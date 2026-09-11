@@ -844,6 +844,8 @@ fn init_writes_an_agents_block() {
     assert!(md.contains("<!-- moai:begin -->") && md.contains("<!-- moai:end -->"));
     assert!(md.contains("moai status") && md.contains("승인 게이트는 없다"), "{md}");
     assert!(md.contains("--from"), "한 번에 만드는 법이 빠졌다\n{md}");
+    // 치트시트가 낡으면 새 세션의 에이전트가 있는 명령을 모른다.
+    assert!(md.contains("moai tui"), "치트시트가 낡았다\n{md}");
 
     let off = Scratch::new("noagents");
     ok(off.path(), &["init", "argos", "--no-agents"]);

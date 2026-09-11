@@ -11,6 +11,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다.
     moai show <id>                         하나 펼치기 — 본문·자식·이력까지
     moai show -s todo -t bug               필터 (쉼표 = 또는, 반복 = 그리고)
     moai show --tree                       에픽 → 이슈 → 자식
+    moai tui                               탐색기로 돌아다닌다 (읽기 전용)
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기   →  review  →  done
     moai edit <id> --tag parser            고치기

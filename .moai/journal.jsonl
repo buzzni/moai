@@ -105,3 +105,7 @@
 {"ts":"2026-09-11T19:11:33Z","id":"moai-6qdx","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
 {"ts":"2026-09-11T19:15:01Z","id":"moai-6qdx","kind":"note","by":"레이븐","text":"갱신·배너 완료. (mtime, 길이) 를 함께 본다 — rename 으로 갈아끼우는 쓰기는 같은 초에 떨어질 수 있어 고친 때만 보면 놓친다. 알아채도 저절로 읽지 않고 말만 한다: 읽으면 커서가 튀어 보던 자리를 잃는다. 실제 임시 저장소를 두고 '안 바뀌었을 땐 조용 → 밖에서 한 줄 더하면 알아챔 → 그래도 안 읽음 → F5 에 읽힘' 을 시험으로 박았다. 경로 손보기: 마일스톤이 처음 생기면 트리가 한 층 깊어져 들고 있던 경로가 통째로 낡는다 — 갈 수 있는 데까지만 남긴다. 갱신해도 거름망은 살린다(이슈 첨자에 매인 것이라 다시 센다). 배너는 화면 안에서 낸다 — 대체 화면 안에서 eprintln! 하면 화면이 망가져 cmd::report_load_errors 의 길을 못 쓴다. MOAI_NOW 는 적재마다 잡는다."}
 {"ts":"2026-09-11T19:15:01Z","id":"moai-6qdx","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
+{"ts":"2026-09-11T19:15:08Z","id":"moai-6qdx","kind":"status","by":"레이븐","from":"review","to":"done"}
+{"ts":"2026-09-11T19:15:08Z","id":"moai-0gox","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-11T19:16:32Z","id":"moai-0gox","kind":"note","by":"레이븐","text":"AGENTS.md 블록·최상위 도움말·CLAUDE.md 의 명령 수를 모두 맞췄다. 블록은 moai init 이 제 손으로 다시 썼다(손으로 고치면 다음 init 이 덮는다). 치트시트가 낡는 것을 막으려고 init_writes_an_agents_block 에 'moai tui 가 들어 있다' 를 넣었다 — 다음에 명령을 더하는 사람이 여기서 걸린다."}
+{"ts":"2026-09-11T19:16:32Z","id":"moai-0gox","kind":"status","by":"레이븐","from":"in_progress","to":"review"}

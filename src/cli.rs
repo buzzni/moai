@@ -17,6 +17,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
   moai show <id>                그 일의 본문과 이력 — 왜 그렇게 정했는지가 여기 있다
   moai mv <id> in_progress      집는다.  끝나면 done
   moai note <id> \"발견한 것\"    다음 사람이 읽을 메모
+  moai tui                      탐색기 — 에픽이 디렉터리처럼 열린다 (읽기 전용)
 
 계획을 한 번에 세울 때:
 

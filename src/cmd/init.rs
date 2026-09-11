@@ -8,7 +8,7 @@ const BEGIN: &str = "<!-- moai:begin -->";
 const END: &str = "<!-- moai:end -->";
 
 /// 에이전트에게 주는 블록. 정적이라 `bd prime` 같은 명령을 따로 두지 않는다 —
-/// 명령이 아홉 개고 치트시트가 여섯 줄인데 그걸 내려고 명령을 하나 더 만드는
+/// 명령이 열 개고 치트시트가 일곱 줄인데 그걸 내려고 명령을 하나 더 만드는
 /// 것은, 이 도구가 이미 기억할 수 없을 만큼 커졌다는 신호를 미리 심는 일이다.
 /// **`moai status` 가 prime 이다.**
 const AGENTS: &str = r#"## 이슈 트래커 — moai
@@ -23,6 +23,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다.
     moai show <id>                         하나 펼치기 — 본문·자식·이력까지
     moai show -s todo -t bug               필터 (쉼표 = 또는, 반복 = 그리고)
     moai show --tree                       에픽 → 이슈 → 자식
+    moai tui                               탐색기로 돌아다닌다 (읽기 전용)
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기   →  review  →  done
     moai edit <id> --tag parser            고치기
