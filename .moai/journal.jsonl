@@ -21,3 +21,5 @@
 {"ts":"2026-09-11T15:35:31Z","id":"moai-y7hi","kind":"note","by":"레이븐","text":"예산을 구현 4,500줄로 다시 잡음 (테스트 제외). 현재 4,024줄. 근거였던 옛 moai 9,462줄이 겨눈 것은 구현의 유지 불가능성이지 테스트가 아니다."}
 {"ts":"2026-09-11T15:35:31Z","id":"moai-y7hi","kind":"status","by":"레이븐","from":"todo","to":"done","note":"결정: 구현 4,500줄"}
 {"ts":"2026-09-11T15:35:46Z","id":"moai-5i34","kind":"status","by":"레이븐","from":"todo","to":"done","note":"1단계 마무리 — 세 건 다 끝"}
+{"ts":"2026-09-11T15:59:16Z","id":"moai-pgdl","kind":"create","by":"레이븐","title":"CLAUDE.md 를 쓰고 유지한다"}
+{"ts":"2026-09-11T15:59:32Z","id":"moai-pgdl","kind":"rm","by":"레이븐","title":"CLAUDE.md 를 쓰고 유지한다"}
