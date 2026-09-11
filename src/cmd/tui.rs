@@ -39,7 +39,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 터미널 복구는 `ratatui::run` 에 맡긴다 — raw mode·대체 화면을 켜고,
     // **되돌리는 패닉 훅까지** 걸고, 끝나면 restore 한다. 손으로 짜면 어느
     // 이른 return 하나가 사용자 셸을 망가뜨린다.
-    let mut app = App::new(load.issues, repo.config.clone(), path);
+    let mut app = App::open(repo, load, path);
     ratatui::run(|term| loop_until_quit(term, &mut app)).map_err(|e| Fail::new(e.to_string()))?;
     Ok(Vec::new())
 }
@@ -120,15 +120,23 @@ use crate::tui::App;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 
+/// 키를 기다리다 이따금 깬다. **깨는 것은 파일이 바뀌었는지 보려는 것뿐이다** —
+/// 저절로 다시 읽지는 않는다. 커서가 튀면 읽던 자리를 잃는다.
+const TICK: std::time::Duration = std::time::Duration::from_millis(700);
+
 fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result<()> {
     while !app.quit {
         term.draw(|f| crate::tui::draw::screen(f, app))?;
-        // **누를 때만 받는다.** crossterm 은 kitty 프로토콜 터미널에서 뗄 때도
-        // 보내므로, 거르지 않으면 키 하나가 두 번 먹는다.
-        if let Event::Key(k) = event::read()?
-            && k.kind == KeyEventKind::Press
-        {
-            app.key(k);
+        if event::poll(TICK)? {
+            // **누를 때만 받는다.** crossterm 은 kitty 프로토콜 터미널에서 뗄 때도
+            // 보내므로, 거르지 않으면 키 하나가 두 번 먹는다.
+            if let Event::Key(k) = event::read()?
+                && k.kind == KeyEventKind::Press
+            {
+                app.key(k);
+            }
+        } else {
+            app.check_stale();
         }
     }
     Ok(())

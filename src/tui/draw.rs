@@ -18,13 +18,27 @@ use ratatui::Frame;
 const LEFT: u16 = 55;
 
 pub fn screen(f: &mut Frame, app: &App) {
-    let [top, body, keys] =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)])
-            .areas(f.area());
+    // 할 말이 있을 때만 배너 줄이 선다. 늘 세워 두면 한 줄이 영영 논다.
+    let banner_h = u16::from(banner(app).is_some());
+    let [top, note, body, keys] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(banner_h),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .areas(f.area());
     let [left, right] =
         Layout::horizontal([Constraint::Percentage(LEFT), Constraint::Min(10)]).areas(body);
 
     crumbs(f, app, top);
+    if let Some((text, urgent)) = banner(app) {
+        let style = if urgent {
+            Style::new().fg(Color::Black).bg(Color::LightRed)
+        } else {
+            Style::new().fg(Color::Black).bg(Color::LightYellow)
+        };
+        f.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), note);
+    }
     list(f, app, left);
     detail(f, app, right);
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 F키 바가 선다.
@@ -33,6 +47,25 @@ pub fn screen(f: &mut Frame, app: &App) {
         Mode::Grep(q) => prompt(f, app, keys, "검색", q),
         Mode::Filter(q) => prompt(f, app, keys, "거름망", q),
     }
+}
+
+/// 화면 안에서 알려야 할 것. **대체 화면 안에서는 `eprintln!` 이 화면을
+/// 망가뜨린다** — 적재 오류를 stderr 로 흘리던 CLI 의 길을 여기서는 못 쓴다.
+///
+/// 급한 것부터 하나만 낸다. 줄을 여럿 세우면 목록이 그만큼 짧아진다.
+fn banner(app: &App) -> Option<(String, bool)> {
+    if app.unreadable > 0 {
+        return Some((
+            format!(" ! 읽을 수 없는 줄 {}개 — 그 줄은 빠진 채로 보고 있다 ", app.unreadable),
+            true,
+        ));
+    }
+    if app.stale {
+        return Some((" ! 파일이 바뀌었다 — F5 로 다시 읽는다 ".into(), false));
+    }
+    (app.warnings > 0).then(|| {
+        (format!(" ! 드러난 것 {}건 — `moai status` 가 자세히 낸다 ", app.warnings), false)
+    })
 }
 
 fn crumbs(f: &mut Frame, app: &App, at: Rect) {
@@ -306,6 +339,7 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
         key("Backspace", "나가기"),
         key("/", "검색"),
         key("f", "거름망"),
+        key("F5", "갱신"),
     ];
     if app.filter_text.is_some() {
         spans.push(key("Esc", "풀기"));
@@ -485,6 +519,25 @@ mod tests {
         a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let lines = render(&a, 100, 20).join("\n");
         assert!(lines.contains("앞[2J뒤"), "제어문자가 안 걸러졌다\n{lines}");
+    }
+
+    /// 못 읽는 줄은 **화면 안에서** 알린다. 대체 화면 안에서 stderr 로 흘리면
+    /// 화면이 망가진다.
+    #[test]
+    fn load_errors_are_told_inside_the_screen() {
+        let mut a = app();
+        a.unreadable = 3;
+        let lines = render(&a, 100, 14).join("\n");
+        assert!(lines.contains("읽을 수 없는 줄 3개"), "{lines}");
+    }
+
+    /// 파일이 바뀌면 말만 하고 **저절로 읽지 않는다**.
+    #[test]
+    fn a_changed_file_is_announced_not_swallowed() {
+        let mut a = app();
+        a.stale = true;
+        let lines = render(&a, 100, 14).join("\n");
+        assert!(lines.contains("F5"), "{lines}");
     }
 
     /// 빈 저장소도 그려진다.

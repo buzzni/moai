@@ -9,6 +9,7 @@ use crate::config::Config;
 use crate::model::Issue;
 use crate::nav::{Entry, Index, Path, Seg};
 use crate::query::{Filter, Raw, Where};
+use crate::store::{Load, Repo};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// 목록의 한 줄. `..` 은 이슈가 아니므로 [`Entry`] 로는 못 담는다.
@@ -38,6 +39,20 @@ pub struct App {
     pub mode: Mode,
     /// 지금 걸린 거름망. 사람이 적은 글 그대로도 들고 있어야 화면에 되비친다.
     pub filter_text: Option<String>,
+    /// 어디서 읽어 왔나. 시험은 저장소 없이 App 을 세우므로 없을 수 있다.
+    pub repo: Option<Repo>,
+    /// 읽은 그 순간의 시각. **프레임마다가 아니라 적재마다 잡는다** — 매번
+    /// 다시 잡으면 "3일 넘게" 같은 판정이 초 단위로 깜빡인다.
+    pub now: String,
+    /// 읽다 만난 못 읽는 줄. 대체 화면 안에서는 stderr 로 못 알린다.
+    pub unreadable: usize,
+    /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
+    pub warnings: usize,
+    /// 파일이 우리가 읽은 뒤로 바뀌었는가. **저절로 다시 읽지 않는다** —
+    /// 커서가 튀기 때문이다. 바뀌었다고 말만 하고 사람이 F5 를 누른다.
+    pub stale: bool,
+    /// 마지막으로 읽은 파일의 (고친 때, 길이).
+    stamp: Option<(std::time::SystemTime, u64)>,
     /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임
     /// `Filter::matches` 를 돌리면 `Where::of` 가 프레임마다 지도를 다시 만든다.
     keep: Vec<bool>,
@@ -53,7 +68,7 @@ impl App {
         // 들어간 채로 시작하면(`--path`) 나올 층마다 기억 자리를 만들어 둔다.
         let remembered = vec![0; path.len()];
         let keep = vec![true; issues.len()];
-        App {
+        let mut app = App {
             issues,
             index,
             cfg,
@@ -61,9 +76,102 @@ impl App {
             cursor: 0,
             mode: Mode::Browse,
             filter_text: None,
+            repo: None,
+            now: crate::model::now(),
+            unreadable: 0,
+            warnings: 0,
+            stale: false,
+            stamp: None,
             keep,
             remembered,
             quit: false,
+        };
+        app.count_warnings();
+        app
+    }
+
+    /// 저장소에서 읽어 세운다.
+    pub fn open(repo: Repo, load: Load, path: Path) -> App {
+        let cfg = repo.config.clone();
+        let mut app = App::new(load.issues, cfg, path);
+        app.unreadable = load.errors.len();
+        app.stamp = stamp_of(&repo);
+        app.repo = Some(repo);
+        app.count_warnings();
+        app
+    }
+
+    /// 다시 읽는다. **거름망과 있던 자리는 지키려 애쓴다** — 갱신 한 번에
+    /// 하던 일이 흩어지면 F5 를 안 누르게 되고, 그러면 낡은 화면을 본다.
+    pub fn reload(&mut self) {
+        let Some(repo) = &self.repo else { return };
+        let Ok(load) = repo.read() else { return };
+        self.stamp = stamp_of(repo);
+        self.unreadable = load.errors.len();
+        self.adopt(load.issues);
+    }
+
+    /// 새 자료를 받아들이고 어긋난 것을 손본다. 시험이 저장소 없이 부른다.
+    pub fn adopt(&mut self, issues: Vec<Issue>) {
+        self.issues = issues;
+        self.index = Index::of(&self.issues);
+        self.now = crate::model::now();
+        self.stale = false;
+        self.repair_path();
+        // 거름망은 이슈 첨자에 매인 것이라 반드시 다시 센다.
+        match self.filter_text.clone() {
+            Some(t) => {
+                let mode = if let Some(q) = t.strip_prefix('/') {
+                    Mode::Grep(q.to_string())
+                } else {
+                    Mode::Filter(t)
+                };
+                if self.apply(&mode).is_err() {
+                    self.clear_filter();
+                }
+            }
+            None => self.keep = vec![true; self.issues.len()],
+        }
+        self.cursor = self.cursor.min(self.rows().len().saturating_sub(1));
+        self.count_warnings();
+    }
+
+    /// 들고 있던 경로가 아직 갈 수 있는 길인가.
+    ///
+    /// 마일스톤이 **처음 생기는 순간** 트리가 한 층 깊어져 경로가 통째로
+    /// 낡는다. 지운 에픽도 마찬가지다. 갈 수 있는 데까지만 남기고 자른다 —
+    /// 없는 자리에 서 있으면 빈 목록이 나오고, 사람은 자료가 사라진 줄 안다.
+    fn repair_path(&mut self) {
+        let mut good = Path::new();
+        for seg in self.path.clone() {
+            let here = self.index.entries(&self.issues, &good);
+            let ok = here.iter().any(|e| matches!(e, Entry::Dir { seg: s, .. } if *s == seg));
+            if !ok {
+                break;
+            }
+            good.push(seg);
+        }
+        if good.len() != self.path.len() {
+            self.remembered.truncate(good.len());
+            self.cursor = 0;
+        }
+        self.path = good;
+    }
+
+    fn count_warnings(&mut self) {
+        let lines: Vec<usize> = (0..self.unreadable).collect();
+        let st = crate::report::status(&self.issues, &lines, &self.cfg, &self.now);
+        self.warnings = st.warnings.len();
+    }
+
+    /// 파일이 우리가 읽은 뒤로 바뀌었는지 본다. **고친 때만 보면 놓친다** —
+    /// rename 으로 갈아끼우는 쓰기는 같은 초에 떨어질 수 있어 길이도 함께 본다.
+    pub fn check_stale(&mut self) {
+        if let Some(repo) = &self.repo
+            && self.stamp.is_some()
+            && stamp_of(repo) != self.stamp
+        {
+            self.stale = true;
         }
     }
 
@@ -149,6 +257,7 @@ impl App {
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             KeyCode::Esc => self.clear_filter(),
+            KeyCode::F(5) | KeyCode::Char('r') => self.reload(),
             _ => {}
         }
     }
@@ -244,6 +353,11 @@ impl App {
             None => id.clone(),
         }
     }
+}
+
+fn stamp_of(repo: &Repo) -> Option<(std::time::SystemTime, u64)> {
+    let m = std::fs::metadata(repo.issues_path()).ok()?;
+    Some((m.modified().ok()?, m.len()))
 }
 
 #[cfg(test)]
@@ -458,6 +572,87 @@ mod tests {
         assert_eq!(a.mode, Mode::Grep("quit".into()));
         a.key(key(KeyCode::Esc));
         assert_eq!(a.mode, Mode::Browse);
+    }
+
+    /// 들고 있던 길이 사라지면 **갈 수 있는 데까지만** 남긴다. 없는 자리에 서
+    /// 있으면 빈 목록이 나오고, 사람은 자료가 사라진 줄 안다.
+    #[test]
+    fn reload_repairs_a_path_that_no_longer_exists() {
+        let mut a = app();
+        a.key(key(KeyCode::Enter)); // 에픽 안으로
+        assert_eq!(a.path.len(), 1);
+
+        // 그 에픽이 사라진 자료로 갈아탄다
+        a.adopt(vec![make("argos-0002", Kind::Epic), make("argos-0009", Kind::Issue)]);
+        assert!(a.path.is_empty(), "없는 자리에 그대로 서 있다");
+        assert_eq!(a.cursor, 0);
+        assert!(!a.rows().is_empty());
+    }
+
+    /// 마일스톤이 **처음 생기면** 트리가 한 층 깊어져 경로가 통째로 낡는다.
+    #[test]
+    fn a_first_milestone_deepens_the_tree_and_the_path_is_repaired() {
+        let mut a = app();
+        a.key(key(KeyCode::Enter));
+        let was = a.path.clone();
+
+        let mut with = a.issues.clone();
+        with.push(make("argos-9999", Kind::Milestone));
+        a.adopt(with);
+        // 에픽은 이제 마일스톤 밑이라, 뿌리에서 곧바로 가던 길은 없다
+        assert_ne!(a.path, was);
+        assert!(a.path.is_empty());
+    }
+
+    /// 갱신해도 걸어 둔 거름망은 살아 있다. 갱신 한 번에 하던 일이 흩어지면
+    /// F5 를 안 누르게 되고, 그러면 낡은 화면을 본다.
+    #[test]
+    fn reloading_keeps_the_filter() {
+        let mut a = app();
+        a.key(key(KeyCode::Char('f')));
+        typed(&mut a, "type=epic");
+        assert_eq!(shown(&a).len(), 2);
+
+        let mut more = a.issues.clone();
+        more.push(make("argos-0007", Kind::Epic));
+        a.adopt(more);
+        assert_eq!(a.filter_text.as_deref(), Some("type=epic"));
+        assert_eq!(shown(&a).len(), 3, "거름망이 새 자료에 다시 걸리지 않았다");
+    }
+
+    /// 진짜 파일을 두고 **바뀐 것을 알아채고 다시 읽는지** 본다. 고친 때만
+    /// 보면 rename 으로 갈아끼우는 쓰기를 같은 초에 놓치므로 길이도 함께 본다.
+    #[test]
+    fn it_notices_a_changed_file_and_rereads_it() {
+        let dir = std::env::temp_dir().join(format!("moai-tui-reload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".moai")).unwrap();
+        std::fs::write(dir.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
+        std::fs::write(dir.join(".moai/issues.jsonl"), line(&make("argos-0001", Kind::Epic))).unwrap();
+
+        let repo = Repo { root: dir.clone(), config: cfg() };
+        let load = repo.read().unwrap();
+        let mut a = App::open(repo, load, Path::new());
+        assert_eq!(a.issues.len(), 1);
+
+        // 아직 아무도 안 건드렸다
+        a.check_stale();
+        assert!(!a.stale, "안 바뀌었는데 바뀌었다고 한다");
+
+        // 밖에서 한 줄 더한다
+        let mut src = std::fs::read_to_string(dir.join(".moai/issues.jsonl")).unwrap();
+        src.push_str(&line(&member("argos-0004", "argos-0001")));
+        std::fs::write(dir.join(".moai/issues.jsonl"), src).unwrap();
+
+        a.check_stale();
+        assert!(a.stale, "바뀐 것을 못 알아챘다");
+        assert_eq!(a.issues.len(), 1, "말만 해야 하는데 저절로 읽었다");
+
+        a.reload();
+        assert_eq!(a.issues.len(), 2, "F5 로도 안 읽혔다");
+        assert!(!a.stale);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 빈 디렉터리에서도 무너지지 않는다.
