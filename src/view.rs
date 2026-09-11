@@ -7,9 +7,9 @@ use crate::config::Config;
 use crate::model::{Issue, JournalEntry, Kind};
 use crate::report::{Roll, StatusReport, Warning};
 use crate::style::{self, paint};
+use crate::text::{clip, width};
 use anstyle::Style;
 use std::collections::BTreeMap;
-use unicode_width::UnicodeWidthStr;
 
 /// 제목이 이보다 길면 자른다. 표가 접히면 표가 아니다.
 const TITLE_CAP: usize = 44;
@@ -17,27 +17,6 @@ const TITLE_CAP: usize = 44;
 const EPIC_CAP: usize = 20;
 /// 진행 막대 칸 수.
 const BAR: usize = 10;
-
-fn width(s: &str) -> usize {
-    UnicodeWidthStr::width(s)
-}
-
-/// 표시 폭 기준으로 자르고 `…` 를 붙인다.
-fn clip(s: &str, max: usize) -> String {
-    if width(s) <= max {
-        return s.to_string();
-    }
-    let mut out = String::new();
-    for c in s.chars() {
-        let w = UnicodeWidthStr::width(c.encode_utf8(&mut [0u8; 4]) as &str);
-        if width(&out) + w > max.saturating_sub(1) {
-            break;
-        }
-        out.push(c);
-    }
-    out.push('…');
-    out
-}
 
 /// 칠한 뒤 **칠하지 않은 폭**을 기준으로 채운다. 순서를 바꾸면 이스케이프가
 /// 폭에 세어져 표가 어긋난다.

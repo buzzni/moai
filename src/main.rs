@@ -16,6 +16,7 @@ mod query;
 mod report;
 mod store;
 mod style;
+mod text;
 mod view;
 
 use clap::Parser;
