@@ -605,3 +605,110 @@ fn tree_is_refused_on_a_single_issue() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--tree"));
 }
+
+// ── S4 — moai status ─────────────────────────────────────────────────
+
+fn at(dir: &Path, now: &str, args: &[&str]) -> Output {
+    Command::new(BIN)
+        .args(args)
+        .current_dir(dir)
+        .env("MOAI_ACTOR", "테스터")
+        .env("MOAI_NOW", now)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap()
+}
+
+/// **경고가 있어도 종료 코드는 0 이다.**
+///
+/// 여기서 비영으로 끝내면 에이전트가 이것을 "실패" 로 읽고, 그러면 이건
+/// 린트고, 린트는 곧 게이트다. 이전 시도가 정확히 그것으로 죽었다.
+/// 이 테스트를 고치려는 사람은 그 사실부터 다시 읽어야 한다.
+#[test]
+fn status_warns_without_blocking() {
+    let s = init("status");
+    for n in 0..6 {
+        add(s.path(), &[&format!("떠 있는 것 {n}")]);
+    }
+    let out = at(s.path(), NOW, &["status"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("에픽 없는 이슈 6건"), "{text}");
+    assert!(out.status.success(), "경고를 보고 비영으로 끝냈다");
+}
+
+#[test]
+fn status_says_so_when_nothing_is_wrong() {
+    let s = init("clean");
+    let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
+    add(s.path(), &["원자적 쓰기", "-e", &epic]);
+    let out = ok(s.path(), &["status"]);
+    assert!(out.contains("드러난 문제 없다"), "{out}");
+}
+
+/// 깨진 데이터만 종료 코드를 바꾼다.
+#[test]
+fn only_broken_data_makes_status_fail() {
+    let s = init("broken_status");
+    let id = add(s.path(), &["제목"]);
+    assert!(at(s.path(), NOW, &["status"]).status.success());
+
+    // 같은 줄을 한 번 더 — 머지를 잘못 풀었을 때 나오는 모양
+    let path = s.path().join(".moai/issues.jsonl");
+    let line = line_of(s.path(), &id);
+    std::fs::write(&path, format!("{line}\n{line}\n")).unwrap();
+
+    let out = at(s.path(), NOW, &["status"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("id 가 두 번 있다"));
+    assert!(!out.status.success(), "깨진 데이터를 보고 0 으로 끝냈다");
+}
+
+/// `warnings[].kind` 가 타입 붙은 열거값이라 받는 쪽이 산문을 안 읽는다.
+#[test]
+fn status_json_is_machine_shaped() {
+    let s = init("statusjson");
+    let epic = add(s.path(), &["빈 에픽", "--type", "epic"]);
+    for n in 0..6 {
+        add(s.path(), &[&format!("떠 있는 것 {n}")]);
+    }
+    let out = ok(s.path(), &["status", "--json"]);
+    one_json_value(&out);
+    for want in [
+        "\"kind\":\"no_epic\"",
+        "\"kind\":\"empty_epic\"",
+        "\"hint\":\"moai show -e none\"",
+        "\"flow\"",
+        "\"counts\"",
+        "\"fatal\":false",
+    ] {
+        assert!(out.contains(want), "{want} 가 없다\n{out}");
+    }
+    assert!(out.contains(&epic), "{out}");
+}
+
+/// 시계가 가는 것만으로 드러나는 것들 — 고정 시계 없이는 시험할 수 없다.
+#[test]
+fn time_alone_surfaces_rot() {
+    let s = init("rot");
+    let id = add(s.path(), &["리뷰에 둔 것"]);
+    at(s.path(), "2026-09-01T00:00:00Z", &["mv", &id, "review"]);
+
+    let soon = String::from_utf8(at(s.path(), "2026-09-02T00:00:00Z", &["status"]).stdout).unwrap();
+    assert!(!soon.contains("review 에"), "{soon}");
+
+    let later = String::from_utf8(at(s.path(), "2026-09-10T00:00:00Z", &["status"]).stdout).unwrap();
+    assert!(later.contains("review 에 3일 넘게 멈춘 것 1건"), "{later}");
+    assert!(later.contains("moai show -s review --stale 3"), "{later}");
+}
+
+/// `moai status` 가 이 도구의 prime 이다 — 세션 시작에 치는 명령 하나.
+/// 보드·경고·흐름·다음 행동이 한 화면에 다 있어야 그 노릇을 한다.
+#[test]
+fn status_is_one_screen_with_everything() {
+    let s = init("prime");
+    add(s.path(), &["제목"]);
+    let out = ok(s.path(), &["status"]);
+    assert!(out.contains("todo") && out.contains("done"), "보드가 없다\n{out}");
+    assert!(out.contains("최근 7일"), "흐름이 없다\n{out}");
+    assert!(out.contains("moai ready"), "다음 행동이 없다\n{out}");
+    assert!(out.contains(".moai/issues.jsonl"), "어느 저장소인지 안 말한다\n{out}");
+}

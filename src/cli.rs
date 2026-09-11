@@ -40,6 +40,13 @@ pub enum ColorArg {
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
+    /// 보드 · 경고 · 흐름. 세션은 여기서 시작한다
+    #[command(after_help = "\
+  아무것도 막지 않는다. 승인도 통과도 없다.
+  대신 에픽에 안 붙은 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것을 드러낸다.
+  종료 코드는 데이터가 깨졌을 때만 0 이 아니다.")]
+    Status,
+
     /// 지금 집을 수 있는 일
     #[command(after_help = "\
   에픽 자체, 끝난 에픽의 멤버, 아직 안 끝난 자식을 가진 부모는 뺀다.

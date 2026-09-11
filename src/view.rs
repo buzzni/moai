@@ -5,7 +5,7 @@
 
 use crate::config::Config;
 use crate::model::{Issue, JournalEntry, Kind};
-use crate::report::Roll;
+use crate::report::{Roll, StatusReport, Warning};
 use crate::style::{self, paint};
 use anstyle::Style;
 use std::collections::BTreeMap;
@@ -239,7 +239,7 @@ fn head(roll: &Roll, shown: usize) -> String {
         // 묶음일 뿐 진척을 가진 것이 아니므로, 걸러진 뒤 **보이는** 수를 말한다.
         None => format!("{}  {}건", paint(style::HEAD, &roll.title), shown),
         Some(id) => {
-            let pct = match roll.percent() {
+            let pct = match roll.percent {
                 None => paint(style::DIM, "자식 없음"),
                 Some(p) => format!("{p:>3}%"),
             };
@@ -249,7 +249,7 @@ fn head(roll: &Roll, shown: usize) -> String {
                 paint(style::EPIC, &clip(&roll.title, TITLE_CAP)),
                 roll.done,
                 roll.total,
-                bar(roll.percent()),
+                bar(roll.percent),
                 pct,
             )
         }
@@ -274,6 +274,166 @@ fn branch(out: &mut Vec<String>, shown: &[Issue], i: &Issue, depth: usize) {
     for c in shown.iter().filter(|c| crate::id::parent_of(&c.id) == Some(i.id.as_str())) {
         branch(out, shown, c, depth + 1);
     }
+}
+
+/// 경고 하나를 사람 말로. **여기가 이 제품의 목소리다.**
+fn says(w: &Warning) -> String {
+    let n = w.count;
+    match w.kind {
+        "no_epic" => format!(
+            "에픽 없는 이슈 {n}건 (열린 것의 {}%)",
+            (w.ratio.unwrap_or(0.0) * 100.0).round() as u32
+        ),
+        "stale_review" => format!("review 에 {}일 넘게 멈춘 것 {n}건", w.days.unwrap_or(0)),
+        // review 도 벌여 놓은 일이다. "진행 중" 이라고 하면 review 경고와
+        // 같은 이슈가 두 번 나오는 것이 말이 안 되게 보인다.
+        "wip_overload" => format!("한 번에 벌여 놓은 것 {n}건 — 하나씩 끝내는 편이 낫다"),
+        "stale_progress" => format!("집어 놓고 {}일 넘게 안 건드린 것 {n}건", w.days.unwrap_or(0)),
+        "empty_epic" => format!("속이 빈 에픽 {n}건 — 계획만 세우고 안 채웠다"),
+        "finished_epic" => format!("다 끝났는데 안 닫힌 에픽 {n}건"),
+        "dangling_epic" => format!("없는 에픽을 가리키는 것 {n}건"),
+        "orphan_child" => format!("부모 줄이 없는 자식 {n}건"),
+        "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
+        "duplicate_id" => format!("id 가 두 번 있다 {n}건 — 머지를 잘못 풀었다"),
+        "unreadable_line" => format!("읽을 수 없는 줄 {n}개"),
+        other => format!("{other} {n}건"),
+    }
+}
+
+/// 보드 · 경고 · 흐름.
+///
+/// **아무것도 막지 않는다.** 종료 코드는 데이터가 깨졌을 때만 0 이 아니다 —
+/// 경고로 비영 종료하는 순간 부르는 쪽이 이것을 "실패" 로 읽고, 그러면 이건
+/// 린트고, 린트는 곧 게이트다.
+pub fn status(st: &StatusReport, issues: &[Issue], cfg: &Config, now: &str, at: &str) -> Vec<String> {
+    let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
+    let mut out = vec![
+        format!(
+            "{}  {}       {}",
+            paint(style::HEAD, &format!("이슈 {}", st.total)),
+            paint(style::DIM, &format!("· 에픽 {}", st.epics.len())),
+            paint(style::DIM, at),
+        ),
+        String::new(),
+    ];
+
+    // 보드 — config 의 칸 차례 그대로.
+    let board: Vec<String> = cfg
+        .statuses
+        .iter()
+        .map(|s| {
+            let style = style::status_style(s);
+            format!(
+                "{} {}",
+                paint(style, style::glyph(s)),
+                paint(style, &format!("{s} {}", st.counts.get(s).copied().unwrap_or(0)))
+            )
+        })
+        .collect();
+    out.push(format!("  {}", board.join("    ")));
+
+    if !st.epics.is_empty() {
+        out.push(String::new());
+        let w_title = st.epics.iter().map(|e| width(&clip(&e.title, EPIC_CAP))).max().unwrap_or(4);
+        for e in &st.epics {
+            let note = match (e.percent, e.total) {
+                (None, _) => paint(style::DIM, "   자식 없음"),
+                (Some(100), _) => paint(style::WARN, "   닫을 때가 됐다"),
+                _ => String::new(),
+            };
+            out.push(format!(
+                "  {}  {}  {}  {}/{}{}",
+                paint(style::ID, e.id.as_deref().unwrap_or("")),
+                cell(style::EPIC, &clip(&e.title, EPIC_CAP), w_title + 2),
+                bar(e.percent),
+                e.done,
+                e.total,
+                note,
+            ));
+        }
+    }
+
+    // 경고는 **에픽 표 바로 다음**이다. 화면 아래로 밀면 페이저에 잘린다.
+    for w in &st.warnings {
+        out.push(String::new());
+        let mark = if w.fatal { style::ERROR } else { style::WARN };
+        out.push(format!("{} {}", paint(mark, "!"), says(w)));
+        out.extend(preview(w, &by_id, now));
+    }
+    if st.warnings.is_empty() {
+        out.push(String::new());
+        out.push(format!("{} 드러난 문제 없다", paint(style::status_style("done"), "✓")));
+    }
+
+    out.push(String::new());
+    let net = st.flow.net;
+    out.push(format!(
+        "최근 {}일   생성 {}  ·  완료 {}   {}",
+        st.flow.days,
+        st.flow.created,
+        st.flow.done,
+        match net.cmp(&0) {
+            std::cmp::Ordering::Greater => paint(style::WARN, &format!("쌓이는 중 +{net}")),
+            std::cmp::Ordering::Less => paint(style::status_style("done"), &format!("줄어드는 중 {net}")),
+            std::cmp::Ordering::Equal => paint(style::DIM, "제자리"),
+        }
+    ));
+    out.push(String::new());
+    out.push(paint(style::DIM, "다음:  `moai ready` 로 집을 것을 고른다"));
+    out
+}
+
+/// 경고마다 앞의 몇 건만 보여 주고 나머지는 세어서 말한다. 다 늘어놓으면
+/// 정작 봐야 할 다음 경고가 화면 밖으로 밀린다.
+fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str) -> Vec<String> {
+    const SHOW: usize = 3;
+    let mut out = Vec::new();
+    // 벌여 놓은 것과 깨진 것은 id 만 한 줄에 늘어놓는다 — 제목이 정보를 안 준다.
+    if matches!(w.kind, "wip_overload" | "duplicate_id" | "orphan_child") {
+        if !w.ids.is_empty() {
+            out.push(format!("    {}", paint(style::DIM, &w.ids.join("   "))));
+        }
+        return out;
+    }
+    // 에픽에 대한 말은 칸도 나이도 뜻이 없다. 어느 에픽인지만 말한다.
+    if matches!(w.kind, "empty_epic" | "finished_epic" | "unknown_field" | "dangling_epic") {
+        for id in w.ids.iter().take(SHOW) {
+            let title = by_id.get(id.as_str()).map(|i| i.title.as_str()).unwrap_or("");
+            out.push(format!("    {}  {}", paint(style::ID, id), clip(title, TITLE_CAP)));
+        }
+        let rest = w.ids.len().saturating_sub(SHOW);
+        if rest > 0 {
+            out.push(format!("    {}", paint(style::DIM, &format!("{rest}건 더"))));
+        }
+        return out;
+    }
+    for id in w.ids.iter().take(SHOW) {
+        let Some(i) = by_id.get(id.as_str()) else {
+            out.push(format!("    {}", paint(style::ID, id)));
+            continue;
+        };
+        let age = crate::model::days_since(&i.status_since, now)
+            .map(|d| format!("{d}일"))
+            .unwrap_or_default();
+        out.push(format!(
+            "    {}  {}  {}  {}  {}",
+            paint(style::ID, &i.id),
+            paint(style::priority_style(i.priority()), &format!("p{}", i.priority())),
+            paint(style::status_style(i.status.as_str()), style::glyph(i.status.as_str())),
+            paint(style::DIM, &format!("{age:>4}")),
+            clip(&i.title, TITLE_CAP),
+        ));
+    }
+    let rest = w.ids.len().saturating_sub(SHOW);
+    let more = if rest > 0 { format!("{rest}건 더") } else { String::new() };
+    if !more.is_empty() || w.hint.is_some() {
+        out.push(format!(
+            "    {}{}",
+            cell(style::DIM, &more, if w.hint.is_some() { 12 } else { 0 }),
+            w.hint.as_deref().map(|h| paint(style::DIM, &format!("→ `{h}`"))).unwrap_or_default(),
+        ));
+    }
+    out
 }
 
 /// 집을 수 있는 일. 그리고 이미 벌여 놓은 것.

@@ -184,8 +184,8 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue) -> R<Vec<String>> {
                 "  멤버   {}/{}  {}{}",
                 r.done,
                 r.total,
-                view::bar(r.percent()),
-                match r.percent() {
+                view::bar(r.percent),
+                match r.percent {
                     None => String::new(),
                     Some(p) => format!("  {p}%"),
                 }

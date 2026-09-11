@@ -11,6 +11,7 @@ pub mod note;
 pub mod ready;
 pub mod rm;
 pub mod show;
+pub mod status;
 
 use crate::cli::{Cli, Cmd, Typed};
 use crate::model::Kind;
@@ -83,6 +84,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Rm(a) => rm::run(&ctx, a),
         Cmd::Note(a) => note::run(&ctx, a),
         Cmd::Ready => ready::run(&ctx),
+        Cmd::Status => status::run(&ctx),
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),
         Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
     }
