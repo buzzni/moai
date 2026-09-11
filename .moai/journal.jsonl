@@ -43,3 +43,6 @@
 {"ts":"2026-09-11T16:27:16Z","id":"moai-uo0e","kind":"status","by":"레이븐","from":"in_progress","to":"done","note":"여섯 건에 설계 메모"}
 {"ts":"2026-09-11T16:27:43Z","id":"moai-rv2u","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
 {"ts":"2026-09-11T16:27:43Z","id":"moai-rv2u","kind":"status","by":"레이븐","from":"in_progress","to":"done","note":"낡을 숫자를 빼고 출처 표를 더함"}
+{"ts":"2026-09-11T16:28:22Z","id":"moai-0l71","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-11T16:29:23Z","id":"moai-0l71","kind":"status","by":"레이븐","from":"in_progress","to":"done","note":"구현 현황·리뷰 교훈·이어받는 법 갱신"}
+{"ts":"2026-09-11T16:29:23Z","id":"moai-csra","kind":"status","by":"레이븐","from":"todo","to":"done","note":"세션 이어받기 준비 완료"}
