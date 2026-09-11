@@ -4,7 +4,7 @@
 //! 규칙 하나를 CLI 에서 그대로 들고 온다: **색이 혼자 뜻을 지지 않는다.**
 //! 모든 색에 글리프나 낱말이 붙는다.
 
-use super::{App, Row};
+use super::{App, Mode, Row};
 use crate::nav::Entry;
 use crate::style;
 use crate::text::clip;
@@ -27,15 +27,52 @@ pub fn screen(f: &mut Frame, app: &App) {
     crumbs(f, app, top);
     list(f, app, left);
     detail(f, app, right);
-    fkeys(f, keys);
+    // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 F키 바가 선다.
+    match &app.mode {
+        Mode::Browse => fkeys(f, app, keys),
+        Mode::Grep(q) => prompt(f, app, keys, "검색", q),
+        Mode::Filter(q) => prompt(f, app, keys, "거름망", q),
+    }
 }
 
 fn crumbs(f: &mut Frame, app: &App, at: Rect) {
-    let here = clip(&app.crumbs(), at.width as usize);
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(here, Style::new().add_modifier(Modifier::BOLD)))),
-        at,
-    );
+    let mut spans = vec![Span::styled(
+        clip(&app.crumbs(), at.width as usize),
+        Style::new().add_modifier(Modifier::BOLD),
+    )];
+    // **걸린 거름망은 늘 보인다.** 안 보이면 왜 줄이 적은지 알 길이 없고,
+    // 그러면 사람이 도구를 의심하는 대신 자료를 의심한다.
+    if let Some(t) = &app.filter_text {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled(
+            format!("[{t}]  Esc 로 푼다"),
+            Style::new().fg(Color::Black).bg(Color::LightYellow),
+        ));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), at);
+}
+
+/// 글을 받는 줄. 잘못 적은 거름망은 그 자리에서 말해 준다.
+fn prompt(f: &mut Frame, app: &App, at: Rect, what: &str, buf: &str) {
+    let mut spans = vec![
+        Span::styled(format!(" {what} "), Style::new().fg(Color::Black).bg(Color::LightBlue)),
+        Span::raw(" "),
+        Span::raw(buf.to_string()),
+        Span::styled("▌", Style::new().fg(Color::LightBlue)),
+    ];
+    match app.input_error() {
+        Some(e) => {
+            spans.push(Span::raw("   "));
+            // 여러 줄짜리 도움말은 첫 줄만 — 한 줄 자리다.
+            let first = e.lines().next().unwrap_or_default().to_string();
+            spans.push(Span::styled(first, Style::new().fg(Color::LightRed)));
+        }
+        None => {
+            spans.push(Span::raw("   "));
+            spans.push(Span::styled("Enter 걸기  Esc 그만", dim()));
+        }
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), at);
 }
 
 fn list(f: &mut Frame, app: &App, at: Rect) {
@@ -263,13 +300,18 @@ fn bold() -> Style {
 
 /// 맨 아래 MC 풍 F키 바. **아직 없는 것은 적지 않는다** — 눌러도 아무 일이
 /// 없는 키를 적어 두면 그것부터 도구를 못 믿게 된다.
-fn fkeys(f: &mut Frame, at: Rect) {
-    let bar = Line::from(vec![
+fn fkeys(f: &mut Frame, app: &App, at: Rect) {
+    let mut spans = vec![
         key("Enter", "들어가기"),
         key("Backspace", "나가기"),
-        key("F10", "끝내기"),
-    ]);
-    f.render_widget(Paragraph::new(bar), at);
+        key("/", "검색"),
+        key("f", "거름망"),
+    ];
+    if app.filter_text.is_some() {
+        spans.push(key("Esc", "풀기"));
+    }
+    spans.push(key("F10", "끝내기"));
+    f.render_widget(Paragraph::new(Line::from(spans)), at);
 }
 
 fn key<'a>(k: &'a str, what: &'a str) -> Span<'a> {
@@ -476,6 +518,13 @@ mod eyeball {
         };
         let mut app = super::App::new(load.issues, cfg, path);
         app.cursor = std::env::var("EYE_CUR").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        if let Ok(q) = std::env::var("EYE_GREP") {
+            let m = super::Mode::Grep(q);
+            let _ = app.apply(&m);
+        }
+        if let Ok(q) = std::env::var("EYE_TYPING") {
+            app.mode = super::Mode::Filter(q);
+        }
         let h: u16 = std::env::var("EYE_H").ok().and_then(|v| v.parse().ok()).unwrap_or(16);
         for l in super::tests::render(&app, 96, h) {
             println!("{l}");

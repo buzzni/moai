@@ -115,12 +115,31 @@ impl Index {
     /// 그 자리를 home 으로 갖는 것들. **`home_of` 의 역상이다** — 목록 규칙을
     /// 따로 쓰지 않는 것이 빠짐도 겹침도 없음을 보장하는 유일한 이유다.
     pub fn entries(&self, issues: &[Issue], path: &Path) -> Vec<Entry> {
+        self.entries_where(issues, path, &|_| true)
+    }
+
+    /// 거르고 나서의 목록.
+    ///
+    /// **거름망은 잎에 걸고, 디렉터리는 걸린 자손이 있으면 남긴다.** 디렉터리
+    /// 자신에게만 걸면 끝난 에픽이 사라지면서 **그 밑의 걸린 이슈까지 통째로**
+    /// 안 보인다 — 찾으려던 것을 거름망이 숨기는 셈이다. 반대로 자손만 보면
+    /// `type=epic` 같은 물음에 에픽이 제 손으로 사라진다. 그래서 둘 중
+    /// 하나라도 걸리면 남긴다.
+    pub fn entries_where(
+        &self,
+        issues: &[Issue],
+        path: &Path,
+        keep: &dyn Fn(usize) -> bool,
+    ) -> Vec<Entry> {
         let mut out: Vec<Entry> = Vec::new();
         let mut buckets: Vec<Seg> = Vec::new();
 
         for (at, home) in self.homes.iter().enumerate() {
             // 바로 이 자리에 사는 것
             if home == path {
+                if !self.kept(at, issues, keep) {
+                    continue;
+                }
                 out.push(match issues[at].kind {
                     Kind::Milestone => Entry::Dir { seg: Seg::Milestone(Some(issues[at].id.clone())), at: Some(at) },
                     Kind::Epic => Entry::Dir { seg: Seg::Epic(issues[at].id.clone()), at: Some(at) },
@@ -133,9 +152,10 @@ impl Index {
             }
             // 이 자리 **바로 밑의 바구니**에 사는 것 — 바구니는 제 줄이 없으므로
             // 사는 것이 있을 때만 생긴다.
-            if home.len() == path.len() + 1
+            if home.len() >= path.len() + 1
                 && home.starts_with(path)
                 && matches!(home[path.len()], Seg::Milestone(None) | Seg::Lost)
+                && keep(at)
                 && !buckets.contains(&home[path.len()])
             {
                 buckets.push(home[path.len()].clone());
@@ -147,6 +167,20 @@ impl Index {
         buckets.sort_by_key(|s| matches!(s, Seg::Lost));
         out.extend(buckets.into_iter().map(|seg| Entry::Dir { seg, at: None }));
         out
+    }
+
+    /// 저 자신이 걸렸거나, 제 밑에 걸린 것이 있는가.
+    fn kept(&self, at: usize, issues: &[Issue], keep: &dyn Fn(usize) -> bool) -> bool {
+        if keep(at) {
+            return true;
+        }
+        let mut under = self.homes[at].clone();
+        under.push(match issues[at].kind {
+            Kind::Milestone => Seg::Milestone(Some(issues[at].id.clone())),
+            Kind::Epic => Seg::Epic(issues[at].id.clone()),
+            Kind::Issue => Seg::Issue(issues[at].id.clone()),
+        });
+        self.descendants(&under).into_iter().any(keep)
     }
 
     /// 그 자리 **밑에 걸린 모든 것**. 바로 밑뿐 아니라 더 깊은 것까지.
@@ -429,6 +463,51 @@ mod tests {
         got.sort();
         assert_eq!(got, [1, 2, 3], "바로 밑 또는 더 깊은 것이 빠졌다");
         assert_eq!(index.descendants(&Vec::new()).len(), issues.len(), "뿌리는 전부다");
+    }
+
+    /// **거름망이 찾으려던 것을 숨기지 않는다.** 끝난 에픽 자신은 안 걸려도
+    /// 그 밑에 걸린 이슈가 있으면 에픽 줄이 남아야 한다 — 안 그러면 에픽이
+    /// 사라지면서 걸린 멤버까지 통째로 안 보인다.
+    #[test]
+    fn a_directory_survives_if_anything_under_it_matches() {
+        let mut done_epic = make("argos-0001", Kind::Epic);
+        done_epic.status = Status::new("done");
+        let issues = vec![
+            done_epic,
+            epic_of("argos-0004", "argos-0001"), // todo 인 멤버
+            make("argos-0009", Kind::Issue),     // 딸린 데 없는 todo
+        ];
+        let index = Index::of(&issues);
+        // "todo 인 것만" — 에픽 자신은 안 걸린다
+        let todo = |at: usize| issues[at].status.as_str() == "todo";
+        let root = index.entries_where(&issues, &Vec::new(), &todo);
+        assert!(
+            root.iter().any(|e| e.at() == Some(0)),
+            "끝난 에픽이 사라지면서 걸린 멤버까지 숨겼다 — {root:?}"
+        );
+        // 그 안에는 걸린 멤버만 남는다
+        let inside = index.entries_where(&issues, &vec![Seg::Epic("argos-0001".into())], &todo);
+        assert_eq!(inside.len(), 1);
+    }
+
+    /// 반대쪽도 막는다 — 자손만 보면 `type=epic` 같은 물음에 에픽이 제 손으로
+    /// 사라진다. 저 자신이 걸리면 밑이 비어도 남는다.
+    #[test]
+    fn a_directory_that_matches_itself_survives_an_empty_subtree() {
+        let issues = vec![make("argos-0001", Kind::Epic), make("argos-0009", Kind::Issue)];
+        let index = Index::of(&issues);
+        let epics = |at: usize| issues[at].kind == Kind::Epic;
+        let root = index.entries_where(&issues, &Vec::new(), &epics);
+        assert_eq!(root.len(), 1);
+        assert_eq!(root[0].at(), Some(0));
+    }
+
+    /// 아무것도 안 걸리면 빈 목록이다 (빈 바구니가 남지 않는다).
+    #[test]
+    fn nothing_matching_leaves_nothing_behind() {
+        let issues = vec![make("argos-0001", Kind::Epic), epic_of("argos-0008", "argos-zzzz")];
+        let index = Index::of(&issues);
+        assert!(index.entries_where(&issues, &Vec::new(), &|_| false).is_empty());
     }
 
     /// 빈 저장소가 무너지지 않는다.
