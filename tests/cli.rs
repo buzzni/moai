@@ -851,3 +851,106 @@ fn every_command_still_speaks_json() {
     assert!(bulk.status.success());
     one_json_value(&String::from_utf8(bulk.stdout).unwrap());
 }
+
+// ── 리뷰 미처리 건 정리 ──────────────────────────────────────────────
+
+/// `allow_hyphen_values` 의 대가를 막는다. 오타 난 플래그가 조용히 이슈가
+/// 되면, 계획 없이 쌓이는 것을 막겠다는 도구가 제 손으로 쓰레기를 만든다.
+#[test]
+fn a_mistyped_flag_does_not_become_an_issue() {
+    let s = init("flaglike");
+    let out = moai(s.path(), &["add", "--dryrun"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("플래그로 보인다") && err.contains("moai add -- --dryrun"), "{err}");
+    assert_eq!(issues(s.path()), "", "거부해 놓고 썼다");
+
+    // 낱말이 여럿인 제목은 그대로 통과한다 — 이걸 받으려고 켠 기능이다
+    add(s.path(), &["--json 이 tags 를 빠뜨린다"]);
+    // `--` 를 쓴 사람은 이미 "이 뒤는 플래그가 아니다" 라고 말한 것이다
+    let out = moai(s.path(), &["add", "-q", "--", "--dryrun"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(issues(s.path()).contains("--dryrun"));
+
+    // `edit --title` 도 같은 규칙을 쓴다
+    let id = add(s.path(), &["평범한 제목"]);
+    assert!(!moai(s.path(), &["edit", &id, "--title", "--dryrun"]).status.success());
+}
+
+/// clap 의 `2 values required by '<id> <id>...'` 는 무엇을 빠뜨렸는지
+/// 말해 주지 않는다.
+#[test]
+fn mv_says_what_is_missing() {
+    let s = init("mvargs");
+    let id = add(s.path(), &["제목"]);
+
+    let out = moai(s.path(), &["mv", &id]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("옮길 칸을 안 적었다") && err.contains("todo, in_progress"), "{err}");
+
+    // 그리고 `-m` 이 가운데 있어도 읽는다
+    assert!(ok(s.path(), &["mv", &id, "-m", "메모", "review"]).contains("todo → review"));
+}
+
+/// `--json` 의 `code` 는 받는 쪽이 분기하는 값이다. 명령마다 다르면 계약이
+/// 아니다 — 예전에는 `show` 만 `not_found` 를 냈다.
+#[test]
+fn the_same_failure_gets_the_same_code() {
+    let s = init("codes");
+    for args in [
+        vec!["show", "argos-0000", "--json"],
+        vec!["note", "argos-0000", "메모", "--json"],
+        vec!["edit", "argos-0000", "--title", "x", "--json"],
+        vec!["add", "x", "--parent", "argos-0000", "--json"],
+    ] {
+        let out = moai(s.path(), &args);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(r#""code":"not_found""#), "{args:?} → {err}");
+    }
+}
+
+/// 되풀이해 불러도 같은 자리면 그만이다. `mv` 가 0 으로 끝나는데 `edit` 만
+/// 1 로 끝나면 받는 쪽이 재시도를 못 짠다.
+#[test]
+fn doing_nothing_is_not_a_failure() {
+    let s = init("noop");
+    let id = add(s.path(), &["제목"]);
+    ok(s.path(), &["edit", &id, "--tag", "bug"]);
+    let out = moai(s.path(), &["edit", &id, "--tag", "bug"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("바뀐 것이 없다"));
+
+    ok(s.path(), &["mv", &id, "done"]);
+    assert!(moai(s.path(), &["mv", &id, "done"]).status.success());
+}
+
+/// 사람 출력에는 있는데 기계 출력에만 없으면, 받는 쪽이 두 표면 중 하나를
+/// 못 믿게 된다. 그 뒤처리를 할 쪽이 바로 그 기계다.
+#[test]
+fn json_reports_the_whole_outcome() {
+    let s = init("jsonout");
+    let epic = add(s.path(), &["에픽", "--type", "epic"]);
+    let member = add(s.path(), &["멤버", "-e", &epic]);
+
+    let out = moai(s.path(), &["mv", &member, "argos-0000", "review", "--json"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("\"moved\"") && text.contains("\"already\""), "{text}");
+    assert!(text.contains(r#""missing":["argos-0000"]"#), "{text}");
+    assert!(!out.status.success(), "못 찾은 것이 있는데 0 으로 끝났다");
+
+    let out = ok(s.path(), &["rm", &epic, "--json"]);
+    assert!(out.contains("\"removed\""), "{out}");
+    assert!(out.contains(&format!(r#""dangling":["{member}"]"#)), "{out}");
+}
+
+/// `--filter` 를 `;` 로 쪼개면 grep 에 세미콜론을 못 쓴다. 여러 개는 플래그를
+/// 되풀이한다.
+#[test]
+fn a_semicolon_is_a_letter_not_a_separator() {
+    let s = init("semicolon");
+    add(s.path(), &["a;b 가 깨진다"]);
+    add(s.path(), &["멀쩡한 것"]);
+    let out = ok(s.path(), &["show", "--filter", "grep=a;b"]);
+    assert!(out.contains("a;b 가 깨진다") && !out.contains("멀쩡한 것"), "{out}");
+}

@@ -146,11 +146,15 @@ impl Filter {
 
 /// `--filter k=v` 를 플래그와 같은 자리(`Raw`)에 풀어 놓는다. **뜻을 정하지
 /// 않는다** — 쪼개고 고르는 일은 `build` 한 곳이 한다.
+///
+/// **한 번에 한 항목이다.** `;` 로 여럿을 받던 것을 걷어냈다 — 그러면
+/// `--filter grep=a;b` 의 `;` 가 글자가 아니라 구분자가 되고, 제목에
+/// 세미콜론이 든 이슈를 영영 못 찾는다. 여럿은 플래그를 되풀이한다.
 fn desugar(raw: &mut Raw, text: &str) -> Result<(), String> {
-    for one in text.split(';') {
-        let one = one.trim();
+    {
+        let one = text.trim();
         if one.is_empty() {
-            continue;
+            return Ok(());
         }
         let (k, v) = one
             .split_once('=')

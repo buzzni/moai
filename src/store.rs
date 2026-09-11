@@ -4,6 +4,7 @@
 //! 경로가 갈라지면 락·정렬·검증·원자적 쓰기를 저마다 반쯤 구현하게 된다.
 
 use crate::config::Config;
+use crate::fail::{Fail, R, code};
 use crate::model::{Issue, JournalEntry};
 use fs2::FileExt;
 use std::collections::BTreeSet;
@@ -41,8 +42,8 @@ impl Load {
 
 impl Repo {
     /// `.moai/` 를 가진 디렉터리를 위로 찾는다. 깊이를 코드에 박지 않는다.
-    pub fn discover() -> Result<Repo, String> {
-        let mut dir = std::env::current_dir().map_err(|e| e.to_string())?;
+    pub fn discover() -> R<Repo> {
+        let mut dir = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
         loop {
             if dir.join(".moai").is_dir() {
                 let config = Config::load(&dir)?;
@@ -69,12 +70,12 @@ impl Repo {
     ///
     /// **읽기는 락을 잡지 않는다.** 쓰기가 `rename` 으로 갈아끼우므로 독자는
     /// 옛 파일 아니면 새 파일을 보지, 찢어진 파일을 볼 수 없다.
-    pub fn read(&self) -> Result<Load, String> {
+    pub fn read(&self) -> R<Load> {
         let path = self.issues_path();
         let src = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(e) => return Err(format!("{}: {e}", path.display())),
+            Err(e) => return Err(Fail::new(format!("{}: {e}", path.display()))),
         };
         Ok(parse_issues(&src))
     }
@@ -85,9 +86,9 @@ impl Repo {
     /// 저널 추가. 순서가 중요하다: **스냅샷 먼저, 저널 나중.** 중간에 죽으면
     /// 저널에 줄이 하나 비는데(이력 공백), 반대 순서면 저널이 일어나지 않은
     /// 일을 주장한다. 빠진 일기가 거짓말하는 일기보다 싸다.
-    pub fn with_write<T, F>(&self, f: F) -> Result<T, String>
+    pub fn with_write<T, F>(&self, f: F) -> R<T>
     where
-        F: FnOnce(&mut Vec<Issue>, &Config) -> Result<(Vec<JournalEntry>, T), String>,
+        F: FnOnce(&mut Vec<Issue>, &Config) -> R<(Vec<JournalEntry>, T)>,
     {
         let _lock = Lock::acquire(&self.dir().join("lock"))?;
 
@@ -95,11 +96,14 @@ impl Repo {
         // 고쳐 쓰고, 나중에 rename 한 쪽이 앞의 이슈를 조용히 지운다.
         let load = self.read()?;
         if let Some(e) = load.errors.first() {
-            return Err(format!(
-                "{}: {}줄을 읽을 수 없어 쓰지 않는다 — {}\n      고친 뒤 다시 시도한다",
-                self.issues_path().display(),
-                e.line,
-                e.message
+            return Err(Fail::coded(
+                format!(
+                    "{}: {}줄을 읽을 수 없어 쓰지 않는다 — {}\n      고친 뒤 다시 시도한다",
+                    self.issues_path().display(),
+                    e.line,
+                    e.message
+                ),
+                code::BROKEN,
             ));
         }
         let before = render_issues(&load.issues);
@@ -126,7 +130,7 @@ impl Repo {
         }
         issues.sort_by(|a, b| a.id.cmp(&b.id));
         if let Some(dup) = first_duplicate(&issues) {
-            return Err(format!("id 가 두 번 있다 — {dup}"));
+            return Err(Fail::coded(format!("id 가 두 번 있다 — {dup}"), code::BROKEN));
         }
 
         // 내용이 그대로면 스냅샷은 건드리지 않는다 (헛 diff 방지).
@@ -141,32 +145,32 @@ impl Repo {
         Ok(out)
     }
 
-    fn append_journal(&self, entries: &[JournalEntry]) -> Result<(), String> {
+    fn append_journal(&self, entries: &[JournalEntry]) -> R<()> {
         let path = self.journal_path();
         let mut buf = String::new();
         for e in entries {
-            buf.push_str(&serde_json::to_string(e).map_err(|e| e.to_string())?);
+            buf.push_str(&serde_json::to_string(e).map_err(|e| Fail::new(e.to_string()))?);
             buf.push('\n');
         }
         let mut f = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&path)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-        f.write_all(buf.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
-        f.sync_all().map_err(|e| format!("{}: {e}", path.display()))
+            .map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
+        f.write_all(buf.as_bytes()).map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
+        f.sync_all().map_err(|e| Fail::new(format!("{}: {e}", path.display())))
     }
 
     /// `moai show <id>` 의 이력 전용. **접지 않는다.**
     ///
     /// 이 함수가 `Vec<Issue>` 를 돌려주게 되는 날이 저널을 상태의 원천으로
     /// 삼기 시작한 날이고, 이전 시도가 거기서 복잡해졌다.
-    pub fn journal_of(&self, id: &str) -> Result<Vec<JournalEntry>, String> {
+    pub fn journal_of(&self, id: &str) -> R<Vec<JournalEntry>> {
         let path = self.journal_path();
         let src = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(format!("{}: {e}", path.display())),
+            Err(e) => return Err(Fail::new(format!("{}: {e}", path.display()))),
         };
         let src = src.strip_prefix('\u{feff}').unwrap_or(&src);
         let mut out: Vec<JournalEntry> = src
@@ -219,14 +223,14 @@ pub fn taken_ids(issues: &[Issue]) -> BTreeSet<String> {
 }
 
 /// temp 에 쓰고 `rename` 으로 갈아끼운다. 독자는 옛 파일 아니면 새 파일만 본다.
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let dir = path.parent().ok_or("경로에 디렉터리가 없다")?;
+fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
+    let dir = path.parent().ok_or_else(|| Fail::new("경로에 디렉터리가 없다"))?;
     let tmp = dir.join(format!(
         "{}.tmp.{}",
         path.file_name().and_then(|s| s.to_str()).unwrap_or("out"),
         std::process::id()
     ));
-    let err = |e: std::io::Error| format!("{}: {e}", tmp.display());
+    let err = |e: std::io::Error| Fail::new(format!("{}: {e}", tmp.display()));
     {
         let mut f = std::fs::File::create(&tmp).map_err(err)?;
         f.write_all(bytes).map_err(err)?;
@@ -234,7 +238,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     }
     std::fs::rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
-        format!("{}: {e}", path.display())
+        Fail::new(format!("{}: {e}", path.display()))
     })?;
     // rename 자체는 원자적이지만 디렉터리 엔트리는 아직 디스크에 없을 수 있다.
     #[cfg(unix)]
@@ -252,27 +256,30 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 struct Lock(std::fs::File);
 
 impl Lock {
-    fn acquire(path: &Path) -> Result<Lock, String> {
+    fn acquire(path: &Path) -> R<Lock> {
         let f = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(false)
             .open(path)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
+            .map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
         let start = Instant::now();
         loop {
             match f.try_lock_exclusive() {
                 Ok(()) => return Ok(Lock(f)),
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
                     if start.elapsed() >= LOCK_TIMEOUT {
-                        return Err(format!(
-                            "{} 초 동안 다른 moai 가 쓰고 있어 물러난다. 아무것도 바뀌지 않았다",
-                            LOCK_TIMEOUT.as_secs()
+                        return Err(Fail::coded(
+                            format!(
+                                "{} 초 동안 다른 moai 가 쓰고 있어 물러난다. 아무것도 바뀌지 않았다",
+                                LOCK_TIMEOUT.as_secs()
+                            ),
+                            code::LOCKED,
                         ));
                     }
                     std::thread::sleep(Duration::from_millis(25));
                 }
-                Err(e) => return Err(format!("{}: {e}", path.display())),
+                Err(e) => return Err(Fail::new(format!("{}: {e}", path.display()))),
             }
         }
     }
@@ -418,7 +425,7 @@ mod tests {
             i.push(issue("argos-4aex"));
             Ok((vec![], ()))
         })
-        .unwrap_err();
+        .unwrap_err().message;
         assert!(e.contains("1줄"), "{e}");
     }
 
@@ -430,7 +437,7 @@ mod tests {
             i.push(issue("argos-4aex"));
             Ok((vec![], ()))
         })
-        .unwrap_err();
+        .unwrap_err().message;
         assert!(e.contains("두 번"), "{e}");
     }
 
@@ -479,7 +486,7 @@ mod tests {
                 issues[0].title = "고친 제목".into();
                 Ok((vec![], ()))
             })
-            .unwrap_err();
+            .unwrap_err().message;
         assert!(e.contains("라는 칸이 없다"), "{e}");
     }
 

@@ -33,6 +33,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             "제목이 없다. `moai add \"제목\"` 또는 `moai add --from -` 이다",
         ));
     };
+    super::refuse_if_flag_like(&title)?;
     let body = read_body(args.body)?;
     let kind = kind_override.or(args.kind).unwrap_or_default();
     let status = Status::new(
@@ -40,7 +41,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     );
     // 칸 검사는 id 를 뽑기 **전에** 한다. 나중에 하면 쓰이지도 않은 id 가
     // 오류 메시지에 실려 나가고, 받는 쪽은 그게 만들어진 줄 안다.
-    repo.config.require_known(status.as_str()).map_err(|e| Fail::coded(e, "bad_status"))?;
+    repo.config.require_known(status.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
     let at = model::now();
     let by = model::actor();
 
@@ -50,7 +51,10 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         let id = match &args.parent {
             Some(p) => {
                 if !issues.iter().any(|i| &i.id == p) {
-                    return Err(format!("{p} 를 못 찾았다 — 부모가 없는 자식은 만들지 않는다"));
+                    return Err(Fail::coded(
+                        format!("{p} 를 못 찾았다 — 부모가 없는 자식은 만들지 않는다"),
+                        super::code::NOT_FOUND,
+                    ));
                 }
                 crate::id::generate_child(
                     p,
@@ -126,7 +130,7 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool) -> R<Vec<String>> {
         path => std::fs::read_to_string(path)
             .map_err(|e| Fail::new(format!("{path}: {e}")))?,
     };
-    let drafts = draft::parse(&src).map_err(|e| Fail::coded(e, "bad_input"))?;
+    let drafts = draft::parse(&src).map_err(|e| Fail::coded(e, super::code::BAD_INPUT))?;
 
     if dry_run {
         // 만들지 않으므로 id 가 없다. 무엇이 어디에 붙는지만 보여 준다.

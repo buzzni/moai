@@ -56,7 +56,19 @@ pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
     }
 
     if ctx.json {
-        return super::json_line(&gone);
+        // 끊긴 참조는 지운 쪽이 알아야 할 결과다. 사람에게만 말하고 기계에는
+        // 안 말하면, 그 뒤처리를 할 쪽이 바로 그 기계다.
+        #[derive(serde::Serialize)]
+        struct Out<'a> {
+            removed: &'a [Issue],
+            missing: &'a [String],
+            dangling: &'a [String],
+        }
+        return super::json_line(&Out {
+            removed: &gone,
+            missing: &missing,
+            dangling: &dangling,
+        });
     }
     Ok(gone
         .iter()

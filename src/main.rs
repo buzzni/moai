@@ -8,6 +8,7 @@ mod cli;
 mod cmd;
 mod config;
 mod draft;
+mod fail;
 mod id;
 mod model;
 mod query;

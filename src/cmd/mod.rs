@@ -17,27 +17,7 @@ use crate::cli::{Cli, Cmd, Typed};
 use crate::model::Kind;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub struct Fail {
-    pub message: String,
-    pub code: &'static str,
-}
-
-impl Fail {
-    pub fn new(message: impl Into<String>) -> Fail {
-        Fail { message: message.into(), code: "error" }
-    }
-    pub fn coded(message: impl Into<String>, code: &'static str) -> Fail {
-        Fail { message: message.into(), code }
-    }
-}
-
-impl From<String> for Fail {
-    fn from(m: String) -> Fail {
-        Fail::new(m)
-    }
-}
-
-pub type R<T> = Result<T, Fail>;
+pub use crate::fail::{Fail, R, code};
 
 pub struct Ctx {
     pub json: bool,
@@ -95,6 +75,34 @@ fn typed(ctx: &Ctx, cmd: Typed, kind: Kind) -> R<Vec<String>> {
         Typed::Add(a) => add::run(ctx, a, Some(kind)),
         Typed::Show(a) => show::run(ctx, a, Some(kind)),
     }
+}
+
+/// 제목 자리에 온 것이 사실은 오타 난 플래그인가.
+///
+/// `allow_hyphen_values` 는 모르는 하이픈 토큰을 전부 제목으로 삼킨다.
+/// `--json 이 tags 를 빠뜨린다` 같은 제목을 받으려고 켠 것인데, 그 대가로
+/// `moai add --dryrun` 이 제목 `"--dryrun"` 인 이슈를 조용히 만든다.
+///
+/// **띄어쓰기가 가른다.** 사람이 쓰는 제목은 낱말이 여럿이고, 오타 난
+/// 플래그는 한 낱말이다. 정말 그 제목을 쓰겠다면 `--` 로 넘긴다.
+pub fn refuse_if_flag_like(title: &str) -> R<()> {
+    // `--` 를 쓴 사람은 "이 뒤는 플래그가 아니다" 라고 이미 말한 것이다.
+    //
+    // argv 를 다시 훑는 것이 `--json` 때는 틀렸지만 여기서는 맞다 — `--` 는
+    // 값이 아니라 구분자라 clap 이 언제나 삼키고, argv 에 남아 있다는 것은
+    // 사용자가 그것을 적었다는 뜻 말고 다른 뜻이 없다.
+    if std::env::args().any(|a| a == "--") {
+        return Ok(());
+    }
+    if title.starts_with("--") && !title.contains(char::is_whitespace) {
+        return Err(Fail::coded(
+            format!(
+                "`{title}` 은 제목이 아니라 플래그로 보인다.\n                       정말 제목이면 `--` 뒤에 둔다 — `moai add -- {title}`"
+            ),
+            code::BAD_INPUT,
+        ));
+    }
+    Ok(())
 }
 
 /// `--json` 일 때 한 줄로 낸다.

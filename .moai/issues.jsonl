@@ -9,6 +9,6 @@
 {"id":"moai-ogcq","title":"moai status 에 마일스톤 행","status":"todo","tags":["enhancement"],"epic":"moai-i4f7","created_at":"2026-09-11T15:18:26Z","updated_at":"2026-09-11T15:18:26Z","status_since":"2026-09-11T15:18:26Z"}
 {"id":"moai-pz7h","title":"config 로 임계값 빼기","status":"todo","priority":3,"tags":["enhancement"],"epic":"moai-in4m","created_at":"2026-09-11T15:18:26Z","updated_at":"2026-09-11T15:18:26Z","status_since":"2026-09-11T15:18:26Z"}
 {"id":"moai-qf5s","title":"4단계 — TUI","kind":"epic","status":"todo","created_at":"2026-09-11T15:18:26Z","updated_at":"2026-09-11T15:18:26Z","status_since":"2026-09-11T15:18:26Z"}
-{"id":"moai-rdpm","title":"/code-review 미처리 건 정리","status":"todo","priority":1,"tags":["chore"],"epic":"moai-5i34","created_at":"2026-09-11T15:18:26Z","updated_at":"2026-09-11T15:19:08Z","status_since":"2026-09-11T15:19:08Z"}
+{"id":"moai-rdpm","title":"/code-review 미처리 건 정리","status":"done","priority":1,"tags":["chore"],"epic":"moai-5i34","created_at":"2026-09-11T15:18:26Z","updated_at":"2026-09-11T15:28:47Z","status_since":"2026-09-11T15:28:47Z"}
 {"id":"moai-x2vs","title":"issues.jsonl 커스텀 머지 드라이버","status":"todo","priority":3,"tags":["enhancement"],"epic":"moai-in4m","created_at":"2026-09-11T15:18:26Z","updated_at":"2026-09-11T15:18:26Z","status_since":"2026-09-11T15:18:26Z"}
 {"id":"moai-y7hi","title":"줄 수 예산 다시 정하기","status":"todo","tags":["chore"],"epic":"moai-5i34","created_at":"2026-09-11T15:18:26Z","updated_at":"2026-09-11T15:18:26Z","status_since":"2026-09-11T15:18:26Z"}

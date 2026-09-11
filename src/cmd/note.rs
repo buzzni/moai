@@ -25,7 +25,7 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
 
     repo.with_write(|issues, _| {
         if !issues.iter().any(|i| i.id == args.id) {
-            return Err(format!("{} 를 못 찾았다", args.id));
+            return Err(Fail::not_found(&args.id));
         }
         Ok((vec![entry.clone()], ()))
     })?;

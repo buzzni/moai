@@ -14,3 +14,5 @@
 {"ts":"2026-09-11T15:18:26Z","id":"moai-0g9i","kind":"create","by":"레이븐","title":"ratatui 로 report·query 위에 얹기"}
 {"ts":"2026-09-11T15:18:34Z","id":"moai-rdpm","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
 {"ts":"2026-09-11T15:19:08Z","id":"moai-rdpm","kind":"status","by":"레이븐","from":"in_progress","to":"todo","note":"diff 읽히는지 확인하느라 옮겼던 것"}
+{"ts":"2026-09-11T15:22:07Z","id":"moai-rdpm","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-11T15:28:47Z","id":"moai-rdpm","kind":"status","by":"레이븐","from":"in_progress","to":"done","note":"리뷰 미처리 건 전부 정리"}

@@ -21,10 +21,20 @@ struct Moved {
 
 pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
+    if args.args.len() < 2 {
+        return Err(Fail::coded(
+            format!(
+                "옮길 칸을 안 적었다 — `moai mv {} <상태>`\n      있는 칸: {}",
+                args.args.join(" "),
+                repo.config.statuses.join(", ")
+            ),
+            super::code::BAD_STATUS,
+        ));
+    }
     let (ids, tail) = args.args.split_at(args.args.len() - 1);
     let to = Status::new(tail[0].clone());
 
-    repo.config.require_known(to.as_str()).map_err(|e| Fail::coded(e, "bad_status"))?;
+    repo.config.require_known(to.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
 
     let at = model::now();
     let by = model::actor();
@@ -66,8 +76,20 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     }
 
     if ctx.json {
-        let only: Vec<&Issue> = moved.done.iter().map(|(i, _)| i).collect();
-        return super::json_line(&only);
+        // **옮긴 것만 내면 나머지를 말할 자리가 없다.** 이미 그 칸이던 것과
+        // 못 찾은 것은 사람 출력에는 있는데 기계 출력에만 없으면, 받는 쪽이
+        // 두 표면 중 하나를 못 믿게 된다.
+        #[derive(serde::Serialize)]
+        struct Out<'a> {
+            moved: Vec<&'a Issue>,
+            already: &'a [String],
+            missing: &'a [String],
+        }
+        return super::json_line(&Out {
+            moved: moved.done.iter().map(|(i, _)| i).collect(),
+            already: &moved.already,
+            missing: &moved.missing,
+        });
     }
 
     let mut out: Vec<String> = moved

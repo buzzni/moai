@@ -17,13 +17,17 @@ fn clearable(v: &str) -> Option<String> {
 
 pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     fail_if_nothing(&args)?;
+    if let Some(t) = &args.title {
+        super::refuse_if_flag_like(t.trim())?;
+    }
     let repo = Repo::discover()?;
     let body = super::add::read_body(args.body.clone())?;
     let at = model::now();
 
-    let (edited, epic, children): (Issue, Option<Issue>, Vec<Issue>) = repo.with_write(|issues, cfg| {
+    let (edited, epic, children, changed): (Issue, Option<Issue>, Vec<Issue>, bool) =
+        repo.with_write(|issues, cfg| {
         let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
-            return Err(format!("{} 를 못 찾았다", args.id));
+            return Err(Fail::not_found(&args.id));
         };
         let before = i.clone();
 
@@ -58,8 +62,12 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
 
         i.normalize();
         i.validate(cfg)?;
-        if *i == before {
-            return Err(format!("{} 는 바뀐 것이 없다", args.id));
+        // 바뀐 것이 없어도 실패가 아니다. `mv` 가 이미 그 칸일 때 0 으로
+        // 끝나는 것과 같아야 한다 — 되풀이해 부르는 것이 흔하고, 그때
+        // 한쪽만 1 로 끝나면 받는 쪽이 재시도를 못 짠다.
+        let changed = *i != before;
+        if !changed {
+            return Ok((vec![], (before, None, Vec::new(), false)));
         }
         i.updated_at = at.clone();
         let out = i.clone();
@@ -79,11 +87,18 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             .filter(|c| crate::id::parent_of(&c.id) == Some(out.id.as_str()))
             .cloned()
             .collect();
-        Ok((vec![], (out, epic, children)))
+        Ok((vec![], (out, epic, children, true)))
     })?;
 
     if ctx.json {
         return super::json_line(&edited);
+    }
+    if !changed {
+        return Ok(vec![format!(
+            "{}  {}",
+            crate::style::paint(crate::style::ID, &edited.id),
+            crate::style::paint(crate::style::DIM, "바뀐 것이 없다")
+        )]);
     }
     let children: Vec<&Issue> = children.iter().collect();
     Ok(view::detail(&edited, epic.as_ref(), &children, &[], &at))

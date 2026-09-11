@@ -84,8 +84,9 @@ pub enum Cmd {
     Show(ShowArgs),
     /// 상태를 옮긴다
     #[command(after_help = "\
-  칸은 .moai/config.toml 의 statuses 차례를 따른다:
-    todo → in_progress → review → done
+  마지막 인자가 갈 칸이고, 그 앞이 전부 옮길 이슈다.
+  칸 이름과 차례는 .moai/config.toml 의 statuses 가 정한다 (기본: todo,
+  in_progress, review, done).
 
   순서를 건너뛰어도, 되돌려도, 막지 않는다. 이 도구에 승인은 없다.
   되감긴 것과 오래 멈춘 것은 `moai status` 가 드러낸다.
@@ -237,8 +238,11 @@ pub struct FilterArgs {
 
 #[derive(Args, Debug)]
 pub struct MvArgs {
-    /// 옮길 이슈들과, 맨 끝에 갈 칸
-    #[arg(required = true, num_args = 2.., value_name = "<id>... <상태>")]
+    /// 옮길 이슈들, 그리고 맨 끝에 갈 칸
+    ///
+    /// 개수는 clap 이 아니라 `mv` 가 본다 — `2 values required by '<id> <id>...'`
+    /// 는 무엇을 빠뜨렸는지 말해 주지 않는다.
+    #[arg(required = true, num_args = 1.., value_name = "id")]
     pub args: Vec<String>,
 
     /// 이 이동에 한 줄 메모 (저널에만 남는다)

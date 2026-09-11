@@ -140,7 +140,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     if dir.exists() {
         return Err(Fail::coded(
             format!("{} 가 이미 있다", dir.display()),
-            "already_exists",
+            super::code::ALREADY_EXISTS,
         ));
     }
 

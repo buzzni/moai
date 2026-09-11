@@ -33,7 +33,7 @@ fn resolve(target: Option<&str>) -> R<Target> {
                 "`{t}` 는 id 도 종류도 아니다. 종류: issue, epic\n      \
                  id 로 찾으려면 접두어까지 적는다"
             ),
-            "bad_target",
+            super::code::BAD_TARGET,
         )),
     }
 }
@@ -82,7 +82,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         }
         let issue = load
             .get(id)
-            .ok_or_else(|| Fail::coded(format!("{id} 를 못 찾았다"), "not_found"))?;
+            .ok_or_else(|| Fail::coded(format!("{id} 를 못 찾았다"), super::code::NOT_FOUND))?;
         return one(ctx, &repo, &load.issues, issue);
     }
 
@@ -105,12 +105,12 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         all: a.all,
         filter: a.filter,
     })
-    .map_err(|e| Fail::coded(e, "bad_filter"))?;
+    .map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
 
     // 모르는 칸은 거부한다. 조용히 0건을 내면 `-s in-progress` 같은 오타가
     // "그 칸은 비었다" 와 구별되지 않는다 — `add`·`mv` 는 이미 거부한다.
     for s in &filter.status {
-        repo.config.require_known(s).map_err(|e| Fail::coded(e, "bad_status"))?;
+        repo.config.require_known(s).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
     }
 
     let now = model::now();
