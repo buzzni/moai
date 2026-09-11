@@ -1,0 +1,18 @@
+[package]
+name = "moai"
+version = "0.1.0"
+edition = "2024"
+description = "이슈 트래커. 승인 게이트 없음. 규율은 `moai status` 가 비춘다."
+
+[dependencies]
+clap          = { version = "4", features = ["derive", "color", "wrap_help"] }
+serde         = { version = "1", features = ["derive"] }
+serde_json    = "1"
+anstream      = "1"
+anstyle       = "1"
+unicode-width = "0.2"
+fs2           = "0.4"
+
+[profile.release]
+lto = true
+strip = true
