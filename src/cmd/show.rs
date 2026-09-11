@@ -37,6 +37,25 @@ fn resolve(target: Option<&str>) -> R<Target> {
     }
 }
 
+/// 목록 자리에서만 뜻이 있는 플래그가 왔는가. 온 것 중 첫 이름을 돌려준다.
+fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
+    [
+        (!a.status.is_empty(), "-s"),
+        (!a.tag.is_empty(), "-t"),
+        (!a.no_tag.is_empty(), "--no-tag"),
+        (!a.epic.is_empty(), "-e"),
+        (!a.parent.is_empty(), "--parent"),
+        (!a.priority.is_empty(), "-p"),
+        (a.kind.is_some(), "--type"),
+        (a.grep.is_some(), "-g"),
+        (a.stale.is_some(), "--stale"),
+        (a.all, "--all"),
+        (!a.filter.is_empty(), "--filter"),
+    ]
+    .into_iter()
+    .find_map(|(given, name)| given.then_some(name))
+}
+
 pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     let load = repo.read()?;
@@ -49,6 +68,17 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     };
 
     if let Target::One(id) = &target {
+        // 필터를 조용히 버리지 않는다. 하나를 콕 집었으면 거를 것이 없고,
+        // 버린 채로 그 하나를 내면 부르는 쪽은 걸러진 결과라고 믿는다.
+        if let Some(flag) = first_given(&args.filter) {
+            return Err(Fail::coded(
+                format!(
+                    "`{id}` 하나를 펼치는 자리에는 `{flag}` 를 쓸 수 없다.\n      \
+                     거르려면 id 없이 `moai show {flag} …` 다"
+                ),
+                "bad_filter",
+            ));
+        }
         let issue = load
             .get(id)
             .ok_or_else(|| Fail::coded(format!("{id} 를 못 찾았다"), "not_found"))?;
@@ -76,22 +106,28 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     })
     .map_err(|e| Fail::coded(e, "bad_filter"))?;
 
-    let now = model::now();
-    let mut shown: Vec<Issue> =
-        load.issues.iter().filter(|i| filter.matches(i, &now)).cloned().collect();
-    crate::query::sort_for_display(&mut shown);
+    // 모르는 칸은 거부한다. 조용히 0건을 내면 `-s in-progress` 같은 오타가
+    // "그 칸은 비었다" 와 구별되지 않는다 — `add`·`mv` 는 이미 거부한다.
+    for s in &filter.status {
+        repo.config.require_known(s).map_err(|e| Fail::coded(e, "bad_status"))?;
+    }
 
-    // 숨긴 done 이 몇 건인지는 "같은 필터에 done 만 허용" 으로 센다.
-    // 칸을 콕 집었으면 숨긴 것이 없으므로 셀 일도 없다.
-    let hidden = if filter.all || !filter.status.is_empty() {
-        0
-    } else {
-        let wide = Filter { all: true, ..filter.clone() };
-        load.issues
-            .iter()
-            .filter(|i| i.status.is_done() && wide.matches(i, &now))
-            .count()
-    };
+    let now = model::now();
+    // 한 번만 훑는다. done 을 숨기는 규칙은 `Filter` 하나가 알고, 여기서는
+    // 그 규칙을 끈 채(`all`) 걸러 놓고 숨긴 것을 세기만 한다 — 두 번 훑으면
+    // 두 판단이 어긋날 자리가 생긴다.
+    let hide_done = !filter.all && filter.status.is_empty();
+    let wide = Filter { all: true, ..filter };
+    let mut shown: Vec<Issue> = Vec::new();
+    let mut hidden = 0usize;
+    for i in load.issues.iter().filter(|i| wide.matches(i, &now)) {
+        if hide_done && i.status.is_done() {
+            hidden += 1;
+        } else {
+            shown.push(i.clone());
+        }
+    }
+    crate::query::sort_for_display(&mut shown);
 
     if ctx.json {
         return super::json_line(&shown);

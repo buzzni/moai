@@ -205,7 +205,7 @@ pub struct MvArgs {
     pub args: Vec<String>,
 
     /// 이 이동에 한 줄 메모 (저널에만 남는다)
-    #[arg(short, long, value_name = "글")]
+    #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
     pub msg: Option<String>,
 }
 
@@ -214,11 +214,12 @@ pub struct EditArgs {
     #[arg(value_name = "id")]
     pub id: String,
 
-    #[arg(long, value_name = "글")]
+    /// 한 줄. `--` 로 시작해도 된다
+    #[arg(long, value_name = "글", allow_hyphen_values = true)]
     pub title: Option<String>,
 
     /// 본문. `-` 이면 stdin 에서 읽는다
-    #[arg(short, long, value_name = "글")]
+    #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
     pub body: Option<String>,
 
     /// 태그를 더한다
@@ -251,7 +252,7 @@ pub struct RmArgs {
 pub struct NoteArgs {
     #[arg(value_name = "id")]
     pub id: String,
-    /// 다음 사람(또는 다음 에이전트)이 읽을 발견사항
-    #[arg(value_name = "글")]
+    /// 다음 사람(또는 다음 에이전트)이 읽을 발견사항. `--` 로 시작해도 된다
+    #[arg(value_name = "글", allow_hyphen_values = true)]
     pub text: String,
 }

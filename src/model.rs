@@ -40,7 +40,10 @@ impl std::str::FromStr for Kind {
         match s {
             "issue" => Ok(Kind::Issue),
             "epic" => Ok(Kind::Epic),
-            "milestone" => Ok(Kind::Milestone),
+            // `milestone` 은 **여기서 받지 않는다.** serde 는 파일에서 읽을 줄
+            // 알아야 하지만(2단계 바이너리가 쓴 줄), CLI 가 만들 수 있으면
+            // `moai show milestone` 은 "아직 없다" 고 하는데 `moai add --type
+            // milestone` 은 만들어지는 상태가 된다.
             _ => Err(format!("`{s}` 는 종류가 아니다. 종류: issue, epic")),
         }
     }
@@ -111,6 +114,19 @@ pub struct Issue {
     pub rest: BTreeMap<String, serde_json::Value>,
 }
 
+/// 태그 표기를 하나로 맞춘다. 앞의 `#` 은 있어도 없어도 같은 태그고,
+/// **대소문자도 가리지 않는다.**
+///
+/// 소문자로 접는 이유 — 태그를 만드는 것이 주로 에이전트고, 같은 개념을
+/// 매번 `Bug`·`bug` 로 달리 적는다. 접지 않으면 한 개념이 둘로 갈라져
+/// 어느 `-t` 로도 한 번에 못 찾는다.
+///
+/// **쓰는 쪽(`add`·`edit`)과 찾는 쪽(`query`)이 같은 함수를 쓴다.** 둘이
+/// 갈라지면 방금 붙인 태그를 같은 낱말로 찾지 못한다.
+pub fn normalize_tag(raw: &str) -> String {
+    raw.trim().trim_start_matches('#').trim().to_lowercase()
+}
+
 impl Issue {
     pub fn new(id: String, title: String, kind: Kind, status: Status, at: &str) -> Issue {
         Issue {
@@ -136,6 +152,10 @@ impl Issue {
 
     /// 쓰기 직전에 한 번. 결정적 출력과 기본값 생략을 여기서 보장한다.
     pub fn normalize(&mut self) {
+        for t in self.tags.iter_mut() {
+            *t = normalize_tag(t);
+        }
+        self.tags.retain(|t| !t.is_empty());
         self.tags.sort();
         self.tags.dedup();
         if self.priority == Some(DEFAULT_PRIORITY) {
@@ -158,14 +178,7 @@ impl Issue {
         if self.title.contains('\n') {
             return Err(format!("{}: 제목은 한 줄이다", self.id));
         }
-        if !cfg.knows(self.status.as_str()) {
-            return Err(format!(
-                "{}: `{}` 라는 칸이 없다. 있는 칸: {}",
-                self.id,
-                self.status,
-                cfg.statuses.join(", ")
-            ));
-        }
+        cfg.require_known(self.status.as_str()).map_err(|e| format!("{}: {e}", self.id))?;
         if self.priority.is_some_and(|p| p > MAX_PRIORITY) {
             return Err(format!(
                 "{}: 우선순위는 0~{MAX_PRIORITY} 다 — {:?}",
@@ -416,6 +429,32 @@ mod tests {
     /// 옛 바이너리가 2단계 종류를 만나도 줄을 버리지 않는다.
     #[test]
     fn reads_milestone_kind() {
+        let i: Issue = serde_json::from_str(
+            r#"{"id":"argos-4aex","title":"M1","kind":"milestone","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#,
+        )
+        .unwrap();
+        assert_eq!(i.kind, Kind::Milestone);
+    }
+
+    /// 같은 개념이 대소문자로 갈라지지 않는다. 태그를 만드는 것이 주로
+    /// 에이전트라 `Bug`·`bug` 를 섞어 쓴다.
+    #[test]
+    fn tags_fold_to_one_spelling() {
+        assert_eq!(normalize_tag("  #Bug "), "bug");
+        assert_eq!(normalize_tag("PARSER"), "parser");
+        assert_eq!(normalize_tag("한글"), "한글");
+
+        let mut i = issue();
+        i.tags = vec!["Bug".into(), "bug".into(), "#BUG".into()];
+        i.normalize();
+        assert_eq!(i.tags, ["bug"], "한 개념이 둘로 갈라졌다");
+    }
+
+    /// 2단계 종류를 CLI 로 만들 수는 없되, 파일에서 읽을 줄은 안다.
+    #[test]
+    fn milestone_reads_from_file_but_not_from_argv() {
+        assert!("milestone".parse::<Kind>().is_err());
+        assert_eq!("epic".parse::<Kind>().unwrap(), Kind::Epic);
         let i: Issue = serde_json::from_str(
             r#"{"id":"argos-4aex","title":"M1","kind":"milestone","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#,
         )

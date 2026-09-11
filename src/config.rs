@@ -128,6 +128,15 @@ impl Config {
     pub fn knows(&self, status: &str) -> bool {
         self.statuses.iter().any(|s| s == status)
     }
+
+    /// 모르는 칸을 거부한다. **문장이 여기 하나다** — `add`·`mv`·`show` 와
+    /// `Issue::validate` 가 저마다 같은 말을 짓고 있으면 반드시 갈라진다.
+    pub fn require_known(&self, status: &str) -> Result<(), String> {
+        if self.knows(status) {
+            return Ok(());
+        }
+        Err(format!("`{status}` 라는 칸이 없다. 있는 칸: {}", self.statuses.join(", ")))
+    }
 }
 
 #[cfg(test)]

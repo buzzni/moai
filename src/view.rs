@@ -209,7 +209,16 @@ pub fn detail(
         out.push(String::new());
         out.push(paint(style::HEAD, "이력"));
         for e in journal {
-            out.push(format!("  {}   {}", paint(style::DIM, &short_stamp(&e.ts)), entry(e)));
+            // 메모는 여러 줄일 수 있다. 한 원소에 `\n` 을 담으면 "원소 하나가
+            // 한 줄" 이라는 약속이 깨지고, 이어지는 줄이 열을 잃는다.
+            let ts = short_stamp(&e.ts);
+            let pad = " ".repeat(width(&ts) + 5);
+            for (n, l) in entry(e).split('\n').enumerate() {
+                out.push(match n {
+                    0 => format!("  {}   {l}", paint(style::DIM, &ts)),
+                    _ => format!("{pad}{l}"),
+                });
+            }
         }
     }
     out

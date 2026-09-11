@@ -26,8 +26,9 @@ pub struct Filter {
     /// AND of OR — 바깥이 그리고, 안쪽이 또는.
     pub tags: Vec<Vec<String>>,
     pub no_tags: Vec<String>,
-    pub epic: Option<Sel>,
-    pub parent: Option<Sel>,
+    /// OR. 비면 아무거나. 쉼표가 또는이라는 규칙이 여기에도 걸린다.
+    pub epic: Vec<Sel>,
+    pub parent: Vec<Sel>,
     pub priority: Vec<u8>,
     pub kind: Option<Kind>,
     pub grep: Option<String>,
@@ -42,7 +43,7 @@ pub struct Filter {
 fn once(values: &[String], flag: &str, what: &str) -> Result<Vec<String>, String> {
     match values {
         [] => Ok(Vec::new()),
-        [one] => Ok(one.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()),
+        [one] => Ok(csv(one)),
         [a, b, ..] => Err(format!(
             "{what}는 {a} 이면서 동시에 {b} 일 수 없다.\n      \
              둘 중 하나를 찾는 것이면 `{flag} {a},{b}` 다"
@@ -74,8 +75,15 @@ pub struct Raw {
 }
 
 impl Filter {
-    pub fn build(raw: Raw) -> Result<Filter, String> {
-        let mut f = Filter {
+    pub fn build(mut raw: Raw) -> Result<Filter, String> {
+        // `--filter` 는 **플래그와 같은 자리에 쌓인다.** 뜻을 정하는 코드가
+        // 아래 한 곳뿐이라야 두 표현이 갈라지지 않는다 — 예전처럼 `Filter` 에
+        // 직접 쓰면 `--filter` 가 플래그를 조용히 덮어썼고, `-s` 를 두 번 썼을
+        // 때 나오는 친절한 오류도 그 길에서만 사라졌다.
+        for one in std::mem::take(&mut raw.filter) {
+            desugar(&mut raw, &one)?;
+        }
+        Ok(Filter {
             status: once(&raw.status, "-s", "상태")?,
             tags: raw
                 .tag
@@ -88,52 +96,11 @@ impl Filter {
             parent: sel(once(&raw.parent, "--parent", "부모")?),
             priority: parse_priorities(&once(&raw.priority, "-p", "우선순위")?)?,
             kind: raw.kind,
-            grep: raw.grep,
+            // 한 번만 내려 두면 이슈마다 다시 만들 일이 없다.
+            grep: raw.grep.map(|q| q.to_lowercase()),
             stale: raw.stale,
             all: raw.all,
-        };
-        for one in &raw.filter {
-            f.apply(one)?;
-        }
-        Ok(f)
-    }
-
-    /// `--filter k=v`. 플래그와 **같은 구조체**로 들어간다 — 표현이 둘이지
-    /// 뜻이 둘이 아니다.
-    fn apply(&mut self, raw: &str) -> Result<(), String> {
-        for one in raw.split(';') {
-            let one = one.trim();
-            if one.is_empty() {
-                continue;
-            }
-            let (k, v) = one
-                .split_once('=')
-                .ok_or_else(|| format!("`{one}` 은 `항목=값` 이 아니다. 있는 항목: {}", KEYS.join(", ")))?;
-            let (k, v) = (k.trim(), v.trim().to_string());
-            let split = |v: &str| -> Vec<String> {
-                v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
-            };
-            match k {
-                "status" => self.status = split(&v),
-                "tag" => self.tags.push(split_tags(&v)),
-                "no-tag" => self.no_tags.extend(split_tags(&v)),
-                "epic" => self.epic = sel(split(&v)),
-                "parent" => self.parent = sel(split(&v)),
-                "priority" => self.priority = parse_priorities(&split(&v))?,
-                "type" => self.kind = Some(v.parse()?),
-                "grep" => self.grep = Some(v),
-                "stale" => {
-                    self.stale = Some(v.parse().map_err(|_| format!("`{v}` 는 날 수가 아니다"))?)
-                }
-                _ => {
-                    return Err(format!(
-                        "`{k}` 라는 필터 항목이 없다.\n      있는 것: {}",
-                        KEYS.join(", ")
-                    ));
-                }
-            }
-        }
-        Ok(())
+        })
     }
 
     pub fn matches(&self, i: &Issue, now: &str) -> bool {
@@ -149,10 +116,10 @@ impl Filter {
         if self.no_tags.iter().any(|t| i.tags.contains(t)) {
             return false;
         }
-        if !matches_sel(self.epic.as_ref(), i.epic.as_deref()) {
+        if !matches_sel(&self.epic, i.epic.as_deref()) {
             return false;
         }
-        if !matches_sel(self.parent.as_ref(), crate::id::parent_of(&i.id)) {
+        if !matches_sel(&self.parent, crate::id::parent_of(&i.id)) {
             return false;
         }
         if !self.priority.is_empty() && !self.priority.contains(&i.priority()) {
@@ -162,9 +129,8 @@ impl Filter {
             return false;
         }
         if let Some(q) = &self.grep {
-            let q = q.to_lowercase();
-            let hit = i.title.to_lowercase().contains(&q)
-                || i.body.as_deref().is_some_and(|b| b.to_lowercase().contains(&q));
+            let hit = i.title.to_lowercase().contains(q)
+                || i.body.as_deref().is_some_and(|b| b.to_lowercase().contains(q));
             if !hit {
                 return false;
             }
@@ -178,34 +144,71 @@ impl Filter {
     }
 }
 
+/// `--filter k=v` 를 플래그와 같은 자리(`Raw`)에 풀어 놓는다. **뜻을 정하지
+/// 않는다** — 쪼개고 고르는 일은 `build` 한 곳이 한다.
+fn desugar(raw: &mut Raw, text: &str) -> Result<(), String> {
+    for one in text.split(';') {
+        let one = one.trim();
+        if one.is_empty() {
+            continue;
+        }
+        let (k, v) = one
+            .split_once('=')
+            .ok_or_else(|| format!("`{one}` 은 `항목=값` 이 아니다. 있는 항목: {}", KEYS.join(", ")))?;
+        let (k, v) = (k.trim(), v.trim().to_string());
+        match k {
+            "status" => raw.status.push(v),
+            "tag" => raw.tag.push(v),
+            "no-tag" => raw.no_tag.push(v),
+            "epic" => raw.epic.push(v),
+            "parent" => raw.parent.push(v),
+            "priority" => raw.priority.push(v),
+            "type" => raw.kind = Some(v.parse()?),
+            "grep" => raw.grep = Some(v),
+            "stale" => raw.stale = Some(v.parse().map_err(|_| format!("`{v}` 는 날 수가 아니다"))?),
+            _ => {
+                return Err(format!(
+                    "`{k}` 라는 필터 항목이 없다.\n      있는 것: {}",
+                    KEYS.join(", ")
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `a, b ,` → `["a", "b"]`. 쉼표는 또는이라는 규칙이 사는 곳.
+fn csv(raw: &str) -> Vec<String> {
+    raw.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+}
+
 /// `bug,#parser` → `["bug", "parser"]`. 앞의 `#` 은 있어도 없어도 된다.
 fn split_tags(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(|s| s.trim().trim_start_matches('#').to_string())
-        .filter(|s| !s.is_empty())
+    csv(raw).iter().map(|t| crate::model::normalize_tag(t)).filter(|s| !s.is_empty()).collect()
+}
+
+/// 쉼표는 여기서도 또는이다. `none` 이 섞이면 "없는 것" 도 함께 고른다.
+fn sel(values: Vec<String>) -> Vec<Sel> {
+    values
+        .into_iter()
+        .map(|v| if v == "none" { Sel::Unset } else { Sel::Is(v) })
         .collect()
 }
 
-fn sel(values: Vec<String>) -> Option<Sel> {
-    match values.first().map(String::as_str) {
-        None => None,
-        Some("none") => Some(Sel::Unset),
-        Some(_) => Some(Sel::Is(values.into_iter().next().unwrap())),
-    }
-}
-
-fn matches_sel(sel: Option<&Sel>, value: Option<&str>) -> bool {
-    match sel {
-        None => true,
-        Some(Sel::Unset) => value.is_none(),
-        Some(Sel::Is(want)) => value == Some(want.as_str()),
-    }
+fn matches_sel(sel: &[Sel], value: Option<&str>) -> bool {
+    sel.is_empty()
+        || sel.iter().any(|s| match s {
+            Sel::Unset => value.is_none(),
+            Sel::Is(want) => value == Some(want.as_str()),
+        })
 }
 
 fn parse_priorities(raw: &[String]) -> Result<Vec<u8>, String> {
     raw.iter()
         .map(|p| {
-            p.trim_start_matches('p')
+            // `p` 한 글자만 벗긴다. `trim_start_matches` 는 `ppp0` 도 받아들인다.
+            p.strip_prefix('p')
+                .unwrap_or(p.as_str())
                 .parse::<u8>()
                 .ok()
                 .filter(|n| *n <= crate::model::MAX_PRIORITY)
@@ -338,6 +341,57 @@ mod tests {
         assert!(named.matches(&done, NOW));
     }
 
+    /// 쉼표는 에픽·부모에서도 또는이다. 첫 값만 보고 나머지를 버리면
+    /// 두 에픽을 한 번에 훑는 요청이 조용히 반쪽 답을 낸다.
+    #[test]
+    fn a_comma_is_or_for_epic_and_parent_too() {
+        let mut a = issue("a-0001", "todo", &[]);
+        a.epic = Some("a-9998".into());
+        let mut b = issue("a-0002", "todo", &[]);
+        b.epic = Some("a-9999".into());
+        let c = issue("a-0003", "todo", &[]);
+
+        for spelling in [
+            Raw { epic: s(&["a-9998,a-9999"]), all: true, ..Raw::default() },
+            Raw { epic: s(&["a-9999,a-9998"]), all: true, ..Raw::default() },
+            Raw { filter: s(&["epic=a-9998,a-9999"]), all: true, ..Raw::default() },
+        ] {
+            let f = Filter::build(spelling).unwrap();
+            assert!(f.matches(&a, NOW) && f.matches(&b, NOW) && !f.matches(&c, NOW));
+        }
+
+        // `none` 도 다른 값과 나란히 놓일 수 있다.
+        let f = Filter::build(Raw { epic: s(&["none,a-9999"]), all: true, ..Raw::default() }).unwrap();
+        assert!(f.matches(&b, NOW) && f.matches(&c, NOW) && !f.matches(&a, NOW));
+
+        let f = Filter::build(Raw { parent: s(&["a-0001,a-0002"]), all: true, ..Raw::default() }).unwrap();
+        assert!(f.matches(&issue("a-0001.abc", "todo", &[]), NOW));
+        assert!(f.matches(&issue("a-0002.abc", "todo", &[]), NOW));
+        assert!(!f.matches(&issue("a-0003.abc", "todo", &[]), NOW));
+    }
+
+    /// `--filter` 는 플래그를 덮어쓰지 않고 **같은 자리에 쌓인다.** 두 표현이
+    /// 한 뜻이라면 두 번 쓴 것을 나무라는 자리도 하나여야 한다.
+    #[test]
+    fn a_filter_string_stacks_with_the_flags_it_mirrors() {
+        let e = Filter::build(Raw { status: s(&["todo"]), filter: s(&["status=review"]), ..Raw::default() })
+            .unwrap_err();
+        assert!(e.contains("동시에"), "{e}");
+        let e = Filter::build(Raw { filter: s(&["status=todo", "status=review"]), ..Raw::default() })
+            .unwrap_err();
+        assert!(e.contains("동시에"), "{e}");
+
+        // 태그는 쌓이는 쪽이라 둘 다 걸린다 (반복=그리고).
+        let f = Filter::build(Raw { tag: s(&["bug"]), filter: s(&["tag=parser"]), all: true, ..Raw::default() })
+            .unwrap();
+        assert!(f.matches(&issue("a-0001", "todo", &["bug", "parser"]), NOW));
+        assert!(!f.matches(&issue("a-0002", "todo", &["bug"]), NOW));
+
+        // 빈 값은 "거르지 않는다" 다 — 플래그 쪽과 같은 뜻이어야 한다.
+        let f = Filter::build(Raw { filter: s(&["tag="]), all: true, ..Raw::default() }).unwrap();
+        assert!(f.matches(&issue("a-0001", "todo", &[]), NOW));
+    }
+
     /// `--filter` 는 플래그와 정확히 같은 뜻이다.
     #[test]
     fn filter_string_equals_the_flags() {
@@ -364,8 +418,10 @@ mod tests {
     fn priorities_accept_both_spellings() {
         let f = Filter::build(Raw { priority: s(&["p0,1"]), all: true, ..Raw::default() }).unwrap();
         assert_eq!(f.priority, [0, 1]);
-        let e = Filter::build(Raw { priority: s(&["9"]), all: true, ..Raw::default() }).unwrap_err();
-        assert!(e.contains("우선순위가 아니다"), "{e}");
+        for bad in ["9", "ppp0"] {
+            let e = Filter::build(Raw { priority: s(&[bad]), all: true, ..Raw::default() }).unwrap_err();
+            assert!(e.contains("우선순위가 아니다"), "{bad} → {e}");
+        }
     }
 
     #[test]

@@ -30,15 +30,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     );
     // 칸 검사는 id 를 뽑기 **전에** 한다. 나중에 하면 쓰이지도 않은 id 가
     // 오류 메시지에 실려 나가고, 받는 쪽은 그게 만들어진 줄 안다.
-    if !repo.config.knows(status.as_str()) {
-        return Err(Fail::coded(
-            format!(
-                "`{status}` 라는 칸이 없다. 있는 칸: {}",
-                repo.config.statuses.join(", ")
-            ),
-            "bad_status",
-        ));
-    }
+    repo.config.require_known(status.as_str()).map_err(|e| Fail::coded(e, "bad_status"))?;
     let at = model::now();
     let by = model::actor();
 
@@ -65,7 +57,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
 
         let mut issue = Issue::new(id, args.title.trim().to_string(), kind, status.clone(), &at);
         issue.epic = args.epic.clone();
-        issue.tags = args.tag.iter().map(|t| t.trim().trim_start_matches('#').to_string()).collect();
+        issue.tags = args.tag.iter().map(|t| model::normalize_tag(t)).collect();
         issue.priority = args.priority;
         issue.assignee = args.assignee.clone();
         issue.body = body.clone();

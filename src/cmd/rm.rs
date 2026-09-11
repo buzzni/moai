@@ -10,15 +10,21 @@ use crate::store::Repo;
 use crate::style::{self, paint};
 
 pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
+    let repo = Repo::discover()?;
     let at = model::now();
     let by = model::actor();
-    let repo = Repo::discover()?;
 
     let (gone, missing, dangling): (Vec<Issue>, Vec<String>, Vec<String>) =
         repo.with_write(|issues, _| {
             let (mut gone, mut missing, mut dangling) = (Vec::new(), Vec::new(), Vec::new());
             let mut entries = Vec::new();
             for id in &args.ids {
+                // 같은 id 를 두 번 적은 것은 실패가 아니다. 인자 목록은 glob·
+                // xargs·에이전트가 짓는 것이라 중복이 흔하고, 지워 놓고
+                // "못 찾았다" 며 비영으로 끝내면 부르는 쪽이 되돌리려 든다.
+                if gone.iter().any(|g: &Issue| &g.id == id) {
+                    continue;
+                }
                 let Some(at_idx) = issues.iter().position(|i| &i.id == id) else {
                     missing.push(id.clone());
                     continue;

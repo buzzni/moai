@@ -78,10 +78,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Add(a) => add::run(&ctx, a, None),
         Cmd::Show(a) => show::run(&ctx, a, None),
         Cmd::Mv(a) => mv::run(&ctx, a),
-        Cmd::Edit(a) => {
-            edit::fail_if_nothing(&a)?;
-            edit::run(&ctx, a)
-        }
+        Cmd::Edit(a) => edit::run(&ctx, a),
         Cmd::Rm(a) => rm::run(&ctx, a),
         Cmd::Note(a) => note::run(&ctx, a),
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),

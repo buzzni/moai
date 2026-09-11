@@ -104,12 +104,25 @@ impl Repo {
         }
         let before = render_issues(&load.issues);
 
+        // 정규화한 원본을 들고 있다가 **바뀐 줄만** 검사한다.
+        //
+        // 전부 검사하면 남의 낡은 줄 하나가 모든 쓰기를 막는다 — config 에서
+        // 칸 이름을 하나 고치는 순간 그 칸에 있던 이슈 때문에 `moai add` 조차
+        // 안 된다. 읽기는 관대하고 쓰기는 엄하다는 규칙은 **지금 쓰는 줄**에
+        // 대한 것이지, 파일 전체에 대한 것이 아니다.
+        let mut original = load.issues.clone();
+        for o in original.iter_mut() {
+            o.normalize();
+        }
+
         let mut issues = load.issues;
         let (entries, out) = f(&mut issues, &self.config)?;
 
         for i in issues.iter_mut() {
             i.normalize();
-            i.validate(&self.config)?;
+            if original.iter().find(|o| o.id == i.id) != Some(&*i) {
+                i.validate(&self.config)?;
+            }
         }
         issues.sort_by(|a, b| a.id.cmp(&b.id));
         if let Some(dup) = first_duplicate(&issues) {
@@ -419,6 +432,55 @@ mod tests {
         })
         .unwrap_err();
         assert!(e.contains("두 번"), "{e}");
+    }
+
+    /// 남의 낡은 줄 하나가 모든 쓰기를 막지 않는다.
+    ///
+    /// config 에서 칸 이름을 고치면 그 칸에 있던 이슈는 더 이상 유효하지
+    /// 않다. 그때도 새 이슈는 만들 수 있어야 한다 — 못 만들면 되돌릴 방법이
+    /// 도구 밖에만 남는다.
+    #[test]
+    fn a_stale_row_does_not_block_unrelated_writes() {
+        let (r, d) = repo("stale_row");
+        let mut old = issue("argos-0001");
+        old.status = Status::new("옛날칸");
+        std::fs::write(
+            d.join(".moai/issues.jsonl"),
+            format!("{}\n", serde_json::to_string(&old).unwrap()),
+        )
+        .unwrap();
+
+        r.with_write(|issues, _| {
+            issues.push(issue("argos-0002"));
+            Ok((vec![], ()))
+        })
+        .expect("낡은 줄 때문에 새 이슈를 못 넣었다");
+
+        let load = r.read().unwrap();
+        assert_eq!(load.issues.len(), 2);
+        // 그리고 낡은 줄은 지워지지 않고 그대로 남는다
+        assert_eq!(load.get("argos-0001").unwrap().status.as_str(), "옛날칸");
+    }
+
+    /// 그 줄을 직접 건드리면 그때는 검사한다.
+    #[test]
+    fn touching_a_stale_row_still_validates_it() {
+        let (r, d) = repo("stale_touch");
+        let mut old = issue("argos-0001");
+        old.status = Status::new("옛날칸");
+        std::fs::write(
+            d.join(".moai/issues.jsonl"),
+            format!("{}\n", serde_json::to_string(&old).unwrap()),
+        )
+        .unwrap();
+
+        let e = r
+            .with_write(|issues, _| {
+                issues[0].title = "고친 제목".into();
+                Ok((vec![], ()))
+            })
+            .unwrap_err();
+        assert!(e.contains("라는 칸이 없다"), "{e}");
     }
 
     /// 쓰기 도중 실패하면 원본이 그대로다 — 반쯤 쓰인 파일이 남지 않는다.

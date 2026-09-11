@@ -445,10 +445,16 @@ fn filters_reach_the_command_line() {
     let or = ok(s.path(), &["show", "-t", "bug,chore"]);
     assert!(or.contains("3건") || or.contains(&a), "{or}");
 
-    // 같은 뜻을 한 문자열로도 쓸 수 있다
+    // 같은 뜻을 한 문자열로도 쓸 수 있다. **둘 다 비지 않았음을 먼저 본다** —
+    // 안 그러면 양쪽이 다 `없다.` 인 실패를 이 단언이 통과시킨다.
     let flags = ok(s.path(), &["show", "-s", "review"]);
     let string = ok(s.path(), &["show", "--filter", "status=review"]);
+    assert!(flags.contains(&a), "{flags}");
     assert_eq!(flags, string);
+
+    // 그리고 두 표현은 **쌓인다** — 덮어쓰면 `-t bug` 가 조용히 사라진다
+    let both = ok(s.path(), &["show", "-t", "bug", "--filter", "tag=parser"]);
+    assert!(both.contains(&b) && !both.contains(&a), "{both}");
 
     let e = moai(s.path(), &["show", "-s", "todo", "-s", "review"]);
     assert!(String::from_utf8_lossy(&e.stderr).contains("-s todo,review"));

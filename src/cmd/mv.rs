@@ -24,12 +24,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let (ids, tail) = args.args.split_at(args.args.len() - 1);
     let to = Status::new(tail[0].clone());
 
-    if !repo.config.knows(to.as_str()) {
-        return Err(Fail::coded(
-            format!("`{to}` 라는 칸이 없다. 있는 칸: {}", repo.config.statuses.join(", ")),
-            "bad_status",
-        ));
-    }
+    repo.config.require_known(to.as_str()).map_err(|e| Fail::coded(e, "bad_status"))?;
 
     let at = model::now();
     let by = model::actor();
@@ -43,6 +38,12 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 continue;
             };
             if i.status == to {
+                // 옮길 것이 없어도 **적어 온 말은 버리지 않는다.** 되풀이해
+                // 부르는 것(재시도·다른 에이전트가 먼저 옮긴 뒤)이 흔하고,
+                // 그때 이유가 조용히 사라지면 저널을 믿을 수 없게 된다.
+                if let Some(msg) = &args.msg {
+                    entries.push(JournalEntry::note(&i.id, msg, &at, &by));
+                }
                 m.already.push(i.id.clone());
                 continue;
             }
@@ -51,6 +52,9 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             i.status = to.clone();
             i.status_since = at.clone();
             i.updated_at = at.clone();
+            // 저장 직전의 모습으로 맞춰 두고 뜬다 — 안 그러면 `--json` 이
+            // 파일에 없는 값(기본 우선순위, 정렬 전 태그)을 말한다.
+            i.normalize();
             m.done.push((i.clone(), from));
         }
         Ok((entries, m))

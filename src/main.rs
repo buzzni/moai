@@ -55,19 +55,17 @@ fn main() -> ExitCode {
         return fail(cli.json, &cmd::Fail::new(format!("{}: {e}", dir.display())));
     }
 
+    // `cmd::run` 이 `cli` 를 삼키기 **전에** 챙긴다. argv 를 다시 훑어
+    // `--json` 을 찾으면 제목이나 메모가 그 낱말일 때(`add -- "--json"`)
+    // 아무도 시키지 않은 기계 출력이 나온다.
+    let json = cli.json;
     match cmd::run(cli) {
         Ok(lines) => {
             print(&lines);
             if cmd::had_partial() { ExitCode::FAILURE } else { ExitCode::SUCCESS }
         }
-        Err(e) => fail(cli_json(), &e),
+        Err(e) => fail(json, &e),
     }
-}
-
-/// `cmd::run` 이 `cli` 를 삼켰으므로 전역에서 다시 읽는다. 인자 하나 때문에
-/// 구조를 비트는 것보다 낫다.
-fn cli_json() -> bool {
-    std::env::args().any(|a| a == "--json")
 }
 
 fn print(lines: &[String]) {
@@ -81,7 +79,10 @@ fn fail(json: bool, e: &cmd::Fail) -> ExitCode {
         let v = serde_json::json!({"error": e.message, "code": e.code});
         eprintln!("{v}");
     } else {
-        eprintln!(
+        // `eprintln!` 은 anstream 을 안 거치므로 색을 끄는 판단이 적용되지
+        // 않는다 — `NO_COLOR` 로도 `--no-color` 로도 빨강이 그대로 샌다.
+        let _ = writeln!(
+            anstream::stderr().lock(),
             "{}{}",
             style::paint(style::ERROR, "moai: "),
             e.message

@@ -16,11 +16,12 @@ fn clearable(v: &str) -> Option<String> {
 }
 
 pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
+    fail_if_nothing(&args)?;
     let repo = Repo::discover()?;
     let body = super::add::read_body(args.body.clone())?;
     let at = model::now();
 
-    let edited: Issue = repo.with_write(|issues, cfg| {
+    let (edited, epic, children): (Issue, Option<Issue>, Vec<Issue>) = repo.with_write(|issues, cfg| {
         let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
             return Err(format!("{} 를 못 찾았다", args.id));
         };
@@ -29,20 +30,20 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         if let Some(t) = &args.title {
             i.title = t.trim().to_string();
         }
-        if body.is_some() {
+        // `--body` 를 적었으면 적은 대로 된다. **빈 것도 적은 것이다** —
+        // `-b ""` 든 빈 stdin 이든 지운다는 뜻이고, 둘이 갈리면 파이프로
+        // 본문을 만들어 넣는 쪽이 옛 본문을 지우지 못한다.
+        if args.body.is_some() {
             i.body = body.clone();
-        } else if args.body.as_deref() == Some("") {
-            i.body = None;
         }
         for t in &args.tag {
-            let t = t.trim().trim_start_matches('#').to_string();
+            let t = model::normalize_tag(t);
             if !t.is_empty() && !i.tags.contains(&t) {
                 i.tags.push(t);
             }
         }
         if !args.untag.is_empty() {
-            let drop: Vec<String> =
-                args.untag.iter().map(|t| t.trim().trim_start_matches('#').to_string()).collect();
+            let drop: Vec<String> = args.untag.iter().map(|t| model::normalize_tag(t)).collect();
             i.tags.retain(|t| !drop.contains(t));
         }
         if let Some(e) = &args.epic {
@@ -63,29 +64,32 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         i.updated_at = at.clone();
         let out = i.clone();
 
+        // 상세를 그릴 재료를 **여기서** 챙긴다. 락을 놓은 뒤 파일을 다시 읽으면
+        // 1만 줄을 두 번 파싱하고(측정: 한 번 더 읽는 데만 25%), 그 틈에 남이
+        // 쓴 것이 섞여 방금 쓴 이슈와 주변이 어긋난다.
+        let epic = out.epic.as_ref().and_then(|e| issues.iter().find(|x| &x.id == e).cloned());
         // 없는 에픽은 막지 않고 알려만 준다 — 끊긴 참조는 `moai status` 가 드러낸다.
         if let Some(e) = &out.epic
-            && !issues.iter().any(|x| &x.id == e)
+            && epic.is_none()
         {
             eprintln!("moai: {e} 라는 에픽이 없다. 그대로 둔다");
         }
-        Ok((vec![], out))
+        let children: Vec<Issue> = issues
+            .iter()
+            .filter(|c| crate::id::parent_of(&c.id) == Some(out.id.as_str()))
+            .cloned()
+            .collect();
+        Ok((vec![], (out, epic, children)))
     })?;
 
     if ctx.json {
         return super::json_line(&edited);
     }
-    let load = repo.read()?;
-    let epic = edited.epic.as_ref().and_then(|e| load.get(e));
-    let children: Vec<&Issue> = load
-        .issues
-        .iter()
-        .filter(|c| crate::id::parent_of(&c.id) == Some(edited.id.as_str()))
-        .collect();
-    Ok(view::detail(&edited, epic, &children, &[], &at))
+    let children: Vec<&Issue> = children.iter().collect();
+    Ok(view::detail(&edited, epic.as_ref(), &children, &[], &at))
 }
 
-pub fn fail_if_nothing(args: &EditArgs) -> R<()> {
+fn fail_if_nothing(args: &EditArgs) -> R<()> {
     let touched = args.title.is_some()
         || args.body.is_some()
         || !args.tag.is_empty()
