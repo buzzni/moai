@@ -53,7 +53,12 @@ pub enum Cmd {
   급한 것 → 끝나가는 에픽 → 오래된 것 차례로 낸다.")]
     Ready,
 
-    /// 이 저장소에 .moai/ 를 심는다
+    /// 이 저장소에 .moai/ 를 심는다 (다시 불러도 된다)
+    #[command(after_help = "\
+  이미 심긴 곳에서 다시 부르면 딸린 파일(.gitattributes·.gitignore·AGENTS.md)
+  만 다시 맞춘다. 이슈와 저널은 건드리지 않는다.
+
+  접두어는 처음 한 번만 정한다 — 이미 발급된 id 가 전부 그것을 달고 있다.")]
     Init {
         /// id 접두어. 없으면 디렉터리 이름에서 만든다
         prefix: Option<String>,

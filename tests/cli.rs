@@ -81,13 +81,35 @@ fn init_creates_exactly_three_files() {
     assert!(!attrs.contains("issues.jsonl   text eol=lf merge"), "{attrs}");
 }
 
-/// 두 번째 init 은 거부한다. 있는 이슈를 지우는 길을 만들지 않는다.
+/// 도구가 자라면 AGENTS.md 블록은 반드시 낡는다. 다시 쓸 길이 없으면 새
+/// 세션의 에이전트가 없는 명령을 쓰고 있는 명령을 모른다.
 #[test]
-fn init_refuses_to_run_twice() {
+fn init_can_be_run_again_to_refresh() {
     let s = init("twice");
-    let out = moai(s.path(), &["init"]);
+    let id = add(s.path(), &["지워지면 안 되는 것"]);
+
+    // 블록을 일부러 낡게 만들어 둔다
+    let md = s.path().join("AGENTS.md");
+    let old = std::fs::read_to_string(&md).unwrap();
+    std::fs::write(&md, old.replace("moai status", "moai 낡은명령")).unwrap();
+
+    let out = ok(s.path(), &["init"]);
+    assert!(out.contains("이미 심겨 있다"), "{out}");
+    assert!(std::fs::read_to_string(&md).unwrap().contains("moai status"), "블록이 안 맞춰졌다");
+    // 이슈와 저널은 그대로다
+    assert!(issues(s.path()).contains(&id), "이슈를 지웠다");
+    assert!(!journal(s.path()).is_empty());
+}
+
+/// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.
+#[test]
+fn init_refuses_to_change_the_prefix() {
+    let s = init("reprefix");
+    let out = moai(s.path(), &["init", "다른것"]);
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("이미 있다"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("나중에 못 바꾼다"));
+    // 같은 접두어면 그냥 맞춘다
+    assert!(moai(s.path(), &["init", "argos"]).status.success());
 }
 
 /// 남의 .gitignore 를 지우지 않고 빠진 줄만 덧붙인다.

@@ -31,3 +31,15 @@
 {"ts":"2026-09-11T16:07:04Z","id":"moai-3b9o","kind":"status","by":"레이븐","from":"in_progress","to":"done"}
 {"ts":"2026-09-11T16:07:04Z","id":"moai-bipm","kind":"note","by":"레이븐","text":"소속은 필드, 파생은 id. 마일스톤은 에픽을 거쳐 물려받는다 — 이슈마다 적게 하면 에픽을 옮길 때 멤버를 전부 따라 고쳐야 하고 반드시 하나는 빠뜨린다."}
 {"ts":"2026-09-11T16:07:04Z","id":"moai-i4f7","kind":"status","by":"레이븐","from":"todo","to":"done","note":"2단계 완료"}
+{"ts":"2026-09-11T16:24:43Z","id":"moai-csra","kind":"create","by":"레이븐","title":"세션 이어받기"}
+{"ts":"2026-09-11T16:24:43Z","id":"moai-8twz","kind":"create","by":"레이븐","title":"moai init 이 AGENTS.md 블록을 다시 쓸 수 있어야 한다"}
+{"ts":"2026-09-11T16:24:43Z","id":"moai-uo0e","kind":"create","by":"레이븐","title":"남은 이슈에 설계 메모 채우기"}
+{"ts":"2026-09-11T16:24:43Z","id":"moai-rv2u","kind":"create","by":"레이븐","title":"CLAUDE.md 숫자 갱신과 출처 표시"}
+{"ts":"2026-09-11T16:24:43Z","id":"moai-0l71","kind":"create","by":"레이븐","title":"Argos 시나리오 갱신"}
+{"ts":"2026-09-11T16:25:14Z","id":"moai-8twz","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-11T16:26:32Z","id":"moai-8twz","kind":"status","by":"레이븐","from":"in_progress","to":"done","note":"init 을 멱등으로 — 새 명령 대신"}
+{"ts":"2026-09-11T16:26:33Z","id":"moai-8twz","kind":"note","by":"레이븐","text":"명령을 하나 더 만드는 대신 init 이 맡는다. 이슈·저널은 안 건드리므로 다시 불러도 잃을 것이 없고, 접두어만 못 바꾸게 막는다."}
+{"ts":"2026-09-11T16:26:33Z","id":"moai-uo0e","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-11T16:27:16Z","id":"moai-uo0e","kind":"status","by":"레이븐","from":"in_progress","to":"done","note":"여섯 건에 설계 메모"}
+{"ts":"2026-09-11T16:27:43Z","id":"moai-rv2u","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-11T16:27:43Z","id":"moai-rv2u","kind":"status","by":"레이븐","from":"in_progress","to":"done","note":"낡을 숫자를 빼고 출처 표를 더함"}

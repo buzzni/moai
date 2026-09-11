@@ -30,6 +30,17 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다.
 
 모든 명령에 `--json` 이 붙는다.
 
+### 묶음은 둘이다
+
+    moai epic add "저장 계층"                      에픽
+    moai milestone add "v0.1"                      마일스톤
+    moai add "제목" -e <에픽> --milestone <마일스톤>
+    moai show <에픽|마일스톤 id>                   그 밑에 무엇이 있는지
+    moai show --milestone <id>                     그 마일스톤에 딸린 전부
+
+**소속은 물려받는다.** 자식은 부모의 에픽을, 이슈는 제 에픽의 마일스톤을
+물려받는다. 이슈마다 다시 적지 않는다 — 에픽을 옮기면 멤버가 따라온다.
+
 ### 기능 요청을 받으면
 
 파일 하나로 안 끝나는 요청이면 **코드를 쓰기 전에** 이렇게 한다.
@@ -47,6 +58,11 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다.
 4. `moai mv <id> in_progress` 로 집고, 끝나면 `done` 으로 옮긴다.
 5. 작업 중 발견한 것 중 지금 범위가 아닌 것은 `moai add` 로 적어 둔다.
    **적지 않고 넘어가는 것이 제일 나쁘다.**
+6. 왜 그렇게 정했는지는 `moai note <id>` 로 이슈에 붙인다. 다음 세션이
+   `moai show <id>` 로 그것을 읽는다.
+
+도구가 자라 이 블록이 낡으면 `moai init` 을 다시 부른다. 이슈와 저널은
+건드리지 않고 이 블록만 다시 쓴다.
 
 ### 승인 게이트는 없다
 
@@ -137,16 +153,33 @@ fn ensure_lines(path: &Path, block: &str) -> Result<bool, String> {
 pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
-    if dir.exists() {
-        return Err(Fail::coded(
-            format!("{} 가 이미 있다", dir.display()),
-            super::code::ALREADY_EXISTS,
-        ));
-    }
 
-    let prefix = match prefix {
-        Some(p) => p.to_string(),
-        None => prefix_from(&root)
+    // 이미 심긴 곳에서 다시 부르면 **딸린 파일만 다시 맞춘다.**
+    //
+    // 도구가 자라면 `AGENTS.md` 블록은 반드시 낡는다. 그걸 다시 쓸 길이
+    // 없으면 새 세션의 에이전트가 없는 명령을 쓰고 있는 명령을 모른다.
+    // 명령을 하나 더 만드는 대신 `init` 이 그 일을 맡는다 — 이슈와 저널은
+    // 손대지 않으므로 다시 불러도 잃을 것이 없다.
+    let again = dir.exists();
+    let prefix = match (prefix, again) {
+        // 접두어는 나중에 못 바꾼다. 이미 발급된 id 가 전부 그것을 달고 있고,
+        // 바꾸면 그 줄들이 제 접두어를 잃는다.
+        (Some(p), true) => {
+            let cur = crate::config::Config::load(&root).map_err(Fail::new)?.prefix;
+            if p != cur {
+                return Err(Fail::coded(
+                    format!(
+                        "접두어는 `{cur}` 로 이미 정해졌다. 나중에 못 바꾼다 —\n      \
+                         이미 발급된 id 가 전부 그것을 달고 있다"
+                    ),
+                    super::code::ALREADY_EXISTS,
+                ));
+            }
+            cur
+        }
+        (Some(p), false) => p.to_string(),
+        (None, true) => crate::config::Config::load(&root).map_err(Fail::new)?.prefix,
+        (None, false) => prefix_from(&root)
             .ok_or_else(|| Fail::new("디렉터리 이름에서 접두어를 만들 수 없다. `moai init <접두어>`"))?,
     };
 
@@ -157,14 +190,17 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // 설정을 먼저 검사한다 — 접두어가 형식에 안 맞으면 파일을 만들기 전에 멈춘다.
     crate::config::Config::parse(&config).map_err(Fail::new)?;
 
-    std::fs::create_dir_all(&dir).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
-    for (name, body) in [
-        ("config.toml", config.as_str()),
-        ("issues.jsonl", ""),
-        ("journal.jsonl", ""),
-    ] {
-        let p = dir.join(name);
-        std::fs::write(&p, body).map_err(|e| Fail::new(format!("{}: {e}", p.display())))?;
+    if !again {
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
+        for (name, body) in [
+            ("config.toml", config.as_str()),
+            ("issues.jsonl", ""),
+            ("journal.jsonl", ""),
+        ] {
+            let p = dir.join(name);
+            std::fs::write(&p, body).map_err(|e| Fail::new(format!("{}: {e}", p.display())))?;
+        }
     }
 
     let attrs = ensure_lines(&root.join(".gitattributes"), GITATTRIBUTES).map_err(Fail::new)?;
@@ -194,16 +230,21 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         return super::json_line(&serde_json::json!({
             "root": root.display().to_string(),
             "prefix": prefix,
+            "created": !again,
             "gitattributes": attrs,
             "gitignore": ignore,
             "agents": agents,
         }));
     }
 
-    let mut out = vec![
-        format!(".moai/ 를 만들었다. 접두어는 `{prefix}` 다"),
-        format!("  칸: {}", DEFAULT_STATUSES.replace(',', " → ")),
-    ];
+    let mut out = if again {
+        vec![format!("이미 심겨 있다. 접두어는 `{prefix}` 다 — 딸린 파일만 다시 맞춘다")]
+    } else {
+        vec![
+            format!(".moai/ 를 만들었다. 접두어는 `{prefix}` 다"),
+            format!("  칸: {}", DEFAULT_STATUSES.replace(',', " → ")),
+        ]
+    };
     if attrs {
         out.push("  .gitattributes 에 병합 규칙을 넣었다".into());
     }
@@ -211,14 +252,19 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         out.push("  .gitignore 에 lock·tmp 를 넣었다".into());
     }
     if agents {
-        out.push("  AGENTS.md 에 에이전트용 블록을 넣었다".into());
+        out.push("  AGENTS.md 블록을 맞췄다".into());
+    }
+    if again && out.len() == 1 {
+        out.push("  이미 다 맞아 있다".into());
     }
     if claude_needs_pointer {
         out.push(String::new());
         out.push("CLAUDE.md 가 있다. 그 안에 `@AGENTS.md` 한 줄을 넣으면 같이 읽힌다".into());
     }
-    out.push(String::new());
-    out.push("다음:  moai add \"첫 이슈\"".into());
+    if !again {
+        out.push(String::new());
+        out.push("다음:  moai add \"첫 이슈\"".into());
+    }
     Ok(out)
 }
 
