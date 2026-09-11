@@ -72,7 +72,6 @@ pub struct Index {
     /// 이슈 첨자 → 제 밑에 걸린 것이 있는가. **미리 센다** — `entries` 는 매
     /// 프레임 불리므로 그때 세면 목록 하나 그리는 데 O(이슈 수²) 다.
     has_kids: Vec<bool>,
-    has_milestones: bool,
 }
 
 impl Index {
@@ -105,14 +104,7 @@ impl Index {
             })
             .collect();
         let has_kids = issues.iter().map(|i| parents.contains(i.id.as_str())).collect();
-        Index { homes, has_kids, has_milestones }
-    }
-
-    /// 마일스톤을 하나도 안 쓰는 저장소는 그 층을 통째로 건너뛴다.
-    /// `report::status` 가 이미 같은 원칙으로 마일스톤에 침묵한다 — 안 쓰는
-    /// 것 때문에 모든 경로가 `(마일스톤 없음)/` 으로 시작하게 두지 않는다.
-    pub fn has_milestones(&self) -> bool {
-        self.has_milestones
+        Index { homes, has_kids }
     }
 
     /// 그 이슈가 걸리는 **단 하나의** 자리.
@@ -322,8 +314,6 @@ mod tests {
             make("argos-0010", Kind::Issue), // 에픽 없는 것은 뿌리에 파일처럼
         ];
         let index = Index::of(&issues);
-        assert!(!index.has_milestones());
-
         let root = index.entries(&issues, &Vec::new());
         assert_eq!(
             root,
@@ -347,8 +337,6 @@ mod tests {
             make("argos-0003", Kind::Epic), // 마일스톤 없는 에픽
         ];
         let index = Index::of(&issues);
-        assert!(index.has_milestones());
-
         let root = index.entries(&issues, &Vec::new());
         assert_eq!(
             root,

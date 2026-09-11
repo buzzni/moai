@@ -880,6 +880,9 @@ fn every_command_still_speaks_json() {
         vec!["show", &epic, "--json"],
         vec!["note", &id, "메모", "--json"],
         vec!["link", &id, "--blocks", &epic, "--json"],
+        // tui 는 화면을 켜지 않고 목록만 낸다. **이 목록은 자동이 아니다** —
+        // 새 명령을 더하면 여기 손으로 넣어야 한다 (moai-mece).
+        vec!["tui", "--json"],
         vec!["edit", &id, "--tag", "bug", "--json"],
         vec!["mv", &id, "review", "--json"],
         vec!["rm", &id, "--json"],
@@ -1061,6 +1064,41 @@ fn the_milestone_namespace_costs_nothing() {
     let m = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
     assert!(line_of(s.path(), &m).contains(r#""kind":"milestone""#));
     assert!(ok(s.path(), &["milestone", "show"]).contains(&m));
+}
+
+// ── TUI ────────────────────────────────────────────────────────────
+
+/// TTY 가 아니면 화면을 켜지 않고 분명히 거절한다. 이게 없으면 파이프로 부른
+/// `moai tui` 가 대체 화면을 켠 채 멈춰 서고, 테스트가 거기서 죽는다.
+#[test]
+fn tui_refuses_when_there_is_no_terminal() {
+    let s = init("tuinotty");
+    add(s.path(), &["제목"]);
+    let out = moai(s.path(), &["tui"]);
+    assert!(!out.status.success(), "TTY 없이도 켜려 들었다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("터미널"), "{err}");
+}
+
+/// `--json` 은 화면을 켜지 않고 그 디렉터리 목록을 낸다. 이것이 실제 바이너리로
+/// 트리를 훑는 손잡이다.
+#[test]
+fn tui_json_lists_a_directory_without_a_terminal() {
+    let s = init("tuijson");
+    let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
+    let member = add(s.path(), &["원자적으로 쓴다", "-e", &epic]);
+    let loose = add(s.path(), &["아무 데도 안 딸린 것"]);
+
+    // 뿌리: 마일스톤이 없으므로 에픽과 소속 없는 이슈가 나란히 선다
+    let root = ok(s.path(), &["tui", "--json"]);
+    one_json_value(&root);
+    assert!(root.contains(&epic) && root.contains(&loose), "{root}");
+    assert!(!root.contains(&member), "멤버가 뿌리에 새어 나왔다 — {root}");
+
+    // 에픽 안으로 들어가면 그 멤버가 나온다
+    let inside = ok(s.path(), &["tui", "--json", "--path", &epic]);
+    one_json_value(&inside);
+    assert!(inside.contains(&member), "{inside}");
 }
 
 // ── 막음 (`moai link`) ─────────────────────────────────────────────

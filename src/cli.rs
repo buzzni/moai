@@ -135,6 +135,17 @@ pub enum Cmd {
     #[command(subcommand)]
     Milestone(Typed),
 
+    /// 탐색기 화면을 띄운다 (읽기 전용)
+    #[command(after_help = "\
+  마일스톤과 에픽이 디렉터리처럼 동작한다. 왼쪽에서 돌아다니면 커서가 머문
+  것의 정보가 오른쪽에 나온다.
+
+  화살표로 이동, Enter 로 들어가고 Backspace 로 나온다. F10 이나 q 로 끝낸다.
+
+  읽기 전용이다 — 고치는 것은 CLI 로 한다.
+  `--json` 은 화면을 켜지 않고 그 디렉터리의 목록만 낸다.")]
+    Tui(TuiArgs),
+
     /// 이 저장소에 .moai/ 를 심는다 (다시 불러도 된다)
     #[command(after_help = "\
   이미 심긴 곳에서 다시 부르면 딸린 파일(.gitattributes·.gitignore·AGENTS.md)
@@ -339,6 +350,13 @@ pub struct EditArgs {
 pub struct RmArgs {
     #[arg(required = true, value_name = "id")]
     pub ids: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct TuiArgs {
+    /// 여기서 시작한다. 디렉터리면 그 안을, 아니면 그것이 든 디렉터리를 연다
+    #[arg(long, value_name = "id|없음|길잃음")]
+    pub path: Option<String>,
 }
 
 #[derive(Args, Debug)]

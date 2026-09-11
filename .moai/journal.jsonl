@@ -82,3 +82,8 @@
 {"ts":"2026-09-11T18:41:26Z","id":"moai-j5im","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
 {"ts":"2026-09-11T18:44:24Z","id":"moai-j5im","kind":"note","by":"레이븐","text":"home_of 한 법칙 + entries 역상으로 구현. 빠짐·겹침 없음을 병적 자료(없는 에픽 참조, 부모 줄 없는 고아, 제 에픽이 부모와 다른 자식, 제 마일스톤이 에픽과 다른 이슈, 중복 id)로 못 박았다. 결정 하나를 기록해 둔다 — 자리는 에픽이 마일스톤보다 세다. 이슈의 milestone 은 제 것이 에픽 것을 이기지만(report::milestones), 자리까지 그렇게 하면 에픽 하나가 두 마일스톤 밑에 나타나야 하고 디렉터리가 두 곳에 있는 탐색기는 못 쓴다. 그래서 제 마일스톤을 따로 적은 이슈는 에픽을 따라 놓이고, 그 사실은 상세 패널이 제 마일스톤을 그대로 보여 주는 것으로 드러낸다. 성능: id→첨자 지도와 자식 보유 여부를 Index 에 미리 계산한다 (없으면 적재가 O(n²·깊이), 목록 그리기가 매 프레임 O(n²))."}
 {"ts":"2026-09-11T18:44:41Z","id":"moai-j5im","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
+{"ts":"2026-09-11T18:44:47Z","id":"moai-j5im","kind":"status","by":"레이븐","from":"review","to":"done"}
+{"ts":"2026-09-11T18:44:47Z","id":"moai-0g9i","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-11T18:50:12Z","id":"moai-0gox","kind":"create","by":"레이븐","title":"AGENTS.md 블록과 도움말에 moai tui 를 넣는다"}
+{"ts":"2026-09-11T18:52:21Z","id":"moai-0g9i","kind":"note","by":"레이븐","text":"뼈대 완료. ratatui 0.30 을 default-features=false + crossterm_0_29 + layout-cache 로 넣었다 — 기본 기능은 달력 위젯(time 크레이트)과 termwiz 백엔드를 끌고 온다. 측정: 바이너리 1.9MB(상한 15MB), clean build 51초(상한 300초), 고유 크레이트 85개. --path 는 슬래시 사슬이 아니라 id 하나로 받는다 — 조상을 사람이 다 적게 할 이유가 없다, nav::home_of 가 이미 안다. 디렉터리면 그 안을, 아니면 그것이 든 디렉터리를 연다. pty 로 띄워 q 종료와 터미널 복구를 확인했다. 렌더 내용 검증은 대체 화면이 나갈 때 지워져 이 방법으로 안 되고, 실제 패널이 서는 moai-ydpz 에서 TestBackend 로 한다."}
+{"ts":"2026-09-11T18:52:21Z","id":"moai-0g9i","kind":"status","by":"레이븐","from":"in_progress","to":"review"}

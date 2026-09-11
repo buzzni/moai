@@ -13,6 +13,7 @@ pub mod ready;
 pub mod rm;
 pub mod show;
 pub mod status;
+pub mod tui;
 
 use crate::cli::{Cli, Cmd, Typed};
 use crate::model::Kind;
@@ -70,6 +71,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Link(a) => link::run(&ctx, a),
         Cmd::Ready => ready::run(&ctx),
         Cmd::Status => status::run(&ctx),
+        Cmd::Tui(a) => tui::run(&ctx, a),
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),
         Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
         Cmd::Milestone(t) => typed(&ctx, t, Kind::Milestone),
