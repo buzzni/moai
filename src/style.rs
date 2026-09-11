@@ -25,8 +25,11 @@ pub const OTHER: Style = fg(AnsiColor::Cyan);
 
 pub const EPIC: Style = fg(AnsiColor::BrightBlue).bold();
 pub const TAG: Style = fg(AnsiColor::Cyan).dimmed();
+/// 목록의 에픽 열. 곁다리라 에픽 제목 자체보다 약하게.
+pub const EPIC_REF: Style = fg(AnsiColor::BrightBlue).dimmed();
 pub const ID: Style = DIM;
 pub const ERROR: Style = fg(AnsiColor::Red);
+pub const WARN: Style = fg(AnsiColor::BrightYellow);
 pub const HEAD: Style = Style::new().bold();
 
 pub const P0: Style = fg(AnsiColor::BrightRed).bold();

@@ -10,6 +10,7 @@ mod config;
 mod id;
 mod model;
 mod query;
+mod report;
 mod store;
 mod style;
 mod view;

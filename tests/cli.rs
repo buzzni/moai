@@ -496,3 +496,112 @@ fn stale_finds_what_rots_in_a_column() {
     let soon = ok(s.path(), &["show", "-s", "review", "--stale", "3"]);
     assert!(!soon.contains(&id), "{soon}");
 }
+
+// ── S3 — 에픽 · 부모-자식 · ready ─────────────────────────────────────
+
+/// 에픽 밑에 이슈, 그 밑에 자식. 한 번에 세운다.
+fn a_small_tree(s: &Scratch) -> (String, String, String, String) {
+    let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
+    let member = add(s.path(), &["원자적 쓰기", "-e", &epic, "-t", "bug"]);
+    let child = add(s.path(), &["회귀 테스트", "--parent", &member]);
+    let loose = add(s.path(), &["떠 있는 것"]);
+    (epic, member, child, loose)
+}
+
+#[test]
+fn tree_nests_and_does_not_repeat() {
+    let s = init("tree");
+    let (epic, member, child, loose) = a_small_tree(&s);
+    let out = ok(s.path(), &["show", "--tree"]);
+
+    assert_eq!(out.matches(&child).count(), 1, "자식이 두 번 나왔다\n{out}");
+    let at = |t: &str| out.lines().position(|l| l.contains(t)).unwrap();
+    assert!(at(&epic) < at(&member) && at(&member) < at(&child), "{out}");
+    assert!(at(&loose) > at(&child), "{out}");
+    assert!(out.contains("에픽 없음  1건"), "{out}");
+}
+
+/// 자식은 소속을 조상에게서 물려받는다 — 진행률도 그 수를 센다.
+#[test]
+fn a_child_counts_toward_its_ancestors_epic() {
+    let s = init("inherit");
+    let (epic, member, _child, _) = a_small_tree(&s);
+    assert!(ok(s.path(), &["show", "--tree"]).contains("0/2"), "손자를 안 셌다");
+    ok(s.path(), &["mv", &member, "done"]);
+    let out = ok(s.path(), &["show", &epic]);
+    assert!(out.contains("멤버   1/2"), "{out}");
+    // 이력은 언제나 맨 끝이다
+    let lines: Vec<&str> = out.lines().collect();
+    let at_hist = lines.iter().position(|l| l.contains("이력")).unwrap();
+    assert!(lines[at_hist..].iter().all(|l| !l.contains("멤버   ")), "{out}");
+}
+
+/// 멤버 없는 에픽은 0% 가 아니다 — "아직 안 한 것" 과 "속을 안 채운 것" 은 다르다.
+#[test]
+fn an_empty_epic_reads_as_empty_not_zero() {
+    let s = init("emptyepic");
+    add(s.path(), &["아직 빈 에픽", "--type", "epic"]);
+    let out = ok(s.path(), &["show", "--tree"]);
+    assert!(out.contains("0/0") && out.contains("자식 없음"), "{out}");
+    assert!(!out.contains("0%"), "{out}");
+}
+
+#[test]
+fn the_list_names_the_epic_not_its_id() {
+    let s = init("epiccol");
+    let (epic, _m, _c, _l) = a_small_tree(&s);
+    let out = ok(s.path(), &["show"]);
+    assert!(out.contains("저장 계층"), "{out}");
+    // 멤버 줄에 에픽 id 가 그대로 실리지 않는다
+    let member_line = out.lines().find(|l| l.contains("원자적 쓰기")).unwrap();
+    assert!(!member_line.contains(&epic), "{member_line}");
+}
+
+#[test]
+fn ready_picks_what_can_be_started() {
+    let s = init("ready");
+    let (epic, member, child, loose) = a_small_tree(&s);
+    let out = ok(s.path(), &["ready"]);
+
+    // 에픽 자체는 집는 것이 아니고, 자식이 남은 부모도 아니다
+    assert!(!out.contains(&epic), "에픽을 집으라고 했다\n{out}");
+    assert!(!out.contains(&format!("{member} ")), "자식 남은 부모를 집으라고 했다\n{out}");
+    assert!(out.contains(&child) && out.contains(&loose), "{out}");
+    assert!(out.contains("2건"), "{out}");
+    // 어디에 속한 일인지 말한다
+    assert!(out.contains("저장 계층") && out.contains("에픽 없음"), "{out}");
+
+    // 집으면 목록에서 빠지고, 대신 "이미 잡고 있는 것" 으로 뜬다
+    ok(s.path(), &["mv", &child, "in_progress"]);
+    let out = ok(s.path(), &["ready"]);
+    assert!(!out.contains(&format!("{child} ")), "{out}");
+    assert!(out.contains("이미 잡고 있는 것 1건"), "{out}");
+
+    // 자식이 끝나면 부모를 집을 수 있다
+    ok(s.path(), &["mv", &child, "done"]);
+    assert!(ok(s.path(), &["ready"]).contains(&member));
+}
+
+#[test]
+fn ready_and_tree_speak_json() {
+    let s = init("s3json");
+    let (epic, _m, _c, _l) = a_small_tree(&s);
+    one_json_value(&ok(s.path(), &["ready", "--json"]));
+    one_json_value(&ok(s.path(), &["show", &epic, "--json"]));
+    assert!(ok(s.path(), &["show", &epic, "--json"]).contains("\"members\""));
+    // --tree 는 보기 방식일 뿐이라 --json 은 같은 배열을 낸다
+    assert_eq!(
+        ok(s.path(), &["show", "--json"]),
+        ok(s.path(), &["show", "--tree", "--json"])
+    );
+}
+
+/// 하나를 콕 집은 자리에 목록용 플래그를 주면 조용히 버리지 않는다.
+#[test]
+fn tree_is_refused_on_a_single_issue() {
+    let s = init("treeone");
+    let (_e, member, _c, _l) = a_small_tree(&s);
+    let out = moai(s.path(), &["show", &member, "--tree"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--tree"));
+}

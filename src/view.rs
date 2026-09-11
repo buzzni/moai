@@ -5,12 +5,18 @@
 
 use crate::config::Config;
 use crate::model::{Issue, JournalEntry, Kind};
+use crate::report::Roll;
 use crate::style::{self, paint};
 use anstyle::Style;
+use std::collections::BTreeMap;
 use unicode_width::UnicodeWidthStr;
 
 /// 제목이 이보다 길면 자른다. 표가 접히면 표가 아니다.
 const TITLE_CAP: usize = 44;
+/// 에픽 열은 곁다리라 더 짧게 자른다.
+const EPIC_CAP: usize = 20;
+/// 진행 막대 칸 수.
+const BAR: usize = 10;
 
 fn width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
@@ -65,7 +71,12 @@ fn title_style(i: &Issue) -> Style {
 }
 
 /// 목록. 비어 있으면 빈 줄이 아니라 왜 비었는지를 말한다.
-pub fn list(issues: &[Issue], cfg: &Config, hidden_done: usize) -> Vec<String> {
+pub fn list(
+    issues: &[Issue],
+    cfg: &Config,
+    hidden_done: usize,
+    epics: &BTreeMap<&str, String>,
+) -> Vec<String> {
     if issues.is_empty() {
         return vec![if hidden_done > 0 {
             format!("없다. done {hidden_done}건은 숨겼다 — `--all`")
@@ -75,12 +86,20 @@ pub fn list(issues: &[Issue], cfg: &Config, hidden_done: usize) -> Vec<String> {
     }
 
     let show_tags = issues.iter().any(|i| !i.tags.is_empty());
-    let show_epic = issues.iter().any(|i| i.epic.is_some());
-    let titles: Vec<String> = issues.iter().map(|i| clip(&i.title, TITLE_CAP)).collect();
+    let show_epic = issues.iter().any(|i| epics.contains_key(i.id.as_str()));
+    let heads: Vec<String> = issues.iter().map(|i| clip(&i.title, TITLE_CAP)).collect();
     let tags: Vec<String> = issues.iter().map(tags_of).collect();
+    // 에픽 열은 **제목**을 보여준다. id 를 보여주면 사람이 그걸 다시 찾아봐야 한다.
+    let epics: Vec<String> = issues
+        .iter()
+        .map(|i| match epics.get(i.id.as_str()) {
+            None => "—".into(),
+            Some(t) => clip(t, EPIC_CAP),
+        })
+        .collect();
 
     let w_id = issues.iter().map(|i| width(&i.id)).max().unwrap_or(2).max(2);
-    let w_title = titles.iter().map(|t| width(t)).max().unwrap_or(4);
+    let w_title = heads.iter().map(|t| width(t)).max().unwrap_or(4);
     let w_tags = tags.iter().map(|t| width(t)).max().unwrap_or(0);
 
     let mut out = Vec::with_capacity(issues.len() + 2);
@@ -99,7 +118,7 @@ pub fn list(issues: &[Issue], cfg: &Config, hidden_done: usize) -> Vec<String> {
     }
     out.push(head.trim_end().to_string());
 
-    for ((i, title), tag) in issues.iter().zip(&titles).zip(&tags) {
+    for (((i, title), tag), epic) in issues.iter().zip(&heads).zip(&tags).zip(&epics) {
         let st = style::status_style(i.status.as_str());
         let mut row = format!(
             "{}{}{}  {}",
@@ -112,7 +131,7 @@ pub fn list(issues: &[Issue], cfg: &Config, hidden_done: usize) -> Vec<String> {
             row.push_str(&cell(style::TAG, tag, if show_epic { w_tags + 2 } else { 0 }));
         }
         if show_epic {
-            row.push_str(&paint(style::DIM, i.epic.as_deref().unwrap_or("—")));
+            row.push_str(&paint(style::EPIC_REF, epic));
         }
         out.push(row.trim_end().to_string());
     }
@@ -139,6 +158,178 @@ fn summary(issues: &[Issue], cfg: &Config, hidden_done: usize) -> String {
         ));
     }
     line
+}
+
+/// 채운 칸과 빈 칸. 멤버가 없으면 막대 대신 빈 자리를 준다 —
+/// 0% 막대를 그리면 "아직 안 한 에픽" 과 "속을 안 채운 에픽" 이 같아 보인다.
+pub fn bar(percent: Option<u8>) -> String {
+    match percent {
+        None => paint(style::DIM, &"░".repeat(BAR)),
+        Some(p) => {
+            let filled = (p as usize * BAR).div_ceil(100).min(BAR);
+            format!(
+                "{}{}",
+                paint(style::status_style("done"), &"█".repeat(filled)),
+                paint(style::DIM, &"░".repeat(BAR - filled))
+            )
+        }
+    }
+}
+
+/// 에픽 → 멤버 → 자식으로 접어 낸다.
+///
+/// `shown` 은 이미 걸러진 것들이다. **걸러진 뒤에도 에픽 줄은 남긴다** —
+/// 멤버가 하나도 안 걸리면 그 에픽은 아예 빼되, 걸린 것이 있으면 어느
+/// 에픽 밑인지 보여야 목록이 뜻을 갖는다.
+pub fn tree(shown: &[Issue], rolls: &[Roll], groups: &BTreeMap<&str, &str>) -> Vec<String> {
+    let mut out = Vec::new();
+    for roll in rolls {
+        let mine: Vec<&Issue> = shown
+            .iter()
+            .filter(|i| {
+                let group = groups.get(i.id.as_str()).copied();
+                match &roll.id {
+                    Some(e) => group == Some(e.as_str()),
+                    None => group.is_none() && i.kind != Kind::Epic,
+                }
+            })
+            .collect();
+        // 자기 자신이 걸러졌으면 빈 에픽도 보여 준다 (계획만 세운 것).
+        let epic_shown = roll.id.as_ref().is_some_and(|e| shown.iter().any(|i| &i.id == e));
+        if mine.is_empty() && !epic_shown {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(String::new());
+        }
+        out.push(head(roll, mine.len()));
+        let tops: Vec<&Issue> = mine
+            .iter()
+            .copied()
+            .filter(|i| {
+                crate::id::parent_of(&i.id).is_none_or(|p| !mine.iter().any(|m| m.id == p))
+            })
+            .collect();
+        for i in tops {
+            branch(&mut out, shown, i, 1);
+        }
+    }
+    if out.is_empty() {
+        out.push("없다.".into());
+    }
+    out
+}
+
+/// 머리글 없이 멤버와 그 자식만. 에픽 상세에서 쓴다 — 상세가 이미 제목을
+/// 냈는데 트리 머리글이 또 내면 같은 줄이 두 번 나온다.
+pub fn members(shown: &[Issue]) -> Vec<String> {
+    let mut out = Vec::new();
+    let tops: Vec<&Issue> = shown
+        .iter()
+        .filter(|i| crate::id::parent_of(&i.id).is_none_or(|p| !shown.iter().any(|m| m.id == p)))
+        .collect();
+    for i in tops {
+        branch(&mut out, shown, i, 0);
+    }
+    out
+}
+
+fn head(roll: &Roll, shown: usize) -> String {
+    match &roll.id {
+        // 묶음일 뿐 진척을 가진 것이 아니므로, 걸러진 뒤 **보이는** 수를 말한다.
+        None => format!("{}  {}건", paint(style::HEAD, &roll.title), shown),
+        Some(id) => {
+            let pct = match roll.percent() {
+                None => paint(style::DIM, "자식 없음"),
+                Some(p) => format!("{p:>3}%"),
+            };
+            format!(
+                "{}  {}   {}/{}  {}  {}",
+                paint(style::ID, id),
+                paint(style::EPIC, &clip(&roll.title, TITLE_CAP)),
+                roll.done,
+                roll.total,
+                bar(roll.percent()),
+                pct,
+            )
+        }
+    }
+}
+
+/// 한 이슈와 그 밑의 자식들. 깊이는 id 의 점 수와 같다.
+fn branch(out: &mut Vec<String>, shown: &[Issue], i: &Issue, depth: usize) {
+    let st = style::status_style(i.status.as_str());
+    let mut line = format!(
+        "{}{}  {}  {}  {}",
+        "  ".repeat(depth + 1),
+        paint(style::ID, &i.id),
+        paint(style::priority_style(i.priority()), &format!("p{}", i.priority())),
+        paint(st, style::glyph(i.status.as_str())),
+        paint(title_style(i), &clip(&i.title, TITLE_CAP)),
+    );
+    if !i.tags.is_empty() {
+        line.push_str(&format!("   {}", paint(style::TAG, &tags_of(i))));
+    }
+    out.push(line);
+    for c in shown.iter().filter(|c| crate::id::parent_of(&c.id) == Some(i.id.as_str())) {
+        branch(out, shown, c, depth + 1);
+    }
+}
+
+/// 집을 수 있는 일. 그리고 이미 벌여 놓은 것.
+pub fn ready(picks: &[&Issue], epics: &BTreeMap<&str, String>, wip: &[&Issue]) -> Vec<String> {
+    let mut out = vec![format!("집을 수 있는 일  {}건", picks.len())];
+    if picks.is_empty() {
+        out.push(String::new());
+        out.push(paint(style::DIM, "없다. `moai show` 로 무엇이 밀려 있는지 본다"));
+    } else {
+        out.push(String::new());
+        let heads: Vec<String> = picks.iter().map(|i| clip(&i.title, TITLE_CAP)).collect();
+        let tags: Vec<String> = picks.iter().map(|i| tags_of(i)).collect();
+        let w_id = picks.iter().map(|i| width(&i.id)).max().unwrap_or(2);
+        let w_title = heads.iter().map(|t| width(t)).max().unwrap_or(4);
+        let w_tags = tags.iter().map(|t| width(t)).max().unwrap_or(0);
+
+        for ((i, title), tag) in picks.iter().zip(&heads).zip(&tags) {
+            let epic = match epics.get(i.id.as_str()) {
+                None => "에픽 없음".to_string(),
+                Some(t) => clip(t, EPIC_CAP),
+            };
+            out.push(
+                format!(
+                    "  {}{}{}{}",
+                    cell(style::ID, &i.id, w_id + 3),
+                    cell(style::priority_style(i.priority()), &format!("p{}", i.priority()), 4),
+                    cell(style::PLAIN, title, w_title + 3),
+                    if w_tags > 0 {
+                        format!("{}{}", cell(style::TAG, tag, w_tags + 3), paint(style::EPIC_REF, &epic))
+                    } else {
+                        paint(style::EPIC_REF, &epic)
+                    },
+                )
+                .trim_end()
+                .to_string(),
+            );
+        }
+    }
+
+    // 이미 벌여 놓은 것을 먼저 알린다. 새로 집기 전에 볼 것이다.
+    if !wip.is_empty() {
+        out.push(String::new());
+        out.push(format!(
+            "{} {}",
+            paint(style::WARN, "!"),
+            paint(
+                style::DIM,
+                &format!("이미 잡고 있는 것 {}건 — 새로 집기 전에 끝내는 편이 낫다", wip.len())
+            )
+        ));
+        out.push(format!(
+            "  {}",
+            paint(style::DIM, &wip.iter().map(|i| i.id.as_str()).collect::<Vec<_>>().join("  "))
+        ));
+    }
+    out
 }
 
 /// 단건 상세. 이력은 저널을 **그대로 찍는다. 접지 않는다.**
@@ -205,6 +396,13 @@ pub fn detail(
         out.extend(body.lines().map(|l| format!("  {l}")));
     }
 
+    out.extend(history(journal));
+    out
+}
+
+/// 저널을 **그대로 찍는다. 접지 않는다.**
+pub fn history(journal: &[JournalEntry]) -> Vec<String> {
+    let mut out = Vec::new();
     if !journal.is_empty() {
         out.push(String::new());
         out.push(paint(style::HEAD, "이력"));
@@ -249,6 +447,10 @@ mod tests {
         Config::parse("prefix = \"argos\"\n").unwrap()
     }
 
+    fn no_epics() -> BTreeMap<&'static str, String> {
+        BTreeMap::new()
+    }
+
     fn issue(id: &str, title: &str, status: &str) -> Issue {
         Issue::new(id.into(), title.into(), Kind::Issue, Status::new(status), "2026-09-11T04:12:03Z")
     }
@@ -280,7 +482,7 @@ mod tests {
             issue("argos-0001", "한글 제목이다", "todo"),
             issue("argos-0002", "ascii title", "review"),
         ];
-        let out = plain(&list(&issues, &cfg(), 0));
+        let out = plain(&list(&issues, &cfg(), 0, &no_epics()));
         let cols: Vec<usize> = out[1..3]
             .iter()
             .map(|l| width(l.split_once("  ").unwrap().0))
@@ -298,7 +500,7 @@ mod tests {
     #[test]
     fn header_lines_up_with_rows() {
         let issues = vec![issue("argos-0001", "제목이다", "todo")];
-        let out = plain(&list(&issues, &cfg(), 0));
+        let out = plain(&list(&issues, &cfg(), 0, &no_epics()));
         let head_at = width(&out[0][..out[0].find("제목").unwrap()]);
         let row_at = width(&out[1][..out[1].find("제목이다").unwrap()]);
         assert_eq!(head_at, row_at, "{out:#?}");
@@ -306,14 +508,14 @@ mod tests {
 
     #[test]
     fn empty_list_says_why() {
-        assert_eq!(plain(&list(&[], &cfg(), 0))[0], "없다.");
-        assert!(plain(&list(&[], &cfg(), 3))[0].contains("done 3건"));
+        assert_eq!(plain(&list(&[], &cfg(), 0, &no_epics()))[0], "없다.");
+        assert!(plain(&list(&[], &cfg(), 3, &no_epics()))[0].contains("done 3건"));
     }
 
     #[test]
     fn summary_counts_each_column() {
         let issues = vec![issue("argos-0001", "a", "todo"), issue("argos-0002", "b", "todo")];
-        let out = plain(&list(&issues, &cfg(), 5));
+        let out = plain(&list(&issues, &cfg(), 5, &no_epics()));
         let last = out.last().unwrap();
         assert!(last.starts_with("2건 (todo 2)"), "{last}");
         assert!(last.contains("done 5건 숨김"), "{last}");
@@ -322,7 +524,7 @@ mod tests {
     #[test]
     fn long_titles_are_clipped_not_wrapped() {
         let long = "가".repeat(80);
-        let out = plain(&list(&[issue("argos-0001", &long, "todo")], &cfg(), 0));
+        let out = plain(&list(&[issue("argos-0001", &long, "todo")], &cfg(), 0, &no_epics()));
         assert!(out[1].ends_with('…'), "{:?}", out[1]);
         assert!(width(&out[1]) < 80, "{:?}", out[1]);
     }
@@ -348,6 +550,91 @@ mod tests {
         assert!(joined.contains("이력"), "{joined}");
         assert!(joined.contains("todo → in_progress"), "{joined}");
         assert!(joined.contains("09-09 14:02"), "{joined}");
+    }
+
+    /// 목록의 에픽 열은 id 가 아니라 제목이다. id 를 보여 주면 사람이
+    /// 그걸 다시 찾아봐야 한다.
+    #[test]
+    fn the_epic_column_shows_a_title() {
+        let mut i = issue("argos-0002", "멤버", "todo");
+        i.epic = Some("argos-0001".into());
+        let labels = BTreeMap::from([("argos-0002", "저장 계층".to_string())]);
+        let out = plain(&list(&[i.clone()], &cfg(), 0, &labels));
+        assert!(out[1].contains("저장 계층") && !out[1].contains("argos-0001"), "{out:#?}");
+
+        // 없는 에픽을 가리켜도 죽지 않고 그렇다고 말한다
+        let dangling = BTreeMap::from([("argos-0002", "(없는 에픽)".to_string())]);
+        let out = plain(&list(&[i], &cfg(), 0, &dangling));
+        assert!(out[1].contains("(없는 에픽)"), "{out:#?}");
+    }
+
+    /// 멤버 없는 에픽은 0% 가 아니라 막대 없음이다 — "아직 안 한 것" 과
+    /// "속을 안 채운 것" 은 다르다.
+    #[test]
+    fn an_empty_bar_is_not_zero_percent() {
+        assert!(!plain(&[bar(None)])[0].contains('█'));
+        assert_eq!(plain(&[bar(Some(0))])[0].matches('█').count(), 0);
+        assert_eq!(plain(&[bar(Some(100))])[0].matches('█').count(), BAR);
+        // 1% 도 한 칸은 찬다 — 시작한 것이 안 시작한 것처럼 보이면 안 된다
+        assert_eq!(plain(&[bar(Some(1))])[0].matches('█').count(), 1);
+    }
+
+    #[test]
+    fn tree_nests_members_then_children() {
+        let mut epic = issue("argos-0001", "저장 계층", "in_progress");
+        epic.kind = Kind::Epic;
+        let mut member = issue("argos-0002", "원자적 쓰기", "todo");
+        member.epic = Some("argos-0001".into());
+        let child = issue("argos-0002.aaa", "회귀 테스트", "todo");
+        let loose = issue("argos-0009", "떠 있는 것", "todo");
+
+        let shown = vec![member.clone(), child.clone(), loose.clone()];
+        let all = vec![epic, member, child, loose];
+        let rolls = crate::report::rollup(&all, &cfg());
+        let groups = crate::report::groups(&all);
+        let out = plain(&tree(&shown, &rolls, &groups));
+        let joined = out.join("\n");
+
+        assert!(joined.contains("저장 계층"), "{joined}");
+        let at_member = out.iter().position(|l| l.contains("원자적 쓰기")).unwrap();
+        let at_child = out.iter().position(|l| l.contains("회귀 테스트")).unwrap();
+        assert!(at_child == at_member + 1, "자식이 부모 바로 밑이 아니다\n{joined}");
+        // 자식이 더 깊게 들어간다
+        let indent = |l: &str| l.len() - l.trim_start().len();
+        assert!(indent(&out[at_child]) > indent(&out[at_member]), "{joined}");
+        assert!(joined.contains("에픽 없음"), "{joined}");
+    }
+
+    /// 걸러진 뒤 멤버가 하나도 안 남은 에픽은 빼되, 자기 자신이 걸렸으면 남긴다.
+    #[test]
+    fn tree_drops_epics_with_nothing_to_show() {
+        let mut epic = issue("argos-0001", "빈 에픽", "todo");
+        epic.kind = Kind::Epic;
+        let all = vec![epic.clone()];
+        let rolls = crate::report::rollup(&all, &cfg());
+
+        let groups = crate::report::groups(&all);
+        assert_eq!(plain(&tree(&[], &rolls, &groups)), ["없다."]);
+        assert!(plain(&tree(&[epic], &rolls, &groups)).join("\n").contains("빈 에픽"));
+    }
+
+    #[test]
+    fn ready_names_where_each_pick_belongs() {
+        let mut a = issue("argos-0002", "멤버", "todo");
+        a.epic = Some("argos-0001".into());
+        let b = issue("argos-0003", "떠 있는 것", "todo");
+        let wip = issue("argos-0004", "잡고 있는 것", "in_progress");
+        let labels = BTreeMap::from([("argos-0002", "저장 계층".to_string())]);
+
+        let out = plain(&ready(&[&a, &b], &labels, &[&wip]));
+        let joined = out.join("\n");
+        assert!(joined.contains("2건"), "{joined}");
+        assert!(joined.contains("저장 계층") && joined.contains("에픽 없음"), "{joined}");
+        assert!(joined.contains("이미 잡고 있는 것 1건"), "{joined}");
+        assert!(joined.contains("argos-0004"), "{joined}");
+
+        let empty = plain(&ready(&[], &labels, &[])).join("\n");
+        assert!(empty.contains("0건") && empty.contains("무엇이 밀려 있는지"), "{empty}");
     }
 
     /// 없는 에픽을 가리켜도 상세가 죽지 않는다 — 드러내되 막지 않는다.

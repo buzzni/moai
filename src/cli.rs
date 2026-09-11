@@ -40,6 +40,12 @@ pub enum ColorArg {
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
+    /// 지금 집을 수 있는 일
+    #[command(after_help = "\
+  에픽 자체, 끝난 에픽의 멤버, 아직 안 끝난 자식을 가진 부모는 뺀다.
+  급한 것 → 끝나가는 에픽 → 오래된 것 차례로 낸다.")]
+    Ready,
+
     /// 이 저장소에 .moai/ 를 심는다
     Init {
         /// id 접두어. 없으면 디렉터리 이름에서 만든다
@@ -143,6 +149,10 @@ pub struct ShowArgs {
     /// 이슈 id, 또는 종류(issue·epic). 없으면 전체 목록
     #[arg(value_name = "대상")]
     pub target: Option<String>,
+
+    /// 에픽 → 이슈 → 자식으로 접어 낸다
+    #[arg(long)]
+    pub tree: bool,
 
     #[command(flatten)]
     pub filter: FilterArgs,

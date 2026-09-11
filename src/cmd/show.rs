@@ -8,6 +8,7 @@ use super::{Ctx, Fail, R};
 use crate::cli::ShowArgs;
 use crate::model::{self, Issue, Kind};
 use crate::query::{Filter, Raw};
+use crate::report;
 use crate::store::Repo;
 use crate::view;
 
@@ -70,7 +71,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     if let Target::One(id) = &target {
         // 필터를 조용히 버리지 않는다. 하나를 콕 집었으면 거를 것이 없고,
         // 버린 채로 그 하나를 내면 부르는 쪽은 걸러진 결과라고 믿는다.
-        if let Some(flag) = first_given(&args.filter) {
+        if let Some(flag) = args.tree.then_some("--tree").or_else(|| first_given(&args.filter)) {
             return Err(Fail::coded(
                 format!(
                     "`{id}` 하나를 펼치는 자리에는 `{flag}` 를 쓸 수 없다.\n      \
@@ -132,26 +133,69 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     if ctx.json {
         return super::json_line(&shown);
     }
-    Ok(view::list(&shown, &repo.config, hidden))
+    if args.tree {
+        return Ok(view::tree(
+            &shown,
+            &report::rollup(&load.issues, &repo.config),
+            &report::groups(&load.issues),
+        ));
+    }
+    Ok(view::list(&shown, &repo.config, hidden, &report::epic_labels(&load.issues)))
 }
 
 fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue) -> R<Vec<String>> {
     let epic = issue.epic.as_ref().and_then(|e| all.iter().find(|i| &i.id == e));
-    let children: Vec<&Issue> = all
-        .iter()
-        .filter(|c| crate::id::parent_of(&c.id) == Some(issue.id.as_str()))
-        .collect();
+    let children = report::children_of(all, &issue.id);
     let journal = repo.journal_of(&issue.id)?;
 
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();
-        return super::json_with(
-            issue,
-            &[
-                ("children", serde_json::to_string(&ids).map_err(|e| Fail::new(e.to_string()))?),
-                ("journal", serde_json::to_string(&journal).map_err(|e| Fail::new(e.to_string()))?),
-            ],
-        );
+        let members: Vec<&str> =
+            report::members_of(all, &issue.id).iter().map(|m| m.id.as_str()).collect();
+        let mut extra = vec![
+            ("children", serde_json::to_string(&ids).map_err(|e| Fail::new(e.to_string()))?),
+            ("journal", serde_json::to_string(&journal).map_err(|e| Fail::new(e.to_string()))?),
+        ];
+        if report::is_epic(issue) {
+            extra.push((
+                "members",
+                serde_json::to_string(&members).map_err(|e| Fail::new(e.to_string()))?,
+            ));
+        }
+        return super::json_with(issue, &extra);
     }
-    Ok(view::detail(issue, epic, &children, &journal, &model::now()))
+
+    // 이력은 언제나 맨 끝이다. 에픽이면 멤버를 그 **앞에** 끼운다.
+    let mut out = view::detail(issue, epic, &children, &[], &model::now());
+    // 에픽을 펼치면 속한 이슈까지 보여 준다 — 에픽 하나를 보는 이유가
+    // 그 밑에 무엇이 있는지 알려는 것이다.
+    if report::is_epic(issue) {
+        let groups = report::groups(all);
+        let mine: Vec<Issue> = all
+            .iter()
+            .filter(|i| groups.get(i.id.as_str()) == Some(&issue.id.as_str()))
+            .cloned()
+            .collect();
+        let roll = report::rollup(all, &repo.config)
+            .into_iter()
+            .find(|r| r.id.as_deref() == Some(issue.id.as_str()));
+        if let Some(r) = roll {
+            out.push(format!(
+                "  멤버   {}/{}  {}{}",
+                r.done,
+                r.total,
+                view::bar(r.percent()),
+                match r.percent() {
+                    None => String::new(),
+                    Some(p) => format!("  {p}%"),
+                }
+            ));
+        }
+        if !mine.is_empty() {
+            out.push(String::new());
+            out.extend(view::members(&mine));
+        }
+    }
+    out.extend(view::history(&journal));
+    Ok(out)
 }
