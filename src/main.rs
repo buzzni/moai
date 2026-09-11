@@ -7,6 +7,7 @@
 mod cli;
 mod cmd;
 mod config;
+mod draft;
 mod id;
 mod model;
 mod query;

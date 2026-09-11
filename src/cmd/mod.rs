@@ -76,7 +76,7 @@ pub fn report_load_errors(path: &std::path::Path, errors: &[crate::store::LoadEr
 pub fn run(cli: Cli) -> R<Vec<String>> {
     let ctx = Ctx { json: cli.json };
     match cli.cmd {
-        Cmd::Init { prefix } => init::run(&ctx, prefix.as_deref()),
+        Cmd::Init { prefix, no_agents } => init::run(&ctx, prefix.as_deref(), no_agents),
         Cmd::Add(a) => add::run(&ctx, a, None),
         Cmd::Show(a) => show::run(&ctx, a, None),
         Cmd::Mv(a) => mv::run(&ctx, a),

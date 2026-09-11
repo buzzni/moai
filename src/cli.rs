@@ -57,6 +57,9 @@ pub enum Cmd {
     Init {
         /// id 접두어. 없으면 디렉터리 이름에서 만든다
         prefix: Option<String>,
+        /// AGENTS.md 를 건드리지 않는다
+        #[arg(long)]
+        no_agents: bool,
     },
     /// 이슈를 만든다
     #[command(after_help = "\
@@ -65,6 +68,15 @@ pub enum Cmd {
   moai add \"저장 계층\" --type epic
   moai add \"부모에 딸린 일\" --parent moai-4aex
   moai add \"본문은 stdin 에서\" -b -
+
+한 번에 여럿 (`--from`):
+  moai add --from - <<'EOF'
+  # 저장 계층                    `#` 줄은 에픽
+  - [p1] 원자적으로 쓴다 #bug    `-` 줄은 바로 위 에픽의 이슈
+  - 잘린 줄을 복구한다           [pN] 과 #태그 는 없어도 된다
+  EOF
+
+  --dry-run 이 heredoc 오타로 여섯 개를 잘못 만드는 것을 막는다.
 
 제목이 `--` 로 시작해도 된다. 아는 플래그가 아니면 제목으로 읽는다.")]
     Add(AddArgs),
@@ -113,7 +125,7 @@ pub enum Typed {
 pub struct AddArgs {
     /// 한 줄. 따옴표로 감싼다. `--` 로 시작해도 된다
     #[arg(value_name = "제목", allow_hyphen_values = true)]
-    pub title: String,
+    pub title: Option<String>,
 
     /// 이 에픽에 넣는다
     #[arg(short, long, value_name = "id")]
@@ -145,6 +157,14 @@ pub struct AddArgs {
     /// 이 이슈의 자식으로 만든다 (id 가 `.xxx` 로 붙는다)
     #[arg(long, value_name = "id")]
     pub parent: Option<String>,
+
+    /// 마크다운에서 에픽과 이슈를 한 번에. `-` 이면 stdin
+    #[arg(long, value_name = "파일|-", conflicts_with_all = ["title", "epic", "tag", "priority", "parent"])]
+    pub from: Option<String>,
+
+    /// 만들지 않고 무엇이 만들어질지만 낸다
+    #[arg(long)]
+    pub dry_run: bool,
 
     /// id 만 낸다 (스크립트용)
     #[arg(short, long)]

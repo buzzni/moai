@@ -1,0 +1,16 @@
+{"ts":"2026-09-11T15:18:26Z","id":"moai-5i34","kind":"create","by":"레이븐","title":"1단계 마무리"}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-rdpm","kind":"create","by":"레이븐","title":"/code-review 미처리 건 정리"}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-9x16","kind":"create","by":"레이븐","title":"전역 설치 여부 결정"}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-y7hi","kind":"create","by":"레이븐","title":"줄 수 예산 다시 정하기"}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-i4f7","kind":"create","by":"레이븐","title":"2단계 — 마일스톤"}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-bipm","kind":"create","by":"레이븐","title":"kind=milestone 과 milestone 필드"}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-ogcq","kind":"create","by":"레이븐","title":"moai status 에 마일스톤 행"}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-3b9o","kind":"create","by":"레이븐","title":"show --filter 에 milestone="}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-in4m","kind":"create","by":"레이븐","title":"3단계 — 의존과 설정"}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-ec83","kind":"create","by":"레이븐","title":"blocks 링크와 ready 의 차단 인식"}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-pz7h","kind":"create","by":"레이븐","title":"config 로 임계값 빼기"}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-x2vs","kind":"create","by":"레이븐","title":"issues.jsonl 커스텀 머지 드라이버"}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-qf5s","kind":"create","by":"레이븐","title":"4단계 — TUI"}
+{"ts":"2026-09-11T15:18:26Z","id":"moai-0g9i","kind":"create","by":"레이븐","title":"ratatui 로 report·query 위에 얹기"}
+{"ts":"2026-09-11T15:18:34Z","id":"moai-rdpm","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-11T15:19:08Z","id":"moai-rdpm","kind":"status","by":"레이븐","from":"in_progress","to":"todo","note":"diff 읽히는지 확인하느라 옮겼던 것"}

@@ -272,7 +272,7 @@ fn refuses_what_it_should() {
         (vec!["show", "argos-0000"], "못 찾았다"),
         (vec!["add", "x", "-s", "blocked"], "라는 칸이 없다"),
         (vec!["add", "x", "--parent", "argos-0000"], "부모가 없는 자식"),
-        (vec!["add", "   "], "제목이 비었다"),
+        (vec!["add", "   "], "제목이 없다"),
     ] {
         let out = moai(s.path(), &args);
         assert!(!out.status.success(), "{args:?} 가 통과했다");
@@ -711,4 +711,143 @@ fn status_is_one_screen_with_everything() {
     assert!(out.contains("최근 7일"), "흐름이 없다\n{out}");
     assert!(out.contains("moai ready"), "다음 행동이 없다\n{out}");
     assert!(out.contains(".moai/issues.jsonl"), "어느 저장소인지 안 말한다\n{out}");
+}
+
+// ── S5 — 한 번에 만들기 · AGENTS.md ──────────────────────────────────
+
+fn from_stdin(dir: &Path, args: &[&str], input: &str) -> Output {
+    use std::io::Write as _;
+    let mut child = Command::new(BIN)
+        .args(args)
+        .current_dir(dir)
+        .env("MOAI_ACTOR", "테스터")
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+const PLAN: &str = "\
+# 저장 계층
+- [p1] 원자적으로 쓴다 #enhancement
+- 잘린 줄을 복구한다 #bug
+# CLI 표면
+- [p3] --json 이 tags 를 빠뜨린다 #bug
+";
+
+/// 사람이 \"좋다\" 한 순간 에픽과 이슈가 **한 번의 호출로** 선다.
+#[test]
+fn a_whole_plan_lands_in_one_call() {
+    let s = init("bulk");
+    let out = from_stdin(s.path(), &["add", "--from", "-"], PLAN);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("에픽 2 · 이슈 3"), "{text}");
+
+    assert_eq!(issues(s.path()).lines().count(), 5);
+    // 이슈가 제 에픽에 붙었고, 태그와 우선순위가 살아 있다
+    let tree = ok(s.path(), &["show", "--tree"]);
+    assert!(tree.contains("저장 계층") && tree.contains("CLI 표면"), "{tree}");
+    assert!(!tree.contains("에픽 없음"), "떠 있는 것이 생겼다\n{tree}");
+    assert!(issues(s.path()).contains(r#""priority":1"#));
+    assert!(issues(s.path()).contains(r#""tags":["enhancement"]"#));
+    // 만든 수만큼 저널에 남는다
+    assert_eq!(journal(s.path()).lines().count(), 5);
+}
+
+/// heredoc 오타로 여섯 개를 잘못 만드는 것을 막는 것이 `--dry-run` 이다.
+#[test]
+fn dry_run_writes_nothing() {
+    let s = init("dryrun");
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--dry-run"], PLAN);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("만들 것"));
+    assert_eq!(issues(s.path()), "", "만들지 말라는데 만들었다");
+    assert_eq!(journal(s.path()), "", "만들지 말라는데 저널에 적었다");
+}
+
+/// 못 읽은 줄은 **전부** 모아 한 번에 말한다. 하나씩 고치게 하면 여섯 줄짜리
+/// heredoc 을 여섯 번 다시 보낸다. 그리고 하나라도 틀리면 아무것도 안 만든다.
+#[test]
+fn a_bad_plan_names_every_line_and_writes_nothing() {
+    let s = init("badplan");
+    let out = from_stdin(
+        s.path(),
+        &["add", "--from", "-"],
+        "# 가\n이건 뭔가\n- [p9] 너무 큼\n- \n",
+    );
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    for want in ["2줄", "3줄", "4줄"] {
+        assert!(err.contains(want), "{want} 가 없다\n{err}");
+    }
+    assert_eq!(issues(s.path()), "");
+}
+
+/// 계획 없이 쌓이는 것을 막는 도구라, 대량 생성이 바로 그 자리다.
+#[test]
+fn bulk_refuses_issues_with_no_epic() {
+    let s = init("noepicbulk");
+    let out = from_stdin(s.path(), &["add", "--from", "-"], "- 그냥 하나\n");
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("어느 에픽의"));
+}
+
+#[test]
+fn init_writes_an_agents_block() {
+    let s = init("agents");
+    let md = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
+    assert!(md.contains("<!-- moai:begin -->") && md.contains("<!-- moai:end -->"));
+    assert!(md.contains("moai status") && md.contains("승인 게이트는 없다"), "{md}");
+    assert!(md.contains("--from"), "한 번에 만드는 법이 빠졌다\n{md}");
+
+    let off = Scratch::new("noagents");
+    ok(off.path(), &["init", "argos", "--no-agents"]);
+    assert!(!off.path().join("AGENTS.md").exists());
+}
+
+/// 남의 산문은 한 글자도 건드리지 않는다.
+#[test]
+fn init_keeps_what_someone_else_wrote() {
+    let s = Scratch::new("keepprose");
+    let mine = "# 우리 규약\n\n손으로 쓴 것.\n";
+    std::fs::write(s.path().join("AGENTS.md"), mine).unwrap();
+    ok(s.path(), &["init", "argos"]);
+    let md = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
+    assert!(md.starts_with(mine), "{md}");
+    assert_eq!(md.matches("<!-- moai:begin -->").count(), 1);
+}
+
+/// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.
+#[test]
+fn every_command_still_speaks_json() {
+    let s = Scratch::new("jsonsweep");
+    one_json_value(&ok(s.path(), &["init", "argos", "--json"]));
+    let made = ok(s.path(), &["add", "제목", "--json"]);
+    let id = field(&made, "id");
+    let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
+
+    for args in [
+        vec!["status", "--json"],
+        vec!["ready", "--json"],
+        vec!["show", "--json"],
+        vec!["show", "--tree", "--json"],
+        vec!["show", &id, "--json"],
+        vec!["show", &epic, "--json"],
+        vec!["note", &id, "메모", "--json"],
+        vec!["edit", &id, "--tag", "bug", "--json"],
+        vec!["mv", &id, "review", "--json"],
+        vec!["rm", &id, "--json"],
+    ] {
+        one_json_value(&ok(s.path(), &args));
+    }
+    // 한 번에 만들기도 배열 하나를 낸다
+    let bulk = from_stdin(s.path(), &["add", "--from", "-", "--json"], "# 가\n- 나\n");
+    assert!(bulk.status.success());
+    one_json_value(&String::from_utf8(bulk.stdout).unwrap());
 }

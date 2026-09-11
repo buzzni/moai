@@ -1,1 +1,5 @@
 /target
+
+# moai
+.moai/lock
+.moai/*.tmp.*
