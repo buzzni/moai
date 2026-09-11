@@ -4,7 +4,11 @@
 //! 정하는 코드가 여기 있으면 나중에 TUI 가 그것을 다시 쓴다.
 
 pub mod add;
+pub mod edit;
 pub mod init;
+pub mod mv;
+pub mod note;
+pub mod rm;
 pub mod show;
 
 use crate::cli::{Cli, Cmd, Typed};
@@ -73,6 +77,13 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Init { prefix } => init::run(&ctx, prefix.as_deref()),
         Cmd::Add(a) => add::run(&ctx, a, None),
         Cmd::Show(a) => show::run(&ctx, a, None),
+        Cmd::Mv(a) => mv::run(&ctx, a),
+        Cmd::Edit(a) => {
+            edit::fail_if_nothing(&a)?;
+            edit::run(&ctx, a)
+        }
+        Cmd::Rm(a) => rm::run(&ctx, a),
+        Cmd::Note(a) => note::run(&ctx, a),
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),
         Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
     }

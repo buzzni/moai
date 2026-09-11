@@ -7,6 +7,7 @@
 use super::{Ctx, Fail, R};
 use crate::cli::ShowArgs;
 use crate::model::{self, Issue, Kind};
+use crate::query::{Filter, Raw};
 use crate::store::Repo;
 use crate::view;
 
@@ -54,21 +55,43 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         return one(ctx, &repo, &load.issues, issue);
     }
 
+    let a = args.filter;
     let kind = match target {
         Target::OfKind(k) => Some(k),
-        _ => None,
+        _ => a.kind,
     };
-    let mut shown: Vec<Issue> = load
-        .issues
-        .iter()
-        .filter(|i| kind.is_none_or(|k| i.kind == k))
-        .cloned()
-        .collect();
-    let total = shown.len();
-    if !args.all {
-        shown.retain(|i| !i.status.is_done());
-    }
-    let hidden = total - shown.len();
+    // argv 를 그대로 옮겨 담을 뿐이다. 뜻을 정하는 것은 `query` 다.
+    let filter = Filter::build(Raw {
+        status: a.status,
+        tag: a.tag,
+        no_tag: a.no_tag,
+        epic: a.epic,
+        parent: a.parent,
+        priority: a.priority,
+        kind,
+        grep: a.grep,
+        stale: a.stale,
+        all: a.all,
+        filter: a.filter,
+    })
+    .map_err(|e| Fail::coded(e, "bad_filter"))?;
+
+    let now = model::now();
+    let mut shown: Vec<Issue> =
+        load.issues.iter().filter(|i| filter.matches(i, &now)).cloned().collect();
+    crate::query::sort_for_display(&mut shown);
+
+    // 숨긴 done 이 몇 건인지는 "같은 필터에 done 만 허용" 으로 센다.
+    // 칸을 콕 집었으면 숨긴 것이 없으므로 셀 일도 없다.
+    let hidden = if filter.all || !filter.status.is_empty() {
+        0
+    } else {
+        let wide = Filter { all: true, ..filter.clone() };
+        load.issues
+            .iter()
+            .filter(|i| i.status.is_done() && wide.matches(i, &now))
+            .count()
+    };
 
     if ctx.json {
         return super::json_line(&shown);

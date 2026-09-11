@@ -1,0 +1,383 @@
+//! 무엇을 보여줄지 고르고 어떤 차례로 놓을지 정한다.
+//! **순수 함수다** — `&[Issue]` 만 본다. 나중에 TUI 가 그대로 쓴다.
+//!
+//! 문법은 한 문장이다:
+//!
+//! > **쉼표는 "또는", 플래그 반복은 "그리고", 서로 다른 플래그끼리는 "그리고".**
+//!
+//! 미니 쿼리 언어(`"status=todo AND tag=bug"`)를 두지 않는다. 에이전트는
+//! `--help` 를 읽고 명령을 만드는데 플래그는 도움말이 곧 문법이고, 쿼리
+//! 문자열은 Bash heredoc 안에서 따옴표가 겹쳐 자주 깨진다. 서로 다른 필드
+//! 사이에 OR 이 필요하다는 요청이 실제로 올 때 다시 본다.
+
+use crate::model::{Issue, Kind, days_since};
+
+/// `epic=none` 처럼 "값이 없는 것" 을 고르는 자리.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Sel {
+    Unset,
+    Is(String),
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct Filter {
+    /// OR. 비면 아무거나.
+    pub status: Vec<String>,
+    /// AND of OR — 바깥이 그리고, 안쪽이 또는.
+    pub tags: Vec<Vec<String>>,
+    pub no_tags: Vec<String>,
+    pub epic: Option<Sel>,
+    pub parent: Option<Sel>,
+    pub priority: Vec<u8>,
+    pub kind: Option<Kind>,
+    pub grep: Option<String>,
+    /// 지금 칸에 이만큼 머문 것.
+    pub stale: Option<i64>,
+    /// done 을 포함한다.
+    pub all: bool,
+}
+
+/// 한 번만 쓸 수 있는 플래그를 두 번 썼을 때. 규칙(반복=그리고)을 지키면서도
+/// 사람이 실제로 저지르는 실수를 잡는다.
+fn once(values: &[String], flag: &str, what: &str) -> Result<Vec<String>, String> {
+    match values {
+        [] => Ok(Vec::new()),
+        [one] => Ok(one.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()),
+        [a, b, ..] => Err(format!(
+            "{what}는 {a} 이면서 동시에 {b} 일 수 없다.\n      \
+             둘 중 하나를 찾는 것이면 `{flag} {a},{b}` 다"
+        )),
+    }
+}
+
+/// 있는 필터 항목. 모르는 키를 만나면 이 목록을 그대로 보여준다.
+pub const KEYS: &[&str] =
+    &["status", "tag", "no-tag", "epic", "parent", "priority", "type", "grep", "stale"];
+
+/// 플래그에서 온 날것. `cmd` 가 argv 를 그대로 옮겨 담아 넘긴다.
+///
+/// 값이 아직 쪼개지지 않은 채로 온다 — `-s todo,review` 와 `-s todo -s review`
+/// 를 구별해야 뒤엣것에 친절한 오류를 낼 수 있어서, 쉼표를 clap 에 맡기지 않는다.
+#[derive(Debug, Default)]
+pub struct Raw {
+    pub status: Vec<String>,
+    pub tag: Vec<String>,
+    pub no_tag: Vec<String>,
+    pub epic: Vec<String>,
+    pub parent: Vec<String>,
+    pub priority: Vec<String>,
+    pub kind: Option<Kind>,
+    pub grep: Option<String>,
+    pub stale: Option<i64>,
+    pub all: bool,
+    pub filter: Vec<String>,
+}
+
+impl Filter {
+    pub fn build(raw: Raw) -> Result<Filter, String> {
+        let mut f = Filter {
+            status: once(&raw.status, "-s", "상태")?,
+            tags: raw
+                .tag
+                .iter()
+                .map(|t| split_tags(t))
+                .filter(|v: &Vec<String>| !v.is_empty())
+                .collect(),
+            no_tags: raw.no_tag.iter().flat_map(|t| split_tags(t)).collect(),
+            epic: sel(once(&raw.epic, "-e", "에픽")?),
+            parent: sel(once(&raw.parent, "--parent", "부모")?),
+            priority: parse_priorities(&once(&raw.priority, "-p", "우선순위")?)?,
+            kind: raw.kind,
+            grep: raw.grep,
+            stale: raw.stale,
+            all: raw.all,
+        };
+        for one in &raw.filter {
+            f.apply(one)?;
+        }
+        Ok(f)
+    }
+
+    /// `--filter k=v`. 플래그와 **같은 구조체**로 들어간다 — 표현이 둘이지
+    /// 뜻이 둘이 아니다.
+    fn apply(&mut self, raw: &str) -> Result<(), String> {
+        for one in raw.split(';') {
+            let one = one.trim();
+            if one.is_empty() {
+                continue;
+            }
+            let (k, v) = one
+                .split_once('=')
+                .ok_or_else(|| format!("`{one}` 은 `항목=값` 이 아니다. 있는 항목: {}", KEYS.join(", ")))?;
+            let (k, v) = (k.trim(), v.trim().to_string());
+            let split = |v: &str| -> Vec<String> {
+                v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+            };
+            match k {
+                "status" => self.status = split(&v),
+                "tag" => self.tags.push(split_tags(&v)),
+                "no-tag" => self.no_tags.extend(split_tags(&v)),
+                "epic" => self.epic = sel(split(&v)),
+                "parent" => self.parent = sel(split(&v)),
+                "priority" => self.priority = parse_priorities(&split(&v))?,
+                "type" => self.kind = Some(v.parse()?),
+                "grep" => self.grep = Some(v),
+                "stale" => {
+                    self.stale = Some(v.parse().map_err(|_| format!("`{v}` 는 날 수가 아니다"))?)
+                }
+                _ => {
+                    return Err(format!(
+                        "`{k}` 라는 필터 항목이 없다.\n      있는 것: {}",
+                        KEYS.join(", ")
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn matches(&self, i: &Issue, now: &str) -> bool {
+        if !self.all && self.status.is_empty() && i.status.is_done() {
+            return false;
+        }
+        if !self.status.is_empty() && !self.status.iter().any(|s| s == i.status.as_str()) {
+            return false;
+        }
+        if !self.tags.iter().all(|any| any.iter().any(|t| i.tags.contains(t))) {
+            return false;
+        }
+        if self.no_tags.iter().any(|t| i.tags.contains(t)) {
+            return false;
+        }
+        if !matches_sel(self.epic.as_ref(), i.epic.as_deref()) {
+            return false;
+        }
+        if !matches_sel(self.parent.as_ref(), crate::id::parent_of(&i.id)) {
+            return false;
+        }
+        if !self.priority.is_empty() && !self.priority.contains(&i.priority()) {
+            return false;
+        }
+        if self.kind.is_some_and(|k| i.kind != k) {
+            return false;
+        }
+        if let Some(q) = &self.grep {
+            let q = q.to_lowercase();
+            let hit = i.title.to_lowercase().contains(&q)
+                || i.body.as_deref().is_some_and(|b| b.to_lowercase().contains(&q));
+            if !hit {
+                return false;
+            }
+        }
+        if let Some(d) = self.stale
+            && days_since(&i.status_since, now).is_none_or(|n| n < d)
+        {
+            return false;
+        }
+        true
+    }
+}
+
+/// `bug,#parser` → `["bug", "parser"]`. 앞의 `#` 은 있어도 없어도 된다.
+fn split_tags(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|s| s.trim().trim_start_matches('#').to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn sel(values: Vec<String>) -> Option<Sel> {
+    match values.first().map(String::as_str) {
+        None => None,
+        Some("none") => Some(Sel::Unset),
+        Some(_) => Some(Sel::Is(values.into_iter().next().unwrap())),
+    }
+}
+
+fn matches_sel(sel: Option<&Sel>, value: Option<&str>) -> bool {
+    match sel {
+        None => true,
+        Some(Sel::Unset) => value.is_none(),
+        Some(Sel::Is(want)) => value == Some(want.as_str()),
+    }
+}
+
+fn parse_priorities(raw: &[String]) -> Result<Vec<u8>, String> {
+    raw.iter()
+        .map(|p| {
+            p.trim_start_matches('p')
+                .parse::<u8>()
+                .ok()
+                .filter(|n| *n <= crate::model::MAX_PRIORITY)
+                .ok_or_else(|| format!("`{p}` 는 우선순위가 아니다. 0~{} 다", crate::model::MAX_PRIORITY))
+        })
+        .collect()
+}
+
+/// 고정 차례: 우선순위 → id. 급한 것이 위로 오고, 나머지는 파일과 같은 순서다.
+pub fn sort_for_display(issues: &mut [Issue]) {
+    issues.sort_by(|a, b| a.priority().cmp(&b.priority()).then_with(|| a.id.cmp(&b.id)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Status;
+
+    const NOW: &str = "2026-09-11T00:00:00Z";
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    fn issue(id: &str, status: &str, tags: &[&str]) -> Issue {
+        let mut i = Issue::new(
+            id.into(),
+            format!("{id} 제목"),
+            Kind::Issue,
+            Status::new(status),
+            "2026-09-01T00:00:00Z",
+        );
+        i.tags = s(tags);
+        i
+    }
+
+    fn f() -> Filter {
+        Filter { all: true, ..Filter::default() }
+    }
+
+    /// 쉼표는 또는.
+    #[test]
+    fn commas_are_or() {
+        let f = Filter::build(Raw { status: s(&["todo,review"]), all: true, ..Raw::default() }).unwrap();
+        assert!(f.matches(&issue("a-0001", "todo", &[]), NOW));
+        assert!(f.matches(&issue("a-0001", "review", &[]), NOW));
+        assert!(!f.matches(&issue("a-0001", "done", &[]), NOW));
+    }
+
+    /// 반복은 그리고.
+    #[test]
+    fn repeating_a_tag_is_and() {
+        let f = Filter::build(Raw { tag: s(&["bug", "p1"]), all: true, ..Raw::default() }).unwrap();
+        assert!(f.matches(&issue("a-0001", "todo", &["bug", "p1"]), NOW));
+        assert!(!f.matches(&issue("a-0001", "todo", &["bug"]), NOW));
+    }
+
+    #[test]
+    fn a_comma_inside_one_tag_flag_is_or() {
+        let f = Filter::build(Raw { tag: s(&["bug,chore"]), all: true, ..Raw::default() }).unwrap();
+        assert!(f.matches(&issue("a-0001", "todo", &["chore"]), NOW));
+        assert!(!f.matches(&issue("a-0001", "todo", &["perf"]), NOW));
+    }
+
+    /// 한 이슈가 두 칸에 동시에 있을 수 없다는 것을 알려 준다.
+    #[test]
+    fn repeating_status_is_a_friendly_error() {
+        let e = Filter::build(Raw { status: s(&["todo", "review"]), all: true, ..Raw::default() }).unwrap_err();
+        assert!(e.contains("동시에") && e.contains("-s todo,review"), "{e}");
+    }
+
+    #[test]
+    fn none_selects_the_unset() {
+        let mut with = issue("a-0001", "todo", &[]);
+        with.epic = Some("a-9999".into());
+        let without = issue("a-0002", "todo", &[]);
+
+        let f = Filter::build(Raw { epic: s(&["none"]), all: true, ..Raw::default() }).unwrap();
+        assert!(!f.matches(&with, NOW) && f.matches(&without, NOW));
+
+        let f = Filter::build(Raw { epic: s(&["a-9999"]), all: true, ..Raw::default() }).unwrap();
+        assert!(f.matches(&with, NOW) && !f.matches(&without, NOW));
+    }
+
+    /// `--parent none` 은 최상위만. 부모는 id 에서 유도된다.
+    #[test]
+    fn parent_none_is_top_level_only() {
+        let f = Filter::build(Raw { parent: s(&["none"]), all: true, ..Raw::default() }).unwrap();
+        assert!(f.matches(&issue("a-0001", "todo", &[]), NOW));
+        assert!(!f.matches(&issue("a-0001.abc", "todo", &[]), NOW));
+    }
+
+    #[test]
+    fn no_tag_excludes() {
+        let f = Filter::build(Raw { no_tag: s(&["wontfix"]), all: true, ..Raw::default() }).unwrap();
+        assert!(!f.matches(&issue("a-0001", "todo", &["wontfix"]), NOW));
+        assert!(f.matches(&issue("a-0001", "todo", &["bug"]), NOW));
+    }
+
+    #[test]
+    fn grep_reads_title_and_body() {
+        let mut i = issue("a-0001", "todo", &[]);
+        i.body = Some("BOM 이 섞여 있다".into());
+        let mut f = f();
+        f.grep = Some("bom".into()); // 대소문자를 가리지 않는다
+        assert!(f.matches(&i, NOW));
+        f.grep = Some("없는말".into());
+        assert!(!f.matches(&i, NOW));
+    }
+
+    /// `--stale` 은 **지금 칸에 머문 기간**이다. 리뷰가 썩는 것을 찾는 데 쓴다.
+    #[test]
+    fn stale_counts_time_in_the_current_column() {
+        let mut i = issue("a-0001", "review", &[]);
+        i.status_since = "2026-09-05T00:00:00Z".into(); // 6일
+        let mut f = f();
+        f.stale = Some(3);
+        assert!(f.matches(&i, NOW));
+        f.stale = Some(7);
+        assert!(!f.matches(&i, NOW));
+    }
+
+    /// 기본은 done 을 뺀다. 칸을 콕 집으면 그 말을 따른다.
+    #[test]
+    fn done_is_hidden_unless_asked_for() {
+        let done = issue("a-0001", "done", &[]);
+        assert!(!Filter::default().matches(&done, NOW));
+        assert!(Filter { all: true, ..Filter::default() }.matches(&done, NOW));
+        let named = Filter::build(Raw { status: s(&["done"]), ..Raw::default() }).unwrap();
+        assert!(named.matches(&done, NOW));
+    }
+
+    /// `--filter` 는 플래그와 정확히 같은 뜻이다.
+    #[test]
+    fn filter_string_equals_the_flags() {
+        let flags = Filter::build(Raw { status: s(&["todo"]), tag: s(&["bug"]), epic: s(&["none"]), ..Raw::default() }).unwrap();
+        let string = Filter::build(Raw { filter: s(&["status=todo", "tag=bug", "epic=none"]), ..Raw::default() }).unwrap();
+        for i in [
+            issue("a-0001", "todo", &["bug"]),
+            issue("a-0002", "review", &["bug"]),
+            issue("a-0003", "todo", &["perf"]),
+        ] {
+            assert_eq!(flags.matches(&i, NOW), string.matches(&i, NOW), "{}", i.id);
+        }
+    }
+
+    #[test]
+    fn unknown_filter_keys_list_the_real_ones() {
+        let e = Filter::build(Raw { filter: s(&["statu=todo"]), ..Raw::default() }).unwrap_err();
+        assert!(e.contains("statu") && e.contains("status, tag"), "{e}");
+        let e = Filter::build(Raw { filter: s(&["todo"]), ..Raw::default() }).unwrap_err();
+        assert!(e.contains("항목=값"), "{e}");
+    }
+
+    #[test]
+    fn priorities_accept_both_spellings() {
+        let f = Filter::build(Raw { priority: s(&["p0,1"]), all: true, ..Raw::default() }).unwrap();
+        assert_eq!(f.priority, [0, 1]);
+        let e = Filter::build(Raw { priority: s(&["9"]), all: true, ..Raw::default() }).unwrap_err();
+        assert!(e.contains("우선순위가 아니다"), "{e}");
+    }
+
+    #[test]
+    fn sorting_puts_the_urgent_first_then_id() {
+        let mut v = vec![
+            issue("a-0003", "todo", &[]),
+            issue("a-0001", "todo", &[]),
+            issue("a-0002", "todo", &[]),
+        ];
+        v[0].priority = Some(0);
+        sort_for_display(&mut v);
+        let ids: Vec<&str> = v.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["a-0003", "a-0001", "a-0002"]);
+    }
+}

@@ -26,7 +26,6 @@ pub const OTHER: Style = fg(AnsiColor::Cyan);
 pub const EPIC: Style = fg(AnsiColor::BrightBlue).bold();
 pub const TAG: Style = fg(AnsiColor::Cyan).dimmed();
 pub const ID: Style = DIM;
-pub const WARN: Style = fg(AnsiColor::BrightYellow);
 pub const ERROR: Style = fg(AnsiColor::Red);
 pub const HEAD: Style = Style::new().bold();
 

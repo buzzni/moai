@@ -9,6 +9,7 @@ mod cmd;
 mod config;
 mod id;
 mod model;
+mod query;
 mod store;
 mod style;
 mod view;

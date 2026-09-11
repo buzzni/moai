@@ -6,7 +6,8 @@ use crate::model::{self, Issue, JournalEntry, Kind, Status};
 use crate::store::{Repo, taken_ids};
 use crate::style::{self, paint};
 
-fn read_body(arg: Option<String>) -> R<Option<String>> {
+/// `-` 이면 stdin. `add` 와 `edit` 이 같은 규칙을 쓴다.
+pub fn read_body(arg: Option<String>) -> R<Option<String>> {
     match arg.as_deref() {
         None => Ok(None),
         Some("-") => {

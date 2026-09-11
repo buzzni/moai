@@ -46,9 +46,35 @@ pub enum Cmd {
         prefix: Option<String>,
     },
     /// 이슈를 만든다
+    #[command(after_help = "\
+예시:
+  moai add \"파서가 BOM 에서 죽는다\" -t bug -p 1
+  moai add \"저장 계층\" --type epic
+  moai add \"부모에 딸린 일\" --parent moai-4aex
+  moai add \"본문은 stdin 에서\" -b -
+
+제목이 `--` 로 시작해도 된다. 아는 플래그가 아니면 제목으로 읽는다.")]
     Add(AddArgs),
     /// 하나를 펼치거나 목록을 낸다
     Show(ShowArgs),
+    /// 상태를 옮긴다
+    #[command(after_help = "\
+  칸은 .moai/config.toml 의 statuses 차례를 따른다:
+    todo → in_progress → review → done
+
+  순서를 건너뛰어도, 되돌려도, 막지 않는다. 이 도구에 승인은 없다.
+  되감긴 것과 오래 멈춘 것은 `moai status` 가 드러낸다.
+
+  moai mv moai-4aex in_progress
+  moai mv moai-4aex moai-9k2p done
+  moai mv moai-4aex review -m \"테스트는 다음 이슈로 뺐다\"")]
+    Mv(MvArgs),
+    /// 제목·본문·태그·에픽·우선순위를 고친다
+    Edit(EditArgs),
+    /// 지운다
+    Rm(RmArgs),
+    /// 이슈에 메모를 남긴다 (저널에만 쌓인다)
+    Note(NoteArgs),
 
     /// 위 동사를 `--type issue` 로 고정해 부른다
     #[command(subcommand)]
@@ -59,7 +85,9 @@ pub enum Cmd {
 }
 
 /// `moai <종류> <동사>` ≡ `moai <동사> --type <종류>`.
-/// 규칙 하나로 네임스페이스가 생기므로 명사별 코드가 없다.
+///
+/// 규칙 하나로 네임스페이스가 생기므로 명사별 코드가 없다. `mv`·`edit`·`rm`
+/// 은 여기 없다 — id 가 대상을 정확히 가리켜서 종류를 덧붙일 자리가 없다.
 #[derive(Subcommand, Debug)]
 pub enum Typed {
     /// 만든다
@@ -70,8 +98,8 @@ pub enum Typed {
 
 #[derive(Args, Debug)]
 pub struct AddArgs {
-    /// 한 줄. 따옴표로 감싼다
-    #[arg(value_name = "제목")]
+    /// 한 줄. 따옴표로 감싼다. `--` 로 시작해도 된다
+    #[arg(value_name = "제목", allow_hyphen_values = true)]
     pub title: String,
 
     /// 이 에픽에 넣는다
@@ -116,7 +144,114 @@ pub struct ShowArgs {
     #[arg(value_name = "대상")]
     pub target: Option<String>,
 
+    #[command(flatten)]
+    pub filter: FilterArgs,
+}
+
+/// 쉼표는 "또는", 반복은 "그리고".
+///
+/// 쉼표를 clap 에게 맡기지 않는 이유가 있다 — `-s todo,review` 와
+/// `-s todo -s review` 가 구별돼야 뒤엣것에 친절한 오류를 낼 수 있다.
+#[derive(Args, Debug)]
+#[command(next_help_heading = "필터  (쉼표 = 또는,  반복 = 그리고)")]
+pub struct FilterArgs {
+    /// 그 칸에 있는 것
+    #[arg(short, long, value_name = "상태")]
+    pub status: Vec<String>,
+
+    /// 그 태그를 가진 것
+    #[arg(short, long, value_name = "태그")]
+    pub tag: Vec<String>,
+
+    /// 그 태그가 없는 것
+    #[arg(long = "no-tag", value_name = "태그")]
+    pub no_tag: Vec<String>,
+
+    /// 그 에픽 소속 (`none` = 에픽 없는 것)
+    #[arg(short, long, value_name = "id|none")]
+    pub epic: Vec<String>,
+
+    /// 그 이슈의 자식 (`none` = 최상위만)
+    #[arg(long, value_name = "id|none")]
+    pub parent: Vec<String>,
+
+    #[arg(short, long, value_name = "0-3")]
+    pub priority: Vec<String>,
+
+    #[arg(long = "type", value_name = "issue|epic")]
+    pub kind: Option<Kind>,
+
+    /// 제목·본문에 이 글이 든 것
+    #[arg(short = 'g', long, value_name = "글")]
+    pub grep: Option<String>,
+
+    /// 지금 칸에 그만큼 머문 것
+    #[arg(long, value_name = "일")]
+    pub stale: Option<i64>,
+
     /// done 을 포함한다
     #[arg(long)]
     pub all: bool,
+
+    /// 위 필터를 한 문자열로. `--filter status=todo,review`
+    #[arg(long, value_name = "항목=값")]
+    pub filter: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct MvArgs {
+    /// 옮길 이슈들과, 맨 끝에 갈 칸
+    #[arg(required = true, num_args = 2.., value_name = "<id>... <상태>")]
+    pub args: Vec<String>,
+
+    /// 이 이동에 한 줄 메모 (저널에만 남는다)
+    #[arg(short, long, value_name = "글")]
+    pub msg: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct EditArgs {
+    #[arg(value_name = "id")]
+    pub id: String,
+
+    #[arg(long, value_name = "글")]
+    pub title: Option<String>,
+
+    /// 본문. `-` 이면 stdin 에서 읽는다
+    #[arg(short, long, value_name = "글")]
+    pub body: Option<String>,
+
+    /// 태그를 더한다
+    #[arg(short, long, value_name = "태그", value_delimiter = ',')]
+    pub tag: Vec<String>,
+
+    /// 태그를 뺀다
+    #[arg(long, value_name = "태그", value_delimiter = ',')]
+    pub untag: Vec<String>,
+
+    /// 에픽을 옮긴다 (`none` 이면 뺀다)
+    #[arg(short, long, value_name = "id|none")]
+    pub epic: Option<String>,
+
+    #[arg(short, long, value_name = "0-3")]
+    pub priority: Option<u8>,
+
+    /// 담당 (`none` 이면 뺀다)
+    #[arg(short, long, value_name = "이름|none")]
+    pub assignee: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct RmArgs {
+    #[arg(required = true, value_name = "id")]
+    pub ids: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct NoteArgs {
+    #[arg(value_name = "id")]
+    pub id: String,
+    /// 다음 사람(또는 다음 에이전트)이 읽을 발견사항
+    #[arg(value_name = "글")]
+    pub text: String,
 }

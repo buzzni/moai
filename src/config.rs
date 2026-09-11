@@ -128,14 +128,6 @@ impl Config {
     pub fn knows(&self, status: &str) -> bool {
         self.statuses.iter().any(|s| s == status)
     }
-
-    /// 보드에서의 순서. 모르는 상태는 맨 뒤로 민다 — 거부하지 않는다(읽기는 관대하다).
-    pub fn rank(&self, status: &str) -> usize {
-        self.statuses
-            .iter()
-            .position(|s| s == status)
-            .unwrap_or(self.statuses.len())
-    }
 }
 
 #[cfg(test)]
@@ -177,7 +169,6 @@ mod tests {
         let c = Config::parse("prefix = \"argos\"\n").unwrap();
         assert_eq!(c.statuses, ["todo", "in_progress", "review", "done"]);
         assert_eq!(c.first_status(), "todo");
-        assert_eq!(c.rank("review"), 2);
         assert!(c.knows("done") && !c.knows("blocked"));
     }
 
@@ -185,13 +176,6 @@ mod tests {
     fn extra_columns_are_allowed() {
         let c = Config::parse("prefix = \"a\"\nstatuses = \"todo, blocked, done\"\n").unwrap();
         assert_eq!(c.statuses, ["todo", "blocked", "done"]);
-    }
-
-    /// 모르는 상태는 거부가 아니라 맨 뒤다 — 읽기는 관대해야 한다.
-    #[test]
-    fn unknown_status_sorts_last() {
-        let c = Config::parse("prefix = \"a\"\n").unwrap();
-        assert!(c.rank("옛날칸") > c.rank("done"));
     }
 
     #[test]
