@@ -98,6 +98,11 @@ pub struct Issue {
     /// 붙을 수 있고, 그 반대도 된다.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub milestone: Option<String>,
+    /// 나를 막고 있는 것들. **막히는 쪽에 둔다** — 막는 쪽을 닫을 때 이 줄만
+    /// 쓰면 된다. 막는 쪽에 두면 닫을 때 상대 줄도 써야 하고, 그건 파생값을
+    /// 저장하는 것과 같은 실패다.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_by: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
     /// `status` 가 마지막으로 바뀐 때. 방치 검사와 "review 에 6일" 이 여기서 나온다.
@@ -140,6 +145,7 @@ impl Issue {
             assignee: None,
             epic: None,
             milestone: None,
+            blocked_by: Vec::new(),
             created_at: at.to_string(),
             updated_at: at.to_string(),
             status_since: at.to_string(),
@@ -160,6 +166,8 @@ impl Issue {
         self.tags.retain(|t| !t.is_empty());
         self.tags.sort();
         self.tags.dedup();
+        self.blocked_by.sort();
+        self.blocked_by.dedup();
         if self.priority == Some(DEFAULT_PRIORITY) {
             self.priority = None; // 기본값을 쓰면 1만 줄이 통째로 diff 에 뜬다
         }
@@ -197,6 +205,14 @@ impl Issue {
                 && !crate::id::is_valid(v)
             {
                 return Err(format!("{}: {what} id 형식이 아니다 — {v:?}", self.id));
+            }
+        }
+        for b in &self.blocked_by {
+            if b == &self.id {
+                return Err(format!("{}: 스스로를 막을 수 없다", self.id));
+            }
+            if !crate::id::is_valid(b) {
+                return Err(format!("{}: blocked_by id 형식이 아니다 — {b:?}", self.id));
             }
         }
         Ok(())
@@ -456,6 +472,42 @@ mod tests {
         i.tags = vec!["Bug".into(), "bug".into(), "#BUG".into()];
         i.normalize();
         assert_eq!(i.tags, ["bug"], "한 개념이 둘로 갈라졌다");
+    }
+
+    /// `blocked_by` 는 마일스톤 다음, `created_at` 전에 온다.
+    #[test]
+    fn blocked_by_sits_between_milestone_and_created_at() {
+        let mut i = issue();
+        i.blocked_by = vec!["argos-0001".into()];
+        let line = serde_json::to_string(&i).unwrap();
+        let want = ["milestone", "blocked_by", "created_at"];
+        // milestone 은 비어 있으니 실제로는 blocked_by 와 created_at 만 있다.
+        let at: Vec<usize> = [want[1], want[2]]
+            .iter()
+            .map(|k| line.find(&format!("\"{k}\":")).unwrap())
+            .collect();
+        assert!(at[0] < at[1], "{line}");
+    }
+
+    /// 중복은 접히고 순서는 결정적이다.
+    #[test]
+    fn blocked_by_normalizes_sorted_and_deduped() {
+        let mut i = issue();
+        i.blocked_by = vec!["argos-0002".into(), "argos-0001".into(), "argos-0002".into()];
+        i.normalize();
+        assert_eq!(i.blocked_by, ["argos-0001", "argos-0002"]);
+    }
+
+    #[test]
+    fn validate_refuses_self_block_and_bad_blocker_id() {
+        let c = cfg();
+        let mut i = issue();
+        i.blocked_by = vec![i.id.clone()];
+        assert!(i.validate(&c).unwrap_err().contains("스스로를 막을"));
+
+        let mut i = issue();
+        i.blocked_by = vec!["이상한".into()];
+        assert!(i.validate(&c).unwrap_err().contains("blocked_by id 형식"));
     }
 
     #[test]

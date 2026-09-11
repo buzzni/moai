@@ -862,6 +862,7 @@ fn every_command_still_speaks_json() {
         vec!["show", &id, "--json"],
         vec!["show", &epic, "--json"],
         vec!["note", &id, "메모", "--json"],
+        vec!["link", &id, "--blocks", &epic, "--json"],
         vec!["edit", &id, "--tag", "bug", "--json"],
         vec!["mv", &id, "review", "--json"],
         vec!["rm", &id, "--json"],
@@ -1043,6 +1044,98 @@ fn the_milestone_namespace_costs_nothing() {
     let m = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
     assert!(line_of(s.path(), &m).contains(r#""kind":"milestone""#));
     assert!(ok(s.path(), &["milestone", "show"]).contains(&m));
+}
+
+// ── 막음 (`moai link`) ─────────────────────────────────────────────
+
+/// A 가 B 를 막으면 B 의 `blocked_by` 에 A 가 적히고, B 는 `ready` 에서 빠진다.
+#[test]
+fn link_blocks_writes_to_the_blocked_side_and_ready_excludes_it() {
+    let s = init("link");
+    let a = add(s.path(), &["막는 것"]);
+    let b = add(s.path(), &["막히는 것"]);
+
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+    assert!(line_of(s.path(), &b).contains(&format!(r#""blocked_by":["{a}"]"#)), "{}", line_of(s.path(), &b));
+    assert!(!line_of(s.path(), &a).contains("blocked_by"), "막는 쪽에는 안 적힌다");
+
+    let ready = ok(s.path(), &["ready"]);
+    assert!(ready.contains(&a) && !ready.contains(&b), "{ready}");
+
+    ok(s.path(), &["mv", &a, "done"]);
+    let ready = ok(s.path(), &["ready"]);
+    assert!(ready.contains(&b), "막은 것이 끝났는데도 여전히 막혀 있다 — {ready}");
+}
+
+/// `--unblocks` 는 그 막음만 없앤다.
+#[test]
+fn link_unblocks_removes_just_that_edge() {
+    let s = init("unlink");
+    let a = add(s.path(), &["a"]);
+    let b = add(s.path(), &["b"]);
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+    ok(s.path(), &["link", &a, "--unblocks", &b]);
+    assert!(!line_of(s.path(), &b).contains("blocked_by"));
+}
+
+/// 고리는 쓰기 전에 막는다.
+#[test]
+fn link_refuses_a_cycle() {
+    let s = init("cycle");
+    let a = add(s.path(), &["a"]);
+    let b = add(s.path(), &["b"]);
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+    let out = moai(s.path(), &["link", &b, "--blocks", &a]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("고리"));
+    assert!(!line_of(s.path(), &a).contains("blocked_by"), "거부했는데 썼다");
+}
+
+/// 스스로를 막는 것도 고리로 거부한다.
+#[test]
+fn link_refuses_self_block() {
+    let s = init("selfblock");
+    let a = add(s.path(), &["a"]);
+    let out = moai(s.path(), &["link", &a, "--blocks", &a]);
+    assert!(!out.status.success());
+}
+
+/// 같은 id 를 `--blocks` 와 `--unblocks` 에 동시에 적으면 어느 쪽도 조용히
+/// 이기게 두지 않는다 — 거부한다.
+#[test]
+fn link_refuses_the_same_id_in_both_lists() {
+    let s = init("linkconflict");
+    let a = add(s.path(), &["a"]);
+    let b = add(s.path(), &["b"]);
+    let out = moai(s.path(), &["link", &a, "--blocks", &b, "--unblocks", &b]);
+    assert!(!out.status.success());
+    assert!(!line_of(s.path(), &b).contains("blocked_by"), "거부했는데 썼다");
+}
+
+/// 막던 쪽이 지워져도 남은 참조는 풀 수 있어야 한다. 못 풀면 `status` 가
+/// 드러낸 것을 도구로 고칠 길이 파일 직접 편집밖에 안 남는다.
+#[test]
+fn link_can_unblock_after_the_blocker_was_removed() {
+    let s = init("unblockgone");
+    let a = add(s.path(), &["막는 것"]);
+    let b = add(s.path(), &["막히는 것"]);
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+    ok(s.path(), &["rm", &a]);
+    assert!(line_of(s.path(), &b).contains("blocked_by"), "사전 조건이 안 섰다");
+
+    ok(s.path(), &["link", &a, "--unblocks", &b]);
+    assert!(!line_of(s.path(), &b).contains("blocked_by"), "지워진 막음을 못 풀었다");
+}
+
+/// 없는 이슈를 막거나 막힐 수는 없다.
+#[test]
+fn link_refuses_unknown_ids() {
+    let s = init("linkmissing");
+    let a = add(s.path(), &["a"]);
+    let out = moai(s.path(), &["link", &a, "--blocks", "argos-zzzz"]);
+    assert!(!out.status.success());
+    let out = moai(s.path(), &["link", "argos-zzzz", "--blocks", &a]);
+    assert!(!out.status.success());
 }
 
 // ── 첫인상 ───────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@
 pub mod add;
 pub mod edit;
 pub mod init;
+pub mod link;
 pub mod mv;
 pub mod note;
 pub mod ready;
@@ -66,6 +67,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Edit(a) => edit::run(&ctx, a),
         Cmd::Rm(a) => rm::run(&ctx, a),
         Cmd::Note(a) => note::run(&ctx, a),
+        Cmd::Link(a) => link::run(&ctx, a),
         Cmd::Ready => ready::run(&ctx),
         Cmd::Status => status::run(&ctx),
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),

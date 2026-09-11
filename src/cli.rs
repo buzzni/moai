@@ -116,6 +116,14 @@ pub enum Cmd {
     Rm(RmArgs),
     /// 이슈에 메모를 남긴다 (저널에만 쌓인다)
     Note(NoteArgs),
+    /// 하나가 다른 것을 막는다 (또는 그 막음을 없앤다)
+    #[command(after_help = "\
+  moai link moai-4aex --blocks moai-9k2p     4aex 가 9k2p 를 막는다
+  moai link moai-4aex --unblocks moai-9k2p   그 막음을 없앤다
+
+  막는 쪽이 아니라 막히는 쪽에 `blocked_by` 를 적는다. 고리(A 가 B 를
+  막는데 B 도 이미 A 를 막고 있는 것)는 쓰기 전에 막는다.")]
+    Link(LinkArgs),
 
     /// 위 동사를 `--type issue` 로 고정해 부른다
     #[command(subcommand)]
@@ -331,6 +339,20 @@ pub struct EditArgs {
 pub struct RmArgs {
     #[arg(required = true, value_name = "id")]
     pub ids: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct LinkArgs {
+    #[arg(value_name = "id")]
+    pub id: String,
+
+    /// 이 이슈(들)을 막는다
+    #[arg(long, value_name = "id", value_delimiter = ',')]
+    pub blocks: Vec<String>,
+
+    /// 이 이슈(들)에 대한 막음을 없앤다
+    #[arg(long, value_name = "id", value_delimiter = ',')]
+    pub unblocks: Vec<String>,
 }
 
 #[derive(Args, Debug)]

@@ -62,6 +62,38 @@ pub fn members_of<'a>(issues: &'a [Issue], epic: &str) -> Vec<&'a Issue> {
     issues.iter().filter(|i| i.epic.as_deref() == Some(epic)).collect()
 }
 
+/// 아직 안 끝난 막음이 하나라도 있는가. 없는 이슈를 가리키는 것은 막지
+/// 않는다 — 끊긴 참조는 `moai status` 가 드러내지 `ready` 가 영원히 막지 않는다.
+pub fn is_blocked(i: &Issue, by_id: &BTreeMap<&str, &Issue>) -> bool {
+    i.blocked_by.iter().any(|b| by_id.get(b.as_str()).is_some_and(|x| !x.status.is_done()))
+}
+
+/// `blocker` 가 `blocked` 를 막으면 고리가 생기는가. **쓰기 전에** 막는다 —
+/// 사후 검사로 두면 이미 고리가 든 파일을 누가 만들고, 그때는 어느 줄을
+/// 끊을지 사람이 정해야 한다.
+pub fn creates_cycle(issues: &[Issue], blocker: &str, blocked: &str) -> bool {
+    // `blocked_by` 는 막히는 쪽에 적힌다. 앞으로(막는 쪽 → 막히는 쪽) 되짚으려면
+    // 방향을 뒤집은 지도가 있어야 한다.
+    let mut forward: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for i in issues {
+        for b in &i.blocked_by {
+            forward.entry(b.as_str()).or_default().push(i.id.as_str());
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut stack = vec![blocked];
+    while let Some(cur) = stack.pop() {
+        if cur == blocker {
+            return true;
+        }
+        if !seen.insert(cur) {
+            continue;
+        }
+        stack.extend(forward.get(cur).into_iter().flatten());
+    }
+    false
+}
+
 /// 이슈 id → 그것이 속한 에픽 id. 없으면 안 들어간다.
 ///
 /// **자식은 소속을 조상에게서 물려받는다.** 부모가 에픽 A 에 있는데 자식이
@@ -187,6 +219,7 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
 /// 조립하게 두면 조립할 때마다 규칙이 조금씩 달라진다.
 pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let group = groups(issues);
+    let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     // 자식은 소속을 조상에게서 물려받으므로 끝난 에픽의 손자도 집지 않는다.
     let done_epic = |i: &Issue| {
         group
@@ -208,6 +241,7 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
                 && i.status.as_str() == cfg.first_status()
                 && !done_epic(i)
                 && !has_open_child(i)
+                && !is_blocked(i, &by_id)
         })
         .collect();
 
@@ -240,6 +274,11 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
 const REVIEW_STALE_DAYS: i64 = 3;
 /// 집어 놓고 이만큼 안 건드리면 잊은 것으로 본다.
 const WIP_STALE_DAYS: i64 = 2;
+/// 막힌 채로 지금 칸에 이만큼 머물면 "계획이 멈춘 자리" 로 본다. **막힌
+/// 기간이 아니라 지금 칸에 머문 기간이다** — 막 막힌 낡은 이슈를 "며칠째
+/// 막혀 있다" 고 잘못 말하지 않으려면 `blocked_by` 를 적은 시각을 따로
+/// 저장해야 하는데, 그건 이 이슈의 범위 밖이다.
+const BLOCKED_STALE_DAYS: i64 = 3;
 /// 한 번에 이보다 많이 벌이면 알린다.
 const WIP_LIMIT: usize = 3;
 /// 에픽 없는 이슈가 이 비율을 넘으면 알린다.
@@ -406,6 +445,21 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
         );
     }
 
+    // 2-2. 오래 막혀 있는 것. 막힌 채로 방치되는 것이 계획이 멈춘 자리다.
+    let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
+    let stuck: Vec<&Issue> = work
+        .iter()
+        .copied()
+        .filter(|i| {
+            !i.status.is_done()
+                && is_blocked(i, &by_id)
+                && days_since(&i.status_since, now).is_some_and(|d| d > BLOCKED_STALE_DAYS)
+        })
+        .collect();
+    if !stuck.is_empty() {
+        warnings.push(Warning::new("blocked_stale", ids_of(&stuck)).days(BLOCKED_STALE_DAYS));
+    }
+
     // 3. 한 번에 여러 개 벌인 것. AI 가 가장 잘 하는 실수다.
     let wip: Vec<&Issue> = work
         .iter()
@@ -464,6 +518,13 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
         .collect();
     if !orphans.is_empty() {
         warnings.push(Warning::new("orphan_child", ids_of(&orphans)));
+    }
+    let dangling_blockers: Vec<&Issue> = issues
+        .iter()
+        .filter(|i| i.blocked_by.iter().any(|b| !known.contains(b.as_str())))
+        .collect();
+    if !dangling_blockers.is_empty() {
+        warnings.push(Warning::new("dangling_blocked_by", ids_of(&dangling_blockers)));
     }
     // 모르는 필드는 **버리지 않고 들고 있다.** 들고 있다는 사실만 비춘다 —
     // 2단계 바이너리가 쓴 파일을 1단계가 만졌다는 뜻일 수 있다.
@@ -600,6 +661,83 @@ mod tests {
         ];
         let got: Vec<&str> = ready(&issues, &cfg()).iter().map(|i| i.id.as_str()).collect();
         assert_eq!(got, ["argos-0004.aaa", "argos-0005"], "{got:?}");
+    }
+
+    /// 막고 있는 것이 안 끝났으면 못 집는다. 끝나면 다시 집을 수 있다.
+    #[test]
+    fn ready_excludes_what_is_still_blocked() {
+        let blocker_open = make("argos-0001", Kind::Issue, "todo");
+        let mut blocked = make("argos-0002", Kind::Issue, "todo");
+        blocked.blocked_by = vec!["argos-0001".into()];
+        let open = [blocker_open, blocked.clone()];
+        let got: Vec<&str> = ready(&open, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(got, ["argos-0001"], "{got:?}");
+
+        let mut blocker_done = make("argos-0001", Kind::Issue, "done");
+        blocker_done.status = Status::new("done");
+        let done = [blocker_done, blocked];
+        let got: Vec<&str> = ready(&done, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(got, ["argos-0002"], "끝난 막음은 더 이상 막지 않는다 — {got:?}");
+    }
+
+    /// 없는 이슈를 가리키는 `blocked_by` 는 막지 않는다 — 끊긴 참조는
+    /// `moai status` 가 드러내지, `ready` 가 조용히 영원히 막지 않는다.
+    #[test]
+    fn a_dangling_blocker_does_not_block_forever() {
+        let mut i = make("argos-0001", Kind::Issue, "todo");
+        i.blocked_by = vec!["argos-9999".into()];
+        let all = [i];
+        let got: Vec<&str> = ready(&all, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(got, ["argos-0001"]);
+    }
+
+    #[test]
+    fn creates_cycle_catches_direct_and_transitive_and_self() {
+        let issues = vec![
+            make("argos-0001", Kind::Issue, "todo"),
+            {
+                let mut i = make("argos-0002", Kind::Issue, "todo");
+                i.blocked_by = vec!["argos-0001".into()]; // 0001 이 0002 를 막는다
+                i
+            },
+        ];
+        // 0002 가 0001 을 막으면 고리(0001→0002→0001).
+        assert!(creates_cycle(&issues, "argos-0002", "argos-0001"));
+        // 관계없는 방향은 고리가 아니다.
+        assert!(!creates_cycle(&issues, "argos-0001", "argos-0003"));
+        // 스스로를 막는 것도 고리로 본다.
+        assert!(creates_cycle(&issues, "argos-0001", "argos-0001"));
+    }
+
+    /// 오래 막혀 있는 것을 `status` 가 드러낸다.
+    #[test]
+    fn status_warns_about_long_blocked_work() {
+        let now = "2026-09-11T00:00:00Z";
+        let mut stuck = make("argos-0002", Kind::Issue, "todo");
+        stuck.blocked_by = vec!["argos-0001".into()];
+        stuck.status_since = "2026-09-01T00:00:00Z".to_string(); // 열흘
+        let issues = vec![make("argos-0001", Kind::Issue, "todo"), stuck];
+        let st = status(&issues, &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "blocked_stale").expect("경고가 없다");
+        assert_eq!(w.ids, ["argos-0002"]);
+
+        // 막 막힌 것은 아직 말하지 않는다.
+        let mut fresh = make("argos-0002", Kind::Issue, "todo");
+        fresh.blocked_by = vec!["argos-0001".into()];
+        fresh.status_since = now.to_string();
+        let issues = vec![make("argos-0001", Kind::Issue, "todo"), fresh];
+        let st = status(&issues, &[], &cfg(), now);
+        assert!(st.warnings.iter().all(|w| w.kind != "blocked_stale"));
+    }
+
+    /// 막는 쪽이 사라지면 `ready` 는 조용히 넘어가지만 `status` 는 드러낸다.
+    #[test]
+    fn status_warns_about_a_dangling_blocker() {
+        let mut i = make("argos-0001", Kind::Issue, "todo");
+        i.blocked_by = vec!["argos-9999".into()];
+        let st = status(&[i], &[], &cfg(), "2026-09-11T00:00:00Z");
+        let w = st.warnings.iter().find(|w| w.kind == "dangling_blocked_by").expect("경고가 없다");
+        assert_eq!(w.ids, ["argos-0001"]);
     }
 
     /// 자식이 다 끝나면 부모를 집을 수 있다.

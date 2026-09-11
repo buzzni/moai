@@ -290,10 +290,14 @@ fn says(w: &Warning) -> String {
         // 같은 이슈가 두 번 나오는 것이 말이 안 되게 보인다.
         "wip_overload" => format!("한 번에 벌여 놓은 것 {n}건 — 하나씩 끝내는 편이 낫다"),
         "stale_progress" => format!("집어 놓고 {}일 넘게 안 건드린 것 {n}건", w.days.unwrap_or(0)),
+        // `days` 는 "막힌 기간" 이 아니라 "지금 칸에 머문 기간" 이다 — 막 막힌
+        // 것을 "며칠째 막혀 있다" 고 잘못 말하지 않으려고 이렇게 적는다.
+        "blocked_stale" => format!("막힌 채로 {}일 넘게 멈춰 있는 것 {n}건", w.days.unwrap_or(0)),
         "empty_epic" => format!("속이 빈 에픽 {n}건 — 계획만 세우고 안 채웠다"),
         "finished_epic" => format!("다 끝났는데 안 닫힌 에픽 {n}건"),
         "dangling_epic" => format!("없는 에픽을 가리키는 것 {n}건"),
         "orphan_child" => format!("부모 줄이 없는 자식 {n}건"),
+        "dangling_blocked_by" => format!("없는 이슈에게 막혀 있다는 것 {n}건"),
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
         "duplicate_id" => format!("id 가 두 번 있다 {n}건 — 머지를 잘못 풀었다"),
         "unreadable_line" => format!("읽을 수 없는 줄 {n}개"),
@@ -403,7 +407,7 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str) -> Vec<String
     const SHOW: usize = 3;
     let mut out = Vec::new();
     // 벌여 놓은 것과 깨진 것은 id 만 한 줄에 늘어놓는다 — 제목이 정보를 안 준다.
-    if matches!(w.kind, "wip_overload" | "duplicate_id" | "orphan_child") {
+    if matches!(w.kind, "wip_overload" | "duplicate_id" | "orphan_child" | "dangling_blocked_by") {
         if !w.ids.is_empty() {
             out.push(format!("    {}", paint(style::DIM, &w.ids.join("   "))));
         }
