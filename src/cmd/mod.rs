@@ -55,7 +55,10 @@ pub fn report_load_errors(path: &std::path::Path, errors: &[crate::store::LoadEr
 
 pub fn run(cli: Cli) -> R<Vec<String>> {
     let ctx = Ctx { json: cli.json };
-    match cli.cmd {
+    let Some(cmd) = cli.cmd else {
+        return opening(&ctx);
+    };
+    match cmd {
         Cmd::Init { prefix, no_agents } => init::run(&ctx, prefix.as_deref(), no_agents),
         Cmd::Add(a) => add::run(&ctx, a, None),
         Cmd::Show(a) => show::run(&ctx, a, None),
@@ -69,6 +72,44 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
         Cmd::Milestone(t) => typed(&ctx, t, Kind::Milestone),
     }
+}
+
+/// 인자 없이 불렀을 때. **오류가 아니다.**
+///
+/// 저장소 안이면 `status` — 세션의 시작점이 그것이고, 그래서 `bd prime` 같은
+/// 명령을 따로 두지 않았다. 밖이면 도움말과 `init` 안내.
+///
+/// 처음 만난 쪽이 알아야 할 것은 둘이다: 지금 무슨 상태인가, 다음에 무엇을
+/// 치는가. 둘 다 여기서 준다.
+fn opening(ctx: &Ctx) -> R<Vec<String>> {
+    use clap::CommandFactory;
+    if crate::store::Repo::discover().is_err() {
+        let mut help = Vec::new();
+        crate::cli::Cli::command()
+            .write_help(&mut help)
+            .map_err(|e| Fail::new(e.to_string()))?;
+        let mut out: Vec<String> =
+            String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
+        out.push(String::new());
+        out.push("여기는 아직 moai 저장소가 아니다 — `moai init` 으로 시작한다".into());
+        return Ok(out);
+    }
+
+    let mut out = status::run(ctx)?;
+    if ctx.json {
+        return Ok(out);
+    }
+    out.push(String::new());
+    let here = std::path::Path::new("AGENTS.md").exists();
+    out.push(crate::style::paint(
+        crate::style::DIM,
+        if here {
+            "명령: `moai --help`   ·   이 저장소에서 일하는 법: AGENTS.md"
+        } else {
+            "명령: `moai --help`"
+        },
+    ));
+    Ok(out)
 }
 
 fn typed(ctx: &Ctx, cmd: Typed, kind: Kind) -> R<Vec<String>> {

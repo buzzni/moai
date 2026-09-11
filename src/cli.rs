@@ -8,11 +8,34 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     name = "moai",
     version,
     about = "이슈 트래커. 승인 게이트 없음. 규율은 `moai status` 가 비춘다.",
-    max_term_width = 100
+    max_term_width = 100,
+    after_help = "\
+세션은 이렇게 시작한다:
+
+  moai status                   보드 · 경고 · 흐름. 인자 없이 불러도 이것이 나온다
+  moai ready                    지금 집을 수 있는 일
+  moai show <id>                그 일의 본문과 이력 — 왜 그렇게 정했는지가 여기 있다
+  moai mv <id> in_progress      집는다.  끝나면 done
+  moai note <id> \"발견한 것\"    다음 사람이 읽을 메모
+
+계획을 한 번에 세울 때:
+
+  moai add --from - <<'EOF'
+  # 에픽 제목
+  - [p1] 첫 이슈 #bug
+  EOF
+
+승인 게이트가 없다. 무엇이든 만들고 무엇이든 옮길 수 있다. 대신
+`moai status` 가 에픽 없는 이슈·오래 멈춘 review·한 번에 벌여 놓은 것을 비춘다.
+
+`moai <명령> --help` 가 그 명령의 전부를 낸다. 저장소에 AGENTS.md 가 있으면
+그 저장소에서 일하는 절차가 거기 있다."
 )]
 pub struct Cli {
+    /// 없으면 `status` 다 (저장소 밖에서는 도움말). **오류가 아니다** —
+    /// 맨몸으로 부른 것을 실패로 끝내면 처음 만난 쪽이 도구가 고장 난 줄 안다.
     #[command(subcommand)]
-    pub cmd: Cmd,
+    pub cmd: Option<Cmd>,
 
     /// 기계가 읽는 출력. 사람 출력은 전부 사라진다
     #[arg(long, global = true)]
@@ -53,19 +76,6 @@ pub enum Cmd {
   급한 것 → 끝나가는 에픽 → 오래된 것 차례로 낸다.")]
     Ready,
 
-    /// 이 저장소에 .moai/ 를 심는다 (다시 불러도 된다)
-    #[command(after_help = "\
-  이미 심긴 곳에서 다시 부르면 딸린 파일(.gitattributes·.gitignore·AGENTS.md)
-  만 다시 맞춘다. 이슈와 저널은 건드리지 않는다.
-
-  접두어는 처음 한 번만 정한다 — 이미 발급된 id 가 전부 그것을 달고 있다.")]
-    Init {
-        /// id 접두어. 없으면 디렉터리 이름에서 만든다
-        prefix: Option<String>,
-        /// AGENTS.md 를 건드리지 않는다
-        #[arg(long)]
-        no_agents: bool,
-    },
     /// 이슈를 만든다
     #[command(after_help = "\
 예시:
@@ -116,6 +126,20 @@ pub enum Cmd {
     /// 위 동사를 `--type milestone` 으로 고정해 부른다
     #[command(subcommand)]
     Milestone(Typed),
+
+    /// 이 저장소에 .moai/ 를 심는다 (다시 불러도 된다)
+    #[command(after_help = "\
+  이미 심긴 곳에서 다시 부르면 딸린 파일(.gitattributes·.gitignore·AGENTS.md)
+  만 다시 맞춘다. 이슈와 저널은 건드리지 않는다.
+
+  접두어는 처음 한 번만 정한다 — 이미 발급된 id 가 전부 그것을 달고 있다.")]
+    Init {
+        /// id 접두어. 없으면 디렉터리 이름에서 만든다
+        prefix: Option<String>,
+        /// AGENTS.md 를 건드리지 않는다
+        #[arg(long)]
+        no_agents: bool,
+    },
 }
 
 /// `moai <종류> <동사>` ≡ `moai <동사> --type <종류>`.

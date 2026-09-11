@@ -2,7 +2,8 @@
 
 이 저장소는 자기 자신을 이 도구로 관리한다. 할 일은 `.moai/issues.jsonl` 에 있다.
 
-    ./target/release/moai status     보드 · 경고 · 흐름. 여기서 시작한다
+    cargo build --release            바이너리는 커밋되지 않는다 (~30초)
+    ./target/release/moai            인자 없이 부르면 status 가 나온다
     ./target/release/moai ready      지금 집을 수 있는 일
 
 명령 전체와 기능 요청을 받았을 때의 절차는 @AGENTS.md 에 있다 (`moai init` 이

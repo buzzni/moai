@@ -1044,3 +1044,58 @@ fn the_milestone_namespace_costs_nothing() {
     assert!(line_of(s.path(), &m).contains(r#""kind":"milestone""#));
     assert!(ok(s.path(), &["milestone", "show"]).contains(&m));
 }
+
+// ── 첫인상 ───────────────────────────────────────────────────────────
+
+/// 맨몸으로 부른 것을 실패로 끝내면 처음 만난 쪽이 도구가 고장 난 줄 안다.
+/// 그리고 에이전트는 exit 2 를 보고 다시 안 부른다.
+#[test]
+fn calling_it_bare_is_not_a_failure() {
+    let s = init("bare");
+    add(s.path(), &["제목"]);
+
+    let out = moai(s.path(), &[]);
+    assert!(out.status.success(), "맨몸 호출이 {:?} 로 끝났다", out.status.code());
+    let text = String::from_utf8_lossy(&out.stdout);
+    // 지금 무슨 상태인가
+    assert!(text.contains("todo") && text.contains("최근 7일"), "{text}");
+    // 다음에 무엇을 치는가
+    assert!(text.contains("moai ready") && text.contains("moai --help"), "{text}");
+    assert!(text.contains("AGENTS.md"), "일하는 법으로 가는 길이 없다\n{text}");
+    assert!(String::from_utf8_lossy(&out.stderr).is_empty(), "{:?}", out.stderr);
+}
+
+/// 저장소 밖에서는 무엇을 할 수 있는지와 어떻게 시작하는지를 같이 낸다.
+#[test]
+fn outside_a_repo_it_teaches_instead_of_erroring() {
+    let s = Scratch::new("bareout");
+    let out = moai(s.path(), &[]);
+    assert!(out.status.success(), "{:?}", out.status.code());
+    let text = String::from_utf8_lossy(&out.stdout);
+    for want in ["moai status", "moai ready", "add --from", "승인 게이트가 없다", "moai init"] {
+        assert!(text.contains(want), "{want} 가 없다\n{text}");
+    }
+}
+
+/// 처음 만난 쪽이 알아야 할 것은 둘이다 — 지금 무슨 상태인가, 다음에 무엇을
+/// 치는가. `--help` 만 봐도 둘째가 나와야 한다.
+#[test]
+fn help_says_what_to_type_next() {
+    let s = init("help");
+    let out = ok(s.path(), &["--help"]);
+    for want in ["moai status", "moai ready", "moai mv", "add --from", "AGENTS.md"] {
+        assert!(out.contains(want), "{want} 가 없다\n{out}");
+    }
+    // 명령 목록도 그대로 있다
+    assert!(out.contains("milestone") && out.contains("note"), "{out}");
+}
+
+/// 인자 없이 부른 것도 `--json` 이 돈다 — 에이전트가 첫 호출부터 기계로 읽는다.
+#[test]
+fn the_bare_call_speaks_json_too() {
+    let s = init("barejson");
+    add(s.path(), &["제목"]);
+    let out = ok(s.path(), &["--json"]);
+    one_json_value(&out);
+    assert!(out.contains("\"warnings\"") && out.contains("\"flow\""), "{out}");
+}

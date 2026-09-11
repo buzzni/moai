@@ -46,3 +46,10 @@
 {"ts":"2026-09-11T16:28:22Z","id":"moai-0l71","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
 {"ts":"2026-09-11T16:29:23Z","id":"moai-0l71","kind":"status","by":"레이븐","from":"in_progress","to":"done","note":"구현 현황·리뷰 교훈·이어받는 법 갱신"}
 {"ts":"2026-09-11T16:29:23Z","id":"moai-csra","kind":"status","by":"레이븐","from":"todo","to":"done","note":"세션 이어받기 준비 완료"}
+{"ts":"2026-09-11T16:39:47Z","id":"moai-vxxo","kind":"create","by":"레이븐","title":"첫인상"}
+{"ts":"2026-09-11T16:39:47Z","id":"moai-1rwp","kind":"create","by":"레이븐","title":"맨몸 moai 가 실패로 끝난다"}
+{"ts":"2026-09-11T16:39:47Z","id":"moai-u63u","kind":"create","by":"레이븐","title":"도움말이 다음에 무엇을 할지 말하지 않는다"}
+{"ts":"2026-09-11T16:42:01Z","id":"moai-1rwp","kind":"status","by":"레이븐","from":"todo","to":"done","note":"맨몸 호출이 status 를 내고 0 으로 끝난다"}
+{"ts":"2026-09-11T16:42:01Z","id":"moai-u63u","kind":"status","by":"레이븐","from":"todo","to":"done","note":"맨몸 호출이 status 를 내고 0 으로 끝난다"}
+{"ts":"2026-09-11T16:42:01Z","id":"moai-1rwp","kind":"note","by":"레이븐","text":"bd prime 을 안 만든 대신 맨몸 호출이 그 자리를 맡는다. 저장소 안이면 status, 밖이면 도움말 + init 안내. 둘 다 exit 0 — 에이전트는 exit 2 를 보면 다시 안 부른다."}
+{"ts":"2026-09-11T16:42:01Z","id":"moai-vxxo","kind":"status","by":"레이븐","from":"todo","to":"done","note":"첫인상 정리"}
