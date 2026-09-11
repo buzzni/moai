@@ -39,8 +39,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 터미널 복구는 `ratatui::run` 에 맡긴다 — raw mode·대체 화면을 켜고,
     // **되돌리는 패닉 훅까지** 걸고, 끝나면 restore 한다. 손으로 짜면 어느
     // 이른 return 하나가 사용자 셸을 망가뜨린다.
-    ratatui::run(|term| loop_until_quit(term, &load.issues, &index, path.clone()))
-        .map_err(|e| Fail::new(e.to_string()))?;
+    let mut app = App::new(load.issues, repo.config.clone(), path);
+    ratatui::run(|term| loop_until_quit(term, &mut app)).map_err(|e| Fail::new(e.to_string()))?;
     Ok(Vec::new())
 }
 
@@ -115,61 +115,21 @@ impl Row {
 }
 
 // ── 화면 ──────────────────────────────────────────────────────────────
-//
-// 뼈대다. 좌우 패널과 검색은 뒤따르는 이슈가 얹는다.
 
+use crate::tui::App;
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{self, Event, KeyEventKind};
 
-fn loop_until_quit(
-    term: &mut DefaultTerminal,
-    issues: &[Issue],
-    index: &Index,
-    mut path: Path,
-) -> std::io::Result<()> {
-    loop {
-        let rows: Vec<String> = index
-            .entries(issues, &path)
-            .iter()
-            .map(|e| match e.at() {
-                Some(at) => format!("{}  {}", issues[at].id, index.label(issues, e)),
-                None => index.label(issues, e),
-            })
-            .collect();
-        let here = if path.is_empty() { "/".to_string() } else { format!("/{}", path.len()) };
-
-        term.draw(|f| {
-            let text = std::iter::once(format!("moai tui — {here}"))
-                .chain(rows.iter().cloned())
-                .chain(std::iter::once(String::new()))
-                .chain(std::iter::once("q·F10 끝내기   Backspace 나가기".to_string()))
-                .collect::<Vec<_>>()
-                .join("\n");
-            f.render_widget(ratatui::widgets::Paragraph::new(text), f.area());
-        })?;
-
+fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result<()> {
+    while !app.quit {
+        term.draw(|f| crate::tui::draw::screen(f, app))?;
         // **누를 때만 받는다.** crossterm 은 kitty 프로토콜 터미널에서 뗄 때도
         // 보내므로, 거르지 않으면 키 하나가 두 번 먹는다.
         if let Event::Key(k) = event::read()?
             && k.kind == KeyEventKind::Press
-            && let Some(()) = handle(k, &mut path)
         {
-            return Ok(());
+            app.key(k);
         }
     }
-}
-
-/// 끝낼 때만 `Some`.
-fn handle(k: KeyEvent, path: &mut Path) -> Option<()> {
-    match k.code {
-        // **raw mode 에서는 Ctrl-C 가 신호로 오지 않는다.** 직접 받지 않으면
-        // 빠져나갈 길이 하나 사라진다.
-        KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => Some(()),
-        KeyCode::Char('q') | KeyCode::Esc | KeyCode::F(10) => Some(()),
-        KeyCode::Backspace | KeyCode::Left => {
-            path.pop();
-            None
-        }
-        _ => None,
-    }
+    Ok(())
 }

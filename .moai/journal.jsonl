@@ -87,3 +87,7 @@
 {"ts":"2026-09-11T18:50:12Z","id":"moai-0gox","kind":"create","by":"레이븐","title":"AGENTS.md 블록과 도움말에 moai tui 를 넣는다"}
 {"ts":"2026-09-11T18:52:21Z","id":"moai-0g9i","kind":"note","by":"레이븐","text":"뼈대 완료. ratatui 0.30 을 default-features=false + crossterm_0_29 + layout-cache 로 넣었다 — 기본 기능은 달력 위젯(time 크레이트)과 termwiz 백엔드를 끌고 온다. 측정: 바이너리 1.9MB(상한 15MB), clean build 51초(상한 300초), 고유 크레이트 85개. --path 는 슬래시 사슬이 아니라 id 하나로 받는다 — 조상을 사람이 다 적게 할 이유가 없다, nav::home_of 가 이미 안다. 디렉터리면 그 안을, 아니면 그것이 든 디렉터리를 연다. pty 로 띄워 q 종료와 터미널 복구를 확인했다. 렌더 내용 검증은 대체 화면이 나갈 때 지워져 이 방법으로 안 되고, 실제 패널이 서는 moai-ydpz 에서 TestBackend 로 한다."}
 {"ts":"2026-09-11T18:52:21Z","id":"moai-0g9i","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
+{"ts":"2026-09-11T18:55:48Z","id":"moai-0g9i","kind":"status","by":"레이븐","from":"review","to":"done"}
+{"ts":"2026-09-11T18:55:49Z","id":"moai-ydpz","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-11T19:02:06Z","id":"moai-ydpz","kind":"note","by":"레이븐","text":"좌측 목록 완료. 상태 전이(App)는 터미널 없이, 그림(draw)은 TestBackend 로 시험한다 — 둘 다 TTY 를 안 켠다. 렌더 테스트가 실제로 값을 했다: TestBackend 버퍼를 칸마다 이어 붙이면 두 칸짜리 한글 다음 칸의 공백까지 글자로 세어져 '상 세' 가 되고, 있는 글자를 못 찾고 폭도 부풀어 센다. 앞 글자 폭만큼 건너뛰어야 화면과 같은 줄이 된다. 커서 기억: 들어갔다 나오면 있던 자리로 돌아온다(MC 와 같다) — 매번 맨 위로 튕기면 형제 여럿을 훑는 일이 못 할 짓이 된다. pty 로 Enter·Backspace·화살표·q·Ctrl-C 를 실제로 눌러 확인했다. 주의: 키를 한꺼번에 밀어 넣으면 raw mode 켜지기 전에 터미널 드라이버가 \\003 을 SIGINT 로 처리해 130 으로 죽는다 — 시간차를 두면 내 핸들러가 받아 0 으로 끝난다."}
+{"ts":"2026-09-11T19:02:06Z","id":"moai-ydpz","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
