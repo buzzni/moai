@@ -25,12 +25,12 @@ fn resolve(target: Option<&str>) -> R<Target> {
         None => Ok(Target::All),
         Some("issue") => Ok(Target::OfKind(Kind::Issue)),
         Some("epic") => Ok(Target::OfKind(Kind::Epic)),
-        Some("milestone") => Err(Fail::new("마일스톤은 아직 없다 (2단계)")),
+        Some("milestone") => Ok(Target::OfKind(Kind::Milestone)),
         Some(t) if crate::id::is_valid(t) => Ok(Target::One(t.to_string())),
         // 조용히 0건을 내지 않는다. 모르는 값은 거부하고 있는 것을 나열한다.
         Some(t) => Err(Fail::coded(
             format!(
-                "`{t}` 는 id 도 종류도 아니다. 종류: issue, epic\n      \
+                "`{t}` 는 id 도 종류도 아니다. 종류: issue, epic, milestone\n      \
                  id 로 찾으려면 접두어까지 적는다"
             ),
             super::code::BAD_TARGET,
@@ -97,6 +97,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         tag: a.tag,
         no_tag: a.no_tag,
         epic: a.epic,
+        milestone: a.milestone,
         parent: a.parent,
         priority: a.priority,
         kind,
@@ -119,9 +120,10 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 두 판단이 어긋날 자리가 생긴다.
     let hide_done = !filter.all && filter.status.is_empty();
     let wide = Filter { all: true, ..filter };
+    let wh = crate::query::Where::of(&load.issues);
     let mut shown: Vec<Issue> = Vec::new();
     let mut hidden = 0usize;
-    for i in load.issues.iter().filter(|i| wide.matches(i, &now)) {
+    for i in load.issues.iter().filter(|i| wide.matches(i, &now, &wh)) {
         if hide_done && i.status.is_done() {
             hidden += 1;
         } else {
@@ -167,16 +169,19 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue) -> R<Vec<String>> {
 
     // 이력은 언제나 맨 끝이다. 에픽이면 멤버를 그 **앞에** 끼운다.
     let mut out = view::detail(issue, epic, &children, &[], &model::now());
-    // 에픽을 펼치면 속한 이슈까지 보여 준다 — 에픽 하나를 보는 이유가
-    // 그 밑에 무엇이 있는지 알려는 것이다.
-    if report::is_epic(issue) {
-        let groups = report::groups(all);
+    // 묶음을 펼치면 그 밑에 무엇이 있는지까지 보여 준다 — 묶음 하나를 보는
+    // 이유가 바로 그것이다. 마일스톤이면 에픽과 이슈가 같이 나온다.
+    if issue.kind != Kind::Issue {
+        let group = match issue.kind {
+            Kind::Milestone => report::milestones(all),
+            _ => report::groups(all),
+        };
         let mine: Vec<Issue> = all
             .iter()
-            .filter(|i| groups.get(i.id.as_str()) == Some(&issue.id.as_str()))
+            .filter(|i| group.get(i.id.as_str()) == Some(&issue.id.as_str()) && i.id != issue.id)
             .cloned()
             .collect();
-        let roll = report::rollup(all, &repo.config)
+        let roll = report::rollup_of(issue.kind, all, &repo.config)
             .into_iter()
             .find(|r| r.id.as_deref() == Some(issue.id.as_str()));
         if let Some(r) = roll {

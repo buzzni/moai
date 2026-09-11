@@ -75,6 +75,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
 
             let mut issue = Issue::new(id, title.clone(), kind, status.clone(), &at);
         issue.epic = args.epic.clone();
+        issue.milestone = args.milestone.clone();
         issue.tags = args.tag.iter().map(|t| model::normalize_tag(t)).collect();
         issue.priority = args.priority;
         issue.assignee = args.assignee.clone();

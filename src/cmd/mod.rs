@@ -67,6 +67,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Status => status::run(&ctx),
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),
         Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
+        Cmd::Milestone(t) => typed(&ctx, t, Kind::Milestone),
     }
 }
 

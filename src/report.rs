@@ -46,6 +46,12 @@ pub fn is_epic(i: &Issue) -> bool {
     i.kind == Kind::Epic
 }
 
+/// **일은 이슈가 한다.** 에픽도 마일스톤도 묶음이지 일이 아니다 — 세면
+/// 보드의 `todo 6` 이 실제로 할 일 넷과 묶음 둘을 합친 수가 된다.
+pub fn is_work(i: &Issue) -> bool {
+    i.kind == Kind::Issue
+}
+
 /// `id` 의 직계 자식. 부모는 id 에서 유도되므로 접두 검사면 된다.
 pub fn children_of<'a>(issues: &'a [Issue], id: &str) -> Vec<&'a Issue> {
     issues.iter().filter(|c| crate::id::parent_of(&c.id) == Some(id)).collect()
@@ -81,12 +87,57 @@ pub fn groups(all: &[Issue]) -> BTreeMap<&str, &str> {
     out
 }
 
+/// 이슈 id → 그것이 속한 마일스톤 id.
+///
+/// **에픽을 거쳐 물려받는다.** 제 것이 있으면 그것, 없으면 에픽의 것,
+/// 그것도 없으면 부모의 것. 이슈마다 마일스톤을 적게 하면 에픽을 옮길 때
+/// 멤버를 전부 따라 고쳐야 하고, 반드시 하나는 빠뜨린다.
+pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
+    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
+    let mut out = BTreeMap::new();
+    for i in all {
+        let mut cur = i;
+        // 에픽·부모를 타고 올라가며 처음 만나는 마일스톤. 고리가 있어도
+        // 멈추도록 걸음 수를 제한한다.
+        for _ in 0..64 {
+            if let Some(m) = &cur.milestone {
+                out.insert(i.id.as_str(), m.as_str());
+                break;
+            }
+            let up = cur
+                .epic
+                .as_deref()
+                .and_then(|e| by_id.get(e))
+                .or_else(|| crate::id::parent_of(&cur.id).and_then(|p| by_id.get(p)));
+            match up {
+                Some(next) if next.id != cur.id => cur = next,
+                _ => break,
+            }
+        }
+    }
+    out
+}
+
+/// 그 종류의 소속 지도. 에픽과 마일스톤이 같은 코드를 지난다.
+fn group_for(kind: Kind, all: &[Issue]) -> BTreeMap<&str, &str> {
+    match kind {
+        Kind::Milestone => milestones(all),
+        _ => groups(all),
+    }
+}
+
 /// 에픽별 집계와, 마지막에 "에픽 없음" 묶음 하나.
 ///
 /// **멤버가 없는 에픽도 줄을 갖는다.** 빠뜨리면 "계획만 세우고 안 채운 것"
 /// 이 화면에서 사라져, 정확히 드러내야 할 것이 안 보인다.
 /// **소속 없는 이슈도 묶음을 갖는다.** 같은 이유다.
 pub fn rollup(issues: &[Issue], cfg: &Config) -> Vec<Roll> {
+    rollup_of(Kind::Epic, issues, cfg)
+}
+
+/// `kind` 가 에픽이든 마일스톤이든 같은 셈을 한다. **일은 이슈가 한다** —
+/// 에픽은 어느 쪽 집계에도 세지 않는다.
+pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
     let tally = |members: &[&Issue]| {
         let counts: BTreeMap<String, usize> = cfg
             .statuses
@@ -101,27 +152,31 @@ pub fn rollup(issues: &[Issue], cfg: &Config) -> Vec<Roll> {
 
     // 자식이 물려받은 소속까지 센다. 트리가 그리는 것과 같은 판정이어야
     // 머리글의 건수와 그 밑의 줄 수가 어긋나지 않는다.
-    let group = groups(issues);
+    let group = group_for(kind, issues);
     let mut out: Vec<Roll> = issues
         .iter()
-        .filter(|i| is_epic(i))
+        .filter(|i| i.kind == kind)
         .map(|e| {
             let members: Vec<&Issue> = issues
                 .iter()
-                .filter(|i| group.get(i.id.as_str()) == Some(&e.id.as_str()))
+                .filter(|i| is_work(i) && group.get(i.id.as_str()) == Some(&e.id.as_str()))
                 .collect();
             let (counts, total, done, percent) = tally(&members);
             Roll { id: Some(e.id.clone()), title: e.title.clone(), counts, total, done, percent }
         })
         .collect();
 
-    // 에픽이 아니면서 어느 에픽에도 안 딸린 것. 에픽 자신은 세지 않는다.
+    // 어느 묶음에도 안 딸린 일. 에픽은 일이 아니라 묶음이라 세지 않는다.
     let loose: Vec<&Issue> = issues
         .iter()
-        .filter(|i| !is_epic(i) && !group.contains_key(i.id.as_str()))
+        .filter(|i| is_work(i) && !group.contains_key(i.id.as_str()))
         .collect();
     let (counts, total, done, percent) = tally(&loose);
-    out.push(Roll { id: None, title: "에픽 없음".into(), counts, total, done, percent });
+    let none = match kind {
+        Kind::Milestone => "마일스톤 없음",
+        _ => "에픽 없음",
+    };
+    out.push(Roll { id: None, title: none.into(), counts, total, done, percent });
     out
 }
 
@@ -149,7 +204,7 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let mut out: Vec<&Issue> = issues
         .iter()
         .filter(|i| {
-            !is_epic(i)                              // 에픽 자체는 집는 게 아니다
+            is_work(i)                               // 묶음은 집는 게 아니다
                 && i.status.as_str() == cfg.first_status()
                 && !done_epic(i)
                 && !has_open_child(i)
@@ -265,6 +320,8 @@ pub struct Flow {
 pub struct StatusReport {
     pub counts: BTreeMap<String, usize>,
     pub total: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub milestones: Vec<Roll>,
     pub epics: Vec<Roll>,
     pub warnings: Vec<Warning>,
     pub flow: Flow,
@@ -283,7 +340,7 @@ fn ids_of(v: &[&Issue]) -> Vec<String> {
 
 /// `unreadable` 은 읽다 만난 줄 번호다 — 저장소가 아니라 부르는 쪽이 준다.
 pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -> StatusReport {
-    let work: Vec<&Issue> = issues.iter().filter(|i| !is_epic(i)).collect();
+    let work: Vec<&Issue> = issues.iter().filter(|i| is_work(i)).collect();
     let counts: BTreeMap<String, usize> = cfg
         .statuses
         .iter()
@@ -292,6 +349,11 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
 
     let rolls = rollup(issues, cfg);
     let epics: Vec<Roll> = rolls.iter().filter(|r| r.id.is_some()).cloned().collect();
+    // 마일스톤을 하나도 안 쓰는 저장소에는 줄도 경고도 내지 않는다.
+    let stones: Vec<Roll> = rollup_of(Kind::Milestone, issues, cfg)
+        .into_iter()
+        .filter(|r| r.id.is_some())
+        .collect();
     let group = groups(issues);
     let mut warnings = Vec::new();
 
@@ -308,6 +370,23 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
         warnings.push(
             Warning::new("no_epic", ids_of(&loose)).ratio(ratio).hint("moai show -e none"),
         );
+    }
+
+    // 1-2. 마일스톤을 쓰기 시작했는데 거기 안 붙은 일. 마일스톤이 없는
+    //      저장소에는 말하지 않는다 — 안 쓰는 기능으로 잔소리하지 않는다.
+    if !stones.is_empty() {
+        let mile = milestones(issues);
+        let outside: Vec<&Issue> = work
+            .iter()
+            .copied()
+            .filter(|i| !i.status.is_done() && !mile.contains_key(i.id.as_str()))
+            .collect();
+        if !outside.is_empty() {
+            warnings.push(
+                Warning::new("no_milestone", ids_of(&outside))
+                    .hint("moai show --milestone none"),
+            );
+        }
     }
 
     // 2. review 에서 썩는 것. 게이트를 없앤 대가라 여기가 제일 먼저 곪는다.
@@ -418,6 +497,7 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     StatusReport {
         counts,
         total: work.len(),
+        milestones: stones,
         epics,
         warnings,
         flow: Flow {
@@ -700,6 +780,58 @@ mod tests {
         let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z");
         assert_eq!(st.total, 1);
         assert_eq!(st.counts.get("todo"), Some(&1));
+    }
+
+    /// 마일스톤은 에픽을 거쳐 물려받는다. 이슈마다 적게 하면 에픽을 옮길 때
+    /// 멤버를 전부 따라 고쳐야 하고, 반드시 하나는 빠뜨린다.
+    #[test]
+    fn milestones_come_down_through_epics() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.milestone = Some("argos-m001".into());
+        let mut own = make("argos-0005", Kind::Issue, "todo");
+        own.milestone = Some("argos-m002".into()); // 제 것이 이긴다
+        let issues = vec![
+            make("argos-m001", Kind::Milestone, "todo"),
+            epic,
+            member("argos-0002", "argos-0001", "todo"),
+            make("argos-0002.aaa", Kind::Issue, "todo"),
+            own,
+            make("argos-0009", Kind::Issue, "todo"),
+        ];
+        let m = milestones(&issues);
+        assert_eq!(m.get("argos-0002"), Some(&"argos-m001"), "에픽을 안 거쳤다");
+        assert_eq!(m.get("argos-0002.aaa"), Some(&"argos-m001"), "손자가 안 물려받았다");
+        assert_eq!(m.get("argos-0005"), Some(&"argos-m002"), "제가 적은 것이 져 버렸다");
+        assert_eq!(m.get("argos-0009"), None);
+    }
+
+    /// 묶음은 일이 아니다. 세면 보드의 숫자가 할 일과 묶음을 합친 것이 된다.
+    #[test]
+    fn groupings_are_not_work() {
+        let issues = vec![
+            make("argos-m001", Kind::Milestone, "todo"),
+            make("argos-0001", Kind::Epic, "todo"),
+            member("argos-0002", "argos-0001", "todo"),
+        ];
+        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z");
+        assert_eq!(st.total, 1);
+        assert_eq!(st.counts.get("todo"), Some(&1));
+        assert!(ready(&issues, &cfg()).iter().all(|i| i.id == "argos-0002"));
+    }
+
+    /// 마일스톤을 안 쓰는 저장소에는 마일스톤 이야기를 꺼내지 않는다.
+    #[test]
+    fn milestones_stay_quiet_until_used() {
+        let plain = vec![make("argos-0001", Kind::Issue, "todo")];
+        let st = status(&plain, &[], &cfg(), "2026-09-01T00:00:00Z");
+        assert!(st.milestones.is_empty());
+        assert!(!kinds(&st).contains(&"no_milestone"), "{:?}", kinds(&st));
+
+        let mut used = plain.clone();
+        used.push(make("argos-m001", Kind::Milestone, "todo"));
+        let st = status(&used, &[], &cfg(), "2026-09-01T00:00:00Z");
+        assert_eq!(st.milestones.len(), 1);
+        assert!(kinds(&st).contains(&"no_milestone"));
     }
 
     #[test]

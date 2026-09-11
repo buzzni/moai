@@ -954,3 +954,71 @@ fn a_semicolon_is_a_letter_not_a_separator() {
     let out = ok(s.path(), &["show", "--filter", "grep=a;b"]);
     assert!(out.contains("a;b 가 깨진다") && !out.contains("멀쩡한 것"), "{out}");
 }
+
+// ── 2단계 — 마일스톤 ─────────────────────────────────────────────────
+
+/// 마일스톤은 에픽과 이슈를 담는다. 사용자가 처음부터 물었던 그림이다.
+#[test]
+fn a_milestone_holds_epics_and_issues() {
+    let s = init("milestone");
+    let m = add(s.path(), &["v0.1", "--type", "milestone"]);
+    let epic = add(s.path(), &["저장 계층", "--type", "epic", "--milestone", &m]);
+    let member = add(s.path(), &["원자적 쓰기", "-e", &epic]);
+    let child = add(s.path(), &["회귀 테스트", "--parent", &member]);
+    let direct = add(s.path(), &["에픽 없이 바로", "--milestone", &m]);
+    let outside = add(s.path(), &["아무 데도"]);
+
+    let out = ok(s.path(), &["show", &m]);
+    for want in [&epic, &member, &child, &direct] {
+        assert!(out.contains(want.as_str()), "{want} 가 없다\n{out}");
+    }
+    assert!(!out.contains(&outside), "{out}");
+    // 진척은 **일** 만 센다 — 에픽은 묶음이라 안 센다
+    assert!(out.contains("멤버   0/3"), "{out}");
+
+    // 종류만 따로 볼 수 있다
+    assert!(ok(s.path(), &["show", "milestone"]).contains(&m));
+    assert!(!ok(s.path(), &["show", "epic"]).contains(&m));
+}
+
+/// `--milestone` 은 물려받은 것까지 고른다. 트리가 보여 주는 것과 목록이
+/// 고르는 것이 달라지면 둘 중 하나를 못 믿게 된다.
+#[test]
+fn the_milestone_filter_sees_what_was_inherited() {
+    let s = init("mfilter");
+    let m = add(s.path(), &["v0.1", "--type", "milestone"]);
+    let epic = add(s.path(), &["저장 계층", "--type", "epic", "--milestone", &m]);
+    let member = add(s.path(), &["원자적 쓰기", "-e", &epic]);
+    let outside = add(s.path(), &["아무 데도"]);
+
+    let out = ok(s.path(), &["show", "--milestone", &m]);
+    assert!(out.contains(&member) && !out.contains(&outside), "{out}");
+    assert_eq!(out, ok(s.path(), &["show", "--filter", &format!("milestone={m}")]));
+
+    let none = ok(s.path(), &["show", "--milestone", "none"]);
+    assert!(none.contains(&outside) && !none.contains(&member), "{none}");
+}
+
+/// 마일스톤을 안 쓰면 그 이야기를 꺼내지 않는다. 안 쓰는 기능으로 잔소리하지 않는다.
+#[test]
+fn status_mentions_milestones_only_when_used() {
+    let s = init("mstatus");
+    add(s.path(), &["제목"]);
+    assert!(!ok(s.path(), &["status"]).contains("마일스톤"), "안 쓰는데 꺼냈다");
+
+    let m = add(s.path(), &["v0.1", "--type", "milestone"]);
+    let out = ok(s.path(), &["status"]);
+    assert!(out.contains("마일스톤") && out.contains(&m), "{out}");
+    assert!(out.contains("마일스톤에 안 붙은 이슈 1건"), "{out}");
+    // 묶음은 보드에 세지 않는다
+    assert!(out.contains("이슈 1"), "{out}");
+}
+
+/// `moai <종류> <동사>` 규칙이 디스패치 코드 0줄로 따라온다.
+#[test]
+fn the_milestone_namespace_costs_nothing() {
+    let s = init("mns");
+    let m = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    assert!(line_of(s.path(), &m).contains(r#""kind":"milestone""#));
+    assert!(ok(s.path(), &["milestone", "show"]).contains(&m));
+}

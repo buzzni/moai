@@ -53,6 +53,9 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         if let Some(e) = &args.epic {
             i.epic = clearable(e);
         }
+        if let Some(m) = &args.milestone {
+            i.milestone = clearable(m);
+        }
         if let Some(p) = args.priority {
             i.priority = Some(p);
         }
@@ -110,6 +113,7 @@ fn fail_if_nothing(args: &EditArgs) -> R<()> {
         || !args.tag.is_empty()
         || !args.untag.is_empty()
         || args.epic.is_some()
+        || args.milestone.is_some()
         || args.priority.is_some()
         || args.assignee.is_some();
     touched.then_some(()).ok_or_else(|| {

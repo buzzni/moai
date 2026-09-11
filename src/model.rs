@@ -40,11 +40,8 @@ impl std::str::FromStr for Kind {
         match s {
             "issue" => Ok(Kind::Issue),
             "epic" => Ok(Kind::Epic),
-            // `milestone` 은 **여기서 받지 않는다.** serde 는 파일에서 읽을 줄
-            // 알아야 하지만(2단계 바이너리가 쓴 줄), CLI 가 만들 수 있으면
-            // `moai show milestone` 은 "아직 없다" 고 하는데 `moai add --type
-            // milestone` 은 만들어지는 상태가 된다.
-            _ => Err(format!("`{s}` 는 종류가 아니다. 종류: issue, epic")),
+            "milestone" => Ok(Kind::Milestone),
+            _ => Err(format!("`{s}` 는 종류가 아니다. 종류: issue, epic, milestone")),
         }
     }
 }
@@ -97,6 +94,10 @@ pub struct Issue {
     /// 소속. **파생이 아니라 필드다** — 부모-자식(id 의 점)과 직교한다.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epic: Option<String>,
+    /// 더 큰 소속. 에픽과도 직교한다 — 에픽에 안 붙은 이슈가 마일스톤에는
+    /// 붙을 수 있고, 그 반대도 된다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub milestone: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     /// `status` 가 마지막으로 바뀐 때. 방치 검사와 "review 에 6일" 이 여기서 나온다.
@@ -138,6 +139,7 @@ impl Issue {
             tags: Vec::new(),
             assignee: None,
             epic: None,
+            milestone: None,
             created_at: at.to_string(),
             updated_at: at.to_string(),
             status_since: at.to_string(),
@@ -190,10 +192,12 @@ impl Issue {
                 return Err(format!("{}: 태그에 공백이나 쉼표를 넣지 않는다 — {tag:?}", self.id));
             }
         }
-        if let Some(e) = &self.epic
-            && !crate::id::is_valid(e)
-        {
-            return Err(format!("{}: 에픽 id 형식이 아니다 — {e:?}", self.id));
+        for (what, v) in [("에픽", &self.epic), ("마일스톤", &self.milestone)] {
+            if let Some(v) = v
+                && !crate::id::is_valid(v)
+            {
+                return Err(format!("{}: {what} id 형식이 아니다 — {v:?}", self.id));
+            }
         }
         Ok(())
     }
@@ -390,11 +394,12 @@ mod tests {
         i.tags = vec!["bug".into()];
         i.assignee = Some("claude".into());
         i.epic = Some("argos-9k2p".into());
+        i.milestone = Some("argos-m001".into());
         i.body = Some("본문".into());
         let line = serde_json::to_string(&i).unwrap();
         let want = [
             "id", "title", "kind", "status", "priority", "tags", "assignee", "epic",
-            "created_at", "updated_at", "status_since", "body",
+            "milestone", "created_at", "updated_at", "status_since", "body",
         ];
         let at: Vec<usize> = want
             .iter()
@@ -408,22 +413,25 @@ mod tests {
     fn round_trips_byte_identical() {
         for line in [
             r#"{"id":"argos-4aex","title":"제목","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#,
-            r#"{"id":"argos-9k2p","title":"에픽","kind":"epic","status":"in_progress","priority":1,"tags":["bug"],"assignee":"claude","epic":"argos-0000","created_at":"2026-09-10T09:00:00Z","updated_at":"2026-09-11T05:02:44Z","status_since":"2026-09-10T09:30:00Z","body":"여러\n줄"}"#,
+            r#"{"id":"argos-9k2p","title":"에픽","kind":"epic","status":"in_progress","priority":1,"tags":["bug"],"assignee":"claude","epic":"argos-0000","milestone":"argos-m001","created_at":"2026-09-10T09:00:00Z","updated_at":"2026-09-11T05:02:44Z","status_since":"2026-09-10T09:30:00Z","body":"여러\n줄"}"#,
         ] {
             let i: Issue = serde_json::from_str(line).unwrap();
             assert_eq!(serde_json::to_string(&i).unwrap(), line);
         }
     }
 
-    /// 2단계가 쓴 필드를 1단계가 읽고 써도 잃지 않는다.
+    /// 뒷 단계가 쓴 필드를 앞 단계 바이너리가 읽고 써도 잃지 않는다.
+    ///
+    /// 매 쓰기가 전체 재작성이라, 이게 없으면 새 바이너리가 쓴 필드를 옛
+    /// 바이너리가 한 번 만지는 것만으로 1만 줄에서 지운다.
     #[test]
     fn unknown_fields_survive() {
-        let line = r#"{"id":"argos-4aex","title":"제목","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z","milestone":"argos-m001","due":"2026-10-01"}"#;
+        let line = r#"{"id":"argos-4aex","title":"제목","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z","due":"2026-10-01","estimate":90}"#;
         let i: Issue = serde_json::from_str(line).unwrap();
         assert_eq!(i.rest.len(), 2, "{:?}", i.rest);
         let out = serde_json::to_string(&i).unwrap();
-        assert!(out.contains(r#""milestone":"argos-m001""#), "{out}");
         assert!(out.contains(r#""due":"2026-10-01""#), "{out}");
+        assert!(out.contains(r#""estimate":90"#), "{out}");
     }
 
     /// 옛 바이너리가 2단계 종류를 만나도 줄을 버리지 않는다.
@@ -450,11 +458,11 @@ mod tests {
         assert_eq!(i.tags, ["bug"], "한 개념이 둘로 갈라졌다");
     }
 
-    /// 2단계 종류를 CLI 로 만들 수는 없되, 파일에서 읽을 줄은 안다.
     #[test]
-    fn milestone_reads_from_file_but_not_from_argv() {
-        assert!("milestone".parse::<Kind>().is_err());
+    fn kinds_round_trip() {
+        assert_eq!("milestone".parse::<Kind>().unwrap(), Kind::Milestone);
         assert_eq!("epic".parse::<Kind>().unwrap(), Kind::Epic);
+        assert!("없는것".parse::<Kind>().is_err());
         let i: Issue = serde_json::from_str(
             r#"{"id":"argos-4aex","title":"M1","kind":"milestone","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#,
         )

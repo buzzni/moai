@@ -108,6 +108,9 @@ pub enum Cmd {
     /// 위 동사를 `--type epic` 으로 고정해 부른다
     #[command(subcommand)]
     Epic(Typed),
+    /// 위 동사를 `--type milestone` 으로 고정해 부른다
+    #[command(subcommand)]
+    Milestone(Typed),
 }
 
 /// `moai <종류> <동사>` ≡ `moai <동사> --type <종류>`.
@@ -131,6 +134,10 @@ pub struct AddArgs {
     /// 이 에픽에 넣는다
     #[arg(short, long, value_name = "id")]
     pub epic: Option<String>,
+
+    /// 이 마일스톤에 넣는다
+    #[arg(long, value_name = "id")]
+    pub milestone: Option<String>,
 
     /// 쉼표로 잇거나 여러 번 쓴다
     #[arg(short, long, value_name = "태그", value_delimiter = ',')]
@@ -209,6 +216,10 @@ pub struct FilterArgs {
     #[arg(short, long, value_name = "id|none")]
     pub epic: Vec<String>,
 
+    /// 그 마일스톤 소속 (`none` = 마일스톤 없는 것)
+    #[arg(long, value_name = "id|none")]
+    pub milestone: Vec<String>,
+
     /// 그 이슈의 자식 (`none` = 최상위만)
     #[arg(long, value_name = "id|none")]
     pub parent: Vec<String>,
@@ -274,6 +285,10 @@ pub struct EditArgs {
     /// 에픽을 옮긴다 (`none` 이면 뺀다)
     #[arg(short, long, value_name = "id|none")]
     pub epic: Option<String>,
+
+    /// 마일스톤을 옮긴다 (`none` 이면 뺀다)
+    #[arg(long, value_name = "id|none")]
+    pub milestone: Option<String>,
 
     #[arg(short, long, value_name = "0-3")]
     pub priority: Option<u8>,

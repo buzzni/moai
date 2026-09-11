@@ -190,7 +190,7 @@ pub fn tree(shown: &[Issue], rolls: &[Roll], groups: &BTreeMap<&str, &str>) -> V
                 let group = groups.get(i.id.as_str()).copied();
                 match &roll.id {
                     Some(e) => group == Some(e.as_str()),
-                    None => group.is_none() && i.kind != Kind::Epic,
+                    None => group.is_none() && crate::report::is_work(i),
                 }
             })
             .collect();
@@ -284,6 +284,7 @@ fn says(w: &Warning) -> String {
             "에픽 없는 이슈 {n}건 (열린 것의 {}%)",
             (w.ratio.unwrap_or(0.0) * 100.0).round() as u32
         ),
+        "no_milestone" => format!("마일스톤에 안 붙은 이슈 {n}건"),
         "stale_review" => format!("review 에 {}일 넘게 멈춘 것 {n}건", w.days.unwrap_or(0)),
         // review 도 벌여 놓은 일이다. "진행 중" 이라고 하면 review 경고와
         // 같은 이슈가 두 번 나오는 것이 말이 안 되게 보인다.
@@ -332,13 +333,26 @@ pub fn status(st: &StatusReport, issues: &[Issue], cfg: &Config, now: &str, at: 
         .collect();
     out.push(format!("  {}", board.join("    ")));
 
-    if !st.epics.is_empty() {
+    for (label, rolls) in [("마일스톤", &st.milestones), ("에픽", &st.epics)] {
+        if rolls.is_empty() {
+            continue;
+        }
         out.push(String::new());
-        let w_title = st.epics.iter().map(|e| width(&clip(&e.title, EPIC_CAP))).max().unwrap_or(4);
-        for e in &st.epics {
-            let note = match (e.percent, e.total) {
-                (None, _) => paint(style::DIM, "   자식 없음"),
-                (Some(100), _) => paint(style::WARN, "   닫을 때가 됐다"),
+        if !st.milestones.is_empty() {
+            out.push(paint(style::DIM, label));
+        }
+        let w_title = rolls.iter().map(|e| width(&clip(&e.title, EPIC_CAP))).max().unwrap_or(4);
+        for e in rolls {
+            // 이미 닫힌 묶음에 "닫을 때가 됐다" 를 내면, 시킨 대로 했는데도
+            // 잔소리가 남는다. 한 번 하면 사라져야 말을 듣는다.
+            let still_open = e
+                .id
+                .as_deref()
+                .and_then(|id| by_id.get(id))
+                .is_some_and(|i| !i.status.is_done());
+            let note = match e.percent {
+                None => paint(style::DIM, "   자식 없음"),
+                Some(100) if still_open => paint(style::WARN, "   닫을 때가 됐다"),
                 _ => String::new(),
             };
             out.push(format!(
@@ -776,6 +790,27 @@ mod tests {
         let groups = crate::report::groups(&all);
         assert_eq!(plain(&tree(&[], &rolls, &groups)), ["없다."]);
         assert!(plain(&tree(&[epic], &rolls, &groups)).join("\n").contains("빈 에픽"));
+    }
+
+    /// 시킨 대로 닫았는데도 잔소리가 남으면 다음부터 안 듣는다.
+    #[test]
+    fn a_closed_grouping_stops_nagging() {
+        let mut epic = issue("argos-0001", "다 끝난 에픽", "todo");
+        epic.kind = Kind::Epic;
+        let mut member = issue("argos-0002", "멤버", "done");
+        member.epic = Some("argos-0001".into());
+        let all = vec![epic.clone(), member];
+        let cfg = cfg();
+
+        let open = crate::report::status(&all, &[], &cfg, "2026-09-11T04:12:03Z");
+        let text = plain(&status(&open, &all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl")).join("\n");
+        assert!(text.contains("닫을 때가 됐다"), "{text}");
+
+        let mut all = all;
+        all[0].status = Status::new("done");
+        let closed = crate::report::status(&all, &[], &cfg, "2026-09-11T04:12:03Z");
+        let text = plain(&status(&closed, &all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl")).join("\n");
+        assert!(!text.contains("닫을 때가 됐다"), "{text}");
     }
 
     #[test]

@@ -11,12 +11,29 @@
 //! 사이에 OR 이 필요하다는 요청이 실제로 올 때 다시 본다.
 
 use crate::model::{Issue, Kind, days_since};
+use std::collections::BTreeMap;
 
 /// `epic=none` 처럼 "값이 없는 것" 을 고르는 자리.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Sel {
     Unset,
     Is(String),
+}
+
+/// 소속은 **묶음 전체를 봐야** 알 수 있다 — 자식은 조상에게서 물려받고,
+/// 마일스톤은 에픽을 거쳐 온다. 그래서 이슈 하나만 보고는 못 고른다.
+pub struct Where<'a> {
+    pub epic: BTreeMap<&'a str, &'a str>,
+    pub milestone: BTreeMap<&'a str, &'a str>,
+}
+
+impl<'a> Where<'a> {
+    pub fn of(all: &'a [Issue]) -> Where<'a> {
+        Where {
+            epic: crate::report::groups(all),
+            milestone: crate::report::milestones(all),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -28,6 +45,7 @@ pub struct Filter {
     pub no_tags: Vec<String>,
     /// OR. 비면 아무거나. 쉼표가 또는이라는 규칙이 여기에도 걸린다.
     pub epic: Vec<Sel>,
+    pub milestone: Vec<Sel>,
     pub parent: Vec<Sel>,
     pub priority: Vec<u8>,
     pub kind: Option<Kind>,
@@ -53,7 +71,7 @@ fn once(values: &[String], flag: &str, what: &str) -> Result<Vec<String>, String
 
 /// 있는 필터 항목. 모르는 키를 만나면 이 목록을 그대로 보여준다.
 pub const KEYS: &[&str] =
-    &["status", "tag", "no-tag", "epic", "parent", "priority", "type", "grep", "stale"];
+    &["status", "tag", "no-tag", "epic", "milestone", "parent", "priority", "type", "grep", "stale"];
 
 /// 플래그에서 온 날것. `cmd` 가 argv 를 그대로 옮겨 담아 넘긴다.
 ///
@@ -65,6 +83,7 @@ pub struct Raw {
     pub tag: Vec<String>,
     pub no_tag: Vec<String>,
     pub epic: Vec<String>,
+    pub milestone: Vec<String>,
     pub parent: Vec<String>,
     pub priority: Vec<String>,
     pub kind: Option<Kind>,
@@ -93,6 +112,7 @@ impl Filter {
                 .collect(),
             no_tags: raw.no_tag.iter().flat_map(|t| split_tags(t)).collect(),
             epic: sel(once(&raw.epic, "-e", "에픽")?),
+            milestone: sel(once(&raw.milestone, "--milestone", "마일스톤")?),
             parent: sel(once(&raw.parent, "--parent", "부모")?),
             priority: parse_priorities(&once(&raw.priority, "-p", "우선순위")?)?,
             kind: raw.kind,
@@ -103,7 +123,7 @@ impl Filter {
         })
     }
 
-    pub fn matches(&self, i: &Issue, now: &str) -> bool {
+    pub fn matches(&self, i: &Issue, now: &str, wh: &Where) -> bool {
         if !self.all && self.status.is_empty() && i.status.is_done() {
             return false;
         }
@@ -116,7 +136,12 @@ impl Filter {
         if self.no_tags.iter().any(|t| i.tags.contains(t)) {
             return false;
         }
-        if !matches_sel(&self.epic, i.epic.as_deref()) {
+        // 소속은 **물려받은 것까지** 본다. `-e X` 가 X 밑의 손자를 빠뜨리면
+        // 트리가 보여 주는 것과 목록이 고르는 것이 달라진다.
+        if !matches_sel(&self.epic, wh.epic.get(i.id.as_str()).copied()) {
+            return false;
+        }
+        if !matches_sel(&self.milestone, wh.milestone.get(i.id.as_str()).copied()) {
             return false;
         }
         if !matches_sel(&self.parent, crate::id::parent_of(&i.id)) {
@@ -165,6 +190,7 @@ fn desugar(raw: &mut Raw, text: &str) -> Result<(), String> {
             "tag" => raw.tag.push(v),
             "no-tag" => raw.no_tag.push(v),
             "epic" => raw.epic.push(v),
+            "milestone" => raw.milestone.push(v),
             "parent" => raw.parent.push(v),
             "priority" => raw.priority.push(v),
             "type" => raw.kind = Some(v.parse()?),
@@ -249,6 +275,12 @@ mod tests {
         i
     }
 
+    /// 한 이슈만 두고 고르기. 소속 지도는 그 이슈에서 뽑는다.
+    fn hit(f: &Filter, i: &Issue) -> bool {
+        let all = [i.clone()];
+        f.matches(i, NOW, &Where::of(&all))
+    }
+
     fn f() -> Filter {
         Filter { all: true, ..Filter::default() }
     }
@@ -257,24 +289,24 @@ mod tests {
     #[test]
     fn commas_are_or() {
         let f = Filter::build(Raw { status: s(&["todo,review"]), all: true, ..Raw::default() }).unwrap();
-        assert!(f.matches(&issue("a-0001", "todo", &[]), NOW));
-        assert!(f.matches(&issue("a-0001", "review", &[]), NOW));
-        assert!(!f.matches(&issue("a-0001", "done", &[]), NOW));
+        assert!(hit(&f, &issue("a-0001", "todo", &[])));
+        assert!(hit(&f, &issue("a-0001", "review", &[])));
+        assert!(!hit(&f, &issue("a-0001", "done", &[])));
     }
 
     /// 반복은 그리고.
     #[test]
     fn repeating_a_tag_is_and() {
         let f = Filter::build(Raw { tag: s(&["bug", "p1"]), all: true, ..Raw::default() }).unwrap();
-        assert!(f.matches(&issue("a-0001", "todo", &["bug", "p1"]), NOW));
-        assert!(!f.matches(&issue("a-0001", "todo", &["bug"]), NOW));
+        assert!(hit(&f, &issue("a-0001", "todo", &["bug", "p1"])));
+        assert!(!hit(&f, &issue("a-0001", "todo", &["bug"])));
     }
 
     #[test]
     fn a_comma_inside_one_tag_flag_is_or() {
         let f = Filter::build(Raw { tag: s(&["bug,chore"]), all: true, ..Raw::default() }).unwrap();
-        assert!(f.matches(&issue("a-0001", "todo", &["chore"]), NOW));
-        assert!(!f.matches(&issue("a-0001", "todo", &["perf"]), NOW));
+        assert!(hit(&f, &issue("a-0001", "todo", &["chore"])));
+        assert!(!hit(&f, &issue("a-0001", "todo", &["perf"])));
     }
 
     /// 한 이슈가 두 칸에 동시에 있을 수 없다는 것을 알려 준다.
@@ -291,25 +323,25 @@ mod tests {
         let without = issue("a-0002", "todo", &[]);
 
         let f = Filter::build(Raw { epic: s(&["none"]), all: true, ..Raw::default() }).unwrap();
-        assert!(!f.matches(&with, NOW) && f.matches(&without, NOW));
+        assert!(!hit(&f, &with) && hit(&f, &without));
 
         let f = Filter::build(Raw { epic: s(&["a-9999"]), all: true, ..Raw::default() }).unwrap();
-        assert!(f.matches(&with, NOW) && !f.matches(&without, NOW));
+        assert!(hit(&f, &with) && !hit(&f, &without));
     }
 
     /// `--parent none` 은 최상위만. 부모는 id 에서 유도된다.
     #[test]
     fn parent_none_is_top_level_only() {
         let f = Filter::build(Raw { parent: s(&["none"]), all: true, ..Raw::default() }).unwrap();
-        assert!(f.matches(&issue("a-0001", "todo", &[]), NOW));
-        assert!(!f.matches(&issue("a-0001.abc", "todo", &[]), NOW));
+        assert!(hit(&f, &issue("a-0001", "todo", &[])));
+        assert!(!hit(&f, &issue("a-0001.abc", "todo", &[])));
     }
 
     #[test]
     fn no_tag_excludes() {
         let f = Filter::build(Raw { no_tag: s(&["wontfix"]), all: true, ..Raw::default() }).unwrap();
-        assert!(!f.matches(&issue("a-0001", "todo", &["wontfix"]), NOW));
-        assert!(f.matches(&issue("a-0001", "todo", &["bug"]), NOW));
+        assert!(!hit(&f, &issue("a-0001", "todo", &["wontfix"])));
+        assert!(hit(&f, &issue("a-0001", "todo", &["bug"])));
     }
 
     #[test]
@@ -318,9 +350,9 @@ mod tests {
         i.body = Some("BOM 이 섞여 있다".into());
         let mut f = f();
         f.grep = Some("bom".into()); // 대소문자를 가리지 않는다
-        assert!(f.matches(&i, NOW));
+        assert!(hit(&f, &i));
         f.grep = Some("없는말".into());
-        assert!(!f.matches(&i, NOW));
+        assert!(!hit(&f, &i));
     }
 
     /// `--stale` 은 **지금 칸에 머문 기간**이다. 리뷰가 썩는 것을 찾는 데 쓴다.
@@ -330,19 +362,19 @@ mod tests {
         i.status_since = "2026-09-05T00:00:00Z".into(); // 6일
         let mut f = f();
         f.stale = Some(3);
-        assert!(f.matches(&i, NOW));
+        assert!(hit(&f, &i));
         f.stale = Some(7);
-        assert!(!f.matches(&i, NOW));
+        assert!(!hit(&f, &i));
     }
 
     /// 기본은 done 을 뺀다. 칸을 콕 집으면 그 말을 따른다.
     #[test]
     fn done_is_hidden_unless_asked_for() {
         let done = issue("a-0001", "done", &[]);
-        assert!(!Filter::default().matches(&done, NOW));
-        assert!(Filter { all: true, ..Filter::default() }.matches(&done, NOW));
+        assert!(!hit(&Filter::default(), &done));
+        assert!(hit(&Filter { all: true, ..Filter::default() }, &done));
         let named = Filter::build(Raw { status: s(&["done"]), ..Raw::default() }).unwrap();
-        assert!(named.matches(&done, NOW));
+        assert!(hit(&named, &done));
     }
 
     /// 쉼표는 에픽·부모에서도 또는이다. 첫 값만 보고 나머지를 버리면
@@ -361,17 +393,17 @@ mod tests {
             Raw { filter: s(&["epic=a-9998,a-9999"]), all: true, ..Raw::default() },
         ] {
             let f = Filter::build(spelling).unwrap();
-            assert!(f.matches(&a, NOW) && f.matches(&b, NOW) && !f.matches(&c, NOW));
+            assert!(hit(&f, &a) && hit(&f, &b) && !hit(&f, &c));
         }
 
         // `none` 도 다른 값과 나란히 놓일 수 있다.
         let f = Filter::build(Raw { epic: s(&["none,a-9999"]), all: true, ..Raw::default() }).unwrap();
-        assert!(f.matches(&b, NOW) && f.matches(&c, NOW) && !f.matches(&a, NOW));
+        assert!(hit(&f, &b) && hit(&f, &c) && !hit(&f, &a));
 
         let f = Filter::build(Raw { parent: s(&["a-0001,a-0002"]), all: true, ..Raw::default() }).unwrap();
-        assert!(f.matches(&issue("a-0001.abc", "todo", &[]), NOW));
-        assert!(f.matches(&issue("a-0002.abc", "todo", &[]), NOW));
-        assert!(!f.matches(&issue("a-0003.abc", "todo", &[]), NOW));
+        assert!(hit(&f, &issue("a-0001.abc", "todo", &[])));
+        assert!(hit(&f, &issue("a-0002.abc", "todo", &[])));
+        assert!(!hit(&f, &issue("a-0003.abc", "todo", &[])));
     }
 
     /// `--filter` 는 플래그를 덮어쓰지 않고 **같은 자리에 쌓인다.** 두 표현이
@@ -388,12 +420,12 @@ mod tests {
         // 태그는 쌓이는 쪽이라 둘 다 걸린다 (반복=그리고).
         let f = Filter::build(Raw { tag: s(&["bug"]), filter: s(&["tag=parser"]), all: true, ..Raw::default() })
             .unwrap();
-        assert!(f.matches(&issue("a-0001", "todo", &["bug", "parser"]), NOW));
-        assert!(!f.matches(&issue("a-0002", "todo", &["bug"]), NOW));
+        assert!(hit(&f, &issue("a-0001", "todo", &["bug", "parser"])));
+        assert!(!hit(&f, &issue("a-0002", "todo", &["bug"])));
 
         // 빈 값은 "거르지 않는다" 다 — 플래그 쪽과 같은 뜻이어야 한다.
         let f = Filter::build(Raw { filter: s(&["tag="]), all: true, ..Raw::default() }).unwrap();
-        assert!(f.matches(&issue("a-0001", "todo", &[]), NOW));
+        assert!(hit(&f, &issue("a-0001", "todo", &[])));
     }
 
     /// `--filter` 는 플래그와 정확히 같은 뜻이다.
@@ -406,7 +438,7 @@ mod tests {
             issue("a-0002", "review", &["bug"]),
             issue("a-0003", "todo", &["perf"]),
         ] {
-            assert_eq!(flags.matches(&i, NOW), string.matches(&i, NOW), "{}", i.id);
+            assert_eq!(hit(&flags, &i), hit(&string, &i), "{}", i.id);
         }
     }
 

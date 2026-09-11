@@ -23,3 +23,11 @@
 {"ts":"2026-09-11T15:35:46Z","id":"moai-5i34","kind":"status","by":"레이븐","from":"todo","to":"done","note":"1단계 마무리 — 세 건 다 끝"}
 {"ts":"2026-09-11T15:59:16Z","id":"moai-pgdl","kind":"create","by":"레이븐","title":"CLAUDE.md 를 쓰고 유지한다"}
 {"ts":"2026-09-11T15:59:32Z","id":"moai-pgdl","kind":"rm","by":"레이븐","title":"CLAUDE.md 를 쓰고 유지한다"}
+{"ts":"2026-09-11T16:00:27Z","id":"moai-bipm","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-11T16:00:27Z","id":"moai-ogcq","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-11T16:00:27Z","id":"moai-3b9o","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-11T16:07:04Z","id":"moai-bipm","kind":"status","by":"레이븐","from":"in_progress","to":"done"}
+{"ts":"2026-09-11T16:07:04Z","id":"moai-ogcq","kind":"status","by":"레이븐","from":"in_progress","to":"done"}
+{"ts":"2026-09-11T16:07:04Z","id":"moai-3b9o","kind":"status","by":"레이븐","from":"in_progress","to":"done"}
+{"ts":"2026-09-11T16:07:04Z","id":"moai-bipm","kind":"note","by":"레이븐","text":"소속은 필드, 파생은 id. 마일스톤은 에픽을 거쳐 물려받는다 — 이슈마다 적게 하면 에픽을 옮길 때 멤버를 전부 따라 고쳐야 하고 반드시 하나는 빠뜨린다."}
+{"ts":"2026-09-11T16:07:04Z","id":"moai-i4f7","kind":"status","by":"레이븐","from":"todo","to":"done","note":"2단계 완료"}
