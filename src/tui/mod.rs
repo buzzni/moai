@@ -11,6 +11,7 @@ use crate::nav::{Entry, Index, Path, Seg};
 use crate::query::{Filter, Raw, Where};
 use crate::store::{Load, Repo};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::widgets::ListState;
 
 /// 목록의 한 줄. `..` 은 이슈가 아니므로 [`Entry`] 로는 못 담는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,25 +47,53 @@ pub struct App {
     pub now: String,
     /// 읽다 만난 못 읽는 줄. 대체 화면 안에서는 stderr 로 못 알린다.
     pub unreadable: usize,
+    /// 마지막 갱신이 **실패한** 까닭. 조용히 삼키면 F5 가 아무 일도 안 하는데
+    /// "바뀌었다" 배너는 붙어 있어, 사람은 누르고 또 누르며 까닭을 못 얻는다.
+    pub trouble: Option<String>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
     /// 파일이 우리가 읽은 뒤로 바뀌었는가. **저절로 다시 읽지 않는다** —
     /// 커서가 튀기 때문이다. 바뀌었다고 말만 하고 사람이 F5 를 누른다.
     pub stale: bool,
     /// 마지막으로 읽은 파일의 (고친 때, 길이).
-    stamp: Option<(std::time::SystemTime, u64)>,
+    stamp: Stamp,
     /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임
     /// `Filter::matches` 를 돌리면 `Where::of` 가 프레임마다 지도를 다시 만든다.
     keep: Vec<bool>,
     /// 층마다 커서를 기억한다. 들어갔다 나오면 **있던 자리로 돌아온다** —
     /// 매번 맨 위로 튕기면 형제 여럿을 훑는 일이 못 할 짓이 된다.
     remembered: Vec<usize>,
+    /// 목록이 훑고 있는 자리. **프레임을 넘어 산다** — 매 프레임 새로 만들면
+    /// 위젯이 0 번 줄부터 다시 세어 커서를 늘 맨 아랫줄에 붙이고, 그러면
+    /// 커서 아래를 한 줄도 못 본다.
+    pub list: ListState,
     pub quit: bool,
 }
 
 impl App {
+    /// 저장소 없이 세운다 — 시험과 눈으로 보는 길이 이것을 쓴다. 진짜 길은
+    /// [`App::open`] 이고, 그쪽은 색인을 부른 쪽에서 받는다.
+    #[cfg(test)]
     pub fn new(issues: Vec<Issue>, cfg: Config, path: Path) -> App {
         let index = Index::of(&issues);
+        App::build(issues, index, cfg, path, 0)
+    }
+
+    /// 저장소에서 읽어 세운다.
+    ///
+    /// **색인은 부른 쪽이 이미 만든 것을 받는다** — 여는 데서 다시 만들면
+    /// 같은 훑기를 두 번 하고, 그 훑기는 이슈 수에 비례한다.
+    /// **표식도 부른 쪽이 읽기 전에 잰 것을 받는다** — 읽고 나서 재면 그
+    /// 사이에 떨어진 쓰기가 "이미 본 것" 으로 적혀 영영 안 보인다.
+    pub fn open(repo: Repo, load: Load, index: Index, path: Path, stamp: Stamp) -> App {
+        let cfg = repo.config.clone();
+        let mut app = App::build(load.issues, index, cfg, path, load.errors.len());
+        app.stamp = stamp;
+        app.repo = Some(repo);
+        app
+    }
+
+    fn build(issues: Vec<Issue>, index: Index, cfg: Config, path: Path, unreadable: usize) -> App {
         // 들어간 채로 시작하면(`--path`) 나올 층마다 기억 자리를 만들어 둔다.
         let remembered = vec![0; path.len()];
         let keep = vec![true; issues.len()];
@@ -78,25 +107,18 @@ impl App {
             filter_text: None,
             repo: None,
             now: crate::model::now(),
-            unreadable: 0,
+            unreadable,
+            trouble: None,
             warnings: 0,
             stale: false,
             stamp: None,
             keep,
             remembered,
+            list: ListState::default(),
             quit: false,
         };
-        app.count_warnings();
-        app
-    }
-
-    /// 저장소에서 읽어 세운다.
-    pub fn open(repo: Repo, load: Load, path: Path) -> App {
-        let cfg = repo.config.clone();
-        let mut app = App::new(load.issues, cfg, path);
-        app.unreadable = load.errors.len();
-        app.stamp = stamp_of(&repo);
-        app.repo = Some(repo);
+        // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
+        // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
         app.count_warnings();
         app
     }
@@ -105,10 +127,20 @@ impl App {
     /// 하던 일이 흩어지면 F5 를 안 누르게 되고, 그러면 낡은 화면을 본다.
     pub fn reload(&mut self) {
         let Some(repo) = &self.repo else { return };
-        let Ok(load) = repo.read() else { return };
-        self.stamp = stamp_of(repo);
-        self.unreadable = load.errors.len();
-        self.adopt(load.issues);
+        // 읽기 **전에** 잰다. 뒤에 재면 읽고 재는 사이의 쓰기를 놓치고, 놓친
+        // 것은 영영 안 돌아온다. 먼저 재면 최악이 헛 알림 하나다.
+        let stamp = stamp_of(repo);
+        match repo.read() {
+            Ok(load) => {
+                self.trouble = None;
+                self.stamp = stamp;
+                self.unreadable = load.errors.len();
+                self.adopt(load.issues);
+            }
+            // **소리 없이 넘기지 않는다.** 삼키면 F5 는 아무 일도 안 하고
+            // 배너는 그대로 붙어 있어, 사람은 누르고 또 누르며 까닭을 못 얻는다.
+            Err(e) => self.trouble = Some(e.to_string()),
+        }
     }
 
     /// 새 자료를 받아들이고 어긋난 것을 손본다. 시험이 저장소 없이 부른다.
@@ -151,10 +183,29 @@ impl App {
             }
             good.push(seg);
         }
-        if good.len() != self.path.len() {
-            self.remembered.truncate(good.len());
-            self.cursor = 0;
+        if good.len() == self.path.len() {
+            self.path = good;
+            return;
         }
+        // **옮겨진 것과 지워진 것은 다르다.** 서 있던 마디가 아직 살아 있으면
+        // 자리만 바뀐 것이니 그 새 자리로 따라간다 — 마일스톤이 처음 생기면
+        // 에픽이 한 층 깊어지는데, 거기서 뿌리로 내려놓으면 가장 흔한 갱신이
+        // 하필 자리를 가장 크게 잃는 갱신이 된다. `home_of` 가 그 새 자리를
+        // 이미 알고, `cmd/tui.rs::resolve` 도 같은 셈을 쓴다.
+        if let Some(at) = self.path.last().and_then(|s| self.index.find(seg_id(s)?))
+            && self.index.is_dir(&self.issues, at)
+        {
+            let mut moved = self.index.home_of(at).clone();
+            moved.push(self.index.seg_of(&self.issues, at));
+            if moved != self.path {
+                self.remembered = vec![0; moved.len()];
+                self.cursor = 0;
+                self.path = moved;
+                return;
+            }
+        }
+        self.remembered.truncate(good.len());
+        self.cursor = 0;
         self.path = good;
     }
 
@@ -166,9 +217,12 @@ impl App {
 
     /// 파일이 우리가 읽은 뒤로 바뀌었는지 본다. **고친 때만 보면 놓친다** —
     /// rename 으로 갈아끼우는 쓰기는 같은 초에 떨어질 수 있어 길이도 함께 본다.
+    /// **`stamp` 이 없다고 멈추지 않는다.** 아직 파일이 없는 저장소는
+    /// `read()` 가 빈 것을 돌려주고 `stamp_of` 는 `None` 을 내는데, 거기서
+    /// 한 번 걸러 버리면 파일이 생긴 뒤에도 영영 바뀐 줄 모른다.
+    /// `None != Some(..)` 이 이미 바르게 답한다.
     pub fn check_stale(&mut self) {
         if let Some(repo) = &self.repo
-            && self.stamp.is_some()
             && stamp_of(repo) != self.stamp
         {
             self.stale = true;
@@ -181,23 +235,25 @@ impl App {
     /// 시키지도 않은 줄을 숨기면 파일이 사라진 것처럼 보인다. 열린 것만 보려면
     /// `status=todo` 라고 적으면 된다.
     pub fn apply(&mut self, mode: &Mode) -> Result<(), String> {
-        let (text, raw) = match mode {
-            Mode::Grep(q) => (q.clone(), Raw { grep: Some(q.clone()), all: true, ..Raw::default() }),
-            Mode::Filter(q) => (
-                q.clone(),
-                Raw { filter: q.split_whitespace().map(str::to_string).collect(), all: true, ..Raw::default() },
-            ),
-            Mode::Browse => (String::new(), Raw::default()),
+        let text = match mode {
+            Mode::Grep(q) | Mode::Filter(q) => q.clone(),
+            Mode::Browse => String::new(),
         };
         if text.trim().is_empty() {
             self.filter_text = None;
             self.keep = vec![true; self.issues.len()];
             return Ok(());
         }
-        // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
-        // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다.
-        let filter = Filter::build(raw)?;
-        let now = crate::model::now();
+        let filter = self.build_filter(mode)?;
+        // 칸 이름은 `Filter::build` 가 모른다 — 저장소가 정하는 것이라
+        // `config` 에 있다. `cmd/show.rs` 와 같은 자로 잰다: 조용히 0건을 내면
+        // `status=in-progress` 같은 오타가 "그 칸은 비었다" 와 구별되지 않는다.
+        for s in &filter.status {
+            self.cfg.require_known(s)?;
+        }
+        // 시계는 **적재마다** 고정한 것을 쓴다. 여기서 다시 잡으면 `stale=`
+        // 같은 물음이 화면의 나머지와 다른 시각으로 판정된다.
+        let now = self.now.clone();
         let wh = Where::of(&self.issues);
         self.keep = self.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
         self.filter_text = Some(match mode {
@@ -205,6 +261,19 @@ impl App {
             _ => text,
         });
         Ok(())
+    }
+
+    /// 적은 글을 거름망으로. **적는 곳과 물어보는 곳이 같은 것을 쓴다** —
+    /// 갈라지면 프롬프트 밑의 오류가 Enter 가 판정할 글과 다른 글을 판정한다.
+    fn build_filter(&self, mode: &Mode) -> Result<Filter, String> {
+        let raw = match mode {
+            Mode::Grep(q) => Raw { grep: Some(q.clone()), all: true, ..Raw::default() },
+            Mode::Filter(q) => Raw { filter: split_filter(q), all: true, ..Raw::default() },
+            Mode::Browse => Raw::default(),
+        };
+        // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
+        // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다.
+        Filter::build(raw)
     }
 
     pub fn clear_filter(&mut self) {
@@ -264,6 +333,21 @@ impl App {
 
     /// 글을 받는 중.
     fn typing(&mut self, k: KeyEvent) {
+        // **Ctrl 은 글자가 아니다.** raw mode 에서는 Ctrl-C 가 신호로 오지
+        // 않으므로, 여기서 글자로 먹으면 검색칸에 `c` 가 찍히고 나갈 길이
+        // Esc 하나로 줄어든다. Ctrl-U 는 적던 것을 통째로 지운다.
+        if k.modifiers.contains(KeyModifiers::CONTROL) {
+            match k.code {
+                KeyCode::Char('c') => self.quit = true,
+                KeyCode::Char('u') => {
+                    if let Mode::Grep(b) | Mode::Filter(b) = &mut self.mode {
+                        b.clear();
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         let buf = match &mut self.mode {
             Mode::Grep(b) | Mode::Filter(b) => b,
             Mode::Browse => return,
@@ -288,14 +372,15 @@ impl App {
     }
 
     /// 지금 적고 있는 글에 대한 오류. 없으면 `None`.
+    ///
+    /// **Enter 가 밟을 길을 그대로 밟는다.** 칸 이름 검사까지 여기서 해야
+    /// `status=in-progress` 같은 오타가 "그 칸은 비었다" 로 보이지 않는다.
     pub fn input_error(&self) -> Option<String> {
         match &self.mode {
-            Mode::Filter(q) if !q.trim().is_empty() => Filter::build(Raw {
-                filter: q.split_whitespace().map(str::to_string).collect(),
-                all: true,
-                ..Raw::default()
-            })
-            .err(),
+            Mode::Filter(q) if !q.trim().is_empty() => match self.build_filter(&self.mode) {
+                Err(e) => Some(e),
+                Ok(f) => f.status.iter().find_map(|s| self.cfg.require_known(s).err()),
+            },
             _ => None,
         }
     }
@@ -334,11 +419,13 @@ impl App {
         out
     }
 
-    /// id 를 제목으로 푼다. 없으면 id 그대로 — 끊긴 참조를 숨기지 않는다.
+    /// id 를 제목으로 푼다. 없으면 **끊겼다고 적는다** — id 만 내면 그것이
+    /// 그저 제목 없는 줄인지 없는 것을 가리키는 참조인지 알 길이 없다.
+    /// 훑지 않는다. 이 함수는 막는 것마다·소속마다·프레임마다 불린다.
     pub fn title_of(&self, id: &str) -> String {
-        match self.issues.iter().find(|i| i.id == id) {
-            Some(i) => i.title.clone(),
-            None => format!("{id}  (없다)"),
+        match self.index.find(id) {
+            Some(at) => self.issues[at].title.clone(),
+            None => format!("{id}  {MISSING}"),
         }
     }
 
@@ -348,16 +435,52 @@ impl App {
             Seg::Lost => return "(길 잃음)".into(),
             Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => id,
         };
-        match self.issues.iter().find(|i| &i.id == id) {
-            Some(i) => i.title.clone(),
-            None => id.clone(),
+        match self.index.find(id) {
+            Some(at) => self.issues[at].title.clone(),
+            None => format!("{id}  {MISSING}"),
         }
     }
 }
 
-fn stamp_of(repo: &Repo) -> Option<(std::time::SystemTime, u64)> {
+/// 없는 것을 가리키는 참조에 붙이는 말. **한 낱말로 통일한다** — 자리마다
+/// 다른 말을 쓰면 같은 깨짐을 서로 다른 일로 읽는다.
+const MISSING: &str = "(없다)";
+
+/// 그 마디가 가리키는 줄의 id. 바구니는 제 줄이 없으므로 `None`.
+fn seg_id(seg: &Seg) -> Option<&str> {
+    match seg {
+        Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => Some(id),
+        Seg::Milestone(None) | Seg::Lost => None,
+    }
+}
+
+/// 파일이 그때 그것인지 가늠하는 표식. 고친 때만 보면 놓친다 — rename 으로
+/// 갈아끼우는 쓰기는 같은 초에 떨어질 수 있어 길이도 함께 본다.
+pub type Stamp = Option<(std::time::SystemTime, u64)>;
+
+pub fn stamp_of(repo: &Repo) -> Stamp {
     let m = std::fs::metadata(repo.issues_path()).ok()?;
     Some((m.modified().ok()?, m.len()))
+}
+
+/// 한 줄을 `--filter` 토큰들로 쪼갠다.
+///
+/// **`항목=` 이 시작하는 데서만 쪼갠다.** 그냥 띄어쓰기로 쪼개면 값에 빈칸이
+/// 든 것(`grep=원자적 쓰기`, `status=to do`)을 이 칸에서는 아예 적을 수 없다 —
+/// CLI 는 그것을 인자 하나로 받으므로, "CLI 와 같은 문법" 이라던 약속이 거기서
+/// 깨진다. 항목 이름이 없는 조각은 앞 토큰의 값에 마저 붙는다.
+fn split_filter(q: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for w in q.split_whitespace() {
+        match out.last_mut() {
+            Some(prev) if !w.contains('=') => {
+                prev.push(' ');
+                prev.push_str(w);
+            }
+            _ => out.push(w.to_string()),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -392,6 +515,31 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// 진짜 파일을 쓰는 시험이 쓰는 임시 자리. **터져도 치운다** — 바로
+    /// `remove_dir_all` 을 부르면 assert 하나가 터질 때마다 찌꺼기가 남고,
+    /// 이름이 pid 라 다음 실행이 그것을 치우지도 못한다.
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Scratch {
+            let dir = std::env::temp_dir().join(format!(
+                "moai-tui-{name}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join(".moai")).unwrap();
+            std::fs::write(dir.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+            Scratch(dir)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     /// 지금 보이는 줄의 id 들 (`..` 은 뺀다).
@@ -531,6 +679,77 @@ mod tests {
         assert_eq!(a.filter_text, None);
     }
 
+    /// **값에 빈칸이 들어간다.** 띄어쓰기로 죄다 쪼개면 `grep=원자적 쓰기` 를
+    /// 이 칸에서는 아예 못 적는다 — CLI 는 인자 하나로 받으니 "같은 문법" 이
+    /// 아니게 된다. 항목 이름이 시작하는 데서만 쪼갠다.
+    #[test]
+    fn a_filter_value_may_contain_spaces() {
+        let mut issues = vec![make("argos-0001", Kind::Epic), make("argos-0009", Kind::Issue)];
+        issues[1].title = "원자적 쓰기를 고친다".into();
+        let mut a = App::new(issues, cfg(), Path::new());
+        a.key(key(KeyCode::Char('f')));
+        typed(&mut a, "grep=원자적 쓰기");
+        assert!(a.input_error().is_none(), "{:?}", a.input_error());
+        assert_eq!(shown(&a), ["argos-0009"]);
+
+        // 여러 조건은 여전히 띄어쓰기로 잇는다
+        let mut a = app();
+        a.key(key(KeyCode::Char('f')));
+        typed(&mut a, "type=epic status=todo");
+        assert_eq!(shown(&a), ["argos-0001", "argos-0002"]);
+    }
+
+    /// **모르는 칸은 거절한다.** `cmd/show.rs` 가 쓰는 것과 같은 자다 — 조용히
+    /// 0건을 내면 `status=in-progress` 같은 오타가 "그 칸은 비었다" 와
+    /// 구별되지 않는다.
+    #[test]
+    fn an_unknown_column_is_refused_not_silently_empty() {
+        let mut a = app();
+        a.key(key(KeyCode::Char('f')));
+        typed(&mut a, "status=in-progress");
+        assert!(matches!(a.mode, Mode::Filter(_)), "오타인데 걸렸다");
+        assert!(a.input_error().is_some_and(|e| e.contains("칸")), "{:?}", a.input_error());
+        assert_eq!(a.filter_text, None);
+    }
+
+    /// raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. **글을 받는 중에도** 받아야
+    /// 한다 — 글자로 먹으면 검색칸에 `c` 가 찍히고 나갈 길이 하나로 줄어든다.
+    #[test]
+    fn ctrl_c_quits_even_while_typing() {
+        for opener in [KeyCode::Char('/'), KeyCode::Char('f')] {
+            let mut a = app();
+            a.key(key(opener));
+            a.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+            assert!(a.quit, "{opener:?} 중에 Ctrl-C 를 글자로 먹었다");
+            assert!(matches!(&a.mode, Mode::Grep(b) | Mode::Filter(b) if b.is_empty()));
+        }
+    }
+
+    /// 파일이 **아직 없는** 저장소에서도 생긴 것을 알아챈다. 표식이 없다고
+    /// 한 번 걸러 버리면 그 뒤로 영영 못 알아챈다.
+    #[test]
+    fn a_file_that_appears_later_is_still_noticed() {
+        let scratch = Scratch::new("appear");
+        let dir = scratch.0.clone();
+        let repo = Repo { root: dir.clone(), config: cfg() };
+        let stamp = stamp_of(&repo);
+        let load = repo.read().unwrap();
+        assert!(stamp.is_none() && load.issues.is_empty(), "판이 다르다");
+        let index = Index::of(&load.issues);
+        let mut a = App::open(repo, load, index, Path::new(), stamp);
+
+        std::fs::write(
+            dir.join(".moai/issues.jsonl"),
+            format!("{}\n", serde_json::to_string(&make("argos-0001", Kind::Epic)).unwrap()),
+        )
+        .unwrap();
+        a.check_stale();
+        assert!(a.stale, "없던 파일이 생긴 것을 못 알아챘다");
+        a.reload();
+        assert_eq!(a.issues.len(), 1);
+        assert!(a.trouble.is_none());
+    }
+
     /// **거름망이 찾으려던 것을 숨기지 않는다.** 끝난 에픽도 걸린 멤버가 있으면
     /// 남는다. `Filter` 의 기본값이 done 을 숨기는 것에 걸려들지 않아야 한다.
     #[test]
@@ -590,8 +809,10 @@ mod tests {
     }
 
     /// 마일스톤이 **처음 생기면** 트리가 한 층 깊어져 경로가 통째로 낡는다.
+    /// 그래도 **서 있던 것이 아직 있으면 따라간다** — 자리만 바뀐 것을 지워진
+    /// 것과 같이 다루면, 가장 흔한 갱신이 하필 자리를 가장 크게 잃는다.
     #[test]
-    fn a_first_milestone_deepens_the_tree_and_the_path_is_repaired() {
+    fn a_first_milestone_deepens_the_tree_and_the_cursor_follows_the_epic() {
         let mut a = app();
         a.key(key(KeyCode::Enter));
         let was = a.path.clone();
@@ -599,9 +820,11 @@ mod tests {
         let mut with = a.issues.clone();
         with.push(make("argos-9999", Kind::Milestone));
         a.adopt(with);
-        // 에픽은 이제 마일스톤 밑이라, 뿌리에서 곧바로 가던 길은 없다
-        assert_ne!(a.path, was);
-        assert!(a.path.is_empty());
+        // 길은 낡았지만 뿌리로 내려놓지는 않는다 — 에픽이 간 자리로 따라간다
+        assert_ne!(a.path, was, "트리가 깊어졌는데 길이 그대로다");
+        assert_eq!(a.path.last(), was.last(), "서 있던 에픽을 놓쳤다");
+        assert_eq!(a.path.len(), 2, "{:?}", a.path);
+        assert_eq!(a.remembered.len(), a.path.len());
     }
 
     /// 갱신해도 걸어 둔 거름망은 살아 있다. 갱신 한 번에 하던 일이 흩어지면
@@ -624,16 +847,16 @@ mod tests {
     /// 보면 rename 으로 갈아끼우는 쓰기를 같은 초에 놓치므로 길이도 함께 본다.
     #[test]
     fn it_notices_a_changed_file_and_rereads_it() {
-        let dir = std::env::temp_dir().join(format!("moai-tui-reload-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join(".moai")).unwrap();
-        std::fs::write(dir.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        let scratch = Scratch::new("reload");
+        let dir = scratch.0.clone();
         let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
         std::fs::write(dir.join(".moai/issues.jsonl"), line(&make("argos-0001", Kind::Epic))).unwrap();
 
         let repo = Repo { root: dir.clone(), config: cfg() };
+        let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
-        let mut a = App::open(repo, load, Path::new());
+        let index = Index::of(&load.issues);
+        let mut a = App::open(repo, load, index, Path::new(), stamp);
         assert_eq!(a.issues.len(), 1);
 
         // 아직 아무도 안 건드렸다
@@ -652,7 +875,6 @@ mod tests {
         a.reload();
         assert_eq!(a.issues.len(), 2, "F5 로도 안 읽혔다");
         assert!(!a.stale);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 빈 디렉터리에서도 무너지지 않는다.

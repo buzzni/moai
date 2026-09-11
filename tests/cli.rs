@@ -1103,6 +1103,63 @@ fn tui_json_lists_a_directory_without_a_terminal() {
     assert!(inside.contains(&member), "{inside}");
 }
 
+/// **멤버 없는 에픽도 디렉터리다.** 비었다고 부모를 대신 열면 그 에픽을 물은
+/// 답으로 형제들이 나오고, `dir` 을 보고 파고드는 쪽은 제자리를 돈다.
+#[test]
+fn tui_json_opens_an_empty_epic_not_its_parent() {
+    let s = init("tuiempty");
+    let epic = add(s.path(), &["아직 안 채운 에픽", "--type", "epic"]);
+    let sibling = add(s.path(), &["남"]);
+
+    let root = ok(s.path(), &["tui", "--json"]);
+    let inside = ok(s.path(), &["tui", "--json", "--path", &epic]);
+    one_json_value(&inside);
+    assert_ne!(inside.trim(), root.trim(), "빈 에픽을 물었더니 뿌리가 나왔다");
+    assert!(!inside.contains(&sibling), "형제가 그 에픽 안에 있다 — {inside}");
+    assert_eq!(inside.trim(), "[]", "{inside}");
+}
+
+/// 바구니에는 id 가 없다. **그래도 도로 넣을 손잡이를 준다** — `dir: true` 만
+/// 주고 들어갈 길을 안 주면 훑는 쪽은 있는 줄 알면서 못 본다.
+#[test]
+fn tui_json_hands_back_a_path_for_every_row() {
+    let s = init("tuipath");
+    let one = add(s.path(), &["에픽 없는 것"]);
+    // 없는 에픽을 가리키게 손으로 고친다 — 길 잃음 바구니가 생긴다
+    let line = line_of(s.path(), &one);
+    let broken = line.replace(r#""status""#, r#""epic":"argos-zzzz","status""#);
+    let file = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&file, format!("{broken}\n")).unwrap();
+
+    let root = ok(s.path(), &["tui", "--json"]);
+    assert!(root.contains(r#""kind":"bucket""#), "{root}");
+    assert!(root.contains(r#""path":"길잃음""#), "바구니에 손잡이가 없다 — {root}");
+
+    let inside = ok(s.path(), &["tui", "--json", "--path", "길잃음"]);
+    assert!(inside.contains(&one), "{inside}");
+
+    // 없는 바구니는 조용한 빈 목록이 아니라 거절이다
+    let out = moai(s.path(), &["tui", "--json", "--path", "없음"]);
+    assert!(!out.status.success(), "없는 바구니를 열어 주었다");
+}
+
+/// **못 읽은 줄을 삼키지 않는다.** 다른 읽기 명령과 같이 stderr 로 알리고
+/// 0 이 아닌 값으로 끝난다 — 조용히 짧아진 목록이 이 도구의 유일한 금기다.
+#[test]
+fn tui_json_tells_about_unreadable_lines() {
+    let s = init("tuibad");
+    add(s.path(), &["멀쩡한 것"]);
+    let file = s.path().join(".moai/issues.jsonl");
+    let mut src = std::fs::read_to_string(&file).unwrap();
+    src.push_str("{ 이건 JSON 이 아니다\n");
+    std::fs::write(&file, src).unwrap();
+
+    let out = moai(s.path(), &["tui", "--json"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("읽을 수 없는 줄"), "조용히 넘어갔다 — {err}");
+    assert!(!out.status.success(), "일부만 읽고도 성공이라고 했다");
+}
+
 // ── 막음 (`moai link`) ─────────────────────────────────────────────
 
 /// A 가 B 를 막으면 B 의 `blocked_by` 에 A 가 적히고, B 는 `ready` 에서 빠진다.

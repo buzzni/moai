@@ -32,7 +32,10 @@ fn stamp(at: &str) -> String {
     }
 }
 
-fn short_stamp(at: &str) -> String {
+/// `2026-09-11T15:18:26Z` → `09-11 15:18`. **한 곳에서만 정한다** — 시각의
+/// 모양은 `model` 이 정하는 것이고, 그것을 짧게 읽는 법이 표면마다 갈라지면
+/// 같은 줄이 CLI 와 TUI 에서 다른 때로 보인다.
+pub fn short_stamp(at: &str) -> String {
     match (at.get(5..10), at.get(11..16)) {
         (Some(d), Some(t)) => format!("{d} {t}"),
         _ => at.to_string(),

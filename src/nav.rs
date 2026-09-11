@@ -72,6 +72,9 @@ pub struct Index {
     /// 이슈 첨자 → 제 밑에 걸린 것이 있는가. **미리 센다** — `entries` 는 매
     /// 프레임 불리므로 그때 세면 목록 하나 그리는 데 O(이슈 수²) 다.
     has_kids: Vec<bool>,
+    /// id → 첨자. 화면은 에픽·마일스톤·막는 것을 제목으로 풀어 내는데, 그때마다
+    /// 전체를 훑으면 프레임 하나에 이슈 수에 비례한 훑기가 여러 번 돈다.
+    by_id: BTreeMap<String, usize>,
 }
 
 impl Index {
@@ -87,24 +90,55 @@ impl Index {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        let kind_of: BTreeMap<&str, Kind> = issues.iter().map(|i| (i.id.as_str(), i.kind)).collect();
         let has_milestones = issues.iter().any(|i| i.kind == Kind::Milestone);
 
         // id → 첨자. 이게 없으면 부모를 찾을 때마다 전체를 훑어 O(이슈 수²·깊이) 다.
         let by_id: BTreeMap<&str, usize> = issues.iter().enumerate().map(|(at, i)| (i.id.as_str(), at)).collect();
 
-        let ctx = Ctx { issues, epic_of: &epic_of, milestone_of: &milestone_of, kind_of: &kind_of, by_id: &by_id, has_milestones };
+        let ctx = Ctx { issues, epic_of: &epic_of, milestone_of: &milestone_of, by_id: &by_id, has_milestones };
         let homes: Vec<Path> = (0..issues.len()).map(|at| ctx.home(at)).collect();
 
-        let parents: std::collections::BTreeSet<&str> = homes
-            .iter()
-            .filter_map(|h| match h.last() {
-                Some(Seg::Issue(id)) => Some(id.as_str()),
-                _ => None,
-            })
-            .collect();
-        let has_kids = issues.iter().map(|i| parents.contains(i.id.as_str())).collect();
-        Index { homes, has_kids }
+        // **첨자로 센다.** id 로 세면 같은 id 를 단 줄 둘이 나란히 디렉터리가
+        // 되고, 자식은 `by_id` 가 고른 한 줄 밑에만 걸리므로 그 자식이 두 곳에
+        // 나타난다 — 이 모듈이 증명하기로 한 성질(`every_issue_lands_exactly_once`)이
+        // 바로 거기서 깨진다. 중복 id 는 이 도구가 거부하지 않고 드러내기만 하는
+        // 상태(`duplicate_id`)라 실재한다.
+        let mut has_kids = vec![false; issues.len()];
+        for h in &homes {
+            if let Some(Seg::Issue(id)) = h.last()
+                && let Some(&at) = by_id.get(id.as_str())
+            {
+                has_kids[at] = true;
+            }
+        }
+        let by_id = by_id.into_iter().map(|(id, at)| (id.to_string(), at)).collect();
+        Index { homes, has_kids, by_id }
+    }
+
+    /// 그 줄이 경로에서 갖는 마디.
+    ///
+    /// **한 곳에서만 정한다.** 자리를 정하는 곳과 들어가는 곳이 갈라지면
+    /// `--path` 가 여는 데와 Enter 가 여는 데가 달라진다.
+    pub fn seg_of(&self, issues: &[Issue], at: usize) -> Seg {
+        match issues[at].kind {
+            Kind::Milestone => Seg::Milestone(Some(issues[at].id.clone())),
+            Kind::Epic => Seg::Epic(issues[at].id.clone()),
+            Kind::Issue => Seg::Issue(issues[at].id.clone()),
+        }
+    }
+
+    /// 들어갈 수 있는가.
+    ///
+    /// **비었는지로 묻지 않는다.** 멤버 없는 에픽도 디렉터리다 — 비었다고
+    /// 대신 부모를 열면 `--path <빈 에픽>` 이 그 에픽의 형제들을 돌려주고,
+    /// 그 답을 다시 훑는 쪽은 제자리를 돌며 끝나지 않는다.
+    pub fn is_dir(&self, issues: &[Issue], at: usize) -> bool {
+        issues[at].kind != Kind::Issue || self.has_kids[at]
+    }
+
+    /// id 로 줄을 찾는다. 화면이 프레임마다 부르므로 훑지 않는다.
+    pub fn find(&self, id: &str) -> Option<usize> {
+        self.by_id.get(id).copied()
     }
 
     /// 그 이슈가 걸리는 **단 하나의** 자리.
@@ -140,25 +174,22 @@ impl Index {
                 if !self.kept(at, issues, keep) {
                     continue;
                 }
-                out.push(match issues[at].kind {
-                    Kind::Milestone => Entry::Dir { seg: Seg::Milestone(Some(issues[at].id.clone())), at: Some(at) },
-                    Kind::Epic => Entry::Dir { seg: Seg::Epic(issues[at].id.clone()), at: Some(at) },
-                    Kind::Issue if self.has_kids[at] => {
-                        Entry::Dir { seg: Seg::Issue(issues[at].id.clone()), at: Some(at) }
-                    }
-                    Kind::Issue => Entry::Leaf { at },
+                out.push(if self.is_dir(issues, at) {
+                    Entry::Dir { seg: self.seg_of(issues, at), at: Some(at) }
+                } else {
+                    Entry::Leaf { at }
                 });
                 continue;
             }
             // 이 자리 **바로 밑의 바구니**에 사는 것 — 바구니는 제 줄이 없으므로
             // 사는 것이 있을 때만 생긴다.
-            if home.len() >= path.len() + 1
-                && home.starts_with(path)
-                && matches!(home[path.len()], Seg::Milestone(None) | Seg::Lost)
+            if home.starts_with(path)
+                && let Some(seg) = home.get(path.len())
+                && matches!(seg, Seg::Milestone(None) | Seg::Lost)
                 && keep(at)
-                && !buckets.contains(&home[path.len()])
+                && !buckets.contains(seg)
             {
-                buckets.push(home[path.len()].clone());
+                buckets.push(seg.clone());
             }
         }
 
@@ -175,12 +206,11 @@ impl Index {
             return true;
         }
         let mut under = self.homes[at].clone();
-        under.push(match issues[at].kind {
-            Kind::Milestone => Seg::Milestone(Some(issues[at].id.clone())),
-            Kind::Epic => Seg::Epic(issues[at].id.clone()),
-            Kind::Issue => Seg::Issue(issues[at].id.clone()),
-        });
-        self.descendants(&under).into_iter().any(keep)
+        under.push(self.seg_of(issues, at));
+        // **훑다 말고 멈춘다.** `descendants` 로 받으면 첫 하나를 보기도 전에
+        // 자손 전부를 담는 Vec 이 생기고, 그것이 거름망에 걸러진 줄마다 한 번씩
+        // 프레임마다 반복된다.
+        self.homes.iter().enumerate().any(|(d, h)| h.starts_with(&under) && keep(d))
     }
 
     /// 그 자리 **밑에 걸린 모든 것**. 바로 밑뿐 아니라 더 깊은 것까지.
@@ -213,10 +243,13 @@ impl Index {
 }
 
 /// 디렉터리 먼저, 그다음 우선순위, 그다음 id. `moai show` 의 차례와 같은 뜻이다.
-fn sort_key(issues: &[Issue], e: &Entry) -> (u8, u8, String) {
+///
+/// **id 를 빌려서 낸다.** `sort_by_key` 는 비교마다 이 함수를 다시 부르므로,
+/// `String` 을 돌려주면 목록 하나 세우는 데 id 가 O(n log n) 번 복제된다.
+fn sort_key<'a>(issues: &'a [Issue], e: &Entry) -> (u8, u8, &'a str) {
     let at = e.at().expect("바구니는 여기 오지 않는다");
     let dir = u8::from(matches!(e, Entry::Leaf { .. }));
-    (dir, issues[at].priority(), issues[at].id.clone())
+    (dir, issues[at].priority(), issues[at].id.as_str())
 }
 
 /// `Index::of` 안에서만 쓰는 계산판. 빌린 지도를 들고 다니므로 밖으로 나가지 않는다.
@@ -224,14 +257,13 @@ struct Ctx<'a> {
     issues: &'a [Issue],
     epic_of: &'a BTreeMap<String, String>,
     milestone_of: &'a BTreeMap<String, String>,
-    kind_of: &'a BTreeMap<&'a str, Kind>,
     by_id: &'a BTreeMap<&'a str, usize>,
     has_milestones: bool,
 }
 
 impl Ctx<'_> {
     fn is(&self, id: &str, kind: Kind) -> bool {
-        self.kind_of.get(id) == Some(&kind)
+        self.by_id.get(id).is_some_and(|&at| self.issues[at].kind == kind)
     }
 
     /// 그 이슈가 걸리는 단 하나의 자리.
@@ -522,5 +554,36 @@ mod tests {
     fn duplicate_ids_both_stay_visible() {
         let issues = vec![make("argos-0010", Kind::Issue), make("argos-0010", Kind::Issue)];
         assert_exactly_once(&issues);
+    }
+
+    /// 중복 id 중 **자식을 실제로 가진 쪽만** 디렉터리다. id 로 세면 둘 다
+    /// 디렉터리가 되고, 둘 다 같은 마디(`Seg::Issue(id)`)를 밀어 넣으므로
+    /// 그 자식이 두 곳에 나타난다.
+    #[test]
+    fn a_duplicate_id_does_not_clone_its_child() {
+        let issues = vec![
+            make("argos-0010", Kind::Issue),
+            make("argos-0010", Kind::Issue),
+            make("argos-0010.aa1", Kind::Issue),
+        ];
+        let index = Index::of(&issues);
+        let dirs = index
+            .entries(&issues, &Vec::new())
+            .into_iter()
+            .filter(|e| matches!(e, Entry::Dir { .. }))
+            .count();
+        assert_eq!(dirs, 1, "같은 id 의 줄 둘이 나란히 디렉터리가 됐다");
+        assert_exactly_once(&issues);
+    }
+
+    /// **멤버 없는 에픽도 디렉터리다.** 비었다고 잎이 되면 `--path` 가 그
+    /// 에픽 대신 부모를 열고, 훑는 쪽은 제자리를 돈다.
+    #[test]
+    fn an_empty_epic_is_still_a_directory() {
+        let issues = vec![make("argos-0001", Kind::Epic), make("argos-0009", Kind::Issue)];
+        let index = Index::of(&issues);
+        assert!(index.is_dir(&issues, 0), "빈 에픽이 잎이 됐다");
+        assert!(!index.is_dir(&issues, 1), "자식 없는 이슈가 디렉터리가 됐다");
+        assert!(index.entries(&issues, &vec![Seg::Epic("argos-0001".into())]).is_empty());
     }
 }
