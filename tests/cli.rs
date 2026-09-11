@@ -429,6 +429,23 @@ fn rm_removes_and_names_what_it_broke() {
     assert!(journal(s.path()).contains(r#""kind":"rm""#));
 }
 
+/// 막던 이슈를 지우면 그 사실도 알린다. 에픽·부모만 보고 `blocked_by` 를
+/// 빠뜨리면, 방금 제 손으로 만든 끊긴 참조를 조용히 넘긴 것이 된다.
+#[test]
+fn rm_names_the_blocks_it_broke() {
+    let s = init("rmblock");
+    let a = add(s.path(), &["막는 것"]);
+    let b = add(s.path(), &["막히는 것"]);
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+
+    let out = moai(s.path(), &["rm", &a]);
+    assert!(out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("끊긴 참조") && err.contains(&b), "{err}");
+    // 막지는 않는다 — 남은 참조는 그대로 두고 `status` 가 드러낸다
+    assert!(line_of(s.path(), &b).contains("blocked_by"));
+}
+
 /// 메모는 스냅샷을 건드리지 않고 저널에만 쌓인다.
 #[test]
 fn note_only_touches_the_journal() {

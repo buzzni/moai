@@ -36,7 +36,8 @@ pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
             for i in issues.iter() {
                 let orphan = crate::id::parent_of(&i.id).is_some_and(|p| gone.iter().any(|g| g.id == p));
                 let lost = i.epic.as_deref().is_some_and(|e| gone.iter().any(|g| g.id == e));
-                if orphan || lost {
+                let unblocked = i.blocked_by.iter().any(|b| gone.iter().any(|g| &g.id == b));
+                if orphan || lost || unblocked {
                     dangling.push(i.id.clone());
                 }
             }
