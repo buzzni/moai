@@ -145,7 +145,7 @@ pub fn bar(percent: Option<u8>) -> String {
     match percent {
         None => paint(style::DIM, &"░".repeat(BAR)),
         Some(p) => {
-            let filled = (p as usize * BAR).div_ceil(100).min(BAR);
+            let filled = crate::text::bar_fill(Some(p), BAR);
             format!(
                 "{}{}",
                 paint(style::status_style("done"), &"█".repeat(filled)),

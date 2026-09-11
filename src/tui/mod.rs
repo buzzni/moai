@@ -105,6 +105,14 @@ impl App {
         out
     }
 
+    /// id 를 제목으로 푼다. 없으면 id 그대로 — 끊긴 참조를 숨기지 않는다.
+    pub fn title_of(&self, id: &str) -> String {
+        match self.issues.iter().find(|i| i.id == id) {
+            Some(i) => i.title.clone(),
+            None => format!("{id}  (없다)"),
+        }
+    }
+
     fn seg_label(&self, seg: &Seg) -> String {
         let id = match seg {
             Seg::Milestone(None) => return "(마일스톤 없음)".into(),

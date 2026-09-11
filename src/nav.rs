@@ -149,6 +149,22 @@ impl Index {
         out
     }
 
+    /// 그 자리 **밑에 걸린 모든 것**. 바로 밑뿐 아니라 더 깊은 것까지.
+    ///
+    /// 디렉터리의 요약은 이것으로 센다. `report::rollup_of` 로 세면 자리를
+    /// 정하는 규칙(에픽이 마일스톤보다 세다)과 세는 규칙(제 마일스톤이 이긴다)이
+    /// 달라, 머리글이 말하는 수와 눈에 보이는 줄 수가 어긋난다.
+    pub fn descendants(&self, path: &Path) -> Vec<usize> {
+        // **직속 자식의 home 은 그 경로와 같다.** `len() >` 로 거르면 바로 밑의
+        // 것이 통째로 빠져, 멤버가 셋인 에픽이 "자식 없음" 이라고 나온다.
+        self.homes
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| h.starts_with(path))
+            .map(|(at, _)| at)
+            .collect()
+    }
+
     /// 화면에 낼 이름. 바구니는 제 줄이 없으므로 여기서 이름을 얻는다.
     pub fn label(&self, issues: &[Issue], e: &Entry) -> String {
         match e.at() {
@@ -395,6 +411,24 @@ mod tests {
         let index = Index::of(&issues);
         assert_eq!(index.home_of(1), &vec![Seg::Epic("argos-0002".into())]);
         assert_exactly_once(&issues);
+    }
+
+    /// 밑에 걸린 것을 셀 때 **바로 밑의 것**도 세어야 한다. 직속 자식의 home 은
+    /// 그 디렉터리 경로와 길이가 같아서, 깊이로 거르면 통째로 빠진다.
+    #[test]
+    fn descendants_count_the_direct_children_too() {
+        let issues = vec![
+            make("argos-0001", Kind::Epic),
+            epic_of("argos-0004", "argos-0001"),
+            epic_of("argos-0005", "argos-0001"),
+            make("argos-0005.aa1", Kind::Issue), // 손자
+            make("argos-0009", Kind::Issue),     // 남
+        ];
+        let index = Index::of(&issues);
+        let mut got = index.descendants(&vec![Seg::Epic("argos-0001".into())]);
+        got.sort();
+        assert_eq!(got, [1, 2, 3], "바로 밑 또는 더 깊은 것이 빠졌다");
+        assert_eq!(index.descendants(&Vec::new()).len(), issues.len(), "뿌리는 전부다");
     }
 
     /// 빈 저장소가 무너지지 않는다.

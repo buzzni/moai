@@ -26,9 +26,7 @@ pub fn screen(f: &mut Frame, app: &App) {
 
     crumbs(f, app, top);
     list(f, app, left);
-    // 오른쪽은 뒤따르는 이슈(moai-2xcm)가 채운다. 빈 테두리라도 먼저 세워 두면
-    // 좌우 폭이 그때 가서 바뀌지 않는다.
-    f.render_widget(Block::default().borders(Borders::ALL).title(" 상세 "), right);
+    detail(f, app, right);
     fkeys(f, keys);
 }
 
@@ -115,6 +113,154 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
     ])
 }
 
+/// 커서가 머문 것을 정리해 낸다. 이슈면 그 이슈를, 디렉터리면 그 밑의 셈을.
+fn detail(f: &mut Frame, app: &App, at: Rect) {
+    let block = Block::default().borders(Borders::ALL).title(" 상세 ");
+    let inner = block.inner(at);
+    f.render_widget(block, at);
+
+    let lines = match app.current() {
+        None => vec![Line::from(Span::styled("없다", dim()))],
+        Some(Row::Up) => vec![Line::from(Span::styled("한 층 위로", dim()))],
+        Some(Row::Item(e)) => match e.at() {
+            Some(idx) => about(app, idx, &e, inner.width as usize),
+            // 바구니는 제 줄이 없다. 밑에 무엇이 있는지만 센다.
+            None => {
+                let mut out = vec![
+                    Line::from(Span::styled(app.index.label(&app.issues, &e), bold())),
+                    Line::from(""),
+                ];
+                out.extend(rollup(app, &deeper(app, &e), inner.width as usize));
+                out
+            }
+        },
+    };
+    f.render_widget(Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }), inner);
+}
+
+/// 그 항목 안으로 들어간 경로. 요약을 세려면 그 밑을 봐야 한다.
+fn deeper(app: &App, e: &Entry) -> crate::nav::Path {
+    let mut p = app.path.clone();
+    if let Entry::Dir { seg, .. } = e {
+        p.push(seg.clone());
+    }
+    p
+}
+
+/// 이슈 하나의 낱낱.
+fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
+    let i = &app.issues[idx];
+    let mut out = vec![
+        Line::from(Span::styled(i.id.clone(), dim())),
+        Line::from(Span::styled(i.title.clone(), bold())),
+        Line::from(""),
+    ];
+
+    // 칸은 글리프와 낱말을 함께 낸다. 색이 없어도 뜻이 남아야 한다.
+    let st = i.status.as_str().to_string();
+    let mut head = vec![
+        Span::styled(format!("{} {st}", style::glyph(&st)), status(&st)),
+        Span::raw("  ·  "),
+        Span::styled(format!("p{}", i.priority()), priority(i.priority())),
+    ];
+    if i.kind != crate::model::Kind::Issue {
+        head.push(Span::raw("  ·  "));
+        head.push(Span::styled(i.kind.as_str().to_string(), Style::new().fg(Color::LightBlue)));
+    }
+    out.push(Line::from(head));
+
+    if !i.tags.is_empty() {
+        let tags = i.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ");
+        out.push(Line::from(Span::styled(tags, Style::new().fg(Color::Cyan))));
+    }
+    if let Some(a) = &i.assignee {
+        out.push(field("담당", a));
+    }
+    if let Some(id) = &i.epic {
+        out.push(field("에픽", &app.title_of(id)));
+    }
+    if let Some(id) = &i.milestone {
+        out.push(field("마일스톤", &app.title_of(id)));
+    }
+    // **막는 것은 제목까지 푼다.** id 만 내면 그것이 무엇인지 또 찾아봐야 한다.
+    for b in &i.blocked_by {
+        out.push(field("막힘", &format!("{b}  {}", app.title_of(b))));
+    }
+    out.push(field("생성", &stamp(&i.created_at)));
+    out.push(field("수정", &stamp(&i.updated_at)));
+
+    // 디렉터리면 그 밑의 셈도 함께.
+    if matches!(e, Entry::Dir { .. }) {
+        out.push(Line::from(""));
+        out.extend(rollup(app, &deeper(app, e), w));
+    }
+
+    if let Some(body) = &i.body {
+        out.push(Line::from(""));
+        out.push(Line::from(Span::styled("─".repeat(w.min(40)), dim())));
+        // **파일에서 온 글이다.** 제어문자를 걸러서 그린다.
+        for l in crate::text::sanitize(body).lines() {
+            out.push(Line::from(l.to_string()));
+        }
+    }
+    out
+}
+
+/// 그 밑의 진척. **`nav` 가 자리를 정한 그대로 센다** — `report::rollup_of` 로
+/// 세면 자리 규칙과 세는 규칙이 달라 머리글과 줄 수가 어긋난다.
+fn rollup<'a>(app: &App, path: &crate::nav::Path, w: usize) -> Vec<Line<'a>> {
+    let kids = app.index.descendants(path);
+    let work: Vec<usize> =
+        kids.iter().copied().filter(|&at| crate::report::is_work(&app.issues[at])).collect();
+    if work.is_empty() {
+        return vec![Line::from(Span::styled("자식 없음", dim()))];
+    }
+    let done = work.iter().filter(|&&at| app.issues[at].status.is_done()).count();
+    let percent = (done * 100 / work.len()) as u8;
+
+    let cells = w.clamp(10, 24).saturating_sub(4).max(4);
+    let filled = crate::text::bar_fill(Some(percent), cells);
+    let mut out = vec![Line::from(vec![
+        Span::styled("█".repeat(filled), Style::new().fg(Color::Green)),
+        Span::styled("░".repeat(cells - filled), dim()),
+        Span::raw(format!("  {done}/{}  {percent}%", work.len())),
+    ])];
+
+    // 칸별 건수는 `config` 차례로. **0인 칸은 빼서** 좁은 패널에서 줄이 접히지
+    // 않게 한다 — CLI 요약이 쓰는 규칙과 같다.
+    let counts: Vec<Span> = app
+        .cfg
+        .statuses
+        .iter()
+        .filter_map(|st| {
+            let n = work.iter().filter(|&&at| app.issues[at].status.as_str() == st).count();
+            (n > 0).then(|| Span::styled(format!("{} {st} {n}   ", style::glyph(st)), status(st)))
+        })
+        .collect();
+    out.push(Line::from(counts));
+    out
+}
+
+fn field<'a>(k: &str, v: &str) -> Line<'a> {
+    Line::from(vec![
+        Span::styled(format!("{k:<5}"), dim()),
+        Span::raw(" "),
+        Span::raw(v.to_string()),
+    ])
+}
+
+/// `2026-09-11T15:18:26Z` → `09-11 15:18`.
+fn stamp(at: &str) -> String {
+    match (at.get(5..10), at.get(11..16)) {
+        (Some(d), Some(t)) => format!("{d} {t}"),
+        _ => at.to_string(),
+    }
+}
+
+fn bold() -> Style {
+    Style::new().add_modifier(Modifier::BOLD)
+}
+
 /// 맨 아래 MC 풍 F키 바. **아직 없는 것은 적지 않는다** — 눌러도 아무 일이
 /// 없는 키를 적어 두면 그것부터 도구를 못 믿게 된다.
 fn fkeys(f: &mut Frame, at: Rect) {
@@ -161,6 +307,7 @@ mod tests {
     use crate::nav::Path;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn issues() -> Vec<Issue> {
         let mut epic = Issue::new(
@@ -252,6 +399,52 @@ mod tests {
         }
     }
 
+    /// 커서가 디렉터리면 그 밑의 셈이, 이슈면 그 낱낱이 오른쪽에 나온다.
+    #[test]
+    fn the_right_pane_follows_the_cursor() {
+        let mut a = app();
+        // 커서가 에픽(디렉터리)에 있다 → 진행과 칸별 건수
+        let lines = render(&a, 100, 16).join("\n");
+        assert!(lines.contains("1/1") || lines.contains("0/1"), "진행이 없다\n{lines}");
+        assert!(lines.contains("done"), "칸별 건수가 없다\n{lines}");
+
+        // 에픽 안으로 들어가 멤버(잎)를 본다 → 그 이슈의 낱낱
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        let lines = render(&a, 100, 16).join("\n");
+        assert!(lines.contains("argos-0003"), "이슈 id 가 없다\n{lines}");
+        assert!(lines.contains("멤버"), "제목이 없다\n{lines}");
+        // 칸은 글리프와 낱말을 함께 낸다
+        assert!(lines.contains("✓ done"), "칸이 낱말 없이 나왔다\n{lines}");
+        // 소속은 id 가 아니라 제목으로 푼다
+        assert!(lines.contains("에픽"), "에픽 줄이 없다\n{lines}");
+    }
+
+    /// 막는 것은 **제목까지 풀어서** 낸다. id 만 내면 또 찾아봐야 한다.
+    #[test]
+    fn blockers_are_resolved_to_titles() {
+        let mut issues = issues();
+        issues[1].blocked_by = vec!["argos-0001".into()];
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        let lines = render(&a, 100, 20).join("\n");
+        assert!(lines.contains("막힘"), "{lines}");
+        assert!(lines.contains("아주 긴"), "막는 것의 제목이 없다\n{lines}");
+    }
+
+    /// 본문에 든 ESC 가 화면을 다시 칠하지 못한다.
+    #[test]
+    fn a_body_cannot_repaint_the_screen() {
+        let mut issues = issues();
+        issues[1].body = Some("앞\u{1b}[2J뒤".into());
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        let lines = render(&a, 100, 20).join("\n");
+        assert!(lines.contains("앞[2J뒤"), "제어문자가 안 걸러졌다\n{lines}");
+    }
+
     /// 빈 저장소도 그려진다.
     #[test]
     fn an_empty_repo_still_draws() {
@@ -270,12 +463,21 @@ mod eyeball {
         let load = crate::store::parse_issues(
             &std::fs::read_to_string(".moai/issues.jsonl").unwrap_or_default(),
         );
-        let app = super::App::new(
-            load.issues,
-            crate::config::Config::parse("prefix = \"moai\"\n").unwrap(),
-            crate::nav::Path::new(),
-        );
-        for l in super::tests::render(&app, 96, 16) {
+        let start = std::env::var("EYE_PATH").ok();
+        let cfg = crate::config::Config::parse("prefix = \"moai\"\n").unwrap();
+        let index = crate::nav::Index::of(&load.issues);
+        let path = match start.as_deref().and_then(|id| load.issues.iter().position(|i| i.id == id)) {
+            Some(at) => {
+                let mut p = index.home_of(at).clone();
+                p.push(crate::nav::Seg::Epic(load.issues[at].id.clone()));
+                p
+            }
+            None => crate::nav::Path::new(),
+        };
+        let mut app = super::App::new(load.issues, cfg, path);
+        app.cursor = std::env::var("EYE_CUR").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        let h: u16 = std::env::var("EYE_H").ok().and_then(|v| v.parse().ok()).unwrap_or(16);
+        for l in super::tests::render(&app, 96, h) {
             println!("{l}");
         }
     }
