@@ -3,3 +3,8 @@
 # moai
 .moai/lock
 .moai/*.tmp.*
+
+# 편의용 심볼릭 링크 (-> target/release/moai)
+/moai
+# 리뷰 툴이 남기는 업로드·스냅샷
+/.aplus/
