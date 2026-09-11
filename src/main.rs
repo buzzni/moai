@@ -11,6 +11,7 @@ mod draft;
 mod fail;
 mod id;
 mod model;
+mod nav;
 mod query;
 mod report;
 mod store;
