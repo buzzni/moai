@@ -280,3 +280,5 @@
 {"ts":"2026-09-12T08:53:05Z","id":"moai-xl8w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이 두 겹 경로로 커밋됐다"}
 {"ts":"2026-09-12T09:04:44Z","id":"moai-dh4n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"세는 쪽(is_work·rollup_of)은 못 바꾼다 — 진행률이 생각을 세기 시작하면 담을수록 그 에픽이 덜 끝난 것으로 보인다. 그래서 자리를 맞췄다: nav 가 idea 를 에픽 밑에 안 건다. 소속은 필드로 그대로 남아 `moai show --type idea -e <에픽>` 이 찾아낸다."}
 {"ts":"2026-09-12T09:04:44Z","id":"moai-dh4n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
+{"ts":"2026-09-12T09:05:17Z","id":"moai-xl8w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"이 세션의 첫 `git add -A` 가 딸려 올린 것이다 (세션 시작 시점에 `?? .claude/.claude/` 로 남아 있었다). 내용은 .claude/settings.json 과 한 글자도 다르지 않고, 한 단 깊어 아무도 안 읽는다."}
+{"ts":"2026-09-12T09:05:17Z","id":"moai-xl8w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
