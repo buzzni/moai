@@ -1661,3 +1661,35 @@ fn an_old_journal_line_without_an_email_still_shows() {
     let out = ok(s.path(), &["show", &id]);
     assert!(out.contains("옛 메모") && out.contains("옛사람"), "{out}");
 }
+
+/// 표기는 **화면만** 바꾼다. 파일은 언제나 이름과 메일을 갈라서 든다 —
+/// 설정 하나가 이미 쓴 줄을 바꾸면 그건 설정이 아니라 마이그레이션이다.
+#[test]
+fn naming_changes_the_screen_not_the_file() {
+    let s = init("naming");
+    let id = add(s.path(), &["표기"]);
+    let before = issues(s.path());
+    let path = s.path().join(".moai/config.toml");
+    let set = |how: &str| {
+        let src = std::fs::read_to_string(&path).unwrap();
+        let kept: Vec<&str> =
+            src.lines().filter(|l| !l.trim_start().starts_with("naming")).collect();
+        std::fs::write(&path, format!("{}\nnaming = \"{how}\"\n", kept.join("\n"))).unwrap();
+    };
+
+    set("name");
+    let out = ok(s.path(), &["show", &id]);
+    assert!(out.contains("테스터") && !out.contains("tester@example.com"), "{out}");
+
+    set("email");
+    let out = ok(s.path(), &["show", &id]);
+    assert!(out.contains("tester@example.com"), "{out}");
+
+    // 오타는 조용히 통과하지 않는다 — 통과하면 왜 표기가 안 바뀌는지 못 찾는다.
+    set("Full");
+    let err = String::from_utf8_lossy(&moai(s.path(), &["show", &id]).stderr).into_owned();
+    assert!(err.contains("full·name·email"), "{err}");
+
+    set("full");
+    assert_eq!(issues(s.path()), before, "표기를 바꿨는데 파일이 달라졌다");
+}

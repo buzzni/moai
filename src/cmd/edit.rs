@@ -102,7 +102,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         )]);
     }
     let children: Vec<&Issue> = children.iter().collect();
-    Ok(view::detail(&edited, epic.as_ref(), &children, &[], &at, false))
+    Ok(view::detail(&edited, epic.as_ref(), &children, &[], &repo.config, &at, false))
 }
 
 fn fail_if_nothing(args: &EditArgs) -> R<()> {

@@ -381,7 +381,10 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
         out.push(Line::from(Span::styled(tags, Style::new().fg(Color::Cyan))));
     }
     if let Some(a) = &i.assignee {
-        fields.push(("담당".into(), crate::model::label(a, i.assignee_email.as_deref())));
+        fields.push((
+            "담당".into(),
+            crate::model::label(a, i.assignee_email.as_deref(), app.cfg.naming),
+        ));
     }
     if let Some(id) = &i.epic {
         fields.push(("에픽".into(), app.title_of(id)));

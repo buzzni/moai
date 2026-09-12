@@ -183,6 +183,14 @@ impl Issue {
         }
         // 담당이 없는데 메일만 남는 것을 막는다. 이름 없는 메일은 어느 화면도
         // 그릴 줄 모르고, 그런 줄은 다음 쓰기까지 조용히 살아 있다.
+        //
+        // **빈 이름도 없는 이름이다.** `None` 만 보면 손으로 푼 충돌이 남긴
+        // `"assignee":""` 한 줄이 이 규칙을 그대로 빠져나가, 상세가
+        // ` (raven@buzzni.com)` 를 낸다 — 본문의 빈 문자열을 지우는 것과 같은
+        // 이유로 여기서 지운다.
+        if self.assignee.as_deref().is_some_and(|a| a.trim().is_empty()) {
+            self.assignee = None;
+        }
         if self.assignee.is_none() {
             self.assignee_email = None;
         }
@@ -325,8 +333,13 @@ impl Actor {
         a.is_sane().then_some(a)
     }
 
+    /// 이름도 **한 줄이다.** 메일만 재고 이름을 안 재면 줄바꿈이 든 `--user` 가
+    /// 통과해, `note`·`mv` 가 두 줄짜리 `by` 를 되돌릴 수 없는 저널에 적는다.
+    /// `add` 쪽은 더 나쁘다 — id 를 뽑은 **뒤에** `담당은 한 줄이다` 로 죽어서,
+    /// 만들어지지도 않은 id 가 오류에 실려 나간다.
     fn is_sane(&self) -> bool {
         !self.name.is_empty()
+            && !self.name.contains(['\n', '\r'])
             && !self.email.is_empty()
             && self.email.contains('@')
             && !self.email.contains(char::is_whitespace)
@@ -336,12 +349,19 @@ impl Actor {
 /// 이름과 메일을 한 줄로 합치는 **유일한 곳.**
 ///
 /// 합치는 곳이 `view` 와 `tui` 로 갈라지면 그때 둘이 서로 다른 모양을 내고,
-/// 한쪽을 고친 사람이 다른 쪽을 못 찾는다. 표기 방법을 설정으로 고르게 할
-/// 때도 갈아끼울 자리가 여기 하나여야 한다.
-pub fn label(name: &str, email: Option<&str>) -> String {
-    match email.map(str::trim).filter(|e| !e.is_empty()) {
-        Some(e) => format!("{name} ({e})"),
-        None => name.to_string(),
+/// 한쪽을 고친 사람이 다른 쪽을 못 찾는다.
+pub fn label(name: &str, email: Option<&str>, how: crate::config::Naming) -> String {
+    use crate::config::Naming;
+    let email = email.map(str::trim).filter(|e| !e.is_empty());
+    match (how, email) {
+        (_, None) => name.to_string(),
+        // 이름이 빈 줄은 어느 모양에서도 메일로 낸다. 저널은 정규화를 거치지
+        // 않아 옛 줄의 `"by":""` 를 고칠 길이 여기뿐이고, 빈칸을 내면 그 줄이
+        // 누구의 것인지 화면에서 사라진다.
+        (_, Some(e)) if name.trim().is_empty() => e.to_string(),
+        (Naming::Name, _) => name.to_string(),
+        (Naming::Email, Some(e)) => e.to_string(),
+        (Naming::Full, Some(e)) => format!("{name} ({e})"),
     }
 }
 
@@ -410,7 +430,7 @@ fn bad_git_identity(a: &Actor) -> Fail {
         format!(
             "git 사용자 정보가 `이름 (메일)` 로 쓸 수 없는 모양이다 — {:?}\n\n  \
              git config user.name  \"이름\"\n  git config user.email \"메일\"",
-            label(&a.name, Some(&a.email))
+            label(&a.name, Some(&a.email), crate::config::Naming::Full)
         ),
         code::NO_ACTOR,
     )
@@ -733,6 +753,30 @@ mod tests {
         for bad in ["레이븐", "레이븐 ()", "()", "(raven@buzzni.com)", "레이븐 (raven)", "레이븐 (a b@c)"] {
             assert_eq!(Actor::parse(bad), None, "{bad:?} 를 받아 버렸다");
         }
+        // 이름에 든 줄바꿈은 여기서 걸러야 한다. 통과시키면 두 줄짜리 `by` 가
+        // 되돌릴 수 없는 저널에 남고, `add` 는 id 를 뽑은 뒤에야 죽는다.
+        for bad in ["철\n수 (a@b.c)", "철\r수 (a@b.c)"] {
+            assert_eq!(Actor::parse(bad), None, "{bad:?} 를 받아 버렸다");
+        }
+    }
+
+    /// 표기를 바꿔도 **저장은 그대로다.** 여기가 흔들리면 설정 하나가
+    /// 마이그레이션이 된다.
+    #[test]
+    fn naming_only_changes_what_is_shown() {
+        use crate::config::Naming;
+        let (n, e) = ("레이븐", Some("raven@buzzni.com"));
+        assert_eq!(label(n, e, Naming::Full), "레이븐 (raven@buzzni.com)");
+        assert_eq!(label(n, e, Naming::Name), "레이븐");
+        assert_eq!(label(n, e, Naming::Email), "raven@buzzni.com");
+        // 메일을 모르는 사람은 어느 모양에서도 이름으로 난다 — 빈칸을 내면
+        // 그 줄이 누구의 것인지 화면에서 사라진다.
+        for how in [Naming::Full, Naming::Name, Naming::Email] {
+            assert_eq!(label(n, None, how), "레이븐");
+            // 이름이 빈 줄은 거꾸로 메일로 난다. 저널은 정규화를 거치지 않아
+            // 옛 줄의 `"by":""` 를 고칠 길이 여기뿐이다.
+            assert_eq!(label("  ", e, how), "raven@buzzni.com");
+        }
     }
 
     /// `-a` 는 메일을 요구하지 않는다. 남의 메일을 모르는 채로 남에게 맡기는
@@ -754,6 +798,15 @@ mod tests {
         i.assignee_email = Some("raven@buzzni.com".into());
         i.normalize();
         assert_eq!(i.assignee_email, None);
+
+        // 빈 이름도 없는 이름이다. 손으로 푼 충돌이 남기는 모양이라 `None` 만
+        // 보면 상세가 ` (raven@buzzni.com)` 를 낸다.
+        for blank in ["", "   "] {
+            i.assignee = Some(blank.into());
+            i.assignee_email = Some("raven@buzzni.com".into());
+            i.normalize();
+            assert_eq!((i.assignee.as_deref(), i.assignee_email.as_deref()), (None, None));
+        }
     }
 
     /// 저널은 넷만 적는다. 필드 변경을 적기 시작하면 이벤트 로그가 된다.
