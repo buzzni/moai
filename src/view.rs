@@ -674,7 +674,10 @@ pub fn detail(
         line.push_str(&format!(" · {}", paint(style::TAG, &tags_of(i))));
     }
     if let Some(a) = &i.assignee {
-        line.push_str(&format!(" · {}", paint(style::DIM, a)));
+        line.push_str(&format!(
+            " · {}",
+            paint(style::DIM, &crate::model::label(a, i.assignee_email.as_deref()))
+        ));
     }
     out.push(line);
 
@@ -806,7 +809,11 @@ fn entry(e: &JournalEntry) -> String {
         other => other.to_string(),
     };
     let note = e.note.as_deref().map(|n| format!("  — {n}")).unwrap_or_default();
-    format!("{what}{}  {}", paint(style::DIM, &note), paint(style::DIM, &e.by))
+    format!(
+        "{what}{}  {}",
+        paint(style::DIM, &note),
+        paint(style::DIM, &crate::model::label(&e.by, e.by_email.as_deref()))
+    )
 }
 
 #[cfg(test)]
@@ -951,14 +958,14 @@ mod tests {
         let mut i = issue("argos-0001", "제목", "in_progress");
         i.body = Some("첫 줄\n둘째 줄".into());
         let j = vec![
-            JournalEntry::create("argos-0001", "제목", "2026-09-09T14:02:11Z", "raven"),
+            JournalEntry::create("argos-0001", "제목", "2026-09-09T14:02:11Z", &crate::model::someone("raven")),
             JournalEntry::status(
                 "argos-0001",
                 &Status::new("todo"),
                 &Status::new("in_progress"),
                 None,
                 "2026-09-10T10:11:00Z",
-                "claude",
+                &crate::model::someone("claude"),
             ),
         ];
         let out = plain(&detail(&i, None, &[], &j, "2026-09-11T04:12:03Z", false));

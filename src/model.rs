@@ -1,5 +1,6 @@
 //! 이슈와 저널 레코드. **여기는 파일시스템도 터미널도 모른다.**
 
+use crate::fail::{Fail, R, code};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -91,6 +92,11 @@ pub struct Issue {
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assignee: Option<String>,
+    /// 담당의 메일. **이름과 한 문자열로 합쳐 두지 않는다** — 합쳐 두면 표기
+    /// 방법을 바꾸려 할 때 이미 쓴 줄을 도로 갈라야 하고, 이름에 괄호가 든
+    /// 사람에서 그 가르기가 틀린다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee_email: Option<String>,
     /// 소속. **파생이 아니라 필드다** — 부모-자식(id 의 점)과 직교한다.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epic: Option<String>,
@@ -143,6 +149,7 @@ impl Issue {
             priority: None,
             tags: Vec::new(),
             assignee: None,
+            assignee_email: None,
             epic: None,
             milestone: None,
             blocked_by: Vec::new(),
@@ -174,6 +181,11 @@ impl Issue {
         if self.body.as_deref().is_some_and(str::is_empty) {
             self.body = None;
         }
+        // 담당이 없는데 메일만 남는 것을 막는다. 이름 없는 메일은 어느 화면도
+        // 그릴 줄 모르고, 그런 줄은 다음 쓰기까지 조용히 살아 있다.
+        if self.assignee.is_none() {
+            self.assignee_email = None;
+        }
     }
 
     /// 쓰기는 읽기보다 엄하다. 읽기는 아는 만큼 보여주고, 쓰기는 거부한다.
@@ -187,6 +199,14 @@ impl Issue {
         }
         if self.title.contains('\n') {
             return Err(format!("{}: 제목은 한 줄이다", self.id));
+        }
+        // 담당도 한 줄이다. `view::history` 와 상세는 "원소 하나가 한 줄" 로
+        // 서 있어서, 담당에 든 줄바꿈 하나가 뒤따르는 줄의 열을 통째로 잃게
+        // 한다 — 제목에 같은 규칙이 있는 것과 같은 이유다.
+        if let Some(a) = &self.assignee
+            && a.contains(['\n', '\r'])
+        {
+            return Err(format!("{}: 담당은 한 줄이다 — {a:?}", self.id));
         }
         cfg.require_known(self.status.as_str()).map_err(|e| format!("{}: {e}", self.id))?;
         if self.priority.is_some_and(|p| p > MAX_PRIORITY) {
@@ -233,6 +253,11 @@ pub struct JournalEntry {
     /// 안 틀리는 유일한 파일이라 여기만 관대해도 된다.
     pub kind: String,
     pub by: String,
+    /// 옛 줄에는 없다. `by` 를 객체로 바꾸지 않은 이유가 이것이다 — 타입을
+    /// 바꾸면 `journal_of` 의 파싱이 옛 줄에서 실패하고, 실패한 줄은 조용히
+    /// 버려져 `moai show` 의 이력이 통째로 사라진다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by_email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -246,12 +271,13 @@ pub struct JournalEntry {
 }
 
 impl JournalEntry {
-    fn base(kind: &str, id: &str, at: &str, by: &str) -> JournalEntry {
+    fn base(kind: &str, id: &str, at: &str, by: &Actor) -> JournalEntry {
         JournalEntry {
             ts: at.to_string(),
             id: id.to_string(),
             kind: kind.to_string(),
-            by: by.to_string(),
+            by: by.name.clone(),
+            by_email: Some(by.email.clone()),
             from: None,
             to: None,
             title: None,
@@ -259,10 +285,10 @@ impl JournalEntry {
             note: None,
         }
     }
-    pub fn create(id: &str, title: &str, at: &str, by: &str) -> JournalEntry {
+    pub fn create(id: &str, title: &str, at: &str, by: &Actor) -> JournalEntry {
         JournalEntry { title: Some(title.to_string()), ..Self::base("create", id, at, by) }
     }
-    pub fn status(id: &str, from: &Status, to: &Status, note: Option<String>, at: &str, by: &str) -> JournalEntry {
+    pub fn status(id: &str, from: &Status, to: &Status, note: Option<String>, at: &str, by: &Actor) -> JournalEntry {
         JournalEntry {
             from: Some(from.0.clone()),
             to: Some(to.0.clone()),
@@ -270,31 +296,142 @@ impl JournalEntry {
             ..Self::base("status", id, at, by)
         }
     }
-    pub fn note(id: &str, text: &str, at: &str, by: &str) -> JournalEntry {
+    pub fn note(id: &str, text: &str, at: &str, by: &Actor) -> JournalEntry {
         JournalEntry { text: Some(text.to_string()), ..Self::base("note", id, at, by) }
     }
-    pub fn removed(id: &str, title: &str, at: &str, by: &str) -> JournalEntry {
+    pub fn removed(id: &str, title: &str, at: &str, by: &Actor) -> JournalEntry {
         JournalEntry { title: Some(title.to_string()), ..Self::base("rm", id, at, by) }
     }
 }
 
-/// 누가 했는가. `MOAI_ACTOR` → `git config user.name` → `unknown`.
-pub fn actor() -> String {
-    if let Ok(a) = std::env::var("MOAI_ACTOR")
-        && !a.trim().is_empty()
+// ── 누가 ──────────────────────────────────────────────────────────────
+
+/// 일을 한 사람. 이름과 메일이 **함께** 다닌다 — 이름만으로는 같은 이름이
+/// 둘일 때 갈라지지 않고, 메일만으로는 화면에 읽을 것이 없다.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Actor {
+    pub name: String,
+    pub email: String,
+}
+
+impl Actor {
+    /// `이름 (메일)` 한 덩이를 가른다. 괄호 앞 공백은 있어도 없어도 된다.
+    ///
+    /// 뒤에서부터 여는 괄호를 찾는다 — 이름 안에 괄호가 있는 사람이 실제로 있고,
+    /// 앞에서 찾으면 그 괄호에서 잘린다.
+    pub fn parse(raw: &str) -> Option<Actor> {
+        let (name, email) = raw.trim().strip_suffix(')')?.rsplit_once('(')?;
+        let a = Actor { name: name.trim().to_string(), email: email.trim().to_string() };
+        a.is_sane().then_some(a)
+    }
+
+    fn is_sane(&self) -> bool {
+        !self.name.is_empty()
+            && !self.email.is_empty()
+            && self.email.contains('@')
+            && !self.email.contains(char::is_whitespace)
+    }
+}
+
+/// 이름과 메일을 한 줄로 합치는 **유일한 곳.**
+///
+/// 합치는 곳이 `view` 와 `tui` 로 갈라지면 그때 둘이 서로 다른 모양을 내고,
+/// 한쪽을 고친 사람이 다른 쪽을 못 찾는다. 표기 방법을 설정으로 고르게 할
+/// 때도 갈아끼울 자리가 여기 하나여야 한다.
+pub fn label(name: &str, email: Option<&str>) -> String {
+    match email.map(str::trim).filter(|e| !e.is_empty()) {
+        Some(e) => format!("{name} ({e})"),
+        None => name.to_string(),
+    }
+}
+
+/// `-a` 로 받은 한 덩이를 담당 이름과 메일로 가른다. 비었으면 담당 없음이다.
+///
+/// `이름 (메일)` 이면 갈라 넣고, 이름만이면 이름만 넣는다 — 남의 메일을 모르는
+/// 채로 남에게 맡기는 일이 실제로 있어 여기서는 메일을 요구하지 않는다.
+pub fn split_assignee(raw: &str) -> (Option<String>, Option<String>) {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return (None, None);
+    }
+    match Actor::parse(raw) {
+        Some(a) => (Some(a.name), Some(a.email)),
+        None => (Some(raw.to_string()), None),
+    }
+}
+
+/// 테스트가 쓰는 사람 하나. 저널 모양을 보는 테스트가 여러 파일에 흩어져 있어
+/// 한 곳에 둔다.
+#[cfg(test)]
+pub fn someone(name: &str) -> Actor {
+    Actor { name: name.to_string(), email: format!("{name}@example.com") }
+}
+
+/// 누가 하는가. `--user` → `MOAI_ACTOR` → `git config user.name`+`user.email`.
+///
+/// 셋 다 없으면 **멈춘다.** 예전에는 `unknown` 으로 적었는데, 그렇게 쌓인 줄은
+/// 나중에 누구도 되짚지 못한다 — 이력이 남는 것이 목적인 파일에 이름 없는 줄을
+/// 채우느니 한 번 물어보는 편이 싸다. 막는 것은 *사람을 부르는 게이트가 아니라*
+/// 입력이 모자라다는 말이고, `--user` 와 `MOAI_ACTOR` 둘 다 사람 없이 채워진다.
+pub fn actor(flag: Option<&str>) -> R<Actor> {
+    if let Some(raw) = flag.map(str::trim).filter(|s| !s.is_empty()) {
+        return Actor::parse(raw).ok_or_else(|| malformed("--user", raw));
+    }
+    if let Ok(raw) = std::env::var("MOAI_ACTOR")
+        && !raw.trim().is_empty()
     {
-        return a.trim().to_string();
+        return Actor::parse(raw.trim()).ok_or_else(|| malformed("MOAI_ACTOR", raw.trim()));
     }
-    let out = std::process::Command::new("git")
-        .args(["config", "user.name"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok());
-    match out {
-        Some(n) if !n.trim().is_empty() => n.trim().to_string(),
-        _ => "unknown".into(),
+    match (git_config("user.name"), git_config("user.email")) {
+        // git 이 준 값도 `--user` 와 **같은 자로 잰다.** 한쪽만 통과시키면
+        // `--user "레이븐 (raven)"` 은 거절당하는데 `user.email = raven` 은
+        // 통과해, 이 도구가 스스로 모양이 아니라고 부르는 값이 되돌릴 수 없는
+        // 저널에 영구히 쌓인다.
+        (Some(name), Some(email)) => {
+            let a = Actor { name, email };
+            if a.is_sane() { Ok(a) } else { Err(bad_git_identity(&a)) }
+        }
+        _ => Err(Fail::coded(NO_ACTOR, code::NO_ACTOR)),
     }
+}
+
+const NO_ACTOR: &str = "\
+누가 하는지 모른다 — git 사용자 정보가 없다.
+
+  git config user.name  \"이름\"
+  git config user.email \"메일\"
+
+이번만 손으로 준다면:  --user \"이름 (메일)\"";
+
+/// 고칠 곳이 argv 가 아니라 설정이라 `NO_ACTOR` 와 같은 코드를 쓴다 — 받는
+/// 쪽은 "사용자 정보를 손봐라" 하나로 두 경우를 같이 다룰 수 있어야 한다.
+fn bad_git_identity(a: &Actor) -> Fail {
+    Fail::coded(
+        format!(
+            "git 사용자 정보가 `이름 (메일)` 로 쓸 수 없는 모양이다 — {:?}\n\n  \
+             git config user.name  \"이름\"\n  git config user.email \"메일\"",
+            label(&a.name, Some(&a.email))
+        ),
+        code::NO_ACTOR,
+    )
+}
+
+fn malformed(what: &str, raw: &str) -> Fail {
+    Fail::coded(
+        format!("{what} 가 `이름 (메일)` 모양이 아니다 — {raw:?}"),
+        code::BAD_INPUT,
+    )
+}
+
+/// git 저장소 밖에서도 전역 설정을 읽는다 — moai 는 `.moai/` 만 찾지 git 을
+/// 요구하지 않으므로, `git init` 전에도 이 값이 있을 수 있다.
+fn git_config(key: &str) -> Option<String> {
+    let out = std::process::Command::new("git").args(["config", key]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    (!v.is_empty()).then_some(v)
 }
 
 // ── 시각 ──────────────────────────────────────────────────────────────
@@ -545,6 +682,7 @@ mod tests {
             (|i| i.status = Status::new("없는칸"), "라는 칸이 없다"),
             (|i| i.priority = Some(9), "우선순위는"),
             (|i| i.tags = vec!["두 낱말".into()], "공백이나 쉼표"),
+            (|i| i.assignee = Some("철수\n악성".into()), "담당은 한 줄"),
             (|i| i.epic = Some("이상한".into()), "에픽 id 형식"),
         ] {
             let mut i = issue();
@@ -577,6 +715,47 @@ mod tests {
         assert_eq!(days_since("어제", "2026-09-11T04:12:03Z"), None);
     }
 
+    /// 이름 안에 괄호가 있는 사람이 실제로 있다. 앞에서 괄호를 찾으면
+    /// 거기서 잘려 메일이 이름으로 들어간다.
+    #[test]
+    fn a_name_with_brackets_still_parses() {
+        let a = Actor::parse("레이븐 (부재중) (raven@buzzni.com)").unwrap();
+        assert_eq!(a.name, "레이븐 (부재중)");
+        assert_eq!(a.email, "raven@buzzni.com");
+        // 괄호 앞 공백은 있어도 없어도 같다
+        assert_eq!(Actor::parse("레이븐(raven@buzzni.com)"), Actor::parse("레이븐 (raven@buzzni.com)"));
+    }
+
+    /// 모양이 어긋난 것을 조용히 이름으로 삼지 않는다 — 메일 없는 줄이 그렇게
+    /// 샌다. 거절해야 `--user` 가 무엇을 받는지가 한 가지로 남는다.
+    #[test]
+    fn a_shape_that_is_not_name_and_mail_is_refused() {
+        for bad in ["레이븐", "레이븐 ()", "()", "(raven@buzzni.com)", "레이븐 (raven)", "레이븐 (a b@c)"] {
+            assert_eq!(Actor::parse(bad), None, "{bad:?} 를 받아 버렸다");
+        }
+    }
+
+    /// `-a` 는 메일을 요구하지 않는다. 남의 메일을 모르는 채로 남에게 맡기는
+    /// 일이 실제로 있다.
+    #[test]
+    fn an_assignee_may_be_a_bare_name() {
+        assert_eq!(split_assignee("철수"), (Some("철수".into()), None));
+        assert_eq!(
+            split_assignee("레이븐 (raven@buzzni.com)"),
+            (Some("레이븐".into()), Some("raven@buzzni.com".into()))
+        );
+        assert_eq!(split_assignee("   "), (None, None));
+    }
+
+    /// 담당이 없는데 메일만 남으면 어느 화면도 그릴 줄 모른다.
+    #[test]
+    fn an_email_never_outlives_its_name() {
+        let mut i = Issue::new("argos-4aex".into(), "t".into(), Kind::Issue, Status::new("todo"), "2026-09-11T05:02:44Z");
+        i.assignee_email = Some("raven@buzzni.com".into());
+        i.normalize();
+        assert_eq!(i.assignee_email, None);
+    }
+
     /// 저널은 넷만 적는다. 필드 변경을 적기 시작하면 이벤트 로그가 된다.
     #[test]
     fn journal_entries_are_shaped() {
@@ -586,11 +765,11 @@ mod tests {
             &Status::new("in_progress"),
             None,
             "2026-09-11T05:02:44Z",
-            "claude",
+            &someone("claude"),
         );
         assert_eq!(
             serde_json::to_string(&e).unwrap(),
-            r#"{"ts":"2026-09-11T05:02:44Z","id":"argos-4aex","kind":"status","by":"claude","from":"todo","to":"in_progress"}"#
+            r#"{"ts":"2026-09-11T05:02:44Z","id":"argos-4aex","kind":"status","by":"claude","by_email":"claude@example.com","from":"todo","to":"in_progress"}"#
         );
     }
 }

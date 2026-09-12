@@ -53,6 +53,10 @@ pub struct Cli {
     /// 이 디렉터리에서 실행한다 (`git -C` 와 같다)
     #[arg(short = 'C', long = "dir", global = true, value_name = "경로")]
     pub dir: Option<std::path::PathBuf>,
+
+    /// 누가 하는가. 없으면 `git config` 에서 가져온다
+    #[arg(long, global = true, value_name = "이름 (메일)")]
+    pub user: Option<String>,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq)]

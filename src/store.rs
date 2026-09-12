@@ -322,7 +322,7 @@ mod tests {
         let (r, _d) = repo("rw");
         r.with_write(|issues, _| {
             issues.push(issue("argos-4aex"));
-            Ok((vec![JournalEntry::create("argos-4aex", "t", T, "raven")], ()))
+            Ok((vec![JournalEntry::create("argos-4aex", "t", T, &crate::model::someone("raven"))], ()))
         })
         .unwrap();
         let load = r.read().unwrap();
@@ -375,7 +375,7 @@ mod tests {
             Ok((vec![], ()))
         })
         .unwrap();
-        r.with_write(|_, _| Ok((vec![JournalEntry::note("argos-4aex", "발견", T, "raven")], ())))
+        r.with_write(|_, _| Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &crate::model::someone("raven"))], ())))
             .unwrap();
         let j = r.journal_of("argos-4aex").unwrap();
         assert_eq!(j.len(), 1);

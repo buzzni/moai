@@ -3,9 +3,20 @@
 use super::{Ctx, Fail, R};
 use crate::cli::AddArgs;
 use crate::draft::{self, Draft};
-use crate::model::{self, Issue, JournalEntry, Kind, Status};
+use crate::model::{self, Actor, Issue, JournalEntry, Kind, Status};
 use crate::store::{Repo, taken_ids};
 use crate::style::{self, paint};
+
+/// 담당을 정한다. **`-a` 를 안 주면 만든 사람이 담당이다** — 이름 없는 줄이
+/// 쌓이는 것이 기본값이면 나중에 누가 무엇을 들고 있는지 아무도 모른다.
+/// 담당 없이 만들려면 `-a none` 이다 (`edit` 이 비우는 법과 같다).
+fn assignee_of(arg: Option<&str>, by: &Actor) -> (Option<String>, Option<String>) {
+    match arg.map(super::clearable) {
+        Some(Some(v)) => model::split_assignee(&v),
+        Some(None) => (None, None),
+        None => (Some(by.name.clone()), Some(by.email.clone())),
+    }
+}
 
 /// `-` 이면 stdin. `add` 와 `edit` 이 같은 규칙을 쓴다.
 pub fn read_body(arg: Option<String>) -> R<Option<String>> {
@@ -25,7 +36,7 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
 pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     if let Some(from) = &args.from {
-        return bulk(ctx, &repo, from, args.dry_run);
+        return bulk(ctx, &repo, from, args.dry_run, args.assignee.clone());
     }
     let Some(title) = args.title.clone().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
     else {
@@ -43,7 +54,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 오류 메시지에 실려 나가고, 받는 쪽은 그게 만들어진 줄 안다.
     repo.config.require_known(status.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
     let at = model::now();
-    let by = model::actor();
+    let by = model::actor(ctx.user.as_deref())?;
 
     let made: Issue = repo.with_write(|issues, cfg| {
         let taken = taken_ids(issues);
@@ -78,7 +89,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         issue.milestone = args.milestone.clone();
         issue.tags = args.tag.iter().map(|t| model::normalize_tag(t)).collect();
         issue.priority = args.priority;
-        issue.assignee = args.assignee.clone();
+        (issue.assignee, issue.assignee_email) = assignee_of(args.assignee.as_deref(), &by);
         issue.body = body.clone();
         issue.normalize();
         issue.validate(cfg)?;
@@ -120,7 +131,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
 ///
 /// 하나씩 만들면 에이전트가 중간에 흘리고, 중간에 죽으면 반만 남은 계획이
 /// 남는다. 한 번의 쓰기라 다 되거나 하나도 안 된다.
-fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool) -> R<Vec<String>> {
+fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool, assignee: Option<String>) -> R<Vec<String>> {
     let src = match from {
         "-" => {
             let mut s = String::new();
@@ -143,7 +154,7 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool) -> R<Vec<String>> {
     }
 
     let at = model::now();
-    let by = model::actor();
+    let by = model::actor(ctx.user.as_deref())?;
     let made: Vec<Issue> = repo.with_write(|issues, cfg| {
         let mut taken = taken_ids(issues);
         let mut ids: Vec<String> = Vec::with_capacity(drafts.len());
@@ -159,6 +170,7 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool) -> R<Vec<String>> {
             issue.priority = d.priority;
             issue.tags = d.tags.clone();
             issue.epic = d.epic.map(|at| ids[at].clone());
+            (issue.assignee, issue.assignee_email) = assignee_of(assignee.as_deref(), &by);
             issue.normalize();
             issue.validate(cfg)?;
             entries.push(JournalEntry::create(&issue.id, &issue.title, &at, &by));

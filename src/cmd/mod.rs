@@ -23,11 +23,21 @@ pub use crate::fail::{Fail, R, code};
 
 pub struct Ctx {
     pub json: bool,
+    /// `--user` 를 **푼 값이 아니라 준 값 그대로** 들고 있다. 여기서 미리
+    /// 풀면 읽기만 하는 명령(`show`·`status`)까지 사용자 정보를 요구한다.
+    pub user: Option<String>,
 }
 
 /// 할 수 있는 것은 다 하고, 된 것과 안 된 것을 둘 다 보고한 뒤 비영 종료한다.
 /// 이 깃발이 서면 결과를 다 낸 **뒤에** 종료 코드가 1 이 된다.
 static PARTIAL: AtomicBool = AtomicBool::new(false);
+
+/// `none` 은 "비운다" 는 뜻이다. `add` 와 `edit` 이 같은 낱말을 써야 한다 —
+/// 한쪽만 알면 방금 만든 이슈를 같은 말로 비우지 못한다.
+pub fn clearable(v: &str) -> Option<String> {
+    let v = v.trim();
+    (!v.is_empty() && v != "none").then(|| v.to_string())
+}
 
 pub fn note_partial() {
     PARTIAL.store(true, Ordering::Relaxed);
@@ -56,7 +66,7 @@ pub fn report_load_errors(path: &std::path::Path, errors: &[crate::store::LoadEr
 }
 
 pub fn run(cli: Cli) -> R<Vec<String>> {
-    let ctx = Ctx { json: cli.json };
+    let ctx = Ctx { json: cli.json, user: cli.user };
     let Some(cmd) = cli.cmd else {
         return opening(&ctx);
     };

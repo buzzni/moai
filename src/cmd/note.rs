@@ -20,7 +20,7 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
         return Err(Fail::new("메모가 비었다"));
     }
     let at = model::now();
-    let by = model::actor();
+    let by = model::actor(ctx.user.as_deref())?;
     let entry = JournalEntry::note(&args.id, &text, &at, &by);
 
     repo.with_write(|issues, _| {

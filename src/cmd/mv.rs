@@ -37,7 +37,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     repo.config.require_known(to.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
 
     let at = model::now();
-    let by = model::actor();
+    let by = model::actor(ctx.user.as_deref())?;
     let moved: Moved = repo.with_write(|issues, _| {
         let mut m = Moved::default();
         let mut entries = Vec::new();
