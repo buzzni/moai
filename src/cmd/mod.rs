@@ -32,11 +32,16 @@ pub struct Ctx {
 /// 이 깃발이 서면 결과를 다 낸 **뒤에** 종료 코드가 1 이 된다.
 static PARTIAL: AtomicBool = AtomicBool::new(false);
 
-/// `none` 은 "비운다" 는 뜻이다. `add` 와 `edit` 이 같은 낱말을 써야 한다 —
-/// 한쪽만 알면 방금 만든 이슈를 같은 말로 비우지 못한다.
+/// `none` 은 "비운다" 는 뜻이다. 제목이 `none` 인 이슈를 만들 일은 없다.
+/// `add` 와 `edit` 이 같은 낱말을 써야 한다 — 한쪽만 알면 방금 만든 이슈를
+/// 같은 말로 비우지 못한다.
+///
+/// **`none` 만 본다.** 빈 값이나 앞뒤 공백까지 여기서 접으면 `-e ""` 가 거절에서
+/// 비우기로, `-e " <id> "` 가 거절에서 통과로 조용히 바뀐다 — 담당 때문에 옮긴
+/// 헬퍼가 에픽·마일스톤의 뜻을 같이 바꾸는 것은 범위 밖이다. 담당 쪽 공백은
+/// `model::split_assignee` 가 접는다.
 pub fn clearable(v: &str) -> Option<String> {
-    let v = v.trim();
-    (!v.is_empty() && v != "none").then(|| v.to_string())
+    (v != "none").then(|| v.to_string())
 }
 
 pub fn note_partial() {

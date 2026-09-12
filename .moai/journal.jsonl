@@ -221,3 +221,5 @@
 {"ts":"2026-09-12T05:04:42Z","id":"moai-9e00","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
 {"ts":"2026-09-12T05:12:09Z","id":"moai-3xhq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-12T05:27:25Z","id":"moai-3xhq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-12T05:36:53Z","id":"moai-45ux","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"담당으로 거를 길이 없다 — show 에 -a 필터"}
+{"ts":"2026-09-12T05:36:53Z","id":"moai-45ux","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"이제 만드는 모든 이슈에 담당이 붙는데(moai-mb9q), 그 값으로 거를 수가 없다. query.rs 에 assignee 필터가 아예 없다.\n\n메일과 이름이 갈라져 있으므로 무엇에 맞출지 정해야 한다 — 둘 중 하나라도 맞으면 통과가 자연스럽다. 'me' 같은 낱말로 지금 사람을 가리키는 것도 같이 볼 것. model::actor 가 이미 그 사람을 안다."}

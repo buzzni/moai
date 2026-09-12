@@ -87,7 +87,7 @@ pub enum Naming {
 }
 
 impl Naming {
-    pub const ALL: [&'static str; 3] = ["full", "name", "email"];
+    const ALL: [&'static str; 3] = ["full", "name", "email"];
 
     fn parse(raw: &str) -> Option<Naming> {
         match raw {

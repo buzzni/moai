@@ -810,11 +810,15 @@ fn entry(e: &JournalEntry, cfg: &Config) -> String {
         other => other.to_string(),
     };
     let note = e.note.as_deref().map(|n| format!("  — {n}")).unwrap_or_default();
+    // 이름도 메일도 없는 줄은 낼 것이 없다. `trim_end` 가 없으면 그 자리에
+    // 꼬리 공백 두 칸이 남는다.
     format!(
         "{what}{}  {}",
         paint(style::DIM, &note),
         paint(style::DIM, &crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming))
     )
+    .trim_end()
+    .to_string()
 }
 
 #[cfg(test)]

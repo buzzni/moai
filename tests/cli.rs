@@ -402,6 +402,13 @@ fn edit_changes_fields_and_none_clears() {
     let line = line_of(s.path(), &id);
     assert!(!line.contains("\"epic\"") && !line.contains("\"assignee\""), "{line}");
 
+    // 비우는 낱말은 `none` **하나다.** 빈 값도 비우기로 치면 `-e ""` 한 번에
+    // 소속이 조용히 날아가고, 그것은 오타와 구분되지 않는다.
+    ok(s.path(), &["edit", &id, "-e", &epic]);
+    let out = moai(s.path(), &["edit", &id, "-e", ""]);
+    assert!(!out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(line_of(s.path(), &id).contains(&format!(r#""epic":"{epic}""#)));
+
     // 필드 변경은 저널에 적지 않는다 — 적기 시작하면 이벤트 로그가 된다
     assert_eq!(journal(s.path()).lines().count(), 2, "생성 둘 말고 더 쌓였다");
 }
