@@ -155,18 +155,50 @@ use crate::tui::App;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 
-/// 키를 기다리다 이따금 깬다. **깨는 것은 파일이 바뀌었는지 보려는 것뿐이다** —
-/// 저절로 다시 읽지는 않는다. 커서가 튀면 읽던 자리를 잃는다.
+/// 파일이 바뀌었는지 보러 깨는 걸음. **보기만 한다** — 저절로 다시 읽지는
+/// 않는다. 커서가 튀면 읽던 자리를 잃는다.
 const TICK: std::time::Duration = std::time::Duration::from_millis(700);
 
+/// 도는 글리프가 한 칸 가는 **가장 빠른** 걸음. ora 가 80ms 로 돌린다. 그보다
+/// 느긋해도 회전으로 읽히는데, **파일을 보는 걸음(700ms)에 얹으면 한 바퀴가
+/// 7초라 도는 것이 아니라 글자가 이따금 바뀌는 것으로 보인다** — 그래서 걸음을
+/// 따로 둔다. 반대로 빠르게 한다고 파일을 그만큼 자주 보게 하지도 않는다.
+/// `stat` 은 디스크를 만지고, 글리프 한 칸은 바뀐 칸만 내보내면 끝이다.
+const SPIN_TICK: std::time::Duration = std::time::Duration::from_millis(120);
+
+/// 걸음이 아무리 늘어져도 여기까지. 넘기면 도는 것이 멈춘 것으로 보이고,
+/// 멈춘 스피너는 "일이 멈췄다" 는 거짓말을 한다.
+const SPIN_SLOWEST: std::time::Duration = std::time::Duration::from_millis(1000);
+
+/// 그리는 데 쓸 몫. **한 프레임이 비싼 저장소에서는 걸음이 스스로 늘어난다** —
+/// 재 보니(release, `TestBackend` 120x45, 에픽 하나에 들어간 채) 이슈 1만 개에서
+/// 한 프레임이 22ms 고 45개는 1.2ms 다. 그걸 120ms 마다 그리면 가만히 둔
+/// 탐색기가 CPU 18% 를 먹는다. 그린 시간의 이만큼을 쉬게 하면 느려지는 것은
+/// 회전뿐이고 비용은 1/n 로 묶인다. 느린 ssh 에서도 같은 자가 듣는다 — 그쪽은
+/// 내보내는 데 걸린 시간이 곧 프레임 값이다.
+const SPIN_BUDGET: u32 = 10;
+
+/// 이번 프레임을 그린 값으로 다음 걸음을 정한다. **터미널 없이 시험된다** —
+/// 루프는 TTY 가 있어야 돌지만 이 셈은 없어도 돈다.
+fn spin_step(drew: std::time::Duration) -> std::time::Duration {
+    (drew * SPIN_BUDGET).clamp(SPIN_TICK, SPIN_SLOWEST)
+}
+
 fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result<()> {
-    let mut due = std::time::Instant::now() + TICK;
+    let mut stale_due = std::time::Instant::now() + TICK;
+    let mut spin_due = std::time::Instant::now() + SPIN_TICK;
     while !app.quit {
+        let began = std::time::Instant::now();
         term.draw(|f| crate::tui::draw::screen(f, app))?;
+        let step = spin_step(began.elapsed());
+        // **돌 것이 없으면 빠른 걸음으로 깨지 않는다.** 다 끝난 판을 열어 둔
+        // 채로 둔 사람의 CPU 를 초당 여덟 번 깨울 까닭이 없다.
+        let spinning = app.spinning();
         // **시간으로 센다, 한가함으로 세지 않는다.** 이벤트가 오는 동안에만
         // 안 보면 — 키를 누르고 있거나 창을 끄는 내내 — 바뀐 것을 못 본다.
         // 하필 그때가 쓰는 사람이 화면을 보고 있는 때다.
-        let wait = due.saturating_duration_since(std::time::Instant::now());
+        let wake = if spinning { stale_due.min(spin_due) } else { stale_due };
+        let wait = wake.saturating_duration_since(std::time::Instant::now());
         if event::poll(wait)? {
             // **누를 때만 받는다.** crossterm 은 kitty 프로토콜 터미널에서 뗄 때도
             // 보내므로, 거르지 않으면 키 하나가 두 번 먹는다.
@@ -177,10 +209,48 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
             }
         }
         let now = std::time::Instant::now();
-        if now >= due {
+        if now >= stale_due {
             app.check_stale();
-            due = now + TICK;
+            stale_due = now + TICK;
+        }
+        // **걸음은 시계가 올린다, 그린 횟수가 올리지 않는다.** 그릴 때마다
+        // 올리면 키를 누르는 내내 타이핑 속도로 돌고, 가만히 두면 파일을 보는
+        // 걸음으로 느려진다. 돌 것이 없는 동안에도 **때는 미뤄 둔다** — 안 그러면
+        // 다시 생긴 순간 지나간 때가 걸려 한 칸이 곧바로 튄다.
+        if now >= spin_due {
+            if spinning {
+                app.spin = app.spin.wrapping_add(1);
+            }
+            spin_due = now + step;
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// 걸음은 그린 값의 [`SPIN_BUDGET`] 배다 — **싼 프레임에서 느려지지 않고,
+    /// 비싼 프레임에서 CPU 를 독차지하지 않는다.** 재 본 값으로 두 끝을 박아
+    /// 둔다: 이슈 45개 1.2ms, 1만 개 22ms.
+    #[test]
+    fn the_step_buys_the_drawing_a_fixed_share_of_the_time() {
+        assert_eq!(spin_step(Duration::from_micros(1158)), SPIN_TICK, "싼 프레임이 느려졌다");
+        assert_eq!(spin_step(Duration::from_millis(22)), Duration::from_millis(220));
+        // 그리는 몫은 어디서나 1/SPIN_BUDGET 아래다 — 두 끝 사이에서는 정확히 그 값이다.
+        for ms in [13, 22, 50, 99] {
+            let drew = Duration::from_millis(ms);
+            assert_eq!(spin_step(drew), drew * SPIN_BUDGET, "{ms}ms 에서 몫이 어긋났다");
+        }
+    }
+
+    /// 아무리 비싼 프레임에서도 **멈춘 것처럼 보이지는 않는다.** 멈춘 스피너는
+    /// 일이 멈췄다는 거짓말이다.
+    #[test]
+    fn even_a_hopeless_frame_keeps_the_glyph_turning() {
+        assert_eq!(spin_step(Duration::from_secs(30)), SPIN_SLOWEST);
+        assert!(spin_step(Duration::from_secs(30)) <= Duration::from_secs(1));
+    }
 }

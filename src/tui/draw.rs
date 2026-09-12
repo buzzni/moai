@@ -164,7 +164,7 @@ fn list(f: &mut Frame, app: &App, at: Rect, rows: &[Row], state: &mut ListState)
         .filter_map(|st| {
             let n = work.iter().filter(|&&at| app.issues[at].status.as_str() == st).count();
             // 글리프만으로는 뜻이 약하다. 칸 이름을 같이 적는다.
-            (n > 0).then(|| format!("{} {st} {n}", style::glyph(st)))
+            (n > 0).then(|| format!("{} {st} {n}", style::spin_glyph(st, app.spin)))
         })
         .collect();
     // **줄이 있으면 "비었다" 라고 하지 않는다.** 셈은 config 에 있는 칸의 일만
@@ -211,7 +211,7 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
         Span::styled(format!("p{}", i.priority()), priority(i.priority())),
         Span::raw(" "),
         // 칸은 글리프로도 말한다. 색이 없는 터미널에서도 뜻이 남아야 한다.
-        Span::styled(style::glyph(i.status.as_str()).to_string(), status(i.status.as_str())),
+        Span::styled(style::spin_glyph(i.status.as_str(), app.spin).to_string(), status(i.status.as_str())),
         Span::raw(" "),
     ];
     // 커서 자리 + 머리글 폭. **`CURSOR` 에서 잰다** — 숫자를 손으로 적으면
@@ -364,7 +364,7 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     // 칸은 글리프와 낱말을 함께 낸다. 색이 없어도 뜻이 남아야 한다.
     let st = i.status.as_str().to_string();
     let mut head = vec![
-        Span::styled(format!("{} {st}", style::glyph(&st)), status(&st)),
+        Span::styled(format!("{} {st}", style::spin_glyph(&st, app.spin)), status(&st)),
         Span::raw("  ·  "),
         Span::styled(format!("p{}", i.priority()), priority(i.priority())),
     ];
@@ -488,7 +488,7 @@ fn rollup<'a>(app: &App, path: &crate::nav::Path, w: usize) -> Vec<Line<'a>> {
         .iter()
         .filter_map(|st| {
             let n = work.iter().filter(|&&at| app.issues[at].status.as_str() == st).count();
-            (n > 0).then(|| Span::styled(format!("{} {st} {n}   ", style::glyph(st)), status(st)))
+            (n > 0).then(|| Span::styled(format!("{} {st} {n}   ", style::spin_glyph(st, app.spin)), status(st)))
         })
         .collect();
     out.push(Line::from(counts));
@@ -690,12 +690,33 @@ mod tests {
         assert!(lines.contains('/'), "경로가 없다\n{lines}");
         assert!(lines.contains("argos-0001"), "id 가 없다\n{lines}");
         assert!(lines.contains("p1"), "우선순위가 없다\n{lines}");
-        assert!(lines.contains('▸'), "칸 글리프가 없다\n{lines}");
+        // `in_progress` 는 정지 글리프가 아니라 도는 프레임을 낸다 — 어느
+        // 프레임이든 `style::SPIN` 의 한 글자여야 한다.
+        assert!(style::SPIN.iter().any(|g| lines.contains(g)), "칸 글리프가 없다\n{lines}");
         assert!(lines.contains("Enter") && lines.contains("F10"), "F키 바가 없다\n{lines}");
         // 긴 제목은 **잘린다**. 잘렸다는 표시가 남아야 어디까지가 제목인지 안다.
         assert!(lines.contains("아주 긴"), "에픽 제목이 없다\n{lines}");
         assert!(lines.contains('…'), "잘렸는데 표시가 없다\n{lines}");
         // 디렉터리는 제목 뒤에 `/` 가 붙는다
+    }
+
+    /// 걸음은 **그린 횟수가 아니라 시계가** 올린다. 다시 그리기만 해서는
+    /// 안 돌아야 하고 — 안 그러면 키를 누르는 동안 타이핑 속도로 돈다 —
+    /// 한 화면 안에서는 목록과 상세가 **같은 걸음**을 보여야 한다.
+    #[test]
+    fn the_spinner_follows_the_clock_and_shows_one_step_per_screen() {
+        let mut a = app();
+        let shown = |lines: &str| -> Vec<&'static str> {
+            style::SPIN.iter().copied().filter(|g| lines.contains(g)).collect()
+        };
+        let first = render(&mut a, 100, 12).join("\n");
+        assert_eq!(shown(&first).len(), 1, "한 화면에 걸음이 섞였다\n{first}");
+        let again = render(&mut a, 100, 12).join("\n");
+        assert_eq!(shown(&first), shown(&again), "그리기만으로 걸음이 갔다\n{again}");
+        a.spin += 1;
+        let next = render(&mut a, 100, 12).join("\n");
+        assert_eq!(shown(&next).len(), 1, "한 화면에 걸음이 섞였다\n{next}");
+        assert_ne!(shown(&first), shown(&next), "걸음이 갔는데 글리프가 그대로다\n{next}");
     }
 
     /// 커서 줄은 **색만으로** 표시하지 않는다. `>` 가 함께 있어야 한다.

@@ -74,6 +74,12 @@ pub struct App {
     /// 커서 아래를 한 줄도 못 본다.
     pub list: ListState,
     pub quit: bool,
+    /// 도는 글리프의 걸음. **그린 횟수가 아니라 시계가 올린다** — 그릴 때마다
+    /// 올리면 키를 누르는 동안에는 타이핑 속도로 돌고 가만히 두면 파일을 보러
+    /// 깨는 걸음(700ms)으로 느려진다. 둘 다 "도는 것" 으로 읽히지 않는다.
+    /// 올리는 것은 `cmd::tui` 의 루프 하나뿐이고, 그래서 한 프레임 안의
+    /// 목록·상세·롤업이 같은 걸음을 본다.
+    pub spin: usize,
 }
 
 impl App {
@@ -124,6 +130,7 @@ impl App {
             remembered,
             list: ListState::default(),
             quit: false,
+            spin: 0,
         };
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
         // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
@@ -149,6 +156,16 @@ impl App {
             // 배너는 그대로 붙어 있어, 사람은 누르고 또 누르며 까닭을 못 얻는다.
             Err(e) => self.trouble = Some(e.to_string()),
         }
+    }
+
+    /// 돌 것이 한 줄이라도 있는가. **화면에 보이는지까지는 따지지 않는다** —
+    /// 보이는 줄만 가리려면 루프가 그림의 결과를 알아야 하고 그 값은 그린 뒤에야
+    /// 나온다. 틀리는 쪽은 "있는데 안 보인다" 하나뿐이고, 그때 손해는 안 보이는
+    /// 것을 위해 걸음을 재는 것이다. 반대쪽은 안 틀린다 — 화면에 도는 글리프가
+    /// 있으면 그 이슈는 `issues` 에 있으므로 여기가 참이다. 스피너를 그려 놓고
+    /// 아무도 안 깨우는 조합은 그래서 못 생긴다.
+    pub fn spinning(&self) -> bool {
+        self.issues.iter().any(|i| crate::style::spins(i.status.as_str()))
     }
 
     /// 새 자료를 받아들이고 어긋난 것을 손본다. 시험이 저장소 없이 부른다.
@@ -555,6 +572,19 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// 루프가 빠른 걸음으로 깰지를 이 답으로 정한다. **거짓을 내면 도는
+    /// 글리프가 첫 칸에 멈춘 채 7초에 한 번만 움직인다** — 스피너가 있는데
+    /// 아무도 깨우지 않는 그 조합이 눈에는 버그로 보이고 코드로는 안 보인다.
+    #[test]
+    fn the_loop_only_wakes_fast_when_something_spins() {
+        let mut a = app();
+        assert!(!a.spinning(), "todo 뿐인데 돈다고 한다");
+        let mut issues = a.issues.clone();
+        issues[0].status = Status::new("in_progress");
+        a.adopt(issues);
+        assert!(a.spinning(), "in_progress 가 있는데 안 돈다고 한다");
     }
 
     /// 진짜 파일을 쓰는 시험이 쓰는 임시 자리. **터져도 치운다** — 바로
