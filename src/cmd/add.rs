@@ -158,28 +158,7 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool, assignee: Option<Stri
     let at = model::now();
     let by = model::actor(ctx.user.as_deref())?;
     let made: Vec<Issue> = repo.with_write(|issues, cfg| {
-        let mut taken = taken_ids(issues);
-        let mut ids: Vec<String> = Vec::with_capacity(drafts.len());
-        let mut entries = Vec::new();
-        let mut made = Vec::new();
-
-        for (n, d) in drafts.iter().enumerate() {
-            let id = crate::id::generate(&cfg.prefix, &taken, &crate::id::seed(&format!("{n}{}", d.title)));
-            taken.insert(id.clone());
-            ids.push(id.clone());
-
-            let mut issue = Issue::new(id, d.title.clone(), d.kind, Status::new(cfg.first_status()), &at);
-            issue.priority = d.priority;
-            issue.tags = d.tags.clone();
-            issue.epic = d.epic.map(|at| ids[at].clone());
-            (issue.assignee, issue.assignee_email) = assignee_of(assignee.as_deref(), &by);
-            issue.normalize();
-            issue.validate(cfg)?;
-            entries.push(JournalEntry::create(&issue.id, &issue.title, &at, &by));
-            made.push(issue.clone());
-            issues.push(issue);
-        }
-        Ok((entries, made))
+        create_drafts(issues, cfg, &drafts, assignee.as_deref(), &by, &at)
     })?;
 
     if ctx.json {
@@ -192,7 +171,44 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool, assignee: Option<Stri
     Ok(out)
 }
 
-fn line_of(d: &Draft, id: Option<&str>) -> String {
+/// 초안 묶음을 실제 이슈로 빚어 `issues` 에 밀어 넣는다. **쓰기 트랜잭션
+/// 안에서 부른다** — 다 되거나 하나도 안 된다는 성질이 그 트랜잭션에서 온다.
+///
+/// `add --from` 과 `idea promote` 가 이 한 길을 같이 쓴다. 둘이 갈라지면
+/// 같은 마크다운이 어느 쪽으로 들어왔느냐에 따라 다른 이슈가 된다.
+pub fn create_drafts(
+    issues: &mut Vec<Issue>,
+    cfg: &crate::config::Config,
+    drafts: &[Draft],
+    assignee: Option<&str>,
+    by: &Actor,
+    at: &str,
+) -> R<(Vec<JournalEntry>, Vec<Issue>)> {
+    let mut taken = taken_ids(issues);
+    let mut ids: Vec<String> = Vec::with_capacity(drafts.len());
+    let mut entries = Vec::new();
+    let mut made = Vec::new();
+
+    for (n, d) in drafts.iter().enumerate() {
+        let id = crate::id::generate(&cfg.prefix, &taken, &crate::id::seed(&format!("{n}{}", d.title)));
+        taken.insert(id.clone());
+        ids.push(id.clone());
+
+        let mut issue = Issue::new(id, d.title.clone(), d.kind, Status::new(cfg.first_status()), at);
+        issue.priority = d.priority;
+        issue.tags = d.tags.clone();
+        issue.epic = d.epic.map(|at| ids[at].clone());
+        (issue.assignee, issue.assignee_email) = assignee_of(assignee, by);
+        issue.normalize();
+        issue.validate(cfg)?;
+        entries.push(JournalEntry::create(&issue.id, &issue.title, at, by));
+        made.push(issue.clone());
+        issues.push(issue);
+    }
+    Ok((entries, made))
+}
+
+pub fn line_of(d: &Draft, id: Option<&str>) -> String {
     let head = match id {
         Some(id) => paint(style::ID, id),
         None => String::new(),
@@ -213,7 +229,7 @@ fn line_of(d: &Draft, id: Option<&str>) -> String {
     format!("{indent}{head}  {mark}  {}{tags}", d.title).trim_end().to_string()
 }
 
-fn tally(drafts: &[Draft]) -> String {
+pub fn tally(drafts: &[Draft]) -> String {
     let epics = drafts.iter().filter(|d| d.kind == Kind::Epic).count();
     paint(style::DIM, &format!("에픽 {epics} · 이슈 {}", drafts.len() - epics))
 }
