@@ -372,10 +372,12 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let group = groups(issues);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     // 자식은 소속을 조상에게서 물려받으므로 끝난 에픽의 손자도 집지 않는다.
+    // **두 줄 위에서 세운 `by_id` 로 짚는다.** 훑으면 후보 하나마다 목록
+    // 전체를 걷게 되어 `ready` 가 이슈 수의 제곱으로 자란다.
     let done_epic = |i: &Issue| {
         group
             .get(i.id.as_str())
-            .and_then(|e| issues.iter().find(|x| x.id == *e))
+            .and_then(|e| by_id.get(*e))
             .is_some_and(|e| e.status.is_done())
     };
     // 자식이 남아 있으면 부모는 직접 하는 일이 아니다. **일만 센다** —
@@ -709,7 +711,9 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
         .filter(|r| r.percent == Some(100))
         .filter_map(|r| r.id.as_deref())
         .filter(|id| !put_off_group(id))
-        .filter(|id| issues.iter().any(|e| e.id == *id && !e.status.is_done()))
+        // `put_off_group` 이 바로 위에서 쓰는 그 `by_id` 로 짚는다 — 여기만
+        // 훑으면 100% 인 에픽 하나마다 목록 전체를 한 번 더 걷는다.
+        .filter(|id| by_id.get(id).is_some_and(|e| !e.status.is_done()))
         .map(str::to_string)
         .collect();
     if !finished.is_empty() {
