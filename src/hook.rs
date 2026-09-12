@@ -225,10 +225,13 @@ struct Seg {
     writes: Vec<String>,
 }
 
+/// **따옴표는 줄을 넘는다.** 줄마다 따로 토막내던 판은 줄이 바뀔 때 따옴표를
+/// 잊어, `git commit -m "…\n- draft -> accepted"` 의 둘째 줄을 명령으로 읽고
+/// `->` 의 `>` 를 `accepted` 에 쓰는 것으로 보아 커밋을 막았다. 그래서 heredoc
+/// 을 걷어낸 뒤 **한 덩이로** 읽고, 따옴표 밖의 줄바꿈만 토막을 가른다.
 fn parse(cmd: &str) -> Vec<Seg> {
-    strip_heredocs(cmd)
-        .iter()
-        .flat_map(|line| split_line(line))
+    split_line(&strip_heredocs(cmd).join("\n"))
+        .into_iter()
         .filter(|s| !s.words.is_empty() || !s.writes.is_empty())
         .collect()
 }
@@ -263,7 +266,7 @@ fn heredoc_tag(line: &str) -> Option<String> {
     (!tag.is_empty()).then_some(tag)
 }
 
-/// 한 줄을 `;`·`&&`·`|` 로 가르고 토큰으로 쪼갠다.
+/// 명령을 `;`·`&&`·`|`·줄바꿈(따옴표 밖) 으로 가르고 토큰으로 쪼갠다.
 ///
 /// **리다이렉션은 따옴표 밖에서만 읽는다.** 토큰이 된 뒤에는 `">"` 와 `>` 가
 /// 같은 글자라, 그때 가서 찾으면 `moai note t-1 "a > src/x.rs"` 가 쓰기로
@@ -303,11 +306,15 @@ fn split_line(line: &str) -> Vec<Seg> {
                 quote = Some(c);
                 had = true;
             }
-            // 따옴표 밖의 `\>` 는 글자다.
-            (None, '\\') => {
-                if let Some(n) = chars.next() {
-                    cur.push(n);
-                }
+            // 따옴표 밖의 `\>` 는 글자다. 줄 끝의 `\` 는 줄을 잇는다.
+            (None, '\\') => match chars.next() {
+                Some('\n') | None => {}
+                Some(n) => cur.push(n),
+            },
+            // 낱말 머리의 `#` 부터 줄 끝까지는 주석이다. 주석 속 `a -> b` 를
+            // 쓰기로 읽으면 명령이 엉뚱하게 막힌다.
+            (None, '#') if cur.is_empty() && !had => {
+                while chars.next_if(|d| *d != '\n').is_some() {}
             }
             (None, '>') => {
                 // `2>` 의 `2` 는 낱말이 아니라 fd 다.
@@ -334,7 +341,7 @@ fn split_line(line: &str) -> Vec<Seg> {
             }
             // **토막을 먼저 가른다.** 공백 갈래가 먼저 오면 줄바꿈이 낱말만
             // 끊고 토막은 안 끊는다 — 그 한 줄 차이로 규칙이 통째로 샜다.
-            (None, ';' | '|' | '&') => {
+            (None, ';' | '|' | '&' | '\n') => {
                 flush_word(&mut seg, &mut cur, &mut had, &mut aimed);
                 aimed = false;
                 all.push(std::mem::take(&mut seg));
@@ -1199,6 +1206,12 @@ mod tests {
             "diff <(sort a) <(sort b)",
             "echo x | tee >(cat)",
             "moai add --from - <<'MD'\n# 에픽\n- 줄 > src/store.rs\nMD",
+            // 따옴표는 줄을 넘는다. 줄마다 따옴표를 새로 세던 판은 둘째 줄을
+            // 명령으로 읽어 `->` 의 `>` 를 리다이렉션으로 보았다.
+            "git commit -m \"feat: x\n\n- draft -> accepted 로 바꾼다\"",
+            "moai note t-1 \"첫 줄\n둘째 줄 > src/store.rs\"",
+            // `#` 뒤는 주석이다.
+            "cargo build  # draft -> accepted",
         ] {
             assert_eq!(guard_writes(&all, &cfg(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
