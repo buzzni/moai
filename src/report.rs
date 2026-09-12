@@ -156,6 +156,60 @@ pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
     out
 }
 
+/// 소속 참조가 못 쓸 것인 까닭.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Misplace {
+    /// 에픽 자리에 없는 것이나 에픽 아닌 것이 있다.
+    Epic,
+    /// 마일스톤 자리에 없는 것이나 마일스톤 아닌 것이 있다.
+    Milestone,
+}
+
+/// 소속으로 쓸 수 없는 참조를 가진 줄.
+///
+/// **끊긴 것과 종류가 틀린 것을 한 자로 잰다.** 둘을 다른 자로 재면 탐색기가
+/// `(길 잃음)` 에 넣은 줄에 대해 `moai status` 가 아무 말도 안 하고, 배너가
+/// 가리킨 명령이 침묵한다 — 실제로 그랬다.
+///
+/// **자리를 정하는 쪽(`nav`)이 이것을 그대로 쓴다.** 술어를 양쪽에 따로 두면
+/// 그 순간 자가 둘이 되고, 어느 쪽이 참인지 화면만 봐서는 알 수 없다.
+/// 그래서 판정 차례도 `nav::Ctx::home` 과 같다 — 마일스톤은 뿌리라 볼 것이
+/// 없고, 에픽은 제 마일스톤만, 이슈는 에픽을 먼저 보고 없으면 마일스톤을 본다.
+pub fn misplaced(all: &[Issue]) -> BTreeMap<&str, Misplace> {
+    let kind_of: BTreeMap<&str, Kind> = all.iter().map(|i| (i.id.as_str(), i.kind)).collect();
+    let epic_of = groups(all);
+    let mile_of = milestones(all);
+    let usable = |id: Option<&&str>, kind: Kind| id.is_none_or(|id| kind_of.get(*id) == Some(&kind));
+
+    let mut out = BTreeMap::new();
+    for i in all {
+        let id = i.id.as_str();
+        let mile = || mile_of.get(id);
+        match i.kind {
+            // 뿌리에 선다. 가리키는 것이 없다.
+            Kind::Milestone => {}
+            Kind::Epic => {
+                if !usable(mile(), Kind::Milestone) {
+                    out.insert(id, Misplace::Milestone);
+                }
+            }
+            Kind::Issue => match epic_of.get(id) {
+                Some(e) if kind_of.get(*e) != Some(&Kind::Epic) => {
+                    out.insert(id, Misplace::Epic);
+                }
+                // 에픽이 멀쩡하면 그 에픽의 마일스톤을 따르므로 여기서 안 본다.
+                Some(_) => {}
+                None if !usable(mile(), Kind::Milestone) => {
+                    out.insert(id, Misplace::Milestone);
+                }
+                None => {}
+            },
+        }
+    }
+    out
+}
+
 /// 그 종류의 소속 지도. 에픽과 마일스톤이 같은 코드를 지난다.
 fn group_for(kind: Kind, all: &[Issue]) -> BTreeMap<&str, &str> {
     match kind {
@@ -429,10 +483,17 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     //      저장소에는 말하지 않는다 — 안 쓰는 기능으로 잔소리하지 않는다.
     if !stones.is_empty() {
         let mile = milestones(issues);
+        // 종류가 틀린 참조는 **마일스톤이 있는 것이 아니다.** 그대로 세면
+        // 그 줄이 "마일스톤 있음" 으로 빠져, 정작 드러내야 할 것이 숨는다.
+        let bad = misplaced(issues);
         let outside: Vec<&Issue> = work
             .iter()
             .copied()
-            .filter(|i| !i.status.is_done() && !mile.contains_key(i.id.as_str()))
+            .filter(|i| {
+                !i.status.is_done()
+                    && (!mile.contains_key(i.id.as_str())
+                        || bad.get(i.id.as_str()) == Some(&Misplace::Milestone))
+            })
             .collect();
         if !outside.is_empty() {
             warnings.push(
@@ -519,13 +580,17 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
 
     // 6. 머지를 잘못 푼 흔적. 여기부터는 드러내는 것을 넘어 고쳐야 할 것이다.
     let known: std::collections::BTreeSet<&str> = issues.iter().map(|i| i.id.as_str()).collect();
-    let dangling: Vec<&Issue> = issues
-        .iter()
-        .filter(|i| i.epic.as_deref().is_some_and(|e| !known.contains(e)))
-        .collect();
-    if !dangling.is_empty() {
-        warnings.push(Warning::new("dangling_epic", ids_of(&dangling)));
+    // **자리를 못 정하는 참조.** 끊긴 것과 종류가 틀린 것을 한 자로 잰다 —
+    // `nav` 가 `(길 잃음)` 바구니에 넣는 것과 **정의상 같은 집합**이다.
+    let bad = misplaced(issues);
+    for (kind, why) in [("dangling_epic", Misplace::Epic), ("dangling_milestone", Misplace::Milestone)] {
+        let ids: Vec<String> =
+            bad.iter().filter(|(_, w)| **w == why).map(|(id, _)| id.to_string()).collect();
+        if !ids.is_empty() {
+            warnings.push(Warning::new(kind, ids));
+        }
     }
+
     let orphans: Vec<&Issue> = issues
         .iter()
         .filter(|i| crate::id::parent_of(&i.id).is_some_and(|p| !known.contains(p)))
@@ -623,6 +688,53 @@ mod tests {
             ("todo".to_string(), 1), ("in_progress".to_string(), 0),
             ("review".to_string(), 0), ("done".to_string(), 2),
         ]));
+    }
+
+    /// **종류가 틀린 참조도 드러낸다.** 에픽이 아닌 것을 에픽이라 가리키면
+    /// 탐색기는 그 줄을 `(길 잃음)` 에 넣는데, `status` 가 아무 말도 안 하면
+    /// 배너가 가리킨 명령이 침묵한다.
+    #[test]
+    fn a_reference_to_the_wrong_kind_is_reported() {
+        let mut points_at_issue = make("argos-0004", Kind::Issue, "todo");
+        points_at_issue.epic = Some("argos-0009".into()); // 에픽이 아니라 이슈다
+        let mut points_at_epic = make("argos-0005", Kind::Issue, "todo");
+        points_at_epic.milestone = Some("argos-0002".into()); // 마일스톤이 아니라 에픽이다
+        let issues = vec![
+            make("argos-0002", Kind::Epic, "todo"),
+            points_at_issue,
+            points_at_epic,
+            make("argos-0009", Kind::Issue, "todo"),
+        ];
+
+        let bad = misplaced(&issues);
+        assert_eq!(bad.get("argos-0004"), Some(&Misplace::Epic), "{bad:?}");
+        assert_eq!(bad.get("argos-0005"), Some(&Misplace::Milestone), "{bad:?}");
+        assert!(!bad.contains_key("argos-0002"), "멀쩡한 줄을 걸었다 — {bad:?}");
+
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(kinds.contains(&"dangling_epic"), "{kinds:?}");
+        assert!(kinds.contains(&"dangling_milestone"), "{kinds:?}");
+    }
+
+    /// 마일스톤 아닌 것을 가리킨 줄을 "마일스톤 있음" 으로 세지 않는다 —
+    /// 그러면 `no_milestone` 이 그 줄을 오히려 빼 버린다.
+    #[test]
+    fn a_wrong_kind_milestone_does_not_count_as_having_one() {
+        let mut bad = make("argos-0005", Kind::Issue, "todo");
+        bad.milestone = Some("argos-0002".into()); // 에픽이다
+        let issues = vec![
+            make("argos-0001", Kind::Milestone, "todo"),
+            make("argos-0002", Kind::Epic, "todo"),
+            bad,
+        ];
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let no_mile = st.warnings.iter().find(|w| w.kind == "no_milestone");
+        assert!(
+            no_mile.is_some_and(|w| w.ids.contains(&"argos-0005".to_string())),
+            "마일스톤 없는 것으로 안 셌다 — {:?}",
+            st.warnings.iter().map(|w| (w.kind, &w.ids)).collect::<Vec<_>>()
+        );
     }
 
     /// 에픽 표도 **급한 것이 위로** 온다. 이슈 목록은 이미 그런데 에픽만

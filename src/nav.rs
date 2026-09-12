@@ -91,11 +91,25 @@ impl Index {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         let has_milestones = issues.iter().any(|i| i.kind == Kind::Milestone);
+        // **자리를 못 정하는 참조는 `report` 가 정한다.** 여기에 술어를 하나 더
+        // 두면 자가 둘이 되고, 탐색기가 `(길 잃음)` 에 넣은 줄에 대해
+        // `moai status` 가 침묵하는 일이 그렇게 생겼다.
+        let misplaced: BTreeMap<String, crate::report::Misplace> = crate::report::misplaced(issues)
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
 
         // id → 첨자. 이게 없으면 부모를 찾을 때마다 전체를 훑어 O(이슈 수²·깊이) 다.
         let by_id: BTreeMap<&str, usize> = issues.iter().enumerate().map(|(at, i)| (i.id.as_str(), at)).collect();
 
-        let ctx = Ctx { issues, epic_of: &epic_of, milestone_of: &milestone_of, by_id: &by_id, has_milestones };
+        let ctx = Ctx {
+            issues,
+            epic_of: &epic_of,
+            milestone_of: &milestone_of,
+            by_id: &by_id,
+            misplaced: &misplaced,
+            has_milestones,
+        };
         let homes: Vec<Path> = (0..issues.len()).map(|at| ctx.home(at)).collect();
 
         // **첨자로 센다.** id 로 세면 같은 id 를 단 줄 둘이 나란히 디렉터리가
@@ -255,17 +269,19 @@ struct Ctx<'a> {
     epic_of: &'a BTreeMap<String, String>,
     milestone_of: &'a BTreeMap<String, String>,
     by_id: &'a BTreeMap<&'a str, usize>,
+    misplaced: &'a BTreeMap<String, crate::report::Misplace>,
     has_milestones: bool,
 }
 
 impl Ctx<'_> {
-    fn is(&self, id: &str, kind: Kind) -> bool {
-        self.by_id.get(id).is_some_and(|&at| self.issues[at].kind == kind)
-    }
 
     /// 그 이슈가 걸리는 단 하나의 자리.
     fn home(&self, at: usize) -> Path {
         let me = &self.issues[at];
+        // 자리를 못 정하는 줄은 여기서 갈라져 나간다. **한 자로 잰다.**
+        if self.lost(&me.id) {
+            return vec![Seg::Lost];
+        }
         match me.kind {
             // 마일스톤은 뿌리에 선다.
             Kind::Milestone => Vec::new(),
@@ -275,13 +291,18 @@ impl Ctx<'_> {
         }
     }
 
+    /// 그 줄의 참조가 못 쓸 것인가. **`report` 가 정한 그대로 묻는다** —
+    /// 여기서 다시 판정하면 `moai status` 가 드러내는 집합과 `(길 잃음)`
+    /// 바구니가 갈라진다.
+    fn lost(&self, id: &str) -> bool {
+        self.misplaced.contains_key(id)
+    }
+
     fn under_milestone(&self, id: &str) -> Path {
         if !self.has_milestones {
             return Vec::new();
         }
         match self.milestone_of.get(id) {
-            // 없는 마일스톤을 가리키는 것은 조용히 뿌리로 보내지 않는다.
-            Some(m) if !self.is(m, Kind::Milestone) => vec![Seg::Lost],
             Some(m) => vec![Seg::Milestone(Some(m.clone()))],
             None => vec![Seg::Milestone(None)],
         }
@@ -301,8 +322,6 @@ impl Ctx<'_> {
             return path;
         }
         match self.epic_of.get(&me.id) {
-            // 없는 에픽, 또는 에픽이 아닌 것을 에픽이라 가리키는 줄.
-            Some(e) if !self.is(e, Kind::Epic) => vec![Seg::Lost],
             Some(e) => {
                 let mut path = self.under_milestone(e);
                 path.push(Seg::Epic(e.clone()));

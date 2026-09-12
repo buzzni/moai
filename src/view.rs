@@ -282,7 +282,10 @@ fn says(w: &Warning) -> String {
         "blocked_stale" => format!("막힌 채로 {}일 넘게 멈춰 있는 것 {n}건", w.days.unwrap_or(0)),
         "empty_epic" => format!("속이 빈 에픽 {n}건 — 계획만 세우고 안 채웠다"),
         "finished_epic" => format!("다 끝났는데 안 닫힌 에픽 {n}건"),
-        "dangling_epic" => format!("없는 에픽을 가리키는 것 {n}건"),
+        // **끊긴 것과 종류가 틀린 것을 한 낱말로 말한다** — 둘을 가려 말하면
+        // 고치는 손이 달라지는 것도 아닌데 경고가 둘로 늘어난다.
+        "dangling_epic" => format!("에픽으로 쓸 수 없는 것을 가리키는 줄 {n}건"),
+        "dangling_milestone" => format!("마일스톤으로 쓸 수 없는 것을 가리키는 줄 {n}건"),
         "orphan_child" => format!("부모 줄이 없는 자식 {n}건"),
         "dangling_blocked_by" => format!("없는 이슈에게 막혀 있다는 것 {n}건"),
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
@@ -401,7 +404,10 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str) -> Vec<String
         return out;
     }
     // 에픽에 대한 말은 칸도 나이도 뜻이 없다. 어느 에픽인지만 말한다.
-    if matches!(w.kind, "empty_epic" | "finished_epic" | "unknown_field" | "dangling_epic") {
+    if matches!(
+        w.kind,
+        "empty_epic" | "finished_epic" | "unknown_field" | "dangling_epic" | "dangling_milestone"
+    ) {
         for id in w.ids.iter().take(SHOW) {
             let title = by_id.get(id.as_str()).map(|i| i.title.as_str()).unwrap_or("");
             out.push(format!("    {}  {}", paint(style::ID, id), clip(title, TITLE_CAP)));
