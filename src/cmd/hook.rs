@@ -106,7 +106,12 @@ fn decide(event: Event, input: &Input) -> Option<String> {
         Event::PreToolUse => {
             match crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input) {
                 crate::hook::Call::Shell(cmd) => {
-                    crate::hook::guard_create(&load.issues, &repo.config, cmd)
+                    // 만드는 것과 닫는 것을 같은 자리에서 본다. 먼저 걸리는
+                    // 쪽이 이긴다 — 한 명령이 둘 다일 수는 없다.
+                    match crate::hook::guard_create(&load.issues, &repo.config, cmd) {
+                        Decision::Pass => crate::hook::guard_close(&load.issues, cmd),
+                        deny => deny,
+                    }
                 }
                 crate::hook::Call::Edits(path) => {
                     crate::hook::guard_edit(&load.issues, &repo.config, &repo.root, path)
