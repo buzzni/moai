@@ -218,7 +218,10 @@ pub fn misplaced(all: &[Issue]) -> BTreeMap<&str, Misplace> {
                     out.insert(id, Misplace::Milestone);
                 }
             }
-            Kind::Issue => match epic_of.get(id) {
+            // idea 도 같은 자를 받는다. 에픽을 안 적은 idea 는 아무것도 안
+            // 가리키므로 여기 걸릴 것이 없고, 적었는데 그것이 에픽이 아니면
+            // 일과 똑같이 드러나야 한다.
+            Kind::Issue | Kind::Idea => match epic_of.get(id) {
                 Some(e) if kind_of.get(*e) != Some(&Kind::Epic) => {
                     out.insert(id, Misplace::Epic);
                 }

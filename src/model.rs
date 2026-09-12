@@ -13,6 +13,16 @@ pub const MAX_PRIORITY: u8 = 3;
 ///
 /// `Milestone` 은 2단계에 CLI 가 붙지만 **지금도 읽을 줄은 안다.**
 /// 모르는 값으로 거절하면 새 바이너리가 쓴 파일을 옛 바이너리가 통째로 못 읽는다.
+///
+/// `Idea` 는 **status 가 아니라 kind 다.** 칸으로 두면 `statuses` 의 맨 앞이
+/// 되고 `report::ready` 가 그 칸을 "지금 집을 수 있는 것" 으로 읽어, 담아 둔
+/// 생각이 전부 집을 일로 올라온다. 그것을 막으려면 "집을 수 있는 첫 칸" 이라는
+/// 둘째 어휘가 필요한데, 종류로 두면 `is_work` 가 이미 문지기다 — 묶음이
+/// 보드와 ready 에서 빠지는 그 길을 그대로 탄다.
+///
+/// **새 값을 더하면 옛 바이너리는 그 줄을 못 읽는다.** 모르는 값을 기본값으로
+/// 접지 않기 때문이고, 접으면 되쓰기 한 번에 원래 값이 조용히 사라진다.
+/// 못 읽는 것은 시끄럽고 그 줄은 파일에 그대로 남는다 (`moai-dcee`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -20,6 +30,7 @@ pub enum Kind {
     Issue,
     Epic,
     Milestone,
+    Idea,
 }
 
 impl Kind {
@@ -31,6 +42,7 @@ impl Kind {
             Kind::Issue => "issue",
             Kind::Epic => "epic",
             Kind::Milestone => "milestone",
+            Kind::Idea => "idea",
         }
     }
 }
@@ -42,7 +54,8 @@ impl std::str::FromStr for Kind {
             "issue" => Ok(Kind::Issue),
             "epic" => Ok(Kind::Epic),
             "milestone" => Ok(Kind::Milestone),
-            _ => Err(format!("`{s}` 는 종류가 아니다. 종류: issue, epic, milestone")),
+            "idea" => Ok(Kind::Idea),
+            _ => Err(format!("`{s}` 는 종류가 아니다. 종류: issue, epic, milestone, idea")),
         }
     }
 }
@@ -616,6 +629,37 @@ mod tests {
         let out = serde_json::to_string(&i).unwrap();
         assert!(out.contains(r#""due":"2026-10-01""#), "{out}");
         assert!(out.contains(r#""estimate":90"#), "{out}");
+    }
+
+    /// idea 줄을 읽고 그대로 쓰면 바이트가 같다. 종류 하나를 더했으므로
+    /// 멱등성이 그 값까지 덮는지 여기서 못 박는다.
+    #[test]
+    fn round_trips_an_idea_line() {
+        let line = r#"{"id":"argos-4aex","title":"반짝","kind":"idea","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#;
+        let i: Issue = serde_json::from_str(line).unwrap();
+        assert_eq!(i.kind, Kind::Idea);
+        assert_eq!(serde_json::to_string(&i).unwrap(), line);
+    }
+
+    /// 모르는 종류는 **조용히 기본값이 되지 않는다.** 기본값으로 접으면 그
+    /// 줄을 한 번 되쓰는 것만으로 원래 값이 사라지는데, 조용한 손실이 이
+    /// 설계가 못 견디는 유일한 실패 모드다. 대신 줄이 안 읽히고 `status` 가
+    /// `unreadable_line` 으로 시끄럽게 말한다 — 파일의 그 줄은 그대로 있다.
+    #[test]
+    fn an_unknown_kind_is_refused_loudly_not_folded() {
+        let line = r#"{"id":"argos-4aex","title":"제목","kind":"몰라","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#;
+        assert!(
+            serde_json::from_str::<Issue>(line).is_err(),
+            "모르는 종류를 조용히 기본값으로 접었다 — 되쓰면 그 값이 사라진다"
+        );
+    }
+
+    #[test]
+    fn idea_parses_from_the_command_line() {
+        assert_eq!("idea".parse::<Kind>(), Ok(Kind::Idea));
+        assert_eq!(Kind::Idea.as_str(), "idea");
+        let e = "아이디어".parse::<Kind>().unwrap_err();
+        assert!(e.contains("idea"), "오류 문장이 idea 를 안 댄다 — {e}");
     }
 
     /// 옛 바이너리가 2단계 종류를 만나도 줄을 버리지 않는다.

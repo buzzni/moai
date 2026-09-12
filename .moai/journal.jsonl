@@ -256,3 +256,7 @@
 {"ts":"2026-09-12T07:33:53Z","id":"moai-064q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쓴 뒤 목록을 다시 세우고 만든 것에 커서를 둔다"}
 {"ts":"2026-09-12T07:33:53Z","id":"moai-nmv2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"누군지 모르면 쓰기 앞에서 한 번 묻는다"}
 {"ts":"2026-09-12T07:36:16Z","id":"moai-7j4j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"쓰기 입력창은 moai-nmv2 (7단계 — TUI 의 첫 쓰기) 가 이어받는다. 이 줄은 그 조건이 실제로 온 것을 적어 둔다."}
+{"ts":"2026-09-12T08:05:34Z","id":"moai-oidr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T08:05:34Z","id":"moai-ma1e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T08:08:16Z","id":"moai-dcee","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"모르는 kind 가 쓰기를 통째로 막는다"}
+{"ts":"2026-09-12T08:08:31Z","id":"moai-ma1e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}

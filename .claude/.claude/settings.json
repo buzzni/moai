@@ -1,0 +1,7 @@
+{
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "voltagent-lang@voltagent-subagents": true,
+    "caveman@caveman": true
+  }
+}

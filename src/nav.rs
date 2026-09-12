@@ -139,7 +139,8 @@ impl Index {
         match issues[at].kind {
             Kind::Milestone => Seg::Milestone(Some(issues[at].id.clone())),
             Kind::Epic => Seg::Epic(issues[at].id.clone()),
-            Kind::Issue => Seg::Issue(issues[at].id.clone()),
+            // idea 는 묶음이 아니다 — 일과 같은 자리에 잎으로 선다.
+            Kind::Issue | Kind::Idea => Seg::Issue(issues[at].id.clone()),
         }
     }
 
@@ -149,7 +150,7 @@ impl Index {
     /// 대신 부모를 열면 `--path <빈 에픽>` 이 그 에픽의 형제들을 돌려주고,
     /// 그 답을 다시 훑는 쪽은 제자리를 돌며 끝나지 않는다.
     pub fn is_dir(&self, issues: &[Issue], at: usize) -> bool {
-        issues[at].kind != Kind::Issue || self.has_kids[at]
+        matches!(issues[at].kind, Kind::Epic | Kind::Milestone) || self.has_kids[at]
     }
 
     /// id 로 줄을 찾는다. 화면이 프레임마다 부르므로 훑지 않는다.
@@ -290,7 +291,8 @@ impl Ctx<'_> {
             Kind::Milestone => Vec::new(),
             // 에픽은 제 마일스톤 밑에. 마일스톤을 안 쓰는 저장소면 뿌리에.
             Kind::Epic => self.under_milestone(&me.id),
-            Kind::Issue => self.home_of_work(at),
+            // idea 는 대개 에픽 없이 산다 — 에픽 없는 일과 같은 자리다.
+            Kind::Issue | Kind::Idea => self.home_of_work(at),
         }
     }
 
