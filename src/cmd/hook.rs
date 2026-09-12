@@ -31,6 +31,31 @@ struct Specific<'a> {
     context: String,
 }
 
+/// 도구 호출을 막을 때의 모양. **까닭이 곧 화면에 뜨는 글이다** — 막힌 쪽이
+/// 읽고 그대로 고칠 수 있어야 한다.
+#[derive(Serialize)]
+struct Refusal<'a> {
+    #[serde(rename = "hookSpecificOutput")]
+    specific: RefusalBody<'a>,
+}
+
+#[derive(Serialize)]
+struct RefusalBody<'a> {
+    #[serde(rename = "hookEventName")]
+    event: &'a str,
+    #[serde(rename = "permissionDecision")]
+    decision: &'a str,
+    #[serde(rename = "permissionDecisionReason")]
+    reason: String,
+}
+
+/// 턴을 끝내지 않게 붙드는 모양.
+#[derive(Serialize)]
+struct Hold {
+    decision: &'static str,
+    reason: String,
+}
+
 pub fn run(_ctx: &Ctx, event: Event) -> R<Vec<String>> {
     // 색은 언제나 끈다. 훅의 stdout 은 사람이 아니라 파서가 읽는다 —
     // 이스케이프가 한 바이트라도 섞이면 계약 JSON 이 통째로 버려진다.
@@ -70,7 +95,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             write_baseline(input, &repo, &load.issues, &unreadable);
             Decision::Pass
         }
-        Event::UserPromptSubmit => once_per_session(input, &repo, || {
+        Event::UserPromptSubmit => once_per_session(input, &repo, "board", || {
             let now = model::now();
             let st = report::status(&load.issues, &unreadable, &repo.config, &now);
             let lines =
@@ -78,9 +103,28 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             crate::hook::board(&lines)
         }),
         Event::PreCompact => crate::hook::carried(&load.issues, &repo.config),
-        // 규칙은 아직 이 자리에 없다. 없는 동안은 통과다 — 반쯤 선 규칙이
-        // 막는 것이 안 서는 규칙보다 나쁘다.
-        Event::PreToolUse | Event::Stop => Decision::Pass,
+        Event::PreToolUse => {
+            match crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input) {
+                crate::hook::Call::Shell(cmd) => {
+                    crate::hook::guard_create(&load.issues, &repo.config, cmd)
+                }
+                crate::hook::Call::Edits(path) => {
+                    crate::hook::guard_edit(&load.issues, &repo.config, &repo.root, path)
+                }
+                crate::hook::Call::Review => {
+                    crate::hook::guard_review(&load.issues, &repo.config)
+                }
+                crate::hook::Call::Other => Decision::Pass,
+            }
+        }
+        // **이미 한 번 붙들었으면 보낸다.** 이 표를 안 보면 무한히 돈다.
+        Event::Stop if input.stop_hook_active => Decision::Pass,
+        Event::Stop => once_per_session(input, &repo, "stop", || {
+            let now = model::now();
+            let st = report::status(&load.issues, &unreadable, &repo.config, &now);
+            let warnings: usize = st.warnings.iter().map(|w| w.count).sum();
+            crate::hook::closing(&load.issues, &repo.config, warnings, baseline(input, &repo))
+        }),
     };
 
     match decision {
@@ -89,15 +133,33 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             specific: Specific { event: event.wire(), context },
         })
         .ok(),
+        Decision::Deny(reason) => serde_json::to_string(&Refusal {
+            specific: RefusalBody { event: event.wire(), decision: "deny", reason },
+        })
+        .ok(),
+        Decision::Block(reason) => {
+            serde_json::to_string(&Hold { decision: "block", reason }).ok()
+        }
     }
+}
+
+/// 이 세션이 열릴 때 적어 둔 경고 수. 없으면 견줄 것이 없다.
+fn baseline(input: &Input, repo: &Repo) -> Option<usize> {
+    let path = session_file(input, repo, "warn")?;
+    std::fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
 /// 세션마다 한 번만. **매 프롬프트에 보드를 붙이면 그것대로 자리값을 잃는다.**
 ///
 /// 표를 남기는 자리는 시스템 임시 디렉터리다. `.moai/` 에 두면 세션 부스러기가
 /// 저장소에 쌓이고, 그것을 `.gitignore` 로 막는 일이 또 생긴다.
-fn once_per_session(input: &Input, repo: &Repo, make: impl FnOnce() -> Decision) -> Decision {
-    let Some(path) = session_file(input, repo, "board") else {
+fn once_per_session(
+    input: &Input,
+    repo: &Repo,
+    what: &str,
+    make: impl FnOnce() -> Decision,
+) -> Decision {
+    let Some(path) = session_file(input, repo, what) else {
         // 누구인지 모르면 한 번을 보장할 수 없다. **그러면 싣지 않는다** —
         // 한 번 빠지는 것이 매 프롬프트 도배보다 싸다.
         return Decision::Pass;

@@ -2984,3 +2984,106 @@ fn two_repos_in_one_session_each_get_a_board() {
     assert!(!second.trim().is_empty(), "둘째 저장소가 보드를 못 받았다");
     assert!(carried_text(&second).contains("표면 다듬기"), "{second}");
 }
+
+/// 막을 때의 계약 — `permissionDecision: "deny"` 와 읽을 수 있는 까닭.
+fn refusal(out: &str) -> String {
+    one_json_value(out);
+    assert!(out.contains("\"permissionDecision\":\"deny\""), "막지 않았다 — {out}");
+    let key = "\"permissionDecisionReason\":\"";
+    let at = out.find(key).unwrap_or_else(|| panic!("까닭이 없다 — {out}"));
+    let rest = &out[at + key.len()..];
+    rest[..rest.find("\"}").unwrap_or(rest.len())].to_string()
+}
+
+fn call(s: &Scratch, tool: &str, body: &str, session: &str) -> String {
+    let cwd = s.path().display().to_string();
+    hook_out(
+        s,
+        "pre-tool-use",
+        &format!(
+            "{{\"session_id\":\"{session}\",\"cwd\":\"{cwd}\",\"tool_name\":\"{tool}\",\"tool_input\":{body}}}"
+        ),
+    )
+}
+
+/// 규칙이 실제로 계약 JSON 으로 나온다. **막힌 쪽이 읽고 그대로 고칠 수 있는
+/// 글이어야 한다** — 고칠 명령 없는 거절은 사람을 부르는 게이트다.
+#[test]
+fn a_refused_call_carries_the_way_out() {
+    let s = init("hookrule");
+    let epic = field(&ok(s.path(), &["add", "저장 계층", "--type", "epic", "--json"]), "id");
+    let id = field(&ok(s.path(), &["add", "락을 잡는다", "-e", &epic, "--json"]), "id");
+
+    // 집은 것이 없으면 저장소 파일을 못 고친다.
+    let why = refusal(&call(&s, "Edit", "{\"file_path\":\"src/store.rs\"}", "s1"));
+    assert!(why.contains(&format!("moai mv {id} in_progress")), "집을 것을 안 낸다 — {why}");
+
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    assert!(
+        call(&s, "Edit", "{\"file_path\":\"src/store.rs\"}", "s1").trim().is_empty(),
+        "집었는데도 막는다"
+    );
+
+    // 집은 뒤에는 그 단위 밖에 세우는 것이 막힌다.
+    let why = refusal(&call(&s, "Bash", "{\"command\":\"moai add \\\"딴 일\\\"\"}", "s1"));
+    assert!(why.contains(&format!("-e {epic}")), "에픽을 안 가리킨다 — {why}");
+    assert!(
+        call(&s, "Bash", &format!("{{\"command\":\"moai add 안의일 -e {epic}\"}}"), "s1")
+            .trim()
+            .is_empty(),
+        "단위 안인데 막는다"
+    );
+}
+
+/// `Stop` 은 **세션당 한 번만** 붙든다. 규칙 2 가 초점을 요구하므로, 그것
+/// 없이는 일하는 내내 매 턴이 붙들린다 — 같은 잔소리를 매번 들으면 아무도
+/// 안 읽는다. 이미 붙든 뒤라고 알려 오면(`stop_hook_active`) 바로 보낸다.
+#[test]
+fn the_close_holds_once_and_then_lets_go() {
+    let s = init("hookstop");
+    let id = field(&ok(s.path(), &["add", "락을 잡는다", "--json"]), "id");
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    let cwd = s.path().display().to_string();
+    let ev = format!("{{\"session_id\":\"s1\",\"cwd\":\"{cwd}\"}}");
+
+    let held = hook_out(&s, "stop", &ev);
+    assert!(held.contains("\"decision\":\"block\""), "안 붙들었다 — {held}");
+    assert!(held.contains(&format!("moai mv {id} review|done")), "옮길 길이 없다 — {held}");
+
+    assert!(hook_out(&s, "stop", &ev).trim().is_empty(), "두 번 붙들었다");
+
+    // 이미 붙든 턴이라고 알려 오면 그 자리에서 보낸다.
+    let s2 = init("hookstop2");
+    let id2 = field(&ok(s2.path(), &["add", "락을 잡는다", "--json"]), "id");
+    ok(s2.path(), &["mv", &id2, "in_progress"]);
+    let cwd2 = s2.path().display().to_string();
+    let out = hook_out(
+        &s2,
+        "stop",
+        &format!("{{\"session_id\":\"s1\",\"cwd\":\"{cwd2}\",\"stop_hook_active\":true}}"),
+    );
+    assert!(out.trim().is_empty(), "이미 붙든 턴을 또 붙들었다 — {out}");
+}
+
+/// 규칙은 **사람을 부르지 않는다.** 막힌 쪽이 거절문이 낸 명령을 그대로
+/// 부르면 지나간다 — 값은 왕복 한 번이고, 그것이 옛 게이트와 갈리는 지점이다.
+#[test]
+fn every_refusal_is_undone_by_its_own_advice() {
+    let s = init("hookundo");
+    let id = field(&ok(s.path(), &["add", "락을 잡는다", "--json"]), "id");
+
+    let why = refusal(&call(&s, "Edit", "{\"file_path\":\"src/store.rs\"}", "s1"));
+    // 거절문이 낸 첫 명령을 그대로 친다.
+    // 까닭은 계약 JSON 에서 꺼낸 **원시** 글이라 줄바꿈이 아직 `\n` 두 글자다.
+    let line = why
+        .split("\\n")
+        .find(|l| l.trim_start().starts_with("moai mv"))
+        .expect("집을 명령이 없다");
+    let args: Vec<&str> = line.split_whitespace().skip(1).take(3).collect();
+    ok(s.path(), &args);
+    assert!(
+        call(&s, "Edit", "{\"file_path\":\"src/store.rs\"}", "s1").trim().is_empty(),
+        "시킨 대로 했는데 또 막는다"
+    );
+    assert!(args.contains(&id.as_str()), "낸 명령이 실제 이슈를 안 가리킨다 — {line}");
+}

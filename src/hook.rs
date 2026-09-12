@@ -18,6 +18,8 @@ use crate::config::Config;
 use crate::model::Issue;
 use crate::report;
 use serde::Deserialize;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 /// 훅이 걸리는 자리.
 ///
@@ -69,6 +71,13 @@ pub struct Input {
     pub session_id: Option<String>,
     #[serde(default)]
     pub cwd: Option<String>,
+    #[serde(default)]
+    pub tool_name: Option<String>,
+    #[serde(default)]
+    pub tool_input: serde_json::Value,
+    /// 이미 한 번 붙들었다는 표. **이것을 안 보면 무한히 돈다.**
+    #[serde(default)]
+    pub stop_hook_active: bool,
 }
 
 /// 훅이 내는 답.
@@ -78,6 +87,11 @@ pub enum Decision {
     Pass,
     /// 이만큼을 컨텍스트에 싣는다.
     Context(String),
+    /// 이 도구 호출을 막는다. **까닭에는 고칠 명령이 함께 든다** — 사람을
+    /// 부르지 않고 막힌 쪽이 제자리에서 풀 수 있어야 게이트가 아니다.
+    Deny(String),
+    /// 턴을 끝내지 않고 이것부터 보게 한다.
+    Block(String),
 }
 
 /// 세션에 싣는 머리말. 보드만 실으면 그것이 무엇을 하라는 뜻인지가 안 붙는다.
@@ -112,6 +126,392 @@ pub fn carried(issues: &[Issue], cfg: &Config) -> Decision {
     Decision::Context(out)
 }
 
+/// 도구가 하려는 일 중 **규칙이 뜻을 두는 것**만 추린 모양.
+///
+/// 계약의 `tool_name`·`tool_input` 을 여기까지 접어 두면, 판정 함수들이 JSON
+/// 모양에 묶이지 않고 시험이 값 하나만 만들면 된다.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Call<'a> {
+    /// 껍데기에 친 명령.
+    Shell(&'a str),
+    /// 이 파일을 고치려 한다.
+    Edits(&'a str),
+    /// 리뷰를 부르려 한다.
+    Review,
+    /// 규칙이 뜻을 두지 않는 것.
+    Other,
+}
+
+impl<'a> Call<'a> {
+    /// 계약이 준 것을 규칙이 아는 모양으로 접는다.
+    ///
+    /// **도구 이름으로 가른다. 입력에 든 글자로 가르지 않는다.** 모든 입력에서
+    /// 낱말을 찾던 판은 리뷰를 설명하는 문서를 쓰는 것만으로 리뷰 규칙에
+    /// 걸렸다 — 규칙이 제 이야기를 적는 것까지 막으면 그 규칙은 못 쓴다.
+    pub fn read(tool: Option<&str>, input: &'a serde_json::Value) -> Call<'a> {
+        let text = |k: &str| input.get(k).and_then(|v| v.as_str());
+        match tool {
+            Some("Bash") => {
+                let cmd = text("command").unwrap_or_default();
+                if calls_review(cmd) { Call::Review } else { Call::Shell(cmd) }
+            }
+            Some("Edit" | "Write" | "NotebookEdit") => {
+                Call::Edits(text("file_path").or_else(|| text("notebook_path")).unwrap_or_default())
+            }
+            Some("Skill") => {
+                let named = format!(
+                    "{} {}",
+                    text("skill").unwrap_or_default(),
+                    text("args").unwrap_or_default()
+                );
+                if named.contains(REVIEW_CMD) { Call::Review } else { Call::Other }
+            }
+            _ => Call::Other,
+        }
+    }
+}
+
+/// 리뷰를 부르는 명령의 이름.
+const REVIEW_CMD: &str = "code-review";
+/// 리뷰 이슈에 붙는 태그.
+pub const REVIEW_TAG: &str = "review";
+
+/// 껍데기에 친 명령이 **리뷰를 부르는가.**
+///
+/// 첫 토큰만 본다. 명령줄 어디서든 낱말을 찾으면 리뷰 결과를 이슈에 적는
+/// `moai note` 가 리뷰 규칙에 걸린다 — 시험판에서 실제로 걸렸고, 그때 이
+/// 세션은 제 리뷰 결과를 적지 못했다.
+fn calls_review(cmd: &str) -> bool {
+    let mut words = argv(cmd).into_iter().skip_while(|w| w.contains('='));
+    match words.next() {
+        Some(first) => {
+            let head = first.trim_start_matches('/');
+            head == REVIEW_CMD
+                || (head.ends_with("claude")
+                    && words.next().is_some_and(|w| w.trim_start_matches('/') == REVIEW_CMD))
+        }
+        None => false,
+    }
+}
+
+/// 명령줄을 토큰으로 가른다. 따옴표 안은 한 토큰이다.
+///
+/// **제목이 동사로 오해받지 않게 하는 것이 전부다.** `moai add "idea 정리"` 의
+/// `idea` 는 제목이지 하위 명령이 아니고, `moai note x "add 는 나중에"` 의
+/// `add` 도 마찬가지다. 낱말을 찾는 판정은 둘 다 틀렸다.
+fn argv(cmd: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    let mut had = false;
+    let mut chars = cmd.chars();
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            (Some(q), _) if c == q => quote = None,
+            (Some('"'), '\\') => {
+                if let Some(n) = chars.next() {
+                    cur.push(n);
+                }
+            }
+            (Some(_), _) => cur.push(c),
+            (None, '\'' | '"') => {
+                quote = Some(c);
+                had = true;
+            }
+            (None, c) if c.is_whitespace() => {
+                if had || !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                    had = false;
+                }
+            }
+            // 이어진 명령은 여기서 끊는다. 뒤쪽은 다음 명령이라 앞의 동사가
+            // 뒤의 동사를 가리면 안 된다.
+            (None, ';' | '|' | '&') => break,
+            (None, _) => cur.push(c),
+        }
+    }
+    if had || !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// `moai` 뒤에 오는 하위 명령들. 플래그를 만나면 멈춘다.
+///
+/// 앞에 붙은 환경변수 대입(`FOO=1 moai …`)과 경로(`./target/release/moai`)를
+/// 지나 실제 동사만 낸다.
+fn moai_verbs(cmd: &str) -> Vec<String> {
+    let parts = argv(cmd);
+    let Some(at) = parts.iter().position(|t| {
+        t.rsplit(['/', '\\']).next().is_some_and(|base| base == "moai")
+    }) else {
+        return Vec::new();
+    };
+    parts[at + 1..].iter().take_while(|t| !t.starts_with('-')).cloned().collect()
+}
+
+/// 지금 집고 있는 것에 매인 단위들 — 그 이슈 자신, 그 에픽, 그 마일스톤, 그 부모.
+///
+/// **소속은 물려받는다.** `epic` 필드만 읽으면 자식 이슈를 집었을 때 그 줄의
+/// `epic` 은 비어 있어, 옳은 에픽을 댄 생성까지 거절당한다 — 시험판이 실제로
+/// 그랬고, 이 규칙을 만든 세션이 제 리뷰 결과를 이슈로 적지 못했다.
+/// `report::groups` 와 `report::milestones` 가 이미 그 상속을 푼다.
+pub fn unit_of<'a>(issues: &'a [Issue], focus: &[&'a Issue]) -> BTreeSet<&'a str> {
+    let epics = report::groups(issues);
+    let stones = report::milestones(issues);
+    let mut out = BTreeSet::new();
+    for i in focus {
+        out.insert(i.id.as_str());
+        if let Some(e) = epics.get(i.id.as_str()) {
+            out.insert(e);
+        }
+        if let Some(m) = stones.get(i.id.as_str()) {
+            out.insert(m);
+        }
+        if let Some(p) = crate::id::parent_of(&i.id) {
+            out.insert(p);
+        }
+    }
+    out
+}
+
+/// 규칙 1 — **집은 것 밖에 새 이슈를 세우지 않는다.**
+///
+/// 초점 밖에 세우면 그 줄이 어느 일에서 나왔는지를 잃고, 에픽을 닫아도 남은
+/// 것이 어디 있는지 아무도 모른다. 지금 할 일이 아니면 `idea` 로 담는다 —
+/// 그쪽은 이 규칙에서 언제나 자유롭다.
+pub fn guard_create(issues: &[Issue], cfg: &Config, cmd: &str) -> Decision {
+    let verbs = moai_verbs(cmd);
+    // `add` 만 본다. `idea add` 는 담는 자리고, `--from` 은 에픽과 그 자식들을
+    // 한 단위로 세우는 자리라 새는 줄이 아니다.
+    if verbs.first().map(String::as_str) != Some("add") || cmd.contains("--from") {
+        return Decision::Pass;
+    }
+    let focus = report::wip(issues, cfg);
+    if focus.is_empty() {
+        return Decision::Pass;
+    }
+    let unit = unit_of(issues, &focus);
+    let named: Vec<&str> = flag_values(cmd, &["-e", "--epic", "--parent", "--milestone"]);
+    if named.iter().any(|v| unit.contains(v)) {
+        return Decision::Pass;
+    }
+
+    let head = focus[0];
+    let anchor = report::groups(issues).get(head.id.as_str()).copied().unwrap_or(&head.id);
+    let held = focus
+        .iter()
+        .take(3)
+        .map(|i| format!("{} {}", i.id, i.title))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Decision::Deny(format!(
+        "지금 집고 있는 것이 있다 — {held}.\n\
+         그 단위 안에서 만들거나, 밖의 것이면 담아 둔다. 초점 밖에 이슈를 세우면\n\
+         그 줄이 어느 일에서 나왔는지를 잃는다.\n\
+         \x20 moai add \"제목\" -e {anchor}        같은 에픽 안에\n\
+         \x20 moai add \"제목\" --parent {}   그 일의 자식으로\n\
+         \x20 moai idea add \"제목\"                 지금 할 일이 아니면 담아 둔다",
+        head.id
+    ))
+}
+
+/// 규칙 2 — **저장소를 고치기 전에 하나를 집는다.**
+///
+/// **도구가 아니라 고치는 파일로 가른다.** 도구로 가르면 스크래치패드 메모와
+/// `src/` 의 한 줄이 같은 값으로 막히고, 그래서 세션당 한 번으로 풀어야 했다 —
+/// 느슨해진 규칙은 정작 막아야 할 것을 놓친다.
+pub fn guard_edit(issues: &[Issue], cfg: &Config, root: &Path, target: &str) -> Decision {
+    if !counted(target, root) || !report::wip(issues, cfg).is_empty() {
+        return Decision::Pass;
+    }
+    let picks = report::ready(issues, cfg)
+        .into_iter()
+        .take(3)
+        .map(|i| format!("  moai mv {} in_progress   {}", i.id, i.title))
+        .collect::<Vec<_>>();
+    let picks = if picks.is_empty() {
+        "  moai add \"제목\" 뒤에 moai mv <id> in_progress".to_string()
+    } else {
+        picks.join("\n")
+    };
+    Decision::Deny(format!(
+        "집은 것 없이 {} 를 고치고 있다. 어느 일에서 나온 변경인지가 남지 않는다.\n\
+         하나를 집고 다시 부른다.\n{picks}\n\
+         계획에 없던 것이면 `moai add \"제목\"` 으로 세우고 그것을 집는다.",
+        rel_to(target, root)
+    ))
+}
+
+/// 규칙 3 — **리뷰도 이슈다. 그 리뷰는 지금 보는 것에 매여야 한다.**
+///
+/// 저장소 어딘가에 열린 리뷰 줄이 하나 있다는 것으로는 안 된다. 옛 리뷰 한
+/// 줄이 뒤따르는 모든 리뷰의 면죄부가 되면, 거기 적히는 결과가 무엇의
+/// 결과인지를 잃는다.
+pub fn guard_review(issues: &[Issue], cfg: &Config) -> Decision {
+    let open: Vec<&Issue> = issues
+        .iter()
+        .filter(|i| {
+            i.tags.iter().any(|t| t == REVIEW_TAG) && !i.status.is_done() && !i.is_deferred()
+        })
+        .collect();
+    let focus = report::wip(issues, cfg);
+
+    if focus.is_empty() {
+        // 집은 것이 없으면, 지금 굴러가고 있는 리뷰만 리뷰로 친다.
+        if open.iter().any(|i| report::wip(issues, cfg).iter().any(|w| w.id == i.id)) {
+            return Decision::Pass;
+        }
+        if let Some(idle) = open.first() {
+            return Decision::Deny(format!(
+                "리뷰 이슈 {} 가 아직 안 집혔다. 리뷰를 시작하면 그 줄도 같이 움직인다.\n\
+                 \x20 moai mv {} in_progress\n\
+                 그 리뷰가 아니면 지금 보는 것을 먼저 집고 다시 부른다.",
+                idle.id, idle.id
+            ));
+        }
+        return Decision::Deny(format!(
+            "리뷰는 이슈로 남긴다. 집은 것이 없으니 무엇을 보는지부터 정한다 —\n\
+             보는 것을 집거나, 리뷰 이슈를 세워 그것을 집는다.\n{}",
+            HOW_TO_REVIEW
+        ));
+    }
+
+    let unit = unit_of(issues, &focus);
+    let epics = report::groups(issues);
+    let anchored = open.iter().any(|i| {
+        unit.contains(i.id.as_str())
+            || epics.get(i.id.as_str()).is_some_and(|e| unit.contains(e))
+            || crate::id::parent_of(&i.id).is_some_and(|p| unit.contains(p))
+    });
+    if anchored {
+        return Decision::Pass;
+    }
+    let head = focus[0];
+    let stray = if open.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "열린 리뷰 줄이 있지만 지금 보는 것에 안 매여 있다: {}\n",
+            open.iter()
+                .take(3)
+                .map(|i| format!(
+                    "{}({})",
+                    i.id,
+                    epics.get(i.id.as_str()).copied().unwrap_or("에픽 없음")
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    Decision::Deny(format!(
+        "리뷰는 이슈로 남긴다. 지금 보는 것({} {})에 매인 리뷰 이슈를 먼저 세운다.\n\
+         {stray}  moai add \"리뷰 — <무엇을 보는가>\" -t {REVIEW_TAG} --parent {}\n{}",
+        head.id, head.title, head.id, HOW_TO_REVIEW_STEPS
+    ))
+}
+
+const HOW_TO_REVIEW: &str = "\
+  moai add \"리뷰 — <무엇을 보는가>\" -t review -e <에픽>
+  moai mv <id> in_progress      리뷰를 시작할 때
+  moai note <id> \"<무엇이 나왔나>\"  리뷰가 낸 것 (넘긴 것도 적는다)
+  moai mv <id> done             지적을 반영하거나 안 할 이유를 적은 뒤";
+
+const HOW_TO_REVIEW_STEPS: &str = "\
+  moai mv <id> in_progress      리뷰를 시작할 때
+  moai note <id> \"<무엇이 나왔나>\"  리뷰가 낸 것 (넘긴 것도 적는다)
+  moai mv <id> done             지적을 반영하거나 안 할 이유를 적은 뒤";
+
+/// 세션을 닫기 전에 — **상태가 실제와 맞는가.**
+///
+/// 붙드는 것은 세션당 한 번이다. 규칙 2 가 초점을 요구하므로, 그것 없이는
+/// 일하는 내내 매 턴이 붙들린다 — 같은 잔소리를 매번 들으면 아무도 안 읽는다.
+pub fn closing(issues: &[Issue], cfg: &Config, warnings: usize, before: Option<usize>) -> Decision {
+    let mut lines = Vec::new();
+    let wip = report::wip(issues, cfg);
+    if !wip.is_empty() {
+        lines.push("아직 집고 있는 것이 있다. 실제로 끝났으면 옮기고, 안 할 것이면 미룬다.".to_string());
+        for i in &wip {
+            lines.push(format!("  moai mv {} review|done     {}", i.id, i.title));
+            lines.push(format!("  moai defer {} -m \"왜\"      지금 안 할 것이면", i.id));
+        }
+    }
+    // **굴러가는 리뷰와 지금 집은 것에 매인 리뷰만 센다.** 저장소에 남은 옛
+    // 리뷰 줄까지 세면 매 세션 같은 줄이 나오고, 그러면 아무도 안 읽는다.
+    let unit = unit_of(issues, &wip);
+    let epics = report::groups(issues);
+    for i in issues.iter().filter(|i| {
+        i.tags.iter().any(|t| t == REVIEW_TAG) && !i.status.is_done() && !i.is_deferred()
+    }) {
+        let mine = unit.contains(i.id.as_str())
+            || epics.get(i.id.as_str()).is_some_and(|e| unit.contains(e));
+        if mine && !wip.iter().any(|w| w.id == i.id) {
+            lines.push(format!(
+                "리뷰 이슈 {} 가 아직 열려 있다. 리뷰가 낸 것과 넘긴 것을 `moai note {}` 로 적고 닫는다.",
+                i.id, i.id
+            ));
+        }
+    }
+    if let Some(before) = before
+        && warnings > before
+    {
+        lines.push(format!(
+            "경고가 {before} 에서 {warnings} 로 늘었다. `moai status` 로 무엇이 늘었는지 본다."
+        ));
+    }
+    if lines.is_empty() { Decision::Pass } else { Decision::Block(lines.join("\n")) }
+}
+
+/// 세지 않는 자리. 저장소 밖, 트래커 자신, 도구 설정, 빌드 산출물.
+/// 여기를 고치는 것은 "일" 이 아니다 — 일을 하러 가는 길이다.
+const SKIP: &[&str] = &[".moai", ".claude", ".git", "target", "node_modules"];
+
+/// 이 파일을 고치는 것이 일에 매여야 하는가.
+fn counted(path: &str, root: &Path) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    let Ok(rel) = resolve(path, root).strip_prefix(root).map(Path::to_path_buf) else {
+        return false; // 저장소 밖 — 스크래치패드·임시 파일·남의 저장소
+    };
+    rel.components()
+        .next()
+        .and_then(|c| c.as_os_str().to_str())
+        .is_some_and(|head| !SKIP.contains(&head))
+}
+
+/// **상대 경로는 저장소의 자리로 푼다.** 훅 프로세스가 어디서 도는지는 아무도
+/// 약속하지 않았다 — `src/main.rs` 가 저장소 밖으로 보여 규칙이 통째로 샜다.
+fn resolve(path: &str, root: &Path) -> PathBuf {
+    let p = Path::new(path);
+    if p.is_absolute() { p.to_path_buf() } else { root.join(p) }
+}
+
+fn rel_to(path: &str, root: &Path) -> String {
+    resolve(path, root)
+        .strip_prefix(root)
+        .map(|r| r.display().to_string())
+        .unwrap_or_else(|_| path.to_string())
+}
+
+/// 명령줄에서 이 플래그들에 딸린 값을 모은다. `-e x` 와 `-e=x` 를 다 받는다.
+fn flag_values<'a>(cmd: &'a str, flags: &[&str]) -> Vec<&'a str> {
+    let mut out = Vec::new();
+    let mut parts = cmd.split_whitespace().peekable();
+    while let Some(t) = parts.next() {
+        if let Some((f, v)) = t.split_once('=') {
+            if flags.contains(&f) {
+                out.push(v);
+            }
+        } else if flags.contains(&t)
+            && let Some(v) = parts.peek()
+        {
+            out.push(v);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +523,247 @@ mod tests {
 
     fn issue(id: &str, status: &str) -> Issue {
         Issue::new(id.into(), "제목".into(), Kind::Issue, Status::new(status), "2026-01-01T00:00:00Z")
+    }
+
+    fn epic(id: &str) -> Issue {
+        let mut i = issue(id, "todo");
+        i.kind = Kind::Epic;
+        i.title = "저장 계층".into();
+        i
+    }
+
+    fn under(id: &str, status: &str, e: &str) -> Issue {
+        let mut i = issue(id, status);
+        i.epic = Some(e.into());
+        i
+    }
+
+    fn shell(cmd: &str) -> serde_json::Value {
+        serde_json::json!({ "command": cmd })
+    }
+
+    fn denied(d: &Decision) -> &str {
+        match d {
+            Decision::Deny(r) => r,
+            other => panic!("막지 않았다 — {other:?}"),
+        }
+    }
+
+    // ── 무엇을 부르려는가 ────────────────────────────────────────────
+
+    /// 도구 이름으로 가른다. **입력에 든 글자로 가르지 않는다** — 리뷰를
+    /// 설명하는 글을 쓰는 것만으로 리뷰 규칙에 걸리면 그 규칙은 못 쓴다.
+    #[test]
+    fn what_a_tool_calls_is_read_from_its_name() {
+        let write = serde_json::json!({"file_path": "/x/y.rs", "content": "code-review 를 부른다"});
+        assert_eq!(Call::read(Some("Write"), &write), Call::Edits("/x/y.rs"));
+
+        let note = shell("moai note t-1 \"code-review 가 낸 것\"");
+        assert!(matches!(Call::read(Some("Bash"), &note), Call::Shell(_)));
+
+        let grep = shell("grep -rn code-review .");
+        assert!(matches!(Call::read(Some("Bash"), &grep), Call::Shell(_)));
+
+        let real = shell("/code-review high");
+        assert_eq!(Call::read(Some("Bash"), &real), Call::Review);
+
+        let skill = serde_json::json!({"skill": "code-review", "args": "low"});
+        assert_eq!(Call::read(Some("Skill"), &skill), Call::Review);
+    }
+
+    // ── 규칙 1 — 초점 밖에 세우지 않는다 ────────────────────────────
+
+    /// 집은 것이 없으면 아무것도 막지 않는다. 초점 없는 규칙은 규칙이 아니다.
+    #[test]
+    fn with_nothing_held_creation_is_free() {
+        let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        assert_eq!(guard_create(&all, &cfg(), "moai add \"딴 일\""), Decision::Pass);
+    }
+
+    /// 집은 것이 있으면 그 단위 안이어야 한다. 밖이면 고칠 명령이 함께 온다.
+    #[test]
+    fn outside_the_held_unit_is_refused_with_the_way_out() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let why = denied(&guard_create(&all, &cfg(), "moai add \"딴 일\"")).to_string();
+        assert!(why.contains("-e t-e"), "에픽을 안 가리킨다\n{why}");
+        assert!(why.contains("--parent t-1"), "자식으로 다는 길이 없다\n{why}");
+        assert!(why.contains("idea add"), "담아 두는 길이 없다\n{why}");
+
+        assert_eq!(guard_create(&all, &cfg(), "moai add \"안의 일\" -e t-e"), Decision::Pass);
+        assert_eq!(guard_create(&all, &cfg(), "moai add \"자식\" --parent t-1"), Decision::Pass);
+    }
+
+    /// **소속은 물려받는다.** 자식 이슈를 집었을 때 그 줄의 `epic` 은 비어
+    /// 있지만, 에픽은 부모에게서 온다. 필드만 읽던 판은 옳은 에픽을 댄
+    /// 생성까지 거절했다 — 이 규칙을 만든 세션이 제 리뷰 결과를 못 적었다.
+    #[test]
+    fn the_held_unit_includes_what_was_inherited() {
+        let all = vec![epic("t-e"), under("t-1", "todo", "t-e"), issue("t-1.aa", "in_progress")];
+        assert_eq!(guard_create(&all, &cfg(), "moai add \"안의 일\" -e t-e"), Decision::Pass);
+        let why = denied(&guard_create(&all, &cfg(), "moai add \"딴 일\"")).to_string();
+        assert!(why.contains("-e t-e"), "물려받은 에픽을 안 가리킨다\n{why}");
+    }
+
+    /// 담아 두는 것은 언제나 자유고, 계획을 한 번에 세우는 것도 그렇다.
+    ///
+    /// `--from` 이 만드는 것은 에픽과 그 자식들이라 **그 자체로 한 단위**다.
+    /// 막으면 계획을 세울 때마다 탈출구를 써야 하고, 탈출구가 일상이 되는
+    /// 순간 규칙은 아무것도 안 지킨다.
+    #[test]
+    fn capturing_and_planning_stay_free() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        for cmd in [
+            "moai idea add \"떠오른 것\"",
+            "moai add --from -",
+            "moai add --from plan.md --dry-run",
+        ] {
+            assert_eq!(guard_create(&all, &cfg(), cmd), Decision::Pass, "{cmd}");
+        }
+    }
+
+    /// 동사를 **자리로** 읽는다. 글자로 찾던 판은 메모를 생성으로 보아 막고,
+    /// 제목에 `idea` 가 든 생성은 반대로 통과시켰다.
+    #[test]
+    fn the_verb_is_a_position_not_a_word() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        for free in ["moai note t-1 \"add 는 나중에\"", "moai show -g add", "moai mv t-1 done"] {
+            assert_eq!(guard_create(&all, &cfg(), free), Decision::Pass, "{free}");
+        }
+        assert!(matches!(guard_create(&all, &cfg(), "moai add \"idea 정리\""), Decision::Deny(_)));
+    }
+
+    // ── 규칙 2 — 고치기 전에 하나를 집는다 ──────────────────────────
+
+    /// **도구가 아니라 고치는 파일로 가른다.** 도구로 가르면 스크래치패드
+    /// 메모와 `src/` 의 한 줄이 같은 값으로 막힌다.
+    #[test]
+    fn only_the_work_in_the_repo_needs_a_held_issue() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        for counted in ["/repo/src/store.rs", "/repo/CLAUDE.md", "src/main.rs"] {
+            assert!(
+                matches!(guard_edit(&all, &cfg(), root, counted), Decision::Deny(_)),
+                "{counted} 를 안 셌다"
+            );
+        }
+        for free in [
+            "/repo/.moai/config.toml",
+            "/repo/.claude/settings.json",
+            "/repo/target/debug/x",
+            "/tmp/scratch/memo.md",
+            "/other/repo/src/main.rs",
+        ] {
+            assert_eq!(guard_edit(&all, &cfg(), root, free), Decision::Pass, "{free}");
+        }
+    }
+
+    /// 하나를 집으면 그대로 지나간다. 값은 왕복 한 번이다.
+    #[test]
+    fn holding_one_opens_the_repo() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        assert_eq!(guard_edit(&all, &cfg(), root, "/repo/src/store.rs"), Decision::Pass);
+    }
+
+    /// 막을 때는 집을 것을 함께 낸다. 고칠 명령 없는 거절은 게이트다.
+    #[test]
+    fn the_refusal_names_what_to_pick_up() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let why = denied(&guard_edit(&all, &cfg(), root, "/repo/src/store.rs")).to_string();
+        assert!(why.contains("moai mv t-1 in_progress"), "집을 것을 안 낸다\n{why}");
+        assert!(why.contains("src/store.rs"), "무엇을 고치려 했는지가 없다\n{why}");
+    }
+
+    // ── 규칙 3 — 리뷰도 이슈다 ──────────────────────────────────────
+
+    fn review(id: &str, status: &str, epic: Option<&str>) -> Issue {
+        let mut i = issue(id, status);
+        i.title = "리뷰 — 저장 계층".into();
+        i.tags = vec![REVIEW_TAG.to_string()];
+        i.epic = epic.map(str::to_string);
+        i
+    }
+
+    /// 리뷰 이슈가 지금 보는 것에 매여 있어야 지나간다.
+    #[test]
+    fn a_review_must_be_anchored_to_what_is_seen() {
+        let cfg = cfg();
+        let mut all = vec![epic("t-e"), epic("t-f"), under("t-1", "in_progress", "t-e")];
+
+        all.push(review("t-r", "todo", Some("t-f")));
+        let why = denied(&guard_review(&all, &cfg)).to_string();
+        assert!(why.contains("t-r(t-f)"), "안 매인 줄을 안 짚는다\n{why}");
+        assert!(why.contains("--parent t-1"), "세울 길이 없다\n{why}");
+
+        // 같은 에픽으로 옮기면 지나간다.
+        all.last_mut().unwrap().epic = Some("t-e".into());
+        assert_eq!(guard_review(&all, &cfg), Decision::Pass);
+    }
+
+    /// 집은 것이 없으면 **굴러가고 있는** 리뷰만 리뷰로 친다. 놀고 있는
+    /// 리뷰 줄은 집으라고 말한다 — 그래야 상태가 실제를 가리킨다.
+    #[test]
+    fn with_nothing_held_only_a_running_review_counts() {
+        let cfg = cfg();
+        let mut all = vec![epic("t-e"), review("t-r", "todo", Some("t-e"))];
+        let why = denied(&guard_review(&all, &cfg)).to_string();
+        assert!(why.contains("moai mv t-r in_progress"), "{why}");
+
+        all[1].status = Status::new("in_progress");
+        assert_eq!(guard_review(&all, &cfg), Decision::Pass);
+    }
+
+    /// 끝난 리뷰는 다음 리뷰의 면죄부가 되지 않는다.
+    #[test]
+    fn a_finished_review_is_no_pass_for_the_next() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), review("t-r", "done", Some("t-e"))];
+        assert!(matches!(guard_review(&all, &cfg()), Decision::Deny(_)));
+    }
+
+    // ── 세션을 닫을 때 ──────────────────────────────────────────────
+
+    /// 집은 채 닫으려 하면 붙든다. 옮길 길과 미룰 길을 함께 낸다.
+    #[test]
+    fn closing_holds_on_what_is_still_held() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let Decision::Block(why) = closing(&all, &cfg(), 0, None) else {
+            panic!("안 붙들었다");
+        };
+        assert!(why.contains("moai mv t-1 review|done"), "{why}");
+        assert!(why.contains("moai defer t-1"), "{why}");
+    }
+
+    /// 다 옮겼고 경고도 안 늘었으면 조용히 보낸다.
+    #[test]
+    fn a_clean_session_closes_quietly() {
+        let all = vec![epic("t-e"), under("t-1", "done", "t-e")];
+        assert_eq!(closing(&all, &cfg(), 3, Some(3)), Decision::Pass);
+    }
+
+    /// 경고가 늘었으면 그 사실만 말한다.
+    #[test]
+    fn a_growing_warning_count_is_named() {
+        let all = vec![epic("t-e"), under("t-1", "done", "t-e")];
+        let Decision::Block(why) = closing(&all, &cfg(), 5, Some(3)) else {
+            panic!("안 붙들었다");
+        };
+        assert!(why.contains("3 에서 5"), "{why}");
+    }
+
+    /// **굴러가는 리뷰와 매인 리뷰만 센다.** 저장소에 남은 옛 리뷰 줄까지
+    /// 세면 매 세션 같은 줄이 나오고, 그러면 아무도 안 읽는다.
+    #[test]
+    fn an_unrelated_open_review_does_not_nag_forever() {
+        let cfg = cfg();
+        let far = vec![epic("t-e"), epic("t-f"), under("t-1", "done", "t-e"), review("t-r", "todo", Some("t-f"))];
+        assert_eq!(closing(&far, &cfg, 0, None), Decision::Pass);
+
+        let near = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), review("t-r", "todo", Some("t-e"))];
+        let Decision::Block(why) = closing(&near, &cfg, 0, None) else {
+            panic!("안 붙들었다");
+        };
+        assert!(why.contains("리뷰 이슈 t-r"), "{why}");
     }
 
     /// 보드는 머리말과 함께 실린다. 머리말이 없으면 보드가 무엇을 하라는
