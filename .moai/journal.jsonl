@@ -191,3 +191,7 @@
 {"ts":"2026-09-12T05:32:27Z","id":"moai-du1l","kind":"status","by":"레이븐 (raven@buzzni.com)","from":"in_progress","to":"done"}
 {"ts":"2026-09-12T05:32:38Z","id":"moai-80ko","kind":"note","by":"레이븐 (raven@buzzni.com)","text":"main(3d5b27b)에서 고쳐졌다고 moa-issue-54 가 알려 왔다. 내가 직접 재확인하진 않았다 — rebase 뒤 fixture 로 보고 닫는다."}
 {"ts":"2026-09-12T05:32:38Z","id":"moai-qj13","kind":"note","by":"레이븐 (raven@buzzni.com)","text":"main(3d5b27b)에서 (a)(c) 고쳐졌다고 moa-issue-54 가 알려 왔다. (c) 원인은 view::walk 이 느슨한 이슈의 자식에 depth+1 을 줘서 머리글 없는 들여쓰기와 어긋난 것이었다고 한다. (b) 바구니 라벨 건은 그쪽도 재현 못 했다 — 미확인으로 남는다. rebase 뒤 확인하고 닫는다."}
+{"ts":"2026-09-12T05:42:21Z","id":"moai-80ko","kind":"note","by":"레이븐 (raven@buzzni.com)","text":"rebase 뒤 같은 픽스처로 재확인 — 고쳐졌다. 에픽 행의 epic=nope 는 dangling_epic, 유효한 에픽 아래 이슈의 milestone=gone 은 dangling_milestone 으로 둘 다 나온다(--json ids 까지 확인). 재현한 쪽이 사라진 것도 확인한다는 약속대로 내가 닫는다."}
+{"ts":"2026-09-12T05:42:21Z","id":"moai-80ko","kind":"status","by":"레이븐 (raven@buzzni.com)","from":"todo","to":"done"}
+{"ts":"2026-09-12T05:42:21Z","id":"moai-qj13","kind":"note","by":"레이븐 (raven@buzzni.com)","text":"rebase 뒤 같은 픽스처로 재확인. (a) show <에픽> 이 제 멤버 위에 '에픽 없음' 을 더는 세우지 않는다. (c) 마일스톤 직속 에픽 없는 이슈가 제 머리 밑에 서고 앞 에픽 멤버와 안 섞인다. (b) 바구니는 '(마일스톤 없음)' 으로 옳게 나온다 — moa-issue-54 도 나도 재현 못 했다. 없는 버그를 열어 두지 않고 닫는다. 같은 모양을 다시 만나면 그때 제 이슈로 연다."}
+{"ts":"2026-09-12T05:42:21Z","id":"moai-qj13","kind":"status","by":"레이븐 (raven@buzzni.com)","from":"todo","to":"done"}
