@@ -59,6 +59,17 @@ pub fn report_load_errors(path: &std::path::Path, errors: &[crate::store::LoadEr
         return;
     }
     note_partial();
+    name_load_errors(path, errors);
+}
+
+/// 같은 말을 하되 **부분 실패 깃발은 안 세운다.** 읽기가 답을 덜 낸 자리
+/// (`show`·`ready`)는 비영 종료가 맞지만, 쓰기와 짝을 이루는 자리(`promote`
+/// 의 연습)는 진짜 실행이 그 줄 때문에 멈추지 않으므로 연습만 실패로 끝나면
+/// 안 된다 — 그것을 거절로 읽은 쪽은 도구가 기꺼이 해 줄 계획을 버린다.
+pub fn name_load_errors(path: &std::path::Path, errors: &[crate::store::LoadError]) {
+    if errors.is_empty() {
+        return;
+    }
     eprintln!(
         "{}: 읽을 수 없는 줄 {}개",
         path.display(),

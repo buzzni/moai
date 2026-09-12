@@ -2711,3 +2711,24 @@ fn a_rehearsal_reports_the_priority_it_will_write() {
     assert!(epic.contains(r#""priority":1"#), "연습이 진짜보다 적게 말했다 — {epic}");
 }
 
+/// **연습이 진짜보다 엄하면 안 된다.** 진짜 `promote` 는 못 읽는 줄을 그대로
+/// 들고 넘어가 0 으로 끝나는데 연습만 1 로 끝나면, 그것을 거절로 읽은 쪽이
+/// 도구가 기꺼이 해 줄 계획을 버린다.
+#[test]
+fn a_rehearsal_is_no_stricter_than_the_real_run() {
+    let s = init("dryruncarry");
+    let thought = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let path = s.path().join(".moai/issues.jsonl");
+    let mut raw = std::fs::read_to_string(&path).unwrap();
+    raw.push_str("{\"id\":\"argos-zzzz\",\"title\":\"x\",\"kind\":\"몰라\",\"status\":\"todo\",\"created_at\":\"2026-01-01T00:00:00Z\",\"updated_at\":\"2026-01-01T00:00:00Z\",\"status_since\":\"2026-01-01T00:00:00Z\"}\n");
+    std::fs::write(&path, raw).unwrap();
+
+    let plan = "# 새 에픽\n- 첫 일\n";
+    let rehearsal = from_stdin(s.path(), &["idea", "promote", &thought, "--from", "-", "--dry-run"], plan);
+    assert!(rehearsal.status.success(), "연습만 실패로 끝난다 — {}", String::from_utf8_lossy(&rehearsal.stderr));
+    // 어느 줄인지는 그래도 말한다.
+    assert!(String::from_utf8_lossy(&rehearsal.stderr).contains("읽을 수 없는 줄"), "조용히 지나갔다");
+    let real = from_stdin(s.path(), &["idea", "promote", &thought, "--from", "-"], plan);
+    assert!(real.status.success(), "{}", String::from_utf8_lossy(&real.stderr));
+}
+
