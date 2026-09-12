@@ -864,6 +864,47 @@ fn init_keeps_what_someone_else_wrote() {
     assert_eq!(md.matches("<!-- moai:begin -->").count(), 1);
 }
 
+/// **훑기 목록이 명령을 빠뜨리면 여기서 걸린다.**
+///
+/// 아래 `every_command_still_speaks_json` 은 손으로 적은 목록을 돈다. 그것만으로는
+/// 새 명령을 더해도 아무것도 안 잡히는데, CLAUDE.md 는 "저절로 잡는다" 고 적고
+/// 있었다 — 틀린 문장을 믿고 안전망이 있다고 여기는 것이 제일 나쁘다.
+///
+/// 그래서 **명령 목록을 바이너리에게 묻는다.** 도움말이 곧 그 목록이라 이 시험은
+/// 새 명령이 생기는 순간 이름을 대며 실패한다. clap 을 dev-dependency 로 끌어올
+/// 필요도 없다.
+#[test]
+fn the_json_sweep_covers_every_command() {
+    let s = init("sweepcover");
+    let help = ok(s.path(), &["--help"]);
+    let listed: Vec<String> = help
+        .lines()
+        .skip_while(|l| !l.starts_with("Commands:"))
+        .skip(1)
+        .take_while(|l| l.starts_with("  "))
+        .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+        // `help` 는 clap 이 제 손으로 만드는 것이라 `--json` 이 뜻이 없다.
+        .filter(|c| c != "help")
+        .collect();
+    assert!(listed.len() > 5, "명령 목록을 못 읽었다 — {listed:?}");
+
+    for cmd in &listed {
+        assert!(
+            JSON_SWEEP.contains(&cmd.as_str()),
+            "`{cmd}` 가 --json 훑기에서 빠졌다. \
+             every_command_still_speaks_json 의 JSON_SWEEP 에 넣는다"
+        );
+    }
+}
+
+/// `--json` 훑기가 실제로 부르는 명령들. **위 시험이 이 목록을 도움말과 견준다** —
+/// 목록을 여기 한 자리에 두어야 그 견줌이 뜻을 갖는다.
+const JSON_SWEEP: &[&str] = &[
+    "init", "add", "status", "ready", "show", "note", "link", "tui", "edit", "mv", "rm",
+    // 종류 네임스페이스는 `moai <종류> show --json` 으로 같은 길을 지난다.
+    "issue", "epic", "milestone",
+];
+
 /// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.
 #[test]
 fn every_command_still_speaks_json() {
@@ -882,9 +923,12 @@ fn every_command_still_speaks_json() {
         vec!["show", &epic, "--json"],
         vec!["note", &id, "메모", "--json"],
         vec!["link", &id, "--blocks", &epic, "--json"],
-        // tui 는 화면을 켜지 않고 목록만 낸다. **이 목록은 자동이 아니다** —
-        // 새 명령을 더하면 여기 손으로 넣어야 한다 (moai-mece).
+        // tui 는 화면을 켜지 않고 목록만 낸다.
         vec!["tui", "--json"],
+        // 종류 네임스페이스도 같은 길을 지난다.
+        vec!["issue", "show", "--json"],
+        vec!["epic", "show", "--json"],
+        vec!["milestone", "show", "--json"],
         vec!["edit", &id, "--tag", "bug", "--json"],
         vec!["mv", &id, "review", "--json"],
         vec!["rm", &id, "--json"],

@@ -158,3 +158,7 @@
 {"ts":"2026-09-12T04:27:50Z","id":"moai-4jpb","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
 {"ts":"2026-09-12T04:30:44Z","id":"moai-4jpb","kind":"note","by":"레이븐","text":"술어를 report::misplaced 하나로 모았다. nav 는 제 판정(Ctx::is)을 버리고 그것을 그대로 묻는다 — 그래서 (길 잃음) 바구니와 경고가 정의상 같은 집합이다. 판정 차례도 nav::Ctx::home 과 맞췄다(마일스톤은 뿌리라 볼 것이 없고, 에픽은 제 마일스톤만, 이슈는 에픽 먼저 그다음 마일스톤). 곁들여 no_milestone 도 고쳤다 — 종류가 틀린 참조를 '마일스톤 있음' 으로 세어 그 줄을 오히려 빼 버리고 있었다. 경고 낱말은 '없는 에픽' 에서 '에픽으로 쓸 수 없는 것' 으로 바꿨다: 끊긴 것과 종류 틀린 것을 가려 말해도 고치는 손은 같다. 실제 저장소로 확인했다 — status 가 말하는 id 와 탐색기가 (길 잃음) 에 넣는 id 가 같다."}
 {"ts":"2026-09-12T04:30:44Z","id":"moai-4jpb","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
+{"ts":"2026-09-12T04:30:44Z","id":"moai-4jpb","kind":"status","by":"레이븐","from":"review","to":"done"}
+{"ts":"2026-09-12T04:30:50Z","id":"moai-mece","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T04:33:22Z","id":"moai-mece","kind":"note","by":"레이븐","text":"(a) 문장 고치기와 (b) 진짜 자동화 사이에 싼 길이 있었다 — 명령 목록을 바이너리의 --help 에서 읽어 훑기 목록과 견준다. 명령을 실제로 부르는 일(인자가 필요한 mv·rm·note 를 어떻게 부를지)은 여전히 사람이 정하지만, 빠뜨리면 이름을 대며 실패한다. clap 을 dev-dependency 로 끌어올 필요도 없다(0개 유지). 목록에서 tui 를 빼 실제로 실패하는지 확인했다. CLAUDE.md 문장도 무엇이 자동이고 무엇이 손인지 가려 적었다."}
+{"ts":"2026-09-12T04:33:22Z","id":"moai-mece","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
