@@ -27,6 +27,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다.
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기   →  review  →  done
     moai edit <id> --tag parser            고치기
+    moai defer <id> -m "다음 분기"         지금 안 할 일을 계획에서 뺀다
     moai note <id> "발견한 것"             다음 사람이 읽을 메모
 
 모든 명령에 `--json` 이 붙는다.
@@ -54,6 +55,17 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다.
 
 `moai add` 와 `moai idea add` 를 가르는 것은 하나다 — **지금 집을 것인가.**
 집을 것이면 이슈고, 나중에 볼 것이면 idea 다.
+
+### 이미 있는 일을 지금 안 할 때
+
+idea 는 "아직 일이 아닌 것" 이고, **미루기는 "일이지만 지금은 아닌 것"** 이다.
+
+    moai defer <id> -m "다음 분기에"       계획에서 잠시 뺀다
+    moai defer <id> --undo                 도로 집는다
+    moai show --deferred                   미뤄 둔 것만 본다
+
+칸도 종류도 안 바뀐다 — 같은 줄이 그대로 돌아온다. 미룬 것은 `moai ready` 와
+보드와 경고에서 빠지고, `moai status` 가 한 줄로 그것을 비춘다.
 
 ### 묶음은 둘이다
 
@@ -93,7 +105,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다.
 
 무엇이든 만들고 무엇이든 옮길 수 있다. 사람을 부르지 않는다.
 대신 `moai status` 가 에픽 없는 이슈, 오래 멈춘 review, 한 번에 벌여 놓은
-것, 쌓인 idea 를 드러낸다. **세션을 닫기 전에 한 번 더 돌려서 경고가 늘지
+것, 쌓인 idea, 미뤄 둔 것을 드러낸다. **세션을 닫기 전에 한 번 더 돌려서 경고가 늘지
 않았는지 본다.**
 "#;
 

@@ -25,7 +25,7 @@ pub fn run(ctx: &Ctx) -> R<Vec<String>> {
         .issues
         .iter()
         .filter(|i| {
-            report::is_work(i)
+            report::is_active(i)
                 && !i.status.is_done()
                 && i.status.as_str() != repo.config.first_status()
         })

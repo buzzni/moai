@@ -72,6 +72,7 @@ fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
         (a.grep.is_some(), "-g"),
         (a.stale.is_some(), "--stale"),
         (a.all, "--all"),
+        (a.deferred, "--deferred"),
         (!a.filter.is_empty(), "--filter"),
         // `--milestone` 도 아래에서 `Filter::build` 로 넘어간다. 여기 빠져
         // 있으면 `moai show <id> --milestone <m>` 이 걸러지지 않은 그 이슈를
@@ -143,6 +144,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         stale: a.stale,
         all: a.all,
         ideas: false,
+        deferred: a.deferred,
         filter: a.filter,
     })
     .map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
@@ -160,6 +162,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 두 판단이 어긋날 자리가 생긴다.
     let hide_done = !filter.all && filter.status.is_empty();
     let hide_ideas = !filter.ideas;
+    // 미뤄 둔 것도 done 과 같은 자리에서 빠진다. `--deferred` 로 콕 집어
+    // 물었으면 그때는 그것만 보는 것이라 숨길 것이 없다.
+    let hide_deferred = filter.deferred.is_none() && !filter.all;
     // **숨긴 것도 센다.** 담아 둔 생각뿐인 저장소에서 `moai show` 가 그냥
     // "없다." 라고 하면, 방금 담은 사람은 파일이 비었다고 믿는다 — done 을
     // 숨길 때 그 수를 말하는 것과 같은 규칙이다.
@@ -170,6 +175,8 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     for i in load.issues.iter().filter(|i| wide.matches(i, &now, &wh)) {
         if hide_ideas && report::is_idea(i) {
             hidden.ideas += 1;
+        } else if hide_deferred && i.is_deferred() {
+            hidden.deferred += 1;
         } else if hide_done && i.status.is_done() {
             hidden.done += 1;
         } else {

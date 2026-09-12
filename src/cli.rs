@@ -24,6 +24,11 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
   moai idea add \"반짝 떠오른 것\"   담는다. 제목 하나면 된다 — 일로 세지 않는다
   moai idea promote <id> --from -  때가 되면 에픽과 이슈로 펼친다
 
+이미 있는 일을 지금 안 할 때:
+
+  moai defer <id> -m \"다음 분기에\"  계획에서 잠시 뺀다. 칸도 종류도 안 바뀐다
+  moai defer <id> --undo           도로 집는다
+
 계획을 한 번에 세울 때:
 
   moai add --from - <<'EOF'
@@ -128,6 +133,19 @@ pub enum Cmd {
     Rm(RmArgs),
     /// 이슈에 메모를 남긴다 (저널에만 쌓인다)
     Note(NoteArgs),
+    /// 지금 안 할 일을 계획에서 잠시 뺀다 (또는 도로 집는다)
+    #[command(after_help = "\
+  moai defer moai-4aex                       미룬다
+  moai defer moai-4aex moai-9k2p -m \"다음 분기\"   여럿을, 까닭과 함께
+  moai defer moai-4aex --undo                도로 집는다
+
+  **칸도 종류도 안 바꾼다.** 어느 칸에 있었는지는 도로 집을 때 그대로
+  필요하고, 같은 줄이 그대로 돌아와야 한다. 미룬 것은 `moai ready` 와 보드와
+  경고에서 빠지고, 쌓이면 `moai status` 가 한 줄로 비춘다.
+
+  `moai show --deferred` 로 미뤄 둔 것만 본다.")]
+    Defer(DeferArgs),
+
     /// 하나가 다른 것을 막는다 (또는 그 막음을 없앤다)
     #[command(after_help = "\
   moai link moai-4aex --blocks moai-9k2p     4aex 가 9k2p 를 막는다
@@ -366,7 +384,11 @@ pub struct FilterArgs {
     #[arg(long, value_name = "일")]
     pub stale: Option<i64>,
 
-    /// done 을 포함한다
+    /// 미뤄 둔 것만
+    #[arg(long)]
+    pub deferred: bool,
+
+    /// done 과 미뤄 둔 것을 포함한다
     #[arg(long)]
     pub all: bool,
 
@@ -424,6 +446,20 @@ pub struct EditArgs {
     /// 담당. `이름 (메일)` 로 주면 갈라 넣고, `none` 이면 뺀다
     #[arg(short, long, value_name = "이름 (메일)|none")]
     pub assignee: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct DeferArgs {
+    #[arg(required = true, value_name = "id")]
+    pub ids: Vec<String>,
+
+    /// 도로 집는다
+    #[arg(long)]
+    pub undo: bool,
+
+    /// 왜 미루는가 (저널에만 남는다)
+    #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
+    pub msg: Option<String>,
 }
 
 #[derive(Args, Debug)]

@@ -914,7 +914,7 @@ fn the_json_sweep_covers_every_command() {
 /// `--json` 훑기가 실제로 부르는 명령들. **위 시험이 이 목록을 도움말과 견준다** —
 /// 목록을 여기 한 자리에 두어야 그 견줌이 뜻을 갖는다.
 const JSON_SWEEP: &[&str] = &[
-    "init", "add", "status", "ready", "show", "note", "link", "tui", "edit", "mv", "rm",
+    "init", "add", "status", "ready", "show", "note", "link", "defer", "tui", "edit", "mv", "rm",
     // 종류 네임스페이스는 `moai <종류> show --json` 으로 같은 길을 지난다.
     "issue", "epic", "milestone", "idea",
 ];
@@ -937,6 +937,7 @@ fn every_command_still_speaks_json() {
         vec!["show", &epic, "--json"],
         vec!["note", &id, "메모", "--json"],
         vec!["link", &id, "--blocks", &epic, "--json"],
+        vec!["defer", &id, "--json"],
         // tui 는 화면을 켜지 않고 목록만 낸다.
         vec!["tui", "--json"],
         // 종류 네임스페이스도 같은 길을 지난다.
@@ -2010,7 +2011,7 @@ fn promote_speaks_json_too() {
 fn the_agents_block_teaches_idea() {
     let s = init("agentsidea");
     let block = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
-    for want in ["moai idea add", "moai idea ls", "moai idea promote"] {
+    for want in ["moai idea add", "moai idea ls", "moai idea promote", "moai defer"] {
         assert!(block.contains(want), "{want} 가 없다 — {block}");
     }
 }
@@ -2263,4 +2264,106 @@ fn a_file_with_an_unreadable_line_is_idempotent() {
     let twice = issues(s.path());
     let settled: Vec<&str> = twice.lines().filter(|l| !l.contains("두 번 쓴다")).collect();
     assert_eq!(settled.join("\n") + "\n", once, "쓸 때마다 줄이 움직인다");
+}
+
+// ── 미루기 ──────────────────────────────────────────────────────────
+
+/// 미루면 `deferred_at` 이 붙고, 도로 집으면 사라진다. **같은 줄이 그대로
+/// 돌아온다** — 종류도 칸도 안 건드린다.
+#[test]
+fn deferring_and_taking_it_back_leaves_the_row_itself_alone() {
+    let s = init("defer");
+    let id = add(s.path(), &["나중에 할 일"]);
+    let before = line_of(s.path(), &id);
+
+    ok(s.path(), &["defer", &id]);
+    let after = line_of(s.path(), &id);
+    assert!(after.contains(r#""deferred_at""#), "{after}");
+    assert!(after.contains(r#""kind""#) == before.contains(r#""kind""#), "종류를 건드렸다");
+    assert!(after.contains(r#""status":"todo""#), "칸을 옮겼다 — {after}");
+
+    ok(s.path(), &["defer", &id, "--undo"]);
+    assert!(!line_of(s.path(), &id).contains("deferred"), "도로 집었는데 자국이 남았다");
+}
+
+/// 여럿을 한 번에 미룬다. `mv` 가 그러듯 하나가 없다고 나머지를 안 미루지
+/// 않는다 — 되풀이해 부르는 것이 흔하다.
+#[test]
+fn deferring_takes_many_and_reports_what_it_could_not() {
+    let s = init("defermany");
+    let a = add(s.path(), &["하나"]);
+    let b = add(s.path(), &["둘"]);
+    let out = moai(s.path(), &["defer", &a, "argos-0000", &b]);
+    assert!(!out.status.success(), "못 찾은 것이 있는데 0 으로 끝났다");
+    assert!(line_of(s.path(), &a).contains("deferred_at"), "나머지를 안 미뤘다");
+    assert!(line_of(s.path(), &b).contains("deferred_at"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("argos-0000"));
+}
+
+/// 이미 미룬 것을 또 미뤄도 **시각이 안 밀린다.** 밀리면 "언제부터 미뤄
+/// 뒀나" 가 마지막으로 명령을 친 때가 된다 — `mv` 가 같은 자리에서 같은
+/// 규칙을 쓴다.
+#[test]
+fn deferring_twice_does_not_move_the_stamp() {
+    let s = init("deferagain");
+    let id = add(s.path(), &["나중에"]);
+    ok(s.path(), &["defer", &id]);
+    let once = line_of(s.path(), &id);
+    ok(s.path(), &["defer", &id]);
+    assert_eq!(line_of(s.path(), &id), once, "두 번째 미루기가 시각을 밀었다");
+}
+
+/// **필드 변경은 저널에 안 적는다** (CLAUDE.md). 적어 온 말은 그래도
+/// 버리지 않는다 — `mv` 와 같은 규칙이다.
+#[test]
+fn deferring_writes_the_reason_but_not_the_field_change() {
+    let s = init("defernote");
+    let id = add(s.path(), &["나중에"]);
+    ok(s.path(), &["defer", &id]);
+    let quiet = ok(s.path(), &["show", &id]);
+    assert_eq!(quiet.matches("note:").count(), 0, "필드 변경을 저널에 적었다 — {quiet}");
+
+    ok(s.path(), &["defer", &id, "--undo"]);
+    ok(s.path(), &["defer", &id, "-m", "다음 분기에 다시 본다"]);
+    let told = ok(s.path(), &["show", &id]);
+    assert!(told.contains("다음 분기에"), "적어 온 말을 버렸다 — {told}");
+}
+
+/// 미룬 것은 목록에서 done 과 같은 자리에서 빠지고, `--deferred` 로 본다.
+/// **켜는 말과 좁히는 말이 하나다** — "미룬 것 보기" 가 한 낱말로 끝난다.
+#[test]
+fn deferred_rows_leave_the_list_and_come_back_by_name() {
+    let s = init("deferlist");
+    let put_off = add(s.path(), &["나중에"]);
+    let now = add(s.path(), &["지금"]);
+    ok(s.path(), &["defer", &put_off]);
+
+    let plain = ok(s.path(), &["show"]);
+    assert!(plain.contains(&now) && !plain.contains(&put_off), "{plain}");
+    assert!(plain.contains("미룸") || plain.contains("1건"), "숨긴 것을 안 센다 — {plain}");
+
+    let only = ok(s.path(), &["show", "--deferred"]);
+    assert!(only.contains(&put_off) && !only.contains(&now), "{only}");
+    assert!(ok(s.path(), &["show", "--all"]).contains(&put_off), "--all 이 안 보여준다");
+}
+
+/// 미룬 것은 `ready` 에도 보드에도 없고, `status` 가 한 줄로 그것을 비춘다.
+/// **막지 않는다** — 알림이지 경고가 아니다.
+#[test]
+fn status_shows_what_was_put_off_without_blocking() {
+    let s = init("deferstatus");
+    let put_off = add(s.path(), &["나중에"]);
+    let now = add(s.path(), &["지금"]);
+    ok(s.path(), &["defer", &put_off]);
+
+    let r = ok(s.path(), &["ready"]);
+    assert!(r.contains(&now) && !r.contains(&put_off), "{r}");
+
+    let out = moai(s.path(), &["status"]);
+    assert!(out.status.success(), "알림으로 비영 종료했다 — 그러면 이건 게이트다");
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("이슈 1"), "미룬 것을 보드가 셌다 — {text}");
+    assert!(text.contains("미뤄 둔 것 1건"), "{text}");
+    assert!(text.contains("+ 미뤄 둔 것"), "알림이 경고 글리프를 달았다 — {text}");
+    assert!(text.contains("moai show --deferred"), "다음에 무엇을 칠지 안 말한다 — {text}");
 }

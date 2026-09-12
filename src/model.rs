@@ -123,6 +123,25 @@ pub struct Issue {
     /// 저장하는 것과 같은 실패다.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocked_by: Vec<String>,
+    /// 미뤄 둔 때. **세 번째 축이다** — `kind` 는 무엇인가, `status` 는 어디
+    /// 있는가, 이것은 *지금 볼 것인가*.
+    ///
+    /// **칸으로 두지 않은 까닭.** `deferred` 칸은 첫 칸이 아니라 `ready` 에는
+    /// 안 걸리지만, `wip_overload` 와 `stale_progress` 가 그것을 "벌여 놓은
+    /// 것" 과 "집어 놓고 잊은 것" 으로 센다 — 미룬 것은 정의상 안 건드리는
+    /// 것이라 미룰수록 잔소리가 는다. 막으려면 config 에 "이 칸은 벌여 놓은
+    /// 것이 아니다" 라는 둘째 어휘가 필요하고, `DONE` 하나로 버티는 이유가
+    /// 바로 그 둘째 어휘를 안 만들기 위해서다.
+    ///
+    /// **종류로 두지 않은 까닭.** `Kind::Deferred` 로 옮기면 그 줄이 원래
+    /// 무엇이었는지를 잃는다. idea 는 새 이슈를 낳고 제가 닫히니 괜찮았지만,
+    /// 미룬 것은 **같은 줄이 그대로 돌아와야 한다.**
+    ///
+    /// **bool 이 아니라 시각인 까닭.** "언제부터 미뤄 뒀나" 를 `status` 가
+    /// 말해야 잊은 것과 막 미룬 것이 갈린다. `status_since` 는 못 쓴다 —
+    /// 미루는 것은 칸을 옮기는 일이 아니다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deferred_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     /// `status` 가 마지막으로 바뀐 때. 방치 검사와 "review 에 6일" 이 여기서 나온다.
@@ -167,6 +186,7 @@ impl Issue {
             epic: None,
             milestone: None,
             blocked_by: Vec::new(),
+            deferred_at: None,
             created_at: at.to_string(),
             updated_at: at.to_string(),
             status_since: at.to_string(),
@@ -177,6 +197,11 @@ impl Issue {
 
     pub fn priority(&self) -> u8 {
         self.priority.unwrap_or(DEFAULT_PRIORITY)
+    }
+
+    /// 지금 계획에서 빠져 있는가.
+    pub fn is_deferred(&self) -> bool {
+        self.deferred_at.is_some()
     }
 
     /// 쓰기 직전에 한 번. 결정적 출력과 기본값 생략을 여기서 보장한다.
@@ -630,6 +655,25 @@ mod tests {
         let out = serde_json::to_string(&i).unwrap();
         assert!(out.contains(r#""due":"2026-10-01""#), "{out}");
         assert!(out.contains(r#""estimate":90"#), "{out}");
+    }
+
+    /// 미룬 줄을 읽고 그대로 쓰면 바이트가 같다. **`blocked_by` 와
+    /// `created_at` 사이**다 — 소속·물림 다음, 시각 앞.
+    #[test]
+    fn round_trips_a_deferred_line() {
+        let line = r#"{"id":"argos-4aex","title":"제목","status":"todo","deferred_at":"2026-09-11T04:12:03Z","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#;
+        let i: Issue = serde_json::from_str(line).unwrap();
+        assert!(i.is_deferred());
+        assert_eq!(serde_json::to_string(&i).unwrap(), line);
+    }
+
+    /// **안 미룬 줄은 한 글자도 안 바뀐다.** 축을 하나 더해 놓고 1만 줄이
+    /// 통째로 diff 에 뜨면 그 축은 값어치보다 비싸다.
+    #[test]
+    fn not_deferring_writes_nothing() {
+        let line = serde_json::to_string(&issue()).unwrap();
+        assert!(!line.contains("deferred"), "{line}");
+        assert!(!issue().is_deferred());
     }
 
     /// idea 줄을 읽고 그대로 쓰면 바이트가 같다. 종류 하나를 더했으므로

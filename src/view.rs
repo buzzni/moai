@@ -51,6 +51,15 @@ fn tags_of(i: &Issue) -> String {
     i.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
 }
 
+/// "미룸 (3일)" — 미루지 않았으면 `None`.
+fn deferred_for(i: &Issue, now: &str) -> Option<String> {
+    let at = i.deferred_at.as_deref()?;
+    Some(match crate::model::days_since(at, now) {
+        Some(d) if d > 0 => format!("미룸 ({d}일)"),
+        _ => "미룸".to_string(),
+    })
+}
+
 fn title_style(i: &Issue) -> Style {
     // 제목은 칠하지 않는다 — 내용은 기본색, 주변만 칠한다.
     // 묶음만 예외다. 계획 계층이 한눈에 떠야 한다.
@@ -67,12 +76,17 @@ fn title_style(i: &Issue) -> Style {
 pub struct Hidden {
     pub done: usize,
     pub ideas: usize,
+    pub deferred: usize,
 }
 
 impl Hidden {
     /// "무엇 N건 숨김 — `플래그`" 조각들. 숨긴 것이 없으면 비어 있다.
     fn says(&self) -> Vec<String> {
-        [(self.done, "done", "--all"), (self.ideas, "idea", "--type idea")]
+        [
+            (self.done, "done", "--all"),
+            (self.deferred, "미룸", "--deferred"),
+            (self.ideas, "idea", "--type idea"),
+        ]
             .into_iter()
             .filter(|(n, _, _)| *n > 0)
             .map(|(n, what, how)| format!("{what} {n}건 숨김 — `{how}`"))
@@ -143,6 +157,13 @@ pub fn list(
         }
         if show_epic {
             row.push_str(&paint(style::EPIC_REF, epic));
+        }
+        // **섞여 나올 때만 뜻이 있다.** `--deferred` 는 전부 미룬 것이라 줄마다
+        // 같은 낱말이 붙어 봐야 자리만 먹는데, `--all` 은 섞여 나오므로 표가
+        // 없으면 어느 줄이 계획 밖인지 알 길이 없다. 열을 늘리지 않고 꼬리에
+        // 단다 — 미루지 않은 줄이 그 자리를 비워 두면 그게 더 시끄럽다.
+        if i.is_deferred() && !issues.iter().all(|x| x.is_deferred()) {
+            row.push_str(&format!("   {}", paint(style::DIM, "미룸")));
         }
         out.push(row.trim_end().to_string());
     }
@@ -454,9 +475,16 @@ fn says(w: &Warning) -> String {
         "dangling_blocked_by" => format!("없는 이슈에게 막혀 있다는 것 {n}건"),
         // **알림이지 경고가 아니다.** 고칠 것이 있다는 말이 아니라, 담아 둔
         // 것을 한 번 펼쳐 볼 때가 됐다는 말이다.
+        // **오늘 것에 "0일" 을 붙이지 않는다.** 나이를 말하는 까닭은 오래된
+        // 것을 드러내려는 것인데, 갓 담은 것에까지 괄호가 붙으면 그 괄호가
+        // 뜻을 잃는다.
         "idea_pile" => match w.oldest {
-            Some(d) => format!("쌓인 idea {n}건 (가장 오래된 것 {d}일)"),
-            None => format!("쌓인 idea {n}건"),
+            Some(d) if d > 0 => format!("쌓인 idea {n}건 (가장 오래된 것 {d}일)"),
+            _ => format!("쌓인 idea {n}건"),
+        },
+        "deferred" => match w.oldest {
+            Some(d) if d > 0 => format!("미뤄 둔 것 {n}건 (가장 오래된 것 {d}일)"),
+            _ => format!("미뤄 둔 것 {n}건"),
         },
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
         "duplicate_id" => format!("id 가 두 번 있다 {n}건 — 머지를 잘못 풀었다"),
@@ -716,6 +744,11 @@ pub fn detail(
     if i.kind != Kind::Issue {
         let mark = if is_group(i) { style::EPIC } else { style::DIM };
         line.push_str(&format!(" · {}", paint(mark, i.kind.as_str())));
+    }
+    // **미룬 것은 상세에서 반드시 말한다.** 목록에서는 아예 안 보이므로,
+    // id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안 나오나" 에 답하는 자리다.
+    if let Some(d) = deferred_for(i, now) {
+        line.push_str(&format!(" · {}", paint(style::WARN, &d)));
     }
     if !i.tags.is_empty() {
         line.push_str(&format!(" · {}", paint(style::TAG, &tags_of(i))));

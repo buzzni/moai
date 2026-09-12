@@ -147,8 +147,13 @@ fn list(f: &mut Frame, app: &App, at: Rect, rows: &[Row], state: &mut ListState)
     // 정하는 것이라(`config.statuses`) 여기서 다시 정하지 않는다.
     //
     // **일만 센다.** 에픽도 마일스톤도 묶음이지 일이 아니라고 `report::is_work`
-    // 가 정했고, `moai status` 와 오른쪽 롤업이 그 자로 센다 — 여기만 묶음을
-    // 같이 세면 한 화면의 두 패널이 같은 디렉터리를 두 수로 말한다.
+    // 가 정했고, 오른쪽 롤업이 그 자로 센다 — 여기만 묶음을 같이 세면 한
+    // 화면의 두 패널이 같은 디렉터리를 두 수로 말한다.
+    //
+    // **미뤄 둔 것은 뺀 자(`is_active`)를 쓰지 않는다.** `moai status` 의
+    // 보드는 그쪽으로 세지만 거기는 "지금 할 수 있는 것" 을 묻는 화면이고,
+    // 탐색기는 시키지도 않은 줄을 숨기지 않으므로 미룬 줄이 목록에 그대로
+    // 있다. 세는 자를 바꾸면 머리글이 제 밑의 줄 수와 어긋난다(moai-lhbh).
     let work: Vec<usize> = rows
         .iter()
         .filter_map(|r| match r {

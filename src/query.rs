@@ -56,6 +56,8 @@ pub struct Filter {
     pub stale: Option<i64>,
     /// done 을 포함한다.
     pub all: bool,
+    /// 미뤄 둔 것만 고른다. `Some(false)` 면 미루지 않은 것만.
+    pub deferred: Option<bool>,
     /// 담아 둔 생각까지 포함한다. **`all` 과 같은 자리의 축이다** — 기본으로
     /// 숨는 것을 도로 켜는 스위치가 둘이 되면, 켜는 쪽이 어느 것을 켰는지
     /// 매번 되짚어야 한다.
@@ -100,6 +102,7 @@ pub struct Raw {
     pub stale: Option<i64>,
     pub all: bool,
     pub ideas: bool,
+    pub deferred: bool,
     pub filter: Vec<String>,
 }
 
@@ -115,6 +118,10 @@ impl Filter {
         // 콕 집어 묻거나(`--type idea`) 글로 찾을 때는 저절로 켜진다.
         // **이미 적어 둔 생각을 다시 안 적으려면 찾아져야 한다.**
         let ideas = raw.ideas || raw.kind == Some(Kind::Idea) || raw.grep.is_some();
+        // **`--deferred` 는 그것만 본다.** 목록 자리에서 미룬 것은 done 처럼
+        // 기본으로 빠지므로, 켜는 말과 좁히는 말이 하나여야 "미룬 것 보기" 가
+        // 한 낱말로 끝난다.
+        let deferred = raw.deferred.then_some(true);
         Ok(Filter {
             status: once(&raw.status, "-s", "상태")?,
             tags: raw
@@ -135,6 +142,7 @@ impl Filter {
             stale: raw.stale,
             all: raw.all,
             ideas,
+            deferred,
         })
     }
 
@@ -151,6 +159,13 @@ impl Filter {
         // 자리다. 술어가 갈라지면 화면과 CLI 가 다른 것을 센다.
         if crate::report::is_idea(i) && !self.ideas {
             return false;
+        }
+        // **미뤄 둔 것은 done 과 같은 자리에서 빠진다.** 지금 계획이 아니라는
+        // 뜻이 같고, 켜는 말(`--all`)도 같아야 축이 안 는다.
+        match self.deferred {
+            Some(want) if i.is_deferred() != want => return false,
+            None if !self.all && i.is_deferred() => return false,
+            _ => {}
         }
         if !self.all && self.status.is_empty() && i.status.is_done() {
             return false;

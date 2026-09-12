@@ -4,6 +4,7 @@
 //! 정하는 코드가 여기 있으면 나중에 TUI 가 그것을 다시 쓴다.
 
 pub mod add;
+pub mod defer;
 pub mod edit;
 pub mod idea;
 pub mod init;
@@ -85,6 +86,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Rm(a) => rm::run(&ctx, a),
         Cmd::Note(a) => note::run(&ctx, a),
         Cmd::Link(a) => link::run(&ctx, a),
+        Cmd::Defer(a) => defer::run(&ctx, a),
         Cmd::Ready => ready::run(&ctx),
         Cmd::Status => status::run(&ctx),
         Cmd::Tui(a) => tui::run(&ctx, a),

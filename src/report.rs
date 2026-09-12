@@ -46,6 +46,16 @@ pub fn is_epic(i: &Issue) -> bool {
     i.kind == Kind::Epic
 }
 
+/// 지금 계획에 있는 일인가. **`is_work` 에서 미뤄 둔 것을 뺀다.**
+///
+/// 세는 자리는 대부분 이쪽을 쓴다 — 보드·`ready`·경고·흐름은 "지금 할 수
+/// 있는 것" 을 묻는다. **롤업만 `is_work` 를 그대로 쓴다**: 다섯 중 둘을
+/// 미뤘다고 `3건짜리 에픽` 이 되면 미루는 것이 계획을 고쳐 쓰는 일이 되고,
+/// 멤버를 전부 미룬 에픽이 `속이 빈 에픽` 으로 고발당한다.
+pub fn is_active(i: &Issue) -> bool {
+    is_work(i) && !i.is_deferred()
+}
+
 /// 담아 둔 생각인가. **술어를 `cmd/` 에 두지 않는다** — 어떤 줄이 무엇인지
 /// 정하는 코드가 거기 있으면 다음 표면이 같은 판단을 다시 짠다.
 pub fn is_idea(i: &Issue) -> bool {
@@ -356,7 +366,7 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     // 이슈 밑에 담아 둔 생각 하나가 그 이슈를 `ready` 에서 지워 버리는데,
     // idea 는 어느 목록에도 안 나오므로 왜 사라졌는지 볼 방법이 없다.
     let has_open_child = |i: &Issue| {
-        children_of(issues, &i.id).iter().any(|c| is_work(c) && !c.status.is_done())
+        children_of(issues, &i.id).iter().any(|c| is_active(c) && !c.status.is_done())
     };
 
     let progress: BTreeMap<Option<String>, u8> =
@@ -365,7 +375,7 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let mut out: Vec<&Issue> = issues
         .iter()
         .filter(|i| {
-            is_work(i)                               // 묶음은 집는 게 아니다
+            is_active(i)                             // 묶음도 미뤄 둔 것도 집는 게 아니다
                 && i.status.as_str() == cfg.first_status()
                 && !done_epic(i)
                 && !has_open_child(i)
@@ -543,7 +553,9 @@ fn ids_of(v: &[&Issue]) -> Vec<String> {
 
 /// `unreadable` 은 읽다 만난 줄 번호다 — 저장소가 아니라 부르는 쪽이 준다.
 pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -> StatusReport {
-    let work: Vec<&Issue> = issues.iter().filter(|i| is_work(i)).collect();
+    // **여기가 "지금 계획" 의 정의다.** 보드 수·모든 경고·흐름이 이 하나를
+    // 지나므로, 미뤄 둔 것을 여기서 빼면 아래 전부에서 저절로 빠진다.
+    let work: Vec<&Issue> = issues.iter().filter(|i| is_active(i)).collect();
     // **한 번만 잰다.** 둘 다 이슈 전부의 물림을 타고 올라가므로, 경고마다
     // 다시 부르면 같은 걸음을 `moai status` 한 번에 여러 벌 걷는다.
     // `placed` 는 자리를 못 정하는 줄(`nav` 의 `(길 잃음)` 과 같은 집합),
@@ -743,6 +755,28 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
                 .oldest(oldest)
                 .notice()
                 .hint("moai idea ls"),
+        );
+    }
+
+    // 6-3. 미뤄 둔 것. **한 건부터 말한다** — idea 와 달리 미루는 것은 이미
+    //      있는 일에 대한 한 번의 결정이라 자주 쌓이지 않고, 대신 보드에서
+    //      통째로 사라지므로 여기가 그것이 보이는 **유일한 자리**다. 흐린 한
+    //      줄이고 알림이라 꾸지람으로 읽히지 않는다.
+    let put_off = |i: &&Issue| is_work(i) && i.is_deferred() && !i.status.is_done();
+    let count = issues.iter().filter(put_off).count();
+    if count > 0 {
+        let oldest = issues
+            .iter()
+            .filter(put_off)
+            .filter_map(|i| i.deferred_at.as_deref().and_then(|at| days_since(at, now)))
+            .max()
+            .unwrap_or(0);
+        warnings.push(
+            Warning::new("deferred", Vec::new())
+                .count(count)
+                .oldest(oldest)
+                .notice()
+                .hint("moai show --deferred"),
         );
     }
 
@@ -1476,5 +1510,70 @@ mod tests {
         let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
         assert_eq!(st.warnings.iter().filter(|w| !w.notice).count(), 0, "{:?}", st.warnings);
         assert!(!st.broken(), "알림으로 비영 종료한다");
+    }
+    // ── 미룬 것은 지금 계획이 아니다 ─────────────────────────────────
+
+    fn deferred(id: &str, status: &str) -> Issue {
+        let mut i = make(id, Kind::Issue, status);
+        i.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        i
+    }
+
+    #[test]
+    fn a_deferred_issue_never_comes_up_as_ready() {
+        let issues = vec![deferred("argos-0001", "todo"), make("argos-0009", Kind::Issue, "todo")];
+        let picks: Vec<&str> = ready(&issues, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(picks, ["argos-0009"], "미뤄 둔 것이 집을 일로 올라왔다");
+    }
+
+    #[test]
+    fn a_deferred_issue_is_not_counted_on_the_board() {
+        let issues = vec![deferred("argos-0001", "todo"), make("argos-0009", Kind::Issue, "todo")];
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        assert_eq!(st.total, 1, "미룬 것을 보드가 셌다");
+        assert_eq!(st.counts.get("todo"), Some(&1), "{:?}", st.counts);
+    }
+
+    /// **미룬 것은 정의상 안 건드리는 것이다.** 방치·벌여 놓음 경고가 세기
+    /// 시작하면 미룰수록 잔소리가 늘고, 그러면 안 미루고 그냥 쌓아 둔다.
+    #[test]
+    fn a_deferred_issue_is_not_nagged_about() {
+        let issues: Vec<Issue> = (0..9)
+            .map(|n| deferred(&format!("argos-000{n}"), if n % 2 == 0 { "in_progress" } else { "review" }))
+            .collect();
+        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z");
+        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        for quiet in ["wip_overload", "stale_progress", "stale_review", "no_epic"] {
+            assert!(!kinds.contains(&quiet), "{quiet} 가 미룬 것을 셌다 — {kinds:?}");
+        }
+    }
+
+    /// 막힌 채로 미뤄 둔 것도 마찬가지다. 미루는 것이 그 막힘을 "계획이 멈춘
+    /// 자리" 에서 빼는 일이다.
+    #[test]
+    fn a_deferred_blocker_is_not_a_stalled_plan() {
+        let mut blocked = deferred("argos-0009", "todo");
+        blocked.blocked_by = vec!["argos-0001".into()];
+        let issues = vec![make("argos-0001", Kind::Issue, "todo"), blocked];
+        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z");
+        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(!kinds.contains(&"blocked_stale"), "{kinds:?}");
+    }
+
+    /// **에픽의 계획은 줄어들지 않는다.** 다섯 중 둘을 미뤘다고 `3건짜리
+    /// 에픽` 이 되면, 미루는 것이 계획을 고쳐 쓰는 일이 된다. 보드는 "지금
+    /// 할 수 있는 것" 을, 롤업은 "이 계획 전부" 를 센다.
+    #[test]
+    fn deferring_does_not_shrink_the_plan() {
+        let mut inside = deferred("argos-0003", "todo");
+        inside.epic = Some("argos-0001".into());
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "todo"),
+            member("argos-0002", "argos-0001", "done"),
+            inside,
+        ];
+        let rolls = rollup(&issues, &cfg());
+        let r = roll_of(&rolls, Some("argos-0001"));
+        assert_eq!((r.total, r.done), (2, 1), "미뤘다고 계획이 줄었다 — {r:?}");
     }
 }
