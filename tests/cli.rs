@@ -2762,12 +2762,18 @@ fn an_empty_reason_is_refused_like_an_empty_note() {
 /// **세션 표를 시험마다 갈라 둔다.** 표가 섞이면 "세션당 한 번" 시험이 앞
 /// 시험이 남긴 표를 보고 조용해져, 고장 난 채로 초록이 된다.
 fn hook(s: &Scratch, event: &str, input: &str) -> Output {
+    hook_in(s, s.path(), event, input)
+}
+
+/// 훅 프로세스를 `run_in` 에서 띄운다. 이벤트가 가리키는 저장소와 다른 자리여도
+/// 판정이 같아야 한다 — 훅 프로세스의 자리는 아무도 약속하지 않았다.
+fn hook_in(s: &Scratch, run_in: &Path, event: &str, input: &str) -> Output {
     use std::io::Write as _;
     let tmp = s.path().join("hooktmp");
     std::fs::create_dir_all(&tmp).unwrap();
     let mut child = Command::new(BIN)
         .args(["hook", event])
-        .current_dir(s.path())
+        .current_dir(run_in)
         .env("MOAI_ACTOR", "테스터 (tester@example.com)")
         .env("MOAI_NOW", NOW)
         .env("TMPDIR", &tmp)
@@ -3090,6 +3096,125 @@ fn every_refusal_is_undone_by_its_own_advice() {
         "시킨 대로 했는데 또 막는다"
     );
     assert!(args.contains(&id.as_str()), "낸 명령이 실제 이슈를 안 가리킨다 — {line}");
+}
+
+// ── 훅 판정 — 시험판이 실제로 넘어진 자리를 계약째로 다시 밟는다 ──────
+//
+// 판정 자체는 `hook.rs` 의 단위 시험이 본다. 여기는 **stdin JSON 을 넣고
+// stdout JSON 을 견준다** — 도구 이름을 가르는 자리, `cwd` 로 경로를 푸는
+// 자리, 계약 JSON 을 쓰는 자리는 단위 시험이 못 밟는다. 시험판에서 잡힌
+// 버그 셋 중 둘이 바로 그 자리에 있었다.
+
+/// JSON 문자열 하나. 따옴표·역슬래시·줄바꿈만 이스케이프한다 — 시험이 넣는
+/// 글에 그 밖의 제어문자는 없다.
+fn json_str(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn shell_call(s: &Scratch, cmd: &str) -> String {
+    call(s, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)), "s1")
+}
+
+/// **훅 프로세스는 남의 자리에서 띄운다.** 저장소 안에서 띄우면 `cwd` 를
+/// 무시하는 판도 상대 경로를 우연히 옳게 풀어, 시험이 아무것도 안 지킨다.
+fn edit_call(s: &Scratch, elsewhere: &Scratch, path: &str) -> String {
+    let input = format!(
+        "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"Edit\",\"tool_input\":{{\"file_path\":{}}}}}",
+        json_str(&s.path().display().to_string()),
+        json_str(path)
+    );
+    String::from_utf8(hook_in(s, elsewhere.path(), "pre-tool-use", &input).stdout).unwrap()
+}
+
+fn review_call(s: &Scratch) -> String {
+    call(s, "Skill", "{\"skill\":\"code-review\",\"args\":\"high\"}", "s1")
+}
+
+/// 규칙 1 — 초점 밖에 세우지 않는다. **담는 것과 계획을 세우는 것은 자유다.**
+#[test]
+fn creation_is_judged_through_the_contract() {
+    let s = init("hookcreate");
+    let epic = field(&ok(s.path(), &["add", "저장 계층", "--type", "epic", "--json"]), "id");
+    let id = field(&ok(s.path(), &["add", "락을 잡는다", "-e", &epic, "--json"]), "id");
+
+    // 집은 것이 없으면 무엇을 세워도 지나간다.
+    assert!(shell_call(&s, "moai add \"딴 일\"").trim().is_empty(), "초점 없이 막았다");
+
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    refusal(&shell_call(&s, "moai add \"딴 일\""));
+    for free in [
+        format!("moai add \"안의 일\" -e {epic}"),
+        format!("moai add \"자식\" --parent {id}"),
+        "moai idea add \"떠오른 것\"".to_string(),
+        "moai add --from - <<'MD'\n# 딴 에픽\n- 첫 이슈\nMD".to_string(),
+        // 리뷰 이야기를 적는 메모는 글자로 가르지 않는다.
+        format!("moai note {id} \"code-review 가 moai add 를 짚었다\""),
+    ] {
+        let out = shell_call(&s, &free);
+        assert!(out.trim().is_empty(), "막혔다 — {free}\n{out}");
+    }
+}
+
+/// 규칙 2 — 저장소를 고치기 전에 하나를 집는다. **세는 것은 저장소 안의
+/// 일감뿐이다.** 상대 경로는 stdin 의 `cwd` 로 푼다 — 훅 프로세스의 자리로
+/// 풀던 시험판은 `src/main.rs` 를 저장소 밖으로 보아 규칙이 통째로 샜다.
+#[test]
+fn edits_are_judged_through_the_contract() {
+    let s = init("hookedit");
+    ok(s.path(), &["add", "락을 잡는다"]);
+    let root = s.path().display().to_string();
+    let other = Scratch::new("hookedit-other");
+
+    for counted in [format!("{root}/src/store.rs"), format!("{root}/CLAUDE.md"), "src/main.rs".into()] {
+        refusal(&edit_call(&s, &other, &counted));
+    }
+    for free in [
+        format!("{root}/.moai/config.toml"),
+        format!("{root}/.claude/settings.json"),
+        format!("{root}/target/release/moai"),
+        std::env::temp_dir().join("scratchpad/memo.md").display().to_string(),
+        format!("{}/src/main.rs", other.path().display()),
+    ] {
+        let out = edit_call(&s, &other, &free);
+        assert!(out.trim().is_empty(), "막혔다 — {free}\n{out}");
+    }
+}
+
+/// 규칙 3 — 리뷰도 이슈다. 그 리뷰는 **지금 보는 것에 매여야 한다.**
+#[test]
+fn reviews_are_judged_through_the_contract() {
+    let s = init("hookreview");
+    let epic = field(&ok(s.path(), &["add", "저장 계층", "--type", "epic", "--json"]), "id");
+    let far = field(&ok(s.path(), &["add", "표면", "--type", "epic", "--json"]), "id");
+    let id = field(&ok(s.path(), &["add", "락을 잡는다", "-e", &epic, "--json"]), "id");
+    let review = field(
+        &ok(s.path(), &["add", "리뷰 — 락", "-t", "review", "-e", &far, "-b", "락을 본다", "--json"]),
+        "id",
+    );
+
+    // 집은 것이 없고 리뷰 줄이 놀고 있으면 그것을 집으라고 한다.
+    let why = refusal(&review_call(&s));
+    assert!(why.contains(&format!("moai mv {review} in_progress")), "집을 명령이 없다 — {why}");
+
+    // 집은 것이 있는데 리뷰가 딴 에픽에 있으면 막는다.
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    let why = refusal(&review_call(&s));
+    assert!(why.contains(&review), "안 매인 리뷰를 안 짚는다 — {why}");
+
+    // 같은 에픽으로 옮기면 지나간다.
+    ok(s.path(), &["edit", &review, "-e", &epic]);
+    let out = review_call(&s);
+    assert!(out.trim().is_empty(), "매였는데 막는다\n{out}");
 }
 
 // ── 메모 — 긴 글을 남기는 길 ────────────────────────────────────────
