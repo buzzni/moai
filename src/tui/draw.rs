@@ -28,6 +28,10 @@ fn left_gutter() -> usize {
 }
 
 pub fn screen(f: &mut Frame, app: &mut App) {
+    // **목록은 한 프레임에 한 번만 센다.** 세는 데 이슈 전부를 훑고 정렬까지
+    // 하므로, 목록 패널과 상세 패널이 각자 세면 그 일이 한 키 누름에 두 번 더
+    // 돈다. 1,600 이슈에서 그 한 번이 20ms 다.
+    let rows = app.rows();
     // 할 말이 있을 때만 배너 줄이 선다. 늘 세워 두면 한 줄이 영영 논다.
     let banner_h = u16::from(banner(app).is_some());
     let [top, note, body, keys] = Layout::vertical([
@@ -53,9 +57,9 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 훑는 자리는 App 이 들고 있다. 잠깐 꺼내 그리고 도로 넣는다 — 그래야
     // 나머지 그리기가 `&App` 만 빌리면 된다.
     let mut state = std::mem::take(&mut app.list);
-    list(f, app, left, &mut state);
+    list(f, app, left, &rows, &mut state);
     app.list = state;
-    detail(f, app, right);
+    detail(f, app, right, &rows);
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 F키 바가 선다.
     match &app.mode {
         Mode::Browse => fkeys(f, app, keys),
@@ -133,8 +137,7 @@ fn prompt(f: &mut Frame, app: &App, at: Rect, what: &str, buf: &str) {
     f.render_widget(Paragraph::new(Line::from(spans)), at);
 }
 
-fn list(f: &mut Frame, app: &App, at: Rect, state: &mut ListState) {
-    let rows = app.rows();
+fn list(f: &mut Frame, app: &App, at: Rect, rows: &[Row], state: &mut ListState) {
     // 테두리 두 칸을 뺀 안쪽 폭. 좁은 창에서도 음수가 되지 않게 막는다.
     let inner = at.width.saturating_sub(2) as usize;
     let items: Vec<ListItem> = rows.iter().map(|r| ListItem::new(row_line(app, r, inner))).collect();
@@ -231,7 +234,7 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
 }
 
 /// 커서가 머문 것을 정리해 낸다. 이슈면 그 이슈를, 디렉터리면 그 밑의 셈을.
-fn detail(f: &mut Frame, app: &App, at: Rect) {
+fn detail(f: &mut Frame, app: &App, at: Rect, rows: &[Row]) {
     // 좌우 여백은 목록의 커서 자리와 같은 폭이다. `inner()` 가 테두리와 여백을
     // 함께 빼 주므로 폭 계산은 아래가 그대로 쓴다.
     let block = Block::default()
@@ -241,7 +244,7 @@ fn detail(f: &mut Frame, app: &App, at: Rect) {
     let inner = block.inner(at);
     f.render_widget(block, at);
 
-    let lines = match app.current() {
+    let lines = match app.current_of(rows) {
         None => vec![Line::from(Span::styled("없다", dim()))],
         Some(Row::Up) => vec![Line::from(Span::styled("한 층 위로", dim()))],
         Some(Row::Item(e)) => match e.at() {

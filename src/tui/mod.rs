@@ -306,23 +306,32 @@ impl App {
         self.rows().get(self.cursor).cloned()
     }
 
+    /// 이미 센 목록에서 커서가 가리키는 줄. **그림은 한 프레임에 목록을 한 번만
+    /// 센다** — 목록 패널과 상세 패널이 각자 세면 이슈 전부를 훑고 정렬하는 일이
+    /// 한 키 누름에 두 번 더 돈다.
+    pub fn current_of(&self, rows: &[Row]) -> Option<Row> {
+        rows.get(self.cursor).cloned()
+    }
+
     pub fn key(&mut self, k: KeyEvent) {
         // 글을 받는 동안에는 이동키가 글자다. 먼저 가로챈다.
         if !matches!(self.mode, Mode::Browse) {
             self.typing(k);
             return;
         }
-        let len = self.rows().len();
+        // **목록은 필요할 때만 센다.** 세는 데 이슈 전부를 훑고 정렬까지 하므로,
+        // 끝내기·검색 같은 키에도 미리 세면 그 값이 그대로 버려진다.
+        let len = || self.rows().len();
         match k.code {
             // raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. 안 받으면 길이 막힌다.
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => self.quit = true,
             KeyCode::Char('q') | KeyCode::F(10) => self.quit = true,
             KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
-            KeyCode::Down => self.cursor = (self.cursor + 1).min(len.saturating_sub(1)),
+            KeyCode::Down => self.cursor = (self.cursor + 1).min(len().saturating_sub(1)),
             KeyCode::Home => self.cursor = 0,
-            KeyCode::End => self.cursor = len.saturating_sub(1),
+            KeyCode::End => self.cursor = len().saturating_sub(1),
             KeyCode::PageUp => self.cursor = self.cursor.saturating_sub(10),
-            KeyCode::PageDown => self.cursor = (self.cursor + 10).min(len.saturating_sub(1)),
+            KeyCode::PageDown => self.cursor = (self.cursor + 10).min(len().saturating_sub(1)),
             KeyCode::Enter | KeyCode::Right => self.enter(),
             KeyCode::Backspace | KeyCode::Left => self.leave(),
             KeyCode::Char('/') => self.mode = Mode::Grep(String::new()),

@@ -162,3 +162,7 @@
 {"ts":"2026-09-12T04:30:50Z","id":"moai-mece","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
 {"ts":"2026-09-12T04:33:22Z","id":"moai-mece","kind":"note","by":"레이븐","text":"(a) 문장 고치기와 (b) 진짜 자동화 사이에 싼 길이 있었다 — 명령 목록을 바이너리의 --help 에서 읽어 훑기 목록과 견준다. 명령을 실제로 부르는 일(인자가 필요한 mv·rm·note 를 어떻게 부를지)은 여전히 사람이 정하지만, 빠뜨리면 이름을 대며 실패한다. clap 을 dev-dependency 로 끌어올 필요도 없다(0개 유지). 목록에서 tui 를 빼 실제로 실패하는지 확인했다. CLAUDE.md 문장도 무엇이 자동이고 무엇이 손인지 가려 적었다."}
 {"ts":"2026-09-12T04:33:22Z","id":"moai-mece","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
+{"ts":"2026-09-12T04:33:23Z","id":"moai-mece","kind":"status","by":"레이븐","from":"review","to":"done"}
+{"ts":"2026-09-12T04:33:29Z","id":"moai-cf1t","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T04:36:59Z","id":"moai-cf1t","kind":"note","by":"레이븐","text":"호출 횟수만 줄이고 창 단위 렌더링은 안 했다 — 재 보니 값이 안 나온다. 측정(이슈 1,601개를 한 에픽에 몰아넣고): tui --json 한 디렉터리 1,600줄 = 18~20ms(프로세스 시작·1,600줄 JSON 파싱·전체 직렬화 포함), 같은 저장소에서 moai ready = 65~73ms. 탐색기 목록 만들기는 이미 이 도구에서 빠른 축이고, 보이는 줄만 만들려면 ListState 의 스크롤 계산을 직접 떠안아야 한다 — 위험 대비 값이 없다. 고친 것: screen 이 목록을 한 번만 세어 list·detail 에 넘긴다(전엔 각자 셌다), key 는 목록 길이를 쓰는 키(Down·End·PageDown)에서만 센다(전엔 끝내기·검색에도 미리 셌다). 구조로 막았다 — list·detail 이 &[Row] 를 받으므로 다시 셀 수가 없다. 남은 한 번(움직임 키의 len)은 캐시와 무효화 규칙이 필요해 그대로 뒀다."}
+{"ts":"2026-09-12T04:36:59Z","id":"moai-cf1t","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
