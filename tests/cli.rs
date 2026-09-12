@@ -2660,3 +2660,37 @@ fn every_hidden_count_names_a_flag_that_opens_it() {
     assert!(!ideas.contains(&closed), "{ideas}");
 }
 
+/// **사람 화면과 기계 출력이 같은 것을 멤버라 부른다.** 머리글(`rollup`)도
+/// `--json` 도 담아 둔 생각을 안 세는데 사람 화면만 그리면, `멤버 0/1` 밑에
+/// 줄 둘이 서서 어느 숫자를 믿어야 할지 알 수 없다.
+#[test]
+fn the_detail_draws_exactly_what_it_counts_as_a_member() {
+    let s = init("memberdraw");
+    let epic = ok(s.path(), &["epic", "add", "저장 계층", "-q"]).trim().to_string();
+    let work = add(s.path(), &["파서", "-e", &epic]);
+    let thought =
+        ok(s.path(), &["idea", "add", "이렇게 하면", "--parent", &work, "-q"]).trim().to_string();
+
+    let human = ok(s.path(), &["show", &epic]);
+    assert!(human.contains("멤버   0/1"), "{human}");
+    assert!(human.contains(&work), "{human}");
+    assert!(!human.contains(&thought), "머리글이 안 세는 줄을 그 밑에 그렸다 — {human}");
+    let machine = ok(s.path(), &["show", &epic, "--json"]);
+    assert!(!machine.contains(&thought), "{machine}");
+}
+
+/// **자식 줄도 제 종류와 미룸을 말한다.** 이 목록은 걸러지지 않으므로 담아 둔
+/// 생각과 미뤄 둔 것이 그대로 서는데, 표가 없으면 `ready` 도 보드도 안 세는
+/// 줄이 일과 똑같이 보인다.
+#[test]
+fn a_child_that_is_not_in_the_plan_says_so() {
+    let s = init("childmark");
+    let parent = add(s.path(), &["부모"]);
+    let shelved = add(s.path(), &["미룰 자식", "--parent", &parent]);
+    ok(s.path(), &["defer", &shelved]);
+    ok(s.path(), &["idea", "add", "자식 생각", "--parent", &parent, "-q"]);
+
+    let out = ok(s.path(), &["show", &parent]);
+    assert!(out.contains("미룸"), "미뤄 둔 자식이 일과 똑같이 보인다 — {out}");
+    assert!(out.contains("idea"), "담아 둔 자식이 일과 똑같이 보인다 — {out}");
+}

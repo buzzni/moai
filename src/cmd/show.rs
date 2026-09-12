@@ -275,9 +275,14 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
         // **베끼지 않는다.** 차례는 `view::members` 가 `nav` 에서 받아 정하므로
         // 여기서 필요한 것은 "누가 이 묶음의 멤버인가" 하나뿐이다. 한때 여기서
         // `sort_for_display` 로 다시 세웠는데, 그 차례는 쓰이는 데가 없었다.
+        // **`--json` 이 세는 것과 같은 것을 그린다.** 담아 둔 생각은 멤버가
+        // 아니다 — 머리글(`rollup` 은 `is_work` 로 센다)도 기계 출력도 그것을
+        // 안 세는데 사람 화면만 그리면, `멤버 0/1` 밑에 줄 둘이 서서 어느
+        // 숫자를 믿어야 할지 알 수 없다.
         let mine: std::collections::BTreeSet<&str> = all
             .iter()
             .filter(|i| group.get(i.id.as_str()) == Some(&issue.id.as_str()) && i.id != issue.id)
+            .filter(|i| !report::is_idea(i))
             .map(|i| i.id.as_str())
             .collect();
         let roll = report::rollup_of(issue.kind, all, &repo.config)

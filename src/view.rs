@@ -794,8 +794,19 @@ pub fn detail(
         out.push(format!("  에픽   {}  {title}", paint(style::ID, e)));
     }
     for c in children {
+        // **자식 줄도 제 종류와 미룸을 말한다.** 이 목록은 걸러지지 않으므로
+        // 담아 둔 생각과 미뤄 둔 것이 그대로 서는데, 표가 없으면 `ready` 도
+        // 보드도 안 세는 줄이 일과 똑같이 보인다 — 낱말은 머리글이 쓰는 그
+        // 자리(`deferred_for`)에서 같이 받는다.
+        let mut tail = String::new();
+        if c.kind != Kind::Issue {
+            tail.push_str(&format!(" · {}", paint(style::DIM, c.kind.as_str())));
+        }
+        if let Some(d) = deferred_for(c, now) {
+            tail.push_str(&format!(" · {}", paint(style::WARN, &d)));
+        }
         out.push(format!(
-            "  자식   {}  {}  ({} {})",
+            "  자식   {}  {}  ({} {}){tail}",
             paint(style::ID, &c.id),
             clip(&c.title, TITLE_CAP),
             paint(style::status_style(c.status.as_str()), style::glyph(c.status.as_str())),
