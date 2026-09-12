@@ -2694,3 +2694,20 @@ fn a_child_that_is_not_in_the_plan_says_so() {
     assert!(out.contains("미룸"), "미뤄 둔 자식이 일과 똑같이 보인다 — {out}");
     assert!(out.contains("idea"), "담아 둔 자식이 일과 똑같이 보인다 — {out}");
 }
+/// **연습은 진짜와 같은 값을 말한다.** 마크다운은 `# [p1] 제목` 을 받고
+/// `create_drafts` 는 그것을 에픽에도 그대로 쓰는데, 연습만 종류로 잘라 내면
+/// 미리 검사하는 쪽이 안 적힌 값을 기본값으로 읽는다.
+#[test]
+fn a_rehearsal_reports_the_priority_it_will_write() {
+    let s = init("dryrunprio");
+    let plan = "# [p1] 급한 에픽\n- [p0] 첫 일\n";
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--dry-run", "--json"], plan);
+    let seen = String::from_utf8(out.stdout).unwrap();
+    assert!(seen.contains(r#""kind":"epic","title":"급한 에픽","priority":1"#), "{seen}");
+
+    let real = from_stdin(s.path(), &["add", "--from", "-"], plan);
+    assert!(real.status.success(), "{}", String::from_utf8_lossy(&real.stderr));
+    let epic = issues(s.path()).lines().find(|l| l.contains("급한 에픽")).unwrap().to_string();
+    assert!(epic.contains(r#""priority":1"#), "연습이 진짜보다 적게 말했다 — {epic}");
+}
+

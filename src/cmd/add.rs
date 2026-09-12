@@ -63,8 +63,12 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         // **마크다운이 못 내는 종류는 전부 막는다.** 하나만 막으면 나머지가
         // 조용히 딴것을 만든다 — `moai milestone add --from -` 이 실제로
         // 마일스톤 없이 에픽과 이슈를 냈다. 거절 목록이 아니라 "이 형식이
-        // 내는 것"(`draft::parse` → 에픽·이슈)의 뒷면이다.
+        // 내는 것"(`draft::parse` → 에픽·이슈)의 뒷면이고, **그래서 통과
+        // 목록으로 적는다**: `_ => {}` 로 닫으면 종류가 하나 더 붙는 날 그것이
+        // 또 조용히 지나가지만, 남김없이 적으면 그날 컴파일러가 이 자리를
+        // 이름으로 댄다.
         match kind_override.or(args.kind) {
+            None | Some(Kind::Issue) | Some(Kind::Epic) => {}
             Some(Kind::Idea) => {
                 return Err(Fail::coded(
                     "생각은 제목 하나로 담는다 — `moai idea add \"반짝 떠오른 것\"`\n      \
@@ -81,7 +85,6 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
                     super::code::BAD_INPUT,
                 ));
             }
-            _ => {}
         }
         return bulk(ctx, &repo, from, args.dry_run, args.assignee.clone());
     }
@@ -337,8 +340,15 @@ pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>) -> R<Vec<String>
             .map(|d| DraftOut {
                 kind: d.kind.as_str(),
                 title: &d.title,
-                priority: (d.kind == Kind::Issue)
-                    .then(|| d.priority.unwrap_or(model::DEFAULT_PRIORITY)),
+                // **적어 온 것은 그대로 낸다.** 마크다운은 `# [p1] 제목` 도
+                // 받고 `create_drafts` 는 그것을 에픽에도 그대로 쓰므로,
+                // 종류로 잘라 내면 연습이 진짜보다 적게 말한다 — 연습을 진짜와
+                // 견주는 쪽이 안 적힌 값을 기본값으로 읽는다.
+                // 안 적혔을 때만 종류를 본다: 우선순위가 없는 종류에 기본값을
+                // 씌우면 에픽이 `p2` 인 줄 안다.
+                priority: d
+                    .priority
+                    .or_else(|| (d.kind == Kind::Issue).then_some(model::DEFAULT_PRIORITY)),
                 tags: &d.tags,
                 epic: d.epic,
             })
