@@ -3188,6 +3188,14 @@ fn edits_are_judged_through_the_contract() {
         let out = edit_call(&s, &other, &free);
         assert!(out.trim().is_empty(), "막혔다 — {free}\n{out}");
     }
+
+    // 껍데기로 쓰는 것도 같은 규칙이다. 상대 경로는 stdin 의 `cwd` 로 푼다.
+    let why = refusal(&shell_call(&s, "sed -i 's/a/b/' src/store.rs"));
+    assert!(why.contains("src/store.rs"), "무엇을 고치려 했는지가 없다 — {why}");
+    for free in ["grep -rn x src > /dev/null", "cargo test 2>&1 | tail -5"] {
+        let out = shell_call(&s, free);
+        assert!(out.trim().is_empty(), "막혔다 — {free}\n{out}");
+    }
 }
 
 /// 규칙 3 — 리뷰도 이슈다. 그 리뷰는 **지금 보는 것에 매여야 한다.**

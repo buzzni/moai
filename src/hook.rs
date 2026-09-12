@@ -212,15 +212,25 @@ fn calls_review(cmd: &str) -> bool {
 ///   `moai add "제목" -e <에픽>` 이라는 **글자**가 있다고 그것을 생성으로 읽으면,
 ///   리뷰 글을 이슈에 적는 일이 막힌다. 실제로 막혔다.
 fn segments(cmd: &str) -> Vec<Vec<String>> {
-    let mut all = Vec::new();
-    for line in strip_heredocs(cmd) {
-        for seg in split_line(&line) {
-            if !seg.is_empty() {
-                all.push(seg);
-            }
-        }
-    }
-    all
+    parse(cmd).into_iter().map(|s| s.words).filter(|w| !w.is_empty()).collect()
+}
+
+/// 명령줄의 한 토막 — 낱말들과, 리다이렉션이 쓰는 자리.
+#[derive(Debug, Default)]
+struct Seg {
+    words: Vec<String>,
+    /// `>`·`>>` 의 과녁. **낱말에서는 빠진다** — 빠지지 않으면
+    /// `moai mv t-r done > /dev/null` 의 갈 칸이 `/dev/null` 로 읽혀, 리뷰를
+    /// 닫는 규칙이 리다이렉션 하나로 샌다.
+    writes: Vec<String>,
+}
+
+fn parse(cmd: &str) -> Vec<Seg> {
+    strip_heredocs(cmd)
+        .iter()
+        .flat_map(|line| split_line(line))
+        .filter(|s| !s.words.is_empty() || !s.writes.is_empty())
+        .collect()
 }
 
 /// heredoc 의 속을 걷어낸다. `<<MD` · `<<'MD'` · `<<-MD` 를 알아본다.
@@ -254,17 +264,28 @@ fn heredoc_tag(line: &str) -> Option<String> {
 }
 
 /// 한 줄을 `;`·`&&`·`|` 로 가르고 토큰으로 쪼갠다.
-fn split_line(line: &str) -> Vec<Vec<String>> {
+///
+/// **리다이렉션은 따옴표 밖에서만 읽는다.** 토큰이 된 뒤에는 `">"` 와 `>` 가
+/// 같은 글자라, 그때 가서 찾으면 `moai note t-1 "a > src/x.rs"` 가 쓰기로
+/// 읽혀 메모가 막힌다.
+fn split_line(line: &str) -> Vec<Seg> {
     let mut all = Vec::new();
-    let mut seg: Vec<String> = Vec::new();
+    let mut seg = Seg::default();
     let mut cur = String::new();
     let mut quote: Option<char> = None;
     let mut had = false;
-    let mut chars = line.chars();
+    // 다음 낱말이 리다이렉션의 과녁이다.
+    let mut aimed = false;
+    let mut chars = line.chars().peekable();
 
-    let flush_word = |seg: &mut Vec<String>, cur: &mut String, had: &mut bool| {
+    let flush_word = |seg: &mut Seg, cur: &mut String, had: &mut bool, aimed: &mut bool| {
         if *had || !cur.is_empty() {
-            seg.push(std::mem::take(cur));
+            let word = std::mem::take(cur);
+            if std::mem::take(aimed) {
+                seg.writes.push(word);
+            } else {
+                seg.words.push(word);
+            }
             *had = false;
         }
     };
@@ -282,17 +303,47 @@ fn split_line(line: &str) -> Vec<Vec<String>> {
                 quote = Some(c);
                 had = true;
             }
+            // 따옴표 밖의 `\>` 는 글자다.
+            (None, '\\') => {
+                if let Some(n) = chars.next() {
+                    cur.push(n);
+                }
+            }
+            (None, '>') => {
+                // `2>` 의 `2` 는 낱말이 아니라 fd 다.
+                if !had && !cur.is_empty() && cur.chars().all(|d| d.is_ascii_digit()) {
+                    cur.clear();
+                }
+                flush_word(&mut seg, &mut cur, &mut had, &mut aimed);
+                if chars.peek() == Some(&'>') {
+                    chars.next();
+                }
+                match chars.peek() {
+                    // `>&2`·`2>&1` 은 fd 를 잇는다. 파일이 아니다.
+                    Some('&') => {
+                        chars.next();
+                        while chars.next_if(|d| d.is_ascii_digit() || *d == '-').is_some() {}
+                    }
+                    // `>|` 는 noclobber 를 넘는 쓰기다. 갈래로 읽으면 안 된다.
+                    Some('|') => {
+                        chars.next();
+                        aimed = true;
+                    }
+                    _ => aimed = true,
+                }
+            }
             // **토막을 먼저 가른다.** 공백 갈래가 먼저 오면 줄바꿈이 낱말만
             // 끊고 토막은 안 끊는다 — 그 한 줄 차이로 규칙이 통째로 샜다.
             (None, ';' | '|' | '&') => {
-                flush_word(&mut seg, &mut cur, &mut had);
+                flush_word(&mut seg, &mut cur, &mut had, &mut aimed);
+                aimed = false;
                 all.push(std::mem::take(&mut seg));
             }
-            (None, c) if c.is_whitespace() => flush_word(&mut seg, &mut cur, &mut had),
+            (None, c) if c.is_whitespace() => flush_word(&mut seg, &mut cur, &mut had, &mut aimed),
             (None, _) => cur.push(c),
         }
     }
-    flush_word(&mut seg, &mut cur, &mut had);
+    flush_word(&mut seg, &mut cur, &mut had, &mut aimed);
     all.push(seg);
     all
 }
@@ -515,6 +566,144 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, root: &Path, target: &str) -> 
          계획에 없던 것이면 `moai add \"제목\"` 으로 세우고 그것을 집는다.",
         rel_to(target, root)
     ))
+}
+
+/// 규칙 2 의 껍데기 쪽 — **`Bash` 로 쓰는 파일도 센다.**
+///
+/// `Edit`·`Write` 만 보던 판은 `sed -i`·`>`·heredoc 을 그대로 보냈다. 규칙이
+/// 못 보는 길이 따로 있으면 규칙은 절반만 서 있다.
+///
+/// 상대 경로는 **껍데기의 자리(`cwd`)** 로 푼다. 저장소 뿌리로 풀면 하위
+/// 디렉터리에서 친 `echo > x` 가 엉뚱한 파일로 읽힌다.
+pub fn guard_writes(issues: &[Issue], cfg: &Config, root: &Path, cwd: &Path, cmd: &str) -> Decision {
+    if !report::wip(issues, cfg).is_empty() {
+        return Decision::Pass;
+    }
+    for path in shell_writes(cmd) {
+        let at = cwd.join(&path);
+        if let deny @ Decision::Deny(_) = guard_edit(issues, cfg, root, &at.to_string_lossy()) {
+            return deny;
+        }
+    }
+    Decision::Pass
+}
+
+/// 이 명령이 **쓰는 파일들.** 흔한 모양만 본다 — `>`·`>>` 리다이렉션,
+/// `sed -i`, `tee`.
+///
+/// **완벽을 노리지 않는다.** 껍데기가 파일을 쓰는 길은 `cp`·`mv`·`install`·
+/// `truncate`·`python -c "open(...)"` 까지 끝이 없고, 그 목록은 반드시 샌다.
+/// 그 대신 **잘못 막지 않는다** — 못 잡는 것보다 엉뚱한 것을 막는 쪽이 훨씬
+/// 나쁘다. 규칙 1 이 명령줄 글자를 훑다가 `moai note` 를 막던 때가 그 증거다.
+/// 그래서 어디인지 모르는 과녁은 버린다: 변수·틸드·글롭·프로세스 치환이 든
+/// 것, 그리고 `cd` 뒤의 상대 경로.
+fn shell_writes(cmd: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut moved = false;
+    for seg in parse(cmd) {
+        let words = after_assignments(&seg.words);
+        let head = words
+            .first()
+            .map(|w| w.trim_start_matches(['(', '{']))
+            .map(|w| w.rsplit('/').next().unwrap_or(w));
+        let mut found = seg.writes;
+        // `[[ a > b ]]`·`(( a > b ))` 의 `>` 는 비교다.
+        if seg.words.iter().any(|w| w == "[[" || w.starts_with("((")) {
+            found.clear();
+        }
+        match head {
+            Some("sed") => found.extend(sed_in_place(&words[1..])),
+            Some("tee") => found.extend(words[1..].iter().filter(|w| !w.starts_with('-')).cloned()),
+            _ => {}
+        }
+        for path in found {
+            let unknowable = path.is_empty()
+                || path == "-"
+                || path.starts_with('~')
+                || path.contains(['$', '`', '*', '?', '[', '(', ')', '{', '}']);
+            if unknowable || (moved && !Path::new(&path).is_absolute()) {
+                continue;
+            }
+            out.push(path);
+        }
+        if matches!(head, Some("cd" | "pushd" | "popd")) {
+            moved = true;
+        }
+    }
+    out
+}
+
+/// 앞에 붙은 환경변수 대입(`FOO=1 cmd`)을 지나친다.
+fn after_assignments(words: &[String]) -> &[String] {
+    let skip = words.iter().take_while(|w| w.contains('=') && !w.starts_with('-')).count();
+    &words[skip..]
+}
+
+/// `sed` 의 인자에서 **제자리로 고치는 파일들.** `-i` 가 없으면 아무것도 안
+/// 쓴다 — stdout 으로 낼 뿐이다.
+///
+/// 스크립트는 `-e`·`-f` 로 따로 받지 않았으면 첫 자리 인자다. 그것을 파일로
+/// 세면 `sed -i 's/a/b/' x` 가 `s/a/b/` 라는 파일을 쓰는 것으로 읽힌다.
+fn sed_in_place(args: &[String]) -> Vec<String> {
+    let mut in_place = false;
+    let mut script_given = false;
+    let mut rest = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--" {
+            rest.extend(it.by_ref().cloned());
+            break;
+        }
+        if let Some(long) = a.strip_prefix("--") {
+            let (name, inline) = match long.split_once('=') {
+                Some((n, _)) => (n, true),
+                None => (long, false),
+            };
+            match name {
+                "in-place" => in_place = true,
+                "expression" | "file" => {
+                    script_given = true;
+                    if !inline {
+                        it.next();
+                    }
+                }
+                "line-length" if !inline => {
+                    it.next();
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if let Some(short) = a.strip_prefix('-').filter(|s| !s.is_empty()) {
+            for (n, ch) in short.char_indices() {
+                let last = n + ch.len_utf8() == short.len();
+                match ch {
+                    // 뒤에 붙은 것은 백업 접미사다 (`-i.bak`).
+                    'i' => {
+                        in_place = true;
+                        break;
+                    }
+                    'e' | 'f' | 'l' => {
+                        script_given |= ch != 'l';
+                        if last {
+                            it.next();
+                        }
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            continue;
+        }
+        rest.push(a.clone());
+    }
+    if !in_place {
+        return Vec::new();
+    }
+    if !script_given && !rest.is_empty() {
+        rest.remove(0);
+    }
+    rest
 }
 
 /// 이 리뷰 줄에 **무엇을 왜 보는지**가 적혀 있는가.
@@ -952,6 +1141,103 @@ mod tests {
             "/other/repo/src/main.rs",
         ] {
             assert_eq!(guard_edit(&all, &cfg(), root, free), Decision::Pass, "{free}");
+        }
+    }
+
+    /// **껍데기로 쓰는 파일도 센다.** `Edit`·`Write` 만 보던 판은 `sed -i` 와
+    /// 리다이렉션을 그대로 보냈다 — 규칙이 못 보는 길이 따로 있으면 규칙은
+    /// 절반만 서 있다.
+    #[test]
+    fn writing_through_the_shell_is_counted_too() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        for cmd in [
+            "echo x > src/store.rs",
+            "echo x >> src/store.rs",
+            "printf x>src/store.rs",
+            "cargo run 2> src/log.rs",
+            "cat > src/store.rs <<'MD'\n본문\nMD",
+            "sed -i 's/a/b/' src/store.rs",
+            "sed -i.bak -e 's/a/b/' README.md src/store.rs",
+            "sed --in-place=.bak -E 's/a/b/' src/store.rs",
+            "sed -ni 's/a/b/p' src/store.rs",
+            "echo x | tee src/store.rs",
+            "echo x | tee -a /repo/CLAUDE.md",
+            "cd /repo && echo x > /repo/src/store.rs",
+            "echo x >| src/store.rs",
+            "FOO=1 sed -i s/a/b/ src/store.rs",
+        ] {
+            assert!(
+                matches!(guard_writes(&all, &cfg(), root, root, cmd), Decision::Deny(_)),
+                "샜다 — {cmd}"
+            );
+        }
+    }
+
+    /// **잘못 막지 않는다.** 못 잡는 것보다 엉뚱한 것을 막는 쪽이 훨씬 나쁘다 —
+    /// 규칙 1 이 명령줄 글자를 훑다가 `moai note` 를 막던 때가 그 증거다.
+    #[test]
+    fn the_shell_rule_never_blocks_what_writes_nothing_here() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        for cmd in [
+            "grep -rn x src > /dev/null",
+            "cargo test 2>&1 | tail -20",
+            "cargo build >&2",
+            "echo x > /tmp/scratch/memo.md",
+            "echo x > target/log.txt",
+            "moai note t-1 \"a > src/store.rs 를 짚었다\"",
+            "moai note t-1 'sed -i s/a/b/ src/store.rs'",
+            "echo a \\> src/store.rs",
+            "sed 's/a/b/' src/store.rs",
+            "sed -n '1,20p' src/store.rs | tee /tmp/out",
+            "echo x > \"$TMPDIR/x\"",
+            "echo x > ~/notes.md",
+            "cd /elsewhere && echo x > notes.md",
+            "[[ a > b ]] && echo yes",
+            "(( n > 3 )) && echo yes",
+            "diff <(sort a) <(sort b)",
+            "echo x | tee >(cat)",
+            "moai add --from - <<'MD'\n# 에픽\n- 줄 > src/store.rs\nMD",
+        ] {
+            assert_eq!(guard_writes(&all, &cfg(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
+        }
+    }
+
+    /// 상대 경로는 **껍데기의 자리**로 푼다. 저장소 뿌리로 풀면 하위 디렉터리에서
+    /// 친 쓰기가 엉뚱한 파일로 읽힌다.
+    #[test]
+    fn a_shell_write_lands_where_the_shell_stands() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let why = denied(&guard_writes(&all, &cfg(), root, Path::new("/repo/docs"), "echo > a.md"))
+            .to_string();
+        assert!(why.contains("docs/a.md"), "{why}");
+        // 저장소 밖에 서 있으면 상대 경로도 밖이다.
+        assert_eq!(guard_writes(&all, &cfg(), root, Path::new("/tmp"), "echo > a.md"), Decision::Pass);
+        // `.moai` 안에 서서 쓰는 것은 트래커 자신이다.
+        assert_eq!(
+            guard_writes(&all, &cfg(), root, Path::new("/repo/.moai"), "echo > x"),
+            Decision::Pass
+        );
+    }
+
+    /// 하나를 집으면 껍데기 쓰기도 그대로 지나간다.
+    #[test]
+    fn holding_one_opens_the_shell_too() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        assert_eq!(guard_writes(&all, &cfg(), root, root, "sed -i s/a/b/ src/store.rs"), Decision::Pass);
+    }
+
+    /// **리다이렉션은 낱말이 아니다.** 낱말로 두던 판은 `moai mv t-r done >
+    /// /dev/null` 의 갈 칸을 `/dev/null` 로 읽어, 리뷰를 닫는 규칙이 출력을
+    /// 버리는 것 하나로 샜다.
+    #[test]
+    fn a_redirection_does_not_hide_the_column() {
+        let all = vec![issue("t-1", "in_progress"), review("t-r", "in_progress", None)];
+        for cmd in ["moai mv t-r done > /dev/null", "moai mv t-r done 2>/dev/null", "moai mv t-r done >/dev/null 2>&1"] {
+            assert!(matches!(guard_close(&all, &cfg(), cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
     }
 

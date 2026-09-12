@@ -431,6 +431,19 @@ mod tests {
             checked += 1;
         }
         assert!(checked > 15, "가르치는 명령을 {checked}개밖에 못 찾았다");
+
+        // **아무것도 안 집은 채로도 쓰기 규칙에 안 걸린다.** 가르치는 명령은
+        // 트래커를 만질 뿐 저장소 파일을 쓰지 않는다 — `< <리뷰 원문>` 같은
+        // 자리표시자의 `>` 가 리다이렉션으로 읽히면 여기서 붉어진다.
+        let idle = vec![epic_row()];
+        let root = Path::new("/repo");
+        for cmd in taught() {
+            assert_eq!(
+                crate::hook::guard_writes(&idle, &cfg, root, root, &cmd),
+                Decision::Pass,
+                "가르치는 명령이 쓰기 규칙에 막힌다 — {cmd}"
+            );
+        }
     }
 
     /// **가르친 대로 세운 리뷰로 곧장 리뷰를 부를 수 있어야 한다.**
