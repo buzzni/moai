@@ -2439,3 +2439,69 @@ fn moving_a_deferred_row_says_it_is_still_out_of_the_plan() {
     assert!(text.contains("defer --undo"), "보드에서 빠져 있다는 말을 안 한다 — {text}");
     assert!(!ok(s.path(), &["ready"]).contains(&id));
 }
+
+// ── 리뷰가 잡은 것들 ────────────────────────────────────────────────
+//
+// 아래는 전부 **조용히 되돌아갈 자리**다. 어느 것도 컴파일러가 못 잡고,
+// 하나같이 사람이 도구를 믿는 근거를 갉아먹는다.
+
+/// **연습이라 적힌 명령이 쓰면 안 된다.** `--from` 없이 부른 `--dry-run` 은
+/// 한 줄을 찍은 다음 그것을 실제로 만들었다 — 막는 줄 알고 부른 명령이 쓰는
+/// 것보다 나쁜 것은 없다. `clap` 의 `requires` 로는 못 막는다: `--from` 이
+/// 제목과 conflicts 라, 제목이 있으면 못 채울 요구로 보고 건너뛴다.
+#[test]
+fn a_rehearsal_without_a_plan_is_refused_not_written() {
+    let s = init("dryrunalone");
+    let out = moai(s.path(), &["add", "연습", "--dry-run"]);
+    assert!(!out.status.success(), "연습이라 해 놓고 받아들였다");
+    assert_eq!(issues(s.path()), "", "연습인데 썼다 — {}", issues(s.path()));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--from"),
+        "어디로 가야 하는지 안 말한다 — {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// **마크다운이 못 내는 종류는 전부 막는다.** `#` 은 에픽이고 `-` 는
+/// 이슈라서 마일스톤은 나올 수가 없는데, 한때 `moai milestone add --from -`
+/// 은 조용히 에픽과 이슈를 만들었다 — 시킨 것과 다른 것을 만드는 쪽이
+/// 거절보다 나쁘다.
+#[test]
+fn a_plan_refuses_a_kind_the_markdown_cannot_make() {
+    let s = init("stonefrom");
+    let out = from_stdin(s.path(), &["milestone", "add", "--from", "-"], "# 에픽\n- 일\n");
+    assert!(!out.status.success(), "마일스톤을 시켰는데 에픽을 만들었다");
+    assert_eq!(issues(s.path()), "", "거절해 놓고 썼다");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("milestone add"),
+        "어디로 가야 하는지 안 말한다 — {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// 못 읽는 줄 하나가 **성공한 쓰기를 실패로 보이게 하지 않는다.** `promote`
+/// 만 락 밖에서 읽고 부분 실패 깃발을 세웠다 — 그것을 실패로 읽은 쪽이 다시
+/// 부르면 같은 계획이 두 벌 생긴다.
+#[test]
+fn an_unreadable_line_does_not_fail_a_promote() {
+    let s = init("promotebroken");
+    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let path = s.path().join(".moai/issues.jsonl");
+    let mut text = issues(s.path());
+    text.push_str("{\"id\":\"argos-9999\",\"title\":\"몰라\",\"kind\":\"몰라\",\"status\":\"todo\"}\n");
+    std::fs::write(&path, text).unwrap();
+
+    let out = from_stdin(
+        s.path(),
+        &["idea", "promote", &id, "--from", "-"],
+        "# 새 에픽\n- [p1] 첫 일\n",
+    );
+    assert!(
+        out.status.success(),
+        "성공한 promote 가 실패로 끝났다 — 다시 부르면 계획이 두 벌이다\nstderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(issues(s.path()).contains("새 에픽"), "안 만들었다");
+    assert!(issues(s.path()).contains("몰라"), "모르는 줄을 잃었다");
+}
+

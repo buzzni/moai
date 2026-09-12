@@ -59,15 +59,44 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         // 보드에 선다. 조용히 그렇게 하느니 어디로 가야 하는지 말한다.
         // **두 철자를 한 자리에서 막는다.** `--type idea` 만 지나가면 그쪽이
         // 그대로 보드에 이슈를 만든다.
-        if kind_override.or(args.kind) == Some(Kind::Idea) {
-            return Err(Fail::coded(
-                "생각은 제목 하나로 담는다 — `moai idea add \"반짝 떠오른 것\"`\n      \
-                 마크다운으로 에픽과 이슈를 펼치는 것은 `moai idea promote <id> --from -` 다"
-                    .to_string(),
-                super::code::BAD_INPUT,
-            ));
+        //
+        // **마크다운이 못 내는 종류는 전부 막는다.** 하나만 막으면 나머지가
+        // 조용히 딴것을 만든다 — `moai milestone add --from -` 이 실제로
+        // 마일스톤 없이 에픽과 이슈를 냈다. 거절 목록이 아니라 "이 형식이
+        // 내는 것"(`draft::parse` → 에픽·이슈)의 뒷면이다.
+        match kind_override.or(args.kind) {
+            Some(Kind::Idea) => {
+                return Err(Fail::coded(
+                    "생각은 제목 하나로 담는다 — `moai idea add \"반짝 떠오른 것\"`\n      \
+                     마크다운으로 에픽과 이슈를 펼치는 것은 `moai idea promote <id> --from -` 다"
+                        .to_string(),
+                    super::code::BAD_INPUT,
+                ));
+            }
+            Some(Kind::Milestone) => {
+                return Err(Fail::coded(
+                    "마크다운은 에픽과 이슈만 낸다 — 마일스톤은 `moai milestone add \"v0.1\"` 로 만든다\n      \
+                     만든 뒤 `moai edit <에픽> --milestone <id>` 로 계획을 건다"
+                        .to_string(),
+                    super::code::BAD_INPUT,
+                ));
+            }
+            _ => {}
         }
         return bulk(ctx, &repo, from, args.dry_run, args.assignee.clone());
+    }
+    // **연습이라 적힌 명령이 쓰면 안 된다.** 여기 닿았다는 것은 `--from` 이
+    // 없다는 뜻이고, 하나짜리에는 연습 길이 없어 `--dry-run` 이 그대로 만들고
+    // 있었다 — 막는 줄 알고 부른 명령이 쓰는 것보다 나쁜 것은 없다.
+    // `clap` 에 맡길 수 없다: `requires = "from"` 은 제목이 있으면(=`from` 과
+    // conflicts) 못 채울 요구로 보고 조용히 건너뛴다.
+    if args.dry_run {
+        return Err(Fail::coded(
+            "`--dry-run` 은 `--from` 과 함께 쓴다 — 하나짜리는 연습할 것이 없다\n      \
+             잘못 만들었으면 `moai rm <id>` 다"
+                .to_string(),
+            super::code::BAD_INPUT,
+        ));
     }
     let Some(title) = args.title.clone().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
     else {
@@ -182,8 +211,9 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool, assignee: Option<Stri
 
     let at = model::now();
     let by = model::actor(ctx.user.as_deref())?;
+    let who = assignee_of(assignee.as_deref(), &by);
     let made: Vec<Issue> = repo.with_write(|issues, cfg, reserved| {
-        create_drafts(issues, cfg, reserved, &drafts, assignee.as_deref(), &by, &at)
+        create_drafts(issues, cfg, reserved, &drafts, &who, &by, &at)
     })?;
 
     if ctx.json {
@@ -201,12 +231,17 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool, assignee: Option<Stri
 ///
 /// `add --from` 과 `idea promote` 가 이 한 길을 같이 쓴다. 둘이 갈라지면
 /// 같은 마크다운이 어느 쪽으로 들어왔느냐에 따라 다른 이슈가 된다.
+///
+/// 담당은 **이미 갈라진 채로** 받는다 (`(이름, 메일)`). 부르는 쪽이 `-a` 를
+/// 풀든 남의 줄에서 물려받든, 여기 닿을 때는 파일에 쓸 모양이어야 한다 —
+/// 화면용 `"이름 (메일)"` 한 줄로 받으면 되가르는 데서 이름 없는 줄의 메일이
+/// 이름 칸으로 넘어간다.
 pub fn create_drafts(
     issues: &mut Vec<Issue>,
     cfg: &crate::config::Config,
     reserved: &std::collections::BTreeSet<String>,
     drafts: &[Draft],
-    assignee: Option<&str>,
+    who: &(Option<String>, Option<String>),
     by: &Actor,
     at: &str,
 ) -> R<(Vec<JournalEntry>, Vec<Issue>)> {
@@ -227,7 +262,7 @@ pub fn create_drafts(
         // 닫힌 이름을 `at` 으로 두면 시각을 담은 인자 `at` 을 가려, 같은
         // 줄에서 같은 이름이 두 가지를 뜻한다.
         issue.epic = d.epic.map(|nth| ids[nth].clone());
-        (issue.assignee, issue.assignee_email) = assignee_of(assignee, by);
+        (issue.assignee, issue.assignee_email) = who.clone();
         issue.normalize();
         issue.validate(cfg)?;
         entries.push(JournalEntry::create(&issue.id, &issue.title, at, by));

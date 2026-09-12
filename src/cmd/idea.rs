@@ -10,6 +10,15 @@ use crate::model::{self, Issue, JournalEntry, Status};
 use crate::store::Repo;
 use crate::style::{self, paint};
 
+/// 펼칠 수 없는 것을 펼치라 했을 때. **한 곳에서 만든다** — 연습과 진짜가
+/// 같은 것을 거절하는데 문장이 둘이면, 어느 쪽을 봤느냐로 말이 달라진다.
+fn not_an_idea(id: &str, i: &Issue) -> Fail {
+    Fail::coded(
+        format!("{id} 는 idea 가 아니라 {} 다 — 펼치면 까닭 없이 닫힌다", i.kind.as_str()),
+        super::code::BAD_TARGET,
+    )
+}
+
 /// idea 하나를 에픽 하나 + 이슈 여럿으로 펼치고, 그 idea 를 닫는다.
 ///
 /// 받는 마크다운은 `add --from` 과 **같은 형식**이다. 형식이 둘이 되면
@@ -28,30 +37,25 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     let src = crate::cmd::add::read_source(&args.from)?;
     let drafts = draft::parse(&src).map_err(|e| Fail::coded(e, super::code::BAD_INPUT))?;
 
-    // **연습도 진짜와 같은 것을 본다.** 연습이 승인의 자리인데 거기서
-    // 못 할 일을 하겠다고 말하면, 사람이 "좋다" 한 뒤에야 도구가 거절한다.
-    // 쓰지 않을 뿐이지 덜 보는 것이 아니다.
-    let load = repo.read()?;
-    super::report_load_errors(&repo.issues_path(), &load.errors);
-    let thought = load
-        .get(&args.id)
-        .ok_or_else(|| Fail::coded(format!("{} 를 못 찾았다", args.id), super::code::NOT_FOUND))?;
-    if !crate::report::is_idea(thought) {
-        return Err(Fail::coded(
-            format!(
-                "{} 는 idea 가 아니라 {} 다 — 펼치면 까닭 없이 닫힌다",
-                args.id,
-                thought.kind.as_str()
-            ),
-            super::code::BAD_TARGET,
-        ));
-    }
-
     // **연습은 저장소를 안 만진다.** AI 가 펼친 안을 사람이 한 번 보고
     // "좋다" 하는 자리라, 여기서 쓰면 그 "좋다" 가 뒤늦은 말이 된다.
+    //
+    // **읽는 것도 연습일 때뿐이다.** 진짜로 펼칠 때는 락 안에서 다시 읽고
+    // 다시 보므로 여기서 본 것은 어차피 안 믿는다 — 파일만 두 번 훑을 뿐이다.
+    // 게다가 `report_load_errors` 는 부분 실패 깃발을 세우므로, 쓰기 경로에
+    // 두면 못 읽는 줄 하나가 **성공한 promote 를 실패로 보이게** 한다. 그것을
+    // 실패로 읽은 쪽이 다시 부르면 같은 계획이 두 벌 생긴다.
     if args.dry_run {
-        // 거절은 위에서 이미 끝났다 — 못 펼칠 것을 펼치라 하면 모양이
-        // 무엇이든 거절이고, 여기 닿은 것은 정말 펼칠 수 있는 것뿐이다.
+        // **연습도 진짜와 같은 것을 본다.** 연습이 승인의 자리인데 거기서
+        // 못 할 일을 하겠다고 말하면, 사람이 "좋다" 한 뒤에야 도구가 거절한다.
+        let load = repo.read()?;
+        super::report_load_errors(&repo.issues_path(), &load.errors);
+        let thought = load.get(&args.id).ok_or_else(|| Fail::not_found(&args.id))?;
+        if !crate::report::is_idea(thought) {
+            return Err(not_an_idea(&args.id, thought));
+        }
+        // **거절은 `--json` 보다 먼저다.** 못 할 일을 하겠다고 말하면 모양이
+        // 무엇이든 거절이고, 뒤에 두면 연습이 조용히 "된다" 고 낸다.
         if ctx.json {
             return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id));
         }
@@ -72,41 +76,28 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 자리를 **한 번만** 찾는다. `create_drafts` 는 뒤에 밀어 넣기만 하니
         // 첨자가 밀리지 않고, 그래야 "방금 찾은 줄이 사라졌다" 같은 있지도
         // 않을 경우를 위한 `expect` 가 필요 없다.
-        let at_idea = issues
-            .iter()
-            .position(|i| i.id == args.id)
-            .ok_or_else(|| Fail::coded(format!("{} 를 못 찾았다", args.id), super::code::NOT_FOUND))?;
+        let at_idea =
+            issues.iter().position(|i| i.id == args.id).ok_or_else(|| Fail::not_found(&args.id))?;
         let thought = &issues[at_idea];
-        // 락 밖에서 이미 봤지만 다시 본다 — 그 사이에 누가 지우거나 바꿨을
-        // 수 있고, 쓰기가 믿을 것은 락 안에서 읽은 것뿐이다.
+        // 연습에서 이미 봤을 수도 있지만 다시 본다 — 그 사이에 누가 지우거나
+        // 바꿨을 수 있고, 쓰기가 믿을 것은 락 안에서 읽은 것뿐이다.
         if !crate::report::is_idea(thought) {
-            return Err(Fail::coded(
-                format!(
-                    "{} 는 idea 가 아니라 {} 다 — 펼치면 까닭 없이 닫힌다",
-                    args.id,
-                    thought.kind.as_str()
-                ),
-                super::code::BAD_TARGET,
-            ));
+            return Err(not_an_idea(&args.id, thought));
         }
         let title = thought.title.clone();
         let was = thought.status.clone();
-        // 담아 둔 생각의 담당을 물려준다. 펼친 계획의 임자가 없으면 `ready` 가
-        // 집으라고 내면서 누가 집는지는 말하지 않는다.
-        // **`-a none` 은 뜻이 있는 값이다.** 없는 것으로 접으면 `add` 가
-        // "안 적었다" 로 읽어 펼치는 사람에게 전부 떠넘긴다 — 연습 삼아 담아
-        // 둔 것이 남의 일이 된다. 합치는 것은 `model::label` 한 곳이다.
-        let heir = match &thought.assignee {
-            Some(name) => crate::model::label(
-                name,
-                thought.assignee_email.as_deref(),
-                crate::config::Naming::Full,
-            ),
-            None => "none".to_string(),
-        };
+        // 담아 둔 생각의 담당을 **갈라진 채로** 물려준다. 펼친 계획의 임자가
+        // 없으면 `ready` 가 집으라고 내면서 누가 집는지는 말하지 않는다.
+        //
+        // **`model::label` 로 합쳤다가 다시 가르지 않는다.** 그쪽은 화면에
+        // 쓰는 말이라 되돌릴 수 없다 — 이름이 빈 줄(손으로 푼 머지가 남기는
+        // 모양)은 `"메일"` 한 토막이 되고, 되가르는 쪽은 괄호가 없으니 그
+        // 메일을 **이름 칸**에 넣고 메일을 버린다. 파일에는 갈라서, 화면에는
+        // 합쳐서 — 여기는 파일 쪽이다.
+        let heir = (thought.assignee.clone(), thought.assignee_email.clone());
 
         let (mut entries, made) =
-            crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, Some(&heir), &by, &at)?;
+            crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, &heir, &by, &at)?;
 
         // **어느 쪽에서 봐도 이어진다.** 펼친 계획에서 "어디서 나왔나" 를
         // 물을 수도, 담아 둔 생각에서 "무엇이 됐나" 를 물을 수도 있다.

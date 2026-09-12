@@ -308,7 +308,15 @@ pub struct AddArgs {
     #[arg(long, value_name = "파일|-", conflicts_with_all = ["title", "epic", "tag", "priority", "parent"])]
     pub from: Option<String>,
 
-    /// 만들지 않고 무엇이 만들어질지만 낸다
+    /// 만들지 않고 무엇이 만들어질지만 낸다 (`--from` 과 함께)
+    ///
+    /// **`--from` 이 있어야 뜻이 있다.** 한때 없이도 받았고, 그때 `moai add
+    /// "제목" --dry-run` 은 연습이라고 적힌 줄을 찍은 다음 그것을 실제로
+    /// 만들었다 — 막는 줄 알고 부른 명령이 쓰는 것보다 나쁜 것은 없다.
+    ///
+    /// 거절은 `clap` 이 아니라 `add::run` 이 한다. `requires = "from"` 은
+    /// 제목이 없을 때만 걸린다 — `from` 이 제목과 `conflicts` 라서, 제목이
+    /// 있으면 못 채울 요구로 보고 조용히 건너뛴다. **바로 그 자리가 구멍이다.**
     #[arg(long)]
     pub dry_run: bool,
 
