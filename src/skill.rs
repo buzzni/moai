@@ -338,13 +338,19 @@ pub const REFERENCE: &str = r#"# 전체 명령
 
     ~/.claude/projects/<프로젝트>/<세션>/subagents/agent-<task-id>.jsonl
 
-마지막 줄의 `message.content[0].text` 가 리뷰 전문이다.
+리뷰 전문은 **마지막 `text` 블록**이다.
 
-    tail -1 <그 파일> \
-      | python3 -c "import json,sys;print(json.loads(sys.stdin.read())['message']['content'][0]['text'])" \
-      | moai note <리뷰 id> -b -
+    python3 -c "
+    import json,sys
+    t=[c['text'] for l in open(sys.argv[1])
+       for c in json.loads(l).get('message',{}).get('content') or []
+       if isinstance(c, dict) and c.get('type') == 'text']
+    print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
 
-`tasks/<task-id>.output` 이 그 파일로 가는 심볼릭 링크라 그쪽을 써도 된다.
+**마지막 줄을 그냥 집지 않는다.** 한 턴의 블록이 줄마다 나뉘어 적히고 생각·
+도구 호출도 섞여, 마지막 줄이 글이 아닐 때가 있다. 그러면 빈 글이 넘어가고
+`moai note` 가 "메모가 비었다" 로 멈춘다 — 시끄럽게 멈추니 잃지는 않지만,
+한 번에 되는 편이 낫다.
 
 **요약만 적고 원문을 버리지 않는다.** 요약은 이쪽의 판단이고 원문은 리뷰어가
 한 말이다. 판단은 다시 할 수 있지만 버린 원문은 못 되돌린다.
@@ -379,60 +385,95 @@ mod tests {
             .collect()
     }
 
+    /// 초점이 있을 때 **막히는 것이 옳은** 명령들.
+    ///
+    /// 새 단위를 세우는 자리라 규칙 1 이 잡는 것이 뜻대로다. 목록으로 두는
+    /// 까닭은 본문이 바뀔 때 **왜 막히는지 한 번 더 생각하게 하기 위해서**다 —
+    /// 시험이 규칙을 다시 구현하면 규칙이 틀렸을 때 시험도 같이 틀린다.
+    ///
+    /// 목록은 **정확히** 적는다. `moai add "제목" -p 1 -t bug -e <에픽>` 처럼
+    /// 앵커가 붙은 줄까지 접두로 싸잡으면, 지나가는 것이 맞는 명령을 시험이
+    /// "막혀야 한다" 고 우긴다 — 처음 적을 때 실제로 그랬다.
+    const DENIED_WHILE_HELD: &[&str] = &["moai epic add", "moai milestone add"];
+
     /// **심는 글이 가르치는 명령은 규칙에 막히면 안 된다.**
     ///
     /// 이 글은 에이전트가 **가장 먼저** 읽는 것이라, 규칙과 어긋나면 거절문을
     /// 보기도 전에 틀린 길로 간다. 실제로 `-b` 없는 `add` 와 `-m` 없는 `done`
     /// 을 가르치고 있었고, 그것을 잡은 것은 시험이 아니라 리뷰였다.
     ///
-    /// 두 상황으로 나눠 본다.
-    ///
-    /// - **집은 것이 없으면 하나도 막히면 안 된다.** 여기서 막히는 명령은
-    ///   무조건 버그다 — 규칙이 뜻을 두는 상황이 아예 아니다.
-    /// - **집은 것이 있으면 리뷰 절차가 막히면 안 된다.** 리뷰는 일하는
-    ///   도중에 부르는 것이라 초점이 있는 것이 보통이고, 리뷰가 잡은 버그도
-    ///   그 자리였다. 반면 `moai epic add` 처럼 새 단위를 세우는 명령은 그때
-    ///   막히는 것이 **규칙이 하려는 일**이다.
+    /// **초점이 있는 상태로만 본다.** 앞선 판은 아무것도 안 집은 상태도 함께
+    /// 봤는데, 그 상태에서는 `guard_create` 와 `guard_close` 가 명령을 읽기도
+    /// 전에 통과한다 — 어떤 글자를 넣어도 초록이라 아무것도 지키지 못했다.
+    /// 리뷰어가 나쁜 명령을 일부러 심어도 시험은 웃고 있었다.
     #[test]
     fn what_the_skill_teaches_actually_passes() {
         use crate::hook::{guard_close, guard_create, Decision};
 
         let cfg = Config::parse("prefix = \"t\"\n").unwrap();
-        let idle = vec![epic_row(), review_row("todo")];
         let held = vec![epic_row(), held_row(), review_row("in_progress")];
 
         let mut checked = 0;
         for cmd in taught() {
-            assert_eq!(
-                guard_create(&idle, &cfg, &cmd),
-                Decision::Pass,
-                "집은 것이 없는데 규칙 1 에 막힌다 — {cmd}"
-            );
-            assert_eq!(
-                guard_close(&idle, &cfg, &cmd),
-                Decision::Pass,
-                "집은 것이 없는데 닫기 규칙에 막힌다 — {cmd}"
-            );
+            let should_deny = DENIED_WHILE_HELD.iter().any(|d| cmd.starts_with(d));
+            let got = match guard_create(&held, &cfg, &cmd) {
+                Decision::Pass => guard_close(&held, &cfg, &cmd),
+                deny => deny,
+            };
+            match (&got, should_deny) {
+                (Decision::Pass, false) => {}
+                (Decision::Deny(_), true) => {}
+                (Decision::Pass, true) => {
+                    panic!("막혀야 하는데 지나간다 — {cmd}")
+                }
+                (got, _) => panic!("가르치는 명령이 막힌다 — {cmd}\n{got:?}"),
+            }
             checked += 1;
         }
         assert!(checked > 15, "가르치는 명령을 {checked}개밖에 못 찾았다");
+    }
 
-        // 리뷰 절차는 일하는 도중에 쓰는 것이라 초점이 있어도 지나가야 한다.
-        for cmd in taught().into_iter().filter(|c| c.contains("review") || c.contains("t-r")) {
-            assert_eq!(
-                guard_create(&held, &cfg, &cmd),
-                Decision::Pass,
-                "리뷰 절차가 규칙 1 에 막힌다 — {cmd}"
-            );
-            assert_eq!(
-                guard_close(&held, &cfg, &cmd),
-                Decision::Pass,
-                "리뷰 절차가 닫기 규칙에 막힌다 — {cmd}"
-            );
-        }
+    /// **가르친 대로 세운 리뷰로 곧장 리뷰를 부를 수 있어야 한다.**
+    ///
+    /// 관점(`-b`)을 요구하는 것은 `guard_review` 인데 위 시험은 그것을 부르지
+    /// 않는다. 그래서 가르치는 줄에서 `-b` 를 지워도 초록이었다 — 리뷰어가
+    /// 실제로 지워 보고 알아냈다. 여기서 그 다리를 놓는다.
+    #[test]
+    fn a_review_made_as_taught_can_be_used_at_once() {
+        use crate::hook::{guard_review, Decision};
+
+        let cfg = Config::parse("prefix = \"t\"\n").unwrap();
+        let made = taught()
+            .into_iter()
+            .find(|c| c.starts_with("moai add") && c.contains("-t review"))
+            .expect("리뷰를 세우는 명령을 안 가르친다");
+
+        // 그 명령이 만들 줄을 세운다 — 본문은 `-b` 가 있을 때만 붙는다.
+        let mut review = review_row("in_progress");
+        review.body = angle_of(&made);
+        let all = vec![epic_row(), held_row(), review];
+
+        assert_eq!(
+            guard_review(&all, &cfg),
+            Decision::Pass,
+            "가르친 대로 세운 리뷰가 규칙 3 에 막힌다 — {made}"
+        );
+    }
+
+    /// `-b "<글>"` 이 있으면 그 글. 없으면 `None` — 본문 없는 줄이 선다.
+    fn angle_of(cmd: &str) -> Option<String> {
+        let at = cmd.find("-b ")?;
+        let rest = cmd[at + 3..].trim_start_matches('"');
+        let end = rest.find('"').unwrap_or(rest.len());
+        let body = rest[..end].trim();
+        (!body.is_empty()).then(|| body.to_string())
     }
 
     /// 심는 글이 실제로 가르치는 명령들. 자리표시자는 실제 값으로 바꾼다.
+    ///
+    /// **글자로 고르지 않는다.** 앞서 리뷰 절차를 `contains("review")` 로
+    /// 골랐는데, 그 그물은 `moai show -s todo,review` 를 끌어오고 리뷰
+    /// 토막의 문구가 바뀌면 조용히 아무것도 안 고른다.
     fn taught() -> Vec<String> {
         SKILL
             .lines()

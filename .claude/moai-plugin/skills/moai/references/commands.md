@@ -56,13 +56,19 @@
 
     ~/.claude/projects/<프로젝트>/<세션>/subagents/agent-<task-id>.jsonl
 
-마지막 줄의 `message.content[0].text` 가 리뷰 전문이다.
+리뷰 전문은 **마지막 `text` 블록**이다.
 
-    tail -1 <그 파일> \
-      | python3 -c "import json,sys;print(json.loads(sys.stdin.read())['message']['content'][0]['text'])" \
-      | moai note <리뷰 id> -b -
+    python3 -c "
+    import json,sys
+    t=[c['text'] for l in open(sys.argv[1])
+       for c in json.loads(l).get('message',{}).get('content') or []
+       if isinstance(c, dict) and c.get('type') == 'text']
+    print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
 
-`tasks/<task-id>.output` 이 그 파일로 가는 심볼릭 링크라 그쪽을 써도 된다.
+**마지막 줄을 그냥 집지 않는다.** 한 턴의 블록이 줄마다 나뉘어 적히고 생각·
+도구 호출도 섞여, 마지막 줄이 글이 아닐 때가 있다. 그러면 빈 글이 넘어가고
+`moai note` 가 "메모가 비었다" 로 멈춘다 — 시끄럽게 멈추니 잃지는 않지만,
+한 번에 되는 편이 낫다.
 
 **요약만 적고 원문을 버리지 않는다.** 요약은 이쪽의 판단이고 원문은 리뷰어가
 한 말이다. 판단은 다시 할 수 있지만 버린 원문은 못 되돌린다.
