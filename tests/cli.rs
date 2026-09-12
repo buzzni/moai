@@ -824,6 +824,23 @@ fn dry_run_writes_nothing() {
     assert_eq!(journal(s.path()), "", "만들지 말라는데 저널에 적었다");
 }
 
+/// **연습도 `--json` 을 지킨다.** 계획을 미리 검사하는 쪽은 `--dry-run` 과
+/// `--json` 을 같이 쓴다. 여기서 사람 글이 나오면 그쪽은 파싱에 실패하고,
+/// 그러면 진짜로 만들어 보고서야 계획을 읽는다 — 연습이 막으려던 그 일이다.
+#[test]
+fn a_rehearsal_still_speaks_json() {
+    let s = init("dryrunjson");
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--dry-run", "--json"], PLAN);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8(out.stdout).unwrap();
+    one_json_value(&text);
+    // 연습임이 출력에 적혀 있어야 한다 — id 가 없는 까닭이 거기서 나온다.
+    assert!(text.contains(r#""dry_run":true"#), "{text}");
+    assert!(text.contains(r#""title":"저장 계층""#), "{text}");
+    assert!(text.contains(r#""priority":1"#), "{text}");
+    assert_eq!(issues(s.path()), "", "연습인데 썼다");
+}
+
 /// 못 읽은 줄은 **전부** 모아 한 번에 말한다. 하나씩 고치게 하면 여섯 줄짜리
 /// heredoc 을 여섯 번 다시 보낸다. 그리고 하나라도 틀리면 아무것도 안 만든다.
 #[test]
@@ -1975,6 +1992,28 @@ fn promote_can_be_rehearsed() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("새 에픽") && text.contains("첫 일"), "{text}");
+    assert_eq!(issues(s.path()), before, "연습인데 썼다");
+}
+
+/// 연습과 `--json` 을 같이 줘도 기계 출력이다. `add --from` 쪽과 **같은
+/// 모양**이라야 계획을 미리 검사하는 코드가 두 동사에 두 벌 필요하지 않다.
+#[test]
+fn a_rehearsed_promote_still_speaks_json() {
+    let s = init("ideadryjson");
+    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let before = issues(s.path());
+    let out = from_stdin(
+        s.path(),
+        &["idea", "promote", &id, "--from", "-", "--dry-run", "--json"],
+        "# 새 에픽\n- [p1] 첫 일\n",
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8(out.stdout).unwrap();
+    one_json_value(&text);
+    assert!(text.contains(r#""dry_run":true"#), "{text}");
+    assert!(text.contains(r#""title":"새 에픽""#), "{text}");
+    // 무엇이 닫힐 것인지는 진짜 출력과 같은 낱말로 말한다.
+    assert_eq!(field(&text, "promoted"), id, "{text}");
     assert_eq!(issues(s.path()), before, "연습인데 썼다");
 }
 

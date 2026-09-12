@@ -169,6 +169,9 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool, assignee: Option<Stri
     let drafts = draft::parse(&src).map_err(|e| Fail::coded(e, super::code::BAD_INPUT))?;
 
     if dry_run {
+        if ctx.json {
+            return json_rehearsal(&drafts, None);
+        }
         // 만들지 않으므로 id 가 없다. 무엇이 어디에 붙는지만 보여 준다.
         let mut out = vec![paint(style::HEAD, "만들 것")];
         out.extend(drafts.iter().map(|d| line_of(d, None)));
@@ -253,6 +256,62 @@ pub fn line_of(d: &Draft, id: Option<&str>) -> String {
         format!("   {}", paint(style::TAG, &d.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")))
     };
     format!("{indent}{head}  {mark}  {}{tags}", d.title).trim_end().to_string()
+}
+
+/// 연습의 기계 출력. **`--dry-run` 도 `--json` 을 지킨다** — 연습은 계획을
+/// 미리 보는 자리인데 거기서만 사람 글이 나오면, 미리 보는 쪽은 파싱에
+/// 실패하고 결국 진짜로 만들어 보고서야 계획을 읽는다.
+///
+/// `add --from` 과 `idea promote` 가 이 한 자리를 같이 쓴다. 둘이 갈라지면
+/// 같은 마크다운이 어느 동사로 들어왔느냐에 따라 다른 모양이 되고, 미리
+/// 검사하는 코드가 두 벌 필요해진다. `promoted` 는 펼칠 때만 붙는다.
+///
+/// `dry_run` 을 적어 두는 것은 **id 가 없는 까닭**이 거기서 나오기 때문이다.
+/// 진짜 출력은 만든 줄을 그대로 내므로, 이 깃발이 두 모양을 가른다.
+pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>) -> R<Vec<String>> {
+    /// 기본 우선순위는 **여기서 풀어 낸다.** `null` 을 내면 받는 쪽이 기본값을
+    /// 다시 알아야 하고, 그러면 그 값이 두 곳에 적힌다. 우선순위가 없는 종류
+    /// (에픽·마일스톤)에는 아예 내지 않는다 — 없는 것에 기본값을 씌우면
+    /// 에픽이 `p2` 인 줄 안다.
+    #[derive(serde::Serialize)]
+    struct DraftOut<'a> {
+        kind: &'a str,
+        title: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        priority: Option<u8>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        tags: &'a Vec<String>,
+        /// 몇 번째 초안이 제 에픽인가. 에픽 자신은 없다 — 아직 id 가 없으므로
+        /// 자리로 말하는 수밖에 없고, 그 자리는 `drafts` 의 첨자다.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        epic: Option<usize>,
+    }
+    #[derive(serde::Serialize)]
+    struct Out<'a> {
+        dry_run: bool,
+        drafts: Vec<DraftOut<'a>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        promoted: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        status: Option<&'a str>,
+    }
+    super::json_line(&Out {
+        dry_run: true,
+        drafts: drafts
+            .iter()
+            .map(|d| DraftOut {
+                kind: d.kind.as_str(),
+                title: &d.title,
+                priority: (d.kind == Kind::Issue)
+                    .then(|| d.priority.unwrap_or(model::DEFAULT_PRIORITY)),
+                tags: &d.tags,
+                epic: d.epic,
+            })
+            .collect(),
+        promoted,
+        // 펼치면 그 생각이 닫힌다는 말은 진짜 출력과 **같은 낱말**로 한다.
+        status: promoted.map(|_| crate::config::DONE),
+    })
 }
 
 pub fn tally(drafts: &[Draft]) -> String {

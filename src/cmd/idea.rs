@@ -50,6 +50,11 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     // **연습은 저장소를 안 만진다.** AI 가 펼친 안을 사람이 한 번 보고
     // "좋다" 하는 자리라, 여기서 쓰면 그 "좋다" 가 뒤늦은 말이 된다.
     if args.dry_run {
+        // 거절은 위에서 이미 끝났다 — 못 펼칠 것을 펼치라 하면 모양이
+        // 무엇이든 거절이고, 여기 닿은 것은 정말 펼칠 수 있는 것뿐이다.
+        if ctx.json {
+            return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id));
+        }
         let mut out = vec![paint(style::HEAD, "펼칠 것")];
         out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None)));
         out.push(String::new());
