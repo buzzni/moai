@@ -168,56 +168,111 @@ pub fn bar(percent: Option<u8>) -> String {
 /// `shown` 은 이미 걸러진 것들이다. **걸러진 뒤에도 에픽 줄은 남긴다** —
 /// 멤버가 하나도 안 걸리면 그 에픽은 아예 빼되, 걸린 것이 있으면 어느
 /// 에픽 밑인지 보여야 목록이 뜻을 갖는다.
-pub fn tree(shown: &[Issue], rolls: &[Roll], groups: &BTreeMap<&str, &str>) -> Vec<String> {
+pub fn tree(
+    all: &[Issue],
+    index: &crate::nav::Index,
+    keep: &dyn Fn(usize) -> bool,
+    rolls: &[Roll],
+) -> Vec<String> {
     let mut out = Vec::new();
-    for roll in rolls {
-        let mine: Vec<&Issue> = shown
-            .iter()
-            .filter(|i| {
-                let group = groups.get(i.id.as_str()).copied();
-                match &roll.id {
-                    Some(e) => group == Some(e.as_str()),
-                    None => group.is_none() && crate::report::is_work(i),
-                }
-            })
-            .collect();
-        // 자기 자신이 걸러졌으면 빈 에픽도 보여 준다 (계획만 세운 것).
-        let epic_shown = roll.id.as_ref().is_some_and(|e| shown.iter().any(|i| &i.id == e));
-        if mine.is_empty() && !epic_shown {
-            continue;
-        }
-        if !out.is_empty() {
-            out.push(String::new());
-        }
-        out.push(head(roll, mine.len()));
-        let tops: Vec<&Issue> = mine
-            .iter()
-            .copied()
-            .filter(|i| {
-                crate::id::parent_of(&i.id).is_none_or(|p| !mine.iter().any(|m| m.id == p))
-            })
-            .collect();
-        for i in tops {
-            branch(&mut out, shown, i, 1);
-        }
-    }
+    walk(&mut out, all, index, keep, rolls, &crate::nav::Path::new(), 0);
     if out.is_empty() {
         out.push("없다.".into());
     }
     out
 }
 
+/// 한 자리를 그리고 그 밑으로 내려간다.
+fn walk(
+    out: &mut Vec<String>,
+    all: &[Issue],
+    index: &crate::nav::Index,
+    keep: &dyn Fn(usize) -> bool,
+    rolls: &[Roll],
+    path: &crate::nav::Path,
+    depth: usize,
+) {
+    use crate::nav::{Entry, Seg};
+    // 뿌리에 파일처럼 놓인 것(`nav` 는 소속 없는 이슈에 바구니를 두지 않는다)도
+    // **머리글을 갖는다.** CLI 트리는 보고서라, 소속 없는 일이 몇 건인지가
+    // 정보다 — `moai status` 가 그것부터 드러내는 이유와 같다.
+    let mut loose = false;
+    for e in index.entries_where(all, path, keep) {
+        if depth == 0 && matches!(e, Entry::Leaf { .. }) && !loose {
+            loose = true;
+            if !out.is_empty() {
+                out.push(String::new());
+            }
+            let n = index
+                .entries_where(all, path, keep)
+                .iter()
+                .filter(|e| matches!(e, Entry::Leaf { .. }))
+                .count();
+            match rolls.iter().find(|r| r.id.is_none()) {
+                Some(roll) => out.push(head(roll, n)),
+                None => out.push(format!("{}  {n}건", paint(style::HEAD, "에픽 없음"))),
+            }
+        }
+        let deeper = {
+            let mut p = path.clone();
+            if let Entry::Dir { seg, .. } = &e {
+                p.push(seg.clone());
+            }
+            p
+        };
+        match &e {
+            // 묶음은 머리글을 갖는다 — 집계는 `report` 가 이미 했다.
+            Entry::Dir { seg: Seg::Milestone(_) | Seg::Epic(_), at } => {
+                if !out.is_empty() {
+                    out.push(String::new());
+                }
+                let id = at.map(|at| all[at].id.as_str());
+                let shown = index.descendants(&deeper).iter().filter(|&&d| keep(d)).count();
+                match rolls.iter().find(|r| r.id.as_deref() == id) {
+                    Some(roll) => out.push(head(roll, shown)),
+                    // 집계가 없을 때도 **id 는 낸다** — 제목만 내면 그것을
+                    // 다시 찾아봐야 하고, 묶음을 펼친 이유가 사라진다.
+                    None => out.push(format!(
+                        "{}  {}  {shown}건",
+                        paint(style::ID, id.unwrap_or("")),
+                        paint(style::HEAD, &index.label(all, &e)),
+                    )),
+                }
+                walk(out, all, index, keep, rolls, &deeper, 1);
+            }
+            // 바구니도 머리글을 갖는다. **조용히 빼지 않는다** — 자리를 못
+            // 정한 줄이 트리에서 사라지면 그 줄은 어디에도 없는 것이 된다.
+            Entry::Dir { seg: Seg::Lost, .. } => {
+                if !out.is_empty() {
+                    out.push(String::new());
+                }
+                out.push(format!(
+                    "{}  {}건",
+                    paint(style::WARN, &index.label(all, &e)),
+                    index.descendants(&deeper).iter().filter(|&&d| keep(d)).count()
+                ));
+                walk(out, all, index, keep, rolls, &deeper, 1);
+            }
+            Entry::Dir { seg: Seg::Issue(_), at: Some(at) } => {
+                row(out, &all[*at], depth.max(1));
+                walk(out, all, index, keep, rolls, &deeper, depth.max(1) + 1);
+            }
+            Entry::Leaf { at } => row(out, &all[*at], depth.max(1)),
+            Entry::Dir { at: None, .. } => {}
+        }
+    }
+}
+
 /// 머리글 없이 멤버와 그 자식만. 에픽 상세에서 쓴다 — 상세가 이미 제목을
 /// 냈는데 트리 머리글이 또 내면 같은 줄이 두 번 나온다.
-pub fn members(shown: &[Issue]) -> Vec<String> {
+pub fn members(
+    all: &[Issue],
+    index: &crate::nav::Index,
+    keep: &dyn Fn(usize) -> bool,
+    at: &crate::nav::Path,
+) -> Vec<String> {
     let mut out = Vec::new();
-    let tops: Vec<&Issue> = shown
-        .iter()
-        .filter(|i| crate::id::parent_of(&i.id).is_none_or(|p| !shown.iter().any(|m| m.id == p)))
-        .collect();
-    for i in tops {
-        branch(&mut out, shown, i, 0);
-    }
+    walk(&mut out, all, index, keep, &[], at, 0);
     out
 }
 
@@ -244,7 +299,9 @@ fn head(roll: &Roll, shown: usize) -> String {
 }
 
 /// 한 이슈와 그 밑의 자식들. 깊이는 id 의 점 수와 같다.
-fn branch(out: &mut Vec<String>, shown: &[Issue], i: &Issue, depth: usize) {
+/// 트리의 한 줄. **내려가는 일은 `walk` 가 한다** — 여기서 자식을 다시 찾으면
+/// 자리를 정하는 코드가 또 둘이 된다.
+fn row(out: &mut Vec<String>, i: &Issue, depth: usize) {
     let st = style::status_style(i.status.as_str());
     let mut line = format!(
         "{}{}  {}  {}  {}",
@@ -258,9 +315,6 @@ fn branch(out: &mut Vec<String>, shown: &[Issue], i: &Issue, depth: usize) {
         line.push_str(&format!("   {}", paint(style::TAG, &tags_of(i))));
     }
     out.push(line);
-    for c in shown.iter().filter(|c| crate::id::parent_of(&c.id) == Some(i.id.as_str())) {
-        branch(out, shown, c, depth + 1);
-    }
 }
 
 /// 경고 하나를 사람 말로. **여기가 이 제품의 목소리다.**
@@ -863,11 +917,14 @@ mod tests {
         let child = issue("argos-0002.aaa", "회귀 테스트", "todo");
         let loose = issue("argos-0009", "떠 있는 것", "todo");
 
-        let shown = vec![member.clone(), child.clone(), loose.clone()];
-        let all = vec![epic, member, child, loose];
+        let all = vec![epic, member.clone(), child.clone(), loose.clone()];
         let rolls = crate::report::rollup(&all, &cfg());
-        let groups = crate::report::groups(&all);
-        let out = plain(&tree(&shown, &rolls, &groups));
+        let index = crate::nav::Index::of(&all);
+        // 걸러진 것만 보여 준다 — 에픽 줄 자체는 걸러 놓고 그 밑을 본다.
+        let shown: std::collections::BTreeSet<&str> =
+            [member.id.as_str(), child.id.as_str(), loose.id.as_str()].into_iter().collect();
+        let keep = |at: usize| shown.contains(all[at].id.as_str());
+        let out = plain(&tree(&all, &index, &keep, &rolls));
         let joined = out.join("\n");
 
         assert!(joined.contains("저장 계층"), "{joined}");
@@ -888,9 +945,9 @@ mod tests {
         let all = vec![epic.clone()];
         let rolls = crate::report::rollup(&all, &cfg());
 
-        let groups = crate::report::groups(&all);
-        assert_eq!(plain(&tree(&[], &rolls, &groups)), ["없다."]);
-        assert!(plain(&tree(&[epic], &rolls, &groups)).join("\n").contains("빈 에픽"));
+        let index = crate::nav::Index::of(&all);
+        assert_eq!(plain(&tree(&all, &index, &|_| false, &rolls)), ["없다."]);
+        assert!(plain(&tree(&all, &index, &|_| true, &rolls)).join("\n").contains("빈 에픽"));
     }
 
     /// 시킨 대로 닫았는데도 잔소리가 남으면 다음부터 안 듣는다.

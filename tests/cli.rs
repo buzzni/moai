@@ -1177,6 +1177,39 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
     }
 }
 
+/// **트리는 모든 줄을 정확히 한 번 낸다.** 자리를 정하는 코드가 둘이면
+/// 어긋나고, 실제로 어긋났다 — 제 에픽이 부모와 다른 자식은 두 번 나왔고
+/// 끊긴 참조를 가진 줄은 아예 사라졌다.
+#[test]
+fn the_tree_shows_every_issue_exactly_once() {
+    let s = init("treeonce");
+    let ga = add(s.path(), &["에픽 가", "--type", "epic"]);
+    let na = add(s.path(), &["에픽 나", "--type", "epic"]);
+    let member = add(s.path(), &["가의 멤버", "-e", &ga]);
+    let child = ok(s.path(), &["add", "자식인데 에픽이 다르다", "--parent", &member, "-e", &na, "-q"])
+        .trim()
+        .to_string();
+    let inherits = ok(s.path(), &["add", "물려받는 자식", "--parent", &member, "-q"]).trim().to_string();
+    let loose = add(s.path(), &["소속 없는 일"]);
+    let dangling = add(s.path(), &["없는 에픽을 가리킨다"]);
+    ok(s.path(), &["edit", &dangling, "-e", "argos-zzzz"]);
+    let wrong = add(s.path(), &["에픽 아닌 것을 에픽이라 한다"]);
+    ok(s.path(), &["edit", &wrong, "-e", &member]);
+
+    let tree = ok(s.path(), &["show", "--tree", "--all"]);
+    // **id 가 자식 id 의 앞부분이기도 하다** — `argos-x` 는 `argos-x.aa1` 안에도
+    // 들어 있다. 뒤에 점이 붙지 않은 것만 그 줄로 센다.
+    let times = |id: &str| {
+        tree.match_indices(id)
+            .filter(|(at, _)| tree[at + id.len()..].chars().next() != Some('.'))
+            .count()
+    };
+    for id in [&ga, &na, &member, &child, &inherits, &loose, &dangling, &wrong] {
+        let n = times(id);
+        assert_eq!(n, 1, "{id} 가 트리에 {n}번 나온다\n{tree}");
+    }
+}
+
 // ── TUI ────────────────────────────────────────────────────────────
 
 /// TTY 가 아니면 화면을 켜지 않고 분명히 거절한다. 이게 없으면 파이프로 부른

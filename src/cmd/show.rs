@@ -152,10 +152,18 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         return super::json_line(&shown);
     }
     if args.tree {
+        // **자리는 `nav` 가 정한다.** 트리와 탐색기가 자리를 따로 정하면
+        // 어긋나고, 실제로 어긋났다 — 제 에픽이 부모와 다른 자식이 두 번
+        // 나왔고 끊긴 참조를 가진 줄은 아예 사라졌다.
+        let shown_ids: std::collections::BTreeSet<&str> =
+            shown.iter().map(|i| i.id.as_str()).collect();
+        let index = crate::nav::Index::of(&load.issues);
+        let keep = |at: usize| shown_ids.contains(load.issues[at].id.as_str());
         return Ok(view::tree(
-            &shown,
+            &load.issues,
+            &index,
+            &keep,
             &report::rollup(&load.issues, &repo.config),
-            &report::groups(&load.issues),
         ));
     }
     Ok(view::list(&shown, &repo.config, hidden, &report::epic_labels(&load.issues)))
@@ -217,7 +225,15 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
         }
         if !mine.is_empty() {
             out.push(String::new());
-            out.extend(view::members(&mine));
+            let ids: std::collections::BTreeSet<&str> = mine.iter().map(|i| i.id.as_str()).collect();
+            let index = crate::nav::Index::of(all);
+            let keep = |at: usize| ids.contains(all[at].id.as_str());
+            let here = index.find(&issue.id).map(|at| {
+                let mut p = index.home_of(at).clone();
+                p.push(index.seg_of(all, at));
+                p
+            });
+            out.extend(view::members(all, &index, &keep, &here.unwrap_or_default()));
         }
     }
     out.extend(view::history(&journal));
