@@ -1,0 +1,384 @@
+//! 에이전트에게 주는 글. **한 출처다** — `init` 이 AGENTS.md 에 쓰는 블록,
+//! `skill install` 이 심는 SKILL.md 와 참고 문서, 그리고 훅이 내는 거절문이
+//! 모두 여기서 조각을 가져간다.
+//!
+//! ## 왜 한 출처인가
+//!
+//! 같은 것을 두 벌로 두면 반드시 갈라지고, 갈라진 둘 중 어느 것이 참인지
+//! 아무도 모른다. 실제로 AGENTS 블록에는 `tui`·`edit` 이 있고 스킬에는
+//! 없었으며, 스킬에는 규칙 셋이 있고 AGENTS 블록에는 없었다.
+//!
+//! ## 왜 그대로 복사하지 않는가
+//!
+//! 모양이 다르다. AGENTS 블록은 언제나 읽히는 산문이라 길어도 되고, SKILL.md
+//! 는 언제 부르는가가 frontmatter 에 있고 본문이 한 화면이어야 한다. 그래서
+//! **조각을 한 군데 두고 표면마다 필요한 만큼 엮는다.** 조각 안의 문장은
+//! 어느 표면에서 읽어도 뜻이 서야 한다 — "위에서 말했듯" 같은 말을 넣지 않는다.
+//!
+//! 순수 모듈이다. 파일을 쓰는 것은 `cmd/init.rs` 와 `cmd/skill.rs` 가 한다.
+
+/// 규칙 셋의 이름. **스킬이 적은 규칙과 훅이 낸 거절문이 같은 이름을 댄다** —
+/// 다르면 막힌 쪽이 무엇을 어겼는지 두 번 읽어야 한다.
+pub const RULES: [&str; 3] = [
+    "집은 것 밖에 새 이슈를 세우지 않는다",
+    "저장소를 고치기 전에 하나를 집는다",
+    "리뷰도 이슈다",
+];
+
+/// 거절문의 머리. 스킬의 규칙 제목과 글자가 같다.
+pub fn rule_head(n: usize) -> String {
+    format!("규칙 {n} — {}.", RULES[n - 1])
+}
+
+/// 리뷰 이슈를 세운 뒤의 세 걸음. **훅의 거절문과 스킬이 이것을 그대로 쓴다.**
+///
+/// **여기 적힌 명령은 그대로 쳐서 지나가야 한다.** `-m` 없는 `done` 을 일러
+/// 줘 결과가 없다고 막은 적이 있다 — 규칙이 제가 일러 준 명령을 막는 자리는
+/// 규칙이 아니라 덫이다.
+// **줄 잇기(`\`)를 쓰지 않는다.** 그것은 개행과 함께 다음 줄의 앞 공백까지
+// 먹어, 첫 명령만 왼쪽 끝에 붙는다.
+pub const REVIEW_STEPS: &str = concat!(
+    "  moai mv <id> in_progress      리뷰를 시작할 때\n",
+    "  moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로\n",
+    "  moai mv <id> done -m \"<무엇을 반영하고 무엇을 넘겼나>\"",
+);
+
+const CHEATSHEET: &str = r#"    moai status                            보드 · 경고 · 흐름 (세션은 여기서 시작)
+    moai ready                             지금 집을 수 있는 일
+    moai show <id>                         본문·자식·이력. 왜 그렇게 정했는지가 여기 있다
+    moai show -g <키워드>                  이미 적어 뒀는지 찾는다
+    moai show -s todo -t bug               필터 (쉼표 = 또는, 반복 = 그리고)
+    moai show --tree                       에픽 → 이슈 → 자식
+    moai tui                               탐색기로 돌아다닌다 (읽기 전용)
+    moai add "제목" -p 1 -t bug -e <에픽>  만들기
+    moai mv <id> in_progress               집기  →  review  →  done
+    moai edit <id> --tag parser            고치기
+    moai note <id> "발견한 것"             다음 사람이 읽을 메모
+    moai defer <id> -m "왜"                지금 안 할 일을 계획에서 뺀다
+
+모든 명령에 `--json` 이 붙는다."#;
+
+const NO_GATE: &str = "승인 게이트가 없다 — 무엇이든 만들고 무엇이든 옮길 수 있다. 사람을 부르지 않는다.";
+
+const FORKS: &str = r#"**1. `add` 냐 `idea` 냐** — 가르는 것은 하나다. *지금 집을 것인가.*
+집을 것이면 `moai add`, 나중에 볼 것이면 `moai idea add "떠오른 것"`.
+idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
+**적지 않고 넘어가는 것이 제일 나쁘다.**
+
+**2. `defer` 냐 `done` 이냐** — 안 하기로 한 것을 `done` 으로 옮기지 않는다.
+`moai defer <id> -m "왜"` 는 칸도 종류도 안 바꾸고, `--undo` 로 같은 줄이
+그대로 돌아온다. idea 는 "아직 일이 아닌 것", defer 는 "일이지만 지금은 아닌 것".
+
+**3. 에픽으로 쪼갤 만한가** — 파일 하나로 안 끝나는 요청이면 코드를 쓰기 전에
+에픽 하나 + 이슈 3~7개로 쪼갠 안을 사람에게 **한 번** 보여주고 물어본다.
+"좋다" 를 받으면 `moai add --from -` 로 한 번에 만든다 (`--dry-run` 으로 먼저 봐도 된다).
+
+    moai add --from - <<'MD'
+    # 에픽 제목
+    - [p1] 첫 이슈 #enhancement
+    - [p2] 둘째 이슈
+    MD"#;
+
+const IDEAS: &str = r#"    moai idea add "반짝 떠오른 것"                 담기
+    moai idea add "긴 생각" -b -                   본문은 stdin 에서
+    moai idea ls                                   쌓인 것 보기
+    moai show -g <키워드>                          이미 적어 뒀는지 찾기
+
+때가 되면 하나를 에픽과 이슈로 펼친다. 펼치면 그 생각은 닫힌다.
+
+    moai idea promote <id> --from - <<'MD'
+    # 에픽 제목
+    - [p1] 첫 이슈 #enhancement
+    MD"#;
+
+const DEFERRING: &str = r#"    moai defer <id> -m "다음 분기에"       계획에서 잠시 뺀다
+    moai defer <id> --undo                 도로 집는다
+    moai show --deferred                   미뤄 둔 것만 본다
+
+칸도 종류도 안 바뀐다 — 같은 줄이 그대로 돌아온다. 미룬 것은 `moai ready` 와
+보드와 경고에서 빠지고, `moai status` 가 한 줄로 그것을 비춘다."#;
+
+const GROUPS: &str = r#"    moai epic add "저장 계층"                      에픽
+    moai milestone add "v0.1"                      마일스톤
+    moai add "제목" -e <에픽> --milestone <마일스톤>
+    moai show <에픽|마일스톤 id>                   그 밑에 무엇이 있는지
+    moai show --milestone <id>                     그 마일스톤에 딸린 전부
+
+**소속은 물려받는다.** 자식은 부모의 에픽을, 이슈는 제 에픽의 마일스톤을
+물려받는다. 이슈마다 다시 적지 않는다 — 에픽을 옮기면 멤버가 따라온다."#;
+
+const PEOPLE: &str = r#"**담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
+`-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`
+에서 오고, 거기 없으면 `--user "이름 (메일)"` 이나 `MOAI_ACTOR` 로 준다."#;
+
+const CLOSING: &str = r#"`moai status` 를 한 번 더 돌려 경고가 늘지 않았는지 본다. 경고는 막지 않는다 —
+에픽 없는 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것, 쌓인 idea, 미뤄 둔 것을
+비출 뿐이다."#;
+
+/// 규칙 셋. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
+fn rules() -> String {
+    let [one, two, three] = RULES;
+    let steps = indent(REVIEW_STEPS, "  ");
+    format!(
+        r#"**1. {one}.** `in_progress` 인 이슈가 초점이다.
+그 일을 하다 나온 것은 같은 에픽 안(`-e <에픽>`)이나 그 일의 자식
+(`--parent <id>`)으로 만든다. 지금 할 일이 아니면 `moai idea add` 로 담는다 —
+idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇다 (거기서
+만들어지는 것은 에픽과 그 자식들이라 그 자체로 한 단위다).
+
+**2. {two}.** `moai mv <id> in_progress`.
+세는 것은 저장소 안의 일감뿐이다 — `.moai/`·`.claude/`·`target/` 과 저장소
+밖(스크래치패드·임시 파일)은 안 센다. `Edit`·`Write` 뿐 아니라 껍데기로 쓰는
+것(`>`·`>>`·`sed -i`·`tee`)도 센다. 계획에 없던 것이면 `moai add "제목"` 으로
+세우고 그것을 집는다.
+
+**3. {three}.** `/code-review` 를 부르기 전에 지금 보는 것에 매인 리뷰
+이슈를 세운다.
+
+    moai add "리뷰 — <무엇을 보는가>" -t review --parent <보는 이슈> -b "<무엇을 왜 보는가>"
+{steps}
+
+관점(`-b`)과 닫는 한 줄(`-m`)은 규칙이 **실제로 요구한다.** 없이 부르면
+막히고, 거절문이 고칠 명령을 함께 낸다. **사람을 부르지 않는다** — 그 명령을
+그대로 부르면 지나간다.
+
+**원문과 판단을 두 노트로 가른다** — 리뷰어가 한 말과 이쪽이 정한 것은 다른
+글이다. 넘긴 것은 **이슈 번호와 함께** 적는다. "넘겼다" 만 적힌 줄은 아무도
+다시 안 본다. 원문을 어디서 찾는지는 스킬의 `references/commands.md` 에 있다."#
+    )
+}
+
+/// `init` 이 AGENTS.md 의 마커 사이에 쓰는 블록. **언제나 읽히는 산문이다.**
+///
+/// 정적이라 `bd prime` 같은 명령을 따로 두지 않는다 — **`moai status` 가
+/// prime 이다.**
+pub fn agents() -> String {
+    format!(
+        r#"## 이슈 트래커 — moai
+
+이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
+TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
+
+세션을 시작하면 `moai status` 를 먼저 돌린다. 보드와 경고가 한 화면에 나온다.
+
+{CHEATSHEET}
+
+{PEOPLE}
+
+### 갈림길 셋
+
+{FORKS}
+
+### 지금 범위가 아닌 것은 담는다
+
+{IDEAS}
+
+### 이미 있는 일을 지금 안 할 때
+
+{DEFERRING}
+
+### 묶음은 둘이다
+
+{GROUPS}
+
+### 기능 요청을 받으면
+
+1. `moai status` 로 이미 있는 에픽을 본다. 겹칠 것 같으면 `moai show -g <키워드>`.
+2. 갈림길 3 대로 쪼갠 안을 한 번 보여주고, "좋다" 를 받으면 한 번에 만든다.
+3. `moai mv <id> in_progress` 로 집고, 끝나면 `done` 으로 옮긴다.
+4. 작업 중 발견한 것 중 지금 범위가 아닌 것은 `moai idea add` 로 담아 둔다.
+5. 왜 그렇게 정했는지는 `moai note <id>` 로 이슈에 붙인다. 다음 세션이
+   `moai show <id>` 로 그것을 읽는다.
+
+도구가 자라 이 블록이 낡으면 `moai init` 을 다시 부른다. 이슈와 저널은
+건드리지 않고 이 블록만 다시 쓴다.
+
+### 훅이 실제로 보는 것 셋
+
+`moai skill install` 로 Claude 에 훅을 심었을 때 선다.
+
+{rules}
+
+### 세션을 닫기 전에
+
+{CLOSING}
+"#,
+        rules = rules()
+    )
+}
+
+/// 스킬의 SKILL.md. **본문은 한 화면이다** — 전체 명령은 `reference` 로 내린다.
+///
+/// 발동어는 frontmatter 의 `description` 이다. 항상 켜져 있는 비용이 이 한
+/// 줄이라, 여기에 낱말을 더하는 것은 모든 세션에 값을 매기는 일이다.
+pub fn skill() -> String {
+    format!(
+        r#"---
+name: moai
+description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자", 기능 요청을 여러 갈래로 쪼갤 때, 또는 작업 중 지금 범위가 아닌 것이 떠올랐을 때. TodoWrite 나 마크다운 TODO 목록 대신 이것을 쓴다.
+---
+
+# moai — 이 저장소의 이슈 트래커
+
+할 일은 `.moai/issues.jsonl` 에 있다. {NO_GATE}
+
+{CHEATSHEET} 담당은 만든 사람이 저절로 맡는다.
+
+## 갈림길 셋
+
+{FORKS}
+
+## 훅이 실제로 보는 것 셋
+
+{rules}
+
+## 세션을 닫기 전에
+
+{CLOSING}
+
+전체 명령과 `--from` 문법은 `references/commands.md` 에 있다.
+"#,
+        rules = rules()
+    )
+}
+
+/// 스킬의 참고 문서. 부를 때만 읽힌다.
+pub fn reference() -> String {
+    format!(
+        r#"# 전체 명령
+
+`moai --help` 와 `moai <명령> --help` 가 참이다. 이 파일은 그 요약이라
+어긋나면 도움말이 이긴다.
+
+## 묶음은 둘이다
+
+{GROUPS}
+
+## 거름망
+
+쉼표는 "또는", 같은 플래그를 두 번 쓰면 "그리고" 다.
+
+    moai show -s todo -t bug          todo 이면서 bug
+    moai show -s todo,review          todo 또는 review
+    moai show -e none                 에픽 없는 것
+    moai show --deferred              미뤄 둔 것만
+    moai show --stale 7               지금 칸에 이레 넘게 머문 것
+    moai show --tree                  에픽 → 이슈 → 자식
+
+## 한 번에 만들기
+
+`#` 줄은 에픽, `-` 줄은 바로 위 에픽의 이슈다. `[pN]` 과 `#태그` 는 없어도 된다.
+
+    moai add --from - <<'MD'
+    # 저장 계층
+    - [p1] 원자적으로 쓴다 #enhancement
+    - 잘린 줄을 복구한다 #bug
+    MD
+
+`--dry-run` 이 heredoc 오타로 엉뚱한 여섯 개를 만드는 것을 막는다.
+
+## 담아 둔 생각을 펼치기
+
+{IDEAS}
+
+## 미루기
+
+{DEFERRING}
+
+## 사람
+
+{PEOPLE}
+
+## 리뷰가 낸 글을 찾는 법
+
+리뷰 전문은 파일에 남아 있다. 끝났다는 알림에 `task-id` 가 실려 오고, 그것이
+곧 파일 이름이다.
+
+    ~/.claude/projects/<프로젝트>/<세션>/subagents/agent-<task-id>.jsonl
+
+리뷰 전문은 **마지막 `text` 블록**이다.
+
+    python3 -c "
+    import json,sys
+    t=[c['text'] for l in open(sys.argv[1])
+       for c in json.loads(l).get('message',{{}}).get('content') or []
+       if isinstance(c, dict) and c.get('type') == 'text']
+    print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
+
+**마지막 줄을 그냥 집지 않는다.** 한 턴의 블록이 줄마다 나뉘어 적히고 생각·
+도구 호출도 섞여, 마지막 줄이 글이 아닐 때가 있다. 그러면 빈 글이 넘어가고
+`moai note` 가 "메모가 비었다" 로 멈춘다 — 시끄럽게 멈추니 잃지는 않지만,
+한 번에 되는 편이 낫다.
+
+**요약만 적고 원문을 버리지 않는다.** 요약은 이쪽의 판단이고 원문은 리뷰어가
+한 말이다. 판단은 다시 할 수 있지만 버린 원문은 못 되돌린다.
+
+## 훅
+
+    moai hook <event>    Claude 의 훅이 부른다. 사람이 손으로 부를 일은 없다
+
+`moai skill install` 이 심은 플러그인이 이것을 부른다. 무엇이 어긋나도 종료
+코드는 0 이다 — 훅이 시끄러우면 사람이 훅을 꺼 버리고, 꺼진 규칙은 없는
+규칙이다.
+"#
+    )
+}
+
+/// 줄마다 앞에 붙인다. 빈 줄은 빈 채로 둔다 — 꼬리 공백은 diff 를 더럽힌다.
+fn indent(text: &str, by: &str) -> String {
+    text.lines()
+        .map(|l| if l.is_empty() { String::new() } else { format!("{by}{l}") })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **공통 조각은 두 표면에 똑같이 든다.** 한쪽만 고치면 여기서 붉어진다 —
+    /// 조각을 거치지 않고 표면에 글을 직접 적는 순간 두 벌이 다시 생긴다.
+    #[test]
+    fn both_surfaces_carry_the_same_pieces() {
+        let (agents, skill, reference) = (agents(), skill(), reference());
+        for piece in [CHEATSHEET, FORKS, NO_GATE, CLOSING] {
+            let head = piece.lines().next().unwrap();
+            assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
+            assert!(skill.contains(piece), "스킬에 없다 — {head}");
+        }
+        let rules = rules();
+        assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
+        for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE] {
+            let head = piece.lines().next().unwrap();
+            assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
+            assert!(reference.contains(piece), "참고 문서에 없다 — {head}");
+        }
+    }
+
+    /// 규칙의 이름이 스킬에 그대로 선다. 훅의 거절문 쪽은 `hook` 의 시험이 본다.
+    #[test]
+    fn the_skill_names_each_rule_as_the_hook_does() {
+        let skill = skill();
+        for n in 1..=3 {
+            let title = format!("**{n}. {}.**", RULES[n - 1]);
+            assert!(skill.contains(&title), "스킬에 규칙 {n} 의 이름이 없다 — {title}");
+        }
+        for step in REVIEW_STEPS.lines() {
+            assert!(skill.contains(step.trim()), "리뷰 걸음이 갈라졌다 — {step}");
+        }
+    }
+
+    /// 포맷 문자열 안의 `{{`·`}}` 가 제대로 풀렸는가. 참고 문서의 파이썬 한 줄이
+    /// 딕셔너리를 쓰므로, 한 번 틀리면 복사해 친 명령이 문법 오류로 죽는다.
+    #[test]
+    fn the_python_one_liner_survives_formatting() {
+        assert!(reference().contains(".get('message',{}).get('content')"));
+    }
+
+    /// 스킬의 frontmatter 는 **첫 줄**에서 시작해야 읽힌다.
+    #[test]
+    fn the_frontmatter_opens_the_skill() {
+        let skill = skill();
+        assert!(skill.starts_with("---\nname: moai\ndescription: "), "{}", &skill[..40]);
+    }
+}

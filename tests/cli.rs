@@ -877,7 +877,9 @@ fn init_writes_an_agents_block() {
     let s = init("agents");
     let md = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
     assert!(md.contains("<!-- moai:begin -->") && md.contains("<!-- moai:end -->"));
-    assert!(md.contains("moai status") && md.contains("승인 게이트는 없다"), "{md}");
+    assert!(md.contains("moai status") && md.contains("승인 게이트가 없다"), "{md}");
+    // 훅이 서는 규칙도 같은 출처에서 온다 — 스킬에만 적혀 있던 자리다.
+    assert!(md.contains("리뷰도 이슈다"), "규칙 셋이 빠졌다\n{md}");
     assert!(md.contains("--from"), "한 번에 만드는 법이 빠졌다\n{md}");
     // 치트시트가 낡으면 새 세션의 에이전트가 있는 명령을 모른다.
     assert!(md.contains("moai tui"), "치트시트가 낡았다\n{md}");

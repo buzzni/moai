@@ -22,7 +22,13 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     let exe = skill::exe_name(&exe, on_path().as_deref());
     let market = skill::market(&repo.config.prefix, &root);
     // **누구인지 묻지 않는다.** 심는 것은 이력이 남는 일이 아니라 설정이다.
-    let files = skill::tree(&repo.config.prefix, &root, &exe, skill::SKILL, skill::REFERENCE);
+    let files = skill::tree(
+        &repo.config.prefix,
+        &root,
+        &exe,
+        &crate::guide::skill(),
+        &crate::guide::reference(),
+    );
 
     if dry_run {
         if ctx.json {

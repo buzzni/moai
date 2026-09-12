@@ -15,6 +15,7 @@
 //! 길을 지나지 않고, `moai status` 는 여전히 아무것도 막지 않는다.
 
 use crate::config::Config;
+use crate::guide::REVIEW_STEPS;
 use crate::model::Issue;
 use crate::report;
 use serde::Deserialize;
@@ -473,7 +474,7 @@ pub fn guard_create(issues: &[Issue], cfg: &Config, cmd: &str) -> Decision {
         .get(head.id.as_str())
         .map(|e| format!("\x20 moai add \"제목\" -e {e}        같은 에픽 안에\n"))
         .unwrap_or_default();
-    Decision::Deny(format!(
+    refuse(1, format!(
         "지금 집고 있는 것이 있다 — {held}.\n\
          그 단위 안에서 만들거나, 밖의 것이면 담아 둔다. 초점 밖에 이슈를 세우면\n\
          그 줄이 어느 일에서 나왔는지를 잃는다.\n\
@@ -530,7 +531,7 @@ pub fn guard_close(issues: &[Issue], cfg: &Config, cmd: &str) -> Decision {
             })
         });
         if let Some(r) = open_review {
-            return Decision::Deny(format!(
+            return refuse(3, format!(
                 "리뷰 {} 를 닫으면서 무엇이 나왔는지를 안 남긴다.\n\
                  \x20 moai note {} -b - < <리뷰 원문>     낸 글을 그대로\n\
                  \x20 moai mv {} done -m \"<무엇을 반영하고 무엇을 넘겼나>\"\n\
@@ -567,7 +568,7 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, root: &Path, target: &str) -> 
     } else {
         picks.join("\n")
     };
-    Decision::Deny(format!(
+    refuse(2, format!(
         "집은 것 없이 {} 를 고치고 있다. 어느 일에서 나온 변경인지가 남지 않는다.\n\
          하나를 집고 다시 부른다.\n{picks}\n\
          계획에 없던 것이면 `moai add \"제목\"` 으로 세우고 그것을 집는다.",
@@ -736,16 +737,16 @@ pub fn guard_review(issues: &[Issue], cfg: &Config) -> Decision {
         // 여기서 "굴러가는 리뷰" 를 다시 찾던 조건은 언제나 거짓이었다.
         // 굴러가는 리뷰가 있는 길은 아래 `anchored` 가 맡는다.
         if let Some(idle) = open.first() {
-            return Decision::Deny(format!(
+            return refuse(3, format!(
                 "리뷰 이슈 {} 가 아직 안 집혔다. 리뷰를 시작하면 그 줄도 같이 움직인다.\n\
                  \x20 moai mv {} in_progress\n\
                  그 리뷰가 아니면 지금 보는 것을 먼저 집고 다시 부른다.",
                 idle.id, idle.id
             ));
         }
-        return Decision::Deny(format!(
+        return refuse(3, format!(
             "리뷰는 이슈로 남긴다. 집은 것이 없으니 무엇을 보는지부터 정한다 —\n\
-             보는 것을 집거나, 리뷰 이슈를 세워 그것을 집는다.\n{HOW_TO_REVIEW}"
+             보는 것을 집거나, 리뷰 이슈를 세워 그것을 집는다.\n{MAKE_REVIEW}\n{REVIEW_STEPS}"
         ));
     }
 
@@ -766,7 +767,7 @@ pub fn guard_review(issues: &[Issue], cfg: &Config) -> Decision {
         return Decision::Pass;
     }
     if let Some(empty) = anchored.first() {
-        return Decision::Deny(format!(
+        return refuse(3, format!(
             "리뷰 이슈 {} 에 무엇을 왜 보는지가 없다. 적고 다시 부른다.\n\
              \x20 moai edit {} -b -\n\
              관점 없이 돌린 리뷰는 무엇을 훑었는지가 안 남아, 다음 사람이 같은 자리를\n\
@@ -791,33 +792,23 @@ pub fn guard_review(issues: &[Issue], cfg: &Config) -> Decision {
                 .join(", ")
         )
     };
-    Decision::Deny(format!(
+    refuse(3, format!(
         "리뷰는 이슈로 남긴다. 지금 보는 것({} {})에 매인 리뷰 이슈를 먼저 세운다.\n\
-         {stray}\x20 moai add \"리뷰 — <무엇을 보는가>\" -t {REVIEW_TAG} --parent {} -b \"<무엇을 왜 보는가>\"\n{HOW_TO_REVIEW_STEPS}",
+         {stray}\x20 moai add \"리뷰 — <무엇을 보는가>\" -t {REVIEW_TAG} --parent {} -b \"<무엇을 왜 보는가>\"\n{REVIEW_STEPS}",
         head.id, head.title, head.id
     ))
 }
 
-/// **여기 적힌 명령은 그대로 쳐서 지나가야 한다.**
-///
-/// 두 번이나 적어 둔 것을 또 어겼다 — `-b` 없는 `add` 는 관점이 없다고
-/// 막히고, `-m` 없는 `done` 은 결과가 없다고 막힌다. 규칙이 제가 일러 준
-/// 명령을 막는 자리는 규칙이 아니라 덫이다. 여기를 고칠 때마다 **직접 쳐 보고**
-/// 고친다.
-// **줄 잇기(`\`)를 쓰지 않는다.** 그것은 개행과 함께 **다음 줄의 앞 공백까지**
-// 먹어, 첫 명령만 왼쪽 끝에 붙는다. 그 자리를 이미 한 번 고쳤는데 다시 났다.
-const HOW_TO_REVIEW: &str = concat!(
-    "  moai add \"리뷰 — <무엇을 보는가>\" -t review -e <에픽> -b \"<무엇을 왜 보는가>\"\n",
-    "  moai mv <id> in_progress      리뷰를 시작할 때\n",
-    "  moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로\n",
-    "  moai mv <id> done -m \"<무엇을 반영하고 무엇을 넘겼나>\"",
-);
+/// 리뷰를 세우는 줄. 뒤따르는 걸음은 `guide::REVIEW_STEPS` 다 — 스킬이 적은
+/// 것과 한 출처다.
+const MAKE_REVIEW: &str =
+    "  moai add \"리뷰 — <무엇을 보는가>\" -t review -e <에픽> -b \"<무엇을 왜 보는가>\"";
 
-const HOW_TO_REVIEW_STEPS: &str = concat!(
-    "  moai mv <id> in_progress      리뷰를 시작할 때\n",
-    "  moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로\n",
-    "  moai mv <id> done -m \"<무엇을 반영하고 무엇을 넘겼나>\"",
-);
+/// 거절한다. **어긴 규칙의 이름이 첫 줄이다** — 스킬이 적은 규칙 제목과 글자가
+/// 같아야 막힌 쪽이 무엇을 어겼는지 한 번에 찾는다.
+fn refuse(rule: usize, why: String) -> Decision {
+    Decision::Deny(format!("{}\n{why}", crate::guide::rule_head(rule)))
+}
 
 /// 세션을 닫기 전에 — **상태가 실제와 맞는가.**
 ///
@@ -1251,6 +1242,28 @@ mod tests {
         let all = vec![issue("t-1", "in_progress"), review("t-r", "in_progress", None)];
         for cmd in ["moai mv t-r done > /dev/null", "moai mv t-r done 2>/dev/null", "moai mv t-r done >/dev/null 2>&1"] {
             assert!(matches!(guard_close(&all, &cfg(), cmd), Decision::Deny(_)), "샜다 — {cmd}");
+        }
+    }
+
+    /// **거절문은 어긴 규칙의 이름으로 시작한다.** 스킬이 적은 규칙 제목과
+    /// 글자가 같아야, 막힌 쪽이 무엇을 어겼는지 두 번 읽지 않는다.
+    #[test]
+    fn every_refusal_names_its_rule() {
+        let root = Path::new("/repo");
+        let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let held = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let reviewing = vec![issue("t-1", "in_progress"), review("t-r", "in_progress", None)];
+        for (n, d) in [
+            (1, guard_create(&held, &cfg(), "moai add \"딴 일\"")),
+            (2, guard_edit(&idle, &cfg(), root, "/repo/src/store.rs")),
+            (2, guard_writes(&idle, &cfg(), root, root, "echo x > src/store.rs")),
+            (3, guard_review(&held, &cfg())),
+            (3, guard_review(&[epic("t-e"), review("t-r", "todo", Some("t-e"))], &cfg())),
+            (3, guard_close(&reviewing, &cfg(), "moai mv t-r done")),
+        ] {
+            let why = denied(&d).to_string();
+            let rule = crate::guide::rule_head(n);
+            assert!(why.starts_with(&rule), "`{rule}` 로 시작하지 않는다\n{why}");
         }
     }
 

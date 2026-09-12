@@ -39,15 +39,32 @@
 
 ## 담아 둔 생각을 펼치기
 
-    moai idea add "반짝 떠오른 것"
-    moai idea ls
-    moai idea promote <id> --from -    에픽과 이슈로 펼치고 그 생각을 닫는다
+    moai idea add "반짝 떠오른 것"                 담기
+    moai idea add "긴 생각" -b -                   본문은 stdin 에서
+    moai idea ls                                   쌓인 것 보기
+    moai show -g <키워드>                          이미 적어 뒀는지 찾기
+
+때가 되면 하나를 에픽과 이슈로 펼친다. 펼치면 그 생각은 닫힌다.
+
+    moai idea promote <id> --from - <<'MD'
+    # 에픽 제목
+    - [p1] 첫 이슈 #enhancement
+    MD
+
+## 미루기
+
+    moai defer <id> -m "다음 분기에"       계획에서 잠시 뺀다
+    moai defer <id> --undo                 도로 집는다
+    moai show --deferred                   미뤄 둔 것만 본다
+
+칸도 종류도 안 바뀐다 — 같은 줄이 그대로 돌아온다. 미룬 것은 `moai ready` 와
+보드와 경고에서 빠지고, `moai status` 가 한 줄로 그것을 비춘다.
 
 ## 사람
 
-이름과 메일은 `git config` 에서 온다. 없으면 `--user "이름 (메일)"` 이나
-`MOAI_ACTOR` 로 준다. 남에게 맡기려면 `-a "이름 (메일)"`, 임자 없이 두려면
-`-a none`.
+**담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
+`-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`
+에서 오고, 거기 없으면 `--user "이름 (메일)"` 이나 `MOAI_ACTOR` 로 준다.
 
 ## 리뷰가 낸 글을 찾는 법
 

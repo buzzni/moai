@@ -5,15 +5,18 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
 
 # moai — 이 저장소의 이슈 트래커
 
-할 일은 `.moai/issues.jsonl` 에 있다. 승인 게이트가 없다 — 무엇이든 만들고
-무엇이든 옮길 수 있다. 사람을 부르지 않는다.
+할 일은 `.moai/issues.jsonl` 에 있다. 승인 게이트가 없다 — 무엇이든 만들고 무엇이든 옮길 수 있다. 사람을 부르지 않는다.
 
     moai status                            보드 · 경고 · 흐름 (세션은 여기서 시작)
     moai ready                             지금 집을 수 있는 일
     moai show <id>                         본문·자식·이력. 왜 그렇게 정했는지가 여기 있다
     moai show -g <키워드>                  이미 적어 뒀는지 찾는다
+    moai show -s todo -t bug               필터 (쉼표 = 또는, 반복 = 그리고)
+    moai show --tree                       에픽 → 이슈 → 자식
+    moai tui                               탐색기로 돌아다닌다 (읽기 전용)
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
+    moai edit <id> --tag parser            고치기
     moai note <id> "발견한 것"             다음 사람이 읽을 메모
     moai defer <id> -m "왜"                지금 안 할 일을 계획에서 뺀다
 
@@ -50,15 +53,16 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 
 **2. 저장소를 고치기 전에 하나를 집는다.** `moai mv <id> in_progress`.
 세는 것은 저장소 안의 일감뿐이다 — `.moai/`·`.claude/`·`target/` 과 저장소
-밖(스크래치패드·임시 파일)은 안 센다. 계획에 없던 것이면 `moai add "제목"` 으로
+밖(스크래치패드·임시 파일)은 안 센다. `Edit`·`Write` 뿐 아니라 껍데기로 쓰는
+것(`>`·`>>`·`sed -i`·`tee`)도 센다. 계획에 없던 것이면 `moai add "제목"` 으로
 세우고 그것을 집는다.
 
 **3. 리뷰도 이슈다.** `/code-review` 를 부르기 전에 지금 보는 것에 매인 리뷰
 이슈를 세운다.
 
     moai add "리뷰 — <무엇을 보는가>" -t review --parent <보는 이슈> -b "<무엇을 왜 보는가>"
-    moai mv <id> in_progress                  리뷰를 시작할 때
-    moai note <id> -b - < <리뷰 원문>         낸 글을 **그대로** 남긴다
+    moai mv <id> in_progress      리뷰를 시작할 때
+    moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로
     moai mv <id> done -m "<무엇을 반영하고 무엇을 넘겼나>"
 
 관점(`-b`)과 닫는 한 줄(`-m`)은 규칙이 **실제로 요구한다.** 없이 부르면
@@ -67,11 +71,12 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 
 **원문과 판단을 두 노트로 가른다** — 리뷰어가 한 말과 이쪽이 정한 것은 다른
 글이다. 넘긴 것은 **이슈 번호와 함께** 적는다. "넘겼다" 만 적힌 줄은 아무도
-다시 안 본다. 원문을 어디서 찾는지는 `references/commands.md` 에 있다.
+다시 안 본다. 원문을 어디서 찾는지는 스킬의 `references/commands.md` 에 있다.
 
 ## 세션을 닫기 전에
 
 `moai status` 를 한 번 더 돌려 경고가 늘지 않았는지 본다. 경고는 막지 않는다 —
-에픽 없는 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것, 쌓인 idea 를 비출 뿐이다.
+에픽 없는 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것, 쌓인 idea, 미뤄 둔 것을
+비출 뿐이다.
 
 전체 명령과 `--from` 문법은 `references/commands.md` 에 있다.
