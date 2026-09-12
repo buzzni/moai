@@ -389,3 +389,6 @@
 {"ts":"2026-09-12T16:30:49Z","id":"moai-y9fs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"리뷰 반영까지 끝"}
 {"ts":"2026-09-12T16:30:49Z","id":"moai-d9zt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"`moai-y9fs` 에서 같이 섰다. 판은 심는 내용의 FNV-1a 해시이고, 판이 내려가도 `claude plugin update` 가 받는 것을 재 보고(1.0.1 → 0.0.5) 그대로 쓴다. `DefaultHasher` 는 rustc 판 사이에 바뀔 수 있어 쓰지 않는다 — 이름이 바뀌면 옛 등록이 남아 훅이 두 벌 돈다. 설치한 scope 를 알아내는 일은 `~/.claude/plugins/known_marketplaces.json` 을 읽어 하고 있고, 옛 판 캐시를 걷는 것(`claude plugin prune`)은 `moai-5yal` 로 넘긴다."}
 {"ts":"2026-09-12T16:30:49Z","id":"moai-d9zt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"y9fs 에서 같이 섰다"}
+{"ts":"2026-09-12T16:36:14Z","id":"moai-abd2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai note 가 긴 글을 stdin 에서 받는다"}
+{"ts":"2026-09-12T16:36:15Z","id":"moai-vvdu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"규칙 3 이 리뷰의 관점과 결과를 요구한다"}
+{"ts":"2026-09-12T16:36:15Z","id":"moai-58oo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"스킬이 리뷰 원문을 이슈에 남기는 절차를 적는다"}
