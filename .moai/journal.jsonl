@@ -273,3 +273,5 @@
 {"ts":"2026-09-12T08:19:16Z","id":"moai-9gry","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-12T08:22:21Z","id":"moai-9gry","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"promote 는 idea 만 받는다 — 다른 종류를 조용히 받으면 이슈 하나가 까닭 없이 닫히고 그 까닭이 저널에만 남는다. 담당은 idea 에서 물려준다: 펼친 계획에 임자가 없으면 ready 가 집으라고 내면서 누가 집는지는 말하지 않는다. 이음은 양방향 저널이다 — 에픽 쪽에 note, idea 쪽에 status 의 note. 필드로 들면 파생값이다."}
 {"ts":"2026-09-12T08:22:21Z","id":"moai-9gry","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-12T08:22:49Z","id":"moai-kebu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T08:26:14Z","id":"moai-kebu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}

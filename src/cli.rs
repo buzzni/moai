@@ -19,6 +19,11 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
   moai note <id> \"발견한 것\"    다음 사람이 읽을 메모
   moai tui                      탐색기 — 에픽이 디렉터리처럼 열린다 (읽기 전용)
 
+지금 할 일은 아닌 것이 떠오르면:
+
+  moai idea add \"반짝 떠오른 것\"   담는다. 제목 하나면 된다 — 일로 세지 않는다
+  moai idea promote <id> --from -  때가 되면 에픽과 이슈로 펼친다
+
 계획을 한 번에 세울 때:
 
   moai add --from - <<'EOF'

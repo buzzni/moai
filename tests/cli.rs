@@ -1981,3 +1981,29 @@ fn only_an_idea_can_be_promoted() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("idea"), "{err}");
 }
+
+/// `promote` 는 훑기 목록의 `idea` 줄이 닿지 않는 길이다 — stdin 을 먹으므로
+/// `every_command_still_speaks_json` 의 손이 안 간다. 여기서 따로 부른다.
+#[test]
+fn promote_speaks_json_too() {
+    let s = init("ideapromotejson");
+    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let out = from_stdin(
+        s.path(),
+        &["idea", "promote", &id, "--from", "-", "--json"],
+        "# 새 에픽\n- 첫 일\n",
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    one_json_value(&String::from_utf8(out.stdout).unwrap());
+}
+
+/// `moai init` 이 쓰는 블록이 idea 를 가르친다. 안 가르치면 에이전트는 지금
+/// 범위 밖의 것을 만나도 `moai add` 로 이슈를 만들고, 보드가 그만큼 흐려진다.
+#[test]
+fn the_agents_block_teaches_idea() {
+    let s = init("agentsidea");
+    let block = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
+    for want in ["moai idea add", "moai idea ls", "moai idea promote"] {
+        assert!(block.contains(want), "{want} 가 없다 — {block}");
+    }
+}
