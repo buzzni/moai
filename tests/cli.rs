@@ -37,7 +37,7 @@ fn moai(dir: &Path, args: &[&str]) -> Output {
     Command::new(BIN)
         .args(args)
         .current_dir(dir)
-        .env("MOAI_ACTOR", "테스터")
+        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
         .env("MOAI_NOW", NOW)
         .env("NO_COLOR", "1")
         .output()
@@ -250,7 +250,7 @@ fn concurrent_adds_all_survive() {
             Command::new(BIN)
                 .args(["add", &format!("동시 {i}"), "-q"])
                 .current_dir(s.path())
-                .env("MOAI_ACTOR", "테스터")
+                .env("MOAI_ACTOR", "테스터 (tester@example.com)")
                 .env("NO_COLOR", "1")
                 .stdout(Stdio::piped())
                 .spawn()
@@ -346,7 +346,7 @@ fn mv_moves_and_journals() {
     let line = line_of(s.path(), &id);
     assert!(line.contains(r#""status":"in_progress""#), "{line}");
     let j = journal(s.path());
-    assert!(j.contains(r#""kind":"status","by":"테스터","from":"todo","to":"in_progress""#), "{j}");
+    assert!(j.contains(r#""kind":"status","by":"테스터","by_email":"tester@example.com","from":"todo","to":"in_progress""#), "{j}");
 }
 
 /// **되감기를 막지 않는다.** 막으면 그게 게이트고, 이전 시도가 그것으로 죽었다.
@@ -401,6 +401,13 @@ fn edit_changes_fields_and_none_clears() {
     ok(s.path(), &["edit", &id, "-e", "none", "-a", "none"]);
     let line = line_of(s.path(), &id);
     assert!(!line.contains("\"epic\"") && !line.contains("\"assignee\""), "{line}");
+
+    // 비우는 낱말은 `none` **하나다.** 빈 값도 비우기로 치면 `-e ""` 한 번에
+    // 소속이 조용히 날아가고, 그것은 오타와 구분되지 않는다.
+    ok(s.path(), &["edit", &id, "-e", &epic]);
+    let out = moai(s.path(), &["edit", &id, "-e", ""]);
+    assert!(!out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(line_of(s.path(), &id).contains(&format!(r#""epic":"{epic}""#)));
 
     // 필드 변경은 저널에 적지 않는다 — 적기 시작하면 이벤트 로그가 된다
     assert_eq!(journal(s.path()).lines().count(), 2, "생성 둘 말고 더 쌓였다");
@@ -651,7 +658,7 @@ fn at(dir: &Path, now: &str, args: &[&str]) -> Output {
     Command::new(BIN)
         .args(args)
         .current_dir(dir)
-        .env("MOAI_ACTOR", "테스터")
+        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
         .env("MOAI_NOW", now)
         .env("NO_COLOR", "1")
         .output()
@@ -759,7 +766,7 @@ fn from_stdin(dir: &Path, args: &[&str], input: &str) -> Output {
     let mut child = Command::new(BIN)
         .args(args)
         .current_dir(dir)
-        .env("MOAI_ACTOR", "테스터")
+        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
         .env("MOAI_NOW", NOW)
         .env("NO_COLOR", "1")
         .stdin(Stdio::piped())
@@ -1521,4 +1528,236 @@ fn the_bare_call_speaks_json_too() {
     let out = ok(s.path(), &["--json"]);
     one_json_value(&out);
     assert!(out.contains("\"warnings\"") && out.contains("\"flow\""), "{out}");
+}
+
+// ── 누가 하는가 ───────────────────────────────────────────────────────
+
+/// `MOAI_ACTOR` 를 걷고 git 이 읽을 설정을 통째로 지정해 돌린다. moai 는 git
+/// 저장소를 요구하지 않으므로 전역·시스템 설정까지 막아야 사람을 못 찾는
+/// 상황을 실제로 만들 수 있다.
+fn with_git_config(dir: &Path, cfg: &str, args: &[&str]) -> Output {
+    Command::new(BIN)
+        .args(args)
+        .current_dir(dir)
+        .env_remove("MOAI_ACTOR")
+        .env("GIT_CONFIG_GLOBAL", cfg)
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap()
+}
+
+/// 아무 데서도 사람을 못 찾는 자리.
+fn without_user(dir: &Path, args: &[&str]) -> Output {
+    with_git_config(dir, "/dev/null", args)
+}
+
+/// 이름만으로는 같은 이름이 둘일 때 갈라지지 않는다. 저널에 메일까지 남는다.
+#[test]
+fn the_journal_records_a_name_and_an_email() {
+    let s = init("who");
+    add(s.path(), &["제목"]);
+    let j = journal(s.path());
+    assert!(j.contains(r#""by":"테스터","by_email":"tester@example.com""#), "{j}");
+}
+
+/// `--user` 가 설정보다 앞선다 — 사람을 부르지 않고도 이름을 댈 길이 있어야
+/// 이 멈춤이 게이트가 되지 않는다.
+#[test]
+fn the_user_flag_wins_over_the_environment() {
+    let s = init("userflag");
+    ok(s.path(), &["add", "제목", "--user", "레이븐 (raven@buzzni.com)"]);
+    let j = journal(s.path());
+    assert!(j.contains(r#""by":"레이븐","by_email":"raven@buzzni.com""#), "{j}");
+}
+
+/// 모양이 어긋나면 조용히 이름으로 삼지 않는다 — 메일 없는 줄이 그렇게 샌다.
+#[test]
+fn a_malformed_user_is_refused() {
+    let s = init("baduser");
+    // 빈 값도 준 것이다 — `--user "$NAME"` 의 변수가 비었을 때 조용히 git 설정으로
+    // 넘어가면 엉뚱한 사람 이름으로 저널이 쌓인다.
+    for bad in ["레이븐", "", "  "] {
+        let out = moai(s.path(), &["add", "제목", "--user", bad]);
+        assert!(!out.status.success(), "{bad:?} 를 받아 버렸다");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("이름 (메일)"), "{bad:?}: {err}");
+    }
+    assert_eq!(issues(s.path()).lines().count(), 0, "거절했는데 줄이 남았다");
+}
+
+/// 아무 데서도 사람을 못 찾으면 멈추고 **무엇을 하라고** 말한다. 이름 없는
+/// 줄을 쌓아 두면 나중에 누구도 되짚지 못한다.
+#[test]
+fn with_no_user_anywhere_it_says_what_to_set() {
+    let s = init("nouser");
+    let out = without_user(s.path(), &["add", "제목"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("git config user.name"), "{err}");
+    assert!(err.contains("git config user.email"), "{err}");
+    assert!(err.contains("--user"), "{err}");
+    assert_eq!(issues(s.path()).lines().count(), 0);
+}
+
+/// git 이 준 값도 `--user` 와 **같은 자로 잰다.** 한쪽만 통과시키면 이 도구가
+/// 스스로 모양이 아니라고 부르는 값이 되돌릴 수 없는 저널에 영구히 쌓인다.
+#[test]
+fn a_malformed_git_identity_is_refused_too() {
+    let s = init("badgit");
+    let cfg = s.path().join("gitconfig");
+    std::fs::write(&cfg, "[user]\n\tname = 레이븐\n\temail = raven\n").unwrap();
+    let out = with_git_config(s.path(), cfg.to_str().unwrap(), &["add", "제목"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("git config user.email"), "{err}");
+    assert_eq!(issues(s.path()).lines().count(), 0, "거절했는데 줄이 남았다");
+}
+
+/// 읽기는 사람을 묻지 않는다. 물으면 설정 없는 기계에서 `moai show` 가 죽고,
+/// 그건 보러 온 사람에게 도구가 고장 난 것으로 보인다.
+#[test]
+fn reading_never_asks_who_you_are() {
+    let s = init("readonly");
+    add(s.path(), &["제목"]);
+    for args in [["status"], ["ready"], ["show"]] {
+        let out = without_user(s.path(), &args);
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+}
+
+/// 저널을 적는 넷이 **모두** 사람을 묻고, 넷이 모두 `--user` 로 답을 받는다.
+/// 한 명령이 `ctx.user` 를 안 넘기면 컴파일은 그대로 되고 `--user` 만 조용히
+/// 무시된다 — 그 구멍은 이렇게 넷을 같이 돌려야 드러난다.
+#[test]
+fn every_journalling_command_asks_who_and_takes_an_answer() {
+    let s = init("whoall");
+    let id = add(s.path(), &["시험"]);
+    let each: [&[&str]; 4] =
+        [&["add", "또"], &["mv", &id, "review"], &["note", &id, "메모"], &["rm", &id]];
+
+    for args in each {
+        let out = without_user(s.path(), args);
+        assert!(!out.status.success(), "{args:?} 가 사람을 안 묻고 지나갔다");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("--user"), "{args:?}: {err}");
+    }
+    for args in each {
+        let mut v = args.to_vec();
+        v.extend_from_slice(&["--user", "레이븐 (raven@buzzni.com)"]);
+        let out = without_user(s.path(), &v);
+        assert!(out.status.success(), "{v:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let j = journal(s.path());
+    for kind in ["create", "status", "note", "rm"] {
+        assert!(
+            j.contains(&format!(r#""kind":"{kind}","by":"레이븐","by_email":"raven@buzzni.com""#)),
+            "{kind} 이 메일을 안 남겼다\n{j}"
+        );
+    }
+}
+
+/// `--dry-run` 은 아무것도 쓰지 않으므로 사람을 묻지 않는다. 물으면 계획을
+/// 확인해 보려던 사람이 설정부터 하게 된다.
+#[test]
+fn a_dry_run_does_not_ask_who_you_are() {
+    let s = init("dryrunwho");
+    use std::io::Write as _;
+    let mut child = Command::new(BIN)
+        .args(["add", "--from", "-", "--dry-run"])
+        .current_dir(s.path())
+        .env_remove("MOAI_ACTOR")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all("# 에픽\n- 하나\n".as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(issues(s.path()).lines().count(), 0);
+}
+
+/// `-a` 를 안 주면 만든 사람이 담당이다. `none` 이면 비운다. 이름만 준 것은
+/// 이름만 넣는다 — 남의 메일을 모르는 채로 맡기는 일이 실제로 있다.
+#[test]
+fn add_assigns_to_whoever_made_it() {
+    let s = init("assign");
+    let mine = add(s.path(), &["내 것"]);
+    let line = line_of(s.path(), &mine);
+    assert!(line.contains(r#""assignee":"테스터","assignee_email":"tester@example.com""#), "{line}");
+
+    let nobody = add(s.path(), &["임자 없음", "-a", "none"]);
+    let line = line_of(s.path(), &nobody);
+    assert!(!line.contains("assignee"), "{line}");
+
+    let hers = add(s.path(), &["남의 것", "-a", "철수"]);
+    let line = line_of(s.path(), &hers);
+    assert!(line.contains(r#""assignee":"철수""#) && !line.contains("assignee_email"), "{line}");
+}
+
+/// 대량 생성도 담당을 받는다. `--from` 이 `-a` 를 통째로 흘리던 자리다 —
+/// 단건에만 붙고 계획 한 장에는 안 붙었다.
+#[test]
+fn a_whole_plan_gets_an_assignee_too() {
+    let s = init("bulkassign");
+    let out = from_stdin(s.path(), &["add", "--from", "-"], "# 에픽\n- 하나\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let all = issues(s.path());
+    assert_eq!(all.matches(r#""assignee":"테스터""#).count(), 2, "{all}");
+    assert_eq!(all.matches(r#""assignee_email":"tester@example.com""#).count(), 2, "{all}");
+}
+
+/// 옛 저널 줄에는 `by_email` 이 없다. `by` 를 객체로 바꿨다면 그 줄이 파싱에
+/// 실패하고, 실패한 줄은 조용히 버려져 이력이 통째로 사라진다.
+#[test]
+fn an_old_journal_line_without_an_email_still_shows() {
+    let s = init("oldjournal");
+    let id = add(s.path(), &["제목"]);
+    let path = s.path().join(".moai/journal.jsonl");
+    let mut j = std::fs::read_to_string(&path).unwrap();
+    j.push_str(&format!(
+        "{{\"ts\":\"2026-09-01T00:00:00Z\",\"id\":\"{id}\",\"kind\":\"note\",\"by\":\"옛사람\",\"text\":\"옛 메모\"}}\n"
+    ));
+    std::fs::write(&path, j).unwrap();
+    let out = ok(s.path(), &["show", &id]);
+    assert!(out.contains("옛 메모") && out.contains("옛사람"), "{out}");
+}
+
+/// 표기는 **화면만** 바꾼다. 파일은 언제나 이름과 메일을 갈라서 든다 —
+/// 설정 하나가 이미 쓴 줄을 바꾸면 그건 설정이 아니라 마이그레이션이다.
+#[test]
+fn naming_changes_the_screen_not_the_file() {
+    let s = init("naming");
+    let id = add(s.path(), &["표기"]);
+    let before = issues(s.path());
+    let path = s.path().join(".moai/config.toml");
+    let set = |how: &str| {
+        let src = std::fs::read_to_string(&path).unwrap();
+        let kept: Vec<&str> =
+            src.lines().filter(|l| !l.trim_start().starts_with("naming")).collect();
+        std::fs::write(&path, format!("{}\nnaming = \"{how}\"\n", kept.join("\n"))).unwrap();
+    };
+
+    set("name");
+    let out = ok(s.path(), &["show", &id]);
+    assert!(out.contains("테스터") && !out.contains("tester@example.com"), "{out}");
+
+    set("email");
+    let out = ok(s.path(), &["show", &id]);
+    assert!(out.contains("tester@example.com"), "{out}");
+
+    // 오타는 조용히 통과하지 않는다 — 통과하면 왜 표기가 안 바뀌는지 못 찾는다.
+    set("Full");
+    let err = String::from_utf8_lossy(&moai(s.path(), &["show", &id]).stderr).into_owned();
+    assert!(err.contains("full·name·email"), "{err}");
+
+    set("full");
+    assert_eq!(issues(s.path()), before, "표기를 바꿨는데 파일이 달라졌다");
 }

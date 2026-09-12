@@ -651,6 +651,7 @@ pub fn detail(
     epic: Option<&Issue>,
     children: &[&Issue],
     journal: &[JournalEntry],
+    cfg: &Config,
     now: &str,
     raw: bool,
 ) -> Vec<String> {
@@ -674,7 +675,10 @@ pub fn detail(
         line.push_str(&format!(" · {}", paint(style::TAG, &tags_of(i))));
     }
     if let Some(a) = &i.assignee {
-        line.push_str(&format!(" · {}", paint(style::DIM, a)));
+        line.push_str(&format!(
+            " · {}",
+            paint(style::DIM, &crate::model::label(a, i.assignee_email.as_deref(), cfg.naming))
+        ));
     }
     out.push(line);
 
@@ -721,7 +725,7 @@ pub fn detail(
         }
     }
 
-    out.extend(history(journal));
+    out.extend(history(journal, cfg));
     out
 }
 
@@ -772,7 +776,7 @@ fn role_style(r: crate::markdown::Role) -> Style {
 }
 
 /// 저널을 **그대로 찍는다. 접지 않는다.**
-pub fn history(journal: &[JournalEntry]) -> Vec<String> {
+pub fn history(journal: &[JournalEntry], cfg: &Config) -> Vec<String> {
     let mut out = Vec::new();
     if !journal.is_empty() {
         out.push(String::new());
@@ -782,7 +786,7 @@ pub fn history(journal: &[JournalEntry]) -> Vec<String> {
             // 한 줄" 이라는 약속이 깨지고, 이어지는 줄이 열을 잃는다.
             let ts = short_stamp(&e.ts);
             let pad = " ".repeat(width(&ts) + 5);
-            for (n, l) in entry(e).split('\n').enumerate() {
+            for (n, l) in entry(e, cfg).split('\n').enumerate() {
                 out.push(match n {
                     0 => format!("  {}   {l}", paint(style::DIM, &ts)),
                     _ => format!("{pad}{l}"),
@@ -793,7 +797,7 @@ pub fn history(journal: &[JournalEntry]) -> Vec<String> {
     out
 }
 
-fn entry(e: &JournalEntry) -> String {
+fn entry(e: &JournalEntry, cfg: &Config) -> String {
     let what = match e.kind.as_str() {
         "create" => "생성".to_string(),
         "rm" => "삭제".to_string(),
@@ -806,7 +810,15 @@ fn entry(e: &JournalEntry) -> String {
         other => other.to_string(),
     };
     let note = e.note.as_deref().map(|n| format!("  — {n}")).unwrap_or_default();
-    format!("{what}{}  {}", paint(style::DIM, &note), paint(style::DIM, &e.by))
+    // 이름도 메일도 없는 줄은 낼 것이 없다. `trim_end` 가 없으면 그 자리에
+    // 꼬리 공백 두 칸이 남는다.
+    format!(
+        "{what}{}  {}",
+        paint(style::DIM, &note),
+        paint(style::DIM, &crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming))
+    )
+    .trim_end()
+    .to_string()
 }
 
 #[cfg(test)]
@@ -940,7 +952,7 @@ mod tests {
         let mut i = issue("argos-0001", "제목", "todo");
         i.body = Some("앞\u{1b}[2J\u{7}뒤".into());
         for raw in [true, false] {
-            let out = plain(&detail(&i, None, &[], &[], "2026-09-11T04:12:03Z", raw)).join("\n");
+            let out = plain(&detail(&i, None, &[], &[], &cfg(), "2026-09-11T04:12:03Z", raw)).join("\n");
             assert!(!out.contains('\u{1b}'), "ESC 가 화면에 닿았다 (raw={raw})\n{out:?}");
             assert!(!out.contains('\u{7}'), "벨이 화면에 닿았다 (raw={raw})\n{out:?}");
         }
@@ -951,17 +963,17 @@ mod tests {
         let mut i = issue("argos-0001", "제목", "in_progress");
         i.body = Some("첫 줄\n둘째 줄".into());
         let j = vec![
-            JournalEntry::create("argos-0001", "제목", "2026-09-09T14:02:11Z", "raven"),
+            JournalEntry::create("argos-0001", "제목", "2026-09-09T14:02:11Z", &crate::model::someone("raven")),
             JournalEntry::status(
                 "argos-0001",
                 &Status::new("todo"),
                 &Status::new("in_progress"),
                 None,
                 "2026-09-10T10:11:00Z",
-                "claude",
+                &crate::model::someone("claude"),
             ),
         ];
-        let out = plain(&detail(&i, None, &[], &j, "2026-09-11T04:12:03Z", false));
+        let out = plain(&detail(&i, None, &[], &j, &cfg(), "2026-09-11T04:12:03Z", false));
         let joined = out.join("\n");
         assert!(joined.contains("첫 줄") && joined.contains("둘째 줄"), "{joined}");
         assert!(joined.contains("이력"), "{joined}");
@@ -1116,7 +1128,7 @@ mod tests {
     fn a_dangling_epic_is_shown_not_fatal() {
         let mut i = issue("argos-0001", "제목", "todo");
         i.epic = Some("argos-0000".into());
-        let out = plain(&detail(&i, None, &[], &[], "2026-09-11T04:12:03Z", false));
+        let out = plain(&detail(&i, None, &[], &[], &cfg(), "2026-09-11T04:12:03Z", false));
         assert!(out.iter().any(|l| l.contains("(없는 에픽)")), "{out:#?}");
     }
 }

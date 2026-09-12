@@ -68,12 +68,45 @@ pub fn scalar(src: &str, key: &str) -> Result<Option<String>, String> {
     Ok(None)
 }
 
+/// 사람을 어떻게 낼까. `레이븐 (raven@buzzni.com)` 은 22칸이라 좁은 화면에서
+/// 줄을 다 먹는다. 무엇이 읽기 좋은지는 저장소마다 다르고, 그 판단은 도구가
+/// 아니라 그 저장소가 한다.
+///
+/// **저장은 이것과 무관하다.** 파일에는 언제나 이름과 메일이 갈라져 들어간다 —
+/// 표기를 바꿨다고 이미 쓴 줄이 달라지면 그건 설정이 아니라 마이그레이션이다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Naming {
+    /// `이름 (메일)`
+    #[default]
+    Full,
+    /// `이름`
+    Name,
+    /// `메일`. 메일을 모르는 사람은 이름으로 낸다 — 빈칸을 내면 그 줄이
+    /// 누구의 것인지 화면에서 사라진다.
+    Email,
+}
+
+impl Naming {
+    const ALL: [&'static str; 3] = ["full", "name", "email"];
+
+    fn parse(raw: &str) -> Option<Naming> {
+        match raw {
+            "full" => Some(Naming::Full),
+            "name" => Some(Naming::Name),
+            "email" => Some(Naming::Email),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     /// id 접두어. 그 저장소의 프로젝트명이다.
     pub prefix: String,
     /// 칸반 컬럼. 적은 순서가 곧 보드의 순서다.
     pub statuses: Vec<String>,
+    /// 화면이 사람을 내는 모양. 파일에 쓰는 모양이 아니다.
+    pub naming: Naming,
 }
 
 impl Config {
@@ -117,7 +150,14 @@ impl Config {
             return Err(format!("`statuses` 에 `{}` 가 두 번 있다", dup.1));
         }
 
-        Ok(Config { prefix, statuses })
+        let naming = match scalar(src, "naming")? {
+            None => Naming::default(),
+            Some(raw) => Naming::parse(&raw).ok_or_else(|| {
+                format!("`naming` 은 {} 중 하나다 — {raw:?}", Naming::ALL.join("·"))
+            })?,
+        };
+
+        Ok(Config { prefix, statuses, naming })
     }
 
     /// 새 이슈가 놓이는 칸. 목록의 첫 칸이다.
@@ -142,6 +182,26 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 안 적으면 `full` 이다. 옛 저장소의 설정 파일에는 이 키가 없다.
+    #[test]
+    fn naming_defaults_to_full() {
+        assert_eq!(Config::parse("prefix = \"argos\"\n").unwrap().naming, Naming::Full);
+    }
+
+    /// 오타를 조용히 통과시키면 왜 표기가 안 바뀌는지 아무도 못 찾는다.
+    #[test]
+    fn a_misspelled_naming_is_refused() {
+        for raw in ["Full", "이름", "", "name,email"] {
+            let src = format!("prefix = \"argos\"\nnaming = \"{raw}\"\n");
+            let e = Config::parse(&src).unwrap_err();
+            assert!(e.contains("full·name·email"), "{raw:?}: {e}");
+        }
+        assert_eq!(
+            Config::parse("prefix = \"argos\"\nnaming = \"email\"\n").unwrap().naming,
+            Naming::Email
+        );
+    }
 
     #[test]
     fn reads_a_quoted_scalar() {

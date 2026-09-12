@@ -195,3 +195,31 @@
 {"ts":"2026-09-12T05:42:21Z","id":"moai-80ko","kind":"status","by":"레이븐 (raven@buzzni.com)","from":"todo","to":"done"}
 {"ts":"2026-09-12T05:42:21Z","id":"moai-qj13","kind":"note","by":"레이븐 (raven@buzzni.com)","text":"rebase 뒤 같은 픽스처로 재확인. (a) show <에픽> 이 제 멤버 위에 '에픽 없음' 을 더는 세우지 않는다. (c) 마일스톤 직속 에픽 없는 이슈가 제 머리 밑에 서고 앞 에픽 멤버와 안 섞인다. (b) 바구니는 '(마일스톤 없음)' 으로 옳게 나온다 — moa-issue-54 도 나도 재현 못 했다. 없는 버그를 열어 두지 않고 닫는다. 같은 모양을 다시 만나면 그때 제 이슈로 연다."}
 {"ts":"2026-09-12T05:42:21Z","id":"moai-qj13","kind":"status","by":"레이븐 (raven@buzzni.com)","from":"todo","to":"done"}
+{"ts":"2026-09-12T04:35:22Z","id":"moai-9e00","kind":"create","by":"레이븐","title":"사용자 정보 — 생성자·담당자를 name/email 로 기록한다"}
+{"ts":"2026-09-12T04:35:22Z","id":"moai-2pbl","kind":"create","by":"레이븐","title":"actor() 가 name·email 을 함께 낸다"}
+{"ts":"2026-09-12T04:35:22Z","id":"moai-i3v1","kind":"create","by":"레이븐","title":"전역 --user \"이름 (email)\" 플래그"}
+{"ts":"2026-09-12T04:35:22Z","id":"moai-ojvd","kind":"create","by":"레이븐","title":"사용자 정보가 없으면 쓰기가 멈추고 설정을 안내한다"}
+{"ts":"2026-09-12T04:35:22Z","id":"moai-mb9q","kind":"create","by":"레이븐","title":"add 가 -a 없으면 담당을 만든 사람으로 채운다"}
+{"ts":"2026-09-12T04:35:22Z","id":"moai-91bj","kind":"create","by":"레이븐","title":"표시가 이름 (email) 로 합쳐 낸다"}
+{"ts":"2026-09-12T04:35:26Z","id":"moai-3xhq","kind":"create","by":"레이븐","title":"표기 방법을 config 로 고른다 — full·name·email"}
+{"ts":"2026-09-12T04:35:27Z","id":"moai-7j4j","kind":"create","by":"레이븐","title":"TUI 가 쓰기를 갖게 되면 사용자 정보 입력창"}
+{"ts":"2026-09-12T04:36:09Z","id":"moai-2pbl","kind":"note","by":"레이븐","text":"우선순위는 --user → MOAI_ACTOR → git config user.name + user.email 순이다.\n\n저장 모양은 분리 필드로 간다. 다만 저널의 by 는 이름 문자열 그대로 두고 by_email 을 곁에 더한다. by 를 객체로 바꾸면 안 되는 이유: store.rs 의 journal_of 가 filter_map(..ok()) 로 파싱에 실패한 줄을 조용히 버리므로, 타입을 바꾸는 순간 옛 저널 줄이 moai show 이력에서 통째로 사라진다. '읽기는 관대하고 쓰기는 엄하다' 를 지키는 모양이 sibling 필드다."}
+{"ts":"2026-09-12T04:36:09Z","id":"moai-i3v1","kind":"note","by":"레이븐","text":"전역 플래그다. 값은 '이름 (email)' 한 덩이로 받아 name 과 email 로 갈라 넣는다. 형식이 어긋나면 거절한다 — 사람이 손으로 넣는 유일한 길이라 검증을 여기 모은다.\n\nadd, mv, rm, note 넷이 모두 actor() 를 부르므로 넷 다 이 플래그를 받아야 한다."}
+{"ts":"2026-09-12T04:36:09Z","id":"moai-ojvd","kind":"note","by":"레이븐","text":"에러가 무엇을 하라고 말해야 한다. git config user.name 과 git config user.email 두 줄, 그리고 --user \"이름 (email)\" 예시를 함께 낸다.\n\nmoai 는 git 저장소를 요구하지 않는다 (store.rs discover 는 .moai/ 만 찾는다). git config 는 전역 설정도 읽으므로 git init 전이어도 전역 값이 있으면 통과한다. 전역까지 비었을 때만 멈춘다."}
+{"ts":"2026-09-12T04:36:09Z","id":"moai-mb9q","kind":"note","by":"레이븐","text":"-a 가 없으면 담당을 만든 사람으로 채운다. -a 로 '이름 (email)' 을 받은 경우도 갈라서 넣는다.\n\n작업 중 발견: --from 대량 생성 경로(cmd/add.rs 146줄 아래)는 지금 -a 를 통째로 무시한다. 단건 경로(81줄)만 assignee 를 넣는다. 자동 채움을 넣을 때 두 경로를 같이 고쳐야 한다."}
+{"ts":"2026-09-12T04:36:09Z","id":"moai-91bj","kind":"note","by":"레이븐","text":"당장은 어디서나 '이름 (email)' 로 낸다. 목록도 예외 없다.\n\n나중에 config 로 표기 방법을 고르게 할 것이므로(moai-3xhq), name 과 email 을 한 줄로 합치는 곳을 함수 하나로 모아 둔다. 그래야 그때 그 함수만 갈아끼우면 된다."}
+{"ts":"2026-09-12T04:36:09Z","id":"moai-3xhq","kind":"note","by":"레이븐","text":"full, name, email 셋 중에서 고른다. moai-91bj 가 모아 둔 합치는 함수 하나만 갈아끼우면 되게 만든다. 이 에픽의 다른 임계값 설정(moai-pz7h)과 같은 축이라 여기에 둔다."}
+{"ts":"2026-09-12T04:36:09Z","id":"moai-7j4j","kind":"note","by":"레이븐","text":"지금 TUI 는 읽기 전용이다 — actor() 도 with_write 도 부르지 않는다. 그래서 사용자 정보 입력창을 붙일 자리가 없다.\n\nTUI 에 쓰기가 생기는 날, git 정보와 --user 가 모두 없으면 입력창으로 안내한다. 그 전에는 열 이유가 없다."}
+{"ts":"2026-09-12T04:37:21Z","id":"moai-2pbl","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T04:37:21Z","id":"moai-i3v1","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T04:37:21Z","id":"moai-ojvd","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T05:04:37Z","id":"moai-2pbl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-12T05:04:37Z","id":"moai-i3v1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-12T05:04:37Z","id":"moai-ojvd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-12T05:04:38Z","id":"moai-mb9q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
+{"ts":"2026-09-12T05:04:38Z","id":"moai-91bj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
+{"ts":"2026-09-12T05:04:42Z","id":"moai-9e00","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
+{"ts":"2026-09-12T05:12:09Z","id":"moai-3xhq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T05:27:25Z","id":"moai-3xhq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-12T05:36:53Z","id":"moai-45ux","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"담당으로 거를 길이 없다 — show 에 -a 필터"}
+{"ts":"2026-09-12T05:36:53Z","id":"moai-45ux","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"이제 만드는 모든 이슈에 담당이 붙는데(moai-mb9q), 그 값으로 거를 수가 없다. query.rs 에 assignee 필터가 아예 없다.\n\n메일과 이름이 갈라져 있으므로 무엇에 맞출지 정해야 한다 — 둘 중 하나라도 맞으면 통과가 자연스럽다. 'me' 같은 낱말로 지금 사람을 가리키는 것도 같이 볼 것. model::actor 가 이미 그 사람을 안다."}

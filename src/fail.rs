@@ -20,6 +20,9 @@ pub mod code {
     pub const BAD_FILTER: &str = "bad_filter";
     pub const BAD_TARGET: &str = "bad_target";
     pub const BAD_INPUT: &str = "bad_input";
+    /// 누가 하는지 모른다. 받는 쪽이 이것만 보고 사람에게 물을 수 있어야 해
+    /// `bad_input` 과 갈라 둔다 — 고칠 곳이 argv 가 아니라 설정이다.
+    pub const NO_ACTOR: &str = "no_actor";
     pub const ALREADY_EXISTS: &str = "already_exists";
     pub const LOCKED: &str = "locked";
     pub const BROKEN: &str = "broken";

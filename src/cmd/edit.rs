@@ -10,11 +10,6 @@ use crate::model::{self, Issue};
 use crate::store::Repo;
 use crate::view;
 
-/// `none` 은 "지운다" 는 뜻이다. 제목이 `none` 인 이슈를 만들 일은 없다.
-fn clearable(v: &str) -> Option<String> {
-    (v != "none").then(|| v.to_string())
-}
-
 pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     fail_if_nothing(&args)?;
     if let Some(t) = &args.title {
@@ -51,16 +46,19 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             i.tags.retain(|t| !drop.contains(t));
         }
         if let Some(e) = &args.epic {
-            i.epic = clearable(e);
+            i.epic = super::clearable(e);
         }
         if let Some(m) = &args.milestone {
-            i.milestone = clearable(m);
+            i.milestone = super::clearable(m);
         }
         if let Some(p) = args.priority {
             i.priority = Some(p);
         }
         if let Some(a) = &args.assignee {
-            i.assignee = clearable(a);
+            (i.assignee, i.assignee_email) = match super::clearable(a) {
+                Some(v) => model::split_assignee(&v),
+                None => (None, None),
+            };
         }
 
         i.normalize();
@@ -104,7 +102,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         )]);
     }
     let children: Vec<&Issue> = children.iter().collect();
-    Ok(view::detail(&edited, epic.as_ref(), &children, &[], &at, false))
+    Ok(view::detail(&edited, epic.as_ref(), &children, &[], &repo.config, &at, false))
 }
 
 fn fail_if_nothing(args: &EditArgs) -> R<()> {

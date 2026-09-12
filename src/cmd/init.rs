@@ -31,6 +31,10 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다.
 
 모든 명령에 `--json` 이 붙는다.
 
+**담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
+`-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`
+에서 오고, 거기 없으면 `--user "이름 (메일)"` 로 준다.
+
 ### 묶음은 둘이다
 
     moai epic add "저장 계층"                      에픽
@@ -185,7 +189,8 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     };
 
     let config = format!(
-        "# moai — {}\nprefix = \"{prefix}\"\nstatuses = \"{DEFAULT_STATUSES}\"\n",
+        "# moai — {}\nprefix = \"{prefix}\"\nstatuses = \"{DEFAULT_STATUSES}\"\n\
+         # 화면이 사람을 내는 모양: full(`이름 (메일)`) · name · email\nnaming = \"full\"\n",
         "이 저장소의 이슈 트래커 설정"
     );
     // 설정을 먼저 검사한다 — 접두어가 형식에 안 맞으면 파일을 만들기 전에 멈춘다.

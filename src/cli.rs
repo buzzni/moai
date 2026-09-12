@@ -53,6 +53,10 @@ pub struct Cli {
     /// 이 디렉터리에서 실행한다 (`git -C` 와 같다)
     #[arg(short = 'C', long = "dir", global = true, value_name = "경로")]
     pub dir: Option<std::path::PathBuf>,
+
+    /// 누가 하는가. 없으면 `git config` 에서 가져온다
+    #[arg(long, global = true, value_name = "이름 (메일)")]
+    pub user: Option<String>,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq)]
@@ -84,6 +88,8 @@ pub enum Cmd {
   moai add \"저장 계층\" --type epic
   moai add \"부모에 딸린 일\" --parent moai-4aex
   moai add \"본문은 stdin 에서\" -b -
+  moai add \"남에게\" -a \"철수 (chulsoo@example.com)\"    안 주면 만든 사람이 담당이다
+  moai add \"임자 없이\" -a none
 
 한 번에 여럿 (`--from`):
   moai add --from - <<'EOF'
@@ -204,8 +210,8 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "글")]
     pub body: Option<String>,
 
-    /// 담당
-    #[arg(short, long, value_name = "이름")]
+    /// 담당. 안 주면 만든 사람이다. `이름 (메일)` 로 주면 갈라 넣고, `none` 이면 비운다
+    #[arg(short, long, value_name = "이름 (메일)|none")]
     pub assignee: Option<String>,
 
     #[arg(long = "type", value_name = "issue|epic")]
@@ -346,8 +352,8 @@ pub struct EditArgs {
     #[arg(short, long, value_name = "0-3")]
     pub priority: Option<u8>,
 
-    /// 담당 (`none` 이면 뺀다)
-    #[arg(short, long, value_name = "이름|none")]
+    /// 담당. `이름 (메일)` 로 주면 갈라 넣고, `none` 이면 뺀다
+    #[arg(short, long, value_name = "이름 (메일)|none")]
     pub assignee: Option<String>,
 }
 
