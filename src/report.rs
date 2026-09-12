@@ -406,6 +406,13 @@ const NO_EPIC_RATIO: f64 = 0.15;
 const NO_EPIC_MIN: usize = 5;
 /// 흐름을 재는 창.
 const FLOW_DAYS: i64 = 7;
+/// 담아 둔 생각이 이만큼 쌓이면 알린다.
+///
+/// **담는 비용을 0 으로 만들면 쌓인다.** 쌓이는 것 자체는 문제가 아니고,
+/// 쌓인 줄 모르는 것이 문제다. 그래서 드러내기만 하고 아무것도 막지 않는다.
+/// 임계값은 `NO_EPIC_MIN` 과 같은 자리에 이름 붙인 상수로 둔다 — `moai-pz7h`
+/// 가 이것들을 config 로 뺄 때 같이 간다.
+const IDEA_PILE: usize = 5;
 
 /// 드러난 것 하나. `kind` 가 **타입 붙은 열거값**이라 받는 쪽이 산문을
 /// 파싱하지 않고 분기한다.
@@ -680,6 +687,24 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     let carrying: Vec<&Issue> = issues.iter().filter(|i| !i.rest.is_empty()).collect();
     if !carrying.is_empty() {
         warnings.push(Warning::new("unknown_field", ids_of(&carrying)));
+    }
+
+    // 6-2. 쌓인 생각. **경고가 아니라 알림이다** — 고칠 것이 있다는 말이
+    //      아니라, 담아 둔 것을 한 번 펼쳐 볼 때가 됐다는 말이다.
+    //
+    //      **id 를 싣지 않는다.** 다섯 건이 넘어야 뜨는 줄인데 거기에 제목
+    //      셋을 더 달면, 정확히 "담을수록 화면이 시끄러워진다" 는 그 일이
+    //      일어난다. 무엇이 쌓였는지는 `moai idea ls` 가 낸다.
+    let piled: Vec<&Issue> = issues
+        .iter()
+        .filter(|i| i.kind == Kind::Idea && !i.status.is_done())
+        .collect();
+    if piled.len() >= IDEA_PILE {
+        let oldest =
+            piled.iter().filter_map(|i| days_since(&i.created_at, now)).max().unwrap_or(0);
+        let mut w = Warning::new("idea_pile", Vec::new()).days(oldest).hint("moai idea ls");
+        w.count = piled.len();
+        warnings.push(w);
     }
 
     // 7. 데이터가 깨진 것. **이것만 비영 종료한다.**
@@ -1367,5 +1392,41 @@ mod tests {
         let issues = vec![idea("argos-0001"), make("argos-0009", Kind::Issue, "todo")];
         let st = status(&issues, &[], &cfg(), "2026-09-02T00:00:00Z");
         assert_eq!(st.flow.created, 1, "{:?}", st.flow);
+    }
+    /// **쌓이는 것 자체는 문제가 아니고, 쌓인 줄 모르는 것이 문제다.** 담는
+    /// 비용을 0 으로 만들었으니 쌓인다 — 그래서 `status` 가 한 줄로 비춘다.
+    #[test]
+    fn a_pile_of_ideas_shows_up_in_status() {
+        let quiet: Vec<Issue> = (0..IDEA_PILE - 1).map(|n| idea(&format!("argos-000{n}"))).collect();
+        let st = status(&quiet, &[], &cfg(), "2026-09-11T00:00:00Z");
+        assert!(
+            !st.warnings.iter().any(|w| w.kind == "idea_pile"),
+            "몇 개 안 되는데 벌써 말한다 — 담을 때마다 잔소리가 는다"
+        );
+
+        let mut piled = quiet;
+        piled.push(idea("argos-0009"));
+        let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let w = st
+            .warnings
+            .iter()
+            .find(|w| w.kind == "idea_pile")
+            .expect("쌓였는데 아무 말도 안 한다");
+        assert_eq!(w.count, IDEA_PILE);
+        assert_eq!(w.days, Some(10), "가장 오래된 것의 나이를 안 말한다 — {w:?}");
+        assert_eq!(w.hint.as_deref(), Some("moai idea ls"));
+        // **막지 않는다.** 여기가 비영 종료를 하면 이건 린트고, 린트는 게이트다.
+        assert!(!w.fatal);
+        assert!(!st.broken());
+    }
+
+    /// 펼쳐서 닫은 생각은 더 이상 쌓인 것이 아니다. 세면 `promote` 를 쓸수록
+    /// 잔소리가 늘어, 시킨 대로 한 사람이 벌을 받는다.
+    #[test]
+    fn a_promoted_idea_leaves_the_pile() {
+        let mut piled: Vec<Issue> = (0..IDEA_PILE).map(|n| idea(&format!("argos-000{n}"))).collect();
+        piled[0].status = Status::new("done");
+        let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
+        assert!(!st.warnings.iter().any(|w| w.kind == "idea_pile"), "{:?}", st.warnings);
     }
 }

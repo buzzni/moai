@@ -1894,3 +1894,21 @@ fn the_kind_vocabulary_names_idea() {
     let err = String::from_utf8_lossy(&moai(s.path(), &["show", "아이디어"]).stderr).into_owned();
     assert!(err.contains("idea"), "종류 목록이 idea 를 안 댄다 — {err}");
 }
+
+/// 쌓인 생각을 `status` 가 한 줄로 비춘다. **막지 않는다** — 종료 코드가
+/// 0 이 아니게 되는 순간 부르는 쪽이 이것을 실패로 읽고, 그러면 이건 린트고
+/// 린트는 곧 게이트다.
+#[test]
+fn status_shows_a_pile_of_ideas_without_blocking() {
+    let s = init("ideapile");
+    for n in 0..5 {
+        ok(s.path(), &["idea", "add", &format!("생각 {n}"), "-q"]);
+    }
+    let out = moai(s.path(), &["status"]);
+    assert!(out.status.success(), "알림으로 비영 종료했다 — 그러면 이건 게이트다");
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("쌓인 idea 5건"), "{text}");
+    assert!(text.contains("moai idea ls"), "다음에 무엇을 칠지 안 말한다 — {text}");
+    // `?` 는 보드에서 review 칸의 글리프다. 한 글자가 두 뜻을 지면 안 된다.
+    assert!(text.contains("+ 쌓인 idea"), "알림이 경고 글리프를 달았다 — {text}");
+}

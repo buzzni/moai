@@ -267,3 +267,6 @@
 {"ts":"2026-09-12T08:12:27Z","id":"moai-dy49","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-12T08:12:48Z","id":"moai-szd9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-12T08:14:21Z","id":"moai-szd9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-12T08:14:46Z","id":"moai-5tff","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T08:18:32Z","id":"moai-5tff","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"글리프를 `?` 로 못 뒀다 — 보드에서 review 칸이 이미 `?` 다. 한 화면에서 한 글자가 두 뜻을 지면 어느 쪽도 못 믿는다. 대신 흐린 `+` 로 뒀다: 흐름 줄의 `쌓이는 중 +3` 과 같은 뜻으로 이미 서 있고, WARN 색을 안 써서 꾸지람으로 읽히지 않는다. 임계값 IDEA_PILE=5 는 NO_EPIC_MIN 옆에 이름 붙인 상수다."}
+{"ts":"2026-09-12T08:18:32Z","id":"moai-5tff","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}

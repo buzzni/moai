@@ -430,6 +430,12 @@ fn says(w: &Warning) -> String {
         "dangling_milestone" => format!("마일스톤으로 쓸 수 없는 것을 가리키는 줄 {n}건"),
         "orphan_child" => format!("부모 줄이 없는 자식 {n}건"),
         "dangling_blocked_by" => format!("없는 이슈에게 막혀 있다는 것 {n}건"),
+        // **알림이지 경고가 아니다.** 고칠 것이 있다는 말이 아니라, 담아 둔
+        // 것을 한 번 펼쳐 볼 때가 됐다는 말이다.
+        "idea_pile" => match w.days {
+            Some(d) => format!("쌓인 idea {n}건 (가장 오래된 것 {d}일)"),
+            None => format!("쌓인 idea {n}건"),
+        },
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
         "duplicate_id" => format!("id 가 두 번 있다 {n}건 — 머지를 잘못 풀었다"),
         "unreadable_line" => format!("읽을 수 없는 줄 {n}개"),
@@ -506,8 +512,21 @@ pub fn status(st: &StatusReport, issues: &[Issue], cfg: &Config, now: &str, at: 
     // 경고는 **에픽 표 바로 다음**이다. 화면 아래로 밀면 페이저에 잘린다.
     for w in &st.warnings {
         out.push(String::new());
-        let mark = if w.fatal { style::ERROR } else { style::WARN };
-        out.push(format!("{} {}", paint(mark, "!"), says(w)));
+        // **알림은 경고처럼 보이면 안 된다.** `!` 를 달면 "쌓인 idea 6건" 이
+        // 꾸지람으로 읽히고, 그러면 담는 것을 멈춘다 — 담는 비용을 0 으로
+        // 만든 뜻이 거기서 사라진다. 그래서 흐린 `+` 다: 쌓였다는 말이지
+        // 잘못됐다는 말이 아니고, `+` 는 흐름 줄의 `쌓이는 중 +3` 과 이미 같은
+        // 뜻으로 서 있다.
+        //
+        // **`?` 는 못 쓴다** — 보드에서 `review` 칸의 글리프다. 한 화면에서
+        // 한 글자가 두 뜻을 지면 어느 쪽도 못 믿는다.
+        let notice = w.kind == "idea_pile";
+        let (mark, glyph) = match (w.fatal, notice) {
+            (true, _) => (style::ERROR, "!"),
+            (_, true) => (style::DIM, "+"),
+            _ => (style::WARN, "!"),
+        };
+        out.push(format!("{} {}", paint(mark, glyph), says(w)));
         out.extend(preview(w, &by_id, now));
     }
     if st.warnings.is_empty() {
@@ -582,7 +601,10 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str) -> Vec<String
     if !more.is_empty() || w.hint.is_some() {
         out.push(format!(
             "    {}{}",
-            cell(style::DIM, &more, if w.hint.is_some() { 12 } else { 0 }),
+            // 뒤따를 힌트를 "N건 더" 열에 맞춰 띄운다. **줄이 하나도 없으면
+            // 맞출 열도 없다** — 그때까지 띄우면 가리키는 것 없는 들여쓰기만
+            // 남는다.
+            cell(style::DIM, &more, if w.hint.is_some() && !w.ids.is_empty() { 12 } else { 0 }),
             w.hint.as_deref().map(|h| paint(style::DIM, &format!("→ `{h}`"))).unwrap_or_default(),
         ));
     }
