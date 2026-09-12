@@ -27,6 +27,10 @@ pub enum Role {
     Code,
     /// 링크의 **글**. 주소는 따로 낸다 — 터미널에서 주소는 대개 방해다.
     Link,
+    /// 제목. 수준은 들여쓰기가 말한다.
+    Heading,
+    /// 글머리·인용 막대·가로줄 같은 **표시**. 글이 아니라 짜임새다.
+    Mark,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -342,6 +346,120 @@ fn regroup(chars: Vec<(char, Role)>) -> Vec<Span> {
     out
 }
 
+// ── 줄로 펴기 ─────────────────────────────────────────────────────────
+//
+// **여기가 두 표면의 계약이다.** 글머리를 무엇으로 쓸지, 인용을 어떻게 물릴지,
+// 코드에 백틱을 남길지는 뜻에 관한 결정이지 색에 관한 결정이 아니다. 표면마다
+// 정하면 CLI 와 탐색기가 같은 본문을 다르게 그리고, 둘을 나란히 놓고 보는
+// 사람이 어느 쪽을 믿을지 정해야 한다. 색으로 옮기는 일만 표면이 한다.
+
+/// 글머리. 겹친 목록도 같은 것을 쓴다 — 깊이는 들여쓰기가 말한다.
+const BULLET: &str = "•";
+
+fn mark(t: impl Into<String>) -> Span {
+    Span { text: t.into(), role: Role::Mark }
+}
+
+/// 블록들을 폭에 맞춰 **줄**로 편다. 줄 하나는 조각의 열이고, 글머리·막대·
+/// 들여쓰기도 조각으로 들어간다. 빈 줄은 빈 열이다.
+pub fn layout(blocks: &[Block], width: usize) -> Vec<Vec<Span>> {
+    let mut out: Vec<Vec<Span>> = Vec::new();
+    for (n, b) in blocks.iter().enumerate() {
+        if n > 0 {
+            out.push(Vec::new());
+        }
+        lay_one(&mut out, b, width);
+    }
+    out
+}
+
+fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize) {
+    match b {
+        Block::Heading { level, spans } => {
+            // 수준은 **들여쓰기**가 말한다. `#` 을 남기면 걷어낸 보람이 없고,
+            // 굵게만으로는 2단계와 3단계가 같아 보인다.
+            let indent = "  ".repeat((*level as usize).saturating_sub(1));
+            let spans: Vec<Span> = spans
+                .iter()
+                .map(|s| match s.role {
+                    Role::Plain => Span { text: s.text.clone(), role: Role::Heading },
+                    _ => s.clone(),
+                })
+                .collect();
+            flow(out, &spans, &indent, &indent, width);
+        }
+        Block::Para(spans) => flow(out, &marked(spans), "", "", width),
+        Block::Quote(spans) => {
+            // 인용은 **색이 아니라 세로줄**로 말한다.
+            flow(out, &marked(spans), "│ ", "│ ", width);
+        }
+        Block::List { ordered, items } => {
+            for (n, it) in items.iter().enumerate() {
+                let pad = "  ".repeat(it.depth as usize);
+                let bullet =
+                    if *ordered { format!("{}. ", n + 1) } else { format!("{BULLET} ") };
+                // 이어지는 줄은 글머리 폭만큼 물려 쓴다 — 안 그러면 둘째 줄이
+                // 다음 항목처럼 보인다.
+                let hang = format!("{pad}{}", " ".repeat(crate::text::width(&bullet)));
+                flow(out, &marked(&it.spans), &format!("{pad}{bullet}"), &hang, width);
+            }
+        }
+        Block::Code { lines, .. } => {
+            // 코드는 접지 않는다. 접으면 그 줄이 더는 그 코드가 아니다.
+            for l in lines {
+                out.push(vec![mark("    "), Span { text: l.clone(), role: Role::Code }]);
+            }
+        }
+        Block::Rule => out.push(vec![mark("─".repeat(width.min(40)))]),
+        Block::Table { head, rows } => {
+            // 칸 맞추기는 아직이다(moai-44rk). 그때까지도 **잃지는 않는다**.
+            let cells = |r: &Vec<Vec<Span>>, role: Option<Role>| -> Vec<Span> {
+                let mut line = Vec::new();
+                for (n, c) in r.iter().enumerate() {
+                    if n > 0 {
+                        line.push(mark(" │ "));
+                    }
+                    line.extend(c.iter().map(|s| match (role, s.role) {
+                        (Some(r), Role::Plain) => Span { text: s.text.clone(), role: r },
+                        _ => s.clone(),
+                    }));
+                }
+                line
+            };
+            out.push(cells(head, Some(Role::Heading)));
+            out.extend(rows.iter().map(|r| cells(r, None)));
+        }
+    }
+}
+
+/// 코드 조각에 백틱을 되돌려 놓는다.
+///
+/// **색을 끄면 색으로만 표시한 것은 그냥 글이 된다** — `0.2` 가 판인지 숫자인지
+/// 구별할 길이 사라진다. 굵게·기울임은 글맛이지 낱말의 정체가 아니라 색과 함께
+/// 사라져도 되지만, 코드는 그렇지 않다.
+fn marked(spans: &[Span]) -> Vec<Span> {
+    spans
+        .iter()
+        .map(|s| match s.role {
+            Role::Code => Span { text: format!("`{}`", s.text), role: s.role },
+            _ => s.clone(),
+        })
+        .collect()
+}
+
+fn flow(out: &mut Vec<Vec<Span>>, spans: &[Span], first: &str, hang: &str, width: usize) {
+    let budget = width.saturating_sub(crate::text::width(first)).max(8);
+    for (n, line) in wrap_spans(spans, budget).into_iter().enumerate() {
+        let lead = if n == 0 { first } else { hang };
+        let mut row = Vec::new();
+        if !lead.is_empty() {
+            row.push(mark(lead));
+        }
+        row.extend(line);
+        out.push(row);
+    }
+}
+
 #[cfg(test)]
 mod real {
     /// **이 저장소의 진짜 본문**으로 돌려 본다. 합성 예제는 제가 만든 모양만
@@ -527,6 +645,40 @@ mod tests {
         // 낱말 하나가 폭보다 길면 그때는 글자에서 끊는다
         let lines = wrap_spans(&[plain("alphabetagamma")], 6);
         assert_eq!(lines.iter().map(|l| flat(l)).collect::<Vec<_>>(), ["alphab", "etagam", "ma"]);
+    }
+
+    /// **두 표면이 같은 줄을 받는다.** 줄로 펴는 일이 여기 하나에 있는 이유다 —
+    /// 표면마다 글머리와 들여쓰기를 따로 정하면 CLI 와 탐색기가 같은 본문을
+    /// 다르게 그리고, 둘을 나란히 놓고 보는 사람이 어느 쪽을 믿을지 정해야 한다.
+    #[test]
+    fn layout_is_what_both_surfaces_share() {
+        let blocks = parse("**굵게**\n\n- 하나\n  - 속\n\n> 인용\n\n    코드\n");
+        let lines = layout(&blocks, 40);
+        let flat: Vec<String> =
+            lines.iter().map(|l| l.iter().map(|s| s.text.as_str()).collect()).collect();
+
+        assert!(flat.iter().any(|l| l.contains("• 하나")), "글머리가 없다 — {flat:?}");
+        assert!(flat.iter().any(|l| l.starts_with("  • 속")), "겹친 목록이 안 물렸다 — {flat:?}");
+        assert!(flat.iter().any(|l| l.starts_with("│ 인용")), "인용 막대가 없다 — {flat:?}");
+        assert!(flat.iter().any(|l| l.contains("    코드")), "코드 들여쓰기가 없다 — {flat:?}");
+        // 표시는 글과 **다른 뜻**을 진다 — 표면이 달리 칠할 수 있어야 한다.
+        assert!(
+            lines.iter().flatten().any(|s| s.role == Role::Mark),
+            "글머리가 글과 같은 뜻으로 나왔다"
+        );
+    }
+
+    /// 이어지는 줄은 글머리 폭만큼 물린다 — 안 그러면 둘째 줄이 다음 항목처럼 보인다.
+    #[test]
+    fn wrapped_list_items_hang_under_their_bullet() {
+        let blocks = parse("- 아주 길어서 반드시 접히고도 남을 한 줄이 여기 들어간다\n");
+        let flat: Vec<String> = layout(&blocks, 20)
+            .iter()
+            .map(|l| l.iter().map(|s| s.text.as_str()).collect())
+            .collect();
+        assert!(flat.len() > 1, "안 접혔다 — {flat:?}");
+        assert!(flat[0].starts_with("• "), "{flat:?}");
+        assert!(flat[1].starts_with("  ") && !flat[1].starts_with("• "), "안 물렸다 — {flat:?}");
     }
 
     /// 빈 본문이 무너지지 않는다.

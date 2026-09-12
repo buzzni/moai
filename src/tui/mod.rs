@@ -52,6 +52,9 @@ pub struct App {
     pub trouble: Option<String>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
+    /// 본문을 그리지 않고 원문 그대로 보는가. 그린 글은 기호가 지워져
+    /// 되돌릴 수 없다 — 긁어 붙이거나 마크다운을 고칠 때 이 길이 필요하다.
+    pub raw: bool,
     /// 파일이 우리가 읽은 뒤로 바뀌었는가. **저절로 다시 읽지 않는다** —
     /// 커서가 튀기 때문이다. 바뀌었다고 말만 하고 사람이 F5 를 누른다.
     pub stale: bool,
@@ -104,6 +107,7 @@ impl App {
             path,
             cursor: 0,
             mode: Mode::Browse,
+            raw: false,
             filter_text: None,
             repo: None,
             now: crate::model::now(),
@@ -327,6 +331,7 @@ impl App {
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             KeyCode::Esc => self.clear_filter(),
             KeyCode::F(5) | KeyCode::Char('r') => self.reload(),
+            KeyCode::F(3) | KeyCode::Char('m') => self.raw = !self.raw,
             _ => {}
         }
     }

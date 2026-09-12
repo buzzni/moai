@@ -322,12 +322,45 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     if let Some(body) = &i.body {
         out.push(Line::from(""));
         out.push(Line::from(Span::styled("─".repeat(w.min(40)), dim())));
-        // **파일에서 온 글이다.** 제어문자를 걸러서 그린다.
-        for l in crate::text::sanitize(body).lines() {
-            out.push(Line::from(l.to_string()));
-        }
+        out.extend(body_lines(body, w, app.raw));
     }
     out
+}
+
+/// 본문. **줄로 펴는 일은 `markdown` 이 한다** — 글머리·들여쓰기 같은 결정이
+/// 표면마다 갈라지면 CLI 와 탐색기가 같은 본문을 다르게 그린다. 여기가 할 일은
+/// 뜻을 색으로 옮기는 것뿐이다.
+fn body_lines<'a>(body: &str, w: usize, raw: bool) -> Vec<Line<'a>> {
+    // **파일에서 온 글이다.** 파서를 거쳐도 조각 안에 ESC 가 남으므로 먼저 거른다.
+    let clean = crate::text::sanitize(body);
+    if raw {
+        return clean.lines().map(|l| Line::from(l.to_string())).collect();
+    }
+    let blocks = crate::markdown::parse(&clean);
+    crate::markdown::layout(&blocks, w.max(8))
+        .into_iter()
+        .map(|line| {
+            Line::from(
+                line.into_iter()
+                    .map(|s| Span::styled(s.text, role_style(s.role)))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect()
+}
+
+/// 뜻을 ratatui 색으로. **CLI(`view::role_style`)와 같은 뜻이 같은 모양이어야
+/// 한다** — 두 표면을 나란히 놓고 보는 사람이 어느 쪽을 믿을지 정하게 두지 않는다.
+fn role_style(r: crate::markdown::Role) -> Style {
+    use crate::markdown::Role;
+    match r {
+        Role::Plain => Style::new(),
+        Role::Strong | Role::Heading => Style::new().add_modifier(Modifier::BOLD),
+        Role::Emphasis => Style::new().add_modifier(Modifier::ITALIC),
+        Role::Code => Style::new().fg(Color::Cyan),
+        Role::Link => Style::new().fg(Color::LightBlue).add_modifier(Modifier::DIM),
+        Role::Mark => dim(),
+    }
 }
 
 /// 그 밑의 진척. **`nav` 가 자리를 정한 그대로 센다** — `report::rollup_of` 로
@@ -394,6 +427,7 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
         key("/", "검색"),
         key("f", "거름망"),
         key("F5", "갱신"),
+        key("F3", if app.raw { "그리기" } else { "원문" }),
     ];
     if app.filter_text.is_some() {
         spans.push(key("Esc", "풀기"));
@@ -772,6 +806,26 @@ mod tests {
     fn timestamps_carry_the_year_like_the_cli_does() {
         let lines = render(&mut app(), 100, 16).join("\n");
         assert!(lines.contains("2026-09-01"), "연도가 없다\n{lines}");
+    }
+
+    /// 본문이 **그려진다.** 기호가 걷히고 목록은 글머리를 얻는다.
+    #[test]
+    fn the_body_is_drawn_in_the_detail_pane() {
+        let mut issues = issues();
+        issues[1].body = Some("**굵게** 한 줄\n\n- 하나\n- 둘\n".into());
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+
+        let drawn = render(&mut a, 100, 22).join("\n");
+        assert!(!drawn.contains("**"), "굵게 기호가 남았다\n{drawn}");
+        assert!(drawn.contains('•'), "목록 글머리가 없다\n{drawn}");
+
+        // F3 으로 원문을 본다 — 그린 글은 기호가 지워져 되돌릴 수 없다
+        a.key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
+        let raw = render(&mut a, 100, 22).join("\n");
+        assert!(raw.contains("**굵게**"), "원문이 아니다\n{raw}");
+        assert!(raw.contains("- 하나"), "원문이 아니다\n{raw}");
     }
 
     /// 빈 저장소도 그려진다.

@@ -143,3 +143,7 @@
 {"ts":"2026-09-12T02:11:20Z","id":"moai-lsl9","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
 {"ts":"2026-09-12T02:11:20Z","id":"moai-ovrg","kind":"note","by":"레이븐","text":"moai-lsl9 에서 함께 해결됐다. view::body_lines 가 파싱 전에 text::sanitize 를 지나므로 ESC 가 든 본문이 화면을 다시 칠하지 못한다."}
 {"ts":"2026-09-12T02:11:20Z","id":"moai-ovrg","kind":"status","by":"레이븐","from":"todo","to":"done"}
+{"ts":"2026-09-12T02:11:20Z","id":"moai-lsl9","kind":"status","by":"레이븐","from":"review","to":"done"}
+{"ts":"2026-09-12T02:23:54Z","id":"moai-83ep","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T02:26:44Z","id":"moai-83ep","kind":"note","by":"레이븐","text":"줄로 펴는 일 자체를 markdown::layout 으로 옮겼다. 처음엔 CLI 렌더러를 view 에 두고 탐색기에도 같은 것을 썼을 뻔했는데, 글머리를 무엇으로 쓸지·인용을 어떻게 물릴지·코드에 백틱을 남길지는 뜻에 관한 결정이지 색에 관한 결정이 아니다. 표면마다 정하면 두 화면이 같은 본문을 다르게 그리고, 나란히 놓고 보는 사람이 어느 쪽을 믿을지 정해야 한다. 이제 표면이 하는 일은 Role→색 옮김 하나뿐이고, 그 대응이 갈라지지 않는지는 layout_is_what_both_surfaces_share 가 지킨다. 원문 토글은 F3(과 m). 코드 블록은 접지 않는다 — 접으면 그 줄이 더는 그 코드가 아니다."}
+{"ts":"2026-09-12T02:26:44Z","id":"moai-83ep","kind":"status","by":"레이븐","from":"in_progress","to":"review"}

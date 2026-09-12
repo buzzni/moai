@@ -579,14 +579,17 @@ pub fn body_lines(body: &str) -> Vec<String> {
     // 파일에서 온 글이다. 그리기 전에 제어문자를 걷어낸다 — ESC 가 든 줄은
     // 그대로 찍으면 화면을 다시 칠한다.
     let blocks = crate::markdown::parse(&crate::text::sanitize(body));
-    let mut out = Vec::new();
-    for (n, b) in blocks.iter().enumerate() {
-        if n > 0 {
-            out.push(String::new());
-        }
-        draw_block(&mut out, b);
-    }
-    out
+    // **줄로 펴는 일은 `markdown` 이 한다.** 글머리·들여쓰기 같은 결정이
+    // 표면마다 갈라지면 CLI 와 탐색기가 같은 본문을 다르게 그린다.
+    // 여기가 할 일은 뜻을 색으로 옮기는 것뿐이다.
+    crate::markdown::layout(&blocks, BODY)
+        .iter()
+        .map(|line| {
+            let painted: String =
+                line.iter().map(|s| paint(role_style(s.role), &s.text)).collect();
+            format!("{PAD}{painted}")
+        })
+        .collect()
 }
 
 /// 본문을 접는 폭. 터미널 폭을 묻지 않는다 — 이 저장소의 본문은 이미 손으로
@@ -595,88 +598,16 @@ const BODY: usize = 76;
 /// 본문은 상세의 다른 줄과 같은 만큼 들어간다.
 const PAD: &str = "  ";
 
-fn draw_block(out: &mut Vec<String>, b: &crate::markdown::Block) {
-    use crate::markdown::Block;
-    match b {
-        Block::Heading { level, spans } => {
-            // 수준은 들여쓰기로 말한다. `#` 을 남기면 걷어낸 보람이 없고,
-            // 굵게만으로는 2단계와 3단계가 같아 보인다.
-            let indent = format!("{PAD}{}", "  ".repeat((*level as usize).saturating_sub(1)));
-            flow(out, spans, &indent, style::HEAD);
-        }
-        Block::Para(spans) => flow(out, spans, PAD, style::PLAIN),
-        Block::Quote(spans) => {
-            // 인용은 **색이 아니라 세로줄**로 말한다.
-            let mut inner = Vec::new();
-            flow(&mut inner, spans, "", style::PLAIN);
-            out.extend(inner.into_iter().map(|l| format!("{PAD}{} {l}", paint(style::DIM, "│"))));
-        }
-        Block::List { ordered, items } => {
-            for (n, it) in items.iter().enumerate() {
-                let indent = format!("{PAD}{}", "  ".repeat(it.depth as usize));
-                let mark = if *ordered { format!("{}.", n + 1) } else { "•".into() };
-                let mut inner = Vec::new();
-                flow(&mut inner, &it.spans, "", style::PLAIN);
-                for (k, l) in inner.into_iter().enumerate() {
-                    // 이어지는 줄은 글머리 폭만큼 물려 쓴다.
-                    out.push(match k {
-                        0 => format!("{indent}{} {l}", paint(style::DIM, &mark)),
-                        _ => format!("{indent}{} {l}", " ".repeat(width(&mark))),
-                    });
-                }
-            }
-        }
-        Block::Code { lines, .. } => {
-            out.extend(lines.iter().map(|l| format!("{PAD}    {}", paint(style::CODE, l))));
-        }
-        Block::Rule => out.push(format!("{PAD}{}", paint(style::DIM, &"─".repeat(BODY / 2)))),
-        // 표는 아직 칸을 안 맞춘다 (moai-44rk). 그때까지도 **잃지는 않는다**.
-        Block::Table { head, rows } => {
-            let row = |cells: &Vec<Vec<crate::markdown::Span>>| {
-                cells
-                    .iter()
-                    .map(|c| c.iter().map(|s| s.text.as_str()).collect::<String>())
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-            };
-            out.push(format!("{PAD}{}", paint(style::HEAD, &row(head))));
-            out.extend(rows.iter().map(|r| format!("{PAD}{}", row(r))));
-        }
-    }
-}
-
-/// 조각들을 접어 칠한다. 접는 일은 `markdown` 이, 칠하는 일은 여기가 한다.
-fn flow(out: &mut Vec<String>, spans: &[crate::markdown::Span], indent: &str, base: Style) {
-    let budget = BODY.saturating_sub(width(indent)).max(8);
-    // **코드는 백틱을 남긴 채로 접는다.** 색을 끄면(`--color never`·`NO_COLOR`)
-    // 색으로만 표시한 것은 그냥 글이 되고, 그러면 `0.2` 가 판인지 숫자인지
-    // 구별할 길이 사라진다 — `색이 혼자 뜻을 지지 않는다`가 여기에도 걸린다.
-    // 굵게·기울임은 글맛이지 낱말의 정체가 아니라 색과 함께 사라져도 된다.
-    let marked: Vec<crate::markdown::Span> = spans
-        .iter()
-        .map(|s| match s.role {
-            crate::markdown::Role::Code => {
-                crate::markdown::Span { text: format!("`{}`", s.text), role: s.role }
-            }
-            _ => s.clone(),
-        })
-        .collect();
-    for line in crate::markdown::wrap_spans(&marked, budget) {
-        let painted: String =
-            line.iter().map(|s| paint(role_style(s.role, base), &s.text)).collect();
-        out.push(format!("{indent}{painted}"));
-    }
-}
-
 /// 뜻을 색·속성으로. **여기가 이 표면의 몫이다** — `markdown` 은 뜻만 낸다.
-fn role_style(r: crate::markdown::Role, base: Style) -> Style {
+fn role_style(r: crate::markdown::Role) -> Style {
     use crate::markdown::Role;
     match r {
-        Role::Plain => base,
-        Role::Strong => style::STRONG,
+        Role::Plain => style::PLAIN,
+        Role::Strong | Role::Heading => style::STRONG,
         Role::Emphasis => style::EM,
         Role::Code => style::CODE,
         Role::Link => style::EPIC_REF,
+        Role::Mark => style::DIM,
     }
 }
 
