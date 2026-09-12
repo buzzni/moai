@@ -7,7 +7,7 @@
 use super::{Ctx, Fail, R};
 use crate::cli::ShowArgs;
 use crate::model::{self, Issue, Kind};
-use crate::query::{Filter, Raw};
+use crate::query::{Filter, Raw, Sel};
 use crate::report;
 use crate::store::Repo;
 use crate::view;
@@ -36,6 +36,25 @@ fn resolve(target: Option<&str>) -> R<Target> {
             super::code::BAD_TARGET,
         )),
     }
+}
+
+/// 담당의 `me` 를 지금 사람으로 바꾼다. **`Filter::build` 뒤에 한다.**
+///
+/// `query` 는 순수 함수라 지금 사람이 누구인지 모르므로 푸는 일은 여기 몫이다.
+/// 다만 argv 를 넘기기 *전에* 풀면 두 군데가 어긋난다 — `--filter assignee=me`
+/// 는 `build` 안에서야 항이 되므로 손이 닿지 않아 `me` 라는 이름을 찾게 되고,
+/// 미리 푼 `이름 (메일)` 은 뒤이어 쉼표로 다시 쪼개져 이름에 쉼표가 든 사람을
+/// 영영 못 찾는다. 쪼개진 뒤의 항을 바꾸면 두 문제가 같이 없어진다.
+fn resolve_me(sel: &mut [Sel], ctx: &Ctx) -> R<()> {
+    for one in sel {
+        if let Sel::Is(v) = one
+            && v == "me"
+        {
+            let me = model::actor(ctx.user.as_deref())?;
+            *one = Sel::Is(format!("{} ({})", me.name, me.email));
+        }
+    }
+    Ok(())
 }
 
 /// 목록 자리에서만 뜻이 있는 플래그가 왔는가. 온 것 중 첫 이름을 돌려준다.
@@ -108,22 +127,8 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         Target::OfKind(k) => Some(k),
         _ => a.kind,
     };
-    // `me` 만 여기서 푼다 — `query` 는 순수 함수라 지금 사람이 누구인지 모른다.
-    // 푼 값은 `이름 (메일)` 한 덩이다. 쉼표로 이어 붙이지 않는다 — 이름에
-    // 쉼표가 든 사람이 있고, 그러면 `query` 가 그 자리에서 항을 둘로 쪼갠다.
-    let assignee = a
-        .assignee
-        .iter()
-        .map(|one| {
-            if one != "me" {
-                return Ok(one.clone());
-            }
-            let me = crate::model::actor(ctx.user.as_deref())?;
-            Ok(format!("{} ({})", me.name, me.email))
-        })
-        .collect::<R<Vec<String>>>()?;
     // argv 를 그대로 옮겨 담을 뿐이다. 뜻을 정하는 것은 `query` 다.
-    let filter = Filter::build(Raw {
+    let mut filter = Filter::build(Raw {
         status: a.status,
         tag: a.tag,
         no_tag: a.no_tag,
@@ -131,7 +136,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         milestone: a.milestone,
         parent: a.parent,
         priority: a.priority,
-        assignee,
+        assignee: a.assignee,
         kind,
         grep: a.grep,
         stale: a.stale,
@@ -139,6 +144,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         filter: a.filter,
     })
     .map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
+    resolve_me(&mut filter.assignee, ctx)?;
 
     // 모르는 칸은 거부한다. 조용히 0건을 내면 `-s in-progress` 같은 오타가
     // "그 칸은 비었다" 와 구별되지 않는다 — `add`·`mv` 는 이미 거부한다.
