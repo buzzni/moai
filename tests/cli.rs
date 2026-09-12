@@ -2617,3 +2617,20 @@ fn a_thought_does_not_hang_under_a_milestone_either() {
     assert!(!out.contains(&thought), "머리글이 안 세는 줄을 그 밑에 그렸다 — {out}");
 }
 
+
+// ── 리뷰가 잡은 것 ───────────────────────────────────────────────────
+
+/// **미뤄 둔 묶음은 표에서도 안 꾸짖는다.** `report` 가 `finished_epic` 을
+/// 그 자로 빼 두는데 표만 노란 글씨로 계속 재촉하면 반만 조용해진 것이다.
+#[test]
+fn a_deferred_epic_is_not_nagged_in_the_table_either() {
+    let s = init("defertable");
+    let epic = ok(s.path(), &["epic", "add", "다음 분기", "-q"]).trim().to_string();
+    let one = add(s.path(), &["일", "-e", &epic]);
+    ok(s.path(), &["mv", &one, "done"]);
+    ok(s.path(), &["defer", &epic]);
+    let out = ok(s.path(), &["status"]);
+    assert!(!out.contains("닫을 때가 됐다"), "미룬 묶음을 표가 재촉한다 — {out}");
+    assert!(out.contains("미룸"), "무엇이 미뤄졌는지 낱말로 안 말한다 — {out}");
+}
+

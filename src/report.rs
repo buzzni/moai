@@ -46,14 +46,30 @@ pub fn is_epic(i: &Issue) -> bool {
     i.kind == Kind::Epic
 }
 
+/// 지금 계획에서 빼 둔 것인가. **끝난 줄은 미룬 것이 아니다.**
+///
+/// 미루기는 "지금 안 한다" 는 말이라 이미 끝난 일에는 걸 것이 없다. 여기서
+/// 닫힌 것을 안 빼면 미뤘다 끝낸 줄이 보드의 `done` 칸과 흐름에서만 사라져
+/// 롤업과 어긋난다 — 한 화면이 같은 두 이슈를 `done 1` 과 `2/2` 로 말한다.
+///
+/// **이 술어가 미룸의 정의다.** `report` 안에서도 `cmd` 에서도 여기 하나를
+/// 쓴다 — 손으로 벌여 적으면 세는 쪽과 보여 주는 쪽이 갈라진다.
+pub fn is_put_off(i: &Issue) -> bool {
+    i.is_deferred() && !i.status.is_done()
+}
+
 /// 지금 계획에 있는 일인가. **`is_work` 에서 미뤄 둔 것을 뺀다.**
 ///
-/// 세는 자리는 대부분 이쪽을 쓴다 — 보드·`ready`·경고·흐름은 "지금 할 수
+/// 세는 자리는 대부분 이쪽을 쓴다 — 보드·`ready`·경고는 "지금 할 수
 /// 있는 것" 을 묻는다. **롤업만 `is_work` 를 그대로 쓴다**: 다섯 중 둘을
 /// 미뤘다고 `3건짜리 에픽` 이 되면 미루는 것이 계획을 고쳐 쓰는 일이 되고,
 /// 멤버를 전부 미룬 에픽이 `속이 빈 에픽` 으로 고발당한다.
+///
+/// **흐름도 `is_work` 를 쓴다.** 흐름은 "지금 무엇을 할 수 있나" 가 아니라
+/// "지난 이레에 무엇이 있었나" 라, 오늘 미룬다고 그저께 만든 사실이 사라지면
+/// 미루기가 쌓임 경고를 지우는 손잡이가 된다.
 pub fn is_active(i: &Issue) -> bool {
-    is_work(i) && !i.is_deferred()
+    is_work(i) && !is_put_off(i)
 }
 
 /// 담아 둔 생각인가. **술어를 `cmd/` 에 두지 않는다** — 어떤 줄이 무엇인지
@@ -752,7 +768,7 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     //      **미뤄 둔 생각은 안 센다.** 여기 세면 이 줄이 가리키는 `moai idea
     //      ls` 가 그것을 숨겨, 세어 놓고 못 보여 주는 수가 된다 — 미룬 것은
     //      아래 6-3 이 제 이름으로 말한다.
-    let piled = |i: &&Issue| is_idea(i) && !i.status.is_done() && !i.is_deferred();
+    let piled = |i: &&Issue| is_idea(i) && !i.status.is_done() && !is_put_off(i);
     let count = issues.iter().filter(piled).count();
     if count >= IDEA_PILE {
         let oldest = issues
@@ -778,7 +794,7 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     //      **종류를 안 가린다.** 미루는 길(`moai defer`)은 무엇이든 받는데
     //      `is_work` 로 좁히면 미뤄 둔 에픽·생각이 목록에서만 사라지고 여기서
     //      한마디도 안 나온다 — 보이는 유일한 자리가 그 줄만 안 비추는 꼴이다.
-    let put_off = |i: &&Issue| i.is_deferred() && !i.status.is_done();
+    let put_off = |i: &&Issue| is_put_off(i);
     let count = issues.iter().filter(put_off).count();
     if count > 0 {
         let oldest = issues
@@ -819,10 +835,16 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     }
 
     // 흐름. 만드는 속도가 끝내는 속도를 넘으면 쌓인다.
+    //
+    // **여기만 `is_work` 로 센다.** 위의 `work` 는 "지금 계획" 이고 이 줄은
+    // "지난 이레에 있었던 일" 이라 묻는 것이 다르다 — 미뤄 둔 것을 여기서
+    // 빼면 오늘 셋을 미루는 것만으로 `생성 5 · 쌓이는 중 +5` 가
+    // `생성 2 · +2` 가 되어, 미루기가 쌓임 경고를 지우는 손잡이가 된다.
     let within = |at: &str| days_since(at, now).is_some_and(|d| (0..FLOW_DAYS).contains(&d));
-    let created = work.iter().filter(|i| within(&i.created_at)).count();
+    let happened: Vec<&Issue> = issues.iter().filter(|i| is_work(i)).collect();
+    let created = happened.iter().filter(|i| within(&i.created_at)).count();
     let closed =
-        work.iter().filter(|i| i.status.is_done() && within(&i.status_since)).count();
+        happened.iter().filter(|i| i.status.is_done() && within(&i.status_since)).count();
 
     StatusReport {
         counts,
@@ -1623,5 +1645,48 @@ mod tests {
         let w = st.warnings.iter().find(|w| w.kind == "deferred").expect("미뤄 둔 에픽이 안 보인다");
         assert_eq!(w.count, 1);
         assert!(w.notice);
+    }
+
+    /// **미뤘다 끝낸 줄은 끝난 줄이다.** 보드가 그것을 done 칸에서 빼면, 같은
+    /// 화면의 롤업은 `2/2` 인데 위의 칸은 `done 1` 이라 말한다 — 한 화면이
+    /// 같은 두 이슈를 두 수로 세는 것이고, 어느 쪽도 못 믿게 된다.
+    #[test]
+    fn closing_a_deferred_row_puts_it_back_on_the_board() {
+        let mut shelved = member("argos-0002", "argos-0001", "done");
+        shelved.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "todo"),
+            shelved,
+            member("argos-0003", "argos-0001", "done"),
+        ];
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let rolls = rollup(&issues, &cfg());
+        let r = roll_of(&rolls, Some("argos-0001"));
+        assert_eq!(st.counts.get("done"), Some(&2), "미뤘다 끝낸 줄을 보드가 잃었다 — {:?}", st.counts);
+        assert_eq!(st.total, 2, "{:?}", st.counts);
+        assert_eq!((r.done, r.total), (2, 2), "롤업과 보드가 다른 수를 말한다 — {r:?}");
+        assert!(
+            !st.warnings.iter().any(|w| w.kind == "deferred"),
+            "끝난 것을 아직 미뤄 둔 것이라 센다 — {:?}",
+            st.warnings
+        );
+    }
+
+    /// **흐름은 지난 이레의 기록이지 지금 계획이 아니다.** 여기서 미뤄 둔 것을
+    /// 빼면 오늘 셋을 미루는 것만으로 `쌓이는 중 +5` 가 `+2` 가 되어, 미루기가
+    /// 경고를 지우는 손잡이가 된다.
+    #[test]
+    fn deferring_does_not_rewrite_what_already_happened() {
+        let issues: Vec<Issue> =
+            (0..5).map(|n| make(&format!("argos-000{n}"), Kind::Issue, "todo")).collect();
+        let before = status(&issues, &[], &cfg(), "2026-09-02T00:00:00Z").flow;
+        let mut after = issues;
+        for i in after.iter_mut().take(3) {
+            i.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        }
+        let after = status(&after, &[], &cfg(), "2026-09-02T00:00:00Z").flow;
+        assert_eq!(before.created, 5, "{before:?}");
+        assert_eq!(after.created, before.created, "미루자 만든 사실이 사라졌다 — {after:?}");
+        assert_eq!(after.net, before.net, "{after:?}");
     }
 }

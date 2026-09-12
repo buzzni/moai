@@ -550,12 +550,17 @@ pub fn status(st: &StatusReport, issues: &[Issue], cfg: &Config, now: &str, at: 
         for e in rolls {
             // 이미 닫힌 묶음에 "닫을 때가 됐다" 를 내면, 시킨 대로 했는데도
             // 잔소리가 남는다. 한 번 하면 사라져야 말을 듣는다.
-            let still_open = e
-                .id
-                .as_deref()
-                .and_then(|id| by_id.get(id))
-                .is_some_and(|i| !i.status.is_done());
+            //
+            // **미뤄 둔 묶음에도 안 낸다.** `report` 가 `finished_epic` 경고를
+            // 그 자로 빼 두는데(`put_off_group`) 표만 노란 글씨로 계속 재촉하면
+            // 반만 조용해진 것이고, 미룰수록 잔소리가 는다는 그 실패가 이 줄에
+            // 그대로 남는다. 대신 무엇이 미뤄졌는지는 낱말로 말한다 — 색만으로
+            // 뜻을 지는 자리를 만들지 않는다.
+            let row = e.id.as_deref().and_then(|id| by_id.get(id));
+            let still_open = row.is_some_and(|i| !i.status.is_done());
+            let put_off = row.is_some_and(|i| crate::report::is_put_off(i));
             let note = match e.percent {
+                _ if put_off => paint(style::DIM, "   미룸"),
                 None => paint(style::DIM, "   자식 없음"),
                 Some(100) if still_open => paint(style::WARN, "   닫을 때가 됐다"),
                 _ => String::new(),

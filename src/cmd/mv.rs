@@ -119,7 +119,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // 나오므로 미뤘다는 것이 더는 그 줄이 안 보이는 까닭이 아니고, `--undo`
     // 는 끝난 일을 계획에 도로 넣으라는 엉뚱한 말이 된다 — `status` 의
     // `미뤄 둔 것` 줄도 같은 자로 닫힌 것을 뺀다.
-    for (i, _) in moved.done.iter().filter(|(i, _)| i.is_deferred() && !i.status.is_done()) {
+    for (i, _) in moved.done.iter().filter(|(i, _)| crate::report::is_put_off(i)) {
         out.push(format!(
             "{}  {}",
             paint(style::ID, &i.id),
