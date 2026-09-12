@@ -36,12 +36,35 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         // 막는 쪽의 존재는 **더할 때만** 따진다. `--unblocks` 만이면 그것이
         // 이미 지워졌을 수 있고, 그때도 남은 참조는 풀려야 한다 — 아니면
         // `status` 가 드러낸 끊긴 참조를 손으로 파일을 고쳐야만 없앨 수 있다.
-        if !args.blocks.is_empty() && !issues.iter().any(|i| i.id == args.id) {
-            return Err(Fail::not_found(&args.id));
+        if !args.blocks.is_empty() {
+            let Some(blocker) = issues.iter().find(|i| i.id == args.id) else {
+                return Err(Fail::not_found(&args.id));
+            };
+            // **담아 둔 생각은 막지 않는다.** idea 는 보통 `done` 에 닿지
+            // 않으므로, 막게 두면 막힌 이슈가 영영 안 풀리면서 `status` 는
+            // 그것을 "계획이 멈춘 자리" 로 센다 — 도구가 스스로 만든 막다른
+            // 길이고, 막는 쪽이 목록에 안 나오니 풀 방법도 안 보인다.
+            if crate::report::is_idea(blocker) {
+                return Err(Fail::coded(
+                    format!(
+                        "{} 는 담아 둔 생각이라 막을 수 없다 — 생각은 닫히지 않으니 영영 안 풀린다.\n      \
+                         먼저 `moai idea promote {} --from -` 으로 펼친다",
+                        args.id, args.id
+                    ),
+                    super::code::BAD_TARGET,
+                ));
+            }
         }
         for (target, wants_block) in &edits {
-            if !issues.iter().any(|i| &i.id == target) {
+            let Some(t) = issues.iter().find(|i| &i.id == target) else {
                 return Err(Fail::not_found(target));
+            };
+            // 막히는 쪽도 마찬가지다. 생각은 집는 것이 아니라서 막힐 것도 없다.
+            if *wants_block && crate::report::is_idea(t) {
+                return Err(Fail::coded(
+                    format!("{target} 는 담아 둔 생각이라 막힐 것이 없다 — 생각은 집는 것이 아니다"),
+                    super::code::BAD_TARGET,
+                ));
             }
             if *wants_block && creates_cycle(issues, &args.id, target) {
                 return Err(Fail::coded(

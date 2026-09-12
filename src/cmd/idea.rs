@@ -6,7 +6,7 @@
 use super::{Ctx, Fail, R};
 use crate::cli::PromoteArgs;
 use crate::draft;
-use crate::model::{self, Issue, JournalEntry, Kind, Status};
+use crate::model::{self, Issue, JournalEntry, Status};
 use crate::store::Repo;
 use crate::style::{self, paint};
 
@@ -27,6 +27,25 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     let src = crate::cmd::add::read_source(&args.from)?;
     let drafts = draft::parse(&src).map_err(|e| Fail::coded(e, super::code::BAD_INPUT))?;
+
+    // **연습도 진짜와 같은 것을 본다.** 연습이 승인의 자리인데 거기서
+    // 못 할 일을 하겠다고 말하면, 사람이 "좋다" 한 뒤에야 도구가 거절한다.
+    // 쓰지 않을 뿐이지 덜 보는 것이 아니다.
+    let load = repo.read()?;
+    super::report_load_errors(&repo.issues_path(), &load.errors);
+    let thought = load
+        .get(&args.id)
+        .ok_or_else(|| Fail::coded(format!("{} 를 못 찾았다", args.id), super::code::NOT_FOUND))?;
+    if !crate::report::is_idea(thought) {
+        return Err(Fail::coded(
+            format!(
+                "{} 는 idea 가 아니라 {} 다 — 펼치면 까닭 없이 닫힌다",
+                args.id,
+                thought.kind.as_str()
+            ),
+            super::code::BAD_TARGET,
+        ));
+    }
 
     // **연습은 저장소를 안 만진다.** AI 가 펼친 안을 사람이 한 번 보고
     // "좋다" 하는 자리라, 여기서 쓰면 그 "좋다" 가 뒤늦은 말이 된다.
@@ -53,7 +72,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             .position(|i| i.id == args.id)
             .ok_or_else(|| Fail::coded(format!("{} 를 못 찾았다", args.id), super::code::NOT_FOUND))?;
         let thought = &issues[at_idea];
-        if thought.kind != Kind::Idea {
+        // 락 밖에서 이미 봤지만 다시 본다 — 그 사이에 누가 지우거나 바꿨을
+        // 수 있고, 쓰기가 믿을 것은 락 안에서 읽은 것뿐이다.
+        if !crate::report::is_idea(thought) {
             return Err(Fail::coded(
                 format!(
                     "{} 는 idea 가 아니라 {} 다 — 펼치면 까닭 없이 닫힌다",
@@ -67,13 +88,20 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         let was = thought.status.clone();
         // 담아 둔 생각의 담당을 물려준다. 펼친 계획의 임자가 없으면 `ready` 가
         // 집으라고 내면서 누가 집는지는 말하지 않는다.
-        let heir = thought.assignee.as_ref().map(|name| match &thought.assignee_email {
-            Some(mail) => format!("{name} ({mail})"),
-            None => name.clone(),
-        });
+        // **`-a none` 은 뜻이 있는 값이다.** 없는 것으로 접으면 `add` 가
+        // "안 적었다" 로 읽어 펼치는 사람에게 전부 떠넘긴다 — 연습 삼아 담아
+        // 둔 것이 남의 일이 된다. 합치는 것은 `model::label` 한 곳이다.
+        let heir = match &thought.assignee {
+            Some(name) => crate::model::label(
+                name,
+                thought.assignee_email.as_deref(),
+                crate::config::Naming::Full,
+            ),
+            None => "none".to_string(),
+        };
 
         let (mut entries, made) =
-            crate::cmd::add::create_drafts(issues, cfg, &drafts, heir.as_deref(), &by, &at)?;
+            crate::cmd::add::create_drafts(issues, cfg, &drafts, Some(&heir), &by, &at)?;
 
         // **어느 쪽에서 봐도 이어진다.** 펼친 계획에서 "어디서 나왔나" 를
         // 물을 수도, 담아 둔 생각에서 "무엇이 됐나" 를 물을 수도 있다.

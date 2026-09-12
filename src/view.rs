@@ -61,18 +61,38 @@ fn title_style(i: &Issue) -> Style {
     if is_group(i) { style::EPIC } else { style::PLAIN }
 }
 
+/// 목록이 안 낸 것. **수와 함께 무엇으로 켜는지까지 들고 다닌다** — 숫자
+/// 둘을 맨몸으로 넘기면 부르는 쪽이 순서를 바꿔도 컴파일러가 안 잡는다.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Hidden {
+    pub done: usize,
+    pub ideas: usize,
+}
+
+impl Hidden {
+    /// "무엇 N건 숨김 — `플래그`" 조각들. 숨긴 것이 없으면 비어 있다.
+    fn says(&self) -> Vec<String> {
+        [(self.done, "done", "--all"), (self.ideas, "idea", "--type idea")]
+            .into_iter()
+            .filter(|(n, _, _)| *n > 0)
+            .map(|(n, what, how)| format!("{what} {n}건 숨김 — `{how}`"))
+            .collect()
+    }
+}
+
 /// 목록. 비어 있으면 빈 줄이 아니라 왜 비었는지를 말한다.
 pub fn list(
     issues: &[Issue],
     cfg: &Config,
-    hidden_done: usize,
+    hidden: Hidden,
     epics: &BTreeMap<&str, String>,
 ) -> Vec<String> {
     if issues.is_empty() {
-        return vec![if hidden_done > 0 {
-            format!("없다. done {hidden_done}건은 숨겼다 — `--all`")
-        } else {
+        let why = hidden.says();
+        return vec![if why.is_empty() {
             "없다.".into()
+        } else {
+            format!("없다. {}", why.join(" · "))
         }];
     }
 
@@ -128,11 +148,11 @@ pub fn list(
     }
 
     out.push(String::new());
-    out.push(summary(issues, cfg, hidden_done));
+    out.push(summary(issues, cfg, hidden));
     out
 }
 
-fn summary(issues: &[Issue], cfg: &Config, hidden_done: usize) -> String {
+fn summary(issues: &[Issue], cfg: &Config, hidden: Hidden) -> String {
     let counts: Vec<String> = cfg
         .statuses
         .iter()
@@ -142,11 +162,9 @@ fn summary(issues: &[Issue], cfg: &Config, hidden_done: usize) -> String {
         })
         .collect();
     let mut line = format!("{}건 ({})", issues.len(), counts.join(" · "));
-    if hidden_done > 0 {
-        line.push_str(&paint(
-            style::DIM,
-            &format!("     done {hidden_done}건 숨김 — `--all`"),
-        ));
+    let why = hidden.says();
+    if !why.is_empty() {
+        line.push_str(&paint(style::DIM, &format!("     {}", why.join(" · "))));
     }
     line
 }
@@ -436,7 +454,7 @@ fn says(w: &Warning) -> String {
         "dangling_blocked_by" => format!("없는 이슈에게 막혀 있다는 것 {n}건"),
         // **알림이지 경고가 아니다.** 고칠 것이 있다는 말이 아니라, 담아 둔
         // 것을 한 번 펼쳐 볼 때가 됐다는 말이다.
-        "idea_pile" => match w.days {
+        "idea_pile" => match w.oldest {
             Some(d) => format!("쌓인 idea {n}건 (가장 오래된 것 {d}일)"),
             None => format!("쌓인 idea {n}건"),
         },
@@ -524,8 +542,7 @@ pub fn status(st: &StatusReport, issues: &[Issue], cfg: &Config, now: &str, at: 
         //
         // **`?` 는 못 쓴다** — 보드에서 `review` 칸의 글리프다. 한 화면에서
         // 한 글자가 두 뜻을 지면 어느 쪽도 못 믿는다.
-        let notice = w.kind == "idea_pile";
-        let (mark, glyph) = match (w.fatal, notice) {
+        let (mark, glyph) = match (w.fatal, w.notice) {
             (true, _) => (style::ERROR, "!"),
             (_, true) => (style::DIM, "+"),
             _ => (style::WARN, "!"),
@@ -894,7 +911,7 @@ mod tests {
             issue("argos-0001", "한글 제목이다", "todo"),
             issue("argos-0002", "ascii title", "review"),
         ];
-        let out = plain(&list(&issues, &cfg(), 0, &no_epics()));
+        let out = plain(&list(&issues, &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics()));
         let cols: Vec<usize> = out[1..3]
             .iter()
             .map(|l| width(l.split_once("  ").unwrap().0))
@@ -912,7 +929,7 @@ mod tests {
     #[test]
     fn header_lines_up_with_rows() {
         let issues = vec![issue("argos-0001", "제목이다", "todo")];
-        let out = plain(&list(&issues, &cfg(), 0, &no_epics()));
+        let out = plain(&list(&issues, &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics()));
         let head_at = width(&out[0][..out[0].find("제목").unwrap()]);
         let row_at = width(&out[1][..out[1].find("제목이다").unwrap()]);
         assert_eq!(head_at, row_at, "{out:#?}");
@@ -920,14 +937,14 @@ mod tests {
 
     #[test]
     fn empty_list_says_why() {
-        assert_eq!(plain(&list(&[], &cfg(), 0, &no_epics()))[0], "없다.");
-        assert!(plain(&list(&[], &cfg(), 3, &no_epics()))[0].contains("done 3건"));
+        assert_eq!(plain(&list(&[], &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics()))[0], "없다.");
+        assert!(plain(&list(&[], &cfg(), Hidden { done: 3, ..Hidden::default() }, &no_epics()))[0].contains("done 3건"));
     }
 
     #[test]
     fn summary_counts_each_column() {
         let issues = vec![issue("argos-0001", "a", "todo"), issue("argos-0002", "b", "todo")];
-        let out = plain(&list(&issues, &cfg(), 5, &no_epics()));
+        let out = plain(&list(&issues, &cfg(), Hidden { done: 5, ..Hidden::default() }, &no_epics()));
         let last = out.last().unwrap();
         assert!(last.starts_with("2건 (todo 2)"), "{last}");
         assert!(last.contains("done 5건 숨김"), "{last}");
@@ -936,7 +953,7 @@ mod tests {
     #[test]
     fn long_titles_are_clipped_not_wrapped() {
         let long = "가".repeat(80);
-        let out = plain(&list(&[issue("argos-0001", &long, "todo")], &cfg(), 0, &no_epics()));
+        let out = plain(&list(&[issue("argos-0001", &long, "todo")], &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics()));
         assert!(out[1].ends_with('…'), "{:?}", out[1]);
         assert!(width(&out[1]) < 80, "{:?}", out[1]);
     }
@@ -1017,12 +1034,12 @@ mod tests {
         let mut i = issue("argos-0002", "멤버", "todo");
         i.epic = Some("argos-0001".into());
         let labels = BTreeMap::from([("argos-0002", "저장 계층".to_string())]);
-        let out = plain(&list(&[i.clone()], &cfg(), 0, &labels));
+        let out = plain(&list(&[i.clone()], &cfg(), Hidden::default(), &labels));
         assert!(out[1].contains("저장 계층") && !out[1].contains("argos-0001"), "{out:#?}");
 
         // 없는 에픽을 가리켜도 죽지 않고 그렇다고 말한다
         let dangling = BTreeMap::from([("argos-0002", "(없는 에픽)".to_string())]);
-        let out = plain(&list(&[i], &cfg(), 0, &dangling));
+        let out = plain(&list(&[i], &cfg(), Hidden::default(), &dangling));
         assert!(out[1].contains("(없는 에픽)"), "{out:#?}");
     }
 

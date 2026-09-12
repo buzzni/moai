@@ -2089,3 +2089,79 @@ fn a_child_of_a_thought_stays_under_it() {
     let inside = ok(s.path(), &["tui", "--json", "--path", &parent]);
     assert!(inside.contains(&child), "열었는데 자식이 없다 — {inside}");
 }
+
+/// **담아 둔 생각이 일을 가로막지 않는다.** idea 를 이슈 밑에 달아 두면
+/// 그 이슈가 `ready` 에서 사라졌다 — 그런데 idea 는 어느 목록에도 안 나오니
+/// 왜 사라졌는지 볼 방법이 없었다. 조용히 멈추는 것이 제일 나쁘다.
+#[test]
+fn a_thought_parked_under_work_does_not_stall_it() {
+    let s = init("ideachild");
+    let work = add(s.path(), &["진짜 일"]);
+    ok(s.path(), &["idea", "add", "나중에 볼 것", "--parent", &work, "-q"]);
+    let r = ok(s.path(), &["ready"]);
+    assert!(r.contains(&work), "담아 둔 생각이 일을 멈춰 세웠다 — {r}");
+}
+
+/// 생각은 막는 것이 아니다. idea 는 보통 `done` 에 닿지 않으므로, 막게 두면
+/// 막힌 이슈가 영영 안 풀리고 `status` 는 그것을 "계획이 멈춘 자리" 로 센다.
+#[test]
+fn a_thought_cannot_block_work() {
+    let s = init("ideablock");
+    let thought = ok(s.path(), &["idea", "add", "먼저 생각", "-q"]).trim().to_string();
+    let work = add(s.path(), &["막힐 일"]);
+    let out = moai(s.path(), &["link", &thought, "--blocks", &work]);
+    assert!(!out.status.success(), "생각이 일을 막게 뒀다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("promote"), "어디로 가야 하는지 안 말한다 — {err}");
+    assert!(ok(s.path(), &["ready"]).contains(&work), "거부해 놓고 막았다");
+}
+
+/// 연습이 승인의 자리다. 그 자리가 못 할 일을 하겠다고 말하면, 사람이
+/// "좋다" 한 뒤에야 도구가 거절한다.
+#[test]
+fn the_rehearsal_checks_what_the_real_run_checks() {
+    let s = init("ideadrycheck");
+    let work = add(s.path(), &["진짜 일"]);
+    for target in [work.as_str(), "argos-zzzz"] {
+        let out = from_stdin(
+            s.path(),
+            &["idea", "promote", target, "--from", "-", "--dry-run"],
+            "# 가\n- 나\n",
+        );
+        assert!(!out.status.success(), "{target} 를 펼치겠다고 했다");
+    }
+}
+
+/// `-a none` 으로 담은 생각은 임자 없이 펼쳐진다. 연습 삼아 담아 둔 것이
+/// 펼치는 순간 누군가의 일이 되면, 그 사람은 시키지도 않은 일을 떠안는다.
+#[test]
+fn promoting_keeps_the_thought_unowned() {
+    let s = init("ideaowner");
+    let id = ok(s.path(), &["idea", "add", "임자 없는 생각", "-a", "none", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--json"], "# 가\n- 나\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let made = String::from_utf8(out.stdout).unwrap();
+    assert!(!made.contains("assignee"), "임자 없이 담은 것에 임자가 붙었다 — {made}");
+}
+
+/// 종류를 `--type` 으로 적어도 같은 자리에서 막힌다. 한쪽 철자만 막으면
+/// 다른 철자가 그대로 보드에 이슈를 만든다.
+#[test]
+fn a_plan_cannot_be_poured_in_as_a_type_flag_either() {
+    let s = init("ideatypefrom");
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--type", "idea"], "# 묶음\n- 하나\n");
+    assert!(!out.status.success(), "idea 라 적었는데 에픽과 이슈를 만들었다");
+    assert_eq!(issues(s.path()), "", "거부해 놓고 썼다");
+}
+
+/// 담아 둔 것이 있는데 목록이 그냥 "없다." 라고 하면, 방금 담은 사람은
+/// 파일이 비었다고 믿는다. done 을 숨길 때 그 수를 말하는 것과 같은 규칙이다.
+#[test]
+fn an_empty_list_says_the_thoughts_are_hidden() {
+    let s = init("ideahiddencount");
+    for n in 0..3 {
+        ok(s.path(), &["idea", "add", &format!("생각 {n}"), "-q"]);
+    }
+    let out = ok(s.path(), &["show"]);
+    assert!(out.contains('3') && out.contains("idea"), "숨긴 것을 안 센다 — {out}");
+}

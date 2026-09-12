@@ -142,6 +142,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         grep: a.grep,
         stale: a.stale,
         all: a.all,
+        ideas: false,
         filter: a.filter,
     })
     .map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
@@ -158,13 +159,19 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 그 규칙을 끈 채(`all`) 걸러 놓고 숨긴 것을 세기만 한다 — 두 번 훑으면
     // 두 판단이 어긋날 자리가 생긴다.
     let hide_done = !filter.all && filter.status.is_empty();
-    let wide = Filter { all: true, ..filter };
+    let hide_ideas = !filter.ideas;
+    // **숨긴 것도 센다.** 담아 둔 생각뿐인 저장소에서 `moai show` 가 그냥
+    // "없다." 라고 하면, 방금 담은 사람은 파일이 비었다고 믿는다 — done 을
+    // 숨길 때 그 수를 말하는 것과 같은 규칙이다.
+    let wide = Filter { all: true, ideas: true, ..filter };
     let wh = crate::query::Where::of(&load.issues);
     let mut shown: Vec<Issue> = Vec::new();
-    let mut hidden = 0usize;
+    let mut hidden = view::Hidden::default();
     for i in load.issues.iter().filter(|i| wide.matches(i, &now, &wh)) {
-        if hide_done && i.status.is_done() {
-            hidden += 1;
+        if hide_ideas && report::is_idea(i) {
+            hidden.ideas += 1;
+        } else if hide_done && i.status.is_done() {
+            hidden.done += 1;
         } else {
             shown.push(i.clone());
         }

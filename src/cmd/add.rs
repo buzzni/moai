@@ -57,7 +57,9 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         // 네임스페이스는 그래도 뜻이 통하지만(`epic add --from` 은 에픽을
         // 낸다) idea 는 정반대다 — 일로 세지 않으려고 담은 것이 그대로
         // 보드에 선다. 조용히 그렇게 하느니 어디로 가야 하는지 말한다.
-        if kind_override == Some(Kind::Idea) {
+        // **두 철자를 한 자리에서 막는다.** `--type idea` 만 지나가면 그쪽이
+        // 그대로 보드에 이슈를 만든다.
+        if kind_override.or(args.kind) == Some(Kind::Idea) {
             return Err(Fail::coded(
                 "생각은 제목 하나로 담는다 — `moai idea add \"반짝 떠오른 것\"`\n      \
                  마크다운으로 에픽과 이슈를 펼치는 것은 `moai idea promote <id> --from -` 다"

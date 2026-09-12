@@ -234,10 +234,14 @@ impl App {
         self.path = good;
     }
 
+    /// **알림은 안 센다.** 배너는 "드러난 것 N건" 이라고 말하는데, 담아 둔
+    /// 생각이 쌓였다는 알림을 거기 더하면 생각을 담을수록 화면이 고쳐야 할
+    /// 것이 늘었다고 말한다 — 그러면 안 담게 된다. 무엇이 알림인지는
+    /// `report` 가 `notice` 로 들고 있으므로 여기서 다시 판단하지 않는다.
     fn count_warnings(&mut self) {
         let lines: Vec<usize> = (0..self.unreadable).collect();
         let st = crate::report::status(&self.issues, &lines, &self.cfg, &self.now);
-        self.warnings = st.warnings.len();
+        self.warnings = st.warnings.iter().filter(|w| !w.notice).count();
     }
 
     /// 파일이 우리가 읽은 뒤로 바뀌었는지 본다. **고친 때만 보면 놓친다** —
@@ -293,7 +297,7 @@ impl App {
     fn build_filter(&self, mode: &Mode) -> Result<Filter, String> {
         let raw = match mode {
             Mode::Grep(q) => Raw { grep: Some(q.clone()), all: true, ..Raw::default() },
-            Mode::Filter(q) => Raw { filter: split_filter(q), all: true, ..Raw::default() },
+            Mode::Filter(q) => Raw { filter: split_filter(q), all: true, ideas: true, ..Raw::default() },
             Mode::Browse => Raw::default(),
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이

@@ -56,6 +56,10 @@ pub struct Filter {
     pub stale: Option<i64>,
     /// done 을 포함한다.
     pub all: bool,
+    /// 담아 둔 생각까지 포함한다. **`all` 과 같은 자리의 축이다** — 기본으로
+    /// 숨는 것을 도로 켜는 스위치가 둘이 되면, 켜는 쪽이 어느 것을 켰는지
+    /// 매번 되짚어야 한다.
+    pub ideas: bool,
 }
 
 /// 한 번만 쓸 수 있는 플래그를 두 번 썼을 때. 규칙(반복=그리고)을 지키면서도
@@ -95,6 +99,7 @@ pub struct Raw {
     pub grep: Option<String>,
     pub stale: Option<i64>,
     pub all: bool,
+    pub ideas: bool,
     pub filter: Vec<String>,
 }
 
@@ -107,6 +112,9 @@ impl Filter {
         for one in std::mem::take(&mut raw.filter) {
             desugar(&mut raw, &one)?;
         }
+        // 콕 집어 묻거나(`--type idea`) 글로 찾을 때는 저절로 켜진다.
+        // **이미 적어 둔 생각을 다시 안 적으려면 찾아져야 한다.**
+        let ideas = raw.ideas || raw.kind == Some(Kind::Idea) || raw.grep.is_some();
         Ok(Filter {
             status: once(&raw.status, "-s", "상태")?,
             tags: raw
@@ -126,6 +134,7 @@ impl Filter {
             grep: raw.grep.map(|q| q.to_lowercase()),
             stale: raw.stale,
             all: raw.all,
+            ideas,
         })
     }
 
@@ -137,9 +146,10 @@ impl Filter {
         // 콕 집어 묻거나(`--type idea`) 글로 찾을 때는 나온다. **이미 적어
         // 둔 생각을 다시 안 적으려면 찾아져야 한다.**
         //
-        // 여기 한 곳에서만 정한다. TUI 도 같은 필터를 쓰므로 여기가 갈라지면
-        // 화면과 CLI 가 다른 것을 센다.
-        if i.kind == Kind::Idea && self.kind != Some(Kind::Idea) && self.grep.is_none() {
+        // 여기 한 곳에서만 정한다. 탐색기는 `ideas` 를 켜고 들어와 시키지도
+        // 않은 줄을 숨기지 않는다 — `all` 을 켜는 것과 같은 까닭이고, 같은
+        // 자리다. 술어가 갈라지면 화면과 CLI 가 다른 것을 센다.
+        if crate::report::is_idea(i) && !self.ideas {
             return false;
         }
         if !self.all && self.status.is_empty() && i.status.is_done() {
@@ -650,6 +660,11 @@ mod tests {
             hits(Raw { grep: Some("파서".into()), ..Raw::default() }),
             ["argos-0001"],
             "적어 둔 생각을 글로 못 찾는다 — 그러면 같은 것을 또 적는다"
+        );
+        assert_eq!(
+            hits(Raw { ideas: true, ..Raw::default() }),
+            ["argos-0001", "argos-0009"],
+            "탐색기가 켜고 들어오는 축이 안 듣는다"
         );
     }
 }

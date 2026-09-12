@@ -46,6 +46,12 @@ pub fn is_epic(i: &Issue) -> bool {
     i.kind == Kind::Epic
 }
 
+/// 담아 둔 생각인가. **술어를 `cmd/` 에 두지 않는다** — 어떤 줄이 무엇인지
+/// 정하는 코드가 거기 있으면 다음 표면이 같은 판단을 다시 짠다.
+pub fn is_idea(i: &Issue) -> bool {
+    i.kind == Kind::Idea
+}
+
 /// 밑에 무엇을 담는 것인가. **일이 아닌 것이 곧 묶음인 것은 아니다** —
 /// idea 도 일이 아니지만 아무것도 담지 않는다. 둘을 한 술어로 묻던 자리가
 /// 상세에 `멤버 0/0` 을 내, 채울 것이 없는 자리에 채울 것이 있다고 말했다.
@@ -346,9 +352,12 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
             .and_then(|e| issues.iter().find(|x| x.id == *e))
             .is_some_and(|e| e.status.is_done())
     };
-    // 자식이 남아 있으면 부모는 직접 하는 일이 아니다.
-    let has_open_child =
-        |i: &Issue| children_of(issues, &i.id).iter().any(|c| !c.status.is_done());
+    // 자식이 남아 있으면 부모는 직접 하는 일이 아니다. **일만 센다** —
+    // 이슈 밑에 담아 둔 생각 하나가 그 이슈를 `ready` 에서 지워 버리는데,
+    // idea 는 어느 목록에도 안 나오므로 왜 사라졌는지 볼 방법이 없다.
+    let has_open_child = |i: &Issue| {
+        children_of(issues, &i.id).iter().any(|c| is_work(c) && !c.status.is_done())
+    };
 
     let progress: BTreeMap<Option<String>, u8> =
         rollup(issues, cfg).into_iter().map(|r| (r.id, r.percent.unwrap_or(0))).collect();
@@ -430,6 +439,15 @@ pub struct Warning {
     pub ratio: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+    /// 가장 오래된 것의 나이. **`days` 와 다른 것이다** — 저쪽은 넘긴
+    /// 임계값이고 이쪽은 실제 나이다. 한 필드에 두 뜻을 담으면 받는 쪽이
+    /// `kind` 를 같이 보지 않고서는 숫자를 읽을 수 없다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oldest: Option<i64>,
+    /// 고칠 것이 아니라 알려 주는 것. **`fatal` 옆에 데이터로 둔다** —
+    /// 이 판단이 `view` 에만 있으면 `view` 를 건너뛴 표면(TUI·`--json`)이
+    /// 알림을 경고로 세고, 담을수록 화면이 시끄러워진다.
+    pub notice: bool,
     /// 데이터가 깨진 것. **이것만 비영 종료한다.**
     pub fatal: bool,
 }
@@ -444,6 +462,8 @@ impl Warning {
             limit: None,
             ratio: None,
             hint: None,
+            oldest: None,
+            notice: false,
             fatal: false,
         }
     }
@@ -465,6 +485,19 @@ impl Warning {
     }
     fn fatal(mut self) -> Warning {
         self.fatal = true;
+        self
+    }
+    /// 세는 것이 `ids` 와 다를 때. 드러낼 id 가 없는 줄이 있다.
+    fn count(mut self, n: usize) -> Warning {
+        self.count = n;
+        self
+    }
+    fn oldest(mut self, d: i64) -> Warning {
+        self.oldest = Some(d);
+        self
+    }
+    fn notice(mut self) -> Warning {
+        self.notice = true;
         self
     }
 }
@@ -695,16 +728,22 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     //      **id 를 싣지 않는다.** 다섯 건이 넘어야 뜨는 줄인데 거기에 제목
     //      셋을 더 달면, 정확히 "담을수록 화면이 시끄러워진다" 는 그 일이
     //      일어난다. 무엇이 쌓였는지는 `moai idea ls` 가 낸다.
-    let piled: Vec<&Issue> = issues
-        .iter()
-        .filter(|i| i.kind == Kind::Idea && !i.status.is_done())
-        .collect();
-    if piled.len() >= IDEA_PILE {
-        let oldest =
-            piled.iter().filter_map(|i| days_since(&i.created_at, now)).max().unwrap_or(0);
-        let mut w = Warning::new("idea_pile", Vec::new()).days(oldest).hint("moai idea ls");
-        w.count = piled.len();
-        warnings.push(w);
+    let piled = |i: &&Issue| is_idea(i) && !i.status.is_done();
+    let count = issues.iter().filter(piled).count();
+    if count >= IDEA_PILE {
+        let oldest = issues
+            .iter()
+            .filter(piled)
+            .filter_map(|i| days_since(&i.created_at, now))
+            .max()
+            .unwrap_or(0);
+        warnings.push(
+            Warning::new("idea_pile", Vec::new())
+                .count(count)
+                .oldest(oldest)
+                .notice()
+                .hint("moai idea ls"),
+        );
     }
 
     // 7. 데이터가 깨진 것. **이것만 비영 종료한다.**
@@ -718,9 +757,7 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
         warnings.push(Warning::new("duplicate_id", dups).fatal());
     }
     if !unreadable.is_empty() {
-        let mut w = Warning::new("unreadable_line", Vec::new()).fatal();
-        w.count = unreadable.len();
-        warnings.push(w);
+        warnings.push(Warning::new("unreadable_line", Vec::new()).count(unreadable.len()).fatal());
     }
 
     // 흐름. 만드는 속도가 끝내는 속도를 넘으면 쌓인다.
@@ -1413,7 +1450,9 @@ mod tests {
             .find(|w| w.kind == "idea_pile")
             .expect("쌓였는데 아무 말도 안 한다");
         assert_eq!(w.count, IDEA_PILE);
-        assert_eq!(w.days, Some(10), "가장 오래된 것의 나이를 안 말한다 — {w:?}");
+        assert_eq!(w.oldest, Some(10), "가장 오래된 것의 나이를 안 말한다 — {w:?}");
+        assert_eq!(w.days, None, "임계값 자리에 나이를 담았다 — {w:?}");
+        assert!(w.notice, "알림이 경고로 선다 — {w:?}");
         assert_eq!(w.hint.as_deref(), Some("moai idea ls"));
         // **막지 않는다.** 여기가 비영 종료를 하면 이건 린트고, 린트는 게이트다.
         assert!(!w.fatal);
@@ -1428,5 +1467,14 @@ mod tests {
         piled[0].status = Status::new("done");
         let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
         assert!(!st.warnings.iter().any(|w| w.kind == "idea_pile"), "{:?}", st.warnings);
+    }
+    /// **알림은 경고 수에 안 든다.** 배너가 "드러난 것 N건" 이라 말하는데
+    /// 담아 둔 생각이 거기 들면, 담을수록 고칠 것이 늘었다고 말하게 된다.
+    #[test]
+    fn a_notice_is_not_counted_among_the_warnings() {
+        let piled: Vec<Issue> = (0..IDEA_PILE).map(|n| idea(&format!("argos-000{n}"))).collect();
+        let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
+        assert_eq!(st.warnings.iter().filter(|w| !w.notice).count(), 0, "{:?}", st.warnings);
+        assert!(!st.broken(), "알림으로 비영 종료한다");
     }
 }
