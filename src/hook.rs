@@ -437,7 +437,7 @@ pub fn guard_create(issues: &[Issue], cfg: &Config, cmd: &str) -> Decision {
 ///
 /// **`defer` 는 막지 않는다.** 안 하기로 한 리뷰에 결과를 적으라고 하면
 /// 그것은 규칙이 아니라 덫이다.
-pub fn guard_close(issues: &[Issue], cmd: &str) -> Decision {
+pub fn guard_close(issues: &[Issue], cfg: &Config, cmd: &str) -> Decision {
     for seg in segments(cmd) {
         let verbs = moai_verbs(&seg);
         if verbs.first().map(String::as_str) != Some("mv") {
@@ -448,13 +448,28 @@ pub fn guard_close(issues: &[Issue], cmd: &str) -> Decision {
         if to != "done" {
             continue;
         }
-        if seg.iter().any(|t| t == "-m" || t == "--msg" || t.starts_with("--msg=")) {
+        // **빈 값은 안 적은 것이다.** 있고 없음만 보던 판은 `-m ""` 두 글자로
+        // 지나갔다 — 이 규칙이 지키려던 단 하나(다음 사람이 읽을 한 줄)가
+        // 그대로 무너진다. 값을 보는 것은 여전히 명령줄만 읽는 일이라
+        // "저널을 안 읽는다" 는 결정과 어긋나지 않는다.
+        if !flag_values(&seg, &["-m", "--msg"]).iter().all(|v| v.trim().is_empty()) {
             continue;
         }
+        // **지금 보는 것에 매인 리뷰만 본다.** 저장소 전체를 보던 판은, 옛
+        // 세션이 남긴 리뷰 줄을 치우려는 사람에게 **돌린 적도 없는 리뷰의
+        // 결과**를 지어내라고 요구했다. `closing` 이 같은 줄을 아예 안 세기로
+        // 한 것과도 어긋난다 — 한 규칙의 두 짝은 같은 셈법을 써야 한다.
+        let unit = unit_of(issues, &report::wip(issues, cfg));
+        let epics = report::groups(issues);
         let open_review = ids.iter().find_map(|id| {
-            issues
-                .iter()
-                .find(|i| &i.id == id && is_review(i) && !i.status.is_done())
+            issues.iter().find(|i| {
+                &i.id == id
+                    && is_review(i)
+                    && !i.status.is_done()
+                    && (unit.contains(i.id.as_str())
+                        || epics.get(i.id.as_str()).is_some_and(|e| unit.contains(e))
+                        || crate::id::parent_of(&i.id).is_some_and(|p| unit.contains(p)))
+            })
         });
         if let Some(r) = open_review {
             return Decision::Deny(format!(
@@ -582,21 +597,31 @@ pub fn guard_review(issues: &[Issue], cfg: &Config) -> Decision {
     };
     Decision::Deny(format!(
         "리뷰는 이슈로 남긴다. 지금 보는 것({} {})에 매인 리뷰 이슈를 먼저 세운다.\n\
-         {stray}\x20 moai add \"리뷰 — <무엇을 보는가>\" -t {REVIEW_TAG} --parent {}\n         {HOW_TO_REVIEW_STEPS}",
+         {stray}\x20 moai add \"리뷰 — <무엇을 보는가>\" -t {REVIEW_TAG} --parent {} -b \"<무엇을 왜 보는가>\"\n{HOW_TO_REVIEW_STEPS}",
         head.id, head.title, head.id
     ))
 }
 
-const HOW_TO_REVIEW: &str = "\x20\
- moai add \"리뷰 — <무엇을 보는가>\" -t review -e <에픽>
-  moai mv <id> in_progress      리뷰를 시작할 때
-  moai note <id> \"<무엇이 나왔나>\"  리뷰가 낸 것 (넘긴 것도 적는다)
-  moai mv <id> done             지적을 반영하거나 안 할 이유를 적은 뒤";
+/// **여기 적힌 명령은 그대로 쳐서 지나가야 한다.**
+///
+/// 두 번이나 적어 둔 것을 또 어겼다 — `-b` 없는 `add` 는 관점이 없다고
+/// 막히고, `-m` 없는 `done` 은 결과가 없다고 막힌다. 규칙이 제가 일러 준
+/// 명령을 막는 자리는 규칙이 아니라 덫이다. 여기를 고칠 때마다 **직접 쳐 보고**
+/// 고친다.
+// **줄 잇기(`\`)를 쓰지 않는다.** 그것은 개행과 함께 **다음 줄의 앞 공백까지**
+// 먹어, 첫 명령만 왼쪽 끝에 붙는다. 그 자리를 이미 한 번 고쳤는데 다시 났다.
+const HOW_TO_REVIEW: &str = concat!(
+    "  moai add \"리뷰 — <무엇을 보는가>\" -t review -e <에픽> -b \"<무엇을 왜 보는가>\"\n",
+    "  moai mv <id> in_progress      리뷰를 시작할 때\n",
+    "  moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로\n",
+    "  moai mv <id> done -m \"<무엇을 반영하고 무엇을 넘겼나>\"",
+);
 
-const HOW_TO_REVIEW_STEPS: &str = "\x20\
- moai mv <id> in_progress      리뷰를 시작할 때
-  moai note <id> \"<무엇이 나왔나>\"  리뷰가 낸 것 (넘긴 것도 적는다)
-  moai mv <id> done             지적을 반영하거나 안 할 이유를 적은 뒤";
+const HOW_TO_REVIEW_STEPS: &str = concat!(
+    "  moai mv <id> in_progress      리뷰를 시작할 때\n",
+    "  moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로\n",
+    "  moai mv <id> done -m \"<무엇을 반영하고 무엇을 넘겼나>\"",
+);
 
 /// 세션을 닫기 전에 — **상태가 실제와 맞는가.**
 ///
@@ -616,9 +641,7 @@ pub fn closing(issues: &[Issue], cfg: &Config, warnings: usize, before: Option<u
     // 리뷰 줄까지 세면 매 세션 같은 줄이 나오고, 그러면 아무도 안 읽는다.
     let unit = unit_of(issues, &wip);
     let epics = report::groups(issues);
-    for i in issues.iter().filter(|i| {
-        i.tags.iter().any(|t| t == REVIEW_TAG) && !i.status.is_done() && !i.is_deferred()
-    }) {
+    for i in issues.iter().filter(|i| is_review(i) && !i.status.is_done()) {
         // **규칙 3 과 같은 셈법이어야 한다.** 여기서 부모를 빼면, 거절문이
         // 시킨 대로 `--parent` 로 세운 리뷰가 규칙 3 은 지나가면서 닫을 때는
         // 아무도 안 챙기는 줄이 된다 — 한 규칙의 두 짝이 서로 다른 말을 한다.
@@ -627,8 +650,10 @@ pub fn closing(issues: &[Issue], cfg: &Config, warnings: usize, before: Option<u
             || crate::id::parent_of(&i.id).is_some_and(|p| unit.contains(p));
         if mine && !wip.iter().any(|w| w.id == i.id) {
             lines.push(format!(
-                "리뷰 이슈 {} 가 아직 열려 있다. 리뷰가 낸 것과 넘긴 것을 `moai note {}` 로 적고 닫는다.",
-                i.id, i.id
+                "리뷰 이슈 {} 가 아직 열려 있다. 낸 글을 붙이고 닫는다.\n\
+                 \x20 moai note {} -b - < <리뷰 원문>\n\
+                 \x20 moai mv {} done -m \"<무엇을 반영하고 무엇을 넘겼나>\"",
+                i.id, i.id, i.id
             ));
         }
     }
@@ -1140,7 +1165,7 @@ mod tests {
     #[test]
     fn closing_a_review_leaves_a_line() {
         let all = vec![issue("t-1", "in_progress"), review("t-r", "in_progress", None)];
-        let why = denied(&guard_close(&all, "moai mv t-r done")).to_string();
+        let why = denied(&guard_close(&all, &cfg(), "moai mv t-r done")).to_string();
         assert!(why.contains("moai note t-r"), "원문을 붙일 길이 없다\n{why}");
         assert!(why.contains("moai mv t-r done -m"), "닫을 길이 없다\n{why}");
 
@@ -1149,7 +1174,7 @@ mod tests {
             "moai mv t-r done --msg \"반영\"",
             "moai mv t-r done --msg=반영",
         ] {
-            assert_eq!(guard_close(&all, ok), Decision::Pass, "{ok}");
+            assert_eq!(guard_close(&all, &cfg(), ok), Decision::Pass, "{ok}");
         }
     }
 
@@ -1158,8 +1183,8 @@ mod tests {
     #[test]
     fn closing_ordinary_work_needs_no_line() {
         let all = vec![issue("t-1", "in_progress"), review("t-r", "todo", None)];
-        assert_eq!(guard_close(&all, "moai mv t-1 done"), Decision::Pass);
-        assert_eq!(guard_close(&all, "moai mv t-1 review"), Decision::Pass);
+        assert_eq!(guard_close(&all, &cfg(), "moai mv t-1 done"), Decision::Pass);
+        assert_eq!(guard_close(&all, &cfg(), "moai mv t-1 review"), Decision::Pass);
     }
 
     /// **미루는 것은 막지 않는다.** 안 하기로 한 리뷰에 결과를 적으라고 하면
@@ -1167,15 +1192,15 @@ mod tests {
     #[test]
     fn deferring_a_review_is_free() {
         let all = vec![issue("t-1", "in_progress"), review("t-r", "todo", None)];
-        assert_eq!(guard_close(&all, "moai defer t-r -m \"다음 분기\""), Decision::Pass);
-        assert_eq!(guard_close(&all, "moai defer t-r"), Decision::Pass);
+        assert_eq!(guard_close(&all, &cfg(), "moai defer t-r -m \"다음 분기\""), Decision::Pass);
+        assert_eq!(guard_close(&all, &cfg(), "moai defer t-r"), Decision::Pass);
     }
 
     /// 이미 닫힌 리뷰를 다시 옮기는 것도 막지 않는다. 막을 것이 없다.
     #[test]
     fn a_closed_review_is_not_closed_again() {
         let all = vec![issue("t-1", "in_progress"), review("t-r", "done", None)];
-        assert_eq!(guard_close(&all, "moai mv t-r done"), Decision::Pass);
+        assert_eq!(guard_close(&all, &cfg(), "moai mv t-r done"), Decision::Pass);
     }
 
     /// 여럿을 한 번에 옮길 때도 그중 리뷰가 있으면 본다.
@@ -1186,7 +1211,119 @@ mod tests {
             issue("t-2", "in_progress"),
             review("t-r", "in_progress", None),
         ];
-        assert!(matches!(guard_close(&all, "moai mv t-1 t-2 t-r done"), Decision::Deny(_)));
+        assert!(matches!(guard_close(&all, &cfg(), "moai mv t-1 t-2 t-r done"), Decision::Deny(_)));
+    }
+
+    /// **일러 준 명령은 그대로 쳐서 지나가야 한다.**
+    ///
+    /// 이 시험이 없어 같은 덫을 세 번 놨다 — `-e <이슈>` 를 일러 줘 경고를
+    /// 만들게 했고, `-b` 없는 `add` 를 일러 줘 관점이 없다고 막았고, `-m` 없는
+    /// `done` 을 일러 줘 결과가 없다고 막았다. 거절문에서 명령 줄을 뽑아
+    /// **도로 판정에 먹인다.** 자리표시자는 실제 id 로 바꾼다.
+    #[test]
+    fn every_offered_command_actually_passes() {
+        let cfg = cfg();
+        let all = vec![
+            epic("t-e"),
+            under("t-1", "in_progress", "t-e"),
+            blank_review("t-r", "in_progress", Some("t-e")),
+        ];
+        let reviewed = vec![
+            epic("t-e"),
+            under("t-1", "in_progress", "t-e"),
+            review("t-r", "in_progress", Some("t-e")),
+        ];
+
+        let refusals = [
+            (guard_create(&all, &cfg, "moai add \"딴 일\""), &all),
+            (guard_review(&all, &cfg), &all),
+            (guard_close(&reviewed, &cfg, "moai mv t-r done"), &reviewed),
+        ];
+        let mut checked = 0;
+        for (decision, issues) in &refusals {
+            let Decision::Deny(why) = decision else {
+                panic!("막지 않았다 — {decision:?}");
+            };
+            for line in why.lines() {
+                let line = line.trim();
+                if !line.starts_with("moai ") {
+                    continue;
+                }
+                // 사람이 채울 자리는 실제 값으로 바꿔 친다.
+                let cmd = line
+                    .replace("<id>", "t-r")
+                    .replace("<에픽>", "t-e")
+                    .replace("<리뷰 원문>", "/tmp/review.txt");
+                assert_eq!(
+                    guard_create(issues, &cfg, &cmd),
+                    Decision::Pass,
+                    "일러 준 명령이 규칙 1 에 막힌다 — {cmd}"
+                );
+                assert_eq!(
+                    guard_close(issues, &cfg, &cmd),
+                    Decision::Pass,
+                    "일러 준 명령이 닫기 규칙에 막힌다 — {cmd}"
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked >= 6, "일러 주는 명령을 {checked}개밖에 못 찾았다");
+    }
+
+    /// 일러 준 대로 리뷰를 세우면 **그 리뷰로 곧장 리뷰를 부를 수 있다.**
+    /// 관점 없이 세우게 일러 주면 왕복이 한 번 더 는다.
+    #[test]
+    fn the_offered_review_is_born_with_its_angle() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let Decision::Deny(why) = guard_review(&all, &cfg()) else {
+            panic!("막지 않았다");
+        };
+        let made = why
+            .lines()
+            .find(|l| l.trim_start().starts_with("moai add"))
+            .expect("리뷰를 세울 명령이 없다");
+        assert!(made.contains("-t review"), "{made}");
+        assert!(made.contains("-b "), "관점 없이 세우라고 한다 — {made}");
+    }
+
+    /// **빈 `-m` 은 안 적은 것이다.** 있고 없음만 보던 판은 두 글자로 지나갔다 —
+    /// 이 규칙이 지키려던 단 하나(다음 사람이 읽을 한 줄)가 그대로 무너진다.
+    #[test]
+    fn an_empty_message_is_no_message() {
+        let all = vec![issue("t-1", "in_progress"), review("t-r", "in_progress", None)];
+        for sneaky in [
+            "moai mv t-r done -m \"\"",
+            "moai mv t-r done --msg=",
+            "moai mv t-r done -m \"   \"",
+        ] {
+            assert!(
+                matches!(guard_close(&all, &cfg(), sneaky), Decision::Deny(_)),
+                "빈 한 줄로 지나갔다 — {sneaky}"
+            );
+        }
+    }
+
+    /// **안 매인 옛 리뷰 줄은 그냥 닫게 둔다.** 저장소 전체를 보던 판은, 옛
+    /// 세션이 남긴 줄을 치우려는 사람에게 돌린 적도 없는 리뷰의 결과를
+    /// 지어내라고 했다. `closing` 이 같은 줄을 아예 안 세는 것과도 어긋났다.
+    #[test]
+    fn a_stale_review_can_just_be_closed() {
+        let cfg = cfg();
+        let all = vec![
+            epic("t-e"),
+            epic("t-f"),
+            under("t-1", "in_progress", "t-e"),
+            review("t-old", "todo", Some("t-f")),
+        ];
+        assert_eq!(guard_close(&all, &cfg, "moai mv t-old done"), Decision::Pass);
+
+        // 지금 보는 것에 매인 리뷰는 그대로 붙든다.
+        let mine = vec![
+            epic("t-e"),
+            under("t-1", "in_progress", "t-e"),
+            review("t-r", "in_progress", Some("t-e")),
+        ];
+        assert!(matches!(guard_close(&mine, &cfg, "moai mv t-r done"), Decision::Deny(_)));
     }
 
     // ── 세션을 닫을 때 ──────────────────────────────────────────────
