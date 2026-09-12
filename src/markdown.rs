@@ -411,25 +411,135 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize) {
             }
         }
         Block::Rule => out.push(vec![mark("─".repeat(width.min(40)))]),
-        Block::Table { head, rows } => {
-            // 칸 맞추기는 아직이다(moai-44rk). 그때까지도 **잃지는 않는다**.
-            let cells = |r: &Vec<Vec<Span>>, role: Option<Role>| -> Vec<Span> {
-                let mut line = Vec::new();
-                for (n, c) in r.iter().enumerate() {
-                    if n > 0 {
-                        line.push(mark(" │ "));
-                    }
-                    line.extend(c.iter().map(|s| match (role, s.role) {
-                        (Some(r), Role::Plain) => Span { text: s.text.clone(), role: r },
-                        _ => s.clone(),
-                    }));
-                }
-                line
-            };
-            out.push(cells(head, Some(Role::Heading)));
-            out.extend(rows.iter().map(|r| cells(r, None)));
+        Block::Table { head, rows } => lay_table(out, head, rows, width),
+    }
+}
+
+/// 칸 사이. 세로줄은 **표시**라 글과 다른 뜻을 진다.
+const CELL_GAP: &str = " │ ";
+
+/// 표를 칸 맞춰 편다.
+///
+/// 좁아서 다 안 들어가면 **칸을 줄이되 버리지는 않는다.** 오른쪽 칸을 조용히
+/// 떨어뜨리면 보는 쪽은 그 칸이 애초에 없는 줄 안다. 줄인 자리에는 `…` 가
+/// 남아 잘렸다는 것이 보인다 — 목록의 긴 제목을 다루는 방식과 같다.
+fn lay_table(
+    out: &mut Vec<Vec<Span>>,
+    head: &[Vec<Span>],
+    rows: &[Vec<Vec<Span>>],
+    width: usize,
+) {
+    let cols = head.len().max(rows.iter().map(Vec::len).max().unwrap_or(0));
+    if cols == 0 {
+        return;
+    }
+    fn cell_at(r: &[Vec<Span>], n: usize) -> &[Span] {
+        r.get(n).map(Vec::as_slice).unwrap_or(&[])
+    }
+    let span_width = |c: &[Span]| c.iter().map(|s| crate::text::width(&s.text)).sum::<usize>();
+
+    // 있는 대로의 폭. 한글이 두 칸이라 **표시 폭**으로 잰다.
+    // **표시를 붙인 뒤의 폭**으로 잰다. 백틱을 빼고 재면 칸이 좁게 잡혀
+    // 멀쩡한 표가 늘 잘린다.
+    let mut w: Vec<usize> = (0..cols)
+        .map(|n| {
+            std::iter::once(span_width(&marked(cell_at(head, n))))
+                .chain(rows.iter().map(|r| span_width(&marked(cell_at(r, n)))))
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+
+    // 넘치면 **가장 넓은 칸부터** 한 칸씩 줄인다. 좁은 칸(`판`·`1.0`)은 그대로
+    // 남으므로, 줄어드는 것은 늘 설명처럼 긴 칸이다.
+    let gaps = crate::text::width(CELL_GAP) * (cols - 1);
+    let budget = width.saturating_sub(gaps).max(cols);
+    while w.iter().sum::<usize>() > budget {
+        let Some(widest) = (0..cols).max_by_key(|&n| (w[n], std::cmp::Reverse(n))) else { break };
+        if w[widest] <= 1 {
+            break;
+        }
+        w[widest] -= 1;
+    }
+
+    let row = |r: &[Vec<Span>], head: bool| -> Vec<Span> {
+        let mut line = Vec::new();
+        for n in 0..cols {
+            if n > 0 {
+                line.push(mark(CELL_GAP));
+            }
+            // 표 안에서도 코드는 백틱을 남긴다 — 칸이 위치를 말해 줄 뿐,
+            // 그 글이 코드라는 것은 색만으로는 색을 끈 터미널에서 사라진다.
+            let cell = fit(&marked(cell_at(r, n)), w[n], head);
+            let pad = w[n].saturating_sub(span_width(&cell));
+            line.extend(cell);
+            // 마지막 칸은 채우지 않는다 — 오른쪽에 뜻 없는 공백이 남는다.
+            if n + 1 < cols && pad > 0 {
+                line.push(mark(" ".repeat(pad)));
+            }
+        }
+        line
+    };
+
+    out.push(row(head, true));
+    // 구분줄. 테두리를 두르지 않는 이 저장소의 표 모양과 같게 가볍게 둔다.
+    out.push({
+        let mut line = Vec::new();
+        for n in 0..cols {
+            if n > 0 {
+                line.push(mark("─┼─"));
+            }
+            line.push(mark("─".repeat(w[n])));
+        }
+        line
+    });
+    out.extend(rows.iter().map(|r| row(r, false)));
+}
+
+/// 칸 하나를 그 폭에 맞춘다. 넘치면 `…` 로 잘린다.
+///
+/// **잘림 표시는 한 번만 붙인다.** 조각마다 `text::clip` 을 부르면 조각마다
+/// `…` 가 붙어 `터미널용 마크다……` 처럼 표시가 겹친다.
+fn fit(cell: &[Span], max: usize, head: bool) -> Vec<Span> {
+    let as_head = |s: &Span| match (head, s.role) {
+        (true, Role::Plain) => Span { text: s.text.clone(), role: Role::Heading },
+        _ => s.clone(),
+    };
+    let total: usize = cell.iter().map(|s| crate::text::width(&s.text)).sum();
+    if total <= max {
+        return cell.iter().map(as_head).collect();
+    }
+    // `…` 한 칸을 남겨 두고 폭으로만 자른다.
+    let room = max.saturating_sub(1);
+    let mut out: Vec<Span> = Vec::new();
+    let mut used = 0;
+    for s in cell {
+        if used >= room {
+            break;
+        }
+        let piece = cut(&s.text, room - used);
+        used += crate::text::width(&piece);
+        if !piece.is_empty() {
+            out.push(Span { text: piece, role: as_head(s).role });
         }
     }
+    out.push(mark("…"));
+    out
+}
+
+/// 표시 폭으로만 자른다 — 표시는 붙이지 않는다.
+fn cut(text: &str, max: usize) -> String {
+    let mut out = String::new();
+    let mut w = 0;
+    for c in text.chars() {
+        let cw = crate::text::width(c.encode_utf8(&mut [0u8; 4]));
+        if w + cw > max {
+            break;
+        }
+        out.push(c);
+        w += cw;
+    }
+    out
 }
 
 /// 코드 조각에 백틱을 되돌려 놓는다.
@@ -679,6 +789,51 @@ mod tests {
         assert!(flat.len() > 1, "안 접혔다 — {flat:?}");
         assert!(flat[0].starts_with("• "), "{flat:?}");
         assert!(flat[1].starts_with("  ") && !flat[1].starts_with("• "), "안 물렸다 — {flat:?}");
+    }
+
+    /// 표는 **칸이 맞는다.** 한글이 두 칸이라 글자 수로 맞추면 여기서 어긋난다.
+    #[test]
+    fn table_columns_line_up_by_display_width() {
+        let blocks = parse("| 후보 | 판 |\n|---|---|\n| termimad | 0.35 |\n| 한글이름 | 1.0 |\n");
+        let lines: Vec<String> = layout(&blocks, 60)
+            .iter()
+            .map(|l| l.iter().map(|s| s.text.as_str()).collect())
+            .collect();
+        assert_eq!(lines.len(), 4, "머리·구분줄·두 줄이어야 한다 — {lines:?}");
+
+        // 둘째 칸이 모든 줄에서 같은 자리에서 시작한다. 구분줄은 `┼` 를 쓴다.
+        let starts: Vec<usize> = lines
+            .iter()
+            .map(|l| {
+                let head = l.split(['│', '┼']).next().unwrap_or_default();
+                crate::text::width(head)
+            })
+            .collect();
+        assert!(starts.windows(2).all(|w| w[0] == w[1]), "칸이 어긋났다 — {starts:?} {lines:?}");
+    }
+
+    /// 좁으면 **칸을 줄이되 잘렸다고 말한다.** 오른쪽 칸을 조용히 버리면
+    /// 표를 보는 사람이 그 칸이 없는 줄 안다.
+    #[test]
+    fn a_narrow_table_shrinks_and_says_so() {
+        let blocks = parse(
+            "| 후보 | 무엇 |\n|---|---|\n| termimad | 터미널용 마크다운 렌더러인데 설명이 아주 길다 |\n",
+        );
+        let lines: Vec<String> = layout(&blocks, 28)
+            .iter()
+            .map(|l| l.iter().map(|s| s.text.as_str()).collect())
+            .collect();
+        for l in &lines {
+            assert!(crate::text::width(l) <= 28, "{l:?} ({}칸)", crate::text::width(l));
+        }
+        // 칸은 둘 다 남아 있고, 잘린 자리에 표시가 있다
+        // 칸은 둘 다 남는다 — 구분줄은 `┼`, 나머지는 `│`.
+        assert!(
+            lines.iter().all(|l| l.contains('│') || l.contains('┼')),
+            "칸을 버렸다 — {lines:?}"
+        );
+        assert!(lines.iter().any(|l| l.contains('…')), "잘렸는데 표시가 없다 — {lines:?}");
+        assert!(!lines.iter().any(|l| l.contains("……")), "잘림 표시가 겹쳤다 — {lines:?}");
     }
 
     /// 빈 본문이 무너지지 않는다.
