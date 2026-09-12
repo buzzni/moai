@@ -11,11 +11,19 @@ use crate::text::clip;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph};
 use ratatui::Frame;
 
 /// 좌우를 가르는 자리. MC 처럼 반반이되 왼쪽을 조금 넓게 — 제목이 길다.
 const LEFT: u16 = 55;
+
+/// 커서 자리. 목록의 글자는 늘 이만큼 안쪽에서 시작한다.
+///
+/// **우측 패널의 좌우 여백도 이 값이다.** 한쪽만 테두리에 붙으면 같은 화면에서
+/// 규칙이 둘이 되고, 붙은 쪽이 답답하게 읽힌다. 한 자리에서 정해 두 패널이
+/// 갈라지지 않게 한다.
+const LEFT_GUTTER: usize = 2;
+const CURSOR: &str = "> ";
 
 pub fn screen(f: &mut Frame, app: &mut App) {
     // 할 말이 있을 때만 배너 줄이 선다. 늘 세워 두면 한 줄이 영영 논다.
@@ -170,7 +178,7 @@ fn list(f: &mut Frame, app: &App, at: Rect, state: &mut ListState) {
             .block(Block::default().borders(Borders::ALL).title(title))
             // 커서는 **색만으로 표시하지 않는다** — 반전과 `>` 를 함께 준다.
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
-            .highlight_symbol("> "),
+            .highlight_symbol(CURSOR),
         at,
         state,
     );
@@ -219,7 +227,12 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
 
 /// 커서가 머문 것을 정리해 낸다. 이슈면 그 이슈를, 디렉터리면 그 밑의 셈을.
 fn detail(f: &mut Frame, app: &App, at: Rect) {
-    let block = Block::default().borders(Borders::ALL).title(" 상세 ");
+    // 좌우 여백은 목록의 커서 자리와 같은 폭이다. `inner()` 가 테두리와 여백을
+    // 함께 빼 주므로 폭 계산은 아래가 그대로 쓴다.
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .padding(Padding::horizontal(LEFT_GUTTER as u16))
+        .title(" 상세 ");
     let inner = block.inner(at);
     f.render_widget(block, at);
 
@@ -719,6 +732,35 @@ mod tests {
         let long = field("마일스톤", "값");
         assert_eq!(starts_at(&short), starts_at(&long), "값이 다른 칸에서 시작한다");
         assert!(starts_at(&long) > crate::text::width("마일스톤"), "이름과 값이 붙었다");
+    }
+
+    /// 우측이 테두리에 붙지 않는다. 좌측은 커서 자리(`> `) 덕에 글자가 늘 두 칸
+    /// 안쪽에서 시작하는데, 우측만 붙어 있으면 같은 화면에서 규칙이 둘이 되고
+    /// 붙은 쪽이 답답하게 읽힌다.
+    #[test]
+    fn the_detail_pane_is_not_glued_to_its_border() {
+        let lines = render(&mut app(), 100, 14);
+        // 테두리가 맞붙어 `││` 라 가운데 빈 조각이 낀다. 빈 조각을 빼면
+        // 앞이 좌측, 뒤가 우측이다.
+        let panes = |l: &str| -> Vec<String> {
+            l.split('│').filter(|s| !s.is_empty()).map(str::to_string).collect()
+        };
+        let inset = |seg: &str| seg.len() - seg.trim_start_matches(' ').len();
+
+        let row = lines
+            .iter()
+            .find(|l| {
+                let p = panes(l);
+                p.len() == 2 && !p[1].trim().is_empty()
+            })
+            .unwrap_or_else(|| panic!("우측에 글자가 있는 줄이 없다\n{}", lines.join("\n")));
+
+        let right = &panes(row)[1];
+        assert!(
+            inset(right) >= LEFT_GUTTER,
+            "우측이 테두리에 붙었다 (들여쓴 칸 {}) — {row:?}",
+            inset(right)
+        );
     }
 
     /// 빈 저장소도 그려진다.
