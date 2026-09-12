@@ -2732,3 +2732,15 @@ fn a_rehearsal_is_no_stricter_than_the_real_run() {
     assert!(real.status.success(), "{}", String::from_utf8_lossy(&real.stderr));
 }
 
+/// **빈 까닭은 안 적는다.** `moai note` 가 같은 자리에서 거절하는데 여기만
+/// 받으면, 이력에 내용 없는 `note:` 줄이 부를 때마다 하나씩 쌓인다.
+#[test]
+fn an_empty_reason_is_refused_like_an_empty_note() {
+    let s = init("deferblank");
+    let id = add(s.path(), &["일"]);
+    let out = moai(s.path(), &["defer", &id, "-m", "   "]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("까닭이 비었다"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!journal(s.path()).contains(r#""kind":"note""#), "거절해 놓고 적었다 — {}", journal(s.path()));
+}
+

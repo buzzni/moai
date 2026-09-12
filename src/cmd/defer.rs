@@ -7,7 +7,7 @@
 //! 여기도 승인은 없다. 무엇이든 미룰 수 있고 언제든 도로 집는다. 쌓인 것은
 //! `moai status` 가 드러낸다.
 
-use super::{Ctx, R};
+use super::{Ctx, Fail, R};
 use crate::cli::DeferArgs;
 use crate::model::{self, Issue, JournalEntry};
 use crate::store::Repo;
@@ -27,6 +27,12 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     let at = model::now();
     let by = model::actor(ctx.user.as_deref())?;
     let back = args.undo;
+    // **빈 까닭은 안 적는다.** `moai note` 가 같은 자리에서 거절하는데 여기만
+    // 받으면, 이력에 내용 없는 `note:` 줄이 부를 때마다 하나씩 쌓인다.
+    let msg = args.msg.as_deref().map(str::trim).filter(|m| !m.is_empty());
+    if args.msg.is_some() && msg.is_none() {
+        return Err(Fail::new("까닭이 비었다"));
+    }
 
     let moved: Moved = repo.with_write(|issues, _, _| {
         let mut m = Moved::default();
@@ -42,7 +48,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
                 // 으로 명령을 친 때가 되고, `status` 의 나이가 거짓말한다.
                 // 적어 온 말은 그래도 버리지 않는다 — 되풀이해 부르는 것이
                 // 흔하고, 그때 이유가 조용히 사라지면 저널을 못 믿게 된다.
-                if let Some(msg) = &args.msg {
+                if let Some(msg) = msg {
                     entries.push(JournalEntry::note(&i.id, msg, &at, &by));
                 }
                 m.already.push(i.id.clone());
@@ -53,7 +59,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             // **필드 변경은 저널에 안 적는다** (CLAUDE.md). 저널을 접어야
             // 답이 나오는 물음이 생기면 그 답은 스냅샷의 필드가 되어야 하고,
             // 여기서는 이미 `deferred_at` 이 그 필드다.
-            if let Some(msg) = &args.msg {
+            if let Some(msg) = msg {
                 entries.push(JournalEntry::note(&i.id, msg, &at, &by));
             }
             i.normalize();
