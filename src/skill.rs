@@ -71,7 +71,7 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 fn command(exe: &str, event: &str) -> String {
     // 따옴표를 깨는 경로는 아예 안 쓴다. 셸 한 줄이 깨지면 그 세션의 모든
     // 도구 호출이 막힌다.
-    let exe = if exe.contains(['"', '\\', '$', '`']) { "moai" } else { exe };
+    let exe = if quotable(exe) { exe } else { "moai" };
     // **`command -v` 로 본다. `[ -x ]` 가 아니다.** `[ -x "moai" ]` 는 PATH 를
     // 안 보고 `./moai` 를 본다 — PATH 에 moai 가 있는 남의 기계에서 훅이 전부
     // 조용히 `exit 0` 으로 빠지고, 그 모습은 "규칙이 통과했다" 와 똑같다.
@@ -188,10 +188,20 @@ fn pretty(v: &serde_json::Value) -> String {
 /// PATH 의 `moai` 가 **다른** moai 인 곳에서는 이름을 적는 것이 남의 바이너리를
 /// 부르는 일이 된다.
 pub fn exe_name(current: &Path, on_path: Option<&Path>) -> String {
+    let shown = current.display().to_string();
     match on_path {
         Some(p) if p == current => "moai".to_string(),
-        _ => current.display().to_string(),
+        // 따옴표를 깨는 경로는 훅 한 줄에 못 적어 `command` 가 이름으로 바꿔 적는다.
+        // **여기서 먼저 바꾼다** — 안 그러면 판·설치 출력·`status` 는 절대 경로를
+        // 말하는데 훅은 PATH 의 `moai` 를 불러, 셋이 서로 다른 것을 가리킨다.
+        _ if !quotable(&shown) => "moai".to_string(),
+        _ => shown,
     }
+}
+
+/// 셸 한 줄의 따옴표 안에 그대로 적을 수 있는 경로인가.
+fn quotable(exe: &str) -> bool {
+    !exe.contains(['"', '\\', '$', '`'])
 }
 
 /// `claude` 가 장부에 적어 둔 설치 한 건.
@@ -300,18 +310,18 @@ mod tests {
     /// 리뷰어가 나쁜 명령을 일부러 심어도 시험은 웃고 있었다.
     #[test]
     fn what_the_skill_teaches_actually_passes() {
-        use crate::hook::{guard_close, guard_create, Decision};
+        use crate::hook::{guard_shell, Decision};
 
         let cfg = Config::parse("prefix = \"t\"\n").unwrap();
         let held = vec![epic_row(), held_row(), review_row("in_progress")];
+        let root = Path::new("/repo");
 
         let mut checked = 0;
         for cmd in taught() {
             let should_deny = DENIED_WHILE_HELD.iter().any(|d| cmd.starts_with(d));
-            let got = match guard_create(&held, &cfg, &cmd) {
-                Decision::Pass => guard_close(&held, &cfg, &cmd),
-                deny => deny,
-            };
+            // 훅이 실제로 부르는 그 차례로 본다 — 손으로 다시 짠 차례는 규칙이
+            // 하나 늘 때 여기서 빠진다.
+            let got = guard_shell(&held, &cfg, root, root, &cmd);
             match (&got, should_deny) {
                 (Decision::Pass, false) => {}
                 (Decision::Deny(_), true) => {}
@@ -328,12 +338,11 @@ mod tests {
         // 트래커를 만질 뿐 저장소 파일을 쓰지 않는다 — `< <리뷰 원문>` 같은
         // 자리표시자의 `>` 가 리다이렉션으로 읽히면 여기서 붉어진다.
         let idle = vec![epic_row()];
-        let root = Path::new("/repo");
         for cmd in taught() {
             assert_eq!(
-                crate::hook::guard_writes(&idle, &cfg, root, root, &cmd),
+                guard_shell(&idle, &cfg, root, root, &cmd),
                 Decision::Pass,
-                "가르치는 명령이 쓰기 규칙에 막힌다 — {cmd}"
+                "가르치는 명령이 아무것도 안 집은 채로 막힌다 — {cmd}"
             );
         }
     }
@@ -580,5 +589,9 @@ mod tests {
         let cmd = command("/tmp/\"moai\"", "stop");
         assert!(!cmd.contains("/tmp/"), "그 경로가 그대로 들어갔다 — {cmd}");
         assert!(cmd.contains("\"moai\" hook stop"), "이름으로도 안 부른다 — {cmd}");
+        // **판과 출력도 같은 이름을 말한다.** 매니페스트만 이름으로 바꾸면 설치
+        // 출력과 `status` 는 절대 경로를, 훅은 PATH 의 moai 를 가리킨다.
+        assert_eq!(exe_name(Path::new("/tmp/we$ird/moai"), None), "moai");
+        assert_eq!(exe_name(Path::new("/tmp/plain/moai"), None), "/tmp/plain/moai");
     }
 }

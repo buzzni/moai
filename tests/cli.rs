@@ -3063,7 +3063,7 @@ fn the_close_holds_once_and_then_lets_go() {
 
     let held = hook_out(&s, "stop", &ev);
     assert!(held.contains("\"decision\":\"block\""), "안 붙들었다 — {held}");
-    assert!(held.contains(&format!("moai mv {id} review|done")), "옮길 길이 없다 — {held}");
+    assert!(held.contains(&format!("moai mv {id} done")), "옮길 길이 없다 — {held}");
 
     assert!(hook_out(&s, "stop", &ev).trim().is_empty(), "두 번 붙들었다");
 
@@ -3110,8 +3110,8 @@ fn every_refusal_is_undone_by_its_own_advice() {
 // 자리, 계약 JSON 을 쓰는 자리는 단위 시험이 못 밟는다. 시험판에서 잡힌
 // 버그 셋 중 둘이 바로 그 자리에 있었다.
 
-/// JSON 문자열 하나. 따옴표·역슬래시·줄바꿈만 이스케이프한다 — 시험이 넣는
-/// 글에 그 밖의 제어문자는 없다.
+/// JSON 문자열 하나. **제어문자는 전부 이스케이프한다** — 하나라도 날것으로 들어가면
+/// 훅이 stdin 을 못 풀어 조용히 지나가고, "막지 않는다" 는 시험이 헛으로 초록이 된다.
 fn json_str(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
@@ -3119,6 +3119,7 @@ fn json_str(s: &str) -> String {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
             c => out.push(c),
         }
     }
@@ -3203,6 +3204,36 @@ fn edits_are_judged_through_the_contract() {
     }
 }
 
+/// 규칙 2 의 껍데기 쪽은 **stdin 의 `cwd` 로** 상대 경로를 푼다. 훅 프로세스를
+/// 저장소 뿌리에서 띄우고 `cwd` 만 하위 디렉터리로 준다 — 뿌리로 푸는 판은 여기서
+/// `a.md` 를 대고, 트래커 안에 서서 친 `../src` 쓰기는 놓친다. 단위 시험은 순수
+/// 함수만 보므로 이 배선은 여기서만 밟힌다.
+#[test]
+fn a_shell_write_is_resolved_where_the_shell_stands() {
+    let s = init("hookcwd");
+    ok(s.path(), &["add", "락을 잡는다"]);
+    let at = |cwd: &Path, cmd: &str| {
+        let input = format!(
+            "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}}}",
+            json_str(&cwd.display().to_string()),
+            json_str(cmd)
+        );
+        String::from_utf8(hook_in(&s, s.path(), "pre-tool-use", &input).stdout).unwrap()
+    };
+    let docs = s.path().join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    let why = refusal(&at(&docs, "echo x > a.md"));
+    assert!(why.contains("docs/a.md"), "껍데기의 자리로 안 풀었다 — {why}");
+
+    let out = at(&s.path().join(".moai"), "echo x > ../src/a.rs");
+    let why = refusal(&out);
+    assert!(why.contains("src/a.rs"), "{why}");
+    let target = s.path().join("target");
+    std::fs::create_dir_all(&target).unwrap();
+    let out = at(&target, "echo x > out.log");
+    assert!(out.trim().is_empty(), "빌드 산출물 자리의 쓰기를 막았다\n{out}");
+}
+
 /// 규칙 3 — 리뷰도 이슈다. 그 리뷰는 **지금 보는 것에 매여야 한다.**
 #[test]
 fn reviews_are_judged_through_the_contract() {
@@ -3254,12 +3285,18 @@ impl Claude {
         std::fs::create_dir_all(&bin).unwrap();
         let log = home.path().join("claude.log");
         let script = bin.join("claude");
-        let fail = word.map(|w| format!("case \"$*\" in *{w}*) exit 1;; esac\n")).unwrap_or_default();
+        // 패턴을 따옴표로 싼다 — 안 싸면 `plugin uninstall` 의 빈칸이 패턴을 둘로
+        // 갈라 문법 오류가 나고, 가짜가 **모든** 부름에 비영으로 끝난다.
+        let fail = word.map(|w| format!("case \"$*\" in *\"{w}\"*) exit 1;; esac\n")).unwrap_or_default();
         std::fs::write(&script, format!("#!/bin/sh\necho \"$@\" >> \"{}\"\n{fail}exit 0\n", log.display()))
             .unwrap();
         use std::os::unix::fs::PermissionsExt as _;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::create_dir_all(home.path().join(".claude/plugins")).unwrap();
+        // moai 가 PATH 에서 찾는 것은 `sh` 뿐이다 (`command -v` 로 이름을 찾는다).
+        let sys = home.path().join("sysbin");
+        std::fs::create_dir_all(&sys).unwrap();
+        std::os::unix::fs::symlink("/bin/sh", sys.join("sh")).unwrap();
         Claude { home, bin, log }
     }
 
@@ -3273,15 +3310,29 @@ impl Claude {
     }
 
     fn run(&self, dir: &Path, args: &[&str], with_claude: bool) -> Output {
-        let path = if with_claude { format!("{}:/usr/bin:/bin", self.bin.display()) } else { "/usr/bin:/bin".into() };
-        Command::new(BIN)
-            .args(args)
+        self.command(Path::new(BIN), dir, args, with_claude).output().unwrap()
+    }
+
+    /// 부를 moai 와 환경을 더 줄 수 있는 모양. `claude` 가 장부를 옮겨 두는 변수는
+    /// 걷는다 — 시험을 돌리는 사람의 것이 새어 들면 시험이 그 사람의 장부를 읽는다.
+    fn command(&self, bin: &Path, dir: &Path, args: &[&str], with_claude: bool) -> Command {
+        // PATH 에는 가짜 `claude` 와 `sh` 하나만 둔다. `/usr/bin:/bin` 을 통째로 두면
+        // 그 자리에 진짜 `claude` 가 깔린 기계에서 시험이 사람의 등록을 부른다.
+        let sys = self.home.path().join("sysbin");
+        let path = if with_claude {
+            format!("{}:{}", self.bin.display(), sys.display())
+        } else {
+            sys.display().to_string()
+        };
+        let mut cmd = Command::new(bin);
+        cmd.args(args)
             .current_dir(dir)
             .env("HOME", self.home.path())
             .env("PATH", path)
             .env("NO_COLOR", "1")
-            .output()
-            .unwrap()
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .env_remove("CLAUDE_CODE_PLUGIN_CACHE_DIR");
+        cmd
     }
 }
 
@@ -3371,6 +3422,82 @@ fn skill_status_notices_a_vanished_hook_binary() {
 
     let said = text(&c.run(s.path(), &["skill", "status"], true));
     assert!(said.contains("/nowhere/moai") && said.contains("없다"), "{said}");
+
+    // **파일은 있어도 실행할 수 없으면** 훅은 권한 오류를 삼키고 아무것도 안 한다.
+    let noexec = c.home.path().join("noexec-moai");
+    std::fs::write(&noexec, "#!/bin/sh\n").unwrap();
+    let body = std::fs::read_to_string(&manifest).unwrap().replace("/nowhere/moai", &noexec.display().to_string());
+    std::fs::write(&manifest, body).unwrap();
+    let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    assert!(json.contains("\"hook_exe_found\":false"), "실행할 수 없는 훅을 있다고 한다\n{json}");
+}
+
+/// **판은 그 설치의 훅이 부르는 것으로 견준다.** 같은 moai 를 다른 자리에서 부른
+/// 것만으로 "다시 심는다" 가 뜨면, 시킨 대로 한 사람의 훅이 그 자리를 부르게 바뀐다.
+#[test]
+fn skill_status_from_another_binary_keeps_a_current_install_current() {
+    let s = init("skillotherbin");
+    let c = Claude::new("skillotherbin-home");
+    installed(&s, &c, "0.0.1");
+    let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    installed(&s, &c, &field(&json, "want_version"));
+
+    let copy = c.home.path().join("otherbin/moai");
+    std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+    std::fs::copy(BIN, &copy).unwrap();
+    let out = c.command(&copy, s.path(), &["skill", "status"], true).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let said = text(&out);
+    assert!(!said.contains("다시 심는다"), "같은 내용인데 다시 심으라 한다\n{said}");
+    assert!(said.contains("훅이 부르는 것과 다르다"), "다른 moai 로 불렀다는 말이 없다\n{said}");
+}
+
+/// **등록이 남의 자리를 가리키면 다시 심으라고 하지 않는다.** `install` 은 그때
+/// 등록을 건너뛰어, 시킨 대로 해도 아무것도 안 바뀐다 — 어느 줄에서든 같은 덫이다.
+#[test]
+fn skill_status_under_a_clash_offers_no_reinstall() {
+    let s = init("skillclashstatus");
+    let c = Claude::new("skillclashstatus-home");
+    let (market, _) = installed(&s, &c, "0.0.1");
+    c.ledger("known_marketplaces.json", &format!("{{\"{market}\":{{\"installLocation\":\"/elsewhere\"}}}}"));
+    std::fs::remove_dir_all(c.home.path().join(format!(".claude/plugins/cache/{market}"))).unwrap();
+
+    let said = text(&c.run(s.path(), &["skill", "status"], true));
+    assert!(!said.contains("moai skill install --scope"), "헛도는 명령을 일러 준다\n{said}");
+    assert!(said.contains(&format!("claude plugin marketplace remove {market}")), "빠져나갈 길이 없다\n{said}");
+
+    c.ledger("installed_plugins.json", "{\"version\":2,\"plugins\":{}}");
+    let said = text(&c.run(s.path(), &["skill", "status"], true));
+    assert!(!said.contains("`moai skill install` 로 심는다"), "헛도는 명령을 일러 준다\n{said}");
+}
+
+/// `claude` 는 `CLAUDE_CONFIG_DIR` 이 있으면 장부를 거기 둔다. `HOME` 만 보던 판은
+/// 그 사람에게 "걷어낼 것이 없다" 고 말하고 0 으로 끝났다 — 훅은 그대로 살아 있는데.
+#[test]
+fn skill_reads_the_ledger_where_claude_keeps_it() {
+    let s = init("skillcfgdir");
+    let c = Claude::new("skillcfgdir-home");
+    let (market, _) = installed(&s, &c, "0.0.1");
+    let cfg = c.home.path().join("elsewhere-config");
+    std::fs::create_dir_all(&cfg).unwrap();
+    std::fs::rename(c.home.path().join(".claude/plugins"), cfg.join("plugins")).unwrap();
+    std::fs::create_dir_all(c.home.path().join(".claude/plugins")).unwrap();
+
+    let status = c.command(Path::new(BIN), s.path(), &["skill", "status", "--json"], true)
+        .env("CLAUDE_CONFIG_DIR", &cfg)
+        .output()
+        .unwrap();
+    let json = String::from_utf8(status.stdout).unwrap();
+    assert!(!json.contains("\"installs\":[]"), "옮긴 장부를 못 읽는다\n{json}");
+
+    let before = c.calls();
+    let out = c.command(Path::new(BIN), s.path(), &["skill", "uninstall"], true)
+        .env("CLAUDE_CONFIG_DIR", &cfg)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let calls = c.calls()[before.len()..].to_string();
+    assert!(calls.contains(&format!("plugin uninstall moai@{market} --scope local")), "걷을 것을 못 찾았다\n{calls}");
 }
 
 /// `claude` 의 캐시에서 설치본이 사라지면 그것을 짚는다. 장부의 판이 맞아도
@@ -3450,6 +3577,26 @@ fn skill_uninstall_leaves_another_repos_registration_alone() {
     let json = String::from_utf8(out.stdout).unwrap();
     assert!(json.contains("\"blocked_by\":\"/elsewhere\""), "{json}");
     assert_eq!(c.calls(), before, "남의 등록인데 claude 를 불렀다");
+}
+
+/// **등록을 못 했으면 심기도 비영으로 끝난다.** 파일은 심었어도 훅은 안 선다 —
+/// `uninstall` 이 같은 반쪽 상태를 실패로 끝내는 것과 같은 셈이다. 연습은 같은
+/// 자리에서 등록을 건너뛸 것을 미리 말한다.
+#[test]
+fn skill_install_without_registration_is_not_a_success() {
+    let s = init("skillinstallpartial");
+    let c = Claude::new("skillinstallpartial-home");
+    let out = c.run(s.path(), &["skill", "install"], false);
+    assert!(!out.status.success(), "등록을 못 했는데 성공으로 끝났다\n{}", text(&out));
+    assert!(text(&out).contains("손으로 마친다"), "마칠 길을 안 낸다\n{}", text(&out));
+
+    let (market, _) = installed(&s, &c, "0.0.1");
+    c.ledger("known_marketplaces.json", &format!("{{\"{market}\":{{\"installLocation\":\"/elsewhere\"}}}}"));
+    let plan = String::from_utf8(c.run(s.path(), &["skill", "install", "--dry-run", "--json"], true).stdout).unwrap();
+    assert!(plan.contains("\"blocked_by\":\"/elsewhere\""), "연습이 건너뛸 등록을 약속한다\n{plan}");
+    let out = c.run(s.path(), &["skill", "install", "--scope", "user"], true);
+    assert!(!out.status.success(), "등록을 건너뛰었는데 성공으로 끝났다");
+    assert!(!text(&out).contains("--scope user"), "헛도는 범위 바꾸기를 일러 준다\n{}", text(&out));
 }
 
 /// `claude` 가 없으면 부를 명령을 내고 비영으로 끝난다. **절반을 해 놓고

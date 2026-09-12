@@ -43,6 +43,23 @@ pub const REVIEW_STEPS: &str = concat!(
     "  moai mv <id> done -m \"<무엇을 반영하고 무엇을 넘겼나>\"",
 );
 
+/// 리뷰 이슈에 붙는 태그. 훅은 리뷰 줄을 이 글자로 가르고, 가르치는 글은 같은
+/// 글자로 세우게 한다 — 둘이 다르면 시킨 대로 세운 리뷰를 규칙이 못 알아본다.
+pub const REVIEW_TAG: &str = "review";
+
+/// 리뷰 이슈를 세우는 줄. `anchor` 는 `--parent <id>` 나 `-e <에픽>` 이다 — 규칙
+/// 셋의 글과 두 거절문이 이 한 줄에서 나온다.
+pub fn make_review(anchor: &str) -> String {
+    format!("moai add \"리뷰 — <무엇을 보는가>\" -t {REVIEW_TAG} {anchor} -b \"<무엇을 왜 보는가>\"")
+}
+
+/// 리뷰를 닫는 두 걸음 — `REVIEW_STEPS` 에서 시작 걸음을 빼고 **실제 id** 를 넣은
+/// 것. 닫기 거절문과 세션을 닫을 때의 붙듦이 쓴다. 손으로 다시 적던 두 자리는
+/// 이미 서로 다른 글을 내고 있었다.
+pub fn close_steps(id: &str) -> String {
+    REVIEW_STEPS.lines().skip(1).map(|l| l.replace("<id>", id)).collect::<Vec<_>>().join("\n")
+}
+
 const CHEATSHEET: &str = r#"    moai status                            보드 · 경고 · 흐름 (세션은 여기서 시작)
     moai ready                             지금 집을 수 있는 일
     moai show <id>                         본문·자식·이력. 왜 그렇게 정했는지가 여기 있다
@@ -119,8 +136,10 @@ const CLOSING: &str = r#"`moai status` 를 한 번 더 돌려 경고가 늘지 �
 fn rules() -> String {
     let [one, two, three] = RULES;
     let steps = indent(REVIEW_STEPS, "  ");
+    let make = make_review("--parent <보는 이슈>");
     format!(
-        r#"**1. {one}.** `in_progress` 인 이슈가 초점이다.
+        r#"**1. {one}.** 집은 이슈 — 첫 칸을 떠났고 아직 안 닫힌 것
+(`in_progress`·`review`) — 가 초점이다.
 그 일을 하다 나온 것은 같은 에픽 안(`-e <에픽>`)이나 그 일의 자식
 (`--parent <id>`)으로 만든다. 지금 할 일이 아니면 `moai idea add` 로 담는다 —
 idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇다 (거기서
@@ -135,7 +154,7 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 **3. {three}.** `/code-review` 를 부르기 전에 지금 보는 것에 매인 리뷰
 이슈를 세운다.
 
-    moai add "리뷰 — <무엇을 보는가>" -t review --parent <보는 이슈> -b "<무엇을 왜 보는가>"
+    {make}
 {steps}
 
 관점(`-b`)과 닫는 한 줄(`-m`)은 규칙이 **실제로 요구한다.** 없이 부르면
@@ -363,6 +382,7 @@ mod tests {
             let title = format!("**{n}. {}.**", RULES[n - 1]);
             assert!(skill.contains(&title), "스킬에 규칙 {n} 의 이름이 없다 — {title}");
         }
+        assert!(skill.contains(&make_review("--parent <보는 이슈>")), "리뷰를 세우는 줄이 갈라졌다");
         for step in REVIEW_STEPS.lines() {
             assert!(skill.contains(step.trim()), "리뷰 걸음이 갈라졌다 — {step}");
         }
@@ -379,6 +399,9 @@ mod tests {
     #[test]
     fn the_frontmatter_opens_the_skill() {
         let skill = skill();
-        assert!(skill.starts_with("---\nname: moai\ndescription: "), "{}", &skill[..40]);
+        // 글자 단위로 자른다 — 바이트로 자르면 한글 한가운데서 끊겨, 실패를 알리려던
+        // 자리가 제가 먼저 죽는다.
+        let head: String = skill.chars().take(40).collect();
+        assert!(skill.starts_with("---\nname: moai\ndescription: "), "{head}");
     }
 }

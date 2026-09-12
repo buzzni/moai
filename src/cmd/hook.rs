@@ -106,24 +106,9 @@ fn decide(event: Event, input: &Input) -> Option<String> {
         Event::PreToolUse => {
             match crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input) {
                 crate::hook::Call::Shell(cmd) => {
-                    // 만드는 것·닫는 것·쓰는 것을 같은 자리에서 본다. 먼저
-                    // 걸리는 쪽이 이긴다 — 거절문은 하나면 된다.
+                    // 규칙의 차례는 `guard_shell` 이 정한다. 여기는 껍데기의 자리만 준다.
                     let cwd = std::env::current_dir().unwrap_or_else(|_| repo.root.clone());
-                    match crate::hook::guard_create(&load.issues, &repo.config, cmd) {
-                        Decision::Pass => {
-                            match crate::hook::guard_close(&load.issues, &repo.config, cmd) {
-                                Decision::Pass => crate::hook::guard_writes(
-                                    &load.issues,
-                                    &repo.config,
-                                    &repo.root,
-                                    &cwd,
-                                    cmd,
-                                ),
-                                deny => deny,
-                            }
-                        }
-                        deny => deny,
-                    }
+                    crate::hook::guard_shell(&load.issues, &repo.config, &repo.root, &cwd, cmd)
                 }
                 crate::hook::Call::Edits(path) => {
                     crate::hook::guard_edit(&load.issues, &repo.config, &repo.root, path)

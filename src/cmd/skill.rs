@@ -19,7 +19,10 @@ struct Place {
     root: PathBuf,
     dir: PathBuf,
     market: String,
+    prefix: String,
     exe: String,
+    /// PATH 에서 찾아지는 `moai` — 훅이 이름으로 적혔을 때 실제로 불리는 것.
+    on_path: Option<PathBuf>,
     files: Vec<(PathBuf, String)>,
 }
 
@@ -27,26 +30,33 @@ fn place() -> R<Place> {
     let repo = crate::store::Repo::discover()?;
     let root = repo.root.clone();
     let exe = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
-    let exe = skill::exe_name(&exe, which("moai").as_deref());
+    let on_path = which("moai");
+    let exe = skill::exe_name(&exe, on_path.as_deref());
+    let prefix = repo.config.prefix.clone();
     // **누구인지 묻지 않는다.** 심는 것은 이력이 남는 일이 아니라 설정이다.
-    let files = skill::tree(
-        &repo.config.prefix,
-        &root,
-        &exe,
-        &crate::guide::skill(),
-        &crate::guide::reference(),
-    );
+    let files = plant(&prefix, &root, &exe);
     Ok(Place {
         dir: root.join(skill::DIR),
-        market: skill::market(&repo.config.prefix, &root),
+        market: skill::market(&prefix, &root),
         root,
+        prefix,
         exe,
+        on_path,
         files,
     })
 }
 
+/// 훅에 이 실행 파일을 적었을 때 심을 트리.
+fn plant(prefix: &str, root: &Path, exe: &str) -> Vec<(PathBuf, String)> {
+    skill::tree(prefix, root, exe, &crate::guide::skill(), &crate::guide::reference())
+}
+
 pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
-    let Place { root, dir, market, exe, files } = place()?;
+    let Place { root, dir, market, exe, files, .. } = place()?;
+    // **같은 이름이 남의 저장소를 가리키면 등록하지 않는다.** 덮어쓰면 그
+    // 저장소의 규칙이 이쪽에 걸린다 — 조용히 엉뚱해지는 쪽이라 더 나쁘다.
+    // 연습도 같은 답을 낸다. 진짜 실행이 건너뛸 등록을 연습이 약속하면 안 된다.
+    let clash = clash_of(&market, &dir);
 
     if dry_run {
         if ctx.json {
@@ -57,6 +67,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
                 "exe": exe,
                 "dry_run": true,
                 "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
+                "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
             }));
         }
         let mut out = vec![format!("심을 것 — {}", dir.display())];
@@ -64,7 +75,10 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
             out.push(format!("  {:<44} {}줄", path.display(), body.lines().count()));
         }
         out.push(String::new());
-        out.push(format!("등록: claude plugin install moai@{market} --scope {scope}"));
+        out.push(match &clash {
+            Some(other) => format!("등록: 건너뛴다 — `{market}` 이 이미 {} 를 가리킨다", other.display()),
+            None => format!("등록: claude plugin install moai@{market} --scope {scope} -y"),
+        });
         return Ok(out);
     }
 
@@ -78,9 +92,6 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         std::fs::write(&at, body).map_err(|e| Fail::new(format!("{}: {e}", at.display())))?;
     }
 
-    // **같은 이름이 남의 저장소를 가리키면 등록하지 않는다.** 덮어쓰면 그
-    // 저장소의 규칙이 이쪽에 걸린다 — 조용히 엉뚱해지는 쪽이라 더 나쁘다.
-    let clash = clash_of(&market, &dir);
     let steps = match &clash {
         Some(other) => vec![(
             format!("`{market}` 이 이미 {} 를 가리킨다 — 등록은 건너뛴다", other.display()),
@@ -88,6 +99,14 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         )],
         None => register(&root, &dir, &market, scope, known_at(&market).is_some()),
     };
+
+    // **등록이 안 됐으면 비영으로 끝낸다.** 파일은 심었어도 훅은 안 선다 —
+    // `uninstall` 이 같은 반쪽 상태를 실패로 끝내는 것과 같은 셈이다. 종료 코드만
+    // 보는 쪽이 "심었다" 로 읽으면 규칙 없이 세션이 돈다.
+    let registered = steps.iter().all(|(_, ok)| *ok);
+    if !registered {
+        super::note_partial();
+    }
 
     if ctx.json {
         return super::json_line(&serde_json::json!({
@@ -97,7 +116,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
             "scope": scope,
             "exe": exe,
             "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
-            "registered": steps.iter().all(|(_, ok)| *ok),
+            "registered": registered,
             // **못 한 까닭을 기계에도 준다.** 사람 출력에만 적어 두면 스크립트는
             // `registered: false` 만 보고 무엇을 해야 할지 모른다.
             "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
@@ -109,7 +128,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     for (what, ok) in &steps {
         out.push(format!("  {} {what}", if *ok { "·" } else { "!" }));
     }
-    if steps.iter().all(|(_, ok)| *ok) {
+    if registered {
         out.push(String::new());
         out.push("Claude 를 다시 열면 든다. 이미 열려 있는 세션은 옛 판을 계속 쓴다".into());
     } else if clash.is_some() {
@@ -117,8 +136,10 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         // 내면, 시킨 대로 한 사람이 남의 저장소 등록을 이쪽으로 돌려놓는다 —
         // 이 가드가 막으려던 바로 그 일이다.
         out.push(String::new());
+        // `--scope` 를 바꿔 보라고 하지 않는다 — 이름은 기계 하나에서 전역이라,
+        // 어느 범위로 심어도 같은 자리에서 걸려 아무것도 안 바뀐다.
         out.push(format!("그 저장소를 이제 안 쓰면 `claude plugin marketplace remove {market}` 뒤에"));
-        out.push("다시 부른다. 둘 다 쓰면 한쪽은 `--scope user` 로 심는다".into());
+        out.push("다시 부른다. 한 이름을 두 자리가 함께 쓸 수는 없다".into());
     } else {
         out.push(String::new());
         out.push("등록은 손으로 마친다:".into());
@@ -133,34 +154,46 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
 /// 어긋남을 비영 종료로 알리면 에이전트가 이것을 "실패" 로 읽는다 —
 /// `moai status` 가 아무것도 막지 않는 것과 같은 까닭이다.
 pub fn status(ctx: &Ctx) -> R<Vec<String>> {
-    let Place { root, dir, market, exe, files } = place()?;
+    let Place { root, dir, market, prefix, exe, on_path, files } = place()?;
     let want = skill::version_in(&files).unwrap_or_default();
     let listed = known_at(&market);
-    let clash = clash_of(&market, &dir);
+    let clash = listed.clone().filter(|other| !same_dir(other, &dir));
     let installs = installs_here(&market, &root);
     let claude = which("claude").is_some();
     // 실제로 불리는 것은 `claude` 가 복사해 간 매니페스트다. **복사본이 사라진
     // 설치**(캐시를 치운 뒤)는 훅이 아예 안 실리므로, 판이 맞아도 따로 짚는다.
-    let manifest_of = |i: &skill::Install| Path::new(&i.install_path).join(".claude-plugin/plugin.json");
-    let copied: Vec<bool> = installs.iter().map(|i| manifest_of(i).is_file()).collect();
-    let hooked = installs.iter().find_map(|i| {
-        std::fs::read_to_string(manifest_of(i)).ok().and_then(|m| skill::hook_exe(&m))
-    });
-    let hook_found = hooked.as_deref().map(exe_exists);
+    let copies: Vec<Option<String>> = installs
+        .iter()
+        .map(|i| std::fs::read_to_string(Path::new(&i.install_path).join(".claude-plugin/plugin.json")).ok())
+        .collect();
+    let hooks: Vec<Option<String>> = copies.iter().map(|m| m.as_deref().and_then(skill::hook_exe)).collect();
+    // **판은 그 설치의 훅이 부르는 실행 파일로 견준다.** 판에는 훅 명령이 들어가,
+    // 지금 부른 moai 의 자리로 견주면 내용이 같아도 판이 달라 보인다 — 복사본이나
+    // `cargo run` 으로 부른 것만으로 "다시 심는다" 가 떴고, 시킨 대로 하면 훅이 그
+    // 복사본을 부르게 바뀌었다.
+    let wants: Vec<String> = hooks
+        .iter()
+        .map(|h| match h.as_deref() {
+            Some(h) if h != exe => skill::version_in(&plant(&prefix, &root, h)).unwrap_or_default(),
+            _ => want.clone(),
+        })
+        .collect();
+    let hooked = hooks.iter().flatten().next().cloned();
+    let hook_path = hooked.as_deref().and_then(|h| runs(h, on_path.as_deref()));
     let stale = stale_copies(&installs);
 
     if ctx.json {
         let rows: Vec<_> = installs
             .iter()
-            .zip(&copied)
-            .map(|(i, copy_found)| {
+            .zip(copies.iter().zip(&wants))
+            .map(|(i, (copy, want))| {
                 serde_json::json!({
                     "scope": i.scope,
                     "version": i.version,
                     "project": i.project,
                     "install_path": i.install_path,
-                    "current": i.version == want,
-                    "copy_found": copy_found,
+                    "current": i.version == *want,
+                    "copy_found": copy.is_some(),
                 })
             })
             .collect();
@@ -174,7 +207,8 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             "exe": exe,
             "installs": rows,
             "hook_exe": hooked,
-            "hook_exe_found": hook_found,
+            "hook_exe_found": hooked.as_ref().map(|_| hook_path.is_some()),
+            "hook_exe_path": hook_path.as_ref().map(|p| p.display().to_string()),
             "stale_copies": stale,
             "claude": claude,
         }));
@@ -190,35 +224,50 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         (Some(_), None) => format!("  · 마켓플레이스  `{market}` 등록됨"),
         (None, _) => format!("  ! 마켓플레이스  `{market}` 등록 안 됨"),
     });
-    if installs.is_empty() {
-        out.push("  ! 설치          없음 — `moai skill install` 로 심는다".into());
+    // **등록이 남의 자리를 가리키면 다시 심으라고 하지 않는다.** `install` 은 그때
+    // 등록을 건너뛰어, 시킨 대로 해도 아무것도 안 바뀐다 — 어느 줄에서 일러 주든
+    // 같은 덫이다. 빠져나갈 길은 이 한 줄에만 댄다.
+    if clash.is_some() {
+        out.push(format!(
+            "    그 자리를 이제 안 쓰면 `claude plugin marketplace remove {market}` 뒤에 `moai skill install`"
+        ));
     }
-    for (i, copy_found) in installs.iter().zip(&copied) {
-        let current = i.version == want;
+    if installs.is_empty() {
+        out.push(if clash.is_some() {
+            "  ! 설치          없음".into()
+        } else {
+            "  ! 설치          없음 — `moai skill install` 로 심는다".into()
+        });
+    }
+    for (i, (copy, want)) in installs.iter().zip(copies.iter().zip(&wants)) {
+        let current = i.version == *want;
+        let found = copy.is_some();
+        let advice = if clash.is_some() { String::new() } else { format!(": moai skill install --scope {}", i.scope) };
         out.push(format!(
             "  {} 설치          {}  판 {}{}",
-            mark(current && *copy_found),
+            mark(current && found),
             i.scope,
             i.version,
-            if !copy_found {
-                format!("  — 설치본({})이 없다. 훅이 안 실린다: moai skill install --scope {}", i.install_path, i.scope)
+            if !found {
+                format!("  — 설치본({})이 없다. 훅이 안 실린다{advice}", i.install_path)
             } else if current {
                 String::new()
-            } else if clash.is_some() {
-                // 다시 심으라고 하지 않는다 — 등록이 남의 자리를 가리켜 `install` 이
-                // 등록을 건너뛰므로, 시킨 대로 해도 아무것도 안 바뀐다.
-                format!("  — 심을 판은 {want}. 등록이 다른 자리를 가리켜 다시 심어도 안 든다")
             } else {
-                format!("  — 심을 판은 {want}. 다시 심는다: moai skill install --scope {}", i.scope)
+                format!("  — 심을 판은 {want}. 다시 심는다{advice}")
             }
         ));
     }
-    if let (Some(exe), Some(found)) = (&hooked, hook_found) {
-        out.push(format!(
-            "  {} 훅            {exe}{}",
-            mark(found),
-            if found { "" } else { "  — 없다. 훅은 조용히 아무것도 안 한다" }
-        ));
+    if let Some(hook) = &hooked {
+        out.push(match &hook_path {
+            Some(path) if path.as_os_str() == hook.as_str() => format!("  · 훅            {hook}"),
+            Some(path) => format!("  · 훅            {hook} → {}", path.display()),
+            None => format!("  ! 훅            {hook}  — 없거나 실행할 수 없다. 훅은 조용히 아무것도 안 한다"),
+        });
+        if *hook != exe {
+            out.push(format!(
+                "    지금 부른 moai({exe}) 는 훅이 부르는 것과 다르다 — 여기서 심으면 훅이 그것을 부르게 바뀐다"
+            ));
+        }
     }
     out.push(format!(
         "  {} claude        {}",
@@ -347,16 +396,49 @@ fn which(name: &str) -> Option<PathBuf> {
     (!found.is_empty()).then(|| std::fs::canonicalize(&found).unwrap_or_else(|_| found.into()))
 }
 
-/// 훅이 부르는 것이 아직 있는가. 이름이면 PATH 를, 경로면 그 파일을 본다 —
-/// 훅 명령의 `command -v` 와 같은 셈이다.
-fn exe_exists(exe: &str) -> bool {
-    if exe.contains('/') { Path::new(exe).is_file() } else { which(exe).is_some() }
+/// 훅이 부르는 것이 **실제로 도는 파일.** 이름이면 PATH 에서 찾은 것이고, 경로면
+/// 실행할 수 있을 때만 그 자리다 — 훅 명령의 `command -v … && "<exe>"` 와 같은 셈.
+///
+/// `is_file` 만 보던 판은 실행 권한이 빠진 파일을 "있다" 고 했다. 훅은 그때 권한
+/// 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 한다. 이름으로 적힌 훅은
+/// 찾은 자리를 **함께 보인다** — PATH 의 `moai` 가 남의 moai 여도 훅은 돈다.
+fn runs(exe: &str, on_path: Option<&Path>) -> Option<PathBuf> {
+    if exe.contains('/') {
+        let path = Path::new(exe);
+        runnable(path).then(|| path.to_path_buf())
+    } else if exe == "moai" {
+        on_path.map(Path::to_path_buf)
+    } else {
+        which(exe)
+    }
+}
+
+fn runnable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
+}
+
+/// `claude` 가 플러그인 장부를 두는 자리. **`claude` 가 보는 곳을 그대로 본다** —
+/// `CLAUDE_CODE_PLUGIN_CACHE_DIR`, 없으면 `CLAUDE_CONFIG_DIR/plugins`, 없으면
+/// `~/.claude/plugins`. `HOME` 만 보던 판은 설정 디렉터리를 옮긴 사람에게 "걷어낼
+/// 것이 없다" 고 말하고 0 으로 끝났다 — 훅은 그대로 살아 있는데.
+fn plugins_dir() -> Option<PathBuf> {
+    let set = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    set("CLAUDE_CODE_PLUGIN_CACHE_DIR")
+        .or_else(|| set("CLAUDE_CONFIG_DIR").map(|d| d.join("plugins")))
+        .or_else(|| set("HOME").map(|h| h.join(".claude/plugins")))
 }
 
 /// `claude` 의 장부 하나. **읽기만** 한다. 쓰는 것은 `claude` 의 몫이다.
 fn ledger(name: &str) -> Option<serde_json::Value> {
-    let home = std::env::var_os("HOME")?;
-    let text = std::fs::read_to_string(Path::new(&home).join(".claude/plugins").join(name)).ok()?;
+    let text = std::fs::read_to_string(plugins_dir()?.join(name)).ok()?;
     serde_json::from_str(&text).ok()
 }
 
