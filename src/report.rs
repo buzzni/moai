@@ -740,7 +740,10 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     //      **id 를 싣지 않는다.** 다섯 건이 넘어야 뜨는 줄인데 거기에 제목
     //      셋을 더 달면, 정확히 "담을수록 화면이 시끄러워진다" 는 그 일이
     //      일어난다. 무엇이 쌓였는지는 `moai idea ls` 가 낸다.
-    let piled = |i: &&Issue| is_idea(i) && !i.status.is_done();
+    //      **미뤄 둔 생각은 안 센다.** 여기 세면 이 줄이 가리키는 `moai idea
+    //      ls` 가 그것을 숨겨, 세어 놓고 못 보여 주는 수가 된다 — 미룬 것은
+    //      아래 6-3 이 제 이름으로 말한다.
+    let piled = |i: &&Issue| is_idea(i) && !i.status.is_done() && !i.is_deferred();
     let count = issues.iter().filter(piled).count();
     if count >= IDEA_PILE {
         let oldest = issues
@@ -762,7 +765,11 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     //      있는 일에 대한 한 번의 결정이라 자주 쌓이지 않고, 대신 보드에서
     //      통째로 사라지므로 여기가 그것이 보이는 **유일한 자리**다. 흐린 한
     //      줄이고 알림이라 꾸지람으로 읽히지 않는다.
-    let put_off = |i: &&Issue| is_work(i) && i.is_deferred() && !i.status.is_done();
+    //
+    //      **종류를 안 가린다.** 미루는 길(`moai defer`)은 무엇이든 받는데
+    //      `is_work` 로 좁히면 미뤄 둔 에픽·생각이 목록에서만 사라지고 여기서
+    //      한마디도 안 나온다 — 보이는 유일한 자리가 그 줄만 안 비추는 꼴이다.
+    let put_off = |i: &&Issue| i.is_deferred() && !i.status.is_done();
     let count = issues.iter().filter(put_off).count();
     if count > 0 {
         let oldest = issues
@@ -1575,5 +1582,29 @@ mod tests {
         let rolls = rollup(&issues, &cfg());
         let r = roll_of(&rolls, Some("argos-0001"));
         assert_eq!((r.total, r.done), (2, 1), "미뤘다고 계획이 줄었다 — {r:?}");
+    }
+    /// **세어 놓고 못 보여 주는 수를 만들지 않는다.** 미뤄 둔 생각을
+    /// `idea_pile` 이 세면, 그 줄이 가리키는 `moai idea ls` 는 그것을 숨긴다.
+    #[test]
+    fn a_deferred_thought_leaves_the_pile_for_its_own_line() {
+        let mut piled: Vec<Issue> = (0..IDEA_PILE).map(|n| idea(&format!("argos-000{n}"))).collect();
+        piled[0].deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(!kinds.contains(&"idea_pile"), "숨길 것을 세었다 — {kinds:?}");
+        assert!(kinds.contains(&"deferred"), "제 이름으로도 안 말한다 — {kinds:?}");
+    }
+
+    /// 미루는 길은 무엇이든 받는다. 드러내는 자리가 `is_work` 로 좁히면
+    /// 미뤄 둔 에픽이 목록에서만 사라지고 아무 데서도 안 보인다 — 보이는
+    /// 유일한 자리가 그 줄만 안 비추는 꼴이다.
+    #[test]
+    fn a_deferred_grouping_is_still_named() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let st = status(&[epic], &[], &cfg(), "2026-09-11T00:00:00Z");
+        let w = st.warnings.iter().find(|w| w.kind == "deferred").expect("미뤄 둔 에픽이 안 보인다");
+        assert_eq!(w.count, 1);
+        assert!(w.notice);
     }
 }

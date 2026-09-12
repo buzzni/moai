@@ -112,6 +112,9 @@ pub fn list(
 
     let show_tags = issues.iter().any(|i| !i.tags.is_empty());
     let show_epic = issues.iter().any(|i| epics.contains_key(i.id.as_str()));
+    // 미룸 표를 달지 말지는 **목록 전체의 성질**이라 줄마다 다시 묻지 않는다 —
+    // 물으면 줄 수의 제곱만큼 훑는다. `show_tags` 와 같은 자리, 같은 모양이다.
+    let mixed = issues.iter().any(|i| !i.is_deferred());
     let heads: Vec<String> = issues.iter().map(|i| clip(&i.title, TITLE_CAP)).collect();
     let tags: Vec<String> = issues.iter().map(tags_of).collect();
     // 에픽 열은 **제목**을 보여준다. id 를 보여주면 사람이 그걸 다시 찾아봐야 한다.
@@ -162,7 +165,7 @@ pub fn list(
         // 같은 낱말이 붙어 봐야 자리만 먹는데, `--all` 은 섞여 나오므로 표가
         // 없으면 어느 줄이 계획 밖인지 알 길이 없다. 열을 늘리지 않고 꼬리에
         // 단다 — 미루지 않은 줄이 그 자리를 비워 두면 그게 더 시끄럽다.
-        if i.is_deferred() && !issues.iter().all(|x| x.is_deferred()) {
+        if i.is_deferred() && mixed {
             row.push_str(&format!("   {}", paint(style::DIM, "미룸")));
         }
         out.push(row.trim_end().to_string());
@@ -578,7 +581,11 @@ pub fn status(st: &StatusReport, issues: &[Issue], cfg: &Config, now: &str, at: 
         out.push(format!("{} {}", paint(mark, glyph), says(w)));
         out.extend(preview(w, &by_id, now));
     }
-    if st.warnings.is_empty() {
+    // **알림만 있는 것은 "아무 문제 없다" 이다.** 여기서 `warnings` 를 통째로
+    // 세면 생각을 담거나 무언가를 미룬 순간부터 이 줄이 사라져, 세션을 닫기
+    // 전에 "경고가 늘지 않았는지" 보는 사람이 알림을 경고로 읽는다 — 탐색기
+    // 배너가 `notice` 를 빼고 세는 것과 같은 자, 같은 까닭이다.
+    if !st.warnings.iter().any(|w| !w.notice) {
         out.push(String::new());
         out.push(format!("{} 드러난 문제 없다", paint(style::status_style("done"), "✓")));
     }

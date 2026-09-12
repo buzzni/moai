@@ -112,5 +112,15 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             paint(style::DIM, &format!("이미 {to} 다"))
         ));
     }
+    // **미뤄 둔 줄을 옮겼으면 말한다.** 칸은 옮겨졌는데 그 줄은 보드에도
+    // `ready` 에도 안 나오므로, 말하지 않으면 집어 든 일이 통째로 안 보인다 —
+    // 막지는 않는다. 도로 집는 말은 `defer --undo` 하나다.
+    for (i, _) in moved.done.iter().filter(|(i, _)| i.is_deferred()) {
+        out.push(format!(
+            "{}  {}",
+            paint(style::ID, &i.id),
+            paint(style::DIM, "미뤄 둔 것이라 보드와 ready 에서는 빠져 있다 — `moai defer --undo`"),
+        ));
+    }
     Ok(out)
 }

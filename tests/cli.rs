@@ -2367,3 +2367,36 @@ fn status_shows_what_was_put_off_without_blocking() {
     assert!(text.contains("+ 미뤄 둔 것"), "알림이 경고 글리프를 달았다 — {text}");
     assert!(text.contains("moai show --deferred"), "다음에 무엇을 칠지 안 말한다 — {text}");
 }
+
+/// **알림만 있는 것은 "아무 문제 없다" 이다.** 여기가 무너지면 생각을 담거나
+/// 무언가를 미룬 순간부터 그 줄이 사라져, 세션을 닫기 전에 "경고가 늘지
+/// 않았는지" 보는 사람이 알림을 경고로 읽는다.
+#[test]
+fn a_repo_with_only_notices_still_reads_clean() {
+    let s = init("noticeclean");
+    let id = add(s.path(), &["지금 할 일"]);
+    ok(s.path(), &["idea", "add", "반짝", "-q"]);
+    let later = add(s.path(), &["나중에"]);
+    ok(s.path(), &["defer", &later]);
+    ok(s.path(), &["epic", "add", "묶음", "-q"]);
+    ok(s.path(), &["edit", &id, "-e", &field(&ok(s.path(), &["epic", "show", "--json"]), "id")]);
+
+    let out = ok(s.path(), &["status"]);
+    assert!(out.contains("미뤄 둔 것"), "알림이 안 나온다 — {out}");
+    assert!(out.contains("드러난 문제 없다"), "알림 하나로 깨끗함을 잃었다 — {out}");
+}
+
+/// 미뤄 둔 줄을 옮기면 **말한다.** 칸은 옮겨졌는데 보드에도 `ready` 에도 안
+/// 나오므로, 말하지 않으면 집어 든 일이 통째로 안 보인다. 막지는 않는다.
+#[test]
+fn moving_a_deferred_row_says_it_is_still_out_of_the_plan() {
+    let s = init("defermv");
+    let id = add(s.path(), &["나중에"]);
+    ok(s.path(), &["defer", &id]);
+    let out = moai(s.path(), &["mv", &id, "in_progress"]);
+    assert!(out.status.success(), "막았다 — 이 도구에 게이트는 없다");
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("in_progress"), "안 옮겼다 — {text}");
+    assert!(text.contains("defer --undo"), "보드에서 빠져 있다는 말을 안 한다 — {text}");
+    assert!(!ok(s.path(), &["ready"]).contains(&id));
+}
