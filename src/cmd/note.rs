@@ -23,7 +23,7 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
     let by = model::actor(ctx.user.as_deref())?;
     let entry = JournalEntry::note(&args.id, &text, &at, &by);
 
-    repo.with_write(|issues, _| {
+    repo.with_write(|issues, _, _| {
         if !issues.iter().any(|i| i.id == args.id) {
             return Err(Fail::not_found(&args.id));
         }

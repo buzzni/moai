@@ -87,8 +87,8 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     let at = model::now();
     let by = model::actor(ctx.user.as_deref())?;
 
-    let made: Issue = repo.with_write(|issues, cfg| {
-        let taken = taken_ids(issues);
+    let made: Issue = repo.with_write(|issues, cfg, reserved| {
+        let taken = taken_ids(issues, reserved);
 
         let id = match &args.parent {
             Some(p) => {
@@ -179,8 +179,8 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool, assignee: Option<Stri
 
     let at = model::now();
     let by = model::actor(ctx.user.as_deref())?;
-    let made: Vec<Issue> = repo.with_write(|issues, cfg| {
-        create_drafts(issues, cfg, &drafts, assignee.as_deref(), &by, &at)
+    let made: Vec<Issue> = repo.with_write(|issues, cfg, reserved| {
+        create_drafts(issues, cfg, reserved, &drafts, assignee.as_deref(), &by, &at)
     })?;
 
     if ctx.json {
@@ -201,12 +201,13 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool, assignee: Option<Stri
 pub fn create_drafts(
     issues: &mut Vec<Issue>,
     cfg: &crate::config::Config,
+    reserved: &std::collections::BTreeSet<String>,
     drafts: &[Draft],
     assignee: Option<&str>,
     by: &Actor,
     at: &str,
 ) -> R<(Vec<JournalEntry>, Vec<Issue>)> {
-    let mut taken = taken_ids(issues);
+    let mut taken = taken_ids(issues, reserved);
     let mut ids: Vec<String> = Vec::with_capacity(drafts.len());
     let mut entries = Vec::new();
     let mut made = Vec::new();

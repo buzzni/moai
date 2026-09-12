@@ -28,6 +28,10 @@ pub struct LoadError {
     pub message: String,
     /// 못 읽은 줄의 **원문 그대로**. 이것이 있어야 되쓸 때 그 줄을 잃지 않는다.
     pub text: String,
+    /// 그 줄이 쓰고 있는 id. **줄을 `Issue` 로 못 읽는 것과 그 안의 `id` 를
+    /// 못 읽는 것은 다른 일이다** — 한 단 낮게(`serde_json::Value`) 읽으면
+    /// 대개 나온다. JSON 도 아닌 줄에서는 `None` 이고, 그때는 지어내지 않는다.
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -39,6 +43,15 @@ pub struct Load {
 impl Load {
     pub fn get(&self, id: &str) -> Option<&Issue> {
         self.issues.iter().find(|i| i.id == id)
+    }
+
+    /// 못 읽는 줄이 이미 쓰고 있는 id. **새 id 를 여기서 피해 뽑는다.**
+    ///
+    /// 안 피하면 못 읽는 동안은 아무 데도 안 보이는 중복이 생기고, 그 줄이
+    /// 읽히게 되는 날(새 바이너리로 갈아타면) `duplicate_id` 가 서서 모든
+    /// 쓰기가 막힌다 — 그때는 어느 줄을 고쳐야 하는지도 사람이 알아내야 한다.
+    pub fn reserved_ids(&self) -> BTreeSet<String> {
+        self.errors.iter().filter_map(|e| e.id.clone()).collect()
     }
 }
 
@@ -88,9 +101,12 @@ impl Repo {
     /// 저널 추가. 순서가 중요하다: **스냅샷 먼저, 저널 나중.** 중간에 죽으면
     /// 저널에 줄이 하나 비는데(이력 공백), 반대 순서면 저널이 일어나지 않은
     /// 일을 주장한다. 빠진 일기가 거짓말하는 일기보다 싸다.
+    /// 닫는 함수는 `(이슈들, 설정, 못 읽는 줄이 이미 쓰는 id)` 를 받는다.
+    /// 셋째 것을 **인자로 주는 까닭**은 안 쓰는 쪽이 잊을 수 없게 하려는
+    /// 것이다 — 락 안에서 읽은 것이라 밖에서 다시 구하면 그 사이에 달라진다.
     pub fn with_write<T, F>(&self, f: F) -> R<T>
     where
-        F: FnOnce(&mut Vec<Issue>, &Config) -> R<(Vec<JournalEntry>, T)>,
+        F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
     {
         let _lock = Lock::acquire(&self.dir().join("lock"))?;
 
@@ -121,8 +137,9 @@ impl Repo {
             o.normalize();
         }
 
+        let reserved = load.reserved_ids();
         let mut issues = load.issues;
-        let (entries, out) = f(&mut issues, &self.config)?;
+        let (entries, out) = f(&mut issues, &self.config, &reserved)?;
 
         for i in issues.iter_mut() {
             i.normalize();
@@ -213,6 +230,12 @@ pub fn parse_issues(src: &str) -> Load {
                 line: i + 1,
                 message: e.to_string(),
                 text: line.to_string(),
+                // **둘째 파서를 만들지 않는다.** 같은 `serde_json` 을 한 겹
+                // 아래로 부를 뿐이라 본체와 어긋날 자리가 없다 — 정규식으로
+                // 긁었으면 그 순간 파서가 둘이 되고, 둘은 언젠가 갈라진다.
+                id: serde_json::from_str::<serde_json::Value>(line)
+                    .ok()
+                    .and_then(|v| v.get("id")?.as_str().map(str::to_string)),
             }),
         }
     }
@@ -244,8 +267,13 @@ fn first_duplicate(sorted: &[Issue]) -> Option<&str> {
     sorted.windows(2).find(|w| w[0].id == w[1].id).map(|w| w[0].id.as_str())
 }
 
-pub fn taken_ids(issues: &[Issue]) -> BTreeSet<String> {
-    issues.iter().map(|i| i.id.clone()).collect()
+/// 이미 쓰이고 있는 id 전부 — 읽은 줄의 것과 **못 읽는 줄의 것까지.**
+///
+/// 둘을 한 함수로 합쳐 두는 까닭은 한쪽만 넘기는 것이 불가능해야 하기
+/// 때문이다. 갈라 두면 부르는 쪽이 언젠가 하나를 잊고, 잊은 그날은 아무
+/// 증상도 없다.
+pub fn taken_ids(issues: &[Issue], reserved: &BTreeSet<String>) -> BTreeSet<String> {
+    issues.iter().map(|i| i.id.clone()).chain(reserved.iter().cloned()).collect()
 }
 
 /// temp 에 쓰고 `rename` 으로 갈아끼운다. 독자는 옛 파일 아니면 새 파일만 본다.
@@ -346,7 +374,7 @@ mod tests {
     #[test]
     fn writes_and_reads_back() {
         let (r, _d) = repo("rw");
-        r.with_write(|issues, _| {
+        r.with_write(|issues, _, _| {
             issues.push(issue("argos-4aex"));
             Ok((vec![JournalEntry::create("argos-4aex", "t", T, &crate::model::someone("raven"))], ()))
         })
@@ -361,7 +389,7 @@ mod tests {
     #[test]
     fn output_is_sorted_and_deterministic() {
         let (r, d) = repo("sorted");
-        r.with_write(|issues, _| {
+        r.with_write(|issues, _, _| {
             for id in ["argos-4aey", "argos-4aex.ae3", "argos-0001", "argos-4aex"] {
                 issues.push(issue(id));
             }
@@ -380,7 +408,7 @@ mod tests {
     #[test]
     fn unchanged_write_leaves_the_file_alone() {
         let (r, d) = repo("idem");
-        r.with_write(|i, _| {
+        r.with_write(|i, _, _| {
             i.push(issue("argos-4aex"));
             Ok((vec![], ()))
         })
@@ -388,7 +416,7 @@ mod tests {
         let path = d.join(".moai/issues.jsonl");
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(Duration::from_millis(20));
-        r.with_write(|_, _| Ok((vec![], ()))).unwrap();
+        r.with_write(|_, _, _| Ok((vec![], ()))).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
     }
 
@@ -396,12 +424,12 @@ mod tests {
     #[test]
     fn journal_only_writes_still_land() {
         let (r, _d) = repo("note");
-        r.with_write(|i, _| {
+        r.with_write(|i, _, _| {
             i.push(issue("argos-4aex"));
             Ok((vec![], ()))
         })
         .unwrap();
-        r.with_write(|_, _| Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &crate::model::someone("raven"))], ())))
+        r.with_write(|_, _, _| Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &crate::model::someone("raven"))], ())))
             .unwrap();
         let j = r.journal_of("argos-4aex").unwrap();
         assert_eq!(j.len(), 1);
@@ -453,7 +481,7 @@ mod tests {
         let (r, d) = repo("broken");
         let path = d.join(".moai/issues.jsonl");
         std::fs::write(&path, "{깨짐\n").unwrap();
-        r.with_write(|i, _| {
+        r.with_write(|i, _, _| {
             i.push(issue("argos-4aex"));
             Ok((vec![], ()))
         })
@@ -465,14 +493,14 @@ mod tests {
 
         // 두 번째 쓰기에서 줄이 또 움직이지 않는다 (멱등).
         let once = std::fs::read_to_string(&path).unwrap();
-        r.with_write(|_, _| Ok((vec![], ()))).unwrap();
+        r.with_write(|_, _, _| Ok((vec![], ()))).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), once);
     }
 
     #[test]
     fn refuses_duplicate_ids() {
         let (r, _d) = repo("dup");
-        let e = r.with_write(|i, _| {
+        let e = r.with_write(|i, _, _| {
             i.push(issue("argos-4aex"));
             i.push(issue("argos-4aex"));
             Ok((vec![], ()))
@@ -497,7 +525,7 @@ mod tests {
         )
         .unwrap();
 
-        r.with_write(|issues, _| {
+        r.with_write(|issues, _, _| {
             issues.push(issue("argos-0002"));
             Ok((vec![], ()))
         })
@@ -522,7 +550,7 @@ mod tests {
         .unwrap();
 
         let e = r
-            .with_write(|issues, _| {
+            .with_write(|issues, _, _| {
                 issues[0].title = "고친 제목".into();
                 Ok((vec![], ()))
             })
@@ -534,17 +562,64 @@ mod tests {
     #[test]
     fn a_rejected_write_leaves_the_file_untouched() {
         let (r, d) = repo("rollback");
-        r.with_write(|i, _| {
+        r.with_write(|i, _, _| {
             i.push(issue("argos-4aex"));
             Ok((vec![], ()))
         })
         .unwrap();
         let before = std::fs::read_to_string(d.join(".moai/issues.jsonl")).unwrap();
-        let _ = r.with_write(|i, _| {
+        let _ = r.with_write(|i, _, _| {
             i.push(issue("argos-4aey"));
             i[0].status = Status::new("없는칸");
             Ok((vec![], ()))
         });
         assert_eq!(std::fs::read_to_string(d.join(".moai/issues.jsonl")).unwrap(), before);
+    }
+    /// 못 읽는 줄도 **id 는 내놓는다.** 줄을 `Issue` 로 못 읽는 것과 그 안의
+    /// `id` 를 못 읽는 것은 다른 일이다 — 한 단 낮게 읽으면 나온다.
+    ///
+    /// **둘째 파서를 만들지 않는다.** `serde_json` 한 겹 아래로 내려갈 뿐이라
+    /// 본체와 어긋날 자리가 없다. 정규식으로 긁었으면 그 순간 파서가 둘이 된다.
+    #[test]
+    fn an_unreadable_line_still_yields_its_id() {
+        let load = parse_issues(
+            "{\"id\":\"argos-9999\",\"title\":\"몰라\",\"kind\":\"몰라\",\"status\":\"todo\"}\n",
+        );
+        assert_eq!(load.errors.len(), 1);
+        assert_eq!(load.errors[0].id.as_deref(), Some("argos-9999"));
+        assert_eq!(load.reserved_ids().iter().next().map(String::as_str), Some("argos-9999"));
+    }
+
+    /// JSON 도 아닌 줄에는 내놓을 id 가 없다. 없는 것을 지어내지 않는다.
+    #[test]
+    fn a_line_that_is_not_even_json_yields_no_id() {
+        let load = parse_issues("{깨짐\n");
+        assert_eq!(load.errors.len(), 1);
+        assert_eq!(load.errors[0].id, None);
+        assert!(load.reserved_ids().is_empty());
+    }
+
+    /// **쓰기는 그 id 를 피해서 뽑는다.** 안 피하면 못 읽는 동안은 아무 데도
+    /// 안 보이는 중복이 생기고, 그 줄이 읽히게 되는 날 모든 쓰기가 막힌다.
+    #[test]
+    fn a_write_reserves_the_ids_it_cannot_read() {
+        let (r, d) = repo("reserve");
+        std::fs::write(
+            d.join(".moai/issues.jsonl"),
+            "{\"id\":\"argos-9999\",\"title\":\"몰라\",\"kind\":\"몰라\",\"status\":\"todo\"}\n",
+        )
+        .unwrap();
+
+        let minted = r
+            .with_write(|issues, cfg, reserved| {
+                assert!(reserved.contains("argos-9999"), "못 읽는 줄의 id 를 안 줬다 — {reserved:?}");
+                // 그 줄의 id 를 그대로 노리는 씨앗이라도 다른 것이 나와야 한다.
+                let taken = taken_ids(issues, reserved);
+                let id = crate::id::generate(&cfg.prefix, &taken, "argos-9999");
+                issues.push(issue(&id));
+                Ok((vec![], id))
+            })
+            .unwrap();
+        assert_ne!(minted, "argos-9999", "못 읽는 줄과 같은 id 를 뽑았다");
     }
 }

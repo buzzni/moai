@@ -60,7 +60,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
 
     let at = model::now();
     let by = model::actor(ctx.user.as_deref())?;
-    let made: Vec<Issue> = repo.with_write(|issues, cfg| {
+    let made: Vec<Issue> = repo.with_write(|issues, cfg, reserved| {
         // 펼칠 것이 정말 idea 인지 **먼저** 본다. 나중에 보면 만들어진 id 가
         // 오류 메시지에 실려 나가고, 받는 쪽은 그게 남은 줄 안다.
         //
@@ -101,7 +101,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         };
 
         let (mut entries, made) =
-            crate::cmd::add::create_drafts(issues, cfg, &drafts, Some(&heir), &by, &at)?;
+            crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, Some(&heir), &by, &at)?;
 
         // **어느 쪽에서 봐도 이어진다.** 펼친 계획에서 "어디서 나왔나" 를
         // 물을 수도, 담아 둔 생각에서 "무엇이 됐나" 를 물을 수도 있다.

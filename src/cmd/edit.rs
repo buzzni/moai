@@ -20,7 +20,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let at = model::now();
 
     let (edited, epic, children, changed): (Issue, Option<Issue>, Vec<Issue>, bool) =
-        repo.with_write(|issues, cfg| {
+        repo.with_write(|issues, cfg, _| {
         let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
             return Err(Fail::not_found(&args.id));
         };

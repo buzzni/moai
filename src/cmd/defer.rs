@@ -28,7 +28,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     let by = model::actor(ctx.user.as_deref())?;
     let back = args.undo;
 
-    let moved: Moved = repo.with_write(|issues, _| {
+    let moved: Moved = repo.with_write(|issues, _, _| {
         let mut m = Moved::default();
         let mut entries = Vec::new();
         for id in &args.ids {

@@ -32,7 +32,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         .chain(args.unblocks.iter().map(|t| (t.clone(), false)))
         .collect();
 
-    let touched: Vec<(Issue, bool)> = repo.with_write(|issues, cfg| {
+    let touched: Vec<(Issue, bool)> = repo.with_write(|issues, cfg, _| {
         // 막는 쪽의 존재는 **더할 때만** 따진다. `--unblocks` 만이면 그것이
         // 이미 지워졌을 수 있고, 그때도 남은 참조는 풀려야 한다 — 아니면
         // `status` 가 드러낸 끊긴 참조를 손으로 파일을 고쳐야만 없앨 수 있다.

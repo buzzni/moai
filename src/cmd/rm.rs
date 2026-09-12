@@ -15,7 +15,7 @@ pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
     let by = model::actor(ctx.user.as_deref())?;
 
     let (gone, missing, dangling): (Vec<Issue>, Vec<String>, Vec<String>) =
-        repo.with_write(|issues, _| {
+        repo.with_write(|issues, _, _| {
             let (mut gone, mut missing, mut dangling) = (Vec::new(), Vec::new(), Vec::new());
             let mut entries = Vec::new();
             for id in &args.ids {
