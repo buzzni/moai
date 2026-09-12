@@ -668,7 +668,8 @@ fn lay_table(out: &mut Vec<Vec<Span>>, head: &[Cell], rows: &[Row], width: usize
     // 넘을 수 있다 — 그때는 가운뎃점만 남기고, 그래도 안 되면 표를 포기하고
     // 칸마다 한 줄로 떨어뜨린다. 넘치면 위젯이 다시 접어 칸 맞춤이 통째로
     // 무너지고, 그러면 표가 표인 값을 잃는다.
-    let gap = match cols * 1 + crate::text::width(CELL_GAP) * (cols - 1) <= width {
+    // `cols` 는 "칸마다 최소 한 칸" 이다 — 칸 너비 1 × 칸 수.
+    let gap = match cols + crate::text::width(CELL_GAP) * (cols - 1) <= width {
         true => CELL_GAP,
         false => THIN_GAP,
     };

@@ -168,6 +168,16 @@ pub fn bar(percent: Option<u8>) -> String {
 /// `shown` 은 이미 걸러진 것들이다. **걸러진 뒤에도 에픽 줄은 남긴다** —
 /// 멤버가 하나도 안 걸리면 그 에픽은 아예 빼되, 걸린 것이 있으면 어느
 /// 에픽 밑인지 보여야 목록이 뜻을 갖는다.
+/// 트리를 훑는 동안 **한 번도 안 바뀌는 것들.** 줄마다 달라지는 것은
+/// `path` 와 `depth` 뿐이라, 그 둘만 인자로 남기면 어느 것이 상태인지가
+/// 부르는 자리에서 바로 보인다.
+struct Ctx<'a> {
+    all: &'a [Issue],
+    index: &'a crate::nav::Index,
+    keep: &'a dyn Fn(usize) -> bool,
+    rolls: &'a [Roll],
+}
+
 pub fn tree(
     all: &[Issue],
     index: &crate::nav::Index,
@@ -175,7 +185,8 @@ pub fn tree(
     rolls: &[Roll],
 ) -> Vec<String> {
     let mut out = Vec::new();
-    walk(&mut out, all, index, keep, rolls, &crate::nav::Path::new(), 0);
+    let cx = Ctx { all, index, keep, rolls };
+    walk(&mut out, &cx, &crate::nav::Path::new(), 0);
     if out.is_empty() {
         out.push("없다.".into());
     }
@@ -215,14 +226,9 @@ fn into_dir(path: &crate::nav::Path, e: &crate::nav::Entry) -> Option<crate::nav
 }
 
 /// 그 밑에 걸린 줄의 수. 제 줄은 안 센다 — 부르는 쪽이 더한다.
-fn under(
-    index: &crate::nav::Index,
-    keep: &dyn Fn(usize) -> bool,
-    path: &crate::nav::Path,
-    e: &crate::nav::Entry,
-) -> usize {
+fn under(cx: &Ctx, path: &crate::nav::Path, e: &crate::nav::Entry) -> usize {
     match into_dir(path, e) {
-        Some(p) => index.descendants(&p).iter().filter(|&&d| keep(d)).count(),
+        Some(p) => cx.index.descendants(&p).iter().filter(|&&d| (cx.keep)(d)).count(),
         None => 0,
     }
 }
@@ -240,25 +246,17 @@ fn blank(out: &mut Vec<String>) {
 /// 그대로 훑으면 소속 없는 줄이 남의 에픽 바로 밑에 같은 들여쓰기로 끼어
 /// 그 에픽의 멤버처럼 읽힌다. 보고서에서는 **무엇에 딸렸는지가 차례보다
 /// 앞선다.**
-fn walk(
-    out: &mut Vec<String>,
-    all: &[Issue],
-    index: &crate::nav::Index,
-    keep: &dyn Fn(usize) -> bool,
-    rolls: &[Roll],
-    path: &crate::nav::Path,
-    depth: usize,
-) {
-    let entries = index.entries_where(all, path, keep);
+fn walk(out: &mut Vec<String>, cx: &Ctx, path: &crate::nav::Path, depth: usize) {
+    let entries = cx.index.entries_where(cx.all, path, cx.keep);
     if !groups_here(path) {
         for e in &entries {
-            place(out, all, index, keep, rolls, path, e, depth);
+            place(out, cx, path, e, depth);
         }
         return;
     }
 
     for e in entries.iter().filter(|e| !is_loose(e) && !is_lost(e)) {
-        place(out, all, index, keep, rolls, path, e, depth);
+        place(out, cx, path, e, depth);
     }
 
     // 소속 없는 것도 **머리글을 갖는다.** CLI 트리는 보고서라, 소속 없는 일이
@@ -267,11 +265,11 @@ fn walk(
     // 셈도 없이 앞쪽으로 흘러나가고, 셈은 그만큼 모자라게 나온다.
     let loose: Vec<&crate::nav::Entry> = entries.iter().filter(|e| is_loose(e)).collect();
     if !loose.is_empty() {
-        let n: usize = loose.iter().map(|e| 1 + under(index, keep, path, e)).sum();
+        let n: usize = loose.iter().map(|e| 1 + under(cx, path, e)).sum();
         blank(out);
         // 집계는 **뿌리에서만** 빌린다. 마일스톤 밑의 `id` 없는 집계는
         // "마일스톤 없음" 이지 "에픽 없음" 이 아니다.
-        match path.is_empty().then(|| rolls.iter().find(|r| r.id.is_none())).flatten() {
+        match path.is_empty().then(|| cx.rolls.iter().find(|r| r.id.is_none())).flatten() {
             Some(roll) => out.push(head(roll, n)),
             None => out.push(format!("{}  {n}건", paint(style::HEAD, "에픽 없음"))),
         }
@@ -279,14 +277,14 @@ fn walk(
         // 마일스톤 안의 소속 없는 줄만 두 칸 들어가, 같은 머리글 밑에서
         // 뿌리와 마일스톤의 들여쓰기가 어긋난다.
         for e in loose {
-            place(out, all, index, keep, rolls, path, e, 1);
+            place(out, cx, path, e, 1);
         }
     }
 
     // 바구니는 늘 끝에. 정상인 것이 먼저 보여야 한다 — `nav` 가 목록을 그렇게
     // 세우는 것과 같은 뜻이다.
     for e in entries.iter().filter(|e| is_lost(e)) {
-        place(out, all, index, keep, rolls, path, e, depth);
+        place(out, cx, path, e, depth);
     }
 }
 
@@ -297,10 +295,7 @@ fn walk(
 /// 내면 안 된다(`moai show <에픽>` 이 제 멤버를 `에픽 없음` 이라 불렀다).
 fn place(
     out: &mut Vec<String>,
-    all: &[Issue],
-    index: &crate::nav::Index,
-    keep: &dyn Fn(usize) -> bool,
-    rolls: &[Roll],
+    cx: &Ctx,
     path: &crate::nav::Path,
     e: &crate::nav::Entry,
     depth: usize,
@@ -314,19 +309,19 @@ fn place(
         // 바구니가 남의 이름표를 달고 남의 건수를 말한다.
         Entry::Dir { seg: Seg::Milestone(_) | Seg::Epic(_), at: Some(at) } => {
             blank(out);
-            let id = all[*at].id.as_str();
-            let shown = under(index, keep, path, e);
-            match rolls.iter().find(|r| r.id.as_deref() == Some(id)) {
+            let id = cx.all[*at].id.as_str();
+            let shown = under(cx, path, e);
+            match cx.rolls.iter().find(|r| r.id.as_deref() == Some(id)) {
                 Some(roll) => out.push(head(roll, shown)),
                 // 집계가 없을 때도 **id 는 낸다** — 제목만 내면 그것을
                 // 다시 찾아봐야 하고, 묶음을 펼친 이유가 사라진다.
                 None => out.push(format!(
                     "{}  {}  {shown}건",
                     paint(style::ID, id),
-                    paint(style::HEAD, &index.label(all, e)),
+                    paint(style::HEAD, &cx.index.label(cx.all, e)),
                 )),
             }
-            walk(out, all, index, keep, rolls, &deeper, 1);
+            walk(out, cx, &deeper, 1);
         }
         // 바구니도 머리글을 갖는다. **조용히 빼지 않는다** — 자리를 못
         // 정한 줄이 트리에서 사라지면 그 줄은 어디에도 없는 것이 된다.
@@ -336,18 +331,18 @@ fn place(
             let style = if is_lost(e) { style::WARN } else { style::HEAD };
             out.push(format!(
                 "{}  {}건",
-                paint(style, &index.label(all, e)),
-                under(index, keep, path, e)
+                paint(style, &cx.index.label(cx.all, e)),
+                under(cx, path, e)
             ));
-            walk(out, all, index, keep, rolls, &deeper, 1);
+            walk(out, cx, &deeper, 1);
         }
         Entry::Dir { seg: Seg::Issue(_), at: Some(at) } => {
-            row(out, &all[*at], depth.max(1));
-            walk(out, all, index, keep, rolls, &deeper, depth.max(1) + 1);
+            row(out, &cx.all[*at], depth.max(1));
+            walk(out, cx, &deeper, depth.max(1) + 1);
         }
         // 제 줄이 있는 잃은 에픽·마일스톤도 여기로 온다 — 줄만 내고 만다.
-        Entry::Dir { seg: Seg::Lost, at: Some(at) } => row(out, &all[*at], depth.max(1)),
-        Entry::Leaf { at } => row(out, &all[*at], depth.max(1)),
+        Entry::Dir { seg: Seg::Lost, at: Some(at) } => row(out, &cx.all[*at], depth.max(1)),
+        Entry::Leaf { at } => row(out, &cx.all[*at], depth.max(1)),
     }
 }
 
@@ -364,7 +359,8 @@ pub fn members(
     at: &crate::nav::Path,
 ) -> Vec<String> {
     let mut out = Vec::new();
-    walk(&mut out, all, index, keep, rolls, at, 0);
+    let cx = Ctx { all, index, keep, rolls };
+    walk(&mut out, &cx, at, 0);
     out
 }
 

@@ -1223,7 +1223,7 @@ fn the_tree_shows_every_issue_exactly_once() {
     // 들어 있다. 뒤에 점이 붙지 않은 것만 그 줄로 센다.
     let times = |id: &str| {
         tree.match_indices(id)
-            .filter(|(at, _)| tree[at + id.len()..].chars().next() != Some('.'))
+            .filter(|(at, _)| !tree[at + id.len()..].starts_with('.'))
             .count()
     };
     for id in [&ga, &na, &member, &child, &inherits, &loose, &dangling, &wrong] {
