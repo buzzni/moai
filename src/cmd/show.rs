@@ -26,11 +26,12 @@ fn resolve(target: Option<&str>) -> R<Target> {
         Some("issue") => Ok(Target::OfKind(Kind::Issue)),
         Some("epic") => Ok(Target::OfKind(Kind::Epic)),
         Some("milestone") => Ok(Target::OfKind(Kind::Milestone)),
+        Some("idea") => Ok(Target::OfKind(Kind::Idea)),
         Some(t) if crate::id::is_valid(t) => Ok(Target::One(t.to_string())),
         // 조용히 0건을 내지 않는다. 모르는 값은 거부하고 있는 것을 나열한다.
         Some(t) => Err(Fail::coded(
             format!(
-                "`{t}` 는 id 도 종류도 아니다. 종류: issue, epic, milestone\n      \
+                "`{t}` 는 id 도 종류도 아니다. 종류: issue, epic, milestone, idea\n      \
                  id 로 찾으려면 접두어까지 적는다"
             ),
             super::code::BAD_TARGET,

@@ -1856,3 +1856,41 @@ fn an_idea_stays_out_of_the_board_and_ready() {
     assert!(r.contains(&work), "{r}");
     assert_eq!(r.matches("argos-").count(), 1, "담아 둔 생각이 집을 일로 올라왔다 — {r}");
 }
+
+/// **기본 목록에는 안 나온다.** `moai show` 는 일을 보는 자리인데 거기에
+/// 생각 조각이 섞이면 목록이 흐려지고, 흐려지면 담기가 꺼려진다.
+#[test]
+fn ideas_stay_out_of_the_plain_list() {
+    let s = init("ideafilter");
+    let thought = ok(s.path(), &["idea", "add", "반짝", "-q"]).trim().to_string();
+    let work = add(s.path(), &["진짜 일"]);
+
+    let plain = ok(s.path(), &["show"]);
+    assert!(plain.contains(&work), "{plain}");
+    assert!(!plain.contains(&thought), "기본 목록에 idea 가 섞였다 — {plain}");
+
+    for args in [vec!["show", "--type", "idea"], vec!["idea", "ls"]] {
+        let out = ok(s.path(), &args);
+        assert!(out.contains(&thought), "{args:?} — {out}");
+        assert!(!out.contains(&work), "{args:?} 가 일까지 냈다 — {out}");
+    }
+}
+
+/// **글로는 찾아진다.** 이미 적어 둔 생각을 다시 안 적으려면 찾아져야 한다 —
+/// 겹칠 것 같을 때 `-g` 로 훑는 것이 이 도구가 가르치는 첫 동작이다.
+#[test]
+fn grep_reaches_into_ideas() {
+    let s = init("ideagrep");
+    let thought = ok(s.path(), &["idea", "add", "파서를 다시 쓴다", "-q"]).trim().to_string();
+    let out = ok(s.path(), &["show", "-g", "파서"]);
+    assert!(out.contains(&thought), "적어 둔 생각을 못 찾는다 — {out}");
+}
+
+/// 모르는 종류는 조용히 0건이 되지 않는다. 오타가 "그 종류는 비었다" 와
+/// 구별되지 않으면 사람은 없는 것을 찾고 있다고 믿는다.
+#[test]
+fn the_kind_vocabulary_names_idea() {
+    let s = init("ideavocab");
+    let err = String::from_utf8_lossy(&moai(s.path(), &["show", "아이디어"]).stderr).into_owned();
+    assert!(err.contains("idea"), "종류 목록이 idea 를 안 댄다 — {err}");
+}

@@ -130,6 +130,18 @@ impl Filter {
     }
 
     pub fn matches(&self, i: &Issue, now: &str, wh: &Where) -> bool {
+        // **담아 둔 생각은 기본 목록에서 빠진다.** 이 자리는 일을 보는
+        // 자리고, 거기에 생각 조각이 섞이면 목록이 흐려진다 — 흐려지면
+        // 담기가 꺼려지고, 담는 비용을 0 으로 만든 뜻이 사라진다.
+        //
+        // 콕 집어 묻거나(`--type idea`) 글로 찾을 때는 나온다. **이미 적어
+        // 둔 생각을 다시 안 적으려면 찾아져야 한다.**
+        //
+        // 여기 한 곳에서만 정한다. TUI 도 같은 필터를 쓰므로 여기가 갈라지면
+        // 화면과 CLI 가 다른 것을 센다.
+        if i.kind == Kind::Idea && self.kind != Some(Kind::Idea) && self.grep.is_none() {
+            return false;
+        }
         if !self.all && self.status.is_empty() && i.status.is_done() {
             return false;
         }
@@ -612,5 +624,32 @@ mod tests {
         sort_for_display(&mut v);
         let ids: Vec<&str> = v.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, ["a-0003", "a-0001", "a-0002"]);
+    }
+    /// **담아 둔 생각은 기본 목록에서 빠지고, 글로는 찾아진다.** 규칙이
+    /// 여기 한 곳에 있어야 화면과 CLI 가 같은 것을 센다 — 이 시험이 그 자리를
+    /// 지킨다.
+    #[test]
+    fn an_idea_hides_until_it_is_asked_for() {
+        let mut thought = issue("argos-0001", "todo", &[]);
+        thought.kind = Kind::Idea;
+        thought.title = "파서를 다시 쓴다".into();
+        let all = vec![thought.clone(), issue("argos-0009", "todo", &[])];
+        let wh = Where::of(&all);
+        let hits = |raw: Raw| -> Vec<String> {
+            let f = Filter::build(raw).unwrap();
+            all.iter().filter(|i| f.matches(i, NOW, &wh)).map(|i| i.id.clone()).collect()
+        };
+
+        assert_eq!(hits(Raw::default()), ["argos-0009"], "기본 목록에 idea 가 섞였다");
+        assert_eq!(
+            hits(Raw { kind: Some(Kind::Idea), ..Raw::default() }),
+            ["argos-0001"],
+            "콕 집어 물었는데 안 나온다"
+        );
+        assert_eq!(
+            hits(Raw { grep: Some("파서".into()), ..Raw::default() }),
+            ["argos-0001"],
+            "적어 둔 생각을 글로 못 찾는다 — 그러면 같은 것을 또 적는다"
+        );
     }
 }
