@@ -96,6 +96,8 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Skill(SkillCmd::Install { scope, dry_run }) => {
             skill::install(&ctx, scope.as_str(), dry_run)
         }
+        Cmd::Skill(SkillCmd::Status) => skill::status(&ctx),
+        Cmd::Skill(SkillCmd::Uninstall { dry_run }) => skill::uninstall(&ctx, dry_run),
         Cmd::Add(a) => add::run(&ctx, a, None),
         Cmd::Show(a) => show::run(&ctx, a, None),
         Cmd::Mv(a) => mv::run(&ctx, a),

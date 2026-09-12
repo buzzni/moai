@@ -570,6 +570,36 @@ pub enum SkillCmd {
         #[arg(long)]
         dry_run: bool,
     },
+
+    /// 무엇이 어느 범위에 심겼나, 저장소와 설치본이 어긋났나
+    #[command(after_help = "\
+  `claude` 의 장부(~/.claude/plugins/)를 **읽기만** 한다. 무엇이 어긋나도
+  종료 코드는 0 이다 — 보이는 명령이지 막는 명령이 아니다.
+
+  보는 것:
+    마켓플레이스  이 저장소 이름으로 등록됐나, 남의 자리를 가리키지 않나
+    설치          어느 범위에 어느 판이, 지금 심을 판과 같은가
+    훅            설치본이 부르는 실행 파일이 아직 있나
+    claude        PATH 에 있나 (없으면 심을 수도 걷을 수도 없다)")]
+    Status,
+
+    /// `claude` 에서 등록을 걷어낸다. 심은 파일은 남긴다
+    #[command(after_help = "\
+  이 저장소의 설치를 범위마다 `claude plugin uninstall` 하고, 마켓플레이스를
+  `claude plugin marketplace remove` 한다. 사람의 settings 에서 두 키를 지우는
+  것은 `claude` 가 한다 — 우리는 남의 JSON 을 만지지 않는다.
+
+  **`.claude/moai-plugin/` 은 지우지 않는다.** 돌고 있는 세션이 물고 있는
+  파일을 지우면 그 세션의 도구 호출이 막힐 수 있다. 세션을 닫은 뒤 지운다.
+
+  이미 열려 있는 Claude 세션은 옛 훅을 계속 부른다 — 다시 열어야 걷힌다.
+
+  moai skill uninstall --dry-run      무엇을 부를지만 본다")]
+    Uninstall {
+        /// 부르지 않고 무엇을 부를지만 낸다
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// 설치 범위. **`--user` 를 못 쓴다** — 그 이름은 이미 "누가 하는가" 다.

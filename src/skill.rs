@@ -194,6 +194,68 @@ pub fn exe_name(current: &Path, on_path: Option<&Path>) -> String {
     }
 }
 
+/// `claude` 가 장부에 적어 둔 설치 한 건.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Install {
+    pub scope: String,
+    pub version: String,
+    pub install_path: String,
+    pub project: Option<String>,
+}
+
+/// `installed_plugins.json` 에서 **이 저장소의** moai 설치를 고른다.
+///
+/// 마켓플레이스 이름이 저장소마다 달라(`market`) `moai@<이름>` 이면 이미 이
+/// 저장소의 것이다. 그래도 `local`·`project` 는 `projectPath` 를 한 번 더
+/// 본다 — 같은 이름이 옛 자리에 남아 있는 줄을 제 것으로 걷으면 남의 설정을
+/// 건드린다. 자리를 견주는 법(심볼릭 링크 풀기)은 부르는 쪽이 준다.
+pub fn installs(ledger: &serde_json::Value, market: &str, is_here: impl Fn(&str) -> bool) -> Vec<Install> {
+    let key = format!("moai@{market}");
+    let Some(rows) = ledger.get("plugins").and_then(|p| p.get(&key)).and_then(|r| r.as_array()) else {
+        return Vec::new();
+    };
+    let text = |row: &serde_json::Value, k: &str| row.get(k).and_then(|v| v.as_str()).map(str::to_string);
+    rows.iter()
+        .filter_map(|row| {
+            let scope = text(row, "scope")?;
+            let project = text(row, "projectPath");
+            if scope != "user" && !project.as_deref().is_some_and(&is_here) {
+                return None;
+            }
+            Some(Install {
+                scope,
+                version: text(row, "version").unwrap_or_default(),
+                install_path: text(row, "installPath").unwrap_or_default(),
+                project,
+            })
+        })
+        .collect()
+}
+
+/// 매니페스트가 훅으로 부르는 실행 파일. `command` 가 적는 모양
+/// (`command -v -- "<exe>" …`)에서 따옴표 속을 꺼낸다.
+///
+/// **설치본의 매니페스트를 읽는다.** 저장소의 트리가 아니라 `claude` 가 복사해
+/// 간 쪽이 실제로 불린다 — 둘이 어긋난 채로 저장소만 보면 멀쩡해 보인다.
+pub fn hook_exe(plugin_json: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(plugin_json).ok()?;
+    let cmd = v
+        .get("hooks")?
+        .as_object()?
+        .values()
+        .filter_map(|groups| groups.get(0)?.get("hooks")?.get(0)?.get("command")?.as_str())
+        .next()?;
+    let rest = cmd.strip_prefix("command -v -- \"")?;
+    Some(rest[..rest.find('"')?].to_string())
+}
+
+/// 트리의 매니페스트에 적힌 판.
+pub fn version_in(files: &[(PathBuf, String)]) -> Option<String> {
+    let (_, body) = files.iter().find(|(p, _)| p.ends_with("plugin.json"))?;
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    v.get("version")?.as_str().map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,6 +539,38 @@ mod tests {
         assert_eq!(exe_name(here, Some(here)), "moai");
         assert_eq!(exe_name(here, Some(Path::new("/usr/bin/moai"))), "/repo/target/release/moai");
         assert_eq!(exe_name(here, None), "/repo/target/release/moai");
+    }
+
+    /// **이 저장소의 설치만 고른다.** 같은 이름이 옛 자리에 남은 `local` 줄을
+    /// 제 것으로 걷으면 남의 설정을 건드린다. `user` 는 자리가 없으니 이름으로
+    /// 족하다.
+    #[test]
+    fn only_this_repos_installs_are_picked() {
+        let ledger = serde_json::json!({"plugins": {
+            "moai@m": [
+                {"scope": "local", "projectPath": "/repo", "version": "1.2.3", "installPath": "/c/1.2.3"},
+                {"scope": "local", "projectPath": "/old/repo", "version": "0.0.1", "installPath": "/c/0.0.1"},
+                {"scope": "user", "version": "4.5.6", "installPath": "/c/4.5.6"},
+            ],
+            "moai@other": [{"scope": "user", "version": "9.9.9", "installPath": "/c/9"}],
+        }});
+        let got = installs(&ledger, "m", |p| p == "/repo");
+        let versions: Vec<&str> = got.iter().map(|i| i.version.as_str()).collect();
+        assert_eq!(versions, ["1.2.3", "4.5.6"]);
+        assert!(installs(&serde_json::json!({}), "m", |_| true).is_empty(), "빈 장부에서 무언가 골랐다");
+    }
+
+    /// 매니페스트에서 훅이 부르는 실행 파일을 **심은 그대로** 꺼낸다 — 이름이든
+    /// 절대 경로든.
+    #[test]
+    fn the_hook_exe_round_trips_through_the_manifest() {
+        for exe in ["/repo/target/release/moai", "moai"] {
+            let files = tree("t", Path::new("/repo"), exe, "# 스킬", "참고");
+            let (_, manifest) = files.iter().find(|(p, _)| p.ends_with("plugin.json")).unwrap();
+            assert_eq!(hook_exe(manifest).as_deref(), Some(exe));
+            assert!(version_in(&files).is_some_and(|v| v.split('.').count() == 3));
+        }
+        assert_eq!(hook_exe("{ 깨진 json"), None);
     }
 
     /// 따옴표를 깨는 경로에는 절대 경로를 안 쓴다. 셸 한 줄이 깨지면 그

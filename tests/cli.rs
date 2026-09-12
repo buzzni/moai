@@ -978,6 +978,9 @@ fn every_command_still_speaks_json() {
         vec!["mv", &id, "review", "--json"],
         vec!["rm", &id, "--json"],
         vec!["skill", "install", "--dry-run", "--json"],
+        // 장부를 읽기만 한다. `uninstall` 은 `claude` 를 부르므로 훑지 않는다 —
+        // 가짜 `claude` 로 따로 본다 (`skill_*` 시험).
+        vec!["skill", "status", "--json"],
     ];
     // **적어 둔 목록과 실제로 부르는 목록을 여기서 잇는다.** 잇지 않으면
     // `JSON_SWEEP` 에 이름만 적고 한 번도 안 부르는 명령이 생기고, 그러면
@@ -3225,6 +3228,194 @@ fn reviews_are_judged_through_the_contract() {
     ok(s.path(), &["edit", &review, "-e", &epic]);
     let out = review_call(&s);
     assert!(out.trim().is_empty(), "매였는데 막는다\n{out}");
+}
+
+// ── skill status · uninstall — 심은 것을 보이고 걷어낸다 ──────────────
+//
+// **진짜 `claude` 에 닿지 않는다.** `HOME` 을 시험 디렉터리로, `PATH` 를 가짜
+// `claude` 와 `/usr/bin:/bin` 으로만 둔다. 가짜는 받은 인자를 적어 두고 0 을
+// 낸다. 이 시험이 사람의 등록을 걷는 날이 오면 그것이 제일 나쁜 버그다.
+
+struct Claude {
+    home: Scratch,
+    bin: PathBuf,
+    log: PathBuf,
+}
+
+impl Claude {
+    fn new(name: &str) -> Claude {
+        let home = Scratch::new(name);
+        let bin = home.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let log = home.path().join("claude.log");
+        let script = bin.join("claude");
+        std::fs::write(&script, format!("#!/bin/sh\necho \"$@\" >> \"{}\"\nexit 0\n", log.display())).unwrap();
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::create_dir_all(home.path().join(".claude/plugins")).unwrap();
+        Claude { home, bin, log }
+    }
+
+    fn calls(&self) -> String {
+        std::fs::read_to_string(&self.log).unwrap_or_default()
+    }
+
+    /// `claude` 가 남긴 장부를 흉내 낸다.
+    fn ledger(&self, name: &str, body: &str) {
+        std::fs::write(self.home.path().join(".claude/plugins").join(name), body).unwrap();
+    }
+
+    fn run(&self, dir: &Path, args: &[&str], with_claude: bool) -> Output {
+        let path = if with_claude { format!("{}:/usr/bin:/bin", self.bin.display()) } else { "/usr/bin:/bin".into() };
+        Command::new(BIN)
+            .args(args)
+            .current_dir(dir)
+            .env("HOME", self.home.path())
+            .env("PATH", path)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    }
+}
+
+fn text(out: &Output) -> String {
+    format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+}
+
+/// 저장소 하나에 트리를 심고, `claude` 가 적었을 장부를 그 판 `version` 으로 세운다.
+/// 설치본 디렉터리에는 트리의 매니페스트를 그대로 복사한다 — `claude` 가 하는 일이다.
+fn installed(s: &Scratch, c: &Claude, version: &str) -> (String, PathBuf) {
+    let plan = String::from_utf8(c.run(s.path(), &["skill", "install", "--dry-run", "--json"], true).stdout).unwrap();
+    let market = field(&plan, "market");
+    let dir = PathBuf::from(field(&plan, "dir"));
+    let root = dir.parent().unwrap().parent().unwrap().to_path_buf();
+    assert!(c.run(s.path(), &["skill", "install"], true).status.success());
+
+    let copy = c.home.path().join(format!(".claude/plugins/cache/{market}/moai/{version}"));
+    std::fs::create_dir_all(copy.join(".claude-plugin")).unwrap();
+    std::fs::copy(dir.join(".claude-plugin/plugin.json"), copy.join(".claude-plugin/plugin.json")).unwrap();
+    // 옛 판 하나가 캐시에 남아 있다.
+    std::fs::create_dir_all(copy.parent().unwrap().join("0.0.0")).unwrap();
+
+    c.ledger(
+        "known_marketplaces.json",
+        &format!("{{\"{market}\":{{\"installLocation\":\"{}\"}}}}", dir.display()),
+    );
+    c.ledger(
+        "installed_plugins.json",
+        &format!(
+            "{{\"version\":2,\"plugins\":{{\"moai@{market}\":[{{\"scope\":\"local\",\"projectPath\":\"{}\",\"installPath\":\"{}\",\"version\":\"{version}\"}}]}}}}",
+            root.display(),
+            copy.display()
+        ),
+    );
+    (market, dir)
+}
+
+/// `status` 는 장부를 읽어 **어긋난 판**을 짚는다. 무엇이 어긋나도 0 이다.
+#[test]
+fn skill_status_names_a_stale_install() {
+    let s = init("skillstatus");
+    let c = Claude::new("skillstatus-home");
+    let (market, _) = installed(&s, &c, "0.0.1");
+
+    let out = c.run(s.path(), &["skill", "status"], true);
+    assert!(out.status.success(), "어긋났다고 비영으로 끝났다\n{}", text(&out));
+    let said = text(&out);
+    assert!(said.contains(&format!("`{market}` 등록됨")), "{said}");
+    assert!(said.contains("판 0.0.1") && said.contains("다시 심는다"), "낡은 판을 안 짚는다\n{said}");
+    assert!(said.contains("옛 판 1개"), "남은 캐시를 안 센다\n{said}");
+
+    let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    one_json_value(&json);
+    assert!(json.contains("\"current\":false"), "{json}");
+    assert!(json.contains("\"hook_exe_found\":true"), "심은 바이너리를 못 찾는다\n{json}");
+    assert!(json.contains("\"claude\":true"), "{json}");
+
+    // 판을 맞추면 조용해진다.
+    let want = field(&json, "want_version");
+    installed(&s, &c, &want);
+    let said = text(&c.run(s.path(), &["skill", "status"], true));
+    assert!(!said.contains("다시 심는다"), "맞는 판인데 다시 심으라 한다\n{said}");
+}
+
+/// 아무것도 안 심긴 기계에서도 `status` 는 멀쩡히 끝난다 — 설정 없는 기계에서
+/// 도구가 고장 난 것으로 보이면 안 된다.
+#[test]
+fn skill_status_on_a_bare_machine_is_quiet_and_fine() {
+    let s = init("skillbare");
+    let c = Claude::new("skillbare-home");
+    let out = c.run(s.path(), &["skill", "status"], false);
+    assert!(out.status.success(), "{}", text(&out));
+    let said = text(&out);
+    assert!(said.contains("등록 안 됨") && said.contains("PATH 에 없다"), "{said}");
+}
+
+/// 설치본이 부르는 바이너리가 사라지면 그것을 짚는다. 훅은 그때 조용히
+/// 아무것도 안 하므로, 여기 말고는 알 길이 없다.
+#[test]
+fn skill_status_notices_a_vanished_hook_binary() {
+    let s = init("skillgone");
+    let c = Claude::new("skillgone-home");
+    let (market, _) = installed(&s, &c, "0.0.1");
+    let manifest = c.home.path().join(format!(".claude/plugins/cache/{market}/moai/0.0.1/.claude-plugin/plugin.json"));
+    let body = std::fs::read_to_string(&manifest).unwrap().replace(BIN, "/nowhere/moai");
+    std::fs::write(&manifest, body).unwrap();
+
+    let said = text(&c.run(s.path(), &["skill", "status"], true));
+    assert!(said.contains("/nowhere/moai") && said.contains("없다"), "{said}");
+}
+
+/// `uninstall` 은 범위마다 걷고 마켓플레이스를 지운다. **파일은 남긴다** —
+/// 돌고 있는 세션이 물고 있을 수 있다.
+#[test]
+fn skill_uninstall_asks_claude_and_keeps_the_files() {
+    let s = init("skillrm");
+    let c = Claude::new("skillrm-home");
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let before = c.calls();
+
+    let rehearsal = c.run(s.path(), &["skill", "uninstall", "--dry-run"], true);
+    assert!(rehearsal.status.success(), "{}", text(&rehearsal));
+    assert_eq!(c.calls(), before, "연습인데 claude 를 불렀다");
+    assert!(text(&rehearsal).contains(&format!("claude plugin uninstall moai@{market} --scope local")));
+
+    let out = c.run(s.path(), &["skill", "uninstall"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let calls = c.calls()[before.len()..].to_string();
+    assert!(calls.contains(&format!("plugin uninstall moai@{market} --scope local")), "{calls}");
+    assert!(calls.contains(&format!("plugin marketplace remove {market}")), "{calls}");
+    assert!(dir.join("skills/moai/SKILL.md").is_file(), "심은 파일을 지웠다");
+    assert!(text(&out).contains("다시 열어야"), "열린 세션에 대해 말하지 않는다\n{}", text(&out));
+}
+
+/// **같은 이름이 남의 자리를 가리키면 아무것도 부르지 않는다.** 걷으면 그
+/// 저장소의 규칙이 말없이 사라진다.
+#[test]
+fn skill_uninstall_leaves_another_repos_registration_alone() {
+    let s = init("skillclash");
+    let c = Claude::new("skillclash-home");
+    let (market, _) = installed(&s, &c, "0.0.1");
+    c.ledger("known_marketplaces.json", &format!("{{\"{market}\":{{\"installLocation\":\"/elsewhere\"}}}}"));
+    let before = c.calls();
+
+    let out = c.run(s.path(), &["skill", "uninstall", "--json"], true);
+    assert!(!out.status.success(), "못 걷었는데 성공으로 끝났다");
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains("\"blocked_by\":\"/elsewhere\""), "{json}");
+    assert_eq!(c.calls(), before, "남의 등록인데 claude 를 불렀다");
+}
+
+/// `claude` 가 없으면 부를 명령을 내고 비영으로 끝난다. **절반을 해 놓고
+/// 아무 말 없이 성공하는 것이 제일 나쁘다.**
+#[test]
+fn skill_uninstall_without_claude_says_what_to_run() {
+    let s = init("skillnoclaude");
+    let c = Claude::new("skillnoclaude-home");
+    let (market, _) = installed(&s, &c, "0.0.1");
+    let out = c.run(s.path(), &["skill", "uninstall"], false);
+    assert!(!out.status.success(), "아무것도 못 했는데 성공으로 끝났다");
+    assert!(text(&out).contains(&format!("claude plugin marketplace remove {market}")), "{}", text(&out));
 }
 
 // ── 메모 — 긴 글을 남기는 길 ────────────────────────────────────────
