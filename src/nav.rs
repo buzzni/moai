@@ -317,13 +317,23 @@ impl Ctx<'_> {
             && self.issues[pat].kind == Kind::Issue
             && self.epic_of.get(&me.id) == self.epic_of.get(p)
         {
-            let mut path = self.home_of_work(pat);
+            // **부모가 사는 자리를 그대로 쓴다.** `home_of_work` 로 곧장
+            // 내려가면 부모가 제 참조 때문에 `(길 잃음)` 으로 갈라진 것을
+            // 못 보고 옛 자리를 셈해, 자식만 닿는 길 없는 자리에 남는다 —
+            // 에픽에서와 같은 실패다.
+            let mut path = self.home(pat);
             path.push(Seg::Issue(p.to_string()));
             return path;
         }
         match self.epic_of.get(&me.id) {
             Some(e) => {
-                let mut path = self.under_milestone(e);
+                // **에픽이 사는 자리 밑으로 간다.** 여기서 마일스톤을 다시
+                // 셈하면, 에픽이 제 참조 때문에 `(길 잃음)` 으로 갈라진 날
+                // 멤버만 옛 자리에 남는다 — 그 자리는 뿌리에서 닿는 길이 없어
+                // (바구니는 `Milestone(None)` 과 `Lost` 뿐이다) 그 줄들이
+                // 트리에서도 탐색기에서도 통째로 사라진다. 실제로 그랬다.
+                let mut path =
+                    if self.lost(e) { vec![Seg::Lost] } else { self.under_milestone(e) };
                 path.push(Seg::Epic(e.clone()));
                 path
             }
@@ -399,6 +409,42 @@ mod tests {
             make("argos-0010", Kind::Issue),          // 아무 데도 안 딸린 것
             make("argos-0011.bb2", Kind::Issue),      // 부모 줄이 없는 고아
             child_elsewhere,                           // 제 에픽이 부모와 다른 자식
+        ];
+        assert_exactly_once(&issues);
+    }
+
+    /// **자리를 잃은 에픽의 멤버도 어딘가에 있다.**
+    ///
+    /// 에픽이 제 마일스톤 때문에 `(길 잃음)` 으로 갈라질 때 멤버가 옛 자리에
+    /// 남으면, 그 자리는 뿌리에서 닿는 길이 없어(바구니는 `Milestone(None)` 과
+    /// `Lost` 뿐이다) 멤버가 트리에서도 탐색기에서도 통째로 사라진다.
+    /// 위의 더미가 이 짝(길 잃은 **디렉터리** + 그 밑의 줄)을 안 담고 있어
+    /// 실제로 한 번 빠져나갔다.
+    #[test]
+    fn the_members_of_a_lost_epic_are_still_reachable() {
+        let mut lost_epic = make("argos-0002", Kind::Epic);
+        lost_epic.milestone = Some("argos-zzzz".into()); // 없는 마일스톤
+        let issues = vec![
+            make("argos-0001", Kind::Milestone), // 마일스톤 층이 서도록
+            lost_epic,
+            epic_of("argos-0004", "argos-0002"),
+            epic_of("argos-0005", "argos-0002"),
+            make("argos-0005.aa1", Kind::Issue), // 그 자식까지
+        ];
+        assert_exactly_once(&issues);
+    }
+
+    /// **자리를 잃은 부모의 자식도 어딘가에 있다.** 위와 같은 실패가 물림
+    /// 쪽에도 있다 — 부모가 제 마일스톤 때문에 갈라졌는데 자식은 제 참조가
+    /// 멀쩡하면, 자식만 부모의 옛 자리에 남아 닿는 길이 없어진다.
+    #[test]
+    fn the_children_of_a_lost_parent_are_still_reachable() {
+        let mut lost_parent = make("argos-0010", Kind::Issue);
+        lost_parent.milestone = Some("argos-zzzz".into()); // 없는 마일스톤
+        let issues = vec![
+            make("argos-0001", Kind::Milestone),
+            lost_parent,
+            make("argos-0010.aa1", Kind::Issue), // 제 참조는 멀쩡한 자식
         ];
         assert_exactly_once(&issues);
     }

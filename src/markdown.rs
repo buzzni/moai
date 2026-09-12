@@ -66,10 +66,16 @@ pub enum Block {
     Para(Vec<Span>),
     /// 번호는 줄마다 [`Item::marker`] 가 든다 — 블록에 `ordered` 를 또 두면
     /// 둘이 어긋날 수 있고, 어긋나면 어느 쪽이 참인지 정할 길이 없다.
-    List { items: Vec<Item> },
+    ///
+    /// `quote` 는 이 목록이 인용 몇 겹 안에 있는가다. **문단에만 막대를 달면
+    /// 인용 속 목록이 막대를 잃고, 기호를 걷어낸 뒤라 남의 말이 제 말처럼
+    /// 읽힌다** — `Quote` 를 따로 둔 까닭과 같은 까닭이다.
+    List { quote: u8, items: Vec<Item> },
     /// 들여쓴 코드와 ``` 코드 둘 다 여기 온다.
-    Code { lang: Option<String>, lines: Vec<String> },
-    Quote(Vec<Span>),
+    Code { quote: u8, lang: Option<String>, lines: Vec<String> },
+    /// `quote` 는 겹친 인용의 깊이다. 하나로 못 박으면 인용 속 인용이 제
+    /// 겹을 잃어, 어디까지가 누구 말인지 화면만 봐서는 못 가린다.
+    Quote { quote: u8, spans: Vec<Span> },
     Table { head: Row, rows: Vec<Row> },
     Rule,
 }
@@ -168,8 +174,28 @@ impl Fold {
         let Some(items) = &mut self.list else { return };
         let items = std::mem::take(items);
         if !items.is_empty() {
-            self.out.push(Block::List { items });
+            let quote = self.quote_depth();
+            self.out.push(Block::List { quote, items });
         }
+    }
+
+    /// 지금 인용 몇 겹 안인가. 막대는 이 수만큼 붙는다.
+    fn quote_depth(&self) -> u8 {
+        self.quote.min(u8::MAX as u32) as u8
+    }
+
+    /// 방금 닫힌 링크·그림의 주소를 글 뒤에 괄호로 붙인다. 터미널에서 주소가
+    /// 방해가 되는 것은 맞지만, 없어서 못 찾는 것이 더 나쁘다.
+    ///
+    /// **글이 이미 주소면 붙이지 않는다.** `<https://a>` 같은 맨 주소는
+    /// 글과 주소가 같은 것 하나라, 그대로 두면 `https://a (https://a)` 로
+    /// 두 번 나오고 그 길이 때문에 줄이 한 번 더 접힌다.
+    fn trail_url(&mut self) {
+        let Some(url) = self.urls.pop() else { return };
+        if url.is_empty() || self.spans.last().is_some_and(|s| s.text.ends_with(&url)) {
+            return;
+        }
+        self.push(&format!(" ({url})"), Role::Mark);
     }
 
     fn flush_html(&mut self) {
@@ -190,6 +216,7 @@ impl Fold {
         }
         // 산문이 아니므로 그대로 낸다. 접으면 태그가 글 사이에 섞인다.
         self.out.push(Block::Code {
+            quote: self.quote_depth(),
             lang: None,
             lines: text.lines().map(str::to_string).collect(),
         });
@@ -276,6 +303,11 @@ impl Fold {
                 self.link += 1;
                 self.urls.push(dest_url.to_string());
             }
+            // **그림도 주소를 남긴다.** 그림은 터미널에 뜨지 않으므로 대체글만
+            // 남기면 무엇을 가리켰는지 `--raw` 밖에 길이 없다 — 링크에 대고
+            // 적어 둔 까닭 그대로다. 대체글은 제 둘레의 뜻을 그대로 쓴다:
+            // 그림은 링크가 아니라 누를 데가 없다.
+            Tag::Image { dest_url, .. } => self.urls.push(dest_url.to_string()),
             // **모으던 목록 줄을 먼저 매듭짓는다.** 이 세 블록은 저마다
             // `spans` 를 통째로 걷어 가므로, 목록 항목의 글이 남아 있으면 그
             // 글까지 같이 걷어 간다 — `- 하나` 뒤의 `## 제목` 이 `하나제목`
@@ -284,7 +316,20 @@ impl Fold {
                 self.close_list();
                 self.heading = Some(level as u8);
             }
-            Tag::BlockQuote(_) => self.quote += 1,
+            Tag::BlockQuote(_) => {
+                self.quote += 1;
+                // **목록 항목 속의 인용에도 막대를 단다.** 항목 안의 인용은
+                // 블록이 아니라 그 줄의 글로 이어지므로(아래 `TagEnd::Paragraph`
+                // 의 목록 갈래), 그냥 두면 `- 목록 항목` 뒤에 곧바로 붙어
+                // `목록 항목항목 속 인용` 처럼 없던 낱말이 생기고, 기호를
+                // 걷어낸 뒤라 남의 말이 제 말처럼 읽힌다.
+                if !self.lists.is_empty() {
+                    if !self.spans.is_empty() {
+                        self.push(" ", Role::Plain);
+                    }
+                    self.push(BAR, Role::Mark);
+                }
+            }
             Tag::CodeBlock(kind) => {
                 self.close_list();
                 let lang = match kind {
@@ -317,12 +362,9 @@ impl Fold {
             TagEnd::Emphasis => self.emphasis = self.emphasis.saturating_sub(1),
             TagEnd::Link => {
                 self.link = self.link.saturating_sub(1);
-                // 글 바로 뒤에 괄호로 붙인다. 터미널에서 주소가 방해가 되는
-                // 것은 맞지만, 없어서 못 찾는 것이 더 나쁘다.
-                if let Some(url) = self.urls.pop() {
-                    self.push(&format!(" ({url})"), Role::Mark);
-                }
+                self.trail_url();
             }
+            TagEnd::Image => self.trail_url(),
             TagEnd::Heading(_) => {
                 let level = self.heading.take().unwrap_or(1);
                 let spans = self.take();
@@ -334,7 +376,7 @@ impl Fold {
                     // 빈 ``` 울타리는 블록이 아니다. 내면 `layout` 이 그 앞에
                     // 빈 줄만 하나 놓아, 본문에 까닭 없는 틈이 벌어진다.
                     if !lines.is_empty() {
-                        self.out.push(Block::Code { lang, lines });
+                        self.out.push(Block::Code { quote: self.quote_depth(), lang, lines });
                     }
                 }
             }
@@ -363,7 +405,7 @@ impl Fold {
                     // 문단이면 접을 때 줄 끝에서 다시 지워진다.
                     self.push(" ", Role::Plain);
                 } else if self.quote > 0 {
-                    self.out.push(Block::Quote(spans));
+                    self.out.push(Block::Quote { quote: self.quote_depth(), spans });
                 } else {
                     self.out.push(Block::Para(spans));
                 }
@@ -485,6 +527,14 @@ fn regroup(chars: Vec<(char, Role)>) -> Vec<Span> {
 /// 글머리. 겹친 목록도 같은 것을 쓴다 — 깊이는 들여쓰기가 말한다.
 const BULLET: &str = "•";
 
+/// 인용 막대. **겹친 만큼 겹쳐 놓는다** — 한 겹만 놓으면 인용 속 인용이
+/// 제 겹을 잃고, 어디까지가 누구 말인지 화면만 봐서는 못 가린다.
+const BAR: &str = "│ ";
+
+fn bars(depth: u8) -> String {
+    BAR.repeat(depth as usize)
+}
+
 fn mark(t: impl Into<String>) -> Span {
     Span { text: t.into(), role: Role::Mark }
 }
@@ -515,11 +565,12 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize) {
             // 굵게에만 기대면 1단계 제목이 문단과 한 글자도 다르지 않다 —
             // 들여쓰기가 0이기 때문이다. 수준도 이것으로 읽힌다.
             let hash = format!("{} ", "#".repeat(*level as usize));
-            // 수준은 **들여쓰기**가 말한다. `#` 을 남기면 걷어낸 보람이 없고,
-            // 굵게만으로는 2단계와 3단계가 같아 보인다.
             // 제목 안의 코드도 백틱을 되돌려 받는다 — 여기서 `marked` 를
             // 빠뜨리면 `## `moai status`` 의 코드가 색만 남아, 색을 끈
             // 터미널에서 제목의 다른 낱말과 구별할 길이 사라진다.
+            //
+            // **한 번만 붙인다.** `marked` 는 백틱을 두르고도 뜻을 `Code` 로
+            // 남기므로, 아래에서 또 부르면 `` ``moai status`` `` 가 된다.
             let spans: Vec<Span> = marked(spans)
                 .into_iter()
                 .map(|s| match s.role {
@@ -529,14 +580,16 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize) {
                 .collect();
             // 이어지는 줄은 `#` 폭만큼 물려 쓴다.
             let hang = " ".repeat(crate::text::width(&hash));
-            flow(out, &marked(&spans), &hash, &hang, width);
+            flow(out, &spans, &hash, &hang, width);
         }
         Block::Para(spans) => flow(out, &marked(spans), "", "", width),
-        Block::Quote(spans) => {
+        Block::Quote { quote, spans } => {
             // 인용은 **색이 아니라 세로줄**로 말한다.
-            flow(out, &marked(spans), "│ ", "│ ", width);
+            let bar = bars((*quote).max(1));
+            flow(out, &marked(spans), &bar, &bar, width);
         }
-        Block::List { items } => {
+        Block::List { quote, items } => {
+            let bar = bars(*quote);
             for it in items {
                 let pad = "  ".repeat(it.depth as usize);
                 let bullet = match it.marker {
@@ -545,14 +598,15 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize) {
                 };
                 // 이어지는 줄은 글머리 폭만큼 물려 쓴다 — 안 그러면 둘째 줄이
                 // 다음 항목처럼 보인다.
-                let hang = format!("{pad}{}", " ".repeat(crate::text::width(&bullet)));
-                flow(out, &marked(&it.spans), &format!("{pad}{bullet}"), &hang, width);
+                let hang = format!("{bar}{pad}{}", " ".repeat(crate::text::width(&bullet)));
+                flow(out, &marked(&it.spans), &format!("{bar}{pad}{bullet}"), &hang, width);
             }
         }
-        Block::Code { lines, .. } => {
+        Block::Code { quote, lines, .. } => {
             // 코드는 접지 않는다. 접으면 그 줄이 더는 그 코드가 아니다.
+            let lead = format!("{}    ", bars(*quote));
             for l in lines {
-                out.push(vec![mark("    "), Span { text: l.clone(), role: Role::Code }]);
+                out.push(vec![mark(lead.clone()), Span { text: l.clone(), role: Role::Code }]);
             }
         }
         Block::Rule => out.push(vec![mark("─".repeat(width.min(40)))]),
@@ -785,7 +839,7 @@ mod real {
                     super::Block::Para(_) => "문단",
                     super::Block::List { .. } => "목록",
                     super::Block::Code { .. } => "코드",
-                    super::Block::Quote(_) => "인용",
+                    super::Block::Quote { .. } => "인용",
                     super::Block::Table { .. } => "표",
                     super::Block::Rule => "줄",
                 };
@@ -839,7 +893,7 @@ mod tests {
     #[test]
     fn lists_carry_their_depth() {
         let got = parse("- 하나\n- 둘\n  - 둘의 속\n");
-        let Some(Block::List { items }) = got.first() else {
+        let Some(Block::List { items, .. }) = got.first() else {
             panic!("목록이 아니다 — {got:?}");
         };
         assert_eq!(items.len(), 3);
@@ -854,7 +908,7 @@ mod tests {
     #[test]
     fn ordered_lists_number_each_level_on_its_own() {
         let got = parse("1. 하나\n2. 둘\n   - 속\n3. 셋\n");
-        let Some(Block::List { items }) = got.first() else {
+        let Some(Block::List { items, .. }) = got.first() else {
             panic!("{got:?}");
         };
         let got: Vec<(u8, Option<u64>)> = items.iter().map(|i| (i.depth, i.marker)).collect();
@@ -865,7 +919,7 @@ mod tests {
     /// 가리키는 단계 번호가 조용히 달라진다.
     #[test]
     fn an_ordered_list_keeps_the_number_it_starts_at() {
-        let Some(Block::List { items }) = parse("3. 셋\n4. 넷\n").first().cloned() else {
+        let Some(Block::List { items, .. }) = parse("3. 셋\n4. 넷\n").first().cloned() else {
             panic!("목록이 아니다");
         };
         assert_eq!(items.iter().map(|i| i.marker).collect::<Vec<_>>(), [Some(3), Some(4)]);
@@ -877,12 +931,13 @@ mod tests {
         let fenced = parse("```rust\nlet x = 1;\n```\n");
         assert_eq!(
             fenced,
-            vec![Block::Code { lang: Some("rust".into()), lines: vec!["let x = 1;".into()] }]
+            vec![Block::Code { quote: 0, lang: Some("rust".into()), lines: vec!["let x = 1;".into()] }]
         );
         let indented = parse("    moai status\n    moai ready\n");
         assert_eq!(
             indented,
             vec![Block::Code {
+                quote: 0,
                 lang: None,
                 lines: vec!["moai status".into(), "moai ready".into()],
             }]
@@ -897,7 +952,7 @@ mod tests {
 
     #[test]
     fn quotes_and_rules_survive() {
-        assert_eq!(parse("> 인용한 줄\n"), vec![Block::Quote(vec![plain("인용한 줄")])]);
+        assert_eq!(parse("> 인용한 줄\n"), vec![Block::Quote { quote: 1, spans: vec![plain("인용한 줄")] }]);
         assert_eq!(parse("---\n"), vec![Block::Rule]);
     }
 
@@ -1184,9 +1239,57 @@ mod tests {
     /// 제목 안의 코드도 백틱을 되돌려 받는다. 색을 끄면 색으로만 표시한 것은
     /// 그냥 글이 된다 — 제목도 예외가 아니다.
     #[test]
+    /// **한 겹만 붙는다.** `contains` 로만 물으면 `` ``moai status`` `` 도
+    /// 통과한다 — 실제로 `marked` 를 두 번 불러 그렇게 나가고 있었고, 그 시험이
+    /// 초록이라 아무도 못 봤다. 줄 전체를 대고 잰다.
     fn code_in_a_heading_keeps_its_backticks() {
-        let got = flat("## `moai status` 를 먼저\n", 40).join("");
-        assert!(got.contains("`moai status`"), "제목의 코드가 표시를 잃었다 — {got:?}");
+        assert_eq!(flat("## `moai status` 를 먼저\n", 40), ["## `moai status` 를 먼저"]);
+    }
+
+    /// **인용은 목록·코드 안에서도 막대를 지킨다.** 문단에만 막대를 달면
+    /// 인용 속 목록과 코드가 막대를 잃고, 기호를 걷어낸 뒤라 남의 말이 제
+    /// 말처럼 읽힌다 — 겹친 인용에 대고 적어 둔 것과 같은 까닭이다.
+    #[test]
+    fn a_quote_keeps_its_bar_around_lists_and_code() {
+        let got = flat("> 인용 문단\n>\n> - 인용 속 목록\n>\n> ```\n> 인용 속 코드\n> ```\n", 40);
+        for l in got.iter().filter(|l| !l.is_empty()) {
+            assert!(l.starts_with("│ "), "인용 막대를 잃었다 — {got:?}");
+        }
+        // 겹친 인용은 겹친 만큼 막대를 쌓는다.
+        assert_eq!(flat("> > 두 겹\n", 40), ["│ │ 두 겹"]);
+    }
+
+    /// 목록 항목 안의 인용은 그 줄에 이어지는데, **낱말이 붙지 않고 막대를
+    /// 얻는다.** 그냥 이으면 `목록 항목항목 속 인용` 처럼 없던 낱말이 생긴다.
+    #[test]
+    fn a_quote_inside_a_list_item_neither_fuses_nor_loses_its_bar() {
+        assert_eq!(
+            flat("- 목록 항목\n  > 항목 속 인용\n- 다음 항목\n", 40),
+            ["• 목록 항목 │ 항목 속 인용", "• 다음 항목"]
+        );
+    }
+
+    /// **맨 주소는 한 번만 낸다.** `<https://a>` 는 글과 주소가 같은 것
+    /// 하나라, 괄호로 또 붙이면 `https://a (https://a)` 로 두 번 나오고 그
+    /// 길이 때문에 줄이 한 번 더 접힌다.
+    #[test]
+    fn a_bare_address_is_not_printed_twice() {
+        assert_eq!(flat("근거는 <https://example.com/a> 다\n", 60), ["근거는 https://example.com/a 다"]);
+        // 글이 따로 있으면 주소는 그대로 뒤에 붙는다.
+        assert_eq!(
+            flat("글은 [여기](https://example.com/b) 다\n", 60),
+            ["글은 여기 (https://example.com/b) 다"]
+        );
+    }
+
+    /// **그림도 주소를 남긴다.** 그림은 터미널에 뜨지 않으므로 대체글만
+    /// 남기면 무엇을 가리켰는지 `--raw` 밖에 길이 없다 — 링크와 같은 까닭이다.
+    #[test]
+    fn an_image_keeps_its_address() {
+        assert_eq!(
+            flat("![그림](https://example.com/i.png) 이 온다\n", 60),
+            ["그림 (https://example.com/i.png) 이 온다"]
+        );
     }
 
     /// 빈 울타리는 블록이 아니다. 내면 `layout` 이 그 앞에 빈 줄만 하나 놓아

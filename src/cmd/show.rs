@@ -200,18 +200,18 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
             Kind::Milestone => report::milestones(all),
             _ => report::groups(all),
         };
-        let mut mine: Vec<Issue> = all
+        // **베끼지 않는다.** 차례는 `view::members` 가 `nav` 에서 받아 정하므로
+        // 여기서 필요한 것은 "누가 이 묶음의 멤버인가" 하나뿐이다. 한때 여기서
+        // `sort_for_display` 로 다시 세웠는데, 그 차례는 쓰이는 데가 없었다.
+        let mine: std::collections::BTreeSet<&str> = all
             .iter()
             .filter(|i| group.get(i.id.as_str()) == Some(&issue.id.as_str()) && i.id != issue.id)
-            .cloned()
+            .map(|i| i.id.as_str())
             .collect();
-        // 묶음 밑의 멤버도 목록과 같은 차례다. 파일 순으로 두면 `moai show
-        // <에픽>` 과 `moai show -e <에픽>` 이 같은 것을 다른 차례로 낸다.
-        crate::query::sort_for_display(&mut mine);
         let roll = report::rollup_of(issue.kind, all, &repo.config)
             .into_iter()
             .find(|r| r.id.as_deref() == Some(issue.id.as_str()));
-        if let Some(r) = roll {
+        if let Some(r) = &roll {
             out.push(format!(
                 "  멤버   {}/{}  {}{}",
                 r.done,
@@ -223,17 +223,25 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
                 }
             ));
         }
+        // **자리를 못 찾으면 아무것도 내지 않는다.** 뿌리로 되돌리면 그 에픽의
+        // 멤버라며 저장소 전부를 낸다 — 없는 답보다 틀린 답이 비싸다.
         if !mine.is_empty() {
-            out.push(String::new());
-            let ids: std::collections::BTreeSet<&str> = mine.iter().map(|i| i.id.as_str()).collect();
             let index = crate::nav::Index::of(all);
-            let keep = |at: usize| ids.contains(all[at].id.as_str());
             let here = index.find(&issue.id).map(|at| {
                 let mut p = index.home_of(at).clone();
                 p.push(index.seg_of(all, at));
                 p
             });
-            out.extend(view::members(all, &index, &keep, &here.unwrap_or_default()));
+            if let Some(here) = here {
+                out.push(String::new());
+                let keep = |at: usize| mine.contains(all[at].id.as_str());
+                // **에픽 집계를 건넨다.** 이 밑에 머리글을 갖는 것은 에픽뿐이고
+                // (마일스톤 밑의 에픽, 에픽 밑에는 없다), 빈 것을 건네면 그 줄이
+                // 집계를 잃어 `에픽 1건` 처럼 나온다 — 같은 에픽이 `moai show
+                // --tree` 와 다르게 읽힌다.
+                let rolls = report::rollup(all, &repo.config);
+                out.extend(view::members(all, &index, &keep, &rolls, &here));
+            }
         }
     }
     out.extend(view::history(&journal));

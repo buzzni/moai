@@ -60,6 +60,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     list(f, app, left, &rows, &mut state);
     app.list = state;
     detail(f, app, right, &rows);
+
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 F키 바가 선다.
     match &app.mode {
         Mode::Browse => fkeys(f, app, keys),
@@ -234,7 +235,7 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
 }
 
 /// 커서가 머문 것을 정리해 낸다. 이슈면 그 이슈를, 디렉터리면 그 밑의 셈을.
-fn detail(f: &mut Frame, app: &App, at: Rect, rows: &[Row]) {
+fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 좌우 여백은 목록의 커서 자리와 같은 폭이다. `inner()` 가 테두리와 여백을
     // 함께 빼 주므로 폭 계산은 아래가 그대로 쓴다.
     // 테두리는 **나중에** 그린다 — 제목에 "몇 줄 더" 를 얹으려면 줄을 먼저
@@ -268,18 +269,61 @@ fn detail(f: &mut Frame, app: &App, at: Rect, rows: &[Row]) {
     let height = inner.height as usize;
     let hidden = lines.len().saturating_sub(height);
     // 끝을 지나 굴리지 않는다 — 빈 화면을 보여 주고 되돌아올 길을 잃게 한다.
+    //
+    // **자른 값을 도로 넣는다.** 그리는 데만 자르면 `App` 에는 큰 수가 남아,
+    // 끝까지 굴린 뒤 `k` 를 눌러도 그 수가 다시 상한 밑으로 내려올 때까지
+    // 화면이 한 칸도 안 움직인다 — 굴리는 키가 죽은 것처럼 보인다. 창을
+    // 줄였을 때 옛 수가 살아나 화면이 갑자기 끝으로 튀는 것도 같은 뿌리다.
     let scroll = (app.scroll as usize).min(hidden);
+    app.scroll = scroll as u16;
     let more = hidden - scroll;
 
     // **더 있는데 안 보이면 말한다.** 잘린 줄이 조용히 사라지면 보는 쪽은
     // 그것이 본문의 끝인 줄 안다. 제목에 얹으면 본문 한 줄을 안 뺏는다.
+    // **굴리는 키를 여기서 말한다.** 아래 F키 바는 좁으면 뒤에서부터 키를
+    // 떨어뜨리는데, 80칸이면 떨어지는 것이 하필 `j·k` 다 — 그때 화살표만
+    // 가리키면 사람은 `↓` 를 누르고, 그것은 왼쪽 커서를 옮겨 보던 이슈를
+    // 잃는다. 알림은 그것이 가리키는 것 곁에 둔다.
     let title = match (more, scroll) {
         (0, 0) => " 상세 ".to_string(),
-        (0, _) => " 상세 · 끝 ".to_string(),
-        (n, _) => format!(" 상세 · {n}줄 더 ↓ "),
+        (0, _) => " 상세 · 끝 (k 로 위) ".to_string(),
+        (n, _) => format!(" 상세 · {n}줄 더 (j·k) "),
     };
     f.render_widget(block.title(title), at);
+    // **넘친 줄은 잘렸다고 말한다.** `Wrap` 을 끈 뒤로 폭을 넘는 줄은 위젯이
+    // 표시도 없이 잘라 낸다 — 태그 줄, 롤업의 칸별 건수, `F3` 원문, 접지
+    // 않기로 한 코드 줄이 그 길로 조용히 꼬리를 잃었다. 만드는 쪽마다 따로
+    // 자르면 또 하나를 빠뜨리므로 **나가는 마지막 자리에서 한 번** 자른다.
+    let lines: Vec<Line> = lines.into_iter().map(|l| fit(l, inner.width as usize)).collect();
     f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), inner);
+}
+
+/// 한 줄을 패널 폭에 맞춘다. 넘치면 `…` 를 남긴다.
+fn fit(line: Line<'_>, room: usize) -> Line<'_> {
+    let w: usize = line.spans.iter().map(|s| crate::text::width(&s.content)).sum();
+    if w <= room {
+        return line;
+    }
+    // `…` 한 칸을 남겨 두고 조각을 차례로 담는다. **표시는 한 번만 붙인다** —
+    // 조각마다 `clip` 을 부르면 `…` 가 조각 수만큼 붙는다.
+    let mut out: Vec<Span> = Vec::new();
+    let mut used = 0usize;
+    for s in line.spans {
+        let left = room.saturating_sub(1).saturating_sub(used);
+        if left == 0 {
+            break;
+        }
+        let piece = clip(&s.content, left);
+        // 잘려서 `…` 만 남은 조각은 버린다 — 아래에서 한 번 붙인다.
+        let piece = piece.trim_end_matches('…').to_string();
+        if piece.is_empty() {
+            break;
+        }
+        used += crate::text::width(&piece);
+        out.push(Span::styled(piece, s.style));
+    }
+    out.push(Span::styled("…", dim()));
+    Line::from(out)
 }
 
 /// 글 하나를 폭에 맞춰 접어 여러 줄로. 접는 자는 본문과 같은 것을 쓴다.
@@ -988,6 +1032,80 @@ mod tests {
         let last = render(&mut a, 100, 16).join("\n");
         assert!(last.contains("40번째"), "끝까지 못 굴렸다\n{last}");
         assert!(!last.contains("줄 더"), "다 보이는데 더 있다고 한다\n{last}");
+
+        // **되돌아오는 길도 한 번에 열린다.** 그리는 데만 자르고 `App` 에 큰
+        // 수를 남겨 두면, 끝까지 굴린 뒤 `k` 를 눌러도 그 수가 상한 밑으로
+        // 내려올 때까지 화면이 한 칸도 안 움직여 키가 죽은 것처럼 보인다.
+        a.key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        let up = render(&mut a, 100, 16).join("\n");
+        assert_ne!(up, last, "끝까지 굴린 뒤 k 가 아무 일도 안 한다");
+        assert!(up.contains("줄 더"), "되돌아왔는데 남은 줄을 안 알린다\n{up}");
+    }
+
+    /// **넘친 줄은 잘렸다고 말한다.** `Wrap` 을 끈 뒤로 폭을 넘는 줄은 위젯이
+    /// 표시도 없이 잘라 낸다 — 태그 줄·롤업의 칸별 건수·`F3` 원문·접지 않기로
+    /// 한 코드 줄이 그 길로 조용히 꼬리를 잃었다. 이 시험은 버퍼 폭이 아니라
+    /// **잘린 자리에 표시가 있는지**를 본다.
+    #[test]
+    fn a_line_too_wide_for_the_detail_pane_says_it_was_cut() {
+        let mut issues = issues();
+        issues[1].tags =
+            vec!["parser".into(), "storage".into(), "renderer".into(), "markdown".into()];
+        issues[1].body = Some("```\nlet very_long = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\";\n```\n".into());
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+
+        for raw in [false, true] {
+            if raw {
+                a.key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
+            }
+            let lines = render(&mut a, 60, 24);
+            let cut = lines.iter().any(|l| l.contains("#parser") && l.contains('…'));
+            assert!(cut, "태그 줄이 표시 없이 잘렸다 (raw={raw})\n{}", lines.join("\n"));
+            let code = lines.iter().any(|l| l.contains("aaaa"));
+            assert!(
+                !code || lines.iter().any(|l| l.contains("aaaa") && l.contains('…')),
+                "코드 줄이 표시 없이 잘렸다 (raw={raw})\n{}",
+                lines.join("\n")
+            );
+        }
+    }
+
+    /// **끝을 지나 굴려도 `k` 가 곧바로 듣는다.** 자른 값을 `App` 에 도로
+    /// 넣지 않으면, 큰 수가 상한 밑으로 내려올 때까지 화면이 한 칸도 안
+    /// 움직여 굴리는 키가 죽은 것처럼 보인다.
+    #[test]
+    fn scrolling_past_the_end_does_not_deaden_the_key() {
+        let mut issues = issues();
+        issues[1].body = Some((1..=40).map(|n| format!("{n}번째 줄이다\n\n")).collect::<String>());
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+
+        for _ in 0..80 {
+            a.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        }
+        let end = render(&mut a, 100, 16).join("\n");
+        assert!(end.contains("40번째"), "끝을 지나쳐 빈 화면이 됐다\n{end}");
+
+        a.key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        let up = render(&mut a, 100, 16).join("\n");
+        assert_ne!(up, end, "k 를 눌렀는데 화면이 그대로다");
+    }
+
+    /// **폭을 넘는 줄은 잘렸다고 말한다.** `Wrap` 을 끈 뒤로 위젯이 표시 없이
+    /// 잘라 내므로, 태그가 길면 꼬리가 조용히 사라진다.
+    #[test]
+    fn an_overlong_line_says_it_was_cut() {
+        let mut issues = issues();
+        issues[1].tags = (1..=20).map(|n| format!("아주긴태그이름{n}")).collect();
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        let out = render(&mut a, 100, 20);
+        let tagline = out.iter().find(|l| l.contains("아주긴태그이름1")).expect("태그 줄이 없다");
+        assert!(tagline.contains('…'), "잘렸는데 표시가 없다 — {tagline:?}");
     }
 
     /// **커서를 옮기면 굴린 자리가 돌아온다.** 안 그러면 다른 이슈의 첫 줄부터

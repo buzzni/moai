@@ -914,7 +914,7 @@ fn every_command_still_speaks_json() {
     let id = field(&made, "id");
     let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
 
-    for args in [
+    let cases = [
         vec!["status", "--json"],
         vec!["ready", "--json"],
         vec!["show", "--json"],
@@ -932,8 +932,20 @@ fn every_command_still_speaks_json() {
         vec!["edit", &id, "--tag", "bug", "--json"],
         vec!["mv", &id, "review", "--json"],
         vec!["rm", &id, "--json"],
-    ] {
-        one_json_value(&ok(s.path(), &args));
+    ];
+    // **적어 둔 목록과 실제로 부르는 목록을 여기서 잇는다.** 잇지 않으면
+    // `JSON_SWEEP` 에 이름만 적고 한 번도 안 부르는 명령이 생기고, 그러면
+    // 위 시험은 초록인데 그 명령의 `--json` 은 아무도 안 본 것이 된다 —
+    // 없는 안전망을 있다고 믿는 것이 제일 나쁘다.
+    // `init` 과 `add` 는 위에서 바탕을 세우며 이미 `--json` 으로 부른다.
+    for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add"].contains(c)) {
+        assert!(
+            cases.iter().any(|a| a[0] == *cmd),
+            "`{cmd}` 가 JSON_SWEEP 에는 있는데 실제로 부르지 않는다"
+        );
+    }
+    for args in &cases {
+        one_json_value(&ok(s.path(), args));
     }
     // 한 번에 만들기도 배열 하나를 낸다
     let bulk = from_stdin(s.path(), &["add", "--from", "-", "--json"], "# 가\n- 나\n");
@@ -1158,13 +1170,18 @@ fn the_body_is_drawn_but_the_raw_text_stays_reachable() {
 fn every_list_only_filter_is_refused_on_a_single_issue() {
     let s = init("onefilter");
     let id = add(s.path(), &["제목"]);
+    // **`FilterArgs` 의 필드마다 하나씩 있다.** 빠뜨린 필드는 `first_given`
+    // 에서 빠져도 아무도 못 보고, 그것이 `--milestone` 에게 실제로 일어났다.
     for flag in [
         vec!["-s", "todo"],
         vec!["-t", "bug"],
+        vec!["--no-tag", "bug"],
         vec!["-e", "none"],
+        vec!["--parent", "argos-0001"],
         vec!["-p", "1"],
         vec!["--type", "issue"],
         vec!["-g", "제"],
+        vec!["--stale", "3"],
         vec!["--all"],
         vec!["--filter", "status=todo"],
         vec!["--milestone", "없는것"],
@@ -1174,6 +1191,11 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
         args.extend(flag.iter().copied());
         let out = moai(s.path(), &args);
         assert!(!out.status.success(), "{flag:?} 를 말없이 버렸다");
+        // **무엇을 버렸는지까지 말한다.** 거절만 보면 엉뚱한 까닭(잘못된 값,
+        // 없는 id)으로 실패해도 통과하고, 그러면 이 시험은 자기가 지키려던
+        // 것을 안 지킨다.
+        let said = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(said.contains(flag[0]), "{flag:?} 를 거절하며 그 이름을 안 짚었다 — {said}");
     }
 }
 
@@ -1208,6 +1230,58 @@ fn the_tree_shows_every_issue_exactly_once() {
         let n = times(id);
         assert_eq!(n, 1, "{id} 가 트리에 {n}번 나온다\n{tree}");
     }
+}
+
+/// **머리글은 그 밑의 줄과 맞는다.** 소속 없는 줄이 남의 에픽 바로 밑에
+/// 같은 들여쓰기로 끼면 그 에픽의 멤버로 읽히고, 자식을 거느린 줄만 잎에서
+/// 빠져 셈이 모자라면 머리글이 제 밑을 거짓으로 센다.
+#[test]
+fn the_tree_groups_every_loose_row_under_one_honest_header() {
+    let s = init("treehead");
+    let m = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let inside = ok(s.path(), &["add", "에픽 안", "--type", "epic", "--milestone", &m, "-q"])
+        .trim()
+        .to_string();
+    ok(s.path(), &["add", "안의 일", "-e", &inside, "-q"]);
+    let outside =
+        ok(s.path(), &["add", "에픽 밖", "--type", "epic", "-q"]).trim().to_string();
+    ok(s.path(), &["add", "밖의 일", "-e", &outside, "-q"]);
+    let parent = add(s.path(), &["소속 없는 부모"]);
+    ok(s.path(), &["add", "그 자식", "--parent", &parent, "-q"]);
+    let leaf = add(s.path(), &["소속 없는 잎"]);
+
+    let tree = ok(s.path(), &["show", "--tree", "--all"]);
+    // 바구니는 제 이름으로 불린다 — "에픽 없음" 집계를 빌려 쓰면 안 된다.
+    assert!(tree.contains("(마일스톤 없음)"), "바구니가 제 이름을 잃었다\n{tree}");
+    // 소속 없는 것은 셋(부모·자식·잎)이고, 머리글이 그렇게 말한다.
+    assert!(tree.contains("에픽 없음  3건"), "소속 없는 것을 덜 셌다\n{tree}");
+    // 소속 없는 부모는 머리글 **뒤에** 온다. 앞에 오면 위 에픽의 멤버로 읽힌다.
+    let at = |needle: &str| tree.find(needle).unwrap_or_else(|| panic!("{needle} 이 없다\n{tree}"));
+    assert!(at("에픽 없음") < at(&parent), "소속 없는 부모가 머리글 위로 샜다\n{tree}");
+    assert!(at("에픽 없음") < at(&leaf), "{tree}");
+    assert!(at(&outside) < at("에픽 없음"), "에픽이 소속 없는 것 뒤로 밀렸다\n{tree}");
+}
+
+/// **묶음 상세는 제 멤버를 "에픽 없음" 이라 부르지 않는다.** 트리의 뿌리에서만
+/// 뜻이 있는 머리글이 에픽 밑까지 따라 내려가던 자리다.
+#[test]
+fn a_grouping_detail_does_not_label_its_own_members_as_loose() {
+    let s = init("memberhead");
+    let m = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let e = ok(s.path(), &["add", "에픽", "--type", "epic", "--milestone", &m, "-q"])
+        .trim()
+        .to_string();
+    let a = add(s.path(), &["멤버 하나", "-e", &e]);
+    ok(s.path(), &["add", "멤버 둘", "-e", &e, "-q"]);
+
+    let detail = ok(s.path(), &["show", &e]);
+    assert!(!detail.contains("에픽 없음"), "제 멤버를 에픽 없음이라 불렀다\n{detail}");
+    assert!(detail.contains(&a), "멤버를 안 냈다\n{detail}");
+
+    // 마일스톤 상세의 에픽 줄은 **집계를 낸다.** 빈 집계를 넘기면 `에픽 1건`
+    // 처럼 나와 같은 에픽이 `--tree` 와 다르게 읽힌다.
+    let mile = ok(s.path(), &["show", &m]);
+    assert!(mile.contains("0/2"), "에픽 줄이 집계를 잃었다\n{mile}");
 }
 
 // ── TUI ────────────────────────────────────────────────────────────

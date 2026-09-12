@@ -210,6 +210,28 @@ pub fn misplaced(all: &[Issue]) -> BTreeMap<&str, Misplace> {
     out
 }
 
+/// 못 쓸 참조를 **든** 줄. 자리를 바꾸든 안 바꾸든 고쳐야 할 것은 같다.
+///
+/// [`misplaced`] 와 물음이 다르다. 저쪽은 "이 줄을 어디에 둘까" 이고 이쪽은
+/// "이 줄이 못 쓸 것을 가리키나" 다. 그래서 **물려받은 것이 아니라 제가 적은
+/// 것**을 본다 — 부모의 망가진 참조를 물려받은 자식은 고칠 데가 없다 — 대신
+/// 종류를 가리지 않는다: 에픽 줄이 든 엉뚱한 `epic` 도 누군가 고쳐야 한다.
+pub fn broken(all: &[Issue]) -> BTreeMap<&str, Misplace> {
+    let kind_of: BTreeMap<&str, Kind> = all.iter().map(|i| (i.id.as_str(), i.kind)).collect();
+    let usable = |id: &Option<String>, kind: Kind| {
+        id.as_deref().is_none_or(|id| kind_of.get(id) == Some(&kind))
+    };
+    let mut out = BTreeMap::new();
+    for i in all {
+        if !usable(&i.epic, Kind::Epic) {
+            out.insert(i.id.as_str(), Misplace::Epic);
+        } else if !usable(&i.milestone, Kind::Milestone) {
+            out.insert(i.id.as_str(), Misplace::Milestone);
+        }
+    }
+    out
+}
+
 /// 그 종류의 소속 지도. 에픽과 마일스톤이 같은 코드를 지난다.
 fn group_for(kind: Kind, all: &[Issue]) -> BTreeMap<&str, &str> {
     match kind {
@@ -448,6 +470,12 @@ fn ids_of(v: &[&Issue]) -> Vec<String> {
 /// `unreadable` 은 읽다 만난 줄 번호다 — 저장소가 아니라 부르는 쪽이 준다.
 pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -> StatusReport {
     let work: Vec<&Issue> = issues.iter().filter(|i| is_work(i)).collect();
+    // **한 번만 잰다.** 둘 다 이슈 전부의 물림을 타고 올라가므로, 경고마다
+    // 다시 부르면 같은 걸음을 `moai status` 한 번에 여러 벌 걷는다.
+    // `placed` 는 자리를 못 정하는 줄(`nav` 의 `(길 잃음)` 과 같은 집합),
+    // `held` 는 못 쓸 참조를 든 줄이다 — 아래 6번이 둘을 합쳐 드러낸다.
+    let placed = misplaced(issues);
+    let held = broken(issues);
     let counts: BTreeMap<String, usize> = cfg
         .statuses
         .iter()
@@ -485,14 +513,13 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
         let mile = milestones(issues);
         // 종류가 틀린 참조는 **마일스톤이 있는 것이 아니다.** 그대로 세면
         // 그 줄이 "마일스톤 있음" 으로 빠져, 정작 드러내야 할 것이 숨는다.
-        let bad = misplaced(issues);
         let outside: Vec<&Issue> = work
             .iter()
             .copied()
             .filter(|i| {
                 !i.status.is_done()
                     && (!mile.contains_key(i.id.as_str())
-                        || bad.get(i.id.as_str()) == Some(&Misplace::Milestone))
+                        || placed.get(i.id.as_str()) == Some(&Misplace::Milestone))
             })
             .collect();
         if !outside.is_empty() {
@@ -580,14 +607,23 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
 
     // 6. 머지를 잘못 푼 흔적. 여기부터는 드러내는 것을 넘어 고쳐야 할 것이다.
     let known: std::collections::BTreeSet<&str> = issues.iter().map(|i| i.id.as_str()).collect();
-    // **자리를 못 정하는 참조.** 끊긴 것과 종류가 틀린 것을 한 자로 잰다 —
-    // `nav` 가 `(길 잃음)` 바구니에 넣는 것과 **정의상 같은 집합**이다.
-    let bad = misplaced(issues);
+    // **드러내는 쪽이 자리를 정하는 쪽보다 넓다.** `misplaced` 는 *자리를 못
+    // 정하는* 줄만 고르므로 `nav` 의 `(길 잃음)` 과 같은 집합이고, 그것은
+    // 그대로 지킨다 — 배너가 가리킨 명령이 침묵하면 안 된다. 다만 자리를
+    // 바꾸지 않는 못 쓸 참조가 있다: 에픽 줄이 든 엉뚱한 `epic`, 제 에픽이
+    // 멀쩡한 줄이 든 엉뚱한 `milestone`. 그것도 고쳐야 할 것은 같으므로
+    // 여기서 합친다. 빼면 `moai rm` 이 "끊긴 참조가 남았다" 고 말한 그 줄에
+    // 대해 `status` 가 그다음부터 영영 침묵한다.
     for (kind, why) in [("dangling_epic", Misplace::Epic), ("dangling_milestone", Misplace::Milestone)] {
-        let ids: Vec<String> =
-            bad.iter().filter(|(_, w)| **w == why).map(|(id, _)| id.to_string()).collect();
-        if !ids.is_empty() {
-            warnings.push(Warning::new(kind, ids));
+        let hit: Vec<&Issue> = issues
+            .iter()
+            .filter(|i| {
+                let id = i.id.as_str();
+                placed.get(id) == Some(&why) || held.get(id) == Some(&why)
+            })
+            .collect();
+        if !hit.is_empty() {
+            warnings.push(Warning::new(kind, ids_of(&hit)));
         }
     }
 
@@ -715,6 +751,48 @@ mod tests {
         let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
         assert!(kinds.contains(&"dangling_epic"), "{kinds:?}");
         assert!(kinds.contains(&"dangling_milestone"), "{kinds:?}");
+    }
+
+    /// **묶음 행의 망가진 참조도 드러낸다.** 에픽이 제 `epic` 에 없는 id 를
+    /// 들고 있으면 자리는 멀쩡해도 그 줄은 고쳐야 한다 — 자리를 정하는
+    /// 술어(`misplaced`)와 드러내는 술어는 물음이 다르다.
+    #[test]
+    fn a_grouping_row_with_a_broken_reference_is_reported() {
+        let mut epic = make("argos-e001", Kind::Epic, "todo");
+        epic.epic = Some("argos-nope".into());
+        let mut issue_with_bad_milestone = make("argos-0010", Kind::Issue, "todo");
+        issue_with_bad_milestone.epic = Some("argos-e001".into());
+        issue_with_bad_milestone.milestone = Some("argos-gone".into());
+        let issues = vec![epic, issue_with_bad_milestone];
+
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let ids: Vec<&String> = st
+            .warnings
+            .iter()
+            .filter(|w| w.kind.starts_with("dangling"))
+            .flat_map(|w| w.ids.iter())
+            .collect();
+        assert!(ids.iter().any(|id| *id == "argos-e001"), "에픽의 망가진 epic 을 안 말한다 — {ids:?}");
+        assert!(
+            ids.iter().any(|id| *id == "argos-0010"),
+            "이슈의 망가진 milestone 을 안 말한다 — {ids:?}"
+        );
+    }
+
+    /// 경고의 id 도 **급한 것이 앞**이다. 보는 쪽이 앞의 셋만 내므로,
+    /// id 순으로 두면 급한 것이 뒤에 숨는다.
+    #[test]
+    fn dangling_warnings_put_the_urgent_first() {
+        let mut rows = vec![make("argos-0001", Kind::Epic, "todo")];
+        for (n, p) in [("argos-aaa1", 3), ("argos-aaa2", 3), ("argos-zzz9", 0)] {
+            let mut i = make(n, Kind::Issue, "todo");
+            i.epic = Some("argos-nope".into());
+            i.priority = Some(p);
+            rows.push(i);
+        }
+        let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let w = st.warnings.iter().find(|w| w.kind == "dangling_epic").expect("경고가 없다");
+        assert_eq!(w.ids.first().map(String::as_str), Some("argos-zzz9"), "{:?}", w.ids);
     }
 
     /// 마일스톤 아닌 것을 가리킨 줄을 "마일스톤 있음" 으로 세지 않는다 —
