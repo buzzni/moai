@@ -48,6 +48,8 @@ pub struct Filter {
     pub milestone: Vec<Sel>,
     pub parent: Vec<Sel>,
     pub priority: Vec<u8>,
+    /// OR. 비면 아무거나. `Sel::Unset` 이 담당 없는 것이다.
+    pub assignee: Vec<Sel>,
     pub kind: Option<Kind>,
     pub grep: Option<String>,
     /// 지금 칸에 이만큼 머문 것.
@@ -70,8 +72,10 @@ fn once(values: &[String], flag: &str, what: &str) -> Result<Vec<String>, String
 }
 
 /// 있는 필터 항목. 모르는 키를 만나면 이 목록을 그대로 보여준다.
-pub const KEYS: &[&str] =
-    &["status", "tag", "no-tag", "epic", "milestone", "parent", "priority", "type", "grep", "stale"];
+pub const KEYS: &[&str] = &[
+    "status", "tag", "no-tag", "epic", "milestone", "parent", "priority", "assignee", "type",
+    "grep", "stale",
+];
 
 /// 플래그에서 온 날것. `cmd` 가 argv 를 그대로 옮겨 담아 넘긴다.
 ///
@@ -86,6 +90,7 @@ pub struct Raw {
     pub milestone: Vec<String>,
     pub parent: Vec<String>,
     pub priority: Vec<String>,
+    pub assignee: Vec<String>,
     pub kind: Option<Kind>,
     pub grep: Option<String>,
     pub stale: Option<i64>,
@@ -115,6 +120,7 @@ impl Filter {
             milestone: sel(once(&raw.milestone, "--milestone", "마일스톤")?),
             parent: sel(once(&raw.parent, "--parent", "부모")?),
             priority: parse_priorities(&once(&raw.priority, "-p", "우선순위")?)?,
+            assignee: sel(once(&raw.assignee, "-a", "담당")?),
             kind: raw.kind,
             // 한 번만 내려 두면 이슈마다 다시 만들 일이 없다.
             grep: raw.grep.map(|q| q.to_lowercase()),
@@ -148,6 +154,9 @@ impl Filter {
             return false;
         }
         if !self.priority.is_empty() && !self.priority.contains(&i.priority()) {
+            return false;
+        }
+        if !self.assignee.is_empty() && !self.assignee.iter().any(|w| is_assignee(w, i)) {
             return false;
         }
         if self.kind.is_some_and(|k| i.kind != k) {
@@ -193,6 +202,7 @@ fn desugar(raw: &mut Raw, text: &str) -> Result<(), String> {
             "milestone" => raw.milestone.push(v),
             "parent" => raw.parent.push(v),
             "priority" => raw.priority.push(v),
+            "assignee" => raw.assignee.push(v),
             "type" => raw.kind = Some(v.parse()?),
             "grep" => raw.grep = Some(v),
             "stale" => raw.stale = Some(v.parse().map_err(|_| format!("`{v}` 는 날 수가 아니다"))?),
@@ -223,6 +233,22 @@ fn sel(values: Vec<String>) -> Vec<Sel> {
         .into_iter()
         .map(|v| if v == "none" { Sel::Unset } else { Sel::Is(v) })
         .collect()
+}
+
+/// 담당 한 항을 잰다. **맡길 때 쓴 문자열 그대로 찾을 수 있어야 한다** —
+/// 가르는 일을 `model::split_assignee` 에 맡기는 이유다. `-a` 로 맡기는 쪽과
+/// 같은 함수라, `이름 (메일)`·이름만·메일만 셋이 저절로 같이 통한다.
+///
+/// 이름과 메일 중 **하나만 맞아도** 통과다. 이름을 바꾼 사람이 옛 줄에서
+/// 사라지지 않고, 남의 메일을 모르는 채 이름으로만 맡긴 줄도 찾힌다.
+fn is_assignee(want: &Sel, i: &crate::model::Issue) -> bool {
+    let Sel::Is(raw) = want else { return i.assignee.is_none() };
+    let (name, email) = crate::model::split_assignee(raw);
+    let by_name = name.as_deref().is_some_and(|n| i.assignee.as_deref() == Some(n));
+    // 메일은 대소문자를 가리지 않는다. 같은 사람이 저장소마다 다르게 적는다.
+    let mail = |e: &str| i.assignee_email.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(e));
+    // 괄호 없이 준 것은 `split_assignee` 가 이름으로 본다. 메일일 수도 있어 한 번 더 잰다.
+    by_name || email.as_deref().is_some_and(&mail) || mail(raw)
 }
 
 fn matches_sel(sel: &[Sel], value: Option<&str>) -> bool {
@@ -467,6 +493,112 @@ mod tests {
             let e = Filter::build(Raw { priority: s(&[bad]), all: true, ..Raw::default() }).unwrap_err();
             assert!(e.contains("우선순위가 아니다"), "{bad} → {e}");
         }
+    }
+
+    /// 이름으로 담당 필터
+    #[test]
+    fn assignee_matches_by_name() {
+        let mut i = issue("a-0001", "todo", &[]);
+        i.assignee = Some("철수".into());
+        i.assignee_email = Some("chulsu@example.com".into());
+        let f = Filter::build(Raw { assignee: s(&["철수"]), all: true, ..Raw::default() }).unwrap();
+        assert!(hit(&f, &i));
+        let f = Filter::build(Raw { assignee: s(&["영희"]), all: true, ..Raw::default() }).unwrap();
+        assert!(!hit(&f, &i));
+    }
+
+    /// 메일로 담당 필터
+    #[test]
+    fn assignee_matches_by_email() {
+        let mut i = issue("a-0001", "todo", &[]);
+        i.assignee = Some("철수".into());
+        i.assignee_email = Some("chulsu@example.com".into());
+        let f = Filter::build(Raw { assignee: s(&["chulsu@example.com"]), all: true, ..Raw::default() }).unwrap();
+        assert!(hit(&f, &i));
+        let f = Filter::build(Raw { assignee: s(&["other@example.com"]), all: true, ..Raw::default() }).unwrap();
+        assert!(!hit(&f, &i));
+    }
+
+    /// 쉼표는 또는 — 이름 하나와 남의 메일 하나를 주면 둘 중 하나만 맞아도 통과.
+    #[test]
+    fn assignee_commas_are_or() {
+        let mut i = issue("a-0001", "todo", &[]);
+        i.assignee = Some("철수".into());
+        i.assignee_email = Some("chulsu@example.com".into());
+        let f = Filter::build(Raw {
+            assignee: s(&["철수,other@example.com"]),
+            all: true,
+            ..Raw::default()
+        })
+        .unwrap();
+        assert!(hit(&f, &i));
+    }
+
+    /// **맡길 때 쓴 문자열 그대로** 찾을 수 있다. `-a "이름 (메일)"` 은 맡기는
+    /// 쪽의 모양이고, 그것을 그대로 필터에 넣는 것이 사람이 실제로 하는 일이다.
+    #[test]
+    fn assignee_takes_the_same_string_that_assigns() {
+        let mut i = issue("a-0001", "todo", &[]);
+        i.assignee = Some("철수".into());
+        i.assignee_email = Some("chulsu@example.com".into());
+        let f = Filter::build(Raw {
+            assignee: s(&["철수 (chulsu@example.com)"]),
+            all: true,
+            ..Raw::default()
+        })
+        .unwrap();
+        assert!(hit(&f, &i));
+
+        // 이름을 바꾼 사람도 옛 줄에서 사라지지 않는다 — 메일 한쪽만 맞아도 된다.
+        let f = Filter::build(Raw {
+            assignee: s(&["레이븐 (chulsu@example.com)"]),
+            all: true,
+            ..Raw::default()
+        })
+        .unwrap();
+        assert!(hit(&f, &i));
+    }
+
+    /// 메일은 대소문자를 가리지 않는다.
+    #[test]
+    fn assignee_email_ignores_case() {
+        let mut i = issue("a-0001", "todo", &[]);
+        i.assignee = Some("철수".into());
+        i.assignee_email = Some("Chulsu@Example.com".into());
+        let f = Filter::build(Raw {
+            assignee: s(&["chulsu@example.com"]),
+            all: true,
+            ..Raw::default()
+        })
+        .unwrap();
+        assert!(hit(&f, &i));
+    }
+
+    /// 메일 없이 이름만으로 맡긴 줄도 이름으로 찾힌다 (`split_assignee` 가 그렇게 둔다).
+    #[test]
+    fn assignee_without_email_still_matches_by_name() {
+        let mut i = issue("a-0001", "todo", &[]);
+        i.assignee = Some("철수".into());
+        let f = Filter::build(Raw { assignee: s(&["철수"]), all: true, ..Raw::default() }).unwrap();
+        assert!(hit(&f, &i));
+    }
+
+    /// -a none 은 담당 없는 것만 고른다
+    #[test]
+    fn assignee_none_selects_unassigned() {
+        let mut assigned = issue("a-0001", "todo", &[]);
+        assigned.assignee = Some("철수".into());
+        let unassigned = issue("a-0002", "todo", &[]);
+        let f = Filter::build(Raw { assignee: s(&["none"]), all: true, ..Raw::default() }).unwrap();
+        assert!(!hit(&f, &assigned));
+        assert!(hit(&f, &unassigned));
+    }
+
+    /// 같은 사람이 둘일 수는 없다 — 다른 필터와 같은 낱말로 거절한다.
+    #[test]
+    fn repeating_assignee_is_a_friendly_error() {
+        let e = Filter::build(Raw { assignee: s(&["철수", "영희"]), all: true, ..Raw::default() }).unwrap_err();
+        assert!(e.contains("동시에") && e.contains("-a 철수,영희"), "{e}");
     }
 
     #[test]

@@ -47,6 +47,7 @@ fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
         (!a.epic.is_empty(), "-e"),
         (!a.parent.is_empty(), "--parent"),
         (!a.priority.is_empty(), "-p"),
+        (!a.assignee.is_empty(), "-a"),
         (a.kind.is_some(), "--type"),
         (a.grep.is_some(), "-g"),
         (a.stale.is_some(), "--stale"),
@@ -107,6 +108,20 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         Target::OfKind(k) => Some(k),
         _ => a.kind,
     };
+    // `me` 만 여기서 푼다 — `query` 는 순수 함수라 지금 사람이 누구인지 모른다.
+    // 푼 값은 `이름 (메일)` 한 덩이다. 쉼표로 이어 붙이지 않는다 — 이름에
+    // 쉼표가 든 사람이 있고, 그러면 `query` 가 그 자리에서 항을 둘로 쪼갠다.
+    let assignee = a
+        .assignee
+        .iter()
+        .map(|one| {
+            if one != "me" {
+                return Ok(one.clone());
+            }
+            let me = crate::model::actor(ctx.user.as_deref())?;
+            Ok(format!("{} ({})", me.name, me.email))
+        })
+        .collect::<R<Vec<String>>>()?;
     // argv 를 그대로 옮겨 담을 뿐이다. 뜻을 정하는 것은 `query` 다.
     let filter = Filter::build(Raw {
         status: a.status,
@@ -116,6 +131,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         milestone: a.milestone,
         parent: a.parent,
         priority: a.priority,
+        assignee,
         kind,
         grep: a.grep,
         stale: a.stale,
