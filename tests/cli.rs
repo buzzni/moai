@@ -909,7 +909,7 @@ fn the_json_sweep_covers_every_command() {
 const JSON_SWEEP: &[&str] = &[
     "init", "add", "status", "ready", "show", "note", "link", "tui", "edit", "mv", "rm",
     // 종류 네임스페이스는 `moai <종류> show --json` 으로 같은 길을 지난다.
-    "issue", "epic", "milestone",
+    "issue", "epic", "milestone", "idea",
 ];
 
 /// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.
@@ -936,6 +936,7 @@ fn every_command_still_speaks_json() {
         vec!["issue", "show", "--json"],
         vec!["epic", "show", "--json"],
         vec!["milestone", "show", "--json"],
+        vec!["idea", "show", "--json"],
         vec!["edit", &id, "--tag", "bug", "--json"],
         vec!["mv", &id, "review", "--json"],
         vec!["rm", &id, "--json"],
@@ -1780,4 +1781,53 @@ fn naming_changes_the_screen_not_the_file() {
 
     set("full");
     assert_eq!(issues(s.path()), before, "표기를 바꿨는데 파일이 달라졌다");
+}
+
+// ── idea — 반짝 생각을 담는 칸 ──────────────────────────────────────
+
+/// **담는 비용이 0 에 가까워야 담는다.** 제목 하나로 끝나야 하고, 우선순위도
+/// 에픽도 안 물어야 한다. 하나라도 더 물으면 그 자리에서 던져 놓는 대신
+/// 사람이 생각을 접는다.
+#[test]
+fn an_idea_costs_one_title() {
+    let s = init("ideaadd");
+    let id = ok(s.path(), &["idea", "add", "반짝 떠오른 것", "-q"]).trim().to_string();
+    let line = line_of(s.path(), &id);
+    assert!(line.contains(r#""kind":"idea""#), "{line}");
+    assert!(!line.contains(r#""epic""#), "안 물은 에픽이 붙었다 — {line}");
+    assert!(!line.contains(r#""priority""#), "안 물은 우선순위가 붙었다 — {line}");
+}
+
+/// 긴 생각도 한 번에 들어간다 — 본문은 `-b -` 로 stdin 에서 받는다.
+#[test]
+fn an_idea_takes_a_body_from_stdin() {
+    let s = init("ideabody");
+    let out = from_stdin(s.path(), &["idea", "add", "긴 생각", "-b", "-", "--json"], "여러\n줄\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let made = String::from_utf8(out.stdout).unwrap();
+    assert!(made.contains(r#""body":"여러\n줄""#), "{made}");
+}
+
+/// `ls` 는 `show` 의 다른 이름이다. 어휘를 둘로 만들지 않으려고 별명으로 둔다 —
+/// 목록을 내는 동사가 둘이면 도움말이 둘 다 가르쳐야 한다.
+#[test]
+fn idea_ls_is_idea_show() {
+    let s = init("idealist");
+    let id = ok(s.path(), &["idea", "add", "담아 둔 것", "-q"]).trim().to_string();
+    let listed = ok(s.path(), &["idea", "ls"]);
+    assert!(listed.contains(&id), "{listed}");
+    assert_eq!(listed, ok(s.path(), &["idea", "show"]), "ls 와 show 가 다른 것을 낸다");
+}
+
+/// 고치고 버리는 것은 이미 있는 동사가 한다. `id` 가 대상을 정확히 가리키므로
+/// 종류를 덧붙일 자리가 없다 — `epic`·`milestone` 이 `mv`·`edit`·`rm` 을
+/// 갖지 않는 것과 같은 규칙이다.
+#[test]
+fn editing_and_removing_an_idea_uses_the_plain_verbs() {
+    let s = init("ideaedit");
+    let id = ok(s.path(), &["idea", "add", "고칠 것", "-q"]).trim().to_string();
+    ok(s.path(), &["edit", &id, "--tag", "parser"]);
+    assert!(line_of(s.path(), &id).contains(r#""tags":["parser"]"#));
+    ok(s.path(), &["rm", &id]);
+    assert!(!issues(s.path()).contains(&id), "안 지워졌다");
 }

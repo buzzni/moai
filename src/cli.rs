@@ -141,6 +141,20 @@ pub enum Cmd {
     /// 위 동사를 `--type milestone` 으로 고정해 부른다
     #[command(subcommand)]
     Milestone(Typed),
+    /// 반짝 떠오른 것을 그 자리에서 담는다 (`--type idea`)
+    #[command(subcommand, after_help = "\
+  todo 보다 한 칸 낮은 자리다. **담는 비용이 0 에 가까워야 담는다** — 제목
+  하나로 끝나고 우선순위도 에픽도 묻지 않는다.
+
+  moai idea add \"반짝 떠오른 것\"      담기
+  moai idea add \"긴 생각\" -b -        본문은 stdin 에서
+  moai idea ls                        쌓인 것 보기 (`idea show` 와 같다)
+
+  idea 는 일이 아니다 — `moai ready` 에도 보드의 셈에도 들지 않고, 에픽 없이
+  사는 것이 정상이라 \"에픽 없는 이슈\" 경고에 안 걸린다.
+
+  고치고 버리는 것은 이미 있는 동사가 한다: `moai edit <id>`, `moai rm <id>`.")]
+    Idea(Typed),
 
     /// 탐색기 화면을 띄운다 (읽기 전용)
     #[command(after_help = "\
@@ -177,6 +191,10 @@ pub enum Typed {
     /// 만든다
     Add(AddArgs),
     /// 펼치거나 목록을 낸다
+    ///
+    /// `ls` 는 같은 것의 다른 이름이다. **어휘를 둘로 만들지 않으려고 별명으로
+    /// 둔다** — 목록을 내는 동사가 둘이면 도움말이 둘 다 가르쳐야 한다.
+    #[command(alias = "ls")]
     Show(ShowArgs),
 }
 
@@ -214,7 +232,7 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "이름 (메일)|none")]
     pub assignee: Option<String>,
 
-    #[arg(long = "type", value_name = "issue|epic")]
+    #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
     pub kind: Option<Kind>,
 
     /// 이 이슈의 자식으로 만든다 (id 가 `.xxx` 로 붙는다)
@@ -290,7 +308,7 @@ pub struct FilterArgs {
     #[arg(short, long, value_name = "이름|메일|none|me")]
     pub assignee: Vec<String>,
 
-    #[arg(long = "type", value_name = "issue|epic")]
+    #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
     pub kind: Option<Kind>,
 
     /// 제목·본문에 이 글이 든 것

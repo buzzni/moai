@@ -90,6 +90,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),
         Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
         Cmd::Milestone(t) => typed(&ctx, t, Kind::Milestone),
+        Cmd::Idea(t) => typed(&ctx, t, Kind::Idea),
     }
 }
 
