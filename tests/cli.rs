@@ -2165,3 +2165,23 @@ fn an_empty_list_says_the_thoughts_are_hidden() {
     let out = ok(s.path(), &["show"]);
     assert!(out.contains('3') && out.contains("idea"), "숨긴 것을 안 센다 — {out}");
 }
+
+/// **한 화면이 두 말을 하지 않는다.** 에픽에 든 생각을 상세가 줄로 내면서
+/// 머리글은 `멤버 0/0` 이라 하면, 보는 쪽은 어느 쪽도 못 믿는다. 세는 쪽은
+/// 못 바꾸므로(진행률이 생각을 세면 담을수록 덜 끝난 것으로 보인다) 자리를
+/// 맞춘다 — 소속은 필드로 남아 `--type idea -e` 가 찾아낸다.
+#[test]
+fn a_thought_does_not_hang_under_an_epic() {
+    let s = init("ideaepic");
+    let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
+    let thought =
+        ok(s.path(), &["idea", "add", "샤딩을 해 볼까", "-e", &epic, "-q"]).trim().to_string();
+
+    let detail = ok(s.path(), &["show", &epic]);
+    assert!(!detail.contains(&thought), "멤버 0/0 밑에 생각을 그렸다 — {detail}");
+    assert!(!ok(s.path(), &["show", "--tree"]).contains(&thought));
+
+    // 소속은 잃지 않았다.
+    let found = ok(s.path(), &["show", "--type", "idea", "-e", &epic]);
+    assert!(found.contains(&thought), "에픽으로 못 찾는다 — {found}");
+}
