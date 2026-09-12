@@ -337,14 +337,21 @@ impl Ctx<'_> {
             path.push(Seg::Issue(p.to_string()));
             return path;
         }
-        // **생각은 에픽 밑에 걸리지 않는다.** 걸면 에픽 상세가 `멤버 0/0` 을
+        // **생각은 계획 계층에 걸리지 않는다.** 걸면 에픽 상세가 `멤버 0/0` 을
         // 낸 바로 밑에 그 줄을 그리고, 트리와 TUI 는 `자식 없음` 이라 말하면서
         // 줄은 낸다 — 자리를 정하는 자와 세는 자가 갈라진 꼴이다(moai-lhbh).
         //
+        // **에픽만 떼면 반만 뗀 것이다.** 마일스톤은 `report::milestones` 가
+        // 에픽을 타고 물려주므로, 에픽에서만 빼면 그 줄이 에픽의 마일스톤
+        // 바구니로 떨어져 `moai show <마일스톤>` 이 똑같이 머리글과 어긋난다.
+        //
         // **세는 쪽은 못 바꾼다.** 진행률이 생각을 세기 시작하면 담을수록 그
-        // 에픽이 덜 끝난 것으로 보인다. 그래서 자리를 맞춘다. 소속은 필드로
+        // 묶음이 덜 끝난 것으로 보인다. 그래서 자리를 맞춘다. 소속은 필드로
         // 그대로 남아 `moai show --type idea -e <에픽>` 이 찾아낸다.
-        match self.epic_of.get(&me.id).filter(|_| !crate::report::is_idea(me)) {
+        if crate::report::is_idea(me) {
+            return if self.has_milestones { vec![Seg::Milestone(None)] } else { Vec::new() };
+        }
+        match self.epic_of.get(&me.id) {
             Some(e) => {
                 // **에픽이 사는 자리 밑으로 간다.** 여기서 마일스톤을 다시
                 // 셈하면, 에픽이 제 참조 때문에 `(길 잃음)` 으로 갈라진 날

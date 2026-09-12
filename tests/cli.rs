@@ -2565,3 +2565,55 @@ fn a_deferred_grouping_is_not_also_scolded() {
     assert!(out.contains("미뤄 둔 것 1건"), "제 이름으로도 안 말한다 — {out}");
     assert!(out.contains("드러난 문제 없다"), "알림 하나로 깨끗함을 잃었다 — {out}");
 }
+
+/// **트리도 안 낸 것을 말한다.** 롤업 머리글은 `is_work` 로 세므로 미뤄 둔
+/// 멤버까지 세는데 그 줄은 트리에서 빠진다 — 말하지 않으면 `0/2` 밑에 줄
+/// 하나만 서고 왜 하나가 없는지 아무도 모른다.
+#[test]
+fn the_tree_says_what_it_did_not_draw() {
+    let s = init("treehidden");
+    let epic = ok(s.path(), &["epic", "add", "저장 계층", "-q"]).trim().to_string();
+    add(s.path(), &["멤버", "-e", &epic]);
+    let put_off = add(s.path(), &["미룬 멤버", "-e", &epic]);
+    ok(s.path(), &["defer", &put_off]);
+
+    let out = ok(s.path(), &["show", "--tree"]);
+    assert!(out.contains("0/2"), "머리글이 계획 전부를 안 센다 — {out}");
+    assert!(!out.contains(&put_off), "미룬 줄을 그렸다 — {out}");
+    assert!(out.contains("미룸 1건 숨김"), "왜 하나가 없는지 안 말한다 — {out}");
+}
+
+/// 담아 둔 생각은 **기계 출력에서도** 멤버가 아니다. 화면도(`nav` 가 에픽
+/// 밑에 안 걸어서) 머리글도(`rollup` 이 `is_work` 로 세서) 세지 않는 줄을
+/// `--json` 만 세면, 받는 쪽이 계획에 없는 것을 계획으로 읽는다.
+#[test]
+fn a_thought_is_not_a_member_on_either_surface() {
+    let s = init("epicjsonidea");
+    let epic = ok(s.path(), &["epic", "add", "저장 계층", "-q"]).trim().to_string();
+    let member = add(s.path(), &["진짜 일", "-e", &epic]);
+    let thought = ok(s.path(), &["idea", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
+
+    let json = ok(s.path(), &["show", &epic, "--json"]);
+    assert!(json.contains(&member), "멤버를 잃었다 — {json}");
+    assert!(!json.contains(&thought), "생각을 멤버로 셌다 — {json}");
+    assert!(ok(s.path(), &["show", &epic]).contains("멤버   0/1"), "머리글이 달라졌다");
+}
+
+/// **에픽만 떼면 반만 뗀 것이다.** 마일스톤은 에픽을 타고 물려받으므로,
+/// 에픽에서만 빼면 그 줄이 마일스톤 바구니로 떨어져 `moai show <마일스톤>` 이
+/// 똑같이 머리글과 어긋난다 — 세는 자와 그리는 자가 갈라진 자리(moai-lhbh)다.
+#[test]
+fn a_thought_does_not_hang_under_a_milestone_either() {
+    let s = init("ideastone");
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let epic = ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &stone, "-q"])
+        .trim()
+        .to_string();
+    add(s.path(), &["진짜 일", "-e", &epic]);
+    let thought = ok(s.path(), &["idea", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
+
+    let out = ok(s.path(), &["show", &stone]);
+    assert!(out.contains("멤버   0/1"), "{out}");
+    assert!(!out.contains(&thought), "머리글이 안 세는 줄을 그 밑에 그렸다 — {out}");
+}
+

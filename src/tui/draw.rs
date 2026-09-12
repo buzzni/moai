@@ -489,7 +489,12 @@ fn rollup<'a>(app: &App, path: &crate::nav::Path, w: usize) -> Vec<Line<'a>> {
     let work: Vec<usize> =
         kids.iter().copied().filter(|&at| crate::report::is_work(&app.issues[at])).collect();
     if work.is_empty() {
-        return vec![Line::from(Span::styled("자식 없음", dim()))];
+        // **없는 것과 안 세는 것은 다르다.** 담아 둔 생각은 자리로는 여기
+        // 걸리지만(왼쪽 목록이 그 줄을 낸다) 진행률로는 안 센다 — 세기
+        // 시작하면 담을수록 그 부모가 덜 끝난 것으로 보인다. 둘을 한 낱말로
+        // 뭉치면 줄이 보이는데 `자식 없음` 이라 말한다(moai-lhbh).
+        let word = if kids.is_empty() { "자식 없음" } else { "셀 일 없음" };
+        return vec![Line::from(Span::styled(word, dim()))];
     }
     let done = work.iter().filter(|&&at| app.issues[at].status.is_done()).count();
     let percent = (done * 100 / work.len()) as u8;

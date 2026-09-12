@@ -196,12 +196,21 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
             shown.iter().map(|i| i.id.as_str()).collect();
         let index = crate::nav::Index::of(&load.issues);
         let keep = |at: usize| shown_ids.contains(load.issues[at].id.as_str());
-        return Ok(view::tree(
+        let mut out = view::tree(
             &load.issues,
             &index,
             &keep,
             &report::rollup(&load.issues, &repo.config),
-        ));
+        );
+        // **트리도 안 낸 것을 말한다.** 롤업 머리글은 `is_work` 로 세므로
+        // 미뤄 둔 멤버까지 세는데, 그 줄은 여기서 빠진다 — 말하지 않으면
+        // `0/2` 밑에 줄 하나만 서고 왜 하나가 없는지 아무도 모른다. 목록이
+        // 요약 꼬리에 다는 것과 같은 말, 같은 자리(`Hidden`)에서 받는다.
+        if let Some(n) = hidden.note() {
+            out.push(String::new());
+            out.push(n);
+        }
+        return Ok(out);
     }
     Ok(view::list(&shown, &repo.config, hidden, &report::epic_labels(&load.issues)))
 }
@@ -213,8 +222,15 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
 
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();
-        let members: Vec<&str> =
-            report::members_of(all, &issue.id).iter().map(|m| m.id.as_str()).collect();
+        // **담아 둔 생각은 멤버로 안 낸다.** 소속은 필드로 남지만 화면도
+        // (`nav` 가 에픽 밑에 안 걸어서) 머리글도(`rollup` 이 `is_work` 로
+        // 세서) 그것을 멤버로 치지 않는다 — 기계 출력만 치면 받는 쪽이 계획에
+        // 없는 줄을 계획으로 읽는다. 찾으려면 `moai show --type idea -e <에픽>`.
+        let members: Vec<&str> = report::members_of(all, &issue.id)
+            .iter()
+            .filter(|m| !report::is_idea(m))
+            .map(|m| m.id.as_str())
+            .collect();
         let mut extra = vec![
             ("children", serde_json::to_string(&ids).map_err(|e| Fail::new(e.to_string()))?),
             ("journal", serde_json::to_string(&journal).map_err(|e| Fail::new(e.to_string()))?),

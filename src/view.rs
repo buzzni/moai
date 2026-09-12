@@ -95,6 +95,13 @@ impl Hidden {
             .map(|(n, what, how)| format!("{what} {n}건 숨김 — `{how}`"))
             .collect()
     }
+
+    /// 숨긴 것을 흐린 한 줄로. **요약을 안 내는 표면(트리)이 쓴다** — 거기서
+    /// 이 말을 빠뜨리면 머리글은 세는데 그 밑에 없는 줄이 까닭 없이 사라진다.
+    pub fn note(&self) -> Option<String> {
+        let why = self.says();
+        (!why.is_empty()).then(|| paint(style::DIM, &why.join(" · ")))
+    }
 }
 
 /// 목록. 비어 있으면 빈 줄이 아니라 왜 비었는지를 말한다.
