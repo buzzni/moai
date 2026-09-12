@@ -32,9 +32,16 @@ pub const ERROR: Style = fg(AnsiColor::Red);
 pub const WARN: Style = fg(AnsiColor::BrightYellow);
 pub const HEAD: Style = Style::new().bold();
 
-/// 본문 마크다운. **굵게·기울임은 색이 아니라 속성이라** `NO_COLOR` 에서도
-/// 살아남는다 — 그래서 `**`·`*` 를 걷어내도 뜻이 남는다. 코드는 색뿐이라
-/// 표시(백틱)를 지우지 않는다.
+/// 본문 마크다운.
+///
+/// **앞서 이 자리에 틀린 말이 적혀 있었다** — "굵게는 속성이라 `NO_COLOR` 에서도
+/// 살아남는다". `anstream` 은 색만이 아니라 **모든 SGR 을 걷어낸다**. 굵게도
+/// 기울임도 함께 사라지고, 그것은 파이프로 넘긴 모든 출력에 해당한다.
+///
+/// 그래서 **뜻을 지는 것은 글자로 남긴다** — 코드는 백틱, 제목은 `#`, 인용은
+/// 세로줄. 굵게·기울임만 색과 함께 사라지는데, 그 둘은 글맛이지 낱말의 정체가
+/// 아니라 잃어도 문장이 여전히 같은 것을 말한다. 칸이나 우선순위처럼 판단이
+/// 걸린 것에는 이 예외를 두지 않는다.
 pub const STRONG: Style = Style::new().bold();
 pub const EM: Style = Style::new().italic();
 pub const CODE: Style = fg(AnsiColor::Cyan);

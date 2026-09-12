@@ -559,12 +559,18 @@ pub fn detail(
 
     if let Some(body) = &i.body {
         out.push(String::new());
+        // **제어문자는 어느 길로도 화면에 닿지 않는다.** 걸러는 일을 `raw` 를
+        // 가리기 **전에** 둔다 — 뒤에 두면 `--raw` 만 걸러지지 않고, 파일에
+        // 심긴 ESC 한 줄이 화면을 다시 칠한다. 그 길을 하나 더 여는 것이
+        // `--raw` 를 더한 값어치보다 비싸다.
+        let clean = crate::text::sanitize(body);
         // **원문 그대로 볼 길을 남긴다.** 그린 글은 기호가 지워져 되돌릴 수
         // 없다 — 본문을 긁어 붙이거나 마크다운을 고칠 때 이 길이 필요하다.
-        out.extend(match raw {
-            true => body.lines().map(|l| format!("  {l}")).collect(),
-            false => body_lines(body),
-        });
+        if raw {
+            out.extend(clean.lines().map(|l| format!("{PAD}{l}")));
+        } else {
+            out.extend(body_lines(&clean));
+        }
     }
 
     out.extend(history(journal));
@@ -577,7 +583,8 @@ pub fn detail(
 /// 없다. `moai show --raw` 가 그 길이고, `--json` 의 `body` 는 언제나 원문이다.
 pub fn body_lines(body: &str) -> Vec<String> {
     // 파일에서 온 글이다. 그리기 전에 제어문자를 걷어낸다 — ESC 가 든 줄은
-    // 그대로 찍으면 화면을 다시 칠한다.
+    // 그대로 찍으면 화면을 다시 칠한다. **부르는 쪽을 믿지 않는다** — 두 번
+    // 걸러도 결과는 같고, 한 번 빠뜨리면 화면이 남의 손에 넘어간다.
     let blocks = crate::markdown::parse(&crate::text::sanitize(body));
     // **줄로 펴는 일은 `markdown` 이 한다.** 글머리·들여쓰기 같은 결정이
     // 표면마다 갈라지면 CLI 와 탐색기가 같은 본문을 다르게 그린다.
@@ -585,6 +592,11 @@ pub fn body_lines(body: &str) -> Vec<String> {
     crate::markdown::layout(&blocks, BODY)
         .iter()
         .map(|line| {
+            // 빈 줄은 빈 줄이다. 들여쓰기를 얹으면 줄 끝에 뜻 없는 공백이
+            // 남아, 본문을 긁어 붙이거나 diff 를 볼 때마다 따라다닌다.
+            if line.is_empty() {
+                return String::new();
+            }
             let painted: String =
                 line.iter().map(|s| paint(role_style(s.role), &s.text)).collect();
             format!("{PAD}{painted}")
@@ -759,12 +771,30 @@ mod tests {
     }
 
     /// 그린 줄은 폭을 넘지 않는다. 한글이 두 칸이라 글자 수로 세면 걸린다.
+    ///
+    /// 상한은 `BODY` 에 들여쓰기(`PAD`)를 더한 값이다. 여유를 더 주면 그만큼
+    /// 넘치는 줄을 통과시킨다.
     #[test]
     fn drawn_lines_stay_within_the_width() {
         let body = "아주 긴 한글 문장이 폭을 넘도록 이어지고 또 이어지고 계속 이어진다. \
                     여기에 `코드` 와 **굵게** 도 섞여 있어서 접는 자리가 조각 가운데에 걸린다.\n";
+        let max = BODY + width(PAD);
         for l in plain(&body_lines(body)) {
-            assert!(width(&l) <= BODY + 4, "{l:?} ({}칸)", width(&l));
+            assert!(width(&l) <= max, "{l:?} ({}칸)", width(&l));
+        }
+    }
+
+    /// **`--raw` 도 제어문자를 걸러 낸다.** 그리는 길만 걸러 두면 파일에 심긴
+    /// ESC 한 줄이 `--raw` 를 타고 화면에 닿아 커서를 옮기고 화면을 지운다 —
+    /// 탐색기의 원문 보기는 이미 걸러므로, 안 걸러면 두 표면이 갈라진다.
+    #[test]
+    fn the_raw_body_cannot_repaint_the_screen() {
+        let mut i = issue("argos-0001", "제목", "todo");
+        i.body = Some("앞\u{1b}[2J\u{7}뒤".into());
+        for raw in [true, false] {
+            let out = plain(&detail(&i, None, &[], &[], "2026-09-11T04:12:03Z", raw)).join("\n");
+            assert!(!out.contains('\u{1b}'), "ESC 가 화면에 닿았다 (raw={raw})\n{out:?}");
+            assert!(!out.contains('\u{7}'), "벨이 화면에 닿았다 (raw={raw})\n{out:?}");
         }
     }
 

@@ -53,8 +53,14 @@ pub fn is_work(i: &Issue) -> bool {
 }
 
 /// `id` 의 직계 자식. 부모는 id 에서 유도되므로 접두 검사면 된다.
+///
+/// **차례는 목록과 같다.** 상세 한 화면에서 자식 줄은 id 순, 그 아래 멤버 줄은
+/// 우선순위 순이면 규칙이 둘이 되어 보는 쪽이 어느 쪽도 못 믿는다.
 pub fn children_of<'a>(issues: &'a [Issue], id: &str) -> Vec<&'a Issue> {
-    issues.iter().filter(|c| crate::id::parent_of(&c.id) == Some(id)).collect()
+    let mut out: Vec<&Issue> =
+        issues.iter().filter(|c| crate::id::parent_of(&c.id) == Some(id)).collect();
+    out.sort_by(|a, b| crate::query::display_order(a, b));
+    out
 }
 
 /// 그 에픽에 속한 이슈. 소속은 필드고 계층은 id 라, 둘은 직교한다.
@@ -376,8 +382,13 @@ impl StatusReport {
     }
 }
 
+/// 경고에 딸린 id 들. **급한 것을 앞에 둔다** — 보는 쪽이 앞의 몇 개만 낸다
+/// (`view` 는 3개에서 자른다). 파일 순으로 두면 `p0` 하나가 `p3` 셋 뒤에
+/// 가려서 아예 보이지 않는다. 여기서는 차례가 무엇이 보이는지를 정한다.
 fn ids_of(v: &[&Issue]) -> Vec<String> {
-    v.iter().map(|i| i.id.clone()).collect()
+    let mut v: Vec<&&Issue> = v.iter().collect();
+    v.sort_by(|a, b| crate::query::display_order(a, b));
+    v.into_iter().map(|i| i.id.clone()).collect()
 }
 
 /// `unreadable` 은 읽다 만난 줄 번호다 — 저장소가 아니라 부르는 쪽이 준다.

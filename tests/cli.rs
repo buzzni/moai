@@ -1086,6 +1086,51 @@ fn the_body_is_drawn_but_the_raw_text_stays_reachable() {
 
     let json = ok(s.path(), &["show", &id, "--json"]);
     assert!(json.contains("**"), "--json 의 body 가 그려져 나왔다\n{json}");
+
+    // **두 길 다 제어문자를 걸러 낸다.** 파일에 심긴 ESC 는 `--raw` 를 타고도
+    // 화면에 닿지 못한다 — 닿으면 그 줄이 커서를 옮기고 화면을 지운다.
+    let esc = add(s.path(), &["제어문자", "-b", "앞\u{1b}[2J\u{7}뒤"]);
+    for args in [vec!["show", &esc], vec!["show", &esc, "--raw"]] {
+        let out = ok(s.path(), &args);
+        assert!(!out.contains('\u{1b}'), "ESC 가 나갔다 — {args:?}\n{out:?}");
+        assert!(!out.contains('\u{7}'), "벨이 나갔다 — {args:?}\n{out:?}");
+    }
+
+    // 목록 자리의 `--raw` 는 아무 일도 못 한다. 말없이 먹지 않고 거절한다 —
+    // 필터를 조용히 버리지 않는 것과 같은 까닭이다.
+    let out = moai(s.path(), &["show", "--raw"]);
+    assert!(!out.status.success(), "목록 자리의 --raw 를 말없이 먹었다");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--raw"),
+        "무엇이 문제인지 말하지 않았다\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// **하나를 집은 자리에서 버려지는 필터가 없다.** 걸러지지 않은 그 이슈를
+/// 그대로 내면 부르는 쪽은 걸러진 결과라고 믿는다 — `--milestone` 이 그렇게
+/// 목록에서만 뜻이 있는데 거절 목록에 빠져 있었다.
+#[test]
+fn every_list_only_filter_is_refused_on_a_single_issue() {
+    let s = init("onefilter");
+    let id = add(s.path(), &["제목"]);
+    for flag in [
+        vec!["-s", "todo"],
+        vec!["-t", "bug"],
+        vec!["-e", "none"],
+        vec!["-p", "1"],
+        vec!["--type", "issue"],
+        vec!["-g", "제"],
+        vec!["--all"],
+        vec!["--filter", "status=todo"],
+        vec!["--milestone", "없는것"],
+        vec!["--tree"],
+    ] {
+        let mut args = vec!["show", id.as_str()];
+        args.extend(flag.iter().copied());
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{flag:?} 를 말없이 버렸다");
+    }
 }
 
 // ── TUI ────────────────────────────────────────────────────────────

@@ -52,6 +52,10 @@ fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
         (a.stale.is_some(), "--stale"),
         (a.all, "--all"),
         (!a.filter.is_empty(), "--filter"),
+        // `--milestone` 도 아래에서 `Filter::build` 로 넘어간다. 여기 빠져
+        // 있으면 `moai show <id> --milestone <m>` 이 걸러지지 않은 그 이슈를
+        // 그대로 내고, 부르는 쪽은 그 마일스톤에 든 것이라고 믿는다.
+        (!a.milestone.is_empty(), "--milestone"),
     ]
     .into_iter()
     .find_map(|(given, name)| given.then_some(name))
@@ -84,6 +88,18 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
             .get(id)
             .ok_or_else(|| Fail::coded(format!("{id} 를 못 찾았다"), super::code::NOT_FOUND))?;
         return one(ctx, &repo, &load.issues, issue, args.raw);
+    }
+
+    // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
+    // 목록 자리의 `--raw` 는 아무 일도 하지 않는다. 말없이 먹으면 부르는 쪽은
+    // 원문을 받았다고 믿는다 — 위의 필터와 같은 까닭이다.
+    if args.raw {
+        return Err(Fail::coded(
+            "`--raw` 는 본문이 나오는 자리에서만 뜻이 있다.\n      \
+             `moai show <id> --raw` 처럼 하나를 집어서 쓴다"
+                .to_string(),
+            "bad_filter",
+        ));
     }
 
     let a = args.filter;
@@ -176,11 +192,14 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
             Kind::Milestone => report::milestones(all),
             _ => report::groups(all),
         };
-        let mine: Vec<Issue> = all
+        let mut mine: Vec<Issue> = all
             .iter()
             .filter(|i| group.get(i.id.as_str()) == Some(&issue.id.as_str()) && i.id != issue.id)
             .cloned()
             .collect();
+        // 묶음 밑의 멤버도 목록과 같은 차례다. 파일 순으로 두면 `moai show
+        // <에픽>` 과 `moai show -e <에픽>` 이 같은 것을 다른 차례로 낸다.
+        crate::query::sort_for_display(&mut mine);
         let roll = report::rollup_of(issue.kind, all, &repo.config)
             .into_iter()
             .find(|r| r.id.as_deref() == Some(issue.id.as_str()));

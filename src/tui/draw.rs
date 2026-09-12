@@ -17,13 +17,15 @@ use ratatui::Frame;
 /// 좌우를 가르는 자리. MC 처럼 반반이되 왼쪽을 조금 넓게 — 제목이 길다.
 const LEFT: u16 = 55;
 
-/// 커서 자리. 목록의 글자는 늘 이만큼 안쪽에서 시작한다.
-///
-/// **우측 패널의 좌우 여백도 이 값이다.** 한쪽만 테두리에 붙으면 같은 화면에서
-/// 규칙이 둘이 되고, 붙은 쪽이 답답하게 읽힌다. 한 자리에서 정해 두 패널이
-/// 갈라지지 않게 한다.
-const LEFT_GUTTER: usize = 2;
+/// 커서. 목록의 글자는 늘 이 폭만큼 안쪽에서 시작한다.
 const CURSOR: &str = "> ";
+
+/// 좌우 여백. **`CURSOR` 에서 잰다** — 우측 패널의 여백도 이 값인데, 숫자를
+/// 따로 적어 두면 커서 글리프를 바꾼 날 두 패널이 말없이 갈라진다. 한쪽만
+/// 테두리에 붙으면 같은 화면에서 규칙이 둘이 되고, 붙은 쪽이 답답하게 읽힌다.
+fn left_gutter() -> usize {
+    crate::text::width(CURSOR)
+}
 
 pub fn screen(f: &mut Frame, app: &mut App) {
     // 할 말이 있을 때만 배너 줄이 선다. 늘 세워 두면 한 줄이 영영 논다.
@@ -208,8 +210,11 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
         Span::styled(style::glyph(i.status.as_str()).to_string(), status(i.status.as_str())),
         Span::raw(" "),
     ];
-    // `> ` 커서 자리 두 칸 + 머리글 폭.
-    let used = 2 + head.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
+    // 커서 자리 + 머리글 폭. **`CURSOR` 에서 잰다** — 숫자를 손으로 적으면
+    // 글리프를 바꾼 날 제목 몫이 한두 칸 넉넉해지고, 넘친 줄은 위젯이 말없이
+    // 잘라 내 잘렸다는 `…` 마저 사라진다.
+    let used =
+        crate::text::width(CURSOR) + head.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
     let mut title = clip(&app.index.label(&app.issues, e), budget.saturating_sub(used));
     // **디렉터리 표시는 자른 뒤에 붙인다.** 먼저 붙이면 긴 제목에서 `/` 가
     // 제일 먼저 잘려 나가고, 목록에는 디렉터리라고 말하는 것이 달리 없다.
@@ -231,7 +236,7 @@ fn detail(f: &mut Frame, app: &App, at: Rect) {
     // 함께 빼 주므로 폭 계산은 아래가 그대로 쓴다.
     let block = Block::default()
         .borders(Borders::ALL)
-        .padding(Padding::horizontal(LEFT_GUTTER as u16))
+        .padding(Padding::horizontal(left_gutter() as u16))
         .title(" 상세 ");
     let inner = block.inner(at);
     f.render_widget(block, at);
@@ -286,18 +291,20 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     }
     out.push(Line::from(head));
 
+    // 라벨 줄은 **모아 두고 폭을 재서** 낸다.
+    let mut fields: Vec<(String, String)> = Vec::new();
     if !i.tags.is_empty() {
         let tags = i.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ");
         out.push(Line::from(Span::styled(tags, Style::new().fg(Color::Cyan))));
     }
     if let Some(a) = &i.assignee {
-        out.push(field("담당", a));
+        fields.push(("담당".into(), a.clone()));
     }
     if let Some(id) = &i.epic {
-        out.push(field("에픽", &app.title_of(id)));
+        fields.push(("에픽".into(), app.title_of(id)));
     }
     if let Some(id) = &i.milestone {
-        out.push(field("마일스톤", &app.title_of(id)));
+        fields.push(("마일스톤".into(), app.title_of(id)));
     }
     // **막는 것은 제목까지 푼다.** id 만 내면 그것이 무엇인지 또 찾아봐야 한다.
     // **끝난 막음은 막지 않는다** — `report::is_blocked` 와 `moai ready` 가 그
@@ -306,12 +313,14 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     for b in &i.blocked_by {
         let done = app.index.find(b).is_some_and(|at| app.issues[at].status.is_done());
         let (label, mark) = if done { ("풀림", "✓") } else { ("막힘", "·") };
-        out.push(field(label, &format!("{mark} {b}  {}", app.title_of(b))));
+        fields.push((label.into(), format!("{mark} {b}  {}", app.title_of(b))));
     }
     // CLI 상세와 **같은 자**를 쓴다. 두 표면이 같은 값을 다르게 적으면 보는
     // 쪽이 어느 쪽을 믿을지 정해야 한다.
-    out.push(field("생성", &crate::view::stamp(&i.created_at)));
-    out.push(field("수정", &crate::view::stamp(&i.updated_at)));
+    fields.push(("생성".into(), crate::view::stamp(&i.created_at)));
+    fields.push(("수정".into(), crate::view::stamp(&i.updated_at)));
+    let w_label = label_width(&fields);
+    out.extend(fields.iter().map(|(k, v)| field(k, v, w_label)));
 
     // 디렉터리면 그 밑의 셈도 함께.
     if matches!(e, Entry::Dir { .. }) {
@@ -337,7 +346,10 @@ fn body_lines<'a>(body: &str, w: usize, raw: bool) -> Vec<Line<'a>> {
         return clean.lines().map(|l| Line::from(l.to_string())).collect();
     }
     let blocks = crate::markdown::parse(&clean);
-    crate::markdown::layout(&blocks, w.max(8))
+    // **패널 폭 그대로 편다.** 넉넉한 바닥값을 얹으면 좁은 창에서 패널보다 넓은
+    // 줄이 나오고, 그 줄은 `Paragraph` 가 말없이 다시 접는다 — 다시 접힌 줄은
+    // 글머리 밑으로 물리지 않고 표의 칸도 맞지 않는다. `markdown` 은 0 도 받는다.
+    crate::markdown::layout(&blocks, w)
         .into_iter()
         .map(|line| {
             Line::from(
@@ -403,10 +415,18 @@ fn rollup<'a>(app: &App, path: &crate::nav::Path, w: usize) -> Vec<Line<'a>> {
 /// 이름 칸을 **표시 폭으로** 맞춘다. `{k:<5}` 는 글자 수를 세므로 `에픽`(2자
 /// 4칸)과 `마일스톤`(4자 8칸)이 두 칸 어긋나 값이 들쭉날쭉해진다 — `text`
 /// 모듈이 있는 까닭이 바로 이것이다.
-const LABEL: usize = 9;
+/// 라벨 칸을 **그 화면에 실제로 쓰인 라벨에 맞춘다.**
+///
+/// 가장 긴 라벨(`마일스톤`, 8칸)로 못 박으면 마일스톤을 안 쓰는 이슈에서도 그
+/// 폭이 새어 나가, 좁은 패널에서 시각이 다음 줄로 밀리고 시계가 값도 라벨도
+/// 아닌 숫자로 홀로 남는다. 목록의 열 폭을 자료에서 재는 것(`view::list`)과
+/// 같은 규칙이다.
+fn label_width(rows: &[(String, String)]) -> usize {
+    rows.iter().map(|(k, _)| crate::text::width(k)).max().unwrap_or(0)
+}
 
-fn field<'a>(k: &str, v: &str) -> Line<'a> {
-    let pad = LABEL.saturating_sub(crate::text::width(k));
+fn field<'a>(k: &str, v: &str, w: usize) -> Line<'a> {
+    let pad = w.saturating_sub(crate::text::width(k));
     Line::from(vec![
         Span::styled(format!("{k}{}", " ".repeat(pad)), dim()),
         Span::raw(" "),
@@ -436,8 +456,11 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
     f.render_widget(Paragraph::new(Line::from(spans)), at);
 }
 
+/// F키 하나. **뒤에 공백을 두지 않는다** — 앞뒤로 두면 칸 사이가 두 칸이 되고,
+/// 그 여섯 칸 때문에 80칸 터미널에서 줄이 넘쳐 맨 끝의 `F10 끝내기` 가 말없이
+/// 잘린다. 나갈 길을 못 찾는 것이 빽빽한 줄보다 나쁘다.
 fn key<'a>(k: &'a str, what: &'a str) -> Span<'a> {
-    Span::styled(format!(" {k} {what} "), dim())
+    Span::styled(format!(" {k} {what}"), dim())
 }
 
 fn dim() -> Style {
@@ -764,8 +787,9 @@ mod tests {
         let starts_at = |l: &Line| {
             l.spans[..l.spans.len() - 1].iter().map(|s| crate::text::width(&s.content)).sum::<usize>()
         };
-        let short = field("에픽", "값");
-        let long = field("마일스톤", "값");
+        let w = label_width(&[("에픽".into(), "값".into()), ("마일스톤".into(), "값".into())]);
+        let short = field("에픽", "값", w);
+        let long = field("마일스톤", "값", w);
         assert_eq!(starts_at(&short), starts_at(&long), "값이 다른 칸에서 시작한다");
         assert!(starts_at(&long) > crate::text::width("마일스톤"), "이름과 값이 붙었다");
     }
@@ -793,7 +817,7 @@ mod tests {
 
         let right = &panes(row)[1];
         assert!(
-            inset(right) >= LEFT_GUTTER,
+            inset(right) >= left_gutter(),
             "우측이 테두리에 붙었다 (들여쓴 칸 {}) — {row:?}",
             inset(right)
         );
@@ -826,6 +850,62 @@ mod tests {
         let raw = render(&mut a, 100, 22).join("\n");
         assert!(raw.contains("**굵게**"), "원문이 아니다\n{raw}");
         assert!(raw.contains("- 하나"), "원문이 아니다\n{raw}");
+    }
+
+    /// **나갈 길은 80칸에서도 보인다.** F키 바는 접히지 않고 위젯이 말없이
+    /// 잘라 내므로, 줄이 넘치면 맨 끝의 `F10 끝내기` 부터 사라진다 — 끝내는
+    /// 법을 모르는 화면은 도구가 아니라 덫이다.
+    #[test]
+    fn the_key_bar_still_says_how_to_quit_at_eighty_columns() {
+        for w in [80u16, 100, 120] {
+            let lines = render(&mut app(), w, 14);
+            let bar = lines.last().cloned().unwrap_or_default();
+            assert!(bar.contains("F10 끝내기"), "{w}칸에서 나갈 길이 잘렸다 — {bar:?}");
+            assert!(bar.contains("F3"), "{w}칸에서 원문 키가 잘렸다 — {bar:?}");
+        }
+    }
+
+    /// **좁은 창에서 본문을 그려도 무너지지 않는다.**
+    /// `narrow_windows_neither_panic_nor_overflow` 는 본문 없는 이슈로 그리므로
+    /// 겹친 목록과 표를 지나는 이 길을 한 번도 밟지 않는다. 줄이 패널 폭 안에
+    /// 드는지는 `markdown::laid_out_prose_never_exceeds_the_width_it_was_given`
+    /// 이 원천에서 재고, 여기서는 좁은 폭에서 셈이 터지지 않는지를 본다.
+    #[test]
+    fn a_body_in_a_narrow_pane_neither_panics_nor_overflows() {
+        let mut issues = issues();
+        issues[1].body = Some(
+            "겹친 목록과 표가 함께 있는 본문이다.\n\n- 하나\n  - 둘의 속이 길게 이어진다\n\n\
+             | 후보 | 판 | 무엇 |\n|---|---|---|\n| `termimad` | 0.35.4 | 렌더러 |\n"
+                .into(),
+        );
+        for w in [20u16, 24, 30, 40, 60, 80] {
+            let mut a =
+                App::new(issues.clone(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+            a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            for l in render(&mut a, w, 30) {
+                assert!(crate::text::width(&l) <= w as usize, "{w}칸을 넘었다 — {l:?}");
+            }
+        }
+    }
+
+    /// 좁은 패널에서도 **시각이 한 줄에 들어간다.** 넘치면 날짜만 남고 시계가
+    /// 다음 줄에 홀로 떨어져, 값도 아니고 라벨도 아닌 숫자가 된다.
+    #[test]
+    fn a_timestamp_fits_on_one_line_in_a_narrow_pane() {
+        for w in [60, 66, 70, 80, 100] {
+            let lines = render(&mut app(), w, 16);
+            let at = lines
+                .iter()
+                .position(|l| l.contains("생성"))
+                .unwrap_or_else(|| panic!("폭 {w}: 생성 줄이 없다\n{}", lines.join("\n")));
+            assert!(
+                lines[at].contains("2026-09-01") && lines[at].contains("00:00"),
+                "폭 {w} 에서 시각이 두 줄로 갈렸다 — {:?} / {:?}",
+                lines[at],
+                lines.get(at + 1)
+            );
+        }
     }
 
     /// 빈 저장소도 그려진다.
