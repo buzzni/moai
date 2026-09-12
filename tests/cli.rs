@@ -2634,3 +2634,29 @@ fn a_deferred_epic_is_not_nagged_in_the_table_either() {
     assert!(out.contains("미룸"), "무엇이 미뤄졌는지 낱말로 안 말한다 — {out}");
 }
 
+/// **꼬리가 대는 낱말이 실제로 그 줄을 내야 한다.** 첫 까닭으로 갈랐을 때
+/// 닫아 둔 생각이 `idea N건 숨김 — --type idea` 로 섰는데 그 명령은 done 을
+/// 여전히 숨겨 아무것도 안 냈다 — `idea_pile` 이 피한 "세어 놓고 못 보여 주는
+/// 수" 가 목록 꼬리에 그대로 있었다.
+#[test]
+fn every_hidden_count_names_a_flag_that_opens_it() {
+    let s = init("hiddenhonest");
+    let shelved = add(s.path(), &["닫고 미룬 일"]);
+    ok(s.path(), &["mv", &shelved, "done"]);
+    ok(s.path(), &["defer", &shelved]);
+    let closed = ok(s.path(), &["idea", "add", "닫은 생각", "-q"]).trim().to_string();
+    ok(s.path(), &["mv", &closed, "done"]);
+    let alive = ok(s.path(), &["idea", "add", "산 생각", "-q"]).trim().to_string();
+
+    let out = ok(s.path(), &["show"]);
+    // 닫고 미룬 줄은 `--all` 이 연다 — `--deferred` 는 done 을 그대로 숨긴다.
+    assert!(out.contains("done 1건 숨김 — `--all`"), "{out}");
+    assert!(ok(s.path(), &["show", "--all"]).contains(&shelved), "댄 낱말이 그 줄을 안 낸다");
+    // 산 생각 하나만 `--type idea` 가 연다. 닫은 생각은 어느 한 낱말로도
+    // 안 열리므로 아예 안 센다 — 못 보여 줄 수를 대느니 말을 안 한다.
+    assert!(out.contains("idea 1건 숨김 — `--type idea`"), "{out}");
+    let ideas = ok(s.path(), &["show", "--type", "idea"]);
+    assert!(ideas.contains(&alive), "{ideas}");
+    assert!(!ideas.contains(&closed), "{ideas}");
+}
+

@@ -105,11 +105,15 @@ impl Hidden {
 }
 
 /// 목록. 비어 있으면 빈 줄이 아니라 왜 비었는지를 말한다.
+///
+/// `asked_deferred` 는 **부르는 쪽이 미룬 것만 달라고 했는가**다. 그때는
+/// 줄마다 `미룸` 을 달아 봐야 자리만 먹는다.
 pub fn list(
     issues: &[Issue],
     cfg: &Config,
     hidden: Hidden,
     epics: &BTreeMap<&str, String>,
+    asked_deferred: bool,
 ) -> Vec<String> {
     if issues.is_empty() {
         let why = hidden.says();
@@ -122,9 +126,11 @@ pub fn list(
 
     let show_tags = issues.iter().any(|i| !i.tags.is_empty());
     let show_epic = issues.iter().any(|i| epics.contains_key(i.id.as_str()));
-    // 미룸 표를 달지 말지는 **목록 전체의 성질**이라 줄마다 다시 묻지 않는다 —
-    // 물으면 줄 수의 제곱만큼 훑는다. `show_tags` 와 같은 자리, 같은 모양이다.
-    let mixed = issues.iter().any(|i| !i.is_deferred());
+    // 미룸 표를 달지 말지는 **부르는 쪽의 물음**에서 온다. 한때 결과의 내용
+    // 으로 정했는데(`any(|i| !i.is_deferred())`), 그러면 `--all` 이 마침 전부
+    // 미룬 것만 냈을 때 표가 통째로 사라져 계획 밖의 줄이 일과 똑같이 보인다 —
+    // 안 물었는데 사라지는 것이 물어서 붙는 군더더기보다 나쁘다.
+    let mark_deferred = !asked_deferred;
     let heads: Vec<String> = issues.iter().map(|i| clip(&i.title, TITLE_CAP)).collect();
     let tags: Vec<String> = issues.iter().map(tags_of).collect();
     // 에픽 열은 **제목**을 보여준다. id 를 보여주면 사람이 그걸 다시 찾아봐야 한다.
@@ -175,7 +181,7 @@ pub fn list(
         // 같은 낱말이 붙어 봐야 자리만 먹는데, `--all` 은 섞여 나오므로 표가
         // 없으면 어느 줄이 계획 밖인지 알 길이 없다. 열을 늘리지 않고 꼬리에
         // 단다 — 미루지 않은 줄이 그 자리를 비워 두면 그게 더 시끄럽다.
-        if i.is_deferred() && mixed {
+        if i.is_deferred() && mark_deferred {
             row.push_str(&format!("   {}", paint(style::DIM, "미룸")));
         }
         out.push(row.trim_end().to_string());
@@ -966,7 +972,7 @@ mod tests {
             issue("argos-0001", "한글 제목이다", "todo"),
             issue("argos-0002", "ascii title", "review"),
         ];
-        let out = plain(&list(&issues, &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics()));
+        let out = plain(&list(&issues, &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false));
         let cols: Vec<usize> = out[1..3]
             .iter()
             .map(|l| width(l.split_once("  ").unwrap().0))
@@ -984,7 +990,7 @@ mod tests {
     #[test]
     fn header_lines_up_with_rows() {
         let issues = vec![issue("argos-0001", "제목이다", "todo")];
-        let out = plain(&list(&issues, &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics()));
+        let out = plain(&list(&issues, &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false));
         let head_at = width(&out[0][..out[0].find("제목").unwrap()]);
         let row_at = width(&out[1][..out[1].find("제목이다").unwrap()]);
         assert_eq!(head_at, row_at, "{out:#?}");
@@ -992,14 +998,14 @@ mod tests {
 
     #[test]
     fn empty_list_says_why() {
-        assert_eq!(plain(&list(&[], &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics()))[0], "없다.");
-        assert!(plain(&list(&[], &cfg(), Hidden { done: 3, ..Hidden::default() }, &no_epics()))[0].contains("done 3건"));
+        assert_eq!(plain(&list(&[], &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false))[0], "없다.");
+        assert!(plain(&list(&[], &cfg(), Hidden { done: 3, ..Hidden::default() }, &no_epics(), false))[0].contains("done 3건"));
     }
 
     #[test]
     fn summary_counts_each_column() {
         let issues = vec![issue("argos-0001", "a", "todo"), issue("argos-0002", "b", "todo")];
-        let out = plain(&list(&issues, &cfg(), Hidden { done: 5, ..Hidden::default() }, &no_epics()));
+        let out = plain(&list(&issues, &cfg(), Hidden { done: 5, ..Hidden::default() }, &no_epics(), false));
         let last = out.last().unwrap();
         assert!(last.starts_with("2건 (todo 2)"), "{last}");
         assert!(last.contains("done 5건 숨김"), "{last}");
@@ -1008,7 +1014,7 @@ mod tests {
     #[test]
     fn long_titles_are_clipped_not_wrapped() {
         let long = "가".repeat(80);
-        let out = plain(&list(&[issue("argos-0001", &long, "todo")], &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics()));
+        let out = plain(&list(&[issue("argos-0001", &long, "todo")], &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false));
         assert!(out[1].ends_with('…'), "{:?}", out[1]);
         assert!(width(&out[1]) < 80, "{:?}", out[1]);
     }
@@ -1089,12 +1095,12 @@ mod tests {
         let mut i = issue("argos-0002", "멤버", "todo");
         i.epic = Some("argos-0001".into());
         let labels = BTreeMap::from([("argos-0002", "저장 계층".to_string())]);
-        let out = plain(&list(&[i.clone()], &cfg(), Hidden::default(), &labels));
+        let out = plain(&list(&[i.clone()], &cfg(), Hidden::default(), &labels, false));
         assert!(out[1].contains("저장 계층") && !out[1].contains("argos-0001"), "{out:#?}");
 
         // 없는 에픽을 가리켜도 죽지 않고 그렇다고 말한다
         let dangling = BTreeMap::from([("argos-0002", "(없는 에픽)".to_string())]);
-        let out = plain(&list(&[i], &cfg(), Hidden::default(), &dangling));
+        let out = plain(&list(&[i], &cfg(), Hidden::default(), &dangling, false));
         assert!(out[1].contains("(없는 에픽)"), "{out:#?}");
     }
 
@@ -1126,6 +1132,27 @@ mod tests {
         assert_eq!(title_style(&thought), title_style(&work), "idea 가 묶음 색을 입었다");
         assert_eq!(title_style(&epic), style::EPIC);
         assert_eq!(title_style(&stone), style::EPIC);
+    }
+
+    /// **안 물었는데 표가 사라지지 않는다.** 표를 달지 말지를 결과의 내용으로
+    /// 정하면(`전부 미룬 것인가`) `--all` 이 마침 미룬 것만 냈을 때 계획 밖의
+    /// 줄이 일과 똑같이 보인다. 물어서 붙는 군더더기보다 안 물었는데 사라지는
+    /// 것이 나쁘다 — 가르는 것은 부르는 쪽의 물음이다.
+    #[test]
+    fn a_list_of_only_deferred_rows_still_marks_them() {
+        let mut a = issue("argos-0001", "하나", "todo");
+        a.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut b = issue("argos-0002", "둘", "todo");
+        b.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let all = vec![a, b];
+
+        let wide = plain(&list(&all, &cfg(), Hidden::default(), &no_epics(), false));
+        assert!(wide[1].contains("미룸"), "미룬 줄이 일과 똑같이 보인다 — {wide:#?}");
+        assert!(wide[2].contains("미룸"), "{wide:#?}");
+
+        // 콕 집어 물었을 때는 줄마다 같은 낱말을 달지 않는다.
+        let asked = plain(&list(&all, &cfg(), Hidden::default(), &no_epics(), true));
+        assert!(!asked[1].contains("미룸"), "물어서 낸 목록에 군더더기가 붙었다 — {asked:#?}");
     }
 
     #[test]

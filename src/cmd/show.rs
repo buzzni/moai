@@ -168,19 +168,32 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // **숨긴 것도 센다.** 담아 둔 생각뿐인 저장소에서 `moai show` 가 그냥
     // "없다." 라고 하면, 방금 담은 사람은 파일이 비었다고 믿는다 — done 을
     // 숨길 때 그 수를 말하는 것과 같은 규칙이다.
+    let asked_deferred = filter.deferred.is_some();
     let wide = Filter { all: true, ideas: true, ..filter };
     let wh = crate::query::Where::of(&load.issues);
     let mut shown: Vec<Issue> = Vec::new();
     let mut hidden = view::Hidden::default();
     for i in load.issues.iter().filter(|i| wide.matches(i, &now, &wh)) {
-        if hide_ideas && report::is_idea(i) {
-            hidden.ideas += 1;
-        } else if hide_deferred && i.is_deferred() {
-            hidden.deferred += 1;
-        } else if hide_done && i.status.is_done() {
-            hidden.done += 1;
-        } else {
-            shown.push(i.clone());
+        // **꼬리가 대는 낱말이 실제로 그 줄을 내야 한다.** 한때 첫 까닭으로
+        // 갈랐는데, 그러면 닫아 둔 생각이 `idea N건 숨김 — --type idea` 로
+        // 서고 그 명령은 done 을 여전히 숨겨 아무것도 안 낸다 — `idea_pile`
+        // 이 피한 "세어 놓고 못 보여 주는 수" 가 여기 그대로 있었다.
+        //
+        // 그래서 **한 낱말로 열리는 것만 그 낱말 밑에 센다.**
+        //   `--type idea` 는 idea 만 연다 (done·미룸은 그대로 숨긴다)
+        //   `--deferred`  는 미룸을 열고 생각까지 같이 연다 (done 은 아니다)
+        //   `--all`       은 done 과 미룸을 연다 (생각은 아니다)
+        // 어느 하나로도 안 열리는 것(닫아 둔 생각)은 세지 않는다. 못 보여 줄
+        // 수를 대느니 말을 안 하는 편이 낫다.
+        let by_idea = hide_ideas && report::is_idea(i);
+        let by_deferred = hide_deferred && i.is_deferred();
+        let by_done = hide_done && i.status.is_done();
+        match (by_idea, by_deferred, by_done) {
+            (false, false, false) => shown.push(i.clone()),
+            (true, false, false) => hidden.ideas += 1,
+            (_, true, false) => hidden.deferred += 1,
+            (false, _, true) => hidden.done += 1,
+            _ => {}
         }
     }
     crate::query::sort_for_display(&mut shown);
@@ -212,7 +225,13 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         }
         return Ok(out);
     }
-    Ok(view::list(&shown, &repo.config, hidden, &report::epic_labels(&load.issues)))
+    Ok(view::list(
+        &shown,
+        &repo.config,
+        hidden,
+        &report::epic_labels(&load.issues),
+        asked_deferred,
+    ))
 }
 
 fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec<String>> {
