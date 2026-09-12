@@ -144,8 +144,19 @@ pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
     for i in all {
         // 에픽이 있으면 **거기서부터** 센다. 제 줄에서 시작하면 제 마일스톤이
         // 이기고, 그러면 트리는 에픽 밑에 두는데 셈만 딴 곳으로 간다.
-        let mut cur = match epic_of.get(i.id.as_str()).and_then(|e| by_id.get(e)) {
-            Some(e) => e,
+        let mut cur = match epic_of.get(i.id.as_str()) {
+            // **에픽으로 쓸 수 없는 것을 가리키면 제 마일스톤으로 되돌아가지
+            // 않는다.** 그 줄은 `nav` 에서 `(길 잃음)` 으로 가므로, 되돌아가면
+            // 머리글은 세는데 목록에는 없는 줄이 그대로 남는다 — moai-lhbh 와
+            // 같은 어긋남이고, 고치려던 것이 참조 하나 어긋난 날 되살아난다.
+            //
+            // **못 쓸 것의 뜻은 `misplaced` 와 같다** — 없는 id 와 종류가 틀린
+            // 것을 한 자로 잰다. 그쪽을 부르지 않는 것은 `misplaced` 가 이
+            // 함수를 부르기 때문이고, 그래서 판정만 같은 모양으로 둔다.
+            Some(e) => match by_id.get(e).filter(|e| e.kind == Kind::Epic) {
+                Some(e) => e,
+                None => continue,
+            },
             None => i,
         };
         // 에픽·부모를 타고 올라가며 처음 만나는 마일스톤. 고리가 있어도
@@ -1203,6 +1214,34 @@ mod tests {
         let m = milestones(&issues);
         assert_eq!(m.get("argos-0002"), Some(&"argos-m001"), "제 마일스톤이 에픽을 이겼다");
         assert_eq!(m.get("argos-0004"), None, "에픽에 없는 마일스톤이 멤버에게서 생겼다");
+    }
+
+    /// **없는 에픽을 가리킨 줄은 제 마일스톤으로도 안 센다.** `nav` 는 그 줄을
+    /// `(길 잃음)` 에 넣으므로, 여기서 세면 `moai show <마일스톤>` 이
+    /// `멤버 0/1` 이라 말하면서 그 1건을 목록에 못 내는 moai-lhbh 가 참조 하나
+    /// 끊긴 날 그대로 되살아난다.
+    #[test]
+    fn a_dangling_epic_does_not_fall_back_to_its_own_milestone() {
+        let mut lost = make("argos-0005", Kind::Issue, "todo");
+        lost.epic = Some("argos-nope".into());
+        lost.milestone = Some("argos-m001".into());
+        let issues = vec![make("argos-m001", Kind::Milestone, "todo"), lost];
+        assert_eq!(milestones(&issues).get("argos-0005"), None);
+    }
+
+    /// 종류가 틀린 에픽 참조도 같다. 이슈를 에픽 자리에 적으면 `nav` 는 그 줄을
+    /// `(길 잃음)` 에 넣는데, 여기서 그 이슈의 마일스톤을 타고 올라가 세면
+    /// `멤버 0/2` 라 말하면서 목록에는 하나만 나온다 — 실제로 그랬다.
+    #[test]
+    fn a_wrong_kind_epic_does_not_lend_its_milestone() {
+        let mut host = make("argos-0002", Kind::Issue, "todo");
+        host.milestone = Some("argos-m001".into());
+        let mut lost = make("argos-0005", Kind::Issue, "todo");
+        lost.epic = Some("argos-0002".into()); // 에픽이 아니라 이슈다
+        let issues = vec![make("argos-m001", Kind::Milestone, "todo"), host, lost];
+        let m = milestones(&issues);
+        assert_eq!(m.get("argos-0002"), Some(&"argos-m001"));
+        assert_eq!(m.get("argos-0005"), None, "에픽 아닌 것의 마일스톤을 빌려 왔다");
     }
 
     /// 묶음은 일이 아니다. 세면 보드의 숫자가 할 일과 묶음을 합친 것이 된다.

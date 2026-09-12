@@ -1702,6 +1702,26 @@ fn add_assigns_to_whoever_made_it() {
     assert!(line.contains(r#""assignee":"철수""#) && !line.contains("assignee_email"), "{line}");
 }
 
+/// `me` 는 **어느 길로 와도** 지금 사람이다. 플래그를 넘기기 전에 풀면
+/// `--filter assignee=me` 는 손이 닿지 않아 `me` 라는 이름을 찾고, 쉼표로 이은
+/// 항도 같이 샌다 — 둘 다 조용히 0건이라 오타와 구별되지 않는다.
+#[test]
+fn me_means_me_however_it_arrives() {
+    let s = init("me");
+    let mine = add(s.path(), &["내 것"]);
+    add(s.path(), &["남의 것", "-a", "철수"]);
+
+    for args in [
+        vec!["show", "-a", "me", "--json"],
+        vec!["show", "--filter", "assignee=me", "--json"],
+        vec!["show", "-a", "me,아무도아님", "--json"],
+    ] {
+        let out = ok(s.path(), &args);
+        assert!(out.contains(&mine), "{args:?} 가 내 것을 못 찾았다: {out}");
+        assert!(!out.contains("남의 것"), "{args:?} 가 남의 것까지 냈다: {out}");
+    }
+}
+
 /// 대량 생성도 담당을 받는다. `--from` 이 `-a` 를 통째로 흘리던 자리다 —
 /// 단건에만 붙고 계획 한 장에는 안 붙었다.
 #[test]
