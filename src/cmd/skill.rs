@@ -139,11 +139,12 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     let clash = clash_of(&market, &dir);
     let installs = installs_here(&market, &root);
     let claude = which("claude").is_some();
-    // 실제로 불리는 것은 `claude` 가 복사해 간 매니페스트다.
-    let hooked = installs.first().and_then(|i| {
-        std::fs::read_to_string(Path::new(&i.install_path).join(".claude-plugin/plugin.json"))
-            .ok()
-            .and_then(|m| skill::hook_exe(&m))
+    // 실제로 불리는 것은 `claude` 가 복사해 간 매니페스트다. **복사본이 사라진
+    // 설치**(캐시를 치운 뒤)는 훅이 아예 안 실리므로, 판이 맞아도 따로 짚는다.
+    let manifest_of = |i: &skill::Install| Path::new(&i.install_path).join(".claude-plugin/plugin.json");
+    let copied: Vec<bool> = installs.iter().map(|i| manifest_of(i).is_file()).collect();
+    let hooked = installs.iter().find_map(|i| {
+        std::fs::read_to_string(manifest_of(i)).ok().and_then(|m| skill::hook_exe(&m))
     });
     let hook_found = hooked.as_deref().map(exe_exists);
     let stale = stale_copies(&installs);
@@ -151,13 +152,15 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     if ctx.json {
         let rows: Vec<_> = installs
             .iter()
-            .map(|i| {
+            .zip(&copied)
+            .map(|(i, copy_found)| {
                 serde_json::json!({
                     "scope": i.scope,
                     "version": i.version,
                     "project": i.project,
                     "install_path": i.install_path,
                     "current": i.version == want,
+                    "copy_found": copy_found,
                 })
             })
             .collect();
@@ -190,15 +193,21 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     if installs.is_empty() {
         out.push("  ! 설치          없음 — `moai skill install` 로 심는다".into());
     }
-    for i in &installs {
+    for (i, copy_found) in installs.iter().zip(&copied) {
         let current = i.version == want;
         out.push(format!(
             "  {} 설치          {}  판 {}{}",
-            mark(current),
+            mark(current && *copy_found),
             i.scope,
             i.version,
-            if current {
+            if !copy_found {
+                format!("  — 설치본({})이 없다. 훅이 안 실린다: moai skill install --scope {}", i.install_path, i.scope)
+            } else if current {
                 String::new()
+            } else if clash.is_some() {
+                // 다시 심으라고 하지 않는다 — 등록이 남의 자리를 가리켜 `install` 이
+                // 등록을 건너뛰므로, 시킨 대로 해도 아무것도 안 바뀐다.
+                format!("  — 심을 판은 {want}. 등록이 다른 자리를 가리켜 다시 심어도 안 든다")
             } else {
                 format!("  — 심을 판은 {want}. 다시 심는다: moai skill install --scope {}", i.scope)
             }
@@ -244,11 +253,18 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
         }
     }
     let claude = which("claude").is_some();
-    let steps: Vec<(String, bool)> = if dry_run || !claude {
-        Vec::new()
-    } else {
-        plan.iter().map(|a| (shown(a), run(&root, a))).collect()
-    };
+    let mut steps: Vec<(String, bool)> = Vec::new();
+    if !dry_run && claude {
+        for a in &plan {
+            let ok = run(&root, a);
+            steps.push((shown(a), ok));
+            // **실패하면 멈춘다.** 플러그인을 못 걷은 채 마켓플레이스를 지우면
+            // 걷을 이름이 사라진 설치가 남고, 그때는 도구로 되돌릴 길이 없다.
+            if !ok {
+                break;
+            }
+        }
+    }
     let failed = steps.iter().any(|(_, ok)| !ok)
         || clash.is_some()
         || (!dry_run && !claude && !plan.is_empty());
@@ -287,9 +303,18 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
         out.extend(plan.iter().map(|a| format!("  {}", shown(a))));
         return Ok(out);
     }
-    let mut out = vec![format!("`{market}` 을 걷었다")];
+    // 한 걸음이라도 실패했으면 "걷었다" 고 말하지 않는다 — 종료 코드만 비영이고
+    // 첫 줄이 성공이면 사람은 첫 줄을 믿는다.
+    let mut out = vec![if failed {
+        format!("! `{market}` 을 다 걷지 못했다")
+    } else {
+        format!("`{market}` 을 걷었다")
+    }];
     for (cmd, ok) in &steps {
         out.push(format!("  {} {cmd}{}", if *ok { "·" } else { "!" }, if *ok { "" } else { "  — 실패" }));
+    }
+    for a in &plan[steps.len()..] {
+        out.push(format!("  - {}  — 앞 걸음이 실패해 안 불렀다", shown(a)));
     }
     out.push(String::new());
     out.push("이미 열려 있는 Claude 세션은 옛 훅을 계속 부른다 — 다시 열어야 완전히 걷힌다".into());

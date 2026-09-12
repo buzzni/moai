@@ -3244,12 +3244,19 @@ struct Claude {
 
 impl Claude {
     fn new(name: &str) -> Claude {
+        Claude::failing_on(name, None)
+    }
+
+    /// 인자에 `word` 가 들면 비영으로 끝나는 가짜.
+    fn failing_on(name: &str, word: Option<&str>) -> Claude {
         let home = Scratch::new(name);
         let bin = home.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let log = home.path().join("claude.log");
         let script = bin.join("claude");
-        std::fs::write(&script, format!("#!/bin/sh\necho \"$@\" >> \"{}\"\nexit 0\n", log.display())).unwrap();
+        let fail = word.map(|w| format!("case \"$*\" in *{w}*) exit 1;; esac\n")).unwrap_or_default();
+        std::fs::write(&script, format!("#!/bin/sh\necho \"$@\" >> \"{}\"\n{fail}exit 0\n", log.display()))
+            .unwrap();
         use std::os::unix::fs::PermissionsExt as _;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::create_dir_all(home.path().join(".claude/plugins")).unwrap();
@@ -3366,6 +3373,26 @@ fn skill_status_notices_a_vanished_hook_binary() {
     assert!(said.contains("/nowhere/moai") && said.contains("없다"), "{said}");
 }
 
+/// `claude` 의 캐시에서 설치본이 사라지면 그것을 짚는다. 장부의 판이 맞아도
+/// 훅은 아예 안 실린다 — 매니페스트를 못 읽었다고 조용히 넘기면 `·` 만 남는다.
+#[test]
+fn skill_status_notices_a_vanished_install_copy() {
+    let s = init("skillnocopy");
+    let c = Claude::new("skillnocopy-home");
+    let (market, _) = installed(&s, &c, "0.0.1");
+    let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    installed(&s, &c, &field(&json, "want_version"));
+    let copy = c.home.path().join(format!(".claude/plugins/cache/{market}/moai"));
+    std::fs::remove_dir_all(&copy).unwrap();
+
+    let out = c.run(s.path(), &["skill", "status"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let said = text(&out);
+    assert!(said.contains("! 설치") && said.contains("설치본"), "사라진 설치본을 안 짚는다\n{said}");
+    let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    assert!(json.contains("\"copy_found\":false"), "{json}");
+}
+
 /// `uninstall` 은 범위마다 걷고 마켓플레이스를 지운다. **파일은 남긴다** —
 /// 돌고 있는 세션이 물고 있을 수 있다.
 #[test]
@@ -3387,6 +3414,25 @@ fn skill_uninstall_asks_claude_and_keeps_the_files() {
     assert!(calls.contains(&format!("plugin marketplace remove {market}")), "{calls}");
     assert!(dir.join("skills/moai/SKILL.md").is_file(), "심은 파일을 지웠다");
     assert!(text(&out).contains("다시 열어야"), "열린 세션에 대해 말하지 않는다\n{}", text(&out));
+}
+
+/// **플러그인을 못 걷으면 마켓플레이스도 안 지운다.** 지우면 걷을 이름이 사라진
+/// 설치가 남아 도구로 되돌릴 길이 없다. 첫 줄도 "걷었다" 고 말하지 않는다.
+#[test]
+fn skill_uninstall_stops_at_the_first_failure() {
+    let s = init("skillrmfail");
+    let c = Claude::failing_on("skillrmfail-home", Some("plugin uninstall"));
+    let (market, _) = installed(&s, &c, "0.0.1");
+    let before = c.calls().len();
+
+    let out = c.run(s.path(), &["skill", "uninstall"], true);
+    assert!(!out.status.success(), "실패했는데 0 으로 끝났다");
+    let calls = c.calls()[before..].to_string();
+    assert!(calls.contains("plugin uninstall"), "{calls}");
+    assert!(!calls.contains("marketplace remove"), "못 걷었는데 마켓플레이스를 지웠다\n{calls}");
+    let said = text(&out);
+    assert!(said.starts_with(&format!("! `{market}` 을 다 걷지 못했다")), "{said}");
+    assert!(said.contains("안 불렀다"), "안 부른 걸음을 안 밝힌다\n{said}");
 }
 
 /// **같은 이름이 남의 자리를 가리키면 아무것도 부르지 않는다.** 걷으면 그
