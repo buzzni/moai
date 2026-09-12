@@ -154,7 +154,7 @@ pub enum Cmd {
   사는 것이 정상이라 \"에픽 없는 이슈\" 경고에 안 걸린다.
 
   고치고 버리는 것은 이미 있는 동사가 한다: `moai edit <id>`, `moai rm <id>`.")]
-    Idea(Typed),
+    Idea(IdeaCmd),
 
     /// 탐색기 화면을 띄운다 (읽기 전용)
     #[command(after_help = "\
@@ -196,6 +196,48 @@ pub enum Typed {
     /// 둔다** — 목록을 내는 동사가 둘이면 도움말이 둘 다 가르쳐야 한다.
     #[command(alias = "ls")]
     Show(ShowArgs),
+}
+
+/// idea 만 갖는 동사가 하나 있다 — 펼치기. 그래서 `Typed` 를 그대로 쓰지
+/// 못하고, `Typed` 에 넣으면 `moai epic promote` 가 생긴다.
+#[derive(Subcommand, Debug)]
+pub enum IdeaCmd {
+    /// 담는다. 제목 하나면 된다
+    Add(AddArgs),
+    /// 펼치거나 목록을 낸다 (`ls` 도 같다)
+    #[command(alias = "ls")]
+    Show(ShowArgs),
+    /// 에픽 하나 + 이슈 여럿으로 펼치고, 그 생각을 닫는다
+    #[command(after_help = "\
+  받는 마크다운은 `add --from` 과 같은 형식이다. 형식이 둘이 되면 어느 쪽
+  문법인지 매번 틀린다.
+
+  moai idea promote <id> --from - <<'EOF'
+  # 에픽 제목
+  - [p1] 첫 이슈 #enhancement
+  - [p2] 둘째 이슈
+  EOF
+
+  펼치면 닫힌다 — 그 idea 는 `done` 으로 간다. 무엇이 무엇에서 나왔는지는
+  저널에 남는다 (`moai show <id>` 의 이력).
+
+  `--dry-run` 이 펼친 안을 사람이 한 번 보고 \"좋다\" 하는 자리다.")]
+    Promote(PromoteArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct PromoteArgs {
+    /// 펼칠 idea
+    #[arg(value_name = "id")]
+    pub id: String,
+
+    /// 마크다운에서 에픽과 이슈를. `-` 이면 stdin
+    #[arg(long, value_name = "파일|-")]
+    pub from: String,
+
+    /// 만들지 않고 무엇이 만들어질지만 낸다
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Args, Debug)]

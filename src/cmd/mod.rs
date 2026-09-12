@@ -5,6 +5,7 @@
 
 pub mod add;
 pub mod edit;
+pub mod idea;
 pub mod init;
 pub mod link;
 pub mod mv;
@@ -15,7 +16,7 @@ pub mod show;
 pub mod status;
 pub mod tui;
 
-use crate::cli::{Cli, Cmd, Typed};
+use crate::cli::{Cli, Cmd, IdeaCmd, Typed};
 use crate::model::Kind;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -90,7 +91,9 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),
         Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
         Cmd::Milestone(t) => typed(&ctx, t, Kind::Milestone),
-        Cmd::Idea(t) => typed(&ctx, t, Kind::Idea),
+        Cmd::Idea(IdeaCmd::Add(a)) => add::run(&ctx, a, Some(Kind::Idea)),
+        Cmd::Idea(IdeaCmd::Show(a)) => show::run(&ctx, a, Some(Kind::Idea)),
+        Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(&ctx, a),
     }
 }
 

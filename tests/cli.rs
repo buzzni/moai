@@ -1912,3 +1912,72 @@ fn status_shows_a_pile_of_ideas_without_blocking() {
     // `?` 는 보드에서 review 칸의 글리프다. 한 글자가 두 뜻을 지면 안 된다.
     assert!(text.contains("+ 쌓인 idea"), "알림이 경고 글리프를 달았다 — {text}");
 }
+
+/// **펼치면 닫힌다.** 에픽과 이슈가 생기고 그 idea 는 `done` 으로 간다 —
+/// 펼쳐졌으므로 더 볼 것이 없다.
+#[test]
+fn promoting_an_idea_opens_a_plan_and_closes_the_thought() {
+    let s = init("ideapromote");
+    let id = ok(s.path(), &["idea", "add", "저장 계층을 다시", "-q"]).trim().to_string();
+    let out = from_stdin(
+        s.path(),
+        &["idea", "promote", &id, "--from", "-"],
+        "# 저장 계층\n- [p1] 원자적으로 쓴다 #bug\n- 잘린 줄을 복구한다\n",
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    let made = ok(s.path(), &["show", "--json"]);
+    assert_eq!(made.matches(r#""kind":"epic""#).count(), 1, "{made}");
+    assert!(made.contains("원자적으로 쓴다") && made.contains("잘린 줄을 복구한다"), "{made}");
+
+    let line = line_of(s.path(), &id);
+    assert!(line.contains(r#""status":"done""#), "펼쳤는데 안 닫혔다 — {line}");
+}
+
+/// **무엇이 무엇에서 나왔는지는 저널에 적는다.** idea 에 `spawned` 같은
+/// 필드를 들면 그건 파생값이고, 그 순간 에픽을 지울 때 idea 도 손봐야 한다.
+#[test]
+fn what_came_from_what_lives_in_the_journal() {
+    let s = init("ideatrace");
+    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], "# 새 에픽\n- 첫 일\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    let epic = {
+        let listed = ok(s.path(), &["epic", "show", "--json"]);
+        field(&listed, "id")
+    };
+    let shown = ok(s.path(), &["show", &id]);
+    assert!(shown.contains(&epic), "이력이 무엇이 나왔는지 안 말한다 — {shown}");
+    assert!(!line_of(s.path(), &id).contains("spawned"), "파생값을 줄에 적었다");
+}
+
+/// `--dry-run` 은 아무것도 만들지 않는다. AI 가 펼친 안을 사람이 한 번 보고
+/// "좋다" 하는 자리다.
+#[test]
+fn promote_can_be_rehearsed() {
+    let s = init("ideadry");
+    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let before = issues(s.path());
+    let out = from_stdin(
+        s.path(),
+        &["idea", "promote", &id, "--from", "-", "--dry-run"],
+        "# 새 에픽\n- 첫 일\n",
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("새 에픽") && text.contains("첫 일"), "{text}");
+    assert_eq!(issues(s.path()), before, "연습인데 썼다");
+}
+
+/// idea 가 아닌 것은 펼치지 않는다. 조용히 받아 주면 이슈 하나가 까닭 없이
+/// 닫히고, 그 까닭은 저널에만 남는다.
+#[test]
+fn only_an_idea_can_be_promoted() {
+    let s = init("ideaonly");
+    let work = add(s.path(), &["진짜 일"]);
+    let out = from_stdin(s.path(), &["idea", "promote", &work, "--from", "-"], "# 가\n- 나\n");
+    assert!(!out.status.success(), "일을 펼쳐 버렸다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("idea"), "{err}");
+}
