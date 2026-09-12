@@ -154,12 +154,18 @@ impl Repo {
         // 내용이 그대로면 스냅샷은 건드리지 않는다 (헛 diff 방지).
         // 저널은 따로다 — `moai note` 처럼 스냅샷을 안 바꾸는 기록이 있다.
         let after = render_issues(&issues, &opaque);
+        // **정말 쓴 자리에서만 센다.** 안 쓴 자리에서 세면 `moai note` 처럼
+        // 스냅샷을 안 건드리는 명령까지 "그대로 두고 썼다" 고 말해, 일어나지
+        // 않은 쓰기를 주장한다 — 저널이 거짓말하면 안 되는 것과 같은 까닭이다.
+        //
+        // **안 쓴 자리에서는 0 을 넣는다.** 한 프로세스가 `with_write` 를 두 번
+        // 부르는 날(묶음 동사·쓰는 탐색기) 앞 호출의 수가 남아 있으면, 아무것도
+        // 안 쓴 뒤에 "그대로 두고 썼다" 가 나온다 — 같은 거짓말의 뒷면이다.
         if after != before {
             write_atomic(&self.issues_path(), after.as_bytes())?;
-            // **정말 쓴 자리에서만 센다.** 위에서 세면 `moai note` 처럼 스냅샷을
-            // 안 건드리는 명령까지 "그대로 두고 썼다" 고 말해, 일어나지 않은
-            // 쓰기를 주장한다 — 저널이 거짓말하면 안 되는 것과 같은 까닭이다.
             CARRIED.store(opaque.len(), std::sync::atomic::Ordering::Relaxed);
+        } else {
+            CARRIED.store(0, std::sync::atomic::Ordering::Relaxed);
         }
         if !entries.is_empty() {
             self.append_journal(&entries)?;
