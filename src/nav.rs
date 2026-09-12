@@ -150,7 +150,10 @@ impl Index {
     /// 대신 부모를 열면 `--path <빈 에픽>` 이 그 에픽의 형제들을 돌려주고,
     /// 그 답을 다시 훑는 쪽은 제자리를 돌며 끝나지 않는다.
     pub fn is_dir(&self, issues: &[Issue], at: usize) -> bool {
-        matches!(issues[at].kind, Kind::Epic | Kind::Milestone) || self.has_kids[at]
+        // **묶음인가를 여기서 다시 정하지 않는다.** `report::is_group` 이 그
+        // 물음의 자리고, 손으로 벌여 적으면 종류가 하나 더 늘던 날 한쪽만
+        // 고쳐져 탐색기와 상세가 다른 것을 묶음이라 부른다.
+        crate::report::is_group(&issues[at]) || self.has_kids[at]
     }
 
     /// id 로 줄을 찾는다. 화면이 프레임마다 부르므로 훑지 않는다.
@@ -317,9 +320,13 @@ impl Ctx<'_> {
         let me = &self.issues[at];
         // 부모가 실재하고 **같은 에픽**이면 부모 밑에 접힌다. 에픽이 다르면
         // 제 에픽으로 간다 — 롤업이 세는 곳과 화면이 그리는 곳을 맞추기 위해서다.
+        // 부모로 설 수 있는 것은 **잎으로 서는 것** 전부다. idea 도 `seg_of`
+        // 와 `home` 에서 일과 같은 자리를 받으므로 여기서만 빼면, idea 밑에
+        // 만든 자식이 부모를 잃고 뿌리로 떠오른다 — 그러면 `has_kids` 도
+        // 안 서서 그 idea 는 열리지도 않는다.
         if let Some(p) = crate::id::parent_of(&me.id)
             && let Some(&pat) = self.by_id.get(p)
-            && self.issues[pat].kind == Kind::Issue
+            && matches!(self.issues[pat].kind, Kind::Issue | Kind::Idea)
             && self.epic_of.get(&me.id) == self.epic_of.get(p)
         {
             // **부모가 사는 자리를 그대로 쓴다.** `home_of_work` 로 곧장

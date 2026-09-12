@@ -368,9 +368,17 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
         Span::raw("  ·  "),
         Span::styled(format!("p{}", i.priority()), priority(i.priority())),
     ];
+    // **색은 묶음에만 준다.** `kind != Issue` 로 칠하면 idea 가 에픽과 같은
+    // 파랑을 입어, 아무것도 담지 않는 줄이 담는 줄처럼 보인다. CLI 상세가
+    // 쓰는 자(`report::is_group`)와 같은 자로 잰다.
     if i.kind != crate::model::Kind::Issue {
+        let mark = if crate::report::is_group(i) {
+            Style::new().fg(Color::LightBlue)
+        } else {
+            dim()
+        };
         head.push(Span::raw("  ·  "));
-        head.push(Span::styled(i.kind.as_str().to_string(), Style::new().fg(Color::LightBlue)));
+        head.push(Span::styled(i.kind.as_str().to_string(), mark));
     }
     out.push(Line::from(head));
 

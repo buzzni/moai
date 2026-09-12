@@ -2007,3 +2007,85 @@ fn the_agents_block_teaches_idea() {
         assert!(block.contains(want), "{want} 가 없다 — {block}");
     }
 }
+
+/// **마크다운은 `idea add` 로 들어오지 않는다.** `#` 이 에픽이고 `-` 가
+/// 이슈라는 뜻이 형식에 박혀 있어 종류 고정 장치가 거기까지 못 가고, 그래서
+/// 담은 줄 알았던 것이 그대로 보드에 선다 — 일로 세지 않으려고 담은 것이
+/// 조용히 일이 되는 것이 이 기능이 막으려던 바로 그것이다.
+#[test]
+fn a_plan_cannot_be_poured_in_through_idea_add() {
+    let s = init("ideafrom");
+    let before = issues(s.path());
+    let out = from_stdin(s.path(), &["idea", "add", "--from", "-"], "# 에픽\n- 이슈\n");
+    assert!(!out.status.success(), "생각 담는 자리로 계획이 들어왔다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("promote"), "어디로 가야 하는지 안 말한다 — {err}");
+    assert_eq!(issues(s.path()), before, "거절했는데 썼다");
+    // 다른 네임스페이스는 그대로다 — 거기서는 마크다운이 뜻이 통한다.
+    let bulk = from_stdin(s.path(), &["epic", "add", "--from", "-"], "# 에픽\n- 이슈\n");
+    assert!(bulk.status.success(), "{}", String::from_utf8_lossy(&bulk.stderr));
+}
+
+/// 이미 닫힌 생각을 또 펼쳐도 **일어나지 않은 전이를 적지 않는다.**
+/// `done → done` 을 적으면 저널이 거짓말을 하고 `status_since` 가 밀려
+/// "언제 닫혔나" 를 잃는다. 적어 온 말은 그래도 남는다 — `mv` 와 같은 규칙이다.
+#[test]
+fn promoting_a_closed_thought_forges_no_transition() {
+    let s = init("ideatwice");
+    let id = ok(s.path(), &["idea", "add", "두 번 펼칠 것", "-q"]).trim().to_string();
+    for plan in ["# 첫 계획\n- 가\n", "# 둘째 계획\n- 나\n"] {
+        let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], plan);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let closed = line_of(s.path(), &id);
+    let mine: Vec<&str> =
+        journal(s.path()).lines().filter(|l| l.contains(&format!(r#""id":"{id}""#))).map(|l| {
+            // 줄 자체를 들고 가면 소유권이 걸린다 — 뜻만 본다.
+            if l.contains(r#""kind":"status""#) {
+                "status"
+            } else if l.contains(r#""kind":"note""#) {
+                "note"
+            } else {
+                "create"
+            }
+        }).collect();
+    // 첫 번은 진짜 전이고, 둘째 번은 전이가 아니라 적어 온 말이다.
+    assert_eq!(mine, ["create", "status", "note"], "{mine:?}");
+    assert!(closed.contains(r#""status":"done""#), "{closed}");
+}
+
+/// `--json` 이 **닫힌 생각까지** 말한다. 사람 출력에는 `→ done` 이 있는데
+/// 기계 출력에만 없으면 받는 쪽이 두 표면 중 하나를 못 믿게 된다.
+#[test]
+fn promote_json_names_the_thought_it_closed() {
+    let s = init("ideapromoted");
+    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let out = from_stdin(
+        s.path(),
+        &["idea", "promote", &id, "--from", "-", "--json"],
+        "# 새 에픽\n- 첫 일\n",
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains(&id), "무엇을 닫았는지 안 말한다 — {text}");
+    assert!(text.contains(r#""status":"done""#), "{text}");
+    assert!(text.contains("새 에픽") && text.contains("첫 일"), "{text}");
+}
+
+/// idea 밑에 만든 자식은 **그 밑에 접힌다.** 잎으로 서는 것은 부모가 될 수
+/// 있고, 여기서만 idea 를 빼면 자식이 부모를 잃고 뿌리로 떠올라 — 그러면
+/// 그 idea 는 열리지도 않는다.
+#[test]
+fn a_child_of_a_thought_stays_under_it() {
+    let s = init("ideachild");
+    let parent = ok(s.path(), &["idea", "add", "부모 생각", "-q"]).trim().to_string();
+    let child = add(s.path(), &["그 자식", "--parent", &parent]);
+    assert!(child.starts_with(&format!("{parent}.")), "{child}");
+
+    let root = ok(s.path(), &["tui", "--json"]);
+    assert!(!root.contains(&child), "자식이 뿌리로 떠올랐다 — {root}");
+    assert!(root.contains(r#""dir":true"#), "부모가 열리지 않는다 — {root}");
+
+    let inside = ok(s.path(), &["tui", "--json", "--path", &parent]);
+    assert!(inside.contains(&child), "열었는데 자식이 없다 — {inside}");
+}

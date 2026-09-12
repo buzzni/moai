@@ -5,7 +5,7 @@
 
 use crate::config::Config;
 use crate::model::{Issue, JournalEntry, Kind};
-use crate::report::{Roll, StatusReport, Warning};
+use crate::report::{Roll, StatusReport, Warning, is_group};
 use crate::style::{self, paint};
 use crate::text::{clip, width};
 use anstyle::Style;
@@ -53,8 +53,12 @@ fn tags_of(i: &Issue) -> String {
 
 fn title_style(i: &Issue) -> Style {
     // 제목은 칠하지 않는다 — 내용은 기본색, 주변만 칠한다.
-    // 에픽만 예외다. 계획 계층이 한눈에 떠야 한다.
-    if i.kind == Kind::Issue { style::PLAIN } else { style::EPIC }
+    // 묶음만 예외다. 계획 계층이 한눈에 떠야 한다.
+    //
+    // **일이 아닌 것이 곧 묶음인 것은 아니다.** `kind != Issue` 로 물으면
+    // idea 가 묶음 색을 입어 목록에서 에픽처럼 보인다 — `cmd/add.rs` 가
+    // 만드는 순간에는 안 그런데 `show` 에서만 그러면 같은 줄이 두 색이다.
+    if is_group(i) { style::EPIC } else { style::PLAIN }
 }
 
 /// 목록. 비어 있으면 빈 줄이 아니라 왜 비었는지를 말한다.
@@ -690,8 +694,11 @@ pub fn detail(
         paint(st, i.status.as_str()),
         paint(style::priority_style(i.priority()), &format!("p{}", i.priority())),
     );
+    // 종류는 이슈가 아닐 때만 적는다. **색은 묶음에만 준다** — idea 에
+    // 묶음 색을 주면 상세 한 줄이 "이것도 무언가를 담는다" 고 말한다.
     if i.kind != Kind::Issue {
-        line.push_str(&format!(" · {}", paint(style::EPIC, i.kind.as_str())));
+        let mark = if is_group(i) { style::EPIC } else { style::DIM };
+        line.push_str(&format!(" · {}", paint(mark, i.kind.as_str())));
     }
     if !i.tags.is_empty() {
         line.push_str(&format!(" · {}", paint(style::TAG, &tags_of(i))));
@@ -1028,6 +1035,25 @@ mod tests {
         assert_eq!(plain(&[bar(Some(100))])[0].matches('█').count(), BAR);
         // 1% 도 한 칸은 찬다 — 시작한 것이 안 시작한 것처럼 보이면 안 된다
         assert_eq!(plain(&[bar(Some(1))])[0].matches('█').count(), 1);
+    }
+
+    /// **묶음 색은 묶음만 입는다.** idea 도 이슈가 아니지만 아무것도 담지
+    /// 않으므로, `kind != Issue` 로 칠하면 목록에서 에픽처럼 보인다 —
+    /// `moai idea add` 가 만드는 순간에는 안 그런데 `moai show` 에서만
+    /// 그러면 같은 줄이 두 색이다. 저절로 되돌아갈 자리라 못 박는다.
+    #[test]
+    fn only_a_grouping_wears_the_grouping_colour() {
+        let work = issue("argos-0009", "진짜 일", "todo");
+        let mut thought = issue("argos-0001", "반짝", "todo");
+        thought.kind = Kind::Idea;
+        let mut epic = issue("argos-0002", "저장 계층", "todo");
+        epic.kind = Kind::Epic;
+        let mut stone = issue("argos-0003", "v0.1", "todo");
+        stone.kind = Kind::Milestone;
+
+        assert_eq!(title_style(&thought), title_style(&work), "idea 가 묶음 색을 입었다");
+        assert_eq!(title_style(&epic), style::EPIC);
+        assert_eq!(title_style(&stone), style::EPIC);
     }
 
     #[test]

@@ -25,7 +25,7 @@ use crate::style::{self, paint};
 /// 지울 때 idea 도 고쳐야 하고, 그건 파생값을 저장한 대가다.
 pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
-    let src = read_source(&args.from)?;
+    let src = crate::cmd::add::read_source(&args.from)?;
     let drafts = draft::parse(&src).map_err(|e| Fail::coded(e, super::code::BAD_INPUT))?;
 
     // **연습은 저장소를 안 만진다.** AI 가 펼친 안을 사람이 한 번 보고
@@ -44,10 +44,15 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     let made: Vec<Issue> = repo.with_write(|issues, cfg| {
         // 펼칠 것이 정말 idea 인지 **먼저** 본다. 나중에 보면 만들어진 id 가
         // 오류 메시지에 실려 나가고, 받는 쪽은 그게 남은 줄 안다.
-        let thought = issues
+        //
+        // 자리를 **한 번만** 찾는다. `create_drafts` 는 뒤에 밀어 넣기만 하니
+        // 첨자가 밀리지 않고, 그래야 "방금 찾은 줄이 사라졌다" 같은 있지도
+        // 않을 경우를 위한 `expect` 가 필요 없다.
+        let at_idea = issues
             .iter()
-            .find(|i| i.id == args.id)
+            .position(|i| i.id == args.id)
             .ok_or_else(|| Fail::coded(format!("{} 를 못 찾았다", args.id), super::code::NOT_FOUND))?;
+        let thought = &issues[at_idea];
         if thought.kind != Kind::Idea {
             return Err(Fail::coded(
                 format!(
@@ -66,42 +71,59 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             Some(mail) => format!("{name} ({mail})"),
             None => name.clone(),
         });
-        drop(thought);
 
         let (mut entries, made) =
             crate::cmd::add::create_drafts(issues, cfg, &drafts, heir.as_deref(), &by, &at)?;
 
         // **어느 쪽에서 봐도 이어진다.** 펼친 계획에서 "어디서 나왔나" 를
         // 물을 수도, 담아 둔 생각에서 "무엇이 됐나" 를 물을 수도 있다.
-        for top in made.iter().filter(|i| i.epic.is_none()) {
+        //
+        // 뿌리로 선 것(제 에픽이 없는 것)이 펼친 계획의 머리다. **한 번만
+        // 고른다** — 두 번 고르면 규칙이 둘이 되고, 갈라진 날 저널의 두 줄이
+        // 서로 다른 것을 가리킨다.
+        let grown: Vec<String> =
+            made.iter().filter(|i| i.epic.is_none()).map(|i| i.id.clone()).collect();
+        for top in &grown {
             entries.push(JournalEntry::note(
-                &top.id,
+                top,
                 &format!("{} 에서 펼쳤다 — {title}", args.id),
                 &at,
                 &by,
             ));
         }
-        let grown: Vec<&str> =
-            made.iter().filter(|i| i.epic.is_none()).map(|i| i.id.as_str()).collect();
         let done = Status::new(crate::config::DONE);
-        entries.push(JournalEntry::status(
-            &args.id,
-            &was,
-            &done,
-            Some(format!("{} 로 펼쳤다 (이슈 {}건)", grown.join(" "), made.len() - grown.len())),
-            &at,
-            &by,
-        ));
-
-        let thought = issues.iter_mut().find(|i| i.id == args.id).expect("방금 찾은 줄이 사라졌다");
-        thought.status = done;
-        thought.status_since = at.clone();
-        thought.updated_at = at.clone();
+        let note = format!("{} 로 펼쳤다 (이슈 {}건)", grown.join(" "), made.len() - grown.len());
+        // **이미 닫힌 것을 또 닫지 않는다.** `done → done` 을 적으면 저널에
+        // 일어나지도 않은 전이가 남고, `status_since` 가 움직여 "언제 닫혔나"
+        // 가 마지막 `promote` 시각으로 밀린다. 적어 온 말은 그래도 버리지
+        // 않는다 — `mv` 가 같은 자리에서 같은 규칙을 쓴다.
+        if was == done {
+            entries.push(JournalEntry::note(&args.id, &note, &at, &by));
+        } else {
+            entries.push(JournalEntry::status(&args.id, &was, &done, Some(note), &at, &by));
+            let thought = &mut issues[at_idea];
+            thought.status = done;
+            thought.status_since = at.clone();
+            thought.updated_at = at.clone();
+        }
         Ok((entries, made))
     })?;
 
     if ctx.json {
-        return super::json_line(&made);
+        // **닫힌 생각까지 낸다.** 사람 출력에는 `→ done` 이 있는데 기계
+        // 출력에만 없으면 받는 쪽이 두 표면 중 하나를 못 믿게 된다 —
+        // `mv --json` 이 옮긴 것 말고도 다 내는 것과 같은 까닭이다.
+        #[derive(serde::Serialize)]
+        struct Out<'a> {
+            made: &'a [Issue],
+            promoted: &'a str,
+            status: &'a str,
+        }
+        return super::json_line(&Out {
+            made: &made,
+            promoted: &args.id,
+            status: crate::config::DONE,
+        });
     }
     let mut out = vec![paint(style::HEAD, "펼침")];
     out.extend(drafts.iter().zip(&made).map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id))));
@@ -113,17 +135,4 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         paint(style::DIM, "→ done  (펼쳐졌으므로 더 볼 것이 없다)")
     ));
     Ok(out)
-}
-
-/// `-` 이면 stdin. `add --from` 과 같은 규칙이다.
-fn read_source(from: &str) -> R<String> {
-    match from {
-        "-" => {
-            let mut s = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)
-                .map_err(|e| Fail::new(format!("stdin: {e}")))?;
-            Ok(s)
-        }
-        path => std::fs::read_to_string(path).map_err(|e| Fail::new(format!("{path}: {e}"))),
-    }
 }

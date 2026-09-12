@@ -18,6 +18,22 @@ fn assignee_of(arg: Option<&str>, by: &Actor) -> (Option<String>, Option<String>
     }
 }
 
+/// `--from` 이 받는 한 덩이. `-` 이면 stdin, 아니면 파일이다.
+///
+/// **`add --from` 과 `idea promote --from` 이 이 한 길을 같이 쓴다.** 갈라지면
+/// 한쪽만 파일을 받거나 한쪽만 오류 문장이 달라진다.
+pub fn read_source(from: &str) -> R<String> {
+    match from {
+        "-" => {
+            let mut s = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)
+                .map_err(|e| Fail::new(format!("stdin: {e}")))?;
+            Ok(s)
+        }
+        path => std::fs::read_to_string(path).map_err(|e| Fail::new(format!("{path}: {e}"))),
+    }
+}
+
 /// `-` 이면 stdin. `add` 와 `edit` 이 같은 규칙을 쓴다.
 pub fn read_body(arg: Option<String>) -> R<Option<String>> {
     match arg.as_deref() {
@@ -36,6 +52,19 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
 pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     if let Some(from) = &args.from {
+        // **마크다운은 에픽과 이슈를 낸다.** `#` 이 에픽이고 `-` 가 이슈라는
+        // 뜻이 형식에 박혀 있어 종류 고정 장치가 여기까지 못 온다. 다른
+        // 네임스페이스는 그래도 뜻이 통하지만(`epic add --from` 은 에픽을
+        // 낸다) idea 는 정반대다 — 일로 세지 않으려고 담은 것이 그대로
+        // 보드에 선다. 조용히 그렇게 하느니 어디로 가야 하는지 말한다.
+        if kind_override == Some(Kind::Idea) {
+            return Err(Fail::coded(
+                "생각은 제목 하나로 담는다 — `moai idea add \"반짝 떠오른 것\"`\n      \
+                 마크다운으로 에픽과 이슈를 펼치는 것은 `moai idea promote <id> --from -` 다"
+                    .to_string(),
+                super::code::BAD_INPUT,
+            ));
+        }
         return bulk(ctx, &repo, from, args.dry_run, args.assignee.clone());
     }
     let Some(title) = args.title.clone().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
@@ -134,16 +163,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
 /// 하나씩 만들면 에이전트가 중간에 흘리고, 중간에 죽으면 반만 남은 계획이
 /// 남는다. 한 번의 쓰기라 다 되거나 하나도 안 된다.
 fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool, assignee: Option<String>) -> R<Vec<String>> {
-    let src = match from {
-        "-" => {
-            let mut s = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)
-                .map_err(|e| Fail::new(format!("stdin: {e}")))?;
-            s
-        }
-        path => std::fs::read_to_string(path)
-            .map_err(|e| Fail::new(format!("{path}: {e}")))?,
-    };
+    let src = read_source(from)?;
     let drafts = draft::parse(&src).map_err(|e| Fail::coded(e, super::code::BAD_INPUT))?;
 
     if dry_run {
@@ -197,7 +217,10 @@ pub fn create_drafts(
         let mut issue = Issue::new(id, d.title.clone(), d.kind, Status::new(cfg.first_status()), at);
         issue.priority = d.priority;
         issue.tags = d.tags.clone();
-        issue.epic = d.epic.map(|at| ids[at].clone());
+        // 초안이 든 것은 **차례 번호**다 — 방금 만든 id 로 바꿔 넣는다.
+        // 닫힌 이름을 `at` 으로 두면 시각을 담은 인자 `at` 을 가려, 같은
+        // 줄에서 같은 이름이 두 가지를 뜻한다.
+        issue.epic = d.epic.map(|nth| ids[nth].clone());
         (issue.assignee, issue.assignee_email) = assignee_of(assignee, by);
         issue.normalize();
         issue.validate(cfg)?;
