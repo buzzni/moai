@@ -1068,6 +1068,26 @@ fn the_milestone_namespace_costs_nothing() {
     assert!(ok(s.path(), &["milestone", "show"]).contains(&m));
 }
 
+/// 본문은 그려서 내고, `--raw` 는 파일에 있는 그대로 낸다.
+/// **`--json` 의 body 는 언제나 원문이다** — 기계가 읽는 것을 그려서 주면 안 된다.
+#[test]
+fn the_body_is_drawn_but_the_raw_text_stays_reachable() {
+    let s = init("mdraw");
+    let id = add(s.path(), &["제목", "-b", "**굵게** 와 `코드`\n\n- 하나\n- 둘"]);
+
+    let drawn = ok(s.path(), &["show", &id]);
+    assert!(!drawn.contains("**굵게**"), "기호가 그대로 남았다\n{drawn}");
+    assert!(drawn.contains('•'), "목록 글머리가 없다\n{drawn}");
+    // 색을 꺼도 코드는 코드로 남는다
+    assert!(drawn.contains("`코드`"), "색 없이 코드를 못 가린다\n{drawn}");
+
+    let raw = ok(s.path(), &["show", &id, "--raw"]);
+    assert!(raw.contains("**굵게**") && raw.contains("- 하나"), "원문이 아니다\n{raw}");
+
+    let json = ok(s.path(), &["show", &id, "--json"]);
+    assert!(json.contains("**"), "--json 의 body 가 그려져 나왔다\n{json}");
+}
+
 // ── TUI ────────────────────────────────────────────────────────────
 
 /// TTY 가 아니면 화면을 켜지 않고 분명히 거절한다. 이게 없으면 파이프로 부른

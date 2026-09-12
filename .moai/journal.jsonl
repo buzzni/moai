@@ -137,3 +137,9 @@
 {"ts":"2026-09-12T01:59:27Z","id":"moai-2zfw","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
 {"ts":"2026-09-12T02:03:48Z","id":"moai-2zfw","kind":"note","by":"레이븐","text":"pulldown-cmark 를 default-features=false 로 넣었다 — 기본은 html 렌더러와 getopts 를 끌고 오는데 둘 다 안 쓴다. 딸려 온 것은 unicase 하나뿐이고 바이너리는 2.0MB 그대로다. 표는 크레이트 기능이 아니라 파서 옵션(ENABLE_TABLES)이다. 구현하며 잡은 것: 겹친 목록에서 안쪽 목록이 시작할 때 모으던 글을 매듭짓지 않으면 바깥 줄의 글이 안쪽 첫 줄에 이어 붙어 '- 둘' 과 '  - 둘의 속' 이 '둘둘의 속' 한 줄이 되고 바깥 줄이 사라진다. 이 저장소 본문 24개를 전부 접어 보는 시험(#[ignore])을 남겼다 — 합성 예제는 제가 만든 모양만 시험한다. 지금 저장소에 표가 든 본문이 없어 표는 합성 시험만 덮는다."}
 {"ts":"2026-09-12T02:03:48Z","id":"moai-2zfw","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
+{"ts":"2026-09-12T02:03:49Z","id":"moai-2zfw","kind":"status","by":"레이븐","from":"review","to":"done"}
+{"ts":"2026-09-12T02:03:55Z","id":"moai-lsl9","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T02:11:20Z","id":"moai-lsl9","kind":"note","by":"레이븐","text":"코드 조각은 백틱을 남긴 채 그린다. 색으로만 표시하면 --color never·NO_COLOR 에서 '0.2' 가 판인지 숫자인지 구별할 길이 사라진다 — '색이 혼자 뜻을 지지 않는다' 가 여기에도 걸린다. 굵게·기울임은 글맛이지 낱말의 정체가 아니라 색과 함께 사라져도 된다고 판단했다. 접기는 markdown::wrap_spans 로 옮겼다: 처음엔 text::wrap 으로 글만 접고 view 에서 글자 자리를 되짚어 뜻을 다시 붙였는데, 자리 추적이 O(n²)이고 접으며 지운 공백 때문에 어긋났다. 조각째 접으면 접는 자리가 조각 한가운데라도 뜻이 그대로 따라온다. 폭은 76칸 고정이다 — 터미널 폭을 물으면 파이프로 넘길 때마다 diff 가 튄다. moai-ovrg(CLI 본문 제어문자)도 이 길에서 함께 해결됐다: body_lines 가 그리기 전에 text::sanitize 를 지난다."}
+{"ts":"2026-09-12T02:11:20Z","id":"moai-lsl9","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
+{"ts":"2026-09-12T02:11:20Z","id":"moai-ovrg","kind":"note","by":"레이븐","text":"moai-lsl9 에서 함께 해결됐다. view::body_lines 가 파싱 전에 text::sanitize 를 지나므로 ESC 가 든 본문이 화면을 다시 칠하지 못한다."}
+{"ts":"2026-09-12T02:11:20Z","id":"moai-ovrg","kind":"status","by":"레이븐","from":"todo","to":"done"}

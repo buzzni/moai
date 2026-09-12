@@ -263,6 +263,85 @@ impl Fold {
     }
 }
 
+/// 조각들을 폭에 맞춰 접는다. **접힌 줄도 조각의 열이다** — 글자마다 무슨
+/// 뜻인지를 잃지 않아야 표면이 칠할 수 있다.
+///
+/// 넘치면 띄어쓴 자리에서 끊고, 그럴 자리가 없으면 글자에서 끊는다. 한글은
+/// 띄어쓰기 없이 길게 이어지고 한 글자가 두 칸이라 낱말 단위로만 접으면 한 줄이
+/// 통째로 넘치고, 늘 글자에서 끊으면 영문 낱말이 가운데서 잘린다. 둘 다 본다.
+///
+/// **접는 것이 칠하는 것보다 먼저다.** 칠한 뒤 접으면 이스케이프가 폭에 세어져
+/// 줄이 짧아지고, 끊긴 자리에 색이 열린 채로 남는다.
+pub fn wrap_spans(spans: &[Span], max: usize) -> Vec<Vec<Span>> {
+    if max == 0 {
+        return vec![Vec::new()];
+    }
+    // 글자마다 뜻을 달아 둔다. 접는 자리는 조각 경계와 무관하게 정해진다.
+    let chars: Vec<(char, Role)> = spans
+        .iter()
+        .flat_map(|s| s.text.chars().map(|c| (c, s.role)))
+        .collect();
+
+    let mut lines: Vec<Vec<(char, Role)>> = Vec::new();
+    let mut line: Vec<(char, Role)> = Vec::new();
+    let mut w = 0usize;
+    let mut space: Option<usize> = None;
+
+    for &(c, role) in &chars {
+        let cw = crate::text::width(c.encode_utf8(&mut [0u8; 4]));
+        if w + cw > max && !line.is_empty() {
+            match space {
+                Some(at) if at > 0 => {
+                    let mut rest: Vec<(char, Role)> = line.split_off(at);
+                    while rest.first().is_some_and(|(c, _)| *c == ' ') {
+                        rest.remove(0);
+                    }
+                    trim_end(&mut line);
+                    lines.push(std::mem::take(&mut line));
+                    w = rest.iter().map(|(c, _)| crate::text::width(c.encode_utf8(&mut [0u8; 4]))).sum();
+                    line = rest;
+                }
+                _ => {
+                    lines.push(std::mem::take(&mut line));
+                    w = 0;
+                }
+            }
+            space = None;
+        }
+        if c == ' ' {
+            space = Some(line.len());
+        }
+        line.push((c, role));
+        w += cw;
+    }
+    trim_end(&mut line);
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    if lines.is_empty() {
+        lines.push(Vec::new());
+    }
+    // 이어지는 같은 뜻을 한 조각으로 되묶는다.
+    lines.into_iter().map(regroup).collect()
+}
+
+fn trim_end(line: &mut Vec<(char, Role)>) {
+    while line.last().is_some_and(|(c, _)| *c == ' ') {
+        line.pop();
+    }
+}
+
+fn regroup(chars: Vec<(char, Role)>) -> Vec<Span> {
+    let mut out: Vec<Span> = Vec::new();
+    for (c, role) in chars {
+        match out.last_mut() {
+            Some(last) if last.role == role => last.text.push(c),
+            _ => out.push(Span { text: c.to_string(), role }),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod real {
     /// **이 저장소의 진짜 본문**으로 돌려 본다. 합성 예제는 제가 만든 모양만
@@ -400,6 +479,54 @@ mod tests {
         assert_eq!(head[0], vec![plain("후보")]);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][1], vec![plain("0.35")]);
+    }
+
+    /// 접은 줄은 **어느 것도** 폭을 넘지 않는다. 한글이 두 칸이라 글자 수로
+    /// 세면 여기서 걸린다.
+    #[test]
+    fn wrapping_never_exceeds_the_width() {
+        let texts = [
+            "짧다",
+            "띄어쓰기 없이 아주 길게 이어지는 한글 문장이 여기 들어간다",
+            "a fairly long ascii sentence that needs to be folded somewhere",
+            "섞인 mixed 문장 with both 스크립트 in it",
+        ];
+        for t in texts {
+            for max in 4..40 {
+                for line in wrap_spans(&[plain(t)], max) {
+                    let w: usize =
+                        line.iter().map(|s| crate::text::width(&s.text)).sum();
+                    assert!(w <= max, "{t:?} @ {max} → {line:?} ({w}칸)");
+                }
+            }
+        }
+    }
+
+    /// 접어도 **뜻을 잃지 않는다.** 접는 자리가 조각 한가운데일 수 있다.
+    #[test]
+    fn wrapping_keeps_the_roles() {
+        let spans = vec![plain("앞 "), strong("아주 긴 굵은 글이 여기 이어진다"), plain(" 뒤")];
+        let lines = wrap_spans(&spans, 12);
+        assert!(lines.len() > 1, "안 접혔다 — {lines:?}");
+        // 굵은 글은 어느 줄에 걸리든 굵은 채로 남는다
+        let bold: String = lines
+            .iter()
+            .flatten()
+            .filter(|s| s.role == Role::Strong)
+            .map(|s| s.text.as_str())
+            .collect();
+        assert_eq!(bold.replace(' ', ""), "아주긴굵은글이여기이어진다");
+    }
+
+    /// 될 수 있으면 낱말 가운데서 안 끊는다.
+    #[test]
+    fn wrapping_prefers_spaces() {
+        let flat = |spans: &[Span]| spans.iter().map(|s| s.text.as_str()).collect::<String>();
+        let lines = wrap_spans(&[plain("alpha beta")], 7);
+        assert_eq!(lines.iter().map(|l| flat(l)).collect::<Vec<_>>(), ["alpha", "beta"]);
+        // 낱말 하나가 폭보다 길면 그때는 글자에서 끊는다
+        let lines = wrap_spans(&[plain("alphabetagamma")], 6);
+        assert_eq!(lines.iter().map(|l| flat(l)).collect::<Vec<_>>(), ["alphab", "etagam", "ma"]);
     }
 
     /// 빈 본문이 무너지지 않는다.

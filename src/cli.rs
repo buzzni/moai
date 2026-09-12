@@ -234,6 +234,10 @@ pub struct ShowArgs {
     #[arg(value_name = "대상")]
     pub target: Option<String>,
 
+    /// 본문을 그리지 않고 파일에 있는 그대로 낸다
+    #[arg(long)]
+    pub raw: bool,
+
     /// 에픽 → 이슈 → 자식으로 접어 낸다
     #[arg(long)]
     pub tree: bool,

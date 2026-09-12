@@ -32,6 +32,13 @@ pub const ERROR: Style = fg(AnsiColor::Red);
 pub const WARN: Style = fg(AnsiColor::BrightYellow);
 pub const HEAD: Style = Style::new().bold();
 
+/// 본문 마크다운. **굵게·기울임은 색이 아니라 속성이라** `NO_COLOR` 에서도
+/// 살아남는다 — 그래서 `**`·`*` 를 걷어내도 뜻이 남는다. 코드는 색뿐이라
+/// 표시(백틱)를 지우지 않는다.
+pub const STRONG: Style = Style::new().bold();
+pub const EM: Style = Style::new().italic();
+pub const CODE: Style = fg(AnsiColor::Cyan);
+
 pub const P0: Style = fg(AnsiColor::BrightRed).bold();
 pub const P1: Style = fg(AnsiColor::Red);
 

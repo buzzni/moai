@@ -83,7 +83,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         let issue = load
             .get(id)
             .ok_or_else(|| Fail::coded(format!("{id} 를 못 찾았다"), super::code::NOT_FOUND))?;
-        return one(ctx, &repo, &load.issues, issue);
+        return one(ctx, &repo, &load.issues, issue, args.raw);
     }
 
     let a = args.filter;
@@ -145,7 +145,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     Ok(view::list(&shown, &repo.config, hidden, &report::epic_labels(&load.issues)))
 }
 
-fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue) -> R<Vec<String>> {
+fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec<String>> {
     let epic = issue.epic.as_ref().and_then(|e| all.iter().find(|i| &i.id == e));
     let children = report::children_of(all, &issue.id);
     let journal = repo.journal_of(&issue.id)?;
@@ -168,7 +168,7 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue) -> R<Vec<String>> {
     }
 
     // 이력은 언제나 맨 끝이다. 에픽이면 멤버를 그 **앞에** 끼운다.
-    let mut out = view::detail(issue, epic, &children, &[], &model::now());
+    let mut out = view::detail(issue, epic, &children, &[], &model::now(), raw);
     // 묶음을 펼치면 그 밑에 무엇이 있는지까지 보여 준다 — 묶음 하나를 보는
     // 이유가 바로 그것이다. 마일스톤이면 에픽과 이슈가 같이 나온다.
     if issue.kind != Kind::Issue {

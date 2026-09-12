@@ -504,6 +504,7 @@ pub fn detail(
     children: &[&Issue],
     journal: &[JournalEntry],
     now: &str,
+    raw: bool,
 ) -> Vec<String> {
     let mut out = vec![format!(
         "{}   {}",
@@ -558,11 +559,125 @@ pub fn detail(
 
     if let Some(body) = &i.body {
         out.push(String::new());
-        out.extend(body.lines().map(|l| format!("  {l}")));
+        // **원문 그대로 볼 길을 남긴다.** 그린 글은 기호가 지워져 되돌릴 수
+        // 없다 — 본문을 긁어 붙이거나 마크다운을 고칠 때 이 길이 필요하다.
+        out.extend(match raw {
+            true => body.lines().map(|l| format!("  {l}")).collect(),
+            false => body_lines(body),
+        });
     }
 
     out.extend(history(journal));
     out
+}
+
+/// 본문을 그린다. 기호를 걷어내고 뜻을 색·속성으로 옮긴다.
+///
+/// **원문 그대로도 볼 수 있어야 한다** — 그린 글은 기호가 지워져 되돌릴 수
+/// 없다. `moai show --raw` 가 그 길이고, `--json` 의 `body` 는 언제나 원문이다.
+pub fn body_lines(body: &str) -> Vec<String> {
+    // 파일에서 온 글이다. 그리기 전에 제어문자를 걷어낸다 — ESC 가 든 줄은
+    // 그대로 찍으면 화면을 다시 칠한다.
+    let blocks = crate::markdown::parse(&crate::text::sanitize(body));
+    let mut out = Vec::new();
+    for (n, b) in blocks.iter().enumerate() {
+        if n > 0 {
+            out.push(String::new());
+        }
+        draw_block(&mut out, b);
+    }
+    out
+}
+
+/// 본문을 접는 폭. 터미널 폭을 묻지 않는다 — 이 저장소의 본문은 이미 손으로
+/// 이만큼에 맞춰 쓰여 있고, 파이프로 넘길 때 폭이 매번 달라지면 diff 가 튄다.
+const BODY: usize = 76;
+/// 본문은 상세의 다른 줄과 같은 만큼 들어간다.
+const PAD: &str = "  ";
+
+fn draw_block(out: &mut Vec<String>, b: &crate::markdown::Block) {
+    use crate::markdown::Block;
+    match b {
+        Block::Heading { level, spans } => {
+            // 수준은 들여쓰기로 말한다. `#` 을 남기면 걷어낸 보람이 없고,
+            // 굵게만으로는 2단계와 3단계가 같아 보인다.
+            let indent = format!("{PAD}{}", "  ".repeat((*level as usize).saturating_sub(1)));
+            flow(out, spans, &indent, style::HEAD);
+        }
+        Block::Para(spans) => flow(out, spans, PAD, style::PLAIN),
+        Block::Quote(spans) => {
+            // 인용은 **색이 아니라 세로줄**로 말한다.
+            let mut inner = Vec::new();
+            flow(&mut inner, spans, "", style::PLAIN);
+            out.extend(inner.into_iter().map(|l| format!("{PAD}{} {l}", paint(style::DIM, "│"))));
+        }
+        Block::List { ordered, items } => {
+            for (n, it) in items.iter().enumerate() {
+                let indent = format!("{PAD}{}", "  ".repeat(it.depth as usize));
+                let mark = if *ordered { format!("{}.", n + 1) } else { "•".into() };
+                let mut inner = Vec::new();
+                flow(&mut inner, &it.spans, "", style::PLAIN);
+                for (k, l) in inner.into_iter().enumerate() {
+                    // 이어지는 줄은 글머리 폭만큼 물려 쓴다.
+                    out.push(match k {
+                        0 => format!("{indent}{} {l}", paint(style::DIM, &mark)),
+                        _ => format!("{indent}{} {l}", " ".repeat(width(&mark))),
+                    });
+                }
+            }
+        }
+        Block::Code { lines, .. } => {
+            out.extend(lines.iter().map(|l| format!("{PAD}    {}", paint(style::CODE, l))));
+        }
+        Block::Rule => out.push(format!("{PAD}{}", paint(style::DIM, &"─".repeat(BODY / 2)))),
+        // 표는 아직 칸을 안 맞춘다 (moai-44rk). 그때까지도 **잃지는 않는다**.
+        Block::Table { head, rows } => {
+            let row = |cells: &Vec<Vec<crate::markdown::Span>>| {
+                cells
+                    .iter()
+                    .map(|c| c.iter().map(|s| s.text.as_str()).collect::<String>())
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            };
+            out.push(format!("{PAD}{}", paint(style::HEAD, &row(head))));
+            out.extend(rows.iter().map(|r| format!("{PAD}{}", row(r))));
+        }
+    }
+}
+
+/// 조각들을 접어 칠한다. 접는 일은 `markdown` 이, 칠하는 일은 여기가 한다.
+fn flow(out: &mut Vec<String>, spans: &[crate::markdown::Span], indent: &str, base: Style) {
+    let budget = BODY.saturating_sub(width(indent)).max(8);
+    // **코드는 백틱을 남긴 채로 접는다.** 색을 끄면(`--color never`·`NO_COLOR`)
+    // 색으로만 표시한 것은 그냥 글이 되고, 그러면 `0.2` 가 판인지 숫자인지
+    // 구별할 길이 사라진다 — `색이 혼자 뜻을 지지 않는다`가 여기에도 걸린다.
+    // 굵게·기울임은 글맛이지 낱말의 정체가 아니라 색과 함께 사라져도 된다.
+    let marked: Vec<crate::markdown::Span> = spans
+        .iter()
+        .map(|s| match s.role {
+            crate::markdown::Role::Code => {
+                crate::markdown::Span { text: format!("`{}`", s.text), role: s.role }
+            }
+            _ => s.clone(),
+        })
+        .collect();
+    for line in crate::markdown::wrap_spans(&marked, budget) {
+        let painted: String =
+            line.iter().map(|s| paint(role_style(s.role, base), &s.text)).collect();
+        out.push(format!("{indent}{painted}"));
+    }
+}
+
+/// 뜻을 색·속성으로. **여기가 이 표면의 몫이다** — `markdown` 은 뜻만 낸다.
+fn role_style(r: crate::markdown::Role, base: Style) -> Style {
+    use crate::markdown::Role;
+    match r {
+        Role::Plain => base,
+        Role::Strong => style::STRONG,
+        Role::Emphasis => style::EM,
+        Role::Code => style::CODE,
+        Role::Link => style::EPIC_REF,
+    }
 }
 
 /// 저널을 **그대로 찍는다. 접지 않는다.**
@@ -694,6 +809,34 @@ mod tests {
         assert!(width(&out[1]) < 80, "{:?}", out[1]);
     }
 
+    /// 본문이 **그려진다.** 기호가 걷히고 목록은 글머리를 얻는다.
+    #[test]
+    fn the_body_is_drawn_not_echoed() {
+        let out = plain(&body_lines("**굵게** 한 줄\n\n- 하나\n- 둘\n")).join("\n");
+        assert!(!out.contains("**"), "굵게 기호가 남았다\n{out}");
+        assert!(out.contains("굵게 한 줄"), "{out}");
+        assert!(out.contains('•'), "목록 글머리가 없다\n{out}");
+        assert!(!out.contains("- 하나"), "목록 기호가 남았다\n{out}");
+    }
+
+    /// **색을 꺼도 코드는 코드로 남는다.** 색으로만 표시하면 `0.2` 가 판인지
+    /// 숫자인지 구별할 길이 사라진다 — 이 저장소의 규칙에 걸린다.
+    #[test]
+    fn code_keeps_a_mark_that_survives_without_colour() {
+        let out = plain(&body_lines("판은 `0.2` 다\n")).join("\n");
+        assert!(out.contains("`0.2`"), "색을 끄니 코드가 그냥 글이 됐다\n{out}");
+    }
+
+    /// 그린 줄은 폭을 넘지 않는다. 한글이 두 칸이라 글자 수로 세면 걸린다.
+    #[test]
+    fn drawn_lines_stay_within_the_width() {
+        let body = "아주 긴 한글 문장이 폭을 넘도록 이어지고 또 이어지고 계속 이어진다. \
+                    여기에 `코드` 와 **굵게** 도 섞여 있어서 접는 자리가 조각 가운데에 걸린다.\n";
+        for l in plain(&body_lines(body)) {
+            assert!(width(&l) <= BODY + 4, "{l:?} ({}칸)", width(&l));
+        }
+    }
+
     #[test]
     fn detail_shows_body_and_history() {
         let mut i = issue("argos-0001", "제목", "in_progress");
@@ -709,7 +852,7 @@ mod tests {
                 "claude",
             ),
         ];
-        let out = plain(&detail(&i, None, &[], &j, "2026-09-11T04:12:03Z"));
+        let out = plain(&detail(&i, None, &[], &j, "2026-09-11T04:12:03Z", false));
         let joined = out.join("\n");
         assert!(joined.contains("첫 줄") && joined.contains("둘째 줄"), "{joined}");
         assert!(joined.contains("이력"), "{joined}");
@@ -828,7 +971,7 @@ mod tests {
     fn a_dangling_epic_is_shown_not_fatal() {
         let mut i = issue("argos-0001", "제목", "todo");
         i.epic = Some("argos-0000".into());
-        let out = plain(&detail(&i, None, &[], &[], "2026-09-11T04:12:03Z"));
+        let out = plain(&detail(&i, None, &[], &[], "2026-09-11T04:12:03Z", false));
         assert!(out.iter().any(|l| l.contains("(없는 에픽)")), "{out:#?}");
     }
 }
