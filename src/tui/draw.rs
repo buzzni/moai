@@ -237,12 +237,12 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
 fn detail(f: &mut Frame, app: &App, at: Rect, rows: &[Row]) {
     // 좌우 여백은 목록의 커서 자리와 같은 폭이다. `inner()` 가 테두리와 여백을
     // 함께 빼 주므로 폭 계산은 아래가 그대로 쓴다.
+    // 테두리는 **나중에** 그린다 — 제목에 "몇 줄 더" 를 얹으려면 줄을 먼저
+    // 세야 한다. 자리 계산은 그래도 블록에 맡긴다.
     let block = Block::default()
         .borders(Borders::ALL)
-        .padding(Padding::horizontal(left_gutter() as u16))
-        .title(" 상세 ");
+        .padding(Padding::horizontal(left_gutter() as u16));
     let inner = block.inner(at);
-    f.render_widget(block, at);
 
     let lines = match app.current_of(rows) {
         None => vec![Line::from(Span::styled("없다", dim()))],
@@ -260,7 +260,42 @@ fn detail(f: &mut Frame, app: &App, at: Rect, rows: &[Row]) {
             }
         },
     };
-    f.render_widget(Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }), inner);
+
+    // **줄 수를 우리가 안다.** `Wrap` 을 켜면 위젯이 줄을 더 늘려 우리가 센
+    // 수와 화면의 수가 어긋나고, 그러면 "몇 줄 더" 도 굴린 자리도 틀린다.
+    // 본문은 `markdown::layout` 이 이미 폭에 맞춰 접었고, 머리 줄은
+    // `about` 이 접거나 잘라서 낸다.
+    let height = inner.height as usize;
+    let hidden = lines.len().saturating_sub(height);
+    // 끝을 지나 굴리지 않는다 — 빈 화면을 보여 주고 되돌아올 길을 잃게 한다.
+    let scroll = (app.scroll as usize).min(hidden);
+    let more = hidden - scroll;
+
+    // **더 있는데 안 보이면 말한다.** 잘린 줄이 조용히 사라지면 보는 쪽은
+    // 그것이 본문의 끝인 줄 안다. 제목에 얹으면 본문 한 줄을 안 뺏는다.
+    let title = match (more, scroll) {
+        (0, 0) => " 상세 ".to_string(),
+        (0, _) => " 상세 · 끝 ".to_string(),
+        (n, _) => format!(" 상세 · {n}줄 더 ↓ "),
+    };
+    f.render_widget(block.title(title), at);
+    f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), inner);
+}
+
+/// 글 하나를 폭에 맞춰 접어 여러 줄로. 접는 자는 본문과 같은 것을 쓴다.
+fn wrapped<'a>(text: &str, w: usize, style: Style) -> Vec<Line<'a>> {
+    let spans = [crate::markdown::Span {
+        text: crate::text::sanitize(text),
+        role: crate::markdown::Role::Plain,
+    }];
+    crate::markdown::wrap_spans(&spans, w.max(2))
+        .into_iter()
+        .map(|line| {
+            Line::from(
+                line.into_iter().map(|s| Span::styled(s.text, style)).collect::<Vec<_>>(),
+            )
+        })
+        .collect()
 }
 
 /// 그 항목 안으로 들어간 경로. 요약을 세려면 그 밑을 봐야 한다.
@@ -275,11 +310,12 @@ fn deeper(app: &App, e: &Entry) -> crate::nav::Path {
 /// 이슈 하나의 낱낱.
 fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     let i = &app.issues[idx];
-    let mut out = vec![
-        Line::from(Span::styled(i.id.clone(), dim())),
-        Line::from(Span::styled(i.title.clone(), bold())),
-        Line::from(""),
-    ];
+    // **제목은 우리가 접는다.** `Wrap` 을 끈 것은 줄 수를 정확히 알기 위해서고,
+    // 그 대가로 넘친 줄을 위젯이 표시도 없이 잘라 낸다 — 잘렸다는 `…` 마저
+    // 사라지는 것이 이 저장소가 막아 온 실패다.
+    let mut out = vec![Line::from(Span::styled(i.id.clone(), dim()))];
+    out.extend(wrapped(&i.title, w, bold()));
+    out.push(Line::from(""));
 
     // 칸은 글리프와 낱말을 함께 낸다. 색이 없어도 뜻이 남아야 한다.
     let st = i.status.as_str().to_string();
@@ -323,7 +359,7 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     fields.push(("생성".into(), crate::view::stamp(&i.created_at)));
     fields.push(("수정".into(), crate::view::stamp(&i.updated_at)));
     let w_label = label_width(&fields);
-    out.extend(fields.iter().map(|(k, v)| field(k, v, w_label)));
+    out.extend(fields.iter().map(|(k, v)| field(k, v, w_label, w)));
 
     // 디렉터리면 그 밑의 셈도 함께.
     if matches!(e, Entry::Dir { .. }) {
@@ -428,8 +464,10 @@ fn label_width(rows: &[(String, String)]) -> usize {
     rows.iter().map(|(k, _)| crate::text::width(k)).max().unwrap_or(0)
 }
 
-fn field<'a>(k: &str, v: &str, w: usize) -> Line<'a> {
+fn field<'a>(k: &str, v: &str, w: usize, room: usize) -> Line<'a> {
     let pad = w.saturating_sub(crate::text::width(k));
+    // 값이 넘치면 **잘렸다고 말하며** 자른다. 위젯에 맡기면 표시 없이 사라진다.
+    let v = crate::text::clip(v, room.saturating_sub(w + 1));
     Line::from(vec![
         Span::styled(format!("{k}{}", " ".repeat(pad)), dim()),
         Span::raw(" "),
@@ -444,18 +482,35 @@ fn bold() -> Style {
 /// 맨 아래 MC 풍 F키 바. **아직 없는 것은 적지 않는다** — 눌러도 아무 일이
 /// 없는 키를 적어 두면 그것부터 도구를 못 믿게 된다.
 fn fkeys(f: &mut Frame, app: &App, at: Rect) {
-    let mut spans = vec![
-        key("Enter", "들어가기"),
-        key("Backspace", "나가기"),
-        key("/", "검색"),
-        key("f", "거름망"),
-        key("F5", "갱신"),
+    // **덜 급한 것부터 떨어뜨린다.** 키를 더할 때마다 줄이 길어져 맨 끝이
+    // 말없이 잘리는데, 맨 끝은 늘 나가는 길이다 — 나갈 길을 못 찾는 것이
+    // 빽빽한 줄보다 나쁘다. 폭이 모자라면 앞쪽부터 버린다.
+    let mut optional = vec![
+        key("j·k", "굴리기"),
         key("F3", if app.raw { "그리기" } else { "원문" }),
+        key("F5", "갱신"),
+        key("f", "거름망"),
+        key("/", "검색"),
+        key("Bksp", "나가기"),
+        key("Enter", "들어가기"),
     ];
+    // 늘 남는 것: 나가는 길, 그리고 걸어 둔 거름망을 푸는 길.
+    let mut keep: Vec<Span> = Vec::new();
     if app.filter_text.is_some() {
-        spans.push(key("Esc", "풀기"));
+        keep.push(key("Esc", "풀기"));
     }
-    spans.push(key("F10", "끝내기"));
+    keep.push(key("F10", "끝내기"));
+
+    let width = |v: &[Span]| v.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
+    let room = at.width as usize;
+    let mut spans: Vec<Span> = Vec::new();
+    while let Some(next) = optional.pop() {
+        if width(&spans) + crate::text::width(&next.content) + width(&keep) > room {
+            break;
+        }
+        spans.push(next);
+    }
+    spans.extend(keep);
     f.render_widget(Paragraph::new(Line::from(spans)), at);
 }
 
@@ -791,8 +846,8 @@ mod tests {
             l.spans[..l.spans.len() - 1].iter().map(|s| crate::text::width(&s.content)).sum::<usize>()
         };
         let w = label_width(&[("에픽".into(), "값".into()), ("마일스톤".into(), "값".into())]);
-        let short = field("에픽", "값", w);
-        let long = field("마일스톤", "값", w);
+        let short = field("에픽", "값", w, 40);
+        let long = field("마일스톤", "값", w, 40);
         assert_eq!(starts_at(&short), starts_at(&long), "값이 다른 칸에서 시작한다");
         assert!(starts_at(&long) > crate::text::width("마일스톤"), "이름과 값이 붙었다");
     }
@@ -909,6 +964,45 @@ mod tests {
                 lines.get(at + 1)
             );
         }
+    }
+
+    /// 긴 본문은 **끝을 볼 수 있다.** 굴리면 뒷부분이 나오고, 남은 줄 수를
+    /// 말해 준다 — 잘린 줄이 조용히 사라지면 그것이 본문의 끝인 줄 안다.
+    #[test]
+    fn a_long_body_can_be_scrolled_to_its_end() {
+        let mut issues = issues();
+        let body: String = (1..=40).map(|n| format!("{n}번째 줄이다\n\n")).collect();
+        issues[1].body = Some(body);
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+
+        let first = render(&mut a, 100, 16).join("\n");
+        assert!(first.contains("1번째"), "{first}");
+        assert!(!first.contains("40번째"), "다 보이면 굴릴 것이 없다\n{first}");
+        assert!(first.contains("줄 더"), "남은 줄을 안 알린다\n{first}");
+
+        for _ in 0..12 {
+            a.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        }
+        let last = render(&mut a, 100, 16).join("\n");
+        assert!(last.contains("40번째"), "끝까지 못 굴렸다\n{last}");
+        assert!(!last.contains("줄 더"), "다 보이는데 더 있다고 한다\n{last}");
+    }
+
+    /// **커서를 옮기면 굴린 자리가 돌아온다.** 안 그러면 다른 이슈의 첫 줄부터
+    /// 못 본다.
+    #[test]
+    fn moving_the_cursor_rewinds_the_detail() {
+        let mut issues = issues();
+        issues[1].body = Some((1..=40).map(|n| format!("{n}번째\n\n")).collect::<String>());
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert!(a.scroll > 0);
+        a.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(a.scroll, 0, "굴린 자리를 들고 다른 줄로 갔다");
     }
 
     /// 빈 저장소도 그려진다.

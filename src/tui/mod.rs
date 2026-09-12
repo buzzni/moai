@@ -52,6 +52,9 @@ pub struct App {
     pub trouble: Option<String>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
+    /// 상세를 몇 줄 굴렸는가. **왼쪽 커서를 옮기면 0 으로 돌아간다** — 다른
+    /// 이슈를 보는데 굴린 자리가 남아 있으면 첫 줄부터 못 본다.
+    pub scroll: u16,
     /// 본문을 그리지 않고 원문 그대로 보는가. 그린 글은 기호가 지워져
     /// 되돌릴 수 없다 — 긁어 붙이거나 마크다운을 고칠 때 이 길이 필요하다.
     pub raw: bool,
@@ -107,6 +110,7 @@ impl App {
             path,
             cursor: 0,
             mode: Mode::Browse,
+            scroll: 0,
             raw: false,
             filter_text: None,
             repo: None,
@@ -326,12 +330,12 @@ impl App {
             // raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. 안 받으면 길이 막힌다.
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => self.quit = true,
             KeyCode::Char('q') | KeyCode::F(10) => self.quit = true,
-            KeyCode::Up => self.cursor = self.cursor.saturating_sub(1),
-            KeyCode::Down => self.cursor = (self.cursor + 1).min(len().saturating_sub(1)),
-            KeyCode::Home => self.cursor = 0,
-            KeyCode::End => self.cursor = len().saturating_sub(1),
-            KeyCode::PageUp => self.cursor = self.cursor.saturating_sub(10),
-            KeyCode::PageDown => self.cursor = (self.cursor + 10).min(len().saturating_sub(1)),
+            KeyCode::Up => self.move_to(self.cursor.saturating_sub(1)),
+            KeyCode::Down => self.move_to((self.cursor + 1).min(len().saturating_sub(1))),
+            KeyCode::Home => self.move_to(0),
+            KeyCode::End => self.move_to(len().saturating_sub(1)),
+            KeyCode::PageUp => self.move_to(self.cursor.saturating_sub(10)),
+            KeyCode::PageDown => self.move_to((self.cursor + 10).min(len().saturating_sub(1))),
             KeyCode::Enter | KeyCode::Right => self.enter(),
             KeyCode::Backspace | KeyCode::Left => self.leave(),
             KeyCode::Char('/') => self.mode = Mode::Grep(String::new()),
@@ -340,9 +344,29 @@ impl App {
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             KeyCode::Esc => self.clear_filter(),
             KeyCode::F(5) | KeyCode::Char('r') => self.reload(),
-            KeyCode::F(3) | KeyCode::Char('m') => self.raw = !self.raw,
+            KeyCode::F(3) | KeyCode::Char('m') => {
+                self.raw = !self.raw;
+                // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
+                // 엉뚱한 데가 나온다.
+                self.scroll = 0;
+            }
+            // 상세를 굴린다. **왼쪽은 그대로 둔다** — 오른쪽만 길어서 못 보는
+            // 것이므로, 굴리려고 커서를 옮기게 하면 보던 이슈를 잃는다.
+            KeyCode::Char('j') => self.scroll = self.scroll.saturating_add(1),
+            KeyCode::Char('k') => self.scroll = self.scroll.saturating_sub(1),
+            KeyCode::Char(' ') => self.scroll = self.scroll.saturating_add(10),
+            KeyCode::Char('b') => self.scroll = self.scroll.saturating_sub(10),
             _ => {}
         }
+    }
+
+    /// 커서를 옮기고 **상세를 첫 줄로 되돌린다.** 다른 것을 보는데 굴린 자리가
+    /// 남아 있으면 그 이슈의 첫 줄부터 못 본다.
+    fn move_to(&mut self, at: usize) {
+        if at != self.cursor {
+            self.scroll = 0;
+        }
+        self.cursor = at;
     }
 
     /// 글을 받는 중.
@@ -406,6 +430,7 @@ impl App {
                 self.remembered.push(self.cursor);
                 self.path.push(seg);
                 self.cursor = 0;
+                self.scroll = 0;
             }
             // 잎은 들어갈 데가 없다. 상세는 오른쪽이 이미 보여 주고 있다.
             _ => {}
@@ -414,6 +439,7 @@ impl App {
 
     fn leave(&mut self) {
         if self.path.pop().is_some() {
+            self.scroll = 0;
             self.cursor = self.remembered.pop().unwrap_or(0);
             // 기억한 자리가 낡았을 수 있다 (파일이 바뀌었거나 `--path` 로 시작했거나).
             self.cursor = self.cursor.min(self.rows().len().saturating_sub(1));
