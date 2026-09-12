@@ -58,16 +58,21 @@ pub fn run(_ctx: &Ctx, event: Event) -> R<Vec<String>> {
 fn decide(event: Event, input: &Input) -> Option<String> {
     let repo = Repo::discover().ok()?;
     let load = repo.read().ok()?;
+    // **못 읽은 줄을 그대로 넘긴다.** 빈 슬라이스를 넘기면 보드에서
+    // `unreadable_line` 경고만 조용히 빠지는데, 그것은 실린 보드 말고는
+    // 에이전트가 알아낼 길이 없는 유일한 경고다 — 기준선도 같은 만큼
+    // 낮게 잡혀 `Stop` 이 "늘었다" 를 영영 못 본다.
+    let unreadable: Vec<usize> = load.errors.iter().map(|e| e.line).collect();
 
     let decision = match event {
         // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다.
         Event::SessionStart => {
-            write_baseline(input, &load.issues, &repo.config);
+            write_baseline(input, &repo, &load.issues, &unreadable);
             Decision::Pass
         }
-        Event::UserPromptSubmit => once_per_session(input, || {
+        Event::UserPromptSubmit => once_per_session(input, &repo, || {
             let now = model::now();
-            let st = report::status(&load.issues, &[], &repo.config, &now);
+            let st = report::status(&load.issues, &unreadable, &repo.config, &now);
             let lines =
                 view::status(&st, &load.issues, &repo.config, &now, ".moai/issues.jsonl");
             crate::hook::board(&lines)
@@ -91,8 +96,8 @@ fn decide(event: Event, input: &Input) -> Option<String> {
 ///
 /// 표를 남기는 자리는 시스템 임시 디렉터리다. `.moai/` 에 두면 세션 부스러기가
 /// 저장소에 쌓이고, 그것을 `.gitignore` 로 막는 일이 또 생긴다.
-fn once_per_session(input: &Input, make: impl FnOnce() -> Decision) -> Decision {
-    let Some(path) = session_file(input, "board") else {
+fn once_per_session(input: &Input, repo: &Repo, make: impl FnOnce() -> Decision) -> Decision {
+    let Some(path) = session_file(input, repo, "board") else {
         // 누구인지 모르면 한 번을 보장할 수 없다. **그러면 싣지 않는다** —
         // 한 번 빠지는 것이 매 프롬프트 도배보다 싸다.
         return Decision::Pass;
@@ -111,17 +116,23 @@ fn once_per_session(input: &Input, make: impl FnOnce() -> Decision) -> Decision 
 ///
 /// 훅이 여는 세션마다 덮어쓴다. 재개도 새 세션이고, 재개 시점의 경고가
 /// 그 세션이 물려받은 빚이다.
-fn write_baseline(input: &Input, issues: &[crate::model::Issue], cfg: &crate::config::Config) {
-    let Some(path) = session_file(input, "warn") else {
+fn write_baseline(input: &Input, repo: &Repo, issues: &[crate::model::Issue], unreadable: &[usize]) {
+    let Some(path) = session_file(input, repo, "warn") else {
         return;
     };
     let now = model::now();
-    let st = report::status(issues, &[], cfg, &now);
+    let st = report::status(issues, unreadable, &repo.config, &now);
     let n: usize = st.warnings.iter().map(|w| w.count).sum();
     let _ = std::fs::write(path, n.to_string());
 }
 
-fn session_file(input: &Input, what: &str) -> Option<std::path::PathBuf> {
+/// 세션의 표가 놓이는 자리.
+///
+/// **저장소도 키에 든다.** 한 세션이 저장소 둘을 오가는 것은 드물지 않은데,
+/// 세션 id 만으로 키를 잡으면 둘째 저장소는 첫째의 표를 보고 제 보드를
+/// 영영 안 싣는다 — 조용히 빠지는 쪽이라 아무도 못 알아챈다.
+fn session_file(input: &Input, repo: &Repo, what: &str) -> Option<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
     let sid = input.session_id.as_deref()?;
     // 세션 id 가 경로 조각이 되므로 사람이 준 글자를 그대로 쓰지 않는다.
     let safe: String = sid
@@ -131,5 +142,8 @@ fn session_file(input: &Input, what: &str) -> Option<std::path::PathBuf> {
     if safe.is_empty() {
         return None;
     }
-    Some(std::env::temp_dir().join(format!("moai-hook-{safe}.{what}")))
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    repo.dir().hash(&mut h);
+    let at = h.finish();
+    Some(std::env::temp_dir().join(format!("moai-hook-{safe}-{at:x}.{what}")))
 }

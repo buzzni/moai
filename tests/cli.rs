@@ -2808,6 +2808,22 @@ fn event(s: &Scratch, session: &str) -> String {
     format!("{{\"session_id\":\"{session}\",\"cwd\":\"{cwd}\"}}")
 }
 
+/// 그 세션이 적어 둔 기준선. **이름을 박지 않는다** — 표의 키에는 저장소도
+/// 들어서, 파일 이름을 시험이 다시 지어내면 구현과 조용히 어긋난다.
+fn baseline(s: &Scratch, session: &str) -> Option<usize> {
+    let dir = s.path().join("hooktmp");
+    let head = format!("moai-hook-{session}-");
+    std::fs::read_dir(&dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.starts_with(&head) && name.ends_with(".warn")
+        })
+        .and_then(|e| std::fs::read_to_string(e.path()).ok())
+        .and_then(|t| t.trim().parse().ok())
+}
+
 /// 보드는 세션의 **첫 프롬프트에 한 번만** 실린다.
 ///
 /// 한 번이 아니면 매 프롬프트에 같은 1KB 가 붙고, 그러면 사람이 훅을 꺼 버린다.
@@ -2872,12 +2888,7 @@ fn the_session_start_only_writes_the_baseline() {
     let out = hook_out(&s, "session-start", &event(&s, "s1"));
     assert!(out.trim().is_empty(), "SessionStart 가 무언가 실었다\n{out}");
 
-    let baseline = s.path().join("hooktmp").join("moai-hook-s1.warn");
-    let n: usize = std::fs::read_to_string(&baseline)
-        .expect("기준선을 안 적었다")
-        .trim()
-        .parse()
-        .expect("기준선이 수가 아니다");
+    let n: usize = baseline(&s, "s1").expect("기준선을 안 적었다");
     assert!(n > 0, "경고가 있는데 기준선이 0 이다");
 }
 
@@ -2929,4 +2940,47 @@ fn the_hook_works_where_stdin_says() {
     assert!(out.status.success());
     let text = carried_text(&String::from_utf8(out.stdout).unwrap());
     assert!(text.contains("락을 잡는다"), "stdin 이 가리킨 저장소를 안 읽었다\n{text}");
+}
+
+/// 못 읽는 줄이 있으면 그 사실이 **실리는 보드에** 들어야 한다.
+///
+/// 빈 슬라이스를 넘기던 자리다. 깨진 줄 경고는 실린 보드 말고는 에이전트가
+/// 알아낼 길이 없고, 기준선까지 같은 만큼 낮게 잡혀 `Stop` 이 "늘었다" 를
+/// 영영 못 보게 된다.
+#[test]
+fn a_broken_line_rides_the_board_too() {
+    let s = init("hookbroken");
+    ok(s.path(), &["add", "락을 잡는다"]);
+    let path = s.path().join(".moai").join("issues.jsonl");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("{ 이건 JSON 이 아니다\n");
+    std::fs::write(&path, text).unwrap();
+
+    let board = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "s1")));
+    assert!(board.contains("읽을 수 없는"), "깨진 줄이 보드에 없다\n{board}");
+
+    hook(&s, "session-start", &event(&s, "s2"));
+    let with_broken = baseline(&s, "s2").expect("기준선을 안 적었다");
+    assert!(with_broken >= 2, "깨진 줄이 기준선에서 빠졌다 — {with_broken}");
+}
+
+/// 한 세션이 저장소 둘을 오가도 각자 제 보드를 받는다.
+///
+/// 표의 키가 세션 id 뿐이면 둘째 저장소는 첫째의 표를 보고 영영 조용해진다.
+#[test]
+fn two_repos_in_one_session_each_get_a_board() {
+    let one = init("hooktwo-a");
+    let two = init("hooktwo-b");
+    ok(one.path(), &["add", "저장 계층"]);
+    ok(two.path(), &["add", "표면 다듬기"]);
+    // 표를 한 자리에 모아 둔다 — 갈라 두면 시험이 저 스스로 답을 만든다.
+    let tmp = one.path().join("hooktmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::os::unix::fs::symlink(&tmp, two.path().join("hooktmp")).unwrap();
+
+    let first = carried_text(&hook_out(&one, "user-prompt-submit", &event(&one, "same")));
+    assert!(first.contains("저장 계층"), "{first}");
+    let second = hook_out(&two, "user-prompt-submit", &event(&two, "same"));
+    assert!(!second.trim().is_empty(), "둘째 저장소가 보드를 못 받았다");
+    assert!(carried_text(&second).contains("표면 다듬기"), "{second}");
 }
