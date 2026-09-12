@@ -286,6 +286,10 @@ pub struct FilterArgs {
     #[arg(short, long, value_name = "0-3")]
     pub priority: Vec<String>,
 
+    /// 그 담당인 것 (`none` = 담당 없는 것, `me` = 현재 사용자)
+    #[arg(short, long, value_name = "이름|메일|none|me")]
+    pub assignee: Vec<String>,
+
     #[arg(long = "type", value_name = "issue|epic")]
     pub kind: Option<Kind>,
 
