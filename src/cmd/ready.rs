@@ -5,7 +5,6 @@
 //! 정한다. 여기는 둘을 잇기만 한다.
 
 use super::{Ctx, R};
-use crate::model::Issue;
 use crate::report;
 use crate::store::Repo;
 use crate::view;
@@ -21,15 +20,7 @@ pub fn run(ctx: &Ctx) -> R<Vec<String>> {
     }
 
     // 첫 칸도 아니고 끝나지도 않은 것 = 누군가 이미 잡고 있는 것.
-    let wip: Vec<&Issue> = load
-        .issues
-        .iter()
-        .filter(|i| {
-            report::is_active(i)
-                && !i.status.is_done()
-                && i.status.as_str() != repo.config.first_status()
-        })
-        .collect();
+    let wip = report::wip(&load.issues, &repo.config);
 
     Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip))
 }

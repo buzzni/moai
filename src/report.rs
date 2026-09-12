@@ -91,6 +91,22 @@ pub fn is_work(i: &Issue) -> bool {
     i.kind == Kind::Issue
 }
 
+/// 지금 집고 있는 것. **첫 칸도 아니고 끝나지도 않은 일**이다.
+///
+/// 칸 이름을 박아 두지 않는다 — 칸은 config 가 정하므로 `in_progress` 를
+/// 글자로 찾으면 칸 이름을 바꾼 저장소에서 이 판단이 조용히 빈다.
+///
+/// `ready` 의 아래쪽 줄과 훅이 압축 직전에 싣는 줄이 같은 집합이다. 두 벌로
+/// 두면 한쪽만 고쳐지고, 그러면 화면이 같은 세션을 두 가지로 말한다.
+pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
+    issues
+        .iter()
+        .filter(|i| {
+            is_active(i) && !i.status.is_done() && i.status.as_str() != cfg.first_status()
+        })
+        .collect()
+}
+
 /// `id` 의 직계 자식. 부모는 id 에서 유도되므로 접두 검사면 된다.
 ///
 /// **차례는 목록과 같다.** 상세 한 화면에서 자식 줄은 id 순, 그 아래 멤버 줄은

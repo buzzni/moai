@@ -114,6 +114,17 @@ pub fn paint(style: Style, text: &str) -> String {
     format!("{}{text}{}", style.render(), anstyle::Reset.render())
 }
 
+/// 색을 **글자에서** 걷어낸다.
+///
+/// `anstream` 은 출력 **스트림**에서 SGR 을 지운다 — 그래서 화면과 파이프가
+/// 저절로 맞고, `paint` 가 무조건 칠해도 됐다. 그런데 훅은 이 글을 JSON
+/// 문자열 **안에** 넣는다. 거기 들어간 이스케이프는 `\u001b` 로 인코딩되어
+/// 더 이상 스트림의 SGR 이 아니고, 그래서 아무도 안 걷어낸다 — 받는 쪽 화면에
+/// 그 글자가 그대로 뜬다. 걷어낼 마지막 기회가 여기다.
+pub fn plain(s: &str) -> String {
+    anstream::adapter::strip_str(s).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

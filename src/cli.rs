@@ -190,6 +190,24 @@ pub enum Cmd {
   `--json` 은 화면을 켜지 않고 그 디렉터리의 목록만 낸다.")]
     Tui(TuiArgs),
 
+    /// Claude 의 훅이 부른다. stdin 으로 이벤트를 받아 낼 것만 낸다
+    #[command(after_help = "\
+  사람이 손으로 부를 일은 없다. `moai skill install` 이 심은 플러그인이
+  이것을 부른다.
+
+  **아무것도 막지 않고, 무엇이 어긋나도 종료 코드는 0 이다.** 훅이 에러를
+  뱉으면 매 세션 시작이 시끄럽고, 그러면 사람이 훅을 꺼 버린다 — 꺼진 규칙은
+  없는 규칙이다.
+
+  자리(cwd)와 세션 id 는 stdin 이 준 것을 쓴다. 환경변수에는 없다.
+
+  echo '{\"session_id\":\"x\",\"cwd\":\"/repo\"}' | moai hook user-prompt-submit")]
+    Hook {
+        /// 어느 자리에서 불렸나
+        #[arg(value_name = "이벤트")]
+        event: crate::hook::Event,
+    },
+
     /// 이 저장소에 .moai/ 를 심는다 (다시 불러도 된다)
     #[command(after_help = "\
   이미 심긴 곳에서 다시 부르면 딸린 파일(.gitattributes·.gitignore·AGENTS.md)

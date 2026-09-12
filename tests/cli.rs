@@ -919,7 +919,10 @@ fn the_json_sweep_covers_every_command() {
         .take_while(|l| l.starts_with("  "))
         .filter_map(|l| l.split_whitespace().next().map(str::to_string))
         // `help` 는 clap 이 제 손으로 만드는 것이라 `--json` 이 뜻이 없다.
-        .filter(|c| c != "help")
+        // `hook` 도 그렇다 — 출력이 언제나 기계용 계약 JSON 이라 `--json` 이
+        // 켤 것이 없고, stdin 없이 부르면 아무 말도 안 하는 것이 맞다.
+        // 대신 `the_hook_*` 시험들이 그 계약을 더 깐깐하게 본다.
+        .filter(|c| c != "help" && c != "hook")
         .collect();
     assert!(listed.len() > 5, "명령 목록을 못 읽었다 — {listed:?}");
 
@@ -2748,3 +2751,182 @@ fn an_empty_reason_is_refused_like_an_empty_note() {
     assert!(!journal(s.path()).contains(r#""kind":"note""#), "거절해 놓고 적었다 — {}", journal(s.path()));
 }
 
+// ── 훅 — 규칙을 읽히는 자리에 놓는다 ────────────────────────────────
+
+/// 훅은 stdin 으로 이벤트를 받고 stdout 으로 계약 JSON 을 낸다.
+///
+/// **세션 표를 시험마다 갈라 둔다.** 표가 섞이면 "세션당 한 번" 시험이 앞
+/// 시험이 남긴 표를 보고 조용해져, 고장 난 채로 초록이 된다.
+fn hook(s: &Scratch, event: &str, input: &str) -> Output {
+    use std::io::Write as _;
+    let tmp = s.path().join("hooktmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let mut child = Command::new(BIN)
+        .args(["hook", event])
+        .current_dir(s.path())
+        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
+        .env("MOAI_NOW", NOW)
+        .env("TMPDIR", &tmp)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let _ = child.stdin.take().unwrap().write_all(input.as_bytes());
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "훅이 비영으로 끝났다 — 훅은 무엇이 어긋나도 0 이어야 한다\nstderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out
+}
+
+fn hook_out(s: &Scratch, event: &str, input: &str) -> String {
+    String::from_utf8(hook(s, event, input).stdout).unwrap()
+}
+
+/// 실린 글. 계약은 `hookSpecificOutput.additionalContext` 하나뿐이다.
+///
+/// **이스케이프를 푼 글이 아니라 파일에 적힌 그대로를 돌려준다.** 색이 샜는지
+/// 보려면 그래야 한다 — `\u001b` 로 인코딩된 이스케이프는 글자로 풀어 놓으면
+/// 평범한 제어문자가 되어 `one_json_value` 의 검사도 지나간다.
+fn carried_text(out: &str) -> String {
+    one_json_value(out);
+    assert!(out.contains("\"hookSpecificOutput\""), "계약 JSON 이 아니다 — {out}");
+    assert!(out.contains("\"hookEventName\""), "이벤트 이름이 없다 — {out}");
+    let key = "\"additionalContext\":\"";
+    let at = out.find(key).unwrap_or_else(|| panic!("실은 글이 없다 — {out}"));
+    let rest = &out[at + key.len()..];
+    // 싣는 글에 큰따옴표를 넣지 않는 시험만 이 헬퍼를 쓴다.
+    rest[..rest.find('"').unwrap_or(rest.len())].to_string()
+}
+
+fn event(s: &Scratch, session: &str) -> String {
+    let cwd = s.path().display().to_string();
+    assert!(!cwd.contains(['"', '\\']), "시험 경로에 따옴표가 있다 — {cwd}");
+    format!("{{\"session_id\":\"{session}\",\"cwd\":\"{cwd}\"}}")
+}
+
+/// 보드는 세션의 **첫 프롬프트에 한 번만** 실린다.
+///
+/// 한 번이 아니면 매 프롬프트에 같은 1KB 가 붙고, 그러면 사람이 훅을 꺼 버린다.
+/// 아예 안 실리면 이어받는 세션이 무엇이 열려 있는지 모른 채 규칙만 만난다.
+#[test]
+fn the_board_rides_the_first_prompt_only() {
+    let s = init("hookboard");
+    ok(s.path(), &["add", "락을 잡는다"]);
+
+    let first = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "s1")));
+    assert!(first.contains("락을 잡는다"), "보드가 안 실렸다\n{first}");
+    assert!(first.contains("TodoWrite"), "무엇을 쓰라는 말이 없다\n{first}");
+
+    let again = hook_out(&s, "user-prompt-submit", &event(&s, "s1"));
+    assert!(again.trim().is_empty(), "같은 세션에 두 번 실었다\n{again}");
+
+    // 다른 세션은 다시 받는다 — 표는 세션마다 따로다.
+    let other = hook_out(&s, "user-prompt-submit", &event(&s, "s2"));
+    assert!(!other.trim().is_empty(), "새 세션이 보드를 못 받았다");
+}
+
+/// 실리는 글에 색이 섞이면 안 된다. 계약 JSON 안의 이스케이프는 아무도
+/// 걷어내지 않아 받는 쪽 화면에 그 글자가 그대로 뜬다.
+#[test]
+fn no_escape_codes_ride_the_contract() {
+    let s = init("hookcolor");
+    ok(s.path(), &["add", "락을 잡는다"]);
+    // `NO_COLOR` 를 주지 않는다 — 끄고 시험하면 새는 것을 못 본다.
+    let out = hook_out(&s, "user-prompt-submit", &event(&s, "s1"));
+    // JSON 안에서 색은 `\u001b` 로 인코딩되어 실려 나간다. 날 이스케이프만
+    // 찾으면 바로 이 새는 길을 못 본다.
+    assert!(!out.contains("\\u001b"), "색이 샜다\n{out}");
+    assert!(!out.contains('\u{1b}'), "날 이스케이프가 샜다\n{out}");
+}
+
+/// 압축 직전에 집고 있던 것이 실린다. 집은 것이 없으면 조용하다 —
+/// 접기 직전의 자리는 비싸고, 거기에 "없다" 를 적을 일이 아니다.
+#[test]
+fn what_is_held_rides_the_fold() {
+    let s = init("hookfold");
+    let id = field(&ok(s.path(), &["add", "락을 잡는다", "--json"]), "id");
+
+    let quiet = hook_out(&s, "pre-compact", &event(&s, "s1"));
+    assert!(quiet.trim().is_empty(), "집은 것이 없는데 실었다\n{quiet}");
+
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    let held = carried_text(&hook_out(&s, "pre-compact", &event(&s, "s1")));
+    assert!(held.contains(&id), "집은 것의 id 가 없다\n{held}");
+    assert!(held.contains("락을 잡는다"), "집은 것의 제목이 없다\n{held}");
+}
+
+/// `SessionStart` 는 아무것도 싣지 않고 기준선만 적는다.
+///
+/// 재개에서 그 출력이 대화에 안 붙는 것을 확인하고 옮긴 자리다. 안 붙는 자리에
+/// 대고 실으면 훅이 사는지 죽었는지 모른 채 규칙만 남는다.
+#[test]
+fn the_session_start_only_writes_the_baseline() {
+    let s = init("hookbase");
+    // 에픽 없는 이슈 하나 = 경고 하나.
+    ok(s.path(), &["add", "락을 잡는다"]);
+
+    let out = hook_out(&s, "session-start", &event(&s, "s1"));
+    assert!(out.trim().is_empty(), "SessionStart 가 무언가 실었다\n{out}");
+
+    let baseline = s.path().join("hooktmp").join("moai-hook-s1.warn");
+    let n: usize = std::fs::read_to_string(&baseline)
+        .expect("기준선을 안 적었다")
+        .trim()
+        .parse()
+        .expect("기준선이 수가 아니다");
+    assert!(n > 0, "경고가 있는데 기준선이 0 이다");
+}
+
+/// **훅은 실패하지 않는다.** 무엇이 어긋나도 빈 출력과 종료 코드 0 이다.
+///
+/// 훅이 에러를 뱉으면 매 세션 시작이 시끄럽고, 그러면 사람이 훅을 꺼 버린다 —
+/// 꺼진 규칙은 없는 규칙이다.
+#[test]
+fn the_hook_never_fails() {
+    let s = init("hooksafe");
+    let outside = Scratch::new("hooksafe-outside");
+    for (what, input) in [
+        ("저장소가 아닌 곳", event(&outside, "s1")),
+        ("없는 자리", "{\"cwd\":\"/does/not/exist\",\"session_id\":\"s1\"}".into()),
+        ("JSON 이 아닌 입력", "not json at all".into()),
+        ("빈 입력", String::new()),
+        ("모르는 필드만 잔뜩", "{\"context_tokens\":9,\"transcript_path\":\"/x\"}".into()),
+    ] {
+        for ev in ["session-start", "user-prompt-submit", "pre-tool-use", "stop", "pre-compact"] {
+            let out = hook_out(&s, ev, &input);
+            assert!(out.trim().is_empty(), "{what} 에서 {ev} 가 무언가 냈다\n{out}");
+        }
+    }
+}
+
+/// 자리는 stdin 이 정한다. 훅 프로세스가 어디서 도는지는 아무도 약속하지 않았다.
+#[test]
+fn the_hook_works_where_stdin_says() {
+    let s = init("hookcwd");
+    ok(s.path(), &["add", "락을 잡는다"]);
+    let elsewhere = Scratch::new("hookcwd-elsewhere");
+
+    // 프로세스는 남의 디렉터리에서 돌지만, 이벤트가 가리키는 저장소를 읽는다.
+    use std::io::Write as _;
+    let tmp = s.path().join("hooktmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let mut child = Command::new(BIN)
+        .args(["hook", "user-prompt-submit"])
+        .current_dir(elsewhere.path())
+        .env("MOAI_NOW", NOW)
+        .env("TMPDIR", &tmp)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let _ = child.stdin.take().unwrap().write_all(event(&s, "s9").as_bytes());
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    let text = carried_text(&String::from_utf8(out.stdout).unwrap());
+    assert!(text.contains("락을 잡는다"), "stdin 이 가리킨 저장소를 안 읽었다\n{text}");
+}

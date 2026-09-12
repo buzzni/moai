@@ -9,6 +9,7 @@ mod cmd;
 mod config;
 mod draft;
 mod fail;
+mod hook;
 mod id;
 mod markdown;
 mod model;
