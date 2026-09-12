@@ -127,14 +127,27 @@ pub fn groups(all: &[Issue]) -> BTreeMap<&str, &str> {
 
 /// 이슈 id → 그것이 속한 마일스톤 id.
 ///
-/// **에픽을 거쳐 물려받는다.** 제 것이 있으면 그것, 없으면 에픽의 것,
-/// 그것도 없으면 부모의 것. 이슈마다 마일스톤을 적게 하면 에픽을 옮길 때
-/// 멤버를 전부 따라 고쳐야 하고, 반드시 하나는 빠뜨린다.
+/// **에픽이 마일스톤을 이긴다.** 제 에픽이 있으면 그 에픽의 마일스톤이고,
+/// 이슈가 `milestone` 을 따로 적었어도 그것은 지지 않는다. 없으면 조상을
+/// 타고 올라가며 처음 만나는 것이다. 이슈마다 마일스톤을 적게 하면 에픽을
+/// 옮길 때 멤버를 전부 따라 고쳐야 하고, 반드시 하나는 빠뜨린다.
+///
+/// **자리를 정하는 자와 세는 자가 하나다.** 한때 `nav` 는 에픽을 이기게 하고
+/// 여기서는 제 마일스톤을 이기게 해, `moai show <마일스톤>` 의 머리글이
+/// `멤버 0/1` 이라 말하면서 목록에는 아무것도 못 내는 일이 있었다(moai-lhbh).
+/// 자가 둘이면 둘은 언젠가 어긋난다 — 어느 쪽이 옳은지가 아니라 하나여야
+/// 한다는 것이 요점이다.
 pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
+    let epic_of = groups(all);
     let mut out = BTreeMap::new();
     for i in all {
-        let mut cur = i;
+        // 에픽이 있으면 **거기서부터** 센다. 제 줄에서 시작하면 제 마일스톤이
+        // 이기고, 그러면 트리는 에픽 밑에 두는데 셈만 딴 곳으로 간다.
+        let mut cur = match epic_of.get(i.id.as_str()).and_then(|e| by_id.get(e)) {
+            Some(e) => e,
+            None => i,
+        };
         // 에픽·부모를 타고 올라가며 처음 만나는 마일스톤. 고리가 있어도
         // 멈추도록 걸음 수를 제한한다.
         for _ in 0..64 {
@@ -1164,6 +1177,32 @@ mod tests {
         assert_eq!(m.get("argos-0002.aaa"), Some(&"argos-m001"), "손자가 안 물려받았다");
         assert_eq!(m.get("argos-0005"), Some(&"argos-m002"), "제가 적은 것이 져 버렸다");
         assert_eq!(m.get("argos-0009"), None);
+    }
+
+    /// **에픽이 마일스톤을 이긴다.** 멤버가 제 `milestone` 을 따로 적어도
+    /// 자리는 에픽이 정한다 — `nav` 가 그렇게 걸고, 세는 자와 거는 자가
+    /// 갈라지면 `show <마일스톤>` 이 "멤버 1건" 이라 말하면서 그 1건을 못 낸다.
+    #[test]
+    fn an_epic_outranks_a_members_own_milestone() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.milestone = Some("argos-m001".into());
+        let mut member_elsewhere = member("argos-0002", "argos-0001", "todo");
+        member_elsewhere.milestone = Some("argos-m002".into());
+        // 마일스톤을 안 가진 에픽. 그 멤버는 제 것을 적었어도 마일스톤 없음이다.
+        let bare = make("argos-0003", Kind::Epic, "todo");
+        let mut member_of_bare = member("argos-0004", "argos-0003", "todo");
+        member_of_bare.milestone = Some("argos-m002".into());
+        let issues = vec![
+            make("argos-m001", Kind::Milestone, "todo"),
+            make("argos-m002", Kind::Milestone, "todo"),
+            epic,
+            member_elsewhere,
+            bare,
+            member_of_bare,
+        ];
+        let m = milestones(&issues);
+        assert_eq!(m.get("argos-0002"), Some(&"argos-m001"), "제 마일스톤이 에픽을 이겼다");
+        assert_eq!(m.get("argos-0004"), None, "에픽에 없는 마일스톤이 멤버에게서 생겼다");
     }
 
     /// 묶음은 일이 아니다. 세면 보드의 숫자가 할 일과 묶음을 합친 것이 된다.
