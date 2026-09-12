@@ -191,6 +191,9 @@ impl Issue {
         if self.assignee.as_deref().is_some_and(|a| a.trim().is_empty()) {
             self.assignee = None;
         }
+        if self.assignee_email.as_deref().is_some_and(|e| e.trim().is_empty()) {
+            self.assignee_email = None;
+        }
         if self.assignee.is_none() {
             self.assignee_email = None;
         }
@@ -211,10 +214,15 @@ impl Issue {
         // 담당도 한 줄이다. `view::history` 와 상세는 "원소 하나가 한 줄" 로
         // 서 있어서, 담당에 든 줄바꿈 하나가 뒤따르는 줄의 열을 통째로 잃게
         // 한다 — 제목에 같은 규칙이 있는 것과 같은 이유다.
-        if let Some(a) = &self.assignee
-            && a.contains(['\n', '\r'])
-        {
-            return Err(format!("{}: 담당은 한 줄이다 — {a:?}", self.id));
+        //
+        // **메일도 같이 잰다.** 화면에 나가는 것은 둘을 합친 한 줄이라, 어느
+        // 쪽에 든 줄바꿈이든 같은 자리를 부순다.
+        for (what, v) in [("담당", &self.assignee), ("담당 메일", &self.assignee_email)] {
+            if let Some(v) = v
+                && v.contains(['\n', '\r'])
+            {
+                return Err(format!("{}: {what}은 한 줄이다 — {v:?}", self.id));
+            }
         }
         cfg.require_known(self.status.as_str()).map_err(|e| format!("{}: {e}", self.id))?;
         if self.priority.is_some_and(|p| p > MAX_PRIORITY) {
@@ -703,6 +711,13 @@ mod tests {
             (|i| i.priority = Some(9), "우선순위는"),
             (|i| i.tags = vec!["두 낱말".into()], "공백이나 쉼표"),
             (|i| i.assignee = Some("철수\n악성".into()), "담당은 한 줄"),
+            (
+                |i| {
+                    i.assignee = Some("철수".into());
+                    i.assignee_email = Some("a@b.c\n악성".into());
+                },
+                "담당 메일은 한 줄",
+            ),
             (|i| i.epic = Some("이상한".into()), "에픽 id 형식"),
         ] {
             let mut i = issue();
@@ -798,6 +813,14 @@ mod tests {
         i.assignee_email = Some("raven@buzzni.com".into());
         i.normalize();
         assert_eq!(i.assignee_email, None);
+
+        // 반대도 같다 — 빈 메일이 남아 있으면 `moai show` 가 이름 뒤에 빈
+        // 괄호를 그린다. 손으로 푼 충돌이 남기는 모양이다.
+        i.assignee = Some("레이븐".into());
+        i.assignee_email = Some("  ".into());
+        i.normalize();
+        assert_eq!(i.assignee_email, None);
+        assert_eq!(i.assignee.as_deref(), Some("레이븐"));
 
         // 빈 이름도 없는 이름이다. 손으로 푼 충돌이 남기는 모양이라 `None` 만
         // 보면 상세가 ` (raven@buzzni.com)` 를 낸다.

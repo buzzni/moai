@@ -1624,6 +1624,62 @@ fn reading_never_asks_who_you_are() {
     }
 }
 
+/// 저널을 적는 넷이 **모두** 사람을 묻고, 넷이 모두 `--user` 로 답을 받는다.
+/// 한 명령이 `ctx.user` 를 안 넘기면 컴파일은 그대로 되고 `--user` 만 조용히
+/// 무시된다 — 그 구멍은 이렇게 넷을 같이 돌려야 드러난다.
+#[test]
+fn every_journalling_command_asks_who_and_takes_an_answer() {
+    let s = init("whoall");
+    let id = add(s.path(), &["시험"]);
+    let each: [&[&str]; 4] =
+        [&["add", "또"], &["mv", &id, "review"], &["note", &id, "메모"], &["rm", &id]];
+
+    for args in each {
+        let out = without_user(s.path(), args);
+        assert!(!out.status.success(), "{args:?} 가 사람을 안 묻고 지나갔다");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("--user"), "{args:?}: {err}");
+    }
+    for args in each {
+        let mut v = args.to_vec();
+        v.extend_from_slice(&["--user", "레이븐 (raven@buzzni.com)"]);
+        let out = without_user(s.path(), &v);
+        assert!(out.status.success(), "{v:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let j = journal(s.path());
+    for kind in ["create", "status", "note", "rm"] {
+        assert!(
+            j.contains(&format!(r#""kind":"{kind}","by":"레이븐","by_email":"raven@buzzni.com""#)),
+            "{kind} 이 메일을 안 남겼다\n{j}"
+        );
+    }
+}
+
+/// `--dry-run` 은 아무것도 쓰지 않으므로 사람을 묻지 않는다. 물으면 계획을
+/// 확인해 보려던 사람이 설정부터 하게 된다.
+#[test]
+fn a_dry_run_does_not_ask_who_you_are() {
+    let s = init("dryrunwho");
+    use std::io::Write as _;
+    let mut child = Command::new(BIN)
+        .args(["add", "--from", "-", "--dry-run"])
+        .current_dir(s.path())
+        .env_remove("MOAI_ACTOR")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all("# 에픽\n- 하나\n".as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(issues(s.path()).lines().count(), 0);
+}
+
 /// `-a` 를 안 주면 만든 사람이 담당이다. `none` 이면 비운다. 이름만 준 것은
 /// 이름만 넣는다 — 남의 메일을 모르는 채로 맡기는 일이 실제로 있다.
 #[test]
