@@ -263,3 +263,5 @@
 {"ts":"2026-09-12T08:08:50Z","id":"moai-c0ns","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-12T08:09:54Z","id":"moai-c0ns","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"mv·edit·rm 은 Typed 에 넣지 않았다. id 가 대상을 정확히 가리켜 종류를 덧붙일 자리가 없고, epic·milestone 이 이미 그 규칙으로 서 있다 — 한쪽만 다르면 규칙이 둘이 된다. `moai idea rm <id>` 대신 `moai rm <id>` 다. ls 는 show 의 별명으로 뒀다 (moai epic ls 도 같이 생긴다) — 목록 동사가 둘이면 도움말이 둘 다 가르쳐야 한다."}
 {"ts":"2026-09-12T08:09:54Z","id":"moai-c0ns","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-12T08:10:31Z","id":"moai-dy49","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T08:12:27Z","id":"moai-dy49","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}

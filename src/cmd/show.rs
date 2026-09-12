@@ -217,7 +217,7 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
     let mut out = view::detail(issue, epic, &children, &[], &repo.config, &model::now(), raw);
     // 묶음을 펼치면 그 밑에 무엇이 있는지까지 보여 준다 — 묶음 하나를 보는
     // 이유가 바로 그것이다. 마일스톤이면 에픽과 이슈가 같이 나온다.
-    if issue.kind != Kind::Issue {
+    if report::is_group(issue) {
         let group = match issue.kind {
             Kind::Milestone => report::milestones(all),
             _ => report::groups(all),

@@ -1831,3 +1831,28 @@ fn editing_and_removing_an_idea_uses_the_plain_verbs() {
     ok(s.path(), &["rm", &id]);
     assert!(!issues(s.path()).contains(&id), "안 지워졌다");
 }
+
+/// **idea 는 묶음이 아니다.** 상세가 `멤버 0/0` 을 내면, 아무것도 안 담을
+/// 자리에 담을 것이 있다고 말하는 것이고 사람은 그 0 을 채우려 든다.
+#[test]
+fn an_idea_is_not_a_grouping() {
+    let s = init("ideadetail");
+    let id = ok(s.path(), &["idea", "add", "반짝", "-q"]).trim().to_string();
+    let out = ok(s.path(), &["show", &id]);
+    assert!(!out.contains("멤버"), "idea 를 묶음으로 펼쳤다 — {out}");
+    assert!(out.contains("idea"), "무슨 종류인지 안 말한다 — {out}");
+}
+
+/// idea 는 일도 아니다 — 보드에도 `ready` 에도 안 든다. 여기가 조용히
+/// 틀어지면 사람이 생각을 담을수록 화면이 시끄러워지고, 그러면 안 담게 된다.
+#[test]
+fn an_idea_stays_out_of_the_board_and_ready() {
+    let s = init("ideaquiet");
+    ok(s.path(), &["idea", "add", "반짝", "-q"]);
+    let work = add(s.path(), &["진짜 일"]);
+    let st = ok(s.path(), &["status"]);
+    assert!(st.contains("이슈 1"), "idea 를 이슈로 셌다 — {st}");
+    let r = ok(s.path(), &["ready"]);
+    assert!(r.contains(&work), "{r}");
+    assert_eq!(r.matches("argos-").count(), 1, "담아 둔 생각이 집을 일로 올라왔다 — {r}");
+}

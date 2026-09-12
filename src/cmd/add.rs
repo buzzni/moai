@@ -113,7 +113,9 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         paint(style::priority_style(made.priority()), &format!("p{}", made.priority())),
         paint(st, style::glyph(made.status.as_str())),
         paint(
-            if made.kind == Kind::Issue { style::PLAIN } else { style::EPIC },
+            // 묶음만 묶음 색이다. idea 는 담는 것이 아니라 담기는 것이라
+            // 여기서 갈라지면 만든 순간부터 에픽처럼 보인다.
+            if crate::report::is_group(&made) { style::EPIC } else { style::PLAIN },
             &made.title
         ),
     );

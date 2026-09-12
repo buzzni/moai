@@ -46,6 +46,13 @@ pub fn is_epic(i: &Issue) -> bool {
     i.kind == Kind::Epic
 }
 
+/// 밑에 무엇을 담는 것인가. **일이 아닌 것이 곧 묶음인 것은 아니다** —
+/// idea 도 일이 아니지만 아무것도 담지 않는다. 둘을 한 술어로 묻던 자리가
+/// 상세에 `멤버 0/0` 을 내, 채울 것이 없는 자리에 채울 것이 있다고 말했다.
+pub fn is_group(i: &Issue) -> bool {
+    matches!(i.kind, Kind::Epic | Kind::Milestone)
+}
+
 /// **일은 이슈가 한다.** 에픽도 마일스톤도 묶음이지 일이 아니다 — 세면
 /// 보드의 `todo 6` 이 실제로 할 일 넷과 묶음 둘을 합친 수가 된다.
 pub fn is_work(i: &Issue) -> bool {
@@ -1288,5 +1295,77 @@ mod tests {
         assert_eq!(kids, ["argos-0002.aaa"], "손자까지 직계로 셌다");
         let mem: Vec<&str> = members_of(&issues, "argos-0001").iter().map(|i| i.id.as_str()).collect();
         assert_eq!(mem, ["argos-0002"]);
+    }
+    // ── idea 는 일이 아니다 ──────────────────────────────────────────
+    //
+    // **여기가 이 에픽에서 제일 조용히 틀어질 자리다.** 경고 하나가 idea 를
+    // 세기 시작하면 사람이 생각을 담을수록 화면이 시끄러워지고, 그러면
+    // 안 담게 된다. 저절로 빠지는 곳이 대부분이라 시험으로 못 박는다.
+
+    fn idea(id: &str) -> Issue {
+        make(id, Kind::Idea, "todo")
+    }
+
+    #[test]
+    fn an_idea_never_comes_up_as_ready() {
+        let issues = vec![idea("argos-0001"), make("argos-0009", Kind::Issue, "todo")];
+        let picks: Vec<&str> = ready(&issues, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(picks, ["argos-0009"], "담아 둔 생각이 집을 일로 올라왔다");
+    }
+
+    #[test]
+    fn an_idea_is_not_counted_on_the_board() {
+        let issues = vec![idea("argos-0001"), make("argos-0009", Kind::Issue, "todo")];
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        assert_eq!(st.total, 1, "idea 를 이슈로 셌다");
+        assert_eq!(st.counts.get("todo"), Some(&1), "{:?}", st.counts);
+    }
+
+    /// 에픽에 든 idea 도 진행률을 움직이지 않는다. 움직이면 생각을 담을수록
+    /// 그 에픽이 덜 끝난 것으로 보인다.
+    #[test]
+    fn an_idea_does_not_move_an_epics_rollup() {
+        let mut inside = idea("argos-0003");
+        inside.epic = Some("argos-0001".into());
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "todo"),
+            member("argos-0002", "argos-0001", "done"),
+            inside,
+        ];
+        let rolls = rollup(&issues, &cfg());
+        let r = roll_of(&rolls, Some("argos-0001"));
+        assert_eq!((r.total, r.done, r.percent), (1, 1, Some(100)), "{r:?}");
+    }
+
+    /// **에픽 없이 사는 것이 정상이다.** 여기 걸리면 담는 족족 잔소리가 는다.
+    #[test]
+    fn an_idea_without_an_epic_is_not_a_warning() {
+        let issues: Vec<Issue> = (0..9).map(|n| idea(&format!("argos-000{n}"))).collect();
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(!kinds.contains(&"no_epic"), "{kinds:?}");
+    }
+
+    /// 방치 검사에도 안 걸린다. 담아 둔 생각은 오래 있는 것이 정상이라,
+    /// 나이로 잔소리하면 오래된 저장소일수록 화면이 시끄러워진다.
+    #[test]
+    fn an_old_idea_is_not_rotting() {
+        let mut old = idea("argos-0001");
+        old.status = Status::new("review");
+        let issues = vec![old];
+        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z");
+        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(!kinds.contains(&"stale_review"), "{kinds:?}");
+        assert!(!kinds.contains(&"stale_progress"), "{kinds:?}");
+        assert!(!kinds.contains(&"wip_overload"), "{kinds:?}");
+    }
+
+    /// 흐름도 일만 센다. idea 를 세면 "쌓이는 중" 이 담은 생각 수를 말하게 되고,
+    /// 그 숫자를 보고 사람이 담기를 멈춘다.
+    #[test]
+    fn the_flow_line_counts_work_only() {
+        let issues = vec![idea("argos-0001"), make("argos-0009", Kind::Issue, "todo")];
+        let st = status(&issues, &[], &cfg(), "2026-09-02T00:00:00Z");
+        assert_eq!(st.flow.created, 1, "{:?}", st.flow);
     }
 }
