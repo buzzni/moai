@@ -180,3 +180,4 @@
 {"ts":"2026-09-12T05:28:38Z","id":"moai-4lnq","kind":"note","by":"레이븐","text":"단계 끝 리뷰(max)가 낸 회귀 넷을 재현해서 고쳤다 (3d5b27b). 뿌리는 하나였다 — 자리를 정하는 술어(report::misplaced, nav::descendants)를 드러내는 일에도 그대로 쓴 것. 물음이 다르다: 자리는 '어디 걸리나'를 묻고, 경고는 '이 줄이 고쳐야 할 데가 있나'를 묻는다."}
 {"ts":"2026-09-12T05:28:38Z","id":"moai-qf5s","kind":"status","by":"레이븐","from":"todo","to":"done"}
 {"ts":"2026-09-12T05:34:12Z","id":"moai-lhbh","kind":"create","by":"레이븐","title":"show <마일스톤> 이 nav 와 report 의 서로 다른 자를 섞어 쓴다"}
+{"ts":"2026-09-12T04:54:49Z","id":"moai-fauw","kind":"create","by":"레이븐 (raven@buzzni.com)","title":"탐색기 상세가 프레임마다 본문을 다시 파싱한다"}
