@@ -781,7 +781,11 @@ fn from_stdin(dir: &Path, args: &[&str], input: &str) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+    // **stdin 을 안 읽고 돌아서는 길이 있다.** `idea add --from -` 처럼 먼저
+    // 거절하는 명령은 우리가 쓰기를 마치기 전에 끝나 있을 수 있고, 그때 쓰기는
+    // EPIPE 로 끝난다 — 그것은 시험이 보려던 거절 그 자체다. 여기서 패닉하면
+    // 같은 시험이 기계 부하에 따라 붙었다 떨어졌다 한다.
+    let _ = child.stdin.take().unwrap().write_all(input.as_bytes());
     child.wait_with_output().unwrap()
 }
 
