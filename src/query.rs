@@ -247,9 +247,18 @@ fn parse_priorities(raw: &[String]) -> Result<Vec<u8>, String> {
         .collect()
 }
 
-/// 고정 차례: 우선순위 → id. 급한 것이 위로 오고, 나머지는 파일과 같은 순서다.
+/// 화면에 놓는 차례: 우선순위 → id. 급한 것이 위로 오고, 나머지는 파일과
+/// 같은 순서다.
+///
+/// **차례를 정하는 곳은 여기 하나다.** 목록·에픽 표·탐색기가 저마다 같은 규칙을
+/// 다시 적으면 언젠가 하나만 고쳐지고, 그러면 한 화면 안에서 차례가 둘이 되어
+/// 보는 쪽이 규칙을 못 세운다. 실제로 에픽 표만 파일 순으로 남아 있었다.
+pub fn display_order(a: &Issue, b: &Issue) -> std::cmp::Ordering {
+    a.priority().cmp(&b.priority()).then_with(|| a.id.cmp(&b.id))
+}
+
 pub fn sort_for_display(issues: &mut [Issue]) {
-    issues.sort_by(|a, b| a.priority().cmp(&b.priority()).then_with(|| a.id.cmp(&b.id)));
+    issues.sort_by(display_order);
 }
 
 #[cfg(test)]

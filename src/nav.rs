@@ -193,7 +193,14 @@ impl Index {
             }
         }
 
-        out.sort_by_key(|e| sort_key(issues, e));
+        // 디렉터리 먼저, 그 안에서는 **목록과 같은 차례**.
+        out.sort_by(|a, b| {
+            let dir = |e: &Entry| u8::from(matches!(e, Entry::Leaf { .. }));
+            dir(a).cmp(&dir(b)).then_with(|| {
+                let at = |e: &Entry| e.at().expect("바구니는 여기 오지 않는다");
+                crate::query::display_order(&issues[at(a)], &issues[at(b)])
+            })
+        });
         // 바구니는 늘 끝에. 정상인 것이 먼저 보여야 한다.
         buckets.sort_by_key(|s| matches!(s, Seg::Lost));
         out.extend(buckets.into_iter().map(|seg| Entry::Dir { seg, at: None }));
@@ -240,16 +247,6 @@ impl Index {
             },
         }
     }
-}
-
-/// 디렉터리 먼저, 그다음 우선순위, 그다음 id. `moai show` 의 차례와 같은 뜻이다.
-///
-/// **id 를 빌려서 낸다.** `sort_by_key` 는 비교마다 이 함수를 다시 부르므로,
-/// `String` 을 돌려주면 목록 하나 세우는 데 id 가 O(n log n) 번 복제된다.
-fn sort_key<'a>(issues: &'a [Issue], e: &Entry) -> (u8, u8, &'a str) {
-    let at = e.at().expect("바구니는 여기 오지 않는다");
-    let dir = u8::from(matches!(e, Entry::Leaf { .. }));
-    (dir, issues[at].priority(), issues[at].id.as_str())
 }
 
 /// `Index::of` 안에서만 쓰는 계산판. 빌린 지도를 들고 다니므로 밖으로 나가지 않는다.

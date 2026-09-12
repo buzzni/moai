@@ -125,3 +125,8 @@
 {"ts":"2026-09-12T01:43:30Z","id":"moai-csnt","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
 {"ts":"2026-09-12T01:44:25Z","id":"moai-csnt","kind":"note","by":"레이븐","text":"CLI 의 view::stamp 를 공개해 탐색기가 같은 자를 쓰게 했다. 짧은 쪽(short_stamp)은 남겼지만 쓰임을 문서에 못 박았다 — 이력 줄은 한 줄에 시각·글·사람이 함께 들어가 연도까지 적을 칸이 없고, 생성·수정처럼 '언제인지가 뜻을 갖는' 자리는 긴 쪽을 쓴다. 애초에 어긋난 이유가 이 구분이 문서에 없어서였다."}
 {"ts":"2026-09-12T01:44:25Z","id":"moai-csnt","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
+{"ts":"2026-09-12T01:44:25Z","id":"moai-156a","kind":"status","by":"레이븐","from":"review","to":"done"}
+{"ts":"2026-09-12T01:44:25Z","id":"moai-csnt","kind":"status","by":"레이븐","from":"review","to":"done"}
+{"ts":"2026-09-12T01:49:36Z","id":"moai-cvwk","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T01:52:21Z","id":"moai-cvwk","kind":"note","by":"레이븐","text":"Roll 에 우선순위 필드를 더하지 않았다 — Roll 은 --json 으로 나가는 계약이고, 정렬하려고 계약을 넓힐 이유가 없다. 대신 rollup_of 안에서 묶음 목록을 먼저 정렬한다. 더 중요한 것은 차례를 정하는 규칙을 query::display_order 한 자리로 모은 것이다: 전에는 query·report·nav 세 곳이 같은 규칙을 따로 적고 있었고, 그래서 에픽 표 하나만 파일 순으로 남은 줄 아무도 몰랐다. ready 는 합치지 않았다 — '다음에 무엇을 집나' 는 '어떻게 늘어놓나' 와 다른 물음이라 끝나가는 에픽을 먼저 보는 제 규칙이 있다."}
+{"ts":"2026-09-12T01:52:21Z","id":"moai-cvwk","kind":"status","by":"레이븐","from":"in_progress","to":"review"}

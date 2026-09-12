@@ -185,9 +185,12 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
     // 자식이 물려받은 소속까지 센다. 트리가 그리는 것과 같은 판정이어야
     // 머리글의 건수와 그 밑의 줄 수가 어긋나지 않는다.
     let group = group_for(kind, issues);
-    let mut out: Vec<Roll> = issues
+    // **묶음도 급한 것이 위로 온다.** 파일 순(=id 순)으로 두면 이슈 목록과
+    // 차례가 달라, 같은 화면에서 규칙이 둘이 된다.
+    let mut groupings: Vec<&Issue> = issues.iter().filter(|i| i.kind == kind).collect();
+    groupings.sort_by(|a, b| crate::query::display_order(a, b));
+    let mut out: Vec<Roll> = groupings
         .iter()
-        .filter(|i| i.kind == kind)
         .map(|e| {
             let members: Vec<&Issue> = issues
                 .iter()
@@ -609,6 +612,25 @@ mod tests {
             ("todo".to_string(), 1), ("in_progress".to_string(), 0),
             ("review".to_string(), 0), ("done".to_string(), 2),
         ]));
+    }
+
+    /// 에픽 표도 **급한 것이 위로** 온다. 이슈 목록은 이미 그런데 에픽만
+    /// 파일 순(=id 순)이면, 한 화면에서 차례가 둘이라 보는 쪽이 규칙을 못 세운다.
+    #[test]
+    fn groupings_are_listed_urgent_first() {
+        let mut low = make("argos-0001", Kind::Epic, "todo");
+        low.priority = Some(3);
+        let mut high = make("argos-0009", Kind::Epic, "todo"); // id 는 뒤인데 급하다
+        high.priority = Some(0);
+        let mid = make("argos-0005", Kind::Epic, "todo"); // 기본값 p2
+        let issues = vec![low, mid, high];
+
+        let rolls = rollup(&issues, &cfg());
+        let ids: Vec<&str> = rolls.iter().filter_map(|r| r.id.as_deref()).collect();
+        assert_eq!(ids, ["argos-0009", "argos-0005", "argos-0001"], "{ids:?}");
+
+        // 묶음 없는 것은 우선순위가 없으니 늘 끝이다
+        assert_eq!(rolls.last().unwrap().id, None);
     }
 
     /// 빈 에픽도 줄을 갖는다. 안 그러면 "계획만 세우고 안 채운 것" 이 사라진다.
