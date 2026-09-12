@@ -115,7 +115,11 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // **미뤄 둔 줄을 옮겼으면 말한다.** 칸은 옮겨졌는데 그 줄은 보드에도
     // `ready` 에도 안 나오므로, 말하지 않으면 집어 든 일이 통째로 안 보인다 —
     // 막지는 않는다. 도로 집는 말은 `defer --undo` 하나다.
-    for (i, _) in moved.done.iter().filter(|(i, _)| i.is_deferred()) {
+    // **닫은 줄에는 안 붙인다.** 끝난 일은 보드에도 `ready` 에도 원래 안
+    // 나오므로 미뤘다는 것이 더는 그 줄이 안 보이는 까닭이 아니고, `--undo`
+    // 는 끝난 일을 계획에 도로 넣으라는 엉뚱한 말이 된다 — `status` 의
+    // `미뤄 둔 것` 줄도 같은 자로 닫힌 것을 뺀다.
+    for (i, _) in moved.done.iter().filter(|(i, _)| i.is_deferred() && !i.status.is_done()) {
         out.push(format!(
             "{}  {}",
             paint(style::ID, &i.id),

@@ -385,6 +385,14 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
         head.push(Span::raw("  ·  "));
         head.push(Span::styled(i.kind.as_str().to_string(), mark));
     }
+    // **미룬 것은 여기서 반드시 말한다.** 탐색기는 시키지도 않은 줄을 숨기지
+    // 않으므로 미룬 줄이 목록에 그대로 서 있는데, 그것이 `moai ready` 에
+    // 안 나오는 까닭은 이 패널 말고는 어디에도 안 적힌다 — 낱말은 CLI 상세와
+    // 같은 자리(`view::deferred_for`)에서 받는다.
+    if let Some(d) = crate::view::deferred_for(i, &app.now) {
+        head.push(Span::raw("  ·  "));
+        head.push(Span::styled(d, Style::new().fg(Color::Yellow)));
+    }
     out.push(Line::from(head));
 
     // 라벨 줄은 **모아 두고 폭을 재서** 낸다.

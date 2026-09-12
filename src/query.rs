@@ -117,7 +117,14 @@ impl Filter {
         }
         // 콕 집어 묻거나(`--type idea`) 글로 찾을 때는 저절로 켜진다.
         // **이미 적어 둔 생각을 다시 안 적으려면 찾아져야 한다.**
-        let ideas = raw.ideas || raw.kind == Some(Kind::Idea) || raw.grep.is_some();
+        //
+        // `--deferred` 도 콕 집어 묻는 자리다. **`status` 의 `미뤄 둔 것 N건`
+        // 은 종류를 안 가리고 세므로**(미뤄 둔 에픽·생각까지), 그 줄이 가리키는
+        // 명령이 생각을 숨기면 세어 놓고 못 보여 주는 수가 된다 — `idea_pile`
+        // 이 미뤄 둔 것을 빼서 피한 바로 그 덫이고, 여기서는 세는 쪽을 못
+        // 좁히니(좁히면 미뤄 둔 에픽이 아무 데서도 안 보인다) 보는 쪽을 연다.
+        let ideas =
+            raw.ideas || raw.kind == Some(Kind::Idea) || raw.grep.is_some() || raw.deferred;
         // **`--deferred` 는 그것만 본다.** 목록 자리에서 미룬 것은 done 처럼
         // 기본으로 빠지므로, 켜는 말과 좁히는 말이 하나여야 "미룬 것 보기" 가
         // 한 낱말로 끝난다.

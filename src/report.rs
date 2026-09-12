@@ -672,10 +672,18 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     }
 
     // 5. 계획만 세우고 안 채운 것 / 채우고 안 접은 것.
+    //
+    // **미뤄 둔 묶음은 꾸짖지 않는다.** 롤업이 `is_work` 로 세는 것은 미뤘다고
+    // 계획이 줄면 안 되기 때문이지 미룬 것을 고발하라는 뜻이 아니다 — 여기서
+    // 세면 "다음 분기에" 하고 통째로 미룬 에픽이 그 순간 `속이 빈 에픽` 으로
+    // 서고, 미룰수록 잔소리가 는다. `is_active` 가 일에 대해 하는 일을 묶음에
+    // 대해서도 하는 자리다.
+    let put_off_group = |id: &str| by_id.get(id).is_some_and(|g| g.is_deferred());
     let empty: Vec<String> = rolls
         .iter()
         .filter(|r| r.id.is_some() && r.total == 0)
         .filter_map(|r| r.id.clone())
+        .filter(|id| !put_off_group(id))
         .collect();
     if !empty.is_empty() {
         warnings.push(Warning::new("empty_epic", empty));
@@ -684,6 +692,7 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
         .iter()
         .filter(|r| r.percent == Some(100))
         .filter_map(|r| r.id.as_deref())
+        .filter(|id| !put_off_group(id))
         .filter(|id| issues.iter().any(|e| e.id == *id && !e.status.is_done()))
         .map(str::to_string)
         .collect();

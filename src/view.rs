@@ -52,7 +52,10 @@ fn tags_of(i: &Issue) -> String {
 }
 
 /// "미룸 (3일)" — 미루지 않았으면 `None`.
-fn deferred_for(i: &Issue, now: &str) -> Option<String> {
+///
+/// **탐색기도 이 낱말을 쓴다.** 같은 사실을 두 표면이 다른 말로 하면, 나란히
+/// 놓고 보는 사람이 어느 쪽을 믿을지 정하게 된다.
+pub fn deferred_for(i: &Issue, now: &str) -> Option<String> {
     let at = i.deferred_at.as_deref()?;
     Some(match crate::model::days_since(at, now) {
         Some(d) if d > 0 => format!("미룸 ({d}일)"),

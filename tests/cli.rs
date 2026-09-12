@@ -2526,3 +2526,42 @@ fn a_journal_only_write_claims_no_rewrite() {
     );
 }
 
+/// **세어 놓고 못 보여 주는 수를 만들지 않는다.** `미뤄 둔 것 N건` 은 종류를
+/// 안 가리고 세므로(미뤄 둔 에픽까지 비추려고), 그 줄이 가리키는 명령이
+/// 생각을 숨기면 가리킨 곳이 비어 있다.
+#[test]
+fn the_deferred_line_points_at_a_command_that_shows_them() {
+    let s = init("deferidea");
+    let id = ok(s.path(), &["idea", "add", "미룰 생각", "-q"]).trim().to_string();
+    ok(s.path(), &["defer", &id]);
+    assert!(ok(s.path(), &["status"]).contains("미뤄 둔 것 1건"), "안 센다");
+    let out = ok(s.path(), &["show", "--deferred"]);
+    assert!(out.contains(&id), "세어 놓고 가리킨 곳이 비었다 — {out}");
+}
+
+/// **닫은 줄에는 안 붙인다.** 끝난 일은 원래 보드에도 `ready` 에도 안
+/// 나오므로 미뤘다는 것이 더는 안 보이는 까닭이 아니고, `--undo` 는 끝난
+/// 일을 계획에 도로 넣으라는 엉뚱한 말이 된다.
+#[test]
+fn closing_a_deferred_row_drops_the_advisory() {
+    let s = init("defermvdone");
+    let id = add(s.path(), &["나중에"]);
+    ok(s.path(), &["defer", &id]);
+    let text = ok(s.path(), &["mv", &id, "done"]);
+    assert!(text.contains("done"), "안 옮겼다 — {text}");
+    assert!(!text.contains("defer --undo"), "끝난 일에게 도로 집으라 한다 — {text}");
+}
+
+/// **미뤄 둔 묶음은 꾸짖지 않는다.** "다음 분기에" 하고 통째로 미룬 에픽이
+/// 그 순간 `속이 빈 에픽` 으로 서면, 미룰수록 잔소리가 늘어 안 미루고 그냥
+/// 쌓아 둔다.
+#[test]
+fn a_deferred_grouping_is_not_also_scolded() {
+    let s = init("deferepicwarn");
+    let epic = ok(s.path(), &["epic", "add", "다음 분기", "-q"]).trim().to_string();
+    ok(s.path(), &["defer", &epic]);
+    let out = ok(s.path(), &["status"]);
+    assert!(!out.contains("속이 빈 에픽"), "미룬 에픽을 고발했다 — {out}");
+    assert!(out.contains("미뤄 둔 것 1건"), "제 이름으로도 안 말한다 — {out}");
+    assert!(out.contains("드러난 문제 없다"), "알림 하나로 깨끗함을 잃었다 — {out}");
+}
