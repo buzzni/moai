@@ -15,9 +15,29 @@ use crate::style::{self, paint};
 
 pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
-    let text = args.text.trim().to_string();
+    // **읽는 것을 먼저 한다.** `-b -` 는 stdin 을 기다리므로, 저장소를 열기
+    // 전에 읽어야 파이프가 안 닫힌 채로 락을 쥐고 있는 일이 없다.
+    //
+    // 자리 인자와 `-b` 는 clap 이 이미 서로 밀어냈다. 여기 오는 것은 둘 중
+    // 하나거나 아무것도 없는 경우뿐이다.
+    // **"안 줬다" 와 "준 자리가 비었다" 는 다른 말이다.** 파일을 잘못 짚어
+    // 빈 stdin 이 들어온 사람에게 "무엇을 적을지 안 줬다" 고 하면, 제가 준
+    // 것을 도구가 못 본 줄 알고 같은 명령을 다시 친다.
+    let asked = args.body.is_some();
+    let given = match (args.text, super::add::read_body(args.body)?) {
+        (Some(t), _) => t,
+        (None, Some(b)) => b,
+        (None, None) if asked => return Err(empty()),
+        (None, None) => {
+            return Err(Fail::coded(
+                "무엇을 적을지 안 줬다. 짧으면 자리 인자로, 길면 `-b -` 로 stdin 에서 준다",
+                super::code::BAD_INPUT,
+            ));
+        }
+    };
+    let text = given.trim().to_string();
     if text.is_empty() {
-        return Err(Fail::new("메모가 비었다"));
+        return Err(empty());
     }
     let at = model::now();
     let by = model::actor(ctx.user.as_deref())?;
@@ -45,4 +65,10 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
             _ => format!("{}  {}", " ".repeat(args.id.chars().count()), paint(style::DIM, l)),
         })
         .collect())
+}
+
+/// 빈 메모는 이력을 더럽히기만 한다. `defer` 의 빈 까닭을 안 적기로 한 것과
+/// 같은 판단이다.
+fn empty() -> Fail {
+    Fail::coded("메모가 비었다", super::code::BAD_INPUT)
 }

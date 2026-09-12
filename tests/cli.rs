@@ -3091,3 +3091,75 @@ fn every_refusal_is_undone_by_its_own_advice() {
     );
     assert!(args.contains(&id.as_str()), "낸 명령이 실제 이슈를 안 가리킨다 — {line}");
 }
+
+// ── 메모 — 긴 글을 남기는 길 ────────────────────────────────────────
+
+/// 리뷰 전문처럼 **긴 글**은 stdin 으로 들어간다.
+///
+/// 이 길이 없어서 리뷰가 낸 글이 매번 요약만 남고 버려졌다. 명령줄에 5천 자를
+/// 욱여넣을 수는 없고, 넣더라도 그 명령줄은 규칙이 읽는 바로 그 글이다.
+#[test]
+fn a_long_note_comes_from_stdin() {
+    let s = init("notebody");
+    let id = field(&ok(s.path(), &["add", "이슈", "--json"]), "id");
+    let long: String =
+        (0..200).map(|n| format!("리뷰가 낸 {n}번째 줄\n")).collect::<Vec<_>>().concat();
+
+    let out = from_stdin(s.path(), &["note", &id, "-b", "-"], &long);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // 저널에 **통째로** 들어간다 — 잘리면 원문을 남기는 뜻이 없다.
+    let shown = ok(s.path(), &["show", &id]);
+    assert!(shown.contains("리뷰가 낸 0번째 줄"), "첫 줄이 없다");
+    assert!(shown.contains("리뷰가 낸 199번째 줄"), "마지막 줄이 없다\n{shown}");
+}
+
+/// 짧은 발견은 그대로 자리 인자로 남는다. 있던 길을 막지 않는다.
+#[test]
+fn a_short_note_still_takes_a_bare_word() {
+    let s = init("noteshort");
+    let id = field(&ok(s.path(), &["add", "이슈", "--json"]), "id");
+    let out = ok(s.path(), &["note", &id, "파서가 BOM 에서 죽는다"]);
+    assert!(out.contains("파서가 BOM 에서 죽는다"), "{out}");
+}
+
+/// **둘은 서로 밀어낸다.** 둘 다 받으면 어느 쪽이 이기는지 아무도 못 외우고,
+/// 외우지 못하는 규칙은 언젠가 남의 글을 지운다.
+#[test]
+fn the_two_ways_to_write_a_note_push_each_other_out() {
+    let s = init("notepush");
+    let id = field(&ok(s.path(), &["add", "이슈", "--json"]), "id");
+    let out = moai(s.path(), &["note", &id, "가", "-b", "나"]);
+    assert!(!out.status.success(), "둘 다 받았다");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("cannot be used with"), "무엇이 부딪혔는지 안 말한다 — {said}");
+}
+
+/// **"안 줬다" 와 "준 자리가 비었다" 는 다른 말이다.** 파일을 잘못 짚어 빈
+/// stdin 이 들어온 사람에게 "안 줬다" 고 하면, 제가 준 것을 도구가 못 본 줄
+/// 알고 같은 명령을 다시 친다.
+#[test]
+fn an_empty_note_is_told_apart_from_a_missing_one() {
+    let s = init("noteempty");
+    let id = field(&ok(s.path(), &["add", "이슈", "--json"]), "id");
+
+    let missing = moai(s.path(), &["note", &id]);
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("안 줬다"),
+        "{}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
+
+    let blank = from_stdin(s.path(), &["note", &id, "-b", "-"], "   \n \n");
+    assert!(!blank.status.success(), "빈 메모가 들어갔다");
+    assert!(
+        String::from_utf8_lossy(&blank.stderr).contains("비었다"),
+        "{}",
+        String::from_utf8_lossy(&blank.stderr)
+    );
+
+    // 둘 다 저널에 아무것도 안 남겼다.
+    let shown = ok(s.path(), &["show", &id]);
+    assert_eq!(shown.matches("note:").count(), 0, "{shown}");
+}

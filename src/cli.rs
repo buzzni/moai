@@ -132,6 +132,15 @@ pub enum Cmd {
     /// 지운다
     Rm(RmArgs),
     /// 이슈에 메모를 남긴다 (저널에만 쌓인다)
+    #[command(after_help = "\
+  moai note moai-4aex \"파서가 BOM 에서 죽는다\"
+  moai note moai-4aex -b - < review.txt        긴 글은 stdin 에서
+  moai note moai-4aex -b - <<'MD' ... MD
+
+  짧은 발견은 자리 인자로, 리뷰 전문처럼 긴 글은 `-b -` 로 넣는다. 둘은 서로
+  밀어낸다 — 둘 다 받으면 어느 쪽이 이기는지 아무도 못 외운다.
+
+  메모는 저널에만 쌓이고 스냅샷을 안 바꾼다. `moai show <id>` 가 이력으로 낸다.")]
     Note(NoteArgs),
     /// 지금 안 할 일을 계획에서 잠시 뺀다 (또는 도로 집는다)
     #[command(after_help = "\
@@ -524,7 +533,14 @@ pub struct NoteArgs {
     pub id: String,
     /// 다음 사람(또는 다음 에이전트)이 읽을 발견사항. `--` 로 시작해도 된다
     #[arg(value_name = "글", allow_hyphen_values = true)]
-    pub text: String,
+    pub text: Option<String>,
+
+    /// 긴 글. `-` 이면 stdin 에서 읽는다
+    ///
+    /// **자리 인자와 서로 밀어낸다.** 둘 다 받으면 어느 쪽이 이기는지 아무도
+    /// 못 외우고, 외우지 못하는 규칙은 언젠가 남의 글을 지운다.
+    #[arg(short = 'b', long, value_name = "글", conflicts_with = "text")]
+    pub body: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
