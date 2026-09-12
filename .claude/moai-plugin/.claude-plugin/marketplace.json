@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "description": "moai 가 심는다. 손으로 고치면 다음 `moai skill install` 이 덮어쓴다.",
-  "name": "moai-moai-95e8",
+  "name": "moai-moai-0cb7",
   "owner": {
     "name": "moai"
   },

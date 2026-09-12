@@ -30,10 +30,20 @@ pub const DIR: &str = ".claude/moai-plugin";
 /// 그때 뒤에 심은 쪽이 등록에 실패하고, 실패한 자리에서 할 수 있는 일이
 /// 없다(접두어는 못 바꾼다). 자리를 섞으면 그 막다른 길이 사라진다.
 pub fn market(prefix: &str, root: &Path) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    root.hash(&mut h);
-    format!("moai-{prefix}-{:04x}", h.finish() % 0x1_0000)
+    format!("moai-{prefix}-{:04x}", stable(root.to_string_lossy().as_bytes()) % 0x1_0000)
+}
+
+/// 손으로 적은 FNV-1a. **`DefaultHasher` 를 쓰지 않는다** — 그 알고리즘은
+/// rustc 판 사이에 바뀌어도 된다고 문서가 밝혀 두었다. 이름과 판이 그것에
+/// 기대면 컴파일러를 올린 날 이름이 바뀌고, 옛 등록은 `지우지 않는다` 는
+/// 약속 때문에 그대로 남아 훅이 두 벌 돈다 — 보드도 거절문도 두 번이다.
+fn stable(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
 
 /// 훅이 걸리는 자리와 그때 부를 이벤트.
@@ -59,11 +69,15 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// 꺼진 규칙은 없는 규칙이다. 한 번은 이 가드가 없어 세션 하나가 통째로
 /// 잠겼다: 도구 호출마다 훅이 실패해 `Bash` 도 `Write` 도 안 돌았다.
 fn command(exe: &str, event: &str) -> String {
-    if exe.contains(['"', '\\', '$', '`']) {
-        // 따옴표를 깨는 경로는 아예 안 쓴다. PATH 에 기대는 편이 낫다.
-        return format!("command -v moai >/dev/null 2>&1 && moai hook {event} || exit 0");
-    }
-    format!("[ -x \"{exe}\" ] && \"{exe}\" hook {event} || exit 0")
+    // 따옴표를 깨는 경로는 아예 안 쓴다. 셸 한 줄이 깨지면 그 세션의 모든
+    // 도구 호출이 막힌다.
+    let exe = if exe.contains(['"', '\\', '$', '`']) { "moai" } else { exe };
+    // **`command -v` 로 본다. `[ -x ]` 가 아니다.** `[ -x "moai" ]` 는 PATH 를
+    // 안 보고 `./moai` 를 본다 — PATH 에 moai 가 있는 남의 기계에서 훅이 전부
+    // 조용히 `exit 0` 으로 빠지고, 그 모습은 "규칙이 통과했다" 와 똑같다.
+    // 이 저장소에서 그 검사가 참으로 보였던 것도 하필 `moai` 라는 **디렉터리**가
+    // 있어서였다. `command -v` 는 절대 경로도 이름도 옳게 가린다.
+    format!("command -v -- \"{exe}\" >/dev/null 2>&1 && \"{exe}\" hook {event} || exit 0")
 }
 
 /// 심을 파일들. 경로는 `DIR` 부터의 상대다.
@@ -79,7 +93,6 @@ pub fn tree(
     prefix: &str,
     root: &Path,
     exe: &str,
-    author: Option<&str>,
     skill: &str,
     reference: &str,
 ) -> Vec<(PathBuf, String)> {
@@ -90,7 +103,7 @@ pub fn tree(
     // 판은 **딸린 파일과 훅 명령**에서 나온다. 매니페스트 자신은 그 판을 담고
     // 있으므로 셈에 넣을 수 없다 — 넣으면 해시가 제 꼬리를 문다.
     let version = version_of(&files, &format!("{exe}\u{1}{prefix}"));
-    files.push((PathBuf::from(".claude-plugin/plugin.json"), plugin_json(exe, author, &version)));
+    files.push((PathBuf::from(".claude-plugin/plugin.json"), plugin_json(exe, &version)));
     files.push((
         PathBuf::from(".claude-plugin/marketplace.json"),
         marketplace_json(prefix, root),
@@ -99,21 +112,30 @@ pub fn tree(
 }
 
 fn version_of(files: &[(PathBuf, String)], exe: &str) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut all = String::new();
     for (path, body) in files {
-        path.hash(&mut h);
-        body.hash(&mut h);
+        all.push_str(&path.to_string_lossy());
+        all.push('\u{1}');
+        all.push_str(body);
+        all.push('\u{2}');
     }
-    exe.hash(&mut h);
-    HOOKS.hash(&mut h);
-    WATCHED.hash(&mut h);
+    all.push_str(exe);
+    for (at, event, message) in HOOKS {
+        all.push_str(at);
+        all.push_str(event);
+        all.push_str(message);
+    }
+    all.push_str(WATCHED);
     // semver 세 자리에 나눠 담는다. `claude` 가 판을 semver 로 읽는다.
-    let n = h.finish();
+    let n = stable(all.as_bytes());
     format!("{}.{}.{}", n % 1000, (n / 1000) % 1000, (n / 1_000_000) % 1000)
 }
 
-fn plugin_json(exe: &str, author: Option<&str>, version: &str) -> String {
+/// **누가 심었는지는 안 적는다.** 심는 사람마다 이 파일이 바뀌면, 팀이
+/// 커밋해 두고 쓰는 트리가 사람이 바뀔 때마다 헛 diff 를 낸다. 그리고 그 값이
+/// 판(해시)에 안 들어가면 내용이 달라졌는데 판은 그대로인 자리가 생긴다 —
+/// `claude` 가 옛 복사를 그대로 쓴다. 안 적는 것이 둘 다 푼다.
+fn plugin_json(exe: &str, version: &str) -> String {
     let mut hooks = BTreeMap::new();
     for (at, event, message) in HOOKS {
         let entry = serde_json::json!({
@@ -129,15 +151,12 @@ fn plugin_json(exe: &str, author: Option<&str>, version: &str) -> String {
         };
         hooks.insert(*at, vec![group]);
     }
-    let mut manifest = serde_json::json!({
+    let manifest = serde_json::json!({
         "name": "moai",
         "description": "이 저장소의 이슈 트래커. 보드를 세션에 싣고, 새 이슈가 집고 있는 단위 밖으로 새는 것을 막는다.",
         "version": version,
         "hooks": hooks,
     });
-    if let Some(who) = author {
-        manifest["author"] = serde_json::json!({ "name": who });
-    }
     pretty(&manifest)
 }
 
@@ -188,7 +207,7 @@ mod tests {
     }
 
     fn tree_at(prefix: &str, root: &Path, exe: &str, skill: &str) -> BTreeMap<String, String> {
-        tree(prefix, root, exe, Some("레이븐 (raven@example.com)"), skill, "참고")
+        tree(prefix, root, exe, skill, "참고")
             .into_iter()
             .map(|(p, b)| (p.display().to_string(), b))
             .collect()
@@ -250,6 +269,17 @@ mod tests {
         assert_ne!(name(&here), name(&there), "접두어가 같다고 이름까지 같다");
     }
 
+    /// **이름으로 적을 때도 PATH 를 본다.** `[ -x "moai" ]` 는 PATH 가 아니라
+    /// `./moai` 를 보므로, PATH 에 moai 가 있는 남의 기계에서 훅이 전부 조용히
+    /// 빠진다 — 그 모습은 "규칙이 통과했다" 와 구별되지 않는다. 이 저장소에서
+    /// 그 검사가 참으로 보였던 것도 하필 `moai` 라는 디렉터리가 있어서였다.
+    #[test]
+    fn a_bare_name_is_looked_up_on_the_path() {
+        let cmd = command("moai", "stop");
+        assert!(cmd.contains("command -v"), "PATH 를 안 본다 — {cmd}");
+        assert!(!cmd.contains("[ -x"), "상대 경로를 본다 — {cmd}");
+    }
+
     /// 훅은 **없으면 조용히 0** 이다. 한 번은 이 가드가 없어 세션 하나가
     /// 통째로 잠겼다 — 훅이 실패하자 `Bash` 도 `Write` 도 안 돌았다.
     #[test]
@@ -265,6 +295,7 @@ mod tests {
                     assert!(cmd.contains("exit 0"), "가드가 없다 — {cmd}");
                     // 경로가 따옴표에 싸이므로 `moai" hook ...` 모양이다.
                     assert!(cmd.contains("/nowhere/moai"), "엉뚱한 것을 부른다 — {cmd}");
+                    assert!(cmd.contains("command -v"), "있는지부터 안 본다 — {cmd}");
                     assert!(cmd.contains(" hook "), "훅을 안 부른다 — {cmd}");
                     seen += 1;
                 }
@@ -302,7 +333,7 @@ mod tests {
     #[test]
     fn a_hostile_path_falls_back_to_the_name() {
         let cmd = command("/tmp/\"moai\"", "stop");
-        assert!(!cmd.contains('"'), "{cmd}");
-        assert!(cmd.contains("command -v moai"), "{cmd}");
+        assert!(!cmd.contains("/tmp/"), "그 경로가 그대로 들어갔다 — {cmd}");
+        assert!(cmd.contains("\"moai\" hook stop"), "이름으로도 안 부른다 — {cmd}");
     }
 }

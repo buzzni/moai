@@ -315,6 +315,10 @@ pub fn guard_create(issues: &[Issue], cfg: &Config, cmd: &str) -> Decision {
         // 자리로 읽기로 한 것과 같은 까닭이다.
         moai_verbs(seg).first().map(String::as_str) == Some("add")
             && !seg.iter().any(|t| t == "--from" || t.starts_with("--from="))
+            // **도움말은 만들지 않는다.** 우리가 심는 스킬이 "모르면
+            // `moai <명령> --help` 를 보라" 고 적어 두는데, 그 길을 막으면
+            // 규칙이 제가 시킨 것을 막는다.
+            && !seg.iter().any(|t| t == "-h" || t == "--help")
     });
     let Some(seg) = makes else {
         return Decision::Pass;
@@ -655,6 +659,16 @@ mod tests {
         assert_eq!(guard_create(&all, &cfg(), "moai add \"안의 일\" -e t-e"), Decision::Pass);
         let why = denied(&guard_create(&all, &cfg(), "moai add \"딴 일\"")).to_string();
         assert!(why.contains("-e t-e"), "물려받은 에픽을 안 가리킨다\n{why}");
+    }
+
+    /// 도움말을 보는 것은 만드는 것이 아니다. 우리가 심는 스킬이 바로 그
+    /// 길을 일러 주므로, 막으면 규칙이 제가 시킨 것을 막는다.
+    #[test]
+    fn asking_for_help_is_not_creating() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        for cmd in ["moai add --help", "moai add -h", "moai idea add --help"] {
+            assert_eq!(guard_create(&all, &cfg(), cmd), Decision::Pass, "{cmd}");
+        }
     }
 
     /// 담아 두는 것은 언제나 자유고, 계획을 한 번에 세우는 것도 그렇다.

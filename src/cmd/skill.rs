@@ -20,20 +20,9 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
 
     let exe = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
     let exe = skill::exe_name(&exe, on_path().as_deref());
-    // **누군지 몰라도 심는다.** 심는 것은 이력이 남는 일이 아니라 설정이라,
-    // 여기서 사람을 물으면 설정 없는 기계에서 설치가 통째로 막힌다.
-    let author = crate::model::actor(ctx.user.as_deref())
-        .ok()
-        .map(|a| format!("{} ({})", a.name, a.email));
     let market = skill::market(&repo.config.prefix, &root);
-    let files = skill::tree(
-        &repo.config.prefix,
-        &root,
-        &exe,
-        author.as_deref(),
-        body::SKILL,
-        body::REFERENCE,
-    );
+    // **누구인지 묻지 않는다.** 심는 것은 이력이 남는 일이 아니라 설정이다.
+    let files = skill::tree(&repo.config.prefix, &root, &exe, body::SKILL, body::REFERENCE);
 
     if dry_run {
         if ctx.json {
@@ -42,8 +31,8 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
                 "market": market,
                 "scope": scope,
                 "exe": exe,
+                "dry_run": true,
                 "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
-                "installed": false,
             }));
         }
         let mut out = vec![format!("심을 것 — {}", dir.display())];
@@ -67,24 +56,27 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
 
     // **같은 이름이 남의 저장소를 가리키면 등록하지 않는다.** 덮어쓰면 그
     // 저장소의 규칙이 이쪽에 걸린다 — 조용히 엉뚱해지는 쪽이라 더 나쁘다.
-    let steps = match known_at(&market) {
-        Some(other) if !same_dir(&other, &dir) => vec![(
-            format!(
-                "`{market}` 이 이미 {} 를 가리킨다 — 등록은 건너뛴다.\n                     그쪽을 안 쓰면 `claude plugin marketplace remove {market}` 뒤에 다시 부른다",
-                other.display()
-            ),
+    let clash = known_at(&market).filter(|other| !same_dir(other, &dir));
+    let steps = match &clash {
+        Some(other) => vec![(
+            format!("`{market}` 이 이미 {} 를 가리킨다 — 등록은 건너뛴다", other.display()),
             false,
         )],
-        listed => register(&dir, &market, scope, listed.is_some()),
+        None => register(&dir, &market, scope, known_at(&market).is_some()),
     };
 
     if ctx.json {
         return super::json_line(&serde_json::json!({
+            "dry_run": false,
             "dir": dir.display().to_string(),
-            "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
+            "market": market,
             "scope": scope,
             "exe": exe,
+            "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
             "registered": steps.iter().all(|(_, ok)| *ok),
+            // **못 한 까닭을 기계에도 준다.** 사람 출력에만 적어 두면 스크립트는
+            // `registered: false` 만 보고 무엇을 해야 할지 모른다.
+            "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
         }));
     }
 
@@ -96,6 +88,13 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     if steps.iter().all(|(_, ok)| *ok) {
         out.push(String::new());
         out.push("Claude 를 다시 열면 든다. 이미 열려 있는 세션은 옛 판을 계속 쓴다".into());
+    } else if clash.is_some() {
+        // **하지 말라던 것을 일러 주지 않는다.** 여기서 `marketplace add` 를
+        // 내면, 시킨 대로 한 사람이 남의 저장소 등록을 이쪽으로 돌려놓는다 —
+        // 이 가드가 막으려던 바로 그 일이다.
+        out.push(String::new());
+        out.push(format!("그 저장소를 이제 안 쓰면 `claude plugin marketplace remove {market}` 뒤에"));
+        out.push("다시 부른다. 둘 다 쓰면 한쪽은 `--scope user` 로 심는다".into());
     } else {
         out.push(String::new());
         out.push("등록은 손으로 마친다:".into());
@@ -151,7 +150,9 @@ fn register(dir: &Path, market: &str, scope: &str, listed: bool) -> Vec<(String,
     // 이미 심긴 곳에서는 `install` 이 아무것도 안 한다. 판이 바뀌었을 때
     // 새 복사를 뜨는 것은 `update` 뿐이라 둘 다 부른다.
     let installed = run(&["plugin", "install", &target, "--scope", scope, "-y"]);
-    let updated = run(&["plugin", "update", &target, "--scope", scope]);
+    // **`-y` 를 준다.** `claude` 는 stdout 이 TTY 가 아니면 그것을 요구하고,
+    // 여기서는 언제나 파이프다 — 없으면 이 갈래가 늘 실패한다.
+    let updated = run(&["plugin", "update", &target, "--scope", scope, "-y"]);
     steps.push(("플러그인을 등록했다".to_string(), installed || updated));
     steps
 }

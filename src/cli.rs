@@ -539,14 +539,15 @@ pub enum SkillCmd {
 
   판은 심는 내용의 해시다. 내용이 같으면 판도 같아 헛 업데이트가 없다.
 
-  moai skill install                  이 저장소에만 (기본)
+  moai skill install                  나만 (기본. settings.local.json)
   moai skill install --scope user     이 기계의 모든 저장소에
+  moai skill install --scope project  팀과 함께 (커밋되는 settings.json)
   moai skill install --dry-run        무엇이 심길지만 본다
 
   이미 열려 있는 Claude 세션은 옛 판을 계속 쓴다 — 다시 열어야 든다.")]
     Install {
         /// 어디에 등록할까
-        #[arg(long, value_name = "범위", default_value = "project")]
+        #[arg(long, value_name = "범위", default_value = "local")]
         scope: Scope,
 
         /// 심지 않고 무엇이 심길지만 낸다
@@ -558,9 +559,13 @@ pub enum SkillCmd {
 /// 설치 범위. **`--user` 를 못 쓴다** — 그 이름은 이미 "누가 하는가" 다.
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq)]
 pub enum Scope {
-    /// 이 저장소에. 팀이 그대로 커밋할 수 있다
+    /// 이 저장소에, 커밋되는 자리에 (`.claude/settings.json`)
+    ///
+    /// **기본이 아니다.** `claude` 가 거기 적는 것은 절대 경로라, 커밋하면
+    /// 남의 기계에서 아무 데도 안 가리키는 줄이 되고 그 사람이 제 손으로
+    /// 심으면 줄이 하나 더 는다 — 사람 수만큼 쌓인다.
     Project,
-    /// 이 저장소에, 나만 (커밋 안 되는 자리)
+    /// 이 저장소에, 나만 (`.claude/settings.local.json` — 기본)
     Local,
     /// 이 기계의 모든 저장소에
     User,
