@@ -8,3 +8,15 @@
 /moai
 # 리뷰 툴이 남기는 업로드·스냅샷
 /.aplus/
+
+# 비밀은 커밋하지 않는다. 워크트리로는 .worktreeinclude 가 날라 준다
+/.env
+
+# 스튜디오가 제 세션을 적어 두는 곳
+/.ax/
+
+# auto-added by aplus-dev-studio (block env secrets)
+.env
+
+# auto-added by aplus-dev-studio (block env secrets)
+.env.*

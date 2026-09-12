@@ -234,3 +234,25 @@
 {"ts":"2026-09-12T07:03:23Z","id":"moai-9yrv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 상세가 이제 아무 데도 안 쓰이는 제 milestone 을 그대로 그린다"}
 {"ts":"2026-09-12T07:03:32Z","id":"moai-9yrv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"에픽이 마일스톤을 이기게 되면서(3301f6e) 에픽 멤버가 제 `milestone` 을 적어도 셈·트리·필터 어디에도 안 쓰인다. 그런데 tui/draw.rs:392 상세 패널은 그 값을 `마일스톤` 이라 그대로 그린다 — 패널은 m002 라 말하고 트리와 `show --milestone` 은 m001 로 세는 상태다. 자를 하나로 모은 커밋이 화면에 자 하나를 남겨 둔 셈이라, 실제 자리(report::milestones)를 그리거나 제 것이 무시된다는 것을 함께 적어야 한다. 리뷰에서 발견했고 UI 동작 변경이라 그 자리에서 안 고쳤다."}
 {"ts":"2026-09-12T07:15:15Z","id":"moai-lhbh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰(high)가 이 고침의 구멍 둘을 찾았다. 첫째, 없는 에픽을 가리키는 줄이 제 마일스톤으로 되돌아가 같은 어긋남이 되살아났다(리뷰가 고침). 둘째, 그 고침이 없는 id 만 막고 종류가 틀린 참조는 그대로 뒀다 — 이슈를 에픽 자리에 적으면 nav 는 (길 잃음) 으로 보내는데 report 는 그 이슈의 마일스톤을 타고 올라가 세서 '멤버 0/2 · 목록 1건' 이 났다. 재현하고 막았다. 판정은 misplaced 와 같은 모양으로 뒀다 — misplaced 가 milestones 를 부르므로 되부를 수는 없다."}
+{"ts":"2026-09-12T07:33:41Z","id":"moai-oidr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"5단계 — idea 단계 (반짝 생각을 담는 칸)"}
+{"ts":"2026-09-12T07:33:41Z","id":"moai-ma1e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Kind::Idea — 종류 하나 더하기"}
+{"ts":"2026-09-12T07:33:41Z","id":"moai-c0ns","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`moai idea` 동사 고정 — add/ls/show/edit/rm"}
+{"ts":"2026-09-12T07:33:41Z","id":"moai-dy49","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"idea 는 일이 아니다 — ready·보드·경고에서 빠지는 자리 잡기"}
+{"ts":"2026-09-12T07:33:41Z","id":"moai-9gry","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`moai idea promote` — idea 하나를 에픽+이슈로 펼치고 닫는다"}
+{"ts":"2026-09-12T07:33:41Z","id":"moai-5tff","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"status 가 쌓인 idea 를 드러낸다"}
+{"ts":"2026-09-12T07:33:41Z","id":"moai-szd9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show/query 에서 idea 를 거르고 찾기"}
+{"ts":"2026-09-12T07:33:41Z","id":"moai-kebu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"AGENTS.md 블록·도움말·JSON 훑기에 idea 를 넣는다"}
+{"ts":"2026-09-12T07:33:48Z","id":"moai-0k1p","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"6단계 — TUI 컴포넌트 층 (포커스·입력·편집·스크롤)"}
+{"ts":"2026-09-12T07:33:48Z","id":"moai-crfj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"포커스 모델 — Pane 과 Tab 순환"}
+{"ts":"2026-09-12T07:33:48Z","id":"moai-b8wq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"포커스 표시 — 초록 테두리, 색 없이도 읽히게"}
+{"ts":"2026-09-12T07:33:48Z","id":"moai-qxbt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"스크롤 컴포넌트 — 포커스 있는 쪽이 이동키를 먹는다"}
+{"ts":"2026-09-12T07:33:48Z","id":"moai-cjgk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"한 줄 입력 컴포넌트 — 커서·좌우 이동·지우기·글자 폭"}
+{"ts":"2026-09-12T07:33:48Z","id":"moai-zag3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`/` 와 `f` 를 입력 컴포넌트 위로 옮긴다 (동작은 그대로)"}
+{"ts":"2026-09-12T07:33:48Z","id":"moai-zyuy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"여러 줄 편집 컴포넌트 — 본문을 받는 칸"}
+{"ts":"2026-09-12T07:33:48Z","id":"moai-agtu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"컴포넌트의 키 처리를 순수 함수로 시험한다"}
+{"ts":"2026-09-12T07:33:53Z","id":"moai-9p36","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"7단계 — TUI 의 첫 쓰기 — idea 담기"}
+{"ts":"2026-09-12T07:33:53Z","id":"moai-2yay","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이벤트 루프에서 store::with_write 를 부르는 길 하나"}
+{"ts":"2026-09-12T07:33:53Z","id":"moai-11s4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`n` — 생각 조각 담기 폼과 저장"}
+{"ts":"2026-09-12T07:33:53Z","id":"moai-064q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쓴 뒤 목록을 다시 세우고 만든 것에 커서를 둔다"}
+{"ts":"2026-09-12T07:33:53Z","id":"moai-nmv2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"누군지 모르면 쓰기 앞에서 한 번 묻는다"}
+{"ts":"2026-09-12T07:36:16Z","id":"moai-7j4j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"쓰기 입력창은 moai-nmv2 (7단계 — TUI 의 첫 쓰기) 가 이어받는다. 이 줄은 그 조건이 실제로 온 것을 적어 둔다."}
