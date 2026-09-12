@@ -16,6 +16,7 @@ mod model;
 mod nav;
 mod query;
 mod report;
+mod skill;
 mod store;
 mod style;
 mod text;

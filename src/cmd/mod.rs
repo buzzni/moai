@@ -15,10 +15,11 @@ pub mod note;
 pub mod ready;
 pub mod rm;
 pub mod show;
+pub mod skill;
 pub mod status;
 pub mod tui;
 
-use crate::cli::{Cli, Cmd, IdeaCmd, Typed};
+use crate::cli::{Cli, Cmd, IdeaCmd, SkillCmd, Typed};
 use crate::model::Kind;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -92,6 +93,9 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
     match cmd {
         Cmd::Init { prefix, no_agents } => init::run(&ctx, prefix.as_deref(), no_agents),
         Cmd::Hook { event } => hook::run(&ctx, event),
+        Cmd::Skill(SkillCmd::Install { scope, dry_run }) => {
+            skill::install(&ctx, scope.as_str(), dry_run)
+        }
         Cmd::Add(a) => add::run(&ctx, a, None),
         Cmd::Show(a) => show::run(&ctx, a, None),
         Cmd::Mv(a) => mv::run(&ctx, a),

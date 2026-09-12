@@ -207,6 +207,10 @@ pub enum Cmd {
         event: crate::hook::Event,
     },
 
+    /// Claude 에 스킬과 훅을 심는다 (다시 불러도 된다)
+    #[command(subcommand)]
+    Skill(SkillCmd),
+
     /// 이 저장소에 .moai/ 를 심는다 (다시 불러도 된다)
     #[command(after_help = "\
   이미 심긴 곳에서 다시 부르면 딸린 파일(.gitattributes·.gitignore·AGENTS.md)
@@ -521,4 +525,53 @@ pub struct NoteArgs {
     /// 다음 사람(또는 다음 에이전트)이 읽을 발견사항. `--` 로 시작해도 된다
     #[arg(value_name = "글", allow_hyphen_values = true)]
     pub text: String,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SkillCmd {
+    /// 플러그인 트리를 심고 `claude` 에 등록한다
+    #[command(after_help = "\
+  `.claude/moai-plugin/` 에 스킬과 훅을 심고 `claude` 에 등록한다. 사람의
+  settings.json 은 건드리지 않는다 — 두 키를 넣는 것은 `claude` 다.
+
+  **지우지 않는다.** 다시 불러도 덮어쓰기만 한다. 돌고 있는 세션이 물고 있는
+  훅 파일을 지우면 그 세션의 도구 호출이 전부 막힌다.
+
+  판은 심는 내용의 해시다. 내용이 같으면 판도 같아 헛 업데이트가 없다.
+
+  moai skill install                  이 저장소에만 (기본)
+  moai skill install --scope user     이 기계의 모든 저장소에
+  moai skill install --dry-run        무엇이 심길지만 본다
+
+  이미 열려 있는 Claude 세션은 옛 판을 계속 쓴다 — 다시 열어야 든다.")]
+    Install {
+        /// 어디에 등록할까
+        #[arg(long, value_name = "범위", default_value = "project")]
+        scope: Scope,
+
+        /// 심지 않고 무엇이 심길지만 낸다
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+/// 설치 범위. **`--user` 를 못 쓴다** — 그 이름은 이미 "누가 하는가" 다.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq)]
+pub enum Scope {
+    /// 이 저장소에. 팀이 그대로 커밋할 수 있다
+    Project,
+    /// 이 저장소에, 나만 (커밋 안 되는 자리)
+    Local,
+    /// 이 기계의 모든 저장소에
+    User,
+}
+
+impl Scope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Scope::Project => "project",
+            Scope::Local => "local",
+            Scope::User => "user",
+        }
+    }
 }

@@ -1,0 +1,71 @@
+{
+  "author": {
+    "name": "레이븐 (raven@buzzni.com)"
+  },
+  "description": "이 저장소의 이슈 트래커. 보드를 세션에 싣고, 새 이슈가 집고 있는 단위 밖으로 새는 것을 막는다.",
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "command": "[ -x \"/home/coder/workspace/moa-issue/target/release/moai\" ] && \"/home/coder/workspace/moa-issue/target/release/moai\" hook pre-compact || exit 0",
+            "statusMessage": "집고 있던 일을 적어 둔다...",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "[ -x \"/home/coder/workspace/moa-issue/target/release/moai\" ] && \"/home/coder/workspace/moa-issue/target/release/moai\" hook pre-tool-use || exit 0",
+            "statusMessage": "moai 규칙을 본다...",
+            "timeout": 15,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash|Edit|Write|NotebookEdit|Skill"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "[ -x \"/home/coder/workspace/moa-issue/target/release/moai\" ] && \"/home/coder/workspace/moa-issue/target/release/moai\" hook session-start || exit 0",
+            "statusMessage": "moai 경고를 센다...",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "[ -x \"/home/coder/workspace/moa-issue/target/release/moai\" ] && \"/home/coder/workspace/moa-issue/target/release/moai\" hook stop || exit 0",
+            "statusMessage": "moai 상태를 견준다...",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "[ -x \"/home/coder/workspace/moa-issue/target/release/moai\" ] && \"/home/coder/workspace/moa-issue/target/release/moai\" hook user-prompt-submit || exit 0",
+            "statusMessage": "moai 보드를 읽는다...",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "name": "moai",
+  "version": "380.497.789"
+}

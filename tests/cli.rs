@@ -939,6 +939,9 @@ fn the_json_sweep_covers_every_command() {
 /// 목록을 여기 한 자리에 두어야 그 견줌이 뜻을 갖는다.
 const JSON_SWEEP: &[&str] = &[
     "init", "add", "status", "ready", "show", "note", "link", "defer", "tui", "edit", "mv", "rm",
+    // `skill` 은 `--dry-run` 으로만 부른다. 진짜 설치는 `claude` 를 부르고
+    // 사람의 설정을 건드리므로 훑기가 할 일이 아니다.
+    "skill",
     // 종류 네임스페이스는 `moai <종류> show --json` 으로 같은 길을 지난다.
     "issue", "epic", "milestone", "idea",
 ];
@@ -972,6 +975,7 @@ fn every_command_still_speaks_json() {
         vec!["edit", &id, "--tag", "bug", "--json"],
         vec!["mv", &id, "review", "--json"],
         vec!["rm", &id, "--json"],
+        vec!["skill", "install", "--dry-run", "--json"],
     ];
     // **적어 둔 목록과 실제로 부르는 목록을 여기서 잇는다.** 잇지 않으면
     // `JSON_SWEEP` 에 이름만 적고 한 번도 안 부르는 명령이 생기고, 그러면

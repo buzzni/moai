@@ -2,6 +2,15 @@
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true,
     "voltagent-lang@voltagent-subagents": true,
-    "caveman@caveman": true
+    "caveman@caveman": true,
+    "moai@moai-moai-95e8": true
+  },
+  "extraKnownMarketplaces": {
+    "moai-moai-95e8": {
+      "source": {
+        "source": "directory",
+        "path": "/home/coder/workspace/moa-issue/.claude/moai-plugin"
+      }
+    }
   }
 }

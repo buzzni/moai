@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "description": "moai 가 심는다. 손으로 고치면 다음 `moai skill install` 이 덮어쓴다.",
+  "name": "moai-moai-95e8",
+  "owner": {
+    "name": "moai"
+  },
+  "plugins": [
+    {
+      "category": "productivity",
+      "description": "이 저장소의 할 일·규칙·보드.",
+      "name": "moai",
+      "source": "./"
+    }
+  ]
+}
