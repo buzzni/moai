@@ -122,3 +122,6 @@
 {"ts":"2026-09-12T01:40:59Z","id":"moai-156a","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
 {"ts":"2026-09-12T01:43:24Z","id":"moai-156a","kind":"note","by":"레이븐","text":"여백 폭을 커서 기호와 한 자리(LEFT_GUTTER)에서 정했다 — 둘이 갈라지면 여백이 또 어긋난다. Block::padding 을 쓰면 inner() 가 테두리와 여백을 함께 빼 주므로 폭 계산은 손댈 데가 없었다. 테스트를 쓰면서 두 번 헛짚었다: 테두리가 맞붙어 '││' 라 split 에 빈 조각이 끼는 것, 그리고 커서 줄의 '>' 는 원래 그 여백에 놓이므로 좌우 들여쓰기를 곧이곧대로 견주면 안 되는 것. 우측이 LEFT_GUTTER 만큼 들어갔는지만 보는 쪽으로 바꿨다."}
 {"ts":"2026-09-12T01:43:24Z","id":"moai-156a","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
+{"ts":"2026-09-12T01:43:30Z","id":"moai-csnt","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T01:44:25Z","id":"moai-csnt","kind":"note","by":"레이븐","text":"CLI 의 view::stamp 를 공개해 탐색기가 같은 자를 쓰게 했다. 짧은 쪽(short_stamp)은 남겼지만 쓰임을 문서에 못 박았다 — 이력 줄은 한 줄에 시각·글·사람이 함께 들어가 연도까지 적을 칸이 없고, 생성·수정처럼 '언제인지가 뜻을 갖는' 자리는 긴 쪽을 쓴다. 애초에 어긋난 이유가 이 구분이 문서에 없어서였다."}
+{"ts":"2026-09-12T01:44:25Z","id":"moai-csnt","kind":"status","by":"레이븐","from":"in_progress","to":"review"}

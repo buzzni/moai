@@ -308,8 +308,10 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
         let (label, mark) = if done { ("풀림", "✓") } else { ("막힘", "·") };
         out.push(field(label, &format!("{mark} {b}  {}", app.title_of(b))));
     }
-    out.push(field("생성", &crate::view::short_stamp(&i.created_at)));
-    out.push(field("수정", &crate::view::short_stamp(&i.updated_at)));
+    // CLI 상세와 **같은 자**를 쓴다. 두 표면이 같은 값을 다르게 적으면 보는
+    // 쪽이 어느 쪽을 믿을지 정해야 한다.
+    out.push(field("생성", &crate::view::stamp(&i.created_at)));
+    out.push(field("수정", &crate::view::stamp(&i.updated_at)));
 
     // 디렉터리면 그 밑의 셈도 함께.
     if matches!(e, Entry::Dir { .. }) {
@@ -761,6 +763,15 @@ mod tests {
             "우측이 테두리에 붙었다 (들여쓴 칸 {}) — {row:?}",
             inset(right)
         );
+    }
+
+    /// 생성·수정에 **연도가 있다.** 해를 넘긴 저장소에서 작년 9월인지 올해
+    /// 9월인지 화면만 보고 알 수 없으면 시각이 시각 구실을 못 한다.
+    /// CLI 상세(`view::detail`)가 이미 연도를 내므로 같은 자를 쓴다.
+    #[test]
+    fn timestamps_carry_the_year_like_the_cli_does() {
+        let lines = render(&mut app(), 100, 16).join("\n");
+        assert!(lines.contains("2026-09-01"), "연도가 없다\n{lines}");
     }
 
     /// 빈 저장소도 그려진다.

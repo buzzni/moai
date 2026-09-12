@@ -25,16 +25,21 @@ fn cell(style: Style, text: &str, w: usize) -> String {
     format!("{}{}", paint(style, text), " ".repeat(pad))
 }
 
-fn stamp(at: &str) -> String {
+/// `2026-09-11T15:18:26Z` → `2026-09-11 15:18`.
+///
+/// **연도를 낸다.** 상세는 정확해야 하는 자리다 — 해를 넘긴 저장소에서
+/// `09-11` 만 보이면 작년인지 올해인지 화면으로는 못 가린다. 짧게 적는 것은
+/// [`short_stamp`] 고, 그쪽은 줄이 빽빽한 이력에만 쓴다.
+pub fn stamp(at: &str) -> String {
     match (at.get(..10), at.get(11..16)) {
         (Some(d), Some(t)) => format!("{d} {t}"),
         _ => at.to_string(),
     }
 }
 
-/// `2026-09-11T15:18:26Z` → `09-11 15:18`. **한 곳에서만 정한다** — 시각의
-/// 모양은 `model` 이 정하는 것이고, 그것을 짧게 읽는 법이 표면마다 갈라지면
-/// 같은 줄이 CLI 와 TUI 에서 다른 때로 보인다.
+/// `2026-09-11T15:18:26Z` → `09-11 15:18`. **이력 줄 전용이다** — 한 줄에
+/// 시각·글·사람이 함께 들어가는 자리라 연도까지 적을 칸이 없다. 언제인지가
+/// 뜻을 갖는 자리(생성·수정)는 [`stamp`] 를 쓴다.
 pub fn short_stamp(at: &str) -> String {
     match (at.get(5..10), at.get(11..16)) {
         (Some(d), Some(t)) => format!("{d} {t}"),
