@@ -15,6 +15,7 @@ fs2           = "0.4"
 # 기본 기능을 끈다 — 달력 위젯은 `time` 을, 다른 백엔드는 termwiz 를 끌고 온다.
 # crossterm 0.29 는 이미 로컬에 있던 판이라 그것을 그대로 쓴다.
 ratatui       = { version = "0.30", default-features = false, features = ["crossterm_0_29", "layout-cache"] }
+pulldown-cmark = { version = "0.13.4", default-features = false }
 
 [profile.release]
 lto = true

@@ -1,0 +1,418 @@
+//! 본문 마크다운을 **표면 중립 블록**으로 접는다.
+//!
+//! 터미널도 ratatui 도 모른다. `nav` 와 같은 자리의 순수 모듈이라 TTY 없이
+//! 시험된다.
+//!
+//! # 색이 아니라 뜻을 낸다
+//!
+//! [`Role`] 은 `Strong`·`Code` 같은 **뜻**이지 색이 아니다. 여기서 색을 정하면
+//! `anstyle`(CLI)과 ratatui(탐색기) 중 하나를 골라야 하고, 그 순간 이 모듈이
+//! 한쪽 표면에 묶인다. 뜻을 색으로 옮기는 일은 표면이 각자 한다 — `색이 혼자
+//! 뜻을 지지 않는다`는 규칙도 그쪽에서 지킨다.
+//!
+//! # 원문을 잃지 않는다
+//!
+//! 그린 글은 기호가 지워져 되돌릴 수 없다. 본문을 긁어 붙이거나 마크다운을
+//! 고쳐야 할 때가 있으므로 표면은 원문 보는 길을 함께 준다 — `--json` 의
+//! `body` 는 **언제나 원문**이다.
+
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+
+/// 글 한 조각이 지는 뜻.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Plain,
+    Strong,
+    Emphasis,
+    Code,
+    /// 링크의 **글**. 주소는 따로 낸다 — 터미널에서 주소는 대개 방해다.
+    Link,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span {
+    pub text: String,
+    pub role: Role,
+}
+
+/// 목록의 한 줄. 깊이를 들고 있어 겹친 목록도 한 벌로 그린다 —
+/// 재귀 구조로 두면 그리는 쪽이 그 재귀를 두 번 짜야 한다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Item {
+    pub depth: u8,
+    pub spans: Vec<Span>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Block {
+    Heading { level: u8, spans: Vec<Span> },
+    Para(Vec<Span>),
+    List { ordered: bool, items: Vec<Item> },
+    /// 들여쓴 코드와 ``` 코드 둘 다 여기 온다.
+    Code { lang: Option<String>, lines: Vec<String> },
+    Quote(Vec<Span>),
+    Table { head: Vec<Vec<Span>>, rows: Vec<Vec<Vec<Span>>> },
+    Rule,
+}
+
+/// 본문을 블록으로. **마크다운이 아닌 글도 그대로 통과한다** — 이 저장소의
+/// 본문은 마크다운을 조금 쓰는 산문이지 마크다운 문서가 아니다.
+pub fn parse(src: &str) -> Vec<Block> {
+    // 표는 크레이트 기능이 아니라 파서 옵션이다. 이 저장소 본문이 표를 쓴다.
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_TABLES);
+    Fold::default().run(Parser::new_ext(src, opts))
+}
+
+/// 이벤트를 받아 블록을 쌓는 자리.
+///
+/// **상태 기계를 하나만 둔다.** 블록마다 따로 접으면 "지금 굵게인가" 같은 것을
+/// 여러 곳이 저마다 세게 되고, 반드시 한 곳이 어긋난다.
+#[derive(Default)]
+struct Fold {
+    out: Vec<Block>,
+    /// 지금 모으는 조각들. 문단·제목·인용·표 칸이 모두 여기로 온다.
+    spans: Vec<Span>,
+    /// 겹친 강조를 센다 — `**굵게 `코드`**` 처럼 겹칠 수 있다.
+    strong: u32,
+    emphasis: u32,
+    link: u32,
+    /// 목록은 끝날 때 한 벌로 낸다. 안쪽 목록이 바깥 것을 끊지 않게 한다.
+    list: Option<(bool, Vec<Item>)>,
+    depth: u8,
+    code: Option<(Option<String>, String)>,
+    quote: bool,
+    heading: Option<u8>,
+    table: Option<(Vec<Vec<Span>>, Vec<Vec<Vec<Span>>>)>,
+    in_head: bool,
+    row: Vec<Vec<Span>>,
+}
+
+impl Fold {
+    fn run(mut self, events: Parser) -> Vec<Block> {
+        for e in events {
+            self.one(e);
+        }
+        self.out
+    }
+
+    fn role(&self) -> Role {
+        // 겹쳤을 때의 차례: 코드가 가장 세고, 그다음 굵게. 하나만 고를 수 있는
+        // 자리라 **더 좁은 뜻**을 남긴다.
+        if self.link > 0 {
+            Role::Link
+        } else if self.strong > 0 {
+            Role::Strong
+        } else if self.emphasis > 0 {
+            Role::Emphasis
+        } else {
+            Role::Plain
+        }
+    }
+
+    fn push(&mut self, text: &str, role: Role) {
+        if text.is_empty() {
+            return;
+        }
+        // 같은 뜻이 이어지면 한 조각으로 잇는다. 파서는 줄 단위로 쪼개 주는데,
+        // 그대로 두면 그리는 쪽이 조각마다 헛되이 칠한다.
+        match self.spans.last_mut() {
+            Some(last) if last.role == role => last.text.push_str(text),
+            _ => self.spans.push(Span { text: text.to_string(), role }),
+        }
+    }
+
+    fn take(&mut self) -> Vec<Span> {
+        std::mem::take(&mut self.spans)
+    }
+
+    fn one(&mut self, e: Event) {
+        match e {
+            Event::Start(t) => self.start(t),
+            Event::End(t) => self.end(t),
+            Event::Text(t) => match &mut self.code {
+                Some((_, buf)) => buf.push_str(&t),
+                None => {
+                    let role = self.role();
+                    self.push(&t, role);
+                }
+            },
+            Event::Code(t) => self.push(&t, Role::Code),
+            // 줄바꿈은 한 칸으로. 문단 안의 줄 나눔은 그리는 쪽이 폭을 보고
+            // 다시 접으므로, 여기서 원문의 줄을 지키면 두 번 접힌다.
+            Event::SoftBreak | Event::HardBreak => {
+                let role = self.role();
+                self.push(" ", role);
+            }
+            Event::Rule => self.out.push(Block::Rule),
+            _ => {}
+        }
+    }
+
+    fn start(&mut self, t: Tag) {
+        match t {
+            Tag::Strong => self.strong += 1,
+            Tag::Emphasis => self.emphasis += 1,
+            Tag::Link { .. } => self.link += 1,
+            Tag::Heading { level, .. } => self.heading = Some(level as u8),
+            Tag::BlockQuote(_) => self.quote = true,
+            Tag::CodeBlock(kind) => {
+                let lang = match kind {
+                    CodeBlockKind::Fenced(l) if !l.is_empty() => Some(l.to_string()),
+                    _ => None,
+                };
+                self.code = Some((lang, String::new()));
+            }
+            Tag::List(first) => match self.list {
+                // 안쪽 목록. 바깥 것을 끊지 않고 깊이만 는다.
+                //
+                // **모으던 글을 먼저 매듭짓는다.** 안 그러면 바깥 줄의 글이
+                // `spans` 에 남아 있다가 안쪽 첫 줄에 이어 붙는다 — `- 둘` 과
+                // `  - 둘의 속` 이 `둘둘의 속` 한 줄이 되고 바깥 줄은 사라진다.
+                Some(_) => {
+                    let spans = self.take();
+                    let depth = self.depth;
+                    if let Some((_, items)) = &mut self.list
+                        && !spans.is_empty()
+                    {
+                        items.push(Item { depth, spans });
+                    }
+                    self.depth = self.depth.saturating_add(1);
+                }
+                None => self.list = Some((first.is_some(), Vec::new())),
+            },
+            Tag::Table(_) => self.table = Some((Vec::new(), Vec::new())),
+            Tag::TableHead => self.in_head = true,
+            _ => {}
+        }
+    }
+
+    fn end(&mut self, t: TagEnd) {
+        match t {
+            TagEnd::Strong => self.strong = self.strong.saturating_sub(1),
+            TagEnd::Emphasis => self.emphasis = self.emphasis.saturating_sub(1),
+            TagEnd::Link => self.link = self.link.saturating_sub(1),
+            TagEnd::Heading(_) => {
+                let level = self.heading.take().unwrap_or(1);
+                let spans = self.take();
+                self.out.push(Block::Heading { level, spans });
+            }
+            TagEnd::CodeBlock => {
+                if let Some((lang, buf)) = self.code.take() {
+                    let lines = buf.lines().map(str::to_string).collect();
+                    self.out.push(Block::Code { lang, lines });
+                }
+            }
+            TagEnd::Item => {
+                let spans = self.take();
+                let depth = self.depth;
+                if let Some((_, items)) = &mut self.list
+                    && !spans.is_empty()
+                {
+                    items.push(Item { depth, spans });
+                }
+            }
+            TagEnd::List(_) => {
+                if self.depth > 0 {
+                    self.depth -= 1;
+                } else if let Some((ordered, items)) = self.list.take() {
+                    self.out.push(Block::List { ordered, items });
+                }
+            }
+            TagEnd::BlockQuote(_) => self.quote = false,
+            TagEnd::Paragraph => {
+                let spans = self.take();
+                if spans.is_empty() {
+                    return;
+                }
+                // 목록 안의 문단은 그 줄의 몫이다 — `Item` 이 받아 간다.
+                if self.list.is_some() {
+                    self.spans = spans;
+                } else if self.quote {
+                    self.out.push(Block::Quote(spans));
+                } else {
+                    self.out.push(Block::Para(spans));
+                }
+            }
+            TagEnd::TableCell => {
+                let cell = self.take();
+                self.row.push(cell);
+            }
+            TagEnd::TableHead => {
+                self.in_head = false;
+                let row = std::mem::take(&mut self.row);
+                if let Some((head, _)) = &mut self.table {
+                    *head = row;
+                }
+            }
+            TagEnd::TableRow => {
+                let row = std::mem::take(&mut self.row);
+                if let Some((_, rows)) = &mut self.table
+                    && !row.is_empty()
+                {
+                    rows.push(row);
+                }
+            }
+            TagEnd::Table => {
+                if let Some((head, rows)) = self.table.take() {
+                    self.out.push(Block::Table { head, rows });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod real {
+    /// **이 저장소의 진짜 본문**으로 돌려 본다. 합성 예제는 제가 만든 모양만
+    /// 시험하므로, 실제로 쓰는 글에서 블록이 어떻게 나오는지는 따로 봐야 한다.
+    /// `cargo test -- --ignored --nocapture real` 로 부른다.
+    #[test]
+    #[ignore]
+    fn fold_every_body_in_this_repo() {
+        let load = crate::store::parse_issues(
+            &std::fs::read_to_string(".moai/issues.jsonl").unwrap_or_default(),
+        );
+        let (mut bodies, mut blocks) = (0, 0);
+        let mut kinds = std::collections::BTreeMap::new();
+        for i in load.issues.iter().filter(|i| i.body.is_some()) {
+            bodies += 1;
+            for b in super::parse(i.body.as_deref().unwrap_or_default()) {
+                blocks += 1;
+                let k = match b {
+                    super::Block::Heading { .. } => "제목",
+                    super::Block::Para(_) => "문단",
+                    super::Block::List { .. } => "목록",
+                    super::Block::Code { .. } => "코드",
+                    super::Block::Quote(_) => "인용",
+                    super::Block::Table { .. } => "표",
+                    super::Block::Rule => "줄",
+                };
+                *kinds.entry(k).or_insert(0) += 1;
+            }
+        }
+        println!("본문 {bodies}개 → 블록 {blocks}개");
+        for (k, n) in kinds {
+            println!("  {k} {n}");
+        }
+        assert!(blocks > 0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plain(t: &str) -> Span {
+        Span { text: t.into(), role: Role::Plain }
+    }
+    fn strong(t: &str) -> Span {
+        Span { text: t.into(), role: Role::Strong }
+    }
+    fn code(t: &str) -> Span {
+        Span { text: t.into(), role: Role::Code }
+    }
+
+    /// 마크다운을 안 쓴 줄은 손대지 않는다. 본문 대부분이 그렇다.
+    #[test]
+    fn plain_prose_passes_through() {
+        assert_eq!(parse("그냥 한 줄이다."), vec![Block::Para(vec![plain("그냥 한 줄이다.")])]);
+    }
+
+    /// 굵게와 코드가 **뜻으로** 나온다. 기호는 사라진다.
+    #[test]
+    fn emphasis_and_code_become_roles() {
+        let got = parse("**굵게** 와 `코드` 가 섞인 줄");
+        assert_eq!(
+            got,
+            vec![Block::Para(vec![
+                strong("굵게"),
+                plain(" 와 "),
+                code("코드"),
+                plain(" 가 섞인 줄"),
+            ])]
+        );
+    }
+
+    /// 목록은 깊이를 들고 나온다. 이 저장소 본문이 겹친 목록을 쓴다.
+    #[test]
+    fn lists_carry_their_depth() {
+        let got = parse("- 하나\n- 둘\n  - 둘의 속\n");
+        let Some(Block::List { ordered, items }) = got.first() else {
+            panic!("목록이 아니다 — {got:?}");
+        };
+        assert!(!ordered);
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].depth, 0);
+        assert_eq!(items[2].depth, 1, "겹친 목록의 깊이를 잃었다");
+        assert_eq!(items[2].spans, vec![plain("둘의 속")]);
+    }
+
+    #[test]
+    fn ordered_lists_are_marked_as_such() {
+        let got = parse("1. 하나\n2. 둘\n");
+        let Some(Block::List { ordered, items }) = got.first() else {
+            panic!("{got:?}");
+        };
+        assert!(ordered);
+        assert_eq!(items.len(), 2);
+    }
+
+    /// 들여쓴 코드와 ``` 코드가 같은 블록으로 온다. 본문은 둘 다 쓴다.
+    #[test]
+    fn both_code_shapes_land_in_one_block() {
+        let fenced = parse("```rust\nlet x = 1;\n```\n");
+        assert_eq!(
+            fenced,
+            vec![Block::Code { lang: Some("rust".into()), lines: vec!["let x = 1;".into()] }]
+        );
+        let indented = parse("    moai status\n    moai ready\n");
+        assert_eq!(
+            indented,
+            vec![Block::Code {
+                lang: None,
+                lines: vec!["moai status".into(), "moai ready".into()],
+            }]
+        );
+    }
+
+    #[test]
+    fn headings_keep_their_level() {
+        let got = parse("## 설계\n");
+        assert_eq!(got, vec![Block::Heading { level: 2, spans: vec![plain("설계")] }]);
+    }
+
+    #[test]
+    fn quotes_and_rules_survive() {
+        assert_eq!(parse("> 인용한 줄\n"), vec![Block::Quote(vec![plain("인용한 줄")])]);
+        assert_eq!(parse("---\n"), vec![Block::Rule]);
+    }
+
+    /// 표는 머리와 줄이 나뉘어 나온다. 칸 맞추는 일은 그리는 쪽이 한다.
+    #[test]
+    fn tables_split_into_head_and_rows() {
+        let got = parse("| 후보 | 판 |\n|---|---|\n| termimad | 0.35 |\n");
+        let Some(Block::Table { head, rows }) = got.first() else {
+            panic!("표가 아니다 — {got:?}");
+        };
+        assert_eq!(head.len(), 2);
+        assert_eq!(head[0], vec![plain("후보")]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][1], vec![plain("0.35")]);
+    }
+
+    /// 빈 본문이 무너지지 않는다.
+    #[test]
+    fn an_empty_body_is_no_blocks() {
+        assert!(parse("").is_empty());
+        assert!(parse("\n\n").is_empty());
+    }
+
+    /// 문단은 문단끼리 나뉜다 — 한 덩어리로 뭉치면 그릴 때 줄 사이가 사라진다.
+    #[test]
+    fn blank_lines_separate_paragraphs() {
+        let got = parse("첫 문단\n\n둘째 문단\n");
+        assert_eq!(got.len(), 2, "{got:?}");
+    }
+}

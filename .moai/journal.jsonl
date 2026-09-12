@@ -130,3 +130,10 @@
 {"ts":"2026-09-12T01:49:36Z","id":"moai-cvwk","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
 {"ts":"2026-09-12T01:52:21Z","id":"moai-cvwk","kind":"note","by":"레이븐","text":"Roll 에 우선순위 필드를 더하지 않았다 — Roll 은 --json 으로 나가는 계약이고, 정렬하려고 계약을 넓힐 이유가 없다. 대신 rollup_of 안에서 묶음 목록을 먼저 정렬한다. 더 중요한 것은 차례를 정하는 규칙을 query::display_order 한 자리로 모은 것이다: 전에는 query·report·nav 세 곳이 같은 규칙을 따로 적고 있었고, 그래서 에픽 표 하나만 파일 순으로 남은 줄 아무도 몰랐다. ready 는 합치지 않았다 — '다음에 무엇을 집나' 는 '어떻게 늘어놓나' 와 다른 물음이라 끝나가는 에픽을 먼저 보는 제 규칙이 있다."}
 {"ts":"2026-09-12T01:52:21Z","id":"moai-cvwk","kind":"status","by":"레이븐","from":"in_progress","to":"review"}
+{"ts":"2026-09-12T01:52:21Z","id":"moai-cvwk","kind":"status","by":"레이븐","from":"review","to":"done"}
+{"ts":"2026-09-12T01:59:20Z","id":"moai-lsl9","kind":"create","by":"레이븐","title":"CLI 상세가 마크다운을 그린다 · moai show --raw"}
+{"ts":"2026-09-12T01:59:20Z","id":"moai-83ep","kind":"create","by":"레이븐","title":"탐색기 상세가 마크다운을 그린다 · 원문 토글"}
+{"ts":"2026-09-12T01:59:20Z","id":"moai-44rk","kind":"create","by":"레이븐","title":"표를 줄 맞춰 그린다 (한글 폭)"}
+{"ts":"2026-09-12T01:59:27Z","id":"moai-2zfw","kind":"status","by":"레이븐","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T02:03:48Z","id":"moai-2zfw","kind":"note","by":"레이븐","text":"pulldown-cmark 를 default-features=false 로 넣었다 — 기본은 html 렌더러와 getopts 를 끌고 오는데 둘 다 안 쓴다. 딸려 온 것은 unicase 하나뿐이고 바이너리는 2.0MB 그대로다. 표는 크레이트 기능이 아니라 파서 옵션(ENABLE_TABLES)이다. 구현하며 잡은 것: 겹친 목록에서 안쪽 목록이 시작할 때 모으던 글을 매듭짓지 않으면 바깥 줄의 글이 안쪽 첫 줄에 이어 붙어 '- 둘' 과 '  - 둘의 속' 이 '둘둘의 속' 한 줄이 되고 바깥 줄이 사라진다. 이 저장소 본문 24개를 전부 접어 보는 시험(#[ignore])을 남겼다 — 합성 예제는 제가 만든 모양만 시험한다. 지금 저장소에 표가 든 본문이 없어 표는 합성 시험만 덮는다."}
+{"ts":"2026-09-12T02:03:48Z","id":"moai-2zfw","kind":"status","by":"레이븐","from":"in_progress","to":"review"}

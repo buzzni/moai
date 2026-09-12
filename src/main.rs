@@ -10,6 +10,7 @@ mod config;
 mod draft;
 mod fail;
 mod id;
+mod markdown;
 mod model;
 mod nav;
 mod query;
