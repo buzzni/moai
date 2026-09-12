@@ -1577,10 +1577,14 @@ fn the_user_flag_wins_over_the_environment() {
 #[test]
 fn a_malformed_user_is_refused() {
     let s = init("baduser");
-    let out = moai(s.path(), &["add", "제목", "--user", "레이븐"]);
-    assert!(!out.status.success());
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("이름 (메일)"), "{err}");
+    // 빈 값도 준 것이다 — `--user "$NAME"` 의 변수가 비었을 때 조용히 git 설정으로
+    // 넘어가면 엉뚱한 사람 이름으로 저널이 쌓인다.
+    for bad in ["레이븐", "", "  "] {
+        let out = moai(s.path(), &["add", "제목", "--user", bad]);
+        assert!(!out.status.success(), "{bad:?} 를 받아 버렸다");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("이름 (메일)"), "{bad:?}: {err}");
+    }
     assert_eq!(issues(s.path()).lines().count(), 0, "거절했는데 줄이 남았다");
 }
 
@@ -1707,6 +1711,7 @@ fn a_whole_plan_gets_an_assignee_too() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let all = issues(s.path());
     assert_eq!(all.matches(r#""assignee":"테스터""#).count(), 2, "{all}");
+    assert_eq!(all.matches(r#""assignee_email":"tester@example.com""#).count(), 2, "{all}");
 }
 
 /// 옛 저널 줄에는 `by_email` 이 없다. `by` 를 객체로 바꿨다면 그 줄이 파싱에

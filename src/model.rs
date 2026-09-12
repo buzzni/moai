@@ -402,7 +402,10 @@ pub fn someone(name: &str) -> Actor {
 /// 채우느니 한 번 물어보는 편이 싸다. 막는 것은 *사람을 부르는 게이트가 아니라*
 /// 입력이 모자라다는 말이고, `--user` 와 `MOAI_ACTOR` 둘 다 사람 없이 채워진다.
 pub fn actor(flag: Option<&str>) -> R<Actor> {
-    if let Some(raw) = flag.map(str::trim).filter(|s| !s.is_empty()) {
+    // 플래그는 비어 있어도 **준 것이다.** `--user "$NAME"` 에서 변수가 비었을 때
+    // 조용히 git 설정으로 넘어가면 엉뚱한 사람 이름으로 저널이 쌓인다 — 이
+    // 기능이 막으려던 바로 그 실패다. 환경변수는 다르다: 빈 값은 관례상 없는 것이다.
+    if let Some(raw) = flag.map(str::trim) {
         return Actor::parse(raw).ok_or_else(|| malformed("--user", raw));
     }
     if let Ok(raw) = std::env::var("MOAI_ACTOR")
