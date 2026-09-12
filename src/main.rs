@@ -69,10 +69,29 @@ fn main() -> ExitCode {
     match cmd::run(cli) {
         Ok(lines) => {
             print(&lines);
+            carried();
             if cmd::had_partial() { ExitCode::FAILURE } else { ExitCode::SUCCESS }
         }
         Err(e) => fail(json, &e),
     }
+}
+
+/// 쓰기가 못 읽는 줄을 그대로 들고 넘어갔으면 말한다.
+///
+/// **막지 않는 대신 시끄럽다.** 막으면 남의 낡은 줄 하나가 모든 쓰기를
+/// 막고, 잃으면 조용한 손실이다. 셋째 길은 들고 가되 말하는 것이다.
+/// 종료 코드는 건드리지 않는다 — 쓰기는 성공했고, 깨진 데이터로 비영
+/// 종료하는 것은 `moai status` 한 곳이다.
+fn carried() {
+    let n = store::carried_unreadable();
+    if n == 0 {
+        return;
+    }
+    let _ = writeln!(
+        anstream::stderr().lock(),
+        "{}읽을 수 없는 줄 {n}개를 그대로 두고 썼다 — 어느 줄인지는 `moai status` 가 낸다",
+        style::paint(style::WARN, "moai: ")
+    );
 }
 
 fn print(lines: &[String]) {

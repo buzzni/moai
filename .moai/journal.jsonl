@@ -287,3 +287,6 @@
 {"ts":"2026-09-12T09:06:01Z","id":"moai-uiyf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"종류를 값 비교로 묻는 자리가 흩어져 컴파일러가 새 값을 안 잡는다"}
 {"ts":"2026-09-12T09:06:01Z","id":"moai-g33x","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai idea 가 Typed 를 손으로 베껴 두 자리를 맞춰야 한다"}
 {"ts":"2026-09-12T09:06:07Z","id":"moai-oidr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-12T09:41:13Z","id":"moai-dcee","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-12T09:45:01Z","id":"moai-dcee","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"셋째 길로 갔다 — 모르는 줄을 들고 가되 그 줄만 손대지 않는다. store::with_write 가 LoadError.text 로 원문을 들고 있다가 파일 끝에 그대로 되쓴다. 기본값 접기(조용한 손실)도 Kind::Other(Copy 상실)도 안 골랐다. 자리는 끝으로 민다 — 차례를 정하는 것이 id 인데 그 줄은 id 를 못 읽어서 못 읽는 줄이다. 막지 않는 대신 시끄럽다: 쓰기가 stderr 로 한 줄 내고, status 가 unreadable_line 을 치명으로 낸다."}
+{"ts":"2026-09-12T09:45:01Z","id":"moai-dcee","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}

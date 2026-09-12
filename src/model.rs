@@ -22,7 +22,8 @@ pub const MAX_PRIORITY: u8 = 3;
 ///
 /// **새 값을 더하면 옛 바이너리는 그 줄을 못 읽는다.** 모르는 값을 기본값으로
 /// 접지 않기 때문이고, 접으면 되쓰기 한 번에 원래 값이 조용히 사라진다.
-/// 못 읽는 것은 시끄럽고 그 줄은 파일에 그대로 남는다 (`moai-dcee`).
+/// 못 읽는 줄은 쓰기를 막지도 않고 사라지지도 않는다 — `store::with_write` 가
+/// 그대로 들고 되쓰고, `moai status` 가 어느 줄인지 낸다 (moai-dcee).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {

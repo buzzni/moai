@@ -280,10 +280,17 @@ fn a_broken_line_is_reported_but_the_rest_still_shows() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("2줄"));
     assert!(!out.status.success(), "깨진 줄을 보고 0 으로 끝났다");
 
-    // 그리고 그 위에 덮어쓰지 않는다 — 쓰면 그 줄이 영원히 사라진다.
+    // 그리고 그 줄을 **들고 간다.** 쓰기는 되고 줄은 남는다 — 막으면
+    // 되돌릴 방법이 도구 밖에만 남고, 버리면 조용한 손실이다.
     let write = moai(s.path(), &["add", "새 것"]);
-    assert!(!write.status.success());
-    assert!(String::from_utf8_lossy(&write.stderr).contains("2줄"));
+    assert!(write.status.success(), "깨진 줄 하나가 쓰기를 막았다");
+    assert!(
+        String::from_utf8_lossy(&write.stderr).contains("그대로 두고 썼다"),
+        "조용히 지나갔다 — {}",
+        String::from_utf8_lossy(&write.stderr)
+    );
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(after.contains("{\"id\": 깨짐"), "모르는 줄을 잃었다 — {after}");
 }
 
 #[test]
@@ -2184,4 +2191,76 @@ fn a_thought_does_not_hang_under_an_epic() {
     // 소속은 잃지 않았다.
     let found = ok(s.path(), &["show", "--type", "idea", "-e", &epic]);
     assert!(found.contains(&thought), "에픽으로 못 찾는다 — {found}");
+}
+
+// ── 못 읽는 줄 ──────────────────────────────────────────────────────
+
+/// 읽을 수 없는 줄 하나가 파일 전체의 쓰기를 막지 않는다.
+///
+/// **CLAUDE.md 의 규칙 그대로다** — 엄함은 *지금 쓰는 줄*에 대한 것이지 파일
+/// 전체에 대한 것이 아니다. 막으면 되돌릴 방법이 도구 밖에만 남는다.
+#[test]
+fn one_unreadable_line_does_not_block_every_write() {
+    let s = init("opaquewrite");
+    let good = add(s.path(), &["멀쩡한 일"]);
+    let bad = r#"{"id":"argos-9999","title":"뒷 단계가 쓴 줄","kind":"몰라","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#;
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!("{bad}\n{}", issues(s.path())),
+    )
+    .unwrap();
+
+    // 쓰기가 된다. 그리고 조용히 되지 않는다.
+    let noisy = moai(s.path(), &["add", "그래도 만들어진다"]);
+    assert!(noisy.status.success(), "{}", String::from_utf8_lossy(&noisy.stderr));
+    assert!(
+        String::from_utf8_lossy(&noisy.stderr).contains("그대로 두고 썼다"),
+        "막지 않는 대신 시끄러워야 한다 — {}",
+        String::from_utf8_lossy(&noisy.stderr)
+    );
+    let made = add(s.path(), &["그래도 만들어진다 둘"]);
+    assert!(issues(s.path()).contains(&made), "못 읽는 줄 하나가 쓰기를 막았다");
+    ok(s.path(), &["mv", &good, "done"]);
+
+    // 그 줄은 **글자 하나 안 바뀌고** 남는다.
+    let after = issues(s.path());
+    assert!(after.contains(bad), "모르는 줄을 잃었다 — {after}");
+}
+
+/// 잃지 않는 것으로 끝이 아니다. **시끄러워야 한다** — 조용히 지나가면
+/// 그 줄이 무엇인지 아무도 안 본다.
+#[test]
+fn an_unreadable_line_still_shouts() {
+    let s = init("opaqueloud");
+    add(s.path(), &["멀쩡한 일"]);
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!("이건 JSON 도 아니다\n{}", issues(s.path())),
+    )
+    .unwrap();
+
+    let out = moai(s.path(), &["status"]);
+    assert!(!out.status.success(), "깨진 데이터인데 0 으로 끝났다");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("읽을 수 없는 줄"), "{text}");
+}
+
+/// 읽고 그대로 쓰면 바이트가 같다 — 모르는 줄이 섞여 있어도. 깨지면 매
+/// 명령이 헛 diff 를 만든다.
+#[test]
+fn a_file_with_an_unreadable_line_is_idempotent() {
+    let s = init("opaquestable");
+    add(s.path(), &["멀쩡한 일"]);
+    let bad = r#"{"id":"argos-9999","title":"모르는 종류","kind":"몰라","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#;
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!("{}{bad}\n", issues(s.path())),
+    )
+    .unwrap();
+
+    let once = { add(s.path(), &["한 번 쓴다"]); issues(s.path()) };
+    add(s.path(), &["두 번 쓴다"]);
+    let twice = issues(s.path());
+    let settled: Vec<&str> = twice.lines().filter(|l| !l.contains("두 번 쓴다")).collect();
+    assert_eq!(settled.join("\n") + "\n", once, "쓸 때마다 줄이 움직인다");
 }

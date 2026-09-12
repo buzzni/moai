@@ -26,6 +26,8 @@ pub struct Repo {
 pub struct LoadError {
     pub line: usize,
     pub message: String,
+    /// 못 읽은 줄의 **원문 그대로**. 이것이 있어야 되쓸 때 그 줄을 잃지 않는다.
+    pub text: String,
 }
 
 #[derive(Debug, Default)]
@@ -95,18 +97,18 @@ impl Repo {
         // 락을 잡은 **뒤에** 읽는다. 밖에서 읽으면 두 프로세스가 같은 옛 상태를
         // 고쳐 쓰고, 나중에 rename 한 쪽이 앞의 이슈를 조용히 지운다.
         let load = self.read()?;
-        if let Some(e) = load.errors.first() {
-            return Err(Fail::coded(
-                format!(
-                    "{}: {}줄을 읽을 수 없어 쓰지 않는다 — {}\n      고친 뒤 다시 시도한다",
-                    self.issues_path().display(),
-                    e.line,
-                    e.message
-                ),
-                code::BROKEN,
-            ));
-        }
-        let before = render_issues(&load.issues);
+        // **못 읽은 줄 때문에 쓰기를 막지 않는다.** 들고 있다가 그대로 되쓴다.
+        //
+        // 한때 여기서 통째로 거절했다. 그러면 뒷 단계 바이너리가 쓴 줄 하나가
+        // 앞 단계 사람의 `add`·`mv`·`edit` 을 전부 막아, 되돌릴 방법이 도구
+        // 밖에만 남는다 — CLAUDE.md 가 이름 붙여 둔 실패다. 엄함은 *지금 쓰는
+        // 줄*에 대한 것이지 파일 전체에 대한 것이 아니다.
+        //
+        // 잃지도 않고 막지도 않는 대신 **시끄럽다**: `moai status` 가
+        // `unreadable_line` 을 치명으로 내고 거기서만 비영 종료한다.
+        let opaque: Vec<&str> = load.errors.iter().map(|e| e.text.as_str()).collect();
+        CARRIED.store(opaque.len(), std::sync::atomic::Ordering::Relaxed);
+        let before = render_issues(&load.issues, &opaque);
 
         // 정규화한 원본을 들고 있다가 **바뀐 줄만** 검사한다.
         //
@@ -135,7 +137,7 @@ impl Repo {
 
         // 내용이 그대로면 스냅샷은 건드리지 않는다 (헛 diff 방지).
         // 저널은 따로다 — `moai note` 처럼 스냅샷을 안 바꾸는 기록이 있다.
-        let after = render_issues(&issues);
+        let after = render_issues(&issues, &opaque);
         if after != before {
             write_atomic(&self.issues_path(), after.as_bytes())?;
         }
@@ -186,6 +188,18 @@ impl Repo {
     }
 }
 
+/// 방금 쓰기가 **그대로 들고 넘어간** 못 읽는 줄의 수.
+///
+/// `store` 는 터미널을 모르므로 찍지 않는다 — 세어 두기만 하고 `main` 이
+/// 말한다. `cmd::had_partial` 과 같은 모양이고, 같은 까닭이다: 쓰기 명령마다
+/// 파일을 한 번 더 읽어 보고하게 하면 그 읽기가 락 밖이라 락 안에서 본 것과
+/// 다를 수 있다.
+static CARRIED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn carried_unreadable() -> usize {
+    CARRIED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub fn parse_issues(src: &str) -> Load {
     let src = src.strip_prefix('\u{feff}').unwrap_or(src);
     let mut load = Load::default();
@@ -195,7 +209,11 @@ pub fn parse_issues(src: &str) -> Load {
         }
         match serde_json::from_str::<Issue>(line) {
             Ok(issue) => load.issues.push(issue),
-            Err(e) => load.errors.push(LoadError { line: i + 1, message: e.to_string() }),
+            Err(e) => load.errors.push(LoadError {
+                line: i + 1,
+                message: e.to_string(),
+                text: line.to_string(),
+            }),
         }
     }
     load.issues.sort_by(|a, b| a.id.cmp(&b.id));
@@ -205,10 +223,18 @@ pub fn parse_issues(src: &str) -> Load {
 /// 정렬은 `id` 바이트 오름차순이다. `-`(0x2D) < `.`(0x2E) < 숫자 < 소문자 라서
 /// 자식이 부모 바로 밑에 붙고, 랜덤 id 가 삽입 위치를 파일 전체에 흩뿌려
 /// git 충돌 확률을 떨어뜨린다 (파일 끝 append 는 두 브랜치가 **항상** 부딪친다).
-fn render_issues(issues: &[Issue]) -> String {
+///
+/// **못 읽은 줄은 뒤에 그대로 붙는다.** 제자리에 둘 수가 없다 — 차례를 정하는
+/// 것이 `id` 인데 그 줄은 `id` 를 못 읽어서 못 읽은 줄이다. 첫 쓰기 한 번만
+/// 자리가 밀리고 그 뒤로는 움직이지 않는다.
+fn render_issues(issues: &[Issue], opaque: &[&str]) -> String {
     let mut out = String::new();
     for i in issues {
         out.push_str(&serde_json::to_string(i).expect("Issue 는 언제나 직렬화된다"));
+        out.push('\n');
+    }
+    for line in opaque {
+        out.push_str(line);
         out.push('\n');
     }
     out
@@ -416,17 +442,31 @@ mod tests {
         assert!(parse_issues("").issues.is_empty());
     }
 
-    /// 깨진 줄이 있으면 쓰지 않는다. 쓰면 그 줄이 사라진다.
+    /// 깨진 줄이 있어도 **쓴다.** 그 줄은 글자 하나 안 바뀌고 남는다.
+    ///
+    /// 한때 여기서 통째로 거절했다 — "쓰면 그 줄이 사라진다" 는 걱정이었다.
+    /// 거절 대신 들고 있으면 걱정도 없고 막히지도 않는다. 막는 쪽이 비싼
+    /// 이유는 뒷 단계 바이너리가 쓴 줄 하나가 앞 단계 사람의 모든 쓰기를
+    /// 막아, 되돌릴 방법이 도구 밖에만 남기 때문이다.
     #[test]
-    fn refuses_to_write_over_a_broken_file() {
+    fn a_broken_line_is_carried_not_a_wall() {
         let (r, d) = repo("broken");
-        std::fs::write(d.join(".moai/issues.jsonl"), "{깨짐\n").unwrap();
-        let e = r.with_write(|i, _| {
+        let path = d.join(".moai/issues.jsonl");
+        std::fs::write(&path, "{깨짐\n").unwrap();
+        r.with_write(|i, _| {
             i.push(issue("argos-4aex"));
             Ok((vec![], ()))
         })
-        .unwrap_err().message;
-        assert!(e.contains("1줄"), "{e}");
+        .expect("깨진 줄 하나가 쓰기를 막았다");
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("{깨짐"), "모르는 줄을 잃었다 — {after}");
+        assert!(after.contains("argos-4aex"), "쓰겠다고 해 놓고 안 썼다 — {after}");
+
+        // 두 번째 쓰기에서 줄이 또 움직이지 않는다 (멱등).
+        let once = std::fs::read_to_string(&path).unwrap();
+        r.with_write(|_, _| Ok((vec![], ()))).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), once);
     }
 
     #[test]
