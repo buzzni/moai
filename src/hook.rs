@@ -198,22 +198,69 @@ fn calls_review(cmd: &str) -> bool {
 
 /// 명령줄을 **토막마다** 토큰으로 가른다. 따옴표 안은 한 토큰이다.
 ///
-/// 두 가지를 같이 해야 한다.
+/// 네 가지를 같이 해야 한다. 넷 다 실제로 틀려 본 자리다.
 ///
 /// - **제목이 동사로 오해받지 않아야 한다.** `moai add "idea 정리"` 의 `idea`
-///   는 제목이지 하위 명령이 아니고, `moai note x "add 는 나중에"` 의 `add` 도
-///   마찬가지다. 낱말을 찾는 판정은 둘 다 틀렸다.
-/// - **이어 붙인 명령을 버리지 않아야 한다.** 앞서 `;`·`&&`·`|` 에서 잘라
-///   버렸는데, 그러면 `cd /repo && moai add "딴 일"` 이 규칙을 통째로 지나갔다.
-///   `cd … && …` 는 피하려는 수가 아니라 에이전트의 보통 말투라, 잘라 버리는
-///   판은 규칙을 없애는 것과 같다.
+///   는 제목이지 하위 명령이 아니다.
+/// - **이어 붙인 명령을 버리지 않아야 한다.** `;`·`&&`·`|` 에서 잘라 버리던
+///   판은 `cd /repo && moai add "딴 일"` 하나로 규칙을 통째로 지나갔다.
+/// - **줄바꿈도 토막을 가른다.** 앞서 `'\n'` 을 갈래에 적어 두고도 그 앞의
+///   `is_whitespace()` 가 먼저 잡아, 여러 줄 명령이 한 토막으로 뭉쳤다.
+///   `moai show\nmoai add "딴 일"` 이 그대로 지나갔다 — 시험도 있었지만
+///   하필 첫 줄이 `cd` 라 우연히 통과해 거짓 안심만 줬다.
+/// - **heredoc 의 속은 명령이 아니다.** `python3 - <<'PY' … PY` 의 본문에
+///   `moai add "제목" -e <에픽>` 이라는 **글자**가 있다고 그것을 생성으로 읽으면,
+///   리뷰 글을 이슈에 적는 일이 막힌다. 실제로 막혔다.
 fn segments(cmd: &str) -> Vec<Vec<String>> {
+    let mut all = Vec::new();
+    for line in strip_heredocs(cmd) {
+        for seg in split_line(&line) {
+            if !seg.is_empty() {
+                all.push(seg);
+            }
+        }
+    }
+    all
+}
+
+/// heredoc 의 속을 걷어낸다. `<<MD` · `<<'MD'` · `<<-MD` 를 알아본다.
+///
+/// 셸을 온전히 흉내 내지 않는다 — 종료어까지 건너뛰는 것으로 족하다. 더
+/// 파고들면 규칙이 셸 파서가 되고, 그 파서는 반드시 어딘가 틀린다.
+fn strip_heredocs(cmd: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut lines = cmd.lines();
+    while let Some(line) = lines.next() {
+        out.push(line.to_string());
+        let Some(tag) = heredoc_tag(line) else { continue };
+        for body in lines.by_ref() {
+            if body.trim() == tag {
+                break;
+            }
+        }
+    }
+    out
+}
+
+fn heredoc_tag(line: &str) -> Option<String> {
+    let at = line.find("<<")?;
+    let rest = line[at + 2..].trim_start_matches('-').trim_start();
+    let word: String = rest
+        .chars()
+        .take_while(|c| !c.is_whitespace() && !matches!(c, ';' | '|' | '&' | '<' | '>'))
+        .collect();
+    let tag = word.trim_matches(['\'', '"']).to_string();
+    (!tag.is_empty()).then_some(tag)
+}
+
+/// 한 줄을 `;`·`&&`·`|` 로 가르고 토큰으로 쪼갠다.
+fn split_line(line: &str) -> Vec<Vec<String>> {
     let mut all = Vec::new();
     let mut seg: Vec<String> = Vec::new();
     let mut cur = String::new();
     let mut quote: Option<char> = None;
     let mut had = false;
-    let mut chars = cmd.chars();
+    let mut chars = line.chars();
 
     let flush_word = |seg: &mut Vec<String>, cur: &mut String, had: &mut bool| {
         if *had || !cur.is_empty() {
@@ -235,37 +282,59 @@ fn segments(cmd: &str) -> Vec<Vec<String>> {
                 quote = Some(c);
                 had = true;
             }
-            (None, c) if c.is_whitespace() => flush_word(&mut seg, &mut cur, &mut had),
-            (None, ';' | '|' | '&' | '\n') => {
+            // **토막을 먼저 가른다.** 공백 갈래가 먼저 오면 줄바꿈이 낱말만
+            // 끊고 토막은 안 끊는다 — 그 한 줄 차이로 규칙이 통째로 샜다.
+            (None, ';' | '|' | '&') => {
                 flush_word(&mut seg, &mut cur, &mut had);
-                if !seg.is_empty() {
-                    all.push(std::mem::take(&mut seg));
-                }
+                all.push(std::mem::take(&mut seg));
             }
+            (None, c) if c.is_whitespace() => flush_word(&mut seg, &mut cur, &mut had),
             (None, _) => cur.push(c),
         }
     }
     flush_word(&mut seg, &mut cur, &mut had);
-    if !seg.is_empty() {
-        all.push(seg);
-    }
+    all.push(seg);
     all
 }
 
-/// 한 토막이 `moai` 를 부른다면, 그 뒤의 하위 명령들. 플래그를 만나면 멈춘다.
+/// 이 토막이 `moai` 를 부른다면, 그 뒤의 하위 명령들. 플래그를 만나면 멈춘다.
 ///
-/// 앞에 붙은 환경변수 대입(`FOO=1 moai …`)과 경로(`./target/release/moai`)를
-/// 지나 실제 동사만 낸다.
+/// **명령 자리에 있어야 한다.** 어디에 있든 `moai` 라는 낱말을 찾던 판은
+/// `echo moai add hello` 를 생성으로 보아 막았고, 무엇보다 리뷰 글을 담은
+/// heredoc 을 막았다 — 규칙이 제가 시킨 일을 막는 자리가 또 나온 것이다.
+/// 앞에 붙은 환경변수 대입(`FOO=1 moai …`)만 지나친다.
 fn moai_verbs(seg: &[String]) -> &[String] {
-    let Some(at) = seg
-        .iter()
-        .position(|t| t.rsplit(['/', '\\']).next().is_some_and(|base| base == "moai"))
-    else {
+    let mut rest = seg;
+    while let Some(head) = rest.first() {
+        if head.contains('=') && !head.starts_with('-') {
+            rest = &rest[1..];
+            continue;
+        }
+        if head.rsplit(['/', '\\']).next().is_some_and(|base| base == "moai") {
+            let after = &rest[1..];
+            let end = after.iter().position(|t| t.starts_with('-')).unwrap_or(after.len());
+            return &after[..end];
+        }
         return &[];
-    };
-    let rest = &seg[at + 1..];
-    let end = rest.iter().position(|t| t.starts_with('-')).unwrap_or(rest.len());
-    &rest[..end]
+    }
+    &[]
+}
+
+/// 이 토막이 **일을 새로 세우는가.**
+///
+/// `moai add` 와 `moai issue add` 는 같은 일이다. 앞의 것만 보던 판은 뒤의
+/// 것을 그냥 보냈다 — 같은 연산의 두 철자가 다르게 움직이면, 규칙을 아는
+/// 쪽은 그것을 우회로로 쓰고 모르는 쪽은 왜 한 번은 막히고 한 번은 안
+/// 막히는지 모른다. `idea add` 는 여기서도 자유롭다.
+fn creates(seg: &[String]) -> bool {
+    let verbs = moai_verbs(seg);
+    match verbs.first().map(String::as_str) {
+        Some("add") => true,
+        Some("issue" | "epic" | "milestone") => {
+            verbs.get(1).map(String::as_str) == Some("add")
+        }
+        _ => false,
+    }
 }
 
 /// 지금 집고 있는 것에 매인 단위들 — 그 이슈 자신, 그 에픽, 그 마일스톤, 그 부모.
@@ -313,7 +382,7 @@ pub fn guard_create(issues: &[Issue], cfg: &Config, cmd: &str) -> Decision {
         // **`--from` 도 토큰으로 본다.** 글자로 찾으면 제목이 그 낱말을 담은
         // `moai add "--from 을 나중에"` 가 규칙을 통째로 지나간다 — 동사를
         // 자리로 읽기로 한 것과 같은 까닭이다.
-        moai_verbs(seg).first().map(String::as_str) == Some("add")
+        creates(seg)
             && !seg.iter().any(|t| t == "--from" || t.starts_with("--from="))
             // **도움말은 만들지 않는다.** 우리가 심는 스킬이 "모르면
             // `moai <명령> --help` 를 보라" 고 적어 두는데, 그 길을 막으면
@@ -697,6 +766,74 @@ mod tests {
             assert_eq!(guard_create(&all, &cfg(), free), Decision::Pass, "{free}");
         }
         assert!(matches!(guard_create(&all, &cfg(), "moai add \"idea 정리\""), Decision::Deny(_)));
+    }
+
+    /// **줄바꿈도 토막을 가른다.** 갈래는 적혀 있었지만 그 앞의 공백 갈래가
+    /// 먼저 잡아, 줄바꿈은 낱말만 끊고 토막은 안 끊었다. 여러 줄 명령이 한
+    /// 토막으로 뭉쳐 규칙이 통째로 샜다.
+    ///
+    /// 앞선 시험이 이 길을 못 밟은 까닭도 적어 둔다 — 첫 줄이 `cd` 라
+    /// 뭉쳐도 `moai add` 가 여전히 그 토막의 첫 명령이었다. **우연히 통과한
+    /// 시험은 없는 시험보다 나쁘다.** 여기서는 첫 줄에 다른 `moai` 를 둔다.
+    #[test]
+    fn a_newline_also_ends_a_segment() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        for cmd in [
+            "moai show\nmoai add \"딴 일\"",
+            "moai status\nmoai add \"딴 일\"\nmoai ready",
+        ] {
+            assert!(matches!(guard_create(&all, &cfg(), cmd), Decision::Deny(_)), "샜다 — {cmd}");
+        }
+        let two_lines = serde_json::json!({"command": "echo hi\n/code-review high"});
+        assert_eq!(Call::read(Some("Bash"), &two_lines), Call::Review, "리뷰 호출이 샜다");
+    }
+
+    /// **`moai` 는 명령 자리에 있어야 한다.** 어디에 있든 그 낱말을 찾던 판은
+    /// 글에 적힌 `moai add` 까지 생성으로 읽었다 — 리뷰 글을 이슈에 적는 일이
+    /// 그래서 막혔다. 규칙이 제가 시킨 일을 막는 자리가 또 하나 있었던 것이다.
+    #[test]
+    fn moai_must_be_the_command_not_a_word() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        for free in [
+            "echo moai add hello",
+            "grep -rn \"moai add\" .",
+            "moai note t-1 -b - <<'MD'\nmoai add \"제목\" -e t-e 라고 일러 준다\nMD",
+            "python3 - <<'PY'\nsubprocess.run([\"moai\", \"add\", \"제목\"])\nPY",
+        ] {
+            assert_eq!(guard_create(&all, &cfg(), free), Decision::Pass, "막혔다 — {free}");
+        }
+        // 환경변수를 앞세운 진짜 호출은 여전히 잡힌다.
+        assert!(matches!(
+            guard_create(&all, &cfg(), "MOAI_NOW=x moai add \"딴 일\""),
+            Decision::Deny(_)
+        ));
+    }
+
+    /// heredoc 이 닫힌 **뒤**는 다시 명령이다. 속을 건너뛴다고 뒤까지
+    /// 놓치면, 글 한 덩이를 앞세우는 것이 그대로 우회로가 된다.
+    #[test]
+    fn what_follows_a_heredoc_is_a_command_again() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let cmd = "cat <<'MD' > /tmp/x\n아무 글\nMD\nmoai add \"딴 일\"";
+        assert!(matches!(guard_create(&all, &cfg(), cmd), Decision::Deny(_)), "샜다");
+    }
+
+    /// **같은 연산의 두 철자가 같이 움직인다.** `moai add` 만 보던 판은
+    /// `moai issue add` 를 그냥 보냈다 — 규칙을 아는 쪽은 그것을 우회로로
+    /// 쓰고, 모르는 쪽은 왜 한 번은 막히고 한 번은 안 막히는지 모른다.
+    #[test]
+    fn the_kind_namespaces_create_too() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        for cmd in [
+            "moai issue add \"딴 일\"",
+            "moai epic add \"딴 에픽\"",
+            "moai milestone add \"v0.2\"",
+            "moai add \"딴 일\" --type epic",
+        ] {
+            assert!(matches!(guard_create(&all, &cfg(), cmd), Decision::Deny(_)), "샜다 — {cmd}");
+        }
+        // 담아 두는 것은 그 어느 철자로도 자유다.
+        assert_eq!(guard_create(&all, &cfg(), "moai idea add \"떠오른 것\""), Decision::Pass);
     }
 
     // ── 규칙 2 — 고치기 전에 하나를 집는다 ──────────────────────────
