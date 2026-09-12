@@ -49,6 +49,24 @@
 `MOAI_ACTOR` 로 준다. 남에게 맡기려면 `-a "이름 (메일)"`, 임자 없이 두려면
 `-a none`.
 
+## 리뷰가 낸 글을 찾는 법
+
+리뷰 전문은 파일에 남아 있다. 끝났다는 알림에 `task-id` 가 실려 오고, 그것이
+곧 파일 이름이다.
+
+    ~/.claude/projects/<프로젝트>/<세션>/subagents/agent-<task-id>.jsonl
+
+마지막 줄의 `message.content[0].text` 가 리뷰 전문이다.
+
+    tail -1 <그 파일> \
+      | python3 -c "import json,sys;print(json.loads(sys.stdin.read())['message']['content'][0]['text'])" \
+      | moai note <리뷰 id> -b -
+
+`tasks/<task-id>.output` 이 그 파일로 가는 심볼릭 링크라 그쪽을 써도 된다.
+
+**요약만 적고 원문을 버리지 않는다.** 요약은 이쪽의 판단이고 원문은 리뷰어가
+한 말이다. 판단은 다시 할 수 있지만 버린 원문은 못 되돌린다.
+
 ## 훅
 
     moai hook <event>    Claude 의 훅이 부른다. 사람이 손으로 부를 일은 없다
