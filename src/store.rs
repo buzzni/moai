@@ -123,7 +123,6 @@ impl Repo {
         // 잃지도 않고 막지도 않는 대신 **시끄럽다**: `moai status` 가
         // `unreadable_line` 을 치명으로 내고 거기서만 비영 종료한다.
         let opaque: Vec<&str> = load.errors.iter().map(|e| e.text.as_str()).collect();
-        CARRIED.store(opaque.len(), std::sync::atomic::Ordering::Relaxed);
         let before = render_issues(&load.issues, &opaque);
 
         // 정규화한 원본을 들고 있다가 **바뀐 줄만** 검사한다.
@@ -157,6 +156,10 @@ impl Repo {
         let after = render_issues(&issues, &opaque);
         if after != before {
             write_atomic(&self.issues_path(), after.as_bytes())?;
+            // **정말 쓴 자리에서만 센다.** 위에서 세면 `moai note` 처럼 스냅샷을
+            // 안 건드리는 명령까지 "그대로 두고 썼다" 고 말해, 일어나지 않은
+            // 쓰기를 주장한다 — 저널이 거짓말하면 안 되는 것과 같은 까닭이다.
+            CARRIED.store(opaque.len(), std::sync::atomic::Ordering::Relaxed);
         }
         if !entries.is_empty() {
             self.append_journal(&entries)?;

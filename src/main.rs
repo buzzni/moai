@@ -89,7 +89,10 @@ fn carried() {
     }
     let _ = writeln!(
         anstream::stderr().lock(),
-        "{}읽을 수 없는 줄 {n}개를 그대로 두고 썼다 — 어느 줄인지는 `moai status` 가 낸다",
+        // **어느 줄인지 아는 명령을 댄다.** `moai status` 는 수만 말하고
+        // 줄 번호와 까닭은 `report_load_errors` 를 지나는 쪽(`show`·`ready`)
+        // 만 낸다 — 없는 답을 가리키면 손으로 고칠 길이 도구 밖에만 남는다.
+        "{}읽을 수 없는 줄 {n}개를 그대로 두고 썼다 — 어느 줄인지는 `moai show` 가 낸다",
         style::paint(style::WARN, "moai: ")
     );
 }

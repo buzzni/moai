@@ -2505,3 +2505,24 @@ fn an_unreadable_line_does_not_fail_a_promote() {
     assert!(issues(s.path()).contains("몰라"), "모르는 줄을 잃었다");
 }
 
+/// **일어나지 않은 쓰기를 주장하지 않는다.** `moai note` 는 스냅샷을 안
+/// 건드리는데, 못 읽는 줄이 하나라도 있으면 "그대로 두고 썼다" 고 말했다.
+#[test]
+fn a_journal_only_write_claims_no_rewrite() {
+    let s = init("carriednote");
+    let id = add(s.path(), &["제목"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    let mut text = issues(s.path());
+    text.push_str("{깨짐\n");
+    std::fs::write(&path, &text).unwrap();
+
+    let out = moai(s.path(), &["note", &id, "메모"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(issues(s.path()), text, "스냅샷을 건드렸다");
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("그대로 두고 썼다"),
+        "안 쓴 쓰기를 주장했다 — {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+

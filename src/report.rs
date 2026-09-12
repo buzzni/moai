@@ -798,7 +798,15 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
         warnings.push(Warning::new("duplicate_id", dups).fatal());
     }
     if !unreadable.is_empty() {
-        warnings.push(Warning::new("unreadable_line", Vec::new()).count(unreadable.len()).fatal());
+        // **어느 줄인지는 여기가 아니라 저기서 난다.** 배너는 수만 말할 수
+        // 있으므로(줄 번호는 id 가 아니라 `ids` 에 실을 것이 아니다) 줄 번호와
+        // 까닭을 내는 명령을 댄다 — 안 대면 고칠 길이 도구 밖에만 남는다.
+        warnings.push(
+            Warning::new("unreadable_line", Vec::new())
+                .count(unreadable.len())
+                .hint("moai show")
+                .fatal(),
+        );
     }
 
     // 흐름. 만드는 속도가 끝내는 속도를 넘으면 쌓인다.
