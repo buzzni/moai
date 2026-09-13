@@ -86,8 +86,8 @@ fn banner(app: &App) -> Option<(String, bool)> {
     if app.stale {
         parts.push("파일이 바뀌었다 — F5 로 다시 읽는다".into());
     }
-    if app.unreadable > 0 {
-        parts.push(format!("읽을 수 없는 줄 {}개 — 그 줄은 빠진 채로 보고 있다", app.unreadable));
+    if !app.unreadable.is_empty() {
+        parts.push(format!("읽을 수 없는 줄 {}개 — 그 줄은 빠진 채로 보고 있다", app.unreadable.len()));
         urgent = true;
     }
     if app.warnings > 0 {
@@ -889,7 +889,7 @@ mod tests {
     #[test]
     fn load_errors_are_told_inside_the_screen() {
         let mut a = app();
-        a.unreadable = 3;
+        a.unreadable = vec![None; 3];
         let lines = render(&mut a, 100, 14).join("\n");
         assert!(lines.contains("읽을 수 없는 줄 3개"), "{lines}");
     }

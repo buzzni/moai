@@ -539,7 +539,10 @@ fn says(w: &Warning) -> String {
             _ => format!("미뤄 둔 것 {n}건"),
         },
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
-        "duplicate_id" => format!("id 가 두 번 있다 {n}건 — 머지를 잘못 풀었다"),
+        // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
+        // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
+        // `moai show` 가 낸다.
+        "duplicate_id" => format!("id 가 두 번 있다 {n}건 — 머지 흔적이거나 못 읽는 줄과 겹친다"),
         "unreadable_line" => format!("읽을 수 없는 줄 {n}개"),
         other => format!("{other} {n}건"),
     }

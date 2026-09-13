@@ -45,11 +45,11 @@ pub struct App {
     /// 읽은 그 순간의 시각. **프레임마다가 아니라 적재마다 잡는다** — 매번
     /// 다시 잡으면 "3일 넘게" 같은 판정이 초 단위로 깜빡인다.
     pub now: String,
-    /// 읽다 만난 못 읽는 줄. 대체 화면 안에서는 stderr 로 못 알린다.
-    pub unreadable: usize,
-    /// 그 못 읽는 줄들이 쓰는 id (읽어 낼 수 있었던 것만). 산 줄과의 중복을
-    /// `moai status` 와 같은 자로 세려면 수만으로는 모자란다(moai-4dk4).
-    unreadable_ids: Vec<Option<String>>,
+    /// 읽다 만난 못 읽는 줄 — 줄마다 **그 줄이 쓰는 id** (읽어 낼 수 있었던
+    /// 것만). 대체 화면 안에서는 stderr 로 못 알린다. 수를 따로 들지 않는다 —
+    /// 둘로 들면 어긋날 수 있고, 산 줄과의 중복을 `moai status` 와 같은 자로
+    /// 세려면 수만으로는 모자란다(moai-4dk4).
+    pub unreadable: Vec<Option<String>>,
     /// 마지막 갱신이 **실패한** 까닭. 조용히 삼키면 F5 가 아무 일도 안 하는데
     /// "바뀌었다" 배너는 붙어 있어, 사람은 누르고 또 누르며 까닭을 못 얻는다.
     pub trouble: Option<String>,
@@ -131,8 +131,7 @@ impl App {
             filter_text: None,
             repo: None,
             now: crate::model::now(),
-            unreadable: unreadable_ids.len(),
-            unreadable_ids,
+            unreadable: unreadable_ids,
             trouble: None,
             warnings: 0,
             stale: false,
@@ -160,8 +159,7 @@ impl App {
             Ok(load) => {
                 self.trouble = None;
                 self.stamp = stamp;
-                self.unreadable_ids = load.errors.iter().map(|e| e.id.clone()).collect();
-                self.unreadable = self.unreadable_ids.len();
+                self.unreadable = load.errors.iter().map(|e| e.id.clone()).collect();
                 self.adopt(load.issues);
             }
             // **소리 없이 넘기지 않는다.** 삼키면 F5 는 아무 일도 안 하고
@@ -252,12 +250,11 @@ impl App {
     /// `report` 가 `notice` 로 들고 있으므로 여기서 다시 판단하지 않는다.
     fn count_warnings(&mut self) {
         // 못 읽는 줄의 id 까지 넘긴다 — 산 줄과의 중복을 `moai status` 와 같은
-        // 자로 센다. 수만 아는 자리(시험이 `unreadable` 을 손으로 넣는 것)는
-        // id 없이 센다.
-        let lines: Vec<crate::report::Unreadable> = (0..self.unreadable)
-            .map(|n| crate::report::Unreadable {
-                id: self.unreadable_ids.get(n).and_then(|i| i.as_deref()),
-            })
+        // 자로 센다.
+        let lines: Vec<crate::report::Unreadable> = self
+            .unreadable
+            .iter()
+            .map(|id| crate::report::Unreadable { id: id.as_deref() })
             .collect();
         let st = crate::report::status(&self.issues, &lines, &self.cfg, &self.now);
         // 알림은 `notices` 에 따로 있다 — `warnings` 가 곧 고칠 것이다.
