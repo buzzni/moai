@@ -3015,6 +3015,37 @@ fn a_thought_does_not_hang_under_a_milestone_either() {
     assert!(!out.contains(&thought), "머리글이 안 세는 줄을 그 밑에 그렸다 — {out}");
 }
 
+/// **부모 밑에 접힌 자식은 부모의 마일스톤으로 센다.** 자식이 제 마일스톤을
+/// 따로 적어도 트리는 그 줄을 부모 밑에 그리므로, 제 것으로 세면 `show <그
+/// 마일스톤>` 이 `멤버 0/1` 이라 말하면서 줄을 못 내고 `--json` 만 그 자식을
+/// 낸다 — 에픽이 이기는 자리(moai-lhbh)와 같은 어긋남이 부모에서 났다(moai-uqoe).
+#[test]
+fn a_folded_child_counts_toward_its_parents_milestone() {
+    let s = init("foldstone");
+    let m1 = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let m2 = ok(s.path(), &["milestone", "add", "v0.2", "-q"]).trim().to_string();
+    let parent = add(s.path(), &["부모", "--milestone", &m1]);
+    let child = add(s.path(), &["자식", "--parent", &parent, "--milestone", &m2]);
+
+    let tree = ok(s.path(), &["show", "--tree"]);
+    // 자식 바로 위에 선 마일스톤이 v0.1 이어야 한다. 마일스톤의 차례는 id 가 정하므로
+    // 어느 쪽이 먼저 나올지는 모른다.
+    let at = |id: &str| tree.find(id).unwrap_or_else(|| panic!("트리에 {id} 가 없다 — {tree}"));
+    let (a1, a2, ac) = (at(&m1), at(&m2), at(&child));
+    assert!(a1 < ac && !(a1 < a2 && a2 < ac), "트리가 그 자식을 v0.1 밑에 안 그린다 — {tree}");
+
+    let elsewhere = ok(s.path(), &["show", &m2]);
+    assert!(elsewhere.contains("멤버   0/0"), "그리지 않는 줄을 셌다 — {elsewhere}");
+    let json = ok(s.path(), &["show", &m2, "--json"]);
+    assert!(!json.contains(&child), "--json 만 그 자식을 낸다 — {json}");
+    assert!(!ok(s.path(), &["show", "--milestone", &m2]).contains(&child), "필터가 트리와 갈린다");
+
+    let home = ok(s.path(), &["show", &m1]);
+    assert!(home.contains("멤버   0/2") && home.contains(&child), "{home}");
+    assert!(ok(s.path(), &["show", &m1, "--json"]).contains(&child));
+    assert!(ok(s.path(), &["show", "--milestone", &m1]).contains(&child));
+}
+
 
 // ── 리뷰가 잡은 것 ───────────────────────────────────────────────────
 

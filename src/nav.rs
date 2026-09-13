@@ -616,6 +616,50 @@ mod tests {
         assert_exactly_once(&issues);
     }
 
+    /// **마일스톤이 세는 멤버는 탐색기가 그 밑에 그리는 줄과 같다.** 제 마일스톤을
+    /// 따로 적은 자식이 부모 밑에 그려지면서 제 마일스톤으로 세어져,
+    /// `show <마일스톤>` 이 `멤버 0/1` 이라 말하고 줄은 못 냈다(moai-uqoe).
+    /// 접힌 모양마다 한 줄씩 — 이슈 밑, 접힌 생각 밑, 뿌리로 올라간 생각 밑.
+    #[test]
+    fn a_milestone_counts_what_it_draws() {
+        let own = |id: &str, kind: Kind, stone: &str| {
+            let mut i = make(id, kind);
+            i.milestone = Some(stone.into());
+            i
+        };
+        let mut rooted_thought = own("argos-0006", Kind::Idea, "argos-0001");
+        rooted_thought.epic = Some("argos-0003".into()); // 에픽이 v0.1 이 아니다 → 뿌리로
+        let issues = vec![
+            make("argos-0001", Kind::Milestone),
+            make("argos-0002", Kind::Milestone),
+            own("argos-0003", Kind::Epic, "argos-0002"),
+            own("argos-0004", Kind::Issue, "argos-0001"),
+            own("argos-0004.aa1", Kind::Issue, "argos-0002"), // 부모 밑에 접힌다
+            own("argos-0004.aa1.bb2", Kind::Issue, "argos-0002"), // 손자도
+            own("argos-0004.cc3", Kind::Idea, "argos-0002"), // 이슈 밑에 접힌 생각
+            own("argos-0004.cc3.dd4", Kind::Issue, "argos-0002"), // 그 밑의 일
+            rooted_thought,
+            own("argos-0006.ee5", Kind::Issue, "argos-0001"), // 뿌리로 올라간 생각 밑
+        ];
+        let index = Index::of(&issues);
+        for stone in &issues[..2] {
+            let mut drawn: Vec<&str> = index
+                .descendants(&vec![Seg::Milestone(Some(stone.id.clone()))])
+                .into_iter()
+                .map(|at| &issues[at])
+                .filter(|i| matches!(i.kind, Kind::Issue | Kind::Epic))
+                .map(|i| i.id.as_str())
+                .collect();
+            drawn.sort();
+            let mut counted: Vec<&str> =
+                crate::report::group_members(&issues, stone).iter().map(|i| i.id.as_str()).collect();
+            counted.sort();
+            assert_eq!(counted, drawn, "{} 가 그리는 것과 세는 것이 갈린다", stone.id);
+        }
+        assert_eq!(index.home_of(9), &vec![Seg::Milestone(None), Seg::Issue("argos-0006".into())]);
+        assert_exactly_once(&issues);
+    }
+
     /// 없는 에픽을 가리키는 줄은 사라지지 않고 `(길 잃음)` 으로 모인다.
     #[test]
     fn a_dangling_epic_reference_goes_to_the_lost_bucket() {
