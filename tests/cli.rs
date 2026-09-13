@@ -4097,8 +4097,9 @@ impl Claude {
         self.command(Path::new(BIN), dir, args, with_claude).output().unwrap()
     }
 
-    /// 부를 moai 와 환경을 더 줄 수 있는 모양. `claude` 가 장부를 옮겨 두는 변수는
-    /// 걷는다 — 시험을 돌리는 사람의 것이 새어 들면 시험이 그 사람의 장부를 읽는다.
+    /// 부를 moai 와 환경을 더 줄 수 있는 모양. **[`isolated`] 에서 출발해 집과 PATH 만
+    /// 제 것으로 덮는다** — 따로 막으면 걷을 목록이 두 벌이 되고, 실제로 이쪽은
+    /// `MOAI_ACTOR`·git 환경 변수를 물려받은 채 남아 있었다(moai-0auu).
     fn command(&self, bin: &Path, dir: &Path, args: &[&str], with_claude: bool) -> Command {
         // PATH 에는 가짜 `claude` 와 `sh` 하나만 둔다. `/usr/bin:/bin` 을 통째로 두면
         // 그 자리에 진짜 `claude` 가 깔린 기계에서 시험이 사람의 등록을 부른다.
@@ -4108,16 +4109,35 @@ impl Claude {
         } else {
             sys.display().to_string()
         };
-        let mut cmd = Command::new(bin);
-        cmd.args(args)
-            .current_dir(dir)
-            .env("HOME", self.home.path())
-            .env("PATH", path)
-            .env("NO_COLOR", "1")
-            .env_remove("CLAUDE_CONFIG_DIR")
-            .env_remove("CLAUDE_CODE_PLUGIN_CACHE_DIR");
+        let mut cmd = isolated(bin);
+        cmd.args(args).current_dir(dir).env("HOME", self.home.path()).env("PATH", path).env("NO_COLOR", "1");
         cmd
     }
+}
+
+/// **가짜 `claude` 를 쓰는 시험도 같은 격리 위에 선다.** 집과 PATH 만 제 것이고,
+/// 셸에서 새는 사람·시계·git 변수는 [`isolated`] 가 걷은 그대로 걷혀 있어야 한다.
+/// 환경을 실제로 심어 돌리는 대신 짓는 명령의 환경을 읽는다 — 부모 프로세스의 환경을
+/// 바꾸면 병렬로 도는 옆 시험이 그것을 본다.
+#[test]
+fn the_fake_claude_command_starts_from_the_isolated_one() {
+    let c = Claude::new("claude-isolated");
+    let s = Scratch::new("claude-isolated-dir");
+    let cmd = c.command(Path::new(BIN), s.path(), &["skill", "status"], true);
+    let envs: std::collections::HashMap<_, _> = cmd.get_envs().collect();
+    let removed = |var: &str| matches!(envs.get(std::ffi::OsStr::new(var)), Some(None));
+    let set = |var: &str| envs.get(std::ffi::OsStr::new(var)).copied().flatten();
+
+    for var in ["MOAI_ACTOR", "MOAI_NOW", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR"]
+        .iter()
+        .chain(GIT_LEAKS)
+    {
+        assert!(removed(var), "{var} 를 안 걷었다");
+    }
+    assert_eq!(set("GIT_CONFIG_GLOBAL"), Some(std::ffi::OsStr::new("/dev/null")));
+    assert_eq!(set("HOME"), Some(c.home.path().as_os_str()), "집은 가짜 claude 의 것이어야 한다");
+    let path = set("PATH").expect("PATH 를 안 줬다").to_string_lossy().into_owned();
+    assert!(path.starts_with(&c.bin.display().to_string()), "가짜 claude 가 PATH 앞에 없다 — {path}");
 }
 
 fn text(out: &Output) -> String {
