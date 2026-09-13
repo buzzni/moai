@@ -1000,3 +1000,4 @@
 {"ts":"2026-09-13T18:21:08Z","id":"moai-54dt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"시험: isolated() 의 MOAI_CONFIG 는 모든 시험이 함께 쓰는 공용 빈 집 밑의 없는 파일이다. project add/rm 을 부르는 시험은 반드시 제 Scratch 밑 파일로 MOAI_CONFIG 를 덮는다 — 안 덮으면 병렬 시험끼리 등록이 섞이고 공용 집이 더 이상 비어 있지 않다 (moai-88l8.5ik 리뷰)"}
 {"ts":"2026-09-13T18:21:15Z","id":"moai-88l8.5ik","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"링크 설정·link/.. 철자 둘 반영(락은 준 자리 곁으로 고쳐), 권한 보존은 moai-gv1c 로, 공용 MOAI_CONFIG 는 moai-54dt 노트로 넘김"}
 {"ts":"2026-09-13T18:21:17Z","id":"moai-88l8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"user_config.rs — [[project]] 목록을 관대하게 읽고 락·temp+rename 으로 모르는 키를 보존하며 쓴다, 시험 격리 포함"}
+{"ts":"2026-09-13T18:28:22Z","id":"moai-54dt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
