@@ -1049,3 +1049,5 @@
 {"ts":"2026-09-13T19:20:23Z","id":"moai-6au6.296","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1·2번(json uninitialized, id 폭) 반영, 3번은 main 합류 뒤 names·shell_word·sanitize 로 반영, inspect→Repo::open 은 moai-s51k, skill.rs shell_word 는 idea moai-gijm"}
 {"ts":"2026-09-13T19:20:27Z","id":"moai-6au6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":".moai 밖 status·ready 가 등록한 프로젝트를 프로젝트마다 따로 열어 한눈에 낸다 (Repo::open·projects::open·--json projects), 안에서는 바이트 그대로"}
 {"ts":"2026-09-13T23:26:24Z","id":"moai-tgfu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-13T23:34:02Z","id":"moai-pxtk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"도움말 after_help 첫 줄이 들여쓰기를 잃는다 (줄 잇기가 앞 공백을 먹음)"}
+{"ts":"2026-09-13T23:34:05Z","id":"moai-ndo7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":".moai 밖 status 가 등록 없음·깨진 사용자 설정에서 1 로 끝난다 (맨몸 moai 는 0)"}
