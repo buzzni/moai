@@ -416,9 +416,16 @@ impl App {
     /// 있으면 버린다 — 누르기 **전에** 시작한 읽기라 늦게 도착하면 방금 읽은 것을
     /// 옛 것으로 덮는다(`w` 를 끄기 전 설정으로 읽은 것이면 더더욱).
     pub fn reload(&mut self) {
-        let Some(repo) = &self.repo else { return };
+        if self.repo.is_none() {
+            return;
+        }
         // 결과는 버리되 손잡이는 든다 — 그 스레드의 패닉을 다음 걸음이 되던진다.
         if let Some((_, handle)) = self.pending.take() {
+            if self.discarded.len() >= DISCARDED_KEPT {
+                // 놓기 **전에** 끝난 것부터 거둔다. 지난 걸음에 살아 있던 것도 그새 끝났을
+                // 수 있고, 그것이 가장 오래된 자리에 있으면 패닉째 놓게 된다.
+                self.reap();
+            }
             if self.discarded.len() >= DISCARDED_KEPT {
                 // 이만큼 안 끝났으면 읽기가 멈춘 것이다(느린 원격 디스크 따위). 기다리면
                 // 루프가 같이 멈추므로 가장 오래된 것을 놓는다 — 그 하나만 1b63abe 이전
@@ -427,6 +434,7 @@ impl App {
             }
             self.discarded.push(handle);
         }
+        let Some(repo) = &self.repo else { return };
         let fresh = (self.read)(repo, self.worktree);
         self.receive(fresh);
     }
@@ -1976,6 +1984,34 @@ mod tests {
         discarded_settle(&a);
         a.follow();
         assert!(!a.reaping());
+    }
+
+    /// **꽉 찬 채로 버릴 때 가장 오래된 것이 그새 패닉으로 끝났으면 놓지 않고 되던진다.**
+    /// 지난 걸음의 거두기는 그것이 살아 있을 때 지나갔다 — 거두지 않고 놓으면 그 패닉만
+    /// 걷힌 화면 뒤로 사라진다.
+    #[test]
+    fn a_full_discard_list_reaps_before_it_lets_go_of_the_oldest() {
+        let (_scratch, mut a) = writable("discard-full-panic");
+        a.discarded.push(std::thread::spawn(|| panic!("가장 오래된 것이 터졌다")));
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+        for _ in 1..DISCARDED_KEPT {
+            let rx = rx.clone();
+            a.discarded.push(std::thread::spawn(move || {
+                let _ = rx.lock().map(|r| r.recv());
+            }));
+        }
+        while !a.discarded[0].is_finished() {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        // `follow` 를 거치지 않고 짓던 읽기를 세운다 — 거기서 거두면 이 틈을 못 본다.
+        let (ptx, prx) = std::sync::mpsc::channel();
+        a.pending = Some((prx, std::thread::spawn(move || drop(ptx))));
+
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.key(key(KeyCode::F(5)))));
+        drop(tx);
+        let payload = caught.expect_err("꽉 찼을 때 끝난 패닉을 거두지 않고 놓았다");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"가장 오래된 것이 터졌다"));
     }
 
     /// 쓰기 시험이 쓰는 판 — 진짜 파일에 줄 하나를 두고 연 탐색기. **사람은
