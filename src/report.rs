@@ -520,12 +520,57 @@ pub fn has_finished_member(all: &[Issue], group: &Issue) -> bool {
 /// 에픽이면 적힌 칸은 안 읽힌다 — 믿으면 진행 중인 에픽을 손으로 done 에 둔
 /// 순간 막힌 일이 `ready` 에 서고, 다 끝난 에픽은 적힌 칸을 옮기기 전까지 영영 막는다.
 pub fn is_blocked(i: &Issue, by_id: &BTreeMap<&str, &Issue>, states: &BTreeMap<&str, &str>) -> bool {
-    i.blocked_by.iter().any(|b| by_id.get(b.as_str()).is_some_and(|x| !stands_done(x, states)))
+    // 미룸은 막는가를 바꾸지 않는다 — 미룬 막음도 막는다([`Blocker::blocks`]).
+    i.blocked_by.iter().any(|b| blocker(standing(b, by_id, states), false).blocks())
 }
 
-/// 서 있는 칸이 `done` 인가 — 묶음이면 읽은 칸, 아니면 제 칸.
-fn stands_done(i: &Issue, states: &BTreeMap<&str, &str>) -> bool {
-    column(i, states) == crate::config::DONE
+/// `blocked_by` 에 적힌 막음 하나가 지금 무엇인가.
+///
+/// **막는가의 뜻은 여기 하나다.** `ready`·`held`·`status` 와 탐색기 상세가 이것으로
+/// 가른다. 한때 탐색기가 [`is_blocked`] 를 손으로 베껴, 없는 id 를 가리키는 막음을
+/// `ready` 는 안 막힌 것으로 고르는데 상세는 "막힘" 이라 그렸다(moai-af64).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Blocker {
+    /// 안 끝났다 — 막는다.
+    Open,
+    /// 안 끝났고 계획에서 빠졌다 — **그래도 막는다.** 미룬 일은 끝난 일이 아니다([`held`]).
+    Deferred,
+    /// 서 있는 칸이 `done` 이다 — 풀렸다.
+    Done,
+    /// 그런 id 가 없다 — 막지 않는다. 끊긴 참조는 `moai status` 가
+    /// `dangling_blocked_by` 로 드러내지, `ready` 가 영원히 막지 않는다.
+    Missing,
+}
+
+impl Blocker {
+    /// 이 막음이 막히는 쪽을 `ready` 에서 빼는가.
+    pub fn blocks(self) -> bool {
+        matches!(self, Blocker::Open | Blocker::Deferred)
+    }
+}
+
+/// 막음 하나를 가른다. `column` 은 막는 줄이 **서 있는** 칸([`column`] — 묶음이면 읽은
+/// 칸)이고 그 id 가 없으면 `None`, `out_of_plan` 은 그 줄이 계획에서 빠졌는가
+/// ([`deferred_roots`] 에 드는가)다.
+///
+/// **답만 여기서 정하고 재료는 부르는 쪽이 댄다.** 탐색기는 서 있는 칸과 미룸을 적재
+/// 때 이미 세어 들고 있어, 저장소 전부를 받는 꼴로 두면 프레임마다 그 셈을 다시 한다.
+pub fn blocker(column: Option<&str>, out_of_plan: bool) -> Blocker {
+    match column {
+        None => Blocker::Missing,
+        Some(crate::config::DONE) => Blocker::Done,
+        Some(_) if out_of_plan => Blocker::Deferred,
+        Some(_) => Blocker::Open,
+    }
+}
+
+/// id 로 막는 줄을 찾아 그 서 있는 칸을 댄다. 없으면 `None`.
+fn standing<'x>(
+    id: &str,
+    by_id: &BTreeMap<&str, &'x Issue>,
+    states: &BTreeMap<&str, &'x str>,
+) -> Option<&'x str> {
+    by_id.get(id).map(|x| column(x, states))
 }
 
 /// `blocker` 가 `blocked` 를 막으면 고리가 생기는가. **쓰기 전에** 막는다 —
@@ -1058,9 +1103,11 @@ fn deferred_blockers<'a>(
 ) -> Vec<&'a str> {
     i.blocked_by
         .iter()
-        .filter_map(|b| by_id.get(b.as_str()))
-        .filter(|b| !stands_done(b, states) && out_of_plan.contains(b.id.as_str()))
-        .map(|b| b.id.as_str())
+        .filter_map(|b| by_id.get(b.as_str()).copied())
+        .filter(|x| {
+            blocker(Some(column(x, states)), out_of_plan.contains(x.id.as_str())) == Blocker::Deferred
+        })
+        .map(|x| x.id.as_str())
         .collect()
 }
 
@@ -1783,6 +1830,20 @@ mod tests {
         let done = [blocker_done, blocked];
         let got: Vec<&str> = ready(&done, &cfg()).iter().map(|i| i.id.as_str()).collect();
         assert_eq!(got, ["argos-0002"], "끝난 막음은 더 이상 막지 않는다 — {got:?}");
+    }
+
+    /// 막음 하나의 판정. 없는 것은 막지 않고, 미룬 것은 **여전히 막는다** —
+    /// `ready` 가 빼는 것과 `held` 가 대는 것이 이 표 하나에서 나온다.
+    #[test]
+    fn a_blocker_is_judged_in_one_place() {
+        assert_eq!(blocker(None, false), Blocker::Missing);
+        assert_eq!(blocker(None, true), Blocker::Missing);
+        assert_eq!(blocker(Some("done"), true), Blocker::Done);
+        assert_eq!(blocker(Some("todo"), true), Blocker::Deferred);
+        assert_eq!(blocker(Some("review"), false), Blocker::Open);
+        let blocks: Vec<bool> =
+            [Blocker::Open, Blocker::Deferred, Blocker::Done, Blocker::Missing].map(Blocker::blocks).to_vec();
+        assert_eq!(blocks, [true, true, false, false]);
     }
 
     /// 없는 이슈를 가리키는 `blocked_by` 는 막지 않는다 — 끊긴 참조는
