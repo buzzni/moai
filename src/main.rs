@@ -15,6 +15,7 @@ mod id;
 mod markdown;
 mod model;
 mod nav;
+mod projects;
 mod query;
 mod report;
 mod skill;

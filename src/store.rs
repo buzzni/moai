@@ -56,6 +56,12 @@ impl Load {
     }
 }
 
+/// `.moai` 를 못 찾았을 때의 말. **다른 곳의 저장소를 부르는 길(`-C`)을 함께 댄다** —
+/// 등록한 프로젝트를 한눈에 보는 `status` 에 익은 사람은 `.moai` 밖에서 `add`·`mv` 도
+/// 될 줄 알고, 쓰는 명령은 어느 프로젝트인지 모르니 멈추는 것이 맞다(moai-6au6).
+pub const NOT_A_REPO: &str =
+    "moai 저장소가 아니다 (.moai/ 를 못 찾았다). `moai init` 으로 시작하거나, 다른 곳의 저장소면 `moai -C <dir> <명령>` 으로 부른다";
+
 /// 디렉터리 하나를 [`Repo::open`] 으로 연 결과.
 ///
 /// **셋을 가른다.** 등록한 프로젝트를 한눈에 볼 때 "아직 `init` 안 했다" 와
@@ -77,9 +83,7 @@ pub enum Opened {
 impl Repo {
     /// `.moai/` 를 가진 디렉터리를 위로 찾는다. 깊이를 코드에 박지 않는다.
     pub fn discover() -> R<Repo> {
-        Repo::find()?.ok_or_else(|| {
-            "moai 저장소가 아니다 (.moai/ 를 못 찾았다). `moai init` 으로 시작한다".into()
-        })
+        Repo::find()?.ok_or_else(|| NOT_A_REPO.into())
     }
 
     /// [`Repo::discover`] 와 같되 **못 찾은 것을 실패로 접지 않는다** — `None`.

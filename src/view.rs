@@ -649,20 +649,7 @@ pub fn status(
         String::new(),
     ];
 
-    // 보드 — config 의 칸 차례 그대로.
-    let board: Vec<String> = cfg
-        .statuses
-        .iter()
-        .map(|s| {
-            let style = style::status_style(s);
-            format!(
-                "{} {}",
-                paint(style, style::glyph(s)),
-                paint(style, &format!("{s} {}", st.counts.get(s).copied().unwrap_or(0)))
-            )
-        })
-        .collect();
-    out.push(format!("  {}", board.join("    ")));
+    out.push(board(cfg, &st.counts));
 
     let shelved = crate::report::put_off(issues);
     for (label, rolls) in [("마일스톤", &st.milestones), ("에픽", &st.epics)] {
@@ -751,6 +738,24 @@ pub fn status(
     out.push(String::new());
     out.push(paint(style::DIM, "다음:  `moai ready` 로 집을 것을 고른다"));
     out
+}
+
+/// 보드 한 줄 — config 의 칸 차례 그대로. 한 프로젝트의 `status` 와 한눈 보기가
+/// 같은 줄을 낸다: 둘이 갈라지면 같은 보드를 두 모양으로 읽는다.
+fn board(cfg: &Config, counts: &BTreeMap<String, usize>) -> String {
+    let cols: Vec<String> = cfg
+        .statuses
+        .iter()
+        .map(|s| {
+            let style = style::status_style(s);
+            format!(
+                "{} {}",
+                paint(style, style::glyph(s)),
+                paint(style, &format!("{s} {}", counts.get(s).copied().unwrap_or(0)))
+            )
+        })
+        .collect();
+    format!("  {}", cols.join("    "))
 }
 
 /// 경고마다 앞의 몇 건만 보여 주고 나머지는 세어서 말한다. 다 늘어놓으면
@@ -1166,6 +1171,186 @@ fn entry(e: &JournalEntry, cfg: &Config) -> String {
     .to_string()
 }
 
+/// 한눈 보기에서 연 프로젝트 하나를 셈한 것 — `moai status` 가 `.moai` 밖에서 낸다.
+pub struct Board<'a> {
+    pub cfg: &'a Config,
+    pub status: StatusReport,
+    /// 집은 것 (`report::wip`).
+    pub picked: Vec<&'a Issue>,
+}
+
+/// 한눈 보기에서 연 프로젝트 하나의 집을 것 — `moai ready` 가 `.moai` 밖에서 낸다.
+pub struct Picks<'a> {
+    pub picks: Vec<&'a Issue>,
+    /// 못 읽는 줄의 수. 그 줄에 있던 일은 목록에서 빠져 있다.
+    pub unreadable: usize,
+}
+
+/// 한 프로젝트에서 집은 것을 몇 줄까지 보이나. 한눈 보기는 프로젝트가 여럿이라 짧게 끊는다.
+const PICKED_SHOWN: usize = 3;
+/// 한 프로젝트에서 집을 것을 몇 줄까지 보이나.
+const READY_SHOWN: usize = 5;
+
+/// 등록한 프로젝트마다 보드 요약 — 칸별 수, 집은 것, 경고 수.
+///
+/// **줄마다 프로젝트 이름을 id 곁에 단다.** 프로젝트끼리 id 가 겹칠 수 있고(접두어가
+/// 같은 두 저장소), 머리에만 이름을 두면 `grep` 으로 뽑은 줄이 어느 것인지 모른다.
+/// 프로젝트 색(moai-xs9x)은 이 이름 곁에 얹는다 — 색이 혼자 뜻을 지지 않는다.
+pub fn projects_status(
+    projects: &[crate::projects::Project],
+    seen: &[crate::projects::Seen<Board>],
+    reg: &crate::user_config::Registry,
+) -> Vec<String> {
+    let mut out = vec![overview_head("등록한 프로젝트", &format!("{}곳", projects.len()), reg)];
+    let w_name = projects.iter().map(|p| width(&p.name)).max().unwrap_or(0);
+    for (p, s) in projects.iter().zip(seen) {
+        out.push(String::new());
+        out.push(project_head(p, ""));
+        let crate::projects::Seen::Ok(b) = s else {
+            out.push(unopened(p, s));
+            continue;
+        };
+        out.push(board(b.cfg, &b.status.counts));
+        for i in b.picked.iter().take(PICKED_SHOWN) {
+            out.push(format!(
+                "  {}{}{}  {}",
+                cell(style::PLAIN, &p.name, w_name + 2),
+                cell(style::ID, &i.id, width(&i.id) + 2),
+                paint(style::status_style(i.status.as_str()), style::glyph(i.status.as_str())),
+                clip(&i.title, TITLE_CAP),
+            ));
+        }
+        let rest = b.picked.len().saturating_sub(PICKED_SHOWN);
+        if rest > 0 {
+            out.push(format!("  {}", paint(style::DIM, &format!("집은 것 {rest}건 더"))));
+        }
+        // **알림은 세지 않는다** — `moai status` 의 "드러난 문제 없다" 와 같은 자다.
+        let n = b.status.warnings.len();
+        let fatal = b.status.warnings.iter().filter(|w| w.fatal).count();
+        let go = paint(style::DIM, &format!("→ `moai -C {} status`", shell_arg(&p.path)));
+        out.push(match (n, fatal) {
+            (0, _) => format!("  {} 드러난 문제 없다", paint(style::status_style("done"), "✓")),
+            (_, 0) => format!("  {} 경고 {n}건  {go}", paint(style::WARN, "!")),
+            (_, f) => format!("  {} 경고 {n}건 (데이터가 깨졌다 {f}건)  {go}", paint(style::ERROR, "!")),
+        });
+    }
+    problems(&mut out, reg);
+    out.push(String::new());
+    out.push(paint(style::DIM, "다음:  `moai ready` 로 프로젝트마다 집을 것을 본다"));
+    out
+}
+
+/// 등록한 프로젝트마다 집을 수 있는 일 — 앞의 몇 건만.
+pub fn projects_ready(
+    projects: &[crate::projects::Project],
+    seen: &[crate::projects::Seen<Picks>],
+    reg: &crate::user_config::Registry,
+) -> Vec<String> {
+    use crate::projects::Seen;
+    let total: usize = seen
+        .iter()
+        .map(|s| match s {
+            Seen::Ok(k) => k.picks.len(),
+            _ => 0,
+        })
+        .sum();
+    let mut out = vec![overview_head(
+        "집을 수 있는 일",
+        &format!("프로젝트 {}곳 · {total}건", projects.len()),
+        reg,
+    )];
+    let w_name = projects.iter().map(|p| width(&p.name)).max().unwrap_or(0);
+    for (p, s) in projects.iter().zip(seen) {
+        out.push(String::new());
+        let Seen::Ok(k) = s else {
+            out.push(project_head(p, ""));
+            out.push(unopened(p, s));
+            continue;
+        };
+        out.push(project_head(p, &format!("{}건", k.picks.len())));
+        let shown = &k.picks[..k.picks.len().min(READY_SHOWN)];
+        let w_id = shown.iter().map(|i| width(&i.id)).max().unwrap_or(0);
+        for i in shown {
+            out.push(format!(
+                "  {}{}{}{}",
+                cell(style::PLAIN, &p.name, w_name + 2),
+                cell(style::ID, &i.id, w_id + 2),
+                cell(style::priority_style(i.priority()), &format!("p{}", i.priority()), 4),
+                clip(&i.title, TITLE_CAP),
+            ));
+        }
+        let rest = k.picks.len() - shown.len();
+        if rest > 0 {
+            let go = format!("{rest}건 더 → `moai -C {} ready`", shell_arg(&p.path));
+            out.push(format!("  {}", paint(style::DIM, &go)));
+        }
+        if k.unreadable > 0 {
+            out.push(format!(
+                "  {} 읽을 수 없는 줄 {}개 — 어느 줄인지는 `moai -C {} show` 가 낸다",
+                paint(style::ERROR, "!"),
+                k.unreadable,
+                shell_arg(&p.path)
+            ));
+        }
+    }
+    problems(&mut out, reg);
+    out
+}
+
+/// 한눈 보기의 머리 — 무엇을 몇이나 봤는지와, 목록을 읽은 사용자 설정 파일.
+fn overview_head(what: &str, count: &str, reg: &crate::user_config::Registry) -> String {
+    let at = reg.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+    format!("{}  {count}       {}", paint(style::HEAD, what), paint(style::DIM, &at))
+        .trim_end()
+        .to_string()
+}
+
+fn project_head(p: &crate::projects::Project, tail: &str) -> String {
+    let at = p.path.display().to_string();
+    format!("{}  {}   {tail}", paint(style::HEAD, &p.name), paint(style::DIM, &at)).trim_end().to_string()
+}
+
+/// 열지 못한 프로젝트의 한 줄. **무엇을 하면 되는지를 함께 댄다.**
+fn unopened<T>(p: &crate::projects::Project, s: &crate::projects::Seen<T>) -> String {
+    use crate::projects::Seen;
+    let at = shell_arg(&p.path);
+    match s {
+        Seen::Ok(_) => String::new(),
+        // init 전은 고칠 것이 아니다 — 나중에 `init` 하면 보이는 것이 요구다. `!` 를 달지 않는다.
+        Seen::Uninit => {
+            let say = format!("init 전 — `moai -C {at} init` 으로 시작하면 여기 보인다");
+            format!("  {} {}", paint(style::DIM, "·"), paint(style::DIM, &say))
+        }
+        Seen::Missing => {
+            let go = format!("→ 옮겼으면 새 자리를 등록하고, 아니면 `moai project rm {at}`");
+            format!("  {} 디렉터리가 없다  {}", paint(style::WARN, "!"), paint(style::DIM, &go))
+        }
+        Seen::Unreadable { error } => format!("  {} 못 읽는다 — {error}", paint(style::ERROR, "!")),
+    }
+}
+
+/// 사용자 설정을 읽다 만난 것을 한 줄씩. 목록을 막지 않는다.
+fn problems(out: &mut Vec<String>, reg: &crate::user_config::Registry) {
+    if reg.problems.is_empty() {
+        return;
+    }
+    out.push(String::new());
+    for p in &reg.problems {
+        out.push(format!("{} {p}", paint(style::WARN, "!")));
+    }
+}
+
+/// 명령 안내에 넣을 경로. 셸이 달리 읽을 글자가 있으면 작은따옴표로 싼다 — 공백 든
+/// 경로를 그대로 대면 복사해 친 명령이 엉뚱한 디렉터리를 찾는다.
+fn shell_arg(p: &std::path::Path) -> String {
+    let s = p.display().to_string();
+    let special = |c: char| c.is_whitespace() || "'\"\\$`*?[]{}()<>|&;!#~=%^".contains(c);
+    match !s.is_empty() && !s.chars().any(special) {
+        true => s,
+        false => format!("'{}'", s.replace('\'', r"'\''")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1177,6 +1362,16 @@ mod tests {
 
     fn no_epics() -> BTreeMap<&'static str, String> {
         BTreeMap::new()
+    }
+
+    /// 안내에 넣은 경로는 복사해 쳐도 같은 디렉터리를 가리켜야 한다.
+    #[test]
+    fn a_path_in_a_hint_survives_the_shell() {
+        let arg = |s: &str| shell_arg(std::path::Path::new(s));
+        assert_eq!(arg("/home/raven/work/api"), "/home/raven/work/api");
+        assert_eq!(arg("/home/raven/작업/api"), "/home/raven/작업/api");
+        assert_eq!(arg("/tmp/my project"), "'/tmp/my project'");
+        assert_eq!(arg("/tmp/it's"), r"'/tmp/it'\''s'");
     }
 
     fn issue(id: &str, title: &str, status: &str) -> Issue {
