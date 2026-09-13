@@ -363,7 +363,7 @@ pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor
 }
 
 /// temp 에 쓰고 `rename` 으로 갈아끼운다. 독자는 옛 파일 아니면 새 파일만 본다.
-fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
     let dir = path.parent().ok_or_else(|| Fail::new("경로에 디렉터리가 없다"))?;
     let tmp = dir.join(format!(
         "{}.tmp.{}",
@@ -393,10 +393,10 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
 /// 직접 만든 락 파일(`O_EXCL`)을 쓰지 않는 이유가 이것이다 — 죽으면 찌꺼기가
 /// 남아 **사람이 손으로 지워야 한다.** 사람 손이 덜 가게 하려고 만드는 도구에
 /// "락 파일 좀 지워주세요" 를 넣을 수는 없다.
-struct Lock(std::fs::File);
+pub(crate) struct Lock(std::fs::File);
 
 impl Lock {
-    fn acquire(path: &Path) -> R<Lock> {
+    pub(crate) fn acquire(path: &Path) -> R<Lock> {
         let f = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
