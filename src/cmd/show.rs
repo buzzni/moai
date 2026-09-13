@@ -237,16 +237,16 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
         // (`nav` 가 에픽 밑에 안 걸어서) 머리글도(`rollup` 이 `is_work` 로
         // 세서) 그것을 멤버로 치지 않는다 — 기계 출력만 치면 받는 쪽이 계획에
         // 없는 줄을 계획으로 읽는다. 찾으려면 `moai show --type idea -e <에픽>`.
-        let members: Vec<&str> = report::members_of(all, &issue.id)
-            .iter()
-            .filter(|m| !report::is_idea(m))
-            .map(|m| m.id.as_str())
-            .collect();
+        // **사람 화면과 같은 자로 고른다** (`report::group_members`). 한때
+        // 여기만 에픽에 한해 제 `epic` 을 적은 줄을 내, 마일스톤은 키가 없고
+        // 물려받은 자식은 화면에만 있었다(moai-qizs).
+        let members: Vec<&str> =
+            report::group_members(all, issue).iter().map(|m| m.id.as_str()).collect();
         let mut extra = vec![
             ("children", serde_json::to_string(&ids).map_err(|e| Fail::new(e.to_string()))?),
             ("journal", serde_json::to_string(&journal).map_err(|e| Fail::new(e.to_string()))?),
         ];
-        if report::is_epic(issue) {
+        if report::is_group(issue) {
             extra.push((
                 "members",
                 serde_json::to_string(&members).map_err(|e| Fail::new(e.to_string()))?,
@@ -260,23 +260,12 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
     // 묶음을 펼치면 그 밑에 무엇이 있는지까지 보여 준다 — 묶음 하나를 보는
     // 이유가 바로 그것이다. 마일스톤이면 에픽과 이슈가 같이 나온다.
     if report::is_group(issue) {
-        let group = match issue.kind {
-            Kind::Milestone => report::milestones(all),
-            _ => report::groups(all),
-        };
         // **베끼지 않는다.** 차례는 `view::members` 가 `nav` 에서 받아 정하므로
-        // 여기서 필요한 것은 "누가 이 묶음의 멤버인가" 하나뿐이다. 한때 여기서
-        // `sort_for_display` 로 다시 세웠는데, 그 차례는 쓰이는 데가 없었다.
-        // **`--json` 이 세는 것과 같은 것을 그린다.** 담아 둔 생각은 멤버가
-        // 아니다 — 머리글(`rollup` 은 `is_work` 로 센다)도 기계 출력도 그것을
-        // 안 세는데 사람 화면만 그리면, `멤버 0/1` 밑에 줄 둘이 서서 어느
-        // 숫자를 믿어야 할지 알 수 없다.
-        let mine: std::collections::BTreeSet<&str> = all
-            .iter()
-            .filter(|i| group.get(i.id.as_str()) == Some(&issue.id.as_str()) && i.id != issue.id)
-            .filter(|i| !report::is_idea(i))
-            .map(|i| i.id.as_str())
-            .collect();
+        // 여기서 필요한 것은 "누가 이 묶음의 멤버인가" 하나뿐이다.
+        // **`--json` 이 내는 것과 같은 것을 그린다** — 둘 다
+        // `report::group_members` 로 고른다.
+        let mine: BTreeSet<&str> =
+            report::group_members(all, issue).iter().map(|i| i.id.as_str()).collect();
         let roll = report::rollup_of(issue.kind, all, &repo.config)
             .into_iter()
             .find(|r| r.id.as_deref() == Some(issue.id.as_str()));

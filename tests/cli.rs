@@ -2662,6 +2662,29 @@ fn the_tree_says_what_it_did_not_draw() {
     assert!(out.contains("미룸 1건 숨김"), "왜 하나가 없는지 안 말한다 — {out}");
 }
 
+/// **사람 화면과 기계 출력이 같은 멤버를 낸다** — 마일스톤도, 물려받은 자식도.
+/// 한때 `--json` 은 에픽에만, 제 `epic` 을 적은 줄만 내 에이전트와 사람이 같은
+/// 묶음을 다르게 셌다(moai-qizs).
+#[test]
+fn a_grouping_lists_the_same_members_on_both_surfaces() {
+    let s = init("groupjson");
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let epic = ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &stone, "-q"])
+        .trim()
+        .to_string();
+    let work = add(s.path(), &["파서", "-e", &epic]);
+    let child = add(s.path(), &["파서 자식", "--parent", &work]);
+
+    let stone_json = ok(s.path(), &["show", &stone, "--json"]);
+    assert!(stone_json.contains(r#""members""#), "마일스톤이 멤버 키를 안 낸다 — {stone_json}");
+    for id in [&epic, &work, &child] {
+        assert!(stone_json.contains(id.as_str()), "{id} 가 빠졌다 — {stone_json}");
+    }
+    let epic_json = ok(s.path(), &["show", &epic, "--json"]);
+    assert!(epic_json.contains(&child), "물려받은 자식을 기계 출력만 뺐다 — {epic_json}");
+    assert!(ok(s.path(), &["show", &epic]).contains(&child), "사람 화면이 자식을 안 그린다");
+}
+
 /// **꼬리는 그린 줄을 숨겼다고 말하지 않는다.** 거름망은 잎에 걸리는데 트리는
 /// 걸린 자손의 조상도 그리므로, 평평하게 센 수를 그대로 대면 방금 그린 생각을
 /// `idea 1건 숨김` 이라 부른다(moai-wi67).

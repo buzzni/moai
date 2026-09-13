@@ -42,10 +42,6 @@ pub fn epic_labels(all: &[Issue]) -> BTreeMap<&str, String> {
         .collect()
 }
 
-pub fn is_epic(i: &Issue) -> bool {
-    i.kind == Kind::Epic
-}
-
 /// 지금 계획에서 빼 둔 것인가. **끝난 줄은 미룬 것이 아니다.**
 ///
 /// 미루기는 "지금 안 한다" 는 말이라 이미 끝난 일에는 걸 것이 없다. 여기서
@@ -180,10 +176,33 @@ pub fn children_of<'a>(issues: &'a [Issue], id: &str) -> Vec<&'a Issue> {
     out
 }
 
-/// 그 에픽에 속한 이슈. 소속은 필드고 계층은 id 라, 둘은 직교한다.
-pub fn members_of<'a>(issues: &'a [Issue], epic: &str) -> Vec<&'a Issue> {
-    issues.iter().filter(|i| i.epic.as_deref() == Some(epic)).collect()
+/// 그 묶음(에픽·마일스톤)의 멤버. **사람 화면과 `--json` 이 같은 것을 부른다.**
+///
+/// 한때 `--json` 은 에픽에만, 그것도 제 `epic` 필드를 적은 줄만 냈고 사람
+/// 화면은 마일스톤까지, 물려받은 자식까지 그렸다 — 에이전트와 사람이 같은
+/// 에픽을 다르게 셌다(moai-qizs). 그래서 고르는 자를 여기 하나로 둔다.
+///
+/// - 소속은 **물려받은 것까지**다 (`groups`·`milestones`). 트리가 그리는 것과
+///   같아야 한다
+/// - **담아 둔 생각은 멤버가 아니다.** 머리글(`rollup` 은 `is_work` 로 센다)이
+///   안 세는 줄을 멤버로 내면 받는 쪽이 계획에 없는 것을 계획으로 읽는다
+/// - 묶음이 아닌 줄에는 멤버가 없다
+///
+/// 차례는 목록과 같다.
+pub fn group_members<'a>(all: &'a [Issue], group: &Issue) -> Vec<&'a Issue> {
+    if !is_group(group) {
+        return Vec::new();
+    }
+    let map = group_for(group.kind, all);
+    let mut out: Vec<&Issue> = all
+        .iter()
+        .filter(|i| i.id != group.id && !is_idea(i))
+        .filter(|i| map.get(i.id.as_str()) == Some(&group.id.as_str()))
+        .collect();
+    out.sort_by(|a, b| crate::query::display_order(a, b));
+    out
 }
+
 
 /// 아직 안 끝난 막음이 하나라도 있는가. 없는 이슈를 가리키는 것은 막지
 /// 않는다 — 끊긴 참조는 `moai status` 가 드러내지 `ready` 가 영원히 막지 않는다.
@@ -1650,8 +1669,36 @@ mod tests {
         ];
         let kids: Vec<&str> = children_of(&issues, "argos-0002").iter().map(|i| i.id.as_str()).collect();
         assert_eq!(kids, ["argos-0002.aaa"], "손자까지 직계로 셌다");
-        let mem: Vec<&str> = members_of(&issues, "argos-0001").iter().map(|i| i.id.as_str()).collect();
-        assert_eq!(mem, ["argos-0002"]);
+        let mem: Vec<&str> = group_members(&issues, &issues[0]).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(mem, ["argos-0002", "argos-0002.aaa", "argos-0002.aaa.bbb"], "물려받은 자식을 뺐다");
+    }
+
+    /// **멤버는 트리가 그리는 것과 같다** — 물려받은 자식까지, 마일스톤이면
+    /// 그 밑의 에픽과 그 멤버까지, 담아 둔 생각은 빼고(moai-qizs).
+    #[test]
+    fn group_members_match_what_the_tree_draws() {
+        let mut stone = make("argos-0001", Kind::Milestone, "todo");
+        stone.title = "v0.1".into();
+        let mut epic = make("argos-0002", Kind::Epic, "todo");
+        epic.milestone = Some("argos-0001".into());
+        let mut thought = make("argos-0004", Kind::Idea, "todo");
+        thought.epic = Some("argos-0002".into());
+        let issues = vec![
+            stone,
+            epic,
+            member("argos-0003", "argos-0002", "todo"),
+            make("argos-0003.aaa", Kind::Issue, "todo"),
+            thought,
+        ];
+        let ids = |v: Vec<&Issue>| v.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
+
+        assert_eq!(ids(group_members(&issues, &issues[1])), ["argos-0003", "argos-0003.aaa"]);
+        assert_eq!(
+            ids(group_members(&issues, &issues[0])),
+            ["argos-0002", "argos-0003", "argos-0003.aaa"],
+            "마일스톤이 밑의 에픽과 그 멤버를 안 낸다"
+        );
+        assert!(group_members(&issues, &issues[2]).is_empty(), "묶음 아닌 줄이 멤버를 냈다");
     }
     // ── idea 는 일이 아니다 ──────────────────────────────────────────
     //
