@@ -186,7 +186,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         // 어느 하나로도 안 열리는 것(닫아 둔 생각)은 세지 않는다. 못 보여 줄
         // 수를 대느니 말을 안 하는 편이 낫다.
         let by_idea = hide_ideas && report::is_idea(i);
-        let by_deferred = hide_deferred && i.is_deferred();
+        let by_deferred = hide_deferred && wh.deferred(i);
         let by_done = hide_done && i.status.is_done();
         match (by_idea, by_deferred, by_done) {
             (false, false, false) => shown.push(i.clone()),
@@ -231,6 +231,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         hidden,
         &report::epic_labels(&load.issues),
         asked_deferred,
+        &wh.put_off,
     ))
 }
 

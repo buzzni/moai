@@ -11,7 +11,7 @@
 //! 사이에 OR 이 필요하다는 요청이 실제로 올 때 다시 본다.
 
 use crate::model::{Issue, Kind, days_since};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// `epic=none` 처럼 "값이 없는 것" 을 고르는 자리.
 #[derive(Debug, Clone, PartialEq)]
@@ -25,14 +25,25 @@ pub enum Sel {
 pub struct Where<'a> {
     pub epic: BTreeMap<&'a str, &'a str>,
     pub milestone: BTreeMap<&'a str, &'a str>,
+    /// 물려받은 것까지 친 미룸. 미룸도 소속처럼 묶음을 타고 내려온다.
+    pub put_off: BTreeSet<&'a str>,
 }
 
 impl<'a> Where<'a> {
     pub fn of(all: &'a [Issue]) -> Where<'a> {
-        Where {
-            epic: crate::report::groups(all),
-            milestone: crate::report::milestones(all),
-        }
+        let epic = crate::report::groups(all);
+        let milestone = crate::report::milestones(all);
+        let put_off = crate::report::put_off_in(all, &epic, &milestone);
+        Where { epic, milestone, put_off }
+    }
+
+    /// 목록에서 미룬 것으로 치는가. **제 줄의 미룸이나 물려받은 미룸.**
+    ///
+    /// 끝난 줄의 제 미룸도 여기 든다 — 그 줄은 done 규칙이 따로 숨기고,
+    /// `--all` 은 그것을 `미룸` 표와 함께 연다. 물려받은 것만 보면 닫고 미룬
+    /// 줄이 `--all` 에서 표를 잃는다.
+    pub fn deferred(&self, i: &Issue) -> bool {
+        i.is_deferred() || self.put_off.contains(i.id.as_str())
     }
 }
 
@@ -169,9 +180,11 @@ impl Filter {
         }
         // **미뤄 둔 것은 done 과 같은 자리에서 빠진다.** 지금 계획이 아니라는
         // 뜻이 같고, 켜는 말(`--all`)도 같아야 축이 안 는다.
+        // **물려받은 미룸도 미룸이다** — 미룬 에픽의 멤버가 목록에 남으면
+        // `ready` 와 보드가 빼 둔 것을 목록만 계획으로 낸다.
         match self.deferred {
-            Some(want) if i.is_deferred() != want => return false,
-            None if !self.all && i.is_deferred() => return false,
+            Some(want) if wh.deferred(i) != want => return false,
+            None if !self.all && wh.deferred(i) => return false,
             _ => {}
         }
         if !self.all && self.status.is_empty() && i.status.is_done() {

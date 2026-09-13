@@ -17,6 +17,8 @@ struct Moved {
     /// 이미 그 칸에 있던 것.
     already: Vec<String>,
     missing: Vec<String>,
+    /// 옮긴 것 중 계획에서 빠진 것 — (그 줄, 실제로 미룬 줄).
+    shelved: Vec<(String, String)>,
 }
 
 pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
@@ -67,6 +69,15 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             i.normalize();
             m.done.push((i.clone(), from));
         }
+        // **물려받은 미룸도 여기서 잰다.** 미룬 에픽의 멤버를 집으면 칸은
+        // 옮겨져도 보드·`ready`·훅의 초점에서 빠진다 — 말하지 않으면 방금 집은
+        // 일을 훅이 "집은 것 없음" 으로 막는 까닭이 아무 데도 없다.
+        let roots = crate::report::deferred_roots(issues);
+        m.shelved = m
+            .done
+            .iter()
+            .filter_map(|(i, _)| roots.get(i.id.as_str()).map(|r| (i.id.clone(), r.to_string())))
+            .collect();
         Ok((entries, m))
     })?;
 
@@ -119,12 +130,13 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // 나오므로 미뤘다는 것이 더는 그 줄이 안 보이는 까닭이 아니고, `--undo`
     // 는 끝난 일을 계획에 도로 넣으라는 엉뚱한 말이 된다 — `status` 의
     // `미뤄 둔 것` 줄도 같은 자로 닫힌 것을 뺀다.
-    for (i, _) in moved.done.iter().filter(|(i, _)| crate::report::is_put_off(i)) {
-        out.push(format!(
-            "{}  {}",
-            paint(style::ID, &i.id),
-            paint(style::DIM, "미뤄 둔 것이라 보드와 ready 에서는 빠져 있다 — `moai defer --undo`"),
-        ));
+    for (id, root) in &moved.shelved {
+        let why = if id == root {
+            "미뤄 둔 것이라 보드와 ready 에서는 빠져 있다 — `moai defer --undo`".to_string()
+        } else {
+            format!("미룬 {root} 밑이라 보드와 ready 에서는 빠져 있다 — `moai defer {root} --undo`")
+        };
+        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &why)));
     }
     Ok(out)
 }

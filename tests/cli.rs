@@ -2456,6 +2456,51 @@ fn moving_a_deferred_row_says_it_is_still_out_of_the_plan() {
     assert!(!ok(s.path(), &["ready"]).contains(&id));
 }
 
+/// **묶음을 미루면 멤버도 계획에서 빠진다.** 에픽 줄 하나만 사라지고 멤버가
+/// `ready` 에 그 에픽 제목을 달고 서면, 미루기는 머리글 하나 지운 일이다.
+/// 목록도 같은 자로 숨기고, `--deferred` 가 그것을 연다.
+#[test]
+fn deferring_an_epic_takes_its_members_out_of_the_plan() {
+    let s = init("deferepicmembers");
+    let epic = ok(s.path(), &["epic", "add", "다음 분기", "-q"]).trim().to_string();
+    let member = add(s.path(), &["파서", "-e", &epic]);
+    let other = add(s.path(), &["지금 할 것"]);
+    ok(s.path(), &["defer", &epic]);
+
+    let r = ok(s.path(), &["ready"]);
+    assert!(r.contains(&other) && !r.contains(&member), "미룬 에픽의 멤버가 올라왔다 — {r}");
+
+    let plain = ok(s.path(), &["show"]);
+    assert!(!plain.contains(&member), "목록만 멤버를 계획으로 낸다 — {plain}");
+    assert!(plain.contains("미룸 2건 숨김"), "{plain}");
+    let only = ok(s.path(), &["show", "--deferred"]);
+    assert!(only.contains(&member), "세어 놓고 가리킨 곳이 비었다 — {only}");
+    let all = ok(s.path(), &["show", "--all"]);
+    let row = all.lines().find(|l| l.contains(&member)).expect("--all 이 멤버를 안 낸다");
+    assert!(row.contains("미룸"), "물려받은 미룸이 표를 잃었다 — {row}");
+    assert!(ok(s.path(), &["status"]).contains("미뤄 둔 것 2건"));
+}
+
+/// **미룬 것이 막고 있으면 `ready` 가 까닭 없이 비지 않는다.** 막는 줄은
+/// 어느 목록에도 없으므로 그 id 와 푸는 길을 같이 댄다.
+#[test]
+fn ready_names_the_deferred_blocker_it_is_waiting_on() {
+    let s = init("deferblocker");
+    let blocker = add(s.path(), &["막는 것"]);
+    let blocked = add(s.path(), &["막힌 것"]);
+    ok(s.path(), &["link", &blocker, "--blocks", &blocked]);
+    ok(s.path(), &["defer", &blocker]);
+
+    let r = ok(s.path(), &["ready"]);
+    assert!(r.contains("0건"), "미룬 막음을 끝난 것으로 봤다 — {r}");
+    assert!(r.contains("미뤄 둔 것에 막혀"), "왜 비었는지 안 말한다 — {r}");
+    assert!(r.contains(&blocked) && r.contains(&blocker), "누가 누구를 막는지 안 댄다 — {r}");
+
+    let st = moai(s.path(), &["status", "--json"]);
+    assert!(st.status.success(), "경고로 비영 종료했다");
+    assert!(String::from_utf8(st.stdout).unwrap().contains("blocked_by_deferred"));
+}
+
 // ── 리뷰가 잡은 것들 ────────────────────────────────────────────────
 //
 // 아래는 전부 **조용히 되돌아갈 자리**다. 어느 것도 컴파일러가 못 잡고,

@@ -21,6 +21,8 @@ pub fn run(ctx: &Ctx) -> R<Vec<String>> {
 
     // 첫 칸도 아니고 끝나지도 않은 것 = 누군가 이미 잡고 있는 것.
     let wip = report::wip(&load.issues, &repo.config);
+    // 미뤄 둔 것에 막혀 못 집는 것. 안 대면 `ready` 가 까닭 없이 빈다.
+    let held = report::held(&load.issues, &repo.config);
 
-    Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip))
+    Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip, &held))
 }

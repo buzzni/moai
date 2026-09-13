@@ -7,7 +7,7 @@
 use crate::config::Config;
 use crate::model::{Issue, Kind, days_since};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// 에픽 하나(또는 "에픽 없음")의 집계. **저장하지 않는다** — 멤버 하나를
 /// 닫을 때 에픽 줄까지 써야 한다면 그 필드는 파생값이고, 두 줄 쓰기 중간에
@@ -58,18 +58,66 @@ pub fn is_put_off(i: &Issue) -> bool {
     i.is_deferred() && !i.status.is_done()
 }
 
-/// 지금 계획에 있는 일인가. **`is_work` 에서 미뤄 둔 것을 뺀다.**
+/// 지금 계획에서 빠진 줄의 id — **제가 미뤘거나, 미룬 것 밑에 있는 것.**
 ///
-/// 세는 자리는 대부분 이쪽을 쓴다 — 보드·`ready`·경고는 "지금 할 수
-/// 있는 것" 을 묻는다. **롤업만 `is_work` 를 그대로 쓴다**: 다섯 중 둘을
-/// 미뤘다고 `3건짜리 에픽` 이 되면 미루는 것이 계획을 고쳐 쓰는 일이 되고,
-/// 멤버를 전부 미룬 에픽이 `속이 빈 에픽` 으로 고발당한다.
+/// 줄 하나만 보고는 못 정한다. 에픽이나 마일스톤이나 부모를 미뤘는데 그 밑의
+/// 일이 `ready` 에 그 묶음 제목을 달고 그대로 서면, 미루기가 한 일은 머리글
+/// 하나 지운 것뿐이다. 그래서 `groups`·`milestones` 처럼 **읽을 때 조상을
+/// 탄다.** 스냅샷에 적지 않는다 — 에픽 하나를 미룰 때 멤버 줄까지 써야
+/// 한다면 그것은 파생값이다.
 ///
-/// **흐름도 `is_work` 를 쓴다.** 흐름은 "지금 무엇을 할 수 있나" 가 아니라
-/// "지난 이레에 무엇이 있었나" 라, 오늘 미룬다고 그저께 만든 사실이 사라지면
-/// 미루기가 쌓임 경고를 지우는 손잡이가 된다.
-pub fn is_active(i: &Issue) -> bool {
-    is_work(i) && !is_put_off(i)
+/// 이 집합을 쓰는 자리는 "지금 할 수 있는 것" 을 묻는다 — 보드·`ready`·경고.
+/// **롤업은 안 쓴다**: 다섯 중 둘을 미뤘다고 `3건짜리 에픽` 이 되면 미루는
+/// 것이 계획을 고쳐 쓰는 일이 된다. **흐름도 안 쓴다**: 흐름은 "지난 이레에
+/// 무엇이 있었나" 라, 오늘 미룬다고 그저께 만든 사실이 사라지면 미루기가
+/// 쌓임 경고를 지우는 손잡이가 된다.
+///
+/// **끝난 줄은 물려받아도 들지 않는다.** [`is_put_off`] 와 같은 까닭이다.
+pub fn put_off(all: &[Issue]) -> BTreeSet<&str> {
+    put_off_in(all, &groups(all), &milestones(all))
+}
+
+/// [`put_off`] 와 같은 것. 소속 지도를 이미 가진 쪽(`query::Where`)이 두 번
+/// 걷지 않게 받는다.
+pub fn put_off_in<'a>(
+    all: &'a [Issue],
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    mile_of: &BTreeMap<&'a str, &'a str>,
+) -> BTreeSet<&'a str> {
+    deferred_roots_in(all, epic_of, mile_of).into_keys().collect()
+}
+
+/// 계획에서 빠진 줄 id → **실제로 `deferred_at` 을 든 줄** id.
+///
+/// 물려받은 줄에 `moai defer <그 줄> --undo` 를 시키면 "이미 그렇다" 로
+/// 끝나고 아무것도 안 풀린다. 되돌리는 말을 대는 자리는 이것으로 미룬 곳을 댄다.
+pub fn deferred_roots(all: &[Issue]) -> BTreeMap<&str, &str> {
+    deferred_roots_in(all, &groups(all), &milestones(all))
+}
+
+fn deferred_roots_in<'a>(
+    all: &'a [Issue],
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    mile_of: &BTreeMap<&'a str, &'a str>,
+) -> BTreeMap<&'a str, &'a str> {
+    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
+    let own = |id: Option<&&'a str>| id.copied().filter(|id| by_id.get(id).is_some_and(|x| is_put_off(x)));
+    // 제 줄부터 부모를 타고 올라가며, 그 줄이나 그 줄의 에픽·마일스톤이
+    // 미뤄졌는지 본다. 부모가 다른 에픽에 있어도 부모가 빠지면 자식도 빠진다.
+    let root = |id: &'a str| {
+        let mut cur = Some(id);
+        while let Some(at) = cur {
+            if let Some(r) = own(Some(&at)).or_else(|| own(epic_of.get(at))).or_else(|| own(mile_of.get(at))) {
+                return Some(r);
+            }
+            cur = crate::id::parent_of(at);
+        }
+        None
+    };
+    all.iter()
+        .filter(|i| !i.status.is_done())
+        .filter_map(|i| root(i.id.as_str()).map(|r| (i.id.as_str(), r)))
+        .collect()
 }
 
 /// 담아 둔 생각인가. **술어를 `cmd/` 에 두지 않는다** — 어떤 줄이 무엇인지
@@ -99,10 +147,14 @@ pub fn is_work(i: &Issue) -> bool {
 /// `ready` 의 아래쪽 줄과 훅이 접힌 뒤에 싣는 줄이 같은 집합이다. 두 벌로
 /// 두면 한쪽만 고쳐지고, 그러면 화면이 같은 세션을 두 가지로 말한다.
 pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
+    let out = put_off(issues);
     issues
         .iter()
         .filter(|i| {
-            is_active(i) && !i.status.is_done() && i.status.as_str() != cfg.first_status()
+            is_work(i)
+                && !out.contains(i.id.as_str())
+                && !i.status.is_done()
+                && i.status.as_str() != cfg.first_status()
         })
         .collect()
 }
@@ -387,35 +439,14 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
 pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let group = groups(issues);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    // 자식은 소속을 조상에게서 물려받으므로 끝난 에픽의 손자도 집지 않는다.
-    // **두 줄 위에서 세운 `by_id` 로 짚는다.** 훑으면 후보 하나마다 목록
-    // 전체를 걷게 되어 `ready` 가 이슈 수의 제곱으로 자란다.
-    let done_epic = |i: &Issue| {
-        group
-            .get(i.id.as_str())
-            .and_then(|e| by_id.get(*e))
-            .is_some_and(|e| e.status.is_done())
-    };
-    // 자식이 남아 있으면 부모는 직접 하는 일이 아니다. **일만 센다** —
-    // 이슈 밑에 담아 둔 생각 하나가 그 이슈를 `ready` 에서 지워 버리는데,
-    // idea 는 어느 목록에도 안 나오므로 왜 사라졌는지 볼 방법이 없다.
-    let has_open_child = |i: &Issue| {
-        children_of(issues, &i.id).iter().any(|c| is_active(c) && !c.status.is_done())
-    };
+    let out_of_plan = put_off(issues);
+    let mut out: Vec<&Issue> = issues
+        .iter()
+        .filter(|i| unblocked_pick(i, issues, cfg, &group, &by_id, &out_of_plan) && !is_blocked(i, &by_id))
+        .collect();
 
     let progress: BTreeMap<Option<String>, u8> =
         rollup(issues, cfg).into_iter().map(|r| (r.id, r.percent.unwrap_or(0))).collect();
-
-    let mut out: Vec<&Issue> = issues
-        .iter()
-        .filter(|i| {
-            is_active(i)                             // 묶음도 미뤄 둔 것도 집는 게 아니다
-                && i.status.as_str() == cfg.first_status()
-                && !done_epic(i)
-                && !has_open_child(i)
-                && !is_blocked(i, &by_id)
-        })
-        .collect();
 
     // 급한 것 → 끝나가는 에픽 → 오래된 것. 끝나가는 것을 먼저 집어야
     // 벌여 놓은 에픽이 줄어든다.
@@ -431,6 +462,92 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
             .then_with(|| a.id.cmp(&b.id))
     });
     out
+}
+
+/// 막음만 빼면 집을 수 있는가. `ready` 와 `held` 가 **같은 자로** 고른다 —
+/// 둘이 따로 고르면 `held` 가 댄 줄이 막음을 풀어도 `ready` 에 안 올라온다.
+fn unblocked_pick(
+    i: &Issue,
+    issues: &[Issue],
+    cfg: &Config,
+    group: &BTreeMap<&str, &str>,
+    by_id: &BTreeMap<&str, &Issue>,
+    out_of_plan: &BTreeSet<&str>,
+) -> bool {
+    // 자식은 소속을 조상에게서 물려받으므로 끝난 에픽의 손자도 집지 않는다.
+    // **미리 세운 `by_id` 로 짚는다.** 훑으면 후보 하나마다 목록 전체를 걷게
+    // 되어 `ready` 가 이슈 수의 제곱으로 자란다.
+    let done_epic = group
+        .get(i.id.as_str())
+        .and_then(|e| by_id.get(*e))
+        .is_some_and(|e| e.status.is_done());
+    // 자식이 남아 있으면 부모는 직접 하는 일이 아니다. **일만 센다** —
+    // 이슈 밑에 담아 둔 생각 하나가 그 이슈를 `ready` 에서 지워 버리는데,
+    // idea 는 어느 목록에도 안 나오므로 왜 사라졌는지 볼 방법이 없다.
+    let has_open_child = || {
+        children_of(issues, &i.id)
+            .iter()
+            .any(|c| is_work(c) && !out_of_plan.contains(c.id.as_str()) && !c.status.is_done())
+    };
+    is_work(i)                                   // 묶음도 생각도 집는 게 아니다
+        && !out_of_plan.contains(i.id.as_str())  // 미뤄 둔 것과 그 밑도
+        && i.status.as_str() == cfg.first_status()
+        && !done_epic
+        && !has_open_child()
+}
+
+/// 미뤄 둔 것에 막혀 못 집는 일 하나와, 그것을 막는 미뤄 둔 줄들.
+#[derive(Debug)]
+pub struct Held<'a> {
+    pub issue: &'a Issue,
+    pub by: Vec<&'a str>,
+    /// `by` 를 풀려면 도로 집어야 할 줄 — 막는 줄이 미룬 에픽 밑이면 그 에픽.
+    pub undo: Vec<&'a str>,
+}
+
+/// 막음만 아니면 집을 일인데, **안 끝난 막음 중 하나라도 미뤄 둔 것**인 줄.
+///
+/// 미룬 막음을 무시하지 않는다 — 미룬 일은 끝난 일이 아니라, 무시하면 안
+/// 끝난 일 위에 선 것을 집으라고 내민다. 그렇다고 입을 다물면 `ready` 가
+/// 까닭 없이 비고, 막는 줄은 어느 목록에도 없어 풀 길이 안 보인다.
+/// 그래서 **드러내되 고르지는 않는다.** 도로 집을지 막음을 풀지는 사람 몫이다.
+pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
+    let group = groups(issues);
+    let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
+    let roots = deferred_roots_in(issues, &group, &milestones(issues));
+    let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
+    // 값싼 막음 검사를 먼저 한다. `unblocked_pick` 은 자식을 찾느라 목록을
+    // 한 번 걷는다 — 모든 줄에 먼저 부르면 `ready` 가 부를 때마다 제곱이다.
+    let mut out: Vec<Held> = issues
+        .iter()
+        .filter_map(|i| {
+            let by = deferred_blockers(i, &by_id, &out_of_plan);
+            (!by.is_empty()).then_some((i, by))
+        })
+        .filter(|(i, _)| unblocked_pick(i, issues, cfg, &group, &by_id, &out_of_plan))
+        .map(|(i, by)| {
+            let mut undo: Vec<&str> = by.iter().filter_map(|b| roots.get(b).copied()).collect();
+            undo.sort_unstable();
+            undo.dedup();
+            Held { issue: i, by, undo }
+        })
+        .collect();
+    out.sort_by(|a, b| crate::query::display_order(a.issue, b.issue));
+    out
+}
+
+/// `i` 를 막는 것 중 안 끝났고 계획에서 빠진 것.
+fn deferred_blockers<'a>(
+    i: &Issue,
+    by_id: &BTreeMap<&str, &'a Issue>,
+    out_of_plan: &BTreeSet<&str>,
+) -> Vec<&'a str> {
+    i.blocked_by
+        .iter()
+        .filter_map(|b| by_id.get(b.as_str()))
+        .filter(|b| !b.status.is_done() && out_of_plan.contains(b.id.as_str()))
+        .map(|b| b.id.as_str())
+        .collect()
 }
 
 
@@ -589,7 +706,9 @@ fn ids_of(v: &[&Issue]) -> Vec<String> {
 pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -> StatusReport {
     // **여기가 "지금 계획" 의 정의다.** 보드 수·모든 경고·흐름이 이 하나를
     // 지나므로, 미뤄 둔 것을 여기서 빼면 아래 전부에서 저절로 빠진다.
-    let work: Vec<&Issue> = issues.iter().filter(|i| is_active(i)).collect();
+    let out_of_plan = put_off(issues);
+    let work: Vec<&Issue> =
+        issues.iter().filter(|i| is_work(i) && !out_of_plan.contains(i.id.as_str())).collect();
     // **한 번만 잰다.** 둘 다 이슈 전부의 물림을 타고 올라가므로, 경고마다
     // 다시 부르면 같은 걸음을 `moai status` 한 번에 여러 벌 걷는다.
     // `placed` 는 자리를 못 정하는 줄(`nav` 의 `(길 잃음)` 과 같은 집합),
@@ -669,17 +788,33 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
 
     // 2-2. 오래 막혀 있는 것. 막힌 채로 방치되는 것이 계획이 멈춘 자리다.
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
+    // 미뤄 둔 것에 막힌 것은 **아래 2-3 이 제 이름으로** 말한다. 여기서도
+    // 세면 같은 줄이 두 번 나오고, 이쪽 말로는 막는 줄을 어디서 찾는지 모른다.
+    let by_deferred =
+        |i: &Issue| !deferred_blockers(i, &by_id, &out_of_plan).is_empty();
     let stuck: Vec<&Issue> = work
         .iter()
         .copied()
         .filter(|i| {
             !i.status.is_done()
                 && is_blocked(i, &by_id)
+                && !by_deferred(i)
                 && days_since(&i.status_since, now).is_some_and(|d| d > BLOCKED_STALE_DAYS)
         })
         .collect();
     if !stuck.is_empty() {
         warnings.push(Warning::new("blocked_stale", ids_of(&stuck)).days(BLOCKED_STALE_DAYS));
+    }
+
+    // 2-3. 미뤄 둔 것에 막힌 것. **날짜를 안 기다린다** — 계획이 스스로
+    //      모순된 자리라(지금 할 일이 지금 안 할 일을 기다린다) 사흘 둔다고
+    //      풀리지 않는다. 막지는 않는다.
+    let waiting: Vec<&Issue> =
+        work.iter().copied().filter(|i| !i.status.is_done() && by_deferred(i)).collect();
+    if !waiting.is_empty() {
+        warnings.push(
+            Warning::new("blocked_by_deferred", ids_of(&waiting)).hint("moai show --deferred"),
+        );
     }
 
     // 3. 한 번에 여러 개 벌인 것. AI 가 가장 잘 하는 실수다.
@@ -710,9 +845,11 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     // **미뤄 둔 묶음은 꾸짖지 않는다.** 롤업이 `is_work` 로 세는 것은 미뤘다고
     // 계획이 줄면 안 되기 때문이지 미룬 것을 고발하라는 뜻이 아니다 — 여기서
     // 세면 "다음 분기에" 하고 통째로 미룬 에픽이 그 순간 `속이 빈 에픽` 으로
-    // 서고, 미룰수록 잔소리가 는다. `is_active` 가 일에 대해 하는 일을 묶음에
-    // 대해서도 하는 자리다.
-    let put_off_group = |id: &str| by_id.get(id).is_some_and(|g| g.is_deferred());
+    // 서고, 미룰수록 잔소리가 는다. `put_off` 가 일에 대해 하는 일을 묶음에
+    // 대해서도 하는 자리다. **물려받은 미룸도 친다** — 미룬 마일스톤 밑의
+    // 에픽은 `미뤄 둔 것` 으로 세면서 `속이 빈 에픽` 으로도 꾸짖으면 안 된다.
+    let put_off_group =
+        |id: &str| by_id.get(id).is_some_and(|g| g.is_deferred()) || out_of_plan.contains(id);
     let empty: Vec<String> = rolls
         .iter()
         .filter(|r| r.id.is_some() && r.total == 0)
@@ -788,7 +925,8 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     //      **미뤄 둔 생각은 안 센다.** 여기 세면 이 줄이 가리키는 `moai idea
     //      ls` 가 그것을 숨겨, 세어 놓고 못 보여 주는 수가 된다 — 미룬 것은
     //      아래 6-3 이 제 이름으로 말한다.
-    let piled = |i: &&Issue| is_idea(i) && !i.status.is_done() && !is_put_off(i);
+    let piled =
+        |i: &&Issue| is_idea(i) && !i.status.is_done() && !out_of_plan.contains(i.id.as_str());
     let count = issues.iter().filter(piled).count();
     if count >= IDEA_PILE {
         let oldest = issues
@@ -814,12 +952,16 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     //      **종류를 안 가린다.** 미루는 길(`moai defer`)은 무엇이든 받는데
     //      `is_work` 로 좁히면 미뤄 둔 에픽·생각이 목록에서만 사라지고 여기서
     //      한마디도 안 나온다 — 보이는 유일한 자리가 그 줄만 안 비추는 꼴이다.
-    let put_off = |i: &&Issue| is_put_off(i);
-    let count = issues.iter().filter(put_off).count();
+    //
+    //      **물려받은 것도 센다.** 미룬 에픽 밑의 멤버도 보드에서 빠지므로
+    //      여기서 안 세면 가리키는 `--deferred` 가 내는 수와 어긋난다. 나이는
+    //      제 줄에 적힌 시각만 있으니 그것으로 잰다.
+    let shelved = |i: &&Issue| out_of_plan.contains(i.id.as_str());
+    let count = issues.iter().filter(shelved).count();
     if count > 0 {
         let oldest = issues
             .iter()
-            .filter(put_off)
+            .filter(shelved)
             .filter_map(|i| i.deferred_at.as_deref().and_then(|at| days_since(at, now)))
             .max()
             .unwrap_or(0);
@@ -1708,5 +1850,130 @@ mod tests {
         assert_eq!(before.created, 5, "{before:?}");
         assert_eq!(after.created, before.created, "미루자 만든 사실이 사라졌다 — {after:?}");
         assert_eq!(after.net, before.net, "{after:?}");
+    }
+
+    // ── 미룸은 물려받는다 ─────────────────────────────────────────────
+
+    fn picks<'a>(issues: &'a [Issue]) -> Vec<&'a str> {
+        ready(issues, &cfg()).iter().map(|i| i.id.as_str()).collect()
+    }
+
+    /// **묶음을 미루면 그 밑의 일도 지금 계획이 아니다.** 에픽 줄 하나만
+    /// 목록에서 사라지고 멤버가 `ready` 에 그 에픽 제목을 달고 그대로 서면,
+    /// 미루기가 한 일은 머리글 하나 지운 것뿐이다.
+    #[test]
+    fn members_of_a_deferred_epic_are_out_of_the_plan() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let issues = vec![
+            epic,
+            member("argos-0002", "argos-0001", "todo"),
+            member("argos-0003", "argos-0001", "in_progress"),
+            make("argos-0009", Kind::Issue, "todo"),
+        ];
+        assert_eq!(picks(&issues), ["argos-0009"], "미룬 에픽의 멤버가 집을 일로 올라왔다");
+        assert!(wip(&issues, &cfg()).is_empty(), "미룬 에픽의 멤버를 벌여 놓은 것으로 셌다");
+
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        assert_eq!(st.total, 1, "미룬 에픽의 멤버를 보드가 셌다 — {:?}", st.counts);
+        let w = st.warnings.iter().find(|w| w.kind == "deferred").expect("미룬 것을 안 말한다");
+        assert_eq!(w.count, 3, "물려받은 것을 안 세면 `--deferred` 가 내는 수와 어긋난다");
+    }
+
+    /// 마일스톤도 묶음이다. 에픽을 거쳐 물려받는다.
+    #[test]
+    fn a_deferred_milestone_takes_its_epics_members_along() {
+        let mut stone = make("argos-0001", Kind::Milestone, "todo");
+        stone.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut epic = make("argos-0002", Kind::Epic, "todo");
+        epic.milestone = Some("argos-0001".into());
+        let issues = vec![stone, epic, member("argos-0003", "argos-0002", "todo")];
+        assert!(picks(&issues).is_empty(), "미룬 마일스톤 밑의 일이 올라왔다");
+    }
+
+    /// 부모를 미루면 그 밑의 자식도 같이 빠진다. 자식이 남아 있으면 부모는
+    /// 직접 하는 일이 아니라는 규칙과 짝이다 — 둘 중 하나만 서면 미룬 부모의
+    /// 자식이 `ready` 맨 위에 선다.
+    #[test]
+    fn children_of_a_deferred_parent_are_out_of_the_plan() {
+        let issues = vec![
+            deferred("argos-0001", "todo"),
+            make("argos-0001.aaa", Kind::Issue, "todo"),
+            make("argos-0001.aaa.bbb", Kind::Issue, "todo"),
+        ];
+        assert!(picks(&issues).is_empty(), "{:?}", picks(&issues));
+    }
+
+    /// **끝난 줄은 물려받아도 미룬 것이 아니다.** 제 줄에 대한 규칙
+    /// (`is_put_off`)과 같다 — 미룬 에픽 밑에서 끝낸 일이 보드의 done 칸에서
+    /// 사라지면 롤업과 어긋난다.
+    #[test]
+    fn a_closed_member_of_a_deferred_epic_stays_on_the_board() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let issues = vec![epic, member("argos-0002", "argos-0001", "done")];
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        assert_eq!(st.counts.get("done"), Some(&1), "{:?}", st.counts);
+    }
+
+    // ── 미룬 것이 막고 있으면 까닭을 말한다 ──────────────────────────
+
+    /// **미룬 막음은 여전히 막는다.** 미룬 일은 끝난 일이 아니다 — 무시하면
+    /// 안 끝난 일 위에 선 것을 집으라고 내민다. 대신 `ready` 가 까닭 없이
+    /// 비지 않도록 무엇이 막는지를 따로 낸다.
+    #[test]
+    fn work_held_by_a_deferred_blocker_is_named_not_offered() {
+        let mut blocked = make("argos-0002", Kind::Issue, "todo");
+        blocked.blocked_by = vec!["argos-0001".into()];
+        let issues = vec![deferred("argos-0001", "todo"), blocked];
+        assert!(picks(&issues).is_empty(), "미룬 막음을 끝난 것으로 봤다");
+
+        let held = held(&issues, &cfg());
+        assert_eq!(held.len(), 1, "막힌 까닭을 안 낸다");
+        assert_eq!(held[0].issue.id, "argos-0002");
+        assert_eq!(held[0].by, ["argos-0001"]);
+    }
+
+    /// 미룬 것이 막는 막음은 `blocked_stale` 이 아니라 제 이름으로 말한다 —
+    /// 그쪽은 막는 줄이 어느 목록에도 없어 풀 방법을 못 댄다.
+    #[test]
+    fn status_names_a_deferred_blocker_instead_of_a_stale_block() {
+        let mut blocked = make("argos-0002", Kind::Issue, "todo");
+        blocked.blocked_by = vec!["argos-0001".into()];
+        let issues = vec![deferred("argos-0001", "todo"), blocked];
+        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z");
+        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(!kinds.contains(&"blocked_stale"), "{kinds:?}");
+        let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("{kinds:?}");
+        assert_eq!(w.ids, ["argos-0002"]);
+        assert!(!w.notice && !w.fatal, "{w:?}");
+    }
+
+    /// 막는 것이 미룬 에픽 밑에 있어도 같다 — 물려받은 미룸도 미룸이다.
+    #[test]
+    fn an_inherited_deferral_also_holds() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut blocked = make("argos-0003", Kind::Issue, "todo");
+        blocked.blocked_by = vec!["argos-0002".into()];
+        let issues = vec![epic, member("argos-0002", "argos-0001", "todo"), blocked];
+        let held = held(&issues, &cfg());
+        assert_eq!(held.len(), 1);
+        // 도로 집을 곳은 막는 멤버가 아니라 미룬 에픽이다 — 멤버에 `--undo` 는 헛손질이다.
+        assert_eq!(held[0].by, ["argos-0002"]);
+        assert_eq!(held[0].undo, ["argos-0001"]);
+    }
+
+    /// 미룬 마일스톤 밑의 빈 에픽은 `미뤄 둔 것` 으로 세면서 `속이 빈 에픽` 으로
+    /// 꾸짖지 않는다. 미룰수록 잔소리가 느는 실패가 물려받은 자리에서 돌아온다.
+    #[test]
+    fn an_epic_under_a_deferred_milestone_is_not_scolded() {
+        let mut stone = make("argos-0001", Kind::Milestone, "todo");
+        stone.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut epic = make("argos-0002", Kind::Epic, "todo");
+        epic.milestone = Some("argos-0001".into());
+        let st = status(&[stone, epic], &[], &cfg(), "2026-09-11T00:00:00Z");
+        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(!kinds.contains(&"empty_epic"), "{kinds:?}");
     }
 }

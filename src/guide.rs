@@ -113,7 +113,8 @@ const DEFERRING: &str = r#"    moai defer <id> -m "다음 분기에"       계�
     moai show --deferred                   미뤄 둔 것만 본다
 
 칸도 종류도 안 바뀐다 — 같은 줄이 그대로 돌아온다. 미룬 것은 `moai ready` 와
-보드와 경고에서 빠지고, `moai status` 가 한 줄로 그것을 비춘다."#;
+보드와 경고에서 빠지고, `moai status` 가 한 줄로 그것을 비춘다. 에픽·마일스톤·
+부모를 미루면 그 밑의 일도 같이 빠진다."#;
 
 const GROUPS: &str = r#"    moai epic add "저장 계층"                      에픽
     moai milestone add "v0.1"                      마일스톤

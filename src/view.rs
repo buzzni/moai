@@ -114,6 +114,7 @@ pub fn list(
     hidden: Hidden,
     epics: &BTreeMap<&str, String>,
     asked_deferred: bool,
+    put_off: &std::collections::BTreeSet<&str>,
 ) -> Vec<String> {
     if issues.is_empty() {
         let why = hidden.says();
@@ -181,7 +182,9 @@ pub fn list(
         // 같은 낱말이 붙어 봐야 자리만 먹는데, `--all` 은 섞여 나오므로 표가
         // 없으면 어느 줄이 계획 밖인지 알 길이 없다. 열을 늘리지 않고 꼬리에
         // 단다 — 미루지 않은 줄이 그 자리를 비워 두면 그게 더 시끄럽다.
-        if i.is_deferred() && mark_deferred {
+        // 물려받은 미룸도 단다 — `--all` 에서 미룬 에픽의 멤버가 표 없이 서면
+        // 계획 밖의 줄이 일과 똑같이 보인다.
+        if (i.is_deferred() || put_off.contains(i.id.as_str())) && mark_deferred {
             row.push_str(&format!("   {}", paint(style::DIM, "미룸")));
         }
         out.push(row.trim_end().to_string());
@@ -484,6 +487,8 @@ fn says(w: &Warning) -> String {
         // `days` 는 "막힌 기간" 이 아니라 "지금 칸에 머문 기간" 이다 — 막 막힌
         // 것을 "며칠째 막혀 있다" 고 잘못 말하지 않으려고 이렇게 적는다.
         "blocked_stale" => format!("막힌 채로 {}일 넘게 멈춰 있는 것 {n}건", w.days.unwrap_or(0)),
+        // 막는 쪽이 어느 목록에도 없으므로 **어디서 찾는지를 같이 말한다.**
+        "blocked_by_deferred" => format!("미뤄 둔 것에 막혀 못 집는 일 {n}건 — 막는 쪽을 도로 집거나 막음을 푼다"),
         "empty_epic" => format!("속이 빈 에픽 {n}건 — 계획만 세우고 안 채웠다"),
         "finished_epic" => format!("다 끝났는데 안 닫힌 에픽 {n}건"),
         // **끊긴 것과 종류가 틀린 것을 한 낱말로 말한다** — 둘을 가려 말하면
@@ -544,6 +549,7 @@ pub fn status(st: &StatusReport, issues: &[Issue], cfg: &Config, now: &str, at: 
         .collect();
     out.push(format!("  {}", board.join("    ")));
 
+    let shelved = crate::report::put_off(issues);
     for (label, rolls) in [("마일스톤", &st.milestones), ("에픽", &st.epics)] {
         if rolls.is_empty() {
             continue;
@@ -564,7 +570,8 @@ pub fn status(st: &StatusReport, issues: &[Issue], cfg: &Config, now: &str, at: 
             // 뜻을 지는 자리를 만들지 않는다.
             let row = e.id.as_deref().and_then(|id| by_id.get(id));
             let still_open = row.is_some_and(|i| !i.status.is_done());
-            let put_off = row.is_some_and(|i| crate::report::is_put_off(i));
+            // 물려받은 미룸도 친다 — 미룬 마일스톤 밑의 에픽을 재촉하면 안 된다.
+            let put_off = e.id.as_deref().is_some_and(|id| shelved.contains(id));
             let note = match e.percent {
                 _ if put_off => paint(style::DIM, "   미룸"),
                 None => paint(style::DIM, "   자식 없음"),
@@ -689,7 +696,12 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str) -> Vec<String
 }
 
 /// 집을 수 있는 일. 그리고 이미 벌여 놓은 것.
-pub fn ready(picks: &[&Issue], epics: &BTreeMap<&str, String>, wip: &[&Issue]) -> Vec<String> {
+pub fn ready(
+    picks: &[&Issue],
+    epics: &BTreeMap<&str, String>,
+    wip: &[&Issue],
+    held: &[crate::report::Held],
+) -> Vec<String> {
     let mut out = vec![format!("집을 수 있는 일  {}건", picks.len())];
     if picks.is_empty() {
         out.push(String::new());
@@ -740,6 +752,34 @@ pub fn ready(picks: &[&Issue], epics: &BTreeMap<&str, String>, wip: &[&Issue]) -
             "  {}",
             paint(style::DIM, &wip.iter().map(|i| i.id.as_str()).collect::<Vec<_>>().join("  "))
         ));
+    }
+
+    // **미뤄 둔 것에 막힌 일은 까닭과 함께 댄다.** 막는 줄은 보드에도 `ready`
+    // 에도 없으므로, 여기서 안 대면 목록이 왜 비었는지 아무 데서도 안 나온다.
+    if !held.is_empty() {
+        out.push(String::new());
+        out.push(format!(
+            "{} {}",
+            paint(style::WARN, "!"),
+            paint(
+                style::DIM,
+                &format!(
+                    "미뤄 둔 것에 막혀 못 집는 일 {}건 — 미룬 곳을 도로 집거나 막음을 푼다",
+                    held.len()
+                )
+            )
+        ));
+        for h in held {
+            // **도로 집는 말은 미룬 곳을 댄다.** 막는 줄이 미룬 에픽 밑이면 그
+            // 줄에 `--undo` 를 쳐 봐야 "이미 그렇다" 로 끝난다.
+            out.push(format!(
+                "  {}  {}  {}  {}",
+                paint(style::ID, &h.issue.id),
+                paint(style::DIM, &clip(&h.issue.title, TITLE_CAP)),
+                paint(style::DIM, &format!("← {}", h.by.join(" · "))),
+                paint(style::DIM, &format!("moai defer {} --undo", h.undo.join(" "))),
+            ));
+        }
     }
     out
 }
@@ -983,7 +1023,7 @@ mod tests {
             issue("argos-0001", "한글 제목이다", "todo"),
             issue("argos-0002", "ascii title", "review"),
         ];
-        let out = plain(&list(&issues, &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false));
+        let out = plain(&list(&issues, &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false, &Default::default()));
         let cols: Vec<usize> = out[1..3]
             .iter()
             .map(|l| width(l.split_once("  ").unwrap().0))
@@ -1001,7 +1041,7 @@ mod tests {
     #[test]
     fn header_lines_up_with_rows() {
         let issues = vec![issue("argos-0001", "제목이다", "todo")];
-        let out = plain(&list(&issues, &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false));
+        let out = plain(&list(&issues, &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false, &Default::default()));
         let head_at = width(&out[0][..out[0].find("제목").unwrap()]);
         let row_at = width(&out[1][..out[1].find("제목이다").unwrap()]);
         assert_eq!(head_at, row_at, "{out:#?}");
@@ -1009,14 +1049,14 @@ mod tests {
 
     #[test]
     fn empty_list_says_why() {
-        assert_eq!(plain(&list(&[], &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false))[0], "없다.");
-        assert!(plain(&list(&[], &cfg(), Hidden { done: 3, ..Hidden::default() }, &no_epics(), false))[0].contains("done 3건"));
+        assert_eq!(plain(&list(&[], &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false, &Default::default()))[0], "없다.");
+        assert!(plain(&list(&[], &cfg(), Hidden { done: 3, ..Hidden::default() }, &no_epics(), false, &Default::default()))[0].contains("done 3건"));
     }
 
     #[test]
     fn summary_counts_each_column() {
         let issues = vec![issue("argos-0001", "a", "todo"), issue("argos-0002", "b", "todo")];
-        let out = plain(&list(&issues, &cfg(), Hidden { done: 5, ..Hidden::default() }, &no_epics(), false));
+        let out = plain(&list(&issues, &cfg(), Hidden { done: 5, ..Hidden::default() }, &no_epics(), false, &Default::default()));
         let last = out.last().unwrap();
         assert!(last.starts_with("2건 (todo 2)"), "{last}");
         assert!(last.contains("done 5건 숨김"), "{last}");
@@ -1025,7 +1065,7 @@ mod tests {
     #[test]
     fn long_titles_are_clipped_not_wrapped() {
         let long = "가".repeat(80);
-        let out = plain(&list(&[issue("argos-0001", &long, "todo")], &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false));
+        let out = plain(&list(&[issue("argos-0001", &long, "todo")], &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false, &Default::default()));
         assert!(out[1].ends_with('…'), "{:?}", out[1]);
         assert!(width(&out[1]) < 80, "{:?}", out[1]);
     }
@@ -1106,12 +1146,12 @@ mod tests {
         let mut i = issue("argos-0002", "멤버", "todo");
         i.epic = Some("argos-0001".into());
         let labels = BTreeMap::from([("argos-0002", "저장 계층".to_string())]);
-        let out = plain(&list(&[i.clone()], &cfg(), Hidden::default(), &labels, false));
+        let out = plain(&list(&[i.clone()], &cfg(), Hidden::default(), &labels, false, &Default::default()));
         assert!(out[1].contains("저장 계층") && !out[1].contains("argos-0001"), "{out:#?}");
 
         // 없는 에픽을 가리켜도 죽지 않고 그렇다고 말한다
         let dangling = BTreeMap::from([("argos-0002", "(없는 에픽)".to_string())]);
-        let out = plain(&list(&[i], &cfg(), Hidden::default(), &dangling, false));
+        let out = plain(&list(&[i], &cfg(), Hidden::default(), &dangling, false, &Default::default()));
         assert!(out[1].contains("(없는 에픽)"), "{out:#?}");
     }
 
@@ -1157,12 +1197,12 @@ mod tests {
         b.deferred_at = Some("2026-09-01T00:00:00Z".into());
         let all = vec![a, b];
 
-        let wide = plain(&list(&all, &cfg(), Hidden::default(), &no_epics(), false));
+        let wide = plain(&list(&all, &cfg(), Hidden::default(), &no_epics(), false, &Default::default()));
         assert!(wide[1].contains("미룸"), "미룬 줄이 일과 똑같이 보인다 — {wide:#?}");
         assert!(wide[2].contains("미룸"), "{wide:#?}");
 
         // 콕 집어 물었을 때는 줄마다 같은 낱말을 달지 않는다.
-        let asked = plain(&list(&all, &cfg(), Hidden::default(), &no_epics(), true));
+        let asked = plain(&list(&all, &cfg(), Hidden::default(), &no_epics(), true, &Default::default()));
         assert!(!asked[1].contains("미룸"), "물어서 낸 목록에 군더더기가 붙었다 — {asked:#?}");
     }
 
@@ -1270,14 +1310,14 @@ mod tests {
         let wip = issue("argos-0004", "잡고 있는 것", "in_progress");
         let labels = BTreeMap::from([("argos-0002", "저장 계층".to_string())]);
 
-        let out = plain(&ready(&[&a, &b], &labels, &[&wip]));
+        let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[]));
         let joined = out.join("\n");
         assert!(joined.contains("2건"), "{joined}");
         assert!(joined.contains("저장 계층") && joined.contains("에픽 없음"), "{joined}");
         assert!(joined.contains("이미 잡고 있는 것 1건"), "{joined}");
         assert!(joined.contains("argos-0004"), "{joined}");
 
-        let empty = plain(&ready(&[], &labels, &[])).join("\n");
+        let empty = plain(&ready(&[], &labels, &[], &[])).join("\n");
         assert!(empty.contains("0건") && empty.contains("무엇이 밀려 있는지"), "{empty}");
     }
 
