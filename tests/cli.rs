@@ -495,6 +495,23 @@ fn outside_a_repo_the_overview_names_each_trouble_and_still_exits_zero() {
     assert!(block(&bare_call, "good").contains("todo 1"), "{bare_call}");
 }
 
+/// **등록한 경로의 제어문자는 화면을 다시 칠하지 못한다.** 설정 파일은 손으로 고칠 수
+/// 있고, ESC 가 든 경로를 그대로 그리면 그 줄이 커서를 옮기고 화면을 지운다
+/// (`moai project ls` 와 같은 자).
+#[test]
+fn outside_a_repo_a_path_cannot_repaint_the_screen() {
+    let s = Scratch::new("ovescape");
+    let out = dir_in(&s, "out");
+    let cfg = s.path().join("user/config.toml");
+    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+    std::fs::write(&cfg, format!("[[project]]\npath = \"{}/gone\\u001b[2Jx\"\n", s.path().display())).unwrap();
+    for verb in ["status", "ready"] {
+        let shown = ok_with(&out, &cfg, &[verb]);
+        assert!(!shown.contains('\u{1b}'), "{verb}: {shown:?}");
+        assert!(shown.contains("gone[2Jx") && shown.contains("디렉터리가 없다"), "{verb}: {shown}");
+    }
+}
+
 /// 한눈 보기의 기계 출력. 프로젝트마다 `name`·`path`·`state` 가 서고, 연 것만 제 셈을
 /// 곁에 든다. **`projects` 키가 곧 여러 프로젝트를 봤다는 뜻이다.**
 #[test]

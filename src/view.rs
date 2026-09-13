@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::model::{Issue, JournalEntry, Kind};
 use crate::report::{Roll, StatusReport, Warning, is_group};
 use crate::style::{self, paint};
-use crate::text::{clip, width};
+use crate::text::{clip, sanitize, width};
 use crate::worktree::Origin;
 use anstyle::Style;
 use std::collections::BTreeMap;
@@ -1202,7 +1202,7 @@ pub fn projects_status(
     reg: &crate::user_config::Registry,
 ) -> Vec<String> {
     let mut out = vec![overview_head("등록한 프로젝트", &format!("{}곳", projects.len()), reg)];
-    let w_name = projects.iter().map(|p| width(&p.name)).max().unwrap_or(0);
+    let w_name = projects.iter().map(|p| width(&sanitize(&p.name))).max().unwrap_or(0);
     for (p, s) in projects.iter().zip(seen) {
         out.push(String::new());
         out.push(project_head(p, ""));
@@ -1217,7 +1217,7 @@ pub fn projects_status(
         for i in shown {
             out.push(format!(
                 "  {}{}{}  {}",
-                cell(style::PLAIN, &p.name, w_name + 2),
+                cell(style::PLAIN, &sanitize(&p.name), w_name + 2),
                 cell(style::ID, &i.id, w_id + 2),
                 paint(style::status_style(i.status.as_str()), style::glyph(i.status.as_str())),
                 clip(&i.title, TITLE_CAP),
@@ -1262,7 +1262,7 @@ pub fn projects_ready(
         &format!("프로젝트 {}곳 · {total}건", projects.len()),
         reg,
     )];
-    let w_name = projects.iter().map(|p| width(&p.name)).max().unwrap_or(0);
+    let w_name = projects.iter().map(|p| width(&sanitize(&p.name))).max().unwrap_or(0);
     for (p, s) in projects.iter().zip(seen) {
         out.push(String::new());
         let Seen::Ok(k) = s else {
@@ -1276,7 +1276,7 @@ pub fn projects_ready(
         for i in shown {
             out.push(format!(
                 "  {}{}{}{}",
-                cell(style::PLAIN, &p.name, w_name + 2),
+                cell(style::PLAIN, &sanitize(&p.name), w_name + 2),
                 cell(style::ID, &i.id, w_id + 2),
                 cell(style::priority_style(i.priority()), &format!("p{}", i.priority()), 4),
                 clip(&i.title, TITLE_CAP),
@@ -1302,15 +1302,15 @@ pub fn projects_ready(
 
 /// 한눈 보기의 머리 — 무엇을 몇이나 봤는지와, 목록을 읽은 사용자 설정 파일.
 fn overview_head(what: &str, count: &str, reg: &crate::user_config::Registry) -> String {
-    let at = reg.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+    let at = reg.path.as_ref().map(|p| sanitize(&p.display().to_string())).unwrap_or_default();
     format!("{}  {count}       {}", paint(style::HEAD, what), paint(style::DIM, &at))
         .trim_end()
         .to_string()
 }
 
 fn project_head(p: &crate::projects::Project, tail: &str) -> String {
-    let at = p.path.display().to_string();
-    format!("{}  {}   {tail}", paint(style::HEAD, &p.name), paint(style::DIM, &at)).trim_end().to_string()
+    let at = sanitize(&p.path.display().to_string());
+    format!("{}  {}   {tail}", paint(style::HEAD, &sanitize(&p.name)), paint(style::DIM, &at)).trim_end().to_string()
 }
 
 /// 열지 못한 프로젝트의 한 줄. **무엇을 하면 되는지를 함께 댄다.**
@@ -1328,7 +1328,7 @@ fn unopened<T>(p: &crate::projects::Project, s: &crate::projects::Seen<T>) -> St
             let go = format!("→ 옮겼으면 새 자리를 등록하고, 아니면 `moai project rm {at}`");
             format!("  {} 디렉터리가 없다  {}", paint(style::WARN, "!"), paint(style::DIM, &go))
         }
-        Seen::Unreadable { error } => format!("  {} 못 읽는다 — {error}", paint(style::ERROR, "!")),
+        Seen::Unreadable { error } => format!("  {} 못 읽는다 — {}", paint(style::ERROR, "!"), sanitize(error)),
     }
 }
 
@@ -1339,19 +1339,13 @@ fn problems(out: &mut Vec<String>, reg: &crate::user_config::Registry) {
     }
     out.push(String::new());
     for p in &reg.problems {
-        out.push(format!("{} {p}", paint(style::WARN, "!")));
+        out.push(format!("{} {}", paint(style::WARN, "!"), sanitize(p)));
     }
 }
 
-/// 명령 안내에 넣을 경로. 셸이 달리 읽을 글자가 있으면 작은따옴표로 싼다 — 공백 든
-/// 경로를 그대로 대면 복사해 친 명령이 엉뚱한 디렉터리를 찾는다.
+/// 명령 안내에 넣을 경로 — 제어문자를 걷고 셸이 가를 글자가 있으면 감싼다.
 fn shell_arg(p: &std::path::Path) -> String {
-    let s = p.display().to_string();
-    let special = |c: char| c.is_whitespace() || "'\"\\$`*?[]{}()<>|&;!#~=%^".contains(c);
-    match !s.is_empty() && !s.chars().any(special) {
-        true => s,
-        false => format!("'{}'", s.replace('\'', r"'\''")),
-    }
+    crate::text::shell_word(&sanitize(&p.display().to_string()))
 }
 
 #[cfg(test)]
@@ -1365,16 +1359,6 @@ mod tests {
 
     fn no_epics() -> BTreeMap<&'static str, String> {
         BTreeMap::new()
-    }
-
-    /// 안내에 넣은 경로는 복사해 쳐도 같은 디렉터리를 가리켜야 한다.
-    #[test]
-    fn a_path_in_a_hint_survives_the_shell() {
-        let arg = |s: &str| shell_arg(std::path::Path::new(s));
-        assert_eq!(arg("/home/raven/work/api"), "/home/raven/work/api");
-        assert_eq!(arg("/home/raven/작업/api"), "/home/raven/작업/api");
-        assert_eq!(arg("/tmp/my project"), "'/tmp/my project'");
-        assert_eq!(arg("/tmp/it's"), r"'/tmp/it'\''s'");
     }
 
     fn issue(id: &str, title: &str, status: &str) -> Issue {

@@ -16,13 +16,15 @@
 use crate::store::{Load, Opened, Repo};
 use crate::user_config::Registry;
 use serde::Serialize;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// 등록한 프로젝트 하나를 연 것.
 pub struct Project {
     /// 등록한 철자 그대로 — 사람이 적은 경로다.
     pub path: PathBuf,
-    /// 화면에 댈 이름. 디렉터리 이름이고, 겹치면 위 디렉터리를 붙여 가른다([`names`]).
+    /// 화면에 댈 이름. 디렉터리 이름이고, 겹치면 위 디렉터리를 붙여 가른다
+    /// ([`crate::user_config::names`] — `moai project ls` 와 같은 자다). 등록 목록이 바뀌면
+    /// 달라질 수 있어 **정체로 쓰지 않는다** — 정체는 `path` 다.
     pub name: String,
     pub state: State,
 }
@@ -39,10 +41,9 @@ pub enum State {
 
 /// 등록 목록 차례 그대로 연다. **실패하지 않는다.**
 pub fn open(reg: &Registry) -> Vec<Project> {
-    let paths: Vec<&Path> = reg.projects.iter().map(|p| p.path.as_path()).collect();
     reg.projects
         .iter()
-        .zip(names(&paths))
+        .zip(crate::user_config::names(&reg.projects))
         .map(|(p, name)| {
             let state = match Repo::open(&p.path) {
                 Ok(Opened::Repo(repo)) => match repo.read() {
@@ -117,67 +118,4 @@ pub struct Overview<'a, T> {
     pub problems: &'a [String],
     /// 읽은 사용자 설정 파일. 자리를 모르면 `null`.
     pub config: Option<&'a Path>,
-}
-
-/// 화면에 댈 이름들. 디렉터리 이름이 겹치면 **겹치는 것끼리만** 위 디렉터리를 하나씩
-/// 붙인다 — `work/api`·`play/api`. 겹치지 않는 것은 짧은 채로 둔다.
-///
-/// 이름은 등록 목록이 바뀌면 달라질 수 있다(같은 이름이 새로 들면). 그래서 **정체로
-/// 쓰지 않는다** — 정체는 경로다. 색 배정(moai-xs9x)도 경로로 한다.
-pub fn names(paths: &[&Path]) -> Vec<String> {
-    let parts: Vec<Vec<String>> = paths
-        .iter()
-        .map(|p| {
-            p.components()
-                .filter_map(|c| match c {
-                    Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
-                    _ => None,
-                })
-                .collect()
-        })
-        .collect();
-    let label = |k: usize, depth: usize| -> String {
-        let c = &parts[k];
-        match c.is_empty() {
-            // `/` 처럼 이름 댈 조각이 없는 경로는 경로가 이름이다.
-            true => paths[k].display().to_string(),
-            false => c[c.len().saturating_sub(depth)..].join("/"),
-        }
-    };
-    let mut depth = vec![1usize; paths.len()];
-    loop {
-        let labels: Vec<String> = (0..paths.len()).map(|k| label(k, depth[k])).collect();
-        let mut grew = false;
-        for k in 0..paths.len() {
-            let clash = labels.iter().enumerate().any(|(j, l)| j != k && *l == labels[k]);
-            if clash && depth[k] < parts[k].len() {
-                depth[k] += 1;
-                grew = true;
-            }
-        }
-        if !grew {
-            return labels;
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn named(paths: &[&str]) -> Vec<String> {
-        let p: Vec<&Path> = paths.iter().map(Path::new).collect();
-        names(&p)
-    }
-
-    #[test]
-    fn names_are_the_directory_unless_they_clash() {
-        assert_eq!(named(&["/w/api", "/w/web"]), ["api", "web"]);
-        assert_eq!(named(&["/work/api", "/play/api", "/w/web"]), ["work/api", "play/api", "web"]);
-        // 겹치는 조각이 깊어도 갈릴 때까지만 붙인다.
-        assert_eq!(named(&["/a/x/api", "/b/x/api"]), ["a/x/api", "b/x/api"]);
-        // 한쪽이 더 못 올라가도 끝난다.
-        assert_eq!(named(&["/api", "/x/api"]), ["api", "x/api"]);
-        assert_eq!(named(&["/"]), ["/"]);
-    }
 }
