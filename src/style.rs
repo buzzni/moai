@@ -51,8 +51,14 @@ pub const HEAD: Style = Style::new().bold();
 /// - 빨강은 `ERROR`·`P1`, 노랑은 `IN_PROGRESS`·`WARN`, 자홍은 `REVIEW` 다. 한눈 보기
 ///   줄에는 우선순위 칸·집은 칸·review 줄이 id 곁에 실제로 서서, 그 색의 id 는 거짓
 ///   뜻으로 읽힌다
-/// - 남는 초록(`DONE`)·청록(`TAG`)·파랑(`EPIC`)은 한눈 보기 줄에 그 뜻이 서지 않는다 —
-///   done 줄도 태그 칸도 에픽 열도 없다
+/// - 남는 초록(`DONE`)·파랑(`EPIC`)은 한눈 보기 줄에 그 뜻이 서지 않는다 — done 줄도
+///   에픽 열도 없다. 청록의 `TAG` 도 태그 칸이 없어 안 선다
+/// - **청록 하나는 알고 받아들인다.** `statuses` 에 칸을 더한 저장소(`blocked` 따위)는
+///   그 칸의 줄이 집은 것으로 서고, 글리프 `○` 가 `OTHER`(청록)로 칠해져 청록 id 곁에
+///   붙는다. 빼지 않는 까닭: 빨강·노랑·자홍이 지는 뜻은 급함·진행·review 라 잘못 읽으면
+///   판단이 틀리지만, `OTHER` 는 "네 칸 밖" 이라는 뜻 없는 뜻이다. 그리고 청록을 빼면
+///   팔레트가 둘로 줄어 **모든** 사용자의 두 프로젝트가 절반 확률로 겹친다 — 칸을 더한
+///   저장소의 드문 줄 하나를 위해 치르기엔 비싸다. 칸은 글리프가 가른다
 ///
 /// **색이 혼자 뜻을 지지 않는다.** 이 색을 다는 줄에는 늘 프로젝트 이름이 곁에 선다.
 pub const PROJECT_HUES: [AnsiColor; 3] = [AnsiColor::Cyan, AnsiColor::Green, AnsiColor::Blue];
@@ -242,17 +248,30 @@ mod tests {
         let bright = [A::BrightRed, A::BrightGreen, A::BrightYellow, A::BrightBlue, A::BrightMagenta, A::BrightCyan];
         // 한눈 보기 줄에 곁에 서는 뜻의 색상 — 보통·bright 둘 다.
         let meaning = [A::Red, A::Yellow, A::Magenta];
+        // bright 는 같은 색상의 밝은 쪽이다 — `BrightYellow` 인 `IN_PROGRESS` 곁에 `Yellow` id
+        // 는 같은 뜻으로 읽힌다. 그래서 색상 계열로 견준다.
         let family = |s: Style| match s.get_fg_color() {
-            Some(Color::Ansi(c)) => Some(c),
-            _ => None,
+            Some(Color::Ansi(c)) => match c {
+                A::BrightRed => A::Red,
+                A::BrightGreen => A::Green,
+                A::BrightYellow => A::Yellow,
+                A::BrightBlue => A::Blue,
+                A::BrightMagenta => A::Magenta,
+                A::BrightCyan => A::Cyan,
+                c => c,
+            },
+            other => panic!("16색이 아니다 — {other:?}"),
         };
         for hue in PROJECT_HUES {
             assert!(!vanish.contains(&hue) && !bright.contains(&hue) && !meaning.contains(&hue), "{hue:?}");
             for used in [IN_PROGRESS, REVIEW, WARN, ERROR, P0, P1] {
-                let c = family(used).unwrap();
-                assert_ne!(Some(hue), Some(c), "{hue:?} 가 칸·경고·우선순위의 색과 같다");
+                assert_ne!(hue, family(used), "{hue:?} 가 칸·경고·우선순위의 색과 같은 계열이다");
             }
         }
+        // 알고 받아들인 겹침 하나 — 설정으로 더한 칸의 `OTHER`. 팔레트나 `OTHER` 를 바꾸면 여기서
+        // 멈춰 `PROJECT_HUES` 문서의 근거를 다시 본다.
+        let clash: Vec<_> = PROJECT_HUES.iter().filter(|h| **h == family(OTHER)).collect();
+        assert_eq!(clash, [&A::Cyan], "OTHER 와의 겹침이 문서와 다르다");
         let uniq: std::collections::BTreeSet<_> = PROJECT_HUES.iter().map(|c| format!("{c:?}")).collect();
         assert_eq!(uniq.len(), PROJECT_HUES.len(), "팔레트에 같은 색이 두 번 있다");
         // 모든 칸이 실제로 쓰인다 — 나머지 연산이 한쪽으로 쏠리지 않는다.
