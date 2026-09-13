@@ -2477,8 +2477,18 @@ fn moving_a_deferred_row_says_it_is_still_out_of_the_plan() {
     assert!(out.status.success(), "막았다 — 이 도구에 게이트는 없다");
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("in_progress"), "안 옮겼다 — {text}");
-    assert!(text.contains("defer --undo"), "보드에서 빠져 있다는 말을 안 한다 — {text}");
+    // **도로 집는 말은 그대로 쳐서 되는 명령이다** — id 가 빠진 `moai defer --undo`
+    // 는 clap 이 인자가 없다며 거절한다.
+    assert!(text.contains(&format!("moai defer {id} --undo")), "보드에서 빠져 있다는 말을 안 한다 — {text}");
     assert!(!ok(s.path(), &["ready"]).contains(&id));
+
+    // **기계 출력도 같은 것을 말한다** — `--json` 을 읽는 에이전트에게만 까닭이
+    // 없으면, 방금 집은 일이 훅의 초점에서 빠진 것을 알 길이 없다.
+    let json = ok(s.path(), &["mv", &id, "review", "--json"]);
+    assert!(
+        json.contains(&format!(r#""shelved":[{{"id":"{id}","root":"{id}"}}]"#)),
+        "기계 출력만 안 말한다 — {json}"
+    );
 }
 
 /// **묶음을 미루면 멤버도 계획에서 빠진다.** 에픽 줄 하나만 사라지고 멤버가
@@ -2504,6 +2514,37 @@ fn deferring_an_epic_takes_its_members_out_of_the_plan() {
     let row = all.lines().find(|l| l.contains(&member)).expect("--all 이 멤버를 안 낸다");
     assert!(row.contains("미룸"), "물려받은 미룸이 표를 잃었다 — {row}");
     assert!(ok(s.path(), &["status"]).contains("미뤄 둔 것 2건"));
+
+    // **펼친 상세도 까닭을 말한다.** 목록에서 빠진 줄을 id 로 콕 집어 펼친 자리가
+    // "왜 ready 에 안 나오나" 에 답하는 곳인데, 제 `deferred_at` 만 보면 표가 없다.
+    let detail = ok(s.path(), &["show", &member]);
+    assert!(detail.contains(&format!("미룸 — {epic} 밑")), "상세가 물려받은 미룸을 안 말한다 — {detail}");
+    let json = ok(s.path(), &["show", &member, "--json"]);
+    assert!(json.contains(&format!(r#""shelved_by":"{epic}""#)), "기계 출력만 안 말한다 — {json}");
+}
+
+/// **물려받은 미룸 앞에서 `--undo` 는 "이미 계획에 있다" 고 하지 않는다.** 제 줄은
+/// 미룬 적이 없어 그렇게 말했는데, 실제로는 미룬 에픽 때문에 여전히 빠져
+/// 있었다(moai-kluk). 도로 집을 줄을 사람에게도 기계에도 댄다.
+#[test]
+fn undoing_an_inherited_deferral_names_the_row_that_holds_it() {
+    let s = init("deferundoinherited");
+    let epic = ok(s.path(), &["epic", "add", "다음 분기", "-q"]).trim().to_string();
+    let member = add(s.path(), &["파서", "-e", &epic]);
+    ok(s.path(), &["defer", &epic]);
+
+    let out = ok(s.path(), &["defer", &member, "--undo"]);
+    assert!(!out.contains("이미 계획에 있다"), "빠져 있는 줄을 계획에 있다고 한다 — {out}");
+    assert!(out.contains(&format!("moai defer {epic} --undo")), "도로 집을 줄을 안 댄다 — {out}");
+
+    let json = ok(s.path(), &["defer", &member, "--undo", "--json"]);
+    assert!(json.contains(r#""already":[]"#), "{json}");
+    assert!(json.contains(&format!(r#""shelved":[{{"id":"{member}","root":"{epic}"}}]"#)), "{json}");
+
+    // 에픽을 도로 집으면 같은 명령이 조용하다 — 헛되이 세지 않는다.
+    ok(s.path(), &["defer", &epic, "--undo"]);
+    let calm = ok(s.path(), &["defer", &member, "--undo"]);
+    assert!(calm.contains("이미 계획에 있다") && !calm.contains("--undo`"), "{calm}");
 }
 
 /// **미룬 것이 막고 있으면 `ready` 가 까닭 없이 비지 않는다.** 막는 줄은
@@ -2684,7 +2725,7 @@ fn closing_a_deferred_row_drops_the_advisory() {
     ok(s.path(), &["defer", &id]);
     let text = ok(s.path(), &["mv", &id, "done"]);
     assert!(text.contains("done"), "안 옮겼다 — {text}");
-    assert!(!text.contains("defer --undo"), "끝난 일에게 도로 집으라 한다 — {text}");
+    assert!(!text.contains("--undo"), "끝난 일에게 도로 집으라 한다 — {text}");
 }
 
 /// **미뤄 둔 묶음은 꾸짖지 않는다.** "다음 분기에" 하고 통째로 미룬 에픽이
@@ -2758,6 +2799,27 @@ fn the_tree_tail_does_not_count_what_it_drew() {
 
     // 목록은 조상을 안 그리므로 여전히 센다.
     assert!(ok(s.path(), &["show"]).contains("idea 1건 숨김"), "목록이 숨긴 것을 안 센다");
+}
+
+/// **트리가 조상으로 그린 줄도 계획 밖이면 그렇다고 단다.** 에픽의 미룸을 받은
+/// 생각은 제 자식에게 미룸을 안 넘기므로, 자식이 걸리면 그 생각이 조상으로 그려진다 —
+/// 표가 없으면 계획 밖의 줄이 일과 똑같이 보이고, 꼬리는 그 줄을 숨긴 수에서 뺀다.
+#[test]
+fn the_tree_marks_a_deferred_row_it_draws_as_an_ancestor() {
+    let s = init("treedeferredancestor");
+    let epic = ok(s.path(), &["epic", "add", "나중", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["idea", "add", "생각", "-e", &epic, "-q"]).trim().to_string();
+    let child = add(s.path(), &["자식", "--parent", &thought]);
+    ok(s.path(), &["defer", &epic]);
+
+    let tree = ok(s.path(), &["show", "--tree"]);
+    let drawn = tree
+        .lines()
+        .find(|l| l.contains(&thought) && !l.contains(&child))
+        .unwrap_or_else(|| panic!("생각이 조상으로 안 그려졌다 — {tree}"));
+    assert!(drawn.contains("미룸"), "계획 밖의 조상이 일과 똑같이 보인다 — {tree}");
+    let kid = tree.lines().find(|l| l.contains(&child)).unwrap_or_else(|| panic!("{tree}"));
+    assert!(!kid.contains("미룸"), "계획 안의 자식에 미룸을 달았다 — {tree}");
 }
 
 /// 담아 둔 생각은 **기계 출력에서도** 멤버가 아니다. 화면도(`nav` 가 에픽

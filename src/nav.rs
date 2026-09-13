@@ -77,9 +77,14 @@ pub struct Index {
     /// id → 첨자. 화면은 에픽·마일스톤·막는 것을 제목으로 풀어 내는데, 그때마다
     /// 전체를 훑으면 프레임 하나에 이슈 수에 비례한 훑기가 여러 번 돈다.
     by_id: BTreeMap<String, usize>,
-    /// id → **자리를 정한** 마일스톤(`report::milestones`). 자리를 정하려고 이미
-    /// 셌으므로 버리지 않고 둔다 — 상세가 프레임마다 다시 걷지 않게.
+    /// id → **그 줄이 실제로 선** 마일스톤 — `homes` 의 `Milestone(Some(..))` 마디.
+    /// `report::milestones` 를 그대로 들면 안 된다: 생각은 에픽의 마일스톤으로
+    /// 세면서도 `(마일스톤 없음)` 에 서므로, 세는 지도를 그리면 상세가 탐색기가
+    /// 두지 않은 마일스톤을 댄다. 자리에서 읽으면 둘은 짓는 법으로 같다.
     milestone_of: BTreeMap<String, String>,
+    /// id → 그 줄을 계획에서 뺀 줄(`report::deferred_roots`). 상세가 물려받은
+    /// 미룸을 말하는 데 쓴다 — 프레임마다 조상을 다시 타지 않게.
+    deferred_root: BTreeMap<String, String>,
 }
 
 impl Index {
@@ -131,13 +136,36 @@ impl Index {
             }
         }
         let by_id = by_id.into_iter().map(|(id, at)| (id.to_string(), at)).collect();
-        Index { homes, has_kids, by_id, milestone_of }
+        // 상세가 그리는 마일스톤은 **그 줄이 선 경로에서** 읽는다. 위의 셈 지도와
+        // 자리가 갈리는 줄이 있다 — 생각은 에픽의 마일스톤을 세면서도 `(마일스톤
+        // 없음)` 에 선다.
+        let placed = issues
+            .iter()
+            .zip(&homes)
+            .filter_map(|(i, home)| {
+                home.iter().find_map(|seg| match seg {
+                    Seg::Milestone(Some(m)) => Some((i.id.clone(), m.clone())),
+                    _ => None,
+                })
+            })
+            .collect();
+        let deferred_root = crate::report::deferred_roots(issues)
+            .into_iter()
+            .map(|(id, root)| (id.to_string(), root.to_string()))
+            .collect();
+        Index { homes, has_kids, by_id, milestone_of: placed, deferred_root }
     }
 
-    /// 그 줄이 **실제로 딸린** 마일스톤. 제 줄의 `milestone` 이 아니다 — 에픽이
-    /// 마일스톤을 이기므로 제 값은 셈·트리·필터 어디에도 안 쓰일 수 있다.
+    /// 그 줄이 **실제로 선** 마일스톤. 제 줄의 `milestone` 이 아니다 — 에픽이
+    /// 마일스톤을 이기고 생각은 마일스톤 밑에 서지 않으므로, 제 값은 그 줄이 선
+    /// 자리와 다를 수 있다.
     pub fn milestone_of(&self, id: &str) -> Option<&str> {
         self.milestone_of.get(id).map(String::as_str)
+    }
+
+    /// 그 줄을 계획에서 뺀 줄 — 제가 미뤘으면 저 자신, 물려받았으면 미룬 조상·묶음.
+    pub fn deferred_root(&self, id: &str) -> Option<&str> {
+        self.deferred_root.get(id).map(String::as_str)
     }
 
     /// 그 줄이 경로에서 갖는 마디.

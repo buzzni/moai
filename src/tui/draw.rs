@@ -388,8 +388,9 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     // **미룬 것은 여기서 반드시 말한다.** 탐색기는 시키지도 않은 줄을 숨기지
     // 않으므로 미룬 줄이 목록에 그대로 서 있는데, 그것이 `moai ready` 에
     // 안 나오는 까닭은 이 패널 말고는 어디에도 안 적힌다 — 낱말은 CLI 상세와
-    // 같은 자리(`view::deferred_for`)에서 받는다.
-    if let Some(d) = crate::view::deferred_for(i, &app.now) {
+    // 같은 자리(`view::deferred_for`)에서 받는다. **물려받은 미룸도** 같이 받는다 —
+    // 미룬 에픽의 멤버에 표가 없으면 그 까닭이 여기서도 빈다.
+    if let Some(d) = crate::view::deferred_for(i, app.index.deferred_root(&i.id), &app.now) {
         head.push(Span::raw("  ·  "));
         head.push(Span::styled(d, Style::new().fg(Color::Yellow)));
     }
@@ -410,19 +411,21 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     if let Some(id) = &i.epic {
         fields.push(("에픽".into(), app.title_of(id)));
     }
-    // **자리를 정한 마일스톤을 그린다.** 에픽이 마일스톤을 이기므로(3301f6e)
-    // 제 줄에 적은 값은 셈·트리·필터 어디에도 안 쓰일 수 있다 — 그것을 그대로
-    // 그리면 패널은 m002 라 말하고 트리와 `show --milestone` 은 m001 로 센다
-    // (moai-9yrv). 안 쓰이는 제 값은 **지우지 않고 그렇다고 적는다** — 적어 둔
-    // 값이 화면에서 말없이 사라지면 그게 더 헷갈린다.
+    // **그 줄이 선 마일스톤을 그린다.** 에픽이 마일스톤을 이기므로(3301f6e) 제 줄에
+    // 적은 값은 그 줄이 선 자리와 다를 수 있다 — 그것을 그대로 그리면 패널은 m002 라
+    // 말하고 트리는 m001 밑에 둔다(moai-9yrv). 자리는 탐색기가 실제로 둔 경로에서
+    // 읽는다(`Index::milestone_of`) — 셈의 지도를 그리면, 에픽의 마일스톤을 세면서도
+    // `(마일스톤 없음)` 에 서는 생각에 탐색기가 두지 않은 마일스톤을 댄다.
+    // 선 자리와 다른 제 값은 **지우지 않고 그렇다고 적는다** — 적어 둔 값이 화면에서
+    // 말없이 사라지면 그게 더 헷갈린다.
     let placed = app.index.milestone_of(&i.id);
     if let Some(id) = placed {
         fields.push(("마일스톤".into(), app.title_of(id)));
     }
-    // 자리를 정한 것이 없을 때 "에픽의 것을 따른다" 고 적으면 거짓이다 — 에픽에
-    // 마일스톤이 없거나, 에픽 참조가 못 쓸 것이라 줄이 `(길 잃음)` 에 있다.
+    // 까닭은 **선 자리로** 댄다. "에픽의 것을 따른다" 고 적으면, 에픽 없이 부모 밑에
+    // 접힌 줄이나 에픽 참조가 끊겨 `(길 잃음)` 에 선 줄에서 거짓이 된다.
     if let Some(own) = i.milestone.as_deref().filter(|own| Some(*own) != placed) {
-        let why = if placed.is_some() { "에픽의 것을 따른다" } else { "에픽이 있으면 셈에 안 쓰인다" };
+        let why = if placed.is_some() { "선 자리의 마일스톤을 따른다" } else { "이 줄은 마일스톤 밖에 선다" };
         fields.push(("안 쓰임".into(), format!("제 마일스톤 {own} — {why}")));
     }
     // **막는 것은 제목까지 푼다.** id 만 내면 그것이 무엇인지 또 찾아봐야 한다.
@@ -820,6 +823,51 @@ mod tests {
         let unused = lines.iter().find(|l| l.contains("안 쓰임")).cloned().unwrap_or_default();
         assert!(unused.contains("argos-0001"), "{lines:#?}");
         assert!(!unused.contains("에픽의 것을 따른다"), "따를 에픽 마일스톤이 없는데 따른다고 적었다\n{lines:#?}");
+    }
+
+    /// **생각은 에픽의 마일스톤을 세도 `(마일스톤 없음)` 에 선다.** 상세가 셈의 지도
+    /// (`report::milestones`)를 그리면, 목록은 `(마일스톤 없음)` 인데 상세만 그 에픽의
+    /// 마일스톤을 댄다 — 탐색기가 두지 않은 자리다.
+    #[test]
+    fn a_thought_shows_no_milestone_it_does_not_stand_under() {
+        let make = |id: &str, title: &str, kind: Kind| {
+            Issue::new(id.into(), title.into(), kind, Status::new("todo"), "2026-09-01T00:00:00Z")
+        };
+        let stone = make("argos-0001", "릴리스 판", Kind::Milestone);
+        let mut epic = make("argos-0002", "에픽", Kind::Epic);
+        epic.milestone = Some("argos-0001".into());
+        let mut thought = make("argos-0003", "샤딩", Kind::Idea);
+        thought.epic = Some("argos-0002".into());
+        let mut a = App::new(
+            vec![stone, epic, thought],
+            Config::parse("prefix = \"argos\"\n").unwrap(),
+            vec![crate::nav::Seg::Milestone(None)],
+        );
+        a.cursor = 1; // 0 은 `..` 줄이다
+        let lines = render(&mut a, 180, 24);
+        assert!(lines.iter().any(|l| l.contains("샤딩")), "그 생각이 목록에 없다\n{lines:#?}");
+        assert!(!lines.iter().any(|l| l.contains("릴리스 판")), "선 자리에 없는 마일스톤을 댔다\n{lines:#?}");
+    }
+
+    /// **물려받은 미룸도 상세가 말한다.** 미룬 에픽의 멤버는 `ready` 에도 보드에도
+    /// 없는데, 제 `deferred_at` 만 보면 이 패널에 표가 없어 까닭이 어디에도 안 적힌다.
+    #[test]
+    fn the_detail_names_an_inherited_deferral() {
+        let make = |id: &str, title: &str, kind: Kind| {
+            Issue::new(id.into(), title.into(), kind, Status::new("todo"), "2026-09-01T00:00:00Z")
+        };
+        let mut epic = make("argos-0001", "다음 분기", Kind::Epic);
+        epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut row = make("argos-0002", "파서", Kind::Issue);
+        row.epic = Some("argos-0001".into());
+        let mut a = App::new(
+            vec![epic, row],
+            Config::parse("prefix = \"argos\"\n").unwrap(),
+            vec![crate::nav::Seg::Epic("argos-0001".into())],
+        );
+        a.cursor = 1; // 0 은 `..` 줄이다
+        let lines = render(&mut a, 180, 24);
+        assert!(lines.iter().any(|l| l.contains("미룸 — argos-0001 밑")), "{lines:#?}");
     }
 
     /// 좁은 창에서 무너지지도, 넘치지도 않는다. 한글이 두 칸을 먹는 것이

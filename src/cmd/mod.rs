@@ -220,3 +220,18 @@ pub fn json_with<T: serde::Serialize>(base: &T, extra: &[(&str, String)]) -> R<V
     s.push('}');
     Ok(vec![s])
 }
+
+/// 옮기거나 도로 집었어도 **계획 밖인 줄**과, 그것을 실제로 뺀 줄.
+///
+/// `mv`·`defer` 의 기계 출력이 같은 모양으로 낸다. 사람 출력은 그 줄에 도로 집을
+/// 말을 붙이는데 기계 출력에만 없으면, `--json` 을 읽는 에이전트는 방금 집은 일이
+/// 왜 훅의 초점에서 빠졌는지 알 길이 없다.
+#[derive(serde::Serialize)]
+pub struct Shelved<'a> {
+    pub id: &'a str,
+    pub root: &'a str,
+}
+
+pub fn shelved(pairs: &[(String, String)]) -> Vec<Shelved<'_>> {
+    pairs.iter().map(|(id, root)| Shelved { id, root }).collect()
+}

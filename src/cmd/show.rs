@@ -230,6 +230,9 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
     let epic = issue.epic.as_ref().and_then(|e| all.iter().find(|i| &i.id == e));
     let children = report::children_of(all, &issue.id);
     let journal = repo.journal_of(&issue.id)?;
+    // 이 줄과 자식을 계획에서 뺀 줄. **물려받은 미룸까지** — 미룬 에픽의 멤버를
+    // 펼쳤을 때 표가 없으면 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다.
+    let roots = report::deferred_roots(all);
 
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();
@@ -249,11 +252,16 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
                 serde_json::to_string(&members).map_err(|e| Fail::new(e.to_string()))?,
             ));
         }
+        // **기계 출력도 같은 것을 말한다.** `deferred_at` 은 제 줄에 적힌 것뿐이라,
+        // 미룬 에픽의 멤버를 `--json` 으로 펼친 쪽은 그것이 계획 밖인 줄 모른다.
+        if let Some(root) = roots.get(issue.id.as_str()) {
+            extra.push(("shelved_by", serde_json::to_string(root).map_err(|e| Fail::new(e.to_string()))?));
+        }
         return super::json_with(issue, &extra);
     }
 
     // 이력은 언제나 맨 끝이다. 에픽이면 멤버를 그 **앞에** 끼운다.
-    let mut out = view::detail(issue, epic, &children, &[], &repo.config, &model::now(), raw);
+    let mut out = view::detail(issue, epic, &children, &roots, &repo.config, &model::now(), raw);
     // 묶음을 펼치면 그 밑에 무엇이 있는지까지 보여 준다 — 묶음 하나를 보는
     // 이유가 바로 그것이다. 마일스톤이면 에픽과 이슈가 같이 나온다.
     if report::is_group(issue) {

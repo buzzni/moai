@@ -72,12 +72,15 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         // **물려받은 미룸도 여기서 잰다.** 미룬 에픽의 멤버를 집으면 칸은
         // 옮겨져도 보드·`ready`·훅의 초점에서 빠진다 — 말하지 않으면 방금 집은
         // 일을 훅이 "집은 것 없음" 으로 막는 까닭이 아무 데도 없다.
-        let roots = crate::report::deferred_roots(issues);
-        m.shelved = m
-            .done
-            .iter()
-            .filter_map(|(i, _)| roots.get(i.id.as_str()).map(|r| (i.id.clone(), r.to_string())))
-            .collect();
+        // 옮긴 것이 없으면 재지 않는다 — 락을 쥔 채 저장소 전체를 걷는 자리다.
+        if !m.done.is_empty() {
+            let roots = crate::report::deferred_roots(issues);
+            m.shelved = m
+                .done
+                .iter()
+                .filter_map(|(i, _)| roots.get(i.id.as_str()).map(|r| (i.id.clone(), r.to_string())))
+                .collect();
+        }
         Ok((entries, m))
     })?;
 
@@ -95,11 +98,14 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             moved: Vec<&'a Issue>,
             already: &'a [String],
             missing: &'a [String],
+            /// 옮겼어도 계획 밖인 것과 도로 집을 줄. 사람 출력의 안내와 같은 것이다.
+            shelved: Vec<super::Shelved<'a>>,
         }
         return super::json_line(&Out {
             moved: moved.done.iter().map(|(i, _)| i).collect(),
             already: &moved.already,
             missing: &moved.missing,
+            shelved: super::shelved(&moved.shelved),
         });
     }
 
@@ -130,13 +136,15 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // 나오므로 미뤘다는 것이 더는 그 줄이 안 보이는 까닭이 아니고, `--undo`
     // 는 끝난 일을 계획에 도로 넣으라는 엉뚱한 말이 된다 — `status` 의
     // `미뤄 둔 것` 줄도 같은 자로 닫힌 것을 뺀다.
+    // 제가 미룬 줄이면 그 줄이, 물려받았으면 미룬 곳이 도로 집을 줄이다 — 말은
+    // `view::shelved_by` 하나다. 한때 제 줄 쪽 안내만 id 없는 `moai defer --undo`
+    // 를 대, 그대로 치면 clap 이 인자가 없다며 거절했다.
     for (id, root) in &moved.shelved {
-        let why = if id == root {
-            "미뤄 둔 것이라 보드와 ready 에서는 빠져 있다 — `moai defer --undo`".to_string()
-        } else {
-            format!("미룬 {root} 밑이라 보드와 ready 에서는 빠져 있다 — `moai defer {root} --undo`")
-        };
-        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &why)));
+        out.push(format!(
+            "{}  {}",
+            paint(style::ID, id),
+            paint(style::DIM, &crate::view::shelved_by(root))
+        ));
     }
     Ok(out)
 }

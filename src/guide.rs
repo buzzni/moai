@@ -130,8 +130,8 @@ const PEOPLE: &str = r#"**담당은 저절로 붙는다** — 만든 사람이 �
 에서 오고, 거기 없으면 `--user "이름 (메일)"` 이나 `MOAI_ACTOR` 로 준다."#;
 
 const CLOSING: &str = r#"`moai status` 를 한 번 더 돌려 경고가 늘지 않았는지 본다. 경고는 막지 않는다 —
-에픽 없는 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것, 쌓인 idea, 미뤄 둔 것을
-비출 뿐이다."#;
+에픽 없는 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것을 비출 뿐이다. 쌓인 idea 와
+미뤄 둔 것은 경고가 아니라 알림(`notices`)으로 따로 선다."#;
 
 /// 규칙 셋. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
 fn rules() -> String {

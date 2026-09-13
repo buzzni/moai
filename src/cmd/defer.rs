@@ -20,6 +20,8 @@ struct Moved {
     /// 이미 그 모양이던 것.
     already: Vec<String>,
     missing: Vec<String>,
+    /// 도로 집으라 했는데 **아직 계획 밖인 것** — (그 줄, 실제로 미룬 줄).
+    shelved: Vec<(String, String)>,
 }
 
 pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
@@ -65,6 +67,22 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             i.normalize();
             m.done.push(i.clone());
         }
+        // **물려받은 미룸은 제 줄을 풀어도 안 풀린다.** 미룬 에픽의 멤버에 `--undo`
+        // 를 치면 제 `deferred_at` 이 없어 "이미 계획에 있다" 로 끝났는데, 실제로는
+        // 그 에픽 때문에 여전히 빠져 있었다(moai-kluk). 제 줄을 풀었어도 에픽이 아직
+        // 미뤄져 있으면 같다. **쓰기를 마친 모습에서** 재야 에픽과 멤버를 한 번에 푼
+        // 경우를 헛되이 안 센다.
+        if back && !(m.done.is_empty() && m.already.is_empty()) {
+            let roots = crate::report::deferred_roots(issues);
+            m.shelved = m
+                .done
+                .iter()
+                .map(|i| i.id.as_str())
+                .chain(m.already.iter().map(String::as_str))
+                .filter_map(|id| roots.get(id).map(|root| (id.to_string(), root.to_string())))
+                .collect();
+            m.already.retain(|id| !roots.contains_key(id.as_str()));
+        }
         Ok((entries, m))
     })?;
 
@@ -82,12 +100,15 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             changed: &'a [Issue],
             already: &'a [String],
             missing: &'a [String],
+            /// 도로 집으라 했는데 아직 계획 밖인 것과, 실제로 도로 집어야 할 줄.
+            shelved: Vec<super::Shelved<'a>>,
         }
         return super::json_line(&Out {
             deferred: !back,
             changed: &moved.done,
             already: &moved.already,
             missing: &moved.missing,
+            shelved: super::shelved(&moved.shelved),
         });
     }
 
@@ -109,6 +130,15 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             "{}  {}",
             paint(style::ID, id),
             paint(style::DIM, if back { "이미 계획에 있다" } else { "이미 미뤄 뒀다" })
+        ));
+    }
+    // **아직 계획 밖이면 도로 집을 줄을 댄다.** 제 줄을 풀었든 원래 안 미뤘든,
+    // 미룬 에픽·부모 밑이면 그 줄을 도로 집어야 풀린다.
+    for (id, root) in &moved.shelved {
+        out.push(format!(
+            "{}  {}",
+            paint(style::ID, id),
+            paint(style::DIM, &crate::view::shelved_by(root))
         ));
     }
     Ok(out)

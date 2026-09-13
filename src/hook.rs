@@ -862,10 +862,11 @@ pub fn guard_close(issues: &[Issue], cfg: &Config, cmd: &str) -> Decision {
         // 한 것과도 어긋난다 — 한 규칙의 두 짝은 같은 셈법을 써야 한다.
         let unit = unit_of(issues, &report::wip(issues, cfg));
         let epics = report::groups(issues);
+        let out = report::put_off(issues);
         let open_review = ids.iter().find_map(|id| {
             issues.iter().find(|i| {
                 i.id == *id
-                    && is_review(i)
+                    && is_review(i, &out)
                     && !i.status.is_done()
                     && (unit.contains(i.id.as_str())
                         || epics.get(i.id.as_str()).is_some_and(|e| unit.contains(e))
@@ -885,9 +886,13 @@ pub fn guard_close(issues: &[Issue], cfg: &Config, cmd: &str) -> Decision {
     Decision::Pass
 }
 
-/// 리뷰 줄인가. 태그 하나로 가른다.
-fn is_review(i: &Issue) -> bool {
-    i.tags.iter().any(|t| t == REVIEW_TAG) && !i.is_deferred()
+/// 리뷰 줄인가. 태그 하나로 가른다. **계획에서 빠진 줄은 리뷰로 안 친다** —
+/// 제 줄을 미뤘든, 미룬 부모·에픽·마일스톤 밑이든 같다(`report::put_off`).
+/// `report::wip` 가 물려받은 미룸으로 초점에서 빼는 줄을 여기서만 열린 리뷰로
+/// 치면, 규칙 3 이 이미 집은 리뷰를 "집으라" 고 거듭 막아 시킨 대로 해도 안
+/// 풀린다.
+fn is_review(i: &Issue, out_of_plan: &BTreeSet<&str>) -> bool {
+    i.tags.iter().any(|t| t == REVIEW_TAG) && !out_of_plan.contains(i.id.as_str())
 }
 
 /// 규칙 2 — **저장소를 고치기 전에 하나를 집는다.**
@@ -1110,7 +1115,9 @@ fn has_angle(i: &Issue) -> bool {
 /// 줄이 뒤따르는 모든 리뷰의 면죄부가 되면, 거기 적히는 결과가 무엇의
 /// 결과인지를 잃는다.
 pub fn guard_review(issues: &[Issue], cfg: &Config) -> Decision {
-    let open: Vec<&Issue> = issues.iter().filter(|i| is_review(i) && !i.status.is_done()).collect();
+    let out_of_plan = report::put_off(issues);
+    let open: Vec<&Issue> =
+        issues.iter().filter(|i| is_review(i, &out_of_plan) && !i.status.is_done()).collect();
     let focus = report::wip(issues, cfg);
 
     if focus.is_empty() {
@@ -1221,7 +1228,8 @@ pub fn closing(issues: &[Issue], cfg: &Config, warnings: usize, before: Option<u
     // 리뷰 줄까지 세면 매 세션 같은 줄이 나오고, 그러면 아무도 안 읽는다.
     let unit = unit_of(issues, &wip);
     let epics = report::groups(issues);
-    for i in issues.iter().filter(|i| is_review(i) && !i.status.is_done()) {
+    let out_of_plan = report::put_off(issues);
+    for i in issues.iter().filter(|i| is_review(i, &out_of_plan) && !i.status.is_done()) {
         // **규칙 3 과 같은 셈법이어야 한다.** 여기서 부모를 빼면, 거절문이
         // 시킨 대로 `--parent` 로 세운 리뷰가 규칙 3 은 지나가면서 닫을 때는
         // 아무도 안 챙기는 줄이 된다 — 한 규칙의 두 짝이 서로 다른 말을 한다.
@@ -1930,6 +1938,21 @@ mod tests {
         let all = vec![issue("t-1", "in_progress"), review("t-r", "todo", None)];
         assert_eq!(guard_close(&all, &cfg(), "moai defer t-r -m \"다음 분기\""), Decision::Pass);
         assert_eq!(guard_close(&all, &cfg(), "moai defer t-r"), Decision::Pass);
+    }
+
+    /// **미룬 일 밑의 리뷰는 열린 리뷰가 아니다** — 제 줄을 미룬 리뷰와 같다.
+    /// `wip` 는 물려받은 미룸으로 그 리뷰를 초점에서 빼는데 규칙 3 만 열린 리뷰로
+    /// 치면, 이미 집은 리뷰를 "집으라" 고 막고 그대로 쳐도 같은 거절이 돌아온다.
+    #[test]
+    fn a_review_under_deferred_work_is_not_an_open_review() {
+        let cfg = cfg();
+        let mut work = issue("t-1", "in_progress");
+        work.deferred_at = Some("2026-01-01T00:00:00Z".into());
+        let all = vec![work, review("t-1.aa", "in_progress", None)];
+
+        let why = denied(&guard_review(&all, &cfg)).to_string();
+        assert!(!why.contains("moai mv t-1.aa in_progress"), "이미 집은 리뷰를 집으라 한다\n{why}");
+        assert_eq!(closing(&all, &cfg, 0, None), Decision::Pass, "계획 밖의 리뷰로 세션을 붙든다");
     }
 
     /// 이미 닫힌 리뷰를 다시 옮기는 것도 막지 않는다. 막을 것이 없다.

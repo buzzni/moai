@@ -51,16 +51,32 @@ fn tags_of(i: &Issue) -> String {
     i.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
 }
 
-/// "미룸 (3일)" — 미루지 않았으면 `None`.
+/// "미룸 (3일)" 이나 "미룸 — <줄> 밑" — 계획에 있으면 `None`.
 ///
 /// **탐색기도 이 낱말을 쓴다.** 같은 사실을 두 표면이 다른 말로 하면, 나란히
 /// 놓고 보는 사람이 어느 쪽을 믿을지 정하게 된다.
-pub fn deferred_for(i: &Issue, now: &str) -> Option<String> {
+///
+/// `root` 는 그 줄을 계획에서 뺀 줄이다(`report::deferred_roots`). **물려받은
+/// 미룸도 여기서 말한다** — 미룬 에픽의 멤버를 펼쳤는데 표가 없으면, 이 낱말을
+/// 쓰는 두 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다. 제가 미룬 줄은
+/// 전처럼 제 시각으로 나이를 댄다.
+pub fn deferred_for(i: &Issue, root: Option<&str>, now: &str) -> Option<String> {
+    if let Some(r) = root.filter(|r| *r != i.id) {
+        return Some(format!("미룸 — {r} 밑"));
+    }
     let at = i.deferred_at.as_deref()?;
     Some(match crate::model::days_since(at, now) {
         Some(d) if d > 0 => format!("미룸 ({d}일)"),
         _ => "미룸".to_string(),
     })
+}
+
+/// 계획에서 빠진 줄에 붙이는 한 마디. **도로 집는 말은 실제로 미룬 줄을 댄다** —
+/// 물려받은 줄에 `--undo` 를 치면 "이미 그렇다" 로 끝나고 아무것도 안 풀린다.
+/// 제가 미룬 줄이면 그 줄이 곧 미룬 곳이라 말이 하나로 되고, 부르는 쪽이 둘을
+/// 가르는 `if` 를 둘 까닭이 없다.
+pub fn shelved_by(root: &str) -> String {
+    format!("{root} 를 미뤄 둬서 보드와 ready 에서는 빠져 있다 — `moai defer {root} --undo`")
 }
 
 fn title_style(i: &Issue) -> Style {
@@ -430,12 +446,12 @@ fn place(
             walk(out, drawn, cx, &deeper, 1);
         }
         Entry::Dir { seg: Seg::Issue(_), at: Some(at) } => {
-            row(out, &cx.all[*at], depth.max(1));
+            row(out, cx, &cx.all[*at], depth.max(1));
             walk(out, drawn, cx, &deeper, depth.max(1) + 1);
         }
         // 제 줄이 있는 잃은 에픽·마일스톤도 여기로 온다 — 줄만 내고 만다.
-        Entry::Dir { seg: Seg::Lost, at: Some(at) } => row(out, &cx.all[*at], depth.max(1)),
-        Entry::Leaf { at } => row(out, &cx.all[*at], depth.max(1)),
+        Entry::Dir { seg: Seg::Lost, at: Some(at) } => row(out, cx, &cx.all[*at], depth.max(1)),
+        Entry::Leaf { at } => row(out, cx, &cx.all[*at], depth.max(1)),
     }
 }
 
@@ -482,7 +498,11 @@ fn head(roll: &Roll, shown: usize) -> String {
 /// 한 이슈와 그 밑의 자식들. 깊이는 id 의 점 수와 같다.
 /// 트리의 한 줄. **내려가는 일은 `walk` 가 한다** — 여기서 자식을 다시 찾으면
 /// 자리를 정하는 코드가 또 둘이 된다.
-fn row(out: &mut Vec<String>, i: &Issue, depth: usize) {
+/// 트리의 줄 하나. **계획 밖이면 그렇다고 단다** — 목록이 꼬리에 다는 것과 같은
+/// 낱말, 같은 자(제 미룸이나 물려받은 미룸)다. 트리는 걸린 자손의 조상도 그리므로,
+/// 에픽의 미룸을 받은 생각이 제 자식 때문에 조상으로 서면 표 없이는 일과 똑같이
+/// 보이고 꼬리는 그 줄을 숨긴 수에서 뺀다.
+fn row(out: &mut Vec<String>, cx: &Ctx, i: &Issue, depth: usize) {
     let st = style::status_style(i.status.as_str());
     let mut line = format!(
         "{}{}  {}  {}  {}",
@@ -494,6 +514,9 @@ fn row(out: &mut Vec<String>, i: &Issue, depth: usize) {
     );
     if !i.tags.is_empty() {
         line.push_str(&format!("   {}", paint(style::TAG, &tags_of(i))));
+    }
+    if i.is_deferred() || cx.index.deferred_root(&i.id).is_some() {
+        line.push_str(&format!("   {}", paint(style::DIM, "미룸")));
     }
     out.push(line);
 }
@@ -516,7 +539,9 @@ fn says(w: &Warning) -> String {
         // 것을 "며칠째 막혀 있다" 고 잘못 말하지 않으려고 이렇게 적는다.
         "blocked_stale" => format!("막힌 채로 {}일 넘게 멈춰 있는 것 {n}건", w.days.unwrap_or(0)),
         // 막는 쪽이 어느 목록에도 없으므로 **어디서 찾는지를 같이 말한다.**
-        "blocked_by_deferred" => format!("미뤄 둔 것에 막혀 못 집는 일 {n}건 — 막는 쪽을 도로 집거나 막음을 푼다"),
+        // `ready` 가 같은 줄에 대는 말과 같다. **막는 쪽이 아니라 미룬 곳이다** — 막는
+        // 줄이 미룬 에픽 밑이면 그 줄에 `--undo` 를 쳐 봐야 "이미 그렇다" 로 끝난다.
+        "blocked_by_deferred" => format!("미뤄 둔 것에 막혀 못 집는 일 {n}건 — 미룬 곳을 도로 집거나 막음을 푼다"),
         "empty_epic" => format!("속이 빈 에픽 {n}건 — 계획만 세우고 안 채웠다"),
         "finished_epic" => format!("다 끝났는데 안 닫힌 에픽 {n}건"),
         // **끊긴 것과 종류가 틀린 것을 한 낱말로 말한다** — 둘을 가려 말하면
@@ -817,12 +842,16 @@ pub fn ready(
     out
 }
 
-/// 단건 상세. 이력은 저널을 **그대로 찍는다. 접지 않는다.**
+/// 단건 상세. **이력은 부르는 쪽이 [`history`] 로 붙인다** — 묶음을 펼치면 멤버를
+/// 이력 앞에 끼워야 해서, 여기서 붙이면 끼울 자리가 없다.
+///
+/// `roots` 는 계획에서 빠진 줄 → 그것을 뺀 줄이다(`report::deferred_roots`). 제
+/// 줄과 자식 줄의 미룸 표가 **물려받은 것까지** 말하게 한다.
 pub fn detail(
     i: &Issue,
     epic: Option<&Issue>,
     children: &[&Issue],
-    journal: &[JournalEntry],
+    roots: &BTreeMap<&str, &str>,
     cfg: &Config,
     now: &str,
     raw: bool,
@@ -848,7 +877,7 @@ pub fn detail(
     }
     // **미룬 것은 상세에서 반드시 말한다.** 목록에서는 아예 안 보이므로,
     // id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안 나오나" 에 답하는 자리다.
-    if let Some(d) = deferred_for(i, now) {
+    if let Some(d) = deferred_for(i, roots.get(i.id.as_str()).copied(), now) {
         line.push_str(&format!(" · {}", paint(style::WARN, &d)));
     }
     if !i.tags.is_empty() {
@@ -875,7 +904,7 @@ pub fn detail(
         if c.kind != Kind::Issue {
             tail.push_str(&format!(" · {}", paint(style::DIM, c.kind.as_str())));
         }
-        if let Some(d) = deferred_for(c, now) {
+        if let Some(d) = deferred_for(c, roots.get(c.id.as_str()).copied(), now) {
             tail.push_str(&format!(" · {}", paint(style::WARN, &d)));
         }
         out.push(format!(
@@ -916,7 +945,6 @@ pub fn detail(
         }
     }
 
-    out.extend(history(journal, cfg));
     out
 }
 
@@ -1143,7 +1171,7 @@ mod tests {
         let mut i = issue("argos-0001", "제목", "todo");
         i.body = Some("앞\u{1b}[2J\u{7}뒤".into());
         for raw in [true, false] {
-            let out = plain(&detail(&i, None, &[], &[], &cfg(), "2026-09-11T04:12:03Z", raw)).join("\n");
+            let out = plain(&detail(&i, None, &[], &BTreeMap::new(), &cfg(), "2026-09-11T04:12:03Z",raw)).join("\n");
             assert!(!out.contains('\u{1b}'), "ESC 가 화면에 닿았다 (raw={raw})\n{out:?}");
             assert!(!out.contains('\u{7}'), "벨이 화면에 닿았다 (raw={raw})\n{out:?}");
         }
@@ -1164,7 +1192,10 @@ mod tests {
                 &crate::model::someone("claude"),
             ),
         ];
-        let out = plain(&detail(&i, None, &[], &j, &cfg(), "2026-09-11T04:12:03Z", false));
+        // 이력은 부르는 쪽이 붙인다 — `moai show` 가 묶음의 멤버를 그 앞에 끼운다.
+        let mut lines = detail(&i, None, &[], &BTreeMap::new(), &cfg(), "2026-09-11T04:12:03Z", false);
+        lines.extend(history(&j, &cfg()));
+        let out = plain(&lines);
         let joined = out.join("\n");
         assert!(joined.contains("첫 줄") && joined.contains("둘째 줄"), "{joined}");
         assert!(joined.contains("이력"), "{joined}");
@@ -1359,7 +1390,7 @@ mod tests {
     fn a_dangling_epic_is_shown_not_fatal() {
         let mut i = issue("argos-0001", "제목", "todo");
         i.epic = Some("argos-0000".into());
-        let out = plain(&detail(&i, None, &[], &[], &cfg(), "2026-09-11T04:12:03Z", false));
+        let out = plain(&detail(&i, None, &[], &BTreeMap::new(), &cfg(), "2026-09-11T04:12:03Z",false));
         assert!(out.iter().any(|l| l.contains("(없는 에픽)")), "{out:#?}");
     }
 }

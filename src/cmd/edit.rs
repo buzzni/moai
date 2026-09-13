@@ -9,6 +9,10 @@ use crate::cli::EditArgs;
 use crate::model::{self, Issue};
 use crate::store::Repo;
 use crate::view;
+use std::collections::BTreeMap;
+
+/// 락 안에서 챙겨 나오는 것 — 고친 줄, 그 에픽, 자식, (계획에서 빠진 줄, 뺀 줄), 바뀌었나.
+type Edited = (Issue, Option<Issue>, Vec<Issue>, Vec<(String, String)>, bool);
 
 pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     fail_if_nothing(&args)?;
@@ -19,8 +23,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let body = super::add::read_body(args.body.clone())?;
     let at = model::now();
 
-    let (edited, epic, children, changed): (Issue, Option<Issue>, Vec<Issue>, bool) =
-        repo.with_write(|issues, cfg, _| {
+    let (edited, epic, children, shelved, changed): Edited = repo.with_write(|issues, cfg, _| {
         let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
             return Err(Fail::not_found(&args.id));
         };
@@ -68,7 +71,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         // 한쪽만 1 로 끝나면 받는 쪽이 재시도를 못 짠다.
         let changed = *i != before;
         if !changed {
-            return Ok((vec![], (before, None, Vec::new(), false)));
+            return Ok((vec![], (before, None, Vec::new(), Vec::new(), false)));
         }
         i.updated_at = at.clone();
         let out = i.clone();
@@ -88,7 +91,14 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             .filter(|c| crate::id::parent_of(&c.id) == Some(out.id.as_str()))
             .cloned()
             .collect();
-        Ok((vec![], (out, epic, children, true)))
+        // 상세가 미룸을 말하려면 **물려받은 것까지** 필요하다 — 미룬 에픽으로 옮기는
+        // 순간 그 줄이 계획에서 빠진다. 같은 까닭으로 락 안에서 본 모습으로 잰다.
+        let shelved: Vec<(String, String)> = crate::report::deferred_roots(issues)
+            .into_iter()
+            .filter(|(id, _)| *id == out.id || children.iter().any(|c| c.id == *id))
+            .map(|(id, root)| (id.to_string(), root.to_string()))
+            .collect();
+        Ok((vec![], (out, epic, children, shelved, true)))
     })?;
 
     if ctx.json {
@@ -102,7 +112,9 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         )]);
     }
     let children: Vec<&Issue> = children.iter().collect();
-    Ok(view::detail(&edited, epic.as_ref(), &children, &[], &repo.config, &at, false))
+    let roots: BTreeMap<&str, &str> =
+        shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect();
+    Ok(view::detail(&edited, epic.as_ref(), &children, &roots, &repo.config, &at, false))
 }
 
 fn fail_if_nothing(args: &EditArgs) -> R<()> {
