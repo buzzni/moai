@@ -11,6 +11,8 @@ serde_json    = "1"
 anstream      = "1"
 anstyle       = "1"
 unicode-width = "0.2"
+# grapheme 으로 걷는다. ratatui 가 이미 끌고 오는 판이라 무게는 0 이다.
+unicode-segmentation = "1"
 fs2           = "0.4"
 # 기본 기능을 끈다 — 달력 위젯은 `time` 을, 다른 백엔드는 termwiz 를 끌고 온다.
 # crossterm 0.29 는 이미 로컬에 있던 판이라 그것을 그대로 쓴다.
