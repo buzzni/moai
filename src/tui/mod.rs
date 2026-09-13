@@ -790,6 +790,11 @@ impl App {
         // 않으므로, 글자로 먹으면 검색칸에 `c` 가 찍히고 나갈 길이 Esc 하나로
         // 줄어든다. 칸이 안 먹은 그 밖의 Ctrl 조합(Ctrl-Enter 같은 것)은 아무
         // 일도 하지 않는다 — 옮기기 전과 같다.
+        //
+        // **Alt 는 옮기면서 바뀌었다.** 옛 `typing()` 은 Alt 를 안 보고 `Alt-b` 를
+        // `b` 로, `Alt-Backspace` 를 한 글자 지우기로 먹었다. 칸은 Alt 조합을
+        // 글자로 치지 않으므로(Alt 를 Meta 로 보내는 터미널에서 `b` 가 찍히는 것은
+        // 사람이 친 것이 아니다) 이제 둘 다 아무 일도 하지 않는다.
         if k.modifiers.contains(KeyModifiers::CONTROL) {
             if k.code == KeyCode::Char('c') {
                 self.quit = true;
