@@ -405,4 +405,33 @@ mod tests {
         }
         assert_eq!(e.text(), text);
     }
+
+    /// 폭 0 인 글자로 시작하는 줄(ZWSP·BOM·홀로 선 결합 악센트)에서도 → 는 줄
+    /// **머리**에 선다. 머리를 지나쳐 서면 곧이은 Backspace 가 줄을 잇지 않고 그
+    /// 글자를 지운다.
+    #[test]
+    fn crossing_into_a_line_that_starts_with_a_zero_width_glyph_lands_on_its_head() {
+        for head in ["\u{200b}", "\u{feff}", "\u{301}"] {
+            let mut e = Editor::new(&format!("ab\n{head}x"));
+            press(&mut e, KeyCode::Up);
+            press(&mut e, KeyCode::End);
+            press(&mut e, KeyCode::Right);
+            assert_eq!(shown(&e), format!("ab\n|{head}x"), "{head:?}");
+            press(&mut e, KeyCode::Up);
+            press(&mut e, KeyCode::Home);
+            press(&mut e, KeyCode::Down);
+            assert_eq!(shown(&e), format!("ab\n|{head}x"), "{head:?}: ↓ 가 0 칸을 겨눴는데 머리를 지났다");
+        }
+    }
+
+    /// ↑↓ 가 겨누는 칸은 **그리는 자와 같은 자**로 잰다. 글 전체의 폭은 글자마다 잰
+    /// 폭의 합과 다를 수 있다(아랍어 lam-alef 는 합쳐 한 칸) — 그러면 화면의 커서와
+    /// 다른 칸을 겨눈다.
+    #[test]
+    fn the_goal_column_is_the_drawn_cursor_column() {
+        let mut e = Editor::new("abcd\nلا");
+        let drawn = e.lines[e.row].view(10).cursor;
+        press(&mut e, KeyCode::Up);
+        assert_eq!(e.lines[e.row].view(10).cursor, drawn);
+    }
 }

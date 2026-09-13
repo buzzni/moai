@@ -171,20 +171,29 @@ impl Input {
     }
 
     /// 커서 앞 글의 칸 수. 줄 사이를 오갈 때 겨눌 칸이다.
+    ///
+    /// **글자마다 잰 폭을 더한다** — [`window`] 가 커서 칸을 그렇게 잰다. 글 전체를
+    /// 한 번에 재면 글자 사이의 문맥(아랍어 lam-alef 는 합쳐 한 칸)이 끼어 화면의
+    /// 커서와 다른 칸을 겨누고, `u16` 을 넘는 긴 줄에서는 수가 돌아 버린다.
     pub(super) fn column(&self) -> usize {
-        self.text[..self.at].cell_width() as usize
+        self.text[..self.at].graphemes(true).map(|g| g.cell_width() as usize).sum()
     }
 
     /// 커서를 칸 `column` 에 세운다. 그 칸이 글자 가운데면 **그 글자 앞에** 선다 —
     /// 한글 위에서 한 칸 오른쪽을 겨눠도 그 한글을 가리킨다. 줄보다 멀면 끝이다.
+    ///
+    /// 폭 0 인 글자(ZWSP·BOM·홀로 선 결합 악센트)가 그 칸에 서 있으면 **그 앞에**
+    /// 선다. 지나쳐 서면 `seek(0)` 이 줄 머리가 아니게 되어, 줄을 넘어온 커서의
+    /// Backspace 가 줄을 잇지 않고 그 글자를 지운다.
     pub(super) fn seek(&mut self, column: usize) {
         let mut used = 0;
         for (i, g) in self.text.grapheme_indices(true) {
-            used += g.cell_width() as usize;
-            if used > column {
+            let w = g.cell_width() as usize;
+            if used + w > column || (w == 0 && used == column) {
                 self.at = i;
                 return;
             }
+            used += w;
         }
         self.at = self.text.len();
     }
