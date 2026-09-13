@@ -96,7 +96,7 @@ pub fn is_work(i: &Issue) -> bool {
 /// 칸 이름을 박아 두지 않는다 — 칸은 config 가 정하므로 `in_progress` 를
 /// 글자로 찾으면 칸 이름을 바꾼 저장소에서 이 판단이 조용히 빈다.
 ///
-/// `ready` 의 아래쪽 줄과 훅이 압축 직전에 싣는 줄이 같은 집합이다. 두 벌로
+/// `ready` 의 아래쪽 줄과 훅이 접힌 뒤에 싣는 줄이 같은 집합이다. 두 벌로
 /// 두면 한쪽만 고쳐지고, 그러면 화면이 같은 세션을 두 가지로 말한다.
 pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     issues

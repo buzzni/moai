@@ -2823,6 +2823,11 @@ fn event(s: &Scratch, session: &str) -> String {
     format!("{{\"session_id\":\"{session}\",\"cwd\":\"{cwd}\"}}")
 }
 
+/// 컨텍스트가 접힌 뒤 다시 열린 세션의 이벤트.
+fn compacted(s: &Scratch, session: &str) -> String {
+    event(s, session).replacen('{', "{\"source\":\"compact\",", 1)
+}
+
 /// 그 세션이 적어 둔 기준선. **이름을 박지 않는다** — 표의 키에는 저장소도
 /// 들어서, 파일 이름을 시험이 다시 지어내면 구현과 조용히 어긋난다.
 fn baseline(s: &Scratch, session: &str) -> Option<usize> {
@@ -2874,20 +2879,58 @@ fn no_escape_codes_ride_the_contract() {
     assert!(!out.contains('\u{1b}'), "날 이스케이프가 샜다\n{out}");
 }
 
-/// 압축 직전에 집고 있던 것이 실린다. 집은 것이 없으면 조용하다 —
-/// 접기 직전의 자리는 비싸고, 거기에 "없다" 를 적을 일이 아니다.
+/// 접힌 뒤(`SessionStart` 의 `source=compact`)에 집고 있던 것이 실린다.
+/// 집은 것이 없으면 조용하다 — 막 비운 자리에 "없다" 를 적을 일이 아니다.
+///
+/// **이 시험은 바이너리의 stdout 만 본다.** 그 글이 대화에 실리는지는 말하지
+/// 못한다 — `PreCompact` 에 싣던 시절에도 여기는 초록이었고 `claude` 는 그
+/// 출력을 거절했다. 붙는지는 사람이 `/compact` 를 쳐서 봤다 (moai-91jk).
 #[test]
 fn what_is_held_rides_the_fold() {
     let s = init("hookfold");
     let id = field(&ok(s.path(), &["add", "락을 잡는다", "--json"]), "id");
 
-    let quiet = hook_out(&s, "pre-compact", &event(&s, "s1"));
+    let quiet = hook_out(&s, "session-start", &compacted(&s, "s1"));
     assert!(quiet.trim().is_empty(), "집은 것이 없는데 실었다\n{quiet}");
 
     ok(s.path(), &["mv", &id, "in_progress"]);
-    let held = carried_text(&hook_out(&s, "pre-compact", &event(&s, "s1")));
+    let out = hook_out(&s, "session-start", &compacted(&s, "s1"));
+    assert!(out.contains("\"hookEventName\":\"SessionStart\""), "이벤트 이름이 틀렸다\n{out}");
+    let held = carried_text(&out);
     assert!(held.contains(&id), "집은 것의 id 가 없다\n{held}");
     assert!(held.contains("락을 잡는다"), "집은 것의 제목이 없다\n{held}");
+
+    // 처음 열린 세션과 재개는 여전히 아무것도 안 싣는다.
+    for source in ["startup", "resume", "clear"] {
+        let input = event(&s, "s2").replacen('{', &format!("{{\"source\":\"{source}\","), 1);
+        let out = hook_out(&s, "session-start", &input);
+        assert!(out.trim().is_empty(), "{source} 에서 무언가 실었다\n{out}");
+    }
+}
+
+/// **접힌 뒤는 같은 세션이다.** 기준선은 그대로 두고, 보드는 다음 프롬프트에
+/// 다시 싣는다 — 접힐 때 보드도 같이 떨어졌다.
+///
+/// 기준선을 다시 적으면 접기 전에 늘린 경고가 물려받은 빚에 묻혀 `Stop` 이
+/// 그것을 영영 못 본다.
+#[test]
+fn the_fold_keeps_the_baseline_and_reloads_the_board() {
+    let s = init("hookrefold");
+    ok(s.path(), &["add", "락을 잡는다"]);
+    hook_out(&s, "session-start", &event(&s, "s1"));
+    let before = baseline(&s, "s1").expect("기준선을 안 적었다");
+
+    let first = hook_out(&s, "user-prompt-submit", &event(&s, "s1"));
+    assert!(!first.trim().is_empty(), "보드가 안 실렸다");
+    assert!(hook_out(&s, "user-prompt-submit", &event(&s, "s1")).trim().is_empty());
+
+    // 접기 전에 경고를 하나 늘린다.
+    ok(s.path(), &["add", "또 하나"]);
+    hook_out(&s, "session-start", &compacted(&s, "s1"));
+    assert_eq!(baseline(&s, "s1"), Some(before), "접힌 뒤에 기준선을 다시 적었다");
+
+    let again = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "s1")));
+    assert!(again.contains("락을 잡는다"), "접힌 뒤 보드를 다시 안 실었다\n{again}");
 }
 
 /// `SessionStart` 는 아무것도 싣지 않고 기준선만 적는다.
@@ -2922,7 +2965,7 @@ fn the_hook_never_fails() {
         ("빈 입력", String::new()),
         ("모르는 필드만 잔뜩", "{\"context_tokens\":9,\"transcript_path\":\"/x\"}".into()),
     ] {
-        for ev in ["session-start", "user-prompt-submit", "pre-tool-use", "stop", "pre-compact"] {
+        for ev in ["session-start", "user-prompt-submit", "pre-tool-use", "stop"] {
             let out = hook_out(&s, ev, &input);
             assert!(out.trim().is_empty(), "{what} 에서 {ev} 가 무언가 냈다\n{out}");
         }

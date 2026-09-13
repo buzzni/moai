@@ -49,13 +49,14 @@ fn stable(bytes: &[u8]) -> u64 {
 /// 훅이 걸리는 자리와 그때 부를 이벤트.
 ///
 /// **`SessionStart` 는 보드를 안 싣는다** — 재개에서 그 출력이 대화에 안 붙는
-/// 것을 여러 번 확인했다. 까닭은 `hook::Event` 에 적혀 있다.
+/// 것을 여러 번 확인했다. 접힌 뒤에만 집고 있던 것을 싣는다. **`PreCompact`
+/// 는 걸지 않는다** — `claude` 가 그 출력을 거절한다. 까닭은 `hook::Event` 에
+/// 적혀 있다.
 const HOOKS: &[(&str, &str, &str)] = &[
     ("SessionStart", "session-start", "moai 경고를 센다..."),
     ("UserPromptSubmit", "user-prompt-submit", "moai 보드를 읽는다..."),
     ("PreToolUse", "pre-tool-use", "moai 규칙을 본다..."),
     ("Stop", "stop", "moai 상태를 견준다..."),
-    ("PreCompact", "pre-compact", "집고 있던 일을 적어 둔다..."),
 ];
 
 /// `PreToolUse` 가 볼 도구들. 규칙이 뜻을 두는 것만 적는다 — 전부 받으면

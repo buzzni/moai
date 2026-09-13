@@ -90,6 +90,15 @@ fn decide(event: Event, input: &Input) -> Option<String> {
     let unreadable: Vec<usize> = load.errors.iter().map(|e| e.line).collect();
 
     let decision = match event {
+        // **접힌 뒤는 같은 세션이다.** 기준선을 다시 적으면 접기 전에 늘린
+        // 경고가 물려받은 빚에 묻혀 `Stop` 이 못 본다. 대신 보드의 표를
+        // 지워 다음 프롬프트가 보드를 다시 싣게 한다 — 접힐 때 같이 떨어졌다.
+        Event::SessionStart if input.source.as_deref() == Some("compact") => {
+            if let Some(path) = session_file(input, &repo, "board") {
+                let _ = std::fs::remove_file(path);
+            }
+            crate::hook::carried(&load.issues, &repo.config)
+        }
         // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다.
         Event::SessionStart => {
             write_baseline(input, &repo, &load.issues, &unreadable);
@@ -102,7 +111,6 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 view::status(&st, &load.issues, &repo.config, &now, ".moai/issues.jsonl");
             crate::hook::board(&lines)
         }),
-        Event::PreCompact => crate::hook::carried(&load.issues, &repo.config),
         Event::PreToolUse => {
             match crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input) {
                 crate::hook::Call::Shell(cmd) => {

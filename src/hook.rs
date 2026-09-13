@@ -30,9 +30,18 @@ use std::path::{Path, PathBuf};
 /// 안 붙는 자리에 대고 실으면 훅이 사는지 죽었는지 모른 채 규칙만 남는다.
 /// 그래서 보드는 `UserPromptSubmit` 이 세션당 한 번 싣고, `SessionStart` 는
 /// `Stop` 이 견줄 기준선만 적는다.
+///
+/// **단 접힌 뒤(`source=compact`)는 싣는다.** 그 자리의 출력은 붙는다 —
+/// `/compact` 뒤에 같은 세션의 다른 플러그인이 `SessionStart:compact` 로 실은
+/// 글이 대화에 그대로 있었다 (moai-91jk). 집고 있던 것은 거기서 싣는다.
+///
+/// **`PreCompact` 는 걸지 않는다.** 한때 거기서 집은 것을 실었는데, `claude` 가
+/// 그 이벤트의 `hookSpecificOutput` 을 검증에서 거절했다 — 받는 이벤트 목록에
+/// `PreCompact` 가 없다. 훅은 돌았고 id 도 옳게 골랐지만 한 줄도 안 붙었고,
+/// stdout 만 보던 시험은 초록이었다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Event {
-    /// 세션이 열렸다. 기준선만 적는다
+    /// 세션이 열렸다. 기준선을 적고, 접힌 뒤면 집고 있던 것을 싣는다
     SessionStart,
     /// 사람이 무언가 시켰다. 보드를 세션당 한 번 싣는다
     UserPromptSubmit,
@@ -40,8 +49,6 @@ pub enum Event {
     PreToolUse,
     /// 턴이 끝난다. 상태가 실제와 맞는지 본다
     Stop,
-    /// 컨텍스트를 접기 직전. 집고 있던 것을 잃지 않게 적어 둔다
-    PreCompact,
 }
 
 impl Event {
@@ -52,7 +59,6 @@ impl Event {
             Event::UserPromptSubmit => "UserPromptSubmit",
             Event::PreToolUse => "PreToolUse",
             Event::Stop => "Stop",
-            Event::PreCompact => "PreCompact",
         }
     }
 }
@@ -72,6 +78,9 @@ pub struct Input {
     pub session_id: Option<String>,
     #[serde(default)]
     pub cwd: Option<String>,
+    /// `SessionStart` 가 왜 열렸나 — `startup`·`resume`·`clear`·`compact`.
+    #[serde(default)]
+    pub source: Option<String>,
     #[serde(default)]
     pub tool_name: Option<String>,
     #[serde(default)]
@@ -111,16 +120,16 @@ pub fn board(lines: &[String]) -> Decision {
     Decision::Context(format!("{LEAD}\n\n{body}"))
 }
 
-/// 압축 뒤에도 잃으면 안 되는 것 — 지금 집고 있는 일.
+/// 접힌 뒤에도 잃으면 안 되는 것 — 지금 집고 있는 일.
 ///
-/// 집은 것이 없으면 아무 말도 하지 않는다. **빈 목록을 싣지 않는다** — 접기
-/// 직전의 자리는 비싸고, 거기에 "없다" 를 적는 것은 그 값을 치를 일이 아니다.
+/// 집은 것이 없으면 아무 말도 하지 않는다. **빈 목록을 싣지 않는다** — 막
+/// 접어 비운 자리에 "없다" 를 적는 것은 그 값을 치를 일이 아니다.
 pub fn carried(issues: &[Issue], cfg: &Config) -> Decision {
     let wip = report::wip(issues, cfg);
     if wip.is_empty() {
         return Decision::Pass;
     }
-    let mut out = String::from("압축 뒤에도 이것을 집고 있다:");
+    let mut out = String::from("압축 전부터 이것을 집고 있다:");
     for i in wip {
         out.push_str(&format!("\n  {}  {}", i.id, i.title));
     }
@@ -2142,7 +2151,7 @@ mod tests {
         assert_eq!(board(&["   ".into()]), Decision::Pass);
     }
 
-    /// 집은 것이 없으면 압축 직전에도 조용하다.
+    /// 집은 것이 없으면 접힌 뒤에도 조용하다.
     #[test]
     fn nothing_carried_stays_quiet() {
         let all = vec![issue("t-1", "todo"), issue("t-2", "done")];
