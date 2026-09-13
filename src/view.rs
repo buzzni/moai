@@ -96,6 +96,18 @@ impl Hidden {
             .collect()
     }
 
+    /// 숨긴 줄 하나를 그것을 여는 낱말 밑에 센다. 어느 낱말로도 안 열리는
+    /// 것은 안 센다 — 못 보여 줄 수를 대느니 말을 안 한다.
+    pub fn add(&mut self, why: crate::query::Hide) {
+        use crate::query::Hide;
+        match why {
+            Hide::Done => self.done += 1,
+            Hide::Idea => self.ideas += 1,
+            Hide::Deferred => self.deferred += 1,
+            Hide::Unopenable => {}
+        }
+    }
+
     /// 숨긴 것을 흐린 한 줄로. **요약을 안 내는 표면(트리)이 쓴다** — 거기서
     /// 이 말을 빠뜨리면 머리글은 세는데 그 밑에 없는 줄이 까닭 없이 사라진다.
     pub fn note(&self) -> Option<String> {
@@ -243,19 +255,23 @@ struct Ctx<'a> {
     rolls: &'a [Roll],
 }
 
+/// **그린 줄의 첨자도 돌려준다.** 거름망에 안 걸린 줄도 걸린 자손의 조상이면
+/// 그려지므로, 꼬리가 "숨겼다" 고 셀 것은 그리지 않은 줄뿐이다. 세는 쪽이
+/// 따로 훑으면 방금 그린 줄을 숨겼다고 말한다(moai-wi67).
 pub fn tree(
     all: &[Issue],
     index: &crate::nav::Index,
     keep: &dyn Fn(usize) -> bool,
     rolls: &[Roll],
-) -> Vec<String> {
+) -> (Vec<String>, std::collections::BTreeSet<usize>) {
     let mut out = Vec::new();
+    let mut drawn = std::collections::BTreeSet::new();
     let cx = Ctx { all, index, keep, rolls };
-    walk(&mut out, &cx, &crate::nav::Path::new(), 0);
+    walk(&mut out, &mut drawn, &cx, &crate::nav::Path::new(), 0);
     if out.is_empty() {
         out.push("없다.".into());
     }
-    out
+    (out, drawn)
 }
 
 /// 소속 없는 줄인가. **잎이든, 자식을 거느려 디렉터리가 된 줄이든 같다.**
@@ -311,17 +327,23 @@ fn blank(out: &mut Vec<String>) {
 /// 그대로 훑으면 소속 없는 줄이 남의 에픽 바로 밑에 같은 들여쓰기로 끼어
 /// 그 에픽의 멤버처럼 읽힌다. 보고서에서는 **무엇에 딸렸는지가 차례보다
 /// 앞선다.**
-fn walk(out: &mut Vec<String>, cx: &Ctx, path: &crate::nav::Path, depth: usize) {
+fn walk(
+    out: &mut Vec<String>,
+    drawn: &mut std::collections::BTreeSet<usize>,
+    cx: &Ctx,
+    path: &crate::nav::Path,
+    depth: usize,
+) {
     let entries = cx.index.entries_where(cx.all, path, cx.keep);
     if !groups_here(path) {
         for e in &entries {
-            place(out, cx, path, e, depth);
+            place(out, drawn, cx, path, e, depth);
         }
         return;
     }
 
     for e in entries.iter().filter(|e| !is_loose(e) && !is_lost(e)) {
-        place(out, cx, path, e, depth);
+        place(out, drawn, cx, path, e, depth);
     }
 
     // 소속 없는 것도 **머리글을 갖는다.** CLI 트리는 보고서라, 소속 없는 일이
@@ -342,14 +364,14 @@ fn walk(out: &mut Vec<String>, cx: &Ctx, path: &crate::nav::Path, depth: usize) 
         // 마일스톤 안의 소속 없는 줄만 두 칸 들어가, 같은 머리글 밑에서
         // 뿌리와 마일스톤의 들여쓰기가 어긋난다.
         for e in loose {
-            place(out, cx, path, e, 1);
+            place(out, drawn, cx, path, e, 1);
         }
     }
 
     // 바구니는 늘 끝에. 정상인 것이 먼저 보여야 한다 — `nav` 가 목록을 그렇게
     // 세우는 것과 같은 뜻이다.
     for e in entries.iter().filter(|e| is_lost(e)) {
-        place(out, cx, path, e, depth);
+        place(out, drawn, cx, path, e, depth);
     }
 }
 
@@ -360,12 +382,18 @@ fn walk(out: &mut Vec<String>, cx: &Ctx, path: &crate::nav::Path, depth: usize) 
 /// 내면 안 된다(`moai show <에픽>` 이 제 멤버를 `에픽 없음` 이라 불렀다).
 fn place(
     out: &mut Vec<String>,
+    drawn: &mut std::collections::BTreeSet<usize>,
     cx: &Ctx,
     path: &crate::nav::Path,
     e: &crate::nav::Entry,
     depth: usize,
 ) {
     use crate::nav::{Entry, Seg};
+    // 제 줄이 있는 것은 줄이든 머리글이든 **여기서 그려진다.** 바구니만 제
+    // 줄이 없다.
+    if let Some(at) = e.at() {
+        drawn.insert(at);
+    }
     let deeper = into_dir(path, e).unwrap_or_else(|| path.clone());
     match e {
         // 묶음은 머리글을 갖는다 — 집계는 `report` 가 이미 했다.
@@ -386,7 +414,7 @@ fn place(
                     paint(style::HEAD, &cx.index.label(cx.all, e)),
                 )),
             }
-            walk(out, cx, &deeper, 1);
+            walk(out, drawn, cx, &deeper, 1);
         }
         // 바구니도 머리글을 갖는다. **조용히 빼지 않는다** — 자리를 못
         // 정한 줄이 트리에서 사라지면 그 줄은 어디에도 없는 것이 된다.
@@ -399,11 +427,11 @@ fn place(
                 paint(style, &cx.index.label(cx.all, e)),
                 under(cx, path, e)
             ));
-            walk(out, cx, &deeper, 1);
+            walk(out, drawn, cx, &deeper, 1);
         }
         Entry::Dir { seg: Seg::Issue(_), at: Some(at) } => {
             row(out, &cx.all[*at], depth.max(1));
-            walk(out, cx, &deeper, depth.max(1) + 1);
+            walk(out, drawn, cx, &deeper, depth.max(1) + 1);
         }
         // 제 줄이 있는 잃은 에픽·마일스톤도 여기로 온다 — 줄만 내고 만다.
         Entry::Dir { seg: Seg::Lost, at: Some(at) } => row(out, &cx.all[*at], depth.max(1)),
@@ -425,7 +453,7 @@ pub fn members(
 ) -> Vec<String> {
     let mut out = Vec::new();
     let cx = Ctx { all, index, keep, rolls };
-    walk(&mut out, &cx, at, 0);
+    walk(&mut out, &mut std::collections::BTreeSet::new(), &cx, at, 0);
     out
 }
 
@@ -1222,7 +1250,7 @@ mod tests {
         let shown: std::collections::BTreeSet<&str> =
             [member.id.as_str(), child.id.as_str(), loose.id.as_str()].into_iter().collect();
         let keep = |at: usize| shown.contains(all[at].id.as_str());
-        let out = plain(&tree(&all, &index, &keep, &rolls));
+        let out = plain(&tree(&all, &index, &keep, &rolls).0);
         let joined = out.join("\n");
 
         assert!(joined.contains("저장 계층"), "{joined}");
@@ -1254,7 +1282,7 @@ mod tests {
         let all = vec![milestone, epic, member, parent, child];
         let rolls = crate::report::rollup(&all, &cfg());
         let index = crate::nav::Index::of(&all);
-        let out = plain(&tree(&all, &index, &|_| true, &rolls));
+        let out = plain(&tree(&all, &index, &|_| true, &rolls).0);
         let joined = out.join("\n");
 
         let at_epic = out.iter().position(|l| l.contains("에픽 멤버")).unwrap();
@@ -1277,8 +1305,8 @@ mod tests {
         let rolls = crate::report::rollup(&all, &cfg());
 
         let index = crate::nav::Index::of(&all);
-        assert_eq!(plain(&tree(&all, &index, &|_| false, &rolls)), ["없다."]);
-        assert!(plain(&tree(&all, &index, &|_| true, &rolls)).join("\n").contains("빈 에픽"));
+        assert_eq!(plain(&tree(&all, &index, &|_| false, &rolls).0), ["없다."]);
+        assert!(plain(&tree(&all, &index, &|_| true, &rolls).0).join("\n").contains("빈 에픽"));
     }
 
     /// 시킨 대로 닫았는데도 잔소리가 남으면 다음부터 안 듣는다.

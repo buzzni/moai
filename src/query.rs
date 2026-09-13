@@ -117,6 +117,19 @@ pub struct Raw {
     pub filter: Vec<String>,
 }
 
+/// 기본 목록이 줄을 숨긴 까닭. **그 줄을 여는 한 낱말로 가른다.**
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hide {
+    /// `--all` 이 연다.
+    Done,
+    /// `--type idea` 가 연다.
+    Idea,
+    /// `--deferred` 가 연다.
+    Deferred,
+    /// 어느 한 낱말로도 안 열린다 (닫아 둔 생각). 세지 않는다.
+    Unopenable,
+}
+
 impl Filter {
     pub fn build(mut raw: Raw) -> Result<Filter, String> {
         // `--filter` 는 **플래그와 같은 자리에 쌓인다.** 뜻을 정하는 코드가
@@ -164,30 +177,48 @@ impl Filter {
         })
     }
 
+    /// 기본 목록이 이 줄을 숨기는가, 숨긴다면 **어느 한 낱말이 그것을 여는가.**
+    ///
+    /// **숨김 규칙은 여기 하나다.** `matches` 도 이것으로 거르고, 숨긴 수를
+    /// 세는 쪽(`moai show` 의 꼬리)도 이것을 받아 세기만 한다. 한때 `show` 가
+    /// 같은 세 규칙을 다시 적었고, 두 벌이라 실제로 갈라졌다(moai-nnul).
+    ///
+    /// - **담아 둔 생각은 기본 목록에서 빠진다.** 이 자리는 일을 보는 자리고,
+    ///   생각 조각이 섞이면 목록이 흐려져 담기가 꺼려진다. 콕 집어 묻거나
+    ///   (`--type idea`) 글로 찾을 때는 나온다 — 이미 적어 둔 생각을 다시 안
+    ///   적으려면 찾아져야 한다. 탐색기는 `ideas` 를 켜고 들어와 시키지도 않은
+    ///   줄을 숨기지 않는다.
+    /// - **미뤄 둔 것은 done 과 같은 자리에서 빠진다.** 지금 계획이 아니라는
+    ///   뜻이 같고, 켜는 말(`--all`)도 같아야 축이 안 는다. 물려받은 미룸도
+    ///   미룸이다 — 미룬 에픽의 멤버가 목록에 남으면 `ready` 와 보드가 빼 둔
+    ///   것을 목록만 계획으로 낸다.
+    ///
+    /// 까닭은 **그 줄을 실제로 여는 한 낱말**로 가른다. 첫 까닭으로 가르면
+    /// 닫아 둔 생각이 `idea N건 숨김 — --type idea` 로 서는데 그 명령은 done 을
+    /// 여전히 숨겨 아무것도 안 낸다.
+    ///   `--type idea` 는 idea 만 연다 (done·미룸은 그대로 숨긴다)
+    ///   `--deferred`  는 미룸을 열고 생각까지 같이 연다 (done 은 아니다)
+    ///   `--all`       은 done 과 미룸을 연다 (생각은 아니다)
+    pub fn hidden_by(&self, i: &Issue, wh: &Where) -> Option<Hide> {
+        let idea = crate::report::is_idea(i) && !self.ideas;
+        let deferred = self.deferred.is_none() && !self.all && wh.deferred(i);
+        let done = !self.all && self.status.is_empty() && i.status.is_done();
+        match (idea, deferred, done) {
+            (false, false, false) => None,
+            (true, false, false) => Some(Hide::Idea),
+            (_, true, false) => Some(Hide::Deferred),
+            (false, _, true) => Some(Hide::Done),
+            _ => Some(Hide::Unopenable),
+        }
+    }
+
     pub fn matches(&self, i: &Issue, now: &str, wh: &Where) -> bool {
-        // **담아 둔 생각은 기본 목록에서 빠진다.** 이 자리는 일을 보는
-        // 자리고, 거기에 생각 조각이 섞이면 목록이 흐려진다 — 흐려지면
-        // 담기가 꺼려지고, 담는 비용을 0 으로 만든 뜻이 사라진다.
-        //
-        // 콕 집어 묻거나(`--type idea`) 글로 찾을 때는 나온다. **이미 적어
-        // 둔 생각을 다시 안 적으려면 찾아져야 한다.**
-        //
-        // 여기 한 곳에서만 정한다. 탐색기는 `ideas` 를 켜고 들어와 시키지도
-        // 않은 줄을 숨기지 않는다 — `all` 을 켜는 것과 같은 까닭이고, 같은
-        // 자리다. 술어가 갈라지면 화면과 CLI 가 다른 것을 센다.
-        if crate::report::is_idea(i) && !self.ideas {
+        // `--deferred` 는 **좁히는 말**이기도 하다 — 미룬 것만 본다. 숨김이
+        // 아니라 고르기라 `hidden_by` 에 넣지 않는다.
+        if self.deferred.is_some_and(|want| wh.deferred(i) != want) {
             return false;
         }
-        // **미뤄 둔 것은 done 과 같은 자리에서 빠진다.** 지금 계획이 아니라는
-        // 뜻이 같고, 켜는 말(`--all`)도 같아야 축이 안 는다.
-        // **물려받은 미룸도 미룸이다** — 미룬 에픽의 멤버가 목록에 남으면
-        // `ready` 와 보드가 빼 둔 것을 목록만 계획으로 낸다.
-        match self.deferred {
-            Some(want) if wh.deferred(i) != want => return false,
-            None if !self.all && wh.deferred(i) => return false,
-            _ => {}
-        }
-        if !self.all && self.status.is_empty() && i.status.is_done() {
+        if self.hidden_by(i, wh).is_some() {
             return false;
         }
         if !self.status.is_empty() && !self.status.iter().any(|s| s == i.status.as_str()) {
@@ -375,6 +406,39 @@ mod tests {
 
     fn f() -> Filter {
         Filter { all: true, ..Filter::default() }
+    }
+
+    /// **숨긴 까닭은 그 줄을 여는 한 낱말이다.** `matches` 와 꼬리 셈이 이
+    /// 하나를 받는다 — 두 벌로 적었을 때 실제로 갈라졌다(moai-nnul).
+    #[test]
+    fn hidden_by_names_the_one_word_that_opens_the_row() {
+        let plain = Filter::default();
+        let why = |i: &Issue| {
+            let all = [i.clone()];
+            plain.hidden_by(i, &Where::of(&all))
+        };
+        let mut thought = issue("a-0001", "todo", &[]);
+        thought.kind = Kind::Idea;
+        let mut closed_thought = thought.clone();
+        closed_thought.status = Status::new("done");
+        let mut shelved = issue("a-0002", "todo", &[]);
+        shelved.deferred_at = Some(NOW.into());
+        let mut shelved_done = shelved.clone();
+        shelved_done.status = Status::new("done");
+
+        assert_eq!(why(&issue("a-0003", "todo", &[])), None);
+        assert_eq!(why(&issue("a-0003", "done", &[])), Some(Hide::Done));
+        assert_eq!(why(&thought), Some(Hide::Idea));
+        assert_eq!(why(&shelved), Some(Hide::Deferred));
+        // 닫고 미룬 줄은 `--all` 이 연다 — `--deferred` 는 done 을 그대로 숨긴다.
+        assert_eq!(why(&shelved_done), Some(Hide::Done));
+        // 닫은 생각은 어느 한 낱말로도 안 열린다.
+        assert_eq!(why(&closed_thought), Some(Hide::Unopenable));
+
+        // 숨김이 있으면 `matches` 도 안 고른다 — 한 규칙이다.
+        for i in [&thought, &shelved, &closed_thought] {
+            assert!(!hit(&plain, i), "{i:?}");
+        }
     }
 
     /// 쉼표는 또는.

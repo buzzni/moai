@@ -7,7 +7,8 @@
 use super::{Ctx, Fail, R};
 use crate::cli::ShowArgs;
 use crate::model::{self, Issue, Kind};
-use crate::query::{Filter, Raw, Sel};
+use crate::query::{Filter, Hide, Raw, Sel};
+use std::collections::BTreeSet;
 use crate::report;
 use crate::store::Repo;
 use crate::view;
@@ -157,45 +158,34 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     }
 
     let now = model::now();
-    // 한 번만 훑는다. done 을 숨기는 규칙은 `Filter` 하나가 알고, 여기서는
-    // 그 규칙을 끈 채(`all`) 걸러 놓고 숨긴 것을 세기만 한다 — 두 번 훑으면
-    // 두 판단이 어긋날 자리가 생긴다.
-    let hide_done = !filter.all && filter.status.is_empty();
-    let hide_ideas = !filter.ideas;
-    // 미뤄 둔 것도 done 과 같은 자리에서 빠진다. `--deferred` 로 콕 집어
-    // 물었으면 그때는 그것만 보는 것이라 숨길 것이 없다.
-    let hide_deferred = filter.deferred.is_none() && !filter.all;
+    // 한 번만 훑는다. 숨기는 규칙은 `Filter::hidden_by` 하나가 알고, 여기서는
+    // 숨김을 끈 채(`all`·`ideas`) 걸러 놓고 까닭을 받아 세기만 한다 — 규칙을
+    // 여기 다시 적으면 두 판단이 어긋나고, 실제로 어긋났다(moai-nnul).
+    //
     // **숨긴 것도 센다.** 담아 둔 생각뿐인 저장소에서 `moai show` 가 그냥
-    // "없다." 라고 하면, 방금 담은 사람은 파일이 비었다고 믿는다 — done 을
-    // 숨길 때 그 수를 말하는 것과 같은 규칙이다.
+    // "없다." 라고 하면, 방금 담은 사람은 파일이 비었다고 믿는다.
     let asked_deferred = filter.deferred.is_some();
-    let wide = Filter { all: true, ideas: true, ..filter };
+    let wide = Filter { all: true, ideas: true, ..filter.clone() };
     let wh = crate::query::Where::of(&load.issues);
     let mut shown: Vec<Issue> = Vec::new();
-    let mut hidden = view::Hidden::default();
-    for i in load.issues.iter().filter(|i| wide.matches(i, &now, &wh)) {
-        // **꼬리가 대는 낱말이 실제로 그 줄을 내야 한다.** 한때 첫 까닭으로
-        // 갈랐는데, 그러면 닫아 둔 생각이 `idea N건 숨김 — --type idea` 로
-        // 서고 그 명령은 done 을 여전히 숨겨 아무것도 안 낸다 — `idea_pile`
-        // 이 피한 "세어 놓고 못 보여 주는 수" 가 여기 그대로 있었다.
-        //
-        // 그래서 **한 낱말로 열리는 것만 그 낱말 밑에 센다.**
-        //   `--type idea` 는 idea 만 연다 (done·미룸은 그대로 숨긴다)
-        //   `--deferred`  는 미룸을 열고 생각까지 같이 연다 (done 은 아니다)
-        //   `--all`       은 done 과 미룸을 연다 (생각은 아니다)
-        // 어느 하나로도 안 열리는 것(닫아 둔 생각)은 세지 않는다. 못 보여 줄
-        // 수를 대느니 말을 안 하는 편이 낫다.
-        let by_idea = hide_ideas && report::is_idea(i);
-        let by_deferred = hide_deferred && wh.deferred(i);
-        let by_done = hide_done && i.status.is_done();
-        match (by_idea, by_deferred, by_done) {
-            (false, false, false) => shown.push(i.clone()),
-            (true, false, false) => hidden.ideas += 1,
-            (_, true, false) => hidden.deferred += 1,
-            (false, _, true) => hidden.done += 1,
-            _ => {}
+    // 숨긴 줄과 까닭. **세는 것은 그린 뒤다** — 트리는 걸리지 않은 줄도 걸린
+    // 자손의 조상이면 그리므로, 먼저 세면 방금 그린 줄을 숨겼다고 말한다.
+    let mut hidden_rows: Vec<(usize, Hide)> = Vec::new();
+    for (at, i) in load.issues.iter().enumerate().filter(|(_, i)| wide.matches(i, &now, &wh)) {
+        match filter.hidden_by(i, &wh) {
+            None => shown.push(i.clone()),
+            Some(why) => hidden_rows.push((at, why)),
         }
     }
+    let tally = |drawn: &BTreeSet<usize>| {
+        let mut h = view::Hidden::default();
+        for (at, why) in &hidden_rows {
+            if !drawn.contains(at) {
+                h.add(*why);
+            }
+        }
+        h
+    };
     crate::query::sort_for_display(&mut shown);
 
     if ctx.json {
@@ -209,7 +199,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
             shown.iter().map(|i| i.id.as_str()).collect();
         let index = crate::nav::Index::of(&load.issues);
         let keep = |at: usize| shown_ids.contains(load.issues[at].id.as_str());
-        let mut out = view::tree(
+        let (mut out, drawn) = view::tree(
             &load.issues,
             &index,
             &keep,
@@ -219,7 +209,8 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         // 미뤄 둔 멤버까지 세는데, 그 줄은 여기서 빠진다 — 말하지 않으면
         // `0/2` 밑에 줄 하나만 서고 왜 하나가 없는지 아무도 모른다. 목록이
         // 요약 꼬리에 다는 것과 같은 말, 같은 자리(`Hidden`)에서 받는다.
-        if let Some(n) = hidden.note() {
+        // **그린 줄은 안 센다** — 걸린 자손 때문에 선 조상이다(moai-wi67).
+        if let Some(n) = tally(&drawn).note() {
             out.push(String::new());
             out.push(n);
         }
@@ -228,7 +219,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     Ok(view::list(
         &shown,
         &repo.config,
-        hidden,
+        tally(&BTreeSet::new()),
         &report::epic_labels(&load.issues),
         asked_deferred,
         &wh.put_off,

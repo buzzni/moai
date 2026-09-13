@@ -518,3 +518,7 @@
 {"ts":"2026-09-13T04:16:44Z","id":"moai-2g4y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"미룸을 에픽·마일스톤·부모에서 읽을 때 물려받는다 (report::put_off)"}
 {"ts":"2026-09-13T04:16:44Z","id":"moai-dly4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"미룬 막음은 여전히 막고, ready 가 막는 줄과 풀 명령을 대고 status 가 blocked_by_deferred 로 낸다"}
 {"ts":"2026-09-13T04:16:54Z","id":"moai-14dm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-13T04:18:43Z","id":"moai-14dm.1yl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 생각을 지나는 소속 상속 끊기"}
+{"ts":"2026-09-13T04:18:43Z","id":"moai-14dm.1yl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-13T04:19:40Z","id":"moai-wi67","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-13T04:19:40Z","id":"moai-nnul","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}

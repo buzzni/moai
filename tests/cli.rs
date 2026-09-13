@@ -2662,6 +2662,23 @@ fn the_tree_says_what_it_did_not_draw() {
     assert!(out.contains("미룸 1건 숨김"), "왜 하나가 없는지 안 말한다 — {out}");
 }
 
+/// **꼬리는 그린 줄을 숨겼다고 말하지 않는다.** 거름망은 잎에 걸리는데 트리는
+/// 걸린 자손의 조상도 그리므로, 평평하게 센 수를 그대로 대면 방금 그린 생각을
+/// `idea 1건 숨김` 이라 부른다(moai-wi67).
+#[test]
+fn the_tree_tail_does_not_count_what_it_drew() {
+    let s = init("treetailancestor");
+    let thought = ok(s.path(), &["idea", "add", "반짝", "-q"]).trim().to_string();
+    let child = add(s.path(), &["자식", "--parent", &thought]);
+
+    let out = ok(s.path(), &["show", "--tree"]);
+    assert!(out.contains(&thought) && out.contains(&child), "{out}");
+    assert!(!out.contains("idea 1건 숨김"), "그린 줄을 숨겼다고 말한다 — {out}");
+
+    // 목록은 조상을 안 그리므로 여전히 센다.
+    assert!(ok(s.path(), &["show"]).contains("idea 1건 숨김"), "목록이 숨긴 것을 안 센다");
+}
+
 /// 담아 둔 생각은 **기계 출력에서도** 멤버가 아니다. 화면도(`nav` 가 에픽
 /// 밑에 안 걸어서) 머리글도(`rollup` 이 `is_work` 로 세서) 세지 않는 줄을
 /// `--json` 만 세면, 받는 쪽이 계획에 없는 것을 계획으로 읽는다.
