@@ -9,10 +9,6 @@
 //! 쪼개진다. 폭은 ratatui 가 칸을 채울 때 쓰는 자([`CellWidth`])를 그대로
 //! 쓴다 — 자가 갈라지면 여기서 센 커서 칸과 화면에 찍힌 글자가 어긋난다.
 
-// `/`·`f` 를 이 위로 옮기는 것은 moai-zag3 이다. 그때까지는 시험만 이것을
-// 부르므로, 거기서 얹는 순간 이 줄을 지운다.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use ratatui::buffer::CellWidth;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use unicode_segmentation::UnicodeSegmentation;
