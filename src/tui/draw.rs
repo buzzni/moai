@@ -403,8 +403,11 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     // 사라지는 것이 이 저장소가 막아 온 실패다.
     let mut first = vec![Span::styled(i.id.clone(), dim())];
     if let Some(b) = app.origin.branch(&i.id) {
+        // 브랜치도 **우리가 자른다** — 좁은 패널에서 긴 브랜치 이름이 위젯에 말없이
+        // 잘리면 `…` 도 없이 다른 브랜치 이름처럼 읽힌다.
+        let room = w.saturating_sub(crate::text::width(&i.id) + 2);
         first.push(Span::raw("  "));
-        first.push(Span::styled(format!("{} {b}", style::BRANCH_GLYPH), branch()));
+        first.push(Span::styled(clip(&format!("{} {b}", style::BRANCH_GLYPH), room), branch()));
     }
     let mut out = vec![Line::from(first)];
     out.extend(wrapped(&i.title, w, bold()));

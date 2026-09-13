@@ -17,8 +17,12 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let crate::worktree::Gathered { load, origin, .. } = super::gather(&repo, worktree)?;
     // **그 줄이 쓰는 id** 까지 넘긴다 — id 가 있어야 산 줄과의 중복이
     // 드러난다(moai-4dk4).
-    let unreadable: Vec<report::Unreadable> =
-        load.errors.iter().map(|e| report::Unreadable { id: e.id.as_deref() }).collect();
+    // 옆에서만 온 줄과 겹친 id 는 중복이 아니다 (`Origin::unreadable`).
+    let unreadable: Vec<report::Unreadable> = origin
+        .unreadable(load.errors.iter().map(|e| e.id.as_deref()))
+        .into_iter()
+        .map(|id| report::Unreadable { id })
+        .collect();
     let now = model::now();
     let st = report::status(&load.issues, &unreadable, &repo.config, &now);
 

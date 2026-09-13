@@ -14,7 +14,7 @@
 
 use crate::model::Issue;
 use crate::store::{Load, Repo};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// 제 워크트리가 아닌 워크트리 하나.
@@ -33,6 +33,9 @@ pub struct Origin {
     from: BTreeMap<String, usize>,
     /// (이름, 그 워크트리의 moai 뿌리). 뿌리는 이력(저널)을 읽을 때 쓴다.
     trees: Vec<(String, PathBuf)>,
+    /// 제 파일에는 없고 옆에서만 온 줄. 제 줄을 **덮은** 것과 가른다 —
+    /// [`Origin::unreadable`] 이 그 차이로 거짓 중복을 거른다.
+    added: BTreeSet<String>,
 }
 
 impl Origin {
@@ -57,6 +60,18 @@ impl Origin {
     /// 칸이 이력에 없어 상세가 제 머리글과 모순된다.
     pub fn root(&self, id: &str) -> Option<&Path> {
         self.from.get(id).map(|&k| self.trees[k].1.as_path())
+    }
+
+    /// 제 파일의 못 읽는 줄이 쓰는 id 를 `report::Unreadable` 에 넘길 모양으로 고른다.
+    ///
+    /// **옆에서만 온 줄과 겹치는 것은 중복이 아니다.** 제 파일에 X 가 못 읽는 줄로만
+    /// 있고 옆 워크트리에 X 가 멀쩡하면, 그대로 넘기는 순간 `--worktree` 를 붙였을
+    /// 때만 `duplicate_id` 가 서는데 그 두 줄은 한 파일에 있지 않다. 그런 id 는 첫
+    /// 번만 떼고, 둘째부터는 남긴다 — 제 파일 안에서 못 읽는 줄끼리 겹친 것은 여전히
+    /// 한 번 드러나야 한다.
+    pub fn unreadable<'a>(&self, ids: impl Iterator<Item = Option<&'a str>>) -> Vec<Option<&'a str>> {
+        let mut first = BTreeSet::new();
+        ids.map(|id| id.filter(|id| !self.added.contains(*id) || !first.insert(*id))).collect()
     }
 }
 
@@ -124,6 +139,7 @@ pub fn overlay(mine: Vec<Issue>, others: Vec<(String, PathBuf, Vec<Issue>)>) -> 
                 Some(_) => {}
                 None => {
                     at.insert(i.id.clone(), shown.len());
+                    origin.added.insert(i.id.clone());
                     origin.from.insert(i.id.clone(), tree);
                     shown.push(i);
                 }
@@ -211,7 +227,11 @@ fn others_of(root: &Path) -> Result<Vec<(Tree, PathBuf)>, String> {
     let top = git(&["rev-parse", "--show-toplevel"])?;
     let top = canonical(Path::new(top.trim_end_matches('\n')));
     let rel = canonical(root).strip_prefix(&top).map(Path::to_path_buf).unwrap_or_default();
-    Ok(parse(&git(&["worktree", "list", "--porcelain", "-z"])?)
+    // `-z` 는 git 2.36 부터다. 그 전 git 에서 거절되면 줄로 가른 것을 NUL 로 바꿔
+    // 같은 파서로 읽는다 — 줄바꿈 든 경로만 잃고, 겹쳐 보기 전체를 잃지는 않는다.
+    let listed = git(&["worktree", "list", "--porcelain", "-z"])
+        .or_else(|_| git(&["worktree", "list", "--porcelain"]).map(|s| s.replace('\n', "\0")))?;
+    Ok(parse(&listed)
         .into_iter()
         .filter(|t| canonical(&t.path) != top)
         .map(|t| {
@@ -324,5 +344,21 @@ mod tests {
         );
         assert_eq!(shown.len(), 2);
         assert_eq!(shown[1].status.as_str(), "review", "읽은 차례가 뒤집혔다");
+    }
+
+    /// 제 파일의 못 읽는 줄이 옆에서만 온 id 를 쓰면 중복으로 넘기지 않는다. 제 줄을
+    /// 덮은 id 나, 못 읽는 줄끼리 겹친 것은 그대로 넘긴다.
+    #[test]
+    fn an_unreadable_line_is_not_a_duplicate_of_a_line_only_elsewhere() {
+        let at = "2026-09-12T00:00:00Z";
+        let later = "2026-09-13T00:00:00Z";
+        let (_, origin) = overlay(
+            vec![issue("m-0002", "todo", at)],
+            vec![tree("feat/x", vec![issue("m-0001", "todo", at), issue("m-0002", "review", later)])],
+        );
+        assert_eq!(origin.unreadable([Some("m-0001")].into_iter()), [None]);
+        assert_eq!(origin.unreadable([Some("m-0002")].into_iter()), [Some("m-0002")]);
+        assert_eq!(origin.unreadable([Some("m-0001"), Some("m-0001")].into_iter()), [None, Some("m-0001")]);
+        assert_eq!(origin.unreadable([None, Some("m-0009")].into_iter()), [None, Some("m-0009")]);
     }
 }

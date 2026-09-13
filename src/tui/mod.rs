@@ -183,7 +183,13 @@ impl App {
             Ok(g) => {
                 self.trouble = None;
                 self.stamp = stamp;
-                self.unreadable = g.load.errors.iter().map(|e| e.id.clone()).collect();
+                // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
+                self.unreadable = g
+                    .origin
+                    .unreadable(g.load.errors.iter().map(|e| e.id.as_deref()))
+                    .into_iter()
+                    .map(|id| id.map(str::to_string))
+                    .collect();
                 self.origin = g.origin;
                 self.elsewhere = g.trouble;
                 self.adopt(g.load.issues);
