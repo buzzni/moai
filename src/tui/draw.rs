@@ -858,15 +858,23 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
         // 떨어진 뒤에도 남는다(`the_key_bar_names_tab_at_eighty_columns`). 여유는 두 칸
         // 뿐이라(`F3 그리기` 로 늘어도 든다), 80칸에서 거름망(`Esc 풀기`)을 걸면
         // `n` 과 함께 `Tab` 이 떨어진다 — 그때도 테두리 모양이 포커스를 말하고, 되돌아올
-        // 길(`F3 그리기`·`Esc 풀기`)과 나갈 길(`F10`)이 `Tab` 보다 급하다.
+        // 길(`F3 그리기`·`Esc 풀기`)과 나갈 길(`F10`)이 `Tab` 보다 급하다. 이 빠듯함은
+        // 목록 포커스의 것이다 — 상세에서는 아래 드나드는 키가 빠져 자리가 남는다.
         key("Tab", pane_name(app.focus.next())),
         key("n", "담기"),
         key("F3", if app.raw { "그리기" } else { "원문" }),
         key("f", "거름망"),
         key("/", "검색"),
-        key("Bksp", "나가기"),
-        key("Enter", "들어가기"),
     ];
+    // **드나드는 키는 목록에서만 적는다.** `App::key` 가 Enter·Bksp 를 포커스에 태워
+    // 상세에서는 아무 일도 안 하므로, 거기서 적어 두면 위의 "눌러도 아무 일이 없는
+    // 키" 가 된다. 흐리게 두지 않고 뺀다 — 이 줄은 이미 통째로 흐려 한 번 더 흐린
+    // 것이 갈리지 않고, 갈린다 해도 색이 혼자 뜻을 지는 일이다. 빠진 27칸만큼 80칸의
+    // 상세 포커스에서는 앞쪽의 `F5`·`j·k` 가 돌아온다(`w` 는 100칸부터). 이 조건과 `App::key` 가
+    // 어긋나면 `the_key_bar_names_only_keys_that_act_in_the_focused_pane` 이 잡는다.
+    if app.focus == Pane::Explorer {
+        optional.extend([key("Bksp", "나가기"), key("Enter", "들어가기")]);
+    }
     // 늘 남는 것: 나가는 길, 그리고 걸어 둔 거름망을 푸는 길.
     let mut keep: Vec<Span> = Vec::new();
     if app.filter_text.is_some() {
@@ -1844,6 +1852,49 @@ mod tests {
             a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
             assert!(bar.contains("Tab 목록") && bar.contains("F10 끝내기"), "{w}칸 — {bar:?}");
+        }
+    }
+
+    /// **키 바는 포커스 칸에서 듣는 키만 적는다.** 적힌 목록을 손으로 다시 적지 않고
+    /// 키를 **실제로 눌러** 잰다 — 누르고 화면이 그대로면 그 칸에서 안 듣는 키고,
+    /// 그런 키는 바에 없어야 한다. 반대로 듣는 키는 바에 있어야 한다. `App::key` 가
+    /// 드나드는 키를 어느 칸에 태우든, `fkeys` 가 따로 따라가지 않으면 여기서 갈린다.
+    ///
+    /// 드나들 데가 있는 자리에서 누른다 — Enter 는 뿌리(커서가 에픽 위), Bksp 는 에픽 안.
+    #[test]
+    fn the_key_bar_names_only_keys_that_act_in_the_focused_pane() {
+        let press = |k: KeyCode| KeyEvent::new(k, KeyModifiers::NONE);
+        for (hint, code, inside) in [("Enter 들어가기", KeyCode::Enter, false), ("Bksp 나가기", KeyCode::Backspace, true)] {
+            for pane in Pane::ALL {
+                let mut a = app();
+                if inside {
+                    a.key(press(KeyCode::Enter));
+                }
+                a.focus = pane;
+                let before = render(&mut a, 120, 14);
+                a.key(press(code));
+                let acts = render(&mut a, 120, 14) != before;
+                let bar = before.last().cloned().unwrap_or_default();
+                assert_eq!(bar.contains(hint), acts, "{pane:?} 에서 {code:?} 가 듣는가 {acts} — 바 {bar:?}");
+            }
+        }
+    }
+
+    /// **상세 포커스에서는 빠진 드나드는 키만큼 앞쪽 키가 돌아온다.** 80칸 목록
+    /// 포커스에서 떨어지던 `F5`·`j·k` 가 선다 — 나갈 길과 `Tab`·`n`·`F3` 은 폭과 상관없이
+    /// 남는다. `w` 는 맨 먼저 떨어지는 키라 `n 담기` 가 들어온 뒤로는 80칸에서 안 돌아오고
+    /// 100칸부터 선다(경로 줄 뱃지가 켜 둔 동안 끄는 법을 대므로 잃는 길은 없다).
+    #[test]
+    fn the_key_bar_in_the_detail_gives_the_freed_room_back() {
+        for w in [80u16, 100, 120] {
+            let mut a = app();
+            a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
+            for shown in ["j·k 굴리기", "Tab 목록", "n 담기", "F3 원문", "F5 갱신", "f 거름망", "/ 검색", "F10 끝내기"] {
+                assert!(bar.contains(shown), "{w}칸 상세 포커스에 {shown:?} 가 없다 — {bar:?}");
+            }
+            assert_eq!(bar.contains("w 워크트리"), w >= 100, "{w}칸 — {bar:?}");
+            assert!(!bar.contains("Enter") && !bar.contains("Bksp"), "{w}칸 — {bar:?}");
         }
     }
 
