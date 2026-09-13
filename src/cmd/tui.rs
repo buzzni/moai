@@ -164,8 +164,8 @@ use crate::tui::App;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 
-/// 파일이 바뀌었는지 보러 깨는 걸음. **보기만 한다** — 저절로 다시 읽지는
-/// 않는다. 커서가 튀면 읽던 자리를 잃는다.
+/// 파일이 바뀌었는지 보러 깨는 걸음. 바뀌었으면 저절로 다시 읽는다(`App::follow`) —
+/// 커서는 줄의 정체를 따라가므로 읽던 자리를 잃지 않는다.
 const TICK: std::time::Duration = std::time::Duration::from_millis(700);
 
 /// 도는 글리프가 한 칸 가는 **가장 빠른** 걸음. ora 가 80ms 로 돌린다. 그보다
@@ -219,7 +219,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
         }
         let now = std::time::Instant::now();
         if now >= stale_due {
-            app.check_stale();
+            app.follow();
             stale_due = now + TICK;
         }
         // **걸음은 시계가 올린다, 그린 횟수가 올리지 않는다.** 그릴 때마다

@@ -83,9 +83,6 @@ fn banner(app: &App) -> Option<(String, bool)> {
         parts.push(format!("다시 읽지 못했다 — {t}"));
         urgent = true;
     }
-    if app.stale {
-        parts.push("파일이 바뀌었다 — F5 로 다시 읽는다".into());
-    }
     if !app.unreadable.is_empty() {
         parts.push(format!("읽을 수 없는 줄 {}개 — 그 줄은 빠진 채로 보고 있다", app.unreadable.len()));
         urgent = true;
@@ -121,7 +118,20 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
         Some(o) => room.saturating_sub(crate::text::width(o) + 3),
         None => room,
     };
+    // **언제 읽은 화면인지** 댄다. 파일이 바뀌면 저절로 다시 읽으므로(`App::follow`)
+    // 배너는 없고, 이 시각이 바뀌는 것이 갱신됐다는 표시다. 자리가 모자라면 이것부터
+    // 버린다 — 거름망·겹쳐 보기 뱃지는 줄이 왜 그런지를 말하고, 이것은 곁들임이다.
+    let read_at = app.now.get(11..19).map(|t| format!("↻ {t}"));
+    let read_at = read_at.filter(|t| crate::text::width(t) + 3 + 8 <= room);
+    let room = match &read_at {
+        Some(t) => room.saturating_sub(crate::text::width(t) + 3),
+        None => room,
+    };
     let mut spans = vec![Span::styled(clip(&app.crumbs(), room), bold())];
+    if let Some(t) = read_at {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled(t, dim()));
+    }
     if let Some(o) = overlay {
         spans.push(Span::raw("   "));
         spans.push(Span::styled(o, branch()));
@@ -1060,13 +1070,15 @@ mod tests {
         assert!(lines.contains("읽을 수 없는 줄 3개"), "{lines}");
     }
 
-    /// 파일이 바뀌면 말만 하고 **저절로 읽지 않는다**.
+    /// 경로 줄이 **언제 읽은 화면인지** 댄다. 저절로 다시 읽으므로 배너는 없고,
+    /// 대신 시각이 바뀌는 것으로 갱신된 줄 안다.
     #[test]
-    fn a_changed_file_is_announced_not_swallowed() {
+    fn the_crumbs_say_when_the_screen_was_read() {
         let mut a = app();
-        a.stale = true;
-        let lines = render(&mut a, 100, 14).join("\n");
-        assert!(lines.contains("F5"), "{lines}");
+        a.now = "2026-09-13T13:42:07Z".into();
+        let lines = render(&mut a, 100, 14);
+        assert!(lines[0].contains("↻ 13:42:07"), "{:?}", lines[0]);
+        assert!(!lines.join("\n").contains("파일이 바뀌었다"), "배너가 남았다");
     }
 
     /// 디렉터리 표시 `/` 는 **잘려 나가지 않는다.** 목록에서 디렉터리라고

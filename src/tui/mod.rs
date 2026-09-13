@@ -84,9 +84,6 @@ pub struct App {
     /// 본문을 그리지 않고 원문 그대로 보는가. 그린 글은 기호가 지워져
     /// 되돌릴 수 없다 — 긁어 붙이거나 마크다운을 고칠 때 이 길이 필요하다.
     pub raw: bool,
-    /// 파일이 우리가 읽은 뒤로 바뀌었는가. **저절로 다시 읽지 않는다** —
-    /// 커서가 튀기 때문이다. 바뀌었다고 말만 하고 사람이 F5 를 누른다.
-    pub stale: bool,
     /// 마지막으로 읽은 파일의 (고친 때, 길이).
     stamp: Stamp,
     /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임
@@ -168,7 +165,6 @@ impl App {
             unreadable: unreadable_ids,
             trouble: None,
             warnings: 0,
-            stale: false,
             stamp: None,
             keep,
             remembered,
@@ -249,7 +245,6 @@ impl App {
         self.index = Index::of(&self.issues);
         self.states = states_of(&self.issues, &self.cfg);
         self.now = crate::model::now();
-        self.stale = false;
         self.repair_path();
         // 거름망은 이슈 첨자에 매인 것이라 반드시 다시 센다.
         match self.filter_text.clone() {
@@ -346,17 +341,23 @@ impl App {
         self.warnings = st.warnings.len();
     }
 
-    /// 파일이 우리가 읽은 뒤로 바뀌었는지 본다. **고친 때만 보면 놓친다** —
-    /// rename 으로 갈아끼우는 쓰기는 같은 초에 떨어질 수 있어 길이도 함께 본다.
-    /// **`stamp` 이 없다고 멈추지 않는다.** 아직 파일이 없는 저장소는
-    /// `read()` 가 빈 것을 돌려주고 `stamp_of` 는 `None` 을 내는데, 거기서
-    /// 한 번 걸러 버리면 파일이 생긴 뒤에도 영영 바뀐 줄 모른다.
-    /// `None != Some(..)` 이 이미 바르게 답한다.
-    pub fn check_stale(&mut self) {
+    /// 파일이 우리가 읽은 뒤로 바뀌었으면 **저절로 다시 읽는다.**
+    ///
+    /// 한때 말만 하고 F5 를 기다렸다(moai-6qdx) — 읽으면 커서가 튀었기 때문이다.
+    /// 커서·기억 자리·굴린 자리가 줄의 정체를 따라가게 된 뒤로(moai-cera) 그 까닭이
+    /// 없어졌고, 남은 것은 사람이 배너를 보고 키를 눌러야 하는 수고뿐이었다.
+    ///
+    /// **고친 때만 보면 놓친다** — rename 으로 갈아끼우는 쓰기는 같은 초에 떨어질 수
+    /// 있어 길이도 함께 본다. **`stamp` 이 없다고 멈추지 않는다.** 아직 파일이 없는
+    /// 저장소는 `stamp_of` 가 `None` 을 내는데, 거기서 걸러 버리면 파일이 생긴 뒤에도
+    /// 영영 바뀐 줄 모른다. `None != Some(..)` 이 이미 바르게 답한다.
+    ///
+    /// **읽기가 실패하면 표식을 안 올린다**(`reload`) — 다음 걸음에 다시 해 본다.
+    pub fn follow(&mut self) {
         if let Some(repo) = &self.repo
             && stamp_of(repo) != self.stamp
         {
-            self.stale = true;
+            self.reload();
         }
     }
 
@@ -962,10 +963,8 @@ mod tests {
             format!("{}\n", serde_json::to_string(&make("argos-0001", Kind::Epic)).unwrap()),
         )
         .unwrap();
-        a.check_stale();
-        assert!(a.stale, "없던 파일이 생긴 것을 못 알아챘다");
-        a.reload();
-        assert_eq!(a.issues.len(), 1);
+        a.follow();
+        assert_eq!(a.issues.len(), 1, "없던 파일이 생긴 것을 못 알아챘다");
         assert!(a.trouble.is_none());
     }
 
@@ -1070,8 +1069,9 @@ mod tests {
         assert_eq!(shown(&a).len(), 3, "거름망이 새 자료에 다시 걸리지 않았다");
     }
 
-    /// 진짜 파일을 두고 **바뀐 것을 알아채고 다시 읽는지** 본다. 고친 때만
+    /// 진짜 파일을 두고 **바뀐 것을 알아채고 저절로 다시 읽는지** 본다. 고친 때만
     /// 보면 rename 으로 갈아끼우는 쓰기를 같은 초에 놓치므로 길이도 함께 본다.
+    /// 다시 읽어도 커서는 보던 줄에 남는다.
     #[test]
     fn it_notices_a_changed_file_and_rereads_it() {
         let scratch = Scratch::new("reload");
@@ -1086,22 +1086,22 @@ mod tests {
         let mut a = App::open(repo, load, index, Path::new(), stamp);
         assert_eq!(a.issues.len(), 1);
 
-        // 아직 아무도 안 건드렸다
-        a.check_stale();
-        assert!(!a.stale, "안 바뀌었는데 바뀌었다고 한다");
+        // 아직 아무도 안 건드렸다 — 읽지 않는다. 읽으면 표식이 같아도 매 걸음
+        // 저장소를 통째로 다시 세는 것이다.
+        let stamp_before = a.stamp;
+        a.follow();
+        assert_eq!(a.stamp, stamp_before);
 
-        // 밖에서 한 줄 더한다
+        // 에픽 안에 들어가 있는 동안 밖에서 한 줄 더한다
+        a.key(key(KeyCode::Enter));
         let mut src = std::fs::read_to_string(dir.join(".moai/issues.jsonl")).unwrap();
         src.push_str(&line(&member("argos-0004", "argos-0001")));
         std::fs::write(dir.join(".moai/issues.jsonl"), src).unwrap();
 
-        a.check_stale();
-        assert!(a.stale, "바뀐 것을 못 알아챘다");
-        assert_eq!(a.issues.len(), 1, "말만 해야 하는데 저절로 읽었다");
-
-        a.reload();
-        assert_eq!(a.issues.len(), 2, "F5 로도 안 읽혔다");
-        assert!(!a.stale);
+        a.follow();
+        assert_eq!(a.issues.len(), 2, "바뀐 것을 저절로 안 읽었다");
+        assert_eq!(a.path, [Seg::Epic("argos-0001".into())], "읽고 나서 자리를 잃었다");
+        assert!(a.trouble.is_none());
     }
 
     /// **다시 읽어도 커서는 보던 줄에 선다.** 위에 줄이 생기거나 사라져도, 칸이
