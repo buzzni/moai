@@ -583,22 +583,20 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     // 적재 때 센 것을 대고, 여기는 받은 답을 낱말로 옮기기만 한다.
     for b in &i.blocked_by {
         let at = app.index.find(b);
-        let judged = crate::report::blocker(
-            at.map(|at| app.column(at)),
-            app.index.deferred_root(b).is_some(),
-        );
-        let title = app.title_of(b);
-        let (label, text) = match judged {
+        let root = app.index.deferred_root(b);
+        let (label, text) = match crate::report::blocker(at.map(|at| app.column(at)), root.is_some()) {
             Blocker::Missing => ("끊김", format!("! {b}  없는 이슈라 막지 않는다")),
-            Blocker::Done => ("풀림", format!("✓ {b}  {title}")),
-            Blocker::Open => ("막힘", format!("· {b}  {title}")),
+            Blocker::Done => ("풀림", format!("✓ {b}  {}", app.title_of(b))),
+            Blocker::Open => ("막힘", format!("· {b}  {}", app.title_of(b))),
             // **미룬 막음도 막는다** — 미룬 일은 끝난 일이 아니다. 다만 그 줄은 보드에도
             // `ready` 에도 없으므로 미뤘다는 말을 붙인다. 낱말은 상세 머리가 쓰는 자리다.
+            // **제목 앞에 둔다** — 값은 오른쪽부터 잘리므로, 뒤에 붙이면 흔한 길이의
+            // 제목에서 이 줄을 그냥 "막힘" 과 가르는 유일한 말이 통째로 사라진다.
             Blocker::Deferred => {
                 let shelf = at
-                    .and_then(|at| crate::view::deferred_for(&app.issues[at], app.index.deferred_root(b), &app.now))
+                    .and_then(|at| crate::view::deferred_for(&app.issues[at], root, &app.now))
                     .unwrap_or_else(|| "미룸".into());
-                ("막힘", format!("· {b}  {title}  · {shelf}"))
+                ("막힘", format!("· {b}  {shelf}  {}", app.title_of(b)))
             }
         };
         fields.push((label.into(), text));
@@ -1306,7 +1304,8 @@ mod tests {
             }
             .into()];
             all.push(blocked);
-            all.push(make("argos-0006", "미룰 일", Kind::Issue, "todo"));
+            // **제목은 흔한 길이로 둔다** — 짧으면 미룸 낱말이 잘려 나가도 이 시험이 못 본다.
+            all.push(make("argos-0006", "미룰 일 — 제목이 흔한 이슈만큼 길어 패널 폭을 넘는다", Kind::Issue, "todo"));
             all.push(make("argos-0007", "막는 에픽", Kind::Epic, "todo"));
             let mut inner = make("argos-0008", "막는 에픽의 멤버", Kind::Issue, "in_progress");
             inner.epic = Some("argos-0007".into());
