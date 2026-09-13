@@ -620,6 +620,8 @@ mod tests {
     /// 따로 적은 자식이 부모 밑에 그려지면서 제 마일스톤으로 세어져,
     /// `show <마일스톤>` 이 `멤버 0/1` 이라 말하고 줄은 못 냈다(moai-uqoe).
     /// 접힌 모양마다 한 줄씩 — 이슈 밑, 접힌 생각 밑, 뿌리로 올라간 생각 밑.
+    /// 에픽 줄이 딴 데를 가리키는 모양도 — 끊긴 `epic`, 에픽 안 에픽, 이슈 밑 id.
+    /// 멤버가 에픽 줄의 필드를 다시 읽어 그 줄이 선 곳과 다르게 세어졌다(moai-0prl).
     #[test]
     fn a_milestone_counts_what_it_draws() {
         let own = |id: &str, kind: Kind, stone: &str| {
@@ -640,9 +642,31 @@ mod tests {
             own("argos-0004.cc3.dd4", Kind::Issue, "argos-0002"), // 그 밑의 일
             rooted_thought,
             own("argos-0006.ee5", Kind::Issue, "argos-0001"), // 뿌리로 올라간 생각 밑
+            pointing(own("argos-0007", Kind::Epic, "argos-0001"), "argos-zzzz"), // 끊긴 epic
+            epic_of("argos-0008", "argos-0007"),
+            pointing(own("argos-0009", Kind::Epic, "argos-0001"), "argos-0003"), // v0.2 에픽 안
+            epic_of("argos-0010", "argos-0009"),
+            own("argos-0004.ff6", Kind::Epic, "argos-0002"), // v0.1 이슈 밑에 id 로
+            epic_of("argos-0011", "argos-0004.ff6"),
         ];
+        assert_counts_what_it_draws(&issues);
         let index = Index::of(&issues);
-        for stone in &issues[..2] {
+        assert_eq!(index.home_of(9), &vec![Seg::Milestone(None), Seg::Issue("argos-0006".into())]);
+        for (at, stone) in [(10, "argos-0001"), (11, "argos-0001"), (12, "argos-0001"), (13, "argos-0001"), (14, "argos-0002"), (15, "argos-0002")] {
+            assert_eq!(index.home_of(at).first(), Some(&Seg::Milestone(Some(stone.into()))), "{}", issues[at].id);
+        }
+        assert_exactly_once(&issues);
+    }
+
+    fn pointing(mut i: Issue, epic: &str) -> Issue {
+        i.epic = Some(epic.into());
+        i
+    }
+
+    /// 마일스톤마다 `group_members` 가 세는 줄과 탐색기가 그 밑에 그리는 줄을 견준다.
+    fn assert_counts_what_it_draws(issues: &[Issue]) {
+        let index = Index::of(issues);
+        for stone in issues.iter().filter(|i| i.kind == Kind::Milestone) {
             let mut drawn: Vec<&str> = index
                 .descendants(&vec![Seg::Milestone(Some(stone.id.clone()))])
                 .into_iter()
@@ -652,12 +676,46 @@ mod tests {
                 .collect();
             drawn.sort();
             let mut counted: Vec<&str> =
-                crate::report::group_members(&issues, stone).iter().map(|i| i.id.as_str()).collect();
+                crate::report::group_members(issues, stone).iter().map(|i| i.id.as_str()).collect();
             counted.sort();
-            assert_eq!(counted, drawn, "{} 가 그리는 것과 세는 것이 갈린다", stone.id);
+            assert_eq!(counted, drawn, "{} 가 그리는 것과 세는 것이 갈린다 — {issues:#?}", stone.id);
         }
-        assert_eq!(index.home_of(9), &vec![Seg::Milestone(None), Seg::Issue("argos-0006".into())]);
-        assert_exactly_once(&issues);
+    }
+
+    /// **무작위 더미로 같은 대조를 돌린다.** 표로 적은 모양은 누가 떠올린 것뿐이다 —
+    /// moai-uqoe·moai-0prl 은 둘 다 리뷰가 무작위 대조로 찾았다. 종류·부모·에픽·
+    /// 마일스톤 참조를 멀쩡한 것, 종류 틀린 것, 없는 것으로 섞는다. 시계도 난수
+    /// 크레이트도 없이 씨앗을 고정해 늘 같은 더미를 만든다.
+    #[test]
+    fn a_milestone_counts_what_it_draws_on_random_piles() {
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut roll = |n: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as usize
+        };
+        for _ in 0..3000 {
+            let mut issues: Vec<Issue> = Vec::new();
+            for n in 0..(2 + roll(12)) {
+                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Idea][roll(6)];
+                let id = match roll(3) {
+                    0 if !issues.is_empty() => format!("{}.a{n:02}", issues[roll(issues.len())].id),
+                    _ => format!("argos-{n:04}"),
+                };
+                let mut i = make(&id, kind);
+                let pick = |roll: &mut dyn FnMut(usize) -> usize| match roll(4) {
+                    0 | 1 => None,
+                    2 if !issues.is_empty() => Some(issues[roll(issues.len())].id.clone()),
+                    _ => Some("argos-zzzz".to_string()),
+                };
+                i.epic = pick(&mut roll);
+                i.milestone = pick(&mut roll);
+                issues.push(i);
+            }
+            assert_counts_what_it_draws(&issues);
+            assert_exactly_once(&issues);
+        }
     }
 
     /// 없는 에픽을 가리키는 줄은 사라지지 않고 `(길 잃음)` 으로 모인다.

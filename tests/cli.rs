@@ -3046,6 +3046,69 @@ fn a_folded_child_counts_toward_its_parents_milestone() {
     assert!(ok(s.path(), &["show", "--milestone", &m1]).contains(&child));
 }
 
+/// **에픽 줄은 제 마일스톤에 서고, 그 멤버는 에픽 줄이 선 마일스톤으로 센다.**
+/// 트리는 에픽을 제 마일스톤 밑에만 두는데, 세는 쪽이 에픽 줄의 `epic` 이나
+/// id 부모를 타고 올라가 에픽 줄을 딴 곳에 세우면서 멤버는 에픽의 `milestone`
+/// 필드를 다시 읽어, `show <마일스톤>` 이 `멤버 0/1` 이라 말하면서 줄을 못 냈다
+/// (moai-0prl). 에픽 줄이 딴 데를 가리키는 세 길이 전부 CLI 로 만들어진다 —
+/// 없는 에픽, 다른 에픽, 이슈 밑의 id.
+#[test]
+fn an_epic_line_stands_in_its_own_milestone_with_its_members() {
+    let s = init("epicstone");
+    let m1 = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let m2 = ok(s.path(), &["milestone", "add", "v0.2", "-q"]).trim().to_string();
+    let epic = |args: &[&str]| {
+        let mut v = vec!["epic", "add"];
+        v.extend_from_slice(args);
+        v.push("-q");
+        ok(s.path(), &v).trim().to_string()
+    };
+    // 없는 에픽을 가리키는 에픽 줄. `edit` 은 경고하고 적는다.
+    let stray = epic(&["끊긴", "--milestone", &m1]);
+    ok(s.path(), &["edit", &stray, "--epic", "argos-zzzz"]);
+    // 다른 마일스톤에 선 에픽을 가리키는 에픽 줄.
+    let outer = epic(&["바깥", "--milestone", &m2]);
+    let inner = epic(&["안쪽", "--milestone", &m1]);
+    ok(s.path(), &["edit", &inner, "--epic", &outer]);
+    // 다른 마일스톤에 선 이슈 밑에 id 로 선 에픽 줄.
+    let host = add(s.path(), &["집", "--milestone", &m2]);
+    let nested = epic(&["이슈 밑", "--parent", &host, "--milestone", &m1]);
+    assert!(nested.starts_with(&format!("{host}.")), "이슈 밑에 id 로 안 섰다 — {nested}");
+
+    let work: Vec<String> =
+        [&stray, &inner, &nested].iter().map(|e| add(s.path(), &["일", "-e", e])).collect();
+
+    let tree = ok(s.path(), &["show", "--tree"]);
+    let at = |needle: &str| tree.find(needle);
+    let sections = [(at(&format!("{m1}  ")), "v0.1"), (at(&format!("{m2}  ")), "v0.2"), (at("(마일스톤 없음)"), "없음")];
+    for id in work.iter().chain([&stray, &inner, &nested]) {
+        let pos = at(id).unwrap_or_else(|| panic!("트리에 {id} 가 없다 — {tree}"));
+        let under = sections.iter().filter(|(p, _)| p.is_some_and(|p| p < pos)).max_by_key(|(p, _)| *p);
+        assert_eq!(under.map(|(_, n)| *n), Some("v0.1"), "트리가 {id} 를 v0.1 밑에 안 그린다 — {tree}");
+    }
+
+    let home = ok(s.path(), &["show", &m1]);
+    assert!(home.contains("멤버   0/3"), "{home}");
+    let json = ok(s.path(), &["show", &m1, "--json"]);
+    let filtered = ok(s.path(), &["show", "--milestone", &m1]);
+    for id in &work {
+        assert!(home.contains(id.as_str()), "머리글이 센 줄을 목록이 못 낸다 — {home}");
+        assert!(json.contains(id.as_str()), "--json 이 {id} 를 안 낸다 — {json}");
+        assert!(filtered.contains(id.as_str()), "필터가 트리와 갈린다 — {filtered}");
+    }
+
+    let elsewhere = ok(s.path(), &["show", &m2]);
+    assert!(elsewhere.contains("멤버   0/1"), "그리지 않는 줄을 셌다 — {elsewhere}");
+    let json = ok(s.path(), &["show", &m2, "--json"]);
+    for id in work.iter().chain([&inner, &nested]) {
+        assert!(!json.contains(id.as_str()), "--json 이 딴 마일스톤에 {id} 를 낸다 — {json}");
+    }
+
+    // 에픽 줄이 든 끊긴 `epic` 은 자리를 안 바꿔도 드러난다.
+    let st = ok(s.path(), &["status"]);
+    assert!(st.contains("에픽으로 쓸 수 없는 것을 가리키는 줄") && st.contains(&stray), "{st}");
+}
+
 
 // ── 리뷰가 잡은 것 ───────────────────────────────────────────────────
 

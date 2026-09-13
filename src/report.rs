@@ -637,65 +637,96 @@ fn passed_down<'a>(
 
 /// 이슈 id → 그것이 속한 마일스톤 id.
 ///
-/// **에픽이 마일스톤을 이긴다.** 제 에픽이 있으면 그 에픽의 마일스톤이고,
+/// **에픽이 마일스톤을 이긴다.** 제 에픽이 있으면 그 에픽이 선 마일스톤이고,
 /// 이슈가 `milestone` 을 따로 적었어도 그것은 지지 않는다. 에픽이 없으면
 /// **부모도 이긴다** — 부모 밑에 접힌 줄은 접힌 맨 위 줄([`fold_top`])의
 /// 마일스톤을 따른다. 이슈마다 마일스톤을 적게 하면 에픽을
 /// 옮길 때 멤버를 전부 따라 고쳐야 하고, 반드시 하나는 빠뜨린다.
 ///
+/// **에픽 줄은 제 `milestone` 에만 선다.** `nav` 는 에픽을 제 마일스톤 밑에만
+/// 두고 에픽 밑에도 이슈 밑에도 두지 않으므로, 에픽 줄이 든 `epic` 과 id 부모는
+/// 그 줄의 자리가 아니다. 그것을 타고 올라가 에픽 줄을 딴 곳에 세우면 트리는
+/// 따라가지만, 이긴다는 규칙의 까닭(그 밑에 그려진다)이 없는 자리에서 제
+/// 필드를 지운다. 못 쓸 `epic` 은 `broken` 이 드러낸다 — `misplaced` 가 에픽을
+/// 제 마일스톤으로만 재는 것과 같은 차례다.
+///
 /// **자리를 정하는 자와 세는 자가 하나다.** 한때 `nav` 는 에픽을 이기게 하고
 /// 여기서는 제 마일스톤을 이기게 해, `moai show <마일스톤>` 의 머리글이
 /// `멤버 0/1` 이라 말하면서 목록에는 아무것도 못 내는 일이 있었다(moai-lhbh).
 /// 자가 둘이면 둘은 언젠가 어긋난다 — 어느 쪽이 옳은지가 아니라 하나여야
-/// 한다는 것이 요점이다.
+/// 한다는 것이 요점이다. 그래서 멤버는 에픽의 필드를 다시 읽지 않고 **에픽
+/// 줄이 받은 값**을 받는다. 다시 읽던 때에는 에픽 줄이 끊긴 `epic` 때문에
+/// `(마일스톤 없음)` 에 서는데 멤버만 그 필드로 세어졌다(moai-0prl).
 pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
     let epic_of = groups(all);
     let rooted = rooted_thoughts(&by_id);
     let mut out = BTreeMap::new();
     for i in all {
-        // 에픽이 있으면 **거기서부터** 센다. 제 줄에서 시작하면 제 마일스톤이
-        // 이기고, 그러면 트리는 에픽 밑에 두는데 셈만 딴 곳으로 간다.
-        let mut cur = match epic_of.get(i.id.as_str()) {
-            // **에픽으로 쓸 수 없는 것을 가리키면 제 마일스톤으로 되돌아가지
-            // 않는다.** 그 줄은 `nav` 에서 `(길 잃음)` 으로 가므로, 되돌아가면
-            // 머리글은 세는데 목록에는 없는 줄이 그대로 남는다 — moai-lhbh 와
-            // 같은 어긋남이고, 고치려던 것이 참조 하나 어긋난 날 되살아난다.
-            //
-            // **못 쓸 것의 뜻은 `misplaced` 와 같다** — 없는 id 와 종류가 틀린
-            // 것을 한 자로 잰다. 그쪽을 부르지 않는 것은 `misplaced` 가 이
-            // 함수를 부르기 때문이고, 그래서 판정만 같은 모양으로 둔다.
-            Some(e) => match by_id.get(e).filter(|e| e.kind == Kind::Epic) {
-                Some(e) => e,
-                None => continue,
-            },
-            // 에픽이 없으면 **접힌 맨 위 줄에서부터** 센다. 제 줄에서 시작하면
-            // 부모 밑에 그려진 자식이 제 마일스톤으로 세어진다(moai-uqoe).
-            None => match fold_top(i, &by_id, &rooted) {
-                Some(top) => top,
-                None => continue,
-            },
+        let got = if i.kind == Kind::Epic {
+            milestone_stood(i)
+        } else {
+            match epic_of.get(i.id.as_str()) {
+                // 에픽이 있으면 **그 에픽이 선 곳**이다. 제 줄에서 시작하면 제
+                // 마일스톤이 이기고, 그러면 트리는 에픽 밑에 두는데 셈만 딴 곳으로 간다.
+                //
+                // **에픽으로 쓸 수 없는 것을 가리키면 제 마일스톤으로 되돌아가지
+                // 않는다.** 그 줄은 `nav` 에서 `(길 잃음)` 으로 가므로, 되돌아가면
+                // 머리글은 세는데 목록에는 없는 줄이 그대로 남는다 — moai-lhbh 와
+                // 같은 어긋남이고, 고치려던 것이 참조 하나 어긋난 날 되살아난다.
+                //
+                // **못 쓸 것의 뜻은 `misplaced` 와 같다** — 없는 id 와 종류가 틀린
+                // 것을 한 자로 잰다. 그쪽을 부르지 않는 것은 `misplaced` 가 이
+                // 함수를 부르기 때문이고, 그래서 판정만 같은 모양으로 둔다.
+                Some(e) => match by_id.get(e).filter(|e| e.kind == Kind::Epic) {
+                    Some(e) => milestone_stood(e),
+                    None => continue,
+                },
+                // 에픽이 없으면 **접힌 맨 위 줄에서부터** 센다. 제 줄에서 시작하면
+                // 부모 밑에 그려진 자식이 제 마일스톤으로 세어진다(moai-uqoe).
+                None => match fold_top(i, &by_id, &rooted) {
+                    Some(top) => climb(top, &by_id, &rooted),
+                    None => continue,
+                },
+            }
         };
-        // 에픽·부모를 타고 올라가며 처음 만나는 마일스톤. 고리가 있어도
-        // 멈추도록 걸음 수를 제한한다.
-        for _ in 0..64 {
-            if let Some(m) = &cur.milestone {
-                out.insert(i.id.as_str(), m.as_str());
-                break;
-            }
-            // 부모가 뿌리로 올라간 생각이면 거기서 멈춘다 — `groups` 와 같은 자다.
-            let up = cur.epic.as_deref().and_then(|e| by_id.get(e)).or_else(|| {
-                crate::id::parent_of(&cur.id)
-                    .and_then(|p| by_id.get(p))
-                    .filter(|p| !rooted.contains(p.id.as_str()))
-            });
-            match up {
-                Some(next) if next.id != cur.id => cur = next,
-                _ => break,
-            }
+        if let Some(m) = got {
+            out.insert(i.id.as_str(), m);
         }
     }
     out
+}
+
+/// 에픽 줄이 선 마일스톤 — 제 필드뿐이다. [`milestones`] 가 에픽 줄 자신에게도,
+/// 그 에픽을 지나는 줄에게도 이것 하나를 준다. 두 곳이 따로 읽으면 자가 둘이다.
+fn milestone_stood(epic: &Issue) -> Option<&str> {
+    epic.milestone.as_deref()
+}
+
+/// 에픽 없는 맨 위 줄에서 id 부모를 타고 올라가며 처음 만나는 마일스톤.
+///
+/// 이 길에는 `epic` 을 든 줄이 없다 — 있었다면 `groups` 가 그것을 물려줘 에픽
+/// 가지로 갔다. 그래서 부모만 탄다. id 가 줄어들며 올라가므로 고리가 없다.
+/// **에픽 줄을 만나면 그 에픽이 선 곳에서 멈춘다**(`milestone_stood`) — 에픽 줄은 제
+/// 부모에게서 마일스톤을 받지 않으므로, 넘어가면 에픽 줄과 다른 값을 낸다.
+fn climb<'a>(
+    top: &'a Issue,
+    by_id: &BTreeMap<&'a str, &'a Issue>,
+    rooted: &BTreeSet<&str>,
+) -> Option<&'a str> {
+    let mut cur = top;
+    loop {
+        if cur.kind == Kind::Epic {
+            return milestone_stood(cur);
+        }
+        if let Some(m) = &cur.milestone {
+            return Some(m.as_str());
+        }
+        // 부모가 뿌리로 올라간 생각이면 거기서 멈춘다 — `groups` 와 같은 자다.
+        cur = crate::id::parent_of(&cur.id)
+            .and_then(|p| by_id.get(p).copied())
+            .filter(|p| !rooted.contains(p.id.as_str()))?;
+    }
 }
 
 /// 에픽 없는 줄이 **접혀 그려지는 맨 위 줄** — `nav::home_of_work` 가 그 줄을
@@ -2075,6 +2106,55 @@ mod tests {
         assert_eq!(m.get("argos-0005"), None, "에픽 아닌 것의 마일스톤을 빌려 왔다");
     }
 
+    /// **에픽 줄은 제 `milestone` 에만 서고, 멤버는 에픽 줄이 선 곳을 받는다.**
+    /// 에픽 줄이 든 `epic` 과 id 부모는 그 줄의 자리가 아니다 — `nav` 는 에픽을
+    /// 마일스톤 밑에만 둔다. 한때 끊긴 `epic` 을 든 에픽 줄은 마일스톤을 못 받는데
+    /// 멤버는 그 줄의 필드를 다시 읽어 세어졌다(moai-0prl).
+    #[test]
+    fn an_epic_line_stands_in_its_own_milestone() {
+        let with = |mut i: Issue, epic: Option<&str>, stone: Option<&str>| {
+            i.epic = epic.map(Into::into);
+            i.milestone = stone.map(Into::into);
+            i
+        };
+        let issues = vec![
+            make("argos-m001", Kind::Milestone, "todo"),
+            make("argos-m002", Kind::Milestone, "todo"),
+            with(make("argos-0001", Kind::Epic, "todo"), Some("argos-nope"), Some("argos-m001")), // 끊긴 epic
+            member("argos-0002", "argos-0001", "todo"),
+            with(make("argos-0003", Kind::Epic, "todo"), None, Some("argos-m002")),
+            with(make("argos-0004", Kind::Epic, "todo"), Some("argos-0003"), Some("argos-m001")), // 에픽 안 에픽
+            member("argos-0005", "argos-0004", "todo"),
+            with(make("argos-0006", Kind::Epic, "todo"), Some("argos-0003"), None), // 제 것이 없다
+            member("argos-0007", "argos-0006", "todo"),
+            with(make("argos-0008", Kind::Issue, "todo"), None, Some("argos-m002")),
+            with(make("argos-0008.aa1", Kind::Epic, "todo"), None, Some("argos-m001")), // 이슈 밑 id
+            member("argos-0009", "argos-0008.aa1", "todo"),
+            make("argos-0008.bb2", Kind::Epic, "todo"), // 이슈 밑 id, 제 것이 없다
+            // 에픽 줄 밑에 id 로 선 이슈 — 에픽이 없어 부모를 타다 에픽 줄에서
+            // 멈춘다. 넘어가면 그 에픽 줄이 안 받은 이슈의 마일스톤을 받는다.
+            make("argos-0008.bb2.cc3", Kind::Issue, "todo"),
+        ];
+        let m = milestones(&issues);
+        for (id, want) in [
+            ("argos-0001", Some("argos-m001")),
+            ("argos-0002", Some("argos-m001")),
+            ("argos-0004", Some("argos-m001")),
+            ("argos-0005", Some("argos-m001")),
+            ("argos-0006", None),
+            ("argos-0007", None),
+            ("argos-0008.aa1", Some("argos-m001")),
+            ("argos-0009", Some("argos-m001")),
+            ("argos-0008.bb2", None),
+            ("argos-0008.bb2.cc3", None),
+        ] {
+            assert_eq!(m.get(id).copied(), want, "{id}");
+        }
+        // 자리는 안 바꿔도 못 쓸 참조는 드러난다.
+        assert_eq!(broken(&issues).get("argos-0001"), Some(&Misplace::Epic));
+        assert!(!misplaced(&issues).contains_key("argos-0001"), "에픽 줄을 제 epic 으로 길 잃게 했다");
+    }
+
     /// 묶음은 일이 아니다. 세면 보드의 숫자가 할 일과 묶음을 합친 것이 된다.
     #[test]
     fn groupings_are_not_work() {
@@ -2128,7 +2208,8 @@ mod tests {
         epic.milestone = Some("argos-0001".into());
         let mut thought = make("argos-0004", Kind::Idea, "todo");
         thought.epic = Some("argos-0002".into());
-        // 에픽 줄이 든 `epic` — `nav` 는 에픽을 에픽 밑에 두지 않는다.
+        // 에픽 줄이 든 `epic` — `nav` 는 에픽을 에픽 밑에 두지 않는다. 그 에픽의
+        // 마일스톤도 물려받지 않는다 — 에픽 줄은 제 `milestone` 에만 선다(moai-0prl).
         let mut stray = make("argos-0005", Kind::Epic, "todo");
         stray.epic = Some("argos-0002".into());
         let issues = vec![
@@ -2148,7 +2229,7 @@ mod tests {
         );
         assert_eq!(
             ids(group_members(&issues, &issues[0])),
-            ["argos-0002", "argos-0003", "argos-0003.aaa", "argos-0005"],
+            ["argos-0002", "argos-0003", "argos-0003.aaa"],
             "마일스톤이 밑의 에픽과 그 멤버를 안 낸다"
         );
         assert!(group_members(&issues, &issues[2]).is_empty(), "묶음 아닌 줄이 멤버를 냈다");
