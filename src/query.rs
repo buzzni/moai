@@ -20,6 +20,9 @@ pub enum Sel {
     Is(String),
 }
 
+/// 줄 하나에 대한 판정 (`Where::eclipsed`).
+type RowTest<'a> = Box<dyn Fn(&Issue) -> bool + 'a>;
+
 /// 소속은 **묶음 전체를 봐야** 알 수 있다 — 자식은 조상에게서 물려받고,
 /// 마일스톤은 에픽을 거쳐 온다. 그래서 이슈 하나만 보고는 못 고른다.
 #[derive(Default)]
@@ -32,6 +35,10 @@ pub struct Where<'a> {
     pub states: BTreeMap<&'a str, &'a str>,
     /// 묶음 → 그 칸의 셈이 마지막으로 움직인 때 (`report::Stand::since`).
     pub since: BTreeMap<&'a str, &'a str>,
+    /// 종류가 다른 쌍둥이에게 id 가 가려진 줄인가 (`report::eclipsed`). 위의 소속
+    /// 지도는 id 로 짠 것이라 그 줄에는 쌍둥이의 값이 나온다.
+    /// 비었으면(`Where::default`) 가려진 줄이 없는 것으로 친다.
+    eclipsed: Option<RowTest<'a>>,
 }
 
 impl<'a> Where<'a> {
@@ -44,7 +51,8 @@ impl<'a> Where<'a> {
         let stands = crate::report::group_stands_in(all, cfg, &epic, &milestone, &roots);
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();
-        Where { epic, milestone, put_off: roots.into_keys().collect(), states, since }
+        let eclipsed: Option<RowTest<'a>> = Some(Box::new(crate::report::eclipsed(all)));
+        Where { epic, milestone, put_off: roots.into_keys().collect(), states, since, eclipsed }
     }
 
     /// 그 줄이 서 있는 칸 (`report::column`).
@@ -263,10 +271,16 @@ impl Filter {
         }
         // 소속은 **물려받은 것까지** 본다. `-e X` 가 X 밑의 손자를 빠뜨리면
         // 트리가 보여 주는 것과 목록이 고르는 것이 달라진다.
-        if !matches_sel(&self.epic, wh.epic.get(i.id.as_str()).copied()) {
-            return false;
-        }
-        if !matches_sel(&self.milestone, wh.milestone.get(i.id.as_str()).copied()) {
+        //
+        // **가려진 줄은 어느 소속으로도 안 고른다** — `-e none` 도. 지도의 값은 종류가
+        // 다른 쌍둥이의 것이고, 트리는 그 줄을 `(길 잃음)` 에 두며 롤업은 어느 묶음에도
+        // 안 센다(moai-2m9p). 여기서 지도를 그대로 읽으면 `moai show <에픽>` 이 `0/0` 이라
+        // 말하는 에픽을 `moai show -e <에픽>` 은 그 줄로 채운다.
+        let eclipsed = wh.eclipsed.as_ref().is_some_and(|f| f(i));
+        let placed = |sel: &[Sel], map: &BTreeMap<&str, &str>| {
+            sel.is_empty() || (!eclipsed && matches_sel(sel, map.get(i.id.as_str()).copied()))
+        };
+        if !placed(&self.epic, &wh.epic) || !placed(&self.milestone, &wh.milestone) {
             return false;
         }
         if !matches_sel(&self.parent, crate::id::parent_of(&i.id)) {
@@ -794,6 +808,29 @@ mod tests {
         assert_eq!(picked(Raw { status: s(&["todo"]), ..Raw::default() }), Vec::<&str>::new());
         assert_eq!(picked(Raw { status: s(&["in_progress"]), ..Raw::default() }), ["argos-0001", "argos-0002"]);
         assert_eq!(picked(Raw::default()), ["argos-0001", "argos-0002"], "읽은 칸으로 숨기지 않았다");
+    }
+
+    /// **종류가 다른 쌍둥이에게 가려진 줄은 어느 소속으로도 안 골린다.** 뒷줄 생각이
+    /// 적은 에픽이 앞줄 이슈에 흘러, `moai show <에픽>` 은 `0/0` 이라 말하고 트리는 그
+    /// 줄을 `(길 잃음)` 에 두는데 `-e <에픽>` 만 그 줄을 멤버로 냈다(moai-2m9p).
+    #[test]
+    fn an_eclipsed_row_is_picked_by_no_membership() {
+        let mut epic = issue("argos-0001", "todo", &[]);
+        epic.kind = Kind::Epic;
+        let mut thought = issue("argos-0002", "todo", &[]);
+        thought.kind = Kind::Idea;
+        thought.epic = Some("argos-0001".into());
+        let all = vec![epic, issue("argos-0002", "todo", &[]), thought];
+        let cfg = cfg();
+        let wh = Where::of(&all, &cfg);
+        let picked = |raw: Raw| -> Vec<(&str, Kind)> {
+            let f = Filter::build(raw).unwrap();
+            all.iter().filter(|i| f.matches(i, NOW, &wh)).map(|i| (i.id.as_str(), i.kind)).collect()
+        };
+        assert!(crate::report::group_members(&all, &all[0]).is_empty());
+        assert_eq!(picked(Raw { epic: s(&["argos-0001"]), ..Raw::default() }), []);
+        assert_eq!(picked(Raw { epic: s(&["none"]), ..Raw::default() }), [("argos-0001", Kind::Epic)]);
+        assert_eq!(picked(Raw::default()), [("argos-0001", Kind::Epic), ("argos-0002", Kind::Issue)]);
     }
 
     /// **담아 둔 생각은 기본 목록에서 빠지고, 글로는 찾아진다.** 규칙이

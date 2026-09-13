@@ -77,11 +77,6 @@ pub struct Index {
     /// id → 첨자. 화면은 에픽·마일스톤·막는 것을 제목으로 풀어 내는데, 그때마다
     /// 전체를 훑으면 프레임 하나에 이슈 수에 비례한 훑기가 여러 번 돈다.
     by_id: BTreeMap<String, usize>,
-    /// id → **그 줄이 실제로 선** 마일스톤 — `homes` 의 `Milestone(Some(..))` 마디.
-    /// `report::milestones` 를 그대로 들면 안 된다: 생각은 에픽의 마일스톤으로
-    /// 세면서도 `(마일스톤 없음)` 에 서므로, 세는 지도를 그리면 상세가 탐색기가
-    /// 두지 않은 마일스톤을 댄다. 자리에서 읽으면 둘은 짓는 법으로 같다.
-    milestone_of: BTreeMap<String, String>,
     /// id → 그 줄을 계획에서 뺀 줄(`report::deferred_roots`). 상세가 물려받은
     /// 미룸을 말하는 데 쓴다 — 프레임마다 조상을 다시 타지 않게.
     deferred_root: BTreeMap<String, String>,
@@ -138,31 +133,26 @@ impl Index {
             }
         }
         let by_id = by_id.into_iter().map(|(id, at)| (id.to_string(), at)).collect();
-        // 상세가 그리는 마일스톤은 **그 줄이 선 경로에서** 읽는다. 위의 셈 지도와
-        // 자리가 갈리는 줄이 있다 — 생각은 에픽의 마일스톤을 세면서도 `(마일스톤
-        // 없음)` 에 선다.
-        let placed = issues
-            .iter()
-            .zip(&homes)
-            .filter_map(|(i, home)| {
-                home.iter().find_map(|seg| match seg {
-                    Seg::Milestone(Some(m)) => Some((i.id.clone(), m.clone())),
-                    _ => None,
-                })
-            })
-            .collect();
         let deferred_root = crate::report::deferred_roots(issues)
             .into_iter()
             .map(|(id, root)| (id.to_string(), root.to_string()))
             .collect();
-        Index { homes, has_kids, by_id, milestone_of: placed, deferred_root }
+        Index { homes, has_kids, by_id, deferred_root }
     }
 
     /// 그 줄이 **실제로 선** 마일스톤. 제 줄의 `milestone` 이 아니다 — 에픽이
     /// 마일스톤을 이기고 생각은 마일스톤 밑에 서지 않으므로, 제 값은 그 줄이 선
     /// 자리와 다를 수 있다.
-    pub fn milestone_of(&self, id: &str) -> Option<&str> {
-        self.milestone_of.get(id).map(String::as_str)
+    ///
+    /// **자리(`homes`)에서 읽는다.** `report::milestones` 를 그대로 대면 생각은 에픽의
+    /// 마일스톤으로 세면서도 `(마일스톤 없음)` 에 서므로, 탐색기가 두지 않은 마일스톤을 댄다.
+    /// **줄로 묻는다.** id 로 짠 지도는 같은 id 의 줄 하나의 값만 들어, 종류가 다른
+    /// 쌍둥이에게 가려져 `(길 잃음)` 에 선 줄에 쌍둥이의 마일스톤을 댔다(moai-2m9p).
+    pub fn milestone_of(&self, at: usize) -> Option<&str> {
+        self.homes[at].iter().find_map(|seg| match seg {
+            Seg::Milestone(Some(m)) => Some(m.as_str()),
+            _ => None,
+        })
     }
 
     /// 그 줄을 계획에서 뺀 줄 — 제가 미뤘으면 저 자신, 물려받았으면 미룬 조상·묶음.
@@ -796,6 +786,16 @@ mod tests {
         assert_eq!(index.home_of(0), &vec![Seg::Lost]);
         assert!(index.home_of(4).is_empty() && index.is_dir(&issues, 4));
 
+        // **상세가 대는 마일스톤도 줄의 것이다.** id 로 짠 지도였을 때는 `(길 잃음)` 에
+        // 선 앞줄 이슈가 뒷줄 에픽이 선 마일스톤을 제 것으로 댔다.
+        let mut stood = make("argos-0001", Kind::Epic);
+        stood.milestone = Some("argos-0009".into());
+        let issues = vec![make("argos-0001", Kind::Issue), stood, make("argos-0009", Kind::Milestone)];
+        let index = Index::of(&issues);
+        assert_eq!(index.home_of(0), &vec![Seg::Lost]);
+        assert_eq!(index.milestone_of(0), None);
+        assert_eq!(index.milestone_of(1), Some("argos-0009"));
+
         // **소속도 흐르지 않는다.** 앞줄 생각이 적은 에픽이 에픽 없는 뒷줄 이슈에
         // 남으면, 그 이슈가 적지도 않은 에픽 밑에 그려지고 세어진다.
         let issues = vec![
@@ -806,6 +806,16 @@ mod tests {
         let index = Index::of(&issues);
         assert_eq!(index.home_of(2), &Vec::<Seg>::new());
         assert!(crate::report::group_members(&issues, &issues[0]).is_empty());
+        assert_exactly_once(&issues);
+
+        // 같은 종류도 같다(moai-9p36.kqi) — 앞줄이 적은 에픽이 에픽 없는 뒷줄에 남아
+        // 둘 다 그 에픽 밑에 그려지고 세어지는데, 뒷줄은 에픽이 없다고 말했다.
+        let issues = vec![make("argos-0001", Kind::Epic), epic_of("argos-0002", "argos-0001"), make("argos-0002", Kind::Issue)];
+        assert!(!crate::report::groups(&issues).contains_key("argos-0002"));
+        let index = Index::of(&issues);
+        assert_eq!((index.home_of(1), index.home_of(2)), (&Vec::new(), &Vec::new()));
+        assert!(crate::report::group_members(&issues, &issues[0]).is_empty());
+        assert_counts_what_it_draws(&issues);
         assert_exactly_once(&issues);
     }
 
