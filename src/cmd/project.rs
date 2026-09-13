@@ -216,7 +216,9 @@ fn said(state: &State) -> String {
                 .map(|s| {
                     let n = counts.get(s).copied().unwrap_or(0);
                     let style = style::status_style(s);
-                    format!("{} {}", paint(style, style::glyph(s)), paint(style, &format!("{s} {n}")))
+                    // 칸 이름도 남의 설정 파일에서 온다 — `statuses` 는 제어문자를 거르지 않는다.
+                    let word = sanitize(s);
+                    format!("{} {}", paint(style, style::glyph(s)), paint(style, &format!("{word} {n}")))
                 })
                 .collect();
             if *unreadable > 0 {

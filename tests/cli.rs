@@ -5186,7 +5186,11 @@ fn project_ls_counts_each_column_and_names_a_broken_moai() {
     std::fs::write(badcfg.join(".moai/config.toml"), "prefix = \"BAD!\"\n").unwrap();
     ok(&badsnap, &["init", "argos"]);
     std::fs::write(badsnap.join(".moai/issues.jsonl"), b"\xff\xfe\n").unwrap();
-    let cfg = registry(&s, &[&good, &badcfg, &badsnap, &bare]);
+    // 칸 이름도 남의 설정에서 온다 — 제어문자가 든 칸이 목록 화면을 다시 칠하면 안 된다.
+    let odd = dir_in(&s, "odd");
+    ok(&odd, &["init", "argos"]);
+    std::fs::write(odd.join(".moai/config.toml"), "prefix = \"argos\"\nstatuses = \"todo,\u{1b}[2Jwip,done\"\n").unwrap();
+    let cfg = registry(&s, &[&good, &badcfg, &badsnap, &bare, &odd]);
 
     let ls = project_ok(&out, &cfg, &["project", "ls"]);
     let row = |name: &str| ls.lines().find(|l| l.starts_with(&format!("{name} "))).unwrap_or_else(|| panic!("{name} 줄이 없다\n{ls}"));
@@ -5196,6 +5200,8 @@ fn project_ls_counts_each_column_and_names_a_broken_moai() {
     assert!(row("badsnap").contains("! 못 읽는다 — ") && row("badsnap").contains("issues.jsonl"), "{ls}");
     assert!(!ls.contains(".moai 있음"), "깨진 .moai 를 있음으로 접었다\n{ls}");
     assert!(row("bare").ends_with("init 전"), "{ls}");
+    assert!(row("odd").contains("[2Jwip 0"), "{ls}");
+    assert!(!ls.contains('\u{1b}'), "남의 설정이 화면을 다시 칠했다\n{ls:?}");
     // 한눈 보기와 같은 자로 센다 — 두 화면의 수가 어긋나면 어느 쪽을 믿을지 모른다.
     assert!(ok_with(&out, &cfg, &["status"]).contains("todo 1    ▸ in_progress 1"));
 
