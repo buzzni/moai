@@ -4,7 +4,7 @@
 //! 규칙 하나를 CLI 에서 그대로 들고 온다: **색이 혼자 뜻을 지지 않는다.**
 //! 모든 색에 글리프나 낱말이 붙는다.
 
-use super::{App, Mode, Row};
+use super::{App, Input, Mode, Row};
 use crate::nav::Entry;
 use crate::style;
 use crate::text::clip;
@@ -145,12 +145,26 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
 }
 
 /// 글을 받는 줄. 잘못 적은 거름망은 그 자리에서 말해 준다.
-fn prompt(f: &mut Frame, app: &App, at: Rect, what: &str, buf: &str) {
+///
+/// **커서는 터미널의 커서다.** 글 끝에 붙여 찍던 `▌` 는 커서가 글 안으로 들어가면
+/// 설 자리가 없다 — 글자 위에 찍으면 그 글자를 가리고, 사이에 끼우면 뒤의 글이
+/// 한 칸 밀려 [`Input::view`] 가 잰 폭이 틀린다. 터미널 커서는 칸을 차지하지
+/// 않고, 한글 입력기가 조합 중인 글자를 띄우는 자리도 거기다.
+///
+/// 글이 칸보다 길면 조각이 커서를 따라 밀린다. 그러면 뒤의 안내·오류는 줄 밖으로
+/// 밀리는데, 옮기기 전에도 그랬다.
+fn prompt(f: &mut Frame, app: &App, at: Rect, what: &str, input: &Input) {
+    let label = format!(" {what} ");
+    // 이름표와 그 뒤 빈칸 하나를 뗀 자리가 글칸이다.
+    let lead = crate::text::width(&label) + 1;
+    let view = input.view((at.width as usize).saturating_sub(lead));
     let mut spans = vec![
-        Span::styled(format!(" {what} "), Style::new().fg(Color::Black).bg(Color::LightBlue)),
+        Span::styled(label, Style::new().fg(Color::Black).bg(Color::LightBlue)),
         Span::raw(" "),
-        Span::raw(buf.to_string()),
-        Span::styled("▌", Style::new().fg(Color::LightBlue)),
+        Span::raw(view.text),
+        // 커서가 끝에 서면 조각 뒤 한 칸이 커서 자리다. 비워 두지 않으면 안내가
+        // 커서 밑으로 붙는다.
+        Span::raw(" "),
     ];
     match app.input_error() {
         Some(e) => {
@@ -165,6 +179,11 @@ fn prompt(f: &mut Frame, app: &App, at: Rect, what: &str, buf: &str) {
         }
     }
     f.render_widget(Paragraph::new(Line::from(spans)), at);
+    // 칸이 좁아 글칸이 0 이면 커서를 세우지 않는다 — 이름표 위에 서면 어디에
+    // 적히는지 거짓말을 한다.
+    if (at.width as usize) > lead {
+        f.set_cursor_position((at.x + (lead + view.cursor) as u16, at.y));
+    }
 }
 
 fn list(f: &mut Frame, app: &App, at: Rect, rows: &[Row], state: &mut ListState) {
@@ -1490,6 +1509,46 @@ mod tests {
         let lines = render(&mut empty, 60, 10).join("\n");
         assert!(lines.contains("비었다"), "{lines}");
     }
+
+    /// 글칸의 커서는 **터미널 커서**가 글 안 제 자리에 선다. 한글은 두 칸이고,
+    /// 글이 칸보다 길면 조각이 커서를 따라 밀려 커서가 줄 밖으로 안 나간다.
+    #[test]
+    fn the_prompt_puts_the_terminal_cursor_where_typing_lands() {
+        use ratatui::backend::Backend;
+        let press = |a: &mut App, code| a.key(KeyEvent::new(code, KeyModifiers::NONE));
+        let cursor_after = |a: &mut App, w: u16| {
+            let mut term = Terminal::new(TestBackend::new(w, 6)).unwrap();
+            term.draw(|f| screen(f, a)).unwrap();
+            let last = term.backend().buffer().area.height - 1;
+            let row: String = (0..w).map(|x| term.backend().buffer()[(x, last)].symbol().to_string()).collect();
+            (term.backend().cursor_visible(), term.backend_mut().get_cursor_position().unwrap(), row)
+        };
+
+        let mut a = app();
+        let (shown, _, _) = cursor_after(&mut a, 60);
+        assert!(!shown, "글을 안 받는데 커서가 보인다");
+
+        // ` 검색 ` 여섯 칸 + 빈칸 하나 뒤에서 글이 시작한다.
+        press(&mut a, KeyCode::Char('/'));
+        for c in "가a".chars() {
+            press(&mut a, KeyCode::Char(c));
+        }
+        let (shown, at, row) = cursor_after(&mut a, 60);
+        assert!(shown, "{row}");
+        assert_eq!((at.x, at.y), (7 + 3, 5), "{row}");
+        press(&mut a, KeyCode::Left);
+        press(&mut a, KeyCode::Left);
+        assert_eq!(cursor_after(&mut a, 60).1.x, 7, "Home 자리");
+
+        let mut a = app();
+        press(&mut a, KeyCode::Char('/'));
+        for c in "abcdefghijklmnopqrstuvwxyz".chars() {
+            press(&mut a, KeyCode::Char(c));
+        }
+        let (_, at, row) = cursor_after(&mut a, 20);
+        assert!(at.x < 20, "커서가 줄 밖에 섰다 {at:?}");
+        assert!(row.contains("xyz") && !row.contains("abc"), "끝이 안 보인다: {row}");
+    }
 }
 
 #[cfg(test)]
@@ -1515,11 +1574,11 @@ mod eyeball {
         let mut app = super::App::new(load.issues, cfg, path);
         app.cursor = std::env::var("EYE_CUR").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
         if let Ok(q) = std::env::var("EYE_GREP") {
-            let m = super::Mode::Grep(q);
+            let m = super::Mode::Grep(super::Input::new(&q));
             let _ = app.apply(&m);
         }
         if let Ok(q) = std::env::var("EYE_TYPING") {
-            app.mode = super::Mode::Filter(q);
+            app.mode = super::Mode::Filter(super::Input::new(&q));
         }
         let h: u16 = std::env::var("EYE_H").ok().and_then(|v| v.parse().ok()).unwrap_or(16);
         for l in super::tests::render(&mut app, 96, h) {

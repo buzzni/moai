@@ -11,6 +11,7 @@ use crate::model::Issue;
 use crate::nav::{Entry, Index, Path, Seg};
 use crate::query::{Filter, Raw, Where};
 use crate::store::{Load, Repo};
+use input::Input;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 
@@ -40,9 +41,9 @@ enum Anchor {
 pub enum Mode {
     Browse,
     /// `/` 로 연 빠른 검색.
-    Grep(String),
+    Grep(Input),
     /// `f` 로 연 거름망. **CLI 와 같은 `항목=값` 문법이다.**
-    Filter(String),
+    Filter(Input),
 }
 
 /// 어느 칸이 이동키를 먹는가. **화면에 칸이 늘면 여기가 는다** — 순환은
@@ -467,9 +468,9 @@ impl App {
         match self.filter_text.clone() {
             Some(t) => {
                 let mode = if let Some(q) = t.strip_prefix('/') {
-                    Mode::Grep(q.to_string())
+                    Mode::Grep(Input::new(q))
                 } else {
-                    Mode::Filter(t)
+                    Mode::Filter(Input::new(&t))
                 };
                 if self.apply(&mode).is_err() {
                     self.clear_filter();
@@ -607,7 +608,7 @@ impl App {
     /// `status=todo` 라고 적으면 된다.
     pub fn apply(&mut self, mode: &Mode) -> Result<(), String> {
         let text = match mode {
-            Mode::Grep(q) | Mode::Filter(q) => q.clone(),
+            Mode::Grep(q) | Mode::Filter(q) => q.text().to_string(),
             Mode::Browse => String::new(),
         };
         if text.trim().is_empty() {
@@ -638,8 +639,8 @@ impl App {
     /// 갈라지면 프롬프트 밑의 오류가 Enter 가 판정할 글과 다른 글을 판정한다.
     fn build_filter(&self, mode: &Mode) -> Result<Filter, String> {
         let raw = match mode {
-            Mode::Grep(q) => Raw { grep: Some(q.clone()), all: true, ..Raw::default() },
-            Mode::Filter(q) => Raw { filter: split_filter(q), all: true, ideas: true, ..Raw::default() },
+            Mode::Grep(q) => Raw { grep: Some(q.text().to_string()), all: true, ..Raw::default() },
+            Mode::Filter(q) => Raw { filter: split_filter(q.text()), all: true, ideas: true, ..Raw::default() },
             Mode::Browse => Raw::default(),
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
@@ -701,8 +702,8 @@ impl App {
             }
             KeyCode::Enter | KeyCode::Right => self.enter(),
             KeyCode::Backspace | KeyCode::Left => self.leave(),
-            KeyCode::Char('/') => self.mode = Mode::Grep(String::new()),
-            KeyCode::Char('f') | KeyCode::F(7) => self.mode = Mode::Filter(String::new()),
+            KeyCode::Char('/') => self.mode = Mode::Grep(Input::default()),
+            KeyCode::Char('f') | KeyCode::F(7) => self.mode = Mode::Filter(Input::default()),
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             KeyCode::Esc => self.clear_filter(),
@@ -776,31 +777,26 @@ impl App {
     }
 
     /// 글을 받는 중.
+    ///
+    /// **글자를 넣고 지우는 것은 칸([`Input`])이 한다.** 여기는 칸이 돌려준 키만
+    /// 정한다 — Enter·Esc·Ctrl-C. 칸이 먹은 키는 여기까지 오지 않으므로 빈 칸의
+    /// Backspace 가 "한 층 위로" 로 새지 않는다.
     fn typing(&mut self, k: KeyEvent) {
+        let (Mode::Grep(input) | Mode::Filter(input)) = &mut self.mode else { return };
+        if input.key(k) {
+            return;
+        }
         // **Ctrl 은 글자가 아니다.** raw mode 에서는 Ctrl-C 가 신호로 오지
-        // 않으므로, 여기서 글자로 먹으면 검색칸에 `c` 가 찍히고 나갈 길이
-        // Esc 하나로 줄어든다. Ctrl-U 는 적던 것을 통째로 지운다.
+        // 않으므로, 글자로 먹으면 검색칸에 `c` 가 찍히고 나갈 길이 Esc 하나로
+        // 줄어든다. 칸이 안 먹은 그 밖의 Ctrl 조합(Ctrl-Enter 같은 것)은 아무
+        // 일도 하지 않는다 — 옮기기 전과 같다.
         if k.modifiers.contains(KeyModifiers::CONTROL) {
-            match k.code {
-                KeyCode::Char('c') => self.quit = true,
-                KeyCode::Char('u') => {
-                    if let Mode::Grep(b) | Mode::Filter(b) = &mut self.mode {
-                        b.clear();
-                    }
-                }
-                _ => {}
+            if k.code == KeyCode::Char('c') {
+                self.quit = true;
             }
             return;
         }
-        let buf = match &mut self.mode {
-            Mode::Grep(b) | Mode::Filter(b) => b,
-            Mode::Browse => return,
-        };
         match k.code {
-            KeyCode::Char(c) => buf.push(c),
-            KeyCode::Backspace => {
-                buf.pop();
-            }
             KeyCode::Enter => {
                 let mode = self.mode.clone();
                 // 잘못 적은 것은 버리지 않고 그 자리에 둔다 — 지우고 다시 치게
@@ -821,7 +817,7 @@ impl App {
     /// `status=in-progress` 같은 오타가 "그 칸은 비었다" 로 보이지 않는다.
     pub fn input_error(&self) -> Option<String> {
         match &self.mode {
-            Mode::Filter(q) if !q.trim().is_empty() => match self.build_filter(&self.mode) {
+            Mode::Filter(q) if !q.text().trim().is_empty() => match self.build_filter(&self.mode) {
                 Err(e) => Some(e),
                 Ok(f) => f.status.iter().find_map(|s| self.cfg.require_known(s).err()),
             },
@@ -1176,7 +1172,7 @@ mod tests {
             a.key(key(KeyCode::Tab));
             a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
             assert_eq!(a.focus, start, "{opener:?} 중에 Tab 이 포커스를 옮겼다");
-            assert!(matches!(&a.mode, Mode::Grep(b) | Mode::Filter(b) if b == "a"), "{:?}", a.mode);
+            assert!(matches!(&a.mode, Mode::Grep(b) | Mode::Filter(b) if b.text() == "a"), "{:?}", a.mode);
         }
     }
 
@@ -1322,7 +1318,7 @@ mod tests {
             a.key(key(opener));
             a.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
             assert!(a.quit, "{opener:?} 중에 Ctrl-C 를 글자로 먹었다");
-            assert!(matches!(&a.mode, Mode::Grep(b) | Mode::Filter(b) if b.is_empty()));
+            assert!(matches!(&a.mode, Mode::Grep(b) | Mode::Filter(b) if b.text().is_empty()));
         }
     }
 
@@ -1386,6 +1382,23 @@ mod tests {
         assert_eq!(shown(&a).len(), 3);
     }
 
+    /// 칸이 먹는 키는 탐색기로 새지 않는다. 빈 칸의 Backspace·`←` 가 "한 층
+    /// 위로" 로 읽히면 적다 말고 디렉터리를 잃는다. 커서가 글 안으로 들어가
+    /// 친 글자가 그 자리에 선다 — 칸이 들고 온 것이다.
+    #[test]
+    fn keys_the_box_eats_never_reach_the_browser() {
+        let mut a = app();
+        a.key(key(KeyCode::Enter));
+        let inside = a.path.clone();
+        a.key(key(KeyCode::Char('/')));
+        for code in [KeyCode::Backspace, KeyCode::Left, KeyCode::Char('a'), KeyCode::Char('c'), KeyCode::Left] {
+            a.key(key(code));
+        }
+        a.key(key(KeyCode::Char('b')));
+        assert_eq!(a.path, inside, "칸의 키가 탐색기로 샜다");
+        assert!(matches!(&a.mode, Mode::Grep(b) if b.text() == "abc"), "{:?}", a.mode);
+    }
+
     /// 글을 받는 동안에는 이동키가 글자다 — `q` 를 쳤다고 꺼지면 못 쓴다.
     #[test]
     fn typing_does_not_trigger_browse_keys() {
@@ -1395,7 +1408,7 @@ mod tests {
             a.key(key(KeyCode::Char(c)));
         }
         assert!(!a.quit);
-        assert_eq!(a.mode, Mode::Grep("quit".into()));
+        assert_eq!(a.mode, Mode::Grep(Input::new("quit")));
         a.key(key(KeyCode::Esc));
         assert_eq!(a.mode, Mode::Browse);
     }
