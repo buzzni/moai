@@ -536,3 +536,6 @@
 {"ts":"2026-09-13T04:31:39Z","id":"moai-wi67.1u4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 없음. 같은 id 가장자리는 duplicate_id 가 드러내므로 둠"}
 {"ts":"2026-09-13T04:31:39Z","id":"moai-wi67","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"트리가 그린 줄을 돌려주고 꼬리는 그리지 않은 줄만 센다"}
 {"ts":"2026-09-13T04:31:39Z","id":"moai-nnul","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"숨김 규칙을 Filter::hidden_by 한 곳에 두고 show 는 받아 세기만 한다"}
+{"ts":"2026-09-13T04:32:43Z","id":"moai-qizs.tdd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 묶음 멤버를 한 자로"}
+{"ts":"2026-09-13T04:32:43Z","id":"moai-qizs.tdd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-13T04:32:43Z","id":"moai-9yrv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}

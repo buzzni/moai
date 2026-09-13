@@ -77,6 +77,9 @@ pub struct Index {
     /// id → 첨자. 화면은 에픽·마일스톤·막는 것을 제목으로 풀어 내는데, 그때마다
     /// 전체를 훑으면 프레임 하나에 이슈 수에 비례한 훑기가 여러 번 돈다.
     by_id: BTreeMap<String, usize>,
+    /// id → **자리를 정한** 마일스톤(`report::milestones`). 자리를 정하려고 이미
+    /// 셌으므로 버리지 않고 둔다 — 상세가 프레임마다 다시 걷지 않게.
+    milestone_of: BTreeMap<String, String>,
 }
 
 impl Index {
@@ -128,7 +131,13 @@ impl Index {
             }
         }
         let by_id = by_id.into_iter().map(|(id, at)| (id.to_string(), at)).collect();
-        Index { homes, has_kids, by_id }
+        Index { homes, has_kids, by_id, milestone_of }
+    }
+
+    /// 그 줄이 **실제로 딸린** 마일스톤. 제 줄의 `milestone` 이 아니다 — 에픽이
+    /// 마일스톤을 이기므로 제 값은 셈·트리·필터 어디에도 안 쓰일 수 있다.
+    pub fn milestone_of(&self, id: &str) -> Option<&str> {
+        self.milestone_of.get(id).map(String::as_str)
     }
 
     /// 그 줄이 경로에서 갖는 마디.

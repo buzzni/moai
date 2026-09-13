@@ -410,8 +410,17 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     if let Some(id) = &i.epic {
         fields.push(("에픽".into(), app.title_of(id)));
     }
-    if let Some(id) = &i.milestone {
+    // **자리를 정한 마일스톤을 그린다.** 에픽이 마일스톤을 이기므로(3301f6e)
+    // 제 줄에 적은 값은 셈·트리·필터 어디에도 안 쓰일 수 있다 — 그것을 그대로
+    // 그리면 패널은 m002 라 말하고 트리와 `show --milestone` 은 m001 로 센다
+    // (moai-9yrv). 안 쓰이는 제 값은 **지우지 않고 그렇다고 적는다** — 적어 둔
+    // 값이 화면에서 말없이 사라지면 그게 더 헷갈린다.
+    let placed = app.index.milestone_of(&i.id);
+    if let Some(id) = placed {
         fields.push(("마일스톤".into(), app.title_of(id)));
+    }
+    if let Some(own) = i.milestone.as_deref().filter(|own| Some(*own) != placed) {
+        fields.push(("안 쓰임".into(), format!("제 마일스톤 {own} — 에픽의 것을 따른다")));
     }
     // **막는 것은 제목까지 푼다.** id 만 내면 그것이 무엇인지 또 찾아봐야 한다.
     // **끝난 막음은 막지 않는다** — `report::is_blocked` 와 `moai ready` 가 그
@@ -753,6 +762,38 @@ mod tests {
     fn the_cursor_is_marked_with_a_glyph_not_only_colour() {
         let lines = render(&mut app(), 100, 12);
         assert!(lines.iter().any(|l| l.contains('>')), "{lines:?}");
+    }
+
+    /// **상세는 자리를 정한 마일스톤을 그린다.** 에픽이 마일스톤을 이기므로 제
+    /// 줄에 적은 값은 셈에 안 쓰인다 — 그것을 `마일스톤` 이라 그리면 패널과
+    /// 트리가 같은 줄을 다른 마일스톤에 둔다(moai-9yrv). 제 값은 안 쓰인다고 적는다.
+    #[test]
+    fn the_detail_shows_the_milestone_that_places_the_row() {
+        let make = |id: &str, title: &str, kind: Kind| {
+            Issue::new(id.into(), title.into(), kind, Status::new("todo"), "2026-09-01T00:00:00Z")
+        };
+        let used = make("argos-0001", "쓰는 판", Kind::Milestone);
+        let unused = make("argos-0002", "안 쓰는 판", Kind::Milestone);
+        let mut epic = make("argos-0003", "에픽", Kind::Epic);
+        epic.milestone = Some("argos-0001".into());
+        let mut row = make("argos-0004", "멤버", Kind::Issue);
+        row.epic = Some("argos-0003".into());
+        row.milestone = Some("argos-0002".into());
+        let path = vec![
+            crate::nav::Seg::Milestone(Some("argos-0001".into())),
+            crate::nav::Seg::Epic("argos-0003".into()),
+        ];
+        let mut a = App::new(
+            vec![used, unused, epic, row],
+            Config::parse("prefix = \"argos\"\n").unwrap(),
+            path,
+        );
+        a.cursor = 1; // 0 은 `..` 줄이다
+        let lines = render(&mut a, 140, 24);
+        let label = |name: &str| lines.iter().find(|l| l.contains(name)).cloned().unwrap_or_default();
+        assert!(label("마일스톤").contains("쓰는 판"), "{lines:#?}");
+        assert!(!label("마일스톤").contains("안 쓰는 판"), "안 쓰이는 제 값을 마일스톤으로 그렸다\n{lines:#?}");
+        assert!(label("안 쓰임").contains("argos-0002"), "제 값이 안 쓰인다고 안 말한다\n{lines:#?}");
     }
 
     /// 좁은 창에서 무너지지도, 넘치지도 않는다. 한글이 두 칸을 먹는 것이
