@@ -15,6 +15,9 @@
 # 스튜디오가 제 세션을 적어 두는 곳
 /.ax/
 
+# 에이전트가 잡는 git 워크트리. 저장소 안에 생기므로 git add -A 에 딸려 오지 않게
+/.claude/worktrees/
+
 # auto-added by aplus-dev-studio (block env secrets)
 .env
 

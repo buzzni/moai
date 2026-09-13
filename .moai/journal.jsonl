@@ -802,3 +802,6 @@
 {"ts":"2026-09-13T15:39:03Z","id":"moai-11s4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"App::write 에 첫 인자 retry: fn(&mut App) 가 붙었다(moai-nmv2). 누군지 모르면 write 는 None 을 내고 Mode::Ask 를 열며, 그때 들고 있던 모드(폼)를 back 에 보관한다 — 폼은 None 을 보고 mode 를 건드리면 안 된다(이미 Ask 다). 받으면 폼 모드를 되돌린 뒤 retry 를 부르므로, retry 는 Ctrl-S 가 부르는 저장 함수 그 자체로 넘기면 된다(폼 상태를 모드에서 다시 읽는 모양). Esc 는 폼으로 돌아간다. 시험 모양은 tui::tests::save 에 있다."}
 {"ts":"2026-09-13T15:39:03Z","id":"moai-7j4j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-nmv2 가 3b18488·5e6a077 로 섰다 — TUI 쓰기 앞에서 누군지 묻는 칸. 이 줄은 한 일이 아니라 넘긴 일이라 done 으로 옮기지 않고 미룬 채 둔다."}
 {"ts":"2026-09-13T15:39:03Z","id":"moai-nmv2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"쓰기 앞에서 NO_ACTOR 면 Mode::Ask 로 묻고, 받은 이름은 세션 동안만 들고 멈춘 쓰기를 retry 로 잇는다"}
+{"ts":"2026-09-13T15:53:52Z","id":"moai-o84q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":".claude/worktrees 를 .gitignore 에 넣는다"}
+{"ts":"2026-09-13T15:53:52Z","id":"moai-o84q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-13T15:54:08Z","id":"moai-o84q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":".gitignore 에 /.claude/worktrees/ 를 더했다"}
