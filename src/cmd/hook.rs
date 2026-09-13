@@ -137,6 +137,9 @@ fn decide(event: Event, input: &Input) -> Option<String> {
         Event::Stop => once_per_session(input, &repo, "stop", || {
             let now = model::now();
             let st = report::status(&load.issues, &unreadable, &repo.config, &now);
+            // **고칠 것만 센다.** 알림(쌓인 생각·미뤄 둔 것)은 `notices` 에 따로
+            // 있다 — 여기 섞이던 때 `defer` 만 해도 "경고가 늘었다" 로 세션이
+            // 붙들렸다(moai-c8lb). 기준선도 같은 자로 잰다.
             let warnings: usize = st.warnings.iter().map(|w| w.count).sum();
             crate::hook::closing(&load.issues, &repo.config, warnings, baseline(input, &repo))
         }),
@@ -199,6 +202,7 @@ fn write_baseline(input: &Input, repo: &Repo, issues: &[crate::model::Issue], un
     };
     let now = model::now();
     let st = report::status(issues, unreadable, &repo.config, &now);
+    // `Stop` 과 같은 자 — 알림은 안 센다.
     let n: usize = st.warnings.iter().map(|w| w.count).sum();
     let _ = std::fs::write(path, n.to_string());
 }

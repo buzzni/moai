@@ -619,7 +619,9 @@ pub fn status(st: &StatusReport, issues: &[Issue], cfg: &Config, now: &str, at: 
     }
 
     // 경고는 **에픽 표 바로 다음**이다. 화면 아래로 밀면 페이저에 잘린다.
-    for w in &st.warnings {
+    // 고칠 것 다음에 알림. **자리가 갈렸어도 한 화면에 같은 모양으로 낸다** —
+    // 글리프(`!`·`+`)가 둘을 가른다.
+    for w in st.warnings.iter().chain(&st.notices) {
         out.push(String::new());
         // **알림은 경고처럼 보이면 안 된다.** `!` 를 달면 "쌓인 idea 6건" 이
         // 꾸지람으로 읽히고, 그러면 담는 것을 멈춘다 — 담는 비용을 0 으로
@@ -637,11 +639,11 @@ pub fn status(st: &StatusReport, issues: &[Issue], cfg: &Config, now: &str, at: 
         out.push(format!("{} {}", paint(mark, glyph), says(w)));
         out.extend(preview(w, &by_id, now));
     }
-    // **알림만 있는 것은 "아무 문제 없다" 이다.** 여기서 `warnings` 를 통째로
-    // 세면 생각을 담거나 무언가를 미룬 순간부터 이 줄이 사라져, 세션을 닫기
-    // 전에 "경고가 늘지 않았는지" 보는 사람이 알림을 경고로 읽는다 — 탐색기
-    // 배너가 `notice` 를 빼고 세는 것과 같은 자, 같은 까닭이다.
-    if !st.warnings.iter().any(|w| !w.notice) {
+    // **알림만 있는 것은 "아무 문제 없다" 이다.** 알림은 `notices` 에 따로
+    // 있으므로 `warnings` 가 비면 고칠 것이 없다 — 생각을 담거나 무언가를 미룬
+    // 순간부터 이 줄이 사라지면, 세션을 닫기 전에 "경고가 늘지 않았는지" 보는
+    // 사람이 알림을 경고로 읽는다.
+    if st.warnings.is_empty() {
         out.push(String::new());
         out.push(format!("{} 드러난 문제 없다", paint(style::status_style("done"), "✓")));
     }

@@ -762,7 +762,15 @@ pub struct StatusReport {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub milestones: Vec<Roll>,
     pub epics: Vec<Roll>,
+    /// 고칠 것. **알림은 여기 없다.**
+    ///
+    /// 한때 한 배열에 섞고 `notice` 깃발로만 갈라, 사람 화면과 탐색기는 알림을
+    /// 빼고 셌는데 `--json` 을 읽는 쪽과 Stop 훅은 `warnings` 를 통째로 셌다 —
+    /// `moai idea add`·`moai defer` 를 부를 때마다 "경고가 늘었다" 로 세션이
+    /// 붙들렸다(moai-c8lb). 받는 쪽마다 깃발을 기억하게 하느니 자리를 가른다.
     pub warnings: Vec<Warning>,
+    /// 알려 주는 것 — 쌓인 생각, 미뤄 둔 것. 고칠 것이 있다는 말이 아니다.
+    pub notices: Vec<Warning>,
     pub flow: Flow,
 }
 
@@ -810,6 +818,7 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
         .collect();
     let group = groups(issues);
     let mut warnings = Vec::new();
+    let mut notices = Vec::new();
 
     // 1. 에픽에 안 붙은 것. 마일스톤이 아직 없으므로 **제일 중요한 신호**다
     //    — "물어보지 않고 만든 이슈" 의 지문이다.
@@ -1015,7 +1024,7 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
             .filter_map(|i| days_since(&i.created_at, now))
             .max()
             .unwrap_or(0);
-        warnings.push(
+        notices.push(
             Warning::new("idea_pile", Vec::new())
                 .count(count)
                 .oldest(oldest)
@@ -1045,7 +1054,7 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
             .filter_map(|i| i.deferred_at.as_deref().and_then(|at| days_since(at, now)))
             .max()
             .unwrap_or(0);
-        warnings.push(
+        notices.push(
             Warning::new("deferred", Vec::new())
                 .count(count)
                 .oldest(oldest)
@@ -1094,6 +1103,7 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
         milestones: stones,
         epics,
         warnings,
+        notices,
         flow: Flow {
             days: FLOW_DAYS,
             created,
@@ -1795,7 +1805,7 @@ mod tests {
         let quiet: Vec<Issue> = (0..IDEA_PILE - 1).map(|n| idea(&format!("argos-000{n}"))).collect();
         let st = status(&quiet, &[], &cfg(), "2026-09-11T00:00:00Z");
         assert!(
-            !st.warnings.iter().any(|w| w.kind == "idea_pile"),
+            !st.notices.iter().any(|w| w.kind == "idea_pile"),
             "몇 개 안 되는데 벌써 말한다 — 담을 때마다 잔소리가 는다"
         );
 
@@ -1803,7 +1813,7 @@ mod tests {
         piled.push(idea("argos-0009"));
         let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
         let w = st
-            .warnings
+            .notices
             .iter()
             .find(|w| w.kind == "idea_pile")
             .expect("쌓였는데 아무 말도 안 한다");
@@ -1824,7 +1834,7 @@ mod tests {
         let mut piled: Vec<Issue> = (0..IDEA_PILE).map(|n| idea(&format!("argos-000{n}"))).collect();
         piled[0].status = Status::new("done");
         let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
-        assert!(!st.warnings.iter().any(|w| w.kind == "idea_pile"), "{:?}", st.warnings);
+        assert!(!st.notices.iter().any(|w| w.kind == "idea_pile"), "{:?}", st.notices);
     }
     /// **알림은 경고 수에 안 든다.** 배너가 "드러난 것 N건" 이라 말하는데
     /// 담아 둔 생각이 거기 들면, 담을수록 고칠 것이 늘었다고 말하게 된다.
@@ -1832,7 +1842,8 @@ mod tests {
     fn a_notice_is_not_counted_among_the_warnings() {
         let piled: Vec<Issue> = (0..IDEA_PILE).map(|n| idea(&format!("argos-000{n}"))).collect();
         let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
-        assert_eq!(st.warnings.iter().filter(|w| !w.notice).count(), 0, "{:?}", st.warnings);
+        assert!(st.warnings.is_empty(), "알림이 고칠 것 자리에 섰다 — {:?}", st.warnings);
+        assert_eq!(st.notices.len(), 1, "{:?}", st.notices);
         assert!(!st.broken(), "알림으로 비영 종료한다");
     }
     // ── 미룬 것은 지금 계획이 아니다 ─────────────────────────────────
@@ -1907,7 +1918,7 @@ mod tests {
         let mut piled: Vec<Issue> = (0..IDEA_PILE).map(|n| idea(&format!("argos-000{n}"))).collect();
         piled[0].deferred_at = Some("2026-09-01T00:00:00Z".into());
         let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
-        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        let kinds: Vec<&str> = st.notices.iter().map(|w| w.kind).collect();
         assert!(!kinds.contains(&"idea_pile"), "숨길 것을 세었다 — {kinds:?}");
         assert!(kinds.contains(&"deferred"), "제 이름으로도 안 말한다 — {kinds:?}");
     }
@@ -1920,7 +1931,7 @@ mod tests {
         let mut epic = make("argos-0001", Kind::Epic, "todo");
         epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
         let st = status(&[epic], &[], &cfg(), "2026-09-11T00:00:00Z");
-        let w = st.warnings.iter().find(|w| w.kind == "deferred").expect("미뤄 둔 에픽이 안 보인다");
+        let w = st.notices.iter().find(|w| w.kind == "deferred").expect("미뤄 둔 에픽이 안 보인다");
         assert_eq!(w.count, 1);
         assert!(w.notice);
     }
@@ -1944,9 +1955,9 @@ mod tests {
         assert_eq!(st.total, 2, "{:?}", st.counts);
         assert_eq!((r.done, r.total), (2, 2), "롤업과 보드가 다른 수를 말한다 — {r:?}");
         assert!(
-            !st.warnings.iter().any(|w| w.kind == "deferred"),
+            !st.notices.iter().any(|w| w.kind == "deferred"),
             "끝난 것을 아직 미뤄 둔 것이라 센다 — {:?}",
-            st.warnings
+            st.notices
         );
     }
 
@@ -1992,7 +2003,7 @@ mod tests {
 
         let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
         assert_eq!(st.total, 1, "미룬 에픽의 멤버를 보드가 셌다 — {:?}", st.counts);
-        let w = st.warnings.iter().find(|w| w.kind == "deferred").expect("미룬 것을 안 말한다");
+        let w = st.notices.iter().find(|w| w.kind == "deferred").expect("미룬 것을 안 말한다");
         assert_eq!(w.count, 3, "물려받은 것을 안 세면 `--deferred` 가 내는 수와 어긋난다");
     }
 

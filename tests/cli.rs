@@ -2457,6 +2457,13 @@ fn a_repo_with_only_notices_still_reads_clean() {
     let out = ok(s.path(), &["status"]);
     assert!(out.contains("미뤄 둔 것"), "알림이 안 나온다 — {out}");
     assert!(out.contains("드러난 문제 없다"), "알림 하나로 깨끗함을 잃었다 — {out}");
+
+    // **기계 출력도 같은 말을 한다.** 알림이 `warnings` 에 섞이면 그 배열의
+    // 길이를 세는 쪽(에이전트·Stop 훅)이 담고 미룰 때마다 경고가 늘었다고
+    // 읽는다(moai-c8lb).
+    let json = ok(s.path(), &["status", "--json"]);
+    assert!(json.contains(r#""warnings":[]"#), "알림이 고칠 것 자리에 섰다 — {json}");
+    assert!(json.contains(r#""notices":["#) && json.contains(r#""kind":"deferred""#), "{json}");
 }
 
 /// 미뤄 둔 줄을 옮기면 **말한다.** 칸은 옮겨졌는데 보드에도 `ready` 에도 안
@@ -3042,6 +3049,25 @@ fn the_fold_keeps_the_baseline_and_reloads_the_board() {
     assert_eq!(baseline(&s, "s3"), None);
     hook_out(&s, "session-start", &compacted(&s, "s3"));
     assert!(baseline(&s, "s3").is_some(), "기준선 없는 세션이 접힌 뒤에도 기준선을 못 얻었다");
+}
+
+/// **알림은 `Stop` 이 세는 경고가 아니다.** 생각을 담고 일을 미루는 것은
+/// 도구가 권하는 일인데, 그것이 경고 수를 올리면 시킨 대로 한 세션이 "경고가
+/// 늘었다" 로 붙들린다 — 실제로 그랬다(moai-c8lb).
+#[test]
+fn stop_does_not_count_notices_as_new_warnings() {
+    let s = init("hookstopnotice");
+    ok(s.path(), &["add", "락을 잡는다"]);
+    hook_out(&s, "session-start", &event(&s, "s1"));
+
+    for n in 0..5 {
+        ok(s.path(), &["idea", "add", &format!("생각 {n}"), "-q"]);
+    }
+    let later = add(s.path(), &["나중에"]);
+    ok(s.path(), &["defer", &later]);
+
+    let out = hook_out(&s, "stop", &event(&s, "s1"));
+    assert!(!out.contains("경고가"), "알림을 경고로 셌다 — {out}");
 }
 
 /// `SessionStart` 는 아무것도 싣지 않고 기준선만 적는다.

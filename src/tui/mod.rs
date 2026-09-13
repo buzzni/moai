@@ -241,7 +241,8 @@ impl App {
     fn count_warnings(&mut self) {
         let lines: Vec<usize> = (0..self.unreadable).collect();
         let st = crate::report::status(&self.issues, &lines, &self.cfg, &self.now);
-        self.warnings = st.warnings.iter().filter(|w| !w.notice).count();
+        // 알림은 `notices` 에 따로 있다 — `warnings` 가 곧 고칠 것이다.
+        self.warnings = st.warnings.len();
     }
 
     /// 파일이 우리가 읽은 뒤로 바뀌었는지 본다. **고친 때만 보면 놓친다** —
