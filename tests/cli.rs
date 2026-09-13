@@ -4243,3 +4243,186 @@ fn an_empty_note_is_told_apart_from_a_missing_one() {
     let shown = ok(s.path(), &["show", &id]);
     assert_eq!(shown.matches("note:").count(), 0, "{shown}");
 }
+
+// ── 워크트리 함께 보기 ────────────────────────────────────────────────
+
+/// 사람의 git 설정 없이 git 을 돌린다. 커밋에 이름이 필요하니 여기서 준다.
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .args(["-c", "user.name=테스터", "-c", "user.email=tester@example.com", "-c", "init.defaultBranch=main"])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .expect("git 을 실행하지 못했다");
+    assert!(out.status.success(), "git {args:?} 가 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// 시계를 달리 두고 돌린다 — 옆 워크트리의 쓰기가 **더 늦게** 떨어진 것을 흉내 낸다.
+fn ok_at(dir: &Path, now: &str, args: &[&str]) -> String {
+    let out = Command::new(BIN)
+        .args(args)
+        .current_dir(dir)
+        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
+        .env("MOAI_NOW", now)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("moai 를 실행하지 못했다");
+    assert!(out.status.success(), "moai {args:?} 가 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
+}
+
+const LATER: &str = "2026-09-12T00:00:00Z";
+
+struct Trees {
+    s: Scratch,
+    epic: String,
+    /// 옆에서 집은 일.
+    picked: String,
+    /// 양쪽이 **같은 시각에** 고친 일 — 동률.
+    tied: String,
+    /// 옆에서만 만든 일.
+    made: String,
+}
+
+impl Trees {
+    fn main(&self) -> PathBuf {
+        self.s.path().join("main")
+    }
+    fn feat(&self) -> PathBuf {
+        self.s.path().join("feat")
+    }
+}
+
+/// `main` 과 `feat/x` 워크트리. 둘은 같은 스냅샷에서 갈라졌고, 옆에서는
+/// 하나를 집고(늦게), 하나를 같은 시각에 고치고, 하나를 새로 만들었다.
+/// moai 를 들이기 **전** 커밋에서 갈라진 `old` 워크트리도 하나 둔다.
+fn trees(name: &str) -> Trees {
+    let s = Scratch::new(name);
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    git(&main, &["commit", "-q", "--allow-empty", "-m", "moai 이전"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "에픽", "--json"]), "id");
+    let picked = field(&ok(&main, &["add", "집을 일", "-e", &epic, "--json"]), "id");
+    let tied = field(&ok(&main, &["add", "여기 제목", "-e", &epic, "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", "../feat", "-b", "feat/x"]);
+    git(&main, &["worktree", "add", "-q", "../old", "-b", "old", "HEAD~1"]);
+
+    let feat = s.path().join("feat");
+    ok_at(&feat, LATER, &["mv", &picked, "in_progress"]);
+    ok(&feat, &["edit", &tied, "--title", "옆 제목"]);
+    let made = field(&ok_at(&feat, LATER, &["add", "옆에서 만든 일", "-e", &epic, "--json"]), "id");
+    Trees { s, epic, picked, tied, made }
+}
+
+/// 옆에서 늦게 옮긴 줄은 **그 줄로** 서고 `⎇ <브랜치>` 를 단다. 같은 시각이면 지금
+/// 브랜치의 줄이다. 옆에만 있는 줄도 선다. 플래그 없이는 전과 똑같다.
+#[test]
+fn worktree_overlays_the_latest_line_and_names_its_branch() {
+    let t = trees("wtlist");
+    let main = t.main();
+
+    let plain = ok(&main, &["show"]);
+    assert!(!plain.contains('⎇') && !plain.contains(&t.made), "플래그 없이 겹쳤다\n{plain}");
+
+    let shown = ok(&main, &["show", "--worktree"]);
+    let line = |id: &str| shown.lines().find(|l| l.starts_with(id)).unwrap_or_else(|| panic!("{id} 가 없다\n{shown}")).to_string();
+    assert!(line(&t.picked).contains("▸  ⎇ feat/x 집을 일"), "늦은 옆 줄이 안 섰다\n{shown}");
+    assert!(line(&t.made).contains("⎇ feat/x 옆에서 만든 일"), "옆에만 있는 줄이 없다\n{shown}");
+    let tied = line(&t.tied);
+    assert!(tied.contains("여기 제목") && !tied.contains('⎇'), "동률에 지금 브랜치 줄이 안 섰다\n{shown}");
+
+    let rows = ok(&main, &["show", "--worktree", "--json"]);
+    let row = |id: &str| rows.split("},{").find(|r| r.contains(&format!("\"id\":\"{id}\""))).unwrap().to_string();
+    assert!(row(&t.picked).contains("\"branch\":\"feat/x\""), "{rows}");
+    assert!(!row(&t.tied).contains("\"branch\""), "지금 브랜치 줄에 branch 키가 붙었다\n{rows}");
+    // 트리도 같은 머리표를 단다.
+    let tree = ok(&main, &["show", "--tree", "--worktree"]);
+    assert!(tree.contains("⎇ feat/x 옆에서 만든 일"), "{tree}");
+}
+
+/// `ready` 는 옆에서 이미 집은 일을 **집을 수 있다고 내지 않고**, 잡고 있는 것에
+/// 어느 워크트리에서 잡았는지 댄다. `status` 는 겹쳐 봤다고 머리에서 말한다.
+#[test]
+fn worktree_keeps_ready_from_offering_what_another_worktree_picked() {
+    let t = trees("wtready");
+    let main = t.main();
+
+    let before = ok(&main, &["ready"]);
+    assert!(before.contains(&t.picked), "{before}");
+
+    let ready = ok(&main, &["ready", "--worktree"]);
+    let picks: String = ready.lines().take_while(|l| !l.starts_with('!')).collect::<Vec<_>>().join("\n");
+    assert!(!picks.contains(&t.picked), "옆에서 집은 일을 집으라고 낸다\n{ready}");
+    assert!(ready.contains(&format!("{} ⎇ feat/x", t.picked)), "누가 어디서 잡았는지 안 댄다\n{ready}");
+    assert!(picks.contains(&t.made), "{ready}");
+
+    let json = ok(&main, &["ready", "--worktree", "--json"]);
+    assert!(!json.contains(&t.picked), "{json}");
+    assert!(json.contains("\"branch\":\"feat/x\""), "{json}");
+
+    let status = ok(&main, &["status", "--worktree"]);
+    // 스냅샷 없는 `old` 는 겹친 것이 아니라 이름에도 안 선다.
+    let head = status.lines().next().unwrap();
+    assert!(head.contains("⎇ feat/x 겹쳐 봄") && !head.contains("old"), "{status}");
+    let st = ok(&main, &["status", "--worktree", "--json"]);
+    assert!(st.contains(&format!("\"branches\":{{\"{}\":\"feat/x\",\"{}\":\"feat/x\"}}", t.made, t.picked))
+        || st.contains(&format!("\"branches\":{{\"{}\":\"feat/x\",\"{}\":\"feat/x\"}}", t.picked, t.made)), "{st}");
+    assert!(!ok(&main, &["status", "--json"]).contains("branches"), "플래그 없이 branches 키가 붙었다");
+
+    // 옆에서 온 줄의 이력은 **그 워크트리의 저널**에서 읽는다.
+    let one = ok(&main, &["show", &t.picked, "--worktree"]);
+    assert!(one.contains("⎇ feat/x") && one.contains("todo → in_progress"), "{one}");
+    let _ = &t.epic;
+}
+
+/// **보여줄 때만 겹친다.** 어느 워크트리의 파일도 한 바이트 안 바뀐다. 스냅샷 없는
+/// 워크트리는 말하지 않는다.
+#[test]
+fn worktree_writes_nothing_and_skips_trees_without_a_snapshot() {
+    let t = trees("wtquiet");
+    let files = |d: &Path| (issues(d), std::fs::read_to_string(d.join(".moai/journal.jsonl")).unwrap());
+    let (m0, f0) = (files(&t.main()), files(&t.feat()));
+    for args in [
+        vec!["status", "--worktree"],
+        vec!["ready", "--worktree"],
+        vec!["show", "--worktree"],
+        vec!["show", "--tree", "--worktree"],
+        vec!["show", &t.picked, "--worktree"],
+    ] {
+        let out = moai(&t.main(), &args);
+        assert!(out.status.success(), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.is_empty(), "스냅샷 없는 워크트리를 두고 말했다 — {args:?}\n{err}");
+    }
+    assert_eq!(files(&t.main()), m0, "지금 워크트리 파일이 바뀌었다");
+    assert_eq!(files(&t.feat()), f0, "옆 워크트리 파일이 바뀌었다");
+}
+
+/// 옆 파일이 깨졌어도, git 저장소가 아니어도 **막지 않는다** — 말만 하고 0 으로 끝난다.
+#[test]
+fn worktree_trouble_is_told_but_never_fails_the_command() {
+    let t = trees("wtbroken");
+    let feat = t.feat().join(".moai/issues.jsonl");
+    let mut src = std::fs::read_to_string(&feat).unwrap();
+    src.push_str("{깨진 줄\n");
+    std::fs::write(&feat, src).unwrap();
+
+    let out = moai(&t.main(), &["status", "--worktree"]);
+    assert!(out.status.success(), "옆 파일 때문에 status 가 실패했다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("⎇ feat/x") && err.contains("읽을 수 없는 줄 1개"), "{err}");
+    let shown = ok(&t.main(), &["show", "--worktree"]);
+    assert!(shown.contains("⎇ feat/x 옆에서 만든 일"), "깨진 줄 말고 나머지도 버렸다\n{shown}");
+
+    let bare = init("wtnogit");
+    let out = moai(bare.path(), &["status", "--worktree"]);
+    assert!(out.status.success(), "git 저장소가 아니라고 실패했다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("워크트리를 못 찾았다"));
+}
