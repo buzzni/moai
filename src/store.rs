@@ -86,13 +86,7 @@ impl Repo {
     /// **읽기는 락을 잡지 않는다.** 쓰기가 `rename` 으로 갈아끼우므로 독자는
     /// 옛 파일 아니면 새 파일을 보지, 찢어진 파일을 볼 수 없다.
     pub fn read(&self) -> R<Load> {
-        let path = self.issues_path();
-        let src = match std::fs::read_to_string(&path) {
-            Ok(s) => s,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(e) => return Err(Fail::new(format!("{}: {e}", path.display()))),
-        };
-        Ok(parse_issues(&src))
+        Ok(read_snapshot(&self.issues_path())?.unwrap_or_default())
     }
 
     /// `issues.jsonl` 을 바꾸는 **유일한 경로**.
@@ -239,6 +233,23 @@ static HELD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::ne
 
 pub fn held_unreadable() -> usize {
     HELD.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// 스냅샷 하나를 읽는다. 파일이 없으면 `None` — **없는 것과 빈 것을 가른다.**
+///
+/// 제 저장소에서는 둘이 같지만(`init` 직후), 다른 워크트리에서는 다르다: 파일이
+/// 없는 워크트리는 moai 를 들이기 전에 갈라진 브랜치라 겹칠 것이 없고, 그것을
+/// 빈 스냅샷으로 세면 "읽었는데 비었다" 로 보인다(`worktree::gather`).
+///
+/// **락을 잡지 않는다** — [`Repo::read`] 와 같은 까닭이다. 남의 워크트리를 읽는
+/// 길도 여기를 지나므로, 거기서도 락을 안 잡는다: 남의 쓰기를 기다리게 할 까닭이
+/// 없고, `rename` 이 찢어진 파일을 못 보게 한다.
+pub fn read_snapshot(path: &Path) -> R<Option<Load>> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => Ok(Some(parse_issues(&s))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(Fail::new(format!("{}: {e}", path.display()))),
+    }
 }
 
 pub fn parse_issues(src: &str) -> Load {

@@ -23,6 +23,7 @@ mod style;
 mod text;
 mod tui;
 mod view;
+mod worktree;
 
 use clap::Parser;
 use std::io::Write;
