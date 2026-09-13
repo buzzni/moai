@@ -17,7 +17,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
   moai show <id>                그 일의 본문과 이력 — 왜 그렇게 정했는지가 여기 있다
   moai mv <id> in_progress      집는다.  끝나면 done
   moai note <id> \"발견한 것\"    다음 사람이 읽을 메모
-  moai tui                      탐색기 — 에픽이 디렉터리처럼 열린다 (읽기 전용)
+  moai tui                      탐색기 — 에픽이 디렉터리처럼 열린다. n 으로 생각을 담는다
 
 지금 할 일은 아닌 것이 떠오르면:
 
@@ -197,7 +197,7 @@ pub enum Cmd {
   고치고 버리는 것은 이미 있는 동사가 한다: `moai edit <id>`, `moai rm <id>`.")]
     Idea(IdeaCmd),
 
-    /// 탐색기 화면을 띄운다 (읽기 전용)
+    /// 탐색기 화면을 띄운다 (쓰는 것은 `n` 생각 담기 하나)
     #[command(after_help = "\
   마일스톤과 에픽이 디렉터리처럼 동작한다. 왼쪽에서 돌아다니면 커서가 머문
   것의 정보가 오른쪽에 나온다.
@@ -206,7 +206,9 @@ pub enum Cmd {
   Tab·Shift-Tab 이 목록과 상세 사이로 포커스를 옮기고, 화살표·PageUp/Down·
   Home/End 는 포커스 있는 칸을 움직인다. j·k 는 어디서든 상세를 굴린다.
 
-  읽기 전용이다 — 고치는 것은 CLI 로 한다.
+  n 은 어디서든 생각 담기 폼을 연다 — 제목 한 줄과 본문, Tab 이 둘 사이를
+  옮기고 Ctrl-S 나 F2 가 idea 로 담는다(에픽 없이). Esc 는 닫되 적던 것이
+  있으면 한 번 묻는다. 쓰는 것은 이것 하나다 — 고치는 것은 CLI 로 한다.
   `--json` 은 화면을 켜지 않고 그 디렉터리의 목록만 낸다.")]
     Tui(TuiArgs),
 

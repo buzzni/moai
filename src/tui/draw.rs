@@ -4,6 +4,7 @@
 //! 규칙 하나를 CLI 에서 그대로 들고 온다: **색이 혼자 뜻을 지지 않는다.**
 //! 모든 색에 글리프나 낱말이 붙는다.
 
+use super::form::{Field, Form};
 use super::scroll::Scroll;
 use super::{App, Input, Mode, Pane, Row};
 use crate::nav::Entry;
@@ -12,7 +13,7 @@ use crate::text::clip;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Padding, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph};
 use ratatui::Frame;
 
 /// 좌우를 가르는 자리. MC 처럼 반반이되 왼쪽을 조금 넓게 — 제목이 길다.
@@ -60,6 +61,22 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     }
     list(f, app, left, &rows);
     detail(f, app, right, &rows);
+    // 폼은 목록과 상세 자리를 **통째로** 덮는다. 가장자리를 비워 뒤를 비치게 해 봤더니
+    // 뒤 칸의 테두리와 커서(`>`)가 폼의 테두리에 겹쳐 어느 선이 어느 칸인지 안 읽혔다.
+    // 닫으면 보던 자리 그대로 돌아온다 — 경로 줄은 폼 위에 그대로 서 있다.
+    //
+    // **담다가 누군지 물으면 폼은 뒤에 남는다.** 묻는 칸이 적던 폼을 들고 있다가
+    // 되돌려 놓는데(`Ask::back`), 그동안 폼이 사라지면 적던 것이 날아간 줄 안다. 키는
+    // 묻는 칸이 먹으므로 폼의 칸은 굵은 선도 커서도 내려놓는다.
+    match &mut app.mode {
+        Mode::Idea(form) => jot(f, form, body, true),
+        Mode::Ask(ask) => {
+            if let Mode::Idea(form) = ask.back.as_mut() {
+                jot(f, form, body, false);
+            }
+        }
+        _ => {}
+    }
 
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 F키 바가 선다.
     match &app.mode {
@@ -74,7 +91,86 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             f.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::new().fg(Color::Black).bg(Color::LightYellow)))), why);
             prompt(f, line, "누구", &ask.input, ask.error.clone(), "이름 (메일)  Enter 쓰기  Esc 그만");
         }
+        Mode::Idea(form) => jot_keys(f, form, keys),
     }
+}
+
+/// 생각 담기 폼. 제목 칸(세 줄) 밑에 본문 칸이 남은 높이를 다 먹는다.
+///
+/// **키를 먹는 칸은 굵은 선이다** — 목록·상세의 포커스와 같은 모양([`frame`])이라 한
+/// 화면에 규칙이 하나다. 폼이 열려 있는 동안 목록·상세는 굵은 선을 내려놓으므로 화면에
+/// 굵은 칸은 늘 하나다. 칸 이름은 테두리에 적는다: 색이 없어도 모양과 이름이 남는다.
+///
+/// 커서는 터미널 커서가 키를 먹는 칸의 글 안 제자리에 선다 — [`prompt`] 와 같은 까닭이다.
+/// `active` 가 거짓이면(다른 칸이 키를 먹는 중이면) 굵은 선도 커서도 없다.
+fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool) {
+    f.render_widget(Clear, at);
+    let [title_at, body_at] = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(at);
+
+    let field = |which: Field, name: &'static str| {
+        let block = Block::default().borders(Borders::ALL).title(name);
+        if active && form.field == which {
+            block.border_type(BorderType::Thick).border_style(from_anstyle(style::FOCUS))
+        } else {
+            block
+        }
+    };
+
+    let title_block = field(Field::Title, " 생각 담기 · 제목 ");
+    let inner = title_block.inner(title_at);
+    let view = form.title.view(inner.width as usize);
+    let title_cursor = (inner.width > 0 && inner.height > 0)
+        .then(|| (inner.x + view.cursor as u16, inner.y));
+    f.render_widget(Paragraph::new(Line::from(view.text)).block(title_block), title_at);
+
+    let body_block = field(Field::Body, " 본문 · 여러 줄 · 없어도 된다 ");
+    let inner = body_block.inner(body_at);
+    form.body.fit(inner.height as usize);
+    let view = form.body.view(inner.width as usize, inner.height as usize);
+    let body_cursor = view.cursor.map(|(x, y)| (inner.x + x as u16, inner.y + y as u16));
+    let lines: Vec<Line> = view.lines.into_iter().map(Line::from).collect();
+    f.render_widget(Paragraph::new(lines).block(body_block), body_at);
+    scroll_mark(f, form.body.scroll(), body_at, "", active && form.field == Field::Body);
+
+    // 묻는 중에는 커서를 안 세운다 — 친 키가 글자로 들어가지 않는데 커서가 글 안에 서
+    // 있으면 거기 적힐 것처럼 보인다.
+    let cursor = match form.field {
+        Field::Title => title_cursor,
+        Field::Body => body_cursor,
+    };
+    if let Some(pos) = cursor.filter(|_| active && !form.leaving) {
+        f.set_cursor_position(pos);
+    }
+}
+
+/// 폼이 열린 동안의 맨 아랫줄 — 담는 법·칸 옮기는 법·닫는 법. **80칸에 다 든다.**
+///
+/// 거절된 까닭(빈 제목)과 버릴지 묻는 말은 이 줄을 차지한다 — 키 안내는 폼을 연
+/// 순간 이미 봤고, 지금 답해야 할 것은 그 말이다.
+fn jot_keys(f: &mut Frame, form: &Form, at: Rect) {
+    let line = if form.leaving {
+        let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
+        Line::from(Span::styled(" 적던 것을 버릴까 — y 버린다 · 다른 키는 폼으로 돌아간다 ", ask))
+    } else if let Some(e) = &form.error {
+        Line::from(vec![
+            Span::styled(" ! ", Style::new().fg(Color::Black).bg(Color::LightRed)),
+            Span::styled(format!(" {e}"), Style::new().fg(Color::LightRed)),
+        ])
+    } else {
+        let (next, enter) = match form.field {
+            Field::Title => ("본문", "본문으로"),
+            Field::Body => ("제목", "줄 나누기"),
+        };
+        Line::from(vec![
+            key("Ctrl-S·F2", "담기"),
+            key("Tab", next),
+            key("Enter", enter),
+            key("Esc", "닫기"),
+            Span::styled("   idea 로 담긴다 — 에픽 없이", dim()),
+        ])
+    };
+    let line = fit(line, at.width as usize);
+    f.render_widget(Paragraph::new(line), at);
 }
 
 /// 누군지 묻는 까닭과 **다시 안 묻게 하는 법.** 받은 것은 이 세션 동안만 들고
@@ -725,6 +821,10 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
     let mut optional = vec![
         key("w", if app.worktree { "워크트리 끄기" } else { "워크트리" }),
         key("j·k", "굴리기"),
+        // **`F5` 는 `n` 보다 먼저 떨어진다.** 파일이 바뀌면 저절로 다시 읽으므로(`App::follow`)
+        // F5 를 누를 일은 드물고, 생각을 담는 길은 이 탐색기가 처음 여는 쓰기다 — 80칸에서
+        // 둘 중 하나만 남는다면 담는 길이다.
+        key("F5", "갱신"),
         // **`Tab` 은 가는 곳을 댄다** — `F3 원문`·`w 워크트리 끄기` 와 같은 자다.
         // "칸 옮기기" 라 적으면 지금 어디 있는지는 테두리만 말하는데, 가는 곳을 적으면
         // 이 줄도 글자로 지금 자리를 말한다. 자리는 `F3` 앞이다 — 80칸에서 `j·k` 가
@@ -733,8 +833,8 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
         // `Tab` 이 먼저 떨어진다 — 그때도 테두리 모양이 포커스를 말하고, 되돌아올
         // 길(`F3 그리기`·`Esc 풀기`)과 나갈 길(`F10`)이 `Tab` 보다 급하다.
         key("Tab", pane_name(app.focus.next())),
+        key("n", "담기"),
         key("F3", if app.raw { "그리기" } else { "원문" }),
-        key("F5", "갱신"),
         key("f", "거름망"),
         key("/", "검색"),
         key("Bksp", "나가기"),
@@ -1743,6 +1843,169 @@ mod tests {
         assert!(line.contains("모양이 아니다") && !line.contains("Esc 그만"), "{line}");
         // 좁아도 무너지지 않는다
         render(&mut a, 20, 6);
+    }
+
+    fn press(a: &mut App, code: KeyCode) {
+        a.key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    fn typed(a: &mut App, s: &str) {
+        for c in s.chars() {
+            press(a, KeyCode::Char(c));
+        }
+    }
+
+    /// **생각 담기 폼은 80칸에서 색 없이 읽힌다.** 키를 먹는 칸은 굵은 선(`┏`)이고 화면에
+    /// 굵은 칸은 그것 하나다 — 폼이 뒤의 목록·상세를 통째로 덮는다. 칸 이름이 테두리에 서고,
+    /// 담는 법·칸 옮기는 법·닫는 법이 맨 아랫줄에 다 든다. `Tab` 이면 굵은 선이 본문으로 간다.
+    #[test]
+    fn the_idea_form_reads_without_colour_at_eighty_columns() {
+        let mut a = app();
+        press(&mut a, KeyCode::Char('n'));
+        typed(&mut a, "떠오른 것");
+        let lines = render(&mut a, 80, 24);
+        let screen = lines.join("\n");
+        let thick = |lines: &[String]| lines.iter().filter(|l| l.contains('┏')).cloned().collect::<Vec<_>>();
+        let t = thick(&lines);
+        assert_eq!(t.len(), 1, "굵은 칸이 하나가 아니다 — 폼이 뒤의 칸을 다 못 덮었다\n{screen}");
+        assert!(t[0].contains("제목"), "제목 칸이 굵지 않다\n{screen}");
+        assert!(lines.iter().any(|l| l.contains('┌') && l.contains("본문")), "본문 칸이 없다\n{screen}");
+        assert!(screen.contains("떠오른 것"), "{screen}");
+        let bar = lines.last().unwrap();
+        for hint in ["Ctrl-S·F2 담기", "Tab 본문", "Enter 본문으로", "Esc 닫기"] {
+            assert!(bar.contains(hint), "80칸에서 `{hint}` 가 없다 — {bar:?}");
+        }
+        assert!(!screen.contains("F10"), "폼이 열렸는데 F키 바가 섰다\n{screen}");
+
+        press(&mut a, KeyCode::Tab);
+        let lines = render(&mut a, 80, 24);
+        let t = thick(&lines);
+        assert!(t.len() == 1 && t[0].contains("본문"), "Tab 뒤에 굵은 선이 본문으로 안 갔다\n{}", lines.join("\n"));
+        let bar = lines.last().unwrap();
+        assert!(bar.contains("Tab 제목") && bar.contains("Enter 줄 나누기"), "{bar:?}");
+    }
+
+    /// 굵은 선은 **초록이기도 하다** — 목록·상세의 포커스와 같은 색이다. 모양만 보는
+    /// 시험으로는 색이 빠져도 조용히 지나간다.
+    #[test]
+    fn the_focused_form_field_is_green() {
+        let mut a = app();
+        press(&mut a, KeyCode::Char('n'));
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let (x, y) = (0..buf.area.height)
+            .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
+            .find(|&(x, y)| buf[(x, y)].symbol() == "┏")
+            .expect("굵은 칸이 없다");
+        assert_eq!(buf[(x, y)].fg, Color::Green);
+    }
+
+    /// 빈 제목의 거절과 버릴지 묻는 말은 **맨 아랫줄에 낱말로** 선다. 묻는 동안은 친 키가
+    /// 글자로 안 들어가므로 터미널 커서도 안 선다.
+    #[test]
+    fn the_form_says_why_it_refused_and_asks_before_dropping_in_words() {
+        let mut a = app();
+        press(&mut a, KeyCode::Char('n'));
+        press(&mut a, KeyCode::F(2));
+        let bar = render(&mut a, 80, 24).last().cloned().unwrap_or_default();
+        assert!(bar.contains("제목이 비었다"), "{bar:?}");
+
+        typed(&mut a, "적던 것");
+        press(&mut a, KeyCode::Esc);
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        assert!(!term.backend().cursor_visible(), "묻는 중인데 글 안에 커서가 섰다");
+        let bar = render(&mut a, 80, 24).last().cloned().unwrap_or_default();
+        assert!(bar.contains("버릴까") && bar.contains("y 버린다"), "{bar:?}");
+    }
+
+    /// 터미널 커서는 **키를 먹는 칸의 글 안 제자리에** 선다 — 제목에서는 제목 끝, 본문에서는
+    /// 커서가 선 줄. 칸이 낮아 본문이 굴러도 커서 줄이 보인다.
+    #[test]
+    fn the_terminal_cursor_stands_in_the_focused_field() {
+        use ratatui::backend::Backend;
+        let cursor = |a: &mut App, w: u16, h: u16| {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| screen(f, a)).unwrap();
+            let buf = term.backend().buffer().clone();
+            let at = term.backend_mut().get_cursor_position().unwrap();
+            (term.backend().cursor_visible(), at, buf)
+        };
+        let mut a = app();
+        press(&mut a, KeyCode::Char('n'));
+        typed(&mut a, "가a");
+        let (shown, at, buf) = cursor(&mut a, 80, 24);
+        assert!(shown);
+        // 제목 칸 안쪽 첫 칸 뒤로 `가`(2칸)·`a`(1칸)
+        let x0 = (0..80).find(|&x| buf[(x, at.y)].symbol() == "가").expect("커서 줄에 제목이 없다");
+        assert_eq!(at.x, x0 + 3, "커서가 제목 끝에 안 섰다");
+
+        press(&mut a, KeyCode::Tab);
+        for n in 0..30 {
+            typed(&mut a, &format!("줄{n}"));
+            press(&mut a, KeyCode::Enter);
+        }
+        typed(&mut a, "끝");
+        let (shown, at, buf) = cursor(&mut a, 80, 24);
+        assert!(shown);
+        assert_eq!(buf[(at.x - 2, at.y)].symbol(), "끝", "커서가 본문 끝 줄에 안 섰다");
+        let lines = render(&mut a, 80, 24).join("\n");
+        assert!(lines.contains("↑ "), "굴린 본문이 위에 남은 줄을 안 댄다\n{lines}");
+    }
+
+    /// **담다가 누군지 물으면 적던 폼이 뒤에 그대로 보인다.** 키는 묻는 칸이 먹으므로 폼에
+    /// 굵은 칸은 없고, 커서는 묻는 칸에 선다.
+    #[test]
+    fn the_form_stays_behind_the_question_without_the_focus() {
+        use ratatui::backend::Backend;
+        let mut a = app();
+        press(&mut a, KeyCode::Char('n'));
+        typed(&mut a, "적던 것");
+        let form = std::mem::replace(&mut a.mode, Mode::Browse);
+        a.mode = Mode::Ask(super::super::Ask {
+            input: Input::new("레이"),
+            error: None,
+            why: "누가 하는지 모른다".into(),
+            back: Box::new(form),
+            then: |_| {},
+        });
+        let lines = render(&mut a, 80, 24);
+        let shown = lines.join("\n");
+        assert!(shown.contains("적던 것") && shown.contains("생각 담기"), "묻는 동안 폼이 사라졌다\n{shown}");
+        assert!(!shown.contains('┏'), "묻는 중인데 폼의 칸이 굵다\n{shown}");
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        assert_eq!(term.backend_mut().get_cursor_position().unwrap().y, 23, "커서가 묻는 칸에 안 섰다");
+    }
+
+    /// 폼이 열린 채로 **좁고 낮은 창**에서도 무너지지 않고 줄이 넘치지 않는다.
+    #[test]
+    fn the_idea_form_survives_tiny_windows() {
+        let mut a = app();
+        press(&mut a, KeyCode::Char('n'));
+        typed(&mut a, "아주 긴 한글 제목이 여기 들어가서 좁은 창을 넘친다");
+        press(&mut a, KeyCode::Tab);
+        typed(&mut a, "본문");
+        press(&mut a, KeyCode::Enter);
+        typed(&mut a, "둘째 줄");
+        for w in [1u16, 4, 10, 20, 39, 40, 60] {
+            for h in [1u16, 2, 3, 4, 6, 10] {
+                for l in render(&mut a, w, h) {
+                    assert!(crate::text::width(&l) <= w as usize, "{w}x{h}: {l:?}");
+                }
+            }
+        }
+    }
+
+    /// **F키 바가 `n` 을 댄다. 80칸에서도** — 담는 길이 안 보이면 없는 길이다. 떨어지는
+    /// 것은 저절로 다시 읽어 누를 일이 드문 `F5` 다. `Tab`·`F10` 은 그대로 남는다.
+    #[test]
+    fn the_key_bar_names_n_at_eighty_columns() {
+        let bar = render(&mut app(), 80, 14).last().cloned().unwrap_or_default();
+        assert!(bar.contains("n 담기") && bar.contains("Tab 상세") && bar.contains("F10 끝내기"), "{bar:?}");
+        let wide = render(&mut app(), 120, 14).last().cloned().unwrap_or_default();
+        assert!(wide.contains("F5 갱신") && wide.contains("n 담기"), "{wide:?}");
     }
 
     /// 빈 저장소도 그려진다.

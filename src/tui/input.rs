@@ -160,7 +160,6 @@ impl Input {
 /// **글자를 걷는 자는 여기 하나다.** 줄마다 grapheme·폭 셈을 새로 적으면 두 칸의
 /// 커서가 같은 글에서 다른 자리에 선다. 여러 줄 칸은 줄을 가르고 잇는 것만 하고,
 /// 한 줄 안의 일은 [`Input::key`] 에 맡긴다.
-#[cfg_attr(not(test), expect(dead_code, reason = "첫 부르는 곳은 `n` 폼의 본문이다(moai-11s4)"))]
 impl Input {
     pub(super) fn at_start(&self) -> bool {
         self.at == 0
