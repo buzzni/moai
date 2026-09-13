@@ -18,6 +18,9 @@ fs2           = "0.4"
 # crossterm 0.29 는 이미 로컬에 있던 판이라 그것을 그대로 쓴다.
 ratatui       = { version = "0.30", default-features = false, features = ["crossterm_0_29", "layout-cache"] }
 pulldown-cmark = { version = "0.13.4", default-features = false }
+# 사용자 설정(`user_config`)을 고쳐 쓸 때 모르는 키·주석·줄 모양을 보존한다.
+# `serde` 기능은 끈다 — 표 배열 하나를 읽는 데 역직렬화가 필요 없다.
+toml_edit     = { version = "0.25.15", default-features = false, features = ["parse", "display"] }
 
 [profile.release]
 lto = true

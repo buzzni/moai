@@ -46,6 +46,7 @@ impl Drop for Scratch {
 ///   가리키는 변수(`GIT_DIR`·`GIT_WORK_TREE`·…)도 걷는다 — git 훅이나
 ///   `git -c … rebase -x 'cargo test'` 안에서 돌면 git 이 이것들을 내보내고,
 ///   그러면 moai 의 `git config user.name` 이 바깥 사람의 이름을 읽는다
+/// - `MOAI_CONFIG`·`XDG_CONFIG_HOME` — 사용자 설정(등록한 프로젝트 목록)의 자리
 /// - `MOAI_ACTOR`·`MOAI_NOW` — 셸에 내보내 둔 값이 새면 "사람을 못 찾는다" 와
 ///   "시계를 고정하지 않았다" 를 보려던 시험이 조용히 딴것을 본다
 ///
@@ -64,7 +65,12 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env_remove("MOAI_ACTOR")
-        .env_remove("MOAI_NOW");
+        .env_remove("MOAI_NOW")
+        // 사용자 설정은 **없는 파일**을 가리킨다. 등록한 프로젝트가 새면 `.moai`
+        // 밖에서 부르는 시험이 돌리는 사람의 프로젝트를 본다. `XDG_CONFIG_HOME` 도
+        // 걷는다 — `MOAI_CONFIG` 를 덮어쓴 시험이 그것을 지우면 그다음 자리다.
+        .env("MOAI_CONFIG", home.join("moai-config-unset/config.toml"))
+        .env_remove("XDG_CONFIG_HOME");
     for var in GIT_LEAKS {
         cmd.env_remove(var);
     }
@@ -4198,13 +4204,16 @@ fn the_fake_claude_command_starts_from_the_isolated_one() {
     let removed = |var: &str| matches!(envs.get(std::ffi::OsStr::new(var)), Some(None));
     let set = |var: &str| envs.get(std::ffi::OsStr::new(var)).copied().flatten();
 
-    for var in ["MOAI_ACTOR", "MOAI_NOW", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR"]
+    for var in ["MOAI_ACTOR", "MOAI_NOW", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "XDG_CONFIG_HOME"]
         .iter()
         .chain(GIT_LEAKS)
     {
         assert!(removed(var), "{var} 를 안 걷었다");
     }
     assert_eq!(set("GIT_CONFIG_GLOBAL"), Some(std::ffi::OsStr::new("/dev/null")));
+    // 사용자 설정은 공용 빈 집 밑의 **없는** 파일이다. 집을 덮어도 이 자리는 따라가지 않는다.
+    let config = Path::new(set("MOAI_CONFIG").expect("MOAI_CONFIG 를 안 줬다"));
+    assert!(config.starts_with(env!("CARGO_TARGET_TMPDIR")) && !config.exists(), "사용자 설정이 격리되지 않았다 — {}", config.display());
     assert_eq!(set("HOME"), Some(c.home.path().as_os_str()), "집은 가짜 claude 의 것이어야 한다");
     let path = set("PATH").expect("PATH 를 안 줬다").to_string_lossy().into_owned();
     assert!(path.starts_with(&c.bin.display().to_string()), "가짜 claude 가 PATH 앞에 없다 — {path}");
