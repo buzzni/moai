@@ -494,3 +494,12 @@
 {"ts":"2026-09-13T03:14:54Z","id":"moai-91jk.97c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-13T03:17:47Z","id":"moai-91jk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"skill install(959.294.225) 뒤 /compact 로 사람이 확인했다. 검증 오류 없이 Compacted 만 떴고, SessionStart:compact 의 additionalContext 로 '압축 전부터 이것을 집고 있다: moai-91jk.97c …' 가 압축 요약과 따로 붙었다. 이어진 첫 프롬프트에서 보드도 다시 실렸다 — .board 표 지우기가 실제로 먹는다. UserPromptSubmit 으로 옮기는 대안은 필요 없다."}
 {"ts":"2026-09-13T03:17:48Z","id":"moai-91jk.97c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"SessionStart:compact 출력이 붙는 것을 확인, 보드 재주입도 확인"}
+{"ts":"2026-09-13T03:43:03Z","id":"moai-2w0s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
+{"ts":"2026-09-13T04:00:42Z","id":"moai-pz7h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"여는 조건 미충족 — 임계값 상수를 고치고 싶어진 적 0회 (09-11·09-12 실측)"}
+{"ts":"2026-09-13T04:00:42Z","id":"moai-x2vs","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"여는 조건 미충족 — issues.jsonl 실제 충돌 0회"}
+{"ts":"2026-09-13T04:00:42Z","id":"moai-g33x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"여는 조건 미충족 — Typed 에 동사를 더할 때 연다"}
+{"ts":"2026-09-13T04:00:42Z","id":"moai-uiyf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"여는 조건 미충족 — Kind 를 하나 더 더할 때 연다"}
+{"ts":"2026-09-13T04:00:43Z","id":"moai-c6z8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"여는 조건 미충족 — 셋째 묶음 동사가 생길 때 연다"}
+{"ts":"2026-09-13T04:00:43Z","id":"moai-ecvy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"여는 조건 미충족 — 강조가 사라져 실제 오해가 난 적 없음"}
+{"ts":"2026-09-13T04:00:43Z","id":"moai-fauw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"여는 조건 미충족 — 훑기가 끈적하다는 보고 없음. 6단계 moai-qxbt 를 열 때 같이 본다"}
+{"ts":"2026-09-13T04:00:43Z","id":"moai-7j4j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-nmv2(7단계) 가 이어받았다 — 한 일이 아니라 넘긴 일이라 done 이 아니다"}
