@@ -672,7 +672,10 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
         // **`Tab` 은 가는 곳을 댄다** — `F3 원문`·`w 워크트리 끄기` 와 같은 자다.
         // "칸 옮기기" 라 적으면 지금 어디 있는지는 테두리만 말하는데, 가는 곳을 적으면
         // 이 줄도 글자로 지금 자리를 말한다. 자리는 `F3` 앞이다 — 80칸에서 `j·k` 가
-        // 떨어진 뒤에도 남는다(`the_key_bar_names_tab_at_eighty_columns`).
+        // 떨어진 뒤에도 남는다(`the_key_bar_names_tab_at_eighty_columns`). 단 한 칸
+        // 여유뿐이라, 80칸에서 거름망(`Esc 풀기`)을 걸었거나 `F3 그리기` 로 늘면
+        // `Tab` 이 먼저 떨어진다 — 그때도 테두리 모양이 포커스를 말하고, 되돌아올
+        // 길(`F3 그리기`·`Esc 풀기`)과 나갈 길(`F10`)이 `Tab` 보다 급하다.
         key("Tab", pane_name(app.focus.next())),
         key("F3", if app.raw { "그리기" } else { "원문" }),
         key("F5", "갱신"),
