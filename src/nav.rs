@@ -694,6 +694,28 @@ mod tests {
             counted.sort();
             assert_eq!(counted, drawn, "{} 가 그리는 것과 세는 것이 갈린다 — {issues:#?}", stone.id);
         }
+        // 에픽도 같다. **폴더인 줄만** 본다 — 같은 id 의 가려진 줄은 잎이라 밑이 없다
+        // (moai-sfml). 에픽 밑에는 일만 그려지고 세어진다. id 부모가 에픽인 줄이
+        // 그 에픽에 드는 것(moai-9t3l)도 여기서 그리는 자와 세는 자가 한 번 더 만난다.
+        for (at, epic) in issues.iter().enumerate().filter(|(_, i)| i.kind == Kind::Epic) {
+            if index.find(&epic.id) != Some(at) {
+                continue;
+            }
+            let mut path = index.home_of(at).clone();
+            path.push(Seg::Epic(epic.id.clone()));
+            let mut drawn: Vec<&str> = index
+                .descendants(&path)
+                .into_iter()
+                .map(|d| &issues[d])
+                .filter(|i| i.kind == Kind::Issue)
+                .map(|i| i.id.as_str())
+                .collect();
+            drawn.sort();
+            let mut counted: Vec<&str> =
+                crate::report::group_members(issues, epic).iter().map(|i| i.id.as_str()).collect();
+            counted.sort();
+            assert_eq!(counted, drawn, "{} 가 그리는 것과 세는 것이 갈린다 — {issues:#?}", epic.id);
+        }
     }
 
     /// **무작위 더미로 같은 대조를 돌린다.** 표로 적은 모양은 누가 떠올린 것뿐이다 —
