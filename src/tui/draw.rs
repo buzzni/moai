@@ -103,6 +103,13 @@ fn banner(app: &App) -> Option<(String, bool)> {
         parts.push(t.clone());
         urgent = true;
     }
+    // 쓰기의 알림은 **실패 바로 뒤, 붙박이들 앞이다.** 다음 키에 사라지는 말이라 뒤에
+    // 서면 80칸에서 "드러난 것 N건" 에 밀려 잘리고, 그러면 담긴 것을 확인할 길이 없다.
+    // 실패보다 앞서지 않는다 — 둘이 함께 서는 것은 담긴 뒤 다시 읽기가 실패했을 때고,
+    // 그때 사람이 할 일은 실패 쪽에 있다. 알림만으로는 급하지 않다(`✓` 가 뜻을 진다).
+    if let Some(n) = &app.notice {
+        parts.push(n.clone());
+    }
     if !app.unreadable.is_empty() {
         parts.push(format!("읽을 수 없는 줄 {}개 — 그 줄은 빠진 채로 보고 있다", app.unreadable.len()));
         urgent = true;
@@ -113,7 +120,10 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 옆 워크트리의 문제는 **급하지 않다** — 제 파일은 멀쩡하고, 그 줄만 빠진 채로
     // 겹쳐 보고 있다.
     parts.extend(app.elsewhere.iter().cloned());
-    (!parts.is_empty()).then(|| (format!(" ! {} ", parts.join("   ·   ")), urgent))
+    // 알림 하나뿐이면 `!` 를 안 붙인다 — 담긴 것을 경보처럼 말하면 담을 때마다 무언가
+    // 잘못된 줄 안다.
+    let lead = if parts.len() == 1 && app.notice.is_some() { "" } else { "! " };
+    (!parts.is_empty()).then(|| (format!(" {lead}{} ", parts.join("   ·   ")), urgent))
 }
 
 fn crumbs(f: &mut Frame, app: &App, at: Rect) {
@@ -1170,6 +1180,28 @@ mod tests {
         a.trouble = Some("쓰지 못했다 — 락".into());
         let lines = render(&mut a, 100, 14).join("\n");
         assert!(lines.contains("쓰지 못했다 — 락") && !lines.contains("다시 읽지"), "{lines}");
+    }
+
+    /// **쓰기의 알림은 80칸에서도 붙박이에 밀려 잘리지 않는다.** 드러난 것·못 읽는
+    /// 줄이 함께 서도 만든 id 가 보이고, 거름망에 가렸다는 말도 선다. 알림만이면
+    /// 급한 색이 아니다 — 뜻은 `✓` 와 낱말이 진다.
+    #[test]
+    fn a_write_notice_survives_eighty_columns_beside_the_standing_banner() {
+        let mut a = app();
+        a.warnings = 4;
+        a.unreadable = vec![None; 2];
+        a.notice = Some("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다".into());
+        let lines = render(&mut a, 80, 12);
+        assert!(lines[1].contains("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다"), "{}", lines.join("\n"));
+        assert!(lines.iter().all(|l| crate::text::width(l) <= 80));
+
+        a.warnings = 0;
+        a.unreadable.clear();
+        assert_eq!(banner(&a), Some((" ✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다 ".into(), false)));
+        // 다시 읽기가 실패했으면 실패가 앞에 선다.
+        a.trouble = Some("다시 읽지 못했다 — 락".into());
+        let (text, urgent) = banner(&a).unwrap();
+        assert!(urgent && text.find("다시 읽지").unwrap() < text.find("담김").unwrap(), "{text}");
     }
 
     /// 경로 줄이 **언제 읽은 화면인지** 댄다. 저절로 다시 읽으므로 배너는 없고,
