@@ -52,7 +52,18 @@ pub fn epic_labels(all: &[Issue]) -> BTreeMap<&str, String> {
 /// 아니라 [`deferred_roots`] 다 — 부모·에픽·마일스톤에서 물려받은 것까지 친다.
 /// 그래서 밖에 내지 않는다: 이것을 부르는 표면은 미룬 에픽의 멤버를 계획으로 읽는다.
 fn is_put_off(i: &Issue) -> bool {
-    i.is_deferred() && !i.status.is_done()
+    i.is_deferred() && !closed_by_hand(i)
+}
+
+/// 적힌 칸이 닫힌 줄인가. **묶음은 적힌 칸으로 닫히지 않는다** — 묶음의 칸은
+/// 멤버에서 읽는다([`group_states`]). 여기서 적힌 `done` 을 믿으면 손으로 `done`
+/// 에 둔 에픽을 미뤄도 그 멤버가 미룸을 안 물려받아 `ready` 에 그대로 선다.
+///
+/// 읽은 칸으로 묻지 않는 까닭은 순환이다 — 읽은 칸이 미룸을 쓴다. 그래서 묶음은
+/// 칸을 아예 안 보고 미룸만 본다. 읽은 칸이 done 인 묶음은 셀 멤버가 이미 끝났거나
+/// 따로 미룬 것이라, 그 묶음을 미룬 것으로 쳐도 멤버 쪽 답은 같다.
+fn closed_by_hand(i: &Issue) -> bool {
+    !is_group(i) && i.status.is_done()
 }
 
 /// 지금 계획에서 빠진 줄의 id — **제가 미뤘거나, 미룬 것 밑에 있는 것.**
@@ -153,7 +164,7 @@ fn deferred_roots_in<'a>(
         None
     };
     all.iter()
-        .filter(|i| !i.status.is_done())
+        .filter(|i| !closed_by_hand(i))
         .filter_map(|i| root(i.id.as_str()).map(|r| (i.id.as_str(), r)))
         .collect()
 }
@@ -1915,6 +1926,21 @@ mod tests {
         let mut own = with(false, false);
         own[3] = put_off_line(own[3].clone());
         assert_eq!(state_of(&own, "argos-0001"), "done");
+    }
+
+    /// **손으로 done 에 둔 묶음도 미루면 그 밑이 물려받는다.** 적힌 칸은 묶음을
+    /// 닫지 않는다 — 믿으면 미룬 에픽의 남은 일이 `ready` 에 그대로 선다.
+    #[test]
+    fn a_grouping_closed_by_hand_still_hands_down_its_deferral() {
+        let issues = vec![
+            put_off_line(make("argos-0001", Kind::Epic, "done")),
+            member("argos-0002", "argos-0001", "todo"),
+            member("argos-0003", "argos-0001", "done"),
+        ];
+        let out = put_off(&issues);
+        assert!(out.contains("argos-0002"), "남은 멤버가 미룸을 안 받았다 — {out:?}");
+        assert!(out.contains("argos-0001") && !out.contains("argos-0003"), "{out:?}");
+        assert!(ready(&issues, &cfg()).is_empty());
     }
 
     /// 마일스톤도 같은 자로 읽는다 — 에픽을 거쳐 온 이슈와 물려받은 자식까지.
