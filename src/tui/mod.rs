@@ -156,10 +156,19 @@ impl Pane {
     }
 }
 
-fn states_of(issues: &[Issue], cfg: &Config) -> std::collections::BTreeMap<String, String> {
-    crate::report::group_states(issues, cfg)
+/// 묶음 id → 멤버에서 읽은 것(`report::group_stands`). 이슈를 빌리지 않게 소유한다.
+type States = std::collections::BTreeMap<String, Stood>;
+
+/// 묶음 하나를 읽은 것 — 서 있는 칸과, 그 밑에 집은 일이 있는가(`report::Stand::busy`).
+struct Stood {
+    column: String,
+    busy: bool,
+}
+
+fn states_of(issues: &[Issue], cfg: &Config) -> States {
+    crate::report::group_stands(issues, cfg)
         .into_iter()
-        .map(|(id, col)| (id.to_string(), col.to_string()))
+        .map(|(id, s)| (id.to_string(), Stood { column: s.column.to_string(), busy: s.busy }))
         .collect()
 }
 
@@ -174,7 +183,7 @@ pub struct Fresh {
     stamp: Stamp,
     issues: Vec<Issue>,
     index: Index,
-    states: std::collections::BTreeMap<String, String>,
+    states: States,
     warnings: usize,
     unreadable: Vec<Option<String>>,
     origin: crate::worktree::Origin,
@@ -230,7 +239,7 @@ pub struct App {
     pub index: Index,
     /// 묶음 id → 멤버에서 읽은 칸 (`report::group_states`). **적재 때 한 번 센다**
     /// — 프레임마다 세면 줄 하나 그리는 데 저장소를 걷는다.
-    states: std::collections::BTreeMap<String, String>,
+    states: States,
     pub cfg: Config,
     pub path: Path,
     pub cursor: usize,
@@ -541,12 +550,26 @@ impl App {
     /// 것을 위해 걸음을 재는 것이다. 반대쪽은 안 틀린다 — 화면에 도는 글리프가
     /// 있으면 그 이슈는 `issues` 에 있으므로 여기가 참이다. 스피너를 그려 놓고
     /// 아무도 안 깨우는 조합은 그래서 못 생긴다.
-    /// **묶음은 안 센다.** 묶음이 읽은 칸은 `in_progress` 라도 그 자리에서 누가
-    /// 손대고 있다는 뜻이 아니다 — 멤버 하나가 끝나고 하나가 남기만 해도 그렇게
-    /// 읽힌다. 그것으로 깨우면 아무 일도 안 벌어진 저장소에서 탐색기가 120ms 마다
-    /// 깨어 도는 글리프를 그린다. 그리는 쪽(`draw::row_line`)도 묶음은 안 돌린다.
+    ///
+    /// **줄마다 묻는 자는 [`App::spins`] 하나다** — 그리는 쪽(`draw::glyph_of`)과 깨우는
+    /// 쪽이 따로 판단하면 한쪽만 고쳐져, 도는데 안 깨우거나 안 도는데 깨운다.
     pub fn spinning(&self) -> bool {
-        self.issues.iter().any(|i| !crate::report::is_group(i) && crate::style::spins(i.status.as_str()))
+        (0..self.issues.len()).any(|at| self.spins(at))
+    }
+
+    /// 그 줄이 도는가 — **지금 누가 손대고 있는 줄**이다.
+    ///
+    /// 일은 제 칸이 도는 칸이면 돈다. **묶음은 읽은 칸이 도는 칸이고, 그 밑에 집은 일이
+    /// 실제로 있을 때만** 돈다(`report::Stand::busy`). 읽은 칸만 보면 멤버 하나가 끝나고
+    /// 나머지가 `todo` 이기만 해도 `in_progress` 로 읽혀, 아무도 손대지 않는데 돌고
+    /// 반쯤 끝난 에픽 하나가 탐색기를 120ms 마다 영영 깨운다(ce73eda). 그렇다고 묶음을
+    /// 아예 안 돌리면 멤버를 집은 에픽이 `▸` 로 멈춰 서서, 목록 뿌리에서 무엇이 움직이는지
+    /// 안 보인다(moai-x5eg). `--worktree` 로 겹친 줄도 겹친 칸으로 센다 — 옆에서 집은
+    /// 멤버가 이 탐색기의 에픽을 돌린다.
+    pub fn spins(&self, at: usize) -> bool {
+        let i = &self.issues[at];
+        let busy = !crate::report::is_group(i) || self.states.get(&i.id).is_some_and(|s| s.busy);
+        busy && crate::style::spins(self.column(at))
     }
 
     /// 그 줄이 **서 있는** 칸 — 묶음이면 멤버에서 읽은 칸, 아니면 제 칸. CLI 가
@@ -554,7 +577,7 @@ impl App {
     pub fn column(&self, at: usize) -> &str {
         let i = &self.issues[at];
         crate::report::is_group(i)
-            .then(|| self.states.get(&i.id).map(String::as_str))
+            .then(|| self.states.get(&i.id).map(|s| s.column.as_str()))
             .flatten()
             .unwrap_or(i.status.as_str())
     }
@@ -580,7 +603,7 @@ impl App {
         &mut self,
         issues: Vec<Issue>,
         index: Index,
-        states: std::collections::BTreeMap<String, String>,
+        states: States,
         now: String,
     ) {
         // **옛 자료로 잰다** — 줄의 첨자는 옛 `issues` 를 가리킨다.
@@ -1181,6 +1204,51 @@ mod tests {
         issues[3].status = Status::new("in_progress");
         a.adopt(issues);
         assert!(a.spinning(), "in_progress 가 있는데 안 돈다고 한다");
+    }
+
+    /// 줄마다 도는지(`App::spins`) — **묶음은 그 밑에 집은 일이 있을 때만 돈다**
+    /// (moai-x5eg). 깨우는 쪽(`spinning`)은 이 답을 모은 것이어야 한다.
+    #[test]
+    fn a_group_spins_only_while_a_member_is_held() {
+        fn spun(a: &App) -> Vec<&str> {
+            (0..a.issues.len()).filter(|&at| a.spins(at)).map(|at| a.issues[at].id.as_str()).collect()
+        }
+        let mut mile = make("argos-0005", Kind::Milestone);
+        mile.status = Status::new("todo");
+        let mut epic = make("argos-0001", Kind::Epic);
+        epic.milestone = Some("argos-0005".into());
+        let mut closed = member("argos-0002", "argos-0001");
+        closed.status = Status::new("done");
+        let mut issues = vec![mile, epic, closed, member("argos-0003", "argos-0001")];
+        let mut a = App::new(issues.clone(), cfg(), Path::new());
+
+        // 끝난 것 하나와 첫 칸 하나 — 둘 다 `in_progress` 로 읽히지만 아무도 손대지 않는다.
+        assert_eq!((a.column(0), a.column(1)), ("in_progress", "in_progress"));
+        assert!(spun(&a).is_empty(), "반쯤 끝난 묶음이 돈다 — {:?}", spun(&a));
+        assert!(!a.spinning());
+
+        // 하나를 집으면 그 일과 에픽, 그리고 **에픽을 거쳐 물려받은 마일스톤**까지 돈다.
+        issues[3].status = Status::new("in_progress");
+        a.adopt(issues.clone());
+        assert_eq!(spun(&a), ["argos-0005", "argos-0001", "argos-0003"]);
+        assert!(a.spinning());
+
+        // **미룬 멤버는 묶음을 안 돌린다.** 칸 셈이 그 멤버를 빼므로(`report::counted`)
+        // 곁들이도 뺀다 — 에픽은 끝난 멤버만 남아 `done` 으로 읽힌다. 미룬 일 제 줄은
+        // 제 칸대로 돈다: 줄 하나의 글리프는 제 칸을 말한다.
+        issues[3].deferred_at = Some("2026-09-02T00:00:00Z".into());
+        a.adopt(issues.clone());
+        assert_eq!(a.column(1), "done");
+        assert_eq!(spun(&a), ["argos-0003"], "미룬 멤버가 묶음을 돌린다");
+
+        // **묶음 제가 받은 미룸으로는 멤버를 안 뺀다** — 에픽을 미뤄도 집은 멤버는 센다.
+        issues[3].deferred_at = None;
+        issues[1].deferred_at = Some("2026-09-02T00:00:00Z".into());
+        a.adopt(issues);
+        assert!(spun(&a).contains(&"argos-0001"), "제 미룸으로 집은 멤버를 뺐다 — {:?}", spun(&a));
+
+        // 깨우는 쪽은 줄마다의 답을 모은 것이다.
+        assert_eq!(a.spinning(), !spun(&a).is_empty());
     }
 
     /// 스레드에서 짓는 다시 읽기를 **끝날 때까지** 받는다. 루프가 하는 것을 흉내 낸다.

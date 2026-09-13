@@ -352,9 +352,15 @@ pub fn group_members<'a>(all: &'a [Issue], group: &Issue) -> Vec<&'a Issue> {
 ///   아니면 **시작한 칸** (`Config::started_status`). 멤버가 모두 `review` 여도
 ///   시작한 칸이다 — 묶음이 설 칸은 "안 했다·하는 중·끝났다" 셋이다
 pub fn group_states<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, &'c str> {
+    group_stands(all, cfg).into_iter().map(|(id, s)| (id, s.column)).collect()
+}
+
+/// [`group_states`] 와 같은 셈에서 **칸과 곁들이([`Stand`])를 함께** 낸다. 소속 지도를
+/// 따로 안 든 쪽(탐색기의 적재)이 부른다.
+pub fn group_stands<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, Stand<'a, 'c>> {
     let (epic_of, mile_of) = (groups(all), milestones(all));
     let roots = deferred_roots_in(all, &epic_of, &mile_of);
-    group_states_in(all, cfg, &epic_of, &mile_of, &roots)
+    group_stands_in(all, cfg, &epic_of, &mile_of, &roots)
 }
 
 /// [`group_states`] 를 **그 줄들 가운데 묶음이 있을 때만** 센다.
@@ -416,6 +422,18 @@ pub struct Stand<'a, 'c> {
     /// **적힌 `status_since` 는 안 쓴다** — 아무 데서도 안 읽히는 칸의 시각이라,
     /// `--stale` 이 그것으로 재면 오늘 진행 중이 된 에픽을 "열흘째 멈춰 있다" 고 한다.
     pub since: &'a str,
+    /// 셀 멤버 가운데 **적힌 칸이 시작한 칸**(`Config::started_status`)인 일이 있는가 —
+    /// 지금 누가 그 묶음 밑에서 손대고 있다는 말.
+    ///
+    /// 읽은 칸만으로는 이 말을 못 한다. 묶음은 멤버 하나가 끝나고 나머지가 첫 칸이기만
+    /// 해도 시작한 칸으로 읽힌다(`column_of`) — 막대로는 "반쯤 했다" 지 "하는 중" 이 아니다.
+    /// 탐색기가 묶음을 돌릴지를 이것으로 가른다(moai-x5eg).
+    ///
+    /// **셀 멤버에서만 찾는다.** 미뤄 칸 셈에서 빠진 멤버가 `in_progress` 에 있어도
+    /// 묶음은 그것으로 안 바쁘다 — 칸이 그 멤버를 안 세는데 곁들이만 세면, 한 줄이
+    /// `todo` 로 서면서 도는 글리프를 낸다. 시작한 칸이 첫 칸과 같은 두 칸짜리 설정에서는
+    /// 시작했다는 말 자체가 없으므로 언제나 거짓이다.
+    pub busy: bool,
 }
 
 /// [`group_states_in`] 과 같은 한 번의 셈에서 칸과 시각을 함께 낸다.
@@ -438,7 +456,10 @@ pub fn group_stands_in<'a, 'c>(
                 .map(|m| m.status_since.as_str())
                 .max()
                 .unwrap_or(g.created_at.as_str());
-            (g.id.as_str(), Stand { column: column_of(&counted, cfg), since })
+            let started = cfg.started_status();
+            let busy = started != cfg.first_status()
+                && counted.iter().any(|m| m.status.as_str() == started);
+            (g.id.as_str(), Stand { column: column_of(&counted, cfg), since, busy })
         })
         .collect()
 }
@@ -2481,6 +2502,32 @@ mod tests {
         assert_eq!(stands["argos-0001"].since, "2026-09-11T00:00:00Z");
         // 셀 멤버가 없으면 묶음이 생긴 때다 — 안 읽히는 칸의 시각은 안 쓴다.
         assert_eq!(stands["argos-0007"].since, "2026-09-01T00:00:00Z");
+    }
+
+    /// **읽은 칸과 "집은 멤버가 있다" 는 다른 말이다.** 끝난 멤버 하나와 첫 칸 하나로도
+    /// 묶음은 시작한 칸으로 읽히지만 아무도 손대지 않는다(moai-x5eg). 두 칸짜리 설정에는
+    /// 시작했다는 말이 없어 언제나 거짓이다.
+    #[test]
+    fn a_group_is_busy_only_with_a_member_in_the_started_column() {
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "todo"),
+            member("argos-0002", "argos-0001", "done"),
+            member("argos-0003", "argos-0001", "todo"),
+            make("argos-0004", Kind::Epic, "todo"),
+            member("argos-0005", "argos-0004", "review"),
+            make("argos-0006", Kind::Epic, "todo"),
+            member("argos-0007", "argos-0006", "in_progress"),
+        ];
+        let cfg = cfg();
+        let stands = group_stands(&issues, &cfg);
+        let read = |id: &str| (stands[id].column, stands[id].busy);
+        assert_eq!(read("argos-0001"), ("in_progress", false), "반쯤 끝난 에픽을 바쁘다고 한다");
+        assert_eq!(read("argos-0004"), ("in_progress", false), "review 멤버를 집은 것으로 셌다");
+        assert_eq!(read("argos-0006"), ("in_progress", true));
+
+        let two = Config::parse("prefix = \"argos\"\nstatuses = \"todo, done\"\n").unwrap();
+        let issues = vec![make("argos-0001", Kind::Epic, "todo"), member("argos-0002", "argos-0001", "todo")];
+        assert!(!group_stands(&issues, &two)["argos-0001"].busy, "첫 칸 멤버를 집은 것으로 셌다");
     }
 
     // ── idea 는 일이 아니다 ──────────────────────────────────────────
