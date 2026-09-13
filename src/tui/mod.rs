@@ -139,6 +139,11 @@ pub struct App {
     /// 조용히 삼키면 F5 가 아무 일도 안 하는데 "바뀌었다" 배너는 붙어 있어, 사람은
     /// 누르고 또 누르며 까닭을 못 얻는다.
     pub trouble: Option<String>,
+    /// `trouble` 이 **쓰기의 실패**인가. 그렇다면 다시 읽기가 성공해도 걷지 않는다 —
+    /// 락을 못 잡은 때가 곧 남이 쓰고 있던 때라 바로 다음 걸음이 다시 읽고, 그 읽기가
+    /// 까닭을 지우면 폼은 열린 채인데 왜 안 닫혔는지가 화면 어디에도 없다. 걷는 것은
+    /// 다음에 성공한 쓰기나, 그 자리를 덮는 읽기의 실패다.
+    write_failed: bool,
     /// `--user` 로 **준 값 그대로**(`Ctx::user` 와 같다). 쓸 때마다 `model::actor` 로
     /// 푼다 — 미리 풀어 두면 설정 없는 기계에서 읽기만 하려던 탐색기가 여는 순간
     /// 사람을 묻는다. 읽기는 묻지 않는다.
@@ -237,6 +242,7 @@ impl App {
             now: crate::model::now(),
             unreadable: unreadable_ids,
             trouble: None,
+            write_failed: false,
             user: None,
             warnings: 0,
             stamp: None,
@@ -277,7 +283,10 @@ impl App {
     fn receive(&mut self, fresh: crate::fail::R<Fresh>) {
         match fresh {
             Ok(f) => self.apply_fresh(f),
-            Err(e) => self.trouble = Some(format!("다시 읽지 못했다 — {e}")),
+            Err(e) => {
+                self.trouble = Some(format!("다시 읽지 못했다 — {e}"));
+                self.write_failed = false;
+            }
         }
     }
 
@@ -297,7 +306,8 @@ impl App {
     ///
     /// **실패를 삼키지 않는다.** 대체 화면 안에서는 stderr 가 안 보이므로 `trouble`
     /// 로 말하고 `None` 을 낸다 — 부른 쪽(폼)은 그것을 보고 적던 것을 닫지 않는다.
-    /// 실패하면 **다시 읽지 않는다**: 파일은 그대로고, 읽으면 방금 단 까닭이 지워진다.
+    /// 실패하면 **다시 읽지 않는다**: 파일은 그대로다. 그 뒤 저절로 다시 읽어도 까닭은
+    /// 남는다(`write_failed`) — 다음 쓰기가 성공할 때 걷힌다.
     ///
     /// **누군지 모르면 락을 잡기 전에 멈춘다.** 이름 없는 줄을 적느니 한 번 묻는다는
     /// 규약이고, 묻는 화면은 따로 선다(moai-nmv2). 여기는 모른다고 말만 한다.
@@ -318,12 +328,14 @@ impl App {
     ) -> Option<T> {
         let Some(repo) = &self.repo else {
             self.trouble = Some("쓰지 못했다 — 저장소 없이 연 화면이다".into());
+            self.write_failed = true;
             return None;
         };
         let written = crate::model::actor(self.user.as_deref())
             .and_then(|by| repo.with_write(|issues, cfg, reserved| f(issues, cfg, reserved, &by)));
         match written {
             Ok(out) => {
+                self.write_failed = false;
                 self.reload();
                 Some(out)
             }
@@ -332,6 +344,7 @@ impl App {
             Err(e) => {
                 let why: Vec<&str> = e.message.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
                 self.trouble = Some(format!("쓰지 못했다 — {}", why.join("  ")));
+                self.write_failed = true;
                 None
             }
         }
@@ -344,7 +357,9 @@ impl App {
 
     /// 지어 온 것을 들인다. 여기서 하는 셈은 커서·경로·거름망뿐이다.
     fn apply_fresh(&mut self, f: Fresh) {
-        self.trouble = None;
+        if !self.write_failed {
+            self.trouble = None;
+        }
         self.stamp = f.stamp;
         self.unreadable = f.unreadable;
         self.origin = f.origin;
@@ -1499,6 +1514,28 @@ mod tests {
         });
         assert!(out.is_none());
         assert_eq!(a.trouble.as_deref(), Some("쓰지 못했다 — 첫 줄  고칠 명령"));
+    }
+
+    /// **쓰기의 실패는 저절로 다시 읽기에 지워지지 않는다.** 락을 못 잡은 때가 곧
+    /// 남이 쓰고 있던 때라, 실패 바로 다음 걸음이 그 쓰기를 보고 다시 읽는다 — 그
+    /// 읽기가 까닭을 지우면 폼은 열린 채인데 왜 안 닫혔는지 아무 데도 없다. 다음
+    /// 쓰기가 성공하면 그때 걷힌다.
+    #[test]
+    fn a_failed_write_survives_the_background_reread() {
+        let (scratch, mut a) = writable("write-sticky");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let out = a.write(|_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> { Err("락".into()) });
+        assert!(out.is_none());
+
+        let mut src = std::fs::read_to_string(&file).unwrap();
+        src.push_str(&format!("{}\n", serde_json::to_string(&make("argos-0003", Kind::Issue)).unwrap()));
+        std::fs::write(&file, src).unwrap();
+        settle(&mut a);
+        assert_eq!(a.issues.len(), 2, "밖의 쓰기를 못 읽었다");
+        assert_eq!(a.trouble.as_deref(), Some("쓰지 못했다 — 락"), "저절로 다시 읽기가 쓰기의 까닭을 지웠다");
+
+        assert!(add_idea(&mut a, "argos-0002").is_some());
+        assert!(a.trouble.is_none(), "쓰기가 성공했는데 옛 까닭이 남았다");
     }
 
     /// **누군지 모르면 쓰지 않는다.** 이름 없는 줄을 적느니 멈추고 말한다 — 묻는 것은
