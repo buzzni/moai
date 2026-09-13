@@ -46,10 +46,18 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     if !initialized {
         out.push(paint(
             style::DIM,
-            &format!("  init 전 — .moai 가 아직 없다. `moai -C {shown} init` 으로 시작하면 보인다"),
+            &format!("  init 전 — .moai 가 아직 없다. `moai -C {} init` 으로 시작하면 보인다", shell_word(&shown)),
         ));
     }
     Ok(out)
+}
+
+/// 붙여 넣어 그대로 돌 수 있게 감싼다. 공백이나 껍데기가 뜻을 붙이는 글자가
+/// 있으면 작은따옴표로 — 안 감싸면 `~/My Projects/argos` 가 두 인자로 갈라진다.
+fn shell_word(s: &str) -> String {
+    let plain = !s.is_empty()
+        && s.chars().all(|c| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | ',' | ':' | '@' | '%'));
+    if plain { s.to_string() } else { format!("'{}'", s.replace('\'', r"'\''")) }
 }
 
 pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
@@ -197,4 +205,16 @@ fn writable_config() -> R<PathBuf> {
 
 fn cwd() -> R<PathBuf> {
     std::env::current_dir().map_err(|e| Fail::new(format!("지금 자리를 모른다: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_word;
+
+    #[test]
+    fn shell_word_quotes_only_what_the_shell_would_split() {
+        assert_eq!(shell_word("/home/raven/work/argos"), "/home/raven/work/argos");
+        assert_eq!(shell_word("/home/raven/My Projects"), "'/home/raven/My Projects'");
+        assert_eq!(shell_word("/a/it's"), r"'/a/it'\''s'");
+    }
 }

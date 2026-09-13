@@ -322,16 +322,36 @@ pub fn resolve_dir(input: &Path, cwd: &Path) -> R<PathBuf> {
 /// 푼 철자는 **글자로 정리하기 전의** 경로에서도 얻는다. `link/..` 을 등록할 때
 /// [`resolve_dir`] 는 링크를 먼저 풀고 `..` 을 따르지만(링크 대상의 부모), 글자
 /// 정리는 `..` 이 링크를 먼저 지워 다른 디렉터리가 된다 — 그 철자로는 못 뺀다.
+///
+/// **사라진 디렉터리도 위쪽의 링크는 푼다.** 등록은 푼 경로로 적히므로, 조상에
+/// 링크가 있는 자리(macOS 의 `/tmp` → `/private/tmp`, 링크로 건 홈)에서 디렉터리가
+/// 사라지면 글자 철자로도 통째 `canonicalize` 로도 안 맞는다 — 아직 있는 가장 깊은
+/// 조상을 풀고 남은 조각을 붙인다.
 pub fn spellings(input: &Path, cwd: &Path) -> Vec<PathBuf> {
     let joined = cwd.join(input);
     let lexical = lexical(&joined);
     let mut out = vec![lexical.clone()];
-    for real in [joined, lexical].iter().filter_map(|p| std::fs::canonicalize(p).ok()) {
+    let reals = [std::fs::canonicalize(&joined).ok(), real_prefix(&lexical)];
+    for real in reals.into_iter().flatten() {
         if !out.contains(&real) {
             out.push(real);
         }
     }
     out
+}
+
+/// 아직 있는 가장 깊은 조상을 풀고 남은 조각을 그대로 붙인다. `..` 이 없는
+/// (글자로 정리한) 경로를 받는다 — 남은 조각에 `..` 이 있으면 풀린 뒤의 뜻이 달라진다.
+fn real_prefix(p: &Path) -> Option<PathBuf> {
+    let mut rest = Vec::new();
+    let mut cur = p;
+    loop {
+        if let Ok(real) = std::fs::canonicalize(cur) {
+            return Some(rest.iter().rev().fold(real, |acc, c| acc.join(c)));
+        }
+        rest.push(cur.file_name()?);
+        cur = cur.parent()?;
+    }
 }
 
 /// 목록에 보일 이름 — 디렉터리 이름이고, **겹치는 것끼리만** 위 조각을 하나씩
@@ -575,6 +595,8 @@ mod tests {
             let registered = resolve_dir(Path::new("up/.."), &d.join("cwd")).unwrap();
             assert_eq!(registered, d.join("else"));
             assert!(spellings(Path::new("up/.."), &d.join("cwd")).contains(&registered), "등록한 철자로 못 뺀다");
+            // 사라진 디렉터리라도 위쪽 링크는 푼다 — 등록은 푼 경로로 적혔다.
+            assert_eq!(spellings(Path::new("link/gone"), &d), [d.join("link/gone"), d.join("real/gone")]);
         }
         // 사라진 디렉터리도 글자로는 찾는다.
         assert_eq!(spellings(Path::new("gone/../gone2"), &d), [d.join("gone2")]);
