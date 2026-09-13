@@ -8,6 +8,7 @@ use super::form::{Field, Form};
 use super::scroll::Scroll;
 use super::{App, Input, Mode, Pane, Row};
 use crate::nav::Entry;
+use crate::report::Blocker;
 use crate::style;
 use crate::text::clip;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -682,13 +683,29 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
         fields.push(("안 쓰임".into(), format!("제 마일스톤 {own} — {why}")));
     }
     // **막는 것은 제목까지 푼다.** id 만 내면 그것이 무엇인지 또 찾아봐야 한다.
-    // **끝난 막음은 막지 않는다** — `report::is_blocked` 와 `moai ready` 가 그
-    // 자로 세므로, 여기서만 다 "막힘" 이라 적으면 집을 수 있는 것을 못 집을
-    // 것으로 읽는다. 뜻은 `report` 가 정하고 여기는 그 답을 그린다.
+    // **막는가는 `report::blocker` 가 가른다** — `moai ready` 가 고르는 그 자다. 한때
+    // 여기가 그 규칙을 손으로 베껴, 없는 id 를 가리키는 막음을 `ready` 는 안 막힌
+    // 것으로 고르는데 이 패널은 "막힘" 이라 그렸다(moai-af64). 재료(서 있는 칸·미룸)는
+    // 적재 때 센 것을 대고, 여기는 받은 답을 낱말로 옮기기만 한다.
     for b in &i.blocked_by {
-        let done = app.index.find(b).is_some_and(|at| app.column(at) == crate::config::DONE);
-        let (label, mark) = if done { ("풀림", "✓") } else { ("막힘", "·") };
-        fields.push((label.into(), format!("{mark} {b}  {}", app.title_of(b))));
+        let at = app.index.find(b);
+        let root = app.index.deferred_root(b);
+        let (label, text) = match crate::report::blocker(at.map(|at| app.column(at)), root.is_some()) {
+            Blocker::Missing => ("끊김", format!("! {b}  없는 이슈라 막지 않는다")),
+            Blocker::Done => ("풀림", format!("✓ {b}  {}", app.title_of(b))),
+            Blocker::Open => ("막힘", format!("· {b}  {}", app.title_of(b))),
+            // **미룬 막음도 막는다** — 미룬 일은 끝난 일이 아니다. 다만 그 줄은 보드에도
+            // `ready` 에도 없으므로 미뤘다는 말을 붙인다. 낱말은 상세 머리가 쓰는 자리다.
+            // **제목 앞에 둔다** — 값은 오른쪽부터 잘리므로, 뒤에 붙이면 흔한 길이의
+            // 제목에서 이 줄을 그냥 "막힘" 과 가르는 유일한 말이 통째로 사라진다.
+            Blocker::Deferred => {
+                let shelf = at
+                    .and_then(|at| crate::view::deferred_for(&app.issues[at], root, &app.now))
+                    .unwrap_or_else(|| "미룸".into());
+                ("막힘", format!("· {b}  {shelf}  {}", app.title_of(b)))
+            }
+        };
+        fields.push((label.into(), text));
     }
     // CLI 상세와 **같은 자**를 쓴다. 두 표면이 같은 값을 다르게 적으면 보는
     // 쪽이 어느 쪽을 믿을지 정해야 한다.
@@ -1389,6 +1406,67 @@ mod tests {
         assert!(!lines.contains("막힘"), "{lines}");
         let lines = drawn(false);
         assert!(lines.contains("막힘"), "적힌 칸만 닫힌 에픽을 풀렸다고 그린다\n{lines}");
+    }
+
+    /// **상세의 막음 줄은 `moai ready` 와 같은 답을 한다.** 한때 여기가
+    /// `report::is_blocked` 를 손으로 베껴, 없는 id 를 가리키는 막음을 `ready` 는
+    /// 안 막힌 것으로 고르는데 탐색기는 "막힘" 이라 그렸다(moai-af64). 끊긴 막음·
+    /// 미뤄 둔 막음·멤버가 다 끝난 묶음 막음을 한 자리에서 `ready` 와 견준다.
+    #[test]
+    fn the_detail_blocker_lines_agree_with_ready() {
+        let make = |id: &str, title: &str, kind: Kind, status: &str| {
+            Issue::new(id.into(), title.into(), kind, Status::new(status), "2026-09-01T00:00:00Z")
+        };
+        // (막는 쪽을 꾸미는 법, 상세에 나와야 할 낱말, 나오면 안 될 낱말)
+        type Case = (&'static str, fn(&mut Vec<Issue>), &'static [&'static str], &'static [&'static str]);
+        let cases: [Case; 4] = [
+            ("끊긴 막음", |_| {}, &["끊김", "argos-9999"], &["막힘", "풀림"]),
+            ("미뤄 둔 막음", |v| v[4].deferred_at = Some("2026-09-02T00:00:00Z".into()), &["막힘", "미룸"], &["풀림"]),
+            ("멤버가 다 끝난 묶음", |v| v[6].status = Status::new("done"), &["풀림"], &["막힘"]),
+            ("멤버가 남은 묶음", |_| {}, &["막힘"], &["풀림", "미룸"]),
+        ];
+        for (name, arrange, want, deny) in cases {
+            let mut all = issues();
+            let mut blocked = make("argos-0005", "막힌 일", Kind::Issue, "todo");
+            blocked.epic = Some("argos-0001".into());
+            blocked.blocked_by = vec![match name {
+                "끊긴 막음" => "argos-9999",
+                "미뤄 둔 막음" => "argos-0006",
+                _ => "argos-0007",
+            }
+            .into()];
+            all.push(blocked);
+            // **제목은 흔한 길이로 둔다** — 짧으면 미룸 낱말이 잘려 나가도 이 시험이 못 본다.
+            all.push(make("argos-0006", "미룰 일 — 제목이 흔한 이슈만큼 길어 패널 폭을 넘는다", Kind::Issue, "todo"));
+            all.push(make("argos-0007", "막는 에픽", Kind::Epic, "todo"));
+            let mut inner = make("argos-0008", "막는 에픽의 멤버", Kind::Issue, "in_progress");
+            inner.epic = Some("argos-0007".into());
+            all.push(inner);
+            arrange(&mut all);
+
+            let cfg = Config::parse("prefix = \"argos\"\n").unwrap();
+            let picked = crate::report::ready(&all, &cfg).iter().any(|i| i.id == "argos-0005");
+            let path = vec![crate::nav::Seg::Epic("argos-0001".into())];
+            let mut a = App::new(all, cfg, path);
+            a.cursor = a
+                .rows()
+                .iter()
+                .position(|r| matches!(r, Row::Item(e) if e.at().is_some_and(|i| a.issues[i].id == "argos-0005")))
+                .unwrap_or_else(|| panic!("{name}: 막힌 일이 목록에 없다"));
+            let lines = render(&mut a, 120, 24).join("\n");
+            for w in want {
+                assert!(lines.contains(w), "{name}: `{w}` 가 없다\n{lines}");
+            }
+            for d in deny {
+                assert!(!lines.contains(d), "{name}: `{d}` 가 나왔다\n{lines}");
+            }
+            assert_eq!(
+                picked,
+                !lines.contains("막힘"),
+                "{name}: ready 는 {} 탐색기는 다르게 그린다\n{lines}",
+                if picked { "고르는데" } else { "안 고르는데" }
+            );
+        }
     }
 
     /// **목록과 상세가 묶음의 읽은 칸을 그린다** — CLI 와 같은 자. 손으로 옮긴
