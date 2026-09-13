@@ -12,6 +12,7 @@ pub mod init;
 pub mod link;
 pub mod mv;
 pub mod note;
+pub mod project;
 pub mod ready;
 pub mod rm;
 pub mod show;
@@ -19,7 +20,7 @@ pub mod skill;
 pub mod status;
 pub mod tui;
 
-use crate::cli::{Cli, Cmd, IdeaCmd, SkillCmd, Typed};
+use crate::cli::{Cli, Cmd, IdeaCmd, ProjectCmd, SkillCmd, Typed};
 use crate::model::Kind;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -141,6 +142,11 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         }
         Cmd::Skill(SkillCmd::Status) => skill::status(&ctx),
         Cmd::Skill(SkillCmd::Uninstall { dry_run }) => skill::uninstall(&ctx, dry_run),
+        // 저장소가 아니라 사람의 설정을 고친다 — `Repo::discover` 를 안 지나므로
+        // `.moai` 밖에서도 선다.
+        Cmd::Project(ProjectCmd::Add { path }) => project::add(&ctx, &path),
+        Cmd::Project(ProjectCmd::Ls) => project::ls(&ctx),
+        Cmd::Project(ProjectCmd::Rm { path }) => project::rm(&ctx, &path),
         Cmd::Add(a) => add::run(&ctx, a, None),
         Cmd::Show(a) => show::run(&ctx, a, None),
         Cmd::Mv(a) => mv::run(&ctx, a),

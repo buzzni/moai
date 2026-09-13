@@ -1364,6 +1364,8 @@ const JSON_SWEEP: &[&str] = &[
     "skill",
     // 종류 네임스페이스는 `moai <종류> show --json` 으로 같은 길을 지난다.
     "issue", "epic", "milestone", "idea",
+    // 사용자 설정을 고친다. `add`·`rm` 은 제 설정 파일로 따로 부른다 — 공용 집에 쓰면 안 된다.
+    "project",
 ];
 
 /// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.
@@ -1399,6 +1401,8 @@ fn every_command_still_speaks_json() {
         // 장부를 읽기만 한다. `uninstall` 은 `claude` 를 부르므로 훑지 않는다 —
         // 가짜 `claude` 로 따로 본다 (`skill_*` 시험).
         vec!["skill", "status", "--json"],
+        // 공용 설정(없는 파일)을 읽기만 한다.
+        vec!["project", "ls", "--json"],
     ];
     // **적어 둔 목록과 실제로 부르는 목록을 여기서 잇는다.** 잇지 않으면
     // `JSON_SWEEP` 에 이름만 적고 한 번도 안 부르는 명령이 생기고, 그러면
@@ -1413,6 +1417,11 @@ fn every_command_still_speaks_json() {
     }
     for args in &cases {
         one_json_value(&ok(s.path(), args));
+    }
+    // 쓰는 `project` 동사는 제 설정 파일로 — 공용 집을 비워 둔다.
+    let config = s.path().join("user-config.toml");
+    for args in [["project", "add", ".", "--json"], ["project", "rm", ".", "--json"]] {
+        one_json_value(&project_ok(s.path(), &config, &args));
     }
     // 한 번에 만들기도 배열 하나를 낸다
     let bulk = from_stdin(s.path(), &["add", "--from", "-", "--json"], "# 가\n- 나\n");
@@ -4983,4 +4992,190 @@ fn worktree_trouble_is_told_but_never_fails_the_command() {
     let out = moai(bare.path(), &["status", "--worktree"]);
     assert!(out.status.success(), "git 저장소가 아니라고 실패했다");
     assert!(String::from_utf8_lossy(&out.stderr).contains("워크트리를 못 찾았다"));
+}
+
+// ── moai project ────────────────────────────────────────────────────────────
+
+/// **등록 시험은 저마다 제 설정 파일을 쓴다.** [`isolated`] 의 `MOAI_CONFIG` 는
+/// 모든 시험이 함께 쓰는 빈 집 밑이라, 거기에 등록하면 병렬로 도는 시험끼리
+/// 목록이 섞이고 공용 집이 더는 비어 있지 않다(moai-88l8.5ik). 사람도 안 준다 —
+/// 이력이 남는 파일이 아니라 누군지 묻지 않아야 한다.
+fn project(dir: &Path, config: &Path, args: &[&str]) -> Output {
+    isolated(BIN)
+        .args(args)
+        .current_dir(dir)
+        .env("MOAI_CONFIG", config)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("moai 를 실행하지 못했다")
+}
+
+fn project_ok(dir: &Path, config: &Path, args: &[&str]) -> String {
+    let out = project(dir, config, args);
+    assert!(out.status.success(), "moai {args:?} 가 실패했다\n{}", text(&out));
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// `.moai` 밖에서 더하고 보고 뺀다. 뺀 뒤에도 디렉터리와 그 `.moai` 는 그대로다.
+#[test]
+fn project_add_ls_rm_round_trip_outside_any_moai() {
+    let home = Scratch::new("project-roundtrip");
+    let config = home.path().join("cfg/moai/config.toml");
+    let argos = init("project-argos");
+    let bare = home.path().join("bare");
+    std::fs::create_dir_all(&bare).unwrap();
+    let argos_real = argos.path().canonicalize().unwrap();
+    let bare_real = bare.canonicalize().unwrap();
+
+    let added = project_ok(home.path(), &config, &["project", "add", argos.path().to_str().unwrap()]);
+    assert!(added.contains("등록함") && !added.contains("init 전"), "{added}");
+    // 상대경로는 지금 자리에 붙고, `.moai` 가 없어도 받되 그렇다고 말한다.
+    let added = project_ok(home.path(), &config, &["project", "add", "bare"]);
+    assert!(added.contains("등록함") && added.contains("init 전"), "{added}");
+    let written = std::fs::read_to_string(&config).unwrap();
+    assert!(written.contains(&format!("path = \"{}\"", bare_real.display())), "절대경로로 적지 않았다\n{written}");
+
+    let ls = project_ok(home.path(), &config, &["project", "ls"]);
+    let lines: Vec<&str> = ls.lines().collect();
+    assert!(lines[0].contains(&argos_real.display().to_string()) && lines[0].ends_with(".moai 있음"), "{ls}");
+    assert!(lines[1].starts_with("bare ") && lines[1].ends_with("init 전"), "{ls}");
+
+    let json = project_ok(home.path(), &config, &["project", "ls", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(&format!("\"config\":\"{}\"", config.display())), "{json}");
+    assert!(json.contains("\"state\":\"initialized\"}"), "{json}");
+    assert!(
+        json.contains(&format!(
+            "{{\"name\":\"bare\",\"path\":\"{}\",\"state\":\"uninitialized\"}}",
+            bare_real.display()
+        )),
+        "{json}"
+    );
+    assert!(json.ends_with("\"problems\":[]}\n"), "{json}");
+
+    let gone = project_ok(home.path(), &config, &["project", "rm", "bare"]);
+    assert!(gone.contains("뺌") && gone.contains(&bare_real.display().to_string()), "{gone}");
+    let rm_json = project_ok(home.path(), &config, &["project", "rm", argos.path().to_str().unwrap(), "--json"]);
+    one_json_value(&rm_json);
+    assert!(rm_json.contains(&format!("\"removed\":[\"{}\"]", argos_real.display())), "{rm_json}");
+    assert!(bare.is_dir() && argos.path().join(".moai/issues.jsonl").is_file(), "목록 밖의 것을 건드렸다");
+
+    let empty = project_ok(home.path(), &config, &["project", "ls", "--json"]);
+    assert!(empty.contains("\"projects\":[]"), "{empty}");
+    assert!(project_ok(home.path(), &config, &["project", "ls"]).contains("등록한 프로젝트가 없다"));
+}
+
+/// 두 번 더해도 한 줄이고 파일은 한 글자도 안 바뀐다. 이미 있는 것은 실패가 아니다.
+#[test]
+fn project_add_is_idempotent() {
+    let home = Scratch::new("project-idem");
+    let config = home.path().join("config.toml");
+    std::fs::create_dir_all(home.path().join("a")).unwrap();
+    project_ok(home.path(), &config, &["project", "add", "a"]);
+    let before = std::fs::read_to_string(&config).unwrap();
+
+    let again = project_ok(home.path(), &config, &["project", "add", "./a/"]);
+    assert!(again.contains("이미 등록돼 있다"), "{again}");
+    let json = project_ok(home.path(), &config, &["project", "add", "a", "--json"]);
+    assert!(json.contains("\"added\":false"), "{json}");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
+}
+
+/// 없는 디렉터리와 파일은 거절하고, 설정은 만들지도 않는다.
+#[test]
+fn project_add_refuses_what_is_not_a_directory() {
+    let home = Scratch::new("project-missing");
+    let config = home.path().join("cfg/config.toml");
+    let out = project(home.path(), &config, &["project", "add", "없음", "--json"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"not_found""#), "{}", text(&out));
+
+    std::fs::write(home.path().join("file"), "").unwrap();
+    let out = project(home.path(), &config, &["project", "add", "file", "--json"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"bad_input""#), "{}", text(&out));
+    assert!(!config.exists(), "거절한 등록이 설정 파일을 만들었다");
+}
+
+/// 모노레포: `.git`·`.moai` 를 찾아 올라가지 않는다. 준 하위 디렉터리가 따로 서고,
+/// 루트와 그 안이 함께 등록돼도 막지 않는다. 이름이 겹치면 위 조각이 붙는다.
+///
+/// `-C` 를 주면 상대경로는 그 디렉터리에 붙는다 — `git -C` 처럼. 자리 인자의
+/// 필드가 전역 `-C` 와 같은 clap id(`dir`)였을 때 준 경로가 `-C` 로 새어
+/// `add a` 가 `a/a` 를 찾았다. 그 되돌림도 여기서 잡힌다.
+#[test]
+fn project_registers_monorepo_subdirs_separately() {
+    let repo = init("project-mono");
+    for sub in ["apps/a", "libs/a", "apps/b"] {
+        std::fs::create_dir_all(repo.path().join(sub)).unwrap();
+    }
+    let config = repo.path().join("user-config.toml");
+    for sub in ["a", "b"] {
+        project_ok(repo.path(), &config, &["-C", "apps", "project", "add", sub]);
+    }
+    project_ok(repo.path(), &config, &["project", "add", "libs/a"]);
+    project_ok(repo.path(), &config, &["project", "add", "."]);
+
+    let json = project_ok(repo.path(), &config, &["project", "ls", "--json"]);
+    let root = repo.path().canonicalize().unwrap();
+    for (name, path) in [("apps/a", root.join("apps/a")), ("b", root.join("apps/b")), ("libs/a", root.join("libs/a"))] {
+        let row = format!("{{\"name\":\"{name}\",\"path\":\"{}\",\"state\":\"uninitialized\"", path.display());
+        assert!(json.contains(&row), "{row} 가 없다 — 루트의 .moai 를 제 것으로 읽었거나 이름을 못 갈랐다\n{json}");
+    }
+    assert!(json.contains(&format!("\"path\":\"{}\",\"state\":\"initialized\"", root.display())), "{json}");
+}
+
+/// 사라진 디렉터리는 `ls` 가 그 줄만 말하고 0 으로 끝나며, 적힌 경로로 뺄 수 있다.
+#[test]
+fn project_rm_takes_a_vanished_dir() {
+    let home = Scratch::new("project-vanish");
+    let config = home.path().join("config.toml");
+    std::fs::create_dir_all(home.path().join("gone")).unwrap();
+    std::fs::create_dir_all(home.path().join("kept")).unwrap();
+    project_ok(home.path(), &config, &["project", "add", "gone"]);
+    project_ok(home.path(), &config, &["project", "add", "kept"]);
+    std::fs::remove_dir(home.path().join("gone")).unwrap();
+
+    let ls = project_ok(home.path(), &config, &["project", "ls"]);
+    assert!(ls.lines().any(|l| l.starts_with("gone ") && l.ends_with("디렉터리가 없다")), "{ls}");
+    assert!(project_ok(home.path(), &config, &["project", "ls", "--json"]).contains("\"state\":\"missing\""));
+
+    assert!(project_ok(home.path(), &config, &["project", "rm", "gone"]).contains("뺌"));
+    // 등록돼 있지 않은 것을 빼는 것은 실패가 아니다 — 바라던 모양이 이미 그렇다.
+    let again = project_ok(home.path(), &config, &["project", "rm", "gone", "--json"]);
+    assert!(again.contains("\"removed\":[]"), "{again}");
+    assert!(project_ok(home.path(), &config, &["project", "ls"]).contains("kept"));
+}
+
+/// 깨진 설정: `ls` 는 까닭을 말하고 0 으로 끝나고, `add`·`rm` 은 멈추고 파일을 안 건드린다.
+#[test]
+fn a_broken_user_config_refuses_writes_but_ls_is_lenient() {
+    let home = Scratch::new("project-broken");
+    let config = home.path().join("config.toml");
+    std::fs::create_dir_all(home.path().join("a")).unwrap();
+    let src = "project = \"/a\"\n";
+    std::fs::write(&config, src).unwrap();
+
+    let out = project(home.path(), &config, &["project", "ls"]);
+    assert!(out.status.success(), "깨진 설정으로 ls 가 실패했다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("[[project]]"), "{}", text(&out));
+    let json = project_ok(home.path(), &config, &["project", "ls", "--json"]);
+    assert!(json.contains("\"projects\":[]") && json.contains("\"problems\":[\""), "{json}");
+
+    for args in [["project", "add", "a", "--json"], ["project", "rm", "a", "--json"]] {
+        let out = project(home.path(), &config, &args);
+        assert!(!out.status.success(), "{args:?} 가 깨진 설정에 썼다");
+        assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"broken""#), "{args:?}\n{}", text(&out));
+    }
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), src);
+}
+
+/// 설정 파일이 없을 때 빼면 아무 일도 안 한다 — 설정 디렉터리조차 만들지 않는다.
+#[test]
+fn project_rm_without_a_config_leaves_no_trace() {
+    let home = Scratch::new("project-rm-none");
+    let config = home.path().join("cfg/moai/config.toml");
+    let out = project_ok(home.path(), &config, &["project", "rm", "어디든"]);
+    assert!(out.contains("등록돼 있지 않다"), "{out}");
+    assert!(!home.path().join("cfg").exists(), "아무것도 안 뺀 명령이 설정 디렉터리를 만들었다");
 }

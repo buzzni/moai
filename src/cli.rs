@@ -233,6 +233,20 @@ pub enum Cmd {
     #[command(subcommand)]
     Skill(SkillCmd),
 
+    /// 여러 프로젝트를 한 moai 에서 보려고 디렉터리를 등록한다 (사용자 설정)
+    #[command(subcommand, after_help = "\
+  moai project add ~/work/argos         등록한다. .moai 가 아직 없어도 받는다
+  moai project add repo/apps/a          모노레포는 하위 디렉터리를 따로 등록한다
+  moai project ls                       등록한 것과 그 상태
+  moai project rm ~/work/argos          목록에서만 뺀다. 디렉터리는 안 건드린다
+
+  저장소가 아니라 **사람의** 설정이다 — `.moai` 밖 어디서 불러도 된다. 자리는
+  MOAI_CONFIG → $XDG_CONFIG_HOME/moai/config.toml → ~/.config/moai/config.toml.
+  상대경로는 지금 자리(`-C` 를 줬으면 그 디렉터리)에 붙이고 심볼릭 링크를 풀어 적는다.
+
+  누가 했는지 묻지 않는다. 이력이 남는 파일이 아니다.")]
+    Project(ProjectCmd),
+
     /// 이 저장소에 .moai/ 를 심는다 (다시 불러도 된다)
     #[command(after_help = "\
   이미 심긴 곳에서 다시 부르면 딸린 파일(.gitattributes·.gitignore·AGENTS.md)
@@ -245,6 +259,30 @@ pub enum Cmd {
         /// AGENTS.md 를 건드리지 않는다
         #[arg(long)]
         no_agents: bool,
+    },
+}
+
+/// 등록한 프로젝트 목록을 고치고 본다. 이슈의 동사(`add`·`show`·`rm`)와 이름이
+/// 겹치지만 **네임스페이스가 가른다** — 대상이 이슈가 아니라 디렉터리다.
+///
+/// **자리 인자의 필드 이름을 `dir` 로 짓지 않는다.** clap 은 필드 이름을 id 로
+/// 쓰고, 전역 `-C` 의 id 가 `dir` 이다 — 같은 id 면 준 경로가 `Cli::dir` 로 새어
+/// `main` 이 먼저 그리로 옮겨 가고, `add argos` 가 `argos/argos` 를 찾는다.
+#[derive(Subcommand, Debug)]
+pub enum ProjectCmd {
+    /// 디렉터리를 등록한다 (이미 있으면 그대로)
+    Add {
+        /// 등록할 디렉터리. 있어야 하지만 `.moai` 는 없어도 된다
+        #[arg(value_name = "디렉터리")]
+        path: std::path::PathBuf,
+    },
+    /// 등록한 것을 낸다 — 이름·경로·`.moai` 유무
+    Ls,
+    /// 목록에서 뺀다. 디렉터리와 그 `.moai` 는 그대로 둔다
+    Rm {
+        /// 뺄 디렉터리. 이미 사라졌어도 적힌 경로로 찾는다
+        #[arg(value_name = "디렉터리")]
+        path: std::path::PathBuf,
     },
 }
 

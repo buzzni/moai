@@ -23,10 +23,6 @@ mod store;
 mod style;
 mod text;
 mod tui;
-// 등록한 프로젝트 목록. 부르는 명령(`moai project`, moai-54dt)이 아직 없다 —
-// 다 쓰이면 `expect` 가 스스로 낡았다고 알린다.
-#[cfg_attr(not(test), expect(dead_code, reason = "부르는 쪽(moai-54dt·moai-6au6)이 아직 없다"))]
-#[cfg_attr(test, allow(dead_code))]
 mod user_config;
 mod view;
 mod worktree;

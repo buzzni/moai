@@ -322,16 +322,85 @@ pub fn resolve_dir(input: &Path, cwd: &Path) -> R<PathBuf> {
 /// 푼 철자는 **글자로 정리하기 전의** 경로에서도 얻는다. `link/..` 을 등록할 때
 /// [`resolve_dir`] 는 링크를 먼저 풀고 `..` 을 따르지만(링크 대상의 부모), 글자
 /// 정리는 `..` 이 링크를 먼저 지워 다른 디렉터리가 된다 — 그 철자로는 못 뺀다.
+///
+/// **사라진 디렉터리도 위쪽의 링크는 푼다.** 등록은 푼 경로로 적히므로, 조상에
+/// 링크가 있는 자리(macOS 의 `/tmp` → `/private/tmp`, 링크로 건 홈)에서 디렉터리가
+/// 사라지면 글자 철자로도 통째 `canonicalize` 로도 안 맞는다 — 아직 있는 가장 깊은
+/// 조상을 풀고 남은 조각을 붙인다.
 pub fn spellings(input: &Path, cwd: &Path) -> Vec<PathBuf> {
     let joined = cwd.join(input);
     let lexical = lexical(&joined);
     let mut out = vec![lexical.clone()];
-    for real in [joined, lexical].iter().filter_map(|p| std::fs::canonicalize(p).ok()) {
+    let reals = [std::fs::canonicalize(&joined).ok(), real_prefix(&lexical)];
+    for real in reals.into_iter().flatten() {
         if !out.contains(&real) {
             out.push(real);
         }
     }
     out
+}
+
+/// 아직 있는 가장 깊은 조상을 풀고 남은 조각을 그대로 붙인다. `..` 이 없는
+/// (글자로 정리한) 경로를 받는다 — 남은 조각에 `..` 이 있으면 풀린 뒤의 뜻이 달라진다.
+fn real_prefix(p: &Path) -> Option<PathBuf> {
+    let mut rest = Vec::new();
+    let mut cur = p;
+    loop {
+        if let Ok(real) = std::fs::canonicalize(cur) {
+            return Some(rest.iter().rev().fold(real, |acc, c| acc.join(c)));
+        }
+        rest.push(cur.file_name()?);
+        cur = cur.parent()?;
+    }
+}
+
+/// 목록에 보일 이름 — 디렉터리 이름이고, **겹치는 것끼리만** 위 조각을 하나씩
+/// 더 붙인다. `repo/apps/a` 와 `lib/a` 는 `apps/a`·`lib/a` 로, 겹치지 않는
+/// `argos` 는 `argos` 그대로 선다.
+///
+/// **파일에 적지 않는 파생값이다.** 이름은 목록 전체에서 정해져, 프로젝트 하나를
+/// 더하면 옆 줄의 이름이 바뀔 수 있다 — 적어 두면 더할 때마다 남의 줄을 고쳐
+/// 써야 한다. 파일 시스템을 안 보는 순수 함수라 `ls`·한눈 보기·TUI 가 같은 자를 쓴다.
+///
+/// 조각을 다 붙여도 겹치면(한쪽이 다른 쪽의 꼬리일 때) 짧은 쪽이 먼저 바닥나
+/// 멈추고 긴 쪽이 계속 자라므로 끝난다. 경로는 [`Doc::projects`] 가 이미
+/// 한 번씩만 내므로 끝까지 겹치는 둘은 없다.
+pub fn names(projects: &[Project]) -> Vec<String> {
+    let parts: Vec<Vec<String>> = projects
+        .iter()
+        .map(|p| {
+            p.path
+                .components()
+                .filter_map(|c| match c {
+                    Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .collect();
+    let name = |i: usize, k: usize| -> String {
+        let c = &parts[i];
+        match c.len() {
+            // 뿌리(`/`)는 조각이 없다. 경로 그대로가 이름이다.
+            0 => projects[i].path.display().to_string(),
+            n => c[n - k.min(n)..].join("/"),
+        }
+    };
+    let mut depth = vec![1usize; projects.len()];
+    loop {
+        let now: Vec<String> = (0..projects.len()).map(|i| name(i, depth[i])).collect();
+        let mut grew = false;
+        for i in 0..projects.len() {
+            let clash = now.iter().enumerate().any(|(j, n)| j != i && *n == now[i]);
+            if clash && depth[i] < parts[i].len() {
+                depth[i] += 1;
+                grew = true;
+            }
+        }
+        if !grew {
+            return now;
+        }
+    }
 }
 
 /// `.` 을 버리고 `..` 은 앞 조각을 뗀다. 파일 시스템을 안 본다.
@@ -526,10 +595,25 @@ mod tests {
             let registered = resolve_dir(Path::new("up/.."), &d.join("cwd")).unwrap();
             assert_eq!(registered, d.join("else"));
             assert!(spellings(Path::new("up/.."), &d.join("cwd")).contains(&registered), "등록한 철자로 못 뺀다");
+            // 사라진 디렉터리라도 위쪽 링크는 푼다 — 등록은 푼 경로로 적혔다.
+            assert_eq!(spellings(Path::new("link/gone"), &d), [d.join("link/gone"), d.join("real/gone")]);
         }
         // 사라진 디렉터리도 글자로는 찾는다.
         assert_eq!(spellings(Path::new("gone/../gone2"), &d), [d.join("gone2")]);
         assert_eq!(lexical(Path::new("/../a")), PathBuf::from("/a"));
+    }
+
+    /// 이름은 디렉터리 이름이고, 겹치는 것끼리만 위 조각이 붙는다.
+    #[test]
+    fn names_grow_only_where_they_clash() {
+        let ps = |paths: &[&str]| paths.iter().map(|p| Project { path: p.into() }).collect::<Vec<_>>();
+        assert_eq!(names(&ps(&["/w/argos", "/r/apps/a", "/r/libs/a"])), ["argos", "apps/a", "libs/a"]);
+        // 둘째 조각까지 같으면 셋째까지. 겹치지 않는 줄은 안 자란다.
+        assert_eq!(names(&ps(&["/x/apps/a", "/y/apps/a", "/y/b"])), ["x/apps/a", "y/apps/a", "b"]);
+        // 한쪽이 다른 쪽의 꼬리면 짧은 쪽이 바닥나고 긴 쪽이 자란다.
+        assert_eq!(names(&ps(&["/a", "/z/a"])), ["a", "z/a"]);
+        assert_eq!(names(&ps(&["/", "/a"])), ["/", "a"]);
+        assert!(names(&[]).is_empty());
     }
 
     /// 설정 파일이 링크면 링크는 링크로 남고 가리키는 파일이 고쳐진다.
