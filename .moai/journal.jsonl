@@ -491,3 +491,6 @@
 {"ts":"2026-09-13T03:05:34Z","id":"moai-91jk.8jz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"기준선 없는 세션 구멍 하나를 6fe4347 로 반영, 넘긴 것 없음"}
 {"ts":"2026-09-13T03:05:34Z","id":"moai-91jk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"PreCompact 를 걷고 SessionStart(source=compact) 에서 집은 것을 싣게 옮겼다 (c4e8bcb, 리뷰 반영 6fe4347). 접힌 뒤 보드 표를 지워 다음 프롬프트가 보드를 다시 싣는다. moai 자신의 compact 출력이 붙는지는 moai-91jk.97c 에서 사람이 본다."}
 {"ts":"2026-09-13T03:05:34Z","id":"moai-91jk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"PreCompact 주입 불가 확인, SessionStart:compact 로 옮김"}
+{"ts":"2026-09-13T03:14:54Z","id":"moai-91jk.97c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-13T03:17:47Z","id":"moai-91jk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"skill install(959.294.225) 뒤 /compact 로 사람이 확인했다. 검증 오류 없이 Compacted 만 떴고, SessionStart:compact 의 additionalContext 로 '압축 전부터 이것을 집고 있다: moai-91jk.97c …' 가 압축 요약과 따로 붙었다. 이어진 첫 프롬프트에서 보드도 다시 실렸다 — .board 표 지우기가 실제로 먹는다. UserPromptSubmit 으로 옮기는 대안은 필요 없다."}
+{"ts":"2026-09-13T03:17:48Z","id":"moai-91jk.97c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"SessionStart:compact 출력이 붙는 것을 확인, 보드 재주입도 확인"}
