@@ -182,6 +182,8 @@ fn states_of(issues: &[Issue], cfg: &Config) -> States {
 /// 여기 드는 셈은 전부 `&[Issue]` 에 대한 순수 함수라 스레드로 옮길 수 있다 —
 /// `report`·`query` 를 순수하게 둔 계약이 여기서 값을 한다.
 pub struct Fresh {
+    /// 어느 프로젝트를 읽었나 — 받는 쪽이 지금 프로젝트와 견준다([`App::receive`]).
+    root: std::path::PathBuf,
     stamp: Stamp,
     issues: Vec<Issue>,
     index: Index,
@@ -215,6 +217,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     let issues = g.load.issues;
     let now = crate::model::now();
     Ok(Fresh {
+        root: repo.root.clone(),
         stamp,
         index: Index::of(&issues),
         states: states_of(&issues, &repo.config),
@@ -430,20 +433,8 @@ impl App {
         if self.repo.is_none() {
             return;
         }
-        // 결과는 버리되 손잡이는 든다 — 그 스레드의 패닉을 다음 걸음이 되던진다.
         if let Some((_, handle)) = self.pending.take() {
-            if self.discarded.len() >= DISCARDED_KEPT {
-                // 놓기 **전에** 끝난 것부터 거둔다. 지난 걸음에 살아 있던 것도 그새 끝났을
-                // 수 있고, 그것이 가장 오래된 자리에 있으면 패닉째 놓게 된다.
-                self.reap();
-            }
-            if self.discarded.len() >= DISCARDED_KEPT {
-                // 이만큼 안 끝났으면 읽기가 멈춘 것이다(느린 원격 디스크 따위). 기다리면
-                // 루프가 같이 멈추므로 가장 오래된 것을 놓는다 — 그 하나만 1b63abe 이전
-                // 처지로 돌아간다.
-                self.discarded.remove(0);
-            }
-            self.discarded.push(handle);
+            self.discard(handle);
         }
         let Some(repo) = &self.repo else { return };
         let fresh = (self.read)(repo, self.worktree);
@@ -453,8 +444,14 @@ impl App {
     /// 다시 읽은 결과를 받는다. **소리 없이 넘기지 않는다** — 실패를 삼키면 갱신이
     /// 아무 일도 안 하는데 사람은 까닭을 못 얻는다. 실패하면 표식을 안 올리므로
     /// 다음 걸음에 다시 해 본다.
+    ///
+    /// **다른 프로젝트에서 지은 것은 버린다.** 프로젝트를 옮길 때 도는 읽기를 이미
+    /// 버리지만([`App::discard`]), 받는 자리에서 한 번 더 뿌리를 견준다 — 떠난
+    /// 프로젝트의 줄이 지금 프로젝트의 화면으로 들어오면 같은 id 가 엉뚱한 줄을
+    /// 가리키고, 그 위에서 쓰면 쓰는 곳은 맞는데 보고 쓴 것이 틀린다.
     fn receive(&mut self, fresh: crate::fail::R<Fresh>) {
         match fresh {
+            Ok(f) if self.repo.as_ref().is_none_or(|r| r.root != f.root) => {}
             Ok(f) => self.apply_fresh(f),
             Err(e) => {
                 self.trouble = Some(format!("다시 읽지 못했다 — {e}"));
@@ -569,6 +566,23 @@ impl App {
     /// 때문이다 — 버린 것은 받을 것이 아니다.
     pub fn reaping(&self) -> bool {
         !self.discarded.is_empty()
+    }
+
+    /// 결과는 버리되 손잡이는 든다 — 그 스레드의 패닉을 다음 걸음이 되던진다.
+    /// 다시 읽기(`reload`)와 프로젝트 옮기기가 도는 읽기를 버리는 길이다.
+    fn discard(&mut self, handle: std::thread::JoinHandle<()>) {
+        if self.discarded.len() >= DISCARDED_KEPT {
+            // 놓기 **전에** 끝난 것부터 거둔다. 지난 걸음에 살아 있던 것도 그새 끝났을
+            // 수 있고, 그것이 가장 오래된 자리에 있으면 패닉째 놓게 된다.
+            self.reap();
+        }
+        if self.discarded.len() >= DISCARDED_KEPT {
+            // 이만큼 안 끝났으면 읽기가 멈춘 것이다(느린 원격 디스크 따위). 기다리면
+            // 루프가 같이 멈추므로 가장 오래된 것을 놓는다 — 그 하나만 1b63abe 이전
+            // 처지로 돌아간다.
+            self.discarded.remove(0);
+        }
+        self.discarded.push(handle);
     }
 
     /// 버린 스레드 중 끝난 것을 join 한다. **패닉이면 되던진다** — [`App::follow`] 가
@@ -2030,6 +2044,25 @@ mod tests {
         a.key(key(KeyCode::F(5)));
         assert!(!a.loading(), "F5 가 짓던 것을 안 버렸다");
         assert_eq!(a.issues.len(), 1);
+    }
+
+    /// **다른 프로젝트에서 지은 읽기는 안 들인다.** 같은 id 를 쓰는 두 프로젝트에서
+    /// 떠난 쪽의 읽기가 늦게 닿으면, 들이는 순간 지금 프로젝트의 화면이 남의 줄이 된다.
+    #[test]
+    fn a_read_built_for_another_project_is_not_taken() {
+        let (mine_dir, mut a) = writable("receive-mine");
+        let (theirs, _) = writable("receive-theirs");
+        touch_outside(&theirs);
+        let other = Repo { root: theirs.0.clone(), config: cfg() };
+        a.receive(prepare(&other, false));
+        assert_eq!(shown(&a), ["argos-0001"], "남의 프로젝트에서 지은 줄을 들였다");
+        assert!(a.trouble.is_none());
+
+        // 제 것은 들인다 — 막은 것이 뿌리 견주기이지 받기 자체가 아니다.
+        let mine = a.repo.clone().unwrap();
+        touch_outside(&mine_dir);
+        a.receive(prepare(&mine, false));
+        assert_eq!(a.issues.len(), 2);
     }
 
     /// 판 밖에서 한 줄을 더해 다음 `follow` 가 스레드 읽기를 띄우게 한다.
