@@ -1195,7 +1195,9 @@ const READY_SHOWN: usize = 5;
 ///
 /// **줄마다 프로젝트 이름을 id 곁에 단다.** 프로젝트끼리 id 가 겹칠 수 있고(접두어가
 /// 같은 두 저장소), 머리에만 이름을 두면 `grep` 으로 뽑은 줄이 어느 것인지 모른다.
-/// 프로젝트 색(moai-xs9x)은 이 이름 곁에 얹는다 — 색이 혼자 뜻을 지지 않는다.
+/// 이름 칸과 id 칸, 머리의 이름에 프로젝트 색([`style::project_colour`])을 얹는다 — 머리가
+/// 색의 범례가 되고, 색을 꺼도 이름이 남아 **색이 혼자 뜻을 지지 않는다.** 칠하는 것만
+/// 더해 글자와 칸 폭은 그대로라, 색을 끈 화면은 색을 얹기 전과 바이트까지 같다.
 pub fn projects_status(
     projects: &[crate::projects::Project],
     seen: &[crate::projects::Seen<Board>],
@@ -1214,11 +1216,12 @@ pub fn projects_status(
         let shown = &b.picked[..b.picked.len().min(PICKED_SHOWN)];
         // 보인 것끼리 id 폭을 맞춘다 — 자식 id(`x-1a2b.3`)가 섞이면 줄마다 제 폭으로는 제목 칸이 어긋난다.
         let w_id = shown.iter().map(|i| width(&i.id)).max().unwrap_or(0);
+        let hue = style::project_colour(&p.path);
         for i in shown {
             out.push(format!(
                 "  {}{}{}  {}",
-                cell(style::PLAIN, &sanitize(&p.name), w_name + 2),
-                cell(style::ID, &i.id, w_id + 2),
+                cell(hue, &sanitize(&p.name), w_name + 2),
+                cell(hue, &i.id, w_id + 2),
                 paint(style::status_style(i.status.as_str()), style::glyph(i.status.as_str())),
                 clip(&i.title, TITLE_CAP),
             ));
@@ -1273,11 +1276,12 @@ pub fn projects_ready(
         out.push(project_head(p, &format!("{}건", k.picks.len())));
         let shown = &k.picks[..k.picks.len().min(READY_SHOWN)];
         let w_id = shown.iter().map(|i| width(&i.id)).max().unwrap_or(0);
+        let hue = style::project_colour(&p.path);
         for i in shown {
             out.push(format!(
                 "  {}{}{}{}",
-                cell(style::PLAIN, &sanitize(&p.name), w_name + 2),
-                cell(style::ID, &i.id, w_id + 2),
+                cell(hue, &sanitize(&p.name), w_name + 2),
+                cell(hue, &i.id, w_id + 2),
                 cell(style::priority_style(i.priority()), &format!("p{}", i.priority()), 4),
                 clip(&i.title, TITLE_CAP),
             ));
@@ -1310,7 +1314,8 @@ fn overview_head(what: &str, count: &str, reg: &crate::user_config::Registry) ->
 
 fn project_head(p: &crate::projects::Project, tail: &str) -> String {
     let at = sanitize(&p.path.display().to_string());
-    format!("{}  {}   {tail}", paint(style::HEAD, &sanitize(&p.name)), paint(style::DIM, &at)).trim_end().to_string()
+    let head = style::project_colour(&p.path).effects(style::HEAD.get_effects());
+    format!("{}  {}   {tail}", paint(head, &sanitize(&p.name)), paint(style::DIM, &at)).trim_end().to_string()
 }
 
 /// 열지 못한 프로젝트의 한 줄. **무엇을 하면 되는지를 함께 댄다.**
