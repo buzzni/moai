@@ -13,6 +13,7 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
     moai show -g <키워드>                  이미 적어 뒀는지 찾는다
     moai show -s todo -t bug               필터 (쉼표 = 또는, 반복 = 그리고)
     moai show --tree                       에픽 → 이슈 → 자식
+    moai ready --worktree                  옆 워크트리에서 집은 것까지 겹쳐 본다
     moai tui                               탐색기로 돌아다닌다 (읽기 전용)
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done

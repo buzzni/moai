@@ -66,6 +66,7 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
     moai show -g <키워드>                  이미 적어 뒀는지 찾는다
     moai show -s todo -t bug               필터 (쉼표 = 또는, 반복 = 그리고)
     moai show --tree                       에픽 → 이슈 → 자식
+    moai ready --worktree                  옆 워크트리에서 집은 것까지 겹쳐 본다
     moai tui                               탐색기로 돌아다닌다 (읽기 전용)
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
@@ -289,6 +290,21 @@ pub fn reference() -> String {
     moai show --deferred              미뤄 둔 것만
     moai show --stale 7               지금 칸에 이레 넘게 머문 것
     moai show --tree                  에픽 → 이슈 → 자식
+
+## 워크트리 함께 보기
+
+에이전트가 git 워크트리를 하나씩 잡고 일하면, 지금 워크트리의 보드는 옆에서
+집고 옮긴 것을 모른다. `status`·`ready`·`show` 에 `--worktree` 를 붙이면 옆
+워크트리의 이슈를 겹쳐 본다. 탐색기(`moai tui`)에서는 `w` 가 켜고 끈다.
+
+    moai ready --worktree             옆에서 집은 일은 빠지고 "잡고 있는 것" 에 선다
+    moai status --worktree            보드 머리에 "⎇ <워크트리들> 겹쳐 봄"
+    moai show --worktree --json       옆에서 온 줄에만 "branch" 키
+
+같은 id 는 `updated_at` 이 가장 늦은 줄이 서고, 같으면 지금 브랜치의 줄이다.
+지금 브랜치가 아닌 줄은 제목 앞에 `⎇ <브랜치>` 가 붙는다. **보여줄 때만
+겹친다** — 어느 파일도 바뀌지 않고, 쓰기(`mv`·`edit`)는 언제나 지금 워크트리
+파일에만 간다. 옆 워크트리의 일을 옮기려면 그 워크트리에서 부른다.
 
 ## 한 번에 만들기
 
