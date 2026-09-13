@@ -7,10 +7,14 @@
 use super::{Ctx, R};
 use crate::report;
 use crate::store::Repo;
+use crate::projects::{Entry, Overview, Seen};
 use crate::view;
 
 pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    // `.moai` 밖이면 등록한 프로젝트마다 집을 것. 안이면 아래 그대로다 (결정 3).
+    let Some(repo) = Repo::find()? else {
+        return overview(ctx, worktree);
+    };
     let crate::worktree::Gathered { load, origin, .. } = super::gather(&repo, worktree)?;
     super::report_load_errors(&repo.issues_path(), &load.errors);
 
@@ -29,4 +33,46 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let held = report::held(&load.issues, &repo.config);
 
     Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip, &held, &origin))
+}
+
+/// 등록한 프로젝트마다 집을 수 있는 일. 무엇이 ready 인지는 프로젝트마다 같은 자
+/// (`report::ready`)가 **그 프로젝트의 줄만 보고** 정한다 — 남의 프로젝트에서 집은
+/// 일이 이쪽의 막음을 풀거나 걸지 않는다.
+///
+/// **못 읽는 줄이 있어도 0 으로 끝난다** (`status::overview` 와 같은 까닭). 그 줄은
+/// 프로젝트 줄 밑에 수로 말하고, 어느 줄인지는 그 프로젝트의 `show` 가 낸다.
+fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
+    let (reg, projects) = super::registered("ready", worktree)?;
+    let seen: Vec<Seen<view::Picks>> = projects
+        .iter()
+        .map(|p| {
+            p.seen(|repo, load| view::Picks {
+                picks: report::ready(&load.issues, &repo.config),
+                unreadable: load.errors.len(),
+            })
+        })
+        .collect();
+
+    if ctx.json {
+        #[derive(serde::Serialize)]
+        struct Said<'a> {
+            ready: Vec<super::Row<'a>>,
+            unreadable: usize,
+        }
+        let entries = projects
+            .iter()
+            .zip(&seen)
+            .map(|(p, s)| Entry {
+                name: &p.name,
+                path: &p.path,
+                seen: s.map(|k| Said {
+                    ready: k.picks.iter().map(|i| super::Row::of(i, None)).collect(),
+                    unreadable: k.unreadable,
+                }),
+            })
+            .collect();
+        let all = Overview { projects: entries, problems: &reg.problems, config: reg.path.as_deref() };
+        return super::json_line(&all);
+    }
+    Ok(view::projects_ready(&projects, &seen, &reg))
 }

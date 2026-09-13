@@ -61,9 +61,28 @@ pub fn sanitize(s: &str) -> String {
     s.chars().filter(|c| *c == '\n' || *c == '\t' || !c.is_control()).collect()
 }
 
+/// 붙여 넣어 그대로 돌 수 있게 감싼다. 공백이나 껍데기가 뜻을 붙이는 글자가
+/// 있으면 작은따옴표로 — 안 감싸면 `~/My Projects/argos` 가 두 인자로 갈라진다.
+///
+/// **안내에 경로를 넣는 곳은 이것을 지난다** (`project add`·한눈 보기). 자리마다
+/// 따로 두면 한쪽은 안전한 글자를, 한쪽은 위험한 글자를 세어 같은 경로를 달리 감싼다.
+pub fn shell_word(s: &str) -> String {
+    let plain = !s.is_empty()
+        && s.chars().all(|c| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | ',' | ':' | '@' | '%'));
+    if plain { s.to_string() } else { format!("'{}'", s.replace('\'', r"'\''")) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shell_word_quotes_only_what_the_shell_would_split() {
+        assert_eq!(shell_word("/home/raven/work/argos"), "/home/raven/work/argos");
+        assert_eq!(shell_word("/home/raven/작업/argos"), "/home/raven/작업/argos");
+        assert_eq!(shell_word("/home/raven/My Projects"), "'/home/raven/My Projects'");
+        assert_eq!(shell_word("/a/it's"), r"'/a/it'\''s'");
+    }
 
     #[test]
     fn korean_counts_two_columns() {

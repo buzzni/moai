@@ -379,6 +379,224 @@ fn outside_a_repo_it_says_what_to_do() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("moai init"));
 }
 
+// ── `.moai` 밖의 한눈 보기 — 등록한 프로젝트마다 (moai-6au6) ──────────
+
+/// 등록 목록을 **제 임시 파일로** 쓴다. 돌리는 사람의 설정을 읽으면 결과가 기계를 따른다.
+fn registry(s: &Scratch, dirs: &[&Path]) -> PathBuf {
+    let path = s.path().join("user/config.toml");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let body: String = dirs.iter().map(|d| format!("[[project]]\npath = {:?}\n", d.to_str().unwrap())).collect();
+    std::fs::write(&path, body).unwrap();
+    path
+}
+
+fn moai_with(dir: &Path, config: &Path, args: &[&str]) -> Output {
+    isolated(BIN)
+        .args(args)
+        .current_dir(dir)
+        .env("MOAI_CONFIG", config)
+        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("moai 를 실행하지 못했다")
+}
+
+fn ok_with(dir: &Path, config: &Path, args: &[&str]) -> String {
+    let out = moai_with(dir, config, args);
+    assert!(
+        out.status.success(),
+        "moai {args:?} 가 실패했다\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// 한눈 보기에서 이름이 `name` 인 프로젝트의 덩어리. 프로젝트는 빈 줄로 갈린다.
+fn block<'a>(out: &'a str, name: &str) -> &'a str {
+    out.split("\n\n")
+        .find(|b| b.starts_with(&format!("{name}  ")))
+        .unwrap_or_else(|| panic!("{name} 덩어리가 없다 — {out}"))
+}
+
+/// 디렉터리 하나를 만들어 돌려준다.
+fn dir_in(s: &Scratch, rel: &str) -> PathBuf {
+    let d = s.path().join(rel);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+/// **같은 id 가 두 프로젝트에 있어도 섞이지 않는다.** 접두어가 같은 두 저장소는 흔하고,
+/// 줄을 한데 모아 세면 한쪽에서 집은 일이 다른 쪽 보드에 서거나 `ready` 에서 빠진다.
+/// 디렉터리 이름이 겹치면 위 디렉터리를 붙여 가른다.
+#[test]
+fn outside_a_repo_each_registered_project_stands_apart_even_with_the_same_ids() {
+    let s = Scratch::new("ovsame");
+    let (one, two, out) = (dir_in(&s, "one/api"), dir_in(&s, "two/api"), dir_in(&s, "out"));
+    ok(&one, &["init", "argos"]);
+    let id = add(&one, &["같은 줄"]);
+    std::fs::create_dir_all(two.join(".moai")).unwrap();
+    for f in ["config.toml", "issues.jsonl", "journal.jsonl"] {
+        std::fs::copy(one.join(".moai").join(f), two.join(".moai").join(f)).unwrap();
+    }
+    ok(&two, &["mv", &id, "in_progress"]);
+    let cfg = registry(&s, &[&one, &two]);
+
+    let st = ok_with(&out, &cfg, &["status"]);
+    let (a, b) = (block(&st, "one/api"), block(&st, "two/api"));
+    assert!(a.contains("todo 1") && a.contains("in_progress 0"), "{st}");
+    assert!(!a.contains(&id), "집지 않은 쪽에 집은 줄이 섰다 — {st}");
+    assert!(b.contains("todo 0") && b.contains("in_progress 1"), "{st}");
+    assert!(b.contains(&format!("two/api  {id}")), "집은 줄 곁에 프로젝트 이름이 없다 — {st}");
+
+    let rd = ok_with(&out, &cfg, &["ready"]);
+    assert!(block(&rd, "one/api").contains(&format!("one/api  {id}")), "{rd}");
+    assert!(!block(&rd, "two/api").contains(&id), "집은 일이 ready 에 섰다 — {rd}");
+}
+
+/// **읽기는 관대하다.** init 전·사라진 디렉터리·깨진 스냅샷·깨진 설정·설정 파일의 못 읽는
+/// 항목은 제 줄에서만 말하고, 멀쩡한 프로젝트는 그대로 보이며, 종료 코드는 0 이다 — 남의
+/// 저장소 하나로 한눈 보기 전체가 실패로 읽히면 나머지를 못 믿는다.
+#[test]
+fn outside_a_repo_the_overview_names_each_trouble_and_still_exits_zero() {
+    let s = Scratch::new("ovtrouble");
+    let (good, bare, broken, badcfg, out) =
+        (dir_in(&s, "good"), dir_in(&s, "bare"), dir_in(&s, "broken"), dir_in(&s, "badcfg"), dir_in(&s, "out"));
+    let gone = s.path().join("gone");
+    ok(&good, &["init", "argos"]);
+    let id = add(&good, &["멀쩡한 일"]);
+    ok(&broken, &["init", "argos"]);
+    let mut lines = issues(&broken);
+    lines.push_str("{이건 JSON 이 아니다\n");
+    std::fs::write(broken.join(".moai/issues.jsonl"), lines).unwrap();
+    ok(&badcfg, &["init", "argos"]);
+    std::fs::write(badcfg.join(".moai/config.toml"), "prefix = \"\"\n").unwrap();
+    let cfg = registry(&s, &[&good, &bare, &gone, &broken, &badcfg]);
+    let mut text = std::fs::read_to_string(&cfg).unwrap();
+    text.push_str("[[project]]\npath = \"relative/dir\"\n");
+    std::fs::write(&cfg, text).unwrap();
+
+    let st = ok_with(&out, &cfg, &["status"]);
+    assert!(block(&st, "good").contains("todo 1"), "{st}");
+    assert!(block(&st, "bare").contains("init 전"), "{st}");
+    assert!(block(&st, "gone").contains("디렉터리가 없다"), "{st}");
+    assert!(block(&st, "broken").contains("데이터가 깨졌다"), "{st}");
+    assert!(block(&st, "badcfg").contains("못 읽는다") && block(&st, "badcfg").contains("prefix"), "{st}");
+    assert!(st.contains("절대경로"), "사용자 설정의 문제를 말하지 않았다 — {st}");
+
+    let rd = ok_with(&out, &cfg, &["ready"]);
+    assert!(block(&rd, "good").contains(&id), "{rd}");
+    assert!(block(&rd, "broken").contains("읽을 수 없는 줄 1개"), "{rd}");
+    assert!(block(&rd, "bare").contains("init 전"), "{rd}");
+
+    // 인자 없이 부른 것도 같은 한눈 보기다 — 세션의 시작점이다.
+    let bare_call = ok_with(&out, &cfg, &[]);
+    assert!(block(&bare_call, "good").contains("todo 1"), "{bare_call}");
+}
+
+/// **등록한 경로의 제어문자는 화면을 다시 칠하지 못한다.** 설정 파일은 손으로 고칠 수
+/// 있고, ESC 가 든 경로를 그대로 그리면 그 줄이 커서를 옮기고 화면을 지운다
+/// (`moai project ls` 와 같은 자).
+#[test]
+fn outside_a_repo_a_path_cannot_repaint_the_screen() {
+    let s = Scratch::new("ovescape");
+    let out = dir_in(&s, "out");
+    let cfg = s.path().join("user/config.toml");
+    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+    std::fs::write(&cfg, format!("[[project]]\npath = \"{}/gone\\u001b[2Jx\"\n", s.path().display())).unwrap();
+    for verb in ["status", "ready"] {
+        let shown = ok_with(&out, &cfg, &[verb]);
+        assert!(!shown.contains('\u{1b}'), "{verb}: {shown:?}");
+        assert!(shown.contains("gone[2Jx") && shown.contains("디렉터리가 없다"), "{verb}: {shown}");
+    }
+}
+
+/// 한눈 보기의 기계 출력. 프로젝트마다 `name`·`path`·`state` 가 서고, 연 것만 제 셈을
+/// 곁에 든다. **`projects` 키가 곧 여러 프로젝트를 봤다는 뜻이다.**
+#[test]
+fn outside_a_repo_the_overview_speaks_json() {
+    let s = Scratch::new("ovjson");
+    let (good, bare, out) = (dir_in(&s, "good"), dir_in(&s, "bare"), dir_in(&s, "out"));
+    let gone = s.path().join("gone");
+    ok(&good, &["init", "argos"]);
+    let id = add(&good, &["집을 일"]);
+    let picked = add(&good, &["집은 일"]);
+    ok(&good, &["mv", &picked, "in_progress"]);
+    let cfg = registry(&s, &[&good, &bare, &gone]);
+
+    let st = ok_with(&out, &cfg, &["status", "--json"]);
+    one_json_value(&st);
+    let good_at = format!("{{\"name\":\"good\",\"path\":{:?},\"state\":\"ok\",\"status\":{{\"counts\":", good.to_str().unwrap());
+    assert!(st.starts_with(&format!("{{\"projects\":[{good_at}")), "{st}");
+    assert!(st.contains(&format!("\"picked\":[{{\"id\":\"{picked}\"")), "{st}");
+    let bare_at = st.find(&format!("{{\"name\":\"bare\",\"path\":{:?},\"state\":\"uninitialized\"}}", bare.to_str().unwrap()));
+    let gone_at = st.find(&format!("{{\"name\":\"gone\",\"path\":{:?},\"state\":\"missing\"}}", gone.to_str().unwrap()));
+    assert!(bare_at.is_some() && gone_at.is_some() && bare_at < gone_at, "등록 차례가 아니다 — {st}");
+    assert!(st.trim_end().ends_with(&format!("\"problems\":[],\"config\":{:?}}}", cfg.to_str().unwrap())), "{st}");
+
+    let rd = ok_with(&out, &cfg, &["ready", "--json"]);
+    one_json_value(&rd);
+    assert!(rd.contains(&format!("\"state\":\"ok\",\"ready\":[{{\"id\":\"{id}\"")), "{rd}");
+    assert!(!rd.contains(&picked), "집은 일이 ready 에 섰다 — {rd}");
+    assert!(rd.contains("\"unreadable\":0"), "{rd}");
+}
+
+/// 등록한 것이 없으면 **전처럼 실패하되** 등록하는 길을 댄다. 보여줄 것이 없는데 0 으로
+/// 끝나면 `.moai` 밖에서 부른 실수가 성공으로 읽힌다. 설정 파일이 깨져 목록이 빈 것이면
+/// 그 까닭도 함께 말한다.
+#[test]
+fn outside_a_repo_with_nothing_registered_it_fails_and_says_how_to_register() {
+    let s = Scratch::new("ovempty");
+    let out = dir_in(&s, "out");
+    let cfg = registry(&s, &[]);
+    for verb in ["status", "ready"] {
+        let o = moai_with(&out, &cfg, &[verb]);
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(!o.status.success(), "{verb}");
+        assert!(err.contains("moai init") && err.contains("moai project add"), "{verb}: {err}");
+    }
+    let help = ok_with(&out, &cfg, &[]);
+    assert!(help.contains("moai init") && help.contains("moai project add"), "{help}");
+
+    std::fs::write(&cfg, "project = 3\n").unwrap();
+    let o = moai_with(&out, &cfg, &["status"]);
+    assert!(!o.status.success());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("표 배열"), "{}", String::from_utf8_lossy(&o.stderr));
+}
+
+/// **쓰는 명령은 `.moai` 밖에서 여전히 멈춘다** — 등록한 프로젝트가 있어도 어느 것에
+/// 쓸지 모른다. 대신 다른 곳의 저장소를 부르는 길(`-C`)을 댄다.
+#[test]
+fn a_write_outside_a_repo_still_stops_and_points_at_dash_c() {
+    let s = Scratch::new("ovwrite");
+    let (good, out) = (dir_in(&s, "good"), dir_in(&s, "out"));
+    ok(&good, &["init", "argos"]);
+    let before = issues(&good);
+    let cfg = registry(&s, &[&good]);
+    let o = moai_with(&out, &cfg, &["add", "어디에 쓸까"]);
+    assert!(!o.status.success());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("moai -C <dir>"), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(issues(&good), before, "등록한 프로젝트에 썼다");
+}
+
+/// **`.moai` 안에서는 등록 목록이 있어도 바이트 하나 안 바뀐다** (결정 3).
+#[test]
+fn inside_a_repo_a_registry_changes_nothing() {
+    let s = init("ovinside");
+    add(s.path(), &["제 일"]);
+    let other = dir_in(&s, "elsewhere");
+    ok(&other, &["init", "other"]);
+    let cfg = registry(&s, &[&other, s.path()]);
+    for args in [&[][..], &["status"], &["ready"], &["status", "--json"], &["ready", "--json"]] {
+        let plain = moai(s.path(), args);
+        let with = moai_with(s.path(), &cfg, args);
+        assert_eq!(plain.stdout, with.stdout, "{args:?}");
+        assert_eq!(plain.stderr, with.stderr, "{args:?}");
+        assert_eq!(plain.status.code(), with.status.code(), "{args:?}");
+    }
+}
+
 // ── S2 — 칸 옮기기·고치기·지우기·메모, 그리고 필터 ────────────────────
 
 fn add(dir: &Path, args: &[&str]) -> String {

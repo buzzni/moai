@@ -71,6 +71,34 @@ pub fn gather(repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::G
     Ok(g)
 }
 
+/// `.moai` 밖에서 부른 `status`·`ready` 가 볼 등록한 프로젝트. 프로젝트마다 연다.
+///
+/// **등록한 것이 없으면 전처럼 실패한다** — 보여줄 것이 없는데 0 으로 끝나면 `.moai`
+/// 밖에서 부른 실수가 성공으로 읽힌다. 대신 등록하는 길을 곁에 댄다.
+///
+/// 사용자 설정의 문제는 등록한 것이 있을 때는 화면이 한 줄씩 비추고(`problems`),
+/// 없을 때는 실패 말에 붙는다 — 목록이 빈 까닭이 그것일 수 있다.
+pub fn registered(verb: &str, worktree: bool) -> R<(crate::user_config::Registry, Vec<crate::projects::Project>)> {
+    let reg = crate::user_config::read(crate::user_config::path().as_deref());
+    if reg.projects.is_empty() {
+        let mut msg = format!(
+            "{}\n등록한 프로젝트도 없다 — `moai project add <dir>` 로 더하면 `.moai` 밖에서 한눈에 본다",
+            crate::store::NOT_A_REPO
+        );
+        for p in &reg.problems {
+            msg.push_str(&format!("\n{p}"));
+        }
+        return Err(Fail::new(msg));
+    }
+    // **`--worktree` 는 아직 프로젝트마다 겹치지 않는다.** 말없이 버리면 겹쳐 본 줄
+    // 알고 읽는다. stderr 라 `--json` 을 흐리지 않는다.
+    if worktree {
+        eprintln!("moai: --worktree 는 등록한 프로젝트 한눈 보기에서는 겹치지 않는다 — `moai -C <dir> {verb} --worktree`");
+    }
+    let projects = crate::projects::open(&reg);
+    Ok((reg, projects))
+}
+
 /// 읽다 만난 잘못된 줄을 stderr 로 알린다. 결과는 그대로 낸다.
 pub fn report_load_errors(path: &std::path::Path, errors: &[crate::store::LoadError]) {
     if errors.is_empty() {
@@ -148,7 +176,13 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
 /// 치는가. 둘 다 여기서 준다.
 fn opening(ctx: &Ctx) -> R<Vec<String>> {
     use clap::CommandFactory;
-    if crate::store::Repo::discover().is_err() {
+    let found = crate::store::Repo::find();
+    // `.moai` 밖이어도 등록한 프로젝트가 있으면 한눈 보기가 곧 시작점이다 (`status` 가
+    // 그 길로 간다). 설정이 깨진 저장소 안(`Err`)은 전처럼 도움말이다.
+    let outside = matches!(found, Ok(None));
+    let registered = outside
+        && !crate::user_config::read(crate::user_config::path().as_deref()).projects.is_empty();
+    if found.as_ref().map_or(true, Option::is_none) && !registered {
         let mut help = Vec::new();
         crate::cli::Cli::command()
             .write_help(&mut help)
@@ -157,6 +191,9 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
             String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
         out.push(String::new());
         out.push("여기는 아직 moai 저장소가 아니다 — `moai init` 으로 시작한다".into());
+        if outside {
+            out.push("다른 곳의 프로젝트를 여기서 한눈에 보려면 `moai project add <dir>` 로 등록한다".into());
+        }
         return Ok(out);
     }
 
@@ -165,7 +202,7 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
         return Ok(out);
     }
     out.push(String::new());
-    let here = std::path::Path::new("AGENTS.md").exists();
+    let here = !registered && std::path::Path::new("AGENTS.md").exists();
     out.push(crate::style::paint(
         crate::style::DIM,
         if here {
