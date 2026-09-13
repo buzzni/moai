@@ -1287,10 +1287,17 @@ fn rel_to(path: &str, root: &Path) -> String {
 /// 명령줄에서 이 플래그들에 딸린 값을 모은다. `-e x`·`-e=x`, 그리고 짧은
 /// 플래그에 **붙여 쓴** `-ex` 를 다 받는다 — clap 이 받는 모양을 못 읽으면
 /// `moai mv t-r done -m"반영"` 처럼 옳게 친 명령이 막힌다.
+///
+/// **`--` 뒤는 플래그가 아니다.** clap 은 그 뒤를 자리 인자로 받는다 — 여기서
+/// 계속 훑으면 `moai add -- --type=idea` 가 `idea` 로 읽혀 지나가는데, 실제로는
+/// 제목이 `--type=idea` 인 이슈가 선다.
 fn flag_values(seg: &[String], flags: &[&str]) -> Vec<String> {
     let mut out = Vec::new();
     let mut parts = seg.iter().peekable();
     while let Some(t) = parts.next() {
+        if t == "--" {
+            break;
+        }
         if let Some((f, v)) = t.split_once('=')
             && flags.contains(&f)
         {
@@ -1510,6 +1517,8 @@ mod tests {
             "moai issue add \"딴 일\" --type idea",
             // 제목에 든 낱말은 플래그가 아니다.
             "moai add \"--type idea\"",
+            // `--` 뒤는 제목이다 — 이슈 `--type=idea` 가 선다.
+            "moai add -- --type=idea",
         ] {
             assert!(matches!(guard_create(&all, &cfg(), cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }

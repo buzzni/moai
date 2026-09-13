@@ -145,7 +145,8 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         out.push("등록은 손으로 마친다:".into());
         // **절대 경로를 낸다.** 저장소 뿌리를 기준으로 한 `./.claude/moai-plugin` 은
         // 하위 디렉터리에서 부른 사람이 그 자리에서 치면 없는 디렉터리를 가리킨다.
-        out.push(format!("  claude plugin marketplace add {} --scope {scope}", dir.display()));
+        // 빈칸 든 경로를 그대로 내면 친 줄이 인자 둘로 갈린다 — 따옴표로 싼다.
+        out.push(format!("  claude plugin marketplace add {} --scope {scope}", shell_word(&dir.display().to_string())));
         out.push(format!("  claude plugin install moai@{market} --scope {scope} -y"));
     }
     Ok(out)
@@ -392,6 +393,14 @@ fn argv(parts: &[&str]) -> Vec<String> {
 
 fn shown(args: &[String]) -> String {
     format!("claude {}", args.join(" "))
+}
+
+/// 사람이 셸에 그대로 칠 한 낱말. 셸이 가를 글자가 없으면 그대로, 있으면
+/// 홑따옴표로 싼다.
+fn shell_word(s: &str) -> String {
+    let plain = !s.is_empty()
+        && s.chars().all(|c| !c.is_ascii() || c.is_ascii_alphanumeric() || "/._-+:@,%=".contains(c));
+    if plain { s.to_string() } else { format!("'{}'", s.replace('\'', r"'\''")) }
 }
 
 /// PATH 에서 찾아지는 그 이름. 훅에 이름을 적어도 되는지, `claude` 를 부를 수
