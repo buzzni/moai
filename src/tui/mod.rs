@@ -5,6 +5,7 @@
 
 pub mod draw;
 pub mod input;
+pub mod scroll;
 
 use crate::config::Config;
 use crate::model::Issue;
@@ -12,7 +13,7 @@ use crate::nav::{Entry, Index, Path, Seg};
 use crate::query::{Filter, Raw, Where};
 use crate::store::{Load, Repo};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::widgets::ListState;
+use scroll::{PAGE, Scroll};
 
 /// 목록의 한 줄. `..` 은 이슈가 아니므로 [`Entry`] 로는 못 담는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,9 +189,9 @@ pub struct App {
     pub user: Option<String>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
-    /// 상세를 몇 줄 굴렸는가. **왼쪽 커서를 옮기면 0 으로 돌아간다** — 다른
+    /// 상세의 굴린 자리. **왼쪽 커서를 옮기면 첫 줄로 돌아간다** — 다른
     /// 이슈를 보는데 굴린 자리가 남아 있으면 첫 줄부터 못 본다.
-    pub scroll: u16,
+    pub detail: Scroll,
     /// 본문을 그리지 않고 원문 그대로 보는가. 그린 글은 기호가 지워져
     /// 되돌릴 수 없다 — 긁어 붙이거나 마크다운을 고칠 때 이 길이 필요하다.
     pub raw: bool,
@@ -209,9 +210,9 @@ pub struct App {
     /// 매번 맨 위로 튕기면 형제 여럿을 훑는 일이 못 할 짓이 된다.
     remembered: Vec<usize>,
     /// 목록이 훑고 있는 자리. **프레임을 넘어 산다** — 매 프레임 새로 만들면
-    /// 위젯이 0 번 줄부터 다시 세어 커서를 늘 맨 아랫줄에 붙이고, 그러면
-    /// 커서 아래를 한 줄도 못 본다.
-    pub list: ListState,
+    /// 0 번 줄부터 다시 세어 커서를 늘 맨 아랫줄에 붙이고, 그러면 커서 아래를
+    /// 한 줄도 못 본다. 상세와 **같은 조각**이다([`Scroll`]).
+    pub list: Scroll,
     pub quit: bool,
     /// 도는 글리프의 걸음. **그린 횟수가 아니라 시계가 올린다** — 그릴 때마다
     /// 올리면 키를 누르는 동안에는 타이핑 속도로 돌고 가만히 두면 파일을 보러
@@ -274,7 +275,7 @@ impl App {
             cursor: 0,
             mode: Mode::Browse,
             focus: Pane::default(),
-            scroll: 0,
+            detail: Scroll::default(),
             raw: false,
             filter_text: None,
             repo: None,
@@ -289,7 +290,7 @@ impl App {
             pending: None,
             keep,
             remembered,
-            list: ListState::default(),
+            list: Scroll::default(),
             quit: false,
             spin: 0,
             worktree: false,
@@ -483,7 +484,7 @@ impl App {
         // 그 이슈를 첫 줄부터 못 본다 — 커서를 옮길 때 0 으로 되돌리는 것(`move_to`)과
         // 같은 까닭이다. 같은 줄이면 본문이 바뀌었어도 두고, 넘치면 그림이 자른다.
         if found.is_none() {
-            self.scroll = 0;
+            self.detail.rewind();
         }
         self.cursor = found.unwrap_or(self.cursor.min(rows.len().saturating_sub(1)));
     }
@@ -697,10 +698,13 @@ impl App {
             KeyCode::Tab if k.modifiers.contains(KeyModifiers::SHIFT) => self.focus = self.focus.prev(),
             KeyCode::Tab => self.focus = self.focus.next(),
             KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown => {
-                self.step(k.code)
+                self.step(k)
             }
-            KeyCode::Enter | KeyCode::Right => self.enter(),
-            KeyCode::Backspace | KeyCode::Left => self.leave(),
+            // **드나드는 키도 포커스를 탄다.** 상세를 읽다가 누른 Enter·←가 목록을
+            // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
+            // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
+            KeyCode::Enter | KeyCode::Right if self.focus == Pane::Explorer => self.enter(),
+            KeyCode::Backspace | KeyCode::Left if self.focus == Pane::Explorer => self.leave(),
             KeyCode::Char('/') => self.mode = Mode::Grep(String::new()),
             KeyCode::Char('f') | KeyCode::F(7) => self.mode = Mode::Filter(String::new()),
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
@@ -717,51 +721,34 @@ impl App {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
                 // 엉뚱한 데가 나온다.
-                self.scroll = 0;
+                self.detail.rewind();
             }
             // 상세를 굴린다. **왼쪽은 그대로 둔다** — 오른쪽만 길어서 못 보는
             // 것이므로, 굴리려고 커서를 옮기게 하면 보던 이슈를 잃는다.
             // **포커스와 상관없이 듣는다** — 포커스가 생기기 전부터 손에 익은
             // 사람이 있고, 목록에 선 채로 상세를 한 칸 굴리는 길이 여전히 쓸모 있다.
-            KeyCode::Char('j') => self.scroll = self.scroll.saturating_add(1),
-            KeyCode::Char('k') => self.scroll = self.scroll.saturating_sub(1),
-            KeyCode::Char(' ') => self.scroll = self.scroll.saturating_add(PAGE as u16),
-            KeyCode::Char('b') => self.scroll = self.scroll.saturating_sub(PAGE as u16),
+            KeyCode::Char('j') => self.detail.by(1),
+            KeyCode::Char('k') => self.detail.by(-1),
+            KeyCode::Char(' ') => self.detail.by(PAGE as isize),
+            KeyCode::Char('b') => self.detail.by(-(PAGE as isize)),
             _ => {}
         }
     }
 
-    /// 이동키 하나를 **포커스 있는 칸에** 준다.
+    /// 이동키 하나를 **포커스 있는 칸에** 준다. 두 칸이 같은 조각([`scroll`])으로
+    /// 굴러 걸음(`PAGE`)도 끝의 뜻도 같다.
     ///
-    /// 상세의 끝(`End`)은 여기서 모른다 — 줄 수는 폭에 달렸고 폭은 그려야 나온다.
-    /// 그래서 큰 수를 넣고, 그림(`draw::detail`)이 보이는 끝으로 잘라 도로 넣는다.
-    fn step(&mut self, code: KeyCode) {
+    /// 상세의 끝(`End`)은 마지막으로 그린 줄 수로 잰다 — 줄 수는 폭에 달렸고 폭은
+    /// 그려야 나온다. 루프는 키 하나마다 한 번 그리므로 그 수는 한 걸음 넘게 낡지 않는다.
+    fn step(&mut self, k: KeyEvent) {
         match self.focus {
             Pane::Explorer => {
-                // **목록은 필요할 때만 센다.** 세는 데 이슈 전부를 훑고 정렬까지
-                // 하므로, 위로 가는 키에도 미리 세면 그 값이 그대로 버려진다.
-                let last = || self.rows().len().saturating_sub(1);
-                let at = match code {
-                    KeyCode::Up => self.cursor.saturating_sub(1),
-                    KeyCode::Down => (self.cursor + 1).min(last()),
-                    KeyCode::Home => 0,
-                    KeyCode::End => last(),
-                    KeyCode::PageUp => self.cursor.saturating_sub(PAGE),
-                    KeyCode::PageDown => (self.cursor + PAGE).min(last()),
-                    _ => return,
-                };
-                self.move_to(at);
+                if let Some(at) = scroll::cursor(k, self.cursor, || self.rows().len()) {
+                    self.move_to(at);
+                }
             }
             Pane::Detail => {
-                self.scroll = match code {
-                    KeyCode::Up => self.scroll.saturating_sub(1),
-                    KeyCode::Down => self.scroll.saturating_add(1),
-                    KeyCode::Home => 0,
-                    KeyCode::End => u16::MAX,
-                    KeyCode::PageUp => self.scroll.saturating_sub(PAGE as u16),
-                    KeyCode::PageDown => self.scroll.saturating_add(PAGE as u16),
-                    _ => return,
-                };
+                self.detail.key(k);
             }
         }
     }
@@ -770,7 +757,7 @@ impl App {
     /// 남아 있으면 그 이슈의 첫 줄부터 못 본다.
     fn move_to(&mut self, at: usize) {
         if at != self.cursor {
-            self.scroll = 0;
+            self.detail.rewind();
         }
         self.cursor = at;
     }
@@ -836,7 +823,7 @@ impl App {
                 self.remembered.push(self.cursor);
                 self.path.push(seg);
                 self.cursor = 0;
-                self.scroll = 0;
+                self.detail.rewind();
             }
             // 잎은 들어갈 데가 없다. 상세는 오른쪽이 이미 보여 주고 있다.
             _ => {}
@@ -850,7 +837,7 @@ impl App {
     /// 못 찾을 때만(거름망에 빠졌거나 `--path` 로 시작했거나) 쓴다.
     fn leave(&mut self) {
         if let Some(from) = self.path.pop() {
-            self.scroll = 0;
+            self.detail.rewind();
             let fallback = self.remembered.pop().unwrap_or(0);
             let rows = self.rows();
             self.cursor = rows
@@ -895,10 +882,6 @@ impl App {
         }
     }
 }
-
-/// PageUp/Down 한 번에 가는 줄 수. 목록과 상세가 **같은 걸음**이다 — 칸마다
-/// 다르면 Tab 한 번에 같은 키의 뜻이 바뀐다.
-const PAGE: usize = 10;
 
 /// 없는 것을 가리키는 참조에 붙이는 말. **한 낱말로 통일한다** — 자리마다
 /// 다른 말을 쓰면 같은 깨짐을 서로 다른 일로 읽는다.
@@ -1125,30 +1108,37 @@ mod tests {
         }
     }
 
+    /// 그림이 잴 것을 손으로 넣는다 — 상세가 `height` 줄 칸에 `len` 줄을 그렸다.
+    /// 시험은 터미널 없이 돌므로 그림 대신 이것을 부른다.
+    fn drawn(a: &mut App, height: usize, len: usize) {
+        a.detail.fit(height, len);
+    }
+
     /// 이동키는 **포커스 있는 칸이** 먹는다. 상세에 포커스가 있으면 왼쪽 커서는
     /// 그대로다 — 굴리려다 보던 이슈를 잃으면 안 된다.
     #[test]
     fn movement_keys_go_to_the_focused_pane() {
         let mut a = app();
         a.key(key(KeyCode::Down));
-        assert_eq!((a.cursor, a.scroll), (1, 0));
+        assert_eq!((a.cursor, a.detail.offset()), (1, 0));
+        drawn(&mut a, 10, 40);
 
         a.key(key(KeyCode::Tab));
         a.key(key(KeyCode::Down));
-        assert_eq!((a.cursor, a.scroll), (1, 1), "상세에 포커스가 있는데 목록이 움직였다");
+        assert_eq!((a.cursor, a.detail.offset()), (1, 1), "상세에 포커스가 있는데 목록이 움직였다");
         a.key(key(KeyCode::PageDown));
-        assert_eq!((a.cursor, a.scroll), (1, 11));
+        assert_eq!((a.cursor, a.detail.offset()), (1, 11));
         a.key(key(KeyCode::Up));
         a.key(key(KeyCode::PageUp));
-        assert_eq!((a.cursor, a.scroll), (1, 0));
+        assert_eq!((a.cursor, a.detail.offset()), (1, 0));
         a.key(key(KeyCode::PageUp));
-        assert_eq!(a.scroll, 0, "첫 줄 위로 굴렀다");
-        // 끝은 그림이 잘라 준다 — 여기서는 커서가 안 움직였는지만 본다
+        assert_eq!(a.detail.offset(), 0, "첫 줄 위로 굴렀다");
         a.key(key(KeyCode::End));
-        assert_eq!(a.cursor, 1);
-        assert!(a.scroll > 0);
+        assert_eq!((a.cursor, a.detail.offset()), (1, 30), "End 가 끝에 안 닿았다");
+        a.key(key(KeyCode::Up));
+        assert_eq!(a.detail.offset(), 29, "끝에서 ↑ 가 곧바로 안 듣는다");
         a.key(key(KeyCode::Home));
-        assert_eq!((a.cursor, a.scroll), (1, 0));
+        assert_eq!((a.cursor, a.detail.offset()), (1, 0));
 
         // 목록으로 돌아오면 이동키가 다시 커서를 옮긴다
         a.key(key(KeyCode::Tab));
@@ -1158,6 +1148,33 @@ mod tests {
         assert_eq!(a.cursor, 0);
         a.key(key(KeyCode::PageDown));
         assert_eq!(a.cursor, a.rows().len() - 1, "PageDown 이 목록 밖으로 나갔다");
+    }
+
+    /// **드나드는 키(Enter·→·Backspace·←)도 포커스를 탄다.** 상세를 읽다 누른 키가
+    /// 목록을 옮기면 보던 이슈가 바뀌고 굴린 자리도 잃는다.
+    #[test]
+    fn entering_and_leaving_keys_go_to_the_focused_pane() {
+        for k in [KeyCode::Enter, KeyCode::Right] {
+            let mut a = app();
+            a.key(key(KeyCode::Tab));
+            a.key(key(k));
+            assert!(a.path.is_empty(), "상세에 포커스가 있는데 {k:?} 가 목록을 들어갔다");
+            a.key(key(KeyCode::Tab));
+            a.key(key(k));
+            assert_eq!(a.path.len(), 1, "목록에 포커스가 있는데 {k:?} 가 안 들어갔다");
+        }
+        for k in [KeyCode::Backspace, KeyCode::Left] {
+            let mut a = app();
+            a.key(key(KeyCode::Enter));
+            drawn(&mut a, 10, 40);
+            a.key(key(KeyCode::Tab));
+            a.key(key(KeyCode::Down));
+            a.key(key(k));
+            assert_eq!((a.path.len(), a.detail.offset()), (1, 1), "상세에 포커스가 있는데 {k:?} 가 목록을 나갔다");
+            a.key(key(KeyCode::Tab));
+            a.key(key(k));
+            assert!(a.path.is_empty(), "목록에 포커스가 있는데 {k:?} 가 안 나갔다");
+        }
     }
 
     /// 글을 받는 중에는 `Tab` 이 포커스를 안 옮기고 글자로도 안 들어간다 — 적다
@@ -1186,10 +1203,11 @@ mod tests {
         for start in Pane::ALL {
             let mut a = app();
             a.focus = start;
+            drawn(&mut a, 10, 40);
             a.key(key(KeyCode::Char('j')));
             a.key(key(KeyCode::Char('j')));
             a.key(key(KeyCode::Char('k')));
-            assert_eq!((a.cursor, a.scroll, a.focus), (0, 1, start), "{start:?}");
+            assert_eq!((a.cursor, a.detail.offset(), a.focus), (0, 1, start), "{start:?}");
         }
     }
 
@@ -1535,15 +1553,16 @@ mod tests {
         let mut a = app();
         a.key(key(KeyCode::Enter));
         a.key(key(KeyCode::End)); // argos-0004
-        a.scroll = 7;
+        drawn(&mut a, 10, 40);
+        a.detail.by(7);
         let mut more = a.issues.clone();
         more.push(member("argos-0000", "argos-0001"));
         a.adopt(more);
-        assert_eq!(a.scroll, 7, "같은 줄인데 굴린 자리를 잃었다");
+        assert_eq!(a.detail.offset(), 7, "같은 줄인데 굴린 자리를 잃었다");
 
         let gone: Vec<Issue> = a.issues.iter().filter(|i| i.id != "argos-0004").cloned().collect();
         a.adopt(gone);
-        assert_eq!(a.scroll, 0, "다른 줄에 섰는데 굴린 자리가 남았다");
+        assert_eq!(a.detail.offset(), 0, "다른 줄에 섰는데 굴린 자리가 남았다");
     }
 
     /// 겹쳐 보는 동안에는 **옆 워크트리 스냅샷이 바뀐 것도** 다시 읽을 까닭이다.
