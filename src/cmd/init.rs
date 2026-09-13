@@ -226,6 +226,20 @@ mod tests {
         assert_eq!(with_block(&twice, "새 내용\n"), twice);
     }
 
+    /// **커밋된 AGENTS.md 블록이 지금의 글과 같다.** `guide.rs` 만 고치고
+    /// `moai init` 을 안 부르면 이 저장소의 에이전트가 옛 글을 배운다 —
+    /// 탐색기가 idea 를 담게 된 뒤에도 "읽기 전용" 이라 적혀 있었다(`moai-ka9p`).
+    /// 블록 밖의 산문은 사람의 것이라 보지 않는다.
+    #[test]
+    fn the_checked_in_agents_block_matches_the_guide() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("AGENTS.md");
+        let existing = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        assert!(
+            with_block(&existing, &crate::guide::agents()) == existing,
+            "AGENTS.md 블록이 guide.rs 의 글에서 낡았다 — `moai init` 을 다시 부른다"
+        );
+    }
+
     #[test]
     fn an_empty_file_gets_just_the_block() {
         let got = with_block("", "내용\n");
