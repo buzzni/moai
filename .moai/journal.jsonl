@@ -716,3 +716,4 @@
 {"ts":"2026-09-13T14:39:23Z","id":"moai-qxbt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-crfj 는 이동키(↑↓·PageUp/Down·Home/End)만 포커스 칸으로 보냈다. Enter·→·Backspace·← 는 상세에 포커스가 있어도 목록을 움직인다 — 상세가 제 키를 갖게 되면 이 넷을 포커스에 태울지 여기서 정한다. 상세의 End 는 u16::MAX 를 넣고 draw::detail 이 잘라 도로 넣는 길에 기댄다."}
 {"ts":"2026-09-13T14:39:28Z","id":"moai-crfj.hg3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"버그 없음 — 반영할 것 없다. 포커스 표시는 moai-b8wq, 상세 칸의 Enter·← 는 moai-qxbt 로 넘겨 메모를 붙였다"}
 {"ts":"2026-09-13T14:39:31Z","id":"moai-crfj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Pane(탐색기·상세)·Tab/Shift-Tab 순환·이동키를 포커스 칸으로 — 7f760ae"}
+{"ts":"2026-09-13T14:43:47Z","id":"moai-b8wq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
