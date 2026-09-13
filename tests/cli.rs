@@ -632,6 +632,30 @@ fn a_group_stands_in_the_column_its_members_read() {
     assert!(edited.contains(r#""status":"done""#) && edited.contains(r#""derived_status":"in_progress""#), "{edited}");
 }
 
+/// **묶음을 옮기는 것은 막지 않되, 서 있는 칸을 말한다.** 말하지 않으면 옮긴
+/// 사람은 에픽이 닫힌 줄 알고 화면은 계속 `in_progress` 를 그린다.
+#[test]
+fn moving_a_group_writes_and_says_where_it_stands() {
+    let s = init("groupmv");
+    let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
+    let held = add(s.path(), &["원자적 쓰기", "-e", &epic]);
+    ok(s.path(), &["mv", &held, "in_progress"]);
+
+    let out = ok(s.path(), &["mv", &epic, "done"]);
+    assert!(line_of(s.path(), &epic).contains(r#""status":"done""#), "쓰기를 막았다");
+    assert!(out.contains("서 있는 칸은 in_progress") && out.contains("moai defer"), "{out}");
+    let again = ok(s.path(), &["mv", &epic, "done"]);
+    assert!(again.contains("서 있는 칸은 in_progress"), "이미 그 칸이면 입을 다물었다 — {again}");
+
+    let json = ok(s.path(), &["mv", &epic, "review", "--json"]);
+    assert!(json.contains(r#""derived_status":"in_progress""#), "{json}");
+
+    // 읽은 칸과 같은 칸으로 옮기면 말할 것이 없다. 일을 옮길 때도 없다.
+    let out = ok(s.path(), &["mv", &epic, "in_progress"]);
+    assert!(!out.contains("서 있는 칸"), "{out}");
+    assert!(!ok(s.path(), &["mv", &held, "done"]).contains("서 있는 칸"));
+}
+
 /// 멤버 없는 에픽은 0% 가 아니다 — "아직 안 한 것" 과 "속을 안 채운 것" 은 다르다.
 #[test]
 fn an_empty_epic_reads_as_empty_not_zero() {

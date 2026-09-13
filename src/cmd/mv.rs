@@ -19,6 +19,8 @@ struct Moved {
     missing: Vec<String>,
     /// 옮긴 것 중 계획에서 빠진 것 — (그 줄, 실제로 미룬 줄).
     shelved: Vec<(String, String)>,
+    /// 옮기려 한 묶음 → 멤버에서 읽은 칸. 적힌 칸은 어디서도 안 읽힌다.
+    read: std::collections::BTreeMap<String, String>,
 }
 
 pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
@@ -40,7 +42,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
 
     let at = model::now();
     let by = model::actor(ctx.user.as_deref())?;
-    let moved: Moved = repo.with_write(|issues, _, _| {
+    let moved: Moved = repo.with_write(|issues, cfg, _| {
         let mut m = Moved::default();
         let mut entries = Vec::new();
         for id in ids {
@@ -81,6 +83,19 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 .filter_map(|(i, _)| roots.get(i.id.as_str()).map(|r| (i.id.clone(), r.to_string())))
                 .collect();
         }
+        // **묶음을 옮기려 했으면 서 있는 칸을 잰다.** 막지 않는다 — 쓰기는 한다.
+        // 다만 그 칸은 멤버에서 읽히므로(moai-j3b3), 말하지 않으면 옮긴 사람은
+        // 에픽이 닫힌 줄 알고 화면은 계속 `in_progress` 를 그린다.
+        let touched = |id: &str| {
+            m.done.iter().any(|(i, _)| i.id == id) || m.already.iter().any(|a| a == id)
+        };
+        if issues.iter().any(|i| crate::report::is_group(i) && touched(&i.id)) {
+            m.read = crate::report::group_states(issues, cfg)
+                .into_iter()
+                .filter(|(id, _)| touched(id))
+                .map(|(id, col)| (id.to_string(), col.to_string()))
+                .collect();
+        }
         Ok((entries, m))
     })?;
 
@@ -95,14 +110,16 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         // 두 표면 중 하나를 못 믿게 된다.
         #[derive(serde::Serialize)]
         struct Out<'a> {
-            moved: Vec<&'a Issue>,
+            moved: Vec<super::Row<'a>>,
             already: &'a [String],
             missing: &'a [String],
             /// 옮겼어도 계획 밖인 것과 도로 집을 줄. 사람 출력의 안내와 같은 것이다.
             shelved: Vec<super::Shelved<'a>>,
         }
+        let read: std::collections::BTreeMap<&str, &str> =
+            moved.read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect();
         return super::json_line(&Out {
-            moved: moved.done.iter().map(|(i, _)| i).collect(),
+            moved: moved.done.iter().map(|(i, _)| super::Row::of(i, &read)).collect(),
             already: &moved.already,
             missing: &moved.missing,
             shelved: super::shelved(&moved.shelved),
@@ -139,6 +156,16 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // 제가 미룬 줄이면 그 줄이, 물려받았으면 미룬 곳이 도로 집을 줄이다 — 말은
     // `view::shelved_by` 하나다. 한때 제 줄 쪽 안내만 id 없는 `moai defer --undo`
     // 를 대, 그대로 치면 clap 이 인자가 없다며 거절했다.
+    // 묶음의 칸이 적은 칸과 다르면 한 줄. 같으면 말하지 않는다 — 멤버가 다 끝난
+    // 에픽을 `done` 에 두는 것은 틀린 일이 아니다.
+    for (id, col) in moved.read.iter().filter(|(_, col)| **col != to.as_str()) {
+        let fold = if to.is_done() { " — 접으려면 남은 멤버를 `moai defer` 한다" } else { "" };
+        out.push(format!(
+            "{}  {}",
+            paint(style::ID, id),
+            paint(style::DIM, &format!("묶음의 칸은 멤버에서 읽는다. 서 있는 칸은 {col}{fold}"))
+        ));
+    }
     for (id, root) in &moved.shelved {
         out.push(format!(
             "{}  {}",
