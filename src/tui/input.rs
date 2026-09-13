@@ -80,10 +80,12 @@ impl Input {
                 let from = self.prev();
                 self.text.replace_range(from..self.at, "");
                 self.at = from;
+                self.settle();
             }
             KeyCode::Delete => {
                 let to = self.next();
                 self.text.replace_range(self.at..to, "");
+                self.settle();
             }
             KeyCode::Left => self.at = self.prev(),
             KeyCode::Right => self.at = self.next(),
@@ -148,6 +150,15 @@ impl Input {
         self.at = self.boundary_from(self.at);
     }
 
+    /// 지운 자리의 앞뒤가 한 grapheme 으로 붙으면(`🇰x🇷` 에서 `x` 를 지우면 깃발
+    /// 하나가 된다) 커서가 그 가운데 남는다. 붙은 것의 **앞으로** 당긴다 —
+    /// 지우기는 커서를 오른쪽으로 옮기지 않는다. 가운데 두면 화면은 커서를
+    /// 붙은 것 뒤에 그리는데 다음 글자는 그 가운데 들어간다.
+    fn settle(&mut self) {
+        let bounds = self.text.grapheme_indices(true).map(|(i, _)| i).chain([self.text.len()]);
+        self.at = bounds.take_while(|&i| i <= self.at).last().unwrap_or(0);
+    }
+
     /// Ctrl-W. 커서 앞의 빈칸을 넘고 낱말 하나를 지운다 — 셸과 같다.
     fn rub_word(&mut self) {
         let mut from = self.at;
@@ -162,6 +173,7 @@ impl Input {
         }
         self.text.replace_range(from..self.at, "");
         self.at = from;
+        self.settle();
     }
 }
 
@@ -298,6 +310,24 @@ mod tests {
         assert_eq!(shown(&i), "👨\u{200d}👩|");
         press(&mut i, KeyCode::Char('!'));
         assert_eq!(shown(&i), "👨\u{200d}👩!|");
+    }
+
+    /// 지워서 앞뒤가 한 글자로 붙으면 커서는 붙은 것 앞에 선다. 가운데 남으면
+    /// 화면은 커서를 깃발 뒤에 그리는데 다음 글자는 깃발 가운데 들어간다.
+    #[test]
+    fn erasing_what_kept_two_apart_leaves_the_cursor_on_a_boundary() {
+        let mut i = Input::new("🇰x🇷");
+        press(&mut i, KeyCode::Left);
+        press(&mut i, KeyCode::Backspace);
+        assert_eq!(shown(&i), "|🇰🇷");
+        press(&mut i, KeyCode::Char('a'));
+        assert_eq!(shown(&i), "a|🇰🇷");
+
+        let mut i = Input::new("🇰x🇷");
+        press(&mut i, KeyCode::Home);
+        press(&mut i, KeyCode::Right);
+        press(&mut i, KeyCode::Delete);
+        assert_eq!(shown(&i), "|🇰🇷");
     }
 
     /// 제어문자는 칸에 안 들어온다 — 키로도, 처음 적힌 글로도. `moai-ovrg`
