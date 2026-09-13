@@ -21,6 +21,19 @@ pub enum Row {
     Item(Entry),
 }
 
+/// 커서가 선 줄의 **정체**. 첨자(`Entry::at`)와 줄 번호는 다시 읽으면 바뀐다 —
+/// 커서 위에 줄 하나가 생기거나 칸이 바뀌어 차례가 달라지면 같은 번호가 다른
+/// 이슈를 가리키고, 그러면 가만히 보던 커서가 옆 줄로 튄다.
+///
+/// 이슈는 id 로 붙든다. **중복 id 면 첫 줄로 간다** — 둘 중 어느 쪽인지는 id 로는
+/// 못 가르고, `duplicate_id` 는 이미 배너가 말한다. 바구니는 제 줄이 없어 `Seg` 로.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Anchor {
+    Up,
+    Issue(String),
+    Bucket(Seg),
+}
+
 /// 무엇을 받고 있는가. 글을 받는 동안에는 이동키가 글자가 된다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
@@ -225,7 +238,13 @@ impl App {
     }
 
     /// 새 자료를 받아들이고 어긋난 것을 손본다. 시험이 저장소 없이 부른다.
+    ///
+    /// **커서는 번호가 아니라 정체로 따라간다**([`Anchor`]). 보던 줄이 아직 보이면
+    /// 그 줄에 서고, 사라졌으면(지워졌거나 거름망에 빠졌으면) 전처럼 그 번호를 목록
+    /// 안으로 자른 자리에 선다.
     pub fn adopt(&mut self, issues: Vec<Issue>) {
+        // **옛 자료로 잰다** — 줄의 첨자는 옛 `issues` 를 가리킨다.
+        let held = self.current().map(|r| self.anchor_of(&r));
         self.issues = issues;
         self.index = Index::of(&self.issues);
         self.states = states_of(&self.issues, &self.cfg);
@@ -246,8 +265,21 @@ impl App {
             }
             None => self.keep = vec![true; self.issues.len()],
         }
-        self.cursor = self.cursor.min(self.rows().len().saturating_sub(1));
+        let rows = self.rows();
+        let found = held.and_then(|a| rows.iter().position(|r| self.anchor_of(r) == a));
+        self.cursor = found.unwrap_or(self.cursor.min(rows.len().saturating_sub(1)));
         self.count_warnings();
+    }
+
+    /// 그 줄의 정체. 지금 `issues` 에 대해 잰다.
+    fn anchor_of(&self, row: &Row) -> Anchor {
+        match row {
+            Row::Up => Anchor::Up,
+            Row::Item(Entry::Dir { seg, at: None }) => Anchor::Bucket(seg.clone()),
+            Row::Item(Entry::Dir { at: Some(at), .. } | Entry::Leaf { at }) => {
+                Anchor::Issue(self.issues[*at].id.clone())
+            }
+        }
     }
 
     /// 들고 있던 경로가 아직 갈 수 있는 길인가.
@@ -1036,6 +1068,45 @@ mod tests {
         a.reload();
         assert_eq!(a.issues.len(), 2, "F5 로도 안 읽혔다");
         assert!(!a.stale);
+    }
+
+    /// **다시 읽어도 커서는 보던 줄에 선다.** 위에 줄이 생기거나 사라져도, 칸이
+    /// 바뀌어 차례가 달라져도 번호가 아니라 그 줄을 따라간다. 보던 줄이 사라지면
+    /// 목록 밖으로 나가지 않는 이웃 자리에 선다.
+    #[test]
+    fn reloading_keeps_the_cursor_on_the_same_line() {
+        let mut a = app();
+        a.key(key(KeyCode::Enter)); // argos-0001 안 — `..`, 0003, 0004
+        a.key(key(KeyCode::End));
+        let at = |a: &App| match a.current() {
+            Some(Row::Item(e)) => a.issues[e.at().unwrap()].id.clone(),
+            other => format!("{other:?}"),
+        };
+        assert_eq!(at(&a), "argos-0004");
+
+        // 위에 줄이 하나 생긴다 — 같은 번호는 이제 0003 이다.
+        let mut more = a.issues.clone();
+        more.push(member("argos-0000", "argos-0001"));
+        a.adopt(more);
+        assert_eq!(at(&a), "argos-0004", "위에 줄이 생기자 커서가 옆 줄로 튀었다");
+
+        // 위의 줄이 사라진다.
+        let fewer: Vec<Issue> = a.issues.iter().filter(|i| i.id != "argos-0000" && i.id != "argos-0003").cloned().collect();
+        a.adopt(fewer);
+        assert_eq!(at(&a), "argos-0004", "위의 줄이 사라지자 커서가 튀었다");
+
+        // 보던 줄이 사라지면 목록 안의 이웃 자리로.
+        let gone: Vec<Issue> = a.issues.iter().filter(|i| i.id != "argos-0004").cloned().collect();
+        a.adopt(gone);
+        assert!(a.cursor < a.rows().len(), "목록 밖에 섰다");
+
+        // `..` 에 서 있으면 `..` 에 남는다.
+        let mut b = app();
+        b.key(key(KeyCode::Enter));
+        let mut more = b.issues.clone();
+        more.push(member("argos-0000", "argos-0001"));
+        b.adopt(more);
+        assert_eq!(b.current(), Some(Row::Up));
     }
 
     /// 빈 디렉터리에서도 무너지지 않는다.
