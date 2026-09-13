@@ -3611,9 +3611,19 @@ fn skill_uninstall_leaves_another_repos_registration_alone() {
 fn skill_install_without_registration_is_not_a_success() {
     let s = init("skillinstallpartial");
     let c = Claude::new("skillinstallpartial-home");
-    let out = c.run(s.path(), &["skill", "install"], false);
+    let dir = field(&String::from_utf8(c.run(s.path(), &["skill", "install", "--dry-run", "--json"], false).stdout).unwrap(), "dir");
+    // **하위 디렉터리에서 불러도 옳은 자리를 댄다.** 뿌리 기준의 상대 경로를 내면
+    // 그 자리에서 친 줄이 없는 디렉터리를 가리킨다.
+    let sub = s.path().join("src");
+    std::fs::create_dir_all(&sub).unwrap();
+    let out = c.run(&sub, &["skill", "install"], false);
     assert!(!out.status.success(), "등록을 못 했는데 성공으로 끝났다\n{}", text(&out));
     assert!(text(&out).contains("손으로 마친다"), "마칠 길을 안 낸다\n{}", text(&out));
+    assert!(
+        text(&out).contains(&format!("claude plugin marketplace add {dir} --scope local")),
+        "마칠 길이 부른 자리에 따라 틀린다\n{}",
+        text(&out)
+    );
 
     let (market, _) = installed(&s, &c, "0.0.1");
     c.ledger("known_marketplaces.json", &format!("{{\"{market}\":{{\"installLocation\":\"/elsewhere\"}}}}"));

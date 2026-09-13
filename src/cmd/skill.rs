@@ -143,7 +143,9 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     } else {
         out.push(String::new());
         out.push("등록은 손으로 마친다:".into());
-        out.push(format!("  claude plugin marketplace add ./{} --scope {scope}", skill::DIR));
+        // **절대 경로를 낸다.** 저장소 뿌리를 기준으로 한 `./.claude/moai-plugin` 은
+        // 하위 디렉터리에서 부른 사람이 그 자리에서 치면 없는 디렉터리를 가리킨다.
+        out.push(format!("  claude plugin marketplace add {} --scope {scope}", dir.display()));
         out.push(format!("  claude plugin install moai@{market} --scope {scope} -y"));
     }
     Ok(out)
