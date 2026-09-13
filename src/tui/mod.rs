@@ -1,4 +1,4 @@
-//! 탐색기 화면. **읽기 전용이다.**
+//! 탐색기 화면. **쓰기는 [`App::write`] 한 구멍으로만 난다.**
 //!
 //! 상태([`App`])와 그림([`draw`])을 나눈다. 상태 전이는 터미널 없이 시험되고,
 //! 그림은 `TestBackend` 로 시험된다 — 둘 다 TTY 를 켜지 않는다.
@@ -173,9 +173,19 @@ pub struct App {
     /// 둘로 들면 어긋날 수 있고, 산 줄과의 중복을 `moai status` 와 같은 자로
     /// 세려면 수만으로는 모자란다(moai-4dk4).
     pub unreadable: Vec<Option<String>>,
-    /// 마지막 갱신이 **실패한** 까닭. 조용히 삼키면 F5 가 아무 일도 안 하는데
-    /// "바뀌었다" 배너는 붙어 있어, 사람은 누르고 또 누르며 까닭을 못 얻는다.
+    /// 마지막 갱신이나 쓰기가 **실패한** 까닭 — 무엇을 못 했는지까지 단 쪽이 적는다.
+    /// 조용히 삼키면 F5 가 아무 일도 안 하는데 "바뀌었다" 배너는 붙어 있어, 사람은
+    /// 누르고 또 누르며 까닭을 못 얻는다.
     pub trouble: Option<String>,
+    /// `trouble` 이 **쓰기의 실패**인가. 그렇다면 다시 읽기가 성공해도 걷지 않는다 —
+    /// 락을 못 잡은 때가 곧 남이 쓰고 있던 때라 바로 다음 걸음이 다시 읽고, 그 읽기가
+    /// 까닭을 지우면 폼은 열린 채인데 왜 안 닫혔는지가 화면 어디에도 없다. 걷는 것은
+    /// 다음에 성공한 쓰기나, 그 자리를 덮는 읽기의 실패다.
+    write_failed: bool,
+    /// `--user` 로 **준 값 그대로**(`Ctx::user` 와 같다). 쓸 때마다 `model::actor` 로
+    /// 푼다 — 미리 풀어 두면 설정 없는 기계에서 읽기만 하려던 탐색기가 여는 순간
+    /// 사람을 묻는다. 읽기는 묻지 않는다.
+    pub user: Option<String>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
     /// 상세를 몇 줄 굴렸는가. **왼쪽 커서를 옮기면 0 으로 돌아간다** — 다른
@@ -271,6 +281,8 @@ impl App {
             now: crate::model::now(),
             unreadable: unreadable_ids,
             trouble: None,
+            write_failed: false,
+            user: None,
             warnings: 0,
             stamp: None,
             watched: Vec::new(),
@@ -310,7 +322,70 @@ impl App {
     fn receive(&mut self, fresh: crate::fail::R<Fresh>) {
         match fresh {
             Ok(f) => self.apply_fresh(f),
-            Err(e) => self.trouble = Some(e.to_string()),
+            Err(e) => {
+                self.trouble = Some(format!("다시 읽지 못했다 — {e}"));
+                self.write_failed = false;
+            }
+        }
+    }
+
+    /// 탐색기가 `issues.jsonl` 을 바꾸는 **유일한 길.** 모든 쓰기가 여기를 지난다.
+    ///
+    /// CLI 와 같은 [`Repo::with_write`] 를 부른다 — 쓰기 경로가 화면 쪽에 따로
+    /// 서면 락·재읽기·검증·원자적 교체를 또 반쯤 구현하게 되고, 옛 `write.rs` 가
+    /// 그렇게 부풀었다. 닫는 함수가 받는 목록은 **락 안에서 다시 읽은 것**이다.
+    /// 화면이 들고 있는 `self.issues` 는 낡았을 수 있으니 그것을 보고 판단하지 않는다.
+    ///
+    /// **쓰고 나면 [`App::reload`] 로 다시 읽는다.** 만든 줄을 `self.issues` 에 손으로
+    /// 넣으면 그 순간 화면과 파일이 갈라진다 — 정규화·정렬·묶음의 칸·경고 셈이
+    /// 파일 쪽에만 걸린다. 다시 읽기가 표식도 함께 잡으므로(`prepare` 는 읽기 전에
+    /// 잰다) 제가 쓴 것을 "밖에서 바뀌었다" 로 읽어 한 번 더 읽는 일이 없다. 스레드에서
+    /// 짓던 읽기는 버린다 — 쓰기 **전에** 띄운 것이라 늦게 닿으면 방금 쓴 것을
+    /// 옛 화면으로 덮는다(`reload` 가 이미 그렇게 한다).
+    ///
+    /// **실패를 삼키지 않는다.** 대체 화면 안에서는 stderr 가 안 보이므로 `trouble`
+    /// 로 말하고 `None` 을 낸다 — 부른 쪽(폼)은 그것을 보고 적던 것을 닫지 않는다.
+    /// 실패하면 **다시 읽지 않는다**: 파일은 그대로다. 그 뒤 저절로 다시 읽어도 까닭은
+    /// 남는다(`write_failed`) — 다음 쓰기가 성공할 때 걷힌다.
+    ///
+    /// **누군지 모르면 락을 잡기 전에 멈춘다.** 이름 없는 줄을 적느니 한 번 묻는다는
+    /// 규약이고, 묻는 화면은 따로 선다(moai-nmv2). 여기는 모른다고 말만 한다.
+    ///
+    /// **동기다.** 로컬 파일 하나라 짧고, 그동안 화면은 멈춘다. 비동기 런타임을
+    /// 들이면 CLI 전체가 async 로 물든다. 락을 못 잡으면 `with_write` 가 5초 뒤
+    /// 아무것도 안 쓰고 물러나고, 그 말이 그대로 화면에 선다.
+    #[must_use = "None 이면 쓰지 못했다 — 적던 것을 닫으면 사람이 적은 것을 잃는다"]
+    #[cfg_attr(not(test), expect(dead_code, reason = "첫 부르는 곳은 `n` 폼이다(moai-11s4)"))]
+    pub fn write<T>(
+        &mut self,
+        f: impl FnOnce(
+            &mut Vec<Issue>,
+            &Config,
+            &std::collections::BTreeSet<String>,
+            &crate::model::Actor,
+        ) -> crate::fail::R<(Vec<crate::model::JournalEntry>, T)>,
+    ) -> Option<T> {
+        let Some(repo) = &self.repo else {
+            self.trouble = Some("쓰지 못했다 — 저장소 없이 연 화면이다".into());
+            self.write_failed = true;
+            return None;
+        };
+        let written = crate::model::actor(self.user.as_deref())
+            .and_then(|by| repo.with_write(|issues, cfg, reserved| f(issues, cfg, reserved, &by)));
+        match written {
+            Ok(out) => {
+                self.write_failed = false;
+                self.reload();
+                Some(out)
+            }
+            // 거절문은 여러 줄일 수 있다(누군지 모를 때는 고칠 명령까지 낸다). 배너는
+            // 한 줄이라 줄바꿈이 그대로 가면 그림이 찢어진다 — 한 줄로 잇는다.
+            Err(e) => {
+                let why: Vec<&str> = e.message.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+                self.trouble = Some(format!("쓰지 못했다 — {}", why.join("  ")));
+                self.write_failed = true;
+                None
+            }
         }
     }
 
@@ -321,7 +396,9 @@ impl App {
 
     /// 지어 온 것을 들인다. 여기서 하는 셈은 커서·경로·거름망뿐이다.
     fn apply_fresh(&mut self, f: Fresh) {
-        self.trouble = None;
+        if !self.write_failed {
+            self.trouble = None;
+        }
         self.stamp = f.stamp;
         self.unreadable = f.unreadable;
         self.origin = f.origin;
@@ -1513,6 +1590,143 @@ mod tests {
         a.key(key(KeyCode::F(5)));
         assert!(!a.loading(), "F5 가 짓던 것을 안 버렸다");
         assert_eq!(a.issues.len(), 1);
+    }
+
+    /// 쓰기 시험이 쓰는 판 — 진짜 파일에 줄 하나를 두고 연 탐색기. **사람은
+    /// `--user` 로 준다** — `MOAI_ACTOR` 를 시험에서 바꾸면 같은 프로세스의 다른
+    /// 시험이 그 값을 본다.
+    fn writable(name: &str) -> (Scratch, App) {
+        let scratch = Scratch::new(name);
+        let dir = scratch.0.clone();
+        std::fs::write(
+            dir.join(".moai/issues.jsonl"),
+            format!("{}\n", serde_json::to_string(&make("argos-0001", Kind::Epic)).unwrap()),
+        )
+        .unwrap();
+        let repo = Repo { root: dir, config: cfg() };
+        let stamp = stamp_of(&repo);
+        let load = repo.read().unwrap();
+        let index = Index::of(&load.issues);
+        let mut a = App::open(repo, load, index, Path::new(), stamp);
+        a.user = Some("레이븐 (raven@example.com)".into());
+        (scratch, a)
+    }
+
+    /// 생각 하나를 담는 쓰기 — 폼이 부를 모양 그대로다.
+    fn add_idea(a: &mut App, id: &'static str) -> Option<&'static str> {
+        a.write(move |issues, _, _, by| {
+            issues.push(Issue::new(id.into(), "떠오른 것".into(), Kind::Idea, Status::new("todo"), "2026-09-13T00:00:00Z"));
+            Ok((vec![crate::model::JournalEntry::create(id, "떠오른 것", "2026-09-13T00:00:00Z", by)], id))
+        })
+    }
+
+    /// **쓰면 파일이 바뀌고, 화면은 그 파일을 다시 읽은 것이다.** 손으로 넣은 것이
+    /// 아니라는 증거가 저널과 표식이다 — 표식이 그대로면 다음 걸음이 제가 쓴 것을
+    /// "밖에서 바뀌었다" 로 읽고 한 번 더 읽는다.
+    #[test]
+    fn a_write_lands_in_the_file_and_the_screen_rereads_it() {
+        let (scratch, mut a) = writable("write");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        a.trouble = Some("다시 읽지 못했다 — 옛 까닭".into());
+
+        assert_eq!(add_idea(&mut a, "argos-0002"), Some("argos-0002"));
+        assert!(std::fs::read_to_string(&file).unwrap().contains("argos-0002"), "파일에 안 닿았다");
+        assert_eq!(a.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["argos-0001", "argos-0002"]);
+        assert_eq!(a.index.find("argos-0002"), Some(1), "색인이 다시 안 섰다 — 손으로 넣은 것이다");
+        let repo = a.repo.clone().unwrap();
+        assert_eq!(repo.journal_of("argos-0002").unwrap()[0].by, "레이븐");
+        assert!(a.trouble.is_none(), "다시 읽었는데 옛 까닭이 남았다");
+
+        assert_eq!(a.stamp, stamp_of(&repo), "표식을 다시 안 잡았다");
+        a.follow();
+        assert!(!a.loading(), "제가 쓴 것을 밖에서 바뀐 것으로 읽었다");
+    }
+
+    /// **쓰기 전에 띄운 다시 읽기는 버린다.** 늦게 닿으면 방금 쓴 것을 옛 화면으로
+    /// 덮는다. 쓰기는 락 안에서 파일을 다시 읽으므로 밖에서 떨어진 줄도 잃지 않는다.
+    #[test]
+    fn a_write_drops_the_read_in_flight_and_keeps_the_outside_change() {
+        let (scratch, mut a) = writable("write-inflight");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let mut src = std::fs::read_to_string(&file).unwrap();
+        src.push_str(&format!("{}\n", serde_json::to_string(&make("argos-0003", Kind::Issue)).unwrap()));
+        std::fs::write(&file, src).unwrap();
+        a.follow();
+        assert!(a.loading(), "판이 다르다 — 밖의 쓰기를 못 봤다");
+
+        assert!(add_idea(&mut a, "argos-0002").is_some());
+        assert!(!a.loading(), "쓰기 전에 띄운 읽기가 남았다");
+        assert_eq!(a.issues.len(), 3, "밖에서 떨어진 줄이나 제가 쓴 줄을 잃었다");
+        settle(&mut a);
+        assert_eq!(a.issues.len(), 3);
+    }
+
+    /// **실패는 화면에 선다.** 검증에 걸리면 파일도 화면도 그대로고, 까닭이 남는다 —
+    /// 다시 읽으면 그 까닭이 지워지므로 실패한 뒤에는 읽지 않는다.
+    #[test]
+    fn a_refused_write_says_why_and_touches_nothing() {
+        let (scratch, mut a) = writable("write-refused");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let before = std::fs::read_to_string(&file).unwrap();
+        let stamp = a.stamp;
+
+        let out = a.write(|issues, _, _, _| {
+            issues.push(Issue::new("argos-0002".into(), "t".into(), Kind::Idea, Status::new("없는칸"), "2026-09-13T00:00:00Z"));
+            Ok((vec![], ()))
+        });
+        assert!(out.is_none(), "거절됐는데 썼다고 한다");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+        assert_eq!(a.issues.len(), 1);
+        assert_eq!(a.stamp, stamp);
+        let t = a.trouble.clone().unwrap_or_default();
+        assert!(t.starts_with("쓰지 못했다") && t.contains("칸"), "{t}");
+
+        // 여러 줄 거절문(고칠 명령까지 내는 것)은 배너 한 줄로 이어진다.
+        let out = a.write(|_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> {
+            Err("첫 줄\n      고칠 명령".into())
+        });
+        assert!(out.is_none());
+        assert_eq!(a.trouble.as_deref(), Some("쓰지 못했다 — 첫 줄  고칠 명령"));
+    }
+
+    /// **쓰기의 실패는 저절로 다시 읽기에 지워지지 않는다.** 락을 못 잡은 때가 곧
+    /// 남이 쓰고 있던 때라, 실패 바로 다음 걸음이 그 쓰기를 보고 다시 읽는다 — 그
+    /// 읽기가 까닭을 지우면 폼은 열린 채인데 왜 안 닫혔는지 아무 데도 없다. 다음
+    /// 쓰기가 성공하면 그때 걷힌다.
+    #[test]
+    fn a_failed_write_survives_the_background_reread() {
+        let (scratch, mut a) = writable("write-sticky");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let out = a.write(|_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> { Err("락".into()) });
+        assert!(out.is_none());
+
+        let mut src = std::fs::read_to_string(&file).unwrap();
+        src.push_str(&format!("{}\n", serde_json::to_string(&make("argos-0003", Kind::Issue)).unwrap()));
+        std::fs::write(&file, src).unwrap();
+        settle(&mut a);
+        assert_eq!(a.issues.len(), 2, "밖의 쓰기를 못 읽었다");
+        assert_eq!(a.trouble.as_deref(), Some("쓰지 못했다 — 락"), "저절로 다시 읽기가 쓰기의 까닭을 지웠다");
+
+        assert!(add_idea(&mut a, "argos-0002").is_some());
+        assert!(a.trouble.is_none(), "쓰기가 성공했는데 옛 까닭이 남았다");
+    }
+
+    /// **누군지 모르면 쓰지 않는다.** 이름 없는 줄을 적느니 멈추고 말한다 — 묻는 것은
+    /// moai-nmv2 의 몫이다. 락도 잡기 전이라 닫는 함수는 불리지도 않는다.
+    #[test]
+    fn an_unknown_actor_stops_the_write_on_screen() {
+        let (scratch, mut a) = writable("write-actor");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let before = std::fs::read_to_string(&file).unwrap();
+        a.user = Some("이름만".into());
+
+        let out = a.write(|_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> {
+            panic!("누군지 모르는데 닫는 함수를 불렀다")
+        });
+        assert!(out.is_none());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+        let t = a.trouble.clone().unwrap_or_default();
+        assert!(t.starts_with("쓰지 못했다") && !t.contains('\n'), "{t:?}");
     }
 
     /// 빈 디렉터리에서도 무너지지 않는다.

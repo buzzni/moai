@@ -80,7 +80,8 @@ fn banner(app: &App) -> Option<(String, bool)> {
     let mut parts: Vec<String> = Vec::new();
     let mut urgent = false;
     if let Some(t) = &app.trouble {
-        parts.push(format!("다시 읽지 못했다 — {t}"));
+        // 무엇을 못 했는지는 단 쪽이 적는다 — 다시 읽기와 쓰기가 같은 자리를 쓴다.
+        parts.push(t.clone());
         urgent = true;
     }
     if !app.unreadable.is_empty() {
@@ -1068,6 +1069,16 @@ mod tests {
         a.unreadable = vec![None; 3];
         let lines = render(&mut a, 100, 14).join("\n");
         assert!(lines.contains("읽을 수 없는 줄 3개"), "{lines}");
+    }
+
+    /// 쓰기의 실패도 같은 자리에 서고, **무엇을 못 했는지는 단 쪽의 말 그대로다** —
+    /// 배너가 "다시 읽지 못했다" 를 덧붙이면 쓰기 실패가 읽기 실패로 거짓말한다.
+    #[test]
+    fn a_failed_write_is_told_as_a_write() {
+        let mut a = app();
+        a.trouble = Some("쓰지 못했다 — 락".into());
+        let lines = render(&mut a, 100, 14).join("\n");
+        assert!(lines.contains("쓰지 못했다 — 락") && !lines.contains("다시 읽지"), "{lines}");
     }
 
     /// 경로 줄이 **언제 읽은 화면인지** 댄다. 저절로 다시 읽으므로 배너는 없고,

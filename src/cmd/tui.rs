@@ -1,4 +1,5 @@
-//! 탐색기 화면. **읽기 전용이다** — `with_write` 를 부르지 않는다.
+//! 탐색기 화면. 쓰기는 `App::write` 하나를 지나 `with_write` 에 닿는다 — 여기서
+//! 따로 부르지 않는다.
 //!
 //! 여기는 얇다. 무엇이 어느 디렉터리에 걸리는지는 [`crate::nav`] 가 정하고,
 //! 무엇을 세는지는 `report` 가 정한다. 이 파일은 잇고 그리기만 한다.
@@ -54,6 +55,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 101 번 패닉이 나고, `--json` 으로 부른 쪽은 약속된 오류 객체 대신
     // 역추적 문구를 받는다. 여기서 받아 `Fail` 로 바꾼다.
     let mut app = App::open(repo, load, index, path, stamp);
+    app.user = ctx.user.clone();
     let mut term = ratatui::try_init().map_err(|e| Fail::new(format!("터미널을 열지 못했다: {e}")))?;
     let out = loop_until_quit(&mut term, &mut app);
     ratatui::restore();
