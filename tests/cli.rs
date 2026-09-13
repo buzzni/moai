@@ -3887,6 +3887,17 @@ fn reviews_are_judged_through_the_contract() {
 // `claude` 와 `/usr/bin:/bin` 으로만 둔다. 가짜는 받은 인자를 적어 두고 0 을
 // 낸다. 이 시험이 사람의 등록을 걷는 날이 오면 그것이 제일 나쁜 버그다.
 
+/// **실행할 파일은 이 프로세스에서 쓰지 않는다 — `cp` 에게 쓰게 한다.** 이 프로세스가
+/// 쓰기 fd 를 여는 순간 옆 스레드의 시험이 fork 하면 그 자식이 fd 를 물려받고,
+/// 자식이 exec 할 때까지 그 inode 에 쓰는 이가 남아 Linux 가 exec 을 ETXTBSY 로
+/// 거절한다. 임시 이름에 쓰고 `rename` 해도 **inode 가 같아** 소용없다 — 재어 보니
+/// 복사 2,400 번에 `fs::copy` 345 번, 복사+rename 294 번, `cp` 0 번 터졌다.
+/// 쓰기 fd 가 `cp` 안에만 살면 이 프로세스의 fork 가 그것을 물려받을 길이 없다.
+fn place_exe(src: &Path, dst: &Path) {
+    let out = Command::new("cp").arg(src).arg(dst).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+}
+
 struct Claude {
     home: Scratch,
     bin: PathBuf,
@@ -3904,14 +3915,17 @@ impl Claude {
         let bin = home.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let log = home.path().join("claude.log");
-        let script = bin.join("claude");
+        // 원본은 `bin` 밖에 쓰고 `place_exe` 로 내놓는다 — 이 프로세스가 쓴 inode 를
+        // moai 가 exec 하면 옆 시험의 fork 와 겹쳐 ETXTBSY 가 날 수 있다.
+        let source = home.path().join("claude.sh");
         // 패턴을 따옴표로 싼다 — 안 싸면 `plugin uninstall` 의 빈칸이 패턴을 둘로
         // 갈라 문법 오류가 나고, 가짜가 **모든** 부름에 비영으로 끝난다.
         let fail = word.map(|w| format!("case \"$*\" in *\"{w}\"*) exit 1;; esac\n")).unwrap_or_default();
-        std::fs::write(&script, format!("#!/bin/sh\necho \"$@\" >> \"{}\"\n{fail}exit 0\n", log.display()))
+        std::fs::write(&source, format!("#!/bin/sh\necho \"$@\" >> \"{}\"\n{fail}exit 0\n", log.display()))
             .unwrap();
         use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+        place_exe(&source, &bin.join("claude"));
         std::fs::create_dir_all(home.path().join(".claude/plugins")).unwrap();
         // moai 가 PATH 에서 찾는 것은 `sh` 뿐이다 (`command -v` 로 이름을 찾는다).
         let sys = home.path().join("sysbin");
@@ -4064,7 +4078,7 @@ fn skill_status_from_another_binary_keeps_a_current_install_current() {
 
     let copy = c.home.path().join("otherbin/moai");
     std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
-    std::fs::copy(BIN, &copy).unwrap();
+    place_exe(Path::new(BIN), &copy);
     let out = c.command(&copy, s.path(), &["skill", "status"], true).output().unwrap();
     assert!(out.status.success(), "{}", text(&out));
     let said = text(&out);
