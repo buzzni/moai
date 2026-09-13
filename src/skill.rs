@@ -97,11 +97,18 @@ pub fn tree(
     skill: &str,
     reference: &str,
 ) -> Vec<(PathBuf, String)> {
+    tree_named(&market(prefix, root), exe, skill, reference)
+}
+
+/// `tree` 의 몸통. 저장소 자리는 마켓플레이스 이름으로만 들어오므로, 이름을
+/// 받아 두면 **커밋된 트리를 그 트리가 적힌 자리 그대로** 다시 낼 수 있다 —
+/// 다른 체크아웃(워크트리)에서 부른 시험이 남의 자리를 안 섞는다.
+fn tree_named(market: &str, exe: &str, skill: &str, reference: &str) -> Vec<(PathBuf, String)> {
     let mut files: Vec<(PathBuf, String)> = vec![
         (PathBuf::from("skills/moai/SKILL.md"), skill.to_string()),
         (PathBuf::from("skills/moai/references/commands.md"), reference.to_string()),
     ];
-    let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(prefix, root));
+    let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
     // 판은 **매니페스트를 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다.
     // 매니페스트 자신은 그 판을 담고 있으므로 그대로는 셈에 넣을 수 없다 —
     // 넣으면 해시가 제 꼬리를 문다. 그렇다고 매니페스트를 통째로 빼면 그 틀
@@ -157,10 +164,10 @@ fn plugin_json(exe: &str, version: &str) -> String {
     pretty(&manifest)
 }
 
-fn marketplace_json(prefix: &str, root: &Path) -> String {
+fn marketplace_json(name: &str) -> String {
     pretty(&serde_json::json!({
         "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-        "name": market(prefix, root),
+        "name": name,
         "description": "moai 가 심는다. 손으로 고치면 다음 `moai skill install` 이 덮어쓴다.",
         "owner": { "name": "moai" },
         "plugins": [{
@@ -613,5 +620,47 @@ mod tests {
         // 출력과 `status` 는 절대 경로를, 훅은 PATH 의 moai 를 가리킨다.
         assert_eq!(exe_name(Path::new("/tmp/we$ird/moai"), None), "moai");
         assert_eq!(exe_name(Path::new("/tmp/plain/moai"), None), "/tmp/plain/moai");
+    }
+
+    /// **커밋된 플러그인 트리가 지금의 글과 같다.**
+    ///
+    /// `.claude/moai-plugin/` 은 `skill install` 이 낸 것을 커밋해 둔 복사라,
+    /// `guide.rs` 의 글만 고치면 조용히 낡는다 — 탐색기가 idea 를 담게 된 뒤에도
+    /// SKILL.md 가 "읽기 전용" 이라 가르쳤다(`moai-ka9p`). 그 복사를 읽은 세션은
+    /// 바이너리가 아니라 옛 글을 배운다.
+    ///
+    /// **훅의 실행 파일과 마켓플레이스 이름은 커밋된 파일에서 읽는다.** 둘은
+    /// 심은 체크아웃의 자리에서 나오는 값이라, 이 시험을 부른 자리(워크트리)로
+    /// 다시 셈하면 글이 같아도 늘 어긋난다. 여기서 보는 것은 글과 판뿐이다.
+    ///
+    /// 다시 쓰는 길: `MOAI_BLESS=1 cargo test --release checked_in` — 같은
+    /// `tree_named` 로 네 파일을 적힌 자리 그대로 다시 쓴다. `skill install` 은
+    /// `claude` 등록까지 건드리고 부른 자리의 경로를 적어, 워크트리에서는 못 쓴다.
+    #[test]
+    fn the_checked_in_plugin_matches_the_guide() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(DIR);
+        let read = |p: &str| std::fs::read_to_string(dir.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+        let manifest = read(".claude-plugin/plugin.json");
+        let exe = hook_exe(&manifest).expect("커밋된 plugin.json 에서 훅의 실행 파일을 못 읽는다");
+        let market: serde_json::Value =
+            serde_json::from_str(&read(".claude-plugin/marketplace.json")).expect("marketplace.json 이 깨졌다");
+        let name = market["name"].as_str().expect("marketplace.json 에 name 이 없다");
+
+        let want = tree_named(name, &exe, &crate::guide::skill(), &crate::guide::reference());
+        if std::env::var_os("MOAI_BLESS").is_some() {
+            for (path, body) in &want {
+                std::fs::write(dir.join(path), body).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            }
+        }
+        let stale: Vec<String> = want
+            .iter()
+            .filter(|(path, body)| read(&path.to_string_lossy()) != *body)
+            .map(|(path, _)| path.display().to_string())
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "{DIR} 이 guide.rs 의 글에서 낡았다: {stale:?}\n  \
+             MOAI_BLESS=1 cargo test --release checked_in 으로 다시 쓴다"
+        );
     }
 }

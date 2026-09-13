@@ -13,7 +13,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. 승인 게이트가 
     moai show -s todo -t bug               필터 (쉼표 = 또는, 반복 = 그리고)
     moai show --tree                       에픽 → 이슈 → 자식
     moai ready --worktree                  옆 워크트리에서 집은 것까지 겹쳐 본다
-    moai tui                               탐색기로 돌아다닌다 (읽기 전용)
+    moai tui                               탐색기로 돌아다닌다. n 으로 생각을 담는다
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
@@ -80,7 +80,8 @@ idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
     moai show --milestone <id>                     그 마일스톤에 딸린 전부
 
 **소속은 물려받는다.** 자식은 부모의 에픽을, 이슈는 제 에픽의 마일스톤을
-물려받는다. 이슈마다 다시 적지 않는다 — 에픽을 옮기면 멤버가 따라온다.
+물려받는다. `--parent <에픽>` 으로 만든 자식은 그 에픽에 든다. 이슈마다 다시
+적지 않는다 — 에픽을 옮기면 멤버가 따라온다.
 
 **묶음의 칸은 멤버에서 읽는다.** 에픽·마일스톤을 `moai mv` 로 옮기지 않는다 —
 멤버를 하나 집으면 `in_progress` 로, 다 끝나면 `done` 으로 저절로 선다. 남은
