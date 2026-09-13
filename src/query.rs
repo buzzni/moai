@@ -22,19 +22,28 @@ pub enum Sel {
 
 /// 소속은 **묶음 전체를 봐야** 알 수 있다 — 자식은 조상에게서 물려받고,
 /// 마일스톤은 에픽을 거쳐 온다. 그래서 이슈 하나만 보고는 못 고른다.
+#[derive(Default)]
 pub struct Where<'a> {
     pub epic: BTreeMap<&'a str, &'a str>,
     pub milestone: BTreeMap<&'a str, &'a str>,
     /// 물려받은 것까지 친 미룸. 미룸도 소속처럼 묶음을 타고 내려온다.
     pub put_off: BTreeSet<&'a str>,
+    /// 묶음 → 멤버에서 읽은 칸. 묶음의 칸도 제 줄만 보고는 모른다.
+    pub states: BTreeMap<&'a str, &'a str>,
 }
 
 impl<'a> Where<'a> {
-    pub fn of(all: &'a [Issue]) -> Where<'a> {
+    pub fn of(all: &'a [Issue], cfg: &'a crate::config::Config) -> Where<'a> {
         let epic = crate::report::groups(all);
         let milestone = crate::report::milestones(all);
         let put_off = crate::report::put_off_in(all, &epic, &milestone);
-        Where { epic, milestone, put_off }
+        let states = crate::report::group_states_in(all, cfg, &epic, &milestone);
+        Where { epic, milestone, put_off, states }
+    }
+
+    /// 그 줄이 서 있는 칸 (`report::column`).
+    pub fn column<'x>(&'x self, i: &'x Issue) -> &'x str {
+        crate::report::column(i, &self.states)
     }
 
     /// 목록에서 미룬 것으로 치는가. **제 줄의 미룸이나 물려받은 미룸.**
@@ -398,10 +407,14 @@ mod tests {
         i
     }
 
+    fn cfg() -> crate::config::Config {
+        crate::config::Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
     /// 한 이슈만 두고 고르기. 소속 지도는 그 이슈에서 뽑는다.
     fn hit(f: &Filter, i: &Issue) -> bool {
         let all = [i.clone()];
-        f.matches(i, NOW, &Where::of(&all))
+        f.matches(i, NOW, &Where::of(&all, &cfg()))
     }
 
     fn f() -> Filter {
@@ -415,7 +428,7 @@ mod tests {
         let plain = Filter::default();
         let why = |i: &Issue| {
             let all = [i.clone()];
-            plain.hidden_by(i, &Where::of(&all))
+            plain.hidden_by(i, &Where::of(&all, &cfg()))
         };
         let mut thought = issue("a-0001", "todo", &[]);
         thought.kind = Kind::Idea;
@@ -743,7 +756,8 @@ mod tests {
         thought.kind = Kind::Idea;
         thought.title = "파서를 다시 쓴다".into();
         let all = vec![thought.clone(), issue("argos-0009", "todo", &[])];
-        let wh = Where::of(&all);
+        let cfg = cfg();
+        let wh = Where::of(&all, &cfg);
         let hits = |raw: Raw| -> Vec<String> {
             let f = Filter::build(raw).unwrap();
             all.iter().filter(|i| f.matches(i, NOW, &wh)).map(|i| i.id.clone()).collect()

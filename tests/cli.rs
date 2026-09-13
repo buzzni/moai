@@ -589,6 +589,36 @@ fn a_child_counts_toward_its_ancestors_epic() {
     assert!(lines[at_hist..].iter().all(|l| !l.contains("멤버   ")), "{out}");
 }
 
+/// **묶음의 칸은 멤버에서 읽는다** (moai-j3b3). 멤버 하나가 집히고 하나가 닫혔는데
+/// 에픽이 `· todo` 로 서면 바로 밑의 `멤버 1/2` 와 한 화면에서 모순된다.
+/// 손으로 둔 칸은 안 읽되, 그렇다고 말은 한다.
+#[test]
+fn a_group_stands_in_the_column_its_members_read() {
+    let s = init("groupcol");
+    let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
+    let held = add(s.path(), &["원자적 쓰기", "-e", &epic]);
+    let closed = add(s.path(), &["락", "-e", &epic]);
+    ok(s.path(), &["mv", &held, "in_progress"]);
+    ok(s.path(), &["mv", &closed, "done"]);
+
+    let out = ok(s.path(), &["show", &epic]);
+    let head = out.lines().nth(1).unwrap();
+    assert!(head.contains("▸ in_progress"), "{out}");
+    assert!(!head.contains("적힌 칸"), "옮긴 적 없는 칸을 따로 말했다\n{out}");
+
+    let list = ok(s.path(), &["show", "--all"]);
+    let row = list.lines().find(|l| l.starts_with(&epic)).unwrap();
+    assert!(row.contains("▸"), "{list}");
+
+    // 손으로 둔 칸은 읽은 칸을 못 이긴다 — 그러나 상세가 그것을 말한다.
+    ok(s.path(), &["mv", &epic, "done"]);
+    let out = ok(s.path(), &["show", &epic]);
+    assert!(out.lines().nth(1).unwrap().contains("▸ in_progress"), "{out}");
+    assert!(out.contains("적힌 칸 `done` 은 안 읽는다"), "{out}");
+    let edited = ok(s.path(), &["edit", &epic, "--tag", "storage"]);
+    assert!(edited.lines().nth(1).unwrap().contains("▸ in_progress"), "{edited}");
+}
+
 /// 멤버 없는 에픽은 0% 가 아니다 — "아직 안 한 것" 과 "속을 안 채운 것" 은 다르다.
 #[test]
 fn an_empty_epic_reads_as_empty_not_zero() {

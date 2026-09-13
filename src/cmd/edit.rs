@@ -9,10 +9,9 @@ use crate::cli::EditArgs;
 use crate::model::{self, Issue};
 use crate::store::Repo;
 use crate::view;
-use std::collections::BTreeMap;
 
 /// 락 안에서 챙겨 나오는 것 — 고친 줄, 그 에픽, 자식, (계획에서 빠진 줄, 뺀 줄), 바뀌었나.
-type Edited = (Issue, Option<Issue>, Vec<Issue>, Vec<(String, String)>, bool);
+type Edited = (Issue, Option<Issue>, Vec<Issue>, Vec<(String, String)>, Vec<(String, String)>, bool);
 
 pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     fail_if_nothing(&args)?;
@@ -23,7 +22,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let body = super::add::read_body(args.body.clone())?;
     let at = model::now();
 
-    let (edited, epic, children, shelved, changed): Edited = repo.with_write(|issues, cfg, _| {
+    let (edited, epic, children, shelved, read, changed): Edited = repo.with_write(|issues, cfg, _| {
         let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
             return Err(Fail::not_found(&args.id));
         };
@@ -71,7 +70,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         // 한쪽만 1 로 끝나면 받는 쪽이 재시도를 못 짠다.
         let changed = *i != before;
         if !changed {
-            return Ok((vec![], (before, None, Vec::new(), Vec::new(), false)));
+            return Ok((vec![], (before, None, Vec::new(), Vec::new(), Vec::new(), false)));
         }
         i.updated_at = at.clone();
         let out = i.clone();
@@ -98,7 +97,13 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             .filter(|(id, _)| *id == out.id || children.iter().any(|c| c.id == *id))
             .map(|(id, root)| (id.to_string(), root.to_string()))
             .collect();
-        Ok((vec![], (out, epic, children, shelved, true)))
+        // 묶음의 칸도 멤버에서 읽는다 — 제 줄만 들고 나가면 상세가 손으로 둔 칸을 그린다.
+        let read: Vec<(String, String)> = crate::report::group_states(issues, cfg)
+            .into_iter()
+            .filter(|(id, _)| *id == out.id || children.iter().any(|c| c.id == *id))
+            .map(|(id, col)| (id.to_string(), col.to_string()))
+            .collect();
+        Ok((vec![], (out, epic, children, shelved, read, true)))
     })?;
 
     if ctx.json {
@@ -112,9 +117,11 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         )]);
     }
     let children: Vec<&Issue> = children.iter().collect();
-    let roots: BTreeMap<&str, &str> =
-        shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect();
-    Ok(view::detail(&edited, epic.as_ref(), &children, &roots, &repo.config, &at, false))
+    let seen = view::Seen {
+        roots: shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect(),
+        states: read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect(),
+    };
+    Ok(view::detail(&edited, epic.as_ref(), &children, &seen, &repo.config, &at, false))
 }
 
 fn fail_if_nothing(args: &EditArgs) -> R<()> {

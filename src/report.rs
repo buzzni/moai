@@ -267,6 +267,14 @@ pub fn group_states<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a s
     group_states_in(all, cfg, &epic_of, &mile_of)
 }
 
+/// 줄이 **서 있는** 칸 — 묶음이면 멤버에서 읽은 칸([`group_states`]), 아니면 제 칸.
+///
+/// 칸을 그리거나 세는 표면은 `i.status` 대신 이것을 묻는다. 묶음을 가르는
+/// `if` 가 표면마다 있으면 하나는 반드시 빠진다.
+pub fn column<'x>(i: &'x Issue, states: &BTreeMap<&str, &'x str>) -> &'x str {
+    states.get(i.id.as_str()).copied().unwrap_or(i.status.as_str())
+}
+
 /// [`group_states`] 와 같은 것. 소속 지도를 이미 가진 쪽이 두 번 걷지 않게 받는다.
 pub fn group_states_in<'a, 'c>(
     all: &'a [Issue],

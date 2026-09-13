@@ -166,7 +166,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // "없다." 라고 하면, 방금 담은 사람은 파일이 비었다고 믿는다.
     let asked_deferred = filter.deferred.is_some();
     let wide = Filter { all: true, ideas: true, ..filter.clone() };
-    let wh = crate::query::Where::of(&load.issues);
+    let wh = crate::query::Where::of(&load.issues, &repo.config);
     let mut shown: Vec<Issue> = Vec::new();
     // 숨긴 줄과 까닭. **세는 것은 그린 뒤다** — 트리는 걸리지 않은 줄도 걸린
     // 자손의 조상이면 그리므로, 먼저 세면 방금 그린 줄을 숨겼다고 말한다.
@@ -204,6 +204,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
             &index,
             &keep,
             &report::rollup(&load.issues, &repo.config),
+            &wh.states,
         );
         // **트리도 안 낸 것을 말한다.** 롤업 머리글은 `is_work` 로 세므로
         // 미뤄 둔 멤버까지 세는데, 그 줄은 여기서 빠진다 — 말하지 않으면
@@ -222,7 +223,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         tally(&BTreeSet::new()),
         &report::epic_labels(&load.issues),
         asked_deferred,
-        &wh.put_off,
+        &wh,
     ))
 }
 
@@ -232,7 +233,7 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
     let journal = repo.journal_of(&issue.id)?;
     // 이 줄과 자식을 계획에서 뺀 줄. **물려받은 미룸까지** — 미룬 에픽의 멤버를
     // 펼쳤을 때 표가 없으면 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다.
-    let roots = report::deferred_roots(all);
+    let seen = view::Seen { roots: report::deferred_roots(all), states: report::group_states(all, &repo.config) };
 
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();
@@ -254,14 +255,14 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
         }
         // **기계 출력도 같은 것을 말한다.** `deferred_at` 은 제 줄에 적힌 것뿐이라,
         // 미룬 에픽의 멤버를 `--json` 으로 펼친 쪽은 그것이 계획 밖인 줄 모른다.
-        if let Some(root) = roots.get(issue.id.as_str()) {
+        if let Some(root) = seen.roots.get(issue.id.as_str()) {
             extra.push(("shelved_by", serde_json::to_string(root).map_err(|e| Fail::new(e.to_string()))?));
         }
         return super::json_with(issue, &extra);
     }
 
     // 이력은 언제나 맨 끝이다. 에픽이면 멤버를 그 **앞에** 끼운다.
-    let mut out = view::detail(issue, epic, &children, &roots, &repo.config, &model::now(), raw);
+    let mut out = view::detail(issue, epic, &children, &seen, &repo.config, &model::now(), raw);
     // 묶음을 펼치면 그 밑에 무엇이 있는지까지 보여 준다 — 묶음 하나를 보는
     // 이유가 바로 그것이다. 마일스톤이면 에픽과 이슈가 같이 나온다.
     if report::is_group(issue) {
@@ -303,7 +304,7 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
                 // 집계를 잃어 `에픽 1건` 처럼 나온다 — 같은 에픽이 `moai show
                 // --tree` 와 다르게 읽힌다.
                 let rolls = report::rollup(all, &repo.config);
-                out.extend(view::members(all, &index, &keep, &rolls, &here));
+                out.extend(view::members(all, &index, &keep, &rolls, &seen.states, &here));
             }
         }
     }

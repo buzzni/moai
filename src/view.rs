@@ -142,7 +142,7 @@ pub fn list(
     hidden: Hidden,
     epics: &BTreeMap<&str, String>,
     asked_deferred: bool,
-    put_off: &std::collections::BTreeSet<&str>,
+    wh: &crate::query::Where,
 ) -> Vec<String> {
     if issues.is_empty() {
         let why = hidden.says();
@@ -192,12 +192,14 @@ pub fn list(
     out.push(head.trim_end().to_string());
 
     for (((i, title), tag), epic) in issues.iter().zip(&heads).zip(&tags).zip(&epics) {
-        let st = style::status_style(i.status.as_str());
+        // 묶음은 **멤버에서 읽은 칸**을 그린다. 손으로 둔 칸을 그리면 진행 중인
+        // 에픽이 `·` 로 서서 롤업과 한 화면에서 모순된다(moai-j3b3).
+        let col = wh.column(i);
         let mut row = format!(
             "{}{}{}  {}",
             cell(style::ID, &i.id, w_id + 3),
             cell(style::priority_style(i.priority()), &format!("p{}", i.priority()), 4),
-            paint(st, style::glyph(i.status.as_str())),
+            paint(style::status_style(col), style::glyph(col)),
             cell(title_style(i), title, if show_tags || show_epic { w_title + 2 } else { 0 }),
         );
         if show_tags {
@@ -212,7 +214,7 @@ pub fn list(
         // 단다 — 미루지 않은 줄이 그 자리를 비워 두면 그게 더 시끄럽다.
         // 물려받은 미룸도 단다 — `--all` 에서 미룬 에픽의 멤버가 표 없이 서면
         // 계획 밖의 줄이 일과 똑같이 보인다.
-        if (i.is_deferred() || put_off.contains(i.id.as_str())) && mark_deferred {
+        if wh.deferred(i) && mark_deferred {
             row.push_str(&format!("   {}", paint(style::DIM, "미룸")));
         }
         out.push(row.trim_end().to_string());
@@ -269,6 +271,9 @@ struct Ctx<'a> {
     index: &'a crate::nav::Index,
     keep: &'a dyn Fn(usize) -> bool,
     rolls: &'a [Roll],
+    /// 묶음 → 멤버에서 읽은 칸 (`report::group_states`). 머리글을 못 받는
+    /// 묶음(자리를 잃은 에픽·마일스톤)이 줄로 설 때 쓴다.
+    states: &'a BTreeMap<&'a str, &'a str>,
 }
 
 /// **그린 줄의 첨자도 돌려준다.** 거름망에 안 걸린 줄도 걸린 자손의 조상이면
@@ -279,10 +284,11 @@ pub fn tree(
     index: &crate::nav::Index,
     keep: &dyn Fn(usize) -> bool,
     rolls: &[Roll],
+    states: &BTreeMap<&str, &str>,
 ) -> (Vec<String>, std::collections::BTreeSet<usize>) {
     let mut out = Vec::new();
     let mut drawn = std::collections::BTreeSet::new();
-    let cx = Ctx { all, index, keep, rolls };
+    let cx = Ctx { all, index, keep, rolls, states };
     walk(&mut out, &mut drawn, &cx, &crate::nav::Path::new(), 0);
     if out.is_empty() {
         out.push("없다.".into());
@@ -465,10 +471,11 @@ pub fn members(
     index: &crate::nav::Index,
     keep: &dyn Fn(usize) -> bool,
     rolls: &[Roll],
+    states: &BTreeMap<&str, &str>,
     at: &crate::nav::Path,
 ) -> Vec<String> {
     let mut out = Vec::new();
-    let cx = Ctx { all, index, keep, rolls };
+    let cx = Ctx { all, index, keep, rolls, states };
     walk(&mut out, &mut std::collections::BTreeSet::new(), &cx, at, 0);
     out
 }
@@ -503,13 +510,13 @@ fn head(roll: &Roll, shown: usize) -> String {
 /// 에픽의 미룸을 받은 생각이 제 자식 때문에 조상으로 서면 표 없이는 일과 똑같이
 /// 보이고 꼬리는 그 줄을 숨긴 수에서 뺀다.
 fn row(out: &mut Vec<String>, cx: &Ctx, i: &Issue, depth: usize) {
-    let st = style::status_style(i.status.as_str());
+    let col = crate::report::column(i, cx.states);
     let mut line = format!(
         "{}{}  {}  {}  {}",
         "  ".repeat(depth + 1),
         paint(style::ID, &i.id),
         paint(style::priority_style(i.priority()), &format!("p{}", i.priority())),
-        paint(st, style::glyph(i.status.as_str())),
+        paint(style::status_style(col), style::glyph(col)),
         paint(title_style(i), &clip(&i.title, TITLE_CAP)),
     );
     if !i.tags.is_empty() {
@@ -842,16 +849,26 @@ pub fn ready(
     out
 }
 
+/// 줄 하나만 보고는 모르고 **파일 전체를 읽어야 아는 것.** 상세가 제 줄과
+/// 자식 줄에 단다.
+#[derive(Default)]
+pub struct Seen<'a> {
+    /// 계획에서 빠진 줄 → 그것을 뺀 줄 (`report::deferred_roots`).
+    pub roots: BTreeMap<&'a str, &'a str>,
+    /// 묶음 → 멤버에서 읽은 칸 (`report::group_states`).
+    pub states: BTreeMap<&'a str, &'a str>,
+}
+
 /// 단건 상세. **이력은 부르는 쪽이 [`history`] 로 붙인다** — 묶음을 펼치면 멤버를
 /// 이력 앞에 끼워야 해서, 여기서 붙이면 끼울 자리가 없다.
 ///
-/// `roots` 는 계획에서 빠진 줄 → 그것을 뺀 줄이다(`report::deferred_roots`). 제
-/// 줄과 자식 줄의 미룸 표가 **물려받은 것까지** 말하게 한다.
+/// `seen.roots` 가 제 줄과 자식 줄의 미룸 표를 **물려받은 것까지** 말하게 하고,
+/// `seen.states` 가 묶음의 칸을 멤버에서 읽게 한다.
 pub fn detail(
     i: &Issue,
     epic: Option<&Issue>,
     children: &[&Issue],
-    roots: &BTreeMap<&str, &str>,
+    seen: &Seen,
     cfg: &Config,
     now: &str,
     raw: bool,
@@ -862,11 +879,12 @@ pub fn detail(
         paint(title_style(i), &i.title)
     )];
 
-    let st = style::status_style(i.status.as_str());
+    let col = crate::report::column(i, &seen.states);
+    let st = style::status_style(col);
     let mut line = format!(
         "  {} {} · {}",
-        paint(st, style::glyph(i.status.as_str())),
-        paint(st, i.status.as_str()),
+        paint(st, style::glyph(col)),
+        paint(st, col),
         paint(style::priority_style(i.priority()), &format!("p{}", i.priority())),
     );
     // 종류는 이슈가 아닐 때만 적는다. **색은 묶음에만 준다** — idea 에
@@ -877,8 +895,18 @@ pub fn detail(
     }
     // **미룬 것은 상세에서 반드시 말한다.** 목록에서는 아예 안 보이므로,
     // id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안 나오나" 에 답하는 자리다.
-    if let Some(d) = deferred_for(i, roots.get(i.id.as_str()).copied(), now) {
+    if let Some(d) = deferred_for(i, seen.roots.get(i.id.as_str()).copied(), now) {
         line.push_str(&format!(" · {}", paint(style::WARN, &d)));
+    }
+    // **손으로 옮긴 칸이 읽은 칸과 다르면 낱말로 말한다.** `moai mv <에픽> done`
+    // 을 한 사람이 상세에서 `in_progress` 만 보면 쓰기가 안 먹은 줄 안다.
+    // 첫 칸 그대로인 줄은 말하지 않는다 — 묶음은 거의 다 만든 칸에 서 있어,
+    // 그것까지 말하면 모든 에픽 상세에 같은 군말이 붙는다.
+    if col != i.status.as_str() && i.status.as_str() != cfg.first_status() {
+        line.push_str(&format!(
+            " · {}",
+            paint(style::DIM, &format!("칸은 멤버에서 읽는다 (적힌 칸 `{}` 은 안 읽는다)", i.status))
+        ));
     }
     if !i.tags.is_empty() {
         line.push_str(&format!(" · {}", paint(style::TAG, &tags_of(i))));
@@ -904,15 +932,16 @@ pub fn detail(
         if c.kind != Kind::Issue {
             tail.push_str(&format!(" · {}", paint(style::DIM, c.kind.as_str())));
         }
-        if let Some(d) = deferred_for(c, roots.get(c.id.as_str()).copied(), now) {
+        if let Some(d) = deferred_for(c, seen.roots.get(c.id.as_str()).copied(), now) {
             tail.push_str(&format!(" · {}", paint(style::WARN, &d)));
         }
+        let ccol = crate::report::column(c, &seen.states);
         out.push(format!(
             "  자식   {}  {}  ({} {}){tail}",
             paint(style::ID, &c.id),
             clip(&c.title, TITLE_CAP),
-            paint(style::status_style(c.status.as_str()), style::glyph(c.status.as_str())),
-            paint(style::DIM, c.status.as_str()),
+            paint(style::status_style(ccol), style::glyph(ccol)),
+            paint(style::DIM, ccol),
         ));
     }
 
@@ -1171,7 +1200,7 @@ mod tests {
         let mut i = issue("argos-0001", "제목", "todo");
         i.body = Some("앞\u{1b}[2J\u{7}뒤".into());
         for raw in [true, false] {
-            let out = plain(&detail(&i, None, &[], &BTreeMap::new(), &cfg(), "2026-09-11T04:12:03Z",raw)).join("\n");
+            let out = plain(&detail(&i, None, &[], &Seen::default(), &cfg(), "2026-09-11T04:12:03Z",raw)).join("\n");
             assert!(!out.contains('\u{1b}'), "ESC 가 화면에 닿았다 (raw={raw})\n{out:?}");
             assert!(!out.contains('\u{7}'), "벨이 화면에 닿았다 (raw={raw})\n{out:?}");
         }
@@ -1193,7 +1222,7 @@ mod tests {
             ),
         ];
         // 이력은 부르는 쪽이 붙인다 — `moai show` 가 묶음의 멤버를 그 앞에 끼운다.
-        let mut lines = detail(&i, None, &[], &BTreeMap::new(), &cfg(), "2026-09-11T04:12:03Z", false);
+        let mut lines = detail(&i, None, &[], &Seen::default(), &cfg(), "2026-09-11T04:12:03Z", false);
         lines.extend(history(&j, &cfg()));
         let out = plain(&lines);
         let joined = out.join("\n");
@@ -1286,7 +1315,7 @@ mod tests {
         let shown: std::collections::BTreeSet<&str> =
             [member.id.as_str(), child.id.as_str(), loose.id.as_str()].into_iter().collect();
         let keep = |at: usize| shown.contains(all[at].id.as_str());
-        let out = plain(&tree(&all, &index, &keep, &rolls).0);
+        let out = plain(&tree(&all, &index, &keep, &rolls, &BTreeMap::new()).0);
         let joined = out.join("\n");
 
         assert!(joined.contains("저장 계층"), "{joined}");
@@ -1318,7 +1347,7 @@ mod tests {
         let all = vec![milestone, epic, member, parent, child];
         let rolls = crate::report::rollup(&all, &cfg());
         let index = crate::nav::Index::of(&all);
-        let out = plain(&tree(&all, &index, &|_| true, &rolls).0);
+        let out = plain(&tree(&all, &index, &|_| true, &rolls, &BTreeMap::new()).0);
         let joined = out.join("\n");
 
         let at_epic = out.iter().position(|l| l.contains("에픽 멤버")).unwrap();
@@ -1341,8 +1370,8 @@ mod tests {
         let rolls = crate::report::rollup(&all, &cfg());
 
         let index = crate::nav::Index::of(&all);
-        assert_eq!(plain(&tree(&all, &index, &|_| false, &rolls).0), ["없다."]);
-        assert!(plain(&tree(&all, &index, &|_| true, &rolls).0).join("\n").contains("빈 에픽"));
+        assert_eq!(plain(&tree(&all, &index, &|_| false, &rolls, &BTreeMap::new()).0), ["없다."]);
+        assert!(plain(&tree(&all, &index, &|_| true, &rolls, &BTreeMap::new()).0).join("\n").contains("빈 에픽"));
     }
 
     /// 시킨 대로 닫았는데도 잔소리가 남으면 다음부터 안 듣는다.
@@ -1390,7 +1419,7 @@ mod tests {
     fn a_dangling_epic_is_shown_not_fatal() {
         let mut i = issue("argos-0001", "제목", "todo");
         i.epic = Some("argos-0000".into());
-        let out = plain(&detail(&i, None, &[], &BTreeMap::new(), &cfg(), "2026-09-11T04:12:03Z",false));
+        let out = plain(&detail(&i, None, &[], &Seen::default(), &cfg(), "2026-09-11T04:12:03Z",false));
         assert!(out.iter().any(|l| l.contains("(없는 에픽)")), "{out:#?}");
     }
 }

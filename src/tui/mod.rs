@@ -300,7 +300,7 @@ impl App {
         // 시계는 **적재마다** 고정한 것을 쓴다. 여기서 다시 잡으면 `stale=`
         // 같은 물음이 화면의 나머지와 다른 시각으로 판정된다.
         let now = self.now.clone();
-        let wh = Where::of(&self.issues);
+        let wh = Where::of(&self.issues, &self.cfg);
         self.keep = self.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
         self.filter_text = Some(match mode {
             Mode::Grep(_) => format!("/{text}"),
