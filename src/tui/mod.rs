@@ -44,6 +44,40 @@ pub enum Mode {
     Filter(String),
 }
 
+/// 어느 칸이 이동키를 먹는가. **화면에 칸이 늘면 여기가 는다** — 순환은
+/// [`Pane::ALL`] 의 차례를 따르므로 새 칸은 거기 한 자리를 얻는 것으로 끝난다.
+///
+/// 포커스가 없던 때는 왼쪽 목록이 늘 `↑↓` 를 먹고 오른쪽은 `j`/`k` 로만 굴렀다.
+/// 한 화면에 이동키가 두 벌이면 칸이 하나 더 생길 때마다 세 벌째를 지어야 한다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Pane {
+    /// 왼쪽 목록. **여기서 시작한다** — 여는 순간 `↓` 가 목록을 내려가던 손을
+    /// 배신하지 않는다.
+    #[default]
+    Explorer,
+    /// 오른쪽 상세.
+    Detail,
+}
+
+impl Pane {
+    /// `Tab` 이 도는 차례.
+    pub const ALL: [Pane; 2] = [Pane::Explorer, Pane::Detail];
+
+    fn at(self) -> usize {
+        Pane::ALL.iter().position(|p| *p == self).unwrap_or(0)
+    }
+
+    /// 다음 칸. 끝에서 처음으로 돈다.
+    pub fn next(self) -> Pane {
+        Pane::ALL[(self.at() + 1) % Pane::ALL.len()]
+    }
+
+    /// 앞 칸. 처음에서 끝으로 돈다.
+    pub fn prev(self) -> Pane {
+        Pane::ALL[(self.at() + Pane::ALL.len() - 1) % Pane::ALL.len()]
+    }
+}
+
 fn states_of(issues: &[Issue], cfg: &Config) -> std::collections::BTreeMap<String, String> {
     crate::report::group_states(issues, cfg)
         .into_iter()
@@ -123,6 +157,9 @@ pub struct App {
     pub path: Path,
     pub cursor: usize,
     pub mode: Mode,
+    /// 이동키(`↑↓`·PageUp/Down·Home/End)를 먹는 칸. `Tab`·`Shift-Tab` 이 돌린다.
+    /// **다시 읽어도 그대로다** — 굴리던 사람의 손이 갱신 한 번에 목록으로 튀면 안 된다.
+    pub focus: Pane,
     /// 지금 걸린 거름망. 사람이 적은 글 그대로도 들고 있어야 화면에 되비친다.
     pub filter_text: Option<String>,
     /// 어디서 읽어 왔나. 시험은 저장소 없이 App 을 세우므로 없을 수 있다.
@@ -225,6 +262,7 @@ impl App {
             path,
             cursor: 0,
             mode: Mode::Browse,
+            focus: Pane::default(),
             scroll: 0,
             raw: false,
             filter_text: None,
@@ -565,24 +603,24 @@ impl App {
     }
 
     pub fn key(&mut self, k: KeyEvent) {
-        // 글을 받는 동안에는 이동키가 글자다. 먼저 가로챈다.
+        // 글을 받는 동안에는 이동키가 글자다. 먼저 가로챈다. **`Tab` 도 여기서
+        // 멈춘다** — 적다 말고 포커스가 튀면 적던 것을 잃는다.
         if !matches!(self.mode, Mode::Browse) {
             self.typing(k);
             return;
         }
-        // **목록은 필요할 때만 센다.** 세는 데 이슈 전부를 훑고 정렬까지 하므로,
-        // 끝내기·검색 같은 키에도 미리 세면 그 값이 그대로 버려진다.
-        let len = || self.rows().len();
         match k.code {
             // raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. 안 받으면 길이 막힌다.
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => self.quit = true,
             KeyCode::Char('q') | KeyCode::F(10) => self.quit = true,
-            KeyCode::Up => self.move_to(self.cursor.saturating_sub(1)),
-            KeyCode::Down => self.move_to((self.cursor + 1).min(len().saturating_sub(1))),
-            KeyCode::Home => self.move_to(0),
-            KeyCode::End => self.move_to(len().saturating_sub(1)),
-            KeyCode::PageUp => self.move_to(self.cursor.saturating_sub(10)),
-            KeyCode::PageDown => self.move_to((self.cursor + 10).min(len().saturating_sub(1))),
+            // 터미널에 따라 `Shift-Tab` 이 `BackTab` 으로도, Shift 가 붙은 `Tab`
+            // 으로도 온다. 한쪽만 받으면 어느 터미널에서는 뒤로 못 돈다.
+            KeyCode::BackTab => self.focus = self.focus.prev(),
+            KeyCode::Tab if k.modifiers.contains(KeyModifiers::SHIFT) => self.focus = self.focus.prev(),
+            KeyCode::Tab => self.focus = self.focus.next(),
+            KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown => {
+                self.step(k.code)
+            }
             KeyCode::Enter | KeyCode::Right => self.enter(),
             KeyCode::Backspace | KeyCode::Left => self.leave(),
             KeyCode::Char('/') => self.mode = Mode::Grep(String::new()),
@@ -605,11 +643,48 @@ impl App {
             }
             // 상세를 굴린다. **왼쪽은 그대로 둔다** — 오른쪽만 길어서 못 보는
             // 것이므로, 굴리려고 커서를 옮기게 하면 보던 이슈를 잃는다.
+            // **포커스와 상관없이 듣는다** — 포커스가 생기기 전부터 손에 익은
+            // 사람이 있고, 목록에 선 채로 상세를 한 칸 굴리는 길이 여전히 쓸모 있다.
             KeyCode::Char('j') => self.scroll = self.scroll.saturating_add(1),
             KeyCode::Char('k') => self.scroll = self.scroll.saturating_sub(1),
-            KeyCode::Char(' ') => self.scroll = self.scroll.saturating_add(10),
-            KeyCode::Char('b') => self.scroll = self.scroll.saturating_sub(10),
+            KeyCode::Char(' ') => self.scroll = self.scroll.saturating_add(PAGE as u16),
+            KeyCode::Char('b') => self.scroll = self.scroll.saturating_sub(PAGE as u16),
             _ => {}
+        }
+    }
+
+    /// 이동키 하나를 **포커스 있는 칸에** 준다.
+    ///
+    /// 상세의 끝(`End`)은 여기서 모른다 — 줄 수는 폭에 달렸고 폭은 그려야 나온다.
+    /// 그래서 큰 수를 넣고, 그림(`draw::detail`)이 보이는 끝으로 잘라 도로 넣는다.
+    fn step(&mut self, code: KeyCode) {
+        match self.focus {
+            Pane::Explorer => {
+                // **목록은 필요할 때만 센다.** 세는 데 이슈 전부를 훑고 정렬까지
+                // 하므로, 위로 가는 키에도 미리 세면 그 값이 그대로 버려진다.
+                let last = || self.rows().len().saturating_sub(1);
+                let at = match code {
+                    KeyCode::Up => self.cursor.saturating_sub(1),
+                    KeyCode::Down => (self.cursor + 1).min(last()),
+                    KeyCode::Home => 0,
+                    KeyCode::End => last(),
+                    KeyCode::PageUp => self.cursor.saturating_sub(PAGE),
+                    KeyCode::PageDown => (self.cursor + PAGE).min(last()),
+                    _ => return,
+                };
+                self.move_to(at);
+            }
+            Pane::Detail => {
+                self.scroll = match code {
+                    KeyCode::Up => self.scroll.saturating_sub(1),
+                    KeyCode::Down => self.scroll.saturating_add(1),
+                    KeyCode::Home => 0,
+                    KeyCode::End => u16::MAX,
+                    KeyCode::PageUp => self.scroll.saturating_sub(PAGE as u16),
+                    KeyCode::PageDown => self.scroll.saturating_add(PAGE as u16),
+                    _ => return,
+                };
+            }
         }
     }
 
@@ -742,6 +817,10 @@ impl App {
         }
     }
 }
+
+/// PageUp/Down 한 번에 가는 줄 수. 목록과 상세가 **같은 걸음**이다 — 칸마다
+/// 다르면 Tab 한 번에 같은 키의 뜻이 바뀐다.
+const PAGE: usize = 10;
 
 /// 없는 것을 가리키는 참조에 붙이는 말. **한 낱말로 통일한다** — 자리마다
 /// 다른 말을 쓰면 같은 깨짐을 서로 다른 일로 읽는다.
@@ -941,6 +1020,99 @@ mod tests {
         assert_eq!(a.cursor, 0);
         a.key(key(KeyCode::End));
         assert_eq!(a.cursor, a.rows().len() - 1);
+    }
+
+    /// `Tab` 은 앞으로, `Shift-Tab` 은 뒤로 돈다. 끝에서 처음으로 넘어간다.
+    /// `Shift-Tab` 은 터미널에 따라 `BackTab` 으로도 Shift 붙은 `Tab` 으로도 온다.
+    #[test]
+    fn tab_cycles_the_focus_both_ways() {
+        let mut a = app();
+        assert_eq!(a.focus, Pane::Explorer, "목록에서 시작하지 않는다");
+        a.key(key(KeyCode::Tab));
+        assert_eq!(a.focus, Pane::Detail);
+        a.key(key(KeyCode::Tab));
+        assert_eq!(a.focus, Pane::Explorer, "끝에서 처음으로 안 돌았다");
+        a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert_eq!(a.focus, Pane::Detail, "BackTab 이 뒤로 안 돌았다");
+        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
+        assert_eq!(a.focus, Pane::Explorer, "Shift 붙은 Tab 이 뒤로 안 돌았다");
+        // 순환은 칸이 몇이든 제자리로 돌아온다
+        for p in Pane::ALL {
+            assert_eq!(p.next().prev(), p);
+            let mut q = p;
+            for _ in Pane::ALL {
+                q = q.next();
+            }
+            assert_eq!(q, p);
+        }
+    }
+
+    /// 이동키는 **포커스 있는 칸이** 먹는다. 상세에 포커스가 있으면 왼쪽 커서는
+    /// 그대로다 — 굴리려다 보던 이슈를 잃으면 안 된다.
+    #[test]
+    fn movement_keys_go_to_the_focused_pane() {
+        let mut a = app();
+        a.key(key(KeyCode::Down));
+        assert_eq!((a.cursor, a.scroll), (1, 0));
+
+        a.key(key(KeyCode::Tab));
+        a.key(key(KeyCode::Down));
+        assert_eq!((a.cursor, a.scroll), (1, 1), "상세에 포커스가 있는데 목록이 움직였다");
+        a.key(key(KeyCode::PageDown));
+        assert_eq!((a.cursor, a.scroll), (1, 11));
+        a.key(key(KeyCode::Up));
+        a.key(key(KeyCode::PageUp));
+        assert_eq!((a.cursor, a.scroll), (1, 0));
+        a.key(key(KeyCode::PageUp));
+        assert_eq!(a.scroll, 0, "첫 줄 위로 굴렀다");
+        // 끝은 그림이 잘라 준다 — 여기서는 커서가 안 움직였는지만 본다
+        a.key(key(KeyCode::End));
+        assert_eq!(a.cursor, 1);
+        assert!(a.scroll > 0);
+        a.key(key(KeyCode::Home));
+        assert_eq!((a.cursor, a.scroll), (1, 0));
+
+        // 목록으로 돌아오면 이동키가 다시 커서를 옮긴다
+        a.key(key(KeyCode::Tab));
+        a.key(key(KeyCode::End));
+        assert_eq!(a.cursor, a.rows().len() - 1);
+        a.key(key(KeyCode::Home));
+        assert_eq!(a.cursor, 0);
+        a.key(key(KeyCode::PageDown));
+        assert_eq!(a.cursor, a.rows().len() - 1, "PageDown 이 목록 밖으로 나갔다");
+    }
+
+    /// 글을 받는 중에는 `Tab` 이 포커스를 안 옮기고 글자로도 안 들어간다 — 적다
+    /// 말고 튀면 적던 것을 잃는다.
+    #[test]
+    fn tab_does_not_move_the_focus_while_typing() {
+        for (opener, start) in [
+            (KeyCode::Char('/'), Pane::Explorer),
+            (KeyCode::Char('f'), Pane::Explorer),
+            (KeyCode::Char('/'), Pane::Detail),
+        ] {
+            let mut a = app();
+            a.focus = start;
+            a.key(key(opener));
+            a.key(key(KeyCode::Char('a')));
+            a.key(key(KeyCode::Tab));
+            a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+            assert_eq!(a.focus, start, "{opener:?} 중에 Tab 이 포커스를 옮겼다");
+            assert!(matches!(&a.mode, Mode::Grep(b) | Mode::Filter(b) if b == "a"), "{:?}", a.mode);
+        }
+    }
+
+    /// `j`/`k` 는 **포커스와 상관없이** 상세를 굴린다 — 손에 익은 사람이 이미 있다.
+    #[test]
+    fn j_and_k_still_scroll_the_detail_from_either_pane() {
+        for start in Pane::ALL {
+            let mut a = app();
+            a.focus = start;
+            a.key(key(KeyCode::Char('j')));
+            a.key(key(KeyCode::Char('j')));
+            a.key(key(KeyCode::Char('k')));
+            assert_eq!((a.cursor, a.scroll, a.focus), (0, 1, start), "{start:?}");
+        }
     }
 
     /// 잎에서 Enter 는 아무 일도 하지 않는다 — 들어갈 데가 없다.

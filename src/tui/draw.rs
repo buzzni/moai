@@ -1449,6 +1449,29 @@ mod tests {
         assert_eq!(a.scroll, 0, "굴린 자리를 들고 다른 줄로 갔다");
     }
 
+    /// **상세에 포커스를 두고 `End` 를 누르면 본문 끝이 보이고, 곧바로 `↑` 가 듣는다.**
+    /// `App` 은 줄 수를 모르므로 큰 수를 넣는다 — 그림이 그것을 끝으로 잘라 도로
+    /// 넣지 않으면 `↑` 를 수만 번 눌러야 화면이 움직인다.
+    #[test]
+    fn end_in_the_detail_reaches_the_last_line_and_up_answers_at_once() {
+        let mut issues = issues();
+        issues[1].body = Some((1..=40).map(|n| format!("{n}번째 줄이다\n\n")).collect::<String>());
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        let cursor = a.cursor;
+
+        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        let end = render(&mut a, 100, 16).join("\n");
+        assert!(end.contains("40번째"), "End 가 본문 끝에 안 닿았다\n{end}");
+        assert_eq!(a.cursor, cursor, "상세에서 End 를 눌렀는데 목록이 움직였다");
+
+        a.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        let up = render(&mut a, 100, 16).join("\n");
+        assert_ne!(up, end, "↑ 를 눌렀는데 화면이 그대로다");
+    }
+
     /// 빈 저장소도 그려진다.
     #[test]
     fn an_empty_repo_still_draws() {
