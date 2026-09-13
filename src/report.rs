@@ -816,7 +816,9 @@ fn climb<'a>(
         if cur.kind == Kind::Epic {
             return milestone_stood(cur);
         }
-        if joins && cur.kind == Kind::Milestone && !std::ptr::eq(cur, top) {
+        // 받는 줄이면 `top` 은 언제나 이슈나 생각이다(`fold_top` 이 그 종류로만 오른다) —
+        // 그래서 여기 서는 마일스톤은 늘 조상이다.
+        if joins && cur.kind == Kind::Milestone {
             return Some(cur.id.as_str());
         }
         if let Some(m) = &cur.milestone {
