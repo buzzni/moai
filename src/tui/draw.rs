@@ -241,9 +241,15 @@ const PROMPT_GAP: usize = 1 + 3;
 ///
 /// 커서는 늘 글칸 안에 선다: 조각이 커서를 따라 밀리고([`Input::view`]), 글칸은
 /// `avail` 을 안 넘는다.
+///
+/// 오류가 한 칸도 못 받으면 글칸을 줄이지 않는다 — 줄여 봐야 오류는 안 보이고
+/// 친 글만 가려진다.
 fn prompt_room(avail: usize, error: usize) -> (usize, usize) {
     let field = avail.saturating_sub(PROMPT_GAP + error).max(avail / 3);
-    (field, avail.saturating_sub(field + PROMPT_GAP))
+    match avail.saturating_sub(field + PROMPT_GAP) {
+        0 => (avail, 0),
+        room => (field, room),
+    }
 }
 
 fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
@@ -1857,12 +1863,13 @@ mod tests {
     }
 
     /// 거름망 칸에 `q` 를 쳐 넣고 `w` 칸 창의 맨 아랫줄(글자만, [`render`] 처럼 두 칸
-    /// 글자 뒤 칸은 건너뛴다)과 터미널 커서 칸, 커서 앞뒤 칸의 글자를 꺼낸다.
+    /// 글자 뒤 칸은 건너뛴다)과 터미널 커서 칸을 꺼낸다.
     fn filter_line(q: &str, w: u16) -> (String, u16) {
         let (row, x, _) = filter_cells(q, w);
         (row, x)
     }
 
+    /// [`filter_line`] 에 더해 커서 앞 칸과 커서 칸의 글자를 꺼낸다.
     fn filter_cells(q: &str, w: u16) -> (String, u16, (String, String)) {
         use ratatui::backend::Backend;
         let mut a = app();
@@ -1939,6 +1946,8 @@ mod tests {
                 assert!(field <= avail && field >= avail / 3, "{avail} {error} → {field}");
                 if room > 0 {
                     assert!(field + PROMPT_GAP + room <= avail, "{avail} {error} → {field} {room}");
+                } else {
+                    assert_eq!(field, avail, "오류가 못 받는데 글칸을 줄였다 {avail} {error}");
                 }
                 if avail / 3 + PROMPT_GAP + error <= avail {
                     assert_eq!(room, error, "자리가 있는데 잘랐다 {avail} {error}");
