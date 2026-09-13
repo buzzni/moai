@@ -67,8 +67,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Grep(q) => prompt(f, keys, "검색", q, app.input_error(), "Enter 걸기  Esc 그만"),
         Mode::Filter(q) => prompt(f, keys, "거름망", q, app.input_error(), "Enter 걸기  Esc 그만"),
         Mode::Ask(ask) => {
-            let [why, line] = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(keys);
-            let text = clip(ASK_WHY, why.width as usize);
+            // 글칸이 **아래**에서 자리를 먼저 얻는다 — 창이 낮아 한 줄만 남으면 적는 칸이
+            // 안내에 가려 어디에 치는지 안 보인다.
+            let [why, line] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(keys);
+            let text = clip(&ask_why(&ask.why), why.width as usize);
             f.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::new().fg(Color::Black).bg(Color::LightYellow)))), why);
             prompt(f, line, "누구", &ask.input, ask.error.clone(), "이름 (메일)  Enter 쓰기  Esc 그만");
         }
@@ -80,8 +82,11 @@ pub fn screen(f: &mut Frame, app: &mut App) {
 /// 적는 것 하나다 — 그 길을 여기서 대지 않으면 열 때마다 물음을 받는다.
 ///
 /// **다시 안 묻게 하는 법이 앞이다.** 좁은 창에서는 뒤가 잘리는데, 세션 동안만 든다는
-/// 말은 잘려도 사람이 잃는 것이 없고 설정하는 법은 잘리면 다음에 또 묻는다.
-const ASK_WHY: &str = " 누군지 모른다 — git config user.name·user.email 을 적어 두면 다시 안 묻는다 · 받은 것은 이 세션 동안만 든다 ";
+/// 말은 잘려도 사람이 잃는 것이 없고 설정하는 법은 잘리면 다음에 또 묻는다. 그다음이
+/// 쓰기를 멈춘 거절문(`why`)이다 — 설정이 없는지 틀렸는지를 그것이 가른다.
+fn ask_why(why: &str) -> String {
+    format!(" git config user.name·user.email 을 바르게 적어 두면 다시 안 묻는다 · {why} · 받은 것은 이 세션 동안만 든다 ")
+}
 
 /// 화면 안에서 알려야 할 것. **대체 화면 안에서는 `eprintln!` 이 화면을
 /// 망가뜨린다** — 적재 오류를 stderr 로 흘리던 CLI 의 길을 여기서는 못 쓴다.
@@ -1714,6 +1719,7 @@ mod tests {
             Mode::Ask(super::super::Ask {
                 input: Input::new("레이븐"),
                 error,
+                why: "git 사용자 정보가 `이름 (메일)` 로 쓸 수 없는 모양이다 — \"레이븐 (raven)\"".into(),
                 back: Box::new(Mode::Browse),
                 then: |_| {},
             })
@@ -1723,6 +1729,12 @@ mod tests {
         let lines = render(&mut a, 80, 12);
         let (why, line) = (&lines[10], &lines[11]);
         assert!(why.contains("git config user.name·user.email") && why.contains("다시 안 묻는다"), "{why}");
+        // 넓으면 무엇이 틀렸는지도 선다 — 설정이 있는데 모양이 틀린 사람에게 "모른다" 고만 하지 않는다.
+        let wide = render(&mut a, 200, 12);
+        assert!(wide[10].contains("쓸 수 없는 모양이다"), "{}", wide[10]);
+        // 한 줄만 남아도 글칸이 보인다
+        let low = render(&mut a, 80, 4);
+        assert!(low[3].contains(" 누구 "), "{low:?}");
         assert!(line.contains(" 누구 ") && line.contains("레이븐") && line.contains("Esc 그만"), "{line}");
         assert!(!lines.join("\n").contains("F10"), "묻는 동안 F키 바가 섰다");
 

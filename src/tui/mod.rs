@@ -69,6 +69,11 @@ pub struct Ask {
     /// 은 닫는 괄호를 치기 전까지 늘 모양이 아니라, 거름망처럼 그 자리에서 판정하면
     /// 적는 내내 빨간 줄이 선다. 칸이 키를 먹으면 걷힌다.
     pub error: Option<String>,
+    /// 왜 묻는가 — 쓰기를 멈춘 거절문의 첫 줄 그대로. **없는 것과 틀린 것이 같은 코드다**
+    /// (`NO_ACTOR`): git 설정이 있는데 메일에 `@` 가 없는 사람에게 "모른다" 고만 하면
+    /// 이미 적은 설정의 무엇이 틀렸는지 영영 모른다. 코드를 가르지 않는 것은 그쪽이
+    /// 일부러 하나로 묶은 것이라서다(`model::bad_git_identity`) — 여기서는 말을 옮긴다.
+    why: String,
     /// 묻기 전에 받던 것 — 적던 폼. **Esc 든 받든 여기로 돌아간다.** 한 키에 적던
     /// 것이 날아가면 다음부터 안 쓴다.
     back: Box<Mode>,
@@ -398,9 +403,12 @@ impl App {
     /// **누군지 모르면 락을 잡기 전에 멈추고 묻는다**([`Mode::Ask`]). 이름 없는 줄을
     /// 적느니 한 번 묻는다는 규약이다. 받으면 `user` 에 들고, **적던 모드를 되돌려
     /// 놓은 뒤** `retry` 를 부른다 — 그래서 `retry` 는 이 쓰기를 부른 그 함수다. 묻는
-    /// 동안은 `None` 이다(아직 안 썼다). 묻는 것은 `--user`·`MOAI_ACTOR`·git 설정이
-    /// **모두 없을 때**(`NO_ACTOR`)뿐이다 — 준 값의 모양이 틀린 것은 사람이 준 것을
-    /// 조용히 갈아 치울 일이 아니라 배너로 말한다.
+    /// 동안은 `None` 이다(아직 안 썼다). 묻는 것은 `NO_ACTOR` 일 때 — `--user`·
+    /// `MOAI_ACTOR`·git 설정이 모두 없거나, **git 설정이 있어도 모양이 틀렸을 때**다.
+    /// 뒤의 것도 묻는 까닭은 고칠 곳이 이 화면 밖의 설정이라서다: 이번 세션의 이름을
+    /// 받으면 나가지 않고 쓸 수 있고, 무엇이 틀렸는지는 칸 위에 거절문 그대로 선다
+    /// ([`Ask`] 의 `why`). `--user`·`MOAI_ACTOR` 로 **준 값**의 모양이 틀린 것은
+    /// 사람이 준 것을 조용히 갈아 치울 일이 아니라 배너로 말한다(`BAD_INPUT`).
     ///
     /// **동기다.** 로컬 파일 하나라 짧고, 그동안 화면은 멈춘다. 비동기 런타임을
     /// 들이면 CLI 전체가 async 로 물든다. 락을 못 잡으면 `with_write` 가 5초 뒤
@@ -427,7 +435,8 @@ impl App {
             && e.code == crate::fail::code::NO_ACTOR
         {
             let back = std::mem::replace(&mut self.mode, Mode::Browse);
-            self.mode = Mode::Ask(Ask { input: Input::default(), error: None, back: Box::new(back), then: retry });
+            let why = e.message.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string();
+            self.mode = Mode::Ask(Ask { input: Input::default(), error: None, why, back: Box::new(back), then: retry });
             return None;
         }
         let written = by.and_then(|by| repo.with_write(|issues, cfg, reserved| f(issues, cfg, reserved, &by)));
@@ -1876,7 +1885,7 @@ mod tests {
     fn nobody(user: Option<&str>) -> crate::fail::R<crate::model::Actor> {
         match user {
             Some(raw) => crate::model::actor(Some(raw)),
-            None => Err(crate::fail::Fail::coded("누가 하는지 모른다", crate::fail::code::NO_ACTOR)),
+            None => Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험\n\n  고칠 명령", crate::fail::code::NO_ACTOR)),
         }
     }
 
@@ -1916,7 +1925,7 @@ mod tests {
         a.mode = Mode::Grep(Input::new("떠오른 것"));
 
         save(&mut a);
-        assert!(matches!(a.mode, Mode::Ask(_)), "모르는데 안 물었다 — {:?}", a.mode);
+        assert!(matches!(&a.mode, Mode::Ask(ask) if ask.why == "누가 하는지 모른다 — 시험"), "모르는데 안 물었거나 까닭을 옮기지 않았다 — {:?}", a.mode);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before, "묻기 전에 썼다");
         assert!(a.trouble.is_none(), "묻는 것은 실패가 아니다 — {:?}", a.trouble);
 
