@@ -672,3 +672,14 @@
 {"ts":"2026-09-13T13:40:13Z","id":"moai-fwl9.0s4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"3·4·5 반영(Origin::unreadable, TUI 브랜치 자르기, -z 폴백), 1 은 도움말만 고치고 moai-2f5g, 2 는 사용자와 정한 대로 두고 moai-0a0u 로 넘김"}
 {"ts":"2026-09-13T13:48:46Z","id":"moai-pj2c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 가 파일이 바뀌면 저절로 다시 읽는다 — 커서는 줄의 정체로 붙든다"}
 {"ts":"2026-09-13T13:48:59Z","id":"moai-8how","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pj2c(자동 갱신)와 한 표식으로 같이 풀린다 — Stamp 을 경로 여럿의 목록으로 두면 옆 워크트리 변경도 같은 틱에서 본다."}
+{"ts":"2026-09-13T13:52:37Z","id":"moai-cera","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 자동 갱신 — 커서는 줄의 정체로 붙든다"}
+{"ts":"2026-09-13T13:52:37Z","id":"moai-hhsx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"커서를 번호가 아니라 줄의 정체(id·바구니·..)로 붙든다 — 다시 읽어도 같은 줄에 선다"}
+{"ts":"2026-09-13T13:52:37Z","id":"moai-3klm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"나올 때 방금 나온 디렉터리를 찾아 선다 — 기억 자리를 번호로 들지 않는다"}
+{"ts":"2026-09-13T13:52:37Z","id":"moai-y7ch","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"상세를 굴린 자리는 커서가 같은 이슈일 때만 둔다"}
+{"ts":"2026-09-13T13:52:37Z","id":"moai-ri8m","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"바뀐 것을 알아채면 저절로 다시 읽는다 — F5 배너 대신 마지막 갱신 시각"}
+{"ts":"2026-09-13T13:52:37Z","id":"moai-imqn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"다시 읽기(읽기·색인·경고 셈)를 스레드로 빼 1만 개에서도 루프를 안 막는다"}
+{"ts":"2026-09-13T13:52:37Z","id":"moai-kyxq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"w 겹쳐 보기 중에는 옆 워크트리 스냅샷도 표식에 넣는다 (moai-8how)"}
+{"ts":"2026-09-13T13:52:37Z","id":"moai-cera","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pj2c 에서 펼쳤다 — TUI 가 파일이 바뀌면 저절로 다시 읽는다 — 커서는 줄의 정체로 붙든다"}
+{"ts":"2026-09-13T13:52:37Z","id":"moai-pj2c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-cera 로 펼쳤다 (이슈 6건)"}
+{"ts":"2026-09-13T13:52:50Z","id":"moai-8how","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-cera 의 moai-kyxq 로 흡수했다."}
+{"ts":"2026-09-13T13:52:50Z","id":"moai-8how","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kyxq 로 흡수"}
