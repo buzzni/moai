@@ -560,12 +560,20 @@ impl App {
         }
     }
 
+    /// 한 층 위로. **방금 나온 디렉터리에 선다** — 그것이 곧 돌아갈 자리다.
+    ///
+    /// 기억한 번호(`remembered`)는 들어가 있는 동안 파일이 바뀌면 낡는다: 위에 에픽
+    /// 하나가 생기면 같은 번호가 옆 에픽을 가리킨다. 그래서 번호는 나온 디렉터리를
+    /// 못 찾을 때만(거름망에 빠졌거나 `--path` 로 시작했거나) 쓴다.
     fn leave(&mut self) {
-        if self.path.pop().is_some() {
+        if let Some(from) = self.path.pop() {
             self.scroll = 0;
-            self.cursor = self.remembered.pop().unwrap_or(0);
-            // 기억한 자리가 낡았을 수 있다 (파일이 바뀌었거나 `--path` 로 시작했거나).
-            self.cursor = self.cursor.min(self.rows().len().saturating_sub(1));
+            let fallback = self.remembered.pop().unwrap_or(0);
+            let rows = self.rows();
+            self.cursor = rows
+                .iter()
+                .position(|r| matches!(r, Row::Item(Entry::Dir { seg, .. }) if *seg == from))
+                .unwrap_or(fallback.min(rows.len().saturating_sub(1)));
         }
     }
 
@@ -757,6 +765,26 @@ mod tests {
         assert_eq!((a.cursor, a.path.len()), (0, 1));
         a.key(key(KeyCode::Backspace));
         assert_eq!((a.cursor, a.path.len()), (1, 0), "있던 자리로 안 돌아왔다");
+    }
+
+    /// 들어가 있는 동안 **위에 줄이 생겨도** 나오면 방금 나온 디렉터리에 선다.
+    /// 기억한 번호로 돌아가면 옆 에픽에 선다.
+    #[test]
+    fn leaving_finds_the_directory_it_came_from_even_after_a_reload() {
+        let mut a = app();
+        a.key(key(KeyCode::Down));
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.path, [Seg::Epic("argos-0002".into())]);
+
+        let mut more = a.issues.clone();
+        more.push(make("argos-0000", Kind::Epic));
+        a.adopt(more);
+        a.key(key(KeyCode::Backspace));
+        assert_eq!(
+            a.current(),
+            Some(Row::Item(Entry::Dir { seg: Seg::Epic("argos-0002".into()), at: a.index.find("argos-0002") })),
+            "나온 디렉터리가 아니라 기억한 번호에 섰다"
+        );
     }
 
     /// 커서는 목록 밖으로 못 나간다.
