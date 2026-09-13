@@ -235,6 +235,15 @@ pub fn held_unreadable() -> usize {
     HELD.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// 파일이 그때 그것인지 가늠하는 표식. 고친 때만 보면 놓친다 — rename 으로
+/// 갈아끼우는 쓰기는 같은 초에 떨어질 수 있어 길이도 함께 본다. 파일이 없으면 `None`.
+pub type Stamp = Option<(std::time::SystemTime, u64)>;
+
+pub fn stamp(path: &Path) -> Stamp {
+    let m = std::fs::metadata(path).ok()?;
+    Some((m.modified().ok()?, m.len()))
+}
+
 /// 스냅샷 하나를 읽는다. 파일이 없으면 `None` — **없는 것과 빈 것을 가른다.**
 ///
 /// 제 저장소에서는 둘이 같지만(`init` 직후), 다른 워크트리에서는 다르다: 파일이

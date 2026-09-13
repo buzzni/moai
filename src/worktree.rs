@@ -161,6 +161,12 @@ pub struct Gathered {
     pub origin: Origin,
     /// 남의 워크트리에서 만난 문제. **막지 않는다** — 부르는 쪽이 한 줄씩 알린다.
     pub trouble: Vec<String>,
+    /// 읽으러 간 옆 스냅샷마다 **읽기 전에** 잰 표식. 탐색기가 바뀐 것을 알아채는 데
+    /// 쓴다. 파일이 없던 곳도 든다 — 거기 스냅샷이 생기는 것도 바뀐 것이다.
+    ///
+    /// **재는 것이 읽는 것보다 먼저다** — 읽고 나서 재면 그 사이에 떨어진 쓰기가
+    /// "이미 본 것" 으로 적혀 영영 안 보인다(`cmd::tui::run` 과 같은 까닭).
+    pub watched: Vec<(PathBuf, crate::store::Stamp)>,
 }
 
 /// 제 저장소를 읽고, `worktree` 면 다른 워크트리의 스냅샷을 겹친다.
@@ -171,15 +177,17 @@ pub struct Gathered {
 pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let load = repo.read()?;
     if !worktree {
-        return Ok(Gathered { load, origin: Origin::default(), trouble: Vec::new() });
+        return Ok(Gathered { load, origin: Origin::default(), trouble: Vec::new(), watched: Vec::new() });
     }
     let mut trouble = Vec::new();
     let mut others = Vec::new();
+    let mut watched = Vec::new();
     match others_of(&repo.root) {
         Err(why) => trouble.push(why),
         Ok(trees) => {
             for (tree, root) in trees {
                 let path = root.join(".moai").join("issues.jsonl");
+                watched.push((path.clone(), crate::store::stamp(&path)));
                 match crate::store::read_snapshot(&path) {
                     Err(e) => trouble.push(format!("⎇ {}: {e}", tree.label)),
                     Ok(None) => {}
@@ -200,7 +208,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     }
     let Load { issues, errors } = load;
     let (issues, origin) = overlay(issues, others);
-    Ok(Gathered { load: Load { issues, errors }, origin, trouble })
+    Ok(Gathered { load: Load { issues, errors }, origin, trouble, watched })
 }
 
 /// 다른 워크트리마다 (워크트리, 그 안의 moai 뿌리).

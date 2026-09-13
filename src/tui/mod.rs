@@ -86,6 +86,9 @@ pub struct App {
     pub raw: bool,
     /// 마지막으로 읽은 파일의 (고친 때, 길이).
     stamp: Stamp,
+    /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과 그 표식(`worktree::gather`
+    /// 가 읽기 **전에** 잰 것). 꺼져 있으면 비었다.
+    watched: Vec<(std::path::PathBuf, Stamp)>,
     /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임
     /// `Filter::matches` 를 돌리면 `Where::of` 가 프레임마다 지도를 다시 만든다.
     keep: Vec<bool>,
@@ -166,6 +169,7 @@ impl App {
             trouble: None,
             warnings: 0,
             stamp: None,
+            watched: Vec::new(),
             keep,
             remembered,
             list: ListState::default(),
@@ -201,6 +205,7 @@ impl App {
                     .collect();
                 self.origin = g.origin;
                 self.elsewhere = g.trouble;
+                self.watched = g.watched;
                 self.adopt(g.load.issues);
             }
             // **소리 없이 넘기지 않는다.** 삼키면 F5 는 아무 일도 안 하고
@@ -353,10 +358,17 @@ impl App {
     /// 영영 바뀐 줄 모른다. `None != Some(..)` 이 이미 바르게 답한다.
     ///
     /// **읽기가 실패하면 표식을 안 올린다**(`reload`) — 다음 걸음에 다시 해 본다.
+    ///
+    /// **겹쳐 보는 동안에는 옆 워크트리 스냅샷도 본다**(`watched`). 옆에서 `mv` 가
+    /// 떨어진 것을 모르면 겹쳐 보기를 켠 뜻이 절반만 선다. 스냅샷이 아직 없던 옆
+    /// 워크트리도 지켜보므로 거기서 `moai init` 하면 알아챈다. 새로 생긴 워크트리는
+    /// `git worktree list` 를 다시 불러야 알아서 여기서는 못 보고, F5 가 그 길이다 —
+    /// 걸음마다 git 을 띄우는 것은 700ms 마다 프로세스 하나를 만드는 일이다.
     pub fn follow(&mut self) {
-        if let Some(repo) = &self.repo
-            && stamp_of(repo) != self.stamp
-        {
+        let Some(repo) = &self.repo else { return };
+        let moved = stamp_of(repo) != self.stamp
+            || self.watched.iter().any(|(path, was)| crate::store::stamp(path) != *was);
+        if moved {
             self.reload();
         }
     }
@@ -632,13 +644,10 @@ fn seg_id(seg: &Seg) -> Option<&str> {
     }
 }
 
-/// 파일이 그때 그것인지 가늠하는 표식. 고친 때만 보면 놓친다 — rename 으로
-/// 갈아끼우는 쓰기는 같은 초에 떨어질 수 있어 길이도 함께 본다.
-pub type Stamp = Option<(std::time::SystemTime, u64)>;
+pub use crate::store::Stamp;
 
 pub fn stamp_of(repo: &Repo) -> Stamp {
-    let m = std::fs::metadata(repo.issues_path()).ok()?;
-    Some((m.modified().ok()?, m.len()))
+    crate::store::stamp(&repo.issues_path())
 }
 
 /// 한 줄을 `--filter` 토큰들로 쪼갠다.
@@ -1159,6 +1168,31 @@ mod tests {
         let gone: Vec<Issue> = a.issues.iter().filter(|i| i.id != "argos-0004").cloned().collect();
         a.adopt(gone);
         assert_eq!(a.scroll, 0, "다른 줄에 섰는데 굴린 자리가 남았다");
+    }
+
+    /// 겹쳐 보는 동안에는 **옆 워크트리 스냅샷이 바뀐 것도** 다시 읽을 까닭이다.
+    /// 안 바뀌었으면 읽지 않는다.
+    #[test]
+    fn a_change_in_a_watched_worktree_snapshot_rereads_too() {
+        let scratch = Scratch::new("watched");
+        let dir = scratch.0.clone();
+        std::fs::write(dir.join(".moai/issues.jsonl"), "").unwrap();
+        let repo = Repo { root: dir.clone(), config: cfg() };
+        let stamp = stamp_of(&repo);
+        let load = repo.read().unwrap();
+        let index = Index::of(&load.issues);
+        let mut a = App::open(repo, load, index, Path::new(), stamp);
+
+        let other = dir.join("other.jsonl");
+        std::fs::write(&other, "").unwrap();
+        a.watched = vec![(other.clone(), crate::store::stamp(&other))];
+        a.now = "읽기 전".into();
+        a.follow();
+        assert_eq!(a.now, "읽기 전", "아무것도 안 바뀌었는데 다시 읽었다");
+
+        std::fs::write(&other, "{}\n").unwrap();
+        a.follow();
+        assert_ne!(a.now, "읽기 전", "옆 스냅샷이 바뀐 것을 못 알아챘다");
     }
 
     /// 빈 디렉터리에서도 무너지지 않는다.
