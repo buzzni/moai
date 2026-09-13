@@ -51,6 +51,68 @@ fn states_of(issues: &[Issue], cfg: &Config) -> std::collections::BTreeMap<Strin
         .collect()
 }
 
+/// 다시 읽은 것 — **무거운 셈을 다 마친 모양.** 읽기·색인·칸 지도·경고 셈은
+/// 이슈 수에 비례해, 1만 개에서 한 번에 수백 ms 다. 그것을 그리는 루프에서 하면
+/// 에이전트가 몰아 쓰는 동안 탐색기가 걸음마다 멈칫한다. 그래서 루프 밖 스레드에서
+/// 이 모양까지 짓고, 루프는 커서·거름망만 맞춘다([`App::apply_fresh`]).
+///
+/// 여기 드는 셈은 전부 `&[Issue]` 에 대한 순수 함수라 스레드로 옮길 수 있다 —
+/// `report`·`query` 를 순수하게 둔 계약이 여기서 값을 한다.
+pub struct Fresh {
+    stamp: Stamp,
+    issues: Vec<Issue>,
+    index: Index,
+    states: std::collections::BTreeMap<String, String>,
+    warnings: usize,
+    unreadable: Vec<Option<String>>,
+    origin: crate::worktree::Origin,
+    elsewhere: Vec<String>,
+    watched: Vec<(std::path::PathBuf, Stamp)>,
+    now: String,
+}
+
+/// 저장소를 읽어 [`Fresh`] 를 짓는다. **어느 스레드에서 불러도 같다.**
+fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
+    // 읽기 **전에** 잰다. 뒤에 재면 읽고 재는 사이의 쓰기를 놓치고, 놓친
+    // 것은 영영 안 돌아온다. 먼저 재면 최악이 헛 갱신 하나다.
+    let stamp = stamp_of(repo);
+    let g = crate::worktree::gather(repo, worktree)?;
+    // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
+    let unreadable: Vec<Option<String>> = g
+        .origin
+        .unreadable(g.load.errors.iter().map(|e| e.id.as_deref()))
+        .into_iter()
+        .map(|id| id.map(str::to_string))
+        .collect();
+    let issues = g.load.issues;
+    let now = crate::model::now();
+    Ok(Fresh {
+        stamp,
+        index: Index::of(&issues),
+        states: states_of(&issues, &repo.config),
+        warnings: warnings_of(&issues, &unreadable, &repo.config, &now),
+        issues,
+        unreadable,
+        origin: g.origin,
+        elsewhere: g.trouble,
+        watched: g.watched,
+        now,
+    })
+}
+
+/// **알림은 안 센다.** 배너는 "드러난 것 N건" 이라고 말하는데, 담아 둔
+/// 생각이 쌓였다는 알림을 거기 더하면 생각을 담을수록 화면이 고쳐야 할
+/// 것이 늘었다고 말한다 — 그러면 안 담게 된다. 무엇이 알림인지는
+/// `report` 가 `notices` 로 따로 내므로 여기서 다시 판단하지 않는다.
+fn warnings_of(issues: &[Issue], unreadable: &[Option<String>], cfg: &Config, now: &str) -> usize {
+    // 못 읽는 줄의 id 까지 넘긴다 — 산 줄과의 중복을 `moai status` 와 같은
+    // 자로 센다.
+    let lines: Vec<crate::report::Unreadable> =
+        unreadable.iter().map(|id| crate::report::Unreadable { id: id.as_deref() }).collect();
+    // 알림은 `notices` 에 따로 있다 — `warnings` 가 곧 고칠 것이다.
+    crate::report::status(issues, &lines, cfg, now).warnings.len()
+}
+
 pub struct App {
     pub issues: Vec<Issue>,
     pub index: Index,
@@ -89,6 +151,8 @@ pub struct App {
     /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과 그 표식(`worktree::gather`
     /// 가 읽기 **전에** 잰 것). 꺼져 있으면 비었다.
     watched: Vec<(std::path::PathBuf, Stamp)>,
+    /// 스레드에서 짓고 있는 다시 읽기. 끝나면 [`App::follow`] 가 받아 들인다.
+    pending: Option<std::sync::mpsc::Receiver<crate::fail::R<Fresh>>>,
     /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임
     /// `Filter::matches` 를 돌리면 `Where::of` 가 프레임마다 지도를 다시 만든다.
     keep: Vec<bool>,
@@ -170,6 +234,7 @@ impl App {
             warnings: 0,
             stamp: None,
             watched: Vec::new(),
+            pending: None,
             keep,
             remembered,
             list: ListState::default(),
@@ -181,37 +246,49 @@ impl App {
         };
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
         // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
-        app.count_warnings();
+        app.warnings = warnings_of(&app.issues, &app.unreadable, &app.cfg, &app.now);
         app
     }
 
     /// 다시 읽는다. **거름망과 있던 자리는 지키려 애쓴다** — 갱신 한 번에
     /// 하던 일이 흩어지면 F5 를 안 누르게 되고, 그러면 낡은 화면을 본다.
+    ///
+    /// **사람이 누른 갱신(F5·`w`)은 그 자리에서 읽는다.** 누른 사람은 결과를 기다리고
+    /// 있고, `w` 는 켠 뜻대로 읽힌 화면이 곧바로 서야 한다. 스레드에서 짓던 것이
+    /// 있으면 버린다 — 누르기 **전에** 시작한 읽기라 늦게 도착하면 방금 읽은 것을
+    /// 옛 것으로 덮는다(`w` 를 끄기 전 설정으로 읽은 것이면 더더욱).
     pub fn reload(&mut self) {
         let Some(repo) = &self.repo else { return };
-        // 읽기 **전에** 잰다. 뒤에 재면 읽고 재는 사이의 쓰기를 놓치고, 놓친
-        // 것은 영영 안 돌아온다. 먼저 재면 최악이 헛 알림 하나다.
-        let stamp = stamp_of(repo);
-        match crate::worktree::gather(repo, self.worktree) {
-            Ok(g) => {
-                self.trouble = None;
-                self.stamp = stamp;
-                // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
-                self.unreadable = g
-                    .origin
-                    .unreadable(g.load.errors.iter().map(|e| e.id.as_deref()))
-                    .into_iter()
-                    .map(|id| id.map(str::to_string))
-                    .collect();
-                self.origin = g.origin;
-                self.elsewhere = g.trouble;
-                self.watched = g.watched;
-                self.adopt(g.load.issues);
-            }
-            // **소리 없이 넘기지 않는다.** 삼키면 F5 는 아무 일도 안 하고
-            // 배너는 그대로 붙어 있어, 사람은 누르고 또 누르며 까닭을 못 얻는다.
+        self.pending = None;
+        let fresh = prepare(repo, self.worktree);
+        self.receive(fresh);
+    }
+
+    /// 다시 읽은 결과를 받는다. **소리 없이 넘기지 않는다** — 실패를 삼키면 갱신이
+    /// 아무 일도 안 하는데 사람은 까닭을 못 얻는다. 실패하면 표식을 안 올리므로
+    /// 다음 걸음에 다시 해 본다.
+    fn receive(&mut self, fresh: crate::fail::R<Fresh>) {
+        match fresh {
+            Ok(f) => self.apply_fresh(f),
             Err(e) => self.trouble = Some(e.to_string()),
         }
+    }
+
+    /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
+    pub fn loading(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// 지어 온 것을 들인다. 여기서 하는 셈은 커서·경로·거름망뿐이다.
+    fn apply_fresh(&mut self, f: Fresh) {
+        self.trouble = None;
+        self.stamp = f.stamp;
+        self.unreadable = f.unreadable;
+        self.origin = f.origin;
+        self.elsewhere = f.elsewhere;
+        self.watched = f.watched;
+        self.warnings = f.warnings;
+        self.take(f.issues, f.index, f.states, f.now);
     }
 
     /// 돌 것이 한 줄이라도 있는가. **화면에 보이는지까지는 따지지 않는다** —
@@ -238,18 +315,36 @@ impl App {
             .unwrap_or(i.status.as_str())
     }
 
-    /// 새 자료를 받아들이고 어긋난 것을 손본다. 시험이 저장소 없이 부른다.
+    /// 새 자료를 받아들이고 어긋난 것을 손본다. **시험이 저장소 없이 부른다** — 진짜
+    /// 길은 스레드에서 셈을 마친 [`Fresh`] 를 [`App::apply_fresh`] 로 들인다.
     ///
     /// **커서는 번호가 아니라 정체로 따라간다**([`Anchor`]). 보던 줄이 아직 보이면
     /// 그 줄에 서고, 사라졌으면(지워졌거나 거름망에 빠졌으면) 전처럼 그 번호를 목록
     /// 안으로 자른 자리에 선다.
+    #[cfg(test)]
     pub fn adopt(&mut self, issues: Vec<Issue>) {
+        let index = Index::of(&issues);
+        let states = states_of(&issues, &self.cfg);
+        let now = crate::model::now();
+        self.warnings = warnings_of(&issues, &self.unreadable, &self.cfg, &now);
+        self.take(issues, index, states, now);
+    }
+
+    /// 이미 센 자료를 들이고 커서·경로·거름망을 맞춘다 — [`App::adopt`] 와 스레드에서
+    /// 지어 온 것([`Fresh`])이 함께 지나는 길이다.
+    fn take(
+        &mut self,
+        issues: Vec<Issue>,
+        index: Index,
+        states: std::collections::BTreeMap<String, String>,
+        now: String,
+    ) {
         // **옛 자료로 잰다** — 줄의 첨자는 옛 `issues` 를 가리킨다.
         let held = self.current().map(|r| self.anchor_of(&r));
         self.issues = issues;
-        self.index = Index::of(&self.issues);
-        self.states = states_of(&self.issues, &self.cfg);
-        self.now = crate::model::now();
+        self.index = index;
+        self.states = states;
+        self.now = now;
         self.repair_path();
         // 거름망은 이슈 첨자에 매인 것이라 반드시 다시 센다.
         match self.filter_text.clone() {
@@ -274,7 +369,6 @@ impl App {
             self.scroll = 0;
         }
         self.cursor = found.unwrap_or(self.cursor.min(rows.len().saturating_sub(1)));
-        self.count_warnings();
     }
 
     /// 그 줄의 정체. 지금 `issues` 에 대해 잰다.
@@ -329,23 +423,6 @@ impl App {
         self.path = good;
     }
 
-    /// **알림은 안 센다.** 배너는 "드러난 것 N건" 이라고 말하는데, 담아 둔
-    /// 생각이 쌓였다는 알림을 거기 더하면 생각을 담을수록 화면이 고쳐야 할
-    /// 것이 늘었다고 말한다 — 그러면 안 담게 된다. 무엇이 알림인지는
-    /// `report` 가 `notices` 로 따로 내므로 여기서 다시 판단하지 않는다.
-    fn count_warnings(&mut self) {
-        // 못 읽는 줄의 id 까지 넘긴다 — 산 줄과의 중복을 `moai status` 와 같은
-        // 자로 센다.
-        let lines: Vec<crate::report::Unreadable> = self
-            .unreadable
-            .iter()
-            .map(|id| crate::report::Unreadable { id: id.as_deref() })
-            .collect();
-        let st = crate::report::status(&self.issues, &lines, &self.cfg, &self.now);
-        // 알림은 `notices` 에 따로 있다 — `warnings` 가 곧 고칠 것이다.
-        self.warnings = st.warnings.len();
-    }
-
     /// 파일이 우리가 읽은 뒤로 바뀌었으면 **저절로 다시 읽는다.**
     ///
     /// 한때 말만 하고 F5 를 기다렸다(moai-6qdx) — 읽으면 커서가 튀었기 때문이다.
@@ -364,12 +441,38 @@ impl App {
     /// 워크트리도 지켜보므로 거기서 `moai init` 하면 알아챈다. 새로 생긴 워크트리는
     /// `git worktree list` 를 다시 불러야 알아서 여기서는 못 보고, F5 가 그 길이다 —
     /// 걸음마다 git 을 띄우는 것은 700ms 마다 프로세스 하나를 만드는 일이다.
+    ///
+    /// **읽기는 스레드에서 한다**([`Fresh`]). 짓는 동안은 표식을 다시 재지 않는다 —
+    /// 하나가 끝나기 전에 또 띄우면 몰아 쓰는 동안 스레드가 쌓인다. 끝난 것을 들인
+    /// 뒤에도 파일이 또 바뀌었으면(표식은 읽기 전에 쟀다) 다음 걸음이 다시 띄운다.
     pub fn follow(&mut self) {
+        if let Some(rx) = &self.pending {
+            match rx.try_recv() {
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Ok(fresh) => {
+                    self.pending = None;
+                    self.receive(fresh);
+                }
+                // 짓던 스레드가 죽었다. 표식을 안 올렸으므로 다음 걸음에 다시 띄운다.
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.pending = None;
+                    self.trouble = Some("다시 읽던 중에 멈췄다 — 다음 걸음에 다시 읽는다".into());
+                }
+            }
+            return;
+        }
         let Some(repo) = &self.repo else { return };
         let moved = stamp_of(repo) != self.stamp
             || self.watched.iter().any(|(path, was)| crate::store::stamp(path) != *was);
         if moved {
-            self.reload();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let repo = repo.clone();
+            let worktree = self.worktree;
+            // 받는 쪽이 사라졌으면(F5 로 버렸으면) 보내기가 실패한다 — 버린 것이라 그대로 둔다.
+            std::thread::spawn(move || {
+                let _ = tx.send(prepare(&repo, worktree));
+            });
+            self.pending = Some(rx);
         }
     }
 
@@ -726,6 +829,17 @@ mod tests {
         assert!(a.spinning(), "in_progress 가 있는데 안 돈다고 한다");
     }
 
+    /// 스레드에서 짓는 다시 읽기를 **끝날 때까지** 받는다. 루프가 하는 것을 흉내 낸다.
+    fn settle(a: &mut App) {
+        a.follow();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while a.loading() {
+            assert!(std::time::Instant::now() < until, "다시 읽기가 끝나지 않는다");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            a.follow();
+        }
+    }
+
     /// 진짜 파일을 쓰는 시험이 쓰는 임시 자리. **터져도 치운다** — 바로
     /// `remove_dir_all` 을 부르면 assert 하나가 터질 때마다 찌꺼기가 남고,
     /// 이름이 pid 라 다음 실행이 그것을 치우지도 못한다.
@@ -972,7 +1086,7 @@ mod tests {
             format!("{}\n", serde_json::to_string(&make("argos-0001", Kind::Epic)).unwrap()),
         )
         .unwrap();
-        a.follow();
+        settle(&mut a);
         assert_eq!(a.issues.len(), 1, "없던 파일이 생긴 것을 못 알아챘다");
         assert!(a.trouble.is_none());
     }
@@ -1099,6 +1213,7 @@ mod tests {
         // 저장소를 통째로 다시 세는 것이다.
         let stamp_before = a.stamp;
         a.follow();
+        assert!(!a.loading(), "안 바뀌었는데 다시 읽으러 갔다");
         assert_eq!(a.stamp, stamp_before);
 
         // 에픽 안에 들어가 있는 동안 밖에서 한 줄 더한다
@@ -1108,6 +1223,9 @@ mod tests {
         std::fs::write(dir.join(".moai/issues.jsonl"), src).unwrap();
 
         a.follow();
+        assert!(a.loading(), "바뀐 것을 보고도 읽으러 가지 않았다");
+        assert_eq!(a.issues.len(), 1, "스레드가 지을 것을 루프에서 읽었다");
+        settle(&mut a);
         assert_eq!(a.issues.len(), 2, "바뀐 것을 저절로 안 읽었다");
         assert_eq!(a.path, [Seg::Epic("argos-0001".into())], "읽고 나서 자리를 잃었다");
         assert!(a.trouble.is_none());
@@ -1187,12 +1305,33 @@ mod tests {
         std::fs::write(&other, "").unwrap();
         a.watched = vec![(other.clone(), crate::store::stamp(&other))];
         a.now = "읽기 전".into();
-        a.follow();
+        settle(&mut a);
         assert_eq!(a.now, "읽기 전", "아무것도 안 바뀌었는데 다시 읽었다");
 
         std::fs::write(&other, "{}\n").unwrap();
-        a.follow();
+        settle(&mut a);
         assert_ne!(a.now, "읽기 전", "옆 스냅샷이 바뀐 것을 못 알아챘다");
+    }
+
+    /// **사람이 누른 갱신이 스레드의 늦은 결과에 덮이지 않는다.** F5 를 누르기 전에
+    /// 띄운 읽기는 누른 뒤의 파일보다 옛것일 수 있다.
+    #[test]
+    fn a_manual_reload_drops_the_read_in_flight() {
+        let scratch = Scratch::new("inflight");
+        let dir = scratch.0.clone();
+        std::fs::write(dir.join(".moai/issues.jsonl"), "").unwrap();
+        let repo = Repo { root: dir.clone(), config: cfg() };
+        let stamp = stamp_of(&repo);
+        let load = repo.read().unwrap();
+        let index = Index::of(&load.issues);
+        let mut a = App::open(repo, load, index, Path::new(), stamp);
+
+        std::fs::write(dir.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&make("argos-0001", Kind::Epic)).unwrap())).unwrap();
+        a.follow();
+        assert!(a.loading());
+        a.key(key(KeyCode::F(5)));
+        assert!(!a.loading(), "F5 가 짓던 것을 안 버렸다");
+        assert_eq!(a.issues.len(), 1);
     }
 
     /// 빈 디렉터리에서도 무너지지 않는다.

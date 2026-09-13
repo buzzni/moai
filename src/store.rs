@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 /// 락을 못 잡으면 **아무것도 쓰지 않고** 물러난다.
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[derive(Clone)]
 pub struct Repo {
     pub root: PathBuf,
     pub config: Config,
