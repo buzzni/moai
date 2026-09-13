@@ -100,18 +100,20 @@ pub fn tree(
         (PathBuf::from("skills/moai/SKILL.md"), skill.to_string()),
         (PathBuf::from("skills/moai/references/commands.md"), reference.to_string()),
     ];
-    // 판은 **딸린 파일과 훅 명령**에서 나온다. 매니페스트 자신은 그 판을 담고
-    // 있으므로 셈에 넣을 수 없다 — 넣으면 해시가 제 꼬리를 문다.
-    let version = version_of(&files, &format!("{exe}\u{1}{prefix}"));
+    let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(prefix, root));
+    // 판은 **매니페스트를 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다.
+    // 매니페스트 자신은 그 판을 담고 있으므로 그대로는 셈에 넣을 수 없다 —
+    // 넣으면 해시가 제 꼬리를 문다. 그렇다고 매니페스트를 통째로 빼면 그 틀
+    // (`timeout`·`description`)만 바꾼 판이 옛 판과 같아 `claude` 가 옛 복사를
+    // 계속 쓴다. 훅 명령·실행 파일·이름표는 그 틀과 `marketplace.json` 에 이미
+    // 들어 있어 따로 셈하지 않는다 — 따로 적은 목록은 틀이 자랄 때마다 어긋난다.
+    let version = version_of(&[files.as_slice(), std::slice::from_ref(&market)].concat(), &plugin_json(exe, ""));
     files.push((PathBuf::from(".claude-plugin/plugin.json"), plugin_json(exe, &version)));
-    files.push((
-        PathBuf::from(".claude-plugin/marketplace.json"),
-        marketplace_json(prefix, root),
-    ));
+    files.push(market);
     files
 }
 
-fn version_of(files: &[(PathBuf, String)], exe: &str) -> String {
+fn version_of(files: &[(PathBuf, String)], template: &str) -> String {
     let mut all = String::new();
     for (path, body) in files {
         all.push_str(&path.to_string_lossy());
@@ -119,13 +121,7 @@ fn version_of(files: &[(PathBuf, String)], exe: &str) -> String {
         all.push_str(body);
         all.push('\u{2}');
     }
-    all.push_str(exe);
-    for (at, event, message) in HOOKS {
-        all.push_str(at);
-        all.push_str(event);
-        all.push_str(message);
-    }
-    all.push_str(WATCHED);
+    all.push_str(template);
     // semver 세 자리에 나눠 담는다. `claude` 가 판을 semver 로 읽는다.
     let n = stable(all.as_bytes());
     format!("{}.{}.{}", n % 1000, (n / 1000) % 1000, (n / 1_000_000) % 1000)
@@ -467,6 +463,29 @@ mod tests {
         assert_ne!(version(&a), version(&d), "부를 바이너리가 달라졌는데 판이 같다");
         // semver 세 자리여야 `claude` 가 읽는다.
         assert_eq!(version(&a).split('.').count(), 3, "{}", version(&a));
+    }
+
+    /// **매니페스트의 틀도 판에 든다.** 딸린 파일과 훅 명령만 셈하던 판은
+    /// `timeout` 이나 `description` 만 바꾸면 판이 그대로여서, `claude` 가 옛
+    /// 복사를 계속 썼다. 셈에 넣는 틀이 실제로 심는 매니페스트와 판 한 자리만
+    /// 다른지도 본다 — 다른 틀을 셈하면 이 시험은 통과해도 구멍은 그대로다.
+    #[test]
+    fn the_manifest_template_is_in_the_version() {
+        let files = tree_of("/bin/moai", "# 스킬");
+        let mut shipped: serde_json::Value =
+            serde_json::from_str(&files[".claude-plugin/plugin.json"]).unwrap();
+        shipped["version"] = "".into();
+        assert_eq!(pretty(&shipped), plugin_json("/bin/moai", ""), "셈한 틀이 심는 매니페스트와 다르다");
+
+        let rest: Vec<(PathBuf, String)> = files
+            .into_iter()
+            .filter(|(p, _)| p != ".claude-plugin/plugin.json")
+            .map(|(p, b)| (PathBuf::from(p), b))
+            .collect();
+        let template = plugin_json("/bin/moai", "");
+        let tweaked = template.replace("\"timeout\": 15", "\"timeout\": 30");
+        assert_ne!(template, tweaked, "시험이 틀을 못 바꿨다");
+        assert_ne!(version_of(&rest, &template), version_of(&rest, &tweaked), "틀이 바뀌었는데 판이 같다");
     }
 
     /// **마켓플레이스 이름은 저장소마다 다르다.** 이름은 기계 하나에서
