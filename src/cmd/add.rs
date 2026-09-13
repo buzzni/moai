@@ -4,7 +4,7 @@ use super::{Ctx, Fail, R};
 use crate::cli::AddArgs;
 use crate::draft::{self, Draft};
 use crate::model::{self, Actor, Issue, JournalEntry, Kind, Status};
-use crate::store::{Repo, taken_ids};
+use crate::store::{self, Repo, taken_ids};
 use crate::style::{self, paint};
 
 /// 담당을 정한다. **`-a` 를 안 주면 만든 사람이 담당이다** — 이름 없는 줄이
@@ -14,7 +14,7 @@ fn assignee_of(arg: Option<&str>, by: &Actor) -> (Option<String>, Option<String>
     match arg.map(super::clearable) {
         Some(Some(v)) => model::split_assignee(&v),
         Some(None) => (None, None),
-        None => (Some(by.name.clone()), Some(by.email.clone())),
+        None => by.as_assignee(),
     }
 }
 
@@ -123,24 +123,15 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
     // 만들면 만든 줄이 처음부터 `in_progress` 로 선다.
     let (made, read): (Issue, super::Read) = repo.with_write(|issues, cfg, reserved| {
-        let taken = taken_ids(issues, reserved);
-
-        let id = match &args.parent {
-            Some(p) => {
-                if !issues.iter().any(|i| &i.id == p) {
-                    return Err(Fail::coded(
-                        format!("{p} 를 못 찾았다 — 부모가 없는 자식은 만들지 않는다"),
-                        super::code::NOT_FOUND,
-                    ));
-                }
-                crate::id::generate_child(
-                    p,
-                    &taken,
-                    &crate::id::seed(&title),
-                )
-            }
-            None => crate::id::generate(&cfg.prefix, &taken, &crate::id::seed(&title)),
-        };
+        if let Some(p) = &args.parent
+            && !issues.iter().any(|i| &i.id == p)
+        {
+            return Err(Fail::coded(
+                format!("{p} 를 못 찾았다 — 부모가 없는 자식은 만들지 않는다"),
+                super::code::NOT_FOUND,
+            ));
+        }
+        let id = store::new_id(issues, cfg, reserved, args.parent.as_deref(), &title);
 
         // 없는 에픽을 가리키는 것은 막지 않고 **알려만 준다** — 에픽을 나중에
         // 만드는 순서가 실제로 있고, 끊긴 참조는 `moai status` 가 드러낸다.
@@ -150,18 +141,14 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             eprintln!("moai: {e} 라는 에픽이 아직 없다. 그대로 넣는다");
         }
 
-            let mut issue = Issue::new(id, title.clone(), kind, status.clone(), &at);
+        let mut issue = Issue::new(id, title.clone(), kind, status.clone(), &at);
         issue.epic = args.epic.clone();
         issue.milestone = args.milestone.clone();
         issue.tags = args.tag.iter().map(|t| model::normalize_tag(t)).collect();
         issue.priority = args.priority;
         (issue.assignee, issue.assignee_email) = assignee_of(args.assignee.as_deref(), &by);
         issue.body = body.clone();
-        issue.normalize();
-        issue.validate(cfg)?;
-
-        let entry = JournalEntry::create(&issue.id, &issue.title, &at, &by);
-        issues.push(issue.clone());
+        let (entry, issue) = store::admit(issues, cfg, issue, &by)?;
         let read = super::read_of(issues, cfg, &[issue.id.as_str()]);
         Ok((vec![entry], (issue, read)))
     })?;
@@ -280,11 +267,9 @@ pub fn create_drafts(
         // 줄에서 같은 이름이 두 가지를 뜻한다.
         issue.epic = d.epic.map(|nth| ids[nth].clone());
         (issue.assignee, issue.assignee_email) = who.clone();
-        issue.normalize();
-        issue.validate(cfg)?;
-        entries.push(JournalEntry::create(&issue.id, &issue.title, at, by));
-        made.push(issue.clone());
-        issues.push(issue);
+        let (entry, issue) = store::admit(issues, cfg, issue, by)?;
+        entries.push(entry);
+        made.push(issue);
     }
     Ok((entries, made))
 }

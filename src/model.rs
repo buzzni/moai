@@ -380,6 +380,14 @@ impl Actor {
         a.is_sane().then_some(a)
     }
 
+    /// 이 사람을 담당 칸에 넣는 모양 — `(이름, 메일)`, **갈라진 채로.**
+    ///
+    /// **만든 사람이 담당이다**는 규칙이 CLI 의 `add` 와 탐색기의 `n` 에 같이 선다.
+    /// 합친 한 줄(`label`)로 넘기면 되가르는 쪽이 이름 없는 줄의 메일을 이름 칸에 넣는다.
+    pub fn as_assignee(&self) -> (Option<String>, Option<String>) {
+        (Some(self.name.clone()), Some(self.email.clone()))
+    }
+
     /// 이름도 **한 줄이다.** 메일만 재고 이름을 안 재면 줄바꿈이 든 `--user` 가
     /// 통과해, `note`·`mv` 가 두 줄짜리 `by` 를 되돌릴 수 없는 저널에 적는다.
     /// `add` 쪽은 더 나쁘다 — id 를 뽑은 **뒤에** `담당은 한 줄이다` 로 죽어서,
