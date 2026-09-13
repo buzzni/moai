@@ -57,10 +57,37 @@ pub enum Mode {
 
 /// 받고 나서 다시 부를 쓰기. **붙잡는 것이 없는 함수다** — 적던 것은 [`Ask`] 가
 /// 들고 있다가 되돌려 놓는 모드 안에 있고, 이 함수는 거기서 다시 읽어 쓴다.
-/// 닫는 함수(`FnOnce`)를 통째로 들고 있으면 그 결과(`T`)를 받을 자리가 없어
-/// 성공한 뒤의 일(폼 닫기·커서 옮기기)을 부른 쪽이 두 벌 짓게 된다. 같은 함수를
-/// 한 번 더 부르면 그 일이 한 벌로 남는다.
+/// 닫는 함수(`FnOnce`)를 통째로 들고 있으면 그 결과를 받을 자리가 없어
+/// 성공한 뒤의 일(폼 닫기)을 부른 쪽이 두 벌 짓게 된다. 같은 함수를
+/// 한 번 더 부르면 그 일이 한 벌로 남는다. 커서 옮기기와 알림은 [`App::write`] 가
+/// 스스로 하므로 어느 길로 이어진 쓰기든 같다.
 pub type Retry = fn(&mut App);
+
+/// 쓰기가 **어느 줄을** 만들었거나 건드렸나. [`App::write`] 에 넘기는 닫는 함수가
+/// 저널과 함께 낸다 — `with_write` 의 `(저널, T)` 에서 `T` 자리다.
+///
+/// **id 는 닫는 함수만 안다.** 새 id 는 락 안에서 다시 읽은 목록을 보고 고르므로
+/// 밖에서 짐작할 수 없고, 쓰고 난 목록을 견줘 "새로 생긴 줄" 을 찾으면 같은 틈에
+/// 남이 쓴 줄과 갈리지 않는다. 그래서 쓰는 쪽이 댄다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Touched {
+    /// 쓰고 나면 커서가 설 줄.
+    pub id: String,
+    /// 알림의 앞말 — `담김`. **부르는 쪽이 정한다**: 쓰기의 뜻(담기·고치기·옮기기)을
+    /// 여기서 저널을 보고 가르면 필드 고치기는 저널을 안 남겨(CLAUDE.md) 이름이 없다.
+    pub done: &'static str,
+}
+
+/// 쓴 줄이 목록 어디에 섰나. 알림이 무엇을 덧붙일지를 가른다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Landing {
+    /// 그 줄에 커서가 섰다.
+    Shown,
+    /// 줄은 있는데 거름망이 가렸다. 커서는 옮기지 않는다.
+    Hidden,
+    /// 다시 읽은 목록에 그 id 가 없다 — 다시 읽기가 실패했거나 지운 쓰기다.
+    Missing,
+}
 
 /// 누군지 묻는 칸의 상태.
 ///
@@ -234,6 +261,13 @@ pub struct App {
     /// 까닭을 지우면 폼은 열린 채인데 왜 안 닫혔는지가 화면 어디에도 없다. 걷는 것은
     /// 다음에 성공한 쓰기나, 그 자리를 덮는 읽기의 실패다.
     write_failed: bool,
+    /// 방금 성공한 쓰기의 한 줄 알림 — `✓ 담김 · moai-xxxx`. **다음 키 하나에 걷힌다**
+    /// ([`App::key`]). 지나가는 말이라 붙박이로 두면 오래전 쓰기를 방금 한 것처럼 말하고,
+    /// 다시 읽기로 걷으면 남이 쓴 걸음 하나에 읽기도 전에 사라진다.
+    ///
+    /// `trouble` 과 **따로 든다.** 쓰기 뒤 다시 읽기가 실패하면 둘이 함께 참이다 —
+    /// 파일에는 담겼고 화면은 못 읽었다. 한 칸에 담으면 어느 한쪽이 거짓말을 한다.
+    pub notice: Option<String>,
     /// `--user` 로 **준 값 그대로**(`Ctx::user` 와 같다), 또는 누군지 묻는 칸에서
     /// 받은 것([`Mode::Ask`]). 쓸 때마다 `model::actor` 로 푼다 — 미리 풀어 두면
     /// 설정 없는 기계에서 읽기만 하려던 탐색기가 여는 순간 사람을 묻는다. 읽기는
@@ -339,6 +373,7 @@ impl App {
             unreadable: unreadable_ids,
             trouble: None,
             write_failed: false,
+            notice: None,
             user: None,
             identify: crate::model::actor,
             warnings: 0,
@@ -399,7 +434,16 @@ impl App {
     /// 파일 쪽에만 걸린다. 다시 읽기가 표식도 함께 잡으므로(`prepare` 는 읽기 전에
     /// 잰다) 제가 쓴 것을 "밖에서 바뀌었다" 로 읽어 한 번 더 읽는 일이 없다. 스레드에서
     /// 짓던 읽기는 버린다 — 쓰기 **전에** 띄운 것이라 늦게 닿으면 방금 쓴 것을
-    /// 옛 화면으로 덮는다(`reload` 가 이미 그렇게 한다).
+    /// 옛 화면으로 덮는다(`reload` 가 이미 그렇게 한다). **다시 읽기는 이 한 번이다** —
+    /// 한 키에 목록을 여러 번 다시 세던 것을 걷어낸 판단(moai-cf1t)을 되돌리지 않는다.
+    ///
+    /// **다시 읽고 나면 쓴 줄에 선다**([`Touched`], [`App::land`]). 담긴 것이 눈앞에
+    /// 보여야 담긴 줄 안다 — 사람이 방금 담은 것을 확인하러 헤매면 다음부터 안 담는다.
+    /// 그 줄이 다른 디렉터리에 서면 그리로 간다(idea 는 에픽에 안 들어가므로 에픽 안에서
+    /// 담으면 뿌리에 선다). 한 줄 알림(`notice`)이 만든 id 를 댄다. **거름망이 그 줄을
+    /// 가리면 커서는 두고 그렇다고 말한다** — 조용히 안 보이면 저장이 실패한 것으로
+    /// 읽힌다. 거름망을 대신 풀지는 않는다: 사람이 건 것이고, 푸는 키는 알림이 댄다.
+    /// 돌려주는 것은 그 id 다.
     ///
     /// **실패를 삼키지 않는다.** 대체 화면 안에서는 stderr 가 안 보이므로 `trouble`
     /// 로 말하고 `None` 을 낸다 — 부른 쪽(폼)은 그것을 보고 적던 것을 닫지 않는다.
@@ -420,7 +464,7 @@ impl App {
     /// 들이면 CLI 전체가 async 로 물든다. 락을 못 잡으면 `with_write` 가 5초 뒤
     /// 아무것도 안 쓰고 물러나고, 그 말이 그대로 화면에 선다.
     #[must_use = "None 이면 쓰지 못했다 — 적던 것을 닫으면 사람이 적은 것을 잃는다"]
-    pub fn write<T>(
+    pub fn write(
         &mut self,
         retry: Retry,
         f: impl FnOnce(
@@ -428,8 +472,11 @@ impl App {
             &Config,
             &std::collections::BTreeSet<String>,
             &crate::model::Actor,
-        ) -> crate::fail::R<(Vec<crate::model::JournalEntry>, T)>,
-    ) -> Option<T> {
+        ) -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)>,
+    ) -> Option<String> {
+        // 앞 쓰기의 알림은 이 쓰기가 무엇이 되든 낡았다 — 실패한 뒤에 옛 `✓` 가 남으면
+        // 이번 것이 담긴 것으로 읽힌다.
+        self.notice = None;
         let Some(repo) = &self.repo else {
             self.trouble = Some("쓰지 못했다 — 저장소 없이 연 화면이다".into());
             self.write_failed = true;
@@ -446,10 +493,18 @@ impl App {
         }
         let written = by.and_then(|by| repo.with_write(|issues, cfg, reserved| f(issues, cfg, reserved, &by)));
         match written {
-            Ok(out) => {
+            Ok(touched) => {
                 self.write_failed = false;
                 self.reload();
-                Some(out)
+                let Touched { id, done } = touched;
+                let told = match self.land(&id) {
+                    Landing::Shown => format!("✓ {done} · {id}"),
+                    Landing::Hidden => format!("✓ {done} · {id} — 거름망에 가려 안 보인다 · Esc 로 푼다"),
+                    // 다시 읽기가 실패했으면 그 까닭은 `trouble` 이 따로 댄다. 담긴 것은 참이다.
+                    Landing::Missing => format!("✓ {done} · {id} — 다시 읽은 목록에 없다"),
+                };
+                self.notice = Some(told);
+                Some(id)
             }
             // 거절문은 여러 줄일 수 있다(누군지 모를 때는 고칠 명령까지 낸다). 배너는
             // 한 줄이라 줄바꿈이 그대로 가면 그림이 찢어진다 — 한 줄로 잇는다.
@@ -559,6 +614,36 @@ impl App {
             self.detail.rewind();
         }
         self.cursor = found.unwrap_or(self.cursor.min(rows.len().saturating_sub(1)));
+    }
+
+    /// 방금 쓴 줄에 선다. **다시 읽은 뒤에 부른다** — 첨자도 자리도 새 `issues` 에 대해 잰다.
+    ///
+    /// 자리는 `nav` 가 정한 그 줄의 집(`home_of`)이다. 묶음이어도 **안으로 들어가지
+    /// 않는다** — 들어가면 방금 만든 것은 목록에 없고 `..` 만 보인다. 그 줄 위에
+    /// 서야 오른쪽이 그 줄을 보여 준다.
+    ///
+    /// 거름망에 가리면 **길도 커서도 그대로 둔다.** 가려진 디렉터리로 옮겨 놓으면 사람은
+    /// 왜 여기로 왔는지도 모르는 목록을 본다. 중복 id 면 그 디렉터리의 첫 줄이다([`Anchor`]).
+    fn land(&mut self, id: &str) -> Landing {
+        let Some(at) = self.index.find(id) else { return Landing::Missing };
+        let home = self.index.home_of(at).clone();
+        let was = std::mem::replace(&mut self.path, home);
+        let want = Anchor::Issue(id.to_string());
+        let rows = self.rows();
+        let Some(row) = rows.iter().position(|r| self.anchor_of(r) == want) else {
+            self.path = was;
+            return Landing::Hidden;
+        };
+        if self.path != was || row != self.cursor {
+            self.detail.rewind();
+        }
+        // 기억 자리는 **갈라지기 전까지만** 참이다. 그 밑은 들어간 적이 없는 층이라 0 —
+        // `leave` 는 나온 디렉터리를 먼저 찾으므로 이 수는 못 찾을 때만 쓰인다.
+        let same = was.iter().zip(&self.path).take_while(|(a, b)| a == b).count();
+        self.remembered.truncate(same);
+        self.remembered.resize(self.path.len(), 0);
+        self.cursor = row;
+        Landing::Shown
     }
 
     /// 그 줄의 정체. 지금 `issues` 에 대해 잰다.
@@ -754,6 +839,9 @@ impl App {
     }
 
     pub fn key(&mut self, k: KeyEvent) {
+        // 쓰기의 알림은 **다음 키 하나에 걷힌다.** 읽었으면 할 일을 다 했고, 이 키가 또
+        // 쓰기라면 그 쓰기가 제 알림을 새로 단다.
+        self.notice = None;
         // 글을 받는 동안에는 이동키가 글자다. 먼저 가로챈다. **`Tab` 도 여기서
         // 멈춘다** — 적다 말고 포커스가 튀면 적던 것을 잃는다.
         if !matches!(self.mode, Mode::Browse) {
@@ -1044,9 +1132,10 @@ impl App {
 /// 정규화, 검증, 저널 `create`, 만든 사람이 담당인 것까지. 에픽은 없다: 커서가 선 자리가
 /// 무엇이든 넣지 않는다. 칸은 config 의 첫 칸이다.
 ///
-/// 되면 폼을 닫는다. 안 되면 **아무것도 건드리지 않는다** — 누군지 묻는 중이면
-/// `write` 가 이미 모드를 `Ask` 로 바꿨고, 실패면 폼이 열린 채 까닭이 배너에 선다.
-/// 쓴 뒤 다시 읽는 것은 `write` 가 한다(커서를 만든 줄에 두는 것은 moai-064q).
+/// 되면 폼을 **닫기만 한다.** 다시 읽기·만든 줄에 커서 두기·`✓ 담김 · id` 알림은
+/// `write` 가 한다(moai-064q) — 여기서 또 하면 한 쓰기에 목록을 두 번 세거나 알림이 둘이
+/// 된다. 안 되면 **아무것도 건드리지 않는다** — 누군지 묻는 중이면 `write` 가 이미 모드를
+/// `Ask` 로 바꿨고, 실패면 폼이 열린 채 까닭이 배너에 선다.
 fn save_idea(app: &mut App) {
     let Mode::Idea(form) = &app.mode else { return };
     let (title, body) = (form.title(), form.body());
@@ -1062,7 +1151,7 @@ fn save_idea(app: &mut App) {
         (idea.assignee, idea.assignee_email) = by.as_assignee();
         idea.body = body;
         let (entry, made) = crate::store::admit(issues, cfg, idea, by)?;
-        Ok((vec![entry], made.id))
+        Ok((vec![entry], Touched { id: made.id, done: "담김" }))
     });
     if wrote.is_some() {
         app.mode = Mode::Browse;
@@ -1838,10 +1927,10 @@ mod tests {
     }
 
     /// 생각 하나를 담는 쓰기 — 폼이 부를 모양 그대로다.
-    fn add_idea(a: &mut App, id: &'static str) -> Option<&'static str> {
+    fn add_idea(a: &mut App, id: &'static str) -> Option<String> {
         a.write(|_| {}, move |issues, _, _, by| {
             issues.push(Issue::new(id.into(), "떠오른 것".into(), Kind::Idea, Status::new("todo"), "2026-09-13T00:00:00Z"));
-            Ok((vec![crate::model::JournalEntry::create(id, "떠오른 것", "2026-09-13T00:00:00Z", by)], id))
+            Ok((vec![crate::model::JournalEntry::create(id, "떠오른 것", "2026-09-13T00:00:00Z", by)], Touched { id: id.into(), done: "담김" }))
         })
     }
 
@@ -1854,7 +1943,7 @@ mod tests {
         let file = scratch.0.join(".moai/issues.jsonl");
         a.trouble = Some("다시 읽지 못했다 — 옛 까닭".into());
 
-        assert_eq!(add_idea(&mut a, "argos-0002"), Some("argos-0002"));
+        assert_eq!(add_idea(&mut a, "argos-0002").as_deref(), Some("argos-0002"));
         assert!(std::fs::read_to_string(&file).unwrap().contains("argos-0002"), "파일에 안 닿았다");
         assert_eq!(a.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["argos-0001", "argos-0002"]);
         assert_eq!(a.index.find("argos-0002"), Some(1), "색인이 다시 안 섰다 — 손으로 넣은 것이다");
@@ -1865,6 +1954,88 @@ mod tests {
         assert_eq!(a.stamp, stamp_of(&repo), "표식을 다시 안 잡았다");
         a.follow();
         assert!(!a.loading(), "제가 쓴 것을 밖에서 바뀐 것으로 읽었다");
+    }
+
+    /// 커서가 선 줄의 id. `..` 이나 바구니면 없다.
+    fn on(a: &App) -> Option<String> {
+        a.current().and_then(|r| match r {
+            Row::Item(e) => e.at().map(|at| a.issues[at].id.clone()),
+            Row::Up => None,
+        })
+    }
+
+    /// **쓰고 나면 만든 줄에 커서가 서고, 한 줄 알림이 그 id 를 댄다.** 담긴 것이
+    /// 눈앞에 보여야 담긴 줄 안다. 알림은 다음 키 하나에 걷힌다.
+    #[test]
+    fn a_write_puts_the_cursor_on_the_line_it_made_and_names_it() {
+        let (_scratch, mut a) = writable("land");
+        assert_eq!(on(&a).as_deref(), Some("argos-0001"));
+        drawn(&mut a, 10, 40);
+        a.detail.by(5);
+
+        assert_eq!(add_idea(&mut a, "argos-0002").as_deref(), Some("argos-0002"));
+        assert_eq!(on(&a).as_deref(), Some("argos-0002"), "만든 줄에 안 섰다 — {:?}", a.rows());
+        assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002"));
+        assert_eq!(a.detail.offset(), 0, "다른 줄에 섰는데 굴린 자리가 남았다");
+        assert!(a.trouble.is_none());
+
+        a.key(key(KeyCode::Down));
+        assert_eq!(a.notice, None, "다음 키에 알림이 안 걷혔다");
+    }
+
+    /// **쓴 줄이 다른 디렉터리에 서면 그리로 간다.** 에픽 안에서 담은 생각은 뿌리에
+    /// 서고, 뿌리에서 만든 멤버는 에픽 안에 선다. 들어간 층에서 나오면 그 에픽에 선다.
+    #[test]
+    fn a_line_written_into_another_directory_takes_the_cursor_there() {
+        let (_scratch, mut a) = writable("land-elsewhere");
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.path, [Seg::Epic("argos-0001".into())]);
+
+        assert!(add_idea(&mut a, "argos-0002").is_some());
+        assert!(a.path.is_empty(), "생각은 에픽 밖에 서는데 에픽 안에 남았다 — {:?}", a.path);
+        assert_eq!(on(&a).as_deref(), Some("argos-0002"));
+        assert!(a.remembered.is_empty());
+
+        let wrote = a.write(|_| {}, |issues, _, _, by| {
+            let at = "2026-09-13T00:00:00Z";
+            issues.push(member("argos-0003", "argos-0001"));
+            Ok((vec![crate::model::JournalEntry::create("argos-0003", "멤버", at, by)], Touched { id: "argos-0003".into(), done: "만듦" }))
+        });
+        assert_eq!(wrote.as_deref(), Some("argos-0003"));
+        assert_eq!(a.path, [Seg::Epic("argos-0001".into())], "에픽 안의 줄인데 그리로 안 갔다");
+        assert_eq!(on(&a).as_deref(), Some("argos-0003"));
+        assert_eq!(a.remembered.len(), a.path.len());
+        assert_eq!(a.notice.as_deref(), Some("✓ 만듦 · argos-0003"));
+
+        a.key(key(KeyCode::Backspace));
+        assert_eq!(on(&a).as_deref(), Some("argos-0001"), "나오니 들어간 에픽에 안 섰다");
+    }
+
+    /// **거름망이 새 줄을 가리면 말한다.** 조용히 안 보이면 저장이 실패한 것으로
+    /// 읽힌다. 커서도 길도 거름망도 그대로다 — 사람이 건 것을 대신 풀지 않는다.
+    #[test]
+    fn a_filter_hiding_the_new_line_is_said_not_silent() {
+        let (_scratch, mut a) = writable("land-hidden");
+        a.key(key(KeyCode::Char('f')));
+        typed(&mut a, "type=epic");
+        let (path, cursor) = (a.path.clone(), a.cursor);
+
+        assert!(add_idea(&mut a, "argos-0002").is_some());
+        assert_eq!(a.issues.len(), 2, "쓰기가 안 닿았다");
+        assert_eq!((a.path.clone(), a.cursor), (path, cursor), "가려진 줄을 찾아 자리를 옮겼다");
+        assert_eq!(on(&a).as_deref(), Some("argos-0001"));
+        assert_eq!(a.filter_text.as_deref(), Some("type=epic"), "거름망을 대신 풀었다");
+        assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다"));
+    }
+
+    /// 닫는 함수가 댄 id 가 다시 읽은 목록에 없으면 **커서는 두고 그렇다고 말한다.**
+    #[test]
+    fn a_touched_id_missing_after_the_reread_moves_nothing() {
+        let (_scratch, mut a) = writable("land-missing");
+        let wrote = a.write(|_| {}, |_, _, _, _| Ok((vec![], Touched { id: "argos-9999".into(), done: "담김" })));
+        assert_eq!(wrote.as_deref(), Some("argos-9999"));
+        assert_eq!((a.cursor, on(&a).as_deref()), (0, Some("argos-0001")));
+        assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-9999 — 다시 읽은 목록에 없다"));
     }
 
     /// **쓰기 전에 띄운 다시 읽기는 버린다.** 늦게 닿으면 방금 쓴 것을 옛 화면으로
@@ -1894,10 +2065,12 @@ mod tests {
         let file = scratch.0.join(".moai/issues.jsonl");
         let before = std::fs::read_to_string(&file).unwrap();
         let stamp = a.stamp;
+        // 앞 쓰기의 알림이 남아 있으면 실패한 이번 쓰기가 담긴 것으로 읽힌다.
+        a.notice = Some("✓ 담김 · argos-0000".into());
 
         let out = a.write(|_| {}, |issues, _, _, _| {
             issues.push(Issue::new("argos-0002".into(), "t".into(), Kind::Idea, Status::new("없는칸"), "2026-09-13T00:00:00Z"));
-            Ok((vec![], ()))
+            Ok((vec![], Touched { id: "argos-0002".into(), done: "담김" }))
         });
         assert!(out.is_none(), "거절됐는데 썼다고 한다");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
@@ -1905,9 +2078,11 @@ mod tests {
         assert_eq!(a.stamp, stamp);
         let t = a.trouble.clone().unwrap_or_default();
         assert!(t.starts_with("쓰지 못했다") && t.contains("칸"), "{t}");
+        assert_eq!(a.notice, None, "실패했는데 앞 쓰기의 알림이 남았다");
+        assert_eq!(a.cursor, 0);
 
         // 여러 줄 거절문(고칠 명령까지 내는 것)은 배너 한 줄로 이어진다.
-        let out = a.write(|_| {}, |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> {
+        let out = a.write(|_| {}, |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> {
             Err("첫 줄\n      고칠 명령".into())
         });
         assert!(out.is_none());
@@ -1922,7 +2097,7 @@ mod tests {
     fn a_failed_write_survives_the_background_reread() {
         let (scratch, mut a) = writable("write-sticky");
         let file = scratch.0.join(".moai/issues.jsonl");
-        let out = a.write(|_| {}, |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> { Err("락".into()) });
+        let out = a.write(|_| {}, |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> { Err("락".into()) });
         assert!(out.is_none());
 
         let mut src = std::fs::read_to_string(&file).unwrap();
@@ -1946,7 +2121,7 @@ mod tests {
         let before = std::fs::read_to_string(&file).unwrap();
         a.user = Some("이름만".into());
 
-        let out = a.write(|_| {}, |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> {
+        let out = a.write(|_| {}, |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> {
             panic!("누군지 모르는데 닫는 함수를 불렀다")
         });
         assert!(out.is_none());
@@ -2042,8 +2217,11 @@ mod tests {
         let journal = repo.journal_of(&idea.id).unwrap();
         assert_eq!(journal.len(), 1);
         assert_eq!((journal[0].kind.as_str(), journal[0].title.as_deref(), journal[0].by.as_str()), ("create", Some("반짝 떠오른 것"), "레이븐"));
-        // 화면은 파일을 다시 읽은 것이다
+        // 화면은 파일을 다시 읽은 것이고, 커서는 만든 줄에 서며 알림은 하나다 — 폼은 닫기만
+        // 하고 뒤처리는 `write` 가 한다(moai-064q). idea 는 에픽에 안 드니 뿌리로 나온다.
         assert!(a.index.find(&idea.id).is_some(), "쓰고 다시 안 읽었다");
+        assert_eq!((on(&a), a.path.len()), (Some(idea.id.clone()), 0), "만든 줄에 안 섰다");
+        assert_eq!(a.notice, Some(format!("✓ 담김 · {}", idea.id)));
 
         // F2 도 담는다. 제목만으로 된다.
         jotting(&mut a, "하나 더");
@@ -2174,6 +2352,9 @@ mod tests {
         let made = ideas_in(&repo);
         assert_eq!(made.len(), 1, "받은 뒤에도 파일에 안 닿았다");
         assert_eq!((made[0].title.as_str(), made[0].body.as_deref()), ("떠오른 것", Some("본문")), "되돌린 폼에서 안 읽었다");
+        // 이어진 쓰기도 같은 뒤처리를 받는다 — Enter 가 알림을 걷은 뒤에 쓰기가 제 알림을 단다.
+        assert_eq!(on(&a), Some(made[0].id.clone()), "묻고 이어진 쓰기가 만든 줄에 안 섰다");
+        assert_eq!(a.notice, Some(format!("✓ 담김 · {}", made[0].id)));
         let journal = repo.journal_of(&made[0].id).unwrap();
         assert_eq!((journal[0].by.as_str(), journal[0].by_email.as_deref()), ("레이븐", Some("raven@example.com")));
         assert_eq!(a.user.as_deref(), Some("레이븐 (raven@example.com)"));

@@ -33,8 +33,60 @@ impl Drop for Scratch {
     }
 }
 
+/// **시험이 띄우는 프로세스는 시험을 돌리는 사람의 기계를 읽지 않는다.** 모든
+/// 실행이 여기서 시작한다 — 따로 막기로 한 시험만 막혀 있으면 새 시험이 그것을
+/// 잊는 날 결과가 기계를 따라 달라진다. json 훑기의 `skill status` 가 진짜
+/// `~/.claude/plugins` 를 읽던 것이 그렇게 났다(moai-kebc).
+///
+/// 걷는 것은 moai 가 실제로 기계에서 읽는 자리뿐이다.
+/// - `HOME`·`CLAUDE_CONFIG_DIR`·`CLAUDE_CODE_PLUGIN_CACHE_DIR` — `claude` 의 장부
+/// - git 전역·시스템 설정 — 사람 이름이 `MOAI_ACTOR` 다음에 여기서 온다.
+///   `GIT_CONFIG_GLOBAL` 을 주면 git 은 `~/.gitconfig` 도 `XDG_CONFIG_HOME` 도 안 본다.
+///   환경으로 넣는 설정(`GIT_CONFIG_COUNT`·`GIT_CONFIG_PARAMETERS`)과 저장소를
+///   가리키는 변수(`GIT_DIR`·`GIT_WORK_TREE`·…)도 걷는다 — git 훅이나
+///   `git -c … rebase -x 'cargo test'` 안에서 돌면 git 이 이것들을 내보내고,
+///   그러면 moai 의 `git config user.name` 이 바깥 사람의 이름을 읽는다
+/// - `MOAI_ACTOR`·`MOAI_NOW` — 셸에 내보내 둔 값이 새면 "사람을 못 찾는다" 와
+///   "시계를 고정하지 않았다" 를 보려던 시험이 조용히 딴것을 본다
+///
+/// 시험이 제 값을 주려면 이 뒤에 `.env` 로 덮는다. `PATH` 는 두고 간다 — moai 가
+/// git 을 부르고, `claude` 가 없는 자리가 필요한 시험은 `Claude` 가 따로 만든다.
+fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    // 빈 집 하나를 모든 시험이 함께 쓴다. moai 도 git 도 `HOME` 에 쓰지 않으니
+    // 비어 있는 채로 남고, `target/` 밑이라 기계에 부스러기를 흘리지 않는다.
+    let home = Path::new(env!("CARGO_TARGET_TMPDIR")).join("moai-cli-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut cmd = Command::new(program);
+    cmd.env("HOME", &home)
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env_remove("CLAUDE_CODE_PLUGIN_CACHE_DIR")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("MOAI_ACTOR")
+        .env_remove("MOAI_NOW");
+    for var in GIT_LEAKS {
+        cmd.env_remove(var);
+    }
+    cmd
+}
+
+/// 물려받으면 git 이 바깥 저장소나 바깥 설정을 보게 되는 변수들.
+const GIT_LEAKS: &[&str] = &[
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+];
+
 fn moai(dir: &Path, args: &[&str]) -> Output {
-    Command::new(BIN)
+    isolated(BIN)
         .args(args)
         .current_dir(dir)
         .env("MOAI_ACTOR", "테스터 (tester@example.com)")
@@ -203,7 +255,7 @@ fn survives_a_closed_pipe() {
     for n in 0..50 {
         ok(s.path(), &["add", &format!("이슈 {n}"), "-q"]);
     }
-    let out = Command::new("bash")
+    let out = isolated("bash")
         .arg("-c")
         .arg(format!("'{BIN}' show | head -1 >/dev/null; exit ${{PIPESTATUS[0]}}"))
         .current_dir(s.path())
@@ -226,7 +278,7 @@ fn colour_turns_itself_off_when_not_a_terminal() {
     ok(s.path(), &["init", "argos"]);
     ok(s.path(), &["add", "제목", "-q"]);
     let run = |args: &[&str]| {
-        Command::new(BIN)
+        isolated(BIN)
             .args(args)
             .current_dir(s.path())
             .env_remove("NO_COLOR")
@@ -247,7 +299,7 @@ fn concurrent_adds_all_survive() {
     let n = 8;
     let kids: Vec<_> = (0..n)
         .map(|i| {
-            Command::new(BIN)
+            isolated(BIN)
                 .args(["add", &format!("동시 {i}"), "-q"])
                 .current_dir(s.path())
                 .env("MOAI_ACTOR", "테스터 (tester@example.com)")
@@ -537,7 +589,7 @@ fn stale_finds_what_rots_in_a_column() {
     let id = add(s.path(), &["오래된 리뷰"]);
     ok(s.path(), &["mv", &id, "review"]);
 
-    let later = Command::new(BIN)
+    let later = isolated(BIN)
         .args(["show", "-s", "review", "--stale", "3"])
         .current_dir(s.path())
         .env("MOAI_NOW", "2026-09-20T04:12:03Z")
@@ -821,7 +873,7 @@ fn tree_is_refused_on_a_single_issue() {
 // ── S4 — moai status ─────────────────────────────────────────────────
 
 fn at(dir: &Path, now: &str, args: &[&str]) -> Output {
-    Command::new(BIN)
+    isolated(BIN)
         .args(args)
         .current_dir(dir)
         .env("MOAI_ACTOR", "테스터 (tester@example.com)")
@@ -929,7 +981,7 @@ fn status_is_one_screen_with_everything() {
 
 fn from_stdin(dir: &Path, args: &[&str], input: &str) -> Output {
     use std::io::Write as _;
-    let mut child = Command::new(BIN)
+    let mut child = isolated(BIN)
         .args(args)
         .current_dir(dir)
         .env("MOAI_ACTOR", "테스터 (tester@example.com)")
@@ -1159,6 +1211,104 @@ fn every_command_still_speaks_json() {
     let bulk = from_stdin(s.path(), &["add", "--from", "-", "--json"], "# 가\n- 나\n");
     assert!(bulk.status.success());
     one_json_value(&String::from_utf8(bulk.stdout).unwrap());
+}
+
+/// **시험을 돌리는 사람의 `~/.claude` 와 git 설정이 시험에 새지 않는다.**
+///
+/// 새는 것은 시험 프로세스가 물려받은 환경이라, 그 환경을 바꿔 보려면 시험을
+/// 한 겹 더 띄워야 한다 — 병렬로 도는 시험 안에서 `set_var` 는 남의 시험까지
+/// 바꾼다. 그래서 이 시험은 제 바이너리를 **자기 자신만** 돌리게 다시 부른다.
+/// 바깥은 가짜 "진짜 집" 에 moai 가 심긴 장부와 사람 이름을 심고, 그것이
+/// 샐 때는 실제로 보인다는 것부터 확인한다 — 안 보이는 표지로는 아무것도 못 증명한다.
+#[test]
+fn tests_do_not_read_the_runners_home() {
+    const PROBE: &str = "MOAI_CLI_LEAK_PROBE";
+    let skill_status = |dir: &Path| String::from_utf8(moai(dir, &["skill", "status", "--json"]).stdout).unwrap();
+
+    // 안쪽: 물려받은 환경이 새는 집을 가리킨다. 공용 도우미로 부르면 안 보여야 한다.
+    if let Some(repo) = std::env::var_os(PROBE) {
+        let repo = PathBuf::from(repo);
+        let json = skill_status(&repo);
+        assert!(json.contains("\"installs\":[]"), "시험이 사람의 장부를 읽었다\n{json}");
+        // 제 사람을 안 주면 git 에서 찾는다. 새는 집의 git 설정이나 물려받은
+        // `MOAI_ACTOR` 가 보이면 여기서 이름이 붙어 쓰기가 지나간다.
+        let bare = isolated(BIN).args(["add", "누구냐"]).current_dir(&repo).output().unwrap();
+        // 다른 까닭으로 넘어져도 초록이 되지 않게, 사람을 못 찾아 멈춘 것인지까지 본다.
+        assert!(!bare.status.success(), "시험이 사람의 이름을 읽었다\n{}", text(&bare));
+        assert!(text(&bare).contains("git 사용자 정보가 없다"), "사람을 못 찾아 멈춘 것이 아니다\n{}", text(&bare));
+        return;
+    }
+
+    let s = init("leakprobe");
+    let root = s.path().canonicalize().unwrap();
+    let market = field(&ok(s.path(), &["skill", "install", "--dry-run", "--json"]), "market");
+    let leak = Scratch::new("leakprobe-home");
+    let ledger = |plugins: &Path| {
+        std::fs::create_dir_all(plugins).unwrap();
+        std::fs::write(
+            plugins.join("installed_plugins.json"),
+            format!(
+                "{{\"version\":2,\"plugins\":{{\"moai@{market}\":[{{\"scope\":\"local\",\"projectPath\":\"{}\",\"installPath\":\"/없는/자리\",\"version\":\"0.0.1\"}}]}}}}",
+                root.display()
+            ),
+        )
+        .unwrap();
+    };
+    let home = leak.path().join("home");
+    let config = leak.path().join("config");
+    let cache = leak.path().join("cache");
+    ledger(&home.join(".claude/plugins"));
+    ledger(&config.join("plugins"));
+    ledger(&cache);
+    let gitconfig = "[user]\n\tname = 새는 사람\n\temail = leak@example.com\n";
+    std::fs::write(home.join(".gitconfig"), gitconfig).unwrap();
+    std::fs::create_dir_all(leak.path().join("xdg/git")).unwrap();
+    std::fs::write(leak.path().join("xdg/git/config"), gitconfig).unwrap();
+    let leaky: [(&str, &Path); 4] = [
+        ("HOME", &home),
+        ("CLAUDE_CONFIG_DIR", &config),
+        ("CLAUDE_CODE_PLUGIN_CACHE_DIR", &cache),
+        ("XDG_CONFIG_HOME", &leak.path().join("xdg")),
+    ];
+
+    // 표지가 샐 때 실제로 보이는가. 장부는 자리마다 따로 본다.
+    for (var, at) in &leaky[..3] {
+        let out = Command::new(BIN)
+            .args(["skill", "status", "--json"])
+            .current_dir(s.path())
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env(var, at)
+            .output()
+            .unwrap();
+        let json = String::from_utf8(out.stdout).unwrap();
+        assert!(!json.contains("\"installs\":[]"), "{var} 에 심은 장부가 새도 안 보인다 — 표지가 헛것이다\n{json}");
+    }
+    for (var, at) in [leaky[0], leaky[3]] {
+        let out = Command::new(BIN)
+            .args(["add", "누구냐", "-q"])
+            .current_dir(s.path())
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            // 기계의 `/etc/gitconfig` 에 이름이 있으면 심은 것 없이도 지나가 표지를 못 잰다.
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env(var, at)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{var} 에 심은 git 설정이 새도 안 보인다 — 표지가 헛것이다\n{}", text(&out));
+    }
+
+    let mut child = Command::new(std::env::current_exe().unwrap());
+    child.args(["--exact", "tests_do_not_read_the_runners_home", "--nocapture"]).env(PROBE, s.path());
+    for (var, at) in &leaky {
+        child.env(var, at);
+    }
+    child.env("MOAI_ACTOR", "새는 사람 (leak@example.com)").env("GIT_CONFIG_GLOBAL", home.join(".gitconfig"));
+    let out = child.output().unwrap();
+    let said = text(&out);
+    assert!(out.status.success(), "안쪽 시험이 실패했다\n{said}");
+    // 안쪽이 이름을 못 찾아 돌지 않고 초록으로 끝나면 이 시험은 아무것도 안 봤다.
+    assert!(said.contains("1 passed"), "안쪽 시험이 돌지 않았다\n{said}");
 }
 
 // ── 리뷰 미처리 건 정리 ──────────────────────────────────────────────
@@ -1737,7 +1887,7 @@ fn the_bare_call_speaks_json_too() {
 /// 저장소를 요구하지 않으므로 전역·시스템 설정까지 막아야 사람을 못 찾는
 /// 상황을 실제로 만들 수 있다.
 fn with_git_config(dir: &Path, cfg: &str, args: &[&str]) -> Output {
-    Command::new(BIN)
+    isolated(BIN)
         .args(args)
         .current_dir(dir)
         .env_remove("MOAI_ACTOR")
@@ -1866,7 +2016,7 @@ fn every_journalling_command_asks_who_and_takes_an_answer() {
 fn a_dry_run_does_not_ask_who_you_are() {
     let s = init("dryrunwho");
     use std::io::Write as _;
-    let mut child = Command::new(BIN)
+    let mut child = isolated(BIN)
         .args(["add", "--from", "-", "--dry-run"])
         .current_dir(s.path())
         .env_remove("MOAI_ACTOR")
@@ -3328,7 +3478,7 @@ fn hook_in(s: &Scratch, run_in: &Path, event: &str, input: &str) -> Output {
     use std::io::Write as _;
     let tmp = s.path().join("hooktmp");
     std::fs::create_dir_all(&tmp).unwrap();
-    let mut child = Command::new(BIN)
+    let mut child = isolated(BIN)
         .args(["hook", event])
         .current_dir(run_in)
         .env("MOAI_ACTOR", "테스터 (tester@example.com)")
@@ -3560,7 +3710,7 @@ fn the_hook_works_where_stdin_says() {
     use std::io::Write as _;
     let tmp = s.path().join("hooktmp");
     std::fs::create_dir_all(&tmp).unwrap();
-    let mut child = Command::new(BIN)
+    let mut child = isolated(BIN)
         .args(["hook", "user-prompt-submit"])
         .current_dir(elsewhere.path())
         .env("MOAI_NOW", NOW)
@@ -3887,6 +4037,17 @@ fn reviews_are_judged_through_the_contract() {
 // `claude` 와 `/usr/bin:/bin` 으로만 둔다. 가짜는 받은 인자를 적어 두고 0 을
 // 낸다. 이 시험이 사람의 등록을 걷는 날이 오면 그것이 제일 나쁜 버그다.
 
+/// **실행할 파일은 이 프로세스에서 쓰지 않는다 — `cp` 에게 쓰게 한다.** 이 프로세스가
+/// 쓰기 fd 를 여는 순간 옆 스레드의 시험이 fork 하면 그 자식이 fd 를 물려받고,
+/// 자식이 exec 할 때까지 그 inode 에 쓰는 이가 남아 Linux 가 exec 을 ETXTBSY 로
+/// 거절한다. 임시 이름에 쓰고 `rename` 해도 **inode 가 같아** 소용없다 — 재어 보니
+/// 복사 2,400 번에 `fs::copy` 345 번, 복사+rename 294 번, `cp` 0 번 터졌다.
+/// 쓰기 fd 가 `cp` 안에만 살면 이 프로세스의 fork 가 그것을 물려받을 길이 없다.
+fn place_exe(src: &Path, dst: &Path) {
+    let out = Command::new("cp").arg(src).arg(dst).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+}
+
 struct Claude {
     home: Scratch,
     bin: PathBuf,
@@ -3904,14 +4065,17 @@ impl Claude {
         let bin = home.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let log = home.path().join("claude.log");
-        let script = bin.join("claude");
+        // 원본은 `bin` 밖에 쓰고 `place_exe` 로 내놓는다 — 이 프로세스가 쓴 inode 를
+        // moai 가 exec 하면 옆 시험의 fork 와 겹쳐 ETXTBSY 가 날 수 있다.
+        let source = home.path().join("claude.sh");
         // 패턴을 따옴표로 싼다 — 안 싸면 `plugin uninstall` 의 빈칸이 패턴을 둘로
         // 갈라 문법 오류가 나고, 가짜가 **모든** 부름에 비영으로 끝난다.
         let fail = word.map(|w| format!("case \"$*\" in *\"{w}\"*) exit 1;; esac\n")).unwrap_or_default();
-        std::fs::write(&script, format!("#!/bin/sh\necho \"$@\" >> \"{}\"\n{fail}exit 0\n", log.display()))
+        std::fs::write(&source, format!("#!/bin/sh\necho \"$@\" >> \"{}\"\n{fail}exit 0\n", log.display()))
             .unwrap();
         use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+        place_exe(&source, &bin.join("claude"));
         std::fs::create_dir_all(home.path().join(".claude/plugins")).unwrap();
         // moai 가 PATH 에서 찾는 것은 `sh` 뿐이다 (`command -v` 로 이름을 찾는다).
         let sys = home.path().join("sysbin");
@@ -4064,7 +4228,7 @@ fn skill_status_from_another_binary_keeps_a_current_install_current() {
 
     let copy = c.home.path().join("otherbin/moai");
     std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
-    std::fs::copy(BIN, &copy).unwrap();
+    place_exe(Path::new(BIN), &copy);
     let out = c.command(&copy, s.path(), &["skill", "status"], true).output().unwrap();
     assert!(out.status.success(), "{}", text(&out));
     let said = text(&out);
@@ -4342,12 +4506,12 @@ fn an_empty_note_is_told_apart_from_a_missing_one() {
 
 /// 사람의 git 설정 없이 git 을 돌린다. 커밋에 이름이 필요하니 여기서 준다.
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    // `isolated` 로 띄운다 — git 훅 안에서 시험이 돌 때 물려받은 `GIT_DIR` 이 남으면
+    // 여기서의 `git commit` 이 바깥 저장소에 떨어진다.
+    let out = isolated("git")
         .args(["-c", "user.name=테스터", "-c", "user.email=tester@example.com", "-c", "init.defaultBranch=main"])
         .args(args)
         .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
         .output()
         .expect("git 을 실행하지 못했다");
     assert!(out.status.success(), "git {args:?} 가 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
@@ -4356,7 +4520,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 
 /// 시계를 달리 두고 돌린다 — 옆 워크트리의 쓰기가 **더 늦게** 떨어진 것을 흉내 낸다.
 fn ok_at(dir: &Path, now: &str, args: &[&str]) -> String {
-    let out = Command::new(BIN)
+    let out = isolated(BIN)
         .args(args)
         .current_dir(dir)
         .env("MOAI_ACTOR", "테스터 (tester@example.com)")

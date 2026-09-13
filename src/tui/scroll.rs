@@ -193,6 +193,10 @@ mod tests {
                 s.key(key(k));
                 assert_eq!(s.offset(), 0, "{len}줄짜리가 {k:?} 에 굴렀다");
             }
+            // 키가 아닌 길(몇 줄 굴리기·커서 따라가기)도 같은 끝을 본다
+            s.by(len as isize);
+            s.reveal(len - 1);
+            assert_eq!(s.offset(), 0, "{len}줄짜리가 by·reveal 에 굴렀다");
             assert_eq!(s.mark(), None, "{len}줄짜리에 더 있다고 한다");
         }
     }
