@@ -257,6 +257,54 @@ mod tests {
         assert_eq!(shown(&e), "ab|\ncd");
         press(&mut e, KeyCode::Right);
         assert_eq!(shown(&e), "ab\n|cd");
+
+        // 글의 양 끝에서는 넘을 줄이 없다. 서 있되 칸이 먹는다 — 흘려보내면 든 쪽이
+        // → 를 "옆 칸으로" 로 읽는다
+        press(&mut e, KeyCode::End);
+        assert!(press(&mut e, KeyCode::Right), "끝 줄 끝의 → 가 샜다");
+        assert_eq!(shown(&e), "ab\ncd|");
+        press(&mut e, KeyCode::Up);
+        press(&mut e, KeyCode::Home);
+        assert!(press(&mut e, KeyCode::Left), "첫 줄 머리의 ← 가 샜다");
+        assert_eq!(shown(&e), "|ab\ncd");
+    }
+
+    /// ↑↓ 가 겨누는 칸은 이모지·ZWJ 이모지를 **두 칸**으로 센다. 두 칸 글자의 오른쪽
+    /// 반을 겨누면 그 글자 앞에 선다. 탭은 줄에 못 들어오므로 칸 수에도 없다.
+    #[test]
+    fn the_goal_column_counts_emoji_as_two_and_tabs_as_nothing() {
+        let mut e = Editor::new("😀😀x\n👨\u{200d}👩z\na\tbcdef");
+        press(&mut e, KeyCode::Home);
+        for _ in 0..3 {
+            press(&mut e, KeyCode::Right);
+        }
+        assert_eq!(shown(&e), "😀😀x\n👨\u{200d}👩z\nabc|def", "걸러진 탭이 한 걸음을 먹었다");
+        press(&mut e, KeyCode::Up);
+        assert_eq!(shown(&e), "😀😀x\n👨\u{200d}👩z|\nabcdef", "ZWJ 이모지를 두 칸으로 안 셌다");
+        press(&mut e, KeyCode::Up);
+        assert_eq!(shown(&e), "😀|😀x\n👨\u{200d}👩z\nabcdef", "3 칸은 둘째 이모지의 오른쪽 반이다");
+        press(&mut e, KeyCode::Down);
+        press(&mut e, KeyCode::Down);
+        assert_eq!(shown(&e), "😀😀x\n👨\u{200d}👩z\nabc|def");
+
+        press(&mut e, KeyCode::Home);
+        press(&mut e, KeyCode::Right);
+        press(&mut e, KeyCode::Up);
+        assert_eq!(shown(&e), "😀😀x\n|👨\u{200d}👩z\nabcdef", "1 칸은 첫 글자의 오른쪽 반이다");
+    }
+
+    /// 칸이 글보다 크면 **어느 키로도 안 구른다.** 줄이 다 보이고 커서는 제 줄에 선다.
+    #[test]
+    fn a_box_taller_than_the_text_never_scrolls() {
+        let mut e = Editor::new("a\nb\nc");
+        for code in [KeyCode::PageDown, KeyCode::End, KeyCode::Down, KeyCode::PageUp, KeyCode::Up, KeyCode::Home] {
+            assert!(press(&mut e, code), "{code:?} 를 칸이 안 먹었다");
+            e.fit(10);
+            assert_eq!((e.scroll().offset(), e.scroll().mark()), (0, None), "{code:?} 에 굴렀다");
+            let v = e.view(5, 10);
+            assert_eq!(v.lines, vec!["a", "b", "c"], "{code:?}");
+            assert_eq!(v.cursor.map(|(_, y)| y), Some(e.row), "{code:?}: 커서가 제 줄에 없다");
+        }
     }
 
     /// ↑↓ 는 **처음 겨눈 칸**을 짧은 줄 너머로 가져간다. 한글은 두 칸이라 한 칸

@@ -454,6 +454,38 @@ mod tests {
         assert_eq!(typed("😀").view(10), View { text: "😀", cursor: 2 });
     }
 
+    /// **폭은 칸으로, 걸음은 글자로 센다.** 한글·이모지·깃발·ZWJ 이모지는 두 칸에
+    /// 한 걸음, 결합 악센트는 앞 글자에 붙어 한 칸에 한 걸음이다. 탭은 칸에 못
+    /// 들어오므로 폭에도 걸음에도 없다 — 들어오면 터미널마다 폭이 달라 커서 칸을
+    /// 셀 수 없다. 칸 수는 커서를 그리는 자(`view`)와 줄 사이를 겨누는 자
+    /// (`column`·`seek`)가 같아야 한다.
+    #[test]
+    fn width_counts_cells_and_steps_count_glyphs() {
+        for (s, cells, glyphs) in [
+            ("abc", 3, 3),
+            ("가나", 4, 2),
+            ("😀", 2, 1),
+            ("👨\u{200d}👩", 2, 1),
+            ("🇰🇷", 2, 1),
+            ("e\u{301}", 1, 1),
+            ("a\tb", 2, 2),
+            ("가😀\tx", 5, 3),
+        ] {
+            let mut i = Input::new(s);
+            assert_eq!((i.column(), i.view(40).cursor), (cells, cells), "{s:?}: 끝의 칸");
+            for step in 1..=glyphs {
+                assert!(press(&mut i, KeyCode::Left));
+                assert_eq!(i.at_start(), step == glyphs, "{s:?}: ← {step} 번");
+            }
+            i.seek(cells);
+            assert!(i.at_end(), "{s:?}: {cells} 칸을 겨눴는데 끝이 아니다");
+            for step in 1..=glyphs {
+                assert!(press(&mut i, KeyCode::Backspace));
+                assert_eq!(i.text().is_empty(), step == glyphs, "{s:?}: Backspace {step} 번");
+            }
+        }
+    }
+
     /// 어떤 글, 어떤 칸, 어떤 커서에서도: 조각은 칸을 넘지 않고, 경계에서
     /// 잘리며, 커서는 칸 안에 서고 조각 속 제 자리를 가리킨다.
     #[test]
@@ -479,6 +511,148 @@ mod tests {
                 }
                 press(&mut i, KeyCode::Right);
             }
+        }
+    }
+
+    /// `src/tui` 에서 조각이 **아닌** 파일과 그 까닭. 여기 없는 파일은 전부 조각으로
+    /// 보고 [`components_know_neither_the_terminal_nor_the_store`] 가 훑는다 — 새
+    /// 파일이 조각이 아니면 이유를 적어 여기 더한다. 목록을 조각 쪽으로 두면 새 조각이
+    /// 목록에 안 올라 조용히 안 훑인다.
+    const NOT_COMPONENTS: [(&str, &str); 2] =
+        [("mod.rs", "App — 저장소(Repo)를 들고 키를 칸에 나눈다"), ("draw.rs", "그림 — Frame 에 찍는다")];
+
+    /// 조각 코드가 **밖으로 뻗는 길**(소문자로 시작하는 `::` 경로) 가운데 허락되지 않은 것.
+    ///
+    /// 금지 목록이 아니라 **허락 목록**이다. `Frame`·`Repo` 를 막는 목록은
+    /// `ratatui::Frame` 을 한 줄에 풀어 쓰거나 `super::` 로 돌아 들어오는 길을 못
+    /// 막는다. 허락하는 것은 키 모양(`crossterm::event` 의 **타입**만 — `read`·`poll`
+    /// 은 터미널을 읽는다), 폭 셈(`CellWidth`·`unicode_*`·`crate::text`), 옆 조각,
+    /// 그리고 부수효과 없는 `std` 다.
+    fn foreign(code: &str, components: &[&str]) -> Vec<String> {
+        const PRIMITIVES: [&str; 18] = [
+            "self", "char", "str", "bool", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128",
+            "isize", "f32", "f64",
+        ];
+        const IMPURE_STD: [&str; 7] = ["io", "fs", "env", "process", "net", "thread", "time"];
+        paths(code)
+            .into_iter()
+            .filter(|p| {
+                let mut seg = p.trim_start_matches("::").split("::");
+                let (root, second) = (seg.next().unwrap_or(""), seg.next().unwrap_or(""));
+                let allowed = match root {
+                    r if r.starts_with(char::is_uppercase) || PRIMITIVES.contains(&r) => true,
+                    "ratatui" => {
+                        p == "ratatui::buffer::CellWidth"
+                            || p.strip_prefix("ratatui::crossterm::event::").is_some_and(|t| t.starts_with(char::is_uppercase))
+                    }
+                    "unicode_segmentation" | "unicode_width" => true,
+                    "crate" => second == "text",
+                    "super" => components.contains(&second),
+                    "std" | "core" | "alloc" => !IMPURE_STD.contains(&second),
+                    _ => false,
+                };
+                !allowed
+            })
+            .collect()
+    }
+
+    /// 코드에 적힌 `::` 경로를 전부 편다. `use a::{B, c::D}` 는 `a::B`·`a::c::D` 둘이다 —
+    /// 묶음을 안 펴면 `use ratatui::{Frame, ..}` 가 `ratatui::` 하나로만 보인다.
+    fn paths(code: &str) -> Vec<String> {
+        let part = |c: char| c.is_alphanumeric() || c == '_' || c == ':';
+        let mut out = Vec::new();
+        let mut rest = code;
+        while let Some(start) = rest.find(part) {
+            rest = &rest[start..];
+            let (run, after) = rest.split_at(rest.find(|c| !part(c)).unwrap_or(rest.len()));
+            rest = after;
+            if !run.contains("::") || (run.ends_with("::") && after.starts_with('<')) {
+                continue; // 경로가 아니거나 `collect::<T>` 의 turbofish
+            }
+            if run.ends_with("::") && after.starts_with('{') {
+                let (mut depth, mut from, mut items) = (0, 1, Vec::new());
+                for (k, c) in after.char_indices() {
+                    match c {
+                        '{' => depth += 1,
+                        ',' if depth == 1 => {
+                            items.push(&after[from..k]);
+                            from = k + 1;
+                        }
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                items.push(&after[from..k]);
+                                rest = &after[k + 1..];
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                for item in items.iter().map(|i| i.trim()).filter(|i| !i.is_empty()) {
+                    out.extend(paths(&format!("{run}{item}")));
+                }
+                continue;
+            }
+            out.push(run.to_string());
+        }
+        out
+    }
+
+    /// 허락 목록이 제 일을 한다 — 풀어 쓴 `Frame`, 묶음 속 `Frame`, 저장소, 터미널을
+    /// 읽는 함수, `super::` 로 돌아 든 `App` 을 잡고, 말로 적은 것·키 타입·옆 조각·
+    /// turbofish·부수효과 없는 `std` 는 그냥 둔다. 이게 없으면 훑기가 늘 비어 나와도
+    /// 아무도 모른다.
+    #[test]
+    fn the_purity_scan_catches_what_it_should() {
+        let planted = "use ratatui::Frame;\n\
+            use ratatui::{Frame, crossterm::event::{KeyCode, read}};\n\
+            fn f(_: &crate::store::Repo) { std::io::stdout(); }\n\
+            use super::App;\n\
+            use super::scroll::Scroll;\n\
+            use ratatui::crossterm::event::KeyEvent;\n\
+            let v = xs.iter().map(char::is_whitespace).collect::<Vec<_>>();\n\
+            std::mem::take(&mut v); KeyCode::Up; usize::MAX;";
+        assert_eq!(
+            foreign(planted, &["scroll"]),
+            [
+                "ratatui::Frame",
+                "ratatui::Frame",
+                "ratatui::crossterm::event::read",
+                "crate::store::Repo",
+                "std::io::stdout",
+                "super::App"
+            ]
+        );
+    }
+
+    /// **조각은 터미널도 저장소도 모른다**(moai-0k1p). 조각이 `Frame` 이나 `Repo` 를
+    /// 알기 시작하면 `KeyEvent` 를 넣고 상태를 보는 시험이 곧 못 쓰게 되고, 그러면
+    /// 다음 화면은 또 손으로 짠다. 그 첫 줄(`use`)이 들어오는 순간 여기서 이름을 대며
+    /// 멈춘다. 시험 모듈은 안 훑는다 — 시험이 무엇을 쓰든 조각 코드의 계약은 아니다.
+    #[test]
+    fn components_know_neither_the_terminal_nor_the_store() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/tui");
+        let mut files: Vec<String> = std::fs::read_dir(dir)
+            .expect("src/tui 를 못 읽었다")
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter(|n| n.ends_with(".rs") && !NOT_COMPONENTS.iter().any(|(f, _)| f == n))
+            .collect();
+        files.sort();
+        for known in ["edit.rs", "input.rs", "scroll.rs"] {
+            assert!(files.iter().any(|f| f == known), "{known} 가 훑기에서 빠졌다: {files:?}");
+        }
+        let names: Vec<&str> = files.iter().map(|f| f.trim_end_matches(".rs")).collect();
+        for f in &files {
+            let src = std::fs::read_to_string(format!("{dir}/{f}")).expect("조각 파일을 못 읽었다");
+            let body = src.split("\n#[cfg(test)]\nmod tests").next().unwrap_or("");
+            let code: Vec<&str> = body.lines().map(|l| l.split("//").next().unwrap_or("")).collect();
+            let bad = foreign(&code.join("\n"), &names);
+            assert!(
+                bad.is_empty(),
+                "src/tui/{f} 가 조각 밖으로 뻗는다: {bad:?}\n\
+                 조각이면 KeyEvent 와 잰 값만 받게 고치고, 조각이 아니면 NOT_COMPONENTS 에 까닭과 함께 적는다"
+            );
         }
     }
 }
