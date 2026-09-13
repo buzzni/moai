@@ -152,7 +152,8 @@ pub struct App {
     /// 가 읽기 **전에** 잰 것). 꺼져 있으면 비었다.
     watched: Vec<(std::path::PathBuf, Stamp)>,
     /// 스레드에서 짓고 있는 다시 읽기. 끝나면 [`App::follow`] 가 받아 들인다.
-    pending: Option<std::sync::mpsc::Receiver<crate::fail::R<Fresh>>>,
+    /// 손잡이는 스레드가 죽었을 때 그 패닉을 루프로 되던지려고 든다.
+    pending: Option<(std::sync::mpsc::Receiver<crate::fail::R<Fresh>>, std::thread::JoinHandle<()>)>,
     /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임
     /// `Filter::matches` 를 돌리면 `Where::of` 가 프레임마다 지도를 다시 만든다.
     keep: Vec<bool>,
@@ -446,16 +447,23 @@ impl App {
     /// 하나가 끝나기 전에 또 띄우면 몰아 쓰는 동안 스레드가 쌓인다. 끝난 것을 들인
     /// 뒤에도 파일이 또 바뀌었으면(표식은 읽기 전에 쟀다) 다음 걸음이 다시 띄운다.
     pub fn follow(&mut self) {
-        if let Some(rx) = &self.pending {
+        if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Ok(fresh) => {
                     self.pending = None;
                     self.receive(fresh);
                 }
-                // 짓던 스레드가 죽었다. 표식을 안 올렸으므로 다음 걸음에 다시 띄운다.
+                // 짓던 스레드가 죽었다. **이어 돌지 않는다** — ratatui 가 `try_init` 에서
+                // 건 패닉 훅은 어느 스레드의 패닉에도 돌아 raw mode 와 대체 화면을 이미
+                // 걷었다. 여기서 배너만 달고 이어 돌면 걷힌 터미널에 그리고, 키는 Enter
+                // 를 쳐야 들어온다. 루프에서 난 패닉과 같게 되던져 끝낸다.
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.pending = None;
+                    if let Some((_, handle)) = self.pending.take()
+                        && let Err(payload) = handle.join()
+                    {
+                        std::panic::resume_unwind(payload);
+                    }
                     self.trouble = Some("다시 읽던 중에 멈췄다 — 다음 걸음에 다시 읽는다".into());
                 }
             }
@@ -469,10 +477,10 @@ impl App {
             let repo = repo.clone();
             let worktree = self.worktree;
             // 받는 쪽이 사라졌으면(F5 로 버렸으면) 보내기가 실패한다 — 버린 것이라 그대로 둔다.
-            std::thread::spawn(move || {
+            let handle = std::thread::spawn(move || {
                 let _ = tx.send(prepare(&repo, worktree));
             });
-            self.pending = Some(rx);
+            self.pending = Some((rx, handle));
         }
     }
 
