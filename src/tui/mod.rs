@@ -4,6 +4,7 @@
 //! 그림은 `TestBackend` 로 시험된다 — 둘 다 TTY 를 켜지 않는다.
 
 pub mod draw;
+pub mod input;
 
 use crate::config::Config;
 use crate::model::Issue;
