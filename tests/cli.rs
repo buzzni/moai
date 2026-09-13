@@ -5054,13 +5054,13 @@ fn project_add_ls_rm_round_trip_outside_any_moai() {
 
     let ls = project_ok(home.path(), &config, &["project", "ls"]);
     let lines: Vec<&str> = ls.lines().collect();
-    assert!(lines[0].contains(&argos_real.display().to_string()) && lines[0].ends_with(".moai 있음"), "{ls}");
+    assert!(lines[0].contains(&argos_real.display().to_string()) && lines[0].ends_with("✓ done 0"), "{ls}");
     assert!(lines[1].starts_with("bare ") && lines[1].ends_with("init 전"), "{ls}");
 
     let json = project_ok(home.path(), &config, &["project", "ls", "--json"]);
     one_json_value(&json);
     assert!(json.contains(&format!("\"config\":\"{}\"", config.display())), "{json}");
-    assert!(json.contains("\"state\":\"initialized\"}"), "{json}");
+    assert!(json.contains("\"state\":\"initialized\",\"counts\":{"), "{json}");
     assert!(
         json.contains(&format!(
             "{{\"name\":\"bare\",\"path\":\"{}\",\"state\":\"uninitialized\"}}",
@@ -5162,6 +5162,60 @@ fn project_rm_takes_a_vanished_dir() {
     let again = project_ok(home.path(), &config, &["project", "rm", "gone", "--json"]);
     assert!(again.contains("\"removed\":[]"), "{again}");
     assert!(project_ok(home.path(), &config, &["project", "ls"]).contains("kept"));
+}
+
+/// `ls` 는 프로젝트를 **한눈 보기와 같은 길로 연다.** 연 것은 칸별 수를 한눈 보기와 같은
+/// 자로 내고(에픽은 안 센다), 못 읽는 줄은 그 줄 곁에 센다. 설정이나 스냅샷이 깨진
+/// 것은 "있음" 이 아니라 `못 읽는다` 한 줄로 서고, 나머지는 그대로 보이며 0 으로 끝난다.
+///
+/// `state` 낱말은 옛 것 그대로다 — 연 것은 `initialized`. 더한 것은 키뿐이다.
+#[test]
+fn project_ls_counts_each_column_and_names_a_broken_moai() {
+    let s = Scratch::new("project-ls-counts");
+    let (good, badcfg, badsnap, bare, out) =
+        (dir_in(&s, "good"), dir_in(&s, "badcfg"), dir_in(&s, "badsnap"), dir_in(&s, "bare"), dir_in(&s, "out"));
+    ok(&good, &["init", "argos"]);
+    add(&good, &["남은 일"]);
+    let picked = add(&good, &["집은 일"]);
+    ok(&good, &["mv", &picked, "in_progress"]);
+    ok(&good, &["epic", "add", "묶음"]);
+    let mut snap = issues(&good);
+    snap.push_str("못 읽는 줄\n");
+    std::fs::write(good.join(".moai/issues.jsonl"), snap).unwrap();
+    ok(&badcfg, &["init", "argos"]);
+    std::fs::write(badcfg.join(".moai/config.toml"), "prefix = \"BAD!\"\n").unwrap();
+    ok(&badsnap, &["init", "argos"]);
+    std::fs::write(badsnap.join(".moai/issues.jsonl"), b"\xff\xfe\n").unwrap();
+    // 칸 이름도 남의 설정에서 온다 — 제어문자가 든 칸이 목록 화면을 다시 칠하면 안 된다.
+    let odd = dir_in(&s, "odd");
+    ok(&odd, &["init", "argos"]);
+    std::fs::write(odd.join(".moai/config.toml"), "prefix = \"argos\"\nstatuses = \"todo,\u{1b}[2Jwip,done\"\n").unwrap();
+    let cfg = registry(&s, &[&good, &badcfg, &badsnap, &bare, &odd]);
+
+    let ls = project_ok(&out, &cfg, &["project", "ls"]);
+    let row = |name: &str| ls.lines().find(|l| l.starts_with(&format!("{name} "))).unwrap_or_else(|| panic!("{name} 줄이 없다\n{ls}"));
+    assert!(row("good").contains("· todo 1  ▸ in_progress 1  ? review 0  ✓ done 0"), "{ls}");
+    assert!(row("good").ends_with("! 읽을 수 없는 줄 1개"), "{ls}");
+    assert!(row("badcfg").contains("! 못 읽는다 — ") && row("badcfg").contains("prefix"), "{ls}");
+    assert!(row("badsnap").contains("! 못 읽는다 — ") && row("badsnap").contains("issues.jsonl"), "{ls}");
+    assert!(!ls.contains(".moai 있음"), "깨진 .moai 를 있음으로 접었다\n{ls}");
+    assert!(row("bare").ends_with("init 전"), "{ls}");
+    assert!(row("odd").contains("[2Jwip 0"), "{ls}");
+    assert!(!ls.contains('\u{1b}'), "남의 설정이 화면을 다시 칠했다\n{ls:?}");
+    // 한눈 보기와 같은 자로 센다 — 두 화면의 수가 어긋나면 어느 쪽을 믿을지 모른다.
+    assert!(ok_with(&out, &cfg, &["status"]).contains("todo 1    ▸ in_progress 1"));
+
+    let json = project_ok(&out, &cfg, &["project", "ls", "--json"]);
+    one_json_value(&json);
+    let good_row = format!(
+        "{{\"name\":\"good\",\"path\":{:?},\"state\":\"initialized\",\"counts\":{{\"done\":0,\"in_progress\":1,\"review\":0,\"todo\":1}},\"unreadable\":1}}",
+        good.to_str().unwrap()
+    );
+    assert!(json.contains(&good_row), "{good_row} 가 없다\n{json}");
+    let broken = format!("{{\"name\":\"badcfg\",\"path\":{:?},\"state\":\"unreadable\",\"error\":\"", badcfg.to_str().unwrap());
+    assert!(json.contains(&broken), "{json}");
+    assert!(json.contains("\"name\":\"badsnap\"") && json.matches("\"state\":\"unreadable\"").count() == 2, "{json}");
+    assert!(json.contains(&format!("{{\"name\":\"bare\",\"path\":{:?},\"state\":\"uninitialized\"}}", bare.to_str().unwrap())), "{json}");
 }
 
 /// 깨진 설정: `ls` 는 까닭을 말하고 0 으로 끝나고, `add`·`rm` 은 멈추고 파일을 안 건드린다.
