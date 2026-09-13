@@ -334,6 +334,55 @@ pub fn spellings(input: &Path, cwd: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// 목록에 보일 이름 — 디렉터리 이름이고, **겹치는 것끼리만** 위 조각을 하나씩
+/// 더 붙인다. `repo/apps/a` 와 `lib/a` 는 `apps/a`·`lib/a` 로, 겹치지 않는
+/// `argos` 는 `argos` 그대로 선다.
+///
+/// **파일에 적지 않는 파생값이다.** 이름은 목록 전체에서 정해져, 프로젝트 하나를
+/// 더하면 옆 줄의 이름이 바뀔 수 있다 — 적어 두면 더할 때마다 남의 줄을 고쳐
+/// 써야 한다. 파일 시스템을 안 보는 순수 함수라 `ls`·한눈 보기·TUI 가 같은 자를 쓴다.
+///
+/// 조각을 다 붙여도 겹치면(한쪽이 다른 쪽의 꼬리일 때) 짧은 쪽이 먼저 바닥나
+/// 멈추고 긴 쪽이 계속 자라므로 끝난다. 경로는 [`Doc::projects`] 가 이미
+/// 한 번씩만 내므로 끝까지 겹치는 둘은 없다.
+pub fn names(projects: &[Project]) -> Vec<String> {
+    let parts: Vec<Vec<String>> = projects
+        .iter()
+        .map(|p| {
+            p.path
+                .components()
+                .filter_map(|c| match c {
+                    Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .collect();
+    let name = |i: usize, k: usize| -> String {
+        let c = &parts[i];
+        match c.len() {
+            // 뿌리(`/`)는 조각이 없다. 경로 그대로가 이름이다.
+            0 => projects[i].path.display().to_string(),
+            n => c[n - k.min(n)..].join("/"),
+        }
+    };
+    let mut depth = vec![1usize; projects.len()];
+    loop {
+        let now: Vec<String> = (0..projects.len()).map(|i| name(i, depth[i])).collect();
+        let mut grew = false;
+        for i in 0..projects.len() {
+            let clash = now.iter().enumerate().any(|(j, n)| j != i && *n == now[i]);
+            if clash && depth[i] < parts[i].len() {
+                depth[i] += 1;
+                grew = true;
+            }
+        }
+        if !grew {
+            return now;
+        }
+    }
+}
+
 /// `.` 을 버리고 `..` 은 앞 조각을 뗀다. 파일 시스템을 안 본다.
 fn lexical(p: &Path) -> PathBuf {
     let mut out = PathBuf::new();
@@ -530,6 +579,19 @@ mod tests {
         // 사라진 디렉터리도 글자로는 찾는다.
         assert_eq!(spellings(Path::new("gone/../gone2"), &d), [d.join("gone2")]);
         assert_eq!(lexical(Path::new("/../a")), PathBuf::from("/a"));
+    }
+
+    /// 이름은 디렉터리 이름이고, 겹치는 것끼리만 위 조각이 붙는다.
+    #[test]
+    fn names_grow_only_where_they_clash() {
+        let ps = |paths: &[&str]| paths.iter().map(|p| Project { path: p.into() }).collect::<Vec<_>>();
+        assert_eq!(names(&ps(&["/w/argos", "/r/apps/a", "/r/libs/a"])), ["argos", "apps/a", "libs/a"]);
+        // 둘째 조각까지 같으면 셋째까지. 겹치지 않는 줄은 안 자란다.
+        assert_eq!(names(&ps(&["/x/apps/a", "/y/apps/a", "/y/b"])), ["x/apps/a", "y/apps/a", "b"]);
+        // 한쪽이 다른 쪽의 꼬리면 짧은 쪽이 바닥나고 긴 쪽이 자란다.
+        assert_eq!(names(&ps(&["/a", "/z/a"])), ["a", "z/a"]);
+        assert_eq!(names(&ps(&["/", "/a"])), ["/", "a"]);
+        assert!(names(&[]).is_empty());
     }
 
     /// 설정 파일이 링크면 링크는 링크로 남고 가리키는 파일이 고쳐진다.
