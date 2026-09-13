@@ -4,14 +4,14 @@
 //! 규칙 하나를 CLI 에서 그대로 들고 온다: **색이 혼자 뜻을 지지 않는다.**
 //! 모든 색에 글리프나 낱말이 붙는다.
 
-use super::{App, Mode, Row};
+use super::{App, Mode, Pane, Row};
 use crate::nav::Entry;
 use crate::style;
 use crate::text::clip;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Padding, Paragraph};
 use ratatui::Frame;
 
 /// 좌우를 가르는 자리. MC 처럼 반반이되 왼쪽을 조금 넓게 — 제목이 길다.
@@ -215,7 +215,7 @@ fn list(f: &mut Frame, app: &App, at: Rect, rows: &[Row], state: &mut ListState)
     state.select((!rows.is_empty()).then_some(app.cursor.min(rows.len().saturating_sub(1))));
     f.render_stateful_widget(
         List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(title))
+            .block(frame(app, Pane::Explorer).title(title))
             // 커서는 **색만으로 표시하지 않는다** — 반전과 `>` 를 함께 준다.
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
             .highlight_symbol(CURSOR),
@@ -284,8 +284,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 함께 빼 주므로 폭 계산은 아래가 그대로 쓴다.
     // 테두리는 **나중에** 그린다 — 제목에 "몇 줄 더" 를 얹으려면 줄을 먼저
     // 세야 한다. 자리 계산은 그래도 블록에 맡긴다.
-    let block = Block::default()
-        .borders(Borders::ALL)
+    let block = frame(app, Pane::Detail)
         .padding(Padding::horizontal(left_gutter() as u16));
     let inner = block.inner(at);
 
@@ -340,6 +339,35 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 자르면 또 하나를 빠뜨리므로 **나가는 마지막 자리에서 한 번** 자른다.
     let lines: Vec<Line> = lines.into_iter().map(|l| fit(l, inner.width as usize)).collect();
     f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), inner);
+}
+
+/// 칸의 테두리. **포커스 있는 칸은 굵은 선에 초록이다.**
+///
+/// 색만 바꾸면 색 없는 터미널·색맹인 눈에서 포커스가 통째로 사라지고, 그러면
+/// `Tab` 을 모르고 누른 사람은 `↓` 가 상세를 굴리는 동안 목록이 죽은 줄 안다.
+/// 그래서 **모양이 뜻을 지고 색은 곁들인다** — `┏━┓` 와 `┌─┐` 는 글자가 달라
+/// 버퍼의 글자만 읽어도 갈린다. 제목 옆 글리프를 따로 두지 않은 것은 목록 제목이
+/// 이미 칸별 건수로 차 있어, 좁은 창에서 그 글리프가 먼저 잘려 나가기 때문이다 —
+/// 테두리는 잘리지 않는다.
+///
+/// 두 줄(`╔═╗`)이 아니라 굵은 선을 고른 것은 **모양은 같고 무게만 달라서**다 —
+/// 두 칸이 여전히 한 벌로 읽히고, 포커스가 옮겨 갈 때 화면이 다른 종류의 창으로
+/// 바뀐 것처럼 보이지 않는다.
+fn frame(app: &App, pane: Pane) -> Block<'static> {
+    let block = Block::default().borders(Borders::ALL);
+    if app.focus == pane {
+        block.border_type(BorderType::Thick).border_style(from_anstyle(style::FOCUS))
+    } else {
+        block
+    }
+}
+
+/// 칸의 이름. F키 바가 `Tab` 이 **어디로 가는지** 댄다.
+fn pane_name(p: Pane) -> &'static str {
+    match p {
+        Pane::Explorer => "목록",
+        Pane::Detail => "상세",
+    }
 }
 
 /// 한 줄을 패널 폭에 맞춘다. 넘치면 `…` 를 남긴다.
@@ -642,6 +670,14 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
     let mut optional = vec![
         key("w", if app.worktree { "워크트리 끄기" } else { "워크트리" }),
         key("j·k", "굴리기"),
+        // **`Tab` 은 가는 곳을 댄다** — `F3 원문`·`w 워크트리 끄기` 와 같은 자다.
+        // "칸 옮기기" 라 적으면 지금 어디 있는지는 테두리만 말하는데, 가는 곳을 적으면
+        // 이 줄도 글자로 지금 자리를 말한다. 자리는 `F3` 앞이다 — 80칸에서 `j·k` 가
+        // 떨어진 뒤에도 남는다(`the_key_bar_names_tab_at_eighty_columns`). 단 한 칸
+        // 여유뿐이라, 80칸에서 거름망(`Esc 풀기`)을 걸었거나 `F3 그리기` 로 늘면
+        // `Tab` 이 먼저 떨어진다 — 그때도 테두리 모양이 포커스를 말하고, 되돌아올
+        // 길(`F3 그리기`·`Esc 풀기`)과 나갈 길(`F10`)이 `Tab` 보다 급하다.
+        key("Tab", pane_name(app.focus.next())),
         key("F3", if app.raw { "그리기" } else { "원문" }),
         key("F5", "갱신"),
         key("f", "거름망"),
@@ -1239,10 +1275,11 @@ mod tests {
     #[test]
     fn the_detail_pane_is_not_glued_to_its_border() {
         let lines = render(&mut app(), 100, 14);
-        // 테두리가 맞붙어 `││` 라 가운데 빈 조각이 낀다. 빈 조각을 빼면
-        // 앞이 좌측, 뒤가 우측이다.
+        // 테두리가 맞붙어 `┃│` 라 가운데 빈 조각이 낀다. 빈 조각을 빼면
+        // 앞이 좌측, 뒤가 우측이다. **포커스 있는 칸은 굵은 선이다** — 한쪽만
+        // 가르면 목록 전체가 한 조각으로 붙는다.
         let panes = |l: &str| -> Vec<String> {
-            l.split('│').filter(|s| !s.is_empty()).map(str::to_string).collect()
+            l.split(['│', '┃']).filter(|s| !s.is_empty()).map(str::to_string).collect()
         };
         let inset = |seg: &str| seg.len() - seg.trim_start_matches(' ').len();
 
@@ -1481,6 +1518,66 @@ mod tests {
         a.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
         let up = render(&mut a, 100, 16).join("\n");
         assert_ne!(up, end, "↑ 를 눌렀는데 화면이 그대로다");
+    }
+
+    /// **포커스는 색 없이도 읽힌다.** 버퍼의 글자만 보고 어느 칸이 굵은 선인지
+    /// 갈려야 한다 — 색만 바꾸면 색 없는 터미널에서 `Tab` 을 누른 뒤 `↓` 가 상세를
+    /// 굴리는데 화면에는 아무 표시가 없어, 목록이 죽은 줄 안다.
+    #[test]
+    fn the_focused_pane_is_marked_by_its_border_shape_without_colour() {
+        let mut a = app();
+        let top = |a: &mut App| {
+            let lines = render(a, 100, 12);
+            let at = lines.iter().position(|l| l.contains('┐') || l.contains('┓')).expect("윗 테두리가 없다");
+            (lines[at].clone(), lines.join("\n"))
+        };
+        let (t, screen) = top(&mut a);
+        assert!(t.starts_with('┏') && t.ends_with('┐'), "목록에 포커스가 있는데 모양이 안 갈린다 — {t:?}\n{screen}");
+        assert_eq!(screen.matches('┏').count(), 1, "굵은 칸이 둘이다\n{screen}");
+
+        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        let (t, screen) = top(&mut a);
+        assert!(t.starts_with('┌') && t.ends_with('┓'), "Tab 뒤에 굵은 선이 상세로 안 옮겼다 — {t:?}\n{screen}");
+        assert_eq!(screen.matches('┏').count(), 1, "굵은 칸이 둘이다\n{screen}");
+        // 옆과 아래 테두리도 같은 모양이다 — 윗줄만 굵으면 긴 목록에서 윗줄이 멀다.
+        assert!(screen.contains('┃') && screen.contains('┛'), "굵은 선이 윗줄에만 섰다\n{screen}");
+
+        // 글을 받는 중에도 테두리는 제자리다 — 포커스가 안 옮겼으니 그림도 안 옮긴다.
+        a.key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        let (t, _) = top(&mut a);
+        assert!(t.ends_with('┓'), "글 받는 중에 포커스 표시가 옮겼다 — {t:?}");
+    }
+
+    /// **초록은 곁들임이지만 빠지면 안 된다** — 사용자 기획이 "초록 테두리" 다.
+    /// 모양만 보는 시험으로는 색을 걷어 내도 조용히 지나가므로 따로 본다. 포커스
+    /// 없는 칸은 칠하지 않는다 — 둘 다 칠하면 색이 아무 말도 안 한다.
+    #[test]
+    fn the_focused_border_is_green_and_the_other_is_not() {
+        let mut a = app();
+        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        let mut term = Terminal::new(TestBackend::new(100, 12)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let y = (0..buf.area.height).find(|&y| buf[(0, y)].symbol() == "┌").expect("목록 윗 테두리가 없다");
+        let right = buf.area.width - 1;
+        assert_eq!(buf[(right, y)].symbol(), "┓");
+        assert_eq!(buf[(right, y)].fg, Color::Green, "포커스 칸 테두리가 초록이 아니다");
+        assert_ne!(buf[(0, y)].fg, Color::Green, "포커스 없는 칸까지 칠했다");
+    }
+
+    /// **F키 바가 `Tab` 을 말한다. 80칸에서도.** 모르는 키는 없는 키다 — 그리고
+    /// 가는 곳을 대므로 지금 어디 있는지를 글자로도 말한다.
+    #[test]
+    fn the_key_bar_names_tab_at_eighty_columns() {
+        for w in [80u16, 100, 120] {
+            let mut a = app();
+            let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
+            assert!(bar.contains("Tab 상세") && bar.contains("F10 끝내기"), "{w}칸 — {bar:?}");
+            a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
+            assert!(bar.contains("Tab 목록") && bar.contains("F10 끝내기"), "{w}칸 — {bar:?}");
+        }
     }
 
     /// 빈 저장소도 그려진다.

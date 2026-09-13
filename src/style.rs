@@ -34,6 +34,11 @@ pub const ID: Style = DIM;
 pub const BRANCH: Style = fg(AnsiColor::BrightCyan).bold();
 /// 브랜치 머리표의 글리프.
 pub const BRANCH_GLYPH: &str = "⎇";
+/// 탐색기에서 **포커스 있는 칸의 테두리.** 초록은 사용자 기획이다(moai-b8wq).
+/// 칸의 `done` 과 같은 계열이지만 **그쪽은 흐리게, 이쪽은 테두리에만** 쓰여 한
+/// 자리에서 부딪치지 않는다. 뜻은 색이 아니라 테두리 모양이 진다 —
+/// `draw::frame` 이 굵은 선을 함께 준다.
+pub const FOCUS: Style = fg(AnsiColor::Green);
 pub const ERROR: Style = fg(AnsiColor::Red);
 pub const WARN: Style = fg(AnsiColor::BrightYellow);
 pub const HEAD: Style = Style::new().bold();
