@@ -4,16 +4,17 @@
 //! 그림은 `TestBackend` 로 시험된다 — 둘 다 TTY 를 켜지 않는다.
 
 pub mod draw;
-#[cfg_attr(not(test), expect(dead_code, reason = "첫 부르는 곳은 `n` 폼의 본문이다(moai-11s4)"))]
 pub mod edit;
+pub mod form;
 pub mod input;
 pub mod scroll;
 
 use crate::config::Config;
-use crate::model::Issue;
+use crate::model::{Issue, Kind, Status};
 use crate::nav::{Entry, Index, Path, Seg};
 use crate::query::{Filter, Raw, Where};
 use crate::store::{Load, Repo};
+use form::{Act, Form};
 use input::Input;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use scroll::{PAGE, Scroll};
@@ -49,6 +50,9 @@ pub enum Mode {
     Filter(Input),
     /// 쓰기 앞에서 누군지 묻는 칸. [`App::write`] 만 연다.
     Ask(Ask),
+    /// `n` 으로 연 생각 담기 폼(moai-11s4). **어디를 보고 있든 같은 폼이다** — 커서가
+    /// 선 에픽에 넣지 않는다. idea 가 소속을 가지면 그것이 이 단계가 없애려던 무게다.
+    Idea(Form),
 }
 
 /// 받고 나서 다시 부를 쓰기. **붙잡는 것이 없는 함수다** — 적던 것은 [`Ask`] 가
@@ -65,7 +69,6 @@ pub type Retry = fn(&mut App);
 /// **id 는 닫는 함수만 안다.** 새 id 는 락 안에서 다시 읽은 목록을 보고 고르므로
 /// 밖에서 짐작할 수 없고, 쓰고 난 목록을 견줘 "새로 생긴 줄" 을 찾으면 같은 틈에
 /// 남이 쓴 줄과 갈리지 않는다. 그래서 쓰는 쪽이 댄다.
-#[cfg_attr(not(test), expect(dead_code, reason = "첫 부르는 곳은 `n` 폼이다(moai-11s4)"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Touched {
     /// 쓰고 나면 커서가 설 줄.
@@ -76,7 +79,6 @@ pub struct Touched {
 }
 
 /// 쓴 줄이 목록 어디에 섰나. 알림이 무엇을 덧붙일지를 가른다.
-#[cfg_attr(not(test), expect(dead_code, reason = "첫 부르는 곳은 `n` 폼이다(moai-11s4)"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Landing {
     /// 그 줄에 커서가 섰다.
@@ -462,7 +464,6 @@ impl App {
     /// 들이면 CLI 전체가 async 로 물든다. 락을 못 잡으면 `with_write` 가 5초 뒤
     /// 아무것도 안 쓰고 물러나고, 그 말이 그대로 화면에 선다.
     #[must_use = "None 이면 쓰지 못했다 — 적던 것을 닫으면 사람이 적은 것을 잃는다"]
-    #[cfg_attr(not(test), expect(dead_code, reason = "첫 부르는 곳은 `n` 폼이다(moai-11s4)"))]
     pub fn write(
         &mut self,
         retry: Retry,
@@ -623,7 +624,6 @@ impl App {
     ///
     /// 거름망에 가리면 **길도 커서도 그대로 둔다.** 가려진 디렉터리로 옮겨 놓으면 사람은
     /// 왜 여기로 왔는지도 모르는 목록을 본다. 중복 id 면 그 디렉터리의 첫 줄이다([`Anchor`]).
-    #[cfg_attr(not(test), expect(dead_code, reason = "첫 부르는 곳은 `n` 폼이다(moai-11s4)"))]
     fn land(&mut self, id: &str) -> Landing {
         let Some(at) = self.index.find(id) else { return Landing::Missing };
         let home = self.index.home_of(at).clone();
@@ -766,7 +766,7 @@ impl App {
     pub fn apply(&mut self, mode: &Mode) -> Result<(), String> {
         let text = match mode {
             Mode::Grep(q) | Mode::Filter(q) => q.text().to_string(),
-            Mode::Browse | Mode::Ask(_) => String::new(),
+            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) => String::new(),
         };
         if text.trim().is_empty() {
             self.filter_text = None;
@@ -798,7 +798,7 @@ impl App {
         let raw = match mode {
             Mode::Grep(q) => Raw { grep: Some(q.text().to_string()), all: true, ..Raw::default() },
             Mode::Filter(q) => Raw { filter: split_filter(q.text()), all: true, ideas: true, ..Raw::default() },
-            Mode::Browse | Mode::Ask(_) => Raw::default(),
+            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) => Raw::default(),
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
         // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다.
@@ -867,6 +867,8 @@ impl App {
             KeyCode::Backspace | KeyCode::Left if self.focus == Pane::Explorer => self.leave(),
             KeyCode::Char('/') => self.mode = Mode::Grep(Input::default()),
             KeyCode::Char('f') | KeyCode::F(7) => self.mode = Mode::Filter(Input::default()),
+            // **포커스와 상관없이 연다.** 무엇을 보다가 떠올랐든 담는 칸은 하나다.
+            KeyCode::Char('n') => self.mode = Mode::Idea(Form::default()),
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             KeyCode::Esc => self.clear_filter(),
@@ -928,6 +930,10 @@ impl App {
     /// 정한다 — Enter·Esc·Ctrl-C. 칸이 먹은 키는 여기까지 오지 않으므로 빈 칸의
     /// Backspace 가 "한 층 위로" 로 새지 않는다.
     fn typing(&mut self, k: KeyEvent) {
+        if matches!(self.mode, Mode::Idea(_)) {
+            self.jot(k);
+            return;
+        }
         let eaten = match &mut self.mode {
             Mode::Grep(input) | Mode::Filter(input) => input.key(k),
             Mode::Ask(ask) => {
@@ -937,7 +943,7 @@ impl App {
                 }
                 eaten
             }
-            Mode::Browse => return,
+            Mode::Browse | Mode::Idea(_) => return,
         };
         if eaten {
             return;
@@ -1002,6 +1008,38 @@ impl App {
         if let Some(who) = who {
             self.user = Some(crate::model::label(&who.name, Some(&who.email), crate::config::Naming::Full));
             (ask.then)(self);
+        }
+    }
+
+    /// 생각 담기 폼의 키. **무엇을 할지는 폼이 정하고**([`Form::key`]) 여기는 그대로 한다.
+    ///
+    /// Ctrl-C 는 폼보다 먼저 받는다 — 어느 모드에서든 나가는 길이다. 적던 것은 그 길로
+    /// 날아가지만, raw mode 에서 Ctrl-C 를 막으면 멈춘 화면에서 나갈 길이 없어진다.
+    fn jot(&mut self, k: KeyEvent) {
+        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
+            self.quit = true;
+            return;
+        }
+        let Mode::Idea(form) = &mut self.mode else { return };
+        match form.key(k) {
+            Act::Stay => {}
+            Act::Save => save_idea(self),
+            Act::Close => {
+                self.mode = Mode::Browse;
+                self.forget_write_failure();
+            }
+        }
+    }
+
+    /// 폼을 닫으면 **그 폼이 못 쓴 까닭도 걷는다.** 쓰기의 실패는 저절로 다시 읽기에
+    /// 안 지워지게 붙박아 두었는데(`write_failed`), 그것은 폼이 열린 채 왜 안 닫혔는지를
+    /// 말하려는 것이었다. 적던 것을 버리고 닫았으면 그 말이 가리키는 것이 화면에 없다 —
+    /// 남겨 두면 다음에 쓰기가 성공할 때까지 빨간 배너가 아무것도 못 고치는 채로 선다.
+    /// 읽기의 실패는 건드리지 않는다: 그것은 폼과 상관없이 지금 화면이 낡았다는 말이다.
+    fn forget_write_failure(&mut self) {
+        if self.write_failed {
+            self.trouble = None;
+            self.write_failed = false;
         }
     }
 
@@ -1083,6 +1121,40 @@ impl App {
             Some(at) => self.issues[at].title.clone(),
             None => format!("{id}  {MISSING}"),
         }
+    }
+}
+
+/// 폼에 적힌 생각 하나를 담는다. **[`Retry`] 로도 넘긴다** — 누군지 묻고 받으면
+/// [`App::answer`] 가 폼을 되돌려 놓고 이 함수를 다시 부르고, 이 함수는 되돌려 놓은
+/// 폼에서 제목과 본문을 다시 읽는다.
+///
+/// **만드는 길은 CLI `idea add` 와 같다**(`store::new_id`·`store::admit`) — id 모양,
+/// 정규화, 검증, 저널 `create`, 만든 사람이 담당인 것까지. 에픽은 없다: 커서가 선 자리가
+/// 무엇이든 넣지 않는다. 칸은 config 의 첫 칸이다.
+///
+/// 되면 폼을 **닫기만 한다.** 다시 읽기·만든 줄에 커서 두기·`✓ 담김 · id` 알림은
+/// `write` 가 한다(moai-064q) — 여기서 또 하면 한 쓰기에 목록을 두 번 세거나 알림이 둘이
+/// 된다. 안 되면 **아무것도 건드리지 않는다** — 누군지 묻는 중이면 `write` 가 이미 모드를
+/// `Ask` 로 바꿨고, 실패면 폼이 열린 채 까닭이 배너에 선다.
+fn save_idea(app: &mut App) {
+    let Mode::Idea(form) = &app.mode else { return };
+    let (title, body) = (form.title(), form.body());
+    // 폼이 이미 거절한다. 되돌아온 길(`answer`)도 같은 폼이라 여기 걸릴 일은 없지만,
+    // 빈 제목을 `write` 까지 보내면 누군지부터 묻는다 — 거절이 물음 뒤로 밀린다.
+    if title.is_empty() {
+        return;
+    }
+    let at = crate::model::now();
+    let wrote = app.write(save_idea, move |issues, cfg, reserved, by| {
+        let id = crate::store::new_id(issues, cfg, reserved, None, &title);
+        let mut idea = Issue::new(id, title, Kind::Idea, Status::new(cfg.first_status()), &at);
+        (idea.assignee, idea.assignee_email) = by.as_assignee();
+        idea.body = body;
+        let (entry, made) = crate::store::admit(issues, cfg, idea, by)?;
+        Ok((vec![entry], Touched { id: made.id, done: "담김" }))
+    });
+    if wrote.is_some() {
+        app.mode = Mode::Browse;
     }
 }
 
@@ -2068,31 +2140,183 @@ mod tests {
         }
     }
 
-    /// 폼이 부를 모양 그대로 — **적던 것을 모드에서 읽어** 생각 하나를 담고, 되면
-    /// 닫는다. 폼(moai-11s4)이 아직 없어 검색칸의 글을 적던 제목으로 쓴다. 묻고 나서
-    /// 다시 불리는 것도 이 함수다.
-    fn save(a: &mut App) {
-        let Mode::Grep(q) = &a.mode else { panic!("적던 것이 돌아오지 않았다 — {:?}", a.mode) };
-        let title = q.text().to_string();
-        let wrote = a.write(save, move |issues, _, _, by| {
-            let at = "2026-09-13T00:00:00Z";
-            issues.push(Issue::new("argos-0002".into(), title.clone(), Kind::Idea, Status::new("todo"), at));
-            Ok((vec![crate::model::JournalEntry::create("argos-0002", &title, at, by)], Touched { id: "argos-0002".into(), done: "담김" }))
-        });
-        if wrote.is_some() {
-            a.mode = Mode::Browse;
-        }
-    }
-
     fn type_in(a: &mut App, text: &str) {
         for c in text.chars() {
             a.key(key(KeyCode::Char(c)));
         }
     }
 
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    /// 파일에 선 생각들 — 화면이 아니라 **파일을** 읽는다.
+    fn ideas_in(repo: &Repo) -> Vec<Issue> {
+        repo.read().unwrap().issues.into_iter().filter(|i| i.kind == Kind::Idea).collect()
+    }
+
+    /// `n` 으로 폼을 열어 제목을 적는다.
+    fn jotting(a: &mut App, title: &str) {
+        a.key(key(KeyCode::Char('n')));
+        type_in(a, title);
+    }
+
+    /// **`n` 은 어디를 보고 있든 같은 빈 폼을 연다** — 목록에서도 상세에서도 에픽 안에서도.
+    /// 글을 받는 중이면 `n` 은 글자다. 폼 안의 포커스는 탐색기의 포커스와 따로라, 닫으면
+    /// 보던 칸이 그대로 있다.
+    #[test]
+    fn n_opens_the_form_from_anywhere_but_is_a_letter_while_typing() {
+        for (inside, focus) in [(false, Pane::Explorer), (true, Pane::Explorer), (true, Pane::Detail)] {
+            let mut a = app();
+            if inside {
+                a.key(key(KeyCode::Enter));
+            }
+            a.focus = focus;
+            a.key(key(KeyCode::Char('n')));
+            assert_eq!(a.mode, Mode::Idea(Form::default()), "{inside} {focus:?}");
+            a.key(key(KeyCode::Tab));
+            assert_eq!(a.focus, focus, "폼의 Tab 이 탐색기 포커스를 옮겼다");
+            a.key(key(KeyCode::Esc));
+            assert_eq!((&a.mode, a.focus), (&Mode::Browse, focus));
+        }
+        for opener in [KeyCode::Char('/'), KeyCode::Char('f')] {
+            let mut a = app();
+            a.key(key(opener));
+            a.key(key(KeyCode::Char('n')));
+            assert!(matches!(&a.mode, Mode::Grep(q) | Mode::Filter(q) if q.text() == "n"), "{:?}", a.mode);
+        }
+    }
+
+    /// **담으면 파일에 idea 로 선다 — 에픽 없이.** 커서가 에픽 안에 있어도 거기 넣지 않는다.
+    /// 만드는 길은 CLI 와 같다: 첫 칸, 만든 사람이 담당, 저널 `create` 한 줄. 본문은 여러
+    /// 줄 그대로, 끝의 빈 줄은 뗀다. 담으면 폼이 닫힌다.
+    #[test]
+    fn ctrl_s_saves_an_idea_without_an_epic_wherever_the_cursor_is() {
+        let (_scratch, mut a) = writable("jot");
+        a.key(key(KeyCode::Enter)); // 에픽 안
+        assert_eq!(a.path.len(), 1, "판이 다르다 — 에픽 안에 못 들어갔다");
+        jotting(&mut a, "  반짝 떠오른 것 ");
+        a.key(key(KeyCode::Tab));
+        type_in(&mut a, "첫 줄");
+        a.key(key(KeyCode::Enter));
+        type_in(&mut a, "둘째 줄");
+        a.key(key(KeyCode::Enter));
+        a.key(ctrl('s'));
+        assert_eq!(a.mode, Mode::Browse, "담았는데 폼이 안 닫혔다 — {:?}", a.trouble);
+
+        let repo = a.repo.clone().unwrap();
+        let made = ideas_in(&repo);
+        assert_eq!(made.len(), 1, "{made:?}");
+        let idea = &made[0];
+        assert_eq!(idea.title, "반짝 떠오른 것");
+        assert_eq!(idea.body.as_deref(), Some("첫 줄\n둘째 줄"));
+        assert_eq!((idea.epic.as_deref(), idea.milestone.as_deref()), (None, None), "커서가 선 에픽에 넣었다");
+        assert_eq!(idea.status.as_str(), "todo");
+        assert_eq!((idea.assignee.as_deref(), idea.assignee_email.as_deref()), (Some("레이븐"), Some("raven@example.com")));
+        assert!(idea.id.starts_with("argos-"), "{}", idea.id);
+        let journal = repo.journal_of(&idea.id).unwrap();
+        assert_eq!(journal.len(), 1);
+        assert_eq!((journal[0].kind.as_str(), journal[0].title.as_deref(), journal[0].by.as_str()), ("create", Some("반짝 떠오른 것"), "레이븐"));
+        // 화면은 파일을 다시 읽은 것이고, 커서는 만든 줄에 서며 알림은 하나다 — 폼은 닫기만
+        // 하고 뒤처리는 `write` 가 한다(moai-064q). idea 는 에픽에 안 드니 뿌리로 나온다.
+        assert!(a.index.find(&idea.id).is_some(), "쓰고 다시 안 읽었다");
+        assert_eq!((on(&a), a.path.len()), (Some(idea.id.clone()), 0), "만든 줄에 안 섰다");
+        assert_eq!(a.notice, Some(format!("✓ 담김 · {}", idea.id)));
+
+        // F2 도 담는다. 제목만으로 된다.
+        jotting(&mut a, "하나 더");
+        a.key(key(KeyCode::F(2)));
+        assert_eq!(a.mode, Mode::Browse);
+        let made = ideas_in(&repo);
+        assert!(made.iter().any(|i| i.title == "하나 더" && i.body.is_none()), "{made:?}");
+    }
+
+    /// **제목이 비면 담지 않는다. 그 밖에는 아무것도 안 묻는다** — 누군지도 안 푼다.
+    /// 파일은 그대로고 폼은 까닭을 달고 제목 칸에 선다.
+    #[test]
+    fn an_empty_title_is_refused_in_place_and_nothing_is_asked() {
+        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+            panic!("빈 제목인데 누군지 물었다")
+        }
+        let (scratch, mut a) = writable("jot-empty");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let before = std::fs::read_to_string(&file).unwrap();
+        a.identify = refuse;
+        jotting(&mut a, "   ");
+        a.key(key(KeyCode::Tab));
+        type_in(&mut a, "본문만 있다");
+        a.key(ctrl('s'));
+        let Mode::Idea(form) = &a.mode else { panic!("빈 제목에 폼이 닫혔다 — {:?}", a.mode) };
+        assert_eq!((form.error.as_deref(), form.field), (Some(form::EMPTY_TITLE), form::Field::Title));
+        assert_eq!(form.body.text(), "본문만 있다", "거절하며 적은 것을 지웠다");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+        assert!(a.trouble.is_none(), "빈 제목은 쓰기의 실패가 아니다 — {:?}", a.trouble);
+    }
+
+    /// **Esc 는 빈 폼을 곧바로 닫고, 적던 것이 있으면 한 번 묻는다.** `y` 만 버린다 —
+    /// 다른 키는 폼으로 돌아가고 적던 것은 그대로다.
+    #[test]
+    fn esc_closes_a_blank_form_at_once_and_asks_before_dropping_what_was_typed() {
+        let mut a = app();
+        a.key(key(KeyCode::Char('n')));
+        a.key(key(KeyCode::Esc));
+        assert_eq!(a.mode, Mode::Browse, "빈 폼인데 물었다");
+
+        jotting(&mut a, "적던 것");
+        a.key(key(KeyCode::Esc));
+        assert!(matches!(&a.mode, Mode::Idea(f) if f.leaving), "적던 것이 있는데 한 키에 닫혔다 — {:?}", a.mode);
+        a.key(key(KeyCode::Char('q')));
+        assert!(!a.quit, "묻는 중의 q 로 꺼졌다");
+        assert!(matches!(&a.mode, Mode::Idea(f) if !f.leaving && f.title.text() == "적던 것"), "{:?}", a.mode);
+        a.key(key(KeyCode::Esc));
+        a.key(key(KeyCode::Char('y')));
+        assert_eq!(a.mode, Mode::Browse);
+        assert!(!a.quit);
+    }
+
+    /// **쓰기가 실패하면 폼은 적던 그대로 열려 있고 까닭이 배너에 선다.** 고치고 다시
+    /// 누르면 담긴다. 실패한 채로 버리고 닫으면 그 까닭도 걷힌다 — 가리키던 폼이 없다.
+    /// 읽기의 실패는 폼을 닫아도 남는다.
+    #[test]
+    fn a_failed_save_keeps_the_form_and_closing_it_clears_the_reason() {
+        let (scratch, mut a) = writable("jot-fail");
+        let lock = scratch.0.join(".moai/lock");
+        // 락 파일 자리에 디렉터리를 두면 `with_write` 가 락을 못 열고 곧바로 물러난다.
+        std::fs::create_dir_all(&lock).unwrap();
+        jotting(&mut a, "못 담길 것");
+        a.key(ctrl('s'));
+        assert!(matches!(&a.mode, Mode::Idea(f) if f.title.text() == "못 담길 것"), "실패했는데 폼이 닫혔다 — {:?}", a.mode);
+        assert!(a.trouble.as_deref().is_some_and(|t| t.starts_with("쓰지 못했다")), "{:?}", a.trouble);
+        assert!(ideas_in(a.repo.as_ref().unwrap()).is_empty());
+
+        // 고치고 다시 누르면 담기고 까닭이 걷힌다
+        std::fs::remove_dir(&lock).unwrap();
+        a.key(key(KeyCode::F(2)));
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
+        assert!(a.trouble.is_none());
+        assert_eq!(ideas_in(a.repo.as_ref().unwrap()).len(), 1);
+
+        // 실패한 채로 버리고 닫으면 까닭도 걷힌다. 성공한 쓰기가 락 파일을 남겼다.
+        std::fs::remove_file(&lock).unwrap();
+        std::fs::create_dir_all(&lock).unwrap();
+        jotting(&mut a, "버릴 것");
+        a.key(ctrl('s'));
+        assert!(a.trouble.is_some());
+        a.key(key(KeyCode::Esc));
+        a.key(key(KeyCode::Char('y')));
+        assert_eq!((&a.mode, &a.trouble), (&Mode::Browse, &None), "버리고 닫았는데 까닭이 남았다");
+
+        // 읽기의 실패는 폼과 상관없다 — 닫아도 남는다
+        a.trouble = Some("다시 읽지 못했다 — 시험".into());
+        a.key(key(KeyCode::Char('n')));
+        a.key(key(KeyCode::Esc));
+        assert_eq!(a.trouble.as_deref(), Some("다시 읽지 못했다 — 시험"));
+    }
+
     /// **누군지 모르면 쓰기 앞에서 묻고, 받으면 멈췄던 쓰기를 잇는다.** 묻는 동안 파일은
     /// 그대로다. 모양이 틀리면 칸이 열린 채 까닭을 달고, 받은 것은 세션 동안만 들어 다음
-    /// 쓰기는 안 묻는다 — `.moai/config.toml` 에는 아무것도 안 적는다.
+    /// 쓰기는 안 묻는다 — `.moai/config.toml` 에는 아무것도 안 적는다. 받고 나면 폼이
+    /// 되돌아와 그 폼의 제목과 본문으로 담긴다.
     #[test]
     fn an_unknown_actor_is_asked_once_and_the_write_goes_on() {
         let (scratch, mut a) = writable("ask");
@@ -2101,9 +2325,11 @@ mod tests {
         let (before, config_before) = (std::fs::read_to_string(&file).unwrap(), std::fs::read_to_string(&config).unwrap());
         a.user = None;
         a.identify = nobody;
-        a.mode = Mode::Grep(Input::new("떠오른 것"));
+        jotting(&mut a, "떠오른 것");
+        a.key(key(KeyCode::Tab));
+        type_in(&mut a, "본문");
 
-        save(&mut a);
+        a.key(ctrl('s'));
         assert!(matches!(&a.mode, Mode::Ask(ask) if ask.why == "누가 하는지 모른다 — 시험"), "모르는데 안 물었거나 까닭을 옮기지 않았다 — {:?}", a.mode);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before, "묻기 전에 썼다");
         assert!(a.trouble.is_none(), "묻는 것은 실패가 아니다 — {:?}", a.trouble);
@@ -2118,25 +2344,30 @@ mod tests {
         a.key(key(KeyCode::Char(' ')));
         assert!(matches!(&a.mode, Mode::Ask(ask) if ask.error.is_none()), "고치기 시작했는데 까닭이 남았다");
 
-        a.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        a.key(ctrl('u'));
         type_in(&mut a, "레이븐 (raven@example.com)");
         a.key(key(KeyCode::Enter));
         assert_eq!(a.mode, Mode::Browse, "받았는데 멈췄던 쓰기가 안 이어졌다");
-        assert!(std::fs::read_to_string(&file).unwrap().contains("argos-0002"), "받은 뒤에도 파일에 안 닿았다");
+        let repo = a.repo.clone().unwrap();
+        let made = ideas_in(&repo);
+        assert_eq!(made.len(), 1, "받은 뒤에도 파일에 안 닿았다");
+        assert_eq!((made[0].title.as_str(), made[0].body.as_deref()), ("떠오른 것", Some("본문")), "되돌린 폼에서 안 읽었다");
         // 이어진 쓰기도 같은 뒤처리를 받는다 — Enter 가 알림을 걷은 뒤에 쓰기가 제 알림을 단다.
-        assert_eq!(on(&a).as_deref(), Some("argos-0002"), "묻고 이어진 쓰기가 만든 줄에 안 섰다");
-        assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002"));
-        let journal = a.repo.clone().unwrap().journal_of("argos-0002").unwrap();
+        assert_eq!(on(&a), Some(made[0].id.clone()), "묻고 이어진 쓰기가 만든 줄에 안 섰다");
+        assert_eq!(a.notice, Some(format!("✓ 담김 · {}", made[0].id)));
+        let journal = repo.journal_of(&made[0].id).unwrap();
         assert_eq!((journal[0].by.as_str(), journal[0].by_email.as_deref()), ("레이븐", Some("raven@example.com")));
         assert_eq!(a.user.as_deref(), Some("레이븐 (raven@example.com)"));
         assert_eq!(std::fs::read_to_string(&config).unwrap(), config_before, "받은 것을 설정에 적었다");
 
         // 두 번째 쓰기는 묻지 않는다.
-        assert!(add_idea(&mut a, "argos-0003").is_some());
+        jotting(&mut a, "또 하나");
+        a.key(ctrl('s'));
         assert_eq!(a.mode, Mode::Browse, "한 번 받았는데 또 물었다");
+        assert_eq!(ideas_in(&repo).len(), 2);
     }
 
-    /// **Esc 는 아무것도 안 쓰고 적던 것으로 돌아간다.** 한 키에 적던 것이 날아가면
+    /// **Esc 는 아무것도 안 쓰고 적던 폼으로 돌아간다.** 한 키에 적던 것이 날아가면
     /// 다음부터 안 쓴다. 받다 만 이름도 들지 않는다.
     #[test]
     fn esc_on_the_question_writes_nothing_and_gives_the_form_back() {
@@ -2145,12 +2376,14 @@ mod tests {
         let before = std::fs::read_to_string(&file).unwrap();
         a.user = None;
         a.identify = nobody;
-        a.mode = Mode::Grep(Input::new("적던 것"));
+        jotting(&mut a, "적던 것");
+        let form = a.mode.clone();
 
-        save(&mut a);
+        a.key(key(KeyCode::F(2)));
+        assert!(matches!(a.mode, Mode::Ask(_)), "{:?}", a.mode);
         type_in(&mut a, "레이븐 (raven@example.com)");
         a.key(key(KeyCode::Esc));
-        assert_eq!(a.mode, Mode::Grep(Input::new("적던 것")), "적던 것으로 안 돌아왔다");
+        assert_eq!(a.mode, form, "적던 폼으로 안 돌아왔다");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before, "그만뒀는데 썼다");
         assert_eq!(a.user, None, "그만뒀는데 받다 만 이름을 들었다");
         assert!(!a.quit);

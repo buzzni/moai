@@ -55,6 +55,7 @@ impl Editor {
     ///
     /// **줄바꿈은 줄을 가르는 데만 쓴다.** 그 밖의 제어문자는 줄마다
     /// [`Input::new`] 가 걸러낸다 — `\r\n` 의 `\r` 도, 탭도 거기서 빠진다.
+    #[cfg_attr(not(test), expect(dead_code, reason = "`n` 폼은 빈 칸으로 연다 — 적힌 본문을 여는 곳(고치기)이 아직 없다"))]
     pub fn new(s: &str) -> Editor {
         let lines: Vec<Input> = s.split('\n').map(Input::new).collect();
         let row = lines.len() - 1;

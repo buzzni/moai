@@ -5,7 +5,7 @@
 
 use crate::config::Config;
 use crate::fail::{Fail, R, code};
-use crate::model::{Issue, JournalEntry};
+use crate::model::{Actor, Issue, JournalEntry};
 use fs2::FileExt;
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -319,6 +319,47 @@ fn first_duplicate(sorted: &[Issue]) -> Option<&str> {
 /// 증상도 없다.
 pub fn taken_ids(issues: &[Issue], reserved: &BTreeSet<String>) -> BTreeSet<String> {
     issues.iter().map(|i| i.id.clone()).chain(reserved.iter().cloned()).collect()
+}
+
+/// 하나짜리를 만들 때의 새 id. **[`Repo::with_write`] 안에서 부른다** — 락 안에서
+/// 읽은 `issues`·`reserved` 로 재야 두 프로세스가 같은 id 를 뽑지 않는다.
+///
+/// `parent` 가 있으면 그 밑의 자식 id 다. 부모가 **있는지는 보지 않는다** — 없는
+/// 부모를 어떻게 말할지는 부르는 쪽의 말투라(CLI 는 `NOT_FOUND`) 여기서 정하지 않는다.
+///
+/// `moai add` 와 탐색기의 `n` 이 이 한 길을 쓴다. 갈라지면 같은 제목이 어디서
+/// 만들었느냐에 따라 다른 모양의 id 를 얻는다. `add --from` 은 초안 여럿을 한
+/// 번에 뽑느라 제 `taken` 을 들고 늘려 가므로 이 길이 아니다.
+pub fn new_id(
+    issues: &[Issue],
+    cfg: &Config,
+    reserved: &BTreeSet<String>,
+    parent: Option<&str>,
+    title: &str,
+) -> String {
+    let taken = taken_ids(issues, reserved);
+    let seed = crate::id::seed(title);
+    match parent {
+        Some(p) => crate::id::generate_child(p, &taken, &seed),
+        None => crate::id::generate(&cfg.prefix, &taken, &seed),
+    }
+}
+
+/// 새 줄 하나를 들인다 — 정규화하고, 재고, 밀어 넣고, 저널의 `create` 한 줄을 낸다.
+/// **만드는 쓰기는 다 이 길을 지난다**(`add`·`add --from`·`idea promote`·탐색기의 `n`).
+/// 갈라지면 한쪽만 태그를 접거나 한쪽만 저널을 빼먹고, 그날은 아무 증상도 없다.
+///
+/// **밀어 넣기 전에 잰다.** `with_write` 가 뒤에서 바뀐 줄을 한 번 더 재지만, 여러
+/// 줄을 만드는 쪽은 첫 거절에서 멈춰야 뒤의 초안이 헛 id 를 안 뽑는다.
+///
+/// 저널의 시각은 그 줄의 `created_at` 이다 — 둘을 따로 받으면 어긋날 수 있다.
+/// 돌려주는 줄은 밀어 넣은 것의 사본이다(출력을 짓는 쪽이 쓴다).
+pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor) -> R<(JournalEntry, Issue)> {
+    issue.normalize();
+    issue.validate(cfg)?;
+    let entry = JournalEntry::create(&issue.id, &issue.title, &issue.created_at, by);
+    issues.push(issue.clone());
+    Ok((entry, issue))
 }
 
 /// temp 에 쓰고 `rename` 으로 갈아끼운다. 독자는 옛 파일 아니면 새 파일만 본다.
