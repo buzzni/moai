@@ -742,3 +742,4 @@
 {"ts":"2026-09-13T14:49:46Z","id":"moai-uqoe.jdv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 0건, fix 커밋 없음. 넘긴 것: 에픽 줄의 끊긴 epic 참조 갈림 → moai-0prl"}
 {"ts":"2026-09-13T14:49:49Z","id":"moai-uqoe","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"report::milestones 가 에픽 없는 줄을 제 줄이 아니라 접힌 맨 위 줄(fold_top)에서부터 센다 — 에픽이 이기듯(moai-lhbh) 부모도 제 마일스톤을 이긴다. 뿌리로 올라간 생각 밑에 접힌 줄은 마일스톤 없음(moai-14dm 과 같은 자). 자식의 milestone 필드는 그대로 두고 broken 이 계속 본다. nav 시험 a_milestone_counts_what_it_draws 가 마일스톤마다 group_members 와 탐색기의 줄을 견준다. 커밋 201b0f1."}
 {"ts":"2026-09-13T14:49:52Z","id":"moai-uqoe","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"접힌 자식을 부모의 마일스톤으로 세어 show·--json·트리·필터가 한 자로 맞는다"}
+{"ts":"2026-09-13T14:54:47Z","id":"moai-zag3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
