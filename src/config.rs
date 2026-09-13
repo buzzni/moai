@@ -165,6 +165,16 @@ impl Config {
         &self.statuses[0]
     }
 
+    /// 시작한 것이 놓이는 칸 — 첫 칸도 끝난 칸도 아닌 첫 칸. 그런 칸이 없는
+    /// 두 칸짜리 설정이면 첫 칸이다: 거기서는 "시작했지만 안 끝났다" 를 말할
+    /// 낱말이 없고, `done` 으로 말하면 안 끝난 것을 끝났다고 한다.
+    pub fn started_status(&self) -> &str {
+        self.statuses
+            .iter()
+            .find(|s| *s != self.first_status() && *s != DONE)
+            .map_or(self.first_status(), String::as_str)
+    }
+
     pub fn knows(&self, status: &str) -> bool {
         self.statuses.iter().any(|s| s == status)
     }
@@ -239,6 +249,19 @@ mod tests {
         assert_eq!(c.statuses, ["todo", "in_progress", "review", "done"]);
         assert_eq!(c.first_status(), "todo");
         assert!(c.knows("done") && !c.knows("blocked"));
+    }
+
+    /// 시작한 칸은 첫 칸도 끝도 아닌 첫 칸이다. 그런 칸이 없으면 첫 칸 —
+    /// 두 칸짜리 설정에서 `done` 으로 말하면 안 끝난 것을 끝났다고 한다.
+    #[test]
+    fn the_started_column_is_neither_first_nor_done() {
+        let started = |cols: &str| {
+            let c = Config::parse(&format!("prefix = \"a\"\nstatuses = \"{cols}\"\n")).unwrap();
+            c.started_status().to_string()
+        };
+        assert_eq!(started("todo,in_progress,review,done"), "in_progress");
+        assert_eq!(started("todo,done,doing"), "doing");
+        assert_eq!(started("todo,done"), "todo");
     }
 
     #[test]

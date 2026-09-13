@@ -245,6 +245,67 @@ pub fn group_members<'a>(all: &'a [Issue], group: &Issue) -> Vec<&'a Issue> {
     out
 }
 
+/// 묶음(에픽·마일스톤) id → **멤버에서 읽은 칸.**
+///
+/// 묶음의 `status` 는 저장된 필드지만 뜻을 갖지 않는다. 멤버를 옮길 때 묶음
+/// 줄을 같이 쓰면 파생값을 저장하는 것이고, 안 쓰면 손으로 둔 칸이 멤버의
+/// 진행과 따로 논다 — 한 화면이 `· todo` 와 `멤버 1/2` 를 같이 냈다(moai-j3b3).
+/// 그래서 칸도 롤업처럼 읽을 때 센다.
+///
+/// - 셀 멤버는 롤업과 같다 — 물려받은 소속까지, **일만**
+/// - **미룬 멤버는 뺀다.** 남은 일이 미룬 것뿐이면 닫힌 것으로 읽는다 — 묶음을
+///   접는 손잡이가 곧 남은 멤버의 `defer` 다. 롤업의 숫자는 빼지 않는다: 칸은
+///   "지금 할 것이 남았나", 막대는 "계획 중 얼마나 했나" 를 말한다
+/// - 단 **묶음 자신이 받은 미룸은 멤버를 빼는 까닭이 못 된다.** 에픽을 미루면
+///   그 밑이 전부 물려받는데, 그것으로 빼면 절반 끝난 에픽이 미뤘다는 이유로
+///   `done` 이 된다
+/// - 셀 멤버가 없으면 첫 칸, 전부 끝났으면 `done`, 전부 첫 칸이면 첫 칸,
+///   아니면 **시작한 칸** (`Config::started_status`). 멤버가 모두 `review` 여도
+///   시작한 칸이다 — 묶음이 설 칸은 "안 했다·하는 중·끝났다" 셋이다
+pub fn group_states<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, &'c str> {
+    let (epic_of, mile_of) = (groups(all), milestones(all));
+    group_states_in(all, cfg, &epic_of, &mile_of)
+}
+
+/// [`group_states`] 와 같은 것. 소속 지도를 이미 가진 쪽이 두 번 걷지 않게 받는다.
+pub fn group_states_in<'a, 'c>(
+    all: &'a [Issue],
+    cfg: &'c Config,
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    mile_of: &BTreeMap<&'a str, &'a str>,
+) -> BTreeMap<&'a str, &'c str> {
+    let roots = deferred_roots_in(all, epic_of, mile_of);
+    // (종류, 묶음 id) → 셀 멤버. 목록을 한 번만 걷는다 — 묶음마다 걸으면 제곱이다.
+    // **종류로 가른다** — 에픽 지도가 마일스톤 id 를 가리키는 틀린 참조를
+    // 마일스톤의 멤버로 세면 롤업(`rollup_of`)과 어긋난다.
+    let mut members: BTreeMap<(Kind, &str), Vec<&Issue>> = BTreeMap::new();
+    for i in all.iter().filter(|i| is_work(i)) {
+        for (kind, map) in [(Kind::Epic, epic_of), (Kind::Milestone, mile_of)] {
+            if let Some(g) = map.get(i.id.as_str()) {
+                members.entry((kind, g)).or_default().push(i);
+            }
+        }
+    }
+    let read = |g: &Issue| {
+        let own = roots.get(g.id.as_str()).copied();
+        let counted: Vec<&Issue> = members
+            .get(&(g.kind, g.id.as_str()))
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|m| roots.get(m.id.as_str()).is_none_or(|r| *r == g.id || Some(*r) == own))
+            .collect();
+        if counted.is_empty() || counted.iter().all(|m| m.status.as_str() == cfg.first_status()) {
+            cfg.first_status()
+        } else if counted.iter().all(|m| m.status.is_done()) {
+            crate::config::DONE
+        } else {
+            cfg.started_status()
+        }
+    };
+    all.iter().filter(|g| is_group(g)).map(|g| (g.id.as_str(), read(g))).collect()
+}
+
 /// 아직 안 끝난 막음이 하나라도 있는가. 없는 이슈를 가리키는 것은 막지
 /// 않는다 — 끊긴 참조는 `moai status` 가 드러내지 `ready` 가 영원히 막지 않는다.
 pub fn is_blocked(i: &Issue, by_id: &BTreeMap<&str, &Issue>) -> bool {
@@ -1784,6 +1845,118 @@ mod tests {
             "마일스톤이 밑의 에픽과 그 멤버를 안 낸다"
         );
         assert!(group_members(&issues, &issues[2]).is_empty(), "묶음 아닌 줄이 멤버를 냈다");
+    }
+
+    // ── 묶음의 칸은 멤버에서 읽는다 (moai-j3b3) ─────────────────────
+
+    fn put_off_line(mut i: Issue) -> Issue {
+        i.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        i
+    }
+
+    fn state_of(issues: &[Issue], id: &str) -> String {
+        group_states(issues, &cfg()).get(id).expect("묶음이 칸을 못 받았다").to_string()
+    }
+
+    /// 멤버 칸의 조합마다 한 줄. **손으로 둔 칸은 답에 안 든다** — 에픽 줄을
+    /// 일부러 엉뚱한 칸에 둔다.
+    #[test]
+    fn a_group_reads_its_column_from_its_members() {
+        for (stored, members, want) in [
+            ("done", &[][..], "todo"),
+            ("in_progress", &["todo", "todo"][..], "todo"),
+            ("done", &["todo", "in_progress"][..], "in_progress"),
+            ("todo", &["todo", "done"][..], "in_progress"),
+            ("todo", &["review", "review"][..], "in_progress"),
+            ("todo", &["done", "done"][..], "done"),
+        ] {
+            let mut issues = vec![make("argos-0001", Kind::Epic, stored)];
+            for (n, st) in members.iter().enumerate() {
+                issues.push(member(&format!("argos-000{}", n + 2), "argos-0001", st));
+            }
+            assert_eq!(state_of(&issues, "argos-0001"), want, "칸 {stored}, 멤버 {members:?}");
+        }
+    }
+
+    /// 남은 일이 미룬 것뿐이면 닫힌 것이다. 미룬 것밖에 없고 끝난 것도 없으면
+    /// 시작도 안 한 것이다.
+    #[test]
+    fn a_deferred_member_does_not_hold_its_group_open() {
+        let epic = || make("argos-0001", Kind::Epic, "todo");
+        let rest = || put_off_line(member("argos-0003", "argos-0001", "in_progress"));
+        let closed = vec![epic(), member("argos-0002", "argos-0001", "done"), rest()];
+        assert_eq!(state_of(&closed, "argos-0001"), "done");
+        let only_shelved = vec![epic(), rest()];
+        assert_eq!(state_of(&only_shelved, "argos-0001"), "todo");
+        // 롤업은 미룬 것도 센다 — 칸과 막대가 말하는 것이 다르다.
+        assert_eq!(roll_of(&rollup(&closed, &cfg()), Some("argos-0001")).percent, Some(50));
+    }
+
+    /// **묶음 자신이 받은 미룸으로는 멤버를 안 뺀다.** 절반 끝난 에픽을 미뤘다고
+    /// `done` 이 되면 미루기가 닫기가 된다. 마일스톤에서 물려받은 미룸도 같다.
+    /// 그러나 **그 안에서 따로 미룬 것은 뺀다** — 마일스톤 밑에서 에픽 하나를
+    /// 미룬 것은 그 마일스톤 쪽에서 보면 멤버를 미룬 것과 같다.
+    #[test]
+    fn a_shelved_group_still_reads_its_whole_membership() {
+        let with = |mile_off: bool, epic_off: bool| {
+            let mut mile = make("argos-0009", Kind::Milestone, "todo");
+            let mut epic = make("argos-0001", Kind::Epic, "todo");
+            epic.milestone = Some("argos-0009".into());
+            if mile_off {
+                mile = put_off_line(mile);
+            }
+            if epic_off {
+                epic = put_off_line(epic);
+            }
+            vec![
+                mile,
+                epic,
+                member("argos-0002", "argos-0001", "done"),
+                member("argos-0003", "argos-0001", "todo"),
+            ]
+        };
+        let shelved_epic = with(false, true);
+        assert_eq!(state_of(&shelved_epic, "argos-0001"), "in_progress", "제 미룸으로 멤버를 뺐다");
+        assert_eq!(state_of(&shelved_epic, "argos-0009"), "done", "안에서 미룬 에픽이 마일스톤을 붙들었다");
+        let shelved_mile = with(true, false);
+        assert_eq!(state_of(&shelved_mile, "argos-0001"), "in_progress", "물려받은 미룸으로 멤버를 뺐다");
+        assert_eq!(state_of(&shelved_mile, "argos-0009"), "in_progress", "제 미룸으로 멤버를 뺐다");
+
+        let mut own = with(false, false);
+        own[3] = put_off_line(own[3].clone());
+        assert_eq!(state_of(&own, "argos-0001"), "done");
+    }
+
+    /// 마일스톤도 같은 자로 읽는다 — 에픽을 거쳐 온 이슈와 물려받은 자식까지.
+    /// 생각은 일이 아니라 안 센다.
+    #[test]
+    fn a_milestone_reads_the_same_way() {
+        let mut epic = make("argos-0001", Kind::Epic, "done");
+        epic.milestone = Some("argos-0009".into());
+        let mut idea = make("argos-0005", Kind::Idea, "in_progress");
+        idea.milestone = Some("argos-0009".into());
+        let issues = vec![
+            make("argos-0009", Kind::Milestone, "done"),
+            epic,
+            member("argos-0002", "argos-0001", "done"),
+            make("argos-0002.aaa", Kind::Issue, "todo"),
+            idea,
+        ];
+        assert_eq!(state_of(&issues, "argos-0009"), "in_progress");
+        assert_eq!(state_of(&issues, "argos-0001"), "in_progress", "물려받은 자식을 안 셌다");
+        assert!(!group_states(&issues, &cfg()).contains_key("argos-0002"), "일이 묶음 칸을 받았다");
+    }
+
+    /// 시작한 칸은 설정에서 온다. 두 칸짜리면 시작했어도 첫 칸이다.
+    #[test]
+    fn a_group_uses_the_configured_columns() {
+        let two = Config::parse("prefix = \"argos\"\nstatuses = \"open,done\"\n").unwrap();
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "done"),
+            member("argos-0002", "argos-0001", "done"),
+            member("argos-0003", "argos-0001", "open"),
+        ];
+        assert_eq!(group_states(&issues, &two).get("argos-0001"), Some(&"open"));
     }
     // ── idea 는 일이 아니다 ──────────────────────────────────────────
     //
