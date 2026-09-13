@@ -4,6 +4,7 @@
 //! 규칙 하나를 CLI 에서 그대로 들고 온다: **색이 혼자 뜻을 지지 않는다.**
 //! 모든 색에 글리프나 낱말이 붙는다.
 
+use super::scroll::Scroll;
 use super::{App, Mode, Row};
 use crate::nav::Entry;
 use crate::style;
@@ -54,11 +55,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         let text = clip(&text, note.width as usize);
         f.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), note);
     }
-    // 훑는 자리는 App 이 들고 있다. 잠깐 꺼내 그리고 도로 넣는다 — 그래야
-    // 나머지 그리기가 `&App` 만 빌리면 된다.
-    let mut state = std::mem::take(&mut app.list);
-    list(f, app, left, &rows, &mut state);
-    app.list = state;
+    list(f, app, left, &rows);
     detail(f, app, right, &rows);
 
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 F키 바가 선다.
@@ -166,7 +163,7 @@ fn prompt(f: &mut Frame, app: &App, at: Rect, what: &str, buf: &str) {
     f.render_widget(Paragraph::new(Line::from(spans)), at);
 }
 
-fn list(f: &mut Frame, app: &App, at: Rect, rows: &[Row], state: &mut ListState) {
+fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 테두리 두 칸을 뺀 안쪽 폭. 좁은 창에서도 음수가 되지 않게 막는다.
     let inner = at.width.saturating_sub(2) as usize;
     let items: Vec<ListItem> = rows.iter().map(|r| ListItem::new(row_line(app, r, inner))).collect();
@@ -208,10 +205,17 @@ fn list(f: &mut Frame, app: &App, at: Rect, rows: &[Row], state: &mut ListState)
         (true, false) => format!(" {}줄 ", rows.len()),
         (false, _) => format!(" {} ", counts.join("  ")),
     };
-    // **자리는 프레임을 넘어 산다.** `ListState` 를 매번 새로 만들면 훑는 자리가
-    // 0 으로 돌아가, 위젯이 커서를 보이게 하려고 커서를 늘 맨 아랫줄에 붙인다 —
-    // 커서 아래를 한 줄도 못 보게 된다.
-    state.select((!rows.is_empty()).then_some(app.cursor.min(rows.len().saturating_sub(1))));
+    // **자리는 프레임을 넘어 산다**(`App::list`). 매번 새로 세면 훑는 자리가 0 으로
+    // 돌아가, 커서를 보이게 하려고 커서를 늘 맨 아랫줄에 붙인다 — 커서 아래를 한
+    // 줄도 못 보게 된다. 굴리는 셈은 상세와 같은 조각이 하고, 위젯은 그 자리를 받아
+    // 그리기만 한다: 커서가 이미 보이는 자리를 주므로 위젯이 다시 옮기지 않는다.
+    // 줄 하나가 한 줄이라 높이가 곧 줄 수다.
+    let selected = (!rows.is_empty()).then_some(app.cursor.min(rows.len().saturating_sub(1)));
+    app.list.fit(at.height.saturating_sub(2) as usize, rows.len());
+    if let Some(at) = selected {
+        app.list.reveal(at);
+    }
+    let mut state = ListState::default().with_offset(app.list.offset()).with_selected(selected);
     f.render_stateful_widget(
         List::new(items)
             .block(Block::default().borders(Borders::ALL).title(title))
@@ -219,8 +223,26 @@ fn list(f: &mut Frame, app: &App, at: Rect, rows: &[Row], state: &mut ListState)
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
             .highlight_symbol(CURSOR),
         at,
-        state,
+        &mut state,
     );
+    scroll_mark(f, &app.list, at, "");
+}
+
+/// 굴릴 것이 남았으면 **칸의 아래 테두리 오른쪽에** 적는다. 목록이든 상세든 같은
+/// 자리, 같은 글이다 — 무엇을 적을지는 조각([`Scroll::mark`])이 정하고 여기는
+/// 놓기만 한다. 아래 테두리는 제목도 무엇도 안 쓰는 자리라 본문 한 줄을 안 뺏는다.
+///
+/// 칸이 좁으면 `…` 를 남기고 자른다. 테두리 모서리는 안 덮는다.
+fn scroll_mark(f: &mut Frame, s: &Scroll, at: Rect, hint: &str) {
+    let Some(mark) = s.mark() else { return };
+    if at.height < 2 || at.width < 4 {
+        return;
+    }
+    let room = at.width as usize - 2;
+    let text = clip(&format!(" {mark}{hint} "), room);
+    let w = crate::text::width(&text) as u16;
+    let x = at.x + at.width - 1 - w;
+    f.buffer_mut().set_stringn(x, at.y + at.height - 1, &text, room, dim());
 }
 
 /// 한 줄: `id  p· 제목`. 디렉터리는 제목 뒤에 `/` 가 붙는다 — MC 와 같다.
@@ -281,8 +303,8 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
 fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 좌우 여백은 목록의 커서 자리와 같은 폭이다. `inner()` 가 테두리와 여백을
     // 함께 빼 주므로 폭 계산은 아래가 그대로 쓴다.
-    // 테두리는 **나중에** 그린다 — 제목에 "몇 줄 더" 를 얹으려면 줄을 먼저
-    // 세야 한다. 자리 계산은 그래도 블록에 맡긴다.
+    // 테두리는 **나중에** 그린다 — 굴릴 것이 남았다는 표시를 테두리에 얹으려면
+    // 줄을 먼저 세야 한다. 자리 계산은 그래도 블록에 맡긴다.
     let block = Block::default()
         .borders(Borders::ALL)
         .padding(Padding::horizontal(left_gutter() as u16));
@@ -306,39 +328,26 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     };
 
     // **줄 수를 우리가 안다.** `Wrap` 을 켜면 위젯이 줄을 더 늘려 우리가 센
-    // 수와 화면의 수가 어긋나고, 그러면 "몇 줄 더" 도 굴린 자리도 틀린다.
-    // 본문은 `markdown::layout` 이 이미 폭에 맞춰 접었고, 머리 줄은
+    // 수와 화면의 수가 어긋나고, 그러면 굴릴 것이 남았다는 표시도 굴린 자리도
+    // 틀린다. 본문은 `markdown::layout` 이 이미 폭에 맞춰 접었고, 머리 줄은
     // `about` 이 접거나 잘라서 낸다.
-    let height = inner.height as usize;
-    let hidden = lines.len().saturating_sub(height);
-    // 끝을 지나 굴리지 않는다 — 빈 화면을 보여 주고 되돌아올 길을 잃게 한다.
     //
-    // **자른 값을 도로 넣는다.** 그리는 데만 자르면 `App` 에는 큰 수가 남아,
-    // 끝까지 굴린 뒤 `k` 를 눌러도 그 수가 다시 상한 밑으로 내려올 때까지
-    // 화면이 한 칸도 안 움직인다 — 굴리는 키가 죽은 것처럼 보인다. 창을
-    // 줄였을 때 옛 수가 살아나 화면이 갑자기 끝으로 튀는 것도 같은 뿌리다.
-    let scroll = (app.scroll as usize).min(hidden);
-    app.scroll = scroll as u16;
-    let more = hidden - scroll;
-
-    // **더 있는데 안 보이면 말한다.** 잘린 줄이 조용히 사라지면 보는 쪽은
-    // 그것이 본문의 끝인 줄 안다. 제목에 얹으면 본문 한 줄을 안 뺏는다.
-    // **굴리는 키를 여기서 말한다.** 아래 F키 바는 좁으면 뒤에서부터 키를
-    // 떨어뜨리는데, 80칸이면 떨어지는 것이 하필 `j·k` 다 — 그때 화살표만
-    // 가리키면 사람은 `↓` 를 누르고, 그것은 왼쪽 커서를 옮겨 보던 이슈를
-    // 잃는다. 알림은 그것이 가리키는 것 곁에 둔다.
-    let title = match (more, scroll) {
-        (0, 0) => " 상세 ".to_string(),
-        (0, _) => " 상세 · 끝 (k 로 위) ".to_string(),
-        (n, _) => format!(" 상세 · {n}줄 더 (j·k) "),
-    };
-    f.render_widget(block.title(title), at);
+    // 잰 것을 조각에 넣으면 **끝을 지난 자리가 잘려 도로 들어간다**(`Scroll::fit`)
+    // — 그리는 데만 자르면 끝까지 굴린 뒤 `k` 가 한동안 죽는다.
+    app.detail.fit(inner.height as usize, lines.len());
+    f.render_widget(block.title(" 상세 "), at);
+    // **굴리는 키를 표시 곁에서 말한다.** 아래 F키 바는 좁으면 뒤에서부터 키를
+    // 떨어뜨리는데, 80칸이면 떨어지는 것이 하필 `j·k` 다. 알림은 그것이
+    // 가리키는 것 곁에 둔다.
+    scroll_mark(f, &app.detail, at, " (j·k)");
     // **넘친 줄은 잘렸다고 말한다.** `Wrap` 을 끈 뒤로 폭을 넘는 줄은 위젯이
     // 표시도 없이 잘라 낸다 — 태그 줄, 롤업의 칸별 건수, `F3` 원문, 접지
     // 않기로 한 코드 줄이 그 길로 조용히 꼬리를 잃었다. 만드는 쪽마다 따로
     // 자르면 또 하나를 빠뜨리므로 **나가는 마지막 자리에서 한 번** 자른다.
     let lines: Vec<Line> = lines.into_iter().map(|l| fit(l, inner.width as usize)).collect();
-    f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), inner);
+    // 줄 수가 u16 을 넘는 본문이면 거기서 멈춘다 — 넘겨 접으면 첫 줄로 튄다.
+    let top = u16::try_from(app.detail.offset()).unwrap_or(u16::MAX);
+    f.render_widget(Paragraph::new(lines).scroll((top, 0)), inner);
 }
 
 /// 한 줄을 패널 폭에 맞춘다. 넘치면 `…` 를 남긴다.
@@ -1350,14 +1359,15 @@ mod tests {
         let first = render(&mut a, 100, 16).join("\n");
         assert!(first.contains("1번째"), "{first}");
         assert!(!first.contains("40번째"), "다 보이면 굴릴 것이 없다\n{first}");
-        assert!(first.contains("줄 더"), "남은 줄을 안 알린다\n{first}");
+        assert!(first.contains("↓ ") && first.contains("줄 (j·k)"), "남은 줄을 안 알린다\n{first}");
 
         for _ in 0..12 {
             a.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
         }
         let last = render(&mut a, 100, 16).join("\n");
         assert!(last.contains("40번째"), "끝까지 못 굴렸다\n{last}");
-        assert!(!last.contains("줄 더"), "다 보이는데 더 있다고 한다\n{last}");
+        assert!(!last.contains("↓ "), "다 보이는데 더 있다고 한다\n{last}");
+        assert!(last.contains("· 끝"), "끝까지 굴렸는데 끝이라 안 한다\n{last}");
 
         // **되돌아오는 길도 한 번에 열린다.** 그리는 데만 자르고 `App` 에 큰
         // 수를 남겨 두면, 끝까지 굴린 뒤 `k` 를 눌러도 그 수가 상한 밑으로
@@ -1365,7 +1375,7 @@ mod tests {
         a.key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
         let up = render(&mut a, 100, 16).join("\n");
         assert_ne!(up, last, "끝까지 굴린 뒤 k 가 아무 일도 안 한다");
-        assert!(up.contains("줄 더"), "되돌아왔는데 남은 줄을 안 알린다\n{up}");
+        assert!(up.contains("↓ 1줄"), "되돌아왔는데 남은 줄을 안 알린다\n{up}");
     }
 
     /// **넘친 줄은 잘렸다고 말한다.** `Wrap` 을 끈 뒤로 폭을 넘는 줄은 위젯이
@@ -1443,10 +1453,11 @@ mod tests {
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        let _ = render(&mut a, 100, 16);
         a.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
-        assert!(a.scroll > 0);
+        assert!(a.detail.offset() > 0);
         a.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        assert_eq!(a.scroll, 0, "굴린 자리를 들고 다른 줄로 갔다");
+        assert_eq!(a.detail.offset(), 0, "굴린 자리를 들고 다른 줄로 갔다");
     }
 
     /// **상세에 포커스를 두고 `End` 를 누르면 본문 끝이 보이고, 곧바로 `↑` 가 듣는다.**
@@ -1470,6 +1481,54 @@ mod tests {
         a.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
         let up = render(&mut a, 100, 16).join("\n");
         assert_ne!(up, end, "↑ 를 눌렀는데 화면이 그대로다");
+    }
+
+    /// **목록도 굴릴 것이 남았으면 말한다** — 상세와 같은 자리(아래 테두리), 같은
+    /// 글이다. 짧은 목록과 짧은 상세에는 표시가 없다.
+    #[test]
+    fn both_panes_mark_what_is_left_to_scroll_in_the_same_place() {
+        let many: Vec<Issue> = (1..=30)
+            .map(|n| {
+                Issue::new(format!("argos-{n:04}"), format!("일 {n}"), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z")
+            })
+            .collect();
+        let mut a = App::new(many, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        // 창 14줄 → 경로·배너·키 바를 뺀 몸통 11줄 → 테두리를 뺀 목록 안쪽 9줄.
+        // 30줄 중 21줄이 아래에 숨는다.
+        let lines = render(&mut a, 100, 14);
+        let bottom = lines.iter().rev().find(|l| l.contains('└')).cloned().unwrap_or_default();
+        assert!(bottom.contains("↓ 21줄"), "목록 아래 테두리에 표시가 없다\n{}", lines.join("\n"));
+        assert!(!lines.iter().any(|l| l.contains("(j·k)")), "짧은 상세에 표시가 섰다\n{}", lines.join("\n"));
+
+        // 커서를 끝으로 — 목록이 따라 굴러 끝이라 말한다
+        a.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        let lines = render(&mut a, 100, 14);
+        let bottom = lines.iter().rev().find(|l| l.contains('└')).cloned().unwrap_or_default();
+        assert!(bottom.contains("↑ 21줄 · 끝"), "{}", lines.join("\n"));
+        assert!(lines.iter().any(|l| l.contains("> argos-0030")), "커서가 안 보인다\n{}", lines.join("\n"));
+
+        // 짧은 목록과 다 들어가는 상세에는 표시가 없다
+        let lines = render(&mut app(), 100, 20).join("\n");
+        assert!(!lines.contains('↓') && !lines.contains('↑'), "굴릴 것이 없는데 표시가 섰다\n{lines}");
+    }
+
+    /// **목록이 줄면 빈 줄을 보이며 서 있지 않는다.** 끝까지 내려가 있던 목록이
+    /// 다시 읽혀 짧아지면 끝으로 당겨 칸을 채운다.
+    #[test]
+    fn a_shrunk_list_is_pulled_back_to_fill_the_pane() {
+        let make = |n: usize| {
+            Issue::new(format!("argos-{n:04}"), format!("일 {n}"), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z")
+        };
+        let mut a = App::new((1..=30).map(make).collect(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        let _ = render(&mut a, 100, 14);
+        a.cursor = 11; // 다시 읽혀 커서가 위쪽 줄에 섰다
+        a.adopt((1..=12).map(make).collect());
+        let lines = render(&mut a, 100, 14);
+        // 안쪽 9줄에 12줄 — 끝으로 당기면 4 번부터 12 번까지 빈 줄 없이 선다.
+        let shown = lines.iter().filter(|l| l.starts_with("│") && l.contains("argos-")).count();
+        assert_eq!(shown, 9, "빈 줄을 보이며 서 있다\n{}", lines.join("\n"));
+        assert!(lines.iter().any(|l| l.contains("argos-0004")), "{}", lines.join("\n"));
     }
 
     /// 빈 저장소도 그려진다.
