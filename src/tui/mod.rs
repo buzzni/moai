@@ -93,6 +93,15 @@ pub struct App {
     /// 올리는 것은 `cmd::tui` 의 루프 하나뿐이고, 그래서 한 프레임 안의
     /// 목록·상세·롤업이 같은 걸음을 본다.
     pub spin: usize,
+    /// 다른 워크트리를 겹쳐 보는가. `w` 가 켜고 끈다 — CLI 의 `--worktree` 와 같은
+    /// 길(`worktree::gather`)로 읽는다. **꺼진 채로 시작한다**: 켜면 `git` 을 부르고
+    /// 옆 파일을 읽는데, 시키지 않은 일을 여는 순간마다 하면 탐색기가 무거워진다.
+    pub worktree: bool,
+    /// 겹쳐 본 줄의 출처. 꺼져 있으면 비었다.
+    pub origin: crate::worktree::Origin,
+    /// 옆 워크트리에서 만난 문제. **배너로 말만 한다** — CLI 가 stderr 로 흘리는
+    /// 말인데, 대체 화면 안에서는 그 길을 못 쓴다.
+    pub elsewhere: Vec<String>,
 }
 
 impl App {
@@ -153,6 +162,9 @@ impl App {
             list: ListState::default(),
             quit: false,
             spin: 0,
+            worktree: false,
+            origin: crate::worktree::Origin::default(),
+            elsewhere: Vec::new(),
         };
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
         // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
@@ -167,12 +179,14 @@ impl App {
         // 읽기 **전에** 잰다. 뒤에 재면 읽고 재는 사이의 쓰기를 놓치고, 놓친
         // 것은 영영 안 돌아온다. 먼저 재면 최악이 헛 알림 하나다.
         let stamp = stamp_of(repo);
-        match repo.read() {
-            Ok(load) => {
+        match crate::worktree::gather(repo, self.worktree) {
+            Ok(g) => {
                 self.trouble = None;
                 self.stamp = stamp;
-                self.unreadable = load.errors.iter().map(|e| e.id.clone()).collect();
-                self.adopt(load.issues);
+                self.unreadable = g.load.errors.iter().map(|e| e.id.clone()).collect();
+                self.origin = g.origin;
+                self.elsewhere = g.trouble;
+                self.adopt(g.load.issues);
             }
             // **소리 없이 넘기지 않는다.** 삼키면 F5 는 아무 일도 안 하고
             // 배너는 그대로 붙어 있어, 사람은 누르고 또 누르며 까닭을 못 얻는다.
@@ -409,6 +423,12 @@ impl App {
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             KeyCode::Esc => self.clear_filter(),
             KeyCode::F(5) | KeyCode::Char('r') => self.reload(),
+            // 켜고 끄는 것은 **다시 읽는 것**이다. 겹친 줄은 적재 때 한 번 세는 것이라
+            // (`states`·거름망·경고), 들고 있는 것에 덧칠하면 셈이 옛 줄로 남는다.
+            KeyCode::Char('w') => {
+                self.worktree = !self.worktree;
+                self.reload();
+            }
             KeyCode::F(3) | KeyCode::Char('m') => {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면

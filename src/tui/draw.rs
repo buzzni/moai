@@ -93,6 +93,9 @@ fn banner(app: &App) -> Option<(String, bool)> {
     if app.warnings > 0 {
         parts.push(format!("드러난 것 {}건 — `moai status` 가 자세히 낸다", app.warnings));
     }
+    // 옆 워크트리의 문제는 **급하지 않다** — 제 파일은 멀쩡하고, 그 줄만 빠진 채로
+    // 겹쳐 보고 있다.
+    parts.extend(app.elsewhere.iter().cloned());
     (!parts.is_empty()).then(|| (format!(" ! {} ", parts.join("   ·   ")), urgent))
 }
 
@@ -107,7 +110,22 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
         Some(b) => w.saturating_sub(crate::text::width(b) + 3),
         None => w,
     };
+    // **겹쳐 보는 중이면 늘 보인다** — 거름망 뱃지와 같은 까닭이다. 옆에서 온 줄에만
+    // `⎇` 가 붙으므로, 옆이 조용하면 켜진 화면과 꺼진 화면이 똑같이 보인다.
+    let overlay = app.worktree.then(|| {
+        let trees = app.origin.labels();
+        let names = if trees.is_empty() { "옆 워크트리 없음".to_string() } else { trees.join(", ") };
+        clip(&format!("{} {names}  w 로 끈다", style::BRANCH_GLYPH), w / 2)
+    });
+    let room = match &overlay {
+        Some(o) => room.saturating_sub(crate::text::width(o) + 3),
+        None => room,
+    };
     let mut spans = vec![Span::styled(clip(&app.crumbs(), room), bold())];
+    if let Some(o) = overlay {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled(o, branch()));
+    }
     if let Some(b) = badge {
         spans.push(Span::raw("   "));
         spans.push(Span::styled(b, Style::new().fg(Color::Black).bg(Color::LightYellow)));
@@ -222,6 +240,13 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
         Span::styled(glyph_of(app, at).to_string(), status(app.column(at))),
         Span::raw(" "),
     ];
+    // 다른 워크트리에서 온 줄은 제목 **앞에** `⎇ <브랜치>` — CLI 목록과 같은 자리다.
+    // 머리글에 넣어 재므로 제목 몫이 그만큼 줄고, 잘린 제목은 여전히 `…` 를 남긴다.
+    let mut head = head;
+    if let Some(b) = app.origin.branch(&i.id) {
+        head.push(Span::styled(format!("{} {}", style::BRANCH_GLYPH, clip(b, BRANCH_CAP)), branch()));
+        head.push(Span::raw(" "));
+    }
     // 커서 자리 + 머리글 폭. **`CURSOR` 에서 잰다** — 숫자를 손으로 적으면
     // 글리프를 바꾼 날 제목 몫이 한두 칸 넉넉해지고, 넘친 줄은 위젯이 말없이
     // 잘라 내 잘렸다는 `…` 마저 사라진다.
@@ -376,7 +401,12 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     // **제목은 우리가 접는다.** `Wrap` 을 끈 것은 줄 수를 정확히 알기 위해서고,
     // 그 대가로 넘친 줄을 위젯이 표시도 없이 잘라 낸다 — 잘렸다는 `…` 마저
     // 사라지는 것이 이 저장소가 막아 온 실패다.
-    let mut out = vec![Line::from(Span::styled(i.id.clone(), dim()))];
+    let mut first = vec![Span::styled(i.id.clone(), dim())];
+    if let Some(b) = app.origin.branch(&i.id) {
+        first.push(Span::raw("  "));
+        first.push(Span::styled(format!("{} {b}", style::BRANCH_GLYPH), branch()));
+    }
+    let mut out = vec![Line::from(first)];
     out.extend(wrapped(&i.title, w, bold()));
     out.push(Line::from(""));
 
@@ -593,7 +623,10 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
     // **덜 급한 것부터 떨어뜨린다.** 키를 더할 때마다 줄이 길어져 맨 끝이
     // 말없이 잘리는데, 맨 끝은 늘 나가는 길이다 — 나갈 길을 못 찾는 것이
     // 빽빽한 줄보다 나쁘다. 폭이 모자라면 앞쪽부터 버린다.
+    // `w` 는 **맨 먼저 떨어진다.** 켜 둔 동안에는 경로 줄의 뱃지가 끄는 법을 대므로,
+    // 좁은 창에서 이 자리를 잃어도 나갈 길을 잃지는 않는다.
     let mut optional = vec![
+        key("w", if app.worktree { "워크트리 끄기" } else { "워크트리" }),
         key("j·k", "굴리기"),
         key("F3", if app.raw { "그리기" } else { "원문" }),
         key("F5", "갱신"),
@@ -627,6 +660,13 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
 /// 잘린다. 나갈 길을 못 찾는 것이 빽빽한 줄보다 나쁘다.
 fn key<'a>(k: &'a str, what: &'a str) -> Span<'a> {
     Span::styled(format!(" {k} {what}"), dim())
+}
+
+/// 브랜치 머리표를 이만큼에서 자른다. 긴 브랜치 하나가 제목 몫을 다 먹으면 안 된다.
+const BRANCH_CAP: usize = 16;
+
+fn branch() -> Style {
+    from_anstyle(style::BRANCH)
 }
 
 fn dim() -> Style {
@@ -778,6 +818,43 @@ mod tests {
         assert!(lines.contains("아주 긴"), "에픽 제목이 없다\n{lines}");
         assert!(lines.contains('…'), "잘렸는데 표시가 없다\n{lines}");
         // 디렉터리는 제목 뒤에 `/` 가 붙는다
+    }
+
+    /// 옆 워크트리에서 온 줄은 목록과 상세 둘 다 `⎇ <브랜치>` 를 댄다. 켜진 동안은
+    /// 경로 줄이 그렇다고 말하고, `w` 가 켜고 끈다.
+    #[test]
+    fn a_line_from_another_worktree_is_marked_in_the_list_and_the_detail() {
+        let mut a = app();
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let plain_screen = render(&mut a, 120, 12).join("\n");
+        assert!(!plain_screen.contains('⎇'), "안 겹쳤는데 머리표가 섰다\n{plain_screen}");
+        assert!(plain_screen.contains("w 워크트리"), "켜는 키를 안 알린다\n{plain_screen}");
+
+        // 저장소 없이 세운 App 이라 `w` 는 켜기만 하고 읽지 않는다 — 겹친 결과는 손으로 넣는다.
+        a.key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE));
+        assert!(a.worktree, "w 가 안 켰다");
+        let mut theirs = issues()[2].clone();
+        theirs.status = crate::model::Status::new("review");
+        theirs.updated_at = "2026-09-02T00:00:00Z".into();
+        let (all, origin) = crate::worktree::overlay(
+            issues(),
+            vec![("feat/x".into(), std::path::PathBuf::from("/wt"), vec![theirs])],
+        );
+        a.adopt(all);
+        a.origin = origin;
+        // 커서를 옆에서 온 줄에 둔다.
+        let at = a.rows().iter().position(|r| matches!(r, Row::Item(e) if e.at().is_some_and(|i| a.issues[i].id == "argos-0004"))).unwrap();
+        a.cursor = at;
+        let lines = render(&mut a, 120, 12);
+        let screen = lines.join("\n");
+        let row = lines.iter().find(|l| l.contains("argos-0004") && l.contains("집은 멤버")).expect("줄이 없다");
+        assert!(row.contains("⎇ feat/x 집은 멤버"), "목록에 머리표가 없다\n{screen}");
+        assert!(lines[0].contains("⎇ feat/x") && lines[0].contains("w 로 끈다"), "켜졌다고 안 말한다\n{screen}");
+        assert!(screen.matches("⎇ feat/x").count() >= 3, "상세에 머리표가 없다\n{screen}");
+        assert!(screen.contains("w 워크트리 끄기"), "{screen}");
+
+        a.key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE));
+        assert!(!a.worktree, "w 가 안 껐다");
     }
 
     /// 걸음은 **그린 횟수가 아니라 시계가** 올린다. 다시 그리기만 해서는
