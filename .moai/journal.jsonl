@@ -1048,3 +1048,4 @@
 {"ts":"2026-09-13T19:20:22Z","id":"moai-xs9x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"고침: 이름 규칙은 main 합류 뒤 user_config::names 하나다(projects::names 는 지웠다). 한눈 보기가 그리는 이름·경로는 text::sanitize 를 지난다 — 색은 거른 이름 곁에 얹는다"}
 {"ts":"2026-09-13T19:20:23Z","id":"moai-6au6.296","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1·2번(json uninitialized, id 폭) 반영, 3번은 main 합류 뒤 names·shell_word·sanitize 로 반영, inspect→Repo::open 은 moai-s51k, skill.rs shell_word 는 idea moai-gijm"}
 {"ts":"2026-09-13T19:20:27Z","id":"moai-6au6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":".moai 밖 status·ready 가 등록한 프로젝트를 프로젝트마다 따로 열어 한눈에 낸다 (Repo::open·projects::open·--json projects), 안에서는 바이트 그대로"}
+{"ts":"2026-09-13T23:26:00Z","id":"moai-ujpu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
