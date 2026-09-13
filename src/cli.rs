@@ -29,6 +29,12 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
   moai defer <id> -m \"다음 분기에\"  계획에서 잠시 뺀다. 칸도 종류도 안 바뀐다
   moai defer <id> --undo           도로 집는다
 
+여러 프로젝트를 한곳에서 볼 때:
+
+  moai project add <dir>        등록하면 `.moai` 밖에서 부른 `moai`·`status`·`ready` 가
+                                등록한 프로젝트를 한눈에 낸다
+  moai -C <dir> <명령>          그 밖의 명령은 어느 프로젝트인지 댄다
+
 계획을 한 번에 세울 때:
 
   moai add --from - <<'EOF'
@@ -43,7 +49,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 그 저장소에서 일하는 절차가 거기 있다."
 )]
 pub struct Cli {
-    /// 없으면 `status` 다 (저장소 밖에서는 도움말). **오류가 아니다** —
+    /// 없으면 `status` 다 (저장소 밖에서는 등록한 프로젝트의 한눈 보기, 등록한
+    /// 것도 없으면 도움말). **오류가 아니다** —
     /// 맨몸으로 부른 것을 실패로 끝내면 처음 만난 쪽이 도구가 고장 난 줄 안다.
     #[command(subcommand)]
     pub cmd: Option<Cmd>,
@@ -235,10 +242,15 @@ pub enum Cmd {
 
     /// 여러 프로젝트를 한 moai 에서 보려고 디렉터리를 등록한다 (사용자 설정)
     #[command(subcommand, after_help = "\
+예시:
   moai project add ~/work/argos         등록한다. .moai 가 아직 없어도 받는다
   moai project add repo/apps/a          모노레포는 하위 디렉터리를 따로 등록한다
   moai project ls                       등록한 것과 그 상태
   moai project rm ~/work/argos          목록에서만 뺀다. 디렉터리는 안 건드린다
+
+  등록하면 `.moai` 밖에서 부른 `moai`·`moai status`·`moai ready` 가 등록한
+  프로젝트를 프로젝트마다 한눈에 낸다 (`--json` 은 `projects` 배열). 그 밖의
+  명령은 어느 프로젝트인지 모르니 `moai -C <dir> <명령>` 으로 부른다.
 
   저장소가 아니라 **사람의** 설정이다 — `.moai` 밖 어디서 불러도 된다. 자리는
   MOAI_CONFIG → $XDG_CONFIG_HOME/moai/config.toml → ~/.config/moai/config.toml.
@@ -271,12 +283,21 @@ pub enum Cmd {
 #[derive(Subcommand, Debug)]
 pub enum ProjectCmd {
     /// 디렉터리를 등록한다 (이미 있으면 그대로)
+    #[command(after_help = "\
+예시:
+  moai project add .                    지금 디렉터리
+  moai project add ~/work/argos         .moai 가 없으면 \"init 전\" 을 알리고 등록한다
+
+  다시 불러도 된다 — 이미 있으면 \"이미 등록돼 있다\" 로 0 종료한다.")]
     Add {
         /// 등록할 디렉터리. 있어야 하지만 `.moai` 는 없어도 된다
         #[arg(value_name = "디렉터리")]
         path: std::path::PathBuf,
     },
     /// 등록한 것을 낸다 — 이름·경로·`.moai` 유무
+    // 첫 줄을 `"\` 로 잇지 않는다 — 줄 잇기가 다음 줄의 앞 공백까지 먹는다.
+    #[command(after_help = "  이름은 디렉터리 이름이고, 겹치면 위 조각을 붙여 가른다 (`apps/a`·`libs/a`).
+  언제나 0 으로 끝난다 — 설정 파일이 깨졌으면 stderr 에 한 줄로 비추고 계속한다.")]
     Ls,
     /// 목록에서 뺀다. 디렉터리와 그 `.moai` 는 그대로 둔다
     Rm {

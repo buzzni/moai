@@ -132,6 +132,15 @@ const GROUPS: &str = r#"    moai epic add "저장 계층"                      �
 멤버가 있는데 접으려면 그 멤버를 `moai defer` 한다 — 끝난 멤버가 하나도 없으면
 미뤄도 첫 칸이니, 그때는 묶음을 `moai defer` 해 계획에서 뺀다."#;
 
+/// 여러 프로젝트. **`main` 에 있는 것만 적는다** — 탐색기의 프로젝트 층이나
+/// 프로젝트 색처럼 아직 서지 않은 것을 적으면, 시킨 대로 친 명령이 없는 것을 찾는다.
+const PROJECTS: &str = r#"    moai project add <dir>                 내 설정에 등록한다 (`.moai` 가 없어도 받는다)
+    moai project ls                        등록한 것과 그 상태
+
+`.moai` 밖에서 부른 `moai`·`moai status`·`moai ready` 는 등록한 프로젝트를
+프로젝트마다 한눈에 낸다. 그 밖의 명령은 어느 프로젝트인지 모르니
+`moai -C <dir> <명령>` 으로 부른다."#;
+
 const PEOPLE: &str = r#"**담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
 `-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`
 에서 오고, 거기 없으면 `--user "이름 (메일)"` 이나 `MOAI_ACTOR` 로 준다."#;
@@ -207,6 +216,10 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 ### 묶음은 둘이다
 
 {GROUPS}
+
+### 여러 프로젝트
+
+{PROJECTS}
 
 ### 기능 요청을 받으면
 
@@ -319,6 +332,10 @@ pub fn reference() -> String {
 
 `--dry-run` 이 heredoc 오타로 엉뚱한 여섯 개를 만드는 것을 막는다.
 
+## 여러 프로젝트
+
+{PROJECTS}
+
 ## 담아 둔 생각을 펼치기
 
 {IDEAS}
@@ -390,7 +407,7 @@ mod tests {
         }
         let rules = rules();
         assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
-        for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE] {
+        for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE, PROJECTS] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(reference.contains(piece), "참고 문서에 없다 — {head}");
