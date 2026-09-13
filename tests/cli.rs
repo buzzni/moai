@@ -41,7 +41,11 @@ impl Drop for Scratch {
 /// 걷는 것은 moai 가 실제로 기계에서 읽는 자리뿐이다.
 /// - `HOME`·`CLAUDE_CONFIG_DIR`·`CLAUDE_CODE_PLUGIN_CACHE_DIR` — `claude` 의 장부
 /// - git 전역·시스템 설정 — 사람 이름이 `MOAI_ACTOR` 다음에 여기서 온다.
-///   `GIT_CONFIG_GLOBAL` 을 주면 git 은 `~/.gitconfig` 도 `XDG_CONFIG_HOME` 도 안 본다
+///   `GIT_CONFIG_GLOBAL` 을 주면 git 은 `~/.gitconfig` 도 `XDG_CONFIG_HOME` 도 안 본다.
+///   환경으로 넣는 설정(`GIT_CONFIG_COUNT`·`GIT_CONFIG_PARAMETERS`)과 저장소를
+///   가리키는 변수(`GIT_DIR`·`GIT_WORK_TREE`·…)도 걷는다 — git 훅이나
+///   `git -c … rebase -x 'cargo test'` 안에서 돌면 git 이 이것들을 내보내고,
+///   그러면 moai 의 `git config user.name` 이 바깥 사람의 이름을 읽는다
 /// - `MOAI_ACTOR`·`MOAI_NOW` — 셸에 내보내 둔 값이 새면 "사람을 못 찾는다" 와
 ///   "시계를 고정하지 않았다" 를 보려던 시험이 조용히 딴것을 본다
 ///
@@ -61,8 +65,25 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env_remove("MOAI_ACTOR")
         .env_remove("MOAI_NOW");
+    for var in GIT_LEAKS {
+        cmd.env_remove(var);
+    }
     cmd
 }
+
+/// 물려받으면 git 이 바깥 저장소나 바깥 설정을 보게 되는 변수들.
+const GIT_LEAKS: &[&str] = &[
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+];
 
 fn moai(dir: &Path, args: &[&str]) -> Output {
     isolated(BIN)
@@ -1212,7 +1233,9 @@ fn tests_do_not_read_the_runners_home() {
         // 제 사람을 안 주면 git 에서 찾는다. 새는 집의 git 설정이나 물려받은
         // `MOAI_ACTOR` 가 보이면 여기서 이름이 붙어 쓰기가 지나간다.
         let bare = isolated(BIN).args(["add", "누구냐"]).current_dir(&repo).output().unwrap();
+        // 다른 까닭으로 넘어져도 초록이 되지 않게, 사람을 못 찾아 멈춘 것인지까지 본다.
         assert!(!bare.status.success(), "시험이 사람의 이름을 읽었다\n{}", text(&bare));
+        assert!(text(&bare).contains("git 사용자 정보가 없다"), "사람을 못 찾아 멈춘 것이 아니다\n{}", text(&bare));
         return;
     }
 
@@ -1267,6 +1290,8 @@ fn tests_do_not_read_the_runners_home() {
             .current_dir(s.path())
             .env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            // 기계의 `/etc/gitconfig` 에 이름이 있으면 심은 것 없이도 지나가 표지를 못 잰다.
+            .env("GIT_CONFIG_NOSYSTEM", "1")
             .env(var, at)
             .output()
             .unwrap();
@@ -4467,12 +4492,12 @@ fn an_empty_note_is_told_apart_from_a_missing_one() {
 
 /// 사람의 git 설정 없이 git 을 돌린다. 커밋에 이름이 필요하니 여기서 준다.
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    // `isolated` 로 띄운다 — git 훅 안에서 시험이 돌 때 물려받은 `GIT_DIR` 이 남으면
+    // 여기서의 `git commit` 이 바깥 저장소에 떨어진다.
+    let out = isolated("git")
         .args(["-c", "user.name=테스터", "-c", "user.email=tester@example.com", "-c", "init.defaultBranch=main"])
         .args(args)
         .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
         .output()
         .expect("git 을 실행하지 못했다");
     assert!(out.status.success(), "git {args:?} 가 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
