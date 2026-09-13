@@ -325,22 +325,27 @@ impl Ctx<'_> {
         // 만든 자식이 부모를 잃고 뿌리로 떠오른다 — 그러면 `has_kids` 도
         // 안 서서 그 idea 는 열리지도 않는다.
         //
-        // 생각인 부모는 **에픽 없이 사는 자리**로 견준다. 생각은 뿌리로 올라가고
-        // `report::groups` 도 생각의 에픽을 자식에게 안 넘기므로, 에픽을 안 적은
-        // 자식은 그 밑에 접히고 제 에픽을 적은 자식은 제 에픽으로 간다.
+        // 생각인 부모는 **그려진 자리의 에픽**으로 견준다. 뿌리로 올라간 생각은
+        // 에픽 없이 사는 자리고, 이슈 밑에 접힌 생각은 그 이슈의 에픽 안에 산다 —
+        // `report::groups` 가 소속을 끊는 곳도 앞의 것뿐이다. 그래서 에픽을 안
+        // 적은 자식은 언제나 그 밑에 접히고, 제 에픽을 적은 자식은 그것이 그려진
+        // 자리와 다를 때만 제 에픽으로 간다.
         if let Some(p) = crate::id::parent_of(&me.id)
             && let Some(&pat) = self.by_id.get(p)
             && matches!(self.issues[pat].kind, Kind::Issue | Kind::Idea)
-            && self.epic_of.get(&me.id)
-                == if crate::report::is_idea(&self.issues[pat]) { None } else { self.epic_of.get(p) }
         {
             // **부모가 사는 자리를 그대로 쓴다.** `home_of_work` 로 곧장
             // 내려가면 부모가 제 참조 때문에 `(길 잃음)` 으로 갈라진 것을
             // 못 보고 옛 자리를 셈해, 자식만 닿는 길 없는 자리에 남는다 —
             // 에픽에서와 같은 실패다.
             let mut path = self.home(pat);
-            path.push(Seg::Issue(p.to_string()));
-            return path;
+            let rooted_thought =
+                crate::report::is_idea(&self.issues[pat]) && !matches!(path.last(), Some(Seg::Issue(_)));
+            let passed = if rooted_thought { None } else { self.epic_of.get(p) };
+            if self.epic_of.get(&me.id) == passed {
+                path.push(Seg::Issue(p.to_string()));
+                return path;
+            }
         }
         // **생각은 계획 계층에 걸리지 않는다.** 걸면 에픽 상세가 `멤버 0/0` 을
         // 낸 바로 밑에 그 줄을 그리고, 트리와 TUI 는 `자식 없음` 이라 말하면서
@@ -543,6 +548,34 @@ mod tests {
 
         assert_eq!(index.home_of(3), &vec![Seg::Epic("argos-0002".into()), Seg::Issue("argos-0004".into())]);
         assert_eq!(index.home_of(4), &vec![Seg::Epic("argos-0003".into())]);
+        assert_exactly_once(&issues);
+    }
+
+    /// **이슈 밑에 접힌 생각의 자식은 그 생각 밑에 접힌다** — 에픽을 안 적었든,
+    /// 그 이슈와 같은 에픽을 적었든. 뿌리로 올라간 생각만 에픽 없는 자리로
+    /// 견주므로, 제 에픽을 적은 자식은 그 생각의 에픽이 아니라 제 에픽으로 간다.
+    #[test]
+    fn a_child_of_a_folded_thought_stays_in_its_epic() {
+        let mut thought_in_epic = make("argos-0005", Kind::Idea);
+        thought_in_epic.epic = Some("argos-0002".into());
+        let issues = vec![
+            make("argos-0002", Kind::Epic),
+            epic_of("argos-0004", "argos-0002"),
+            make("argos-0004.aa1", Kind::Idea),                // 이슈 밑에 접힌 생각
+            make("argos-0004.aa1.bb2", Kind::Issue),           // 에픽을 안 적은 자식
+            epic_of("argos-0004.aa1.cc3", "argos-0002"),       // 같은 에픽을 적은 자식
+            thought_in_epic,                                   // 뿌리로 올라간 생각
+            epic_of("argos-0005.dd4", "argos-0002"),           // 제 에픽을 적은 자식
+        ];
+        let index = Index::of(&issues);
+        let under = vec![
+            Seg::Epic("argos-0002".into()),
+            Seg::Issue("argos-0004".into()),
+            Seg::Issue("argos-0004.aa1".into()),
+        ];
+        assert_eq!(index.home_of(3), &under);
+        assert_eq!(index.home_of(4), &under);
+        assert_eq!(index.home_of(6), &vec![Seg::Epic("argos-0002".into())]);
         assert_exactly_once(&issues);
     }
 

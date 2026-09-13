@@ -105,13 +105,15 @@ fn deferred_roots_in<'a>(
     // 제 줄부터 부모를 타고 올라가며, 그 줄이나 그 줄의 에픽·마일스톤이
     // 미뤄졌는지 본다. 부모가 다른 에픽에 있어도 부모가 빠지면 자식도 빠진다.
     //
-    // **생각인 조상은 제 미룸만 물려준다.** 소속이 생각을 지나 내려오지 않으므로
-    // (`groups`) 생각의 에픽이 미뤄졌다고 그 밑의 일을 빼면, 세지도 않는 에픽의
-    // 미룸을 받는 꼴이다. 생각 위로는 더 오르지 않는다.
+    // **뿌리로 올라간 생각인 조상은 제 미룸만 물려준다.** 소속이 그것을 지나
+    // 내려오지 않으므로(`groups`) 생각의 에픽이 미뤄졌다고 그 밑의 일을 빼면,
+    // 세지도 않는 에픽의 미룸을 받는 꼴이다. 그 위로는 더 오르지 않는다.
+    // 이슈 밑에 접힌 생각은 그대로 지나간다 — 그 밑의 일은 미룬 이슈 밑에 그려진다.
+    let rooted = rooted_thoughts(&by_id);
     let root = |id: &'a str| {
         let mut cur = Some(id);
         while let Some(at) = cur {
-            let thought = at != id && by_id.get(at).is_some_and(|x| is_idea(x));
+            let thought = at != id && rooted.contains(at);
             if thought {
                 return own(Some(&at));
             }
@@ -223,25 +225,62 @@ pub fn creates_cycle(issues: &[Issue], blocker: &str, blocked: &str) -> bool {
 /// 적었으면 그것이 이긴다 — 계층과 소속은 직교하므로 옮길 수 있어야 한다.
 pub fn groups(all: &[Issue]) -> BTreeMap<&str, &str> {
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
-    let mut out = BTreeMap::new();
-    for i in all {
-        let mut cur = i;
-        loop {
-            if let Some(e) = &cur.epic {
-                out.insert(i.id.as_str(), e.as_str());
-                break;
-            }
-            // **생각을 지나 물려주지 않는다.** 생각은 계획 계층에 안 걸리므로
-            // (`nav` 가 뿌리로 올린다) 그 밑의 자식이 생각의 에픽을 받으면,
-            // 자기를 절대 안 그리는 에픽에 세어진다 — `멤버 0/1` 밑에 줄이
-            // 없다(moai-14dm). 생각 제 줄의 소속은 그대로 남는다.
-            match crate::id::parent_of(&cur.id).and_then(|p| by_id.get(p)).filter(|p| !is_idea(p)) {
-                Some(p) => cur = p,
-                None => break,
-            }
+    let rooted = rooted_thoughts(&by_id);
+    all.iter().filter_map(|i| epic_through(i, &by_id, &rooted).map(|e| (i.id.as_str(), e))).collect()
+}
+
+/// **뿌리로 올라간 생각** — 제 부모 밑에 접히지 않는 idea 의 id.
+///
+/// 소속·마일스톤·미룸은 이것을 지나 내려오지 않는다. 생각인 부모에서 무조건
+/// 끊으면 자기를 안 그리는 에픽에 세는 일은 사라지지만(moai-14dm), **이슈 밑에
+/// 접힌 생각**에서도 끊겨 그 자식이 에픽 안에 그려지면서 `에픽 없음` 으로
+/// 세어지고, 부모를 미뤄도 `ready` 에 남는다. 끊는 까닭은 생각이라서가 아니라
+/// 그리는 자리가 끊겨서다.
+///
+/// 접히는 조건은 `nav::home_of_work` 와 같은 자다 — 부모가 이슈나 생각이고,
+/// 제 에픽이 부모가 넘기는 에픽과 같다. 부모는 id 가 더 짧으므로 짧은 것부터
+/// 정하면 한 번 훑어 끝난다.
+fn rooted_thoughts<'a>(by_id: &BTreeMap<&'a str, &'a Issue>) -> BTreeSet<&'a str> {
+    let mut thoughts: Vec<&Issue> = by_id.values().copied().filter(|i| is_idea(i)).collect();
+    thoughts.sort_by_key(|t| t.id.len());
+    let mut rooted = BTreeSet::new();
+    for t in thoughts {
+        let folds = crate::id::parent_of(&t.id)
+            .and_then(|p| by_id.get(p).copied())
+            .filter(|p| matches!(p.kind, Kind::Issue | Kind::Idea))
+            .is_some_and(|p| epic_through(t, by_id, &rooted) == passed_down(p, by_id, &rooted));
+        if !folds {
+            rooted.insert(t.id.as_str());
         }
     }
-    out
+    rooted
+}
+
+/// 그 줄의 에픽 — 제가 적었거나 조상에게서 물려받은 것. 뿌리로 올라간
+/// 생각에서 멈춘다. 생각 제 줄의 소속은 그대로 남는다.
+fn epic_through<'a>(
+    i: &'a Issue,
+    by_id: &BTreeMap<&'a str, &'a Issue>,
+    rooted: &BTreeSet<&str>,
+) -> Option<&'a str> {
+    let mut cur = i;
+    loop {
+        if let Some(e) = &cur.epic {
+            return Some(e.as_str());
+        }
+        cur = crate::id::parent_of(&cur.id)
+            .and_then(|p| by_id.get(p).copied())
+            .filter(|p| !rooted.contains(p.id.as_str()))?;
+    }
+}
+
+/// 그 줄이 자식에게 넘기는 에픽. 뿌리로 올라간 생각은 아무것도 안 넘긴다.
+fn passed_down<'a>(
+    p: &'a Issue,
+    by_id: &BTreeMap<&'a str, &'a Issue>,
+    rooted: &BTreeSet<&str>,
+) -> Option<&'a str> {
+    if rooted.contains(p.id.as_str()) { None } else { epic_through(p, by_id, rooted) }
 }
 
 /// 이슈 id → 그것이 속한 마일스톤 id.
@@ -259,6 +298,7 @@ pub fn groups(all: &[Issue]) -> BTreeMap<&str, &str> {
 pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
     let epic_of = groups(all);
+    let rooted = rooted_thoughts(&by_id);
     let mut out = BTreeMap::new();
     for i in all {
         // 에픽이 있으면 **거기서부터** 센다. 제 줄에서 시작하면 제 마일스톤이
@@ -285,9 +325,11 @@ pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
                 out.insert(i.id.as_str(), m.as_str());
                 break;
             }
-            // 부모가 생각이면 거기서 멈춘다 — `groups` 와 같은 자다.
+            // 부모가 뿌리로 올라간 생각이면 거기서 멈춘다 — `groups` 와 같은 자다.
             let up = cur.epic.as_deref().and_then(|e| by_id.get(e)).or_else(|| {
-                crate::id::parent_of(&cur.id).and_then(|p| by_id.get(p)).filter(|p| !is_idea(p))
+                crate::id::parent_of(&cur.id)
+                    .and_then(|p| by_id.get(p))
+                    .filter(|p| !rooted.contains(p.id.as_str()))
             });
             match up {
                 Some(next) if next.id != cur.id => cur = next,
@@ -1952,6 +1994,39 @@ mod tests {
         let rolls = rollup(&issues, &cfg());
         assert_eq!(roll_of(&rolls, Some("argos-0002")).total, 1, "{rolls:?}");
         assert_eq!(roll_of(&rolls, None).total, 1, "{rolls:?}");
+    }
+
+    /// **끊는 것은 뿌리로 올라간 생각뿐이다.** 이슈 밑에 접힌 생각은 그 이슈의
+    /// 에픽 안에 그려지므로, 거기서도 끊으면 그 자식이 에픽 안에 그려지면서
+    /// `에픽 없음` 으로 세어지고, 부모를 미뤄도 `ready` 에 남는다.
+    #[test]
+    fn a_thought_folded_under_work_still_passes_its_place_down() {
+        let stone = make("argos-0001", Kind::Milestone, "todo");
+        let mut epic = make("argos-0002", Kind::Epic, "todo");
+        epic.milestone = Some("argos-0001".into());
+        let mut work = make("argos-0003", Kind::Issue, "todo");
+        work.epic = Some("argos-0002".into());
+        let thought = make("argos-0003.aaa", Kind::Idea, "todo");
+        let child = make("argos-0003.aaa.bbb", Kind::Issue, "todo");
+        let mut issues = vec![stone.clone(), epic, work, thought, child];
+
+        assert_eq!(groups(&issues).get("argos-0003.aaa.bbb"), Some(&"argos-0002"), "접힌 생각에서 소속이 끊겼다");
+        assert_eq!(milestones(&issues).get("argos-0003.aaa.bbb"), Some(&"argos-0001"));
+        assert_eq!(roll_of(&rollup(&issues, &cfg()), Some("argos-0002")).total, 2);
+
+        issues[2].deferred_at = Some("2026-09-01T00:00:00Z".into());
+        assert!(picks(&issues).is_empty(), "미룬 이슈 밑에 그려진 일이 올라왔다");
+
+        // 에픽 없이 마일스톤에 바로 든 이슈 밑이어도 같다.
+        let mut work = make("argos-0004", Kind::Issue, "todo");
+        work.milestone = Some("argos-0001".into());
+        let issues = vec![
+            stone,
+            work,
+            make("argos-0004.aaa", Kind::Idea, "todo"),
+            make("argos-0004.aaa.bbb", Kind::Issue, "todo"),
+        ];
+        assert_eq!(milestones(&issues).get("argos-0004.aaa.bbb"), Some(&"argos-0001"));
     }
 
     /// 생각의 에픽을 미뤄도 그 밑의 일은 안 빠진다 — 소속을 안 받았으니
