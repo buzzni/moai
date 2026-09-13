@@ -45,7 +45,46 @@ pub enum Mode {
     Grep(Input),
     /// `f` 로 연 거름망. **CLI 와 같은 `항목=값` 문법이다.**
     Filter(Input),
+    /// 쓰기 앞에서 누군지 묻는 칸. [`App::write`] 만 연다.
+    Ask(Ask),
 }
+
+/// 받고 나서 다시 부를 쓰기. **붙잡는 것이 없는 함수다** — 적던 것은 [`Ask`] 가
+/// 들고 있다가 되돌려 놓는 모드 안에 있고, 이 함수는 거기서 다시 읽어 쓴다.
+/// 닫는 함수(`FnOnce`)를 통째로 들고 있으면 그 결과(`T`)를 받을 자리가 없어
+/// 성공한 뒤의 일(폼 닫기·커서 옮기기)을 부른 쪽이 두 벌 짓게 된다. 같은 함수를
+/// 한 번 더 부르면 그 일이 한 벌로 남는다.
+pub type Retry = fn(&mut App);
+
+/// 누군지 묻는 칸의 상태.
+///
+/// **받은 것은 그 세션 동안만 든다**(`App::user`). `.moai/config.toml` 에도
+/// `git config` 에도 적지 않는다 — 도구가 남의 설정을 쓰는 순간 그건 설정이 아니라
+/// 마이그레이션이다(moai-nmv2 사용자 결정). 대신 칸 위에 `git config` 로 적어 두면
+/// 다시 안 묻는다고 댄다.
+#[derive(Debug, Clone)]
+pub struct Ask {
+    pub input: Input,
+    /// 마지막 Enter 가 거절된 까닭. **치는 동안에는 나무라지 않는다** — `이름 (메일)`
+    /// 은 닫는 괄호를 치기 전까지 늘 모양이 아니라, 거름망처럼 그 자리에서 판정하면
+    /// 적는 내내 빨간 줄이 선다. 칸이 키를 먹으면 걷힌다.
+    pub error: Option<String>,
+    /// 묻기 전에 받던 것 — 적던 폼. **Esc 든 받든 여기로 돌아간다.** 한 키에 적던
+    /// 것이 날아가면 다음부터 안 쓴다.
+    back: Box<Mode>,
+    then: Retry,
+}
+
+/// **다시 부를 함수는 견주지 않는다.** 함수 주소는 같은 함수라도 코드 조각마다
+/// 갈라질 수 있어 `==` 이 뜻을 못 진다(`unpredictable_function_pointer_comparisons`).
+/// 견주는 쪽은 시험의 `assert_eq!(a.mode, ..)` 뿐이고, 거기서 보는 것은 칸의 글이다.
+impl PartialEq for Ask {
+    fn eq(&self, other: &Ask) -> bool {
+        self.input == other.input && self.error == other.error && self.back == other.back
+    }
+}
+
+impl Eq for Ask {}
 
 /// 어느 칸이 이동키를 먹는가. **화면에 칸이 늘면 여기가 는다** — 순환은
 /// [`Pane::ALL`] 의 차례를 따르므로 새 칸은 거기 한 자리를 얻는 것으로 끝난다.
@@ -184,10 +223,15 @@ pub struct App {
     /// 까닭을 지우면 폼은 열린 채인데 왜 안 닫혔는지가 화면 어디에도 없다. 걷는 것은
     /// 다음에 성공한 쓰기나, 그 자리를 덮는 읽기의 실패다.
     write_failed: bool,
-    /// `--user` 로 **준 값 그대로**(`Ctx::user` 와 같다). 쓸 때마다 `model::actor` 로
-    /// 푼다 — 미리 풀어 두면 설정 없는 기계에서 읽기만 하려던 탐색기가 여는 순간
-    /// 사람을 묻는다. 읽기는 묻지 않는다.
+    /// `--user` 로 **준 값 그대로**(`Ctx::user` 와 같다), 또는 누군지 묻는 칸에서
+    /// 받은 것([`Mode::Ask`]). 쓸 때마다 `model::actor` 로 푼다 — 미리 풀어 두면
+    /// 설정 없는 기계에서 읽기만 하려던 탐색기가 여는 순간 사람을 묻는다. 읽기는
+    /// 묻지 않는다. **받은 것은 이 세션이 끝나면 사라진다** — 어디에도 적지 않는다.
     pub user: Option<String>,
+    /// 누가 쓰는가를 푸는 길. 진짜 길은 `model::actor` 다. **시험이 갈아 끼운다** —
+    /// 그쪽은 `MOAI_ACTOR` 와 이 기계의 git 설정을 읽어, 갈아 끼우지 않으면
+    /// "누군지 모를 때" 를 시험한 결과가 돌리는 사람의 설정에 달린다.
+    identify: fn(Option<&str>) -> crate::fail::R<crate::model::Actor>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
     /// 상세의 굴린 자리. **왼쪽 커서를 옮기면 첫 줄로 돌아간다** — 다른
@@ -285,6 +329,7 @@ impl App {
             trouble: None,
             write_failed: false,
             user: None,
+            identify: crate::model::actor,
             warnings: 0,
             stamp: None,
             watched: Vec::new(),
@@ -350,8 +395,12 @@ impl App {
     /// 실패하면 **다시 읽지 않는다**: 파일은 그대로다. 그 뒤 저절로 다시 읽어도 까닭은
     /// 남는다(`write_failed`) — 다음 쓰기가 성공할 때 걷힌다.
     ///
-    /// **누군지 모르면 락을 잡기 전에 멈춘다.** 이름 없는 줄을 적느니 한 번 묻는다는
-    /// 규약이고, 묻는 화면은 따로 선다(moai-nmv2). 여기는 모른다고 말만 한다.
+    /// **누군지 모르면 락을 잡기 전에 멈추고 묻는다**([`Mode::Ask`]). 이름 없는 줄을
+    /// 적느니 한 번 묻는다는 규약이다. 받으면 `user` 에 들고, **적던 모드를 되돌려
+    /// 놓은 뒤** `retry` 를 부른다 — 그래서 `retry` 는 이 쓰기를 부른 그 함수다. 묻는
+    /// 동안은 `None` 이다(아직 안 썼다). 묻는 것은 `--user`·`MOAI_ACTOR`·git 설정이
+    /// **모두 없을 때**(`NO_ACTOR`)뿐이다 — 준 값의 모양이 틀린 것은 사람이 준 것을
+    /// 조용히 갈아 치울 일이 아니라 배너로 말한다.
     ///
     /// **동기다.** 로컬 파일 하나라 짧고, 그동안 화면은 멈춘다. 비동기 런타임을
     /// 들이면 CLI 전체가 async 로 물든다. 락을 못 잡으면 `with_write` 가 5초 뒤
@@ -360,6 +409,7 @@ impl App {
     #[cfg_attr(not(test), expect(dead_code, reason = "첫 부르는 곳은 `n` 폼이다(moai-11s4)"))]
     pub fn write<T>(
         &mut self,
+        retry: Retry,
         f: impl FnOnce(
             &mut Vec<Issue>,
             &Config,
@@ -372,8 +422,15 @@ impl App {
             self.write_failed = true;
             return None;
         };
-        let written = crate::model::actor(self.user.as_deref())
-            .and_then(|by| repo.with_write(|issues, cfg, reserved| f(issues, cfg, reserved, &by)));
+        let by = (self.identify)(self.user.as_deref());
+        if let Err(e) = &by
+            && e.code == crate::fail::code::NO_ACTOR
+        {
+            let back = std::mem::replace(&mut self.mode, Mode::Browse);
+            self.mode = Mode::Ask(Ask { input: Input::default(), error: None, back: Box::new(back), then: retry });
+            return None;
+        }
+        let written = by.and_then(|by| repo.with_write(|issues, cfg, reserved| f(issues, cfg, reserved, &by)));
         match written {
             Ok(out) => {
                 self.write_failed = false;
@@ -610,7 +667,7 @@ impl App {
     pub fn apply(&mut self, mode: &Mode) -> Result<(), String> {
         let text = match mode {
             Mode::Grep(q) | Mode::Filter(q) => q.text().to_string(),
-            Mode::Browse => String::new(),
+            Mode::Browse | Mode::Ask(_) => String::new(),
         };
         if text.trim().is_empty() {
             self.filter_text = None;
@@ -642,7 +699,7 @@ impl App {
         let raw = match mode {
             Mode::Grep(q) => Raw { grep: Some(q.text().to_string()), all: true, ..Raw::default() },
             Mode::Filter(q) => Raw { filter: split_filter(q.text()), all: true, ideas: true, ..Raw::default() },
-            Mode::Browse => Raw::default(),
+            Mode::Browse | Mode::Ask(_) => Raw::default(),
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
         // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다.
@@ -769,8 +826,18 @@ impl App {
     /// 정한다 — Enter·Esc·Ctrl-C. 칸이 먹은 키는 여기까지 오지 않으므로 빈 칸의
     /// Backspace 가 "한 층 위로" 로 새지 않는다.
     fn typing(&mut self, k: KeyEvent) {
-        let (Mode::Grep(input) | Mode::Filter(input)) = &mut self.mode else { return };
-        if input.key(k) {
+        let eaten = match &mut self.mode {
+            Mode::Grep(input) | Mode::Filter(input) => input.key(k),
+            Mode::Ask(ask) => {
+                let eaten = ask.input.key(k);
+                if eaten {
+                    ask.error = None;
+                }
+                eaten
+            }
+            Mode::Browse => return,
+        };
+        if eaten {
             return;
         }
         // **Ctrl 은 글자가 아니다.** raw mode 에서는 Ctrl-C 가 신호로 오지
@@ -788,6 +855,10 @@ impl App {
             }
             return;
         }
+        if matches!(self.mode, Mode::Ask(_)) {
+            self.answer(k);
+            return;
+        }
         match k.code {
             KeyCode::Enter => {
                 let mode = self.mode.clone();
@@ -800,6 +871,35 @@ impl App {
             }
             KeyCode::Esc => self.mode = Mode::Browse,
             _ => {}
+        }
+    }
+
+    /// 누군지 묻는 칸이 먹지 않은 키 — Enter·Esc.
+    ///
+    /// **받은 것은 `model::Actor::parse` 로 잰다** — `--user`·`MOAI_ACTOR` 와 같은
+    /// 자다. 여기서 따로 재면 CLI 가 거절하는 모양이 화면에서는 통과해 되돌릴 수
+    /// 없는 저널에 쌓인다. 거절하면 칸은 열린 채 까닭을 달고, 적은 것은 그대로 둔다.
+    ///
+    /// 받거나 그만두면 **적던 모드로 먼저 돌아간다.** 받았으면 그다음에 쓰기를 다시
+    /// 부른다 — 다시 부른 쓰기는 되돌려 놓은 폼에서 적던 것을 읽는다.
+    fn answer(&mut self, k: KeyEvent) {
+        let Mode::Ask(ask) = &mut self.mode else { return };
+        let who = match k.code {
+            KeyCode::Enter => match crate::model::Actor::parse(ask.input.text()) {
+                Some(who) => Some(who),
+                None => {
+                    ask.error = Some(format!("`이름 (메일)` 모양이 아니다 — 예: {ASK_EXAMPLE}"));
+                    return;
+                }
+            },
+            KeyCode::Esc => None,
+            _ => return,
+        };
+        let Mode::Ask(ask) = std::mem::replace(&mut self.mode, Mode::Browse) else { return };
+        self.mode = *ask.back;
+        if let Some(who) = who {
+            self.user = Some(crate::model::label(&who.name, Some(&who.email), crate::config::Naming::Full));
+            (ask.then)(self);
         }
     }
 
@@ -883,6 +983,9 @@ impl App {
         }
     }
 }
+
+/// 누군지 묻는 칸이 보이는 본보기. 거절문이 댄다.
+pub const ASK_EXAMPLE: &str = "레이븐 (raven@example.com)";
 
 /// 없는 것을 가리키는 참조에 붙이는 말. **한 낱말로 통일한다** — 자리마다
 /// 다른 말을 쓰면 같은 깨짐을 서로 다른 일로 읽는다.
@@ -1651,7 +1754,7 @@ mod tests {
 
     /// 생각 하나를 담는 쓰기 — 폼이 부를 모양 그대로다.
     fn add_idea(a: &mut App, id: &'static str) -> Option<&'static str> {
-        a.write(move |issues, _, _, by| {
+        a.write(|_| {}, move |issues, _, _, by| {
             issues.push(Issue::new(id.into(), "떠오른 것".into(), Kind::Idea, Status::new("todo"), "2026-09-13T00:00:00Z"));
             Ok((vec![crate::model::JournalEntry::create(id, "떠오른 것", "2026-09-13T00:00:00Z", by)], id))
         })
@@ -1707,7 +1810,7 @@ mod tests {
         let before = std::fs::read_to_string(&file).unwrap();
         let stamp = a.stamp;
 
-        let out = a.write(|issues, _, _, _| {
+        let out = a.write(|_| {}, |issues, _, _, _| {
             issues.push(Issue::new("argos-0002".into(), "t".into(), Kind::Idea, Status::new("없는칸"), "2026-09-13T00:00:00Z"));
             Ok((vec![], ()))
         });
@@ -1719,7 +1822,7 @@ mod tests {
         assert!(t.starts_with("쓰지 못했다") && t.contains("칸"), "{t}");
 
         // 여러 줄 거절문(고칠 명령까지 내는 것)은 배너 한 줄로 이어진다.
-        let out = a.write(|_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> {
+        let out = a.write(|_| {}, |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> {
             Err("첫 줄\n      고칠 명령".into())
         });
         assert!(out.is_none());
@@ -1734,7 +1837,7 @@ mod tests {
     fn a_failed_write_survives_the_background_reread() {
         let (scratch, mut a) = writable("write-sticky");
         let file = scratch.0.join(".moai/issues.jsonl");
-        let out = a.write(|_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> { Err("락".into()) });
+        let out = a.write(|_| {}, |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> { Err("락".into()) });
         assert!(out.is_none());
 
         let mut src = std::fs::read_to_string(&file).unwrap();
@@ -1748,22 +1851,138 @@ mod tests {
         assert!(a.trouble.is_none(), "쓰기가 성공했는데 옛 까닭이 남았다");
     }
 
-    /// **누군지 모르면 쓰지 않는다.** 이름 없는 줄을 적느니 멈추고 말한다 — 묻는 것은
-    /// moai-nmv2 의 몫이다. 락도 잡기 전이라 닫는 함수는 불리지도 않는다.
+    /// **준 사람의 모양이 틀리면 묻지 않고 말한다.** `--user "이름만"` 은 사람이 준
+    /// 것이라 조용히 갈아 치울 일이 아니다 — 묻는 것은 아무것도 없을 때뿐이다. 락도
+    /// 잡기 전이라 닫는 함수는 불리지도 않는다.
     #[test]
-    fn an_unknown_actor_stops_the_write_on_screen() {
+    fn a_malformed_user_stops_the_write_on_screen_without_asking() {
         let (scratch, mut a) = writable("write-actor");
         let file = scratch.0.join(".moai/issues.jsonl");
         let before = std::fs::read_to_string(&file).unwrap();
         a.user = Some("이름만".into());
 
-        let out = a.write(|_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> {
+        let out = a.write(|_| {}, |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, ())> {
             panic!("누군지 모르는데 닫는 함수를 불렀다")
         });
         assert!(out.is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
         let t = a.trouble.clone().unwrap_or_default();
         assert!(t.starts_with("쓰지 못했다") && !t.contains('\n'), "{t:?}");
+        assert_eq!(a.mode, Mode::Browse, "사람이 준 것을 두고 또 물었다");
+    }
+
+    /// 누군지 모르는 기계. **이 기계의 git 설정도 `MOAI_ACTOR` 도 안 본다** — 준 것만
+    /// 푼다. 진짜 길(`model::actor`)을 쓰면 이 시험들이 돌리는 사람의 설정에 달린다.
+    fn nobody(user: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+        match user {
+            Some(raw) => crate::model::actor(Some(raw)),
+            None => Err(crate::fail::Fail::coded("누가 하는지 모른다", crate::fail::code::NO_ACTOR)),
+        }
+    }
+
+    /// 폼이 부를 모양 그대로 — **적던 것을 모드에서 읽어** 생각 하나를 담고, 되면
+    /// 닫는다. 폼(moai-11s4)이 아직 없어 검색칸의 글을 적던 제목으로 쓴다. 묻고 나서
+    /// 다시 불리는 것도 이 함수다.
+    fn save(a: &mut App) {
+        let Mode::Grep(q) = &a.mode else { panic!("적던 것이 돌아오지 않았다 — {:?}", a.mode) };
+        let title = q.text().to_string();
+        let wrote = a.write(save, move |issues, _, _, by| {
+            let at = "2026-09-13T00:00:00Z";
+            issues.push(Issue::new("argos-0002".into(), title.clone(), Kind::Idea, Status::new("todo"), at));
+            Ok((vec![crate::model::JournalEntry::create("argos-0002", &title, at, by)], ()))
+        });
+        if wrote.is_some() {
+            a.mode = Mode::Browse;
+        }
+    }
+
+    fn type_in(a: &mut App, text: &str) {
+        for c in text.chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+    }
+
+    /// **누군지 모르면 쓰기 앞에서 묻고, 받으면 멈췄던 쓰기를 잇는다.** 묻는 동안 파일은
+    /// 그대로다. 모양이 틀리면 칸이 열린 채 까닭을 달고, 받은 것은 세션 동안만 들어 다음
+    /// 쓰기는 안 묻는다 — `.moai/config.toml` 에는 아무것도 안 적는다.
+    #[test]
+    fn an_unknown_actor_is_asked_once_and_the_write_goes_on() {
+        let (scratch, mut a) = writable("ask");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let config = scratch.0.join(".moai/config.toml");
+        let (before, config_before) = (std::fs::read_to_string(&file).unwrap(), std::fs::read_to_string(&config).unwrap());
+        a.user = None;
+        a.identify = nobody;
+        a.mode = Mode::Grep(Input::new("떠오른 것"));
+
+        save(&mut a);
+        assert!(matches!(a.mode, Mode::Ask(_)), "모르는데 안 물었다 — {:?}", a.mode);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before, "묻기 전에 썼다");
+        assert!(a.trouble.is_none(), "묻는 것은 실패가 아니다 — {:?}", a.trouble);
+
+        type_in(&mut a, "이름만");
+        a.key(key(KeyCode::Enter));
+        let Mode::Ask(ask) = &a.mode else { panic!("모양이 틀렸는데 칸이 닫혔다 — {:?}", a.mode) };
+        assert!(ask.error.as_deref().is_some_and(|e| e.contains("이름 (메일)")), "{:?}", ask.error);
+        assert_eq!(ask.input.text(), "이름만", "거절하며 적은 것을 지웠다");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+        assert_eq!(a.user, None);
+        a.key(key(KeyCode::Char(' ')));
+        assert!(matches!(&a.mode, Mode::Ask(ask) if ask.error.is_none()), "고치기 시작했는데 까닭이 남았다");
+
+        a.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        type_in(&mut a, "레이븐 (raven@example.com)");
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.mode, Mode::Browse, "받았는데 멈췄던 쓰기가 안 이어졌다");
+        assert!(std::fs::read_to_string(&file).unwrap().contains("argos-0002"), "받은 뒤에도 파일에 안 닿았다");
+        let journal = a.repo.clone().unwrap().journal_of("argos-0002").unwrap();
+        assert_eq!((journal[0].by.as_str(), journal[0].by_email.as_deref()), ("레이븐", Some("raven@example.com")));
+        assert_eq!(a.user.as_deref(), Some("레이븐 (raven@example.com)"));
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), config_before, "받은 것을 설정에 적었다");
+
+        // 두 번째 쓰기는 묻지 않는다.
+        assert!(add_idea(&mut a, "argos-0003").is_some());
+        assert_eq!(a.mode, Mode::Browse, "한 번 받았는데 또 물었다");
+    }
+
+    /// **Esc 는 아무것도 안 쓰고 적던 것으로 돌아간다.** 한 키에 적던 것이 날아가면
+    /// 다음부터 안 쓴다. 받다 만 이름도 들지 않는다.
+    #[test]
+    fn esc_on_the_question_writes_nothing_and_gives_the_form_back() {
+        let (scratch, mut a) = writable("ask-esc");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let before = std::fs::read_to_string(&file).unwrap();
+        a.user = None;
+        a.identify = nobody;
+        a.mode = Mode::Grep(Input::new("적던 것"));
+
+        save(&mut a);
+        type_in(&mut a, "레이븐 (raven@example.com)");
+        a.key(key(KeyCode::Esc));
+        assert_eq!(a.mode, Mode::Grep(Input::new("적던 것")), "적던 것으로 안 돌아왔다");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before, "그만뒀는데 썼다");
+        assert_eq!(a.user, None, "그만뒀는데 받다 만 이름을 들었다");
+        assert!(!a.quit);
+    }
+
+    /// **읽기는 묻지 않는다.** 누가 하는지는 쓸 때만 푼다 — 여는 순간이나 돌아다니는
+    /// 동안 물으면 설정 없는 기계에서 도구가 고장 난 것으로 보인다.
+    #[test]
+    fn reading_never_asks_who() {
+        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+            panic!("읽기가 누군지 물었다")
+        }
+        let (_scratch, mut a) = writable("ask-read");
+        a.user = None;
+        a.identify = refuse;
+        for k in [KeyCode::Down, KeyCode::Enter, KeyCode::Backspace, KeyCode::F(5), KeyCode::Tab, KeyCode::Char('m')] {
+            a.key(key(k));
+        }
+        a.key(key(KeyCode::Char('/')));
+        type_in(&mut a, "제목");
+        a.key(key(KeyCode::Enter));
+        settle(&mut a);
+        assert_eq!(a.mode, Mode::Browse);
     }
 
     /// 빈 디렉터리에서도 무너지지 않는다.
