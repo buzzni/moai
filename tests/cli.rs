@@ -2931,6 +2931,12 @@ fn the_fold_keeps_the_baseline_and_reloads_the_board() {
 
     let again = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "s1")));
     assert!(again.contains("락을 잡는다"), "접힌 뒤 보드를 다시 안 실었다\n{again}");
+
+    // 여는 훅이 안 돌았던 세션은 접힌 뒤에라도 기준선을 얻는다 — 안 그러면
+    // `Stop` 이 끝까지 견줄 것이 없다.
+    assert_eq!(baseline(&s, "s3"), None);
+    hook_out(&s, "session-start", &compacted(&s, "s3"));
+    assert!(baseline(&s, "s3").is_some(), "기준선 없는 세션이 접힌 뒤에도 기준선을 못 얻었다");
 }
 
 /// `SessionStart` 는 아무것도 싣지 않고 기준선만 적는다.

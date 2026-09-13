@@ -94,6 +94,11 @@ fn decide(event: Event, input: &Input) -> Option<String> {
         // 경고가 물려받은 빚에 묻혀 `Stop` 이 못 본다. 대신 보드의 표를
         // 지워 다음 프롬프트가 보드를 다시 싣게 한다 — 접힐 때 같이 떨어졌다.
         Event::SessionStart if input.source.as_deref() == Some("compact") => {
+            // **없을 때만 적는다.** 여는 훅이 안 돌았던 세션(도중에 심었거나 임시
+            // 디렉터리가 비워졌다)은 여기서 적지 않으면 `Stop` 이 끝까지 견줄 것이 없다.
+            if baseline(input, &repo).is_none() {
+                write_baseline(input, &repo, &load.issues, &unreadable);
+            }
             if let Some(path) = session_file(input, &repo, "board") {
                 let _ = std::fs::remove_file(path);
             }
