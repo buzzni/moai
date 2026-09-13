@@ -3165,6 +3165,76 @@ fn a_thought_does_not_hang_under_a_milestone_either() {
     assert!(!out.contains(&thought), "머리글이 안 세는 줄을 그 밑에 그렸다 — {out}");
 }
 
+/// **부모가 묶음이면 그 묶음이 소속이다** (moai-9t3l). `--parent <에픽>` 으로 만든
+/// 자식은 id 가 에픽 밑에 붙는데, "자식은 부모의 에픽을" 이 부모가 에픽 자신일 때
+/// 물려줄 것이 없어 트리의 `에픽 없음`·status 의 `에픽 없는 이슈` 로 빠졌다 — 에픽
+/// 전체를 보는 리뷰를 세울 때마다 났다. 적힌 필드는 그대로고 읽을 때 정한다.
+///
+/// 제 `epic` 을 따로 적은 자식은 그것이 이긴다(물려받은 소속과 같은 차례). 부모가
+/// 마일스톤이면 같은 규칙으로 그 마일스톤에 든다.
+#[test]
+fn a_child_of_a_group_belongs_to_that_group() {
+    let s = init("groupparent");
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let epic = ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &stone, "-q"]).trim().to_string();
+    let other = ok(s.path(), &["epic", "add", "딴 에픽", "-q"]).trim().to_string();
+    let member = add(s.path(), &["멤버", "-e", &epic]);
+    let review = add(s.path(), &["리뷰 — 에픽 전체", "-t", "review", "--parent", &epic]);
+    let grand = add(s.path(), &["리뷰의 자식", "--parent", &review]);
+    let moved = add(s.path(), &["딴 데 적은 자식", "--parent", &epic, "-e", &other]);
+    let under_stone = add(s.path(), &["마일스톤의 자식", "--parent", &stone]);
+    assert!(review.starts_with(&format!("{epic}.")), "에픽 밑에 id 로 안 섰다 — {review}");
+    assert!(!line_of(s.path(), &review).contains(r#""epic""#), "필드를 적었다 — 읽을 때 정해야 한다");
+
+    let tree = ok(s.path(), &["show", "--tree"]);
+    let at = |id: &str| tree.find(&format!("{id}  ")).unwrap_or_else(|| panic!("트리에 {id} 가 없다 — {tree}"));
+    assert!(at(&epic) < at(&review) && at(&review) < at(&grand) && at(&grand) < at(&other), "{tree}");
+    assert!(!tree[at(&epic)..at(&grand)].contains("에픽 없음"), "에픽의 자식이 `에픽 없음` 으로 빠졌다 — {tree}");
+    assert!(at(&other) < at(&moved), "제 에픽을 적은 자식이 부모 에픽 밑에 그려졌다 — {tree}");
+
+    let st = ok(s.path(), &["status", "--json"]);
+    // status 의 `--json` 은 경고에서만 id 를 댄다. 마일스톤의 자식은 에픽이 없어 거기 선다.
+    for id in [&review, &grand] {
+        assert!(!st.contains(&format!("\"{id}\"")), "에픽의 자식 {id} 를 경고에 댔다 — {st}");
+    }
+    let loose = ok(s.path(), &["show", "-e", "none"]);
+    for id in [&review, &grand, &moved] {
+        assert!(!loose.contains(id.as_str()), "`-e none` 이 {id} 를 낸다 — {loose}");
+    }
+
+    let detail = ok(s.path(), &["show", &epic]);
+    assert!(detail.contains("멤버   0/3"), "{detail}");
+    // `children` 은 id 로 매인 자식이라 제 에픽을 따로 적은 줄도 든다. 멤버만 본다.
+    let members = |group: &str| {
+        let json = ok(s.path(), &["show", group, "--json"]);
+        let from = json.find(r#""members":["#).unwrap_or_else(|| panic!("멤버 키가 없다 — {json}"));
+        let rest = &json[from..];
+        rest[..rest.find(']').unwrap()].to_string()
+    };
+    let json = members(&epic);
+    let filtered = ok(s.path(), &["show", "-e", &epic]);
+    let inside = ok(s.path(), &["tui", "--json", "--path", &epic]);
+    for id in [&member, &review] {
+        assert!(detail.contains(id.as_str()), "상세가 {id} 를 안 그린다 — {detail}");
+        assert!(json.contains(&format!("\"{id}\"")), "--json 이 {id} 를 안 낸다 — {json}");
+        assert!(filtered.contains(id.as_str()), "`-e` 가 {id} 를 안 고른다 — {filtered}");
+        assert!(inside.contains(&format!("\"{id}\"")), "탐색기가 에픽 안에 {id} 를 안 둔다 — {inside}");
+    }
+    assert!(json.contains(&format!("\"{grand}\"")) && filtered.contains(&grand), "손자가 사슬을 못 탔다");
+    assert!(!json.contains(&format!("\"{moved}\"")) && !filtered.contains(&moved), "제 에픽이 안 이겼다");
+    assert!(ok(s.path(), &["show", "-e", &other]).contains(&moved));
+
+    // 마일스톤은 에픽을 거쳐 온다 — 에픽의 자식도 그 에픽이 선 마일스톤에 든다.
+    let home = ok(s.path(), &["show", "--milestone", &stone]);
+    assert!(home.contains(&review) && home.contains(&grand), "{home}");
+    // 부모가 마일스톤이면 그 마일스톤이다.
+    let stone_json = members(&stone);
+    assert!(home.contains(&under_stone), "마일스톤의 자식이 필터에서 빠졌다 — {home}");
+    assert!(stone_json.contains(&format!("\"{under_stone}\"")), "{stone_json}");
+    let bare = ok(s.path(), &["show", "--milestone", "none"]);
+    assert!(!bare.contains(&under_stone), "마일스톤의 자식이 `마일스톤 없음` 이다 — {bare}");
+}
+
 /// **부모 밑에 접힌 자식은 부모의 마일스톤으로 센다.** 자식이 제 마일스톤을
 /// 따로 적어도 트리는 그 줄을 부모 밑에 그리므로, 제 것으로 세면 `show <그
 /// 마일스톤>` 이 `멤버 0/1` 이라 말하면서 줄을 못 내고 `--json` 만 그 자식을

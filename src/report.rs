@@ -641,6 +641,13 @@ pub fn creates_cycle(issues: &[Issue], blocker: &str, blocked: &str) -> bool {
 /// 제 `epic` 을 안 적었다고 "에픽 없음" 으로 가면, 같은 일이 두 묶음에
 /// 나타나고 어느 쪽이 참인지 화면만 봐서는 알 수 없다. 자식이 제 `epic` 을
 /// 적었으면 그것이 이긴다 — 계층과 소속은 직교하므로 옮길 수 있어야 한다.
+///
+/// **부모가 에픽이면 그 에픽이 소속이다** (moai-9t3l). `--parent <에픽>` 으로 만든
+/// 자식은 id 가 에픽 밑에 붙는데, "부모의 에픽을 물려받는다" 만으로는 부모가 에픽
+/// 자신일 때 물려줄 것이 없어 그 줄이 `에픽 없음` 으로 빠졌다 — 에픽 전체를 보는
+/// 리뷰를 세울 때마다 났다. 적힌 필드는 안 바꾼다. 소속은 파생값이라 읽을 때 정한다.
+/// 차례는 물려받는 소속과 같다: 제 `epic` → 가까운 조상의 `epic` → 에픽인 조상.
+/// 받는 줄은 [`joins`] 뿐이다.
 pub fn groups(all: &[Issue]) -> BTreeMap<&str, &str> {
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
     let rooted = rooted_thoughts(&by_id);
@@ -674,8 +681,10 @@ fn rooted_thoughts<'a>(by_id: &BTreeMap<&'a str, &'a Issue>) -> BTreeSet<&'a str
     rooted
 }
 
-/// 그 줄의 에픽 — 제가 적었거나 조상에게서 물려받은 것. 뿌리로 올라간
-/// 생각에서 멈춘다. 생각 제 줄의 소속은 그대로 남는다.
+/// 그 줄의 에픽 — 제가 적었거나 조상에게서 물려받은 것, 또는 에픽인 조상 그 자신.
+/// 뿌리로 올라간 생각에서 멈춘다. 생각 제 줄의 소속은 그대로 남는다.
+/// **없는 부모는 넘지 않는다** — 지운 에픽의 자식은 `에픽 없음` 이고, 끊긴 id 는
+/// `orphan_child` 가 드러낸다. 가리키는 필드가 없으니 `(길 잃음)` 이 아니다.
 fn epic_through<'a>(
     i: &'a Issue,
     by_id: &BTreeMap<&'a str, &'a Issue>,
@@ -689,7 +698,21 @@ fn epic_through<'a>(
         cur = crate::id::parent_of(&cur.id)
             .and_then(|p| by_id.get(p).copied())
             .filter(|p| !rooted.contains(p.id.as_str()))?;
+        if cur.kind == Kind::Epic && joins(i) {
+            return Some(cur.id.as_str());
+        }
     }
+}
+
+/// id 부모인 묶음을 소속으로 **받는** 줄 — 이슈와 생각. 트리가 묶음 밑에 둘 수 있는
+/// 줄이 이것들이다.
+///
+/// 묶음 줄은 안 받는다. 에픽 줄은 제 `milestone` 에만 서고(moai-0prl) `nav` 는 에픽을
+/// 에픽 밑에 두지 않으므로, `moai epic add --parent <에픽>` 이 그 에픽을 소속으로
+/// 받으면 `moai show -e <바깥 에픽>` 만 트리에 없는 줄을 고른다. 마일스톤은 뿌리에 선다.
+/// 생각은 받되 그 밑에 그려지지는 않는다 — `-e <에픽>` 을 적은 생각과 같은 자리다.
+fn joins(i: &Issue) -> bool {
+    matches!(i.kind, Kind::Issue | Kind::Idea)
 }
 
 /// 그 줄이 자식에게 넘기는 에픽. 뿌리로 올라간 생각은 아무것도 안 넘긴다.
@@ -747,7 +770,7 @@ pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
                 Some(e) => by_id.get(e).filter(|e| e.kind == Kind::Epic).and_then(|e| milestone_stood(e)),
                 // 에픽이 없으면 **접힌 맨 위 줄에서부터** 센다. 제 줄에서 시작하면
                 // 부모 밑에 그려진 자식이 제 마일스톤으로 세어진다(moai-uqoe).
-                None => fold_top(i, &by_id, &rooted).and_then(|top| climb(top, &by_id, &rooted)),
+                None => fold_top(i, &by_id, &rooted).and_then(|top| climb(top, &by_id, &rooted, joins(i))),
             }
         };
         // **못 받은 줄도 지도를 쓴다 — 같은 id 의 뒷줄이 이긴다.** 멤버는 에픽 줄을
@@ -773,16 +796,30 @@ fn milestone_stood(epic: &Issue) -> Option<&str> {
 /// 이 길에는 `epic` 을 든 줄이 없다 — 있었다면 `groups` 가 그것을 물려줘 에픽
 /// 가지로 갔다. 그래서 부모만 탄다. id 가 줄어들며 올라가므로 고리가 없다.
 /// **에픽 줄을 만나면 그 에픽이 선 곳에서 멈춘다**(`milestone_stood`) — 에픽 줄은 제
-/// 부모에게서 마일스톤을 받지 않으므로, 넘어가면 에픽 줄과 다른 값을 낸다.
+/// 부모에게서 마일스톤을 받지 않으므로, 넘어가면 에픽 줄과 다른 값을 낸다. 받는
+/// 줄([`joins`])이 에픽을 거쳐 여기 오는 일은 이제 없다 — `groups` 가 에픽인 조상을
+/// 소속으로 줘 에픽 가지로 갔다.
+///
+/// **마일스톤인 조상을 만나면 그 마일스톤이다** — 부모가 에픽이면 그 에픽이듯
+/// (moai-9t3l). `--parent <마일스톤>` 의 자식이 `(마일스톤 없음)` 으로 빠지지 않는다.
+/// 제 `milestone` 이 먼저다: 에픽에서 제 `epic` 이 먼저인 것과 같은 차례다.
+/// `joins` 는 맨 처음 줄의 것이다 — 이슈 밑에 id 로 선 마일스톤 줄도 이슈를 맨 위
+/// 줄로 받아 여기 온다.
 fn climb<'a>(
     top: &'a Issue,
     by_id: &BTreeMap<&'a str, &'a Issue>,
     rooted: &BTreeSet<&str>,
+    joins: bool,
 ) -> Option<&'a str> {
     let mut cur = top;
     loop {
         if cur.kind == Kind::Epic {
             return milestone_stood(cur);
+        }
+        // 받는 줄이면 `top` 은 언제나 이슈나 생각이다(`fold_top` 이 그 종류로만 오른다) —
+        // 그래서 여기 서는 마일스톤은 늘 조상이다.
+        if joins && cur.kind == Kind::Milestone {
+            return Some(cur.id.as_str());
         }
         if let Some(m) = &cur.milestone {
             return Some(m.as_str());
@@ -2277,6 +2314,52 @@ mod tests {
         assert_eq!(kids, ["argos-0002.aaa"], "손자까지 직계로 셌다");
         let mem: Vec<&str> = group_members(&issues, &issues[0]).iter().map(|i| i.id.as_str()).collect();
         assert_eq!(mem, ["argos-0002", "argos-0002.aaa", "argos-0002.aaa.bbb"], "물려받은 자식을 뺐다");
+    }
+
+    /// **부모가 묶음이면 그 묶음이 소속이다** (moai-9t3l). 가장자리마다 한 줄 —
+    /// 제 필드가 이기고, 사슬을 타고, 묶음 줄은 안 받고, 없는 부모는 안 넘는다.
+    #[test]
+    fn a_child_of_a_group_takes_that_group() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.milestone = Some("argos-m001".into());
+        epic.epic = Some("argos-0002".into()); // 에픽 줄이 든 `epic` 은 안 내려온다
+        let mut own_epic = make("argos-0001.aa2", Kind::Issue, "todo");
+        own_epic.epic = Some("argos-0002".into());
+        let mut own_stone = make("argos-m001.cc2", Kind::Issue, "todo");
+        own_stone.milestone = Some("argos-m002".into());
+        let issues = vec![
+            make("argos-m001", Kind::Milestone, "todo"),
+            make("argos-m002", Kind::Milestone, "todo"),
+            epic,
+            make("argos-0002", Kind::Epic, "todo"),
+            make("argos-0001.aa1", Kind::Issue, "todo"),
+            make("argos-0001.aa1.bb1", Kind::Issue, "todo"),
+            own_epic,
+            make("argos-0001.aa3", Kind::Idea, "todo"),
+            make("argos-0001.ee1", Kind::Epic, "todo"),
+            make("argos-m001.cc1", Kind::Issue, "todo"),
+            own_stone,
+            make("argos-m001.dd1", Kind::Milestone, "todo"),
+            make("argos-zzzz.ff1", Kind::Issue, "todo"),
+        ];
+        let (e, m) = (groups(&issues), milestones(&issues));
+        for (id, epic, stone) in [
+            ("argos-0001.aa1", Some("argos-0001"), Some("argos-m001")),
+            ("argos-0001.aa1.bb1", Some("argos-0001"), Some("argos-m001")), // 사슬을 탄다
+            ("argos-0001.aa2", Some("argos-0002"), None),                   // 제 에픽이 이긴다
+            ("argos-0001.aa3", Some("argos-0001"), Some("argos-m001")),     // 생각도 받는다
+            ("argos-0001.ee1", Some("argos-0002"), None), // 에픽 줄은 부모 에픽을 안 받는다
+            ("argos-m001.cc1", None, Some("argos-m001")),
+            ("argos-m001.cc2", None, Some("argos-m002")), // 제 마일스톤이 이긴다
+            ("argos-m001.dd1", None, None),               // 마일스톤 줄은 안 받는다
+            ("argos-zzzz.ff1", None, None),               // 없는 부모는 넘지 않는다
+        ] {
+            assert_eq!((e.get(id).copied(), m.get(id).copied()), (epic, stone), "{id}");
+        }
+        assert!(!status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z")
+            .warnings
+            .iter()
+            .any(|w| w.kind == "no_epic" && w.ids.iter().any(|i| i.starts_with("argos-0001."))));
     }
 
     /// **멤버는 트리가 그리는 것과 같다** — 물려받은 자식까지, 마일스톤이면
