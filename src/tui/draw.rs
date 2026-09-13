@@ -35,11 +35,14 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     let rows = app.rows();
     // 할 말이 있을 때만 배너 줄이 선다. 늘 세워 두면 한 줄이 영영 논다.
     let banner_h = u16::from(banner(app).is_some());
+    // 누군지 묻는 동안만 아랫줄이 둘이다 — 왜 묻는지와 다시 안 묻게 하는 법은 글칸
+    // 뒤에 붙이면 적는 글에 밀려 사라진다. 그 둘이 이 칸의 알맹이다.
+    let keys_h = if matches!(app.mode, Mode::Ask(_)) { 2 } else { 1 };
     let [top, note, body, keys] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(banner_h),
         Constraint::Min(1),
-        Constraint::Length(1),
+        Constraint::Length(keys_h),
     ])
     .areas(f.area());
     let [left, right] =
@@ -61,9 +64,28 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 F키 바가 선다.
     match &app.mode {
         Mode::Browse => fkeys(f, app, keys),
-        Mode::Grep(q) => prompt(f, app, keys, "검색", q),
-        Mode::Filter(q) => prompt(f, app, keys, "거름망", q),
+        Mode::Grep(q) => prompt(f, keys, "검색", q, app.input_error(), "Enter 걸기  Esc 그만"),
+        Mode::Filter(q) => prompt(f, keys, "거름망", q, app.input_error(), "Enter 걸기  Esc 그만"),
+        Mode::Ask(ask) => {
+            // 글칸이 **아래**에서 자리를 먼저 얻는다 — 창이 낮아 한 줄만 남으면 적는 칸이
+            // 안내에 가려 어디에 치는지 안 보인다.
+            let [why, line] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(keys);
+            let text = clip(&ask_why(&ask.why), why.width as usize);
+            f.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::new().fg(Color::Black).bg(Color::LightYellow)))), why);
+            prompt(f, line, "누구", &ask.input, ask.error.clone(), "이름 (메일)  Enter 쓰기  Esc 그만");
+        }
     }
+}
+
+/// 누군지 묻는 까닭과 **다시 안 묻게 하는 법.** 받은 것은 이 세션 동안만 들고
+/// 어디에도 적지 않으므로(moai-nmv2), 다음에도 묻지 않게 하는 길은 사람이 제 설정에
+/// 적는 것 하나다 — 그 길을 여기서 대지 않으면 열 때마다 물음을 받는다.
+///
+/// **다시 안 묻게 하는 법이 앞이다.** 좁은 창에서는 뒤가 잘리는데, 세션 동안만 든다는
+/// 말은 잘려도 사람이 잃는 것이 없고 설정하는 법은 잘리면 다음에 또 묻는다. 그다음이
+/// 쓰기를 멈춘 거절문(`why`)이다 — 설정이 없는지 틀렸는지를 그것이 가른다.
+fn ask_why(why: &str) -> String {
+    format!(" git config user.name·user.email 을 바르게 적어 두면 다시 안 묻는다 · {why} · 받은 것은 이 세션 동안만 든다 ")
 }
 
 /// 화면 안에서 알려야 할 것. **대체 화면 안에서는 `eprintln!` 이 화면을
@@ -150,7 +172,7 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
 ///
 /// 글이 칸보다 길면 조각이 커서를 따라 밀린다. 그러면 뒤의 안내·오류는 줄 밖으로
 /// 밀리는데, 옮기기 전에도 그랬다.
-fn prompt(f: &mut Frame, app: &App, at: Rect, what: &str, input: &Input) {
+fn prompt(f: &mut Frame, at: Rect, what: &str, input: &Input, error: Option<String>, help: &str) {
     let label = format!(" {what} ");
     // 이름표와 그 뒤 빈칸 하나를 뗀 자리가 글칸이다.
     let lead = crate::text::width(&label) + 1;
@@ -163,7 +185,7 @@ fn prompt(f: &mut Frame, app: &App, at: Rect, what: &str, input: &Input) {
         // 커서 밑으로 붙는다.
         Span::raw(" "),
     ];
-    match app.input_error() {
+    match error {
         Some(e) => {
             spans.push(Span::raw("   "));
             // 여러 줄짜리 도움말은 첫 줄만 — 한 줄 자리다.
@@ -172,7 +194,7 @@ fn prompt(f: &mut Frame, app: &App, at: Rect, what: &str, input: &Input) {
         }
         None => {
             spans.push(Span::raw("   "));
-            spans.push(Span::styled("Enter 걸기  Esc 그만", dim()));
+            spans.push(Span::styled(help.to_string(), dim()));
         }
     }
     f.render_widget(Paragraph::new(Line::from(spans)), at);
@@ -1686,6 +1708,41 @@ mod tests {
         let shown = lines.iter().filter(|l| (l.starts_with('│') || l.starts_with('┃')) && l.contains("argos-")).count();
         assert_eq!(shown, 9, "빈 줄을 보이며 서 있다\n{}", lines.join("\n"));
         assert!(lines.iter().any(|l| l.contains("argos-0004")), "{}", lines.join("\n"));
+    }
+
+    /// **누군지 묻는 칸은 왜 묻는지와 다시 안 묻게 하는 법을 함께 댄다.** 받은 것은
+    /// 세션 동안만 들므로 설정하는 법을 안 대면 열 때마다 묻는다. 80칸에서도 그 법이
+    /// 안 잘린다. 거절된 까닭은 글칸 줄에 선다.
+    #[test]
+    fn the_question_names_the_git_setting_that_stops_it() {
+        let ask = |error: Option<String>| {
+            Mode::Ask(super::super::Ask {
+                input: Input::new("레이븐"),
+                error,
+                why: "git 사용자 정보가 `이름 (메일)` 로 쓸 수 없는 모양이다 — \"레이븐 (raven)\"".into(),
+                back: Box::new(Mode::Browse),
+                then: |_| {},
+            })
+        };
+        let mut a = app();
+        a.mode = ask(None);
+        let lines = render(&mut a, 80, 12);
+        let (why, line) = (&lines[10], &lines[11]);
+        assert!(why.contains("git config user.name·user.email") && why.contains("다시 안 묻는다"), "{why}");
+        // 넓으면 무엇이 틀렸는지도 선다 — 설정이 있는데 모양이 틀린 사람에게 "모른다" 고만 하지 않는다.
+        let wide = render(&mut a, 200, 12);
+        assert!(wide[10].contains("쓸 수 없는 모양이다"), "{}", wide[10]);
+        // 한 줄만 남아도 글칸이 보인다
+        let low = render(&mut a, 80, 4);
+        assert!(low[3].contains(" 누구 "), "{low:?}");
+        assert!(line.contains(" 누구 ") && line.contains("레이븐") && line.contains("Esc 그만"), "{line}");
+        assert!(!lines.join("\n").contains("F10"), "묻는 동안 F키 바가 섰다");
+
+        a.mode = ask(Some("`이름 (메일)` 모양이 아니다".into()));
+        let line = render(&mut a, 80, 12)[11].clone();
+        assert!(line.contains("모양이 아니다") && !line.contains("Esc 그만"), "{line}");
+        // 좁아도 무너지지 않는다
+        render(&mut a, 20, 6);
     }
 
     /// 빈 저장소도 그려진다.
