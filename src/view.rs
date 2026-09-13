@@ -1211,11 +1211,14 @@ pub fn projects_status(
             continue;
         };
         out.push(board(b.cfg, &b.status.counts));
-        for i in b.picked.iter().take(PICKED_SHOWN) {
+        let shown = &b.picked[..b.picked.len().min(PICKED_SHOWN)];
+        // 보인 것끼리 id 폭을 맞춘다 — 자식 id(`x-1a2b.3`)가 섞이면 줄마다 제 폭으로는 제목 칸이 어긋난다.
+        let w_id = shown.iter().map(|i| width(&i.id)).max().unwrap_or(0);
+        for i in shown {
             out.push(format!(
                 "  {}{}{}  {}",
                 cell(style::PLAIN, &p.name, w_name + 2),
-                cell(style::ID, &i.id, width(&i.id) + 2),
+                cell(style::ID, &i.id, w_id + 2),
                 paint(style::status_style(i.status.as_str()), style::glyph(i.status.as_str())),
                 clip(&i.title, TITLE_CAP),
             ));

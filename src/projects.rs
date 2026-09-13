@@ -79,6 +79,9 @@ impl Project {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum Seen<'a, T> {
     Ok(T),
+    /// `moai project ls --json` 과 같은 낱말이다 — 같은 상태를 두 명령이 달리 부르면
+    /// 둘을 함께 읽는 쪽이 두 낱말을 다 알아야 한다.
+    #[serde(rename = "uninitialized")]
     Uninit,
     Missing,
     Unreadable { error: &'a str },

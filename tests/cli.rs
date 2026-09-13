@@ -513,7 +513,7 @@ fn outside_a_repo_the_overview_speaks_json() {
     let good_at = format!("{{\"name\":\"good\",\"path\":{:?},\"state\":\"ok\",\"status\":{{\"counts\":", good.to_str().unwrap());
     assert!(st.starts_with(&format!("{{\"projects\":[{good_at}")), "{st}");
     assert!(st.contains(&format!("\"picked\":[{{\"id\":\"{picked}\"")), "{st}");
-    let bare_at = st.find(&format!("{{\"name\":\"bare\",\"path\":{:?},\"state\":\"uninit\"}}", bare.to_str().unwrap()));
+    let bare_at = st.find(&format!("{{\"name\":\"bare\",\"path\":{:?},\"state\":\"uninitialized\"}}", bare.to_str().unwrap()));
     let gone_at = st.find(&format!("{{\"name\":\"gone\",\"path\":{:?},\"state\":\"missing\"}}", gone.to_str().unwrap()));
     assert!(bare_at.is_some() && gone_at.is_some() && bare_at < gone_at, "등록 차례가 아니다 — {st}");
     assert!(st.trim_end().ends_with(&format!("\"problems\":[],\"config\":{:?}}}", cfg.to_str().unwrap())), "{st}");
