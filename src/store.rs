@@ -234,7 +234,7 @@ pub fn carried_unreadable() -> usize {
 }
 
 /// 방금 쓰기가 **스냅샷을 안 건드렸는데** 파일에 있던 못 읽는 줄의 수.
-/// [`carried_unreadable`] 과 둘 중 하나만 0 이 아니다.
+/// [`carried_unreadable`] 과 **많아야 하나만** 0 이 아니다 (둘 다 0 일 수 있다).
 static HELD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 pub fn held_unreadable() -> usize {
