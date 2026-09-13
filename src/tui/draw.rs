@@ -705,7 +705,7 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     // `(마일스톤 없음)` 에 서는 생각에 탐색기가 두지 않은 마일스톤을 댄다.
     // 선 자리와 다른 제 값은 **지우지 않고 그렇다고 적는다** — 적어 둔 값이 화면에서
     // 말없이 사라지면 그게 더 헷갈린다.
-    let placed = app.index.milestone_of(&i.id);
+    let placed = app.index.milestone_of(idx);
     if let Some(id) = placed {
         fields.push(("마일스톤".into(), app.title_of(id)));
     }

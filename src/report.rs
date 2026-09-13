@@ -321,13 +321,16 @@ pub fn group_members<'a>(all: &'a [Issue], group: &Issue) -> Vec<&'a Issue> {
         Kind::Milestone => matches!(k, Kind::Issue | Kind::Epic),
         _ => false,
     };
-    if !is_group(group) {
+    let eclipsed = eclipsed(all);
+    // 종류가 다른 쌍둥이에게 id 가 가려진 묶음 줄도 멤버가 없다 — 그 id 를 가리키는
+    // 줄은 쌍둥이의 것이다([`eclipsed`]).
+    if !is_group(group) || eclipsed(group) {
         return Vec::new();
     }
     let map = group_for(group.kind, all);
     let mut out: Vec<&Issue> = all
         .iter()
-        .filter(|i| i.id != group.id && holds(i.kind))
+        .filter(|i| i.id != group.id && holds(i.kind) && !eclipsed(i))
         .filter(|i| map.get(i.id.as_str()) == Some(&group.id.as_str()))
         .collect();
     out.sort_by(|a, b| crate::query::display_order(a, b));
@@ -473,7 +476,8 @@ fn members_in<'a>(
     mile_of: &BTreeMap<&'a str, &'a str>,
 ) -> BTreeMap<(Kind, &'a str), Vec<&'a Issue>> {
     let mut members: BTreeMap<(Kind, &str), Vec<&Issue>> = BTreeMap::new();
-    for i in all.iter().filter(|i| is_work(i)) {
+    let eclipsed = eclipsed(all);
+    for i in all.iter().filter(|i| is_work(i) && !eclipsed(i)) {
         for (kind, map) in [(Kind::Epic, epic_of), (Kind::Milestone, mile_of)] {
             if let Some(g) = map.get(i.id.as_str()) {
                 members.entry((kind, g)).or_default().push(i);
@@ -651,7 +655,17 @@ pub fn creates_cycle(issues: &[Issue], blocker: &str, blocked: &str) -> bool {
 pub fn groups(all: &[Issue]) -> BTreeMap<&str, &str> {
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
     let rooted = rooted_thoughts(&by_id);
-    all.iter().filter_map(|i| epic_through(i, &by_id, &rooted).map(|e| (i.id.as_str(), e))).collect()
+    // **못 받은 줄도 지도를 쓴다** — `milestones` 와 같은 까닭이다. 받은 줄만 적으면
+    // 같은 id 의 앞줄이 받은 에픽이 뒷줄에 흘러, 에픽 없는 뒷줄이 남의 에픽에
+    // 그려지고 세어진다(moai-2m9p).
+    let mut out = BTreeMap::new();
+    for i in all {
+        match epic_through(i, &by_id, &rooted) {
+            Some(e) => out.insert(i.id.as_str(), e),
+            None => out.remove(i.id.as_str()),
+        };
+    }
+    out
 }
 
 /// **뿌리로 올라간 생각** — 제 부모 밑에 접히지 않는 idea 의 id.
@@ -867,6 +881,25 @@ fn fold_top<'a>(
     Some(cur)
 }
 
+/// **같은 id 의 뜻을 정하는 줄과 종류가 다른 가려진 줄**인가.
+///
+/// 중복 id 는 이 도구가 거부하지 않고 드러내기만 하는 상태(`duplicate_id`)고, id 로
+/// 짠 지도(`groups`·`milestones`·`misplaced`)는 모두 뒷줄 — `by_id` 가 고르는 줄 — 이
+/// 이긴다. 그 값은 **그 줄의 종류로** 셈한 것이다: 마일스톤 줄이 든 `epic`, 에픽 줄이
+/// 받은 제 `milestone`, 생각이 `(마일스톤 없음)` 에 서면서 세는 마일스톤. 종류가 다른
+/// 쌍둥이가 그 값을 제 종류로 읽으면 그리는 자리와 세는 묶음이 갈리고, 한때는 생각
+/// 줄의 길 잃음 판정이 마일스톤 줄에 흘러 그 마일스톤이 통째로 `(길 잃음)` 에
+/// 끌려갔다(moai-2m9p).
+///
+/// 그래서 그런 줄은 **어느 묶음에도 세지 않고** `nav` 는 `(길 잃음)` 에 둔다 — 제 뜻을
+/// 담을 지도 칸이 없으니 자리를 정할 수 없는 줄이다. 지우지 않으므로 보이고,
+/// `duplicate_id` 가 그 id 를 따로 드러낸다. 같은 종류의 쌍둥이는 같은 값을 같은 자로
+/// 읽으므로 여기 안 걸린다.
+pub fn eclipsed(all: &[Issue]) -> impl Fn(&Issue) -> bool + '_ {
+    let kind_of: BTreeMap<&str, Kind> = all.iter().map(|i| (i.id.as_str(), i.kind)).collect();
+    move |i| kind_of.get(i.id.as_str()).is_some_and(|k| *k != i.kind)
+}
+
 /// 소속 참조가 못 쓸 것인 까닭.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -897,29 +930,27 @@ pub fn misplaced(all: &[Issue]) -> BTreeMap<&str, Misplace> {
     for i in all {
         let id = i.id.as_str();
         let mile = || mile_of.get(id);
-        match i.kind {
+        let got = match i.kind {
             // 뿌리에 선다. 가리키는 것이 없다.
-            Kind::Milestone => {}
-            Kind::Epic => {
-                if !usable(mile(), Kind::Milestone) {
-                    out.insert(id, Misplace::Milestone);
-                }
-            }
+            Kind::Milestone => None,
+            Kind::Epic => (!usable(mile(), Kind::Milestone)).then_some(Misplace::Milestone),
             // idea 도 같은 자를 받는다. 에픽을 안 적은 idea 는 아무것도 안
             // 가리키므로 여기 걸릴 것이 없고, 적었는데 그것이 에픽이 아니면
             // 일과 똑같이 드러나야 한다.
             Kind::Issue | Kind::Idea => match epic_of.get(id) {
-                Some(e) if kind_of.get(*e) != Some(&Kind::Epic) => {
-                    out.insert(id, Misplace::Epic);
-                }
+                Some(e) if kind_of.get(*e) != Some(&Kind::Epic) => Some(Misplace::Epic),
                 // 에픽이 멀쩡하면 그 에픽의 마일스톤을 따르므로 여기서 안 본다.
-                Some(_) => {}
-                None if !usable(mile(), Kind::Milestone) => {
-                    out.insert(id, Misplace::Milestone);
-                }
-                None => {}
+                Some(_) => None,
+                None if !usable(mile(), Kind::Milestone) => Some(Misplace::Milestone),
+                None => None,
             },
-        }
+        };
+        // **판정도 같은 id 의 뒷줄이 이긴다** — `milestones` 와 같은 차례다. 넣기만
+        // 하면 종류가 다른 앞줄의 판정이 뒷줄에 남는다(moai-2m9p, [`eclipsed`]).
+        match got {
+            Some(m) => out.insert(id, m),
+            None => out.remove(id),
+        };
     }
     out
 }
@@ -981,16 +1012,17 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
     // 자식이 물려받은 소속까지 센다. 트리가 그리는 것과 같은 판정이어야
     // 머리글의 건수와 그 밑의 줄 수가 어긋나지 않는다.
     let group = group_for(kind, issues);
+    let eclipsed = eclipsed(issues);
     // **묶음도 급한 것이 위로 온다.** 파일 순(=id 순)으로 두면 이슈 목록과
     // 차례가 달라, 같은 화면에서 규칙이 둘이 된다.
-    let mut groupings: Vec<&Issue> = issues.iter().filter(|i| i.kind == kind).collect();
+    let mut groupings: Vec<&Issue> = issues.iter().filter(|i| i.kind == kind && !eclipsed(i)).collect();
     groupings.sort_by(|a, b| crate::query::display_order(a, b));
     let mut out: Vec<Roll> = groupings
         .iter()
         .map(|e| {
             let members: Vec<&Issue> = issues
                 .iter()
-                .filter(|i| is_work(i) && group.get(i.id.as_str()) == Some(&e.id.as_str()))
+                .filter(|i| is_work(i) && !eclipsed(i) && group.get(i.id.as_str()) == Some(&e.id.as_str()))
                 .collect();
             let (counts, total, done, percent) = tally(&members);
             Roll {
@@ -1008,7 +1040,7 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
     // 어느 묶음에도 안 딸린 일. 에픽은 일이 아니라 묶음이라 세지 않는다.
     let loose: Vec<&Issue> = issues
         .iter()
-        .filter(|i| is_work(i) && !group.contains_key(i.id.as_str()))
+        .filter(|i| is_work(i) && !eclipsed(i) && !group.contains_key(i.id.as_str()))
         .collect();
     let (counts, total, done, percent) = tally(&loose);
     let none = match kind {
