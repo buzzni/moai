@@ -10,8 +10,18 @@ use crate::model::{self, Issue};
 use crate::store::Repo;
 use crate::view;
 
-/// 락 안에서 챙겨 나오는 것 — 고친 줄, 그 에픽, 자식, (계획에서 빠진 줄, 뺀 줄), 바뀌었나.
-type Edited = (Issue, Option<Issue>, Vec<Issue>, Vec<(String, String)>, Vec<(String, String)>, bool);
+/// 락 안에서 챙겨 나오는 것. **이름을 붙여 둔다** — 같은 모양의 지도 둘을 튜플로
+/// 늘어놓으면 자리를 바꿔 적어도 컴파일러가 안 잡는다.
+struct Edited {
+    issue: Issue,
+    epic: Option<Issue>,
+    children: Vec<Issue>,
+    /// 계획에서 빠진 줄 → 뺀 줄. 고친 줄과 그 자식만.
+    shelved: Vec<(String, String)>,
+    /// 묶음 → 멤버에서 읽은 칸. 고친 줄과 그 자식만.
+    read: super::Read,
+    changed: bool,
+}
 
 pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     fail_if_nothing(&args)?;
@@ -22,7 +32,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let body = super::add::read_body(args.body.clone())?;
     let at = model::now();
 
-    let (edited, epic, children, shelved, read, changed): Edited = repo.with_write(|issues, cfg, _| {
+    let done: Edited = repo.with_write(|issues, cfg, _| {
         let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
             return Err(Fail::not_found(&args.id));
         };
@@ -70,7 +80,20 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         // 한쪽만 1 로 끝나면 받는 쪽이 재시도를 못 짠다.
         let changed = *i != before;
         if !changed {
-            return Ok((vec![], (before, None, Vec::new(), Vec::new(), Vec::new(), false)));
+            // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
+            // 키가 사라지면 받는 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
+            let read = super::read_of(issues, cfg, &[before.id.as_str()]);
+            return Ok((
+                vec![],
+                Edited {
+                    issue: before,
+                    epic: None,
+                    children: Vec::new(),
+                    shelved: Vec::new(),
+                    read,
+                    changed: false,
+                },
+            ));
         }
         i.updated_at = at.clone();
         let out = i.clone();
@@ -90,26 +113,24 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             .filter(|c| crate::id::parent_of(&c.id) == Some(out.id.as_str()))
             .cloned()
             .collect();
+        // 상세가 그리는 줄 — 고친 줄과 그 자식. 미룸과 읽은 칸을 같은 자로 고른다.
+        let near: Vec<&str> =
+            std::iter::once(out.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
         // 상세가 미룸을 말하려면 **물려받은 것까지** 필요하다 — 미룬 에픽으로 옮기는
         // 순간 그 줄이 계획에서 빠진다. 같은 까닭으로 락 안에서 본 모습으로 잰다.
         let shelved: Vec<(String, String)> = crate::report::deferred_roots(issues)
             .into_iter()
-            .filter(|(id, _)| *id == out.id || children.iter().any(|c| c.id == *id))
+            .filter(|(id, _)| near.contains(id))
             .map(|(id, root)| (id.to_string(), root.to_string()))
             .collect();
         // 묶음의 칸도 멤버에서 읽는다 — 제 줄만 들고 나가면 상세가 손으로 둔 칸을 그린다.
-        let read: Vec<(String, String)> = crate::report::group_states(issues, cfg)
-            .into_iter()
-            .filter(|(id, _)| *id == out.id || children.iter().any(|c| c.id == *id))
-            .map(|(id, col)| (id.to_string(), col.to_string()))
-            .collect();
-        Ok((vec![], (out, epic, children, shelved, read, true)))
+        let read = super::read_of(issues, cfg, &near);
+        Ok((vec![], Edited { issue: out, epic, children, shelved, read, changed: true }))
     })?;
 
+    let Edited { issue: edited, epic, children, shelved, read, changed } = done;
     if ctx.json {
-        let states: std::collections::BTreeMap<&str, &str> =
-            read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect();
-        return super::json_line(&super::Row::of(&edited, &states));
+        return super::json_line(&super::Row::from(&edited, &read));
     }
     if !changed {
         return Ok(vec![format!(

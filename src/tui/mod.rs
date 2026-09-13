@@ -186,15 +186,22 @@ impl App {
     /// 것을 위해 걸음을 재는 것이다. 반대쪽은 안 틀린다 — 화면에 도는 글리프가
     /// 있으면 그 이슈는 `issues` 에 있으므로 여기가 참이다. 스피너를 그려 놓고
     /// 아무도 안 깨우는 조합은 그래서 못 생긴다.
+    /// **묶음은 안 센다.** 묶음이 읽은 칸은 `in_progress` 라도 그 자리에서 누가
+    /// 손대고 있다는 뜻이 아니다 — 멤버 하나가 끝나고 하나가 남기만 해도 그렇게
+    /// 읽힌다. 그것으로 깨우면 아무 일도 안 벌어진 저장소에서 탐색기가 120ms 마다
+    /// 깨어 도는 글리프를 그린다. 그리는 쪽(`draw::row_line`)도 묶음은 안 돌린다.
     pub fn spinning(&self) -> bool {
-        (0..self.issues.len()).any(|at| crate::style::spins(self.column(at)))
+        self.issues.iter().any(|i| !crate::report::is_group(i) && crate::style::spins(i.status.as_str()))
     }
 
     /// 그 줄이 **서 있는** 칸 — 묶음이면 멤버에서 읽은 칸, 아니면 제 칸. CLI 가
-    /// 묻는 `report::column` 과 같은 답이다.
+    /// 묻는 `report::column` 과 같은 답이다 — 묶음만 읽은 칸을 받는 것까지 같다.
     pub fn column(&self, at: usize) -> &str {
         let i = &self.issues[at];
-        self.states.get(&i.id).map_or(i.status.as_str(), String::as_str)
+        crate::report::is_group(i)
+            .then(|| self.states.get(&i.id).map(String::as_str))
+            .flatten()
+            .unwrap_or(i.status.as_str())
     }
 
     /// 새 자료를 받아들이고 어긋난 것을 손본다. 시험이 저장소 없이 부른다.
@@ -627,7 +634,12 @@ mod tests {
         issues[0].status = Status::new("in_progress");
         a.adopt(issues.clone());
         assert!(!a.spinning(), "멤버가 안 움직인 에픽이 적힌 칸으로 돈다");
-        issues[2].status = Status::new("in_progress");
+        // 읽은 칸으로도 안 돈다 — 멤버 하나가 끝나기만 해도 묶음은 `in_progress` 로
+        // 읽히는데, 그것으로 깨우면 아무도 손대지 않은 저장소에서 화면이 계속 깬다.
+        issues[2].status = Status::new("done");
+        a.adopt(issues.clone());
+        assert!(!a.spinning(), "일은 멈췄는데 묶음의 읽은 칸으로 돈다");
+        issues[3].status = Status::new("in_progress");
         a.adopt(issues);
         assert!(a.spinning(), "in_progress 가 있는데 안 돈다고 한다");
     }
@@ -865,19 +877,27 @@ mod tests {
         assert!(a.trouble.is_none());
     }
 
-    /// **거름망이 찾으려던 것을 숨기지 않는다.** 끝난 에픽도 걸린 멤버가 있으면
-    /// 남는다. `Filter` 의 기본값이 done 을 숨기는 것에 걸려들지 않아야 한다.
+    /// **거름망이 찾으려던 것을 숨기지 않는다.** 저 자신은 안 걸리는 에픽도 걸린
+    /// 멤버가 있으면 남는다. `Filter` 의 기본값이 done 을 숨기는 것에 걸려들지 않아야 한다.
+    ///
+    /// **에픽 자신은 정말로 안 걸려야 한다.** 묶음의 칸은 멤버에서 읽으므로(moai-j3b3)
+    /// 적힌 칸을 `done` 에 둬도 멤버가 `todo` 뿐이면 에픽이 `todo` 로 서서 제 손으로
+    /// 걸린다 — 그러면 이 시험은 자손으로 남는 길을 한 번도 안 지난다. 끝난 멤버를
+    /// 하나 둬 에픽을 `in_progress` 에 세운다.
     #[test]
-    fn a_finished_epic_does_not_swallow_its_matching_members() {
-        let mut issues = vec![
+    fn an_unmatched_epic_does_not_swallow_its_matching_members() {
+        let mut closed = member("argos-0002", "argos-0001");
+        closed.status = Status::new("done");
+        let issues = vec![
             make("argos-0001", Kind::Epic),
+            closed,
             member("argos-0003", "argos-0001"),
         ];
-        issues[0].status = Status::new("done");
         let mut a = App::new(issues, cfg(), Path::new());
+        assert_eq!(a.column(0), "in_progress", "에픽이 제 손으로 걸린다 — 시험이 자손 길을 안 지난다");
         a.key(key(KeyCode::Char('f')));
         typed(&mut a, "status=todo");
-        assert_eq!(shown(&a), ["argos-0001"], "끝난 에픽이 걸린 멤버를 데리고 사라졌다");
+        assert_eq!(shown(&a), ["argos-0001"], "안 걸린 에픽이 걸린 멤버를 데리고 사라졌다");
     }
 
     /// Esc 는 거름망을 푼다. 화면을 끄지는 않는다 — 실수 한 번에 하던 것이

@@ -72,7 +72,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
 
     let at = model::now();
     let by = model::actor(ctx.user.as_deref())?;
-    let made: Vec<Issue> = repo.with_write(|issues, cfg, reserved| {
+    let (made, read): (Vec<Issue>, super::Read) = repo.with_write(|issues, cfg, reserved| {
         // 펼칠 것이 정말 idea 인지 **먼저** 본다. 나중에 보면 만들어진 id 가
         // 오류 메시지에 실려 나가고, 받는 쪽은 그게 남은 줄 안다.
         //
@@ -133,7 +133,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             thought.status_since = at.clone();
             thought.updated_at = at.clone();
         }
-        Ok((entries, made))
+        // 펼치면 에픽이 선다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는 칸을 읽는다.
+        let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
+        let read = crate::cmd::read_of(issues, cfg, &ids);
+        Ok((entries, (made, read)))
     })?;
 
     if ctx.json {
@@ -142,12 +145,12 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // `mv --json` 이 옮긴 것 말고도 다 내는 것과 같은 까닭이다.
         #[derive(serde::Serialize)]
         struct Out<'a> {
-            made: &'a [Issue],
+            made: Vec<super::Row<'a>>,
             promoted: &'a str,
             status: &'a str,
         }
         return super::json_line(&Out {
-            made: &made,
+            made: made.iter().map(|i| super::Row::from(i, &read)).collect(),
             promoted: &args.id,
             status: crate::config::DONE,
         });

@@ -20,7 +20,9 @@ struct Moved {
     /// 옮긴 것 중 계획에서 빠진 것 — (그 줄, 실제로 미룬 줄).
     shelved: Vec<(String, String)>,
     /// 옮기려 한 묶음 → 멤버에서 읽은 칸. 적힌 칸은 어디서도 안 읽힌다.
-    read: std::collections::BTreeMap<String, String>,
+    read: super::Read,
+    /// 그 가운데 **끝난 멤버가 있는** 묶음 — 남은 멤버를 미뤄 접히는 것.
+    finished: std::collections::BTreeSet<String>,
 }
 
 pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
@@ -85,17 +87,16 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         }
         // **묶음을 옮기려 했으면 서 있는 칸을 잰다.** 막지 않는다 — 쓰기는 한다.
         // 다만 그 칸은 멤버에서 읽히므로(moai-j3b3), 말하지 않으면 옮긴 사람은
-        // 에픽이 닫힌 줄 알고 화면은 계속 `in_progress` 를 그린다.
-        let touched = |id: &str| {
-            m.done.iter().any(|(i, _)| i.id == id) || m.already.iter().any(|a| a == id)
-        };
-        if issues.iter().any(|i| crate::report::is_group(i) && touched(&i.id)) {
-            m.read = crate::report::group_states(issues, cfg)
-                .into_iter()
-                .filter(|(id, _)| touched(id))
-                .map(|(id, col)| (id.to_string(), col.to_string()))
-                .collect();
-        }
+        // 에픽이 닫힌 줄 알고 화면은 계속 `in_progress` 를 그린다. 못 찾은 id 는
+        // 저절로 빠진다 — `read_of` 가 있는 묶음만 고른다.
+        let asked: Vec<&str> = ids.iter().map(String::as_str).collect();
+        m.read = super::read_of(issues, cfg, &asked);
+        // 접는 길이 갈리는 자리 — `report` 가 정하고 여기서는 그 답을 나른다.
+        m.finished = issues
+            .iter()
+            .filter(|g| m.read.contains_key(&g.id) && crate::report::has_finished_member(issues, g))
+            .map(|g| g.id.clone())
+            .collect();
         Ok((entries, m))
     })?;
 
@@ -109,20 +110,33 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         // 못 찾은 것은 사람 출력에는 있는데 기계 출력에만 없으면, 받는 쪽이
         // 두 표면 중 하나를 못 믿게 된다.
         #[derive(serde::Serialize)]
+        struct Stands<'a> {
+            id: &'a str,
+            derived_status: &'a str,
+        }
+        #[derive(serde::Serialize)]
         struct Out<'a> {
             moved: Vec<super::Row<'a>>,
             already: &'a [String],
             missing: &'a [String],
             /// 옮겼어도 계획 밖인 것과 도로 집을 줄. 사람 출력의 안내와 같은 것이다.
             shelved: Vec<super::Shelved<'a>>,
+            /// 옮기려 한 묶음 가운데 **서 있는 칸이 적은 칸과 다른 것.** 사람 출력의
+            /// 한 줄과 같은 것이다 — 이미 그 칸이던 묶음은 `already` 에 id 뿐이라,
+            /// 여기 없으면 되풀이해 부른 쪽만 그 칸을 모른다.
+            stands: Vec<Stands<'a>>,
         }
-        let read: std::collections::BTreeMap<&str, &str> =
-            moved.read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect();
         return super::json_line(&Out {
-            moved: moved.done.iter().map(|(i, _)| super::Row::of(i, &read)).collect(),
+            moved: moved.done.iter().map(|(i, _)| super::Row::from(i, &moved.read)).collect(),
             already: &moved.already,
             missing: &moved.missing,
             shelved: super::shelved(&moved.shelved),
+            stands: moved
+                .read
+                .iter()
+                .filter(|(_, col)| col.as_str() != to.as_str())
+                .map(|(id, col)| Stands { id, derived_status: col })
+                .collect(),
         });
     }
 
@@ -146,6 +160,18 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             paint(style::DIM, &format!("이미 {to} 다"))
         ));
     }
+    // 묶음의 칸이 적은 칸과 다르면 한 줄. 같으면 말하지 않는다 — 멤버가 다 끝난
+    // 에픽을 `done` 에 두는 것은 틀린 일이 아니다. 접는 길은 `view` 가 고른다.
+    for (id, col) in moved.read.iter().filter(|(_, col)| col.as_str() != to.as_str()) {
+        out.push(format!(
+            "{}  {}",
+            paint(style::ID, id),
+            paint(
+                style::DIM,
+                &crate::view::group_moved(id, col, to.is_done(), moved.finished.contains(id))
+            )
+        ));
+    }
     // **미뤄 둔 줄을 옮겼으면 말한다.** 칸은 옮겨졌는데 그 줄은 보드에도
     // `ready` 에도 안 나오므로, 말하지 않으면 집어 든 일이 통째로 안 보인다 —
     // 막지는 않는다. 도로 집는 말은 `defer --undo` 하나다.
@@ -156,16 +182,6 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // 제가 미룬 줄이면 그 줄이, 물려받았으면 미룬 곳이 도로 집을 줄이다 — 말은
     // `view::shelved_by` 하나다. 한때 제 줄 쪽 안내만 id 없는 `moai defer --undo`
     // 를 대, 그대로 치면 clap 이 인자가 없다며 거절했다.
-    // 묶음의 칸이 적은 칸과 다르면 한 줄. 같으면 말하지 않는다 — 멤버가 다 끝난
-    // 에픽을 `done` 에 두는 것은 틀린 일이 아니다.
-    for (id, col) in moved.read.iter().filter(|(_, col)| **col != to.as_str()) {
-        let fold = if to.is_done() { " — 접으려면 남은 멤버를 `moai defer` 한다" } else { "" };
-        out.push(format!(
-            "{}  {}",
-            paint(style::ID, id),
-            paint(style::DIM, &format!("묶음의 칸은 멤버에서 읽는다. 서 있는 칸은 {col}{fold}"))
-        ));
-    }
     for (id, root) in &moved.shelved {
         out.push(format!(
             "{}  {}",

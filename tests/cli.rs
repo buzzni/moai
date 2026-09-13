@@ -630,6 +630,81 @@ fn a_group_stands_in_the_column_its_members_read() {
     assert!(edited.lines().nth(1).unwrap().contains("▸ in_progress"), "{edited}");
     let edited = ok(s.path(), &["edit", &epic, "--tag", "cache", "--json"]);
     assert!(edited.contains(r#""status":"done""#) && edited.contains(r#""derived_status":"in_progress""#), "{edited}");
+    // **되풀이해 불러도 같은 모양이다.** 바뀐 것이 없을 때만 키가 사라지면 재시도한
+    // 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
+    let again = ok(s.path(), &["edit", &epic, "--tag", "cache", "--json"]);
+    assert!(again.contains(r#""derived_status":"in_progress""#), "바뀐 것이 없다고 키를 뺐다 — {again}");
+}
+
+/// **줄을 내는 표면은 모두 서 있는 칸을 말한다.** `show` 만 곁들이면 `add`·`defer`·
+/// `link` 를 읽는 쪽은 같은 에픽을 적힌 칸으로 읽고, 만든 사람은 `add` 가 낸 글리프와
+/// 바로 다음 `show` 가 다른 칸을 말하는 것을 본다.
+#[test]
+fn every_surface_that_prints_a_group_reads_its_column() {
+    let s = init("groupsurface");
+    // 만든 칸은 안 읽힌다 — 멤버가 없으니 첫 칸에 선다.
+    let made = ok(s.path(), &["add", "저장 계층", "--type", "epic", "-s", "done"]);
+    assert!(made.contains('·') && !made.contains('✓'), "만든 줄이 적힌 칸을 그린다 — {made}");
+    let epic = made.split_whitespace().next().unwrap().to_string();
+    let held = add(s.path(), &["원자적 쓰기", "-e", &epic]);
+    ok(s.path(), &["mv", &held, "in_progress"]);
+
+    let json = ok(s.path(), &["add", "다른 에픽", "--type", "epic", "-s", "review", "--json"]);
+    assert!(json.contains(r#""derived_status":"todo""#), "add --json 이 읽은 칸을 안 낸다 — {json}");
+    for args in [
+        vec!["defer", &epic, "-m", "잠깐"],
+        vec!["defer", &epic, "--undo"],
+        vec!["link", &held, "--blocks", &epic],
+    ] {
+        let mut args = args.clone();
+        args.push("--json");
+        let json = ok(s.path(), &args);
+        assert!(
+            json.contains(r#""derived_status":"in_progress""#),
+            "{args:?} 가 읽은 칸을 안 낸다 — {json}"
+        );
+    }
+    // 펼친 계획의 에픽도 같다.
+    let idea = ok(s.path(), &["idea", "add", "캐시 층", "-q"]).trim().to_string();
+    let grown =
+        from_stdin(s.path(), &["idea", "promote", &idea, "--from", "-", "--json"], "# 캐시 층\n- [p2] 첫 이슈\n");
+    let json = String::from_utf8_lossy(&grown.stdout).to_string();
+    assert!(json.contains(r#""derived_status":"todo""#), "펼친 에픽이 읽은 칸을 안 낸다 — {json}");
+}
+
+/// **`--stale` 도 서 있는 칸의 나이를 잰다.** `-s` 는 읽은 칸으로 고르는데 나이만
+/// 적힌 칸의 시각으로 재면, 오늘 진행 중이 된 에픽이 "열흘째 멈춰 있다" 로 걸린다.
+#[test]
+fn stale_ages_a_group_by_its_members() {
+    let s = init("groupstale");
+    let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
+    let one = add(s.path(), &["원자적 쓰기", "-e", &epic]);
+    // 열흘 뒤에 집었다 — 에픽 줄의 시각은 만들어진 그날 그대로다.
+    let late = at(s.path(), "2026-09-21T04:12:03Z", &["mv", &one, "in_progress"]);
+    assert!(late.status.success());
+    let shown = |now: &str| -> String {
+        let out = at(s.path(), now, &["show", "-s", "in_progress", "--stale", "3"]);
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+    assert!(!shown("2026-09-21T04:12:03Z").contains(&epic), "오늘 진행 중이 된 에픽을 멈춘 것으로 셌다");
+    assert!(shown("2026-10-01T04:12:03Z").contains(&epic), "멤버가 열흘째 안 움직이는데 안 셌다");
+}
+
+/// **묶음이 제 멤버를 막는 것은 고리다.** 묶음은 멤버가 다 끝나야 닫히므로 둘 다 영영
+/// 안 끝나고, 적힌 칸을 `done` 으로 옮겨 푸는 길은 이제 없다.
+#[test]
+fn a_grouping_cannot_block_its_own_member() {
+    let s = init("groupcycle");
+    let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
+    let one = add(s.path(), &["원자적 쓰기", "-e", &epic]);
+    let outside = add(s.path(), &["남의 일"]);
+
+    let out = moai(s.path(), &["link", &epic, "--blocks", &one]);
+    assert!(!out.status.success(), "제 멤버를 막게 뒀다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("고리"), "{:?}", out.stderr);
+    // 남을 막는 것은 그대로 된다.
+    assert!(moai(s.path(), &["link", &epic, "--blocks", &outside]).status.success());
 }
 
 /// **묶음을 옮기는 것은 막지 않되, 서 있는 칸을 말한다.** 말하지 않으면 옮긴
@@ -643,9 +718,26 @@ fn moving_a_group_writes_and_says_where_it_stands() {
 
     let out = ok(s.path(), &["mv", &epic, "done"]);
     assert!(line_of(s.path(), &epic).contains(r#""status":"done""#), "쓰기를 막았다");
-    assert!(out.contains("서 있는 칸은 in_progress") && out.contains("moai defer"), "{out}");
+    assert!(out.contains("서 있는 칸은 in_progress"), "{out}");
+    // **끝난 멤버가 없으면 멤버를 미뤄도 안 닫힌다** — 셀 멤버가 비면 첫 칸이다.
+    // 시킨 대로 했는데 같은 말이 돌아오는 자리라, 접는 길을 제대로 댄다.
+    assert!(out.contains(&format!("moai defer {epic}")), "접을 수 없는데 멤버를 미루라고 한다 — {out}");
     let again = ok(s.path(), &["mv", &epic, "done"]);
     assert!(again.contains("서 있는 칸은 in_progress"), "이미 그 칸이면 입을 다물었다 — {again}");
+    // **기계 출력도 같은 것을 말한다.** 이미 그 칸이던 묶음은 `already` 에 id 뿐이라,
+    // 여기 없으면 되풀이해 부른 쪽만 그 칸을 모른다.
+    let json = ok(s.path(), &["mv", &epic, "done", "--json"]);
+    assert!(json.contains(r#""already":["#) && json.contains(r#""derived_status":"in_progress""#), "{json}");
+
+    // 끝난 멤버가 하나 생기면 남은 멤버를 미뤄 접을 수 있다 — 그때는 그렇게 댄다.
+    let closed = add(s.path(), &["락", "-e", &epic]);
+    ok(s.path(), &["mv", &closed, "done"]);
+    let out = ok(s.path(), &["mv", &epic, "done"]);
+    assert!(out.contains("접으려면 남은 멤버를"), "접을 수 있는데 안 알려 준다 — {out}");
+    ok(s.path(), &["defer", &held, "-m", "다음에"]);
+    let out = ok(s.path(), &["mv", &epic, "done"]);
+    assert!(!out.contains("서 있는 칸"), "접었는데 아직 말한다 — {out}");
+    ok(s.path(), &["defer", &held, "--undo"]);
 
     let json = ok(s.path(), &["mv", &epic, "review", "--json"]);
     assert!(json.contains(r#""derived_status":"in_progress""#), "{json}");
@@ -2933,12 +3025,87 @@ fn a_thought_does_not_hang_under_a_milestone_either() {
 fn a_deferred_epic_is_not_nagged_in_the_table_either() {
     let s = init("defertable");
     let epic = ok(s.path(), &["epic", "add", "다음 분기", "-q"]).trim().to_string();
-    let one = add(s.path(), &["일", "-e", &epic]);
-    ok(s.path(), &["mv", &one, "done"]);
+    add(s.path(), &["일", "-e", &epic]); // 안 끝난 채로 남는다
     ok(s.path(), &["defer", &epic]);
     let out = ok(s.path(), &["status"]);
     assert!(!out.contains("닫을 때가 됐다"), "미룬 묶음을 표가 재촉한다 — {out}");
     assert!(out.contains("미룸"), "무엇이 미뤄졌는지 낱말로 안 말한다 — {out}");
+}
+
+/// **끝난 묶음은 미뤄 둔 것으로 안 센다.** 세면 `moai status` 가 센 줄을 그 줄이
+/// 가리키는 `moai show --deferred` 가 done 으로 숨겨, 세어 놓고 못 보여 주는 수가
+/// 된다 — `idea_pile` 이 피한 그 덫이다. 남은 일이 생기면 다시 센다.
+#[test]
+fn a_finished_grouping_is_not_counted_as_shelved() {
+    let s = init("shelvedone");
+    let epic = ok(s.path(), &["epic", "add", "다음 분기", "-q"]).trim().to_string();
+    let one = add(s.path(), &["일", "-e", &epic]);
+    ok(s.path(), &["mv", &one, "done"]);
+    ok(s.path(), &["defer", &epic, "-m", "다음 분기에"]);
+
+    let st = ok(s.path(), &["status"]);
+    assert!(!st.contains("미뤄 둔 것"), "끝난 묶음을 미뤄 둔 것으로 셌다 — {st}");
+    let list = ok(s.path(), &["show", "--deferred"]);
+    assert!(!list.contains(&epic), "센 것과 내는 것이 어긋난다 — {list}");
+    // 끝난 묶음을 옮길 때 도로 집으라고 하지 않는다 — 그 줄은 계획 밖이 아니다.
+    let moved = ok(s.path(), &["mv", &epic, "done"]);
+    assert!(!moved.contains("--undo"), "끝난 묶음에 도로 집으라고 한다 — {moved}");
+
+    // 남은 일이 생기면 그 묶음은 다시 계획 밖이다 — 세는 곳과 내는 곳이 같이 움직인다.
+    add(s.path(), &["남은 일", "-e", &epic]);
+    let st = ok(s.path(), &["status"]);
+    assert!(st.contains("미뤄 둔 것 2건"), "{st}");
+    assert!(ok(s.path(), &["show", "--deferred"]).contains(&epic), "센 것을 안 낸다");
+}
+
+/// **읽은 칸 키는 우리 것이다.** `--json` 을 파일에 되써 넣어 `derived_status` 를
+/// 모르는 필드로 든 줄이 생기면, 그대로 내보낼 때 한 객체에 같은 키가 둘 서서 깐깐한
+/// 파서가 거절하고 묶음 아닌 줄에는 읽은 칸이 있는 것처럼 보인다. 파일의 값은
+/// 그대로 둔다 — `moai status` 가 "모르는 필드" 로 비춘다.
+#[test]
+fn a_stored_derived_status_never_doubles_in_the_output() {
+    let s = init("derivedtwice");
+    let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
+    let one = add(s.path(), &["원자적 쓰기", "-e", &epic]);
+    ok(s.path(), &["mv", &one, "in_progress"]);
+    // 손으로 푼 머지가 남긴 모양 — 두 줄 다 그 키를 들고 있다.
+    let doctored: String = issues(s.path())
+        .lines()
+        .map(|l| format!("{}{}\n", &l[..l.len() - 1], r#","derived_status":"done"}"#))
+        .collect();
+    std::fs::write(s.path().join(".moai/issues.jsonl"), doctored).unwrap();
+
+    let json = ok(s.path(), &["show", &epic, "--json"]);
+    assert_eq!(json.matches(r#""derived_status""#).count(), 1, "같은 키가 두 번 났다 — {json}");
+    assert!(json.contains(r#""derived_status":"in_progress""#), "{json}");
+    let work = ok(s.path(), &["show", &one, "--json"]);
+    assert!(!work.contains("derived_status"), "묶음 아닌 줄이 읽은 칸을 냈다 — {work}");
+    // 파일은 그대로다 — 모르는 필드는 잃지 않는다.
+    assert!(line_of(s.path(), &one).contains(r#""derived_status":"done""#));
+    assert!(ok(s.path(), &["status"]).contains("모르는 필드"));
+}
+
+/// **접은 묶음은 표와 기계 출력이 그렇다고 말한다.** 남은 멤버를 미뤄 닫은 묶음은
+/// 막대가 `1/2` 인 채로 done 에 서는데, 세션이 시작하는 화면이 그것을 안 말하면
+/// 접은 것과 굴러가는 것이 똑같아 보인다 — `moai show` 는 이미 하나를 숨긴다.
+#[test]
+fn status_says_which_groupings_stand_closed() {
+    let s = init("statusfold");
+    let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
+    let one = add(s.path(), &["원자적 쓰기", "-e", &epic]);
+    let two = add(s.path(), &["락", "-e", &epic]);
+    ok(s.path(), &["mv", &one, "done"]);
+
+    let out = ok(s.path(), &["status"]);
+    assert!(!out.contains("닫힘"), "굴러가는 묶음을 닫혔다고 한다 — {out}");
+    let json = ok(s.path(), &["status", "--json"]);
+    assert!(json.contains(r#""derived_status":"in_progress""#), "{json}");
+
+    ok(s.path(), &["defer", &two, "-m", "다음에"]);
+    let out = ok(s.path(), &["status"]);
+    assert!(out.contains("1/2") && out.contains("닫힘"), "접은 묶음을 안 비춘다 — {out}");
+    let json = ok(s.path(), &["status", "--json"]);
+    assert!(json.contains(r#""derived_status":"done""#), "{json}");
 }
 
 /// **꼬리가 대는 낱말이 실제로 그 줄을 내야 한다.** 첫 까닭으로 갈랐을 때

@@ -216,8 +216,10 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
         Span::styled(format!("p{}", i.priority()), priority(i.priority())),
         Span::raw(" "),
         // 칸은 글리프로도 말한다. 색이 없는 터미널에서도 뜻이 남아야 한다.
-        // 묶음은 멤버에서 읽은 칸이다 — CLI 목록의 S 열과 같은 자.
-        Span::styled(style::spin_glyph(app.column(at), app.spin).to_string(), status(app.column(at))),
+        // 묶음은 멤버에서 읽은 칸이다 — CLI 목록의 S 열과 같은 자. **다만 안 돌린다**:
+        // 도는 글리프는 "지금 누가 손대고 있다" 는 말인데 묶음의 `in_progress` 는
+        // 멤버 하나가 끝났다는 말일 수도 있다(`App::spinning` 과 같은 자).
+        Span::styled(glyph_of(app, at).to_string(), status(app.column(at))),
         Span::raw(" "),
     ];
     // 커서 자리 + 머리글 폭. **`CURSOR` 에서 잰다** — 숫자를 손으로 적으면
@@ -348,6 +350,17 @@ fn wrapped<'a>(text: &str, w: usize, style: Style) -> Vec<Line<'a>> {
         .collect()
 }
 
+/// 그 줄의 글리프. **묶음은 안 돈다** — 도는 것은 지금 누가 손대고 있는 일이다
+/// (`App::spinning` 이 같은 자로 깨울 것을 센다).
+fn glyph_of(app: &App, at: usize) -> &'static str {
+    let col = app.column(at);
+    if crate::report::is_group(&app.issues[at]) {
+        style::glyph(col)
+    } else {
+        style::spin_glyph(col, app.spin)
+    }
+}
+
 /// 그 항목 안으로 들어간 경로. 요약을 세려면 그 밑을 봐야 한다.
 fn deeper(app: &App, e: &Entry) -> crate::nav::Path {
     let mut p = app.path.clone();
@@ -370,7 +383,7 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     // 칸은 글리프와 낱말을 함께 낸다. 색이 없어도 뜻이 남아야 한다.
     let st = app.column(idx).to_string();
     let mut head = vec![
-        Span::styled(format!("{} {st}", style::spin_glyph(&st, app.spin)), status(&st)),
+        Span::styled(format!("{} {st}", glyph_of(app, idx)), status(&st)),
         Span::raw("  ·  "),
         Span::styled(format!("p{}", i.priority()), priority(i.priority())),
     ];
@@ -395,12 +408,13 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
         head.push(Span::raw("  ·  "));
         head.push(Span::styled(d, Style::new().fg(Color::Yellow)));
     }
-    // 손으로 옮긴 칸이 읽은 칸과 다르면 말한다 — CLI 상세와 같은 말.
-    if let Some(n) = crate::view::unread_column(i, &st, &app.cfg) {
-        head.push(Span::raw("  ·  "));
-        head.push(Span::styled(n, dim()));
-    }
     out.push(Line::from(head));
+    // 손으로 옮긴 칸이 읽은 칸과 다르면 말한다 — CLI 상세와 같은 말. **제 줄로
+    // 낸다**: 머리 줄에 이어 붙이면 80~160칸에서 `fit` 이 그 말을 통째로 잘라, 정작
+    // `moai mv <에픽> done` 을 친 사람이 까닭을 못 본다.
+    if let Some(n) = crate::view::unread_column(i, &st, &app.cfg) {
+        out.extend(wrapped(&n, w, dim()));
+    }
 
     // 라벨 줄은 **모아 두고 폭을 재서** 낸다.
     let mut fields: Vec<(String, String)> = Vec::new();
@@ -697,12 +711,13 @@ mod tests {
         );
         member.epic = Some("argos-0001".into());
         // 에픽이 `in_progress` 로 서려면 멤버가 그래야 한다 — 묶음의 칸은 멤버에서
-        // 읽는다. 적힌 칸만 옮겨서는 안 선다.
+        // 읽는다. 적힌 칸만 옮겨서는 안 선다. 도는 글리프도 이 줄에서 나온다:
+        // 묶음은 안 돌리므로(`glyph_of`) 집은 일이 하나는 있어야 한다.
         let mut held = Issue::new(
             "argos-0004".into(),
             "집은 멤버".into(),
             Kind::Issue,
-            Status::new("todo"),
+            Status::new("in_progress"),
             "2026-09-01T00:00:00Z",
         );
         held.epic = Some("argos-0001".into());
@@ -750,9 +765,14 @@ mod tests {
         assert!(lines.contains('/'), "경로가 없다\n{lines}");
         assert!(lines.contains("argos-0001"), "id 가 없다\n{lines}");
         assert!(lines.contains("p1"), "우선순위가 없다\n{lines}");
-        // `in_progress` 는 정지 글리프가 아니라 도는 프레임을 낸다 — 어느
-        // 프레임이든 `style::SPIN` 의 한 글자여야 한다.
-        assert!(style::SPIN.iter().any(|g| lines.contains(g)), "칸 글리프가 없다\n{lines}");
+        // 뿌리에는 묶음뿐이다 — **묶음은 안 돈다.** CLI 와 같은 정지 글리프다.
+        assert!(lines.contains('▸'), "묶음의 칸 글리프가 없다\n{lines}");
+        assert!(!style::SPIN.iter().any(|g| lines.contains(g)), "묶음이 돈다\n{lines}");
+        // 그 안의 집은 일은 도는 프레임을 낸다 — 어느 프레임이든 `SPIN` 의 한 글자다.
+        let mut a = app();
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let inside = render(&mut a, 100, 12).join("\n");
+        assert!(style::SPIN.iter().any(|g| inside.contains(g)), "집은 일이 안 돈다\n{inside}");
         assert!(lines.contains("Enter") && lines.contains("F10"), "F키 바가 없다\n{lines}");
         // 긴 제목은 **잘린다**. 잘렸다는 표시가 남아야 어디까지가 제목인지 안다.
         assert!(lines.contains("아주 긴"), "에픽 제목이 없다\n{lines}");
@@ -766,6 +786,8 @@ mod tests {
     #[test]
     fn the_spinner_follows_the_clock_and_shows_one_step_per_screen() {
         let mut a = app();
+        // 도는 것은 일이다 — 집은 멤버가 있는 에픽 안에서 본다.
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let shown = |lines: &str| -> Vec<&'static str> {
             style::SPIN.iter().copied().filter(|g| lines.contains(g)).collect()
         };
@@ -992,11 +1014,11 @@ mod tests {
         assert!(!title.contains("in_progress"), "에픽을 일로 셌다 — {title:?}");
         assert!(title.contains("1줄"), "{title:?}");
 
-        // 그 안에는 일이 하나 있다 — 이제 칸 셈이 선다
+        // 그 안에는 일이 둘 있다 — 이제 칸 셈이 선다
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let lines = render(&mut a, 100, 12);
         let title = lines.iter().find(|l| l.contains('┌')).unwrap();
-        assert!(title.contains("done 1"), "{title:?}");
+        assert!(title.contains("done 1") && title.contains("in_progress 1"), "{title:?}");
     }
 
     /// **줄이 있으면 "비었다" 라고 하지 않는다.** 셈이 비는 경우(바구니만 있는
@@ -1044,16 +1066,25 @@ mod tests {
     }
 
     /// **목록과 상세가 묶음의 읽은 칸을 그린다** — CLI 와 같은 자. 손으로 옮긴
-    /// 칸이 다르면 상세가 낱말로 말한다.
+    /// 칸이 다르면 상세가 낱말로 말한다. **흔한 폭에서 본다** — 그 말을 머리 줄에
+    /// 이어 붙이면 80~160칸에서 통째로 잘려, 옮긴 사람이 까닭을 못 본다.
     #[test]
     fn a_grouping_is_drawn_in_the_column_its_members_read() {
         let mut issues = issues();
         issues[0].status = Status::new("done");
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
-        let lines = render(&mut a, 200, 16).join("\n");
-        let row = lines.lines().find(|l| l.contains("> argos-0001")).unwrap();
-        assert!(style::SPIN.iter().any(|g| row.contains(g)), "목록이 적힌 칸을 그린다\n{lines}");
-        assert!(lines.contains("in_progress") && lines.contains("적힌 칸 `done` 은 안 읽는다"), "{lines}");
+        for w in [100, 200] {
+            let lines = render(&mut a, w, 16).join("\n");
+            let row = lines.lines().find(|l| l.contains("> argos-0001")).unwrap();
+            assert!(row.contains('▸'), "목록이 적힌 칸을 그린다 ({w}칸)\n{lines}");
+            // 좁은 폭에서는 접힌다 — 잘리지만 않으면 된다.
+            assert!(
+                lines.contains("in_progress")
+                    && lines.contains("칸은 멤버에서 읽는다")
+                    && lines.contains("`done`"),
+                "{w}칸에서 잘렸다\n{lines}"
+            );
+        }
     }
 
     /// 커서가 아래로 가도 **그 아래가 보인다.** 훑는 자리를 프레임마다 새로

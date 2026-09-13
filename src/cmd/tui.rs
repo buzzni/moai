@@ -131,7 +131,10 @@ impl Row {
                 dir,
                 path: issues[at].id.clone(),
                 status: Some(issues[at].status.as_str().to_string()),
-                derived_status: states.get(issues[at].id.as_str()).map(|s| s.to_string()),
+                // 묶음만 읽은 칸을 받는다 — `report::column` 과 같은 자다.
+                derived_status: crate::report::is_group(&issues[at])
+                    .then(|| states.get(issues[at].id.as_str()).map(|s| s.to_string()))
+                    .flatten(),
                 priority: Some(issues[at].priority()),
             },
             None => Row {

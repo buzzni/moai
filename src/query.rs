@@ -30,20 +30,38 @@ pub struct Where<'a> {
     pub put_off: BTreeSet<&'a str>,
     /// 묶음 → 멤버에서 읽은 칸. 묶음의 칸도 제 줄만 보고는 모른다.
     pub states: BTreeMap<&'a str, &'a str>,
+    /// 묶음 → 그 칸의 셈이 마지막으로 움직인 때 (`report::Stand::since`).
+    pub since: BTreeMap<&'a str, &'a str>,
 }
 
 impl<'a> Where<'a> {
     pub fn of(all: &'a [Issue], cfg: &'a crate::config::Config) -> Where<'a> {
         let epic = crate::report::groups(all);
         let milestone = crate::report::milestones(all);
-        let put_off = crate::report::put_off_in(all, &epic, &milestone);
-        let states = crate::report::group_states_in(all, cfg, &epic, &milestone);
-        Where { epic, milestone, put_off, states }
+        // **미룸을 한 번만 걷는다.** 읽은 칸이 그것을 쓰므로(미룬 멤버는 칸 셈에서
+        // 빠진다) 따로 부르면 조상을 타는 걸음이 두 벌이 된다.
+        let roots = crate::report::deferred_roots_in(all, &epic, &milestone);
+        let stands = crate::report::group_stands_in(all, cfg, &epic, &milestone, &roots);
+        let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
+        let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();
+        Where { epic, milestone, put_off: roots.into_keys().collect(), states, since }
     }
 
     /// 그 줄이 서 있는 칸 (`report::column`).
     pub fn column<'x>(&'x self, i: &'x Issue) -> &'x str {
         crate::report::column(i, &self.states)
+    }
+
+    /// 그 줄이 **지금 칸에 들어선 때** — `--stale` 이 재는 시각.
+    ///
+    /// 묶음이면 읽은 칸의 셈이 마지막으로 움직인 때다. 적힌 `status_since` 는 아무
+    /// 데서도 안 읽히는 칸의 시각이라, 그것으로 재면 오늘 진행 중이 된 에픽이
+    /// `-s in_progress --stale 10` 에 걸린다 — 고르는 자와 재는 자가 어긋난다.
+    pub fn since<'x>(&'x self, i: &'x Issue) -> &'x str {
+        crate::report::is_group(i)
+            .then(|| self.since.get(i.id.as_str()).copied())
+            .flatten()
+            .unwrap_or(i.status_since.as_str())
     }
 
     /// 목록에서 미룬 것으로 치는가. **제 줄의 미룸이나 물려받은 미룸.**
@@ -270,8 +288,10 @@ impl Filter {
                 return false;
             }
         }
+        // 머문 기간도 **서 있는 칸**의 것이다 (`Where::since`). `-s` 는 읽은 칸으로
+        // 고르는데 나이만 적힌 칸의 시각으로 재면, 한 물음의 두 조각이 다른 칸을 본다.
         if let Some(d) = self.stale
-            && days_since(&i.status_since, now).is_none_or(|n| n < d)
+            && days_since(wh.since(i), now).is_none_or(|n| n < d)
         {
             return false;
         }
@@ -751,9 +771,6 @@ mod tests {
         let ids: Vec<&str> = v.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, ["a-0003", "a-0001", "a-0002"]);
     }
-    /// **담아 둔 생각은 기본 목록에서 빠지고, 글로는 찾아진다.** 규칙이
-    /// 여기 한 곳에 있어야 화면과 CLI 가 같은 것을 센다 — 이 시험이 그 자리를
-    /// 지킨다.
     /// **묶음은 서 있는 칸으로 고르고 숨긴다** (moai-j3b3). 멤버가 집힌 에픽이
     /// `-s todo` 에 걸리거나, 손으로 `done` 에 둔 진행 중인 에픽이 목록에서
     /// 사라지면 거름망이 화면과 다른 칸을 본다.
@@ -779,6 +796,9 @@ mod tests {
         assert_eq!(picked(Raw::default()), ["argos-0001", "argos-0002"], "읽은 칸으로 숨기지 않았다");
     }
 
+    /// **담아 둔 생각은 기본 목록에서 빠지고, 글로는 찾아진다.** 규칙이
+    /// 여기 한 곳에 있어야 화면과 CLI 가 같은 것을 센다 — 이 시험이 그 자리를
+    /// 지킨다.
     #[test]
     fn an_idea_hides_until_it_is_asked_for() {
         let mut thought = issue("argos-0001", "todo", &[]);

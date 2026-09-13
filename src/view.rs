@@ -273,9 +273,6 @@ struct Ctx<'a> {
     index: &'a crate::nav::Index,
     keep: &'a dyn Fn(usize) -> bool,
     rolls: &'a [Roll],
-    /// 묶음 → 멤버에서 읽은 칸 (`report::group_states`). 머리글을 못 받는
-    /// 묶음(자리를 잃은 에픽·마일스톤)이 줄로 설 때 쓴다.
-    states: &'a BTreeMap<&'a str, &'a str>,
 }
 
 /// **그린 줄의 첨자도 돌려준다.** 거름망에 안 걸린 줄도 걸린 자손의 조상이면
@@ -286,11 +283,10 @@ pub fn tree(
     index: &crate::nav::Index,
     keep: &dyn Fn(usize) -> bool,
     rolls: &[Roll],
-    states: &BTreeMap<&str, &str>,
 ) -> (Vec<String>, std::collections::BTreeSet<usize>) {
     let mut out = Vec::new();
     let mut drawn = std::collections::BTreeSet::new();
-    let cx = Ctx { all, index, keep, rolls, states };
+    let cx = Ctx { all, index, keep, rolls };
     walk(&mut out, &mut drawn, &cx, &crate::nav::Path::new(), 0);
     if out.is_empty() {
         out.push("없다.".into());
@@ -473,11 +469,10 @@ pub fn members(
     index: &crate::nav::Index,
     keep: &dyn Fn(usize) -> bool,
     rolls: &[Roll],
-    states: &BTreeMap<&str, &str>,
     at: &crate::nav::Path,
 ) -> Vec<String> {
     let mut out = Vec::new();
-    let cx = Ctx { all, index, keep, rolls, states };
+    let cx = Ctx { all, index, keep, rolls };
     walk(&mut out, &mut std::collections::BTreeSet::new(), &cx, at, 0);
     out
 }
@@ -512,7 +507,9 @@ fn head(roll: &Roll, shown: usize) -> String {
 /// 에픽의 미룸을 받은 생각이 제 자식 때문에 조상으로 서면 표 없이는 일과 똑같이
 /// 보이고 꼬리는 그 줄을 숨긴 수에서 뺀다.
 fn row(out: &mut Vec<String>, cx: &Ctx, i: &Issue, depth: usize) {
-    let col = crate::report::column(i, cx.states);
+    // **여기 오는 것은 일과 생각뿐이다** — 묶음은 `nav` 가 언제나 디렉터리로 세우고
+    // (`Index::is_dir`), `place` 가 머리글로 받는다. 그래서 읽은 칸을 물을 것이 없다.
+    let col = i.status.as_str();
     let mut line = format!(
         "{}{}  {}  {}  {}",
         "  ".repeat(depth + 1),
@@ -628,9 +625,14 @@ pub fn status(st: &StatusReport, issues: &[Issue], cfg: &Config, now: &str, at: 
             // 않는다. 물려받은 미룸도 친다. "닫을 때가 됐다" 는 더 안 낸다: 묶음의
             // 칸은 멤버에서 읽으므로 100% 면 곧 닫힌 것이다(moai-j3b3).
             let put_off = e.id.as_deref().is_some_and(|id| shelved.contains(id));
+            // **접은 묶음은 그렇다고 말한다.** 남은 멤버를 미뤄 닫은 묶음은 막대가
+            // `1/2` 인 채로 done 에 서는데(칸은 미룬 멤버를 빼고 센다), 말하지 않으면
+            // 세션이 시작하는 이 화면에서 접은 것과 굴러가는 것이 똑같아 보인다.
+            let folded = e.column.as_deref() == Some(crate::config::DONE) && e.percent != Some(100);
             let note = match e.percent {
                 _ if put_off => paint(style::DIM, "   미룸"),
                 None => paint(style::DIM, "   자식 없음"),
+                _ if folded => paint(style::status_style(crate::config::DONE), "   닫힘"),
                 _ => String::new(),
             };
             out.push(format!(
@@ -860,6 +862,25 @@ pub struct Seen<'a> {
 pub fn unread_column(i: &Issue, col: &str, cfg: &Config) -> Option<String> {
     (col != i.status.as_str() && i.status.as_str() != cfg.first_status())
         .then(|| format!("칸은 멤버에서 읽는다 (적힌 칸 `{}` 은 안 읽는다)", i.status))
+}
+
+/// `moai mv <묶음>` 이 내는 한 줄 — 서 있는 칸과, `done` 으로 옮기려 했으면 **실제로
+/// 접히는 길.**
+///
+/// 끝난 멤버가 있으면 남은 멤버를 미뤄 접힌다 — 미룬 멤버는 칸 셈에서 빠지므로 남은
+/// 것이 끝난 것뿐이 된다. **끝난 멤버가 하나도 없으면 전부 미뤄도 첫 칸이다**: 셀
+/// 멤버가 없는 묶음은 첫 칸에 서므로(`report::group_states`), 그때 "남은 멤버를 미룬다"
+/// 를 시키면 시킨 대로 한 뒤에도 같은 말이 돌아온다. 빈 묶음도 마찬가지다. 그 자리에서
+/// 실제로 듣는 말은 묶음 제 `defer` 다 — 계획에서 빠지면 보드와 `ready` 에서 함께 빠진다.
+pub fn group_moved(id: &str, col: &str, closing: bool, finished: bool) -> String {
+    let fold = match (closing, finished) {
+        (false, _) => String::new(),
+        (true, true) => " — 접으려면 남은 멤버를 `moai defer` 한다".to_string(),
+        (true, false) => {
+            format!(" — 끝난 멤버가 없어 닫히지 않는다. 계획에서 빼려면 `moai defer {id}`")
+        }
+    };
+    format!("묶음의 칸은 멤버에서 읽는다. 서 있는 칸은 {col}{fold}")
 }
 
 /// 단건 상세. **이력은 부르는 쪽이 [`history`] 로 붙인다** — 묶음을 펼치면 멤버를
@@ -1311,7 +1332,7 @@ mod tests {
         let shown: std::collections::BTreeSet<&str> =
             [member.id.as_str(), child.id.as_str(), loose.id.as_str()].into_iter().collect();
         let keep = |at: usize| shown.contains(all[at].id.as_str());
-        let out = plain(&tree(&all, &index, &keep, &rolls, &BTreeMap::new()).0);
+        let out = plain(&tree(&all, &index, &keep, &rolls).0);
         let joined = out.join("\n");
 
         assert!(joined.contains("저장 계층"), "{joined}");
@@ -1343,7 +1364,7 @@ mod tests {
         let all = vec![milestone, epic, member, parent, child];
         let rolls = crate::report::rollup(&all, &cfg());
         let index = crate::nav::Index::of(&all);
-        let out = plain(&tree(&all, &index, &|_| true, &rolls, &BTreeMap::new()).0);
+        let out = plain(&tree(&all, &index, &|_| true, &rolls).0);
         let joined = out.join("\n");
 
         let at_epic = out.iter().position(|l| l.contains("에픽 멤버")).unwrap();
@@ -1366,24 +1387,38 @@ mod tests {
         let rolls = crate::report::rollup(&all, &cfg());
 
         let index = crate::nav::Index::of(&all);
-        assert_eq!(plain(&tree(&all, &index, &|_| false, &rolls, &BTreeMap::new()).0), ["없다."]);
-        assert!(plain(&tree(&all, &index, &|_| true, &rolls, &BTreeMap::new()).0).join("\n").contains("빈 에픽"));
+        assert_eq!(plain(&tree(&all, &index, &|_| false, &rolls).0), ["없다."]);
+        assert!(plain(&tree(&all, &index, &|_| true, &rolls).0).join("\n").contains("빈 에픽"));
     }
 
-    /// **다 끝난 묶음을 재촉하지 않는다.** 묶음의 칸은 멤버에서 읽으므로 100% 면
-    /// 곧 닫힌 것이다 — 적힌 칸을 옮기라고 시키면 어디서도 안 읽히는 칸을 쓰게 한다.
+    /// **다 끝난 묶음은 재촉하지 않고, 접은 묶음은 그렇다고 말한다.** 묶음의 칸은
+    /// 멤버에서 읽으므로 100% 면 곧 닫힌 것이라 시킬 말이 없다 — 적힌 칸을 옮기라고
+    /// 시키면 어디서도 안 읽히는 칸을 쓰게 한다. 남은 멤버를 미뤄 접은 묶음은 막대가
+    /// `1/2` 인 채로 닫혀 있어, 말하지 않으면 굴러가는 묶음과 똑같아 보인다.
     #[test]
-    fn a_finished_grouping_is_not_nagged_to_close() {
+    fn a_finished_grouping_is_not_nagged_but_a_folded_one_says_so() {
+        let table = |all: &[Issue]| {
+            let cfg = cfg();
+            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z");
+            plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl")).join("\n")
+        };
         let mut epic = issue("argos-0001", "다 끝난 에픽", "todo");
         epic.kind = Kind::Epic;
         let mut member = issue("argos-0002", "멤버", "done");
         member.epic = Some("argos-0001".into());
-        let all = vec![epic, member];
-        let cfg = cfg();
+        let mut all = vec![epic, member];
 
-        let st = crate::report::status(&all, &[], &cfg, "2026-09-11T04:12:03Z");
-        let text = plain(&status(&st, &all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl")).join("\n");
+        let text = table(&all);
         assert!(!text.contains("닫을 때가 됐다") && !text.contains("안 닫힌"), "{text}");
+        assert!(!text.contains("닫힘"), "다 끝난 줄에 군말을 달았다 — {text}");
+
+        // 남은 멤버 하나를 미루면 그 묶음은 `1/2` 인 채로 닫힌다.
+        let mut rest = issue("argos-0003", "남은 멤버", "todo");
+        rest.epic = Some("argos-0001".into());
+        rest.deferred_at = Some("2026-09-10T00:00:00Z".into());
+        all.push(rest);
+        let text = table(&all);
+        assert!(text.contains("1/2") && text.contains("닫힘"), "접은 묶음을 안 비춘다 — {text}");
     }
 
     #[test]

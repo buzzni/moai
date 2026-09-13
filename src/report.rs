@@ -28,6 +28,14 @@ pub struct Roll {
     /// 멤버 하나 닫을 때 에픽 줄까지 써야 하고, 두 줄 쓰기 중간에 죽으면
     /// 영원히 거짓말한다.
     pub percent: Option<u8>,
+    /// 그 묶음이 **서 있는 칸** ([`group_states`]). 채우는 곳은 `status` 하나고,
+    /// 집계만 필요한 `rollup` 은 비워 둔다 — 칸은 미룬 멤버를 빼고 세므로 막대와
+    /// 답이 다를 수 있다. `2/3` 인데 `done` 인 묶음은 남은 하나를 미뤄 접은 것이다.
+    ///
+    /// 기계 출력에서는 **줄이 쓰는 이름과 같은 이름**이다(`cmd::Row` 의
+    /// `derived_status`) — 한 낱말이 두 이름으로 나가면 받는 쪽이 둘을 다 기억해야 한다.
+    #[serde(rename = "derived_status", skip_serializing_if = "Option::is_none")]
+    pub column: Option<String>,
 }
 
 /// 이슈 id → 그것이 속한 에픽의 **제목**. 화면이 필요한 것은 id 가 아니라
@@ -59,9 +67,10 @@ fn is_put_off(i: &Issue) -> bool {
 /// 멤버에서 읽는다([`group_states`]). 여기서 적힌 `done` 을 믿으면 손으로 `done`
 /// 에 둔 에픽을 미뤄도 그 멤버가 미룸을 안 물려받아 `ready` 에 그대로 선다.
 ///
-/// 읽은 칸으로 묻지 않는 까닭은 순환이다 — 읽은 칸이 미룸을 쓴다. 그래서 묶음은
-/// 칸을 아예 안 보고 미룸만 본다. 읽은 칸이 done 인 묶음은 셀 멤버가 이미 끝났거나
-/// 따로 미룬 것이라, 그 묶음을 미룬 것으로 쳐도 멤버 쪽 답은 같다.
+/// 읽은 칸으로 묻지 않는 까닭은 순환이다 — 읽은 칸이 미룸을 쓴다. 그래서 물려주는
+/// 셈에서는 묶음의 칸을 아예 안 보고 미룸만 본다. 읽은 칸이 done 인 묶음은 셀 멤버가
+/// 이미 끝났거나 따로 미룬 것이라, 그 묶음을 미룬 것으로 쳐도 멤버 쪽 답은 같다.
+/// **묶음 제 줄**은 멤버를 다 센 뒤에 [`deferred_roots_in`] 이 따로 뺀다.
 fn closed_by_hand(i: &Issue) -> bool {
     !is_group(i) && i.status.is_done()
 }
@@ -87,17 +96,7 @@ pub fn put_off(all: &[Issue]) -> BTreeSet<&str> {
     if !all.iter().any(is_put_off) {
         return BTreeSet::new();
     }
-    put_off_in(all, &groups(all), &milestones(all))
-}
-
-/// [`put_off`] 와 같은 것. 소속 지도를 이미 가진 쪽(`query::Where`)이 두 번
-/// 걷지 않게 받는다.
-pub fn put_off_in<'a>(
-    all: &'a [Issue],
-    epic_of: &BTreeMap<&'a str, &'a str>,
-    mile_of: &BTreeMap<&'a str, &'a str>,
-) -> BTreeSet<&'a str> {
-    deferred_roots_in(all, epic_of, mile_of).into_keys().collect()
+    deferred_roots_in(all, &groups(all), &milestones(all)).into_keys().collect()
 }
 
 /// 계획에서 빠진 줄 id → **실제로 `deferred_at` 을 든 줄** id.
@@ -111,7 +110,16 @@ pub fn deferred_roots(all: &[Issue]) -> BTreeMap<&str, &str> {
     deferred_roots_in(all, &groups(all), &milestones(all))
 }
 
-fn deferred_roots_in<'a>(
+/// [`deferred_roots`] 와 같은 것. 소속 지도를 이미 가진 쪽(`query::Where`)이 두 번
+/// 걷지 않게 받는다.
+///
+/// **읽은 칸이 done 인 묶음은 제 줄이 빠진다.** 끝난 줄은 미룬 것이 아니다
+/// ([`is_put_off`]). 묶음이 끝났는지는 멤버를 다 센 뒤에야 알므로 물려주는 셈
+/// (`closed_by_hand`)에서는 못 거르고 여기서 거른다 — 안 거르면 `moai status` 의
+/// `미뤄 둔 것` 이 센 줄을 그 줄이 가리키는 `moai show --deferred` 가 done 으로
+/// 숨기고, `moai mv` 는 끝난 묶음에 도로 집으라고 한다. **그 밑의 줄이 물려받은
+/// 미룸은 그대로다** — 멤버 쪽 답은 이미 셌다.
+pub fn deferred_roots_in<'a>(
     all: &'a [Issue],
     epic_of: &BTreeMap<&'a str, &'a str>,
     mile_of: &BTreeMap<&'a str, &'a str>,
@@ -121,52 +129,122 @@ fn deferred_roots_in<'a>(
     if !all.iter().any(is_put_off) {
         return BTreeMap::new();
     }
-    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
-    let kind = |id: &str| by_id.get(id).map(|x| x.kind);
-    let own = |id: &'a str| by_id.get(id).is_some_and(|x| is_put_off(x)).then_some(id);
-    // 그 줄이 **든 묶음**의 미룸. **소속이 실제로 서는 곳만** 본다 — 에픽은 에픽에
-    // 안 들고(`nav` 는 에픽 밑에 에픽을 두지 않는다), 마일스톤은 뿌리에 서며,
-    // 종류가 틀린 참조는 `(길 잃음)` 이다. 그런 참조로 미룸을 받으면 저만 계획에서
-    // 빠지고 제 멤버는 남는다 — 에픽 줄이 든 엉뚱한 `epic` 이 실제로 그랬다.
-    let grouped = |at: &'a str| {
-        let joined = |to: Option<&&'a str>, want: Kind| {
-            to.copied().filter(|t| kind(t) == Some(want)).and_then(&own)
-        };
-        let here = kind(at);
-        let epic = matches!(here, Some(Kind::Issue | Kind::Idea)).then(|| joined(epic_of.get(at), Kind::Epic));
-        let mile = || {
-            matches!(here, Some(Kind::Issue | Kind::Idea | Kind::Epic))
-                .then(|| joined(mile_of.get(at), Kind::Milestone))
-        };
-        epic.flatten().or_else(|| mile().flatten())
-    };
-    // 제 줄부터 부모를 타고 올라가며, 그 줄이나 그 줄의 에픽·마일스톤이
-    // 미뤄졌는지 본다. 부모가 다른 에픽에 있어도 부모가 빠지면 자식도 빠진다.
-    // **없는 부모는 넘지 않는다** — `groups`·`milestones` 도 거기서 멈추므로, 넘으면
-    // 그리지도 세지도 않는 조상의 미룸에 끌려 나간다.
-    //
-    // **뿌리로 올라간 생각인 조상은 제 미룸만 물려준다.** 소속이 그것을 지나
-    // 내려오지 않으므로(`groups`) 생각의 에픽이 미뤄졌다고 그 밑의 일을 빼면,
-    // 세지도 않는 에픽의 미룸을 받는 꼴이다. 그 위로는 더 오르지 않는다.
-    // 이슈 밑에 접힌 생각은 그대로 지나간다 — 그 밑의 일은 미룬 이슈 밑에 그려진다.
-    let rooted = rooted_thoughts(&by_id);
-    let root = |id: &'a str| {
+    let shelf = Shelf::new(all, epic_of, mile_of);
+    let mut roots: BTreeMap<&str, &str> = all
+        .iter()
+        .filter(|i| !closed_by_hand(i))
+        .filter_map(|i| shelf.nearest(i.id.as_str()).map(|r| (i.id.as_str(), r)))
+        .collect();
+    // 계획에서 빠진 묶음이 없으면 멤버를 셀 것도 없다.
+    let shelved: Vec<&Issue> =
+        roots.keys().filter_map(|id| shelf.by_id.get(id).copied()).filter(|g| is_group(g)).collect();
+    if !shelved.is_empty() {
+        let members = members_in(all, epic_of, mile_of);
+        let done: Vec<&str> = shelved
+            .into_iter()
+            .filter(|g| reads_done(&counted(g, &members, Some(&shelf), &roots)))
+            .map(|g| g.id.as_str())
+            .collect();
+        for id in done {
+            roots.remove(id);
+        }
+    }
+    roots
+}
+
+/// 줄 하나를 계획에서 빼는 미룸을 **가까운 것부터** 짚는 길 — 제 줄, 제가 든
+/// 에픽·마일스톤, 그다음 부모. [`deferred_roots_in`] 은 첫째만 쓰고(그 줄을 뺀 곳),
+/// [`counted`] 는 전부 본다(묶음 제 미룸 말고도 그 멤버를 빼는 까닭이 있나).
+struct Shelf<'a, 'm> {
+    by_id: BTreeMap<&'a str, &'a Issue>,
+    rooted: BTreeSet<&'a str>,
+    epic_of: &'m BTreeMap<&'a str, &'a str>,
+    mile_of: &'m BTreeMap<&'a str, &'a str>,
+}
+
+impl<'a, 'm> Shelf<'a, 'm> {
+    fn new(
+        all: &'a [Issue],
+        epic_of: &'m BTreeMap<&'a str, &'a str>,
+        mile_of: &'m BTreeMap<&'a str, &'a str>,
+    ) -> Shelf<'a, 'm> {
+        let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
+        let rooted = rooted_thoughts(&by_id);
+        Shelf { by_id, rooted, epic_of, mile_of }
+    }
+
+    fn own(&self, id: &'a str) -> Option<&'a str> {
+        self.by_id.get(id).is_some_and(|x| is_put_off(x)).then_some(id)
+    }
+
+    /// 그 줄이 **든 묶음**의 미룸. **소속이 실제로 서는 곳만** 본다 — 에픽은 에픽에
+    /// 안 들고(`nav` 는 에픽 밑에 에픽을 두지 않는다), 마일스톤은 뿌리에 서며,
+    /// 종류가 틀린 참조는 `(길 잃음)` 이다. 그런 참조로 미룸을 받으면 저만 계획에서
+    /// 빠지고 제 멤버는 남는다 — 에픽 줄이 든 엉뚱한 `epic` 이 실제로 그랬다.
+    fn joined(&self, to: Option<&&'a str>, want: Kind) -> Option<&'a str> {
+        to.copied().filter(|t| self.by_id.get(t).map(|x| x.kind) == Some(want)).and_then(|t| self.own(t))
+    }
+
+    /// 제 줄부터 부모를 타고 올라가며, 그 줄이나 그 줄의 에픽·마일스톤의 미룸을
+    /// `visit` 에 넘긴다. `visit` 이 참을 내면 멈춘다. 부모가 다른 에픽에 있어도
+    /// 부모가 빠지면 자식도 빠진다. **없는 부모는 넘지 않는다** — `groups`·
+    /// `milestones` 도 거기서 멈추므로, 넘으면 그리지도 세지도 않는 조상의 미룸에
+    /// 끌려 나간다.
+    ///
+    /// **뿌리로 올라간 생각인 조상은 제 미룸만 물려준다.** 소속이 그것을 지나
+    /// 내려오지 않으므로(`groups`) 생각의 에픽이 미뤄졌다고 그 밑의 일을 빼면,
+    /// 세지도 않는 에픽의 미룸을 받는 꼴이다. 그 위로는 더 오르지 않는다.
+    /// 이슈 밑에 접힌 생각은 그대로 지나간다 — 그 밑의 일은 미룬 이슈 밑에 그려진다.
+    fn walk(&self, id: &'a str, mut visit: impl FnMut(&'a str) -> bool) {
         let mut cur = Some(id);
         while let Some(at) = cur {
-            if at != id && rooted.contains(at) {
-                return own(at);
+            if at != id && self.rooted.contains(at) {
+                if let Some(r) = self.own(at) {
+                    visit(r);
+                }
+                return;
             }
-            if let Some(r) = own(at).or_else(|| grouped(at)) {
-                return Some(r);
+            let here = self.by_id.get(at).map(|x| x.kind);
+            if let Some(r) = self.own(at)
+                && visit(r)
+            {
+                return;
             }
-            cur = crate::id::parent_of(at).filter(|p| by_id.contains_key(p));
+            if matches!(here, Some(Kind::Issue | Kind::Idea))
+                && let Some(r) = self.joined(self.epic_of.get(at), Kind::Epic)
+                && visit(r)
+            {
+                return;
+            }
+            if matches!(here, Some(Kind::Issue | Kind::Idea | Kind::Epic))
+                && let Some(r) = self.joined(self.mile_of.get(at), Kind::Milestone)
+                && visit(r)
+            {
+                return;
+            }
+            cur = crate::id::parent_of(at).filter(|p| self.by_id.contains_key(p));
         }
-        None
-    };
-    all.iter()
-        .filter(|i| !closed_by_hand(i))
-        .filter_map(|i| root(i.id.as_str()).map(|r| (i.id.as_str(), r)))
-        .collect()
+    }
+
+    /// 그 줄을 계획에서 뺀 가장 가까운 줄.
+    fn nearest(&self, id: &'a str) -> Option<&'a str> {
+        let mut found = None;
+        self.walk(id, |r| {
+            found = Some(r);
+            true
+        });
+        found
+    }
+
+    /// 그 줄을 계획에서 빼는 줄 전부.
+    fn every(&self, id: &'a str) -> Vec<&'a str> {
+        let mut out = Vec::new();
+        self.walk(id, |r| {
+            out.push(r);
+            false
+        });
+        out
+    }
 }
 
 /// 담아 둔 생각인가. **술어를 `cmd/` 에 두지 않는다** — 어떤 줄이 무엇인지
@@ -275,28 +353,104 @@ pub fn group_members<'a>(all: &'a [Issue], group: &Issue) -> Vec<&'a Issue> {
 ///   시작한 칸이다 — 묶음이 설 칸은 "안 했다·하는 중·끝났다" 셋이다
 pub fn group_states<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, &'c str> {
     let (epic_of, mile_of) = (groups(all), milestones(all));
-    group_states_in(all, cfg, &epic_of, &mile_of)
+    let roots = deferred_roots_in(all, &epic_of, &mile_of);
+    group_states_in(all, cfg, &epic_of, &mile_of, &roots)
+}
+
+/// [`group_states`] 를 **그 줄들 가운데 묶음이 있을 때만** 센다.
+///
+/// 하나를 펼치거나 쓰는 표면(`show <id>`·`add`·`edit`·`mv`)은 대개 일 하나를 보는데,
+/// 그때 묶음 지도와 미룸 걷기는 통째로 헛일이다 — 10k 줄에서 `moai show <이슈>` 가
+/// 그것만으로 갑절이 됐다.
+pub fn group_states_of<'a, 'c>(
+    all: &'a [Issue],
+    cfg: &'c Config,
+    ids: &[&str],
+) -> BTreeMap<&'a str, &'c str> {
+    if !all.iter().any(|i| is_group(i) && ids.contains(&i.id.as_str())) {
+        return BTreeMap::new();
+    }
+    let mut states = group_states(all, cfg);
+    states.retain(|id, _| ids.contains(id));
+    states
 }
 
 /// 줄이 **서 있는** 칸 — 묶음이면 멤버에서 읽은 칸([`group_states`]), 아니면 제 칸.
 ///
 /// 칸을 그리거나 세는 표면은 `i.status` 대신 이것을 묻는다. 묶음을 가르는
 /// `if` 가 표면마다 있으면 하나는 반드시 빠진다.
+///
+/// **읽은 칸은 묶음만 받는다.** id 로만 짚으면 머지를 잘못 푼 파일에서 묶음과 id 가
+/// 같은 일 줄이 그 묶음의 칸을 입는다 — 그리는 쪽은 `▸` 로 내는데 `ready` 는 그 줄의
+/// 적힌 칸으로 골라, 한 화면이 같은 줄을 두 칸으로 말한다.
 pub fn column<'x>(i: &'x Issue, states: &BTreeMap<&str, &'x str>) -> &'x str {
-    states.get(i.id.as_str()).copied().unwrap_or(i.status.as_str())
+    stands(i, states).unwrap_or(i.status.as_str())
 }
 
-/// [`group_states`] 와 같은 것. 소속 지도를 이미 가진 쪽이 두 번 걷지 않게 받는다.
+/// 묶음이 읽은 칸. 묶음이 아니거나 못 받았으면 없다.
+fn stands<'x>(i: &Issue, states: &BTreeMap<&str, &'x str>) -> Option<&'x str> {
+    is_group(i).then(|| states.get(i.id.as_str()).copied()).flatten()
+}
+
+/// [`group_states`] 와 같은 것. 소속 지도와 미룸을 이미 가진 쪽이 두 번 걷지 않게 받는다.
 pub fn group_states_in<'a, 'c>(
     all: &'a [Issue],
     cfg: &'c Config,
     epic_of: &BTreeMap<&'a str, &'a str>,
     mile_of: &BTreeMap<&'a str, &'a str>,
+    roots: &BTreeMap<&'a str, &'a str>,
 ) -> BTreeMap<&'a str, &'c str> {
-    let roots = deferred_roots_in(all, epic_of, mile_of);
-    // (종류, 묶음 id) → 셀 멤버. 목록을 한 번만 걷는다 — 묶음마다 걸으면 제곱이다.
-    // **종류로 가른다** — 에픽 지도가 마일스톤 id 를 가리키는 틀린 참조를
-    // 마일스톤의 멤버로 세면 롤업(`rollup_of`)과 어긋난다.
+    group_stands_in(all, cfg, epic_of, mile_of, roots)
+        .into_iter()
+        .map(|(id, s)| (id, s.column))
+        .collect()
+}
+
+/// 묶음 하나를 읽은 것 — 서 있는 칸과, 그 칸의 셈이 마지막으로 움직인 때.
+/// **저장하지 않는다** ([`group_states`] 가 까닭을 적었다).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Stand<'a, 'c> {
+    /// 서 있는 칸.
+    pub column: &'c str,
+    /// 셀 멤버 가운데 가장 늦게 칸을 옮긴 때. 셀 멤버가 없으면 묶음이 생긴 때다.
+    /// **적힌 `status_since` 는 안 쓴다** — 아무 데서도 안 읽히는 칸의 시각이라,
+    /// `--stale` 이 그것으로 재면 오늘 진행 중이 된 에픽을 "열흘째 멈춰 있다" 고 한다.
+    pub since: &'a str,
+}
+
+/// [`group_states_in`] 과 같은 한 번의 셈에서 칸과 시각을 함께 낸다.
+pub fn group_stands_in<'a, 'c>(
+    all: &'a [Issue],
+    cfg: &'c Config,
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    mile_of: &BTreeMap<&'a str, &'a str>,
+    roots: &BTreeMap<&'a str, &'a str>,
+) -> BTreeMap<&'a str, Stand<'a, 'c>> {
+    let members = members_in(all, epic_of, mile_of);
+    // 미룬 줄이 없으면 뺄 멤버도 없다 — 조상을 타는 길을 아예 안 세운다.
+    let shelf = (!roots.is_empty()).then(|| Shelf::new(all, epic_of, mile_of));
+    all.iter()
+        .filter(|g| is_group(g))
+        .map(|g| {
+            let counted = counted(g, &members, shelf.as_ref(), roots);
+            let since = counted
+                .iter()
+                .map(|m| m.status_since.as_str())
+                .max()
+                .unwrap_or(g.created_at.as_str());
+            (g.id.as_str(), Stand { column: column_of(&counted, cfg), since })
+        })
+        .collect()
+}
+
+/// (종류, 묶음 id) → 그 묶음의 일. **롤업과 같은 자다** — 물려받은 소속까지, 일만.
+/// 목록을 한 번만 걷는다 — 묶음마다 걸으면 제곱이다. **종류로 가른다** — 에픽 지도가
+/// 마일스톤 id 를 가리키는 틀린 참조를 마일스톤의 멤버로 세면 `rollup_of` 와 어긋난다.
+fn members_in<'a>(
+    all: &'a [Issue],
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    mile_of: &BTreeMap<&'a str, &'a str>,
+) -> BTreeMap<(Kind, &'a str), Vec<&'a Issue>> {
     let mut members: BTreeMap<(Kind, &str), Vec<&Issue>> = BTreeMap::new();
     for i in all.iter().filter(|i| is_work(i)) {
         for (kind, map) in [(Kind::Epic, epic_of), (Kind::Milestone, mile_of)] {
@@ -305,24 +459,58 @@ pub fn group_states_in<'a, 'c>(
             }
         }
     }
-    let read = |g: &Issue| {
-        let own = roots.get(g.id.as_str()).copied();
-        let counted: Vec<&Issue> = members
-            .get(&(g.kind, g.id.as_str()))
-            .into_iter()
-            .flatten()
-            .copied()
-            .filter(|m| roots.get(m.id.as_str()).is_none_or(|r| *r == g.id || Some(*r) == own))
-            .collect();
-        if counted.is_empty() || counted.iter().all(|m| m.status.as_str() == cfg.first_status()) {
-            cfg.first_status()
-        } else if counted.iter().all(|m| m.status.is_done()) {
-            crate::config::DONE
-        } else {
-            cfg.started_status()
-        }
-    };
-    all.iter().filter(|g| is_group(g)).map(|g| (g.id.as_str(), read(g))).collect()
+    members
+}
+
+/// 묶음의 칸을 셀 멤버 — 미룬 멤버는 빼되, **묶음 제가 받은 미룸으로는 안 뺀다.**
+///
+/// 멤버를 빼는 미룸을 **전부** 본다(`Shelf::every`). 가까운 하나만 보면, 부모를 미뤄
+/// 빠진 자식이 제 에픽을 미루는 순간 그 에픽의 미룸을 뿌리로 받아 도로 세어진다 —
+/// 미루기 하나로 에픽의 칸이 `done` 에서 `in_progress` 로 되돌아갔다.
+///
+/// **끝난 멤버는 언제나 센다.** 끝난 일은 물려받아도 계획에서 안 빠지므로
+/// (`closed_by_hand`) 애초에 `roots` 에 없다.
+fn counted<'a>(
+    g: &'a Issue,
+    members: &BTreeMap<(Kind, &'a str), Vec<&'a Issue>>,
+    shelf: Option<&Shelf<'a, '_>>,
+    roots: &BTreeMap<&'a str, &'a str>,
+) -> Vec<&'a Issue> {
+    let of = members.get(&(g.kind, g.id.as_str())).map(Vec::as_slice).unwrap_or_default();
+    let Some(shelf) = shelf else { return of.to_vec() };
+    // 묶음을 계획에서 뺀 것들 — 제 미룸과 마일스톤·부모에게서 물려받은 것.
+    let mine = shelf.every(g.id.as_str());
+    of.iter()
+        .copied()
+        .filter(|m| {
+            !roots.contains_key(m.id.as_str())
+                || shelf.every(m.id.as_str()).iter().all(|s| mine.contains(s))
+        })
+        .collect()
+}
+
+/// 셀 멤버가 있고 전부 끝났는가 — 묶음의 칸이 `done` 으로 읽히는 조건.
+fn reads_done(counted: &[&Issue]) -> bool {
+    !counted.is_empty() && counted.iter().all(|m| m.status.is_done())
+}
+
+fn column_of<'c>(counted: &[&Issue], cfg: &'c Config) -> &'c str {
+    if counted.iter().all(|m| m.status.as_str() == cfg.first_status()) {
+        cfg.first_status() // 셀 멤버가 없을 때도 여기다
+    } else if reads_done(counted) {
+        crate::config::DONE
+    } else {
+        cfg.started_status()
+    }
+}
+
+/// 그 묶음에 **끝난 일**이 하나라도 있는가.
+///
+/// 남은 멤버를 미뤄 묶음이 `done` 으로 서려면 이것이 참이어야 한다 — 끝난 멤버가
+/// 하나도 없으면 전부 미뤄도 셀 멤버가 비어 첫 칸이다. `moai mv <묶음> done` 이
+/// 접는 길을 일러 줄 때 그 갈림길을 여기서 묻는다.
+pub fn has_finished_member(all: &[Issue], group: &Issue) -> bool {
+    group_members(all, group).iter().any(|m| is_work(m) && m.status.is_done())
 }
 
 /// 아직 안 끝난 막음이 하나라도 있는가. 없는 이슈를 가리키는 것은 막지
@@ -343,6 +531,12 @@ fn stands_done(i: &Issue, states: &BTreeMap<&str, &str>) -> bool {
 /// `blocker` 가 `blocked` 를 막으면 고리가 생기는가. **쓰기 전에** 막는다 —
 /// 사후 검사로 두면 이미 고리가 든 파일을 누가 만들고, 그때는 어느 줄을
 /// 끊을지 사람이 정해야 한다.
+///
+/// **멤버도 제 묶음을 막는다.** 묶음은 멤버가 다 끝나야 `done` 으로 서므로
+/// ([`group_states`]), 묶음이 제 멤버를 막으면 둘 다 영영 안 끝난다 — 적힌 칸을
+/// `done` 으로 옮겨 풀던 길은 이제 없다(`is_blocked` 는 읽은 칸을 본다). 그래서 그
+/// 물림도 고리로 센다: 담아 둔 생각을 막지 못하게 하는 `cmd/link.rs` 와 같은 까닭이다.
+/// 미룬 멤버는 칸 셈에서 빠지지만 미룸은 되돌리는 것이라 그것에 기대지 않는다.
 pub fn creates_cycle(issues: &[Issue], blocker: &str, blocked: &str) -> bool {
     // `blocked_by` 는 막히는 쪽에 적힌다. 앞으로(막는 쪽 → 막히는 쪽) 되짚으려면
     // 방향을 뒤집은 지도가 있어야 한다.
@@ -350,6 +544,15 @@ pub fn creates_cycle(issues: &[Issue], blocker: &str, blocked: &str) -> bool {
     for i in issues {
         for b in &i.blocked_by {
             forward.entry(b.as_str()).or_default().push(i.id.as_str());
+        }
+    }
+    let kind_of: BTreeMap<&str, Kind> = issues.iter().map(|i| (i.id.as_str(), i.kind)).collect();
+    let (epic_of, mile_of) = (groups(issues), milestones(issues));
+    for (&(kind, g), of) in &members_in(issues, &epic_of, &mile_of) {
+        if kind_of.get(g) == Some(&kind) {
+            for m in of {
+                forward.entry(m.id.as_str()).or_default().push(g);
+            }
         }
     }
     let mut seen = std::collections::BTreeSet::new();
@@ -615,7 +818,15 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
                 .filter(|i| is_work(i) && group.get(i.id.as_str()) == Some(&e.id.as_str()))
                 .collect();
             let (counts, total, done, percent) = tally(&members);
-            Roll { id: Some(e.id.clone()), title: e.title.clone(), counts, total, done, percent }
+            Roll {
+                id: Some(e.id.clone()),
+                title: e.title.clone(),
+                counts,
+                total,
+                done,
+                percent,
+                column: None,
+            }
         })
         .collect();
 
@@ -629,7 +840,7 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
         Kind::Milestone => "마일스톤 없음",
         _ => "에픽 없음",
     };
-    out.push(Roll { id: None, title: none.into(), counts, total, done, percent });
+    out.push(Roll { id: None, title: none.into(), counts, total, done, percent, column: None });
     out
 }
 
@@ -641,9 +852,8 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
 pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let group = groups(issues);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    let mile = milestones(issues);
-    let out_of_plan = put_off_in(issues, &group, &mile);
-    let states = group_states_in(issues, cfg, &group, &mile);
+    let (roots, states) = blocking(issues, cfg, &group, &by_id);
+    let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     let mut out: Vec<&Issue> = issues
         .iter()
         // 값싼 막음 검사를 먼저 한다 — `unblocked_pick` 은 자식을 찾느라 목록을 걷는다.
@@ -667,6 +877,35 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
             .then_with(|| a.id.cmp(&b.id))
     });
     out
+}
+
+/// 막음을 재는 데 드는 것 — 계획에서 빠진 줄(뺀 곳과 함께)과, 막는 묶음의 읽은 칸.
+///
+/// **필요할 때만 센다.** 미룬 줄이 없으면 물려받을 것도 없고, 묶음에 막힌 줄이 하나도
+/// 없으면 읽은 칸을 물을 자리가 없다 — 읽은 칸을 묻는 것은 `is_blocked` 뿐이고, 그
+/// 밖의 줄은 제 칸으로 답한다(`column`). 둘 다 조상과 소속을 타는 셈이라, 안 묻는
+/// 저장소에서 그냥 돌리면 `moai ready` 가 부를 때마다 목록을 여러 벌 더 걷는다.
+fn blocking<'a, 'c>(
+    issues: &'a [Issue],
+    cfg: &'c Config,
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    by_id: &BTreeMap<&'a str, &'a Issue>,
+) -> (BTreeMap<&'a str, &'a str>, BTreeMap<&'a str, &'c str>) {
+    let shelved = issues.iter().any(is_put_off);
+    let by_group = issues.iter().any(|i| {
+        i.blocked_by.iter().any(|b| by_id.get(b.as_str()).is_some_and(|x| is_group(x)))
+    });
+    if !shelved && !by_group {
+        return (BTreeMap::new(), BTreeMap::new());
+    }
+    let mile_of = milestones(issues);
+    let roots = deferred_roots_in(issues, epic_of, &mile_of);
+    let states = if by_group {
+        group_states_in(issues, cfg, epic_of, &mile_of, &roots)
+    } else {
+        BTreeMap::new()
+    };
+    (roots, states)
 }
 
 /// 막음만 빼면 집을 수 있는가. `ready` 와 `held` 가 **같은 자로** 고른다 —
@@ -716,10 +955,8 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
     }
     let group = groups(issues);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    let mile = milestones(issues);
-    let roots = deferred_roots_in(issues, &group, &mile);
+    let (roots, states) = blocking(issues, cfg, &group, &by_id);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
-    let states = group_states_in(issues, cfg, &group, &mile);
     // 값싼 막음 검사를 먼저 한다. `unblocked_pick` 은 자식을 찾느라 목록을
     // 한 번 걷는다 — 모든 줄에 먼저 부르면 `ready` 가 부를 때마다 제곱이다.
     let mut out: Vec<Held> = issues
@@ -928,9 +1165,16 @@ pub struct Unreadable<'a> {
 
 /// `unreadable` 은 읽다 만난 못 읽는 줄이다 — 저장소가 아니라 부르는 쪽이 준다.
 pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &str) -> StatusReport {
+    let group = groups(issues);
+    let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     // **여기가 "지금 계획" 의 정의다.** 보드 수·모든 경고·흐름이 이 하나를
     // 지나므로, 미뤄 둔 것을 여기서 빼면 아래 전부에서 저절로 빠진다.
-    let out_of_plan = put_off(issues);
+    // 묶음의 읽은 칸도 같은 자리에서 한 번만 받는다 — 둘 다 조상과 소속을 타는
+    // 셈이라 따로 부르면 `moai status` 한 번에 같은 걸음을 두 벌 걷는다.
+    let mile_of = milestones(issues);
+    let roots = deferred_roots_in(issues, &group, &mile_of);
+    let states = group_states_in(issues, cfg, &group, &mile_of, &roots);
+    let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     let work: Vec<&Issue> =
         issues.iter().filter(|i| is_work(i) && !out_of_plan.contains(i.id.as_str())).collect();
     // **한 번만 잰다.** 둘 다 이슈 전부의 물림을 타고 올라가므로, 경고마다
@@ -946,14 +1190,20 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
         .collect();
 
     let rolls = rollup(issues, cfg);
-    let epics: Vec<Roll> = rolls.iter().filter(|r| r.id.is_some()).cloned().collect();
+    // **묶음 줄에는 읽은 칸을 곁들인다.** 막대(`3/5`)는 계획 중 얼마나 했나이고 칸은
+    // 지금 할 것이 남았나라, 남은 멤버를 미뤄 접은 묶음은 `1/2` 인 채로 닫혀 있다 —
+    // 세션이 여기서 시작하는데 그것을 안 말하면 접은 묶음과 굴러가는 묶음이 같아 보인다.
+    let stood = |r: Roll| {
+        let column = r.id.as_deref().and_then(|id| states.get(id)).map(|c| c.to_string());
+        Roll { column, ..r }
+    };
+    let epics: Vec<Roll> = rolls.iter().filter(|r| r.id.is_some()).cloned().map(stood).collect();
     // 마일스톤을 하나도 안 쓰는 저장소에는 줄도 경고도 내지 않는다.
     let stones: Vec<Roll> = rollup_of(Kind::Milestone, issues, cfg)
         .into_iter()
         .filter(|r| r.id.is_some())
+        .map(stood)
         .collect();
-    let group = groups(issues);
-    let states = group_states_in(issues, cfg, &group, &milestones(issues));
     let mut warnings = Vec::new();
     let mut notices = Vec::new();
 
@@ -1017,7 +1267,6 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     }
 
     // 2-2. 오래 막혀 있는 것. 막힌 채로 방치되는 것이 계획이 멈춘 자리다.
-    let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     // 미뤄 둔 것에 막힌 것은 **아래 2-3 이 제 이름으로** 말한다. 여기서도
     // 세면 같은 줄이 두 번 나오고, 이쪽 말로는 막는 줄을 어디서 찾는지 모른다.
     let by_deferred =
@@ -1078,13 +1327,13 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 서고, 미룰수록 잔소리가 는다. `put_off` 가 일에 대해 하는 일을 묶음에
     // 대해서도 하는 자리다. **물려받은 미룸도 친다** — 미룬 마일스톤 밑의
     // 에픽은 `미뤄 둔 것` 으로 세면서 `속이 빈 에픽` 으로도 꾸짖으면 안 된다.
-    let put_off_group =
-        |id: &str| by_id.get(id).is_some_and(|g| g.is_deferred()) || out_of_plan.contains(id);
+    // 제 미룸을 따로 묻지 않는다: 빈 묶음은 읽은 칸이 첫 칸이라 `deferred_roots`
+    // 에서 빠지지 않으므로, 미뤘으면 언제나 `out_of_plan` 에 든다.
     let empty: Vec<String> = rolls
         .iter()
         .filter(|r| r.id.is_some() && r.total == 0)
         .filter_map(|r| r.id.clone())
-        .filter(|id| !put_off_group(id))
+        .filter(|id| !out_of_plan.contains(id.as_str()))
         .collect();
     if !empty.is_empty() {
         warnings.push(Warning::new("empty_epic", empty));
@@ -2013,6 +2262,105 @@ mod tests {
         ];
         assert_eq!(group_states(&issues, &two).get("argos-0001"), Some(&"open"));
     }
+
+    /// **묶음을 미뤄도 그 밑의 다른 미룸은 그대로다.** 멤버를 빼는 까닭을 가까운
+    /// 하나로만 보면, 미룬 부모 밑의 자식이 제 에픽이 미뤄지는 순간 그 에픽을
+    /// 뿌리로 받아 도로 세어진다 — 미루기 하나로 에픽이 `done` 에서 되돌아 나온다.
+    #[test]
+    fn shelving_a_group_does_not_bring_back_what_is_shelved_deeper() {
+        let base = || {
+            let mut epic = make("argos-0001", Kind::Epic, "todo");
+            epic.milestone = Some("argos-0009".into());
+            vec![
+                make("argos-0009", Kind::Milestone, "todo"),
+                epic,
+                member("argos-0003", "argos-0001", "done"),
+                put_off_line(member("argos-0002", "argos-0001", "todo")),
+                // 미룬 부모의 자식 — 소속은 부모에게서 물려받는다.
+                make("argos-0002.aaa", Kind::Issue, "todo"),
+            ]
+        };
+        assert_eq!(state_of(&base(), "argos-0001"), "done");
+
+        let mut shelved_epic = base();
+        shelved_epic[1] = put_off_line(shelved_epic[1].clone());
+        assert_eq!(state_of(&shelved_epic, "argos-0001"), "done", "제 미룸이 남의 미룸을 풀었다");
+
+        let mut shelved_mile = base();
+        shelved_mile[0] = put_off_line(shelved_mile[0].clone());
+        assert_eq!(state_of(&shelved_mile, "argos-0001"), "done", "물려받은 미룸이 풀었다");
+        assert_eq!(state_of(&shelved_mile, "argos-0009"), "done");
+    }
+
+    /// **읽은 칸이 done 인 묶음은 미뤄 둔 것으로 안 센다.** 끝난 줄은 미룬 것이
+    /// 아니다 — 세면 `status` 의 알림이 센 줄을 `show --deferred` 가 done 으로
+    /// 숨긴다. 그 밑의 남은 일은 그대로 물려받는다.
+    #[test]
+    fn a_grouping_that_reads_done_is_not_shelved() {
+        let closed = vec![
+            put_off_line(make("argos-0001", Kind::Epic, "todo")),
+            member("argos-0002", "argos-0001", "done"),
+        ];
+        assert!(!put_off(&closed).contains("argos-0001"), "{:?}", put_off(&closed));
+
+        let mut open = closed.clone();
+        open.push(member("argos-0003", "argos-0001", "todo"));
+        let out = put_off(&open);
+        assert!(out.contains("argos-0001") && out.contains("argos-0003"), "{out:?}");
+    }
+
+    /// **묶음이 제 멤버를 막으면 고리다.** 묶음은 멤버가 다 끝나야 닫히므로
+    /// (`group_states`) 둘 다 영영 안 끝난다 — 적힌 칸을 옮겨 푸는 길은 없다.
+    #[test]
+    fn creates_cycle_counts_membership() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.milestone = Some("argos-0008".into());
+        let issues = vec![
+            make("argos-0008", Kind::Milestone, "todo"),
+            epic,
+            member("argos-0002", "argos-0001", "todo"),
+            make("argos-0009", Kind::Issue, "todo"),
+        ];
+        assert!(creates_cycle(&issues, "argos-0001", "argos-0002"), "에픽이 제 멤버를 막는다");
+        assert!(creates_cycle(&issues, "argos-0008", "argos-0002"), "마일스톤도 같다");
+        assert!(!creates_cycle(&issues, "argos-0001", "argos-0009"), "남을 막는 것까지 막았다");
+        assert!(!creates_cycle(&issues, "argos-0002", "argos-0001"), "멤버가 제 묶음을 막는 것은 고리가 아니다");
+    }
+
+    /// **읽은 칸은 묶음만 받는다.** 머지를 잘못 푼 파일에서 같은 id 를 든 일 줄이
+    /// 묶음의 칸을 입으면, 목록은 `▸` 로 그리는데 `ready` 는 그 줄을 집으라고 낸다.
+    #[test]
+    fn a_work_row_never_wears_a_groupings_column() {
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "todo"),
+            member("argos-0002", "argos-0001", "in_progress"),
+            make("argos-0001", Kind::Issue, "todo"), // 같은 id 를 든 일 (머지 흔적)
+        ];
+        let cfg = cfg();
+        let states = group_states(&issues, &cfg);
+        assert_eq!(column(&issues[0], &states), "in_progress");
+        assert_eq!(column(&issues[2], &states), "todo", "일이 묶음의 칸을 입었다");
+    }
+
+    /// 묶음이 그 칸에 들어선 때도 멤버에서 읽는다 — `--stale` 이 재는 시각이다.
+    /// 적힌 `status_since` 로 재면 오늘 진행 중이 된 에픽이 "열흘째" 가 된다.
+    #[test]
+    fn a_group_dates_its_column_from_its_members() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo"); // 생성 09-01
+        epic.status_since = "2026-09-01T00:00:00Z".into();
+        let mut moved = member("argos-0002", "argos-0001", "in_progress");
+        moved.status_since = "2026-09-11T00:00:00Z".into();
+        let empty = make("argos-0007", Kind::Epic, "todo");
+        let issues = vec![epic, moved, empty];
+        let (e, m) = (groups(&issues), milestones(&issues));
+        let roots = deferred_roots_in(&issues, &e, &m);
+        let cfg = cfg();
+        let stands = group_stands_in(&issues, &cfg, &e, &m, &roots);
+        assert_eq!(stands["argos-0001"].since, "2026-09-11T00:00:00Z");
+        // 셀 멤버가 없으면 묶음이 생긴 때다 — 안 읽히는 칸의 시각은 안 쓴다.
+        assert_eq!(stands["argos-0007"].since, "2026-09-01T00:00:00Z");
+    }
+
     // ── idea 는 일이 아니다 ──────────────────────────────────────────
     //
     // **여기가 이 에픽에서 제일 조용히 틀어질 자리다.** 경고 하나가 idea 를

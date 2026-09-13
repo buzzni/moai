@@ -36,7 +36,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         return Err(Fail::new("까닭이 비었다"));
     }
 
-    let moved: Moved = repo.with_write(|issues, _, _| {
+    let (moved, read): (Moved, super::Read) = repo.with_write(|issues, cfg, _| {
         let mut m = Moved::default();
         let mut entries = Vec::new();
         for id in &args.ids {
@@ -83,7 +83,11 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
                 .collect();
             m.already.retain(|id| !roots.contains_key(id.as_str()));
         }
-        Ok((entries, m))
+        // 묶음도 미룬다 — 그 줄을 내면서 적힌 칸을 그대로 내면 받는 쪽이
+        // 안 읽히는 칸을 읽는다(`cmd::Row`).
+        let ids: Vec<&str> = m.done.iter().map(|i| i.id.as_str()).collect();
+        let read = super::read_of(issues, cfg, &ids);
+        Ok((entries, (m, read)))
     })?;
 
     for id in &moved.missing {
@@ -97,7 +101,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         #[derive(serde::Serialize)]
         struct Out<'a> {
             deferred: bool,
-            changed: &'a [Issue],
+            changed: Vec<super::Row<'a>>,
             already: &'a [String],
             missing: &'a [String],
             /// 도로 집으라 했는데 아직 계획 밖인 것과, 실제로 도로 집어야 할 줄.
@@ -105,7 +109,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         }
         return super::json_line(&Out {
             deferred: !back,
-            changed: &moved.done,
+            changed: moved.done.iter().map(|i| super::Row::from(i, &read)).collect(),
             already: &moved.already,
             missing: &moved.missing,
             shelved: super::shelved(&moved.shelved),

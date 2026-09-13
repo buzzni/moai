@@ -189,7 +189,8 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     crate::query::sort_for_display(&mut shown);
 
     if ctx.json {
-        let rows: Vec<super::Row> = shown.iter().map(|i| super::Row::of(i, &wh.states)).collect();
+        let rows: Vec<super::Row> =
+            shown.iter().map(|i| super::Row::of(i, wh.states.get(i.id.as_str()).copied())).collect();
         return super::json_line(&rows);
     }
     if args.tree {
@@ -205,7 +206,6 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
             &index,
             &keep,
             &report::rollup(&load.issues, &repo.config),
-            &wh.states,
         );
         // **트리도 안 낸 것을 말한다.** 롤업 머리글은 `is_work` 로 세므로
         // 미뤄 둔 멤버까지 세는데, 그 줄은 여기서 빠진다 — 말하지 않으면
@@ -234,7 +234,14 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
     let journal = repo.journal_of(&issue.id)?;
     // 이 줄과 자식을 계획에서 뺀 줄. **물려받은 미룸까지** — 미룬 에픽의 멤버를
     // 펼쳤을 때 표가 없으면 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다.
-    let seen = view::Seen { roots: report::deferred_roots(all), states: report::group_states(all, &repo.config) };
+    // 묶음의 읽은 칸은 **이 줄과 자식에 대해서만** 센다 — 일 하나를 펼치는 흔한 길에서
+    // 저장소 전부의 소속과 미룸을 걷는 것은 통째로 헛일이다(`group_states_of`).
+    let near: Vec<&str> =
+        std::iter::once(issue.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
+    let seen = view::Seen {
+        roots: report::deferred_roots(all),
+        states: report::group_states_of(all, &repo.config, &near),
+    };
 
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();
@@ -259,7 +266,10 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
         if let Some(root) = seen.roots.get(issue.id.as_str()) {
             extra.push(("shelved_by", serde_json::to_string(root).map_err(|e| Fail::new(e.to_string()))?));
         }
-        return super::json_with(&super::Row::of(issue, &seen.states), &extra);
+        return super::json_with(
+            &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()),
+            &extra,
+        );
     }
 
     // 이력은 언제나 맨 끝이다. 에픽이면 멤버를 그 **앞에** 끼운다.
@@ -305,7 +315,7 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
                 // 집계를 잃어 `에픽 1건` 처럼 나온다 — 같은 에픽이 `moai show
                 // --tree` 와 다르게 읽힌다.
                 let rolls = report::rollup(all, &repo.config);
-                out.extend(view::members(all, &index, &keep, &rolls, &seen.states, &here));
+                out.extend(view::members(all, &index, &keep, &rolls, &here));
             }
         }
     }

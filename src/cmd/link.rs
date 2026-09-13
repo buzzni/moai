@@ -32,7 +32,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         .chain(args.unblocks.iter().map(|t| (t.clone(), false)))
         .collect();
 
-    let touched: Vec<(Issue, bool)> = repo.with_write(|issues, cfg, _| {
+    let (touched, read): (Vec<(Issue, bool)>, super::Read) = repo.with_write(|issues, cfg, _| {
         // 막는 쪽의 존재는 **더할 때만** 따진다. `--unblocks` 만이면 그것이
         // 이미 지워졌을 수 있고, 그때도 남은 참조는 풀려야 한다 — 아니면
         // `status` 가 드러낸 끊긴 참조를 손으로 파일을 고쳐야만 없앨 수 있다.
@@ -69,7 +69,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
             if *wants_block && creates_cycle(issues, &args.id, target) {
                 return Err(Fail::coded(
                     format!(
-                        "{} 가 {target} 를 막으면 고리가 된다 — {target} 는 이미 (곧바로든 건너서든) {} 를 막고 있다",
+                        "{} 가 {target} 를 막으면 고리가 된다 — {target} 는 이미 (곧바로든 건너서든, 묶음의 멤버로든) {} 를 막고 있다",
                         args.id, args.id
                     ),
                     super::code::BAD_INPUT,
@@ -94,12 +94,16 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
             t.validate(cfg)?;
             out.push((t.clone(), wants_block));
         }
-        Ok((vec![], out))
+        // 막히는 쪽이 묶음일 수 있다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는
+        // 칸을 읽는다(`cmd::Row`).
+        let ids: Vec<&str> = out.iter().map(|(i, _)| i.id.as_str()).collect();
+        let read = super::read_of(issues, cfg, &ids);
+        Ok((vec![], (out, read)))
     })?;
 
     if ctx.json {
-        let issues_only: Vec<&Issue> = touched.iter().map(|(i, _)| i).collect();
-        return super::json_line(&issues_only);
+        let rows: Vec<super::Row> = touched.iter().map(|(i, _)| super::Row::from(i, &read)).collect();
+        return super::json_line(&rows);
     }
     if touched.is_empty() {
         return Ok(vec![format!(

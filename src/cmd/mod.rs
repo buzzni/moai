@@ -21,6 +21,7 @@ pub mod tui;
 
 use crate::cli::{Cli, Cmd, IdeaCmd, SkillCmd, Typed};
 use crate::model::Kind;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use crate::fail::{Fail, R, code};
@@ -208,18 +209,57 @@ pub fn json_line<T: serde::Serialize>(v: &T) -> R<Vec<String>> {
 /// `status` 의 뜻은 안 바꾼다 — 파일에 적힌 값 그대로다. 이미 나간 계약이라,
 /// 그 키를 읽은 칸으로 바꾸면 `--json` 을 읽고 되쓰는 쪽이 읽은 값을 적힌
 /// 값으로 믿는다. 사람 화면이 `-s` 로 고르고 그리는 칸이 이 키다.
+///
+/// **줄을 내는 모든 명령이 이것을 지난다.** `show` 만 곁들이면 `add`·`defer`·`link` 를
+/// 읽는 쪽은 같은 에픽을 적힌 칸으로 읽는다 — 키가 없다는 것이 "묶음이 아니다" 라는 뜻이다.
 #[derive(serde::Serialize)]
 pub struct Row<'a> {
     #[serde(flatten)]
-    pub issue: &'a crate::model::Issue,
+    pub issue: std::borrow::Cow<'a, crate::model::Issue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub derived_status: Option<&'a str>,
 }
 
+/// 읽은 칸의 키. 모르는 필드로 같은 이름을 든 줄을 가려내는 데도 쓴다.
+const DERIVED: &str = "derived_status";
+
 impl<'a> Row<'a> {
-    pub fn of(issue: &'a crate::model::Issue, states: &std::collections::BTreeMap<&str, &'a str>) -> Row<'a> {
-        Row { issue, derived_status: states.get(issue.id.as_str()).copied() }
+    /// `read` 는 그 줄의 읽은 칸이다. **묶음이 아니면 버린다** — 머지를 잘못 푼
+    /// 파일에서 묶음과 id 가 같은 일 줄이 그 묶음의 칸을 입지 않게, `report::column`
+    /// 과 같은 자로 묻는다.
+    pub fn of(issue: &'a crate::model::Issue, read: Option<&'a str>) -> Row<'a> {
+        // **이 키는 우리 것이다.** `--json` 을 파일에 되써 넣어 `derived_status` 를
+        // 모르는 필드로 든 줄이면 그 값을 화면에서 걷어낸다 — 그대로 두면 한 객체에
+        // 같은 키가 둘 서서 깐깐한 파서가 거절하고, 묶음 아닌 줄에는 읽은 칸이
+        // 있는 것처럼 보인다. 파일의 값은 그대로 둔다(`moai status` 가 비춘다).
+        let issue = match issue.rest.contains_key(DERIVED) {
+            false => std::borrow::Cow::Borrowed(issue),
+            true => {
+                let mut own = issue.clone();
+                own.rest.remove(DERIVED);
+                std::borrow::Cow::Owned(own)
+            }
+        };
+        let derived = read.filter(|_| crate::report::is_group(&issue));
+        Row { issue, derived_status: derived }
     }
+
+    /// 락 안에서 챙겨 온 지도(`read_of`)로 짓는다.
+    pub fn from(issue: &'a crate::model::Issue, read: &'a Read) -> Row<'a> {
+        Row::of(issue, read.get(&issue.id).map(String::as_str))
+    }
+}
+
+/// 묶음 id → 멤버에서 읽은 칸. 락 밖으로 들고 나가는 모양이라 제 문자열을 쥔다.
+pub type Read = BTreeMap<String, String>;
+
+/// 락 안에서 **낼 줄 가운데 묶음의 읽은 칸**을 챙겨 나온다 — 락을 놓은 뒤에 다시 세면
+/// 그 사이에 남이 쓴 멤버가 섞인다. 묶음이 없으면 걷지 않는다(`group_states_of`).
+pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str]) -> Read {
+    crate::report::group_states_of(issues, cfg, ids)
+        .into_iter()
+        .map(|(id, col)| (id.to_string(), col.to_string()))
+        .collect()
 }
 
 /// 객체 하나에 필드를 덧붙여 낸다. 선언 순서를 지키려면 직렬화된 뒤에

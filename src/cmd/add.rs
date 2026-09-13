@@ -119,7 +119,10 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     let at = model::now();
     let by = model::actor(ctx.user.as_deref())?;
 
-    let made: Issue = repo.with_write(|issues, cfg, reserved| {
+    // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
+    // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
+    // 만들면 만든 줄이 처음부터 `in_progress` 로 선다.
+    let (made, read): (Issue, super::Read) = repo.with_write(|issues, cfg, reserved| {
         let taken = taken_ids(issues, reserved);
 
         let id = match &args.parent {
@@ -159,22 +162,29 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
 
         let entry = JournalEntry::create(&issue.id, &issue.title, &at, &by);
         issues.push(issue.clone());
-        Ok((vec![entry], issue))
+        let read = super::read_of(issues, cfg, &[issue.id.as_str()]);
+        Ok((vec![entry], (issue, read)))
     })?;
 
     if ctx.json {
-        return super::json_line(&made);
+        return super::json_line(&super::Row::from(&made, &read));
     }
     if args.quiet {
         return Ok(vec![made.id]);
     }
 
-    let st = style::status_style(made.status.as_str());
+    // **만든 줄도 서 있는 칸으로 그린다.** 묶음의 적힌 칸은 어디서도 안 읽히므로
+    // (`report::column`), 여기서만 그것을 그리면 `moai add --type epic -s done` 이
+    // 낸 `✓` 를 바로 다음 `moai show` 가 `· todo` 로 뒤집는다.
+    let states: std::collections::BTreeMap<&str, &str> =
+        read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect();
+    let col = crate::report::column(&made, &states);
+    let st = style::status_style(col);
     let mut line = format!(
         "{}  {}  {}  {}",
         paint(style::ID, &made.id),
         paint(style::priority_style(made.priority()), &format!("p{}", made.priority())),
-        paint(st, style::glyph(made.status.as_str())),
+        paint(st, style::glyph(col)),
         paint(
             // 묶음만 묶음 색이다. idea 는 담는 것이 아니라 담기는 것이라
             // 여기서 갈라지면 만든 순간부터 에픽처럼 보인다.
@@ -215,12 +225,16 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool, assignee: Option<Stri
     let at = model::now();
     let by = model::actor(ctx.user.as_deref())?;
     let who = assignee_of(assignee.as_deref(), &by);
-    let made: Vec<Issue> = repo.with_write(|issues, cfg, reserved| {
-        create_drafts(issues, cfg, reserved, &drafts, &who, &by, &at)
+    let (made, read): (Vec<Issue>, super::Read) = repo.with_write(|issues, cfg, reserved| {
+        let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, &who, &by, &at)?;
+        let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
+        let read = super::read_of(issues, cfg, &ids);
+        Ok((entries, (made, read)))
     })?;
 
     if ctx.json {
-        return super::json_line(&made);
+        let rows: Vec<super::Row> = made.iter().map(|i| super::Row::from(i, &read)).collect();
+        return super::json_line(&rows);
     }
     let mut out = vec![paint(style::HEAD, "만듦")];
     out.extend(drafts.iter().zip(&made).map(|(d, i)| line_of(d, Some(&i.id))));
