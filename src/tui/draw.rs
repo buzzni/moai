@@ -419,8 +419,11 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     if let Some(id) = placed {
         fields.push(("마일스톤".into(), app.title_of(id)));
     }
+    // 자리를 정한 것이 없을 때 "에픽의 것을 따른다" 고 적으면 거짓이다 — 에픽에
+    // 마일스톤이 없거나, 에픽 참조가 못 쓸 것이라 줄이 `(길 잃음)` 에 있다.
     if let Some(own) = i.milestone.as_deref().filter(|own| Some(*own) != placed) {
-        fields.push(("안 쓰임".into(), format!("제 마일스톤 {own} — 에픽의 것을 따른다")));
+        let why = if placed.is_some() { "에픽의 것을 따른다" } else { "에픽이 있으면 셈에 안 쓰인다" };
+        fields.push(("안 쓰임".into(), format!("제 마일스톤 {own} — {why}")));
     }
     // **막는 것은 제목까지 푼다.** id 만 내면 그것이 무엇인지 또 찾아봐야 한다.
     // **끝난 막음은 막지 않는다** — `report::is_blocked` 와 `moai ready` 가 그
@@ -794,6 +797,29 @@ mod tests {
         assert!(label("마일스톤").contains("쓰는 판"), "{lines:#?}");
         assert!(!label("마일스톤").contains("안 쓰는 판"), "안 쓰이는 제 값을 마일스톤으로 그렸다\n{lines:#?}");
         assert!(label("안 쓰임").contains("argos-0002"), "제 값이 안 쓰인다고 안 말한다\n{lines:#?}");
+    }
+
+    /// 에픽 참조가 끊겨 자리를 정한 마일스톤이 없으면, 안 쓰이는 제 값을
+    /// "에픽의 것을 따른다" 고 적지 않는다 — 따를 에픽의 마일스톤이 없다.
+    #[test]
+    fn an_unused_milestone_without_a_placed_one_does_not_claim_to_follow_the_epic() {
+        let make = |id: &str, title: &str, kind: Kind| {
+            Issue::new(id.into(), title.into(), kind, Status::new("todo"), "2026-09-01T00:00:00Z")
+        };
+        let ms = make("argos-0001", "판", Kind::Milestone);
+        let mut row = make("argos-0004", "멤버", Kind::Issue);
+        row.epic = Some("argos-9999".into());
+        row.milestone = Some("argos-0001".into());
+        let mut a = App::new(
+            vec![ms, row],
+            Config::parse("prefix = \"argos\"\n").unwrap(),
+            vec![crate::nav::Seg::Lost],
+        );
+        a.cursor = 1; // 0 은 `..` 줄이다
+        let lines = render(&mut a, 140, 24);
+        let unused = lines.iter().find(|l| l.contains("안 쓰임")).cloned().unwrap_or_default();
+        assert!(unused.contains("argos-0001"), "{lines:#?}");
+        assert!(!unused.contains("에픽의 것을 따른다"), "따를 에픽 마일스톤이 없는데 따른다고 적었다\n{lines:#?}");
     }
 
     /// 좁은 창에서 무너지지도, 넘치지도 않는다. 한글이 두 칸을 먹는 것이
