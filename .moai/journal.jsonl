@@ -773,3 +773,4 @@
 {"ts":"2026-09-13T15:06:39Z","id":"moai-zag3.weu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Alt 조합 변경은 되돌리지 않고 주석으로 적음(eb6b452), Alt-Backspace 낱말 지우기는 moai-6jql, 긴 글에 밀리는 오류는 moai-do11 로 담음"}
 {"ts":"2026-09-13T15:06:48Z","id":"moai-zag3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Mode::Grep/Filter 가 tui::input::Input 을 든다. typing() 은 칸이 돌려준 Enter·Esc·Ctrl-C 만 정한다. 프롬프트 커서는 ▌ 대신 터미널 커서(set_cursor_position) — 글 안 커서에서 ▌ 는 설 자리가 없고, 한글 입력기 조합 자리도 터미널 커서다. Alt 조합은 칸의 판단대로 무동작이 됐다(옛 typing 은 Alt 를 흘렸다). 커밋 21daced, eb6b452."}
 {"ts":"2026-09-13T15:06:51Z","id":"moai-zag3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"/·f 가 Input 위에 서고 프롬프트는 터미널 커서를 세운다 (21daced, eb6b452)"}
+{"ts":"2026-09-13T15:13:25Z","id":"moai-zyuy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
