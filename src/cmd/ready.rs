@@ -9,14 +9,18 @@ use crate::report;
 use crate::store::Repo;
 use crate::view;
 
-pub fn run(ctx: &Ctx) -> R<Vec<String>> {
+pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let repo = Repo::discover()?;
-    let load = repo.read()?;
+    let crate::worktree::Gathered { load, origin, .. } = super::gather(&repo, worktree)?;
     super::report_load_errors(&repo.issues_path(), &load.errors);
 
+    // **겹친 줄로 고른다.** 옆 워크트리에서 집은 일은 거기서 `in_progress` 로 서
+    // 있으므로, 같은 자(`report::ready`)가 그것을 저절로 뺀다 — 여기에 "남이 집은
+    // 것" 을 가르는 `if` 를 따로 두지 않는다.
     let picks = report::ready(&load.issues, &repo.config);
     if ctx.json {
-        return super::json_line(&picks);
+        let rows: Vec<super::Row> = picks.iter().map(|i| super::Row::of(i, None).on(&origin)).collect();
+        return super::json_line(&rows);
     }
 
     // 첫 칸도 아니고 끝나지도 않은 것 = 누군가 이미 잡고 있는 것.
@@ -24,5 +28,5 @@ pub fn run(ctx: &Ctx) -> R<Vec<String>> {
     // 미뤄 둔 것에 막혀 못 집는 것. 안 대면 `ready` 가 까닭 없이 빈다.
     let held = report::held(&load.issues, &repo.config);
 
-    Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip, &held))
+    Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip, &held, &origin))
 }

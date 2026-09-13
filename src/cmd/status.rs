@@ -12,9 +12,9 @@ use crate::report;
 use crate::store::Repo;
 use crate::view;
 
-pub fn run(ctx: &Ctx) -> R<Vec<String>> {
+pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let repo = Repo::discover()?;
-    let load = repo.read()?;
+    let crate::worktree::Gathered { load, origin, .. } = super::gather(&repo, worktree)?;
     // **그 줄이 쓰는 id** 까지 넘긴다 — id 가 있어야 산 줄과의 중복이
     // 드러난다(moai-4dk4).
     let unreadable: Vec<report::Unreadable> =
@@ -26,6 +26,12 @@ pub fn run(ctx: &Ctx) -> R<Vec<String>> {
         super::note_partial();
     }
     if ctx.json {
+        // **겹쳐 봤을 때만 키를 단다.** 늘 달면 `--worktree` 없이 부른 쪽도 빈
+        // 지도를 받아 "겹쳐 봤는데 옆에 아무것도 없다" 로 읽는다.
+        if worktree {
+            let branches = serde_json::to_string(&origin.branches()).map_err(|e| super::Fail::new(e.to_string()))?;
+            return super::json_with(&st, &[("branches", branches)]);
+        }
         return super::json_line(&st);
     }
     Ok(view::status(
@@ -34,5 +40,6 @@ pub fn run(ctx: &Ctx) -> R<Vec<String>> {
         &repo.config,
         &now,
         ".moai/issues.jsonl",
+        &origin,
     ))
 }

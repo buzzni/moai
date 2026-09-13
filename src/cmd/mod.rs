@@ -56,6 +56,20 @@ pub fn had_partial() -> bool {
     PARTIAL.load(Ordering::Relaxed)
 }
 
+/// 제 저장소를 읽고, `worktree` 면 다른 워크트리를 겹친다(`worktree::gather`).
+///
+/// **남의 워크트리에서 만난 문제는 말만 한다** — stderr 로 한 줄씩, 부분 실패
+/// 깃발은 안 세운다. 옆 워크트리의 깨진 줄로 `moai status` 가 비영 종료하면
+/// 제 파일은 멀쩡한데 도구가 실패로 읽힌다. 제 파일의 못 읽는 줄은 전과 같이
+/// `load.errors` 에 남아 부르는 쪽이 제 길로 알린다.
+pub fn gather(repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::Gathered> {
+    let g = crate::worktree::gather(repo, worktree)?;
+    for t in &g.trouble {
+        eprintln!("{t}");
+    }
+    Ok(g)
+}
+
 /// 읽다 만난 잘못된 줄을 stderr 로 알린다. 결과는 그대로 낸다.
 pub fn report_load_errors(path: &std::path::Path, errors: &[crate::store::LoadError]) {
     if errors.is_empty() {
@@ -107,8 +121,8 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Note(a) => note::run(&ctx, a),
         Cmd::Link(a) => link::run(&ctx, a),
         Cmd::Defer(a) => defer::run(&ctx, a),
-        Cmd::Ready => ready::run(&ctx),
-        Cmd::Status => status::run(&ctx),
+        Cmd::Ready(w) => ready::run(&ctx, w.worktree),
+        Cmd::Status(w) => status::run(&ctx, w.worktree),
         Cmd::Tui(a) => tui::run(&ctx, a),
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),
         Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
@@ -140,7 +154,7 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
         return Ok(out);
     }
 
-    let mut out = status::run(ctx)?;
+    let mut out = status::run(ctx, false)?;
     if ctx.json {
         return Ok(out);
     }
@@ -218,10 +232,16 @@ pub struct Row<'a> {
     pub issue: std::borrow::Cow<'a, crate::model::Issue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub derived_status: Option<&'a str>,
+    /// 다른 워크트리에서 온 줄이면 그 브랜치 (`--worktree`). **키가 없다는 것이 곧
+    /// "지금 브랜치의 줄" 이다** — `derived_status` 와 같은 약속이다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<&'a str>,
 }
 
 /// 읽은 칸의 키. 모르는 필드로 같은 이름을 든 줄을 가려내는 데도 쓴다.
 const DERIVED: &str = "derived_status";
+/// 출처 브랜치의 키. `DERIVED` 와 같은 까닭으로 우리 것이다.
+const BRANCH: &str = "branch";
 
 impl<'a> Row<'a> {
     /// `read` 는 그 줄의 읽은 칸이다. **묶음이 아니면 버린다** — 머지를 잘못 푼
@@ -232,16 +252,25 @@ impl<'a> Row<'a> {
         // 모르는 필드로 든 줄이면 그 값을 화면에서 걷어낸다 — 그대로 두면 한 객체에
         // 같은 키가 둘 서서 깐깐한 파서가 거절하고, 묶음 아닌 줄에는 읽은 칸이
         // 있는 것처럼 보인다. 파일의 값은 그대로 둔다(`moai status` 가 비춘다).
-        let issue = match issue.rest.contains_key(DERIVED) {
+        // `branch` 도 같다 — 겹쳐 본 줄에 붙이는 키라, 파일에 같은 이름이 들어 있으면
+        // 한 객체에 둘이 서거나 지금 브랜치의 줄이 남의 브랜치에서 온 것처럼 읽힌다.
+        let issue = match issue.rest.contains_key(DERIVED) || issue.rest.contains_key(BRANCH) {
             false => std::borrow::Cow::Borrowed(issue),
             true => {
                 let mut own = issue.clone();
                 own.rest.remove(DERIVED);
+                own.rest.remove(BRANCH);
                 std::borrow::Cow::Owned(own)
             }
         };
         let derived = read.filter(|_| crate::report::is_group(&issue));
-        Row { issue, derived_status: derived }
+        Row { issue, derived_status: derived, branch: None }
+    }
+
+    /// 겹쳐 본 줄이면 그 출처를 곁들인다.
+    pub fn on(mut self, origin: &'a crate::worktree::Origin) -> Row<'a> {
+        self.branch = origin.branch(&self.issue.id);
+        self
     }
 
     /// 락 안에서 챙겨 온 지도(`read_of`)로 짓는다.

@@ -114,7 +114,14 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             let now = model::now();
             let st = report::status(&load.issues, &unreadable, &repo.config, &now);
             let lines =
-                view::status(&st, &load.issues, &repo.config, &now, ".moai/issues.jsonl");
+                view::status(
+                    &st,
+                    &load.issues,
+                    &repo.config,
+                    &now,
+                    ".moai/issues.jsonl",
+                    &crate::worktree::Origin::default(),
+                );
             crate::hook::board(&lines)
         }),
         Event::PreToolUse => {

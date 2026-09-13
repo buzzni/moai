@@ -86,7 +86,7 @@ fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
 
 pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
     let repo = Repo::discover()?;
-    let load = repo.read()?;
+    let crate::worktree::Gathered { load, origin, .. } = super::gather(&repo, args.worktree.worktree)?;
     super::report_load_errors(&repo.issues_path(), &load.errors);
 
     let target = match kind_filter {
@@ -110,7 +110,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         let issue = load
             .get(id)
             .ok_or_else(|| Fail::coded(format!("{id} 를 못 찾았다"), super::code::NOT_FOUND))?;
-        return one(ctx, &repo, &load.issues, issue, args.raw);
+        return one(ctx, &repo, &load.issues, issue, args.raw, &origin);
     }
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
@@ -190,7 +190,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
 
     if ctx.json {
         let rows: Vec<super::Row> =
-            shown.iter().map(|i| super::Row::of(i, wh.states.get(i.id.as_str()).copied())).collect();
+            shown.iter().map(|i| super::Row::of(i, wh.states.get(i.id.as_str()).copied()).on(&origin)).collect();
         return super::json_line(&rows);
     }
     if args.tree {
@@ -206,6 +206,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
             &index,
             &keep,
             &report::rollup(&load.issues, &repo.config),
+            &origin,
         );
         // **트리도 안 낸 것을 말한다.** 롤업 머리글은 `is_work` 로 세므로
         // 미뤄 둔 멤버까지 세는데, 그 줄은 여기서 빠진다 — 말하지 않으면
@@ -225,13 +226,27 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         &report::epic_labels(&load.issues),
         asked_deferred,
         &wh,
+        &origin,
     ))
 }
 
-fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec<String>> {
+fn one(
+    ctx: &Ctx,
+    repo: &Repo,
+    all: &[Issue],
+    issue: &Issue,
+    raw: bool,
+    origin: &crate::worktree::Origin,
+) -> R<Vec<String>> {
     let epic = issue.epic.as_ref().and_then(|e| all.iter().find(|i| &i.id == e));
     let children = report::children_of(all, &issue.id);
-    let journal = repo.journal_of(&issue.id)?;
+    // **이력은 줄이 온 워크트리의 저널에서 읽는다** (`Origin::root`). 스냅샷은
+    // 옆 워크트리의 줄을 내는데 이력만 이쪽에서 읽으면, 거기서 옮긴 칸이 이력에
+    // 없어 상세의 머리글과 이력이 서로 다른 말을 한다.
+    let journal = match origin.root(&issue.id) {
+        None => repo.journal_of(&issue.id)?,
+        Some(root) => Repo { root: root.to_path_buf(), config: repo.config.clone() }.journal_of(&issue.id)?,
+    };
     // 이 줄과 자식을 계획에서 뺀 줄. **물려받은 미룸까지** — 미룬 에픽의 멤버를
     // 펼쳤을 때 표가 없으면 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다.
     // 묶음의 읽은 칸은 **이 줄과 자식에 대해서만** 센다 — 일 하나를 펼치는 흔한 길에서
@@ -241,6 +256,7 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
     let seen = view::Seen {
         roots: report::deferred_roots(all),
         states: report::group_states_of(all, &repo.config, &near),
+        origin: Some(origin),
     };
 
     if ctx.json {
@@ -267,7 +283,7 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
             extra.push(("shelved_by", serde_json::to_string(root).map_err(|e| Fail::new(e.to_string()))?));
         }
         return super::json_with(
-            &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()),
+            &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),
             &extra,
         );
     }
@@ -315,7 +331,7 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
                 // 집계를 잃어 `에픽 1건` 처럼 나온다 — 같은 에픽이 `moai show
                 // --tree` 와 다르게 읽힌다.
                 let rolls = report::rollup(all, &repo.config);
-                out.extend(view::members(all, &index, &keep, &rolls, &here));
+                out.extend(view::members(all, &index, &keep, &rolls, &here, origin));
             }
         }
     }

@@ -82,14 +82,21 @@ pub enum Cmd {
     #[command(after_help = "\
   아무것도 막지 않는다. 승인도 통과도 없다.
   대신 에픽에 안 붙은 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것을 드러낸다.
-  종료 코드는 데이터가 깨졌을 때만 0 이 아니다.")]
-    Status,
+  종료 코드는 데이터가 깨졌을 때만 0 이 아니다.
+
+  --worktree 는 다른 git 워크트리의 이슈도 겹쳐 본다. 같은 id 는 updated_at 이
+  가장 늦은 줄이 서고, 지금 브랜치가 아닌 줄은 제목 앞에 ⎇ <브랜치> 가 붙는다.
+  보여줄 때만 겹친다 — 어느 파일도 바뀌지 않는다.")]
+    Status(WorktreeArg),
 
     /// 지금 집을 수 있는 일
     #[command(after_help = "\
   에픽 자체, 미뤄 둔 것과 그 밑, 아직 안 끝난 자식을 가진 부모는 뺀다.
-  급한 것 → 끝나가는 에픽 → 오래된 것 차례로 낸다.")]
-    Ready,
+  급한 것 → 끝나가는 에픽 → 오래된 것 차례로 낸다.
+
+  --worktree 면 다른 워크트리에서 이미 집은 일은 여기서 빠지고, 잡고 있는
+  것에 ⎇ <브랜치> 와 함께 선다 — 두 에이전트가 같은 일을 잡지 않는다.")]
+    Ready(WorktreeArg),
 
     /// 이슈를 만든다
     #[command(after_help = "\
@@ -371,7 +378,20 @@ pub struct ShowArgs {
     pub tree: bool,
 
     #[command(flatten)]
+    pub worktree: WorktreeArg,
+
+    #[command(flatten)]
     pub filter: FilterArgs,
+}
+
+/// `status`·`ready`·`show` 가 함께 받는다. **전역 플래그로 두지 않는다** — 쓰는
+/// 명령(`mv`·`edit`)에 붙으면 겹친 화면을 보고 쓴다고 믿게 되는데, 쓰기는 언제나
+/// 제 워크트리 파일에만 간다.
+#[derive(Args, Debug, Default, Clone, Copy)]
+pub struct WorktreeArg {
+    /// 다른 git 워크트리의 이슈도 겹쳐 본다 (보여줄 때만 — 파일은 안 바뀐다)
+    #[arg(long)]
+    pub worktree: bool,
 }
 
 /// 쉼표는 "또는", 반복은 "그리고".

@@ -28,6 +28,12 @@ pub const TAG: Style = fg(AnsiColor::Cyan).dimmed();
 /// 목록의 에픽 열. 곁다리라 에픽 제목 자체보다 약하게.
 pub const EPIC_REF: Style = fg(AnsiColor::BrightBlue).dimmed();
 pub const ID: Style = DIM;
+/// 다른 워크트리에서 온 줄의 `⎇ <브랜치>`. **글리프가 뜻을 지고 색은 곁들인다** —
+/// 색을 꺼도 `⎇` 가 남는다. 쓰이지 않은 색을 고른다: 노랑·자홍·초록은 칸이,
+/// 파랑은 묶음이, 청록은 태그·코드가 이미 쓴다.
+pub const BRANCH: Style = fg(AnsiColor::BrightCyan).bold();
+/// 브랜치 머리표의 글리프.
+pub const BRANCH_GLYPH: &str = "⎇";
 pub const ERROR: Style = fg(AnsiColor::Red);
 pub const WARN: Style = fg(AnsiColor::BrightYellow);
 pub const HEAD: Style = Style::new().bold();
