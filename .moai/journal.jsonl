@@ -805,3 +805,36 @@
 {"ts":"2026-09-13T15:53:52Z","id":"moai-o84q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":".claude/worktrees 를 .gitignore 에 넣는다"}
 {"ts":"2026-09-13T15:53:52Z","id":"moai-o84q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-13T15:54:08Z","id":"moai-o84q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":".gitignore 에 /.claude/worktrees/ 를 더했다"}
+{"ts":"2026-09-13T15:58:47Z","id":"moai-0xp7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쌓인 idea 에서 건진 결함 — 시험·TUI 가장자리"}
+{"ts":"2026-09-13T15:58:47Z","id":"moai-4v8w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"cargo test 가 가끔 ETXTBSY 로 터진다 — 복사한 바이너리를 rename 으로 내놓는다"}
+{"ts":"2026-09-13T15:58:47Z","id":"moai-kebc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"json 훑기 시험이 진짜 HOME 의 ~/.claude 를 읽는다 — HOME 을 시험 디렉터리로"}
+{"ts":"2026-09-13T15:58:47Z","id":"moai-r27k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"버린 다시 읽기 스레드의 패닉을 다음 걸음에 되던진다"}
+{"ts":"2026-09-13T15:58:47Z","id":"moai-af64","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 상세의 막힘 판정이 report::is_blocked 를 베껴 끊긴 막음에서 갈린다"}
+{"ts":"2026-09-13T15:58:47Z","id":"moai-x5eg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 에서 에픽은 멤버 중 실제 in_progress 가 있을 때만 돌린다"}
+{"ts":"2026-09-13T15:58:47Z","id":"moai-sfml","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"같은 id 의 에픽 줄 둘이면 멤버가 탐색기에 두 번 그려진다"}
+{"ts":"2026-09-13T15:58:47Z","id":"moai-7nzr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"키 바가 포커스를 따른다 — 상세 포커스에서 Enter·Bksp 를 빼거나 흐리게"}
+{"ts":"2026-09-13T15:58:47Z","id":"moai-1vjh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"글칸이 길면 거름망 오류가 줄 밖으로 밀린다"}
+{"ts":"2026-09-13T15:58:47Z","id":"moai-0xp7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-sphx 에서 펼쳤다 — skill_status_from_another_binary_keeps_a_current_install_current 가 가끔 실행 직전에 터진다"}
+{"ts":"2026-09-13T15:58:47Z","id":"moai-sphx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-0xp7 로 펼쳤다 (이슈 8건)"}
+{"ts":"2026-09-13T15:59:07Z","id":"moai-gi3a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kebc 로 펼쳤다 (에픽 moai-0xp7)"}
+{"ts":"2026-09-13T15:59:07Z","id":"moai-8ued","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r27k 로 펼쳤다 (에픽 moai-0xp7)"}
+{"ts":"2026-09-13T15:59:07Z","id":"moai-bjqj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"넷 중 TUI 상세의 막힘 판정이 report::is_blocked 와 갈리는 한 줄은 moai-af64 로 펼쳤다. 나머지 셋(rollup_of 의 E×N 걸음, TUI 가 묶음 칸·미룸을 따로 세기, view::Seen 과 query::Where 겹침)은 리팩터라 idea 로 남긴다"}
+{"ts":"2026-09-13T15:59:07Z","id":"moai-e9ax","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-x5eg 로 펼쳤다 (에픽 moai-0xp7)"}
+{"ts":"2026-09-13T15:59:08Z","id":"moai-ywtx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-sfml 로 펼쳤다 (에픽 moai-0xp7)"}
+{"ts":"2026-09-13T15:59:08Z","id":"moai-fbg3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-7nzr 로 펼쳤다 (에픽 moai-0xp7)"}
+{"ts":"2026-09-13T15:59:08Z","id":"moai-do11","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-1vjh 로 펼쳤다 (에픽 moai-0xp7)"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-0gxf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 설계 결정 묶음 '막음·미룸의 뜻' — moai-0gxf·moai-ace6·moai-69hw·moai-4tfb·moai-vw39·moai-phzi 를 한 번에 정한다. 묶음이 막을 때 미룬 멤버·빈 묶음을 어떻게 세는가가 공통 물음"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-ace6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 설계 결정 묶음 '막음·미룸의 뜻' — moai-0gxf·moai-ace6·moai-69hw·moai-4tfb·moai-vw39·moai-phzi 를 한 번에 정한다. 묶음이 막을 때 미룬 멤버·빈 묶음을 어떻게 세는가가 공통 물음"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-69hw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 설계 결정 묶음 '막음·미룸의 뜻' — moai-0gxf·moai-ace6·moai-69hw·moai-4tfb·moai-vw39·moai-phzi 를 한 번에 정한다. 묶음이 막을 때 미룬 멤버·빈 묶음을 어떻게 세는가가 공통 물음"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-4tfb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 설계 결정 묶음 '막음·미룸의 뜻' — moai-0gxf·moai-ace6·moai-69hw·moai-4tfb·moai-vw39·moai-phzi 를 한 번에 정한다. 묶음이 막을 때 미룬 멤버·빈 묶음을 어떻게 세는가가 공통 물음"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-vw39","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 설계 결정 묶음 '막음·미룸의 뜻' — moai-0gxf·moai-ace6·moai-69hw·moai-4tfb·moai-vw39·moai-phzi 를 한 번에 정한다. 묶음이 막을 때 미룬 멤버·빈 묶음을 어떻게 세는가가 공통 물음"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-phzi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 설계 결정 묶음 '막음·미룸의 뜻' — moai-0gxf·moai-ace6·moai-69hw·moai-4tfb·moai-vw39·moai-phzi 를 한 번에 정한다. 묶음이 막을 때 미룬 멤버·빈 묶음을 어떻게 세는가가 공통 물음"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-0a0u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 설계 결정 묶음 '워크트리 겹쳐 보기' — moai-0a0u·moai-2f5g. 옆 줄이 지운 것인지 안 받은 것인지, 필드 편집이 집은 것을 덮지 않게 할 규칙을 함께 정한다"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-2f5g","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 설계 결정 묶음 '워크트리 겹쳐 보기' — moai-0a0u·moai-2f5g. 옆 줄이 지운 것인지 안 받은 것인지, 필드 편집이 집은 것을 덮지 않게 할 규칙을 함께 정한다"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-mwzf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 설계 결정 묶음 '출력 계약' — moai-mwzf·moai-hbqc. ready --json 의 맨 배열 계약과 저널만 실패한 쓰기를 무엇으로 알릴지를 계약을 바꾸는 날 함께 연다"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-hbqc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 설계 결정 묶음 '출력 계약' — moai-mwzf·moai-hbqc. ready --json 의 맨 배열 계약과 저널만 실패한 쓰기를 무엇으로 알릴지를 계약을 바꾸는 날 함께 연다"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-6ynw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 설계 결정 묶음 '소속 가장자리' — moai-6ynw·moai-xy3z"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-xy3z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 설계 결정 묶음 '소속 가장자리' — moai-6ynw·moai-xy3z"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-6jql","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): moai-6jql·moai-7fwn 은 같은 물음 — 글칸이 Alt(와 Ctrl+Alt) 조합을 어떻게 읽을까. 함께 정한다"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-7fwn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): moai-6jql·moai-7fwn 은 같은 물음 — 글칸이 Alt(와 Ctrl+Alt) 조합을 어떻게 읽을까. 함께 정한다"}
+{"ts":"2026-09-13T15:59:37Z","id":"moai-2v3w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림(2026-09-13): 여는 조건(한 프로세스의 여러 번 쓰기)이 TUI 쓰기로 왔지만 TUI 는 main 을 안 지나 CARRIED·HELD 에 닿지 않는다. moai-11s4 가 합쳐진 뒤 다시 본다"}
