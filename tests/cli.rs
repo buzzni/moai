@@ -2612,6 +2612,32 @@ fn a_journal_only_write_claims_no_rewrite() {
     );
 }
 
+/// **안 썼어도 파일이 상했다는 것은 말한다.** 저널만 쓰는 명령과 할 일이 없던
+/// 쓰기는 `report_load_errors` 도 안 지나, 그 동사만 쓰는 쪽은 상한 줄을 영영
+/// 몰랐다(moai-relb). 종료 코드는 그대로다 — 쓰기는 성공했다.
+#[test]
+fn a_write_that_touched_nothing_still_names_the_unreadable_line() {
+    let s = init("heldnote");
+    let id = add(s.path(), &["제목"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    let mut text = issues(s.path());
+    text.push_str("{깨짐\n");
+    std::fs::write(&path, &text).unwrap();
+
+    for args in [
+        vec!["note", id.as_str(), "메모"],
+        vec!["defer", id.as_str(), "--undo"],
+    ] {
+        let out = moai(s.path(), &args);
+        assert!(out.status.success(), "{args:?} — {}", String::from_utf8_lossy(&out.stderr));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("읽을 수 없는 줄 1개"), "{args:?} 가 상한 줄을 말 안 했다 — {err}");
+        assert!(err.contains("moai show"), "{args:?} 가 어디서 보는지 안 댄다 — {err}");
+        assert!(!err.contains("그대로 두고 썼다"), "{args:?} 가 안 쓴 쓰기를 주장했다 — {err}");
+    }
+    assert_eq!(issues(s.path()), text, "스냅샷을 건드렸다");
+}
+
 /// **세어 놓고 못 보여 주는 수를 만들지 않는다.** `미뤄 둔 것 N건` 은 종류를
 /// 안 가리고 세므로(미뤄 둔 에픽까지 비추려고), 그 줄이 가리키는 명령이
 /// 생각을 숨기면 가리킨 곳이 비어 있다.

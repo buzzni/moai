@@ -161,11 +161,18 @@ impl Repo {
         // **안 쓴 자리에서는 0 을 넣는다.** 한 프로세스가 `with_write` 를 두 번
         // 부르는 날(묶음 동사·쓰는 탐색기) 앞 호출의 수가 남아 있으면, 아무것도
         // 안 쓴 뒤에 "그대로 두고 썼다" 가 나온다 — 같은 거짓말의 뒷면이다.
+        //
+        // **안 쓴 자리에서도 들고 있다는 것은 따로 센다.** `moai note` 처럼
+        // 저널만 쓰는 명령은 `report_load_errors` 도 안 지나므로, 여기서 입을
+        // 다물면 그 동사만 쓰는 쪽은 파일이 상했다는 것을 영영 모른다(moai-relb).
+        // 낱말이 달라야 해서 수를 갈라 둔다 — "그대로 두고 썼다" 는 쓴 자리의 말이다.
         if after != before {
             write_atomic(&self.issues_path(), after.as_bytes())?;
             CARRIED.store(opaque.len(), std::sync::atomic::Ordering::Relaxed);
+            HELD.store(0, std::sync::atomic::Ordering::Relaxed);
         } else {
             CARRIED.store(0, std::sync::atomic::Ordering::Relaxed);
+            HELD.store(opaque.len(), std::sync::atomic::Ordering::Relaxed);
         }
         if !entries.is_empty() {
             self.append_journal(&entries)?;
@@ -224,6 +231,14 @@ static CARRIED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize:
 
 pub fn carried_unreadable() -> usize {
     CARRIED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// 방금 쓰기가 **스냅샷을 안 건드렸는데** 파일에 있던 못 읽는 줄의 수.
+/// [`carried_unreadable`] 과 둘 중 하나만 0 이 아니다.
+static HELD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn held_unreadable() -> usize {
+    HELD.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 pub fn parse_issues(src: &str) -> Load {

@@ -86,16 +86,20 @@ fn main() -> ExitCode {
 /// 종료 코드는 건드리지 않는다 — 쓰기는 성공했고, 깨진 데이터로 비영
 /// 종료하는 것은 `moai status` 한 곳이다.
 fn carried() {
-    let n = store::carried_unreadable();
-    if n == 0 {
-        return;
-    }
+    // **쓴 자리와 안 쓴 자리의 말이 다르다.** 안 쓴 명령(`note`·이미 그런
+    // `defer`)이 "그대로 두고 썼다" 고 하면 일어나지 않은 쓰기를 주장하고,
+    // 아무 말도 안 하면 그 동사만 쓰는 쪽이 상한 파일을 영영 모른다(moai-relb).
+    let said = match (store::carried_unreadable(), store::held_unreadable()) {
+        (0, 0) => return,
+        (0, n) => format!("읽을 수 없는 줄 {n}개가 파일에 있다, 이번 명령은 그 파일을 안 건드렸다"),
+        (n, _) => format!("읽을 수 없는 줄 {n}개를 그대로 두고 썼다"),
+    };
     let _ = writeln!(
         anstream::stderr().lock(),
         // **어느 줄인지 아는 명령을 댄다.** `moai status` 는 수만 말하고
         // 줄 번호와 까닭은 `report_load_errors` 를 지나는 쪽(`show`·`ready`)
         // 만 낸다 — 없는 답을 가리키면 손으로 고칠 길이 도구 밖에만 남는다.
-        "{}읽을 수 없는 줄 {n}개를 그대로 두고 썼다 — 어느 줄인지는 `moai show` 가 낸다",
+        "{}{said} — 어느 줄인지는 `moai show` 가 낸다",
         style::paint(style::WARN, "moai: ")
     );
 }
