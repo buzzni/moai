@@ -187,22 +187,30 @@ pub fn children_of<'a>(issues: &'a [Issue], id: &str) -> Vec<&'a Issue> {
 /// - **담아 둔 생각은 멤버가 아니다.** 머리글(`rollup` 은 `is_work` 로 센다)이
 ///   안 세는 줄을 멤버로 내면 받는 쪽이 계획에 없는 것을 계획으로 읽는다
 /// - 묶음이 아닌 줄에는 멤버가 없다
+/// - **트리가 그 밑에 둘 수 있는 종류만** 멤버다. 에픽 밑에는 이슈, 마일스톤
+///   밑에는 이슈와 에픽. 소속 지도는 종류를 안 가려 에픽 줄이 든 `epic` 도
+///   소속으로 치는데, `nav` 는 에픽을 제 마일스톤 밑에만 두므로 그것을 멤버로
+///   내면 `--json` 만 화면에 없는 줄을 낸다
 ///
 /// 차례는 목록과 같다.
 pub fn group_members<'a>(all: &'a [Issue], group: &Issue) -> Vec<&'a Issue> {
+    let holds = |k: Kind| match group.kind {
+        Kind::Epic => k == Kind::Issue,
+        Kind::Milestone => matches!(k, Kind::Issue | Kind::Epic),
+        _ => false,
+    };
     if !is_group(group) {
         return Vec::new();
     }
     let map = group_for(group.kind, all);
     let mut out: Vec<&Issue> = all
         .iter()
-        .filter(|i| i.id != group.id && !is_idea(i))
+        .filter(|i| i.id != group.id && holds(i.kind))
         .filter(|i| map.get(i.id.as_str()) == Some(&group.id.as_str()))
         .collect();
     out.sort_by(|a, b| crate::query::display_order(a, b));
     out
 }
-
 
 /// 아직 안 끝난 막음이 하나라도 있는가. 없는 이슈를 가리키는 것은 막지
 /// 않는다 — 끊긴 참조는 `moai status` 가 드러내지 `ready` 가 영원히 막지 않는다.
@@ -1683,19 +1691,27 @@ mod tests {
         epic.milestone = Some("argos-0001".into());
         let mut thought = make("argos-0004", Kind::Idea, "todo");
         thought.epic = Some("argos-0002".into());
+        // 에픽 줄이 든 `epic` — `nav` 는 에픽을 에픽 밑에 두지 않는다.
+        let mut stray = make("argos-0005", Kind::Epic, "todo");
+        stray.epic = Some("argos-0002".into());
         let issues = vec![
             stone,
             epic,
             member("argos-0003", "argos-0002", "todo"),
             make("argos-0003.aaa", Kind::Issue, "todo"),
             thought,
+            stray,
         ];
         let ids = |v: Vec<&Issue>| v.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
 
-        assert_eq!(ids(group_members(&issues, &issues[1])), ["argos-0003", "argos-0003.aaa"]);
+        assert_eq!(
+            ids(group_members(&issues, &issues[1])),
+            ["argos-0003", "argos-0003.aaa"],
+            "에픽이 에픽을 멤버로 냈다"
+        );
         assert_eq!(
             ids(group_members(&issues, &issues[0])),
-            ["argos-0002", "argos-0003", "argos-0003.aaa"],
+            ["argos-0002", "argos-0003", "argos-0003.aaa", "argos-0005"],
             "마일스톤이 밑의 에픽과 그 멤버를 안 낸다"
         );
         assert!(group_members(&issues, &issues[2]).is_empty(), "묶음 아닌 줄이 멤버를 냈다");

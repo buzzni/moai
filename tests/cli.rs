@@ -2677,11 +2677,13 @@ fn a_grouping_lists_the_same_members_on_both_surfaces() {
 
     let stone_json = ok(s.path(), &["show", &stone, "--json"]);
     assert!(stone_json.contains(r#""members""#), "마일스톤이 멤버 키를 안 낸다 — {stone_json}");
+    // 따옴표까지 찾는다 — 자식 id 는 부모 id 로 시작해, 맨 id 로 찾으면 부모가
+    // 빠져도 자식이 대신 걸린다.
     for id in [&epic, &work, &child] {
-        assert!(stone_json.contains(id.as_str()), "{id} 가 빠졌다 — {stone_json}");
+        assert!(stone_json.contains(&format!("\"{id}\"")), "{id} 가 빠졌다 — {stone_json}");
     }
     let epic_json = ok(s.path(), &["show", &epic, "--json"]);
-    assert!(epic_json.contains(&child), "물려받은 자식을 기계 출력만 뺐다 — {epic_json}");
+    assert!(epic_json.contains(&format!("\"{child}\"")), "물려받은 자식을 기계 출력만 뺐다 — {epic_json}");
     assert!(ok(s.path(), &["show", &epic]).contains(&child), "사람 화면이 자식을 안 그린다");
 }
 
