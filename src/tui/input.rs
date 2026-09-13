@@ -527,13 +527,19 @@ mod tests {
     /// `ratatui::Frame` 을 한 줄에 풀어 쓰거나 `super::` 로 돌아 들어오는 길을 못
     /// 막는다. 허락하는 것은 키 모양(`crossterm::event` 의 **타입**만 — `read`·`poll`
     /// 은 터미널을 읽는다), 폭 셈(`CellWidth`·`unicode_*`·`crate::text`), 옆 조각,
-    /// 그리고 부수효과 없는 `std` 다.
+    /// 그리고 부수효과 없는 `std` 다. 경로 없이 화면에 찍는 `println!`·`dbg!` 같은
+    /// 매크로도 여기서 잡는다 — 조각이 찍으면 대체 화면이 깨진다.
     fn foreign(code: &str, components: &[&str]) -> Vec<String> {
         const PRIMITIVES: [&str; 18] = [
             "self", "char", "str", "bool", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128",
             "isize", "f32", "f64",
         ];
-        const IMPURE_STD: [&str; 7] = ["io", "fs", "env", "process", "net", "thread", "time"];
+        const IMPURE_STD: [&str; 8] = ["io", "fs", "os", "env", "process", "net", "thread", "time"];
+        const IMPURE_MACROS: [&str; 5] = ["print", "println", "eprint", "eprintln", "dbg"];
+        let macros = code.match_indices('!').filter_map(|(k, _)| {
+            let name = code[..k].rsplit(|c: char| !(c.is_alphanumeric() || c == '_')).next()?;
+            (!code[k + 1..].starts_with('=') && IMPURE_MACROS.contains(&name)).then(|| format!("{name}!"))
+        });
         paths(code)
             .into_iter()
             .filter(|p| {
@@ -553,6 +559,7 @@ mod tests {
                 };
                 !allowed
             })
+            .chain(macros)
             .collect()
     }
 
@@ -563,10 +570,17 @@ mod tests {
         let mut out = Vec::new();
         let mut rest = code;
         while let Some(start) = rest.find(part) {
+            let before = rest[..start].chars().last();
             rest = &rest[start..];
             let (run, after) = rest.split_at(rest.find(|c| !part(c)).unwrap_or(rest.len()));
             rest = after;
-            if !run.contains("::") || (run.ends_with("::") && after.starts_with('<')) {
+            if run.starts_with("::") && before == Some('>') {
+                continue; // `Vec::<u8>::new` 의 뒷토막 — 머리는 `<` 앞에서 이미 봤다
+            }
+            // turbofish 는 `::` 만 떼고 머리를 본다. 통째로 넘기면
+            // `std::fs::read::<&str>` 가 조용히 빠진다
+            let run = if after.starts_with('<') { run.strip_suffix("::").unwrap_or(run) } else { run };
+            if !run.contains("::") {
                 continue; // 경로가 아니거나 `collect::<T>` 의 turbofish
             }
             if run.ends_with("::") && after.starts_with('{') {
@@ -612,7 +626,9 @@ mod tests {
             use super::scroll::Scroll;\n\
             use ratatui::crossterm::event::KeyEvent;\n\
             let v = xs.iter().map(char::is_whitespace).collect::<Vec<_>>();\n\
-            std::mem::take(&mut v); KeyCode::Up; usize::MAX;";
+            std::mem::take(&mut v); KeyCode::Up; usize::MAX; Vec::<u8>::with_capacity(1);\n\
+            <[u8]>::len(&[]); if a != b { std::fs::read::<&str>(p); std::os::unix::fs::symlink(a, b); }\n\
+            eprintln!(\"x\"); std::println!(); format!(\"{a}\");";
         assert_eq!(
             foreign(planted, &["scroll"]),
             [
@@ -621,7 +637,11 @@ mod tests {
                 "ratatui::crossterm::event::read",
                 "crate::store::Repo",
                 "std::io::stdout",
-                "super::App"
+                "super::App",
+                "std::fs::read",
+                "std::os::unix::fs::symlink",
+                "eprintln!",
+                "println!"
             ]
         );
     }
@@ -633,9 +653,15 @@ mod tests {
     #[test]
     fn components_know_neither_the_terminal_nor_the_store() {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/tui");
-        let mut files: Vec<String> = std::fs::read_dir(dir)
-            .expect("src/tui 를 못 읽었다")
-            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        let entries: Vec<std::fs::DirEntry> =
+            std::fs::read_dir(dir).expect("src/tui 를 못 읽었다").map(|e| e.expect("src/tui 를 못 읽었다")).collect();
+        // 이 훑기는 한 층만 본다. 폴더로 든 조각(`src/tui/list/mod.rs`)을 말없이 건너뛰면
+        // 조각을 목록에 안 올려 조용히 안 훑는 것과 같은 구멍이다
+        let nested: Vec<_> = entries.iter().filter(|e| e.path().is_dir()).map(|e| e.file_name()).collect();
+        assert!(nested.is_empty(), "src/tui 밑에 폴더가 생겼다: {nested:?} — 폴더 속 조각도 훑게 이 시험을 고친다");
+        let mut files: Vec<String> = entries
+            .iter()
+            .map(|e| e.file_name().into_string().expect("src/tui 에 UTF-8 이 아닌 파일 이름"))
             .filter(|n| n.ends_with(".rs") && !NOT_COMPONENTS.iter().any(|(f, _)| f == n))
             .collect();
         files.sort();
