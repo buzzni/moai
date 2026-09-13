@@ -324,10 +324,15 @@ impl Ctx<'_> {
         // 와 `home` 에서 일과 같은 자리를 받으므로 여기서만 빼면, idea 밑에
         // 만든 자식이 부모를 잃고 뿌리로 떠오른다 — 그러면 `has_kids` 도
         // 안 서서 그 idea 는 열리지도 않는다.
+        //
+        // 생각인 부모는 **에픽 없이 사는 자리**로 견준다. 생각은 뿌리로 올라가고
+        // `report::groups` 도 생각의 에픽을 자식에게 안 넘기므로, 에픽을 안 적은
+        // 자식은 그 밑에 접히고 제 에픽을 적은 자식은 제 에픽으로 간다.
         if let Some(p) = crate::id::parent_of(&me.id)
             && let Some(&pat) = self.by_id.get(p)
             && matches!(self.issues[pat].kind, Kind::Issue | Kind::Idea)
-            && self.epic_of.get(&me.id) == self.epic_of.get(p)
+            && self.epic_of.get(&me.id)
+                == if crate::report::is_idea(&self.issues[pat]) { None } else { self.epic_of.get(p) }
         {
             // **부모가 사는 자리를 그대로 쓴다.** `home_of_work` 로 곧장
             // 내려가면 부모가 제 참조 때문에 `(길 잃음)` 으로 갈라진 것을

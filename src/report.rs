@@ -104,9 +104,17 @@ fn deferred_roots_in<'a>(
     let own = |id: Option<&&'a str>| id.copied().filter(|id| by_id.get(id).is_some_and(|x| is_put_off(x)));
     // 제 줄부터 부모를 타고 올라가며, 그 줄이나 그 줄의 에픽·마일스톤이
     // 미뤄졌는지 본다. 부모가 다른 에픽에 있어도 부모가 빠지면 자식도 빠진다.
+    //
+    // **생각인 조상은 제 미룸만 물려준다.** 소속이 생각을 지나 내려오지 않으므로
+    // (`groups`) 생각의 에픽이 미뤄졌다고 그 밑의 일을 빼면, 세지도 않는 에픽의
+    // 미룸을 받는 꼴이다. 생각 위로는 더 오르지 않는다.
     let root = |id: &'a str| {
         let mut cur = Some(id);
         while let Some(at) = cur {
+            let thought = at != id && by_id.get(at).is_some_and(|x| is_idea(x));
+            if thought {
+                return own(Some(&at));
+            }
             if let Some(r) = own(Some(&at)).or_else(|| own(epic_of.get(at))).or_else(|| own(mile_of.get(at))) {
                 return Some(r);
             }
@@ -223,7 +231,11 @@ pub fn groups(all: &[Issue]) -> BTreeMap<&str, &str> {
                 out.insert(i.id.as_str(), e.as_str());
                 break;
             }
-            match crate::id::parent_of(&cur.id).and_then(|p| by_id.get(p)) {
+            // **생각을 지나 물려주지 않는다.** 생각은 계획 계층에 안 걸리므로
+            // (`nav` 가 뿌리로 올린다) 그 밑의 자식이 생각의 에픽을 받으면,
+            // 자기를 절대 안 그리는 에픽에 세어진다 — `멤버 0/1` 밑에 줄이
+            // 없다(moai-14dm). 생각 제 줄의 소속은 그대로 남는다.
+            match crate::id::parent_of(&cur.id).and_then(|p| by_id.get(p)).filter(|p| !is_idea(p)) {
                 Some(p) => cur = p,
                 None => break,
             }
@@ -273,11 +285,10 @@ pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
                 out.insert(i.id.as_str(), m.as_str());
                 break;
             }
-            let up = cur
-                .epic
-                .as_deref()
-                .and_then(|e| by_id.get(e))
-                .or_else(|| crate::id::parent_of(&cur.id).and_then(|p| by_id.get(p)));
+            // 부모가 생각이면 거기서 멈춘다 — `groups` 와 같은 자다.
+            let up = cur.epic.as_deref().and_then(|e| by_id.get(e)).or_else(|| {
+                crate::id::parent_of(&cur.id).and_then(|p| by_id.get(p)).filter(|p| !is_idea(p))
+            });
             match up {
                 Some(next) if next.id != cur.id => cur = next,
                 _ => break,
@@ -1914,6 +1925,49 @@ mod tests {
         let issues = vec![epic, member("argos-0002", "argos-0001", "done")];
         let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
         assert_eq!(st.counts.get("done"), Some(&1), "{:?}", st.counts);
+    }
+
+    // ── 생각은 소속을 물려주지 않는다 ────────────────────────────────
+
+    /// **세는 자와 그리는 자가 같은 답을 본다.** 생각은 뿌리로 올라가므로
+    /// 그 밑의 자식이 생각의 에픽을 받으면 `멤버 0/1` 밑에 줄이 없다.
+    #[test]
+    fn a_child_of_a_thought_does_not_inherit_its_grouping() {
+        let stone = make("argos-0001", Kind::Milestone, "todo");
+        let mut epic = make("argos-0002", Kind::Epic, "todo");
+        epic.milestone = Some("argos-0001".into());
+        let mut thought = make("argos-0003", Kind::Idea, "todo");
+        thought.epic = Some("argos-0002".into());
+        let child = make("argos-0003.aaa", Kind::Issue, "todo");
+        let mut placed = make("argos-0003.bbb", Kind::Issue, "todo");
+        placed.epic = Some("argos-0002".into());
+        let issues = vec![stone, epic, thought, child, placed];
+
+        let g = groups(&issues);
+        assert_eq!(g.get("argos-0003"), Some(&"argos-0002"), "생각 제 소속을 잃었다");
+        assert_eq!(g.get("argos-0003.aaa"), None, "생각의 에픽을 물려받았다");
+        assert_eq!(g.get("argos-0003.bbb"), Some(&"argos-0002"), "제가 적은 에픽을 잃었다");
+        assert_eq!(milestones(&issues).get("argos-0003.aaa"), None, "생각을 지나 마일스톤을 받았다");
+
+        let rolls = rollup(&issues, &cfg());
+        assert_eq!(roll_of(&rolls, Some("argos-0002")).total, 1, "{rolls:?}");
+        assert_eq!(roll_of(&rolls, None).total, 1, "{rolls:?}");
+    }
+
+    /// 생각의 에픽을 미뤄도 그 밑의 일은 안 빠진다 — 소속을 안 받았으니
+    /// 미룸도 안 받는다. 생각 자신을 미룬 것은 받는다.
+    #[test]
+    fn a_thought_passes_down_only_its_own_deferral() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut thought = make("argos-0002", Kind::Idea, "todo");
+        thought.epic = Some("argos-0001".into());
+        let issues = vec![epic, thought.clone(), make("argos-0002.aaa", Kind::Issue, "todo")];
+        assert_eq!(picks(&issues), ["argos-0002.aaa"], "세지도 않는 에픽의 미룸을 받았다");
+
+        thought.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let issues = vec![thought, make("argos-0002.aaa", Kind::Issue, "todo")];
+        assert!(picks(&issues).is_empty(), "미룬 생각 밑의 일이 올라왔다");
     }
 
     // ── 미룬 것이 막고 있으면 까닭을 말한다 ──────────────────────────

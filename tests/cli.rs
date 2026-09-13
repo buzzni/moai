@@ -2153,6 +2153,24 @@ fn a_child_of_a_thought_stays_under_it() {
     assert!(inside.contains(&child), "열었는데 자식이 없다 — {inside}");
 }
 
+/// **에픽에 든 생각 밑의 자식도 그 에픽에 안 세어진다.** 생각은 뿌리로 올라
+/// 그 자식도 같이 올라가는데, 셈만 생각의 에픽을 물려주면 에픽 상세가
+/// `멤버 0/1` 을 내고 그 밑에 줄이 없다(moai-14dm).
+#[test]
+fn a_child_of_a_thought_in_an_epic_is_counted_where_it_is_drawn() {
+    let s = init("ideachildepic");
+    let epic = ok(s.path(), &["epic", "add", "저장 계층", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["idea", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
+    let child = add(s.path(), &["생각의 자식", "--parent", &thought]);
+
+    let detail = ok(s.path(), &["show", &epic]);
+    assert!(!detail.contains("0/1"), "그리지 않는 줄을 셌다 — {detail}");
+    let tree = ok(s.path(), &["show", "--tree"]);
+    assert!(tree.contains(&child), "{tree}");
+    assert!(tree.contains("에픽 없음"), "{tree}");
+    assert!(!ok(s.path(), &["show", "-e", &epic]).contains(&child), "-e 가 그리는 자리와 다른 것을 고른다");
+}
+
 /// **담아 둔 생각이 일을 가로막지 않는다.** idea 를 이슈 밑에 달아 두면
 /// 그 이슈가 `ready` 에서 사라졌다 — 그런데 idea 는 어느 목록에도 안 나오니
 /// 왜 사라졌는지 볼 방법이 없었다. 조용히 멈추는 것이 제일 나쁘다.
