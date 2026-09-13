@@ -851,6 +851,17 @@ pub struct Seen<'a> {
     pub states: BTreeMap<&'a str, &'a str>,
 }
 
+/// **손으로 옮긴 칸이 서 있는 칸과 다르면** 그렇다고 말하는 낱말. CLI 상세와
+/// 탐색기가 같은 말을 받는다.
+///
+/// `moai mv <에픽> done` 을 한 사람이 상세에서 `in_progress` 만 보면 쓰기가 안
+/// 먹은 줄 안다. 첫 칸 그대로인 줄은 말하지 않는다 — 묶음은 거의 다 만든 칸에
+/// 서 있어, 그것까지 말하면 모든 에픽 상세에 같은 군말이 붙는다.
+pub fn unread_column(i: &Issue, col: &str, cfg: &Config) -> Option<String> {
+    (col != i.status.as_str() && i.status.as_str() != cfg.first_status())
+        .then(|| format!("칸은 멤버에서 읽는다 (적힌 칸 `{}` 은 안 읽는다)", i.status))
+}
+
 /// 단건 상세. **이력은 부르는 쪽이 [`history`] 로 붙인다** — 묶음을 펼치면 멤버를
 /// 이력 앞에 끼워야 해서, 여기서 붙이면 끼울 자리가 없다.
 ///
@@ -890,15 +901,8 @@ pub fn detail(
     if let Some(d) = deferred_for(i, seen.roots.get(i.id.as_str()).copied(), now) {
         line.push_str(&format!(" · {}", paint(style::WARN, &d)));
     }
-    // **손으로 옮긴 칸이 읽은 칸과 다르면 낱말로 말한다.** `moai mv <에픽> done`
-    // 을 한 사람이 상세에서 `in_progress` 만 보면 쓰기가 안 먹은 줄 안다.
-    // 첫 칸 그대로인 줄은 말하지 않는다 — 묶음은 거의 다 만든 칸에 서 있어,
-    // 그것까지 말하면 모든 에픽 상세에 같은 군말이 붙는다.
-    if col != i.status.as_str() && i.status.as_str() != cfg.first_status() {
-        line.push_str(&format!(
-            " · {}",
-            paint(style::DIM, &format!("칸은 멤버에서 읽는다 (적힌 칸 `{}` 은 안 읽는다)", i.status))
-        ));
+    if let Some(n) = unread_column(i, col, cfg) {
+        line.push_str(&format!(" · {}", paint(style::DIM, &n)));
     }
     if !i.tags.is_empty() {
         line.push_str(&format!(" · {}", paint(style::TAG, &tags_of(i))));

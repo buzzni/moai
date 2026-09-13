@@ -216,7 +216,8 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
         Span::styled(format!("p{}", i.priority()), priority(i.priority())),
         Span::raw(" "),
         // 칸은 글리프로도 말한다. 색이 없는 터미널에서도 뜻이 남아야 한다.
-        Span::styled(style::spin_glyph(i.status.as_str(), app.spin).to_string(), status(i.status.as_str())),
+        // 묶음은 멤버에서 읽은 칸이다 — CLI 목록의 S 열과 같은 자.
+        Span::styled(style::spin_glyph(app.column(at), app.spin).to_string(), status(app.column(at))),
         Span::raw(" "),
     ];
     // 커서 자리 + 머리글 폭. **`CURSOR` 에서 잰다** — 숫자를 손으로 적으면
@@ -367,7 +368,7 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     out.push(Line::from(""));
 
     // 칸은 글리프와 낱말을 함께 낸다. 색이 없어도 뜻이 남아야 한다.
-    let st = i.status.as_str().to_string();
+    let st = app.column(idx).to_string();
     let mut head = vec![
         Span::styled(format!("{} {st}", style::spin_glyph(&st, app.spin)), status(&st)),
         Span::raw("  ·  "),
@@ -393,6 +394,11 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     if let Some(d) = crate::view::deferred_for(i, app.index.deferred_root(&i.id), &app.now) {
         head.push(Span::raw("  ·  "));
         head.push(Span::styled(d, Style::new().fg(Color::Yellow)));
+    }
+    // 손으로 옮긴 칸이 읽은 칸과 다르면 말한다 — CLI 상세와 같은 말.
+    if let Some(n) = crate::view::unread_column(i, &st, &app.cfg) {
+        head.push(Span::raw("  ·  "));
+        head.push(Span::styled(n, dim()));
     }
     out.push(Line::from(head));
 
@@ -433,7 +439,7 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     // 자로 세므로, 여기서만 다 "막힘" 이라 적으면 집을 수 있는 것을 못 집을
     // 것으로 읽는다. 뜻은 `report` 가 정하고 여기는 그 답을 그린다.
     for b in &i.blocked_by {
-        let done = app.index.find(b).is_some_and(|at| app.issues[at].status.is_done());
+        let done = app.index.find(b).is_some_and(|at| app.column(at) == crate::config::DONE);
         let (label, mark) = if done { ("풀림", "✓") } else { ("막힘", "·") };
         fields.push((label.into(), format!("{mark} {b}  {}", app.title_of(b))));
     }
@@ -690,7 +696,17 @@ mod tests {
             "2026-09-01T00:00:00Z",
         );
         member.epic = Some("argos-0001".into());
-        vec![epic, member]
+        // 에픽이 `in_progress` 로 서려면 멤버가 그래야 한다 — 묶음의 칸은 멤버에서
+        // 읽는다. 적힌 칸만 옮겨서는 안 선다.
+        let mut held = Issue::new(
+            "argos-0004".into(),
+            "집은 멤버".into(),
+            Kind::Issue,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        );
+        held.epic = Some("argos-0001".into());
+        vec![epic, member, held]
     }
 
     /// 그려 보고 **글자만** 꺼낸다. 색은 여기서 따지지 않는다 —
@@ -892,7 +908,7 @@ mod tests {
         let mut a = app();
         // 커서가 에픽(디렉터리)에 있다 → 진행과 칸별 건수
         let lines = render(&mut a, 100, 16).join("\n");
-        assert!(lines.contains("1/1") || lines.contains("0/1"), "진행이 없다\n{lines}");
+        assert!(lines.contains("1/2"), "진행이 없다\n{lines}");
         assert!(lines.contains("done"), "칸별 건수가 없다\n{lines}");
 
         // 에픽 안으로 들어가 멤버(잎)를 본다 → 그 이슈의 낱낱
@@ -1004,18 +1020,40 @@ mod tests {
 
     /// **끝난 막음은 막지 않는다.** `report::is_blocked` 와 `moai ready` 가 그
     /// 자로 세므로, 여기서만 다 "막힘" 이라 적으면 집을 수 있는 것을 못 집을
-    /// 것으로 읽는다.
+    /// 것으로 읽는다. 막는 것이 묶음이면 **서 있는 칸**으로 끝났는지 본다 —
+    /// 적힌 칸만 done 인 에픽은 아직 막는다.
     #[test]
     fn a_finished_blocker_is_not_drawn_as_blocking() {
-        let mut issues = issues();
-        issues[0].status = Status::new("done"); // 막는 쪽이 끝났다
-        issues[1].blocked_by = vec!["argos-0001".into()];
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
-        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-        let lines = render(&mut a, 100, 20).join("\n");
+        let drawn = |close_members: bool| {
+            let mut issues = issues();
+            issues[0].status = Status::new("done"); // 막는 쪽의 적힌 칸
+            if close_members {
+                issues[2].status = Status::new("done"); // 막는 쪽이 정말 끝났다
+            }
+            issues[1].blocked_by = vec!["argos-0001".into()];
+            let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+            a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            render(&mut a, 100, 20).join("\n")
+        };
+        let lines = drawn(true);
         assert!(lines.contains("풀림"), "끝난 막음을 아직 막혔다고 그린다\n{lines}");
         assert!(!lines.contains("막힘"), "{lines}");
+        let lines = drawn(false);
+        assert!(lines.contains("막힘"), "적힌 칸만 닫힌 에픽을 풀렸다고 그린다\n{lines}");
+    }
+
+    /// **목록과 상세가 묶음의 읽은 칸을 그린다** — CLI 와 같은 자. 손으로 옮긴
+    /// 칸이 다르면 상세가 낱말로 말한다.
+    #[test]
+    fn a_grouping_is_drawn_in_the_column_its_members_read() {
+        let mut issues = issues();
+        issues[0].status = Status::new("done");
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let lines = render(&mut a, 200, 16).join("\n");
+        let row = lines.lines().find(|l| l.contains("> argos-0001")).unwrap();
+        assert!(style::SPIN.iter().any(|g| row.contains(g)), "목록이 적힌 칸을 그린다\n{lines}");
+        assert!(lines.contains("in_progress") && lines.contains("적힌 칸 `done` 은 안 읽는다"), "{lines}");
     }
 
     /// 커서가 아래로 가도 **그 아래가 보인다.** 훑는 자리를 프레임마다 새로

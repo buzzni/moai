@@ -31,9 +31,19 @@ pub enum Mode {
     Filter(String),
 }
 
+fn states_of(issues: &[Issue], cfg: &Config) -> std::collections::BTreeMap<String, String> {
+    crate::report::group_states(issues, cfg)
+        .into_iter()
+        .map(|(id, col)| (id.to_string(), col.to_string()))
+        .collect()
+}
+
 pub struct App {
     pub issues: Vec<Issue>,
     pub index: Index,
+    /// 묶음 id → 멤버에서 읽은 칸 (`report::group_states`). **적재 때 한 번 센다**
+    /// — 프레임마다 세면 줄 하나 그리는 데 저장소를 걷는다.
+    states: std::collections::BTreeMap<String, String>,
     pub cfg: Config,
     pub path: Path,
     pub cursor: usize,
@@ -119,9 +129,11 @@ impl App {
         // 들어간 채로 시작하면(`--path`) 나올 층마다 기억 자리를 만들어 둔다.
         let remembered = vec![0; path.len()];
         let keep = vec![true; issues.len()];
+        let states = states_of(&issues, &cfg);
         let mut app = App {
             issues,
             index,
+            states,
             cfg,
             path,
             cursor: 0,
@@ -175,13 +187,21 @@ impl App {
     /// 있으면 그 이슈는 `issues` 에 있으므로 여기가 참이다. 스피너를 그려 놓고
     /// 아무도 안 깨우는 조합은 그래서 못 생긴다.
     pub fn spinning(&self) -> bool {
-        self.issues.iter().any(|i| crate::style::spins(i.status.as_str()))
+        (0..self.issues.len()).any(|at| crate::style::spins(self.column(at)))
+    }
+
+    /// 그 줄이 **서 있는** 칸 — 묶음이면 멤버에서 읽은 칸, 아니면 제 칸. CLI 가
+    /// 묻는 `report::column` 과 같은 답이다.
+    pub fn column(&self, at: usize) -> &str {
+        let i = &self.issues[at];
+        self.states.get(&i.id).map_or(i.status.as_str(), String::as_str)
     }
 
     /// 새 자료를 받아들이고 어긋난 것을 손본다. 시험이 저장소 없이 부른다.
     pub fn adopt(&mut self, issues: Vec<Issue>) {
         self.issues = issues;
         self.index = Index::of(&self.issues);
+        self.states = states_of(&self.issues, &self.cfg);
         self.now = crate::model::now();
         self.stale = false;
         self.repair_path();
@@ -603,7 +623,11 @@ mod tests {
         let mut a = app();
         assert!(!a.spinning(), "todo 뿐인데 돈다고 한다");
         let mut issues = a.issues.clone();
+        // 에픽의 적힌 칸으로는 안 돈다 — 묶음의 칸은 멤버에서 읽는다.
         issues[0].status = Status::new("in_progress");
+        a.adopt(issues.clone());
+        assert!(!a.spinning(), "멤버가 안 움직인 에픽이 적힌 칸으로 돈다");
+        issues[2].status = Status::new("in_progress");
         a.adopt(issues);
         assert!(a.spinning(), "in_progress 가 있는데 안 돈다고 한다");
     }
