@@ -277,13 +277,31 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
 /// 한 칸 밀려 [`Input::view`] 가 잰 폭이 틀린다. 터미널 커서는 칸을 차지하지
 /// 않고, 한글 입력기가 조합 중인 글자를 띄우는 자리도 거기다.
 ///
-/// 글이 칸보다 길면 조각이 커서를 따라 밀린다. 그러면 뒤의 안내·오류는 줄 밖으로
-/// 밀리는데, 옮기기 전에도 그랬다.
+/// 글이 칸보다 길면 조각이 커서를 따라 밀린다. **오류는 그 전에 제 몫을 먼저
+/// 받는다**([`prompt_room`]) — 긴 거름망일수록 오타가 잦은데, 폭을 글칸에 다 주면
+/// 바로 그때 오류가 줄 밖으로 밀려 안 보였다(moai-1vjh). 오류를 윗줄로 올리지
+/// 않는 까닭은 그 줄이 배너 자리라서다: 쓰기의 알림과 실패가 차례를 정해 서
+/// 있고(moai-064q), 치는 동안 매 키에 나타났다 사라지는 말이 거기 끼면 그 차례가
+/// 흔들린다. 무엇이 틀렸는지는 친 글 바로 옆에 있어야 읽힌다.
+///
+/// 안내(`help`)는 몫을 안 받는다 — Enter·Esc 는 한 번 읽으면 끝이고, 긴 글을
+/// 치는 사람에게는 글이 더 값지다. 그래서 오류가 서고 걷힐 때 긴 글의 조각이
+/// 그 몫만큼 밀렸다 돌아온다. 짧은 글에서는 아무것도 안 움직인다.
 fn prompt(f: &mut Frame, at: Rect, what: &str, input: &Input, error: Option<String>, help: &str) {
     let label = format!(" {what} ");
     // 이름표와 그 뒤 빈칸 하나를 뗀 자리가 글칸이다.
     let lead = crate::text::width(&label) + 1;
-    let view = input.view((at.width as usize).saturating_sub(lead));
+    let avail = (at.width as usize).saturating_sub(lead);
+    // 여러 줄짜리 도움말은 첫 줄만 — 한 줄 자리다.
+    let error = error.map(|e| e.lines().next().unwrap_or_default().to_string());
+    let (field, error) = match error {
+        Some(e) => {
+            let (field, room) = prompt_room(avail, crate::text::width(&e));
+            (field, Some(clip(&e, room)))
+        }
+        None => (avail, None),
+    };
+    let view = input.view(field);
     let mut spans = vec![
         Span::styled(label, Style::new().fg(Color::Black).bg(Color::LightBlue)),
         Span::raw(" "),
@@ -291,24 +309,43 @@ fn prompt(f: &mut Frame, at: Rect, what: &str, input: &Input, error: Option<Stri
         // 커서가 끝에 서면 조각 뒤 한 칸이 커서 자리다. 비워 두지 않으면 안내가
         // 커서 밑으로 붙는다.
         Span::raw(" "),
+        Span::raw("   "),
     ];
     match error {
-        Some(e) => {
-            spans.push(Span::raw("   "));
-            // 여러 줄짜리 도움말은 첫 줄만 — 한 줄 자리다.
-            let first = e.lines().next().unwrap_or_default().to_string();
-            spans.push(Span::styled(first, Style::new().fg(Color::LightRed)));
-        }
-        None => {
-            spans.push(Span::raw("   "));
-            spans.push(Span::styled(help.to_string(), dim()));
-        }
+        Some(e) => spans.push(Span::styled(e, Style::new().fg(Color::LightRed))),
+        None => spans.push(Span::styled(help.to_string(), dim())),
     }
     f.render_widget(Paragraph::new(Line::from(spans)), at);
     // 칸이 좁아 글칸이 0 이면 커서를 세우지 않는다 — 이름표 위에 서면 어디에
     // 적히는지 거짓말을 한다.
     if (at.width as usize) > lead {
         f.set_cursor_position((at.x + (lead + view.cursor) as u16, at.y));
+    }
+}
+
+/// 글칸 뒤에 조각 밖으로 붙는 칸 — 커서가 글 가운데 서도 조각 뒤에 붙는 빈칸
+/// 하나와, 오류 앞의 빈칸 셋.
+const PROMPT_GAP: usize = 1 + 3;
+
+/// 이름표 뒤 `avail` 칸을 글칸과 오류(`error` 칸)에 나눈다. `(글칸, 오류가 쓸 칸)`.
+///
+/// **오류가 먼저 받되, 글칸의 삼분의 일은 남긴다.** 다 주면 좁은 창에서 글칸이
+/// 0 이 되어 무엇을 치는지도 커서가 어디 섰는지도 안 보인다 — 틀렸다는 말만
+/// 있고 고칠 자리가 없다. 그래서 모자라면 오류를 `…` 로 자른다. 오류는 앞에서
+/// 무엇이 틀렸는지를 말하고(`` `xyz` 라는 칸이 없다 ``) 뒤에서 있는 것을 늘어놓으므로,
+/// 잘려도 앞이 남는 쪽이 잃는 것이 적다. 삼분의 일은 창을 따라 자란다 — 칸 수를
+/// 박아 두면 넓은 창에서는 괜히 좁고 좁은 창에서는 오류가 통째로 사라진다.
+///
+/// 커서는 늘 글칸 안에 선다: 조각이 커서를 따라 밀리고([`Input::view`]), 글칸은
+/// `avail` 을 안 넘는다.
+///
+/// 오류가 한 칸도 못 받으면 글칸을 줄이지 않는다 — 줄여 봐야 오류는 안 보이고
+/// 친 글만 가려진다.
+fn prompt_room(avail: usize, error: usize) -> (usize, usize) {
+    let field = avail.saturating_sub(PROMPT_GAP + error).max(avail / 3);
+    match avail.saturating_sub(field + PROMPT_GAP) {
+        0 => (avail, 0),
+        room => (field, room),
     }
 }
 
@@ -2215,6 +2252,100 @@ mod tests {
         let (_, at, row) = cursor_after(&mut a, 20);
         assert!(at.x < 20, "커서가 줄 밖에 섰다 {at:?}");
         assert!(row.contains("xyz") && !row.contains("abc"), "끝이 안 보인다: {row}");
+    }
+
+    /// 거름망 칸에 `q` 를 쳐 넣고 `w` 칸 창의 맨 아랫줄(글자만, [`render`] 처럼 두 칸
+    /// 글자 뒤 칸은 건너뛴다)과 터미널 커서 칸을 꺼낸다.
+    fn filter_line(q: &str, w: u16) -> (String, u16) {
+        let (row, x, _) = filter_cells(q, w);
+        (row, x)
+    }
+
+    /// [`filter_line`] 에 더해 커서 앞 칸과 커서 칸의 글자를 꺼낸다.
+    fn filter_cells(q: &str, w: u16) -> (String, u16, (String, String)) {
+        use ratatui::backend::Backend;
+        let mut a = app();
+        a.key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
+        for c in q.chars() {
+            a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        let mut term = Terminal::new(TestBackend::new(w, 6)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let x = term.backend_mut().get_cursor_position().unwrap().x;
+        let buf = term.backend().buffer();
+        let mut row = String::new();
+        let mut skip = 0usize;
+        for c in 0..w {
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
+            let sym = buf[(c, 5)].symbol();
+            row.push_str(sym);
+            skip = crate::text::width(sym).saturating_sub(1);
+        }
+        let at = |c: u16| if c < w { buf[(c, 5)].symbol().to_string() } else { String::new() };
+        (row, x, (at(x.wrapping_sub(1)), at(x)))
+    }
+
+    /// **글이 길어도 오류가 줄 안에 선다** (moai-1vjh). 긴 거름망일수록 오타가 잦은데,
+    /// 폭을 글칸에 다 주면 바로 그때 오류가 줄 밖으로 밀렸다. 커서는 여전히 친 글 끝에
+    /// 서고, 끝이 보인다.
+    #[test]
+    fn a_long_filter_still_shows_its_error() {
+        let q = "tag=parser grep=원자적 쓰기 원자적 쓰기 원자적 쓰기 원자적 쓰기 status=xyz";
+        let (row, x, around) = filter_cells(q, 80);
+        assert!(row.contains("`xyz` 라는 칸이 없다"), "오류가 밀려났다: {row}");
+        assert!(!row.contains("Enter 걸기"), "{row}");
+        // 커서 바로 앞 칸이 친 글의 마지막 글자이고, 커서 칸은 비었다.
+        assert_eq!((around.0.as_str(), around.1.as_str()), ("z", " "), "{x} {row}");
+        assert!(row.contains("status=xyz") && !row.contains("tag=parser"), "끝이 안 보인다: {row}");
+    }
+
+    /// 짧은 글은 그대로다 — 글 뒤 네 칸을 띄우고 오류가 붙는다. 몫을 떼는 것은 글이
+    /// 칸을 넘칠 때만 보인다.
+    #[test]
+    fn a_short_filter_draws_as_before() {
+        let (row, x) = filter_line("status=xyz", 80);
+        assert!(row.starts_with(" 거름망  status=xyz    `xyz` 라는 칸이 없다"), "{row}");
+        assert_eq!(x, 9 + 10);
+        let (row, _) = filter_line("tag=parser", 80);
+        assert!(row.starts_with(" 거름망  tag=parser    Enter 걸기  Esc 그만"), "{row}");
+    }
+
+    /// **좁으면 오류를 `…` 로 자르고 글칸은 남긴다.** 오류에 다 주면 틀렸다는 말만 있고
+    /// 고칠 자리가 안 보인다. 어느 폭에서도 커서는 줄 안, 이름표 뒤에 선다.
+    #[test]
+    fn a_narrow_prompt_clips_the_error_and_keeps_the_cursor() {
+        let q = "tag=parser grep=원자적 쓰기 status=xyz";
+        let (row, x) = filter_line(q, 40);
+        assert!(row.contains("`xyz") && row.contains('…'), "오류가 안 보이거나 안 잘렸다: {row}");
+        assert!(row.contains("=xyz"), "치는 자리가 안 보인다: {row}");
+        assert!((9..40).contains(&x), "{x} {row}");
+        for w in 1..=40 {
+            let (row, x) = filter_line(q, w);
+            assert!(w <= 9 || (9..w).contains(&x), "{w}칸: 커서가 이름표 위나 줄 밖에 섰다 {x} {row}");
+        }
+    }
+
+    /// 나누기의 약속: 글칸은 `avail` 을 안 넘고 삼분의 일 밑으로 안 줄며, 둘에 틈을
+    /// 더해도 줄을 안 넘는다. 자리가 있으면 오류는 안 잘린다.
+    #[test]
+    fn the_prompt_room_never_overflows() {
+        for avail in 0..120 {
+            for error in 0..100 {
+                let (field, room) = prompt_room(avail, error);
+                assert!(field <= avail && field >= avail / 3, "{avail} {error} → {field}");
+                if room > 0 {
+                    assert!(field + PROMPT_GAP + room <= avail, "{avail} {error} → {field} {room}");
+                } else {
+                    assert_eq!(field, avail, "오류가 못 받는데 글칸을 줄였다 {avail} {error}");
+                }
+                if avail / 3 + PROMPT_GAP + error <= avail {
+                    assert_eq!(room, error, "자리가 있는데 잘랐다 {avail} {error}");
+                }
+            }
+        }
     }
 }
 
