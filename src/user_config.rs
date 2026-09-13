@@ -136,6 +136,16 @@ pub fn update<T>(path: &Path, f: impl FnOnce(&mut Doc) -> R<T>) -> R<T> {
     lock_name.push(".lock");
     let _lock = Lock::acquire(&dir.join(lock_name))?;
 
+    // 설정 파일이 심볼릭 링크면(dotfiles 저장소가 흔히 그렇게 건다) **링크가 가리키는
+    // 파일을** 고친다. 링크 자리에 `rename` 하면 링크가 보통 파일로 갈아끼워져
+    // dotfiles 쪽은 옛 내용에 멈추고, 사람은 그것을 모른다.
+    //
+    // 락은 **준 자리 곁에** 둔다 — 링크 대상 곁에 두면 dotfiles 저장소에 락 파일이
+    // 흘러 추적 안 된 파일로 선다. 푸는 것은 락 **안에서** 한다: 밖에서 풀면 그
+    // 사이에 파일이 링크로 갈아끼워질 수 있다.
+    let resolved = std::fs::canonicalize(path).ok();
+    let path = resolved.as_deref().unwrap_or(path);
+
     // 락을 잡은 **뒤에** 읽는다. 밖에서 읽으면 두 프로세스가 같은 옛 목록을 고친다.
     let src = match std::fs::read_to_string(path) {
         Ok(s) => s,
@@ -308,13 +318,18 @@ pub fn resolve_dir(input: &Path, cwd: &Path) -> R<PathBuf> {
 ///
 /// 뺄 때는 디렉터리가 이미 없을 수 있어 [`resolve_dir`] 만으로는 못 찾는다.
 /// 반대로 손으로 적은 링크 철자는 푼 경로로는 안 맞는다. 둘 다 댄다.
+///
+/// 푼 철자는 **글자로 정리하기 전의** 경로에서도 얻는다. `link/..` 을 등록할 때
+/// [`resolve_dir`] 는 링크를 먼저 풀고 `..` 을 따르지만(링크 대상의 부모), 글자
+/// 정리는 `..` 이 링크를 먼저 지워 다른 디렉터리가 된다 — 그 철자로는 못 뺀다.
 pub fn spellings(input: &Path, cwd: &Path) -> Vec<PathBuf> {
-    let lexical = lexical(&cwd.join(input));
+    let joined = cwd.join(input);
+    let lexical = lexical(&joined);
     let mut out = vec![lexical.clone()];
-    if let Ok(real) = std::fs::canonicalize(&lexical)
-        && real != lexical
-    {
-        out.push(real);
+    for real in [joined, lexical].iter().filter_map(|p| std::fs::canonicalize(p).ok()) {
+        if !out.contains(&real) {
+            out.push(real);
+        }
     }
     out
 }
@@ -504,10 +519,33 @@ mod tests {
             assert_eq!(resolve_dir(Path::new("link/apps"), &d).unwrap(), d.join("real/apps"));
             // 뺄 때는 글자 철자와 푼 철자를 둘 다 댄다.
             assert_eq!(spellings(Path::new("link/./apps"), &d), [d.join("link/apps"), d.join("real/apps")]);
+            // `link/..` 은 링크 대상의 부모로 등록된다 — 뺄 때도 그 철자가 나와야 한다.
+            std::fs::create_dir_all(d.join("else/real")).unwrap();
+            std::fs::create_dir_all(d.join("cwd")).unwrap();
+            std::os::unix::fs::symlink(d.join("else/real"), d.join("cwd/up")).unwrap();
+            let registered = resolve_dir(Path::new("up/.."), &d.join("cwd")).unwrap();
+            assert_eq!(registered, d.join("else"));
+            assert!(spellings(Path::new("up/.."), &d.join("cwd")).contains(&registered), "등록한 철자로 못 뺀다");
         }
         // 사라진 디렉터리도 글자로는 찾는다.
         assert_eq!(spellings(Path::new("gone/../gone2"), &d), [d.join("gone2")]);
         assert_eq!(lexical(Path::new("/../a")), PathBuf::from("/a"));
+    }
+
+    /// 설정 파일이 링크면 링크는 링크로 남고 가리키는 파일이 고쳐진다.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_config_stays_a_symlink() {
+        let d = scratch("symlink").canonicalize().unwrap();
+        std::fs::create_dir_all(d.join("dots")).unwrap();
+        std::fs::write(d.join("dots/config.toml"), "# dotfiles\n").unwrap();
+        let link = d.join("config.toml");
+        std::os::unix::fs::symlink(d.join("dots/config.toml"), &link).unwrap();
+
+        assert!(update(&link, |doc| doc.add(Path::new("/a"))).unwrap());
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "링크를 보통 파일로 갈아끼웠다");
+        assert_eq!(read(Some(&d.join("dots/config.toml"))).projects, [Project { path: "/a".into() }]);
+        assert!(!d.join("dots/config.toml.lock").exists(), "링크 대상 곁(dotfiles 저장소)에 락 파일을 흘렸다");
     }
 
     /// **동시 등록이 서로를 지우지 않는다.** 락이 없으면 둘 다 옛 목록을 읽고
