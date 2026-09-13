@@ -715,11 +715,16 @@ fn positionals(args: &[String]) -> Vec<&str> {
 /// 것을 그냥 보냈다 — 같은 연산의 두 철자가 다르게 움직이면, 규칙을 아는
 /// 쪽은 그것을 우회로로 쓰고 모르는 쪽은 왜 한 번은 막히고 한 번은 안
 /// 막히는지 모른다. `idea add` 는 여기서도 자유롭다.
+///
+/// **`add --type idea` 도 `idea add` 와 같은 연산이다.** 앞의 것만 풀어 주던
+/// 판은 뒤의 것을 생성으로 읽어 막았다 — 위와 같은 까닭의 반대쪽이다. 종류를
+/// 고정한 네임스페이스(`issue add --type idea`)는 고정한 쪽이 이기므로
+/// (`add::run` 의 `kind_override.or(args.kind)`) 그대로 생성이다.
 fn creates(seg: &[String]) -> bool {
     let Some(args) = moai_args(seg) else { return false };
     let verbs = positionals(args);
     match verbs.first().copied() {
-        Some("add") => true,
+        Some("add") => flag_values(args, &["--type"]).last().map(String::as_str) != Some("idea"),
         Some("issue" | "epic" | "milestone") => verbs.get(1).copied() == Some("add"),
         _ => false,
     }
@@ -1501,11 +1506,22 @@ mod tests {
             "moai epic add \"딴 에픽\"",
             "moai milestone add \"v0.2\"",
             "moai add \"딴 일\" --type epic",
+            // 종류를 고정한 쪽이 이긴다 — 이것은 이슈를 만든다.
+            "moai issue add \"딴 일\" --type idea",
+            // 제목에 든 낱말은 플래그가 아니다.
+            "moai add \"--type idea\"",
         ] {
             assert!(matches!(guard_create(&all, &cfg(), cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
         // 담아 두는 것은 그 어느 철자로도 자유다.
-        assert_eq!(guard_create(&all, &cfg(), "moai idea add \"떠오른 것\""), Decision::Pass);
+        for cmd in [
+            "moai idea add \"떠오른 것\"",
+            "moai add \"떠오른 것\" --type idea",
+            "moai add --type=idea \"떠오른 것\"",
+            "moai --json add --type idea \"떠오른 것\"",
+        ] {
+            assert_eq!(guard_create(&all, &cfg(), cmd), Decision::Pass, "막혔다 — {cmd}");
+        }
     }
 
     // ── 규칙 2 — 고치기 전에 하나를 집는다 ──────────────────────────
