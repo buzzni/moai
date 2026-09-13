@@ -3562,6 +3562,31 @@ fn skill_uninstall_stops_at_the_first_failure() {
     assert!(said.contains("안 불렀다"), "안 부른 걸음을 안 밝힌다\n{said}");
 }
 
+/// **범위마다 한 번만 걷는다.** 장부에 같은 범위 줄이 겹치면 같은 걷기를 두 번
+/// 부르고, 둘째가 이미 걷힌 것에 실패해 첫 실패에서 멈춘다 — 마켓플레이스가 안
+/// 지워진 채 남는다.
+#[test]
+fn skill_uninstall_calls_each_scope_once() {
+    let s = init("skillrmdup");
+    let c = Claude::new("skillrmdup-home");
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let root = dir.parent().unwrap().parent().unwrap();
+    let copy = c.home.path().join(format!(".claude/plugins/cache/{market}/moai/0.0.1"));
+    let row = format!(
+        "{{\"scope\":\"local\",\"projectPath\":\"{}\",\"installPath\":\"{}\",\"version\":\"0.0.1\"}}",
+        root.display(),
+        copy.display()
+    );
+    c.ledger("installed_plugins.json", &format!("{{\"version\":2,\"plugins\":{{\"moai@{market}\":[{row},{row}]}}}}"));
+    let before = c.calls().len();
+
+    let out = c.run(s.path(), &["skill", "uninstall"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let calls = c.calls()[before..].to_string();
+    assert_eq!(calls.matches("plugin uninstall").count(), 1, "같은 범위를 두 번 걷는다\n{calls}");
+    assert!(calls.contains(&format!("plugin marketplace remove {market}")), "{calls}");
+}
+
 /// **같은 이름이 남의 자리를 가리키면 아무것도 부르지 않는다.** 걷으면 그
 /// 저장소의 규칙이 말없이 사라진다.
 #[test]

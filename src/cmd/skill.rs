@@ -293,8 +293,18 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     // 가리키는데 걷으면, 그 저장소의 규칙이 말없이 사라진다.
     let mut plan: Vec<Vec<String>> = Vec::new();
     if clash.is_none() {
+        // **범위마다 한 번만 부른다.** 장부에 같은 범위 줄이 겹치면 같은 걷기를 두
+        // 번 부르고, 둘째는 이미 걷힌 것이라 실패한다 — 그러면 아래의 "실패하면
+        // 멈춘다" 에 걸려 마켓플레이스가 안 지워진다. 장부는 `claude` 의 것이라
+        // 고치지 않고, 읽은 쪽에서 겹침을 걷는다.
+        let mut scopes: Vec<&str> = Vec::new();
         for i in &installs {
-            plan.push(argv(&["plugin", "uninstall", &target, "--scope", &i.scope]));
+            if !scopes.contains(&i.scope.as_str()) {
+                scopes.push(&i.scope);
+            }
+        }
+        for scope in scopes {
+            plan.push(argv(&["plugin", "uninstall", &target, "--scope", scope]));
         }
         if known_at(&market).is_some() {
             // 범위를 안 주면 모든 범위에서 걷는다.
