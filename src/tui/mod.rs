@@ -194,6 +194,11 @@ pub struct Fresh {
     now: String,
 }
 
+/// 버린 다시 읽기 손잡이를 이만큼까지 든다(`App::discarded`). 버리는 것은 사람의
+/// 손(F5·`w`·쓰기)이 읽기가 도는 동안 닿을 때뿐이고, 한 읽기는 1만 개에서도 수백 ms
+/// 라 보통은 하나도 안 쌓인다. 이것이 차는 것은 읽기가 멈춘 때뿐이다.
+const DISCARDED_KEPT: usize = 8;
+
 /// 저장소를 읽어 [`Fresh`] 를 짓는다. **어느 스레드에서 불러도 같다.**
 fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     // 읽기 **전에** 잰다. 뒤에 재면 읽고 재는 사이의 쓰기를 놓치고, 놓친
@@ -302,6 +307,14 @@ pub struct App {
     /// 스레드에서 짓고 있는 다시 읽기. 끝나면 [`App::follow`] 가 받아 들인다.
     /// 손잡이는 스레드가 죽었을 때 그 패닉을 루프로 되던지려고 든다.
     pending: Option<(std::sync::mpsc::Receiver<crate::fail::R<Fresh>>, std::thread::JoinHandle<()>)>,
+    /// 버린 다시 읽기(F5·`w`·쓰기가 `pending` 을 버렸을 때)의 손잡이. 결과는 안 받지만
+    /// **패닉은 받는다** — ratatui 의 패닉 훅은 어느 스레드에서 나든 터미널을 걷으므로,
+    /// 손잡이를 같이 버리면 루프가 걷힌 화면에 모른 채 그린다. [`App::follow`] 가
+    /// 걸음마다 끝난 것을 join 해 패닉이면 되던진다. [`DISCARDED_KEPT`] 개까지 든다.
+    discarded: Vec<std::thread::JoinHandle<()>>,
+    /// 다시 읽는 길. 진짜 길은 [`prepare`] 다. **시험이 갈아 끼운다** — 스레드에서
+    /// 짓는 읽기가 패닉하는 때는 진짜 파일로는 못 만든다.
+    read: fn(&Repo, bool) -> crate::fail::R<Fresh>,
     /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임
     /// `Filter::matches` 를 돌리면 `Where::of` 가 프레임마다 지도를 다시 만든다.
     keep: Vec<bool>,
@@ -389,6 +402,8 @@ impl App {
             stamp: None,
             watched: Vec::new(),
             pending: None,
+            discarded: Vec::new(),
+            read: prepare,
             keep,
             remembered,
             list: Scroll::default(),
@@ -412,9 +427,26 @@ impl App {
     /// 있으면 버린다 — 누르기 **전에** 시작한 읽기라 늦게 도착하면 방금 읽은 것을
     /// 옛 것으로 덮는다(`w` 를 끄기 전 설정으로 읽은 것이면 더더욱).
     pub fn reload(&mut self) {
+        if self.repo.is_none() {
+            return;
+        }
+        // 결과는 버리되 손잡이는 든다 — 그 스레드의 패닉을 다음 걸음이 되던진다.
+        if let Some((_, handle)) = self.pending.take() {
+            if self.discarded.len() >= DISCARDED_KEPT {
+                // 놓기 **전에** 끝난 것부터 거둔다. 지난 걸음에 살아 있던 것도 그새 끝났을
+                // 수 있고, 그것이 가장 오래된 자리에 있으면 패닉째 놓게 된다.
+                self.reap();
+            }
+            if self.discarded.len() >= DISCARDED_KEPT {
+                // 이만큼 안 끝났으면 읽기가 멈춘 것이다(느린 원격 디스크 따위). 기다리면
+                // 루프가 같이 멈추므로 가장 오래된 것을 놓는다 — 그 하나만 1b63abe 이전
+                // 처지로 돌아간다.
+                self.discarded.remove(0);
+            }
+            self.discarded.push(handle);
+        }
         let Some(repo) = &self.repo else { return };
-        self.pending = None;
-        let fresh = prepare(repo, self.worktree);
+        let fresh = (self.read)(repo, self.worktree);
         self.receive(fresh);
     }
 
@@ -529,6 +561,30 @@ impl App {
     /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
     pub fn loading(&self) -> bool {
         self.pending.is_some()
+    }
+
+    /// 버린 다시 읽기 스레드가 아직 남았는가. 루프는 이 동안에도 빠른 걸음으로 깬다 —
+    /// 그 스레드가 패닉하면 터미널은 이미 걷혔고, 느린 걸음(700ms)으로 깨면 그동안
+    /// 걷힌 화면에 그린다. [`App::loading`] 과 가르는 것은 **새 읽기를 막지 않기**
+    /// 때문이다 — 버린 것은 받을 것이 아니다.
+    pub fn reaping(&self) -> bool {
+        !self.discarded.is_empty()
+    }
+
+    /// 버린 스레드 중 끝난 것을 join 한다. **패닉이면 되던진다** — [`App::follow`] 가
+    /// 받은 스레드에 하는 것과 같은 끝이다. 끝나지 않은 것은 기다리지 않는다.
+    fn reap(&mut self) {
+        if self.discarded.is_empty() {
+            return;
+        }
+        let (done, alive): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut self.discarded).into_iter().partition(|h| h.is_finished());
+        self.discarded = alive;
+        for handle in done {
+            if let Err(payload) = handle.join() {
+                std::panic::resume_unwind(payload);
+            }
+        }
     }
 
     /// 지어 온 것을 들인다. 여기서 하는 셈은 커서·경로·거름망뿐이다.
@@ -744,6 +800,7 @@ impl App {
     /// 하나가 끝나기 전에 또 띄우면 몰아 쓰는 동안 스레드가 쌓인다. 끝난 것을 들인
     /// 뒤에도 파일이 또 바뀌었으면(표식은 읽기 전에 쟀다) 다음 걸음이 다시 띄운다.
     pub fn follow(&mut self) {
+        self.reap();
         if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -773,9 +830,10 @@ impl App {
             let (tx, rx) = std::sync::mpsc::channel();
             let repo = repo.clone();
             let worktree = self.worktree;
+            let read = self.read;
             // 받는 쪽이 사라졌으면(F5 로 버렸으면) 보내기가 실패한다 — 버린 것이라 그대로 둔다.
             let handle = std::thread::spawn(move || {
-                let _ = tx.send(prepare(&repo, worktree));
+                let _ = tx.send(read(&repo, worktree));
             });
             self.pending = Some((rx, handle));
         }
@@ -1972,6 +2030,128 @@ mod tests {
         a.key(key(KeyCode::F(5)));
         assert!(!a.loading(), "F5 가 짓던 것을 안 버렸다");
         assert_eq!(a.issues.len(), 1);
+    }
+
+    /// 판 밖에서 한 줄을 더해 다음 `follow` 가 스레드 읽기를 띄우게 한다.
+    fn touch_outside(scratch: &Scratch) {
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let mut src = std::fs::read_to_string(&file).unwrap();
+        src.push_str(&format!("{}\n", serde_json::to_string(&make("argos-0003", Kind::Issue)).unwrap()));
+        std::fs::write(&file, src).unwrap();
+    }
+
+    /// 버린 스레드가 **다 끝날 때까지** 기다린다. join 은 하지 않는다 — 그것은 `follow` 의 일이다.
+    fn discarded_settle(a: &App) {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !a.discarded.iter().all(|h| h.is_finished()) {
+            assert!(std::time::Instant::now() < until, "버린 읽기가 끝나지 않는다");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    fn boom(_: &Repo, _: bool) -> crate::fail::R<Fresh> {
+        panic!("버린 읽기가 터졌다")
+    }
+
+    /// **F5 가 버린 읽기가 패닉하면 다음 걸음이 되던진다.** 패닉 훅은 이미 터미널을
+    /// 걷었다 — 손잡이를 같이 버리면 루프는 걷힌 화면에 모른 채 그린다(1b63abe 가
+    /// 받은 스레드에만 막은 구멍).
+    #[test]
+    fn a_discarded_read_that_panics_is_rethrown_at_the_next_step() {
+        let (scratch, mut a) = writable("discard-panic");
+        touch_outside(&scratch);
+        a.read = boom;
+        a.follow();
+        assert!(a.loading());
+        // 사람이 누른 갱신은 진짜 길로 읽는다 — 터지는 것은 버린 스레드뿐이다.
+        a.read = prepare;
+        a.key(key(KeyCode::F(5)));
+        assert!(!a.loading(), "F5 가 짓던 것을 안 버렸다");
+        assert!(a.reaping(), "버린 손잡이를 안 들었다 — 루프가 빠른 걸음으로 안 깬다");
+        assert_eq!(a.issues.len(), 2, "F5 가 제 자리에서 안 읽었다");
+
+        discarded_settle(&a);
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.follow()));
+        let payload = caught.expect_err("버린 스레드의 패닉을 삼켰다");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"버린 읽기가 터졌다"));
+    }
+
+    /// **버린 읽기가 제대로 끝나면 join 만 하고 결과는 안 들인다.** 다시 읽으러 가지도
+    /// 않는다 — F5 가 표식을 이미 올렸다.
+    #[test]
+    fn a_discarded_read_that_finishes_is_joined_and_ignored() {
+        let (scratch, mut a) = writable("discard-ok");
+        touch_outside(&scratch);
+        a.follow();
+        assert!(a.loading());
+        a.key(key(KeyCode::F(5)));
+        assert!(a.reaping());
+        let stamp = a.stamp;
+
+        discarded_settle(&a);
+        a.follow();
+        assert!(!a.reaping(), "끝난 스레드를 join 안 했다");
+        assert!(!a.loading(), "버린 읽기가 끝난 것을 보고 또 읽으러 갔다");
+        assert_eq!(a.stamp, stamp);
+        assert_eq!(a.issues.len(), 2);
+        assert!(a.trouble.is_none());
+    }
+
+    /// **든 손잡이는 [`DISCARDED_KEPT`] 개를 안 넘는다.** 안 끝나는 스레드를 기다리면
+    /// 루프가 같이 멈추므로 가장 오래된 것을 놓는다. 끝나지 않은 것은 `follow` 가
+    /// 기다리지 않는다.
+    #[test]
+    fn kept_discarded_reads_are_bounded() {
+        let (scratch, mut a) = writable("discard-bound");
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+        for _ in 0..DISCARDED_KEPT {
+            let rx = rx.clone();
+            a.discarded.push(std::thread::spawn(move || {
+                let _ = rx.lock().map(|r| r.recv());
+            }));
+        }
+        a.follow();
+        assert_eq!(a.discarded.len(), DISCARDED_KEPT, "안 끝난 것을 기다리거나 버렸다");
+
+        touch_outside(&scratch);
+        a.follow();
+        assert!(a.loading());
+        a.key(key(KeyCode::F(5)));
+        assert_eq!(a.discarded.len(), DISCARDED_KEPT, "든 손잡이가 상한을 넘었다");
+
+        drop(tx);
+        discarded_settle(&a);
+        a.follow();
+        assert!(!a.reaping());
+    }
+
+    /// **꽉 찬 채로 버릴 때 가장 오래된 것이 그새 패닉으로 끝났으면 놓지 않고 되던진다.**
+    /// 지난 걸음의 거두기는 그것이 살아 있을 때 지나갔다 — 거두지 않고 놓으면 그 패닉만
+    /// 걷힌 화면 뒤로 사라진다.
+    #[test]
+    fn a_full_discard_list_reaps_before_it_lets_go_of_the_oldest() {
+        let (_scratch, mut a) = writable("discard-full-panic");
+        a.discarded.push(std::thread::spawn(|| panic!("가장 오래된 것이 터졌다")));
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+        for _ in 1..DISCARDED_KEPT {
+            let rx = rx.clone();
+            a.discarded.push(std::thread::spawn(move || {
+                let _ = rx.lock().map(|r| r.recv());
+            }));
+        }
+        while !a.discarded[0].is_finished() {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        // `follow` 를 거치지 않고 짓던 읽기를 세운다 — 거기서 거두면 이 틈을 못 본다.
+        let (ptx, prx) = std::sync::mpsc::channel();
+        a.pending = Some((prx, std::thread::spawn(move || drop(ptx))));
+
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.key(key(KeyCode::F(5)))));
+        drop(tx);
+        let payload = caught.expect_err("꽉 찼을 때 끝난 패닉을 거두지 않고 놓았다");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"가장 오래된 것이 터졌다"));
     }
 
     /// 쓰기 시험이 쓰는 판 — 진짜 파일에 줄 하나를 두고 연 탐색기. **사람은

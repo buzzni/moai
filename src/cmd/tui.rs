@@ -227,7 +227,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
         let now = std::time::Instant::now();
         if now >= stale_due {
             app.follow();
-            stale_due = now + if app.loading() { LOAD_POLL } else { TICK };
+            stale_due = now + if app.loading() || app.reaping() { LOAD_POLL } else { TICK };
         }
         // **걸음은 시계가 올린다, 그린 횟수가 올리지 않는다.** 그릴 때마다
         // 올리면 키를 누르는 내내 타이핑 속도로 돌고, 가만히 두면 파일을 보는
