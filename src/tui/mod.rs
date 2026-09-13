@@ -267,6 +267,12 @@ impl App {
         }
         let rows = self.rows();
         let found = held.and_then(|a| rows.iter().position(|r| self.anchor_of(r) == a));
+        // **굴린 자리는 같은 줄일 때만 둔다.** 다른 이슈로 옮겨 섰는데 굴린 수가 남으면
+        // 그 이슈를 첫 줄부터 못 본다 — 커서를 옮길 때 0 으로 되돌리는 것(`move_to`)과
+        // 같은 까닭이다. 같은 줄이면 본문이 바뀌었어도 두고, 넘치면 그림이 자른다.
+        if found.is_none() {
+            self.scroll = 0;
+        }
         self.cursor = found.unwrap_or(self.cursor.min(rows.len().saturating_sub(1)));
         self.count_warnings();
     }
@@ -1135,6 +1141,24 @@ mod tests {
         more.push(member("argos-0000", "argos-0001"));
         b.adopt(more);
         assert_eq!(b.current(), Some(Row::Up));
+    }
+
+    /// 다시 읽어도 **같은 줄을 보고 있으면 굴린 자리를 둔다.** 보던 줄이 사라져
+    /// 다른 줄에 서면 첫 줄부터 보인다.
+    #[test]
+    fn reloading_keeps_the_scroll_only_on_the_same_line() {
+        let mut a = app();
+        a.key(key(KeyCode::Enter));
+        a.key(key(KeyCode::End)); // argos-0004
+        a.scroll = 7;
+        let mut more = a.issues.clone();
+        more.push(member("argos-0000", "argos-0001"));
+        a.adopt(more);
+        assert_eq!(a.scroll, 7, "같은 줄인데 굴린 자리를 잃었다");
+
+        let gone: Vec<Issue> = a.issues.iter().filter(|i| i.id != "argos-0004").cloned().collect();
+        a.adopt(gone);
+        assert_eq!(a.scroll, 0, "다른 줄에 섰는데 굴린 자리가 남았다");
     }
 
     /// 빈 디렉터리에서도 무너지지 않는다.
