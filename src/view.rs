@@ -407,7 +407,7 @@ fn walk(
         // 집계는 **뿌리에서만** 빌린다. 마일스톤 밑의 `id` 없는 집계는
         // "마일스톤 없음" 이지 "에픽 없음" 이 아니다.
         match path.is_empty().then(|| cx.rolls.iter().find(|r| r.id.is_none())).flatten() {
-            Some(roll) => out.push(head(roll, n, None)),
+            Some(roll) => out.push(head(roll, &roll.title, n, None)),
             None => out.push(format!("{}  {n}건", paint(style::HEAD, "에픽 없음"))),
         }
         // **머리글이 들여쓰이지 않으니 그 밑도 한 칸이다.** `depth` 를 더하면
@@ -454,14 +454,18 @@ fn place(
             blank(out);
             let id = cx.all[*at].id.as_str();
             let shown = under(cx, path, e);
+            // **이름은 제 줄에서 읽는다.** 집계는 id 로 찾으므로 같은 id 의 줄이
+            // 둘이면 남의 줄 것일 수 있다 — 그러면 두 줄이 한 제목을 달고 폴더인
+            // 줄의 이름은 트리에서 사라진다(moai-sfml). 수는 id 가 같으면 같다.
+            let title = cx.index.label(cx.all, e);
             match cx.rolls.iter().find(|r| r.id.as_deref() == Some(id)) {
-                Some(roll) => out.push(head(roll, shown, cx.origin.branch(id))),
+                Some(roll) => out.push(head(roll, &title, shown, cx.origin.branch(id))),
                 // 집계가 없을 때도 **id 는 낸다** — 제목만 내면 그것을
                 // 다시 찾아봐야 하고, 묶음을 펼친 이유가 사라진다.
                 None => out.push(format!(
                     "{}  {}  {shown}건",
                     paint(style::ID, id),
-                    marked(cx.origin.branch(id), &cx.index.label(cx.all, e), usize::MAX, style::HEAD).0,
+                    marked(cx.origin.branch(id), &title, usize::MAX, style::HEAD).0,
                 )),
             }
             walk(out, drawn, cx, &deeper, 1);
@@ -508,10 +512,10 @@ pub fn members(
     out
 }
 
-fn head(roll: &Roll, shown: usize, branch: Option<&str>) -> String {
+fn head(roll: &Roll, title: &str, shown: usize, branch: Option<&str>) -> String {
     match &roll.id {
         // 묶음일 뿐 진척을 가진 것이 아니므로, 걸러진 뒤 **보이는** 수를 말한다.
-        None => format!("{}  {}건", paint(style::HEAD, &roll.title), shown),
+        None => format!("{}  {}건", paint(style::HEAD, title), shown),
         Some(id) => {
             let pct = match roll.percent {
                 None => paint(style::DIM, "자식 없음"),
@@ -520,7 +524,7 @@ fn head(roll: &Roll, shown: usize, branch: Option<&str>) -> String {
             format!(
                 "{}  {}   {}/{}  {}  {}",
                 paint(style::ID, id),
-                marked(branch, &roll.title, TITLE_CAP, style::EPIC).0,
+                marked(branch, title, TITLE_CAP, style::EPIC).0,
                 roll.done,
                 roll.total,
                 bar(roll.percent),
@@ -540,6 +544,8 @@ fn head(roll: &Roll, shown: usize, branch: Option<&str>) -> String {
 fn row(out: &mut Vec<String>, cx: &Ctx, i: &Issue, depth: usize) {
     // **여기 오는 것은 일과 생각뿐이다** — 묶음은 `nav` 가 언제나 디렉터리로 세우고
     // (`Index::is_dir`), `place` 가 머리글로 받는다. 그래서 읽은 칸을 물을 것이 없다.
+    // 예외는 같은 id 의 쌍둥이에게 폴더를 내준 **가려진 묶음 줄** 하나다 — 깨진
+    // 자료(`duplicate_id`)를 숨기지 않으려 잎으로 세운 것이라 적힌 칸을 그대로 낸다.
     let col = i.status.as_str();
     let mut line = format!(
         "{}{}  {}  {}  {}",
@@ -1471,6 +1477,38 @@ mod tests {
         // 들어가면, 앞선 에픽의 멤버보다 한 칸 깊어 남의 손자로 읽힌다.
         let pad = |l: &str| l.len() - l.trim_start().len();
         assert_eq!(pad(&out[at_loose]), pad(&out[at_epic]), "들여쓰기가 어긋났다\n{joined}");
+    }
+
+    /// **같은 id 의 에픽 줄 둘이어도 멤버는 한 번, 두 줄은 다 보인다.** 폴더는
+    /// id 가 가리키는 뒷줄이고(`nav::Index::is_dir`), 앞줄은 잎으로 선다. 머리글이
+    /// 제 이름을 집계에서 id 로 찾으면 두 줄이 같은 제목을 달고 뒷줄은 트리
+    /// 어디에도 안 나온다 — 깨진 자료를 숨기는 셈이다(moai-sfml). 집계의 차례가
+    /// 어느 줄을 먼저 두든 같아야 하므로 두 차례 모두 본다.
+    #[test]
+    fn a_duplicate_epic_id_draws_its_members_once_and_both_lines() {
+        for (front, back) in [("가 앞줄", "나 뒷줄"), ("나 앞줄", "가 뒷줄")] {
+            let mut milestone = issue("argos-m001", "v0.1", "todo");
+            milestone.kind = Kind::Milestone;
+            let mut first = issue("argos-e001", front, "todo");
+            first.kind = Kind::Epic;
+            first.milestone = Some("argos-m001".into());
+            let mut second = issue("argos-e001", back, "todo");
+            second.kind = Kind::Epic;
+            let mut member = issue("argos-0020", "멤버", "todo");
+            member.epic = Some("argos-e001".into());
+
+            let all = vec![milestone, first, second, member];
+            let rolls = crate::report::rollup(&all, &cfg());
+            let index = crate::nav::Index::of(&all);
+            let out = plain(&tree(&all, &index, &|_| true, &rolls, &Origin::default()).0);
+            let joined = out.join("\n");
+            let count = |needle: &str| out.iter().filter(|l| l.contains(needle)).count();
+            assert_eq!(count("멤버"), 1, "멤버가 두 번 그려졌다\n{joined}");
+            assert_eq!(count(front), 1, "앞줄이 사라졌거나 겹쳤다\n{joined}");
+            assert_eq!(count(back), 1, "뒷줄이 사라졌거나 겹쳤다\n{joined}");
+            let at_member = out.iter().position(|l| l.contains("멤버")).unwrap();
+            assert!(out[at_member - 1].contains(back), "멤버가 폴더인 뒷줄 밑이 아니다\n{joined}");
+        }
     }
 
     /// 걸러진 뒤 멤버가 하나도 안 남은 에픽은 빼되, 자기 자신이 걸렸으면 남긴다.

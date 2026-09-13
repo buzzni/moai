@@ -190,7 +190,16 @@ impl Index {
         // **묶음인가를 여기서 다시 정하지 않는다.** `report::is_group` 이 그
         // 물음의 자리고, 손으로 벌여 적으면 종류가 하나 더 늘던 날 한쪽만
         // 고쳐져 탐색기와 상세가 다른 것을 묶음이라 부른다.
-        crate::report::is_group(&issues[at]) || self.has_kids[at]
+        //
+        // **id 가 가리키는 줄만 폴더다.** 경로 마디는 id 라, 같은 id 의 묶음 줄
+        // 둘이 다 폴더가 되면 같은 마디를 밀어 넣고 그 밑의 멤버가 두 폴더에
+        // 한 번씩 그려진다(moai-sfml). 어느 줄이 폴더인지는 `by_id` 가 정한
+        // 차례 — 뒷줄 — 를 따른다. `report::milestones` 가 중복 에픽의
+        // 마일스톤을 뒷줄로 세는 것(moai-0prl)과, 이슈 중복에서 자식이 걸리는
+        // 줄(`has_kids`)과 같은 자다. 가려진 앞줄은 잎으로 남아 **보인다** —
+        // 깨진 자료는 숨기지 않고 `duplicate_id` 가 따로 드러낸다.
+        self.find(&issues[at].id) == Some(at)
+            && (crate::report::is_group(&issues[at]) || self.has_kids[at])
     }
 
     /// id 로 줄을 찾는다. 화면이 프레임마다 부르므로 훑지 않는다.
@@ -268,6 +277,11 @@ impl Index {
     fn kept(&self, at: usize, issues: &[Issue], keep: &dyn Fn(usize) -> bool) -> bool {
         if keep(at) {
             return true;
+        }
+        // **폴더만 밑을 본다.** 잎의 마디 밑에 사는 것은 없어야 하지만, 같은 id 의
+        // 가려진 줄은 폴더인 쌍둥이와 마디가 같아 그 멤버를 제 자손으로 센다.
+        if !self.is_dir(issues, at) {
+            return false;
         }
         let mut under = self.homes[at].clone();
         under.push(self.seg_of(issues, at));
@@ -698,9 +712,20 @@ mod tests {
         for _ in 0..3000 {
             let mut issues: Vec<Issue> = Vec::new();
             for n in 0..(2 + roll(12)) {
-                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Idea][roll(6)];
-                let id = match roll(3) {
+                let mut kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Idea][roll(6)];
+                // 중복 id 도 섞는다 — 머지를 잘못 푼 파일은 이 도구가 거부하지 않고
+                // 드러내기만 하는 실재 상태(`duplicate_id`)고, 같은 id 의 에픽 줄
+                // 둘이 멤버를 두 번 그린 것(moai-sfml)은 이 더미가 그런 줄을 안
+                // 만들어 못 잡았다. **종류는 앞줄의 것을 따른다** — 종류까지 다른
+                // 중복은 `report` 의 id 지도들이 한 줄의 판정을 다른 줄에 흘리는
+                // 따로 된 문제라 여기서 섞으면 이 대조가 그것을 대신 앓는다(moai-2m9p).
+                let id = match roll(4) {
                     0 if !issues.is_empty() => format!("{}.a{n:02}", issues[roll(issues.len())].id),
+                    1 if !issues.is_empty() => {
+                        let twin = &issues[roll(issues.len())];
+                        kind = twin.kind;
+                        twin.id.clone()
+                    }
                     _ => format!("argos-{n:04}"),
                 };
                 let mut i = make(&id, kind);
@@ -867,6 +892,47 @@ mod tests {
             let issues =
                 vec![make("argos-m001", Kind::Milestone), own(a), own(b), epic_of("argos-0002", "argos-0001")];
             assert_counts_what_it_draws(&issues);
+            assert_exactly_once(&issues);
         }
+    }
+
+    /// **같은 id 의 묶음 줄 둘이 멤버를 두 번 그리지 않는다.** 묶음은 비어도
+    /// 디렉터리라(`an_empty_epic_is_still_a_directory`) 둘 다 디렉터리가 되면
+    /// 같은 마디(`Seg::Epic(id)`)를 밀어 넣고, 멤버가 두 폴더 밑에 한 번씩
+    /// 나타난다(moai-sfml). 이슈 중복을 첨자로 막은 것과 같은 자리다.
+    #[test]
+    fn a_duplicate_group_id_does_not_clone_its_members() {
+        let mut with_stone = make("argos-0001", Kind::Epic);
+        with_stone.milestone = Some("argos-m001".into());
+        let issues = vec![
+            make("argos-m001", Kind::Milestone),
+            with_stone,
+            make("argos-0001", Kind::Epic),
+            epic_of("argos-0002", "argos-0001"),
+        ];
+        assert_exactly_once(&issues);
+        let index = Index::of(&issues);
+        // 폴더는 **id 가 가리키는 줄**(뒷줄)이다 — `report::milestones` 와
+        // `by_id` 가 뒷줄을 이기게 하는 것과 같은 차례. 앞줄은 잎으로 남아
+        // 사라지지 않는다.
+        assert_eq!(index.find("argos-0001"), Some(2));
+        assert!(index.is_dir(&issues, 2));
+        assert!(!index.is_dir(&issues, 1), "가려진 에픽 줄이 폴더가 됐다");
+
+        let mut loose = make("argos-0003", Kind::Issue);
+        loose.milestone = Some("argos-m001".into());
+        let stones = vec![make("argos-m001", Kind::Milestone), make("argos-m001", Kind::Milestone), loose];
+        assert_exactly_once(&stones);
+
+        // **가려진 줄은 멤버 덕에 거름망을 지나지 않는다.** 그 줄은 폴더가 아니라
+        // 멤버를 거느리지 않는다 — 멤버만 걸리는 물음에 그 잎이 따라 서면, 걸리지
+        // 않은 줄이 걸린 것처럼 보인다.
+        let pair = vec![make("argos-0001", Kind::Epic), make("argos-0001", Kind::Epic), epic_of("argos-0002", "argos-0001")];
+        let index = Index::of(&pair);
+        let member = |at: usize| at == 2;
+        assert_eq!(
+            index.entries_where(&pair, &Vec::new(), &member),
+            vec![Entry::Dir { seg: Seg::Epic("argos-0001".into()), at: Some(1) }]
+        );
     }
 }
