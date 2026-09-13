@@ -1000,3 +1000,24 @@
 {"ts":"2026-09-13T18:21:08Z","id":"moai-54dt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"시험: isolated() 의 MOAI_CONFIG 는 모든 시험이 함께 쓰는 공용 빈 집 밑의 없는 파일이다. project add/rm 을 부르는 시험은 반드시 제 Scratch 밑 파일로 MOAI_CONFIG 를 덮는다 — 안 덮으면 병렬 시험끼리 등록이 섞이고 공용 집이 더 이상 비어 있지 않다 (moai-88l8.5ik 리뷰)"}
 {"ts":"2026-09-13T18:21:15Z","id":"moai-88l8.5ik","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"링크 설정·link/.. 철자 둘 반영(락은 준 자리 곁으로 고쳐), 권한 보존은 moai-gv1c 로, 공용 MOAI_CONFIG 는 moai-54dt 노트로 넘김"}
 {"ts":"2026-09-13T18:21:17Z","id":"moai-88l8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"user_config.rs — [[project]] 목록을 관대하게 읽고 락·temp+rename 으로 모르는 키를 보존하며 쓴다, 시험 격리 포함"}
+{"ts":"2026-09-13T18:54:35Z","id":"moai-6k07","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"beads 벤치마크 조사 원문 (2026-09-13) — 에이전트 워크플로·formulas·git 훅·.github·문서·사용자 모으기"}
+{"ts":"2026-09-13T18:56:25Z","id":"moai-yuid","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`moai prime` — 세션 시작·컴팩션 뒤 다시 넣는 1k 토큰 요약 표면"}
+{"ts":"2026-09-13T18:56:25Z","id":"moai-89xm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`moai init` 관리 블록 마커에 버전·해시를 넣고 `--check` 로 낡음을 판정한다"}
+{"ts":"2026-09-13T18:56:25Z","id":"moai-etl2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`mv <id> done` 뒤에 이로써 풀린 일을 한 줄로 알린다 (`--suggest-next`)"}
+{"ts":"2026-09-13T18:56:25Z","id":"moai-0rui","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"세션을 닫을 때 다음 세션용 프롬프트 한 줄을 집은 이슈에 note 로 남기고 status 가 비춘다"}
+{"ts":"2026-09-13T18:56:25Z","id":"moai-quxo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽 템플릿 파일 — `.moai/templates/*.md` 를 `moai add --from <파일> --var k=v` 로 편다"}
+{"ts":"2026-09-13T18:56:25Z","id":"moai-0cwa","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"잘 굴러간 에픽을 템플릿 마크다운으로 되뽑는다 (distill)"}
+{"ts":"2026-09-13T18:56:26Z","id":"moai-5i6i","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"git 훅 shim 의 안전 규약 — 도구가 없거나 느리거나 초기화 전이면 git 을 막지 않는다"}
+{"ts":"2026-09-13T18:56:26Z","id":"moai-taho","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`prepare-commit-msg` 훅으로 `MOAI_ACTOR` 가 있으면 커밋에 `Executed-By:` 트레일러를 남긴다"}
+{"ts":"2026-09-13T18:56:26Z","id":"moai-bvce","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"외부 PR 이 `.moai/issues.jsonl` 을 바꾸면 CI 가 거부하고 되돌리는 명령을 댄다"}
+{"ts":"2026-09-13T18:56:26Z","id":"moai-tkl8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"릴리스 파이프라인 1차안 — cargo-dist 로 빌드 매트릭스·checksums·install.sh·Homebrew tap 을 한 번에"}
+{"ts":"2026-09-13T18:56:26Z","id":"moai-oktj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"설치 스크립트는 checksums 로 검증하지 못하면 설치를 거부한다 — 다음 단계는 SBOM·attest"}
+{"ts":"2026-09-13T18:56:26Z","id":"moai-7bg7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"cross-version smoke — 옛 릴리스 바이너리가 쓴 스냅샷을 새 바이너리가 읽고 되써도 바이트가 같은지 CI 가 본다"}
+{"ts":"2026-09-13T18:56:26Z","id":"moai-miwk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"의존성·CI 위생 — dependabot(cargo) 그룹화, renovate 로 actions SHA 고정, PR 템플릿 What/Why/Verification"}
+{"ts":"2026-09-13T18:56:27Z","id":"moai-oybp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"출시용 문서 묶음 — README·CHANGELOG·LICENSE·CONTRIBUTING·SECURITY·복구 런북"}
+{"ts":"2026-09-13T18:56:27Z","id":"moai-ksi8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLI 레퍼런스를 `--help` 에서 생성하고 문서와 도움말의 어긋남을 시험이 잡는다"}
+{"ts":"2026-09-13T18:56:27Z","id":"moai-kns6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`moai onboard` 스니펫과 README 의 `--json` 계약 선언 — 외부 UI·다른 에이전트가 붙을 자리"}
+{"ts":"2026-09-13T18:56:27Z","id":"moai-hjrx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`moai import --from beads-jsonl` — beads·옛 moai 스냅샷을 옮겨 오는 단방향 가져오기"}
+{"ts":"2026-09-13T18:56:27Z","id":"moai-ubtx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`examples/` 에 bash 20줄 에이전트 루프 예제 — ready → 집기 → 일 → done 을 --json 으로"}
+{"ts":"2026-09-13T18:56:45Z","id":"moai-6k07","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"이 원문에서 담은 idea 18건: moai-yuid moai-89xm moai-etl2 moai-0rui moai-quxo moai-0cwa moai-5i6i moai-taho moai-bvce moai-tkl8 moai-oktj moai-7bg7 moai-miwk moai-oybp moai-ksi8 moai-kns6 moai-hjrx moai-ubtx"}
+{"ts":"2026-09-13T18:56:45Z","id":"moai-x2vs","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"beads 조사(moai-6k07): beads 는 JSONL merge driver 를 만들었다가 Dolt 로 옮기며 버리고 JSONL 을 병합 단위에서 뺐다. 짝이 되는 CI 거부 안은 moai-bvce."}
