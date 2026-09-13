@@ -327,8 +327,17 @@ pub fn group_states_in<'a, 'c>(
 
 /// 아직 안 끝난 막음이 하나라도 있는가. 없는 이슈를 가리키는 것은 막지
 /// 않는다 — 끊긴 참조는 `moai status` 가 드러내지 `ready` 가 영원히 막지 않는다.
-pub fn is_blocked(i: &Issue, by_id: &BTreeMap<&str, &Issue>) -> bool {
-    i.blocked_by.iter().any(|b| by_id.get(b.as_str()).is_some_and(|x| !x.status.is_done()))
+///
+/// 끝났는지는 **서 있는 칸**으로 본다(`states`, [`group_states`]). 막는 것이
+/// 에픽이면 적힌 칸은 안 읽힌다 — 믿으면 진행 중인 에픽을 손으로 done 에 둔
+/// 순간 막힌 일이 `ready` 에 서고, 다 끝난 에픽은 적힌 칸을 옮기기 전까지 영영 막는다.
+pub fn is_blocked(i: &Issue, by_id: &BTreeMap<&str, &Issue>, states: &BTreeMap<&str, &str>) -> bool {
+    i.blocked_by.iter().any(|b| by_id.get(b.as_str()).is_some_and(|x| !stands_done(x, states)))
+}
+
+/// 서 있는 칸이 `done` 인가 — 묶음이면 읽은 칸, 아니면 제 칸.
+fn stands_done(i: &Issue, states: &BTreeMap<&str, &str>) -> bool {
+    column(i, states) == crate::config::DONE
 }
 
 /// `blocker` 가 `blocked` 를 막으면 고리가 생기는가. **쓰기 전에** 막는다 —
@@ -632,11 +641,13 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
 pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let group = groups(issues);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    let out_of_plan = put_off(issues);
+    let mile = milestones(issues);
+    let out_of_plan = put_off_in(issues, &group, &mile);
+    let states = group_states_in(issues, cfg, &group, &mile);
     let mut out: Vec<&Issue> = issues
         .iter()
         // 값싼 막음 검사를 먼저 한다 — `unblocked_pick` 은 자식을 찾느라 목록을 걷는다.
-        .filter(|i| !is_blocked(i, &by_id) && unblocked_pick(i, issues, cfg, &out_of_plan))
+        .filter(|i| !is_blocked(i, &by_id, &states) && unblocked_pick(i, issues, cfg, &out_of_plan))
         .collect();
 
     let progress: BTreeMap<Option<String>, u8> =
@@ -705,14 +716,16 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
     }
     let group = groups(issues);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    let roots = deferred_roots_in(issues, &group, &milestones(issues));
+    let mile = milestones(issues);
+    let roots = deferred_roots_in(issues, &group, &mile);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
+    let states = group_states_in(issues, cfg, &group, &mile);
     // 값싼 막음 검사를 먼저 한다. `unblocked_pick` 은 자식을 찾느라 목록을
     // 한 번 걷는다 — 모든 줄에 먼저 부르면 `ready` 가 부를 때마다 제곱이다.
     let mut out: Vec<Held> = issues
         .iter()
         .filter_map(|i| {
-            let by = deferred_blockers(i, &by_id, &out_of_plan);
+            let by = deferred_blockers(i, &by_id, &out_of_plan, &states);
             (!by.is_empty()).then_some((i, by))
         })
         .filter(|(i, _)| unblocked_pick(i, issues, cfg, &out_of_plan))
@@ -732,11 +745,12 @@ fn deferred_blockers<'a>(
     i: &Issue,
     by_id: &BTreeMap<&str, &'a Issue>,
     out_of_plan: &BTreeSet<&str>,
+    states: &BTreeMap<&str, &str>,
 ) -> Vec<&'a str> {
     i.blocked_by
         .iter()
         .filter_map(|b| by_id.get(b.as_str()))
-        .filter(|b| !b.status.is_done() && out_of_plan.contains(b.id.as_str()))
+        .filter(|b| !stands_done(b, states) && out_of_plan.contains(b.id.as_str()))
         .map(|b| b.id.as_str())
         .collect()
 }
@@ -939,6 +953,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
         .filter(|r| r.id.is_some())
         .collect();
     let group = groups(issues);
+    let states = group_states_in(issues, cfg, &group, &milestones(issues));
     let mut warnings = Vec::new();
     let mut notices = Vec::new();
 
@@ -1006,13 +1021,13 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 미뤄 둔 것에 막힌 것은 **아래 2-3 이 제 이름으로** 말한다. 여기서도
     // 세면 같은 줄이 두 번 나오고, 이쪽 말로는 막는 줄을 어디서 찾는지 모른다.
     let by_deferred =
-        |i: &Issue| !deferred_blockers(i, &by_id, &out_of_plan).is_empty();
+        |i: &Issue| !deferred_blockers(i, &by_id, &out_of_plan, &states).is_empty();
     let stuck: Vec<&Issue> = work
         .iter()
         .copied()
         .filter(|i| {
             !i.status.is_done()
-                && is_blocked(i, &by_id)
+                && is_blocked(i, &by_id, &states)
                 && !by_deferred(i)
                 && days_since(&i.status_since, now).is_some_and(|d| d > BLOCKED_STALE_DAYS)
         })
@@ -1941,6 +1956,30 @@ mod tests {
         assert!(out.contains("argos-0002"), "남은 멤버가 미룸을 안 받았다 — {out:?}");
         assert!(out.contains("argos-0001") && !out.contains("argos-0003"), "{out:?}");
         assert!(ready(&issues, &cfg()).is_empty());
+    }
+
+    /// **막는 것이 묶음이면 서 있는 칸으로 끝났는지 본다.** 적힌 칸을 믿으면 진행
+    /// 중인 에픽을 손으로 done 에 둔 순간 막힌 일이 풀리고, 다 끝난 에픽은 영영 막는다.
+    #[test]
+    fn a_blocking_grouping_blocks_by_the_column_it_stands_in() {
+        let blocked = |by: &str| {
+            let mut i = make("argos-0009", Kind::Issue, "todo");
+            i.blocked_by = vec![by.into()];
+            i
+        };
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "done"),          // 적힌 칸만 닫힘
+            member("argos-0002", "argos-0001", "in_progress"),
+            make("argos-0003", Kind::Epic, "todo"),          // 멤버가 다 끝남
+            member("argos-0004", "argos-0003", "done"),
+        ];
+        let pick = |by: &str| {
+            let mut all = issues.clone();
+            all.push(blocked(by));
+            ready(&all, &cfg()).iter().any(|i| i.id == "argos-0009")
+        };
+        assert!(!pick("argos-0001"), "진행 중인 에픽이 적힌 칸 때문에 안 막았다");
+        assert!(pick("argos-0003"), "다 끝난 에픽이 적힌 칸 때문에 막았다");
     }
 
     /// 마일스톤도 같은 자로 읽는다 — 에픽을 거쳐 온 이슈와 물려받은 자식까지.
