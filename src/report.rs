@@ -625,7 +625,7 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let mut out: Vec<&Issue> = issues
         .iter()
         // 값싼 막음 검사를 먼저 한다 — `unblocked_pick` 은 자식을 찾느라 목록을 걷는다.
-        .filter(|i| !is_blocked(i, &by_id) && unblocked_pick(i, issues, cfg, &group, &by_id, &out_of_plan))
+        .filter(|i| !is_blocked(i, &by_id) && unblocked_pick(i, issues, cfg, &out_of_plan))
         .collect();
 
     let progress: BTreeMap<Option<String>, u8> =
@@ -653,17 +653,11 @@ fn unblocked_pick(
     i: &Issue,
     issues: &[Issue],
     cfg: &Config,
-    group: &BTreeMap<&str, &str>,
-    by_id: &BTreeMap<&str, &Issue>,
     out_of_plan: &BTreeSet<&str>,
 ) -> bool {
-    // 자식은 소속을 조상에게서 물려받으므로 끝난 에픽의 손자도 집지 않는다.
-    // **미리 세운 `by_id` 로 짚는다.** 훑으면 후보 하나마다 목록 전체를 걷게
-    // 되어 `ready` 가 이슈 수의 제곱으로 자란다.
-    let done_epic = group
-        .get(i.id.as_str())
-        .and_then(|e| by_id.get(*e))
-        .is_some_and(|e| e.status.is_done());
+    // **끝난 에픽인지는 묻지 않는다.** 묶음의 칸은 멤버에서 읽으므로(`group_states`)
+    // 읽은 칸이 done 인 묶음에는 집을 멤버가 이미 없고, 적힌 칸으로 물으면 손으로
+    // done 에 둔 에픽의 남은 일이 까닭 없이 `ready` 에서 사라진다(moai-j3b3).
     // 자식이 남아 있으면 부모는 직접 하는 일이 아니다. **일만 센다** —
     // 이슈 밑에 담아 둔 생각 하나가 그 이슈를 `ready` 에서 지워 버리는데,
     // idea 는 어느 목록에도 안 나오므로 왜 사라졌는지 볼 방법이 없다.
@@ -675,7 +669,6 @@ fn unblocked_pick(
     is_work(i)                                   // 묶음도 생각도 집는 게 아니다
         && !out_of_plan.contains(i.id.as_str())  // 미뤄 둔 것과 그 밑도
         && i.status.as_str() == cfg.first_status()
-        && !done_epic
         && !has_open_child()
 }
 
@@ -711,7 +704,7 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
             let by = deferred_blockers(i, &by_id, &out_of_plan);
             (!by.is_empty()).then_some((i, by))
         })
-        .filter(|(i, _)| unblocked_pick(i, issues, cfg, &group, &by_id, &out_of_plan))
+        .filter(|(i, _)| unblocked_pick(i, issues, cfg, &out_of_plan))
         .map(|(i, by)| {
             let mut undo: Vec<&str> = by.iter().filter_map(|b| roots.get(b).copied()).collect();
             undo.sort_unstable();
@@ -1070,19 +1063,9 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     if !empty.is_empty() {
         warnings.push(Warning::new("empty_epic", empty));
     }
-    let finished: Vec<String> = rolls
-        .iter()
-        .filter(|r| r.percent == Some(100))
-        .filter_map(|r| r.id.as_deref())
-        .filter(|id| !put_off_group(id))
-        // `put_off_group` 이 바로 위에서 쓰는 그 `by_id` 로 짚는다 — 여기만
-        // 훑으면 100% 인 에픽 하나마다 목록 전체를 한 번 더 걷는다.
-        .filter(|id| by_id.get(id).is_some_and(|e| !e.status.is_done()))
-        .map(str::to_string)
-        .collect();
-    if !finished.is_empty() {
-        warnings.push(Warning::new("finished_epic", finished));
-    }
+    // "다 끝났는데 안 닫힌 에픽" 은 없다 — 묶음의 칸은 멤버에서 읽으므로 100% 면
+    // 곧 닫힌 것이다. 그 경고가 서 있으면 적힌 칸을 옮기라고 시키는데, 그 칸은
+    // 이제 어디서도 읽히지 않는다(moai-j3b3).
 
     // 6. 머지를 잘못 푼 흔적. 여기부터는 드러내는 것을 넘어 고쳐야 할 것이다.
     let known: std::collections::BTreeSet<&str> = issues.iter().map(|i| i.id.as_str()).collect();
@@ -1414,7 +1397,7 @@ mod tests {
         assert_eq!(rolls.len(), 2);
     }
 
-    /// 모든 멤버가 끝난 에픽은 100% 다 — "닫을 때가 됐다" 를 말할 근거.
+    /// 모든 멤버가 끝난 에픽은 100% 다 — 그 에픽의 읽은 칸이 done 인 근거.
     #[test]
     fn a_finished_epic_reads_full() {
         let issues = vec![
@@ -1427,12 +1410,8 @@ mod tests {
 
     #[test]
     fn ready_excludes_what_is_not_pickable() {
-        let mut done_epic = make("argos-0001", Kind::Epic, "done");
-        done_epic.status = Status::new("done");
         let issues = vec![
             make("argos-00aa", Kind::Epic, "todo"),          // 에픽 자체
-            done_epic,                                        // 끝난 에픽
-            member("argos-0002", "argos-0001", "todo"),       // 끝난 에픽의 멤버
             make("argos-0003", Kind::Issue, "in_progress"),   // 이미 집은 것
             make("argos-0004", Kind::Issue, "todo"),          // 자식이 남은 부모
             make("argos-0004.aaa", Kind::Issue, "todo"),      // 그 자식 — 이건 집는다
@@ -1572,17 +1551,19 @@ mod tests {
         assert_eq!(g.get("argos-0004"), None);
     }
 
-    /// 끝난 에픽의 **손자**도 집지 않는다.
+    /// **적힌 칸이 done 인 에픽의 남은 일도 집는다.** 묶음의 칸은 멤버에서 읽으므로
+    /// 손으로 done 에 둔 에픽은 닫힌 것이 아니다 — 그 밑의 손자를 까닭 없이
+    /// `ready` 에서 빼면 어디서도 안 읽는 칸이 계획을 지운다(moai-j3b3).
     #[test]
-    fn ready_skips_grandchildren_of_a_finished_epic() {
-        let mut epic = make("argos-0001", Kind::Epic, "done");
-        epic.status = Status::new("done");
+    fn ready_ignores_a_grouping_closed_by_hand() {
         let issues = vec![
-            epic,
+            make("argos-0001", Kind::Epic, "done"),
             member("argos-0002", "argos-0001", "done"),
             make("argos-0002.aaa", Kind::Issue, "todo"),
         ];
-        assert!(ready(&issues, &cfg()).is_empty(), "끝난 에픽 밑의 손자를 집었다");
+        let got: Vec<&str> = ready(&issues, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(got, ["argos-0002.aaa"]);
+        assert_eq!(group_states(&issues, &cfg()).get("argos-0001"), Some(&"in_progress"));
     }
 
     fn kinds(st: &StatusReport) -> Vec<&str> {
@@ -1646,15 +1627,16 @@ mod tests {
     }
 
     #[test]
-    fn plans_unfilled_and_work_unclosed_both_show() {
+    fn an_unfilled_plan_shows_and_finished_work_is_not_scolded() {
         let issues = vec![
             make("argos-0001", Kind::Epic, "todo"),                 // 빈 에픽
-            make("argos-0002", Kind::Epic, "in_progress"),          // 다 끝났는데 안 닫힘
+            make("argos-0002", Kind::Epic, "in_progress"),          // 다 끝났고 적힌 칸은 안 닫힘
             member("argos-0003", "argos-0002", "done"),
         ];
         let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z");
         let k = kinds(&st);
-        assert!(k.contains(&"empty_epic") && k.contains(&"finished_epic"), "{k:?}");
+        // 다 끝난 묶음은 읽은 칸이 곧 done 이라 꾸짖을 것이 없다(moai-j3b3).
+        assert_eq!(k, ["empty_epic"], "{k:?}");
     }
 
     /// 머지를 잘못 푼 흔적. 깨진 것만 종료 코드를 바꾼다.

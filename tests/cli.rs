@@ -2902,8 +2902,9 @@ fn a_thought_does_not_hang_under_a_milestone_either() {
 
 // ── 리뷰가 잡은 것 ───────────────────────────────────────────────────
 
-/// **미뤄 둔 묶음은 표에서도 안 꾸짖는다.** `report` 가 `finished_epic` 을
-/// 그 자로 빼 두는데 표만 노란 글씨로 계속 재촉하면 반만 조용해진 것이다.
+/// **미뤄 둔 묶음은 표가 낱말로 말한다.** 한때 다 끝난 묶음을 노란 글씨로 재촉하던
+/// 표가 미룬 묶음까지 재촉했다. 그 재촉은 걷었지만(moai-j3b3, 묶음의 칸은 멤버에서
+/// 읽는다) 무엇이 미뤄졌는지는 여전히 색이 아니라 낱말이 진다.
 #[test]
 fn a_deferred_epic_is_not_nagged_in_the_table_either() {
     let s = init("defertable");

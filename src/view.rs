@@ -552,7 +552,6 @@ fn says(w: &Warning) -> String {
         // 줄이 미룬 에픽 밑이면 그 줄에 `--undo` 를 쳐 봐야 "이미 그렇다" 로 끝난다.
         "blocked_by_deferred" => format!("미뤄 둔 것에 막혀 못 집는 일 {n}건 — 미룬 곳을 도로 집거나 막음을 푼다"),
         "empty_epic" => format!("속이 빈 에픽 {n}건 — 계획만 세우고 안 채웠다"),
-        "finished_epic" => format!("다 끝났는데 안 닫힌 에픽 {n}건"),
         // **끊긴 것과 종류가 틀린 것을 한 낱말로 말한다** — 둘을 가려 말하면
         // 고치는 손이 달라지는 것도 아닌데 경고가 둘로 늘어난다.
         "dangling_epic" => format!("에픽으로 쓸 수 없는 것을 가리키는 줄 {n}건"),
@@ -625,22 +624,13 @@ pub fn status(st: &StatusReport, issues: &[Issue], cfg: &Config, now: &str, at: 
         }
         let w_title = rolls.iter().map(|e| width(&clip(&e.title, EPIC_CAP))).max().unwrap_or(4);
         for e in rolls {
-            // 이미 닫힌 묶음에 "닫을 때가 됐다" 를 내면, 시킨 대로 했는데도
-            // 잔소리가 남는다. 한 번 하면 사라져야 말을 듣는다.
-            //
-            // **미뤄 둔 묶음에도 안 낸다.** `report` 가 `finished_epic` 경고를
-            // 그 자로 빼 두는데(`put_off_group`) 표만 노란 글씨로 계속 재촉하면
-            // 반만 조용해진 것이고, 미룰수록 잔소리가 는다는 그 실패가 이 줄에
-            // 그대로 남는다. 대신 무엇이 미뤄졌는지는 낱말로 말한다 — 색만으로
-            // 뜻을 지는 자리를 만들지 않는다.
-            let row = e.id.as_deref().and_then(|id| by_id.get(id));
-            let still_open = row.is_some_and(|i| !i.status.is_done());
-            // 물려받은 미룸도 친다 — 미룬 마일스톤 밑의 에픽을 재촉하면 안 된다.
+            // **미뤄 둔 묶음은 낱말로 말한다** — 색만으로 뜻을 지는 자리를 만들지
+            // 않는다. 물려받은 미룸도 친다. "닫을 때가 됐다" 는 더 안 낸다: 묶음의
+            // 칸은 멤버에서 읽으므로 100% 면 곧 닫힌 것이다(moai-j3b3).
             let put_off = e.id.as_deref().is_some_and(|id| shelved.contains(id));
             let note = match e.percent {
                 _ if put_off => paint(style::DIM, "   미룸"),
                 None => paint(style::DIM, "   자식 없음"),
-                Some(100) if still_open => paint(style::WARN, "   닫을 때가 됐다"),
                 _ => String::new(),
             };
             out.push(format!(
@@ -718,7 +708,7 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str) -> Vec<String
     // 에픽에 대한 말은 칸도 나이도 뜻이 없다. 어느 에픽인지만 말한다.
     if matches!(
         w.kind,
-        "empty_epic" | "finished_epic" | "unknown_field" | "dangling_epic" | "dangling_milestone"
+        "empty_epic" | "unknown_field" | "dangling_epic" | "dangling_milestone"
     ) {
         for id in w.ids.iter().take(SHOW) {
             let title = by_id.get(id.as_str()).map(|i| i.title.as_str()).unwrap_or("");
@@ -1376,25 +1366,20 @@ mod tests {
         assert!(plain(&tree(&all, &index, &|_| true, &rolls, &BTreeMap::new()).0).join("\n").contains("빈 에픽"));
     }
 
-    /// 시킨 대로 닫았는데도 잔소리가 남으면 다음부터 안 듣는다.
+    /// **다 끝난 묶음을 재촉하지 않는다.** 묶음의 칸은 멤버에서 읽으므로 100% 면
+    /// 곧 닫힌 것이다 — 적힌 칸을 옮기라고 시키면 어디서도 안 읽히는 칸을 쓰게 한다.
     #[test]
-    fn a_closed_grouping_stops_nagging() {
+    fn a_finished_grouping_is_not_nagged_to_close() {
         let mut epic = issue("argos-0001", "다 끝난 에픽", "todo");
         epic.kind = Kind::Epic;
         let mut member = issue("argos-0002", "멤버", "done");
         member.epic = Some("argos-0001".into());
-        let all = vec![epic.clone(), member];
+        let all = vec![epic, member];
         let cfg = cfg();
 
-        let open = crate::report::status(&all, &[], &cfg, "2026-09-11T04:12:03Z");
-        let text = plain(&status(&open, &all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl")).join("\n");
-        assert!(text.contains("닫을 때가 됐다"), "{text}");
-
-        let mut all = all;
-        all[0].status = Status::new("done");
-        let closed = crate::report::status(&all, &[], &cfg, "2026-09-11T04:12:03Z");
-        let text = plain(&status(&closed, &all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl")).join("\n");
-        assert!(!text.contains("닫을 때가 됐다"), "{text}");
+        let st = crate::report::status(&all, &[], &cfg, "2026-09-11T04:12:03Z");
+        let text = plain(&status(&st, &all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl")).join("\n");
+        assert!(!text.contains("닫을 때가 됐다") && !text.contains("안 닫힌"), "{text}");
     }
 
     #[test]
