@@ -959,3 +959,4 @@
 {"ts":"2026-09-13T17:28:46Z","id":"moai-ka9p.lx7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단 — 리뷰는 버그를 못 찾아 고칠 것이 없다(fix 커밋 없음). 넘긴 둘(MOAI_BLESS=0 도 참으로 읽음, 깨진 plugin.json 은 bless 가 못 고침)은 시험 스위치라 당장 해가 없어 idea moai-x9s4 로 담았다. 커밋된 판이 main 체크아웃에서 skill install 한 값과 같다는 리뷰의 확인이 이 방식(커밋된 exe·마켓 이름을 읽어 다시 셈)의 근거다."}
 {"ts":"2026-09-13T17:28:46Z","id":"moai-ka9p.lx7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 없음 — 사소한 둘은 idea moai-x9s4 로 넘김"}
 {"ts":"2026-09-13T17:28:47Z","id":"moai-ka9p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"AGENTS.md·플러그인 트리를 다시 쓰고(478e445, 9t3l 합친 뒤 ae112b9) 드리프트 시험을 세움(f126ef7)"}
+{"ts":"2026-09-13T17:40:34Z","id":"moai-qrnq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"여러 프로젝트를 한 moai 에서 본다 — 설정에 모니터링할 프로젝트 디렉터리를 더한다"}
