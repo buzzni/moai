@@ -2612,6 +2612,29 @@ fn a_journal_only_write_claims_no_rewrite() {
     );
 }
 
+/// **못 읽는 줄이 산 줄의 id 를 들고 있으면 `status` 가 중복이라 말한다.**
+/// 줄 번호만 보던 때는 `읽을 수 없는 줄` 만 서고 중복은 안 서서, 그 줄이
+/// 읽히게 되는 날에야 모든 쓰기가 막혔다(moai-4dk4). 쓰기는 여전히 안 막는다.
+#[test]
+fn status_names_an_unreadable_line_that_reuses_a_live_id() {
+    let s = init("unreadabledup");
+    let id = add(s.path(), &["산 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    let mut text = issues(s.path());
+    text.push_str(&format!("{{\"id\":\"{id}\",\"title\":\"몰라\",\"kind\":\"몰라\",\"status\":\"todo\"}}\n"));
+    std::fs::write(&path, &text).unwrap();
+
+    let out = moai(s.path(), &["status", "--json"]);
+    assert!(!out.status.success(), "깨진 데이터인데 0 으로 끝났다");
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains(r#""kind":"duplicate_id""#), "중복을 못 봤다 — {json}");
+    assert!(json.contains(&format!(r#""ids":["{id}"]"#)), "{json}");
+
+    // 드러내기만 한다 — 다른 줄을 쓰는 것은 막지 않는다.
+    let other = moai(s.path(), &["add", "새 줄"]);
+    assert!(other.status.success(), "{}", String::from_utf8_lossy(&other.stderr));
+}
+
 /// **안 썼어도 파일이 상했다는 것은 말한다.** 저널만 쓰는 명령과 할 일이 없던
 /// 쓰기는 `report_load_errors` 도 안 지나, 그 동사만 쓰는 쪽은 상한 줄을 영영
 /// 몰랐다(moai-relb). 종료 코드는 그대로다 — 쓰기는 성공했다.

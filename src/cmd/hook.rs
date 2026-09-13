@@ -87,7 +87,8 @@ fn decide(event: Event, input: &Input) -> Option<String> {
     // `unreadable_line` 경고만 조용히 빠지는데, 그것은 실린 보드 말고는
     // 에이전트가 알아낼 길이 없는 유일한 경고다 — 기준선도 같은 만큼
     // 낮게 잡혀 `Stop` 이 "늘었다" 를 영영 못 본다.
-    let unreadable: Vec<usize> = load.errors.iter().map(|e| e.line).collect();
+    let unreadable: Vec<report::Unreadable> =
+        load.errors.iter().map(|e| report::Unreadable { id: e.id.as_deref() }).collect();
 
     let decision = match event {
         // **접힌 뒤는 같은 세션이다.** 기준선을 다시 적으면 접기 전에 늘린
@@ -196,7 +197,12 @@ fn once_per_session(
 ///
 /// 훅이 여는 세션마다 덮어쓴다. 재개도 새 세션이고, 재개 시점의 경고가
 /// 그 세션이 물려받은 빚이다.
-fn write_baseline(input: &Input, repo: &Repo, issues: &[crate::model::Issue], unreadable: &[usize]) {
+fn write_baseline(
+    input: &Input,
+    repo: &Repo,
+    issues: &[crate::model::Issue],
+    unreadable: &[report::Unreadable],
+) {
     let Some(path) = session_file(input, repo, "warn") else {
         return;
     };

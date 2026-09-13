@@ -15,7 +15,10 @@ use crate::view;
 pub fn run(ctx: &Ctx) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     let load = repo.read()?;
-    let unreadable: Vec<usize> = load.errors.iter().map(|e| e.line).collect();
+    // **그 줄이 쓰는 id** 까지 넘긴다 — id 가 있어야 산 줄과의 중복이
+    // 드러난다(moai-4dk4).
+    let unreadable: Vec<report::Unreadable> =
+        load.errors.iter().map(|e| report::Unreadable { id: e.id.as_deref() }).collect();
     let now = model::now();
     let st = report::status(&load.issues, &unreadable, &repo.config, &now);
 

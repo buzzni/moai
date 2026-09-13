@@ -790,8 +790,19 @@ fn ids_of(v: &[&Issue]) -> Vec<String> {
     v.into_iter().map(|i| i.id.clone()).collect()
 }
 
-/// `unreadable` 은 읽다 만난 줄 번호다 — 저장소가 아니라 부르는 쪽이 준다.
-pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -> StatusReport {
+/// 읽다 만난 못 읽는 줄 하나 — **읽어 낼 수 있었다면 그 줄이 쓰는 id.**
+///
+/// 줄 번호만 받던 때는 못 읽는 줄이 산 줄의 id 를 들고 있어도 `duplicate_id` 가
+/// 안 섰다. 그 줄이 읽히게 되는 날 모든 쓰기가 막히고, 그때는 어느 줄인지 사람이
+/// 찾아야 한다(moai-4dk4). `store` 를 모르게 두려고 여기 제 모양으로 받는다.
+/// 줄 번호는 싣지 않는다 — 여기서는 수만 세고, 줄 번호는 `moai show` 가 낸다.
+#[derive(Debug, Clone, Copy)]
+pub struct Unreadable<'a> {
+    pub id: Option<&'a str>,
+}
+
+/// `unreadable` 은 읽다 만난 못 읽는 줄이다 — 저장소가 아니라 부르는 쪽이 준다.
+pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &str) -> StatusReport {
     // **여기가 "지금 계획" 의 정의다.** 보드 수·모든 경고·흐름이 이 하나를
     // 지나므로, 미뤄 둔 것을 여기서 빼면 아래 전부에서 저절로 빠진다.
     let out_of_plan = put_off(issues);
@@ -1064,11 +1075,17 @@ pub fn status(issues: &[Issue], unreadable: &[usize], cfg: &Config, now: &str) -
     }
 
     // 7. 데이터가 깨진 것. **이것만 비영 종료한다.**
-    let mut seen = std::collections::BTreeSet::new();
+    //
+    // **못 읽는 줄이 쓰는 id 도 같이 견준다.** 안 견주면 그 중복은 못 읽는 동안
+    // 아무 데도 안 보이다가, 새 바이너리가 그 줄을 읽는 날 모든 쓰기를 막는다.
+    // 드러내기만 한다 — 쓰기를 막으면 "못 읽는 줄은 들고 간다" 가 무너진다.
+    let mut seen = BTreeSet::new();
     let dups: Vec<String> = issues
         .iter()
-        .filter(|i| !seen.insert(i.id.as_str()))
-        .map(|i| i.id.clone())
+        .map(|i| i.id.as_str())
+        .chain(unreadable.iter().filter_map(|u| u.id))
+        .filter(|id| !seen.insert(*id))
+        .map(str::to_string)
         .collect();
     if !dups.is_empty() {
         warnings.push(Warning::new("duplicate_id", dups).fatal());
@@ -1542,7 +1559,7 @@ mod tests {
 
         let dup = vec![make("argos-0001", Kind::Issue, "todo"), make("argos-0001", Kind::Issue, "todo")];
         assert!(status(&dup, &[], &cfg(), "2026-09-01T00:00:00Z").broken());
-        assert!(status(&[], &[41], &cfg(), "2026-09-01T00:00:00Z").broken());
+        assert!(status(&[], &[Unreadable { id: None }], &cfg(), "2026-09-01T00:00:00Z").broken());
     }
 
     /// 만드는 속도가 끝내는 속도를 넘으면 쌓인다.
@@ -2117,6 +2134,25 @@ mod tests {
         thought.deferred_at = Some("2026-09-01T00:00:00Z".into());
         let issues = vec![thought, make("argos-0002.aaa", Kind::Issue, "todo")];
         assert!(picks(&issues).is_empty(), "미룬 생각 밑의 일이 올라왔다");
+    }
+
+    // ── 못 읽는 줄의 id ──────────────────────────────────────────────
+
+    /// **못 읽는 줄이 산 줄의 id 를 들고 있으면 중복이다.** 줄 번호만 보던 때는
+    /// `unreadable_line` 만 서고 `duplicate_id` 는 안 서, 그 줄이 읽히는 날에야
+    /// 모든 쓰기가 막혔다(moai-4dk4).
+    #[test]
+    fn an_unreadable_line_reusing_a_live_id_is_a_duplicate() {
+        let issues = vec![make("argos-0001", Kind::Issue, "todo")];
+        let clash = [Unreadable { id: Some("argos-0001") }];
+        let st = status(&issues, &clash, &cfg(), "2026-09-01T00:00:00Z");
+        let w = st.warnings.iter().find(|w| w.kind == "duplicate_id").expect("중복을 못 봤다");
+        assert_eq!(w.ids, ["argos-0001"]);
+        assert!(w.fatal);
+
+        let apart = [Unreadable { id: Some("argos-0002") }, Unreadable { id: None }];
+        let st = status(&issues, &apart, &cfg(), "2026-09-01T00:00:00Z");
+        assert!(!st.warnings.iter().any(|w| w.kind == "duplicate_id"), "{:?}", st.warnings);
     }
 
     // ── 미룬 것이 막고 있으면 까닭을 말한다 ──────────────────────────

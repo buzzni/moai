@@ -47,6 +47,9 @@ pub struct App {
     pub now: String,
     /// 읽다 만난 못 읽는 줄. 대체 화면 안에서는 stderr 로 못 알린다.
     pub unreadable: usize,
+    /// 그 못 읽는 줄들이 쓰는 id (읽어 낼 수 있었던 것만). 산 줄과의 중복을
+    /// `moai status` 와 같은 자로 세려면 수만으로는 모자란다(moai-4dk4).
+    unreadable_ids: Vec<Option<String>>,
     /// 마지막 갱신이 **실패한** 까닭. 조용히 삼키면 F5 가 아무 일도 안 하는데
     /// "바뀌었다" 배너는 붙어 있어, 사람은 누르고 또 누르며 까닭을 못 얻는다.
     pub trouble: Option<String>,
@@ -88,7 +91,7 @@ impl App {
     #[cfg(test)]
     pub fn new(issues: Vec<Issue>, cfg: Config, path: Path) -> App {
         let index = Index::of(&issues);
-        App::build(issues, index, cfg, path, 0)
+        App::build(issues, index, cfg, path, Vec::new())
     }
 
     /// 저장소에서 읽어 세운다.
@@ -99,13 +102,20 @@ impl App {
     /// 사이에 떨어진 쓰기가 "이미 본 것" 으로 적혀 영영 안 보인다.
     pub fn open(repo: Repo, load: Load, index: Index, path: Path, stamp: Stamp) -> App {
         let cfg = repo.config.clone();
-        let mut app = App::build(load.issues, index, cfg, path, load.errors.len());
+        let ids = load.errors.iter().map(|e| e.id.clone()).collect();
+        let mut app = App::build(load.issues, index, cfg, path, ids);
         app.stamp = stamp;
         app.repo = Some(repo);
         app
     }
 
-    fn build(issues: Vec<Issue>, index: Index, cfg: Config, path: Path, unreadable: usize) -> App {
+    fn build(
+        issues: Vec<Issue>,
+        index: Index,
+        cfg: Config,
+        path: Path,
+        unreadable_ids: Vec<Option<String>>,
+    ) -> App {
         // 들어간 채로 시작하면(`--path`) 나올 층마다 기억 자리를 만들어 둔다.
         let remembered = vec![0; path.len()];
         let keep = vec![true; issues.len()];
@@ -121,7 +131,8 @@ impl App {
             filter_text: None,
             repo: None,
             now: crate::model::now(),
-            unreadable,
+            unreadable: unreadable_ids.len(),
+            unreadable_ids,
             trouble: None,
             warnings: 0,
             stale: false,
@@ -149,7 +160,8 @@ impl App {
             Ok(load) => {
                 self.trouble = None;
                 self.stamp = stamp;
-                self.unreadable = load.errors.len();
+                self.unreadable_ids = load.errors.iter().map(|e| e.id.clone()).collect();
+                self.unreadable = self.unreadable_ids.len();
                 self.adopt(load.issues);
             }
             // **소리 없이 넘기지 않는다.** 삼키면 F5 는 아무 일도 안 하고
@@ -239,7 +251,14 @@ impl App {
     /// 것이 늘었다고 말한다 — 그러면 안 담게 된다. 무엇이 알림인지는
     /// `report` 가 `notice` 로 들고 있으므로 여기서 다시 판단하지 않는다.
     fn count_warnings(&mut self) {
-        let lines: Vec<usize> = (0..self.unreadable).collect();
+        // 못 읽는 줄의 id 까지 넘긴다 — 산 줄과의 중복을 `moai status` 와 같은
+        // 자로 센다. 수만 아는 자리(시험이 `unreadable` 을 손으로 넣는 것)는
+        // id 없이 센다.
+        let lines: Vec<crate::report::Unreadable> = (0..self.unreadable)
+            .map(|n| crate::report::Unreadable {
+                id: self.unreadable_ids.get(n).and_then(|i| i.as_deref()),
+            })
+            .collect();
         let st = crate::report::status(&self.issues, &lines, &self.cfg, &self.now);
         // 알림은 `notices` 에 따로 있다 — `warnings` 가 곧 고칠 것이다.
         self.warnings = st.warnings.len();
