@@ -56,18 +56,83 @@ impl Load {
     }
 }
 
+/// 디렉터리 하나를 [`Repo::open`] 으로 연 결과.
+///
+/// **셋을 가른다.** 등록한 프로젝트를 한눈에 볼 때 "아직 `init` 안 했다" 와
+/// "디렉터리가 사라졌다" 는 사람이 할 일이 다르다 — 앞은 `moai init`, 뒤는
+/// 등록을 뺀다. 둘을 한 `None` 으로 접으면 받는 쪽이 파일 시스템을 다시 뒤져야
+/// 하고, 그 뒤짐은 부르는 곳마다 조금씩 달라진다.
+///
+/// 설정이 깨졌거나 디렉터리를 못 읽는 것은 여기가 아니라 `Err` 다 — 고칠 것이지
+/// 상태가 아니다.
+#[derive(Clone)]
+pub enum Opened {
+    Repo(Repo),
+    /// 디렉터리는 있는데 `.moai/` 가 없다.
+    Uninit,
+    /// 디렉터리가 없다.
+    Missing,
+}
+
 impl Repo {
     /// `.moai/` 를 가진 디렉터리를 위로 찾는다. 깊이를 코드에 박지 않는다.
     pub fn discover() -> R<Repo> {
+        Repo::find()?.ok_or_else(|| {
+            "moai 저장소가 아니다 (.moai/ 를 못 찾았다). `moai init` 으로 시작한다".into()
+        })
+    }
+
+    /// [`Repo::discover`] 와 같되 **못 찾은 것을 실패로 접지 않는다** — `None`.
+    ///
+    /// 못 찾은 것과 찾았는데 설정이 깨진 것은 다르다. `.moai` 밖에서 부른
+    /// `status` 는 앞의 것일 때만 등록한 프로젝트를 보여 줘야 한다 — 뒤의 것까지
+    /// 한눈 보기로 넘기면 제 저장소의 깨진 설정이 남의 프로젝트 목록 뒤에 숨는다.
+    pub fn find() -> R<Option<Repo>> {
         let mut dir = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
         loop {
+            // **못 들여다보는 조상은 건너뛴다** (`is_dir` 이 `false` 로 접는다). 위로 찾는
+            // 길에서는 권한 없는 남의 디렉터리를 지나는 것이 흔한 일이라, [`Repo::open`]
+            // 처럼 그것을 실패로 세면 제 저장소 밖 어디서나 넘어진다.
             if dir.join(".moai").is_dir() {
-                let config = Config::load(&dir)?;
-                return Ok(Repo { root: dir, config });
+                return Repo::rooted(dir).map(Some);
             }
             if !dir.pop() {
-                return Err("moai 저장소가 아니다 (.moai/ 를 못 찾았다). `moai init` 으로 시작한다".into());
+                return Ok(None);
             }
+        }
+    }
+
+    fn rooted(root: PathBuf) -> R<Repo> {
+        let config = Config::load(&root)?;
+        Ok(Repo { root, config })
+    }
+
+    /// **준 디렉터리 그 자리의** `.moai/` 를 연다. 위로 찾지 않는다.
+    ///
+    /// 등록한 경로는 사람이 "이것이 프로젝트다" 라고 이름 댄 뿌리다. 위로 찾으면
+    /// 모노레포에서 `.moai` 없는 하위 디렉터리가 바깥 저장소의 이슈를 제 이름으로
+    /// 내 같은 이슈가 두 프로젝트에 두 번 선다 — "init 전" 이 정직한 답이다.
+    ///
+    /// 경로는 **받은 철자 그대로** 뿌리가 된다. 링크를 풀지 않는다 — 풀지 말지는
+    /// 경로를 가진 쪽(`user_config::resolve_dir`)이 이미 정했다.
+    pub fn open(dir: &Path) -> R<Opened> {
+        let gone = |e: &std::io::Error| {
+            // 경로 중간이 파일이면(`file/sub`) `NotADirectory` 다 — 없는 것과 같다.
+            matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)
+        };
+        match std::fs::metadata(dir) {
+            Ok(m) if m.is_dir() => {}
+            Ok(_) => return Err(Fail::new(format!("디렉터리가 아니다 — {}", dir.display()))),
+            Err(e) if gone(&e) => return Ok(Opened::Missing),
+            Err(e) => return Err(Fail::new(format!("{}: {e}", dir.display()))),
+        }
+        match std::fs::metadata(dir.join(".moai")) {
+            Ok(m) if m.is_dir() => Repo::rooted(dir.to_path_buf()).map(Opened::Repo),
+            // `.moai` 가 파일이면 저장소가 아니다 — 위로 찾는 [`Repo::find`] 의 `is_dir` 과 같은 자다.
+            Ok(_) => Ok(Opened::Uninit),
+            Err(e) if gone(&e) => Ok(Opened::Uninit),
+            // 권한 없음 따위는 init 전이 아니다. 접으면 "init 하라" 는 틀린 말을 한다.
+            Err(e) => Err(Fail::new(format!("{}: {e}", dir.join(".moai").display()))),
         }
     }
 
@@ -707,5 +772,28 @@ mod tests {
             })
             .unwrap();
         assert_ne!(minted, "argos-9999", "못 읽는 줄과 같은 id 를 뽑았다");
+    }
+
+    /// 등록한 디렉터리 하나를 열 때 넷을 가른다 — 연 것, init 전, 사라짐, 깨짐.
+    #[test]
+    fn open_tells_uninit_missing_and_broken_apart() {
+        let root = scratch("open");
+        assert!(matches!(Repo::open(&root), Ok(Opened::Repo(r)) if r.root == root));
+
+        let bare = root.join("bare");
+        std::fs::create_dir_all(&bare).unwrap();
+        assert!(matches!(Repo::open(&bare), Ok(Opened::Uninit)));
+        // 위로 찾지 않는다 — 바깥 저장소의 `.moai` 를 제 것으로 내면 안 된다.
+        assert!(matches!(Repo::open(&bare.join("gone")), Ok(Opened::Missing)));
+        // 경로 중간이 파일이어도 없는 것이다.
+        std::fs::write(root.join("file"), "").unwrap();
+        assert!(matches!(Repo::open(&root.join("file/sub")), Ok(Opened::Missing)));
+        assert!(Repo::open(&root.join("file")).is_err(), "파일을 디렉터리로 열었다");
+
+        let broken = root.join("broken");
+        std::fs::create_dir_all(broken.join(".moai")).unwrap();
+        std::fs::write(broken.join(".moai/config.toml"), "prefix = \"\"\n").unwrap();
+        assert!(Repo::open(&broken).is_err(), "깨진 설정을 init 전으로 접었다");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
