@@ -103,25 +103,7 @@ impl Input {
     /// 위에 선 커서가 반 칸만 보이면 어느 글자를 지울지 읽을 수 없다. 맨
     /// 끝이면 커서 자리로 한 칸을 비워 둔다.
     pub fn view(&self, width: usize) -> View<'_> {
-        let cells: Vec<(usize, usize)> =
-            self.text.grapheme_indices(true).map(|(i, g)| (i, g.cell_width() as usize)).collect();
-        let here = cells.iter().position(|&(i, _)| i >= self.at).unwrap_or(cells.len());
-        let need = cells.get(here).map_or(1, |&(_, w)| w.max(1));
-
-        let mut start = 0;
-        let mut before: usize = cells[..here].iter().map(|&(_, w)| w).sum();
-        while start < here && before + need > width {
-            before -= cells[start].1;
-            start += 1;
-        }
-        let mut end = start;
-        let mut used = 0;
-        while end < cells.len() && used + cells[end].1 <= width {
-            used += cells[end].1;
-            end += 1;
-        }
-        let byte = |k: usize| cells.get(k).map_or(self.text.len(), |&(i, _)| i);
-        View { text: &self.text[byte(start)..byte(end)], cursor: before }
+        window(&self.text, self.at, width)
     }
 
     /// 커서 앞 grapheme 의 첫 바이트. 맨 앞이면 0.
@@ -171,6 +153,84 @@ impl Input {
         self.at = from;
         self.settle();
     }
+}
+
+/// 여러 줄 칸([`super::edit::Editor`])이 줄 하나를 이 칸으로 들고 쓰는 것.
+///
+/// **글자를 걷는 자는 여기 하나다.** 줄마다 grapheme·폭 셈을 새로 적으면 두 칸의
+/// 커서가 같은 글에서 다른 자리에 선다. 여러 줄 칸은 줄을 가르고 잇는 것만 하고,
+/// 한 줄 안의 일은 [`Input::key`] 에 맡긴다.
+#[cfg_attr(not(test), expect(dead_code, reason = "첫 부르는 곳은 `n` 폼의 본문이다(moai-11s4)"))]
+impl Input {
+    pub(super) fn at_start(&self) -> bool {
+        self.at == 0
+    }
+
+    pub(super) fn at_end(&self) -> bool {
+        self.at == self.text.len()
+    }
+
+    /// 커서 앞 글의 칸 수. 줄 사이를 오갈 때 겨눌 칸이다.
+    pub(super) fn column(&self) -> usize {
+        self.text[..self.at].cell_width() as usize
+    }
+
+    /// 커서를 칸 `column` 에 세운다. 그 칸이 글자 가운데면 **그 글자 앞에** 선다 —
+    /// 한글 위에서 한 칸 오른쪽을 겨눠도 그 한글을 가리킨다. 줄보다 멀면 끝이다.
+    pub(super) fn seek(&mut self, column: usize) {
+        let mut used = 0;
+        for (i, g) in self.text.grapheme_indices(true) {
+            used += g.cell_width() as usize;
+            if used > column {
+                self.at = i;
+                return;
+            }
+        }
+        self.at = self.text.len();
+    }
+
+    /// 커서 뒤를 떼어 새 칸으로 낸다. 떼인 칸의 커서는 맨 앞이다 — Enter 가 줄을
+    /// 나눈 뒤 커서는 새 줄 머리에 선다.
+    pub(super) fn split_off(&mut self) -> Input {
+        Input { text: self.text.split_off(self.at), at: 0 }
+    }
+
+    /// 뒤에 칸 하나를 잇는다. 커서는 **이은 자리**에 선다 — 앞 줄 끝의 Backspace 도
+    /// 줄 끝의 Delete 도 거기다. 이어서 한 글자가 되면(`e` 뒤에 결합 악센트로
+    /// 시작하는 줄) 붙은 것의 앞으로 당긴다([`Input::settle`]).
+    pub(super) fn append(&mut self, tail: Input) {
+        self.at = self.text.len();
+        self.text.push_str(&tail.text);
+        self.settle();
+    }
+
+    /// 커서가 없는 줄로 그릴 조각. 머리부터 칸이 차는 데까지다.
+    pub(super) fn head(&self, width: usize) -> &str {
+        window(&self.text, 0, width).text
+    }
+}
+
+/// `text` 를 폭 `width` 칸에 그릴 조각. 커서 `at` 이 칸 안에 들게 민다 — 뜻은
+/// [`Input::view`] 에 적었다. 커서 없는 줄은 `at` 을 0 으로 불러 머리를 얻는다.
+fn window(text: &str, at: usize, width: usize) -> View<'_> {
+    let cells: Vec<(usize, usize)> = text.grapheme_indices(true).map(|(i, g)| (i, g.cell_width() as usize)).collect();
+    let here = cells.iter().position(|&(i, _)| i >= at).unwrap_or(cells.len());
+    let need = cells.get(here).map_or(1, |&(_, w)| w.max(1));
+
+    let mut start = 0;
+    let mut before: usize = cells[..here].iter().map(|&(_, w)| w).sum();
+    while start < here && before + need > width {
+        before -= cells[start].1;
+        start += 1;
+    }
+    let mut end = start;
+    let mut used = 0;
+    while end < cells.len() && used + cells[end].1 <= width {
+        used += cells[end].1;
+        end += 1;
+    }
+    let byte = |k: usize| cells.get(k).map_or(text.len(), |&(i, _)| i);
+    View { text: &text[byte(start)..byte(end)], cursor: before }
 }
 
 #[cfg(test)]
