@@ -678,21 +678,20 @@ pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
                 // **못 쓸 것의 뜻은 `misplaced` 와 같다** — 없는 id 와 종류가 틀린
                 // 것을 한 자로 잰다. 그쪽을 부르지 않는 것은 `misplaced` 가 이
                 // 함수를 부르기 때문이고, 그래서 판정만 같은 모양으로 둔다.
-                Some(e) => match by_id.get(e).filter(|e| e.kind == Kind::Epic) {
-                    Some(e) => milestone_stood(e),
-                    None => continue,
-                },
+                Some(e) => by_id.get(e).filter(|e| e.kind == Kind::Epic).and_then(|e| milestone_stood(e)),
                 // 에픽이 없으면 **접힌 맨 위 줄에서부터** 센다. 제 줄에서 시작하면
                 // 부모 밑에 그려진 자식이 제 마일스톤으로 세어진다(moai-uqoe).
-                None => match fold_top(i, &by_id, &rooted) {
-                    Some(top) => climb(top, &by_id, &rooted),
-                    None => continue,
-                },
+                None => fold_top(i, &by_id, &rooted).and_then(|top| climb(top, &by_id, &rooted)),
             }
         };
-        if let Some(m) = got {
-            out.insert(i.id.as_str(), m);
-        }
+        // **못 받은 줄도 지도를 쓴다 — 같은 id 의 뒷줄이 이긴다.** 멤버는 에픽 줄을
+        // `by_id`(뒷줄이 이긴다)로 찾는데, 받은 줄만 적으면 같은 id 의 앞줄이 받은
+        // 값이 남아 `nav::under_milestone(e)` 는 그 값으로 그리고 멤버는 뒷줄의
+        // 빈 값으로 세어진다 — 머지를 잘못 푼 파일에서 moai-0prl 이 되살아난다.
+        match got {
+            Some(m) => out.insert(i.id.as_str(), m),
+            None => out.remove(i.id.as_str()),
+        };
     }
     out
 }

@@ -851,4 +851,22 @@ mod tests {
         assert!(!index.is_dir(&issues, 1), "자식 없는 이슈가 디렉터리가 됐다");
         assert!(index.entries(&issues, &vec![Seg::Epic("argos-0001".into())]).is_empty());
     }
+
+    /// **같은 id 의 에픽 줄 둘이 마일스톤을 달리 들어도 세는 줄과 그리는 줄이 같다.**
+    /// 멤버는 뒷줄로 에픽을 찾는데 지도가 앞줄이 받은 값을 남기면, 탐색기는 그
+    /// 값으로 멤버를 그리고 셈은 뒷줄의 빈 값으로 뺀다. 중복 id 는 머지를 잘못
+    /// 풀면 실재한다(`duplicate_id`). 두 차례 모두 본다.
+    #[test]
+    fn a_duplicate_epic_id_counts_what_it_draws() {
+        let own = |stone: Option<&str>| {
+            let mut e = make("argos-0001", Kind::Epic);
+            e.milestone = stone.map(Into::into);
+            e
+        };
+        for (a, b) in [(Some("argos-m001"), None), (None, Some("argos-m001"))] {
+            let issues =
+                vec![make("argos-m001", Kind::Milestone), own(a), own(b), epic_of("argos-0002", "argos-0001")];
+            assert_counts_what_it_draws(&issues);
+        }
+    }
 }
