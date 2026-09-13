@@ -609,6 +609,8 @@ fn a_group_stands_in_the_column_its_members_read() {
     let list = ok(s.path(), &["show", "--all"]);
     let row = list.lines().find(|l| l.starts_with(&epic)).unwrap();
     assert!(row.contains("▸"), "{list}");
+    assert!(list.contains("3건 (in_progress 2 · done 1)"), "꼬리가 줄과 다른 칸으로 셌다\n{list}");
+    assert!(!ok(s.path(), &["show", "-s", "todo"]).contains(&epic), "진행 중인 에픽을 할 일로 골랐다");
 
     // 손으로 둔 칸은 읽은 칸을 못 이긴다 — 그러나 상세가 그것을 말한다.
     ok(s.path(), &["mv", &epic, "done"]);

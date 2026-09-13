@@ -211,7 +211,9 @@ impl Filter {
     pub fn hidden_by(&self, i: &Issue, wh: &Where) -> Option<Hide> {
         let idea = crate::report::is_idea(i) && !self.ideas;
         let deferred = self.deferred.is_none() && !self.all && wh.deferred(i);
-        let done = !self.all && self.status.is_empty() && i.status.is_done();
+        // 묶음은 **읽은 칸**으로 닫혔는지 본다 — 멤버가 남은 에픽을 손으로
+        // `done` 에 뒀다고 목록에서 숨기면, 진행 중인 묶음이 사라진다.
+        let done = !self.all && self.status.is_empty() && wh.column(i) == crate::config::DONE;
         match (idea, deferred, done) {
             (false, false, false) => None,
             (true, false, false) => Some(Hide::Idea),
@@ -230,7 +232,9 @@ impl Filter {
         if self.hidden_by(i, wh).is_some() {
             return false;
         }
-        if !self.status.is_empty() && !self.status.iter().any(|s| s == i.status.as_str()) {
+        // `-s todo` 는 **서 있는 칸**으로 고른다. 멤버가 집힌 에픽을 손으로 둔
+        // 칸으로 고르면 "할 일" 에 진행 중인 묶음이 섞인다(moai-j3b3).
+        if !self.status.is_empty() && !self.status.iter().any(|s| s == wh.column(i)) {
             return false;
         }
         if !self.tags.iter().all(|any| any.iter().any(|t| i.tags.contains(t))) {
@@ -750,6 +754,31 @@ mod tests {
     /// **담아 둔 생각은 기본 목록에서 빠지고, 글로는 찾아진다.** 규칙이
     /// 여기 한 곳에 있어야 화면과 CLI 가 같은 것을 센다 — 이 시험이 그 자리를
     /// 지킨다.
+    /// **묶음은 서 있는 칸으로 고르고 숨긴다** (moai-j3b3). 멤버가 집힌 에픽이
+    /// `-s todo` 에 걸리거나, 손으로 `done` 에 둔 진행 중인 에픽이 목록에서
+    /// 사라지면 거름망이 화면과 다른 칸을 본다.
+    #[test]
+    fn a_group_is_filtered_by_the_column_it_stands_in() {
+        let mut epic = issue("argos-0001", "done", &[]);
+        epic.kind = Kind::Epic;
+        let mut held = issue("argos-0002", "in_progress", &[]);
+        held.epic = Some("argos-0001".into());
+        let mut shut = issue("argos-0003", "todo", &[]);
+        shut.kind = Kind::Epic;
+        let mut closed = issue("argos-0004", "done", &[]);
+        closed.epic = Some("argos-0003".into());
+        let all = vec![epic, held, shut, closed];
+        let cfg = cfg();
+        let wh = Where::of(&all, &cfg);
+        let picked = |raw: Raw| -> Vec<&str> {
+            let f = Filter::build(raw).unwrap();
+            all.iter().filter(|i| f.matches(i, NOW, &wh)).map(|i| i.id.as_str()).collect()
+        };
+        assert_eq!(picked(Raw { status: s(&["todo"]), ..Raw::default() }), Vec::<&str>::new());
+        assert_eq!(picked(Raw { status: s(&["in_progress"]), ..Raw::default() }), ["argos-0001", "argos-0002"]);
+        assert_eq!(picked(Raw::default()), ["argos-0001", "argos-0002"], "읽은 칸으로 숨기지 않았다");
+    }
+
     #[test]
     fn an_idea_hides_until_it_is_asked_for() {
         let mut thought = issue("argos-0001", "todo", &[]);

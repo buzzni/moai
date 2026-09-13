@@ -221,16 +221,18 @@ pub fn list(
     }
 
     out.push(String::new());
-    out.push(summary(issues, cfg, hidden));
+    out.push(summary(issues, cfg, hidden, wh));
     out
 }
 
-fn summary(issues: &[Issue], cfg: &Config, hidden: Hidden) -> String {
+/// 칸별 건수. 묶음은 **줄마다 그린 그 칸**으로 센다 — S 열에 `▸` 로 선 에픽을
+/// 꼬리에서 `todo` 로 세면 한 화면이 같은 줄을 두 칸으로 말한다.
+fn summary(issues: &[Issue], cfg: &Config, hidden: Hidden, wh: &crate::query::Where) -> String {
     let counts: Vec<String> = cfg
         .statuses
         .iter()
         .filter_map(|s| {
-            let n = issues.iter().filter(|i| i.status.as_str() == s).count();
+            let n = issues.iter().filter(|i| wh.column(i) == s).count();
             (n > 0).then(|| format!("{s} {n}"))
         })
         .collect();
