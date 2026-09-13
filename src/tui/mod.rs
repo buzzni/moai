@@ -4,6 +4,8 @@
 //! 그림은 `TestBackend` 로 시험된다 — 둘 다 TTY 를 켜지 않는다.
 
 pub mod draw;
+#[cfg_attr(not(test), expect(dead_code, reason = "첫 부르는 곳은 `n` 폼의 본문이다(moai-11s4)"))]
+pub mod edit;
 pub mod input;
 pub mod scroll;
 
