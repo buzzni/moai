@@ -237,7 +237,7 @@ fn warnings_of(issues: &[Issue], unreadable: &[Option<String>], cfg: &Config, no
 pub struct App {
     pub issues: Vec<Issue>,
     pub index: Index,
-    /// 묶음 id → 멤버에서 읽은 칸 (`report::group_states`). **적재 때 한 번 센다**
+    /// 묶음 id → 멤버에서 읽은 칸과 집은 멤버가 있는가 (`report::group_stands`). **적재 때 한 번 센다**
     /// — 프레임마다 세면 줄 하나 그리는 데 저장소를 걷는다.
     states: States,
     pub cfg: Config,
