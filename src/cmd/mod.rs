@@ -202,6 +202,26 @@ pub fn json_line<T: serde::Serialize>(v: &T) -> R<Vec<String>> {
         .map_err(|e| Fail::new(e.to_string()))
 }
 
+/// 이슈 한 줄의 기계 출력. 묶음이면 **멤버에서 읽은 칸**을 `derived_status` 로
+/// 곁들인다 (`report::group_states`).
+///
+/// `status` 의 뜻은 안 바꾼다 — 파일에 적힌 값 그대로다. 이미 나간 계약이라,
+/// 그 키를 읽은 칸으로 바꾸면 `--json` 을 읽고 되쓰는 쪽이 읽은 값을 적힌
+/// 값으로 믿는다. 사람 화면이 `-s` 로 고르고 그리는 칸이 이 키다.
+#[derive(serde::Serialize)]
+pub struct Row<'a> {
+    #[serde(flatten)]
+    pub issue: &'a crate::model::Issue,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub derived_status: Option<&'a str>,
+}
+
+impl<'a> Row<'a> {
+    pub fn of(issue: &'a crate::model::Issue, states: &std::collections::BTreeMap<&str, &'a str>) -> Row<'a> {
+        Row { issue, derived_status: states.get(issue.id.as_str()).copied() }
+    }
+}
+
 /// 객체 하나에 필드를 덧붙여 낸다. 선언 순서를 지키려면 직렬화된 뒤에
 /// 붙이는 수밖에 없다 — 중간에 `Value` 를 쓰면 순서가 사라진다.
 pub fn json_with<T: serde::Serialize>(base: &T, extra: &[(&str, String)]) -> R<Vec<String>> {

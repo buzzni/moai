@@ -26,10 +26,11 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // 배너가 없다 — 여기서 안 알리면 목록이 조용히 짧아지고, 부른 쪽은
         // 그 이슈가 없다고 읽는다. 다른 읽기 명령과 같은 길로 간다.
         super::report_load_errors(&repo.issues_path(), &load.errors);
+        let states = crate::report::group_states(&load.issues, &repo.config);
         let rows: Vec<Row> = index
             .entries(&load.issues, &path)
             .iter()
-            .map(|e| Row::of(&index, &load.issues, e))
+            .map(|e| Row::of(&index, &load.issues, &states, e))
             .collect();
         return super::json_line(&rows);
     }
@@ -111,12 +112,15 @@ struct Row {
     path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     status: Option<String>,
+    /// 묶음이면 멤버에서 읽은 칸. `show --json` 과 같은 키, 같은 뜻이다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    derived_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     priority: Option<u8>,
 }
 
 impl Row {
-    fn of(index: &Index, issues: &[Issue], e: &Entry) -> Row {
+    fn of(index: &Index, issues: &[Issue], states: &std::collections::BTreeMap<&str, &str>, e: &Entry) -> Row {
         let dir = matches!(e, Entry::Dir { .. });
         let title = index.label(issues, e);
         match e.at() {
@@ -127,6 +131,7 @@ impl Row {
                 dir,
                 path: issues[at].id.clone(),
                 status: Some(issues[at].status.as_str().to_string()),
+                derived_status: states.get(issues[at].id.as_str()).map(|s| s.to_string()),
                 priority: Some(issues[at].priority()),
             },
             None => Row {
@@ -139,6 +144,7 @@ impl Row {
                     _ => NO_MILESTONE.into(),
                 },
                 status: None,
+                derived_status: None,
                 priority: None,
             },
         }

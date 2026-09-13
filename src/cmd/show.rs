@@ -189,7 +189,8 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     crate::query::sort_for_display(&mut shown);
 
     if ctx.json {
-        return super::json_line(&shown);
+        let rows: Vec<super::Row> = shown.iter().map(|i| super::Row::of(i, &wh.states)).collect();
+        return super::json_line(&rows);
     }
     if args.tree {
         // **자리는 `nav` 가 정한다.** 트리와 탐색기가 자리를 따로 정하면
@@ -258,7 +259,7 @@ fn one(ctx: &Ctx, repo: &Repo, all: &[Issue], issue: &Issue, raw: bool) -> R<Vec
         if let Some(root) = seen.roots.get(issue.id.as_str()) {
             extra.push(("shelved_by", serde_json::to_string(root).map_err(|e| Fail::new(e.to_string()))?));
         }
-        return super::json_with(issue, &extra);
+        return super::json_with(&super::Row::of(issue, &seen.states), &extra);
     }
 
     // 이력은 언제나 맨 끝이다. 에픽이면 멤버를 그 **앞에** 끼운다.

@@ -612,6 +612,15 @@ fn a_group_stands_in_the_column_its_members_read() {
     assert!(list.contains("3건 (in_progress 2 · done 1)"), "꼬리가 줄과 다른 칸으로 셌다\n{list}");
     assert!(!ok(s.path(), &["show", "-s", "todo"]).contains(&epic), "진행 중인 에픽을 할 일로 골랐다");
 
+    // 기계 출력은 `status` 를 적힌 값 그대로 두고 읽은 칸을 곁들인다 — 표면 넷이 같은 키다.
+    for args in [vec!["show", &epic, "--json"], vec!["show", "--json"], vec!["tui", "--json"]] {
+        let json = ok(s.path(), &args);
+        let row = json.split("},{").find(|r| r.contains(&format!(r#""id":"{epic}""#))).unwrap();
+        assert!(row.contains(r#""status":"todo""#) && row.contains(r#""derived_status":"in_progress""#), "{args:?}: {json}");
+    }
+    let member_row = ok(s.path(), &["show", &held, "--json"]);
+    assert!(!member_row.contains("derived_status"), "묶음 아닌 줄이 읽은 칸을 냈다 — {member_row}");
+
     // 손으로 둔 칸은 읽은 칸을 못 이긴다 — 그러나 상세가 그것을 말한다.
     ok(s.path(), &["mv", &epic, "done"]);
     let out = ok(s.path(), &["show", &epic]);
@@ -619,6 +628,8 @@ fn a_group_stands_in_the_column_its_members_read() {
     assert!(out.contains("적힌 칸 `done` 은 안 읽는다"), "{out}");
     let edited = ok(s.path(), &["edit", &epic, "--tag", "storage"]);
     assert!(edited.lines().nth(1).unwrap().contains("▸ in_progress"), "{edited}");
+    let edited = ok(s.path(), &["edit", &epic, "--tag", "cache", "--json"]);
+    assert!(edited.contains(r#""status":"done""#) && edited.contains(r#""derived_status":"in_progress""#), "{edited}");
 }
 
 /// 멤버 없는 에픽은 0% 가 아니다 — "아직 안 한 것" 과 "속을 안 채운 것" 은 다르다.

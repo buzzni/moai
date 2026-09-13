@@ -107,7 +107,9 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     })?;
 
     if ctx.json {
-        return super::json_line(&edited);
+        let states: std::collections::BTreeMap<&str, &str> =
+            read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect();
+        return super::json_line(&super::Row::of(&edited, &states));
     }
     if !changed {
         return Ok(vec![format!(
