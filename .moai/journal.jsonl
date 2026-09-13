@@ -939,3 +939,5 @@
 {"ts":"2026-09-13T16:52:08Z","id":"moai-cera.c1d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"--parent moai-cera 로 만들어 id 는 에픽 밑에 붙었지만 소속은 비어 트리의 '에픽 없음' 에 떠 있었다(moai-6ynw 의 그 길). 에픽의 칸 때문이 아니다 — 제 에픽으로 되돌린다"}
 {"ts":"2026-09-13T16:52:09Z","id":"moai-fwl9.0s4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"--parent moai-fwl9 로 만들어 id 는 에픽 밑에 붙었지만 소속은 비어 트리의 '에픽 없음' 에 떠 있었다(moai-6ynw 의 그 길). 에픽의 칸 때문이 아니다 — 제 에픽으로 되돌린다"}
 {"ts":"2026-09-13T16:52:09Z","id":"moai-j3b3.vpq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"--parent moai-j3b3 로 만들어 id 는 에픽 밑에 붙었지만 소속은 비어 트리의 '에픽 없음' 에 떠 있었다(moai-6ynw 의 그 길). 에픽의 칸 때문이 아니다 — 제 에픽으로 되돌린다"}
+{"ts":"2026-09-13T16:53:49Z","id":"moai-9t3l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"부모가 에픽이면 그 에픽을 소속으로 본다 — --parent <에픽> 자식이 '에픽 없음' 으로 빠진다"}
+{"ts":"2026-09-13T16:53:49Z","id":"moai-6ynw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"사용자 결정 A 로 moai-9t3l 에 펼쳤다 (에픽 moai-0xp7)"}
