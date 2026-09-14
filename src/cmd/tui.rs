@@ -301,12 +301,65 @@ fn bracketed_paste(out: &mut impl std::io::Write, on: bool) -> std::io::Result<(
 
 /// 패닉하면 **먼저 bracketed paste 를 끄고** 걸려 있던 훅(ratatui 의 터미널 복구)으로 넘긴다.
 /// 어느 스레드의 패닉에도 돈다 — 버린 다시 읽기 스레드가 터져도 셸이 붙여넣기를 싸서 받지 않는다.
+///
+/// **편집기가 터미널을 쥔 동안에는 편집기가 끝날 때까지 기다린다**([`EDITING`]).
 fn paste_off_on_panic() {
     let next = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        EDITING.wait();
         let _ = bracketed_paste(&mut std::io::stdout(), false);
         next(info);
     }));
+}
+
+/// 편집기에 터미널을 넘긴 동안 **다른 스레드의 패닉 훅을 세워 두는 문**(moai-46xe).
+///
+/// 편집기가 도는 동안 루프 스레드는 편집기를 기다리지만, 짓던·버린 다시 읽기 스레드는 계속
+/// 돈다. 그것이 터지면 훅이 raw mode 를 끄고 대체 화면을 걷어 편집기 화면이 흐트러진다.
+///
+/// **건너뛰지 않고 기다린다.** 건너뛰면 그 패닉은 `App::follow` 가 `resume_unwind` 로
+/// 되던질 때 다시 훅을 안 지나므로, 터미널이 raw·대체 화면에 남고 패닉 글도 사라진다.
+/// 기다렸다가 평소대로 돌면 편집기 밖에서 터진 것과 같은 차례가 된다: 훅이 걷고, 루프가
+/// 되던져 끝낸다. 기다리는 쪽은 그리지 않는 스레드라 세워 둬도 해가 없다.
+///
+/// **문을 쥔 스레드 자신은 안 기다린다.** 편집기를 부르는 길에서 루프 스레드가 터지면 풀어
+/// 줄 스레드가 자기뿐이라 영영 멈춘다.
+static EDITING: Gate = Gate::new();
+
+struct Gate {
+    holder: std::sync::Mutex<Option<std::thread::ThreadId>>,
+    opened: std::sync::Condvar,
+}
+
+impl Gate {
+    const fn new() -> Gate {
+        Gate { holder: std::sync::Mutex::new(None), opened: std::sync::Condvar::new() }
+    }
+
+    /// 이 스레드가 문을 쥔다.
+    fn hold(&self) {
+        *self.lock() = Some(std::thread::current().id());
+    }
+
+    /// 문을 연다 — 기다리던 훅이 전부 깬다.
+    fn release(&self) {
+        *self.lock() = None;
+        self.opened.notify_all();
+    }
+
+    /// 남이 쥐고 있으면 열릴 때까지 선다.
+    fn wait(&self) {
+        let me = std::thread::current().id();
+        let mut holder = self.lock();
+        while holder.is_some_and(|h| h != me) {
+            holder = self.opened.wait(holder).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+
+    /// **훅 안에서 부르므로 독든 자물쇠에도 패닉하지 않는다** — 훅 안의 패닉은 프로세스를 끊는다.
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<std::thread::ThreadId>> {
+        self.holder.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
 /// 생각 담기를 적을 편집기(moai-08af). **환경과 PATH 를 읽는 것은 여기다** — 고르는 차례는
@@ -339,8 +392,10 @@ fn executable(_: &std::fs::Metadata) -> bool {
 /// 끝낼 때(`screen`)와 같은 차례다: bracketed paste 를 끄고 raw mode·대체 화면을 걷는다. 안
 /// 끄면 편집기에 붙인 글이 `200~…201~` 에 싸여 들어간다. 편집기가 도는 동안 **루프 스레드는
 /// 편집기를 기다리며 서 있다** — 그리기·스피너·다시 읽기 받기(`follow`)가 전부 멈춘다. 다시
-/// 읽기 스레드는 계속 짓지만 그리지 않고, 돌아오면 다음 걸음이 받는다.
+/// 읽기 스레드는 계속 짓지만 그리지 않고, 돌아오면 다음 걸음이 받는다. 그 스레드가 터지면
+/// 훅은 [`EDITING`] 앞에서 선다 — 문은 **걷기 전에** 쥐고, 여는 것은 루프가 올린 뒤다.
 fn suspend() {
+    EDITING.hold();
     let _ = bracketed_paste(&mut std::io::stdout(), false);
     ratatui::restore();
 }
@@ -487,7 +542,12 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
             // **받은 글을 올리기보다 먼저 담는다.** 올리기가 실패하면 루프가 끝나는데, 먼저 담아
             // 두면 적은 것은 파일에 있다 — 거꾸로 하면 편집기에서 적은 글이 임시 파일과 함께 사라진다.
             app.edited(edit.into, got);
-            resume(term)?;
+            // **올린 뒤에 연다.** 먼저 열면 기다리던 훅이 이미 내린 터미널을 걷고, 그 뒤에 올린
+            // 화면은 `resume_unwind` 가 훅 없이 끝내며 raw·대체 화면인 채로 셸에 남는다. 올리기가
+            // 실패해도 연다 — 기다리던 훅이 패닉 글을 내야 한다.
+            let up = resume(term);
+            EDITING.release();
+            up?;
         }
         let now = std::time::Instant::now();
         // 키가 읽기를 띄웠으면(층으로 올라가기 따위) 느린 걸음까지 기다리지 않고 받으러 깬다.
@@ -557,6 +617,27 @@ mod tests {
         bracketed_paste(&mut out, true).unwrap();
         bracketed_paste(&mut out, false).unwrap();
         assert_eq!(out, b"\x1b[?2004h\x1b[?2004l");
+    }
+
+    /// **편집기가 쥔 문 앞에서 남의 훅은 서고, 쥔 스레드 자신은 안 선다**(moai-46xe). 전역
+    /// [`EDITING`] 이 아니라 따로 세운 문으로 본다 — 시험은 한 프로세스에서 나란히 돈다.
+    #[test]
+    fn a_panic_elsewhere_waits_for_the_editor_but_the_holder_does_not() {
+        use std::sync::{Arc, mpsc};
+        let gate = Arc::new(Gate::new());
+        gate.hold();
+        gate.wait(); // 쥔 스레드 — 서면 여기서 시험이 멈춘다
+        let (tx, rx) = mpsc::channel();
+        let other = Arc::clone(&gate);
+        let waiter = std::thread::spawn(move || {
+            other.wait();
+            tx.send(()).unwrap();
+        });
+        assert!(rx.recv_timeout(Duration::from_millis(150)).is_err(), "편집기가 도는데 훅이 지나갔다");
+        gate.release();
+        rx.recv_timeout(Duration::from_secs(5)).expect("문을 열었는데 훅이 안 깼다");
+        waiter.join().unwrap();
+        gate.wait(); // 연 문은 누구도 안 세운다
     }
 
     /// 편집기 시험의 임시 자리. 이름에 **빈칸**을 넣는다 — 경로가 셸에서 쪼개지면 여기서 드러난다.
