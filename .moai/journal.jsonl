@@ -1333,3 +1333,6 @@
 {"ts":"2026-09-14T06:45:24Z","id":"moai-fy99","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"16색 빛줄기 — 자식 둔 이슈 포함, 한글 제목에서 안 깜빡임"}
 {"ts":"2026-09-14T06:52:14Z","id":"moai-nc7w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"main 을 합쳤다(17ef585): 작업하는 사이 main 의 d1a780b(moai-u3r2)가 진행 바탕 토글 p·App::shade 를 기능째 걷어, 표의 Browse::Shade·Ctx::shade·바 차례에서도 걷었다. 뒤 이슈(hudg 의 SPC t p)는 옮길 것이 없다"}
 {"ts":"2026-09-14T06:52:14Z","id":"moai-nc7w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"키→동작 표(src/tui/keys.rs) 한 곳에서 App::key·층의 거절·키 바·안내 문구가 읽고 도움말은 시험이 표와 견준다 — 키 배치는 그대로(층의 Ctrl/Alt-F7 거절 하나만 고침)"}
+{"ts":"2026-09-14T06:55:15Z","id":"moai-zcuh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 가 워크트리 겹쳐 보기를 켠 채로 시작한다 — w 는 끄는 키가 된다"}
+{"ts":"2026-09-14T06:55:29Z","id":"moai-zcuh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T06:55:54Z","id":"moai-hudg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"갱신(2026-09-14): 진행 바탕 자체가 걷혔다(moai-u3r2, d1a780b) — 확정표의 SPC t p 진행 바탕 토글은 할 일이 없어 빠진다. SPC t 에는 w 워크트리·r 원문↔그리기만 남는다"}
