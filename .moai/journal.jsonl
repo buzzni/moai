@@ -1514,3 +1514,34 @@
 {"ts":"2026-09-14T09:06:44Z","id":"moai-ha03","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T09:07:53Z","id":"moai-0lmn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T09:08:19Z","id":"moai-4l7m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"guide·overlay 문서에 적었다 (ef4bc0b) — 문서만 바꿔 리뷰는 안 돌렸다"}
+{"ts":"2026-09-14T09:10:18Z","id":"moai-pqrq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"옮겨 작업한다 (2026-09-14, 사용자 요청): 겹쳐 보는 탐색기가 옆 워크트리와 제 워크트리의 HEAD 가 움직인 것(커밋·merge·checkout)도 다시 읽을 까닭으로 센다 — 갈라진 자리(merge-base)가 바뀌면 지운 줄 숨김(moai-u7k8)의 답이 바뀐다."}
+{"ts":"2026-09-14T09:10:18Z","id":"moai-lql6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 겹쳐 보기가 워크트리 HEAD 이동(커밋·merge·checkout)도 다시 읽을 까닭으로 센다"}
+{"ts":"2026-09-14T09:10:18Z","id":"moai-pqrq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-lql6 로 옮겨 작업한다"}
+{"ts":"2026-09-14T09:10:18Z","id":"moai-lql6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T09:13:05Z","id":"moai-l11z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"worktree-moai-planned 를 main 에 머지 — planned_at(defer·--undo 가 적음), 겹칠 때 max(status_since, planned_at)"}
+{"ts":"2026-09-14T09:13:27Z","id":"moai-l11z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"done","to":"review","note":"done 은 이르게 옮겼다 — main 머지가 main 의 커밋 안 된 변경(src/cli.rs·worktree.rs·tests/cli.rs)에 막혀 아직 안 들어갔다. 코드는 브랜치 worktree-moai-planned 에 있다"}
+{"ts":"2026-09-14T09:14:50Z","id":"moai-ha03","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"d52b7c5. 결정: 롤업 막대(Roll::percent)는 미룬 멤버를 센 채로 둔다 — 막대는 '계획 중 얼마나 했나' 다. ready 의 차례만 칸 셈(counted, 미룬 멤버 뺌)에서 낸 Stand::progress 로 잰다 — 차례가 묻는 것은 '몇 번 더 집으면 닫히나' 다. ready 는 rollup 을 따로 안 부르고 막음과 차례에 group_stands_in 한 번을 쓴다(한 명령 안에 두 자가 서지 않게). blocking() 의 '필요할 때만 센다' 조기 반환은 ready 에서 빠졌지만 롤업이 같은 걸음을 걸었으므로 셈은 안 는다 — held 는 여전히 blocking() 을 쓴다. 시험: 새 시험이 HEAD 에서 빨갛고(원래 차례 [001b,001c,002e]) 적용 뒤 전체 659 단위·243 CLI 통과(격리 사본)."}
+{"ts":"2026-09-14T09:14:50Z","id":"moai-ha03.qlr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — ready 의 끝나가는 에픽 차례를 칸 셈으로 잰다 (moai-ha03)"}
+{"ts":"2026-09-14T09:14:50Z","id":"moai-ha03","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"d52b7c5. 리뷰를 기다린다"}
+{"ts":"2026-09-14T09:15:00Z","id":"moai-ha03.qlr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T09:17:14Z","id":"moai-ukm1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"세션 핸드오프 — 집은 채 닫을 때 다음 세션에 한 줄을 남긴다"}
+{"ts":"2026-09-14T09:17:14Z","id":"moai-z5aj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"안내의 '세션을 닫기 전에' 에 다음 세션용 note 한 줄 관례를 넣는다"}
+{"ts":"2026-09-14T09:17:14Z","id":"moai-iaa4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"닫기 훅이 집은 줄마다 다음 세션용 note 명령을 함께 낸다"}
+{"ts":"2026-09-14T09:17:14Z","id":"moai-ukm1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-0rui 에서 펼쳤다 — 세션을 닫을 때 다음 세션용 프롬프트 한 줄을 집은 이슈에 note 로 남기고 status 가 비춘다"}
+{"ts":"2026-09-14T09:17:14Z","id":"moai-0rui","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ukm1 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-09-14T09:17:32Z","id":"moai-z5aj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T09:17:32Z","id":"moai-iaa4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T09:17:36Z","id":"moai-lql6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-14T09:17:36Z","id":"moai-lql6.hg6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 탐색기 겹쳐 보기가 워크트리 HEAD 이동도 다시 읽는다 (moai-lql6)"}
+{"ts":"2026-09-14T09:17:36Z","id":"moai-lql6.hg6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T09:17:44Z","id":"moai-glix","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"edit --milestone <다른 마일스톤> 도 에픽·부모가 이기는 줄에서 조용히 안 먹는다 — moai-0lmn 은 none 만 말한다"}
+{"ts":"2026-09-14T09:21:08Z","id":"moai-pqdg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"edit 이 끊지 못한 마일스톤을 말한다"}
+{"ts":"2026-09-14T09:21:08Z","id":"moai-0wpa","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"edit --milestone none 이 에픽·부모에서 오는 마일스톤을 못 끊으면 stderr 한 줄·--json inherited_milestone 으로 댄다"}
+{"ts":"2026-09-14T09:21:08Z","id":"moai-pqdg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-0lmn 에서 펼쳤다 — edit --milestone none 도 물려받은 마일스톤(에픽·부모에서 오는 것)을 못 끊는데 조용하다 — w5gz 와 같은 모양"}
+{"ts":"2026-09-14T09:21:08Z","id":"moai-0lmn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"moai-pqdg 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-14T09:21:21Z","id":"moai-0wpa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T09:21:22Z","id":"moai-0wpa","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"구현은 moai-0lmn(idea) 에서 d140c11 로 이미 커밋했다 — report::milestone_from_above 는 옆 세션의 d52b7c5 에 함께 들어갔다. idea 가 훅의 집은 일로 안 세여 리뷰 이슈를 못 세워, 사람과 정해 promote 로 이슈를 세웠다. --milestone <다른 것> 도 조용한 것은 moai-glix 로 담았다."}
+{"ts":"2026-09-14T09:21:22Z","id":"moai-0wpa.vvf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — edit --milestone none 이 물려받은 마일스톤을 말하기"}
+{"ts":"2026-09-14T09:21:31Z","id":"moai-0wpa.vvf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T09:22:19Z","id":"moai-l11z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"중복 moai-4i82 를 지웠다 (2026-09-14, 사용자와 정함) — moa-issue-e9 가 같은 일(plan_since)을 2분 뒤 main 에서 시작했다가 이쪽을 남기기로 하고 코드를 되돌렸다. 넘긴 조각(CLI 시험·status 도움말·되쓰기 시험)은 이 이슈에 반영됐다."}
+{"ts":"2026-09-14T09:22:19Z","id":"moai-4i82","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"defer·--undo 가 계획 시각을 스냅샷에 적고, --worktree 겹쳐 보기가 칸 이동과 계획 시각 중 늦은 것으로 줄을 고른다"}
