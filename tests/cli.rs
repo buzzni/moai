@@ -596,6 +596,56 @@ fn a_colour_chosen_in_the_user_config_beats_the_hash_and_only_colour_changes() {
     assert!(ls.status.success() && String::from_utf8_lossy(&ls.stderr).contains("\"red\""), "{}", text(&ls));
 }
 
+/// 줄 **맨 앞의** 칠한 칸 — (SGR, 글). `indent` 를 떼고 곧바로 SGR 이 이어져야 칸이다.
+///
+/// 한눈 보기의 줄은 `  <SGR>이름<리셋>  <SGR>id<리셋> …`, 머리는 `<SGR>이름<리셋>  경로` 다.
+/// **이름은 이 자리로 찾는다** — 줄 어디서든 `이름<리셋>` 을 찾으면 무작위 id 의 끝이 이름과
+/// 같을 때(`argos-i3p1` 과 `p1`) 남의 줄을 제 줄로 읽어 시험이 흔들렸다(moai-7ccd).
+fn name_cell<'a>(line: &'a str, indent: &str) -> Option<(String, &'a str)> {
+    let mut rest = line.strip_prefix(indent)?;
+    let mut sgr = String::new();
+    while let Some(tail) = rest.strip_prefix("\u{1b}[") {
+        let end = tail.find('m')?;
+        if !tail[..end].chars().all(|c| c.is_ascii_digit() || c == ';') {
+            return None;
+        }
+        sgr.push_str(&rest[..end + 3]);
+        rest = &tail[end + 1..];
+    }
+    let (text, _) = rest.split_once("\u{1b}[0m")?;
+    (!sgr.is_empty()).then_some((sgr, text))
+}
+
+/// 프로젝트 `name` 의 일 줄 중 `id` 가 든 것.
+fn project_row<'a>(painted: &'a str, name: &str, id: &str) -> Option<&'a str> {
+    painted.lines().find(|l| name_cell(l, "  ").is_some_and(|(_, n)| n == name) && l.contains(id))
+}
+
+/// 프로젝트 `name` 의 머리 줄.
+fn project_head<'a>(painted: &'a str, name: &str) -> Option<&'a str> {
+    painted.lines().find(|l| !l.starts_with(' ') && name_cell(l, "").is_some_and(|(_, n)| n == name))
+}
+
+/// **줄 찾기는 id 의 끝에 속지 않는다**(moai-7ccd). 옛 찾기(`이름<리셋>` 이 줄 어디든 있다)는
+/// `p0` 의 줄에 선 `argos-i3p1` 을 `p1` 의 줄로 읽었다 — 그 무작위 id 를 손으로 박아 본다.
+#[test]
+fn a_project_row_is_found_by_its_name_cell_not_by_an_id_that_ends_like_it() {
+    let painted = "\u{1b}[1m\u{1b}[32mp0\u{1b}[0m  /w/p0   1건
+  \u{1b}[32mp0\u{1b}[0m   \u{1b}[32margos-i3p1\u{1b}[0m  p2  집을 일
+
+\u{1b}[1m\u{1b}[35mp1\u{1b}[0m  /w/p1   1건
+  \u{1b}[35mp1\u{1b}[0m   \u{1b}[35margos-i3p1\u{1b}[0m  p2  집을 일
+";
+    let old = painted.lines().find(|l| l.starts_with("  ") && l.contains("p1\u{1b}[0m") && l.contains("argos-i3p1")).unwrap();
+    assert!(old.contains("\u{1b}[32mp0"), "옛 찾기가 틀리는 자리를 못 만들었다 — {old:?}");
+    let row = project_row(painted, "p1", "argos-i3p1").expect("p1 의 줄이 없다");
+    assert_eq!(name_cell(row, "  "), Some(("\u{1b}[35m".to_string(), "p1")), "{row:?}");
+    let head = project_head(painted, "p1").expect("p1 의 머리가 없다");
+    assert_eq!(name_cell(head, ""), Some(("\u{1b}[1m\u{1b}[35m".to_string(), "p1")), "{head:?}");
+    assert_eq!(project_row(painted, "p", "argos-i3p1"), None, "이름의 앞부분으로 줄을 찾았다");
+    assert_eq!(project_row(painted, "i3p1", ""), None, "id 로 줄을 찾았다");
+}
+
 /// **프로젝트마다 색이 다르고, 한 프로젝트의 줄은 한 색이다** (moai-xs9x). 색은 경로로
 /// 고른다 — 다른 프로젝트를 더하고 빼도 제 색이 그대로다. 색을 끄면 글자는 칠하기 전과
 /// 바이트까지 같다: 이름이 곁에 서서 **색이 혼자 뜻을 지지 않는다.**
@@ -642,15 +692,12 @@ fn outside_a_repo_each_project_wears_its_own_colour_and_only_colour_changes() {
 
         let mut hues = std::collections::BTreeSet::new();
         for n in &names {
-            let row = painted
-                .lines()
-                .find(|l| l.starts_with("  ") && l.contains(&format!("{n}\u{1b}[0m")) && l.contains(id.as_str()))
-                .unwrap_or_else(|| panic!("{n} 의 줄이 없다 — {painted}"));
-            let (name_sgr, id_sgr) = (sgr_before(row, n), sgr_before(row, id));
+            let row = project_row(&painted, n, id).unwrap_or_else(|| panic!("{n} 의 줄이 없다 — {painted}"));
+            let (name_sgr, id_sgr) = (name_cell(row, "  ").unwrap().0, sgr_before(row, id));
             assert!(!name_sgr.is_empty(), "{n} 의 이름 칸이 안 칠해졌다 — {row:?}");
             assert_eq!(name_sgr, id_sgr, "{n} 의 이름 칸과 id 칸 색이 다르다 — {row:?}");
-            let head = painted.lines().find(|l| !l.starts_with(' ') && l.contains(&format!("{n}\u{1b}[0m  "))).unwrap();
-            assert!(sgr_before(head, n).contains(&name_sgr), "{n} 의 머리가 줄과 다른 색이다 — {head:?}");
+            let head = project_head(&painted, n).unwrap_or_else(|| panic!("{n} 의 머리가 없다 — {painted}"));
+            assert!(name_cell(head, "").unwrap().0.contains(&name_sgr), "{n} 의 머리가 줄과 다른 색이다 — {head:?}");
             hues.insert(name_sgr);
         }
         assert!(hues.len() > 1, "열세 프로젝트가 한 색이다 — {painted}");
@@ -659,8 +706,8 @@ fn outside_a_repo_each_project_wears_its_own_colour_and_only_colour_changes() {
     // 다른 프로젝트를 빼고 차례를 바꿔도 제 색이 그대로다 — 등록 순서가 아니라 경로로 고른다.
     let colour_of = |cfg: &Path, n: &str| {
         let t = run(cfg, &["ready"], true);
-        let row = t.lines().find(|l| l.starts_with("  ") && l.contains(&format!("{n}\u{1b}[0m"))).unwrap().to_string();
-        sgr_before(&row, n)
+        let row = project_row(&t, n, "").unwrap_or_else(|| panic!("{n} 의 줄이 없다 — {t}"));
+        name_cell(row, "  ").unwrap().0
     };
     let full = colour_of(&cfg, "p7");
     let alone = s.path().join("alone.toml");
