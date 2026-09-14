@@ -556,10 +556,13 @@ fn prompt_room(avail: usize, error: usize) -> (usize, usize) {
 fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 테두리 두 칸을 뺀 안쪽 폭. 좁은 창에서도 음수가 되지 않게 막는다.
     let inner = at.width.saturating_sub(2) as usize;
-    // 진행 바탕은 반전으로 깐다 — 사용자 팔레트를 모르므로 이름 있는 색 바탕 위에 글자색을
-    // 고르면 테마가 대비를 뒤집을 수 있다(moai-xs9x). 반전은 어느 테마에서도 읽힌다.
+    // 진행 바탕은 **막대 색**으로 깐다(moai-1krv). 처음엔 반전으로 깔았는데 줄마다 흰 덩어리가
+    // 서서 정신없었다 — 사용자 판단. 바탕 위 글자는 검정으로 못 박는다: 제 색(흐린 id·
+    // 우선순위 색)을 초록 위에 두면 안 읽히는 짝이 생긴다. 색이 없는 화면에서는 바탕이
+    // 사라지지만 줄 끝 셈이 글자로 남는다.
     let room = inner.saturating_sub(crate::text::width(CURSOR));
-    let over = Style::new().add_modifier(Modifier::REVERSED);
+    let over = Style::new().fg(Color::Black).bg(PROGRESS);
+    let reversed = Style::new().add_modifier(Modifier::REVERSED);
     let cursor_at = (!rows.is_empty()).then(|| app.cursor.min(rows.len() - 1));
     // 커서 줄을 거꾸로 깔았는가 — 그렇다면 위젯의 커서 반전을 끈다. 위젯은 줄을 그린
     // **뒤에** 커서 스타일을 덮으므로(`List::render`), 켜 두면 걷은 반전이 도로 선다.
@@ -568,15 +571,16 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         .iter()
         .enumerate()
         .map(|(i, r)| match row_line(app, r, inner) {
-            // **커서 줄은 거꾸로 깐다.** 커서가 줄 전체를 반전하므로 그 위의 반전 바탕은
-            // 안 보인다 — 줄은 반전, 끝난 몫만 반전을 걷는다. 커서라는 뜻은 `>` 가 진다.
+            // **커서 줄은 반전 위에 끝난 몫만 초록이다.** 커서가 줄 전체를 반전하면 초록
+            // 바탕도 뒤집혀 글자색이 되므로, 끝난 몫은 반전을 걷고 제 바탕을 입는다.
+            // 커서라는 뜻은 `>` 가 진다.
             (line, Some((from, cut))) if app.shade && Some(i) == cursor_at => {
                 cursor_shaded = true;
-                let under = Style::new().remove_modifier(Modifier::REVERSED);
+                let under = over.remove_modifier(Modifier::REVERSED);
                 // 반전은 **줄이 아니라 항목에** 입힌다. 위젯은 항목 스타일을 커서 자리(`>`)까지
                 // 포함한 줄 전체에 깔고 줄 스타일은 커서 자리 뒤에만 깐다 — 줄에 입히면 `> `
                 // 두 칸만 반전이 빠져 커서 줄의 머리가 끊겨 보인다.
-                ListItem::new(shade(line, from, cut, room, under)).style(over)
+                ListItem::new(shade(line, from, cut, room, under)).style(reversed)
             }
             (line, Some((from, cut))) if app.shade => ListItem::new(shade(line, from, cut, room, over)),
             (line, _) => ListItem::new(line),
@@ -641,7 +645,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
             .block(frame(app, Pane::Explorer).title(title))
             // 커서는 **색만으로 표시하지 않는다** — 반전과 `>` 를 함께 준다. 거꾸로 깐 커서
             // 줄은 반전을 이미 제가 들었다.
-            .highlight_style(if cursor_shaded { Style::new() } else { over })
+            .highlight_style(if cursor_shaded { Style::new() } else { reversed })
             .highlight_symbol(CURSOR),
         at,
         &mut state,
@@ -734,14 +738,19 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> (Line<'a>, Option<(usize, 
         title.push('/');
     }
 
-    let mut spans = head;
-    spans.push(Span::raw(title));
-    if !tally.is_empty() {
-        spans.push(Span::styled(tally, dim()));
-    }
     // 바탕의 100% 는 **제목 시작부터 테두리 안쪽 끝까지**다. 채울 칸은 CLI 막대와 같은
     // 자(`text::bar_fill`)로 잰다 — 99% 가 꽉 차 보이지 않는다.
     let room = budget.saturating_sub(crate::text::width(CURSOR));
+    let title_w = crate::text::width(&title);
+    let mut spans = head;
+    spans.push(Span::raw(title));
+    if !tally.is_empty() {
+        // 셈은 **테두리 끝에 오른쪽 정렬**한다(moai-1krv) — 줄마다 제목 길이를 따라 들쭉날쭉하면
+        // 여러 에픽의 셈을 한 줄로 훑어 내려갈 수 없다. 제목과의 틈은 채움 칸이 진다.
+        let gap = room.saturating_sub(head_w + title_w + crate::text::width(&tally));
+        spans.push(Span::raw(" ".repeat(gap)));
+        spans.push(Span::styled(tally, dim()));
+    }
     let cut = percent.map(|p| (head_w, head_w + crate::text::bar_fill(Some(p), room.saturating_sub(head_w))));
     (Line::from(spans), cut)
 }
@@ -798,6 +807,10 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     let top = u16::try_from(app.detail.offset()).unwrap_or(u16::MAX);
     f.render_widget(Paragraph::new(lines).scroll((top, 0)), inner);
 }
+
+/// 진행의 색 — 상세의 막대(`rollup`)와 목록 줄의 진행 바탕이 **같은 색**이다. 둘이 따로
+/// 적히면 한쪽만 바뀌어 같은 진척이 두 색으로 선다.
+const PROGRESS: Color = Color::Green;
 
 /// 한 줄의 **칸 `from` 부터 `cut` 앞까지**에 제 스타일 위로 `over` 를 덧입힌다 — 나머지는
 /// 그대로. 줄은 `room` 칸까지 공백으로 채운다: 바탕은 글자가 없는 칸에도 깔려야
@@ -1134,7 +1147,7 @@ fn rollup<'a>(app: &App, path: &crate::nav::Path, w: usize) -> Vec<Line<'a>> {
     let cells = w.clamp(10, 24) - 4;
     let filled = crate::text::bar_fill(Some(percent), cells);
     let mut out = vec![Line::from(vec![
-        Span::styled("█".repeat(filled), Style::new().fg(Color::Green)),
+        Span::styled("█".repeat(filled), Style::new().fg(PROGRESS)),
         Span::styled("░".repeat(cells - filled), dim()),
         Span::raw(format!("  {done}/{}  {percent}%", work.len())),
     ])];
@@ -1246,8 +1259,14 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> (Line<'a>, Option<(usi
         spans.push(Span::styled(if p.registered { "  여기" } else { "  여기 · 등록 안 됨" }, dim()));
     }
     spans.push(Span::styled(format!("  {}", crate::text::one_line(&p.path.display().to_string())), dim()));
+    // 바탕은 **이름 뒤에서** 시작한다. 이름의 색은 어느 프로젝트인지를 말하는 색이라
+    // (moai-xs9x) 바탕 위 검정 글자로 덮으면 그 뜻이 사라진다. 100% 는 이름 뒤 틈부터
+    // 테두리 안쪽 끝까지다.
+    let from = spans.first().map_or(0, |s| crate::text::width(&s.content)) + 2;
     let cut = match &p.look {
-        Look::Open { sum, .. } => sum.percent().map(|pc| (0, crate::text::bar_fill(Some(pc), room))),
+        Look::Open { sum, .. } => {
+            sum.percent().map(|pc| (from, from + crate::text::bar_fill(Some(pc), room.saturating_sub(from))))
+        }
         _ => None,
     };
     (fit(Line::from(spans), room), cut)
@@ -1584,18 +1603,25 @@ pub(super) mod tests {
         let y = text.iter().position(|l| l.contains("argos-0001")).expect("에픽 줄이 없다") as u16;
         assert!(text[y as usize].contains("1/2"), "셈이 글자로 안 섰다\n{}", text.join("\n"));
 
-        let lit: Vec<u16> = (0..w).filter(|&x| buf[(x, y)].modifier.contains(Modifier::REVERSED)).collect();
+        let green = |x: u16| buf[(x, y)].bg == PROGRESS;
+        let lit: Vec<u16> = (0..w).filter(|&x| green(x)).collect();
         let (first, last) = (*lit.first().expect("바탕이 없다"), *lit.last().unwrap());
-        // 두 칸 글자의 뒤 칸은 버퍼가 비워 둔다(수식자도 안 붙는다) — 그 칸만 빈틈으로 봐준다.
+        // 두 칸 글자의 뒤 칸은 버퍼가 비워 둔다(스타일도 안 붙는다) — 그 칸만 빈틈으로 봐준다.
         let wide_tail = |x: u16| x > 0 && crate::text::width(buf[(x - 1, y)].symbol()) == 2;
-        assert!(
-            (first..=last).all(|x| buf[(x, y)].modifier.contains(Modifier::REVERSED) || wide_tail(x)),
-            "바탕이 끊겼다"
-        );
+        assert!((first..=last).all(|x| green(x) || wide_tail(x)), "바탕이 끊겼다");
+        assert_eq!(buf[(first, y)].fg, Color::Black, "바탕 위 글자가 검정이 아니다");
+        assert!((0..w).all(|x| !buf[(x, y)].modifier.contains(Modifier::REVERSED)), "커서 아닌 줄이 반전이다");
         let lit = (first..=last).collect::<Vec<_>>();
         assert_eq!(buf[(first, y)].symbol(), "아", "바탕이 제목에서 시작하지 않는다");
         // 목록 칸의 오른쪽 테두리 앞까지가 100% — 포커스 칸이라 테두리는 굵은 선이다(`frame`).
         let border = (first..w).find(|&x| buf[(x, y)].symbol() == "┃").expect("테두리가 없다");
+        // 셈은 테두리 바로 앞에 오른쪽 정렬로 선다.
+        assert_eq!(
+            (buf[(border - 3, y)].symbol(), buf[(border - 2, y)].symbol(), buf[(border - 1, y)].symbol()),
+            ("1", "/", "2"),
+            "셈이 테두리 끝에 붙지 않았다\n{}",
+            text.join("\n")
+        );
         let span = (border - first) as usize;
         let want = crate::text::bar_fill(Some(50), span);
         let got = lit.len();
@@ -1606,7 +1632,7 @@ pub(super) mod tests {
         a.shade = false;
         term.draw(|f| screen(f, &mut a)).unwrap();
         let buf = term.backend().buffer().clone();
-        assert!((0..w).all(|x| !buf[(x, y)].modifier.contains(Modifier::REVERSED)), "껐는데 깔렸다");
+        assert!((0..w).all(|x| buf[(x, y)].bg != PROGRESS), "껐는데 깔렸다");
     }
 
     /// **층의 연 프로젝트 줄에도 진행 바탕이 선다** — 줄에 적힌 칸별 수 그대로의 몫이다
@@ -1621,12 +1647,14 @@ pub(super) mod tests {
         term.draw(|f| screen(f, &mut a)).unwrap();
         let buf = term.backend().buffer().clone();
         let text = render(&mut a, w, h);
-        let rev = |x: u16, y: u16| buf[(x, y)].modifier.contains(Modifier::REVERSED);
+        let rev = |x: u16, y: u16| buf[(x, y)].bg == PROGRESS;
         let row = |name: &str| text.iter().position(|l| l.contains(name)).expect(name) as u16;
 
         let y = row("one/");
         let first = (0..w).find(|&x| rev(x, y)).expect("연 프로젝트 줄에 바탕이 없다");
-        assert_eq!(buf[(first, y)].symbol(), "o", "바탕이 이름에서 시작하지 않는다");
+        // 이름(`one/`)과 틈 두 칸 뒤에서 시작한다 — 이름의 프로젝트 색을 덮지 않는다.
+        let name = (0..w).find(|&x| buf[(x, y)].symbol() == "o").unwrap();
+        assert_eq!(first, name + "one/".len() as u16 + 2, "바탕이 이름 뒤에서 시작하지 않는다");
         let border = (first..w).find(|&x| buf[(x, y)].symbol() == "┃").expect("테두리가 없다");
         let got = (first..border).filter(|&x| rev(x, y)).count();
         let want = crate::text::bar_fill(Some(75), (border - first) as usize);
@@ -1650,8 +1678,8 @@ pub(super) mod tests {
         assert!(bar.contains("p 진행 바탕"), "{bar:?}");
     }
 
-    /// **커서 줄에서는 바탕이 거꾸로 선다** — 커서가 줄 전체를 반전하므로 그대로 두면 진척이
-    /// 사라진다. 끝난 몫은 반전을 걷고, 커서라는 뜻은 `>` 가 진다.
+    /// **커서 줄은 반전 위에 끝난 몫만 초록이다** — 커서가 줄 전체를 반전하므로 그대로 두면
+    /// 초록 바탕이 뒤집힌다. 끝난 몫은 반전을 걷고 제 바탕을 입고, 커서라는 뜻은 `>` 가 진다.
     #[test]
     fn the_cursor_row_shows_its_progress_inverted() {
         let mut a = app();
@@ -1671,6 +1699,7 @@ pub(super) mod tests {
         let gutter = (0..w).find(|&x| buf[(x, y)].symbol() == ">").unwrap();
         assert!(rev(gutter) && rev(gutter + 1), "커서 자리(`> `)만 반전이 빠졌다");
         assert!(!rev(title), "끝난 몫이 반전을 안 걷었다");
+        assert_eq!(buf[(title, y)].bg, PROGRESS, "커서 줄의 끝난 몫이 초록이 아니다");
         assert!(rev(border - 1), "남은 몫이 반전이 아니다");
     }
 
