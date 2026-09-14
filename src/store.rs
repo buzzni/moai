@@ -42,8 +42,15 @@ pub struct Load {
 }
 
 impl Load {
+    /// id 로 줄을 찾는다. **같은 id 의 줄이 둘이면 뒷줄이다.**
+    ///
+    /// 트리·탐색기(`nav::Index::find`)와 id 로 짠 지도(`report::groups`·`milestones`·
+    /// `misplaced`)가 모두 뒷줄을 고른다. 여기만 앞줄이면 `moai show <id>` 의 머리 제목·
+    /// 필드는 앞줄 것이고 멤버 셈은 뒷줄 것인 한 화면이 서고, 종류가 다른 쌍둥이면
+    /// 가려진 줄(`report::eclipsed`)을 열어 멤버가 통째로 빈다(moai-e0ro). 중복은
+    /// 쓰기가 거부하고 `duplicate_id` 가 드러내는 깨진 상태라, 여기는 읽는 자만 맞춘다.
     pub fn get(&self, id: &str) -> Option<&Issue> {
-        self.issues.iter().find(|i| i.id == id)
+        self.issues.iter().rfind(|i| i.id == id)
     }
 
     /// 못 읽는 줄이 이미 쓰고 있는 id. **새 id 를 여기서 피해 뽑는다.**

@@ -3687,6 +3687,40 @@ fn status_names_an_unreadable_line_that_reuses_a_live_id() {
     assert!(other.status.success(), "{}", String::from_utf8_lossy(&other.stderr));
 }
 
+/// **같은 id 의 줄이 둘이면 `show <id>` 도 뒷줄을 연다** — 트리·탐색기(`nav::Index::find`)와
+/// id 지도(`report::groups`·`milestones`)가 모두 뒷줄을 고르는데 상세만 앞줄을 열면, 머리
+/// 제목·필드는 앞줄 것이고 멤버 셈은 뒷줄 것인 한 화면이 선다(moai-e0ro). 종류가 다른
+/// 쌍둥이면 앞줄은 가려진 줄이라 마일스톤 상세를 CLI 로 아예 못 열었다(moai-2m9p).
+/// 중복은 숨기지 않는다 — 상세가 한 줄로 말하고, `--json` 도 같은 수를 낸다.
+#[test]
+fn show_opens_the_later_line_of_a_duplicate_id_and_says_so() {
+    let s = init("dupline");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        concat!(
+            "{\"id\":\"argos-0001\",\"title\":\"앞 줄 생각\",\"kind\":\"idea\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n",
+            "{\"id\":\"argos-0001\",\"title\":\"뒷줄 마일스톤\",\"kind\":\"milestone\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n",
+            "{\"id\":\"argos-0002\",\"title\":\"딸린 에픽\",\"kind\":\"epic\",\"status\":\"todo\",\"milestone\":\"argos-0001\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n",
+        ),
+    )
+    .unwrap();
+
+    let out = ok(s.path(), &["show", "argos-0001"]);
+    assert!(out.contains("뒷줄 마일스톤") && !out.contains("앞 줄 생각"), "앞줄을 열었다 — {out}");
+    assert!(out.contains("argos-0002"), "뒷줄의 멤버가 안 나왔다 — {out}");
+    assert!(out.contains("이 id 의 줄이 2개"), "중복을 말하지 않았다 — {out}");
+
+    let json = ok(s.path(), &["show", "argos-0001", "--json"]);
+    assert_eq!(field(&json, "title"), "뒷줄 마일스톤", "{json}");
+    assert!(json.contains(r#""members":["argos-0002"]"#), "{json}");
+    assert!(json.contains(r#""duplicate_lines":2"#), "{json}");
+
+    // 중복이 아닌 줄에는 말을 붙이지 않는다.
+    let lone = ok(s.path(), &["show", "argos-0002"]);
+    assert!(!lone.contains("이 id 의 줄이"), "{lone}");
+    assert!(!ok(s.path(), &["show", "argos-0002", "--json"]).contains("duplicate_lines"));
+}
+
 /// **안 썼어도 파일이 상했다는 것은 말한다.** 저널만 쓰는 명령과 할 일이 없던
 /// 쓰기는 `report_load_errors` 도 안 지나, 그 동사만 쓰는 쪽은 상한 줄을 영영
 /// 몰랐다(moai-relb). 종료 코드는 그대로다 — 쓰기는 성공했다.

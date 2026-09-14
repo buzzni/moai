@@ -38,14 +38,25 @@ pub struct Roll {
     pub column: Option<String>,
 }
 
-/// 이슈 id → 그것이 속한 에픽의 **제목**. 화면이 필요한 것은 id 가 아니라
+/// 줄 → 그것이 속한 에픽의 제목 ([`epic_labels`]). 키는 **id 와 그 줄의 종류**다.
+pub type EpicLabels<'a> = BTreeMap<(&'a str, Kind), String>;
+
+/// 줄 → 그것이 속한 에픽의 **제목**. 화면이 필요한 것은 id 가 아니라
 /// 제목이고, 소속 판정(`groups`)과 제목 찾기를 한 번에 끝내 둔다.
-pub fn epic_labels(all: &[Issue]) -> BTreeMap<&str, String> {
-    let titles: BTreeMap<&str, &str> = all.iter().map(|i| (i.id.as_str(), i.title.as_str())).collect();
+///
+/// **키에 종류를 싣는다.** `groups` 는 id 지도라 같은 id 의 뒷줄 — 그 줄의 종류로 —
+/// 셈한 값이다. id 만으로 찾으면 종류가 다른 쌍둥이에게 가려진 줄([`eclipsed`])이
+/// 쌍둥이 에픽의 제목을 달아, 트리는 `(길 잃음)`·`-e` 는 어느 에픽에도 안 고르는 그
+/// 줄이 목록 칸에서만 멤버로 섰다(moai-b5lu). 뒷줄의 종류로 키를 짜면 가려진 줄은
+/// 저절로 못 찾고, 같은 종류의 쌍둥이는 전처럼 같은 칸을 받는다. 찾는 쪽은
+/// `(i.id, i.kind)` 로 묻는다.
+pub fn epic_labels(all: &[Issue]) -> EpicLabels<'_> {
+    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
     groups(all)
         .into_iter()
-        .map(|(id, epic)| {
-            (id, titles.get(epic).copied().unwrap_or("(없는 에픽)").to_string())
+        .filter_map(|(id, epic)| {
+            let title = by_id.get(epic).map_or("(없는 에픽)", |e| e.title.as_str());
+            by_id.get(id).map(|row| ((id, row.kind), title.to_string()))
         })
         .collect()
 }
@@ -285,6 +296,15 @@ pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     }
     let out = put_off(issues);
     held.into_iter().filter(|i| !out.contains(i.id.as_str())).collect()
+}
+
+/// 같은 id 를 쓰는 줄이 **둘 이상이면** 그 수. 하나뿐이면 `None`.
+///
+/// 상세는 뒷줄을 연다(`store::Load::get`). 앞줄을 말없이 가리면 깨진 파일을 보는
+/// 사람이 제 줄이 사라진 줄 알므로, 펼친 자리에서 한 줄로 드러낸다 — `status` 의
+/// `duplicate_id` 와 같은 사실을 그 id 하나에 대해 말하는 것이다(moai-e0ro).
+pub fn duplicate_lines(issues: &[Issue], id: &str) -> Option<usize> {
+    Some(issues.iter().filter(|i| i.id == id).count()).filter(|n| *n > 1)
 }
 
 /// `id` 의 직계 자식. 부모는 id 에서 유도되므로 접두 검사면 된다.
@@ -1281,7 +1301,15 @@ pub struct Warning {
 }
 
 impl Warning {
+    /// **id 는 한 번씩만 담는다** — 처음 나온 자리(급한 차례, [`ids_of`])를 지킨다.
+    ///
+    /// 경고가 가리키는 것은 줄이 아니라 id 다. 사람이 고치러 부르는 손잡이가 id 뿐이고,
+    /// 같은 id 의 줄이 둘이면(`duplicate_id`) 줄마다 id 지도를 묻는 판정이 그 id 를 두 번
+    /// 담아 `N건` 이 줄 수로 부풀었다(moai-ddtg). 거르는 자리를 경고마다 두면 새 경고가
+    /// 그것을 잊으므로 여기 한 곳에 둔다. 중복 줄 자체는 `duplicate_id` 가 따로 말한다.
     fn new(kind: &'static str, ids: Vec<String>) -> Warning {
+        let mut seen = BTreeSet::new();
+        let ids: Vec<String> = ids.into_iter().filter(|id| seen.insert(id.clone())).collect();
         Warning {
             kind,
             count: ids.len(),
@@ -1432,23 +1460,36 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     let mut warnings = Vec::new();
     let mut notices = Vec::new();
 
+    // **가려진 줄은 소속으로 꾸짖지 않는다** (1·1-2). 소속 지도의 값은 쌍둥이의
+    // 종류로 셈한 것이라 그 줄의 것이 아니고, 그 줄은 `(길 잃음)` 에 서며 힌트
+    // (`moai show -e none`·`--milestone none`)의 거름망도 안 고른다 — 세면 경고가
+    // 가리킨 명령이 침묵한다(moai-b5lu). `duplicate_id` 가 그 id 를 따로 드러낸다.
+    let eclipsed = eclipsed(issues);
+
     // 1. 에픽에 안 붙은 것. 마일스톤이 아직 없으므로 **제일 중요한 신호**다
     //    — "물어보지 않고 만든 이슈" 의 지문이다.
     let loose: Vec<&Issue> = work
         .iter()
         .copied()
-        .filter(|i| !i.status.is_done() && !group.contains_key(i.id.as_str()))
+        .filter(|i| !i.status.is_done() && !eclipsed(i) && !group.contains_key(i.id.as_str()))
         .collect();
     // **분모는 미룬 일까지 센다.** 에픽을 통째로 미루면 그 멤버만 `work` 에서 빠져,
     // 원래 있던 소속 없는 일 하나가 "열린 것의 100%" 로 선다 — 미루기 하나로 경고가
     // 늘어 `Stop` 이 세션을 붙들었다(moai-c8lb 와 같은 덫). 분자는 그대로 지금 계획만
     // 센다: 미룬 소속 없는 일로는 꾸짖지 않는다. 그래서 미루기는 비율을 못 올린다.
-    let open = issues.iter().filter(|i| is_work(i) && !i.status.is_done()).count();
-    let ratio = if open == 0 { 0.0 } else { loose.len() as f64 / open as f64 };
-    if loose.len() >= NO_EPIC_MIN || (ratio >= NO_EPIC_RATIO && !loose.is_empty()) {
-        warnings.push(
-            Warning::new("no_epic", ids_of(&loose)).ratio(ratio).hint("moai show -e none"),
-        );
+    //
+    // **문턱도 id 로 잰다** — 경고가 내는 셈(`Warning::new` 가 거른 `count`)과 같은 자다.
+    // 줄로 재면 같은 종류 쌍둥이 한 쌍이 `NO_EPIC_MIN` 을 넘겨 놓고 `4건` 을 말한다.
+    let open = issues
+        .iter()
+        .filter(|i| is_work(i) && !i.status.is_done())
+        .map(|i| i.id.as_str())
+        .collect::<BTreeSet<_>>()
+        .len();
+    let no_epic = Warning::new("no_epic", ids_of(&loose));
+    let ratio = if open == 0 { 0.0 } else { no_epic.count as f64 / open as f64 };
+    if no_epic.count >= NO_EPIC_MIN || (ratio >= NO_EPIC_RATIO && no_epic.count > 0) {
+        warnings.push(no_epic.ratio(ratio).hint("moai show -e none"));
     }
 
     // 1-2. 마일스톤을 쓰기 시작했는데 거기 안 붙은 일. 마일스톤이 없는
@@ -1461,7 +1502,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
             .iter()
             .copied()
             .filter(|i| {
-                !i.status.is_done()
+                !i.status.is_done() && !eclipsed(i)
                     && (!mile.contains_key(i.id.as_str())
                         || placed.get(i.id.as_str()) == Some(&Misplace::Milestone))
             })
@@ -1527,8 +1568,10 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
         .copied()
         .filter(|i| !i.status.is_done() && i.status.as_str() != cfg.first_status())
         .collect();
-    if wip.len() > WIP_LIMIT {
-        warnings.push(Warning::new("wip_overload", ids_of(&wip)).limit(WIP_LIMIT));
+    // 문턱은 id 로 잰다 — 위 `no_epic` 과 같은 까닭이다.
+    let overload = Warning::new("wip_overload", ids_of(&wip));
+    if overload.count > WIP_LIMIT {
+        warnings.push(overload.limit(WIP_LIMIT));
     }
 
     // 4. 집어 놓고 잊은 것.
@@ -3132,6 +3175,81 @@ mod tests {
         let apart = [Unreadable { id: Some("argos-0002") }, Unreadable { id: None }];
         let st = status(&issues, &apart, &cfg(), "2026-09-01T00:00:00Z");
         assert!(!st.warnings.iter().any(|w| w.kind == "duplicate_id"), "{:?}", st.warnings);
+    }
+
+    /// **경고는 id 를 한 번씩만 댄다** (moai-ddtg). 같은 id 의 줄이 둘이면 줄마다 id
+    /// 지도를 물어 같은 id 가 두 번 담겼다 — 사람이 고칠 손잡이는 id 하나고, 셈(`N건`)이
+    /// 줄 수로 부풀면 `moai show -e none` 같은 힌트가 내는 것과도 어긋난다. 세 줄 중복도
+    /// `duplicate_id` 에 그 id 를 두 번 대지 않는다.
+    #[test]
+    fn a_warning_names_a_duplicated_id_once() {
+        let mut thought = make("argos-0000", Kind::Idea, "todo");
+        thought.milestone = Some("argos-zzzz".into());
+        let mut stone = make("argos-0000", Kind::Milestone, "todo");
+        stone.milestone = Some("argos-zzzz".into());
+        let st = status(&[thought, stone], &[], &cfg(), "2026-09-11T00:00:00Z");
+        let w = st.warnings.iter().find(|w| w.kind == "dangling_milestone").expect("경고가 없다");
+        assert_eq!((w.ids.as_slice(), w.count), (&["argos-0000".to_string()][..], 1), "{w:?}");
+
+        let mut orphan = make("argos-0009.aaa", Kind::Issue, "todo");
+        orphan.blocked_by = vec!["argos-gone".into()];
+        let thrice = vec![orphan.clone(), orphan.clone(), orphan];
+        let st = status(&thrice, &[], &cfg(), "2026-09-11T00:00:00Z");
+        for kind in ["orphan_child", "dangling_blocked_by", "duplicate_id"] {
+            let w = st.warnings.iter().find(|w| w.kind == kind).unwrap_or_else(|| panic!("{kind} 가 없다"));
+            assert_eq!((w.ids.as_slice(), w.count), (&["argos-0009.aaa".to_string()][..], 1), "{w:?}");
+        }
+
+        // **문턱도 id 로 잰다.** 벌인 일 셋에 그중 하나의 쌍둥이 줄 — 줄로 재면 `WIP_LIMIT`
+        // 를 넘겨 `3건` 을 말하는 `wip_overload` 가 선다. 소속 없는 일도 같은 자로 잰다.
+        let held: Vec<Issue> = ["argos-0101", "argos-0102", "argos-0103", "argos-0103"]
+            .iter()
+            .map(|id| make(id, Kind::Issue, "in_progress"))
+            .collect();
+        let st = status(&held, &[], &cfg(), "2026-09-11T00:00:00Z");
+        assert!(!st.warnings.iter().any(|w| w.kind == "wip_overload"), "{:?}", st.warnings);
+        let loose: Vec<Issue> = ["argos-0201", "argos-0202", "argos-0203", "argos-0204", "argos-0204"]
+            .iter()
+            .map(|id| make(id, Kind::Issue, "todo"))
+            .chain((0..30).map(|n| member(&format!("argos-1{n:03}"), "argos-e001", "todo")))
+            .chain([make("argos-e001", Kind::Epic, "todo")])
+            .collect();
+        let st = status(&loose, &[], &cfg(), "2026-09-11T00:00:00Z");
+        assert!(!st.warnings.iter().any(|w| w.kind == "no_epic"), "{:?}", st.warnings);
+    }
+
+    /// **가려진 줄은 쌍둥이의 소속을 달지도, 쌍둥이의 소속으로 세지도 않는다** (moai-b5lu).
+    /// 종류가 다른 쌍둥이에게 id 가 가려진 줄([`eclipsed`])은 트리에서 `(길 잃음)`,
+    /// 롤업·`-e`/`--milestone` 거름망에서 어느 묶음에도 안 든다. 그런데 에픽 칸은 id 로
+    /// 찾아 그 줄에 쌍둥이 에픽의 제목을 냈고, `no_epic`·`no_milestone` 은 쌍둥이의 지도
+    /// 값으로 세어 경고에 선 줄을 힌트(`moai show -e none`)가 안 냈다.
+    #[test]
+    fn an_eclipsed_row_borrows_no_membership_from_its_twin() {
+        let epic = make("argos-e001", Kind::Epic, "todo");
+        // 앞줄 이슈는 에픽이 없고, 뒷줄 생각이 그 에픽에 든다 — 에픽 칸이 흐르는 쪽.
+        let bare = make("argos-0001", Kind::Issue, "todo");
+        let mut held = make("argos-0001", Kind::Idea, "todo");
+        held.epic = Some("argos-e001".into());
+        let rows = [epic, bare, held];
+        let labels = epic_labels(&rows);
+        assert_eq!(labels.get(&("argos-0001", Kind::Idea)).map(String::as_str), Some("argos-e001 제목"));
+        assert_eq!(labels.get(&("argos-0001", Kind::Issue)), None, "가려진 줄이 쌍둥이 에픽을 달았다 — {labels:?}");
+
+        // 앞줄 이슈는 에픽·마일스톤이 있고 뒷줄 생각은 없다 — 경고가 쌍둥이 값으로 세는 쪽.
+        let stone = make("argos-m001", Kind::Milestone, "todo");
+        let mut placed = make("argos-e002", Kind::Epic, "todo");
+        placed.milestone = Some("argos-m001".into());
+        let mut member = make("argos-0002", Kind::Issue, "todo");
+        member.epic = Some("argos-e002".into());
+        let mut shadowed = make("argos-0003", Kind::Issue, "todo");
+        shadowed.epic = Some("argos-e002".into());
+        let loose_thought = make("argos-0003", Kind::Idea, "todo");
+        let rows = vec![stone, placed, member, shadowed, loose_thought];
+        let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z");
+        for kind in ["no_epic", "no_milestone"] {
+            let named = st.warnings.iter().filter(|w| w.kind == kind).flat_map(|w| w.ids.iter()).any(|id| id == "argos-0003");
+            assert!(!named, "{kind} 가 가려진 줄을 쌍둥이 값으로 셌다 — {:?}", st.warnings);
+        }
     }
 
     // ── 미룬 것이 막고 있으면 까닭을 말한다 ──────────────────────────

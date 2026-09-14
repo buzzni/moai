@@ -164,7 +164,7 @@ pub fn list(
     issues: &[Issue],
     cfg: &Config,
     hidden: Hidden,
-    epics: &BTreeMap<&str, String>,
+    epics: &crate::report::EpicLabels,
     asked_deferred: bool,
     wh: &crate::query::Where,
     origin: &Origin,
@@ -179,7 +179,7 @@ pub fn list(
     }
 
     let show_tags = issues.iter().any(|i| !i.tags.is_empty());
-    let show_epic = issues.iter().any(|i| epics.contains_key(i.id.as_str()));
+    let show_epic = issues.iter().any(|i| epics.contains_key(&(i.id.as_str(), i.kind)));
     // 미룸 표를 달지 말지는 **부르는 쪽의 물음**에서 온다. 한때 결과의 내용
     // 으로 정했는데(`any(|i| !i.is_deferred())`), 그러면 `--all` 이 마침 전부
     // 미룬 것만 냈을 때 표가 통째로 사라져 계획 밖의 줄이 일과 똑같이 보인다 —
@@ -193,7 +193,7 @@ pub fn list(
     // 에픽 열은 **제목**을 보여준다. id 를 보여주면 사람이 그걸 다시 찾아봐야 한다.
     let epics: Vec<String> = issues
         .iter()
-        .map(|i| match epics.get(i.id.as_str()) {
+        .map(|i| match epics.get(&(i.id.as_str(), i.kind)) {
             None => "—".into(),
             Some(t) => clip(t, EPIC_CAP),
         })
@@ -330,6 +330,12 @@ fn is_loose(e: &crate::nav::Entry) -> bool {
     matches!(e, Entry::Leaf { .. } | Entry::Dir { seg: Seg::Issue(_), .. })
 }
 
+/// 머리글로 그려지는가 — 빈 줄로 갈라 서고 그 밑을 거느린다 ([`place`]).
+fn is_head(e: &crate::nav::Entry) -> bool {
+    use crate::nav::{Entry, Seg};
+    matches!(e, Entry::Dir { seg: Seg::Milestone(_) | Seg::Epic(_), at: Some(_) } | Entry::Dir { at: None, .. })
+}
+
 fn is_lost(e: &crate::nav::Entry) -> bool {
     use crate::nav::{Entry, Seg};
     matches!(e, Entry::Dir { seg: Seg::Lost, .. })
@@ -386,7 +392,15 @@ fn walk(
 ) {
     let entries = cx.index.entries_where(cx.all, path, cx.keep);
     if !groups_here(path) {
-        for e in &entries {
+        // **머리글 없는 줄을 먼저, 머리글을 뒤에.** 에픽 안에는 머리글이 설 것이 없어
+        // 차례 그대로지만, `(길 잃음)` 안에는 마일스톤이 끊긴 에픽이 머리글로 서고
+        // 에픽이 끊긴 잎이 곁에 선다. 받은 차례대로 놓으면 그 잎이 에픽 머리글 바로
+        // 밑에 들여쓰여 멤버로 읽혔다(moai-44k8). 앞에 두면 바구니 머리글 밑에 서고,
+        // 에픽 머리글은 빈 줄로 갈라 제 멤버만 거느린다 — 아래 소속 없는 줄을
+        // 머리글로 가르는 것과 같은 까닭이다.
+        let (heads, rows): (Vec<&crate::nav::Entry>, Vec<&crate::nav::Entry>) =
+            entries.iter().partition(|e| is_head(e));
+        for e in rows.into_iter().chain(heads) {
             place(out, drawn, cx, path, e, depth);
         }
         return;
@@ -830,7 +844,7 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, origin: &Orig
 /// 집을 수 있는 일. 그리고 이미 벌여 놓은 것.
 pub fn ready(
     picks: &[&Issue],
-    epics: &BTreeMap<&str, String>,
+    epics: &crate::report::EpicLabels,
     wip: &[&Issue],
     held: &[crate::report::Held],
     origin: &Origin,
@@ -851,7 +865,7 @@ pub fn ready(
         let w_tags = tags.iter().map(|t| width(t)).max().unwrap_or(0);
 
         for ((i, (title, w_this)), tag) in picks.iter().zip(&heads).zip(&tags) {
-            let epic = match epics.get(i.id.as_str()) {
+            let epic = match epics.get(&(i.id.as_str(), i.kind)) {
                 None => "에픽 없음".to_string(),
                 Some(t) => clip(t, EPIC_CAP),
             };
@@ -1131,6 +1145,16 @@ fn role_style(r: crate::markdown::Role) -> Style {
     }
 }
 
+/// 펼친 id 가 여러 줄에 쓰였다는 한 줄 (`report::duplicate_lines`). **뒷줄을 열었다고
+/// 말한다** — 트리·탐색기가 고르는 줄과 같다는 것까지 알아야 앞줄을 찾으러 간다.
+pub fn duplicate_note(lines: usize) -> String {
+    format!(
+        "  {}   {}",
+        paint(style::WARN, "중복"),
+        paint(style::WARN, &format!("이 id 의 줄이 {lines}개다 — 파일에서 뒷줄을 연다 (moai status 의 duplicate_id)"))
+    )
+}
+
 /// 저널을 **그대로 찍는다. 접지 않는다.**
 pub fn history(journal: &[JournalEntry], cfg: &Config) -> Vec<String> {
     let mut out = Vec::new();
@@ -1377,7 +1401,7 @@ mod tests {
         Config::parse("prefix = \"argos\"\n").unwrap()
     }
 
-    fn no_epics() -> BTreeMap<&'static str, String> {
+    fn no_epics() -> crate::report::EpicLabels<'static> {
         BTreeMap::new()
     }
 
@@ -1469,7 +1493,7 @@ mod tests {
             mine,
             vec![("feat/x".into(), std::path::PathBuf::from("/wt"), theirs)],
         );
-        let tagged: BTreeMap<&str, String> = all.iter().map(|i| (i.id.as_str(), "에픽".to_string())).collect();
+        let tagged: crate::report::EpicLabels = all.iter().map(|i| ((i.id.as_str(), i.kind), "에픽".to_string())).collect();
         let out = plain(&list(&all, &cfg(), Hidden::default(), &tagged, false, &Default::default(), &origin));
         assert!(out[1].contains("여기 일") && !out[1].contains('⎇'), "{out:#?}");
         assert!(out[2].contains("⎇ feat/x 옆 일"), "{out:#?}");
@@ -1558,12 +1582,12 @@ mod tests {
     fn the_epic_column_shows_a_title() {
         let mut i = issue("argos-0002", "멤버", "todo");
         i.epic = Some("argos-0001".into());
-        let labels = BTreeMap::from([("argos-0002", "저장 계층".to_string())]);
+        let labels = BTreeMap::from([(("argos-0002", Kind::Issue), "저장 계층".to_string())]);
         let out = plain(&list(&[i.clone()], &cfg(), Hidden::default(), &labels, false, &Default::default(), &Origin::default()));
         assert!(out[1].contains("저장 계층") && !out[1].contains("argos-0001"), "{out:#?}");
 
         // 없는 에픽을 가리켜도 죽지 않고 그렇다고 말한다
-        let dangling = BTreeMap::from([("argos-0002", "(없는 에픽)".to_string())]);
+        let dangling = BTreeMap::from([(("argos-0002", Kind::Issue), "(없는 에픽)".to_string())]);
         let out = plain(&list(&[i], &cfg(), Hidden::default(), &dangling, false, &Default::default(), &Origin::default()));
         assert!(out[1].contains("(없는 에픽)"), "{out:#?}");
     }
@@ -1681,6 +1705,35 @@ mod tests {
         assert_eq!(pad(&out[at_loose]), pad(&out[at_epic]), "들여쓰기가 어긋났다\n{joined}");
     }
 
+    /// **`(길 잃음)` 안에서도 남의 머리글 밑에 붙지 않는다** (moai-44k8). 마일스톤이
+    /// 끊긴 에픽은 바구니 안에서 머리글(0/0)을 달고, 에픽이 끊긴 이슈는 같은 바구니의
+    /// 잎이다. 받은 차례대로 놓으면 잎이 그 에픽 머리글 바로 밑에 한 칸 들여쓰여 멤버로
+    /// 읽혔다 — 뿌리·마일스톤에서 소속 없는 줄을 머리글로 가른 것과 같은 자리다. 그
+    /// 에픽의 진짜 멤버는 여전히 그 밑에 선다.
+    #[test]
+    fn a_lost_leaf_is_not_drawn_under_a_lost_epic() {
+        let mut milestone = issue("argos-m001", "v0.1", "todo");
+        milestone.kind = Kind::Milestone;
+        let mut epic = issue("argos-e001", "잃은 에픽", "todo");
+        epic.kind = Kind::Epic;
+        epic.milestone = Some("argos-zzzz".into());
+        let mut stray = issue("argos-0001", "끊긴 이슈", "todo");
+        stray.epic = Some("argos-zzzz".into());
+        let mut member = issue("argos-0002", "잃은 에픽의 멤버", "todo");
+        member.epic = Some("argos-e001".into());
+
+        let all = vec![milestone, epic, stray, member];
+        let rolls = crate::report::rollup(&all, &cfg());
+        let index = crate::nav::Index::of(&all);
+        let out = plain(&tree(&all, &index, &|_| true, &rolls, &Origin::default()).0);
+        let joined = out.join("\n");
+        let at = |needle: &str| out.iter().position(|l| l.contains(needle)).unwrap_or_else(|| panic!("{needle}\n{joined}"));
+
+        let (bucket, head, stray, member) = (at("(길 잃음)"), at("argos-e001"), at("끊긴 이슈"), at("멤버"));
+        assert!(bucket < stray && stray < head, "끊긴 이슈가 잃은 에픽 머리글 밑에 섰다\n{joined}");
+        assert!(head < member, "잃은 에픽의 멤버가 제 머리글 밑을 떠났다\n{joined}");
+    }
+
     /// **같은 id 의 에픽 줄 둘이어도 멤버는 한 번, 두 줄은 다 보인다.** 폴더는
     /// id 가 가리키는 뒷줄이고(`nav::Index::is_dir`), 앞줄은 잎으로 선다. 머리글이
     /// 제 이름을 집계에서 id 로 찾으면 두 줄이 같은 제목을 달고 뒷줄은 트리
@@ -1762,7 +1815,7 @@ mod tests {
         a.epic = Some("argos-0001".into());
         let b = issue("argos-0003", "떠 있는 것", "todo");
         let wip = issue("argos-0004", "잡고 있는 것", "in_progress");
-        let labels = BTreeMap::from([("argos-0002", "저장 계층".to_string())]);
+        let labels = BTreeMap::from([(("argos-0002", Kind::Issue), "저장 계층".to_string())]);
 
         let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[], &Origin::default()));
         let joined = out.join("\n");

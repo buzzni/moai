@@ -238,7 +238,9 @@ fn one(
     raw: bool,
     origin: &crate::worktree::Origin,
 ) -> R<Vec<String>> {
-    let epic = issue.epic.as_ref().and_then(|e| all.iter().find(|i| &i.id == e));
+    // **에픽도 뒷줄로 푼다** — 펼친 줄을 고른 자(`Load::get`)와 같다(moai-e0ro).
+    let epic = issue.epic.as_ref().and_then(|e| all.iter().rfind(|i| &i.id == e));
+    let twins = report::duplicate_lines(all, &issue.id);
     let children = report::children_of(all, &issue.id);
     // **이력은 줄이 온 워크트리의 저널에서 읽는다** (`Origin::root`). 스냅샷은
     // 옆 워크트리의 줄을 내는데 이력만 이쪽에서 읽으면, 거기서 옮긴 칸이 이력에
@@ -282,6 +284,9 @@ fn one(
         if let Some(root) = seen.roots.get(issue.id.as_str()) {
             extra.push(("shelved_by", serde_json::to_string(root).map_err(|e| Fail::new(e.to_string()))?));
         }
+        if let Some(n) = twins {
+            extra.push(("duplicate_lines", n.to_string()));
+        }
         return super::json_with(
             &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),
             &extra,
@@ -290,6 +295,10 @@ fn one(
 
     // 이력은 언제나 맨 끝이다. 에픽이면 멤버를 그 **앞에** 끼운다.
     let mut out = view::detail(issue, epic, &children, &seen, &repo.config, &model::now(), raw);
+    // 머리 두 줄(제목·칸) 바로 밑이다 — 본문을 읽기 전에 이 줄이 하나뿐이 아님을 안다.
+    if let Some(n) = twins {
+        out.insert(2.min(out.len()), view::duplicate_note(n));
+    }
     // 묶음을 펼치면 그 밑에 무엇이 있는지까지 보여 준다 — 묶음 하나를 보는
     // 이유가 바로 그것이다. 마일스톤이면 에픽과 이슈가 같이 나온다.
     if report::is_group(issue) {
