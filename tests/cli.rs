@@ -3877,6 +3877,37 @@ fn moving_a_deferred_row_says_it_is_still_out_of_the_plan() {
     );
 }
 
+/// **`done` 으로 옮기면 이로써 풀린 일을 한 줄로 댄다**(moai-942k, 사용자와 정함). `ready` 를
+/// 다시 안 불러도 다음 일을 안다. 풀린 것이 없으면 말하지 않고, `--json` 은 `unblocked` 를
+/// 늘 싣는다.
+#[test]
+fn mv_done_names_the_work_it_just_unblocked() {
+    let s = init("mvfreed");
+    let first = add(s.path(), &["막는 일"]);
+    let waiting = add(s.path(), &["기다리는 일"]);
+    ok(s.path(), &["link", &first, "--blocks", &waiting]);
+    assert!(!ok(s.path(), &["ready"]).contains(&waiting), "막았는데 ready 에 섰다");
+
+    let text = ok(s.path(), &["mv", &first, "done"]);
+    let line = text.lines().find(|l| l.contains("풀림")).unwrap_or_else(|| panic!("풀린 일을 안 댄다 — {text}"));
+    assert!(line.contains(&waiting) && line.contains("기다리는 일"), "{line:?}");
+    assert!(ok(s.path(), &["ready"]).contains(&waiting), "댄 일이 ready 에 없다");
+
+    // 풀린 것이 없으면 조용하다 — 기계 출력은 빈 배열을 싣는다.
+    let lone = add(s.path(), &["홀로 선 일"]);
+    let json = ok(s.path(), &["mv", &lone, "done", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(r#""unblocked":[]"#), "{json}");
+    assert!(!ok(s.path(), &["mv", &waiting, "done"]).contains("풀림"), "풀린 것 없이 말했다");
+
+    // 기계 출력은 풀린 줄을 싣는다.
+    let a = add(s.path(), &["둘째 막는 일"]);
+    let b = add(s.path(), &["둘째 기다리는 일"]);
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+    let json = ok(s.path(), &["mv", &a, "done", "--json"]);
+    assert!(json.contains(&format!(r#""unblocked":[{{"id":"{b}""#)), "{json}");
+}
+
 /// **묶음을 미루면 멤버도 계획에서 빠진다.** 에픽 줄 하나만 사라지고 멤버가
 /// `ready` 에 그 에픽 제목을 달고 서면, 미루기는 머리글 하나 지운 일이다.
 /// 목록도 같은 자로 숨기고, `--deferred` 가 그것을 연다.
