@@ -292,17 +292,24 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
 /// 이미 달라 다음 걸음이 다시 읽는다. 못 찾으면(git 밖, 가지를 파일로 두지 않는 저장소) 비어
 /// 있고 말하지 않는다 — 전처럼 스냅샷만 지켜본다.
 fn heads(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
-    let Ok(common) = git(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"]) else {
+    // `--path-format=absolute` 는 git 2.31 부터고, 그 전 rev-parse 는 모르는 플래그를 **출력에
+    // 그대로 되뱉고 성공한다** — 경로가 두 줄이 되어 표식이 영영 안 바뀐다. 상대 경로는 `-C`
+    // 로 준 디렉터리에서 푼 것이라 `root` 에 붙인다(절대 경로면 `join` 이 그대로 둔다).
+    let Ok(common) = git(root, &["rev-parse", "--git-common-dir"]) else {
         return Vec::new();
     };
-    let common = PathBuf::from(common.trim_end_matches('\n'));
+    let common = root.join(common.trim_end_matches('\n'));
+    // 워크트리가 생기거나 없어지면 이 디렉터리의 수정 시각이 바뀐다 — git 을 안 띄우고도
+    // 새 워크트리를 다시 읽을 까닭으로 센다.
+    let worktrees = common.join("worktrees");
     let mut files = vec![common.join("HEAD")];
-    if let Ok(linked) = std::fs::read_dir(common.join("worktrees")) {
+    // 목록을 읽기 **전에** 잰다 — 읽고 나서 재면 그 사이에 생긴 워크트리를 놓친다.
+    let mut watched = vec![(worktrees.clone(), crate::store::stamp(&worktrees))];
+    if let Ok(linked) = std::fs::read_dir(&worktrees) {
         let mut linked: Vec<PathBuf> = linked.filter_map(Result::ok).map(|e| e.path().join("HEAD")).collect();
         linked.sort();
         files.extend(linked);
     }
-    let mut watched = Vec::new();
     for head in files {
         watched.push((head.clone(), crate::store::stamp(&head)));
         let Ok(text) = std::fs::read_to_string(&head) else { continue };
@@ -527,6 +534,15 @@ mod tests {
         let seen = heads(&main);
         run(&feat, &["checkout", "-q", "--detach"]);
         assert!(changed(&seen), "떼어 낸 checkout 을 못 알아챈다");
+        let seen = heads(&main);
+        run(&main, &["worktree", "add", "-q", "../more", "-b", "more"]);
+        assert!(changed(&seen), "새로 생긴 워크트리를 못 알아챈다");
+
+        // 하위 디렉터리에서 부르면 `--git-common-dir` 이 상대 경로(`../.git`)로 온다.
+        let sub = main.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        let seen = heads(&sub);
+        assert!(seen.iter().any(|(p, s)| p.ends_with("refs/heads/more") && s.is_some()), "하위에서 가지 파일을 못 찾는다 — {seen:#?}");
         let _ = std::fs::remove_dir_all(&base);
     }
 
