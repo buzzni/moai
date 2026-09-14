@@ -5523,6 +5523,9 @@ fn worktree_trouble_is_told_but_never_fails_the_command() {
     assert!(out.status.success(), "옆 파일 때문에 status 가 실패했다");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("⎇ feat/x") && err.contains("읽을 수 없는 줄 1개"), "{err}");
+    // 보드는 stderr 의 말을 "문제 없다" 로 뒤집지 않는다(moai-cuw2).
+    let board = String::from_utf8_lossy(&out.stdout);
+    assert!(!board.contains("드러난 문제 없다") && board.contains("옆 워크트리 문제 1건"), "{board}");
     let shown = ok(&t.main(), &["show", "--worktree"]);
     assert!(shown.contains("⎇ feat/x 옆에서 만든 일"), "깨진 줄 말고 나머지도 버렸다\n{shown}");
 
@@ -5530,6 +5533,10 @@ fn worktree_trouble_is_told_but_never_fails_the_command() {
     let out = moai(bare.path(), &["status", "--worktree"]);
     assert!(out.status.success(), "git 저장소가 아니라고 실패했다");
     assert!(String::from_utf8_lossy(&out.stderr).contains("워크트리를 못 찾았다"));
+    let board = String::from_utf8_lossy(&out.stdout);
+    assert!(!board.contains("드러난 문제 없다") && board.contains("옆 워크트리 문제 1건"), "{board}");
+    // 겹쳐 보라고 안 시켰으면 옆을 찾지도 않으니 문제도 없다.
+    assert!(ok(bare.path(), &["status"]).contains("드러난 문제 없다"));
 }
 
 /// **여기서 지운 줄은 옆 줄로 되살아나지 않는다**(moai-0a0u). 갈라진 뒤 옆에서 안
@@ -5608,6 +5615,8 @@ fn outside_a_repo_the_overview_overlays_each_projects_worktrees() {
     assert!(run.stderr.is_empty(), "{}", String::from_utf8_lossy(&run.stderr));
     let st = String::from_utf8(run.stdout).unwrap();
     assert!(block(&st, "main").contains("! ⎇ feat/x") && st.contains("읽을 수 없는 줄 1개"), "그 프로젝트 줄에서 말하지 않는다\n{st}");
+    let b = block(&st, "main");
+    assert!(!b.contains("드러난 문제 없다") && b.contains("옆 워크트리 문제 1건"), "위에서 문제를 말하고 밑에서 문제 없다고 한다\n{st}");
     let json = ok_with(&out, &cfg, &["status", "--worktree", "--json"]);
     assert!(json.contains("\"trouble\":[\"⎇ feat/x"), "{json}");
 }

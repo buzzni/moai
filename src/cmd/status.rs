@@ -19,7 +19,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let Some(repo) = Repo::find()? else {
         return overview(ctx, worktree);
     };
-    let crate::worktree::Gathered { load, origin, .. } = super::gather(&repo, worktree)?;
+    let crate::worktree::Gathered { load, origin, trouble, unfound, .. } = super::gather(&repo, worktree)?;
+    // stderr 에 한 줄씩 낸 것의 수 — 보드가 "문제 없다" 로 그 말을 뒤집지 않게 넘긴다(moai-cuw2).
+    let trouble = trouble.len() + usize::from(unfound.is_some());
     // **그 줄이 쓰는 id** 까지 넘긴다 — id 가 있어야 산 줄과의 중복이
     // 드러난다(moai-4dk4).
     // 옆에서만 온 줄과 겹친 id 는 중복이 아니다 (`Origin::unreadable`).
@@ -50,6 +52,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         &now,
         ".moai/issues.jsonl",
         &origin,
+        trouble,
     ))
 }
 

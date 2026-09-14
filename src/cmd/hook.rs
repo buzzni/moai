@@ -120,6 +120,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                     &now,
                     ".moai/issues.jsonl",
                     &crate::worktree::Origin::default(),
+                    0,
                 );
             crate::hook::board(&lines)
         }),

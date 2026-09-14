@@ -641,6 +641,7 @@ pub fn status(
     now: &str,
     at: &str,
     origin: &Origin,
+    trouble: usize,
 ) -> Vec<String> {
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     let overlaid = overlaid(origin);
@@ -722,7 +723,14 @@ pub fn status(
     // 있으므로 `warnings` 가 비면 고칠 것이 없다 — 생각을 담거나 무언가를 미룬
     // 순간부터 이 줄이 사라지면, 세션을 닫기 전에 "경고가 늘지 않았는지" 보는
     // 사람이 알림을 경고로 읽는다.
-    if st.warnings.is_empty() {
+    //
+    // **옆 워크트리의 문제는 화면에서만 문제로 센다**(moai-cuw2). `report` 에는 넣지 않는다 —
+    // 그쪽은 이 프로젝트의 `&[Issue]` 만 받고, 옆 파일은 이 데이터가 아니다. 그래도 보드가
+    // "✓ 문제 없다" 를 말하면 한 줄씩 알린 stderr 와 제 말을 뒤집는다. 종료 코드는 안 바꾼다.
+    if trouble > 0 {
+        out.push(String::new());
+        out.push(format!("{} 옆 워크트리 문제 {trouble}건 — 한 줄씩은 stderr 에 냈다", paint(style::WARN, "!")));
+    } else if st.warnings.is_empty() {
         out.push(String::new());
         out.push(format!("{} 드러난 문제 없다", paint(style::status_style("done"), "✓")));
     }
@@ -1317,10 +1325,18 @@ pub fn projects_status(
         let n = b.status.warnings.len();
         let fatal = b.status.warnings.iter().filter(|w| w.fatal).count();
         let go = paint(style::DIM, &format!("→ `moai -C {} status`", shell_arg(&p.path)));
+        // 옆 워크트리의 문제는 화면에서만 센다 — 위에 `!` 줄로 섰는데 밑에서 "문제 없다" 면
+        // 덩어리가 제 말을 뒤집는다(moai-cuw2, `status` 와 같은 자).
+        let t = b.trouble.len();
+        let beside = match t {
+            0 => String::new(),
+            _ => format!(" · 옆 워크트리 문제 {t}건"),
+        };
         out.push(match (n, fatal) {
-            (0, _) => format!("  {} 드러난 문제 없다", paint(style::status_style("done"), "✓")),
-            (_, 0) => format!("  {} 경고 {n}건  {go}", paint(style::WARN, "!")),
-            (_, f) => format!("  {} 경고 {n}건 (데이터가 깨졌다 {f}건)  {go}", paint(style::ERROR, "!")),
+            (0, _) if t == 0 => format!("  {} 드러난 문제 없다", paint(style::status_style("done"), "✓")),
+            (0, _) => format!("  {} 옆 워크트리 문제 {t}건 — 위 줄", paint(style::WARN, "!")),
+            (_, 0) => format!("  {} 경고 {n}건{beside}  {go}", paint(style::WARN, "!")),
+            (_, f) => format!("  {} 경고 {n}건 (데이터가 깨졌다 {f}건){beside}  {go}", paint(style::ERROR, "!")),
         });
     }
     problems(&mut out, reg);
@@ -1839,7 +1855,7 @@ mod tests {
         let table = |all: &[Issue]| {
             let cfg = cfg();
             let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z");
-            plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", &Origin::default())).join("\n")
+            plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", &Origin::default(), 0)).join("\n")
         };
         let mut epic = issue("argos-0001", "다 끝난 에픽", "todo");
         epic.kind = Kind::Epic;
