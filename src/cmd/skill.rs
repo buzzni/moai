@@ -536,3 +536,28 @@ fn run(root: &Path, args: &[String]) -> bool {
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    /// **글마다 제 자리에 선다.** `skill::tree` 는 같은 `&str` 셋을 자리로 받아, 여기서 둘을
+    /// 바꿔 적어도 컴파일되고 판도 제 자신과 맞는다 — 커밋된 트리 시험은 `tree_named` 를
+    /// 따로 불러 이 길을 안 지난다. 바뀌면 frontmatter 없는 참고 문서가 감독 스킬 자리에
+    /// 서서, 모든 저장소에서 그 스킬이 조용히 안 뜬다.
+    #[test]
+    fn each_text_is_planted_at_its_own_path() {
+        let files: BTreeMap<String, String> = plant("t", Path::new("/repo"), "/bin/moai")
+            .into_iter()
+            .map(|(p, b)| (p.display().to_string(), b))
+            .collect();
+        for (path, head) in [
+            ("skills/moai/SKILL.md", "---\nname: moai\n"),
+            ("skills/moai/references/commands.md", "# 전체 명령"),
+            ("skills/moai-supervise/SKILL.md", "---\nname: moai-supervise\n"),
+        ] {
+            assert!(files[path].starts_with(head), "{path} 에 엉뚱한 글이 섰다");
+        }
+    }
+}

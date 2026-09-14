@@ -108,8 +108,9 @@ fn tree_named(market: &str, exe: &str, skill: &str, reference: &str, supervise: 
     let mut files: Vec<(PathBuf, String)> = vec![
         (PathBuf::from("skills/moai/SKILL.md"), skill.to_string()),
         (PathBuf::from("skills/moai/references/commands.md"), reference.to_string()),
-        // 감독 스킬은 따로 선다 — 일꾼 세션마다 켜지는 `moai` 스킬의 발동어에 감독의
-        // 낱말을 섞으면 모든 세션이 그 값을 문다.
+        // 감독 스킬은 따로 선다 — `moai` 스킬에 섞으면 감독의 낱말에 `moai` 가 불려 오고,
+        // 일꾼이 `moai` 를 부를 때마다 감독의 걸음까지 읽는다. 발동어(description)는 따로
+        // 서도 모든 세션에 실리므로, 나눈 것이 그 값을 아끼지는 않는다.
         (PathBuf::from("skills/moai-supervise/SKILL.md"), supervise.to_string()),
     ];
     let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
@@ -397,7 +398,8 @@ mod tests {
     /// 골랐는데, 그 그물은 `moai show -s todo,review` 를 끌어오고 리뷰
     /// 토막의 문구가 바뀌면 조용히 아무것도 안 고른다.
     fn taught() -> Vec<String> {
-        // AGENTS 블록도 같은 조각에서 나오므로 같이 본다.
+        // AGENTS 블록도 같은 조각에서 나오고, 감독이 일꾼에게 싣는 글도 리뷰를 세우고
+        // 닫는 줄을 같은 조각으로 적으므로 같이 본다.
         let texts = [crate::guide::skill(), crate::guide::reference(), crate::guide::agents(), crate::guide::supervise()];
         texts
             .iter()
@@ -644,7 +646,7 @@ mod tests {
     /// 다시 셈하면 글이 같아도 늘 어긋난다. 여기서 보는 것은 글과 판뿐이다.
     ///
     /// 다시 쓰는 길: `MOAI_BLESS=1 cargo test --release checked_in` — 같은
-    /// `tree_named` 로 네 파일을 적힌 자리 그대로 다시 쓴다. `skill install` 은
+    /// `tree_named` 로 트리 전부를 적힌 자리 그대로 다시 쓴다. `skill install` 은
     /// `claude` 등록까지 건드리고 부른 자리의 경로를 적어, 워크트리에서는 못 쓴다.
     #[test]
     fn the_checked_in_plugin_matches_the_guide() {
@@ -671,7 +673,7 @@ mod tests {
         let want = tree_named(&name, &exe, &crate::guide::skill(), &crate::guide::reference(), &crate::guide::supervise());
         if bless {
             for (path, body) in &want {
-                // 새로 는 파일은 제 디렉터리가 아직 없다 (감독 스킬이 처음 그랬다).
+                // 새로 느는 파일은 제 디렉터리가 아직 없다 (감독 스킬이 처음 그랬다).
                 if let Some(parent) = dir.join(path).parent() {
                     std::fs::create_dir_all(parent).unwrap_or_else(|e| panic!("{}: {e}", parent.display()));
                 }

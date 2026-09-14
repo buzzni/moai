@@ -426,8 +426,15 @@ pub fn reference() -> String {
 ///
 /// **`~/.claude/sessions/*.json` 은 Claude Code 의 속 파일이다.** 문서에 없고
 /// 판마다 바뀔 수 있어, 글이 그렇다고 밝히고 못 읽을 때의 길을 함께 준다.
+///
+/// **모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 글에 적지 않고, `main` 은 그
+/// 저장소의 본 가지로 바꿔 읽게 한다. 워크트리 안의 규칙 3 이 main 에서 집은 리뷰를
+/// 못 보는 것은 moai-iz38(에픽 moai-wofj)이지만, 남의 저장소에서 그 id 는 아무것도 안
+/// 가리키고 고친 뒤에는 거짓이 된다.
 pub fn supervise() -> String {
-    r#"---
+    let brief = brief();
+    format!(
+        r#"---
 name: moai-supervise
 description: 같은 저장소에서 놀고 있는 Claude 세션들에 쌓인 idea 를 하나씩 나눠 주고 보고를 받을 때 쓴다. "감독해 줘", "idea 나눠 줘", "놀고 있는 세션에 일 시켜" 가 나오면.
 ---
@@ -437,6 +444,9 @@ description: 같은 저장소에서 놀고 있는 Claude 세션들에 쌓인 ide
 감독은 **고르고, 보내고, 확인한다.** 코드를 고치지 않고, 병합하지 않고, 일꾼
 대신 설계를 정하지 않는다. 병합은 일꾼이 하고, 겹치는 병합은 일꾼끼리 먼저
 알린다.
+
+아래의 `main` 은 이 저장소의 본 가지다. 이름이 다르면(`master`·`develop`) 명령에서도
+일꾼에게 싣는 글에서도 그 이름으로 바꾼다.
 
 ## 한 바퀴
 
@@ -448,97 +458,103 @@ description: 같은 저장소에서 놀고 있는 Claude 세션들에 쌓인 ide
 
 `git worktree list` 도 본다. 이미 선 워크트리나 집힌 에픽과 **같은 파일·같은
 영역**을 건드리는 idea 는 이번 바퀴에서 뺀다 — 둘이 같은 곳을 고치면 병합에서
-한쪽이 다른 쪽을 기다린다.
+한쪽이 다른 쪽을 기다린다. **이번 바퀴에 함께 보내는 idea 끼리도 견준다** — 일꾼은
+받은 뒤에야 워크트리를 세우니, 방금 보낸 것은 아직 위 목록에 안 뜬다. 다음 idea 를
+보낼 때도 이 셈을 다시 한다.
+
+**보낸 idea 는 그 보고를 확인할 때까지 후보에서 뺀다.** 일꾼이 펼치기 전까지는
+`moai idea ls` 에 그대로 남아, 둘째 일꾼에게 같은 idea 가 또 간다.
 
 **2. 일꾼을 찾는다.** `ListAgents` 는 세션의 자리(cwd)를 안 보여 준다.
-Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽는다.
+Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽는다
+(`CLAUDE_CONFIG_DIR` 를 옮겼으면 그 아래다). 모노레포의 하위 프로젝트면 `.moai` 가
+있는 그 하위가 루트다.
 
-    python3 - "$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)" <<'PY'
+    python3 - "$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)" "$(git rev-parse --show-toplevel)" <<'PY'
     import glob, json, os, sys
-    root = os.path.realpath(sys.argv[1])
+    if not sys.argv[1]:
+        sys.exit("git 저장소 안에서 부른다")
+    top, here = os.path.realpath(sys.argv[2]), os.path.realpath(os.getcwd())
+    while here not in (top, os.path.dirname(here)) and not os.path.isdir(os.path.join(here, ".moai")):
+        here = os.path.dirname(here)
+    root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
     trees = os.path.join(root, ".claude", "worktrees") + os.sep
-    for f in glob.glob(os.path.expanduser("~/.claude/sessions/*.json")):
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    unread = 0
+    for f in glob.glob(os.path.join(home, "sessions", "*.json")):
         try:
             s = json.load(open(f))
             os.kill(s["pid"], 0)
-            cwd = os.path.realpath(s["cwd"]) if s.get("cwd") else None
-        except (OSError, ValueError, KeyError, TypeError):
+            cwd = os.path.realpath(s["cwd"]) if s["cwd"] else None
+        except OSError:
+            continue
+        except (ValueError, KeyError, TypeError, OverflowError):
+            unread += 1
             continue
         if cwd is None:
-            continue
-        if cwd == root:
+            unread += 1
+        elif cwd == root:
             print("루트    ", s.get("status"), s.get("name"))
         elif cwd.startswith(trees):
             print("워크트리", s.get("status"), s.get("name"), cwd)
+    if unread:
+        print("못 읽은 파일", unread)
     PY
 
 - **맡기는 것은 자리가 루트이고 `idle`·`waiting` 인 세션뿐이다.** `busy` 는
   일하는 중이고, 그 밖의 값(`shell` 따위)은 뜻을 모르니 맡기지 않는다
+- **보낸 idea 의 보고를 아직 확인하지 않은 세션은 뺀다.** 일꾼은 펼치고 집고 병합하는
+  동안 루트에 있다 — 사람의 답이나 권한을 기다리면 `waiting`, 턴을 마치면 `idle` 로 뜬다
 - 자리가 `<루트>/.claude/worktrees/*` 인 세션은 이 저장소에서 **일하는 중**이다.
   지켜보되 맡기지 않는다
 - **다른 디렉터리의 세션은 건드리지 않는다**
 - **맡기기를 거절한 세션은 후보에서 빼고 다시 보내지 않는다.** 제 사람이 준 일만
   받는 세션이 있다 — 한 번 거절했으면 그 뒤로는 알림도 걸지 않는다
-- 이 파일은 문서에 없는 속 파일이라 판이 바뀌면 필드가 달라질 수 있다. 못 읽으면
-  `ListAgents` 로 이름을 보고, 그 세션에 `pwd` 와 지금 하는 일을 물어 가린다
+- 파일은 세션이 끝나도 남고, 그 pid 를 다른 프로세스가 다시 쓰면 산 것처럼 읽힌다.
+  보내기 전에 그 이름이 `ListAgents` 에도 뜨는지 한 번 본다
+- 이 파일은 문서에 없는 속 파일이라 판이 바뀌면 필드가 달라질 수 있다. 스크립트가
+  `못 읽은 파일` 을 내거나 못 돌면 `ListAgents` 로 이름을 보고, **이 기계의 세션에만**
+  `pwd` 와 지금 하는 일을 물어 가린다 — 원격·클라우드 세션은 같은 경로를 대도 다른
+  체크아웃이다
 
 **3. 보낸다.** 놀고 있는 세션 하나에 idea **하나**를 `SendMessage` 로 보낸다.
-일꾼은 이 대화를 모르니 절차를 **통째로** 싣는다.
+일꾼은 이 대화를 모르니 아래 글을 **통째로** 싣는다 — 일꾼이 받는 것은 이 글뿐이라,
+일꾼이 지킬 것은 모두 이 안에 있다.
 
-    감독 세션(<내 이름>)이 idea <id> 를 맡긴다 — <제목>.
-    먼저 읽을 것: moai show <id>
-    1. main 에서 펼친다 — idea 를 일감으로 바꾸는 길은 `moai idea promote <id> --from -`
-       하나다. 이슈 하나짜리여도 에픽 + 이슈로 펼친다. `--dry-run` 을 먼저 본다
-    2. 멤버를 `moai mv <멤버> in_progress` 로 집고 main 에
-       "chore(tracker): <에픽> 를 워크트리에서 집는다" 로 커밋한다.
-       main 에서 커밋하기 전에는 언제나 `git status` 를 본다 — 아래 "공유 main" 을 따른다
-    3. `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> main` 으로
-       로컬 main 에서 뜨고 EnterWorktree(path) 로 들어간다. 이름은 idea id 가
-       아니라 펼친 에픽 id 다
-    4. 노트에 없는 설계 결정은 추측하지 말고 AskUserQuestion 으로 묻는다 —
-       사람이 일꾼 창을 보고 있다
-    5. 리뷰 이슈를 세워(규칙 3) `/code-review high --fix`. 반영은 별도 fix: 커밋,
-       넘긴 것은 이슈 번호와 함께 노트.
-       워크트리에서 `/code-review` 가 규칙 3 에 막히면 — 지금 훅은 그 워크트리의
-       스냅샷만 읽어 main 에서 집은 리뷰 이슈를 못 본다(moai-iz38, 에픽 moai-wofj
-       에서 고치는 중) — 같은 관점·단계·`--fix` 범위로 리뷰 서브에이전트를 돌린다.
-       리뷰 이슈·원문 노트·닫는 `-m` 은 그대로 남긴다
-    6. 멤버의 일이 다 끝나면 병합 전에 에픽 전체를 `/code-review max --fix` 로 본다 —
-       가지가 main 을 떠난 자리(`git merge-base main HEAD`)부터의 diff 다. 리뷰
-       이슈를 따로 세운다(`-t review --parent <에픽>`). 막히면 5 의 길로 간다
-    7. 워크트리에서 main 을 받아 충돌을 푼다
-    8. ExitWorktree(keep) 로 루트로 돌아온다 — 워크트리 안에서 그것을 지우면 세션의
-       자리가 사라진 디렉터리에 남아 감독이 다시는 이 세션을 루트로 못 본다.
-       옆 세션과 병합이 겹치면 먼저 알린 뒤 루트에서 `git merge worktree-<에픽> -m "merge: …"`
-       로 **한 번에** 병합한다 — `--no-commit` 으로 열어 두지 않는다.
-       **`moai mv <멤버> done` 은 그 병합이 실제로 끝난 뒤에만 친다** — 병합 전에
-       옮겼다가 되돌린 일꾼이 있었다. 시험 통과를 보고 멤버·리뷰 이슈를 done 으로 커밋
-    9. 루트에서 `git worktree remove .claude/worktrees/<에픽>` 과
-       `git branch -d worktree-<에픽>` 으로 워크트리와 가지를 지운다
-    10. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 한두 줄 요약, 넘긴 것·새 idea
-
-### 공유 main
-
-루트 체크아웃은 **모든 세션이 같이 쓴다.** 한 세션이 `git merge --no-commit` 으로
-병합을 열어 둔 사이에 다른 세션이 트래커 노트를 커밋하면, 그 커밋이 남의 병합을
-제 제목으로 봉인한다 — 실제로 그렇게 됐다. 그래서 감독이든 일꾼이든, 트래커 노트
-하나라도 main 에서 `git commit` 하기 전에:
-
-- `git status` 를 본다. `.git/MERGE_HEAD` 가 있거나 "still merging" 이면 **커밋하지
-  않는다.** 그 병합을 연 세션이 끝낼 때까지 기다린다
-- 제 병합은 `git merge <가지> -m "…"` 한 번으로 끝낸다. `--no-commit` 을 쓰지 않는다
+{brief}
 
 **4. 기다린다.** 일하는 세션에는 메시지 없이 `notify_when_idle: true` 로
-걸어 둔다. **`ListAgents` 를 되풀이해 훑지 않는다** — 알림이 온다.
+걸어 둔다. **`ListAgents` 를 되풀이해 훑지 않는다** — 알림이 온다. 알림은 한 번뿐이라,
+보고 없이 온 알림(일꾼이 사람에게 묻고 턴을 마쳤다)이면 다시 걸어 둔다.
+
+감독이 루트에 있으면, 일꾼이 멤버를 집고 워크트리를 세우기 전의 틈에 감독의 턴이
+끝날 때 훅이 그 멤버를 "아직 집고 있는 것" 으로 붙든다. **그 멤버는 일꾼의 것이다** —
+옮기거나 미루거나 노트를 달지 않고 그대로 턴을 마친다.
 
 **5. 보고를 확인하고 다음을 보낸다.** 보고를 믿기 전에 셋을 본다.
 
-    git log --oneline main                 머지 해시가 main 에 있는가
-    moai show <id>                         펼친 에픽과 멤버가 done 인가
+    git merge-base --is-ancestor <머지 해시> main && echo 있다   머지가 main 에 있는가
+    moai show <에픽>                       펼친 에픽과 멤버가 done 인가
     git worktree list                      그 워크트리가 사라졌는가
+
+`<에픽>` 은 보고에 실린 에픽 id 다. idea 는 펼칠 때 이미 done 이 되고 멤버를 안 보여 줘,
+`moai show <id>` 로는 일이 끝났는지 모른다 — 보고에 없으면 그 idea 의 이력 "… 로
+펼쳤다" 에서 읽는다.
 
 셋이 맞으면 그 세션에 다음 idea 를 보낸다. 어긋나면 그 세션에 무엇이 남았는지
 묻고, 대신 끝내지 않는다.
+
+## 공유 main
+
+루트 체크아웃은 **모든 세션이 같이 쓴다.** 한 세션이 병합을 열어 둔 사이(`MERGE_HEAD`)에
+다른 세션이 트래커 노트를 커밋하면, 그 커밋이 남의 병합을 제 제목으로 봉인한다 — 실제로
+그렇게 됐다. 그래서 감독이든 일꾼이든 main 에서는:
+
+- 트래커 커밋에 경로를 준다 — `git commit -m "…" -- .moai/`. 병합이 열려 있으면 git 이
+  경로 준 커밋을 거절하니, 그 병합을 연 세션이 끝낼 때까지 기다렸다 다시 친다. 경로 없는
+  `git commit` 은 `git status` 를 보고 쳐도 그 병합을 그대로 봉인한다
+- 제 병합은 `git merge --no-ff <가지> -m "…"` 한 번으로 끝낸다. `--no-commit` 을 쓰지 않는다.
+  충돌로 멈추면 루트에서 풀지 않고 `git merge --abort` 한다
 
 ## 멈출 때
 
@@ -546,7 +562,70 @@ Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽�
   멈춘다 — 부딪히는 idea 를 억지로 보내지 않는다
 - 일꾼이 사람의 결정을 기다리면 감독이 대신 답하지 않는다. 결정은 사람의 것이다
 "#
-    .to_string()
+    )
+}
+
+/// 감독이 일꾼에게 `SendMessage` 로 싣는 글. **일꾼이 받는 것은 이것뿐이다** — 감독
+/// 스킬의 다른 절을 가리키면 일꾼에게 없는 글을 가리키는 것이라(첫 판의 "아래 공유
+/// main" 이 그랬다), 일꾼이 지킬 것은 모두 여기 적는다.
+///
+/// **리뷰 줄은 규칙 3 의 조각으로 적는다.** 손으로 줄인 `-t review --parent <에픽>` 은
+/// 관점(`-b`)이 빠져, 에픽 리뷰가 무엇을 왜 보는지 없이 섰다.
+///
+/// **닫기는 워크트리를 지운 뒤다.** 워크트리가 남아 있으면 훅이 그 에픽을 옆 워크트리의
+/// 일로 읽어(`worktree::away`) `-m` 없는 리뷰 닫기를 못 막고, 루트의 편집은 규칙 2 로
+/// 막는다 — 그래서 충돌과 시험은 워크트리에서 풀고, 루트 병합이 막히면 되돌리고 돌아간다.
+fn brief() -> String {
+    let review = make_review("--parent <에픽>");
+    let close = indent(&close_steps("<리뷰 id>"), "       ");
+    format!(
+        r#"    감독 세션(<내 이름>)이 idea <id> 를 맡긴다 — <제목>.
+    먼저 읽을 것: moai show <id>
+    1. main 에서 펼친다 — idea 를 일감으로 바꾸는 길은 `moai idea promote <id> --from -`
+       하나다. 이슈 하나짜리여도 에픽 + 이슈로 펼친다. `--dry-run` 을 먼저 본다.
+       그 idea 가 이미 done 이면(누가 펼쳤다) 펼치지 말고 감독에게 알린다 — 다시 펼치면
+       에픽이 둘 선다
+    2. 멤버를 `moai mv <멤버> in_progress` 로 집고 main 에 커밋한다. 루트는 모든 세션이
+       같이 쓴다 — 남이 병합을 열어 둔 사이(MERGE_HEAD)에 친 커밋은 그 병합을 제 제목으로
+       봉인한다. 그래서 트래커 커밋에는 경로를 준다. 병합이 열려 있으면 git 이 거절하니,
+       그 병합이 끝나기를 기다렸다 다시 친다
+         git commit -m "chore(tracker): <에픽> 를 워크트리에서 집는다" -- .moai/
+    3. 2 의 커밋 뒤 곧바로 `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> main`
+       으로 로컬 main 에서 뜨고 EnterWorktree(path) 로 들어간다. 이름은 idea id 가 아니라
+       펼친 에픽 id 다. 워크트리가 서기 전에는 루트의 다른 세션들이 이 멤버를 제 초점으로 읽는다
+    4. 노트에 없는 설계 결정은 추측하지 말고 AskUserQuestion 으로 묻는다 —
+       사람이 일꾼 창을 보고 있다
+    5. 리뷰 이슈를 세워(규칙 3) `/code-review high --fix`. 반영은 별도 fix: 커밋,
+       넘긴 것은 이슈 번호와 함께 노트.
+       main 에서 세우거나 집은 리뷰 이슈를 워크트리의 훅이 못 봐서 막힐 때만 — 훅은 그
+       워크트리의 스냅샷만 읽는다 — 같은 관점·단계·`--fix` 범위로 리뷰 서브에이전트를
+       돌린다. 리뷰 이슈·관점(`-b`)·원문 노트·닫는 `-m` 은 그대로 남긴다. 관점이 없다
+       같은 다른 거절은 돌아가지 않고 거절문이 내는 명령대로 고친다
+    6. 멤버의 일이 다 끝나면 워크트리에서 main 을 받아 충돌을 풀고 시험을 돌린다. 고칠
+       것은 여기서 고친다 — 워크트리가 남아 있는 동안 루트에서는 규칙 2 가 편집을 막는다
+    7. 병합 전에 에픽 전체를 `/code-review max --fix` 로 본다 — 가지가 main 을 떠난
+       자리(`git merge-base main HEAD`)부터의 diff 다. 6 에서 main 을 받았으니 충돌을 푼
+       자리도 든다. 리뷰 이슈를 따로 세운다. 막히면 5 의 길로 간다
+         {review}
+    8. ExitWorktree(keep) 로 루트로 돌아온다 — 워크트리 안에서 그것을 지우면 세션의
+       자리가 사라진 디렉터리에 남아 감독이 다시는 이 세션을 루트로 못 본다.
+       옆 세션과 병합이 겹치면 먼저 알린 뒤 루트에서 **한 번에** 병합한다.
+       `--no-commit` 을 쓰지 않는다. `--no-ff` 가 없으면 fast-forward 로 끝나 병합 커밋이 안 선다
+         git merge --no-ff worktree-<에픽> -m "merge: …"
+       루트의 `.moai` 에 커밋 안 된 옆 세션의 줄이 있으면 병합이 거절된다 — 2 처럼 경로를
+       준 커밋으로 먼저 담는다. 충돌로 멈추면 루트에서 풀지 않는다 — `git merge --abort`
+       로 되돌리고 EnterWorktree(path) 로 워크트리에 돌아가 6 부터 다시 한다
+    9. 병합이 실제로 끝났으면 루트에서 `git worktree remove .claude/worktrees/<에픽>` 과
+       `git branch -d worktree-<에픽>` 으로 워크트리와 가지를 지운다
+    10. 그 뒤에 닫는다. **`moai mv <멤버> done` 은 그 병합이 실제로 끝난 뒤에만 친다** —
+       병합 전에 옮겼다가 되돌린 일꾼이 있었다. 워크트리가 남아 있으면 훅이 이 일을 옆
+       워크트리의 것으로 읽어 `-m` 없는 리뷰 닫기를 못 막는다. 리뷰 이슈는 무엇이
+       나왔는지를 남기며 닫는다
+{close}
+       시험 통과를 보고 2 처럼 경로를 준 커밋으로 main 에 남긴다
+    11. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 펼친 에픽 id, 한두 줄 요약,
+       넘긴 것·새 idea"#
+    )
 }
 
 /// 줄마다 앞에 붙인다. 빈 줄은 빈 채로 둔다 — 꼬리 공백은 diff 를 더럽힌다.
@@ -615,33 +694,82 @@ mod tests {
 
     /// **감독이 일꾼에게 가르치는 펼치기는 참고 문서의 그 명령이다.** 길이 둘로
     /// 갈라지면 일꾼마다 다르게 고른다 — 첫 실행에서 `add` 로 새 줄을 세운 일꾼이 있었다.
+    /// 리뷰 이슈를 세우는 줄은 규칙 3 의 그 조각이라 빼고 센다 — `moai add` 를 통째로
+    /// 막던 판은 그 조각을 못 실어, 관점(`-b`) 없는 줄을 손으로 줄여 적었다.
     #[test]
     fn the_supervisor_teaches_promote_as_the_one_way() {
         let (supervise, reference) = (supervise(), reference());
         let promote = "moai idea promote <id> --from -";
         assert!(reference.contains(promote), "참고 문서의 펼치기 줄이 바뀌었다");
         assert!(supervise.contains(promote), "감독이 promote 를 안 가르친다");
-        assert!(!supervise.contains("moai add "), "감독이 promote 말고 다른 길을 가르친다");
+        let review = make_review("--parent <에픽>");
+        assert!(supervise.contains(&review), "에픽 리뷰를 규칙 3 의 줄로 안 세운다");
+        assert!(!supervise.replace(&review, "").contains("moai add"), "감독이 promote 말고 다른 길을 가르친다");
     }
 
-    /// **첫 실행에서 일꾼들이 실제로 걸려 넘어진 세 자리가 절차에 선다.** 리뷰가
-    /// 워크트리에서 막힐 때의 길, 병합 뒤에만 done, 에픽 끝의 max 리뷰 — 셋 중
+    /// **일꾼이 받는 글(`brief`)에 첫 실행에서 넘어진 자리가 선다.** 감독 스킬의 다른
+    /// 절에만 적으면 시험은 초록인데 일꾼은 못 받는다 — `MERGE_HEAD` 가 실제로 그랬다.
     /// 하나라도 빠지면 다음 일꾼이 같은 자리에서 또 넘어진다.
     #[test]
     fn the_worker_brief_carries_what_the_first_run_tripped_on() {
-        let supervise = supervise();
+        let (brief, supervise) = (brief(), supervise());
+        assert!(supervise.contains(&brief), "감독이 싣는 글이 brief 가 아니다");
+        let review = make_review("--parent <에픽>");
         for (piece, why) in [
             ("리뷰 서브에이전트", "워크트리에서 /code-review 가 막힐 때의 길이 없다"),
-            ("moai-iz38", "막히는 까닭을 가리키는 이슈가 없다"),
+            ("스냅샷만 읽는다", "막히는 까닭이 없어 다른 거절까지 돌아간다"),
             ("병합이 실제로 끝난 뒤에만", "병합 전에 done 으로 옮기지 말라는 말이 없다"),
             ("/code-review max --fix", "에픽 끝의 max 리뷰가 없다"),
-            ("--parent <에픽>", "max 리뷰 이슈를 에픽에 매는 줄이 없다"),
+            (review.as_str(), "max 리뷰 이슈를 관점과 함께 에픽에 매는 줄이 없다"),
             ("ExitWorktree(keep)", "루트로 돌아오는 걸음이 없다"),
             ("MERGE_HEAD", "남이 열어 둔 병합을 봉인하지 말라는 말이 없다"),
+            ("-- .moai/", "트래커 커밋이 열린 병합을 봉인한다"),
             ("`--no-commit` 을 쓰지 않는다", "병합을 한 번에 끝내라는 말이 없다"),
+            ("git merge --no-ff", "fast-forward 로 끝나 병합 커밋이 안 선다"),
+            ("git merge --abort", "루트 병합이 충돌할 때의 길이 없다"),
+            ("펼친 에픽 id", "보고에 에픽이 없어 감독이 멤버를 못 본다"),
+        ] {
+            assert!(brief.contains(piece), "{why} — {piece}");
+        }
+        // 리뷰는 무엇이 나왔는지를 남기며 닫는다. 워크트리가 남아 있으면 훅이 그 에픽을 옆의
+        // 일로 읽어 `-m` 없는 닫기를 못 막으니, 닫기는 워크트리를 지운 뒤다.
+        for step in close_steps("<리뷰 id>").lines() {
+            assert!(brief.contains(step.trim()), "리뷰 닫기 걸음이 갈라졌다 — {step}");
+        }
+        let removed = brief.find("git worktree remove").expect("워크트리를 지우는 걸음이 없다");
+        let closed = brief.find("moai mv <리뷰 id> done").expect("리뷰를 닫는 걸음이 없다");
+        assert!(removed < closed, "워크트리를 지우기 전에 리뷰를 닫는다");
+        // 에픽 리뷰는 main 을 받은 뒤다 — 먼저 보면 충돌을 푼 자리가 리뷰 없이 main 에 선다.
+        let synced = brief.find("main 을 받아").expect("main 을 받는 걸음이 없다");
+        let reviewed = brief.find("/code-review max --fix").expect("에픽 리뷰 걸음이 없다");
+        assert!(synced < reviewed, "main 을 받기 전에 에픽 전체를 리뷰한다");
+        assert!(brief.contains("이미 done 이면"), "누가 펼친 idea 를 또 펼쳐 에픽이 둘 선다");
+        for (piece, why) in [
             ("거절한 세션", "맡기기를 거절한 세션을 빼라는 말이 없다"),
+            ("함께 보내는 idea 끼리도", "같은 바퀴에 보낸 둘이 같은 곳을 고친다"),
+            ("보고를 확인할 때까지 후보에서 뺀다", "보낸 idea 가 둘째 일꾼에게 또 간다"),
+            ("그 멤버는 일꾼의 것이다", "감독이 훅에 떠밀려 일꾼의 멤버를 옮긴다"),
+            ("이 기계의 세션에만", "원격 세션에 루트를 묻는다"),
+            ("보고를 아직 확인하지 않은 세션", "맡긴 일을 하던 세션에 또 맡긴다"),
+            ("moai show <에픽>", "idea 로 확인하면 멤버가 안 보인다"),
         ] {
             assert!(supervise.contains(piece), "{why} — {piece}");
         }
+    }
+
+    /// **감독 스킬은 모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 적으면 남의 저장소에서는
+    /// 아무것도 안 가리키고, 고친 뒤에는 거짓이 된다.
+    #[test]
+    fn the_supervisor_names_no_issue_of_this_repo() {
+        let text = supervise();
+        let ids: Vec<&str> = text
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .filter(|w| {
+                w.strip_prefix("moai-").is_some_and(|rest| {
+                    rest.len() == 4 && rest.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                })
+            })
+            .collect();
+        assert!(ids.is_empty(), "이 저장소의 이슈 id 가 섰다 — {ids:?}");
     }
 }
