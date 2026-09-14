@@ -135,10 +135,15 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
 
 /// 겹칠 줄들을 **제 워크트리가 먼저**인 차례로 받아 하나로 보인다.
 ///
-/// 같은 id 는 `updated_at` 이 가장 늦은 줄이 선다. **같으면 앞선 쪽** — 제
-/// 워크트리가 맨 앞이라 동률이면 지금 브랜치의 줄이고, 남끼리는 git 이 댄
-/// 차례다. 결정적이어야 부를 때마다 같은 줄이 선다. 시각은 RFC3339 UTC
-/// 고정폭이라 문자열로 견준다(`model::now`).
+/// 같은 id 는 **칸을 늦게 옮긴 줄**(`status_since`)이 통째로 선다. 같으면
+/// `updated_at` 이 늦은 줄, 그것도 같으면 앞선 쪽 — 제 워크트리가 맨 앞이라
+/// 동률이면 지금 브랜치의 줄이고, 남끼리는 git 이 댄 차례다. 결정적이어야 부를
+/// 때마다 같은 줄이 선다. 시각은 RFC3339 UTC 고정폭이라 문자열로 견준다(`model::now`).
+///
+/// **칸이 먼저인 까닭** — 제목·우선순위·태그를 고친 것도 `updated_at` 을 올린다.
+/// 그것으로만 견주면 옆에서 집은 뒤 여기서 우선순위 하나만 고쳐도 옆 줄이 가려져
+/// `ready --worktree` 가 옆에서 잡은 일을 다시 집으라고 낸다(moai-2f5g). 필드마다
+/// 따로 고르지는 않는다 — 한 줄의 출처가 둘이면 `⎇` 와 이력을 읽을 뿌리가 갈린다.
 ///
 /// **제 줄은 한 줄도 접지 않는다.** 제 파일에 같은 id 가 둘이면 둘 다 남긴다 —
 /// 여기서 접으면 `moai status` 의 `duplicate_id` 가 `--worktree` 를 붙인
@@ -164,7 +169,7 @@ pub fn overlay(mine: Vec<Issue>, others: Vec<Side>) -> (Vec<Issue>, Origin) {
         origin.trees.push((label, root));
         for i in issues {
             match at.get(&i.id) {
-                Some(&k) if i.updated_at > shown[k].updated_at => {
+                Some(&k) if (&i.status_since, &i.updated_at) > (&shown[k].status_since, &shown[k].updated_at) => {
                     origin.from.insert(i.id.clone(), tree);
                     shown[k] = i;
                 }
@@ -413,6 +418,25 @@ mod tests {
         assert_eq!(origin.root("m-0001"), Some(Path::new("/wt/feat/x")));
         assert_eq!(shown[1].status.as_str(), "todo", "이른 남의 줄이 제 줄을 덮었다");
         assert_eq!(origin.branch("m-0002"), None, "제 줄인데 출처가 붙었다");
+    }
+
+    /// 칸을 늦게 옮긴 줄이 선다 — 그 뒤에 필드만 고친 줄은 칸을 덮지 못한다(moai-2f5g).
+    #[test]
+    fn a_later_move_beats_a_later_field_edit() {
+        let mut picked = issue("m-0001", "in_progress", "2026-09-12T00:00:00Z");
+        picked.status_since = "2026-09-12T00:00:00Z".into();
+        let edited = issue("m-0001", "todo", "2026-09-13T00:00:00Z");
+        let (shown, origin) = overlay(vec![edited], vec![tree("feat/x", vec![picked])]);
+        assert_eq!(shown[0].status.as_str(), "in_progress", "늦은 필드 편집이 옆에서 집은 것을 풀었다");
+        assert_eq!(origin.branch("m-0001"), Some("feat/x"));
+
+        // 거꾸로 — 여기서 늦게 옮겼으면 옆의 늦은 필드 편집이 덮지 못한다.
+        let mut moved = issue("m-0002", "done", "2026-09-12T00:00:00Z");
+        moved.status_since = "2026-09-12T00:00:00Z".into();
+        let theirs = issue("m-0002", "todo", "2026-09-13T00:00:00Z");
+        let (shown, origin) = overlay(vec![moved], vec![tree("feat/x", vec![theirs])]);
+        assert_eq!(shown[0].status.as_str(), "done");
+        assert_eq!(origin.branch("m-0002"), None);
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.

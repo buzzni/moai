@@ -1039,7 +1039,8 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     for b in &i.blocked_by {
         let at = app.index.find(b);
         let root = app.index.deferred_root(b);
-        let (label, text) = match crate::report::blocker(at.map(|at| app.column(at)), root.is_some()) {
+        let aside = at.map_or(&[][..], |at| app.aside(at));
+        let (label, text) = match crate::report::blocker(at.map(|at| app.column(at)), root.is_some(), !aside.is_empty()) {
             Blocker::Missing => ("끊김", format!("! {b}  없는 이슈라 막지 않는다")),
             Blocker::Done => ("풀림", format!("✓ {b}  {}", app.title_of(b))),
             Blocker::Open => ("막힘", format!("· {b}  {}", app.title_of(b))),
@@ -1047,6 +1048,10 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
             // `ready` 에도 없으므로 미뤘다는 말을 붙인다. 낱말은 상세 머리가 쓰는 자리다.
             // **제목 앞에 둔다** — 값은 오른쪽부터 잘리므로, 뒤에 붙이면 흔한 길이의
             // 제목에서 이 줄을 그냥 "막힘" 과 가르는 유일한 말이 통째로 사라진다.
+            // 미뤄 뺀 멤버 덕에 닫힌 것으로 선 묶음이면 묶음은 미룬 적이 없다 — 그 멤버를 댄다.
+            Blocker::Deferred if !aside.is_empty() => {
+                ("막힘", format!("· {b}  미룬 멤버 {}  {}", aside.join(" "), app.title_of(b)))
+            }
             Blocker::Deferred => {
                 let shelf = at
                     .and_then(|at| crate::view::deferred_for(&app.issues[at], root, &app.now))
@@ -2105,11 +2110,18 @@ pub(super) mod tests {
         };
         // (막는 쪽을 꾸미는 법, 상세에 나와야 할 낱말, 나오면 안 될 낱말)
         type Case = (&'static str, fn(&mut Vec<Issue>), &'static [&'static str], &'static [&'static str]);
-        let cases: [Case; 4] = [
+        let cases: [Case; 5] = [
             ("끊긴 막음", |_| {}, &["끊김", "argos-9999"], &["막힘", "풀림"]),
             ("미뤄 둔 막음", |v| v[4].deferred_at = Some("2026-09-02T00:00:00Z".into()), &["막힘", "미룸"], &["풀림"]),
             ("멤버가 다 끝난 묶음", |v| v[6].status = Status::new("done"), &["풀림"], &["막힘"]),
             ("멤버가 남은 묶음", |_| {}, &["막힘"], &["풀림", "미룸"]),
+            // 끝난 멤버 하나에 남은 멤버를 미뤄 접은 묶음 — 칸은 done 이어도 아직 막는다(moai-0gxf).
+            ("미뤄 접은 묶음", |v| {
+                v[6].deferred_at = Some("2026-09-02T00:00:00Z".into());
+                let mut closed = Issue::new("argos-0009".into(), "끝난 멤버".into(), Kind::Issue, Status::new("done"), "2026-09-01T00:00:00Z");
+                closed.epic = Some("argos-0007".into());
+                v.push(closed);
+            }, &["막힘", "미룬 멤버 argos-0008"], &["풀림"]),
         ];
         for (name, arrange, want, deny) in cases {
             let mut all = issues();

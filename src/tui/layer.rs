@@ -148,7 +148,14 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
         State::Missing => Shut::Missing,
         State::Unreadable(_) | State::Open { .. } => Shut::Unreadable,
     };
-    let p = projects::Project { path: path.to_path_buf(), name: name.to_string(), hue: None, state };
+    let p = projects::Project {
+        path: path.to_path_buf(),
+        name: name.to_string(),
+        hue: None,
+        state,
+        origin: Default::default(),
+        trouble: Vec::new(),
+    };
     let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()))).trim().to_string();
     Look::Shut { state: kind, said }
 }

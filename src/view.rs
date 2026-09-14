@@ -643,16 +643,7 @@ pub fn status(
     origin: &Origin,
 ) -> Vec<String> {
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    // **겹쳐 본 화면은 머리에서 그렇다고 말한다.** 줄마다 붙는 `⎇` 는 옆에서 온
-    // 줄에만 서므로, 옆 워크트리가 조용하면 겹쳐 본 보드와 제 보드가 똑같이 보인다.
-    let trees = origin.labels();
-    let overlaid = match trees.is_empty() {
-        true => String::new(),
-        false => format!(
-            "   {}",
-            paint(style::BRANCH, &format!("{} {} 겹쳐 봄", style::BRANCH_GLYPH, clip(&trees.join(", "), TITLE_CAP)))
-        ),
-    };
+    let overlaid = overlaid(origin);
     let mut out = vec![
         format!(
             "{}  {}       {}{overlaid}",
@@ -1207,6 +1198,10 @@ pub struct Board<'a> {
     pub status: StatusReport,
     /// 집은 것 (`report::wip`).
     pub picked: Vec<&'a Issue>,
+    /// `--worktree` 로 겹쳤으면 줄마다의 출처 (`Project::origin`).
+    pub origin: &'a Origin,
+    /// 옆 워크트리를 겹치다 만난 것 (`Project::trouble`).
+    pub trouble: &'a [String],
 }
 
 /// 한눈 보기에서 연 프로젝트 하나의 집을 것 — `moai ready` 가 `.moai` 밖에서 낸다.
@@ -1214,6 +1209,30 @@ pub struct Picks<'a> {
     pub picks: Vec<&'a Issue>,
     /// 못 읽는 줄의 수. 그 줄에 있던 일은 목록에서 빠져 있다.
     pub unreadable: usize,
+    pub origin: &'a Origin,
+    pub trouble: &'a [String],
+}
+
+/// 겹쳐 본 화면의 머리 꼬리 — `   ⎇ <워크트리들> 겹쳐 봄`. 안 겹쳤으면 빈 글.
+///
+/// **겹쳐 본 화면은 머리에서 그렇다고 말한다.** 줄마다 붙는 `⎇` 는 옆에서 온
+/// 줄에만 서므로, 옆 워크트리가 조용하면 겹쳐 본 보드와 제 보드가 똑같이 보인다.
+fn overlaid(origin: &Origin) -> String {
+    let trees = origin.labels();
+    match trees.is_empty() {
+        true => String::new(),
+        false => format!(
+            "   {}",
+            paint(style::BRANCH, &format!("{} {} 겹쳐 봄", style::BRANCH_GLYPH, clip(&trees.join(", "), TITLE_CAP)))
+        ),
+    }
+}
+
+/// 옆 워크트리를 겹치다 만난 것을 한 줄씩. **막지 않는다** — `!` 로 말만 한다.
+fn troubles(out: &mut Vec<String>, trouble: &[String]) {
+    for t in trouble {
+        out.push(format!("  {} {}", paint(style::WARN, "!"), one_line(t)));
+    }
 }
 
 /// 한 프로젝트에서 집은 것을 몇 줄까지 보이나. 한눈 보기는 프로젝트가 여럿이라 짧게 끊는다.
@@ -1237,11 +1256,12 @@ pub fn projects_status(
     let w_name = projects.iter().map(|p| width(&one_line(&p.name))).max().unwrap_or(0);
     for (p, s) in projects.iter().zip(seen) {
         out.push(String::new());
-        out.push(project_head(p, ""));
         let crate::projects::Seen::Ok(b) = s else {
+            out.push(project_head(p, ""));
             out.push(unopened(p, s));
             continue;
         };
+        out.push(project_head(p, overlaid(b.origin).trim_start()));
         out.push(board(b.cfg, &b.status.counts));
         let shown = &b.picked[..b.picked.len().min(PICKED_SHOWN)];
         // **id 도 제목도 남의 스냅샷에서 온다** — 읽기는 관대해 `\n` 말고는 아무것도 안 막으므로,
@@ -1257,13 +1277,14 @@ pub fn projects_status(
                 cell(hue, &one_line(&p.name), w_name + 2),
                 cell(hue, id, w_id + 2),
                 paint(style::status_style(i.status.as_str()), style::glyph(i.status.as_str())),
-                clip(&one_line(&i.title), TITLE_CAP),
+                marked(b.origin.branch(&i.id), &one_line(&i.title), TITLE_CAP, style::PLAIN).0,
             ));
         }
         let rest = b.picked.len().saturating_sub(PICKED_SHOWN);
         if rest > 0 {
             out.push(format!("  {}", paint(style::DIM, &format!("집은 것 {rest}건 더"))));
         }
+        troubles(&mut out, b.trouble);
         // **알림은 세지 않는다** — `moai status` 의 "드러난 문제 없다" 와 같은 자다.
         let n = b.status.warnings.len();
         let fatal = b.status.warnings.iter().filter(|w| w.fatal).count();
@@ -1307,7 +1328,7 @@ pub fn projects_ready(
             out.push(unopened(p, s));
             continue;
         };
-        out.push(project_head(p, &format!("{}건", k.picks.len())));
+        out.push(project_head(p, &format!("{}건{}", k.picks.len(), overlaid(k.origin))));
         let shown = &k.picks[..k.picks.len().min(READY_SHOWN)];
         // 남의 스냅샷에서 온 글자다 — 걸러서 찍고 걸러서 잰다(`projects_status` 와 같은 까닭).
         let ids: Vec<String> = shown.iter().map(|i| one_line(&i.id)).collect();
@@ -1319,7 +1340,7 @@ pub fn projects_ready(
                 cell(hue, &one_line(&p.name), w_name + 2),
                 cell(hue, id, w_id + 2),
                 cell(style::priority_style(i.priority()), &format!("p{}", i.priority()), 4),
-                clip(&one_line(&i.title), TITLE_CAP),
+                marked(k.origin.branch(&i.id), &one_line(&i.title), TITLE_CAP, style::PLAIN).0,
             ));
         }
         let rest = k.picks.len() - shown.len();
@@ -1327,6 +1348,8 @@ pub fn projects_ready(
             let go = format!("{rest}건 더 → `moai -C {} ready`", shell_arg(&p.path));
             out.push(format!("  {}", paint(style::DIM, &go)));
         }
+        // 목록 꼬리("N건 더") 뒤에 둔다 — 앞에 두면 그 꼬리가 문제 줄의 연속으로 읽힌다(`projects_status` 와 같은 차례).
+        troubles(&mut out, k.trouble);
         if k.unreadable > 0 {
             out.push(format!(
                 "  {} 읽을 수 없는 줄 {}개 — 어느 줄인지는 `moai -C {} show` 가 낸다",
