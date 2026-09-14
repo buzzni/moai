@@ -286,7 +286,18 @@ pub enum Browse {
     Reload,
     Worktree,
     Raw,
+    /// 설정의 n 번째 칸(0부터)을 보이고 숨긴다(moai-fmv5). **칸 이름이 설정에서 오므로 글자가
+    /// 아니라 번호로 누른다** — 글자로 두면 설정에 따라 키가 겹친다.
+    Column(u8),
+    /// done 을 보이고 숨긴다 — 가장 자주 누를 것이라 번호와 따로 선다.
+    Done,
+    /// 미룬 것을 보이고 숨긴다. 칸이 아니라 `deferred_at` 축이다.
+    Deferred,
+    ShowAll,
 }
+
+/// 칸 토글에 번호를 줄 수 있는 칸 수 — `1`~`9`. 넘는 칸은 번호가 없고 `SPC s a` 로만 돌아온다.
+pub const NUMBERED: usize = 9;
 
 /// 탐색의 이동(moai-ob4c, 키 지도 moai-hudg). **vi 키에 이름을 붙이고 화살표·Home·End·PgUp/Dn
 /// 은 숨은 별칭이다** — 바가 한 이름만 대야 좁은 창에서 덜 떨어진다. 드나들기만 거꾸로다:
@@ -362,6 +373,20 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Unregister, Some("SPC p d"), LEADER, Key::plain('p'), Key::plain('d')),
         row!(Worktree, Some("SPC t w"), LEADER, Key::plain('t'), Key::plain('w')),
         row!(Raw, Some("SPC t r"), LEADER, Key::plain('t'), Key::plain('r')),
+        row!(Done, Some("SPC s d"), LEADER, Key::plain('s'), Key::plain('d')),
+        row!(Deferred, Some("SPC s z"), LEADER, Key::plain('s'), Key::plain('z')),
+        row!(ShowAll, Some("SPC s a"), LEADER, Key::plain('s'), Key::plain('a')),
+        // 번호 줄은 첫 줄만 이름을 단다 — 도움말이 `SPC s 1` 과 "번호가 차례로 는다" 로 한 번에
+        // 대고, 메뉴는 이름이 아니라 키(`next.name()`)와 설정의 칸 이름을 세운다.
+        row!(Column(0), Some("SPC s 1"), LEADER, Key::plain('s'), Key::plain('1')),
+        row!(Column(1), None, LEADER, Key::plain('s'), Key::plain('2')),
+        row!(Column(2), None, LEADER, Key::plain('s'), Key::plain('3')),
+        row!(Column(3), None, LEADER, Key::plain('s'), Key::plain('4')),
+        row!(Column(4), None, LEADER, Key::plain('s'), Key::plain('5')),
+        row!(Column(5), None, LEADER, Key::plain('s'), Key::plain('6')),
+        row!(Column(6), None, LEADER, Key::plain('s'), Key::plain('7')),
+        row!(Column(7), None, LEADER, Key::plain('s'), Key::plain('8')),
+        row!(Column(8), None, LEADER, Key::plain('s'), Key::plain('9')),
     ]
 };
 
@@ -380,6 +405,12 @@ pub struct Ctx {
     pub root: bool,
     pub worktree: bool,
     pub raw: bool,
+    /// 번호를 받은 칸 수 — 설정의 칸 수와 [`NUMBERED`] 중 작은 것.
+    pub columns: usize,
+    /// 숨긴 칸 — n 번째 비트가 설정의 n 번째 칸. 이름을 들지 않는다: 이 값은 복사로 다닌다.
+    pub hidden: u16,
+    pub done_hidden: bool,
+    pub deferred_hidden: bool,
     /// `Tab`·Shift-Tab 이 가는 칸의 이름.
     pub next_pane: &'static str,
     pub prev_pane: &'static str,
@@ -420,6 +451,9 @@ impl Browse {
                 Err(Off::Why(format!("거름망은 프로젝트 안의 줄에 건다 — {} 로 들어가서 건다", label(BROWSE, Enter))))
             }
             Worktree if c.layer => Err(Off::Quiet),
+            // 보기는 프로젝트 안의 줄에 건다 — 층에서는 그룹째 메뉴에 안 선다(`menu::live`).
+            Column(_) | Done | Deferred | ShowAll if c.layer => Err(Off::Quiet),
+            Column(n) if usize::from(n) >= c.columns => Err(Off::Quiet),
             _ => Ok(()),
         }
     }
@@ -435,6 +469,8 @@ impl Browse {
             Unregister => "목록에서 빼기",
             Worktree => "워크트리 겹쳐 보기",
             Raw => "원문↔그리기",
+            Deferred => "미룸",
+            ShowAll => "모두 보이기",
             _ => self.what(c),
         }
     }
@@ -445,6 +481,9 @@ impl Browse {
         match self {
             Browse::Worktree => Some(if c.worktree { "[켜짐]" } else { "[꺼짐]" }),
             Browse::Raw => Some(if c.raw { "[원문]" } else { "[그리기]" }),
+            Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0)),
+            Browse::Done => Some(shown(c.done_hidden)),
+            Browse::Deferred => Some(shown(c.deferred_hidden)),
             _ => None,
         }
     }
@@ -474,8 +513,17 @@ impl Browse {
             Worktree => "워크트리",
             Raw if c.raw => "그리기",
             Raw => "원문",
+            // 칸의 이름은 설정에서 온다 — 메뉴가 이름을 붙인다(`menu::entries`).
+            Column(_) => "칸",
+            Done => "done",
+            Deferred => "미룸",
+            ShowAll => "모두",
         }
     }
+}
+
+fn shown(hidden: bool) -> &'static str {
+    if hidden { "[숨김]" } else { "[보임]" }
 }
 
 /// SPC 메뉴가 열린 동안 **표보다 먼저** 받는 키(moai-7sjm). Esc 는 탐색에서 거름망을 풀지만,
@@ -994,6 +1042,11 @@ mod tests {
             (vec![sp, ch('p'), ch('d')], B::Unregister),
             (vec![sp, ch('t'), ch('w')], B::Worktree),
             (vec![sp, ch('t'), ch('r')], B::Raw),
+            (vec![sp, ch('s'), ch('d')], B::Done),
+            (vec![sp, ch('s'), ch('z')], B::Deferred),
+            (vec![sp, ch('s'), ch('a')], B::ShowAll),
+            (vec![sp, ch('s'), ch('1')], B::Column(0)),
+            (vec![sp, ch('s'), ch('9')], B::Column(8)),
         ];
         for (seq, act) in menu {
             assert_eq!(lookup(BROWSE, &seq), Lookup::Run(act), "메뉴 {seq:?}");

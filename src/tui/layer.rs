@@ -474,6 +474,7 @@ impl App {
         self.index = Index::of(&[]);
         self.states = Default::default();
         self.keep = Vec::new();
+        self.shown = Vec::new();
         self.unreadable = Vec::new();
         self.origin = Default::default();
         self.elsewhere = Vec::new();
@@ -482,6 +483,10 @@ impl App {
         self.stamp = None;
         self.warnings = 0;
         self.filter_text = None;
+        // **보기도 처음으로 돌린다**(moai-fmv5). 숨긴 칸은 칸 *이름*이라 그 프로젝트의 설정에
+        // 매인 것이다 — 다음 프로젝트에 그 칸이 없으면 번호 토글이 안 서서 `SPC s a` 말고는
+        // 경로 줄의 `[… 숨김]` 을 걷을 길이 없다. 거름망과 같은 까닭이다.
+        self.view = super::view::View::hiding(crate::config::DONE);
         // **겹쳐 보기는 기본값(켬)으로 돌린다.** 한 프로젝트에서 `w` 로 끈 것은 그
         // 프로젝트에 매인 뜻이다 — 층에서는 `w` 가 안 먹어 되켤 길이 없는 채로, 다음
         // 프로젝트가 시키지도 않은 끈 화면으로 읽힌다. 거름망과 같은 까닭이다.

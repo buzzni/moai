@@ -53,7 +53,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 없으면 격자 없이 접두어 줄 한 줄로 접는다([`menu_line`]).
     let area = f.area();
     let open_menu = (matches!(app.mode, Mode::Browse) && menu::open(&app.chord)).then(|| {
-        let items = menu::entries(app.chord.held(), &app.key_ctx(&rows));
+        let items = menu::entries(app.chord.held(), &app.key_ctx(&rows), &app.cfg.statuses);
         let left = area.height.saturating_sub(1 + banner_h + keys_h) as usize;
         let grid = menu::grid(&items, (area.width as usize).saturating_sub(2), menu::rows_for(left));
         (items, grid)
@@ -496,6 +496,15 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
         Some(o) => room.saturating_sub(crate::text::width(o) + 3),
         None => room,
     };
+    // **보기가 숨긴 것을 댄다**(moai-fmv5) — done 을 숨긴 채 시작하므로, 안 대면 끝난 일이 사라진
+    // 줄 안다. 거름망 뱃지와 달리 **늘 서 있는 것**이라 경로의 몫을 굶기지 않는다: 경로에 여덟 칸이
+    // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC s` 가 댄다. 층에서는 보기가 뜻이 없다.
+    let look = app.view.badge().filter(|_| !app.on_layer()).map(|b| format!("[{b}]"));
+    let look = look.filter(|l| crate::text::width(l) + 3 + 8 <= room);
+    let room = match &look {
+        Some(l) => room.saturating_sub(crate::text::width(l) + 3),
+        None => room,
+    };
     // **언제 읽은 화면인지** 댄다. 파일이 바뀌면 저절로 다시 읽으므로(`App::follow`)
     // 배너는 없고, 이 시각이 바뀌는 것이 갱신됐다는 표시다. 자리가 모자라면 이것부터
     // 버린다 — 거름망·겹쳐 보기 뱃지는 줄이 왜 그런지를 말하고, 이것은 곁들임이다.
@@ -523,6 +532,10 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     if let Some(o) = overlay {
         spans.push(Span::raw("   "));
         spans.push(Span::styled(o, branch()));
+    }
+    if let Some(l) = look {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled(l, dim()));
     }
     if let Some(b) = badge {
         spans.push(Span::raw("   "));
@@ -1732,8 +1745,17 @@ pub(super) mod tests {
             .collect()
     }
 
+    /// **다 보이는 채로 세운다.** 그림 시험의 줄에는 끝난 멤버가 있고, 시험은 그 줄을 그리는
+    /// 법을 본다 — 처음 done 을 숨기는 보기(moai-fmv5)는 제 시험이 따로 본다.
     fn app() -> App {
-        App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new())
+        every(issues())
+    }
+
+    fn every(issues: Vec<Issue>) -> App {
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.view = super::super::view::View::default();
+        a.see();
+        a
     }
 
     /// 빛줄기는 **글자와 폭을 그대로 두고** 스타일만 칸마다 바꾸며, 한 걸음에 한 칸씩 흐르고,
@@ -2146,7 +2168,7 @@ pub(super) mod tests {
     fn blockers_are_resolved_to_titles() {
         let mut issues = issues();
         issues[1].blocked_by = vec!["argos-0001".into()];
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let lines = render(&mut a, 100, 20).join("\n");
         assert!(lines.contains("막힘"), "{lines}");
@@ -2158,7 +2180,7 @@ pub(super) mod tests {
     fn a_body_cannot_repaint_the_screen() {
         let mut issues = issues();
         issues[1].body = Some("앞\u{1b}[2J뒤".into());
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let lines = render(&mut a, 100, 20).join("\n");
         assert!(lines.contains("앞[2J뒤"), "제어문자가 안 걸러졌다\n{lines}");
@@ -2281,7 +2303,7 @@ pub(super) mod tests {
                 issues[2].status = Status::new("done"); // 막는 쪽이 정말 끝났다
             }
             issues[1].blocked_by = vec!["argos-0001".into()];
-            let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+            let mut a = every(issues);
             a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
             render(&mut a, 100, 20).join("\n")
         };
@@ -2395,7 +2417,7 @@ pub(super) mod tests {
             crate::model::Issue::new(id.into(), title.into(), Kind::Issue, Status::new(st), "2026-09-01T00:00:00Z")
         };
         let issues = vec![row("argos-0001", "집은 일", "in_progress"), row("argos-0002", "리뷰 기다리는 일", "review"), row("argos-0003", "안 한 일", "todo")];
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         let lines = render(&mut a, 120, 16);
         let line_of = |id: &str| lines.iter().find(|l| l.contains(id)).cloned().unwrap_or_else(|| panic!("{id} 줄이 없다\n{}", lines.join("\n")));
         let (held, waiting, idle) = (line_of("argos-0001"), line_of("argos-0002"), line_of("argos-0003"));
@@ -2422,7 +2444,7 @@ pub(super) mod tests {
     fn a_deferred_pick_does_not_spin_the_counts_either() {
         let mut issues = issues();
         issues[2].deferred_at = Some("2026-09-02T00:00:00Z".into());
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         let root = render(&mut a, 120, 16).join("\n");
         assert!(!a.spun);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -2454,7 +2476,7 @@ pub(super) mod tests {
         let mut held = make("argos-0002", Kind::Issue, "in_progress");
         held.epic = Some("argos-0001".into());
         issues.extend([held_epic, held]);
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         assert!(a.spins(a.index.find("argos-0001").unwrap()), "시험의 전제 — 그 에픽은 돈다");
 
         let off = render(&mut a, 100, 10).join("\n");
@@ -2518,7 +2540,7 @@ pub(super) mod tests {
         // 집은 멤버를 내려놓는다 — 끝난 것 하나와 첫 칸 하나로도 에픽은 `in_progress` 로
         // 읽히고, 그때는 안 도므로 정지 글리프 `▸` 로 읽은 칸을 확인할 수 있다.
         issues[2].status = Status::new("todo");
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         for w in [100, 200] {
             let lines = render(&mut a, w, 16).join("\n");
             let row = lines.lines().find(|l| l.contains("> argos-0001")).unwrap();
@@ -2548,7 +2570,7 @@ pub(super) mod tests {
                 )
             })
             .collect();
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         // 창은 12줄 — 목록 안쪽은 그보다 짧다. 커서를 다섯 칸 내린다.
         for _ in 0..5 {
             a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
@@ -2620,7 +2642,7 @@ pub(super) mod tests {
     fn the_body_is_drawn_in_the_detail_pane() {
         let mut issues = issues();
         issues[1].body = Some("**굵게** 한 줄\n\n- 하나\n- 둘\n".into());
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         let drawn = render(&mut a, 100, 22).join("\n");
@@ -2892,7 +2914,7 @@ pub(super) mod tests {
         let mut issues = issues();
         let body: String = (1..=40).map(|n| format!("{n}번째 줄이다\n\n")).collect();
         issues[1].body = Some(body);
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         let first = render(&mut a, 100, 16).join("\n");
@@ -2931,7 +2953,7 @@ pub(super) mod tests {
         issues[1].tags =
             vec!["parser".into(), "storage".into(), "renderer".into(), "markdown".into()];
         issues[1].body = Some("```\nlet very_long = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\";\n```\n".into());
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         for raw in [false, true] {
@@ -2957,7 +2979,7 @@ pub(super) mod tests {
     fn scrolling_past_the_end_does_not_deaden_the_key() {
         let mut issues = issues();
         issues[1].body = Some((1..=40).map(|n| format!("{n}번째 줄이다\n\n")).collect::<String>());
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
@@ -2978,7 +3000,7 @@ pub(super) mod tests {
     fn an_overlong_line_says_it_was_cut() {
         let mut issues = issues();
         issues[1].tags = (1..=20).map(|n| format!("아주긴태그이름{n}")).collect();
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let out = render(&mut a, 100, 20);
         let tagline = out.iter().find(|l| l.contains("아주긴태그이름1")).expect("태그 줄이 없다");
@@ -2991,7 +3013,7 @@ pub(super) mod tests {
     fn moving_the_cursor_rewinds_the_detail() {
         let mut issues = issues();
         issues[1].body = Some((1..=40).map(|n| format!("{n}번째\n\n")).collect::<String>());
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let _ = render(&mut a, 100, 16);
         a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
@@ -3009,7 +3031,7 @@ pub(super) mod tests {
     fn end_in_the_detail_reaches_the_last_line_and_up_answers_at_once() {
         let mut issues = issues();
         issues[1].body = Some((1..=40).map(|n| format!("{n}번째 줄이다\n\n")).collect::<String>());
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = every(issues);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let cursor = a.cursor;
 
