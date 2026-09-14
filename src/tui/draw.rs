@@ -1221,7 +1221,7 @@ fn paint_project(path: &std::path::Path, hue: Option<style::Hue>) -> Style {
 /// CLI 한눈 보기와 같은 말을 잘라서 낸다 — 무엇인지는 앞머리(`init 전`·`디렉터리가 없다`·
 /// `못 읽는다`)에 있어 잘려도 남는다.
 ///
-/// 연 프로젝트의 줄은 에픽 줄처럼 **진행 바탕을 가를 칸**을 함께 낸다 — 이름 시작부터
+/// 연 프로젝트의 줄은 에픽 줄처럼 **진행 바탕을 가를 칸**을 함께 낸다 — 이름 뒤 틈부터
 /// 테두리 안쪽 끝이 100% 다. 칸별 수가 이미 글자로 서 있어 셈을 따로 붙이지 않는다.
 fn place_line<'a>(app: &App, at: usize, budget: usize) -> (Line<'a>, Option<(usize, usize)>) {
     let Some(p) = app.layer.as_ref().and_then(|l| l.places.get(at)) else {
