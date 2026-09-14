@@ -385,7 +385,8 @@ impl Doc {
             None => {
                 self.doc.insert(TUI, Item::Table(Table::new()));
             }
-            Some(item) if item.is_table() => {}
+            // 읽기(`look`)가 받는 모양은 쓰기도 받는다 — `tui = { … }` 인라인 표도 표다.
+            Some(item) if item.is_table_like() => {}
             Some(item) => {
                 return Err(Fail::new(format!(
                     "`{TUI}` 가 `[{TUI}]` 표가 아니라({}) 보기를 적지 않는다 — 손으로 고친다",
@@ -393,7 +394,7 @@ impl Doc {
                 )));
             }
         }
-        let t = self.doc.get_mut(TUI).and_then(Item::as_table_mut).expect("방금 표로 섰다");
+        let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let words = |v: &[String]| toml_edit::value(v.iter().map(String::as_str).collect::<toml_edit::Array>());
         let mut put = |key: &str, v: Option<Item>| match v {
             Some(v) => {
@@ -939,6 +940,12 @@ mod tests {
         assert_eq!(odd.look().1.len(), 1);
         assert!(odd.set_look(&Look { sort: Some("title".into()), ..Look::default() }).is_err());
         assert!(!odd.changed());
+
+        // 읽히는 인라인 표는 쓰기도 받는다.
+        let mut inline = Doc::parse("tui = { sort = \"created\" }\n").unwrap();
+        assert_eq!(inline.look().0.sort.as_deref(), Some("created"));
+        inline.set_look(&Look { sort: Some("title".into()), ..Look::default() }).unwrap();
+        assert!(inline.render().contains("sort = \"title\""), "{}", inline.render());
     }
 
     /// 바꾼 것이 없으면 파일을 건드리지 않는다 — 헛 쓰기도 헛 diff 도 없다.

@@ -377,6 +377,11 @@ pub struct App {
     pub order: (keys::Order, bool),
     /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)다.
     pub fields: view::Fields,
+    /// 설정에서 읽었지만 이 바이너리가 모르는 정렬·열 낱말(moai-2bzp 리뷰). **적을 때 도로 싣는다** —
+    /// 새 바이너리가 적은 낱말을 옛 바이너리가 토글 한 번으로 지우면 안 된다. 정렬은 사람이
+    /// `SPC o` 로 새로 고르면 걷는다.
+    unknown_sort: Option<String>,
+    unknown_fields: Vec<String>,
     /// 층마다 커서를 기억한다. 들어갔다 나오면 **있던 자리로 돌아온다** —
     /// 매번 맨 위로 튕기면 형제 여럿을 훑는 일이 못 할 짓이 된다.
     remembered: Vec<usize>,
@@ -544,6 +549,8 @@ impl App {
             shown: Vec::new(),
             order: Default::default(),
             fields: Default::default(),
+            unknown_sort: None,
+            unknown_fields: Vec::new(),
             remembered,
             list: Scroll::default(),
             quit: false,
@@ -1179,10 +1186,13 @@ impl App {
         if let Some(s) = &look.sort {
             match keys::Order::named(s) {
                 Some(o) => self.order.0 = o,
-                None => problems.push(format!(
-                    "`sort = \"{s}\"` 는 모르는 차례다 — {} 중 하나",
-                    keys::Order::ALL.map(keys::Order::name).join("·")
-                )),
+                None => {
+                    self.unknown_sort = Some(s.clone());
+                    problems.push(format!(
+                        "`sort = \"{s}\"` 는 모르는 차례다 — {} 중 하나",
+                        keys::Order::ALL.map(keys::Order::name).join("·")
+                    ))
+                }
             }
         }
         if let Some(r) = look.sort_reversed {
@@ -1194,10 +1204,15 @@ impl App {
                 match view::Field::named(w) {
                     Some(f) if !fields.shows(f) => fields.toggle(f),
                     Some(_) => {}
-                    None => problems.push(format!(
-                        "`fields` 의 `{w}` 는 모르는 열이다 — {} 중에서",
-                        view::Field::ALL.map(view::Field::name).join("·")
-                    )),
+                    None => {
+                        if !self.unknown_fields.contains(w) {
+                            self.unknown_fields.push(w.clone());
+                        }
+                        problems.push(format!(
+                            "`fields` 의 `{w}` 는 모르는 열이다 — {} 중에서",
+                            view::Field::ALL.map(view::Field::name).join("·")
+                        ))
+                    }
                 }
             }
             self.fields = fields;
@@ -1209,9 +1224,16 @@ impl App {
         crate::user_config::Look {
             hidden: Some(self.view.hidden.clone()),
             hide_deferred: Some(self.view.hide_deferred),
-            sort: Some(self.order.0.name().to_string()),
+            sort: Some(self.unknown_sort.clone().unwrap_or_else(|| self.order.0.name().to_string())),
             sort_reversed: Some(self.order.1),
-            fields: Some(view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name().to_string()).collect()),
+            fields: Some(
+                view::Field::ALL
+                    .into_iter()
+                    .filter(|f| self.fields.shows(*f))
+                    .map(|f| f.name().to_string())
+                    .chain(self.unknown_fields.iter().cloned())
+                    .collect(),
+            ),
         }
     }
 
@@ -1241,7 +1263,11 @@ impl App {
             B::Deferred => self.view.hide_deferred = !self.view.hide_deferred,
             B::ShowAll => self.view = view::View::default(),
             // 고른 것을 다시 누르면 거꾸로, 다른 것을 누르면 그것의 제 방향으로.
-            B::Sort(o) => self.order = (o, self.order.0 == o && !self.order.1),
+            B::Sort(o) => {
+                // 사람이 새로 골랐다 — 모르던 낱말은 이제 걷는다.
+                self.unknown_sort = None;
+                self.order = (o, self.order.0 == o && !self.order.1);
+            }
             _ => return,
         }
         self.see();
@@ -3498,8 +3524,16 @@ mod tests {
         assert!(c.view.hide_deferred, "틀린 키 하나로 나머지를 버렸다");
         assert_eq!(c.order, Default::default());
         assert!(c.fields.shows(view::Field::Id) && !c.fields.shows(view::Field::Priority));
-        let said = c.notice.unwrap_or_default();
+        let said = c.notice.clone().unwrap_or_default();
         assert!(said.contains("nope") && said.contains("what"), "{said}");
+
+        // 모르는 낱말은 토글 한 번에 지워지지 않는다 — 새 바이너리가 적은 것일 수 있다.
+        c.hit("SPC s d");
+        let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
+        assert!(text.contains("sort = \"nope\"") && text.contains("\"what\""), "{text}");
+        c.hit("SPC o t");
+        let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
+        assert!(text.contains("sort = \"title\"") && text.contains("\"what\""), "{text}");
     }
 
     /// 닫는 함수가 댄 id 가 다시 읽은 목록에 없으면 **커서는 두고 그렇다고 말한다.**
