@@ -927,7 +927,7 @@ fn outside_a_repo_the_overview_speaks_json() {
 /// **`.moai` 밖의 `tui --json` 은 프로젝트 층의 줄을 낸다**(moai-ujpu) — 탐색기 줄과 같은
 /// 키(`title`·`kind`·`dir`·`path`)에 한눈 보기와 같은 상태 낱말. 프로젝트 줄의 `path` 는
 /// 디렉터리라 `-C` 로 들어간다. 등록 차례 그대로다. `--path` 는 어느 프로젝트의 id 인지
-/// 몰라 거절하고, 등록한 것이 없으면 `status` 와 같은 말로 멈춘다.
+/// 몰라 거절하고, 등록한 것이 없으면 `ready` 와 같은 말로 멈춘다.
 #[test]
 fn outside_a_repo_tui_json_lists_the_project_layer() {
     let s = Scratch::new("ovtui");
@@ -963,20 +963,24 @@ fn outside_a_repo_tui_json_lists_the_project_layer() {
     assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("moai project add"), "{}", text(&o));
 }
 
-/// 등록한 것이 없으면 **전처럼 실패하되** 등록하는 길을 댄다. 보여줄 것이 없는데 0 으로
-/// 끝나면 `.moai` 밖에서 부른 실수가 성공으로 읽힌다. 설정 파일이 깨져 목록이 빈 것이면
-/// 그 까닭도 함께 말한다.
+/// 등록한 것이 없으면 등록하는 길을 댄다. 설정 파일이 깨져 목록이 빈 것이면 그 까닭도 함께
+/// 말한다. **`status` 는 0 으로 끝난다**(moai-ynsb) — 세션의 시작점이 제 파일 아닌 것으로
+/// 실패해 보이면 안 된다. `ready` 는 여전히 멈춘다.
 #[test]
-fn outside_a_repo_with_nothing_registered_it_fails_and_says_how_to_register() {
+fn outside_a_repo_with_nothing_registered_it_says_how_to_register() {
     let s = Scratch::new("ovempty");
     let out = dir_in(&s, "out");
     let cfg = registry(&s, &[]);
-    for verb in ["status", "ready"] {
-        let o = moai_with(&out, &cfg, &[verb]);
-        let err = String::from_utf8_lossy(&o.stderr);
-        assert!(!o.status.success(), "{verb}");
-        assert!(err.contains("moai init") && err.contains("moai project add"), "{verb}: {err}");
-    }
+    let st = ok_with(&out, &cfg, &["status"]);
+    assert!(st.contains("moai init") && st.contains("moai project add"), "{st}");
+    let js = ok_with(&out, &cfg, &["status", "--json"]);
+    one_json_value(&js);
+    assert!(js.starts_with("{\"projects\":[],\"problems\":[]"), "{js}");
+
+    let o = moai_with(&out, &cfg, &["ready"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(!o.status.success(), "ready");
+    assert!(err.contains("moai init") && err.contains("moai project add"), "ready: {err}");
     let help = ok_with(&out, &cfg, &[]);
     assert!(help.contains("moai init") && help.contains("moai project add"), "{help}");
 
@@ -990,10 +994,16 @@ fn outside_a_repo_with_nothing_registered_it_fails_and_says_how_to_register() {
     let err = String::from_utf8_lossy(&o.stderr);
     assert!(!o.status.success() && err.contains("moai project add"), "{err}");
 
+    // 깨진 설정도 0 이고, 목록이 빈 까닭을 댄다 — 모양이 틀린 것도, TOML 이 아닌 것도.
     std::fs::write(&cfg, "project = 3\n").unwrap();
-    let o = moai_with(&out, &cfg, &["status"]);
-    assert!(!o.status.success());
-    assert!(String::from_utf8_lossy(&o.stderr).contains("표 배열"), "{}", String::from_utf8_lossy(&o.stderr));
+    let st = ok_with(&out, &cfg, &["status"]);
+    assert!(st.contains("표 배열") && st.contains("moai project add"), "{st}");
+    std::fs::write(&cfg, "not [toml\n").unwrap();
+    let st = ok_with(&out, &cfg, &["status"]);
+    assert!(st.contains("moai project add") && st.lines().count() > 2, "까닭을 안 댔다 — {st}");
+    let js = ok_with(&out, &cfg, &["status", "--json"]);
+    one_json_value(&js);
+    assert!(js.starts_with("{\"projects\":[],\"problems\":[\""), "{js}");
 }
 
 /// **쓰는 명령은 `.moai` 밖에서 여전히 멈춘다** — 등록한 프로젝트가 있어도 어느 것에

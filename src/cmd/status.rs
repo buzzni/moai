@@ -62,7 +62,20 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
 /// 데이터로 비영 종료하는 것은 제 파일이라서다. 여기서 보는 것은 남의 저장소일 수
 /// 있고, 그것 하나로 한눈 보기 전체가 실패로 읽히면 나머지를 못 믿는다.
 fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
-    let (reg, projects) = super::registered(worktree)?;
+    // **등록한 것이 없어도, 설정이 깨져 목록이 비어도 0 이다**(moai-ynsb, 2026-09-14 사람의 결정).
+    // 세션은 `status` 로 시작한다 — 제 파일이 아닌 것(아직 없는 등록·사람의 설정)으로 비영
+    // 종료하면 도구가 고장 난 것으로 읽히고, 같은 자리의 맨몸 `moai`·`project ls` 는 이미 0 이다.
+    // 말은 그대로 댄다: 저장소가 아니라는 것, 등록하는 길, 목록이 빈 까닭. `ready`·`tui --json`
+    // 은 [`super::registered`] 로 여전히 멈춘다 — 그쪽 계약은 따로 정한다.
+    let reg = crate::user_config::read(crate::user_config::path().as_deref());
+    if reg.projects.is_empty() {
+        if ctx.json {
+            let none: Overview<()> = Overview { projects: Vec::new(), problems: &reg.problems, config: reg.path.as_deref() };
+            return super::json_line(&none);
+        }
+        return Ok(super::nothing_registered(&reg).message.lines().map(str::to_string).collect());
+    }
+    let projects = crate::projects::open_with(&reg, worktree);
     let now = model::now();
     let seen: Vec<Seen<view::Board>> = projects
         .iter()
