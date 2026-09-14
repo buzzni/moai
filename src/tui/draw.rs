@@ -1223,7 +1223,8 @@ fn rollup<'a>(app: &App, path: &crate::nav::Path, w: usize) -> Vec<Line<'a>> {
     let cells = w.clamp(10, 24) - 4;
     let filled = crate::text::bar_fill(Some(percent), cells);
     let mut out = vec![Line::from(vec![
-        Span::styled("█".repeat(filled), Style::new().fg(Color::Green)),
+        // 16색 10번 — SPC 메뉴의 키와 같은 색(사용자 결정, moai-a46g).
+        Span::styled("█".repeat(filled), Style::new().fg(Color::LightGreen)),
         Span::styled("░".repeat(cells - filled), dim()),
         Span::raw(format!("  {done}/{}  {percent}%", work.len())),
     ])];
