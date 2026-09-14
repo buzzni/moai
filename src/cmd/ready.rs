@@ -42,13 +42,15 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
 /// **못 읽는 줄이 있어도 0 으로 끝난다** (`status::overview` 와 같은 까닭). 그 줄은
 /// 프로젝트 줄 밑에 수로 말하고, 어느 줄인지는 그 프로젝트의 `show` 가 낸다.
 fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
-    let (reg, projects) = super::registered("ready", worktree)?;
+    let (reg, projects) = super::registered(worktree)?;
     let seen: Vec<Seen<view::Picks>> = projects
         .iter()
         .map(|p| {
             p.seen(|repo, load| view::Picks {
                 picks: report::ready(&load.issues, &repo.config),
                 unreadable: load.errors.len(),
+                origin: &p.origin,
+                trouble: &p.trouble,
             })
         })
         .collect();
@@ -58,6 +60,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         struct Said<'a> {
             ready: Vec<super::Row<'a>>,
             unreadable: usize,
+            #[serde(skip_serializing_if = "<[String]>::is_empty")]
+            trouble: &'a [String],
         }
         let entries = projects
             .iter()
@@ -66,8 +70,9 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 name: &p.name,
                 path: &p.path,
                 seen: s.map(|k| Said {
-                    ready: k.picks.iter().map(|i| super::Row::of(i, None)).collect(),
+                    ready: k.picks.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
                     unreadable: k.unreadable,
+                    trouble: &p.trouble,
                 }),
             })
             .collect();

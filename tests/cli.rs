@@ -5553,6 +5553,47 @@ fn worktree_a_later_field_edit_here_does_not_unpick_what_another_worktree_picked
     assert!(line.contains("▸  ⎇ feat/x"), "옆에서 집은 줄이 안 섰다\n{shown}");
 }
 
+/// **`.moai` 밖 한눈 보기도 `--worktree` 로 프로젝트마다 겹친다**(moai-x0gb). 옆에서 집은
+/// 일은 `ready` 에서 빠지고 집은 것에 `⎇` 와 함께 서며, 머리가 겹쳐 봤다고 말한다. 옆
+/// 파일이 깨졌으면 stderr 가 아니라 그 프로젝트의 줄이 말하고 0 으로 끝난다.
+#[test]
+fn outside_a_repo_the_overview_overlays_each_projects_worktrees() {
+    let t = trees("ovwt");
+    let out = dir_in(&t.s, "out");
+    let cfg = registry(&t.s, &[&t.main()]);
+
+    let plain = ok_with(&out, &cfg, &["status"]);
+    assert!(!plain.contains('⎇'), "플래그 없이 겹쳤다\n{plain}");
+
+    let run = moai_with(&out, &cfg, &["status", "--worktree"]);
+    assert!(run.status.success());
+    assert!(run.stderr.is_empty(), "stderr 로 말했다 — {}", String::from_utf8_lossy(&run.stderr));
+    let st = String::from_utf8(run.stdout).unwrap();
+    let b = block(&st, "main");
+    assert!(b.lines().next().unwrap().contains("⎇ feat/x 겹쳐 봄"), "머리가 겹쳐 봤다고 안 한다\n{st}");
+    assert!(b.contains("in_progress 1") && b.contains("⎇ feat/x 집을 일"), "옆에서 집은 것이 안 섰다\n{st}");
+
+    let rd = ok_with(&out, &cfg, &["ready", "--worktree"]);
+    let b = block(&rd, "main");
+    assert!(!b.contains(&t.picked), "옆에서 집은 일을 집으라고 낸다\n{rd}");
+    assert!(b.contains("⎇ feat/x 옆에서 만든 일"), "{rd}");
+    let json = ok_with(&out, &cfg, &["ready", "--worktree", "--json"]);
+    assert!(json.contains(&format!("\"id\":\"{}\"", t.made)) && json.contains("\"branch\":\"feat/x\""), "{json}");
+    assert!(!json.contains("\"trouble\""), "문제가 없는데 trouble 키가 섰다\n{json}");
+
+    let feat = t.feat().join(".moai/issues.jsonl");
+    let mut src = std::fs::read_to_string(&feat).unwrap();
+    src.push_str("{깨진 줄\n");
+    std::fs::write(&feat, src).unwrap();
+    let run = moai_with(&out, &cfg, &["status", "--worktree"]);
+    assert!(run.status.success(), "옆 워크트리 때문에 한눈 보기가 실패했다");
+    assert!(run.stderr.is_empty(), "{}", String::from_utf8_lossy(&run.stderr));
+    let st = String::from_utf8(run.stdout).unwrap();
+    assert!(block(&st, "main").contains("! ⎇ feat/x") && st.contains("읽을 수 없는 줄 1개"), "그 프로젝트 줄에서 말하지 않는다\n{st}");
+    let json = ok_with(&out, &cfg, &["status", "--worktree", "--json"]);
+    assert!(json.contains("\"trouble\":[\"⎇ feat/x"), "{json}");
+}
+
 // ── moai project ────────────────────────────────────────────────────────────
 
 /// **등록 시험은 저마다 제 설정 파일을 쓴다.** [`isolated`] 의 `MOAI_CONFIG` 는

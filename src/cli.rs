@@ -261,8 +261,9 @@ pub enum Cmd {
   moai project color ~/work/argos green 색을 정한다 (auto 면 경로로 고른다)
 
   등록하면 `.moai` 밖에서 부른 `moai`·`moai status`·`moai ready` 가 등록한
-  프로젝트를 프로젝트마다 한눈에 낸다 (`--json` 은 `projects` 배열). 그 밖의
-  명령은 어느 프로젝트인지 모르니 `moai -C <dir> <명령>` 으로 부른다.
+  프로젝트를 프로젝트마다 한눈에 낸다 (`--json` 은 `projects` 배열). `--worktree` 를
+  붙이면 프로젝트마다 옆 워크트리도 겹친다. 그 밖의 명령은 어느 프로젝트인지 모르니
+  `moai -C <dir> <명령>` 으로 부른다.
 
   저장소가 아니라 **사람의** 설정이다 — `.moai` 밖 어디서 불러도 된다. 자리는
   MOAI_CONFIG → $XDG_CONFIG_HOME/moai/config.toml → ~/.config/moai/config.toml.
