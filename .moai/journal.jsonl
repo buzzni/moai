@@ -2532,3 +2532,4 @@
 {"ts":"2026-09-14T18:09:03Z","id":"moai-g7p8.lq0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 1번 반영(fix 커밋 그대로). 넘긴 주석 어긋남은 직접 판단해 주석을 고쳤다 — 빈 태그는 빈칸이 맞다(태그 없는 줄이 흔해 — 가 줄마다 서면 눈이 걸린다), 동작은 안 바꾼다. 두 번 그리기는 걷힘이 있을 때만이라 값은 받아들인다."}
 {"ts":"2026-09-14T18:10:50Z","id":"moai-g7p8.lq0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1건 반영(열 걷기를 목록 전체가 정한다). 넘긴 주석 어긋남은 주석을 고쳐 반영. 넘긴 것 없음"}
 {"ts":"2026-09-14T18:13:30Z","id":"moai-g7p8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 머지(d6520fe), 합친 main 에서 시험 754·267 통과"}
+{"ts":"2026-09-14T18:13:31Z","id":"moai-2bzp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
