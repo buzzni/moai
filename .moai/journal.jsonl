@@ -2049,3 +2049,8 @@
 {"ts":"2026-09-14T13:08:23Z","id":"moai-kgu2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"--json 에 덧붙인 키와 같은 이름의 모르는 필드는 출력에서 걷는다 — json_with 한 곳에서"}
 {"ts":"2026-09-14T13:08:23Z","id":"moai-yec5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kgu2 로 옮겨 작업한다"}
 {"ts":"2026-09-14T13:08:23Z","id":"moai-kgu2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T13:10:45Z","id":"moai-q59j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-jcui 에서 옮김(moai-p415 에서 드러난 다섯째 사본, 감독 세션 moa-issue-45 가 맡김). 사용자와 정한 것(2026-09-14): 도는 칸을 '시작한 칸 모두' 로 넓힌다 — Config::is_started(첫 칸도 done 도 아닌 칸)가 참이면 돈다. '시작했다' 의 뜻이 한 곳으로 모이고, 칸 이름을 바꾼 설정(doing·check)에서도 돈다. 대가: 기본 설정에서도 review 가 돌기 시작한다 — 'review 에 선 묶음이 안 돈다' 는 기존 단언을 뒤집는다. style 은 설정을 모르므로 판단을 App(설정을 든 쪽)으로 옮기거나 is_started 결과를 넘긴다."}
+{"ts":"2026-09-14T13:10:50Z","id":"moai-a5pz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"계획 마크다운에 이스케이프 — 앞머리 [..] 와 끝의 #낱말 을 제목으로 도로 읽는다 (moai-kqab)"}
+{"ts":"2026-09-14T13:10:51Z","id":"moai-kqab","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"일감으로 옮겨 세움 — moai-a5pz 가 이어받는다 (감독 세션 요청, 2026-09-14)."}
+{"ts":"2026-09-14T13:10:51Z","id":"moai-kqab","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"일감 moai-a5pz 로 옮겨 세움"}
+{"ts":"2026-09-14T13:10:51Z","id":"moai-a5pz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
