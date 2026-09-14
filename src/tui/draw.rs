@@ -806,6 +806,14 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     let inner = block.inner(at);
 
     let lines = match app.current_of(rows) {
+        // **빈 층은 할 일을 댄다**(moai-r8kl). 등록이 0 인 채 `.moai` 밖에서 띄운 자리다 — "없다"
+        // 만 서면 밖에서 부른 실수가 멀쩡한 빈 목록으로 읽힌다.
+        None if app.on_layer() => {
+            let mut out = vec![Line::from(Span::styled("등록한 프로젝트가 없다", bold())), Line::from("")];
+            let how = format!("{} 로 디렉터리를 골라 등록한다", label(BROWSE, Browse::Pick));
+            out.extend(wrapped(&how, inner.width as usize, dim()));
+            out
+        }
         None => vec![Line::from(Span::styled("없다", dim()))],
         // 프로젝트 뿌리의 `..` 은 층으로 간다 — 어디로 가는지 말한다.
         Some(Row::Up) if app.path.is_empty() => vec![Line::from(Span::styled("프로젝트 층으로", dim()))],
@@ -1488,8 +1496,8 @@ fn browse_hints(app: &App, c: &Ctx) -> (Vec<Hint>, Vec<Hint>) {
 
 /// SPC 메뉴 창(moai-7sjm, 모양은 moai-apsa 의 doom emacs which-key 식). 목록·상세 **아래 전체
 /// 폭**에 서고 몸통을 밀어 올린다. 칸은 `키 : 낱말 [상태]` — 격자는 [`menu::grid`] 가 놓았고 여기는
-/// 칠하기만 한다. 키는 굵게, 나머지는 그대로 — **색 없이도 키와 낱말이 글자로 서고**, 묶음은
-/// `+`, 토글은 `[켜짐]` 이 댄다.
+/// 칠하기만 한다. 키는 굵게, 키·`:`·실행 낱말·`+묶음` 이 제 색([`MENU_KEY`]…)을 입지만 **색
+/// 없이도 키와 낱말이 글자로 서고**, 묶음은 `+`, 토글은 `[켜짐]` 이 댄다.
 ///
 /// 위 가름줄 하나가 몸통과 가른다 — 몸통의 아래 테두리에 바로 붙으므로 선이 없으면 격자의 첫
 /// 줄이 목록의 줄로 읽힌다. 가름줄은 굵지 않다 — 키 먹는 칸의 굵은 선은 목록·상세의 것이다.
@@ -1502,9 +1510,9 @@ fn menu_panel(f: &mut Frame, grid: &menu::Grid, at: Rect) {
                 if c > 0 {
                     spans.push(Span::raw(" ".repeat(menu::GAP)));
                 }
-                spans.push(Span::styled(p.key.clone(), bold()));
-                spans.push(Span::raw(menu::SEP));
-                spans.push(Span::raw(p.text.clone()));
+                spans.push(Span::styled(p.key.clone(), bold().fg(MENU_KEY)));
+                spans.push(Span::styled(menu::SEP, Style::new().fg(MENU_SEP)));
+                spans.push(Span::styled(p.text.clone(), menu_word(p.group)));
             }
             // 격자가 이미 폭에 맞췄다. 한 열도 안 드는 좁은 창만 여기서 잘린다.
             fit(Line::from(spans), room)
@@ -1513,6 +1521,18 @@ fn menu_panel(f: &mut Frame, grid: &menu::Grid, at: Rect) {
     let block = Block::default().borders(Borders::TOP).border_style(dim()).padding(Padding::horizontal(1));
     f.render_widget(Clear, at);
     f.render_widget(Paragraph::new(lines).block(block), at);
+}
+
+/// SPC 메뉴의 색(사용자 결정, moai-r2dt). 키·`:`·실행 낱말·`+묶음` 이 가까운 붉은 주황 넷으로
+/// 갈린다 — 뜻은 여전히 글자(`+`)가 진다.
+const MENU_KEY: Color = Color::Rgb(0xf1, 0x0b, 0x00);
+const MENU_SEP: Color = Color::Rgb(0xf0, 0x8b, 0x00);
+const MENU_RUN: Color = Color::Rgb(0xf1, 0x2b, 0x00);
+const MENU_GROUP: Color = Color::Rgb(0xf1, 0x3b, 0x00);
+
+/// 메뉴 칸 낱말의 색 — 묶음이면 [`MENU_GROUP`], 실행이면 [`MENU_RUN`].
+fn menu_word(group: bool) -> Style {
+    Style::new().fg(if group { MENU_GROUP } else { MENU_RUN })
 }
 
 /// 메뉴가 열린 동안의 맨 아랫줄 — 접두어 줄(doom 의 `SPC- <leader>`). 왼쪽에 지금 접두어와 층의
@@ -1529,8 +1549,8 @@ fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid,
     if grid.rows == 0 {
         for e in items {
             spans.push(Span::raw("  "));
-            spans.push(Span::styled(e.key.clone(), bold()));
-            spans.push(Span::raw(format!(" {}", e.text())));
+            spans.push(Span::styled(e.key.clone(), bold().fg(MENU_KEY)));
+            spans.push(Span::styled(format!(" {}", e.text()), menu_word(e.is_group())));
         }
     } else {
         spans.push(Span::raw(format!(" {}", menu::name(held))));
@@ -3609,10 +3629,11 @@ pub(super) mod tests {
         for row in ["/ : 검색", "f : 거름망", "n : 생각 담기", "r : 다시 읽기", "q : 끝내기", "p : +프로젝트", "t : +토글"] {
             assert!(screen.contains(row), "{row:?} 가 없다\n{screen}");
         }
-        // 뿌리 일곱 칸은 한 열로 선다 — 가름줄 · 격자 7줄 · 접두어 줄.
+        // 뿌리 일곱 칸은 6칸 한 열과 옆 열 1칸으로 선다(moai-r2dt) — 가름줄 · 격자 6줄 · 접두어 줄.
         let n = lines.len();
-        assert_eq!(lines[n - 9], "─".repeat(80), "전체 폭 가름줄이 아니다\n{screen}");
-        assert!(lines[n - 10].starts_with(['└', '┗']), "몸통이 창 위로 밀려 올라가지 않았다\n{screen}");
+        assert_eq!(lines[n - 8], "─".repeat(80), "전체 폭 가름줄이 아니다\n{screen}");
+        assert!(lines[n - 9].starts_with(['└', '┗']), "몸통이 창 위로 밀려 올라가지 않았다\n{screen}");
+        assert!(lines[n - 7].contains("/ : 검색") && lines[n - 7].contains("t : +토글"), "일곱째 칸이 옆 열로 안 넘어갔다\n{screen}");
         let bar = &lines[n - 1];
         assert!(bar.starts_with("SPC- 메뉴") && bar.ends_with("Esc 닫기"), "{bar:?}");
         assert!(!bar.contains("Bksp") && !bar.contains("SPC 메뉴"), "{bar:?}");
@@ -3634,6 +3655,27 @@ pub(super) mod tests {
         let lines = render(&mut a, 80, 20);
         assert!(!lines.iter().any(|l| *l == "─".repeat(80)), "실행했는데 창이 남았다");
         assert_eq!(lines.last(), before.last(), "실행한 뒤 바가 돌아오지 않았다");
+    }
+
+    /// **메뉴 칸은 키·`:`·실행 낱말·`+묶음` 이 제 색을 입는다**(moai-r2dt). 뜻은 글자가 지므로 색은
+    /// 덧칠이다 — 여기서는 칠한 자리만 본다.
+    #[test]
+    fn the_menu_paints_keys_colons_actions_and_groups_apart() {
+        let mut a = app();
+        a.hit("SPC");
+        let (w, h) = (80u16, 20u16);
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let text = render(&mut a, w, h);
+        let y = text.iter().rposition(|l| l.contains("/ : 검색")).expect("메뉴 칸이 없다") as u16;
+        let at = |s: &str| (0..w).find(|&x| buf[(x, y)].symbol() == s).unwrap_or_else(|| panic!("{s:?} 가 없다"));
+        assert_eq!(buf[(at("/"), y)].fg, MENU_KEY);
+        assert!(buf[(at("/"), y)].modifier.contains(Modifier::BOLD), "키가 굵지 않다");
+        assert_eq!(buf[(at(":"), y)].fg, MENU_SEP);
+        assert_eq!(buf[(at("검"), y)].fg, MENU_RUN);
+        assert_eq!(buf[(at("+"), y)].fg, MENU_GROUP);
+        assert_eq!(buf[(at("토"), y)].fg, MENU_GROUP);
     }
 
     /// **메뉴 창은 어느 폭에서도 `:` 가 줄 서고, 몸통을 밀어 올려도 커서를 잃지 않는다**(moai-apsa).

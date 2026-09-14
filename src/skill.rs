@@ -96,17 +96,22 @@ pub fn tree(
     exe: &str,
     skill: &str,
     reference: &str,
+    supervise: &str,
 ) -> Vec<(PathBuf, String)> {
-    tree_named(&market(prefix, root), exe, skill, reference)
+    tree_named(&market(prefix, root), exe, skill, reference, supervise)
 }
 
 /// `tree` 의 몸통. 저장소 자리는 마켓플레이스 이름으로만 들어오므로, 이름을
 /// 받아 두면 **커밋된 트리를 그 트리가 적힌 자리 그대로** 다시 낼 수 있다 —
 /// 다른 체크아웃(워크트리)에서 부른 시험이 남의 자리를 안 섞는다.
-fn tree_named(market: &str, exe: &str, skill: &str, reference: &str) -> Vec<(PathBuf, String)> {
+fn tree_named(market: &str, exe: &str, skill: &str, reference: &str, supervise: &str) -> Vec<(PathBuf, String)> {
     let mut files: Vec<(PathBuf, String)> = vec![
         (PathBuf::from("skills/moai/SKILL.md"), skill.to_string()),
         (PathBuf::from("skills/moai/references/commands.md"), reference.to_string()),
+        // 감독 스킬은 따로 선다 — `moai` 스킬에 섞으면 감독의 낱말에 `moai` 가 불려 오고,
+        // 일꾼이 `moai` 를 부를 때마다 감독의 걸음까지 읽는다. 발동어(description)는 따로
+        // 서도 모든 세션에 실리므로, 나눈 것이 그 값을 아끼지는 않는다.
+        (PathBuf::from("skills/moai-supervise/SKILL.md"), supervise.to_string()),
     ];
     let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
     // 판은 **매니페스트를 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다.
@@ -285,7 +290,7 @@ mod tests {
     }
 
     fn tree_at(prefix: &str, root: &Path, exe: &str, skill: &str) -> BTreeMap<String, String> {
-        tree(prefix, root, exe, skill, "참고")
+        tree(prefix, root, exe, skill, "참고", "감독")
             .into_iter()
             .map(|(p, b)| (p.display().to_string(), b))
             .collect()
@@ -393,8 +398,9 @@ mod tests {
     /// 골랐는데, 그 그물은 `moai show -s todo,review` 를 끌어오고 리뷰
     /// 토막의 문구가 바뀌면 조용히 아무것도 안 고른다.
     fn taught() -> Vec<String> {
-        // AGENTS 블록도 같은 조각에서 나오므로 같이 본다.
-        let texts = [crate::guide::skill(), crate::guide::reference(), crate::guide::agents()];
+        // AGENTS 블록도 같은 조각에서 나오고, 감독이 일꾼에게 싣는 글도 리뷰를 세우고
+        // 닫는 줄을 같은 조각으로 적으므로 같이 본다.
+        let texts = [crate::guide::skill(), crate::guide::reference(), crate::guide::agents(), crate::guide::supervise()];
         texts
             .iter()
             .flat_map(|t| t.lines())
@@ -439,13 +445,14 @@ mod tests {
 
     const NOW: &str = "2026-01-01T00:00:00Z";
 
-    /// 심는 것은 넷이다 — 스킬, 참고, 그리고 매니페스트 둘.
+    /// 심는 것은 다섯이다 — 스킬, 참고, 감독 스킬, 그리고 매니페스트 둘.
     #[test]
     fn the_tree_has_what_claude_needs() {
         let files = tree_of("/bin/moai", "# 스킬");
         for want in [
             "skills/moai/SKILL.md",
             "skills/moai/references/commands.md",
+            "skills/moai-supervise/SKILL.md",
             ".claude-plugin/plugin.json",
             ".claude-plugin/marketplace.json",
         ] {
@@ -469,6 +476,11 @@ mod tests {
         assert_eq!(version(&a), version(&b), "같은 내용인데 판이 다르다");
         assert_ne!(version(&a), version(&c), "본문이 달라졌는데 판이 같다");
         assert_ne!(version(&a), version(&d), "부를 바이너리가 달라졌는데 판이 같다");
+        let e = tree("t", Path::new("/repo"), "/bin/moai", "# 스킬", "참고", "감독 (고침)")
+            .into_iter()
+            .map(|(p, b)| (p.display().to_string(), b))
+            .collect();
+        assert_ne!(version(&a), version(&e), "감독 스킬이 달라졌는데 판이 같다");
         // semver 세 자리여야 `claude` 가 읽는다.
         assert_eq!(version(&a).split('.').count(), 3, "{}", version(&a));
     }
@@ -601,7 +613,7 @@ mod tests {
     #[test]
     fn the_hook_exe_round_trips_through_the_manifest() {
         for exe in ["/repo/target/release/moai", "moai"] {
-            let files = tree("t", Path::new("/repo"), exe, "# 스킬", "참고");
+            let files = tree("t", Path::new("/repo"), exe, "# 스킬", "참고", "감독");
             let (_, manifest) = files.iter().find(|(p, _)| p.ends_with("plugin.json")).unwrap();
             assert_eq!(hook_exe(manifest).as_deref(), Some(exe));
             assert!(version_in(&files).is_some_and(|v| v.split('.').count() == 3));
@@ -634,7 +646,7 @@ mod tests {
     /// 다시 셈하면 글이 같아도 늘 어긋난다. 여기서 보는 것은 글과 판뿐이다.
     ///
     /// 다시 쓰는 길: `MOAI_BLESS=1 cargo test --release checked_in` — 같은
-    /// `tree_named` 로 네 파일을 적힌 자리 그대로 다시 쓴다. `skill install` 은
+    /// `tree_named` 로 트리 전부를 적힌 자리 그대로 다시 쓴다. `skill install` 은
     /// `claude` 등록까지 건드리고 부른 자리의 경로를 적어, 워크트리에서는 못 쓴다.
     #[test]
     fn the_checked_in_plugin_matches_the_guide() {
@@ -658,9 +670,13 @@ mod tests {
             .or_else(|| loose(&market, TOP_NAME).filter(|_| bless))
             .expect("marketplace.json 에서 name 을 못 읽는다 — 깨졌으면 MOAI_BLESS=1 로 다시 쓴다");
 
-        let want = tree_named(&name, &exe, &crate::guide::skill(), &crate::guide::reference());
+        let want = tree_named(&name, &exe, &crate::guide::skill(), &crate::guide::reference(), &crate::guide::supervise());
         if bless {
             for (path, body) in &want {
+                // 새로 느는 파일은 제 디렉터리가 아직 없다 (감독 스킬이 처음 그랬다).
+                if let Some(parent) = dir.join(path).parent() {
+                    std::fs::create_dir_all(parent).unwrap_or_else(|e| panic!("{}: {e}", parent.display()));
+                }
                 std::fs::write(dir.join(path), body).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             }
         }
@@ -708,7 +724,7 @@ mod tests {
     #[test]
     fn a_conflicted_tree_still_yields_its_exe_and_name() {
         let exe = "/repo/target/release/moai";
-        let files = tree("t", Path::new("/repo"), exe, "# 스킬", "참고");
+        let files = tree("t", Path::new("/repo"), exe, "# 스킬", "참고", "감독");
         let body = |end: &str| {
             let (_, b) = files.iter().find(|(p, _)| p.ends_with(end)).unwrap();
             format!("<<<<<<< HEAD\n{b}=======\n")

@@ -39,6 +39,10 @@ pub struct Where<'a> {
     /// 지도는 id 로 짠 것이라 그 줄에는 쌍둥이의 값이 나온다.
     /// 비었으면(`Where::default`) 가려진 줄이 없는 것으로 친다.
     eclipsed: Option<RowTest<'a>>,
+    /// 길 잃은 줄 **밑에 접힌** 줄 (`report::under_lost`). 트리가 `(길 잃음)` 안에 그리고
+    /// status 가 `no_epic`·`no_milestone` 으로 안 세는 그 집합이다 — `none` 거름이 같은 자로
+    /// 고르게 한다(moai-phw9).
+    folded: BTreeSet<&'a str>,
 }
 
 impl<'a> Where<'a> {
@@ -51,8 +55,12 @@ impl<'a> Where<'a> {
         let stands = crate::report::group_stands_in(all, cfg, &epic, &milestone, &roots);
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();
-        let eclipsed: Option<RowTest<'a>> = Some(Box::new(crate::report::eclipsed(all)));
-        Where { epic, milestone, put_off: roots.into_keys().collect(), states, since, eclipsed }
+        let hidden = crate::report::eclipsed(all);
+        // 길 잃음은 `nav::Ctx::home` 과 같다 — 못 쓸 참조를 든 줄과 가려진 쌍둥이.
+        let lost = crate::report::misplaced(all);
+        let folded = crate::report::under_lost(all, &epic, |i| lost.contains_key(i.id.as_str()) || hidden(i));
+        let eclipsed: Option<RowTest<'a>> = Some(Box::new(hidden));
+        Where { epic, milestone, put_off: roots.into_keys().collect(), states, since, eclipsed, folded }
     }
 
     /// 그 줄이 서 있는 칸 (`report::column`).
@@ -277,8 +285,16 @@ impl Filter {
         // 안 센다(moai-2m9p). 여기서 지도를 그대로 읽으면 `moai show <에픽>` 이 `0/0` 이라
         // 말하는 에픽을 `moai show -e <에픽>` 은 그 줄로 채운다.
         let eclipsed = wh.eclipsed.as_ref().is_some_and(|f| f(i));
+        // **길 잃은 줄 밑에 접힌 줄은 `none` 으로 안 고른다**(moai-phw9, 사용자와 정함). 소속
+        // 지도에 없다는 사실만 보면 트리가 `(길 잃음)` 안에 그리고 status 가 안 세는 줄을
+        // "없는 것" 으로 고른다. 고칠 곳은 부모의 끊긴 참조라 `-e none` 으로 찾을 줄이 아니다.
+        // 이름으로 고르는 `-e X` 는 그대로다.
+        let folded = wh.folded.contains(i.id.as_str());
         let placed = |sel: &[Sel], map: &BTreeMap<&str, &str>| {
-            sel.is_empty() || (!eclipsed && matches_sel(sel, map.get(i.id.as_str()).copied()))
+            let value = map.get(i.id.as_str()).copied();
+            sel.is_empty()
+                || (!eclipsed
+                    && sel.iter().any(|s| !(folded && matches!(s, Sel::Unset)) && matches_sel(std::slice::from_ref(s), value)))
         };
         if !placed(&self.epic, &wh.epic) || !placed(&self.milestone, &wh.milestone) {
             return false;

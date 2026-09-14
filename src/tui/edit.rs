@@ -76,8 +76,9 @@ impl Editor {
     /// 바뀐 것이 없어도 그렇다. 거짓이면 Esc·Tab·Ctrl-C·저장 키처럼 칸을 든 쪽이
     /// 정할 키다.
     ///
-    /// Ctrl-U·Ctrl-W 는 한 줄 칸의 것을 그대로 받는다 — Ctrl-U 가 지우는 것은
-    /// **커서가 선 줄**이다. 본문 전부를 한 키에 날리면 되돌릴 길이 없다.
+    /// Ctrl-U·Ctrl-W·Alt-Backspace 는 한 줄 칸의 것을 그대로 받는다 — Ctrl-U 가 지우는 것은
+    /// **커서가 선 줄**이다. 본문 전부를 한 키에 날리면 되돌릴 길이 없다. Ctrl-W·Alt-Backspace 도
+    /// 커서 줄 안에서만 지운다 — 줄 첫머리에서는 윗줄과 잇지 않는다(그냥 Backspace 만 잇는다).
     pub fn key(&mut self, k: KeyEvent) -> bool {
         let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         let last = self.lines.len() - 1;
@@ -420,11 +421,17 @@ mod tests {
             assert!(!press(&mut e, code), "{code:?} 를 칸이 먹었다");
         }
         for m in [KeyModifiers::CONTROL, KeyModifiers::ALT] {
-            for code in [KeyCode::Enter, KeyCode::Char('s'), KeyCode::Char('c'), KeyCode::Up, KeyCode::Backspace] {
+            for code in [KeyCode::Enter, KeyCode::Char('s'), KeyCode::Char('c'), KeyCode::Up] {
                 assert!(!e.key(KeyEvent::new(code, m)), "{m:?}+{code:?} 를 칸이 먹었다");
             }
         }
+        assert!(!e.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL)), "Ctrl+Backspace 를 칸이 먹었다");
         assert_eq!(shown(&e), "ab\ncd|");
+        // **Alt-Backspace 는 한 줄 칸과 같이 커서 줄의 낱말 하나를 지운다**(moai-979m) — 본문도 줄의 키를
+        // `Input::key` 에 맡기므로 Ctrl-W·Ctrl-U 처럼 칸의 것이다.
+        let mut words = typed("ab\ncd ef");
+        assert!(words.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT)), "본문 칸이 Alt-Backspace 를 안 먹었다");
+        assert_eq!(shown(&words), "ab\ncd |");
         assert!(e.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)));
         assert_eq!(shown(&e), "ab\n|", "Ctrl-U 가 커서 줄 밖을 지웠다");
     }

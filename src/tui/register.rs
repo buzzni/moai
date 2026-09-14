@@ -159,18 +159,30 @@ impl App {
                 self.pick_from = Some(p.at.dir.clone());
                 self.mode = Mode::Browse;
             }
-            Act::Go(to) => self.relist(&to),
+            Act::Go(to) => self.relist(&to, None),
+            Act::Hidden(show) => {
+                let here = p.at.dir.clone();
+                self.relist(&here, Some(show));
+            }
             Act::Register(dir) => self.register(&dir),
         }
     }
 
     /// 창에 그 디렉터리 한 층을 읽어 넣는다. 못 읽으면 **그 자리에 선 채** 까닭 한 줄.
-    fn relist(&mut self, to: &Path) {
+    ///
+    /// `hidden` 이 있으면 점 디렉터리 보이기를 그 값으로 읽고, **읽혔을 때만 목록과 함께 넣는다**
+    /// (moai-v2jf, 사용자와 정함). 못 읽으면 설정도 목록도 그대로다 — 먼저 넣으면 창은 "보이기
+    /// 켬" 인데 화면은 감춘 목록이라, `.` 을 한 번 더 눌러야 풀리던 어긋남이 생긴다.
+    fn relist(&mut self, to: &Path, hidden: Option<bool>) {
         let to = expand_home(to);
         let registered = self.config_file().map(|c| registered_paths(&c)).unwrap_or_default();
         let Mode::Pick(p) = &mut self.mode else { return };
-        match list_dir(&to, &registered, p.show_hidden) {
-            Ok(at) => p.show(at),
+        let show = hidden.unwrap_or(p.show_hidden);
+        match list_dir(&to, &registered, show) {
+            Ok(at) => {
+                p.show_hidden = show;
+                p.show(at);
+            }
             Err(e) => p.error = Some(format!("못 연다 — {}", crate::text::one_line(&e))),
         }
     }
@@ -198,7 +210,7 @@ impl App {
                 self.notice = Some(format!("{what} · {}{bad}{bare}{back}", shown(&added.path)));
                 if let Mode::Pick(p) = &self.mode {
                     let here = p.at.dir.clone();
-                    self.relist(&here);
+                    self.relist(&here, None);
                 }
             }
             // **창에 선 채 말한다.** 깨진 설정이면 `user_config::update` 가 한 글자도 안 쓰고
@@ -394,6 +406,45 @@ mod tests {
         assert_eq!(picker(&a).at.hidden, 0);
     }
 
+    /// **열어 둔 디렉터리를 못 읽게 된 뒤 `.` 을 눌러도 보이기 설정과 목록이 안 어긋난다**
+    /// (moai-v2jf, 사용자와 정함). 다시 읽기에 실패하면 설정도 목록도 그대로 두고 까닭 한 줄만
+    /// 선다 — 한때 설정만 먼저 뒤집혀 화면은 점 디렉터리를 감춘 목록인데 창은 "보이기 켬" 이었다.
+    /// 다시 읽을 수 있게 되면 `.` 이 그때 설정과 목록을 함께 바꾼다.
+    #[cfg(unix)]
+    #[test]
+    fn dot_in_an_unreadable_directory_keeps_the_setting_and_the_list_together() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::new("dotlocked");
+        let mut a = on_layer(&s);
+        s.dir("work/.cache");
+        let work = s.0.join("work");
+
+        a.hit("SPC p a");
+        let before = picker(&a).at.clone();
+        assert!(!picker(&a).show_hidden);
+        assert_eq!(before.hidden, 1, "{before:?}");
+
+        std::fs::set_permissions(&work, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // root 는 권한 000 도 읽는다 — 못 읽게 만들 수 없으면 이 시험은 볼 것이 없다.
+        if std::fs::read_dir(&work).is_ok() {
+            std::fs::set_permissions(&work, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+        a.key(key(KeyCode::Char('.')));
+        let locked = (picker(&a).show_hidden, picker(&a).at.clone(), picker(&a).error.clone());
+        std::fs::set_permissions(&work, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!locked.0, "못 읽었는데 보이기 설정이 뒤집혔다 — 목록은 옛것이다");
+        assert_eq!(locked.1, before, "못 읽었는데 목록이 바뀌었다");
+        assert!(locked.2.as_deref().is_some_and(|e| e.contains("못 연다")), "까닭을 안 댔다 — {:?}", locked.2);
+
+        // 다시 읽을 수 있으면 `.` 이 설정과 목록을 함께 바꾼다.
+        a.key(key(KeyCode::Char('.')));
+        assert!(picker(&a).show_hidden);
+        assert!(picker(&a).at.entries.iter().any(|d| d.name == ".cache"), "{:?}", picker(&a).at);
+        assert_eq!(picker(&a).at.hidden, 0);
+        assert_eq!(picker(&a).error, None);
+    }
+
     /// **디렉터리를 드나들어 모노레포 하위를 등록한다** — `.git` 에서 멈추지 않고 고른 그
     /// 디렉터리가 푼 경로로 적힌다. 창은 열린 채 표시가 서고, 층에 새 줄이 서고 커서가 거기
     /// 있다. `.moai` 없는 것도 받아 층에 "init 전" 으로 선다. 다시 등록하면 멱등이다.
@@ -564,6 +615,32 @@ mod tests {
         none.hit("SPC p a");
         assert_eq!(none.mode, Mode::Browse);
         assert!(none.notice.as_deref().is_some_and(|n| n.contains("자리를 모른다")), "{:?}", none.notice);
+    }
+
+    /// **등록이 0 인 채 `.moai` 밖에서 띄우면 빈 층이 서고 `SPC p a` 를 댄다**(moai-r8kl, 사용자와
+    /// 정함). 빈 화면이 실수를 성공으로 읽히지 않게 무엇을 할지 한 줄로 말하고, 그 키로 첫 등록을
+    /// 하면 그 자리에서 층에 줄이 선다.
+    #[test]
+    fn with_nothing_registered_the_empty_layer_says_how_and_a_registers_the_first() {
+        let s = Scratch::new("empty");
+        let cfg = s.register(&[]);
+        let argos = s.project("work/argos");
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        a.launched_at = Some(s.0.join("work"));
+        assert!(a.on_layer() && a.repo.is_none());
+
+        let screen = crate::tui::draw::tests::render(&mut a, 80, 12).join("\n");
+        assert!(screen.contains("등록한 프로젝트가 없다") && screen.contains("SPC p a"), "{screen}");
+
+        a.hit("SPC p a");
+        point(&mut a, "argos");
+        a.key(key(KeyCode::Char('a')));
+        assert_eq!(s.registered(), [argos.clone()]);
+        press(&mut a, &[KeyCode::Esc]);
+        assert!(a.on_layer());
+        assert_eq!(place_at_cursor(&a), argos);
+        let screen = crate::tui::draw::tests::render(&mut a, 80, 12).join("\n");
+        assert!(!screen.contains("등록한 프로젝트가 없다"), "등록했는데 안내가 남았다 — {screen}");
     }
 
     /// **등록이 0 인 채 `.moai` 안에서 띄워도 `a` 로 첫 등록을 한다.** 층이 그 자리에서 서되

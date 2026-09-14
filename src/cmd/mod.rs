@@ -91,7 +91,8 @@ pub fn registered(worktree: bool) -> R<(crate::user_config::Registry, Vec<crate:
     Ok((reg, projects))
 }
 
-/// `.moai` 밖인데 등록한 것도 없을 때의 말 — `status`·`ready`·`tui` 가 같은 말로 멈춘다.
+/// `.moai` 밖인데 등록한 것도 없을 때의 말 — `status`·`ready`·`tui --json` 이 같은 말로 멈춘다.
+/// 화면의 `tui` 는 멈추지 않고 빈 층에서 `SPC p a` 를 댄다(moai-r8kl).
 /// 목록이 빈 까닭이 사용자 설정의 문제일 수 있어 그것도 붙인다.
 pub fn nothing_registered(reg: &crate::user_config::Registry) -> Fail {
     let mut msg = format!(

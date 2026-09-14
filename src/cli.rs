@@ -37,10 +37,10 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 계획을 한 번에 세울 때:
 
-  moai add --from - <<'EOF'
-  # 에픽 제목
-  - [p1] 첫 이슈 #bug
-  EOF
+moai add --from - <<'PLAN'
+# 에픽 제목
+- [p1] 첫 이슈 #bug
+PLAN
 
 승인 게이트가 없다. 무엇이든 만들고 무엇이든 옮길 수 있다. 대신
 `moai status` 가 에픽 없는 이슈·오래 멈춘 review·한 번에 벌여 놓은 것을 비춘다.
@@ -86,6 +86,10 @@ pub enum ColorArg {
 // **들여쓴 `after_help` 를 `"\` 줄 잇기로 시작하지 않는다.** 잇기가 개행과 함께 다음
 // 줄의 앞 공백까지 먹어 첫 줄만 왼쪽 끝에 붙는다 — 같은 줄에서 글을 시작한다.
 // `every_help_keeps_its_indent` 가 모든 명령의 `--help` 를 훑어 잡는다 (moai-p63y).
+// **heredoc 예시만은 왼쪽 끝이다** — 여는 줄부터 닫는 줄까지 들여쓰지 않고, 표시는
+// `EOF`·`MD` 가 아닌 것(`PLAN`·`NOTE`)을 쓴다. 들여쓴 채 복사하면 셸이 닫는 줄을 못
+// 찾고, 겹치는 표시는 커밋 메시지나 노트에 인용할 때 바깥 heredoc 을 닫는다
+// (`every_help_heredoc_is_copyable`, moai-foc3).
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
     /// 보드 · 경고 · 흐름. 세션은 여기서 시작한다
@@ -122,13 +126,16 @@ pub enum Cmd {
   moai add \"임자 없이\" -a none
 
 한 번에 여럿 (`--from`):
-  moai add --from - <<'EOF'
-  # 저장 계층                    `#` 줄은 에픽
-  - [p1] 원자적으로 쓴다 #bug    `-` 줄은 바로 위 에픽의 이슈
-  - 잘린 줄을 복구한다           [pN] 과 #태그 는 없어도 된다
-  - \\[WIP] 이슈 \\#12             제목의 앞머리 [ 와 끝 #낱말 은 \\ 를 앞에
-  EOF
 
+moai add --from - <<'PLAN'
+# 저장 계층
+- [p1] 원자적으로 쓴다 #bug
+- 잘린 줄을 복구한다
+- \\[WIP] 이슈 \\#12
+PLAN
+
+  `#` 줄은 에픽, `-` 줄은 바로 위 에픽의 이슈다. [pN] 과 #태그 는 없어도 된다.
+  제목의 앞머리 [ 와 끝 #낱말 은 \\ 를 앞에 붙인다.
   --dry-run 이 heredoc 오타로 여섯 개를 잘못 만드는 것을 막는다.
 
 계획 템플릿 (`{{이름}}` 을 --var 로 채운다, 변수는 전부 필수):
@@ -157,7 +164,10 @@ pub enum Cmd {
     /// 이슈에 메모를 남긴다 (저널에만 쌓인다)
     #[command(after_help = "  moai note moai-4aex \"파서가 BOM 에서 죽는다\"
   moai note moai-4aex -b - < review.txt        긴 글은 stdin 에서
-  moai note moai-4aex -b - <<'MD' ... MD
+
+moai note moai-4aex -b - <<'NOTE'
+여러 줄의 긴 글
+NOTE
 
   짧은 발견은 자리 인자로, 리뷰 전문처럼 긴 글은 `-b -` 로 넣는다. 둘은 서로
   밀어낸다 — 둘 다 받으면 어느 쪽이 이기는지 아무도 못 외운다.
@@ -228,7 +238,8 @@ pub enum Cmd {
 
   등록한 프로젝트(`moai project add`)가 있으면 맨 위에 프로젝트 층이 선다.
   `.moai` 밖에서 띄우면 층에서 시작하고, 안에서 띄우면 그 프로젝트의 뿌리에서
-  Backspace 로 올라간다. 층에서는 Enter 로 들어간다.
+  Backspace 로 올라간다. 층에서는 Enter 로 들어간다. 등록한 것이 없는데 밖에서 띄우면
+  빈 층이 서서 SPC p a 로 첫 프로젝트를 더하라고 댄다(`--json` 은 등록 없음으로 멈춘다).
 
   SPC p a 는 디렉터리를 골라 프로젝트로 등록하는 창을 연다 — 띄운 자리에서 한 층씩
   드나들고(Enter·Backspace, 이동은 목록과 같은 j·k·gg·G), `.moai` 가 있는 것과 이미
@@ -395,11 +406,11 @@ pub enum IdeaCmd {
     #[command(after_help = "  받는 마크다운은 `add --from` 과 같은 형식이다. 형식이 둘이 되면 어느 쪽
   문법인지 매번 틀린다.
 
-  moai idea promote <id> --from - <<'EOF'
-  # 에픽 제목
-  - [p1] 첫 이슈 #enhancement
-  - [p2] 둘째 이슈
-  EOF
+moai idea promote <id> --from - <<'PLAN'
+# 에픽 제목
+- [p1] 첫 이슈 #enhancement
+- [p2] 둘째 이슈
+PLAN
 
   펼치면 닫힌다 — 그 idea 는 `done` 으로 간다. 무엇이 무엇에서 나왔는지는
   저널에 남는다 (`moai show <id>` 의 이력).

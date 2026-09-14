@@ -76,6 +76,10 @@ pub enum Act {
     Stay,
     /// 이 디렉터리를 읽어 [`Picker::show`] 로 넣어 달라. 지금 디렉터리를 다시 읽는 것도 이것이다.
     Go(PathBuf),
+    /// 지금 디렉터리를 **점 디렉터리 보이기를 이 값으로** 다시 읽어 달라. 보이기 설정은 읽기가
+    /// 됐을 때 목록과 함께 넣는다(moai-v2jf) — 창이 먼저 뒤집으면 못 읽는 디렉터리에서 설정은
+    /// 바뀌고 목록은 옛것이라 둘이 어긋난다.
+    Hidden(bool),
     /// 이 디렉터리를 등록해 달라.
     Register(PathBuf),
     /// 닫는다. 적던 것이 없으니 묻지 않는다.
@@ -165,7 +169,7 @@ impl Picker {
         self.error = None;
         // 기다리던 `g` 는 버린다 — 칸을 닫은 뒤의 `g` 가 붙여넣기 전의 `g` 와 이어 맨 위로 뛰지 않게.
         self.chord.clear();
-        self.typing.get_or_insert_with(Input::default).paste(s);
+        self.typing.get_or_insert_with(|| Input::path("")).paste(s);
     }
 
     /// 키 하나. Ctrl-C 는 여기 오기 전에 든 쪽이 받는다 — 어느 모드에서든 나가는 길이다.
@@ -236,16 +240,14 @@ impl Picker {
                 Some(r) => self.path_of(r).map_or(Act::Stay, Act::Register),
                 None => Act::Stay,
             },
-            Pick::Hidden => {
-                self.show_hidden = !self.show_hidden;
-                Act::Go(self.at.dir.clone())
-            }
+            // **뒤집지 않고 원하는 값만 댄다** — 넣는 것은 다시 읽기가 된 뒤 든 쪽이 한다.
+            Pick::Hidden => Act::Hidden(!self.show_hidden),
             Pick::Path => {
                 let mut text = self.at.dir.display().to_string();
                 if !text.ends_with(std::path::MAIN_SEPARATOR) {
                     text.push(std::path::MAIN_SEPARATOR);
                 }
-                self.typing = Some(Input::new(&text));
+                self.typing = Some(Input::path(&text));
                 Act::Stay
             }
             Pick::Close => Act::Close,
@@ -367,7 +369,7 @@ mod tests {
         assert_eq!(p.typing, None);
 
         path(&mut p);
-        p.typing = Some(Input::new("apps/sub"));
+        p.typing = Some(Input::path("apps/sub"));
         assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/apps/sub".into()), "상대경로가 지금 디렉터리에 안 붙었다");
 
         // **`~` 는 붙이지 않고 그대로 넘긴다** — 껍데기가 풀어 주는 철자라 경로 칸에
@@ -375,12 +377,12 @@ mod tests {
         // 홈이 어디인지는 드는 쪽(`register::expand_home`)이 안다 — 여기는 조각이다.
         for typed in ["~", "~/work/argos"] {
             path(&mut p);
-            p.typing = Some(Input::new(typed));
+            p.typing = Some(Input::path(typed));
             assert_eq!(press(&mut p, KeyCode::Enter), Act::Go(typed.into()), "`~` 를 지금 디렉터리에 붙였다");
         }
         // `~` 로 시작하지 않는 것은 그대로 붙는다 — `~x` 는 그냥 이름이다.
         path(&mut p);
-        p.typing = Some(Input::new("~x"));
+        p.typing = Some(Input::path("~x"));
         assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/~x".into()));
         path(&mut p);
         assert_eq!(press(&mut p, KeyCode::Esc), Act::Stay);
@@ -401,6 +403,40 @@ mod tests {
         path(&mut p);
         p.paste("apps");
         assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/apps".into()));
+    }
+
+    /// **경로 칸의 낱말 지우기는 `/` 에서 멈춘다**(moai-8dna) — 빈칸만 경계로 보면
+    /// `/home/coder/work` 에서 Ctrl-W·Alt-Backspace 가 경로를 통째로 지운다. 한 층씩 지운다:
+    /// 끝의 `/` 는 넘고, 앞 층의 `/` 는 남긴다. 빈칸은 여전히 경계다. `g p` 로 연 칸도,
+    /// 붙여넣기로 연 칸도 같다.
+    #[test]
+    fn rubbing_a_word_in_the_path_field_stops_at_a_slash() {
+        let alt_bksp = KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT);
+        let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+        let text = |p: &Picker| p.typing.as_ref().map(|i| i.text().to_string());
+
+        let mut p = Picker::new(listing("/home/coder/work", &[]));
+        path(&mut p);
+        assert_eq!(text(&p).as_deref(), Some("/home/coder/work/"));
+        assert_eq!(p.key(alt_bksp), Act::Stay);
+        assert_eq!(text(&p).as_deref(), Some("/home/coder/"), "Alt-Backspace 가 한 층보다 많이 지웠다");
+        p.key(ctrl_w);
+        assert_eq!(text(&p).as_deref(), Some("/home/"), "Ctrl-W 가 Alt-Backspace 와 다르게 지웠다");
+        for c in "a b".chars() {
+            press(&mut p, KeyCode::Char(c));
+        }
+        p.key(ctrl_w);
+        assert_eq!(text(&p).as_deref(), Some("/home/a "), "빈칸이 경계가 아니게 됐다");
+        p.key(ctrl_w);
+        p.key(ctrl_w);
+        assert_eq!(text(&p).as_deref(), Some("/"));
+        p.key(ctrl_w);
+        assert_eq!(text(&p).as_deref(), Some(""), "뿌리 `/` 가 안 지워졌다");
+        press(&mut p, KeyCode::Esc);
+
+        p.paste("/home/coder/work");
+        p.key(alt_bksp);
+        assert_eq!(text(&p).as_deref(), Some("/home/coder/"), "붙여넣기로 연 칸이 경로 칸이 아니다");
     }
 
     /// **vi 이동**(moai-ob4c) — `j`·`k`, `gg`·`G`, Ctrl-d·Ctrl-u 가 커서를, `h`·`l` 이 위로·들어가기를
@@ -458,14 +494,16 @@ mod tests {
         assert_eq!(p.current(), Some(Row::Dir(1)), "붙이기 전의 `g` 와 이어졌다");
     }
 
-    /// `.` 은 숨은 것 보이기를 뒤집고 같은 층을 다시 읽으라고 한다. Esc·q 는 닫는다.
+    /// `.` 은 숨은 것 보이기를 **반대 값으로** 다시 읽으라고만 한다 — 창은 설정을 스스로 안
+    /// 뒤집는다. 읽기가 된 뒤 든 쪽이 넣는다(moai-v2jf). Esc·q 는 닫는다.
     #[test]
-    fn dot_toggles_hidden_and_esc_or_q_closes() {
+    fn dot_asks_for_the_other_hidden_setting_and_esc_or_q_closes() {
         let mut p = Picker::new(listing("/w", &[]));
-        assert_eq!(press(&mut p, KeyCode::Char('.')), Act::Go("/w".into()));
+        assert_eq!(press(&mut p, KeyCode::Char('.')), Act::Hidden(true));
+        assert!(!p.show_hidden, "읽기 전에 창이 설정을 뒤집었다");
+        p.show_hidden = true;
+        assert_eq!(press(&mut p, KeyCode::Char('.')), Act::Hidden(false));
         assert!(p.show_hidden);
-        assert_eq!(press(&mut p, KeyCode::Char('.')), Act::Go("/w".into()));
-        assert!(!p.show_hidden);
         assert_eq!(press(&mut p, KeyCode::Char('q')), Act::Close);
         assert_eq!(press(&mut p, KeyCode::Esc), Act::Close);
     }

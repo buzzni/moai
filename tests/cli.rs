@@ -227,6 +227,44 @@ fn init_appends_to_an_existing_gitignore() {
     assert!(got.contains(".moai/lock"), "{got}");
 }
 
+/// **워크트리 자리도 gitignore 한다**(moai-mxtb) — 감독 일꾼 절차가 `.claude/worktrees/` 에
+/// 워크트리를 뜨는데, 그 자리가 안 막히면 `git add -A` 에 남의 가지 전체가 딸려 온다.
+/// 넣는 것은 그 자리 하나다 — `.claude/` 통째는 저장소가 커밋하는 설정·스킬을 가린다.
+/// 같은 뜻의 철자나 `.claude/` 를 이미 막았으면 더하지 않고, 다시 불러도 한 줄이다.
+#[test]
+fn init_ignores_the_worktree_dir_once_and_respects_equivalent_spellings() {
+    let s = Scratch::new("ignorewt");
+    let claude_lines = |got: &str| got.lines().filter(|l| l.contains(".claude")).count();
+
+    let fresh = s.path().join("fresh");
+    std::fs::create_dir_all(&fresh).unwrap();
+    ok(&fresh, &["init", "argos"]);
+    let got = std::fs::read_to_string(fresh.join(".gitignore")).unwrap();
+    assert!(got.lines().any(|l| l == "/.claude/worktrees/"), "새 저장소에 워크트리 자리를 안 막았다\n{got}");
+    ok(&fresh, &["init"]);
+    assert_eq!(std::fs::read_to_string(fresh.join(".gitignore")).unwrap(), got, "다시 init 하자 .gitignore 가 바뀌었다");
+
+    for (name, already) in [("anchored", "/.claude/worktrees\n"), ("bare", ".claude/worktrees/\n"), ("whole", ".claude/\n")] {
+        let dir = s.path().join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = format!("target/\n# 우리 것\n{already}");
+        std::fs::write(dir.join(".gitignore"), &original).unwrap();
+        ok(&dir, &["init", "argos"]);
+        let got = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
+        assert!(got.starts_with(&original), "`{name}`: 원래 .gitignore 를 바꿨다\n{got}");
+        assert_eq!(claude_lines(&got), 1, "`{name}`: 같은 뜻의 줄이 있는데 또 더했다\n{got}");
+    }
+
+    // 끝 `/` 는 "디렉터리만" 이다(리뷰 moai-mxtb.az6). `.moai/lock/` 은 락 파일을 못 막으니
+    // 같은 이름이라도 덮은 것으로 치지 않고 `.moai/lock` 을 더한다.
+    let dir = s.path().join("dironly");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".gitignore"), ".moai/lock/\n").unwrap();
+    ok(&dir, &["init", "argos"]);
+    let got = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
+    assert!(got.lines().any(|l| l == ".moai/lock"), "디렉터리 전용 줄을 락 파일을 막은 것으로 쳤다\n{got}");
+}
+
 #[test]
 fn add_then_show() {
     let s = init("add");
@@ -942,6 +980,16 @@ fn outside_a_repo_with_nothing_registered_it_fails_and_says_how_to_register() {
     let help = ok_with(&out, &cfg, &[]);
     assert!(help.contains("moai init") && help.contains("moai project add"), "{help}");
 
+    // **탐색기만 다르다**(moai-r8kl) — 사람이 보는 화면이라 빈 층을 열고 `SPC p a` 를 댄다. 여기는
+    // 터미널이 아니라 그 까닭으로 멈추고, 등록이 없다는 말로는 안 멈춘다. `--json` 은 기계가
+    // 읽으니 `status`·`ready` 와 같은 말로 멈춘다.
+    let o = moai_with(&out, &cfg, &["tui"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(!o.status.success() && err.contains("터미널이 아니라") && !err.contains("moai project add"), "{err}");
+    let o = moai_with(&out, &cfg, &["tui", "--json"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(!o.status.success() && err.contains("moai project add"), "{err}");
+
     std::fs::write(&cfg, "project = 3\n").unwrap();
     let o = moai_with(&out, &cfg, &["status"]);
     assert!(!o.status.success());
@@ -1417,6 +1465,28 @@ fn a_child_under_a_lost_thought_is_not_counted_as_having_no_epic() {
         !warning("no_milestone").is_some_and(|w| w.contains(&child)),
         "트리가 길 잃음에 그린 줄을 status 는 마일스톤 없는 일로 센다\n{st}"
     );
+}
+
+/// **`-e none`·`--milestone none` 도 status 와 같은 자로 고른다**(moai-phw9) — 끊긴 에픽을 든
+/// 생각 밑에 접힌 줄은 트리가 `(길 잃음)` 안에 그리고 status 가 두 경고 어디에도 안 센다.
+/// 거름망만 그 줄을 "없는 것" 으로 고르면 한 저장소가 같은 줄을 세 가지로 말한다. 진짜 소속
+/// 없는 일은 그대로 고른다.
+#[test]
+fn none_filters_skip_a_child_under_a_lost_thought_like_status() {
+    let s = init("nonelost");
+    let mile = add(s.path(), &["마일스톤", "--type", "milestone"]);
+    let epic = add(s.path(), &["지울 에픽", "--type", "epic", "--milestone", &mile]);
+    let thought = add(s.path(), &["생각", "--type", "idea", "-e", &epic]);
+    let child = add(s.path(), &["생각 밑의 일", "--parent", &thought]);
+    let loose = add(s.path(), &["그냥 소속 없는 일"]);
+    assert!(moai(s.path(), &["rm", &epic]).status.success());
+
+    for flag in ["-e", "--milestone"] {
+        let listed = ok(s.path(), &["show", flag, "none"]);
+        let ids: Vec<&str> = listed.lines().filter_map(|l| l.split_whitespace().next()).collect();
+        assert!(!ids.contains(&child.as_str()), "`{flag} none` 이 길 잃은 생각 밑에 접힌 줄을 고른다\n{listed}");
+        assert!(ids.contains(&loose.as_str()), "`{flag} none` 이 진짜 소속 없는 일까지 뺐다\n{listed}");
+    }
 }
 
 /// 메모는 스냅샷을 건드리지 않고 저널에만 쌓인다.
@@ -2958,7 +3028,22 @@ fn help_says_what_to_type_next() {
 fn lost_indent(help: &str) -> Vec<String> {
     let mut bad = Vec::new();
     let mut prose: Option<&str> = None;
+    let mut closer: Option<String> = None;
     for l in help.lines().skip_while(|l| !l.starts_with("Usage:")).skip(1) {
+        // **heredoc 블록은 왼쪽 끝이 옳다** — 복사해 돌려면 여는 줄도 닫는 줄도 들여쓰지
+        // 않는다(moai-foc3). 블록 안은 산문도 설명도 아니라 건너뛰고, 닫힌 뒤 새로 센다.
+        if let Some(tag) = &closer {
+            if l == tag {
+                closer = None;
+                prose = None;
+            }
+            continue;
+        }
+        if let Some(tag) = heredoc_tag(l) {
+            closer = Some(tag);
+            prose = None;
+            continue;
+        }
         if l.trim().is_empty() {
             continue;
         }
@@ -2973,6 +3058,35 @@ fn lost_indent(help: &str) -> Vec<String> {
         }
     }
     bad
+}
+
+/// 줄에 heredoc 이 열리면 그 닫는 표시. `<<<` 는 heredoc 이 아니다.
+fn heredoc_tag(line: &str) -> Option<String> {
+    let at = line.match_indices("<<").map(|(i, _)| i).find(|&i| {
+        !line[..i].ends_with('<') && !line[i + 2..].starts_with('<')
+    })?;
+    let rest = line[at + 2..].trim_start_matches('-').trim_start();
+    let rest = rest.trim_start_matches(['\'', '"']);
+    let tag: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+    (!tag.is_empty()).then_some(tag)
+}
+
+/// 모든 명령(하위 명령까지)의 `--help`. **명령 목록은 바이너리의 도움말에서 읽는다.**
+fn every_help(s: &Scratch) -> Vec<(String, String)> {
+    let mut queue: Vec<Vec<String>> = vec![vec![]];
+    let mut all = Vec::new();
+    while let Some(path) = queue.pop() {
+        let mut args: Vec<&str> = path.iter().map(String::as_str).collect();
+        args.push("--help");
+        let help = ok(s.path(), &args);
+        for c in subcommands(&help) {
+            let mut next = path.clone();
+            next.push(c);
+            queue.push(next);
+        }
+        all.push((path.join(" "), help));
+    }
+    all
 }
 
 /// 도움말의 `Commands:` 밑에 선 이름들. `help` 는 clap 이 만드는 것이라 뺀다.
@@ -3009,32 +3123,76 @@ fn every_help_keeps_its_indent() {
         assert!(found.is_empty(), "멀쩡한 글을 잡는다 — {found:?}");
     }
 
-    let mut queue: Vec<Vec<String>> = vec![vec![]];
     let mut seen = Vec::new();
     let mut with_examples = 0;
     let mut bad = Vec::new();
-    while let Some(path) = queue.pop() {
-        let mut args: Vec<&str> = path.iter().map(String::as_str).collect();
-        args.push("--help");
-        let help = ok(s.path(), &args);
+    for (path, help) in every_help(&s) {
         if help.lines().any(|l| l.starts_with("  moai ")) {
             with_examples += 1;
         }
         for b in lost_indent(&help) {
-            bad.push(format!("moai {} --help:\n{b}", path.join(" ")));
+            bad.push(format!("moai {path} --help:\n{b}"));
         }
-        for c in subcommands(&help) {
-            let mut next = path.clone();
-            next.push(c);
-            queue.push(next);
-        }
-        seen.push(path.join(" "));
+        seen.push(path);
     }
     // 훑기가 실제로 돌았는지 — 하위 명령까지 내려갔고 예시 줄을 가진 도움말을 봤다.
     assert!(seen.len() > 20, "명령 목록을 못 읽었다 — {seen:?}");
     assert!(seen.iter().any(|c| c == "skill install"), "하위 명령으로 안 내려갔다 — {seen:?}");
     assert!(with_examples >= 8, "예시 줄이 있는 도움말이 {with_examples} 개뿐이다 — {seen:?}");
     assert!(bad.is_empty(), "들여쓰기를 잃은 줄:\n\n{}", bad.join("\n\n"));
+}
+
+/// **도움말의 heredoc 은 복사해서 그대로 돈다** (moai-foc3).
+///
+/// 들여쓴 heredoc 을 그대로 치면 닫는 표시가 들여써져 셸이 끝을 못 찾는다 — `<<-` 는
+/// 탭만 벗긴다. 한 줄에 `<<'MD' ... MD` 로 줄인 것은 닫히지 않는다. 표시가 `EOF`·`MD`
+/// 면 커밋 메시지나 `moai note -b - <<'MD'` 에 인용할 때 바깥 heredoc 을 일찍 닫는다.
+#[test]
+fn every_help_heredoc_is_copyable() {
+    // 판정이 헛돌지 않는지 먼저 본다.
+    for (broken, why) in [
+        ("  moai add --from - <<'PLAN'\n  # 에픽\n  PLAN\n", "들여쓴 여는 줄"),
+        ("moai add --from - <<'PLAN'\n# 에픽\n  PLAN\n", "들여쓴 닫는 줄"),
+        ("moai note t-1 -b - <<'PLAN' ... PLAN\n", "한 줄로 줄인 것"),
+        ("moai add --from - <<'EOF'\n# 에픽\nEOF\n", "겹치는 표시"),
+    ] {
+        assert!(!copyable_heredocs(broken).is_empty(), "판정이 {why} 을 못 알아본다");
+    }
+    assert!(copyable_heredocs("moai add --from - <<'PLAN'\n# 에픽\nPLAN\n  설명\n").is_empty());
+    assert!(copyable_heredocs("grep x <<< \"hi\"\n").is_empty(), "here-string 을 heredoc 으로 읽는다");
+
+    let s = init("helpheredoc");
+    let mut bad = Vec::new();
+    let mut seen = 0;
+    for (path, help) in every_help(&s) {
+        seen += help.lines().filter(|l| heredoc_tag(l).is_some()).count();
+        for b in copyable_heredocs(&help) {
+            bad.push(format!("moai {path} --help: {b}"));
+        }
+    }
+    assert!(seen >= 4, "도움말에서 heredoc 을 {seen}개밖에 못 찾았다");
+    assert!(bad.is_empty(), "복사해 못 도는 heredoc:\n{}", bad.join("\n"));
+}
+
+/// 복사해 못 도는 heredoc 마다 한 줄.
+fn copyable_heredocs(help: &str) -> Vec<String> {
+    let lines: Vec<&str> = help.lines().collect();
+    let mut bad = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let Some(tag) = heredoc_tag(line) else { continue };
+        if line.starts_with(char::is_whitespace) {
+            bad.push(format!("여는 줄이 들여써졌다 — {line}"));
+        }
+        if matches!(tag.as_str(), "EOF" | "MD") {
+            bad.push(format!("표시 {tag} 는 바깥 heredoc 과 겹친다 — {line}"));
+        }
+        match lines[i + 1..].iter().find(|l| l.trim() == tag) {
+            Some(close) if *close == tag => {}
+            Some(close) => bad.push(format!("닫는 줄이 들여써졌다 — {close:?}")),
+            None => bad.push(format!("닫히지 않는다 — {line}")),
+        }
+    }
+    bad
 }
 
 /// 인자 없이 부른 것도 `--json` 이 돈다 — 에이전트가 첫 호출부터 기계로 읽는다.
