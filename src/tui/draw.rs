@@ -101,6 +101,14 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     if matches!(app.mode, Mode::Browse) && menu::open(&app.chord) {
         menu_popup(f, app, &rows, body);
     }
+    // **도는 것이 화면에 남았는지는 다 그린 버퍼에서 읽는다**(moai-5jh6). 목록은 스크롤 창
+    // 밖의 줄도 짓고, 상세는 굴린 위쪽 줄도 짓고, 폼은 둘을 통째로 덮는다 — 짓는 쪽에서 세면
+    // 그 셋을 따로 따져야 하고, 하나를 빠뜨리면 보이는 스피너가 멈추거나 안 보이는 스피너로
+    // 깬다. 버퍼에 스피너 글자가 있으면 그것은 보이는 것이다. 틀리는 쪽은 제목·본문에
+    // 스피너 글자를 적은 경우 하나고, 그 손해는 오늘까지의 깨움과 같다(`SPIN_BUDGET` 로 묶인다).
+    // 빛줄기는 따로 안 본다 — 같은 줄의 글리프(`App::spins`)가 늘 그 왼쪽에 서고, 덮는 창은
+    // 오른쪽에 붙거나(메뉴) 통째로 덮어(폼) 빛만 보이고 글리프가 가려지는 화면이 없다.
+    app.spun = spinner_on(f.buffer_mut());
 
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
@@ -138,6 +146,12 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             f.render_widget(Paragraph::new(fit(line, keys.width as usize)), keys);
         }
     }
+}
+
+/// 그린 화면에 도는 글리프가 한 칸이라도 있는가. 글자는 `style::SPIN` 에서 읽는다 —
+/// 도는 칸이 쓰는 글자와 찾는 글자가 따로 적히면 한쪽만 바뀐다.
+fn spinner_on(buf: &ratatui::buffer::Buffer) -> bool {
+    buf.content.iter().any(|c| style::SPIN.contains(&c.symbol()))
 }
 
 /// 디렉터리 고르기 창(moai-plvy). 목록·상세 자리를 **폼처럼 통째로** 덮는다 — 뒤 칸의
@@ -731,10 +745,11 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
 
     let title_w = crate::text::width(&title);
     let mut spans = head;
-    // 집은 **일**의 제목에는 빛줄기가 흐른다(moai-fy99). 묶음은 안 흐른다 — 묶음의 도는
-    // 글리프는 "밑에 집은 것이 있다" 는 말이고, 손대는 줄은 그 밑의 이슈다.
-    // 가르는 자는 `is_group` 이지 `is_dir` 가 아니다 — 자식을 둔 이슈도 디렉터리로 서지만 그건 일이다.
-    if !crate::report::is_group(i) && app.spins(at) {
+    // **도는 줄의 제목에는 빛줄기가 흐른다**(moai-fy99). 자는 글리프와 같은 `App::spins` 하나다 —
+    // 일은 집었을 때, 에픽·마일스톤은 그 밑에 집은 일이 실제로 있을 때(moai-x5eg), 미룬 것은 안
+    // 돈다(moai-tawj). 묶음을 따로 빼 두면 목록 뿌리에서 무엇이 움직이는지 글리프 한 칸으로만
+    // 읽혀, 여러 에픽을 훑어 내릴 때 눈에 안 걸린다(moai-eomg). 뜻은 여전히 글리프가 진다.
+    if app.spins(at) {
         spans.extend(shimmer(title, app.spin));
     } else {
         spans.push(Span::raw(title));
@@ -823,9 +838,9 @@ fn glint() -> [Style; 3] {
     [edge, from_anstyle(style::IN_PROGRESS), edge]
 }
 
-/// 집은 이슈의 제목을 **빛줄기가 왼쪽에서 오른쪽으로 흐르는** 조각들로 낸다. 걸음은 도는
+/// 도는 줄(집은 일, 집은 일을 품은 묶음)의 제목을 **빛줄기가 왼쪽에서 오른쪽으로 흐르는** 조각들로 낸다. 걸음은 도는
 /// 글리프와 같은 `App::spin` 이다 — 따로 시계를 두면 둘이 다른 박자로 움직이고, 도는
-/// 것이 없을 때 루프가 안 깨우는 규칙(`App::spinning`)도 그대로 따른다.
+/// 것이 안 보일 때 루프가 안 깨우는 규칙(`App::spun`)도 그대로 따른다.
 ///
 /// **뜻은 글리프가 진다.** 빛줄기는 곁들임이라 색이 없는 화면에서 사라져도 잃는 것이 없다.
 /// 글자와 폭은 그대로다 — 스타일만 칸마다 바꾼다. 두 칸 글자는 **덮는 칸 중 가장 밝은 띠**를
@@ -936,15 +951,15 @@ fn wrapped<'a>(text: &str, w: usize, style: Style) -> Vec<Line<'a>> {
 }
 
 /// 그 줄의 글리프. 도는 것은 지금 누가 손대고 있는 줄이다 — **돌지는 [`App::spins`]
-/// 가 정한다**(`App::spinning` 이 같은 자로 깨울 것을 센다).
+/// 가 정한다**(루프는 그려진 글리프로 깬다 — `App::spun`).
 fn glyph_of(app: &App, at: usize) -> &'static str {
     let col = app.column(at);
     if app.spins(at) { style::spin_glyph(col, app.spin) } else { style::glyph(col) }
 }
 
 /// 칸별 건수의 글리프. **센 줄 가운데 도는 줄이 있을 때만 돈다**([`App::spins`]) — 칸
-/// 이름만 보고 돌리면 미룬 `in_progress` 하나뿐인 칸이, 루프가 빠른 걸음으로 안 깨우는
-/// (`App::spinning`) 스피너의 한 프레임에 멈춰 선다. 멈춘 스피너는 일이 멈췄다는 거짓말이다.
+/// 이름만 보고 돌리면 미룬 `in_progress` 하나뿐인 칸이, 줄은 다 멈췄는데 건수만 돌아 계획에서
+/// 뺀 일을 "지금 손대는 중" 이라 말하고 그 스피너로 루프를 깨운다(`App::spun`).
 fn count_glyph(app: &App, work: &[usize], st: &str) -> &'static str {
     let turning = work.iter().any(|&at| app.issues[at].status.as_str() == st && app.spins(at));
     if turning { style::spin_glyph(st, app.spin) } else { style::glyph(st) }
@@ -1712,7 +1727,8 @@ pub(super) mod tests {
         assert_eq!(shimmer(title.to_string(), 5), shimmer(title.to_string(), 5 + cycle), "한 바퀴가 제자리로 안 온다");
     }
 
-    /// 목록에서 **집은 이슈의 제목만** 빛난다 — 끝난 멤버와 묶음 줄은 안 흐른다.
+    /// 목록에서 **집은 이슈의 제목은** 빛나고 끝난 멤버는 안 흐른다. 묶음 줄은
+    /// `a_group_title_glints_exactly_when_it_spins` 가 본다.
     #[test]
     fn only_a_held_issue_title_glints_in_the_list() {
         let mut a = app();
@@ -1736,6 +1752,74 @@ pub(super) mod tests {
         };
         assert!(glints_from("argos-0004", "집"), "집은 이슈 제목에 빛이 없다\n{}", text.join("\n"));
         assert!(!glints_from("argos-0003", "멤"), "끝난 멤버가 빛났다\n{}", text.join("\n"));
+    }
+
+    /// **묶음 줄도 돌 때 빛난다**(moai-eomg) — 자는 도는 글리프와 같은 `App::spins` 다. 밑에
+    /// 집은 일이 있는 에픽·마일스톤은 흐르고, 멤버가 첫 칸뿐이거나 집은 멤버를 미룬 에픽은 안
+    /// 흐른다. 마일스톤도 묶음이라 같은 자다.
+    #[test]
+    fn a_group_title_glints_exactly_when_it_spins() {
+        let make = |id: &str, title: &str, kind: Kind, st: &str| {
+            Issue::new(id.into(), title.into(), kind, Status::new(st), "2026-09-01T00:00:00Z")
+        };
+        let member = |id: &str, epic: &str, st: &str| {
+            let mut m = make(id, "멤버", Kind::Issue, st);
+            m.epic = Some(epic.into());
+            m
+        };
+        let mut first = make("argos-0001", "빈돌", Kind::Milestone, "todo");
+        first.priority = Some(0);
+        let stone = make("argos-0010", "빛돌", Kind::Milestone, "todo");
+        let mut under = make("argos-0011", "돌밑에픽", Kind::Epic, "todo");
+        under.milestone = Some("argos-0010".into());
+        let lit = make("argos-0041", "빛에픽", Kind::Epic, "todo");
+        let idle = make("argos-0021", "멈춘에픽", Kind::Epic, "todo");
+        let shelved = make("argos-0031", "미룬에픽", Kind::Epic, "todo");
+        let mut put_off = member("argos-0032", "argos-0031", "in_progress");
+        put_off.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let issues = vec![
+            first,
+            stone,
+            under,
+            member("argos-0012", "argos-0011", "in_progress"),
+            lit,
+            member("argos-0042", "argos-0041", "in_progress"),
+            idle,
+            member("argos-0022", "argos-0021", "todo"),
+            shelved,
+            put_off,
+        ];
+        let cfg = || Config::parse("prefix = \"argos\"\n").unwrap();
+        // 가운데 칸이 제목 첫 글자에 오는 걸음. 커서는 재지 않는 줄에 둔다 — 커서 줄의 모양이
+        // 제목 칸을 가린다.
+        let glints = |a: &mut App, row: &str, first: &str| {
+            a.spin = 2;
+            let (w, h) = (100u16, 14u16);
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| screen(f, a)).unwrap();
+            let buf = term.backend().buffer().clone();
+            let text = render(a, w, h);
+            let y = text.iter().position(|l| l.contains(row)).unwrap_or_else(|| panic!("{row} 가 없다\n{}", text.join("\n"))) as u16;
+            let x0 = (0..w).find(|&x| buf[(x, y)].symbol() == first).unwrap_or_else(|| panic!("{first} 가 없다"));
+            let lit = (x0..w / 2).any(|x| buf[(x, y)].modifier.contains(Modifier::BOLD) && buf[(x, y)].fg == Color::LightYellow);
+            (lit, text.join("\n"))
+        };
+
+        // 뿌리는 마일스톤이다 — 커서는 빈 마일스톤에 선다.
+        let mut root = App::new(issues.clone(), cfg(), Path::new());
+        let (on, text) = glints(&mut root, "argos-0010", "빛");
+        assert!(on, "집은 일이 밑에 있는 마일스톤이 안 빛난다\n{text}");
+        let (on, text) = glints(&mut root, "argos-0001", "빈");
+        assert!(!on, "빈 마일스톤이 빛났다\n{text}");
+
+        // 마일스톤 없는 에픽들 — 커서는 `..` 에 선다.
+        let mut basket = App::new(issues, cfg(), vec![crate::nav::Seg::Milestone(None)]);
+        let (on, text) = glints(&mut basket, "argos-0041", "빛");
+        assert!(on, "집은 멤버가 있는 에픽이 안 빛난다\n{text}");
+        let (on, text) = glints(&mut basket, "argos-0021", "멈");
+        assert!(!on, "멤버가 첫 칸뿐인 에픽이 빛났다\n{text}");
+        let (on, text) = glints(&mut basket, "argos-0031", "미");
+        assert!(!on, "집은 멤버를 미룬 에픽이 빛났다\n{text}");
     }
 
     /// 에픽 줄은 **끝난/일 셈을 테두리 바로 앞에 오른쪽 정렬로** 댄다 — 제목 길이와 상관없이
@@ -2213,7 +2297,7 @@ pub(super) mod tests {
 
     /// **반쯤 끝난 묶음은 안 돈다** — 목록 줄도 상세 머리도. 읽은 칸은 `in_progress` 지만
     /// 그 밑에서 아무도 손대지 않는다. 멤버 하나를 집는 순간 둘 다 돌고, 그 판단은
-    /// 깨우는 쪽(`App::spinning`)과 같다(moai-x5eg).
+    /// 깨우는 쪽(`App::spun`)도 그린 것을 따른다(moai-x5eg·moai-5jh6).
     #[test]
     fn a_half_done_group_stands_still() {
         let mut issues = issues();
@@ -2224,7 +2308,7 @@ pub(super) mod tests {
         let lines = render(&mut a, 120, 16).join("\n");
         assert!(lines.contains("▸ in_progress"), "상세 머리가 정지 글리프가 아니다\n{lines}");
         assert!(!style::SPIN.iter().any(|g| lines.contains(g)), "아무도 손대지 않는 묶음이 돈다\n{lines}");
-        assert!(!a.spinning(), "안 도는 화면이 빠른 걸음으로 깨운다");
+        assert!(!a.spun, "안 도는 화면이 빠른 걸음으로 깨운다");
 
         issues[2].status = Status::new("in_progress");
         let mut a = App::new(issues, cfg(), Path::new());
@@ -2232,7 +2316,7 @@ pub(super) mod tests {
         let row = lines.lines().find(|l| l.contains("> argos-0001")).unwrap();
         assert!(style::SPIN.iter().any(|g| row.contains(g)), "집은 멤버가 있는데 묶음이 안 돈다\n{lines}");
         assert!(!lines.contains("▸ in_progress"), "상세 머리만 멈췄다\n{lines}");
-        assert!(a.spinning(), "도는 화면을 안 깨운다");
+        assert!(a.spun, "도는 화면을 안 깨운다");
     }
 
     /// **미룬 `in_progress` 하나뿐인 칸은 건수 글리프도 안 돈다**(moai-tawj) — 줄은 멈추는데
@@ -2243,14 +2327,89 @@ pub(super) mod tests {
         let mut issues = issues();
         issues[2].deferred_at = Some("2026-09-02T00:00:00Z".into());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
-        assert!(!a.spinning());
         let root = render(&mut a, 120, 16).join("\n");
+        assert!(!a.spun);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let inside = render(&mut a, 120, 16).join("\n");
         for lines in [&root, &inside] {
             assert!(!style::SPIN.iter().any(|g| lines.contains(g)), "안 깨우는 스피너가 섰다\n{lines}");
         }
         assert!(inside.contains("▸ in_progress 1"), "건수에 정지 글리프가 없다\n{inside}");
+    }
+
+    /// **루프는 화면에 도는 것이 그려졌을 때만 빠른 걸음으로 깬다**(moai-5jh6). 집은 일이
+    /// 스크롤 밖 에픽 안에 있으면 안 깨고, 굴려 보이면 깬다. SPC 메뉴가 떠도 뒤의 줄이
+    /// 보이면 깨고, 폼이 목록·상세를 통째로 덮으면 안 깬다.
+    #[test]
+    fn the_loop_wakes_fast_only_for_a_spinner_on_the_screen() {
+        let make = |id: &str, kind: Kind, st: &str| {
+            Issue::new(id.into(), format!("{id} 제목"), kind, Status::new(st), "2026-09-01T00:00:00Z")
+        };
+        // 앞선 에픽들이 창을 채우고, 집은 멤버가 있는 에픽은 우선순위가 낮아 맨 뒤에 선다.
+        let mut issues: Vec<Issue> = (101..113)
+            .map(|n| {
+                let mut e = make(&format!("argos-{n:04}"), Kind::Epic, "todo");
+                e.priority = Some(1);
+                e
+            })
+            .collect();
+        let mut held_epic = make("argos-0001", Kind::Epic, "todo");
+        held_epic.priority = Some(3);
+        let mut held = make("argos-0002", Kind::Issue, "in_progress");
+        held.epic = Some("argos-0001".into());
+        issues.extend([held_epic, held]);
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        assert!(a.spins(a.index.find("argos-0001").unwrap()), "시험의 전제 — 그 에픽은 돈다");
+
+        let off = render(&mut a, 100, 10).join("\n");
+        assert!(!off.contains("argos-0001"), "시험의 전제 — 도는 에픽이 창 밖이어야 한다\n{off}");
+        assert!(!a.spun, "안 보이는 집은 일로 빠른 걸음으로 깬다\n{off}");
+
+        a.hit("G");
+        let on = render(&mut a, 100, 10).join("\n");
+        assert!(on.contains("argos-0001"), "끝으로 안 갔다\n{on}");
+        assert!(a.spun, "보이는 도는 줄을 안 깨운다\n{on}");
+
+        // 그리기만 다시 해도 답이 따라온다 — 지난 프레임의 값이 남지 않는다.
+        a.key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        let back = render(&mut a, 100, 10).join("\n");
+        assert!(!back.contains("argos-0001"), "맨 위로 안 굴렀다\n{back}");
+        assert!(!a.spun, "굴려 치운 줄로 여전히 깬다\n{back}");
+
+        a.hit("G");
+        a.hit("SPC");
+        let menu = render(&mut a, 160, 24).join("\n");
+        assert!(menu::open(&a.chord), "메뉴가 안 떴다");
+        assert!(a.spun, "메뉴 뒤로 보이는 도는 줄을 안 깨운다\n{menu}");
+
+        a.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        a.hit("SPC n");
+        assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
+        let form = render(&mut a, 160, 24).join("\n");
+        assert!(!a.spun, "폼이 덮은 도는 줄로 깬다\n{form}");
+    }
+
+    /// **상세에만 선 스피너도 깨운다.** `(마일스톤 없음)` 바구니는 제 줄에 글리프가 없어 목록은
+    /// 안 돌지만, 커서를 올리면 상세 롤업의 칸별 건수가 돈다.
+    #[test]
+    fn a_spinner_only_in_the_detail_still_wakes_the_loop() {
+        let make = |id: &str, kind: Kind, st: &str| {
+            Issue::new(id.into(), format!("{id} 제목"), kind, Status::new(st), "2026-09-01T00:00:00Z")
+        };
+        let stone = make("argos-0001", Kind::Milestone, "todo");
+        let mut epic = make("argos-0002", Kind::Epic, "todo");
+        epic.milestone = Some("argos-0001".into());
+        let mut member = make("argos-0003", Kind::Issue, "todo");
+        member.epic = Some("argos-0002".into());
+        let loose = make("argos-0004", Kind::Issue, "in_progress");
+        let mut a = App::new(vec![stone, epic, member, loose], Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+
+        let still = render(&mut a, 120, 16).join("\n");
+        assert!(!a.spun, "안 도는 화면으로 깬다\n{still}");
+        a.hit("j");
+        let basket = render(&mut a, 120, 16).join("\n");
+        assert!(basket.contains("마일스톤 없음"), "바구니에 안 섰다\n{basket}");
+        assert!(a.spun, "상세의 도는 건수를 안 깨운다\n{basket}");
     }
 
     /// **목록과 상세가 묶음의 읽은 칸을 그린다** — CLI 와 같은 자. 손으로 옮긴
