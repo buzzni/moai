@@ -698,6 +698,30 @@ mod tests {
         }
     }
 
+    /// **`moai tui --help` 에 적힌 키는 표에 있다.** 도움말은 손으로 쓴 글로 두되(지어내면 글이
+    /// 나빠진다), 글에서 키 이름으로 읽히는 낱말을 전부 뽑아 어느 표에서 뜻이 있는지 본다 — 키를
+    /// 걷고 도움말을 안 고치면 여기서 이름을 대며 멈춘다.
+    #[test]
+    fn every_key_the_help_names_is_in_a_table() {
+        use clap::CommandFactory;
+        let cli = crate::cli::Cli::command();
+        let help = cli.find_subcommand("tui").and_then(|c| c.get_after_help()).map(|h| h.to_string()).expect("tui 도움말이 없다");
+        let mut named = Vec::new();
+        for word in help.split(|c: char| c.is_whitespace() || "·/,()`".contains(c)) {
+            let word = word.trim_end_matches(['.', '|']);
+            let Some(k) = parse(word) else { continue };
+            let known = lookup(ANYWHERE, &[k]) != Lookup::Unknown
+                || lookup(BROWSE, &[k]) != Lookup::Unknown
+                || lookup(PICK, &[k]) != Lookup::Unknown
+                || lookup(JOT, &[k]) != Lookup::Unknown;
+            assert!(known, "도움말이 `{word}` 를 대는데 어느 키 표에도 없다");
+            named.push(word);
+        }
+        for must in ["F10", "q", "Enter", "Backspace", "Shift-Tab", "j", "a", "d", "n", "Ctrl-S", "F2", "Esc"] {
+            assert!(named.contains(&must), "도움말에서 `{must}` 를 못 뽑았다 — 뽑기가 헛돈다: {named:?}");
+        }
+    }
+
     fn layer() -> Ctx {
         Ctx { layer: true, list_focus: true, ..Ctx::default() }
     }

@@ -599,7 +599,10 @@ impl App {
                 };
                 let told = match self.land(&id) {
                     Landing::Shown => format!("✓ {done} · {what}"),
-                    Landing::Hidden => format!("✓ {done} · {what} — 거름망에 가려 안 보인다 · Esc 로 푼다"),
+                    Landing::Hidden => format!(
+                        "✓ {done} · {what} — 거름망에 가려 안 보인다 · {} 로 푼다",
+                        keys::label(keys::BROWSE, keys::Browse::ClearFilter)
+                    ),
                     // 다시 읽기가 실패했으면 그 까닭은 `trouble` 이 따로 댄다. 담긴 것은 참이다.
                     Landing::Missing => format!("✓ {done} · {what} — 다시 읽은 목록에 없다"),
                 };
@@ -1205,8 +1208,15 @@ impl App {
     /// 해제 물음에서는 **다른 키처럼** 물음을 거둔다: 붙인 글 속 `y` 는 답이 아니다.
     pub fn paste(&mut self, s: &str) {
         self.notice = None;
-        // 층에서는 `/`·`f` 가 안 열린다(`layer::refused`) — 열리는 칸만 댄다.
-        let open = if self.on_layer() { "`n`" } else { "`/`·`f`·`n`" };
+        // 층에서는 `/`·`f` 가 안 열린다 — **키 처리와 같은 판정**([`keys::Browse::enabled`])으로
+        // 열리는 칸만 대고, 키 이름은 표에서 읽는다.
+        let ctx = self.key_ctx();
+        let open: Vec<String> = [keys::Browse::Grep, keys::Browse::Filter, keys::Browse::Jot]
+            .into_iter()
+            .filter(|a| a.enabled(&ctx).is_ok())
+            .map(|a| format!("`{}`", keys::label(keys::BROWSE, a)))
+            .collect();
+        let open = open.join("·");
         match &mut self.mode {
             Mode::Browse => self.notice = Some(format!("붙여 넣을 칸이 없다 — {open} 으로 칸을 열고 붙인다")),
             Mode::Grep(input) | Mode::Filter(input) => input.paste(s),

@@ -7,7 +7,7 @@
 //! 않는다 — 층이 읽은 파일(`Layer::config`)이나, 층이 없으면 띄울 때 받은 자리
 //! (`App::user_config`)다. 환경을 여기서 다시 읽으면 시험이 돌리는 사람의 설정을 쓴다.
 
-use super::keys::{CONFIRM, Confirm, Lookup, lookup};
+use super::keys::{BROWSE, Browse, CONFIRM, Confirm, Lookup, label, lookup};
 use super::picker::{Act, Dent, Listing, Picker};
 use super::{App, Mode, Row};
 use ratatui::crossterm::event::KeyEvent;
@@ -190,7 +190,11 @@ impl App {
                 // 층에서 "못 읽는다" 를 처음 만난다 (moai-9omq).
                 let bad = added.unreadable.as_deref().map(|e| format!(" · ! 못 읽는다 — {}", crate::text::one_line(e))).unwrap_or_default();
                 let bare = if added.initialized { "" } else { " · init 전 — .moai 가 아직 없다" };
-                let back = if self.on_layer() || self.layer.is_none() { "" } else { " · 뿌리에서 Bksp 로 층에 올라가면 보인다" };
+                let back = if self.on_layer() || self.layer.is_none() {
+                    String::new()
+                } else {
+                    format!(" · 뿌리에서 {} 로 층에 올라가면 보인다", label(BROWSE, Browse::Leave))
+                };
                 self.notice = Some(format!("{what} · {}{bad}{bare}{back}", shown(&added.path)));
                 if let Mode::Pick(p) = &self.mode {
                     let here = p.at.dir.clone();

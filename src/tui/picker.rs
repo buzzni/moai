@@ -10,7 +10,7 @@
 //! 보지도 않을 디렉터리 이름까지 읽는다.
 
 use super::input::Input;
-use super::keys::{Goto, Lookup, PATH, PICK, Pick, lookup};
+use super::keys::{Goto, Lookup, PATH, PICK, Pick, label, lookup};
 use super::scroll::Scroll;
 use ratatui::crossterm::event::KeyEvent;
 use std::path::{Path, PathBuf};
@@ -80,11 +80,15 @@ pub enum Act {
     Close,
 }
 
-/// `..` 에서 `a` 를 누른 까닭.
-pub const UP_IS_NOT_A_PROJECT: &str = "`..` 은 등록하지 않는다 — 올라가서 `./` 에서 a";
+/// `..` 에서 `a` 를 누른 까닭. 키 이름은 표에서 읽는다 — 등록 키를 옮기면 이 말도 따라온다.
+pub fn up_is_not_a_project() -> String {
+    format!("`..` 은 등록하지 않는다 — 올라가서 `./` 에서 {}", label(PICK, Pick::Register))
+}
 
 /// `./` 에서 Enter 를 누른 까닭.
-pub const HERE_IS_ALREADY_OPEN: &str = "`./` 은 지금 열어 둔 디렉터리다 — 여기를 등록하려면 a";
+pub fn here_is_already_open() -> String {
+    format!("`./` 은 지금 열어 둔 디렉터리다 — 여기를 등록하려면 {}", label(PICK, Pick::Register))
+}
 
 impl Picker {
     /// 첫 층으로 연다. 커서는 첫 하위 디렉터리에 선다 — 고르러 들어온 사람이 먼저 보는 것은 밑이다.
@@ -207,7 +211,7 @@ impl Picker {
                 // `Enter 들어가기` 를 대고 있고, 하위 디렉터리가 없는 자리에서는 커서가
                 // 여기 서므로(`first_dir`) 아무 말 없으면 창이 멎은 줄 안다(`..` 의 `a` 와 같다).
                 Some(Row::Here) => {
-                    self.error = Some(HERE_IS_ALREADY_OPEN.into());
+                    self.error = Some(here_is_already_open());
                     Act::Stay
                 }
                 None => Act::Stay,
@@ -215,7 +219,7 @@ impl Picker {
             Pick::Up => self.path_of(Row::Up).map_or(Act::Stay, Act::Go),
             Pick::Register => match row {
                 Some(Row::Up) => {
-                    self.error = Some(UP_IS_NOT_A_PROJECT.into());
+                    self.error = Some(up_is_not_a_project());
                     Act::Stay
                 }
                 Some(r) => self.path_of(r).map_or(Act::Stay, Act::Register),
@@ -300,7 +304,10 @@ mod tests {
         assert_eq!(press(&mut p, KeyCode::Char('a')), Act::Register("/w/mono".into()));
         p.cursor = 1;
         assert_eq!(press(&mut p, KeyCode::Char('a')), Act::Stay);
-        assert_eq!(p.error.as_deref(), Some(UP_IS_NOT_A_PROJECT));
+        assert_eq!(p.error, Some(up_is_not_a_project()));
+        // 문구는 표에서 키 이름을 읽어 짓는다 — 옮기기 전과 한 글자도 같다(moai-nc7w).
+        assert_eq!(up_is_not_a_project(), "`..` 은 등록하지 않는다 — 올라가서 `./` 에서 a");
+        assert_eq!(here_is_already_open(), "`./` 은 지금 열어 둔 디렉터리다 — 여기를 등록하려면 a");
         press(&mut p, KeyCode::Down);
         assert_eq!(p.error, None, "까닭이 다음 키에 안 걷혔다");
         // Ctrl·Alt 붙은 `a` 는 등록이 아니다

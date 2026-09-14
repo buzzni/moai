@@ -15,6 +15,7 @@
 //! 조각이 아니다 — 저장소와 사용자 설정을 연다(`input::NOT_COMPONENTS`).
 
 use super::form::{Form, Target};
+use super::keys::{BROWSE, Browse, JOT, Jot, label};
 use super::{App, Row, Stamp};
 use crate::nav::Index;
 use crate::projects::{self, State};
@@ -397,7 +398,8 @@ impl App {
             return true;
         }
         let why = match into {
-            None => "담을 곳 없이 연 폼이다 — Esc 로 닫고 프로젝트 안에서 다시 n".to_string(),
+            // 문구 속 키 이름은 표에서 읽는다 — 키를 옮기면 이 말도 따라온다.
+            None => format!("담을 곳 없이 연 폼이다 — {} 로 닫고 프로젝트 안에서 다시 {}", label(JOT, Jot::Close), label(BROWSE, Browse::Jot)),
             Some(t) if self.on_layer() => {
                 let name = crate::text::one_line(&t.name);
                 match self.layer.as_ref().and_then(|l| l.position(&t.path)) {
@@ -410,10 +412,15 @@ impl App {
                         let said = self.notice.take().unwrap_or_default();
                         format!("{name} 에 못 들어갔다 · {}", said.trim_start_matches(['·', '!', ' ']).trim_start_matches("들어가지 못했다 — "))
                     }
-                    None => format!("{name} 이 프로젝트 층에서 빠졌다 — Esc 로 닫고 다시 고른다"),
+                    None => format!("{name} 이 프로젝트 층에서 빠졌다 — {} 로 닫고 다시 고른다", label(JOT, Jot::Close)),
                 }
             }
-            Some(t) => format!("폼을 연 곳({})과 지금 선 곳이 다르다 — Esc 로 닫고 다시 n", crate::text::one_line(&t.name)),
+            Some(t) => format!(
+                "폼을 연 곳({})과 지금 선 곳이 다르다 — {} 로 닫고 다시 {}",
+                crate::text::one_line(&t.name),
+                label(JOT, Jot::Close),
+                label(BROWSE, Browse::Jot)
+            ),
         };
         self.notice = None;
         self.trouble = Some(format!("쓰지 못했다 — {}", why.trim()));
