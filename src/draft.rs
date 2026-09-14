@@ -14,8 +14,9 @@
 //! - \[WIP] 제목 \#12              `[`·끝의 `#낱말` 이 제목이면 `\` 를 앞에 둔다
 //! ```
 //!
-//! **이스케이프는 두 자리뿐이다**(moai-a5pz) — 앞머리 `\[` 와 끝쪽에 이어진 `\#낱말`.
-//! 오타(`[P1]`·`[x]`)는 조용히 제목이 되지 않고 전처럼 줄 번호와 거절한다.
+//! **이스케이프는 세 자리뿐이다** — 앞머리 `\[` 와 끝쪽에 이어진 `\#낱말`(moai-a5pz), 그리고 템플릿
+//! 변수로 안 읽힐 글자 `\{{`(moai-xqxu). 오타(`[P1]`·`[x]`)는 조용히 제목이 되지 않고 전처럼 줄
+//! 번호와 거절한다.
 //!
 //! **JSON 입력은 두지 않는다.** 에이전트가 Bash heredoc 안에서 중첩 JSON 을
 //! 이스케이프하는 것이 마크다운을 쓰는 것보다 훨씬 잘 깨진다. 그리고 사람도
@@ -113,19 +114,31 @@ fn map_trailing_words(s: &str, f: impl Fn(&str) -> Option<String>) -> String {
 ///   [`parse`] 처럼 한 번에 다 말한다
 /// - 치환은 한 번뿐이다 — 값 안의 `{{…}}` 는 다시 펴지 않는다
 /// - 변수도 `vars` 도 없으면 글을 그대로 돌려준다 — 여느 계획은 안 바뀐다
+/// - **`\{{` 는 글자 `{{` 다**(moai-xqxu) — 역슬래시를 떼고 변수로 세지 않는다. [`render`] 가 제목의
+///   `{{` 를 그렇게 써서, 되뽑은 계획이 채우지 않은 변수로 거절되지 않는다
+/// - **값은 늘 제목 글자다**(사람이 정했다, 리뷰 moai-cypw.nn4) — 값이 제목 앞머리에 오면 `[` 를,
+///   제목 끝쪽에 오면 `#낱말` 을 이스케이프해 넣어 우선순위·태그를 못 바꾼다([`escape_value`])
 pub fn fill(src: &str, vars: &[(String, String)]) -> Result<String, String> {
     let is_name = |n: &str| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
     let mut out = String::with_capacity(src.len());
     let (mut missing, mut used): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
     let mut rest = src;
     while let Some(open) = rest.find("{{") {
+        if rest[..open].ends_with('\\') {
+            out.push_str(&rest[..open - 1]);
+            out.push_str("{{");
+            rest = &rest[open + 2..];
+            continue;
+        }
         out.push_str(&rest[..open]);
         let after = &rest[open + 2..];
         match after.find("}}").map(|end| &after[..end]).filter(|n| is_name(n)) {
             Some(name) => {
                 match vars.iter().find(|(k, _)| k == name) {
                     Some((_, value)) => {
-                        out.push_str(value);
+                        let before = out.rsplit('\n').next().unwrap_or("");
+                        let line_rest = after[name.len() + 2..].split('\n').next().unwrap_or("");
+                        out.push_str(&escape_value(value, before, line_rest));
                         if !used.contains(&name) {
                             used.push(name);
                         }
@@ -163,6 +176,40 @@ pub fn fill(src: &str, vars: &[(String, String)]) -> Result<String, String> {
         return Err(errors.join("\n      "));
     }
     Ok(out)
+}
+
+/// `--var` 값을 **제목 글자로** 넣게 이스케이프한다(moai-xqxu). `before` 는 같은 줄에서 값 앞의 글,
+/// `after` 는 값 뒤의 글이다.
+///
+/// - 값이 **제목 앞머리**에 오면(`- `·`* `·`# ` 글머리와, 있으면 `[pN]` 뒤) 앞의 `[` 를 `\[` 로 —
+///   [`split_parts`] 가 우선순위로 읽는 자리다
+/// - 값이 **제목 끝쪽**에 오면(뒤가 `#태그` 낱말뿐) 값의 끝 `#낱말` 들을 `\#낱말` 로 — 태그로 먹히는
+///   자리다. 가운데 오는 값은 원래 태그로 안 읽혀 그대로 둔다
+///
+/// 형식의 이스케이프(`\[`·`\#`, moai-a5pz)를 그대로 쓴다 — 값만을 위한 문법을 따로 짓지 않는다.
+fn escape_value(value: &str, before: &str, after: &str) -> String {
+    let head = before.trim_start();
+    let head = head.strip_prefix("- ").or_else(|| head.strip_prefix("* ")).or_else(|| head.strip_prefix("# "));
+    let at_start = head.is_some_and(|h| {
+        let h = h.trim_start();
+        let h = match h.strip_prefix('[').and_then(|x| x.split_once(']')) {
+            Some((p, tail)) if p.trim().strip_prefix('p').is_some_and(|d| d.parse::<u8>().is_ok()) => tail,
+            _ => h,
+        };
+        h.trim().is_empty()
+    });
+    let at_end = after
+        .split_whitespace()
+        .all(|w| w.strip_prefix('#').is_some_and(|t| !t.is_empty()));
+    let mut v = if at_end {
+        map_trailing_words(value, |w| w.strip_prefix('#').filter(|t| !t.is_empty()).map(|t| format!("\\#{t}")))
+    } else {
+        value.to_string()
+    };
+    if at_start && v.starts_with('[') {
+        v.insert(0, '\\');
+    }
+    v
 }
 
 /// 못 읽은 줄은 **전부** 모아 한 번에 말한다. 하나씩 고치게 하면 여섯 줄짜리
@@ -252,7 +299,11 @@ fn body(i: &Issue) -> String {
     if let Some(p) = i.priority {
         s.push_str(&format!("[p{p}] "));
     }
-    let title = map_trailing_words(&crate::text::one_line(&i.title), |w| {
+    // 제목의 `{{` 는 `\{{` 로 쓴다(moai-xqxu) — `add --from` 은 형식을 읽기 전에 채우기(`fill`)를 지나므로,
+    // 안 쓰면 제목의 `{{version}}` 같은 글자가 채우지 않은 변수로 거절된다. 왼쪽부터 겹치지 않게
+    // 바꾸면 `{{{` 도 `\{{{` 가 되어 채운 뒤 제자리로 돌아온다.
+    let title = crate::text::one_line(&i.title).replace("{{", "\\{{");
+    let title = map_trailing_words(&title, |w| {
         w.strip_prefix('#').filter(|t| !t.is_empty()).map(|t| format!("\\#{t}"))
     });
     if title.starts_with('[') {
@@ -278,7 +329,9 @@ pub fn lossy<'a>(epic: &'a Issue, members: &[&'a Issue]) -> Vec<&'a str> {
     std::iter::once(epic)
         .chain(members.iter().copied())
         .filter(|i| {
-            split_parts(&body(i), 0).ok() != Some((crate::text::one_line(&i.title), i.priority, i.tags.clone()))
+            // `add --from` 이 도로 읽는 길 그대로 — 채우기(빈 변수)를 지난 뒤 형식을 읽는다(moai-xqxu).
+            fill(&body(i), &[]).ok().and_then(|b| split_parts(&b, 0).ok())
+                != Some((crate::text::one_line(&i.title), i.priority, i.tags.clone()))
         })
         .map(|i| i.id.as_str())
         .collect()
@@ -429,6 +482,57 @@ mod tests {
         let e = fill(tpl, &vars(&[("version", "1"), ("channel", "c"), ("owner", "o"), ("verison", "2")])).unwrap_err();
         assert!(e.contains("verison"), "파일에 없는 --var 를 안 댔다 — {e}");
         assert!(fill("# 변수 없음\n", &vars(&[("x", "1")])).is_err(), "쓸 곳 없는 --var 를 받았다");
+    }
+
+    /// **`\{{` 는 변수가 아니라 글자 `{{` 다**(moai-xqxu) — 제목에 `{{이름}}` 문법 자체를 적을 수 있게.
+    /// 변수로 세지 않으니 채우라고 거절하지도 않는다.
+    #[test]
+    fn an_escaped_brace_pair_is_text_not_a_variable() {
+        assert_eq!(fill("# \\{{version}} 문법을 적는다\n", &[]).unwrap(), "# {{version}} 문법을 적는다\n");
+        assert_eq!(
+            fill("# {{v}} 과 \\{{v}}\n", &vars(&[("v", "1")])).unwrap(),
+            "# 1 과 {{v}}\n",
+            "이스케이프한 자리까지 채웠다"
+        );
+    }
+
+    /// **되뽑은 계획의 제목에 든 `{{` 는 `\{{` 로 쓴다**(moai-xqxu) — 도로 넣을 때 채우지 않은 변수로
+    /// 거절되지 않는다. 채우기를 지나 읽어도 같은 제목이다.
+    #[test]
+    fn titles_with_braces_round_trip_through_fill() {
+        let epic = issue("{{version}} 문법", Kind::Epic, None, &[]);
+        let a = issue("겹친 {{{a}}} 와 {{ 빈칸 }}", Kind::Issue, Some(1), &["x"]);
+        let b = issue("{{", Kind::Issue, None, &[]);
+        let md = render(&epic, &[&a, &b]);
+        assert!(md.starts_with("# \\{{version}} 문법\n"), "{md}");
+        let filled = fill(&md, &[]).expect("되뽑은 계획이 변수로 거절됐다");
+        let got = one(&filled);
+        for (d, i) in got.iter().zip([&epic, &a, &b]) {
+            assert_eq!((d.title.as_str(), d.priority, d.tags.as_slice()), (i.title.as_str(), i.priority, i.tags.as_slice()), "{md}");
+        }
+        assert!(lossy(&epic, &[&a, &b]).is_empty(), "되돌아 읽히는데 lossy 가 짚었다");
+    }
+
+    /// **`--var` 값은 늘 제목 글자다**(사람이 정했다, 리뷰 moai-cypw.nn4) — 값이 우선순위나 태그를
+    /// 바꾸지 못한다. 우선순위와 태그는 템플릿 파일에서만 정한다.
+    #[test]
+    fn a_value_cannot_set_priority_or_tags() {
+        let tpl = "# 에픽 {{e}}\n- {{p}}\n- [p2] {{p}}\n- 끝에 {{t}}\n- 끝에 {{t}} #release\n- 가운데 {{t}} 뒤\n";
+        let filled = fill(tpl, &vars(&[("e", "#1"), ("p", "[p0] 몰래"), ("t", "x #injected")])).unwrap();
+        let got = one(&filled);
+        let seen: Vec<(&str, Option<u8>, &[String])> = got.iter().map(|d| (d.title.as_str(), d.priority, d.tags.as_slice())).collect();
+        assert_eq!(
+            seen,
+            [
+                ("에픽 #1", None, &[][..]),
+                ("[p0] 몰래", None, &[][..]),
+                ("[p0] 몰래", Some(2), &[][..]),
+                ("끝에 x #injected", None, &[][..]),
+                ("끝에 x #injected", None, &["release".to_string()][..]),
+                ("가운데 x #injected 뒤", None, &[][..]),
+            ],
+            "{filled}"
+        );
     }
 
     #[test]
