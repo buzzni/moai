@@ -76,6 +76,7 @@ fn main() -> ExitCode {
         Ok(lines) => {
             print(&lines);
             carried();
+            unjournaled();
             if cmd::had_partial() { ExitCode::FAILURE } else { ExitCode::SUCCESS }
         }
         Err(e) => fail(json, &e),
@@ -124,6 +125,25 @@ fn carried() {
             // 줄 번호와 까닭은 `report_load_errors` 를 지나는 쪽(`show`·`ready`)
             // 만 낸다 — 없는 답을 가리키면 손으로 고칠 길이 도구 밖에만 남는다.
             "{}{said} — 어느 줄인지는 `{show}` 가 낸다",
+            style::paint(style::WARN, "moai: ")
+        );
+    }
+}
+
+/// 스냅샷은 썼는데 저널에 못 적었으면 말한다(moai-52z9).
+///
+/// **종료 코드는 0 이다.** 쓰기는 담겼다 — 비영으로 끝나면 사람이 다시 부르고, `add` 는
+/// 같은 이슈를 하나 더 세운다. 그래서 "다시 부르지 않는다" 를 함께 댄다.
+fn unjournaled() {
+    let here = store::Repo::find().ok().flatten().map(|r| r.root);
+    for (root, why) in store::journal_misses() {
+        let whose = match &here {
+            Some(h) if *h == root => String::new(),
+            _ => format!(" ({})", root.display()),
+        };
+        let _ = writeln!(
+            anstream::stderr().lock(),
+            "{}썼지만 이력(journal.jsonl)은 못 남겼다{whose} — {why}. 이슈는 담겼으니 다시 부르지 않는다",
             style::paint(style::WARN, "moai: ")
         );
     }

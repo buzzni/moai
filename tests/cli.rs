@@ -4290,6 +4290,31 @@ fn a_journal_only_write_claims_no_rewrite() {
     );
 }
 
+/// **저널만 못 적은 `add` 는 0 으로 끝나고 stderr 로 말한다**(moai-52z9). 실패로 끝나면
+/// 사람이 다시 부르고, id 가 다른 같은 이슈가 둘 선다. 저널이 전부인 `note` 는 그대로 실패다.
+#[cfg(unix)]
+#[test]
+fn an_add_whose_journal_fails_succeeds_and_says_so() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = init("journalfail");
+    let journal = s.path().join(".moai/journal.jsonl");
+    std::fs::write(&journal, "").unwrap();
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().append(true).open(&journal).is_ok() {
+        return; // root 는 권한을 안 본다
+    }
+
+    let out = moai(s.path(), &["add", "한 번만", "-q"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "담겼는데 실패로 끝났다 — {err}");
+    assert!(err.contains("이력(journal.jsonl)은 못 남겼다"), "{err}");
+    assert_eq!(issues(s.path()).matches("한 번만").count(), 1);
+
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let note = moai(s.path(), &["note", &id, "메모"]);
+    assert!(!note.status.success(), "아무것도 안 담긴 note 가 성공으로 끝났다");
+}
+
 /// **못 읽는 줄이 산 줄의 id 를 들고 있으면 `status` 가 중복이라 말한다.**
 /// 줄 번호만 보던 때는 `읽을 수 없는 줄` 만 서고 중복은 안 서서, 그 줄이
 /// 읽히게 되는 날에야 모든 쓰기가 막혔다(moai-4dk4). 쓰기는 여전히 안 막는다.
