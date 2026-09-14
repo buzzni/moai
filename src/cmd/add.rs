@@ -34,6 +34,32 @@ pub fn read_source(from: &str) -> R<String> {
     }
 }
 
+/// `--from` 의 계획 한 덩이를 읽어 **템플릿 변수를 채우고 형식을 읽는다**(moai-cypw).
+///
+/// `add --from` 과 `idea promote --from` 이 **이것만** 부른다 — 한쪽만 `--var` 를 받거나 한쪽만
+/// 거절 문장이 달라지지 않게. 채우기(`draft::fill`)는 형식 읽기(`draft::parse`) 앞에서 글을 한
+/// 번 바꿀 뿐이다.
+///
+/// `--var` 는 `이름=값` 이다. `=` 이 없거나 이름이 비면 그 인자를 대며 거절하고, **같은 이름을 두
+/// 번 주면 거절한다** — 어느 값이 이길지 조용히 고르면 템플릿이 사람이 안 적은 계획을 찍는다.
+/// 이 거절과 `fill`·`parse` 의 거절은 모두 `bad_input` 이다.
+pub fn read_plan(from: &str, vars: &[String]) -> R<Vec<draft::Draft>> {
+    let bad = |msg: String| Fail::coded(msg, super::code::BAD_INPUT);
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for raw in vars {
+        let Some((name, value)) = raw.split_once('=').filter(|(n, _)| !n.is_empty()) else {
+            return Err(bad(format!("`--var {raw}` 는 `이름=값` 이 아니다")));
+        };
+        if pairs.iter().any(|(k, _)| k == name) {
+            return Err(bad(format!("`--var {name}` 를 두 번 줬다 — 어느 값을 쓸지 하나만 준다")));
+        }
+        pairs.push((name.to_string(), value.to_string()));
+    }
+    let src = read_source(from)?;
+    let filled = draft::fill(&src, &pairs).map_err(bad)?;
+    draft::parse(&filled).map_err(bad)
+}
+
 /// `-` 이면 stdin. `add` 와 `edit` 이 같은 규칙을 쓴다.
 pub fn read_body(arg: Option<String>) -> R<Option<String>> {
     match arg.as_deref() {
@@ -86,7 +112,17 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
                 ));
             }
         }
-        return bulk(ctx, &repo, from, args.dry_run, args.assignee.clone());
+        return bulk(ctx, &repo, from, &args.var, args.dry_run, args.assignee.clone());
+    }
+    // **`--var` 도 `--from` 이 있어야 뜻이 있다**(moai-cypw) — 아래 `--dry-run` 과 같은 까닭이다.
+    // 조용히 버리면 템플릿을 채운 줄 안 사람이 `{{이름}}` 이 아닌 제목 하나를 만든다.
+    if !args.var.is_empty() {
+        return Err(Fail::coded(
+            "`--var` 는 `--from` 과 함께 쓴다 — 템플릿 파일의 `{{이름}}` 을 채우는 것이다\n      \
+             `moai add --from <파일> --var 이름=값`"
+                .to_string(),
+            super::code::BAD_INPUT,
+        ));
     }
     // **연습이라 적힌 명령이 쓰면 안 된다.** 여기 닿았다는 것은 `--from` 이
     // 없다는 뜻이고, 하나짜리에는 연습 길이 없어 `--dry-run` 이 그대로 만들고
@@ -193,9 +229,8 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
 ///
 /// 하나씩 만들면 에이전트가 중간에 흘리고, 중간에 죽으면 반만 남은 계획이
 /// 남는다. 한 번의 쓰기라 다 되거나 하나도 안 된다.
-fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool, assignee: Option<String>) -> R<Vec<String>> {
-    let src = read_source(from)?;
-    let drafts = draft::parse(&src).map_err(|e| Fail::coded(e, super::code::BAD_INPUT))?;
+fn bulk(ctx: &Ctx, repo: &Repo, from: &str, vars: &[String], dry_run: bool, assignee: Option<String>) -> R<Vec<String>> {
+    let drafts = read_plan(from, vars)?;
 
     if dry_run {
         if ctx.json {

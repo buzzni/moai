@@ -415,6 +415,10 @@ pub struct PromoteArgs {
     #[arg(long, value_name = "파일|-")]
     pub from: String,
 
+    /// 계획 템플릿의 `{{이름}}` 을 채운다 (여러 번 준다) — `add --from` 과 같은 규칙
+    #[arg(long = "var", value_name = "이름=값")]
+    pub var: Vec<String>,
+
     /// 만들지 않고 무엇이 만들어질지만 낸다
     #[arg(long)]
     pub dry_run: bool,
@@ -476,6 +480,14 @@ pub struct AddArgs {
     /// 있으면 못 채울 요구로 보고 조용히 건너뛴다. **바로 그 자리가 구멍이다.**
     #[arg(long)]
     pub dry_run: bool,
+
+    /// 계획 템플릿의 `{{이름}}` 을 채운다 (`--from` 과 함께, 여러 번 준다)
+    ///
+    /// **변수는 전부 필수다**(moai-ahyz) — 못 채운 이름·계획에 없는 이름·같은 이름 두 번은
+    /// 거절하고 아무것도 안 만든다. `--dry-run` 과 같은 까닭으로 `--from` 없이 주면 `add::run` 이
+    /// 거절한다.
+    #[arg(long = "var", value_name = "이름=값")]
+    pub var: Vec<String>,
 
     /// id 만 낸다 (스크립트용)
     #[arg(short, long)]

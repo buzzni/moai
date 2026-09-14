@@ -2014,6 +2014,66 @@ fn bulk_refuses_issues_with_no_epic() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("어느 에픽의"));
 }
 
+/// **템플릿 파일은 `--var` 로 채워 편다**(moai-cypw). 연습도 채운 뒤의 계획을 보여 준다.
+#[test]
+fn a_template_file_is_filled_with_vars() {
+    let s = init("template");
+    let tpl = s.path().join("release.md");
+    std::fs::write(&tpl, "# 릴리스 {{version}}\n- [p1] {{version}} 태그를 단다 #release\n- {{channel}} 에 올린다\n").unwrap();
+    let path = tpl.to_str().unwrap();
+
+    let rehearsal = ok(s.path(), &["add", "--from", path, "--var", "version=1.2", "--var", "channel=stable", "--dry-run"]);
+    assert!(rehearsal.contains("릴리스 1.2") && rehearsal.contains("stable 에 올린다"), "{rehearsal}");
+    assert_eq!(issues(s.path()), "", "연습인데 썼다");
+
+    ok(s.path(), &["add", "--from", path, "--var", "version=1.2", "--var", "channel=stable"]);
+    let made = issues(s.path());
+    assert!(made.contains("\"title\":\"릴리스 1.2\"") && made.contains("\"title\":\"1.2 태그를 단다\""), "{made}");
+    assert!(!made.contains("{{"), "채우지 않은 자리가 남았다\n{made}");
+}
+
+/// **못 채운 변수·계획에 없는 변수·같은 이름 두 번·모양이 틀린 `--var`·`--from` 없는 `--var` 는
+/// 거절하고 아무것도 안 만든다**(사람이 정했다). 반만 채운 계획이 조용히 서지 않게.
+#[test]
+fn template_vars_that_do_not_fit_are_refused_and_write_nothing() {
+    let s = init("templatebad");
+    let tpl = s.path().join("t.md");
+    std::fs::write(&tpl, "# {{version}}\n- {{channel}} 에 올린다\n").unwrap();
+    let path = tpl.to_str().unwrap();
+    for (args, says) in [
+        (vec!["--var", "version=1"], "channel"),
+        (vec!["--var", "version=1", "--var", "channel=c", "--var", "verison=2"], "verison"),
+        (vec!["--var", "version=1", "--var", "version=2", "--var", "channel=c"], "version"),
+        (vec!["--var", "version", "--var", "channel=c"], "version"),
+        (vec!["--var", "=1", "--var", "version=1", "--var", "channel=c"], "=1"),
+    ] {
+        let mut argv = vec!["add", "--from", path];
+        argv.extend(args.iter().copied());
+        let out = moai(s.path(), &argv);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{args:?} 를 받았다");
+        assert!(err.contains(says), "{args:?} 의 거절이 {says} 를 안 댄다 — {err}");
+        assert_eq!(issues(s.path()), "", "{args:?} 인데 썼다");
+    }
+    let out = moai(s.path(), &["add", "제목", "--var", "a=1"]);
+    assert!(!out.status.success(), "--from 없는 --var 를 받았다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--from"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(issues(s.path()), "", "--from 없는 --var 인데 썼다");
+}
+
+/// `idea promote --from` 도 같은 길로 템플릿을 채운다 — 두 명령이 형식을 따로 알지 않는다.
+#[test]
+fn promote_fills_a_template_too() {
+    let s = init("templatepromote");
+    let idea = ok(s.path(), &["idea", "add", "릴리스를 돌린다", "-q"]).trim().to_string();
+    let tpl = s.path().join("t.md");
+    std::fs::write(&tpl, "# 릴리스 {{version}}\n- 올린다\n").unwrap();
+    ok(s.path(), &["idea", "promote", &idea, "--from", tpl.to_str().unwrap(), "--var", "version=2.0"]);
+    assert!(issues(s.path()).contains("\"title\":\"릴리스 2.0\""), "{}", issues(s.path()));
+    let out = moai(s.path(), &["idea", "promote", &idea, "--from", tpl.to_str().unwrap()]);
+    assert!(!out.status.success(), "채우지 않은 템플릿을 펼쳤다");
+}
+
 #[test]
 fn init_writes_an_agents_block() {
     let s = init("agents");
