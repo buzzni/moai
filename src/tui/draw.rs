@@ -115,7 +115,11 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         },
         Mode::Unregister(u) => {
             let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
-            let name = crate::text::sanitize(&u.name);
+            // **이름은 반까지만 받는다.** 이름은 겹치면 위 조각이 붙어 자라는 파생값이고
+            // (`user_config::names`) 한글은 두 칸을 먹는다 — 그대로 두면 `fit` 이 뒤에서부터
+            // 자를 때 답하는 키(`y 뺀다`)가 먼저 밀려나, 무엇으로 답하는지 없는 물음이 선다.
+            let room = keys.width as usize;
+            let name = clip(&crate::text::sanitize(&u.name), (room / 2).max(1));
             let line = Line::from(Span::styled(
                 format!(" {name} 을 목록에서 뺄까 — y 뺀다 · 다른 키는 그만 · 디렉터리와 .moai 는 그대로다 "),
                 ask,
@@ -139,7 +143,7 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect) {
     let dir = crate::text::sanitize(&p.at.dir.display().to_string());
     // 경로는 **뒤가 값지다** — 깊이 들어갈수록 앞은 늘 같은 홈이다. 넘치면 앞을 자른다.
     let room = inner.saturating_sub(crate::text::width(" 프로젝트 등록 ·  ") + 1);
-    let title = format!(" 프로젝트 등록 · {} ", clip_front(&dir, room));
+    let title = format!(" 프로젝트 등록 · {} ", crate::text::clip_front(&dir, room));
     let mut foot: Vec<String> = Vec::new();
     if p.at.hidden > 0 {
         foot.push(format!("숨은 것 {}개 · . 로 보인다", p.at.hidden));
@@ -168,27 +172,6 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect) {
         &mut state,
     );
     scroll_mark(f, &p.list, at, "", true);
-}
-
-/// 앞을 잘라 뒤를 남긴다 — `…/apps/a`.
-fn clip_front(s: &str, room: usize) -> String {
-    if crate::text::width(s) <= room {
-        return s.to_string();
-    }
-    if room == 0 {
-        return String::new();
-    }
-    let mut out: Vec<char> = Vec::new();
-    let mut used = 1; // `…`
-    for c in s.chars().rev() {
-        let w = crate::text::width(&c.to_string());
-        if used + w > room {
-            break;
-        }
-        used += w;
-        out.push(c);
-    }
-    std::iter::once('…').chain(out.into_iter().rev()).collect()
 }
 
 /// 창의 한 줄: `apps/  .moai  ✓ 등록됨`. `./` 은 지금 디렉터리, `..` 은 위로.
@@ -259,11 +242,14 @@ fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool, tint: Style) {
             f.render_widget(Paragraph::new(jot_head(into, head_at.width as usize, tint)), head_at);
             Line::from(" 생각 담기 · 제목 ")
         }
-        Some(into) => Line::from(vec![
-            Span::raw(" 담을 곳 "),
-            Span::styled(crate::text::sanitize(&into.name), tint),
-            Span::raw(" · 제목 "),
-        ]),
+        // 테두리에 접을 때도 **이름은 반까지만** 받는다(`jot_head` 와 같은 자). 안 자르면
+        // 테두리가 뒤에서부터 잘려 ` · 제목 ` 이 먼저 빠지고, 이 칸이 제목 칸이라는 말이 사라진다.
+        Some(into) => {
+            let room = (title_at.width as usize).saturating_sub(2);
+            let label = crate::text::width(" 담을 곳  · 제목 ");
+            let name = clip(&crate::text::sanitize(&into.name), room.saturating_sub(label).min(room / 2).max(1));
+            Line::from(vec![Span::raw(" 담을 곳 "), Span::styled(name, tint), Span::raw(" · 제목 ")])
+        }
         None => Line::from(" 생각 담기 · 제목 "),
     };
 
@@ -424,7 +410,7 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
     };
     // **겹쳐 보는 중이면 늘 보인다** — 거름망 뱃지와 같은 까닭이다. 옆에서 온 줄에만
     // `⎇` 가 붙으므로, 옆이 조용하면 켜진 화면과 꺼진 화면이 똑같이 보인다.
-    let overlay = (app.worktree && !app.on_layer()).then(|| {
+    let overlay = app.worktree.then(|| {
         let trees = app.origin.labels();
         let names = if trees.is_empty() { "옆 워크트리 없음".to_string() } else { trees.join(", ") };
         clip(&format!("{} {names}  w 로 끈다", style::BRANCH_GLYPH), w / 2)
@@ -1158,32 +1144,35 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
     let Some(p) = app.layer.as_ref().and_then(|l| l.places.get(at)) else {
         return vec![Line::from(Span::styled("없다", dim()))];
     };
-    let place: &Place = p;
-    let mut out = wrapped(&place.name, w, project_style(place));
-    out.extend(wrapped(&place.path.display().to_string(), w, dim()));
-    match (place.launched, place.registered) {
+    let mut out = wrapped(&p.name, w, project_style(p));
+    out.extend(wrapped(&p.path.display().to_string(), w, dim()));
+    match (p.launched, p.registered) {
         (true, true) => out.push(Line::from(Span::styled("여기서 띄웠다", dim()))),
         // 고칠 명령에는 **그 뿌리를** 댄다. `.` 이라 적으면 하위 디렉터리에서 띄운 사람이 그
         // 하위 디렉터리를 등록한다 — 그곳은 `.moai` 가 없어 "init 전" 으로 선다.
         (true, false) => {
-            let at = crate::text::shell_word(&crate::text::sanitize(&place.path.display().to_string()));
+            let at = crate::text::shell_word(&crate::text::sanitize(&p.path.display().to_string()));
             out.extend(wrapped(&format!("여기서 띄웠다 · 등록 안 됨 — `moai project add {at}` 로 더하면 어디서든 보인다"), w, dim()))
         }
         _ => {}
     }
     out.push(Line::from(""));
-    match &place.look {
+    match &p.look {
         Look::Unread => out.push(Line::from(Span::styled("읽는 중", dim()))),
         Look::Shut { state, said } => out.extend(wrapped(said, w, shut_style(*state))),
         Look::Open { sum, .. } => {
             for (st, n) in &sum.counts {
-                out.push(Line::from(Span::styled(format!("{} {st} {n}", style::glyph(st)), status(st))));
+                // 칸 이름은 **남의 설정 파일**에서 온다 — `wrapped` 를 지나는 옆 줄들처럼 거른다.
+                out.push(Line::from(Span::styled(
+                    format!("{} {} {n}", style::glyph(st), crate::text::sanitize(st)),
+                    status(st),
+                )));
             }
             out.push(Line::from(""));
             out.push(Line::from(Span::styled(format!("집은 것 {}건", sum.picked.len()), bold())));
             for i in &sum.picked {
                 out.push(Line::from(vec![
-                    Span::styled(i.id.clone(), dim()),
+                    Span::styled(crate::text::sanitize(&i.id), dim()),
                     Span::raw("  "),
                     Span::styled(style::glyph(&i.column).to_string(), status(&i.column)),
                     Span::raw(" "),

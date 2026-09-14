@@ -145,19 +145,26 @@ pub fn update<T>(path: &Path, f: impl FnOnce(&mut Doc) -> R<T>) -> R<T> {
         .filter(|d| !d.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir).map_err(|e| err(dir, e))?;
-    let mut lock_name = path.file_name().map(OsString::from).unwrap_or_else(|| "config".into());
-    lock_name.push(".lock");
-    let _lock = Lock::acquire(&dir.join(lock_name))?;
+    let _lock = Lock::acquire(&lock_beside(path))?;
 
     // 설정 파일이 심볼릭 링크면(dotfiles 저장소가 흔히 그렇게 건다) **링크가 가리키는
     // 파일을** 고친다. 링크 자리에 `rename` 하면 링크가 보통 파일로 갈아끼워져
-    // dotfiles 쪽은 옛 내용에 멈추고, 사람은 그것을 모른다.
-    //
-    // 락은 **준 자리 곁에** 둔다 — 링크 대상 곁에 두면 dotfiles 저장소에 락 파일이
-    // 흘러 추적 안 된 파일로 선다. 푸는 것은 락 **안에서** 한다: 밖에서 풀면 그
-    // 사이에 파일이 링크로 갈아끼워질 수 있다.
+    // dotfiles 쪽은 옛 내용에 멈추고, 사람은 그것을 모른다. 푸는 것은 락 **안에서**
+    // 한다: 밖에서 풀면 그 사이에 파일이 링크로 갈아끼워질 수 있다.
     let resolved = std::fs::canonicalize(path).ok();
-    let path = resolved.as_deref().unwrap_or(path);
+    let real = resolved.as_deref().unwrap_or(path);
+
+    // **푼 자리에도 락을 잡는다.** 준 철자 곁의 락만으로는 같은 파일을 두 철자로 부른
+    // 둘이 서로 다른 락 파일을 잡아 아무도 막지 않는다 — `~/.config/moai/config.toml`
+    // 이 `~/dotfiles/…` 로 걸린 사람이 한쪽 철자로 등록하는 동안 다른 철자로 등록하면
+    // 나중에 `rename` 한 쪽이 앞의 등록을 지운다(재 보면 스무 개 중 열 개가 사라진다).
+    // 그것이 이 모듈이 못 견딘다고 적어 둔 조용한 손실이다. 대가는 dotfiles 저장소에
+    // 락 파일 하나가 어른거리는 것인데, 잃는 것보다 싸다.
+    //
+    // **차례가 있어 엉키지 않는다**: 푼 경로는 `canonicalize` 의 고정점이라 모든
+    // 프로세스가 같은 자리를 둘째로 잡고, 준 철자가 곧 푼 경로인 쪽은 하나만 잡는다.
+    let _real_lock = (real != path).then(|| Lock::acquire(&lock_beside(real))).transpose()?;
+    let path = real;
 
     // 락을 잡은 **뒤에** 읽는다. 밖에서 읽으면 두 프로세스가 같은 옛 목록을 고친다.
     let src = match std::fs::read_to_string(path) {
@@ -176,6 +183,14 @@ pub fn update<T>(path: &Path, f: impl FnOnce(&mut Doc) -> R<T>) -> R<T> {
         write_atomic(path, doc.render().as_bytes())?;
     }
     Ok(out)
+}
+
+/// 그 설정 파일의 락 자리 — 곁의 `<이름>.lock`.
+fn lock_beside(path: &Path) -> PathBuf {
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let mut name = path.file_name().map(OsString::from).unwrap_or_else(|| "config".into());
+    name.push(".lock");
+    dir.join(name)
 }
 
 /// 읽어 들인 설정 문서. 모르는 키·표·주석은 문서가 들고 있다가 그대로 낸다.
@@ -420,17 +435,34 @@ pub fn resolve_dir(input: &Path, cwd: &Path) -> R<PathBuf> {
 /// 링크가 있는 자리(macOS 의 `/tmp` → `/private/tmp`, 링크로 건 홈)에서 디렉터리가
 /// 사라지면 글자 철자로도 통째 `canonicalize` 로도 안 맞는다 — 아직 있는 가장 깊은
 /// 조상을 풀고 남은 조각을 붙인다.
+///
+/// **준 철자 그대로도 댄다.** 손으로 적은 `/w/a/../b` 는 글자 정리로도 링크 풀기로도
+/// 그 철자가 안 나온다 — TUI 의 `d` 는 층의 줄에 적힌 철자를 그대로 주는데, 그것으로
+/// 못 찾으면 줄은 남은 채 "이미 목록에 없다" 고 말한다. 맨 뒤에 붙여 대표 철자
+/// (`out[0]`, 글자로 정리한 것)는 그대로 둔다. **이 목록은 `rm`·`color` 가 함께
+/// 쓴다** — 한쪽에만 철자를 더하면 `rm` 이 빼는 줄을 `color` 가 "등록돼 있지 않다"
+/// 고 거절하고, 거절문이 시키는 `add` 가 같은 디렉터리의 둘째 줄을 만든다.
 pub fn spellings(input: &Path, cwd: &Path) -> Vec<PathBuf> {
     let joined = cwd.join(input);
     let lexical = lexical(&joined);
     let mut out = vec![lexical.clone()];
-    let reals = [std::fs::canonicalize(&joined).ok(), real_prefix(&lexical)];
-    for real in reals.into_iter().flatten() {
-        if !out.contains(&real) {
-            out.push(real);
+    let more = [std::fs::canonicalize(&joined).ok(), real_prefix(&lexical), Some(joined)];
+    for one in more.into_iter().flatten() {
+        if !out.contains(&one) {
+            out.push(one);
         }
     }
     out
+}
+
+/// 같은 디렉터리인가. 철자가 같으면 그만이고, 아니면 링크를 풀어 견준다.
+///
+/// **등록은 푼 경로로 적히지만**(`resolve_dir`) 손으로 적은 줄이나 옛 바이너리가 적은
+/// 줄은 링크 철자일 수 있다. 등록 목록에 이미 있는지를 묻는 자리는 전부 이것을 지난다 —
+/// 글자로만 견주면 `/w/link` 가 적힌 목록에 `/w/real` 이 또 실려 같은 저장소가 두 줄로
+/// 선다(TUI 의 고르기 창은 이미 링크를 풀어 `✓ 등록됨` 을 달아 놓고 있다).
+pub fn same_dir(a: &Path, b: &Path) -> bool {
+    a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
 }
 
 /// 아직 있는 가장 깊은 조상을 풀고 남은 조각을 그대로 붙인다. `..` 이 없는
@@ -519,11 +551,31 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn scratch(name: &str) -> PathBuf {
+    /// 시험 하나의 임시 디렉터리. **놓을 때 지운다** — 이름에 pid 가 들어 돌 때마다 새로
+    /// 서므로, 안 지우면 `cargo test` 한 번마다 시험 수만큼 `/tmp` 에 쌓인다(층·등록 시험의
+    /// `Scratch` 와 같다). 패닉으로 끝나도 `Drop` 이 돈다.
+    struct Scratch(PathBuf);
+
+    impl std::ops::Deref for Scratch {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// **돌려받은 것을 묶어 둔다** — `scratch(..).canonicalize()` 처럼 곧바로 흘리면
+    /// 그 줄 끝에서 디렉터리가 지워진다.
+    fn scratch(name: &str) -> Scratch {
         let dir = std::env::temp_dir().join(format!("moai-user-config-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        dir
+        Scratch(dir)
     }
 
     fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<OsString> {
@@ -740,7 +792,8 @@ mod tests {
 
     #[test]
     fn resolve_dir_makes_absolute_and_follows_symlinks() {
-        let d = scratch("resolve").canonicalize().unwrap();
+        let s = scratch("resolve");
+        let d = s.canonicalize().unwrap();
         std::fs::create_dir_all(d.join("real/apps/a")).unwrap();
         assert_eq!(resolve_dir(Path::new("real/apps/./a"), &d).unwrap(), d.join("real/apps/a"));
         assert_eq!(resolve_dir(&d.join("real/apps/a/.."), Path::new("/")).unwrap(), d.join("real/apps"));
@@ -764,8 +817,10 @@ mod tests {
             // 사라진 디렉터리라도 위쪽 링크는 푼다 — 등록은 푼 경로로 적혔다.
             assert_eq!(spellings(Path::new("link/gone"), &d), [d.join("link/gone"), d.join("real/gone")]);
         }
-        // 사라진 디렉터리도 글자로는 찾는다.
-        assert_eq!(spellings(Path::new("gone/../gone2"), &d), [d.join("gone2")]);
+        // 사라진 디렉터리도 글자로는 찾는다. 준 철자 그대로도 뒤에 선다 — 손으로
+        // `/w/a/../b` 라 적힌 줄은 그 철자로만 찾을 수 있다(`rm`·`color` 가 함께 쓴다).
+        assert_eq!(spellings(Path::new("gone/../gone2"), &d), [d.join("gone2"), d.join("gone/../gone2")]);
+        assert_eq!(spellings(Path::new("gone/../gone2"), &d)[0], d.join("gone2"), "대표 철자가 밀렸다");
         assert_eq!(lexical(Path::new("/../a")), PathBuf::from("/a"));
     }
 
@@ -786,7 +841,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_symlinked_config_stays_a_symlink() {
-        let d = scratch("symlink").canonicalize().unwrap();
+        let s = scratch("symlink");
+        let d = s.canonicalize().unwrap();
         std::fs::create_dir_all(d.join("dots")).unwrap();
         std::fs::write(d.join("dots/config.toml"), "# dotfiles\n").unwrap();
         let link = d.join("config.toml");
@@ -795,7 +851,42 @@ mod tests {
         assert!(update(&link, |doc| doc.add(Path::new("/a"))).unwrap());
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "링크를 보통 파일로 갈아끼웠다");
         assert_eq!(read(Some(&d.join("dots/config.toml"))).projects, [Project { path: "/a".into(), hue: None }]);
-        assert!(!d.join("dots/config.toml.lock").exists(), "링크 대상 곁(dotfiles 저장소)에 락 파일을 흘렸다");
+        // **락 파일은 양쪽에 선다.** 한때 준 철자 곁에만 두어 dotfiles 저장소를 깨끗이
+        // 했는데, 그러면 같은 파일을 두 철자로 부른 둘이 서로 다른 락을 잡아 아무도
+        // 막지 않았다(아래 시험이 그것을 잰다). 추적 안 된 파일 하나가 조용한 손실보다 싸다.
+        assert!(d.join("config.toml.lock").exists(), "준 철자 곁의 락이 없다");
+        assert!(d.join("dots/config.toml.lock").exists(), "푼 자리의 락이 없다 — 두 철자가 서로를 안 막는다");
+    }
+
+    /// **한 파일을 두 철자로 불러도 서로를 막는다.** 설정이 링크면(dotfiles 저장소가 흔히
+    /// 그렇게 건다) 한쪽은 `~/.config/…`, 한쪽은 `~/dotfiles/…` 로 같은 파일을 고친다 —
+    /// 준 철자 곁의 락만 잡으면 둘이 다른 파일을 잡아 나중에 `rename` 한 쪽이 앞의 등록을
+    /// 지운다. 재 보면 스무 개 중 열 개가 사라졌다.
+    #[cfg(unix)]
+    #[test]
+    fn two_spellings_of_one_config_still_lock_each_other() {
+        let s = scratch("two-spellings");
+        let d = s.canonicalize().unwrap();
+        std::fs::create_dir_all(d.join("dots")).unwrap();
+        let real = d.join("dots/config.toml");
+        std::fs::write(&real, "").unwrap();
+        let link = d.join("config.toml");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let (threads, each) = (8, 5);
+        std::thread::scope(|s| {
+            for t in 0..threads {
+                // 짝수 갈래는 링크 철자로, 홀수 갈래는 푼 철자로 — 같은 파일이다.
+                let path = if t % 2 == 0 { link.clone() } else { real.clone() };
+                s.spawn(move || {
+                    for i in 0..each {
+                        let dir = PathBuf::from(format!("/w/t{t}-{i}"));
+                        update(&path, |doc| doc.add(&dir)).unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(read(Some(&real)).projects.len(), threads * each, "동시 등록이 서로를 지웠다");
     }
 
     /// **동시 등록이 서로를 지우지 않는다.** 락이 없으면 둘 다 옛 목록을 읽고

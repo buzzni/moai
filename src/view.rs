@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::model::{Issue, JournalEntry, Kind};
 use crate::report::{Roll, StatusReport, Warning, is_group};
 use crate::style::{self, paint};
-use crate::text::{clip, sanitize, width};
+use crate::text::{clip, one_line, width};
 use crate::worktree::Origin;
 use anstyle::Style;
 use std::collections::BTreeMap;
@@ -742,16 +742,22 @@ pub fn status(
 
 /// 보드 한 줄 — config 의 칸 차례 그대로. 한 프로젝트의 `status` 와 한눈 보기가
 /// 같은 줄을 낸다: 둘이 갈라지면 같은 보드를 두 모양으로 읽는다.
+///
+/// **칸 이름은 걸러서 찍는다.** 한눈 보기가 여기 넘기는 `cfg` 는 **남의 저장소의**
+/// 설정이고, `config.rs` 는 `statuses` 의 글자를 재지 않는다 — ESC 가 든 칸 이름을
+/// 그대로 찍으면 그 줄이 화면을 다시 칠한다. 찾는 자(`status_style`·`glyph`)는 날
+/// 이름으로 두고 **찍는 낱말만** 거른다(`project ls` 와 같은 자).
 fn board(cfg: &Config, counts: &BTreeMap<String, usize>) -> String {
     let cols: Vec<String> = cfg
         .statuses
         .iter()
         .map(|s| {
             let style = style::status_style(s);
+            let word = one_line(s);
             format!(
                 "{} {}",
                 paint(style, style::glyph(s)),
-                paint(style, &format!("{s} {}", counts.get(s).copied().unwrap_or(0)))
+                paint(style, &format!("{word} {}", counts.get(s).copied().unwrap_or(0)))
             )
         })
         .collect();
@@ -1204,7 +1210,7 @@ pub fn projects_status(
     reg: &crate::user_config::Registry,
 ) -> Vec<String> {
     let mut out = vec![overview_head("등록한 프로젝트", &format!("{}곳", projects.len()), reg)];
-    let w_name = projects.iter().map(|p| width(&sanitize(&p.name))).max().unwrap_or(0);
+    let w_name = projects.iter().map(|p| width(&one_line(&p.name))).max().unwrap_or(0);
     for (p, s) in projects.iter().zip(seen) {
         out.push(String::new());
         out.push(project_head(p, ""));
@@ -1214,16 +1220,20 @@ pub fn projects_status(
         };
         out.push(board(b.cfg, &b.status.counts));
         let shown = &b.picked[..b.picked.len().min(PICKED_SHOWN)];
+        // **id 도 제목도 남의 스냅샷에서 온다** — 읽기는 관대해 `\n` 말고는 아무것도 안 막으므로,
+        // 걸러서 찍는다(이 줄의 이름·경로가 이미 그렇다). 폭도 거른 뒤에 잰다: 날 글자로 재면
+        // 걸러 낸 만큼 칸이 남아 제목 칸이 줄마다 어긋난다.
+        let ids: Vec<String> = shown.iter().map(|i| one_line(&i.id)).collect();
         // 보인 것끼리 id 폭을 맞춘다 — 자식 id(`x-1a2b.3`)가 섞이면 줄마다 제 폭으로는 제목 칸이 어긋난다.
-        let w_id = shown.iter().map(|i| width(&i.id)).max().unwrap_or(0);
+        let w_id = ids.iter().map(|id| width(id)).max().unwrap_or(0);
         let hue = style::project_colour(&p.path, p.hue);
-        for i in shown {
+        for (i, id) in shown.iter().zip(&ids) {
             out.push(format!(
                 "  {}{}{}  {}",
-                cell(hue, &sanitize(&p.name), w_name + 2),
-                cell(hue, &i.id, w_id + 2),
+                cell(hue, &one_line(&p.name), w_name + 2),
+                cell(hue, id, w_id + 2),
                 paint(style::status_style(i.status.as_str()), style::glyph(i.status.as_str())),
-                clip(&i.title, TITLE_CAP),
+                clip(&one_line(&i.title), TITLE_CAP),
             ));
         }
         let rest = b.picked.len().saturating_sub(PICKED_SHOWN);
@@ -1265,7 +1275,7 @@ pub fn projects_ready(
         &format!("프로젝트 {}곳 · {total}건", projects.len()),
         reg,
     )];
-    let w_name = projects.iter().map(|p| width(&sanitize(&p.name))).max().unwrap_or(0);
+    let w_name = projects.iter().map(|p| width(&one_line(&p.name))).max().unwrap_or(0);
     for (p, s) in projects.iter().zip(seen) {
         out.push(String::new());
         let Seen::Ok(k) = s else {
@@ -1275,15 +1285,17 @@ pub fn projects_ready(
         };
         out.push(project_head(p, &format!("{}건", k.picks.len())));
         let shown = &k.picks[..k.picks.len().min(READY_SHOWN)];
-        let w_id = shown.iter().map(|i| width(&i.id)).max().unwrap_or(0);
+        // 남의 스냅샷에서 온 글자다 — 걸러서 찍고 걸러서 잰다(`projects_status` 와 같은 까닭).
+        let ids: Vec<String> = shown.iter().map(|i| one_line(&i.id)).collect();
+        let w_id = ids.iter().map(|id| width(id)).max().unwrap_or(0);
         let hue = style::project_colour(&p.path, p.hue);
-        for i in shown {
+        for (i, id) in shown.iter().zip(&ids) {
             out.push(format!(
                 "  {}{}{}{}",
-                cell(hue, &sanitize(&p.name), w_name + 2),
-                cell(hue, &i.id, w_id + 2),
+                cell(hue, &one_line(&p.name), w_name + 2),
+                cell(hue, id, w_id + 2),
                 cell(style::priority_style(i.priority()), &format!("p{}", i.priority()), 4),
-                clip(&i.title, TITLE_CAP),
+                clip(&one_line(&i.title), TITLE_CAP),
             ));
         }
         let rest = k.picks.len() - shown.len();
@@ -1306,16 +1318,16 @@ pub fn projects_ready(
 
 /// 한눈 보기의 머리 — 무엇을 몇이나 봤는지와, 목록을 읽은 사용자 설정 파일.
 fn overview_head(what: &str, count: &str, reg: &crate::user_config::Registry) -> String {
-    let at = reg.path.as_ref().map(|p| sanitize(&p.display().to_string())).unwrap_or_default();
+    let at = reg.path.as_ref().map(|p| one_line(&p.display().to_string())).unwrap_or_default();
     format!("{}  {count}       {}", paint(style::HEAD, what), paint(style::DIM, &at))
         .trim_end()
         .to_string()
 }
 
 fn project_head(p: &crate::projects::Project, tail: &str) -> String {
-    let at = sanitize(&p.path.display().to_string());
+    let at = one_line(&p.path.display().to_string());
     let head = style::project_colour(&p.path, p.hue).effects(style::HEAD.get_effects());
-    format!("{}  {}   {tail}", paint(head, &sanitize(&p.name)), paint(style::DIM, &at)).trim_end().to_string()
+    format!("{}  {}   {tail}", paint(head, &one_line(&p.name)), paint(style::DIM, &at)).trim_end().to_string()
 }
 
 /// 열지 못한 프로젝트의 한 줄. **무엇을 하면 되는지를 함께 댄다.**
@@ -1333,7 +1345,10 @@ pub(crate) fn unopened<T>(p: &crate::projects::Project, s: &crate::projects::See
             let go = format!("→ 옮겼으면 새 자리를 등록하고, 아니면 `moai project rm {at}`");
             format!("  {} 디렉터리가 없다  {}", paint(style::WARN, "!"), paint(style::DIM, &go))
         }
-        Seen::Unreadable { error } => format!("  {} 못 읽는다 — {}", paint(style::ERROR, "!"), sanitize(error)),
+        // **까닭은 한 줄에 둔다** — `sanitize` 는 줄바꿈을 남기므로 그대로 쓰면 뒤가
+        // 다음 줄로 흘러 옆 프로젝트의 줄과 안 갈린다. 이 글은 층의 알림(`layer::shut`)
+        // 으로도 그대로 가는데 거기는 한 줄짜리 자리다.
+        Seen::Unreadable { error } => format!("  {} 못 읽는다 — {}", paint(style::ERROR, "!"), one_line(error)),
     }
 }
 
@@ -1344,13 +1359,13 @@ fn problems(out: &mut Vec<String>, reg: &crate::user_config::Registry) {
     }
     out.push(String::new());
     for p in &reg.problems {
-        out.push(format!("{} {}", paint(style::WARN, "!"), sanitize(p)));
+        out.push(format!("{} {}", paint(style::WARN, "!"), one_line(p)));
     }
 }
 
 /// 명령 안내에 넣을 경로 — 제어문자를 걷고 셸이 가를 글자가 있으면 감싼다.
 fn shell_arg(p: &std::path::Path) -> String {
-    crate::text::shell_word(&sanitize(&p.display().to_string()))
+    crate::text::shell_word(&one_line(&p.display().to_string()))
 }
 
 #[cfg(test)]

@@ -87,8 +87,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
     // `unreadable_line` 경고만 조용히 빠지는데, 그것은 실린 보드 말고는
     // 에이전트가 알아낼 길이 없는 유일한 경고다 — 기준선도 같은 만큼
     // 낮게 잡혀 `Stop` 이 "늘었다" 를 영영 못 본다.
-    let unreadable: Vec<report::Unreadable> =
-        load.errors.iter().map(|e| report::Unreadable { id: e.id.as_deref() }).collect();
+    let unreadable = load.unreadable();
 
     let decision = match event {
         // **접힌 뒤는 같은 세션이다.** 기준선을 다시 적으면 접기 전에 늘린

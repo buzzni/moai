@@ -54,7 +54,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.user = ctx.user.clone();
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
-    app.here = std::env::current_dir().ok();
+    app.launched_at = std::env::current_dir().ok();
     screen(app)
 }
 
@@ -100,9 +100,13 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                 }
             })
             .collect();
-        // 사용자 설정의 문제는 말만 한다 — 한눈 보기와 같다. stderr 라 `--json` 을 흐리지 않는다.
+        // 사용자 설정의 문제는 말만 한다. **한눈 보기와 다르다** — `status`·`ready`·
+        // `project ls` 의 `--json` 은 `problems` 배열에 싣지만, 이 줄들은 탐색기의 줄
+        // (`Row`)과 같은 배열 하나라 실을 자리가 없다. 그래서 stderr 로 가고, 거기서도
+        // `project ls` 와 같은 모양이다: `moai: ` 를 달고 한 줄로 접는다(남의 설정 파일
+        // 에서 온 글이라 제어문자가 들 수 있다).
         for problem in &reg.problems {
-            eprintln!("{problem}");
+            eprintln!("moai: {}", crate::text::one_line(problem));
         }
         return super::json_line(&rows);
     }
@@ -110,14 +114,18 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let mut app = App::on_projects(crate::tui::layer::Layer::read(config.as_deref(), None));
     app.user = ctx.user.clone();
     app.user_config = config;
-    app.here = std::env::current_dir().ok();
+    app.launched_at = std::env::current_dir().ok();
     screen(app)
 }
 
 /// 층의 `--json` 한 줄. **탐색기 줄(`Row`)과 같은 키를 쓴다** — `title`·`kind`·`dir`·`path`.
 /// 다른 것은 손잡이의 뜻 하나다: 프로젝트 줄의 `path` 는 `--path` 가 아니라 디렉터리라
-/// `moai -C <path> tui --json` 으로 들어간다. 상태 낱말은 `project ls --json`·한눈 보기와
-/// 같다(`projects::Seen`).
+/// `moai -C <path> tui --json` 으로 들어간다.
+///
+/// **상태 낱말은 한눈 보기(`status`·`ready`)와 같은 [`crate::projects::Seen`] 이다** —
+/// 연 것이 `ok` 다. `project ls --json` 만 다르다: 그쪽은 이 기능보다 먼저 `initialized`
+/// 를 내보냈고, 이미 나간 값이라 안 바꾼 것이다(`cmd::project::State` 에 그 까닭이 있다).
+/// 나머지 셋(`uninitialized`·`missing`·`unreadable`)은 셋이 다 같다.
 #[derive(serde::Serialize)]
 struct ProjectRow<'a> {
     title: &'a str,

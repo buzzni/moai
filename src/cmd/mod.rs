@@ -99,8 +99,10 @@ pub fn nothing_registered(reg: &crate::user_config::Registry) -> Fail {
         "{}\n등록한 프로젝트도 없다 — `moai project add <dir>` 로 더하면 `.moai` 밖에서 한눈에 본다",
         crate::store::NOT_A_REPO
     );
+    // 사람의 설정 파일에서 온 글이다 — 제어문자를 걷고 한 줄로 접는다. 이 말은 줄 단위로
+    // 읽히므로(`fail` 이 그대로 stderr 에 쓴다) 여러 줄이 섞이면 어디까지가 한 까닭인지 흐려진다.
     for p in &reg.problems {
-        msg.push_str(&format!("\n{p}"));
+        msg.push_str(&format!("\n{}", crate::text::one_line(p)));
     }
     Fail::new(msg)
 }

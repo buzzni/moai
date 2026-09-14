@@ -118,17 +118,16 @@ fn marks_of(dir: &Path) -> Marks {
     (dir.is_dir(), crate::store::stamp(&moai.join("issues.jsonl")), crate::store::stamp(&moai.join("config.toml")))
 }
 
-/// 같은 디렉터리인가. 철자가 같으면 그만이고, 아니면 링크를 풀어 견준다 — 등록은 푼
-/// 경로로 적히지만 손으로 적은 줄은 링크 철자일 수 있다.
+/// 같은 디렉터리인가 — 등록 목록이 쓰는 그 자다. 여기에 따로 두면 층이 "같은 프로젝트"
+/// 라고 본 줄을 등록(`projects::add`)이 다른 것으로 세어 같은 저장소가 둘로 선다.
 fn same_dir(a: &Path, b: &Path) -> bool {
-    a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+    user_config::same_dir(a, b)
 }
 
 /// 연 프로젝트 하나를 센다. **`&[Issue]` 에 대한 셈은 전부 `report` 가 한다.**
 pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
     let cfg = &repo.config;
-    let unreadable: Vec<crate::report::Unreadable> =
-        load.errors.iter().map(|e| crate::report::Unreadable { id: e.id.as_deref() }).collect();
+    let unreadable = load.unreadable();
     let st = crate::report::status(&load.issues, &unreadable, cfg, now);
     Summary {
         counts: cfg.statuses.iter().map(|s| (s.clone(), st.counts.get(s).copied().unwrap_or(0))).collect(),
@@ -312,7 +311,15 @@ impl App {
         let place = self.layer.as_mut()?.places.get_mut(at)?;
         let marks = marks_of(&place.path);
         let state = match Repo::open(&place.path) {
-            Ok(Opened::Repo(repo)) => return Some(repo),
+            // **스냅샷까지 읽어 본다.** 층의 줄이 "못 읽는다" 로 서는 자는 `projects::open`
+            // 의 `repo.read()` 인데 `Repo::open` 은 `.moai/config.toml` 까지만 본다 — 여기서
+            // 안 재면 Enter 는 막히는 그 줄에 `n` 은 폼을 열고, 사람은 다 적고 Ctrl-S 를
+            // 눌러서야 못 담는다고 듣는다(적은 것이 갈 데가 없다). 한 번 더 읽는 값은
+            // 사람이 키를 누른 한 번뿐이라 싸다.
+            Ok(Opened::Repo(repo)) => match repo.read() {
+                Ok(_) => return Some(repo),
+                Err(e) => State::Unreadable(e.message),
+            },
             Ok(Opened::Uninit) => State::Uninit,
             Ok(Opened::Missing) => State::Missing,
             Err(e) => State::Unreadable(e.message),
@@ -451,6 +458,11 @@ impl App {
         self.stamp = None;
         self.warnings = 0;
         self.filter_text = None;
+        // **겹쳐 보기도 푼다.** 그 산물(`origin`·`elsewhere`·`watched`)만 비우고 깃발을
+        // 두면, 층에서는 뱃지도 안 서고 `w` 도 안 먹어(`refused` 가 "프로젝트 안에서
+        // 켠다" 는 틀린 말을 한다) 끄는 길이 없는 채로 다음 프로젝트가 시키지도 않은
+        // 겹쳐 보기로 읽힌다. 거름망과 같은 까닭이다 — 한 프로젝트에 매인 것이다.
+        self.worktree = false;
         self.trouble = None;
         self.write_failed = false;
         self.path.clear();
@@ -490,9 +502,14 @@ impl App {
         }
         self.refresh_layer();
         let rows = self.rows().len();
-        let found = held.and_then(|h| self.layer.as_ref().and_then(|l| l.position(&h)));
+        let found = held.as_ref().and_then(|h| self.layer.as_ref().and_then(|l| l.position(h)));
         self.cursor = found.unwrap_or(self.cursor.min(rows.saturating_sub(1)));
-        self.detail.rewind();
+        // **보던 줄에 그대로 섰으면 되감지 않는다** — 상세를 굴려 놓고 F5 를 누르면 굴린
+        // 자리를 잃는다. 정체로 가른다([`App::relayer`] 와 같은 자): 층이 다시 서며 차례가
+        // 바뀌어도 같은 프로젝트면 그대로다.
+        if found.is_none() || self.place_path(self.cursor) != held.as_deref() {
+            self.detail.rewind();
+        }
     }
 
     /// **등록 목록을 이 탐색기가 바꾼 뒤**(층의 `a`·`d`, moai-plvy) 층을 다시 세운다.
@@ -825,6 +842,32 @@ mod tests {
         assert_eq!(a.current(), Some(Row::Project(1)));
     }
 
+    /// **겹쳐 보기는 한 프로젝트에 매인다** — 올라오면 거름망처럼 풀린다.
+    ///
+    /// 산물(`origin`·`elsewhere`)만 비우고 깃발을 두면 층에서는 뱃지도 안 서고 `w` 도
+    /// "프로젝트 안에서 켠다" 는 틀린 말을 해, 끄는 길이 없는 채로 다음 프로젝트가
+    /// 시키지도 않은 겹쳐 보기로 읽힌다.
+    #[test]
+    fn climbing_drops_the_worktree_overlay_like_it_drops_the_filter() {
+        let s = Scratch::new("climb-w");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+
+        a.key(key(KeyCode::Enter));
+        a.key(key(KeyCode::Char('w')));
+        assert!(a.worktree, "프로젝트 안에서 w 가 안 켰다");
+
+        a.key(key(KeyCode::Home));
+        a.key(key(KeyCode::Backspace));
+        assert!(a.on_layer());
+        assert!(!a.worktree, "층에 올라왔는데 겹쳐 보기가 따라왔다 — 끄는 키가 여기 없다");
+
+        a.key(key(KeyCode::Down));
+        a.key(key(KeyCode::Enter));
+        assert!(!a.worktree, "다음 프로젝트가 시키지 않은 겹쳐 보기로 읽혔다");
+    }
+
     /// **`.moai` 안에서 띄우면 그 안에서 시작하고, 뿌리에서 Bksp 로 층에 올라가 띄운 자리에
     /// 선다**(결정 3). 등록 안 된 자리는 층 맨 앞에 서서 도로 내려갈 수 있다. 남의 프로젝트는
     /// 올라갈 때 처음 읽는다.
@@ -984,6 +1027,17 @@ mod tests {
             assert!(a.notice.as_deref().is_some_and(|n| n.contains(word)), "{c}: {:?}", a.notice);
         }
         assert!(!a.worktree, "층에서 겹쳐 보기를 켰다");
+
+        // **거들쇠가 붙어도 새지 않는다.** `refused` 는 Ctrl·Alt 를 그냥 넘기므로, 키를
+        // 나누는 쪽이 안 거르면 Ctrl-A 가 등록 창을, Ctrl-D 가 "목록에서 뺄까" 를 띄운다 —
+        // 터미널에서 줄 맨 앞·EOF 로 손에 익은 키라 누를 일이 실제로 있다.
+        for c in ['a', 'd', 'f', 'w', 'n'] {
+            for m in [KeyModifiers::CONTROL, KeyModifiers::ALT] {
+                a.key(KeyEvent::new(KeyCode::Char(c), m));
+                assert_eq!(a.mode, Mode::Browse, "{m:?}-{c} 가 칸을 열었다");
+            }
+        }
+        assert!(!a.worktree, "Ctrl-w 가 겹쳐 보기를 켰다");
         assert_eq!(files(), was, "층에서 누른 키가 파일을 바꿨다");
         assert!(!one.join(".moai/journal.jsonl").exists() && !two.join(".moai/journal.jsonl").exists());
 

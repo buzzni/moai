@@ -65,11 +65,9 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         .iter()
         .map(|p| {
             p.seen(|repo, load| {
-                let unreadable: Vec<report::Unreadable> =
-                    load.errors.iter().map(|e| report::Unreadable { id: e.id.as_deref() }).collect();
                 view::Board {
                     cfg: &repo.config,
-                    status: report::status(&load.issues, &unreadable, &repo.config, &now),
+                    status: report::status(&load.issues, &load.unreadable(), &repo.config, &now),
                     picked: report::wip(&load.issues, &repo.config),
                 }
             })

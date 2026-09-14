@@ -730,6 +730,39 @@ fn outside_a_repo_a_path_cannot_repaint_the_screen() {
     }
 }
 
+/// **남의 저장소의 글자도 화면을 다시 칠하지 못한다** — 칸 이름(`statuses`)·id·제목.
+///
+/// 위 시험이 `NO_COLOR` 로 도는 바람에 이것을 못 잡았다: 색을 끄면 anstream 이 나가는
+/// 길에서 ESC 를 걷어내, 걸러지지 않은 글자가 시험에서만 안전해 보인다. 켜고 재야 진짜
+/// 터미널과 같은 길이다. 등록한 것은 남의 저장소일 수 있고 `.moai/config.toml` 도
+/// `issues.jsonl` 도 손으로 고칠 수 있다 — 읽기는 관대하되 그리기는 엄해야 하는 자리다.
+#[test]
+fn outside_a_repo_another_repos_own_text_cannot_repaint_the_screen() {
+    let s = Scratch::new("ovescape2");
+    let (odd, out) = (dir_in(&s, "odd"), dir_in(&s, "out"));
+    std::fs::create_dir_all(odd.join(".moai")).unwrap();
+    std::fs::write(odd.join(".moai/config.toml"), "prefix = \"argos\"\nstatuses = \"todo,\u{1b}[2Jwip,done\"\n").unwrap();
+    std::fs::write(
+        odd.join(".moai/issues.jsonl"),
+        // JSON 문자열 안의 제어문자는 `\\u001b` 로 적는다 — 날 바이트로 두면 줄이 통째로
+        // 못 읽는 줄이 되어 시험이 아무것도 안 잰다.
+        "{\"id\":\"argos-\\u001b[2J01\",\"title\":\"\\u001b[2J집은 것\",\"status\":\"\\u001b[2Jwip\",\"created_at\":\"2026-09-01T00:00:00Z\",\"updated_at\":\"2026-09-01T00:00:00Z\",\"status_since\":\"2026-09-01T00:00:00Z\"}\n\
+         {\"id\":\"argos-0002\",\"title\":\"\\u001b[2J집을 것\",\"status\":\"todo\",\"created_at\":\"2026-09-01T00:00:00Z\",\"updated_at\":\"2026-09-01T00:00:00Z\",\"status_since\":\"2026-09-01T00:00:00Z\"}\n",
+    )
+    .unwrap();
+    let cfg = registry(&s, &[&odd]);
+
+    // **색을 켜고 잰다.** `--color always` 는 `NO_COLOR` 를 이기므로 anstream 이 걷어내지
+    // 않고, 그래서 진짜 터미널과 같은 바이트가 나온다.
+    for args in [&["status", "--color", "always"][..], &["ready", "--color", "always"], &["project", "ls", "--color", "always"]] {
+        let shown = ok_with(&out, &cfg, args);
+        assert!(!shown.contains("\u{1b}[2J"), "{args:?} 가 남의 ESC 를 흘렸다: {shown:?}");
+        // 거르되 버리지는 않는다 — 글자는 남아야 어느 줄인지 안다.
+        assert!(shown.contains("[2J"), "{args:?}: 글자를 통째로 버렸다 — {shown}");
+        assert!(shown.contains("\u{1b}["), "{args:?}: 색이 안 켜졌다 — 시험이 아무것도 안 재고 있다");
+    }
+}
+
 /// 한눈 보기의 기계 출력. 프로젝트마다 `name`·`path`·`state` 가 서고, 연 것만 제 셈을
 /// 곁에 든다. **`projects` 키가 곧 여러 프로젝트를 봤다는 뜻이다.**
 #[test]
@@ -5357,6 +5390,48 @@ fn project_add_is_idempotent() {
     let json = project_ok(home.path(), &config, &["project", "add", "a", "--json"]);
     assert!(json.contains("\"added\":false"), "{json}");
     assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
+}
+
+/// **링크 철자로 적힌 줄이 있으면 푼 경로를 또 넣지 않는다.** 등록은 링크를 풀어 적지만
+/// 손으로 적은 줄이나 옛 바이너리가 적은 줄은 링크 철자일 수 있다 — 글자로만 견주면 같은
+/// 저장소가 두 줄로 서고, 층에도 `project ls` 에도 둘이 보이며 하나를 빼도 다른 하나가
+/// 남는다. TUI 의 고르기 창은 이미 링크를 풀어 그 줄에 `✓ 등록됨` 을 달고 있다.
+#[cfg(unix)]
+#[test]
+fn project_add_is_idempotent_across_a_symlink_spelling() {
+    let home = Scratch::new("project-link");
+    let config = home.path().join("config.toml");
+    let real = home.path().join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, home.path().join("link")).unwrap();
+    // 손으로 적은 것처럼 링크 철자로 넣어 둔다.
+    std::fs::write(&config, format!("[[project]]\npath = {:?}\n", home.path().join("link").to_str().unwrap())).unwrap();
+    let before = std::fs::read_to_string(&config).unwrap();
+
+    let again = project_ok(home.path(), &config, &["project", "add", "real"]);
+    assert!(again.contains("이미 등록돼 있다"), "{again}");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), before, "같은 디렉터리가 두 줄로 섰다");
+    let shown = project_ok(home.path(), &config, &["project", "ls"]);
+    assert_eq!(shown.lines().filter(|l| l.contains("init 전")).count(), 1, "{shown}");
+}
+
+/// **`color` 가 찾는 철자는 `rm` 과 같다.** 손으로 `/w/a/../b` 라 적힌 줄은 글자 정리로도
+/// 링크 풀기로도 그 철자가 안 나와, 한쪽에만 철자를 더하면 `rm` 이 빼는 줄을 `color` 가
+/// "등록돼 있지 않다" 고 거절한다 — 그 거절문이 시키는 `add` 는 같은 디렉터리의 둘째 줄을 만든다.
+#[test]
+fn project_color_finds_every_spelling_that_rm_can_remove() {
+    let home = Scratch::new("project-spell");
+    let config = home.path().join("config.toml");
+    std::fs::create_dir_all(home.path().join("b")).unwrap();
+    std::fs::create_dir_all(home.path().join("a")).unwrap();
+    let odd = home.path().join("a/../b");
+    std::fs::write(&config, format!("[[project]]\npath = {:?}\n", odd.to_str().unwrap())).unwrap();
+
+    let said = project_ok(home.path(), &config, &["project", "color", odd.to_str().unwrap(), "green"]);
+    assert!(said.contains("green"), "{said}");
+    assert!(std::fs::read_to_string(&config).unwrap().contains("color = \"green\""));
+    let json = project_ok(home.path(), &config, &["project", "rm", odd.to_str().unwrap(), "--json"]);
+    assert!(json.contains("\"removed\":[\""), "{json}");
 }
 
 /// 없는 디렉터리와 파일은 거절하고, 설정은 만들지도 않는다.

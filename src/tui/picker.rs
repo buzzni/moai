@@ -82,6 +82,9 @@ pub enum Act {
 /// `..` 에서 `a` 를 누른 까닭.
 pub const UP_IS_NOT_A_PROJECT: &str = "`..` 은 등록하지 않는다 — 올라가서 `./` 에서 a";
 
+/// `./` 에서 Enter 를 누른 까닭.
+pub const HERE_IS_ALREADY_OPEN: &str = "`./` 은 지금 열어 둔 디렉터리다 — 여기를 등록하려면 a";
+
 impl Picker {
     /// 첫 층으로 연다. 커서는 첫 하위 디렉터리에 선다 — 고르러 들어온 사람이 먼저 보는 것은 밑이다.
     pub fn new(at: Listing) -> Picker {
@@ -160,7 +163,15 @@ impl Picker {
                 KeyCode::Enter => {
                     let text = input.text().trim().to_string();
                     self.typing = None;
-                    if text.is_empty() { Act::Stay } else { Act::Go(self.at.dir.join(text)) }
+                    // **`~` 는 든 쪽이 푼다.** 여기는 조각이라 홈을 모른다(환경을 안 본다).
+                    // 붙여 버리면 `~` 가 하위 디렉터리 이름이 되어 `…/~/work/argos` 를
+                    // 찾다 실패하고, 사람은 없는 디렉터리로 읽는다 — 껍데기가 풀어 주는
+                    // 철자라 경로 칸에 가장 먼저 치는 것이 이것이다.
+                    match text.as_str() {
+                        "" => Act::Stay,
+                        t if t == "~" || t.starts_with("~/") => Act::Go(PathBuf::from(t)),
+                        t => Act::Go(self.at.dir.join(t)),
+                    }
                 }
                 KeyCode::Esc => {
                     self.typing = None;
@@ -180,7 +191,14 @@ impl Picker {
         match k.code {
             KeyCode::Enter | KeyCode::Right => match row {
                 Some(r @ (Row::Up | Row::Dir(_))) => self.path_of(r).map_or(Act::Stay, Act::Go),
-                _ => Act::Stay,
+                // `./` 은 이미 여기다 — 들어갈 데가 없다. **조용히 먹지 않는다**: 아랫줄이
+                // `Enter 들어가기` 를 대고 있고, 하위 디렉터리가 없는 자리에서는 커서가
+                // 여기 서므로(`first_dir`) 아무 말 없으면 창이 멎은 줄 안다(`..` 의 `a` 와 같다).
+                Some(Row::Here) => {
+                    self.error = Some(HERE_IS_ALREADY_OPEN.into());
+                    Act::Stay
+                }
+                None => Act::Stay,
             },
             KeyCode::Backspace | KeyCode::Left => self.path_of(Row::Up).map_or(Act::Stay, Act::Go),
             KeyCode::Char('a') => match row {
@@ -313,6 +331,19 @@ mod tests {
         press(&mut p, KeyCode::Char('g'));
         p.typing = Some(Input::new("apps/sub"));
         assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/apps/sub".into()), "상대경로가 지금 디렉터리에 안 붙었다");
+
+        // **`~` 는 붙이지 않고 그대로 넘긴다** — 껍데기가 풀어 주는 철자라 경로 칸에
+        // 가장 먼저 치는 것이 이것이고, 붙여 버리면 `…/~/work` 를 찾다 없다고 한다.
+        // 홈이 어디인지는 드는 쪽(`register::expand_home`)이 안다 — 여기는 조각이다.
+        for typed in ["~", "~/work/argos"] {
+            press(&mut p, KeyCode::Char('g'));
+            p.typing = Some(Input::new(typed));
+            assert_eq!(press(&mut p, KeyCode::Enter), Act::Go(typed.into()), "`~` 를 지금 디렉터리에 붙였다");
+        }
+        // `~` 로 시작하지 않는 것은 그대로 붙는다 — `~x` 는 그냥 이름이다.
+        press(&mut p, KeyCode::Char('g'));
+        p.typing = Some(Input::new("~x"));
+        assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/~x".into()));
         press(&mut p, KeyCode::Char('g'));
         assert_eq!(press(&mut p, KeyCode::Esc), Act::Stay);
         assert_eq!(p.typing, None);

@@ -365,8 +365,12 @@ pub struct App {
     /// 파일(`Layer::config`)을 쓴다. `cmd::tui` 가 `user_config::path()` 로 넣고, 시험은 임시
     /// 파일을 준다 — 여기서 환경을 읽으면 시험이 돌리는 사람의 설정을 고친다.
     pub user_config: Option<std::path::PathBuf>,
-    /// 띄운 자리(cwd). 고르기 창이 처음 여기서 연다. 시험은 임시 디렉터리를 준다.
-    pub here: Option<std::path::PathBuf>,
+    /// **띄운 자리**(cwd). 고르기 창이 처음 여기서 연다. 시험은 임시 디렉터리를 준다.
+    ///
+    /// 이름이 [`App::here`] 와 겹치지 않게 둔다 — 그쪽은 *지금 선 프로젝트*, 곧 **쓰기가
+    /// 닿는 곳**이다. 둘 다 `Option<PathBuf>` 라 괄호 하나를 빠뜨려도 컴파일되고, 그러면
+    /// 생각 담기가 머리에 보인 곳 말고 띄운 자리에 쓰려 든다.
+    pub launched_at: Option<std::path::PathBuf>,
     /// 고르기 창을 마지막으로 닫은 디렉터리 — 다시 열면 여기서 연다.
     pick_from: Option<std::path::PathBuf>,
 }
@@ -442,7 +446,7 @@ impl App {
             elsewhere: Vec::new(),
             layer: None,
             user_config: None,
-            here: None,
+            launched_at: None,
             pick_from: None,
         };
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
@@ -1000,6 +1004,12 @@ impl App {
         match k.code {
             // raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. 안 받으면 길이 막힌다.
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => self.quit = true,
+            // **거들쇠가 붙은 글자키는 여기 뜻이 없다.** Ctrl-C 말고는 아무 글자키도
+            // Ctrl·Alt 와 짝지어 두지 않았으므로, 안 거르면 Ctrl-A 가 등록 창을 열고
+            // Ctrl-D 가 "목록에서 뺄까" 를 띄운다 — 둘 다 터미널에서 다른 뜻으로 손에 익은
+            // 키다. 조각들은 이미 이렇게 거른다(`picker::key`·`layer::refused`·
+            // `settle_unregister`); 키를 나누는 이 자리만 빠져 있었다.
+            KeyCode::Char(_) if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {}
             KeyCode::Char('q') | KeyCode::F(10) => self.quit = true,
             // 터미널에 따라 `Shift-Tab` 이 `BackTab` 으로도, Shift 가 붙은 `Tab`
             // 으로도 온다. 한쪽만 받으면 어느 터미널에서는 뒤로 못 돈다.

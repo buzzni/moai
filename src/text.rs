@@ -61,13 +61,61 @@ pub fn sanitize(s: &str) -> String {
     s.chars().filter(|c| *c == '\n' || *c == '\t' || !c.is_control()).collect()
 }
 
+/// 앞을 잘라 **뒤를 남긴다** — `…/apps/a`. 경로처럼 뒤가 값진 글에 쓴다.
+///
+/// [`clip`] 과 한 자로 잰다(같은 `…`, 같은 0 규칙, 같은 글자 단위 폭). 따로 두면 한쪽만
+/// 고쳐져 같은 폭에서 두 표면이 달리 잘린다 — 그 둘을 한자리에 두려고 있는 모듈이다.
+pub fn clip_front(s: &str, max: usize) -> String {
+    if width(s) <= max {
+        return s.to_string();
+    }
+    if max == 0 {
+        return String::new();
+    }
+    let mut back: Vec<char> = Vec::new();
+    let mut used = 1; // `…`
+    for c in s.chars().rev() {
+        let w = UnicodeWidthChar::width(c).unwrap_or(0);
+        if used + w > max {
+            break;
+        }
+        used += w;
+        back.push(c);
+    }
+    std::iter::once('…').chain(back.into_iter().rev()).collect()
+}
+
+/// 한 줄에 세우는 글 — 제어문자를 걷고 여러 줄이면 사이를 두 칸으로 접는다.
+///
+/// **[`sanitize`] 는 줄바꿈과 탭을 남긴다** — 본문은 여러 줄이 정상이라서다. 한 줄짜리
+/// 자리(목록의 한 줄·배너·창의 아랫줄)에 그대로 쓰면 뒤가 다음 줄로 흘러 옆 항목의
+/// 줄과 갈리지 않는다. 그 자리는 전부 이것을 지난다 — 자리마다 따로 접으면 한쪽은
+/// 접고 한쪽은 안 접어 같은 글이 화면마다 달리 선다.
+///
+/// **이미 한 줄이면 앞뒤를 안 깎는다.** 경로·이름도 이것을 지나는데(`a<LF>b` 라는
+/// 디렉터리도 등록된다) 끝에 공백이 든 디렉터리 이름을 깎으면 다른 디렉터리를 보인다.
+/// 여러 줄일 때만 줄마다 깎아 잇는다 — 들여 쓴 둘째 줄이 달린 오류 말의 모양이다.
+pub fn one_line(s: &str) -> String {
+    if !s.contains('\n') {
+        // `\r` 같은 제어문자는 `sanitize` 가 걷는다. 남는 것은 탭뿐이다.
+        return sanitize(s).replace('\t', " ");
+    }
+    let joined = s.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("  ");
+    sanitize(&joined).replace('\t', " ")
+}
+
 /// 붙여 넣어 그대로 돌 수 있게 감싼다. 공백이나 껍데기가 뜻을 붙이는 글자가
 /// 있으면 작은따옴표로 — 안 감싸면 `~/My Projects/argos` 가 두 인자로 갈라진다.
 ///
 /// **안내에 경로를 넣는 곳은 이것을 지난다** (`project add`·한눈 보기). 자리마다
 /// 따로 두면 한쪽은 안전한 글자를, 한쪽은 위험한 글자를 세어 같은 경로를 달리 감싼다.
+///
+/// **`-` 로 시작하는 것은 감싼다.** 글자 자체는 껍데기에 뜻이 없지만, 안내가 내는 것은
+/// 명령줄이라 맨 앞의 `-` 는 그것을 **인자가 아니라 플래그로** 만든다 — `-rf` 라는
+/// 디렉터리의 `moai project rm -rf` 는 clap 이 플래그로 읽고 경로는 없다고 한다.
 pub fn shell_word(s: &str) -> String {
     let plain = !s.is_empty()
+        && !s.starts_with('-')
         && s.chars().all(|c| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | ',' | ':' | '@' | '%'));
     if plain { s.to_string() } else { format!("'{}'", s.replace('\'', r"'\''")) }
 }
@@ -82,6 +130,23 @@ mod tests {
         assert_eq!(shell_word("/home/raven/작업/argos"), "/home/raven/작업/argos");
         assert_eq!(shell_word("/home/raven/My Projects"), "'/home/raven/My Projects'");
         assert_eq!(shell_word("/a/it's"), r"'/a/it'\''s'");
+        // 맨 앞의 `-` 는 안내가 낸 명령줄에서 플래그가 된다.
+        assert_eq!(shell_word("-rf"), "'-rf'");
+        assert_eq!(shell_word("--json"), "'--json'");
+        assert_eq!(shell_word("/w/my-repo"), "/w/my-repo", "가운데 `-` 까지 감쌌다");
+    }
+
+    /// 한 줄짜리 자리에 여러 줄이 흘러들지 않는다.
+    #[test]
+    fn one_line_folds_every_break_and_drops_control_characters() {
+        assert_eq!(one_line("한 줄"), "한 줄");
+        assert_eq!(one_line("첫 줄\n  둘째 줄  \n\n셋째"), "첫 줄  둘째 줄  셋째");
+        assert_eq!(one_line("탭\t섞임"), "탭 섞임");
+        assert_eq!(one_line("지움\u{1b}[2J"), "지움[2J");
+        // 한 줄이면 앞뒤를 안 깎는다 — 끝에 공백이 든 디렉터리 이름이 다른 이름으로 보이면 안 된다.
+        assert_eq!(one_line("/w/끝에 공백 "), "/w/끝에 공백 ");
+        // 줄바꿈이 든 경로도 한 줄로 선다.
+        assert_eq!(one_line("/w/a\nb"), "/w/a  b");
     }
 
     #[test]
@@ -103,6 +168,20 @@ mod tests {
         }
         assert_eq!(clip("짧다", 10), "짧다");
         assert_eq!(clip("짧다", 0), "");
+    }
+
+    /// 앞을 자르는 쪽도 같은 자로 잰다 — 상한을 넘지 않고 뒤를 남긴다.
+    #[test]
+    fn clipping_the_front_keeps_the_tail_within_the_budget() {
+        for s in ["/w/one", "/home/raven/작업/아주/깊은/경로/여기", "짧다"] {
+            for max in 0..20 {
+                let got = clip_front(s, max);
+                assert!(width(&got) <= max, "{s:?} @ {max} → {got:?}");
+            }
+        }
+        assert_eq!(clip_front("/w/one", 10), "/w/one");
+        assert_eq!(clip_front("/w/apps/a", 7), "…apps/a");
+        assert_eq!(clip_front("/w/one", 0), "");
     }
 
     /// 0% 와 "멤버 없음" 은 다르다. 100% 만 꽉 차고, 1% 도 한 칸은 보인다.

@@ -143,7 +143,17 @@ pub struct Added {
 /// 가 루트의 `.moai` 를 제 것으로 읽고, 그러면 따로 등록한 뜻이 없다.
 pub fn add(config: &Path, input: &Path, cwd: &Path) -> R<Added> {
     let dir = crate::user_config::resolve_dir(input, cwd)?;
-    let added = crate::user_config::update(config, |doc| doc.add(&dir))?;
+    let added = crate::user_config::update(config, |doc| {
+        // **링크를 풀어서도 견준다.** `Doc::add` 는 파일 시스템을 안 보는 자리라 글자로만
+        // 재는데, 목록에 링크 철자(`/w/link`)로 적힌 줄이 있으면 푼 경로(`/w/real`)가 또
+        // 실려 같은 저장소가 두 줄로 선다. TUI 의 고르기 창은 이미 링크를 풀어 그 줄에
+        // `✓ 등록됨` 을 달아 놓으므로, 그대로 두면 등록됐다고 적힌 줄에서 `a` 를 누른
+        // 사람이 둘째 줄을 만든다. 파일 시스템을 보는 것은 여기 — 이미 보고 있다.
+        if doc.projects().0.iter().any(|p| crate::user_config::same_dir(&p.path, &dir)) {
+            return Ok(false);
+        }
+        doc.add(&dir)
+    })?;
     let initialized = dir.join(".moai").is_dir();
     Ok(Added { path: dir, added, initialized })
 }
@@ -163,14 +173,9 @@ pub struct Removed {
 /// **설정 파일이 없으면 뺄 것도 없다.** 그대로 `update` 로 가면 빈 목록에서 아무것도 안
 /// 빼려고 설정 디렉터리를 만든다 — 아무 일도 안 한 명령이 사람의 `~/.config` 에 흔적을 남긴다.
 pub fn remove(config: &Path, input: &Path, cwd: &Path) -> R<Removed> {
-    let mut spellings = crate::user_config::spellings(input, cwd);
-    // **준 철자 그대로도 견준다.** 손으로 적은 `/w/a/../b` 는 글자 정리로도 링크 풀기로도
-    // 그 철자가 안 나온다 — TUI 의 `d` 는 층의 줄에 적힌 철자를 그대로 주는데, 그것으로
-    // 못 빼면 줄은 남은 채 "이미 목록에 없다" 고 말한다. 대표 철자(`spelled`)는 앞의 것이다.
-    let exact = cwd.join(input);
-    if !spellings.contains(&exact) {
-        spellings.push(exact);
-    }
+    // 준 철자 그대로까지 [`crate::user_config::spellings`] 가 댄다 — `color` 와 같은
+    // 목록이라야 한쪽이 빼는 줄을 다른 쪽이 없다고 하지 않는다. 대표 철자(`spelled`)는 앞의 것이다.
+    let spellings = crate::user_config::spellings(input, cwd);
     let removed: Vec<PathBuf> = if config.exists() {
         crate::user_config::update(config, |doc| {
             let hit: Vec<PathBuf> =

@@ -13,7 +13,7 @@
 
 use super::{Ctx, Fail, R, code};
 use crate::style::{self, Hue, paint};
-use crate::text::{sanitize, shell_word, width};
+use crate::text::{one_line, shell_word, width};
 use crate::user_config;
 use crate::{model, projects, report};
 use std::collections::BTreeMap;
@@ -36,7 +36,7 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
         return super::json_line(&Out { path: &dir, added, initialized, config: &config });
     }
 
-    let shown = sanitize(&dir.display().to_string());
+    let shown = one_line(&dir.display().to_string());
     let mut out = vec![if added {
         format!("등록함  {shown}")
     } else {
@@ -72,11 +72,11 @@ pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
         return Ok(vec![format!(
             "{}  {}",
             paint(style::DIM, "등록돼 있지 않다"),
-            sanitize(&spelled.display().to_string())
+            one_line(&spelled.display().to_string())
         )]);
     }
     let mut out: Vec<String> =
-        removed.iter().map(|p| format!("뺌  {}", sanitize(&p.display().to_string()))).collect();
+        removed.iter().map(|p| format!("뺌  {}", one_line(&p.display().to_string()))).collect();
     out.push(paint(style::DIM, "  목록에서만 뺐다 — 디렉터리와 그 .moai 는 그대로다"));
     Ok(out)
 }
@@ -94,7 +94,7 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     let config = writable_config()?;
     let spellings = user_config::spellings(input, &cwd()?);
     let not_registered = || {
-        let shown = sanitize(&spellings[0].display().to_string());
+        let shown = one_line(&spellings[0].display().to_string());
         Fail::coded(
             format!("등록돼 있지 않다 — {shown} · `moai project add {}` 로 먼저 더한다", shell_word(&shown)),
             code::NOT_FOUND,
@@ -137,7 +137,7 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
         });
     }
 
-    let shown = sanitize(&before.path.display().to_string());
+    let shown = one_line(&before.path.display().to_string());
     // 색 낱말을 그 색으로 칠한다 — 낱말이 뜻을 지고 색은 곁들인다. `auto` 면 경로가 고른 색을 댄다.
     let now = hue.unwrap_or_else(|| Hue::of_path(&before.path));
     let word = paint(style::project_colour(&before.path, Some(now)), now.name());
@@ -188,16 +188,27 @@ enum State<'a> {
     Unreadable { error: &'a str },
 }
 
+/// 정한 색을 `--json` 에 이름으로 싣는다. `None` 은 `skip_serializing_if` 가 빼므로 여기 안 온다.
+fn hue_name<S: serde::Serializer>(hue: &Option<Hue>, s: S) -> Result<S::Ok, S::Error> {
+    match hue {
+        Some(h) => s.serialize_str(h.name()),
+        None => s.serialize_none(),
+    }
+}
+
 #[derive(serde::Serialize)]
 struct Row<'a> {
     name: &'a str,
     path: &'a Path,
-    /// 사용자 설정에 정한 색의 이름. **정했을 때만 선다** — 키를 더하기만 해, 이미 나간 줄의
-    /// 모양은 색을 안 정한 사람에게 한 글자도 안 바뀐다. **경로로 고른 색은 싣지 않는다** —
-    /// 실으면 팔레트와 해시가 기계 계약이 되어 못 바꾼다. 사람이 적은 것만 계약이다.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    color: Option<&'static str>,
-    #[serde(skip)]
+    /// 사용자 설정에 정한 색. `--json` 에는 그 **이름**이 `color` 로 선다.
+    ///
+    /// **정했을 때만 선다** — 키를 더하기만 해, 이미 나간 줄의 모양은 색을 안 정한 사람에게
+    /// 한 글자도 안 바뀐다. **경로로 고른 색은 싣지 않는다** — 실으면 팔레트와 해시가 기계
+    /// 계약이 되어 못 바꾼다. 사람이 적은 것만 계약이다.
+    ///
+    /// 이름을 곁에 **따로 들지 않는다**: 이름은 이 값에서 나오는 파생값이라, 두 필드로 두면
+    /// 칠하는 쪽과 적는 쪽이 갈라져 초록으로 칠한 줄이 `"color":"blue"` 로 나갈 수 있다.
+    #[serde(rename = "color", skip_serializing_if = "Option::is_none", serialize_with = "hue_name")]
     hue: Option<Hue>,
     #[serde(flatten)]
     state: State<'a>,
@@ -213,7 +224,7 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     let now = model::now();
     let rows: Vec<Row> = projects
         .iter()
-        .map(|p| Row { name: &p.name, path: &p.path, color: p.hue.map(Hue::name), hue: p.hue, state: state(p, &now) })
+        .map(|p| Row { name: &p.name, path: &p.path, hue: p.hue, state: state(p, &now) })
         .collect();
 
     if ctx.json {
@@ -227,14 +238,14 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     }
 
     for p in &reg.problems {
-        eprintln!("moai: {}", sanitize(p));
+        eprintln!("moai: {}", one_line(p));
     }
     let mut out = Vec::new();
     if rows.is_empty() {
         out.push("등록한 프로젝트가 없다 — `moai project add <디렉터리>` 로 더한다".into());
     } else {
-        let names: Vec<String> = rows.iter().map(|r| sanitize(r.name)).collect();
-        let paths: Vec<String> = rows.iter().map(|r| sanitize(&r.path.display().to_string())).collect();
+        let names: Vec<String> = rows.iter().map(|r| one_line(r.name)).collect();
+        let paths: Vec<String> = rows.iter().map(|r| one_line(&r.path.display().to_string())).collect();
         let name_w = names.iter().map(|n| width(n)).max().unwrap_or(0);
         let path_w = paths.iter().map(|p| width(p)).max().unwrap_or(0);
         for ((r, name), path) in rows.iter().zip(&names).zip(&paths) {
@@ -250,7 +261,7 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
         }
     }
     if let Some(config) = &reg.path {
-        out.push(paint(style::DIM, &format!("설정: {}", sanitize(&config.display().to_string()))));
+        out.push(paint(style::DIM, &format!("설정: {}", one_line(&config.display().to_string()))));
     }
     Ok(out)
 }
@@ -260,8 +271,7 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
 fn state<'a>(p: &'a projects::Project, now: &str) -> State<'a> {
     match &p.state {
         projects::State::Open { repo, load } => {
-            let unreadable: Vec<report::Unreadable> =
-                load.errors.iter().map(|e| report::Unreadable { id: e.id.as_deref() }).collect();
+            let unreadable = load.unreadable();
             State::Initialized {
                 counts: report::status(&load.issues, &unreadable, &repo.config, now).counts,
                 unreadable: load.errors.len(),
@@ -285,7 +295,7 @@ fn said(state: &State) -> String {
                     let n = counts.get(s).copied().unwrap_or(0);
                     let style = style::status_style(s);
                     // 칸 이름도 남의 설정 파일에서 온다 — `statuses` 는 제어문자를 거르지 않는다.
-                    let word = sanitize(s);
+                    let word = one_line(s);
                     format!("{} {}", paint(style, style::glyph(s)), paint(style, &format!("{word} {n}")))
                 })
                 .collect();
@@ -297,9 +307,7 @@ fn said(state: &State) -> String {
         State::Uninitialized => paint(style::DIM, "init 전"),
         State::Missing => paint(style::WARN, "디렉터리가 없다"),
         // 까닭은 한 줄에 둔다 — 줄바꿈이 섞이면 다음 프로젝트의 줄과 갈리지 않는다.
-        State::Unreadable { error } => {
-            format!("{} 못 읽는다 — {}", paint(style::ERROR, "!"), sanitize(error).replace(['\n', '\t'], " "))
-        }
+        State::Unreadable { error } => format!("{} 못 읽는다 — {}", paint(style::ERROR, "!"), one_line(error)),
     }
 }
 

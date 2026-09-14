@@ -54,6 +54,16 @@ impl Load {
     pub fn reserved_ids(&self) -> BTreeSet<String> {
         self.errors.iter().filter_map(|e| e.id.clone()).collect()
     }
+
+    /// 못 읽는 줄을 `report` 가 받는 모양으로. **그 줄이 쓰는 id 를 함께 넘긴다** —
+    /// id 가 있어야 산 줄과의 중복이 드러난다(moai-4dk4).
+    ///
+    /// 한 줄짜리지만 자리마다 손으로 적으면 언젠가 `None` 으로 적는 곳이 생기고, 그러면
+    /// 그 화면만 중복을 못 본다. 옆의 [`Load::reserved_ids`] 가 같은 `errors` 에서 뽑는
+    /// 다른 파생값이라 짝으로 둔다.
+    pub fn unreadable(&self) -> Vec<crate::report::Unreadable<'_>> {
+        self.errors.iter().map(|e| crate::report::Unreadable { id: e.id.as_deref() }).collect()
+    }
 }
 
 /// `.moai` 를 못 찾았을 때의 말. **다른 곳의 저장소를 부르는 길(`-C`)을 함께 댄다** —

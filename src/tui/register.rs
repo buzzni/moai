@@ -95,14 +95,19 @@ pub fn registered_paths(config: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// 거절문을 한 줄로 — 배너도 창의 아랫줄도 한 줄이다. 남의 설정 파일 이름이 들 수 있어 거른다.
-fn one_line(message: &str) -> String {
-    let lines: Vec<&str> = message.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    crate::text::sanitize(&lines.join("  "))
-}
-
 fn shown(path: &Path) -> String {
     crate::text::sanitize(&path.display().to_string())
+}
+
+/// `~`·`~/…` 를 홈으로 푼다. **여기서 푸는 까닭**은 창([`super::picker`])이 조각이라
+/// 환경을 안 보기 때문이다 — 창은 `~` 로 시작하는 철자를 붙이지 않고 그대로 넘긴다.
+/// 홈을 모르면 준 철자 그대로 두고, 없는 디렉터리라는 말이 그대로 선다.
+fn expand_home(p: &Path) -> PathBuf {
+    let Ok(rest) = p.strip_prefix("~") else { return p.to_path_buf() };
+    match std::env::var_os("HOME").filter(|h| !h.is_empty()) {
+        Some(home) => PathBuf::from(home).join(rest),
+        None => p.to_path_buf(),
+    }
 }
 
 impl App {
@@ -116,7 +121,7 @@ impl App {
 
     /// `a` — 디렉터리 고르기 창을 연다.
     ///
-    /// 시작 자리는 **마지막으로 창에서 본 디렉터리**, 처음이면 **띄운 자리**(`App::here`),
+    /// 시작 자리는 **마지막으로 창에서 본 디렉터리**, 처음이면 **띄운 자리**(`App::launched_at`),
     /// 그것도 모르면 지금 프로젝트의 뿌리다. 띄운 자리인 까닭: CLI 의 `moai project add .` 과
     /// 상대경로가 거기 붙고, 모노레포 안에서 띄운 사람이 `apps/a` 를 고르려고 홈부터 파고들
     /// 까닭이 없다. 앞의 자리가 그새 사라졌으면 다음 자리로 넘어간다.
@@ -125,7 +130,7 @@ impl App {
             self.notice = Some("! 사용자 설정의 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 중 하나를 준다".into());
             return;
         };
-        let starts: Vec<PathBuf> = [self.pick_from.clone(), self.here.clone(), self.repo.as_ref().map(|r| r.root.clone())]
+        let starts: Vec<PathBuf> = [self.pick_from.clone(), self.launched_at.clone(), self.repo.as_ref().map(|r| r.root.clone())]
             .into_iter()
             .flatten()
             .collect();
@@ -163,9 +168,10 @@ impl App {
 
     /// 창에 그 디렉터리 한 층을 읽어 넣는다. 못 읽으면 **그 자리에 선 채** 까닭 한 줄.
     fn relist(&mut self, to: &Path) {
+        let to = expand_home(to);
         let registered = self.config_file().map(|c| registered_paths(&c)).unwrap_or_default();
         let Mode::Pick(p) = &mut self.mode else { return };
-        match list_dir(to, &registered, p.show_hidden) {
+        match list_dir(&to, &registered, p.show_hidden) {
             Ok(at) => p.show(at),
             Err(e) => p.error = Some(format!("못 연다 — {}", crate::text::sanitize(&e))),
         }
@@ -194,7 +200,7 @@ impl App {
             // 거절했다 — 층의 배너가 그 설정 문제를 이미 비추고 있다.
             Err(e) => {
                 if let Mode::Pick(p) = &mut self.mode {
-                    p.error = Some(format!("등록하지 못했다 — {}", one_line(&e.message)));
+                    p.error = Some(format!("등록하지 못했다 — {}", crate::text::one_line(&e.message)));
                 }
             }
         }
@@ -247,7 +253,7 @@ impl App {
                     format!("✓ 뺌 · {} — 목록에서만 뺐다, 디렉터리와 .moai 는 그대로다", gone.join(", "))
                 });
             }
-            Err(e) => self.notice = Some(format!("! 빼지 못했다 — {}", one_line(&e.message))),
+            Err(e) => self.notice = Some(format!("! 빼지 못했다 — {}", crate::text::one_line(&e.message))),
         }
     }
 }
@@ -261,7 +267,7 @@ mod tests {
     use crate::tui::stamp_of;
 
     /// 진짜 디렉터리와 사용자 설정 한 벌. **돌리는 사람의 홈·설정은 안 읽는다** — 창은
-    /// `App::here` 에서, 쓰기는 층이 읽은 임시 설정 파일에 한다.
+    /// `App::launched_at` 에서, 쓰기는 층이 읽은 임시 설정 파일에 한다.
     struct Scratch(PathBuf);
 
     impl Scratch {
@@ -350,12 +356,16 @@ mod tests {
         let argos = s.project("work/argos");
         let cfg = s.register(&[&argos]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
-        a.here = Some(s.0.join("work"));
+        a.launched_at = Some(s.0.join("work"));
         a
     }
 
     /// **창은 한 층씩 읽고 표시를 낱말로 단다** — `.moai` 가 있는 것, 이미 등록한 것(링크로
     /// 가리켜도), 감춘 점 디렉터리의 수. 파일은 줄로 안 선다.
+    ///
+    /// 링크를 만드는 시험이라 unix 에서만 돈다 — 가리지 않으면 unix 가 아닌 곳에서 이 한
+    /// 시험이 아니라 **바이너리의 시험 전부**가 컴파일되지 않는다(`user_config` 의 링크 시험과 같다).
+    #[cfg(unix)]
     #[test]
     fn the_picker_marks_moai_and_registered_and_hides_dot_directories() {
         let s = Scratch::new("marks");
@@ -526,7 +536,7 @@ mod tests {
         let broken = "[[project]\npath = \"/a\"\n";
         std::fs::write(&cfg, broken).unwrap();
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
-        a.here = Some(s.dir("work"));
+        a.launched_at = Some(s.dir("work"));
         s.dir("work/x");
 
         a.key(key(KeyCode::Char('a')));
@@ -544,7 +554,7 @@ mod tests {
 
         // 설정 자리를 모르면 창을 안 연다.
         let mut none = App::on_projects(Layer::read(None, None));
-        none.here = Some(s.0.clone());
+        none.launched_at = Some(s.0.clone());
         none.key(key(KeyCode::Char('a')));
         assert_eq!(none.mode, Mode::Browse);
         assert!(none.notice.as_deref().is_some_and(|n| n.contains("자리를 모른다")), "{:?}", none.notice);
@@ -573,7 +583,7 @@ mod tests {
         let index = Index::of(&load.issues);
         let mut a = App::open(repo, load, index, NavPath::new(), stamp);
         a.user_config = Some(s.config());
-        a.here = Some(here.clone());
+        a.launched_at = Some(here.clone());
         assert!(a.layer.is_none());
         press(&mut a, &[KeyCode::Down]);
         let held = a.current();
