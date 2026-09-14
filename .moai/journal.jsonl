@@ -2499,3 +2499,13 @@
 {"ts":"2026-09-14T17:28:35Z","id":"moai-emcv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T17:31:22Z","id":"moai-fmv5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 머지(dbc2346), 합친 main 에서 시험 742·267 통과"}
 {"ts":"2026-09-14T17:31:25Z","id":"moai-55cp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T17:32:22Z","id":"moai-kojj.txo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — TUI / 검색 범위·실시간 거르기·찾은 글자 칠 (0ock)"}
+{"ts":"2026-09-14T17:32:35Z","id":"moai-kojj.txo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T17:32:46Z","id":"moai-3r5h","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 상세창 본문·태그에서도 / 검색이 찾은 글자를 칠한다 — 목록 줄은 id·제목만 칠해, 본문·태그 범위로 찾으면 왜 걸렸는지 안 보인다 (moai-yio7 에서)"}
+{"ts":"2026-09-14T17:33:24Z","id":"moai-kojj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-14T17:33:26Z","id":"moai-yio7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-14T17:33:28Z","id":"moai-00le","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-14T17:33:31Z","id":"moai-fmmg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-14T17:33:33Z","id":"moai-0ock","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review high --fix (리뷰 moai-kojj.txo) 결과 반영 뒤 worktree-moai-0ock 을 main 에 머지하고 넷(kojj·yio7·00le·fmmg)을 done. 구현은 84e42d0."}
+{"ts":"2026-09-14T17:38:33Z","id":"moai-55cp.0ji","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — SPC o 정렬 (55cp)"}
+{"ts":"2026-09-14T17:38:33Z","id":"moai-55cp.0ji","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
