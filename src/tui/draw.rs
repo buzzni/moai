@@ -556,7 +556,17 @@ fn prompt_room(avail: usize, error: usize) -> (usize, usize) {
 fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 테두리 두 칸을 뺀 안쪽 폭. 좁은 창에서도 음수가 되지 않게 막는다.
     let inner = at.width.saturating_sub(2) as usize;
-    let items: Vec<ListItem> = rows.iter().map(|r| ListItem::new(row_line(app, r, inner))).collect();
+    // 진행 바탕은 반전으로 깐다 — 사용자 팔레트를 모르므로 이름 있는 색 바탕 위에 글자색을
+    // 고르면 테마가 대비를 뒤집을 수 있다(moai-xs9x). 반전은 어느 테마에서도 읽힌다.
+    let room = inner.saturating_sub(crate::text::width(CURSOR));
+    let over = Style::new().add_modifier(Modifier::REVERSED);
+    let items: Vec<ListItem> = rows
+        .iter()
+        .map(|r| match row_line(app, r, inner) {
+            (line, Some((from, cut))) if app.shade => ListItem::new(shade(line, from, cut, room, over)),
+            (line, _) => ListItem::new(line),
+        })
+        .collect();
 
     // 제목에 칸별 건수를 **config 차례로** 낸다. 칸 이름과 순서는 저장소가
     // 정하는 것이라(`config.statuses`) 여기서 다시 정하지 않는다.
@@ -646,16 +656,20 @@ fn scroll_mark(f: &mut Frame, s: &Scroll, at: Rect, hint: &str, focused: bool) {
 }
 
 /// 한 줄: `id  p· 제목`. 디렉터리는 제목 뒤에 `/` 가 붙는다 — MC 와 같다.
-fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
+///
+/// 에픽·마일스톤 줄은 뒤에 `  끝난/일` 셈을 붙이고, **진행 바탕을 가를 칸**을 함께 낸다
+/// (줄 안의 칸 — 커서 자리는 안 센다). 셈이 글자로 남으므로 바탕이 없는 화면에서도
+/// 진척이 읽힌다 — 색이 혼자 뜻을 지지 않는다. 셀 일이 없으면 셈도 바탕도 없다.
+fn row_line<'a>(app: &App, r: &Row, budget: usize) -> (Line<'a>, Option<(usize, usize)>) {
     let e = match r {
         Row::Item(e) => e,
-        Row::Up => return Line::from(Span::styled("..", dim())),
-        Row::Project(at) => return place_line(app, *at, budget),
+        Row::Up => return (Line::from(Span::styled("..", dim())), None),
+        Row::Project(at) => return (place_line(app, *at, budget), None),
     };
     let is_dir = matches!(e, Entry::Dir { .. });
     let Some(at) = e.at() else {
         // 바구니는 제 줄이 없다 — 이름만 낸다.
-        return Line::from(Span::styled(format!("{}/", app.index.label(&app.issues, e)), dim()));
+        return (Line::from(Span::styled(format!("{}/", app.index.label(&app.issues, e)), dim())), None);
     };
     let i = &app.issues[at];
 
@@ -684,8 +698,16 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
     // 커서 자리 + 머리글 폭. **`CURSOR` 에서 잰다** — 숫자를 손으로 적으면
     // 글리프를 바꾼 날 제목 몫이 한두 칸 넉넉해지고, 넘친 줄은 위젯이 말없이
     // 잘라 내 잘렸다는 `…` 마저 사라진다.
-    let used =
-        crate::text::width(CURSOR) + head.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
+    let head_w = head.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
+    // 셈은 **제목보다 먼저 자리를 얻는다** — 긴 제목에 밀려 잘리면 바탕 없는 화면에서
+    // 진척을 말하는 것이 사라진다. 자는 상세 롤업과 같다(`Index::progress`).
+    let progress = if is_dir { Some(app.index.progress(&app.issues, &deeper(app, e))) } else { None };
+    let percent = progress.as_ref().and_then(|p| p.percent());
+    let tally = match (&progress, percent) {
+        (Some(p), Some(_)) => format!("  {}/{}", p.done, p.work.len()),
+        _ => String::new(),
+    };
+    let used = crate::text::width(CURSOR) + head_w + crate::text::width(&tally);
     let mut title = clip(&app.index.label(&app.issues, e), budget.saturating_sub(used));
     // **디렉터리 표시는 자른 뒤에 붙인다.** 먼저 붙이면 긴 제목에서 `/` 가
     // 제일 먼저 잘려 나가고, 목록에는 디렉터리라고 말하는 것이 달리 없다.
@@ -698,7 +720,14 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
 
     let mut spans = head;
     spans.push(Span::raw(title));
-    Line::from(spans)
+    if !tally.is_empty() {
+        spans.push(Span::styled(tally, dim()));
+    }
+    // 바탕의 100% 는 **제목 시작부터 테두리 안쪽 끝까지**다. 채울 칸은 CLI 막대와 같은
+    // 자(`text::bar_fill`)로 잰다 — 99% 가 꽉 차 보이지 않는다.
+    let room = budget.saturating_sub(crate::text::width(CURSOR));
+    let cut = percent.map(|p| (head_w, head_w + crate::text::bar_fill(Some(p), room.saturating_sub(head_w))));
+    (Line::from(spans), cut)
 }
 
 /// 커서가 머문 것을 정리해 낸다. 이슈면 그 이슈를, 디렉터리면 그 밑의 셈을.
@@ -754,16 +783,15 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     f.render_widget(Paragraph::new(lines).scroll((top, 0)), inner);
 }
 
-/// 한 줄을 **칸 `cut` 에서** 두 스타일로 가른다 — 앞은 제 스타일에 `over` 를 덧입고
-/// 뒤는 그대로. 줄은 `room` 칸까지 공백으로 채운다: 바탕은 글자가 없는 칸에도 깔려야
+/// 한 줄의 **칸 `from` 부터 `cut` 앞까지**에 제 스타일 위로 `over` 를 덧입힌다 — 나머지는
+/// 그대로. 줄은 `room` 칸까지 공백으로 채운다: 바탕은 글자가 없는 칸에도 깔려야
 /// 테두리 끝까지가 100% 로 읽힌다. 줄이 `room` 보다 넓으면 자르지 않는다 — 부르는 쪽이
 /// 먼저 맞춘다([`fit`]).
 ///
 /// **글자 가운데서 가르지 않는다.** 두 칸 글자가 경계에 걸리면 뒤로 보낸다 — 덜
 /// 칠하는 쪽이다. 99% 가 꽉 차 보이면 안 되는 `text::bar_fill` 과 같은 쪽의 거짓말이다.
 /// 폭 0 글자(결합 문자)는 앞 글자를 따라간다.
-#[cfg_attr(not(test), allow(dead_code))]
-fn shade(line: Line<'_>, cut: usize, room: usize, over: Style) -> Line<'static> {
+fn shade(line: Line<'_>, from: usize, cut: usize, room: usize, over: Style) -> Line<'static> {
     fn part(spans: &mut Vec<Span<'static>>, run: &mut String, style: Style) {
         if !run.is_empty() {
             spans.push(Span::styled(std::mem::take(run), style));
@@ -771,7 +799,7 @@ fn shade(line: Line<'_>, cut: usize, room: usize, over: Style) -> Line<'static> 
     }
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut col = 0;
-    let mut on = cut > 0;
+    let mut on = from == 0 && cut > 0;
     for span in line.spans {
         let (base, lit) = (span.style, span.style.patch(over));
         let mut run = String::new();
@@ -779,7 +807,7 @@ fn shade(line: Line<'_>, cut: usize, room: usize, over: Style) -> Line<'static> 
         for c in span.content.chars() {
             let w = crate::text::width(c.encode_utf8(&mut [0; 4]));
             if w > 0 {
-                on = col + w <= cut;
+                on = col >= from && col + w <= cut;
             }
             if on != run_on {
                 part(&mut spans, &mut run, if run_on { lit } else { base });
@@ -791,13 +819,12 @@ fn shade(line: Line<'_>, cut: usize, room: usize, over: Style) -> Line<'static> 
         part(&mut spans, &mut run, if run_on { lit } else { base });
     }
     if col < room {
-        let lit_pad = cut.min(room).saturating_sub(col);
-        if lit_pad > 0 {
-            spans.push(Span::styled(" ".repeat(lit_pad), over));
-        }
-        let rest = room - col - lit_pad;
-        if rest > 0 {
-            spans.push(Span::raw(" ".repeat(rest)));
+        let lit_from = from.clamp(col, room);
+        let lit_to = cut.clamp(lit_from, room);
+        for (a, b, style) in [(col, lit_from, Style::new()), (lit_from, lit_to, over), (lit_to, room, Style::new())] {
+            if b > a {
+                spans.push(Span::styled(" ".repeat(b - a), style));
+            }
         }
     }
     Line::from(spans).style(line.style)
@@ -1507,6 +1534,52 @@ pub(super) mod tests {
         App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new())
     }
 
+    /// 에픽 줄에 **진행 바탕이 제목부터 끝난 몫만큼** 깔리고, 셈이 글자로도 선다.
+    /// 커서는 다른 줄에 둔다 — 커서 줄은 통째로 반전이라 바탕과 안 갈린다(moai-ke4l).
+    #[test]
+    fn an_epic_row_is_shaded_as_far_as_it_is_done() {
+        let mut issues = issues();
+        issues.push(Issue::new(
+            "argos-0009".into(),
+            "에픽 없는 일".into(),
+            Kind::Issue,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        ));
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(Entry::Leaf { .. }))).unwrap();
+        let (w, h) = (80u16, 10u16);
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let text = render(&mut a, w, h);
+        let y = text.iter().position(|l| l.contains("argos-0001")).expect("에픽 줄이 없다") as u16;
+        assert!(text[y as usize].contains("1/2"), "셈이 글자로 안 섰다\n{}", text.join("\n"));
+
+        let lit: Vec<u16> = (0..w).filter(|&x| buf[(x, y)].modifier.contains(Modifier::REVERSED)).collect();
+        let (first, last) = (*lit.first().expect("바탕이 없다"), *lit.last().unwrap());
+        // 두 칸 글자의 뒤 칸은 버퍼가 비워 둔다(수식자도 안 붙는다) — 그 칸만 빈틈으로 봐준다.
+        let wide_tail = |x: u16| x > 0 && crate::text::width(buf[(x - 1, y)].symbol()) == 2;
+        assert!(
+            (first..=last).all(|x| buf[(x, y)].modifier.contains(Modifier::REVERSED) || wide_tail(x)),
+            "바탕이 끊겼다"
+        );
+        let lit = (first..=last).collect::<Vec<_>>();
+        assert_eq!(buf[(first, y)].symbol(), "아", "바탕이 제목에서 시작하지 않는다");
+        // 목록 칸의 오른쪽 테두리 앞까지가 100% — 테두리 칸 x 는 제목 줄의 끝에서 찾는다.
+        let border = (first..w).find(|&x| buf[(x, y)].symbol() == "│").expect("테두리가 없다");
+        let span = (border - first) as usize;
+        let want = crate::text::bar_fill(Some(50), span);
+        let got = lit.len();
+        assert!(got <= want && got + 1 >= want, "50% 가 아니다 — {got}/{span}");
+
+        // 끄면 바탕이 없고 셈은 남는다.
+        a.shade = false;
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        assert!((0..w).all(|x| !buf[(x, y)].modifier.contains(Modifier::REVERSED)), "껐는데 깔렸다");
+    }
+
     /// 진행 바탕을 가르는 조각은 **폭을 지키고 글자 가운데서 안 가른다** — 한 칸이 새면
     /// 줄이 테두리를 넘고, 두 칸 글자를 가르면 반쪽 글자가 선다.
     #[test]
@@ -1523,19 +1596,24 @@ pub(super) mod tests {
         let line = || Line::from(vec![Span::styled("ab", dim()), Span::raw("한글")]);
 
         // 경계(3칸)가 두 칸 글자 가운데 — 그 글자는 뒤로 간다.
-        let got = shade(line(), 3, 10, lit);
+        let got = shade(line(), 0, 3, 10, lit);
         assert_eq!((text(&got, true).as_str(), text(&got, false).as_str()), ("ab", "한글    "));
         // 글 뒤 빈칸까지 칠한다. 덧입어도 제 색은 남는다.
-        let got = shade(line(), 8, 10, lit);
+        let got = shade(line(), 0, 8, 10, lit);
         assert_eq!((text(&got, true).as_str(), text(&got, false).as_str()), ("ab한글  ", "  "));
         assert_eq!(got.spans[0].style.fg, Some(Color::DarkGray), "제 색을 잃었다");
+        // 시작 칸 앞은 안 칠한다 — 에픽 줄의 id·우선순위 자리다.
+        let got = shade(line(), 2, 8, 10, lit);
+        assert_eq!((text(&got, true).as_str(), text(&got, false).as_str()), ("한글  ", "ab  "));
         // 양 끝.
-        assert_eq!(text(&shade(line(), 0, 10, lit), true), "");
-        assert_eq!(text(&shade(line(), 10, 10, lit), false), "");
-        for cut in 0..=12 {
-            let got = shade(line(), cut, 10, lit);
-            assert_eq!(width(&got), 10, "폭이 샜다 @ {cut}");
-            assert!(crate::text::width(&text(&got, true)) <= cut, "경계를 넘겨 칠했다 @ {cut}");
+        assert_eq!(text(&shade(line(), 0, 0, 10, lit), true), "");
+        assert_eq!(text(&shade(line(), 0, 10, 10, lit), false), "");
+        for from in 0..=4 {
+            for cut in from..=12 {
+                let got = shade(line(), from, cut, 10, lit);
+                assert_eq!(width(&got), 10, "폭이 샜다 @ {from}..{cut}");
+                assert!(crate::text::width(&text(&got, true)) <= cut - from, "경계를 넘겨 칠했다 @ {from}..{cut}");
+            }
         }
     }
 

@@ -319,6 +319,9 @@ pub struct App {
     /// 본문을 그리지 않고 원문 그대로 보는가. 그린 글은 기호가 지워져
     /// 되돌릴 수 없다 — 긁어 붙이거나 마크다운을 고칠 때 이 길이 필요하다.
     pub raw: bool,
+    /// 에픽·마일스톤 줄에 진행 바탕을 까는가(moai-94uf). **세션만 든다, 켜진 채로 시작한다** —
+    /// 포커스 없이 여러 묶음의 진척을 한눈에 보는 것이 이 탐색기의 쓸모라서다.
+    pub shade: bool,
     /// 마지막으로 읽은 파일의 (고친 때, 길이).
     stamp: Stamp,
     /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과 그 표식(`worktree::gather`
@@ -431,6 +434,7 @@ impl App {
             focus: Pane::default(),
             detail: Scroll::default(),
             raw: false,
+            shade: true,
             filter_text: None,
             repo: None,
             now: crate::model::now(),
