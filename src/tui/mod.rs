@@ -7,6 +7,7 @@ pub mod draw;
 pub mod edit;
 pub mod form;
 pub mod input;
+pub mod keys;
 pub mod layer;
 pub mod picker;
 pub mod register;
@@ -19,7 +20,8 @@ use crate::query::{Filter, Raw, Where};
 use crate::store::{Load, Repo};
 use form::{Act, Form};
 use input::Input;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use keys::Lookup;
+use ratatui::crossterm::event::KeyEvent;
 use scroll::{PAGE, Scroll};
 
 /// 목록의 한 줄. `..` 은 이슈가 아니므로 [`Entry`] 로는 못 담는다.
@@ -593,7 +595,10 @@ impl App {
                 };
                 let told = match self.land(&id) {
                     Landing::Shown => format!("✓ {done} · {what}"),
-                    Landing::Hidden => format!("✓ {done} · {what} — 거름망에 가려 안 보인다 · Esc 로 푼다"),
+                    Landing::Hidden => format!(
+                        "✓ {done} · {what} — 거름망에 가려 안 보인다 · {} 로 푼다",
+                        keys::label(keys::BROWSE, keys::Browse::ClearFilter)
+                    ),
                     // 다시 읽기가 실패했으면 그 까닭은 `trouble` 이 따로 댄다. 담긴 것은 참이다.
                     Landing::Missing => format!("✓ {done} · {what} — 다시 읽은 목록에 없다"),
                 };
@@ -1018,66 +1023,65 @@ impl App {
         // 쓰기의 알림은 **다음 키 하나에 걷힌다.** 읽었으면 할 일을 다 했고, 이 키가 또
         // 쓰기라면 그 쓰기가 제 알림을 새로 단다.
         self.notice = None;
+        // raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. **어느 모드에서든 먼저 받는다** — 글을
+        // 받는 중에 글자로 먹으면 검색칸에 `c` 가 찍히고, 폼·창·물음에서 막히면 멈춘 화면에서
+        // 나갈 길이 없다. 적던 것은 그 길로 날아간다.
+        if let Lookup::Run(keys::Anywhere::Quit) = keys::lookup(keys::ANYWHERE, &[k]) {
+            self.quit = true;
+            return;
+        }
         // 글을 받는 동안에는 이동키가 글자다. 먼저 가로챈다. **`Tab` 도 여기서
         // 멈춘다** — 적다 말고 포커스가 튀면 적던 것을 잃는다.
         if !matches!(self.mode, Mode::Browse) {
             self.typing(k);
             return;
         }
-        // 층에서 뜻이 없는 키는 **왜 안 되는지를** 한 줄로 말한다. `n` 은 층에서도 듣는다 —
-        // 커서의 프로젝트를 담을 곳으로 박는다([`App::open_form`]).
-        if self.on_layer()
-            && let Some(say) = layer::refused(&k)
-        {
-            self.notice = Some(say.to_string());
-            return;
-        }
-        match k.code {
-            // raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. 안 받으면 길이 막힌다.
-            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => self.quit = true,
-            // **거들쇠가 붙은 글자키는 여기 뜻이 없다.** Ctrl-C 말고는 아무 글자키도
-            // Ctrl·Alt 와 짝지어 두지 않았으므로, 안 거르면 Ctrl-A 가 등록 창을 열고
-            // Ctrl-D 가 "목록에서 뺄까" 를 띄운다 — 둘 다 터미널에서 다른 뜻으로 손에 익은
-            // 키다. 조각들은 이미 이렇게 거른다(`picker::key`·`layer::refused`·
-            // `settle_unregister`); 키를 나누는 이 자리만 빠져 있었다.
-            KeyCode::Char(_) if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {}
-            KeyCode::Char('q') | KeyCode::F(10) => self.quit = true,
-            // 터미널에 따라 `Shift-Tab` 이 `BackTab` 으로도, Shift 가 붙은 `Tab`
-            // 으로도 온다. 한쪽만 받으면 어느 터미널에서는 뒤로 못 돈다.
-            KeyCode::BackTab => self.focus = self.focus.prev(),
-            KeyCode::Tab if k.modifiers.contains(KeyModifiers::SHIFT) => self.focus = self.focus.prev(),
-            KeyCode::Tab => self.focus = self.focus.next(),
-            KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown => {
-                self.step(k)
+        // **키의 뜻은 표에서 읽는다**([`keys::BROWSE`]). 표에 없는 키 — Ctrl·Alt 붙은 글자키도
+        // — 는 여기 뜻이 없다: 안 거르면 Ctrl-A 가 등록 창을, Ctrl-D 가 "목록에서 뺄까" 를
+        // 띄운다.
+        let Lookup::Run(act) = keys::lookup(keys::BROWSE, &[k]) else { return };
+        // **되는지는 한 판정이 가른다**([`keys::Browse::enabled`]) — 키 바가 같은 판정으로
+        // 적을 키를 고르므로 둘이 안 갈린다. 층에서 뜻이 없는 키는 왜 안 되는지를 한 줄로
+        // 말한다. `n` 은 층에서도 듣는다 — 커서의 프로젝트를 담을 곳으로 박는다([`App::open_form`]).
+        match act.enabled(&self.key_ctx()) {
+            Ok(()) => {}
+            Err(keys::Off::Quiet) => return,
+            Err(keys::Off::Why(say)) => {
+                self.notice = Some(say);
+                return;
             }
-            // **드나드는 키도 포커스를 탄다.** 상세를 읽다가 누른 Enter·←가 목록을
+        }
+        use keys::Browse as B;
+        match act {
+            B::Quit => self.quit = true,
+            B::FocusPrev => self.focus = self.focus.prev(),
+            B::FocusNext => self.focus = self.focus.next(),
+            B::Step => self.step(k),
+            // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
             // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
-            KeyCode::Enter | KeyCode::Right if self.focus == Pane::Explorer => self.enter(),
-            KeyCode::Backspace | KeyCode::Left if self.focus == Pane::Explorer => self.leave(),
-            KeyCode::Char('/') => self.mode = Mode::Grep(Input::default()),
-            KeyCode::Char('f') | KeyCode::F(7) => self.mode = Mode::Filter(Input::default()),
+            B::Enter => self.enter(),
+            B::Leave => self.leave(),
+            B::Grep => self.mode = Mode::Grep(Input::default()),
+            B::Filter => self.mode = Mode::Filter(Input::default()),
             // **포커스와 상관없이 연다.** 무엇을 보다가 떠올랐든 담는 칸은 하나다. 담을 곳은
             // 여는 순간 박힌다 — 층에서는 커서의 프로젝트다(moai-fccv).
-            KeyCode::Char('n') => self.open_form(),
+            B::Jot => self.open_form(),
             // 등록은 사람의 설정이지 이 프로젝트의 것이 아니라 **어디서든 연다**(moai-plvy).
-            KeyCode::Char('a') => self.open_picker(),
-            // 해제는 층의 줄에서만 — 지금 선 프로젝트를 빼는 일이 안 생긴다. 드나드는 키처럼
-            // 목록 포커스를 탄다(커서가 선 줄을 뺀다).
-            KeyCode::Char('d') | KeyCode::Delete if self.on_layer() && self.focus == Pane::Explorer => {
-                self.ask_unregister()
-            }
+            B::Pick => self.open_picker(),
+            // 해제는 층의 줄에서만, 목록 포커스로(`enabled`) — 커서가 선 줄을 뺀다.
+            B::Unregister => self.ask_unregister(),
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
-            KeyCode::Esc => self.clear_filter(),
-            KeyCode::F(5) | KeyCode::Char('r') => self.reload(),
+            B::ClearFilter => self.clear_filter(),
+            B::Reload => self.reload(),
             // 켜고 끄는 것은 **다시 읽는 것**이다. 겹친 줄은 적재 때 한 번 세는 것이라
             // (`states`·거름망·경고), 들고 있는 것에 덧칠하면 셈이 옛 줄로 남는다.
-            KeyCode::Char('w') => {
+            B::Worktree => {
                 self.worktree = !self.worktree;
                 self.reload();
             }
-            KeyCode::F(3) | KeyCode::Char('m') => {
+            B::Raw => {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
                 // 엉뚱한 데가 나온다.
@@ -1087,11 +1091,22 @@ impl App {
             // 것이므로, 굴리려고 커서를 옮기게 하면 보던 이슈를 잃는다.
             // **포커스와 상관없이 듣는다** — 포커스가 생기기 전부터 손에 익은
             // 사람이 있고, 목록에 선 채로 상세를 한 칸 굴리는 길이 여전히 쓸모 있다.
-            KeyCode::Char('j') => self.detail.by(1),
-            KeyCode::Char('k') => self.detail.by(-1),
-            KeyCode::Char(' ') => self.detail.by(PAGE as isize),
-            KeyCode::Char('b') => self.detail.by(-(PAGE as isize)),
-            _ => {}
+            B::DetailDown => self.detail.by(1),
+            B::DetailUp => self.detail.by(-1),
+            B::DetailPageDown => self.detail.by(PAGE as isize),
+            B::DetailPageUp => self.detail.by(-(PAGE as isize)),
+        }
+    }
+
+    /// 키 표가 켜짐과 낱말을 가를 값. **여기서 잰다** — 표([`keys`])는 조각이라 `App` 을 모른다.
+    pub fn key_ctx(&self) -> keys::Ctx {
+        keys::Ctx {
+            layer: self.on_layer(),
+            list_focus: self.focus == Pane::Explorer,
+            worktree: self.worktree,
+            raw: self.raw,
+            next_pane: draw::pane_name(self.focus.next()),
+            prev_pane: draw::pane_name(self.focus.prev()),
         }
     }
 
@@ -1148,27 +1163,21 @@ impl App {
         if eaten {
             return;
         }
-        // **Ctrl 은 글자가 아니다.** raw mode 에서는 Ctrl-C 가 신호로 오지
-        // 않으므로, 글자로 먹으면 검색칸에 `c` 가 찍히고 나갈 길이 Esc 하나로
-        // 줄어든다. 칸이 안 먹은 그 밖의 Ctrl 조합(Ctrl-Enter 같은 것)은 아무
-        // 일도 하지 않는다 — 옮기기 전과 같다.
+        // 칸이 안 먹은 키는 표([`keys::PROMPT`])가 가른다 — Enter·Esc. **Ctrl 은 글자가
+        // 아니다**: 칸이 안 먹은 Ctrl 조합(Ctrl-Enter 같은 것)은 표에 없어 아무 일도 하지
+        // 않는다. Ctrl-C 는 [`App::key`] 가 이미 받았다.
         //
         // **Alt 는 옮기면서 바뀌었다.** 옛 `typing()` 은 Alt 를 안 보고 `Alt-b` 를
         // `b` 로, `Alt-Backspace` 를 한 글자 지우기로 먹었다. 칸은 Alt 조합을
         // 글자로 치지 않으므로(Alt 를 Meta 로 보내는 터미널에서 `b` 가 찍히는 것은
         // 사람이 친 것이 아니다) 이제 둘 다 아무 일도 하지 않는다.
-        if k.modifiers.contains(KeyModifiers::CONTROL) {
-            if k.code == KeyCode::Char('c') {
-                self.quit = true;
-            }
-            return;
-        }
+        let Lookup::Run(act) = keys::lookup(keys::PROMPT, &[k]) else { return };
         if matches!(self.mode, Mode::Ask(_)) {
-            self.answer(k);
+            self.answer(act);
             return;
         }
-        match k.code {
-            KeyCode::Enter => {
+        match act {
+            keys::Prompt::Apply => {
                 let mode = self.mode.clone();
                 // 잘못 적은 것은 버리지 않고 그 자리에 둔다 — 지우고 다시 치게
                 // 하면 긴 거름망일수록 고치기가 벌이 된다.
@@ -1177,8 +1186,7 @@ impl App {
                     self.cursor = self.cursor.min(self.rows().len().saturating_sub(1));
                 }
             }
-            KeyCode::Esc => self.mode = Mode::Browse,
-            _ => {}
+            keys::Prompt::Cancel => self.mode = Mode::Browse,
         }
     }
 
@@ -1192,8 +1200,15 @@ impl App {
     /// 해제 물음에서는 **다른 키처럼** 물음을 거둔다: 붙인 글 속 `y` 는 답이 아니다.
     pub fn paste(&mut self, s: &str) {
         self.notice = None;
-        // 층에서는 `/`·`f` 가 안 열린다(`layer::refused`) — 열리는 칸만 댄다.
-        let open = if self.on_layer() { "`n`" } else { "`/`·`f`·`n`" };
+        // 층에서는 `/`·`f` 가 안 열린다 — **키 처리와 같은 판정**([`keys::Browse::enabled`])으로
+        // 열리는 칸만 대고, 키 이름은 표에서 읽는다.
+        let ctx = self.key_ctx();
+        let open: Vec<String> = [keys::Browse::Grep, keys::Browse::Filter, keys::Browse::Jot]
+            .into_iter()
+            .filter(|a| a.enabled(&ctx).is_ok())
+            .map(|a| format!("`{}`", keys::label(keys::BROWSE, a)))
+            .collect();
+        let open = open.join("·");
         match &mut self.mode {
             Mode::Browse => self.notice = Some(format!("붙여 넣을 칸이 없다 — {open} 으로 칸을 열고 붙인다")),
             Mode::Grep(input) | Mode::Filter(input) => input.paste(s),
@@ -1215,18 +1230,17 @@ impl App {
     ///
     /// 받거나 그만두면 **적던 모드로 먼저 돌아간다.** 받았으면 그다음에 쓰기를 다시
     /// 부른다 — 다시 부른 쓰기는 되돌려 놓은 폼에서 적던 것을 읽는다.
-    fn answer(&mut self, k: KeyEvent) {
+    fn answer(&mut self, act: keys::Prompt) {
         let Mode::Ask(ask) = &mut self.mode else { return };
-        let who = match k.code {
-            KeyCode::Enter => match crate::model::Actor::parse(ask.input.text()) {
+        let who = match act {
+            keys::Prompt::Apply => match crate::model::Actor::parse(ask.input.text()) {
                 Some(who) => Some(who),
                 None => {
                     ask.error = Some(format!("`이름 (메일)` 모양이 아니다 — 예: {ASK_EXAMPLE}"));
                     return;
                 }
             },
-            KeyCode::Esc => None,
-            _ => return,
+            keys::Prompt::Cancel => None,
         };
         let Mode::Ask(ask) = std::mem::replace(&mut self.mode, Mode::Browse) else { return };
         self.mode = *ask.back;
@@ -1238,13 +1252,9 @@ impl App {
 
     /// 생각 담기 폼의 키. **무엇을 할지는 폼이 정하고**([`Form::key`]) 여기는 그대로 한다.
     ///
-    /// Ctrl-C 는 폼보다 먼저 받는다 — 어느 모드에서든 나가는 길이다. 적던 것은 그 길로
-    /// 날아가지만, raw mode 에서 Ctrl-C 를 막으면 멈춘 화면에서 나갈 길이 없어진다.
+    /// Ctrl-C 는 폼보다 먼저 [`App::key`] 가 받는다 — 어느 모드에서든 나가는 길이다. 적던 것은
+    /// 그 길로 날아가지만, raw mode 에서 Ctrl-C 를 막으면 멈춘 화면에서 나갈 길이 없어진다.
     fn jot(&mut self, k: KeyEvent) {
-        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
-            self.quit = true;
-            return;
-        }
         let Mode::Idea(form) = &mut self.mode else { return };
         match form.key(k) {
             Act::Stay => {}
@@ -1445,6 +1455,7 @@ fn split_filter(q: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
     use crate::model::{Kind, Status};
 
     fn cfg() -> Config {

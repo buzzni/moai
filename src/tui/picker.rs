@@ -10,8 +10,9 @@
 //! 보지도 않을 디렉터리 이름까지 읽는다.
 
 use super::input::Input;
+use super::keys::{Goto, Lookup, PATH, PICK, Pick, label, lookup};
 use super::scroll::Scroll;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use std::path::{Path, PathBuf};
 
 /// 하위 디렉터리 하나.
@@ -79,11 +80,15 @@ pub enum Act {
     Close,
 }
 
-/// `..` 에서 `a` 를 누른 까닭.
-pub const UP_IS_NOT_A_PROJECT: &str = "`..` 은 등록하지 않는다 — 올라가서 `./` 에서 a";
+/// `..` 에서 `a` 를 누른 까닭. 키 이름은 표에서 읽는다 — 등록 키를 옮기면 이 말도 따라온다.
+pub fn up_is_not_a_project() -> String {
+    format!("`..` 은 등록하지 않는다 — 올라가서 `./` 에서 {}", label(PICK, Pick::Register))
+}
 
 /// `./` 에서 Enter 를 누른 까닭.
-pub const HERE_IS_ALREADY_OPEN: &str = "`./` 은 지금 열어 둔 디렉터리다 — 여기를 등록하려면 a";
+pub fn here_is_already_open() -> String {
+    format!("`./` 은 지금 열어 둔 디렉터리다 — 여기를 등록하려면 {}", label(PICK, Pick::Register))
+}
 
 impl Picker {
     /// 첫 층으로 연다. 커서는 첫 하위 디렉터리에 선다 — 고르러 들어온 사람이 먼저 보는 것은 밑이다.
@@ -166,11 +171,9 @@ impl Picker {
             if input.key(k) {
                 return Act::Stay;
             }
-            if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
-                return Act::Stay;
-            }
-            return match k.code {
-                KeyCode::Enter => {
+            // 칸이 안 먹은 키는 표([`PATH`])가 가른다. Ctrl·Alt 붙은 키는 표에 없어 아무 일도 없다.
+            return match lookup(PATH, &[k]) {
+                Lookup::Run(Goto::Go) => {
                     let text = input.text().trim().to_string();
                     self.typing = None;
                     // **`~` 는 든 쪽이 푼다.** 여기는 조각이라 홈을 모른다(환경을 안 본다).
@@ -183,47 +186,50 @@ impl Picker {
                         t => Act::Go(self.at.dir.join(t)),
                     }
                 }
-                KeyCode::Esc => {
+                Lookup::Run(Goto::Cancel) => {
                     self.typing = None;
                     Act::Stay
                 }
-                _ => Act::Stay,
+                Lookup::Pending | Lookup::Unknown => Act::Stay,
             };
         }
-        if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
-            return Act::Stay;
-        }
-        if let Some(at) = super::scroll::cursor(k, self.cursor, || self.rows().len()) {
-            self.cursor = at;
+        // 키의 뜻은 표([`PICK`])에서 읽는다. 창의 줄은 전부 Ctrl·Alt 없이 누른 키라, 거들쇠가
+        // 붙은 키는 표에 없어 아무 일도 없다.
+        let Lookup::Run(act) = lookup(PICK, &[k]) else { return Act::Stay };
+        if act == Pick::Step {
+            if let Some(at) = super::scroll::cursor(k, self.cursor, || self.rows().len()) {
+                self.cursor = at;
+            }
             return Act::Stay;
         }
         let row = self.current();
-        match k.code {
-            KeyCode::Enter | KeyCode::Right => match row {
+        match act {
+            Pick::Step => Act::Stay,
+            Pick::Enter => match row {
                 Some(r @ (Row::Up | Row::Dir(_))) => self.path_of(r).map_or(Act::Stay, Act::Go),
                 // `./` 은 이미 여기다 — 들어갈 데가 없다. **조용히 먹지 않는다**: 아랫줄이
                 // `Enter 들어가기` 를 대고 있고, 하위 디렉터리가 없는 자리에서는 커서가
                 // 여기 서므로(`first_dir`) 아무 말 없으면 창이 멎은 줄 안다(`..` 의 `a` 와 같다).
                 Some(Row::Here) => {
-                    self.error = Some(HERE_IS_ALREADY_OPEN.into());
+                    self.error = Some(here_is_already_open());
                     Act::Stay
                 }
                 None => Act::Stay,
             },
-            KeyCode::Backspace | KeyCode::Left => self.path_of(Row::Up).map_or(Act::Stay, Act::Go),
-            KeyCode::Char('a') => match row {
+            Pick::Up => self.path_of(Row::Up).map_or(Act::Stay, Act::Go),
+            Pick::Register => match row {
                 Some(Row::Up) => {
-                    self.error = Some(UP_IS_NOT_A_PROJECT.into());
+                    self.error = Some(up_is_not_a_project());
                     Act::Stay
                 }
                 Some(r) => self.path_of(r).map_or(Act::Stay, Act::Register),
                 None => Act::Stay,
             },
-            KeyCode::Char('.') => {
+            Pick::Hidden => {
                 self.show_hidden = !self.show_hidden;
                 Act::Go(self.at.dir.clone())
             }
-            KeyCode::Char('g') => {
+            Pick::Path => {
                 let mut text = self.at.dir.display().to_string();
                 if !text.ends_with(std::path::MAIN_SEPARATOR) {
                     text.push(std::path::MAIN_SEPARATOR);
@@ -231,8 +237,7 @@ impl Picker {
                 self.typing = Some(Input::new(&text));
                 Act::Stay
             }
-            KeyCode::Esc | KeyCode::Char('q') => Act::Close,
-            _ => Act::Stay,
+            Pick::Close => Act::Close,
         }
     }
 }
@@ -240,6 +245,7 @@ impl Picker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
     fn press(p: &mut Picker, code: KeyCode) -> Act {
         p.key(KeyEvent::new(code, KeyModifiers::NONE))
@@ -298,7 +304,10 @@ mod tests {
         assert_eq!(press(&mut p, KeyCode::Char('a')), Act::Register("/w/mono".into()));
         p.cursor = 1;
         assert_eq!(press(&mut p, KeyCode::Char('a')), Act::Stay);
-        assert_eq!(p.error.as_deref(), Some(UP_IS_NOT_A_PROJECT));
+        assert_eq!(p.error, Some(up_is_not_a_project()));
+        // 문구는 표에서 키 이름을 읽어 짓는다 — 옮기기 전과 한 글자도 같다(moai-nc7w).
+        assert_eq!(up_is_not_a_project(), "`..` 은 등록하지 않는다 — 올라가서 `./` 에서 a");
+        assert_eq!(here_is_already_open(), "`./` 은 지금 열어 둔 디렉터리다 — 여기를 등록하려면 a");
         press(&mut p, KeyCode::Down);
         assert_eq!(p.error, None, "까닭이 다음 키에 안 걷혔다");
         // Ctrl·Alt 붙은 `a` 는 등록이 아니다

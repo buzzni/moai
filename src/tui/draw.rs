@@ -5,6 +5,7 @@
 //! 모든 색에 글리프나 낱말이 붙는다.
 
 use super::form::{Field, Form, Target};
+use super::keys::{BROWSE, Browse, CONFIRM, Confirm, Goto, JOT, Jot, PATH, PICK, PROMPT, Pick, Prompt, label, labels};
 use super::scroll::Scroll;
 use super::layer::{Look, Place, Shut};
 use super::picker::{self, Picker};
@@ -98,19 +99,23 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 F키 바가 선다.
     match &app.mode {
         Mode::Browse => fkeys(f, app, keys),
-        Mode::Grep(q) => prompt(f, keys, "검색", q, app.input_error(), "Enter 걸기  Esc 그만"),
-        Mode::Filter(q) => prompt(f, keys, "거름망", q, app.input_error(), "Enter 걸기  Esc 그만"),
+        // 안내 속 키 이름은 표에서 읽는다 — 키를 옮기면 안내도 따라온다.
+        Mode::Grep(q) => prompt(f, keys, "검색", q, app.input_error(), &prompt_help("걸기")),
+        Mode::Filter(q) => prompt(f, keys, "거름망", q, app.input_error(), &prompt_help("걸기")),
         Mode::Ask(ask) => {
             // 글칸이 **아래**에서 자리를 먼저 얻는다 — 창이 낮아 한 줄만 남으면 적는 칸이
             // 안내에 가려 어디에 치는지 안 보인다.
             let [why, line] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(keys);
             let text = clip(&ask_why(&ask.why), why.width as usize);
             f.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::new().fg(Color::Black).bg(Color::LightYellow)))), why);
-            prompt(f, line, "누구", &ask.input, ask.error.clone(), "이름 (메일)  Enter 쓰기  Esc 그만");
+            prompt(f, line, "누구", &ask.input, ask.error.clone(), &format!("이름 (메일)  {}", prompt_help("쓰기")));
         }
         Mode::Idea(form) => jot_keys(f, form, keys),
         Mode::Pick(p) => match &p.typing {
-            Some(input) => prompt(f, keys, "경로", input, p.error.clone(), "Enter 가기  Esc 그만"),
+            Some(input) => {
+                let help = format!("{} 가기  {} 그만", label(PATH, Goto::Go), label(PATH, Goto::Cancel));
+                prompt(f, keys, "경로", input, p.error.clone(), &help)
+            }
             None => pick_keys(f, p, keys),
         },
         Mode::Unregister(u) => {
@@ -121,7 +126,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             let room = keys.width as usize;
             let name = clip(&crate::text::one_line(&u.name), (room / 2).max(1));
             let line = Line::from(Span::styled(
-                format!(" {name} 을 목록에서 뺄까 — y 뺀다 · 다른 키는 그만 · 디렉터리와 .moai 는 그대로다 "),
+                format!(" {name} 을 목록에서 뺄까 — {} 뺀다 · 다른 키는 그만 · 디렉터리와 .moai 는 그대로다 ", label(CONFIRM, Confirm::Yes)),
                 ask,
             ));
             f.render_widget(Paragraph::new(fit(line, keys.width as usize)), keys);
@@ -146,10 +151,10 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect) {
     let title = format!(" 프로젝트 등록 · {} ", crate::text::clip_front(&dir, room));
     let mut foot: Vec<String> = Vec::new();
     if p.at.hidden > 0 {
-        foot.push(format!("숨은 것 {}개 · . 로 보인다", p.at.hidden));
+        foot.push(format!("숨은 것 {}개 · {} 로 보인다", p.at.hidden, label(PICK, Pick::Hidden)));
     }
     if p.at.cut > 0 {
-        foot.push(format!("그 밖 {}개 — g 로 경로를 적는다", p.at.cut));
+        foot.push(format!("그 밖 {}개 — {} 로 경로를 적는다", p.at.cut, label(PICK, Pick::Path)));
     }
     let mut block = Block::default()
         .borders(Borders::ALL)
@@ -211,13 +216,10 @@ fn pick_keys(f: &mut Frame, p: &Picker, at: Rect) {
         ]);
         return f.render_widget(Paragraph::new(fit(line, at.width as usize)), at);
     }
-    let optional = vec![
-        key(".", if p.show_hidden { "숨은 것 감추기" } else { "숨은 것" }),
-        key("g", "경로 적기"),
-        key("Bksp", "위로"),
-        key("Enter", "들어가기"),
-    ];
-    bar(f, at, optional, vec![key("a", "등록"), key("Esc", "닫기")]);
+    // 이름과 낱말은 키 표([`PICK`])에서 읽는다. 여기서 정하는 것은 차례뿐이다.
+    let hint = |a: Pick| key(&label(PICK, a), a.what(p.show_hidden));
+    let optional = vec![hint(Pick::Hidden), hint(Pick::Path), hint(Pick::Up), hint(Pick::Enter)];
+    bar(f, at, optional, vec![hint(Pick::Register), hint(Pick::Close)]);
 }
 
 /// 생각 담기 폼. 제목 칸(세 줄) 밑에 본문 칸이 남은 높이를 다 먹는다.
@@ -318,22 +320,21 @@ fn jot_head<'a>(into: &Target, w: usize, tint: Style) -> Line<'a> {
 fn jot_keys(f: &mut Frame, form: &Form, at: Rect) {
     let line = if form.leaving {
         let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
-        Line::from(Span::styled(" 적던 것을 버릴까 — y 버린다 · 다른 키는 폼으로 돌아간다 ", ask))
+        Line::from(Span::styled(format!(" 적던 것을 버릴까 — {} 버린다 · 다른 키는 폼으로 돌아간다 ", label(CONFIRM, Confirm::Yes)), ask))
     } else if let Some(e) = &form.error {
         Line::from(vec![
             Span::styled(" ! ", Style::new().fg(Color::Black).bg(Color::LightRed)),
             Span::styled(format!(" {e}"), Style::new().fg(Color::LightRed)),
         ])
     } else {
-        let (next, enter) = match form.field {
-            Field::Title => ("본문", "본문으로"),
-            Field::Body => ("제목", "줄 나누기"),
-        };
+        // 이름과 낱말은 키 표([`JOT`])에서 읽는다 — `Tab`·`Enter` 의 낱말은 포커스 칸에 달렸다.
+        let title = form.field == Field::Title;
+        let hint = |a: Jot| key(&label(JOT, a), a.what(title));
         Line::from(vec![
-            key("Ctrl-S·F2", "담기"),
-            key("Tab", next),
-            key("Enter", enter),
-            key("Esc", "닫기"),
+            hint(Jot::Save),
+            hint(Jot::Switch),
+            hint(Jot::Next),
+            hint(Jot::Close),
             Span::styled("   idea 로 담긴다 — 에픽 없이", dim()),
         ])
     };
@@ -423,7 +424,7 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
     // 그러면 사람이 도구를 의심하는 대신 자료를 의심한다. 그래서 **뱃지 자리를
     // 먼저 뗀다** — 경로를 줄 폭 전체로 자르면 깊이 들어갔을 때 뱃지가 줄
     // 밖으로 밀려 통째로 사라지고, 하필 그때가 목록이 가장 짧아 보이는 때다.
-    let badge = app.filter_text.as_ref().map(|t| clip(&format!("[{t}]  Esc 로 푼다"), w));
+    let badge = app.filter_text.as_ref().map(|t| clip(&format!("[{t}]  {} 로 푼다", label(BROWSE, Browse::ClearFilter)), w));
     let room = match &badge {
         Some(b) => w.saturating_sub(crate::text::width(b) + 3),
         None => w,
@@ -433,7 +434,7 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
     let overlay = app.worktree.then(|| {
         let trees = app.origin.labels();
         let names = if trees.is_empty() { "옆 워크트리 없음".to_string() } else { trees.join(", ") };
-        clip(&format!("{} {names}  w 로 끈다", style::BRANCH_GLYPH), w / 2)
+        clip(&format!("{} {names}  {} 로 끈다", style::BRANCH_GLYPH, label(BROWSE, Browse::Worktree)), w / 2)
     });
     let room = match &overlay {
         Some(o) => room.saturating_sub(crate::text::width(o) + 3),
@@ -771,7 +772,8 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // **굴리는 키를 표시 곁에서 말한다.** 아래 F키 바는 좁으면 뒤에서부터 키를
     // 떨어뜨리는데, 80칸이면 떨어지는 것이 하필 `j·k` 다. 알림은 그것이
     // 가리키는 것 곁에 둔다.
-    scroll_mark(f, &app.detail, at, " (j·k)", app.focus == Pane::Detail);
+    let hint = format!(" ({})", labels(BROWSE, &[Browse::DetailDown, Browse::DetailUp]));
+    scroll_mark(f, &app.detail, at, &hint, app.focus == Pane::Detail);
     // **넘친 줄은 잘렸다고 말한다.** `Wrap` 을 끈 뒤로 폭을 넘는 줄은 위젯이
     // 표시도 없이 잘라 낸다 — 태그 줄, 롤업의 칸별 건수, `F3` 원문, 접지
     // 않기로 한 코드 줄이 그 길로 조용히 꼬리를 잃었다. 만드는 쪽마다 따로
@@ -855,7 +857,7 @@ fn frame(app: &App, pane: Pane) -> Block<'static> {
 }
 
 /// 칸의 이름. F키 바가 `Tab` 이 **어디로 가는지** 댄다.
-fn pane_name(p: Pane) -> &'static str {
+pub(super) fn pane_name(p: Pane) -> &'static str {
     match p {
         Pane::Explorer => "목록",
         Pane::Detail => "상세",
@@ -1302,7 +1304,7 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                 ]));
             }
             out.push(Line::from(""));
-            out.push(Line::from(Span::styled("Enter 로 들어간다", dim())));
+            out.push(Line::from(Span::styled(format!("{} 로 들어간다", label(BROWSE, Browse::Enter)), dim())));
         }
     }
     out
@@ -1315,38 +1317,58 @@ fn bold() -> Style {
 /// 맨 아래 MC 풍 F키 바. **아직 없는 것은 적지 않는다** — 눌러도 아무 일이
 /// 없는 키를 적어 두면 그것부터 도구를 못 믿게 된다.
 fn fkeys(f: &mut Frame, app: &App, at: Rect) {
+    let (optional, keep) = browse_hints(app);
+    let spans = |v: Vec<(String, &str)>| v.iter().map(|(k, what)| key(k, what)).collect();
+    bar(f, at, spans(optional), spans(keep));
+}
+
+/// 바의 한 칸 — `(키 이름, 낱말)`.
+type Hint = (String, &'static str);
+
+/// 탐색 바에 적을 것 — `(키 이름, 낱말)`. 앞 묶음은 폭이 모자라면 앞쪽부터 떨어지고, 뒤 묶음은
+/// 늘 남는다([`bar`]).
+///
+/// **이름·낱말·켜짐은 키 표에서 읽는다**([`keys::BROWSE`]·[`keys::Browse::enabled`]). 여기서
+/// 정하는 것은 **차례**뿐이다 — 무엇이 먼저 떨어지는가. 켜지지 않은 동작은 적지 않으므로
+/// 키 처리와 바가 한 판정을 읽고, 둘이 갈릴 수 없다.
+fn browse_hints(app: &App) -> (Vec<Hint>, Vec<Hint>) {
+    use Browse as B;
+    let c = app.key_ctx();
+    let hint = |acts: &[Browse]| -> Hint { (labels(BROWSE, acts), acts[0].what(&c)) };
+    let shown = |order: &[&[Browse]]| -> Vec<Hint> {
+        order.iter().filter(|acts| acts[0].enabled(&c).is_ok()).map(|acts| hint(acts)).collect()
+    };
     // **덜 급한 것부터 떨어뜨린다.** 키를 더할 때마다 줄이 길어져 맨 끝이
     // 말없이 잘리는데, 맨 끝은 늘 나가는 길이다 — 나갈 길을 못 찾는 것이
     // 빽빽한 줄보다 나쁘다. 폭이 모자라면 앞쪽부터 버린다.
     // `w` 는 **맨 먼저 떨어진다.** 켜 둔 동안에는 경로 줄의 뱃지가 끄는 법을 대므로,
     // 좁은 창에서 이 자리를 잃어도 나갈 길을 잃지는 않는다.
     // **층에서는 층에서 듣는 키만 적는다** — `f`·`/`·`w` 는 층에서 까닭만 말하고
-    // (`layer::refused`) 나가기는 위가 없다. 적어 두면 누를 때마다 "안 된다" 를 듣는다.
-    // `n` 은 층에서도 듣는다 — 커서의 프로젝트에 담는다(moai-fccv).
+    // (`Browse::enabled` 가 걸러 여기 안 선다) 나가기는 위가 없다. 적어 두면 누를 때마다
+    // "안 된다" 를 듣는다. `n` 은 층에서도 듣는다 — 커서의 프로젝트에 담는다(moai-fccv).
     if app.on_layer() {
-        let mut optional = vec![
-            key("j·k", "굴리기"),
-            key("F5", "갱신"),
-            key("Tab", pane_name(app.focus.next())),
-            key("n", "담기"),
-            key("a", "등록"),
-        ];
-        // `d` 는 커서가 선 줄을 뺀다 — 드나드는 키처럼 목록 포커스를 탄다(`App::key`).
-        if app.focus == Pane::Explorer {
-            optional.extend([key("d", "해제"), key("Enter", "들어가기")]);
-        }
-        return bar(f, at, optional, vec![key("F10", "끝내기")]);
+        let optional = shown(&[
+            &[B::DetailDown, B::DetailUp],
+            &[B::Reload],
+            &[B::FocusNext],
+            &[B::Jot],
+            &[B::Pick],
+            // `d` 는 커서가 선 줄을 뺀다 — 드나드는 키처럼 목록 포커스를 탄다(`Browse::enabled`).
+            &[B::Unregister],
+            &[B::Enter],
+        ]);
+        return (optional, vec![hint(&[B::Quit])]);
     }
-    let mut optional = vec![
+    let optional = shown(&[
         // **프로젝트 안에서는 맨 먼저 떨어진다.** 등록은 층의 일이고 층에서는 늘 보이지만,
         // 등록이 0 인 채 `.moai` 안에서 띄우면 층이 없어 이 키가 첫 등록의 길이다(moai-plvy).
-        key("a", "프로젝트 등록"),
-        key("w", if app.worktree { "워크트리 끄기" } else { "워크트리" }),
-        key("j·k", "굴리기"),
+        &[B::Pick],
+        &[B::Worktree],
+        &[B::DetailDown, B::DetailUp],
         // **`F5` 는 `n` 보다 먼저 떨어진다.** 파일이 바뀌면 저절로 다시 읽으므로(`App::follow`)
         // F5 를 누를 일은 드물고, 생각을 담는 길은 이 탐색기가 처음 여는 쓰기다 — 80칸에서
         // 둘 중 하나만 남는다면 담는 길이다.
-        key("F5", "갱신"),
+        &[B::Reload],
         // **`Tab` 은 가는 곳을 댄다** — `F3 원문`·`w 워크트리 끄기` 와 같은 자다.
         // "칸 옮기기" 라 적으면 지금 어디 있는지는 테두리만 말하는데, 가는 곳을 적으면
         // 이 줄도 글자로 지금 자리를 말한다. 자리는 `F3` 앞이다 — 80칸에서 `j·k` 가
@@ -1355,28 +1377,27 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
         // `n` 과 함께 `Tab` 이 떨어진다 — 그때도 테두리 모양이 포커스를 말하고, 되돌아올
         // 길(`F3 그리기`·`Esc 풀기`)과 나갈 길(`F10`)이 `Tab` 보다 급하다. 이 빠듯함은
         // 목록 포커스의 것이다 — 상세에서는 아래 드나드는 키가 빠져 자리가 남는다.
-        key("Tab", pane_name(app.focus.next())),
-        key("n", "담기"),
-        key("F3", if app.raw { "그리기" } else { "원문" }),
-        key("f", "거름망"),
-        key("/", "검색"),
-    ];
-    // **드나드는 키는 목록에서만 적는다.** `App::key` 가 Enter·Bksp 를 포커스에 태워
-    // 상세에서는 아무 일도 안 하므로, 거기서 적어 두면 위의 "눌러도 아무 일이 없는
-    // 키" 가 된다. 흐리게 두지 않고 뺀다 — 이 줄은 이미 통째로 흐려 한 번 더 흐린
-    // 것이 갈리지 않고, 갈린다 해도 색이 혼자 뜻을 지는 일이다. 빠진 27칸만큼 80칸의
-    // 상세 포커스에서는 앞쪽의 `F5`·`j·k` 가 돌아온다(`w` 는 100칸부터). 이 조건과 `App::key` 가
-    // 어긋나면 `the_key_bar_names_only_keys_that_act_in_the_focused_pane` 이 잡는다.
-    if app.focus == Pane::Explorer {
-        optional.extend([key("Bksp", "나가기"), key("Enter", "들어가기")]);
-    }
+        &[B::FocusNext],
+        &[B::Jot],
+        &[B::Raw],
+        &[B::Filter],
+        &[B::Grep],
+        // **드나드는 키는 목록에서만 적는다.** `Browse::enabled` 가 Enter·Bksp 를 포커스에
+        // 태워 상세에서는 아무 일도 안 하므로, 거기서 적어 두면 위의 "눌러도 아무 일이 없는
+        // 키" 가 된다. 흐리게 두지 않고 뺀다 — 이 줄은 이미 통째로 흐려 한 번 더 흐린
+        // 것이 갈리지 않고, 갈린다 해도 색이 혼자 뜻을 지는 일이다. 빠진 27칸만큼 80칸의
+        // 상세 포커스에서는 앞쪽의 `F5`·`j·k` 가 돌아온다(`w` 는 100칸부터). 키 처리와 바가
+        // 같은 판정을 읽고, 실제로 눌러 재는 것은 `the_key_bar_names_only_keys_that_act_in_the_focused_pane` 이다.
+        &[B::Leave],
+        &[B::Enter],
+    ]);
     // 늘 남는 것: 나가는 길, 그리고 걸어 둔 거름망을 푸는 길.
-    let mut keep: Vec<Span> = Vec::new();
+    let mut keep = Vec::new();
     if app.filter_text.is_some() {
-        keep.push(key("Esc", "풀기"));
+        keep.push(hint(&[B::ClearFilter]));
     }
-    keep.push(key("F10", "끝내기"));
-    bar(f, at, optional, keep);
+    keep.push(hint(&[B::Quit]));
+    (optional, keep)
 }
 
 /// F키 바를 폭에 맞춰 놓는다. `optional` 은 **뒤에서부터** 들어가고 모자라면 앞쪽이 떨어진다.
@@ -1397,8 +1418,13 @@ fn bar(f: &mut Frame, at: Rect, mut optional: Vec<Span<'_>>, keep: Vec<Span<'_>>
 /// F키 하나. **뒤에 공백을 두지 않는다** — 앞뒤로 두면 칸 사이가 두 칸이 되고,
 /// 그 여섯 칸 때문에 80칸 터미널에서 줄이 넘쳐 맨 끝의 `F10 끝내기` 가 말없이
 /// 잘린다. 나갈 길을 못 찾는 것이 빽빽한 줄보다 나쁘다.
-fn key<'a>(k: &'a str, what: &'a str) -> Span<'a> {
+fn key(k: &str, what: &str) -> Span<'static> {
     Span::styled(format!(" {k} {what}"), dim())
+}
+
+/// 글칸 안내 — `Enter <무엇>  Esc 그만`. 키 이름은 표([`PROMPT`])에서 읽는다.
+fn prompt_help(apply: &str) -> String {
+    format!("{} {apply}  {} 그만", label(PROMPT, Prompt::Apply), label(PROMPT, Prompt::Cancel))
 }
 
 /// 브랜치 머리표를 이만큼에서 자른다. 긴 브랜치 하나가 제목 몫을 다 먹으면 안 된다.
@@ -2691,6 +2717,36 @@ pub(super) mod tests {
             }
             assert_eq!(bar.contains("w 워크트리"), w >= 100, "{w}칸 — {bar:?}");
             assert!(!bar.contains("Enter") && !bar.contains("Bksp"), "{w}칸 — {bar:?}");
+        }
+    }
+
+    /// **탐색 바에 적힌 키는 표에 있고, 그 자리에서 켜진 동작이다**(moai-nc7w). 층·프로젝트 안,
+    /// 목록·상세 포커스, 거름망, 토글을 다 돌려 바에 선 이름을 키로 풀고 표에서 찾는다 — 표에서
+    /// 키를 옮기고 바의 차례만 남겨 두면 여기서 갈린다. 낱말도 표가 낸 그대로다.
+    #[test]
+    fn every_key_on_the_browse_bar_is_an_enabled_row_of_the_table() {
+        use super::super::keys::{Lookup, lookup, parse};
+        use super::super::layer::At;
+        for layer in [false, true] {
+            for pane in Pane::ALL {
+                for on in [false, true] {
+                    let mut a = if layer { layered(At::Layer) } else { app() };
+                    a.focus = pane;
+                    a.filter_text = on.then(|| "tag=x".to_string());
+                    (a.worktree, a.raw) = (on, on);
+                    let c = a.key_ctx();
+                    let (optional, keep) = browse_hints(&a);
+                    assert!(keep.last().is_some_and(|(k, _)| k == "F10"), "{c:?}: 나갈 길이 늘 남지 않는다");
+                    for (names, what) in optional.iter().chain(&keep) {
+                        for name in names.split('·') {
+                            let k = parse(name).unwrap_or_else(|| panic!("{c:?}: 바의 `{name}` 를 키로 못 푼다"));
+                            let Lookup::Run(act) = lookup(BROWSE, &[k]) else { panic!("{c:?}: 바의 `{name}` 가 표에 없다") };
+                            assert_eq!(act.enabled(&c), Ok(()), "{c:?}: 켜지지 않은 `{name}` 가 바에 섰다");
+                            assert_eq!(act.what(&c), *what, "{c:?}: `{name}`");
+                        }
+                    }
+                }
+            }
         }
     }
 

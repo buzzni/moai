@@ -7,9 +7,10 @@
 //! 않는다 — 층이 읽은 파일(`Layer::config`)이나, 층이 없으면 띄울 때 받은 자리
 //! (`App::user_config`)다. 환경을 여기서 다시 읽으면 시험이 돌리는 사람의 설정을 쓴다.
 
+use super::keys::{BROWSE, Browse, CONFIRM, Confirm, Lookup, label, lookup};
 use super::picker::{Act, Dent, Listing, Picker};
 use super::{App, Mode, Row};
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use std::path::{Path, PathBuf};
 
 /// 한 층에 세우는 하위 디렉터리의 상한. 넘으면 이름순 앞만 세우고 창이 그 밖의 수를 댄다 —
@@ -149,11 +150,8 @@ impl App {
     }
 
     /// 창이 열린 동안의 키. **무엇을 할지는 창이 정하고**([`Picker::key`]) 여기는 그대로 한다.
+    /// Ctrl-C 는 여기 오기 전에 [`App::key`] 가 받았다.
     pub(super) fn pick(&mut self, k: KeyEvent) {
-        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
-            self.quit = true;
-            return;
-        }
         let Mode::Pick(p) = &mut self.mode else { return };
         match p.key(k) {
             Act::Stay => {}
@@ -192,7 +190,11 @@ impl App {
                 // 층에서 "못 읽는다" 를 처음 만난다 (moai-9omq).
                 let bad = added.unreadable.as_deref().map(|e| format!(" · ! 못 읽는다 — {}", crate::text::one_line(e))).unwrap_or_default();
                 let bare = if added.initialized { "" } else { " · init 전 — .moai 가 아직 없다" };
-                let back = if self.on_layer() || self.layer.is_none() { "" } else { " · 뿌리에서 Bksp 로 층에 올라가면 보인다" };
+                let back = if self.on_layer() || self.layer.is_none() {
+                    String::new()
+                } else {
+                    format!(" · 뿌리에서 {} 로 층에 올라가면 보인다", label(BROWSE, Browse::Leave))
+                };
                 self.notice = Some(format!("{what} · {}{bad}{bare}{back}", shown(&added.path)));
                 if let Mode::Pick(p) = &self.mode {
                     let here = p.at.dir.clone();
@@ -225,13 +227,7 @@ impl App {
     /// 이동으로도 쓰지 않는다: 물음을 못 보고 누른 `↓` 가 커서를 옮기면 무엇을 그만뒀는지 헷갈린다.
     pub(super) fn settle_unregister(&mut self, k: KeyEvent) {
         let Mode::Unregister(u) = std::mem::replace(&mut self.mode, Mode::Browse) else { return };
-        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        if ctrl && k.code == KeyCode::Char('c') {
-            self.quit = true;
-            return;
-        }
-        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-        if plain && matches!(k.code, KeyCode::Char('y' | 'Y')) {
+        if let Lookup::Run(Confirm::Yes) = lookup(CONFIRM, &[k]) {
             self.unregister(&u.path);
         }
     }
@@ -264,6 +260,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
     use crate::nav::{Index, Path as NavPath};
     use crate::store::Repo;
     use crate::tui::layer::{At, Layer, Look, Shut};
