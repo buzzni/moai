@@ -2577,3 +2577,7 @@
 {"ts":"2026-09-14T23:55:48Z","id":"moai-emcv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"정함: 사람 화면은 트래커 커밋(chore(tracker))을 빼고 --json 은 tracker 표시와 함께 전부 낸다. 칸은 이력 바로 앞, 짧은 해시 7자. edit 뒤 상세(edit.rs)는 이력을 안 그리므로 커밋 칸도 안 붙인다. git 실패는 빈 칸 — 말투는 moai-mauw"}
 {"ts":"2026-09-14T23:56:03Z","id":"moai-emcv.q3a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — show 상세의 커밋 칸과 --json commits (emcv)"}
 {"ts":"2026-09-14T23:56:03Z","id":"moai-emcv.q3a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T23:56:17Z","id":"moai-m1ym.l30","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — tui 중복 모으기 (m1ym)"}
+{"ts":"2026-09-14T23:56:18Z","id":"moai-m1ym.l30","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T23:56:18Z","id":"moai-m1ym","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-14T23:56:18Z","id":"moai-m1ym","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 워크트리 worktree-moai-m1ym 에 /code-review high --fix. 결과 반영 → 리뷰 moai-m1ym.l30 원문·판단 → main 머지 → done → moai-u8cs 집기."}
