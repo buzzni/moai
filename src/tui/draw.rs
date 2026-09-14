@@ -3575,7 +3575,6 @@ pub(super) mod tests {
             a.hit("SPC");
             let lines = render(&mut a, w, 16);
             let screen = lines.join("\n");
-            eprintln!("── {w}칸 ──\n{screen}");
             let n = lines.len();
             let sep = lines.iter().rposition(|l| *l == "─".repeat(w as usize)).expect("가름줄이 없다");
             assert_eq!(a.cursor, last, "메뉴가 커서를 옮겼다");
