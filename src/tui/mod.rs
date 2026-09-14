@@ -787,7 +787,8 @@ impl App {
         let busy = !crate::report::is_group(i) || self.states.get(&i.id).is_some_and(|s| s.busy);
         // **도는 칸은 설정이 정한다**(moai-q59j) — 시작한 칸 모두(`Config::is_started`). 칸 이름
         // `"in_progress"` 를 박아 두면 칸 이름을 바꾼 설정에서 아무것도 안 돌았다. 설정이 모르는
-        // 칸은 안 돈다 — 묶음의 `busy` 와 같은 자다(`report::Stand::busy`).
+        // 칸은 안 돈다 — 묶음의 `busy` 와 같은 자다(`report::Stand::busy`). 바쁜 묶음은 늘 시작한
+        // 칸으로 읽히므로 묶음에는 이 검사가 답을 안 바꾼다 — 줄(일)을 위한 것이다.
         let col = self.column(at);
         busy && self.cfg.knows(col) && self.cfg.is_started(col)
     }
