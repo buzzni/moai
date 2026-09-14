@@ -463,11 +463,10 @@ impl App {
         self.stamp = None;
         self.warnings = 0;
         self.filter_text = None;
-        // **겹쳐 보기도 푼다.** 그 산물(`origin`·`elsewhere`·`watched`)만 비우고 깃발을
-        // 두면, 층에서는 뱃지도 안 서고 `w` 도 안 먹어(`refused` 가 "프로젝트 안에서
-        // 켠다" 는 틀린 말을 한다) 끄는 길이 없는 채로 다음 프로젝트가 시키지도 않은
-        // 겹쳐 보기로 읽힌다. 거름망과 같은 까닭이다 — 한 프로젝트에 매인 것이다.
-        self.worktree = false;
+        // **겹쳐 보기는 기본값(켬)으로 돌린다.** 한 프로젝트에서 `w` 로 끈 것은 그
+        // 프로젝트에 매인 뜻이다 — 층에서는 `w` 가 안 먹어 되켤 길이 없는 채로, 다음
+        // 프로젝트가 시키지도 않은 끈 화면으로 읽힌다. 거름망과 같은 까닭이다.
+        self.worktree = true;
         self.trouble = None;
         self.write_failed = false;
         self.path.clear();
@@ -848,30 +847,31 @@ mod tests {
         assert_eq!(a.current(), Some(Row::Project(1)));
     }
 
-    /// **겹쳐 보기는 한 프로젝트에 매인다** — 올라오면 거름망처럼 풀린다.
+    /// **겹쳐 보기를 끈 것은 한 프로젝트에 매인다** — 올라오면 거름망처럼 풀려 기본값(켬)으로
+    /// 돌아간다(moai-zcuh).
     ///
-    /// 산물(`origin`·`elsewhere`)만 비우고 깃발을 두면 층에서는 뱃지도 안 서고 `w` 도
-    /// "프로젝트 안에서 켠다" 는 틀린 말을 해, 끄는 길이 없는 채로 다음 프로젝트가
-    /// 시키지도 않은 겹쳐 보기로 읽힌다.
+    /// 끈 깃발을 들고 올라가면 층에서는 `w` 가 안 먹어 되켤 길이 없는 채로, 다음 프로젝트가
+    /// 시키지도 않은 끈 화면으로 읽힌다.
     #[test]
-    fn climbing_drops_the_worktree_overlay_like_it_drops_the_filter() {
+    fn climbing_restores_the_worktree_overlay_like_it_drops_the_filter() {
         let s = Scratch::new("climb-w");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
 
         a.key(key(KeyCode::Enter));
+        assert!(a.worktree, "프로젝트에 들어갔는데 겹쳐 보기가 꺼져 있다");
         a.key(key(KeyCode::Char('w')));
-        assert!(a.worktree, "프로젝트 안에서 w 가 안 켰다");
+        assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
 
         a.key(key(KeyCode::Home));
         a.key(key(KeyCode::Backspace));
         assert!(a.on_layer());
-        assert!(!a.worktree, "층에 올라왔는데 겹쳐 보기가 따라왔다 — 끄는 키가 여기 없다");
+        assert!(a.worktree, "층에 올라왔는데 끈 것이 따라왔다 — 되켤 키가 여기 없다");
 
         a.key(key(KeyCode::Down));
         a.key(key(KeyCode::Enter));
-        assert!(!a.worktree, "다음 프로젝트가 시키지 않은 겹쳐 보기로 읽혔다");
+        assert!(a.worktree, "다음 프로젝트가 시키지 않은 끈 화면으로 읽혔다");
     }
 
     /// **설정이 깨져 층이 안 서도 까닭은 댄다.** 등록한 것이 하나도 안 읽히면 층은 없고
@@ -1060,7 +1060,7 @@ mod tests {
             assert_eq!(a.mode, Mode::Browse, "{c} 가 층에서 칸을 열었다");
             assert!(a.notice.as_deref().is_some_and(|n| n.contains(word)), "{c}: {:?}", a.notice);
         }
-        assert!(!a.worktree, "층에서 겹쳐 보기를 켰다");
+        assert!(a.worktree, "층에서 w 가 겹쳐 보기를 건드렸다");
 
         // **거들쇠가 붙어도 새지 않는다.** `refused` 는 Ctrl·Alt 를 그냥 넘기므로, 키를
         // 나누는 쪽이 안 거르면 Ctrl-A 가 등록 창을, Ctrl-D 가 "목록에서 뺄까" 를 띄운다 —
@@ -1071,7 +1071,7 @@ mod tests {
                 assert_eq!(a.mode, Mode::Browse, "{m:?}-{c} 가 칸을 열었다");
             }
         }
-        assert!(!a.worktree, "Ctrl-w 가 겹쳐 보기를 켰다");
+        assert!(a.worktree, "Ctrl-w 가 겹쳐 보기를 건드렸다");
         // **숨은 별칭 F7 도 수식키가 붙든 말든 같은 까닭으로 거절한다**(moai-nc7w). 옛 `refused` 는
         // 수식키 붙은 키를 통째로 넘겨, 키를 나누는 쪽의 `F(7)` 이 층에서 거름망 칸을 열었다.
         for m in [KeyModifiers::NONE, KeyModifiers::CONTROL, KeyModifiers::ALT] {

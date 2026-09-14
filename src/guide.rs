@@ -311,7 +311,7 @@ pub fn reference() -> String {
 
 에이전트가 git 워크트리를 하나씩 잡고 일하면, 지금 워크트리의 보드는 옆에서
 집고 옮긴 것을 모른다. `status`·`ready`·`show` 에 `--worktree` 를 붙이면 옆
-워크트리의 이슈를 겹쳐 본다. 탐색기(`moai tui`)에서는 `w` 가 켜고 끈다.
+워크트리의 이슈를 겹쳐 본다. 탐색기(`moai tui`)는 겹친 채로 열고 `w` 가 끄고 켠다.
 
     moai ready --worktree             옆에서 집은 일은 빠지고 "잡고 있는 것" 에 선다
     moai status --worktree            보드 머리에 "⎇ <워크트리들> 겹쳐 봄"

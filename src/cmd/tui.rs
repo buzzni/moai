@@ -21,7 +21,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // "이미 본 것" 으로 적혀 그 뒤로 영영 바뀐 줄 모른다. 먼저 재면 최악이
     // 헛 알림 하나고, 빠진 알림보다 헛 알림이 싸다.
     let stamp = crate::tui::stamp_of(&repo);
-    let load = repo.read()?;
+    // 탐색기는 옆 워크트리를 겹친 채로 연다(`App::worktree`). `--json` 은 겹치지 않는다 —
+    // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
+    let crate::worktree::Gathered { load, origin, trouble, watched } = crate::worktree::gather(&repo, !ctx.json)?;
     let index = Index::of(&load.issues);
     let path = resolve(&index, &load.issues, args.path.as_deref())?;
 
@@ -47,7 +49,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 화면을 등록한 저장소 수만큼 늦출 까닭이 없다.
     let config = crate::user_config::path();
     let layer = crate::tui::layer::Layer::read(config.as_deref(), Some(&repo.root));
-    let mut app = App::open(repo, load, index, path, stamp).attach_layer(layer);
+    let mut app = App::open(repo, load, index, path, stamp).overlaid(origin, trouble, watched).attach_layer(layer);
     app.user = ctx.user.clone();
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;

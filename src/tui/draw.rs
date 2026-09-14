@@ -1675,11 +1675,14 @@ pub(super) mod tests {
     }
 
     /// 옆 워크트리에서 온 줄은 목록과 상세 둘 다 `⎇ <브랜치>` 를 댄다. 켜진 동안은
-    /// 경로 줄이 그렇다고 말하고, `w` 가 켜고 끈다.
+    /// 경로 줄이 그렇다고 말하고, `w` 가 켜고 끈다. **켜진 채로 시작한다**(moai-zcuh).
     #[test]
     fn a_line_from_another_worktree_is_marked_in_the_list_and_the_detail() {
         let mut a = app();
+        assert!(a.worktree, "겹쳐 보기가 꺼진 채로 시작했다");
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE));
+        assert!(!a.worktree, "w 가 안 껐다");
         let plain_screen = render(&mut a, 120, 12).join("\n");
         assert!(!plain_screen.contains('⎇'), "안 겹쳤는데 머리표가 섰다\n{plain_screen}");
         assert!(plain_screen.contains("w 워크트리"), "켜는 키를 안 알린다\n{plain_screen}");

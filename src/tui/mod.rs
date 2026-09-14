@@ -361,8 +361,10 @@ pub struct App {
     /// 목록·상세·롤업이 같은 걸음을 본다.
     pub spin: usize,
     /// 다른 워크트리를 겹쳐 보는가. `w` 가 켜고 끈다 — CLI 의 `--worktree` 와 같은
-    /// 길(`worktree::gather`)로 읽는다. **꺼진 채로 시작한다**: 켜면 `git` 을 부르고
-    /// 옆 파일을 읽는데, 시키지 않은 일을 여는 순간마다 하면 탐색기가 무거워진다.
+    /// 길(`worktree::gather`)로 읽는다. **켜진 채로 시작한다**(moai-zcuh): 탐색기는
+    /// 사람이 둘러보는 자리라 옆 워크트리에서 집은 일이 안 보이면 보드가 거짓말을
+    /// 한다. 값은 여는 순간 `git` 한 번과 옆 스냅샷 읽기다. CLI 의 `--worktree` 는
+    /// 그대로 끈 채로 둔다 — 기계가 읽는 출력의 모양을 안 바꾼다.
     pub worktree: bool,
     /// 겹쳐 본 줄의 출처. 꺼져 있으면 비었다.
     pub origin: crate::worktree::Origin,
@@ -411,6 +413,27 @@ impl App {
         app
     }
 
+    /// 여는 읽기가 겹쳐 본 것을 들인다(`worktree::gather`). 못 읽는 줄은 겹친 뒤의 자로
+    /// 다시 센다 — 옆에서 산 줄로 온 id 를 여기서도 못 읽는 줄로 세면 경고가 [`prepare`]
+    /// 로 다시 읽은 화면과 갈린다.
+    pub fn overlaid(
+        mut self,
+        origin: crate::worktree::Origin,
+        elsewhere: Vec<String>,
+        watched: Vec<(std::path::PathBuf, Stamp)>,
+    ) -> App {
+        self.unreadable = origin
+            .unreadable(self.unreadable.iter().map(Option::as_deref))
+            .into_iter()
+            .map(|id| id.map(str::to_string))
+            .collect();
+        self.warnings = warnings_of(&self.issues, &self.unreadable, &self.cfg, &self.now);
+        self.origin = origin;
+        self.elsewhere = elsewhere;
+        self.watched = watched;
+        self
+    }
+
     fn build(
         issues: Vec<Issue>,
         index: Index,
@@ -455,7 +478,7 @@ impl App {
             list: Scroll::default(),
             quit: false,
             spin: 0,
-            worktree: false,
+            worktree: true,
             origin: crate::worktree::Origin::default(),
             elsewhere: Vec::new(),
             layer: None,
