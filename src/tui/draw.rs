@@ -269,7 +269,7 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
     if let Some(p) = app.project() {
         let name = clip(&crate::text::sanitize(&p.name), (room / 2).max(1));
         room = room.saturating_sub(crate::text::width(&name) + 1);
-        spans.push(Span::styled(name, project_style()));
+        spans.push(Span::styled(name, project_style(&p.path)));
         spans.push(Span::styled(":", bold()));
     }
     spans.push(Span::styled(clip(&app.crumbs(), room), bold()));
@@ -891,11 +891,14 @@ fn field<'a>(k: &str, v: &str, w: usize, room: usize) -> Line<'a> {
     ])
 }
 
-/// 프로젝트 이름을 칠하는 **한 곳.** 프로젝트마다 색(moai-xs9x)이 서면 여기서 받는다 —
-/// 경로 줄·층의 줄·층의 상세가 모두 이것을 부르므로 한 자리만 고치면 된다. 색이 서도
-/// 이름이 곁에 있으므로 색이 혼자 뜻을 지지 않는다.
-fn project_style() -> Style {
-    bold()
+/// 프로젝트 이름을 칠하는 **한 곳** — 경로 줄·층의 줄·층의 상세가 모두 이것을 부른다.
+///
+/// 색은 CLI 한눈 보기와 같은 `style::project_colour` 다(moai-xs9x). **경로로 고른다** —
+/// 이름은 등록 목록을 따라 바뀌는 파생값이라, 이름으로 고르면 프로젝트 하나를 더할 때
+/// 옆 프로젝트의 색이 바뀌고 두 표면이 같은 프로젝트를 다른 색으로 칠한다. 무게는 CLI
+/// 머리와 같은 `HEAD` 다. 칠하는 곳에는 늘 이름이 곁에 선다 — 색이 혼자 뜻을 지지 않는다.
+fn project_style(path: &std::path::Path) -> Style {
+    from_anstyle(style::project_colour(path).effects(style::HEAD.get_effects()))
 }
 
 /// 층의 한 줄: `이름/  ·3 ▸1 ✓12  여기  /경로`. 들어갈 수 있는 것만 `/` 가 붙는다.
@@ -915,7 +918,7 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
     if enterable {
         name.push('/');
     }
-    let mut spans = vec![Span::styled(name, project_style()), Span::raw("  ")];
+    let mut spans = vec![Span::styled(name, project_style(&p.path)), Span::raw("  ")];
     match &p.look {
         Look::Unread => spans.push(Span::styled("읽는 중", dim())),
         Look::Open { sum, .. } => {
@@ -960,7 +963,7 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
         return vec![Line::from(Span::styled("없다", dim()))];
     };
     let place: &Place = p;
-    let mut out = wrapped(&place.name, w, project_style());
+    let mut out = wrapped(&place.name, w, project_style(&place.path));
     out.extend(wrapped(&place.path.display().to_string(), w, dim()));
     match (place.launched, place.registered) {
         (true, true) => out.push(Line::from(Span::styled("여기서 띄웠다", dim()))),
@@ -1895,6 +1898,30 @@ mod tests {
         assert_eq!(a.path.len(), 1);
         let lines = render(&mut a, 40, 12);
         assert!(lines[0].starts_with("one:/아주"), "깊이 들어가자 프로젝트 이름이 잘렸다 — {:?}", lines[0]);
+    }
+
+    /// **프로젝트 이름은 CLI 한눈 보기와 같은 색이다** — 경로 줄에서도 층의 줄에서도
+    /// `style::project_colour(경로)` 를 입는다. 두 표면이 같은 프로젝트를 다른 색으로 칠하면
+    /// 색으로 알아보라던 약속이 거꾸로 선다.
+    #[test]
+    fn a_project_name_wears_the_same_colour_as_in_the_cli_overview() {
+        use super::super::layer::At;
+        let want = from_anstyle(style::project_colour(std::path::Path::new("/w/one"))).fg;
+        let colour_of = |app: &mut App, y: u16, text: &str| {
+            let mut term = Terminal::new(TestBackend::new(80, 12)).unwrap();
+            term.draw(|f| screen(f, app)).unwrap();
+            let buf = term.backend().buffer().clone();
+            let row: String = (0..80).map(|x| buf[(x, y)].symbol().to_string()).collect();
+            let x = row.find(text).map(|b| row[..b].chars().count() as u16).unwrap_or_else(|| panic!("{text} 가 없다 — {row:?}"));
+            buf[(x, y)].fg
+        };
+        let mut inside = layered(At::Project("/w/one".into()));
+        assert_eq!(Some(colour_of(&mut inside, 0, "one")), want, "경로 줄의 이름이 한눈 보기와 다른 색이다");
+        let mut on = layered(At::Layer);
+        on.issues.clear();
+        on.index = crate::nav::Index::of(&[]);
+        on.keep.clear();
+        assert_eq!(Some(colour_of(&mut on, 3, "one/")), want, "층의 줄 이름이 한눈 보기와 다른 색이다");
     }
 
     /// **좁은 창에서 본문을 그려도 무너지지 않는다.**
