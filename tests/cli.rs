@@ -2046,6 +2046,10 @@ fn template_vars_that_do_not_fit_are_refused_and_write_nothing() {
         (vec!["--var", "version=1", "--var", "version=2", "--var", "channel=c"], "version"),
         (vec!["--var", "version", "--var", "channel=c"], "version"),
         (vec!["--var", "=1", "--var", "version=1", "--var", "channel=c"], "=1"),
+        (vec!["--var", "version=1\n- [p0] 몰래", "--var", "channel=c"], "줄바꿈"),
+        // 빈 값은 반쯤 채운 제목을 조용히 세운다 — 셸 변수가 비었을 때 흔하다(사람이 정했다).
+        (vec!["--var", "version=", "--var", "channel=c"], "비었다"),
+        (vec!["--var", "version=  ", "--var", "channel=c"], "비었다"),
     ] {
         let mut argv = vec!["add", "--from", path];
         argv.extend(args.iter().copied());

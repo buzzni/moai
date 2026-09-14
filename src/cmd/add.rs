@@ -50,6 +50,15 @@ pub fn read_plan(from: &str, vars: &[String]) -> R<Vec<draft::Draft>> {
         let Some((name, value)) = raw.split_once('=').filter(|(n, _)| !n.is_empty()) else {
             return Err(bad(format!("`--var {raw}` 는 `이름=값` 이 아니다")));
         };
+        // 형식은 한 줄에 하나다 — 줄바꿈이 든 값은 채우는 순간 계획에 없던 줄(이슈·에픽)을 세운다.
+        if value.contains(['\n', '\r']) {
+            return Err(bad(format!("`--var {name}` 의 값에 줄바꿈이 들었다 — 값은 한 줄이다")));
+        }
+        // **빈 값은 거절한다**(사람이 정했다, 리뷰 moai-cypw.nn4). 셸 변수가 비어 `--var version=$VERSION`
+        // 이 빈 값이 되면 "릴리스 " 같은 반쯤 채운 제목이 조용히 선다 — 전부 필수가 막으려던 그것이다.
+        if value.trim().is_empty() {
+            return Err(bad(format!("`--var {name}` 의 값이 비었다 — 채울 값을 준다")));
+        }
         if pairs.iter().any(|(k, _)| k == name) {
             return Err(bad(format!("`--var {name}` 를 두 번 줬다 — 어느 값을 쓸지 하나만 준다")));
         }
