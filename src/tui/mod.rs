@@ -14,6 +14,7 @@ pub mod menu;
 pub mod picker;
 pub mod register;
 pub mod scroll;
+pub mod view;
 
 use crate::config::Config;
 use crate::model::{Issue, Kind, Status};
@@ -367,6 +368,11 @@ pub struct App {
     /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임
     /// `Filter::matches` 를 돌리면 `Where::of` 가 프레임마다 지도를 다시 만든다.
     keep: Vec<bool>,
+    /// 무엇을 보일까(moai-fmv5) — 칸·미룸 토글. 거름망과 따로 들어 Esc 가 안 푼다.
+    pub view: view::View,
+    /// 이슈 첨자 → 보기에 보이는가. `keep` 과 같은 까닭으로 **보기나 자료가 바뀔 때만** 센다
+    /// ([`App::see`]) — 묶음의 칸과 물려받은 미룸을 줄마다 프레임마다 다시 풀지 않는다.
+    shown: Vec<bool>,
     /// 층마다 커서를 기억한다. 들어갔다 나오면 **있던 자리로 돌아온다** —
     /// 매번 맨 위로 튕기면 형제 여럿을 훑는 일이 못 할 짓이 된다.
     remembered: Vec<usize>,
@@ -528,6 +534,10 @@ impl App {
             let_go: 0,
             read: prepare,
             keep,
+            // **처음에는 done 을 숨긴다**(사람의 결정, 2026-09-14). 끝난 것이 목록을 채워 지금 볼
+            // 것을 덮었고, 걷으려면 `status=todo,in_progress,review` 를 손으로 적어야 했다.
+            view: view::View::hiding(crate::config::DONE),
+            shown: Vec::new(),
             remembered,
             list: Scroll::default(),
             quit: false,
@@ -547,6 +557,7 @@ impl App {
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
         // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
         app.warnings = warnings_of(&app.issues, &app.unreadable, &app.cfg, &app.now);
+        app.see();
         app
     }
 
@@ -687,6 +698,12 @@ impl App {
                 };
                 let told = match self.land(&id) {
                     Landing::Shown => format!("✓ {done} · {what}"),
+                    // **무엇이 가렸는지 가른다**(moai-fmv5) — 보기가 가린 줄에 "Esc 로 푼다" 를 대면
+                    // Esc 는 거름망만 풀어 누른 키가 아무것도 안 한다.
+                    Landing::Hidden if self.index.find(&id).is_some_and(|at| !self.shown.get(at).copied().unwrap_or(true)) => format!(
+                        "✓ {done} · {what} — 보기에 가려 안 보인다 · {} 로 모두 보인다",
+                        keys::label(keys::BROWSE, keys::Browse::ShowAll)
+                    ),
                     Landing::Hidden => format!(
                         "✓ {done} · {what} — 거름망에 가려 안 보인다 · {} 로 푼다",
                         keys::label(keys::BROWSE, keys::Browse::ClearFilter)
@@ -866,6 +883,7 @@ impl App {
         self.repair_path();
         // 거름망은 이슈 첨자에 매인 것이라 반드시 다시 센다.
         self.reapply();
+        self.see();
         let rows = self.rows();
         let found = held.and_then(|a| rows.iter().position(|r| self.anchor_of(r) == a));
         // **굴린 자리는 같은 줄일 때만 둔다.** 다른 이슈로 옮겨 섰는데 굴린 수가 남으면
@@ -1050,8 +1068,9 @@ impl App {
     }
 
     /// 걸린 거름망에 **제 줄이 걸린** 이슈 수. 걸린 것을 품어 남은 디렉터리는 안 센다.
+    /// 보기(`SPC s`)가 숨긴 줄도 안 센다 — 세어 놓고 목록에 없으면 셈이 거짓말이 된다.
     pub fn hit_count(&self) -> usize {
-        self.keep.iter().filter(|k| **k).count()
+        (0..self.keep.len()).filter(|&at| self.keep[at] && self.shown.get(at).copied().unwrap_or(true)).count()
     }
 
     /// 거름망을 건다. 빈 글은 "거름망 없음" 이다.
@@ -1110,6 +1129,41 @@ impl App {
         self.keep = vec![true; self.issues.len()];
     }
 
+    /// 줄마다 보기에 보이는지 다시 센다. 칸은 **목록의 글리프와 같은 자**([`App::column`])로,
+    /// 미룸은 물려받은 것까지(`Index::deferred_root`) 읽는다 — 미룬 에픽 밑의 일도 같이 빠진다.
+    fn see(&mut self) {
+        self.shown = (0..self.issues.len())
+            .map(|at| self.view.shows(self.column(at), self.index.deferred_root(&self.issues[at].id).is_some()))
+            .collect();
+    }
+
+    /// 보기 토글 하나(`SPC s`). **커서는 줄의 정체로 붙든다** — 숨긴 줄에 서 있었으면 그 자리
+    /// 가까이 남는다. 첨자로 두면 위에서 줄이 빠질 때마다 커서가 딴 이슈로 미끄러진다.
+    fn look(&mut self, act: keys::Browse) {
+        use keys::Browse as B;
+        let held = self.current().map(|r| self.anchor_of(&r));
+        match act {
+            B::Column(n) => {
+                if let Some(s) = self.cfg.statuses.get(usize::from(n)).cloned() {
+                    self.view.toggle(&s);
+                }
+            }
+            B::Done => self.view.toggle(crate::config::DONE),
+            B::Deferred => self.view.hide_deferred = !self.view.hide_deferred,
+            B::ShowAll => self.view = view::View::default(),
+            _ => return,
+        }
+        self.see();
+        let rows = self.rows();
+        match held.and_then(|a| rows.iter().position(|r| self.anchor_of(r) == a)) {
+            Some(at) => self.cursor = at,
+            None => {
+                self.cursor = self.cursor.min(rows.len().saturating_sub(1));
+                self.detail.rewind();
+            }
+        }
+    }
+
     /// 지금 디렉터리의 줄들.
     pub fn rows(&self) -> Vec<Row> {
         if let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) {
@@ -1119,10 +1173,12 @@ impl App {
         if !self.path.is_empty() || self.layer.is_some() {
             rows.push(Row::Up);
         }
-        let keep = &self.keep;
+        let (keep, shown) = (&self.keep, &self.shown);
+        // **보기는 줄마다 건다** — 숨긴 칸의 묶음이라도 보이는 멤버가 있으면 디렉터리는 선다
+        // (`Index::kept`). done 에픽 밑에 남은 todo 가 폴더째 사라지면 안 된다.
         rows.extend(
             self.index
-                .entries_where(&self.issues, &self.path, &|at| keep[at])
+                .entries_where(&self.issues, &self.path, &|at| keep[at] && shown.get(at).copied().unwrap_or(true))
                 .into_iter()
                 .map(Row::Item),
         );
@@ -1224,6 +1280,7 @@ impl App {
                     });
                 }
             }
+            B::Column(_) | B::Done | B::Deferred | B::ShowAll => self.look(act),
             B::Raw => {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
@@ -1248,6 +1305,17 @@ impl App {
             root: self.path.is_empty() && (self.layer.is_none() || self.on_layer()),
             worktree: self.worktree,
             raw: self.raw,
+            columns: self.cfg.statuses.len().min(keys::NUMBERED),
+            hidden: self
+                .cfg
+                .statuses
+                .iter()
+                .take(keys::NUMBERED)
+                .enumerate()
+                .filter(|(_, s)| self.view.hides(s))
+                .fold(0, |bits, (n, _)| bits | 1 << n),
+            done_hidden: self.view.hides(crate::config::DONE),
+            deferred_hidden: self.view.hide_deferred,
             next_pane: draw::pane_name(self.focus.next()),
             prev_pane: draw::pane_name(self.focus.prev()),
         }
@@ -1748,6 +1816,45 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn row_ids(a: &App) -> Vec<String> {
+        a.rows().iter().filter_map(|r| if let Row::Item(e) = r { e.at() } else { None }).map(|at| a.issues[at].id.clone()).collect()
+    }
+
+    /// **처음에는 done 을 숨기고 `SPC s` 가 칸·미룸을 켜고 끈다**(moai-fmv5). 보기는 거름망이
+    /// 아니라 Esc 가 안 푼다. 끝난 멤버가 있어도 안 끝난 멤버가 있는 에픽은 선다. 토글 뒤에도
+    /// 커서는 보던 줄에 붙는다.
+    #[test]
+    fn done_starts_hidden_and_the_view_menu_brings_it_back() {
+        let mut done_member = member("argos-0003", "argos-0001");
+        done_member.status = Status::new("done");
+        let mut loose_done = make("argos-0009", Kind::Issue);
+        loose_done.status = Status::new("done");
+        let mut put_off = make("argos-0010", Kind::Issue);
+        put_off.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let issues = vec![make("argos-0001", Kind::Epic), done_member, member("argos-0004", "argos-0001"), loose_done, put_off];
+        let mut a = App::new(issues, cfg(), Path::new());
+
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0010"], "done 이 처음부터 보인다");
+        a.hit("Enter");
+        assert_eq!(row_ids(&a), ["argos-0004"], "에픽 안의 끝난 멤버가 보인다");
+        a.hit("Bksp");
+
+        a.cursor = 1;
+        a.hit("SPC s d");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0009", "argos-0010"]);
+        assert_eq!(row_ids(&a)[a.cursor], "argos-0010", "토글이 커서를 딴 줄로 옮겼다");
+        a.hit("Esc");
+        assert_eq!(row_ids(&a).len(), 3, "Esc 가 보기를 풀었다");
+
+        a.hit("SPC s z");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0009"], "미룸이 안 숨었다");
+        // 설정의 넷째 칸이 done 이다 — 번호로 누른 것과 `d` 가 같은 칸을 만진다.
+        a.hit("SPC s 4");
+        assert_eq!(row_ids(&a), ["argos-0001"]);
+        a.hit("SPC s a");
+        assert_eq!(row_ids(&a).len(), 3, "모두 보이기가 다 안 보인다");
     }
 
     /// 도는 줄이 있는지 — 줄마다의 답([`App::spins`])을 모은 것. 루프가 깨는 것은 이것이
