@@ -1057,7 +1057,7 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
             // 미뤄 뺀 멤버만 기다리는 묶음이면 묶음은 미룬 적이 없다 — 그 멤버를 댄다.
             // **첫 멤버와 남은 수만** 댄다: 값은 오른쪽부터 잘리므로 다 늘어놓으면 큰 에픽을
             // 미뤘을 때 제목이 통째로 사라진다(리뷰 moai-2sea.tns).
-            Blocker::Deferred if !aside.is_empty() => {
+            Blocker::Deferred if !aside.is_empty() && root.is_none() => {
                 let more = if aside.len() > 1 { format!(" 외 {}", aside.len() - 1) } else { String::new() };
                 ("막힘", format!("· {b}  미룬 멤버 {}{more}  {}", aside[0], app.title_of(b)))
             }

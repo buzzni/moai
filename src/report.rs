@@ -669,6 +669,9 @@ impl Blocker {
 pub fn blocker(column: Option<&str>, out_of_plan: bool, waiting: Waiting) -> Blocker {
     match column {
         None => Blocker::Missing,
+        // 묶음 제 미룸이 미룬 멤버보다 먼저다 — 멤버를 도로 집어도 묶음이 미뤄져 있으면
+        // 안 풀린다. 읽은 칸이 done 인 묶음은 `deferred_roots` 에 안 드므로 여기 안 걸린다.
+        Some(c) if out_of_plan && c != crate::config::DONE => Blocker::Deferred,
         Some(_) if waiting == Waiting::Shelved => Blocker::Deferred,
         Some(crate::config::DONE) => Blocker::Done,
         Some(_) if out_of_plan => Blocker::Deferred,
@@ -1310,8 +1313,9 @@ fn holding<'a>(
         let waiting = wait.map_or(Waiting::Live, |w| w.0);
         match blocker(Some(column(x, states)), out_of_plan.contains(id), waiting) {
             Blocker::Deferred => {
+                // 묶음을 제가 미뤘으면 그 묶음을 댄다([`blocker`] 와 같은 순서).
                 let named = match wait {
-                    Some((Waiting::Shelved, aside)) => aside.clone(),
+                    Some((Waiting::Shelved, aside)) if !out_of_plan.contains(id) => aside.clone(),
                     _ => vec![id],
                 };
                 for n in named {
@@ -3457,6 +3461,11 @@ mod tests {
         let shelved = vec![make("argos-0001", Kind::Epic, "todo"), rest, blocked_by("argos-0001")];
         assert!(picks(&shelved).is_empty());
         assert_eq!(said(&shelved), [row(&["argos-0002"], &["argos-0002"], &[])]);
+        // 멤버를 다 미룬 묶음을 제가 또 미뤘으면 묶음을 댄다 — 멤버를 도로 집어도 안 풀린다.
+        let mut both = shelved.clone();
+        both[0].deferred_at = Some("2026-09-02T00:00:00Z".into());
+        assert_eq!(said(&both), [row(&["argos-0001"], &["argos-0001"], &[])]);
+        assert_eq!(blocker(Some("todo"), true, Waiting::Shelved), Blocker::Deferred);
 
         // 멤버가 하나도 없다 — 도로 집을 것이 없으니 비었다고 댄다.
         let empty = vec![make("argos-0001", Kind::Epic, "todo"), blocked_by("argos-0001")];
