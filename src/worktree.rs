@@ -152,7 +152,9 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
 /// **여기서 지운 줄은 되살리지 않는다.** 옆에만 있는 줄이 갈라진 자리
 /// ([`Side::base`])에도 있었고 그 뒤로 옆에서 안 만졌으면 세우지 않는다. 옆에서
 /// 그 뒤에 집거나 고쳤으면 세운다 — 지운 것과 옆의 작업이 부딪힌 것을 감추면
-/// 옆에서 하던 일이 화면에서 사라진다. 옆에서 지운 줄(여기에만 있다)은 그대로
+/// 옆에서 하던 일이 화면에서 사라진다. **메모는 만진 것으로 안 센다** — `note` 는
+/// 스냅샷을 안 바꾸고, 그것을 세려고 옆 저널을 읽으면 "저널은 상태 계산에 읽히지
+/// 않는다" 가 무너진다(moai-dyeu, 사용자와 정함). 옆에서 지운 줄(여기에만 있다)은 그대로
 /// 둔다 — 그 삭제는 브랜치가 합쳐질 때 반영된다.
 pub fn overlay(mine: Vec<Issue>, others: Vec<Side>) -> (Vec<Issue>, Origin) {
     let mut shown = mine;
@@ -209,6 +211,9 @@ pub struct Gathered {
     ///
     /// **재는 것이 읽는 것보다 먼저다** — 읽고 나서 재면 그 사이에 떨어진 쓰기가
     /// "이미 본 것" 으로 적혀 영영 안 보인다(`cmd::tui::run` 과 같은 까닭).
+    ///
+    /// 워크트리들의 HEAD 가 움직인 것을 알리는 git 파일도 든다([`heads`]) — 갈라진 자리가
+    /// 바뀌면 지운 줄 숨김의 답이 바뀐다(moai-pqrq).
     pub watched: Vec<(PathBuf, crate::store::Stamp)>,
 }
 
@@ -231,7 +236,8 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let mut trouble = Vec::new();
     let mut unfound = None;
     let mut others = Vec::new();
-    let mut watched = Vec::new();
+    // HEAD 가 움직인 것도 다시 읽을 까닭이다 — **`others_of` 가 HEAD 를 읽기 전에** 잰다.
+    let mut watched = heads(&repo.root);
     match others_of(&repo.root) {
         Err(why) => unfound = Some(why),
         Ok((mine, trees)) => {
@@ -267,6 +273,47 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let Load { issues, errors } = load;
     let (issues, origin) = overlay(issues, others);
     Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, watched })
+}
+
+/// 워크트리들의 HEAD 가 움직인 것을 알아챌 git 파일과 **지금 잰** 표식 — 제 워크트리와
+/// 옆 워크트리 모두.
+///
+/// 갈라진 자리(`merge-base`)는 두 HEAD 에서 나오므로, 어느 쪽이든 커밋·merge·checkout 하면
+/// 지운 줄 숨김([`Side::base`])의 답이 바뀐다. 스냅샷 파일만 지켜보면 탐색기는 다른 까닭으로
+/// 다시 읽을 때까지 낡은 답을 든다(moai-pqrq).
+///
+/// **git 은 한 번만 부른다**(공용 git 디렉터리를 찾는 데) — 탐색기는 다시 읽을 때마다 여기를
+/// 지난다. 나머지는 파일을 직접 본다: 공용 디렉터리의 `HEAD`(주 워크트리), `worktrees/*/HEAD`
+/// (딸린 워크트리), 그 HEAD 가 가리키는 가지 파일, `packed-refs`. 커밋·merge 는 가지 파일을,
+/// checkout·떼어 낸 HEAD 의 커밋은 HEAD 파일을 갈아끼우고, `pack-refs` 는 가지 파일을 지우고
+/// `packed-refs` 를 쓴다.
+///
+/// **HEAD 파일을 잰 뒤에 그 안을 읽어** 가지를 찾는다 — 그 사이에 HEAD 가 바뀌면 HEAD 표식이
+/// 이미 달라 다음 걸음이 다시 읽는다. 못 찾으면(git 밖, 가지를 파일로 두지 않는 저장소) 비어
+/// 있고 말하지 않는다 — 전처럼 스냅샷만 지켜본다.
+fn heads(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
+    let Ok(common) = git(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"]) else {
+        return Vec::new();
+    };
+    let common = PathBuf::from(common.trim_end_matches('\n'));
+    let mut files = vec![common.join("HEAD")];
+    if let Ok(linked) = std::fs::read_dir(common.join("worktrees")) {
+        let mut linked: Vec<PathBuf> = linked.filter_map(Result::ok).map(|e| e.path().join("HEAD")).collect();
+        linked.sort();
+        files.extend(linked);
+    }
+    let mut watched = Vec::new();
+    for head in files {
+        watched.push((head.clone(), crate::store::stamp(&head)));
+        let Ok(text) = std::fs::read_to_string(&head) else { continue };
+        if let Some(branch) = text.trim_end().strip_prefix("ref: ") {
+            let file = common.join(branch);
+            watched.push((file.clone(), crate::store::stamp(&file)));
+        }
+    }
+    let packed = common.join("packed-refs");
+    watched.push((packed.clone(), crate::store::stamp(&packed)));
+    watched
 }
 
 /// 제 워크트리의 HEAD 와, 다른 워크트리마다 (워크트리, 그 안의 moai 뿌리).
@@ -437,6 +484,50 @@ mod tests {
         let (shown, origin) = overlay(vec![moved], vec![tree("feat/x", vec![theirs])]);
         assert_eq!(shown[0].status.as_str(), "done");
         assert_eq!(origin.branch("m-0002"), None);
+    }
+
+    /// 어느 워크트리에서든 커밋·`pack-refs`·떼어 낸 checkout 이 지켜보는 표식을 바꾼다 —
+    /// 탐색기가 갈라진 자리가 바뀐 것을 알아챈다(moai-pqrq).
+    #[test]
+    fn a_moved_head_in_any_worktree_changes_a_watched_stamp() {
+        let base = std::env::temp_dir().join(format!("moai-heads-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (main, feat) = (base.join("main"), base.join("feat"));
+        std::fs::create_dir_all(&main).unwrap();
+        // 물려받은 `GIT_DIR` 이 남으면 여기서의 git 이 바깥 저장소를 건드린다(tests/cli.rs 의 `git` 과 같은 까닭).
+        let run = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+                .args(args)
+                .current_dir(dir)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../feat", "-b", "feat/x"]);
+
+        let seen = heads(&main);
+        let has = |tail: &str| seen.iter().any(|(p, _)| p.ends_with(tail));
+        for tail in [".git/HEAD", "worktrees/feat/HEAD", "refs/heads/main", "refs/heads/feat/x", "packed-refs"] {
+            assert!(has(tail), "{tail} 를 안 지켜본다 — {seen:#?}");
+        }
+        let changed = |was: &[(PathBuf, crate::store::Stamp)]| was.iter().any(|(p, s)| crate::store::stamp(p) != *s);
+        assert!(!changed(&seen), "아무것도 안 했는데 표식이 바뀌었다");
+
+        run(&feat, &["commit", "-q", "--allow-empty", "-m", "b"]);
+        assert!(changed(&seen), "옆 워크트리의 커밋을 못 알아챈다");
+        let seen = heads(&main);
+        run(&main, &["pack-refs", "--all"]);
+        assert!(changed(&seen), "pack-refs 를 못 알아챈다");
+        let seen = heads(&main);
+        run(&feat, &["checkout", "-q", "--detach"]);
+        assert!(changed(&seen), "떼어 낸 checkout 을 못 알아챈다");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.
