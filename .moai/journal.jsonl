@@ -1654,3 +1654,7 @@
 {"ts":"2026-09-14T10:27:57Z","id":"moai-0qr8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-7azq 로 옮겨 작업한다"}
 {"ts":"2026-09-14T10:27:58Z","id":"moai-7azq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T10:27:58Z","id":"moai-7azq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-0qr8 에서 옮김(리뷰 moai-cxk8.l89 가 넘긴 2번). 안: 판정한 자리(report::status)가 id 마다 잰 나이를 Warning 에 싣고(additive JSON 필드), view::preview 는 그것을 쓴다 — 없으면 전처럼 status_since. 나이를 두 자리에서 따로 재면 판정과 표시가 또 갈라진다. blocked_stale 은 blocked_since 로, 다른 날짜 경고는 제 판정 시각으로."}
+{"ts":"2026-09-14T10:28:25Z","id":"moai-bbzg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자와 정한 것 (2026-09-14): 그대로 두고 적어 둔다. 소속을 옮긴 때를 스냅샷에 적어 Stand::since 에 세면, 멤버를 뺐다 도로 넣는 것만으로 에픽의 막힘 시계가 0일로 돌아가 moai-cxk8 이 막은 '경고를 지우는 손잡이' 가 소속 쪽으로 다시 생긴다. blocked_by 를 적은 시각을 안 재는 한계와 같은 결로 받아들이고, BLOCKED_STALE_DAYS·Stand::since 문서와 guide 에 적는다."}
+{"ts":"2026-09-14T10:28:25Z","id":"moai-n648","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"edit 으로 끝난 묶음에 옛 일을 넣어 다시 열어도 막힘 시계가 새로 서지 않는다는 한계를 문서에 적는다"}
+{"ts":"2026-09-14T10:28:25Z","id":"moai-bbzg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-n648 로 옮겨 적는다 — 동작은 그대로 둔다"}
+{"ts":"2026-09-14T10:28:25Z","id":"moai-n648","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
