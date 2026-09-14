@@ -76,6 +76,10 @@ pub enum Act {
     Stay,
     /// 이 디렉터리를 읽어 [`Picker::show`] 로 넣어 달라. 지금 디렉터리를 다시 읽는 것도 이것이다.
     Go(PathBuf),
+    /// 지금 디렉터리를 **점 디렉터리 보이기를 이 값으로** 다시 읽어 달라. 보이기 설정은 읽기가
+    /// 됐을 때 목록과 함께 넣는다(moai-v2jf) — 창이 먼저 뒤집으면 못 읽는 디렉터리에서 설정은
+    /// 바뀌고 목록은 옛것이라 둘이 어긋난다.
+    Hidden(bool),
     /// 이 디렉터리를 등록해 달라.
     Register(PathBuf),
     /// 닫는다. 적던 것이 없으니 묻지 않는다.
@@ -236,10 +240,8 @@ impl Picker {
                 Some(r) => self.path_of(r).map_or(Act::Stay, Act::Register),
                 None => Act::Stay,
             },
-            Pick::Hidden => {
-                self.show_hidden = !self.show_hidden;
-                Act::Go(self.at.dir.clone())
-            }
+            // **뒤집지 않고 원하는 값만 댄다** — 넣는 것은 다시 읽기가 된 뒤 든 쪽이 한다.
+            Pick::Hidden => Act::Hidden(!self.show_hidden),
             Pick::Path => {
                 let mut text = self.at.dir.display().to_string();
                 if !text.ends_with(std::path::MAIN_SEPARATOR) {
@@ -458,14 +460,16 @@ mod tests {
         assert_eq!(p.current(), Some(Row::Dir(1)), "붙이기 전의 `g` 와 이어졌다");
     }
 
-    /// `.` 은 숨은 것 보이기를 뒤집고 같은 층을 다시 읽으라고 한다. Esc·q 는 닫는다.
+    /// `.` 은 숨은 것 보이기를 **반대 값으로** 다시 읽으라고만 한다 — 창은 설정을 스스로 안
+    /// 뒤집는다. 읽기가 된 뒤 든 쪽이 넣는다(moai-v2jf). Esc·q 는 닫는다.
     #[test]
-    fn dot_toggles_hidden_and_esc_or_q_closes() {
+    fn dot_asks_for_the_other_hidden_setting_and_esc_or_q_closes() {
         let mut p = Picker::new(listing("/w", &[]));
-        assert_eq!(press(&mut p, KeyCode::Char('.')), Act::Go("/w".into()));
+        assert_eq!(press(&mut p, KeyCode::Char('.')), Act::Hidden(true));
+        assert!(!p.show_hidden, "읽기 전에 창이 설정을 뒤집었다");
+        p.show_hidden = true;
+        assert_eq!(press(&mut p, KeyCode::Char('.')), Act::Hidden(false));
         assert!(p.show_hidden);
-        assert_eq!(press(&mut p, KeyCode::Char('.')), Act::Go("/w".into()));
-        assert!(!p.show_hidden);
         assert_eq!(press(&mut p, KeyCode::Char('q')), Act::Close);
         assert_eq!(press(&mut p, KeyCode::Esc), Act::Close);
     }
