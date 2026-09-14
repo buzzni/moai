@@ -1994,3 +1994,7 @@
 {"ts":"2026-09-14T12:52:15Z","id":"moai-mzoc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-14T12:52:15Z","id":"moai-4lam","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-14T12:52:26Z","id":"moai-5zqe.exx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review high --fix(4a49890) 결과를 원문·판단 두 노트로 붙이고 fix: 커밋, main 받아 worktree-moai-hxma 병합·시험·done 커밋, 워크트리·가지 지우고 moa-issue-45 에 보고"}
+{"ts":"2026-09-14T12:54:13Z","id":"moai-f7xs","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: worktree-moai-f7xs 에서 시험 통과 확인(init.rs PREFIX_MAX·shorten·거절, cli.rs 도움말, tests/cli.rs init_keeps_a_new_prefix_short) → 커밋 → 리뷰 이슈(--parent moai-f7xs)와 리뷰 서브에이전트 → 원문·판단 노트, fix: 커밋, 리뷰 닫기 → 브랜치에 main 을 받아 시험 → 워크트리를 둔 채 나와 main 에서 머지 → f7xs done·트래커 커밋 → 워크트리·가지 삭제 → moa-issue-45 에 머지 해시·요약 보고."}
+{"ts":"2026-09-14T12:54:41Z","id":"moai-f7xs.z1x","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — init 접두어 8자 제한과 줄이기 (f7xs)"}
+{"ts":"2026-09-14T12:55:20Z","id":"moai-f7xs.z1x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:57:40Z","id":"moai-ugjp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"2db5e57 (7215e15 + 리뷰 fix 1365a8f). 리뷰 moai-ugjp.yhs 지적 1건 반영"}
