@@ -1590,10 +1590,14 @@ impl Warning {
     }
     /// 줄마다 판정에 쓴 나이를 싣는다. **잰 시각을 받는다** — 판정과 같은 시각으로 재야
     /// 표시가 판정과 안 갈라진다. 담긴 id 만 싣는다.
+    ///
+    /// **같은 id 의 줄이 둘이면 파일에서 뒤의 줄이 이긴다** — 보이는 쪽의 id 지도
+    /// (`view::status` 의 `by_id`)가 뒷줄의 칸·제목을 내므로, 앞줄 나이를 실으면 한 줄에
+    /// 두 줄의 값이 섞인다. 겹친 id 자체는 `duplicate_id` 가 따로 말한다.
     fn ages<'x>(mut self, of: impl Fn(&'x Issue) -> &'x str, rows: &[&'x Issue], now: &str) -> Warning {
         for i in rows {
             if let Some(d) = days_since(of(i), now) {
-                self.ages.entry(i.id.clone()).or_insert(d);
+                self.ages.insert(i.id.clone(), d);
             }
         }
         self
@@ -2417,6 +2421,15 @@ mod tests {
         let st = status(&[picked], &[], &cfg(), now);
         let w = st.warnings.iter().find(|w| w.kind == "stale_progress").expect("잊은 것 경고가 없다");
         assert_eq!(w.ages.get("argos-0003"), Some(&20));
+
+        // 같은 id 의 줄이 둘 다 걸리면 뒷줄의 나이다 — 보이는 쪽이 뒷줄의 칸·제목을 낸다.
+        let mut front = make("argos-0005", Kind::Issue, "review");
+        front.status_since = "2026-09-21T00:00:00Z".into(); // 10일
+        let mut back = make("argos-0005", Kind::Issue, "review");
+        back.status_since = "2026-09-27T00:00:00Z".into(); // 4일
+        let st = status(&[front, back], &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "stale_review").expect("썩는 review 경고가 없다");
+        assert_eq!(w.ages.get("argos-0005"), Some(&4), "앞줄 나이를 뒷줄 옆에 댔다");
 
         // 날짜로 안 거는 경고는 안 싣는다 — JSON 에서 키가 사라진다.
         let mut blocked = make("argos-0004", Kind::Issue, "todo");

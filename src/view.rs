@@ -1490,6 +1490,26 @@ mod tests {
         Issue::new(id.into(), title.into(), Kind::Issue, Status::new(status), "2026-09-11T04:12:03Z")
     }
 
+    /// **경고 목록은 판정한 나이를 댄다**(moai-7azq). 칸에 30일 선 줄이 막음이 5일 전 다시
+    /// 선 것으로 `blocked_stale` 에 걸리면 "5일" 이다 — 여기서 칸 나이를 새로 재면 "3일 넘게
+    /// 막힘" 밑에 "30일" 이 선다.
+    #[test]
+    fn a_warning_row_shows_the_age_it_was_judged_by() {
+        let now = "2026-10-11T00:00:00Z";
+        let mut blocker = issue("argos-0001", "막는 일", "todo");
+        blocker.status_since = "2026-10-06T00:00:00Z".into(); // 5일 전 done 에서 되돌아 나왔다
+        let mut stuck = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
+        stuck.blocked_by = vec!["argos-0001".into()];
+        let issues = vec![blocker, stuck];
+        let st = crate::report::status(&issues, &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "blocked_stale").expect("막힘 경고가 없다");
+        let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
+        let out = plain(&preview(w, &by_id, now, &Origin::default()));
+        let row = out.iter().find(|l| l.contains("argos-0002")).expect("막힌 줄이 목록에 없다");
+        assert!(row.contains(" 5일"), "판정한 나이를 안 댔다 — {row}");
+        assert!(!row.contains("30일"), "칸 나이를 댔다 — {row}");
+    }
+
     fn plain(lines: &[String]) -> Vec<String> {
         // 테스트는 칠하지 않은 모양을 본다 — 표 정렬은 색과 무관해야 한다.
         lines
