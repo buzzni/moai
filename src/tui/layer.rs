@@ -477,6 +477,7 @@ impl App {
         self.unreadable = Vec::new();
         self.origin = Default::default();
         self.elsewhere = Vec::new();
+        self.unfound = None;
         self.watched = Vec::new();
         self.stamp = None;
         self.warnings = 0;

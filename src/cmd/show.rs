@@ -110,6 +110,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         let issue = load
             .get(id)
             .ok_or_else(|| Fail::coded(format!("{id} 를 못 찾았다"), super::code::NOT_FOUND))?;
+        if args.as_plan {
+            return plan(ctx, &load.issues, issue, args.raw);
+        }
         return one(ctx, &repo, &load.issues, issue, args.raw, &origin);
     }
 
@@ -122,6 +125,16 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
              `moai show <id> --raw` 처럼 하나를 집어서 쓴다"
                 .to_string(),
             "bad_filter",
+        ));
+    }
+    // 되뽑을 에픽이 없다. 목록을 통째로 되뽑으면 에픽 없는 이슈가 `add --from` 에
+    // 도로 안 들어가는 글이 된다.
+    if args.as_plan {
+        return Err(Fail::coded(
+            "`--as-plan` 은 에픽 하나를 되뽑는다.\n      \
+             `moai show <에픽> --as-plan` 처럼 하나를 집어서 쓴다"
+                .to_string(),
+            super::code::BAD_TARGET,
         ));
     }
 
@@ -228,6 +241,45 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         &wh,
         &origin,
     ))
+}
+
+/// `--as-plan` — 에픽 하나를 `add --from` 이 받는 마크다운으로 되뽑는다.
+///
+/// 형식은 `draft::render` 가 안다. 여기는 멤버를 사람 화면과 같은 자
+/// (`report::group_members`)로 고를 뿐이다 — 따로 고르면 `show <에픽>` 에 선 줄과
+/// 되뽑은 줄이 어긋난다. 미뤄 둔 멤버도 든다: 틀을 다듬는 것은 사람이다.
+///
+/// 차례는 목록 차례다. 스냅샷은 id 차례라 만든 차례가 남아 있지 않다.
+fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
+    if raw {
+        return Err(Fail::coded(
+            "`--as-plan` 과 `--raw` 는 같이 쓸 수 없다 — 되뽑은 계획에는 본문이 없다".to_string(),
+            super::code::BAD_FILTER,
+        ));
+    }
+    if epic.kind != Kind::Epic {
+        return Err(Fail::coded(
+            format!(
+                "`{}` 는 {} 다. `--as-plan` 은 에픽을 되뽑는다\n      에픽 목록은 `moai show epic`",
+                epic.id,
+                epic.kind.as_str()
+            ),
+            super::code::BAD_TARGET,
+        ));
+    }
+    let members = report::group_members(all, epic);
+    let md = crate::draft::render(epic, &members);
+    // 도로 못 들어가는 줄은 이름을 댄다. 종료 코드는 안 바꾼다 — 틀은 사람이 다듬는다.
+    let lossy = crate::draft::lossy(epic, &members);
+    if ctx.json {
+        return super::json_line(&serde_json::json!({ "id": epic.id, "plan": md, "lossy": lossy }));
+    }
+    for id in &lossy {
+        // 앞머리 `[`·끝의 `#낱말` 은 render 가 이스케이프한다(moai-a5pz). 여기 오는 것은 원래
+        // 역슬래시를 든 제목처럼 이스케이프로도 못 담는 것뿐이라 까닭을 하나로 단정하지 않는다.
+        eprintln!("moai: {id} 의 제목은 이 형식으로 도로 넣으면 달리 읽힌다 — 넣기 전에 고친다");
+    }
+    Ok(md.lines().map(str::to_string).collect())
 }
 
 fn one(

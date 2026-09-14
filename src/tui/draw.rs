@@ -474,13 +474,18 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
         Some(b) => w.saturating_sub(crate::text::width(b) + 3),
         None => w,
     };
-    // **겹쳐 보는 중이면 늘 보인다** — 거름망 뱃지와 같은 까닭이다. 옆에서 온 줄에만
-    // `⎇` 가 붙으므로, 옆이 조용하면 켜진 화면과 꺼진 화면이 똑같이 보인다.
+    // **옆 워크트리가 있어 겹쳐 보는 중이면 늘 보인다** — 거름망 뱃지와 같은 까닭이다. 옆에서
+    // 온 줄에만 `⎇` 가 붙으므로, 옆이 조용하면 켜진 화면과 꺼진 화면이 똑같이 보인다.
+    // **옆이 없으면 안 세운다**(moai-d5vn). 겹쳐 보기는 켜진 채로 시작하므로(moai-zcuh) "옆
+    // 워크트리 없음" 을 세우면 모든 프로젝트의 경로 줄 절반을 늘 먹는다 — 옆이 없으면 켜진 화면과
+    // 꺼진 화면이 정말로 같아 가를 것이 없다. 켜짐은 메뉴의 `[켜짐]` 이 댄다. 못 찾은 까닭은
+    // `SPC t w` 로 켰을 때 알림이 댄다(`App::unfound`).
     // **끄는 법은 끌 수 있는 자리에서만 댄다** — 층에서는 `SPC t w` 가 메뉴에 안 서고 말없이
-    // 꺼져 있으므로(`Browse::enabled`), 적어 두면 눌러도 아무 일이 없는 키가 된다.
-    let overlay = app.worktree.then(|| {
-        let trees = app.origin.labels();
-        let names = if trees.is_empty() { "옆 워크트리 없음".to_string() } else { trees.join(", ") };
+    // 꺼져 있으므로(`Browse::enabled`), 적어 두면 눌러도 아무 일이 없는 키가 된다. 키 이름은
+    // 표에서 읽는다 — `w` 가 `SPC t w` 로 옮겨 간 뒤에도 옛 이름을 대던 자리다.
+    let trees = app.origin.labels();
+    let overlay = (app.worktree && !trees.is_empty()).then(|| {
+        let names = trees.join(", ");
         let off = match Browse::Worktree.enabled(&app.key_ctx(rows)) {
             Ok(()) => format!("  {} 로 끈다", label(BROWSE, Browse::Worktree)),
             Err(_) => String::new(),
@@ -729,7 +734,7 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
         // 묶음은 멤버에서 읽은 칸이다 — CLI 목록의 S 열과 같은 자. **다만 집은 멤버가
         // 있을 때만 돌린다**: 도는 글리프는 "지금 누가 손대고 있다" 는 말인데 묶음의
         // `in_progress` 는 멤버 하나가 끝났다는 말일 수도 있다(`App::spins`).
-        Span::styled(glyph_of(app, at).to_string(), status(app.column(at))),
+        Span::styled(row_glyph(app, at), status(app.column(at))),
         Span::raw(" "),
     ];
     // 다른 워크트리에서 온 줄은 제목 **앞에** `⎇ <브랜치>` — CLI 목록과 같은 자리다.
@@ -742,13 +747,21 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
     // 커서 자리 + 머리글 폭. **`CURSOR` 에서 잰다** — 숫자를 손으로 적으면
     // 글리프를 바꾼 날 제목 몫이 한두 칸 넉넉해지고, 넘친 줄은 위젯이 말없이
     // 잘라 내 잘렸다는 `…` 마저 사라진다.
-    let head_w = head.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
+    let mut head_w = head.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
     // 셈은 **제목보다 먼저 자리를 얻는다** — 긴 제목에 밀려 잘리면 진척을 말하는 것이
     // 사라진다. 자는 상세 롤업과 같다(`Index::progress`).
     let tally = match is_dir.then(|| app.index.progress(&app.issues, &deeper(app, e))) {
         Some(p) if p.percent().is_some() => format!("  {}/{}", p.done, p.work.len()),
         _ => String::new(),
     };
+    // **좁으면 스피너부터 걷는다**(moai-q59j). 목록 줄의 글리프는 두 칸(`⠋▸`·` ·`)인데, 제목
+    // 한 글자와 디렉터리 `/` 가 들어갈 자리가 없으면 멈춘 글리프 한 칸만 남긴다 — 뜻은 글리프가
+    // 지고 움직임은 곁들이라, 잘려도 되는 것부터 뺀다. 안 빼면 `/` 가 잘려 폴더와 파일이 안 갈린다.
+    if crate::text::width(CURSOR) + head_w + crate::text::width(&tally) + 2 > budget {
+        let still = style::glyph(app.column(at)).to_string();
+        head_w = head_w - crate::text::width(&head[4].content) + crate::text::width(&still);
+        head[4] = Span::styled(still, status(app.column(at)));
+    }
     let used = crate::text::width(CURSOR) + head_w + crate::text::width(&tally);
     let mut title = clip(&app.index.label(&app.issues, e), budget.saturating_sub(used));
     // **디렉터리 표시는 자른 뒤에 붙인다.** 먼저 붙이면 긴 제목에서 `/` 가
@@ -971,7 +984,17 @@ fn wrapped<'a>(text: &str, w: usize, style: Style) -> Vec<Line<'a>> {
 /// 가 정한다**(루프는 그려진 글리프로 깬다 — `App::spun`).
 fn glyph_of(app: &App, at: usize) -> &'static str {
     let col = app.column(at);
-    if app.spins(at) { style::spin_glyph(col, app.spin) } else { style::glyph(col) }
+    if app.spins(at) { style::spin_frame(app.spin) } else { style::glyph(col) }
+}
+
+/// 목록 줄의 글리프 — **도는 줄은 스피너 뒤에 그 칸의 멈춘 글리프를 붙인다**(moai-q59j).
+/// 시작한 칸이 모두 돌면서 `in_progress` 와 `review` 가 같은 스피너가 됐고, 목록 줄에는 칸
+/// 이름이 없어 색만으로 갈렸다 — 색이 혼자 뜻을 지면 안 된다. 움직임은 곁들이고 뜻은
+/// 글리프가 진다(`⠋▸`·`⠋?`). 안 도는 줄은 한 칸 띄워 두 글자 자리를 맞춘다 — 줄마다 제목이
+/// 들쭉날쭉하면 훑어 내려갈 수 없다. 상세 머리와 건수는 칸 이름을 곁에 적으므로 [`glyph_of`] 다.
+fn row_glyph(app: &App, at: usize) -> String {
+    let col = style::glyph(app.column(at));
+    if app.spins(at) { format!("{}{col}", style::spin_frame(app.spin)) } else { format!(" {col}") }
 }
 
 /// 칸별 건수의 글리프. **센 줄 가운데 도는 줄이 있을 때만 돈다**([`App::spins`]) — 칸
@@ -979,7 +1002,7 @@ fn glyph_of(app: &App, at: usize) -> &'static str {
 /// 뺀 일을 "지금 손대는 중" 이라 말하고 그 스피너로 루프를 깨운다(`App::spun`).
 fn count_glyph(app: &App, work: &[usize], st: &str) -> &'static str {
     let turning = work.iter().any(|&at| app.issues[at].status.as_str() == st && app.spins(at));
-    if turning { style::spin_glyph(st, app.spin) } else { style::glyph(st) }
+    if turning { style::spin_frame(app.spin) } else { style::glyph(st) }
 }
 
 /// 그 항목 안으로 들어간 경로. 요약을 세려면 그 밑을 봐야 한다.
@@ -1917,6 +1940,21 @@ pub(super) mod tests {
         assert!(!a.worktree, "SPC t w 가 안 껐다");
     }
 
+    /// **옆 워크트리가 없으면 경로 줄은 겹쳐 보기를 말하지 않는다**(moai-d5vn). 겹쳐 보기는 켜진
+    /// 채로 시작하므로(moai-zcuh) 없을 때도 세우면 모든 프로젝트의 경로 줄 절반을 먹는다 — 옆이
+    /// 없으면 켜진 화면과 꺼진 화면이 정말로 같으니 가를 것이 없다. 켜짐은 메뉴의 `[켜짐]` 이 댄다.
+    #[test]
+    fn the_path_line_says_nothing_of_the_overlay_when_no_worktree_sits_beside() {
+        let mut a = app();
+        assert!(a.worktree, "겹쳐 보기가 꺼진 채로 시작했다");
+        assert!(a.origin.labels().is_empty());
+        let lines = render(&mut a, 120, 12);
+        assert!(!lines[0].contains('⎇') && !lines[0].contains("워크트리"), "옆이 없는데 경로 줄이 겹쳐 보기를 댄다\n{}", lines[0]);
+        a.hit("SPC t");
+        let menu = render(&mut a, 120, 12).join("\n");
+        assert!(menu.contains("워크트리 겹쳐 보기 [켜짐]"), "켜진 것을 댈 자리가 없다\n{menu}");
+    }
+
     /// 걸음은 **그린 횟수가 아니라 시계가** 올린다. 다시 그리기만 해서는
     /// 안 돌아야 하고 — 안 그러면 키를 누르는 동안 타이핑 속도로 돈다 —
     /// 한 화면 안에서는 목록과 상세가 **같은 걸음**을 보여야 한다.
@@ -2326,6 +2364,35 @@ pub(super) mod tests {
         assert!(a.spun, "도는 화면을 안 깨운다");
     }
 
+    /// **도는 목록 줄은 색 없이도 칸이 갈린다**(moai-q59j). 시작한 칸이 모두 돌아 `in_progress`
+    /// 와 `review` 가 같은 스피너가 되므로, 스피너 뒤에 그 칸의 멈춘 글리프가 붙는다. 칸 이름을
+    /// 바꾼 설정에서도 시작한 칸이 돌고 루프를 깨운다.
+    #[test]
+    fn a_spinning_row_still_says_which_column_without_colour() {
+        let row = |id: &str, title: &str, st: &str| {
+            crate::model::Issue::new(id.into(), title.into(), Kind::Issue, Status::new(st), "2026-09-01T00:00:00Z")
+        };
+        let issues = vec![row("argos-0001", "집은 일", "in_progress"), row("argos-0002", "리뷰 기다리는 일", "review"), row("argos-0003", "안 한 일", "todo")];
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let lines = render(&mut a, 120, 16);
+        let line_of = |id: &str| lines.iter().find(|l| l.contains(id)).cloned().unwrap_or_else(|| panic!("{id} 줄이 없다\n{}", lines.join("\n")));
+        let (held, waiting, idle) = (line_of("argos-0001"), line_of("argos-0002"), line_of("argos-0003"));
+        for l in [&held, &waiting] {
+            assert!(style::SPIN.iter().any(|g| l.contains(g)), "시작한 줄이 안 돈다\n{l}");
+        }
+        assert!(style::SPIN.iter().any(|g| held.contains(&format!("{g}▸"))), "집은 줄에 칸 글리프가 없다\n{held}");
+        assert!(style::SPIN.iter().any(|g| waiting.contains(&format!("{g}?"))), "리뷰 줄에 칸 글리프가 없다 — 색만으로 갈린다\n{waiting}");
+        assert!(!style::SPIN.iter().any(|g| idle.contains(g)) && idle.contains(" ·"), "안 도는 줄의 글리프 자리가 어긋났다\n{idle}");
+        assert!(a.spun, "도는 줄을 그리고도 안 깨운다");
+
+        // 칸 이름을 바꾼 설정에서도 시작한 칸이 돈다 — 멈춘 글리프는 설정으로 더한 칸의 `○`.
+        let renamed = Config::parse("prefix = \"argos\"\nstatuses = \"todo, doing, check, done\"\n").unwrap();
+        let mut a = App::new(vec![row("argos-0001", "하는 일", "doing")], renamed, Path::new());
+        let lines = render(&mut a, 120, 16).join("\n");
+        assert!(style::SPIN.iter().any(|g| lines.contains(&format!("{g}○"))), "바꾼 칸이 안 돈다\n{lines}");
+        assert!(a.spun, "바꾼 칸의 스피너가 루프를 안 깨운다");
+    }
+
     /// **미룬 `in_progress` 하나뿐인 칸은 건수 글리프도 안 돈다**(moai-tawj) — 줄은 멈추는데
     /// 목록 머리·롤업의 건수만 칸 이름으로 돌리면, 루프가 빠른 걸음으로 안 깨우는 스피너의
     /// 한 프레임에 멈춰 선다.
@@ -2608,9 +2675,16 @@ pub(super) mod tests {
         for absent in ["거름망", "검색", "Bksp", "워크트리", "F3", "F10"] {
             assert!(!bar.contains(absent), "층에서 안 듣는 키를 적었다 — {absent} in {bar:?}");
         }
-        // 층에서도 겹쳐 보기는 켜져 있어 뱃지가 서지만, `SPC t w` 는 층의 메뉴에 안 서므로 끄는 법을 대지 않는다.
-        assert!(a.worktree && lines[0].contains('⎇'), "{:?}", lines[0]);
-        assert!(!lines[0].contains("로 끈다"), "층에서 안 듣는 끄는 키를 댄다 — {:?}", lines[0]);
+        // 옆 워크트리가 없으면 겹쳐 보기가 켜져 있어도 뱃지가 안 선다(moai-d5vn).
+        assert!(a.worktree && !lines[0].contains('⎇'), "{:?}", lines[0]);
+        // 옆이 있으면 층에서도 뱃지가 서지만, `SPC t w` 는 층의 메뉴에 안 서므로 끄는 법을 대지 않는다.
+        let (_, origin) =
+            crate::worktree::overlay(Vec::new(), vec![crate::worktree::Side::new("feat/x", "/wt", vec![issues()[2].clone()])]);
+        let plain = std::mem::replace(&mut a.origin, origin);
+        let top = render(&mut a, 80, 22).remove(0);
+        assert!(top.contains("⎇ feat/x"), "{top:?}");
+        assert!(!top.contains("로 끈다"), "층에서 안 듣는 끄는 키를 댄다 — {top:?}");
+        a.origin = plain;
         for l in &lines {
             assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
         }

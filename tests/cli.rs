@@ -170,6 +170,52 @@ fn init_refuses_to_change_the_prefix() {
     assert!(moai(s.path(), &["init", "argos"]).status.success());
 }
 
+/// **새로 심는 접두어는 8자까지다**(moai-f7xs). 사람이 준 긴 것은 거절하고 짧은 후보를 대며
+/// 아무것도 안 만든다. 디렉터리 이름에서 만든 긴 것은 머리글자로 줄이고 그렇다고 말한다.
+/// 이미 긴 접두어로 심긴 저장소는 막지 않는다 — 읽기는 관대하게, 접두어는 못 바꾸는 값이다.
+#[test]
+fn init_keeps_a_new_prefix_short() {
+    let s = Scratch::new("shortprefix");
+    let out = moai(s.path(), &["init", "my-company-backend"]);
+    assert!(!out.status.success(), "긴 접두어를 받았다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("8자까지") && err.contains("`mcb`"), "{err}");
+    assert!(!s.path().join(".moai").exists(), "거절하고도 .moai 를 만들었다");
+    // 모양이 틀린 긴 접두어는 모양을 먼저 말한다 — 길이 오류가 틀린 후보(`MyCompan`)를 대면 안 된다.
+    let out = moai(s.path(), &["init", "MyCompanyBackend"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("소문자") && !err.contains("8자까지"), "{err}");
+
+    // 디렉터리 이름에서 만든 긴 것은 줄인다.
+    let long = s.path().join("my-company-backend");
+    std::fs::create_dir_all(&long).unwrap();
+    let out = ok(&long, &["init"]);
+    assert!(out.contains("접두어는 `mcb`") && out.contains("줄였다"), "{out}");
+    assert!(add(&long, &["첫 이슈"]).starts_with("mcb-"), "줄인 접두어로 id 를 안 냈다");
+
+    // 기계 출력은 줄였을 때만 원래 이름을 싣는다.
+    let other = s.path().join("another-long-name-here");
+    std::fs::create_dir_all(&other).unwrap();
+    let json = ok(&other, &["init", "--json"]);
+    assert!(json.contains("\"prefix\":\"alnh\"") && json.contains("\"shortened_from\":\"another-long-name-here\""), "{json}");
+    let short = s.path().join("argos");
+    std::fs::create_dir_all(&short).unwrap();
+    assert!(!ok(&short, &["init", "--json"]).contains("shortened_from"), "안 줄였는데 원래 이름을 실었다");
+
+    // 이미 긴 접두어로 심긴 저장소는 다시 불러도, 이슈를 만들어도 된다.
+    let old = s.path().join("old");
+    std::fs::create_dir_all(old.join(".moai")).unwrap();
+    std::fs::write(old.join(".moai/config.toml"), "prefix = \"my-company-backend\"\n").unwrap();
+    std::fs::write(old.join(".moai/issues.jsonl"), "").unwrap();
+    std::fs::write(old.join(".moai/journal.jsonl"), "").unwrap();
+    assert!(ok(&old, &["init"]).contains("이미 심겨 있다"));
+    assert!(ok(&old, &["init", "my-company-backend"]).contains("이미 심겨 있다"), "같은 긴 접두어로 다시 부른 것을 막았다");
+    let out = moai(&old, &["init", "another-long-one"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("나중에 못 바꾼다") && !err.contains("8자까지"), "{err}");
+    assert!(add(&old, &["옛 저장소의 이슈"]).starts_with("my-company-backend-"), "옛 긴 접두어를 막았다");
+}
+
 /// 남의 .gitignore 를 지우지 않고 빠진 줄만 덧붙인다.
 #[test]
 fn init_appends_to_an_existing_gitignore() {
@@ -596,6 +642,56 @@ fn a_colour_chosen_in_the_user_config_beats_the_hash_and_only_colour_changes() {
     assert!(ls.status.success() && String::from_utf8_lossy(&ls.stderr).contains("\"red\""), "{}", text(&ls));
 }
 
+/// 줄 **맨 앞의** 칠한 칸 — (SGR, 글). `indent` 를 떼고 곧바로 SGR 이 이어져야 칸이다.
+///
+/// 한눈 보기의 줄은 `  <SGR>이름<리셋>  <SGR>id<리셋> …`, 머리는 `<SGR>이름<리셋>  경로` 다.
+/// **이름은 이 자리로 찾는다** — 줄 어디서든 `이름<리셋>` 을 찾으면 무작위 id 의 끝이 이름과
+/// 같을 때(`argos-i3p1` 과 `p1`) 남의 줄을 제 줄로 읽어 시험이 흔들렸다(moai-7ccd).
+fn name_cell<'a>(line: &'a str, indent: &str) -> Option<(String, &'a str)> {
+    let mut rest = line.strip_prefix(indent)?;
+    let mut sgr = String::new();
+    while let Some(tail) = rest.strip_prefix("\u{1b}[") {
+        let end = tail.find('m')?;
+        if !tail[..end].chars().all(|c| c.is_ascii_digit() || c == ';') {
+            return None;
+        }
+        sgr.push_str(&rest[..end + 3]);
+        rest = &tail[end + 1..];
+    }
+    let (text, _) = rest.split_once("\u{1b}[0m")?;
+    (!sgr.is_empty()).then_some((sgr, text))
+}
+
+/// 프로젝트 `name` 의 일 줄 중 `id` 가 든 것.
+fn project_row<'a>(painted: &'a str, name: &str, id: &str) -> Option<&'a str> {
+    painted.lines().find(|l| name_cell(l, "  ").is_some_and(|(_, n)| n == name) && l.contains(id))
+}
+
+/// 프로젝트 `name` 의 머리 줄.
+fn project_head<'a>(painted: &'a str, name: &str) -> Option<&'a str> {
+    painted.lines().find(|l| !l.starts_with(' ') && name_cell(l, "").is_some_and(|(_, n)| n == name))
+}
+
+/// **줄 찾기는 id 의 끝에 속지 않는다**(moai-7ccd). 옛 찾기(`이름<리셋>` 이 줄 어디든 있다)는
+/// `p0` 의 줄에 선 `argos-i3p1` 을 `p1` 의 줄로 읽었다 — 그 무작위 id 를 손으로 박아 본다.
+#[test]
+fn a_project_row_is_found_by_its_name_cell_not_by_an_id_that_ends_like_it() {
+    let painted = "\u{1b}[1m\u{1b}[32mp0\u{1b}[0m  /w/p0   1건
+  \u{1b}[32mp0\u{1b}[0m   \u{1b}[32margos-i3p1\u{1b}[0m  p2  집을 일
+
+\u{1b}[1m\u{1b}[35mp1\u{1b}[0m  /w/p1   1건
+  \u{1b}[35mp1\u{1b}[0m   \u{1b}[35margos-i3p1\u{1b}[0m  p2  집을 일
+";
+    let old = painted.lines().find(|l| l.starts_with("  ") && l.contains("p1\u{1b}[0m") && l.contains("argos-i3p1")).unwrap();
+    assert!(old.contains("\u{1b}[32mp0"), "옛 찾기가 틀리는 자리를 못 만들었다 — {old:?}");
+    let row = project_row(painted, "p1", "argos-i3p1").expect("p1 의 줄이 없다");
+    assert_eq!(name_cell(row, "  "), Some(("\u{1b}[35m".to_string(), "p1")), "{row:?}");
+    let head = project_head(painted, "p1").expect("p1 의 머리가 없다");
+    assert_eq!(name_cell(head, ""), Some(("\u{1b}[1m\u{1b}[35m".to_string(), "p1")), "{head:?}");
+    assert_eq!(project_row(painted, "p", "argos-i3p1"), None, "이름의 앞부분으로 줄을 찾았다");
+    assert_eq!(project_row(painted, "i3p1", ""), None, "id 로 줄을 찾았다");
+}
+
 /// **프로젝트마다 색이 다르고, 한 프로젝트의 줄은 한 색이다** (moai-xs9x). 색은 경로로
 /// 고른다 — 다른 프로젝트를 더하고 빼도 제 색이 그대로다. 색을 끄면 글자는 칠하기 전과
 /// 바이트까지 같다: 이름이 곁에 서서 **색이 혼자 뜻을 지지 않는다.**
@@ -642,15 +738,12 @@ fn outside_a_repo_each_project_wears_its_own_colour_and_only_colour_changes() {
 
         let mut hues = std::collections::BTreeSet::new();
         for n in &names {
-            let row = painted
-                .lines()
-                .find(|l| l.starts_with("  ") && l.contains(&format!("{n}\u{1b}[0m")) && l.contains(id.as_str()))
-                .unwrap_or_else(|| panic!("{n} 의 줄이 없다 — {painted}"));
-            let (name_sgr, id_sgr) = (sgr_before(row, n), sgr_before(row, id));
-            assert!(!name_sgr.is_empty(), "{n} 의 이름 칸이 안 칠해졌다 — {row:?}");
+            let row = project_row(&painted, n, id).unwrap_or_else(|| panic!("{n} 의 줄이 없다 — {painted}"));
+            // 칠하지 않은 이름 칸은 `name_cell` 이 칸으로 안 읽어 위의 찾기에서 이미 멈춘다.
+            let (name_sgr, id_sgr) = (name_cell(row, "  ").unwrap().0, sgr_before(row, id));
             assert_eq!(name_sgr, id_sgr, "{n} 의 이름 칸과 id 칸 색이 다르다 — {row:?}");
-            let head = painted.lines().find(|l| !l.starts_with(' ') && l.contains(&format!("{n}\u{1b}[0m  "))).unwrap();
-            assert!(sgr_before(head, n).contains(&name_sgr), "{n} 의 머리가 줄과 다른 색이다 — {head:?}");
+            let head = project_head(&painted, n).unwrap_or_else(|| panic!("{n} 의 머리가 없다 — {painted}"));
+            assert!(name_cell(head, "").unwrap().0.contains(&name_sgr), "{n} 의 머리가 줄과 다른 색이다 — {head:?}");
             hues.insert(name_sgr);
         }
         assert!(hues.len() > 1, "열세 프로젝트가 한 색이다 — {painted}");
@@ -659,8 +752,8 @@ fn outside_a_repo_each_project_wears_its_own_colour_and_only_colour_changes() {
     // 다른 프로젝트를 빼고 차례를 바꿔도 제 색이 그대로다 — 등록 순서가 아니라 경로로 고른다.
     let colour_of = |cfg: &Path, n: &str| {
         let t = run(cfg, &["ready"], true);
-        let row = t.lines().find(|l| l.starts_with("  ") && l.contains(&format!("{n}\u{1b}[0m"))).unwrap().to_string();
-        sgr_before(&row, n)
+        let row = project_row(&t, n, &todo).unwrap_or_else(|| panic!("{n} 의 줄이 없다 — {t}"));
+        name_cell(row, "  ").unwrap().0
     };
     let full = colour_of(&cfg, "p7");
     let alone = s.path().join("alone.toml");
@@ -1061,6 +1154,59 @@ fn edit_says_when_epic_none_cannot_cut_a_parents_membership() {
     assert!(line_of(s.path(), &top).contains(r#""inherited_epic":"거짓""#), "모르는 필드를 잃었다");
 }
 
+/// **마일스톤 줄에는 `--milestone <id>` 를 못 적는다**(moai-bg55, 사용자와 정함). 그 필드는
+/// 소속으로 안 세므로(moai-jwnr) 조용히 받으면 적은 사람은 걸린 줄 안다. 만들 때도 고칠
+/// 때도 같은 자로 거절하고 파일은 한 바이트도 안 바뀐다. **엄함은 지금 쓰는 줄에만** —
+/// 이미 그 필드를 든 옛 줄은 다른 쓰기를 막지 않고, 그 줄을 손댈 때 비우는 길을 댄다.
+#[test]
+fn a_milestone_line_refuses_a_milestone_but_old_lines_do_not_block() {
+    let s = init("stonestone");
+    let m2 = ok(s.path(), &["milestone", "add", "M2", "-q"]).trim().to_string();
+    let m1 = ok(s.path(), &["milestone", "add", "M1", "-q"]).trim().to_string();
+    let refused = |args: &[&str], id: &str| {
+        let before = issues(s.path());
+        let out = moai(s.path(), args);
+        assert!(!out.status.success(), "{args:?} 를 받았다");
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(err.contains("다른 마일스톤에 들지 않는다") && err.contains(&format!("moai edit {id} --milestone none")), "{args:?}: {err:?}");
+        assert_eq!(issues(s.path()), before, "{args:?}: 거절했는데 파일이 바뀌었다");
+    };
+    refused(&["edit", &m1, "--milestone", &m2], &m1);
+    let before = issues(s.path());
+    let out = moai(s.path(), &["milestone", "add", "M3", "--milestone", &m2]);
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(!out.status.success() && err.contains("다른 마일스톤에 들지 않는다"), "만들 때 받았다 — {err:?}");
+    // 만들 때는 **빼라고** 댄다. 거절된 새 줄의 id 는 저장되지 않으므로, 그 id 로 `moai edit` 를
+    // 치라고 대면 시킨 대로 친 명령이 "못 찾았다" 로 끝난다(리뷰 moai-bg55.oya).
+    assert!(err.contains("`--milestone` 을 빼고"), "만들 때 뺄 길을 안 댔다 — {err:?}");
+    assert_eq!(issues(s.path()), before, "거절한 만들기가 파일을 바꿨다");
+    // 이슈·에픽은 여전히 마일스톤에 든다.
+    add(s.path(), &["일", "--milestone", &m2]);
+    add(s.path(), &["에픽", "--type", "epic", "--milestone", &m2]);
+
+    // 옛 바이너리가 쓴 줄 — 필드를 든 마일스톤 줄을 파일에 직접 둔다.
+    let file = s.path().join(".moai/issues.jsonl");
+    let src = std::fs::read_to_string(&file).unwrap();
+    let old = src
+        .lines()
+        .map(|l| match l.contains(&format!("\"id\":\"{m1}\"")) {
+            true => l.replacen("\"created_at\"", &format!("\"milestone\":\"{m2}\",\"created_at\""), 1),
+            false => l.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(&file, &old).unwrap();
+    // 그 줄을 안 건드리는 쓰기는 지나간다.
+    add(s.path(), &["딴 일"]);
+    assert!(line_of(s.path(), &m1).contains(&format!("\"milestone\":\"{m2}\"")), "안 건드린 옛 줄의 필드를 지웠다");
+    // 그 줄을 손대면 거절하고 비우는 길을 댄다 — 그 길을 치면 지나간다.
+    refused(&["edit", &m1, "--title", "M1 새 제목"], &m1);
+    ok(s.path(), &["edit", &m1, "--milestone", "none"]);
+    // 키로 찾는다 — 마일스톤 줄은 `"kind":"milestone"` 을 들어 낱말만 찾으면 늘 걸린다.
+    assert!(!line_of(s.path(), &m1).contains("\"milestone\":"), "--milestone none 이 옛 줄을 못 비웠다");
+}
+
 /// **`--milestone none` 도 못 끊는 소속은 끊기지 않았다고 말한다** (moai-0lmn). 에픽이
 /// 마일스톤을 이기고 부모도 이기므로, 제 필드를 비워도 에픽이나 부모가 선 마일스톤에
 /// 그대로 든다 — `-e none` 과 같은 모양이라 같은 말투로 댄다.
@@ -1218,6 +1364,59 @@ fn edit_detail_draws_the_same_blocker_lines_as_show() {
     let edited = ok(s.path(), &["edit", &b, "-p", "2"]);
     assert!(line(&edited).contains("풀림"), "끝난 막음이 풀림으로 안 섰다\n{edited}");
     assert_eq!(line(&edited), line(&ok(s.path(), &["show", &b])));
+}
+
+/// **덧붙인 키가 이긴다**(moai-kgu2) — 줄이 모르는 필드로 `children`·`blockers` 를 들고 있어도
+/// `show --json` 은 그 키를 한 번씩만, 우리 값으로 낸다. 파일은 한 바이트도 안 바뀐다.
+#[test]
+fn show_json_keys_win_over_unknown_fields_of_the_same_name() {
+    let s = init("showkeys");
+    let a = add(s.path(), &["막는 것"]);
+    let b = add(s.path(), &["막히는 것"]);
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+    let doctored = issues(s.path()).replace(
+        &format!("\"id\":\"{b}\","),
+        &format!("\"id\":\"{b}\",\"children\":[\"가짜\"],\"blockers\":\"가짜\","),
+    );
+    std::fs::write(s.path().join(".moai/issues.jsonl"), &doctored).unwrap();
+
+    let json = ok(s.path(), &["show", &b, "--json"]);
+    assert_eq!(json.matches("\"children\":").count(), 1, "children 키가 둘 섰다\n{json}");
+    assert_eq!(json.matches("\"blockers\":").count(), 1, "blockers 키가 둘 섰다\n{json}");
+    assert!(json.contains("\"children\":[]") && !json.contains("가짜"), "모르는 필드가 덧붙인 키를 이겼다\n{json}");
+    assert!(json.contains(&format!("\"blockers\":[{{\"id\":\"{a}\"")), "{json}");
+    assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
+}
+
+/// **끊긴 에픽을 든 생각 밑에 접힌 줄은 트리와 status 가 같게 읽는다**(moai-uni2) — 길 잃은
+/// 부모의 묶음이다. 트리는 그 줄을 `(길 잃음)` 안의 생각 밑에 그리므로, status 가 그 줄을
+/// "에픽 없는 이슈" 로 세면 `moai show -e none` 을 가리키며 고칠 수 없는 줄을 고치라 한다.
+/// 고칠 곳은 생각의 끊긴 에픽 하나고, `dangling_epic` 이 그것을 댄다.
+#[test]
+fn a_child_under_a_lost_thought_is_not_counted_as_having_no_epic() {
+    let s = init("lostthought");
+    // 마일스톤을 쓰는 저장소여야 `no_milestone` 도 같은 자로 읽는지 본다.
+    let stone = add(s.path(), &["v1", "--type", "milestone"]);
+    let epic = add(s.path(), &["지울 에픽", "--type", "epic", "--milestone", &stone]);
+    let thought = add(s.path(), &["생각", "--type", "idea", "-e", &epic]);
+    let child = add(s.path(), &["생각 밑의 일", "--parent", &thought]);
+    assert!(moai(s.path(), &["rm", &epic]).status.success());
+
+    let tree = ok(s.path(), &["show", "--tree"]);
+    let lost_at = tree.find("(길 잃음)").unwrap_or_else(|| panic!("길 잃음 바구니가 없다\n{tree}"));
+    assert!(tree[lost_at..].contains(&child), "트리가 자식을 길 잃음 밖에 그렸다\n{tree}");
+
+    let st = ok(s.path(), &["status", "--json"]);
+    let warning = |kind: &str| st.split("{\"kind\":").find(|w| w.starts_with(&format!("\"{kind}\""))).map(str::to_string);
+    assert!(warning("dangling_epic").is_some_and(|w| w.contains(&thought)), "고칠 곳(생각의 끊긴 에픽)을 안 댄다\n{st}");
+    assert!(
+        !warning("no_epic").is_some_and(|w| w.contains(&child)),
+        "트리가 길 잃음에 그린 줄을 status 는 에픽 없는 이슈로 센다\n{st}"
+    );
+    assert!(
+        !warning("no_milestone").is_some_and(|w| w.contains(&child)),
+        "트리가 길 잃음에 그린 줄을 status 는 마일스톤 없는 일로 센다\n{st}"
+    );
 }
 
 /// 메모는 스냅샷을 건드리지 않고 저널에만 쌓인다.
@@ -2264,6 +2463,61 @@ fn the_body_is_drawn_but_the_raw_text_stays_reachable() {
         "무엇이 문제인지 말하지 않았다\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+/// **되뽑은 계획은 도로 들어간다.** `show <에픽> --as-plan` 의 출력을 그대로
+/// `add --from` 에 넣으면 같은 모양의 에픽이 선다 — 이 짝이 틀로 쓰는 계약이다.
+#[test]
+fn an_epic_comes_back_out_as_a_plan_that_goes_back_in() {
+    let s = init("asplan");
+    let made = from_stdin(
+        s.path(),
+        &["add", "--from", "-"],
+        "# 릴리스 #release\n- 바이너리를 올린다\n- [p1] 태그를 단다 #git\n",
+    );
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let epic = field(&ok(s.path(), &["show", "epic", "--json"]), "id");
+
+    let plan = ok(s.path(), &["show", &epic, "--as-plan"]);
+    assert_eq!(plan, "# 릴리스 #release\n- [p1] 태그를 단다 #git\n- 바이너리를 올린다\n");
+
+    let again = init("asplanagain");
+    let back = from_stdin(again.path(), &["add", "--from", "-"], &plan);
+    assert!(back.status.success(), "되뽑은 계획이 도로 안 들어간다\n{}", String::from_utf8_lossy(&back.stderr));
+    let epic2 = field(&ok(again.path(), &["show", "epic", "--json"]), "id");
+    assert_eq!(ok(again.path(), &["show", &epic2, "--as-plan"]), plan);
+
+    let json = ok(s.path(), &["show", &epic, "--as-plan", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(r##""plan":"# 릴리스 #release\n"##), "{json}");
+    assert!(json.contains(r#""lossy":[]"#), "{json}");
+
+    // 앞머리 `[` 와 끝의 `#낱말` 은 이스케이프로 도로 들어간다(moai-a5pz).
+    let bracket = add(s.path(), &["[WIP] 반쯤 #12", "-e", &epic]);
+    let plan = ok(s.path(), &["show", &epic, "--as-plan"]);
+    assert!(plan.contains("- \\[WIP] 반쯤 \\#12\n"), "{plan}");
+    assert!(ok(s.path(), &["show", &epic, "--as-plan", "--json"]).contains(r#""lossy":[]"#), "이스케이프한 제목을 짚었다");
+    let round = init("asplanescape");
+    assert!(from_stdin(round.path(), &["add", "--from", "-"], &plan).status.success(), "{plan}");
+    assert!(ok(round.path(), &["show", "-g", "WIP"]).contains("[WIP] 반쯤 #12"), "제목이 도로 안 섰다");
+    ok(s.path(), &["rm", &bracket]);
+
+    // 이스케이프로도 못 담는 제목은 조용히 틀리지 않고 이름을 댄다. 실패로는 안 끝난다.
+    let wip = add(s.path(), &["\\[이미 역슬래시]", "-e", &epic]);
+    let out = moai(s.path(), &["show", &epic, "--as-plan"]);
+    assert!(out.status.success(), "경고로 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&wip), "{}", String::from_utf8_lossy(&out.stderr));
+    let json = ok(s.path(), &["show", &epic, "--as-plan", "--json"]);
+    assert!(json.contains(&format!(r#""lossy":["{wip}"]"#)), "{json}");
+
+    // 에픽이 아닌 것과 목록 자리는 거절한다 — 조용히 엉뚱한 계획을 내지 않는다.
+    let lone = add(s.path(), &["그냥 이슈"]);
+    for args in [vec!["show", lone.as_str(), "--as-plan"], vec!["show", "--as-plan"], vec!["show", &epic, "--as-plan", "--raw"]] {
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{args:?} 를 말없이 먹었다");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("--as-plan"), "무엇이 문제인지 말하지 않았다 — {args:?}\n{err}");
+    }
 }
 
 /// **하나를 집은 자리에서 버려지는 필터가 없다.** 걸러지지 않은 그 이슈를
@@ -3654,6 +3908,37 @@ fn moving_a_deferred_row_says_it_is_still_out_of_the_plan() {
     );
 }
 
+/// **`done` 으로 옮기면 이로써 풀린 일을 한 줄로 댄다**(moai-942k, 사용자와 정함). `ready` 를
+/// 다시 안 불러도 다음 일을 안다. 풀린 것이 없으면 말하지 않고, `--json` 은 `unblocked` 를
+/// 늘 싣는다.
+#[test]
+fn mv_done_names_the_work_it_just_unblocked() {
+    let s = init("mvfreed");
+    let first = add(s.path(), &["막는 일"]);
+    let waiting = add(s.path(), &["기다리는 일"]);
+    ok(s.path(), &["link", &first, "--blocks", &waiting]);
+    assert!(!ok(s.path(), &["ready"]).contains(&waiting), "막았는데 ready 에 섰다");
+
+    let text = ok(s.path(), &["mv", &first, "done"]);
+    let line = text.lines().find(|l| l.contains("풀림")).unwrap_or_else(|| panic!("풀린 일을 안 댄다 — {text}"));
+    assert!(line.contains(&waiting) && line.contains("기다리는 일"), "{line:?}");
+    assert!(ok(s.path(), &["ready"]).contains(&waiting), "댄 일이 ready 에 없다");
+
+    // 풀린 것이 없으면 조용하다 — 기계 출력은 빈 배열을 싣는다.
+    let lone = add(s.path(), &["홀로 선 일"]);
+    let json = ok(s.path(), &["mv", &lone, "done", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(r#""unblocked":[]"#), "{json}");
+    assert!(!ok(s.path(), &["mv", &waiting, "done"]).contains("풀림"), "풀린 것 없이 말했다");
+
+    // 기계 출력은 풀린 줄을 싣는다.
+    let a = add(s.path(), &["둘째 막는 일"]);
+    let b = add(s.path(), &["둘째 기다리는 일"]);
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+    let json = ok(s.path(), &["mv", &a, "done", "--json"]);
+    assert!(json.contains(&format!(r#""unblocked":[{{"id":"{b}""#)), "{json}");
+}
+
 /// **묶음을 미루면 멤버도 계획에서 빠진다.** 에픽 줄 하나만 사라지고 멤버가
 /// `ready` 에 그 에픽 제목을 달고 서면, 미루기는 머리글 하나 지운 일이다.
 /// 목록도 같은 자로 숨기고, `--deferred` 가 그것을 연다.
@@ -5009,6 +5294,173 @@ fn the_hook_leaves_what_a_named_worktree_holds_to_that_worktree() {
     let input = format!("{{\"session_id\":\"s3\",\"cwd\":{}}}", json_str(&inside.display().to_string()));
     let own = String::from_utf8(hook_in(&s, &inside, "stop", &input).stdout).unwrap();
     assert!(own.contains(&format!("moai mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
+}
+
+/// **이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다**
+/// (moai-ntl6, 사용자 결정 B). 에이전트 격리 워크트리(`worktree-agent-<해시>`)와 옛 id 로 뜬
+/// 워크트리가 실제로 그랬다(moai-apsa·nt0h). 누구의 것인지 모르는 줄로는 막지도 붙들지도
+/// 않는다. 갈라진 **뒤에** main 에서 집은 일은 여전히 main 의 초점이다.
+#[test]
+fn work_picked_before_an_unnamed_worktree_branched_is_left_to_it() {
+    let s = Scratch::new("hookbranchpoint");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let agent = field(&ok(&main, &["add", "에이전트가 할 일", "--json"]), "id");
+    let renamed = field(&ok(&main, &["add", "옛 id 에서 옮긴 일", "--json"]), "id");
+    ok(&main, &["mv", &agent, "in_progress"]);
+    ok(&main, &["mv", &renamed, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-a04acfb3", "-b", "worktree-agent-a04acfb3"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/argos-old1", "-b", "worktree-argos-old1"]);
+
+    let at_main = |event: &str, session: &str, tool: Option<&str>| {
+        let body = tool.map_or(String::new(), |cmd| {
+            format!(",\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}", json_str(cmd))
+        });
+        let input = format!("{{\"session_id\":\"{session}\",\"cwd\":{}{body}}}", json_str(&main.display().to_string()));
+        String::from_utf8(hook_in(&s, &main, event, &input).stdout).unwrap()
+    };
+
+    // 갈라질 때 집혀 있던 일로는 막지도 붙들지도 않는다.
+    let out = at_main("pre-tool-use", "s1", Some("moai add \"딴 일\""));
+    assert!(out.trim().is_empty(), "옆 워크트리가 쥐었을 일로 main 의 생성을 막는다\n{out}");
+    let out = at_main("stop", "s1", None);
+    assert!(out.trim().is_empty(), "옆 워크트리가 쥐었을 일로 main 세션을 붙든다\n{out}");
+
+    // 갈라진 뒤 main 에서 집은 일은 main 의 초점이다 — 막고, 붙들고, 그것만 댄다.
+    let mine = field(&ok(&main, &["add", "main 에서 집은 일", "--json"]), "id");
+    ok(&main, &["mv", &mine, "in_progress"]);
+    let why = refusal(&at_main("pre-tool-use", "s2", Some("moai add \"딴 일\"")));
+    assert!(why.contains(&mine) && !why.contains(&agent) && !why.contains(&renamed), "{why}");
+    let out = at_main("pre-tool-use", "s2", Some(&format!("moai add \"자식\" --parent {mine}")));
+    assert!(out.trim().is_empty(), "main 의 일의 자식을 막았다\n{out}");
+    let held = at_main("stop", "s2", None);
+    assert!(held.contains(&format!("moai mv {mine}")), "main 에서 집은 일을 안 붙든다\n{held}");
+    assert!(!held.contains(&agent) && !held.contains(&renamed), "옆이 쥐었을 일을 옮기라고 한다\n{held}");
+}
+
+/// 규약대로 일을 main 에서 집고 그 이름의 워크트리를 띄운 저장소. (main, 워크트리, 집은 id)
+fn picked_in_a_worktree(s: &Scratch) -> (PathBuf, PathBuf, String) {
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "워크트리에서 할 일", "--json"]), "id");
+    ok(&main, &["mv", &id, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    let dir = format!(".claude/worktrees/{id}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{id}")]);
+    let inside = main.join(&dir);
+    (main, inside, id)
+}
+
+/// 도구 호출 하나를 `cwd` 자리의 세션으로 부른다.
+fn tool_at(s: &Scratch, cwd: &Path, tool: &str, body: &str) -> String {
+    let input = format!(
+        "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"{tool}\",\"tool_input\":{body}}}",
+        json_str(&cwd.display().to_string())
+    );
+    String::from_utf8(hook_in(s, cwd, "pre-tool-use", &input).stdout).unwrap()
+}
+
+/// **워크트리 안의 리뷰 규칙은 main 에서 집은 리뷰를 본다** (moai-w2iy). 트래커는 main 에서
+/// 만지는 것이 규약이라, 리뷰 이슈는 main 스냅샷에만 있고 워크트리의 스냅샷(HEAD)에는
+/// 없다 — 제 스냅샷만 읽던 훅은 시킨 대로 세우고 집은 리뷰를 "없다" 로 막았다.
+#[test]
+fn a_review_picked_in_main_opens_the_review_inside_the_worktree() {
+    let s = Scratch::new("hookreviewwt");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let review = "{\"skill\":\"code-review\",\"args\":\"high\"}";
+
+    // 리뷰 이슈가 어디에도 없으면 여전히 막는다 — 겹쳐 봐도 풀리지 않는다.
+    let why = refusal(&tool_at(&s, &inside, "Skill", review));
+    assert!(why.contains(&format!("--parent {id}")), "{why}");
+
+    let r = field(
+        &ok(&main, &["add", "리뷰 — 워크트리 일", "-t", "review", "--parent", &id, "-b", "무엇을 왜 보는가", "--json"]),
+        "id",
+    );
+    ok(&main, &["mv", &r, "in_progress"]);
+    let out = tool_at(&s, &inside, "Skill", review);
+    assert!(out.trim().is_empty(), "main 에서 집은 리뷰를 못 보고 막는다\n{out}");
+}
+
+/// **`moai` 는 그 명령이 가리키는 저장소의 트래커로 판정한다** (moai-23ky) — `-C`·`--dir`
+/// 나 앞의 `cd`. 세션 자리의 트래커로 판정하던 훅은 남의 프로젝트에 세우는 줄을 제
+/// 초점으로 막았고, 남의 프로젝트가 쥔 초점은 못 봤다.
+#[test]
+fn a_moai_call_is_judged_by_the_tracker_it_points_at() {
+    let a = init("hookaimA");
+    let b = init("hookaimB");
+    let held = field(&ok(a.path(), &["add", "여기서 할 일", "--json"]), "id");
+    ok(a.path(), &["mv", &held, "in_progress"]);
+    let bash = |s: &Scratch, cmd: &str| tool_at(s, s.path(), "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+    let bp = b.path().display().to_string();
+
+    // A 가 쥔 것으로 B 에 세우는 줄을 막지 않는다.
+    for cmd in [
+        format!("moai -C {bp} add \"딴 일\""),
+        format!("moai --dir={bp} add \"딴 일\""),
+        format!("cd {bp} && moai add \"딴 일\""),
+    ] {
+        let out = bash(&a, &cmd);
+        assert!(out.trim().is_empty(), "남의 트래커에 세우는 줄을 제 초점으로 막았다 — {cmd}\n{out}");
+    }
+    // 같은 줄의 제 자리 토막은 여전히 제 트래커로 본다.
+    let why = refusal(&bash(&a, &format!("moai -C {bp} add \"딴 일\" && moai add \"또 딴 일\"")));
+    assert!(why.contains(&held), "{why}");
+    // 하위 셸의 `cd` 는 뒤로 안 이어진다 — 뒷토막은 제 자리에 선다.
+    let why = refusal(&bash(&a, &format!("(cd {bp} && moai status); moai add \"딴 일\"")));
+    assert!(why.contains(&held), "묶음 밖 토막을 남의 트래커로 보냈다 — {why}");
+    // 아직 없는 디렉터리는 실행할 때 생겨 `moai` 가 위로 찾아 이 트래커에 세운다 — 아무도 안 보면 샌다.
+    for cmd in ["mkdir fresh && moai -C fresh add \"딴 일\"", "mkdir fresh && cd fresh && moai add \"딴 일\""] {
+        let why = refusal(&bash(&a, cmd));
+        assert!(why.contains(&held), "없는 디렉터리를 거쳐 규칙 1 을 넘었다 — {cmd}\n{why}");
+    }
+
+    // 거꾸로 — B 가 쥔 것이 있으면 B 에 세우는 줄은 B 의 초점으로 막힌다.
+    let theirs = field(&ok(b.path(), &["add", "저기서 할 일", "--json"]), "id");
+    ok(b.path(), &["mv", &theirs, "in_progress"]);
+    ok(a.path(), &["mv", &held, "done"]);
+    let why = refusal(&bash(&a, &format!("moai -C {bp} add \"딴 일\"")));
+    assert!(why.contains(&theirs), "가리킨 트래커의 초점을 못 봤다 — {why}");
+}
+
+/// 워크트리 세션이 `-C <main>` 으로 트래커를 만진다 — **같은 저장소의 워크트리는 이 세션의
+/// 자리다.** main 의 눈으로만 보면 이 워크트리가 쥔 일은 "옆의 것" 이라 초점에서 빠져,
+/// `-C <main>` 한 번으로 규칙 1 을 넘는다. main 에서 방금 집은 줄은 겹쳐 보고 안다.
+#[test]
+fn a_worktree_session_touching_main_is_still_that_session() {
+    let s = Scratch::new("hookaimwt");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let mp = main.display().to_string();
+    let bash = |cmd: &str| tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+
+    let why = refusal(&bash(&format!("moai -C {mp} add \"딴 일\"")));
+    assert!(why.contains(&id), "main 을 가리키면 제 초점을 잃는다 — {why}");
+    let out = bash(&format!("moai -C {mp} add \"자식\" --parent {id}"));
+    assert!(out.trim().is_empty(), "제 일의 자식을 막았다\n{out}");
+
+    // main 에서 둘째 일을 집었다 — 워크트리 스냅샷은 모르지만 막지 않는다(moai-iaa4 의 자리).
+    let next = field(&ok(&main, &["add", "둘째 일", "--json"]), "id");
+    ok(&main, &["mv", &next, "in_progress"]);
+    let out = bash(&format!("moai -C {mp} add \"둘째의 자식\" --parent {next}"));
+    assert!(out.trim().is_empty(), "main 에서 방금 집은 일의 자식을 막았다\n{out}");
+
+    // 거꾸로 — 세션은 main 에 서 있고 명령이 워크트리로 들어간다(에이전트 스레드는 자리가 main
+    // 으로 돌아온다). **딸린 워크트리를 가리키면 그 워크트리의 일로 본다** — main 의 눈으로는
+    // 그 워크트리의 일이 "옆의 것" 이라 제 단위 안의 줄이 막히고, 단위 밖의 줄은 샌다.
+    ok(&main, &["mv", &next, "done"]);
+    let ip = inside.display().to_string();
+    let from_main = |cmd: &str| tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+    let out = from_main(&format!("cd {ip} && moai add \"자식\" --parent {id}"));
+    assert!(out.trim().is_empty(), "워크트리로 들어가 제 일의 자식을 세우는 것을 막았다\n{out}");
+    let why = refusal(&from_main(&format!("moai -C {ip} add \"딴 일\"")));
+    assert!(why.contains(&id), "워크트리를 가리킨 단위 밖 줄을 그 워크트리의 초점으로 못 막는다 — {why}");
 }
 
 /// 규칙 2 의 껍데기 쪽은 **stdin 의 `cwd` 로** 상대 경로를 푼다. 훅 프로세스를

@@ -186,6 +186,11 @@ fn screen(mut app: App) -> R<Vec<String>> {
     let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| loop_until_quit(&mut term, &mut app)));
     let _ = bracketed_paste(&mut std::io::stdout(), false);
     ratatui::restore();
+    // 오류·패닉으로 끝났으면 폼에 남은 글부터 건진다 — 터미널을 걷은 **뒤라** 그 말이 셸에 보이고,
+    // 패닉을 되던지기 **전이라** 남길 기회가 있다(moai-y3r7).
+    if !matches!(out, Ok(Ok(()))) {
+        keep_unsaved(&app);
+    }
     let out = out.unwrap_or_else(|payload| {
         let why = payload
             .downcast_ref::<&str>()
@@ -465,10 +470,16 @@ fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path) -> Result<St
 /// 짐작한 남이 먼저 둔 파일(심볼릭 링크 포함)을 열면 적은 생각이 그리로 샌다. `create_new` 는
 /// 있는 것을 안 연다. `.md` 는 편집기가 본문을 마크다운으로 칠하게 한다.
 fn scratch_file(dir: &std::path::Path) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
+    private_file(dir, "moai-idea")
+}
+
+/// `dir` 안에 `<stem>-<pid>-<n>.md` 로 **남이 못 읽는 새 파일**을 만든다 — [`scratch_file`] 과
+/// [`rescue`] 가 같이 쓴다. 이름이 있으면 다음 번호로 넘어간다.
+fn private_file(dir: &std::path::Path, stem: &str) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     for _ in 0..64 {
-        let path = dir.join(format!("moai-idea-{}-{}.md", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let path = dir.join(format!("{stem}-{}-{}.md", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
         let mut open = std::fs::OpenOptions::new();
         open.write(true).create_new(true);
         #[cfg(unix)]
@@ -480,6 +491,42 @@ fn scratch_file(dir: &std::path::Path) -> std::io::Result<(std::path::PathBuf, s
         }
     }
     Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "빈 이름을 못 찾았다"))
+}
+
+/// 버릴 뻔한 글을 `dir` 의 새 파일에 **편집기 글과 같은 모양**으로 적고 그 경로를 돌려준다
+/// (moai-y3r7) — 첫 줄 제목, 한 줄 띄우고 본문. **파일에는 적은 글이 바이트 그대로 다 든다.**
+/// 다만 편집기 길(`jotfile::parse`)로 도로 읽으면 그 형식의 규칙을 탄다 — 제목이 비면 본문 첫
+/// 줄이 제목이 되고, `# ` 로 시작하는 줄은 안내 주석으로 걷힌다(리뷰 moai-y3r7.u3p). 사람이
+/// 열어 옮겨 담는 것이 목적이라 그대로 둔다. 파일은 남이 못 읽게 새로 만든다([`private_file`])
+/// — 적은 생각이 공유 임시 디렉터리로 새지 않게.
+fn rescue(title: &str, body: Option<&str>, dir: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write;
+    let (path, mut file) = private_file(dir, "moai-unsaved")?;
+    let text = match body {
+        Some(body) => format!("{title}\n\n{body}\n"),
+        None => format!("{title}\n"),
+    };
+    file.write_all(text.as_bytes())?;
+    file.sync_all()?;
+    Ok(path)
+}
+
+/// 루프가 오류·패닉으로 끝났을 때 **폼에 남은 글을 잃지 않는다**(moai-y3r7). 조용한 손실은 이
+/// 도구가 못 견디는 유일한 실패 모드라, 올리기 실패만이 아니라 루프를 끝낸 오류면 무엇이든
+/// 이 길을 지난다(사람이 정했다). 파일로도 못 남기면 **글 자체를 stderr 에 낸다** — 터미널을
+/// 걷은 뒤에 부르므로 셸에 보인다.
+fn keep_unsaved(app: &App) {
+    let Some((title, body)) = app.unsaved() else { return };
+    match rescue(&title, body.as_deref(), &std::env::temp_dir()) {
+        Ok(path) => eprintln!(
+            "moai: 담지 못한 생각을 파일로 남겼다 — {}\n      첫 줄이 제목, 한 줄 띄우고 본문이다. 탐색기에서 SPC n 으로 다시 담는다",
+            path.display()
+        ),
+        Err(e) => eprintln!(
+            "moai: 담지 못한 생각을 파일로도 못 남겼다({e}) — 여기 그대로 낸다\n{title}\n\n{}",
+            body.unwrap_or_default()
+        ),
+    }
 }
 
 /// 루프가 받은 사건 하나를 탐색기에 넘긴다. **터미널 없이 시험된다.**
@@ -738,6 +785,25 @@ mod tests {
         let why = write_in_editor("moai-없는-편집기-08af", "", &d.0).expect_err("없는 편집기인데 글을 돌려줬다");
         assert!(why.contains("127"), "{why}");
         assert_eq!(d.leftovers(), Vec::<String>::new());
+    }
+
+    /// **루프가 오류로 끝나며 버릴 뻔한 글은 파일로 남는다**(moai-y3r7). 편집기 글과 같은 모양이라
+    /// 그대로 편집기에 열거나 도로 읽을 수 있고, 공유 임시 디렉터리라 남이 못 읽는다(0600).
+    /// 부를 때마다 새 이름이다 — 앞서 남긴 것을 덮지 않는다.
+    #[test]
+    fn unsaved_text_is_rescued_to_a_private_file_in_editor_form() {
+        let d = Dir::new("rescue");
+        let one = rescue("못 담길 것", Some("## 설계\n둘째 줄"), &d.0).expect("못 남겼다");
+        let text = std::fs::read_to_string(&one).unwrap();
+        assert_eq!(crate::tui::jotfile::parse(&text), Some(("못 담길 것".to_string(), Some("## 설계\n둘째 줄".to_string()))), "{text:?}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&one).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        let two = rescue("제목만", None, &d.0).expect("못 남겼다");
+        assert_ne!(one, two, "앞서 남긴 파일을 덮었다");
+        assert_eq!(crate::tui::jotfile::parse(&std::fs::read_to_string(&two).unwrap()), Some(("제목만".to_string(), None)));
     }
 
     /// 임시 파일은 **있는 이름을 안 연다** — 남이 먼저 둔 파일에 적은 생각을 쓰지 않는다.

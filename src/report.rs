@@ -926,7 +926,7 @@ pub fn milestone_from_above<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, 
     let top = fold_top(line, &by_id, &rooted)?;
     // 값을 든 줄은 `climb` 이 읽는 그 줄이다 — 자를 따로 두면 안내가 셈과 어긋난다.
     // 그 줄이 제 줄이면 제 필드가 답이다(접히지 않은 줄의 제 `milestone`).
-    let source = stood_at(top, &by_id, &rooted, joins(line))?;
+    let source = stood_at(top, &by_id, &rooted)?;
     if source.id == line.id {
         return None;
     }
@@ -1054,7 +1054,7 @@ pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
                 Some(e) => by_id.get(e).filter(|e| e.kind == Kind::Epic).and_then(|e| milestone_stood(e)),
                 // 에픽이 없으면 **접힌 맨 위 줄에서부터** 센다. 제 줄에서 시작하면
                 // 부모 밑에 그려진 자식이 제 마일스톤으로 세어진다(moai-uqoe).
-                None => fold_top(i, &by_id, &rooted).and_then(|top| climb(top, &by_id, &rooted, joins(i))),
+                None => fold_top(i, &by_id, &rooted).and_then(|top| climb(top, &by_id, &rooted)),
             },
         };
         // **못 받은 줄도 지도를 쓴다 — 같은 id 의 뒷줄이 이긴다.** 멤버는 에픽 줄을
@@ -1087,18 +1087,20 @@ fn milestone_stood(epic: &Issue) -> Option<&str> {
 /// **마일스톤인 조상을 만나면 그 마일스톤이다** — 부모가 에픽이면 그 에픽이듯
 /// (moai-9t3l). `--parent <마일스톤>` 의 자식이 `(마일스톤 없음)` 으로 빠지지 않는다.
 /// 제 `milestone` 이 먼저다: 에픽에서 제 `epic` 이 먼저인 것과 같은 차례다.
-/// `joins` 는 맨 처음 줄의 것이다. 마일스톤 줄은 여기 오지 않는다 — [`milestones`] 가
-/// 그 종류에 값을 안 준다(moai-8tav). 이슈 밑에 id 로 선 마일스톤 줄도 그렇다.
+/// **여기 오는 줄은 늘 일이다**([`joins`] 가 받는 이슈·생각). 마일스톤 줄은 오지 않는다 —
+/// [`milestones`] 가 그 종류에 값을 안 준다(moai-8tav). 이슈 밑에 id 로 선 마일스톤 줄도
+/// 그렇다. 에픽 줄은 [`milestones`]·[`milestone_from_above`] 가 먼저 제 필드로 돌아간다.
+/// 한때 받는 줄인지를 인자로 넘겼는데 늘 참이라 걷었다(moai-dejq) — 거짓일 수 없는 가드는
+/// "마일스톤 줄도 여기 온다" 는 없는 길을 읽는 사람에게 말한다.
 fn climb<'a>(
     top: &'a Issue,
     by_id: &BTreeMap<&'a str, &'a Issue>,
     rooted: &BTreeSet<&str>,
-    joins: bool,
 ) -> Option<&'a str> {
-    let at = stood_at(top, by_id, rooted, joins)?;
+    let at = stood_at(top, by_id, rooted)?;
     match at.kind {
         Kind::Epic => milestone_stood(at),
-        Kind::Milestone if joins => Some(at.id.as_str()),
+        Kind::Milestone => Some(at.id.as_str()),
         _ => at.milestone.as_deref(),
     }
 }
@@ -1109,16 +1111,15 @@ fn stood_at<'a>(
     top: &'a Issue,
     by_id: &BTreeMap<&'a str, &'a Issue>,
     rooted: &BTreeSet<&str>,
-    joins: bool,
 ) -> Option<&'a Issue> {
     let mut cur = top;
     loop {
         if cur.kind == Kind::Epic {
             return Some(cur);
         }
-        // 받는 줄이면 `top` 은 언제나 이슈나 생각이다(`fold_top` 이 그 종류로만 오른다) —
-        // 그래서 여기 서는 마일스톤은 늘 조상이다.
-        if joins && cur.kind == Kind::Milestone {
+        // `top` 은 언제나 이슈나 생각이다(부르는 쪽이 일만 넘기고 `fold_top` 도 그 종류로만
+        // 오른다) — 그래서 여기 서는 마일스톤은 늘 조상이다.
+        if cur.kind == Kind::Milestone {
             return Some(cur);
         }
         if cur.milestone.is_some() {
@@ -1237,6 +1238,53 @@ pub fn misplaced(all: &[Issue]) -> BTreeMap<&str, Misplace> {
             Some(m) => out.insert(id, m),
             None => out.remove(id),
         };
+    }
+    out
+}
+
+/// 제가 길을 잃지는 않았지만 **길 잃은 줄 밑에 접힌** 줄 — 트리가 그 줄을 부모 밑, 곧
+/// `(길 잃음)` 바구니 안에 그린다(moai-uni2, 사용자와 정함: 길 잃은 부모 밑에 접힌다).
+///
+/// 흔한 모양은 끊긴 에픽을 든 생각 밑의 일이다. 생각은 소속을 안 넘기므로 자식은 에픽이
+/// 없다고 셈해지는데, 트리는 그 줄을 길 잃은 생각 밑에 접는다 — status 가 "에픽 없는
+/// 이슈" 로 세면 고칠 수 없는 줄에 `-e none` 을 가리킨다. 고칠 곳은 부모의 끊긴 참조
+/// 하나이고 `dangling_epic` 이 그것을 댄다.
+///
+/// **접는 자는 `nav::Ctx::home_of_work` 와 같다** — 부모가 이슈나 생각이고, 제 소속이
+/// 부모가 넘기는 것과 같다. 생각인 부모는 뿌리로 올라갔거나 제가 길을 잃었으면(그려진
+/// 자리가 이슈 밑이 아니면) 아무것도 안 넘긴다. 자를 따로 두면 트리와 status 가 또 갈린다.
+/// 길 잃음은 부르는 쪽이 준다 — `nav::Ctx::home` 처럼 가려진 쌍둥이도 거기 든다.
+pub fn under_lost<'a>(
+    all: &'a [Issue],
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    lost: impl Fn(&Issue) -> bool,
+) -> BTreeSet<&'a str> {
+    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
+    // 길 잃은 줄이 없으면 그 밑에 접힐 줄도 없다 — 흔한 저장소에서 생각 지도를 안 세운다.
+    if !by_id.values().any(|i| lost(i)) {
+        return BTreeSet::new();
+    }
+    let rooted = rooted_thoughts(&by_id);
+    let mut out = BTreeSet::new();
+    for i in all.iter().filter(|i| !lost(i)) {
+        let mut cur = i;
+        while let Some(p) = crate::id::parent_of(&cur.id)
+            .and_then(|p| by_id.get(p).copied())
+            .filter(|p| matches!(p.kind, Kind::Issue | Kind::Idea))
+        {
+            let passed = match is_idea(p) && (rooted.contains(p.id.as_str()) || lost(p)) {
+                true => None,
+                false => epic_of.get(p.id.as_str()).copied(),
+            };
+            if epic_of.get(cur.id.as_str()).copied() != passed {
+                break;
+            }
+            if lost(p) {
+                out.insert(i.id.as_str());
+                break;
+            }
+            cur = p;
+        }
     }
     out
 }
@@ -1372,6 +1420,18 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
             .then_with(|| a.id.cmp(&b.id))
     });
     out
+}
+
+/// **이로써 풀린 일** — 쓰기 전(`before`)에는 [`ready`] 가 아니었고 쓴 뒤(`after`)에는
+/// ready 인 일(moai-942k). `moai mv <id> done` 이 한 줄로 댄다.
+///
+/// **고르는 자는 `ready` 하나다.** 막음·미룸·열린 자식·묶음 칸의 규칙을 여기서 다시 재면
+/// `ready` 가 내는 것과 이 줄이 대는 것이 갈린다 — 두 번 불러 견준다. 차례는 `after` 의
+/// `ready` 차례 그대로다. **저장하지 않는다** — 막힌 줄의 "풀렸나" 는 막는 줄을 닫을
+/// 때마다 달라지는 파생값이다.
+pub fn unblocked<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
+    let was: BTreeSet<&str> = ready(before, cfg).into_iter().map(|i| i.id.as_str()).collect();
+    ready(after, cfg).into_iter().filter(|i| !was.contains(i.id.as_str())).collect()
 }
 
 /// 막음을 재는 데 드는 것 — 계획에서 빠진 줄(뺀 곳과 함께)과, 막는 묶음의 읽은 칸.
@@ -1850,10 +1910,18 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
 
     // 1. 에픽에 안 붙은 것. 마일스톤이 아직 없으므로 **제일 중요한 신호**다
     //    — "물어보지 않고 만든 이슈" 의 지문이다.
+    //    **길 잃은 줄 밑에 접힌 줄도 안 센다**(moai-uni2) — 트리가 그 줄을 `(길 잃음)` 안에
+    //    그리고, 고칠 곳은 부모의 끊긴 참조라 6번의 `dangling_*` 가 댄다.
+    let folded = under_lost(issues, &group, |i| placed.contains_key(i.id.as_str()) || eclipsed(i));
     let loose: Vec<&Issue> = work
         .iter()
         .copied()
-        .filter(|i| !i.status.is_done() && !eclipsed(i) && !group.contains_key(i.id.as_str()))
+        .filter(|i| {
+            !i.status.is_done()
+                && !eclipsed(i)
+                && !group.contains_key(i.id.as_str())
+                && !folded.contains(i.id.as_str())
+        })
         .collect();
     // **분모는 미룬 일까지 센다.** 에픽을 통째로 미루면 그 멤버만 `work` 에서 빠져,
     // 원래 있던 소속 없는 일 하나가 "열린 것의 100%" 로 선다 — 미루기 하나로 경고가
@@ -1884,7 +1952,9 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
             .iter()
             .copied()
             .filter(|i| {
-                !i.status.is_done() && !eclipsed(i)
+                // 길 잃은 줄 밑에 접힌 줄은 1번과 같은 까닭으로 안 센다(moai-uni2) —
+                // 트리가 `(길 잃음)` 안에 그리고, 고칠 곳은 부모의 끊긴 참조다.
+                !i.status.is_done() && !eclipsed(i) && !folded.contains(i.id.as_str())
                     && (!mile.contains_key(i.id.as_str())
                         || placed.get(i.id.as_str()) == Some(&Misplace::Milestone))
             })
@@ -2214,6 +2284,48 @@ mod tests {
         let mut i = make(id, Kind::Issue, status);
         i.epic = Some(epic.into());
         i
+    }
+
+    /// **길 잃은 생각 밑에 접힌 일은 에픽 없는 이슈로 안 센다**(moai-uni2). 멀쩡한 생각 밑의
+    /// 일은 그대로 센다 — 생각은 소속을 안 넘긴다. 에픽 없는 이슈를 사이에 둔 손자도 접힌다.
+    #[test]
+    fn a_row_folded_under_a_lost_thought_is_not_loose() {
+        let now = "2026-09-11T00:00:00Z";
+        let loose = |issues: &[Issue]| -> Vec<String> {
+            status(issues, &[], &cfg(), now)
+                .warnings
+                .iter()
+                .find(|w| w.kind == "no_epic")
+                .map(|w| w.ids.clone())
+                .unwrap_or_default()
+        };
+        let thought = |id: &str, epic: Option<&str>| {
+            let mut t = make(id, Kind::Idea, "todo");
+            t.epic = epic.map(str::to_string);
+            t
+        };
+
+        // 끊긴 에픽을 든 생각 밑 — 자식도 손자도 길 잃음 안에 접힌다.
+        let lost = [
+            thought("argos-0001", Some("argos-zzzz")),
+            make("argos-0001.aaa", Kind::Issue, "todo"),
+            make("argos-0001.aaa.bbb", Kind::Issue, "todo"),
+        ];
+        assert!(loose(&lost).is_empty(), "길 잃은 생각 밑에 접힌 줄을 에픽 없음으로 센다: {:?}", loose(&lost));
+        let folded = under_lost(&lost, &groups(&lost), |i| misplaced(&lost).contains_key(i.id.as_str()));
+        assert_eq!(folded.into_iter().collect::<Vec<_>>(), ["argos-0001.aaa", "argos-0001.aaa.bbb"]);
+
+        // 멀쩡한 생각 밑 — 그대로 에픽 없는 이슈다.
+        let healthy = [thought("argos-0002", None), make("argos-0002.aaa", Kind::Issue, "todo")];
+        assert_eq!(loose(&healthy), ["argos-0002.aaa"]);
+
+        // 제 에픽을 적은 자식은 접히지 않는다 — 제 에픽으로 간다.
+        let own = [
+            thought("argos-0003", Some("argos-zzzz")),
+            make("argos-0004", Kind::Epic, "todo"),
+            member("argos-0003.aaa", "argos-0004", "todo"),
+        ];
+        assert!(under_lost(&own, &groups(&own), |i| misplaced(&own).contains_key(i.id.as_str())).is_empty());
     }
 
     fn roll_of<'a>(rolls: &'a [Roll], id: Option<&str>) -> &'a Roll {
@@ -2660,6 +2772,33 @@ mod tests {
         ];
         let got: Vec<&str> = ready(&issues, &cfg()).iter().map(|i| i.id.as_str()).collect();
         assert_eq!(got, ["argos-0004"]);
+    }
+
+    /// **이로써 풀린 일만 댄다**(moai-942k). 막는 줄과 마지막 자식을 닫으면 막혔던 줄과 부모가
+    /// 새로 ready 가 된다. 닫은 줄, 원래 ready 이던 줄, 여전히 막힌 줄은 안 댄다.
+    #[test]
+    fn unblocked_names_only_what_the_write_just_freed() {
+        let mut blocked = make("argos-0002", Kind::Issue, "todo");
+        blocked.blocked_by = vec!["argos-0001".into()];
+        let mut still = make("argos-0006", Kind::Issue, "todo");
+        still.blocked_by = vec!["argos-0001".into(), "argos-0005".into()];
+        let before = vec![
+            make("argos-0001", Kind::Issue, "in_progress"), // 막는 줄
+            blocked,
+            make("argos-0003", Kind::Issue, "todo"),        // 부모
+            make("argos-0003.aaa", Kind::Issue, "todo"),    // 그 마지막 자식
+            make("argos-0004", Kind::Issue, "todo"),        // 원래 ready
+            make("argos-0005", Kind::Issue, "todo"),        // 아직 안 닫힌 막는 줄
+            still,
+        ];
+        let mut after = before.clone();
+        for i in after.iter_mut().filter(|i| i.id == "argos-0001" || i.id == "argos-0003.aaa") {
+            i.status = Status::new("done");
+        }
+        let got: BTreeSet<&str> = unblocked(&before, &after, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(got, BTreeSet::from(["argos-0002", "argos-0003"]));
+        // 아무것도 안 바꾼 쓰기는 풀린 것이 없다.
+        assert!(unblocked(&before, &before, &cfg()).is_empty());
     }
 
     /// 급한 것 먼저, 그다음 끝나가는 에픽 먼저.
@@ -3507,8 +3646,7 @@ mod tests {
     /// 시작했다는 말이 없어 언제나 거짓이다.
     ///
     /// `review` 멤버도 시작한 것으로 센다(moai-p415) — "시작했다" 의 뜻이 `Config::is_started`
-    /// 하나다. 도는 글리프는 여전히 칸 이름(`style::spins`)이 가르므로, review 에 선 묶음은
-    /// 바빠도 안 돈다.
+    /// 하나다. 도는 글리프도 같은 뜻을 쓰므로(moai-q59j) review 에 선 바쁜 묶음은 돈다.
     #[test]
     fn a_group_is_busy_only_with_a_member_in_the_started_column() {
         let issues = vec![
@@ -3525,7 +3663,7 @@ mod tests {
         let read = |id: &str| (stands[id].column, stands[id].busy);
         assert_eq!(read("argos-0001"), ("in_progress", false), "반쯤 끝난 에픽을 바쁘다고 한다");
         assert_eq!(read("argos-0004"), ("review", true), "review 멤버의 칸·시작을 잘못 읽었다");
-        assert!(!crate::style::spins(read("argos-0004").0), "review 에 선 묶음이 돈다");
+        assert!(cfg.is_started(read("argos-0004").0), "review 에 선 바쁜 묶음이 시작한 칸이 아니다");
         assert_eq!(read("argos-0006"), ("in_progress", true));
 
         let two = Config::parse("prefix = \"argos\"\nstatuses = \"todo, done\"\n").unwrap();

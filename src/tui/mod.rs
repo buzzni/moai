@@ -216,6 +216,8 @@ pub struct Fresh {
     unreadable: Vec<Option<String>>,
     origin: crate::worktree::Origin,
     elsewhere: Vec<String>,
+    /// 옆 워크트리를 못 찾은 까닭(`Gathered::unfound`). 사람이 SPC t w 로 켰을 때만 댄다.
+    unfound: Option<String>,
     watched: Vec<(std::path::PathBuf, Stamp)>,
     now: String,
 }
@@ -250,6 +252,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         unreadable,
         origin: g.origin,
         elsewhere: g.trouble,
+        unfound: g.unfound,
         watched: g.watched,
         now,
     })
@@ -386,6 +389,10 @@ pub struct App {
     /// 옆 워크트리에서 만난 문제. **배너로 말만 한다** — CLI 가 stderr 로 흘리는
     /// 말인데, 대체 화면 안에서는 그 길을 못 쓴다.
     pub elsewhere: Vec<String>,
+    /// 옆 워크트리를 **못 찾은** 까닭(`Gathered::unfound`) — git 밖 프로젝트다. 경로 줄에도 배너에도
+    /// 안 세운다: 겹쳐 보기는 켜진 채로 시작해 git 밖 프로젝트를 볼 때마다 시키지 않은 말이 선다.
+    /// 사람이 `SPC t w` 로 **켰을 때만** 알림으로 한 번 댄다(moai-d5vn).
+    pub unfound: Option<String>,
     /// 프로젝트 층([`layer`]). **`None` 이면 등록한 것이 없고 오늘 탐색기 그대로다.** 층이
     /// 있으면 지금 선 곳(`layer.at`)이 층이거나 한 프로젝트 안이고, 층에 선 동안에는 위의
     /// 한 프로젝트 자리(`repo`·`issues`·`index`…)가 비었다.
@@ -521,6 +528,7 @@ impl App {
             worktree: true,
             origin: crate::worktree::Origin::default(),
             elsewhere: Vec::new(),
+            unfound: None,
             layer: None,
             user_config: None,
             launched_at: None,
@@ -744,6 +752,7 @@ impl App {
         self.unreadable = f.unreadable;
         self.origin = f.origin;
         self.elsewhere = f.elsewhere;
+        self.unfound = f.unfound;
         self.watched = f.watched;
         self.warnings = f.warnings;
         self.take(f.issues, f.index, f.states, f.now);
@@ -776,7 +785,12 @@ impl App {
             return false;
         }
         let busy = !crate::report::is_group(i) || self.states.get(&i.id).is_some_and(|s| s.busy);
-        busy && crate::style::spins(self.column(at))
+        // **도는 칸은 설정이 정한다**(moai-q59j) — 시작한 칸 모두(`Config::is_started`). 칸 이름
+        // `"in_progress"` 를 박아 두면 칸 이름을 바꾼 설정에서 아무것도 안 돌았다. 설정이 모르는
+        // 칸은 안 돈다 — 묶음의 `busy` 와 같은 자다(`report::Stand::busy`). 바쁜 묶음은 늘 시작한
+        // 칸으로 읽히므로 묶음에는 이 검사가 답을 안 바꾼다 — 줄(일)을 위한 것이다.
+        let col = self.column(at);
+        busy && self.cfg.knows(col) && self.cfg.is_started(col)
     }
 
     /// 그 줄이 **서 있는** 칸 — 묶음이면 멤버에서 읽은 칸, 아니면 제 칸. CLI 가
@@ -1150,9 +1164,21 @@ impl App {
             B::Reload => self.reload(),
             // 켜고 끄는 것은 **다시 읽는 것**이다. 겹친 줄은 적재 때 한 번 세는 것이라
             // (`states`·거름망·경고), 들고 있는 것에 덧칠하면 셈이 옛 줄로 남는다.
+            // **켰는데 겹칠 것이 없으면 한 번 말한다**(moai-d5vn). 경로 줄은 옆이 없으면 비므로, 말이
+            // 없으면 메뉴만 닫힌 똑같은 화면이 남아 누른 키가 고장 난 줄 안다. 못 찾았으면 그 까닭을,
+            // 찾았는데 비었으면 없다고 댄다. 알림이라 다음 키에 걷힌다. 읽기가 실패했으면 `trouble` 이
+            // 이미 그 까닭을 대므로 겹쳐 말하지 않는다 — 그래서 옛 `unfound` 를 먼저 비운다.
             B::Worktree => {
                 self.worktree = !self.worktree;
+                self.unfound = None;
                 self.reload();
+                if self.worktree && self.trouble.is_none() && self.origin.labels().is_empty() {
+                    let g = crate::style::BRANCH_GLYPH;
+                    self.notice = Some(match &self.unfound {
+                        Some(why) => format!("{g} 옆 워크트리를 못 찾았다 — {}", crate::text::one_line(why)),
+                        None => format!("{g} 옆 워크트리 없음 — 겹칠 줄이 없다"),
+                    });
+                }
             }
             B::Raw => {
                 self.raw = !self.raw;
@@ -1489,6 +1515,22 @@ impl App {
         self.mode = Mode::Idea(form);
         save_idea(self);
     }
+
+    /// **아직 안 담긴 글** — (제목, 본문). 루프가 오류로 끝나며 버릴 뻔한 것을 남기는 쪽이 묻는다
+    /// (moai-y3r7). 폼이 열려 있거나(담기 실패·적는 중), 누구냐 묻는 칸 뒤에 폼이 서 있을 때다.
+    /// **빈칸뿐인 폼은 없다** — 잃을 것이 없다([`Form::is_blank`]). 제목이 비고 본문만 있어도
+    /// 적은 것이라 낸다.
+    pub fn unsaved(&self) -> Option<(String, Option<String>)> {
+        let form = match &self.mode {
+            Mode::Idea(form) => form,
+            Mode::Ask(ask) => match ask.back.as_ref() {
+                Mode::Idea(form) => form,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        (!form.is_blank()).then(|| (form.title(), form.body()))
+    }
 }
 
 /// 폼에 적힌 생각 하나를 담는다. **[`Retry`] 로도 넘긴다** — 누군지 묻고 받으면
@@ -1643,6 +1685,25 @@ mod tests {
         issues[3].status = Status::new("in_progress");
         a.adopt(issues);
         assert!(any_spins(&a), "in_progress 가 있는데 안 돈다고 한다");
+    }
+
+    /// **도는 칸은 설정이 정한다**(moai-q59j) — `Config::is_started` 인 칸 모두. 칸 이름을 박아
+    /// 두면 `doing` 으로 바꾼 설정에서 아무것도 안 돌았다. `review` 도 시작한 칸이라 돈다. 설정이
+    /// 모르는 칸(바꾼 설정의 `in_progress`)은 안 돈다.
+    #[test]
+    fn every_started_column_spins_whatever_it_is_named() {
+        let renamed = crate::config::Config::parse("prefix = \"argos\"\nstatuses = \"todo, doing, check, done\"\n").unwrap();
+        for (cfg, cases) in [
+            (cfg(), vec![("todo", false), ("in_progress", true), ("review", true), ("done", false)]),
+            (renamed, vec![("todo", false), ("doing", true), ("check", true), ("done", false), ("in_progress", false)]),
+        ] {
+            for (st, want) in cases {
+                let mut i = make("argos-0001", Kind::Issue);
+                i.status = Status::new(st);
+                let a = App::new(vec![i], cfg.clone(), Path::new());
+                assert_eq!(a.spins(0), want, "{st} 칸이 도는가 — {:?}", cfg.statuses);
+            }
+        }
     }
 
     /// 줄마다 도는지(`App::spins`) — **묶음은 그 밑에 집은 일이 있을 때만 돈다**
@@ -2717,6 +2778,45 @@ mod tests {
         }
     }
 
+    /// 옆 워크트리를 **못 찾는** 읽기 — git 밖 프로젝트를 흉내 낸다. 시험 기계의 git 에 기대지 않는다.
+    fn lost(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
+        let mut f = prepare(repo, worktree)?;
+        f.unfound = worktree.then(|| "git 저장소가 아니다".to_string());
+        Ok(f)
+    }
+
+    /// **사람이 SPC t w 로 켰는데 옆을 못 찾으면 까닭을 한 번 댄다**(moai-d5vn). 시작할 때의
+    /// 겹쳐 보기는 시키지 않은 것이라 말하지 않지만, 누른 사람은 아무것도 안 바뀐 화면만 보면
+    /// 키가 고장 난 줄 안다. 알림이라 다음 키에 걷힌다 — 경로 줄에 박아 두면 git 밖 프로젝트를
+    /// 볼 때마다 줄을 먹는다.
+    #[test]
+    fn turning_the_overlay_on_says_why_no_worktree_was_found() {
+        let (_scratch, mut a) = writable("overlay-lost");
+        a.read = lost;
+        assert!(a.worktree);
+        a.hit("SPC t w");
+        assert!(!a.worktree);
+        assert_eq!(a.notice, None, "끌 때 까닭을 댔다");
+        a.hit("SPC t w");
+        assert!(a.worktree);
+        let said = a.notice.clone().expect("켰는데 못 찾은 까닭을 안 댄다");
+        assert!(said.contains("git 저장소가 아니다") && said.contains("옆 워크트리"), "{said}");
+        a.hit("SPC r");
+        assert_eq!(a.notice, None, "시키지 않은 다시 읽기가 까닭을 또 댔다");
+        // 찾았는데 옆이 비었으면 까닭 없이 없다고만 한다 — 경로 줄이 비어 달리 알 길이 없다.
+        a.read = prepare_found;
+        a.hit("SPC t w");
+        a.hit("SPC t w");
+        let said = a.notice.clone().expect("켰는데 겹칠 것이 없다고 안 한다");
+        assert!(said.contains("옆 워크트리 없음") && !said.contains("못 찾았다"), "{said}");
+    }
+
+    fn prepare_found(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
+        let mut f = prepare(repo, worktree)?;
+        f.unfound = None;
+        Ok(f)
+    }
+
     fn boom(_: &Repo, _: bool) -> crate::fail::R<Fresh> {
         panic!("버린 읽기가 터졌다")
     }
@@ -3463,6 +3563,31 @@ mod tests {
         a.key(ctrl('s'));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
         assert_eq!(ideas_in(a.repo.as_ref().unwrap()).len(), 1);
+    }
+
+    /// **아직 안 담긴 글을 찾는다**(moai-y3r7). 루프가 오류로 끝날 때 남길 글이다 — 폼에
+    /// 열린 채든(담기 실패), 누구냐 묻는 칸 뒤에 서 있든. 빈 폼과 탐색은 남길 것이 없다.
+    #[test]
+    fn unsaved_text_is_found_in_an_open_form_or_behind_a_question() {
+        let (scratch, mut a) = writable("unsaved-fail");
+        assert_eq!(a.unsaved(), None, "탐색 중인데 남길 글이 있다고 한다");
+        std::fs::create_dir_all(scratch.0.join(".moai/lock")).unwrap();
+        let edit = ask_editor(&mut a);
+        a.edited(edit.into, Ok("못 담길 것\n\n긴 본문".into()));
+        assert_eq!(a.unsaved(), Some(("못 담길 것".to_string(), Some("긴 본문".to_string()))), "{:?}", a.mode);
+
+        let (_s, mut b) = writable("unsaved-ask");
+        b.user = None;
+        b.identify = nobody;
+        let edit = ask_editor(&mut b);
+        b.edited(edit.into, Ok("물어볼 것".into()));
+        assert!(matches!(b.mode, Mode::Ask(_)), "{:?}", b.mode);
+        assert_eq!(b.unsaved(), Some(("물어볼 것".to_string(), None)), "묻는 칸 뒤의 폼을 못 봤다");
+
+        let (_s, mut c) = writable("unsaved-blank");
+        c.hit("SPC n");
+        assert!(matches!(c.mode, Mode::Idea(_)), "{:?}", c.mode);
+        assert_eq!(c.unsaved(), None, "빈 폼을 남길 글로 셌다");
     }
 
     /// 빈 디렉터리에서도 무너지지 않는다.
