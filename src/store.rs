@@ -239,23 +239,24 @@ impl Repo {
         // 스냅샷을 안 건드리는 명령까지 "그대로 두고 썼다" 고 말해, 일어나지
         // 않은 쓰기를 주장한다 — 저널이 거짓말하면 안 되는 것과 같은 까닭이다.
         //
-        // **안 쓴 자리에서는 0 을 넣는다.** 한 프로세스가 `with_write` 를 두 번
-        // 부르는 날(묶음 동사·쓰는 탐색기) 앞 호출의 수가 남아 있으면, 아무것도
-        // 안 쓴 뒤에 "그대로 두고 썼다" 가 나온다 — 같은 거짓말의 뒷면이다.
-        //
         // **안 쓴 자리에서도 들고 있다는 것은 따로 센다.** `moai note` 처럼
         // 저널만 쓰는 명령은 `report_load_errors` 도 안 지나므로, 여기서 입을
         // 다물면 그 동사만 쓰는 쪽은 파일이 상했다는 것을 영영 모른다(moai-relb).
         // 낱말이 달라야 해서 수를 갈라 둔다 — "그대로 두고 썼다" 는 쓴 자리의 말이다.
-        if after != before {
+        //
+        // **호출마다 덮지 않고 쌓는다**([`Tally::after`]). 한 프로세스가 여러 번 쓰는
+        // 길(탐색기)에서 마지막 호출만 말하면 앞에서 쓴 것을 "안 건드렸다" 로 지운다.
+        let wrote = after != before;
+        if wrote {
             // 사람이 정한 권한은 `write_atomic` 이 지킨다. 저널은 제자리에 덧붙이므로 원래 안 풀린다.
             write_atomic(&self.issues_path(), after.as_bytes())?;
-            CARRIED.store(opaque.len(), std::sync::atomic::Ordering::Relaxed);
-            HELD.store(0, std::sync::atomic::Ordering::Relaxed);
-        } else {
-            CARRIED.store(0, std::sync::atomic::Ordering::Relaxed);
-            HELD.store(opaque.len(), std::sync::atomic::Ordering::Relaxed);
         }
+        let mut tallies = TALLY.lock().unwrap_or_else(|e| e.into_inner());
+        match tallies.iter_mut().find(|(root, _)| *root == self.root) {
+            Some((_, t)) => *t = t.after(wrote, opaque.len()),
+            None => tallies.push((self.root.clone(), Tally::default().after(wrote, opaque.len()))),
+        }
+        drop(tallies);
         if !entries.is_empty() {
             self.append_journal(&entries)?;
         }
@@ -303,24 +304,46 @@ impl Repo {
     }
 }
 
-/// 방금 쓰기가 **그대로 들고 넘어간** 못 읽는 줄의 수.
+/// 이 프로세스의 `with_write` 들이 못 읽는 줄에 대해 본 것.
 ///
 /// `store` 는 터미널을 모르므로 찍지 않는다 — 세어 두기만 하고 `main` 이
 /// 말한다. `cmd::had_partial` 과 같은 모양이고, 같은 까닭이다: 쓰기 명령마다
 /// 파일을 한 번 더 읽어 보고하게 하면 그 읽기가 락 밖이라 락 안에서 본 것과
 /// 다를 수 있다.
-static CARRIED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-pub fn carried_unreadable() -> usize {
-    CARRIED.load(std::sync::atomic::Ordering::Relaxed)
+///
+/// **명령 하나가 아니라 프로세스 하나의 것이다.** `moai tui` 는 여러 번 쓰고 나서
+/// `main` 을 지난다. 마지막 호출만 남기면 앞에서 쓴 뒤 끝에 `note` 하나를 적은
+/// 세션이 "이번 명령은 그 파일을 안 건드렸다" 고 나오고, 반대 순서면 안 쓴
+/// 쓰기의 수가 쓴 자리의 말로 선다(moai-2v3w).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Tally {
+    /// 한 번이라도 스냅샷을 썼는가.
+    pub wrote: bool,
+    /// 쓴 호출이 **그대로 들고 넘어간** 줄의 수 — 쓴 호출 가운데 가장 많던 것.
+    /// 더하지 않는다: 두 번 쓰면 같은 줄을 두 번 들고 간 것이다.
+    pub carried: usize,
+    /// 마지막 호출이 파일에서 본 줄의 수. 쓴 것과 무관한 파일의 지금 모습이다.
+    pub seen: usize,
 }
 
-/// 방금 쓰기가 **스냅샷을 안 건드렸는데** 파일에 있던 못 읽는 줄의 수.
-/// [`carried_unreadable`] 과 **많아야 하나만** 0 이 아니다 (둘 다 0 일 수 있다).
-static HELD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+impl Tally {
+    /// 호출 하나를 더 접는다. **순수하다** — 전역을 건드리는 것은 `with_write` 뿐이다.
+    pub fn after(self, wrote: bool, unreadable: usize) -> Tally {
+        Tally {
+            wrote: self.wrote || wrote,
+            carried: if wrote { self.carried.max(unreadable) } else { self.carried },
+            seen: unreadable,
+        }
+    }
+}
 
-pub fn held_unreadable() -> usize {
-    HELD.load(std::sync::atomic::Ordering::Relaxed)
+/// **저장소마다 따로 센다.** 탐색기는 층에서 여러 프로젝트에 쓴다 — 하나로 접으면
+/// A 에서 들고 간 줄을 B 의 말로 내거나, A 가 상한 것을 B 의 깨끗한 쓰기가 덮어
+/// 입을 다문다. 처음 쓴 차례대로 둔다.
+static TALLY: std::sync::Mutex<Vec<(PathBuf, Tally)>> = std::sync::Mutex::new(Vec::new());
+
+pub fn unreadable_tallies() -> Vec<(PathBuf, Tally)> {
+    TALLY.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// 파일이 그때 그것인지 가늠하는 표식. 고친 때만 보면 놓친다 — rename 으로
@@ -620,6 +643,31 @@ mod tests {
         let j = r.journal_of("argos-4aex").unwrap();
         assert_eq!(j.len(), 1);
         assert_eq!(j[0].text.as_deref(), Some("발견"));
+    }
+
+    /// **여러 번 쓴 프로세스는 한 번이라도 쓴 것을 잊지 않는다**(moai-2v3w). 탐색기가
+    /// 이슈를 옮긴 뒤 `note` 하나로 끝나면, 마지막 호출만 보던 때는 나오면서 "안 건드렸다"
+    /// 고 했다. 전역은 병렬 시험끼리 섞이므로 접는 함수를 직접 본다.
+    #[test]
+    fn the_tally_keeps_a_write_that_came_before_a_quiet_call() {
+        let none = Tally::default();
+
+        let wrote_then_noted = none.after(true, 1).after(false, 1);
+        assert!(wrote_then_noted.wrote);
+        assert_eq!(wrote_then_noted.carried, 1, "앞에서 들고 간 줄을 잊었다");
+
+        // 반대 순서도 같은 답이다 — 안 쓴 호출의 수가 쓴 자리의 말로 서지 않는다.
+        assert_eq!(none.after(false, 1).after(true, 1), wrote_then_noted);
+
+        // 안 쓴 호출만이면 쓴 적이 없다.
+        let quiet = none.after(false, 2).after(false, 2);
+        assert_eq!(quiet, Tally { wrote: false, carried: 0, seen: 2 });
+
+        // 깨끗할 때 쓰고 그 뒤에 줄이 상하면 — 쓰긴 했지만 들고 간 것은 없다.
+        assert_eq!(none.after(true, 0).after(false, 1), Tally { wrote: true, carried: 0, seen: 1 });
+
+        // 두 번 쓰면 같은 줄을 두 번 든 것이지 두 배가 아니다.
+        assert_eq!(none.after(true, 3).after(true, 3).carried, 3);
     }
 
     /// 41번 줄이 깨져도 나머지가 읽히고, 어느 줄인지 보고된다.
