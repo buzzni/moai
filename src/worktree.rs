@@ -230,6 +230,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     match others_of(&repo.root) {
         Err(why) => unfound = Some(why),
         Ok((mine, trees)) => {
+            let here: std::collections::HashSet<&str> = load.issues.iter().map(|i| i.id.as_str()).collect();
             for (tree, root) in trees {
                 let path = root.join(".moai").join("issues.jsonl");
                 watched.push((path.clone(), crate::store::stamp(&path)));
@@ -245,7 +246,13 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                                 other.errors.len()
                             ));
                         }
-                        let base = mine.as_deref().map(|m| base_of(&repo.root, m, &tree.head)).unwrap_or_default();
+                        // 갈라진 자리는 옆에만 있는 줄을 가를 때만 쓴다. 다 여기에도 있으면
+                        // git 을 두 번 더 부르지 않는다 — 탐색기는 다시 읽을 때마다 여기를 지난다.
+                        let lonely = other.issues.iter().any(|i| !here.contains(i.id.as_str()));
+                        let base = match mine.as_deref() {
+                            Some(m) if lonely => base_of(&repo.root, m, &tree.head),
+                            _ => BTreeMap::new(),
+                        };
                         others.push(Side { base, ..Side::new(tree.label, root, other.issues) });
                     }
                 }
