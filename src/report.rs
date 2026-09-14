@@ -1461,12 +1461,19 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 원래 있던 소속 없는 일 하나가 "열린 것의 100%" 로 선다 — 미루기 하나로 경고가
     // 늘어 `Stop` 이 세션을 붙들었다(moai-c8lb 와 같은 덫). 분자는 그대로 지금 계획만
     // 센다: 미룬 소속 없는 일로는 꾸짖지 않는다. 그래서 미루기는 비율을 못 올린다.
-    let open = issues.iter().filter(|i| is_work(i) && !i.status.is_done()).count();
-    let ratio = if open == 0 { 0.0 } else { loose.len() as f64 / open as f64 };
-    if loose.len() >= NO_EPIC_MIN || (ratio >= NO_EPIC_RATIO && !loose.is_empty()) {
-        warnings.push(
-            Warning::new("no_epic", ids_of(&loose)).ratio(ratio).hint("moai show -e none"),
-        );
+    //
+    // **문턱도 id 로 잰다** — 경고가 내는 셈(`Warning::new` 가 거른 `count`)과 같은 자다.
+    // 줄로 재면 같은 종류 쌍둥이 한 쌍이 `NO_EPIC_MIN` 을 넘겨 놓고 `4건` 을 말한다.
+    let open = issues
+        .iter()
+        .filter(|i| is_work(i) && !i.status.is_done())
+        .map(|i| i.id.as_str())
+        .collect::<BTreeSet<_>>()
+        .len();
+    let no_epic = Warning::new("no_epic", ids_of(&loose));
+    let ratio = if open == 0 { 0.0 } else { no_epic.count as f64 / open as f64 };
+    if no_epic.count >= NO_EPIC_MIN || (ratio >= NO_EPIC_RATIO && no_epic.count > 0) {
+        warnings.push(no_epic.ratio(ratio).hint("moai show -e none"));
     }
 
     // 1-2. 마일스톤을 쓰기 시작했는데 거기 안 붙은 일. 마일스톤이 없는
@@ -1545,8 +1552,10 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
         .copied()
         .filter(|i| !i.status.is_done() && i.status.as_str() != cfg.first_status())
         .collect();
-    if wip.len() > WIP_LIMIT {
-        warnings.push(Warning::new("wip_overload", ids_of(&wip)).limit(WIP_LIMIT));
+    // 문턱은 id 로 잰다 — 위 `no_epic` 과 같은 까닭이다.
+    let overload = Warning::new("wip_overload", ids_of(&wip));
+    if overload.count > WIP_LIMIT {
+        warnings.push(overload.limit(WIP_LIMIT));
     }
 
     // 4. 집어 놓고 잊은 것.
@@ -3174,6 +3183,23 @@ mod tests {
             let w = st.warnings.iter().find(|w| w.kind == kind).unwrap_or_else(|| panic!("{kind} 가 없다"));
             assert_eq!((w.ids.as_slice(), w.count), (&["argos-0009.aaa".to_string()][..], 1), "{w:?}");
         }
+
+        // **문턱도 id 로 잰다.** 벌인 일 셋에 그중 하나의 쌍둥이 줄 — 줄로 재면 `WIP_LIMIT`
+        // 를 넘겨 `3건` 을 말하는 `wip_overload` 가 선다. 소속 없는 일도 같은 자로 잰다.
+        let held: Vec<Issue> = ["argos-0101", "argos-0102", "argos-0103", "argos-0103"]
+            .iter()
+            .map(|id| make(id, Kind::Issue, "in_progress"))
+            .collect();
+        let st = status(&held, &[], &cfg(), "2026-09-11T00:00:00Z");
+        assert!(!st.warnings.iter().any(|w| w.kind == "wip_overload"), "{:?}", st.warnings);
+        let loose: Vec<Issue> = ["argos-0201", "argos-0202", "argos-0203", "argos-0204", "argos-0204"]
+            .iter()
+            .map(|id| make(id, Kind::Issue, "todo"))
+            .chain((0..30).map(|n| member(&format!("argos-1{n:03}"), "argos-e001", "todo")))
+            .chain([make("argos-e001", Kind::Epic, "todo")])
+            .collect();
+        let st = status(&loose, &[], &cfg(), "2026-09-11T00:00:00Z");
+        assert!(!st.warnings.iter().any(|w| w.kind == "no_epic"), "{:?}", st.warnings);
     }
 
     /// **가려진 줄은 쌍둥이의 소속을 달지도, 쌍둥이의 소속으로 세지도 않는다** (moai-b5lu).

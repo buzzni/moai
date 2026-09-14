@@ -122,11 +122,13 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
 pub fn overlay(mine: Vec<Issue>, others: Vec<(String, PathBuf, Vec<Issue>)>) -> (Vec<Issue>, Origin) {
     let mut shown = mine;
     let mut origin = Origin::default();
-    // id → `shown` 의 자리. 제 줄은 첫 자리만 적는다 — 둘째는 이미 깨진 줄이라
-    // 남의 줄로 덮을 자리가 아니다.
+    // id → `shown` 의 자리. 제 줄이 둘이면 **뒷자리를** 적는다 — `store::Load::get`·
+    // 트리·탐색기가 모두 뒷줄을 연다. 앞자리를 덮으면 `show <id> --worktree` 가 덮지
+    // 않은 낡은 뒷줄을 열면서 이력은 옆 워크트리에서 읽어, 머리와 이력이 서로 다른
+    // 줄을 말한다.
     let mut at: BTreeMap<String, usize> = BTreeMap::new();
     for (k, i) in shown.iter().enumerate() {
-        at.entry(i.id.clone()).or_insert(k);
+        at.insert(i.id.clone(), k);
     }
     for (tree, (label, root, issues)) in others.into_iter().enumerate() {
         origin.trees.push((label, root));
@@ -352,6 +354,15 @@ mod tests {
         );
         assert_eq!(shown.len(), 2);
         assert_eq!(shown[1].status.as_str(), "review", "읽은 차례가 뒤집혔다");
+
+        // 옆의 더 새 줄은 **뒷줄을** 덮는다 — 상세·트리가 여는 줄이 그것이다.
+        let later = "2026-09-13T00:00:00Z";
+        let (shown, _) = overlay(
+            vec![issue("m-0001", "todo", at), issue("m-0001", "review", at)],
+            vec![tree("feat/x", vec![issue("m-0001", "done", later)])],
+        );
+        let cols: Vec<&str> = shown.iter().map(|i| i.status.as_str()).collect();
+        assert_eq!(cols, ["todo", "done"], "옆 줄이 앞줄을 덮었다");
     }
 
     /// 제 파일의 못 읽는 줄이 옆에서만 온 id 를 쓰면 중복으로 넘기지 않는다. 제 줄을
