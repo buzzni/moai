@@ -90,6 +90,73 @@ impl<'a> Where<'a> {
     }
 }
 
+/// 글로 찾을 때 **어디를 보는가**(moai-kojj). TUI 검색 칸의 Tab 이 이 차례로 돈다.
+///
+/// `All` 은 넷을 다 본다 — CLI 의 `-g` 도 이것이다. 한때 제목·본문만 봤는데, 그러면 id
+/// 조각이나 태그로 찾은 것이 `All` 에서는 안 걸리고 좁힌 범위에서만 걸린다. 좁힌 것이
+/// 넓은 것보다 더 찾으면 "전체" 라는 이름이 거짓말이 된다.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum GrepIn {
+    #[default]
+    All,
+    Id,
+    Title,
+    Tag,
+    Body,
+}
+
+impl GrepIn {
+    const ORDER: [GrepIn; 5] = [GrepIn::All, GrepIn::Id, GrepIn::Title, GrepIn::Tag, GrepIn::Body];
+
+    /// 화면에 적는 이름. 거름망 뱃지의 `/id:…` 앞머리이기도 하다.
+    pub fn name(self) -> &'static str {
+        match self {
+            GrepIn::All => "전체",
+            GrepIn::Id => "id",
+            GrepIn::Title => "제목",
+            GrepIn::Tag => "태그",
+            GrepIn::Body => "본문",
+        }
+    }
+
+    /// Tab 의 다음 범위. 끝에서 처음으로 돈다.
+    pub fn next(self) -> GrepIn {
+        let at = Self::ORDER.iter().position(|g| *g == self).unwrap_or(0);
+        Self::ORDER[(at + 1) % Self::ORDER.len()]
+    }
+
+    /// Shift-Tab 의 앞 범위.
+    pub fn prev(self) -> GrepIn {
+        let at = Self::ORDER.iter().position(|g| *g == self).unwrap_or(0);
+        Self::ORDER[(at + Self::ORDER.len() - 1) % Self::ORDER.len()]
+    }
+
+    /// id·제목을 이 범위가 보는가 — 목록 줄에서 찾은 글자를 칠할 자리를 가른다.
+    pub fn sees_id(self) -> bool {
+        matches!(self, GrepIn::All | GrepIn::Id)
+    }
+
+    pub fn sees_title(self) -> bool {
+        matches!(self, GrepIn::All | GrepIn::Title)
+    }
+
+    /// `q` 는 이미 소문자다([`Filter::build`]).
+    pub fn hits(self, i: &Issue, q: &str) -> bool {
+        let has = |s: &str| s.to_lowercase().contains(q);
+        let id = || has(&i.id);
+        let title = || has(&i.title);
+        let tag = || i.tags.iter().any(|t| has(t));
+        let body = || i.body.as_deref().is_some_and(has);
+        match self {
+            GrepIn::All => id() || title() || tag() || body(),
+            GrepIn::Id => id(),
+            GrepIn::Title => title(),
+            GrepIn::Tag => tag(),
+            GrepIn::Body => body(),
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Filter {
     /// OR. 비면 아무거나.
@@ -106,6 +173,8 @@ pub struct Filter {
     pub assignee: Vec<Sel>,
     pub kind: Option<Kind>,
     pub grep: Option<String>,
+    /// `grep` 이 어디를 보는가. CLI 는 늘 [`GrepIn::All`] 이고, TUI 의 검색 칸이 Tab 으로 돌린다.
+    pub grep_in: GrepIn,
     /// 지금 칸에 이만큼 머문 것.
     pub stale: Option<i64>,
     /// done 을 포함한다.
@@ -153,6 +222,7 @@ pub struct Raw {
     pub assignee: Vec<String>,
     pub kind: Option<Kind>,
     pub grep: Option<String>,
+    pub grep_in: GrepIn,
     pub stale: Option<i64>,
     pub all: bool,
     pub ideas: bool,
@@ -213,6 +283,7 @@ impl Filter {
             kind: raw.kind,
             // 한 번만 내려 두면 이슈마다 다시 만들 일이 없다.
             grep: raw.grep.map(|q| q.to_lowercase()),
+            grep_in: raw.grep_in,
             stale: raw.stale,
             all: raw.all,
             ideas,
@@ -311,12 +382,10 @@ impl Filter {
         if self.kind.is_some_and(|k| i.kind != k) {
             return false;
         }
-        if let Some(q) = &self.grep {
-            let hit = i.title.to_lowercase().contains(q)
-                || i.body.as_deref().is_some_and(|b| b.to_lowercase().contains(q));
-            if !hit {
-                return false;
-            }
+        if let Some(q) = &self.grep
+            && !self.grep_in.hits(i, q)
+        {
+            return false;
         }
         // 머문 기간도 **서 있는 칸**의 것이다 (`Where::since`). `-s` 는 읽은 칸으로
         // 고르는데 나이만 적힌 칸의 시각으로 재면, 한 물음의 두 조각이 다른 칸을 본다.
@@ -651,6 +720,37 @@ mod tests {
         assert!(hit(&f, &i));
         f.grep = Some("없는말".into());
         assert!(!hit(&f, &i));
+    }
+
+    /// 범위마다 제 자리만 본다. **전체는 넷을 다 본다** — 좁힌 범위가 전체보다 더 찾으면 안 된다.
+    #[test]
+    fn grep_in_narrows_to_one_field_and_all_sees_every_one() {
+        let mut i = issue("a-0042", "todo", &["parser"]);
+        i.title = "저장 계층".into();
+        i.body = Some("원자적 쓰기".into());
+        let cases = [
+            ("0042", GrepIn::Id),
+            ("저장", GrepIn::Title),
+            ("pars", GrepIn::Tag),
+            ("원자", GrepIn::Body),
+        ];
+        for (q, only) in cases {
+            let mut f = f();
+            f.grep = Some(q.into());
+            f.grep_in = GrepIn::All;
+            assert!(hit(&f, &i), "전체가 {q} 를 못 찾았다");
+            for g in GrepIn::ORDER.into_iter().filter(|g| *g != GrepIn::All) {
+                f.grep_in = g;
+                assert_eq!(hit(&f, &i), g == only, "{} 범위가 {q} 에 틀렸다", g.name());
+            }
+        }
+        // 차례는 전체 → id → 제목 → 태그 → 본문 → 전체, 거꾸로도 돈다.
+        let mut g = GrepIn::All;
+        for want in [GrepIn::Id, GrepIn::Title, GrepIn::Tag, GrepIn::Body, GrepIn::All] {
+            g = g.next();
+            assert_eq!(g, want);
+            assert_eq!(g.prev().next(), g);
+        }
     }
 
     /// `--stale` 은 **지금 칸에 머문 기간**이다. 리뷰가 썩는 것을 찾는 데 쓴다.

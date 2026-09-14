@@ -226,7 +226,8 @@ NOTE
   위, G·End 가 맨 아래, Ctrl-d·Ctrl-u 가 반 쪽, Ctrl-f·Ctrl-b(PageDown·PageUp)가 한
   쪽이다. Tab·Shift-Tab 이 목록과 상세 사이로 포커스를 옮기고, 이동키는 모두 포커스
   있는 칸을 움직인다 — 상세를 굴리려면 Tab 으로 간다. / 가 검색, Esc 가 걸어 둔
-  거름망을 푼다. 검색·거름망 칸은 Enter 로 걸고 Esc 로 그만둔다.
+  거름망을 푼다. 검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며, 검색은 치는 대로
+  목록을 거르고 Tab·Shift-Tab 이 찾을 자리를 전체·id·제목·태그·본문으로 돌린다.
 
   그 밖의 동작은 SPC 를 누르면 곧바로 뜨는 메뉴에 있다. 메뉴는 그 자리에서 되는 것만
   세우고, 모르는 키는 무시하며, Esc 로 닫고 Backspace 로 한 층 올라간다.
@@ -591,7 +592,7 @@ pub struct FilterArgs {
     #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
     pub kind: Option<Kind>,
 
-    /// 제목·본문에 이 글이 든 것
+    /// id·제목·태그·본문에 이 글이 든 것
     #[arg(short = 'g', long, value_name = "글")]
     pub grep: Option<String>,
 

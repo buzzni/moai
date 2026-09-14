@@ -676,10 +676,10 @@ mod tests {
         assert!(!app.quit, "붙인 q 가 끝냈다");
         take(&mut app, Event::Key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE)));
         take(&mut app, Event::Paste("a\tb\r".into()));
-        assert_eq!(app.mode, Mode::Grep(Input::new("a b")));
+        assert_eq!(app.mode, Mode::Grep(Input::new("a b"), crate::query::GrepIn::All));
         let release = KeyEvent::new_with_kind_and_state(KeyCode::Esc, KeyModifiers::NONE, KeyEventKind::Release, KeyEventState::NONE);
         take(&mut app, Event::Key(release));
-        assert!(matches!(app.mode, Mode::Grep(_)), "뗀 키를 먹었다");
+        assert!(matches!(app.mode, Mode::Grep(..)), "뗀 키를 먹었다");
     }
 
     /// 켜고 끄는 글은 **xterm 의 2004 번**이다. 끄는 글이 패닉 훅에도 쓰이므로 여기서 박아 둔다 —

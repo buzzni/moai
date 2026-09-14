@@ -594,11 +594,16 @@ impl Menu {
 pub enum Prompt {
     Apply,
     Cancel,
+    /// 검색 칸에서 찾을 자리를 돌린다(moai-kojj) — 전체 → id → 제목 → 태그 → 본문. 다른 칸은 안 쓴다.
+    NextScope,
+    PrevScope,
 }
 
 pub const PROMPT: &[Bind<Prompt>] = &[
     row!(Prompt::Apply, Some("Enter"), Key::unctrl(KeyCode::Enter)),
     row!(Prompt::Cancel, Some("Esc"), Key::unctrl(KeyCode::Esc)),
+    row!(Prompt::NextScope, Some("Tab"), Key::unshift(KeyCode::Tab)),
+    row!(Prompt::PrevScope, Some("Shift-Tab"), Key::shift(KeyCode::Tab)),
 ];
 
 /// 고르기 창(moai-plvy).
@@ -1128,7 +1133,8 @@ mod tests {
             (with(C::Enter, alt), Lookup::Run(Prompt::Apply)),
             (press(C::Esc), Lookup::Run(Prompt::Cancel)),
             (with(C::Enter, ctrl), Lookup::Unknown),
-            (press(C::Tab), Lookup::Unknown),
+            (press(C::Tab), Lookup::Run(Prompt::NextScope)),
+            (press(C::BackTab), Lookup::Run(Prompt::PrevScope)),
         ];
         for (k, want) in prompt {
             assert_eq!(one(PROMPT, k), want, "글칸 {k:?}");
@@ -1202,7 +1208,7 @@ mod tests {
             // 다른 문단에만 남은 키 — 목록 문단의 Tab.
             ("Tab 이 둘 사이를 옮기고", "둘 사이를 옮기고", &["Tab"][..], &["JOT: Tab"][..]),
             // 좁힌 표 — 같은 문단의 목록 Enter·Esc 로 지나가면 안 된다.
-            ("검색·거름망 칸은 Enter 로 걸고 Esc 로 그만둔다.", "검색·거름망 칸은 그 칸에서 걸고 그만둔다.", &["Enter", "Esc"][..], &["PROMPT: Enter", "PROMPT: Esc"][..]),
+            ("검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며", "검색·거름망 칸은 그 칸에서 걸고 그만두며", &["Enter", "Esc"][..], &["PROMPT: Enter", "PROMPT: Esc"][..]),
             // 좁힌 표 — 같은 문단의 고르기 창 Enter·Esc 로 지나가면 안 된다.
             ("(Enter 로 가고 Esc 로", "(가고", &["Enter", "Esc"][..], &["PATH: Enter", "PATH: Esc"][..]),
             // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Backspace 로 지나가면 안 된다.

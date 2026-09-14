@@ -13,6 +13,7 @@ use super::layer::{Look, Place, Shut};
 use super::picker::{self, Picker};
 use super::{App, Input, Mode, Pane, Row};
 use crate::nav::Entry;
+use crate::query::GrepIn;
 use crate::report::Blocker;
 use crate::style;
 use crate::text::clip;
@@ -131,7 +132,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             None => fkeys(f, app, &rows, keys),
         },
         // 안내 속 키 이름은 표에서 읽는다 — 키를 옮기면 안내도 따라온다.
-        Mode::Grep(q) => prompt(f, keys, "검색", q, app.input_error(), &prompt_help("걸기")),
+        Mode::Grep(q, g) => prompt(f, keys, &grep_label(*g), q, app.input_error(), &grep_help(app, q)),
         Mode::Filter(q) => prompt(f, keys, "거름망", q, app.input_error(), &prompt_help("걸기")),
         Mode::Ask(ask) => {
             // 글칸이 **아래**에서 자리를 먼저 얻는다 — 창이 낮아 한 줄만 남으면 적는 칸이
@@ -739,6 +740,10 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
         return Line::from(Span::styled(format!("{}/", app.index.label(&app.issues, e)), dim()));
     };
     let i = &app.issues[at];
+    // 걸린 검색이 이 자리를 보면 찾은 글자를 칠한다(moai-yio7).
+    let grep = app.grep_query();
+    let in_id = grep.filter(|(g, _)| g.sees_id()).map(|(_, q)| q);
+    let in_title = grep.filter(|(g, _)| g.sees_title()).map(|(_, q)| q);
 
     // 앞에 붙는 것들을 **먼저 만들고 재서** 남는 만큼을 제목에 준다. 손으로
     // 더한 숫자로 어림하면 `p10` 처럼 자리를 더 먹는 값이나 한글이 든 id 에서
@@ -793,14 +798,17 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
 
     let title_w = crate::text::width(&title);
     let mut spans = head;
+    // id 는 칠하면 조각이 갈라진다 — 머리글의 자리(`head[4]`)를 다 쓴 **뒤에** 편다.
+    let id = spans.remove(0);
+    spans.splice(0..0, mark(vec![id], in_id));
     // **도는 줄의 제목에는 빛줄기가 흐른다**(moai-fy99). 자는 글리프와 같은 `App::spins` 하나다 —
     // 일은 집었을 때, 에픽·마일스톤은 그 밑에 집은 일이 실제로 있을 때(moai-x5eg), 미룬 것은 안
     // 돈다(moai-tawj). 묶음을 따로 빼 두면 목록 뿌리에서 무엇이 움직이는지 글리프 한 칸으로만
     // 읽혀, 여러 에픽을 훑어 내릴 때 눈에 안 걸린다(moai-eomg). 뜻은 여전히 글리프가 진다.
     if app.spins(at) {
-        spans.extend(shimmer(title, app.spin));
+        spans.extend(mark(shimmer(title, app.spin), in_title));
     } else {
-        spans.push(Span::raw(title));
+        spans.extend(mark(vec![Span::raw(title)], in_title));
     }
     if !tally.is_empty() {
         // 셈은 **테두리 끝에 오른쪽 정렬**한다(moai-1krv) — 줄마다 제목 길이를 따라 들쭉날쭉하면
@@ -1616,6 +1624,76 @@ fn key(k: &str, what: &str) -> Span<'static> {
 /// 글칸 안내 — `Enter <무엇>  Esc 그만`. 키 이름은 표([`PROMPT`])에서 읽는다.
 fn prompt_help(apply: &str) -> String {
     format!("{} {apply}  {} 그만", label(PROMPT, Prompt::Apply), label(PROMPT, Prompt::Cancel))
+}
+
+/// 검색 칸 이름표 — 좁힌 범위면 `검색·id` 처럼 붙인다(moai-kojj). 전체면 옛 이름 그대로다.
+fn grep_label(g: GrepIn) -> String {
+    match g {
+        GrepIn::All => "검색".to_string(),
+        g => format!("검색·{}", g.name()),
+    }
+}
+
+/// 검색 칸 안내 — `3건  Tab·Shift-Tab 범위  Enter 걸기  Esc 그만`. 셈은 **친 글이 있을 때만**
+/// 낸다(moai-00le): 빈 칸은 거름망이 없는 것이라 전체 수가 "걸린 수" 로 읽힌다.
+fn grep_help(app: &App, q: &Input) -> String {
+    let scope = format!("{} 범위  {}", labels(PROMPT, &[Prompt::NextScope, Prompt::PrevScope]), prompt_help("걸기"));
+    match q.text().trim().is_empty() {
+        true => scope,
+        false => format!("{}건  {scope}", app.hit_count()),
+    }
+}
+
+/// 찾은 글자 — 밝은 파랑에 **굵게**(moai-yio7). 색만으로 말하지 않는다: 색이 없는 터미널에서도
+/// 굵기가 남고, 무엇을 찾았는지는 뱃지·검색 칸이 글로 말한다.
+fn found() -> Style {
+    Style::new().fg(Color::LightBlue).add_modifier(Modifier::BOLD)
+}
+
+/// `spans` 의 글에서 `q` 가 든 자리를 [`found`] 로 덧칠한다. 대소문자를 가리지 않는다.
+///
+/// **글자 단위로 견준다** — 통째로 `to_lowercase` 한 글은 바이트 길이가 달라질 수 있어
+/// (`İ`) 찾은 자리를 원문에 되짚을 수 없다. 이미 칠한 조각(빛줄기·흐림)은 제 스타일 위에 덧댄다.
+fn mark(spans: Vec<Span<'static>>, q: Option<&str>) -> Vec<Span<'static>> {
+    let fold = |c: char| c.to_lowercase().next().unwrap_or(c);
+    let needle: Vec<char> = match q {
+        Some(q) if !q.trim().is_empty() => q.chars().map(fold).collect(),
+        _ => return spans,
+    };
+    let hay: Vec<char> = spans.iter().flat_map(|s| s.content.chars()).map(fold).collect();
+    let mut hit = vec![false; hay.len()];
+    let mut at = 0;
+    while at + needle.len() <= hay.len() {
+        if hay[at..at + needle.len()] == needle[..] {
+            hit[at..at + needle.len()].iter_mut().for_each(|h| *h = true);
+            at += needle.len();
+        } else {
+            at += 1;
+        }
+    }
+    if !hit.contains(&true) {
+        return spans;
+    }
+    let mut out = Vec::new();
+    let mut n = 0;
+    for span in spans {
+        let mut run = String::new();
+        let mut on = None;
+        for c in span.content.chars() {
+            if on.is_some_and(|o| o != hit[n]) {
+                let style = if on == Some(true) { span.style.patch(found()) } else { span.style };
+                out.push(Span::styled(std::mem::take(&mut run), style));
+            }
+            on = Some(hit[n]);
+            run.push(c);
+            n += 1;
+        }
+        if !run.is_empty() {
+            let style = if on == Some(true) { span.style.patch(found()) } else { span.style };
+            out.push(Span::styled(run, style));
+        }
+    }
+    out
 }
 
 /// 브랜치 머리표를 이만큼에서 자른다. 긴 브랜치 하나가 제목 몫을 다 먹으면 안 된다.
@@ -3767,6 +3845,48 @@ pub(super) mod tests {
         assert!(!screen.contains("┌ SPC"), "{screen}");
     }
 
+    /// **찾은 글자는 밝은 파랑에 굵게 선다**(moai-yio7) — 그 범위가 보는 자리에서만. 검색 칸은
+    /// 좁힌 범위를 이름표에, 걸린 수를 안내에 적는다(moai-00le).
+    #[test]
+    fn slash_paints_what_it_found_only_where_the_scope_looks() {
+        let found_text = |a: &mut App| {
+            let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+            term.draw(|f| screen(f, a)).unwrap();
+            let buf = term.backend().buffer().clone();
+            let mut out = String::new();
+            for y in 0..buf.area.height {
+                for x in 0..buf.area.width {
+                    let c = &buf[(x, y)];
+                    if c.fg == Color::LightBlue && c.modifier.contains(Modifier::BOLD) && c.bg != Color::LightBlue {
+                        out.push_str(c.symbol());
+                    }
+                }
+                out.push('\n');
+            }
+            out
+        };
+        let mut a = app();
+        let id = a.issues[0].id.clone();
+        let q = id[id.len() - 3..].to_uppercase();
+        a.key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        for c in q.chars() {
+            a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        let prompt = render(&mut a, 100, 20).join("\n");
+        let n = a.hit_count();
+        assert!(prompt.contains(&format!("{n}건")), "걸린 수가 없다\n{prompt}");
+        assert!(prompt.contains("Tab·Shift-Tab 범위"), "범위 키가 없다\n{prompt}");
+        let painted = found_text(&mut a);
+        assert!(painted.contains(&q.to_lowercase()), "찾은 글자를 안 칠했다\n{painted}");
+
+        // 태그 범위는 id·제목을 안 본다 — 칠할 것이 없다. 이름표가 범위를 말한다.
+        a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+        a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+        let prompt = render(&mut a, 100, 20).join("\n");
+        assert!(prompt.contains(" 검색·태그 "), "{prompt}");
+        assert!(found_text(&mut a).trim().is_empty(), "보지 않는 자리를 칠했다");
+    }
+
     /// 빈 저장소도 그려진다.
     #[test]
     fn an_empty_repo_still_draws() {
@@ -3978,7 +4098,7 @@ mod eyeball {
         let mut app = super::App::new(load.issues, cfg, path);
         app.cursor = std::env::var("EYE_CUR").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
         if let Ok(q) = std::env::var("EYE_GREP") {
-            let m = super::Mode::Grep(super::Input::new(&q));
+            let m = super::Mode::Grep(super::Input::new(&q), crate::query::GrepIn::All);
             let _ = app.apply(&m);
         }
         if let Ok(q) = std::env::var("EYE_TYPING") {
