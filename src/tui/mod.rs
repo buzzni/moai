@@ -1182,6 +1182,31 @@ impl App {
         }
     }
 
+    /// 붙여 넣은 글(moai-od9q) — 루프가 bracketed paste 로 받은 `Event::Paste`. **키로
+    /// 풀지 않는다.** 풀면 붙인 글의 탭이 Tab 으로 폼의 칸을 옮기고, 줄바꿈이 Enter 로
+    /// 검색을 걸거나 제목을 떠나며, 탐색 중에 붙인 `q` 는 탐색기를 끝낸다.
+    ///
+    /// 글은 **지금 열린 글칸 하나에만** 들어간다 — 검색·거름망·누군지 묻는 칸·폼의 포커스 칸·
+    /// 고르기 창의 경로 칸. 무엇으로 받을지(한 줄로 잇기·줄로 가르기·걸러낼 글자)는 칸이 정한다.
+    /// 받을 칸이 없으면 삼키고 그렇다고 말한다 — 말없이 삼키면 붙여넣기가 고장 난 줄 안다.
+    /// 해제 물음에서는 **다른 키처럼** 물음을 거둔다: 붙인 글 속 `y` 는 답이 아니다.
+    pub fn paste(&mut self, s: &str) {
+        self.notice = None;
+        // 층에서는 `/`·`f` 가 안 열린다(`layer::refused`) — 열리는 칸만 댄다.
+        let open = if self.on_layer() { "`n`" } else { "`/`·`f`·`n`" };
+        match &mut self.mode {
+            Mode::Browse => self.notice = Some(format!("붙여 넣을 칸이 없다 — {open} 으로 칸을 열고 붙인다")),
+            Mode::Grep(input) | Mode::Filter(input) => input.paste(s),
+            Mode::Ask(ask) => {
+                ask.input.paste(s);
+                ask.error = None;
+            }
+            Mode::Idea(form) => form.paste(s),
+            Mode::Pick(picker) => picker.paste(s),
+            Mode::Unregister(_) => self.mode = Mode::Browse,
+        }
+    }
+
     /// 누군지 묻는 칸이 먹지 않은 키 — Enter·Esc.
     ///
     /// **받은 것은 `model::Actor::parse` 로 잰다** — `--user`·`MOAI_ACTOR` 와 같은
@@ -1992,6 +2017,39 @@ mod tests {
         assert_eq!(a.mode, Mode::Grep(Input::new("quit")));
         a.key(key(KeyCode::Esc));
         assert_eq!(a.mode, Mode::Browse);
+    }
+
+    /// **붙여넣기는 열린 글칸에 글로만 들어간다**(moai-od9q). 키로 읽지 않는다 — 탐색 중에
+    /// 붙인 `q` 가 끝내지 않고, 검색칸에 붙인 줄바꿈이 Enter 로 걸리지 않는다. 받을 칸이
+    /// 없으면 말없이 삼키지 않고 그렇다고 한다. 해제 물음에 붙인 `y` 는 답이 아니다.
+    #[test]
+    fn a_paste_lands_in_the_open_field_and_never_acts_as_keys() {
+        let mut a = app();
+        a.paste("q\n");
+        assert!(!a.quit, "탐색 중에 붙인 q 가 끝냈다");
+        assert_eq!(a.mode, Mode::Browse);
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("붙여")), "받을 칸이 없는데 말이 없다 — {:?}", a.notice);
+        a.key(key(KeyCode::Down));
+        assert_eq!(a.notice, None, "붙여넣기의 말이 다음 키에 안 걷혔다");
+
+        a.key(key(KeyCode::Char('/')));
+        a.paste("qu\tit\n");
+        assert_eq!(a.mode, Mode::Grep(Input::new("qu it")), "줄바꿈이 Enter 로 걸렸다");
+        a.key(key(KeyCode::Esc));
+
+        a.key(key(KeyCode::Char('f')));
+        a.paste("status=todo");
+        assert_eq!(a.mode, Mode::Filter(Input::new("status=todo")));
+        a.key(key(KeyCode::Esc));
+
+        a.key(key(KeyCode::Char('n')));
+        a.paste("제목\t이어\n본문");
+        let Mode::Idea(form) = &a.mode else { panic!("폼이 닫혔다 — {:?}", a.mode) };
+        assert_eq!((form.title.text(), form.field), ("제목 이어 본문", super::form::Field::Title));
+
+        a.mode = Mode::Unregister(register::Unregister { path: "/w/one".into(), name: "one".into() });
+        a.paste("y");
+        assert_eq!(a.mode, Mode::Browse, "해제 물음이 안 거둬졌다");
     }
 
     /// 들고 있던 길이 사라지면 **갈 수 있는 데까지만** 남긴다. 없는 자리에 서

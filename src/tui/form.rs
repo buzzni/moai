@@ -142,6 +142,29 @@ impl Form {
         Act::Stay
     }
 
+    /// 붙여 넣은 글(moai-od9q). **포커스 칸에 글로 들어간다** — 탭이 칸을 옮기지 않고
+    /// 줄바꿈이 제목을 떠나지 않는다. 제목에서는 한 줄로 이어 붙는다([`Input::paste`]).
+    ///
+    /// 제목에 붙인 여러 줄을 **첫 줄만 제목, 나머지는 본문으로 나누지 않는다.** 제목 가운데
+    /// 커서가 서 있으면 "나머지" 가 어디서 시작하는지부터 모호하고, 적어 둔 본문이 있으면
+    /// 그 앞·뒤 어디에 넣을지를 또 정해야 한다. 한 줄로 이으면 붙인 글이 전부 커서 자리에
+    /// 보이고, 나누고 싶으면 Tab 으로 본문에 가서 붙이면 된다 — 검색·거름망·누군지 묻는
+    /// 칸도 같은 자라 칸마다 붙여넣기의 뜻이 갈리지 않는다.
+    ///
+    /// 버릴까 묻는 중이면 **다른 키처럼** 물음만 거두고 글은 안 넣는다 — 물음을 못 보고
+    /// 붙인 글이 엉뚱한 자리에 찍히면 안 된다.
+    pub fn paste(&mut self, s: &str) {
+        if self.leaving {
+            self.leaving = false;
+            return;
+        }
+        match self.field {
+            Field::Title => self.title.paste(s),
+            Field::Body => self.body.paste(s),
+        }
+        self.error = None;
+    }
+
     fn save(&mut self) -> Act {
         if self.title().is_empty() {
             self.error = Some(EMPTY_TITLE.into());
@@ -237,6 +260,28 @@ mod tests {
             press(&mut f, KeyCode::Esc);
             assert_eq!(press(&mut f, KeyCode::Char('y')), Act::Close);
         }
+    }
+
+    /// **붙여넣기는 포커스 칸에 글로 들어간다**(moai-od9q). 탭은 Tab 이 아니고 줄바꿈은
+    /// Enter 가 아니다 — 붙여 넣은 긴 생각이 제목과 본문으로 찢어지지 않는다. 제목에서는
+    /// 한 줄로 이어 붙고(칸을 옮기지 않는다), 본문에서는 줄로 선다. 물음 중에 붙이면
+    /// 다른 키처럼 물음만 거두고 글은 안 넣는다.
+    #[test]
+    fn a_paste_stays_in_the_focused_field() {
+        let mut f = Form { error: Some(EMPTY_TITLE.into()), ..Form::default() };
+        f.paste("첫 줄\t이어서\n둘째 줄\n");
+        assert_eq!((f.title.text(), f.body.text().as_str(), f.field), ("첫 줄 이어서 둘째 줄", "", Field::Title));
+        assert_eq!(f.error, None, "붙였는데 까닭이 남았다");
+
+        press(&mut f, KeyCode::Tab);
+        f.paste("하나\n\t둘\r\n셋");
+        assert_eq!((f.body.text().as_str(), f.field), ("하나\n    둘\n셋", Field::Body));
+
+        press(&mut f, KeyCode::Esc);
+        assert!(f.leaving);
+        f.paste("y");
+        assert!(!f.leaving, "붙여넣기가 물음을 안 거뒀다");
+        assert_eq!(f.body.text(), "하나\n    둘\n셋", "물음 뒤의 붙여넣기가 글로 들어갔다");
     }
 
     #[test]

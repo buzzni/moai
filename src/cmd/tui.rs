@@ -166,7 +166,16 @@ fn screen(mut app: App) -> R<Vec<String>> {
     // 101 번 패닉이 나고, `--json` 으로 부른 쪽은 약속된 오류 객체 대신
     // 역추적 문구를 받는다. 여기서 받아 `Fail` 로 바꾼다.
     let mut term = ratatui::try_init().map_err(|e| Fail::new(format!("터미널을 열지 못했다: {e}")))?;
+    // **붙여넣기를 글로 받는다**(moai-od9q). 안 켜면 붙인 글이 키 하나하나로 와서, 탭은 폼의
+    // 칸을 옮기고 줄바꿈은 Enter 로 검색을 걸거나 제목을 떠나며, 탐색 중에 붙인 `q` 는 끝낸다.
+    // 끄는 길은 둘이다 — 여기 아래의 정상 끝과 **패닉 훅.** ratatui 의 훅은 raw mode 와 대체
+    // 화면만 걷으므로, 안 걸면 패닉 뒤 사용자 셸에 붙인 글이 `200~…201~` 에 싸여 들어간다.
+    // 훅은 `try_init` **뒤에** 건다 — 그래야 끄기가 ratatui 의 복구를 감싸 먼저 돈다. 켜기를
+    // 못 해도 멈추지 않는다: 붙여넣기가 옛날처럼 키로 올 뿐이다.
+    paste_off_on_panic();
+    let _ = bracketed_paste(&mut std::io::stdout(), true);
     let out = loop_until_quit(&mut term, &mut app);
+    let _ = bracketed_paste(&mut std::io::stdout(), false);
     ratatui::restore();
     out.map_err(|e| Fail::new(e.to_string()))?;
     Ok(Vec::new())
@@ -273,7 +282,41 @@ const LOST: &str = "길잃음";
 
 use crate::tui::App;
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind};
+
+/// bracketed paste 를 켜거나 끈다 — xterm 의 2004 번. 쓰는 곳을 받는 것은 시험이 그 글을
+/// 보려고서다([`paste_off_on_panic`] 이 같은 글을 낸다).
+fn bracketed_paste(out: &mut impl std::io::Write, on: bool) -> std::io::Result<()> {
+    if on {
+        ratatui::crossterm::execute!(out, EnableBracketedPaste)
+    } else {
+        ratatui::crossterm::execute!(out, DisableBracketedPaste)
+    }
+}
+
+/// 패닉하면 **먼저 bracketed paste 를 끄고** 걸려 있던 훅(ratatui 의 터미널 복구)으로 넘긴다.
+/// 어느 스레드의 패닉에도 돈다 — 버린 다시 읽기 스레드가 터져도 셸이 붙여넣기를 싸서 받지 않는다.
+fn paste_off_on_panic() {
+    let next = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = bracketed_paste(&mut std::io::stdout(), false);
+        next(info);
+    }));
+}
+
+/// 루프가 받은 사건 하나를 탐색기에 넘긴다. **터미널 없이 시험된다.**
+///
+/// - 키는 **누를 때만** 받는다. crossterm 은 kitty 프로토콜 터미널에서 뗄 때도 보내므로,
+///   거르지 않으면 키 하나가 두 번 먹는다
+/// - 붙여넣기는 글로 넘긴다([`App::paste`]) — 키로 풀지 않는다
+/// - 창 크기 따위는 받을 것이 없다. 다음 그림이 새 크기로 그린다
+fn take(app: &mut App, ev: Event) {
+    match ev {
+        Event::Key(k) if k.kind == KeyEventKind::Press => app.key(k),
+        Event::Paste(text) => app.paste(&text),
+        _ => {}
+    }
+}
 
 /// 파일이 바뀌었는지 보러 깨는 걸음. 바뀌었으면 저절로 다시 읽는다(`App::follow`) —
 /// 커서는 줄의 정체를 따라가므로 읽던 자리를 잃지 않는다.
@@ -326,13 +369,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
         let wake = if spinning { stale_due.min(spin_due) } else { stale_due };
         let wait = wake.saturating_duration_since(std::time::Instant::now());
         if event::poll(wait)? {
-            // **누를 때만 받는다.** crossterm 은 kitty 프로토콜 터미널에서 뗄 때도
-            // 보내므로, 거르지 않으면 키 하나가 두 번 먹는다.
-            if let Event::Key(k) = event::read()?
-                && k.kind == KeyEventKind::Press
-            {
-                app.key(k);
-            }
+            take(app, event::read()?);
         }
         let now = std::time::Instant::now();
         // 키가 읽기를 띄웠으면(층으로 올라가기 따위) 느린 걸음까지 기다리지 않고 받으러 깬다.
@@ -374,6 +411,34 @@ mod tests {
             let drew = Duration::from_millis(ms);
             assert_eq!(spin_step(drew), drew * SPIN_BUDGET, "{ms}ms 에서 몫이 어긋났다");
         }
+    }
+
+    /// **붙여넣기는 글로 가고 키로 안 풀린다**(moai-od9q). 루프가 받은 사건을 나누는 자리를
+    /// 터미널 없이 본다 — 탐색 중에 붙인 `q` 는 끝내지 않고, 검색칸에 붙인 줄바꿈은 걸지 않는다.
+    /// 누른 키만 먹는 것(kitty 의 뗌)도 같은 자리다.
+    #[test]
+    fn a_paste_event_is_text_and_only_pressed_keys_act() {
+        use crate::tui::{Mode, input::Input};
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventState, KeyModifiers};
+        let mut app = App::new(Vec::new(), crate::config::Config::parse("prefix = \"argos\"\n").unwrap(), Vec::new());
+        take(&mut app, Event::Paste("q".into()));
+        assert!(!app.quit, "붙인 q 가 끝냈다");
+        take(&mut app, Event::Key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE)));
+        take(&mut app, Event::Paste("a\tb\r".into()));
+        assert_eq!(app.mode, Mode::Grep(Input::new("a b")));
+        let release = KeyEvent::new_with_kind_and_state(KeyCode::Esc, KeyModifiers::NONE, KeyEventKind::Release, KeyEventState::NONE);
+        take(&mut app, Event::Key(release));
+        assert!(matches!(app.mode, Mode::Grep(_)), "뗀 키를 먹었다");
+    }
+
+    /// 켜고 끄는 글은 **xterm 의 2004 번**이다. 끄는 글이 패닉 훅에도 쓰이므로 여기서 박아 둔다 —
+    /// 안 끄고 나가면 사용자 셸에 붙인 글이 `200~…201~` 에 싸여 들어간다.
+    #[test]
+    fn bracketed_paste_is_mode_2004_on_and_off() {
+        let mut out = Vec::new();
+        bracketed_paste(&mut out, true).unwrap();
+        bracketed_paste(&mut out, false).unwrap();
+        assert_eq!(out, b"\x1b[?2004h\x1b[?2004l");
     }
 
     /// 아무리 비싼 프레임에서도 **멈춘 것처럼 보이지는 않는다.** 멈춘 스피너는

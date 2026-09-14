@@ -92,6 +92,17 @@ impl Input {
         true
     }
 
+    /// 붙여 넣은 글을 커서 자리에 넣는다(moai-od9q). **키가 아니라 글이다** — 탭은 Tab 이
+    /// 아니고 줄바꿈은 Enter 가 아니다. 그 뜻은 든 쪽이 정하지 않는다: 한 줄 칸이라
+    /// 줄바꿈은 빈칸 하나로 잇고 탭도 빈칸이다. 버리면 `a<TAB>b` 가 `ab` 라는 다른 낱말이 된다.
+    /// **끝의 줄바꿈은 뗀다** — 한 줄을 통째로 긁으면 따라오는데, 빈칸으로 남기면 거름망에
+    /// 안 보이는 글자가 붙는다. 그 밖의 제어문자는 키와 같이 걸러낸다.
+    pub fn paste(&mut self, s: &str) {
+        let text = line_breaks(s);
+        let joined: Vec<&str> = text.trim_end_matches('\n').split('\n').collect();
+        self.insert(&joined.join(" ").replace('\t', " "));
+    }
+
     /// 폭 `width` 칸에 그릴 조각과 커서 칸.
     ///
     /// **상태를 들지 않는다.** 굴린 자리를 따로 들면 그리는 쪽이 `&mut` 을
@@ -212,10 +223,26 @@ impl Input {
         self.settle();
     }
 
+    /// 커서 자리에 글을 넣고 커서를 그 뒤에 세운다. **제어문자는 여기서 걸러낸다** —
+    /// 키로 치는 글자([`Input::key`])와 같은 자다. 줄을 가르는 것은 부르는 쪽의 일이다.
+    pub(super) fn insert(&mut self, s: &str) {
+        let clean: String = s.chars().filter(|c| !c.is_control()).collect();
+        self.text.insert_str(self.at, &clean);
+        self.at += clean.len();
+        self.snap();
+    }
+
     /// 커서가 없는 줄로 그릴 조각. 머리부터 칸이 차는 데까지다.
     pub(super) fn head(&self, width: usize) -> &str {
         window(&self.text, 0, width).text
     }
+}
+
+/// 붙여 넣은 글의 줄바꿈을 `\n` 하나로 맞춘다. **터미널은 붙여넣기 속 줄바꿈을 `\r` 로도
+/// 보낸다** — `\r\n`·`\r` 을 그대로 두면 한 줄 칸에서는 걸러져 줄이 붙고, 여러 줄 칸에서는
+/// 줄이 안 갈린다. 한 줄 칸과 여러 줄 칸이 같은 자로 가른다.
+pub(super) fn line_breaks(s: &str) -> String {
+    s.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 /// `text` 를 폭 `width` 칸에 그릴 조각. 커서 `at` 이 칸 안에 들게 민다 — 뜻은
@@ -392,6 +419,25 @@ mod tests {
         press(&mut i, KeyCode::Right);
         press(&mut i, KeyCode::Delete);
         assert_eq!(shown(&i), "|🇰🇷");
+    }
+
+    /// **붙여 넣은 글은 글자로 들어간다**(moai-od9q). 한 줄 칸이라 줄바꿈(`\n`·`\r\n`·
+    /// 터미널이 보내는 `\r`)은 빈칸 하나로, 탭도 빈칸으로 — 버리면 `a<TAB>b` 가 `ab` 라는 다른
+    /// 낱말이 된다. 끝의 줄바꿈은 뗀다(한 줄을 통째로 긁으면 따라온다). 그 밖의 제어문자는
+    /// 키와 같이 걸러낸다. 커서는 넣은 글 뒤에 선다.
+    #[test]
+    fn a_paste_goes_in_as_text_on_one_line() {
+        let mut i = typed("ab");
+        press(&mut i, KeyCode::Left);
+        i.paste("x\ty\r\nz\rw\n\u{1b}[2Jq\r\n");
+        assert_eq!(shown(&i), "ax y z w [2Jq|b");
+        let mut i = Input::default();
+        i.paste("");
+        assert_eq!(shown(&i), "|");
+        // 결합 악센트로 시작하는 글을 붙여도 커서는 경계에 선다
+        let mut i = typed("e");
+        i.paste("\u{301}!");
+        assert_eq!(shown(&i), "e\u{301}!|");
     }
 
     /// 제어문자는 칸에 안 들어온다 — 키로도, 처음 적힌 글로도. `moai-ovrg`

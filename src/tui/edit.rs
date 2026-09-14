@@ -122,6 +122,39 @@ impl Editor {
         true
     }
 
+    /// 붙여 넣은 글을 커서 자리에 넣는다(moai-od9q). **글의 줄바꿈이 줄을 가른다** — Enter 를
+    /// 친 것과 같은 자리에서. 그래서 커서는 넣은 글 뒤, 원래 커서 뒤에 있던 글 앞에 선다.
+    ///
+    /// 탭은 **빈칸 넷**이다. 한 줄 칸([`Input::paste`])은 빈칸 하나지만 여기는 마크다운 본문
+    /// 이라 탭 하나가 네 칸이다 — 버리면 들여 쓴 줄이 붙고, 하나로 줄이면 들여쓰기의 뜻이
+    /// 바뀐다. 적힌 본문을 여는 [`Editor::new`] 는 탭을 버리는데, 그쪽은 파일에서 온 글을
+    /// 칸이 못 세는 글자로 막는 것이고 여기는 사람이 붙인 글의 뜻을 옮기는 것이다.
+    ///
+    /// 줄은 **한 번에 끼운다.** 줄마다 `Vec::insert` 로 끼우면 긴 글 하나를 붙이는 값이
+    /// 줄 수의 제곱이 된다.
+    pub fn paste(&mut self, s: &str) {
+        let text = super::input::line_breaks(s);
+        let mut pieces = text.split('\n').map(|p| p.replace('\t', "    "));
+        let tail = self.lines[self.row].split_off();
+        self.lines[self.row].insert(&pieces.next().unwrap_or_default());
+        let mut more: Vec<Input> = pieces
+            .map(|p| {
+                let mut line = Input::default();
+                line.insert(&p);
+                line
+            })
+            .collect();
+        // 원래 커서 뒤에 있던 글은 마지막 줄 뒤에 붙는다 — 커서는 그 이은 자리에 선다.
+        match more.last_mut() {
+            Some(last) => last.append(tail),
+            None => self.lines[self.row].append(tail),
+        }
+        let at = self.row + 1;
+        self.row += more.len();
+        self.lines.splice(at..at, more);
+        self.goal = None;
+    }
+
     /// 줄 사이를 `delta` 줄 걷는다. 첫 줄·끝 줄 밖으로는 안 나가고, 거기서 누른
     /// 것도 먹는다 — 흘려보내면 든 쪽이 ↑ 를 "윗칸으로" 로 읽어 커서가 칸 밖으로 샌다.
     fn walk(&mut self, delta: isize) -> bool {
@@ -361,6 +394,23 @@ mod tests {
         let e = Editor::new("a\tb\r\n\u{1b}[2Jc\n");
         assert_eq!(e.text(), "ab\n[2Jc\n");
         assert_eq!(shown(&e), "ab\n[2Jc\n|");
+    }
+
+    /// **붙여 넣은 글의 줄바꿈은 줄을 가른다**(moai-od9q) — Enter 를 친 것과 같은 자리에서.
+    /// `\r\n`·`\r` 도 줄바꿈이다(터미널은 붙여넣기 속 줄바꿈을 `\r` 로 보내기도 한다). 탭은
+    /// 빈칸 넷 — 본문은 마크다운이라 탭 하나가 네 칸이고, 버리면 들여 쓴 줄이 붙는다. 그 밖의
+    /// 제어문자는 키와 같이 걸러낸다. 커서는 넣은 글 뒤, 원래 뒤에 있던 글 앞에 선다.
+    #[test]
+    fn a_paste_splits_lines_where_its_own_newlines_are() {
+        let mut e = typed("ab");
+        press(&mut e, KeyCode::Left);
+        e.paste("x\r\ny\rz\tw\u{1b}");
+        assert_eq!(shown(&e), "ax\ny\nz    w|b");
+        e.paste("\n");
+        assert_eq!(shown(&e), "ax\ny\nz    w\n|b");
+        // ↑ 가 겨누는 칸은 붙여넣기 뒤 커서에서 새로 잰다
+        press(&mut e, KeyCode::Up);
+        assert_eq!(shown(&e), "ax\ny\n|z    w\nb");
     }
 
     /// Esc·Tab·Ctrl·Alt 조합은 든 쪽의 것이다. 저장 키가 무엇이 되든 여기서 안 먹는다.
