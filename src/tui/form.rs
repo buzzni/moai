@@ -6,6 +6,10 @@
 //!
 //! **담는 값이 0 에 가까워야 담는다**(moai-c0ns). 제목이 비었을 때만 거절하고 나머지는
 //! 아무것도 안 묻는다 — 우선순위도 에픽도 태그도 없다.
+//!
+//! **담을 곳은 여는 순간 박힌다**([`Target`], moai-fccv). 여러 프로젝트를 한 탐색기에
+//! 올리면 `n` 이 어디에 쓰는지가 가장 위험한 자리다 — 폼이 든 경로가 머리에 서고, 쓰는
+//! 쪽(`save_idea`)은 지금 선 곳이 그 경로일 때만 쓴다. 폼은 저장소를 모른 채 경로만 든다.
 
 use super::edit::Editor;
 use super::input::Input;
@@ -30,8 +34,19 @@ impl Field {
     }
 }
 
+/// 이 폼이 담을 프로젝트. **정체는 경로다** — 층의 `At::Project` 경로, 층이 없으면 저장소
+/// 뿌리. 이름은 머리에 댈 여는 순간의 이름이라(파생값) 견주는 데 안 쓴다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target {
+    pub path: std::path::PathBuf,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Form {
+    /// 담을 곳. 여는 순간 정하고 **폼이 열린 동안 안 바뀐다** — 층이 다시 읽혀도, 커서가
+    /// 옮겨도. 저장소 없이 세운 화면이면 없다(그때 쓰기는 `App::write` 가 멈춘다).
+    pub into: Option<Target>,
     pub title: Input,
     pub body: Editor,
     pub field: Field,
@@ -56,6 +71,11 @@ pub enum Act {
 pub const EMPTY_TITLE: &str = "제목이 비었다 — 제목 한 줄이면 담긴다";
 
 impl Form {
+    /// 담을 곳을 박은 빈 폼.
+    pub fn new(into: Option<Target>) -> Form {
+        Form { into, ..Form::default() }
+    }
+
     /// 적던 것이 있는가. **빈칸뿐인 것은 적은 것이 아니다** — 날아가도 잃을 것이 없는데
     /// 묻으면 Esc 가 두 번 누르는 키가 된다.
     pub fn is_blank(&self) -> bool {

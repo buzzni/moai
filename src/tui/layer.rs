@@ -14,6 +14,7 @@
 //!
 //! 조각이 아니다 — 저장소와 사용자 설정을 연다(`input::NOT_COMPONENTS`).
 
+use super::form::{Form, Target};
 use super::{App, Row, Stamp};
 use crate::nav::Index;
 use crate::projects::{self, State};
@@ -54,6 +55,8 @@ pub struct Place {
     pub path: PathBuf,
     /// 화면에 댈 이름. 파생값이라 정체로 쓰지 않는다.
     pub name: String,
+    /// 사용자 설정에 정한 색 — 없으면 경로로 고른다(`draw::project_style`).
+    pub hue: Option<crate::style::Hue>,
     /// 사용자 설정에 있는가. 아니면 띄운 자리라 층에 섰을 뿐이다.
     pub registered: bool,
     /// 이 탐색기를 띄운 자리인가.
@@ -146,7 +149,7 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
         State::Missing => Shut::Missing,
         State::Unreadable(_) | State::Open { .. } => Shut::Unreadable,
     };
-    let p = projects::Project { path: path.to_path_buf(), name: name.to_string(), state };
+    let p = projects::Project { path: path.to_path_buf(), name: name.to_string(), hue: None, state };
     let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()))).trim().to_string();
     Look::Shut { state: kind, said }
 }
@@ -159,7 +162,7 @@ fn look_at(paths: &[PathBuf], now: &str) -> Vec<Looked> {
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
     let reg = user_config::Registry {
         path: None,
-        projects: paths.iter().map(|p| user_config::Project { path: p.clone() }).collect(),
+        projects: paths.iter().map(|p| user_config::Project { path: p.clone(), hue: None }).collect(),
         problems: Vec::new(),
     };
     projects::open(&reg)
@@ -188,7 +191,7 @@ impl Layer {
         let mut entries = reg.projects.clone();
         let extra = match (launch, found) {
             (Some(l), None) => {
-                entries.insert(0, user_config::Project { path: l.to_path_buf() });
+                entries.insert(0, user_config::Project { path: l.to_path_buf(), hue: None });
                 true
             }
             _ => false,
@@ -203,6 +206,7 @@ impl Layer {
                 launched: (extra && k == 0) || found == Some(k),
                 path: p.path,
                 name,
+                hue: p.hue,
                 look: Look::Unread,
                 marks: (false, None, None),
             })
@@ -246,14 +250,13 @@ impl Layer {
 
 /// 층에서 뜻이 없는 키가 **왜 아무 일도 안 하는지**. 조용히 먹으면 고장 난 것으로 보인다.
 ///
-/// `n` 은 특히 그렇다: 어느 프로젝트에 담을지 안 정해진 채로 띄운 자리에 쓰면, 사람은 보던
-/// 줄의 프로젝트에 담긴 줄 안다. 담을 곳을 고르는 길은 moai-fccv 가 정한다.
+/// `n` 은 여기 없다 — 층에서는 커서의 프로젝트를 담을 곳으로 박아 폼을 연다
+/// ([`App::open_form`], moai-fccv).
 pub fn refused(k: &KeyEvent) -> Option<&'static str> {
     if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
         return None;
     }
     match k.code {
-        KeyCode::Char('n') => Some("여기는 프로젝트 층이라 담을 곳이 없다 — Enter 로 프로젝트에 들어가서 n"),
         KeyCode::Char('/') | KeyCode::Char('f') | KeyCode::F(7) => {
             Some("거름망은 프로젝트 안의 줄에 건다 — Enter 로 들어가서 건다")
         }
@@ -302,32 +305,112 @@ impl App {
         self
     }
 
+    /// 층의 줄을 **지금의 디렉터리로** 연다. 못 열면 그 줄을 고쳐 세우고 CLI 한눈 보기와 같은
+    /// 말(`view::unopened`)을 알림으로 댄 뒤 `None` — 들어가기(Enter)와 담기(`n`)가 같은 길이라
+    /// 같은 상태를 두 키가 달리 부르지 않는다.
+    fn open_place(&mut self, at: usize) -> Option<Repo> {
+        let place = self.layer.as_mut()?.places.get_mut(at)?;
+        let marks = marks_of(&place.path);
+        let state = match Repo::open(&place.path) {
+            Ok(Opened::Repo(repo)) => return Some(repo),
+            Ok(Opened::Uninit) => State::Uninit,
+            Ok(Opened::Missing) => State::Missing,
+            Err(e) => State::Unreadable(e.message),
+        };
+        place.look = shut(&place.path, &place.name, state);
+        place.marks = marks;
+        if let Look::Shut { said, .. } = &place.look {
+            self.notice = Some(said.clone());
+        }
+        None
+    }
+
+    /// 지금 선 프로젝트의 정체 — **쓰기가 닿는 곳.** 층이 있으면 `At::Project` 의 경로(그동안
+    /// `repo` 는 그 프로젝트의 것이다), 층이 없으면 저장소 뿌리. 층에 섰으면 `None` 이다.
+    pub fn here(&self) -> Option<PathBuf> {
+        match &self.layer {
+            Some(l) => match &l.at {
+                At::Project(p) => Some(p.clone()),
+                At::Layer => None,
+            },
+            None => self.repo.as_ref().map(|r| r.root.clone()),
+        }
+    }
+
+    /// `n` — **담을 곳을 박아** 생각 담기 폼을 연다(moai-fccv).
+    ///
+    /// 프로젝트 안이면 지금 선 곳이다. 층에 섰으면 커서의 프로젝트를 담을 곳으로 제안한다 —
+    /// 층에 선 채 폼을 열고, 머리가 그 프로젝트를 댄다. 여는 순간 [`App::open_place`] 로 열어
+    /// 보고, 못 열면(init 전·없음·못 읽음) **폼을 안 연다** — 적고 나서야 못 담는다고 들으면
+    /// 적은 것이 갈 데가 없다. 담는 순간 그 프로젝트로 들어간다([`App::stand_at`]).
+    pub(super) fn open_form(&mut self) {
+        let into = if self.on_layer() {
+            let Some(Row::Project(at)) = self.current() else {
+                self.notice = Some("담을 프로젝트가 없다 — `moai project add <dir>` 로 등록하면 여기 선다".into());
+                return;
+            };
+            if self.open_place(at).is_none() {
+                return;
+            }
+            self.layer.as_ref().and_then(|l| l.places.get(at)).map(|p| Target { path: p.path.clone(), name: p.name.clone() })
+        } else {
+            self.here().map(|path| {
+                let name = match self.project() {
+                    Some(p) => p.name.clone(),
+                    None => path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string()),
+                };
+                Target { path, name }
+            })
+        };
+        self.mode = super::Mode::Idea(Form::new(into));
+    }
+
+    /// 폼이 박은 담을 곳에 **선다** — 쓰기 바로 앞에서 부른다. 서면 참이고, 못 서면 쓰기의
+    /// 실패로 까닭을 달고(`trouble`, 폼은 적던 그대로) 거짓이다.
+    ///
+    /// 지금 선 곳이 그 경로면 그대로다. 층에 섰으면 그 경로의 줄을 **경로로** 다시 찾아
+    /// 들어간다 — 첨자로 들면 층이 다시 읽혀 차례가 바뀐 뒤 옆 프로젝트에 들어간다. 그 밖에
+    /// 선 곳이 다르면(다른 프로젝트 안) **쓰지 않는다.** 폼이 열린 동안 선 곳을 옮기는 키는
+    /// 없지만, 그 불변식에 기대지 않고 쓰는 자리에서 거른다 — 머리에 보인 곳 말고 다른 곳에
+    /// 쓰는 길을 구조로 막는다.
+    pub(super) fn stand_at(&mut self, into: Option<&Target>) -> bool {
+        let want = into.map(|t| t.path.clone());
+        if self.here() == want {
+            return true;
+        }
+        let why = match into {
+            None => "담을 곳 없이 연 폼이다 — Esc 로 닫고 프로젝트 안에서 다시 n".to_string(),
+            Some(t) if self.on_layer() => {
+                let name = crate::text::sanitize(&t.name);
+                match self.layer.as_ref().and_then(|l| l.position(&t.path)) {
+                    Some(at) => {
+                        self.enter_project(at);
+                        if self.here() == want {
+                            return true;
+                        }
+                        // 들어가기가 댄 까닭(못 연 말·못 읽은 말)을 옮긴다. 앞의 글리프는 배너의 `!` 와 겹친다.
+                        let said = self.notice.take().unwrap_or_default();
+                        format!("{name} 에 못 들어갔다 · {}", said.trim_start_matches(['·', '!', ' ']).trim_start_matches("들어가지 못했다 — "))
+                    }
+                    None => format!("{name} 이 프로젝트 층에서 빠졌다 — Esc 로 닫고 다시 고른다"),
+                }
+            }
+            Some(t) => format!("폼을 연 곳({})과 지금 선 곳이 다르다 — Esc 로 닫고 다시 n", crate::text::sanitize(&t.name)),
+        };
+        self.notice = None;
+        self.trouble = Some(format!("쓰지 못했다 — {}", why.trim()));
+        self.write_failed = true;
+        false
+    }
+
     /// 층의 줄로 들어간다. **늘 `Repo::open` 부터 다시 한다** — 층의 셈이 낡았어도 들어가는
     /// 것은 지금의 디렉터리다. 못 열면 층에 선 채 그 까닭을 알림으로 댄다(그 줄도 고쳐 선다).
     ///
     /// 읽기는 그 자리에서 한다. 누른 사람은 결과를 기다리고 있다(`App::reload` 와 같다).
     pub(super) fn enter_project(&mut self, at: usize) {
+        let Some(repo) = self.open_place(at) else { return };
         let Some(layer) = &mut self.layer else { return };
-        let Some(place) = layer.places.get_mut(at) else { return };
-        let path = place.path.clone();
-        let marks = marks_of(&path);
-        let state = match Repo::open(&path) {
-            Ok(Opened::Repo(repo)) => Ok(repo),
-            Ok(Opened::Uninit) => Err(State::Uninit),
-            Ok(Opened::Missing) => Err(State::Missing),
-            Err(e) => Err(State::Unreadable(e.message)),
-        };
-        let repo = match state {
-            Ok(repo) => repo,
-            Err(state) => {
-                place.look = shut(&path, &place.name, state);
-                place.marks = marks;
-                if let Look::Shut { said, .. } = &place.look {
-                    self.notice = Some(said.clone());
-                }
-                return;
-            }
-        };
+        let path = layer.places[at].path.clone();
         match (self.read)(&repo, self.worktree) {
             Ok(fresh) => {
                 layer.at = At::Project(path);
@@ -541,6 +624,7 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
             .map(|(name, path, look)| Place {
                 path: PathBuf::from(path),
                 name: name.into(),
+                hue: None,
                 registered: true,
                 launched: false,
                 look,
@@ -791,6 +875,19 @@ mod tests {
         assert!(Layer::read(Some(&cfg), Some(&here)).registered());
     }
 
+    /// 사용자 설정에 정한 색이 층의 줄까지 실려 온다(moai-o04b) — `draw::project_style` 이 그것을
+    /// 입힌다. 띄운 자리로만 선 줄은 설정에 없으니 정한 색도 없다.
+    #[test]
+    fn a_colour_chosen_in_the_user_config_rides_on_the_place() {
+        let s = Scratch::new("hue");
+        let (one, here) = (s.dir("one"), s.dir("here"));
+        let cfg = s.register(&[&one]);
+        std::fs::write(&cfg, format!("{}color = \"blue\"\n", std::fs::read_to_string(&cfg).unwrap())).unwrap();
+        let layer = Layer::read(Some(&cfg), Some(&here));
+        let hues: Vec<_> = layer.places.iter().map(|p| (p.name.as_str(), p.hue.map(crate::style::Hue::name))).collect();
+        assert_eq!(hues, [("here", None), ("one", Some("blue"))]);
+    }
+
     /// 열 수 없는 프로젝트에 들어가려 하면 **층에 선 채 까닭만 말한다.** 넘어지지도, 빈
     /// 화면에 들어가지도 않는다. 그새 init 했으면 들어간다 — 층의 셈이 아니라 지금의
     /// 디렉터리를 연다.
@@ -869,8 +966,8 @@ mod tests {
         assert!(matches!(look(&a, "bare"), Look::Shut { state: Shut::Uninit, .. }), "다시 생긴 디렉터리를 없다로 둔다");
     }
 
-    /// **층에서 `n` 은 아무 데도 안 쓴다** — 담을 프로젝트가 안 정해졌다. 폼을 안 열고 왜
-    /// 안 되는지를 한 줄로 말한다. 거름망·겹쳐 보기 키도 같다.
+    /// **층에서 프로젝트 안의 줄에 매인 키는 아무것도 안 한다** — 폼·칸을 안 열고 왜 안 되는지를
+    /// 한 줄로 말한다. `n` 은 여기 없다(커서의 프로젝트에 담는다 — 아래 시험들).
     #[test]
     fn keys_that_need_a_project_say_so_on_the_layer_and_touch_nothing() {
         let s = Scratch::new("refuse");
@@ -881,7 +978,7 @@ mod tests {
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
         a.user = Some("레이븐 (raven@example.com)".into());
 
-        for (c, word) in [('n', "담을 곳이 없다"), ('f', "거름망"), ('/', "거름망"), ('w', "워크트리")] {
+        for (c, word) in [('f', "거름망"), ('/', "거름망"), ('w', "워크트리")] {
             a.key(key(KeyCode::Char(c)));
             assert_eq!(a.mode, Mode::Browse, "{c} 가 층에서 칸을 열었다");
             assert!(a.notice.as_deref().is_some_and(|n| n.contains(word)), "{c}: {:?}", a.notice);
@@ -894,6 +991,218 @@ mod tests {
         a.key(key(KeyCode::Enter));
         a.key(key(KeyCode::Char('n')));
         assert!(matches!(a.mode, Mode::Idea(_)));
+    }
+
+    /// 두 프로젝트의 `issues.jsonl` 바이트.
+    fn snapshots(dirs: &[&Path]) -> Vec<Vec<u8>> {
+        dirs.iter().map(|d| std::fs::read(d.join(".moai/issues.jsonl")).unwrap()).collect()
+    }
+
+    /// 그 프로젝트 파일에 선 생각들의 제목 — 화면이 아니라 **파일을** 읽는다.
+    fn ideas_at(dir: &Path) -> Vec<String> {
+        let repo = match Repo::open(dir).unwrap() {
+            Opened::Repo(r) => r,
+            _ => panic!("{} 가 안 열린다", dir.display()),
+        };
+        repo.read().unwrap().issues.into_iter().filter(|i| i.kind == Kind::Idea).map(|i| i.title).collect()
+    }
+
+    fn type_in(a: &mut App, text: &str) {
+        for c in text.chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+    }
+
+    fn target(a: &App) -> Option<PathBuf> {
+        match &a.mode {
+            Mode::Idea(f) => f.into.as_ref().map(|t| t.path.clone()),
+            Mode::Ask(_) | Mode::Browse | Mode::Grep(_) | Mode::Filter(_) | Mode::Pick(_) | Mode::Unregister(_) => None,
+        }
+    }
+
+    fn on_layer_with_twins(s: &Scratch) -> (PathBuf, PathBuf, App) {
+        let (one, two) = twins(s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        a.user = Some("레이븐 (raven@example.com)".into());
+        (one, two, a)
+    }
+
+    /// **프로젝트 안에서 `n` 은 그 프로젝트에만 담는다.** 같은 id 를 쓰는 두 프로젝트 중 선
+    /// 프로젝트의 파일만 바뀌고, 알림이 어느 프로젝트인지 댄다.
+    #[test]
+    fn n_inside_a_project_writes_only_that_projects_file() {
+        let s = Scratch::new("jot-inside");
+        let (one, two, mut a) = on_layer_with_twins(&s);
+        a.key(key(KeyCode::Down));
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.here(), Some(two.clone()));
+        let before = snapshots(&[&one]);
+
+        a.key(key(KeyCode::Char('n')));
+        assert_eq!(target(&a), Some(two.clone()), "폼이 선 프로젝트를 담을 곳으로 안 박았다");
+        type_in(&mut a, "two 에 담을 것");
+        a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
+
+        assert_eq!(ideas_at(&two), ["two 에 담을 것"]);
+        assert_eq!(snapshots(&[&one]), before, "선 프로젝트 말고 다른 프로젝트 파일이 바뀌었다");
+        assert!(!one.join(".moai/journal.jsonl").exists());
+        let n = a.notice.clone().unwrap_or_default();
+        assert!(n.starts_with("✓ 담김 · two · argos-"), "알림이 프로젝트를 안 댄다 — {n:?}");
+    }
+
+    /// **층에서 `n` 은 커서의 프로젝트를 담을 곳으로 박아 층에 선 채 폼을 연다.** 담으면 그
+    /// 프로젝트로 들어가 만든 줄에 서고, 다른 프로젝트 파일은 그대로다. Esc 로 닫으면 아무
+    /// 데도 안 들어간다.
+    #[test]
+    fn n_on_the_layer_saves_into_the_project_under_the_cursor() {
+        let s = Scratch::new("jot-layer");
+        let (one, two, mut a) = on_layer_with_twins(&s);
+        let before = snapshots(&[&one, &two]);
+
+        a.key(key(KeyCode::Char('n')));
+        assert!(a.on_layer(), "폼을 열며 프로젝트로 들어갔다");
+        assert_eq!(target(&a), Some(one.clone()));
+        a.key(key(KeyCode::Esc));
+        assert!(a.on_layer() && a.mode == Mode::Browse, "빈 폼을 닫았는데 들어갔다");
+        assert_eq!(snapshots(&[&one, &two]), before);
+
+        a.key(key(KeyCode::Char('n')));
+        type_in(&mut a, "one 에 담을 것");
+        a.key(key(KeyCode::F(2)));
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
+        assert_eq!(a.here(), Some(one.clone()), "담은 프로젝트로 안 들어갔다");
+        assert_eq!(ideas_at(&one), ["one 에 담을 것"]);
+        assert_eq!(snapshots(&[&two])[0], before[1], "커서의 프로젝트 말고 다른 파일이 바뀌었다");
+        assert_eq!(titles(&a).iter().filter(|t| *t == "one 에 담을 것").count(), 1);
+        let on = a.current().and_then(|r| match r {
+            Row::Item(e) => e.at().map(|at| a.issues[at].title.clone()),
+            _ => None,
+        });
+        assert_eq!(on.as_deref(), Some("one 에 담을 것"), "만든 줄에 안 섰다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.starts_with("✓ 담김 · one · ")), "{:?}", a.notice);
+    }
+
+    /// **담을 곳은 여는 순간 경로로 박힌다.** 폼이 열린 동안 층이 다시 읽혀 차례가 바뀌고
+    /// 커서가 옆 프로젝트로 가도, 담기는 곳은 머리에 보인 그 프로젝트다.
+    #[test]
+    fn the_target_is_fixed_when_the_form_opens() {
+        let s = Scratch::new("jot-fixed");
+        let (one, two, mut a) = on_layer_with_twins(&s);
+        let before = snapshots(&[&two]);
+        a.key(key(KeyCode::Char('n')));
+        type_in(&mut a, "one 의 생각");
+
+        // 폼이 열린 동안에는 키로 못 옮기므로 속을 직접 흔든다 — 등록 차례가 뒤집히고, 층이
+        // 다시 읽히고, 커서가 0(이제 two)에 선다.
+        s.register(&[&two, &one]);
+        a.reread_layer();
+        a.cursor = 0;
+        a.follow();
+        assert_eq!(a.current(), Some(Row::Project(0)));
+        assert_eq!(a.place_path(0), Some(two.as_path()), "판이 다르다 — 차례가 안 뒤집혔다");
+        assert_eq!(target(&a), Some(one.clone()), "층이 다시 읽히자 담을 곳이 바뀌었다");
+
+        a.key(key(KeyCode::F(2)));
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
+        assert_eq!(ideas_at(&one), ["one 의 생각"]);
+        assert_eq!(snapshots(&[&two]), before, "커서가 옮겨 간 프로젝트에 담겼다");
+
+        // 프로젝트 안에서 연 폼인데 선 곳이 그새 다른 프로젝트면 **쓰지 않는다.**
+        a.key(key(KeyCode::Char('n')));
+        type_in(&mut a, "one 에만");
+        a.climb();
+        let two_at = a.layer.as_ref().unwrap().position(&two).unwrap();
+        a.enter_project(two_at);
+        assert_eq!(a.here(), Some(two.clone()));
+        let (one_before, two_before) = (snapshots(&[&one]), snapshots(&[&two]));
+        a.key(key(KeyCode::F(2)));
+        assert!(matches!(&a.mode, Mode::Idea(f) if f.title.text() == "one 에만"), "선 곳이 다른데 폼이 닫혔다 — {:?}", a.mode);
+        assert!(a.trouble.as_deref().is_some_and(|t| t.starts_with("쓰지 못했다") && t.contains("one")), "{:?}", a.trouble);
+        assert_eq!((snapshots(&[&one]), snapshots(&[&two])), (one_before, two_before), "머리에 보인 곳 말고 다른 곳에 썼다");
+    }
+
+    /// 층에서 연 폼의 프로젝트가 그새 등록에서 빠지면 **쓰지 않고 말한다.** 폼은 적던 그대로다.
+    #[test]
+    fn a_target_dropped_from_the_layer_is_not_written_elsewhere() {
+        let s = Scratch::new("jot-dropped");
+        let (one, two, mut a) = on_layer_with_twins(&s);
+        a.key(key(KeyCode::Char('n')));
+        type_in(&mut a, "갈 데 없는 것");
+        s.register(&[&two]);
+        a.reread_layer();
+        let before = snapshots(&[&one, &two]);
+        a.key(key(KeyCode::F(2)));
+        assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
+        assert!(a.on_layer());
+        assert!(a.trouble.as_deref().is_some_and(|t| t.contains("빠졌다")), "{:?}", a.trouble);
+        assert_eq!(snapshots(&[&one, &two]), before);
+        // 버리고 닫으면 까닭도 걷힌다(쓰기의 실패와 같다)
+        a.key(key(KeyCode::Esc));
+        a.key(key(KeyCode::Char('y')));
+        assert_eq!((&a.mode, &a.trouble), (&Mode::Browse, &None));
+    }
+
+    /// **열 수 없는 프로젝트에는 폼을 안 연다** — init 전·사라진 디렉터리. Enter 와 같은
+    /// 말(`view::unopened`)을 한 줄로 댄다. 그새 init 했으면 연다.
+    #[test]
+    fn n_on_a_project_that_cannot_open_opens_no_form() {
+        let s = Scratch::new("jot-shut");
+        let bare = s.dir("bare");
+        let gone = s.0.join("gone");
+        let cfg = s.register(&[&bare, &gone]);
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+
+        a.key(key(KeyCode::Char('n')));
+        assert_eq!(a.mode, Mode::Browse, "init 전 프로젝트에 폼을 열었다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("init 전")), "{:?}", a.notice);
+        a.key(key(KeyCode::Down));
+        a.key(key(KeyCode::Char('n')));
+        assert_eq!(a.mode, Mode::Browse);
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("디렉터리가 없다")), "{:?}", a.notice);
+        assert!(!bare.join(".moai").exists() && !gone.exists(), "못 여는 프로젝트에 무언가 만들었다");
+
+        std::fs::create_dir_all(bare.join(".moai")).unwrap();
+        std::fs::write(bare.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        a.key(key(KeyCode::Up));
+        a.key(key(KeyCode::Char('n')));
+        assert_eq!(target(&a), Some(bare), "init 한 뒤에도 층의 옛 셈을 보고 안 열었다");
+    }
+
+    /// **누군지 묻고 이어진 쓰기도 박은 프로젝트에 담는다.** 층에서 연 폼이 묻는 칸을 지나
+    /// 담기면 그 프로젝트 파일에만 선다.
+    #[test]
+    fn the_question_and_its_retry_stay_on_the_fixed_project() {
+        fn nobody(user: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+            match user {
+                Some(raw) => crate::model::actor(Some(raw)),
+                None => Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험", crate::fail::code::NO_ACTOR)),
+            }
+        }
+        let s = Scratch::new("jot-ask");
+        let (one, two, mut a) = on_layer_with_twins(&s);
+        a.user = None;
+        a.identify = nobody;
+        let before = snapshots(&[&one]);
+        a.key(key(KeyCode::Down));
+        a.key(key(KeyCode::Char('n')));
+        assert_eq!(target(&a), Some(two.clone()));
+        type_in(&mut a, "two 의 생각");
+        a.key(key(KeyCode::F(2)));
+        assert!(matches!(a.mode, Mode::Ask(_)), "{:?}", a.mode);
+        assert!(ideas_at(&two).is_empty(), "묻기 전에 썼다");
+
+        // 묻는 칸을 Esc 로 물리면 폼이 돌아오고 담을 곳은 그대로다.
+        a.key(key(KeyCode::Esc));
+        assert_eq!(target(&a), Some(two.clone()));
+        a.key(key(KeyCode::F(2)));
+        type_in(&mut a, "레이븐 (raven@example.com)");
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
+        assert_eq!(ideas_at(&two), ["two 의 생각"]);
+        assert_eq!(snapshots(&[&one]), before, "묻고 이어진 쓰기가 다른 프로젝트에 닿았다");
+        assert_eq!(a.here(), Some(two));
     }
 
     /// **떠난 프로젝트에서 짓던 읽기는 다음 프로젝트에 안 닿는다.** 같은 id 를 쓰는 두

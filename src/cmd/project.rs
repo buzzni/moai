@@ -1,4 +1,4 @@
-//! 등록한 프로젝트 목록을 고치고 본다 — `moai project add|ls|rm`.
+//! 등록한 프로젝트 목록을 고치고 본다 — `moai project add|ls|rm|color`.
 //!
 //! **저장소가 아니라 사람의 설정이다.** 그래서 `Repo::discover` 를 부르지 않고
 //! `.moai` 밖 어디서도 선다. 누가 했는지도 묻지 않는다 — 이력이 남는 파일이
@@ -12,7 +12,7 @@
 //! 같다. `-C` 만 따로 셈하면 같은 플래그가 이 명령에서만 다른 뜻이 된다.
 
 use super::{Ctx, Fail, R, code};
-use crate::style::{self, paint};
+use crate::style::{self, Hue, paint};
 use crate::text::{sanitize, shell_word, width};
 use crate::user_config;
 use crate::{model, projects, report};
@@ -81,6 +81,77 @@ pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     Ok(out)
 }
 
+/// 등록한 프로젝트가 입을 색을 정한다. `auto` 는 정한 것을 지워 경로로 고르게 한다.
+///
+/// - **값부터 잰다.** 팔레트 밖 값으로는 락도 안 잡고 설정 디렉터리도 안 만든다. 자는
+///   설정 읽기와 같은 [`user_config::hue_choice`] 다 — 명령이 받은 값을 읽기가 틀렸다고
+///   하면 시킨 대로 했는데 알림이 선다
+/// - **등록 안 된 디렉터리는 멈춘다**(`not_found`). 저절로 등록하지 않는다 — 색을 고르다
+///   목록이 느는 것은 시킨 일이 아니다. 찾는 철자는 `rm` 과 같아 사라진 디렉터리도 된다
+/// - 같은 색이면 파일을 안 건드린다(`Doc::set_hue`)
+pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
+    let hue = user_config::hue_choice(word).map_err(|e| Fail::coded(e, code::BAD_INPUT))?;
+    let config = writable_config()?;
+    let spellings = user_config::spellings(input, &cwd()?);
+    let not_registered = || {
+        let shown = sanitize(&spellings[0].display().to_string());
+        Fail::coded(
+            format!("등록돼 있지 않다 — {shown} · `moai project add {}` 로 먼저 더한다", shell_word(&shown)),
+            code::NOT_FOUND,
+        )
+    };
+    // 설정 파일이 없으면 등록한 것도 없다 — `update` 로 가면 아무것도 못 바꾸려고 설정 디렉터리를 만든다.
+    if !config.exists() {
+        return Err(not_registered());
+    }
+    let (before, changed) = user_config::update(&config, |doc| {
+        let found = doc.projects().0.into_iter().find(|p| spellings.contains(&p.path));
+        if found.is_some() {
+            doc.set_hue(&spellings, hue);
+        }
+        // 바뀌었는지는 **문서가** 안다 — 앞뒤 색을 견주면 틀린 값(`red` → auto)을 지운 쓰기가
+        // "이미 그렇다" 로 선다. 읽기는 틀린 값을 `None` 으로 접기 때문이다.
+        Ok(found.map(|p| (p, doc.changed())))
+    })?
+    .ok_or_else(not_registered)?;
+
+    if ctx.json {
+        #[derive(serde::Serialize)]
+        struct Out<'a> {
+            /// 설정에 적힌 경로.
+            path: &'a Path,
+            /// 이제 정한 색. `null` 이면 경로로 고른다.
+            color: Option<&'static str>,
+            /// 전에 정해 있던 색. 틀린 값이었으면 `null` 이다 — 읽기가 그것을 안 받았다.
+            was: Option<&'static str>,
+            /// 설정 파일을 고쳐 썼나. `false` 면 이미 그랬다 — 실패가 아니다.
+            changed: bool,
+            config: &'a Path,
+        }
+        return super::json_line(&Out {
+            path: &before.path,
+            color: hue.map(Hue::name),
+            was: before.hue.map(Hue::name),
+            changed,
+            config: &config,
+        });
+    }
+
+    let shown = sanitize(&before.path.display().to_string());
+    // 색 낱말을 그 색으로 칠한다 — 낱말이 뜻을 지고 색은 곁들인다. `auto` 면 경로가 고른 색을 댄다.
+    let now = hue.unwrap_or_else(|| Hue::of_path(&before.path));
+    let word = paint(style::project_colour(&before.path, Some(now)), now.name());
+    let said = match hue {
+        Some(_) => format!("색 {word}"),
+        None => format!("색 {AUTO} — 경로로 고른다 ({word})", AUTO = user_config::AUTO),
+    };
+    let mut line = format!("{said}  {shown}");
+    if !changed {
+        line = format!("{}  {line}", paint(style::DIM, "이미 그렇다"));
+    }
+    Ok(vec![line])
+}
+
 /// 등록한 프로젝트 하나가 지금 어떤 모양인가. **파일에 적지 않는다** — 볼 때마다
 /// 디스크에서 읽는 파생값이다.
 ///
@@ -121,6 +192,13 @@ enum State<'a> {
 struct Row<'a> {
     name: &'a str,
     path: &'a Path,
+    /// 사용자 설정에 정한 색의 이름. **정했을 때만 선다** — 키를 더하기만 해, 이미 나간 줄의
+    /// 모양은 색을 안 정한 사람에게 한 글자도 안 바뀐다. **경로로 고른 색은 싣지 않는다** —
+    /// 실으면 팔레트와 해시가 기계 계약이 되어 못 바꾼다. 사람이 적은 것만 계약이다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    color: Option<&'static str>,
+    #[serde(skip)]
+    hue: Option<Hue>,
     #[serde(flatten)]
     state: State<'a>,
 }
@@ -133,8 +211,10 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     let reg = user_config::read(user_config::path().as_deref());
     let projects = projects::open(&reg);
     let now = model::now();
-    let rows: Vec<Row> =
-        projects.iter().map(|p| Row { name: &p.name, path: &p.path, state: state(p, &now) }).collect();
+    let rows: Vec<Row> = projects
+        .iter()
+        .map(|p| Row { name: &p.name, path: &p.path, color: p.hue.map(Hue::name), hue: p.hue, state: state(p, &now) })
+        .collect();
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -158,8 +238,11 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
         let name_w = names.iter().map(|n| width(n)).max().unwrap_or(0);
         let path_w = paths.iter().map(|p| width(p)).max().unwrap_or(0);
         for ((r, name), path) in rows.iter().zip(&names).zip(&paths) {
+            // 이름은 한눈 보기·탐색기와 **같은 색**을 입는다 — 이 목록이 색의 범례가 된다.
+            // 칠하는 것만 더해 글자와 칸 폭은 그대로다.
             out.push(format!(
-                "{name}{}  {path}{}  {}",
+                "{}{}  {path}{}  {}",
+                paint(style::project_colour(r.path, r.hue), name),
                 " ".repeat(name_w - width(name)),
                 " ".repeat(path_w - width(path)),
                 said(&r.state),

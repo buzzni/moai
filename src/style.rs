@@ -76,24 +76,60 @@ pub const PROJECT_HUES: [AnsiColor; 3] = [AnsiColor::Cyan, AnsiColor::Green, Ans
 ///   색이 바뀐다. **끝섞기를 빼지 않는다** — 날 FNV 의 `% 3` 은 끝 글자 하나만 다른
 ///   경로(`/a`…`/f`)를 전부 한 색에 몰고, 형제 디렉터리 300개를 190:100:10 으로 쏠리게 냈다
 /// - **겹치는 것은 받아들인다.** 색은 셋이라 프로젝트가 늘면 겹친다. 겹쳐도 이름이
-///   곁에 서서 가른다 — 겹침을 피하려고 목록 안에서 밀어내면 남을 더할 때 제 색이 바뀐다
-pub fn project_colour(path: &std::path::Path) -> Style {
-    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let mut h = OFFSET;
-    for part in path.components() {
-        // 조각 사이에 0 을 끼운다 — `a/bc` 와 `ab/c` 가 같은 바이트열로 섞이지 않게.
-        for b in part.as_os_str().as_encoded_bytes().iter().chain([&0u8]) {
-            h ^= u64::from(*b);
-            h = h.wrapping_mul(PRIME);
-        }
+///   곁에 서서 가른다 — 겹침을 피하려고 목록 안에서 밀어내면 남을 더할 때 제 색이 바뀐다.
+///   겹침이 거슬리는 사람은 사용자 설정에 색을 정한다(`chosen`)
+///
+/// **`chosen` 이 있으면 그것이 해시를 이긴다**(moai-o04b). 사람이 설정에 적은 색이다 —
+/// 이 모듈은 설정을 읽지 않고, 부르는 쪽이 등록 항목에서 들고 온다. CLI 한눈 보기·
+/// `project ls`·TUI 가 모두 이 한 함수를 지나야 같은 프로젝트를 같은 색으로 낸다.
+pub fn project_colour(path: &std::path::Path, chosen: Option<Hue>) -> Style {
+    fg(PROJECT_HUES[chosen.unwrap_or_else(|| Hue::of_path(path)).0])
+}
+
+/// 팔레트([`PROJECT_HUES`]) 안의 색 하나. **첨자로는 못 만든다** — 이름([`Hue::named`])이나
+/// 경로([`Hue::of_path`])로만 선다. 그래서 `Hue` 를 든 값은 늘 팔레트 안이고, 빨강·노랑·
+/// 자홍이 설정을 거쳐 프로젝트 색으로 새어 들 길이 없다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Hue(usize);
+
+/// 사람이 설정과 명령줄에 적는 이름 — [`PROJECT_HUES`] 와 같은 차례다.
+const PROJECT_HUE_NAMES: [&str; PROJECT_HUES.len()] = ["cyan", "green", "blue"];
+
+impl Hue {
+    /// 이름 → 색. 팔레트 밖이거나 대소문자가 섞였으면(`Green`) `None` 이다 — 받는 철자를
+    /// 늘리면 되쓸 때 어느 철자로 쓸지를 또 정해야 한다.
+    pub fn named(name: &str) -> Option<Hue> {
+        PROJECT_HUE_NAMES.iter().position(|n| *n == name).map(Hue)
     }
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
-    h ^= h >> 33;
-    fg(PROJECT_HUES[(h % PROJECT_HUES.len() as u64) as usize])
+
+    pub fn name(self) -> &'static str {
+        PROJECT_HUE_NAMES[self.0]
+    }
+
+    /// 받는 이름 전부, 팔레트 차례로 — 거절문이 댄다.
+    pub fn names() -> &'static [&'static str] {
+        &PROJECT_HUE_NAMES
+    }
+
+    /// 정한 색이 없을 때 경로로 고른다. 까닭은 [`project_colour`] 에 있다.
+    pub fn of_path(path: &std::path::Path) -> Hue {
+        const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+        const PRIME: u64 = 0x0000_0100_0000_01b3;
+        let mut h = OFFSET;
+        for part in path.components() {
+            // 조각 사이에 0 을 끼운다 — `a/bc` 와 `ab/c` 가 같은 바이트열로 섞이지 않게.
+            for b in part.as_os_str().as_encoded_bytes().iter().chain([&0u8]) {
+                h ^= u64::from(*b);
+                h = h.wrapping_mul(PRIME);
+            }
+        }
+        h ^= h >> 33;
+        h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+        h ^= h >> 33;
+        h = h.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+        h ^= h >> 33;
+        Hue((h % PROJECT_HUES.len() as u64) as usize)
+    }
 }
 
 /// 본문 마크다운.
@@ -226,7 +262,7 @@ mod tests {
     #[test]
     fn project_colour_is_a_function_of_the_path_alone() {
         use std::path::Path;
-        let hue = |s: &str| match project_colour(Path::new(s)).get_fg_color() {
+        let hue = |s: &str| match project_colour(Path::new(s), None).get_fg_color() {
             Some(Color::Ansi(c)) => c,
             other => panic!("{s}: 16색이 아니다 — {other:?}"),
         };
@@ -276,9 +312,30 @@ mod tests {
         assert_eq!(uniq.len(), PROJECT_HUES.len(), "팔레트에 같은 색이 두 번 있다");
         // 모든 칸이 실제로 쓰인다 — 나머지 연산이 한쪽으로 쏠리지 않는다.
         let seen: std::collections::BTreeSet<_> = (0..64)
-            .map(|i| format!("{:?}", project_colour(std::path::Path::new(&format!("/p/{i}"))).get_fg_color()))
+            .map(|i| format!("{:?}", project_colour(std::path::Path::new(&format!("/p/{i}")), None).get_fg_color()))
             .collect();
         assert_eq!(seen.len(), PROJECT_HUES.len(), "{seen:?}");
+    }
+
+    /// **정한 색이 해시를 이긴다** — 경로가 어느 색을 고르든 정한 것이 선다. 이름은 팔레트의
+    /// 이름뿐이고, 이름과 팔레트 칸은 한 차례로 짝지어 있다.
+    #[test]
+    fn a_chosen_hue_beats_the_path_hash_and_names_stay_inside_the_palette() {
+        use std::path::Path;
+        assert_eq!(Hue::names().len(), PROJECT_HUES.len());
+        for (i, name) in Hue::names().iter().enumerate() {
+            let hue = Hue::named(name).unwrap();
+            assert_eq!(hue.name(), *name);
+            // 이름이 뜻하는 색과 팔레트의 색이 같다 — `"green"` 이 파랑을 칠하면 안 된다.
+            assert_eq!(format!("{:?}", PROJECT_HUES[i]).to_lowercase(), *name);
+            for p in ["/a", "/b", "/c", "/d", "/e", "/f"] {
+                assert_eq!(project_colour(Path::new(p), Some(hue)), fg(PROJECT_HUES[i]), "{p} 에서 {name} 가 졌다");
+            }
+        }
+        for bad in ["red", "yellow", "magenta", "Green", " green", "", "auto", "brightcyan"] {
+            assert_eq!(Hue::named(bad), None, "{bad:?} 를 받았다");
+        }
+        assert_eq!(project_colour(Path::new("/a"), None), fg(PROJECT_HUES[Hue::of_path(Path::new("/a")).0]));
     }
 
     /// 기본 우선순위는 안 칠한다.

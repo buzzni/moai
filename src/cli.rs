@@ -258,6 +258,7 @@ pub enum Cmd {
   moai project add repo/apps/a          모노레포는 하위 디렉터리를 따로 등록한다
   moai project ls                       등록한 것과 그 상태
   moai project rm ~/work/argos          목록에서만 뺀다. 디렉터리는 안 건드린다
+  moai project color ~/work/argos green 색을 정한다 (auto 면 경로로 고른다)
 
   등록하면 `.moai` 밖에서 부른 `moai`·`moai status`·`moai ready` 가 등록한
   프로젝트를 프로젝트마다 한눈에 낸다 (`--json` 은 `projects` 배열). 그 밖의
@@ -316,6 +317,29 @@ pub enum ProjectCmd {
         /// 뺄 디렉터리. 이미 사라졌어도 적힌 경로로 찾는다
         #[arg(value_name = "디렉터리")]
         path: std::path::PathBuf,
+    },
+    /// 한눈 보기와 탐색기에서 그 프로젝트가 입을 색을 정한다 (auto 면 경로로 고른다)
+    #[command(alias = "colour", after_help = "\
+예시:
+  moai project color ~/work/argos green   경로로 고른 색 대신 초록으로
+  moai project color ~/work/argos auto    정한 것을 지우고 경로로 고른다
+
+  고를 수 있는 색은 cyan·green·blue 셋뿐이다. 빨강·노랑·자홍은 이미 오류·집은 일·
+  review 를 뜻해 id 곁에서 거짓 뜻이 되고, 밝은 색과 회색은 어느 한쪽 바탕에서 사라진다.
+  색은 곁들이다 — 이름이 늘 곁에 선다. 두 프로젝트가 같은 색으로 겹칠 때 쓴다.
+
+  사용자 설정의 `[[project]]` 에 `color = \"green\"` 로 적힌다. 손으로 적어도 된다 —
+  틀린 값은 `moai project ls` 가 한 줄로 비추고 경로로 고른 색을 쓴다.")]
+    Color {
+        /// 등록한 디렉터리. 이미 사라졌어도 적힌 경로로 찾는다
+        #[arg(value_name = "디렉터리")]
+        path: std::path::PathBuf,
+        // 필드 이름을 `color` 로 짓지 않는다 — 전역 `--color` 의 clap id 와 겹쳐 준 값이
+        // 그리로 샌다(`path` 가 `dir` 을 피한 것과 같다). 값은 여기서 거르지 않고 `cmd` 가
+        // `user_config::hue_choice` 로 잰다 — 설정 읽기와 한 자로 재고, `--json` 오류로 선다.
+        /// cyan · green · blue · auto
+        #[arg(value_name = "색")]
+        hue: String,
     },
 }
 

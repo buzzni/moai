@@ -4,7 +4,7 @@
 //! 규칙 하나를 CLI 에서 그대로 들고 온다: **색이 혼자 뜻을 지지 않는다.**
 //! 모든 색에 글리프나 낱말이 붙는다.
 
-use super::form::{Field, Form};
+use super::form::{Field, Form, Target};
 use super::scroll::Scroll;
 use super::layer::{Look, Place, Shut};
 use super::picker::{self, Picker};
@@ -71,12 +71,25 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // **담다가 누군지 물으면 폼은 뒤에 남는다.** 묻는 칸이 적던 폼을 들고 있다가
     // 되돌려 놓는데(`Ask::back`), 그동안 폼이 사라지면 적던 것이 날아간 줄 안다. 키는
     // 묻는 칸이 먹으므로 폼의 칸은 굵은 선도 커서도 내려놓는다.
+    // 담을 곳의 색은 **폼을 그리기 전에** 층에서 찾아 둔다 — 폼은 `app.mode` 를 빌려 쓰는
+    // 동안 층을 못 본다. 폼의 `Target` 은 조각(`form.rs`)이라 `style` 을 모르므로 색을 들지 않고,
+    // 정한 색(moai-o04b)은 경로로 층에서 다시 찾는다.
+    let tint = match &app.mode {
+        Mode::Idea(form) => form.into.as_ref(),
+        Mode::Ask(ask) => match ask.back.as_ref() {
+            Mode::Idea(form) => form.into.as_ref(),
+            _ => None,
+        },
+        _ => None,
+    }
+    .map(|into| project_style_at(app, &into.path))
+    .unwrap_or_default();
     match &mut app.mode {
-        Mode::Idea(form) => jot(f, form, body, true),
+        Mode::Idea(form) => jot(f, form, body, true, tint),
         Mode::Pick(p) => pick(f, p, body),
         Mode::Ask(ask) => {
             if let Mode::Idea(form) = ask.back.as_mut() {
-                jot(f, form, body, false);
+                jot(f, form, body, false, tint);
             }
         }
         _ => {}
@@ -232,11 +245,29 @@ fn pick_keys(f: &mut Frame, p: &Picker, at: Rect) {
 ///
 /// 커서는 터미널 커서가 키를 먹는 칸의 글 안 제자리에 선다 — [`prompt`] 와 같은 까닭이다.
 /// `active` 가 거짓이면(다른 칸이 키를 먹는 중이면) 굵은 선도 커서도 없다.
-fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool) {
+fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool, tint: Style) {
     f.render_widget(Clear, at);
-    let [title_at, body_at] = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(at);
+    // 머리 줄이 따로 설 자리가 없으면(머리 1 + 제목 3 + 본문 칸 3 이 안 들면) 담을 곳을 제목
+    // 칸 테두리로 접는다 — 낮은 창에서 본문 칸이 테두리만 남는 것보다 낫고, 어느 프로젝트에
+    // 담기는지는 창이 낮아도 빠지면 안 된다.
+    let roomy = at.height >= JOT_HEAD_ROOM;
+    let head_h = u16::from(form.into.is_some() && roomy);
+    let [head_at, title_at, body_at] =
+        Layout::vertical([Constraint::Length(head_h), Constraint::Length(3), Constraint::Min(0)]).areas(at);
+    let title_name = match &form.into {
+        Some(into) if roomy => {
+            f.render_widget(Paragraph::new(jot_head(into, head_at.width as usize, tint)), head_at);
+            Line::from(" 생각 담기 · 제목 ")
+        }
+        Some(into) => Line::from(vec![
+            Span::raw(" 담을 곳 "),
+            Span::styled(crate::text::sanitize(&into.name), tint),
+            Span::raw(" · 제목 "),
+        ]),
+        None => Line::from(" 생각 담기 · 제목 "),
+    };
 
-    let field = |which: Field, name: &'static str| {
+    let field = |which: Field, name: Line<'static>| {
         let block = Block::default().borders(Borders::ALL).title(name);
         if active && form.field == which {
             block.border_type(BorderType::Thick).border_style(from_anstyle(style::FOCUS))
@@ -245,14 +276,14 @@ fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool) {
         }
     };
 
-    let title_block = field(Field::Title, " 생각 담기 · 제목 ");
+    let title_block = field(Field::Title, title_name);
     let inner = title_block.inner(title_at);
     let view = form.title.view(inner.width as usize);
     let title_cursor = (inner.width > 0 && inner.height > 0)
         .then(|| (inner.x + view.cursor as u16, inner.y));
     f.render_widget(Paragraph::new(Line::from(view.text)).block(title_block), title_at);
 
-    let body_block = field(Field::Body, " 본문 · 여러 줄 · 없어도 된다 ");
+    let body_block = field(Field::Body, Line::from(" 본문 · 여러 줄 · 없어도 된다 "));
     let inner = body_block.inner(body_at);
     form.body.fit(inner.height as usize);
     let view = form.body.view(inner.width as usize, inner.height as usize);
@@ -270,6 +301,28 @@ fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool) {
     if let Some(pos) = cursor.filter(|_| active && !form.leaving) {
         f.set_cursor_position(pos);
     }
+}
+
+/// 폼 머리 줄이 따로 서는 높이 — 머리 1 + 제목 칸 3 + 본문 칸(테두리 2 + 한 줄) 3.
+const JOT_HEAD_ROOM: u16 = 7;
+
+/// 폼 머리 — **어느 프로젝트에 담기는가**(moai-fccv). `담을 곳  이름  경로`.
+///
+/// 이름은 프로젝트 색을 입는다([`project_style`], 경로 줄·층과 같은 색). 색이 혼자 말하지 않게
+/// 낱말(`담을 곳`)과 이름·경로가 곁에 선다. 이름은 반까지만 받는다 — 경로가 같은 이름의 두
+/// 프로젝트를 가르는 것이라 이름이 줄을 다 먹으면 안 된다. 층이 없어도 선다: 위로 찾아
+/// 올라간 저장소가 어디인지는 층이 없어도 헷갈린다.
+fn jot_head<'a>(into: &Target, w: usize, tint: Style) -> Line<'a> {
+    const LABEL: &str = " 담을 곳  ";
+    let room = w.saturating_sub(crate::text::width(LABEL));
+    let name = clip(&crate::text::sanitize(&into.name), (room / 2).max(1));
+    let path = crate::text::sanitize(&into.path.display().to_string());
+    let line = Line::from(vec![
+        Span::styled(LABEL, bold()),
+        Span::styled(name, tint),
+        Span::styled(format!("  {path}"), dim()),
+    ]);
+    fit(line, w)
 }
 
 /// 폼이 열린 동안의 맨 아랫줄 — 담는 법·칸 옮기는 법·닫는 법. **80칸에 다 든다.**
@@ -396,7 +449,7 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
     if let Some(p) = app.project() {
         let name = clip(&crate::text::sanitize(&p.name), (room / 2).max(1));
         room = room.saturating_sub(crate::text::width(&name) + 1);
-        spans.push(Span::styled(name, project_style(&p.path)));
+        spans.push(Span::styled(name, project_style(p)));
         spans.push(Span::styled(":", bold()));
     }
     spans.push(Span::styled(clip(&app.crumbs(), room), bold()));
@@ -1027,8 +1080,21 @@ fn field<'a>(k: &str, v: &str, w: usize, room: usize) -> Line<'a> {
 /// 이름은 등록 목록을 따라 바뀌는 파생값이라, 이름으로 고르면 프로젝트 하나를 더할 때
 /// 옆 프로젝트의 색이 바뀌고 두 표면이 같은 프로젝트를 다른 색으로 칠한다. 무게는 CLI
 /// 머리와 같은 `HEAD` 다. 칠하는 곳에는 늘 이름이 곁에 선다 — 색이 혼자 뜻을 지지 않는다.
-fn project_style(path: &std::path::Path) -> Style {
-    from_anstyle(style::project_colour(path).effects(style::HEAD.get_effects()))
+/// 사용자 설정에 색을 정했으면(`Place::hue`, moai-o04b) 그것이 경로 해시를 이긴다 — 그 판단도
+/// `style::project_colour` 안에 있어 CLI 와 갈라지지 않는다. `F5` 가 설정을 다시 읽으면 따라온다.
+fn project_style(place: &Place) -> Style {
+    paint_project(&place.path, place.hue)
+}
+
+/// 층의 줄을 들고 있지 않은 자리(폼의 담을 곳)에서 경로로 칠한다. 정한 색은 층에서 같은
+/// 경로를 찾아 쓰고, 층이 없으면 경로 해시다 — 층이 없으면 사용자 설정에 프로젝트가 없다.
+fn project_style_at(app: &App, path: &std::path::Path) -> Style {
+    let hue = app.layer.as_ref().and_then(|l| l.places.iter().find(|p| p.path == path)).and_then(|p| p.hue);
+    paint_project(path, hue)
+}
+
+fn paint_project(path: &std::path::Path, hue: Option<style::Hue>) -> Style {
+    from_anstyle(style::project_colour(path, hue).effects(style::HEAD.get_effects()))
 }
 
 /// 층의 한 줄: `이름/  ·3 ▸1 ✓12  여기  /경로`. 들어갈 수 있는 것만 `/` 가 붙는다.
@@ -1048,7 +1114,7 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
     if enterable {
         name.push('/');
     }
-    let mut spans = vec![Span::styled(name, project_style(&p.path)), Span::raw("  ")];
+    let mut spans = vec![Span::styled(name, project_style(p)), Span::raw("  ")];
     match &p.look {
         Look::Unread => spans.push(Span::styled("읽는 중", dim())),
         Look::Open { sum, .. } => {
@@ -1093,7 +1159,7 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
         return vec![Line::from(Span::styled("없다", dim()))];
     };
     let place: &Place = p;
-    let mut out = wrapped(&place.name, w, project_style(&place.path));
+    let mut out = wrapped(&place.name, w, project_style(place));
     out.extend(wrapped(&place.path.display().to_string(), w, dim()));
     match (place.launched, place.registered) {
         (true, true) => out.push(Line::from(Span::styled("여기서 띄웠다", dim()))),
@@ -1158,10 +1224,17 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
     // 빽빽한 줄보다 나쁘다. 폭이 모자라면 앞쪽부터 버린다.
     // `w` 는 **맨 먼저 떨어진다.** 켜 둔 동안에는 경로 줄의 뱃지가 끄는 법을 대므로,
     // 좁은 창에서 이 자리를 잃어도 나갈 길을 잃지는 않는다.
-    // **층에서는 층에서 듣는 키만 적는다** — `n`·`f`·`/`·`w` 는 층에서 까닭만 말하고
+    // **층에서는 층에서 듣는 키만 적는다** — `f`·`/`·`w` 는 층에서 까닭만 말하고
     // (`layer::refused`) 나가기는 위가 없다. 적어 두면 누를 때마다 "안 된다" 를 듣는다.
+    // `n` 은 층에서도 듣는다 — 커서의 프로젝트에 담는다(moai-fccv).
     if app.on_layer() {
-        let mut optional = vec![key("j·k", "굴리기"), key("F5", "갱신"), key("Tab", pane_name(app.focus.next())), key("a", "등록")];
+        let mut optional = vec![
+            key("j·k", "굴리기"),
+            key("F5", "갱신"),
+            key("Tab", pane_name(app.focus.next())),
+            key("n", "담기"),
+            key("a", "등록"),
+        ];
         // `d` 는 커서가 선 줄을 뺀다 — 드나드는 키처럼 목록 포커스를 탄다(`App::key`).
         if app.focus == Pane::Explorer {
             optional.extend([key("d", "해제"), key("Enter", "들어가기")]);
@@ -1991,7 +2064,7 @@ pub(super) mod tests {
 
     /// **층도 색 없이 80칸에서 읽힌다** — 어디인지(경로 줄), 프로젝트마다 이름·들어갈 수 있는지
     /// (`/`)·칸 글리프와 수·못 여는 까닭, 오른쪽에 칸 이름별 수와 집은 것. 아래 줄은 층에서
-    /// 듣는 키만 적는다 — `n`·거름망·나가기는 층에서 까닭만 말한다.
+    /// 듣는 키만 적는다 — 거름망·나가기는 층에서 까닭만 말하고, `n` 은 커서의 프로젝트에 담는다.
     #[test]
     fn the_project_layer_reads_without_colour_at_eighty_columns() {
         use super::super::layer::At;
@@ -2012,8 +2085,9 @@ pub(super) mod tests {
         assert!(screen.contains("드러난 것 2건"), "{screen}");
         let bar = lines.last().unwrap();
         assert!(bar.contains("Enter 들어가기") && bar.contains("F10 끝내기"), "{bar:?}");
+        assert!(bar.contains("n 담기"), "층에서도 듣는 `n` 을 안 적었다 — {bar:?}");
         assert!(bar.contains("a 등록") && bar.contains("d 해제"), "80칸에서 등록·해제 키가 잘렸다 — {bar:?}");
-        for absent in ["담기", "거름망", "Bksp", "워크트리", "F3"] {
+        for absent in ["거름망", "Bksp", "워크트리", "F3"] {
             assert!(!bar.contains(absent), "층에서 안 듣는 키를 적었다 — {absent} in {bar:?}");
         }
         for l in &lines {
@@ -2104,7 +2178,8 @@ pub(super) mod tests {
     #[test]
     fn a_project_name_wears_the_same_colour_as_in_the_cli_overview() {
         use super::super::layer::At;
-        let want = from_anstyle(style::project_colour(std::path::Path::new("/w/one"))).fg;
+        let one = std::path::Path::new("/w/one");
+        let want = from_anstyle(style::project_colour(one, None)).fg;
         let colour_of = |app: &mut App, y: u16, text: &str| {
             let mut term = Terminal::new(TestBackend::new(80, 12)).unwrap();
             term.draw(|f| screen(f, app)).unwrap();
@@ -2120,6 +2195,16 @@ pub(super) mod tests {
         on.index = crate::nav::Index::of(&[]);
         on.keep.clear();
         assert_eq!(Some(colour_of(&mut on, 3, "one/")), want, "층의 줄 이름이 한눈 보기와 다른 색이다");
+
+        // **설정에 정한 색이 해시를 이긴다** — 해시가 고른 것과 다른 색을 골라 두 자리가 따라오는지 본다.
+        let other = style::Hue::names().iter().filter_map(|n| style::Hue::named(n)).find(|h| *h != style::Hue::of_path(one)).unwrap();
+        let chosen = from_anstyle(style::project_colour(one, Some(other))).fg;
+        assert_ne!(chosen, want);
+        for app in [&mut inside, &mut on] {
+            app.layer.as_mut().unwrap().places.iter_mut().filter(|p| p.path == one).for_each(|p| p.hue = Some(other));
+        }
+        assert_eq!(Some(colour_of(&mut inside, 0, "one")), chosen, "경로 줄이 정한 색을 안 입었다");
+        assert_eq!(Some(colour_of(&mut on, 3, "one/")), chosen, "층의 줄이 정한 색을 안 입었다");
     }
 
     /// **좁은 창에서 본문을 그려도 무너지지 않는다.**
@@ -2552,6 +2637,60 @@ pub(super) mod tests {
         assert!(t.len() == 1 && t[0].contains("본문"), "Tab 뒤에 굵은 선이 본문으로 안 갔다\n{}", lines.join("\n"));
         let bar = lines.last().unwrap();
         assert!(bar.contains("Tab 제목") && bar.contains("Enter 줄 나누기"), "{bar:?}");
+    }
+
+    /// **폼 머리가 어느 프로젝트에 담기는지 댄다** — 색 없이도 `담을 곳  이름  경로` 가 80칸에
+    /// 들고, 이름은 경로 줄·층과 같은 프로젝트 색을 입는다. 담을 곳 없이 세운 화면(저장소 없음)
+    /// 에는 머리가 안 선다.
+    #[test]
+    fn the_idea_form_names_the_project_it_saves_into() {
+        use super::super::layer::At;
+        let mut a = layered(At::Project("/w/one".into()));
+        press(&mut a, KeyCode::Char('n'));
+        typed(&mut a, "떠오른 것");
+        let lines = render(&mut a, 80, 24);
+        let shown = lines.join("\n");
+        let (y, head) = lines.iter().enumerate().find(|(_, l)| l.contains("담을 곳")).unwrap_or_else(|| panic!("머리가 없다\n{shown}"));
+        assert!(head.contains("담을 곳  one  /w/one"), "{head:?}");
+        let title = lines.iter().position(|l| l.contains("제목")).unwrap();
+        assert!(y < title, "머리가 제목 칸 아래에 섰다\n{shown}");
+        for l in &lines {
+            assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
+        }
+
+        let want = from_anstyle(style::project_colour(std::path::Path::new("/w/one"), None)).fg;
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let row: String = (0..80).map(|x| buf[(x, y as u16)].symbol().to_string()).collect();
+        let x = row.find("one").map(|b| row[..b].chars().count() as u16).unwrap();
+        assert_eq!(Some(buf[(x, y as u16)].fg), want, "머리의 이름이 경로 줄과 다른 색이다");
+
+        // **설정에 정한 색(moai-o04b)도 따라온다** — 폼의 담을 곳은 층의 줄을 안 들고 경로만
+        // 드므로, 층에서 같은 경로의 정한 색을 찾아 입는다. 해시와 다른 색을 골라 본다.
+        let one = std::path::Path::new("/w/one");
+        let other = style::Hue::names().iter().filter_map(|n| style::Hue::named(n)).find(|h| *h != style::Hue::of_path(one)).unwrap();
+        a.layer.as_mut().unwrap().places.iter_mut().filter(|p| p.path == one).for_each(|p| p.hue = Some(other));
+        let chosen = from_anstyle(style::project_colour(one, Some(other))).fg;
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        assert_eq!(Some(buf[(x, y as u16)].fg), chosen, "머리의 이름이 설정에 정한 색을 안 입었다");
+
+        // 좁고 긴 경로에서도 이름이 남는다
+        let lines = render(&mut a, 24, 12);
+        assert!(lines.iter().any(|l| l.contains("담을 곳  one")), "{lines:?}");
+
+        // 낮은 창에서는 머리가 제목 칸 테두리로 접힌다 — 본문 칸이 테두리만 남지 않고,
+        // 담을 곳은 빠지지 않는다.
+        let lines = render(&mut a, 80, 8);
+        let shown = lines.join("\n");
+        assert!(!lines.iter().any(|l| l.contains("담을 곳  one")), "낮은 창에 머리 줄이 따로 섰다\n{shown}");
+        assert!(lines.iter().any(|l| l.contains("담을 곳 one · 제목")), "낮은 창에서 담을 곳이 빠졌다\n{shown}");
+        assert!(lines.iter().any(|l| l.contains("본문")), "{shown}");
+
+        let mut bare = app();
+        press(&mut bare, KeyCode::Char('n'));
+        assert!(!render(&mut bare, 80, 24).join("\n").contains("담을 곳"), "담을 곳 없는 폼에 머리가 섰다");
     }
 
     /// 굵은 선은 **초록이기도 하다** — 목록·상세의 포커스와 같은 색이다. 모양만 보는
