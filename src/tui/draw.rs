@@ -5,7 +5,8 @@
 //! 모든 색에 글리프나 낱말이 붙는다.
 
 use super::form::{Field, Form, Target};
-use super::keys::{BROWSE, Browse, CONFIRM, Confirm, Goto, JOT, Jot, PATH, PICK, PROMPT, Pick, Prompt, label, labels};
+use super::keys::{BROWSE, Browse, CONFIRM, Confirm, Goto, JOT, Jot, LEADER, MENU, Menu, PATH, PICK, PROMPT, Pick, Prompt, label, labels};
+use super::menu;
 use super::scroll::Move;
 use super::scroll::Scroll;
 use super::layer::{Look, Place, Shut};
@@ -96,8 +97,12 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         }
         _ => {}
     }
+    // SPC 메뉴는 탐색 중에만 선다 — 글칸으로 넘어가면 열이 버려져 저절로 닫힌다.
+    if matches!(app.mode, Mode::Browse) && menu::open(&app.chord) {
+        menu_popup(f, app, body);
+    }
 
-    // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 F키 바가 선다.
+    // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
         Mode::Browse => fkeys(f, app, keys),
         // 안내 속 키 이름은 표에서 읽는다 — 키를 옮기면 안내도 따라온다.
@@ -432,10 +437,16 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
     };
     // **겹쳐 보는 중이면 늘 보인다** — 거름망 뱃지와 같은 까닭이다. 옆에서 온 줄에만
     // `⎇` 가 붙으므로, 옆이 조용하면 켜진 화면과 꺼진 화면이 똑같이 보인다.
+    // **끄는 법은 끌 수 있는 자리에서만 댄다** — 층에서는 `SPC t w` 가 메뉴에 안 서고 말없이
+    // 꺼져 있으므로(`Browse::enabled`), 적어 두면 눌러도 아무 일이 없는 키가 된다.
     let overlay = app.worktree.then(|| {
         let trees = app.origin.labels();
         let names = if trees.is_empty() { "옆 워크트리 없음".to_string() } else { trees.join(", ") };
-        clip(&format!("{} {names}  {} 로 끈다", style::BRANCH_GLYPH, label(BROWSE, Browse::Worktree)), w / 2)
+        let off = match Browse::Worktree.enabled(&app.key_ctx()) {
+            Ok(()) => format!("  {} 로 끈다", label(BROWSE, Browse::Worktree)),
+            Err(_) => String::new(),
+        };
+        clip(&format!("{} {names}{off}", style::BRANCH_GLYPH), w / 2)
     });
     let room = match &overlay {
         Some(o) => room.saturating_sub(crate::text::width(o) + 3),
@@ -770,7 +781,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // — 그리는 데만 자르면 끝까지 굴린 뒤 `k` 가 한동안 죽는다.
     app.detail.fit(inner.height as usize, lines.len());
     f.render_widget(block.title(" 상세 "), at);
-    // **굴리는 키를 표시 곁에서 말한다.** 아래 F키 바는 좁으면 뒤에서부터 키를
+    // **굴리는 키를 표시 곁에서 말한다.** 아래 키 바는 좁으면 뒤에서부터 키를
     // 떨어뜨리는데, 80칸이면 떨어지는 것이 하필 `j·k` 다. 알림은 그것이
     // 가리키는 것 곁에 둔다. **지금 자리에서 듣는 키를 댄다** — `j·k` 는 포커스 칸을
     // 움직이므로(moai-ob4c) 목록에 선 사람에게 `j·k` 라 적으면 누른 대로 커서가 옮겨 가고
@@ -783,7 +794,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     let hint = format!(" ({hint})");
     scroll_mark(f, &app.detail, at, &hint, app.focus == Pane::Detail);
     // **넘친 줄은 잘렸다고 말한다.** `Wrap` 을 끈 뒤로 폭을 넘는 줄은 위젯이
-    // 표시도 없이 잘라 낸다 — 태그 줄, 롤업의 칸별 건수, `F3` 원문, 접지
+    // 표시도 없이 잘라 낸다 — 태그 줄, 롤업의 칸별 건수, `SPC t r` 원문, 접지
     // 않기로 한 코드 줄이 그 길로 조용히 꼬리를 잃었다. 만드는 쪽마다 따로
     // 자르면 또 하나를 빠뜨리므로 **나가는 마지막 자리에서 한 번** 자른다.
     let lines: Vec<Line> = lines.into_iter().map(|l| fit(l, inner.width as usize)).collect();
@@ -864,7 +875,7 @@ fn frame(app: &App, pane: Pane) -> Block<'static> {
     }
 }
 
-/// 칸의 이름. F키 바가 `Tab` 이 **어디로 가는지** 댄다.
+/// 칸의 이름. 키 바가 `Tab` 이 **어디로 가는지** 댄다.
 pub(super) fn pane_name(p: Pane) -> &'static str {
     match p {
         Pane::Explorer => "목록",
@@ -1192,7 +1203,7 @@ fn field<'a>(k: &str, v: &str, w: usize, room: usize) -> Line<'a> {
 /// 옆 프로젝트의 색이 바뀌고 두 표면이 같은 프로젝트를 다른 색으로 칠한다. 무게는 CLI
 /// 머리와 같은 `HEAD` 다. 칠하는 곳에는 늘 이름이 곁에 선다 — 색이 혼자 뜻을 지지 않는다.
 /// 사용자 설정에 색을 정했으면(`Place::hue`, moai-o04b) 그것이 경로 해시를 이긴다 — 그 판단도
-/// `style::project_colour` 안에 있어 CLI 와 갈라지지 않는다. `F5` 가 설정을 다시 읽으면 따라온다.
+/// `style::project_colour` 안에 있어 CLI 와 갈라지지 않는다. `SPC r` 이 설정을 다시 읽으면 따라온다.
 fn project_style(place: &Place) -> Style {
     paint_project(&place.path, place.hue)
 }
@@ -1332,9 +1343,17 @@ fn bold() -> Style {
     Style::new().add_modifier(Modifier::BOLD)
 }
 
-/// 맨 아래 MC 풍 F키 바. **아직 없는 것은 적지 않는다** — 눌러도 아무 일이
+/// 맨 아래 키 바. **아직 없는 것은 적지 않는다** — 눌러도 아무 일이
 /// 없는 키를 적어 두면 그것부터 도구를 못 믿게 된다.
 fn fkeys(f: &mut Frame, app: &App, at: Rect) {
+    // 메뉴가 열린 동안은 메뉴에서 나가는 법만 댄다 — 탐색의 키는 메뉴 안에서 안 듣는다.
+    if menu::open(&app.chord) {
+        let mut keep = vec![key(&label(MENU, Menu::Close), Menu::Close.what())];
+        if app.chord.held().len() > 1 {
+            keep.push(key(&label(MENU, Menu::Up), Menu::Up.what()));
+        }
+        return bar(f, at, Vec::new(), keep);
+    }
     let (optional, keep) = browse_hints(app);
     let spans = |v: Vec<(String, &str)>| v.iter().map(|(k, what)| key(k, what)).collect();
     bar(f, at, spans(optional), spans(keep));
@@ -1356,69 +1375,107 @@ fn browse_hints(app: &App) -> (Vec<Hint>, Vec<Hint>) {
     let shown = |order: &[&[Browse]]| -> Vec<Hint> {
         order.iter().filter(|acts| acts[0].enabled(&c).is_ok()).map(|acts| hint(acts)).collect()
     };
-    // **덜 급한 것부터 떨어뜨린다.** 키를 더할 때마다 줄이 길어져 맨 끝이
-    // 말없이 잘리는데, 맨 끝은 늘 나가는 길이다 — 나갈 길을 못 찾는 것이
-    // 빽빽한 줄보다 나쁘다. 폭이 모자라면 앞쪽부터 버린다.
-    // `w` 는 **맨 먼저 떨어진다.** 켜 둔 동안에는 경로 줄의 뱃지가 끄는 법을 대므로,
-    // 좁은 창에서 이 자리를 잃어도 나갈 길을 잃지는 않는다.
-    // **층에서는 층에서 듣는 키만 적는다** — `f`·`/`·`w` 는 층에서 까닭만 말하고
-    // (`Browse::enabled` 가 걸러 여기 안 선다) 나가기는 위가 없다. 적어 두면 누를 때마다
-    // "안 된다" 를 듣는다. `n` 은 층에서도 듣는다 — 커서의 프로젝트에 담는다(moai-fccv).
-    if app.on_layer() {
-        let optional = shown(&[
+    // **덜 급한 것부터 떨어뜨린다.** 폭이 모자라면 앞쪽부터 버리고, 뒤 묶음(`keep`)은 늘 남는다.
+    // 바로 누르는 키는 이동·포커스·`/`·드나들기뿐이고(moai-7sjm) 나머지는 `SPC 메뉴` 한 칸이
+    // 댄다 — 메뉴는 그 자리에서 켜진 것만 세우므로 바와 같은 판정을 읽는다. 끝내기(`SPC q`)도
+    // 메뉴에 있고 Ctrl-C 는 어디서든 끝낸다.
+    // **층에서는 층에서 듣는 키만 적는다** — `/` 는 층에서 까닭만 말하고(`Browse::enabled` 가
+    // 걸러 여기 안 선다) 나가기는 위가 없다.
+    let optional = if app.on_layer() {
+        shown(&[&[B::Step(Move::LineDown), B::Step(Move::LineUp)], &[B::FocusNext], &[B::Enter]])
+    } else {
+        shown(&[
             &[B::Step(Move::LineDown), B::Step(Move::LineUp)],
-            &[B::Reload],
+            // **`Tab` 은 가는 곳을 댄다** — 가는 곳을 적으면 이 줄도 글자로 지금 자리를 말한다.
             &[B::FocusNext],
-            &[B::Jot],
-            &[B::Pick],
-            // `d` 는 커서가 선 줄을 뺀다 — 드나드는 키처럼 목록 포커스를 탄다(`Browse::enabled`).
-            &[B::Unregister],
+            &[B::Grep],
+            // **드나드는 키는 목록에서만 적는다.** `Browse::enabled` 가 Enter·Bksp 를 포커스에
+            // 태워 상세에서는 아무 일도 안 하므로, 거기서 적어 두면 "눌러도 아무 일이 없는 키"
+            // 가 된다. 실제로 눌러 재는 것은 `the_key_bar_names_only_keys_that_act_in_the_focused_pane` 이다.
+            &[B::Leave],
             &[B::Enter],
-        ]);
-        return (optional, vec![hint(&[B::Quit])]);
-    }
-    let optional = shown(&[
-        // **프로젝트 안에서는 맨 먼저 떨어진다.** 등록은 층의 일이고 층에서는 늘 보이지만,
-        // 등록이 0 인 채 `.moai` 안에서 띄우면 층이 없어 이 키가 첫 등록의 길이다(moai-plvy).
-        &[B::Pick],
-        &[B::Worktree],
-        &[B::Step(Move::LineDown), B::Step(Move::LineUp)],
-        // **`F5` 는 `n` 보다 먼저 떨어진다.** 파일이 바뀌면 저절로 다시 읽으므로(`App::follow`)
-        // F5 를 누를 일은 드물고, 생각을 담는 길은 이 탐색기가 처음 여는 쓰기다 — 80칸에서
-        // 둘 중 하나만 남는다면 담는 길이다.
-        &[B::Reload],
-        // **`Tab` 은 가는 곳을 댄다** — `F3 원문`·`w 워크트리 끄기` 와 같은 자다.
-        // "칸 옮기기" 라 적으면 지금 어디 있는지는 테두리만 말하는데, 가는 곳을 적으면
-        // 이 줄도 글자로 지금 자리를 말한다. 자리는 `F3` 앞이다 — 80칸에서 `j·k` 가
-        // 떨어진 뒤에도 남는다(`the_key_bar_names_tab_at_eighty_columns`). 여유는 두 칸
-        // 뿐이라(`F3 그리기` 로 늘어도 든다), 80칸에서 거름망(`Esc 풀기`)을 걸면
-        // `n` 과 함께 `Tab` 이 떨어진다 — 그때도 테두리 모양이 포커스를 말하고, 되돌아올
-        // 길(`F3 그리기`·`Esc 풀기`)과 나갈 길(`F10`)이 `Tab` 보다 급하다. 이 빠듯함은
-        // 목록 포커스의 것이다 — 상세에서는 아래 드나드는 키가 빠져 자리가 남는다.
-        &[B::FocusNext],
-        &[B::Jot],
-        &[B::Raw],
-        &[B::Filter],
-        &[B::Grep],
-        // **드나드는 키는 목록에서만 적는다.** `Browse::enabled` 가 Enter·Bksp 를 포커스에
-        // 태워 상세에서는 아무 일도 안 하므로, 거기서 적어 두면 위의 "눌러도 아무 일이 없는
-        // 키" 가 된다. 흐리게 두지 않고 뺀다 — 이 줄은 이미 통째로 흐려 한 번 더 흐린
-        // 것이 갈리지 않고, 갈린다 해도 색이 혼자 뜻을 지는 일이다. 빠진 27칸만큼 80칸의
-        // 상세 포커스에서는 앞쪽의 `F5`·`j·k` 가 돌아온다(`w` 는 100칸부터). 키 처리와 바가
-        // 같은 판정을 읽고, 실제로 눌러 재는 것은 `the_key_bar_names_only_keys_that_act_in_the_focused_pane` 이다.
-        &[B::Leave],
-        &[B::Enter],
-    ]);
-    // 늘 남는 것: 나가는 길, 그리고 걸어 둔 거름망을 푸는 길.
+        ])
+    };
+    // 늘 남는 것: 걸어 둔 거름망을 푸는 길, 그리고 나머지 전부로 가는 메뉴.
     let mut keep = Vec::new();
     if app.filter_text.is_some() {
         keep.push(hint(&[B::ClearFilter]));
     }
-    keep.push(hint(&[B::Quit]));
+    keep.push((menu::title(&[LEADER.event()]), MENU_WORD));
     (optional, keep)
 }
 
-/// F키 바를 폭에 맞춰 놓는다. `optional` 은 **뒤에서부터** 들어가고 모자라면 앞쪽이 떨어진다.
+/// 바의 `SPC 메뉴` 낱말.
+const MENU_WORD: &str = "메뉴";
+
+/// SPC 메뉴 창(moai-7sjm, 모양은 moai-gaum 의 helix 식). 목록·상세 자리의 **아래 오른쪽**에 뜬다 —
+/// 맨 아랫줄 바로 위라 눈이 바에서 멀리 안 간다. 줄은 `키  낱말 [상태]`, 테두리 제목이 지금
+/// 접두어(`SPC t`)를 댄다. 키는 굵게, 낱말은 그대로 — **색 없이도 키와 낱말이 글자로 선다.**
+///
+/// 창이 낮으면 항목을 **여러 열로** 놓는다: 줄을 잘라 낸 채 두면 안 보이는 항목이 없는 줄 안다.
+/// 테두리 설 높이(3)도 없으면 한 줄로 접는다(`SPC  / 검색 · f 거름망 …`). 좁아서 칸이 모자라면
+/// 각 칸이 `…` 로 잘린다 — 키는 칸의 앞이라 남는다.
+///
+/// 키 먹는 칸의 굵은 선 규칙은 목록·상세의 것이라 이 창은 보통 선이다 — 굵은 칸이 둘로
+/// 보이지 않게.
+fn menu_popup(f: &mut Frame, app: &App, at: Rect) {
+    let held = app.chord.held();
+    let items = menu::entries(held, &app.key_ctx());
+    let name = menu::title(held);
+    let cell = |e: &menu::Entry| -> Line<'static> {
+        let mut spans = vec![Span::styled(e.key.clone(), bold()), Span::raw(format!("  {}", e.what))];
+        if let Some(st) = e.state {
+            spans.push(Span::raw(format!(" {st}")));
+        }
+        Line::from(spans)
+    };
+    let width_of = |l: &Line| l.spans.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
+    if at.height < 3 || at.width < 8 {
+        let mut spans = vec![Span::styled(name, bold()), Span::raw(" ")];
+        for (i, e) in items.iter().enumerate() {
+            spans.push(Span::raw(if i == 0 { " " } else { " · " }));
+            spans.extend(cell(e).spans);
+        }
+        let row = Rect { y: at.y + at.height.saturating_sub(1), height: at.height.min(1), ..at };
+        f.render_widget(Clear, row);
+        f.render_widget(Paragraph::new(fit(Line::from(spans), row.width as usize)), row);
+        return;
+    }
+    const GAP: usize = 3;
+    let n = items.len().max(1);
+    let room_h = (at.height - 2) as usize;
+    let cols = n.div_ceil(room_h);
+    let rows = n.div_ceil(cols);
+    let widest = items.iter().map(|e| width_of(&cell(e))).max().unwrap_or(0);
+    let title = format!(" {name} ");
+    // 안쪽 폭 = 좌우 여백 한 칸씩을 뺀 자리.
+    let room_w = (at.width as usize).saturating_sub(4);
+    let inner = (cols * widest + (cols - 1) * GAP).max(crate::text::width(&title)).min(room_w);
+    let col_w = (inner.saturating_sub((cols - 1) * GAP) / cols).max(1);
+    let lines: Vec<Line> = (0..rows)
+        .map(|r| {
+            let mut spans = Vec::new();
+            for col in 0..cols {
+                let Some(e) = items.get(col * rows + r) else { continue };
+                if col > 0 {
+                    spans.push(Span::raw(" ".repeat(GAP)));
+                }
+                let c = fit(cell(e), col_w);
+                let pad = col_w.saturating_sub(width_of(&c));
+                spans.extend(c.spans);
+                spans.push(Span::raw(" ".repeat(pad)));
+            }
+            Line::from(spans)
+        })
+        .collect();
+    let (w, h) = ((inner + 4) as u16, (rows + 2) as u16);
+    let area = Rect { x: at.x + at.width - w, y: at.y + at.height - h, width: w, height: h };
+    f.render_widget(Clear, area);
+    let block = Block::default().borders(Borders::ALL).title(title).padding(Padding::horizontal(1));
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+/// 키 바를 폭에 맞춰 놓는다. `optional` 은 **뒤에서부터** 들어가고 모자라면 앞쪽이 떨어진다.
 fn bar(f: &mut Frame, at: Rect, mut optional: Vec<Span<'_>>, keep: Vec<Span<'_>>) {
     let width = |v: &[Span]| v.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
     let room = at.width as usize;
@@ -1433,8 +1490,8 @@ fn bar(f: &mut Frame, at: Rect, mut optional: Vec<Span<'_>>, keep: Vec<Span<'_>>
     f.render_widget(Paragraph::new(Line::from(spans)), at);
 }
 
-/// F키 하나. **뒤에 공백을 두지 않는다** — 앞뒤로 두면 칸 사이가 두 칸이 되고,
-/// 그 여섯 칸 때문에 80칸 터미널에서 줄이 넘쳐 맨 끝의 `F10 끝내기` 가 말없이
+/// 바의 키 하나. **뒤에 공백을 두지 않는다** — 앞뒤로 두면 칸 사이가 두 칸이 되고,
+/// 그 여섯 칸 때문에 80칸 터미널에서 줄이 넘쳐 맨 끝의 `SPC 메뉴` 가 말없이
 /// 잘린다. 나갈 길을 못 찾는 것이 빽빽한 줄보다 나쁘다.
 fn key(k: &str, what: &str) -> Span<'static> {
     Span::styled(format!(" {k} {what}"), dim())
@@ -1673,7 +1730,7 @@ pub(super) mod tests {
         assert!((0..w).all(|x| buf[(x, y)].bg != Color::Green), "바탕이 깔렸다");
     }
 
-    /// 색 없이 글자만 봐도 읽힌다 — 경로, id, 우선순위, 칸 글리프, 제목, F키 바.
+    /// 색 없이 글자만 봐도 읽힌다 — 경로, id, 우선순위, 칸 글리프, 제목, 키 바.
     #[test]
     fn the_screen_reads_without_colour() {
         let lines = render(&mut app(), 100, 12).join("\n");
@@ -1688,7 +1745,7 @@ pub(super) mod tests {
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let inside = render(&mut a, 100, 12).join("\n");
         assert!(style::SPIN.iter().any(|g| inside.contains(g)), "집은 일이 안 돈다\n{inside}");
-        assert!(lines.contains("Enter") && lines.contains("F10"), "F키 바가 없다\n{lines}");
+        assert!(lines.contains("Enter") && lines.contains("SPC 메뉴"), "키 바가 없다\n{lines}");
         // 긴 제목은 **잘린다**. 잘렸다는 표시가 남아야 어디까지가 제목인지 안다.
         assert!(lines.contains("아주 긴"), "에픽 제목이 없다\n{lines}");
         assert!(lines.contains('…'), "잘렸는데 표시가 없다\n{lines}");
@@ -1702,15 +1759,19 @@ pub(super) mod tests {
         let mut a = app();
         assert!(a.worktree, "겹쳐 보기가 꺼진 채로 시작했다");
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE));
-        assert!(!a.worktree, "w 가 안 껐다");
+        a.hit("SPC t w");
+        assert!(!a.worktree, "SPC t w 가 안 껐다");
         let plain_screen = render(&mut a, 120, 12).join("\n");
         assert!(!plain_screen.contains('⎇'), "안 겹쳤는데 머리표가 섰다\n{plain_screen}");
-        assert!(plain_screen.contains("w 워크트리"), "켜는 키를 안 알린다\n{plain_screen}");
+        // 켜는 키는 메뉴가 상태 낱말과 함께 댄다.
+        a.hit("SPC t");
+        let menu_screen = render(&mut a, 120, 12).join("\n");
+        assert!(menu_screen.contains("w  워크트리 겹쳐 보기 [꺼짐]"), "켜는 키를 안 알린다\n{menu_screen}");
+        a.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
         // 저장소 없이 세운 App 이라 `w` 는 켜기만 하고 읽지 않는다 — 겹친 결과는 손으로 넣는다.
-        a.key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE));
-        assert!(a.worktree, "w 가 안 켰다");
+        a.hit("SPC t w");
+        assert!(a.worktree, "SPC t w 가 안 켰다");
         let mut theirs = issues()[2].clone();
         theirs.status = crate::model::Status::new("review");
         theirs.updated_at = "2026-09-02T00:00:00Z".into();
@@ -1727,12 +1788,11 @@ pub(super) mod tests {
         let screen = lines.join("\n");
         let row = lines.iter().find(|l| l.contains("argos-0004") && l.contains("집은 멤버")).expect("줄이 없다");
         assert!(row.contains("⎇ feat/x 집은 멤버"), "목록에 머리표가 없다\n{screen}");
-        assert!(lines[0].contains("⎇ feat/x") && lines[0].contains("w 로 끈다"), "켜졌다고 안 말한다\n{screen}");
+        assert!(lines[0].contains("⎇ feat/x") && lines[0].contains("SPC t w 로 끈다"), "켜졌다고 안 말한다\n{screen}");
         assert!(screen.matches("⎇ feat/x").count() >= 3, "상세에 머리표가 없다\n{screen}");
-        assert!(screen.contains("w 워크트리 끄기"), "{screen}");
 
-        a.key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE));
-        assert!(!a.worktree, "w 가 안 껐다");
+        a.hit("SPC t w");
+        assert!(!a.worktree, "SPC t w 가 안 껐다");
     }
 
     /// 걸음은 **그린 횟수가 아니라 시계가** 올린다. 다시 그리기만 해서는
@@ -2281,23 +2341,28 @@ pub(super) mod tests {
         assert!(!drawn.contains("**"), "굵게 기호가 남았다\n{drawn}");
         assert!(drawn.contains('•'), "목록 글머리가 없다\n{drawn}");
 
-        // F3 으로 원문을 본다 — 그린 글은 기호가 지워져 되돌릴 수 없다
-        a.key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
+        // SPC t r 로 원문을 본다 — 그린 글은 기호가 지워져 되돌릴 수 없다
+        a.hit("SPC t r");
         let raw = render(&mut a, 100, 22).join("\n");
         assert!(raw.contains("**굵게**"), "원문이 아니다\n{raw}");
         assert!(raw.contains("- 하나"), "원문이 아니다\n{raw}");
     }
 
-    /// **나갈 길은 80칸에서도 보인다.** F키 바는 접히지 않고 위젯이 말없이
-    /// 잘라 내므로, 줄이 넘치면 맨 끝의 `F10 끝내기` 부터 사라진다 — 끝내는
-    /// 법을 모르는 화면은 도구가 아니라 덫이다.
+    /// **메뉴로 가는 길은 80칸에서도 보인다.** 바는 접히지 않고 위젯이 말없이 잘라 내므로 늘
+    /// 남는 묶음의 맨 끝에 둔다 — 끝내기·거름망·담기·원문이 모두 그 뒤에 있다(moai-7sjm).
     #[test]
-    fn the_key_bar_still_says_how_to_quit_at_eighty_columns() {
+    fn the_key_bar_still_names_the_menu_at_eighty_columns() {
         for w in [80u16, 100, 120] {
-            let lines = render(&mut app(), w, 14);
-            let bar = lines.last().cloned().unwrap_or_default();
-            assert!(bar.contains("F10 끝내기"), "{w}칸에서 나갈 길이 잘렸다 — {bar:?}");
-            assert!(bar.contains("F3"), "{w}칸에서 원문 키가 잘렸다 — {bar:?}");
+            let mut a = app();
+            let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
+            assert!(bar.trim_end().ends_with("SPC 메뉴"), "{w}칸에서 메뉴 키가 잘렸다 — {bar:?}");
+            a.filter_text = Some("tag=x".into());
+            let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
+            assert!(bar.contains("Esc 풀기") && bar.trim_end().ends_with("SPC 메뉴"), "{w}칸 — {bar:?}");
+            // 옮긴 키는 바에 없다.
+            for gone in ["F10", "F5", "F3", "F7", "끝내기", "n 담기", "f 거름망", "w 워크트리"] {
+                assert!(!bar.contains(gone), "{w}칸 바에 옮긴 키 `{gone}` 가 남았다 — {bar:?}");
+            }
         }
     }
 
@@ -2341,19 +2406,32 @@ pub(super) mod tests {
         assert!(screen.contains("in_progress 1") && screen.contains("집은 것 1건") && screen.contains("집은 멤버"), "{screen}");
         assert!(screen.contains("드러난 것 2건"), "{screen}");
         let bar = lines.last().unwrap();
-        assert!(bar.contains("Enter 들어가기") && bar.contains("F10 끝내기"), "{bar:?}");
-        assert!(bar.contains("n 담기"), "층에서도 듣는 `n` 을 안 적었다 — {bar:?}");
-        assert!(bar.contains("a 등록") && bar.contains("d 해제"), "80칸에서 등록·해제 키가 잘렸다 — {bar:?}");
-        for absent in ["거름망", "Bksp", "워크트리", "F3"] {
+        assert!(bar.contains("Enter 들어가기") && bar.contains("SPC 메뉴"), "{bar:?}");
+        for absent in ["거름망", "검색", "Bksp", "워크트리", "F3", "F10"] {
             assert!(!bar.contains(absent), "층에서 안 듣는 키를 적었다 — {absent} in {bar:?}");
         }
+        // 층에서도 겹쳐 보기는 켜져 있어 뱃지가 서지만, `SPC t w` 는 층의 메뉴에 안 서므로 끄는 법을 대지 않는다.
+        assert!(a.worktree && lines[0].contains('⎇'), "{:?}", lines[0]);
+        assert!(!lines[0].contains("로 끈다"), "층에서 안 듣는 끄는 키를 댄다 — {:?}", lines[0]);
         for l in &lines {
             assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
         }
-        // `d` 는 목록 포커스에서만 듣는다(`App::key`) — 상세 포커스의 바에는 없다. `a` 는 남는다.
+        // 층의 메뉴에는 담기·등록·해제가 서고 거름망·검색·워크트리는 안 선다.
+        a.hit("SPC");
+        let screen = render(&mut a, 80, 22).join("\n");
+        assert!(screen.contains("n  생각 담기") && screen.contains("p  프로젝트 …"), "{screen}");
+        assert!(!screen.contains("f  거름망") && !screen.contains("/  검색"), "{screen}");
+        a.hit("p");
+        let screen = render(&mut a, 80, 22).join("\n");
+        assert!(screen.contains("a  등록") && screen.contains("d  목록에서 빼기"), "{screen}");
+        a.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        // `SPC p d` 는 목록 포커스에서만 듣는다 — 상세 포커스의 메뉴에는 없다. `a` 는 남는다.
         a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         let bar = render(&mut a, 80, 22).last().cloned().unwrap_or_default();
-        assert!(bar.contains("a 등록") && !bar.contains("d 해제") && !bar.contains("Enter"), "{bar:?}");
+        assert!(!bar.contains("Enter"), "{bar:?}");
+        a.hit("SPC p");
+        let screen = render(&mut a, 80, 22).join("\n");
+        assert!(screen.contains("a  등록") && !screen.contains("목록에서 빼기"), "{screen}");
     }
 
     /// **디렉터리 고르기 창도 색 없이 80칸에서 읽힌다** — 테두리가 지금 디렉터리를 대고(길면
@@ -2543,7 +2621,7 @@ pub(super) mod tests {
     }
 
     /// **넘친 줄은 잘렸다고 말한다.** `Wrap` 을 끈 뒤로 폭을 넘는 줄은 위젯이
-    /// 표시도 없이 잘라 낸다 — 태그 줄·롤업의 칸별 건수·`F3` 원문·접지 않기로
+    /// 표시도 없이 잘라 낸다 — 태그 줄·롤업의 칸별 건수·`SPC t r` 원문·접지 않기로
     /// 한 코드 줄이 그 길로 조용히 꼬리를 잃었다. 이 시험은 버퍼 폭이 아니라
     /// **잘린 자리에 표시가 있는지**를 본다.
     #[test]
@@ -2557,7 +2635,7 @@ pub(super) mod tests {
 
         for raw in [false, true] {
             if raw {
-                a.key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE));
+                a.hit("SPC t r");
             }
             let lines = render(&mut a, 60, 24);
             let cut = lines.iter().any(|l| l.contains("#parser") && l.contains('…'));
@@ -2691,17 +2769,17 @@ pub(super) mod tests {
         assert_ne!(buf[(0, y)].fg, Color::Green, "포커스 없는 칸까지 칠했다");
     }
 
-    /// **F키 바가 `Tab` 을 말한다. 80칸에서도.** 모르는 키는 없는 키다 — 그리고
+    /// **키 바가 `Tab` 을 말한다. 80칸에서도.** 모르는 키는 없는 키다 — 그리고
     /// 가는 곳을 대므로 지금 어디 있는지를 글자로도 말한다.
     #[test]
     fn the_key_bar_names_tab_at_eighty_columns() {
         for w in [80u16, 100, 120] {
             let mut a = app();
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
-            assert!(bar.contains("Tab 상세") && bar.contains("F10 끝내기"), "{w}칸 — {bar:?}");
+            assert!(bar.contains("Tab 상세") && bar.contains("SPC 메뉴"), "{w}칸 — {bar:?}");
             a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
-            assert!(bar.contains("Tab 목록") && bar.contains("F10 끝내기"), "{w}칸 — {bar:?}");
+            assert!(bar.contains("Tab 목록") && bar.contains("SPC 메뉴"), "{w}칸 — {bar:?}");
         }
     }
 
@@ -2730,20 +2808,22 @@ pub(super) mod tests {
         }
     }
 
-    /// **상세 포커스에서는 빠진 드나드는 키만큼 앞쪽 키가 돌아온다.** 80칸 목록
-    /// 포커스에서 떨어지던 `F5`·`j·k` 가 선다 — 나갈 길과 `Tab`·`n`·`F3` 은 폭과 상관없이
-    /// 남는다. `w` 는 맨 먼저 떨어지는 키라 `n 담기` 가 들어온 뒤로는 80칸에서 안 돌아오고
-    /// 100칸부터 선다(경로 줄 뱃지가 켜 둔 동안 끄는 법을 대므로 잃는 길은 없다).
+    /// **80칸에서 바의 키가 하나도 안 떨어진다** — 옮긴 키가 빠져 자리가 났다(moai-7sjm). 상세
+    /// 포커스에서는 드나드는 키가 빠진다.
     #[test]
-    fn the_key_bar_in_the_detail_gives_the_freed_room_back() {
+    fn the_key_bar_fits_whole_at_eighty_columns() {
         for w in [80u16, 100, 120] {
             let mut a = app();
+            a.filter_text = Some("tag=x".into());
+            let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
+            for shown in ["j·k 이동", "Tab 상세", "/ 검색", "Bksp 나가기", "Enter 들어가기", "Esc 풀기", "SPC 메뉴"] {
+                assert!(bar.contains(shown), "{w}칸 목록 포커스에 {shown:?} 가 없다 — {bar:?}");
+            }
             a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
-            for shown in ["j·k 굴리기", "Tab 목록", "n 담기", "F3 원문", "F5 갱신", "f 거름망", "/ 검색", "F10 끝내기"] {
+            for shown in ["j·k 굴리기", "Tab 목록", "/ 검색", "SPC 메뉴"] {
                 assert!(bar.contains(shown), "{w}칸 상세 포커스에 {shown:?} 가 없다 — {bar:?}");
             }
-            assert_eq!(bar.contains("w 워크트리"), w >= 100, "{w}칸 — {bar:?}");
             assert!(!bar.contains("Enter") && !bar.contains("Bksp"), "{w}칸 — {bar:?}");
         }
     }
@@ -2764,8 +2844,9 @@ pub(super) mod tests {
                     (a.worktree, a.raw) = (on, on);
                     let c = a.key_ctx();
                     let (optional, keep) = browse_hints(&a);
-                    assert!(keep.last().is_some_and(|(k, _)| k == "F10"), "{c:?}: 나갈 길이 늘 남지 않는다");
-                    for (names, what) in optional.iter().chain(&keep) {
+                    assert!(keep.last().is_some_and(|(k, w)| k == "SPC" && *w == "메뉴"), "{c:?}: 메뉴로 가는 길이 늘 남지 않는다");
+                    assert_eq!(lookup(BROWSE, &[parse("SPC").unwrap()]), Lookup::Pending, "SPC 가 메뉴를 안 연다");
+                    for (names, what) in optional.iter().chain(&keep[..keep.len() - 1]) {
                         for name in names.split('·') {
                             let k = parse(name).unwrap_or_else(|| panic!("{c:?}: 바의 `{name}` 를 키로 못 푼다"));
                             let Lookup::Run(act) = lookup(BROWSE, &[k]) else { panic!("{c:?}: 바의 `{name}` 가 표에 없다") };
@@ -2877,7 +2958,7 @@ pub(super) mod tests {
         let low = render(&mut a, 80, 4);
         assert!(low[3].contains(" 누구 "), "{low:?}");
         assert!(line.contains(" 누구 ") && line.contains("레이븐") && line.contains("Esc 그만"), "{line}");
-        assert!(!lines.join("\n").contains("F10"), "묻는 동안 F키 바가 섰다");
+        assert!(!lines.join("\n").contains("SPC 메뉴"), "묻는 동안 탐색 바가 섰다");
 
         a.mode = ask(Some("`이름 (메일)` 모양이 아니다".into()));
         let line = render(&mut a, 80, 12)[11].clone();
@@ -2902,7 +2983,7 @@ pub(super) mod tests {
     #[test]
     fn the_idea_form_reads_without_colour_at_eighty_columns() {
         let mut a = app();
-        press(&mut a, KeyCode::Char('n'));
+        a.hit("SPC n");
         typed(&mut a, "떠오른 것");
         let lines = render(&mut a, 80, 24);
         let screen = lines.join("\n");
@@ -2913,10 +2994,10 @@ pub(super) mod tests {
         assert!(lines.iter().any(|l| l.contains('┌') && l.contains("본문")), "본문 칸이 없다\n{screen}");
         assert!(screen.contains("떠오른 것"), "{screen}");
         let bar = lines.last().unwrap();
-        for hint in ["Ctrl-S·F2 담기", "Tab 본문", "Enter 본문으로", "Esc 닫기"] {
+        for hint in ["Ctrl-S 담기", "Tab 본문", "Enter 본문으로", "Esc 닫기"] {
             assert!(bar.contains(hint), "80칸에서 `{hint}` 가 없다 — {bar:?}");
         }
-        assert!(!screen.contains("F10"), "폼이 열렸는데 F키 바가 섰다\n{screen}");
+        assert!(!screen.contains("SPC 메뉴"), "폼이 열렸는데 탐색 바가 섰다\n{screen}");
 
         press(&mut a, KeyCode::Tab);
         let lines = render(&mut a, 80, 24);
@@ -2933,7 +3014,7 @@ pub(super) mod tests {
     fn the_idea_form_names_the_project_it_saves_into() {
         use super::super::layer::At;
         let mut a = layered(At::Project("/w/one".into()));
-        press(&mut a, KeyCode::Char('n'));
+        a.hit("SPC n");
         typed(&mut a, "떠오른 것");
         let lines = render(&mut a, 80, 24);
         let shown = lines.join("\n");
@@ -2976,7 +3057,7 @@ pub(super) mod tests {
         assert!(lines.iter().any(|l| l.contains("본문")), "{shown}");
 
         let mut bare = app();
-        press(&mut bare, KeyCode::Char('n'));
+        bare.hit("SPC n");
         assert!(!render(&mut bare, 80, 24).join("\n").contains("담을 곳"), "담을 곳 없는 폼에 머리가 섰다");
     }
 
@@ -2985,7 +3066,7 @@ pub(super) mod tests {
     #[test]
     fn the_focused_form_field_is_green() {
         let mut a = app();
-        press(&mut a, KeyCode::Char('n'));
+        a.hit("SPC n");
         let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
         term.draw(|f| screen(f, &mut a)).unwrap();
         let buf = term.backend().buffer().clone();
@@ -3001,8 +3082,8 @@ pub(super) mod tests {
     #[test]
     fn the_form_says_why_it_refused_and_asks_before_dropping_in_words() {
         let mut a = app();
-        press(&mut a, KeyCode::Char('n'));
-        press(&mut a, KeyCode::F(2));
+        a.hit("SPC n");
+        a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         let bar = render(&mut a, 80, 24).last().cloned().unwrap_or_default();
         assert!(bar.contains("제목이 비었다"), "{bar:?}");
 
@@ -3028,7 +3109,7 @@ pub(super) mod tests {
             (term.backend().cursor_visible(), at, buf)
         };
         let mut a = app();
-        press(&mut a, KeyCode::Char('n'));
+        a.hit("SPC n");
         typed(&mut a, "가a");
         let (shown, at, buf) = cursor(&mut a, 80, 24);
         assert!(shown);
@@ -3055,7 +3136,7 @@ pub(super) mod tests {
     fn the_form_stays_behind_the_question_without_the_focus() {
         use ratatui::backend::Backend;
         let mut a = app();
-        press(&mut a, KeyCode::Char('n'));
+        a.hit("SPC n");
         typed(&mut a, "적던 것");
         let form = std::mem::replace(&mut a.mode, Mode::Browse);
         a.mode = Mode::Ask(super::super::Ask {
@@ -3078,7 +3159,7 @@ pub(super) mod tests {
     #[test]
     fn the_idea_form_survives_tiny_windows() {
         let mut a = app();
-        press(&mut a, KeyCode::Char('n'));
+        a.hit("SPC n");
         typed(&mut a, "아주 긴 한글 제목이 여기 들어가서 좁은 창을 넘친다");
         press(&mut a, KeyCode::Tab);
         typed(&mut a, "본문");
@@ -3093,14 +3174,73 @@ pub(super) mod tests {
         }
     }
 
-    /// **F키 바가 `n` 을 댄다. 80칸에서도** — 담는 길이 안 보이면 없는 길이다. 떨어지는
-    /// 것은 저절로 다시 읽어 누를 일이 드문 `F5` 다. `Tab`·`F10` 은 그대로 남는다.
+    /// **SPC 메뉴는 색 없이 80칸에서 읽힌다**(moai-7sjm). `키  낱말` 줄이 아래 오른쪽에 서고
+    /// 테두리가 지금 접두어를 대며, 토글은 상태를 낱말로 단다. 바는 메뉴에서 나가는 법만 댄다.
+    /// 하위 층에 들어가면 제목이 `SPC t` 가 되고 Bksp 가 선다. 동작을 실행하면 창이 걷힌다.
     #[test]
-    fn the_key_bar_names_n_at_eighty_columns() {
-        let bar = render(&mut app(), 80, 14).last().cloned().unwrap_or_default();
-        assert!(bar.contains("n 담기") && bar.contains("Tab 상세") && bar.contains("F10 끝내기"), "{bar:?}");
-        let wide = render(&mut app(), 120, 14).last().cloned().unwrap_or_default();
-        assert!(wide.contains("F5 갱신") && wide.contains("n 담기"), "{wide:?}");
+    fn the_menu_reads_without_colour_at_eighty_columns() {
+        let mut a = app();
+        let before = render(&mut a, 80, 20);
+        a.hit("SPC");
+        let lines = render(&mut a, 80, 20);
+        let screen = lines.join("\n");
+        assert!(lines.iter().any(|l| l.contains("┌ SPC ")), "제목이 접두어를 안 댄다\n{screen}");
+        for row in ["/  검색", "f  거름망", "n  생각 담기", "r  다시 읽기", "q  끝내기", "p  프로젝트 …", "t  토글 …"] {
+            assert!(screen.contains(row), "{row:?} 가 없다\n{screen}");
+        }
+        assert!(lines[lines.len() - 2].contains('└'), "아래에 안 붙었다\n{screen}");
+        let bar = lines.last().unwrap();
+        assert!(bar.contains("Esc 닫기") && !bar.contains("Bksp") && !bar.contains("SPC 메뉴"), "{bar:?}");
+        for l in &lines {
+            assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
+        }
+
+        a.hit("t");
+        let lines = render(&mut a, 80, 20);
+        let screen = lines.join("\n");
+        assert!(lines.iter().any(|l| l.contains("┌ SPC t ")), "{screen}");
+        assert!(screen.contains("w  워크트리 겹쳐 보기 [켜짐]") && screen.contains("r  원문↔그리기 [그리기]"), "{screen}");
+        assert!(!screen.contains("q  끝내기"), "하위 층에 뿌리가 남았다\n{screen}");
+        assert!(lines.last().unwrap().contains("Bksp 위로"), "{:?}", lines.last());
+
+        a.hit("r");
+        assert!(a.raw);
+        let lines = render(&mut a, 80, 20);
+        assert!(!lines.iter().any(|l| l.contains("┌ SPC")), "실행했는데 창이 남았다");
+        assert_eq!(lines.last(), before.last(), "실행한 뒤 바가 돌아오지 않았다");
+    }
+
+    /// **낮은 창에서도 메뉴 항목이 안 사라진다** — 높이가 모자라면 여러 열로, 테두리 설 높이도
+    /// 없으면 한 줄로 접는다. 어느 줄도 폭을 넘지 않는다.
+    #[test]
+    fn the_menu_folds_into_columns_or_a_line_in_a_low_window() {
+        for (w, h) in [(80u16, 8u16), (80, 6), (80, 5), (40, 8), (30, 3), (12, 5)] {
+            let mut a = app();
+            a.hit("SPC");
+            let lines = render(&mut a, w, h);
+            let screen = lines.join("\n");
+            for l in &lines {
+                assert!(crate::text::width(l) <= w as usize, "{w}x{h} 넘쳤다: {l:?}");
+            }
+            if w >= 80 {
+                for key in ["/ ", "f ", "n ", "q ", "t "] {
+                    assert!(screen.contains(key), "{w}x{h}: {key:?} 가 안 보인다\n{screen}");
+                }
+            }
+            if h >= 4 {
+                assert!(screen.contains("SPC"), "{w}x{h}: 접두어가 없다\n{screen}");
+            }
+        }
+    }
+
+    /// **글칸에서는 메뉴가 안 선다** — SPC 는 글자다.
+    #[test]
+    fn the_menu_never_draws_over_a_text_field() {
+        let mut a = app();
+        a.key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        a.hit("SPC");
+        let screen = render(&mut a, 80, 20).join("\n");
+        assert!(!screen.contains("┌ SPC"), "{screen}");
     }
 
     /// 빈 저장소도 그려진다.
@@ -3207,7 +3347,7 @@ pub(super) mod tests {
     fn filter_cells(q: &str, w: u16) -> (String, u16, (String, String)) {
         use ratatui::backend::Backend;
         let mut a = app();
-        a.key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
+        a.hit("SPC f");
         for c in q.chars() {
             a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
         }

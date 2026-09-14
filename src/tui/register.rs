@@ -375,7 +375,7 @@ mod tests {
         std::fs::write(s.0.join("work/README"), "").unwrap();
         std::os::unix::fs::symlink(s.0.join("work/argos"), s.0.join("work/link")).unwrap();
 
-        a.key(key(KeyCode::Char('a')));
+        a.hit("SPC p a");
         let p = picker(&a);
         assert_eq!(p.at.dir, s.0.join("work"));
         let names: Vec<&str> = p.at.entries.iter().map(|d| d.name.as_str()).collect();
@@ -405,7 +405,7 @@ mod tests {
         let app_a = s.project("work/mono/apps/a");
         let app_b = s.dir("work/mono/apps/b");
 
-        a.key(key(KeyCode::Char('a')));
+        a.hit("SPC p a");
         point(&mut a, "mono");
         press(&mut a, &[KeyCode::Enter]);
         assert_eq!(picker(&a).at.dir, s.0.join("work/mono"));
@@ -427,7 +427,7 @@ mod tests {
         press(&mut a, &[KeyCode::Esc]);
         assert_eq!(a.mode, Mode::Browse);
         assert_eq!(place_at_cursor(&a), app_a);
-        a.key(key(KeyCode::Char('a')));
+        a.hit("SPC p a");
         assert_eq!(picker(&a).at.dir, s.0.join("work/mono/apps"), "마지막으로 본 디렉터리에서 안 열었다");
 
         // `.moai` 없는 디렉터리 — 받고, init 전이라 말하고, 층에 그렇게 선다.
@@ -440,7 +440,7 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("> b ") && l.contains("init 전")), "{}", lines.join("\n"));
 
         // 다시 등록해도 한 줄이다.
-        a.key(key(KeyCode::Char('a')));
+        a.hit("SPC p a");
         point(&mut a, "a");
         let before = std::fs::read(s.config()).unwrap();
         a.key(key(KeyCode::Char('a')));
@@ -467,16 +467,21 @@ mod tests {
         assert_eq!(place_at_cursor(&a), two);
 
         let before = std::fs::read(&cfg).unwrap();
-        a.key(key(KeyCode::Char('d')));
+        a.hit("SPC p d");
         assert!(matches!(&a.mode, Mode::Unregister(u) if u.path == two), "{:?}", a.mode);
         a.key(key(KeyCode::Char('n')));
         assert_eq!(a.mode, Mode::Browse);
         assert_eq!(std::fs::read(&cfg).unwrap(), before, "그만뒀는데 설정을 고쳤다");
-        a.key(key(KeyCode::Char('d')));
+        a.hit("SPC p d");
         a.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL));
         assert_eq!(std::fs::read(&cfg).unwrap(), before, "Ctrl-Y 로 뺐다");
 
-        a.key(key(KeyCode::Delete));
+        // 옮긴 키(moai-7sjm) — 바로 누르던 `d`·Delete 는 아무것도 안 묻는다.
+        for k in [KeyCode::Char('d'), KeyCode::Delete] {
+            a.key(key(k));
+            assert_eq!(a.mode, Mode::Browse, "{k:?} 가 해제를 물었다");
+        }
+        a.hit("SPC p d");
         a.key(key(KeyCode::Char('y')));
         assert_eq!(s.registered(), [one.clone()]);
         assert!(two.is_dir(), "디렉터리를 지웠다");
@@ -485,10 +490,11 @@ mod tests {
         assert_eq!(a.current(), Some(Row::Project(0)), "뺀 뒤 커서가 줄 밖에 섰다");
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("✓ 뺌") && n.contains("그대로")), "{:?}", a.notice);
 
-        // 상세에 포커스가 있으면 `d` 는 아무것도 안 뺀다 — 키 바도 그렇게 적는다.
+        // 상세에 포커스가 있으면 `SPC p d` 는 메뉴에 안 서고 아무것도 안 뺀다.
         a.key(key(KeyCode::Tab));
-        a.key(key(KeyCode::Char('d')));
+        a.hit("SPC p d");
         assert_eq!(a.mode, Mode::Browse);
+        assert!(super::super::menu::open(&a.chord), "안 선 `d` 가 메뉴를 닫았다");
     }
 
     /// **손으로 적은 철자(`a/../b`)도 층의 `d` 로 빠진다.** 글자 정리·링크 풀기가 그 철자를
@@ -502,7 +508,7 @@ mod tests {
         let cfg = s.register(&[&odd]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
         assert_eq!(place_at_cursor(&a), odd);
-        a.key(key(KeyCode::Char('d')));
+        a.hit("SPC p d");
         a.key(key(KeyCode::Char('y')));
         assert!(s.registered().is_empty(), "손으로 적은 철자를 못 뺐다 — {:?}", a.notice);
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("✓ 뺌")), "{:?}", a.notice);
@@ -521,7 +527,7 @@ mod tests {
         let mut a = App::on_projects(layer);
         assert_eq!(place_at_cursor(&a), here);
         let before = std::fs::read(&cfg).unwrap();
-        a.key(key(KeyCode::Char('d')));
+        a.hit("SPC p d");
         assert_eq!(a.mode, Mode::Browse);
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("등록돼 있지 않다")), "{:?}", a.notice);
         assert_eq!(std::fs::read(&cfg).unwrap(), before);
@@ -539,7 +545,7 @@ mod tests {
         a.launched_at = Some(s.dir("work"));
         s.dir("work/x");
 
-        a.key(key(KeyCode::Char('a')));
+        a.hit("SPC p a");
         a.key(key(KeyCode::Char('a')));
         let p = picker(&a);
         let e = p.error.as_deref().unwrap_or_else(|| panic!("까닭이 없다 — {:?}", a.notice));
@@ -555,7 +561,7 @@ mod tests {
         // 설정 자리를 모르면 창을 안 연다.
         let mut none = App::on_projects(Layer::read(None, None));
         none.launched_at = Some(s.0.clone());
-        none.key(key(KeyCode::Char('a')));
+        none.hit("SPC p a");
         assert_eq!(none.mode, Mode::Browse);
         assert!(none.notice.as_deref().is_some_and(|n| n.contains("자리를 모른다")), "{:?}", none.notice);
     }
@@ -589,7 +595,7 @@ mod tests {
         let held = a.current();
         assert_eq!(a.cursor, 1);
 
-        a.key(key(KeyCode::Char('a')));
+        a.hit("SPC p a");
         assert_eq!(picker(&a).at.dir, here, "띄운 자리에서 안 열었다");
         press(&mut a, &[KeyCode::Backspace]);
         point(&mut a, "other");

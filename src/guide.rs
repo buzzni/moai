@@ -67,7 +67,7 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
     moai show -s todo -t bug               필터 (쉼표 = 또는, 반복 = 그리고)
     moai show --tree                       에픽 → 이슈 → 자식
     moai ready --worktree                  옆 워크트리에서 집은 것까지 겹쳐 본다
-    moai tui                               탐색기로 돌아다닌다. n 으로 생각을 담는다
+    moai tui                               탐색기로 돌아다닌다. SPC n 으로 생각을 담는다
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
@@ -142,7 +142,7 @@ const PROJECTS: &str = r#"    moai project add <dir>                 내 설정�
 겹친다. 그 밖의 명령은 어느 프로젝트인지 모르니
 `moai -C <dir> <명령>` 으로 부른다. `moai tui` 에서는 등록한 프로젝트가 맨 위
 층으로 선다 — `.moai` 밖이면 거기서 시작하고, 안이면 뿌리에서 Backspace 로 올라간다.
-층에서 `a` 로 디렉터리를 골라 등록하고(모노레포 하위도 따로), `d` 로 목록에서 뺀다."#;
+층에서 `SPC p a` 로 디렉터리를 골라 등록하고(모노레포 하위도 따로), `SPC p d` 로 목록에서 뺀다."#;
 
 const PEOPLE: &str = r#"**담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
 `-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`
@@ -312,7 +312,7 @@ pub fn reference() -> String {
 
 에이전트가 git 워크트리를 하나씩 잡고 일하면, 지금 워크트리의 보드는 옆에서
 집고 옮긴 것을 모른다. `status`·`ready`·`show` 에 `--worktree` 를 붙이면 옆
-워크트리의 이슈를 겹쳐 본다. 탐색기(`moai tui`)는 겹친 채로 열고 `w` 가 끄고 켠다.
+워크트리의 이슈를 겹쳐 본다. 탐색기(`moai tui`)는 겹친 채로 열고 `SPC t w` 가 끄고 켠다.
 
     moai ready --worktree             옆에서 집은 일은 빠지고 "잡고 있는 것" 에 선다
     moai status --worktree            보드 머리에 "⎇ <워크트리들> 겹쳐 봄"
