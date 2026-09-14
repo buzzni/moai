@@ -183,7 +183,13 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             // 있다 — 여기 섞이던 때 `defer` 만 해도 "경고가 늘었다" 로 세션이
             // 붙들렸다(moai-c8lb). 기준선도 같은 자로 잰다.
             let warnings: usize = st.warnings.iter().map(|w| w.count).sum();
-            crate::hook::closing(&load.issues, &repo.config, &away(), warnings, baseline(input, &repo))
+            // **누구의 것인지 모르는 줄로는 붙들지 않는다**(moai-ntl6). 집은 것이 남을 때만 옆
+            // 스냅샷을 읽는다 — `Stop` 은 턴마다 돈다.
+            let mut away = away();
+            if !crate::hook::held(&load.issues, &repo.config, &away).is_empty() {
+                away.extend(unsure_of(&repo, &load.issues));
+            }
+            crate::hook::closing(&load.issues, &repo.config, &away, warnings, baseline(input, &repo))
         }),
     };
 
@@ -214,13 +220,32 @@ fn settle(
     away: &dyn Fn() -> BTreeSet<String>,
     judge: &dyn Fn(&[model::Issue], &BTreeSet<String>) -> Decision,
 ) -> Decision {
-    match judge(issues, &away()) {
-        deny @ Decision::Deny(_) => match crate::worktree::fresh(repo, issues.to_vec()) {
-            Some((issues, away)) if judge(&issues, &away) == Decision::Pass => Decision::Pass,
-            _ => deny,
-        },
-        other => other,
+    let first = judge(issues, &away());
+    let Decision::Deny(_) = first else { return first };
+    if let Some((fresh, fresh_away)) = crate::worktree::fresh(repo, issues.to_vec())
+        && judge(&fresh, &fresh_away) == Decision::Pass
+    {
+        return Decision::Pass;
     }
+    // **누구의 것인지 모르는 줄을 빼고 한 번 더 본다**(moai-ntl6, 사용자 결정 B). 좁은 초점으로도
+    // 막히면 그 까닭을 낸다 — 옆 워크트리가 쥐었을 일을 초점으로 대지 않는다.
+    let unsure = unsure_of(repo, issues);
+    if unsure.is_empty() {
+        return first;
+    }
+    let mut narrow = away();
+    narrow.extend(unsure);
+    match judge(issues, &narrow) {
+        deny @ Decision::Deny(_) => deny,
+        Decision::Pass => Decision::Pass,
+        _ => first,
+    }
+}
+
+/// 옆 딸린 워크트리가 쥐었을 수 있어 **누구의 것인지 모르는** 집은 줄(`hook::unsure`).
+fn unsure_of(repo: &Repo, issues: &[model::Issue]) -> BTreeSet<String> {
+    let (elsewhere, own) = crate::worktree::held_elsewhere(&repo.root, issues, &repo.config);
+    crate::hook::unsure(issues, &repo.config, &elsewhere, &own)
 }
 
 /// 껍데기 토막 하나를 판정할 트래커.

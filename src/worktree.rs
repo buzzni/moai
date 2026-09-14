@@ -396,7 +396,56 @@ fn others_of(root: &Path) -> Result<(Option<String>, Vec<(Tree, PathBuf)>), Stri
 /// **못 찾으면 비어 있다.** git 이 없거나 저장소가 아니면 옆도 없는 것이고, 그러면
 /// 전처럼 스냅샷의 집은 줄이 다 제 초점이다. 훅은 무엇이 어긋나도 조용해야 한다.
 pub fn away(root: &Path) -> BTreeSet<String> {
-    names(&trees_on_disk(root).unwrap_or_default())
+    on_disk(root).map(|d| names(d.others())).unwrap_or_default()
+}
+
+/// git 이 적어 둔 파일에서 읽은 워크트리 목록([`on_disk`]).
+struct Disk {
+    /// 워크트리 꼭대기에서 moai 뿌리까지 — 같은 저장소의 워크트리는 같은 나무 모양이다([`others_of`]).
+    rel: PathBuf,
+    /// (워크트리, 딸린 워크트리인가, 제 워크트리인가).
+    all: Vec<(Tree, bool, bool)>,
+}
+
+impl Disk {
+    fn others(&self) -> impl Iterator<Item = &Tree> {
+        self.all.iter().filter(|(_, _, me)| !me).map(|(t, ..)| t)
+    }
+}
+
+/// 옆 **딸린** 워크트리가 쥐었을 수 있는 줄 id 와, 제 워크트리의 이름 후보 (moai-ntl6, 사용자 결정 B).
+///
+/// 이름이 id 가 아닌 워크트리(에이전트 격리 `worktree-agent-<해시>`, 옛 id 로 뜬 워크트리)가
+/// 쥔 일은 이름으로 못 가른다. 대신 **갈라진 자리**로 짐작한다 — 규약상 집기는 main 에서 커밋한
+/// 뒤 워크트리가 뜨므로, 그 워크트리의 스냅샷 파일에 벌여 놓인 줄은 갈라질 때 이미 집혀 있던
+/// 일이다. 그 워크트리에서 main 보다 늦게 옮긴 줄(`planned`·`updated_at`)도 든다. 갈라진 **뒤에**
+/// main 에서 집은 일은 그 파일에 없어 들지 않는다.
+///
+/// **main 워크트리는 쥔 곳으로 안 센다** — 모두의 집기가 모이는 자리라, 세면 모든 줄이 든다.
+/// **답은 짐작이다** — 받는 쪽은 이 줄로 막거나 붙들지 않기만 한다(`hook::unsure`). git 을 띄우지
+/// 않고 파일만 읽지만 옆 스냅샷을 다 풀어 싸지 않다 — 거절 길과 `Stop` 에서만 부른다.
+pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> (BTreeSet<String>, BTreeSet<String>) {
+    let Some(disk) = on_disk(root) else { return Default::default() };
+    let own = names(disk.all.iter().filter(|(_, _, me)| *me).map(|(t, ..)| t));
+    let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
+    let mut out = BTreeSet::new();
+    for (tree, linked, me) in &disk.all {
+        if *me || !*linked {
+            continue;
+        }
+        let path = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
+        let Ok(Some(side)) = crate::store::read_snapshot(&path) else { continue };
+        out.extend(crate::report::wip(&side.issues, cfg).into_iter().map(|i| i.id.clone()));
+        for i in &side.issues {
+            let later = by_id
+                .get(i.id.as_str())
+                .is_some_and(|m| (i.planned(), i.updated_at.as_str()) > (m.planned(), m.updated_at.as_str()));
+            if later {
+                out.insert(i.id.clone());
+            }
+        }
+    }
+    (out, own)
 }
 
 /// 제 워크트리가 아닌 워크트리들을 **git 을 띄우지 않고** 읽는다 — 이름 후보([`away`])만 쓴다.
@@ -409,7 +458,7 @@ pub fn away(root: &Path) -> BTreeSet<String> {
 /// **목록이 틀려도 싸다** — 후보일 뿐이라 id 와 정확히 같은 이름만 뺀다. 경로가 사라진 워크트리
 /// (`prunable`)는 뺀다. 맨몸 저장소는 공용 디렉터리 이름이 `.git` 이 아니라 주 워크트리가 없다.
 /// 겹쳐 보기([`gather`]·[`fresh`])는 HEAD 커밋이 필요해 여전히 git 으로 읽는다.
-fn trees_on_disk(root: &Path) -> Option<Vec<Tree>> {
+fn on_disk(root: &Path) -> Option<Disk> {
     let top = root.ancestors().find(|d| d.join(".git").exists())?;
     let dotgit = top.join(".git");
     let common = if dotgit.is_dir() {
@@ -433,7 +482,7 @@ fn trees_on_disk(root: &Path) -> Option<Vec<Tree>> {
     if common.file_name().is_some_and(|n| n == ".git")
         && let (Some(path), Some(label)) = (common.parent(), label(&common.join("HEAD")))
     {
-        all.push(Tree { path: path.to_path_buf(), label, head: String::new() });
+        all.push((Tree { path: path.to_path_buf(), label, head: String::new() }, false));
     }
     if let Ok(linked) = std::fs::read_dir(common.join("worktrees")) {
         for entry in linked.filter_map(Result::ok) {
@@ -448,11 +497,19 @@ fn trees_on_disk(root: &Path) -> Option<Vec<Tree>> {
                 continue;
             };
             let Some(label) = label(&dir.join("HEAD")) else { continue };
-            all.push(Tree { path, label, head: String::new() });
+            all.push((Tree { path, label, head: String::new() }, true));
         }
     }
     let top = canonical(top);
-    Some(all.into_iter().filter(|t| canonical(&t.path) != top).collect())
+    let rel = canonical(root).strip_prefix(&top).map(Path::to_path_buf).unwrap_or_default();
+    let all = all
+        .into_iter()
+        .map(|(t, linked)| {
+            let me = canonical(&t.path) == top;
+            (t, linked, me)
+        })
+        .collect();
+    Some(Disk { rel, all })
 }
 
 /// 이 자리가 **딸린 워크트리 안인가** — 가장 가까운 `.git` 이 디렉터리가 아니라 `gitdir:` 파일이다.

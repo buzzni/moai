@@ -5149,6 +5149,52 @@ fn the_hook_leaves_what_a_named_worktree_holds_to_that_worktree() {
     assert!(own.contains(&format!("moai mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
 }
 
+/// **이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다**
+/// (moai-ntl6, 사용자 결정 B). 에이전트 격리 워크트리(`worktree-agent-<해시>`)와 옛 id 로 뜬
+/// 워크트리가 실제로 그랬다(moai-apsa·nt0h). 누구의 것인지 모르는 줄로는 막지도 붙들지도
+/// 않는다. 갈라진 **뒤에** main 에서 집은 일은 여전히 main 의 초점이다.
+#[test]
+fn work_picked_before_an_unnamed_worktree_branched_is_left_to_it() {
+    let s = Scratch::new("hookbranchpoint");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let agent = field(&ok(&main, &["add", "에이전트가 할 일", "--json"]), "id");
+    let renamed = field(&ok(&main, &["add", "옛 id 에서 옮긴 일", "--json"]), "id");
+    ok(&main, &["mv", &agent, "in_progress"]);
+    ok(&main, &["mv", &renamed, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-a04acfb3", "-b", "worktree-agent-a04acfb3"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/argos-old1", "-b", "worktree-argos-old1"]);
+
+    let at_main = |event: &str, session: &str, tool: Option<&str>| {
+        let body = tool.map_or(String::new(), |cmd| {
+            format!(",\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}", json_str(cmd))
+        });
+        let input = format!("{{\"session_id\":\"{session}\",\"cwd\":{}{body}}}", json_str(&main.display().to_string()));
+        String::from_utf8(hook_in(&s, &main, event, &input).stdout).unwrap()
+    };
+
+    // 갈라질 때 집혀 있던 일로는 막지도 붙들지도 않는다.
+    let out = at_main("pre-tool-use", "s1", Some("moai add \"딴 일\""));
+    assert!(out.trim().is_empty(), "옆 워크트리가 쥐었을 일로 main 의 생성을 막는다\n{out}");
+    let out = at_main("stop", "s1", None);
+    assert!(out.trim().is_empty(), "옆 워크트리가 쥐었을 일로 main 세션을 붙든다\n{out}");
+
+    // 갈라진 뒤 main 에서 집은 일은 main 의 초점이다 — 막고, 붙들고, 그것만 댄다.
+    let mine = field(&ok(&main, &["add", "main 에서 집은 일", "--json"]), "id");
+    ok(&main, &["mv", &mine, "in_progress"]);
+    let why = refusal(&at_main("pre-tool-use", "s2", Some("moai add \"딴 일\"")));
+    assert!(why.contains(&mine) && !why.contains(&agent) && !why.contains(&renamed), "{why}");
+    let out = at_main("pre-tool-use", "s2", Some(&format!("moai add \"자식\" --parent {mine}")));
+    assert!(out.trim().is_empty(), "main 의 일의 자식을 막았다\n{out}");
+    let held = at_main("stop", "s2", None);
+    assert!(held.contains(&format!("moai mv {mine}")), "main 에서 집은 일을 안 붙든다\n{held}");
+    assert!(!held.contains(&agent) && !held.contains(&renamed), "옆이 쥐었을 일을 옮기라고 한다\n{held}");
+}
+
 /// 규약대로 일을 main 에서 집고 그 이름의 워크트리를 띄운 저장소. (main, 워크트리, 집은 id)
 fn picked_in_a_worktree(s: &Scratch) -> (PathBuf, PathBuf, String) {
     let main = s.path().join("main");

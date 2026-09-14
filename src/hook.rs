@@ -803,6 +803,26 @@ fn theirs<'a>(issues: &'a [Issue], away: &'a BTreeSet<String>) -> impl Fn(&Issue
     }
 }
 
+/// **누구의 것인지 모르는** 집은 줄 — 옆 딸린 워크트리의 스냅샷에도 벌여 놓인(또는 거기서 늦게
+/// 옮긴) 줄(`elsewhere`, `worktree::held_elsewhere`)이다 (moai-ntl6, 사용자 결정 B).
+///
+/// 이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다.
+/// **이 줄로는 막지도 붙들지도 않는다** — 받는 쪽은 이것을 `away` 에 더한 좁은 초점으로 한 번
+/// 더 판정해, 풀릴 때만 푼다. 새로 막는 일은 없다. **제 워크트리 이름이 가리키는 일은 확실히
+/// 제 것이라 빼지 않는다**(`own`) — 이름으로 가르던 판정은 그대로다. 대가: main 이 제 몫으로
+/// 집은 뒤 갈라진 워크트리가 생기면 그 집기는 `Stop` 이 더는 안 붙든다(사용자가 받아들였다).
+pub fn unsure(issues: &[Issue], cfg: &Config, elsewhere: &BTreeSet<String>, own: &BTreeSet<String>) -> BTreeSet<String> {
+    if elsewhere.is_empty() {
+        return BTreeSet::new();
+    }
+    let named_mine = theirs(issues, own);
+    report::wip(issues, cfg)
+        .into_iter()
+        .filter(|i| elsewhere.contains(&i.id) && !named_mine(i))
+        .map(|i| i.id.clone())
+        .collect()
+}
+
 /// 규칙 1 — **집은 것 밖에 새 이슈를 세우지 않는다.**
 ///
 /// 초점 밖에 세우면 그 줄이 어느 일에서 나왔는지를 잃고, 에픽을 닫아도 남은
@@ -1599,6 +1619,23 @@ mod tests {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), review("t-1.aa", "in_progress", None)];
         let why = denied(&guard_review(&all, &cfg(), &away(&["t-1"]))).to_string();
         assert!(!why.contains("t-1.aa"), "옆의 리뷰를 집으라고 한다\n{why}");
+    }
+
+    /// 옆 딸린 워크트리에도 벌여 놓인 줄만 누구의 것인지 모른다 — **제 워크트리 이름이 가리키는
+    /// 일은 확실히 제 것이라** 거기 있어도 빼지 않는다(moai-ntl6).
+    #[test]
+    fn only_work_also_held_elsewhere_is_unsure_and_my_named_work_stays_mine() {
+        let all = vec![
+            epic("t-e"),
+            under("t-1", "in_progress", "t-e"),
+            issue("t-2", "in_progress"),
+            issue("t-3", "in_progress"),
+            issue("t-4", "todo"),
+        ];
+        let elsewhere = away(&["t-1", "t-2", "t-4"]);
+        let got: Vec<String> = unsure(&all, &cfg(), &elsewhere, &away(&["t-e"])).into_iter().collect();
+        assert_eq!(got, ["t-2"], "제 에픽의 일이나 안 집은 줄을 모른다고 했다");
+        assert!(unsure(&all, &cfg(), &here(), &here()).is_empty());
     }
 
     // ── 명령이 가리키는 트래커 ────────────────────────────────────────
