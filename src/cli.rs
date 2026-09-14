@@ -230,7 +230,8 @@ NOTE
   위, G·End 가 맨 아래, Ctrl-d·Ctrl-u 가 반 쪽, Ctrl-f·Ctrl-b(PageDown·PageUp)가 한
   쪽이다. Tab·Shift-Tab 이 목록과 상세 사이로 포커스를 옮기고, 이동키는 모두 포커스
   있는 칸을 움직인다 — 상세를 굴리려면 Tab 으로 간다. / 가 검색, Esc 가 걸어 둔
-  거름망을 푼다. 검색·거름망 칸은 Enter 로 걸고 Esc 로 그만둔다.
+  거름망을 푼다. 검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며, 검색은 치는 대로
+  목록을 거르고 Tab·Shift-Tab 이 찾을 자리를 전체·id·제목·태그·본문으로 돌린다.
 
   그 밖의 동작은 SPC 를 누르면 곧바로 뜨는 메뉴에 있다. 메뉴는 그 자리에서 되는 것만
   세우고, 모르는 키는 무시하며, Esc 로 닫고 Backspace 로 한 층 올라간다.
@@ -238,7 +239,19 @@ NOTE
     SPC r  다시 읽기       SPC q  끝내기
     SPC p a  등록          SPC p d  목록에서 빼기
     SPC t w  워크트리 겹쳐 보기 [켜짐/꺼짐]    SPC t r  원문↔그리기
+    SPC s d  done [보임/숨김]    SPC s z  미룸    SPC s a  모두 보이기
+    SPC s 1  설정의 첫 칸 [보임/숨김] — 둘째 칸부터 번호가 차례로 는다
+    SPC o p  우선순위   SPC o c  생성   SPC o u  수정   SPC o s  칸   SPC o a  담당   SPC o t  제목
+    SPC c i  id   SPC c p  우선순위   SPC c a  담당   SPC c c  생성   SPC c u  수정   SPC c n  셈   SPC c g  태그
   바로 끝내는 키는 Ctrl-C 하나다 — 어디서든, 글을 적는 중에도 끝낸다.
+
+  목록은 처음에 done 을 숨긴다 — 경로 줄의 [done 숨김] 이 그것을 댄다. 보기는 거름망과
+  따로라 Esc 로 안 풀리고, 둘은 함께 걸린다. 정렬은 급한 것·새것·앞 칸·가나다가 위고,
+  고른 것을 다시 누르면 거꾸로 선다. 기본(우선순위)이 아니면 경로 줄이 그 차례를 댄다.
+  열(SPC c)은 [보임/숨김] 으로 켜고 끈다. 담당·태그·생성·수정 날짜는 줄 오른쪽에 서고,
+  좁으면 날짜 → 담당 → 태그 차례로 걷혀 제목 몫을 남긴다.
+  보기·정렬·열은 누를 때마다 사용자 설정의 [tui] 표에 적혀 다음 실행과 다른 프로젝트로
+  이어진다(`moai project add` 가 쓰는 파일과 같다).
 
   등록한 프로젝트(`moai project add`)가 있으면 맨 위에 프로젝트 층이 선다.
   `.moai` 밖에서 띄우면 층에서 시작하고, 안에서 띄우면 그 프로젝트의 뿌리에서
@@ -588,7 +601,7 @@ pub struct FilterArgs {
     #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
     pub kind: Option<Kind>,
 
-    /// 제목·본문에 이 글이 든 것
+    /// id·제목·태그·본문에 이 글이 든 것
     #[arg(short = 'g', long, value_name = "글")]
     pub grep: Option<String>,
 

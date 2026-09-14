@@ -90,6 +90,73 @@ impl<'a> Where<'a> {
     }
 }
 
+/// 글로 찾을 때 **어디를 보는가**(moai-kojj). TUI 검색 칸의 Tab 이 이 차례로 돈다.
+///
+/// `All` 은 넷을 다 본다 — CLI 의 `-g` 도 이것이다. 한때 제목·본문만 봤는데, 그러면 id
+/// 조각이나 태그로 찾은 것이 `All` 에서는 안 걸리고 좁힌 범위에서만 걸린다. 좁힌 것이
+/// 넓은 것보다 더 찾으면 "전체" 라는 이름이 거짓말이 된다.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum GrepIn {
+    #[default]
+    All,
+    Id,
+    Title,
+    Tag,
+    Body,
+}
+
+impl GrepIn {
+    const ORDER: [GrepIn; 5] = [GrepIn::All, GrepIn::Id, GrepIn::Title, GrepIn::Tag, GrepIn::Body];
+
+    /// 화면에 적는 이름. 거름망 뱃지의 `/id:…` 앞머리이기도 하다.
+    pub fn name(self) -> &'static str {
+        match self {
+            GrepIn::All => "전체",
+            GrepIn::Id => "id",
+            GrepIn::Title => "제목",
+            GrepIn::Tag => "태그",
+            GrepIn::Body => "본문",
+        }
+    }
+
+    /// Tab 의 다음 범위. 끝에서 처음으로 돈다.
+    pub fn next(self) -> GrepIn {
+        let at = Self::ORDER.iter().position(|g| *g == self).unwrap_or(0);
+        Self::ORDER[(at + 1) % Self::ORDER.len()]
+    }
+
+    /// Shift-Tab 의 앞 범위.
+    pub fn prev(self) -> GrepIn {
+        let at = Self::ORDER.iter().position(|g| *g == self).unwrap_or(0);
+        Self::ORDER[(at + Self::ORDER.len() - 1) % Self::ORDER.len()]
+    }
+
+    /// id·제목을 이 범위가 보는가 — 목록 줄에서 찾은 글자를 칠할 자리를 가른다.
+    pub fn sees_id(self) -> bool {
+        matches!(self, GrepIn::All | GrepIn::Id)
+    }
+
+    pub fn sees_title(self) -> bool {
+        matches!(self, GrepIn::All | GrepIn::Title)
+    }
+
+    /// `q` 는 이미 소문자다([`Filter::build`]).
+    pub fn hits(self, i: &Issue, q: &str) -> bool {
+        let has = |s: &str| s.to_lowercase().contains(q);
+        let id = || has(&i.id);
+        let title = || has(&i.title);
+        let tag = || i.tags.iter().any(|t| has(t));
+        let body = || i.body.as_deref().is_some_and(has);
+        match self {
+            GrepIn::All => id() || title() || tag() || body(),
+            GrepIn::Id => id(),
+            GrepIn::Title => title(),
+            GrepIn::Tag => tag(),
+            GrepIn::Body => body(),
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Filter {
     /// OR. 비면 아무거나.
@@ -106,6 +173,8 @@ pub struct Filter {
     pub assignee: Vec<Sel>,
     pub kind: Option<Kind>,
     pub grep: Option<String>,
+    /// `grep` 이 어디를 보는가. CLI 는 늘 [`GrepIn::All`] 이고, TUI 의 검색 칸이 Tab 으로 돌린다.
+    pub grep_in: GrepIn,
     /// 지금 칸에 이만큼 머문 것.
     pub stale: Option<i64>,
     /// done 을 포함한다.
@@ -153,6 +222,7 @@ pub struct Raw {
     pub assignee: Vec<String>,
     pub kind: Option<Kind>,
     pub grep: Option<String>,
+    pub grep_in: GrepIn,
     pub stale: Option<i64>,
     pub all: bool,
     pub ideas: bool,
@@ -213,6 +283,7 @@ impl Filter {
             kind: raw.kind,
             // 한 번만 내려 두면 이슈마다 다시 만들 일이 없다.
             grep: raw.grep.map(|q| q.to_lowercase()),
+            grep_in: raw.grep_in,
             stale: raw.stale,
             all: raw.all,
             ideas,
@@ -311,12 +382,10 @@ impl Filter {
         if self.kind.is_some_and(|k| i.kind != k) {
             return false;
         }
-        if let Some(q) = &self.grep {
-            let hit = i.title.to_lowercase().contains(q)
-                || i.body.as_deref().is_some_and(|b| b.to_lowercase().contains(q));
-            if !hit {
-                return false;
-            }
+        if let Some(q) = &self.grep
+            && !self.grep_in.hits(i, q)
+        {
+            return false;
         }
         // 머문 기간도 **서 있는 칸**의 것이다 (`Where::since`). `-s` 는 읽은 칸으로
         // 고르는데 나이만 적힌 칸의 시각으로 재면, 한 물음의 두 조각이 다른 칸을 본다.
@@ -438,10 +507,103 @@ pub fn sort_for_display(issues: &mut [Issue]) {
     issues.sort_by(display_order);
 }
 
+/// 사람이 고르는 차례(moai-55cp). 기본은 [`display_order`] 다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SortKey {
+    #[default]
+    Priority,
+    Created,
+    Updated,
+    Status,
+    Assignee,
+    Title,
+}
+
+/// 고른 차례로 두 줄을 견준다. 줄마다 **칸을 곁에 받는다** — 묶음의 칸은 멤버에서 읽은
+/// 것이라 `Issue::status` 만 보면 목록의 글리프와 차례가 다른 칸을 본다. `statuses` 는 설정의
+/// 칸 차례다(칸 순서는 설정이 정한다). 설정에 없는 칸은 뒤로 간다.
+///
+/// - 제 방향은 사람이 먼저 보고 싶은 쪽이다 — 우선순위는 급한 것, 생성·수정은 **새것**,
+///   칸은 설정의 앞 칸, 담당·제목은 가나다. 담당 없는 줄은 뒤로 간다
+/// - 담당은 **화면에 선 이름**(`model::label`, `naming`)으로 견준다 — 이름만 견주면 `naming = "email"`
+///   에서 담당 열이 가나다로 안 선다(moai-2kyl 단계 리뷰)
+/// - 같으면 [`display_order`] 로 가른다 — 차례가 흔들리지 않는다
+/// - `reversed` 는 가른 것까지 통째로 뒤집는다
+pub fn order_by(
+    key: SortKey,
+    reversed: bool,
+    a: (&Issue, &str),
+    b: (&Issue, &str),
+    statuses: &[String],
+    naming: crate::config::Naming,
+) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let rank = |column: &str| statuses.iter().position(|s| s == column).unwrap_or(statuses.len());
+    let shown = |i: &Issue, name: &str| crate::model::label(name, i.assignee_email.as_deref(), naming).to_lowercase();
+    let natural = match key {
+        SortKey::Priority => Ordering::Equal,
+        SortKey::Created => b.0.created_at.cmp(&a.0.created_at),
+        SortKey::Updated => b.0.updated_at.cmp(&a.0.updated_at),
+        SortKey::Status => rank(a.1).cmp(&rank(b.1)),
+        SortKey::Assignee => match (&a.0.assignee, &b.0.assignee) {
+            (Some(x), Some(y)) => shown(a.0, x).cmp(&shown(b.0, y)),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        },
+        SortKey::Title => a.0.title.to_lowercase().cmp(&b.0.title.to_lowercase()),
+    };
+    let order = natural.then_with(|| display_order(a.0, b.0));
+    if reversed { order.reverse() } else { order }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::Status;
+
+    /// **고른 차례는 제 방향이 있고, 같으면 기본 차례로 가르며, 뒤집으면 통째로 뒤집는다**(moai-55cp).
+    #[test]
+    fn order_by_each_key_and_its_reverse() {
+        let at = |id: &str, p: u8, created: &str, who: Option<&str>| {
+            let mut i = Issue::new(id.into(), format!("{id} 제목"), Kind::Issue, Status::new("todo"), created);
+            i.priority = Some(p);
+            i.assignee = who.map(String::from);
+            i
+        };
+        let issues = [
+            at("a-1", 2, "2026-09-01T00:00:00Z", Some("나래")),
+            at("a-2", 1, "2026-09-03T00:00:00Z", None),
+            at("a-3", 2, "2026-09-02T00:00:00Z", Some("가람")),
+        ];
+        let columns = ["review", "todo", "done"];
+        let statuses: Vec<String> = ["todo", "review", "done"].map(String::from).to_vec();
+        let sorted = |key, reversed| {
+            let mut idx = vec![0, 1, 2];
+            idx.sort_by(|&x, &y| {
+                order_by(key, reversed, (&issues[x], columns[x]), (&issues[y], columns[y]), &statuses, crate::config::Naming::Full)
+            });
+            idx.iter().map(|&i| issues[i].id.as_str()).collect::<Vec<_>>()
+        };
+        assert_eq!(sorted(SortKey::Priority, false), ["a-2", "a-1", "a-3"], "기본 차례와 다르다");
+        assert_eq!(sorted(SortKey::Priority, true), ["a-3", "a-1", "a-2"]);
+        assert_eq!(sorted(SortKey::Created, false), ["a-2", "a-3", "a-1"], "새것이 위가 아니다");
+        assert_eq!(sorted(SortKey::Created, true), ["a-1", "a-3", "a-2"]);
+        assert_eq!(sorted(SortKey::Status, false), ["a-2", "a-1", "a-3"], "설정의 칸 차례가 아니다");
+        assert_eq!(sorted(SortKey::Assignee, false), ["a-3", "a-1", "a-2"], "담당 없는 줄이 뒤로 안 갔다");
+
+        // **담당은 화면에 선 이름으로 선다**(moai-2kyl 단계 리뷰) — 메일로 대면 메일의 가나다다.
+        let mut mailed = [issues[0].clone(), issues[2].clone()];
+        mailed[0].assignee_email = Some("abe@example.com".into()); // 나래
+        mailed[1].assignee_email = Some("zed@example.com".into()); // 가람
+        let by = |naming| {
+            let mut idx = [0, 1];
+            idx.sort_by(|&x, &y| order_by(SortKey::Assignee, false, (&mailed[x], "todo"), (&mailed[y], "todo"), &statuses, naming));
+            idx.map(|i| mailed[i].id.as_str())
+        };
+        assert_eq!(by(crate::config::Naming::Name), ["a-3", "a-1"]);
+        assert_eq!(by(crate::config::Naming::Email), ["a-1", "a-3"], "메일로 선 담당 열이 가나다가 아니다");
+    }
 
     const NOW: &str = "2026-09-11T00:00:00Z";
 
@@ -576,6 +738,37 @@ mod tests {
         assert!(hit(&f, &i));
         f.grep = Some("없는말".into());
         assert!(!hit(&f, &i));
+    }
+
+    /// 범위마다 제 자리만 본다. **전체는 넷을 다 본다** — 좁힌 범위가 전체보다 더 찾으면 안 된다.
+    #[test]
+    fn grep_in_narrows_to_one_field_and_all_sees_every_one() {
+        let mut i = issue("a-0042", "todo", &["parser"]);
+        i.title = "저장 계층".into();
+        i.body = Some("원자적 쓰기".into());
+        let cases = [
+            ("0042", GrepIn::Id),
+            ("저장", GrepIn::Title),
+            ("pars", GrepIn::Tag),
+            ("원자", GrepIn::Body),
+        ];
+        for (q, only) in cases {
+            let mut f = f();
+            f.grep = Some(q.into());
+            f.grep_in = GrepIn::All;
+            assert!(hit(&f, &i), "전체가 {q} 를 못 찾았다");
+            for g in GrepIn::ORDER.into_iter().filter(|g| *g != GrepIn::All) {
+                f.grep_in = g;
+                assert_eq!(hit(&f, &i), g == only, "{} 범위가 {q} 에 틀렸다", g.name());
+            }
+        }
+        // 차례는 전체 → id → 제목 → 태그 → 본문 → 전체, 거꾸로도 돈다.
+        let mut g = GrepIn::All;
+        for want in [GrepIn::Id, GrepIn::Title, GrepIn::Tag, GrepIn::Body, GrepIn::All] {
+            g = g.next();
+            assert_eq!(g, want);
+            assert_eq!(g.prev().next(), g);
+        }
     }
 
     /// `--stale` 은 **지금 칸에 머문 기간**이다. 리뷰가 썩는 것을 찾는 데 쓴다.

@@ -1,0 +1,239 @@
+//! 목록에 **무엇을 보일까**(moai-fmv5). 거름망이 아니라 보기다 — 사람이 적은 물음(`SPC f`·`/`)과
+//! 따로 들고, 목록은 둘을 함께 통과한 줄만 세운다. Esc 는 거름망만 푼다: 늘 켜 두는 보기를 실수
+//! 한 번에 잃으면 done 이 도로 쏟아진다.
+//!
+//! **조각이다.** `App` 도 설정도 모른다. 처음 무엇을 숨길지(done)는 든 쪽이 정하고, 줄마다의
+//! 사실(묶음이면 멤버에서 읽은 칸, 물려받았든 미뤘는가)도 든 쪽이 재서 넘긴다 — 여기서 이슈를
+//! 풀어 칸을 다시 읽으면 목록의 글리프와 숨김이 다른 칸을 본다.
+
+/// 칸마다 보이는가, 미룬 것을 보이는가.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct View {
+    /// 숨긴 칸의 이름. **보인 쪽이 아니라 숨긴 쪽을 든다** — 설정에 칸이 새로 생기면 저절로
+    /// 보인다. 보인 쪽을 들면 새 칸의 줄이 이유 없이 사라진다.
+    pub hidden: Vec<String>,
+    pub hide_deferred: bool,
+}
+
+impl View {
+    /// 칸 하나를 숨긴 채로.
+    pub fn hiding(column: &str) -> View {
+        View { hidden: vec![column.to_string()], hide_deferred: false }
+    }
+
+    pub fn hides(&self, column: &str) -> bool {
+        self.hidden.iter().any(|h| h == column)
+    }
+
+    pub fn toggle(&mut self, column: &str) {
+        match self.hidden.iter().position(|h| h == column) {
+            Some(at) => {
+                self.hidden.remove(at);
+            }
+            None => self.hidden.push(column.to_string()),
+        }
+    }
+
+    /// 그 줄이 보이는가. `column` 은 묶음이면 멤버에서 읽은 칸이고, `known` 은 이 프로젝트의 칸이다.
+    ///
+    /// **숨김은 이 프로젝트에 있는 칸에만 건다**(moai-2kyl 단계 리뷰) — 뱃지([`View::badge`])와 같은 자다.
+    /// 보기는 사람의 설정이라 다른 프로젝트의 칸 이름을 들고 다니는데, 그 이름이 여기서 줄을 숨기면 뱃지도
+    /// 번호 토글도 없어 줄이 말없이 사라진다. 설정에서 칸 이름을 바꿔 옛 칸에 남은 줄도 그렇다.
+    pub fn shows(&self, column: &str, deferred: bool, known: &[String]) -> bool {
+        let hidden = self.hides(column) && known.iter().any(|k| k == column);
+        !hidden && !(deferred && self.hide_deferred)
+    }
+
+    /// 모두 보인다(`SPC s a`). **이 프로젝트의 칸만 걷는다**(moai-2kyl 단계 리뷰) — 다른 프로젝트에만 있는
+    /// 칸 이름은 여기서 아무것도 안 숨겼으니 들고 있는다. 통째로 비우면 그 프로젝트로 돌아갔을 때 숨겨 둔
+    /// 칸이 쏟아진다.
+    pub fn show_all(&mut self, known: &[String]) {
+        self.hidden.retain(|h| !known.contains(h));
+        self.hide_deferred = false;
+    }
+
+    /// 경로 줄에 댈 한 마디 — `done·미룸 숨김`. 숨긴 것이 없으면 없다.
+    ///
+    /// **이 프로젝트의 칸(`known`)만 댄다**(moai-2bzp). 보기는 사람의 설정이라 프로젝트를 옮겨도
+    /// 이어지는데, 다른 프로젝트에만 있는 칸 이름까지 대면 여기서는 번호 토글이 없어 걷을 길이 없다.
+    /// 그 이름은 버리지 않고 들고 있다 — 그 칸이 있는 프로젝트로 돌아가면 다시 숨는다. 여기서는 줄도
+    /// 안 숨긴다([`View::shows`]).
+    pub fn badge(&self, known: &[String]) -> Option<String> {
+        let mut names: Vec<&str> = self.hidden.iter().filter(|h| known.contains(h)).map(String::as_str).collect();
+        if self.hide_deferred {
+            names.push("미룸");
+        }
+        (!names.is_empty()).then(|| format!("{} 숨김", names.join("·")))
+    }
+}
+
+/// 목록 줄에 붙일 수 있는 열(moai-g7p8). 제목과 칸 글리프는 늘 선다 — 끄면 줄이 무엇인지 모른다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    Id,
+    Priority,
+    Assignee,
+    Created,
+    Updated,
+    /// 묶음의 `끝난/일` 셈.
+    Tally,
+    Tags,
+}
+
+impl Field {
+    pub fn word(self) -> &'static str {
+        match self {
+            Field::Id => "id",
+            Field::Priority => "우선순위",
+            Field::Assignee => "담당",
+            Field::Created => "생성",
+            Field::Updated => "수정",
+            Field::Tally => "셈",
+            Field::Tags => "태그",
+        }
+    }
+
+    /// 좁을 때 **걷는 차례** — 작을수록 먼저 걷힌다(사람의 결정: 날짜 → 담당 → 태그). id·우선순위·
+    /// 셈은 원래 목록 줄에 있던 것이라 이 차례로 걷지 않는다 — 켜 두면 제목 몫을 줄여서라도 선다.
+    pub fn drop_rank(self) -> Option<u8> {
+        match self {
+            Field::Created | Field::Updated => Some(0),
+            Field::Assignee => Some(1),
+            Field::Tags => Some(2),
+            Field::Id | Field::Priority | Field::Tally => None,
+        }
+    }
+
+    fn bit(self) -> u8 {
+        1 << self as u8
+    }
+
+    pub const ALL: [Field; 7] =
+        [Field::Id, Field::Priority, Field::Assignee, Field::Created, Field::Updated, Field::Tally, Field::Tags];
+
+    /// 설정 파일에 적는 이름(moai-2bzp). 화면의 낱말([`Field::word`])과 따로 둔다 — 낱말을 다듬은 날
+    /// 이미 적힌 설정이 안 읽히면 그건 다듬기가 아니라 마이그레이션이다.
+    pub fn name(self) -> &'static str {
+        match self {
+            Field::Id => "id",
+            Field::Priority => "priority",
+            Field::Assignee => "assignee",
+            Field::Created => "created",
+            Field::Updated => "updated",
+            Field::Tally => "tally",
+            Field::Tags => "tags",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<Field> {
+        Field::ALL.into_iter().find(|f| f.name() == name)
+    }
+}
+
+/// 켜 둔 열. 복사로 다닌다 — 키 표의 켜짐(`Ctx`)이 이것을 그대로 든다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fields(u8);
+
+/// **처음에는 원래 목록 줄 그대로다** — id·우선순위·셈. 열 토글이 생긴 날 화면이 바뀌면 안 된다.
+impl Default for Fields {
+    fn default() -> Fields {
+        Fields(Field::Id.bit() | Field::Priority.bit() | Field::Tally.bit())
+    }
+}
+
+impl Fields {
+    /// 아무 열도 안 켠 것 — 설정에서 읽은 이름을 하나씩 켤 때 쓴다.
+    pub fn none() -> Fields {
+        Fields(0)
+    }
+
+    pub fn shows(self, f: Field) -> bool {
+        self.0 & f.bit() != 0
+    }
+
+    pub fn toggle(&mut self, f: Field) {
+        self.0 ^= f.bit();
+    }
+
+    /// 둘 다 켠 열.
+    pub fn both(self, other: Fields) -> Fields {
+        Fields(self.0 & other.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fields_start_as_the_old_row_and_toggle_one_at_a_time() {
+        let mut f = Fields::default();
+        assert!(f.shows(Field::Id) && f.shows(Field::Priority) && f.shows(Field::Tally));
+        assert!(!f.shows(Field::Assignee) && !f.shows(Field::Created) && !f.shows(Field::Tags));
+        f.toggle(Field::Assignee);
+        assert!(f.shows(Field::Assignee) && f.shows(Field::Id), "하나를 켜며 다른 것을 건드렸다");
+        f.toggle(Field::Assignee);
+        assert_eq!(f, Fields::default());
+    }
+
+    /// 이 프로젝트의 칸 — 시험마다 같은 설정이다.
+    fn here() -> Vec<String> {
+        ["todo", "blocked", "done"].map(String::from).to_vec()
+    }
+
+    #[test]
+    fn a_hidden_column_comes_back_when_toggled_again() {
+        let mut v = View::hiding("done");
+        assert!(!v.shows("done", false, &here()));
+        assert!(v.shows("todo", true, &here()), "미룬 것은 처음에 보인다");
+        v.toggle("done");
+        assert_eq!(v, View::default());
+        v.toggle("done");
+        assert_eq!(v, View::hiding("done"), "두 번 누르면 제자리다");
+    }
+
+    #[test]
+    fn deferred_hides_on_its_own_axis() {
+        let v = View { hide_deferred: true, ..View::default() };
+        assert!(!v.shows("todo", true, &here()));
+        assert!(v.shows("todo", false, &here()), "미룸을 숨겨도 안 미룬 칸은 그대로다");
+    }
+
+    #[test]
+    fn a_column_the_config_adds_later_stays_visible() {
+        assert!(View::hiding("done").shows("blocked", false, &here()));
+    }
+
+    /// **숨김은 이 프로젝트의 칸에만 건다**(moai-2kyl 단계 리뷰). 다른 프로젝트에서 숨긴 칸 이름은 여기서 줄을
+    /// 숨기지도, 모두 보이기에 걷히지도 않는다 — 그 칸이 있는 프로젝트로 돌아가면 다시 숨는다.
+    #[test]
+    fn a_name_this_project_lacks_neither_hides_nor_is_cleared() {
+        let lacks: Vec<String> = ["todo", "done"].map(String::from).to_vec();
+        let mut v = View { hidden: vec!["blocked".into(), "done".into()], hide_deferred: true };
+        assert!(v.shows("blocked", false, &lacks), "이 프로젝트에 없는 칸 이름이 줄을 숨겼다");
+        assert!(!v.shows("done", false, &lacks));
+        v.show_all(&lacks);
+        assert_eq!(v, View { hidden: vec!["blocked".into()], hide_deferred: false });
+    }
+
+    #[test]
+    fn the_badge_names_what_is_hidden() {
+        let known: Vec<String> = ["todo", "review", "done"].map(String::from).to_vec();
+        assert_eq!(View::default().badge(&known), None);
+        assert_eq!(View::hiding("done").badge(&known).as_deref(), Some("done 숨김"));
+        let v = View { hidden: vec!["review".into(), "done".into()], hide_deferred: true };
+        assert_eq!(v.badge(&known).as_deref(), Some("review·done·미룸 숨김"));
+        // 다른 프로젝트의 칸 이름은 들고만 있고 대지 않는다.
+        let elsewhere = View { hidden: vec!["blocked".into(), "done".into()], hide_deferred: false };
+        assert_eq!(elsewhere.badge(&known).as_deref(), Some("done 숨김"));
+        assert_eq!(View::hiding("blocked").badge(&known), None);
+    }
+
+    #[test]
+    fn field_names_round_trip() {
+        for f in Field::ALL {
+            assert_eq!(Field::named(f.name()), Some(f));
+        }
+        assert_eq!(Field::named("우선순위"), None, "화면 낱말을 설정 이름으로 받았다");
+    }
+}

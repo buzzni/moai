@@ -286,7 +286,66 @@ pub enum Browse {
     Reload,
     Worktree,
     Raw,
+    /// 설정의 n 번째 칸(0부터)을 보이고 숨긴다(moai-fmv5). **칸 이름이 설정에서 오므로 글자가
+    /// 아니라 번호로 누른다** — 글자로 두면 설정에 따라 키가 겹친다.
+    Column(u8),
+    /// done 을 보이고 숨긴다 — 가장 자주 누를 것이라 번호와 따로 선다.
+    Done,
+    /// 미룬 것을 보이고 숨긴다. 칸이 아니라 `deferred_at` 축이다.
+    Deferred,
+    ShowAll,
+    /// 목록 차례를 고른다(moai-55cp). 이미 고른 것을 다시 누르면 거꾸로 선다.
+    Sort(Order),
+    /// 목록 줄의 열 하나를 켜고 끈다(moai-g7p8).
+    Cell(super::view::Field),
 }
+
+/// 목록 차례. **조각이라 `query::SortKey` 를 모른다** — `App` 이 둘을 잇는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Order {
+    #[default]
+    Priority,
+    Created,
+    Updated,
+    Column,
+    Assignee,
+    Title,
+}
+
+impl Order {
+    pub fn word(self) -> &'static str {
+        match self {
+            Order::Priority => "우선순위",
+            Order::Created => "생성",
+            Order::Updated => "수정",
+            Order::Column => "칸",
+            Order::Assignee => "담당",
+            Order::Title => "제목",
+        }
+    }
+
+    pub const ALL: [Order; 6] =
+        [Order::Priority, Order::Created, Order::Updated, Order::Column, Order::Assignee, Order::Title];
+
+    /// 설정 파일에 적는 이름(moai-2bzp) — 화면 낱말과 따로다(`view::Field::name` 과 같은 까닭).
+    pub fn name(self) -> &'static str {
+        match self {
+            Order::Priority => "priority",
+            Order::Created => "created",
+            Order::Updated => "updated",
+            Order::Column => "status",
+            Order::Assignee => "assignee",
+            Order::Title => "title",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<Order> {
+        Order::ALL.into_iter().find(|o| o.name() == name)
+    }
+}
+
+/// 칸 토글에 번호를 줄 수 있는 칸 수 — `1`~`9`. 넘는 칸은 번호가 없고 `SPC s a` 로만 돌아온다.
+pub const NUMBERED: usize = 9;
 
 /// 탐색의 이동(moai-ob4c, 키 지도 moai-hudg). **vi 키에 이름을 붙이고 화살표·Home·End·PgUp/Dn
 /// 은 숨은 별칭이다** — 바가 한 이름만 대야 좁은 창에서 덜 떨어진다. 드나들기만 거꾸로다:
@@ -362,6 +421,33 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Unregister, Some("SPC p d"), LEADER, Key::plain('p'), Key::plain('d')),
         row!(Worktree, Some("SPC t w"), LEADER, Key::plain('t'), Key::plain('w')),
         row!(Raw, Some("SPC t r"), LEADER, Key::plain('t'), Key::plain('r')),
+        row!(Done, Some("SPC s d"), LEADER, Key::plain('s'), Key::plain('d')),
+        row!(Deferred, Some("SPC s z"), LEADER, Key::plain('s'), Key::plain('z')),
+        row!(ShowAll, Some("SPC s a"), LEADER, Key::plain('s'), Key::plain('a')),
+        // 번호 줄은 첫 줄만 이름을 단다 — 도움말이 `SPC s 1` 과 "번호가 차례로 는다" 로 한 번에
+        // 대고, 메뉴는 이름이 아니라 키(`next.name()`)와 설정의 칸 이름을 세운다.
+        row!(Column(0), Some("SPC s 1"), LEADER, Key::plain('s'), Key::plain('1')),
+        row!(Column(1), None, LEADER, Key::plain('s'), Key::plain('2')),
+        row!(Column(2), None, LEADER, Key::plain('s'), Key::plain('3')),
+        row!(Column(3), None, LEADER, Key::plain('s'), Key::plain('4')),
+        row!(Column(4), None, LEADER, Key::plain('s'), Key::plain('5')),
+        row!(Column(5), None, LEADER, Key::plain('s'), Key::plain('6')),
+        row!(Column(6), None, LEADER, Key::plain('s'), Key::plain('7')),
+        row!(Column(7), None, LEADER, Key::plain('s'), Key::plain('8')),
+        row!(Column(8), None, LEADER, Key::plain('s'), Key::plain('9')),
+        row!(Sort(Order::Priority), Some("SPC o p"), LEADER, Key::plain('o'), Key::plain('p')),
+        row!(Sort(Order::Created), Some("SPC o c"), LEADER, Key::plain('o'), Key::plain('c')),
+        row!(Sort(Order::Updated), Some("SPC o u"), LEADER, Key::plain('o'), Key::plain('u')),
+        row!(Sort(Order::Column), Some("SPC o s"), LEADER, Key::plain('o'), Key::plain('s')),
+        row!(Sort(Order::Assignee), Some("SPC o a"), LEADER, Key::plain('o'), Key::plain('a')),
+        row!(Sort(Order::Title), Some("SPC o t"), LEADER, Key::plain('o'), Key::plain('t')),
+        row!(Cell(super::view::Field::Id), Some("SPC c i"), LEADER, Key::plain('c'), Key::plain('i')),
+        row!(Cell(super::view::Field::Priority), Some("SPC c p"), LEADER, Key::plain('c'), Key::plain('p')),
+        row!(Cell(super::view::Field::Assignee), Some("SPC c a"), LEADER, Key::plain('c'), Key::plain('a')),
+        row!(Cell(super::view::Field::Created), Some("SPC c c"), LEADER, Key::plain('c'), Key::plain('c')),
+        row!(Cell(super::view::Field::Updated), Some("SPC c u"), LEADER, Key::plain('c'), Key::plain('u')),
+        row!(Cell(super::view::Field::Tally), Some("SPC c n"), LEADER, Key::plain('c'), Key::plain('n')),
+        row!(Cell(super::view::Field::Tags), Some("SPC c g"), LEADER, Key::plain('c'), Key::plain('g')),
     ]
 };
 
@@ -380,6 +466,17 @@ pub struct Ctx {
     pub root: bool,
     pub worktree: bool,
     pub raw: bool,
+    /// 번호를 받은 칸 수 — 설정의 칸 수와 [`NUMBERED`] 중 작은 것.
+    pub columns: usize,
+    /// 숨긴 칸 — n 번째 비트가 설정의 n 번째 칸. 이름을 들지 않는다: 이 값은 복사로 다닌다.
+    pub hidden: u16,
+    pub done_hidden: bool,
+    pub deferred_hidden: bool,
+    /// 고른 차례와 거꾸로인가.
+    pub order: Order,
+    pub order_reversed: bool,
+    /// 켜 둔 목록 열.
+    pub fields: super::view::Fields,
     /// `Tab`·Shift-Tab 이 가는 칸의 이름.
     pub next_pane: &'static str,
     pub prev_pane: &'static str,
@@ -420,6 +517,9 @@ impl Browse {
                 Err(Off::Why(format!("거름망은 프로젝트 안의 줄에 건다 — {} 로 들어가서 건다", label(BROWSE, Enter))))
             }
             Worktree if c.layer => Err(Off::Quiet),
+            // 보기는 프로젝트 안의 줄에 건다 — 층에서는 그룹째 메뉴에 안 선다(`menu::live`).
+            Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer => Err(Off::Quiet),
+            Column(n) if usize::from(n) >= c.columns => Err(Off::Quiet),
             _ => Ok(()),
         }
     }
@@ -435,6 +535,9 @@ impl Browse {
             Unregister => "목록에서 빼기",
             Worktree => "워크트리 겹쳐 보기",
             Raw => "원문↔그리기",
+            ShowAll => "모두 보이기",
+            Sort(o) => o.word(),
+            Cell(f) => f.word(),
             _ => self.what(c),
         }
     }
@@ -445,6 +548,12 @@ impl Browse {
         match self {
             Browse::Worktree => Some(if c.worktree { "[켜짐]" } else { "[꺼짐]" }),
             Browse::Raw => Some(if c.raw { "[원문]" } else { "[그리기]" }),
+            Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0)),
+            Browse::Done => Some(shown(c.done_hidden)),
+            Browse::Deferred => Some(shown(c.deferred_hidden)),
+            // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
+            Browse::Sort(o) if o == c.order => Some(if c.order_reversed { "[● 거꾸로]" } else { "[● 차례]" }),
+            Browse::Cell(f) => Some(shown(!c.fields.shows(f))),
             _ => None,
         }
     }
@@ -474,8 +583,19 @@ impl Browse {
             Worktree => "워크트리",
             Raw if c.raw => "그리기",
             Raw => "원문",
+            // 칸의 이름은 설정에서 온다 — 메뉴가 이름을 붙인다(`menu::entries`).
+            Column(_) => "칸",
+            Done => "done",
+            Deferred => "미룸",
+            ShowAll => "모두",
+            Sort(_) => "정렬",
+            Cell(_) => "열",
         }
     }
+}
+
+fn shown(hidden: bool) -> &'static str {
+    if hidden { "[숨김]" } else { "[보임]" }
 }
 
 /// SPC 메뉴가 열린 동안 **표보다 먼저** 받는 키(moai-7sjm). Esc 는 탐색에서 거름망을 풀지만,
@@ -506,11 +626,16 @@ impl Menu {
 pub enum Prompt {
     Apply,
     Cancel,
+    /// 검색 칸에서 찾을 자리를 돌린다(moai-kojj) — 전체 → id → 제목 → 태그 → 본문. 다른 칸은 안 쓴다.
+    NextScope,
+    PrevScope,
 }
 
 pub const PROMPT: &[Bind<Prompt>] = &[
     row!(Prompt::Apply, Some("Enter"), Key::unctrl(KeyCode::Enter)),
     row!(Prompt::Cancel, Some("Esc"), Key::unctrl(KeyCode::Esc)),
+    row!(Prompt::NextScope, Some("Tab"), Key::unshift(KeyCode::Tab)),
+    row!(Prompt::PrevScope, Some("Shift-Tab"), Key::shift(KeyCode::Tab)),
 ];
 
 /// 고르기 창(moai-plvy).
@@ -994,6 +1119,16 @@ mod tests {
             (vec![sp, ch('p'), ch('d')], B::Unregister),
             (vec![sp, ch('t'), ch('w')], B::Worktree),
             (vec![sp, ch('t'), ch('r')], B::Raw),
+            (vec![sp, ch('s'), ch('d')], B::Done),
+            (vec![sp, ch('s'), ch('z')], B::Deferred),
+            (vec![sp, ch('s'), ch('a')], B::ShowAll),
+            (vec![sp, ch('s'), ch('1')], B::Column(0)),
+            (vec![sp, ch('s'), ch('9')], B::Column(8)),
+            (vec![sp, ch('o'), ch('p')], B::Sort(Order::Priority)),
+            (vec![sp, ch('o'), ch('u')], B::Sort(Order::Updated)),
+            (vec![sp, ch('o'), ch('t')], B::Sort(Order::Title)),
+            (vec![sp, ch('c'), ch('a')], B::Cell(super::super::view::Field::Assignee)),
+            (vec![sp, ch('c'), ch('g')], B::Cell(super::super::view::Field::Tags)),
         ];
         for (seq, act) in menu {
             assert_eq!(lookup(BROWSE, &seq), Lookup::Run(act), "메뉴 {seq:?}");
@@ -1032,7 +1167,8 @@ mod tests {
             (with(C::Enter, alt), Lookup::Run(Prompt::Apply)),
             (press(C::Esc), Lookup::Run(Prompt::Cancel)),
             (with(C::Enter, ctrl), Lookup::Unknown),
-            (press(C::Tab), Lookup::Unknown),
+            (press(C::Tab), Lookup::Run(Prompt::NextScope)),
+            (press(C::BackTab), Lookup::Run(Prompt::PrevScope)),
         ];
         for (k, want) in prompt {
             assert_eq!(one(PROMPT, k), want, "글칸 {k:?}");
@@ -1106,7 +1242,7 @@ mod tests {
             // 다른 문단에만 남은 키 — 목록 문단의 Tab.
             ("Tab 이 둘 사이를 옮기고", "둘 사이를 옮기고", &["Tab"][..], &["JOT: Tab"][..]),
             // 좁힌 표 — 같은 문단의 목록 Enter·Esc 로 지나가면 안 된다.
-            ("검색·거름망 칸은 Enter 로 걸고 Esc 로 그만둔다.", "검색·거름망 칸은 그 칸에서 걸고 그만둔다.", &["Enter", "Esc"][..], &["PROMPT: Enter", "PROMPT: Esc"][..]),
+            ("검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며", "검색·거름망 칸은 그 칸에서 걸고 그만두며", &["Enter", "Esc"][..], &["PROMPT: Enter", "PROMPT: Esc"][..]),
             // 좁힌 표 — 같은 문단의 고르기 창 Enter·Esc 로 지나가면 안 된다.
             ("(Enter 로 가고 Esc 로", "(가고", &["Enter", "Esc"][..], &["PATH: Enter", "PATH: Esc"][..]),
             // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Backspace 로 지나가면 안 된다.

@@ -50,10 +50,15 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 화면을 등록한 저장소 수만큼 늦출 까닭이 없다.
     let config = crate::user_config::path();
     let layer = crate::tui::layer::Layer::read(config.as_deref(), Some(&repo.root));
-    let mut app = App::open(repo, load, index, path, stamp).overlaid(origin, trouble, watched).attach_layer(layer);
+    let mut app = App::open(repo, load, index, path, stamp).overlaid(origin, trouble, watched);
     app.user = ctx.user.clone();
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
+    // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다 — 설정 자리를 넣은 **뒤에** 읽는다(moai-2bzp). 층은 **그다음에**
+    // 얹는다: 층이 첫 화면의 커서를 `..` 너머 첫 줄에 세우는데(`App::with_layer`), 처음값 보기로 세운 뒤
+    // 적어 둔 보기를 입히면 줄이 바뀌어 커서가 `..` 에 남거나 목록 밖에 선다(moai-2kyl 단계 리뷰).
+    app.load_look();
+    let mut app = app.attach_layer(layer);
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     screen(app)
@@ -113,6 +118,8 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let mut app = App::on_projects(crate::tui::layer::Layer::read(config.as_deref(), None));
     app.user = ctx.user.clone();
     app.user_config = config;
+    // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다 — 설정 자리를 넣은 **뒤에** 읽는다(moai-2bzp).
+    app.load_look();
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     screen(app)
@@ -676,10 +683,10 @@ mod tests {
         assert!(!app.quit, "붙인 q 가 끝냈다");
         take(&mut app, Event::Key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE)));
         take(&mut app, Event::Paste("a\tb\r".into()));
-        assert_eq!(app.mode, Mode::Grep(Input::new("a b")));
+        assert_eq!(app.mode, Mode::Grep(Input::new("a b"), crate::query::GrepIn::All));
         let release = KeyEvent::new_with_kind_and_state(KeyCode::Esc, KeyModifiers::NONE, KeyEventKind::Release, KeyEventState::NONE);
         take(&mut app, Event::Key(release));
-        assert!(matches!(app.mode, Mode::Grep(_)), "뗀 키를 먹었다");
+        assert!(matches!(app.mode, Mode::Grep(..)), "뗀 키를 먹었다");
     }
 
     /// 켜고 끄는 글은 **xterm 의 2004 번**이다. 끄는 글이 패닉 훅에도 쓰이므로 여기서 박아 둔다 —

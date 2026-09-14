@@ -155,6 +155,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         assignee: a.assignee,
         kind,
         grep: a.grep,
+        grep_in: crate::query::GrepIn::All,
         stale: a.stale,
         all: a.all,
         ideas: false,

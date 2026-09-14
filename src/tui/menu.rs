@@ -23,7 +23,7 @@ use ratatui::crossterm::event::KeyEvent;
 
 /// 하위 접두어의 이름. 표에는 동작만 있고 묶음의 이름은 없어 여기 둔다 — 이름 없는 접두어는
 /// 시험(`every_prefix_in_the_menu_has_a_name`)이 막는다.
-const GROUPS: &[(&str, &str)] = &[("SPC p", "프로젝트"), ("SPC t", "토글")];
+const GROUPS: &[(&str, &str)] = &[("SPC p", "프로젝트"), ("SPC t", "토글"), ("SPC s", "보기"), ("SPC o", "정렬"), ("SPC c", "열")];
 
 /// 메뉴가 열렸나.
 pub fn open(chord: &Chord) -> bool {
@@ -88,8 +88,9 @@ impl Entry {
     }
 }
 
-/// 지금 층(`held`)에 선 항목. 차례는 표의 차례다.
-pub fn entries(held: &[KeyEvent], c: &Ctx) -> Vec<Entry> {
+/// 지금 층(`held`)에 선 항목. 차례는 표의 차례다. `columns` 는 설정의 칸 이름이다 — 칸 토글
+/// (`SPC s 1`)의 낱말이 거기서 온다. 표는 칸 이름을 모른다.
+pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
     let mut seen = Vec::new();
     let mut out = Vec::new();
     for b in BROWSE.iter().filter(|b| b.seq.len() > held.len() && under(b, held)) {
@@ -102,7 +103,12 @@ pub fn entries(held: &[KeyEvent], c: &Ctx) -> Vec<Entry> {
         seq.push(next.event());
         match lookup(BROWSE, &seq) {
             Lookup::Run(act) if act.enabled(c).is_ok() => {
-                out.push(Entry { key: next.name(), what: act.menu_word(c).into(), state: act.state(c) });
+                let what = match act {
+                    // 설정에 이름이 없으면 표의 낱말로 — 낱말은 표 한 곳에만 둔다.
+                    Browse::Column(n) => columns.get(usize::from(n)).map_or(act.menu_word(c), String::as_str),
+                    _ => act.menu_word(c),
+                };
+                out.push(Entry { key: next.name(), what: what.into(), state: act.state(c) });
             }
             Lookup::Pending if live(&seq, c) => {
                 out.push(Entry { key: next.name(), what: format!("+{}", group(&seq)), state: None });
@@ -272,10 +278,27 @@ mod tests {
         assert_eq!(feed(&mut ch, &inside(), k(' ')), None);
         assert!(open(&ch));
         assert_eq!(title(ch.held()), "SPC");
-        let root = entries(ch.held(), &inside());
-        assert_eq!(keys_of(&root), ["/", "f", "n", "r", "q", "p", "t"]);
+        let root = entries(ch.held(), &inside(), &[]);
+        assert_eq!(keys_of(&root), ["/", "f", "n", "r", "q", "p", "t", "s", "o", "c"]);
         let what: Vec<&str> = root.iter().map(|e| e.what.as_str()).collect();
-        assert_eq!(what, ["검색", "거름망", "생각 담기", "다시 읽기", "끝내기", "+프로젝트", "+토글"]);
+        assert_eq!(what, ["검색", "거름망", "생각 담기", "다시 읽기", "끝내기", "+프로젝트", "+토글", "+보기", "+정렬", "+열"]);
+    }
+
+    /// **칸 토글은 설정의 칸 이름을 번호에 붙이고, 있는 칸 수만큼만 선다**(moai-fmv5). 숨김은
+    /// 낱말로 댄다 — 색이 혼자 뜻을 지지 않는다.
+    #[test]
+    fn the_view_menu_numbers_the_configured_columns() {
+        let columns: Vec<String> = ["todo", "in_progress", "done"].map(String::from).to_vec();
+        let c = Ctx { columns: 3, hidden: 0b100, done_hidden: true, ..inside() };
+        let items = entries(&[k(' '), k('s')], &c, &columns);
+        assert_eq!(keys_of(&items), ["d", "z", "a", "1", "2", "3"]);
+        let text: Vec<String> = items.iter().map(Entry::text).collect();
+        assert_eq!(text, ["done [숨김]", "미룸 [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]);
+        let mut ch = Chord::default();
+        for x in [' ', 's', '4'] {
+            assert_eq!(feed(&mut ch, &c, k(x)), None, "없는 칸의 번호가 돌았다");
+        }
+        assert!(keys_of(&entries(&[k(' ')], &layer(), &columns)).iter().all(|k| *k != "s"), "층에서 보기가 섰다");
     }
 
     fn e(key: &str, what: &str) -> Entry {
@@ -391,7 +414,7 @@ mod tests {
         }
         feed(&mut ch, &c, k('t'));
         assert_eq!(title(ch.held()), "SPC t");
-        assert_eq!(keys_of(&entries(ch.held(), &c)), ["w", "r"]);
+        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["w", "r"]);
         feed(&mut ch, &c, k('x'));
         assert_eq!(title(ch.held()), "SPC t", "하위 층의 모르는 키가 메뉴를 옮겼다");
         feed(&mut ch, &c, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
@@ -408,15 +431,15 @@ mod tests {
     /// 안 선 키는 눌러도 모르는 키다.
     #[test]
     fn entries_hide_what_is_not_enabled_here() {
-        let root_in = entries(&[k(' ')], &inside());
-        let root_layer = entries(&[k(' ')], &layer());
+        let root_in = entries(&[k(' ')], &inside(), &[]);
+        let root_layer = entries(&[k(' ')], &layer(), &[]);
         assert_eq!(keys_of(&root_layer), ["n", "r", "q", "p", "t"], "층에서 검색·거름망이 섰다");
         assert!(keys_of(&root_in).contains(&"f"));
-        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &inside())), ["a"], "프로젝트 안에서 해제가 섰다");
-        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &layer())), ["a", "d"]);
+        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &inside(), &[])), ["a"], "프로젝트 안에서 해제가 섰다");
+        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &layer(), &[])), ["a", "d"]);
         let detail = Ctx { list_focus: false, ..layer() };
-        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &detail)), ["a"], "상세 포커스에서 해제가 섰다");
-        assert_eq!(keys_of(&entries(&[k(' '), k('t')], &layer())), ["r"], "층에서 워크트리가 섰다");
+        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &detail, &[])), ["a"], "상세 포커스에서 해제가 섰다");
+        assert_eq!(keys_of(&entries(&[k(' '), k('t')], &layer(), &[])), ["r"], "층에서 워크트리가 섰다");
 
         let mut ch = Chord::default();
         for x in [' ', 't', 'w'] {
@@ -433,7 +456,7 @@ mod tests {
     /// **토글은 지금 상태를 낱말로 댄다** — 색이 혼자 뜻을 지지 않는다.
     #[test]
     fn toggles_show_their_state_in_words() {
-        let states = |c: Ctx| -> Vec<Option<&'static str>> { entries(&[k(' '), k('t')], &c).iter().map(|e| e.state).collect() };
+        let states = |c: Ctx| -> Vec<Option<&'static str>> { entries(&[k(' '), k('t')], &c, &[]).iter().map(|e| e.state).collect() };
         assert_eq!(states(inside()), [Some("[꺼짐]"), Some("[그리기]")]);
         assert_eq!(states(Ctx { worktree: true, raw: true, ..inside() }), [Some("[켜짐]"), Some("[원문]")]);
     }

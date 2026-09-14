@@ -474,6 +474,7 @@ impl App {
         self.index = Index::of(&[]);
         self.states = Default::default();
         self.keep = Vec::new();
+        self.shown = Vec::new();
         self.unreadable = Vec::new();
         self.origin = Default::default();
         self.elsewhere = Vec::new();
@@ -482,6 +483,10 @@ impl App {
         self.stamp = None;
         self.warnings = 0;
         self.filter_text = None;
+        // **보기는 돌리지 않는다**(moai-2bzp). 보기·정렬·열은 사람의 설정이라 사용자 설정에 적혀
+        // 프로젝트를 옮겨도 이어진다 — 한때(moai-fmv5) 여기서 처음값으로 돌렸는데, 그러면 저장한
+        // 보기가 층을 한 번 오갈 때마다 사라진다. 그때의 까닭(다른 프로젝트의 칸 이름이 뱃지에 남아
+        // 걷을 길이 없다)은 뱃지가 이 프로젝트의 칸만 대게 해 풀었다(`View::badge`).
         // **겹쳐 보기는 기본값(켬)으로 돌린다.** 한 프로젝트에서 `w` 로 끈 것은 그
         // 프로젝트에 매인 뜻이다 — 층에서는 `w` 가 안 먹어 되켤 길이 없는 채로, 다음
         // 프로젝트가 시키지도 않은 끈 화면으로 읽힌다. 거름망과 같은 까닭이다.
@@ -589,7 +594,7 @@ impl App {
             let l = self.layer.as_ref()?;
             l.position(want).or_else(|| l.places.iter().position(|p| same_dir(&p.path, want)))
         });
-        let found = landed.or_else(|| held.as_ref().and_then(|a| rows.iter().position(|r| &self.anchor_of(r) == a)));
+        let found = landed.or_else(|| held.as_ref().and_then(|a| self.row_of(&rows, a)));
         let cursor = found.unwrap_or(self.cursor.min(rows.len().saturating_sub(1)));
         // **정체로 가른다, 번호로 가르지 않는다.** 뺀 줄의 번호에 다음 프로젝트가 올라서면 번호는
         // 같아도 다른 것을 보고, 층이 새로 서며 `..` 이 끼면 번호가 밀려도 같은 것을 본다.
@@ -886,6 +891,11 @@ mod tests {
         assert!(a.worktree, "프로젝트에 들어갔는데 겹쳐 보기가 꺼져 있다");
         a.hit("SPC t w");
         assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
+        // 보기는 사람의 설정이라 **따라간다**(moai-2bzp) — 겹쳐 보기와 반대다.
+        a.hit("SPC s d");
+        a.hit("SPC o t");
+        let (view, order) = (a.view.clone(), a.order);
+        assert!(!view.hides(crate::config::DONE), "프로젝트 안에서 SPC s d 가 done 을 안 보였다");
 
         a.key(key(KeyCode::Home));
         a.key(key(KeyCode::Backspace));
@@ -895,6 +905,7 @@ mod tests {
         a.key(key(KeyCode::Down));
         a.key(key(KeyCode::Enter));
         assert!(a.worktree, "다음 프로젝트가 시키지 않은 끈 화면으로 읽혔다");
+        assert_eq!((a.view.clone(), a.order), (view, order), "보기·정렬이 층을 오가며 처음으로 돌아갔다");
     }
 
     /// **설정이 깨져 층이 안 서도 까닭은 댄다.** 등록한 것이 하나도 안 읽히면 층은 없고
@@ -1140,7 +1151,7 @@ mod tests {
     fn target(a: &App) -> Option<PathBuf> {
         match &a.mode {
             Mode::Idea(f) => f.into.as_ref().map(|t| t.path.clone()),
-            Mode::Ask(_) | Mode::Browse | Mode::Grep(_) | Mode::Filter(_) | Mode::Pick(_) | Mode::Unregister(_) => None,
+            Mode::Ask(_) | Mode::Browse | Mode::Grep(..) | Mode::Filter(_) | Mode::Pick(_) | Mode::Unregister(_) => None,
         }
     }
 
