@@ -1751,3 +1751,52 @@
 {"ts":"2026-09-14T12:04:05Z","id":"moai-8m81","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T12:05:37Z","id":"moai-rvcb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"중복 moai-8m81 을 지웠다 (2026-09-14, 사용자와 정함) — 옆 세션이 같은 moai-bxen 을 1분 뒤 main 에서 집었다가(c79d2f5) 코드 없이 접었다. 이쪽을 남긴다."}
 {"ts":"2026-09-14T12:05:37Z","id":"moai-8m81","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"CLI moai show <id> 상세가 막음 줄을 탐색기와 같은 낱말(막힘·풀림·끊김·미룸)로 그린다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-z3lo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"막음·소속을 표면마다 같게 읽는다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-i9g6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLI moai show <id> 상세에 막음 줄을 그린다 — 지금은 탐색기에만 있다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-w6n2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ready --json 도 미룬 막음·빈 묶음에 막힌 일을 싣는다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-lg2t","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ready 가 종류 다른 쌍둥이에게 가려진 줄을 집을 일로 내지 않는다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-k9yb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽 줄이 id 부모 이슈의 에픽을 물려받지 않는다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-jwnr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 줄이 제 milestone 필드로 다른 마일스톤에 속하지 않는다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-mhxf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"edit --milestone <다른 것> 이 에픽·부모에게 지면 한 줄로 말한다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-isyy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"묶음 멤버 셈을 한 벌로 — rollup_of·members_in·group_members"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-z3lo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-bxen 에서 펼쳤다 — CLI moai show <id> 상세가 blocked_by 를 안 그린다 — 막음 줄은 탐색기에만 있다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-bxen","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-z3lo 로 펼쳤다 (이슈 7건)"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-vycf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쓰기와 설정의 모서리"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-52z9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"저널만 못 적은 쓰기를 실패로 내지 않는다 — 다시 누르면 같은 줄이 둘 선다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-r9qa","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"user_config 쓰기가 손으로 적은 표 모양 color 를 덮지 않고 끝 줄바꿈을 지킨다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-ynsb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":".moai 밖 status 가 등록 없음·깨진 설정에서 0 으로 끝난다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-yxae","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tui --json 이 .moai 밖에서도 JSON 계약을 지킨다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-mckp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"MOAI_BLESS=0 을 거짓으로 읽고, 깨진 plugin.json 도 bless 로 고친다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-vycf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-hbqc 에서 펼쳤다 — 저널만 못 적은 쓰기가 '쓰지 못했다' 로 나가 다시 누르면 같은 것이 둘 선다"}
+{"ts":"2026-09-14T12:05:44Z","id":"moai-hbqc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vycf 로 펼쳤다 (이슈 5건)"}
+{"ts":"2026-09-14T12:05:51Z","id":"moai-5e7w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"idea 추림 3 — 소속·표시가 조용히 틀리는 자리"}
+{"ts":"2026-09-14T12:05:51Z","id":"moai-hxz5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ready 가 종류 다른 쌍둥이에게 가려진 줄을 집을 일로 내고 '에픽 없음' 을 단다 (moai-o6e0)"}
+{"ts":"2026-09-14T12:05:51Z","id":"moai-6eny","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"edit --milestone <다른 것> 이 에픽·부모가 이기는 줄에서 조용히 안 먹는다 (moai-glix)"}
+{"ts":"2026-09-14T12:05:51Z","id":"moai-aucs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"소속 오르기의 두 틈 — 에픽 줄이 id 부모 이슈의 에픽을 물려받고, 마일스톤 줄이 제 milestone 필드를 센다 (moai-cl8h·moai-8tav)"}
+{"ts":"2026-09-14T12:05:51Z","id":"moai-0cl3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"층 안내가 대는 경로가 붙여 넣으면 다른 디렉터리다 — shell_word 두 벌을 하나로 (moai-c34w·moai-gijm)"}
+{"ts":"2026-09-14T12:05:51Z","id":"moai-w3xk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"저널만 못 적은 쓰기가 '쓰지 못했다' 로 나가 다시 치면 같은 줄이 둘 선다 (moai-hbqc)"}
+{"ts":"2026-09-14T12:05:51Z","id":"moai-bqo7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"user_config 쓰기의 두 모서리 — 표 모양 color 덮어쓰기, 끝 줄바꿈 늘어남 (moai-70ix)"}
+{"ts":"2026-09-14T12:05:51Z","id":"moai-5e7w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-o6e0 에서 펼쳤다 — ready 가 종류 다른 쌍둥이에게 가려진 이슈 줄을 집을 일로 내고 '에픽 없음' 을 단다"}
+{"ts":"2026-09-14T12:05:51Z","id":"moai-o6e0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-5e7w 로 펼쳤다 (이슈 6건)"}
+{"ts":"2026-09-14T12:06:03Z","id":"moai-i9g6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-bxen 에서 펼침(idea 추림 3, 2026-09-14). 원문과 재현은 moai show moai-bxen."}
+{"ts":"2026-09-14T12:06:03Z","id":"moai-w6n2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-mwzf 에서 펼침(idea 추림 3, 2026-09-14). 원문과 재현은 moai show moai-mwzf."}
+{"ts":"2026-09-14T12:06:03Z","id":"moai-mwzf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"idea 추림 3 으로 펼침 — moai-w6n2 가 이어받는다"}
+{"ts":"2026-09-14T12:06:03Z","id":"moai-lg2t","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-o6e0 에서 펼침(idea 추림 3, 2026-09-14). 원문과 재현은 moai show moai-o6e0."}
+{"ts":"2026-09-14T12:06:03Z","id":"moai-o6e0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"idea 추림 3 으로 펼침 — moai-lg2t 가 이어받는다"}
+{"ts":"2026-09-14T12:06:03Z","id":"moai-k9yb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-cl8h 에서 펼침(idea 추림 3, 2026-09-14). 원문과 재현은 moai show moai-cl8h."}
+{"ts":"2026-09-14T12:06:03Z","id":"moai-cl8h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"idea 추림 3 으로 펼침 — moai-k9yb 가 이어받는다"}
+{"ts":"2026-09-14T12:06:03Z","id":"moai-jwnr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-8tav 에서 펼침(idea 추림 3, 2026-09-14). 원문과 재현은 moai show moai-8tav."}
+{"ts":"2026-09-14T12:06:03Z","id":"moai-8tav","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"idea 추림 3 으로 펼침 — moai-jwnr 가 이어받는다"}
+{"ts":"2026-09-14T12:06:04Z","id":"moai-mhxf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-glix 에서 펼침(idea 추림 3, 2026-09-14). 원문과 재현은 moai show moai-glix."}
+{"ts":"2026-09-14T12:06:04Z","id":"moai-glix","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"idea 추림 3 으로 펼침 — moai-mhxf 가 이어받는다"}
+{"ts":"2026-09-14T12:06:04Z","id":"moai-isyy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-bjqj 에서 펼침(idea 추림 3, 2026-09-14). 원문과 재현은 moai show moai-bjqj."}
+{"ts":"2026-09-14T12:06:04Z","id":"moai-bjqj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"idea 추림 3 으로 펼침 — moai-isyy 가 이어받는다"}
+{"ts":"2026-09-14T12:06:04Z","id":"moai-52z9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-hbqc 에서 펼침(idea 추림 3, 2026-09-14). 원문과 재현은 moai show moai-hbqc."}
+{"ts":"2026-09-14T12:06:04Z","id":"moai-r9qa","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-70ix 에서 펼침(idea 추림 3, 2026-09-14). 원문과 재현은 moai show moai-70ix."}
+{"ts":"2026-09-14T12:06:04Z","id":"moai-70ix","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"idea 추림 3 으로 펼침 — moai-r9qa 가 이어받는다"}
+{"ts":"2026-09-14T12:06:04Z","id":"moai-ynsb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ndo7 에서 펼침(idea 추림 3, 2026-09-14). 원문과 재현은 moai show moai-ndo7."}
+{"ts":"2026-09-14T12:06:05Z","id":"moai-ndo7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"idea 추림 3 으로 펼침 — moai-ynsb 가 이어받는다"}
+{"ts":"2026-09-14T12:06:05Z","id":"moai-yxae","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-9gw8 에서 펼침(idea 추림 3, 2026-09-14). 원문과 재현은 moai show moai-9gw8."}
+{"ts":"2026-09-14T12:06:05Z","id":"moai-9gw8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"idea 추림 3 으로 펼침 — moai-yxae 가 이어받는다"}
+{"ts":"2026-09-14T12:06:05Z","id":"moai-mckp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-x9s4 에서 펼침(idea 추림 3, 2026-09-14). 원문과 재현은 moai show moai-x9s4."}
+{"ts":"2026-09-14T12:06:05Z","id":"moai-x9s4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"idea 추림 3 으로 펼침 — moai-mckp 가 이어받는다"}
