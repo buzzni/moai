@@ -138,6 +138,9 @@ PLAN
   제목의 앞머리 [ 와 끝 #낱말 은 \\ 를 앞에 붙인다.
   --dry-run 이 heredoc 오타로 여섯 개를 잘못 만드는 것을 막는다.
 
+계획 템플릿 (`{{이름}}` 을 --var 로 채운다, 변수는 전부 필수):
+  moai add --from .moai/templates/release.md --var version=1.2
+
 제목이 `--` 로 시작해도 된다. 아는 플래그가 아니면 제목으로 읽는다.")]
     Add(AddArgs),
     /// 하나를 펼치거나 목록을 낸다
@@ -426,6 +429,10 @@ pub struct PromoteArgs {
     #[arg(long, value_name = "파일|-")]
     pub from: String,
 
+    /// 계획 템플릿의 `{{이름}}` 을 채운다 (여러 번 준다) — `add --from` 과 같은 규칙
+    #[arg(long = "var", value_name = "이름=값")]
+    pub var: Vec<String>,
+
     /// 만들지 않고 무엇이 만들어질지만 낸다
     #[arg(long)]
     pub dry_run: bool,
@@ -487,6 +494,14 @@ pub struct AddArgs {
     /// 있으면 못 채울 요구로 보고 조용히 건너뛴다. **바로 그 자리가 구멍이다.**
     #[arg(long)]
     pub dry_run: bool,
+
+    /// 계획 템플릿의 `{{이름}}` 을 채운다 (`--from` 과 함께, 여러 번 준다)
+    ///
+    /// **변수는 전부 필수다**(moai-ahyz) — 못 채운 이름·빈 값·줄바꿈이 든 값·계획에 없는 이름·같은
+    /// 이름 두 번은 거절하고 아무것도 안 만든다. 이름은 영문·숫자·`_`·`-` 이고, 값은 늘 제목 글자라
+    /// 변수는 제목 자리에만 둔다. `--dry-run` 과 같은 까닭으로 `--from` 없이 주면 거절한다.
+    #[arg(long = "var", value_name = "이름=값")]
+    pub var: Vec<String>,
 
     /// id 만 낸다 (스크립트용)
     #[arg(short, long)]

@@ -5,7 +5,6 @@
 
 use super::{Ctx, Fail, R};
 use crate::cli::PromoteArgs;
-use crate::draft;
 use crate::model::{self, Issue, JournalEntry, Status};
 use crate::store::Repo;
 use crate::style::{self, paint};
@@ -34,8 +33,8 @@ fn not_an_idea(id: &str, i: &Issue) -> Fail {
 /// 지울 때 idea 도 고쳐야 하고, 그건 파생값을 저장한 대가다.
 pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
-    let src = crate::cmd::add::read_source(&args.from)?;
-    let drafts = draft::parse(&src).map_err(|e| Fail::coded(e, super::code::BAD_INPUT))?;
+    // `add --from` 과 **한 길**이다 — 읽기·템플릿 채우기·형식 읽기(moai-cypw).
+    let drafts = crate::cmd::add::read_plan(&args.from, &args.var)?;
 
     // **연습은 저장소를 안 만진다.** AI 가 펼친 안을 사람이 한 번 보고
     // "좋다" 하는 자리라, 여기서 쓰면 그 "좋다" 가 뒤늦은 말이 된다.

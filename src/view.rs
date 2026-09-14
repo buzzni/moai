@@ -315,7 +315,7 @@ pub fn bar(percent: Option<u8>) -> String {
             let filled = crate::text::bar_fill(Some(p), BAR);
             format!(
                 "{}{}",
-                paint(style::status_style("done"), &"█".repeat(filled)),
+                paint(style::BAR, &"█".repeat(filled)),
                 paint(style::DIM, &"░".repeat(BAR - filled))
             )
         }
