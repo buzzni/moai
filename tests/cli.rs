@@ -5938,6 +5938,29 @@ fn project_color_finds_every_spelling_that_rm_can_remove() {
     assert!(json.contains("\"removed\":[\""), "{json}");
 }
 
+/// **안내가 대는 명령은 붙여 넣으면 그 디렉터리로 풀린다.** 경로를 화면용 `one_line` 에
+/// 지나게 한 뒤 감쌌을 때는 이름 속 탭이 빈칸이 된 채 인용돼, 시키는 대로 치면 없는
+/// 디렉터리를 가리켰다(moai-0cl3). 제어문자는 `$'…'` 로 한 줄에 원문 그대로 선다.
+#[test]
+fn a_hint_spells_a_path_with_a_tab_so_the_shell_gets_that_directory() {
+    let home = Scratch::new("project-tab");
+    let config = home.path().join("config.toml");
+    let odd = home.path().join("a\tb");
+    std::fs::create_dir_all(&odd).unwrap();
+
+    let said = project_ok(home.path(), &config, &["project", "add", odd.to_str().unwrap()]);
+    assert!(said.contains(r"a\tb'") && said.contains("$'"), "init 안내가 탭을 원문으로 안 적었다 — {said}");
+    // 머리 줄(`등록함 …`)은 화면용이라 빈칸으로 접는 것이 맞다 — 명령 안의 철자만 본다.
+    assert!(!said.contains("a b'"), "명령 안에서 탭을 빈칸으로 바꿔 적었다 — {said}");
+
+    let other = home.path().join("c\td");
+    std::fs::create_dir_all(&other).unwrap();
+    let out = project(home.path(), &config, &["project", "color", other.to_str().unwrap(), "green"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{}", text(&out));
+    assert!(err.contains(r"c\td'") && err.contains("moai project add $'"), "거절문의 add 가 탭을 원문으로 안 적었다 — {err}");
+}
+
 /// 없는 디렉터리와 파일은 거절하고, 설정은 만들지도 않는다.
 #[test]
 fn project_add_refuses_what_is_not_a_directory() {
