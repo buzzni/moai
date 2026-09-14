@@ -617,6 +617,32 @@ mod tests {
         assert!(none.notice.as_deref().is_some_and(|n| n.contains("자리를 모른다")), "{:?}", none.notice);
     }
 
+    /// **등록이 0 인 채 `.moai` 밖에서 띄우면 빈 층이 서고 `SPC p a` 를 댄다**(moai-r8kl, 사용자와
+    /// 정함). 빈 화면이 실수를 성공으로 읽히지 않게 무엇을 할지 한 줄로 말하고, 그 키로 첫 등록을
+    /// 하면 그 자리에서 층에 줄이 선다.
+    #[test]
+    fn with_nothing_registered_the_empty_layer_says_how_and_a_registers_the_first() {
+        let s = Scratch::new("empty");
+        let cfg = s.register(&[]);
+        let argos = s.project("work/argos");
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        a.launched_at = Some(s.0.join("work"));
+        assert!(a.on_layer() && a.repo.is_none());
+
+        let screen = crate::tui::draw::tests::render(&mut a, 80, 12).join("\n");
+        assert!(screen.contains("등록한 프로젝트가 없다") && screen.contains("SPC p a"), "{screen}");
+
+        a.hit("SPC p a");
+        point(&mut a, "argos");
+        a.key(key(KeyCode::Char('a')));
+        assert_eq!(s.registered(), [argos.clone()]);
+        press(&mut a, &[KeyCode::Esc]);
+        assert!(a.on_layer());
+        assert_eq!(place_at_cursor(&a), argos);
+        let screen = crate::tui::draw::tests::render(&mut a, 80, 12).join("\n");
+        assert!(!screen.contains("등록한 프로젝트가 없다"), "등록했는데 안내가 남았다 — {screen}");
+    }
+
     /// **등록이 0 인 채 `.moai` 안에서 띄워도 `a` 로 첫 등록을 한다.** 층이 그 자리에서 서되
     /// 지금 프로젝트는 그대로다 — 뿌리에 `..` 이 새로 서도 커서는 보던 줄에 선다. 그 뒤
     /// Bksp 로 올라가면 띄운 자리와 새 프로젝트가 층에 선다.
