@@ -92,7 +92,7 @@ pub fn registered(worktree: bool) -> R<(crate::user_config::Registry, Vec<crate:
     Ok((reg, projects))
 }
 
-/// `.moai` 밖인데 등록한 것도 없을 때의 말 — `ready`·`tui --json` 은 이 말로 멈추고, `status` 는
+/// `.moai` 밖인데 등록한 것도 없을 때의 말 — `ready` 는 이 말로 멈추고, `status` 는
 /// 같은 말을 내고 0 으로 끝난다(moai-ynsb).
 /// 화면의 `tui` 는 멈추지 않고 빈 층에서 `SPC p a` 를 댄다(moai-r8kl).
 /// 목록이 빈 까닭이 사용자 설정의 문제일 수 있어 그것도 붙인다.
@@ -209,8 +209,8 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
         out.push("다른 곳의 프로젝트를 여기서 한눈에 보려면 `moai project add <dir>` 로 등록한다".into());
         // **목록이 빈 까닭이 설정의 문제면 그것을 댄다.** 세션은 여기서 시작하는데, 설정이
         // 깨져 등록한 것이 안 읽힌 사람에게 "등록한 것이 없다, 더하라" 만 하면 정반대를
-        // 믿고 깨진 파일에 `project add` 를 친다. `status`·`ready`·`tui` 는 이미 이 줄을 댄다
-        // (`nothing_registered`). 도움말 자리라 종료 코드는 그대로 0 이다.
+        // 믿고 깨진 파일에 `project add` 를 친다. `status`·`ready` 는 이미 이 줄을 대고
+        // (`nothing_registered`), `tui --json` 은 `problems` 에 싣는다. 도움말 자리라 종료 코드는 그대로 0 이다.
         for p in reg.iter().flat_map(|r| &r.problems) {
             out.push(crate::style::paint(crate::style::WARN, &format!("! {}", crate::text::one_line(p))));
         }
