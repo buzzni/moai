@@ -1204,7 +1204,10 @@ pub fn closing(issues: &[Issue], cfg: &Config, warnings: usize, before: Option<u
     let mut lines = Vec::new();
     let wip = report::wip(issues, cfg);
     if !wip.is_empty() {
-        lines.push("아직 집고 있는 것이 있다. 실제로 끝났으면 옮기고, 안 할 것이면 미룬다.".to_string());
+        lines.push(
+            "아직 집고 있는 것이 있다. 실제로 끝났으면 옮기고, 안 할 것이면 미루고, 이어서 할 것이면 다음 세션에 한 줄 남긴다."
+                .to_string(),
+        );
         for i in &wip {
             // **그 줄이 갈 수 있는 칸만 댄다.** 모두에게 `review|done` 을 일러 주던
             // 판은 이미 review 인 줄에 제자리걸음을 시켰고, `|` 는 그대로 치면 파이프다.
@@ -1222,6 +1225,7 @@ pub fn closing(issues: &[Issue], cfg: &Config, warnings: usize, before: Option<u
             }
             lines.push(format!("  moai mv {} {last}     {}", i.id, i.title));
             lines.push(format!("  moai defer {} -m \"왜\"      지금 안 할 것이면", i.id));
+            lines.push(format!("  {}      이어서 할 것이면", crate::guide::handoff(&i.id)));
         }
     }
     // **굴러가는 리뷰와 지금 집은 것에 매인 리뷰만 센다.** 저장소에 남은 옛
@@ -2097,6 +2101,7 @@ mod tests {
         assert!(why.contains("moai mv t-1 review\n") && why.contains("moai mv t-1 done"), "{why}");
         assert!(!why.contains('|'), "그대로 치면 파이프가 되는 줄을 일러 준다\n{why}");
         assert!(why.contains("moai defer t-1"), "{why}");
+        assert!(why.contains(&crate::guide::handoff("t-1")), "이어받을 한 줄을 안 일러 준다\n{why}");
     }
 
     /// **이미 review 인 줄에 review 로 옮기라고 하지 않는다.** 집은 것은 첫 칸도

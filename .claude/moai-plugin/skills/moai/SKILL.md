@@ -81,4 +81,9 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 에픽 없는 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것을 비출 뿐이다. 쌓인 idea 와
 미뤄 둔 것은 경고가 아니라 알림(`notices`)으로 따로 선다.
 
+집은 채 닫으면 다음 세션이 이어받을 한 줄을 그 이슈에 남긴다. 다음 세션은
+`moai show <id>` 의 이력에서 그것을 읽는다.
+
+    moai note <id> "다음: <이어서 할 것>"
+
 전체 명령과 `--from` 문법은 `references/commands.md` 에 있다.

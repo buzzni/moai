@@ -1087,12 +1087,23 @@ fn edit_says_when_milestone_none_cannot_cut_an_inherited_milestone() {
     assert!(!line_of(s.path(), &member).contains("\"milestone\""), "필드는 비워져야 한다");
     assert!(ok(s.path(), &["show", "--milestone", &ms]).contains(&member));
     // 부모 밑 자식 — 비울 필드가 없어 바뀐 것이 없어도 말한다.
-    says(&child, &format!("부모 {parent}"));
+    says(&child, &format!("조상 {parent}"));
+    // 손자는 **값을 든 조상**을 댄다 — 바로 위 자식을 고치라면 아무것도 안 바뀐다.
+    let grand = add(s.path(), &["손자", "--parent", &child]);
+    says(&grand, &format!("조상 {parent}"));
+    // 마일스톤 밑에 id 로 선 자식 — 그 마일스톤의 필드를 고치라고 대지 않는다.
+    let under = add(s.path(), &["마일스톤 밑", "--parent", &ms]);
+    let out = moai(s.path(), &["edit", &under, "--milestone", "none"]);
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(err.contains(&ms) && err.contains("--milestone none"), "{err:?}");
+    assert!(!err.contains(&format!("moai edit {ms}")), "고쳐도 안 바뀌는 길을 댔다 — {err:?}");
 
     let json = ok(s.path(), &["edit", &member, "--milestone", "none", "--json"]);
     one_json_value(&json);
     assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{ms}","epic":"{epic}"}}"#)), "{json}");
     let json = ok(s.path(), &["edit", &child, "--milestone", "none", "--json"]);
+    assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{ms}","parent":"{parent}"}}"#)), "{json}");
+    let json = ok(s.path(), &["edit", &grand, "--milestone", "none", "--json"]);
     assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{ms}","parent":"{parent}"}}"#)), "{json}");
 
     // 모르는 필드로 든 같은 이름은 끊긴 줄에 새지 않는다.

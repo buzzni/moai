@@ -150,7 +150,22 @@ const PEOPLE: &str = r#"**담당은 저절로 붙는다** — 만든 사람이 �
 
 const CLOSING: &str = r#"`moai status` 를 한 번 더 돌려 경고가 늘지 않았는지 본다. 경고는 막지 않는다 —
 에픽 없는 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것을 비출 뿐이다. 쌓인 idea 와
-미뤄 둔 것은 경고가 아니라 알림(`notices`)으로 따로 선다."#;
+미뤄 둔 것은 경고가 아니라 알림(`notices`)으로 따로 선다.
+
+집은 채 닫으면 다음 세션이 이어받을 한 줄을 그 이슈에 남긴다. 다음 세션은
+`moai show <id>` 의 이력에서 그것을 읽는다.
+
+    moai note <id> "다음: <이어서 할 것>""#;
+
+/// 집은 채 닫을 때 남기는 한 줄. `CLOSING` 과 세션을 닫을 때의 붙듦이 같은
+/// 글을 내야 한다 — 안내가 가르친 줄과 훅이 내민 줄이 다르면 둘 다 안 믿는다.
+///
+/// **`status` 가 이것을 비추지 않는다.** 마지막 note 는 저널을 훑어야 나오는
+/// 값이라, 비추는 순간 저널이 `status` 에 읽힌다. `show` 를 한 번 더 치는 것이
+/// 실제로 불편해지면 그때 스냅샷 필드를 논의한다 (moai-0rui).
+pub fn handoff(id: &str) -> String {
+    format!("moai note {id} \"다음: <이어서 할 것>\"")
+}
 
 /// 규칙 셋. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
 fn rules() -> String {
@@ -415,6 +430,7 @@ mod tests {
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(skill.contains(piece), "스킬에 없다 — {head}");
         }
+        assert!(CLOSING.contains(&handoff("<id>")), "안내의 핸드오프 줄이 훅과 갈라졌다");
         let rules = rules();
         assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
         for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE, PROJECTS] {
