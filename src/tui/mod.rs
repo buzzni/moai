@@ -2598,9 +2598,7 @@ mod tests {
         let before = std::fs::read_to_string(&file).unwrap();
         jotting(&mut a, "여기");
         assert!(matches!(&a.mode, Mode::Idea(f) if f.into.as_ref().is_some_and(|t| t.path == scratch.0)), "{:?}", a.mode);
-        let mut form = Form::default();
-        form.title = Input::new("어디에도");
-        a.mode = Mode::Idea(form);
+        a.mode = Mode::Idea(Form { title: Input::new("어디에도"), ..Form::default() });
         a.key(ctrl('s'));
         assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
         assert!(a.trouble.as_deref().is_some_and(|t| t.starts_with("쓰지 못했다")), "{:?}", a.trouble);

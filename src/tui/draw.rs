@@ -107,14 +107,27 @@ pub fn screen(f: &mut Frame, app: &mut App) {
 /// `active` 가 거짓이면(다른 칸이 키를 먹는 중이면) 굵은 선도 커서도 없다.
 fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool) {
     f.render_widget(Clear, at);
-    let head_h = u16::from(form.into.is_some());
+    // 머리 줄이 따로 설 자리가 없으면(머리 1 + 제목 3 + 본문 칸 3 이 안 들면) 담을 곳을 제목
+    // 칸 테두리로 접는다 — 낮은 창에서 본문 칸이 테두리만 남는 것보다 낫고, 어느 프로젝트에
+    // 담기는지는 창이 낮아도 빠지면 안 된다.
+    let roomy = at.height >= JOT_HEAD_ROOM;
+    let head_h = u16::from(form.into.is_some() && roomy);
     let [head_at, title_at, body_at] =
         Layout::vertical([Constraint::Length(head_h), Constraint::Length(3), Constraint::Min(0)]).areas(at);
-    if let Some(into) = &form.into {
-        f.render_widget(Paragraph::new(jot_head(into, head_at.width as usize)), head_at);
-    }
+    let title_name = match &form.into {
+        Some(into) if roomy => {
+            f.render_widget(Paragraph::new(jot_head(into, head_at.width as usize)), head_at);
+            Line::from(" 생각 담기 · 제목 ")
+        }
+        Some(into) => Line::from(vec![
+            Span::raw(" 담을 곳 "),
+            Span::styled(crate::text::sanitize(&into.name), project_style(&into.path)),
+            Span::raw(" · 제목 "),
+        ]),
+        None => Line::from(" 생각 담기 · 제목 "),
+    };
 
-    let field = |which: Field, name: &'static str| {
+    let field = |which: Field, name: Line<'static>| {
         let block = Block::default().borders(Borders::ALL).title(name);
         if active && form.field == which {
             block.border_type(BorderType::Thick).border_style(from_anstyle(style::FOCUS))
@@ -123,14 +136,14 @@ fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool) {
         }
     };
 
-    let title_block = field(Field::Title, " 생각 담기 · 제목 ");
+    let title_block = field(Field::Title, title_name);
     let inner = title_block.inner(title_at);
     let view = form.title.view(inner.width as usize);
     let title_cursor = (inner.width > 0 && inner.height > 0)
         .then(|| (inner.x + view.cursor as u16, inner.y));
     f.render_widget(Paragraph::new(Line::from(view.text)).block(title_block), title_at);
 
-    let body_block = field(Field::Body, " 본문 · 여러 줄 · 없어도 된다 ");
+    let body_block = field(Field::Body, Line::from(" 본문 · 여러 줄 · 없어도 된다 "));
     let inner = body_block.inner(body_at);
     form.body.fit(inner.height as usize);
     let view = form.body.view(inner.width as usize, inner.height as usize);
@@ -149,6 +162,9 @@ fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool) {
         f.set_cursor_position(pos);
     }
 }
+
+/// 폼 머리 줄이 따로 서는 높이 — 머리 1 + 제목 칸 3 + 본문 칸(테두리 2 + 한 줄) 3.
+const JOT_HEAD_ROOM: u16 = 7;
 
 /// 폼 머리 — **어느 프로젝트에 담기는가**(moai-fccv). `담을 곳  이름  경로`.
 ///
@@ -2421,6 +2437,14 @@ mod tests {
         // 좁고 긴 경로에서도 이름이 남는다
         let lines = render(&mut a, 24, 12);
         assert!(lines.iter().any(|l| l.contains("담을 곳  one")), "{lines:?}");
+
+        // 낮은 창에서는 머리가 제목 칸 테두리로 접힌다 — 본문 칸이 테두리만 남지 않고,
+        // 담을 곳은 빠지지 않는다.
+        let lines = render(&mut a, 80, 8);
+        let shown = lines.join("\n");
+        assert!(!lines.iter().any(|l| l.contains("담을 곳  one")), "낮은 창에 머리 줄이 따로 섰다\n{shown}");
+        assert!(lines.iter().any(|l| l.contains("담을 곳 one · 제목")), "낮은 창에서 담을 곳이 빠졌다\n{shown}");
+        assert!(lines.iter().any(|l| l.contains("본문")), "{shown}");
 
         let mut bare = app();
         press(&mut bare, KeyCode::Char('n'));
