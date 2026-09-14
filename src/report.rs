@@ -558,7 +558,12 @@ pub fn group_stands_in<'a, 'c>(
                 .max()
                 .unwrap_or(g.created_at.as_str());
             // 칸 자리가 아니라 뜻으로 묻는다(moai-p415) — 두 칸짜리 설정에는 시작한 칸이 없어 거짓이다.
-            let busy = counted.iter().any(|m| cfg.is_started(m.status.as_str()));
+            // **설정이 아는 칸만 센다** — `column_of` 가 설정의 칸에서만 고르므로, 모르는 칸
+            // 멤버로 바쁘다고 하면 묶음은 대신 선 시작 칸에서 돌고 그 밑에 도는 줄은 없다.
+            let busy = counted.iter().any(|m| {
+                let s = m.status.as_str();
+                cfg.knows(s) && cfg.is_started(s)
+            });
             let column = column_of(&counted, cfg);
             let of = members.get(&(g.kind, g.id.as_str())).map(Vec::as_slice).unwrap_or_default();
             let (waiting, aside) = waiting_in(of, &counted);
@@ -3186,6 +3191,11 @@ mod tests {
         assert!(group_stands(&working, &cfg)["argos-0001"].busy, "in_progress 멤버가 있는데 안 바쁘다");
         let resting = rows(&["done", "todo"]);
         assert!(!group_stands(&resting, &cfg)["argos-0001"].busy, "아무도 손대지 않았는데 바쁘다");
+        // 설정에 없는 칸의 멤버는 칸 셈이 못 고르니 바쁨으로도 안 센다 — 세면 묶음이 대신 선
+        // 시작 칸에서 도는데 그 밑에 도는 줄이 없다.
+        let unknown = rows(&["qa", "todo"]);
+        let stand = &group_stands(&unknown, &cfg)["argos-0001"];
+        assert_eq!((stand.column, stand.busy), ("blocked", false), "모르는 칸 멤버로 바쁘다고 했다");
     }
 
     /// **읽은 칸과 "집은 멤버가 있다" 는 다른 말이다.** 끝난 멤버 하나와 첫 칸 하나로도
