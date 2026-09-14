@@ -65,7 +65,7 @@ pub fn had_partial() -> bool {
 /// `load.errors` 에 남아 부르는 쪽이 제 길로 알린다.
 pub fn gather(repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::Gathered> {
     let g = crate::worktree::gather(repo, worktree)?;
-    for t in &g.trouble {
+    for t in g.unfound.iter().chain(&g.trouble) {
         eprintln!("{t}");
     }
     Ok(g)

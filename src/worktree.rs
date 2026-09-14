@@ -163,6 +163,11 @@ pub struct Gathered {
     pub origin: Origin,
     /// 남의 워크트리에서 만난 문제. **막지 않는다** — 부르는 쪽이 한 줄씩 알린다.
     pub trouble: Vec<String>,
+    /// 옆 워크트리를 **찾지 못한** 까닭(git 이 없거나 저장소가 아니다). `trouble` 과 가른다 —
+    /// `--worktree` 를 시킨 CLI 는 말하지만, 겹쳐 보기를 기본으로 켜는 탐색기는 git 밖의
+    /// 프로젝트를 열 때마다 시키지 않은 배너를 세우게 된다(moai-zcuh). 탐색기는 경로 줄의
+    /// "옆 워크트리 없음" 으로 말한다.
+    pub unfound: Option<String>,
     /// 읽으러 간 옆 스냅샷마다 **읽기 전에** 잰 표식. 탐색기가 바뀐 것을 알아채는 데
     /// 쓴다. 파일이 없던 곳도 든다 — 거기 스냅샷이 생기는 것도 바뀐 것이다.
     ///
@@ -179,13 +184,20 @@ pub struct Gathered {
 pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let load = repo.read()?;
     if !worktree {
-        return Ok(Gathered { load, origin: Origin::default(), trouble: Vec::new(), watched: Vec::new() });
+        return Ok(Gathered {
+            load,
+            origin: Origin::default(),
+            trouble: Vec::new(),
+            unfound: None,
+            watched: Vec::new(),
+        });
     }
     let mut trouble = Vec::new();
+    let mut unfound = None;
     let mut others = Vec::new();
     let mut watched = Vec::new();
     match others_of(&repo.root) {
-        Err(why) => trouble.push(why),
+        Err(why) => unfound = Some(why),
         Ok(trees) => {
             for (tree, root) in trees {
                 let path = root.join(".moai").join("issues.jsonl");
@@ -210,7 +222,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     }
     let Load { issues, errors } = load;
     let (issues, origin) = overlay(issues, others);
-    Ok(Gathered { load: Load { issues, errors }, origin, trouble, watched })
+    Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, watched })
 }
 
 /// 다른 워크트리마다 (워크트리, 그 안의 moai 뿌리).
