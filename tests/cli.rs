@@ -1313,6 +1313,28 @@ fn edit_detail_draws_the_same_blocker_lines_as_show() {
     assert_eq!(line(&edited), line(&ok(s.path(), &["show", &b])));
 }
 
+/// **덧붙인 키가 이긴다**(moai-kgu2) — 줄이 모르는 필드로 `children`·`blockers` 를 들고 있어도
+/// `show --json` 은 그 키를 한 번씩만, 우리 값으로 낸다. 파일은 한 바이트도 안 바뀐다.
+#[test]
+fn show_json_keys_win_over_unknown_fields_of_the_same_name() {
+    let s = init("showkeys");
+    let a = add(s.path(), &["막는 것"]);
+    let b = add(s.path(), &["막히는 것"]);
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+    let doctored = issues(s.path()).replace(
+        &format!("\"id\":\"{b}\","),
+        &format!("\"id\":\"{b}\",\"children\":[\"가짜\"],\"blockers\":\"가짜\","),
+    );
+    std::fs::write(s.path().join(".moai/issues.jsonl"), &doctored).unwrap();
+
+    let json = ok(s.path(), &["show", &b, "--json"]);
+    assert_eq!(json.matches("\"children\":").count(), 1, "children 키가 둘 섰다\n{json}");
+    assert_eq!(json.matches("\"blockers\":").count(), 1, "blockers 키가 둘 섰다\n{json}");
+    assert!(json.contains("\"children\":[]") && !json.contains("가짜"), "모르는 필드가 덧붙인 키를 이겼다\n{json}");
+    assert!(json.contains(&format!("\"blockers\":[{{\"id\":\"{a}\"")), "{json}");
+    assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
+}
+
 /// 메모는 스냅샷을 건드리지 않고 저널에만 쌓인다.
 #[test]
 fn note_only_touches_the_journal() {

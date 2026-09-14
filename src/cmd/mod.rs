@@ -339,6 +339,30 @@ impl<'a> Row<'a> {
     }
 }
 
+/// [`json_with`] 가 덧붙이는 객체. **덧붙일 키와 같은 이름을 제가 들고 있으면 걷은 모습**을
+/// 낸다 — 기본은 걷을 것이 없다.
+pub trait Shown: serde::Serialize + Sized {
+    fn without(&self, _keys: &[&str]) -> Option<Self> {
+        None
+    }
+}
+
+/// 줄 하나의 기계 출력은 **모르는 필드**(`Issue::rest`)를 그대로 편다. 그 가운데 덧붙일 키와
+/// 이름이 같은 것만 걷는다(moai-kgu2) — `derived_status`·`branch`(`Row::of`)와 같은 약속이다.
+impl Shown for Row<'_> {
+    fn without(&self, keys: &[&str]) -> Option<Self> {
+        if !keys.iter().any(|k| self.issue.rest.contains_key(*k)) {
+            return None;
+        }
+        let mut own = self.issue.clone().into_owned();
+        own.rest.retain(|k, _| !keys.contains(&k.as_str()));
+        Some(Row { issue: std::borrow::Cow::Owned(own), derived_status: self.derived_status, branch: self.branch })
+    }
+}
+
+/// 필드가 선언된 것뿐이라 걷을 것이 없다.
+impl Shown for crate::report::StatusReport {}
+
 /// 묶음 id → 멤버에서 읽은 칸. 락 밖으로 들고 나가는 모양이라 제 문자열을 쥔다.
 pub type Read = BTreeMap<String, String>;
 
@@ -353,8 +377,15 @@ pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids:
 
 /// 객체 하나에 필드를 덧붙여 낸다. 선언 순서를 지키려면 직렬화된 뒤에
 /// 붙이는 수밖에 없다 — 중간에 `Value` 를 쓰면 순서가 사라진다.
-pub fn json_with<T: serde::Serialize>(base: &T, extra: &[(&str, String)]) -> R<Vec<String>> {
-    let mut s = serde_json::to_string(base).map_err(|e| Fail::new(e.to_string()))?;
+///
+/// **덧붙인 키가 이긴다**(moai-kgu2, 사용자와 정함). 줄이 모르는 필드로 같은 이름을 들고 있으면
+/// (`--json` 을 파일에 되써 넣은 줄) 한 객체에 같은 키가 둘 서서 깐깐한 파서가 거절하거나 앞의
+/// 값을 읽는다. 그 이름은 **여기서** 걷는다 — 덧붙이는 자리마다 목록을 두면 새 키를 더할 때 빠진다.
+/// 걷는 것은 출력뿐이고 파일의 값은 그대로다(모르는 필드 보존, `moai status` 가 비춘다).
+pub fn json_with<T: Shown>(base: &T, extra: &[(&str, String)]) -> R<Vec<String>> {
+    let keys: Vec<&str> = extra.iter().map(|(k, _)| *k).collect();
+    let stripped = base.without(&keys);
+    let mut s = serde_json::to_string(stripped.as_ref().unwrap_or(base)).map_err(|e| Fail::new(e.to_string()))?;
     if !s.ends_with('}') {
         return Err(Fail::new("객체가 아니다"));
     }
