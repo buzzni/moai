@@ -2557,3 +2557,11 @@
 {"ts":"2026-09-14T23:47:40Z","id":"moai-86r3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wpvm 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-14T23:47:41Z","id":"moai-wpvm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(2026-09-14, 사람): {{ 바로 앞에 이어진 역슬래시만 쌍으로 센다 — \\\\ 는 글자 \\ 하나, 홀수면 마지막 하나가 {{ 를 글자로 만든다. 그래서 \\{{ 는 지금처럼 글자 {{, \\\\{{dir}} 은 역슬래시 하나 + 변수, \\\\\\{{dir}} 은 역슬래시 하나 + 글자 {{. 다른 자리의 역슬래시(C:\\temp)는 그대로. --as-plan 은 제목·태그에서 {{ 앞 역슬래시를 두 배로 쓰고 {{ 를 \\{{ 로 써 되돌려 읽힌다."}
 {"ts":"2026-09-14T23:47:41Z","id":"moai-nqk5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T23:48:12Z","id":"moai-epb0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 관리 블록 마커 — 버전·해시와 --check"}
+{"ts":"2026-09-14T23:48:12Z","id":"moai-leyw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마커에 v·hash 를 싣고 옛 맨 마커도 알아본다"}
+{"ts":"2026-09-14T23:48:12Z","id":"moai-mstm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init --check 가 AGENTS.md 블록을 current·stale·missing 으로 rc 0 에 낸다"}
+{"ts":"2026-09-14T23:48:12Z","id":"moai-mj45","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"status 가 낡은 AGENTS.md 블록을 알림으로 비춘다"}
+{"ts":"2026-09-14T23:48:12Z","id":"moai-epb0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-89xm 에서 펼쳤다 — `moai init` 관리 블록 마커에 버전·해시를 넣고 `--check` 로 낡음을 판정한다"}
+{"ts":"2026-09-14T23:48:12Z","id":"moai-89xm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-epb0 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-14T23:48:31Z","id":"moai-epb0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(2026-09-14, 사용자): 마커는 `<!-- moai:begin v:<crate 버전> hash:<FNV-1a 8자> -->` — 해시는 init 이 쓰는 블록 글(guide::agents) 위의 FNV-1a(새 크레이트 없음, std 해셔는 러스트 버전마다 바뀜). 낡음은 디스크 본문이 지금 바이너리가 쓸 글과 다를 때(손으로 고친 것도 stale). 옛 맨 마커도 알아보고 갈아 끼운다. init --check 는 새 명령 없이 플래그, 쓰지 않고 늘 rc 0(파일을 못 읽을 때만 비영). status 는 stale 일 때만 알림(missing 은 --no-agents 저장소를 영영 조르므로 안 냄). CLAUDE.md 는 보지 않는다 — init 이 블록을 AGENTS.md 에만 쓴다"}
+{"ts":"2026-09-14T23:48:31Z","id":"moai-leyw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
