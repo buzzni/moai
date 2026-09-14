@@ -2451,3 +2451,5 @@
 {"ts":"2026-09-14T17:07:02Z","id":"moai-ynsb.0r0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 지적 없음, 고친 것 없음. 리뷰가 남긴 한 가지(status overview 가 registered() 첫 세 줄을 되풀이)는 그대로 둔다 — 공유하려면 빈 목록을 실패로 접을지를 인자로 받는 헬퍼가 필요한데, 갈라지는 까닭(status 는 0, ready 는 멈춤)이 오히려 두 자리에서 따로 보이는 편이 낫다. 이슈로 세우지 않는다"}
 {"ts":"2026-09-14T17:07:02Z","id":"moai-ynsb.0r0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 없음 — 반영한 것 없음, 넘긴 것은 registered() 세 줄 되풀이(판단 노트에 까닭, 이슈 안 세움)"}
 {"ts":"2026-09-14T17:07:02Z","id":"moai-ynsb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"92b8350 을 main 에 머지 — .moai 밖 status 는 등록 없음·깨진 설정에서 rc 0, ready·tui --json 은 그대로 멈춤"}
+{"ts":"2026-09-14T17:12:48Z","id":"moai-kndp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색창에서 `/` 검색 기능 사용시 개선 요청"}
+{"ts":"2026-09-14T17:15:22Z","id":"moai-yxae","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
