@@ -2089,3 +2089,5 @@
 {"ts":"2026-09-14T13:26:42Z","id":"moai-942k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai mv <id> done 뒤에 이로써 풀린 일을 한 줄로 알린다 — --json 은 unblocked"}
 {"ts":"2026-09-14T13:26:42Z","id":"moai-etl2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-942k 로 옮겨 작업한다"}
 {"ts":"2026-09-14T13:26:42Z","id":"moai-942k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T13:33:55Z","id":"moai-942k.m9b","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — mv done 뒤 이로써 풀린 일 한 줄 (moai-942k)"}
+{"ts":"2026-09-14T13:34:10Z","id":"moai-942k.m9b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
