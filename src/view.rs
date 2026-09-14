@@ -996,6 +996,8 @@ pub struct Seen<'a> {
     pub states: BTreeMap<&'a str, &'a str>,
     /// 다른 워크트리에서 온 줄 (`worktree::overlay`). `--worktree` 가 아니면 비었다.
     pub origin: Option<&'a Origin>,
+    /// 펼친 줄의 막음을 하나씩 가른 것 (`report::blocks_of`). 막음이 없으면 비었다.
+    pub blocks: Vec<crate::report::Block<'a>>,
 }
 
 /// **손으로 옮긴 칸이 서 있는 칸과 다르면** 그렇다고 말하는 낱말. CLI 상세와
@@ -1026,6 +1028,31 @@ pub fn group_moved(id: &str, col: &str, closing: bool, finished: bool) -> String
         }
     };
     format!("묶음의 칸은 멤버에서 읽는다. 서 있는 칸은 {col}{fold}")
+}
+
+/// 상세의 막음 한 줄. **탐색기 상세(`tui::draw`)와 같은 낱말이다** — 막힘·풀림·끊김, 미룬
+/// 막음은 "막힘" 에 미룬 까닭을 제목 앞에 둔다(값이 오른쪽부터 잘려도 남는다). 색은 글리프와
+/// 낱말에 함께 붙어 혼자 뜻을 지지 않는다.
+fn block_line(b: &crate::report::Block, branch: Option<&str>, now: &str) -> String {
+    use crate::report::Blocker;
+    let title = b.issue.map(|x| marked(branch, &x.title, TITLE_CAP, style::PLAIN).0).unwrap_or_default();
+    let (label, mark, glyph, what) = match b.blocker {
+        Blocker::Missing => ("끊김", style::ERROR, "!", "없는 이슈라 막지 않는다".to_string()),
+        Blocker::Done => ("풀림", style::status_style("done"), "✓", title),
+        Blocker::Open => ("막힘", style::WARN, "·", title),
+        // 미뤄 뺀 멤버만 기다리는 묶음 — 묶음은 미룬 적이 없으니 그 멤버를 댄다. 첫 멤버와 남은 수만.
+        Blocker::Deferred if !b.aside.is_empty() && b.root.is_none() => {
+            let more = if b.aside.len() > 1 { format!(" 외 {}", b.aside.len() - 1) } else { String::new() };
+            ("막힘", style::WARN, "·", format!("{}  {title}", paint(style::WARN, &format!("미룬 멤버 {}{more}", b.aside[0]))))
+        }
+        // 멤버가 없는 묶음 — 기다릴 일이 없어도 막는다(moai-1c2l).
+        Blocker::Empty => ("막힘", style::WARN, "·", format!("{}  {title}", paint(style::WARN, "멤버 없음"))),
+        Blocker::Deferred => {
+            let shelf = b.issue.and_then(|x| deferred_for(x, b.root, now)).unwrap_or_else(|| "미룸".into());
+            ("막힘", style::WARN, "·", format!("{}  {title}", paint(style::WARN, &shelf)))
+        }
+    };
+    format!("  {}   {} {}  {what}", paint(mark, label), paint(mark, glyph), paint(style::ID, b.id))
 }
 
 /// 단건 상세. **이력은 부르는 쪽이 [`history`] 로 붙인다** — 묶음을 펼치면 멤버를
@@ -1085,6 +1112,12 @@ pub fn detail(
     if let Some(e) = &i.epic {
         let title = epic.map(|e| e.title.as_str()).unwrap_or("(없는 에픽)");
         out.push(format!("  에픽   {}  {title}", paint(style::ID, e)));
+    }
+    // **막음도 상세에서 말한다**(moai-rvcb). id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안
+    // 나오나" 에 답하는 자리인데, 막힘·미룬 막음·끊긴 막음이 탐색기에만 있었다. 막는가는
+    // `report::blocks_of` 가 `ready` 의 자로 가르고, 여기는 받은 답을 낱말로만 옮긴다.
+    for b in &seen.blocks {
+        out.push(block_line(b, branch_of(b.id), now));
     }
     for c in children {
         // **자식 줄도 제 종류와 미룸을 말한다.** 이 목록은 걸러지지 않으므로
@@ -1468,9 +1501,11 @@ fn problems(out: &mut Vec<String>, reg: &crate::user_config::Registry) {
     }
 }
 
-/// 명령 안내에 넣을 경로 — 제어문자를 걷고 셸이 가를 글자가 있으면 감싼다.
+/// 명령 안내에 넣을 경로 — 붙여 넣으면 그 디렉터리로 풀리게 감싼다. `one_line` 을
+/// 지나지 않는다: 화면용 접기가 탭·줄바꿈을 빈칸으로 바꾸면 없는 디렉터리를 가리킨다.
+/// 한 줄 자리를 지키는 것은 `shell_word` 의 `$'…'` 다.
 fn shell_arg(p: &std::path::Path) -> String {
-    crate::text::shell_word(&one_line(&p.display().to_string()))
+    crate::text::shell_word(&p.display().to_string())
 }
 
 #[cfg(test)]
@@ -1507,6 +1542,25 @@ mod tests {
         let out = plain(&preview(w, &by_id, now, &Origin::default()));
         let row = out.iter().find(|l| l.contains("argos-0002")).expect("막힌 줄이 목록에 없다");
         assert!(row.contains(" 5일"), "판정한 나이를 안 댔다 — {row}");
+        assert!(!row.contains("30일"), "칸 나이를 댔다 — {row}");
+    }
+
+    /// 미룬 것에 막힌 줄은 **막는 줄을 미룬 지 며칠**로 선다(moai-hcx3) — 칸 나이 "30일" 이
+    /// 아니다.
+    #[test]
+    fn a_row_held_by_a_deferral_shows_how_long_ago_it_was_deferred() {
+        let now = "2026-10-11T00:00:00Z";
+        let mut shelved = issue("argos-0001", "미룬 일", "todo");
+        shelved.deferred_at = Some("2026-09-29T00:00:00Z".into()); // 12일 전
+        let mut held = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
+        held.blocked_by = vec!["argos-0001".into()];
+        let issues = vec![shelved, held];
+        let st = crate::report::status(&issues, &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("미룬 것에 막힘 경고가 없다");
+        let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
+        let out = plain(&preview(w, &by_id, now, &Origin::default()));
+        let row = out.iter().find(|l| l.contains("argos-0002")).expect("막힌 줄이 목록에 없다");
+        assert!(row.contains("12일"), "미룬 지 며칠을 안 댔다 — {row}");
         assert!(!row.contains("30일"), "칸 나이를 댔다 — {row}");
     }
 
