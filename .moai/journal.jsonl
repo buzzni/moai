@@ -1605,3 +1605,4 @@
 {"ts":"2026-09-14T09:49:08Z","id":"moai-z5aj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"4716cf2 — CLOSING 에 관례 문단, AGENTS·스킬 재생성"}
 {"ts":"2026-09-14T09:49:08Z","id":"moai-iaa4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"4716cf2 — 닫기 훅이 집은 줄마다 guide::handoff 한 줄을 낸다. 리뷰 moai-iaa4.sct 지적 없음"}
 {"ts":"2026-09-14T09:49:49Z","id":"moai-oohk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"CLAUDE.md 에 워크트리 규약을 적고 main 에 병합"}
+{"ts":"2026-09-14T09:50:21Z","id":"moai-0yrv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"닫기 훅도 같다 — 2026-09-14 moai-oohk 를 닫은 세션의 Stop 훅이 옆 워크트리(.claude/worktrees/moai-xib6)에서 집은 moai-xib6 를 이 세션 것으로 보고 옮기라/미루라/note 하라 요구했다. 남의 워크트리 일에 손대라는 요구라 따르지 않았다."}
