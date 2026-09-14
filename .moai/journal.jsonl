@@ -2519,3 +2519,4 @@
 {"ts":"2026-09-14T17:41:15Z","id":"moai-55cp.0ji","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 반영할 것 없음. 처음의 SPC o p 가 거꾸로 서는 것은 그대로 둔다 — 고른 것을 다시 누르면 뒤집는다는 한 규칙이고, 기본만 예외로 두면 둘째 규칙이 생긴다. 메뉴의 [● 차례] 가 이미 골라져 있음을 댄다."}
 {"ts":"2026-09-14T17:41:15Z","id":"moai-55cp.0ji","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 없음(반영할 것 없음). 처음 SPC o p 가 거꾸로 서는 것은 한 규칙이라 그대로 둔다"}
 {"ts":"2026-09-14T17:43:57Z","id":"moai-55cp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 머지(1b3cde5), 합친 main 에서 시험 747·267 통과"}
+{"ts":"2026-09-14T17:43:58Z","id":"moai-g7p8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
