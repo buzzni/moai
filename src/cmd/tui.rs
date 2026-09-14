@@ -63,8 +63,13 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
 ///
 /// **등록한 것이 없어도 화면은 빈 층을 연다**(moai-r8kl, 사용자와 정함). 층이 `SPC p a` 를
 /// 대므로 빈 화면이 성공으로 읽히지 않고, 그 자리에서 첫 등록을 한다 — 전에는 그러려면 어느
-/// `.moai` 안에서 띄워야 했다. **`--json` 은 `status`·`ready` 와 같은 말로 멈춘다**
-/// (`cmd::nothing_registered`) — 기계에게 빈 배열은 "등록한 것이 다 비었다" 로 읽힌다.
+/// `.moai` 안에서 띄워야 했다.
+///
+/// **`--json` 은 한눈 보기(`status --json`)와 같은 객체다**(moai-yxae, 2026-09-14 사람의 결정) —
+/// `{"projects":[…],"problems":[…],"config":…}`. 맨 배열이던 때는 사용자 설정의 문제를 실을
+/// 자리가 없어 stderr 로만 냈고, 등록한 것이 없으면 오류로 멈춰 stdout 에는 JSON 이 없었다.
+/// 이제 등록한 것이 없어도, 설정이 깨져도 0 이다 — 빈 `projects` 가 "다 비었다" 로 잘못 읽히지
+/// 않는 것은 곁의 `problems` 가 까닭을 대기 때문이다(`status` 와 같은 자리, moai-ynsb).
 fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let config = crate::user_config::path();
     let reg = crate::user_config::read(config.as_deref());
@@ -77,9 +82,6 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         ));
     }
     if ctx.json {
-        if reg.projects.is_empty() {
-            return Err(super::nothing_registered(&reg));
-        }
         let now = crate::model::now();
         let projects = crate::projects::open(&reg);
         let rows: Vec<ProjectRow> = projects
@@ -103,15 +105,9 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                 }
             })
             .collect();
-        // 사용자 설정의 문제는 말만 한다. **한눈 보기와 다르다** — `status`·`ready`·
-        // `project ls` 의 `--json` 은 `problems` 배열에 싣지만, 이 줄들은 탐색기의 줄
-        // (`Row`)과 같은 배열 하나라 실을 자리가 없다. 그래서 stderr 로 가고, 거기서도
-        // `project ls` 와 같은 모양이다: `moai: ` 를 달고 한 줄로 접는다(남의 설정 파일
-        // 에서 온 글이라 제어문자가 들 수 있다).
-        for problem in &reg.problems {
-            eprintln!("moai: {}", crate::text::one_line(problem));
-        }
-        return super::json_line(&rows);
+        // 사용자 설정의 문제는 `problems` 에 싣는다 — 한눈 보기·`project ls` 와 같은 자리다.
+        // 제어문자는 serde 가 이스케이프한다.
+        return super::json_line(&Layered { projects: rows, problems: &reg.problems, config: reg.path.as_deref() });
     }
     refuse_without_terminal()?;
     let mut app = App::on_projects(crate::tui::layer::Layer::read(config.as_deref(), None));
@@ -138,6 +134,15 @@ struct ProjectRow<'a> {
     path: &'a std::path::Path,
     #[serde(flatten)]
     seen: crate::projects::Seen<'a, Counted>,
+}
+
+/// `.moai` 밖 `tui --json` 전체. **키가 한눈 보기의 [`crate::projects::Overview`] 와 같다** —
+/// 다른 것은 `projects` 원소가 탐색기 줄 모양([`ProjectRow`])이라는 것 하나다.
+#[derive(serde::Serialize)]
+struct Layered<'a> {
+    projects: Vec<ProjectRow<'a>>,
+    problems: &'a [String],
+    config: Option<&'a std::path::Path>,
 }
 
 /// 연 프로젝트의 셈 — 화면의 층이 쓰는 그 셈(`layer::summarize`)이다.

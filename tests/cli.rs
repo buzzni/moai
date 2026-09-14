@@ -927,7 +927,8 @@ fn outside_a_repo_the_overview_speaks_json() {
 /// **`.moai` 밖의 `tui --json` 은 프로젝트 층의 줄을 낸다**(moai-ujpu) — 탐색기 줄과 같은
 /// 키(`title`·`kind`·`dir`·`path`)에 한눈 보기와 같은 상태 낱말. 프로젝트 줄의 `path` 는
 /// 디렉터리라 `-C` 로 들어간다. 등록 차례 그대로다. `--path` 는 어느 프로젝트의 id 인지
-/// 몰라 거절하고, 등록한 것이 없으면 `ready` 와 같은 말로 멈춘다.
+/// 몰라 거절한다. 전체는 한눈 보기와 같은 객체(`projects`·`problems`·`config`)라, 등록한 것이
+/// 없거나 설정이 깨져도 JSON 으로 0 이다(moai-yxae).
 #[test]
 fn outside_a_repo_tui_json_lists_the_project_layer() {
     let s = Scratch::new("ovtui");
@@ -940,14 +941,15 @@ fn outside_a_repo_tui_json_lists_the_project_layer() {
     let rows = ok_with(&out, &cfg, &["tui", "--json"]);
     one_json_value(&rows);
     let good_at = format!(
-        "[{{\"title\":\"good\",\"kind\":\"project\",\"dir\":true,\"path\":{:?},\"state\":\"ok\",\"counts\":{{",
+        "{{\"projects\":[{{\"title\":\"good\",\"kind\":\"project\",\"dir\":true,\"path\":{:?},\"state\":\"ok\",\"counts\":{{",
         good.to_str().unwrap()
     );
     assert!(rows.starts_with(&good_at), "{rows}");
     assert!(rows.contains(&format!("\"picked\":[\"{picked}\"]")) && rows.contains("\"in_progress\":1"), "{rows}");
     let bare_at = format!(
-        "{{\"title\":\"bare\",\"kind\":\"project\",\"dir\":false,\"path\":{:?},\"state\":\"uninitialized\"}}]",
-        bare.to_str().unwrap()
+        "{{\"title\":\"bare\",\"kind\":\"project\",\"dir\":false,\"path\":{:?},\"state\":\"uninitialized\"}}],\"problems\":[],\"config\":{:?}}}",
+        bare.to_str().unwrap(),
+        cfg.to_str().unwrap()
     );
     assert!(rows.trim_end().ends_with(&bare_at), "{rows}");
 
@@ -958,9 +960,20 @@ fn outside_a_repo_tui_json_lists_the_project_layer() {
     let o = moai_with(&out, &cfg, &["tui", "--json", "--path", &picked]);
     assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("-C <dir> tui --path"), "{}", text(&o));
 
+    // 등록한 것이 없어도 같은 객체로 0 이다(moai-yxae) — stdout 에 JSON 이 없던 자리다.
     let empty = registry(&s, &[]);
+    let none = ok_with(&out, &empty, &["tui", "--json"]);
+    one_json_value(&none);
+    assert!(none.starts_with("{\"projects\":[],\"problems\":[]"), "{none}");
+
+    // 사용자 설정의 문제는 stderr 가 아니라 `problems` 에 선다.
+    std::fs::write(&empty, "not [toml\n").unwrap();
     let o = moai_with(&out, &empty, &["tui", "--json"]);
-    assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("moai project add"), "{}", text(&o));
+    let said = String::from_utf8_lossy(&o.stdout);
+    assert!(o.status.success(), "{}", text(&o));
+    one_json_value(&said);
+    assert!(said.starts_with("{\"projects\":[],\"problems\":[\""), "{said}");
+    assert!(o.stderr.is_empty(), "설정 문제를 stderr 로도 냈다 — {}", String::from_utf8_lossy(&o.stderr));
 }
 
 /// 등록한 것이 없으면 등록하는 길을 댄다. 설정 파일이 깨져 목록이 빈 것이면 그 까닭도 함께
@@ -985,14 +998,13 @@ fn outside_a_repo_with_nothing_registered_it_says_how_to_register() {
     assert!(help.contains("moai init") && help.contains("moai project add"), "{help}");
 
     // **탐색기만 다르다**(moai-r8kl) — 사람이 보는 화면이라 빈 층을 열고 `SPC p a` 를 댄다. 여기는
-    // 터미널이 아니라 그 까닭으로 멈추고, 등록이 없다는 말로는 안 멈춘다. `--json` 은 기계가
-    // 읽으니 `status`·`ready` 와 같은 말로 멈춘다.
+    // 터미널이 아니라 그 까닭으로 멈추고, 등록이 없다는 말로는 안 멈춘다. `--json` 은 `status --json`
+    // 과 같은 빈 객체로 0 이다(moai-yxae).
     let o = moai_with(&out, &cfg, &["tui"]);
     let err = String::from_utf8_lossy(&o.stderr);
     assert!(!o.status.success() && err.contains("터미널이 아니라") && !err.contains("moai project add"), "{err}");
-    let o = moai_with(&out, &cfg, &["tui", "--json"]);
-    let err = String::from_utf8_lossy(&o.stderr);
-    assert!(!o.status.success() && err.contains("moai project add"), "{err}");
+    let js = ok_with(&out, &cfg, &["tui", "--json"]);
+    assert!(js.starts_with("{\"projects\":[]"), "{js}");
 
     // 깨진 설정도 0 이고, 목록이 빈 까닭을 댄다 — 모양이 틀린 것도, TOML 이 아닌 것도.
     std::fs::write(&cfg, "project = 3\n").unwrap();

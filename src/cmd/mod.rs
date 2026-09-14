@@ -92,7 +92,7 @@ pub fn registered(worktree: bool) -> R<(crate::user_config::Registry, Vec<crate:
     Ok((reg, projects))
 }
 
-/// `.moai` 밖인데 등록한 것도 없을 때의 말 — `ready`·`tui --json` 은 이 말로 멈추고, `status` 는
+/// `.moai` 밖인데 등록한 것도 없을 때의 말 — `ready` 는 이 말로 멈추고, `status` 는
 /// 같은 말을 내고 0 으로 끝난다(moai-ynsb).
 /// 화면의 `tui` 는 멈추지 않고 빈 층에서 `SPC p a` 를 댄다(moai-r8kl).
 /// 목록이 빈 까닭이 사용자 설정의 문제일 수 있어 그것도 붙인다.
