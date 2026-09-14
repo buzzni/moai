@@ -1274,7 +1274,15 @@ pub struct Warning {
 }
 
 impl Warning {
+    /// **id 는 한 번씩만 담는다** — 처음 나온 자리(급한 차례, [`ids_of`])를 지킨다.
+    ///
+    /// 경고가 가리키는 것은 줄이 아니라 id 다. 사람이 고치러 부르는 손잡이가 id 뿐이고,
+    /// 같은 id 의 줄이 둘이면(`duplicate_id`) 줄마다 id 지도를 묻는 판정이 그 id 를 두 번
+    /// 담아 `N건` 이 줄 수로 부풀었다(moai-ddtg). 거르는 자리를 경고마다 두면 새 경고가
+    /// 그것을 잊으므로 여기 한 곳에 둔다. 중복 줄 자체는 `duplicate_id` 가 따로 말한다.
     fn new(kind: &'static str, ids: Vec<String>) -> Warning {
+        let mut seen = BTreeSet::new();
+        let ids: Vec<String> = ids.into_iter().filter(|id| seen.insert(id.clone())).collect();
         Warning {
             kind,
             count: ids.len(),
@@ -3125,6 +3133,30 @@ mod tests {
         let apart = [Unreadable { id: Some("argos-0002") }, Unreadable { id: None }];
         let st = status(&issues, &apart, &cfg(), "2026-09-01T00:00:00Z");
         assert!(!st.warnings.iter().any(|w| w.kind == "duplicate_id"), "{:?}", st.warnings);
+    }
+
+    /// **경고는 id 를 한 번씩만 댄다** (moai-ddtg). 같은 id 의 줄이 둘이면 줄마다 id
+    /// 지도를 물어 같은 id 가 두 번 담겼다 — 사람이 고칠 손잡이는 id 하나고, 셈(`N건`)이
+    /// 줄 수로 부풀면 `moai show -e none` 같은 힌트가 내는 것과도 어긋난다. 세 줄 중복도
+    /// `duplicate_id` 에 그 id 를 두 번 대지 않는다.
+    #[test]
+    fn a_warning_names_a_duplicated_id_once() {
+        let mut thought = make("argos-0000", Kind::Idea, "todo");
+        thought.milestone = Some("argos-zzzz".into());
+        let mut stone = make("argos-0000", Kind::Milestone, "todo");
+        stone.milestone = Some("argos-zzzz".into());
+        let st = status(&[thought, stone], &[], &cfg(), "2026-09-11T00:00:00Z");
+        let w = st.warnings.iter().find(|w| w.kind == "dangling_milestone").expect("경고가 없다");
+        assert_eq!((w.ids.as_slice(), w.count), (&["argos-0000".to_string()][..], 1), "{w:?}");
+
+        let mut orphan = make("argos-0009.aaa", Kind::Issue, "todo");
+        orphan.blocked_by = vec!["argos-gone".into()];
+        let thrice = vec![orphan.clone(), orphan.clone(), orphan];
+        let st = status(&thrice, &[], &cfg(), "2026-09-11T00:00:00Z");
+        for kind in ["orphan_child", "dangling_blocked_by", "duplicate_id"] {
+            let w = st.warnings.iter().find(|w| w.kind == kind).unwrap_or_else(|| panic!("{kind} 가 없다"));
+            assert_eq!((w.ids.as_slice(), w.count), (&["argos-0009.aaa".to_string()][..], 1), "{w:?}");
+        }
     }
 
     // ── 미룬 것이 막고 있으면 까닭을 말한다 ──────────────────────────
