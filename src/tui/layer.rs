@@ -99,19 +99,6 @@ pub struct Summary {
     pub unreadable: usize,
 }
 
-impl Summary {
-    /// 끝난 몫. **줄에 선 칸별 수 그대로에서 잰다** — 층의 줄은 그 수(미룬 것을 뺀 보드의
-    /// 자)를 글자로 대므로, 바탕이 다른 자로 재면 한 줄이 두 진척을 말한다. 프로젝트 안의
-    /// 롤업은 미룬 것도 세지만 거기는 탐색기라 숨기지 않는 자리다(`draw::list`).
-    /// 셀 일이 없으면 `None`.
-    pub fn percent(&self) -> Option<u8> {
-        let total: usize = self.counts.iter().map(|(_, n)| n).sum();
-        let done: usize =
-            self.counts.iter().filter(|(st, _)| st.as_str() == crate::config::DONE).map(|(_, n)| n).sum();
-        (total > 0).then(|| (done * 100 / total) as u8)
-    }
-}
-
 /// 집은 일 한 줄.
 pub struct Picked {
     pub id: String,
