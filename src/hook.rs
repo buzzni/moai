@@ -779,16 +779,28 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &BTreeSet<String>) -> V
     if away.is_empty() || wip.is_empty() {
         return wip;
     }
-    let epics = report::groups(issues);
-    let stones = report::milestones(issues);
-    let theirs = |id: &str| {
-        away.contains(id)
-            || epics.get(id).is_some_and(|e| away.contains(*e))
-            || stones.get(id).is_some_and(|m| away.contains(*m))
+    let theirs = theirs(issues, away);
+    wip.into_iter().filter(|i| !theirs(i)).collect()
+}
+
+/// 이 줄이 **옆 워크트리의 일**인가 — 그 줄 자신이나 조상이 `away` 에 들었거나, 그 에픽·
+/// 마일스톤이 들었다. [`held`] 와 그 초점을 쓰는 규칙이 같은 자로 재야 한다 — 초점에서는
+/// 뺀 옆의 리뷰 줄을 규칙 3 이 "집으라" 고 대면, 이미 옆에서 집은 줄이라 시킨 대로 해도
+/// 안 풀린다.
+fn theirs<'a>(issues: &'a [Issue], away: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
+    let (epics, stones) = if away.is_empty() {
+        (Default::default(), Default::default())
+    } else {
+        (report::groups(issues), report::milestones(issues))
     };
-    wip.into_iter()
-        .filter(|i| !std::iter::successors(Some(i.id.as_str()), |id| crate::id::parent_of(id)).any(theirs))
-        .collect()
+    move |i: &Issue| {
+        !away.is_empty()
+            && std::iter::successors(Some(i.id.as_str()), |id| crate::id::parent_of(id)).any(|id| {
+                away.contains(id)
+                    || epics.get(id).is_some_and(|e| away.contains(*e))
+                    || stones.get(id).is_some_and(|m| away.contains(*m))
+            })
+    }
 }
 
 /// 규칙 1 — **집은 것 밖에 새 이슈를 세우지 않는다.**
@@ -1157,8 +1169,13 @@ fn has_angle(i: &Issue) -> bool {
 /// 결과인지를 잃는다.
 pub fn guard_review(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>) -> Decision {
     let out_of_plan = report::put_off(issues);
-    let open: Vec<&Issue> =
-        issues.iter().filter(|i| is_review(i, &out_of_plan) && !i.status.is_done()).collect();
+    // **옆 워크트리의 리뷰는 여기서 안 센다** — 초점에서 뺀 것과 같은 자다([`theirs`]).
+    // 세면 main 에서 아무것도 안 집은 세션에 옆이 이미 집은 리뷰를 "집으라" 고 막는다.
+    let theirs = theirs(issues, away);
+    let open: Vec<&Issue> = issues
+        .iter()
+        .filter(|i| is_review(i, &out_of_plan) && !i.status.is_done() && !theirs(i))
+        .collect();
     let focus = held(issues, cfg, away);
 
     if focus.is_empty() {
@@ -1477,6 +1494,16 @@ mod tests {
         ];
         assert!(held(&all, &cfg(), &away(&["t-e", "t-2"])).is_empty());
         assert_eq!(held(&all, &cfg(), &away(&["main", "t-9"])).len(), 2);
+    }
+
+    /// **옆이 집은 리뷰를 여기서 집으라고 하지 않는다.** 초점에서 뺀 리뷰 줄을 규칙 3 이
+    /// 그대로 세면, 아무것도 안 집은 main 세션에 "moai mv t-1.aa in_progress" 를 댄다 —
+    /// 이미 그 칸이라 시킨 대로 해도 안 풀린다.
+    #[test]
+    fn a_review_another_worktree_holds_is_not_named_here() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), review("t-1.aa", "in_progress", None)];
+        let why = denied(&guard_review(&all, &cfg(), &away(&["t-1"]))).to_string();
+        assert!(!why.contains("t-1.aa"), "옆의 리뷰를 집으라고 한다\n{why}");
     }
 
     // ── 무엇을 부르려는가 ────────────────────────────────────────────
