@@ -351,6 +351,153 @@ impl Doc {
         }
         removed
     }
+
+    /// 적어 둔 탐색기 보기와, 못 읽은 키의 까닭(moai-2bzp). **관대하게 읽는다** — 틀린 키 하나가
+    /// 나머지 보기를 버리게 두지 않는다. `[tui]` 가 없으면 빈 `Look` 이다.
+    pub fn look(&self) -> (Look, Vec<String>) {
+        let mut problems = Vec::new();
+        let Some(item) = self.doc.get(TUI) else {
+            return (Look::default(), problems);
+        };
+        let Some(t) = item.as_table_like() else {
+            problems.push(format!("`{TUI}` 는 `[{TUI}]` 표여야 한다 — 지금은 {}", item.type_name()));
+            return (Look::default(), problems);
+        };
+        let look = Look {
+            hidden: look_words(t, HIDDEN, &mut problems),
+            hide_deferred: look_flag(t, HIDE_DEFERRED, &mut problems),
+            sort: look_word(t, SORT, &mut problems),
+            sort_reversed: look_flag(t, SORT_REVERSED, &mut problems),
+            fields: look_words(t, FIELDS, &mut problems),
+        };
+        (look, problems)
+    }
+
+    /// 보기를 적는다. 읽은 것과 같으면 **아무것도 안 한다** — 토글마다 부르므로 헛 쓰기가 없어야
+    /// 한다. `None` 인 값은 키를 지운다. 표 안의 모르는 키와 주석은 그대로 둔다.
+    ///
+    /// **`tui` 가 표가 아니면 적지 않는다** — 무엇인지 모르는 값을 덮으면 되돌릴 수 없다.
+    pub fn set_look(&mut self, look: &Look) -> R<()> {
+        if self.look().0 == *look {
+            return Ok(());
+        }
+        match self.doc.get(TUI) {
+            None => {
+                self.doc.insert(TUI, Item::Table(Table::new()));
+            }
+            // 읽기(`look`)가 받는 모양은 쓰기도 받는다 — `tui = { … }` 인라인 표도 표다.
+            Some(item) if item.is_table_like() => {}
+            Some(item) => {
+                return Err(Fail::new(format!(
+                    "`{TUI}` 가 `[{TUI}]` 표가 아니라({}) 보기를 적지 않는다 — 손으로 고친다",
+                    item.type_name()
+                )));
+            }
+        }
+        let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
+        let words = |v: &[String]| toml_edit::value(v.iter().map(String::as_str).collect::<toml_edit::Array>());
+        let mut put = |key: &str, v: Option<Item>| match v {
+            Some(v) => {
+                t.insert(key, v);
+            }
+            None => {
+                t.remove(key);
+            }
+        };
+        put(HIDDEN, look.hidden.as_deref().map(words));
+        put(HIDE_DEFERRED, look.hide_deferred.map(toml_edit::value));
+        put(SORT, look.sort.as_deref().map(toml_edit::value));
+        put(SORT_REVERSED, look.sort_reversed.map(toml_edit::value));
+        put(FIELDS, look.fields.as_deref().map(words));
+        self.dirty = true;
+        Ok(())
+    }
+}
+
+/// 탐색기 보기가 사는 표(moai-2bzp).
+const TUI: &str = "tui";
+const HIDDEN: &str = "hidden";
+const HIDE_DEFERRED: &str = "hide_deferred";
+const SORT: &str = "sort";
+const SORT_REVERSED: &str = "sort_reversed";
+const FIELDS: &str = "fields";
+
+/// 탐색기의 보기 — 사람이 마지막으로 고른 것(moai-2bzp). **낱말로 든다** — 무슨 낱말이 있는지는
+/// 탐색기가 안다. 이 모듈이 조각의 타입을 알면 설정 파일의 모양이 화면 코드에 매인다. 없는 키는
+/// `None` 이고, 그 자리는 탐색기의 처음값이 선다.
+///
+/// ```toml
+/// [tui]
+/// hidden = ["done"]
+/// hide_deferred = false
+/// sort = "updated"
+/// sort_reversed = false
+/// fields = ["id", "priority", "tally", "assignee"]
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Look {
+    pub hidden: Option<Vec<String>>,
+    pub hide_deferred: Option<bool>,
+    pub sort: Option<String>,
+    pub sort_reversed: Option<bool>,
+    pub fields: Option<Vec<String>>,
+}
+
+/// 설정에서 보기를 읽는다. 파일이 없으면 빈 `Look` 이고 문제도 아니다. 깨진 파일은 까닭 한 줄 —
+/// 탐색기는 그래도 처음값으로 뜬다.
+pub fn read_look(path: Option<&Path>) -> (Look, Vec<String>) {
+    let Some(path) = path else {
+        return (Look::default(), Vec::new());
+    };
+    let at = |e: String| vec![format!("{}: {e}", path.display())];
+    match std::fs::read_to_string(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Look::default(), Vec::new()),
+        Err(e) => (Look::default(), at(e.to_string())),
+        Ok(src) => match Doc::parse(&src) {
+            Ok(doc) => {
+                let (look, problems) = doc.look();
+                (look, problems.into_iter().flat_map(at).collect())
+            }
+            Err(e) => (Look::default(), at(e)),
+        },
+    }
+}
+
+fn look_words(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<String>) -> Option<Vec<String>> {
+    let item = t.get(key)?;
+    let Some(a) = item.as_array() else {
+        problems.push(format!("`{TUI}.{key}` 는 낱말 배열이어야 한다 — 지금은 {}", item.type_name()));
+        return None;
+    };
+    Some(
+        a.iter()
+            .filter_map(|v| {
+                let w = v.as_str().map(String::from);
+                if w.is_none() {
+                    problems.push(format!("`{TUI}.{key}` 의 `{}` 는 낱말이 아니다 — 건너뛴다", v.to_string().trim()));
+                }
+                w
+            })
+            .collect(),
+    )
+}
+
+fn look_word(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<String>) -> Option<String> {
+    let item = t.get(key)?;
+    let w = item.as_str().map(String::from);
+    if w.is_none() {
+        problems.push(format!("`{TUI}.{key}` 는 낱말이어야 한다 — 지금은 {}", item.type_name()));
+    }
+    w
+}
+
+fn look_flag(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<String>) -> Option<bool> {
+    let item = t.get(key)?;
+    let b = item.as_bool();
+    if b.is_none() {
+        problems.push(format!("`{TUI}.{key}` 는 true·false 여야 한다 — 지금은 {}", item.type_name()));
+    }
+    b
 }
 
 /// 항목 표 하나에서 경로를 읽는다. 상대경로는 거절한다 — 부른 자리마다 다른
@@ -745,6 +892,60 @@ mod tests {
         assert_eq!(hue_choice(AUTO).unwrap(), None);
         let e = hue_choice("magenta").unwrap_err();
         assert!(e.contains("\"magenta\"") && e.contains("cyan·green·blue") && e.contains(AUTO), "{e}");
+    }
+
+    /// **보기는 `[tui]` 에 적히고 도로 읽히며, 남의 키·주석·등록은 그대로다**(moai-2bzp). 같은 보기를
+    /// 다시 적으면 파일을 안 건드린다 — 토글마다 적으므로 헛 쓰기가 없어야 한다.
+    #[test]
+    fn a_look_round_trips_and_leaves_the_rest_alone() {
+        let d = scratch("look");
+        let path = d.join("config.toml");
+        std::fs::write(&path, "# 내 설정\n[[project]]\npath = \"/a\"\n\n[tui]\nextra = 1  # 남의 키\n").unwrap();
+        let look = Look {
+            hidden: Some(vec!["done".into(), "review".into()]),
+            hide_deferred: Some(true),
+            sort: Some("updated".into()),
+            sort_reversed: Some(false),
+            fields: Some(vec!["id".into(), "assignee".into()]),
+        };
+        update(&path, |doc| doc.set_look(&look)).unwrap();
+        let (back, problems) = read_look(Some(&path));
+        assert_eq!((back, problems), (look.clone(), Vec::new()));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# 내 설정") && text.contains("path = \"/a\"") && text.contains("extra = 1  # 남의 키"), "{text}");
+
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        update(&path, |doc| doc.set_look(&look)).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before, "같은 보기를 다시 적었다");
+
+        // 없는 값은 키를 지운다.
+        update(&path, |doc| doc.set_look(&Look { sort: Some("title".into()), ..Look::default() })).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("hidden") && text.contains("sort = \"title\"") && text.contains("extra = 1"), "{text}");
+    }
+
+    /// **틀린 보기 키는 알리고 나머지는 읽는다**(moai-2bzp). `tui` 가 표가 아니면 읽기는 비고 쓰기는 멈춘다.
+    #[test]
+    fn a_bad_look_key_is_reported_and_the_rest_still_reads() {
+        let doc = Doc::parse("[tui]\nhidden = \"done\"\nsort = 3\nfields = [\"id\", 7]\nhide_deferred = true\n").unwrap();
+        let (look, problems) = doc.look();
+        assert_eq!(look.hidden, None);
+        assert_eq!(look.sort, None);
+        assert_eq!(look.fields, Some(vec!["id".to_string()]));
+        assert_eq!(look.hide_deferred, Some(true));
+        assert_eq!(problems.len(), 3, "{problems:?}");
+
+        let mut odd = Doc::parse("tui = 3\n").unwrap();
+        assert_eq!(odd.look().1.len(), 1);
+        assert!(odd.set_look(&Look { sort: Some("title".into()), ..Look::default() }).is_err());
+        assert!(!odd.changed());
+
+        // 읽히는 인라인 표는 쓰기도 받는다.
+        let mut inline = Doc::parse("tui = { sort = \"created\" }\n").unwrap();
+        assert_eq!(inline.look().0.sort.as_deref(), Some("created"));
+        inline.set_look(&Look { sort: Some("title".into()), ..Look::default() }).unwrap();
+        assert!(inline.render().contains("sort = \"title\""), "{}", inline.render());
     }
 
     /// 바꾼 것이 없으면 파일을 건드리지 않는다 — 헛 쓰기도 헛 diff 도 없다.
