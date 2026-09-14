@@ -2366,3 +2366,4 @@
 {"ts":"2026-09-14T16:50:19Z","id":"moai-1uod","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T16:53:20Z","id":"moai-52z9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"a32ab3a·f9a0c5e 를 main 에 머지 — 스냅샷을 썼으면 rc 0 + stderr 경고, note 는 그대로 실패"}
 {"ts":"2026-09-14T16:56:17Z","id":"moai-ynsb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T16:56:24Z","id":"moai-1uod","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 머지 — 키 f10·콜론 f08·실행 f12·+그룹 f13 을 16색으로, 워크트리 시험 726·263 통과"}
