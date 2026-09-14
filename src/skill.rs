@@ -643,8 +643,10 @@ mod tests {
         let bless = blessing(std::env::var("MOAI_BLESS").ok().as_deref());
         // **깨진 파일도 bless 로 되살린다.** 두 값은 JSON 을 읽어야 나오는데, 병합
         // 충돌 표시 한 줄로 그 읽기가 실패하면 다시 쓰기에 닿기 전에 멈춰 도구
-        // 밖(`git checkout`)만 남는다. 그래서 bless 일 때만 글자로 찾는다 — 찾은
-        // 값이 틀렸으면 아래 비교가 그대로 잡는다.
+        // 밖(`git checkout`)만 남는다. 그래서 bless 일 때만 글자로 찾는다. **아래
+        // 비교는 틀린 값을 못 잡는다** — bless 는 찾은 값으로 먼저 쓰고 견주므로
+        // 제 자신과 같다. 그래서 이름은 맨 윗단 들여쓰기(두 칸)에 매어 찾는다 —
+        // 안 매면 맨 윗단 `name` 이 빠진 글에서 `owner.name` 의 `moai` 를 집는다.
         let manifest = read(".claude-plugin/plugin.json");
         let exe = hook_exe(&manifest)
             .or_else(|| loose(&manifest, "command -v -- \\\"").filter(|_| bless))
@@ -653,7 +655,7 @@ mod tests {
         let name = serde_json::from_str::<serde_json::Value>(&market)
             .ok()
             .and_then(|v| Some(v.get("name")?.as_str()?.to_string()))
-            .or_else(|| loose(&market, "\"name\": \"").filter(|_| bless))
+            .or_else(|| loose(&market, TOP_NAME).filter(|_| bless))
             .expect("marketplace.json 에서 name 을 못 읽는다 — 깨졌으면 MOAI_BLESS=1 로 다시 쓴다");
 
         let want = tree_named(&name, &exe, &crate::guide::skill(), &crate::guide::reference());
@@ -679,6 +681,10 @@ mod tests {
     fn blessing(value: Option<&str>) -> bool {
         matches!(value.map(|v| v.trim().to_ascii_lowercase()).as_deref(), Some("1" | "true" | "yes"))
     }
+
+    /// `marketplace.json` 맨 윗단의 `name`. `pretty` 가 두 칸으로 들여 쓰고
+    /// `owner`·`plugins` 의 `name` 은 더 깊다.
+    const TOP_NAME: &str = "\n  \"name\": \"";
 
     /// JSON 으로 못 읽는 글에서 `before` 바로 뒤의 값을 찾는다. 값은 따옴표나
     /// 역슬래시에서 끝난다 — 훅의 실행 파일은 `quotable` 이라 둘 다 못 품는다.
@@ -710,7 +716,12 @@ mod tests {
         let manifest = body("plugin.json");
         assert_eq!(hook_exe(&manifest), None, "시험이 깨진 매니페스트를 만들지 못했다");
         assert_eq!(loose(&manifest, "command -v -- \\\"").as_deref(), Some(exe));
-        assert_eq!(loose(&body("marketplace.json"), "\"name\": \"").as_deref(), Some(market("t", Path::new("/repo")).as_str()));
-        assert_eq!(loose("{}", "\"name\": \""), None);
+        let name = market("t", Path::new("/repo"));
+        assert_eq!(loose(&body("marketplace.json"), TOP_NAME).as_deref(), Some(name.as_str()));
+        assert_eq!(loose("{}", TOP_NAME), None);
+        // 맨 윗단 name 이 빠지면 owner·plugins 의 `moai` 를 집지 않는다.
+        let headless = body("marketplace.json").replace(&format!("\n  \"name\": \"{name}\","), "");
+        assert_ne!(headless, body("marketplace.json"), "시험이 name 을 못 뺐다");
+        assert_eq!(loose(&headless, TOP_NAME), None);
     }
 }
