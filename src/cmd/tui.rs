@@ -334,26 +334,32 @@ fn executable(_: &std::fs::Metadata) -> bool {
     true
 }
 
-/// 터미널을 **내리고** `f` 를 부른 뒤 다시 올린다 — 편집기에 터미널을 넘기는 자리(moai-08af).
+/// 터미널을 **내린다** — 편집기에 터미널을 넘기는 자리(moai-08af).
 ///
-/// 내리는 것은 끝낼 때(`screen`)와 같은 차례다: bracketed paste 를 끄고 raw mode·대체 화면을
-/// 걷는다. 안 끄면 편집기에 붙인 글이 `200~…201~` 에 싸여 들어간다. 올릴 때는 거꾸로 켜고
-/// **화면을 비워 다음 그림이 통째로 다시 그리게 한다** — ratatui 는 바뀐 칸만 내보내는데,
-/// 편집기가 지나간 화면은 ratatui 가 아는 앞 그림과 다르다. 커서는 그림마다 숨기거나 두므로
-/// 따로 안 만진다.
-///
-/// `f` 가 도는 동안 **이 스레드는 거기 서 있다** — 그리기·스피너·다시 읽기 받기(`follow`)가
-/// 전부 멈춘다. 다시 읽기 스레드는 계속 짓지만 그리지 않고, 돌아오면 다음 걸음이 받는다.
-/// 다시 올리기를 못 하면 오류로 루프를 끝낸다 — `screen` 이 그 뒤를 끝낼 때처럼 걷는다.
-fn suspended<T>(term: &mut DefaultTerminal, f: impl FnOnce() -> T) -> std::io::Result<T> {
+/// 끝낼 때(`screen`)와 같은 차례다: bracketed paste 를 끄고 raw mode·대체 화면을 걷는다. 안
+/// 끄면 편집기에 붙인 글이 `200~…201~` 에 싸여 들어간다. 편집기가 도는 동안 **루프 스레드는
+/// 편집기를 기다리며 서 있다** — 그리기·스피너·다시 읽기 받기(`follow`)가 전부 멈춘다. 다시
+/// 읽기 스레드는 계속 짓지만 그리지 않고, 돌아오면 다음 걸음이 받는다.
+fn suspend() {
     let _ = bracketed_paste(&mut std::io::stdout(), false);
     ratatui::restore();
-    let out = f();
-    ratatui::crossterm::terminal::enable_raw_mode()?;
-    ratatui::crossterm::execute!(std::io::stdout(), ratatui::crossterm::terminal::EnterAlternateScreen)?;
+}
+
+/// 내린 터미널을 다시 올리고 **다음 그림이 통째로 다시 그리게** 한다. ratatui 는 바뀐 칸만
+/// 내보내는데, 편집기가 지나간 화면은 ratatui 가 아는 앞 그림과 다르다.
+///
+/// **`Terminal::clear` 를 안 쓴다.** ratatui-core 의 `clear` 는 커서 자리를 터미널에 물어(DSR)
+/// 되돌리는데, 답하지 않는 터미널(pty 를 잇는 `script`, 느린 원격)에서는 몇 초 뒤 오류가 나
+/// 루프가 끝난다 — 실제로 그렇게 끝났다. 온 화면을 지우고 앞 그림을 비우면(`swap_buffers`)
+/// 다음 그림이 빈칸 아닌 칸을 모두 다시 낸다. `clear` 가 온 화면 뷰포트에서 하는 일과 같고
+/// 묻는 것만 없다. 커서는 그림마다 숨기거나 두므로 따로 안 만진다.
+fn resume(term: &mut DefaultTerminal) -> std::io::Result<()> {
+    use ratatui::crossterm::terminal::{Clear, ClearType, EnterAlternateScreen, enable_raw_mode};
+    enable_raw_mode()?;
+    ratatui::crossterm::execute!(std::io::stdout(), EnterAlternateScreen, Clear(ClearType::All))?;
     let _ = bracketed_paste(&mut std::io::stdout(), true);
-    term.clear()?;
-    Ok(out)
+    term.swap_buffers();
+    Ok(())
 }
 
 /// `text` 를 임시 파일에 적고 `editor` 로 연 뒤 **고친 글**을 돌려준다. `Err` 는 담지 않을
@@ -476,8 +482,12 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
         // 키가 편집기를 청했으면(`n`) 터미널을 넘긴다. 받은 글은 App 이 담는다 — 담을 곳은 연
         // 순간 박힌 그대로 요청에 실려 왔다.
         if let Some(edit) = app.edit.take() {
-            let got = suspended(term, || write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir()))?;
+            suspend();
+            let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir());
+            // **받은 글을 올리기보다 먼저 담는다.** 올리기가 실패하면 루프가 끝나는데, 먼저 담아
+            // 두면 적은 것은 파일에 있다 — 거꾸로 하면 편집기에서 적은 글이 임시 파일과 함께 사라진다.
             app.edited(edit.into, got);
+            resume(term)?;
         }
         let now = std::time::Instant::now();
         // 키가 읽기를 띄웠으면(층으로 올라가기 따위) 느린 걸음까지 기다리지 않고 받으러 깬다.
