@@ -103,6 +103,66 @@ fn map_trailing_words(s: &str, f: impl Fn(&str) -> Option<String>) -> String {
     pieces[..keep].concat() + &tail.into_iter().rev().collect::<String>()
 }
 
+/// 템플릿의 `{{이름}}` 을 `vars` 로 채운다(moai-3faw). [`parse`] **앞에서** 글을 한 번 바꿀 뿐이라
+/// 형식의 규칙은 채운 뒤의 글에 그대로 선다.
+///
+/// - 이름은 영문·숫자·`_`·`-` 만이고 `{{` 와 `}}` 사이에 빈칸이 없다. **그 모양이 아닌 `{{…}}` 는
+///   변수가 아니라 글자다** — `{{ 빈칸 }}` 같은 글이 멀쩡한 계획을 거절시키지 않게
+/// - **변수는 선언 없이 전부 필수다**(사람이 정했다). 못 채운 이름과 계획에 없는 `--var` 는
+///   **전부** 대며 거절한다 — 반만 채운 계획이 조용히 만들어지거나 오타가 넘어가지 않게.
+///   [`parse`] 처럼 한 번에 다 말한다
+/// - 치환은 한 번뿐이다 — 값 안의 `{{…}}` 는 다시 펴지 않는다
+/// - 변수도 `vars` 도 없으면 글을 그대로 돌려준다 — 여느 계획은 안 바뀐다
+pub fn fill(src: &str, vars: &[(String, String)]) -> Result<String, String> {
+    let is_name = |n: &str| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    let mut out = String::with_capacity(src.len());
+    let (mut missing, mut used): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
+    let mut rest = src;
+    while let Some(open) = rest.find("{{") {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 2..];
+        match after.find("}}").map(|end| &after[..end]).filter(|n| is_name(n)) {
+            Some(name) => {
+                match vars.iter().find(|(k, _)| k == name) {
+                    Some((_, value)) => {
+                        out.push_str(value);
+                        if !used.contains(&name) {
+                            used.push(name);
+                        }
+                    }
+                    None if !missing.contains(&name) => missing.push(name),
+                    None => {}
+                }
+                rest = &after[name.len() + 2..];
+            }
+            None => {
+                out.push_str("{{");
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+
+    let mut unknown: Vec<&str> = Vec::new();
+    for (k, _) in vars {
+        if !used.contains(&k.as_str()) && !unknown.contains(&k.as_str()) {
+            unknown.push(k);
+        }
+    }
+    let names = |v: &[&str]| v.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join("·");
+    let mut errors = Vec::new();
+    if !missing.is_empty() {
+        errors.push(format!("채우지 않은 변수 {} — `--var 이름=값` 으로 준다", names(&missing)));
+    }
+    if !unknown.is_empty() {
+        errors.push(format!("계획에 없는 변수 {} — 이름이 맞는지 본다", names(&unknown)));
+    }
+    if !errors.is_empty() {
+        return Err(errors.join("\n      "));
+    }
+    Ok(out)
+}
+
 /// 못 읽은 줄은 **전부** 모아 한 번에 말한다. 하나씩 고치게 하면 여섯 줄짜리
 /// heredoc 을 여섯 번 다시 보낸다.
 pub fn parse(src: &str) -> Result<Vec<Draft>, String> {
@@ -327,6 +387,42 @@ mod tests {
         let md = render(&issue("빈 에픽", Kind::Epic, None, &[]), &[]);
         assert_eq!(md, "# 빈 에픽\n");
         assert_eq!(one(&md).len(), 1);
+    }
+
+    fn vars(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    /// **템플릿의 `{{이름}}` 은 `--var` 로 채운다**(moai-3faw). 채운 글은 여느 계획처럼 읽힌다.
+    #[test]
+    fn variables_are_filled_before_the_plan_is_read() {
+        let tpl = "# 릴리스 {{version}}\n- [p1] {{version}} 태그를 단다 #release\n- {{channel}} 채널에 올린다\n";
+        let got = fill(tpl, &vars(&[("version", "1.2"), ("channel", "stable")])).unwrap();
+        assert_eq!(got, "# 릴리스 1.2\n- [p1] 1.2 태그를 단다 #release\n- stable 채널에 올린다\n");
+        assert_eq!(one(&got)[1].title, "1.2 태그를 단다");
+        // 값 안의 `{{…}}` 는 다시 펴지 않는다 — 한 번뿐이다.
+        assert_eq!(fill("# {{a}}\n", &vars(&[("a", "{{a}}")])).unwrap(), "# {{a}}\n");
+    }
+
+    /// 변수가 없고 `--var` 도 없으면 글은 그대로다 — 여느 계획이 안 바뀐다. 이름 모양이 아닌
+    /// `{{…}}` 는 변수가 아니라 글자다.
+    #[test]
+    fn a_plan_without_variables_is_untouched() {
+        let plain = "# 가\n- --json 이 #1 에서 깨진다 #bug\n- {{ 빈칸 }} 과 {{}} 와 {{a b}} 는 글자\n";
+        assert_eq!(fill(plain, &[]).unwrap(), plain);
+    }
+
+    /// **못 채운 변수와 파일에 없는 `--var` 는 이름을 전부 대며 거절한다**(사람이 정했다) — 반만
+    /// 채운 계획이 조용히 만들어지거나 오타가 넘어가지 않게.
+    #[test]
+    fn missing_and_unknown_variables_are_refused_by_name() {
+        let tpl = "# {{version}}\n- {{channel}} 과 {{version}} 과 {{owner}}\n";
+        let e = fill(tpl, &vars(&[("version", "1")])).unwrap_err();
+        assert!(e.contains("channel") && e.contains("owner"), "빠진 이름을 다 안 댔다 — {e}");
+        assert_eq!(e.matches("version").count(), 0, "채운 것까지 댔다 — {e}");
+        let e = fill(tpl, &vars(&[("version", "1"), ("channel", "c"), ("owner", "o"), ("verison", "2")])).unwrap_err();
+        assert!(e.contains("verison"), "파일에 없는 --var 를 안 댔다 — {e}");
+        assert!(fill("# 변수 없음\n", &vars(&[("x", "1")])).is_err(), "쓸 곳 없는 --var 를 받았다");
     }
 
     #[test]
