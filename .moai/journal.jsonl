@@ -2091,3 +2091,5 @@
 {"ts":"2026-09-14T13:26:42Z","id":"moai-942k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T13:33:55Z","id":"moai-942k.m9b","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — mv done 뒤 이로써 풀린 일 한 줄 (moai-942k)"}
 {"ts":"2026-09-14T13:34:10Z","id":"moai-942k.m9b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T13:34:27Z","id":"moai-942k","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 리뷰 moai-942k.m9b(/code-review high --fix 496bafb~1..496bafb, 백그라운드)의 원문·판단 노트 → 필요하면 fix: 커밋 → .moai 커밋 → 워크트리 moai-942k 에 main 을 받아 시험 → main 에서 MERGE_HEAD 확인, 남의 .moai 미커밋 줄은 그대로 담고 한 번에 merge → merge 성공 뒤에만 942k·m9b done → 워크트리·가지 삭제 → moa-issue-45 에 해시 보고. 코드 커밋 496bafb."}
+{"ts":"2026-09-14T13:34:27Z","id":"moai-942k.m9b","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 백그라운드 /code-review 결과를 원문(-b -)과 판단 두 노트로 나눠 적고, 넘긴 것은 이슈 번호와 함께. done -m 은 merge 뒤에."}
