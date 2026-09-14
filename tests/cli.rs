@@ -3200,7 +3200,9 @@ fn every_help_heredoc_is_copyable() {
 ///
 /// clap 의 `wrap_help` 는 도움말을 터미널 폭에 맞춰 낱말 사이에 **실제 개행**을 넣어
 /// 접는다. 여는 줄이 두 줄로 갈리면 복사한 명령에 heredoc 이 없고 본문 줄이 셸 명령으로
-/// 돈다. 시험에는 터미널이 없어 clap 이 `COLUMNS` 로 폭을 정하므로 그것을 좁혀 본다.
+/// 돈다. 그래서 `wrap_help` 를 뺐다 — 뺀 채로는 clap 이 `COLUMNS` 를 안 읽어 이 시험은
+/// 폭과 무관하게 초록이다. **지키는 것은 누가 그 기능을 다시 켜는 날이다.** 켜지면 시험에
+/// 터미널이 없어 clap 이 `COLUMNS` 로 폭을 정하고, 좁힌 폭에서 여는 줄이 갈려 붉어진다.
 #[test]
 fn narrow_terminals_keep_heredoc_openers_whole() {
     let s = init("helpnarrow");
