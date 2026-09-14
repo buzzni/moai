@@ -677,7 +677,7 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> (Line<'a>, Option<(usize, 
     let e = match r {
         Row::Item(e) => e,
         Row::Up => return (Line::from(Span::styled("..", dim())), None),
-        Row::Project(at) => return (place_line(app, *at, budget), None),
+        Row::Project(at) => return place_line(app, *at, budget),
     };
     let is_dir = matches!(e, Entry::Dir { .. });
     let Some(at) = e.at() else {
@@ -1204,9 +1204,12 @@ fn paint_project(path: &std::path::Path, hue: Option<style::Hue>) -> Style {
 /// 글리프가 뜻을 지므로 색이 혼자 말하지 않고, 이름은 오른쪽 상세가 댄다. 못 여는 것은
 /// CLI 한눈 보기와 같은 말을 잘라서 낸다 — 무엇인지는 앞머리(`init 전`·`디렉터리가 없다`·
 /// `못 읽는다`)에 있어 잘려도 남는다.
-fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
+///
+/// 연 프로젝트의 줄은 에픽 줄처럼 **진행 바탕을 가를 칸**을 함께 낸다 — 이름 시작부터
+/// 테두리 안쪽 끝이 100% 다. 칸별 수가 이미 글자로 서 있어 셈을 따로 붙이지 않는다.
+fn place_line<'a>(app: &App, at: usize, budget: usize) -> (Line<'a>, Option<(usize, usize)>) {
     let Some(p) = app.layer.as_ref().and_then(|l| l.places.get(at)) else {
-        return Line::from("");
+        return (Line::from(""), None);
     };
     let room = budget.saturating_sub(crate::text::width(CURSOR));
     let enterable = matches!(p.look, Look::Open { .. } | Look::Unread);
@@ -1240,7 +1243,11 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
         spans.push(Span::styled(if p.registered { "  여기" } else { "  여기 · 등록 안 됨" }, dim()));
     }
     spans.push(Span::styled(format!("  {}", crate::text::one_line(&p.path.display().to_string())), dim()));
-    fit(Line::from(spans), room)
+    let cut = match &p.look {
+        Look::Open { sum, .. } => sum.percent().map(|pc| (0, crate::text::bar_fill(Some(pc), room))),
+        _ => None,
+    };
+    (fit(Line::from(spans), room), cut)
 }
 
 /// 못 여는 프로젝트의 색 — CLI 한눈 보기(`view::unopened`)와 같은 무게다. init 전은
@@ -1335,6 +1342,8 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
     // `n` 은 층에서도 듣는다 — 커서의 프로젝트에 담는다(moai-fccv).
     if app.on_layer() {
         let mut optional = vec![
+            // 층의 줄에도 진행 바탕이 선다(moai-luze) — 프로젝트 안과 같은 자리, 가장 먼저 떨어진다.
+            key("p", if app.shade { "진행 끄기" } else { "진행 바탕" }),
             key("j·k", "굴리기"),
             key("F5", "갱신"),
             key("Tab", pane_name(app.focus.next())),
@@ -1595,6 +1604,33 @@ pub(super) mod tests {
         term.draw(|f| screen(f, &mut a)).unwrap();
         let buf = term.backend().buffer().clone();
         assert!((0..w).all(|x| !buf[(x, y)].modifier.contains(Modifier::REVERSED)), "껐는데 깔렸다");
+    }
+
+    /// **층의 연 프로젝트 줄에도 진행 바탕이 선다** — 줄에 적힌 칸별 수 그대로의 몫이다
+    /// (끝난 12 / 16 = 75%). 못 여는 프로젝트에는 셀 것이 없어 안 깔린다.
+    #[test]
+    fn an_open_project_row_on_the_layer_is_shaded_too() {
+        let mut a = layered(super::super::layer::At::Layer);
+        // 커서는 다른 줄에 — 커서 줄은 거꾸로 깔린다.
+        a.cursor = 1;
+        let (w, h) = (100u16, 14u16);
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let text = render(&mut a, w, h);
+        let rev = |x: u16, y: u16| buf[(x, y)].modifier.contains(Modifier::REVERSED);
+        let row = |name: &str| text.iter().position(|l| l.contains(name)).expect(name) as u16;
+
+        let y = row("one/");
+        let first = (0..w).find(|&x| rev(x, y)).expect("연 프로젝트 줄에 바탕이 없다");
+        assert_eq!(buf[(first, y)].symbol(), "o", "바탕이 이름에서 시작하지 않는다");
+        let border = (first..w).find(|&x| buf[(x, y)].symbol() == "┃").expect("테두리가 없다");
+        let got = (first..border).filter(|&x| rev(x, y)).count();
+        let want = crate::text::bar_fill(Some(75), (border - first) as usize);
+        assert!(got <= want && got + 1 >= want, "75% 가 아니다 — {got}/{}", border - first);
+
+        let gone = row("gone");
+        assert!((0..w).all(|x| !rev(x, gone)), "못 여는 프로젝트에 바탕이 깔렸다");
     }
 
     /// `p` 가 진행 바탕을 켜고 끄고, 키 바가 **지금 누르면 무엇이 되는지**를 댄다 —
