@@ -81,6 +81,11 @@ impl Entry {
             None => self.what.clone(),
         }
     }
+
+    /// 하위 접두어(`+이름`)인가.
+    pub fn is_group(&self) -> bool {
+        self.what.starts_with('+')
+    }
 }
 
 /// 지금 층(`held`)에 선 항목. 차례는 표의 차례다.
@@ -121,9 +126,10 @@ pub fn name(held: &[KeyEvent]) -> &'static str {
     if held.len() <= 1 { ROOT } else { group(held) }
 }
 
-/// 격자의 줄 수 상한. 사용자가 준 "하단 8~10칸"(moai-apsa) — 격자 8줄에 가름줄·접두어 줄을
-/// 더해 10줄이다. 항목이 적으면 그만큼 낮게 선다.
-pub const MAX_ROWS: usize = 8;
+/// 격자의 줄 수 상한 — 한 열에 6칸, 넘치면 옆 열에 다시 6칸(사용자 결정, moai-r2dt). 처음의
+/// "하단 8~10칸"(moai-apsa)은 뿌리 7칸이 넓은 창에서 왼쪽 한 열로만 서 허전했다(moai-ik31).
+/// 항목이 적으면 그만큼 낮게 선다.
+pub const MAX_ROWS: usize = 6;
 
 /// 메뉴가 떠도 몸통에 남길 높이 — 테두리 둘과 줄 하나. 이보다 낮게 누르면 커서가 선 줄이
 /// 안 보여, 메뉴가 무엇에 대한 것인지를 잃는다.
@@ -150,6 +156,8 @@ pub fn rows_for(left: usize) -> usize {
 pub struct Placed {
     pub key: String,
     pub text: String,
+    /// 하위 접두어(`+이름`)인가 — 실행 항목과 색을 가른다. 뜻은 `+` 가 글자로 이미 댄다.
+    pub group: bool,
 }
 
 /// 격자 — 열 우선으로 채운 칸들. `columns[c][r]` 이 c 열 r 줄이다.
@@ -211,6 +219,7 @@ pub fn grid(items: &[Entry], room: usize, max_rows: usize) -> Grid {
                     Placed {
                         key: format!("{}{}", " ".repeat(key_w[c] - width(&e.key)), e.key),
                         text: format!("{text}{}", " ".repeat(tw.saturating_sub(width(&text)))),
+                        group: e.is_group(),
                     }
                 })
                 .collect()
@@ -307,7 +316,7 @@ mod tests {
     fn the_grid_caps_rows_and_derives_columns() {
         let items = letters(20, "낱말");
         let g = grid(&items, 200, MAX_ROWS);
-        assert_eq!((g.rows, g.columns.len(), g.hidden), (8, 3, 0));
+        assert_eq!((g.rows, g.columns.len(), g.hidden), (6, 4, 0));
         assert_eq!(grid(&items[..3], 200, MAX_ROWS).rows, 3);
         assert_eq!(grid(&items, 200, 0), Grid { rows: 0, columns: Vec::new(), hidden: 20 });
         assert_eq!(grid(&[], 200, MAX_ROWS), Grid::default());
