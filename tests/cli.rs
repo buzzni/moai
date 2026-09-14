@@ -1388,6 +1388,31 @@ fn show_json_keys_win_over_unknown_fields_of_the_same_name() {
     assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
 }
 
+/// **끊긴 에픽을 든 생각 밑에 접힌 줄은 트리와 status 가 같게 읽는다**(moai-uni2) — 길 잃은
+/// 부모의 묶음이다. 트리는 그 줄을 `(길 잃음)` 안의 생각 밑에 그리므로, status 가 그 줄을
+/// "에픽 없는 이슈" 로 세면 `moai show -e none` 을 가리키며 고칠 수 없는 줄을 고치라 한다.
+/// 고칠 곳은 생각의 끊긴 에픽 하나고, `dangling_epic` 이 그것을 댄다.
+#[test]
+fn a_child_under_a_lost_thought_is_not_counted_as_having_no_epic() {
+    let s = init("lostthought");
+    let epic = add(s.path(), &["지울 에픽", "--type", "epic"]);
+    let thought = add(s.path(), &["생각", "--type", "idea", "-e", &epic]);
+    let child = add(s.path(), &["생각 밑의 일", "--parent", &thought]);
+    assert!(moai(s.path(), &["rm", &epic]).status.success());
+
+    let tree = ok(s.path(), &["show", "--tree"]);
+    let lost_at = tree.find("(길 잃음)").unwrap_or_else(|| panic!("길 잃음 바구니가 없다\n{tree}"));
+    assert!(tree[lost_at..].contains(&child), "트리가 자식을 길 잃음 밖에 그렸다\n{tree}");
+
+    let st = ok(s.path(), &["status", "--json"]);
+    let warning = |kind: &str| st.split("{\"kind\":").find(|w| w.starts_with(&format!("\"{kind}\""))).map(str::to_string);
+    assert!(warning("dangling_epic").is_some_and(|w| w.contains(&thought)), "고칠 곳(생각의 끊긴 에픽)을 안 댄다\n{st}");
+    assert!(
+        !warning("no_epic").is_some_and(|w| w.contains(&child)),
+        "트리가 길 잃음에 그린 줄을 status 는 에픽 없는 이슈로 센다\n{st}"
+    );
+}
+
 /// 메모는 스냅샷을 건드리지 않고 저널에만 쌓인다.
 #[test]
 fn note_only_touches_the_journal() {

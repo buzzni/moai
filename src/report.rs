@@ -1242,6 +1242,53 @@ pub fn misplaced(all: &[Issue]) -> BTreeMap<&str, Misplace> {
     out
 }
 
+/// 제가 길을 잃지는 않았지만 **길 잃은 줄 밑에 접힌** 줄 — 트리가 그 줄을 부모 밑, 곧
+/// `(길 잃음)` 바구니 안에 그린다(moai-uni2, 사용자와 정함: 길 잃은 부모 밑에 접힌다).
+///
+/// 흔한 모양은 끊긴 에픽을 든 생각 밑의 일이다. 생각은 소속을 안 넘기므로 자식은 에픽이
+/// 없다고 셈해지는데, 트리는 그 줄을 길 잃은 생각 밑에 접는다 — status 가 "에픽 없는
+/// 이슈" 로 세면 고칠 수 없는 줄에 `-e none` 을 가리킨다. 고칠 곳은 부모의 끊긴 참조
+/// 하나이고 `dangling_epic` 이 그것을 댄다.
+///
+/// **접는 자는 `nav::Ctx::home_of_work` 와 같다** — 부모가 이슈나 생각이고, 제 소속이
+/// 부모가 넘기는 것과 같다. 생각인 부모는 뿌리로 올라갔거나 제가 길을 잃었으면(그려진
+/// 자리가 이슈 밑이 아니면) 아무것도 안 넘긴다. 자를 따로 두면 트리와 status 가 또 갈린다.
+/// 길 잃음은 부르는 쪽이 준다 — `nav::Ctx::home` 처럼 가려진 쌍둥이도 거기 든다.
+pub fn under_lost<'a>(
+    all: &'a [Issue],
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    lost: impl Fn(&Issue) -> bool,
+) -> BTreeSet<&'a str> {
+    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
+    // 길 잃은 줄이 없으면 그 밑에 접힐 줄도 없다 — 흔한 저장소에서 생각 지도를 안 세운다.
+    if !by_id.values().any(|i| lost(i)) {
+        return BTreeSet::new();
+    }
+    let rooted = rooted_thoughts(&by_id);
+    let mut out = BTreeSet::new();
+    for i in all.iter().filter(|i| !lost(i)) {
+        let mut cur = i;
+        while let Some(p) = crate::id::parent_of(&cur.id)
+            .and_then(|p| by_id.get(p).copied())
+            .filter(|p| matches!(p.kind, Kind::Issue | Kind::Idea))
+        {
+            let passed = match is_idea(p) && (rooted.contains(p.id.as_str()) || lost(p)) {
+                true => None,
+                false => epic_of.get(p.id.as_str()).copied(),
+            };
+            if epic_of.get(cur.id.as_str()).copied() != passed {
+                break;
+            }
+            if lost(p) {
+                out.insert(i.id.as_str());
+                break;
+            }
+            cur = p;
+        }
+    }
+    out
+}
+
 /// 못 쓸 참조를 **든** 줄. 자리를 바꾸든 안 바꾸든 고쳐야 할 것은 같다.
 ///
 /// [`misplaced`] 와 물음이 다르다. 저쪽은 "이 줄을 어디에 둘까" 이고 이쪽은
@@ -1851,10 +1898,18 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
 
     // 1. 에픽에 안 붙은 것. 마일스톤이 아직 없으므로 **제일 중요한 신호**다
     //    — "물어보지 않고 만든 이슈" 의 지문이다.
+    //    **길 잃은 줄 밑에 접힌 줄도 안 센다**(moai-uni2) — 트리가 그 줄을 `(길 잃음)` 안에
+    //    그리고, 고칠 곳은 부모의 끊긴 참조라 6번의 `dangling_*` 가 댄다.
+    let folded = under_lost(issues, &group, |i| placed.contains_key(i.id.as_str()) || eclipsed(i));
     let loose: Vec<&Issue> = work
         .iter()
         .copied()
-        .filter(|i| !i.status.is_done() && !eclipsed(i) && !group.contains_key(i.id.as_str()))
+        .filter(|i| {
+            !i.status.is_done()
+                && !eclipsed(i)
+                && !group.contains_key(i.id.as_str())
+                && !folded.contains(i.id.as_str())
+        })
         .collect();
     // **분모는 미룬 일까지 센다.** 에픽을 통째로 미루면 그 멤버만 `work` 에서 빠져,
     // 원래 있던 소속 없는 일 하나가 "열린 것의 100%" 로 선다 — 미루기 하나로 경고가
@@ -2215,6 +2270,48 @@ mod tests {
         let mut i = make(id, Kind::Issue, status);
         i.epic = Some(epic.into());
         i
+    }
+
+    /// **길 잃은 생각 밑에 접힌 일은 에픽 없는 이슈로 안 센다**(moai-uni2). 멀쩡한 생각 밑의
+    /// 일은 그대로 센다 — 생각은 소속을 안 넘긴다. 에픽 없는 이슈를 사이에 둔 손자도 접힌다.
+    #[test]
+    fn a_row_folded_under_a_lost_thought_is_not_loose() {
+        let now = "2026-09-11T00:00:00Z";
+        let loose = |issues: &[Issue]| -> Vec<String> {
+            status(issues, &[], &cfg(), now)
+                .warnings
+                .iter()
+                .find(|w| w.kind == "no_epic")
+                .map(|w| w.ids.clone())
+                .unwrap_or_default()
+        };
+        let thought = |id: &str, epic: Option<&str>| {
+            let mut t = make(id, Kind::Idea, "todo");
+            t.epic = epic.map(str::to_string);
+            t
+        };
+
+        // 끊긴 에픽을 든 생각 밑 — 자식도 손자도 길 잃음 안에 접힌다.
+        let lost = [
+            thought("argos-0001", Some("argos-zzzz")),
+            make("argos-0001.aaa", Kind::Issue, "todo"),
+            make("argos-0001.aaa.bbb", Kind::Issue, "todo"),
+        ];
+        assert!(loose(&lost).is_empty(), "길 잃은 생각 밑에 접힌 줄을 에픽 없음으로 센다: {:?}", loose(&lost));
+        let folded = under_lost(&lost, &groups(&lost), |i| misplaced(&lost).contains_key(i.id.as_str()));
+        assert_eq!(folded.into_iter().collect::<Vec<_>>(), ["argos-0001.aaa", "argos-0001.aaa.bbb"]);
+
+        // 멀쩡한 생각 밑 — 그대로 에픽 없는 이슈다.
+        let healthy = [thought("argos-0002", None), make("argos-0002.aaa", Kind::Issue, "todo")];
+        assert_eq!(loose(&healthy), ["argos-0002.aaa"]);
+
+        // 제 에픽을 적은 자식은 접히지 않는다 — 제 에픽으로 간다.
+        let own = [
+            thought("argos-0003", Some("argos-zzzz")),
+            make("argos-0004", Kind::Epic, "todo"),
+            member("argos-0003.aaa", "argos-0004", "todo"),
+        ];
+        assert!(under_lost(&own, &groups(&own), |i| misplaced(&own).contains_key(i.id.as_str())).is_empty());
     }
 
     fn roll_of<'a>(rolls: &'a [Roll], id: Option<&str>) -> &'a Roll {
