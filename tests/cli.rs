@@ -4313,6 +4313,12 @@ fn an_add_whose_journal_fails_succeeds_and_says_so() {
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     let note = moai(s.path(), &["note", &id, "메모"]);
     assert!(!note.status.success(), "아무것도 안 담긴 note 가 성공으로 끝났다");
+
+    // 칸은 옮겨졌지만 `-m` 의 말은 저널에만 산다 — 다시 적을 길을 대야 한다.
+    let mv = moai(s.path(), &["mv", &id, "in_progress", "-m", "까닭"]);
+    let err = String::from_utf8_lossy(&mv.stderr);
+    assert!(mv.status.success(), "{err}");
+    assert!(err.contains("moai note") && err.contains(&id), "잃은 말을 안 댔다 — {err}");
 }
 
 /// **못 읽는 줄이 산 줄의 id 를 들고 있으면 `status` 가 중복이라 말한다.**

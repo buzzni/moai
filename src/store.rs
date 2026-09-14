@@ -276,7 +276,21 @@ impl Repo {
             if !wrote {
                 return Err(e);
             }
-            MISSED.lock().unwrap_or_else(|e| e.into_inner()).push((self.root.clone(), e.message));
+            // **적어 온 말은 저널에만 산다**(`mv -m`·`defer -m`·`promote` 의 메모). 스냅샷이
+            // 담겼다고 "다시 부르지 않는다" 만 말하면 그 말은 영영 사라진다 — 어느 이슈의
+            // 말이었는지 대어 `moai note` 로 다시 적게 한다.
+            let mut worded: Vec<&str> = entries
+                .iter()
+                .filter(|j| j.text.is_some() || j.note.is_some())
+                .map(|j| j.id.as_str())
+                .collect();
+            worded.dedup();
+            let why = if worded.is_empty() {
+                e.message
+            } else {
+                format!("{} (적어 온 말도 안 남았다 — `moai note` 로 다시 적는다: {})", e.message, worded.join(" "))
+            };
+            MISSED.lock().unwrap_or_else(|e| e.into_inner()).push((self.root.clone(), why));
         }
         Ok(out)
     }
