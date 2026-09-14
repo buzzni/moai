@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(p.typing, None);
 
         path(&mut p);
-        p.typing = Some(Input::new("apps/sub"));
+        p.typing = Some(Input::path("apps/sub"));
         assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/apps/sub".into()), "상대경로가 지금 디렉터리에 안 붙었다");
 
         // **`~` 는 붙이지 않고 그대로 넘긴다** — 껍데기가 풀어 주는 철자라 경로 칸에
@@ -377,12 +377,12 @@ mod tests {
         // 홈이 어디인지는 드는 쪽(`register::expand_home`)이 안다 — 여기는 조각이다.
         for typed in ["~", "~/work/argos"] {
             path(&mut p);
-            p.typing = Some(Input::new(typed));
+            p.typing = Some(Input::path(typed));
             assert_eq!(press(&mut p, KeyCode::Enter), Act::Go(typed.into()), "`~` 를 지금 디렉터리에 붙였다");
         }
         // `~` 로 시작하지 않는 것은 그대로 붙는다 — `~x` 는 그냥 이름이다.
         path(&mut p);
-        p.typing = Some(Input::new("~x"));
+        p.typing = Some(Input::path("~x"));
         assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/~x".into()));
         path(&mut p);
         assert_eq!(press(&mut p, KeyCode::Esc), Act::Stay);
