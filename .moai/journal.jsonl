@@ -1245,3 +1245,39 @@
 {"ts":"2026-09-14T05:19:11Z","id":"moai-94uf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-yjg1 에서 펼쳤다 — 탐색기 목록 줄에 묶음의 진행률을 바탕색으로 깐다 — 포커스 없이 여러 에픽의 진행을 한 번에"}
 {"ts":"2026-09-14T05:19:11Z","id":"moai-yjg1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-94uf 로 펼쳤다 (이슈 6건)"}
 {"ts":"2026-09-14T05:19:30Z","id":"moai-94uf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"## 펼칠 때 정한 것 (사용자, 2026-09-14)\n\n나온 곳: moai-yjg1 — 요청 원문과 설계 메모는 거기 본문에 있다.\n\n- 바탕은 `REVERSED` 수식자로 깐다. 사용자 팔레트를 모르므로(moai-xs9x) 이름 있는 초록 바탕 위 글자색을 고르면 테마가 대비를 뒤집을 수 있다 — 반전은 테마 무관하게 늘 읽힌다. 요청의 \"막대 색과 같게\" 보다 가독성을 앞세운 결정\n- 토글은 세션 상태, 기본 켜짐. 사용자 설정에 저장하는 것은 필요해지면 idea 로\n- 진행률의 자는 상세 rollup 과 같게 맞춘다(moai-5l0k). 미룬 멤버를 세는지(moai-vw39)는 ready 차례 규칙이라 이 에픽 밖\n- 토글 키 후보 `p` — 탐색기에서 안 쓰는 글자. vi 키·SPC 메뉴 idea(moai-wk14)가 오면 함께 옮긴다\n- 색이 혼자 뜻을 지지 않는다 — 색 없는 화면에서도 `3/7` 셈이 글자로 남아야 한다"}
+{"ts":"2026-09-14T05:20:18Z","id":"moai-5l0k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T05:25:50Z","id":"moai-y56u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 키 — vi 이동과 SPC 메뉴"}
+{"ts":"2026-09-14T05:25:50Z","id":"moai-gaum","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"조사: helix space 모드·lazygit·yazi·k9s·doom emacs which-key — 곧바로 뜨는 메뉴의 모양·하위 접두어·빠지는 법"}
+{"ts":"2026-09-14T05:25:50Z","id":"moai-hudg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"키 지도 확정 — 지금 키 전부를 vi 키·SPC 메뉴 자리로 옮기고 겹침을 정리한다, 사람에게 한 번 보이고 정한다"}
+{"ts":"2026-09-14T05:25:50Z","id":"moai-nc7w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"키 처리 한 곳 — 키→동작 표를 두고 App::key·층의 거절·키 바·도움말·SPC 메뉴가 같은 표를 읽는다"}
+{"ts":"2026-09-14T05:25:50Z","id":"moai-ob4c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"vi 이동 — h·j·k·l, gg·G, Ctrl-d·Ctrl-u, q (글 받는 칸에서는 글자)"}
+{"ts":"2026-09-14T05:25:50Z","id":"moai-7sjm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC 메뉴 — 누르면 곧바로 하단에 키:낱말 창, 하위 접두어, Esc 로 빠짐, 순수 조각"}
+{"ts":"2026-09-14T05:25:50Z","id":"moai-k3yi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"키 바를 SPC 메뉴에 맞춰 줄이고 커서·포커스에서 되는 키만 적는다"}
+{"ts":"2026-09-14T05:25:50Z","id":"moai-cm13","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"프로젝트·디렉터리에 들어가면 커서가 `..` 에 서는 것을 새 키 지도에서 정한다"}
+{"ts":"2026-09-14T05:25:50Z","id":"moai-y56u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-wk14 에서 펼쳤다 — TUI 키 바인딩을 vi 형태로 바꾸고 doom emacs 처럼 SPC 로 여는 메뉴(which-key)를 둔다"}
+{"ts":"2026-09-14T05:25:50Z","id":"moai-wk14","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-y56u 로 펼쳤다 (이슈 7건)"}
+{"ts":"2026-09-14T05:25:52Z","id":"moai-uowi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-k3yi 로 흡수했다 (에픽 moai-y56u)"}
+{"ts":"2026-09-14T05:25:52Z","id":"moai-o8q8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-cm13 로 흡수했다 (에픽 moai-y56u)"}
+{"ts":"2026-09-14T05:25:52Z","id":"moai-7fwn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"키 에픽 moai-y56u 이 생겼다 — 이동 키가 아니라 글 받는 칸의 편집 키라 흡수하지 않았다. 키 지도(moai-hudg)가 정해지면 Alt·Ctrl 조합을 어떻게 읽을지 함께 본다"}
+{"ts":"2026-09-14T05:25:52Z","id":"moai-6jql","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"키 에픽 moai-y56u 이 생겼다 — 이동 키가 아니라 글 받는 칸의 편집 키라 흡수하지 않았다. 키 지도(moai-hudg)가 정해지면 Alt·Ctrl 조합을 어떻게 읽을지 함께 본다"}
+{"ts":"2026-09-14T05:25:52Z","id":"moai-zk14","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"키 에픽 moai-y56u 이 생겼다 — 이동 키가 아니라 글 받는 칸의 편집 키라 흡수하지 않았다. 키 지도(moai-hudg)가 정해지면 Alt·Ctrl 조합을 어떻게 읽을지 함께 본다"}
+{"ts":"2026-09-14T05:25:53Z","id":"moai-yjg1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"토글 키 자리는 키 에픽 moai-y56u 의 키 지도(moai-hudg)에서 SPC 메뉴 항목으로 함께 잡는다"}
+{"ts":"2026-09-14T05:26:18Z","id":"moai-5l0k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Index::progress 로 뽑고 상세 롤업이 그것을 쓴다"}
+{"ts":"2026-09-14T05:26:18Z","id":"moai-9b7c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T05:30:17Z","id":"moai-9b7c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"draw::shade — 칸 경계에서 가르고 room 까지 채운다"}
+{"ts":"2026-09-14T05:30:17Z","id":"moai-4uj4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T05:38:23Z","id":"moai-4uj4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"row_line 이 셈과 (from,cut) 을 내고 list 가 shade 로 깐다"}
+{"ts":"2026-09-14T05:38:23Z","id":"moai-ke4l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T05:43:47Z","id":"moai-ke4l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"커서 줄은 반전 위에 끝난 몫만 반전을 걷는다"}
+{"ts":"2026-09-14T05:43:47Z","id":"moai-6m56","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T05:46:21Z","id":"moai-6m56","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"p 토글·키 바 이름이 방향을 댄다"}
+{"ts":"2026-09-14T05:46:21Z","id":"moai-luze","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T05:49:31Z","id":"moai-luze","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Summary::percent 로 층 줄에도 깐다"}
+{"ts":"2026-09-14T05:49:32Z","id":"moai-94uf.sqi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 목록 줄 진행 바탕 (progress-shade)"}
+{"ts":"2026-09-14T05:49:44Z","id":"moai-94uf.sqi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T05:50:29Z","id":"moai-94uf.sqi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-14T05:50:29Z","id":"moai-94uf.sqi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰(/code-review high --fix)가 백그라운드에서 도는 중 — 결과가 오면 원문과 판단을 노트로 적고 done 으로 옮긴다"}
+{"ts":"2026-09-14T05:54:23Z","id":"moai-5lc8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"목록 줄 진행 바탕이 줄마다 Index::progress 로 homes 전체를 훑는다 — 에픽이 아주 많으면 경로별 셈을 적재 때 한 번 세 둔다"}
+{"ts":"2026-09-14T05:54:54Z","id":"moai-94uf.sqi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"## 리뷰 원문 — /code-review high --fix main..progress-shade\n\n1. `src/tui/draw.rs:576` (낮음): 진행 바탕이 켜진 채 커서가 에픽·마일스톤 줄에 서면 `> ` 두 칸만 반전이 빠진다. 줄 스타일에 REVERSED 를 입히고 위젯의 커서 스타일을 껐는데, ratatui 0.30 List 는 줄 스타일을 커서 자리 뒤에만 깐다. 고침: `ListItem::new(shade(line, from, cut, room, under)).style(over)`. 시험 `the_cursor_row_shows_its_progress_inverted` 가 `> ` 두 칸을 확인한다.\n2. `src/tui/draw.rs:717` (낮음, 효율): `row_line` 이 에픽·마일스톤 줄마다 매 프레임 `Index::progress` 를 불러 homes 전체를 훑는다. 경로별 셈을 캐시해야 해서 이 diff 범위 밖이라 안 고쳤다.\n\n맞다고 확인한 것: cut 계산과 셈·`/` 폭, bar_fill 의 99%, shade 의 두 칸·폭 0 글자, Summary::percent 의 DONE 비교, 층에서 p 가 막히지 않음, cursor_at 과 ListState 선택이 같음."}
+{"ts":"2026-09-14T05:54:55Z","id":"moai-94uf.sqi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"## 판단\n\n- 1 반영 — fix 커밋. 시험 전체(단위 603·CLI 238) 통과를 확인했다\n- 2 넘김 → moai-5lc8 (idea). 지금 크기(에픽 수십 × 이슈 수백)에서는 프레임당 수천 번 비교라 체감이 없고, 캐시는 적재 때 세는 파생값을 하나 더 드는 일이다. 느려진다는 보고나 수천 건 저장소가 생기면 연다"}
+{"ts":"2026-09-14T05:54:55Z","id":"moai-94uf.sqi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"커서 줄 '> ' 반전 반영, 줄마다 progress 훑기는 moai-5lc8 로 넘김"}
