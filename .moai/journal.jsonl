@@ -1961,3 +1961,4 @@
 {"ts":"2026-09-14T12:42:44Z","id":"moai-dtye.0t0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: 지금 호출자가 모두 절대 경로라는 것과 상대 경로 기준을 주석에. 안 함: clap 끝까지 CLI 시험(새 코드를 못 잼). 넘김: 없음"}
 {"ts":"2026-09-14T12:44:50Z","id":"moai-jwnr.7xb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"버그 없음, 고친 것 없음. 남은 것(climb 의 joins 가드가 죽었다)은 idea moai-zg19 로 넘겼다"}
 {"ts":"2026-09-14T12:44:50Z","id":"moai-jwnr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (c32cc6c) — report::milestones 가 마일스톤 줄에 값을 안 준다. edit --milestone 이 마일스톤 줄에 조용히 적는 것은 idea moai-09fq"}
+{"ts":"2026-09-14T12:45:53Z","id":"moai-dtye","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 — shell_word 가 '-' 로 시작하는 경로에 ./ 를 붙인다"}
