@@ -259,6 +259,7 @@ fn one(
         roots: report::deferred_roots(all),
         states: report::group_states_of(all, &repo.config, &near),
         origin: Some(origin),
+        blocks: report::blocks_of(all, &repo.config, issue),
     };
 
     if ctx.json {
@@ -286,6 +287,13 @@ fn one(
         }
         if let Some(n) = twins {
             extra.push(("duplicate_lines", n.to_string()));
+        }
+        // 사람 화면이 그리는 막음을 **같은 답으로** 낸다. `blocked_by` 는 적힌 id 뿐이라 막는지·
+        // 풀렸는지·끊겼는지를 받는 쪽이 다시 가르게 된다. 막음이 없으면 키를 안 단다.
+        // **키는 `blockers` 다** — `link A --blocks B` 가 "A 가 B 를 막는다" 이므로 B 에 단
+        // `blocks` 는 받는 쪽이 "B 가 A 를 막는다" 로 거꾸로 읽는다.
+        if !seen.blocks.is_empty() {
+            extra.push(("blockers",serde_json::to_string(&seen.blocks).map_err(|e| Fail::new(e.to_string()))?));
         }
         return super::json_with(
             &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),

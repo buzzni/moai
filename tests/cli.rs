@@ -1162,6 +1162,44 @@ fn rm_names_the_blocks_it_broke() {
     assert!(line_of(s.path(), &b).contains("blocked_by"));
 }
 
+/// **CLI 상세도 막음을 그린다**(moai-rvcb) — `ready` 가 고르는 그 자로, 탐색기와 같은 낱말로.
+/// 막는 줄이 끝나면 풀림, 미루면 미룬 까닭과 함께 막힘, 지우면 끊김이다. `--json` 도 같은 답을 낸다.
+#[test]
+fn show_draws_each_blocker_with_the_words_ready_uses() {
+    let s = init("showblocks");
+    let a = add(s.path(), &["먼저 할 것"]);
+    let c = add(s.path(), &["미뤄 둔 것"]);
+    let b = add(s.path(), &["막히는 것"]);
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+    ok(s.path(), &["link", &c, "--blocks", &b]);
+    let line = |out: &str, id: &str| out.lines().find(|l| l.contains(id) && !l.starts_with(id)).unwrap_or_default().to_string();
+
+    let shown = ok(s.path(), &["show", &b]);
+    assert!(line(&shown, &a).contains("막힘") && line(&shown, &a).contains("먼저 할 것"), "{shown}");
+
+    ok(s.path(), &["mv", &a, "done"]);
+    ok(s.path(), &["defer", &c]);
+    let shown = ok(s.path(), &["show", &b]);
+    assert!(line(&shown, &a).contains("풀림"), "끝난 막음이 풀림으로 안 섰다\n{shown}");
+    let deferred = line(&shown, &c);
+    assert!(deferred.contains("막힘") && deferred.contains("미룸"), "미룬 막음이 미뤘다고 안 한다\n{shown}");
+    // `ready` 와 같은 답이다 — 미룬 막음도 막으므로 b 는 집을 일로 안 선다. b 는 `held` 에
+    // "미룬 것에 막혀 못 집는 것" 으로 서므로, `ready` 목록만 떼어 본다.
+    let rd = ok(s.path(), &["ready", "--json"]);
+    let picks = rd.split("\"held\"").next().unwrap_or_default();
+    assert!(!picks.contains(&b), "미룬 막음에 막힌 줄을 집으라고 낸다\n{rd}");
+    assert!(rd.contains(&format!("\"id\":\"{b}\"")), "held 에 막힌 줄이 없다\n{rd}");
+
+    ok(s.path(), &["rm", &c]);
+    let shown = ok(s.path(), &["show", &b]);
+    assert!(line(&shown, &c).contains("끊김"), "끊긴 막음이 끊김으로 안 섰다\n{shown}");
+    let json = ok(s.path(), &["show", &b, "--json"]);
+    // 차례는 적힌 `blocked_by` 차례다 — 쓸 때 id 로 정렬되므로 여기서는 차례를 안 본다.
+    assert!(json.contains("\"blockers\":[") && json.contains(&format!("{{\"id\":\"{a}\",\"state\":\"done\"}}")), "{json}");
+    assert!(json.contains(&format!("{{\"id\":\"{c}\",\"state\":\"missing\"}}")), "{json}");
+    assert!(!ok(s.path(), &["show", &a, "--json"]).contains("\"blockers\""), "막음이 없는데 blockers 키가 섰다");
+}
+
 /// 메모는 스냅샷을 건드리지 않고 저널에만 쌓인다.
 #[test]
 fn note_only_touches_the_journal() {
