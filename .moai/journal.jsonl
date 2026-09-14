@@ -2045,3 +2045,7 @@
 {"ts":"2026-09-14T13:07:23Z","id":"moai-q59j","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기의 도는 글리프가 칸 이름 \"in_progress\" 를 박아 둬 칸 이름을 바꾼 설정에서 안 돈다"}
 {"ts":"2026-09-14T13:07:23Z","id":"moai-jcui","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-q59j 로 옮겨 작업한다 (감독 세션 moa-issue-45 가 맡김)"}
 {"ts":"2026-09-14T13:07:23Z","id":"moai-q59j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T13:08:23Z","id":"moai-yec5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"옮겨 작업한다 (2026-09-14, 감독 세션 moa-issue-45 이 맡김, 사용자와 정함): 덧붙인 키가 이긴다 — json_with 한 곳에서, 덧붙일 키 이름과 같은 모르는 필드를 출력에서만 걷는다. 파일은 안 바뀐다(모르는 필드 보존). Row 의 derived_status·branch, edit 의 inherited_* 와 같은 약속을 한 자리로 모은다."}
+{"ts":"2026-09-14T13:08:23Z","id":"moai-kgu2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"--json 에 덧붙인 키와 같은 이름의 모르는 필드는 출력에서 걷는다 — json_with 한 곳에서"}
+{"ts":"2026-09-14T13:08:23Z","id":"moai-yec5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kgu2 로 옮겨 작업한다"}
+{"ts":"2026-09-14T13:08:23Z","id":"moai-kgu2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
