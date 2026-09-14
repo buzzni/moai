@@ -1942,3 +1942,17 @@
 {"ts":"2026-09-14T12:36:07Z","id":"moai-ugjp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(2026-09-14, 사람): 경고 future_timestamp 로 드러내고 종료 코드는 0 그대로(fatal 아님 — 줄은 읽히고 고칠 것이지 깨진 것이 아니다). 문턱은 지금보다 하루(24시간) 넘게 앞선 시각. 보는 시각은 created_at·updated_at·status_since·deferred_at·planned_at 전부. 걸린 줄은 최근 7일 흐름(생성·완료) 셈에서 뺀다."}
 {"ts":"2026-09-14T12:36:07Z","id":"moai-x7w3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"일감으로 옮겨 세움 — moai-ugjp 가 이어받는다 (edit 에 종류 플래그가 없다)"}
 {"ts":"2026-09-14T12:36:07Z","id":"moai-ugjp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:36:50Z","id":"moai-dtye","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: worktree-moai-dtye 에서 시험 통과 확인 → 커밋 → 리뷰 이슈(--parent moai-dtye)와 리뷰(워크트리 안에서 /code-review 가 훅에 막히면 서브에이전트) → 원문·판단 노트, fix: 커밋, 리뷰 닫기 → 브랜치에 main 을 받아 시험 → 워크트리를 둔 채 나와 main 에서 머지 → dtye done·트래커 커밋 → 워크트리·가지 삭제(감독 moa-issue-45 절차) → 45 에 머지 해시·고친 것·넘긴 것 보고."}
+{"ts":"2026-09-14T12:37:15Z","id":"moai-dtye.0t0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 안내 경로의 맨 앞 '-' 를 ./ 로 (dtye)"}
+{"ts":"2026-09-14T12:37:23Z","id":"moai-5zqe","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:37:23Z","id":"moai-xms8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:37:23Z","id":"moai-mzoc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:37:23Z","id":"moai-4lam","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:37:34Z","id":"moai-dtye.0t0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:39:30Z","id":"moai-rvcb.7u5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"json 키 blocks→blockers 반영(265ea45), 모르는 필드와 덧붙인 키 이름 겹침은 moai-yec5 로 넘겼다, 전체 셈 비용은 held 와 같아 두었다"}
+{"ts":"2026-09-14T12:39:30Z","id":"moai-rvcb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (04da79f) — show <id> 상세의 막음 줄과 --json blockers. edit 상세는 moai-dt5s"}
+{"ts":"2026-09-14T12:40:02Z","id":"moai-hxma","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(사용자, 2026-09-14): 일꾼이 idea 를 일감으로 바꾸는 길은 언제나 `moai idea promote <id> --from -` 하나다. 이슈 하나짜리도 에픽+이슈로 펼친다 — idea 가 저절로 done 이 되고 출처가 저널에 남아 따로 닫을 일이 없고, add 가 훅 규칙 1 에 걸리지 않는다. 워크트리·가지 이름은 펼친 에픽 id 로 뜬다"}
+{"ts":"2026-09-14T12:42:33Z","id":"moai-dt5s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"옮겨 작업한다 (2026-09-14, 감독 세션 moa-issue-45 이 맡김, 사용자와 정함): edit 의 쓰기 안에서 막는 줄들과 report::blocks_of 의 답을 떠 와 상세에 그린다 — 쓰기 뒤 다시 읽지 않는다(파일을 한 번만 읽고, 방금 쓴 그 시점의 답)."}
+{"ts":"2026-09-14T12:42:33Z","id":"moai-xe74","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai edit 뒤 상세도 막음 줄을 그린다 — 쓰기 안에서 막음 답을 떠 온다"}
+{"ts":"2026-09-14T12:42:33Z","id":"moai-dt5s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-xe74 로 옮겨 작업한다"}
+{"ts":"2026-09-14T12:42:33Z","id":"moai-xe74","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
