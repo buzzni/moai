@@ -1619,6 +1619,9 @@ pub(super) mod tests {
     fn only_a_held_issue_title_glints_in_the_list() {
         let mut a = app();
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        // 커서는 `..` 에 둔다 — 들어가면 첫 줄(끝난 멤버)에 서는데(moai-cm13), 커서 줄의 모양이
+        // 제목 칸을 가려 여기서 재려는 빛과 섞인다.
+        a.key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
         // 가운데 칸이 제목 첫 글자에 오는 걸음.
         a.spin = 2;
         let (w, h) = (80u16, 10u16);
@@ -1877,7 +1880,6 @@ pub(super) mod tests {
 
         // 에픽 안으로 들어가 멤버(잎)를 본다 → 그 이슈의 낱낱
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let lines = render(&mut a, 100, 16).join("\n");
         assert!(lines.contains("argos-0003"), "이슈 id 가 없다\n{lines}");
         assert!(lines.contains("멤버"), "제목이 없다\n{lines}");
@@ -1894,7 +1896,6 @@ pub(super) mod tests {
         issues[1].blocked_by = vec!["argos-0001".into()];
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let lines = render(&mut a, 100, 20).join("\n");
         assert!(lines.contains("막힘"), "{lines}");
         assert!(lines.contains("아주 긴"), "막는 것의 제목이 없다\n{lines}");
@@ -1907,7 +1908,6 @@ pub(super) mod tests {
         issues[1].body = Some("앞\u{1b}[2J뒤".into());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let lines = render(&mut a, 100, 20).join("\n");
         assert!(lines.contains("앞[2J뒤"), "제어문자가 안 걸러졌다\n{lines}");
     }
@@ -2031,7 +2031,6 @@ pub(super) mod tests {
             issues[1].blocked_by = vec!["argos-0001".into()];
             let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
             a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-            a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
             render(&mut a, 100, 20).join("\n")
         };
         let lines = drawn(true);
@@ -2258,7 +2257,6 @@ pub(super) mod tests {
         issues[1].body = Some("**굵게** 한 줄\n\n- 하나\n- 둘\n".into());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
         let drawn = render(&mut a, 100, 22).join("\n");
         assert!(!drawn.contains("**"), "굵게 기호가 남았다\n{drawn}");
@@ -2464,7 +2462,6 @@ pub(super) mod tests {
             let mut a =
                 App::new(issues.clone(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
             a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-            a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
             for l in render(&mut a, w, 30) {
                 assert!(crate::text::width(&l) <= w as usize, "{w}칸을 넘었다 — {l:?}");
             }
@@ -2499,7 +2496,6 @@ pub(super) mod tests {
         issues[1].body = Some(body);
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
         let first = render(&mut a, 100, 16).join("\n");
         assert!(first.contains("1번째"), "{first}");
@@ -2539,7 +2535,6 @@ pub(super) mod tests {
         issues[1].body = Some("```\nlet very_long = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\";\n```\n".into());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
         for raw in [false, true] {
             if raw {
@@ -2566,7 +2561,6 @@ pub(super) mod tests {
         issues[1].body = Some((1..=40).map(|n| format!("{n}번째 줄이다\n\n")).collect::<String>());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
         a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         for _ in 0..80 {
@@ -2588,7 +2582,6 @@ pub(super) mod tests {
         issues[1].tags = (1..=20).map(|n| format!("아주긴태그이름{n}")).collect();
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let out = render(&mut a, 100, 20);
         let tagline = out.iter().find(|l| l.contains("아주긴태그이름1")).expect("태그 줄이 없다");
         assert!(tagline.contains('…'), "잘렸는데 표시가 없다 — {tagline:?}");
@@ -2602,7 +2595,6 @@ pub(super) mod tests {
         issues[1].body = Some((1..=40).map(|n| format!("{n}번째\n\n")).collect::<String>());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let _ = render(&mut a, 100, 16);
         a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         a.key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
@@ -2621,7 +2613,6 @@ pub(super) mod tests {
         issues[1].body = Some((1..=40).map(|n| format!("{n}번째 줄이다\n\n")).collect::<String>());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let cursor = a.cursor;
 
         a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));

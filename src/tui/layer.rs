@@ -297,8 +297,8 @@ impl App {
 
     pub fn with_layer(mut self, layer: Layer) -> App {
         self.layer = Some(layer);
-        if self.path.is_empty() && self.cursor == 0 && self.rows().len() > 1 {
-            self.cursor = 1;
+        if self.path.is_empty() && self.cursor == 0 {
+            self.cursor = self.first_row();
         }
         self
     }
@@ -435,6 +435,9 @@ impl App {
                 // 들이기 전 목록은 비었다(층에 선 동안 비워 둔다) — 커서가 붙들 정체는 `..`
                 // 뿐이라 남의 프로젝트의 id 가 여기로 새지 않는다.
                 self.apply_fresh(fresh);
+                // 그다음 `..` 너머 첫 줄에 선다 — 디렉터리에 들어갈 때와 같은 자(`App::first_row`,
+                // moai-cm13). 들인 뒤에 세운다: 들이기는 커서를 정체(`..`)로 붙든다.
+                self.cursor = self.first_row();
             }
             Err(e) => self.notice = Some(format!("들어가지 못했다 — {e}")),
         }
@@ -841,7 +844,11 @@ mod tests {
         a.key(key(KeyCode::Enter));
         assert_eq!(a.repo.as_ref().map(|r| r.root.clone()), Some(two.clone()));
         assert_eq!(titles(&a), ["two 의 집은 줄", "two 의 줄"], "옛 프로젝트의 줄이 섞였다");
-        assert_eq!(a.current(), Some(Row::Up), "들어가면 `..` 에 선다 — 옛 커서의 id 를 따라갔다");
+        // **들어가면 `..` 너머 첫 줄에 선다**(moai-cm13). 한때 여기서 `..` 에 선다를 결정으로
+        // 못 박았는데, 그러면 들어가자마자 누른 Enter 가 층으로 되올라가 Enter 두 번이 제자리다.
+        // 디렉터리·고르기 창·안에서 띄운 첫 화면(`with_layer`)과 같은 자로 맞췄다. 옛 커서의 id
+        // (one 의 argos-0002, 둘째 줄)를 따라가지 않는 것은 그대로 잰다.
+        assert_eq!(a.cursor, 1, "들어가서 `..` 에 섰거나 옛 커서의 id 를 따라갔다");
 
         a.key(key(KeyCode::Left));
         assert_eq!(a.current(), Some(Row::Project(1)));

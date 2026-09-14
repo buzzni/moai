@@ -1322,13 +1322,25 @@ impl App {
         }
     }
 
+    /// 들어간 층에서 커서가 설 줄 — **`..` 너머 첫 줄**(moai-cm13). 비었으면 `..`.
+    ///
+    /// `..` 에 세우면 들어가자마자 누른 Enter(·`l`) 한 번이 도로 나온다 — 두 번 누르면 들어갔다
+    /// 나온 제자리다. 고르기 창(`Picker::new`)이 첫 하위 디렉터리에, 안에서 띄운 탐색기
+    /// (`App::with_layer`)가 첫 항목에 서는 것과 같은 자다. `..` 은 `k`·`gg`·Home 한 번 거리다
+    /// — vi 키가 서기 전에는 `..` 에 세워 두는 것이 나가는 길을 보이는 값이었지만, 이제
+    /// `h`·Bksp 가 어느 줄에서든 나간다.
+    fn first_row(&self) -> usize {
+        let rows = self.rows();
+        usize::from(rows.len() > 1 && rows.first() == Some(&Row::Up))
+    }
+
     fn enter(&mut self) {
         match self.current() {
             Some(Row::Up) => self.leave(),
             Some(Row::Item(Entry::Dir { seg, .. })) => {
                 self.remembered.push(self.cursor);
                 self.path.push(seg);
-                self.cursor = 0;
+                self.cursor = self.first_row();
                 self.detail.rewind();
             }
             Some(Row::Project(at)) => self.enter_project(at),
@@ -1656,6 +1668,27 @@ mod tests {
         assert!(!a.rows().contains(&Row::Up));
         a.key(key(KeyCode::Enter));
         assert_eq!(a.rows().first(), Some(&Row::Up));
+    }
+
+    /// **들어가면 `..` 너머 첫 줄에 선다**(moai-cm13). `..` 에 세우면 들어가자마자 누른 Enter
+    /// 한 번이 도로 나와 Enter 두 번이 제자리다. `..` 은 `k` 한 번 거리에 남는다. 빈
+    /// 디렉터리는 `..` 뿐이라 거기 선다.
+    #[test]
+    fn entering_lands_past_the_up_row() {
+        let mut a = app();
+        a.key(key(KeyCode::Enter));
+        assert_eq!((a.path.len(), a.cursor), (1, 1), "들어가서 `..` 에 섰다");
+        assert!(matches!(a.current(), Some(Row::Item(_))), "{:?}", a.current());
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.path.len(), 1, "들어가자마자 누른 Enter 가 도로 나왔다");
+        a.key(key(KeyCode::Char('k')));
+        assert_eq!(a.current(), Some(Row::Up), "`..` 이 `k` 한 번 거리에 없다");
+        a.key(key(KeyCode::Char('l')));
+        assert!(a.path.is_empty());
+
+        a.key(key(KeyCode::Char('j')));
+        a.key(key(KeyCode::Char('l')));
+        assert_eq!((a.path.len(), a.current()), (1, Some(Row::Up)), "빈 디렉터리에서 `..` 말고 설 데가 없다");
     }
 
     /// 들어갔다 나오면 **있던 자리로 돌아온다**. 매번 맨 위로 튕기면 못 쓴다.
@@ -2340,9 +2373,10 @@ mod tests {
         a.adopt(gone);
         assert!(a.cursor < a.rows().len(), "목록 밖에 섰다");
 
-        // `..` 에 서 있으면 `..` 에 남는다.
+        // `..` 에 서 있으면 `..` 에 남는다. 들어가면 첫 줄에 서므로(moai-cm13) `..` 로 올라간다.
         let mut b = app();
         b.key(key(KeyCode::Enter));
+        b.key(key(KeyCode::Home));
         let mut more = b.issues.clone();
         more.push(member("argos-0000", "argos-0001"));
         b.adopt(more);
