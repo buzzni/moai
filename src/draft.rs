@@ -135,9 +135,11 @@ pub fn fill(src: &str, vars: &[(String, String)]) -> Result<String, String> {
                 }
                 rest = &after[name.len() + 2..];
             }
+            // `{` 하나만 글자로 넘기고 다음 `{` 부터 다시 본다 — `{{` 를 통째로 넘기면
+            // `{{{a}}}` 의 `{{a}}` 가 변수로 안 읽혀, 준 `--var a` 가 "계획에 없는 변수" 로 거절된다.
             None => {
-                out.push_str("{{");
-                rest = after;
+                out.push('{');
+                rest = &rest[open + 1..];
             }
         }
     }
@@ -402,6 +404,10 @@ mod tests {
         assert_eq!(one(&got)[1].title, "1.2 태그를 단다");
         // 값 안의 `{{…}}` 는 다시 펴지 않는다 — 한 번뿐이다.
         assert_eq!(fill("# {{a}}\n", &vars(&[("a", "{{a}}")])).unwrap(), "# {{a}}\n");
+        // 겹친 중괄호 안의 이름도 변수다 — `{{{a}}}` 의 `{{a}}` 를 놓치면 준 `--var a` 가 거절된다.
+        assert_eq!(fill("# {{{a}}} {{{{a}}}}\n", &vars(&[("a", "1")])).unwrap(), "# {1} {{1}}\n");
+        // 닫히지 않은 `{{` 는 글자고, 그 뒤의 변수는 그대로 읽는다. 여러 바이트 글자 사이에서도.
+        assert_eq!(fill("# 가{{나 {{a}}다{{\n", &vars(&[("a", "값")])).unwrap(), "# 가{{나 값다{{\n");
     }
 
     /// 변수가 없고 `--var` 도 없으면 글은 그대로다 — 여느 계획이 안 바뀐다. 이름 모양이 아닌
