@@ -499,7 +499,12 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // **보기가 숨긴 것을 댄다**(moai-fmv5) — done 을 숨긴 채 시작하므로, 안 대면 끝난 일이 사라진
     // 줄 안다. 거름망 뱃지와 달리 **늘 서 있는 것**이라 경로의 몫을 굶기지 않는다: 경로에 여덟 칸이
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC s` 가 댄다. 층에서는 보기가 뜻이 없다.
-    let look = app.view.badge().filter(|_| !app.on_layer()).map(|b| format!("[{b}]"));
+    // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
+    let sorted = (app.order != Default::default()).then(|| {
+        format!("정렬 {}{}", app.order.0.word(), if app.order.1 { " 거꾸로" } else { "" })
+    });
+    let parts: Vec<String> = [app.view.badge(), sorted].into_iter().flatten().collect();
+    let look = (!parts.is_empty() && !app.on_layer()).then(|| format!("[{}]", parts.join(" · ")));
     let look = look.filter(|l| crate::text::width(l) + 3 + 8 <= room);
     let room = match &look {
         Some(l) => room.saturating_sub(crate::text::width(l) + 3),

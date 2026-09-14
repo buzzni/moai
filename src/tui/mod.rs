@@ -367,6 +367,8 @@ pub struct App {
     /// 이슈 첨자 → 보기에 보이는가. `keep` 과 같은 까닭으로 **보기나 자료가 바뀔 때만** 센다
     /// ([`App::see`]) — 묶음의 칸과 물려받은 미룸을 줄마다 프레임마다 다시 풀지 않는다.
     shown: Vec<bool>,
+    /// 목록 차례와 거꾸로인가(moai-55cp). 기본은 우선순위 차례다.
+    pub order: (keys::Order, bool),
     /// 층마다 커서를 기억한다. 들어갔다 나오면 **있던 자리로 돌아온다** —
     /// 매번 맨 위로 튕기면 형제 여럿을 훑는 일이 못 할 짓이 된다.
     remembered: Vec<usize>,
@@ -530,6 +532,7 @@ impl App {
             // 것을 덮었고, 걷으려면 `status=todo,in_progress,review` 를 손으로 적어야 했다.
             view: view::View::hiding(crate::config::DONE),
             shown: Vec::new(),
+            order: Default::default(),
             remembered,
             list: Scroll::default(),
             quit: false,
@@ -1098,6 +1101,20 @@ impl App {
         self.keep = vec![true; self.issues.len()];
     }
 
+    /// 키 표의 차례(조각)를 `query` 의 차례로 잇는다. 둘을 한 타입으로 두지 않는 까닭은 키 표가
+    /// 조각이라 `crate::query` 를 못 부르기 때문이다(`input::tests::components_know_neither…`).
+    fn sort_key(o: keys::Order) -> crate::query::SortKey {
+        use crate::query::SortKey;
+        match o {
+            keys::Order::Priority => SortKey::Priority,
+            keys::Order::Created => SortKey::Created,
+            keys::Order::Updated => SortKey::Updated,
+            keys::Order::Column => SortKey::Status,
+            keys::Order::Assignee => SortKey::Assignee,
+            keys::Order::Title => SortKey::Title,
+        }
+    }
+
     /// 줄마다 보기에 보이는지 다시 센다. 칸은 **목록의 글리프와 같은 자**([`App::column`])로,
     /// 미룸은 물려받은 것까지(`Index::deferred_root`) 읽는다 — 미룬 에픽 밑의 일도 같이 빠진다.
     fn see(&mut self) {
@@ -1120,6 +1137,8 @@ impl App {
             B::Done => self.view.toggle(crate::config::DONE),
             B::Deferred => self.view.hide_deferred = !self.view.hide_deferred,
             B::ShowAll => self.view = view::View::default(),
+            // 고른 것을 다시 누르면 거꾸로, 다른 것을 누르면 그것의 제 방향으로.
+            B::Sort(o) => self.order = (o, self.order.0 == o && !self.order.1),
             _ => return,
         }
         self.see();
@@ -1133,7 +1152,7 @@ impl App {
         }
     }
 
-    /// 지금 디렉터리의 줄들.
+    /// 지금 디렉터리의 줄들. 차례는 고른 것(`SPC o`)이다.
     pub fn rows(&self) -> Vec<Row> {
         if let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) {
             return (0..l.places.len()).map(Row::Project).collect();
@@ -1147,7 +1166,16 @@ impl App {
         // (`Index::kept`). done 에픽 밑에 남은 todo 가 폴더째 사라지면 안 된다.
         rows.extend(
             self.index
-                .entries_where(&self.issues, &self.path, &|at| keep[at] && shown.get(at).copied().unwrap_or(true))
+                .entries_sorted(&self.issues, &self.path, &|at| keep[at] && shown.get(at).copied().unwrap_or(true), &|a, b| {
+                    // 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다.
+                    crate::query::order_by(
+                        Self::sort_key(self.order.0),
+                        self.order.1,
+                        (&self.issues[a], self.column(a)),
+                        (&self.issues[b], self.column(b)),
+                        &self.cfg.statuses,
+                    )
+                })
                 .into_iter()
                 .map(Row::Item),
         );
@@ -1246,7 +1274,7 @@ impl App {
                     });
                 }
             }
-            B::Column(_) | B::Done | B::Deferred | B::ShowAll => self.look(act),
+            B::Column(_) | B::Done | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act),
             B::Raw => {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
@@ -1282,6 +1310,8 @@ impl App {
                 .fold(0, |bits, (n, _)| bits | 1 << n),
             done_hidden: self.view.hides(crate::config::DONE),
             deferred_hidden: self.view.hide_deferred,
+            order: self.order.0,
+            order_reversed: self.order.1,
             next_pane: draw::pane_name(self.focus.next()),
             prev_pane: draw::pane_name(self.focus.prev()),
         }
@@ -1777,6 +1807,33 @@ mod tests {
         assert_eq!(row_ids(&a), ["argos-0001"]);
         a.hit("SPC s a");
         assert_eq!(row_ids(&a).len(), 3, "모두 보이기가 다 안 보인다");
+    }
+
+    /// **`SPC o` 가 차례를 고르고, 같은 키를 다시 누르면 거꾸로 선다**(moai-55cp). 다른 키로 가면
+    /// 그 키의 제 방향부터다. 커서는 보던 줄에 붙는다.
+    #[test]
+    fn the_sort_menu_orders_rows_and_the_same_key_reverses() {
+        let dated = |id: &str, created: &str| {
+            let mut i = make(id, Kind::Issue);
+            i.created_at = created.into();
+            i
+        };
+        let issues = vec![
+            dated("argos-0001", "2026-09-02T00:00:00Z"),
+            dated("argos-0002", "2026-09-03T00:00:00Z"),
+            dated("argos-0003", "2026-09-01T00:00:00Z"),
+        ];
+        let mut a = App::new(issues, cfg(), Path::new());
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0003"]);
+        a.hit("SPC o c");
+        assert_eq!(row_ids(&a), ["argos-0002", "argos-0001", "argos-0003"], "새것이 위가 아니다");
+        assert_eq!(a.cursor, 1, "커서가 보던 줄(argos-0001)을 놓쳤다");
+        a.hit("SPC o c");
+        assert_eq!(row_ids(&a), ["argos-0003", "argos-0001", "argos-0002"], "다시 눌렀는데 안 뒤집혔다");
+        a.hit("SPC o t");
+        assert_eq!(a.order, (keys::Order::Title, false), "다른 키가 거꾸로를 물려받았다");
+        a.hit("SPC o p");
+        assert_eq!(a.order, Default::default());
     }
 
     /// 도는 줄이 있는지 — 줄마다의 답([`App::spins`])을 모은 것. 루프가 깨는 것은 이것이

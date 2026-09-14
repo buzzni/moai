@@ -294,6 +294,33 @@ pub enum Browse {
     /// 미룬 것을 보이고 숨긴다. 칸이 아니라 `deferred_at` 축이다.
     Deferred,
     ShowAll,
+    /// 목록 차례를 고른다(moai-55cp). 이미 고른 것을 다시 누르면 거꾸로 선다.
+    Sort(Order),
+}
+
+/// 목록 차례. **조각이라 `query::SortKey` 를 모른다** — `App` 이 둘을 잇는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Order {
+    #[default]
+    Priority,
+    Created,
+    Updated,
+    Column,
+    Assignee,
+    Title,
+}
+
+impl Order {
+    pub fn word(self) -> &'static str {
+        match self {
+            Order::Priority => "우선순위",
+            Order::Created => "생성",
+            Order::Updated => "수정",
+            Order::Column => "칸",
+            Order::Assignee => "담당",
+            Order::Title => "제목",
+        }
+    }
 }
 
 /// 칸 토글에 번호를 줄 수 있는 칸 수 — `1`~`9`. 넘는 칸은 번호가 없고 `SPC s a` 로만 돌아온다.
@@ -387,6 +414,12 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Column(6), None, LEADER, Key::plain('s'), Key::plain('7')),
         row!(Column(7), None, LEADER, Key::plain('s'), Key::plain('8')),
         row!(Column(8), None, LEADER, Key::plain('s'), Key::plain('9')),
+        row!(Sort(Order::Priority), Some("SPC o p"), LEADER, Key::plain('o'), Key::plain('p')),
+        row!(Sort(Order::Created), Some("SPC o c"), LEADER, Key::plain('o'), Key::plain('c')),
+        row!(Sort(Order::Updated), Some("SPC o u"), LEADER, Key::plain('o'), Key::plain('u')),
+        row!(Sort(Order::Column), Some("SPC o s"), LEADER, Key::plain('o'), Key::plain('s')),
+        row!(Sort(Order::Assignee), Some("SPC o a"), LEADER, Key::plain('o'), Key::plain('a')),
+        row!(Sort(Order::Title), Some("SPC o t"), LEADER, Key::plain('o'), Key::plain('t')),
     ]
 };
 
@@ -411,6 +444,9 @@ pub struct Ctx {
     pub hidden: u16,
     pub done_hidden: bool,
     pub deferred_hidden: bool,
+    /// 고른 차례와 거꾸로인가.
+    pub order: Order,
+    pub order_reversed: bool,
     /// `Tab`·Shift-Tab 이 가는 칸의 이름.
     pub next_pane: &'static str,
     pub prev_pane: &'static str,
@@ -452,7 +488,7 @@ impl Browse {
             }
             Worktree if c.layer => Err(Off::Quiet),
             // 보기는 프로젝트 안의 줄에 건다 — 층에서는 그룹째 메뉴에 안 선다(`menu::live`).
-            Column(_) | Done | Deferred | ShowAll if c.layer => Err(Off::Quiet),
+            Column(_) | Done | Deferred | ShowAll | Sort(_) if c.layer => Err(Off::Quiet),
             Column(n) if usize::from(n) >= c.columns => Err(Off::Quiet),
             _ => Ok(()),
         }
@@ -471,6 +507,7 @@ impl Browse {
             Raw => "원문↔그리기",
             Deferred => "미룸",
             ShowAll => "모두 보이기",
+            Sort(o) => o.word(),
             _ => self.what(c),
         }
     }
@@ -484,6 +521,8 @@ impl Browse {
             Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0)),
             Browse::Done => Some(shown(c.done_hidden)),
             Browse::Deferred => Some(shown(c.deferred_hidden)),
+            // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
+            Browse::Sort(o) if o == c.order => Some(if c.order_reversed { "[● 거꾸로]" } else { "[● 차례]" }),
             _ => None,
         }
     }
@@ -518,6 +557,7 @@ impl Browse {
             Done => "done",
             Deferred => "미룸",
             ShowAll => "모두",
+            Sort(_) => "정렬",
         }
     }
 }
@@ -1047,6 +1087,9 @@ mod tests {
             (vec![sp, ch('s'), ch('a')], B::ShowAll),
             (vec![sp, ch('s'), ch('1')], B::Column(0)),
             (vec![sp, ch('s'), ch('9')], B::Column(8)),
+            (vec![sp, ch('o'), ch('p')], B::Sort(Order::Priority)),
+            (vec![sp, ch('o'), ch('u')], B::Sort(Order::Updated)),
+            (vec![sp, ch('o'), ch('t')], B::Sort(Order::Title)),
         ];
         for (seq, act) in menu {
             assert_eq!(lookup(BROWSE, &seq), Lookup::Run(act), "메뉴 {seq:?}");
