@@ -7,6 +7,7 @@ pub mod draw;
 pub mod edit;
 pub mod form;
 pub mod input;
+pub mod jotfile;
 pub mod keys;
 pub mod layer;
 pub mod picker;
