@@ -785,7 +785,11 @@ impl App {
             return false;
         }
         let busy = !crate::report::is_group(i) || self.states.get(&i.id).is_some_and(|s| s.busy);
-        busy && crate::style::spins(self.column(at))
+        // **도는 칸은 설정이 정한다**(moai-q59j) — 시작한 칸 모두(`Config::is_started`). 칸 이름
+        // `"in_progress"` 를 박아 두면 칸 이름을 바꾼 설정에서 아무것도 안 돌았다. 설정이 모르는
+        // 칸은 안 돈다 — 묶음의 `busy` 와 같은 자다(`report::Stand::busy`).
+        let col = self.column(at);
+        busy && self.cfg.knows(col) && self.cfg.is_started(col)
     }
 
     /// 그 줄이 **서 있는** 칸 — 묶음이면 멤버에서 읽은 칸, 아니면 제 칸. CLI 가
@@ -1664,6 +1668,25 @@ mod tests {
         issues[3].status = Status::new("in_progress");
         a.adopt(issues);
         assert!(any_spins(&a), "in_progress 가 있는데 안 돈다고 한다");
+    }
+
+    /// **도는 칸은 설정이 정한다**(moai-q59j) — `Config::is_started` 인 칸 모두. 칸 이름을 박아
+    /// 두면 `doing` 으로 바꾼 설정에서 아무것도 안 돌았다. `review` 도 시작한 칸이라 돈다. 설정이
+    /// 모르는 칸(바꾼 설정의 `in_progress`)은 안 돈다.
+    #[test]
+    fn every_started_column_spins_whatever_it_is_named() {
+        let renamed = crate::config::Config::parse("prefix = \"argos\"\nstatuses = \"todo, doing, check, done\"\n").unwrap();
+        for (cfg, cases) in [
+            (cfg(), vec![("todo", false), ("in_progress", true), ("review", true), ("done", false)]),
+            (renamed, vec![("todo", false), ("doing", true), ("check", true), ("done", false), ("in_progress", false)]),
+        ] {
+            for (st, want) in cases {
+                let mut i = make("argos-0001", Kind::Issue);
+                i.status = Status::new(st);
+                let a = App::new(vec![i], cfg.clone(), Path::new());
+                assert_eq!(a.spins(0), want, "{st} 칸이 도는가 — {:?}", cfg.statuses);
+            }
+        }
     }
 
     /// 줄마다 도는지(`App::spins`) — **묶음은 그 밑에 집은 일이 있을 때만 돈다**

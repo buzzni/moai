@@ -976,7 +976,7 @@ fn wrapped<'a>(text: &str, w: usize, style: Style) -> Vec<Line<'a>> {
 /// 가 정한다**(루프는 그려진 글리프로 깬다 — `App::spun`).
 fn glyph_of(app: &App, at: usize) -> &'static str {
     let col = app.column(at);
-    if app.spins(at) { style::spin_glyph(col, app.spin) } else { style::glyph(col) }
+    if app.spins(at) { style::spin_frame(app.spin) } else { style::glyph(col) }
 }
 
 /// 칸별 건수의 글리프. **센 줄 가운데 도는 줄이 있을 때만 돈다**([`App::spins`]) — 칸
@@ -984,7 +984,7 @@ fn glyph_of(app: &App, at: usize) -> &'static str {
 /// 뺀 일을 "지금 손대는 중" 이라 말하고 그 스피너로 루프를 깨운다(`App::spun`).
 fn count_glyph(app: &App, work: &[usize], st: &str) -> &'static str {
     let turning = work.iter().any(|&at| app.issues[at].status.as_str() == st && app.spins(at));
-    if turning { style::spin_glyph(st, app.spin) } else { style::glyph(st) }
+    if turning { style::spin_frame(app.spin) } else { style::glyph(st) }
 }
 
 /// 그 항목 안으로 들어간 경로. 요약을 세려면 그 밑을 봐야 한다.

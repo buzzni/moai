@@ -160,17 +160,15 @@ pub fn glyph(status: &str) -> &'static str {
     }
 }
 
-/// `in_progress` 가 도는 걸음. ora 기본 세트를 그대로 옮겼다 — 검증된 것을
+/// 시작한 칸이 도는 걸음. ora 기본 세트를 그대로 옮겼다 — 검증된 것을
 /// 다시 재느니 그대로 가져온다.
 pub const SPIN: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-/// 도는 칸인가. **한 군데서만 정한다** — 그리는 쪽과 깨어날 걸음을 재는 쪽이
-/// 따로 판단하면, 도는 글리프를 그려 놓고 아무도 안 깨워 첫 프레임에 멈춘다.
-pub fn spins(status: &str) -> bool {
-    status == "in_progress"
-}
-
-/// [`glyph`] 와 같되 도는 칸만 `frame` 으로 돈다. **TUI 만 이 값을 넘긴다** —
+/// 도는 줄이 `frame` 에 낼 글자. **돌지는 여기서 안 정한다** — 그것은 설정을 든
+/// `tui::App::spins` 한 곳이다(moai-q59j). 여기가 칸 이름 `"in_progress"` 로 가르던
+/// 때는 칸 이름을 바꾼 설정에서 아무것도 안 돌았다 — `style` 은 설정을 모른다.
+///
+/// **TUI 만 이 값을 넘긴다** —
 /// `view`(CLI)는 한 번 찍고 끝이라 돌 프레임이 없고, 거기서 이걸 쓰면 같은
 /// 이슈가 부를 때마다 다른 글자로 찍혀 파이프로 받는 쪽이 자를 잃는다.
 ///
@@ -179,8 +177,8 @@ pub fn spins(status: &str) -> bool {
 /// 보이지만, 그 규칙이 막으려는 것은 **뜻이 갈라지는 것**이고 칸 이름은 두
 /// 표면에 똑같이 적힌다. 움직임은 곁들이고, 뜻은 낱말이 진다. 이쪽을 맞추려고
 /// CLI 글리프를 프레임 하나로 바꾸지 않는다 — 멈춘 스피너 한 칸은 아무 뜻이 없다.
-pub fn spin_glyph(status: &str, frame: usize) -> &'static str {
-    if spins(status) { SPIN[frame % SPIN.len()] } else { glyph(status) }
+pub fn spin_frame(frame: usize) -> &'static str {
+    SPIN[frame % SPIN.len()]
 }
 
 pub fn status_style(status: &str) -> Style {
@@ -238,16 +236,14 @@ mod tests {
         assert_eq!(glyph("설정으로_더한_칸"), "○");
     }
 
-    /// 프레임이 겹치지 않고 한 바퀴 돌면 처음으로 돌아온다. 다른 칸은 안 돈다.
+    /// 프레임이 겹치지 않고 한 바퀴 돌면 처음으로 돌아온다. 어느 칸이 도는지는
+    /// `tui::App::spins` 가 설정으로 정한다(`every_started_column_spins_whatever_it_is_named`).
     #[test]
-    fn spin_glyph_cycles_in_progress_and_leaves_others_still() {
-        let seen: std::collections::BTreeSet<_> =
-            (0..SPIN.len()).map(|f| spin_glyph("in_progress", f)).collect();
+    fn spin_frame_cycles_without_repeating() {
+        let seen: std::collections::BTreeSet<_> = (0..SPIN.len()).map(spin_frame).collect();
         assert_eq!(seen.len(), SPIN.len(), "프레임이 겹친다");
-        assert_eq!(spin_glyph("in_progress", SPIN.len()), spin_glyph("in_progress", 0));
-        for st in ["todo", "review", "done", "설정으로_더한_칸"] {
-            assert_eq!(spin_glyph(st, 3), glyph(st), "{st} 는 안 돌아야 한다");
-        }
+        assert_eq!(spin_frame(SPIN.len()), spin_frame(0));
+        assert!(!SPIN.iter().any(|f| ["todo", "in_progress", "review", "done"].iter().any(|s| glyph(s) == *f)), "도는 글자가 멈춘 글리프와 겹친다");
     }
 
     #[test]
