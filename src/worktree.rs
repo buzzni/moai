@@ -588,16 +588,12 @@ fn base_of(root: &Path, mine: &str, theirs: &str) -> BTreeMap<String, String> {
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git 을 부르지 못해 워크트리를 못 찾았다 — {e}"))?;
-    if !out.status.success() {
-        return Err(format!("워크트리를 못 찾았다 — {}", String::from_utf8_lossy(&out.stderr).trim()));
-    }
-    String::from_utf8(out.stdout).map_err(|e| format!("워크트리 목록을 못 읽었다 — {e}"))
+    use crate::git::Error;
+    crate::git::run(root, args).map_err(|e| match e {
+        Error::Spawn(e) => format!("git 을 부르지 못해 워크트리를 못 찾았다 — {e}"),
+        Error::Failed(err) => format!("워크트리를 못 찾았다 — {err}"),
+        Error::NotUtf8(e) => format!("워크트리 목록을 못 읽었다 — {e}"),
+    })
 }
 
 /// 견줄 수 있는 경로. 못 풀면(사라진 경로) 받은 그대로 — 그런 경로는 어차피
