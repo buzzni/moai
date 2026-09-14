@@ -1706,7 +1706,7 @@ pub(super) mod tests {
         theirs.updated_at = "2026-09-02T00:00:00Z".into();
         let (all, origin) = crate::worktree::overlay(
             issues(),
-            vec![("feat/x".into(), std::path::PathBuf::from("/wt"), vec![theirs])],
+            vec![crate::worktree::Side::new("feat/x", "/wt", vec![theirs])],
         );
         a.adopt(all);
         a.origin = origin;
