@@ -2105,7 +2105,8 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // "지난 이레에 있었던 일" 이라 묻는 것이 다르다 — 미뤄 둔 것을 여기서
     // 빼면 오늘 셋을 미루는 것만으로 `생성 5 · 쌓이는 중 +5` 가
     // `생성 2 · +2` 가 되어, 미루기가 쌓임 경고를 지우는 손잡이가 된다.
-    let within = |at: &str| days_since(at, now).is_some_and(|d| (0..FLOW_DAYS).contains(&d));
+    // 나이는 0 아래로 안 내려간다(`days_since`) — 조금 미래로 찍힌 줄도 오늘 것으로 센다.
+    let within = |at: &str| days_since(at, now).is_some_and(|d| d < FLOW_DAYS);
     let happened: Vec<&Issue> = issues.iter().filter(|i| is_work(i)).collect();
     let created = happened.iter().filter(|i| within(&i.created_at)).count();
     let closed =

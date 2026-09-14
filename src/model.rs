@@ -610,8 +610,12 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
 }
 
 /// `at` 이 `now` 로부터 며칠 전인가. 파싱이 안 되면 `None`.
+///
+/// **`at` 이 `now` 보다 뒤면 0 이다**(moai-fix6). `div_euclid` 는 몇 초만 늦어도 -1 을 돌려,
+/// `--worktree` 로 겹친 다른 기계의 시계가 조금 빠르면 목록에 "-1일" 이 섰다. 그 줄은 오늘
+/// 적힌 것이다. 방치 판정은 안 바뀐다 — 0 은 어느 문턱도 안 넘는다.
 pub fn days_since(at: &str, now: &str) -> Option<i64> {
-    Some((parse_rfc3339(now)? - parse_rfc3339(at)?).div_euclid(86_400))
+    Some((parse_rfc3339(now)? - parse_rfc3339(at)?).div_euclid(86_400).max(0))
 }
 
 #[cfg(test)]
@@ -888,6 +892,9 @@ mod tests {
         assert_eq!(days_since("2026-09-08T00:00:00Z", "2026-09-11T04:12:03Z"), Some(3));
         assert_eq!(days_since("2026-09-11T04:12:03Z", "2026-09-11T23:59:59Z"), Some(0));
         assert_eq!(days_since("어제", "2026-09-11T04:12:03Z"), None);
+        // 지금보다 뒤인 시각은 오늘이다 — 몇 초 빠른 옆 기계의 시계가 "-1일" 을 만들던 자리.
+        assert_eq!(days_since("2026-09-11T04:12:05Z", "2026-09-11T04:12:03Z"), Some(0), "몇 초 뒤가 -1일이 됐다");
+        assert_eq!(days_since("2026-09-20T00:00:00Z", "2026-09-11T04:12:03Z"), Some(0));
     }
 
     /// 이름 안에 괄호가 있는 사람이 실제로 있다. 앞에서 괄호를 찾으면
