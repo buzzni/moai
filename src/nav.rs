@@ -43,6 +43,24 @@ pub enum Seg {
 
 pub type Path = Vec<Seg>;
 
+/// 한 자리 밑의 진척([`Index::progress`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Progress {
+    /// 밑에 걸린 것 전부의 수 — 일이 아닌 것까지. "자식 없음" 과 "셀 일 없음" 을 가른다.
+    pub kids: usize,
+    /// 그중 일의 첨자.
+    pub work: Vec<usize>,
+    /// 그중 끝난 일의 수.
+    pub done: usize,
+}
+
+impl Progress {
+    /// 끝난 몫. **셀 일이 없으면 `None`** — 0% 와 "셀 것 없음" 은 다르다(`text::bar_fill`).
+    pub fn percent(&self) -> Option<u8> {
+        (!self.work.is_empty()).then(|| (self.done * 100 / self.work.len()) as u8)
+    }
+}
+
 /// 목록의 한 줄. `at` 은 **id 가 아니라 `issues` 의 첨자다** — 중복 id 는 이
 /// 도구가 거부하지 않고 드러내기만 하는 상태(`duplicate_id`)라 실재할 수 있고,
 /// id 로 가리키면 그 둘이 조용히 하나로 접힌다.
@@ -298,6 +316,18 @@ impl Index {
             .filter(|(_, h)| h.starts_with(path))
             .map(|(at, _)| at)
             .collect()
+    }
+
+    /// 그 자리 밑의 진척 — **상세의 롤업과 목록 줄의 진행 바탕이 같은 자로 잰다.**
+    /// 둘이 따로 세면 한 화면에서 같은 에픽이 두 퍼센트로 선다.
+    ///
+    /// 셈은 [`Index::descendants`] 위에 선다(자리를 정한 그대로). 일만 센다 —
+    /// 묶음과 담아 둔 생각은 `report::is_work` 가 뺀다.
+    pub fn progress(&self, issues: &[Issue], path: &Path) -> Progress {
+        let kids = self.descendants(path);
+        let work: Vec<usize> = kids.iter().copied().filter(|&at| crate::report::is_work(&issues[at])).collect();
+        let done = work.iter().filter(|&&at| issues[at].status.is_done()).count();
+        Progress { kids: kids.len(), work, done }
     }
 
     /// 화면에 낼 이름. 바구니는 제 줄이 없으므로 여기서 이름을 얻는다.
@@ -861,6 +891,28 @@ mod tests {
         got.sort();
         assert_eq!(got, [1, 2, 3], "바로 밑 또는 더 깊은 것이 빠졌다");
         assert_eq!(index.descendants(&Vec::new()).len(), issues.len(), "뿌리는 전부다");
+    }
+
+    /// 진척은 **일만** 세고, 셀 일이 없으면 퍼센트가 없다 — 0% 로 서면 빈 에픽이
+    /// 안 끝난 에픽처럼 보인다.
+    #[test]
+    fn progress_counts_only_work_and_has_no_percent_without_it() {
+        let mut done = epic_of("argos-0004", "argos-0001");
+        done.status = Status::new("done");
+        // 이슈 밑에 접힌 생각 — 자리로는 에픽 밑에 걸리지만 일이 아니다.
+        let idea = make("argos-0005.aa1", Kind::Idea);
+        let issues = vec![
+            make("argos-0001", Kind::Epic),
+            done,
+            epic_of("argos-0005", "argos-0001"),
+            idea,
+            make("argos-0002", Kind::Epic),
+        ];
+        let index = Index::of(&issues);
+        let p = index.progress(&issues, &vec![Seg::Epic("argos-0001".into())]);
+        assert_eq!((p.kids, p.work.len(), p.done, p.percent()), (3, 2, 1, Some(50)), "생각을 일로 셌다");
+        let empty = index.progress(&issues, &vec![Seg::Epic("argos-0002".into())]);
+        assert_eq!((empty.kids, empty.percent()), (0, None));
     }
 
     /// **거름망이 찾으려던 것을 숨기지 않는다.** 끝난 에픽 자신은 안 걸려도
