@@ -19,10 +19,12 @@
 //! ```toml
 //! [[project]]
 //! path = "/home/raven/work/argos"
+//! color = "green"      # 없으면 경로로 고른다 (moai-o04b)
 //! ```
 
 use crate::fail::{Fail, R, code};
 use crate::store::{Lock, write_atomic};
+use crate::style::Hue;
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
@@ -30,6 +32,14 @@ use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 /// 프로젝트 목록이 사는 키.
 const PROJECT: &str = "project";
 const PATH: &str = "path";
+/// 프로젝트 색. **사람이 치는 철자는 `color` 하나다** — 전역 `--color`·`NO_COLOR` 와 같다.
+const COLOR: &str = "color";
+/// 틀리기 쉬운 철자. 받지 않고 알린다 — 조용히 버리면 적었는데 안 먹고, 둘 다 받으면
+/// 둘이 다를 때 어느 쪽이냐는 둘째 규칙이 생긴다.
+const COLOUR: &str = "colour";
+/// 색을 정하지 않은 것 — 경로로 고른다. 명령줄에서는 키를 지우는 낱말이고, 설정에
+/// 적혀 있어도 같은 뜻으로 읽는다.
+pub const AUTO: &str = "auto";
 
 /// 설정 파일의 자리. `MOAI_CONFIG` → `$XDG_CONFIG_HOME/moai/config.toml` →
 /// `$HOME/.config/moai/config.toml`. 셋 다 없으면 `None`.
@@ -57,13 +67,16 @@ pub fn path() -> Option<PathBuf> {
     path_from(|k| std::env::var_os(k))
 }
 
-/// 등록한 프로젝트 하나. **지금은 경로뿐이다** — 이름·색은 파생값이거나
-/// 나중 필드다. 파일에 있는 모르는 필드는 여기 안 올라오지만 되쓸 때 보존된다.
+/// 등록한 프로젝트 하나. 이름은 파생값이라 여기 없다. 파일에 있는 모르는 필드는
+/// 여기 안 올라오지만 되쓸 때 보존된다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
     /// 절대경로. 등록할 때 [`resolve_dir`] 로 정규화한 것이지만, 손으로 적은
     /// 줄이면 심볼릭 링크를 지난 모양일 수 있다 — 견줄 때는 받는 쪽이 푼다.
     pub path: PathBuf,
+    /// 사람이 정한 색. `None` 이면 경로로 고른다(`style::project_colour`). **파생값이
+    /// 아니라 사람이 적은 값이라** 들고 다닌다 — 틀린 값은 읽을 때 `None` 으로 접고 알린다.
+    pub hue: Option<Hue>,
 }
 
 /// 읽은 결과. **실패하지 않는다** — 파일이 깨졌으면 목록은 비고 `problems`
@@ -197,6 +210,11 @@ impl Doc {
         Ok(Doc { doc, bom, dirty: false })
     }
 
+    /// 고친 것이 있나 — [`update`] 가 쓸지 가르는 깃발 그대로다.
+    pub fn changed(&self) -> bool {
+        self.dirty
+    }
+
     pub fn render(&self) -> String {
         let body = self.doc.to_string();
         if self.bom { format!("\u{feff}{body}") } else { body }
@@ -209,17 +227,67 @@ impl Doc {
     /// 읽을 수 있는 항목과, 못 읽는 항목의 까닭. 같은 경로가 두 번 적혔으면
     /// 앞의 것 하나만 낸다 — 손으로 적은 겹침으로 같은 프로젝트가 두 번 보이면
     /// 어느 쪽이 진짜인지 묻게 된다.
+    ///
+    /// **색이 틀린 항목은 빼지 않는다.** 경로로 고른 색으로 서고 까닭이 한 줄 선다 —
+    /// 빼면 색 오타 하나로 한눈 보기에서 저장소가 통째로 사라진다.
     pub fn projects(&self) -> (Vec<Project>, Vec<String>) {
         let mut out: Vec<Project> = Vec::new();
         let mut problems = Vec::new();
         for (i, t) in self.tables().into_iter().flat_map(ArrayOfTables::iter).enumerate() {
+            let at = |e: String| format!("{}번째 [[{PROJECT}]]: {e}", i + 1);
             match entry_path(t) {
                 Ok(path) if out.iter().any(|p| p.path == path) => {}
-                Ok(path) => out.push(Project { path }),
-                Err(e) => problems.push(format!("{}번째 [[{PROJECT}]]: {e}", i + 1)),
+                Ok(path) => {
+                    let hue = entry_hue(t).unwrap_or_else(|e| {
+                        problems.push(at(format!("{e} — 지금은 경로로 고른 색을 쓴다")));
+                        None
+                    });
+                    // 둘 다 적혔으면 `color` 를 읽되 `colour` 도 알린다 — 조용히 버리면 뒤에 고쳐
+                    // 적은 `colour` 가 안 먹는 까닭을 아무도 말하지 않는다.
+                    if t.contains_key(COLOR) && t.contains_key(COLOUR) {
+                        problems.push(at(format!("`{COLOUR}` 는 모르는 키다 — `{COLOR}` 만 읽는다")));
+                    }
+                    out.push(Project { path, hue });
+                }
+                Err(e) => problems.push(at(e)),
             }
         }
         (out, problems)
+    }
+
+    /// 경로가 `any_of` 중 하나인 항목의 색을 바꾼다. `None` 이면 키를 **지운다** — 경로로
+    /// 고르는 것으로 돌아가고, 더했다 지우면 처음 바이트로 돌아온다. 같은 값이면 파일을 안
+    /// 건드린다. 맞은 항목 수를 낸다(0 이면 등록돼 있지 않다).
+    ///
+    /// 손으로 겹쳐 적은 줄은 **모두** 바꾼다 — 읽기는 앞의 것만 보지만, 앞의 것을 지웠을 때
+    /// 뒤의 것이 옛 색으로 되살아나면 안 된다([`Doc::remove`] 가 모두 빼는 것과 같다).
+    /// 틀린 철자 `colour` 는 건드리지 않는다 — 무엇을 뜻했는지 모르는 남의 키다.
+    pub fn set_hue(&mut self, any_of: &[PathBuf], hue: Option<Hue>) -> usize {
+        let Some(aot) = self.doc.get_mut(PROJECT).and_then(Item::as_array_of_tables_mut) else {
+            return 0;
+        };
+        let mut hit = 0;
+        for t in aot.iter_mut().filter(|t| entry_path(t).is_ok_and(|p| any_of.contains(&p))) {
+            hit += 1;
+            match hue {
+                Some(h) if t.get(COLOR).and_then(Item::as_str) == Some(h.name()) => {}
+                Some(h) => {
+                    // 옛 값 뒤의 주석(`color = "blue"  # 회사 것`)은 들고 간다 — 값만 바꾼 것이다.
+                    let mut v = toml_edit::Value::from(h.name());
+                    if let Some(old) = t.get(COLOR).and_then(Item::as_value) {
+                        *v.decor_mut() = old.decor().clone();
+                    }
+                    t.insert(COLOR, Item::Value(v));
+                    self.dirty = true;
+                }
+                None => {
+                    if t.remove(COLOR).is_some() {
+                        self.dirty = true;
+                    }
+                }
+            }
+        }
+        hit
     }
 
     /// 등록한다. 이미 있으면 아무것도 안 하고 `false` — **멱등이다.**
@@ -281,6 +349,31 @@ fn entry_path(t: &Table) -> Result<PathBuf, String> {
         return Err(format!("`{PATH}` 는 절대경로여야 한다 — {raw:?}"));
     }
     Ok(p)
+}
+
+/// 항목 표 하나에서 정한 색을 읽는다. 없거나 `auto` 면 `None`.
+fn entry_hue(t: &Table) -> Result<Option<Hue>, String> {
+    match t.get(COLOR) {
+        None if t.contains_key(COLOUR) => Err(format!("`{COLOUR}` 는 모르는 키다 — `{COLOR}` 로 적는다")),
+        None => Ok(None),
+        Some(item) => match item.as_str() {
+            Some(s) => hue_choice(s).map_err(|e| format!("`{COLOR}`: {e}")),
+            None => Err(format!("`{COLOR}` 는 문자열이어야 한다 — 지금은 {}", item.type_name())),
+        },
+    }
+}
+
+/// 사람이 적은 색 낱말 → 정한 색. `auto` 는 정하지 않은 것(`None`)이다.
+///
+/// 설정 읽기와 `moai project color` 가 **같은 자로 잰다** — 명령이 받은 값을 읽기가 틀렸다고
+/// 하거나 그 반대면, 고친 대로 적었는데 또 알림이 선다. 받는 이름은 `style` 이 댄다.
+pub fn hue_choice(word: &str) -> Result<Option<Hue>, String> {
+    if word == AUTO {
+        return Ok(None);
+    }
+    Hue::named(word).map(Some).ok_or_else(|| {
+        format!("{word:?} 는 프로젝트 색이 아니다 — {} 중 하나, 또는 {AUTO}", Hue::names().join("·"))
+    })
 }
 
 fn writable(dir: &Path) -> R<&str> {
@@ -490,7 +583,7 @@ mod tests {
         let src = "[[project]]\npath = \"상대/경로\"\n\n[[project]]\npath = \"/good\"\n\n[[project]]\nname = \"경로 없음\"\n\n[[project]]\npath = 3\n";
         std::fs::write(&path, src).unwrap();
         let reg = read(Some(&path));
-        assert_eq!(reg.projects, [Project { path: "/good".into() }]);
+        assert_eq!(reg.projects, [Project { path: "/good".into(), hue: None }]);
         assert_eq!(reg.problems.len(), 3, "{reg:?}");
         assert!(reg.problems[0].contains("1번째") && reg.problems[0].contains("절대경로"), "{reg:?}");
 
@@ -524,6 +617,79 @@ mod tests {
         // 더했다 빼면 처음 바이트로 돌아온다.
         update(&path, |doc| Ok(doc.remove(&["/b".into()]))).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
+    }
+
+    /// **색이 틀린 항목은 알리되 서 있다** — 경로로 고른 색으로. 틀린 철자 `colour` 도
+    /// 알린다. `auto` 는 정하지 않은 것이라 알릴 것이 없다.
+    #[test]
+    fn a_bad_colour_is_reported_and_the_project_still_stands() {
+        let src = "[[project]]\npath = \"/ok\"\ncolor = \"green\"\n\n\
+                   [[project]]\npath = \"/red\"\ncolor = \"red\"\n\n\
+                   [[project]]\npath = \"/num\"\ncolor = 3\n\n\
+                   [[project]]\npath = \"/typo\"\ncolour = \"blue\"\n\n\
+                   [[project]]\npath = \"/auto\"\ncolor = \"auto\"\n\n\
+                   [[project]]\npath = \"/case\"\ncolor = \"Green\"\n";
+        let (projects, problems) = Doc::parse(src).unwrap().projects();
+        let got: Vec<(&str, Option<&str>)> =
+            projects.iter().map(|p| (p.path.to_str().unwrap(), p.hue.map(Hue::name))).collect();
+        assert_eq!(
+            got,
+            [("/ok", Some("green")), ("/red", None), ("/num", None), ("/typo", None), ("/auto", None), ("/case", None)]
+        );
+        assert_eq!(problems.len(), 4, "{problems:#?}");
+        assert!(problems[0].starts_with("2번째") && problems[0].contains("cyan·green·blue"), "{problems:#?}");
+        assert!(problems[1].contains("문자열"), "{problems:#?}");
+        assert!(problems[2].contains("`colour` 는 모르는 키다"), "{problems:#?}");
+        assert!(problems[3].contains("\"Green\""), "{problems:#?}");
+        assert!(problems.iter().all(|p| p.contains("지금은 경로로 고른 색을 쓴다") && !p.contains('\n')), "{problems:#?}");
+
+        // `color` 와 `colour` 가 함께 있으면 `color` 가 서고, `colour` 는 조용히 버리지 않고 알린다.
+        let both = "[[project]]\npath = \"/both\"\ncolor = \"green\"\ncolour = \"blue\"\n";
+        let (projects, problems) = Doc::parse(both).unwrap().projects();
+        assert_eq!(projects[0].hue, Hue::named("green"));
+        assert_eq!(problems.len(), 1, "{problems:#?}");
+        assert!(problems[0].contains("`colour` 는 모르는 키다"), "{problems:#?}");
+    }
+
+    /// 색을 정했다 `auto` 로 되돌리면 처음 바이트로 돌아온다. 같은 색을 다시 정하면 파일을
+    /// 안 건드린다. 모르는 키·주석과 **값 뒤의 주석**은 살아남는다. 등록 안 된 경로는 0 이다.
+    #[test]
+    fn setting_a_colour_and_back_to_auto_restores_the_bytes() {
+        let d = scratch("hue");
+        let path = d.join("config.toml");
+        let src = "# 내 설정\n[[project]]\npath = \"/a\"   # 일\nalias = \"일\"\n\n[[project]]\npath = \"/b\"\n\n[ui]\nx = 1\n";
+        std::fs::write(&path, src).unwrap();
+        let green = Hue::named("green");
+
+        assert_eq!(update(&path, |doc| Ok(doc.set_hue(&["/a".into()], green))).unwrap(), 1);
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("color = \"green\"") && after.contains("alias = \"일\"") && after.contains("[ui]"), "{after}");
+        assert_eq!(read(Some(&path)).projects[0].hue, green);
+        assert_eq!(read(Some(&path)).projects[1].hue, None, "남의 줄에 색이 붙었다");
+
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert_eq!(update(&path, |doc| Ok(doc.set_hue(&["/a".into()], green))).unwrap(), 1);
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before, "같은 색인데 다시 썼다");
+
+        assert_eq!(update(&path, |doc| Ok(doc.set_hue(&["/a".into()], None))).unwrap(), 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "auto 로 되돌렸는데 바이트가 다르다");
+        assert_eq!(update(&path, |doc| Ok(doc.set_hue(&["/없음".into()], green))).unwrap(), 0);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
+
+        // 값을 바꿀 때 그 값 뒤의 주석은 들고 간다.
+        std::fs::write(&path, "[[project]]\npath = \"/a\"\ncolor = \"blue\"  # 회사 것\n").unwrap();
+        update(&path, |doc| Ok(doc.set_hue(&["/a".into()], Hue::named("cyan")))).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[[project]]\npath = \"/a\"\ncolor = \"cyan\"  # 회사 것\n");
+    }
+
+    /// 명령이 받는 낱말과 읽기가 받는 낱말이 같다.
+    #[test]
+    fn hue_choice_takes_palette_names_and_auto_only() {
+        assert_eq!(hue_choice("blue").unwrap(), Hue::named("blue"));
+        assert_eq!(hue_choice(AUTO).unwrap(), None);
+        let e = hue_choice("magenta").unwrap_err();
+        assert!(e.contains("\"magenta\"") && e.contains("cyan·green·blue") && e.contains(AUTO), "{e}");
     }
 
     /// 바꾼 것이 없으면 파일을 건드리지 않는다 — 헛 쓰기도 헛 diff 도 없다.
@@ -561,7 +727,7 @@ mod tests {
         std::fs::write(&path, format!("{src}\n[[project]]\npath = \"/a\"\n")).unwrap();
         assert_eq!(read(Some(&path)).projects.len(), 2);
         assert_eq!(update(&path, |doc| Ok(doc.remove(&["/x".into(), "/a".into()]))).unwrap(), 2);
-        assert_eq!(read(Some(&path)).projects, [Project { path: "/b".into() }]);
+        assert_eq!(read(Some(&path)).projects, [Project { path: "/b".into(), hue: None }]);
     }
 
     /// 적는 줄은 엄하다 — 상대경로는 부른 자리마다 다른 곳을 가리킨다.
@@ -606,7 +772,7 @@ mod tests {
     /// 이름은 디렉터리 이름이고, 겹치는 것끼리만 위 조각이 붙는다.
     #[test]
     fn names_grow_only_where_they_clash() {
-        let ps = |paths: &[&str]| paths.iter().map(|p| Project { path: p.into() }).collect::<Vec<_>>();
+        let ps = |paths: &[&str]| paths.iter().map(|p| Project { path: p.into(), hue: None }).collect::<Vec<_>>();
         assert_eq!(names(&ps(&["/w/argos", "/r/apps/a", "/r/libs/a"])), ["argos", "apps/a", "libs/a"]);
         // 둘째 조각까지 같으면 셋째까지. 겹치지 않는 줄은 안 자란다.
         assert_eq!(names(&ps(&["/x/apps/a", "/y/apps/a", "/y/b"])), ["x/apps/a", "y/apps/a", "b"]);
@@ -628,7 +794,7 @@ mod tests {
 
         assert!(update(&link, |doc| doc.add(Path::new("/a"))).unwrap());
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "링크를 보통 파일로 갈아끼웠다");
-        assert_eq!(read(Some(&d.join("dots/config.toml"))).projects, [Project { path: "/a".into() }]);
+        assert_eq!(read(Some(&d.join("dots/config.toml"))).projects, [Project { path: "/a".into(), hue: None }]);
         assert!(!d.join("dots/config.toml.lock").exists(), "링크 대상 곁(dotfiles 저장소)에 락 파일을 흘렸다");
     }
 

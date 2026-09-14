@@ -269,7 +269,7 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
     if let Some(p) = app.project() {
         let name = clip(&crate::text::sanitize(&p.name), (room / 2).max(1));
         room = room.saturating_sub(crate::text::width(&name) + 1);
-        spans.push(Span::styled(name, project_style(&p.path)));
+        spans.push(Span::styled(name, project_style(p)));
         spans.push(Span::styled(":", bold()));
     }
     spans.push(Span::styled(clip(&app.crumbs(), room), bold()));
@@ -900,8 +900,10 @@ fn field<'a>(k: &str, v: &str, w: usize, room: usize) -> Line<'a> {
 /// 이름은 등록 목록을 따라 바뀌는 파생값이라, 이름으로 고르면 프로젝트 하나를 더할 때
 /// 옆 프로젝트의 색이 바뀌고 두 표면이 같은 프로젝트를 다른 색으로 칠한다. 무게는 CLI
 /// 머리와 같은 `HEAD` 다. 칠하는 곳에는 늘 이름이 곁에 선다 — 색이 혼자 뜻을 지지 않는다.
-fn project_style(path: &std::path::Path) -> Style {
-    from_anstyle(style::project_colour(path).effects(style::HEAD.get_effects()))
+/// 사용자 설정에 색을 정했으면(`Place::hue`, moai-o04b) 그것이 경로 해시를 이긴다 — 그 판단도
+/// `style::project_colour` 안에 있어 CLI 와 갈라지지 않는다. `F5` 가 설정을 다시 읽으면 따라온다.
+fn project_style(place: &Place) -> Style {
+    from_anstyle(style::project_colour(&place.path, place.hue).effects(style::HEAD.get_effects()))
 }
 
 /// 층의 한 줄: `이름/  ·3 ▸1 ✓12  여기  /경로`. 들어갈 수 있는 것만 `/` 가 붙는다.
@@ -921,7 +923,7 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
     if enterable {
         name.push('/');
     }
-    let mut spans = vec![Span::styled(name, project_style(&p.path)), Span::raw("  ")];
+    let mut spans = vec![Span::styled(name, project_style(p)), Span::raw("  ")];
     match &p.look {
         Look::Unread => spans.push(Span::styled("읽는 중", dim())),
         Look::Open { sum, .. } => {
@@ -966,7 +968,7 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
         return vec![Line::from(Span::styled("없다", dim()))];
     };
     let place: &Place = p;
-    let mut out = wrapped(&place.name, w, project_style(&place.path));
+    let mut out = wrapped(&place.name, w, project_style(place));
     out.extend(wrapped(&place.path.display().to_string(), w, dim()));
     match (place.launched, place.registered) {
         (true, true) => out.push(Line::from(Span::styled("여기서 띄웠다", dim()))),
@@ -1914,7 +1916,8 @@ mod tests {
     #[test]
     fn a_project_name_wears_the_same_colour_as_in_the_cli_overview() {
         use super::super::layer::At;
-        let want = from_anstyle(style::project_colour(std::path::Path::new("/w/one"))).fg;
+        let one = std::path::Path::new("/w/one");
+        let want = from_anstyle(style::project_colour(one, None)).fg;
         let colour_of = |app: &mut App, y: u16, text: &str| {
             let mut term = Terminal::new(TestBackend::new(80, 12)).unwrap();
             term.draw(|f| screen(f, app)).unwrap();
@@ -1930,6 +1933,16 @@ mod tests {
         on.index = crate::nav::Index::of(&[]);
         on.keep.clear();
         assert_eq!(Some(colour_of(&mut on, 3, "one/")), want, "층의 줄 이름이 한눈 보기와 다른 색이다");
+
+        // **설정에 정한 색이 해시를 이긴다** — 해시가 고른 것과 다른 색을 골라 두 자리가 따라오는지 본다.
+        let other = style::Hue::names().iter().filter_map(|n| style::Hue::named(n)).find(|h| *h != style::Hue::of_path(one)).unwrap();
+        let chosen = from_anstyle(style::project_colour(one, Some(other))).fg;
+        assert_ne!(chosen, want);
+        for app in [&mut inside, &mut on] {
+            app.layer.as_mut().unwrap().places.iter_mut().filter(|p| p.path == one).for_each(|p| p.hue = Some(other));
+        }
+        assert_eq!(Some(colour_of(&mut inside, 0, "one")), chosen, "경로 줄이 정한 색을 안 입었다");
+        assert_eq!(Some(colour_of(&mut on, 3, "one/")), chosen, "층의 줄이 정한 색을 안 입었다");
     }
 
     /// **좁은 창에서 본문을 그려도 무너지지 않는다.**

@@ -54,6 +54,8 @@ pub struct Place {
     pub path: PathBuf,
     /// 화면에 댈 이름. 파생값이라 정체로 쓰지 않는다.
     pub name: String,
+    /// 사용자 설정에 정한 색 — 없으면 경로로 고른다(`draw::project_style`).
+    pub hue: Option<crate::style::Hue>,
     /// 사용자 설정에 있는가. 아니면 띄운 자리라 층에 섰을 뿐이다.
     pub registered: bool,
     /// 이 탐색기를 띄운 자리인가.
@@ -146,7 +148,7 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
         State::Missing => Shut::Missing,
         State::Unreadable(_) | State::Open { .. } => Shut::Unreadable,
     };
-    let p = projects::Project { path: path.to_path_buf(), name: name.to_string(), state };
+    let p = projects::Project { path: path.to_path_buf(), name: name.to_string(), hue: None, state };
     let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()))).trim().to_string();
     Look::Shut { state: kind, said }
 }
@@ -159,7 +161,7 @@ fn look_at(paths: &[PathBuf], now: &str) -> Vec<Looked> {
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
     let reg = user_config::Registry {
         path: None,
-        projects: paths.iter().map(|p| user_config::Project { path: p.clone() }).collect(),
+        projects: paths.iter().map(|p| user_config::Project { path: p.clone(), hue: None }).collect(),
         problems: Vec::new(),
     };
     projects::open(&reg)
@@ -188,7 +190,7 @@ impl Layer {
         let mut entries = reg.projects.clone();
         let extra = match (launch, found) {
             (Some(l), None) => {
-                entries.insert(0, user_config::Project { path: l.to_path_buf() });
+                entries.insert(0, user_config::Project { path: l.to_path_buf(), hue: None });
                 true
             }
             _ => false,
@@ -203,6 +205,7 @@ impl Layer {
                 launched: (extra && k == 0) || found == Some(k),
                 path: p.path,
                 name,
+                hue: p.hue,
                 look: Look::Unread,
                 marks: (false, None, None),
             })
@@ -477,6 +480,7 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
             .map(|(name, path, look)| Place {
                 path: PathBuf::from(path),
                 name: name.into(),
+                hue: None,
                 registered: true,
                 launched: false,
                 look,
@@ -725,6 +729,19 @@ mod tests {
         assert!(!Layer::read(None, Some(&here)).registered(), "설정 자리를 몰라도 층이 섰다");
         let cfg = s.register(&[&s.0.join("gone")]);
         assert!(Layer::read(Some(&cfg), Some(&here)).registered());
+    }
+
+    /// 사용자 설정에 정한 색이 층의 줄까지 실려 온다(moai-o04b) — `draw::project_style` 이 그것을
+    /// 입힌다. 띄운 자리로만 선 줄은 설정에 없으니 정한 색도 없다.
+    #[test]
+    fn a_colour_chosen_in_the_user_config_rides_on_the_place() {
+        let s = Scratch::new("hue");
+        let (one, here) = (s.dir("one"), s.dir("here"));
+        let cfg = s.register(&[&one]);
+        std::fs::write(&cfg, format!("{}color = \"blue\"\n", std::fs::read_to_string(&cfg).unwrap())).unwrap();
+        let layer = Layer::read(Some(&cfg), Some(&here));
+        let hues: Vec<_> = layer.places.iter().map(|p| (p.name.as_str(), p.hue.map(crate::style::Hue::name))).collect();
+        assert_eq!(hues, [("here", None), ("one", Some("blue"))]);
     }
 
     /// 열 수 없는 프로젝트에 들어가려 하면 **층에 선 채 까닭만 말한다.** 넘어지지도, 빈
