@@ -1182,3 +1182,5 @@
 {"ts":"2026-09-14T04:25:04Z","id":"moai-byih","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T04:30:08Z","id":"moai-byih","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"인자 없는 moai 가 깨진 저장소 설정을 status 와 같은 말·종료 코드로 댄다"}
 {"ts":"2026-09-14T04:30:08Z","id":"moai-9omq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T04:35:40Z","id":"moai-9omq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"project add 가 못 읽는 저장소에 '못 읽는다' 한 줄과 --json error 키를 곁들인다 (등록은 그대로)"}
+{"ts":"2026-09-14T04:35:40Z","id":"moai-c1s3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
