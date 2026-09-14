@@ -2271,3 +2271,5 @@
 {"ts":"2026-09-14T14:50:37Z","id":"moai-7ljm.ba8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review max --fix(main...HEAD, main 받고 시험 통과 뒤) 결과를 원문·판단 노트로, fix: 커밋 → ExitWorktree(keep) → MERGE_HEAD·git status 확인 후 git merge --no-ff worktree-moai-7ljm -m → 시험 → 워크트리·가지 지우기 → b14·ba8 은 -m 과 함께, hy2h·5jxr done → -- .moai/ 커밋 → moa-issue-45 보고"}
 {"ts":"2026-09-14T14:51:12Z","id":"moai-phw9.3mw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"발견 0 — 고칠 것 없음, 넘긴 것 없음"}
 {"ts":"2026-09-14T14:51:12Z","id":"moai-phw9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (ab03544) — -e none·--milestone none 이 길 잃은 줄 밑에 접힌 줄을 안 고른다, status·트리와 같은 자"}
+{"ts":"2026-09-14T14:53:01Z","id":"moai-979m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-14T14:53:01Z","id":"moai-d3tp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
