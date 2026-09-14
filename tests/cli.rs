@@ -3576,6 +3576,27 @@ fn undoing_an_inherited_deferral_names_the_row_that_holds_it() {
     assert!(calm.contains("이미 계획에 있다") && !calm.contains("--undo`"), "{calm}");
 }
 
+/// **도로 집는 말은 풀어야 할 미룸을 다 댄다**(moai-g2a1). 제 줄도 미뤘고 미룬 에픽에도
+/// 든 줄에 가까운 하나만 대면, 그것을 풀고도 여전히 빠진 채 그제야 다음을 댄다.
+#[test]
+fn moving_a_row_shelved_twice_names_every_deferral_to_undo() {
+    let s = init("defertwice");
+    let epic = ok(s.path(), &["epic", "add", "다음 분기", "-q"]).trim().to_string();
+    let member = add(s.path(), &["파서", "-e", &epic]);
+    ok(s.path(), &["defer", &epic]);
+    ok(s.path(), &["defer", &member]);
+
+    let out = ok(s.path(), &["mv", &member, "in_progress"]);
+    assert!(out.contains(&format!("moai defer {member} {epic} --undo")), "하나만 댄다 — {out}");
+    let json = ok(s.path(), &["mv", &member, "review", "--json"]);
+    assert!(json.contains(&format!(r#""root":"{member}","roots":["{member}","{epic}"]"#)), "{json}");
+
+    // 하나뿐이면 기계 출력은 전과 같다.
+    ok(s.path(), &["defer", &member, "--undo"]);
+    let one = ok(s.path(), &["mv", &member, "todo", "--json"]);
+    assert!(one.contains(&format!(r#""shelved":[{{"id":"{member}","root":"{epic}"}}]"#)), "{one}");
+}
+
 /// **미룬 것이 막고 있으면 `ready` 가 까닭 없이 비지 않는다.** 막는 줄은
 /// 어느 목록에도 없으므로 그 id 와 푸는 길을 같이 댄다.
 #[test]
