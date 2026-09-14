@@ -1089,15 +1089,14 @@ mod tests {
         assert!(missing.is_empty(), "표에 이름 붙은 키를 `moai tui --help` 의 제 문단이 안 댄다: {missing:?}");
     }
 
-    /// **다른 문단에만 적힌 키는 그 표의 것으로 안 센다** — 문단 범위가 헛돌지 않는다는 증명.
-    /// 생각 담기 문단에서 Tab 을 지운 도움말은 도움말 전체에는 여전히 Tab 이 있지만(목록 문단의
-    /// 포커스 옮기기), 생각 담기 표(JOT)는 빠졌다고 말해야 한다. 옛 시험(도움말 어디든)은 이것을
-    /// 못 잡았다.
+    /// **다른 표의 글로는 지나가지 않는다** — 범위가 헛돌지 않는다는 증명. 지울 말마다 그 키는
+    /// 도움말 전체에 여전히 있으므로(옛 시험은 못 잡았다) 제 범위만 보는 표가 빠졌다고 말해야 한다.
     ///
-    /// **같은 문단을 쓰는 표끼리는 서로를 덮으므로, 같은 키를 나눠 쓰는 표는 제 문장으로
-    /// 좁힌다**([`SENTENCES`], 사용자와 정함). 검색·거름망 칸(PROMPT)은 목록(BROWSE)과, 경로 칸
-    /// (PATH)은 고르기 창(PICK)과 한 문단이라 문단만 보면 칸 문장의 Enter·Esc 가 빠져도 옆 표의
-    /// Enter·Esc 로 지나간다 — 리뷰 moai-d5vn.txv 가 예로 든 바로 그 경우다.
+    /// - 다른 문단에만 남은 키: 생각 담기의 Tab ↔ 목록의 Tab
+    /// - **같은 문단을 같은 키로 나눠 쓰는 표는 양쪽으로 서로를 덮는다**(사용자와 정함, 리뷰
+    ///   moai-psqc.172). 좁힌 표(PROMPT·PATH·MENU)는 제 문장만 보고([`SENTENCES`]), 나머지 표의
+    ///   글에서는 그 문장을 걷어 낸다 — 한쪽만 좁히면 목록(BROWSE)의 Enter 가 빠져도 검색 칸
+    ///   문장의 Enter 로 지나갔다
     #[test]
     fn a_key_told_only_in_another_paragraph_does_not_count() {
         let help = tui_help();
@@ -1106,10 +1105,15 @@ mod tests {
         for (phrase, instead, still, want) in [
             // 다른 문단에만 남은 키 — 목록 문단의 Tab.
             ("Tab 이 둘 사이를 옮기고", "둘 사이를 옮기고", &["Tab"][..], &["JOT: Tab"][..]),
-            // 같은 문단의 옆 표가 같은 키를 쓴다 — 목록의 Enter·Esc.
+            // 좁힌 표 — 같은 문단의 목록 Enter·Esc 로 지나가면 안 된다.
             ("검색·거름망 칸은 Enter 로 걸고 Esc 로 그만둔다.", "검색·거름망 칸은 그 칸에서 걸고 그만둔다.", &["Enter", "Esc"][..], &["PROMPT: Enter", "PROMPT: Esc"][..]),
-            // 같은 문단의 옆 표가 같은 키를 쓴다 — 고르기 창의 Enter·Esc.
+            // 좁힌 표 — 같은 문단의 고르기 창 Enter·Esc 로 지나가면 안 된다.
             ("(Enter 로 가고 Esc 로", "(가고", &["Enter", "Esc"][..], &["PATH: Enter", "PATH: Esc"][..]),
+            // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Backspace 로 지나가면 안 된다.
+            ("Enter·l 로 들어가고", "l 로 들어가고", &["Enter"][..], &["BROWSE: Enter"][..]),
+            ("Backspace·h 로 나온다", "h 로 나온다", &["Backspace"][..], &["BROWSE: Bksp"][..]),
+            // 거꾸로 — 고르기 창이 경로 칸 문장의 Esc 로 지나가면 안 된다.
+            ("창은 Esc 로 닫는다", "창은 닫는다", &["Esc"][..], &["PICK: Esc"][..]),
         ] {
             assert!(help.contains(phrase), "시험이 지울 말 `{phrase}` 이 도움말에 없다 — 문장이 바뀌었으면 여기도 고친다");
             let broken = help.replace(phrase, instead);
@@ -1124,40 +1128,76 @@ mod tests {
         }
     }
 
-    /// 같은 문단을 **같은 키로** 나눠 쓰는 표 → 그 표를 말하는 문장의 첫머리 말. 문장은 그 말부터
-    /// 첫 `.` 까지다. 여기 든 표는 [`SECTIONS`] 대신 이것을 본다 — 나머지 표는 문단이면 충분하다
-    /// (같은 문단의 다른 표와 겹치는 키가 없다).
-    const SENTENCES: &[(&str, &str)] = &[("PROMPT", "검색·거름망 칸은"), ("PATH", "g p 가 경로를 직접")];
+    /// 목록 문단의 첫머리 말.
+    const LIST: &str = "j·k 나 화살표로 이동";
+    /// SPC 메뉴 문단.
+    const SPC: &str = "그 밖의 동작은 SPC";
+    /// 고르기 창·경로 칸·목록에서 빼기 문단.
+    const PICKER: &str = "SPC p a 는 디렉터리를 골라";
+    /// 생각 담기 문단.
+    const JOTTING: &str = "SPC n 은 프로젝트 안";
 
-    /// 표 → 그 표를 말하는 문단들의 첫머리 말. 문단은 빈 줄로 나눈 덩어리다.
+    /// 같은 문단을 **같은 키로** 나눠 쓰는 표 → (그 문단, 그 표를 말하는 문장의 첫머리 말). 문장은
+    /// 그 말부터 첫 `.` 까지이고 **그 문단 안에서만** 찾는다 — 도움말 어디든 찾으면 같은 말이 앞선
+    /// 문단에 생긴 날 엉뚱한 문장을 본다.
     ///
-    /// - 고르기 창(PICK)은 목록 문단도 본다 — 도움말이 "이동은 목록과 같은 j·k·gg·G" 로 쪽 이동
-    ///   (Ctrl-d 따위)을 목록 문단에 맡긴다
-    /// - 확인(CONFIRM)의 `y` 는 목록에서 빼기(고르기 창 문단)와 생각 담기 문단 둘에서 묻는다
-    const SECTIONS: &[(&str, &[&str])] = &[
-        ("ANYWHERE", &["그 밖의 동작은 SPC"]),
-        ("BROWSE", &["j·k 나 화살표로 이동", "그 밖의 동작은 SPC"]),
-        ("MENU", &["그 밖의 동작은 SPC"]),
-        ("PROMPT", &["j·k 나 화살표로 이동"]),
-        ("PICK", &["SPC p a 는 디렉터리를 골라", "j·k 나 화살표로 이동"]),
-        ("PATH", &["SPC p a 는 디렉터리를 골라"]),
-        ("JOT", &["SPC n 은 프로젝트 안"]),
-        ("CONFIRM", &["SPC p a 는 디렉터리를 골라", "SPC n 은 프로젝트 안"]),
+    /// 여기 든 표는 제 문장만 보고, **같은 문단의 다른 표는 이 문장을 걷어 낸 글을 본다** — 둘 중
+    /// 한쪽만 좁히면 남은 쪽이 좁힌 표의 Enter·Esc·Bksp 로 지나간다(리뷰 moai-psqc.172).
+    const SENTENCES: &[(&str, &str, &str)] = &[
+        // 목록(BROWSE)과 Enter·Esc 를 나눠 쓴다.
+        ("PROMPT", LIST, "검색·거름망 칸은"),
+        // 목록(BROWSE)과 Esc·Bksp 를 나눠 쓴다.
+        ("MENU", SPC, "메뉴는 그 자리에서"),
+        // 고르기 창(PICK)과 Enter·Esc 를 나눠 쓴다. `g p` 는 창의 것이라 괄호부터 잡는다.
+        ("PATH", PICKER, "적는 칸을 연다("),
     ];
 
-    /// `help` 에서 표마다 제 문단([`SECTIONS`])이 안 대는 이름 붙은 키 — `표: 이름`.
+    /// [`SENTENCES`] 에 없는 표 → 그 표를 말하는 문단들. 문단은 빈 줄로 나눈 덩어리다.
+    ///
+    /// - 고르기 창(PICK)의 **이동 키만** 목록 문단도 본다 — 도움말이 "이동은 목록과 같은 j·k·gg·G"
+    ///   로 쪽 이동(Ctrl-d 따위)을 목록 문단에 맡긴다. Enter·Esc·Bksp 까지 빌리면 목록의 것으로 지나간다
+    /// - 확인(CONFIRM)의 `y` 는 목록에서 빼기(고르기 창 문단)와 생각 담기 문단 둘에서 묻는다 — 한
+    ///   번 적히면 된다
+    const SECTIONS: &[(&str, &[&str])] = &[
+        ("ANYWHERE", &[SPC]),
+        ("BROWSE", &[LIST, SPC]),
+        ("PICK", &[PICKER]),
+        ("JOT", &[JOTTING]),
+        ("CONFIRM", &[PICKER, JOTTING]),
+    ];
+
+    /// `head` 로 시작하는 문단.
+    fn paragraph<'h>(help: &'h str, head: &str) -> &'h str {
+        help.split("\n\n")
+            .find(|p| p.trim_start().starts_with(head))
+            .unwrap_or_else(|| panic!("`{head}` 로 시작하는 문단을 못 찾았다 — 도움말 문단이 바뀌었으면 SECTIONS·SENTENCES 를 고친다"))
+    }
+
+    /// `par` 문단 안에서 `head` 부터 첫 `.` 까지.
+    fn sentence<'h>(help: &'h str, par: &str, head: &str) -> &'h str {
+        let p = paragraph(help, par);
+        let start = p.find(head).unwrap_or_else(|| panic!("`{par}` 문단에 `{head}` 로 시작하는 문장이 없다 — 도움말 문장이 바뀌었으면 SENTENCES 를 고친다"));
+        let rest = &p[start..];
+        &rest[..rest.find('.').map_or(rest.len(), |e| e + 1)]
+    }
+
+    /// 문단들을 잇되 **좁힌 표의 문장은 걷어 낸** 글 — 옆 표의 같은 키로 지나가지 않게.
+    fn scope(help: &str, heads: &[&str]) -> String {
+        heads
+            .iter()
+            .map(|h| {
+                let mut text = paragraph(help, h).to_string();
+                for (_, par, head) in SENTENCES.iter().filter(|(_, par, _)| par == h) {
+                    text = text.replace(sentence(help, par, head), "");
+                }
+                text
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    /// `help` 에서 표마다 제 범위([`SENTENCES`]·[`SECTIONS`])가 안 대는 이름 붙은 키 — `표: 이름`.
     fn missing_in(help: &str) -> Vec<String> {
-        let paragraphs: Vec<String> = help
-            .split("\n\n")
-            .map(|p| p.to_string())
-            .filter(|p| !p.trim().is_empty())
-            .collect();
-        let section = |head: &str| -> &str {
-            paragraphs
-                .iter()
-                .find(|p| p.trim_start().starts_with(head))
-                .unwrap_or_else(|| panic!("`{head}` 로 시작하는 문단을 못 찾았다 — 도움말 문단이 바뀌었으면 SECTIONS 를 고친다"))
-        };
         let tables: [(&str, Vec<(&'static str, &'static [Key])>); 8] = [
             ("ANYWHERE", named(ANYWHERE)),
             ("BROWSE", named(BROWSE)),
@@ -1168,24 +1208,26 @@ mod tests {
             ("JOT", named(JOT)),
             ("CONFIRM", named(CONFIRM)),
         ];
-        let sentence = |head: &str| -> String {
-            let start = help.find(head).unwrap_or_else(|| panic!("`{head}` 로 시작하는 문장을 못 찾았다 — 도움말 문장이 바뀌었으면 SENTENCES 를 고친다"));
-            let rest = &help[start..];
-            rest[..rest.find('.').map_or(rest.len(), |e| e + 1)].to_string()
+        // 고르기 창이 목록 문단에서 빌리는 이동 키 — 표와 같은 매크로에서 읽는다.
+        // `const` 로 받는다 — 매크로의 `&[…]` 는 상수 자리에서만 `'static` 이다(표도 그렇게 받는다).
+        const MOVES: [Bind<Pick>; 14] = moves!(Pick::Step, Key::bare);
+        let moves: Vec<&str> = MOVES.iter().filter_map(|b| b.label).collect();
+        let told = |text: &str, seq: &[Key]| {
+            keys_in(text).into_iter().any(|(_, k)| k.len() == seq.len() && seq.iter().zip(&k).all(|(key, ev)| key.matches(*ev)))
         };
         let mut missing = Vec::new();
         for (table, rows) in tables {
-            let text = match SENTENCES.iter().find(|(t, _)| *t == table) {
-                Some((_, head)) => sentence(head),
+            let own = match SENTENCES.iter().find(|(t, ..)| *t == table) {
+                Some((_, par, head)) => sentence(help, par, head).to_string(),
                 None => {
-                    let heads = SECTIONS.iter().find(|(t, _)| *t == table).map(|(_, h)| *h).unwrap_or_else(|| panic!("{table} 의 문단이 SECTIONS 에 없다"));
-                    heads.iter().map(|h| section(h)).collect::<Vec<_>>().join("\n\n")
+                    let heads = SECTIONS.iter().find(|(t, _)| *t == table).map(|(_, h)| *h).unwrap_or_else(|| panic!("{table} 의 범위가 SECTIONS·SENTENCES 에 없다"));
+                    scope(help, heads)
                 }
             };
-            let said: Vec<Vec<KeyEvent>> = keys_in(&text).into_iter().map(|(_, k)| k).collect();
+            let borrowed = format!("{own}\n\n{}", scope(help, &[LIST]));
             for (name, seq) in rows {
-                let told = said.iter().any(|k| k.len() == seq.len() && seq.iter().zip(k).all(|(key, ev)| key.matches(*ev)));
-                if !told {
+                let text = if table == "PICK" && moves.contains(&name) { borrowed.as_str() } else { own.as_str() };
+                if !told(text, seq) {
                     missing.push(format!("{table}: {name}"));
                 }
             }
