@@ -1713,3 +1713,28 @@
 {"ts":"2026-09-14T11:59:46Z","id":"moai-6hrf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-hcx3 로 옮겨 작업한다"}
 {"ts":"2026-09-14T11:59:46Z","id":"moai-hcx3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T11:59:46Z","id":"moai-hcx3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-6hrf 에서 옮김(리뷰 moai-7azq.p3p 가 넘긴 3번). 사용자와 정한 것(2026-09-14): blocked_by_deferred 는 막는 쪽이 미뤄진 날부터 센 날수를 Warning::ages 로 싣는다 — 이 경고의 뜻이 '지금 할 일이 지금 안 할 일을 기다린다' 라 그 모순이 며칠째인지가 읽히는 대로의 뜻이다. 막는 쪽이 여럿이면 가장 오래된 미룸, 미룸이 조상(에픽·마일스톤·부모)에서 물려받은 것이면 그 조상의 deferred_at. no_epic·no_milestone 은 칸 나이 그대로."}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-wofj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅이 여러 세션·워크트리에서 제자리를 본다"}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-w2iy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"워크트리 안의 리뷰 훅(규칙 3)이 본 저장소에서 집은 리뷰 이슈를 못 봐 /code-review 를 막는다"}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-23ky","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅이 세션 cwd 가 아니라 명령이 가리키는 저장소(-C·앞의 cd)로 판정한다"}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-ntl6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이름이 id 가 아닌 워크트리에서 집은 일도 main 세션의 초점에서 뺀다"}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-n2jh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅 한 번의 값을 잰다 — report::wip 여러 번·git 두 번을 한 번으로"}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-wofj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-iz38 에서 펼쳤다 — 훅 규칙 3 이 워크트리 안에서는 그 워크트리 스냅샷만 읽어, 본 저장소에서 집은 리뷰 이슈를 못 보고 /code-review 를 막는다 — 겹쳐 보기(--worktree)나 본 저장소 트래커를 봐야 하나"}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-iz38","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wofj 로 펼쳤다 (이슈 4건)"}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-gmt9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 다듬기 — 새 키 지도 뒤에 어긋난 곳"}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-d5vn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"경로 줄의 '⎇ 옆 워크트리 없음 w 로 끈다' — 없을 때는 안 세우고, 키 이름은 SPC t w 로"}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-3l4l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai tui --help 가 표의 키를 다 대고, 시험이 표→도움말 방향도 본다"}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-7ccd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"흔들리는 시험 outside_a_repo_each_project_wears_its_own_colour 를 고친다"}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-gmt9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-n468 에서 펼쳤다 — 탐색기 경로 줄의 '⎇ 옆 워크트리 없음  w 로 끈다' 가 겹쳐 보기 기본 켬(moai-zcuh) 뒤로 늘 선다 — 옆 워크트리가 없으면 경로 줄 절반을 먹는다. 없을 때는 안 세우거나 짧게 줄일지 정한다. git 밖 프로젝트에서 찾지 못한 까닭(Gathered::unfound)도 탐색기가 w 로 직접 켰을 때는 대지 않는다(리뷰 moai-zcuh.fqp)."}
+{"ts":"2026-09-14T12:01:45Z","id":"moai-n468","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-gmt9 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-14T12:02:04Z","id":"moai-w2iy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:02:05Z","id":"moai-n658","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-23ky 로 펼쳤다 (에픽 moai-wofj)"}
+{"ts":"2026-09-14T12:02:05Z","id":"moai-23ky","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:02:05Z","id":"moai-f69b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ntl6 로 펼쳤다 (에픽 moai-wofj)"}
+{"ts":"2026-09-14T12:02:06Z","id":"moai-ntl6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:02:06Z","id":"moai-9cjg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-n2jh 로 펼쳤다 (에픽 moai-wofj)"}
+{"ts":"2026-09-14T12:02:06Z","id":"moai-n2jh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:02:06Z","id":"moai-d5vn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:02:07Z","id":"moai-7tfu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3l4l 로 펼쳤다 (에픽 moai-gmt9)"}
+{"ts":"2026-09-14T12:02:07Z","id":"moai-3l4l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:02:08Z","id":"moai-tcqp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-7ccd 로 펼쳤다 (에픽 moai-gmt9)"}
+{"ts":"2026-09-14T12:02:08Z","id":"moai-7ccd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
