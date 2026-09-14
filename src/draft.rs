@@ -134,8 +134,8 @@ pub fn parse(src: &str) -> Result<Vec<Draft>, String> {
 /// **이 파일에 둔다.** 형식을 아는 자리가 둘이 되면 되뽑은 것을 도로 넣을 때
 /// 한쪽만 바뀐 형식에서 깨진다 — 짝을 같은 파일에 두고 되돌려 읽는 시험으로 묶는다.
 ///
-/// - 형식이 받는 것만 낸다: 제목·`[pN]`·`#태그`. 막음(`blocked_by`)·담당·본문은
-///   형식에 자리가 없어 빠진다. 없는 문법을 지어내면 `add --from` 이 그 줄을
+/// - 형식이 받는 것만 낸다: 제목·`[pN]`·`#태그`. 막음(`blocked_by`)·담당·본문·
+///   부모는 형식에 자리가 없어 빠진다 — 자식 이슈는 형제로 평평하게 선다. 없는 문법을 지어내면 `add --from` 이 그 줄을
 ///   거부해 되뽑은 것이 도로 안 들어간다 (막음은 moai-quxo 의 단계 의존과 함께)
 /// - 우선순위는 **적힌 것만** 낸다. 기본값을 채워 쓰면 템플릿이 설정의 기본값을
 ///   박제한다
@@ -144,19 +144,41 @@ pub fn parse(src: &str) -> Result<Vec<Draft>, String> {
 ///   파일의 줄바꿈이 든 제목은 다음 줄을 딴 이슈로 만들고, 제어문자는 이 글을
 ///   그대로 찍는 터미널을 다시 칠한다
 pub fn render(epic: &Issue, members: &[&Issue]) -> String {
-    let line = |mark: &str, i: &Issue| {
-        let mut s = format!("{mark} ");
-        if let Some(p) = i.priority {
-            s.push_str(&format!("[p{p}] "));
-        }
-        s.push_str(&crate::text::one_line(&i.title));
-        for t in &i.tags {
-            s.push_str(&format!(" #{t}"));
-        }
-        s.push('\n');
-        s
-    };
-    std::iter::once(line("#", epic)).chain(members.iter().map(|m| line("-", m))).collect()
+    std::iter::once(format!("# {}\n", body(epic)))
+        .chain(members.iter().map(|m| format!("- {}\n", body(m))))
+        .collect()
+}
+
+/// 글머리(`#`·`-`)를 뗀 한 줄 — [`split_parts`] 가 읽는 바로 그 자리.
+fn body(i: &Issue) -> String {
+    let mut s = String::new();
+    if let Some(p) = i.priority {
+        s.push_str(&format!("[p{p}] "));
+    }
+    s.push_str(&crate::text::one_line(&i.title));
+    for t in &i.tags {
+        s.push_str(&format!(" #{t}"));
+    }
+    s
+}
+
+/// [`render`] 가 쓴 줄을 [`parse`] 가 **다르게 읽는** 줄의 id.
+///
+/// 형식에 이스케이프가 없어 `[WIP] 반쯤` 은 우선순위로 읽혀 거부되고 `이슈 #12` 는
+/// 끝 낱말이 태그로 먹힌다. render 안에서는 고칠 수 없다 — 고치면 parse 가 받는 것이
+/// 바뀐다. 그래서 **조용히 틀리지 않고 이름을 댄다**(moai-nb8d.j61). 되뽑은 글은
+/// 사람이 다듬는 틀이라 거절하지는 않는다.
+///
+/// 판정은 짝이 직접 한다 — 쓴 줄을 도로 읽어 견준다. 규칙을 따로 적으면 parse 가
+/// 바뀌는 날 이쪽만 옛 규칙으로 남는다.
+pub fn lossy<'a>(epic: &'a Issue, members: &[&'a Issue]) -> Vec<&'a str> {
+    std::iter::once(epic)
+        .chain(members.iter().copied())
+        .filter(|i| {
+            split_parts(&body(i), 0).ok() != Some((crate::text::one_line(&i.title), i.priority, i.tags.clone()))
+        })
+        .map(|i| i.id.as_str())
+        .collect()
 }
 
 #[cfg(test)]
@@ -197,6 +219,24 @@ mod tests {
         let md = render(&epic, &[&bad]);
         assert_eq!(md, "# 가\n- 앞  뒤[2J\n");
         assert_eq!(one(&md).len(), 2, "줄바꿈이 이슈를 하나 더 만들었다");
+    }
+
+    /// 형식이 담지 못하는 제목은 이름이 불린다. 앞머리 `[` 는 우선순위로, 끝의
+    /// `#낱말` 은 태그로 읽혀 도로 넣으면 거부되거나 조용히 바뀐다.
+    #[test]
+    fn titles_the_format_cannot_hold_are_named() {
+        let epic = issue("가", Kind::Epic, None, &[]);
+        let mut wip = issue("[WIP] 반쯤", Kind::Issue, None, &[]);
+        wip.id = "x-wip".into();
+        let mut hash = issue("이슈 #12 를 고친다 #12", Kind::Issue, Some(1), &[]);
+        hash.id = "x-hash".into();
+        let mut fine = issue("--json 이 #1 에서 깨진다", Kind::Issue, Some(0), &["bug"]);
+        fine.id = "x-fine".into();
+        assert_eq!(lossy(&epic, &[&wip, &hash, &fine]), ["x-wip", "x-hash"]);
+
+        // 짝이 실제로 그렇게 읽는지 — 판정이 헛짚은 것이 아님을 본다.
+        let md = render(&epic, &[&wip]);
+        assert!(parse(&md).is_err(), "{md}");
     }
 
     /// 멤버가 없는 에픽도 도로 들어가는 계획이다 — 에픽 줄 하나.

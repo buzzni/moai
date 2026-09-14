@@ -267,9 +267,15 @@ fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
             super::code::BAD_TARGET,
         ));
     }
-    let md = crate::draft::render(epic, &report::group_members(all, epic));
+    let members = report::group_members(all, epic);
+    let md = crate::draft::render(epic, &members);
+    // 도로 못 들어가는 줄은 이름을 댄다. 종료 코드는 안 바꾼다 — 틀은 사람이 다듬는다.
+    let lossy = crate::draft::lossy(epic, &members);
     if ctx.json {
-        return super::json_line(&serde_json::json!({ "id": epic.id, "plan": md }));
+        return super::json_line(&serde_json::json!({ "id": epic.id, "plan": md, "lossy": lossy }));
+    }
+    for id in &lossy {
+        eprintln!("moai: {id} 의 제목은 이 형식으로 도로 넣으면 달리 읽힌다 (앞머리 `[` 나 끝의 `#낱말`) — 넣기 전에 고친다");
     }
     Ok(md.lines().map(str::to_string).collect())
 }

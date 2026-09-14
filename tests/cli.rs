@@ -2139,6 +2139,15 @@ fn an_epic_comes_back_out_as_a_plan_that_goes_back_in() {
     let json = ok(s.path(), &["show", &epic, "--as-plan", "--json"]);
     one_json_value(&json);
     assert!(json.contains(r##""plan":"# 릴리스 #release\n"##), "{json}");
+    assert!(json.contains(r#""lossy":[]"#), "{json}");
+
+    // 도로 못 들어가는 제목은 조용히 틀리지 않고 이름을 댄다. 실패로는 안 끝난다.
+    let wip = add(s.path(), &["[WIP] 반쯤", "-e", &epic]);
+    let out = moai(s.path(), &["show", &epic, "--as-plan"]);
+    assert!(out.status.success(), "경고로 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&wip), "{}", String::from_utf8_lossy(&out.stderr));
+    let json = ok(s.path(), &["show", &epic, "--as-plan", "--json"]);
+    assert!(json.contains(&format!(r#""lossy":["{wip}"]"#)), "{json}");
 
     // 에픽이 아닌 것과 목록 자리는 거절한다 — 조용히 엉뚱한 계획을 내지 않는다.
     let lone = add(s.path(), &["그냥 이슈"]);
