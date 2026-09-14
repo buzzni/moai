@@ -263,8 +263,34 @@ impl Repo {
             None => tallies.push((self.root.clone(), Tally::default().after(wrote, opaque.len()))),
         }
         drop(tallies);
-        if !entries.is_empty() {
-            self.append_journal(&entries)?;
+        // **스냅샷을 썼으면 저널 실패는 실패가 아니다**(moai-52z9). 줄은 이미 들어갔는데
+        // `Err` 를 내면 사람은 다시 부르고, `add` 는 id 가 다른 같은 이슈를 하나 더 세운다.
+        // 순서는 그대로다 — 빠진 일기가 거짓말하는 일기보다 싸다. 고칠 것은 말이다:
+        // 세어 두고 `main`·탐색기가 "썼지만 이력은 못 남겼다" 고 말한다.
+        //
+        // **안 썼으면 그대로 `Err` 다.** `note` 처럼 저널만 적는 쓰기는 저널이 전부라,
+        // 거기서 실패하면 아무것도 안 담겼고 다시 부르는 것이 맞다.
+        if !entries.is_empty()
+            && let Err(e) = self.append_journal(&entries)
+        {
+            if !wrote {
+                return Err(e);
+            }
+            // **적어 온 말은 저널에만 산다**(`mv -m`·`defer -m`·`promote` 의 메모). 스냅샷이
+            // 담겼다고 "다시 부르지 않는다" 만 말하면 그 말은 영영 사라진다 — 어느 이슈의
+            // 말이었는지 대어 `moai note` 로 다시 적게 한다.
+            let mut worded: Vec<&str> = entries
+                .iter()
+                .filter(|j| j.text.is_some() || j.note.is_some())
+                .map(|j| j.id.as_str())
+                .collect();
+            worded.dedup();
+            let why = if worded.is_empty() {
+                e.message
+            } else {
+                format!("{} (적어 온 말도 안 남았다 — `moai note` 로 다시 적는다: {})", e.message, worded.join(" "))
+            };
+            MISSED.lock().unwrap_or_else(|e| e.into_inner()).push((self.root.clone(), why));
         }
         Ok(out)
     }
@@ -350,6 +376,17 @@ static TALLY: std::sync::Mutex<Vec<(PathBuf, Tally)>> = std::sync::Mutex::new(Ve
 
 pub fn unreadable_tallies() -> Vec<(PathBuf, Tally)> {
     TALLY.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// 스냅샷은 썼는데 저널에 못 적은 쓰기 — `(저장소 뿌리, 까닭)`, 일어난 차례대로.
+///
+/// [`TALLY`] 와 같은 까닭으로 `store` 는 세어 두기만 한다. **비우지 않는다** — 탐색기가
+/// 제 쓰기의 것을 알림으로 말하고 나서도, 나올 때 `main` 이 한 번 더 stderr 로 남긴다.
+/// 대체 화면 안의 알림은 닫으면 사라지기 때문이다.
+static MISSED: std::sync::Mutex<Vec<(PathBuf, String)>> = std::sync::Mutex::new(Vec::new());
+
+pub fn journal_misses() -> Vec<(PathBuf, String)> {
+    MISSED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// 파일이 그때 그것인지 가늠하는 표식. 고친 때만 보면 놓친다 — rename 으로
@@ -649,6 +686,33 @@ mod tests {
         let j = r.journal_of("argos-4aex").unwrap();
         assert_eq!(j.len(), 1);
         assert_eq!(j[0].text.as_deref(), Some("발견"));
+    }
+
+    /// **저널만 못 적은 쓰기는 담긴 것으로 끝나고, 저널이 전부인 쓰기는 실패다**(moai-52z9).
+    /// 앞의 것을 `Err` 로 내면 다시 부른 `add` 가 같은 이슈를 하나 더 세운다.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_whose_journal_fails_still_lands_but_a_journal_only_one_does_not() {
+        use std::os::unix::fs::PermissionsExt;
+        let (r, d) = repo("journalfail");
+        let journal = d.join(".moai/journal.jsonl");
+        std::fs::write(&journal, "").unwrap();
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o444)).unwrap();
+        if std::fs::OpenOptions::new().append(true).open(&journal).is_ok() {
+            return; // root 는 권한을 안 본다 — 재현이 안 되는 자리다
+        }
+
+        let by = crate::model::someone("raven");
+        r.with_write(|i, _, _| {
+            i.push(issue("argos-4aex"));
+            Ok((vec![JournalEntry::create("argos-4aex", "t", T, &by)], ()))
+        })
+        .expect("스냅샷을 썼는데 실패로 냈다 — 다시 부르면 둘 선다");
+        assert_eq!(r.read().unwrap().issues.len(), 1);
+        assert!(journal_misses().iter().any(|(root, _)| *root == d), "못 남긴 것을 안 셌다");
+
+        let e = r.with_write(|_, _, _| Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &by)], ())));
+        assert!(e.is_err(), "저널만 적는 쓰기가 아무것도 안 담았는데 성공으로 끝났다");
     }
 
     /// **여러 번 쓴 프로세스는 한 번이라도 쓴 것을 잊지 않는다**(moai-2v3w). 탐색기가

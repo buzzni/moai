@@ -654,9 +654,20 @@ impl App {
             self.mode = Mode::Ask(Ask { input: Input::default(), error: None, why, back: Box::new(back), then: retry });
             return None;
         }
+        // 저널 실패는 프로세스 전체에 쌓인다 — 이 쓰기 뒤에 이 저장소에 새로 선 것만 이 쓰기의 것이다.
+        let missed_before = crate::store::journal_misses().len();
+        let root = repo.root.clone();
         let written = by.and_then(|by| repo.with_write(|issues, cfg, reserved| f(issues, cfg, reserved, &by)));
         match written {
             Ok(touched) => {
+                // 담긴 것은 참이라 성공으로 닫는다 — 실패로 내면 폼이 열린 채 남아 다시 누르면
+                // 같은 것이 둘 선다(moai-52z9). 이력을 못 남긴 것은 알림 끝에 붙인다.
+                let unjournaled = crate::store::journal_misses()
+                    .into_iter()
+                    .skip(missed_before)
+                    .find(|(r, _)| *r == root)
+                    .map(|(_, why)| format!(" — 이력은 못 남겼다: {}", crate::text::one_line(&why)))
+                    .unwrap_or_default();
                 self.write_failed = false;
                 self.reload();
                 let Touched { id, done } = touched;
@@ -675,7 +686,7 @@ impl App {
                     // 다시 읽기가 실패했으면 그 까닭은 `trouble` 이 따로 댄다. 담긴 것은 참이다.
                     Landing::Missing => format!("✓ {done} · {what} — 다시 읽은 목록에 없다"),
                 };
-                self.notice = Some(told);
+                self.notice = Some(told + &unjournaled);
                 Some(id)
             }
             // 거절문은 여러 줄일 수 있다(누군지 모를 때는 고칠 명령까지 낸다). 배너는
@@ -3299,6 +3310,27 @@ mod tests {
         assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
         assert!(a.trouble.as_deref().is_some_and(|t| t.starts_with("쓰지 못했다")), "{:?}", a.trouble);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+    }
+
+    /// **저널만 못 적은 쓰기는 담긴 것으로 닫고 알림이 그렇다고 말한다**(moai-52z9). 실패로
+    /// 내면 폼이 열린 채 남아 다시 누르면 같은 것이 둘 선다.
+    #[cfg(unix)]
+    #[test]
+    fn a_save_whose_journal_fails_closes_as_saved_and_says_so() {
+        use std::os::unix::fs::PermissionsExt;
+        let (scratch, mut a) = writable("jot-nojournal");
+        let journal = scratch.0.join(".moai/journal.jsonl");
+        std::fs::write(&journal, "").unwrap();
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o444)).unwrap();
+        if std::fs::OpenOptions::new().append(true).open(&journal).is_ok() {
+            return; // root 는 권한을 안 본다
+        }
+        jotting(&mut a, "한 번만");
+        a.key(ctrl('s'));
+        assert_eq!(a.mode, Mode::Browse, "담겼는데 폼이 열린 채다 — {:?}", a.trouble);
+        assert!(a.trouble.is_none(), "{:?}", a.trouble);
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("이력은 못 남겼다")), "{:?}", a.notice);
+        assert_eq!(ideas_in(a.repo.as_ref().unwrap()).len(), 1);
     }
 
     /// **Esc 는 빈 폼을 곧바로 닫고, 적던 것이 있으면 한 번 묻는다.** `y` 만 버린다 —
