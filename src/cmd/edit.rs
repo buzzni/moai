@@ -33,6 +33,9 @@ struct Inherited {
     parent: String,
 }
 
+/// 남은 소속의 키. 모르는 필드로 같은 이름을 든 줄을 가려내는 데도 쓴다.
+const INHERITED: &str = "inherited_epic";
+
 /// 기계 출력 — 줄 하나에 남은 소속을 곁들인다. 기존 키는 그대로 두고 더하기만 한다.
 #[derive(serde::Serialize)]
 struct Out<'a> {
@@ -161,7 +164,18 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
 
     let Edited { issue: edited, epic, children, shelved, read, changed, kept } = done;
     if ctx.json {
-        let row = super::Row::from(&edited, &read);
+        // **이 키는 우리 것이다** — `Row` 가 `derived_status` 를 걷는 것과 같은 까닭이다.
+        // `--json` 을 되써 넣어 모르는 필드로 든 줄이면 한 객체에 같은 키가 둘 서거나,
+        // 끊긴 줄이 안 끊긴 것처럼 읽힌다. 파일의 값은 그대로 둔다.
+        let shown = match edited.rest.contains_key(INHERITED) {
+            false => std::borrow::Cow::Borrowed(&edited),
+            true => {
+                let mut own = edited.clone();
+                own.rest.remove(INHERITED);
+                std::borrow::Cow::Owned(own)
+            }
+        };
+        let row = super::Row::from(&shown, &read);
         return super::json_line(&Out { row, inherited_epic: kept.as_ref() });
     }
     if let Some(k) = &kept {

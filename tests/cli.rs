@@ -1045,6 +1045,20 @@ fn edit_says_when_epic_none_cannot_cut_a_parents_membership() {
         let json = ok(s.path(), &j);
         assert!(!json.contains("inherited_epic"), "{args:?}: {json}");
     }
+
+    // **이 키도 우리 것이다** — `derived_status` 와 같은 까닭. `--json` 을 되써 넣어
+    // 모르는 필드로 든 줄이면 한 객체에 같은 키가 둘 서거나, 끊긴 줄이 안 끊긴 것처럼 읽힌다.
+    let doctored: String = issues(s.path())
+        .lines()
+        .map(|l| format!("{}{}\n", &l[..l.len() - 1], r#","inherited_epic":"거짓"}"#))
+        .collect();
+    std::fs::write(s.path().join(".moai/issues.jsonl"), doctored).unwrap();
+    let json = ok(s.path(), &["edit", &review, "-e", "none", "--json"]);
+    assert_eq!(json.matches(r#""inherited_epic""#).count(), 1, "같은 키가 두 번 났다 — {json}");
+    assert!(!json.contains("거짓"), "{json}");
+    let json = ok(s.path(), &["edit", &top, "-e", "none", "--json"]);
+    assert!(!json.contains("inherited_epic"), "파일의 값이 끊긴 줄에 샜다 — {json}");
+    assert!(line_of(s.path(), &top).contains(r#""inherited_epic":"거짓""#), "모르는 필드를 잃었다");
 }
 
 #[test]
