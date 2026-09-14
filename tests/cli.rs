@@ -227,6 +227,35 @@ fn init_appends_to_an_existing_gitignore() {
     assert!(got.contains(".moai/lock"), "{got}");
 }
 
+/// **워크트리 자리도 gitignore 한다**(moai-mxtb) — 감독 일꾼 절차가 `.claude/worktrees/` 에
+/// 워크트리를 뜨는데, 그 자리가 안 막히면 `git add -A` 에 남의 가지 전체가 딸려 온다.
+/// 넣는 것은 그 자리 하나다 — `.claude/` 통째는 저장소가 커밋하는 설정·스킬을 가린다.
+/// 같은 뜻의 철자나 `.claude/` 를 이미 막았으면 더하지 않고, 다시 불러도 한 줄이다.
+#[test]
+fn init_ignores_the_worktree_dir_once_and_respects_equivalent_spellings() {
+    let s = Scratch::new("ignorewt");
+    let claude_lines = |got: &str| got.lines().filter(|l| l.contains(".claude")).count();
+
+    let fresh = s.path().join("fresh");
+    std::fs::create_dir_all(&fresh).unwrap();
+    ok(&fresh, &["init", "argos"]);
+    let got = std::fs::read_to_string(fresh.join(".gitignore")).unwrap();
+    assert!(got.lines().any(|l| l == "/.claude/worktrees/"), "새 저장소에 워크트리 자리를 안 막았다\n{got}");
+    ok(&fresh, &["init"]);
+    assert_eq!(std::fs::read_to_string(fresh.join(".gitignore")).unwrap(), got, "다시 init 하자 .gitignore 가 바뀌었다");
+
+    for (name, already) in [("anchored", "/.claude/worktrees\n"), ("bare", ".claude/worktrees/\n"), ("whole", ".claude/\n")] {
+        let dir = s.path().join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = format!("target/\n# 우리 것\n{already}");
+        std::fs::write(dir.join(".gitignore"), &original).unwrap();
+        ok(&dir, &["init", "argos"]);
+        let got = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
+        assert!(got.starts_with(&original), "`{name}`: 원래 .gitignore 를 바꿨다\n{got}");
+        assert_eq!(claude_lines(&got), 1, "`{name}`: 같은 뜻의 줄이 있는데 또 더했다\n{got}");
+    }
+}
+
 #[test]
 fn add_then_show() {
     let s = init("add");

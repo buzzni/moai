@@ -42,10 +42,15 @@ const GITATTRIBUTES: &str = "\
 .moai/journal.jsonl  text eol=lf merge=union
 ";
 
+// **워크트리 자리도 막는다**(moai-mxtb, 사용자와 정함). 감독 일꾼 절차가 `.claude/worktrees/` 에
+// 워크트리를 뜨는데, 그 자리가 안 막히면 `git add -A` 에 남의 가지 전체가 딸려 온다. 넣는 것은
+// 그 자리 하나다 — `.claude/` 통째는 저장소가 커밋하는 설정·스킬·플러그인을 가린다. 끄는 길은
+// 두지 않는다: 워크트리를 안 쓰는 저장소에는 빈 자리를 막는 줄일 뿐이다.
 const GITIGNORE: &str = "\
 # moai
 .moai/lock
 .moai/*.tmp.*
+/.claude/worktrees/
 ";
 
 /// **새로 심는 접두어의 최대 길이**(moai-f7xs). id 는 `<접두어>-<4자>` 이고 사람과
@@ -99,7 +104,7 @@ fn ensure_lines(path: &Path, block: &str) -> Result<bool, String> {
     let existing = std::fs::read_to_string(path).unwrap_or_default();
     let missing: Vec<&str> = block
         .lines()
-        .filter(|l| !l.trim().is_empty() && !existing.lines().any(|e| e.trim() == l.trim()))
+        .filter(|l| !l.trim().is_empty() && !existing.lines().any(|e| covers(e, l)))
         .collect();
     if missing.is_empty() {
         return Ok(false);
@@ -115,6 +120,26 @@ fn ensure_lines(path: &Path, block: &str) -> Result<bool, String> {
     out.push('\n');
     std::fs::write(path, out).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(true)
+}
+
+/// 이미 있는 줄 `have` 가 넣으려는 줄 `want` 를 **이미 막고 있는가**(moai-mxtb).
+///
+/// 글자가 같은 줄만 보면, `/.claude/worktrees` 를 이미 적은 저장소에 효과 없는
+/// `/.claude/worktrees/` 가 하나 더 붙는다. 그래서 앞뒤 `/` 를 떼고 견주고, 윗 디렉터리를
+/// 통째로 막은 줄(`.claude/`)도 그 밑의 줄을 막은 것으로 친다. **남의 줄은 안 바꾼다** —
+/// 판정만 넓히고 쓰는 것은 빠진 줄을 덧붙이는 것뿐이다. 주석·빈 줄·`!` 되살림은 넓혀
+/// 읽지 않는다.
+fn covers(have: &str, want: &str) -> bool {
+    let (have, want) = (have.trim(), want.trim());
+    if have == want {
+        return true;
+    }
+    if have.is_empty() || have.starts_with('#') || have.starts_with('!') || want.starts_with('#') {
+        return false;
+    }
+    let bare = |s: &str| s.trim_start_matches('/').trim_end_matches('/').to_string();
+    let (have, want) = (bare(have), bare(want));
+    !have.is_empty() && (have == want || want.starts_with(&format!("{have}/")))
 }
 
 pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
@@ -264,7 +289,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         out.push("  .gitattributes 에 병합 규칙을 넣었다".into());
     }
     if ignore {
-        out.push("  .gitignore 에 lock·tmp 를 넣었다".into());
+        out.push("  .gitignore 에 moai 가 쓰는 자리(lock·tmp·워크트리)를 넣었다".into());
     }
     if agents {
         out.push("  AGENTS.md 블록을 맞췄다".into());
