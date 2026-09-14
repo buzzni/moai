@@ -131,6 +131,9 @@ pub enum Cmd {
 
   --dry-run 이 heredoc 오타로 여섯 개를 잘못 만드는 것을 막는다.
 
+계획 템플릿 (`{{이름}}` 을 --var 로 채운다, 변수는 전부 필수):
+  moai add --from .moai/templates/release.md --var version=1.2
+
 제목이 `--` 로 시작해도 된다. 아는 플래그가 아니면 제목으로 읽는다.")]
     Add(AddArgs),
     /// 하나를 펼치거나 목록을 낸다
