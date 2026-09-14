@@ -1519,3 +1519,5 @@
 {"ts":"2026-09-14T09:06:44Z","id":"moai-ha03","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T09:07:53Z","id":"moai-0lmn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T09:08:19Z","id":"moai-4l7m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"guide·overlay 문서에 적었다 (ef4bc0b) — 문서만 바꿔 리뷰는 안 돌렸다"}
+{"ts":"2026-09-14T09:19:40Z","id":"moai-k3yi.kyu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 키 바 마무리 (k3yi)"}
+{"ts":"2026-09-14T09:19:57Z","id":"moai-k3yi.kyu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
