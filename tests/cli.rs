@@ -1183,9 +1183,12 @@ fn show_draws_each_blocker_with_the_words_ready_uses() {
     assert!(line(&shown, &a).contains("풀림"), "끝난 막음이 풀림으로 안 섰다\n{shown}");
     let deferred = line(&shown, &c);
     assert!(deferred.contains("막힘") && deferred.contains("미룸"), "미룬 막음이 미뤘다고 안 한다\n{shown}");
-    // `ready` 와 같은 답이다 — 미룬 막음도 막으므로 b 는 집을 일로 안 선다. 사람 화면은 b 를
-    // "미룬 것에 막혀 못 집는 것" 으로 대므로, 집을 일만 내는 `--json` 으로 본다.
-    assert!(!ok(s.path(), &["ready", "--json"]).contains(&b));
+    // `ready` 와 같은 답이다 — 미룬 막음도 막으므로 b 는 집을 일로 안 선다. b 는 `held` 에
+    // "미룬 것에 막혀 못 집는 것" 으로 서므로, `ready` 목록만 떼어 본다.
+    let rd = ok(s.path(), &["ready", "--json"]);
+    let picks = rd.split("\"held\"").next().unwrap_or_default();
+    assert!(!picks.contains(&b), "미룬 막음에 막힌 줄을 집으라고 낸다\n{rd}");
+    assert!(rd.contains(&format!("\"id\":\"{b}\"")), "held 에 막힌 줄이 없다\n{rd}");
 
     ok(s.path(), &["rm", &c]);
     let shown = ok(s.path(), &["show", &b]);
