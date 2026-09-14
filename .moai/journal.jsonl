@@ -2314,3 +2314,8 @@
 {"ts":"2026-09-14T16:17:35Z","id":"moai-7ljm.ba8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"13건 중 9건 반영(5dd1fc3). 넘긴 것: moai-dubz(루트 HEAD 와 본 가지 갈림, 사용자 결정 필요), moai-zaml(모노레포 일꾼), 12·13 은 이유와 함께 안 고침"}
 {"ts":"2026-09-14T16:17:35Z","id":"moai-hy2h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-14T16:17:35Z","id":"moai-5jxr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-14T16:20:41Z","id":"moai-foc3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"--help 의 heredoc 예시를 복사해도 돌게"}
+{"ts":"2026-09-14T16:20:41Z","id":"moai-vdmh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"모든 명령의 --help 에서 heredoc 예시가 왼쪽 끝에서 열고 닫히며 겹치지 않는 표시를 쓴다"}
+{"ts":"2026-09-14T16:20:41Z","id":"moai-foc3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-sr5i 에서 펼쳤다 — moai --help 의 heredoc 예시가 2칸 들여쓰여 그대로 복사하면 닫는 EOF 를 셸이 못 찾는다 — cli.rs 40·125·395 (moai-hy2h.b14 리뷰가 diff 밖이라 넘김)"}
+{"ts":"2026-09-14T16:20:41Z","id":"moai-sr5i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-foc3 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-14T16:21:01Z","id":"moai-vdmh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
