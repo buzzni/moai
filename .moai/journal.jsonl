@@ -1185,3 +1185,5 @@
 {"ts":"2026-09-14T04:35:40Z","id":"moai-9omq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"project add 가 못 읽는 저장소에 '못 읽는다' 한 줄과 --json error 키를 곁들인다 (등록은 그대로)"}
 {"ts":"2026-09-14T04:35:40Z","id":"moai-c1s3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T04:41:06Z","id":"moai-c1s3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"write_atomic 이 늘 옛 파일 권한을 입힌다 — issues.jsonl·사용자 설정 한 길 (저널은 덧붙이기라 원래 안 풀림)"}
+{"ts":"2026-09-14T04:41:17Z","id":"moai-byih.wbj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 추림2 A: 설정·권한 (byih·9omq·c1s3)"}
+{"ts":"2026-09-14T04:41:22Z","id":"moai-byih.wbj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
