@@ -2439,3 +2439,7 @@
 {"ts":"2026-09-14T17:04:07Z","id":"moai-wqm7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"설계: 커밋 제목에 (<id>) 를 넣는 것이 연결 고리임을 moai init 관리 블록(AGENTS)에 적는다 — 새 저장소는 CLAUDE.md 규약을 모른다"}
 {"ts":"2026-09-14T17:04:07Z","id":"moai-pjic","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T17:04:42Z","id":"moai-a46g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 머지 — TUI 상세·CLI 보드 진행 바 둘 다 16색 10번, 시험 통과"}
+{"ts":"2026-09-14T17:05:12Z","id":"moai-3faw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"d4c8763 (에픽 moai-ahyz 머지). 리뷰와 max 리뷰 반영"}
+{"ts":"2026-09-14T17:05:12Z","id":"moai-cypw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"d4c8763 (에픽 moai-ahyz 머지). 리뷰와 max 리뷰 반영"}
+{"ts":"2026-09-14T17:05:12Z","id":"moai-xqxu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"d4c8763 (에픽 moai-ahyz 머지). 리뷰와 max 리뷰 반영"}
+{"ts":"2026-09-14T17:05:12Z","id":"moai-sujb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"d4c8763 (에픽 moai-ahyz 머지). 리뷰와 max 리뷰 반영"}
