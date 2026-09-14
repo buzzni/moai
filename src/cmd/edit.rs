@@ -255,6 +255,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         roots: shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect(),
         states: read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect(),
         origin: None,
+        // 쓴 뒤의 줄 전부는 쓰기 안에서만 있어 막음을 가를 재료가 없다 — `show <id>` 가 그린다.
+        blocks: Vec::new(),
     };
     Ok(view::detail(&edited, epic.as_ref(), &children, &seen, &repo.config, &at, false))
 }

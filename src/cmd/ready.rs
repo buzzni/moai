@@ -22,15 +22,40 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 있으므로, 같은 자(`report::ready`)가 그것을 저절로 뺀다 — 여기에 "남이 집은
     // 것" 을 가르는 `if` 를 따로 두지 않는다.
     let picks = report::ready(&load.issues, &repo.config);
+    // 미뤄 둔 것·빈 묶음에 막혀 못 집는 것. 안 대면 `ready` 가 까닭 없이 빈다.
+    let held = report::held(&load.issues, &repo.config);
     if ctx.json {
-        let rows: Vec<super::Row> = picks.iter().map(|i| super::Row::of(i, None).on(&origin)).collect();
-        return super::json_line(&rows);
+        // **객체로 감싼다**(moai-w6n2, 사람이 정한 출력 계약). 맨 배열이던 때는 막혀 못 집는
+        // 일을 실을 자리가 없어, 에이전트는 `[]` 를 "할 일이 없다" 로 읽었다. `.moai` 밖
+        // 한눈 보기가 프로젝트마다 `ready` 키를 쓰는 것과 같은 이름이다.
+        #[derive(serde::Serialize)]
+        struct Said<'a> {
+            ready: Vec<super::Row<'a>>,
+            held: Vec<Waiting<'a>>,
+        }
+        // 사람 화면의 held 줄과 같은 셋. 빈 목록은 안 싣는다 — 미룬 막음이면 `empty` 가,
+        // 빈 묶음이면 `by`·`undo` 가 늘 비어 키만 늘린다.
+        #[derive(serde::Serialize)]
+        struct Waiting<'a> {
+            id: &'a str,
+            #[serde(skip_serializing_if = "<[&str]>::is_empty")]
+            by: &'a [&'a str],
+            #[serde(skip_serializing_if = "<[&str]>::is_empty")]
+            undo: &'a [&'a str],
+            #[serde(skip_serializing_if = "<[&str]>::is_empty")]
+            empty: &'a [&'a str],
+        }
+        return super::json_line(&Said {
+            ready: picks.iter().map(|i| super::Row::of(i, None).on(&origin)).collect(),
+            held: held
+                .iter()
+                .map(|h| Waiting { id: &h.issue.id, by: &h.by, undo: &h.undo, empty: &h.empty })
+                .collect(),
+        });
     }
 
     // 첫 칸도 아니고 끝나지도 않은 것 = 누군가 이미 잡고 있는 것.
     let wip = report::wip(&load.issues, &repo.config);
-    // 미뤄 둔 것에 막혀 못 집는 것. 안 대면 `ready` 가 까닭 없이 빈다.
-    let held = report::held(&load.issues, &repo.config);
 
     Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip, &held, &origin))
 }

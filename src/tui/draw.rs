@@ -1329,7 +1329,8 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
         // 고칠 명령에는 **그 뿌리를** 댄다. `.` 이라 적으면 하위 디렉터리에서 띄운 사람이 그
         // 하위 디렉터리를 등록한다 — 그곳은 `.moai` 가 없어 "init 전" 으로 선다.
         (true, false) => {
-            let at = crate::text::shell_word(&crate::text::one_line(&p.path.display().to_string()));
+            // 명령에 넣는 철자는 `one_line` 을 안 지난다 — 탭·줄바꿈이 빈칸이 되면 다른 디렉터리다.
+            let at = crate::text::shell_word(&p.path.display().to_string());
             out.extend(wrapped(&format!("여기서 띄웠다 · 등록 안 됨 — `moai project add {at}` 로 더하면 어디서든 보인다"), w, dim()))
         }
         _ => {}
