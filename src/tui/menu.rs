@@ -14,9 +14,11 @@
 //! **켜진 것만 선다.** 항목마다 [`Browse::enabled`] 를 읽는다 — 키 바와 같은 판정이다. 메뉴에 안
 //! 선 키는 눌러도 모르는 키와 같다: 선 것과 도는 것이 갈리지 않는다.
 //!
-//! **조각이다.** `App`·터미널을 모른다. 켜짐([`Ctx`])은 든 쪽이 재서 넘긴다.
+//! **조각이다.** `App`·터미널을 모른다. 켜짐([`Ctx`])은 든 쪽이 재서 넘긴다. 격자를 어떻게
+//! 놓는가([`grid`])도 여기서 폭과 높이만 받아 정하고, `draw.rs` 는 그 격자를 칠하기만 한다.
 
 use super::keys::{BROWSE, Bind, Browse, Chord, Ctx, LEADER, Lookup, MENU, Menu, lookup, name_of};
+use crate::text::{clip, width};
 use ratatui::crossterm::event::KeyEvent;
 
 /// 하위 접두어의 이름. 표에는 동작만 있고 묶음의 이름은 없어 여기 둔다 — 이름 없는 접두어는
@@ -61,14 +63,24 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
     }
 }
 
-/// 메뉴 한 줄 — `키  낱말 [상태]`.
+/// 메뉴 한 칸 — `키 : 낱말 [상태]`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub key: String,
-    /// 동작의 낱말, 하위 접두어면 `이름 …`.
+    /// 동작의 낱말, 하위 접두어면 `+이름`(doom which-key 의 모양 — moai-apsa).
     pub what: String,
     /// 켜고 끄는 것의 지금 상태(`[켜짐]`·`[원문]`).
     pub state: Option<&'static str>,
+}
+
+impl Entry {
+    /// 칸의 설명 — 낱말 뒤에 상태. **상태는 글자로 선다** — 색이 혼자 뜻을 지지 않는다.
+    pub fn text(&self) -> String {
+        match self.state {
+            Some(st) => format!("{} {st}", self.what),
+            None => self.what.clone(),
+        }
+    }
 }
 
 /// 지금 층(`held`)에 선 항목. 차례는 표의 차례다.
@@ -88,7 +100,7 @@ pub fn entries(held: &[KeyEvent], c: &Ctx) -> Vec<Entry> {
                 out.push(Entry { key: next.name(), what: act.menu_word(c).into(), state: act.state(c) });
             }
             Lookup::Pending if live(&seq, c) => {
-                out.push(Entry { key: next.name(), what: format!("{} …", group(&seq)), state: None });
+                out.push(Entry { key: next.name(), what: format!("+{}", group(&seq)), state: None });
             }
             _ => {}
         }
@@ -99,6 +111,112 @@ pub fn entries(held: &[KeyEvent], c: &Ctx) -> Vec<Entry> {
 /// 테두리에 적을 지금 접두어 — `SPC`, `SPC t`.
 pub fn title(held: &[KeyEvent]) -> String {
     held.iter().map(|k| name_of(k.code)).collect::<Vec<_>>().join(" ")
+}
+
+/// 뿌리의 이름 — 접두어 줄의 `SPC- 메뉴`, 키 바의 `SPC 메뉴`.
+pub const ROOT: &str = "메뉴";
+
+/// 접두어 줄에 적을 지금 층의 이름 — 뿌리는 [`ROOT`], 하위 층은 묶음의 이름(`토글`).
+pub fn name(held: &[KeyEvent]) -> &'static str {
+    if held.len() <= 1 { ROOT } else { group(held) }
+}
+
+/// 격자의 줄 수 상한. 사용자가 준 "하단 8~10칸"(moai-apsa) — 격자 8줄에 가름줄·접두어 줄을
+/// 더해 10줄이다. 항목이 적으면 그만큼 낮게 선다.
+pub const MAX_ROWS: usize = 8;
+
+/// 메뉴가 떠도 몸통에 남길 높이 — 테두리 둘과 줄 하나. 이보다 낮게 누르면 커서가 선 줄이
+/// 안 보여, 메뉴가 무엇에 대한 것인지를 잃는다.
+pub const BODY_MIN: usize = 3;
+
+/// 칸의 키와 설명 사이.
+pub const SEP: &str = " : ";
+
+/// 열 사이.
+pub const GAP: usize = 2;
+
+/// 자른 설명의 최소 폭 — 한글 한 자와 `…`. 이보다 좁히면 `…` 만 남아 뜻이 없다.
+const MIN_TEXT: usize = 3;
+
+/// 경로 줄·배너·키 바를 뺀 높이 `left` 에서 격자에 줄 수 있는 줄 수. 가름줄 하나와
+/// [`BODY_MIN`] 을 먼저 뺀다. **0 이면 격자를 세우지 않고 접두어 줄 한 줄로 접는다.**
+pub fn rows_for(left: usize) -> usize {
+    left.saturating_sub(BODY_MIN + 1).min(MAX_ROWS)
+}
+
+/// 격자의 한 칸. 둘 다 **이미 채워 둔 글**이다 — 키는 열 안에서 오른쪽 맞춤이라 [`SEP`] 이 줄
+/// 서고, 설명은 잘려(`…`) 열 폭까지 채워져 다음 열이 줄 선다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placed {
+    pub key: String,
+    pub text: String,
+}
+
+/// 격자 — 열 우선으로 채운 칸들. `columns[c][r]` 이 c 열 r 줄이다.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Grid {
+    pub rows: usize,
+    pub columns: Vec<Vec<Placed>>,
+    /// 폭이 모자라 못 세운 항목 수. 말없이 빠지면 없는 줄 안다 — 접두어 줄이 수를 댄다.
+    pub hidden: usize,
+}
+
+impl Grid {
+    /// r 줄에 선 칸들 — 왼쪽 열부터. 열 우선이라 짧은 것은 마지막 열뿐이다.
+    pub fn row(&self, r: usize) -> impl Iterator<Item = &Placed> {
+        self.columns.iter().filter_map(move |c| c.get(r))
+    }
+}
+
+/// 항목을 which-key 식 격자로 놓는다(moai-apsa). **순수 함수다** — 폭 `room` 과 줄 상한
+/// `max_rows` 만 받는다. 차례는 받은 차례(곧 표의 차례)다.
+///
+/// - **열 우선.** 한 열을 `min(항목 수, max_rows)` 줄까지 위에서 아래로 채우고 다음 열로 간다
+///   — which-key 가 창 높이까지 열을 채우는 것과 같다. 줄 수가 먼저고 열 수는 거기서 나온다.
+/// - **열마다 제 폭.** 키 폭·설명 폭은 그 열에서 가장 넓은 것이다(doom 의 `RET`·`SPC` 열).
+/// - **넘치면 설명을 줄인다.** 모든 열의 설명에 같은 상한을 걸어 긴 것부터 `…` 로 자른다.
+///   그 상한이 [`MIN_TEXT`] 아래로 가야 하면 **뒤 열을 뺀다** — 빠진 수가 `hidden` 이다.
+///   한 열도 안 들면 그 한 열을 폭까지 자른다.
+pub fn grid(items: &[Entry], room: usize, max_rows: usize) -> Grid {
+    if items.is_empty() || max_rows == 0 {
+        return Grid { rows: 0, columns: Vec::new(), hidden: items.len() };
+    }
+    let rows = items.len().min(max_rows);
+    let chunks: Vec<&[Entry]> = items.chunks(rows).collect();
+    let key_w: Vec<usize> = chunks.iter().map(|c| c.iter().map(|e| width(&e.key)).max().unwrap_or(0)).collect();
+    let text_w: Vec<usize> = chunks.iter().map(|c| c.iter().map(|e| width(&e.text())).max().unwrap_or(0)).collect();
+    let fixed = |n: usize| key_w[..n].iter().sum::<usize>() + n * width(SEP) + n.saturating_sub(1) * GAP;
+    let mut shown = chunks.len();
+    let limit = loop {
+        let left = room.saturating_sub(fixed(shown));
+        let used = |l: usize| text_w[..shown].iter().map(|t| (*t).min(l)).sum::<usize>();
+        let widest = text_w[..shown].iter().copied().max().unwrap_or(0);
+        if let Some(l) = (MIN_TEXT.min(widest)..=widest).rev().find(|l| used(*l) <= left) {
+            break l;
+        }
+        if shown == 1 {
+            break left;
+        }
+        shown -= 1;
+    };
+    let columns = chunks[..shown]
+        .iter()
+        .enumerate()
+        .map(|(c, chunk)| {
+            let tw = text_w[c].min(limit);
+            chunk
+                .iter()
+                .map(|e| {
+                    let text = clip(&e.text(), tw);
+                    Placed {
+                        key: format!("{}{}", " ".repeat(key_w[c] - width(&e.key)), e.key),
+                        text: format!("{text}{}", " ".repeat(tw.saturating_sub(width(&text)))),
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    Grid { rows, columns, hidden: items.len() - (shown * rows).min(items.len()) }
 }
 
 /// 하위 접두어의 이름. 이름이 없으면 `…` 만 — 시험이 막으므로 실제로는 안 선다.
@@ -148,7 +266,82 @@ mod tests {
         let root = entries(ch.held(), &inside());
         assert_eq!(keys_of(&root), ["/", "f", "n", "r", "q", "p", "t"]);
         let what: Vec<&str> = root.iter().map(|e| e.what.as_str()).collect();
-        assert_eq!(what, ["검색", "거름망", "생각 담기", "다시 읽기", "끝내기", "프로젝트 …", "토글 …"]);
+        assert_eq!(what, ["검색", "거름망", "생각 담기", "다시 읽기", "끝내기", "+프로젝트", "+토글"]);
+    }
+
+    fn e(key: &str, what: &str) -> Entry {
+        Entry { key: key.into(), what: what.into(), state: None }
+    }
+
+    fn line(g: &Grid, r: usize) -> String {
+        g.row(r).map(|p| format!("{}{SEP}{}", p.key, p.text)).collect::<Vec<_>>().join(&" ".repeat(GAP))
+    }
+
+    fn letters(n: u8, what: &str) -> Vec<Entry> {
+        (0..n).map(|i| e(&char::from(b'a' + i).to_string(), what)).collect()
+    }
+
+    /// **격자는 열 우선으로 채우고 열마다 `:` 가 줄 선다**(moai-apsa) — which-key 처럼 한 열을 줄
+    /// 상한까지 위에서 아래로 채운 뒤 다음 열로 간다. 키는 열 안에서 오른쪽 맞춤이다(doom 의 `RET`).
+    #[test]
+    fn the_grid_fills_columns_first_and_lines_up_the_colons() {
+        let items: Vec<Entry> = ["a", "b", "SPC", "d", "e", "f", "g", "h", "i", "j"].iter().map(|k| e(k, "설명")).collect();
+        let g = grid(&items, 200, 4);
+        assert_eq!((g.rows, g.columns.len(), g.hidden), (4, 3, 0));
+        let keys = |c: usize| g.columns[c].iter().map(|p| p.key.trim_start()).collect::<Vec<_>>();
+        assert_eq!(keys(0), ["a", "b", "SPC", "d"]);
+        assert_eq!(keys(1), ["e", "f", "g", "h"]);
+        assert_eq!(keys(2), ["i", "j"]);
+        let nth = |r: usize, k: usize| {
+            let l = line(&g, r);
+            l.match_indices(SEP).nth(k).map(|(i, _)| width(&l[..i]))
+        };
+        assert!((0..4).all(|r| nth(r, 0) == Some(3)), "첫 열의 `:` 가 줄 서지 않는다");
+        assert!((0..4).all(|r| nth(r, 1) == nth(0, 1)), "둘째 열의 `:` 가 줄 서지 않는다");
+        assert_eq!(line(&g, 0), "  a : 설명  e : 설명  i : 설명");
+    }
+
+    /// **줄 수는 상한에서 멈추고 열 수가 거기서 나온다** — 뿌리처럼 항목이 적으면 그만큼 낮다.
+    /// 몸통 몫을 남기지 못하는 높이면 격자를 세우지 않는다.
+    #[test]
+    fn the_grid_caps_rows_and_derives_columns() {
+        let items = letters(20, "낱말");
+        let g = grid(&items, 200, MAX_ROWS);
+        assert_eq!((g.rows, g.columns.len(), g.hidden), (8, 3, 0));
+        assert_eq!(grid(&items[..3], 200, MAX_ROWS).rows, 3);
+        assert_eq!(grid(&items, 200, 0), Grid { rows: 0, columns: Vec::new(), hidden: 20 });
+        assert_eq!(grid(&[], 200, MAX_ROWS), Grid::default());
+        assert_eq!(rows_for(40), MAX_ROWS);
+        assert_eq!(rows_for(BODY_MIN + 1), 0, "몸통을 남기지 못하는데 격자를 세웠다");
+        assert_eq!(rows_for(BODY_MIN + 3), 2);
+    }
+
+    /// **좁으면 설명을 `…` 로 자르고, 그래도 안 들면 뒤 열을 빼며 그 수를 댄다.** 한글은 두 칸으로
+    /// 잰다. 어느 줄도 폭을 넘지 않고, 아주 좁아도 멈추지 않는다.
+    #[test]
+    fn a_narrow_grid_clips_descriptions_then_drops_columns_and_counts_them() {
+        let items = letters(12, "아주 긴 한글 설명이 붙은 동작");
+        let wide = grid(&items, 200, 4);
+        assert_eq!((wide.columns.len(), wide.hidden), (3, 0));
+        assert!(!line(&wide, 0).contains('…'), "{}", line(&wide, 0));
+
+        let narrow = grid(&items, 60, 4);
+        assert_eq!((narrow.columns.len(), narrow.hidden), (3, 0), "{narrow:?}");
+        assert!(line(&narrow, 0).contains('…'), "{}", line(&narrow, 0));
+        for r in 0..narrow.rows {
+            assert!(width(&line(&narrow, r)) <= 60, "{}", line(&narrow, r));
+        }
+
+        let tight = grid(&items, 20, 4);
+        assert_eq!((tight.columns.len(), tight.hidden), (2, 4), "{tight:?}");
+        for r in 0..tight.rows {
+            assert!(width(&line(&tight, r)) <= 20, "{}", line(&tight, r));
+        }
+        for w in [0usize, 1, 5] {
+            let g = grid(&items, w, 4);
+            assert_eq!(g.columns.len(), 1, "{w}칸");
+            assert_eq!(g.hidden, 8, "{w}칸");
+        }
     }
 
     /// **메뉴의 모든 길이 같은 동작을 낸다** — 바로 누르던 키가 하던 그 동작이고, 실행하면 닫힌다.
