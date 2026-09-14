@@ -1487,3 +1487,4 @@
 {"ts":"2026-09-14T08:52:25Z","id":"moai-eomg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽·마일스톤 줄에도 빛줄기 — 밑에 집은 일이 있을 때(도는 묶음)"}
 {"ts":"2026-09-14T08:57:28Z","id":"moai-5jh6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T09:13:42Z","id":"moai-5jh6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"루프는 방금 그린 버퍼에 스피너 글자가 있을 때만 빠른 걸음으로 깬다(App::spun) — 스크롤 밖·폼에 덮인 줄로 안 깨고, 상세에만 선 건수로는 깬다. App::spinning 은 걷었다"}
+{"ts":"2026-09-14T09:14:10Z","id":"moai-eomg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
