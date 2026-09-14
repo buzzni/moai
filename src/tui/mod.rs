@@ -422,12 +422,16 @@ impl App {
         elsewhere: Vec<String>,
         watched: Vec<(std::path::PathBuf, Stamp)>,
     ) -> App {
-        self.unreadable = origin
+        let unreadable: Vec<Option<String>> = origin
             .unreadable(self.unreadable.iter().map(Option::as_deref))
             .into_iter()
             .map(|id| id.map(str::to_string))
             .collect();
-        self.warnings = warnings_of(&self.issues, &self.unreadable, &self.cfg, &self.now);
+        // `build` 가 이미 한 번 셌다. 못 읽는 줄의 자가 안 바뀌었으면 같은 훑기를 다시 하지 않는다.
+        if unreadable != self.unreadable {
+            self.unreadable = unreadable;
+            self.warnings = warnings_of(&self.issues, &self.unreadable, &self.cfg, &self.now);
+        }
         self.origin = origin;
         self.elsewhere = elsewhere;
         self.watched = watched;
