@@ -821,7 +821,13 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, origin: &Orig
             out.push(format!("    {}", paint(style::ID, id)));
             continue;
         };
-        let age = crate::model::days_since(&i.status_since, now)
+        // **판정한 나이를 댄다**(`Warning::ages`, moai-7azq). 여기서 새로 재면 `blocked_stale`
+        // 처럼 칸 나이로 안 거는 경고에서 판정과 표시가 갈라진다. 안 실린 경고만 칸 나이다.
+        let age = w
+            .ages
+            .get(id)
+            .copied()
+            .or_else(|| crate::model::days_since(&i.status_since, now))
             .map(|d| format!("{d}일"))
             .unwrap_or_default();
         out.push(format!(
