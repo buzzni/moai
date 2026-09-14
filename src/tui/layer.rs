@@ -474,6 +474,7 @@ impl App {
         self.index = Index::of(&[]);
         self.states = Default::default();
         self.keep = Vec::new();
+        self.shown = Vec::new();
         self.unreadable = Vec::new();
         self.origin = Default::default();
         self.elsewhere = Vec::new();
