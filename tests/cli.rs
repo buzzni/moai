@@ -995,6 +995,58 @@ fn edit_says_so_when_nothing_was_asked_for() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("무엇을 고칠지"));
 }
 
+/// **`-e none` 이 못 끊는 소속은 끊기지 않았다고 말한다** (moai-w5gz). id 부모에서
+/// 오는 소속 — 이슈 밑 자식(부모의 에픽을 물려받는다)과 에픽 밑 자식(moai-9t3l) — 은
+/// 필드가 아니라 자리에서 오므로, 필드를 비워도 그대로 남는다. 조용하면 사람은 뺀
+/// 줄 안다. 사람에게는 한 줄로, `--json` 에는 더한 키로 댄다.
+#[test]
+fn edit_says_when_epic_none_cannot_cut_a_parents_membership() {
+    let s = init("editkept");
+    let epic = add(s.path(), &["에픽", "--type", "epic"]);
+    let other = add(s.path(), &["딴 에픽", "--type", "epic"]);
+    let parent = add(s.path(), &["부모", "-e", &epic]);
+    let child = add(s.path(), &["자식", "--parent", &parent, "-e", &other]);
+    let review = add(s.path(), &["리뷰", "--parent", &epic]);
+    let top = add(s.path(), &["홀로 선 이슈", "-e", &epic]);
+    let inner = ok(s.path(), &["epic", "add", "에픽 밑 에픽", "--parent", &epic, "-q"]).trim().to_string();
+
+    let says = |id: &str, from: &str| {
+        let out = moai(s.path(), &["edit", id, "-e", "none"]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        let lines: Vec<&str> = err.lines().filter(|l| l.contains(&format!("부모 {from}"))).collect();
+        assert_eq!(lines.len(), 1, "{id}: 부모 {from} 에서 온 소속을 한 줄로 안 댔다 — {err:?}");
+        assert!(lines[0].contains(&epic) && lines[0].contains("-e <"), "{id}: 에픽과 옮기는 길이 없다 — {err:?}");
+    };
+    // 이슈 밑 자식 — 제 필드는 비워지고, 소속은 부모의 에픽으로 돌아간다.
+    says(&child, &parent);
+    assert!(!line_of(s.path(), &child).contains("\"epic\""), "필드는 비워져야 한다");
+    assert!(ok(s.path(), &["show", "-e", &epic]).contains(&child));
+    // 에픽 밑 자식 — 비울 필드가 없어 바뀐 것이 없어도 말한다.
+    says(&review, &epic);
+
+    let json = ok(s.path(), &["edit", &review, "-e", "none", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(&format!(r#""inherited_epic":{{"epic":"{epic}","parent":"{epic}"}}"#)), "{json}");
+    let json = ok(s.path(), &["edit", &child, "-e", "none", "--json"]);
+    assert!(json.contains(&format!(r#""inherited_epic":{{"epic":"{epic}","parent":"{parent}"}}"#)), "{json}");
+
+    // 끊긴 것, 끊을 뜻이 없던 것, 소속을 안 받는 줄은 조용하다.
+    for args in [
+        vec!["edit", top.as_str(), "-e", "none"],
+        vec!["edit", review.as_str(), "--tag", "x"],
+        vec!["edit", inner.as_str(), "-e", "none"],
+    ] {
+        let out = moai(s.path(), &args);
+        assert!(out.status.success());
+        assert!(out.stderr.is_empty(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let mut j = args.clone();
+        j.push("--json");
+        let json = ok(s.path(), &j);
+        assert!(!json.contains("inherited_epic"), "{args:?}: {json}");
+    }
+}
+
 #[test]
 fn rm_removes_and_names_what_it_broke() {
     let s = init("rm");

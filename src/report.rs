@@ -668,6 +668,22 @@ pub fn groups(all: &[Issue]) -> BTreeMap<&str, &str> {
     out
 }
 
+/// 제 `epic` 필드 없이 id 부모에게서 오는 소속 — `(에픽, 부모 id)`. 제 `epic` 을
+/// 적었거나 소속이 없으면 `None` 이다.
+///
+/// `edit -e none` 이 필드를 비워도 이 소속은 남는다(moai-w5gz) — id 는 옮기지 못하니
+/// 부모 밑에 선 줄의 소속은 필드가 아니라 자리에서 온다. 조용하면 사람은 뺀 줄 안다.
+/// 답은 [`groups`] 에서 읽는다 — 소속을 따로 재면 둘은 언젠가 어긋난다. 같은 id 가
+/// 둘이면 `groups` 처럼 뒷줄이 선다.
+pub fn epic_from_parent<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, &'a str)> {
+    let line = all.iter().rev().find(|i| i.id == id)?;
+    if line.epic.is_some() {
+        return None;
+    }
+    let epic = *groups(all).get(id)?;
+    Some((epic, crate::id::parent_of(&line.id)?))
+}
+
 /// **뿌리로 올라간 생각** — 제 부모 밑에 접히지 않는 idea 의 id.
 ///
 /// 소속·마일스톤·미룸은 이것을 지나 내려오지 않는다. 생각인 부모에서 무조건

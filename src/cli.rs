@@ -582,7 +582,7 @@ pub struct EditArgs {
     #[arg(long, value_name = "태그", value_delimiter = ',')]
     pub untag: Vec<String>,
 
-    /// 에픽을 옮긴다 (`none` 이면 뺀다)
+    /// 에픽을 옮긴다 (`none` 이면 제 필드를 뺀다 — 부모에게서 오는 소속은 남는다)
     #[arg(short, long, value_name = "id|none")]
     pub epic: Option<String>,
 
