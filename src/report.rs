@@ -1569,6 +1569,14 @@ pub struct Warning {
     /// `kind` 를 같이 보지 않고서는 숫자를 읽을 수 없다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oldest: Option<i64>,
+    /// id → **판정에 쓴 나이(일)**. 날짜로 거는 경고(`stale_review`·`blocked_stale`·
+    /// `stale_progress`)만 싣는다.
+    ///
+    /// 보이는 쪽이 나이를 새로 재면 판정과 표시가 갈라진다 — `blocked_stale` 은 막음이 다시
+    /// 선 때([`blocked_since`])로 재는데 목록이 제 칸 나이를 내면, 칸에 30일 선 줄이 "3일
+    /// 넘게 막힘" 밑에 "30일" 로 섰다(moai-7azq). 잰 자리가 싣고 보이는 쪽은 읽기만 한다.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub ages: BTreeMap<String, i64>,
     /// 고칠 것이 아니라 알려 주는 것. **`fatal` 옆에 데이터로 둔다** —
     /// 이 판단이 `view` 에만 있으면 `view` 를 건너뛴 표면(TUI·`--json`)이
     /// 알림을 경고로 세고, 담을수록 화면이 시끄러워진다.
@@ -1596,9 +1604,24 @@ impl Warning {
             ratio: None,
             hint: None,
             oldest: None,
+            ages: BTreeMap::new(),
             notice: false,
             fatal: false,
         }
+    }
+    /// 줄마다 판정에 쓴 나이를 싣는다. **잰 시각을 받는다** — 판정과 같은 시각으로 재야
+    /// 표시가 판정과 안 갈라진다. 담긴 id 만 싣는다.
+    ///
+    /// **같은 id 의 줄이 둘이면 파일에서 뒤의 줄이 이긴다** — 보이는 쪽의 id 지도
+    /// (`view::status` 의 `by_id`)가 뒷줄의 칸·제목을 내므로, 앞줄 나이를 실으면 한 줄에
+    /// 두 줄의 값이 섞인다. 겹친 id 자체는 `duplicate_id` 가 따로 말한다.
+    fn ages<'x>(mut self, of: impl Fn(&'x Issue) -> &'x str, rows: &[&'x Issue], now: &str) -> Warning {
+        for i in rows {
+            if let Some(d) = days_since(of(i), now) {
+                self.ages.insert(i.id.clone(), d);
+            }
+        }
+        self
     }
     fn hint(mut self, h: &str) -> Warning {
         self.hint = Some(h.to_string());
@@ -1808,6 +1831,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
         warnings.push(
             Warning::new("stale_review", ids_of(&rotting))
                 .days(REVIEW_STALE_DAYS)
+                .ages(|i| i.status_since.as_str(), &rotting, now)
                 .hint("moai show -s review --stale 3"),
         );
     }
@@ -1829,7 +1853,11 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
         })
         .collect();
     if !stuck.is_empty() {
-        warnings.push(Warning::new("blocked_stale", ids_of(&stuck)).days(BLOCKED_STALE_DAYS));
+        warnings.push(
+            Warning::new("blocked_stale", ids_of(&stuck))
+                .days(BLOCKED_STALE_DAYS)
+                .ages(|i| blocked_since(i, &by_id, &states, &waits, &group_since), &stuck, now),
+        );
     }
 
     // 2-3. 미뤄 둔 것에 막힌 것. **날짜를 안 기다린다** — 계획이 스스로
@@ -1865,7 +1893,11 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
         })
         .collect();
     if !forgotten.is_empty() {
-        warnings.push(Warning::new("stale_progress", ids_of(&forgotten)).days(WIP_STALE_DAYS));
+        warnings.push(
+            Warning::new("stale_progress", ids_of(&forgotten))
+                .days(WIP_STALE_DAYS)
+                .ages(|i| i.status_since.as_str(), &forgotten, now),
+        );
     }
 
     // 5. 계획만 세우고 안 채운 것 / 채우고 안 접은 것.
@@ -2387,6 +2419,46 @@ mod tests {
         let mut moved = make("argos-0006", Kind::Issue, "in_progress");
         moved.status_since = today.into();
         assert!(stale(&[make("argos-0005", Kind::Issue, "todo"), moved, two]), "오늘 움직인 막음 하나가 열흘 막힘을 가린다");
+    }
+
+    /// **경고가 판정한 나이를 싣는다**(moai-7azq). 목록이 줄마다 제 칸 나이를 새로 재면, 칸에
+    /// 30일 선 줄이 막음이 5일 전 다시 선 것으로 `blocked_stale` 에 걸려도 "30일" 로 선다.
+    #[test]
+    fn a_warning_carries_the_age_it_was_judged_by() {
+        let now = "2026-10-01T00:00:00Z";
+        // 막는 줄은 5일 전 done 에서 되돌아 나왔다. 막힌 줄은 `make` 이 09-01 에 만들어 칸에 30일.
+        let mut blocker = make("argos-0001", Kind::Issue, "todo");
+        blocker.status_since = "2026-09-26T00:00:00Z".into();
+        let mut stuck = make("argos-0002", Kind::Issue, "todo");
+        stuck.blocked_by = vec!["argos-0001".into()];
+        let st = status(&[blocker, stuck], &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "blocked_stale").expect("막힘 경고가 없다");
+        assert_eq!(w.ages.get("argos-0002"), Some(&5), "칸 나이를 댔다 — {w:?}");
+        assert_eq!(w.ages.len(), w.ids.len());
+
+        // 칸 나이로 거는 경고는 칸 나이를 싣는다.
+        let mut picked = make("argos-0003", Kind::Issue, "in_progress");
+        picked.status_since = "2026-09-11T00:00:00Z".into();
+        let st = status(&[picked], &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "stale_progress").expect("잊은 것 경고가 없다");
+        assert_eq!(w.ages.get("argos-0003"), Some(&20));
+
+        // 같은 id 의 줄이 둘 다 걸리면 뒷줄의 나이다 — 보이는 쪽이 뒷줄의 칸·제목을 낸다.
+        let mut front = make("argos-0005", Kind::Issue, "review");
+        front.status_since = "2026-09-21T00:00:00Z".into(); // 10일
+        let mut back = make("argos-0005", Kind::Issue, "review");
+        back.status_since = "2026-09-27T00:00:00Z".into(); // 4일
+        let st = status(&[front, back], &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "stale_review").expect("썩는 review 경고가 없다");
+        assert_eq!(w.ages.get("argos-0005"), Some(&4), "앞줄 나이를 뒷줄 옆에 댔다");
+
+        // 날짜로 안 거는 경고는 안 싣는다 — JSON 에서 키가 사라진다.
+        let mut blocked = make("argos-0004", Kind::Issue, "todo");
+        blocked.blocked_by = vec!["argos-9999".into()];
+        let st = status(&[blocked], &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "dangling_blocked_by").expect("끊긴 막음 경고가 없다");
+        assert!(w.ages.is_empty());
+        assert!(!serde_json::to_string(w).unwrap().contains("\"ages\""));
     }
 
     /// 막는 쪽이 사라지면 `ready` 는 조용히 넘어가지만 `status` 는 드러낸다.
