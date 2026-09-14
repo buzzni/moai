@@ -140,13 +140,16 @@ pub fn parse(src: &str) -> Result<Vec<Draft>, String> {
 /// - 우선순위는 **적힌 것만** 낸다. 기본값을 채워 쓰면 템플릿이 설정의 기본값을
 ///   박제한다
 /// - 멤버는 받은 차례 그대로 적는다 — 차례를 정하는 것은 부르는 쪽이다
+/// - 제목은 [`crate::text::one_line`] 을 지난다. 형식은 한 줄에 하나라 손으로 고친
+///   파일의 줄바꿈이 든 제목은 다음 줄을 딴 이슈로 만들고, 제어문자는 이 글을
+///   그대로 찍는 터미널을 다시 칠한다
 pub fn render(epic: &Issue, members: &[&Issue]) -> String {
     let line = |mark: &str, i: &Issue| {
         let mut s = format!("{mark} ");
         if let Some(p) = i.priority {
             s.push_str(&format!("[p{p}] "));
         }
-        s.push_str(&i.title);
+        s.push_str(&crate::text::one_line(&i.title));
         for t in &i.tags {
             s.push_str(&format!(" #{t}"));
         }
@@ -184,6 +187,16 @@ mod tests {
         assert_eq!(got[0], Draft { kind: Kind::Epic, title: "릴리스".into(), priority: Some(1), tags: vec!["release".into()], epic: None });
         assert_eq!(got[1], Draft { kind: Kind::Issue, title: a.title.clone(), priority: Some(0), tags: vec!["bug".into(), "parser".into()], epic: Some(0) });
         assert_eq!(got[2], Draft { kind: Kind::Issue, title: b.title.clone(), priority: None, tags: vec![], epic: Some(0) });
+    }
+
+    /// 손으로 고친 파일의 제목에 줄바꿈이나 ESC 가 들어도 한 줄에 하나로 선다.
+    #[test]
+    fn a_title_that_spans_lines_stays_one_line() {
+        let epic = issue("가", Kind::Epic, None, &[]);
+        let bad = issue("앞\n뒤\u{1b}[2J", Kind::Issue, None, &[]);
+        let md = render(&epic, &[&bad]);
+        assert_eq!(md, "# 가\n- 앞  뒤[2J\n");
+        assert_eq!(one(&md).len(), 2, "줄바꿈이 이슈를 하나 더 만들었다");
     }
 
     /// 멤버가 없는 에픽도 도로 들어가는 계획이다 — 에픽 줄 하나.
