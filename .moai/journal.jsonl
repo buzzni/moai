@@ -1618,3 +1618,5 @@
 {"ts":"2026-09-14T09:49:08Z","id":"moai-iaa4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"4716cf2 — 닫기 훅이 집은 줄마다 guide::handoff 한 줄을 낸다. 리뷰 moai-iaa4.sct 지적 없음"}
 {"ts":"2026-09-14T09:49:49Z","id":"moai-oohk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"CLAUDE.md 에 워크트리 규약을 적고 main 에 병합"}
 {"ts":"2026-09-14T09:50:21Z","id":"moai-0yrv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"닫기 훅도 같다 — 2026-09-14 moai-oohk 를 닫은 세션의 Stop 훅이 옆 워크트리(.claude/worktrees/moai-xib6)에서 집은 moai-xib6 를 이 세션 것으로 보고 옮기라/미루라/note 하라 요구했다. 남의 워크트리 일에 손대라는 요구라 따르지 않았다."}
+{"ts":"2026-09-14T10:05:04Z","id":"moai-yvxs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"blocked_stale·묶음 Stand::since 가 planned() 로 재면서, defer 한 뒤 곧바로 --undo 하면 '오래 막힘' 시계가 새로 선다 — planned_at 을 만들 때 status_since 를 안 올린 까닭(미루기가 방치 경고를 지우는 손잡이)과 부딪히는지 정한다"}
+{"ts":"2026-09-14T10:10:44Z","id":"moai-p415","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
