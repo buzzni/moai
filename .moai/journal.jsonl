@@ -2524,3 +2524,7 @@
 {"ts":"2026-09-14T17:46:52Z","id":"moai-yio7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-14T17:46:53Z","id":"moai-00le","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-14T17:46:53Z","id":"moai-fmmg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-14T17:53:11Z","id":"moai-g7p8.lq0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — SPC c 열 토글·좁은 창 걷기 (g7p8)"}
+{"ts":"2026-09-14T17:53:11Z","id":"moai-g7p8.lq0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T17:53:11Z","id":"moai-g7p8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-14T17:53:11Z","id":"moai-g7p8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 워크트리 worktree-moai-g7p8 에 /code-review high --fix. 결과 반영 → 리뷰 moai-g7p8.lq0 에 원문·판단 → main 머지 → done → moai-2bzp(보기 설정 저장) 집기."}
