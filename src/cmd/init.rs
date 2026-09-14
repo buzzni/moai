@@ -48,6 +48,30 @@ const GITIGNORE: &str = "\
 .moai/*.tmp.*
 ";
 
+/// **새로 심는 접두어의 최대 길이**(moai-f7xs). id 는 `<접두어>-<4자>` 이고 사람과
+/// 에이전트가 명령마다 친다 — 접두어가 길면 그만큼 매번 손이 늘고, 목록·트리·탐색기의 id
+/// 열이 넓어져 제목 몫이 준다. 8자면 id 13자·자식 id 17자이고, `backend`·`frontend`
+/// 같은 흔한 한 낱말이 그대로 들어간다.
+///
+/// **검사는 새로 심을 때만 한다.** `Config::parse` 에 두면 이미 긴 접두어로 심긴 저장소가
+/// 통째로 안 열린다(읽기는 관대하게) — 접두어는 나중에 못 바꾸는 값이라 알려 봐야 고칠
+/// 길도 없다.
+pub const PREFIX_MAX: usize = 8;
+
+/// 긴 접두어의 짧은 후보. [`PREFIX_MAX`] 이하면 그대로, 넘으면 하이픈 낱말이 둘 이상일 때
+/// 머리글자(`my-company-backend` → `mcb`), 낱말이 하나면 앞에서 [`PREFIX_MAX`] 자.
+fn shorten(prefix: &str) -> String {
+    if prefix.chars().count() <= PREFIX_MAX {
+        return prefix.to_string();
+    }
+    let words: Vec<&str> = prefix.split('-').filter(|w| !w.is_empty()).collect();
+    if words.len() >= 2 {
+        words.iter().filter_map(|w| w.chars().next()).take(PREFIX_MAX).collect()
+    } else {
+        prefix.chars().take(PREFIX_MAX).collect()
+    }
+}
+
 /// 디렉터리 이름에서 접두어를 만든다. 소문자·숫자·`-` 만 남긴다.
 fn prefix_from(dir: &Path) -> Option<String> {
     let name = dir.file_name()?.to_str()?.to_ascii_lowercase();
@@ -97,6 +121,8 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // 명령을 하나 더 만드는 대신 `init` 이 그 일을 맡는다 — 이슈와 저널은
     // 손대지 않으므로 다시 불러도 잃을 것이 없다.
     let again = dir.exists();
+    // 디렉터리 이름이 길어 줄였으면 그 원래 모양 — 무엇에서 줄였는지 말하려고 든다.
+    let mut shortened: Option<String> = None;
     let prefix = match (prefix, again) {
         // 접두어는 나중에 못 바꾼다. 이미 발급된 id 가 전부 그것을 달고 있고,
         // 바꾸면 그 줄들이 제 접두어를 잃는다.
@@ -113,10 +139,33 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             }
             cur
         }
+        // **사람이 준 긴 접두어는 거절한다** — 쓰기는 엄하게. `init` 은 한 번 부르는 명령이라
+        // 다시 부르는 비용이 작고, 거절문이 짧은 후보를 댄다. 이미 심긴 저장소의 긴 접두어는
+        // 위 갈래가 그대로 받는다.
+        (Some(p), false) if p.chars().count() > PREFIX_MAX => {
+            return Err(Fail::coded(
+                format!(
+                    "접두어는 {PREFIX_MAX}자까지다 — `{p}` 는 {}자다. id 를 칠 때마다 붙는다\n      \
+                     짧게: `moai init {}`",
+                    p.chars().count(),
+                    shorten(p)
+                ),
+                super::code::BAD_INPUT,
+            ));
+        }
         (Some(p), false) => p.to_string(),
         (None, true) => crate::config::Config::load(&root).map_err(Fail::new)?.prefix,
-        (None, false) => prefix_from(&root)
-            .ok_or_else(|| Fail::new("디렉터리 이름에서 접두어를 만들 수 없다. `moai init <접두어>`"))?,
+        // **디렉터리 이름에서 만든 것은 줄여서 쓴다** — 사람이 고른 이름이 아니라 거절할
+        // 까닭이 없다. 줄였다는 것은 출력이 말한다.
+        (None, false) => {
+            let full = prefix_from(&root)
+                .ok_or_else(|| Fail::new("디렉터리 이름에서 접두어를 만들 수 없다. `moai init <접두어>`"))?;
+            let short = shorten(&full);
+            if short != full {
+                shortened = Some(full);
+            }
+            short
+        }
     };
 
     let config = format!(
@@ -164,14 +213,19 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             .contains("AGENTS.md");
 
     if ctx.json {
-        return super::json_line(&serde_json::json!({
+        let mut v = serde_json::json!({
             "root": root.display().to_string(),
             "prefix": prefix,
             "created": !again,
             "gitattributes": attrs,
             "gitignore": ignore,
             "agents": agents,
-        }));
+        });
+        // 줄였을 때만 싣는다 — 늘 `null` 을 두면 줄이지 않은 대부분의 줄이 헛 키를 든다.
+        if let Some(full) = &shortened {
+            v["shortened_from"] = serde_json::json!(full);
+        }
+        return super::json_line(&v);
     }
 
     let mut out = if again {
@@ -182,6 +236,16 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             format!("  칸: {}", DEFAULT_STATUSES.replace(',', " → ")),
         ]
     };
+    // 접두어는 나중에 못 바꾸므로 **지금** 말한다 — 이슈를 하나라도 만들면 되돌릴 길이 없다.
+    if let Some(full) = &shortened {
+        out.insert(
+            1,
+            format!(
+                "  디렉터리 이름 `{full}` 이 {PREFIX_MAX}자를 넘어 줄였다 — 다른 것을 원하면 이슈를 만들기 전에 \
+                 .moai/ 를 지우고 `moai init <접두어>`"
+            ),
+        );
+    }
     if attrs {
         out.push("  .gitattributes 에 병합 규칙을 넣었다".into());
     }
@@ -255,6 +319,26 @@ mod tests {
             ("/w/___", None),
         ] {
             assert_eq!(prefix_from(Path::new(dir)).as_deref(), want, "{dir}");
+        }
+    }
+
+    /// **긴 접두어는 머리글자로, 낱말이 하나면 앞 8자로 줄인다**(moai-f7xs). 8자 이하는 그대로.
+    #[test]
+    fn a_long_prefix_is_shortened_to_initials_or_cut() {
+        for (full, want) in [
+            ("argos", "argos"),
+            ("backend8", "backend8"),
+            ("moa-issue", "mi"),
+            ("my-company-backend", "mcb"),
+            ("my-2nd-project-x", "m2px"),
+            ("supercalifragilistic", "supercal"),
+            ("a-b-c-d-e-f-g-h-i-j", "abcdefgh"),
+        ] {
+            let got = shorten(full);
+            assert_eq!(got, want, "{full}");
+            assert!(got.chars().count() <= PREFIX_MAX, "{full} → {got}");
+            // 줄인 것도 설정이 받는 접두어다.
+            crate::config::Config::parse(&format!("prefix = \"{got}\"\n")).unwrap_or_else(|e| panic!("{full} → {got}: {e}"));
         }
     }
 }

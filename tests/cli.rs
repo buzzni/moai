@@ -170,6 +170,44 @@ fn init_refuses_to_change_the_prefix() {
     assert!(moai(s.path(), &["init", "argos"]).status.success());
 }
 
+/// **새로 심는 접두어는 8자까지다**(moai-f7xs). 사람이 준 긴 것은 거절하고 짧은 후보를 대며
+/// 아무것도 안 만든다. 디렉터리 이름에서 만든 긴 것은 머리글자로 줄이고 그렇다고 말한다.
+/// 이미 긴 접두어로 심긴 저장소는 막지 않는다 — 읽기는 관대하게, 접두어는 못 바꾸는 값이다.
+#[test]
+fn init_keeps_a_new_prefix_short() {
+    let s = Scratch::new("shortprefix");
+    let out = moai(s.path(), &["init", "my-company-backend"]);
+    assert!(!out.status.success(), "긴 접두어를 받았다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("8자까지") && err.contains("moai init mcb"), "{err}");
+    assert!(!s.path().join(".moai").exists(), "거절하고도 .moai 를 만들었다");
+
+    // 디렉터리 이름에서 만든 긴 것은 줄인다.
+    let long = s.path().join("my-company-backend");
+    std::fs::create_dir_all(&long).unwrap();
+    let out = ok(&long, &["init"]);
+    assert!(out.contains("접두어는 `mcb`") && out.contains("줄였다"), "{out}");
+    assert!(add(&long, &["첫 이슈"]).starts_with("mcb-"), "줄인 접두어로 id 를 안 냈다");
+
+    // 기계 출력은 줄였을 때만 원래 이름을 싣는다.
+    let other = s.path().join("another-long-name-here");
+    std::fs::create_dir_all(&other).unwrap();
+    let json = ok(&other, &["init", "--json"]);
+    assert!(json.contains("\"prefix\":\"alnh\"") && json.contains("\"shortened_from\":\"another-long-name-here\""), "{json}");
+    let short = s.path().join("argos");
+    std::fs::create_dir_all(&short).unwrap();
+    assert!(!ok(&short, &["init", "--json"]).contains("shortened_from"), "안 줄였는데 원래 이름을 실었다");
+
+    // 이미 긴 접두어로 심긴 저장소는 다시 불러도, 이슈를 만들어도 된다.
+    let old = s.path().join("old");
+    std::fs::create_dir_all(old.join(".moai")).unwrap();
+    std::fs::write(old.join(".moai/config.toml"), "prefix = \"my-company-backend\"\n").unwrap();
+    std::fs::write(old.join(".moai/issues.jsonl"), "").unwrap();
+    std::fs::write(old.join(".moai/journal.jsonl"), "").unwrap();
+    assert!(ok(&old, &["init"]).contains("이미 심겨 있다"));
+    assert!(add(&old, &["옛 저장소의 이슈"]).starts_with("my-company-backend-"), "옛 긴 접두어를 막았다");
+}
+
 /// 남의 .gitignore 를 지우지 않고 빠진 줄만 덧붙인다.
 #[test]
 fn init_appends_to_an_existing_gitignore() {
