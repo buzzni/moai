@@ -1336,10 +1336,11 @@ impl App {
             keys::Prompt::Cancel => {
                 // 치는 대로 걸었던 것을 **열기 전으로** 되돌린다 — Esc 는 "안 한 것으로" 다.
                 if let (Mode::Grep(..), Some((text, g, cursor))) = (&self.mode, self.grep_was.take()) {
+                    let held = self.current().map(|r| self.anchor_of(&r));
                     self.filter_text = text;
                     self.grep_in = g;
                     self.reapply();
-                    self.cursor = cursor.min(self.rows().len().saturating_sub(1));
+                    self.settle(held, cursor);
                 }
                 self.mode = Mode::Browse;
             }
@@ -1358,8 +1359,19 @@ impl App {
     /// 커서는 줄 수 안으로만 당긴다 — Enter 로 걸 때와 같은 자다.
     fn live(&mut self) {
         let mode @ Mode::Grep(..) = self.mode.clone() else { return };
+        let held = self.current().map(|r| self.anchor_of(&r));
         if self.apply(&mode).is_ok() {
-            self.cursor = self.cursor.min(self.rows().len().saturating_sub(1));
+            self.settle(held, self.cursor);
+        }
+    }
+
+    /// 거름망이 바뀐 뒤 커서를 `at` 을 줄 수 안으로 자른 자리에 세운다. **그 자리의 줄이
+    /// 바뀌었으면 상세를 첫 줄로 되돌린다** — 치는 대로 거르면 같은 번호에 다른 이슈가
+    /// 서는데, 굴린 자리가 남으면 그 이슈를 첫 줄부터 못 본다(`move_to` 와 같은 까닭).
+    fn settle(&mut self, held: Option<Anchor>, at: usize) {
+        self.cursor = at.min(self.rows().len().saturating_sub(1));
+        if self.current().map(|r| self.anchor_of(&r)) != held {
+            self.detail.rewind();
         }
     }
 
