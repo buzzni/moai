@@ -1523,12 +1523,13 @@ fn menu_panel(f: &mut Frame, grid: &menu::Grid, at: Rect) {
     f.render_widget(Paragraph::new(lines).block(block), at);
 }
 
-/// SPC 메뉴의 색(사용자 결정, moai-r2dt). 키·`:`·실행 낱말·`+묶음` 이 가까운 붉은 주황 넷으로
-/// 갈린다 — 뜻은 여전히 글자(`+`)가 진다.
-const MENU_KEY: Color = Color::Rgb(0xf1, 0x0b, 0x00);
-const MENU_SEP: Color = Color::Rgb(0xf0, 0x8b, 0x00);
-const MENU_RUN: Color = Color::Rgb(0xf1, 0x2b, 0x00);
-const MENU_GROUP: Color = Color::Rgb(0xf1, 0x3b, 0x00);
+/// SPC 메뉴의 색(사용자 결정, moai-r2dt·moai-1uod). 터미널 16색 번호로 준 것이다 — sixteen-colour-table
+/// 의 `f10b00` 은 글자색 10·바탕색 0 이지 hex 가 아니다. 키 10(밝은 초록)·`:` 8(밝은 검정)·실행
+/// 12(밝은 파랑)·`+묶음` 13(밝은 자홍). 바탕은 깔지 않는다. 뜻은 여전히 글자(`+`)가 진다.
+const MENU_KEY: Color = Color::LightGreen;
+const MENU_SEP: Color = Color::DarkGray;
+const MENU_RUN: Color = Color::LightBlue;
+const MENU_GROUP: Color = Color::LightMagenta;
 
 /// 메뉴 칸 낱말의 색 — 묶음이면 [`MENU_GROUP`], 실행이면 [`MENU_RUN`].
 fn menu_word(group: bool) -> Style {
