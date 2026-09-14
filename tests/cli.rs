@@ -2359,6 +2359,51 @@ fn the_body_is_drawn_but_the_raw_text_stays_reachable() {
     );
 }
 
+/// **되뽑은 계획은 도로 들어간다.** `show <에픽> --as-plan` 의 출력을 그대로
+/// `add --from` 에 넣으면 같은 모양의 에픽이 선다 — 이 짝이 틀로 쓰는 계약이다.
+#[test]
+fn an_epic_comes_back_out_as_a_plan_that_goes_back_in() {
+    let s = init("asplan");
+    let made = from_stdin(
+        s.path(),
+        &["add", "--from", "-"],
+        "# 릴리스 #release\n- 바이너리를 올린다\n- [p1] 태그를 단다 #git\n",
+    );
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let epic = field(&ok(s.path(), &["show", "epic", "--json"]), "id");
+
+    let plan = ok(s.path(), &["show", &epic, "--as-plan"]);
+    assert_eq!(plan, "# 릴리스 #release\n- [p1] 태그를 단다 #git\n- 바이너리를 올린다\n");
+
+    let again = init("asplanagain");
+    let back = from_stdin(again.path(), &["add", "--from", "-"], &plan);
+    assert!(back.status.success(), "되뽑은 계획이 도로 안 들어간다\n{}", String::from_utf8_lossy(&back.stderr));
+    let epic2 = field(&ok(again.path(), &["show", "epic", "--json"]), "id");
+    assert_eq!(ok(again.path(), &["show", &epic2, "--as-plan"]), plan);
+
+    let json = ok(s.path(), &["show", &epic, "--as-plan", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(r##""plan":"# 릴리스 #release\n"##), "{json}");
+    assert!(json.contains(r#""lossy":[]"#), "{json}");
+
+    // 도로 못 들어가는 제목은 조용히 틀리지 않고 이름을 댄다. 실패로는 안 끝난다.
+    let wip = add(s.path(), &["[WIP] 반쯤", "-e", &epic]);
+    let out = moai(s.path(), &["show", &epic, "--as-plan"]);
+    assert!(out.status.success(), "경고로 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&wip), "{}", String::from_utf8_lossy(&out.stderr));
+    let json = ok(s.path(), &["show", &epic, "--as-plan", "--json"]);
+    assert!(json.contains(&format!(r#""lossy":["{wip}"]"#)), "{json}");
+
+    // 에픽이 아닌 것과 목록 자리는 거절한다 — 조용히 엉뚱한 계획을 내지 않는다.
+    let lone = add(s.path(), &["그냥 이슈"]);
+    for args in [vec!["show", lone.as_str(), "--as-plan"], vec!["show", "--as-plan"], vec!["show", &epic, "--as-plan", "--raw"]] {
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{args:?} 를 말없이 먹었다");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("--as-plan"), "무엇이 문제인지 말하지 않았다 — {args:?}\n{err}");
+    }
+}
+
 /// **하나를 집은 자리에서 버려지는 필터가 없다.** 걸러지지 않은 그 이슈를
 /// 그대로 내면 부르는 쪽은 걸러진 결과라고 믿는다 — `--milestone` 이 그렇게
 /// 목록에서만 뜻이 있는데 거절 목록에 빠져 있었다.
