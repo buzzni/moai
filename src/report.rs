@@ -1595,6 +1595,23 @@ const NO_EPIC_RATIO: f64 = 0.15;
 const NO_EPIC_MIN: usize = 5;
 /// 흐름을 재는 창.
 const FLOW_DAYS: i64 = 7;
+/// 지금보다 이만큼(초) 넘게 뒤인 시각은 "먼 미래" 로 본다(moai-ugjp). 하루 — 겹쳐 보는 다른
+/// 기계의 몇 초~몇 분 앞선 시계나 시간대 실수는 안 걸리고, 손으로 고친 2099 는 걸린다.
+const FUTURE_SLACK_SECS: i64 = 86_400;
+
+/// 줄이 든 시각 다섯 가운데 하나라도 지금보다 [`FUTURE_SLACK_SECS`] 넘게 뒤인가.
+///
+/// 도구는 제 시계로만 적으므로 그런 시각은 손으로 고친 줄이나 크게 틀린 시계에서 온다.
+/// 나이는 0 아래로 안 내려가서(`days_since`, moai-fix6) 목록에서는 "오늘" 로 숨는다.
+/// 못 읽는 시각은 여기서 따지지 않는다 — 읽기는 관대하다.
+fn far_ahead(i: &Issue, now: &str) -> bool {
+    let Some(now) = crate::model::parse_rfc3339(now) else { return false };
+    [Some(i.created_at.as_str()), Some(i.updated_at.as_str()), Some(i.status_since.as_str()), i.deferred_at.as_deref(), i.planned_at.as_deref()]
+        .into_iter()
+        .flatten()
+        .filter_map(crate::model::parse_rfc3339)
+        .any(|t| t - now > FUTURE_SLACK_SECS)
+}
 /// 담아 둔 생각이 이만큼 쌓이면 알린다.
 ///
 /// **담는 비용을 0 으로 만들면 쌓인다.** 쌓이는 것 자체는 문제가 아니고,
@@ -2045,6 +2062,12 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     if !dangling_blockers.is_empty() {
         warnings.push(Warning::new("dangling_blocked_by", ids_of(&dangling_blockers)));
     }
+    // 먼 미래 시각(moai-ugjp). **경고지 깨진 데이터가 아니다** — 줄은 읽히고 고칠 것일 뿐이라
+    // 종료 코드를 안 바꾼다(사람이 정했다). 종류를 안 가린다: 시각은 모든 줄이 든다.
+    let ahead: Vec<&Issue> = issues.iter().filter(|i| far_ahead(i, now)).collect();
+    if !ahead.is_empty() {
+        warnings.push(Warning::new("future_timestamp", ids_of(&ahead)));
+    }
     // 모르는 필드는 **버리지 않고 들고 있다.** 들고 있다는 사실만 비춘다 —
     // 2단계 바이너리가 쓴 파일을 1단계가 만졌다는 뜻일 수 있다.
     let carrying: Vec<&Issue> = issues.iter().filter(|i| !i.rest.is_empty()).collect();
@@ -2145,8 +2168,10 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 빼면 오늘 셋을 미루는 것만으로 `생성 5 · 쌓이는 중 +5` 가
     // `생성 2 · +2` 가 되어, 미루기가 쌓임 경고를 지우는 손잡이가 된다.
     // 나이는 0 아래로 안 내려간다(`days_since`) — 조금 미래로 찍힌 줄도 오늘 것으로 센다.
+    // **먼 미래 시각을 든 줄은 통째로 뺀다**(moai-ugjp) — 2099 는 "최근" 이 아니고, 셈에 넣으면
+    // 위 `future_timestamp` 가 드러낸 오타가 흐름 숫자로도 새어 나온다.
     let within = |at: &str| days_since(at, now).is_some_and(|d| d < FLOW_DAYS);
-    let happened: Vec<&Issue> = issues.iter().filter(|i| is_work(i)).collect();
+    let happened: Vec<&Issue> = issues.iter().filter(|i| is_work(i) && !far_ahead(i, now)).collect();
     let created = happened.iter().filter(|i| within(&i.created_at)).count();
     let closed =
         happened.iter().filter(|i| i.status.is_done() && within(&i.status_since)).count();
@@ -3892,6 +3917,41 @@ mod tests {
     /// **경고는 id 를 한 번씩만 댄다** (moai-ddtg). 같은 id 의 줄이 둘이면 줄마다 id
     /// 지도를 물어 같은 id 가 두 번 담겼다 — 사람이 고칠 손잡이는 id 하나고, 셈(`N건`)이
     /// 줄 수로 부풀면 `moai show -e none` 같은 힌트가 내는 것과도 어긋난다. 세 줄 중복도
+    /// **먼 미래 시각을 든 줄을 드러낸다**(moai-ugjp). 나이는 0 아래로 안 내려가서(moai-fix6)
+    /// 2099 같은 오타가 목록에서 "오늘" 로 숨고 흐름 셈에도 들었다. 도구는 제 시계로만 적으니
+    /// 그런 시각은 손으로 고친 줄이나 크게 틀린 시계에서 온다. 사람이 정한 대로 — 경고지
+    /// 깨진 데이터가 아니고(종료 코드 0), 문턱은 하루, 시각 다섯을 다 보고, 흐름에서 뺀다.
+    #[test]
+    fn a_row_stamped_far_in_the_future_is_named_and_left_out_of_the_flow() {
+        let now = "2026-09-11T00:00:00Z";
+        let at = |id: &str, t: &str| {
+            let mut i = make(id, Kind::Issue, "todo");
+            (i.created_at, i.updated_at, i.status_since) = (now.into(), now.into(), now.into());
+            if !t.is_empty() {
+                i.created_at = t.into();
+            }
+            i
+        };
+        let typo = at("argos-0001", "2099-09-11T00:00:00Z");
+        let skewed = at("argos-0002", "2026-09-11T12:00:00Z"); // 옆 기계 시계가 반나절 빠르다 — 문턱 안
+        let plain = at("argos-0003", "");
+        let mut late_deferral = at("argos-0004", "");
+        late_deferral.deferred_at = Some("2026-09-13T00:00:00Z".into()); // 이틀 뒤 — 시각 다섯을 다 본다
+        let mut late_plan = at("argos-0005", "");
+        late_plan.planned_at = Some("2027-01-01T00:00:00Z".into());
+        let st = status(&[typo, skewed, plain, late_deferral, late_plan], &[], &cfg(), now);
+
+        let w = st.warnings.iter().find(|w| w.kind == "future_timestamp").expect("먼 미래 시각을 안 말한다");
+        assert_eq!(w.ids, ["argos-0001", "argos-0004", "argos-0005"], "{w:?}");
+        assert!(!w.fatal && !w.notice && !st.broken(), "경고로 비영 종료한다 — {w:?}");
+        // 흐름은 먼 미래 시각을 "최근" 으로 세지 않는다 — 걸린 줄은 통째로 빠진다.
+        assert_eq!(st.flow.created, 2, "{:?}", st.flow);
+
+        // 문턱 안이면 말하지 않는다.
+        let ok = status(&[at("argos-0002", "2026-09-11T23:59:00Z")], &[], &cfg(), now);
+        assert!(!ok.warnings.iter().any(|w| w.kind == "future_timestamp"), "{:?}", ok.warnings);
+    }
+
     /// `duplicate_id` 에 그 id 를 두 번 대지 않는다.
     #[test]
     fn a_warning_names_a_duplicated_id_once() {
