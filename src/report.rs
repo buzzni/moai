@@ -163,6 +163,42 @@ pub fn deferred_roots_in<'a>(
     roots
 }
 
+/// 계획에서 빠진 줄 id → 그 줄을 **계획에 도로 넣으려면 풀어야 할 미룸 전부**, 가까운 것부터.
+///
+/// [`deferred_roots`] 는 가장 가까운 하나를 댄다 — "어디 밑에서 빠졌나" 를 말하는 자리는
+/// 그것이면 된다. 그러나 도로 집는 말을 대는 자리가 그것만 대면, 제 줄도 미뤘고 미룬
+/// 에픽에도 든 줄은 하나를 풀고도 여전히 빠진 채 그제야 다음을 댄다(moai-phzi).
+///
+/// 키는 [`deferred_roots`] 와 같다. **읽은 칸이 done 인 묶음의 미룸은 안 댄다** — 그 묶음은
+/// 계획에서 빠진 것으로 안 세므로([`deferred_roots_in`]) 풀 것이 없다.
+pub fn deferred_sources(all: &[Issue]) -> BTreeMap<&str, Vec<&str>> {
+    if !all.iter().any(is_put_off) {
+        return BTreeMap::new();
+    }
+    let (epic_of, mile_of) = (groups(all), milestones(all));
+    let roots = deferred_roots_in(all, &epic_of, &mile_of);
+    let shelf = Shelf::new(all, &epic_of, &mile_of);
+    roots
+        .iter()
+        .map(|(&id, &nearest)| {
+            // 걸음은 같은 묶음을 두 번 짚는다 — 자식과 부모가 같은 에픽에 들면 둘 다에서.
+            // 거르지 않으면 `moai defer E E --undo` 를 댄다.
+            let mut every: Vec<&str> = Vec::new();
+            for r in shelf.every(id) {
+                if roots.contains_key(r) && !every.contains(&r) {
+                    every.push(r);
+                }
+            }
+            // 짚은 미룸이 전부 done 으로 읽은 묶음이면 비는데, 줄은 여전히 계획 밖이다
+            // (`deferred_roots` 가 그 묶음을 댄다). 비우면 `moai defer  --undo` 를 댄다.
+            if every.is_empty() {
+                every.push(nearest);
+            }
+            (id, every)
+        })
+        .collect()
+}
+
 /// 줄 하나를 계획에서 빼는 미룸을 **가까운 것부터** 짚는 길 — 제 줄, 제가 든
 /// 에픽·마일스톤, 그다음 부모. [`deferred_roots_in`] 은 첫째만 쓰고(그 줄을 뺀 곳),
 /// [`counted`] 는 전부 본다(묶음 제 미룸 말고도 그 멤버를 빼는 까닭이 있나).
@@ -452,6 +488,12 @@ pub struct Stand<'a, 'c> {
     /// 에 선다(moai-0gxf). 미룬 일은 끝난 일이 아니다 — 막음은 이것으로 그 멤버를 댄다
     /// ([`blocker`]).
     pub aside: Vec<&'a str>,
+    /// 셀 멤버 가운데 끝난 것의 몫(0~100). 셀 멤버가 없으면 `None`.
+    ///
+    /// **칸과 같은 자다** — 미룬 멤버를 뺀다. 롤업의 막대(`Roll::percent`)는 "계획 중 얼마나
+    /// 했나" 라 미룬 멤버도 세지만, `ready` 가 끝나가는 에픽을 먼저 세울 때 묻는 것은
+    /// "몇 번 더 집으면 닫히나" 다. 막대로 재면 한 번에 닫히는 에픽이 뒤에 섰다(moai-ha03).
+    pub progress: Option<u8>,
 }
 
 /// 묶음이 막을 때 기다리는 것.
@@ -516,7 +558,9 @@ pub fn group_stands_in<'a, 'c>(
             let column = column_of(&counted, cfg);
             let of = members.get(&(g.kind, g.id.as_str())).map(Vec::as_slice).unwrap_or_default();
             let (waiting, aside) = waiting_in(of, &counted);
-            (g.id.as_str(), Stand { column, since, busy, waiting, aside })
+            let finished = counted.iter().filter(|m| m.status.is_done()).count();
+            let progress = (!counted.is_empty()).then(|| (finished * 100 / counted.len()) as u8);
+            (g.id.as_str(), Stand { column, since, busy, waiting, aside, progress })
         })
         .collect()
 }
@@ -669,6 +713,9 @@ impl Blocker {
 pub fn blocker(column: Option<&str>, out_of_plan: bool, waiting: Waiting) -> Blocker {
     match column {
         None => Blocker::Missing,
+        // 묶음 제 미룸이 미룬 멤버보다 먼저다 — 멤버를 도로 집어도 묶음이 미뤄져 있으면
+        // 안 풀린다. 읽은 칸이 done 인 묶음은 `deferred_roots` 에 안 드므로 여기 안 걸린다.
+        Some(c) if out_of_plan && c != crate::config::DONE => Blocker::Deferred,
         Some(_) if waiting == Waiting::Shelved => Blocker::Deferred,
         Some(crate::config::DONE) => Blocker::Done,
         Some(_) if out_of_plan => Blocker::Deferred,
@@ -770,6 +817,38 @@ pub fn epic_from_parent<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, &'a 
     }
     let epic = *groups(all).get(id)?;
     Some((epic, crate::id::parent_of(&line.id)?))
+}
+
+/// 마일스톤을 넘긴 자리 — 제 에픽이거나 id 부모다.
+#[derive(Debug, PartialEq)]
+pub enum Above<'a> {
+    Epic(&'a str),
+    Parent(&'a str),
+}
+
+/// 제 `milestone` 필드가 아니라 위에서 오는 마일스톤 — `(마일스톤, 넘긴 자리)`.
+/// 제 필드가 답이거나 마일스톤이 없으면 `None` 이다.
+///
+/// `edit --milestone none` 이 필드를 비워도 이 소속은 남는다(moai-0lmn) — [`milestones`]
+/// 는 에픽이 이기고 부모도 이긴다. [`epic_from_parent`] 와 같은 모양이다. 답은
+/// `milestones` 에서 읽고, 넘긴 자리만 같은 차례(에픽 → 접힌 맨 위 줄)로 가린다.
+/// 에픽 줄은 제 필드에만 서므로 언제나 `None` 이다.
+pub fn milestone_from_above<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, Above<'a>)> {
+    let line = all.iter().rev().find(|i| i.id == id)?;
+    if line.kind == Kind::Epic {
+        return None;
+    }
+    let milestone = *milestones(all).get(id)?;
+    if let Some(e) = groups(all).get(id) {
+        return Some((milestone, Above::Epic(e)));
+    }
+    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
+    let top = fold_top(line, &by_id, &rooted_thoughts(&by_id))?;
+    // 접히지 않은 줄은 제 필드가 먼저다 — `climb` 과 같은 차례.
+    if top.id == line.id && line.milestone.is_some() {
+        return None;
+    }
+    Some((milestone, Above::Parent(crate::id::parent_of(&line.id)?)))
 }
 
 /// **뿌리로 올라간 생각** — 제 부모 밑에 접히지 않는 idea 의 id.
@@ -1163,7 +1242,14 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
 pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let group = groups(issues);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    let (roots, states, waits) = blocking(issues, cfg, &group, &by_id);
+    // **막음과 차례가 한 번의 셈을 쓴다.** 끝나가는지를 롤업으로 따로 재면 미룬 멤버를 세는
+    // 자와 안 세는 자가 한 명령 안에 둘이 된다(moai-ha03). 롤업도 같은 걸음을 걸었으므로
+    // 늘어나는 셈은 없다.
+    let mile_of = milestones(issues);
+    let roots = deferred_roots_in(issues, &group, &mile_of);
+    let stands = group_stands_in(issues, cfg, &group, &mile_of, &roots);
+    let progress: BTreeMap<&str, u8> = stands.iter().map(|(id, s)| (*id, s.progress.unwrap_or(0))).collect();
+    let (states, waits) = split_stands(stands);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     let mut out: Vec<&Issue> = issues
         .iter()
@@ -1171,14 +1257,9 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
         .filter(|i| !is_blocked(i, &by_id, &states, &waits) && unblocked_pick(i, issues, cfg, &out_of_plan))
         .collect();
 
-    let progress: BTreeMap<Option<String>, u8> =
-        rollup(issues, cfg).into_iter().map(|r| (r.id, r.percent.unwrap_or(0))).collect();
-
     // 급한 것 → 끝나가는 에픽 → 오래된 것. 끝나가는 것을 먼저 집어야
     // 벌여 놓은 에픽이 줄어든다.
-    let pct = |i: &Issue| {
-        progress.get(&group.get(i.id.as_str()).map(|e| e.to_string())).copied().unwrap_or(0)
-    };
+    let pct = |i: &Issue| group.get(i.id.as_str()).and_then(|e| progress.get(e)).copied().unwrap_or(0);
     out.sort_by(|a, b| {
         let (pa, pb) = (pct(a), pct(b));
         a.priority()
@@ -1271,6 +1352,7 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     let (roots, states, waits) = blocking(issues, cfg, &group, &by_id);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
+    let sources = deferred_sources(issues);
     // 값싼 막음 검사를 먼저 한다. `unblocked_pick` 은 자식을 찾느라 목록을
     // 한 번 걷는다 — 모든 줄에 먼저 부르면 `ready` 가 부를 때마다 제곱이다.
     let mut out: Vec<Held> = issues
@@ -1281,7 +1363,20 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
         })
         .filter(|(i, _, _)| unblocked_pick(i, issues, cfg, &out_of_plan))
         .map(|(i, by, empty)| {
-            let mut undo: Vec<&str> = by.iter().filter_map(|b| roots.get(b).copied()).collect();
+            // **풀어야 할 미룸을 다 댄다**(moai-g2a1). 가까운 하나만 대면 그것을 풀고도 여전히
+            // 막힌 채 그제야 다음을 댄다(moai-phzi). 제가 미뤄진 묶음이 멤버도 다 미뤘으면
+            // 묶음만 풀어서는 이번엔 그 멤버에 막히므로, 뺀 멤버의 미룸까지 댄다.
+            let mut undo: Vec<&str> = by
+                .iter()
+                .flat_map(|b| {
+                    let aside = match waits.get(b) {
+                        Some((Waiting::Shelved, aside)) => aside.as_slice(),
+                        _ => &[],
+                    };
+                    std::iter::once(*b).chain(aside.iter().copied())
+                })
+                .flat_map(|x| sources.get(x).into_iter().flatten().copied())
+                .collect();
             undo.sort_unstable();
             undo.dedup();
             Held { issue: i, by, undo, empty }
@@ -1310,8 +1405,9 @@ fn holding<'a>(
         let waiting = wait.map_or(Waiting::Live, |w| w.0);
         match blocker(Some(column(x, states)), out_of_plan.contains(id), waiting) {
             Blocker::Deferred => {
+                // 묶음을 제가 미뤘으면 그 묶음을 댄다([`blocker`] 와 같은 순서).
                 let named = match wait {
-                    Some((Waiting::Shelved, aside)) => aside.clone(),
+                    Some((Waiting::Shelved, aside)) if !out_of_plan.contains(id) => aside.clone(),
                     _ => vec![id],
                 };
                 for n in named {
@@ -2178,6 +2274,34 @@ mod tests {
         assert_eq!(got, ["argos-000d", "argos-000b", "argos-000c"], "{got:?}");
     }
 
+    /// **끝나가는지는 칸 셈과 같은 자로 잰다**(moai-ha03). 미룬 멤버까지 센 막대로 재면, 한 번만
+    /// 집으면 닫히는 에픽(끝난 1 · 미룬 3 · 남은 1 = 20%)이 두 번 집어야 하는 에픽(끝난 1 · 남은 2
+    /// = 33%)보다 뒤에 선다 — 미룬 멤버는 칸 셈에서 빠지는데 차례만 그것을 셌다.
+    #[test]
+    fn nearly_finished_is_measured_without_deferred_members() {
+        let put_off = |id: &str| {
+            let mut m = member(id, "argos-0002", "todo");
+            m.deferred_at = Some("2026-09-01T00:00:00Z".into());
+            m
+        };
+        let mut issues = vec![
+            make("argos-0001", Kind::Epic, "todo"), // 끝난 1 · 남은 2
+            member("argos-001a", "argos-0001", "done"),
+            member("argos-001b", "argos-0001", "todo"),
+            member("argos-001c", "argos-0001", "todo"),
+            make("argos-0002", Kind::Epic, "todo"), // 끝난 1 · 미룬 3 · 남은 1
+            member("argos-002a", "argos-0002", "done"),
+            put_off("argos-002b"),
+            put_off("argos-002c"),
+            put_off("argos-002d"),
+            member("argos-002e", "argos-0002", "todo"),
+        ];
+        // 한 번에 닫히는 에픽의 남은 일을 가장 늦게 만든다 — 차례가 나이로 갈리면 이 시험이 못 본다.
+        issues[9].created_at = "2026-09-09T00:00:00Z".into();
+        let got = picks(&issues);
+        assert_eq!(got, ["argos-002e", "argos-001b", "argos-001c"], "{got:?}");
+    }
+
     /// 자식은 소속을 조상에게서 물려받는다. 안 그러면 같은 일이
     /// 에픽 밑과 "에픽 없음" 양쪽에 나타난다.
     #[test]
@@ -2810,6 +2934,73 @@ mod tests {
         let states = group_states(&issues, &cfg);
         assert_eq!(column(&issues[0], &states), "in_progress");
         assert_eq!(column(&issues[2], &states), "todo", "일이 묶음의 칸을 입었다");
+    }
+
+    /// **도로 집는 말은 풀어야 할 미룸을 다 댄다**(moai-g2a1). 제 줄도 미뤘고 미룬 에픽에도
+    /// 든 줄에 가까운 하나만 대면, 그것을 풀고도 여전히 빠진 채 그제야 다음을 댄다.
+    #[test]
+    fn every_deferral_that_keeps_a_row_out_is_named() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut both = member("argos-0002", "argos-0001", "todo");
+        both.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let only = member("argos-0003", "argos-0001", "todo");
+        let issues = vec![epic, both, only];
+        let sources = deferred_sources(&issues);
+        assert_eq!(sources["argos-0002"], ["argos-0002", "argos-0001"], "가까운 것부터 다 댄다");
+        assert_eq!(sources["argos-0003"], ["argos-0001"]);
+        assert_eq!(sources["argos-0001"], ["argos-0001"]);
+        assert_eq!(
+            deferred_roots(&issues).keys().collect::<Vec<_>>(),
+            sources.keys().collect::<Vec<_>>(),
+            "키가 어긋났다"
+        );
+        assert_eq!(deferred_roots(&issues)["argos-0002"], "argos-0002", "어디 밑인지는 그대로 가까운 하나다");
+
+        // 자식과 부모가 같은 에픽에 들면 걸음이 그 에픽을 두 번 짚는다 — 한 번만 댄다.
+        let mut nested = issues.clone();
+        nested.push(make("argos-0003.1", Kind::Issue, "todo"));
+        assert_eq!(deferred_sources(&nested)["argos-0003.1"], ["argos-0001"], "같은 미룸을 두 번 댔다");
+
+        // 미룬 마일스톤이 done 으로 읽혀도 멤버 없는 에픽은 그 밑에서 계획 밖이다 — 비우지 않는다.
+        let mut mile = make("argos-000m", Kind::Milestone, "todo");
+        mile.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut finished = make("argos-000d", Kind::Issue, "done");
+        finished.milestone = Some("argos-000m".into());
+        let mut empty = make("argos-000e", Kind::Epic, "todo");
+        empty.milestone = Some("argos-000m".into());
+        let under_done = vec![mile, finished, empty];
+        assert_eq!(deferred_roots(&under_done)["argos-000e"], "argos-000m");
+        assert_eq!(deferred_sources(&under_done)["argos-000e"], ["argos-000m"], "도로 집을 곳이 비었다");
+    }
+
+    /// `ready` 가 미룬 막음에 대는 도로 집는 말도 풀어야 할 미룸을 다 댄다(moai-g2a1).
+    #[test]
+    fn held_names_every_deferral_to_undo() {
+        let deferred_epic = || {
+            let mut e = make("argos-0001", Kind::Epic, "todo");
+            e.deferred_at = Some("2026-09-01T00:00:00Z".into());
+            e
+        };
+        let mut inner = member("argos-0002", "argos-0001", "todo");
+        inner.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let waiting_on = |id: &str| {
+            let mut x = make("argos-0009", Kind::Issue, "todo");
+            x.blocked_by = vec![id.into()];
+            x
+        };
+
+        // 막는 줄이 제 줄도 미뤘고 미룬 에픽에도 든다(moai-phzi).
+        let row = vec![deferred_epic(), inner.clone(), waiting_on("argos-0002")];
+        let h = held(&row, &cfg());
+        assert_eq!(h[0].by, ["argos-0002"]);
+        assert_eq!(h[0].undo, ["argos-0001", "argos-0002"], "가까운 하나만 댄다");
+
+        // 제가 미뤄졌고 멤버도 다 미룬 묶음이 막는다 — 묶음만 풀면 멤버에 막힌다(moai-1c2l.8o1).
+        let group = vec![deferred_epic(), inner, waiting_on("argos-0001")];
+        let h = held(&group, &cfg());
+        assert_eq!(h[0].by, ["argos-0001"]);
+        assert_eq!(h[0].undo, ["argos-0001", "argos-0002"], "묶음만 대면 풀고도 막힌다");
     }
 
     /// 묶음이 그 칸에 들어선 때도 멤버에서 읽는다 — `--stale` 이 재는 시각이다.
@@ -3457,6 +3648,12 @@ mod tests {
         let shelved = vec![make("argos-0001", Kind::Epic, "todo"), rest, blocked_by("argos-0001")];
         assert!(picks(&shelved).is_empty());
         assert_eq!(said(&shelved), [row(&["argos-0002"], &["argos-0002"], &[])]);
+        // 멤버를 다 미룬 묶음을 제가 또 미뤘으면 묶음을 댄다 — 멤버를 도로 집어도 안 풀린다.
+        // 도로 집을 곳은 둘 다다: 묶음만 풀면 이번엔 미룬 멤버에 막힌다(moai-g2a1).
+        let mut both = shelved.clone();
+        both[0].deferred_at = Some("2026-09-02T00:00:00Z".into());
+        assert_eq!(said(&both), [row(&["argos-0001"], &["argos-0001", "argos-0002"], &[])]);
+        assert_eq!(blocker(Some("todo"), true, Waiting::Shelved), Blocker::Deferred);
 
         // 멤버가 하나도 없다 — 도로 집을 것이 없으니 비었다고 댄다.
         let empty = vec![make("argos-0001", Kind::Epic, "todo"), blocked_by("argos-0001")];

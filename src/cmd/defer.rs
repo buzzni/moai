@@ -21,7 +21,7 @@ struct Moved {
     already: Vec<String>,
     missing: Vec<String>,
     /// 도로 집으라 했는데 **아직 계획 밖인 것** — (그 줄, 실제로 미룬 줄).
-    shelved: Vec<(String, String)>,
+    shelved: Vec<(String, Vec<String>)>,
 }
 
 pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
@@ -73,13 +73,13 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         // 미뤄져 있으면 같다. **쓰기를 마친 모습에서** 재야 에픽과 멤버를 한 번에 푼
         // 경우를 헛되이 안 센다.
         if back && !(m.done.is_empty() && m.already.is_empty()) {
-            let roots = crate::report::deferred_roots(issues);
+            let roots = crate::report::deferred_sources(issues);
             m.shelved = m
                 .done
                 .iter()
                 .map(|i| i.id.as_str())
                 .chain(m.already.iter().map(String::as_str))
-                .filter_map(|id| roots.get(id).map(|root| (id.to_string(), root.to_string())))
+                .filter_map(|id| roots.get(id).map(|r| (id.to_string(), r.iter().map(|s| s.to_string()).collect())))
                 .collect();
             m.already.retain(|id| !roots.contains_key(id.as_str()));
         }

@@ -378,9 +378,22 @@ pub fn json_with<T: serde::Serialize>(base: &T, extra: &[(&str, String)]) -> R<V
 #[derive(serde::Serialize)]
 pub struct Shelved<'a> {
     pub id: &'a str,
+    /// 가장 가까운 미룬 곳.
     pub root: &'a str,
+    /// 도로 집어야 할 곳 **전부**, 가까운 것부터(moai-g2a1). 하나뿐이면 `root` 와 같아
+    /// 안 낸다 — 흔한 경우의 출력을 바꾸지 않는다.
+    #[serde(skip_serializing_if = "one_or_none")]
+    pub roots: &'a [String],
 }
 
-pub fn shelved(pairs: &[(String, String)]) -> Vec<Shelved<'_>> {
-    pairs.iter().map(|(id, root)| Shelved { id, root }).collect()
+fn one_or_none(roots: &&[String]) -> bool {
+    roots.len() <= 1
+}
+
+/// (줄, 풀어야 할 미룸 전부 — 가까운 것부터).
+pub fn shelved(pairs: &[(String, Vec<String>)]) -> Vec<Shelved<'_>> {
+    pairs
+        .iter()
+        .map(|(id, roots)| Shelved { id, root: roots.first().map_or("", String::as_str), roots })
+        .collect()
 }
