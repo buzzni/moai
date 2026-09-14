@@ -242,6 +242,11 @@ impl Doc {
                         problems.push(at(format!("{e} — 지금은 경로로 고른 색을 쓴다")));
                         None
                     });
+                    // 둘 다 적혔으면 `color` 를 읽되 `colour` 도 알린다 — 조용히 버리면 뒤에 고쳐
+                    // 적은 `colour` 가 안 먹는 까닭을 아무도 말하지 않는다.
+                    if t.contains_key(COLOR) && t.contains_key(COLOUR) {
+                        problems.push(at(format!("`{COLOUR}` 는 모르는 키다 — `{COLOR}` 만 읽는다")));
+                    }
                     out.push(Project { path, hue });
                 }
                 Err(e) => problems.push(at(e)),
@@ -637,6 +642,13 @@ mod tests {
         assert!(problems[2].contains("`colour` 는 모르는 키다"), "{problems:#?}");
         assert!(problems[3].contains("\"Green\""), "{problems:#?}");
         assert!(problems.iter().all(|p| p.contains("지금은 경로로 고른 색을 쓴다") && !p.contains('\n')), "{problems:#?}");
+
+        // `color` 와 `colour` 가 함께 있으면 `color` 가 서고, `colour` 는 조용히 버리지 않고 알린다.
+        let both = "[[project]]\npath = \"/both\"\ncolor = \"green\"\ncolour = \"blue\"\n";
+        let (projects, problems) = Doc::parse(both).unwrap().projects();
+        assert_eq!(projects[0].hue, Hue::named("green"));
+        assert_eq!(problems.len(), 1, "{problems:#?}");
+        assert!(problems[0].contains("`colour` 는 모르는 키다"), "{problems:#?}");
     }
 
     /// 색을 정했다 `auto` 로 되돌리면 처음 바이트로 돌아온다. 같은 색을 다시 정하면 파일을
