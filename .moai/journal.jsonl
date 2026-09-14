@@ -2248,3 +2248,5 @@
 {"ts":"2026-09-14T14:35:20Z","id":"moai-7ljm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(사용자, 2026-09-14): 본 가지는 루트 체크아웃의 지금 가지(git -C <루트> branch --show-current)로 읽는다 — 일꾼이 뜨고 병합하는 곳이 거기라 어긋날 수 없고 origin/HEAD 가 낡은 저장소에서도 맞다. detached 면 origin/HEAD → main. 감독이 바퀴 시작에 한 번 읽어 brief 의 <본 가지> 를 채워 보낸다 — 일꾼은 읽지 않는다. heredoc(5jxr)은 들여쓴 블록 대신 들여쓰지 않은 펜스 블록으로 — <<- 는 탭만 벗긴다"}
 {"ts":"2026-09-14T14:35:20Z","id":"moai-hy2h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T14:35:20Z","id":"moai-5jxr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T14:39:18Z","id":"moai-v2jf.lsa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"고칠 것 없음, 넘긴 것 없음 — 읽혔을 때만 설정을 넣는 것·다른 relist 의 None·키 안내·권한 시험을 확인"}
+{"ts":"2026-09-14T14:39:19Z","id":"moai-v2jf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (83c29cc) — 고르기 창의 . 이 다시 읽기에 성공할 때만 숨은 것 보이기를 바꾼다"}
