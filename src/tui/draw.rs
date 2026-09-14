@@ -631,7 +631,20 @@ fn prompt_room(avail: usize, error: usize) -> (usize, usize) {
 fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 테두리 두 칸을 뺀 안쪽 폭. 좁은 창에서도 음수가 되지 않게 막는다.
     let inner = at.width.saturating_sub(2) as usize;
-    let items: Vec<ListItem> = rows.iter().map(|r| ListItem::new(row_line(app, r, inner))).collect();
+    // **오른쪽 열을 걷는 것은 목록 전체가 함께 정한다**(moai-g7p8 리뷰). 줄마다 정하면 머리글이
+    // 긴 줄(`⎇ 브랜치`·`p10`)만 날짜를 걷어 같은 폭에서 열이 들쭉날쭉 선다 — 고정 폭의 까닭이
+    // 사라진다. 제일 많이 걷힌 줄의 열에 맞춘다(걷는 차례가 하나라 그 열은 모든 줄에 들어간다).
+    let (mut items, kept): (Vec<ListItem>, Vec<super::view::Fields>) = rows
+        .iter()
+        .map(|r| {
+            let (line, kept) = row_line(app, r, inner, app.fields);
+            (ListItem::new(line), kept)
+        })
+        .unzip();
+    let common = kept.into_iter().fold(app.fields, super::view::Fields::both);
+    if common != app.fields {
+        items = rows.iter().map(|r| ListItem::new(row_line(app, r, inner, common).0)).collect();
+    }
 
     // 제목에 칸별 건수를 **config 차례로** 낸다. 칸 이름과 순서는 저장소가
     // 정하는 것이라(`config.statuses`) 여기서 다시 정하지 않는다.
@@ -727,18 +740,19 @@ fn scroll_mark(f: &mut Frame, s: &Scroll, at: Rect, hint: &str, focused: bool) {
 ///
 /// **진행 바탕은 두 번 깔아 보고 걷었다**(moai-u3r2). 반전도 막대 색 초록도 줄마다 덩어리가
 /// 서서 목록이 정신없었다 — 사용자 판단. 셈 글자만으로 한눈에 읽힌다.
-fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
+/// 켠 열 가운데 이 줄에 실제로 선 것을 함께 낸다 — 걷기를 목록 전체에 맞추려고(`list`).
+fn row_line<'a>(app: &App, r: &Row, budget: usize, fields: super::view::Fields) -> (Line<'a>, super::view::Fields) {
     // 이 파일의 `Field` 는 폼의 칸이다(`form::Field`) — 목록 열은 여기서만 가린다.
     use super::view::Field;
     let e = match r {
         Row::Item(e) => e,
-        Row::Up => return Line::from(Span::styled("..", dim())),
-        Row::Project(at) => return place_line(app, *at, budget),
+        Row::Up => return (Line::from(Span::styled("..", dim())), fields),
+        Row::Project(at) => return (place_line(app, *at, budget), fields),
     };
     let is_dir = matches!(e, Entry::Dir { .. });
     let Some(at) = e.at() else {
         // 바구니는 제 줄이 없다 — 이름만 낸다.
-        return Line::from(Span::styled(format!("{}/", app.index.label(&app.issues, e)), dim()));
+        return (Line::from(Span::styled(format!("{}/", app.index.label(&app.issues, e)), dim())), fields);
     };
     let i = &app.issues[at];
 
@@ -746,7 +760,6 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
     // 더한 숫자로 어림하면 `p10` 처럼 자리를 더 먹는 값이나 한글이 든 id 에서
     // 어긋나고, 넘친 줄은 위젯이 말없이 잘라 내 **잘렸다는 `…` 마저** 사라진다.
     // id·우선순위는 켜 둔 것만 선다(`SPC c`, moai-g7p8). 칸 글리프는 늘 선다.
-    let fields = app.fields;
     let mut head = Vec::new();
     if fields.shows(Field::Id) {
         head.push(Span::styled(i.id.clone(), dim()));
@@ -780,7 +793,8 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
         _ => String::new(),
     };
     // **오른쪽 열**(moai-g7p8) — 태그·담당·생성·수정. 줄마다 폭을 고정해 여러 줄을 한 줄로 훑어
-    // 내려갈 수 있게 한다(셈을 오른쪽 정렬한 까닭과 같다). 값이 없으면 `—` 로 자리를 지킨다.
+    // 내려갈 수 있게 한다(셈을 오른쪽 정렬한 까닭과 같다). 담당·날짜가 없으면 `—` 로, 태그가 없으면
+    // 빈칸으로 자리를 지킨다 — 태그 없는 줄이 흔해 `—` 가 줄마다 서면 눈이 거기 걸린다.
     // 날짜는 `+`(생성)·`✎`(수정) 글리프로 가른다 — 둘 다 `MM-DD` 라 글리프 없이는 어느 쪽인지 모른다.
     let mut cells: Vec<(Field, String)> = [Field::Tags, Field::Assignee, Field::Created, Field::Updated]
         .into_iter()
@@ -818,6 +832,13 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
         let least = cells.iter().filter_map(|(f, _)| f.drop_rank()).min().expect("오른쪽 열은 걷는 차례가 있다");
         cells.retain(|(f, _)| f.drop_rank() != Some(least));
     }
+    let kept = [Field::Tags, Field::Assignee, Field::Created, Field::Updated]
+        .into_iter()
+        .filter(|f| fields.shows(*f) && !cells.iter().any(|(c, _)| c == f))
+        .fold(fields, |mut k, f| {
+            k.toggle(f);
+            k
+        });
     let right = right_of(&cells);
     // **좁으면 스피너부터 걷는다**(moai-q59j). 목록 줄의 글리프는 두 칸(`⠋▸`·` ·`)인데, 제목
     // 한 글자와 디렉터리 `/` 가 들어갈 자리가 없으면 멈춘 글리프 한 칸만 남긴다 — 뜻은 글리프가
@@ -858,7 +879,7 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
         spans.push(Span::raw(" ".repeat(gap)));
         spans.push(Span::styled(right, dim()));
     }
-    Line::from(spans)
+    (Line::from(spans), kept)
 }
 
 /// 오른쪽 열의 폭 — 담당·태그. 날짜는 `+MM-DD` 여섯 칸으로 저절로 고정이다.
@@ -1860,6 +1881,30 @@ pub(super) mod tests {
         }
         a.hit("SPC c i");
         assert!(!row_by(&mut a, 240, "레이븐").contains("argos-0001"), "끈 id 가 목록 줄에 남았다");
+    }
+
+    /// **열을 걷는 것은 목록 전체가 함께 정한다**(moai-g7p8 리뷰). 머리글이 긴 줄(`p10`)만 날짜를
+    /// 걷으면 같은 폭에서 오른쪽 열이 줄마다 어긋난다.
+    #[test]
+    fn cells_drop_together_across_rows_with_different_heads() {
+        let mut is = issues();
+        for i in &mut is {
+            i.assignee = Some("레이븐".into());
+        }
+        is.iter_mut().find(|i| i.id == "argos-0004").unwrap().priority = Some(10);
+        let mut a = every(is);
+        a.hit("Enter");
+        a.hit("SPC c c");
+        for w in 40..160u16 {
+            let rows: Vec<String> = render(&mut a, w, 12)
+                .into_iter()
+                .map(|l| l.split('│').next().unwrap_or_default().to_string())
+                .filter(|l| l.contains("argos-"))
+                .collect();
+            assert!(rows.len() >= 2, "{w}: 줄이 모자라 견줄 수 없다 {rows:?}");
+            let dated = rows.iter().filter(|l| l.contains("+09-01")).count();
+            assert!(dated == 0 || dated == rows.len(), "{w}: 날짜가 줄마다 다르게 걷혔다 {rows:?}");
+        }
     }
 
     /// 빛줄기는 **글자와 폭을 그대로 두고** 스타일만 칸마다 바꾸며, 한 걸음에 한 칸씩 흐르고,

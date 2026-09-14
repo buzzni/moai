@@ -110,6 +110,11 @@ impl Fields {
     pub fn toggle(&mut self, f: Field) {
         self.0 ^= f.bit();
     }
+
+    /// 둘 다 켠 열.
+    pub fn both(self, other: Fields) -> Fields {
+        Fields(self.0 & other.0)
+    }
 }
 
 #[cfg(test)]
