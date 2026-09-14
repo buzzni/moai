@@ -2325,3 +2325,4 @@
 {"ts":"2026-09-14T16:27:43Z","id":"moai-r2dt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC 메뉴 색·격자 — 단축키·콜론·실행·+그룹을 제 색으로, 열마다 6칸"}
 {"ts":"2026-09-14T16:27:44Z","id":"moai-a5it","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r2dt 로 옮겼다"}
 {"ts":"2026-09-14T16:27:44Z","id":"moai-r2dt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T16:28:05Z","id":"moai-r2dt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-14): 네 코드는 hex RGB 그대로 — 단축키 #f10b00·콜론 #f08b00·실행 #f12b00·+그룹 #f13b00. 진행 바는 지금 초록(Color::Green) 그대로 둔다."}
