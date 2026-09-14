@@ -135,14 +135,17 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
 
 /// 겹칠 줄들을 **제 워크트리가 먼저**인 차례로 받아 하나로 보인다.
 ///
-/// 같은 id 는 **칸을 늦게 옮긴 줄**(`status_since`)이 통째로 선다. 같으면
+/// 같은 id 는 **계획에서의 자리를 늦게 바꾼 줄**([`Issue::planned`] — 칸을 옮기거나
+/// 미루거나 도로 집은 때)이 통째로 선다. 같으면
 /// `updated_at` 이 늦은 줄, 그것도 같으면 앞선 쪽 — 제 워크트리가 맨 앞이라
 /// 동률이면 지금 브랜치의 줄이고, 남끼리는 git 이 댄 차례다. 결정적이어야 부를
 /// 때마다 같은 줄이 선다. 시각은 RFC3339 UTC 고정폭이라 문자열로 견준다(`model::now`).
 ///
 /// **칸이 먼저인 까닭** — 제목·우선순위·태그를 고친 것도 `updated_at` 을 올린다.
 /// 그것으로만 견주면 옆에서 집은 뒤 여기서 우선순위 하나만 고쳐도 옆 줄이 가려져
-/// `ready --worktree` 가 옆에서 잡은 일을 다시 집으라고 낸다(moai-2f5g). 필드마다
+/// `ready --worktree` 가 옆에서 잡은 일을 다시 집으라고 낸다(moai-2f5g). 칸만 보면
+/// 옆에서 늦게 미룬 것이 여기서 먼저 집은 칸에 가려진다 — 미루기는 칸을 안 옮긴다
+/// (moai-l11z). 필드마다
 /// 따로 고르지는 않는다 — 한 줄의 출처가 둘이면 `⎇` 와 이력을 읽을 뿌리가 갈린다.
 ///
 /// **제 줄은 한 줄도 접지 않는다.** 제 파일에 같은 id 가 둘이면 둘 다 남긴다 —
@@ -171,7 +174,7 @@ pub fn overlay(mine: Vec<Issue>, others: Vec<Side>) -> (Vec<Issue>, Origin) {
         origin.trees.push((label, root));
         for i in issues {
             match at.get(&i.id) {
-                Some(&k) if (&i.status_since, &i.updated_at) > (&shown[k].status_since, &shown[k].updated_at) => {
+                Some(&k) if (i.planned(), i.updated_at.as_str()) > (shown[k].planned(), shown[k].updated_at.as_str()) => {
                     origin.from.insert(i.id.clone(), tree);
                     shown[k] = i;
                 }
@@ -491,6 +494,43 @@ mod tests {
         let (shown, origin) = overlay(vec![moved], vec![tree("feat/x", vec![theirs])]);
         assert_eq!(shown[0].status.as_str(), "done");
         assert_eq!(origin.branch("m-0002"), None);
+    }
+
+    /// 옆에서 늦게 미룬 것·도로 집은 것이 여기서 먼저 옮긴 칸에 안 가려진다(moai-l11z). 미루기는
+    /// `status_since` 를 안 올리고, 도로 집기는 `deferred_at` 을 지운다 — 남는 시각은 `planned_at` 이다.
+    #[test]
+    fn a_later_defer_or_undo_beats_an_earlier_move() {
+        let (t1, t2, t3, t4) =
+            ("2026-09-12T00:00:00Z", "2026-09-13T00:00:00Z", "2026-09-14T00:00:00Z", "2026-09-15T00:00:00Z");
+        let mut picked = issue("m-0001", "in_progress", t1);
+        picked.status_since = t1.into();
+        let mut shelved = issue("m-0001", "todo", t2);
+        shelved.deferred_at = Some(t2.into());
+        shelved.planned_at = Some(t2.into());
+        let (shown, origin) = overlay(vec![picked], vec![tree("feat/x", vec![shelved.clone()])]);
+        assert!(shown[0].is_deferred(), "옆에서 늦게 미룬 것이 여기서 먼저 집은 줄에 가려졌다");
+        assert_eq!(origin.branch("m-0001"), Some("feat/x"));
+
+        // 도로 집으면 `deferred_at` 은 사라져도 `planned_at` 이 늦어 이긴다. 여기 줄은 칸을
+        // 도로 집은 줄보다 늦게 옮겼다 — 칸 시각만 보면 여기 미룬 줄이 선다.
+        let mut here = shelved.clone();
+        here.status_since = t2.into();
+        let mut back = issue("m-0001", "todo", t3);
+        back.planned_at = Some(t3.into());
+        let (shown, origin) = overlay(vec![here], vec![tree("feat/x", vec![back])]);
+        assert!(!shown[0].is_deferred(), "옆에서 도로 집은 것이 여기서 미룬 줄에 가려졌다");
+        assert_eq!(origin.branch("m-0001"), Some("feat/x"));
+
+        // 미룬 뒤에 칸을 옮긴 줄은 `planned_at` 이 낡았어도 이긴다 — 옛 바이너리는 칸만 옮긴다.
+        let mut moved = shelved.clone();
+        moved.status = Status::new("review");
+        moved.status_since = t4.into();
+        let mut later_shelf = issue("m-0001", "todo", t3);
+        later_shelf.deferred_at = Some(t3.into());
+        later_shelf.planned_at = Some(t3.into());
+        let (shown, origin) = overlay(vec![later_shelf], vec![tree("feat/x", vec![moved])]);
+        assert_eq!(shown[0].status.as_str(), "review", "늦게 옮긴 칸이 그 전의 미룸에 졌다");
+        assert_eq!(origin.branch("m-0001"), Some("feat/x"));
     }
 
     /// 어느 워크트리에서든 커밋·`pack-refs`·떼어 낸 checkout 이 지켜보는 표식을 바꾼다 —
