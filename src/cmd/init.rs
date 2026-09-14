@@ -137,9 +137,12 @@ fn covers(have: &str, want: &str) -> bool {
     if have.is_empty() || have.starts_with('#') || have.starts_with('!') || want.starts_with('#') {
         return false;
     }
+    // 끝 `/` 는 "디렉터리만" 이라는 뜻이다. 같은 이름끼리 견줄 때 `have` 만 디렉터리 전용이면
+    // (`.moai/lock/`) 파일 `.moai/lock` 을 막지 못하니 덮은 것으로 치지 않는다.
+    let dir_only = have.ends_with('/') && !want.ends_with('/');
     let bare = |s: &str| s.trim_start_matches('/').trim_end_matches('/').to_string();
     let (have, want) = (bare(have), bare(want));
-    !have.is_empty() && (have == want || want.starts_with(&format!("{have}/")))
+    !have.is_empty() && ((have == want && !dir_only) || want.starts_with(&format!("{have}/")))
 }
 
 pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {

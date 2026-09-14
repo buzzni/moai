@@ -254,6 +254,15 @@ fn init_ignores_the_worktree_dir_once_and_respects_equivalent_spellings() {
         assert!(got.starts_with(&original), "`{name}`: 원래 .gitignore 를 바꿨다\n{got}");
         assert_eq!(claude_lines(&got), 1, "`{name}`: 같은 뜻의 줄이 있는데 또 더했다\n{got}");
     }
+
+    // 끝 `/` 는 "디렉터리만" 이다(리뷰 moai-mxtb.az6). `.moai/lock/` 은 락 파일을 못 막으니
+    // 같은 이름이라도 덮은 것으로 치지 않고 `.moai/lock` 을 더한다.
+    let dir = s.path().join("dironly");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".gitignore"), ".moai/lock/\n").unwrap();
+    ok(&dir, &["init", "argos"]);
+    let got = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
+    assert!(got.lines().any(|l| l == ".moai/lock"), "디렉터리 전용 줄을 락 파일을 막은 것으로 쳤다\n{got}");
 }
 
 #[test]
