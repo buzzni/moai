@@ -1114,7 +1114,9 @@ impl App {
         // — 는 여기 뜻이 없다. 접두어(`g`)는 다음 키를 기다리고, 뜻 없는 다음 키는 그 `g` 와 함께
         // 버린다. SPC 는 메뉴를 열고, 열린 메뉴는 제 규칙(모르는 키 무시·Esc·Bksp)으로 받는다
         // ([`menu::feed`]) — 메뉴로 누른 동작도 바로 누른 키와 같은 아래 `match` 를 지난다.
-        let ctx = self.key_ctx();
+        // 목록은 여기서 **한 번** 센다 — 커서의 사실(`Ctx::leaf`)과 이동의 끝(`step`)이 같은 줄을 읽는다.
+        let rows = self.rows();
+        let ctx = self.key_ctx(&rows);
         let Some(act) = menu::feed(&mut self.chord, &ctx, k) else { return };
         // **되는지는 한 판정이 가른다**([`keys::Browse::enabled`]) — 키 바가 같은 판정으로
         // 적을 키를 고르므로 둘이 안 갈린다. 층에서 뜻이 없는 키는 왜 안 되는지를 한 줄로
@@ -1132,7 +1134,7 @@ impl App {
             B::Quit => self.quit = true,
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
-            B::Step(m) => self.step(m),
+            B::Step(m) => self.step(m, rows.len()),
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
             // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
@@ -1167,10 +1169,18 @@ impl App {
     }
 
     /// 키 표가 켜짐과 낱말을 가를 값. **여기서 잰다** — 표([`keys`])는 조각이라 `App` 을 모른다.
-    pub fn key_ctx(&self) -> keys::Ctx {
+    ///
+    /// **목록(`rows`)은 든 쪽이 센 것을 받는다.** 커서가 선 줄의 사실(잎인가)은 목록을 세야
+    /// 나오는데, 세는 데 이슈 전부를 훑고 정렬한다 — 그림은 프레임마다 이미 한 번 센 것을
+    /// 넘기고, 키 처리는 키 하나에 한 번 센다. 여기서 따로 세면 바·메뉴·뱃지가 각자 센다.
+    pub fn key_ctx(&self, rows: &[Row]) -> keys::Ctx {
         keys::Ctx {
             layer: self.on_layer(),
             list_focus: self.focus == Pane::Explorer,
+            // [`App::enter`] 가 무언가 하는 줄 — `..`(나가기)·디렉터리·층의 프로젝트.
+            leaf: !matches!(self.current_of(rows), Some(Row::Up | Row::Item(Entry::Dir { .. }) | Row::Project(_))),
+            // [`App::leave`] 가 무언가 하는 자리 — 디렉터리 안이거나, 층이 있는 프로젝트 뿌리.
+            root: self.path.is_empty() && (self.layer.is_none() || self.on_layer()),
             worktree: self.worktree,
             raw: self.raw,
             next_pane: draw::pane_name(self.focus.next()),
@@ -1188,10 +1198,10 @@ impl App {
     ///
     /// 상세의 끝(`End`)은 마지막으로 그린 줄 수로 잰다 — 줄 수는 폭에 달렸고 폭은
     /// 그려야 나온다. 루프는 키 하나마다 한 번 그리므로 그 수는 한 걸음 넘게 낡지 않는다.
-    fn step(&mut self, m: Move) {
+    fn step(&mut self, m: Move, rows: usize) {
         match self.focus {
             Pane::Explorer => {
-                let at = scroll::cursor(m, self.cursor, || self.rows().len());
+                let at = scroll::cursor(m, self.cursor, || rows);
                 self.move_to(at);
             }
             Pane::Detail => self.detail.go(m),
@@ -1274,7 +1284,7 @@ impl App {
         self.chord.clear();
         // 층에서는 `/`·`f` 가 안 열린다 — **키 처리와 같은 판정**([`keys::Browse::enabled`])으로
         // 열리는 칸만 대고, 키 이름은 표에서 읽는다.
-        let ctx = self.key_ctx();
+        let ctx = self.key_ctx(&self.rows());
         let open: Vec<String> = [keys::Browse::Grep, keys::Browse::Filter, keys::Browse::Jot]
             .into_iter()
             .filter(|a| a.enabled(&ctx).is_ok())

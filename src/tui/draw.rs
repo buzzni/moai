@@ -5,7 +5,7 @@
 //! 모든 색에 글리프나 낱말이 붙는다.
 
 use super::form::{Field, Form, Target};
-use super::keys::{BROWSE, Browse, CONFIRM, Confirm, Goto, JOT, Jot, LEADER, MENU, Menu, PATH, PICK, PROMPT, Pick, Prompt, label, labels};
+use super::keys::{self, BROWSE, Browse, CONFIRM, Confirm, Ctx, Goto, JOT, Jot, LEADER, MENU, Menu, PATH, PICK, PROMPT, Pick, Prompt, label, labels};
 use super::menu;
 use super::scroll::Move;
 use super::scroll::Scroll;
@@ -55,7 +55,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     let [left, right] =
         Layout::horizontal([Constraint::Percentage(LEFT), Constraint::Min(10)]).areas(body);
 
-    crumbs(f, app, top);
+    crumbs(f, app, &rows, top);
     if let Some((text, urgent)) = banner(app) {
         let style = if urgent {
             Style::new().fg(Color::Black).bg(Color::LightRed)
@@ -99,12 +99,12 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     }
     // SPC 메뉴는 탐색 중에만 선다 — 글칸으로 넘어가면 열이 버려져 저절로 닫힌다.
     if matches!(app.mode, Mode::Browse) && menu::open(&app.chord) {
-        menu_popup(f, app, body);
+        menu_popup(f, app, &rows, body);
     }
 
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
-        Mode::Browse => fkeys(f, app, keys),
+        Mode::Browse => fkeys(f, app, &rows, keys),
         // 안내 속 키 이름은 표에서 읽는다 — 키를 옮기면 안내도 따라온다.
         Mode::Grep(q) => prompt(f, keys, "검색", q, app.input_error(), &prompt_help("걸기")),
         Mode::Filter(q) => prompt(f, keys, "거름망", q, app.input_error(), &prompt_help("걸기")),
@@ -221,6 +221,14 @@ fn pick_keys(f: &mut Frame, p: &Picker, at: Rect) {
             Span::styled(format!(" {e}"), Style::new().fg(Color::LightRed)),
         ]);
         return f.render_widget(Paragraph::new(fit(line, at.width as usize)), at);
+    }
+    // `g` 가 기다리는 동안은 무엇을 기다리는지 댄다 — 탐색의 바와 같은 모양이다.
+    if !p.chord.held().is_empty() {
+        let next = keys::next_keys(PICK, p.chord.held())
+            .into_iter()
+            .map(|(k, a)| (k, if let Pick::Step(m) = a { keys::move_word(m) } else { a.what(p.show_hidden) }))
+            .collect();
+        return bar(f, at, Vec::new(), vec![waiting(p.chord.held(), next)]);
     }
     // 이름과 낱말은 키 표([`PICK`])에서 읽는다. 여기서 정하는 것은 차례뿐이다.
     let hint = |a: Pick| key(&label(PICK, a), a.what(p.show_hidden));
@@ -424,7 +432,7 @@ fn banner(app: &App) -> Option<(String, bool)> {
     (!parts.is_empty()).then(|| (format!(" {lead}{} ", parts.join("   ·   ")), urgent))
 }
 
-fn crumbs(f: &mut Frame, app: &App, at: Rect) {
+fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let w = at.width as usize;
     // **걸린 거름망은 늘 보인다.** 안 보이면 왜 줄이 적은지 알 길이 없고,
     // 그러면 사람이 도구를 의심하는 대신 자료를 의심한다. 그래서 **뱃지 자리를
@@ -442,7 +450,7 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
     let overlay = app.worktree.then(|| {
         let trees = app.origin.labels();
         let names = if trees.is_empty() { "옆 워크트리 없음".to_string() } else { trees.join(", ") };
-        let off = match Browse::Worktree.enabled(&app.key_ctx()) {
+        let off = match Browse::Worktree.enabled(&app.key_ctx(rows)) {
             Ok(()) => format!("  {} 로 끈다", label(BROWSE, Browse::Worktree)),
             Err(_) => String::new(),
         };
@@ -1345,7 +1353,7 @@ fn bold() -> Style {
 
 /// 맨 아래 키 바. **아직 없는 것은 적지 않는다** — 눌러도 아무 일이
 /// 없는 키를 적어 두면 그것부터 도구를 못 믿게 된다.
-fn fkeys(f: &mut Frame, app: &App, at: Rect) {
+fn fkeys(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 메뉴가 열린 동안은 메뉴에서 나가는 법만 댄다 — 탐색의 키는 메뉴 안에서 안 듣는다.
     if menu::open(&app.chord) {
         let mut keep = vec![key(&label(MENU, Menu::Close), Menu::Close.what())];
@@ -1354,7 +1362,18 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
         }
         return bar(f, at, Vec::new(), keep);
     }
-    let (optional, keep) = browse_hints(app);
+    let c = app.key_ctx(rows);
+    // `g` 가 기다리는 동안은 메뉴와 같은 자리에서 **무엇을 기다리는지** 댄다(moai-k3yi). 뜻 없는
+    // 키를 누르면 열이 버려져([`keys::Chord::feed`]) 바가 저절로 돌아온다.
+    if !app.chord.held().is_empty() {
+        let next = keys::next_keys(BROWSE, app.chord.held())
+            .into_iter()
+            .filter(|(_, a)| a.enabled(&c).is_ok())
+            .map(|(k, a)| (k, if let Browse::Step(m) = a { keys::move_word(m) } else { a.what(&c) }))
+            .collect();
+        return bar(f, at, Vec::new(), vec![waiting(app.chord.held(), next)]);
+    }
+    let (optional, keep) = browse_hints(app, &c);
     let spans = |v: Vec<(String, &str)>| v.iter().map(|(k, what)| key(k, what)).collect();
     bar(f, at, spans(optional), spans(keep));
 }
@@ -1362,18 +1381,24 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
 /// 바의 한 칸 — `(키 이름, 낱말)`.
 type Hint = (String, &'static str);
 
+/// 접두어를 누르고 기다리는 동안의 바 한 칸 — `g → g 맨 위 · p 경로 적기`. 이어 누를 키는 든
+/// 쪽이 표([`keys::next_keys`])에서 읽어 넘긴다.
+fn waiting(held: &[ratatui::crossterm::event::KeyEvent], next: Vec<Hint>) -> Span<'static> {
+    let next: Vec<String> = next.iter().map(|(k, what)| format!("{k} {what}")).collect();
+    key(&menu::title(held), &format!("→ {}", next.join(" · ")))
+}
+
 /// 탐색 바에 적을 것 — `(키 이름, 낱말)`. 앞 묶음은 폭이 모자라면 앞쪽부터 떨어지고, 뒤 묶음은
 /// 늘 남는다([`bar`]).
 ///
 /// **이름·낱말·켜짐은 키 표에서 읽는다**([`keys::BROWSE`]·[`keys::Browse::enabled`]). 여기서
 /// 정하는 것은 **차례**뿐이다 — 무엇이 먼저 떨어지는가. 켜지지 않은 동작은 적지 않으므로
 /// 키 처리와 바가 한 판정을 읽고, 둘이 갈릴 수 없다.
-fn browse_hints(app: &App) -> (Vec<Hint>, Vec<Hint>) {
+fn browse_hints(app: &App, c: &Ctx) -> (Vec<Hint>, Vec<Hint>) {
     use Browse as B;
-    let c = app.key_ctx();
-    let hint = |acts: &[Browse]| -> Hint { (labels(BROWSE, acts), acts[0].what(&c)) };
+    let hint = |acts: &[Browse]| -> Hint { (labels(BROWSE, acts), acts[0].what(c)) };
     let shown = |order: &[&[Browse]]| -> Vec<Hint> {
-        order.iter().filter(|acts| acts[0].enabled(&c).is_ok()).map(|acts| hint(acts)).collect()
+        order.iter().filter(|acts| acts[0].enabled(c).is_ok()).map(|acts| hint(acts)).collect()
     };
     // **덜 급한 것부터 떨어뜨린다.** 폭이 모자라면 앞쪽부터 버리고, 뒤 묶음(`keep`)은 늘 남는다.
     // 바로 누르는 키는 이동·포커스·`/`·드나들기뿐이고(moai-7sjm) 나머지는 `SPC 메뉴` 한 칸이
@@ -1381,6 +1406,12 @@ fn browse_hints(app: &App) -> (Vec<Hint>, Vec<Hint>) {
     // 메뉴에 있고 Ctrl-C 는 어디서든 끝낸다.
     // **층에서는 층에서 듣는 키만 적는다** — `/` 는 층에서 까닭만 말하고(`Browse::enabled` 가
     // 걸러 여기 안 선다) 나가기는 위가 없다.
+    // **차례는 커서를 따라 안 바뀐다**(moai-k3yi). 커서가 잎이면 Enter, 뿌리면 Bksp 가 `enabled`
+    // 에서 빠질 뿐 나머지 칸은 제자리다 — 80칸에서 하나도 안 떨어지므로 빠진 자리 말고는
+    // 흔들리는 것이 없다(`the_key_bar_keeps_its_order_as_the_cursor_moves_at_eighty_columns`).
+    // `h·l`·`Ctrl-C` 는 적지 않는다: 드나들기의 이름은 Enter·Bksp 하나고(층의 거절문도 그 이름을
+    // 댄다), 끝내기는 메뉴의 `q` 가 대며 Ctrl-C 까지 늘 남기면 80칸 거름망 켠 목록에서 `j·k` 가
+    // 떨어진다. 둘 다 `moai tui --help` 에 있다.
     let optional = if app.on_layer() {
         shown(&[&[B::Step(Move::LineDown), B::Step(Move::LineUp)], &[B::FocusNext], &[B::Enter]])
     } else {
@@ -1418,9 +1449,9 @@ const MENU_WORD: &str = "메뉴";
 ///
 /// 키 먹는 칸의 굵은 선 규칙은 목록·상세의 것이라 이 창은 보통 선이다 — 굵은 칸이 둘로
 /// 보이지 않게.
-fn menu_popup(f: &mut Frame, app: &App, at: Rect) {
+fn menu_popup(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let held = app.chord.held();
-    let items = menu::entries(held, &app.key_ctx());
+    let items = menu::entries(held, &app.key_ctx(rows));
     let name = menu::title(held);
     let cell = |e: &menu::Entry| -> Line<'static> {
         let mut spans = vec![Span::styled(e.key.clone(), bold()), Span::raw(format!("  {}", e.what))];
@@ -2360,7 +2391,8 @@ pub(super) mod tests {
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
             assert!(bar.contains("Esc 풀기") && bar.trim_end().ends_with("SPC 메뉴"), "{w}칸 — {bar:?}");
             // 옮긴 키는 바에 없다.
-            for gone in ["F10", "F5", "F3", "F7", "끝내기", "n 담기", "f 거름망", "w 워크트리"] {
+            // `h·l`·`Ctrl-C` 는 바에 안 세운다(moai-k3yi) — 도움말이 댄다.
+            for gone in ["F10", "F5", "F3", "F7", "끝내기", "n 담기", "f 거름망", "w 워크트리", "Ctrl-C", "h·", "·l"] {
                 assert!(!bar.contains(gone), "{w}칸 바에 옮긴 키 `{gone}` 가 남았다 — {bar:?}");
             }
         }
@@ -2466,10 +2498,17 @@ pub(super) mod tests {
         assert!(lines.iter().any(|l| l.contains("bare/") && !l.contains(".moai") && l.contains("✓ 등록됨")), "{screen}");
         assert!(screen.contains("숨은 것 2개") && screen.contains("그 밖 7개"), "{screen}");
         assert_eq!(lines.iter().filter(|l| l.contains('┏')).count(), 1, "창이 뒤 칸을 다 못 덮었다\n{screen}");
-        let bar = lines.last().unwrap();
+        let bar = lines.last().unwrap().clone();
         for hint in ["Enter 들어가기", "Bksp 위로", "g p 경로 적기", "a 등록", "Esc 닫기"] {
             assert!(bar.contains(hint), "80칸에서 `{hint}` 가 없다 — {bar:?}");
         }
+        // `g` 를 누르면 무엇을 기다리는지 댄다(moai-k3yi). 뜻 없는 키가 열을 버리면 바가 돌아온다.
+        a.key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        let waiting = render(&mut a, 80, 16).last().cloned().unwrap_or_default();
+        assert_eq!(waiting, " g → g 맨 위 · p 경로 적기");
+        a.key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert!(matches!(a.mode, Mode::Pick(_)), "뜻 없는 키가 창을 닫았다");
+        assert_eq!(render(&mut a, 80, 16).last(), Some(&bar), "창의 바가 안 돌아왔다");
         for l in &lines {
             assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
         }
@@ -2788,32 +2827,165 @@ pub(super) mod tests {
     /// 그런 키는 바에 없어야 한다. 반대로 듣는 키는 바에 있어야 한다. `App::key` 가
     /// 드나드는 키를 어느 칸에 태우든, `fkeys` 가 따로 따라가지 않으면 여기서 갈린다.
     ///
-    /// 드나들 데가 있는 자리에서 누른다 — Enter 는 뿌리(커서가 에픽 위), Bksp 는 에픽 안.
+    /// 드나들 데가 있는 자리와 없는 자리를 다 누른다(moai-k3yi) — 뿌리의 에픽·잎, 에픽 안의
+    /// 잎·`..`, 층이 있는 프로젝트 뿌리. 잎의 Enter 와 층 없는 뿌리의 Bksp 는 아무 일도 없고
+    /// 바에도 없어야 한다.
     #[test]
     fn the_key_bar_names_only_keys_that_act_in_the_focused_pane() {
         let press = |k: KeyCode| KeyEvent::new(k, KeyModifiers::NONE);
-        for (hint, code, inside) in [("Enter 들어가기", KeyCode::Enter, false), ("Bksp 나가기", KeyCode::Backspace, true)] {
-            for pane in Pane::ALL {
-                let mut a = app();
-                if inside {
-                    a.key(press(KeyCode::Enter));
+        for (hint, code) in [("Enter 들어가기", KeyCode::Enter), ("Bksp 나가기", KeyCode::Backspace)] {
+            for place in Place::ALL {
+                for pane in Pane::ALL {
+                    let mut a = place.app();
+                    a.focus = pane;
+                    let before = render(&mut a, 120, 14);
+                    a.key(press(code));
+                    let acts = render(&mut a, 120, 14) != before;
+                    let bar = before.last().cloned().unwrap_or_default();
+                    assert_eq!(bar.contains(hint), acts, "{place:?}·{pane:?} 에서 {code:?} 가 듣는가 {acts} — 바 {bar:?}");
                 }
-                a.focus = pane;
-                let before = render(&mut a, 120, 14);
-                a.key(press(code));
-                let acts = render(&mut a, 120, 14) != before;
-                let bar = before.last().cloned().unwrap_or_default();
-                assert_eq!(bar.contains(hint), acts, "{pane:?} 에서 {code:?} 가 듣는가 {acts} — 바 {bar:?}");
             }
+        }
+    }
+
+    /// 커서를 세우는 자리 — 드나드는 키가 듣고 안 듣는 곳을 고루.
+    #[derive(Debug, Clone, Copy)]
+    enum Place {
+        /// 프로젝트 뿌리(층 없음), 커서가 에픽(디렉터리) 위.
+        RootDir,
+        /// 프로젝트 뿌리(층 없음), 커서가 잎 위.
+        RootLeaf,
+        /// 에픽 안, 커서가 잎 위.
+        InsideLeaf,
+        /// 에픽 안, 커서가 `..` 위.
+        InsideUp,
+        /// 층이 있는 프로젝트 뿌리, 커서가 잎 위 — Bksp 가 층으로 올라간다.
+        LayeredRootLeaf,
+        /// 층이 있는 프로젝트의 에픽 안, 커서가 `..` 위 — 드나드는 키가 둘 다 듣는다.
+        LayeredInsideUp,
+    }
+
+    impl Place {
+        const ALL: [Place; 6] =
+            [Place::RootDir, Place::RootLeaf, Place::InsideLeaf, Place::InsideUp, Place::LayeredRootLeaf, Place::LayeredInsideUp];
+
+        /// 그 자리에 목록 포커스로 선 앱. 커서는 줄의 **종류**로 찾는다 — 번호로 박으면 fixture 의
+        /// 차례가 바뀐 날 엉뚱한 줄에서 잰다.
+        fn app(self) -> App {
+            use super::super::layer::At;
+            let mut a = match self {
+                Place::LayeredRootLeaf | Place::LayeredInsideUp => layered(At::Project("/w/one".into())),
+                _ => app(),
+            };
+            // fixture 의 뿌리에는 에픽뿐이다 — 뿌리의 잎 하나를 더한다.
+            let mut all = a.issues.clone();
+            all.push(Issue::new("argos-0009".into(), "홀로 선 일".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z"));
+            a.adopt(all);
+            let find = |a: &App, want: &dyn Fn(&Row) -> bool| a.rows().iter().position(want).expect("그런 줄이 없다");
+            let dir = |r: &Row| matches!(r, Row::Item(Entry::Dir { .. }));
+            a.focus = Pane::Explorer;
+            if matches!(self, Place::InsideLeaf | Place::InsideUp | Place::LayeredInsideUp) {
+                a.cursor = find(&a, &dir);
+                a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                assert!(!a.path.is_empty(), "{self:?}: 에픽에 못 들어갔다");
+            }
+            a.cursor = match self {
+                Place::RootDir => find(&a, &dir),
+                Place::InsideUp | Place::LayeredInsideUp => find(&a, &|r| *r == Row::Up),
+                _ => find(&a, &|r| matches!(r, Row::Item(Entry::Leaf { .. }))),
+            };
+            a
+        }
+    }
+
+    /// **커서가 잎이면 Enter, 층 없는 뿌리면 Bksp 가 바에서 빠지고 그 키는 조용히 아무 일도 안
+    /// 한다**(moai-k3yi, moai-uowi 흡수). 층이 있는 프로젝트 뿌리의 Bksp 는 층으로 올라가므로 선다.
+    #[test]
+    fn the_key_bar_follows_the_row_under_the_cursor() {
+        let bar_at = |a: &mut App| render(a, 80, 14).last().cloned().unwrap_or_default();
+
+        let mut a = Place::RootLeaf.app();
+        let bar = bar_at(&mut a);
+        assert!(!bar.contains("Enter") && !bar.contains("Bksp"), "잎·층 없는 뿌리 — {bar:?}");
+        let (cursor, path) = (a.cursor, a.path.clone());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!((a.cursor, &a.path, &a.notice), (cursor, &path, &None), "잎의 Enter·뿌리의 Bksp 가 무언가 했다");
+
+        let mut a = Place::RootDir.app();
+        let bar = bar_at(&mut a);
+        assert!(bar.contains("Enter 들어가기") && !bar.contains("Bksp"), "에픽 위·층 없는 뿌리 — {bar:?}");
+
+        let mut a = Place::LayeredRootLeaf.app();
+        let bar = bar_at(&mut a);
+        assert!(bar.contains("Bksp 나가기") && !bar.contains("Enter"), "층이 있는 뿌리의 잎 — {bar:?}");
+
+        let mut a = Place::InsideUp.app();
+        let bar = bar_at(&mut a);
+        assert!(bar.contains("Bksp 나가기") && bar.contains("Enter 들어가기"), "에픽 안의 `..` — {bar:?}");
+    }
+
+    /// **커서가 옮겨 가도 바의 칸은 제자리다** — 빠지는 것은 그 자리에서 안 듣는 Enter·Bksp 뿐이고
+    /// 나머지는 차례도 글자도 그대로다. 80칸 거름망 켠 목록에서 바를 **통째로** 견준다: 늘 서는
+    /// 칸이 밀리거나 떨어지면 여기서 갈린다.
+    #[test]
+    fn the_key_bar_keeps_its_order_as_the_cursor_moves_at_eighty_columns() {
+        for place in Place::ALL {
+            let mut a = place.app();
+            a.filter_text = Some("tag=x".into());
+            for at in 0..a.rows().len() {
+                a.cursor = at;
+                let c = a.key_ctx(&a.rows());
+                // 앞 묶음은 뒤에서부터 놓인다([`bar`]) — 떨어지는 차례의 거꾸로가 화면의 차례다.
+                let want: String = [
+                    (!c.leaf).then_some("Enter 들어가기"),
+                    (!c.root).then_some("Bksp 나가기"),
+                    Some("/ 검색"),
+                    Some("Tab 상세"),
+                    Some("j·k 이동"),
+                    Some("Esc 풀기"),
+                    Some("SPC 메뉴"),
+                ]
+                .into_iter()
+                .flatten()
+                .map(|h| format!(" {h}"))
+                .collect();
+                let bar = render(&mut a, 80, 14).last().cloned().unwrap_or_default();
+                assert_eq!(bar, want, "{place:?} 줄 {at} ({c:?})");
+            }
+        }
+    }
+
+    /// **`g` 를 누르고 기다리는 동안 바가 그것을 말한다**(moai-k3yi) — 메뉴가 서는 자리에서, 이어
+    /// 누를 키와 낱말을 표에서 읽어. 다음 키가 동작이든(`gg`) 뜻이 없든(`g j`) 열이 비면 바가
+    /// 돌아온다. 메뉴 창은 안 뜬다 — `g` 는 메뉴가 아니다.
+    #[test]
+    fn a_pending_g_names_what_it_waits_for_and_clears() {
+        let g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
+        for pane in Pane::ALL {
+            let mut a = app();
+            a.focus = pane;
+            let before = render(&mut a, 80, 14);
+            a.key(g);
+            let lines = render(&mut a, 80, 14);
+            assert_eq!(lines.last().map(String::as_str), Some(" g → g 맨 위"), "{pane:?}");
+            assert!(!lines.iter().any(|l| l.contains("┌ SPC")), "`g` 가 메뉴 창을 띄웠다");
+            a.key(g);
+            assert_eq!(render(&mut a, 80, 14).last(), before.last(), "{pane:?}: `gg` 뒤에 바가 안 돌아왔다");
+            a.key(g);
+            a.key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+            assert_eq!(render(&mut a, 80, 14).last(), before.last(), "{pane:?}: 뜻 없는 키 뒤에 바가 안 돌아왔다");
         }
     }
 
     /// **80칸에서 바의 키가 하나도 안 떨어진다** — 옮긴 키가 빠져 자리가 났다(moai-7sjm). 상세
     /// 포커스에서는 드나드는 키가 빠진다.
+    ///
+    /// 드나드는 키가 둘 다 듣는 자리(층이 있는 프로젝트의 에픽 안 `..`)에서 잰다 — 바가 가장 긴 곳이다.
     #[test]
     fn the_key_bar_fits_whole_at_eighty_columns() {
         for w in [80u16, 100, 120] {
-            let mut a = app();
+            let mut a = Place::LayeredInsideUp.app();
             a.filter_text = Some("tag=x".into());
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
             for shown in ["j·k 이동", "Tab 상세", "/ 검색", "Bksp 나가기", "Enter 들어가기", "Esc 풀기", "SPC 메뉴"] {
@@ -2835,15 +3007,18 @@ pub(super) mod tests {
     fn every_key_on_the_browse_bar_is_an_enabled_row_of_the_table() {
         use super::super::keys::{Lookup, lookup, parse};
         use super::super::layer::At;
-        for layer in [false, true] {
+        // 층, 그리고 프로젝트 안에서 커서가 선 줄(잎·디렉터리·`..` × 층 없는 뿌리·층 있는 뿌리·에픽 안).
+        let mut seen = std::collections::HashSet::new();
+        for place in [None].into_iter().chain(Place::ALL.map(Some)) {
             for pane in Pane::ALL {
                 for on in [false, true] {
-                    let mut a = if layer { layered(At::Layer) } else { app() };
+                    let mut a = place.map_or_else(|| layered(At::Layer), Place::app);
                     a.focus = pane;
                     a.filter_text = on.then(|| "tag=x".to_string());
                     (a.worktree, a.raw) = (on, on);
-                    let c = a.key_ctx();
-                    let (optional, keep) = browse_hints(&a);
+                    let c = a.key_ctx(&a.rows());
+                    seen.insert((c.list_focus, c.leaf, c.root));
+                    let (optional, keep) = browse_hints(&a, &c);
                     assert!(keep.last().is_some_and(|(k, w)| k == "SPC" && *w == "메뉴"), "{c:?}: 메뉴로 가는 길이 늘 남지 않는다");
                     assert_eq!(lookup(BROWSE, &[parse("SPC").unwrap()]), Lookup::Pending, "SPC 가 메뉴를 안 연다");
                     for (names, what) in optional.iter().chain(&keep[..keep.len() - 1]) {
@@ -2855,6 +3030,12 @@ pub(super) mod tests {
                         }
                     }
                 }
+            }
+        }
+        // 조합이 커서의 사실을 정말 고루 돌았는가 — 목록 포커스에서 잎·뿌리가 켜지고 꺼진 네 가지.
+        for leaf in [false, true] {
+            for root in [false, true] {
+                assert!(seen.contains(&(true, leaf, root)), "잎 {leaf}·뿌리 {root} 를 안 돌았다 — {seen:?}");
             }
         }
     }
