@@ -64,8 +64,11 @@ pub struct Place {
 }
 
 /// 설정 표식까지 재는 까닭: `moai init` 은 설정이 먼저 생기고, 깨진 설정을 고친 것은
-/// 스냅샷 표식으로는 안 보인다. 둘 다 `stat` 하나라 걸음마다 재도 싸다.
-type Marks = (Stamp, Stamp);
+/// 스냅샷 표식으로는 안 보인다. **디렉터리가 있는지도 잰다** — `.moai` 없는 디렉터리가
+/// 지워지거나(init 전 → 없다) 빈 디렉터리로 다시 생기면(없다 → init 전) 두 파일의 표식은
+/// 둘 다 `None` 그대로라, 층이 옛 까닭과 옛 고칠 길을 영영 댄다. 셋 다 `stat` 하나라
+/// 걸음마다 재도 싸다.
+type Marks = (bool, Stamp, Stamp);
 
 /// 프로젝트 하나를 본 것.
 pub enum Look {
@@ -109,7 +112,7 @@ struct Looked {
 
 fn marks_of(dir: &Path) -> Marks {
     let moai = dir.join(".moai");
-    (crate::store::stamp(&moai.join("issues.jsonl")), crate::store::stamp(&moai.join("config.toml")))
+    (dir.is_dir(), crate::store::stamp(&moai.join("issues.jsonl")), crate::store::stamp(&moai.join("config.toml")))
 }
 
 /// 같은 디렉터리인가. 철자가 같으면 그만이고, 아니면 링크를 풀어 견준다 — 등록은 푼
@@ -201,7 +204,7 @@ impl Layer {
                 path: p.path,
                 name,
                 look: Look::Unread,
-                marks: (None, None),
+                marks: (false, None, None),
             })
             .collect();
         let at = match places.iter().find(|p| p.launched) {
@@ -464,7 +467,7 @@ fn blank_config() -> crate::config::Config {
 }
 
 /// 그림 시험이 디스크 없이 층을 세운다. 읽을 것이 없게 모든 줄을 이미 본 것으로 둔다 —
-/// 없는 경로의 표식은 `(None, None)` 이라 [`Layer::stale`] 이 다시 읽으러 가지 않는다.
+/// 없는 경로의 표식은 `(false, None, None)` 이라 [`Layer::stale`] 이 다시 읽으러 가지 않는다.
 #[cfg(test)]
 pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
     Layer {
@@ -477,7 +480,7 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
                 registered: true,
                 launched: false,
                 look,
-                marks: (None, None),
+                marks: (false, None, None),
             })
             .collect(),
         problems: Vec::new(),
@@ -765,7 +768,7 @@ mod tests {
         assert!(!a.loading(), "아무것도 안 바뀌었는데 읽으러 갔다");
 
         write_lines(&two, &[("argos-0001", "two 의 집은 줄", "done")]);
-        assert_eq!(a.layer.as_ref().unwrap().stale(), [two.clone()]);
+        assert_eq!(a.layer.as_ref().unwrap().stale(), std::slice::from_ref(&two));
         a.follow();
         assert!(a.loading(), "바뀐 것을 보고도 안 읽었다");
         settle(&mut a);
@@ -781,6 +784,25 @@ mod tests {
         a.key(key(KeyCode::Backspace));
         let Look::Open { sum } = look(&a, "two") else { panic!() };
         assert_eq!(sum.picked.len(), 1, "올라갈 때 바뀐 것을 안 읽었다");
+    }
+
+    /// **`.moai` 없는 디렉터리가 사라지거나 다시 생기는 것도 본다.** 두 파일의 표식은 그
+    /// 동안 둘 다 없음 그대로라, 디렉터리를 안 재면 층이 "init 전" 을 영영 댄다.
+    #[test]
+    fn a_bare_directory_that_disappears_is_reread() {
+        let s = Scratch::new("vanish");
+        let bare = s.dir("bare");
+        let cfg = s.register(&[&bare]);
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        assert!(matches!(look(&a, "bare"), Look::Shut { state: Shut::Uninit, .. }));
+
+        std::fs::remove_dir_all(&bare).unwrap();
+        settle(&mut a);
+        assert!(matches!(look(&a, "bare"), Look::Shut { state: Shut::Missing, .. }), "사라진 디렉터리를 init 전으로 둔다");
+
+        std::fs::create_dir_all(&bare).unwrap();
+        settle(&mut a);
+        assert!(matches!(look(&a, "bare"), Look::Shut { state: Shut::Uninit, .. }), "다시 생긴 디렉터리를 없다로 둔다");
     }
 
     /// **층에서 `n` 은 아무 데도 안 쓴다** — 담을 프로젝트가 안 정해졌다. 폼을 안 열고 왜

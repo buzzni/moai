@@ -404,11 +404,14 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // **줄이 있으면 "비었다" 라고 하지 않는다.** 셈은 config 에 있는 칸의 일만
     // 세므로, 묶음만 있는 디렉터리·바구니만 있는 디렉터리·config 에 없는 칸에
     // 선 줄에서는 비어 있고, 그때 제목이 목록과 정면으로 어긋난다.
-    let title = match (counts.is_empty(), rows.is_empty()) {
+    // `..` 은 줄로 안 센다 — 층이 있으면 프로젝트 뿌리에도 서므로, 세면 빈 프로젝트가
+    // " 1줄 " 로 서고 "비었다" 에 영영 못 닿는다.
+    let lines = rows.iter().filter(|r| !matches!(r, Row::Up)).count();
+    let title = match (counts.is_empty(), lines == 0) {
         // 층의 줄은 일이 아니라 프로젝트다 — 칸 셈은 줄마다 곁에 선다.
         _ if app.on_layer() => format!(" 프로젝트 {}곳 ", rows.len()),
         (_, true) => " 비었다 ".to_string(),
-        (true, false) => format!(" {}줄 ", rows.len()),
+        (true, false) => format!(" {lines}줄 "),
         (false, _) => format!(" {} ", counts.join("  ")),
     };
     // **자리는 프레임을 넘어 산다**(`App::list`). 매번 새로 세면 훑는 자리가 0 으로
@@ -967,7 +970,12 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
     out.extend(wrapped(&place.path.display().to_string(), w, dim()));
     match (place.launched, place.registered) {
         (true, true) => out.push(Line::from(Span::styled("여기서 띄웠다", dim()))),
-        (true, false) => out.extend(wrapped("여기서 띄웠다 · 등록 안 됨 — `moai project add .` 로 더하면 어디서든 보인다", w, dim())),
+        // 고칠 명령에는 **그 뿌리를** 댄다. `.` 이라 적으면 하위 디렉터리에서 띄운 사람이 그
+        // 하위 디렉터리를 등록한다 — 그곳은 `.moai` 가 없어 "init 전" 으로 선다.
+        (true, false) => {
+            let at = crate::text::shell_word(&crate::text::sanitize(&place.path.display().to_string()));
+            out.extend(wrapped(&format!("여기서 띄웠다 · 등록 안 됨 — `moai project add {at}` 로 더하면 어디서든 보인다"), w, dim()))
+        }
         _ => {}
     }
     out.push(Line::from(""));
@@ -2485,6 +2493,23 @@ mod tests {
         let mut empty = App::new(Vec::new(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         let lines = render(&mut empty, 60, 10).join("\n");
         assert!(lines.contains("비었다"), "{lines}");
+    }
+
+    /// **층으로 가는 `..` 은 줄로 안 센다** — 층이 있으면 빈 프로젝트의 뿌리에도 `..` 이
+    /// 서는데, 그것을 세면 목록 제목이 " 1줄 " 이 되어 빈 프로젝트를 비었다고 못 한다.
+    #[test]
+    fn an_empty_project_under_the_layer_is_still_called_empty() {
+        use super::super::layer::At;
+        let mut a = layered(At::Project("/w/one".into()));
+        a.issues.clear();
+        a.index = crate::nav::Index::of(&[]);
+        a.keep.clear();
+        a.warnings = 0;
+        a.cursor = 0;
+        assert_eq!(a.rows(), [Row::Up]);
+        let lines = render(&mut a, 60, 10);
+        let title = lines.iter().find(|l| l.contains('┌')).unwrap();
+        assert!(title.contains("비었다") && !title.contains("1줄"), "{title:?}");
     }
 
     /// 글칸의 커서는 **터미널 커서**가 글 안 제 자리에 선다. 한글은 두 칸이고,
