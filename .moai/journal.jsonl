@@ -1915,3 +1915,9 @@
 {"ts":"2026-09-14T12:28:40Z","id":"moai-rvcb.7u5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 1(blocks→blockers)은 반영했다(265ea45, 전체 시험 684+247 다시 돌림). 넘긴 둘 — 스냅샷의 모르는 필드와 덧붙인 키의 같은 이름은 이 diff 만의 것이 아니라 children·journal·members·shelved_by 도 같은 결이라 moai-yec5(idea)로 담았다. blocks_of 가 묶음에 막힌 줄이 있을 때 저장소 전부의 묶음 칸을 다시 세는 비용은 held 와 같은 자리이고 막음이 있는 줄을 펼칠 때만 들어 이슈로 세우지 않는다."}
 {"ts":"2026-09-14T12:28:40Z","id":"moai-fix6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 — days_since 가 음수를 0 으로 누른다"}
 {"ts":"2026-09-14T12:30:04Z","id":"moai-w6n2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"acc5c5f (c99fa3a). 리뷰 moai-w6n2.odd 지적 없음"}
+{"ts":"2026-09-14T12:33:09Z","id":"moai-ugjp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"status 가 지금보다 한참 뒤인 시각을 든 줄을 드러낸다 — days_since 가 0 으로 누른 뒤로 2099 같은 오타가 '오늘' 로 숨는다"}
+{"ts":"2026-09-14T12:34:00Z","id":"moai-iq0v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:34:00Z","id":"moai-iq0v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"todo"}
+{"ts":"2026-09-14T12:34:00Z","id":"moai-dtye","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"안내 명령의 경로가 맨 앞 '-' 면 따옴표로 싸도 clap 이 플래그로 읽는다 — shell_word 가 막지 못한다"}
+{"ts":"2026-09-14T12:34:01Z","id":"moai-iq0v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-dtye 로 옮겨 작업한다 (감독 세션 moa-issue-45 가 맡김)"}
+{"ts":"2026-09-14T12:34:01Z","id":"moai-dtye","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
