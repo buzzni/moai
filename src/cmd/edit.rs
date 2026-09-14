@@ -237,18 +237,13 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
 
     let Edited { issue: edited, epic, children, shelved, read, changed, kept, kept_milestone, blocked } = done;
     if ctx.json {
-        // **이 키는 우리 것이다** — `Row` 가 `derived_status` 를 걷는 것과 같은 까닭이다.
-        // `--json` 을 되써 넣어 모르는 필드로 든 줄이면 한 객체에 같은 키가 둘 서거나,
-        // 끊긴 줄이 안 끊긴 것처럼 읽힌다. 파일의 값은 그대로 둔다.
-        let shown = match INHERITED.iter().any(|k| edited.rest.contains_key(*k)) {
-            false => std::borrow::Cow::Borrowed(&edited),
-            true => {
-                let mut own = edited.clone();
-                own.rest.retain(|k, _| !INHERITED.contains(&k.as_str()));
-                std::borrow::Cow::Owned(own)
-            }
-        };
-        let row = super::Row::from(&shown, &read);
+        // **이 키는 우리 것이다** — `--json` 을 되써 넣어 모르는 필드로 든 줄이면 한 객체에 같은
+        // 키가 둘 서거나, 끊긴 줄이 안 끊긴 것처럼 읽힌다. 파일의 값은 그대로 둔다. 걷는 길은
+        // `json_with` 와 같은 `Shown::without` 이다(moai-kgu2) — 목록만 여기 있다. `Out` 에
+        // 덧붙이는 필드를 더하면 `INHERITED` 에도 더한다.
+        use super::Shown;
+        let row = super::Row::from(&edited, &read);
+        let row = row.without(&INHERITED).unwrap_or(row);
         return super::json_line(&Out {
             row,
             inherited_epic: kept.as_ref(),

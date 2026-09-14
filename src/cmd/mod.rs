@@ -339,6 +339,30 @@ impl<'a> Row<'a> {
     }
 }
 
+/// [`json_with`] 가 덧붙이는 객체. **덧붙일 키와 같은 이름을 제가 들고 있으면 걷은 모습**을
+/// 낸다 — 기본은 걷을 것이 없다.
+pub trait Shown: serde::Serialize + Sized {
+    fn without(&self, _keys: &[&str]) -> Option<Self> {
+        None
+    }
+}
+
+/// 줄 하나의 기계 출력은 **모르는 필드**(`Issue::rest`)를 그대로 편다. 그 가운데 덧붙일 키와
+/// 이름이 같은 것만 걷는다(moai-kgu2) — `derived_status`·`branch`(`Row::of`)와 같은 약속이다.
+impl Shown for Row<'_> {
+    fn without(&self, keys: &[&str]) -> Option<Self> {
+        if !keys.iter().any(|k| self.issue.rest.contains_key(*k)) {
+            return None;
+        }
+        let mut own = self.issue.clone().into_owned();
+        own.rest.retain(|k, _| !keys.contains(&k.as_str()));
+        Some(Row { issue: std::borrow::Cow::Owned(own), derived_status: self.derived_status, branch: self.branch })
+    }
+}
+
+/// 필드가 선언된 것뿐이라 걷을 것이 없다.
+impl Shown for crate::report::StatusReport {}
+
 /// 묶음 id → 멤버에서 읽은 칸. 락 밖으로 들고 나가는 모양이라 제 문자열을 쥔다.
 pub type Read = BTreeMap<String, String>;
 
@@ -353,8 +377,15 @@ pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids:
 
 /// 객체 하나에 필드를 덧붙여 낸다. 선언 순서를 지키려면 직렬화된 뒤에
 /// 붙이는 수밖에 없다 — 중간에 `Value` 를 쓰면 순서가 사라진다.
-pub fn json_with<T: serde::Serialize>(base: &T, extra: &[(&str, String)]) -> R<Vec<String>> {
-    let mut s = serde_json::to_string(base).map_err(|e| Fail::new(e.to_string()))?;
+///
+/// **덧붙인 키가 이긴다**(moai-kgu2, 사용자와 정함). 줄이 모르는 필드로 같은 이름을 들고 있으면
+/// (`--json` 을 파일에 되써 넣은 줄) 한 객체에 같은 키가 둘 서서 깐깐한 파서가 거절하거나 앞의
+/// 값을 읽는다. 그 이름은 **여기서** 걷는다 — 덧붙이는 자리마다 목록을 두면 새 키를 더할 때 빠진다.
+/// 걷는 것은 출력뿐이고 파일의 값은 그대로다(모르는 필드 보존, `moai status` 가 비춘다).
+pub fn json_with<T: Shown>(base: &T, extra: &[(&str, String)]) -> R<Vec<String>> {
+    let keys: Vec<&str> = extra.iter().map(|(k, _)| *k).collect();
+    let stripped = base.without(&keys);
+    let mut s = serde_json::to_string(stripped.as_ref().unwrap_or(base)).map_err(|e| Fail::new(e.to_string()))?;
     if !s.ends_with('}') {
         return Err(Fail::new("객체가 아니다"));
     }
@@ -396,4 +427,46 @@ pub fn shelved(pairs: &[(String, Vec<String>)]) -> Vec<Shelved<'_>> {
         .iter()
         .map(|(id, roots)| Shelved { id, root: roots.first().map_or("", String::as_str), roots })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Issue, Kind, Status};
+
+    fn row_with(rest: &[(&str, &str)]) -> Issue {
+        let mut i = Issue::new("argos-0001".into(), "제목".into(), Kind::Epic, Status::new("todo"), "2026-09-11T04:12:03Z");
+        for (k, v) in rest {
+            i.rest.insert(k.to_string(), serde_json::Value::String(v.to_string()));
+        }
+        i
+    }
+
+    /// **덧붙인 키가 이긴다**(moai-kgu2) — `show` 가 덧붙이는 키 전부에 같은 자로 선다. 겹치지
+    /// 않는 모르는 필드와 곁들인 `derived_status` 는 그대로 남는다.
+    #[test]
+    fn every_appended_key_wins_over_an_unknown_field_and_nothing_else_is_lost() {
+        let i = row_with(&[("members", "가짜"), ("shelved_by", "가짜"), ("duplicate_lines", "가짜"), ("due", "2026-10-01")]);
+        let row = Row::of(&i, Some("in_progress"));
+        let extra = [
+            ("members", "[]".to_string()),
+            ("shelved_by", "\"argos-0002\"".to_string()),
+            ("duplicate_lines", "2".to_string()),
+        ];
+        let out = json_with(&row, &extra).unwrap().join("");
+        for (k, v) in &extra {
+            assert_eq!(out.matches(&format!("\"{k}\":")).count(), 1, "{k} 가 둘 섰다\n{out}");
+            assert!(out.contains(&format!("\"{k}\":{v}")), "{k} 에 우리 값이 안 섰다\n{out}");
+        }
+        assert!(!out.contains("가짜"), "{out}");
+        assert!(out.contains("\"due\":\"2026-10-01\""), "겹치지 않는 모르는 필드까지 걷었다\n{out}");
+        assert!(out.contains("\"derived_status\":\"in_progress\""), "{out}");
+    }
+
+    /// 겹치는 것이 없으면 걷은 모습을 짓지 않는다 — 흔한 길에서 줄을 복제하지 않는다.
+    #[test]
+    fn nothing_to_strip_means_no_copy() {
+        let i = row_with(&[("due", "2026-10-01")]);
+        assert!(Row::of(&i, None).without(&["children", "journal"]).is_none());
+    }
 }
