@@ -437,10 +437,16 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
     };
     // **겹쳐 보는 중이면 늘 보인다** — 거름망 뱃지와 같은 까닭이다. 옆에서 온 줄에만
     // `⎇` 가 붙으므로, 옆이 조용하면 켜진 화면과 꺼진 화면이 똑같이 보인다.
+    // **끄는 법은 끌 수 있는 자리에서만 댄다** — 층에서는 `SPC t w` 가 메뉴에 안 서고 말없이
+    // 꺼져 있으므로(`Browse::enabled`), 적어 두면 눌러도 아무 일이 없는 키가 된다.
     let overlay = app.worktree.then(|| {
         let trees = app.origin.labels();
         let names = if trees.is_empty() { "옆 워크트리 없음".to_string() } else { trees.join(", ") };
-        clip(&format!("{} {names}  {} 로 끈다", style::BRANCH_GLYPH, label(BROWSE, Browse::Worktree)), w / 2)
+        let off = match Browse::Worktree.enabled(&app.key_ctx()) {
+            Ok(()) => format!("  {} 로 끈다", label(BROWSE, Browse::Worktree)),
+            Err(_) => String::new(),
+        };
+        clip(&format!("{} {names}{off}", style::BRANCH_GLYPH), w / 2)
     });
     let room = match &overlay {
         Some(o) => room.saturating_sub(crate::text::width(o) + 3),
@@ -2397,6 +2403,9 @@ pub(super) mod tests {
         for absent in ["거름망", "검색", "Bksp", "워크트리", "F3", "F10"] {
             assert!(!bar.contains(absent), "층에서 안 듣는 키를 적었다 — {absent} in {bar:?}");
         }
+        // 층에서도 겹쳐 보기는 켜져 있어 뱃지가 서지만, `SPC t w` 는 층의 메뉴에 안 서므로 끄는 법을 대지 않는다.
+        assert!(a.worktree && lines[0].contains('⎇'), "{:?}", lines[0]);
+        assert!(!lines[0].contains("로 끈다"), "층에서 안 듣는 끄는 키를 댄다 — {:?}", lines[0]);
         for l in &lines {
             assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
         }
