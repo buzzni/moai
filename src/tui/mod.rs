@@ -298,6 +298,10 @@ pub struct App {
     /// `trouble` 과 **따로 든다.** 쓰기 뒤 다시 읽기가 실패하면 둘이 함께 참이다 —
     /// 파일에는 담겼고 화면은 못 읽었다. 한 칸에 담으면 어느 한쪽이 거짓말을 한다.
     pub notice: Option<String>,
+    /// 사용자 설정을 못 읽어 **층을 안 세운** 까닭. 층이 서면 층이 제 `problems` 를 대므로
+    /// 층이 없을 때만 든다. 붙박이다 — 다시 읽기가 걷는 `trouble` 에 두면 700ms 뒤에
+    /// 사라져 사람은 층이 왜 없는지 끝내 모른다. F5 로 설정을 다시 읽어 층이 서면 걷힌다.
+    pub unlayered: Option<String>,
     /// `--user` 로 **준 값 그대로**(`Ctx::user` 와 같다), 또는 누군지 묻는 칸에서
     /// 받은 것([`Mode::Ask`]). 쓸 때마다 `model::actor` 로 푼다 — 미리 풀어 두면
     /// 설정 없는 기계에서 읽기만 하려던 탐색기가 여는 순간 사람을 묻는다. 읽기는
@@ -426,6 +430,7 @@ impl App {
             now: crate::model::now(),
             unreadable: unreadable_ids,
             trouble: None,
+            unlayered: None,
             write_failed: false,
             notice: None,
             user: None,

@@ -443,6 +443,13 @@ pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor
 
 /// temp 에 쓰고 `rename` 으로 갈아끼운다. 독자는 옛 파일 아니면 새 파일만 본다.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
+    write_atomic_as(path, bytes, None)
+}
+
+/// [`write_atomic`] 이되 **바꿔 끼우기 전에** 임시 파일에 권한을 입힌다. 새로 만든 임시
+/// 파일은 umask 권한이라, 그대로 `rename` 하면 사람이 `chmod 600` 해 둔 파일이 쓰기 한
+/// 번에 남도 읽는 파일로 바뀐다. 바꾼 뒤에 입히면 그 사이 잠깐 열려 있으므로 앞에서 한다.
+pub(crate) fn write_atomic_as(path: &Path, bytes: &[u8], perms: Option<std::fs::Permissions>) -> R<()> {
     let dir = path.parent().ok_or_else(|| Fail::new("경로에 디렉터리가 없다"))?;
     let tmp = dir.join(format!(
         "{}.tmp.{}",
@@ -452,6 +459,9 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
     let err = |e: std::io::Error| Fail::new(format!("{}: {e}", tmp.display()));
     {
         let mut f = std::fs::File::create(&tmp).map_err(err)?;
+        if let Some(p) = perms {
+            f.set_permissions(p).map_err(err)?;
+        }
         f.write_all(bytes).map_err(err)?;
         f.sync_all().map_err(err)?;
     }

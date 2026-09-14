@@ -296,6 +296,22 @@ impl App {
 
     /// `.moai` 안에서 띄운 탐색기에 층을 얹는다. 첫 화면은 오늘처럼 첫 항목에 선다 — 새로
     /// 선 `..` 에 커서를 두면 여는 순간의 Enter 가 층으로 올라간다.
+    /// 안에서 띄운 탐색기에 층을 얹는다 — **등록한 것이 읽혔을 때만.** 설정이 깨져 하나도
+    /// 안 읽혔으면 층은 안 서지만 까닭을 [`App::unlayered`] 에 붙여 배너가 댄다. 층이
+    /// 조용히 사라지면 여러 프로젝트 보기가 고장 난 줄만 알고, 같은 자리의 `moai status`
+    /// 는 파싱 오류를 댄다. 층이 서면 층이 제 `problems` 로 댄다.
+    pub fn attach_layer(self, layer: Layer) -> App {
+        if layer.registered() {
+            return self.with_layer(layer);
+        }
+        let mut app = self;
+        if !layer.problems.is_empty() {
+            let why = layer.problems.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>().join(" · ");
+            app.unlayered = Some(format!("사용자 설정을 못 읽어 프로젝트 층을 안 세웠다 — {why}"));
+        }
+        app
+    }
+
     pub fn with_layer(mut self, layer: Layer) -> App {
         self.layer = Some(layer);
         if self.path.is_empty() && self.cursor == 0 && self.rows().len() > 1 {
@@ -866,6 +882,34 @@ mod tests {
         a.key(key(KeyCode::Down));
         a.key(key(KeyCode::Enter));
         assert!(!a.worktree, "다음 프로젝트가 시키지 않은 겹쳐 보기로 읽혔다");
+    }
+
+    /// **설정이 깨져 층이 안 서도 까닭은 댄다.** 등록한 것이 하나도 안 읽히면 층은 없고
+    /// (프로젝트 안 화면은 예전 그대로), 배너가 설정의 문제를 한 줄로 댄다. 멀쩡한 설정이면
+    /// 그 줄이 없다.
+    #[test]
+    fn a_broken_config_leaves_no_layer_but_says_why() {
+        let s = Scratch::new("broken-cfg");
+        let here = s.project("here", &[("argos-0009", "여기 줄", "todo")]);
+        let cfg = s.0.join("broken.toml");
+        std::fs::write(&cfg, "[[project]]\npath = \"/x\"\n[[project\n").unwrap();
+        let open = || {
+            let repo = Repo { root: here.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
+            let stamp = stamp_of(&repo);
+            let load = repo.read().unwrap();
+            let index = Index::of(&load.issues);
+            App::open(repo, load, index, NavPath::new(), stamp)
+        };
+        let mut a = open().attach_layer(Layer::read(Some(&cfg), Some(&here)));
+        assert!(a.layer.is_none(), "깨진 설정으로 층을 세웠다");
+        let why = a.unlayered.clone().expect("층이 없는 까닭을 안 들었다");
+        assert!(why.contains("TOML") && !why.contains('\n'), "{why:?}");
+        let banner = super::super::draw::tests_banner(&mut a);
+        assert!(banner.contains("프로젝트 층을 안 세웠다"), "배너가 까닭을 안 댔다 — {banner:?}");
+
+        std::fs::write(&cfg, "").unwrap();
+        let a = open().attach_layer(Layer::read(Some(&cfg), Some(&here)));
+        assert!(a.layer.is_none() && a.unlayered.is_none(), "멀쩡한 빈 설정에 까닭을 달았다");
     }
 
     /// **`.moai` 안에서 띄우면 그 안에서 시작하고, 뿌리에서 Bksp 로 층에 올라가 띄운 자리에

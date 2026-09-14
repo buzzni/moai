@@ -23,7 +23,7 @@
 //! ```
 
 use crate::fail::{Fail, R, code};
-use crate::store::{Lock, write_atomic};
+use crate::store::Lock;
 use crate::style::Hue;
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
@@ -180,7 +180,11 @@ pub fn update<T>(path: &Path, f: impl FnOnce(&mut Doc) -> R<T>) -> R<T> {
     // 보는 까닭은, 라이브러리가 어느 날 공백 하나를 달리 내더라도 헛 쓰기가 안
     // 생기게 하려는 것이다.
     if doc.dirty {
-        write_atomic(path, doc.render().as_bytes())?;
+        // **사람이 정한 권한을 지킨다.** 설정은 사람의 파일이다 — `chmod 600` 해 둔 것이
+        // 등록 한 번에 0644 로 풀리면 안 되고, 권한까지 추적하는 dotfiles 저장소에 헛 변경이
+        // 뜬다. 파일이 없던 처음 쓰기만 umask 를 따른다.
+        let keep = std::fs::metadata(path).ok().map(|m| m.permissions());
+        crate::store::write_atomic_as(path, doc.render().as_bytes(), keep)?;
     }
     Ok(out)
 }

@@ -359,6 +359,12 @@ fn ask_why(why: &str) -> String {
 /// 고르지는 않는다**: 못 읽는 줄은 사람이 파일을 고칠 때까지 붙박이고 "바뀌었다"
 /// 는 지나가는 것이라, 붙박이가 이기면 지나가는 알림은 영영 안 보인다.
 /// 지금 할 일이 있는 것부터 앞에 놓고 이어 붙인다.
+/// 시험이 배너 글을 본다 — 그리지 않고 [`banner`] 가 낼 글만.
+#[cfg(test)]
+pub(crate) fn tests_banner(app: &mut App) -> String {
+    banner(app).map(|(t, _)| t).unwrap_or_default()
+}
+
 fn banner(app: &App) -> Option<(String, bool)> {
     let mut parts: Vec<String> = Vec::new();
     let mut urgent = false;
@@ -390,6 +396,13 @@ fn banner(app: &App) -> Option<(String, bool)> {
         && let Some(l) = &app.layer
     {
         parts.extend(l.problems.iter().map(|p| crate::text::sanitize(p).replace('\n', " ")));
+    }
+    // 층이 **안 선** 까닭은 프로젝트 안에서도 댄다 — 그 화면에서는 층이 없다는 것 말고
+    // 달리 알 길이 없다. 급하지 않다(이 프로젝트는 멀쩡하다).
+    if app.layer.is_none()
+        && let Some(u) = &app.unlayered
+    {
+        parts.push(u.clone());
     }
     // 알림 하나뿐이면 `!` 를 안 붙인다 — 담긴 것을 경보처럼 말하면 담을 때마다 무언가
     // 잘못된 줄 안다.

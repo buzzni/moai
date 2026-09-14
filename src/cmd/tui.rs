@@ -47,10 +47,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 화면을 등록한 저장소 수만큼 늦출 까닭이 없다.
     let config = crate::user_config::path();
     let layer = crate::tui::layer::Layer::read(config.as_deref(), Some(&repo.root));
-    let mut app = App::open(repo, load, index, path, stamp);
-    if layer.registered() {
-        app = app.with_layer(layer);
-    }
+    let mut app = App::open(repo, load, index, path, stamp).attach_layer(layer);
     app.user = ctx.user.clone();
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;

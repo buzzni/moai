@@ -5577,6 +5577,43 @@ fn a_broken_user_config_refuses_writes_but_ls_is_lenient() {
     assert_eq!(std::fs::read_to_string(&config).unwrap(), src);
 }
 
+/// **세션 시작점(`moai`)도 설정의 문제를 댄다.** 설정이 깨져 등록한 것이 하나도 안
+/// 읽히면 `status`·`ready` 는 파싱 오류를 대는데, 인자 없는 `moai` 만 "등록한 것이 없다,
+/// 더하라" 로 끝나 사람을 깨진 파일에 `project add` 치게 했다. 도움말 자리라 종료 코드는 0.
+#[test]
+fn bare_moai_outside_names_a_broken_user_config() {
+    let home = Scratch::new("bare-broken");
+    let config = home.path().join("config.toml");
+    std::fs::write(&config, "[[project]]\npath = \"/x\"\n[[project\n").unwrap();
+    let out = project(home.path(), &config, &[]);
+    assert!(out.status.success(), "{}", text(&out));
+    let said = text(&out);
+    assert!(said.contains("project add"), "{said}");
+    assert!(said.contains("TOML") && said.contains("config.toml"), "깨진 설정을 안 댔다\n{said}");
+
+    std::fs::write(&config, "").unwrap();
+    assert!(!text(&project(home.path(), &config, &[])).contains("TOML"), "멀쩡한 설정에 문제를 댔다");
+}
+
+/// **등록 한 번에 설정 파일의 권한이 풀리지 않는다.** 임시 파일은 umask 권한으로 새로
+/// 서므로 그대로 바꿔 끼우면 `chmod 600` 한 설정이 0644 가 된다.
+#[cfg(unix)]
+#[test]
+fn project_writes_keep_the_config_files_permissions() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = Scratch::new("project-perms");
+    let config = home.path().join("config.toml");
+    std::fs::create_dir_all(home.path().join("a")).unwrap();
+    std::fs::create_dir_all(home.path().join("b")).unwrap();
+    std::fs::write(&config, "# 내 설정\n").unwrap();
+    std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o600)).unwrap();
+    for args in [["project", "add", "a"].as_slice(), &["project", "color", "a", "green"], &["project", "add", "b"], &["project", "rm", "a"]] {
+        project_ok(home.path(), &config, args);
+        let mode = std::fs::metadata(&config).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "{args:?} 뒤에 권한이 {mode:o} 로 바뀌었다");
+    }
+}
+
 /// 설정 파일이 없을 때 빼면 아무 일도 안 한다 — 설정 디렉터리조차 만들지 않는다.
 #[test]
 fn project_rm_without_a_config_leaves_no_trace() {
