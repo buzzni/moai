@@ -1192,9 +1192,9 @@ fn show_draws_each_blocker_with_the_words_ready_uses() {
     assert!(line(&shown, &c).contains("끊김"), "끊긴 막음이 끊김으로 안 섰다\n{shown}");
     let json = ok(s.path(), &["show", &b, "--json"]);
     // 차례는 적힌 `blocked_by` 차례다 — 쓸 때 id 로 정렬되므로 여기서는 차례를 안 본다.
-    assert!(json.contains("\"blocks\":[") && json.contains(&format!("{{\"id\":\"{a}\",\"state\":\"done\"}}")), "{json}");
+    assert!(json.contains("\"blockers\":[") && json.contains(&format!("{{\"id\":\"{a}\",\"state\":\"done\"}}")), "{json}");
     assert!(json.contains(&format!("{{\"id\":\"{c}\",\"state\":\"missing\"}}")), "{json}");
-    assert!(!ok(s.path(), &["show", &a, "--json"]).contains("\"blocks\""), "막음이 없는데 blocks 키가 섰다");
+    assert!(!ok(s.path(), &["show", &a, "--json"]).contains("\"blockers\""), "막음이 없는데 blockers 키가 섰다");
 }
 
 /// 메모는 스냅샷을 건드리지 않고 저널에만 쌓인다.
