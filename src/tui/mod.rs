@@ -7,6 +7,7 @@ pub mod draw;
 pub mod edit;
 pub mod form;
 pub mod input;
+pub mod jotfile;
 pub mod keys;
 pub mod layer;
 pub mod picker;
@@ -387,6 +388,25 @@ pub struct App {
     pub launched_at: Option<std::path::PathBuf>,
     /// 고르기 창을 마지막으로 닫은 디렉터리 — 다시 열면 여기서 연다.
     pick_from: Option<std::path::PathBuf>,
+    /// 생각 담기를 적을 외부 편집기(moai-08af). **있으면 `n` 이 안 폼 대신 이것을 연다** —
+    /// 둘을 고르는 키나 설정은 없다(둘째 어휘). `cmd::tui` 가 띄울 때 한 번 고른다
+    /// ([`jotfile::pick`]). 시험이 세운 App 은 없어 안 폼을 연다 — 여기서 환경을 읽으면
+    /// 시험이 돌리는 사람의 `$EDITOR` 에 달린다.
+    pub editor: Option<String>,
+    /// 루프에 맡긴 "편집기로 열어 달라". **App 은 터미널을 모른다** — 터미널을 내리고 편집기를
+    /// 기다리고 다시 올리는 것은 루프가 하고, 받은 글은 [`App::edited`] 로 돌려준다.
+    pub edit: Option<Edit>,
+}
+
+/// 편집기로 적어 달라는 요청. 담을 곳은 **여는 순간 박힌 것**이다(moai-fccv) — 편집기가
+/// 도는 사이 층이 다시 읽혀도 돌아온 글은 이 곳으로 간다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Edit {
+    pub into: Option<form::Target>,
+    /// 파일에 먼저 적을 글([`jotfile::template`]).
+    pub text: String,
+    /// 띄울 편집기([`App::editor`] 를 연 순간 옮긴 것).
+    pub editor: String,
 }
 
 impl App {
@@ -489,6 +509,8 @@ impl App {
             user_config: None,
             launched_at: None,
             pick_from: None,
+            editor: None,
+            edit: None,
         };
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
         // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
@@ -1392,6 +1414,40 @@ impl App {
             Some(at) => self.issues[at].title.clone(),
             None => format!("{id}  {MISSING}"),
         }
+    }
+}
+
+impl App {
+    /// 편집기가 돌려준 것을 받는다(moai-08af). `got` 은 파일의 글이거나, 담지 않을 까닭
+    /// (편집기가 0 이 아닌 코드로 끝났다·못 띄웠다·못 읽었다)이다.
+    ///
+    /// **담는 길은 안 폼과 한 길이다.** 받은 제목·본문으로 폼을 세우고 [`save_idea`] 를
+    /// 부른다 — 박힌 곳에 서기(moai-fccv)·`write`·누구냐 묻고 다시 부르기(moai-nmv2)·쓴 뒤
+    /// 커서와 알림(moai-064q)이 전부 같다. 그래서 **담기가 실패하면 적은 글이 폼에 열린 채
+    /// 남는다** — 까닭은 배너에 서고, 고치고 다시 담거나 Esc 로 버린다. 적은 것이 임시
+    /// 파일과 함께 사라지지 않는다.
+    ///
+    /// 까닭이 왔거나 제목이 비면 **아무것도 안 쓰고** 한 줄 알린다. 폼도 안 연다 — 편집기를
+    /// 오류로 끝낸 것(vim 의 `:cq`)과 비워 닫은 것은 그만두겠다는 뜻이다(git 과 같다).
+    pub fn edited(&mut self, into: Option<form::Target>, got: Result<String, String>) {
+        let text = match got {
+            Ok(text) => text,
+            Err(why) => {
+                self.notice = Some(format!("담지 않았다 — {}", crate::text::one_line(&why)));
+                return;
+            }
+        };
+        let Some((title, body)) = jotfile::parse(&text) else {
+            self.notice = Some("담지 않았다 — 제목이 비었다".into());
+            return;
+        };
+        let mut form = Form::new(into);
+        form.title = Input::new(&title);
+        if let Some(body) = &body {
+            form.body = edit::Editor::new(body);
+        }
+        self.mode = Mode::Idea(form);
+        save_idea(self);
     }
 }
 
@@ -2954,6 +3010,113 @@ mod tests {
         a.key(key(KeyCode::Enter));
         settle(&mut a);
         assert_eq!(a.mode, Mode::Browse);
+    }
+
+    /// 편집기가 있는 판에서 `n` 을 눌러 루프에 맡긴 요청을 꺼낸다 — 루프가 하는 것을 흉내 낸다.
+    fn ask_editor(a: &mut App) -> Edit {
+        a.editor = Some("vi".into());
+        a.key(key(KeyCode::Char('n')));
+        assert_eq!(a.mode, Mode::Browse, "편집기가 있는데 안 폼을 열었다");
+        a.edit.take().expect("편집기를 청하지 않았다")
+    }
+
+    /// **편집기가 있으면 `n` 은 폼을 안 열고 루프에 편집기를 청한다.** 담을 곳은 여는 순간
+    /// 박히고 안내 글이 그곳을 댄다. 편집기가 없으면 오늘처럼 안 폼이다.
+    #[test]
+    fn n_asks_the_loop_for_the_editor_when_there_is_one() {
+        let (scratch, mut a) = writable("editor-ask");
+        let edit = ask_editor(&mut a);
+        assert_eq!(edit.into.as_ref().map(|t| t.path.clone()), Some(scratch.0.clone()));
+        assert_eq!(edit.editor, "vi");
+        assert!(edit.text.contains(&scratch.0.display().to_string()), "{}", edit.text);
+
+        let (_s, mut b) = writable("editor-none");
+        b.key(key(KeyCode::Char('n')));
+        assert_eq!(b.edit, None, "편집기가 없는데 청했다");
+        assert!(matches!(&b.mode, Mode::Idea(f) if f.into.is_some()), "{:?}", b.mode);
+    }
+
+    /// **편집기에서 받은 글은 폼과 같은 길로 담긴다** — 첫 줄 제목, 한 줄 띄우고 본문, 주석은
+    /// 걷고. 담기면 폼은 안 남고 커서와 알림은 `write` 가 한다.
+    #[test]
+    fn the_edited_text_is_saved_like_the_form() {
+        let (_scratch, mut a) = writable("editor-save");
+        let edit = ask_editor(&mut a);
+        let text = format!("  편집기에서 온 것 \n\n## 설계\n둘째 줄\n{}", edit.text);
+        a.edited(edit.into, Ok(text));
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
+        let repo = a.repo.clone().unwrap();
+        let made = ideas_in(&repo);
+        assert_eq!(made.len(), 1, "{made:?}");
+        assert_eq!((made[0].title.as_str(), made[0].body.as_deref()), ("편집기에서 온 것", Some("## 설계\n둘째 줄")));
+        assert_eq!(made[0].epic, None);
+        assert_eq!(on(&a), Some(made[0].id.clone()));
+        assert_eq!(a.notice, Some(format!("✓ 담김 · {}", made[0].id)));
+    }
+
+    /// **편집기가 오류로 끝났거나 제목이 비면 아무것도 안 쓴다** — 누군지도 안 묻고, 폼도 안
+    /// 열고, 한 줄로 까닭을 댄다.
+    #[test]
+    fn a_failed_or_empty_edit_writes_nothing_and_says_so() {
+        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+            panic!("담지 않을 글인데 누군지 물었다")
+        }
+        let (scratch, mut a) = writable("editor-nothing");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let before = std::fs::read_to_string(&file).unwrap();
+        a.identify = refuse;
+        for (got, says) in [
+            (Err("편집기가 3 로 끝났다(vi)".to_string()), "3 로 끝났다"),
+            (Ok(String::new()), "제목이 비었다"),
+            // 안 고치고 닫은 안내 글 그대로
+            (Ok(jotfile::template(None)), "제목이 비었다"),
+        ] {
+            let edit = ask_editor(&mut a);
+            a.edited(edit.into, got);
+            assert_eq!(a.mode, Mode::Browse, "{:?}", a.mode);
+            assert!(a.notice.as_deref().is_some_and(|n| n.starts_with("담지 않았다") && n.contains(says)), "{says} {:?}", a.notice);
+            assert!(a.trouble.is_none(), "그만둔 것은 실패가 아니다 — {:?}", a.trouble);
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+        }
+    }
+
+    /// **누군지 모르면 편집기에서 온 글도 묻고, 받으면 그 글이 박힌 곳에 담긴다.** 묻는 칸
+    /// 뒤에 선 것은 받은 글로 채운 폼이다 — Esc 로 그만둬도 글은 폼에 남는다.
+    #[test]
+    fn an_edit_that_needs_a_name_asks_and_then_lands_in_the_fixed_project() {
+        let (scratch, mut a) = writable("editor-ask-who");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let before = std::fs::read_to_string(&file).unwrap();
+        a.user = None;
+        a.identify = nobody;
+        let edit = ask_editor(&mut a);
+        a.edited(edit.into, Ok("물어볼 것\n\n본문".into()));
+        let Mode::Ask(ask) = &a.mode else { panic!("모르는데 안 물었다 — {:?}", a.mode) };
+        assert!(matches!(ask.back.as_ref(), Mode::Idea(f) if f.title.text() == "물어볼 것" && f.body.text() == "본문"), "{:?}", ask.back);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before, "묻기 전에 썼다");
+
+        type_in(&mut a, "레이븐 (raven@example.com)");
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
+        let made = ideas_in(a.repo.as_ref().unwrap());
+        assert_eq!((made.len(), made[0].title.as_str(), made[0].body.as_deref()), (1, "물어볼 것", Some("본문")));
+    }
+
+    /// **담기가 실패하면 편집기에서 적은 글이 폼에 열린 채 남는다** — 임시 파일과 함께 사라지지
+    /// 않는다. 고치고 다시 담으면 담긴다.
+    #[test]
+    fn a_failed_save_of_an_edit_keeps_the_text_in_the_form() {
+        let (scratch, mut a) = writable("editor-fail");
+        let lock = scratch.0.join(".moai/lock");
+        std::fs::create_dir_all(&lock).unwrap();
+        let edit = ask_editor(&mut a);
+        a.edited(edit.into, Ok("못 담길 것\n\n긴 본문".into()));
+        assert!(matches!(&a.mode, Mode::Idea(f) if f.title.text() == "못 담길 것" && f.body.text() == "긴 본문"), "{:?}", a.mode);
+        assert!(a.trouble.as_deref().is_some_and(|t| t.starts_with("쓰지 못했다")), "{:?}", a.trouble);
+        std::fs::remove_dir(&lock).unwrap();
+        a.key(ctrl('s'));
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
+        assert_eq!(ideas_in(a.repo.as_ref().unwrap()).len(), 1);
     }
 
     /// 빈 디렉터리에서도 무너지지 않는다.

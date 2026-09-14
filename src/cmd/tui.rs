@@ -55,6 +55,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
     app.launched_at = std::env::current_dir().ok();
+    app.editor = editor();
     screen(app)
 }
 
@@ -115,6 +116,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.user = ctx.user.clone();
     app.user_config = config;
     app.launched_at = std::env::current_dir().ok();
+    app.editor = editor();
     screen(app)
 }
 
@@ -307,6 +309,109 @@ fn paste_off_on_panic() {
     }));
 }
 
+/// 생각 담기를 적을 편집기(moai-08af). **환경과 PATH 를 읽는 것은 여기다** — 고르는 차례는
+/// 조각([`crate::tui::jotfile::pick`])이 정한다. 띄울 때 한 번 고른다: 도는 중에 `$EDITOR` 가
+/// 바뀔 길은 없고, 키마다 PATH 를 훑을 까닭도 없다.
+fn editor() -> Option<String> {
+    let var = |k: &str| std::env::var(k).ok();
+    crate::tui::jotfile::pick(var("VISUAL").as_deref(), var("EDITOR").as_deref(), on_path)
+}
+
+/// PATH 에 그 이름의 실행 파일이 있는가.
+fn on_path(name: &str) -> bool {
+    let Some(dirs) = std::env::var_os("PATH") else { return false };
+    std::env::split_paths(&dirs).any(|d| std::fs::metadata(d.join(name)).is_ok_and(|m| m.is_file() && executable(&m)))
+}
+
+#[cfg(unix)]
+fn executable(m: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    m.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn executable(_: &std::fs::Metadata) -> bool {
+    true
+}
+
+/// 터미널을 **내린다** — 편집기에 터미널을 넘기는 자리(moai-08af).
+///
+/// 끝낼 때(`screen`)와 같은 차례다: bracketed paste 를 끄고 raw mode·대체 화면을 걷는다. 안
+/// 끄면 편집기에 붙인 글이 `200~…201~` 에 싸여 들어간다. 편집기가 도는 동안 **루프 스레드는
+/// 편집기를 기다리며 서 있다** — 그리기·스피너·다시 읽기 받기(`follow`)가 전부 멈춘다. 다시
+/// 읽기 스레드는 계속 짓지만 그리지 않고, 돌아오면 다음 걸음이 받는다.
+fn suspend() {
+    let _ = bracketed_paste(&mut std::io::stdout(), false);
+    ratatui::restore();
+}
+
+/// 내린 터미널을 다시 올리고 **다음 그림이 통째로 다시 그리게** 한다. ratatui 는 바뀐 칸만
+/// 내보내는데, 편집기가 지나간 화면은 ratatui 가 아는 앞 그림과 다르다.
+///
+/// **`Terminal::clear` 를 안 쓴다.** ratatui-core 의 `clear` 는 커서 자리를 터미널에 물어(DSR)
+/// 되돌리는데, 답하지 않는 터미널(pty 를 잇는 `script`, 느린 원격)에서는 몇 초 뒤 오류가 나
+/// 루프가 끝난다 — 실제로 그렇게 끝났다. 온 화면을 지우고 앞 그림을 비우면(`swap_buffers`)
+/// 다음 그림이 빈칸 아닌 칸을 모두 다시 낸다. `clear` 가 온 화면 뷰포트에서 하는 일과 같고
+/// 묻는 것만 없다. 커서는 그림마다 숨기거나 두므로 따로 안 만진다.
+fn resume(term: &mut DefaultTerminal) -> std::io::Result<()> {
+    use ratatui::crossterm::terminal::{Clear, ClearType, EnterAlternateScreen, enable_raw_mode};
+    enable_raw_mode()?;
+    ratatui::crossterm::execute!(std::io::stdout(), EnterAlternateScreen, Clear(ClearType::All))?;
+    let _ = bracketed_paste(&mut std::io::stdout(), true);
+    term.swap_buffers();
+    Ok(())
+}
+
+/// `text` 를 임시 파일에 적고 `editor` 로 연 뒤 **고친 글**을 돌려준다. `Err` 는 담지 않을
+/// 까닭이다 — 편집기가 0 이 아닌 코드로 끝났다(vim 의 `:cq`), 못 띄웠다, 못 읽었다.
+///
+/// 파일은 **어느 길로든 지운다.** 받은 글은 이미 돌려주었고, 담기가 실패해도 그 글은 폼에
+/// 열린 채 남는다([`App::edited`]) — 파일에 둘 까닭이 없다. 편집기는 이 프로세스의 stdin·
+/// stdout 을 그대로 받는다. 기다리는 동안 Ctrl-C 가 신호로 오면(raw 로 돌지 않는 편집기)
+/// moai 도 같이 끝난다 — 터미널은 이미 내려 둔 채라 셸은 멀쩡하고, 파일 하나가 남는다.
+fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path) -> Result<String, String> {
+    use std::io::Write;
+    let (path, mut file) = scratch_file(dir).map_err(|e| format!("임시 파일을 못 만들었다 — {e}"))?;
+    let written = file.write_all(text.as_bytes()).and_then(|()| file.sync_all());
+    drop(file);
+    let got = written
+        .map_err(|e| format!("임시 파일에 못 적었다 — {e}"))
+        .and_then(|()| {
+            std::process::Command::new("sh")
+                .args(crate::tui::jotfile::argv(editor, &path))
+                .status()
+                .map_err(|e| format!("편집기를 못 띄웠다({editor}) — {e}"))
+        })
+        .and_then(|status| match status.code() {
+            Some(0) => std::fs::read_to_string(&path).map_err(|e| format!("편집기가 남긴 파일을 못 읽었다 — {e}")),
+            Some(code) => Err(format!("편집기가 {code} 로 끝났다({editor})")),
+            None => Err(format!("편집기가 신호로 끝났다({editor})")),
+        });
+    let _ = std::fs::remove_file(&path);
+    got
+}
+
+/// 편집기에 넘길 새 파일. **남이 못 읽게(0600) 새로 만든다** — 공유 임시 디렉터리라 이름을
+/// 짐작한 남이 먼저 둔 파일(심볼릭 링크 포함)을 열면 적은 생각이 그리로 샌다. `create_new` 는
+/// 있는 것을 안 연다. `.md` 는 편집기가 본문을 마크다운으로 칠하게 한다.
+fn scratch_file(dir: &std::path::Path) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    for _ in 0..64 {
+        let path = dir.join(format!("moai-idea-{}-{}.md", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let mut open = std::fs::OpenOptions::new();
+        open.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut open, 0o600);
+        match open.open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "빈 이름을 못 찾았다"))
+}
+
 /// 루프가 받은 사건 하나를 탐색기에 넘긴다. **터미널 없이 시험된다.**
 ///
 /// - 키는 **누를 때만** 받는다. crossterm 은 kitty 프로토콜 터미널에서 뗄 때도 보내므로,
@@ -373,6 +478,16 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
         let wait = wake.saturating_duration_since(std::time::Instant::now());
         if event::poll(wait)? {
             take(app, event::read()?);
+        }
+        // 키가 편집기를 청했으면(`n`) 터미널을 넘긴다. 받은 글은 App 이 담는다 — 담을 곳은 연
+        // 순간 박힌 그대로 요청에 실려 왔다.
+        if let Some(edit) = app.edit.take() {
+            suspend();
+            let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir());
+            // **받은 글을 올리기보다 먼저 담는다.** 올리기가 실패하면 루프가 끝나는데, 먼저 담아
+            // 두면 적은 것은 파일에 있다 — 거꾸로 하면 편집기에서 적은 글이 임시 파일과 함께 사라진다.
+            app.edited(edit.into, got);
+            resume(term)?;
         }
         let now = std::time::Instant::now();
         // 키가 읽기를 띄웠으면(층으로 올라가기 따위) 느린 걸음까지 기다리지 않고 받으러 깬다.
@@ -442,6 +557,106 @@ mod tests {
         bracketed_paste(&mut out, true).unwrap();
         bracketed_paste(&mut out, false).unwrap();
         assert_eq!(out, b"\x1b[?2004h\x1b[?2004l");
+    }
+
+    /// 편집기 시험의 임시 자리. 이름에 **빈칸**을 넣는다 — 경로가 셸에서 쪼개지면 여기서 드러난다.
+    struct Dir(std::path::PathBuf);
+
+    impl Dir {
+        fn new(name: &str) -> Dir {
+            let d = std::env::temp_dir().join(format!("moai-editor {name}-{}-{:?}", std::process::id(), std::thread::current().id()));
+            let _ = std::fs::remove_dir_all(&d);
+            std::fs::create_dir_all(&d).unwrap();
+            Dir(d)
+        }
+
+        /// 가짜 편집기 — 받은 인자와 파일의 권한·글을 옆에 적고, `script` 를 돈다. **진짜 편집기는
+        /// 안 띄운다.** `"$@"` 의 마지막이 파일이다.
+        fn editor(&self, script: &str) -> String {
+            let path = self.0.join("fake editor.sh");
+            let seen = self.0.join("seen");
+            std::fs::write(
+                &path,
+                format!(
+                    "for a in \"$@\"; do f=\"$a\"; done\nprintf '%s\\n' \"$@\" > '{seen}/args'\nstat -c %a \"$f\" > '{seen}/mode'\ncp \"$f\" '{seen}/text'\n{script}\n",
+                    seen = seen.display()
+                ),
+            )
+            .unwrap();
+            std::fs::create_dir_all(&seen).unwrap();
+            // 인자가 붙은 편집기(`code --wait`)와 같은 모양 — 셸 규칙으로 쪼개져야 선다.
+            format!("sh '{}' --wait", path.display())
+        }
+
+        fn seen(&self, what: &str) -> String {
+            std::fs::read_to_string(self.0.join("seen").join(what)).unwrap_or_default()
+        }
+
+        /// 편집기가 끝난 뒤 남은 임시 파일.
+        fn leftovers(&self) -> Vec<String> {
+            std::fs::read_dir(&self.0)
+                .unwrap()
+                .filter_map(|e| e.ok()?.file_name().into_string().ok())
+                .filter(|n| n.starts_with("moai-idea-"))
+                .collect()
+        }
+    }
+
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// **편집기가 고친 글이 돌아오고, 파일은 남이 못 읽게 만들어졌다가 지워진다.** 편집기
+    /// 글의 인자(`--wait`)는 셸 규칙으로 서고, 빈칸 든 경로는 한 인자로 간다.
+    #[test]
+    fn the_editor_gets_the_template_and_its_edit_comes_back() {
+        let d = Dir::new("ok");
+        let editor = d.editor("f=\"$2\"; printf '제목\\n\\n본문\\n' >> \"$f\"");
+        let got = write_in_editor(&editor, "# 안내\n", &d.0).expect("편집기가 돌려주지 않았다");
+        assert_eq!(got, "# 안내\n제목\n\n본문\n");
+        assert_eq!(d.seen("text"), "# 안내\n", "편집기가 안내 글을 못 봤다");
+        assert_eq!(d.seen("mode").trim(), "600", "임시 파일을 남도 읽게 만들었다");
+        let args: Vec<String> = d.seen("args").lines().map(str::to_string).collect();
+        assert_eq!(args.len(), 2, "인자가 쪼개졌다 — {args:?}");
+        assert_eq!(args[0], "--wait");
+        assert!(args[1].starts_with(&d.0.display().to_string()) && args[1].ends_with(".md"), "{args:?}");
+        assert_eq!(d.leftovers(), Vec::<String>::new(), "임시 파일이 남았다");
+    }
+
+    /// **편집기가 0 이 아닌 코드로 끝나면 글을 안 돌려준다** — 그만두겠다는 뜻이다(vim 의 `:cq`).
+    /// 없는 편집기도 같은 길이다(셸이 127). 둘 다 임시 파일은 지운다.
+    #[test]
+    fn a_failing_editor_gives_a_reason_and_leaves_nothing() {
+        let d = Dir::new("fail");
+        let editor = d.editor("printf '담길 뻔한 것\\n' > \"$2\"; exit 3");
+        let why = write_in_editor(&editor, "", &d.0).expect_err("비영으로 끝났는데 글을 돌려줬다");
+        assert!(why.contains('3'), "{why}");
+        assert_eq!(d.leftovers(), Vec::<String>::new());
+
+        let why = write_in_editor("moai-없는-편집기-08af", "", &d.0).expect_err("없는 편집기인데 글을 돌려줬다");
+        assert!(why.contains("127"), "{why}");
+        assert_eq!(d.leftovers(), Vec::<String>::new());
+    }
+
+    /// 임시 파일은 **있는 이름을 안 연다** — 남이 먼저 둔 파일에 적은 생각을 쓰지 않는다.
+    #[test]
+    fn the_scratch_file_never_reuses_an_existing_name() {
+        let d = Dir::new("name");
+        let (a, _fa) = scratch_file(&d.0).unwrap();
+        // 다음에 고를 이름들을 남이 먼저 둔다 — 카운터만 믿으면 `create_new` 갈래를 한 번도 안 지난다.
+        let n: usize = a.to_string_lossy().rsplit('-').next().unwrap().trim_end_matches(".md").parse().unwrap();
+        let theirs: Vec<std::path::PathBuf> = (n + 1..=n + 8).map(|k| d.0.join(format!("moai-idea-{}-{k}.md", std::process::id()))).collect();
+        for p in &theirs {
+            std::fs::write(p, "남의 것").unwrap();
+        }
+        let (b, _fb) = scratch_file(&d.0).unwrap();
+        assert_ne!(a, b);
+        assert!(!theirs.contains(&b), "남이 둔 이름을 열었다 — {}", b.display());
+        for p in &theirs {
+            assert_eq!(std::fs::read_to_string(p).unwrap(), "남의 것", "남이 둔 파일을 덮었다");
+        }
     }
 
     /// 아무리 비싼 프레임에서도 **멈춘 것처럼 보이지는 않는다.** 멈춘 스피너는
