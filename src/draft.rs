@@ -79,14 +79,28 @@ fn split_parts(raw: &str, n: usize) -> Result<(String, Option<u8>, Vec<String>),
     }
     // 제목 끝쪽에 이어진 `\#낱말` 은 태그가 아니라 제목의 `#낱말` 이다(moai-a5pz). 가운데
     // 것은 원래 태그로 안 읽히므로 이스케이프도 안 하고 풀지도 않는다 — render 와 같은 자리.
-    let mut words: Vec<String> = rest.split(' ').map(str::to_string).collect();
-    for w in words.iter_mut().rev() {
-        match w.strip_prefix("\\#") {
-            Some(t) if !t.is_empty() => *w = format!("#{t}"),
-            _ => break,
+    let title = map_trailing_words(rest, |w| w.strip_prefix("\\#").filter(|t| !t.is_empty()).map(|t| format!("#{t}")));
+    Ok((title, priority, tags))
+}
+
+/// 끝쪽에 이어진 낱말을 `f` 가 `None` 을 낼 때까지 바꾼다 — 이스케이프의 두 짝이 같이 쓴다.
+///
+/// 낱말은 **태그 고리와 같은 `char::is_whitespace` 로 가른다.** `' '` 로만 가르면
+/// `메모\u{3000}#12` 의 끝 `#12` 를 render 는 낱말로 안 보고 parse 는 태그로 먹는다.
+/// 가름자는 그대로 둔다 — 빈 낱말(겹친 공백)은 `f` 가 거절해 멈춘다.
+fn map_trailing_words(s: &str, f: impl Fn(&str) -> Option<String>) -> String {
+    let pieces: Vec<&str> = s.split_inclusive(char::is_whitespace).collect();
+    let mut keep = pieces.len();
+    let mut tail = Vec::new();
+    for p in pieces.iter().rev() {
+        let word = p.strip_suffix(char::is_whitespace).unwrap_or(p);
+        match f(word) {
+            Some(w) => tail.push(format!("{w}{}", &p[word.len()..])),
+            None => break,
         }
+        keep -= 1;
     }
-    Ok((words.join(" "), priority, tags))
+    pieces[..keep].concat() + &tail.into_iter().rev().collect::<String>()
 }
 
 /// 못 읽은 줄은 **전부** 모아 한 번에 말한다. 하나씩 고치게 하면 여섯 줄짜리
@@ -176,15 +190,9 @@ fn body(i: &Issue) -> String {
     if let Some(p) = i.priority {
         s.push_str(&format!("[p{p}] "));
     }
-    let title = crate::text::one_line(&i.title);
-    let mut words: Vec<String> = title.split(' ').map(str::to_string).collect();
-    for w in words.iter_mut().rev() {
-        match w.strip_prefix('#') {
-            Some(t) if !t.is_empty() => *w = format!("\\#{t}"),
-            _ => break,
-        }
-    }
-    let title = words.join(" ");
+    let title = map_trailing_words(&crate::text::one_line(&i.title), |w| {
+        w.strip_prefix('#').filter(|t| !t.is_empty()).map(|t| format!("\\#{t}"))
+    });
     if title.starts_with('[') {
         s.push('\\');
     }
@@ -278,6 +286,12 @@ mod tests {
             assert_eq!((d.title.as_str(), d.priority, d.tags.as_slice()), (i.title.as_str(), i.priority, i.tags.as_slice()), "{md}");
         }
         assert!(lossy(&epic, &all).is_empty(), "되돌아 읽히는데 lossy 가 짚었다");
+
+        // 태그 고리는 `' '` 가 아닌 공백(전각·NBSP)에서도 낱말을 가른다 — 이스케이프도 같은 자리를 본다.
+        let wide = issue("메모\u{3000}#12", Kind::Issue, None, &["x"]);
+        let nbsp = issue("[a]\u{a0}#1 #2", Kind::Issue, Some(1), &[]);
+        assert_eq!(render(&epic, &[&wide, &nbsp]).lines().skip(1).collect::<Vec<_>>(), ["- 메모\u{3000}\\#12 #x", "- [p1] \\[a]\u{a0}\\#1 \\#2"]);
+        assert!(lossy(&epic, &[&wide, &nbsp]).is_empty(), "전각 공백 뒤의 #낱말 을 태그로 먹었다");
     }
 
     /// 사람이 손으로 쓸 때도 같은 이스케이프를 받고, **오타는 여전히 거절한다** — `[P1]`
