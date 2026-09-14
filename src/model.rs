@@ -152,6 +152,10 @@ pub struct Issue {
     ///
     /// **칸 이동은 안 적는다** — 그 시각은 `status_since` 가 이미 말하고, 견줄 때 둘 중 늦은
     /// 것을 쓴다. 그래서 이 필드 전의 줄도, 옛 바이너리가 칸만 옮긴 줄도 옳게 선다.
+    ///
+    /// **겹쳐 보기에만 쓴다. 방치·막힘 시계(`--stale`·`blocked_stale`·묶음의 `Stand::since`)는
+    /// 이것을 안 본다**(moai-cxk8). 보면 `defer`→`--undo` 두 번으로 그 경고가 지워져, 이
+    /// 필드를 `status_since` 와 따로 둔 까닭이 경고 쪽으로 돌아온다.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub planned_at: Option<String>,
     pub created_at: String,
