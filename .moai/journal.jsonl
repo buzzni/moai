@@ -2573,3 +2573,7 @@
 {"ts":"2026-09-14T23:50:32Z","id":"moai-y61p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ltc4 에서 펼쳤다 — TUI 보기 조절 코드 정리 — 보이는지 판정 세 벌·커서 붙들기 두 벌·오른쪽 열 리터럴·look_* 판독기 셋 모으기, Fields set/clear, 정렬 튜플을 구조체로"}
 {"ts":"2026-09-14T23:50:32Z","id":"moai-ltc4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-y61p 로 펼쳤다 (이슈 3건)"}
 {"ts":"2026-09-14T23:50:44Z","id":"moai-m1ym","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T23:55:48Z","id":"moai-mauw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"측정(2026-09-14, moai-emcv 가지): 이 저장소 커밋 934개에서 moai show moai-rvcb 가 24ms → 71ms. 늘어난 것 대부분이 git log --grep 한 번(67ms). 커밋이 쌓일수록 선형으로 는다. 볼 것: 상한(-n 또는 --since), 제목만 훑게 할 길(git 은 --grep 이 본문까지 훑는다), 탐색기(moai-a4i0)에서는 캐시"}
+{"ts":"2026-09-14T23:55:48Z","id":"moai-emcv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"정함: 사람 화면은 트래커 커밋(chore(tracker))을 빼고 --json 은 tracker 표시와 함께 전부 낸다. 칸은 이력 바로 앞, 짧은 해시 7자. edit 뒤 상세(edit.rs)는 이력을 안 그리므로 커밋 칸도 안 붙인다. git 실패는 빈 칸 — 말투는 moai-mauw"}
+{"ts":"2026-09-14T23:56:03Z","id":"moai-emcv.q3a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — show 상세의 커밋 칸과 --json commits (emcv)"}
+{"ts":"2026-09-14T23:56:03Z","id":"moai-emcv.q3a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
