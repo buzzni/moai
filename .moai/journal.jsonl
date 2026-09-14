@@ -1604,3 +1604,4 @@
 {"ts":"2026-09-14T09:49:08Z","id":"moai-iaa4.sct","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 없음 — 반영도 넘긴 것도 없다"}
 {"ts":"2026-09-14T09:49:08Z","id":"moai-z5aj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"4716cf2 — CLOSING 에 관례 문단, AGENTS·스킬 재생성"}
 {"ts":"2026-09-14T09:49:08Z","id":"moai-iaa4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"4716cf2 — 닫기 훅이 집은 줄마다 guide::handoff 한 줄을 낸다. 리뷰 moai-iaa4.sct 지적 없음"}
+{"ts":"2026-09-14T09:49:49Z","id":"moai-oohk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"CLAUDE.md 에 워크트리 규약을 적고 main 에 병합"}
