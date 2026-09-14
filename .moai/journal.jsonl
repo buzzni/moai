@@ -1592,3 +1592,4 @@
 {"ts":"2026-09-14T09:35:54Z","id":"moai-5jh6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"리뷰 moai-5jh6.hvg 통과 — 결함 없음"}
 {"ts":"2026-09-14T09:35:54Z","id":"moai-eomg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"리뷰 moai-5jh6.hvg 통과 — 결함 없음"}
 {"ts":"2026-09-14T09:42:13Z","id":"moai-l11z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 에 머지 — planned_at(defer·--undo 가 적음), 겹칠 때 max(status_since, planned_at)"}
+{"ts":"2026-09-14T09:45:49Z","id":"moai-xib6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
