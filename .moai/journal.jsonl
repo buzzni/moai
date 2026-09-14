@@ -1488,3 +1488,6 @@
 {"ts":"2026-09-14T08:57:28Z","id":"moai-5jh6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T09:13:42Z","id":"moai-5jh6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"루프는 방금 그린 버퍼에 스피너 글자가 있을 때만 빠른 걸음으로 깬다(App::spun) — 스크롤 밖·폼에 덮인 줄로 안 깨고, 상세에만 선 건수로는 깬다. App::spinning 은 걷었다"}
 {"ts":"2026-09-14T09:14:10Z","id":"moai-eomg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T09:23:35Z","id":"moai-eomg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정: 마일스톤 줄도 에픽과 같은 규칙이다 — 빛줄기는 App::spins 하나를 따르고, 마일스톤은 묶음이라 밑(에픽을 거쳐 물려받은 멤버 포함)에 집은 일이 실제로 있을 때만 돌고 빛난다. 따로 가르면 도는 마일스톤이 글리프만 돌고 빛은 없어 한 화면에 규칙이 둘이 된다. 프로젝트 층의 프로젝트 줄은 범위 밖으로 두었다(그 줄은 글리프도 안 돈다)."}
+{"ts":"2026-09-14T09:23:53Z","id":"moai-eomg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"빛줄기는 App::spins 하나를 따른다 — 집은 일을 품은 에픽·마일스톤도 흐르고, 첫 칸뿐이거나 집은 멤버를 미룬 묶음은 안 흐른다. draw.rs 의 묶음 가지를 걷었다"}
+{"ts":"2026-09-14T09:23:57Z","id":"moai-4l1e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 목록이 스크롤 창 밖 줄까지 매 프레임 짓는다 — 보이는 창만 지으면 1만 이슈 22ms 프레임이 준다"}
