@@ -1021,7 +1021,7 @@ fn picks_up(seg: &[String], cfg: &Config) -> bool {
     match verbs.split_first() {
         Some((&"mv", rest)) if rest.len() >= 2 => {
             let to = rest[rest.len() - 1];
-            cfg.knows(to) && to != cfg.first_status() && to != crate::config::DONE
+            cfg.knows(to) && cfg.is_started(to)
         }
         _ => false,
     }

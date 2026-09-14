@@ -165,9 +165,23 @@ impl Config {
         &self.statuses[0]
     }
 
+    /// 시작했으나 안 끝난 칸인가 — 첫 칸도 `done` 도 아니다. **"시작했다" 의 뜻은 여기
+    /// 하나다**(moai-p415). `wip`·`wip_overload`·훅의 집기 판단·묶음이 저마다 "첫 칸도 done
+    /// 도 아니다" 를 적고 있었고, 묶음만 [`Config::started_status`] 로 **자리를** 골라 칸이 더
+    /// 있는 설정에서 멤버가 `in_progress` 인 에픽이 `blocked` 로 읽혔다.
+    ///
+    /// 설정에 없는 칸도 시작한 것으로 센다 — 읽기는 관대하다. 칸을 알아야 하는 쪽(훅)은
+    /// [`Config::knows`] 를 따로 묻는다.
+    pub fn is_started(&self, status: &str) -> bool {
+        status != self.first_status() && status != DONE
+    }
+
     /// 시작한 것이 놓이는 칸 — 첫 칸도 끝난 칸도 아닌 첫 칸. 그런 칸이 없는
     /// 두 칸짜리 설정이면 첫 칸이다: 거기서는 "시작했지만 안 끝났다" 를 말할
     /// 낱말이 없고, `done` 으로 말하면 안 끝난 것을 끝났다고 한다.
+    ///
+    /// **"시작했는가" 를 묻는 데 쓰지 않는다** — 그것은 [`Config::is_started`] 다. 이 칸은
+    /// 묶음이 반쯤 끝났는데 시작한 멤버가 없을 때 설 자리를 댈 때만 쓴다.
     pub fn started_status(&self) -> &str {
         self.statuses
             .iter()
@@ -268,6 +282,17 @@ mod tests {
     fn extra_columns_are_allowed() {
         let c = Config::parse("prefix = \"a\"\nstatuses = \"todo, blocked, done\"\n").unwrap();
         assert_eq!(c.statuses, ["todo", "blocked", "done"]);
+    }
+
+    /// **시작했다는 판단은 자리가 아니라 뜻으로 한다**(moai-p415) — 첫 칸도 `done` 도 아니면
+    /// 시작했다. 두 칸짜리 설정에는 시작한 칸이 없다.
+    #[test]
+    fn started_is_neither_first_nor_done() {
+        let c = Config::parse("prefix = \"a\"\nstatuses = \"todo, blocked, in_progress, review, done\"\n").unwrap();
+        let started: Vec<&str> = c.statuses.iter().map(String::as_str).filter(|s| c.is_started(s)).collect();
+        assert_eq!(started, ["blocked", "in_progress", "review"]);
+        let two = Config::parse("prefix = \"a\"\nstatuses = \"todo, done\"\n").unwrap();
+        assert!(!two.is_started("todo") && !two.is_started("done"));
     }
 
     #[test]
