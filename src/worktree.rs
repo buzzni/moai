@@ -396,7 +396,61 @@ fn others_of(root: &Path) -> Result<(Option<String>, Vec<(Tree, PathBuf)>), Stri
 /// **못 찾으면 비어 있다.** git 이 없거나 저장소가 아니면 옆도 없는 것이고, 그러면
 /// 전처럼 스냅샷의 집은 줄이 다 제 초점이다. 훅은 무엇이 어긋나도 조용해야 한다.
 pub fn away(root: &Path) -> BTreeSet<String> {
-    others_of(root).map(|(_, trees)| names(trees.iter().map(|(t, _)| t))).unwrap_or_default()
+    names(&trees_on_disk(root).unwrap_or_default())
+}
+
+/// 제 워크트리가 아닌 워크트리들을 **git 을 띄우지 않고** 읽는다 — 이름 후보([`away`])만 쓴다.
+///
+/// 훅은 도구 호출마다 이름 후보를 읽는다. `git rev-parse` 와 `git worktree list` 두 번이 호출당
+/// 값의 약 40%(9ms/22ms)였다(moai-n2jh). 이름에는 경로와 가지만 들면 되고, 그 둘은 git 이 적어
+/// 두는 파일에 그대로 있다 — `.git`(주 워크트리면 디렉터리, 딸린 워크트리면 `gitdir:` 한 줄),
+/// 공용 디렉터리의 `commondir`·`HEAD`, `worktrees/<이름>/gitdir`·`HEAD`. [`heads`] 도 같은 파일을 본다.
+///
+/// **목록이 틀려도 싸다** — 후보일 뿐이라 id 와 정확히 같은 이름만 뺀다. 경로가 사라진 워크트리
+/// (`prunable`)는 뺀다. 맨몸 저장소는 공용 디렉터리 이름이 `.git` 이 아니라 주 워크트리가 없다.
+/// 겹쳐 보기([`gather`]·[`fresh`])는 HEAD 커밋이 필요해 여전히 git 으로 읽는다.
+fn trees_on_disk(root: &Path) -> Option<Vec<Tree>> {
+    let top = root.ancestors().find(|d| d.join(".git").exists())?;
+    let dotgit = top.join(".git");
+    let common = if dotgit.is_dir() {
+        dotgit
+    } else {
+        let text = std::fs::read_to_string(&dotgit).ok()?;
+        let gitdir = top.join(text.trim_end().strip_prefix("gitdir:")?.trim());
+        let up = std::fs::read_to_string(gitdir.join("commondir")).ok()?;
+        // `commondir` 는 대개 `../..` 다 — 풀지 않으면 끝 이름이 `..` 라 주 워크트리를 못 알아본다.
+        canonical(&gitdir.join(up.trim_end()))
+    };
+    let label = |head: &Path| {
+        let text = std::fs::read_to_string(head).ok()?;
+        let text = text.trim_end();
+        Some(match text.strip_prefix("ref: ") {
+            Some(r) => r.strip_prefix("refs/heads/").unwrap_or(r).to_string(),
+            None => text.chars().take(7).collect(),
+        })
+    };
+    let mut all = Vec::new();
+    if common.file_name().is_some_and(|n| n == ".git")
+        && let (Some(path), Some(label)) = (common.parent(), label(&common.join("HEAD")))
+    {
+        all.push(Tree { path: path.to_path_buf(), label, head: String::new() });
+    }
+    if let Ok(linked) = std::fs::read_dir(common.join("worktrees")) {
+        for entry in linked.filter_map(Result::ok) {
+            let dir = entry.path();
+            let Some(path) = std::fs::read_to_string(dir.join("gitdir"))
+                .ok()
+                .and_then(|g| Path::new(g.trim_end()).parent().map(Path::to_path_buf))
+                .filter(|p| p.exists())
+            else {
+                continue;
+            };
+            let Some(label) = label(&dir.join("HEAD")) else { continue };
+            all.push(Tree { path, label, head: String::new() });
+        }
+    }
+    let top = canonical(top);
+    Some(all.into_iter().filter(|t| canonical(&t.path) != top).collect())
 }
 
 /// 두 자리가 **같은 git 저장소의 워크트리인가** — 공용 git 디렉터리가 같다. 못 찾으면 아니다.
@@ -665,6 +719,18 @@ mod tests {
         let seen = heads(&main);
         run(&main, &["worktree", "add", "-q", "../more", "-b", "more"]);
         assert!(changed(&seen), "새로 생긴 워크트리를 못 알아챈다");
+
+        // **파일로 읽은 이름 후보가 git 이 낸 목록과 같다**(moai-n2jh) — 주 워크트리에서도, 딸린
+        // 워크트리에서도, 떼어 낸 HEAD 여도. 경로가 사라진 워크트리는 둘 다 뺀다.
+        let gone = base.join("gone");
+        run(&main, &["worktree", "add", "-q", "../gone", "-b", "gone"]);
+        std::fs::remove_dir_all(&gone).unwrap();
+        let by_git = |at: &Path| others_of(at).map(|(_, t)| names(t.iter().map(|(t, _)| t))).unwrap();
+        for at in [&main, &feat, &base.join("more")] {
+            assert_eq!(away(at), by_git(at), "{} 에서 파일로 읽은 목록이 git 과 다르다", at.display());
+        }
+        assert!(!away(&main).contains("gone"), "사라진 워크트리를 이름으로 댄다");
+        assert!(away(&base.join("nowhere")).is_empty());
 
         // 하위 디렉터리에서 부르면 `--git-common-dir` 이 상대 경로(`../.git`)로 온다.
         let sub = main.join("sub");
