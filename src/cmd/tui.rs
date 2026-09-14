@@ -494,9 +494,11 @@ fn private_file(dir: &std::path::Path, stem: &str) -> std::io::Result<(std::path
 }
 
 /// 버릴 뻔한 글을 `dir` 의 새 파일에 **편집기 글과 같은 모양**으로 적고 그 경로를 돌려준다
-/// (moai-y3r7) — 첫 줄 제목, 한 줄 띄우고 본문. 그대로 편집기에 열거나 `jotfile::parse` 로
-/// 도로 읽는다. 파일은 남이 못 읽게 새로 만든다([`private_file`]) — 적은 생각이 공유 임시
-/// 디렉터리로 새지 않게.
+/// (moai-y3r7) — 첫 줄 제목, 한 줄 띄우고 본문. **파일에는 적은 글이 바이트 그대로 다 든다.**
+/// 다만 편집기 길(`jotfile::parse`)로 도로 읽으면 그 형식의 규칙을 탄다 — 제목이 비면 본문 첫
+/// 줄이 제목이 되고, `# ` 로 시작하는 줄은 안내 주석으로 걷힌다(리뷰 moai-y3r7.u3p). 사람이
+/// 열어 옮겨 담는 것이 목적이라 그대로 둔다. 파일은 남이 못 읽게 새로 만든다([`private_file`])
+/// — 적은 생각이 공유 임시 디렉터리로 새지 않게.
 fn rescue(title: &str, body: Option<&str>, dir: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
     use std::io::Write;
     let (path, mut file) = private_file(dir, "moai-unsaved")?;
