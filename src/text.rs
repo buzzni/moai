@@ -110,15 +110,26 @@ pub fn one_line(s: &str) -> String {
 /// **안내에 경로를 넣는 곳은 이것을 지난다** (`project add`·한눈 보기). 자리마다
 /// 따로 두면 한쪽은 안전한 글자를, 한쪽은 위험한 글자를 세어 같은 경로를 달리 감싼다.
 ///
-/// **`-` 로 시작하는 것은 감싼다.** 글자 자체는 껍데기에 뜻이 없지만, 안내가 내는 것은
-/// 명령줄이라 맨 앞의 `-` 는 그것을 **인자가 아니라 플래그로** 만든다 — `-rf` 라는
-/// 디렉터리의 `moai project rm -rf` 는 clap 이 플래그로 읽고 경로는 없다고 한다.
+/// **`-` 로 시작하는 것은 앞에 `./` 를 붙인다**(moai-dtye). 안내가 내는 것은 명령줄이라 맨
+/// 앞의 `-` 는 그것을 **인자가 아니라 플래그로** 만든다 — `-rf` 라는 디렉터리의
+/// `moai -C -rf init` 은 clap 이 플래그로 읽고 경로는 없다고 한다. **따옴표로는 못 막는다** —
+/// 껍데기가 `'-rf'` 의 따옴표를 벗겨 clap 은 같은 `-rf` 를 받는다. `./-rf` 는 같은 디렉터리를
+/// 가리키면서 `-` 로 시작하지 않는다. 이것을 지나는 글은 모두 경로라 뜻이 안 바뀐다 — 절대
+/// 경로는 `-` 로 시작할 수 없다. 경로가 아닌 낱말을 여기 넣지 않는다.
+///
+/// **지금 부르는 자리는 모두 절대 경로를 넘긴다**(canonicalize·`current_dir`·절대 경로만 받는
+/// 사용자 설정). 그래서 이 갈래는 지금은 안 탄다 — 상대 경로를 넣는 자리가 새로 생길 때
+/// 따옴표로 막는다고 믿고 틀리지 않게 둔 것이다. 그런 자리는 붙여 넣는 곳(사용자의 cwd)을
+/// 기준으로 한 경로를 넣어야 `./` 가 같은 디렉터리를 가리킨다.
 ///
 /// **원문을 받는다 — [`one_line`] 을 지난 글을 넣지 않는다.** `one_line` 은 화면용이라
 /// 탭·줄바꿈을 빈칸으로 바꾸고, 그것을 감싸 붙여 넣으면 없는 디렉터리를 가리킨다
 /// (moai-0cl3). 제어문자가 든 글은 `$'…'` 로 바이트 그대로 적는다 — 한 줄에 서고
 /// 터미널에 날것의 제어문자를 흘리지 않으면서 bash·zsh 가 원문으로 푼다.
 pub fn shell_word(s: &str) -> String {
+    if s.starts_with('-') {
+        return shell_word(&format!("./{s}"));
+    }
     if s.chars().any(char::is_control) {
         let mut out = String::from("$'");
         for c in s.chars() {
@@ -143,7 +154,6 @@ pub fn shell_word(s: &str) -> String {
     }
     // `=` 는 첫 낱말이 아니면 껍데기에 뜻이 없다 — 안내가 내는 경로는 늘 인자 자리다.
     let plain = !s.is_empty()
-        && !s.starts_with('-')
         && s.chars().all(|c| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | ',' | ':' | '@' | '%' | '='));
     if plain { s.to_string() } else { format!("'{}'", s.replace('\'', r"'\''")) }
 }
@@ -158,9 +168,11 @@ mod tests {
         assert_eq!(shell_word("/home/raven/작업/argos"), "/home/raven/작업/argos");
         assert_eq!(shell_word("/home/raven/My Projects"), "'/home/raven/My Projects'");
         assert_eq!(shell_word("/a/it's"), r"'/a/it'\''s'");
-        // 맨 앞의 `-` 는 안내가 낸 명령줄에서 플래그가 된다.
-        assert_eq!(shell_word("-rf"), "'-rf'");
-        assert_eq!(shell_word("--json"), "'--json'");
+        // 맨 앞 `-` 는 따옴표가 아니라 `./` 로 막는다 — 껍데기가 따옴표를 벗기면 clap 은 플래그로 읽는다.
+        assert_eq!(shell_word("-rf"), "./-rf");
+        assert_eq!(shell_word("--json"), "./--json");
+        assert_eq!(shell_word("-my dir"), "'./-my dir'", "감쌀 것은 `./` 를 붙인 뒤에 감싼다");
+        assert_eq!(shell_word("-a\tb"), r"$'./-a\tb'");
         assert_eq!(shell_word("/w/my-repo"), "/w/my-repo", "가운데 `-` 까지 감쌌다");
         assert_eq!(shell_word("/w/a=b"), "/w/a=b");
         // 제어문자는 `$'…'` 로 — 빈칸으로 바꾸면 다른 디렉터리다(moai-0cl3).
@@ -179,13 +191,15 @@ mod tests {
         if !probe.success() {
             return;
         }
-        for s in ["/w/My Projects", "/w/it's", "-rf", "/w/a\tb", "/w/a\nb", "/w/\u{1b}[2J", "/w/\u{85}끝 ", "/w/\\x41", "/w/$HOME", "/w/`id`"] {
+        for s in ["/w/My Projects", "/w/it's", "-rf", "-my dir", "/w/a\tb", "/w/a\nb", "/w/\u{1b}[2J", "/w/\u{85}끝 ", "/w/\\x41", "/w/$HOME", "/w/`id`"] {
             let out = std::process::Command::new("bash")
                 .arg("-c")
                 .arg(format!("printf %s {}", shell_word(s)))
                 .output()
                 .unwrap();
-            assert_eq!(String::from_utf8(out.stdout).unwrap(), s, "{:?} 를 bash 가 다르게 풀었다", shell_word(s));
+            // 맨 앞 `-` 는 `./` 를 붙여 같은 디렉터리로 푼다 — 원문 그대로면 플래그가 된다.
+            let want = if s.starts_with('-') { format!("./{s}") } else { s.to_string() };
+            assert_eq!(String::from_utf8(out.stdout).unwrap(), want, "{:?} 를 bash 가 다르게 풀었다", shell_word(s));
         }
     }
 
