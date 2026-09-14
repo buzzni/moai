@@ -1658,3 +1658,11 @@
 {"ts":"2026-09-14T10:28:25Z","id":"moai-n648","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"edit 으로 끝난 묶음에 옛 일을 넣어 다시 열어도 막힘 시계가 새로 서지 않는다는 한계를 문서에 적는다"}
 {"ts":"2026-09-14T10:28:25Z","id":"moai-bbzg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-n648 로 옮겨 적는다 — 동작은 그대로 둔다"}
 {"ts":"2026-09-14T10:28:25Z","id":"moai-n648","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T10:30:52Z","id":"moai-wn3i","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 줄 셈 — 한 프로세스의 여러 번 쓰기"}
+{"ts":"2026-09-14T10:30:52Z","id":"moai-j9e8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 줄 셈을 호출마다 덮지 않고 프로세스 동안 쌓는다 (탐색기가 여러 번 쓰고 main 을 지난다)"}
+{"ts":"2026-09-14T10:30:52Z","id":"moai-wn3i","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2v3w 에서 펼쳤다 — 한 프로세스가 with_write 를 두 번 부르면 CARRIED·HELD 가 마지막 호출만 말한다"}
+{"ts":"2026-09-14T10:30:52Z","id":"moai-2v3w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"moai-wn3i 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-14T10:31:03Z","id":"moai-j9e8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T10:31:03Z","id":"moai-j9e8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2v3w 를 펼친 것. 작업 가지는 worktree-moai-2v3w(.claude/worktrees/moai-2v3w) 그대로 — idea 는 훅 규칙 1 의 초점이 못 되어 리뷰 이슈를 자식으로 세울 수 없어 사용자와 정해 펼쳤다(2026-09-14). 고친 것: b754b39."}
+{"ts":"2026-09-14T10:31:20Z","id":"moai-7azq.p3p","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 경고가 판정한 나이를 싣는다 (7azq)"}
+{"ts":"2026-09-14T10:31:28Z","id":"moai-7azq.p3p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
