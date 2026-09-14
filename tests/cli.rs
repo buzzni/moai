@@ -2461,8 +2461,18 @@ fn an_epic_comes_back_out_as_a_plan_that_goes_back_in() {
     assert!(json.contains(r##""plan":"# 릴리스 #release\n"##), "{json}");
     assert!(json.contains(r#""lossy":[]"#), "{json}");
 
-    // 도로 못 들어가는 제목은 조용히 틀리지 않고 이름을 댄다. 실패로는 안 끝난다.
-    let wip = add(s.path(), &["[WIP] 반쯤", "-e", &epic]);
+    // 앞머리 `[` 와 끝의 `#낱말` 은 이스케이프로 도로 들어간다(moai-a5pz).
+    let bracket = add(s.path(), &["[WIP] 반쯤 #12", "-e", &epic]);
+    let plan = ok(s.path(), &["show", &epic, "--as-plan"]);
+    assert!(plan.contains("- \\[WIP] 반쯤 \\#12\n"), "{plan}");
+    assert!(ok(s.path(), &["show", &epic, "--as-plan", "--json"]).contains(r#""lossy":[]"#), "이스케이프한 제목을 짚었다");
+    let round = init("asplanescape");
+    assert!(from_stdin(round.path(), &["add", "--from", "-"], &plan).status.success(), "{plan}");
+    assert!(ok(round.path(), &["show", "-g", "WIP"]).contains("[WIP] 반쯤 #12"), "제목이 도로 안 섰다");
+    ok(s.path(), &["rm", &bracket]);
+
+    // 이스케이프로도 못 담는 제목은 조용히 틀리지 않고 이름을 댄다. 실패로는 안 끝난다.
+    let wip = add(s.path(), &["\\[이미 역슬래시]", "-e", &epic]);
     let out = moai(s.path(), &["show", &epic, "--as-plan"]);
     assert!(out.status.success(), "경고로 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
     assert!(String::from_utf8_lossy(&out.stderr).contains(&wip), "{}", String::from_utf8_lossy(&out.stderr));
