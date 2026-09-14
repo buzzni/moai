@@ -1708,3 +1708,4 @@
 {"ts":"2026-09-14T10:40:41Z","id":"moai-j9e8.9jb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: 셈을 저장소마다 가름(e25ccb9). 안 함: 리뷰가 확인하고 둔 셋, -C 경로 따옴표. 넘김: 없음"}
 {"ts":"2026-09-14T10:42:14Z","id":"moai-7azq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 — Warning::ages 로 판정한 나이를 싣고 view 는 그것을 댄다"}
 {"ts":"2026-09-14T10:43:22Z","id":"moai-j9e8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 머지 52d00c6. 셈을 프로세스 동안 쌓고(b754b39) 저장소마다 가름(e25ccb9, 리뷰 moai-j9e8.9jb)"}
+{"ts":"2026-09-14T10:48:30Z","id":"moai-apsa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"SPC 메뉴가 하단 전체 폭 격자(열 우선, 키 : 설명, +묶음, 접두어 줄)로 서고 몸통을 밀어 올린다 — 리뷰 moai-apsa.oyz 반영"}
