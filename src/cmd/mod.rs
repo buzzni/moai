@@ -71,10 +71,11 @@ pub fn gather(repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::G
     Ok(g)
 }
 
-/// `.moai` 밖에서 부른 `status`·`ready` 가 볼 등록한 프로젝트. 프로젝트마다 연다.
+/// `.moai` 밖에서 부른 `ready` 가 볼 등록한 프로젝트. 프로젝트마다 연다.
 ///
-/// **등록한 것이 없으면 전처럼 실패한다** — 보여줄 것이 없는데 0 으로 끝나면 `.moai`
-/// 밖에서 부른 실수가 성공으로 읽힌다. 대신 등록하는 길을 곁에 댄다.
+/// **등록한 것이 없으면 실패한다** — 대신 등록하는 길을 곁에 댄다. `status` 는 이것을
+/// 안 지나고 같은 말을 내며 0 으로 끝난다(moai-ynsb): 세션의 시작점이 제 파일 아닌 것으로
+/// 실패해 보이면 안 된다.
 ///
 /// 사용자 설정의 문제는 등록한 것이 있을 때는 화면이 한 줄씩 비추고(`problems`),
 /// 없을 때는 실패 말에 붙는다 — 목록이 빈 까닭이 그것일 수 있다.
@@ -91,7 +92,8 @@ pub fn registered(worktree: bool) -> R<(crate::user_config::Registry, Vec<crate:
     Ok((reg, projects))
 }
 
-/// `.moai` 밖인데 등록한 것도 없을 때의 말 — `status`·`ready`·`tui --json` 이 같은 말로 멈춘다.
+/// `.moai` 밖인데 등록한 것도 없을 때의 말 — `ready`·`tui --json` 은 이 말로 멈추고, `status` 는
+/// 같은 말을 내고 0 으로 끝난다(moai-ynsb).
 /// 화면의 `tui` 는 멈추지 않고 빈 층에서 `SPC p a` 를 댄다(moai-r8kl).
 /// 목록이 빈 까닭이 사용자 설정의 문제일 수 있어 그것도 붙인다.
 pub fn nothing_registered(reg: &crate::user_config::Registry) -> Fail {
