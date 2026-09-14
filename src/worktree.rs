@@ -457,10 +457,13 @@ mod tests {
         assert!(shown[0].is_deferred(), "옆에서 늦게 미룬 것이 여기서 먼저 집은 줄에 가려졌다");
         assert_eq!(origin.branch("m-0001"), Some("feat/x"));
 
-        // 도로 집으면 `deferred_at` 은 사라져도 `planned_at` 이 늦어 이긴다.
+        // 도로 집으면 `deferred_at` 은 사라져도 `planned_at` 이 늦어 이긴다. 여기 줄은 칸을
+        // 도로 집은 줄보다 늦게 옮겼다 — 칸 시각만 보면 여기 미룬 줄이 선다.
+        let mut here = shelved.clone();
+        here.status_since = t2.into();
         let mut back = issue("m-0001", "todo", t3);
         back.planned_at = Some(t3.into());
-        let (shown, origin) = overlay(vec![shelved.clone()], vec![tree("feat/x", vec![back])]);
+        let (shown, origin) = overlay(vec![here], vec![tree("feat/x", vec![back])]);
         assert!(!shown[0].is_deferred(), "옆에서 도로 집은 것이 여기서 미룬 줄에 가려졌다");
         assert_eq!(origin.branch("m-0001"), Some("feat/x"));
 

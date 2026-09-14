@@ -5560,6 +5560,28 @@ fn worktree_does_not_revive_a_line_removed_here() {
     assert!(!status.contains(&t.tied), "{status}");
 }
 
+/// 옆에서 **늦게 미루거나 도로 집은 것**은 여기서 먼저 옮긴 칸에 가려지지 않는다(moai-l11z).
+/// 미루기는 칸을 안 옮기지만 `planned_at` 이 그 때를 적는다 — 도로 집어 `deferred_at` 이
+/// 지워져도 남는다. (moai-4i82 에서 e9 세션이 짠 시험을 받았다.)
+#[test]
+fn worktree_a_later_defer_or_undo_there_is_not_hidden_by_an_earlier_move_here() {
+    let t = trees("wtdefer");
+    let (main, feat) = (t.main(), t.feat());
+    ok_at(&main, LATER, &["mv", &t.tied, "in_progress"]);
+    ok_at(&feat, "2026-09-13T00:00:00Z", &["defer", &t.tied]);
+    assert!(issues(&feat).contains("\"planned_at\":\"2026-09-13T00:00:00Z\""), "{}", issues(&feat));
+    let deferred = ok(&main, &["show", "--deferred", "--worktree"]);
+    let line = deferred.lines().find(|l| l.starts_with(t.tied.as_str())).unwrap_or_default();
+    assert!(line.contains("⎇ feat/x"), "옆의 늦은 defer 가 가려졌다\n{deferred}");
+
+    ok_at(&main, "2026-09-14T00:00:00Z", &["defer", &t.tied]);
+    ok_at(&feat, "2026-09-15T00:00:00Z", &["defer", &t.tied, "--undo"]);
+    let deferred = ok(&main, &["show", "--deferred", "--worktree"]);
+    assert!(!deferred.lines().any(|l| l.starts_with(t.tied.as_str())), "옆의 늦은 --undo 가 가려졌다\n{deferred}");
+    // 도로 집은 줄도 그 때를 든다 — 이것이 없으면 위의 셈이 저널을 접어야 한다.
+    assert!(issues(&feat).contains("\"planned_at\":\"2026-09-15T00:00:00Z\""), "{}", issues(&feat));
+}
+
 /// 옆에서 집은 뒤 **여기서 필드만 늦게 고쳐도** 옆에서 집은 것이 풀리지 않는다
 /// (moai-2f5g). 겹치는 규칙이 칸을 옮긴 시각을 먼저 본다.
 #[test]

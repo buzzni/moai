@@ -673,6 +673,20 @@ mod tests {
         }
     }
 
+    /// 계획 시각도 되쓰면 바이트가 같다 — 도로 집은 줄은 `deferred_at` 없이 `planned_at` 만
+    /// 든다(moai-l11z). 늦은 계획 시각이 [`Issue::planned`] 가 된다.
+    #[test]
+    fn round_trips_a_line_with_a_plan_time() {
+        for line in [
+            r#"{"id":"argos-4aex","title":"제목","status":"todo","deferred_at":"2026-09-12T00:00:00Z","planned_at":"2026-09-12T00:00:00Z","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-12T00:00:00Z","status_since":"2026-09-11T04:12:03Z"}"#,
+            r#"{"id":"argos-4aex","title":"제목","status":"todo","planned_at":"2026-09-13T00:00:00Z","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-13T00:00:00Z","status_since":"2026-09-11T04:12:03Z"}"#,
+        ] {
+            let i: Issue = serde_json::from_str(line).unwrap();
+            assert_eq!(serde_json::to_string(&i).unwrap(), line);
+            assert_eq!(Some(i.planned()), i.planned_at.as_deref(), "늦은 계획 시각이 계획 자리를 바꾼 때가 아니다");
+        }
+    }
+
     /// 뒷 단계가 쓴 필드를 앞 단계 바이너리가 읽고 써도 잃지 않는다.
     ///
     /// 매 쓰기가 전체 재작성이라, 이게 없으면 새 바이너리가 쓴 필드를 옛
