@@ -5265,6 +5265,165 @@ fn the_hook_leaves_what_a_named_worktree_holds_to_that_worktree() {
     assert!(own.contains(&format!("moai mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
 }
 
+/// **이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다**
+/// (moai-ntl6, 사용자 결정 B). 에이전트 격리 워크트리(`worktree-agent-<해시>`)와 옛 id 로 뜬
+/// 워크트리가 실제로 그랬다(moai-apsa·nt0h). 누구의 것인지 모르는 줄로는 막지도 붙들지도
+/// 않는다. 갈라진 **뒤에** main 에서 집은 일은 여전히 main 의 초점이다.
+#[test]
+fn work_picked_before_an_unnamed_worktree_branched_is_left_to_it() {
+    let s = Scratch::new("hookbranchpoint");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let agent = field(&ok(&main, &["add", "에이전트가 할 일", "--json"]), "id");
+    let renamed = field(&ok(&main, &["add", "옛 id 에서 옮긴 일", "--json"]), "id");
+    ok(&main, &["mv", &agent, "in_progress"]);
+    ok(&main, &["mv", &renamed, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-a04acfb3", "-b", "worktree-agent-a04acfb3"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/argos-old1", "-b", "worktree-argos-old1"]);
+
+    let at_main = |event: &str, session: &str, tool: Option<&str>| {
+        let body = tool.map_or(String::new(), |cmd| {
+            format!(",\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}", json_str(cmd))
+        });
+        let input = format!("{{\"session_id\":\"{session}\",\"cwd\":{}{body}}}", json_str(&main.display().to_string()));
+        String::from_utf8(hook_in(&s, &main, event, &input).stdout).unwrap()
+    };
+
+    // 갈라질 때 집혀 있던 일로는 막지도 붙들지도 않는다.
+    let out = at_main("pre-tool-use", "s1", Some("moai add \"딴 일\""));
+    assert!(out.trim().is_empty(), "옆 워크트리가 쥐었을 일로 main 의 생성을 막는다\n{out}");
+    let out = at_main("stop", "s1", None);
+    assert!(out.trim().is_empty(), "옆 워크트리가 쥐었을 일로 main 세션을 붙든다\n{out}");
+
+    // 갈라진 뒤 main 에서 집은 일은 main 의 초점이다 — 막고, 붙들고, 그것만 댄다.
+    let mine = field(&ok(&main, &["add", "main 에서 집은 일", "--json"]), "id");
+    ok(&main, &["mv", &mine, "in_progress"]);
+    let why = refusal(&at_main("pre-tool-use", "s2", Some("moai add \"딴 일\"")));
+    assert!(why.contains(&mine) && !why.contains(&agent) && !why.contains(&renamed), "{why}");
+    let out = at_main("pre-tool-use", "s2", Some(&format!("moai add \"자식\" --parent {mine}")));
+    assert!(out.trim().is_empty(), "main 의 일의 자식을 막았다\n{out}");
+    let held = at_main("stop", "s2", None);
+    assert!(held.contains(&format!("moai mv {mine}")), "main 에서 집은 일을 안 붙든다\n{held}");
+    assert!(!held.contains(&agent) && !held.contains(&renamed), "옆이 쥐었을 일을 옮기라고 한다\n{held}");
+}
+
+/// 규약대로 일을 main 에서 집고 그 이름의 워크트리를 띄운 저장소. (main, 워크트리, 집은 id)
+fn picked_in_a_worktree(s: &Scratch) -> (PathBuf, PathBuf, String) {
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "워크트리에서 할 일", "--json"]), "id");
+    ok(&main, &["mv", &id, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    let dir = format!(".claude/worktrees/{id}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{id}")]);
+    let inside = main.join(&dir);
+    (main, inside, id)
+}
+
+/// 도구 호출 하나를 `cwd` 자리의 세션으로 부른다.
+fn tool_at(s: &Scratch, cwd: &Path, tool: &str, body: &str) -> String {
+    let input = format!(
+        "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"{tool}\",\"tool_input\":{body}}}",
+        json_str(&cwd.display().to_string())
+    );
+    String::from_utf8(hook_in(s, cwd, "pre-tool-use", &input).stdout).unwrap()
+}
+
+/// **워크트리 안의 리뷰 규칙은 main 에서 집은 리뷰를 본다** (moai-w2iy). 트래커는 main 에서
+/// 만지는 것이 규약이라, 리뷰 이슈는 main 스냅샷에만 있고 워크트리의 스냅샷(HEAD)에는
+/// 없다 — 제 스냅샷만 읽던 훅은 시킨 대로 세우고 집은 리뷰를 "없다" 로 막았다.
+#[test]
+fn a_review_picked_in_main_opens_the_review_inside_the_worktree() {
+    let s = Scratch::new("hookreviewwt");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let review = "{\"skill\":\"code-review\",\"args\":\"high\"}";
+
+    // 리뷰 이슈가 어디에도 없으면 여전히 막는다 — 겹쳐 봐도 풀리지 않는다.
+    let why = refusal(&tool_at(&s, &inside, "Skill", review));
+    assert!(why.contains(&format!("--parent {id}")), "{why}");
+
+    let r = field(
+        &ok(&main, &["add", "리뷰 — 워크트리 일", "-t", "review", "--parent", &id, "-b", "무엇을 왜 보는가", "--json"]),
+        "id",
+    );
+    ok(&main, &["mv", &r, "in_progress"]);
+    let out = tool_at(&s, &inside, "Skill", review);
+    assert!(out.trim().is_empty(), "main 에서 집은 리뷰를 못 보고 막는다\n{out}");
+}
+
+/// **`moai` 는 그 명령이 가리키는 저장소의 트래커로 판정한다** (moai-23ky) — `-C`·`--dir`
+/// 나 앞의 `cd`. 세션 자리의 트래커로 판정하던 훅은 남의 프로젝트에 세우는 줄을 제
+/// 초점으로 막았고, 남의 프로젝트가 쥔 초점은 못 봤다.
+#[test]
+fn a_moai_call_is_judged_by_the_tracker_it_points_at() {
+    let a = init("hookaimA");
+    let b = init("hookaimB");
+    let held = field(&ok(a.path(), &["add", "여기서 할 일", "--json"]), "id");
+    ok(a.path(), &["mv", &held, "in_progress"]);
+    let bash = |s: &Scratch, cmd: &str| tool_at(s, s.path(), "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+    let bp = b.path().display().to_string();
+
+    // A 가 쥔 것으로 B 에 세우는 줄을 막지 않는다.
+    for cmd in [
+        format!("moai -C {bp} add \"딴 일\""),
+        format!("moai --dir={bp} add \"딴 일\""),
+        format!("cd {bp} && moai add \"딴 일\""),
+    ] {
+        let out = bash(&a, &cmd);
+        assert!(out.trim().is_empty(), "남의 트래커에 세우는 줄을 제 초점으로 막았다 — {cmd}\n{out}");
+    }
+    // 같은 줄의 제 자리 토막은 여전히 제 트래커로 본다.
+    let why = refusal(&bash(&a, &format!("moai -C {bp} add \"딴 일\" && moai add \"또 딴 일\"")));
+    assert!(why.contains(&held), "{why}");
+
+    // 거꾸로 — B 가 쥔 것이 있으면 B 에 세우는 줄은 B 의 초점으로 막힌다.
+    let theirs = field(&ok(b.path(), &["add", "저기서 할 일", "--json"]), "id");
+    ok(b.path(), &["mv", &theirs, "in_progress"]);
+    ok(a.path(), &["mv", &held, "done"]);
+    let why = refusal(&bash(&a, &format!("moai -C {bp} add \"딴 일\"")));
+    assert!(why.contains(&theirs), "가리킨 트래커의 초점을 못 봤다 — {why}");
+}
+
+/// 워크트리 세션이 `-C <main>` 으로 트래커를 만진다 — **같은 저장소의 워크트리는 이 세션의
+/// 자리다.** main 의 눈으로만 보면 이 워크트리가 쥔 일은 "옆의 것" 이라 초점에서 빠져,
+/// `-C <main>` 한 번으로 규칙 1 을 넘는다. main 에서 방금 집은 줄은 겹쳐 보고 안다.
+#[test]
+fn a_worktree_session_touching_main_is_still_that_session() {
+    let s = Scratch::new("hookaimwt");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let mp = main.display().to_string();
+    let bash = |cmd: &str| tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+
+    let why = refusal(&bash(&format!("moai -C {mp} add \"딴 일\"")));
+    assert!(why.contains(&id), "main 을 가리키면 제 초점을 잃는다 — {why}");
+    let out = bash(&format!("moai -C {mp} add \"자식\" --parent {id}"));
+    assert!(out.trim().is_empty(), "제 일의 자식을 막았다\n{out}");
+
+    // main 에서 둘째 일을 집었다 — 워크트리 스냅샷은 모르지만 막지 않는다(moai-iaa4 의 자리).
+    let next = field(&ok(&main, &["add", "둘째 일", "--json"]), "id");
+    ok(&main, &["mv", &next, "in_progress"]);
+    let out = bash(&format!("moai -C {mp} add \"둘째의 자식\" --parent {next}"));
+    assert!(out.trim().is_empty(), "main 에서 방금 집은 일의 자식을 막았다\n{out}");
+
+    // 거꾸로 — 세션은 main 에 서 있고 명령이 워크트리로 들어간다(에이전트 스레드는 자리가 main
+    // 으로 돌아온다). **딸린 워크트리를 가리키면 그 워크트리의 일로 본다** — main 의 눈으로는
+    // 그 워크트리의 일이 "옆의 것" 이라 제 단위 안의 줄이 막히고, 단위 밖의 줄은 샌다.
+    ok(&main, &["mv", &next, "done"]);
+    let ip = inside.display().to_string();
+    let from_main = |cmd: &str| tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+    let out = from_main(&format!("cd {ip} && moai add \"자식\" --parent {id}"));
+    assert!(out.trim().is_empty(), "워크트리로 들어가 제 일의 자식을 세우는 것을 막았다\n{out}");
+    let why = refusal(&from_main(&format!("moai -C {ip} add \"딴 일\"")));
+    assert!(why.contains(&id), "워크트리를 가리킨 단위 밖 줄을 그 워크트리의 초점으로 못 막는다 — {why}");
+}
+
 /// 규칙 2 의 껍데기 쪽은 **stdin 의 `cwd` 로** 상대 경로를 푼다. 훅 프로세스를
 /// 저장소 뿌리에서 띄우고 `cwd` 만 하위 디렉터리로 준다 — 뿌리로 푸는 판은 여기서
 /// `a.md` 를 대고, 트래커 안에 서서 친 `../src` 쓰기는 놓친다. 단위 시험은 순수

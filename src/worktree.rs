@@ -260,14 +260,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                                 other.errors.len()
                             ));
                         }
-                        // 갈라진 자리는 옆에만 있는 줄을 가를 때만 쓴다. 다 여기에도 있으면
-                        // git 을 두 번 더 부르지 않는다 — 탐색기는 다시 읽을 때마다 여기를 지난다.
-                        let lonely = other.issues.iter().any(|i| !here.contains(i.id.as_str()));
-                        let base = match mine.as_deref() {
-                            Some(m) if lonely => base_of(&repo.root, m, &tree.head),
-                            _ => BTreeMap::new(),
-                        };
-                        others.push(Side { base, ..Side::new(tree.label, root, other.issues) });
+                        others.push(side(&repo.root, &here, mine.as_deref(), tree, root, other.issues));
                     }
                 }
             }
@@ -276,6 +269,51 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let Load { issues, errors } = load;
     let (issues, origin) = overlay(issues, others);
     Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, watched })
+}
+
+/// 옆 워크트리 하나의 줄을 겹칠 모양으로 — 옆에만 있는 줄이 있으면 갈라진 자리([`Side::base`])를 댄다.
+///
+/// 갈라진 자리는 옆에만 있는 줄을 가를 때만 쓴다. 다 여기에도 있으면 git 을 두 번 더 부르지
+/// 않는다 — 탐색기는 다시 읽을 때마다 여기를 지난다.
+fn side(
+    repo_root: &Path,
+    here: &std::collections::HashSet<&str>,
+    mine: Option<&str>,
+    tree: Tree,
+    root: PathBuf,
+    issues: Vec<Issue>,
+) -> Side {
+    let lonely = issues.iter().any(|i| !here.contains(i.id.as_str()));
+    let base = match mine {
+        Some(m) if lonely => base_of(repo_root, m, &tree.head),
+        _ => BTreeMap::new(),
+    };
+    Side { base, ..Side::new(tree.label, root, issues) }
+}
+
+/// 제 줄을 **옆 워크트리의 스냅샷과 겹친 것**과, 옆 워크트리의 이름이 가리키는 id 후보([`away`]
+/// 와 같은 자) — 훅이 막기 전에 한 번 더 비춰 보는 자리다(moai-w2iy).
+///
+/// 트래커는 main 에서 만지는 것이 규약이라(CLAUDE.md "워크트리"), 워크트리의 스냅샷(HEAD)은
+/// main 에서 방금 세우고 집은 줄을 모른다. 그 낡은 스냅샷만 보고 막으면 시킨 대로 한 일이
+/// 막힌다. 겹치는 규칙은 `--worktree` 와 같다([`overlay`]) — 훅만의 셈을 따로 두지 않는다.
+///
+/// **git 목록은 한 번만 읽는다** — 겹칠 줄과 이름 후보가 한 목록에서 나온다. 못 찾으면 `None`
+/// 이고, 남의 못 읽는 줄은 말없이 빼고 겹친다 — 훅은 무엇이 어긋나도 조용해야 한다.
+pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, BTreeSet<String>)> {
+    let (head, trees) = others_of(&repo.root).ok()?;
+    let away = names(trees.iter().map(|(t, _)| t));
+    let mut others = Vec::new();
+    {
+        let here: std::collections::HashSet<&str> = mine.iter().map(|i| i.id.as_str()).collect();
+        for (tree, root) in trees {
+            let Ok(Some(other)) = crate::store::read_snapshot(&root.join(".moai").join("issues.jsonl")) else {
+                continue;
+            };
+            others.push(side(&repo.root, &here, head.as_deref(), tree, root, other.issues));
+        }
+    }
+    Some((overlay(mine, others).0, away))
 }
 
 /// 워크트리들의 HEAD 가 움직인 것을 알아챌 git 파일과 **지금 잰** 표식 — 제 워크트리와
@@ -358,7 +396,142 @@ fn others_of(root: &Path) -> Result<(Option<String>, Vec<(Tree, PathBuf)>), Stri
 /// **못 찾으면 비어 있다.** git 이 없거나 저장소가 아니면 옆도 없는 것이고, 그러면
 /// 전처럼 스냅샷의 집은 줄이 다 제 초점이다. 훅은 무엇이 어긋나도 조용해야 한다.
 pub fn away(root: &Path) -> BTreeSet<String> {
-    others_of(root).map(|(_, trees)| names(trees.iter().map(|(t, _)| t))).unwrap_or_default()
+    on_disk(root).map(|d| names(d.others())).unwrap_or_default()
+}
+
+/// git 이 적어 둔 파일에서 읽은 워크트리 목록([`on_disk`]).
+struct Disk {
+    /// 워크트리 꼭대기에서 moai 뿌리까지 — 같은 저장소의 워크트리는 같은 나무 모양이다([`others_of`]).
+    rel: PathBuf,
+    /// (워크트리, 딸린 워크트리인가, 제 워크트리인가).
+    all: Vec<(Tree, bool, bool)>,
+}
+
+impl Disk {
+    fn others(&self) -> impl Iterator<Item = &Tree> {
+        self.all.iter().filter(|(_, _, me)| !me).map(|(t, ..)| t)
+    }
+}
+
+/// 옆 **딸린** 워크트리가 쥐었을 수 있는 줄 id 와, 제 워크트리의 이름 후보 (moai-ntl6, 사용자 결정 B).
+///
+/// 이름이 id 가 아닌 워크트리(에이전트 격리 `worktree-agent-<해시>`, 옛 id 로 뜬 워크트리)가
+/// 쥔 일은 이름으로 못 가른다. 대신 **갈라진 자리**로 짐작한다 — 규약상 집기는 main 에서 커밋한
+/// 뒤 워크트리가 뜨므로, 그 워크트리의 스냅샷 파일에 벌여 놓인 줄은 갈라질 때 이미 집혀 있던
+/// 일이다. 그 워크트리에서 main 보다 늦게 옮긴 줄(`planned`·`updated_at`)도 든다. 갈라진 **뒤에**
+/// main 에서 집은 일은 그 파일에 없어 들지 않는다.
+///
+/// **main 워크트리는 쥔 곳으로 안 센다** — 모두의 집기가 모이는 자리라, 세면 모든 줄이 든다.
+/// **답은 짐작이다** — 받는 쪽은 이 줄로 막거나 붙들지 않기만 한다(`hook::unsure`). git 을 띄우지
+/// 않고 파일만 읽지만 옆 스냅샷을 다 풀어 싸지 않다 — 거절 길과 `Stop` 에서만 부른다.
+pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> (BTreeSet<String>, BTreeSet<String>) {
+    let Some(disk) = on_disk(root) else { return Default::default() };
+    let own = names(disk.all.iter().filter(|(_, _, me)| *me).map(|(t, ..)| t));
+    let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
+    let mut out = BTreeSet::new();
+    for (tree, linked, me) in &disk.all {
+        if *me || !*linked {
+            continue;
+        }
+        let path = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
+        let Ok(Some(side)) = crate::store::read_snapshot(&path) else { continue };
+        out.extend(crate::report::wip(&side.issues, cfg).into_iter().map(|i| i.id.clone()));
+        for i in &side.issues {
+            let later = by_id
+                .get(i.id.as_str())
+                .is_some_and(|m| (i.planned(), i.updated_at.as_str()) > (m.planned(), m.updated_at.as_str()));
+            if later {
+                out.insert(i.id.clone());
+            }
+        }
+    }
+    (out, own)
+}
+
+/// 제 워크트리가 아닌 워크트리들을 **git 을 띄우지 않고** 읽는다 — 이름 후보([`away`])만 쓴다.
+///
+/// 훅은 도구 호출마다 이름 후보를 읽는다. `git rev-parse` 와 `git worktree list` 두 번이 호출당
+/// 값의 약 40%(9ms/22ms)였다(moai-n2jh). 이름에는 경로와 가지만 들면 되고, 그 둘은 git 이 적어
+/// 두는 파일에 그대로 있다 — `.git`(주 워크트리면 디렉터리, 딸린 워크트리면 `gitdir:` 한 줄),
+/// 공용 디렉터리의 `commondir`·`HEAD`, `worktrees/<이름>/gitdir`·`HEAD`. [`heads`] 도 같은 파일을 본다.
+///
+/// **목록이 틀려도 싸다** — 후보일 뿐이라 id 와 정확히 같은 이름만 뺀다. 경로가 사라진 워크트리
+/// (`prunable`)는 뺀다. 맨몸 저장소는 공용 디렉터리 이름이 `.git` 이 아니라 주 워크트리가 없다.
+/// 겹쳐 보기([`gather`]·[`fresh`])는 HEAD 커밋이 필요해 여전히 git 으로 읽는다.
+fn on_disk(root: &Path) -> Option<Disk> {
+    let top = root.ancestors().find(|d| d.join(".git").exists())?;
+    let dotgit = top.join(".git");
+    let common = if dotgit.is_dir() {
+        dotgit
+    } else {
+        let text = std::fs::read_to_string(&dotgit).ok()?;
+        let gitdir = top.join(text.trim_end().strip_prefix("gitdir:")?.trim());
+        let up = std::fs::read_to_string(gitdir.join("commondir")).ok()?;
+        // `commondir` 는 대개 `../..` 다 — 풀지 않으면 끝 이름이 `..` 라 주 워크트리를 못 알아본다.
+        canonical(&gitdir.join(up.trim_end()))
+    };
+    let label = |head: &Path| {
+        let text = std::fs::read_to_string(head).ok()?;
+        let text = text.trim_end();
+        Some(match text.strip_prefix("ref: ") {
+            Some(r) => r.strip_prefix("refs/heads/").unwrap_or(r).to_string(),
+            None => text.chars().take(7).collect(),
+        })
+    };
+    let mut all = Vec::new();
+    if common.file_name().is_some_and(|n| n == ".git")
+        && let (Some(path), Some(label)) = (common.parent(), label(&common.join("HEAD")))
+    {
+        all.push((Tree { path: path.to_path_buf(), label, head: String::new() }, false));
+    }
+    if let Ok(linked) = std::fs::read_dir(common.join("worktrees")) {
+        for entry in linked.filter_map(Result::ok) {
+            let dir = entry.path();
+            // `worktree.useRelativePaths` 면 이 경로는 이 디렉터리에서 푼 상대 경로다 — 프로세스의
+            // 자리로 풀면 멀쩡한 워크트리가 "사라졌다" 로 빠진다(`join` 은 절대 경로면 그대로 둔다).
+            let Some(path) = std::fs::read_to_string(dir.join("gitdir"))
+                .ok()
+                .and_then(|g| canonical(&dir.join(g.trim_end())).parent().map(Path::to_path_buf))
+                .filter(|p| p.exists())
+            else {
+                continue;
+            };
+            let Some(label) = label(&dir.join("HEAD")) else { continue };
+            all.push((Tree { path, label, head: String::new() }, true));
+        }
+    }
+    let top = canonical(top);
+    let rel = canonical(root).strip_prefix(&top).map(Path::to_path_buf).unwrap_or_default();
+    let all = all
+        .into_iter()
+        .map(|(t, linked)| {
+            let me = canonical(&t.path) == top;
+            (t, linked, me)
+        })
+        .collect();
+    Some(Disk { rel, all })
+}
+
+/// 이 자리가 **딸린 워크트리 안인가** — 가장 가까운 `.git` 이 디렉터리가 아니라 `gitdir:` 파일이다.
+/// git 을 띄우지 않는다. git 밖이면 아니다.
+///
+/// 훅이 `-C`·`cd` 로 가리킨 트래커를 누구의 눈으로 볼지 가른다(moai-23ky). 딸린 워크트리는 그
+/// 이름이 곧 거기서 하는 일이라 그 워크트리의 눈으로 보고, 모두의 집기가 모이는 main 은 세션의
+/// 눈으로 본다.
+pub fn is_linked(root: &Path) -> bool {
+    root.ancestors().map(|d| d.join(".git")).find(|g| g.exists()).is_some_and(|g| g.is_file())
+}
+
+/// 두 자리가 **같은 git 저장소의 워크트리인가** — 공용 git 디렉터리가 같다. 못 찾으면 아니다.
+///
+/// 훅이 `-C`·`cd` 로 가리킨 트래커가 세션의 옆 워크트리인지 가른다(moai-23ky). 옆 워크트리면
+/// 세션의 자리로 본다 — 그쪽 눈으로 보면 이 세션이 쥔 일이 "옆의 것" 이라 초점에서 빠져,
+/// `moai -C <main> add` 한 번으로 규칙 1 을 넘는다. 다른 트래커를 가리킬 때만 부른다.
+pub fn same_repo(a: &Path, b: &Path) -> bool {
+    let common = |root: &Path| {
+        git(root, &["rev-parse", "--git-common-dir"]).ok().map(|c| canonical(&root.join(c.trim_end_matches('\n'))))
+    };
+    matches!((common(a), common(b)), (Some(x), Some(y)) if x == y)
 }
 
 /// 워크트리 이름에서 id 후보를 읽는다 — 경로의 끝 이름, 가지 이름, `worktree-` 를 뗀 가지 이름.
@@ -615,6 +788,18 @@ mod tests {
         let seen = heads(&main);
         run(&main, &["worktree", "add", "-q", "../more", "-b", "more"]);
         assert!(changed(&seen), "새로 생긴 워크트리를 못 알아챈다");
+
+        // **파일로 읽은 이름 후보가 git 이 낸 목록과 같다**(moai-n2jh) — 주 워크트리에서도, 딸린
+        // 워크트리에서도, 떼어 낸 HEAD 여도. 경로가 사라진 워크트리는 둘 다 뺀다.
+        let gone = base.join("gone");
+        run(&main, &["worktree", "add", "-q", "../gone", "-b", "gone"]);
+        std::fs::remove_dir_all(&gone).unwrap();
+        let by_git = |at: &Path| others_of(at).map(|(_, t)| names(t.iter().map(|(t, _)| t))).unwrap();
+        for at in [&main, &feat, &base.join("more")] {
+            assert_eq!(away(at), by_git(at), "{} 에서 파일로 읽은 목록이 git 과 다르다", at.display());
+        }
+        assert!(!away(&main).contains("gone"), "사라진 워크트리를 이름으로 댄다");
+        assert!(away(&base.join("nowhere")).is_empty());
 
         // 하위 디렉터리에서 부르면 `--git-common-dir` 이 상대 경로(`../.git`)로 온다.
         let sub = main.join("sub");
