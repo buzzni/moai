@@ -5382,6 +5382,14 @@ fn a_moai_call_is_judged_by_the_tracker_it_points_at() {
     // 같은 줄의 제 자리 토막은 여전히 제 트래커로 본다.
     let why = refusal(&bash(&a, &format!("moai -C {bp} add \"딴 일\" && moai add \"또 딴 일\"")));
     assert!(why.contains(&held), "{why}");
+    // 하위 셸의 `cd` 는 뒤로 안 이어진다 — 뒷토막은 제 자리에 선다.
+    let why = refusal(&bash(&a, &format!("(cd {bp} && moai status); moai add \"딴 일\"")));
+    assert!(why.contains(&held), "묶음 밖 토막을 남의 트래커로 보냈다 — {why}");
+    // 아직 없는 디렉터리는 실행할 때 생겨 `moai` 가 위로 찾아 이 트래커에 세운다 — 아무도 안 보면 샌다.
+    for cmd in ["mkdir fresh && moai -C fresh add \"딴 일\"", "mkdir fresh && cd fresh && moai add \"딴 일\""] {
+        let why = refusal(&bash(&a, cmd));
+        assert!(why.contains(&held), "없는 디렉터리를 거쳐 규칙 1 을 넘었다 — {cmd}\n{why}");
+    }
 
     // 거꾸로 — B 가 쥔 것이 있으면 B 에 세우는 줄은 B 의 초점으로 막힌다.
     let theirs = field(&ok(b.path(), &["add", "저기서 할 일", "--json"]), "id");

@@ -232,6 +232,10 @@ struct Seg {
     /// 닫는 규칙이 리다이렉션 하나로 샌다. 읽는 쪽(`<`·`<<<`·`<&`)의 과녁은
     /// 어디에도 안 든다 — 같은 까닭으로 낱말에 남으면 안 되고, 쓰는 것도 아니다.
     writes: Vec<String>,
+    /// 몇 겹의 `( … )` 안인가 — 하위 셸이라 그 안의 `cd` 는 괄호를 나오면 풀린다([`aimed`]).
+    depth: usize,
+    /// 파이프의 한 칸이거나 `&` 로 띄운 것 — 제 하위 셸에서 돌아 `cd` 가 뒤로 안 이어진다.
+    sub: bool,
 }
 
 /// 명령을 **셸이 읽는 대로 한 걸음에** 읽는다 — 따옴표·명령 치환·산술·heredoc
@@ -291,6 +295,8 @@ struct Lexer<'a> {
     test: bool,
     /// 이 줄이 끝나면 건너뛸 heredoc 본문들 — 종료어와, 앞 탭을 걷는가(`<<-`).
     heredocs: Vec<(String, bool)>,
+    /// 지금 몇 겹의 `( … )` 묶음 안인가([`Seg::depth`]).
+    group: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -305,6 +311,7 @@ impl<'a> Lexer<'a> {
             stack: Vec::new(),
             test: false,
             heredocs: Vec::new(),
+            group: 0,
         }
     }
 
@@ -381,9 +388,33 @@ impl<'a> Lexer<'a> {
                 self.end_segment();
                 self.skip_heredocs();
             }
-            ';' | '|' | '&' | ')' => self.end_segment(),
+            // `||`·`&&` 는 이어 도는 갈래다. 홀로 선 `|`·`|&` 는 양쪽을, `&` 는 앞을 하위 셸로
+            // 돌린다 — 그 `cd` 는 뒤로 안 이어진다([`Seg::sub`]).
+            '|' if self.chars.next_if_eq(&'|').is_some() => self.end_segment(),
+            '&' if self.chars.next_if_eq(&'&').is_some() => self.end_segment(),
+            '|' => {
+                self.chars.next_if_eq(&'&');
+                self.seg.sub = true;
+                self.end_segment();
+                self.seg.sub = true;
+            }
+            '&' => {
+                self.flush();
+                if !self.seg.words.is_empty() {
+                    self.seg.sub = true;
+                }
+                self.end_segment();
+            }
+            ';' => self.end_segment(),
+            ')' => {
+                self.end_segment();
+                self.group = self.group.saturating_sub(1);
+            }
             // `( cd /tmp && … )` 의 괄호는 묶음이다 — 명령 자리가 그 뒤에서 다시 선다.
-            '(' if self.at_word_start() => self.end_segment(),
+            '(' if self.at_word_start() => {
+                self.end_segment();
+                self.group += 1;
+            }
             c if c.is_whitespace() => self.flush(),
             c => self.cur.push(c),
         }
@@ -651,7 +682,13 @@ impl<'a> Lexer<'a> {
         self.flush();
         self.aim = Aim::Word;
         self.test = false;
-        self.all.push(std::mem::take(&mut self.seg));
+        // 빈 토막은 쌓지 않는다 — 어차피 걸러지고, 그 표식(`a |\n b` 의 `sub`)은 다음 토막의 것이다.
+        if self.seg.words.is_empty() && self.seg.writes.is_empty() {
+            return;
+        }
+        let mut seg = std::mem::take(&mut self.seg);
+        seg.depth = self.group;
+        self.all.push(seg);
     }
 }
 
@@ -1143,16 +1180,32 @@ pub fn guard_moai(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: 
 ///
 /// **모르면 `None` 이다** — 세션의 자리로 본다. 변수·틸드 뒤, `cd -`·`popd`·인자 없는 `cd`
 /// 뒤는 어디인지 글자로 모른다. 지어낸 자리로 보내면 규칙이 새고, 세션 자리로 보는 것은 고치기
-/// 전의 판정 그대로다. 괄호 묶음 안의 `cd` 가 밖으로 이어지는 것은 가르지 않는다 — 드문 모양이고,
-/// 틀려도 명령이 가리킨 트래커 쪽으로 틀린다.
+/// 전의 판정 그대로다.
+///
+/// **하위 셸의 `cd` 는 뒤로 안 이어진다** — `( … )` 묶음을 나오면 들어가기 전 자리로 돌아오고,
+/// 파이프의 칸이나 `&` 로 띄운 `cd` 는 아무것도 안 옮긴다. 가르지 않던 판은
+/// `(cd <남의 트래커> && moai status); moai add "딴 일"` 의 뒷토막을 남의 트래커로 보내, 실제로는
+/// 세션 자리에 서는 줄이 규칙 1 을 넘었다.
 pub fn aimed(cmd: &str, cwd: &Path) -> Vec<Option<PathBuf>> {
     let here = resolve(".", cwd);
     let mut at = Some(here.clone());
-    segments(cmd)
-        .iter()
+    // 묶음 겹마다 들어가기 전의 자리.
+    let mut outer: Vec<Option<PathBuf>> = Vec::new();
+    parse(cmd)
+        .into_iter()
+        .filter(|s| !s.words.is_empty())
         .map(|seg| {
-            let words = command_of(seg);
+            while outer.len() > seg.depth {
+                if let Some(before) = outer.pop() {
+                    at = before;
+                }
+            }
+            while outer.len() < seg.depth {
+                outer.push(at.clone());
+            }
+            let words = command_of(&seg.words);
             match words.first().map(|w| basename(w)) {
+                Some("cd" | "pushd" | "popd") if seg.sub => None,
                 Some("cd" | "pushd") => {
                     let arg = words[1..].iter().find(|w| !w.starts_with('-') || w.as_str() == "-");
                     at = match (at.take(), arg) {
@@ -1167,7 +1220,7 @@ pub fn aimed(cmd: &str, cwd: &Path) -> Vec<Option<PathBuf>> {
                     None
                 }
                 _ => {
-                    let args = moai_args(seg)?;
+                    let args = moai_args(&seg.words)?;
                     let base = at.clone()?;
                     let dir = match flag_values(args, &["-C", "--dir"]).last() {
                         Some(d) if unknowable(d) => return None,
@@ -1661,6 +1714,13 @@ mod tests {
         assert_eq!(at("cd && moai add x"), [None, None]);
         assert_eq!(at("pushd /c && pushd +1 && moai add x"), [None, None, None], "스택 돌리기를 경로로 읽었다");
         assert_eq!(at("moai -C $X add x"), [None]);
+        // 하위 셸의 `cd` 는 뒤로 안 이어진다 — 묶음을 나오면 제자리, 파이프·`&` 는 안 옮긴다.
+        assert_eq!(at("(cd /c && moai add x); moai add y"), [None, there("/c"), None], "묶음의 cd 가 샜다");
+        assert_eq!(at("cd /c && ( cd /d; moai add x ) && moai add y"), [None, None, there("/d"), there("/c")]);
+        assert_eq!(at("cd /c | moai add x; moai add y"), [None, None, None], "파이프의 cd 를 이어 읽었다");
+        assert_eq!(at("cd /c & moai add x"), [None, None], "& 로 띄운 cd 를 이어 읽었다");
+        assert_eq!(at("cd /c || moai add x"), [None, there("/c")]);
+        assert_eq!(at("cd /c &&\nmoai add x"), [None, there("/c")]);
         // `moai` 가 아닌 토막은 어디도 안 가리킨다.
         assert_eq!(at("echo -C /c"), [None]);
     }
