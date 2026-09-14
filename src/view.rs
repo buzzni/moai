@@ -1491,7 +1491,7 @@ mod tests {
         let theirs = vec![issue("argos-0002", "옆 일", "in_progress")];
         let (all, origin) = crate::worktree::overlay(
             mine,
-            vec![("feat/x".into(), std::path::PathBuf::from("/wt"), theirs)],
+            vec![crate::worktree::Side::new("feat/x", "/wt", theirs)],
         );
         let tagged: crate::report::EpicLabels = all.iter().map(|i| ((i.id.as_str(), i.kind), "에픽".to_string())).collect();
         let out = plain(&list(&all, &cfg(), Hidden::default(), &tagged, false, &Default::default(), &origin));
