@@ -1429,6 +1429,28 @@ fn a_child_under_a_lost_thought_is_not_counted_as_having_no_epic() {
     );
 }
 
+/// **`-e none`·`--milestone none` 도 status 와 같은 자로 고른다**(moai-phw9) — 끊긴 에픽을 든
+/// 생각 밑에 접힌 줄은 트리가 `(길 잃음)` 안에 그리고 status 가 두 경고 어디에도 안 센다.
+/// 거름망만 그 줄을 "없는 것" 으로 고르면 한 저장소가 같은 줄을 세 가지로 말한다. 진짜 소속
+/// 없는 일은 그대로 고른다.
+#[test]
+fn none_filters_skip_a_child_under_a_lost_thought_like_status() {
+    let s = init("nonelost");
+    let mile = add(s.path(), &["마일스톤", "--type", "milestone"]);
+    let epic = add(s.path(), &["지울 에픽", "--type", "epic", "--milestone", &mile]);
+    let thought = add(s.path(), &["생각", "--type", "idea", "-e", &epic]);
+    let child = add(s.path(), &["생각 밑의 일", "--parent", &thought]);
+    let loose = add(s.path(), &["그냥 소속 없는 일"]);
+    assert!(moai(s.path(), &["rm", &epic]).status.success());
+
+    for flag in ["-e", "--milestone"] {
+        let listed = ok(s.path(), &["show", flag, "none"]);
+        let ids: Vec<&str> = listed.lines().filter_map(|l| l.split_whitespace().next()).collect();
+        assert!(!ids.contains(&child.as_str()), "`{flag} none` 이 길 잃은 생각 밑에 접힌 줄을 고른다\n{listed}");
+        assert!(ids.contains(&loose.as_str()), "`{flag} none` 이 진짜 소속 없는 일까지 뺐다\n{listed}");
+    }
+}
+
 /// 메모는 스냅샷을 건드리지 않고 저널에만 쌓인다.
 #[test]
 fn note_only_touches_the_journal() {
