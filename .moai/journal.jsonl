@@ -2273,3 +2273,6 @@
 {"ts":"2026-09-14T14:51:12Z","id":"moai-phw9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (ab03544) — -e none·--milestone none 이 길 잃은 줄 밑에 접힌 줄을 안 고른다, status·트리와 같은 자"}
 {"ts":"2026-09-14T14:53:01Z","id":"moai-979m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-14T14:53:01Z","id":"moai-d3tp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-14T14:57:39Z","id":"moai-8dna","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"고르기 창 경로 칸(g p)의 낱말 지우기가 / 에서 멈춘다"}
+{"ts":"2026-09-14T14:57:47Z","id":"moai-jzye","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-8dna 로 옮겼다 — 사용자가 경로 칸만 / 경계로 골랐다"}
+{"ts":"2026-09-14T14:57:48Z","id":"moai-8dna","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
