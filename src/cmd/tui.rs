@@ -179,9 +179,22 @@ fn screen(mut app: App) -> R<Vec<String>> {
     // 못 해도 멈추지 않는다: 붙여넣기가 옛날처럼 키로 올 뿐이다.
     paste_off_on_panic();
     let _ = bracketed_paste(&mut std::io::stdout(), true);
-    let out = loop_until_quit(&mut term, &mut app);
+    // **패닉으로 끝나도 여기서 걷는다**(moai-46xe). 다시 읽기 스레드의 패닉은 루프가 `resume_unwind`
+    // 로 되던지는데 그것은 훅을 안 지난다 — 훅이 이미 걷은 터미널을 편집기에서 돌아오며 다시
+    // 올렸다면 raw·대체 화면인 채로 셸에 남는다. 걷은 뒤 패닉 글을 **한 번 더** 낸다: 훅이 낸
+    // 글은 그 뒤에도 루프가 그린 한 프레임에 덮였을 수 있다.
+    let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| loop_until_quit(&mut term, &mut app)));
     let _ = bracketed_paste(&mut std::io::stdout(), false);
     ratatui::restore();
+    let out = out.unwrap_or_else(|payload| {
+        let why = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("알 수 없는 까닭");
+        eprintln!("moai: 탐색기가 패닉으로 멈췄다 — {why}");
+        std::panic::resume_unwind(payload)
+    });
     out.map_err(|e| Fail::new(e.to_string()))?;
     Ok(Vec::new())
 }
@@ -317,10 +330,12 @@ fn paste_off_on_panic() {
 /// 편집기가 도는 동안 루프 스레드는 편집기를 기다리지만, 짓던·버린 다시 읽기 스레드는 계속
 /// 돈다. 그것이 터지면 훅이 raw mode 를 끄고 대체 화면을 걷어 편집기 화면이 흐트러진다.
 ///
-/// **건너뛰지 않고 기다린다.** 건너뛰면 그 패닉은 `App::follow` 가 `resume_unwind` 로
-/// 되던질 때 다시 훅을 안 지나므로, 터미널이 raw·대체 화면에 남고 패닉 글도 사라진다.
-/// 기다렸다가 평소대로 돌면 편집기 밖에서 터진 것과 같은 차례가 된다: 훅이 걷고, 루프가
-/// 되던져 끝낸다. 기다리는 쪽은 그리지 않는 스레드라 세워 둬도 해가 없다.
+/// **건너뛰지 않고 기다린다.** 건너뛰면 패닉 글이 사라진다. 기다렸다가 평소대로 돌면 훅이
+/// 걷고 루프가 되던져 끝낸다. 기다리는 쪽은 그리지 않는 스레드라 세워 둬도 해가 없다.
+///
+/// **문이 막는 것은 쥔 뒤에 시작한 패닉뿐이다.** 쥐기 직전에 훅을 지난 패닉은 이미 터미널을
+/// 걷었고, 편집기에서 돌아오며 다시 올린 화면은 훅이 다시 안 걷는다 — 그 끝은 `screen` 의
+/// `catch_unwind` 가 맡는다. 문은 편집기 화면을 지키고, 셸을 되돌리는 것은 그쪽이다.
 ///
 /// **문을 쥔 스레드 자신은 안 기다린다.** 편집기를 부르는 길에서 루프 스레드가 터지면 풀어
 /// 줄 스레드가 자기뿐이라 영영 멈춘다.
@@ -392,8 +407,8 @@ fn executable(_: &std::fs::Metadata) -> bool {
 /// 끝낼 때(`screen`)와 같은 차례다: bracketed paste 를 끄고 raw mode·대체 화면을 걷는다. 안
 /// 끄면 편집기에 붙인 글이 `200~…201~` 에 싸여 들어간다. 편집기가 도는 동안 **루프 스레드는
 /// 편집기를 기다리며 서 있다** — 그리기·스피너·다시 읽기 받기(`follow`)가 전부 멈춘다. 다시
-/// 읽기 스레드는 계속 짓지만 그리지 않고, 돌아오면 다음 걸음이 받는다. 그 스레드가 터지면
-/// 훅은 [`EDITING`] 앞에서 선다 — 문은 **걷기 전에** 쥐고, 여는 것은 루프가 올린 뒤다.
+/// 읽기 스레드는 계속 짓지만 그리지 않고, 돌아오면 다음 걸음이 받는다. 쥔 뒤에 그 스레드가
+/// 터지면 훅은 [`EDITING`] 앞에서 선다 — 문은 **걷기 전에** 쥐고, 여는 것은 루프가 올린 뒤다.
 fn suspend() {
     EDITING.hold();
     let _ = bracketed_paste(&mut std::io::stdout(), false);
