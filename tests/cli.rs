@@ -3196,6 +3196,47 @@ fn every_help_heredoc_is_copyable() {
     assert!(bad.is_empty(), "복사해 못 도는 heredoc:\n{}", bad.join("\n"));
 }
 
+/// **좁은 터미널에서도 heredoc 여는 줄이 접히지 않는다** (moai-opjn).
+///
+/// clap 의 `wrap_help` 는 도움말을 터미널 폭에 맞춰 낱말 사이에 **실제 개행**을 넣어
+/// 접는다. 여는 줄이 두 줄로 갈리면 복사한 명령에 heredoc 이 없고 본문 줄이 셸 명령으로
+/// 돈다. 시험에는 터미널이 없어 clap 이 `COLUMNS` 로 폭을 정하므로 그것을 좁혀 본다.
+#[test]
+fn narrow_terminals_keep_heredoc_openers_whole() {
+    let s = init("helpnarrow");
+    let wide = every_help(&s);
+    let mut openers = 0;
+    let mut bad = Vec::new();
+    for columns in ["30", "45"] {
+        for (path, full) in &wide {
+            let narrow = help_at(&s, path, columns);
+            for line in full.lines().filter(|l| heredoc_tag(l).is_some()) {
+                openers += 1;
+                if !narrow.lines().any(|n| n == line) {
+                    bad.push(format!("COLUMNS={columns} moai {path} --help: {line}"));
+                }
+            }
+        }
+    }
+    assert!(openers >= 8, "heredoc 여는 줄을 {openers}개밖에 못 봤다");
+    assert!(bad.is_empty(), "좁은 터미널에서 접힌 heredoc 여는 줄:\n{}", bad.join("\n"));
+}
+
+/// `COLUMNS` 를 준 채 부른 `moai <path> --help`.
+fn help_at(s: &Scratch, path: &str, columns: &str) -> String {
+    let mut args: Vec<&str> = path.split_whitespace().collect();
+    args.push("--help");
+    let out = isolated(BIN)
+        .args(&args)
+        .current_dir(s.path())
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", columns)
+        .output()
+        .expect("moai 를 실행하지 못했다");
+    assert!(out.status.success(), "moai {path} --help 가 실패했다");
+    String::from_utf8(out.stdout).unwrap()
+}
+
 /// 복사해 못 도는 heredoc 마다 한 줄.
 fn copyable_heredocs(help: &str) -> Vec<String> {
     let lines: Vec<&str> = help.lines().collect();
