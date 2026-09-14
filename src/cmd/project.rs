@@ -54,7 +54,7 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     if !initialized {
         out.push(paint(
             style::DIM,
-            &format!("  init 전 — .moai 가 아직 없다. `moai -C {} init` 으로 시작하면 보인다", shell_word(&shown)),
+            &format!("  init 전 — .moai 가 아직 없다. `moai -C {} init` 으로 시작하면 보인다", shell_word(&dir.display().to_string())),
         ));
     }
     Ok(out)
@@ -105,7 +105,10 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     let not_registered = || {
         let shown = one_line(&spellings[0].display().to_string());
         Fail::coded(
-            format!("등록돼 있지 않다 — {shown} · `moai project add {}` 로 먼저 더한다", shell_word(&shown)),
+            format!(
+                "등록돼 있지 않다 — {shown} · `moai project add {}` 로 먼저 더한다",
+                shell_word(&spellings[0].display().to_string())
+            ),
             code::NOT_FOUND,
         )
     };
