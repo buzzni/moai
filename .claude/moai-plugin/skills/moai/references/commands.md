@@ -58,6 +58,15 @@
 
 `--dry-run` 이 heredoc 오타로 엉뚱한 여섯 개를 만드는 것을 막는다.
 
+## 여러 프로젝트
+
+    moai project add <dir>                 내 설정에 등록한다 (`.moai` 가 없어도 받는다)
+    moai project ls                        등록한 것과 그 상태
+
+`.moai` 밖에서 부른 `moai`·`moai status`·`moai ready` 는 등록한 프로젝트를
+프로젝트마다 한눈에 낸다. 그 밖의 명령은 어느 프로젝트인지 모르니
+`moai -C <dir> <명령>` 으로 부른다.
+
 ## 담아 둔 생각을 펼치기
 
     moai idea add "반짝 떠오른 것"                 담기

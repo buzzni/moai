@@ -88,6 +88,15 @@ idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
 멤버가 있는데 접으려면 그 멤버를 `moai defer` 한다 — 끝난 멤버가 하나도 없으면
 미뤄도 첫 칸이니, 그때는 묶음을 `moai defer` 해 계획에서 뺀다.
 
+### 여러 프로젝트
+
+    moai project add <dir>                 내 설정에 등록한다 (`.moai` 가 없어도 받는다)
+    moai project ls                        등록한 것과 그 상태
+
+`.moai` 밖에서 부른 `moai`·`moai status`·`moai ready` 는 등록한 프로젝트를
+프로젝트마다 한눈에 낸다. 그 밖의 명령은 어느 프로젝트인지 모르니
+`moai -C <dir> <명령>` 으로 부른다.
+
 ### 기능 요청을 받으면
 
 1. `moai status` 로 이미 있는 에픽을 본다. 겹칠 것 같으면 `moai show -g <키워드>`.

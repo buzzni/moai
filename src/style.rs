@@ -43,6 +43,59 @@ pub const ERROR: Style = fg(AnsiColor::Red);
 pub const WARN: Style = fg(AnsiColor::BrightYellow);
 pub const HEAD: Style = Style::new().bold();
 
+/// 한 화면에 여러 프로젝트를 올릴 때 프로젝트마다 다는 색상 — [`project_colour`] 가 고른다.
+///
+/// **기본 16색의 보통 칸 셋만 쓴다.** 고른 까닭(moai-xs9x note 에 전문):
+/// - bright 변종은 Solarized 가 회색에 매핑하고, 밝은 바탕(Tango)에서 초록·청록이
+///   사라진다. 검정·흰색은 한쪽 바탕과 같은 색이다
+/// - 빨강은 `ERROR`·`P1`, 노랑은 `IN_PROGRESS`·`WARN`, 자홍은 `REVIEW` 다. 한눈 보기
+///   줄에는 우선순위 칸·집은 칸·review 줄이 id 곁에 실제로 서서, 그 색의 id 는 거짓
+///   뜻으로 읽힌다
+/// - 남는 초록(`DONE`)·파랑(`EPIC`)은 한눈 보기 줄에 그 뜻이 서지 않는다 — done 줄도
+///   에픽 열도 없다. 청록의 `TAG` 도 태그 칸이 없어 안 선다
+/// - **청록 하나는 알고 받아들인다.** `statuses` 에 칸을 더한 저장소(`blocked` 따위)는
+///   그 칸의 줄이 집은 것으로 서고, 글리프 `○` 가 `OTHER`(청록)로 칠해져 청록 id 곁에
+///   붙는다. 빼지 않는 까닭: 빨강·노랑·자홍이 지는 뜻은 급함·진행·review 라 잘못 읽으면
+///   판단이 틀리지만, `OTHER` 는 "네 칸 밖" 이라는 뜻 없는 뜻이다. 그리고 청록을 빼면
+///   팔레트가 둘로 줄어 **모든** 사용자의 두 프로젝트가 절반 확률로 겹친다 — 칸을 더한
+///   저장소의 드문 줄 하나를 위해 치르기엔 비싸다. 칸은 글리프가 가른다
+///
+/// **색이 혼자 뜻을 지지 않는다.** 이 색을 다는 줄에는 늘 프로젝트 이름이 곁에 선다.
+pub const PROJECT_HUES: [AnsiColor; 3] = [AnsiColor::Cyan, AnsiColor::Green, AnsiColor::Blue];
+
+/// 프로젝트 → 색. **경로에 대한 순수 함수**라 부를 때마다, 표면마다(CLI·TUI) 같다.
+///
+/// - **등록 순서가 아니라 경로 해시다.** 순서로 고르면 앞의 것 하나를 빼는 순간 뒤의
+///   것이 전부 색을 바꾼다. 해시는 다른 프로젝트를 더하고 빼도 제 색이 그대로다
+/// - **이름이 아니라 경로다.** 이름은 겹치면 위 디렉터리를 붙이는 파생값이라 등록
+///   목록을 따라 바뀐다
+/// - 경로는 조각(`components`) 단위로 센다 — 끝 `/` 나 겹 `/` 같은 철자가 색을 가르지
+///   않게. 링크는 안 푼다(순수 함수로 둔다). 등록이 이미 푼 경로로 적힌다
+/// - FNV-1a 로 세고 MurmurHash3 의 끝섞기(`fmix64`)를 지난다. `DefaultHasher` 는
+///   알고리즘이 바뀔 수 있다고 적혀 있고, 바뀌면 업그레이드 한 번에 모든 프로젝트의
+///   색이 바뀐다. **끝섞기를 빼지 않는다** — 날 FNV 의 `% 3` 은 끝 글자 하나만 다른
+///   경로(`/a`…`/f`)를 전부 한 색에 몰고, 형제 디렉터리 300개를 190:100:10 으로 쏠리게 냈다
+/// - **겹치는 것은 받아들인다.** 색은 셋이라 프로젝트가 늘면 겹친다. 겹쳐도 이름이
+///   곁에 서서 가른다 — 겹침을 피하려고 목록 안에서 밀어내면 남을 더할 때 제 색이 바뀐다
+pub fn project_colour(path: &std::path::Path) -> Style {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut h = OFFSET;
+    for part in path.components() {
+        // 조각 사이에 0 을 끼운다 — `a/bc` 와 `ab/c` 가 같은 바이트열로 섞이지 않게.
+        for b in part.as_os_str().as_encoded_bytes().iter().chain([&0u8]) {
+            h ^= u64::from(*b);
+            h = h.wrapping_mul(PRIME);
+        }
+    }
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    h ^= h >> 33;
+    fg(PROJECT_HUES[(h % PROJECT_HUES.len() as u64) as usize])
+}
+
 /// 본문 마크다운.
 ///
 /// **앞서 이 자리에 틀린 말이 적혀 있었다** — "굵게는 속성이라 `NO_COLOR` 에서도
@@ -167,6 +220,65 @@ mod tests {
         assert!(s.starts_with('\u{1b}') && s.ends_with("\u{1b}[0m"), "{s:?}");
         assert!(s.contains('x'));
         assert_eq!(paint(REVIEW, ""), "");
+    }
+
+    /// 같은 경로는 늘 같은 색이고, 철자만 다른 같은 경로도 같은 색이다.
+    #[test]
+    fn project_colour_is_a_function_of_the_path_alone() {
+        use std::path::Path;
+        let hue = |s: &str| match project_colour(Path::new(s)).get_fg_color() {
+            Some(Color::Ansi(c)) => c,
+            other => panic!("{s}: 16색이 아니다 — {other:?}"),
+        };
+        assert_eq!(hue("/home/me/work/api"), hue("/home/me/work/api/"));
+        assert_eq!(hue("/home/me/work/api"), hue("/home/me//work/api"));
+        // **값을 못 박는다.** 해시나 팔레트 차례를 바꾸면 사용자의 모든 프로젝트가 색을
+        // 바꾼다 — 일부러 바꿀 때만 이 줄을 고친다.
+        use AnsiColor as A;
+        let got: Vec<_> = ["/a", "/b", "/c", "/d", "/e", "/f"].iter().map(|s| hue(s)).collect();
+        assert_eq!(got, [A::Green, A::Cyan, A::Blue, A::Cyan, A::Blue, A::Blue], "배정이 바뀌었다");
+    }
+
+    /// 팔레트에는 한쪽 바탕에서 사라지는 색도, 한눈 보기 줄에서 다른 뜻을 지는 색도 없다.
+    #[test]
+    fn project_hues_avoid_vanishing_and_meaningful_colours() {
+        use AnsiColor as A;
+        let vanish = [A::Black, A::White, A::BrightBlack, A::BrightWhite];
+        // bright 변종은 Solarized 에서 회색이 되고 밝은 바탕에서 사라진다.
+        let bright = [A::BrightRed, A::BrightGreen, A::BrightYellow, A::BrightBlue, A::BrightMagenta, A::BrightCyan];
+        // 한눈 보기 줄에 곁에 서는 뜻의 색상 — 보통·bright 둘 다.
+        let meaning = [A::Red, A::Yellow, A::Magenta];
+        // bright 는 같은 색상의 밝은 쪽이다 — `BrightYellow` 인 `IN_PROGRESS` 곁에 `Yellow` id
+        // 는 같은 뜻으로 읽힌다. 그래서 색상 계열로 견준다.
+        let family = |s: Style| match s.get_fg_color() {
+            Some(Color::Ansi(c)) => match c {
+                A::BrightRed => A::Red,
+                A::BrightGreen => A::Green,
+                A::BrightYellow => A::Yellow,
+                A::BrightBlue => A::Blue,
+                A::BrightMagenta => A::Magenta,
+                A::BrightCyan => A::Cyan,
+                c => c,
+            },
+            other => panic!("16색이 아니다 — {other:?}"),
+        };
+        for hue in PROJECT_HUES {
+            assert!(!vanish.contains(&hue) && !bright.contains(&hue) && !meaning.contains(&hue), "{hue:?}");
+            for used in [IN_PROGRESS, REVIEW, WARN, ERROR, P0, P1] {
+                assert_ne!(hue, family(used), "{hue:?} 가 칸·경고·우선순위의 색과 같은 계열이다");
+            }
+        }
+        // 알고 받아들인 겹침 하나 — 설정으로 더한 칸의 `OTHER`. 팔레트나 `OTHER` 를 바꾸면 여기서
+        // 멈춰 `PROJECT_HUES` 문서의 근거를 다시 본다.
+        let clash: Vec<_> = PROJECT_HUES.iter().filter(|h| **h == family(OTHER)).collect();
+        assert_eq!(clash, [&A::Cyan], "OTHER 와의 겹침이 문서와 다르다");
+        let uniq: std::collections::BTreeSet<_> = PROJECT_HUES.iter().map(|c| format!("{c:?}")).collect();
+        assert_eq!(uniq.len(), PROJECT_HUES.len(), "팔레트에 같은 색이 두 번 있다");
+        // 모든 칸이 실제로 쓰인다 — 나머지 연산이 한쪽으로 쏠리지 않는다.
+        let seen: std::collections::BTreeSet<_> = (0..64)
+            .map(|i| format!("{:?}", project_colour(std::path::Path::new(&format!("/p/{i}"))).get_fg_color()))
+            .collect();
+        assert_eq!(seen.len(), PROJECT_HUES.len(), "{seen:?}");
     }
 
     /// 기본 우선순위는 안 칠한다.

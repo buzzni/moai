@@ -14,7 +14,9 @@
 use super::{Ctx, Fail, R, code};
 use crate::style::{self, paint};
 use crate::text::{sanitize, shell_word, width};
-use crate::user_config::{self, Project};
+use crate::user_config;
+use crate::{model, projects, report};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
@@ -97,44 +99,63 @@ pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
 /// 등록한 프로젝트 하나가 지금 어떤 모양인가. **파일에 적지 않는다** — 볼 때마다
 /// 디스크에서 읽는 파생값이다.
 ///
-/// 셋은 `.moai` 밖 한눈 보기(moai-6au6)가 디렉터리 하나를 여는 결과와 한 짝씩
-/// 맞춘다 — 그쪽이 들어오면 여기는 그것을 부르는 것으로 바뀌고 모양은 그대로다.
-#[derive(serde::Serialize, Clone, Copy, PartialEq, Debug)]
-#[serde(rename_all = "snake_case")]
-enum State {
-    /// `.moai` 가 있다.
-    Initialized,
+/// 여는 길은 `.moai` 밖 한눈 보기와 같은 [`projects::open`] 하나다. 따로 들여다보면
+/// (한때 `is_dir` 두 번이었다) 설정이 깨진 프로젝트를 `ls` 는 "있음" 으로, 한눈
+/// 보기는 "못 읽는다" 로 말해 두 화면이 같은 디렉터리를 달리 부른다.
+///
+/// **`--json` 의 `state` 낱말은 옛 것을 그대로 둔다.** 연 것은 한눈 보기의 `ok` 가
+/// 아니라 전부터 내던 `initialized` 다 — 이미 나간 값을 바꾸면 읽던 쪽이 모르는 채로
+/// 멀쩡한 줄을 모르는 상태로 읽는다. 새로 선 것은 더하기만 한다: `unreadable`(+`error`)
+/// 과, 연 것 곁의 `counts`·`unreadable`. 그래서 [`projects::Seen`] 을 그대로 싣지
+/// 않고 여기서 한 번 옮긴다 — 나머지 낱말(`uninitialized`·`missing`·`unreadable`)은
+/// 그쪽과 같다.
+#[derive(serde::Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum State<'a> {
+    /// 설정과 스냅샷까지 읽었다.
+    Initialized {
+        /// 칸별 이슈 수 — 한눈 보기와 같은 자(`report::status(..).counts`)로 센다.
+        /// 에픽·마일스톤과 미룬 것은 안 센다. 자를 따로 두면 두 화면의 수가 어긋난다.
+        counts: BTreeMap<String, usize>,
+        /// 못 읽는 줄의 수. 그 줄의 이슈는 `counts` 에서 빠져 있다.
+        unreadable: usize,
+        /// 칸의 차례 — 설정에 적힌 대로 그린다. `counts` 는 이름순이라 쓸 수 없다.
+        #[serde(skip)]
+        columns: &'a [String],
+    },
     /// 디렉터리는 있는데 `.moai` 가 없다 — 등록한 뒤 `moai init` 하면 보인다.
     Uninitialized,
     /// 디렉터리가 없다. 옮겼거나 지웠다. 목록에서 빼는 것은 사람의 몫이다.
     Missing,
+    /// 설정이 깨졌거나, 스냅샷을 못 읽거나, 등록한 경로가 디렉터리가 아니다.
+    /// **"있음" 으로 접지 않는다** — 접으면 `ls` 가 괜찮다고 한 프로젝트를 `status` 가 못 연다.
+    Unreadable { error: &'a str },
 }
 
 #[derive(serde::Serialize)]
-struct Row {
-    name: String,
-    path: PathBuf,
-    state: State,
+struct Row<'a> {
+    name: &'a str,
+    path: &'a Path,
+    #[serde(flatten)]
+    state: State<'a>,
 }
 
 /// **실패하지 않는다.** 설정이 깨졌거나 등록한 디렉터리가 사라져도 보이는 것은
 /// 다 보이고 까닭은 한 줄씩 선다. 사람의 설정 파일 하나로 비영 종료하면 이것을
 /// 부른 스크립트가 도구가 고장 난 줄 안다 (`moai status` 가 막지 않는 것과 같다).
+/// 등록한 프로젝트의 `.moai` 가 깨진 것도 같다 — 그 줄에만 선다.
 pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     let reg = user_config::read(user_config::path().as_deref());
-    let names = user_config::names(&reg.projects);
-    let rows: Vec<Row> = reg
-        .projects
-        .iter()
-        .zip(names)
-        .map(|(Project { path }, name)| Row { name, path: path.clone(), state: inspect(path) })
-        .collect();
+    let projects = projects::open(&reg);
+    let now = model::now();
+    let rows: Vec<Row> =
+        projects.iter().map(|p| Row { name: &p.name, path: &p.path, state: state(p, &now) }).collect();
 
     if ctx.json {
         #[derive(serde::Serialize)]
         struct Out<'a> {
             config: Option<&'a Path>,
-            projects: &'a [Row],
+            projects: &'a [Row<'a>],
             problems: &'a [String],
         }
         return super::json_line(&Out { config: reg.path.as_deref(), projects: &rows, problems: &reg.problems });
@@ -147,20 +168,16 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     if rows.is_empty() {
         out.push("등록한 프로젝트가 없다 — `moai project add <디렉터리>` 로 더한다".into());
     } else {
-        let names: Vec<String> = rows.iter().map(|r| sanitize(&r.name)).collect();
+        let names: Vec<String> = rows.iter().map(|r| sanitize(r.name)).collect();
         let paths: Vec<String> = rows.iter().map(|r| sanitize(&r.path.display().to_string())).collect();
         let name_w = names.iter().map(|n| width(n)).max().unwrap_or(0);
         let path_w = paths.iter().map(|p| width(p)).max().unwrap_or(0);
         for ((r, name), path) in rows.iter().zip(&names).zip(&paths) {
-            let state = match r.state {
-                State::Initialized => ".moai 있음".to_string(),
-                State::Uninitialized => paint(style::DIM, "init 전"),
-                State::Missing => paint(style::WARN, "디렉터리가 없다"),
-            };
             out.push(format!(
-                "{name}{}  {path}{}  {state}",
+                "{name}{}  {path}{}  {}",
                 " ".repeat(name_w - width(name)),
                 " ".repeat(path_w - width(path)),
+                said(&r.state),
             ));
         }
     }
@@ -170,17 +187,51 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     Ok(out)
 }
 
-/// 디렉터리 하나를 들여다본다. **`.moai` 는 준 디렉터리에서만 본다.**
-///
-/// 이슈 수는 아직 안 낸다. 줄을 세는 것만으로는 칸도 종류도 못 가르고, 칸을
-/// 가르려면 저장소를 설정째 여는 길이 있어야 한다 — 그 길은 moai-6au6 이 `store`
-/// 에 둔다. 지금 줄 수를 `issues` 로 내보내면 그쪽이 들어오는 날 같은 키의 뜻이
-/// 바뀌어, `--json` 을 읽던 쪽이 모르는 채로 다른 수를 읽는다.
-fn inspect(dir: &Path) -> State {
-    match (dir.is_dir(), dir.join(".moai").is_dir()) {
-        (false, _) => State::Missing,
-        (true, false) => State::Uninitialized,
-        (true, true) => State::Initialized,
+/// 연 프로젝트 하나를 `ls` 의 낱말로 옮긴다. 못 읽는 줄을 넘기는 자는 한눈 보기와 같다
+/// — 넘기지 않으면 그 줄이 쓰던 id 와의 중복이 셈에서 달라진다.
+fn state<'a>(p: &'a projects::Project, now: &str) -> State<'a> {
+    match &p.state {
+        projects::State::Open { repo, load } => {
+            let unreadable: Vec<report::Unreadable> =
+                load.errors.iter().map(|e| report::Unreadable { id: e.id.as_deref() }).collect();
+            State::Initialized {
+                counts: report::status(&load.issues, &unreadable, &repo.config, now).counts,
+                unreadable: load.errors.len(),
+                columns: &repo.config.statuses,
+            }
+        }
+        projects::State::Uninit => State::Uninitialized,
+        projects::State::Missing => State::Missing,
+        projects::State::Unreadable(e) => State::Unreadable { error: e },
+    }
+}
+
+/// 목록 한 줄의 끝 칸. 칸별 수는 한눈 보기의 보드 줄과 같은 글리프·낱말이되 한 줄에
+/// 들게 사이를 좁힌다. **색이 혼자 뜻을 지지 않는다** — 글리프와 낱말이 늘 곁에 선다.
+fn said(state: &State) -> String {
+    match state {
+        State::Initialized { counts, unreadable, columns } => {
+            let mut cols: Vec<String> = columns
+                .iter()
+                .map(|s| {
+                    let n = counts.get(s).copied().unwrap_or(0);
+                    let style = style::status_style(s);
+                    // 칸 이름도 남의 설정 파일에서 온다 — `statuses` 는 제어문자를 거르지 않는다.
+                    let word = sanitize(s);
+                    format!("{} {}", paint(style, style::glyph(s)), paint(style, &format!("{word} {n}")))
+                })
+                .collect();
+            if *unreadable > 0 {
+                cols.push(format!("{} 읽을 수 없는 줄 {unreadable}개", paint(style::ERROR, "!")));
+            }
+            cols.join("  ")
+        }
+        State::Uninitialized => paint(style::DIM, "init 전"),
+        State::Missing => paint(style::WARN, "디렉터리가 없다"),
+        // 까닭은 한 줄에 둔다 — 줄바꿈이 섞이면 다음 프로젝트의 줄과 갈리지 않는다.
+        State::Unreadable { error } => {
+            format!("{} 못 읽는다 — {}", paint(style::ERROR, "!"), sanitize(error).replace(['\n', '\t'], " "))
+        }
     }
 }
 
