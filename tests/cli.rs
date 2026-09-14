@@ -4889,6 +4889,54 @@ fn edits_are_judged_through_the_contract() {
     }
 }
 
+/// **옆 워크트리가 쥔 일은 이 세션의 일이 아니다.** 집기 커밋이 main 에 들어오면 main
+/// 스냅샷에는 옆에서 집은 줄이 벌여 놓은 칸에 선다 — 그것을 제 일로 세던 훅은 main
+/// 세션에 남의 일을 옮기라고 붙들고 main 의 `moai add` 를 막았다(moai-0yrv). 워크트리
+/// 목록을 읽는 배선은 단위 시험이 못 밟아 여기서 본다.
+#[test]
+fn the_hook_leaves_what_a_named_worktree_holds_to_that_worktree() {
+    let s = Scratch::new("hookaway");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let there = field(&ok(&main, &["add", "옆에서 할 일", "--json"]), "id");
+    ok(&main, &["mv", &there, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+
+    let stop = |session: &str| {
+        let input = format!("{{\"session_id\":\"{session}\",\"cwd\":{}}}", json_str(&main.display().to_string()));
+        String::from_utf8(hook_in(&s, &main, "stop", &input).stdout).unwrap()
+    };
+    let add = |session: &str| {
+        let input = format!(
+            "{{\"session_id\":\"{session}\",\"cwd\":{},\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}}}",
+            json_str(&main.display().to_string()),
+            json_str("moai add \"딴 일\"")
+        );
+        String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap()
+    };
+
+    // 옆 워크트리가 없으면 여전히 이 자리의 일이다.
+    assert!(stop("s1").contains(&format!("moai mv {there}")), "워크트리 없이도 안 붙든다");
+    assert!(refusal(&add("s1")).contains(&there), "워크트리 없이도 안 막는다");
+
+    let dir = format!(".claude/worktrees/{there}");
+    let branch = format!("worktree-{there}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &branch]);
+    let held = stop("s2");
+    assert!(held.trim().is_empty(), "옆 워크트리가 쥔 일로 붙든다\n{held}");
+    let made = add("s2");
+    assert!(made.trim().is_empty(), "옆 워크트리가 쥔 일로 생성을 막는다\n{made}");
+
+    // 그 워크트리 안에서는 제 일이다.
+    let inside = main.join(&dir);
+    let input = format!("{{\"session_id\":\"s3\",\"cwd\":{}}}", json_str(&inside.display().to_string()));
+    let own = String::from_utf8(hook_in(&s, &inside, "stop", &input).stdout).unwrap();
+    assert!(own.contains(&format!("moai mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
+}
+
 /// 규칙 2 의 껍데기 쪽은 **stdin 의 `cwd` 로** 상대 경로를 푼다. 훅 프로세스를
 /// 저장소 뿌리에서 띄우고 `cwd` 만 하위 디렉터리로 준다 — 뿌리로 푸는 판은 여기서
 /// `a.md` 를 대고, 트래커 안에 서서 친 `../src` 쓰기는 놓친다. 단위 시험은 순수
