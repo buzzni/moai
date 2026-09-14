@@ -373,12 +373,20 @@ impl Doc {
         (look, problems)
     }
 
-    /// 보기를 적는다. 읽은 것과 같으면 **아무것도 안 한다** — 토글마다 부르므로 헛 쓰기가 없어야
-    /// 한다. `None` 인 값은 키를 지운다. 표 안의 모르는 키와 주석은 그대로 둔다.
+    /// 이 세션이 보기를 `base` 에서 `new` 로 바꾼 **만큼만** 지금 파일 위에 옮긴다(moai-2kyl 단계 리뷰).
     ///
-    /// **`tui` 가 표가 아니면 적지 않는다** — 무엇인지 모르는 값을 덮으면 되돌릴 수 없다.
-    pub fn set_look(&mut self, look: &Look) -> R<()> {
-        if self.look().0 == *look {
+    /// 화면이 든 보기를 통째로 적으면 그사이 옆 탐색기·손·새 바이너리가 적은 것을 토글 한 번이 되돌린다 —
+    /// 락 안에서 다시 읽는 까닭이 사라지는 조용한 손실이다. 그래서
+    /// - **이 세션이 안 바꾼 키는 건드리지 않는다.** 모르는 낱말·모르는 모양(`sort = { … }`)·틀린 값도 그대로다
+    /// - **낱말 배열(`hidden`·`fields`)은 뺀 낱말만 빼고 더한 낱말만 끝에 더한다** — 남이 더한 낱말은 남는다
+    /// - **차례와 방향(`sort`·`sort_reversed`)은 한 벌이다** — 하나를 고르면 둘을 함께 적는다
+    /// - **값만 바꾼다** — 키 위의 주석·값 뒤의 주석·여러 줄로 벌인 배열은 그대로다(`put_value`)
+    ///
+    /// `None` 으로 바꾼 키는 지운다. 파일이 이미 그렇게 적혀 있으면(옆에서 같게 적었으면) 아무것도 안
+    /// 한다 — 헛 쓰기가 없다. **`tui` 가 표가 아니면 적지 않는다** — 무엇인지 모르는 값을 덮으면 되돌릴
+    /// 수 없다.
+    pub fn merge_look(&mut self, base: &Look, new: &Look) -> R<()> {
+        if base == new {
             return Ok(());
         }
         match self.doc.get(TUI) {
@@ -395,21 +403,16 @@ impl Doc {
             }
         }
         let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
-        let words = |v: &[String]| toml_edit::value(v.iter().map(String::as_str).collect::<toml_edit::Array>());
-        let mut put = |key: &str, v: Option<Item>| match v {
-            Some(v) => {
-                t.insert(key, v);
-            }
-            None => {
-                t.remove(key);
-            }
-        };
-        put(HIDDEN, look.hidden.as_deref().map(words));
-        put(HIDE_DEFERRED, look.hide_deferred.map(toml_edit::value));
-        put(SORT, look.sort.as_deref().map(toml_edit::value));
-        put(SORT_REVERSED, look.sort_reversed.map(toml_edit::value));
-        put(FIELDS, look.fields.as_deref().map(words));
-        self.dirty = true;
+        let mut changed = merge_words(t, HIDDEN, base.hidden.as_deref(), new.hidden.as_deref());
+        if base.hide_deferred != new.hide_deferred {
+            changed |= put_value(t, HIDE_DEFERRED, new.hide_deferred.map(toml_edit::Value::from));
+        }
+        if (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed) {
+            changed |= put_value(t, SORT, new.sort.as_deref().map(toml_edit::Value::from));
+            changed |= put_value(t, SORT_REVERSED, new.sort_reversed.map(toml_edit::Value::from));
+        }
+        changed |= merge_words(t, FIELDS, base.fields.as_deref(), new.fields.as_deref());
+        self.dirty |= changed;
         Ok(())
     }
 }
@@ -498,6 +501,65 @@ fn look_flag(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<String>
         problems.push(format!("`{TUI}.{key}` 는 true·false 여야 한다 — 지금은 {}", item.type_name()));
     }
     b
+}
+
+/// 낱말 배열 하나에 이 세션이 바꾼 만큼만 옮긴다(`Doc::merge_look`). 바뀐 것이 있으면 참.
+///
+/// 배열이면 **제자리에서** 고친다 — 뺀 낱말(겹쳐 적힌 것까지)을 빼고 더한 낱말을 끝에 더한다. 낱말이
+/// 아닌 원소(새 바이너리의 모양)와 여러 줄로 벌인 모양은 그대로다. 배열이 아니거나 없으면 이 세션이 그
+/// 키를 바꿨으니 `new` 를 새로 적는다.
+fn merge_words(t: &mut dyn toml_edit::TableLike, key: &str, base: Option<&[String]>, new: Option<&[String]>) -> bool {
+    if base == new {
+        return false;
+    }
+    let Some(new) = new else {
+        return t.remove(key).is_some();
+    };
+    if t.get(key).and_then(Item::as_array).is_none() {
+        return put_value(t, key, Some(new.iter().map(String::as_str).collect::<toml_edit::Array>().into()));
+    }
+    let base = base.unwrap_or_default();
+    let words = t.get_mut(key).and_then(Item::as_array_mut).expect("방금 배열인 것을 봤다");
+    let before = words.len();
+    words.retain(|v| !v.as_str().is_some_and(|w| base.iter().any(|b| b == w) && !new.iter().any(|n| n == w)));
+    let mut changed = words.len() != before;
+    for w in new {
+        if base.contains(w) || words.iter().any(|v| v.as_str() == Some(w.as_str())) {
+            continue;
+        }
+        words.push(w.as_str());
+        changed = true;
+    }
+    changed
+}
+
+/// 값 하나를 적는다(`Doc::merge_look`). 같은 값이면 안 적고, 바뀐 것이 있으면 참. `None` 이면 키를 지운다.
+///
+/// **키는 안 건드리고 값만 바꾼다.** 키 위의 주석은 키의 꾸밈에 붙어 있어 `Table::insert` 로 갈아 끼우면
+/// 지워진다(키 모양을 새로 짓는다). 값 뒤의 주석은 있던 값의 꾸밈에 붙어 있어 옮겨 단다 — `set_hue` 와
+/// 같은 까닭이다.
+fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::Value>) -> bool {
+    let Some(mut v) = v else {
+        return t.remove(key).is_some();
+    };
+    if !t.contains_key(key) {
+        t.insert(key, Item::Value(v));
+        return true;
+    }
+    let item = t.get_mut(key).expect("방금 있는 것을 봤다");
+    if let Some(old) = item.as_value() {
+        let same = match (old, &v) {
+            (toml_edit::Value::String(a), toml_edit::Value::String(b)) => a.value() == b.value(),
+            (toml_edit::Value::Boolean(a), toml_edit::Value::Boolean(b)) => a.value() == b.value(),
+            _ => false,
+        };
+        if same {
+            return false;
+        }
+        *v.decor_mut() = old.decor().clone();
+    }
+    *item = Item::Value(v);
+    true
 }
 
 /// 항목 표 하나에서 경로를 읽는다. 상대경로는 거절한다 — 부른 자리마다 다른
@@ -894,8 +956,8 @@ mod tests {
         assert!(e.contains("\"magenta\"") && e.contains("cyan·green·blue") && e.contains(AUTO), "{e}");
     }
 
-    /// **보기는 `[tui]` 에 적히고 도로 읽히며, 남의 키·주석·등록은 그대로다**(moai-2bzp). 같은 보기를
-    /// 다시 적으면 파일을 안 건드린다 — 토글마다 적으므로 헛 쓰기가 없어야 한다.
+    /// **보기는 `[tui]` 에 적히고 도로 읽히며, 남의 키·주석·등록은 그대로다**(moai-2bzp). 파일이 이미 그
+    /// 보기면 파일을 안 건드린다 — 토글마다 적으므로 헛 쓰기가 없어야 한다.
     #[test]
     fn a_look_round_trips_and_leaves_the_rest_alone() {
         let d = scratch("look");
@@ -908,19 +970,20 @@ mod tests {
             sort_reversed: Some(false),
             fields: Some(vec!["id".into(), "assignee".into()]),
         };
-        update(&path, |doc| doc.set_look(&look)).unwrap();
+        update(&path, |doc| doc.merge_look(&Look::default(), &look)).unwrap();
         let (back, problems) = read_look(Some(&path));
         assert_eq!((back, problems), (look.clone(), Vec::new()));
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("# 내 설정") && text.contains("path = \"/a\"") && text.contains("extra = 1  # 남의 키"), "{text}");
 
+        // 이 세션이 바꾼 것이 파일에 이미 있으면(옆에서 같게 적었으면) 파일을 안 건드린다.
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        update(&path, |doc| doc.set_look(&look)).unwrap();
+        update(&path, |doc| doc.merge_look(&Look::default(), &look)).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before, "같은 보기를 다시 적었다");
 
-        // 없는 값은 키를 지운다.
-        update(&path, |doc| doc.set_look(&Look { sort: Some("title".into()), ..Look::default() })).unwrap();
+        // 없는 값으로 바꾼 키는 지운다.
+        update(&path, |doc| doc.merge_look(&look, &Look { sort: Some("title".into()), ..Look::default() })).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("hidden") && text.contains("sort = \"title\"") && text.contains("extra = 1"), "{text}");
     }
@@ -936,16 +999,57 @@ mod tests {
         assert_eq!(look.hide_deferred, Some(true));
         assert_eq!(problems.len(), 3, "{problems:?}");
 
+        let title = Look { sort: Some("title".into()), ..Look::default() };
         let mut odd = Doc::parse("tui = 3\n").unwrap();
         assert_eq!(odd.look().1.len(), 1);
-        assert!(odd.set_look(&Look { sort: Some("title".into()), ..Look::default() }).is_err());
+        assert!(odd.merge_look(&Look::default(), &title).is_err());
         assert!(!odd.changed());
 
         // 읽히는 인라인 표는 쓰기도 받는다.
         let mut inline = Doc::parse("tui = { sort = \"created\" }\n").unwrap();
         assert_eq!(inline.look().0.sort.as_deref(), Some("created"));
-        inline.set_look(&Look { sort: Some("title".into()), ..Look::default() }).unwrap();
+        inline.merge_look(&Look::default(), &title).unwrap();
         assert!(inline.render().contains("sort = \"title\""), "{}", inline.render());
+    }
+
+    /// **보기는 이 세션이 바꾼 만큼만 적힌다**(moai-2kyl 단계 리뷰). 같은 설정에서 뜬 두 탐색기가 저마다
+    /// 다른 것을 눌러도 둘 다 남고, 안 바꾼 키는 주석·여러 줄 배열·모르는 모양까지 그대로다. 바꾼 값도
+    /// 값 뒤 주석은 들고 간다.
+    #[test]
+    fn a_look_merge_keeps_what_others_wrote_and_the_comments() {
+        let d = scratch("look-merge");
+        let path = d.join("config.toml");
+        std::fs::write(
+            &path,
+            "[tui]\n# 끝난 일은 늘 숨긴다\nhidden = [\n  \"done\",\n]\nsort = \"updated\"  # 새것 먼저\nfields = [\"id\", { name = \"estimate\" }]\nwidth = { list = 40 }\n",
+        )
+        .unwrap();
+        // 둘 다 같은 파일을 읽고 떴다 — 화면의 말로 든 보기다.
+        let base = Look {
+            hidden: Some(vec!["done".into()]),
+            hide_deferred: Some(false),
+            sort: Some("updated".into()),
+            sort_reversed: Some(false),
+            fields: Some(vec!["id".into()]),
+        };
+        let a = Look { fields: Some(vec!["id".into(), "assignee".into()]), ..base.clone() };
+        let b = Look { hide_deferred: Some(true), ..base.clone() };
+        update(&path, |doc| doc.merge_look(&base, &a)).unwrap();
+        update(&path, |doc| doc.merge_look(&base, &b)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let (back, _) = read_look(Some(&path));
+        assert_eq!(back.fields, Some(vec!["id".to_string(), "assignee".to_string()]), "옆 탐색기가 켠 열을 지웠다\n{text}");
+        assert_eq!(back.hide_deferred, Some(true), "{text}");
+        for kept in ["# 끝난 일은 늘 숨긴다", "hidden = [\n  \"done\",\n]", "sort = \"updated\"  # 새것 먼저", "{ name = \"estimate\" }", "width = { list = 40 }"] {
+            assert!(text.contains(kept), "안 바꾼 `{kept}` 가 달라졌다\n{text}");
+        }
+
+        // 바꾼 것은 값만 바뀐다 — 뒤 주석과 키 위 주석은 남고, 낱말 배열은 뺀 낱말만 빠진다.
+        let c = Look { hidden: Some(Vec::new()), sort: Some("title".into()), ..b.clone() };
+        update(&path, |doc| doc.merge_look(&b, &c)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("sort = \"title\"  # 새것 먼저") && text.contains("# 끝난 일은 늘 숨긴다"), "{text}");
+        assert_eq!(read_look(Some(&path)).0.hidden, Some(Vec::new()), "{text}");
     }
 
     /// 바꾼 것이 없으면 파일을 건드리지 않는다 — 헛 쓰기도 헛 diff 도 없다.

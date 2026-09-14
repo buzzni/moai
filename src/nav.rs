@@ -23,14 +23,14 @@
 //! 보이는 줄 수가 어긋났다(moai-lhbh).
 
 use crate::model::{Issue, Kind};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 /// 경로 한 마디.
 ///
 /// `Milestone(None)` 은 `(마일스톤 없음)` 바구니다. 에픽 없는 이슈는 따로
 /// 바구니를 두지 않고 제 마일스톤(또는 뿌리)에 파일처럼 그냥 놓인다 — MC 에서
 /// 파일과 디렉터리가 한 목록에 나란히 있는 것과 같다.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Seg {
     Milestone(Option<String>),
     Epic(String),
@@ -255,11 +255,30 @@ impl Index {
     ) -> Vec<Entry> {
         let mut out: Vec<Entry> = Vec::new();
         let mut buckets: Vec<Seg> = Vec::new();
+        // 걸린 것이 밑에 사는 마디 — **처음 물을 때 한 번에 모은다**(moai-2kyl 단계 리뷰). 이 자리보다 깊이
+        // 사는 줄의 첫 마디가 곧 그 줄을 품은 폴더의 마디다. 안 걸린 폴더마다 이슈 전부를 다시 훑으면, 보기가
+        // 끝난 에픽을 숨기는 동안(moai-fmv5) 목록 한 번에 끝난 폴더 수 × 이슈 수가 들고 목록은 프레임마다
+        // 센다. 다 걸리는 목록은 묻지 않으니 모으지도 않는다.
+        let mut lit: Option<HashSet<&Seg>> = None;
 
         for (at, home) in self.homes.iter().enumerate() {
-            // 바로 이 자리에 사는 것
+            // 바로 이 자리에 사는 것 — 저 자신이 걸렸거나 **밑에 걸린 것이 있는 폴더**. **폴더만 밑을
+            // 본다** — 잎의 마디 밑에 사는 것은 없어야 하지만, 같은 id 의 가려진 줄은 폴더인 쌍둥이와
+            // 마디가 같아 그 멤버를 제 자손으로 센다.
             if home == path {
-                if !self.kept(at, issues, keep) {
+                let kept = keep(at)
+                    || (self.is_dir(issues, at)
+                        && lit
+                            .get_or_insert_with(|| {
+                                self.homes
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(d, h)| h.len() > path.len() && h.starts_with(path) && keep(*d))
+                                    .map(|(_, h)| &h[path.len()])
+                                    .collect()
+                            })
+                            .contains(&self.seg_of(issues, at)));
+                if !kept {
                     continue;
                 }
                 out.push(if self.is_dir(issues, at) {
@@ -293,24 +312,6 @@ impl Index {
         buckets.sort_by_key(|s| matches!(s, Seg::Lost));
         out.extend(buckets.into_iter().map(|seg| Entry::Dir { seg, at: None }));
         out
-    }
-
-    /// 저 자신이 걸렸거나, 제 밑에 걸린 것이 있는가.
-    fn kept(&self, at: usize, issues: &[Issue], keep: &dyn Fn(usize) -> bool) -> bool {
-        if keep(at) {
-            return true;
-        }
-        // **폴더만 밑을 본다.** 잎의 마디 밑에 사는 것은 없어야 하지만, 같은 id 의
-        // 가려진 줄은 폴더인 쌍둥이와 마디가 같아 그 멤버를 제 자손으로 센다.
-        if !self.is_dir(issues, at) {
-            return false;
-        }
-        let mut under = self.homes[at].clone();
-        under.push(self.seg_of(issues, at));
-        // **훑다 말고 멈춘다.** `descendants` 로 받으면 첫 하나를 보기도 전에
-        // 자손 전부를 담는 Vec 이 생기고, 그것이 거름망에 걸러진 줄마다 한 번씩
-        // 프레임마다 반복된다.
-        self.homes.iter().enumerate().any(|(d, h)| h.starts_with(&under) && keep(d))
     }
 
     /// 그 자리 **밑에 걸린 모든 것**. 바로 밑뿐 아니라 더 깊은 것까지.

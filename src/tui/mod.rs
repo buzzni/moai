@@ -377,11 +377,11 @@ pub struct App {
     pub order: (keys::Order, bool),
     /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)다.
     pub fields: view::Fields,
-    /// 설정에서 읽었지만 이 바이너리가 모르는 정렬·열 낱말(moai-2bzp 리뷰). **적을 때 도로 싣는다** —
-    /// 새 바이너리가 적은 낱말을 옛 바이너리가 토글 한 번으로 지우면 안 된다. 정렬은 사람이
-    /// `SPC o` 로 새로 고르면 걷는다.
-    unknown_sort: Option<String>,
-    unknown_fields: Vec<String>,
+    /// 설정에 적혀 있다고 이 세션이 아는 보기 — 읽은 뒤와 적은 뒤의 [`App::look_now`](moai-2kyl 단계 리뷰).
+    /// **적을 때 이것과 지금의 차이만 옮긴다**(`Doc::merge_look`). 화면이 든 보기를 통째로 적으면 그사이
+    /// 옆 탐색기·손·새 바이너리가 적은 것을 토글 한 번이 되돌린다. 새 바이너리가 적은 모르는 낱말을 들고
+    /// 있다가 도로 싣던 것(moai-2bzp 리뷰)도 이것으로 선다 — 이 세션이 안 바꾼 것은 안 적는다.
+    saved: crate::user_config::Look,
     /// 층마다 커서를 기억한다. 들어갔다 나오면 **있던 자리로 돌아온다** —
     /// 매번 맨 위로 튕기면 형제 여럿을 훑는 일이 못 할 짓이 된다.
     remembered: Vec<usize>,
@@ -549,8 +549,7 @@ impl App {
             shown: Vec::new(),
             order: Default::default(),
             fields: Default::default(),
-            unknown_sort: None,
-            unknown_fields: Vec::new(),
+            saved: Default::default(),
             remembered,
             list: Scroll::default(),
             quit: false,
@@ -712,15 +711,18 @@ impl App {
                 let told = match self.land(&id) {
                     Landing::Shown => format!("✓ {done} · {what}"),
                     // **무엇이 가렸는지 가른다**(moai-fmv5) — 보기가 가린 줄에 "Esc 로 푼다" 를 대면
-                    // Esc 는 거름망만 풀어 누른 키가 아무것도 안 한다.
-                    Landing::Hidden if self.index.find(&id).is_some_and(|at| !self.shown.get(at).copied().unwrap_or(true)) => format!(
-                        "✓ {done} · {what} — 보기에 가려 안 보인다 · {} 로 모두 보인다",
-                        keys::label(keys::BROWSE, keys::Browse::ShowAll)
-                    ),
-                    Landing::Hidden => format!(
-                        "✓ {done} · {what} — 거름망에 가려 안 보인다 · {} 로 푼다",
-                        keys::label(keys::BROWSE, keys::Browse::ClearFilter)
-                    ),
+                    // Esc 는 거름망만 풀어 누른 키가 아무것도 안 한다. **둘 다 가렸으면 둘 다 댄다**
+                    // (moai-2kyl 단계 리뷰) — 하나만 대면 그 키를 눌러도 다른 쪽에 여전히 가린다.
+                    Landing::Hidden => {
+                        let masked = |mask: &[bool]| self.index.find(&id).is_some_and(|at| !mask.get(at).copied().unwrap_or(true));
+                        let clear = keys::label(keys::BROWSE, keys::Browse::ClearFilter);
+                        let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
+                        match (masked(&self.keep), masked(&self.shown)) {
+                            (true, true) => format!("✓ {done} · {what} — 거름망과 보기에 가려 안 보인다 · {clear} 로 풀고 {show} 로 모두 보인다"),
+                            (false, true) => format!("✓ {done} · {what} — 보기에 가려 안 보인다 · {show} 로 모두 보인다"),
+                            _ => format!("✓ {done} · {what} — 거름망에 가려 안 보인다 · {clear} 로 푼다"),
+                        }
+                    }
                     // 다시 읽기가 실패했으면 그 까닭은 `trouble` 이 따로 댄다. 담긴 것은 참이다.
                     Landing::Missing => format!("✓ {done} · {what} — 다시 읽은 목록에 없다"),
                 };
@@ -1086,6 +1088,18 @@ impl App {
         (0..self.keep.len()).filter(|&at| self.keep[at] && self.shown.get(at).copied().unwrap_or(true)).count()
     }
 
+    /// 거름망에 걸렸는데 **보기(`SPC s`)가 숨긴** 이슈 수(moai-2kyl 단계 리뷰). 검색 칸이 `N건` 곁에 댄다 —
+    /// 끝난 일을 찾는데 `0건` 만 서면 없는 줄 알고, 까닭을 대는 경로 줄의 뱃지는 좁으면 빠진다.
+    pub fn veiled_count(&self) -> usize {
+        (0..self.keep.len()).filter(|&at| self.keep[at] && !self.shown.get(at).copied().unwrap_or(true)).count()
+    }
+
+    /// 지금 디렉터리에 **보기만 가린 줄**이 있는가 — 거름망은 지나는데 보기가 숨긴 것(moai-2kyl 단계 리뷰).
+    /// 목록이 비었을 때 까닭을 대려고 묻는다. 이슈 수에 비례한 훑기라 줄이 있을 때는 안 부른다.
+    pub fn view_hides_here(&self) -> bool {
+        !self.on_layer() && !self.index.entries_where(&self.issues, &self.path, &|at| self.keep[at]).is_empty()
+    }
+
     /// 거름망을 건다. 빈 글은 "거름망 없음" 이다.
     ///
     /// **`all` 을 켠다.** `Filter` 의 기본값은 done 을 숨기는데, 탐색기가
@@ -1158,18 +1172,23 @@ impl App {
 
     /// 줄마다 보기에 보이는지 다시 센다. 칸은 **목록의 글리프와 같은 자**([`App::column`])로,
     /// 미룸은 물려받은 것까지(`Index::deferred_root`) 읽는다 — 미룬 에픽 밑의 일도 같이 빠진다.
+    /// 칸 숨김은 **이 프로젝트의 칸에만** 건다(`View::shows`).
     fn see(&mut self) {
         self.shown = (0..self.issues.len())
-            .map(|at| self.view.shows(self.column(at), self.index.deferred_root(&self.issues[at].id).is_some()))
+            .map(|at| self.view.shows(self.column(at), self.index.deferred_root(&self.issues[at].id).is_some(), &self.cfg.statuses))
             .collect();
     }
 
     /// 사용자 설정에 적어 둔 보기를 입힌다(moai-2bzp) — 칸 숨김·미룸·정렬·열. 없는 키는 처음값
     /// 그대로다. **읽기는 관대하다**: 모르는 낱말·틀린 키는 한 줄 알림으로 대고 나머지를 입힌다 —
     /// 틀린 키 하나로 탐색기가 안 뜨면 설정이 도구를 막는다.
+    ///
+    /// 입힌 뒤의 보기를 `App::saved` 로 든다 — 모르는 낱말·틀린 값은 화면의 보기에 없으니, 이 세션이
+    /// 그 키를 안 바꾸는 한 적을 때 파일의 것이 그대로 남는다(`Doc::merge_look`).
     pub fn load_look(&mut self) {
         let (look, mut problems) = crate::user_config::read_look(self.user_config.as_deref());
         self.apply_look(&look, &mut problems);
+        self.saved = self.look_now();
         if !problems.is_empty() {
             self.notice = Some(format!("보기 설정 — {}", problems.join(" · ")));
         }
@@ -1178,24 +1197,37 @@ impl App {
 
     fn apply_look(&mut self, look: &crate::user_config::Look, problems: &mut Vec<String>) {
         if let Some(hidden) = &look.hidden {
-            self.view.hidden = hidden.clone();
+            // **겹쳐 적힌 이름은 하나로 든다**(moai-2kyl 단계 리뷰) — 토글(`View::toggle`)은 한 번에 하나를
+            // 빼, 겹친 채 들면 한 번 눌러서는 안 보인다.
+            self.view.hidden = Vec::new();
+            for h in hidden {
+                if !self.view.hides(h) {
+                    self.view.hidden.push(h.clone());
+                }
+            }
         }
         if let Some(d) = look.hide_deferred {
             self.view.hide_deferred = d;
         }
-        if let Some(s) = &look.sort {
-            match keys::Order::named(s) {
-                Some(o) => self.order.0 = o,
+        // **차례와 방향은 한 벌이다**(moai-2kyl 단계 리뷰) — 모르는 차례의 방향을 처음 차례(우선순위)에
+        // 입히면 아무도 안 고른 거꾸로가 선다. 모르는 차례면 방향도 두고, 파일의 둘은 그대로 남는다.
+        let sort_known = match look.sort.as_deref() {
+            None => true,
+            Some(s) => match keys::Order::named(s) {
+                Some(o) => {
+                    self.order.0 = o;
+                    true
+                }
                 None => {
-                    self.unknown_sort = Some(s.clone());
                     problems.push(format!(
                         "`sort = \"{s}\"` 는 모르는 차례다 — {} 중 하나",
                         keys::Order::ALL.map(keys::Order::name).join("·")
-                    ))
+                    ));
+                    false
                 }
-            }
-        }
-        if let Some(r) = look.sort_reversed {
+            },
+        };
+        if sort_known && let Some(r) = look.sort_reversed {
             self.order.1 = r;
         }
         if let Some(words) = &look.fields {
@@ -1204,15 +1236,10 @@ impl App {
                 match view::Field::named(w) {
                     Some(f) if !fields.shows(f) => fields.toggle(f),
                     Some(_) => {}
-                    None => {
-                        if !self.unknown_fields.contains(w) {
-                            self.unknown_fields.push(w.clone());
-                        }
-                        problems.push(format!(
-                            "`fields` 의 `{w}` 는 모르는 열이다 — {} 중에서",
-                            view::Field::ALL.map(view::Field::name).join("·")
-                        ))
-                    }
+                    None => problems.push(format!(
+                        "`fields` 의 `{w}` 는 모르는 열이다 — {} 중에서",
+                        view::Field::ALL.map(view::Field::name).join("·")
+                    )),
                 }
             }
             self.fields = fields;
@@ -1224,27 +1251,26 @@ impl App {
         crate::user_config::Look {
             hidden: Some(self.view.hidden.clone()),
             hide_deferred: Some(self.view.hide_deferred),
-            sort: Some(self.unknown_sort.clone().unwrap_or_else(|| self.order.0.name().to_string())),
+            sort: Some(self.order.0.name().to_string()),
             sort_reversed: Some(self.order.1),
-            fields: Some(
-                view::Field::ALL
-                    .into_iter()
-                    .filter(|f| self.fields.shows(*f))
-                    .map(|f| f.name().to_string())
-                    .chain(self.unknown_fields.iter().cloned())
-                    .collect(),
-            ),
+            fields: Some(view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name().to_string()).collect()),
         }
     }
 
     /// 지금 보기를 사용자 설정에 적는다 — **토글마다**. 끝낼 때 한 번 적으면 Ctrl-C·터미널이 닫힌
-    /// 때 잃는다. 같은 보기면 파일을 안 건드린다(`Doc::set_look`). 설정 자리가 없으면(시험·설정
-    /// 없는 기계) 적지 않는다. **못 적어도 화면은 바뀐 대로다** — 알림 한 줄로 댄다.
+    /// 때 잃는다. **이 세션이 바꾼 만큼만 옮긴다**(`Doc::merge_look`, moai-2kyl 단계 리뷰) — 옆 탐색기가
+    /// 켠 열이나 손으로 고친 값을 내 토글 한 번이 되돌리지 않는다. 바뀐 것이 없으면 파일을 열지도 않는다.
+    /// 설정 자리가 없으면(시험·설정 없는 기계) 적지 않는다. **못 적어도 화면은 바뀐 대로다** — 알림 한
+    /// 줄로 대고, 다음 토글이 쌓인 차이를 다시 옮긴다.
     fn save_look(&mut self) {
         let Some(path) = self.user_config.clone() else { return };
         let look = self.look_now();
-        if let Err(e) = crate::user_config::update(&path, |doc| doc.set_look(&look)) {
-            self.notice = Some(format!("보기를 설정에 못 적었다 — {}", crate::text::one_line(&e.to_string())));
+        if look == self.saved {
+            return;
+        }
+        match crate::user_config::update(&path, |doc| doc.merge_look(&self.saved, &look)) {
+            Ok(()) => self.saved = look,
+            Err(e) => self.notice = Some(format!("보기를 설정에 못 적었다 — {}", crate::text::one_line(&e.to_string()))),
         }
     }
 
@@ -1261,13 +1287,11 @@ impl App {
             }
             B::Done => self.view.toggle(crate::config::DONE),
             B::Deferred => self.view.hide_deferred = !self.view.hide_deferred,
-            B::ShowAll => self.view = view::View::default(),
+            // 이 프로젝트의 칸만 걷는다 — 다른 프로젝트에만 있는 칸 이름은 여기서 아무것도 안 숨겼으니
+            // 들고 있는다(`View::show_all`).
+            B::ShowAll => self.view.show_all(&self.cfg.statuses),
             // 고른 것을 다시 누르면 거꾸로, 다른 것을 누르면 그것의 제 방향으로.
-            B::Sort(o) => {
-                // 사람이 새로 골랐다 — 모르던 낱말은 이제 걷는다.
-                self.unknown_sort = None;
-                self.order = (o, self.order.0 == o && !self.order.1);
-            }
+            B::Sort(o) => self.order = (o, self.order.0 == o && !self.order.1),
             _ => return,
         }
         self.see();
@@ -1293,17 +1317,18 @@ impl App {
         }
         let (keep, shown) = (&self.keep, &self.shown);
         // **보기는 줄마다 건다** — 숨긴 칸의 묶음이라도 보이는 멤버가 있으면 디렉터리는 선다
-        // (`Index::kept`). done 에픽 밑에 남은 todo 가 폴더째 사라지면 안 된다.
+        // (`Index::entries_where`). done 에픽 밑에 남은 todo 가 폴더째 사라지면 안 된다.
         rows.extend(
             self.index
                 .entries_sorted(&self.issues, &self.path, &|at| keep[at] && shown.get(at).copied().unwrap_or(true), &|a, b| {
-                    // 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다.
+                    // 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다. 담당은 화면에 선 이름으로.
                     crate::query::order_by(
                         Self::sort_key(self.order.0),
                         self.order.1,
                         (&self.issues[a], self.column(a)),
                         (&self.issues[b], self.column(b)),
                         &self.cfg.statuses,
+                        self.cfg.naming,
                     )
                 })
                 .into_iter()
@@ -3494,6 +3519,21 @@ mod tests {
         assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002 — 보기에 가려 안 보인다 · SPC s a 로 모두 보인다"));
     }
 
+    /// **거름망과 보기가 함께 가리면 둘 다 댄다**(moai-2kyl 단계 리뷰) — 보기만 대면 `SPC s a` 를 눌러도
+    /// 거름망에 여전히 가려 누른 키가 아무것도 안 한다.
+    #[test]
+    fn the_filter_and_the_view_hiding_the_new_line_are_both_named() {
+        let (_scratch, mut a) = writable("land-both");
+        a.hit("SPC f");
+        typed(&mut a, "type=epic");
+        a.hit("SPC s 1");
+        assert!(add_idea(&mut a, "argos-0002").is_some());
+        assert_eq!(
+            a.notice.as_deref(),
+            Some("✓ 담김 · argos-0002 — 거름망과 보기에 가려 안 보인다 · Esc 로 풀고 SPC s a 로 모두 보인다")
+        );
+    }
+
     /// **보기·정렬·열은 누를 때마다 사용자 설정에 적히고 다음 실행이 읽는다**(moai-2bzp).
     #[test]
     fn the_look_is_saved_on_each_toggle_and_read_by_the_next_run() {
@@ -3516,24 +3556,87 @@ mod tests {
         assert_eq!((b.view.clone(), b.order, b.fields), (a.view.clone(), a.order, a.fields), "다음 실행이 다른 보기로 떴다");
         assert_eq!(b.notice, None);
 
-        // 모르는 낱말은 알리고 나머지는 입힌다.
-        std::fs::write(&user, "[tui]\nsort = \"nope\"\nhide_deferred = true\nfields = [\"id\", \"what\"]\n").unwrap();
+        // 모르는 낱말은 알리고 나머지는 입힌다. 모르는 차례의 방향은 우선순위에 입히지 않는다 — 아무도 안
+        // 고른 거꾸로가 선다. 겹쳐 적힌 숨김은 하나로 든다(moai-2kyl 단계 리뷰).
+        std::fs::write(
+            &user,
+            "[tui]\nhidden = [\"done\", \"done\"]\nsort = \"nope\"\nsort_reversed = true\nhide_deferred = true\nfields = [\"id\", \"what\"]\n",
+        )
+        .unwrap();
         let mut c = App::new(Vec::new(), cfg(), Path::new());
         c.user_config = Some(user);
         c.load_look();
         assert!(c.view.hide_deferred, "틀린 키 하나로 나머지를 버렸다");
-        assert_eq!(c.order, Default::default());
+        assert_eq!(c.order, Default::default(), "모르는 차례의 방향을 우선순위에 입혔다");
         assert!(c.fields.shows(view::Field::Id) && !c.fields.shows(view::Field::Priority));
         let said = c.notice.clone().unwrap_or_default();
         assert!(said.contains("nope") && said.contains("what"), "{said}");
 
-        // 모르는 낱말은 토글 한 번에 지워지지 않는다 — 새 바이너리가 적은 것일 수 있다.
+        // 모르는 낱말은 토글 한 번에 지워지지 않는다 — 새 바이너리가 적은 것일 수 있다. 겹쳐 적힌 done 은
+        // 한 번에 보인다.
         c.hit("SPC s d");
+        assert!(!c.view.hides(crate::config::DONE), "겹쳐 적힌 done 이 한 번 눌러서는 안 보였다");
         let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
-        assert!(text.contains("sort = \"nope\"") && text.contains("\"what\""), "{text}");
+        assert!(text.contains("sort = \"nope\"") && text.contains("sort_reversed = true") && text.contains("\"what\""), "{text}");
         c.hit("SPC o t");
         let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
-        assert!(text.contains("sort = \"title\"") && text.contains("\"what\""), "{text}");
+        assert!(text.contains("sort = \"title\"") && text.contains("sort_reversed = false") && text.contains("\"what\""), "{text}");
+    }
+
+    /// **두 탐색기가 저마다 누른 것이 둘 다 남는다**(moai-2kyl 단계 리뷰). 적는 것은 이 세션이 바꾼 만큼이다
+    /// — 화면이 든 보기를 통째로 적으면 옆에서 켠 열을 내 토글 한 번이 지운다.
+    #[test]
+    fn two_explorers_keep_each_others_toggles() {
+        let s = Scratch::new("look-two");
+        let user = s.0.join("user.toml");
+        let open = || {
+            let mut x = App::new(Vec::new(), cfg(), Path::new());
+            x.user_config = Some(user.clone());
+            x.load_look();
+            x
+        };
+        let (mut a, mut b) = (open(), open());
+        a.hit("SPC c a");
+        b.hit("SPC s d");
+        b.hit("SPC o u");
+        let c = open();
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(c.fields.shows(view::Field::Assignee), "옆 탐색기가 켠 열을 지웠다\n{text}");
+        assert!(!c.view.hides(crate::config::DONE) && c.order == (keys::Order::Updated, false), "{text}");
+    }
+
+    /// **숨김은 이 프로젝트의 칸에만 건다**(moai-2kyl 단계 리뷰). 다른 프로젝트에서 숨긴 칸 이름이 이 프로젝트의
+    /// 줄(설정에서 이름이 바뀐 옛 칸에 남은 줄)을 말없이 숨기지 않고 — 뱃지도 번호 토글도 없다 — `SPC s a` 도
+    /// 그 이름을 걷지 않는다. 그 칸이 있는 프로젝트로 돌아가면 다시 숨는다.
+    #[test]
+    fn a_hidden_name_this_project_lacks_neither_hides_rows_nor_is_wiped() {
+        let mut stale = make("argos-0002", Kind::Issue);
+        stale.status = Status::new("blocked");
+        let mut a = App::new(vec![make("argos-0001", Kind::Issue), stale], cfg(), Path::new());
+        a.view.hidden.push("blocked".into());
+        a.see();
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002"], "설정에 없는 칸 이름이 줄을 말없이 숨겼다");
+        a.hit("SPC s a");
+        assert!(a.view.hides("blocked"), "모두 보이기가 다른 프로젝트의 칸 이름을 걷었다");
+        assert!(!a.view.hides(crate::config::DONE));
+    }
+
+    /// **적어 둔 보기를 입힌 뒤에 층을 얹는다**(moai-2kyl 단계 리뷰 — `cmd/tui.rs::run` 의 차례). 층은 첫 화면의
+    /// 커서를 `..` 너머 첫 줄에 세운다(`App::with_layer`). 처음값 보기(done 숨김)로 세우면 끝난 줄뿐인 뿌리에서
+    /// 커서가 `..` 에 서고, 적어 둔 보기가 그 줄을 보여도 첫 Enter 가 층으로 올라간다.
+    #[test]
+    fn the_saved_look_is_on_before_the_layer_places_the_first_cursor() {
+        let s = Scratch::new("look-layer");
+        let user = s.0.join("user.toml");
+        std::fs::write(&user, "[tui]\nhidden = []\n").unwrap();
+        let mut finished = make("argos-0001", Kind::Issue);
+        finished.status = Status::new("done");
+        let mut a = App::new(vec![finished], cfg(), Path::new());
+        a.user_config = Some(user);
+        a.load_look();
+        let a = a.with_layer(layer::fake(vec![("argos", "/x", layer::Look::Unread)], layer::At::Project("/x".into())));
+        assert_eq!(a.rows().len(), 2, "시험의 전제 — `..` 과 끝난 줄 하나");
+        assert_eq!(a.cursor, 1, "첫 화면이 `..` 에 섰다");
     }
 
     /// 닫는 함수가 댄 id 가 다시 읽은 목록에 없으면 **커서는 두고 그렇다고 말한다.**

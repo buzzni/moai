@@ -504,9 +504,18 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let sorted = (app.order != Default::default()).then(|| {
         format!("정렬 {}{}", app.order.0.word(), if app.order.1 { " 거꾸로" } else { "" })
     });
-    let parts: Vec<String> = [app.view.badge(&app.cfg.statuses), sorted].into_iter().flatten().collect();
-    let look = (!parts.is_empty() && !app.on_layer()).then(|| format!("[{}]", parts.join(" · ")));
-    let look = look.filter(|l| crate::text::width(l) + 3 + 8 <= room);
+    // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
+    // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
+    let hidden = app.view.badge(&app.cfg.statuses);
+    let look = if app.on_layer() {
+        None
+    } else {
+        [[hidden.as_deref(), sorted.as_deref()], [hidden.as_deref(), None], [None, sorted.as_deref()]].into_iter().find_map(|parts| {
+            let parts: Vec<&str> = parts.into_iter().flatten().collect();
+            let l = format!("[{}]", parts.join(" · "));
+            (!parts.is_empty() && crate::text::width(&l) + 3 + 8 <= room).then_some(l)
+        })
+    };
     let room = match &look {
         Some(l) => room.saturating_sub(crate::text::width(l) + 3),
         None => room,
@@ -642,9 +651,14 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
             (ListItem::new(line), kept)
         })
         .unzip();
-    let common = kept.into_iter().fold(app.fields, super::view::Fields::both);
-    if common != app.fields {
-        items = rows.iter().map(|r| ListItem::new(row_line(app, r, inner, common).0)).collect();
+    let common = kept.iter().copied().fold(app.fields, super::view::Fields::both);
+    // **덜 걷힌 줄만 다시 그린다**(moai-2kyl 단계 리뷰) — 이미 그만큼 걷힌 줄은 같은 열로 다시 그려도 같은
+    // 줄이다. 대개는 모든 줄이 같은 만큼 걷히므로, 통째로 다시 그리면 좁은 창에서 줄마다 셈
+    // (`Index::progress`)이 프레임마다 두 번 돈다.
+    for ((item, r), k) in items.iter_mut().zip(rows).zip(&kept) {
+        if *k != common {
+            *item = ListItem::new(row_line(app, r, inner, common).0);
+        }
     }
 
     // 제목에 칸별 건수를 **config 차례로** 낸다. 칸 이름과 순서는 저장소가
@@ -685,6 +699,9 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     let title = match (counts.is_empty(), lines == 0) {
         // 층의 줄은 일이 아니라 프로젝트다 — 칸 셈은 줄마다 곁에 선다.
         _ if app.on_layer() => format!(" 프로젝트 {}곳 ", rows.len()),
+        // **보기가 다 가렸으면 그렇다고 댄다**(moai-2kyl 단계 리뷰). 까닭을 대는 경로 줄의 `[done 숨김]` 은
+        // 자리가 모자라면 빠지는데, 그때 " 비었다 " 만 서면 끝난 일이 사라진 줄 안다.
+        (_, true) if app.view_hides_here() => " 보기에 가려 비었다 ".to_string(),
         (_, true) => " 비었다 ".to_string(),
         (true, false) => format!(" {lines}줄 "),
         (false, _) => format!(" {} ", counts.join("  ")),
@@ -866,9 +883,12 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize, fields: super::view::Fields) 
 
     let title_w = crate::text::width(&title);
     let mut spans = head;
-    // id 는 칠하면 조각이 갈라진다 — 머리글의 자리(`head[4]`)를 다 쓴 **뒤에** 편다.
-    let id = spans.remove(0);
-    spans.splice(0..0, mark(vec![id], in_id));
+    // id 는 칠하면 조각이 갈라진다 — 머리글의 자리(`glyph_at`)를 다 쓴 **뒤에** 편다. **첫 조각이 id 인 것은
+    // id 를 켰을 때뿐이다**(moai-2kyl 단계 리뷰) — 끈 채 칠하면 우선순위 `p1` 의 글자를 찾은 것으로 칠한다.
+    if fields.shows(Field::Id) {
+        let id = spans.remove(0);
+        spans.splice(0..0, mark(vec![id], in_id));
+    }
     // **도는 줄의 제목에는 빛줄기가 흐른다**(moai-fy99). 자는 글리프와 같은 `App::spins` 하나다 —
     // 일은 집었을 때, 에픽·마일스톤은 그 밑에 집은 일이 실제로 있을 때(moai-x5eg), 미룬 것은 안
     // 돈다(moai-tawj). 묶음을 따로 빼 두면 목록 뿌리에서 무엇이 움직이는지 글리프 한 칸으로만
@@ -1720,9 +1740,13 @@ fn grep_label(g: GrepIn) -> String {
 /// 낸다(moai-00le): 빈 칸은 거름망이 없는 것이라 전체 수가 "걸린 수" 로 읽힌다.
 fn grep_help(app: &App, q: &Input) -> String {
     let scope = format!("{} 범위  {}", labels(PROMPT, &[Prompt::NextScope, Prompt::PrevScope]), prompt_help("걸기"));
-    match q.text().trim().is_empty() {
-        true => scope,
-        false => format!("{}건  {scope}", app.hit_count()),
+    if q.text().trim().is_empty() {
+        return scope;
+    }
+    // **보기가 가린 것도 댄다**(moai-2kyl 단계 리뷰) — 끝난 일을 찾는데 `0건` 만 서면 없는 줄 안다.
+    match app.veiled_count() {
+        0 => format!("{}건  {scope}", app.hit_count()),
+        n => format!("{}건 · 보기에 가린 {n}건  {scope}", app.hit_count()),
     }
 }
 
@@ -3106,11 +3130,16 @@ pub(super) mod tests {
                 .into(),
         );
         for w in [20u16, 24, 30, 40, 60, 80] {
-            let mut a =
-                App::new(issues.clone(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+            // **다 보이는 채로 세운다** — 본문은 끝난 멤버에 있다. 처음 보기(done 숨김)로 세우면 커서가 본문 없는
+            // 멤버에 서서 이 시험이 본문을 한 번도 안 그리고 지나간다(moai-2kyl 단계 리뷰).
+            let mut a = every(issues.clone());
             a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-            for l in render(&mut a, w, 30) {
-                assert!(crate::text::width(&l) <= w as usize, "{w}칸을 넘었다 — {l:?}");
+            let lines = render(&mut a, w, 30);
+            for l in &lines {
+                assert!(crate::text::width(l) <= w as usize, "{w}칸을 넘었다 — {l:?}");
+            }
+            if w == 80 {
+                assert!(lines.iter().any(|l| l.contains("겹친 목록")), "시험의 전제 — 본문이 안 그려졌다\n{}", lines.join("\n"));
             }
         }
     }
@@ -3993,22 +4022,6 @@ pub(super) mod tests {
     /// 좁힌 범위를 이름표에, 걸린 수를 안내에 적는다(moai-00le).
     #[test]
     fn slash_paints_what_it_found_only_where_the_scope_looks() {
-        let found_text = |a: &mut App| {
-            let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
-            term.draw(|f| screen(f, a)).unwrap();
-            let buf = term.backend().buffer().clone();
-            let mut out = String::new();
-            for y in 0..buf.area.height {
-                for x in 0..buf.area.width {
-                    let c = &buf[(x, y)];
-                    if c.fg == Color::LightBlue && c.modifier.contains(Modifier::BOLD) && c.bg != Color::LightBlue {
-                        out.push_str(c.symbol());
-                    }
-                }
-                out.push('\n');
-            }
-            out
-        };
         let mut a = app();
         let id = a.issues[0].id.clone();
         let q = id[id.len() - 3..].to_uppercase();
@@ -4029,6 +4042,74 @@ pub(super) mod tests {
         let prompt = render(&mut a, 100, 20).join("\n");
         assert!(prompt.contains(" 검색·태그 "), "{prompt}");
         assert!(found_text(&mut a).trim().is_empty(), "보지 않는 자리를 칠했다");
+    }
+
+    /// 찾은 글자로 칠한 칸만 모은다 — 밝은 파랑에 굵게. 이름표의 바탕색 칸은 뺀다.
+    fn found_text(a: &mut App) -> String {
+        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        term.draw(|f| screen(f, a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let c = &buf[(x, y)];
+                if c.fg == Color::LightBlue && c.modifier.contains(Modifier::BOLD) && c.bg != Color::LightBlue {
+                    out.push_str(c.symbol());
+                }
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// **끈 id 자리는 칠하지 않는다**(moai-2kyl 단계 리뷰). 목록 줄의 첫 조각이 id 라 여기고 칠하면, id 를 끈
+    /// 줄에서는 우선순위 `p1` 의 글자가 찾은 것으로 칠해진다 — 검색은 우선순위를 안 본다.
+    #[test]
+    fn a_hidden_id_column_is_not_painted_as_found() {
+        let painted = |hide_id: bool| {
+            let mut a = app();
+            if hide_id {
+                a.hit("SPC c i");
+            }
+            for c in "/1".chars() {
+                a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+            }
+            found_text(&mut a)
+        };
+        assert!(painted(false).contains('1'), "시험의 전제 — 켠 id 의 `1` 은 칠한다");
+        assert!(!painted(true).contains('1'), "끈 id 자리에서 우선순위 `p1` 을 찾은 것으로 칠했다");
+    }
+
+    /// **차례를 고른 것이 `[done 숨김]` 을 밀어내지 않는다**(moai-2kyl 단계 리뷰). 경로 줄이 모자라면 차례부터
+    /// 뺀다 — 한 뱃지로 통째로 재면 차례만 골라도 숨긴 것을 대는 말까지 빠진다.
+    #[test]
+    fn a_chosen_sort_gives_way_before_the_hidden_badge() {
+        let mut a = App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.hit("SPC o u");
+        a.hit("SPC o u");
+        let badge = |a: &mut App, w: u16| render(a, w, 12).into_iter().find(|l| l.contains("숨김") || l.contains("정렬")).unwrap_or_default();
+        let wide = badge(&mut a, 120);
+        assert!(wide.contains("[done 숨김 · 정렬 수정 거꾸로]"), "{wide:?}");
+        let narrow = badge(&mut a, 30);
+        assert!(narrow.contains("[done 숨김]") && !narrow.contains("정렬"), "차례를 골랐다고 숨김 뱃지까지 빠졌다: {narrow:?}");
+    }
+
+    /// **보기가 다 가린 목록은 그렇다고 댄다**(moai-2kyl 단계 리뷰). 경로 줄의 `[done 숨김]` 은 좁으면 빠지고,
+    /// 그때 " 비었다 " 만 서면 끝난 일이 사라진 줄 안다. 검색 칸도 보기가 가린 수를 댄다.
+    #[test]
+    fn a_list_the_view_emptied_says_why() {
+        let mut finished = issues();
+        for i in &mut finished {
+            i.status = Status::new("done");
+        }
+        let mut a = App::new(finished, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let lines = render(&mut a, 100, 12).join("\n");
+        assert!(lines.contains(" 보기에 가려 비었다 "), "{lines}");
+        for c in "/멤".chars() {
+            a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        let lines = render(&mut a, 100, 12).join("\n");
+        assert!(lines.contains("0건 · 보기에 가린 2건"), "{lines}");
     }
 
     /// 빈 저장소도 그려진다.

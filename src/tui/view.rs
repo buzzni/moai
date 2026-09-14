@@ -34,16 +34,30 @@ impl View {
         }
     }
 
-    /// 그 줄이 보이는가. `column` 은 묶음이면 멤버에서 읽은 칸이다.
-    pub fn shows(&self, column: &str, deferred: bool) -> bool {
-        !self.hides(column) && !(deferred && self.hide_deferred)
+    /// 그 줄이 보이는가. `column` 은 묶음이면 멤버에서 읽은 칸이고, `known` 은 이 프로젝트의 칸이다.
+    ///
+    /// **숨김은 이 프로젝트에 있는 칸에만 건다**(moai-2kyl 단계 리뷰) — 뱃지([`View::badge`])와 같은 자다.
+    /// 보기는 사람의 설정이라 다른 프로젝트의 칸 이름을 들고 다니는데, 그 이름이 여기서 줄을 숨기면 뱃지도
+    /// 번호 토글도 없어 줄이 말없이 사라진다. 설정에서 칸 이름을 바꿔 옛 칸에 남은 줄도 그렇다.
+    pub fn shows(&self, column: &str, deferred: bool, known: &[String]) -> bool {
+        let hidden = self.hides(column) && known.iter().any(|k| k == column);
+        !hidden && !(deferred && self.hide_deferred)
+    }
+
+    /// 모두 보인다(`SPC s a`). **이 프로젝트의 칸만 걷는다**(moai-2kyl 단계 리뷰) — 다른 프로젝트에만 있는
+    /// 칸 이름은 여기서 아무것도 안 숨겼으니 들고 있는다. 통째로 비우면 그 프로젝트로 돌아갔을 때 숨겨 둔
+    /// 칸이 쏟아진다.
+    pub fn show_all(&mut self, known: &[String]) {
+        self.hidden.retain(|h| !known.contains(h));
+        self.hide_deferred = false;
     }
 
     /// 경로 줄에 댈 한 마디 — `done·미룸 숨김`. 숨긴 것이 없으면 없다.
     ///
     /// **이 프로젝트의 칸(`known`)만 댄다**(moai-2bzp). 보기는 사람의 설정이라 프로젝트를 옮겨도
     /// 이어지는데, 다른 프로젝트에만 있는 칸 이름까지 대면 여기서는 번호 토글이 없어 걷을 길이 없다.
-    /// 그 이름은 버리지 않고 들고 있다 — 그 칸이 있는 프로젝트로 돌아가면 다시 숨는다.
+    /// 그 이름은 버리지 않고 들고 있다 — 그 칸이 있는 프로젝트로 돌아가면 다시 숨는다. 여기서는 줄도
+    /// 안 숨긴다([`View::shows`]).
     pub fn badge(&self, known: &[String]) -> Option<String> {
         let mut names: Vec<&str> = self.hidden.iter().filter(|h| known.contains(h)).map(String::as_str).collect();
         if self.hide_deferred {
@@ -162,11 +176,16 @@ mod tests {
         assert_eq!(f, Fields::default());
     }
 
+    /// 이 프로젝트의 칸 — 시험마다 같은 설정이다.
+    fn here() -> Vec<String> {
+        ["todo", "blocked", "done"].map(String::from).to_vec()
+    }
+
     #[test]
     fn a_hidden_column_comes_back_when_toggled_again() {
         let mut v = View::hiding("done");
-        assert!(!v.shows("done", false));
-        assert!(v.shows("todo", true), "미룬 것은 처음에 보인다");
+        assert!(!v.shows("done", false, &here()));
+        assert!(v.shows("todo", true, &here()), "미룬 것은 처음에 보인다");
         v.toggle("done");
         assert_eq!(v, View::default());
         v.toggle("done");
@@ -176,13 +195,25 @@ mod tests {
     #[test]
     fn deferred_hides_on_its_own_axis() {
         let v = View { hide_deferred: true, ..View::default() };
-        assert!(!v.shows("todo", true));
-        assert!(v.shows("todo", false), "미룸을 숨겨도 안 미룬 칸은 그대로다");
+        assert!(!v.shows("todo", true, &here()));
+        assert!(v.shows("todo", false, &here()), "미룸을 숨겨도 안 미룬 칸은 그대로다");
     }
 
     #[test]
     fn a_column_the_config_adds_later_stays_visible() {
-        assert!(View::hiding("done").shows("blocked", false));
+        assert!(View::hiding("done").shows("blocked", false, &here()));
+    }
+
+    /// **숨김은 이 프로젝트의 칸에만 건다**(moai-2kyl 단계 리뷰). 다른 프로젝트에서 숨긴 칸 이름은 여기서 줄을
+    /// 숨기지도, 모두 보이기에 걷히지도 않는다 — 그 칸이 있는 프로젝트로 돌아가면 다시 숨는다.
+    #[test]
+    fn a_name_this_project_lacks_neither_hides_nor_is_cleared() {
+        let lacks: Vec<String> = ["todo", "done"].map(String::from).to_vec();
+        let mut v = View { hidden: vec!["blocked".into(), "done".into()], hide_deferred: true };
+        assert!(v.shows("blocked", false, &lacks), "이 프로젝트에 없는 칸 이름이 줄을 숨겼다");
+        assert!(!v.shows("done", false, &lacks));
+        v.show_all(&lacks);
+        assert_eq!(v, View { hidden: vec!["blocked".into()], hide_deferred: false });
     }
 
     #[test]
