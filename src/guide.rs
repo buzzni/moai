@@ -74,7 +74,8 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
     moai note <id> "발견한 것"             다음 사람이 읽을 메모
     moai defer <id> -m "왜"                지금 안 할 일을 계획에서 뺀다
 
-모든 명령에 `--json` 이 붙는다."#;
+모든 명령에 `--json` 이 붙는다. `ready --json` 은 `{"ready":[…],"held":[…]}` —
+`held` 는 미뤄 둔 것·빈 묶음에 막혀 못 집는 일과 도로 집을 곳이다."#;
 
 const NO_GATE: &str = "승인 게이트가 없다 — 무엇이든 만들고 무엇이든 옮길 수 있다. 사람을 부르지 않는다.";
 

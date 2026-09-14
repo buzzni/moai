@@ -1462,10 +1462,16 @@ fn ready_names_an_empty_group_that_blocks() {
     assert!(r.contains("멤버가 없는 묶음에 막혀"), "왜 비었는지 안 말한다 — {r}");
     assert!(r.contains(&format!("moai link {epic} --unblocks {work}")), "푸는 말을 안 댄다 — {r}");
     assert!(!r.contains("미뤄 둔 것에 막혀"), "미룬 것이 없는데 미뤘다고 한다 — {r}");
+    // 기계 출력도 빈 묶음을 댄다(moai-w6n2). 도로 집을 것이 없으니 `by`·`undo` 는 안 선다.
+    let json = ok(s.path(), &["ready", "--json"]);
+    assert_eq!(json.trim(), format!(r#"{{"ready":[],"held":[{{"id":"{work}","empty":["{epic}"]}}]}}"#), "{json}");
 
     // 채우면 보통 막음이다 — 까닭을 따로 대지 않는다.
-    add(s.path(), &["락", "-e", &epic]);
+    let lock = add(s.path(), &["락", "-e", &epic]);
     assert!(!ok(s.path(), &["ready"]).contains("멤버가 없는"));
+    // 막힌 것이 없으면 held 는 빈 배열로 선다 — 키가 있다 없다로 모양이 흔들리지 않는다.
+    let json = ok(s.path(), &["ready", "--json"]);
+    assert!(json.starts_with(&format!(r#"{{"ready":[{{"id":"{lock}""#)) && json.trim_end().ends_with(r#""held":[]}"#), "{json}");
 }
 
 /// 멤버 없는 에픽은 0% 가 아니다 — "아직 안 한 것" 과 "속을 안 채운 것" 은 다르다.
@@ -3681,6 +3687,16 @@ fn ready_names_the_deferred_blocker_it_is_waiting_on() {
     assert!(r.contains("0건"), "미룬 막음을 끝난 것으로 봤다 — {r}");
     assert!(r.contains("미뤄 둔 것에 막혀"), "왜 비었는지 안 말한다 — {r}");
     assert!(r.contains(&blocked) && r.contains(&blocker), "누가 누구를 막는지 안 댄다 — {r}");
+
+    // **기계 출력도 같은 것을 말한다**(moai-w6n2). 맨 배열이던 때는 `[]` 뿐이라, 에이전트는
+    // 왜 비었는지 모른 채 할 일이 없다고 읽었다. 이제 객체로 감싸 held 를 싣는다.
+    let json = ok(s.path(), &["ready", "--json"]);
+    one_json_value(&json);
+    assert_eq!(
+        json.trim(),
+        format!(r#"{{"ready":[],"held":[{{"id":"{blocked}","by":["{blocker}"],"undo":["{blocker}"]}}]}}"#),
+        "{json}"
+    );
 
     let st = moai(s.path(), &["status", "--json"]);
     assert!(st.status.success(), "경고로 비영 종료했다");
@@ -5936,6 +5952,29 @@ fn project_color_finds_every_spelling_that_rm_can_remove() {
     assert!(std::fs::read_to_string(&config).unwrap().contains("color = \"green\""));
     let json = project_ok(home.path(), &config, &["project", "rm", odd.to_str().unwrap(), "--json"]);
     assert!(json.contains("\"removed\":[\""), "{json}");
+}
+
+/// **안내가 대는 명령은 붙여 넣으면 그 디렉터리로 풀린다.** 경로를 화면용 `one_line` 에
+/// 지나게 한 뒤 감쌌을 때는 이름 속 탭이 빈칸이 된 채 인용돼, 시키는 대로 치면 없는
+/// 디렉터리를 가리켰다(moai-0cl3). 제어문자는 `$'…'` 로 한 줄에 원문 그대로 선다.
+#[test]
+fn a_hint_spells_a_path_with_a_tab_so_the_shell_gets_that_directory() {
+    let home = Scratch::new("project-tab");
+    let config = home.path().join("config.toml");
+    let odd = home.path().join("a\tb");
+    std::fs::create_dir_all(&odd).unwrap();
+
+    let said = project_ok(home.path(), &config, &["project", "add", odd.to_str().unwrap()]);
+    assert!(said.contains(r"a\tb'") && said.contains("$'"), "init 안내가 탭을 원문으로 안 적었다 — {said}");
+    // 머리 줄(`등록함 …`)은 화면용이라 빈칸으로 접는 것이 맞다 — 명령 안의 철자만 본다.
+    assert!(!said.contains("a b'"), "명령 안에서 탭을 빈칸으로 바꿔 적었다 — {said}");
+
+    let other = home.path().join("c\td");
+    std::fs::create_dir_all(&other).unwrap();
+    let out = project(home.path(), &config, &["project", "color", other.to_str().unwrap(), "green"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{}", text(&out));
+    assert!(err.contains(r"c\td'") && err.contains("moai project add $'"), "거절문의 add 가 탭을 원문으로 안 적었다 — {err}");
 }
 
 /// 없는 디렉터리와 파일은 거절하고, 설정은 만들지도 않는다.

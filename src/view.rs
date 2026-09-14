@@ -1468,9 +1468,11 @@ fn problems(out: &mut Vec<String>, reg: &crate::user_config::Registry) {
     }
 }
 
-/// 명령 안내에 넣을 경로 — 제어문자를 걷고 셸이 가를 글자가 있으면 감싼다.
+/// 명령 안내에 넣을 경로 — 붙여 넣으면 그 디렉터리로 풀리게 감싼다. `one_line` 을
+/// 지나지 않는다: 화면용 접기가 탭·줄바꿈을 빈칸으로 바꾸면 없는 디렉터리를 가리킨다.
+/// 한 줄 자리를 지키는 것은 `shell_word` 의 `$'…'` 다.
 fn shell_arg(p: &std::path::Path) -> String {
-    crate::text::shell_word(&one_line(&p.display().to_string()))
+    crate::text::shell_word(&p.display().to_string())
 }
 
 #[cfg(test)]
