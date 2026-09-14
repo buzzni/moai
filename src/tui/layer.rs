@@ -412,6 +412,68 @@ impl App {
         self.detail.rewind();
     }
 
+    /// **등록 목록을 이 탐색기가 바꾼 뒤**(층의 `a`·`d`, moai-plvy) 층을 다시 세운다.
+    ///
+    /// F5([`App::reread_layer`])와 가르는 것 셋:
+    /// - **선 자리를 둔다.** 프로젝트 안에서 `a` 로 등록해도 층으로 끌어올리지 않는다
+    /// - **이미 본 프로젝트는 다시 안 읽는다.** 경로가 같은 줄의 셈과 표식을 옮겨 들고, 새로
+    ///   선 줄만 읽는다(층에 섰을 때, 그 자리에서). F5 는 사람이 "전부 다시" 를 누른 것이지만
+    ///   이것은 한 줄을 더하거나 뺀 것이라, 등록 수만큼 저장소를 다시 읽을 까닭이 없다
+    /// - **층이 없었으면 세운다.** `.moai` 안에서 띄웠고 등록이 0 이었던 경우다. 띄운 자리가
+    ///   `At::Project` 로 서므로 지금 프로젝트는 그대로이고, 뿌리에 `..` 이 새로 서도 커서는
+    ///   보던 줄(정체)에 선다
+    ///
+    /// `land` 가 있으면 층에 섰을 때 커서를 그 프로젝트(경로)에 둔다 — 방금 등록한 것이 눈앞에
+    /// 있어야 등록된 줄 안다. 없거나 못 찾으면 보던 줄, 그것도 사라졌으면(뺐으면) 그 번호를 자른 자리.
+    pub(super) fn relayer(&mut self, land: Option<&Path>) {
+        let held = self.current().map(|r| self.anchor_of(&r));
+        match self.layer.take() {
+            None => {
+                let Some(repo) = &self.repo else { return };
+                let fresh = Layer::read(self.user_config.as_deref(), Some(&repo.root));
+                if !fresh.registered() {
+                    return;
+                }
+                self.layer = Some(fresh);
+            }
+            Some(mut old) => {
+                let mut fresh = Layer::read(old.config.as_deref(), old.launch.as_deref());
+                for p in &mut fresh.places {
+                    if let Some(o) = old.places.iter_mut().find(|o| o.path == p.path) {
+                        p.look = std::mem::replace(&mut o.look, Look::Unread);
+                        p.marks = o.marks;
+                    }
+                }
+                fresh.at = match old.at {
+                    At::Layer => At::Layer,
+                    // 띄운 자리를 등록하면 따로 섰던 줄이 등록 줄로 합쳐지고, 등록 철자가 띄운
+                    // 뿌리와 다를 수 있다(링크) — 그때는 새 층이 정한 띄운 자리로 옮겨 선다.
+                    At::Project(p) if fresh.position(&p).is_none() && old.launch.as_deref() == Some(p.as_path()) => {
+                        fresh.at.clone()
+                    }
+                    At::Project(p) => At::Project(p),
+                };
+                // 도는 읽기는 경로로 맞춰 들이므로 넘겨도 섞이지 않는다.
+                fresh.pending = old.pending.take();
+                self.layer = Some(fresh);
+            }
+        }
+        if self.on_layer() {
+            self.refresh_layer();
+        }
+        let rows = self.rows();
+        let landed = land.filter(|_| self.on_layer()).and_then(|want| {
+            let l = self.layer.as_ref()?;
+            l.position(want).or_else(|| l.places.iter().position(|p| same_dir(&p.path, want)))
+        });
+        let found = landed.or_else(|| held.and_then(|a| rows.iter().position(|r| self.anchor_of(r) == a)));
+        let cursor = found.unwrap_or(self.cursor.min(rows.len().saturating_sub(1)));
+        if cursor != self.cursor {
+            self.detail.rewind();
+        }
+        self.cursor = cursor;
+    }
+
     /// 걸음마다 층을 본다. 스레드가 읽어 온 것은 **어디 서 있든** 받는다 — 경로로 맞춰
     /// 들이므로 안에 들어간 뒤에 닿아도 섞일 데가 없다. 새로 읽으러 가는 것은 **층에 선
     /// 동안만**이다: 안에 있는 동안 남의 프로젝트를 걸음마다 재고 읽을 까닭이 없고, 올라갈

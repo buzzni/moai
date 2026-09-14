@@ -8,6 +8,8 @@ pub mod edit;
 pub mod form;
 pub mod input;
 pub mod layer;
+pub mod picker;
+pub mod register;
 pub mod scroll;
 
 use crate::config::Config;
@@ -59,6 +61,11 @@ pub enum Mode {
     /// `n` 으로 연 생각 담기 폼(moai-11s4). **어디를 보고 있든 같은 폼이다** — 커서가
     /// 선 에픽에 넣지 않는다. idea 가 소속을 가지면 그것이 이 단계가 없애려던 무게다.
     Idea(Form),
+    /// 층의 `a` 가 연 디렉터리 고르기 창(moai-plvy). 프로젝트 안에서도 연다 — 등록이 0 인
+    /// 채 `.moai` 안에서 띄우면 층이 없어, 층에서만 열면 첫 등록을 할 길이 없다.
+    Pick(picker::Picker),
+    /// 층의 `d` 가 묻는 "목록에서 뺄까". `y` 만 뺀다.
+    Unregister(register::Unregister),
 }
 
 /// 받고 나서 다시 부를 쓰기. **붙잡는 것이 없는 함수다** — 적던 것은 [`Ask`] 가
@@ -354,6 +361,14 @@ pub struct App {
     /// 있으면 지금 선 곳(`layer.at`)이 층이거나 한 프로젝트 안이고, 층에 선 동안에는 위의
     /// 한 프로젝트 자리(`repo`·`issues`·`index`…)가 비었다.
     pub layer: Option<layer::Layer>,
+    /// 사용자 설정 파일의 자리 — **층이 없을 때** 등록(`a`)이 쓰는 곳이다. 층이 있으면 층이 읽은
+    /// 파일(`Layer::config`)을 쓴다. `cmd::tui` 가 `user_config::path()` 로 넣고, 시험은 임시
+    /// 파일을 준다 — 여기서 환경을 읽으면 시험이 돌리는 사람의 설정을 고친다.
+    pub user_config: Option<std::path::PathBuf>,
+    /// 띄운 자리(cwd). 고르기 창이 처음 여기서 연다. 시험은 임시 디렉터리를 준다.
+    pub here: Option<std::path::PathBuf>,
+    /// 고르기 창을 마지막으로 닫은 디렉터리 — 다시 열면 여기서 연다.
+    pick_from: Option<std::path::PathBuf>,
 }
 
 impl App {
@@ -426,6 +441,9 @@ impl App {
             origin: crate::worktree::Origin::default(),
             elsewhere: Vec::new(),
             layer: None,
+            user_config: None,
+            here: None,
+            pick_from: None,
         };
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
         // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
@@ -880,7 +898,7 @@ impl App {
     pub fn apply(&mut self, mode: &Mode) -> Result<(), String> {
         let text = match mode {
             Mode::Grep(q) | Mode::Filter(q) => q.text().to_string(),
-            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) => String::new(),
+            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) => String::new(),
         };
         if text.trim().is_empty() {
             self.filter_text = None;
@@ -912,7 +930,7 @@ impl App {
         let raw = match mode {
             Mode::Grep(q) => Raw { grep: Some(q.text().to_string()), all: true, ..Raw::default() },
             Mode::Filter(q) => Raw { filter: split_filter(q.text()), all: true, ideas: true, ..Raw::default() },
-            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) => Raw::default(),
+            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) => Raw::default(),
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
         // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다.
@@ -994,6 +1012,13 @@ impl App {
             KeyCode::Char('f') | KeyCode::F(7) => self.mode = Mode::Filter(Input::default()),
             // **포커스와 상관없이 연다.** 무엇을 보다가 떠올랐든 담는 칸은 하나다.
             KeyCode::Char('n') => self.mode = Mode::Idea(Form::default()),
+            // 등록은 사람의 설정이지 이 프로젝트의 것이 아니라 **어디서든 연다**(moai-plvy).
+            KeyCode::Char('a') => self.open_picker(),
+            // 해제는 층의 줄에서만 — 지금 선 프로젝트를 빼는 일이 안 생긴다. 드나드는 키처럼
+            // 목록 포커스를 탄다(커서가 선 줄을 뺀다).
+            KeyCode::Char('d') | KeyCode::Delete if self.on_layer() && self.focus == Pane::Explorer => {
+                self.ask_unregister()
+            }
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             KeyCode::Esc => self.clear_filter(),
@@ -1055,9 +1080,11 @@ impl App {
     /// 정한다 — Enter·Esc·Ctrl-C. 칸이 먹은 키는 여기까지 오지 않으므로 빈 칸의
     /// Backspace 가 "한 층 위로" 로 새지 않는다.
     fn typing(&mut self, k: KeyEvent) {
-        if matches!(self.mode, Mode::Idea(_)) {
-            self.jot(k);
-            return;
+        match self.mode {
+            Mode::Idea(_) => return self.jot(k),
+            Mode::Pick(_) => return self.pick(k),
+            Mode::Unregister(_) => return self.settle_unregister(k),
+            _ => {}
         }
         let eaten = match &mut self.mode {
             Mode::Grep(input) | Mode::Filter(input) => input.key(k),
@@ -1068,7 +1095,7 @@ impl App {
                 }
                 eaten
             }
-            Mode::Browse | Mode::Idea(_) => return,
+            Mode::Browse | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) => return,
         };
         if eaten {
             return;

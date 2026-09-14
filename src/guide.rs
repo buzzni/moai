@@ -140,7 +140,8 @@ const PROJECTS: &str = r#"    moai project add <dir>                 내 설정�
 `.moai` 밖에서 부른 `moai`·`moai status`·`moai ready` 는 등록한 프로젝트를
 프로젝트마다 한눈에 낸다. 그 밖의 명령은 어느 프로젝트인지 모르니
 `moai -C <dir> <명령>` 으로 부른다. `moai tui` 에서는 등록한 프로젝트가 맨 위
-층으로 선다 — `.moai` 밖이면 거기서 시작하고, 안이면 뿌리에서 Backspace 로 올라간다."#;
+층으로 선다 — `.moai` 밖이면 거기서 시작하고, 안이면 뿌리에서 Backspace 로 올라간다.
+층에서 `a` 로 디렉터리를 골라 등록하고(모노레포 하위도 따로), `d` 로 목록에서 뺀다."#;
 
 const PEOPLE: &str = r#"**담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
 `-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`

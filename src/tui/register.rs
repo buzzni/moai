@@ -1,0 +1,596 @@
+//! 프로젝트 등록·해제 — 층의 `a`·`d`(moai-plvy).
+//!
+//! 조각이 아니다 — 디렉터리를 읽고([`list_dir`]) 사용자 설정을 쓴다. 창의 상태와 키는
+//! 조각([`super::picker`])이 들고, 여기는 그 창이 시킨 것([`Act`])을 디스크에 한다.
+//!
+//! **쓰는 길은 CLI 와 하나다**(`projects::add`·`projects::remove`). 설정 자리도 새로 찾지
+//! 않는다 — 층이 읽은 파일(`Layer::config`)이나, 층이 없으면 띄울 때 받은 자리
+//! (`App::user_config`)다. 환경을 여기서 다시 읽으면 시험이 돌리는 사람의 설정을 쓴다.
+
+use super::picker::{Act, Dent, Listing, Picker};
+use super::{App, Mode, Row};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::path::{Path, PathBuf};
+
+/// 한 층에 세우는 하위 디렉터리의 상한. 넘으면 이름순 앞만 세우고 창이 그 밖의 수를 댄다 —
+/// `node_modules` 같은 곳에 잘못 들어가도 줄마다 `.moai` 를 재느라 화면이 멈추지 않게.
+/// 거기 있는 것을 고르는 길은 `g`(경로 적기)다.
+pub const SHOWN_MAX: usize = 2000;
+
+/// `d` 로 해제를 묻는 중. **정체는 경로다** — 묻는 동안 층이 다시 읽혀 줄 차례가 바뀌어도
+/// 사람이 본 그 프로젝트를 뺀다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unregister {
+    pub path: PathBuf,
+    pub name: String,
+}
+
+/// 디렉터리 한 층을 읽는다. **재귀로 훑지 않는다.**
+///
+/// - 링크를 푼다 — 창이 보이는 경로가 곧 `resolve_dir` 이 적을 철자다
+/// - 링크도 따라가 디렉터리면 세운다(모노레포를 링크로 건 사람이 있다)
+/// - 이름이 UTF-8 이 아닌 것은 세우지 않는다 — 사용자 설정(TOML)에 적을 수 없어 골라도
+///   거절된다. 고를 수 없는 줄을 세우면 고른 뒤에야 안 된다는 것을 안다
+/// - 점 디렉터리는 `show_hidden` 이 아니면 감추고 그 수만 센다
+/// - 하나씩 못 읽는 항목은 건너뛴다. 디렉터리 자체를 못 읽으면 `Err` 한 줄
+///
+/// `registered` 는 등록한 경로와 그 푼 철자들이다([`registered_paths`]).
+pub fn list_dir(dir: &Path, registered: &[PathBuf], show_hidden: bool) -> Result<Listing, String> {
+    let dir = std::fs::canonicalize(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    if !dir.is_dir() {
+        return Err(format!("디렉터리가 아니다 — {}", dir.display()));
+    }
+    let read = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let mut found: Vec<(String, bool)> = Vec::new();
+    let mut hidden = 0;
+    for entry in read.flatten() {
+        let Ok(name) = entry.file_name().into_string() else { continue };
+        let (is_dir, link) = match entry.file_type() {
+            Ok(t) if t.is_dir() => (true, false),
+            // 링크는 따라가 봐야 디렉터리인지 안다 — 링크인 것만 `stat` 한다.
+            Ok(t) if t.is_symlink() => (entry.path().is_dir(), true),
+            _ => (false, false),
+        };
+        if !is_dir {
+            continue;
+        }
+        if name.starts_with('.') && !show_hidden {
+            hidden += 1;
+            continue;
+        }
+        found.push((name, link));
+    }
+    found.sort();
+    let cut = found.len().saturating_sub(SHOWN_MAX);
+    found.truncate(SHOWN_MAX);
+    let marked = |p: &Path| registered.iter().any(|r| r == p);
+    let entries = found
+        .into_iter()
+        .map(|(name, link)| {
+            let path = dir.join(&name);
+            // 링크면 등록은 푼 경로로 적혔다. 링크가 아니면 `dir` 이 이미 풀렸으니 그대로다.
+            let real = if link { std::fs::canonicalize(&path).ok() } else { None };
+            Dent {
+                moai: path.join(".moai").is_dir(),
+                registered: marked(&path) || real.as_deref().is_some_and(marked),
+                name,
+            }
+        })
+        .collect();
+    Ok(Listing { moai: dir.join(".moai").is_dir(), registered: marked(&dir), dir, entries, cut, hidden })
+}
+
+/// 등록한 경로와, 손으로 적은 링크 철자면 그 푼 경로까지. 등록은 몇 개뿐이라 한 번씩 푼다.
+pub fn registered_paths(config: &Path) -> Vec<PathBuf> {
+    let reg = crate::user_config::read(Some(config));
+    let mut out = Vec::new();
+    for p in reg.projects {
+        if let Ok(real) = std::fs::canonicalize(&p.path)
+            && real != p.path
+        {
+            out.push(real);
+        }
+        out.push(p.path);
+    }
+    out
+}
+
+/// 거절문을 한 줄로 — 배너도 창의 아랫줄도 한 줄이다. 남의 설정 파일 이름이 들 수 있어 거른다.
+fn one_line(message: &str) -> String {
+    let lines: Vec<&str> = message.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    crate::text::sanitize(&lines.join("  "))
+}
+
+fn shown(path: &Path) -> String {
+    crate::text::sanitize(&path.display().to_string())
+}
+
+impl App {
+    /// 쓸 사용자 설정 파일. 층이 있으면 층이 읽은 그 파일이다 — 둘이 갈리면 등록한 것이 층에 안 선다.
+    fn config_file(&self) -> Option<PathBuf> {
+        match &self.layer {
+            Some(l) => l.config.clone(),
+            None => self.user_config.clone(),
+        }
+    }
+
+    /// `a` — 디렉터리 고르기 창을 연다.
+    ///
+    /// 시작 자리는 **마지막으로 창에서 본 디렉터리**, 처음이면 **띄운 자리**(`App::here`),
+    /// 그것도 모르면 지금 프로젝트의 뿌리다. 띄운 자리인 까닭: CLI 의 `moai project add .` 과
+    /// 상대경로가 거기 붙고, 모노레포 안에서 띄운 사람이 `apps/a` 를 고르려고 홈부터 파고들
+    /// 까닭이 없다. 앞의 자리가 그새 사라졌으면 다음 자리로 넘어간다.
+    pub(super) fn open_picker(&mut self) {
+        let Some(config) = self.config_file() else {
+            self.notice = Some("! 사용자 설정의 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 중 하나를 준다".into());
+            return;
+        };
+        let starts: Vec<PathBuf> = [self.pick_from.clone(), self.here.clone(), self.repo.as_ref().map(|r| r.root.clone())]
+            .into_iter()
+            .flatten()
+            .collect();
+        let registered = registered_paths(&config);
+        let mut why = "어디서 고를지 모른다".to_string();
+        for start in starts {
+            match list_dir(&start, &registered, false) {
+                Ok(at) => {
+                    self.mode = Mode::Pick(Picker::new(at));
+                    return;
+                }
+                Err(e) => why = e,
+            }
+        }
+        self.notice = Some(format!("! 고르기 창을 못 열었다 — {}", crate::text::sanitize(&why)));
+    }
+
+    /// 창이 열린 동안의 키. **무엇을 할지는 창이 정하고**([`Picker::key`]) 여기는 그대로 한다.
+    pub(super) fn pick(&mut self, k: KeyEvent) {
+        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
+            self.quit = true;
+            return;
+        }
+        let Mode::Pick(p) = &mut self.mode else { return };
+        match p.key(k) {
+            Act::Stay => {}
+            Act::Close => {
+                self.pick_from = Some(p.at.dir.clone());
+                self.mode = Mode::Browse;
+            }
+            Act::Go(to) => self.relist(&to),
+            Act::Register(dir) => self.register(&dir),
+        }
+    }
+
+    /// 창에 그 디렉터리 한 층을 읽어 넣는다. 못 읽으면 **그 자리에 선 채** 까닭 한 줄.
+    fn relist(&mut self, to: &Path) {
+        let registered = self.config_file().map(|c| registered_paths(&c)).unwrap_or_default();
+        let Mode::Pick(p) = &mut self.mode else { return };
+        match list_dir(to, &registered, p.show_hidden) {
+            Ok(at) => p.show(at),
+            Err(e) => p.error = Some(format!("못 연다 — {}", crate::text::sanitize(&e))),
+        }
+    }
+
+    /// 창의 `a`. **CLI `moai project add` 와 같은 함수를 부른다**(`projects::add`).
+    ///
+    /// 되면 창은 **열린 채** 그 줄에 등록 표시가 서고, 층은 그 자리에서 다시 선다 — 층에
+    /// 섰으면 커서가 새 프로젝트에 가 있어 Esc 로 닫으면 거기 서 있다. 모노레포 하위를 여럿
+    /// 등록하는 사람이 하나마다 창을 다시 열지 않는다. 이미 있으면 그렇다고만 한다(멱등).
+    fn register(&mut self, dir: &Path) {
+        let Some(config) = self.config_file() else { return };
+        match crate::projects::add(&config, dir, dir) {
+            Ok(added) => {
+                self.relayer(Some(&added.path));
+                let what = if added.added { "✓ 등록함" } else { "이미 등록돼 있다" };
+                let bare = if added.initialized { "" } else { " · init 전 — .moai 가 아직 없다" };
+                let back = if self.on_layer() || self.layer.is_none() { "" } else { " · 뿌리에서 Bksp 로 층에 올라가면 보인다" };
+                self.notice = Some(format!("{what} · {}{bare}{back}", shown(&added.path)));
+                if let Mode::Pick(p) = &self.mode {
+                    let here = p.at.dir.clone();
+                    self.relist(&here);
+                }
+            }
+            // **창에 선 채 말한다.** 깨진 설정이면 `user_config::update` 가 한 글자도 안 쓰고
+            // 거절했다 — 층의 배너가 그 설정 문제를 이미 비추고 있다.
+            Err(e) => {
+                if let Mode::Pick(p) = &mut self.mode {
+                    p.error = Some(format!("등록하지 못했다 — {}", one_line(&e.message)));
+                }
+            }
+        }
+    }
+
+    /// `d` — 커서가 선 층의 줄을 목록에서 뺄지 묻는다. **띄운 자리(등록 안 됨)는 묻지 않는다** —
+    /// 뺄 것이 없다.
+    pub(super) fn ask_unregister(&mut self) {
+        let Some(Row::Project(at)) = self.current() else { return };
+        let Some(place) = self.layer.as_ref().and_then(|l| l.places.get(at)) else { return };
+        if !place.registered {
+            self.notice = Some("등록돼 있지 않다 — 여기서 띄워 층에 섰을 뿐이라 뺄 것이 없다".into());
+            return;
+        }
+        self.mode = Mode::Unregister(Unregister { path: place.path.clone(), name: place.name.clone() });
+    }
+
+    /// 해제를 묻는 동안의 키. **`y` 만 뺀다** — 폼의 "버릴까" 와 같다. 다른 키는 그만두고 글자로도
+    /// 이동으로도 쓰지 않는다: 물음을 못 보고 누른 `↓` 가 커서를 옮기면 무엇을 그만뒀는지 헷갈린다.
+    pub(super) fn settle_unregister(&mut self, k: KeyEvent) {
+        let Mode::Unregister(u) = std::mem::replace(&mut self.mode, Mode::Browse) else { return };
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        if ctrl && k.code == KeyCode::Char('c') {
+            self.quit = true;
+            return;
+        }
+        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        if plain && matches!(k.code, KeyCode::Char('y' | 'Y')) {
+            self.unregister(&u.path);
+        }
+    }
+
+    /// 목록에서만 뺀다 — **CLI `moai project rm` 과 같은 함수다**(`projects::remove`). 그
+    /// 디렉터리와 `.moai` 는 건드리지 않는다. 뺀 뒤 층을 다시 세우고 커서는 그 자리에 둔다.
+    fn unregister(&mut self, path: &Path) {
+        let Some(config) = self.config_file() else {
+            self.notice = Some("! 사용자 설정의 자리를 모른다 — 뺄 곳이 없다".into());
+            return;
+        };
+        match crate::projects::remove(&config, path, path) {
+            Ok(r) => {
+                self.relayer(None);
+                self.notice = Some(if r.removed.is_empty() {
+                    // 그새 밖에서 뺐다. 층은 방금 다시 읽어 그 줄이 사라졌다.
+                    format!("이미 목록에 없다 · {}", shown(path))
+                } else {
+                    format!("✓ 뺌 · {} — 목록에서만 뺐다, 디렉터리와 .moai 는 그대로다", shown(path))
+                });
+            }
+            Err(e) => self.notice = Some(format!("! 빼지 못했다 — {}", one_line(&e.message))),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nav::{Index, Path as NavPath};
+    use crate::store::Repo;
+    use crate::tui::layer::{At, Layer, Look, Shut};
+    use crate::tui::stamp_of;
+
+    /// 진짜 디렉터리와 사용자 설정 한 벌. **돌리는 사람의 홈·설정은 안 읽는다** — 창은
+    /// `App::here` 에서, 쓰기는 층이 읽은 임시 설정 파일에 한다.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Scratch {
+            let dir = std::env::temp_dir().join(format!(
+                "moai-register-{name}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            // 임시 자리 위에 링크가 있어도(macOS 의 /tmp) 등록되는 철자와 견주게 푼다.
+            Scratch(std::fs::canonicalize(&dir).unwrap())
+        }
+
+        fn dir(&self, rel: &str) -> PathBuf {
+            let d = self.0.join(rel);
+            std::fs::create_dir_all(&d).unwrap();
+            d
+        }
+
+        fn project(&self, rel: &str) -> PathBuf {
+            let d = self.dir(rel);
+            std::fs::create_dir_all(d.join(".moai")).unwrap();
+            std::fs::write(d.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+            std::fs::write(d.join(".moai/issues.jsonl"), "").unwrap();
+            d
+        }
+
+        fn config(&self) -> PathBuf {
+            self.0.join("user/config.toml")
+        }
+
+        fn register(&self, dirs: &[&Path]) -> PathBuf {
+            let path = self.config();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let body: String = dirs.iter().map(|d| format!("[[project]]\npath = {:?}\n", d.to_str().unwrap())).collect();
+            std::fs::write(&path, body).unwrap();
+            path
+        }
+
+        fn registered(&self) -> Vec<PathBuf> {
+            crate::user_config::read(Some(&self.config())).projects.into_iter().map(|p| p.path).collect()
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn press(a: &mut App, codes: &[KeyCode]) {
+        for c in codes {
+            a.key(key(*c));
+        }
+    }
+
+    fn picker(a: &App) -> &Picker {
+        match &a.mode {
+            Mode::Pick(p) => p,
+            other => panic!("고르기 창이 안 열렸다 — {other:?}"),
+        }
+    }
+
+    /// 커서를 창의 그 이름 줄에 둔다.
+    fn point(a: &mut App, name: &str) {
+        let Mode::Pick(p) = &mut a.mode else { panic!("창이 없다") };
+        let at = p.at.entries.iter().position(|d| d.name == name).unwrap_or_else(|| panic!("{name} 가 창에 없다 — {:?}", p.at));
+        p.cursor = p.rows().iter().position(|r| *r == crate::tui::picker::Row::Dir(at)).unwrap();
+    }
+
+    fn place_at_cursor(a: &App) -> PathBuf {
+        match a.current() {
+            Some(Row::Project(at)) => a.layer.as_ref().unwrap().places[at].path.clone(),
+            other => panic!("커서가 층의 줄에 안 섰다 — {other:?}"),
+        }
+    }
+
+    /// 층에서 연 탐색기 — 등록 하나(`argos`), 창은 `work` 에서 연다.
+    fn on_layer(s: &Scratch) -> App {
+        let argos = s.project("work/argos");
+        let cfg = s.register(&[&argos]);
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        a.here = Some(s.0.join("work"));
+        a
+    }
+
+    /// **창은 한 층씩 읽고 표시를 낱말로 단다** — `.moai` 가 있는 것, 이미 등록한 것(링크로
+    /// 가리켜도), 감춘 점 디렉터리의 수. 파일은 줄로 안 선다.
+    #[test]
+    fn the_picker_marks_moai_and_registered_and_hides_dot_directories() {
+        let s = Scratch::new("marks");
+        let mut a = on_layer(&s);
+        s.dir("work/mono/apps/a");
+        s.dir("work/.cache");
+        std::fs::write(s.0.join("work/README"), "").unwrap();
+        std::os::unix::fs::symlink(s.0.join("work/argos"), s.0.join("work/link")).unwrap();
+
+        a.key(key(KeyCode::Char('a')));
+        let p = picker(&a);
+        assert_eq!(p.at.dir, s.0.join("work"));
+        let names: Vec<&str> = p.at.entries.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["argos", "link", "mono"], "파일이 섰거나 점 디렉터리가 안 감춰졌다");
+        assert_eq!(p.at.hidden, 1);
+        let argos = &p.at.entries[0];
+        assert!(argos.moai && argos.registered, "{argos:?}");
+        assert!(p.at.entries[1].registered, "등록한 디렉터리를 가리키는 링크에 표시가 없다");
+        let mono = &p.at.entries[2];
+        assert!(!mono.moai && !mono.registered, "{mono:?}");
+        assert_eq!(s.registered().len(), 1, "여는 것만으로 설정을 고쳤다");
+
+        // 점 디렉터리 보이기
+        a.key(key(KeyCode::Char('.')));
+        assert!(picker(&a).at.entries.iter().any(|d| d.name == ".cache"));
+        assert_eq!(picker(&a).at.hidden, 0);
+    }
+
+    /// **디렉터리를 드나들어 모노레포 하위를 등록한다** — `.git` 에서 멈추지 않고 고른 그
+    /// 디렉터리가 푼 경로로 적힌다. 창은 열린 채 표시가 서고, 층에 새 줄이 서고 커서가 거기
+    /// 있다. `.moai` 없는 것도 받아 층에 "init 전" 으로 선다. 다시 등록하면 멱등이다.
+    #[test]
+    fn browsing_into_a_monorepo_registers_its_subdirectories_one_by_one() {
+        let s = Scratch::new("mono");
+        let mut a = on_layer(&s);
+        s.dir("work/mono/.git");
+        let app_a = s.project("work/mono/apps/a");
+        let app_b = s.dir("work/mono/apps/b");
+
+        a.key(key(KeyCode::Char('a')));
+        point(&mut a, "mono");
+        press(&mut a, &[KeyCode::Enter]);
+        assert_eq!(picker(&a).at.dir, s.0.join("work/mono"));
+        assert_eq!(picker(&a).at.hidden, 1, ".git 이 줄로 섰다");
+        press(&mut a, &[KeyCode::Enter]);
+        assert_eq!(picker(&a).at.dir, s.0.join("work/mono/apps"));
+        point(&mut a, "a");
+        a.key(key(KeyCode::Char('a')));
+
+        assert_eq!(s.registered(), [s.0.join("work/argos"), app_a.clone()]);
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("✓ 등록함")), "{:?}", a.notice);
+        let p = picker(&a);
+        assert!(p.at.entries.iter().find(|d| d.name == "a").is_some_and(|d| d.registered && d.moai), "창의 표시가 안 고쳐졌다");
+        assert_eq!(p.error, None);
+        assert_eq!(place_at_cursor(&a), app_a, "층의 커서가 새 프로젝트에 안 섰다");
+        assert!(matches!(a.layer.as_ref().unwrap().places[1].look, Look::Open { .. }), "새 줄을 안 읽었다");
+
+        // 창을 닫으면 그 줄에 서 있다. 다시 열면 마지막 디렉터리에서 연다.
+        press(&mut a, &[KeyCode::Esc]);
+        assert_eq!(a.mode, Mode::Browse);
+        assert_eq!(place_at_cursor(&a), app_a);
+        a.key(key(KeyCode::Char('a')));
+        assert_eq!(picker(&a).at.dir, s.0.join("work/mono/apps"), "마지막으로 본 디렉터리에서 안 열었다");
+
+        // `.moai` 없는 디렉터리 — 받고, init 전이라 말하고, 층에 그렇게 선다.
+        point(&mut a, "b");
+        a.key(key(KeyCode::Char('a')));
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("init 전")), "{:?}", a.notice);
+        press(&mut a, &[KeyCode::Esc]);
+        assert_eq!(place_at_cursor(&a), app_b);
+        let lines = crate::tui::draw::tests::render(&mut a, 100, 16);
+        assert!(lines.iter().any(|l| l.contains("> b ") && l.contains("init 전")), "{}", lines.join("\n"));
+
+        // 다시 등록해도 한 줄이다.
+        a.key(key(KeyCode::Char('a')));
+        point(&mut a, "a");
+        let before = std::fs::read(s.config()).unwrap();
+        a.key(key(KeyCode::Char('a')));
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("이미 등록돼 있다")), "{:?}", a.notice);
+        assert_eq!(std::fs::read(s.config()).unwrap(), before, "멱등이 아니다 — 설정을 다시 썼다");
+
+        // 지금 디렉터리(`./`)도 고를 수 있다 — 모노레포 뿌리.
+        press(&mut a, &[KeyCode::Backspace, KeyCode::Home]);
+        assert_eq!(picker(&a).at.dir, s.0.join("work/mono"));
+        a.key(key(KeyCode::Char('a')));
+        assert_eq!(s.registered().last(), Some(&s.0.join("work/mono")));
+    }
+
+    /// **해제는 한 번 묻고 `y` 만 뺀다.** 목록에서만 빼고 디렉터리와 `.moai` 는 그대로다.
+    /// 다른 키는 그만두고 아무것도 안 쓴다.
+    #[test]
+    fn unregistering_asks_once_and_only_removes_the_entry() {
+        let s = Scratch::new("unregister");
+        let one = s.project("work/one");
+        let two = s.dir("work/two");
+        let cfg = s.register(&[&one, &two]);
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        press(&mut a, &[KeyCode::Down]);
+        assert_eq!(place_at_cursor(&a), two);
+
+        let before = std::fs::read(&cfg).unwrap();
+        a.key(key(KeyCode::Char('d')));
+        assert!(matches!(&a.mode, Mode::Unregister(u) if u.path == two), "{:?}", a.mode);
+        a.key(key(KeyCode::Char('n')));
+        assert_eq!(a.mode, Mode::Browse);
+        assert_eq!(std::fs::read(&cfg).unwrap(), before, "그만뒀는데 설정을 고쳤다");
+        a.key(key(KeyCode::Char('d')));
+        a.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL));
+        assert_eq!(std::fs::read(&cfg).unwrap(), before, "Ctrl-Y 로 뺐다");
+
+        a.key(key(KeyCode::Delete));
+        a.key(key(KeyCode::Char('y')));
+        assert_eq!(s.registered(), [one.clone()]);
+        assert!(two.is_dir(), "디렉터리를 지웠다");
+        assert!(one.join(".moai/config.toml").is_file());
+        assert_eq!(a.layer.as_ref().unwrap().places.iter().map(|p| p.path.clone()).collect::<Vec<_>>(), [one.clone()]);
+        assert_eq!(a.current(), Some(Row::Project(0)), "뺀 뒤 커서가 줄 밖에 섰다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("✓ 뺌") && n.contains("그대로")), "{:?}", a.notice);
+
+        // 상세에 포커스가 있으면 `d` 는 아무것도 안 뺀다 — 키 바도 그렇게 적는다.
+        a.key(key(KeyCode::Tab));
+        a.key(key(KeyCode::Char('d')));
+        assert_eq!(a.mode, Mode::Browse);
+    }
+
+    /// 띄운 자리(등록 안 됨) 줄의 `d` 는 묻지 않고 뺄 것이 없다고만 한다.
+    #[test]
+    fn the_launched_but_unregistered_row_has_nothing_to_unregister() {
+        let s = Scratch::new("launched");
+        let one = s.project("work/one");
+        let here = s.project("work/here");
+        let cfg = s.register(&[&one]);
+        let mut layer = Layer::read(Some(&cfg), Some(&here));
+        layer.at = At::Layer;
+        let mut a = App::on_projects(layer);
+        assert_eq!(place_at_cursor(&a), here);
+        let before = std::fs::read(&cfg).unwrap();
+        a.key(key(KeyCode::Char('d')));
+        assert_eq!(a.mode, Mode::Browse);
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("등록돼 있지 않다")), "{:?}", a.notice);
+        assert_eq!(std::fs::read(&cfg).unwrap(), before);
+    }
+
+    /// **깨진 설정이면 한 글자도 안 쓰고 창에 선 채 까닭 한 줄.** 창도 층도 그대로 돈다.
+    #[test]
+    fn a_broken_config_refuses_the_write_and_says_so_in_one_line() {
+        let s = Scratch::new("broken");
+        let cfg = s.config();
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        let broken = "[[project]\npath = \"/a\"\n";
+        std::fs::write(&cfg, broken).unwrap();
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        a.here = Some(s.dir("work"));
+        s.dir("work/x");
+
+        a.key(key(KeyCode::Char('a')));
+        a.key(key(KeyCode::Char('a')));
+        let p = picker(&a);
+        let e = p.error.as_deref().unwrap_or_else(|| panic!("까닭이 없다 — {:?}", a.notice));
+        assert!(e.contains("등록하지 못했다") && e.contains("쓰지 않는다") && !e.contains('\n'), "{e}");
+        assert_eq!(std::fs::read_to_string(&cfg).unwrap(), broken, "깨진 설정을 덮어썼다");
+        let bar = crate::tui::draw::tests::render(&mut a, 80, 12).last().cloned().unwrap_or_default();
+        assert!(bar.contains("등록하지 못했다"), "{bar:?}");
+        press(&mut a, &[KeyCode::Down]);
+        assert_eq!(picker(&a).error, None);
+        press(&mut a, &[KeyCode::Esc]);
+        assert!(a.on_layer());
+
+        // 설정 자리를 모르면 창을 안 연다.
+        let mut none = App::on_projects(Layer::read(None, None));
+        none.here = Some(s.0.clone());
+        none.key(key(KeyCode::Char('a')));
+        assert_eq!(none.mode, Mode::Browse);
+        assert!(none.notice.as_deref().is_some_and(|n| n.contains("자리를 모른다")), "{:?}", none.notice);
+    }
+
+    /// **등록이 0 인 채 `.moai` 안에서 띄워도 `a` 로 첫 등록을 한다.** 층이 그 자리에서 서되
+    /// 지금 프로젝트는 그대로다 — 뿌리에 `..` 이 새로 서도 커서는 보던 줄에 선다. 그 뒤
+    /// Bksp 로 올라가면 띄운 자리와 새 프로젝트가 층에 선다.
+    #[test]
+    fn without_a_layer_the_first_registration_raises_one_and_stays_in_the_project() {
+        use crate::model::{Issue, Kind, Status};
+        let s = Scratch::new("bootstrap");
+        let here = s.project("work/here");
+        let lines: String = [("argos-0001", "첫 줄"), ("argos-0002", "둘째 줄")]
+            .iter()
+            .map(|(id, t)| {
+                let i = Issue::new((*id).into(), (*t).into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+                format!("{}\n", serde_json::to_string(&i).unwrap())
+            })
+            .collect();
+        std::fs::write(here.join(".moai/issues.jsonl"), lines).unwrap();
+        let other = s.dir("work/other");
+        let repo = Repo { root: here.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
+        let stamp = stamp_of(&repo);
+        let load = repo.read().unwrap();
+        let index = Index::of(&load.issues);
+        let mut a = App::open(repo, load, index, NavPath::new(), stamp);
+        a.user_config = Some(s.config());
+        a.here = Some(here.clone());
+        assert!(a.layer.is_none());
+        press(&mut a, &[KeyCode::Down]);
+        let held = a.current();
+        assert_eq!(a.cursor, 1);
+
+        a.key(key(KeyCode::Char('a')));
+        assert_eq!(picker(&a).at.dir, here, "띄운 자리에서 안 열었다");
+        press(&mut a, &[KeyCode::Backspace]);
+        point(&mut a, "other");
+        a.key(key(KeyCode::Char('a')));
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("Bksp")), "{:?}", a.notice);
+        press(&mut a, &[KeyCode::Esc]);
+
+        assert_eq!(s.registered(), [other.clone()]);
+        let layer = a.layer.as_ref().expect("등록했는데 층이 안 섰다");
+        assert_eq!(layer.at, At::Project(here.clone()), "등록하다 프로젝트에서 튕겨 나왔다");
+        assert_eq!(a.repo.as_ref().map(|r| r.root.clone()), Some(here.clone()));
+        assert_eq!(a.rows().first(), Some(&Row::Up), "층이 섰는데 뿌리에 `..` 이 없다");
+        assert_eq!(a.current(), held, "`..` 이 서면서 커서가 옆 줄로 밀렸다");
+
+        press(&mut a, &[KeyCode::Home, KeyCode::Backspace]);
+        assert!(a.on_layer());
+        let places: Vec<(PathBuf, bool)> =
+            a.layer.as_ref().unwrap().places.iter().map(|p| (p.path.clone(), p.registered)).collect();
+        assert_eq!(places, [(here, false), (other, true)]);
+        assert!(matches!(a.layer.as_ref().unwrap().places[1].look, Look::Shut { state: Shut::Uninit, .. }));
+    }
+
+    /// 한 층에 너무 많으면 앞만 세우고 그 밖의 수를 댄다. 없는 디렉터리는 한 줄 까닭이다.
+    #[test]
+    fn a_huge_directory_is_cut_and_says_how_much() {
+        let s = Scratch::new("huge");
+        for i in 0..SHOWN_MAX + 3 {
+            std::fs::create_dir(s.0.join(format!("d{i:05}"))).unwrap();
+        }
+        let l = list_dir(&s.0, &[], false).unwrap();
+        assert_eq!((l.entries.len(), l.cut), (SHOWN_MAX, 3));
+        assert_eq!(l.entries[0].name, "d00000");
+        assert!(list_dir(&s.0.join("없음"), &[], false).is_err());
+    }
+}
