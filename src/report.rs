@@ -462,9 +462,13 @@ fn stands<'x>(i: &Issue, states: &BTreeMap<&str, &'x str>) -> Option<&'x str> {
 pub struct Stand<'a, 'c> {
     /// 서 있는 칸.
     pub column: &'c str,
-    /// 셀 멤버 가운데 가장 늦게 칸을 옮긴 때. 셀 멤버가 없으면 묶음이 생긴 때다.
+    /// 셀 멤버 가운데 **계획 자리가 가장 늦게 바뀐 때**(`Issue::planned` — 칸을 옮긴 때와
+    /// 미루거나 도로 집은 때 중 늦은 것). 셀 멤버가 없으면 묶음이 생긴 때다.
     /// **적힌 `status_since` 는 안 쓴다** — 아무 데서도 안 읽히는 칸의 시각이라,
     /// `--stale` 이 그것으로 재면 오늘 진행 중이 된 에픽을 "열흘째 멈춰 있다" 고 한다.
+    /// **도로 집은 때도 센다** — 접어 둔 멤버를 도로 집으면 칸은 안 옮겨도 셀 멤버가 바뀌어
+    /// 묶음의 칸이 움직인다. 칸 이동만 보면 그 순간 done 에서 되돌아 나온 묶음이 "열흘째"
+    /// 로 서고, 그것에 막힌 줄이 곧장 `blocked_stale` 로 꾸짖힌다(moai-xib6).
     pub since: &'a str,
     /// 셀 멤버 가운데 **적힌 칸이 시작한 칸**(`Config::started_status`)인 일이 있는가 —
     /// 지금 누가 그 묶음 밑에서 손대고 있다는 말.
@@ -548,7 +552,7 @@ pub fn group_stands_in<'a, 'c>(
             let counted = counted(g, &members, shelf.as_ref(), roots);
             let since = counted
                 .iter()
-                .map(|m| m.status_since.as_str())
+                .map(|m| m.planned())
                 .max()
                 .unwrap_or(g.created_at.as_str());
             let started = cfg.started_status();
@@ -1458,11 +1462,37 @@ fn holding<'a>(
 const REVIEW_STALE_DAYS: i64 = 3;
 /// 집어 놓고 이만큼 안 건드리면 잊은 것으로 본다.
 const WIP_STALE_DAYS: i64 = 2;
-/// 막힌 채로 지금 칸에 이만큼 머물면 "계획이 멈춘 자리" 로 본다. **막힌
-/// 기간이 아니라 지금 칸에 머문 기간이다** — 막 막힌 낡은 이슈를 "며칠째
-/// 막혀 있다" 고 잘못 말하지 않으려면 `blocked_by` 를 적은 시각을 따로
-/// 저장해야 하는데, 그건 이 이슈의 범위 밖이다.
+/// 막힌 채로 이만큼 서 있으면 "계획이 멈춘 자리" 로 본다. 재는 것은 [`blocked_since`] —
+/// 제 계획 자리가 바뀐 때와 **지금 막는 줄이 다시 선 때** 중 늦은 것이다(moai-xib6).
+/// `blocked_by` 를 적은 시각은 여전히 안 잰다 — 오래된 두 줄 사이에 오늘 막음을 걸면
+/// 곧장 선다. 그것을 재려면 그 시각을 스냅샷에 적어야 하는데, 링크 하나에 시각을 달
+/// 만큼 거슬린 적이 아직 없다.
 const BLOCKED_STALE_DAYS: i64 = 3;
+
+/// 막힌 줄이 **지금 막힌 채로 선 때** — 제 계획 자리가 바뀐 때(`Issue::planned`)와, 지금
+/// 막는 줄마다 그 줄이 다시 선 때 중 가장 늦은 것.
+///
+/// 막는 줄이 선 때는 일이면 그 줄의 계획 자리가 바뀐 때(done 에서 되돌아 나왔으면 그때),
+/// 묶음이면 읽은 칸의 셈이 움직인 때([`Stand::since`])다. 막힌 줄의 칸 나이로만 재면,
+/// 끝난 에픽에 멤버를 더하는 순간 그 에픽에 막힌 오래된 줄이 곧장 "N일째" 로 섰다.
+/// **파생값이라 저장하지 않는다** — 막는 줄을 옮길 때 막힌 줄을 같이 쓰게 된다.
+fn blocked_since<'a>(
+    i: &'a Issue,
+    by_id: &BTreeMap<&str, &'a Issue>,
+    states: &BTreeMap<&str, &str>,
+    waits: &Waits,
+    group_since: &BTreeMap<&str, &'a str>,
+) -> &'a str {
+    i.blocked_by
+        .iter()
+        .filter_map(|b| by_id.get(b.as_str()).copied())
+        .filter(|x| blocker(Some(column(x, states)), false, waiting_of(&x.id, waits)).blocks())
+        .map(|x| match is_group(x) {
+            true => group_since.get(x.id.as_str()).copied().unwrap_or(x.created_at.as_str()),
+            false => x.planned(),
+        })
+        .fold(i.planned(), |a, b| a.max(b))
+}
 /// 한 번에 이보다 많이 벌이면 알린다.
 const WIP_LIMIT: usize = 3;
 /// 에픽 없는 이슈가 이 비율을 넘으면 알린다.
@@ -1634,7 +1664,10 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 셈이라 따로 부르면 `moai status` 한 번에 같은 걸음을 두 벌 걷는다.
     let mile_of = milestones(issues);
     let roots = deferred_roots_in(issues, &group, &mile_of);
-    let (states, waits) = split_stands(group_stands_in(issues, cfg, &group, &mile_of, &roots));
+    let stands = group_stands_in(issues, cfg, &group, &mile_of, &roots);
+    // 묶음이 막을 때 그 막음이 선 때(`blocked_since`). 칸과 한 번의 셈에서 받는다.
+    let group_since: BTreeMap<&str, &str> = stands.iter().map(|(id, s)| (*id, s.since)).collect();
+    let (states, waits) = split_stands(stands);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     let work: Vec<&Issue> =
         issues.iter().filter(|i| is_work(i) && !out_of_plan.contains(i.id.as_str())).collect();
@@ -1752,7 +1785,8 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
             !i.status.is_done()
                 && is_blocked(i, &by_id, &states, &waits)
                 && !by_deferred(i)
-                && days_since(&i.status_since, now).is_some_and(|d| d > BLOCKED_STALE_DAYS)
+                && days_since(blocked_since(i, &by_id, &states, &waits, &group_since), now)
+                    .is_some_and(|d| d > BLOCKED_STALE_DAYS)
         })
         .collect();
     if !stuck.is_empty() {
@@ -2253,6 +2287,46 @@ mod tests {
         let issues = vec![make("argos-0001", Kind::Issue, "todo"), fresh];
         let st = status(&issues, &[], &cfg(), now);
         assert!(st.warnings.iter().all(|w| w.kind != "blocked_stale"));
+    }
+
+    /// **막힌 기간은 막음이 다시 선 때부터 잰다**(moai-xib6). 막힌 줄의 칸 나이로만 재면,
+    /// 끝난 에픽에 멤버를 더하거나 접은 멤버를 도로 집어 에픽이 done 에서 되돌아 나오는 순간
+    /// 그 에픽에 막힌 오래된 줄이 곧장 "N일째 막혔다" 로 선다.
+    #[test]
+    fn blocked_stale_counts_from_when_the_block_came_back() {
+        // `make` 은 09-01 에 만든다 — 기준 시각에서 열흘 전이다.
+        let (now, today) = ("2026-09-11T00:00:00Z", "2026-09-10T12:00:00Z");
+        let blocked = |by: &str| {
+            let mut x = make("argos-0009", Kind::Issue, "todo");
+            x.blocked_by = vec![by.into()];
+            x
+        };
+        let stale = |issues: &[Issue]| status(issues, &[], &cfg(), now).warnings.iter().any(|w| w.kind == "blocked_stale");
+        let epic = || make("argos-0001", Kind::Epic, "todo");
+        let finished = || member("argos-0002", "argos-0001", "done");
+
+        // 오래 막힌 것은 그대로 꾸짖는다 — 기준선.
+        assert!(stale(&[epic(), finished(), member("argos-0003", "argos-0001", "todo"), blocked("argos-0001")]));
+
+        // 끝난 에픽에 오늘 멤버를 더했다 — 에픽이 막 다시 막았다.
+        let mut added = member("argos-0003", "argos-0001", "todo");
+        (added.created_at, added.status_since) = (today.into(), today.into());
+        assert!(!stale(&[epic(), finished(), added, blocked("argos-0001")]), "막 다시 막은 줄을 N일째로 꾸짖는다");
+
+        // 접어 둔 멤버를 오늘 도로 집었다 — 칸은 안 옮겼어도 셈이 움직였다.
+        let mut back = member("argos-0003", "argos-0001", "todo");
+        back.planned_at = Some(today.into());
+        assert!(!stale(&[epic(), finished(), back, blocked("argos-0001")]), "도로 집은 때를 안 본다");
+
+        // 막는 이슈가 오늘 done 에서 되돌아 나왔다.
+        let mut reopened = make("argos-0001", Kind::Issue, "todo");
+        reopened.status_since = today.into();
+        assert!(!stale(&[reopened, blocked("argos-0001")]));
+
+        // 막힌 줄 제가 오늘 도로 집혔다.
+        let mut mine = blocked("argos-0005");
+        mine.planned_at = Some(today.into());
+        assert!(!stale(&[make("argos-0005", Kind::Issue, "todo"), mine]));
     }
 
     /// 막는 쪽이 사라지면 `ready` 는 조용히 넘어가지만 `status` 는 드러낸다.
