@@ -1940,7 +1940,9 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
             .iter()
             .copied()
             .filter(|i| {
-                !i.status.is_done() && !eclipsed(i)
+                // 길 잃은 줄 밑에 접힌 줄은 1번과 같은 까닭으로 안 센다(moai-uni2) —
+                // 트리가 `(길 잃음)` 안에 그리고, 고칠 곳은 부모의 끊긴 참조다.
+                !i.status.is_done() && !eclipsed(i) && !folded.contains(i.id.as_str())
                     && (!mile.contains_key(i.id.as_str())
                         || placed.get(i.id.as_str()) == Some(&Misplace::Milestone))
             })

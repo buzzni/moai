@@ -1395,7 +1395,9 @@ fn show_json_keys_win_over_unknown_fields_of_the_same_name() {
 #[test]
 fn a_child_under_a_lost_thought_is_not_counted_as_having_no_epic() {
     let s = init("lostthought");
-    let epic = add(s.path(), &["지울 에픽", "--type", "epic"]);
+    // 마일스톤을 쓰는 저장소여야 `no_milestone` 도 같은 자로 읽는지 본다.
+    let stone = add(s.path(), &["v1", "--type", "milestone"]);
+    let epic = add(s.path(), &["지울 에픽", "--type", "epic", "--milestone", &stone]);
     let thought = add(s.path(), &["생각", "--type", "idea", "-e", &epic]);
     let child = add(s.path(), &["생각 밑의 일", "--parent", &thought]);
     assert!(moai(s.path(), &["rm", &epic]).status.success());
@@ -1410,6 +1412,10 @@ fn a_child_under_a_lost_thought_is_not_counted_as_having_no_epic() {
     assert!(
         !warning("no_epic").is_some_and(|w| w.contains(&child)),
         "트리가 길 잃음에 그린 줄을 status 는 에픽 없는 이슈로 센다\n{st}"
+    );
+    assert!(
+        !warning("no_milestone").is_some_and(|w| w.contains(&child)),
+        "트리가 길 잃음에 그린 줄을 status 는 마일스톤 없는 일로 센다\n{st}"
     );
 }
 
