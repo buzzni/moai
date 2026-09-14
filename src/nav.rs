@@ -241,6 +241,18 @@ impl Index {
         path: &Path,
         keep: &dyn Fn(usize) -> bool,
     ) -> Vec<Entry> {
+        self.entries_sorted(issues, path, keep, &|a, b| crate::query::display_order(&issues[a], &issues[b]))
+    }
+
+    /// 거르고 **고른 차례로** 놓은 목록(moai-55cp). 차례는 이슈 첨자 둘을 받는다 — 묶음의 칸처럼
+    /// 이슈 밖에서 읽은 값으로 견줄 수 있게. 디렉터리가 먼저고 바구니가 끝인 것은 차례와 상관없다.
+    pub fn entries_sorted(
+        &self,
+        issues: &[Issue],
+        path: &Path,
+        keep: &dyn Fn(usize) -> bool,
+        order: &dyn Fn(usize, usize) -> std::cmp::Ordering,
+    ) -> Vec<Entry> {
         let mut out: Vec<Entry> = Vec::new();
         let mut buckets: Vec<Seg> = Vec::new();
 
@@ -274,7 +286,7 @@ impl Index {
             let dir = |e: &Entry| u8::from(matches!(e, Entry::Leaf { .. }));
             dir(a).cmp(&dir(b)).then_with(|| {
                 let at = |e: &Entry| e.at().expect("바구니는 여기 오지 않는다");
-                crate::query::display_order(&issues[at(a)], &issues[at(b)])
+                order(at(a), at(b))
             })
         });
         // 바구니는 늘 끝에. 정상인 것이 먼저 보여야 한다.

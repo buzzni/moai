@@ -23,7 +23,7 @@ use ratatui::crossterm::event::KeyEvent;
 
 /// 하위 접두어의 이름. 표에는 동작만 있고 묶음의 이름은 없어 여기 둔다 — 이름 없는 접두어는
 /// 시험(`every_prefix_in_the_menu_has_a_name`)이 막는다.
-const GROUPS: &[(&str, &str)] = &[("SPC p", "프로젝트"), ("SPC t", "토글"), ("SPC s", "보기")];
+const GROUPS: &[(&str, &str)] = &[("SPC p", "프로젝트"), ("SPC t", "토글"), ("SPC s", "보기"), ("SPC o", "정렬")];
 
 /// 메뉴가 열렸나.
 pub fn open(chord: &Chord) -> bool {
@@ -278,9 +278,9 @@ mod tests {
         assert!(open(&ch));
         assert_eq!(title(ch.held()), "SPC");
         let root = entries(ch.held(), &inside(), &[]);
-        assert_eq!(keys_of(&root), ["/", "f", "n", "r", "q", "p", "t", "s"]);
+        assert_eq!(keys_of(&root), ["/", "f", "n", "r", "q", "p", "t", "s", "o"]);
         let what: Vec<&str> = root.iter().map(|e| e.what.as_str()).collect();
-        assert_eq!(what, ["검색", "거름망", "생각 담기", "다시 읽기", "끝내기", "+프로젝트", "+토글", "+보기"]);
+        assert_eq!(what, ["검색", "거름망", "생각 담기", "다시 읽기", "끝내기", "+프로젝트", "+토글", "+보기", "+정렬"]);
     }
 
     /// **칸 토글은 설정의 칸 이름을 번호에 붙이고, 있는 칸 수만큼만 선다**(moai-fmv5). 숨김은

@@ -438,10 +438,85 @@ pub fn sort_for_display(issues: &mut [Issue]) {
     issues.sort_by(display_order);
 }
 
+/// 사람이 고르는 차례(moai-55cp). 기본은 [`display_order`] 다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SortKey {
+    #[default]
+    Priority,
+    Created,
+    Updated,
+    Status,
+    Assignee,
+    Title,
+}
+
+/// 고른 차례로 두 줄을 견준다. 줄마다 **칸을 곁에 받는다** — 묶음의 칸은 멤버에서 읽은
+/// 것이라 `Issue::status` 만 보면 목록의 글리프와 차례가 다른 칸을 본다. `statuses` 는 설정의
+/// 칸 차례다(칸 순서는 설정이 정한다). 설정에 없는 칸은 뒤로 간다.
+///
+/// - 제 방향은 사람이 먼저 보고 싶은 쪽이다 — 우선순위는 급한 것, 생성·수정은 **새것**,
+///   칸은 설정의 앞 칸, 담당·제목은 가나다. 담당 없는 줄은 뒤로 간다
+/// - 같으면 [`display_order`] 로 가른다 — 차례가 흔들리지 않는다
+/// - `reversed` 는 가른 것까지 통째로 뒤집는다
+pub fn order_by(
+    key: SortKey,
+    reversed: bool,
+    a: (&Issue, &str),
+    b: (&Issue, &str),
+    statuses: &[String],
+) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let rank = |column: &str| statuses.iter().position(|s| s == column).unwrap_or(statuses.len());
+    let natural = match key {
+        SortKey::Priority => Ordering::Equal,
+        SortKey::Created => b.0.created_at.cmp(&a.0.created_at),
+        SortKey::Updated => b.0.updated_at.cmp(&a.0.updated_at),
+        SortKey::Status => rank(a.1).cmp(&rank(b.1)),
+        SortKey::Assignee => match (&a.0.assignee, &b.0.assignee) {
+            (Some(x), Some(y)) => x.to_lowercase().cmp(&y.to_lowercase()),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        },
+        SortKey::Title => a.0.title.to_lowercase().cmp(&b.0.title.to_lowercase()),
+    };
+    let order = natural.then_with(|| display_order(a.0, b.0));
+    if reversed { order.reverse() } else { order }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::Status;
+
+    /// **고른 차례는 제 방향이 있고, 같으면 기본 차례로 가르며, 뒤집으면 통째로 뒤집는다**(moai-55cp).
+    #[test]
+    fn order_by_each_key_and_its_reverse() {
+        let at = |id: &str, p: u8, created: &str, who: Option<&str>| {
+            let mut i = Issue::new(id.into(), format!("{id} 제목"), Kind::Issue, Status::new("todo"), created);
+            i.priority = Some(p);
+            i.assignee = who.map(String::from);
+            i
+        };
+        let issues = [
+            at("a-1", 2, "2026-09-01T00:00:00Z", Some("나래")),
+            at("a-2", 1, "2026-09-03T00:00:00Z", None),
+            at("a-3", 2, "2026-09-02T00:00:00Z", Some("가람")),
+        ];
+        let columns = ["review", "todo", "done"];
+        let statuses: Vec<String> = ["todo", "review", "done"].map(String::from).to_vec();
+        let sorted = |key, reversed| {
+            let mut idx = vec![0, 1, 2];
+            idx.sort_by(|&x, &y| order_by(key, reversed, (&issues[x], columns[x]), (&issues[y], columns[y]), &statuses));
+            idx.iter().map(|&i| issues[i].id.as_str()).collect::<Vec<_>>()
+        };
+        assert_eq!(sorted(SortKey::Priority, false), ["a-2", "a-1", "a-3"], "기본 차례와 다르다");
+        assert_eq!(sorted(SortKey::Priority, true), ["a-3", "a-1", "a-2"]);
+        assert_eq!(sorted(SortKey::Created, false), ["a-2", "a-3", "a-1"], "새것이 위가 아니다");
+        assert_eq!(sorted(SortKey::Created, true), ["a-1", "a-3", "a-2"]);
+        assert_eq!(sorted(SortKey::Status, false), ["a-2", "a-1", "a-3"], "설정의 칸 차례가 아니다");
+        assert_eq!(sorted(SortKey::Assignee, false), ["a-3", "a-1", "a-2"], "담당 없는 줄이 뒤로 안 갔다");
+    }
 
     const NOW: &str = "2026-09-11T00:00:00Z";
 
