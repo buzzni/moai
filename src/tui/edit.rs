@@ -76,8 +76,9 @@ impl Editor {
     /// 바뀐 것이 없어도 그렇다. 거짓이면 Esc·Tab·Ctrl-C·저장 키처럼 칸을 든 쪽이
     /// 정할 키다.
     ///
-    /// Ctrl-U·Ctrl-W 는 한 줄 칸의 것을 그대로 받는다 — Ctrl-U 가 지우는 것은
-    /// **커서가 선 줄**이다. 본문 전부를 한 키에 날리면 되돌릴 길이 없다.
+    /// Ctrl-U·Ctrl-W·Alt-Backspace 는 한 줄 칸의 것을 그대로 받는다 — Ctrl-U 가 지우는 것은
+    /// **커서가 선 줄**이다. 본문 전부를 한 키에 날리면 되돌릴 길이 없다. Ctrl-W·Alt-Backspace 도
+    /// 커서 줄 안에서만 지운다 — 줄 첫머리에서는 윗줄과 잇지 않는다(그냥 Backspace 만 잇는다).
     pub fn key(&mut self, k: KeyEvent) -> bool {
         let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         let last = self.lines.len() - 1;

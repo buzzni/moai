@@ -62,6 +62,10 @@ impl Input {
             // **Windows 의 AltGr 글자는 Ctrl+Alt 로 온다**(moai-d3tp) — crossterm 이 독일어 자판의
             // `@`·`€` 를 CONTROL|ALT 를 단 글자로 낸다. 거기서만 글자로 받는다: 리눅스·맥은 AltGr
             // 글자가 수식자 없이 오므로, 거기서 받으면 Ctrl-Alt-u 가 `u` 로 찍힌다. 사용자와 정했다.
+            // **대가: Windows 에서는 어느 자판이든 Ctrl+Alt+글자가 그 글자로 찍힌다** — crossterm 이
+            // 그냥 누른 Ctrl+Alt+u 도 `ToUnicodeEx` 로 `u` 를 채워 AltGr 글자와 같은 모양으로 내서
+            // 둘을 가를 길이 없다. 그래서 Ctrl-Alt-u·Ctrl-Alt-w 는 지우기가 아니라 글자다. 표가 칸보다
+            // 먼저 보는 Ctrl-C(끝내기)·Ctrl-S(담기)는 그대로 듣는다(리뷰 moai-979m.jws).
             KeyCode::Char(c) if windows && ctrl && alt => self.put(c),
             // Ctrl-U 는 커서 앞만이 아니라 **전부** 지운다. 지금 `/`·`f` 가 그렇게
             // 하고 있고, 옮기면서 뜻을 바꾸지 않는다.
@@ -70,8 +74,10 @@ impl Input {
                 self.at = 0;
             }
             KeyCode::Char('w') if ctrl => self.rub_word(),
-            // **Alt-Backspace 도 낱말 하나를 지운다**(moai-979m) — readline 의 Meta-DEL. 셸에 익은
-            // 손이 이것으로 지운다. Ctrl 까지 붙은 것은 받지 않는다(아래 줄이 든 쪽에 돌려준다).
+            // **Alt-Backspace 도 낱말 하나를 지운다**(moai-979m) — 셸에 익은 손이 이것으로 지운다.
+            // **자리는 Ctrl-W 와 같다**: 빈칸만 낱말의 경계로 본다. readline 의 Meta-DEL 은 `/` 같은
+            // 글자에서도 멈추지만(`/home/coder/work` 에서 `work` 만), 여기서는 경로를 통째로 지운다 —
+            // Ctrl-W 와 같은 동작으로 정했다. Ctrl 까지 붙은 것은 받지 않는다(아래 줄이 든 쪽에 돌려준다).
             KeyCode::Backspace if alt && !ctrl => self.rub_word(),
             // 그 밖의 Ctrl·Alt 는 글자가 아니다. raw mode 에서는 Ctrl-C 가
             // 신호로 오지 않으므로, 여기서 `c` 로 먹으면 나갈 길이 막힌다.
