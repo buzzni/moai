@@ -1347,3 +1347,6 @@
 {"ts":"2026-09-14T07:13:54Z","id":"moai-zcuh.fqp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 둘 다 받는다. (1) git 밖 프로젝트마다 시키지 않은 배너가 서는 것은 기본 켬이 만든 회귀라 unfound 를 trouble 과 가르는 수정을 그대로 둔다. 대가로 탐색기에서 w 로 직접 켰을 때도 까닭을 안 대는데, 경로 줄이 '옆 워크트리 없음' 은 말하므로 받아들이고 moai-n468 에 담았다. CLI --worktree 는 전과 같이 stderr 로 말한다. (2) overlaid 의 경고 두 번 세기는 못 읽는 줄의 자가 바뀔 때만 다시 세도록 한 수정을 받는다. 넘긴 것: 옆 워크트리 없음 표지가 늘 경로 줄을 먹는 것 — 설계 판단이라 moai-n468 로 넘긴다. 시험 611+238 을 이쪽에서 다시 돌려 통과를 봤다."}
 {"ts":"2026-09-14T07:13:54Z","id":"moai-zcuh.fqp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"두 지적 모두 반영(git 밖 배너 회귀·경고 두 번 세기). 경로 줄 표지는 moai-n468 로 넘김"}
 {"ts":"2026-09-14T07:14:12Z","id":"moai-zcuh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"구현 8e26871, 리뷰 반영 ee524f6. 경로 줄 표지는 moai-n468"}
+{"ts":"2026-09-14T07:36:20Z","id":"moai-0l65","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"편집기로 담는 동안 다시 읽기 스레드가 패닉하면 ratatui 훅이 raw mode·대체 화면을 걷어 편집기 화면이 흐트러진다"}
+{"ts":"2026-09-14T07:40:49Z","id":"moai-08af.pmn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 외부 편집기로 담기 (08af)"}
+{"ts":"2026-09-14T07:41:02Z","id":"moai-08af.pmn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
