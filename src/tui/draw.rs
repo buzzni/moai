@@ -712,7 +712,8 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
     let mut spans = head;
     // 집은 **일**의 제목에는 빛줄기가 흐른다(moai-fy99). 묶음은 안 흐른다 — 묶음의 도는
     // 글리프는 "밑에 집은 것이 있다" 는 말이고, 손대는 줄은 그 밑의 이슈다.
-    if !is_dir && app.spins(at) {
+    // 가르는 자는 `is_group` 이지 `is_dir` 가 아니다 — 자식을 둔 이슈도 디렉터리로 서지만 그건 일이다.
+    if !crate::report::is_group(i) && app.spins(at) {
         spans.extend(shimmer(title, app.spin));
     } else {
         spans.push(Span::raw(title));
@@ -798,7 +799,9 @@ fn glint() -> [Style; 3] {
 /// 것이 없을 때 루프가 안 깨우는 규칙(`App::spinning`)도 그대로 따른다.
 ///
 /// **뜻은 글리프가 진다.** 빛줄기는 곁들임이라 색이 없는 화면에서 사라져도 잃는 것이 없다.
-/// 글자와 폭은 그대로다 — 스타일만 칸마다 바꾼다. 두 칸 글자는 시작 칸으로 띠에 든다.
+/// 글자와 폭은 그대로다 — 스타일만 칸마다 바꾼다. 두 칸 글자는 **덮는 칸 중 가장 밝은 띠**를
+/// 받는다: 시작 칸으로만 재면 가운데가 뒤 칸에 서는 걸음마다 굵은 칸이 사라져, 한글 제목에서
+/// 빛이 흐르지 않고 한 걸음 걸러 깜빡인다.
 fn shimmer(title: String, frame: usize) -> Vec<Span<'static>> {
     let band = glint();
     let cycle = crate::text::width(&title) + band.len() + GLINT_REST;
@@ -810,7 +813,13 @@ fn shimmer(title: String, frame: usize) -> Vec<Span<'static>> {
     let mut col = 0usize;
     for c in title.chars() {
         let w = crate::text::width(c.encode_utf8(&mut [0; 4]));
-        let style = (col < head).then(|| head - 1 - col).and_then(|back| band.get(back).copied());
+        // 띠 번호가 가운데(1)에 가까울수록 밝다. 덮는 칸들 중 가장 밝은 것을 고른다.
+        let style = (col..col + w.max(1))
+            .filter(|&x| x < head)
+            .map(|x| head - 1 - x)
+            .filter(|&back| back < band.len())
+            .min_by_key(|&back| back.abs_diff(1))
+            .map(|back| band[back]);
         if style != run_style && !run.is_empty() {
             spans.push(Span::styled(std::mem::take(&mut run), run_style.unwrap_or_default()));
         }
@@ -1556,12 +1565,18 @@ pub(super) mod tests {
         assert!(lit(&shimmer(title.to_string(), 0)).is_empty(), "들어오기 전에 빛났다");
         assert!(lit(&shimmer(title.to_string(), cycle - 1)).is_empty(), "쉬는 동안 빛났다");
         // 가운데 칸(굵게)이 걸음마다 오른쪽으로 간다. 가운데는 앞머리 두 칸 뒤라, 걸음 4 는
-        // `은`(2칸), 걸음 7 은 `멤`(5칸)에 선다 — 두 칸 글자의 뒤 칸에 서는 걸음은 글자가 없어
-        // 굵은 칸도 없다(가장자리 노랑만 남는다).
+        // `은`(2칸), 걸음 7 은 `멤`(5칸)에 선다. 두 칸 글자의 **뒤 칸**에 서는 걸음(5)에도 그
+        // 글자가 굵다 — 시작 칸으로만 재면 거기서 빛이 꺼져 한 걸음 걸러 깜빡인다.
         let a = lit(&shimmer(title.to_string(), 4));
+        let back = lit(&shimmer(title.to_string(), 5));
         let b = lit(&shimmer(title.to_string(), 7));
         assert_eq!((a.as_slice(), b.as_slice()), ([2].as_slice(), [5].as_slice()), "빛이 제자리에 안 선다");
+        assert_eq!(back, vec![2], "가운데가 두 칸 글자의 뒤 칸에 서자 빛이 꺼졌다");
         assert!(!a.is_empty() && !b.is_empty() && b[0] > a[0], "빛이 안 흐른다 — {a:?} → {b:?}");
+        // 제목 안의 모든 걸음에서 굵은 칸이 하나는 있다 — 한글 제목에서 깜빡이지 않는다.
+        for frame in 3..=crate::text::width(title) + 1 {
+            assert!(!lit(&shimmer(title.to_string(), frame)).is_empty(), "걸음 {frame} 에 빛이 꺼졌다");
+        }
         assert_eq!(shimmer(title.to_string(), 5), shimmer(title.to_string(), 5 + cycle), "한 바퀴가 제자리로 안 온다");
     }
 
