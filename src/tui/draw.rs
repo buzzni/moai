@@ -573,7 +573,10 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
             (line, Some((from, cut))) if app.shade && Some(i) == cursor_at => {
                 cursor_shaded = true;
                 let under = Style::new().remove_modifier(Modifier::REVERSED);
-                ListItem::new(shade(line.style(over), from, cut, room, under))
+                // 반전은 **줄이 아니라 항목에** 입힌다. 위젯은 항목 스타일을 커서 자리(`>`)까지
+                // 포함한 줄 전체에 깔고 줄 스타일은 커서 자리 뒤에만 깐다 — 줄에 입히면 `> `
+                // 두 칸만 반전이 빠져 커서 줄의 머리가 끊겨 보인다.
+                ListItem::new(shade(line, from, cut, room, under)).style(over)
             }
             (line, Some((from, cut))) if app.shade => ListItem::new(shade(line, from, cut, room, over)),
             (line, _) => ListItem::new(line),
@@ -1665,6 +1668,8 @@ pub(super) mod tests {
         // 포커스 칸의 테두리는 굵은 선이다(`frame`).
         let border = (title..w).find(|&x| matches!(buf[(x, y)].symbol(), "│" | "┃")).unwrap();
         assert!(rev(id), "커서 줄의 머리가 반전이 아니다");
+        let gutter = (0..w).find(|&x| buf[(x, y)].symbol() == ">").unwrap();
+        assert!(rev(gutter) && rev(gutter + 1), "커서 자리(`> `)만 반전이 빠졌다");
         assert!(!rev(title), "끝난 몫이 반전을 안 걷었다");
         assert!(rev(border - 1), "남은 몫이 반전이 아니다");
     }
