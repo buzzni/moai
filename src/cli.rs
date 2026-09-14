@@ -83,11 +83,13 @@ pub enum ColorArg {
     Never,
 }
 
+// **들여쓴 `after_help` 를 `"\` 줄 잇기로 시작하지 않는다.** 잇기가 개행과 함께 다음
+// 줄의 앞 공백까지 먹어 첫 줄만 왼쪽 끝에 붙는다 — 같은 줄에서 글을 시작한다.
+// `every_help_keeps_its_indent` 가 모든 명령의 `--help` 를 훑어 잡는다 (moai-p63y).
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
     /// 보드 · 경고 · 흐름. 세션은 여기서 시작한다
-    #[command(after_help = "\
-  아무것도 막지 않는다. 승인도 통과도 없다.
+    #[command(after_help = "  아무것도 막지 않는다. 승인도 통과도 없다.
   대신 에픽에 안 붙은 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것을 드러낸다.
   종료 코드는 데이터가 깨졌을 때만 0 이 아니다.
 
@@ -97,8 +99,7 @@ pub enum Cmd {
     Status(WorktreeArg),
 
     /// 지금 집을 수 있는 일
-    #[command(after_help = "\
-  에픽 자체, 미뤄 둔 것과 그 밑, 아직 안 끝난 자식을 가진 부모는 뺀다.
+    #[command(after_help = "  에픽 자체, 미뤄 둔 것과 그 밑, 아직 안 끝난 자식을 가진 부모는 뺀다.
   급한 것 → 끝나가는 에픽 → 오래된 것 차례로 낸다.
 
   --worktree 면 다른 워크트리에서 이미 집은 일은 여기서 빠지고, 잡고 있는
@@ -130,8 +131,7 @@ pub enum Cmd {
     /// 하나를 펼치거나 목록을 낸다
     Show(ShowArgs),
     /// 상태를 옮긴다
-    #[command(after_help = "\
-  마지막 인자가 갈 칸이고, 그 앞이 전부 옮길 이슈다.
+    #[command(after_help = "  마지막 인자가 갈 칸이고, 그 앞이 전부 옮길 이슈다.
   칸 이름과 차례는 .moai/config.toml 의 statuses 가 정한다 (기본: todo,
   in_progress, review, done).
 
@@ -147,8 +147,7 @@ pub enum Cmd {
     /// 지운다
     Rm(RmArgs),
     /// 이슈에 메모를 남긴다 (저널에만 쌓인다)
-    #[command(after_help = "\
-  moai note moai-4aex \"파서가 BOM 에서 죽는다\"
+    #[command(after_help = "  moai note moai-4aex \"파서가 BOM 에서 죽는다\"
   moai note moai-4aex -b - < review.txt        긴 글은 stdin 에서
   moai note moai-4aex -b - <<'MD' ... MD
 
@@ -158,8 +157,7 @@ pub enum Cmd {
   메모는 저널에만 쌓이고 스냅샷을 안 바꾼다. `moai show <id>` 가 이력으로 낸다.")]
     Note(NoteArgs),
     /// 지금 안 할 일을 계획에서 잠시 뺀다 (또는 도로 집는다)
-    #[command(after_help = "\
-  moai defer moai-4aex                       미룬다
+    #[command(after_help = "  moai defer moai-4aex                       미룬다
   moai defer moai-4aex moai-9k2p -m \"다음 분기\"   여럿을, 까닭과 함께
   moai defer moai-4aex --undo                도로 집는다
 
@@ -172,8 +170,7 @@ pub enum Cmd {
     Defer(DeferArgs),
 
     /// 하나가 다른 것을 막는다 (또는 그 막음을 없앤다)
-    #[command(after_help = "\
-  moai link moai-4aex --blocks moai-9k2p     4aex 가 9k2p 를 막는다
+    #[command(after_help = "  moai link moai-4aex --blocks moai-9k2p     4aex 가 9k2p 를 막는다
   moai link moai-4aex --unblocks moai-9k2p   그 막음을 없앤다
 
   막는 쪽이 아니라 막히는 쪽에 `blocked_by` 를 적는다. 고리(A 가 B 를
@@ -190,8 +187,7 @@ pub enum Cmd {
     #[command(subcommand)]
     Milestone(Typed),
     /// 반짝 떠오른 것을 그 자리에서 담는다 (`--type idea`)
-    #[command(subcommand, after_help = "\
-  todo 보다 한 칸 낮은 자리다. **담는 비용이 0 에 가까워야 담는다** — 제목
+    #[command(subcommand, after_help = "  todo 보다 한 칸 낮은 자리다. **담는 비용이 0 에 가까워야 담는다** — 제목
   하나로 끝나고 우선순위도 에픽도 묻지 않는다.
 
   moai idea add \"반짝 떠오른 것\"      담기
@@ -205,8 +201,7 @@ pub enum Cmd {
     Idea(IdeaCmd),
 
     /// 탐색기 화면을 띄운다 (이슈에 쓰는 것은 `n` 생각 담기 하나)
-    #[command(after_help = "\
-  마일스톤과 에픽이 디렉터리처럼 동작한다. 왼쪽에서 돌아다니면 커서가 머문
+    #[command(after_help = "  마일스톤과 에픽이 디렉터리처럼 동작한다. 왼쪽에서 돌아다니면 커서가 머문
   것의 정보가 오른쪽에 나온다.
 
   화살표로 이동, Enter 로 들어가고 Backspace 로 나온다. F10 이나 q 로 끝낸다.
@@ -231,8 +226,7 @@ pub enum Cmd {
     Tui(TuiArgs),
 
     /// Claude 의 훅이 부른다. stdin 으로 이벤트를 받아 낼 것만 낸다
-    #[command(after_help = "\
-  사람이 손으로 부를 일은 없다. Claude 에 심은 플러그인이 이것을 부른다.
+    #[command(after_help = "  사람이 손으로 부를 일은 없다. Claude 에 심은 플러그인이 이것을 부른다.
 
   **아무것도 막지 않고, 무엇이 어긋나도 종료 코드는 0 이다.** 훅이 에러를
   뱉으면 매 세션 시작이 시끄럽고, 그러면 사람이 훅을 꺼 버린다 — 꺼진 규칙은
@@ -272,8 +266,7 @@ pub enum Cmd {
     Project(ProjectCmd),
 
     /// 이 저장소에 .moai/ 를 심는다 (다시 불러도 된다)
-    #[command(after_help = "\
-  이미 심긴 곳에서 다시 부르면 딸린 파일(.gitattributes·.gitignore·AGENTS.md)
+    #[command(after_help = "  이미 심긴 곳에서 다시 부르면 딸린 파일(.gitattributes·.gitignore·AGENTS.md)
   만 다시 맞춘다. 이슈와 저널은 건드리지 않는다.
 
   접두어는 처음 한 번만 정한다 — 이미 발급된 id 가 전부 그것을 달고 있다.")]
@@ -307,7 +300,6 @@ pub enum ProjectCmd {
         path: std::path::PathBuf,
     },
     /// 등록한 것을 낸다 — 이름·경로·`.moai` 유무
-    // 첫 줄을 `"\` 로 잇지 않는다 — 줄 잇기가 다음 줄의 앞 공백까지 먹는다.
     #[command(after_help = "  이름은 디렉터리 이름이고, 겹치면 위 조각을 붙여 가른다 (`apps/a`·`libs/a`).
   언제나 0 으로 끝난다 — 설정 파일이 깨졌으면 stderr 에 한 줄로 비추고 계속한다
   (`--json` 이면 stderr 대신 `problems` 배열에 선다).")]
@@ -369,8 +361,7 @@ pub enum IdeaCmd {
     #[command(alias = "ls")]
     Show(ShowArgs),
     /// 에픽 하나 + 이슈 여럿으로 펼치고, 그 생각을 닫는다
-    #[command(after_help = "\
-  받는 마크다운은 `add --from` 과 같은 형식이다. 형식이 둘이 되면 어느 쪽
+    #[command(after_help = "  받는 마크다운은 `add --from` 과 같은 형식이다. 형식이 둘이 되면 어느 쪽
   문법인지 매번 틀린다.
 
   moai idea promote <id> --from - <<'EOF'
@@ -591,7 +582,7 @@ pub struct EditArgs {
     #[arg(long, value_name = "태그", value_delimiter = ',')]
     pub untag: Vec<String>,
 
-    /// 에픽을 옮긴다 (`none` 이면 뺀다)
+    /// 에픽을 옮긴다 (`none` 이면 제 필드를 뺀다 — 부모에게서 오는 소속은 남는다)
     #[arg(short, long, value_name = "id|none")]
     pub epic: Option<String>,
 
@@ -667,8 +658,7 @@ pub struct NoteArgs {
 #[derive(Subcommand, Debug)]
 pub enum SkillCmd {
     /// 플러그인 트리를 심고 `claude` 에 등록한다
-    #[command(after_help = "\
-  `.claude/moai-plugin/` 에 스킬과 훅을 심고 `claude` 에 등록한다. 사람의
+    #[command(after_help = "  `.claude/moai-plugin/` 에 스킬과 훅을 심고 `claude` 에 등록한다. 사람의
   settings.json 은 건드리지 않는다 — 두 키를 넣는 것은 `claude` 다.
 
   **지우지 않는다.** 다시 불러도 덮어쓰기만 한다. 돌고 있는 세션이 물고 있는
@@ -693,8 +683,7 @@ pub enum SkillCmd {
     },
 
     /// 무엇이 어느 범위에 심겼나, 저장소와 설치본이 어긋났나
-    #[command(after_help = "\
-  `claude` 의 장부(~/.claude/plugins/)를 **읽기만** 한다. 무엇이 어긋나도
+    #[command(after_help = "  `claude` 의 장부(~/.claude/plugins/)를 **읽기만** 한다. 무엇이 어긋나도
   종료 코드는 0 이다 — 보이는 명령이지 막는 명령이 아니다.
 
   보는 것:
@@ -705,8 +694,7 @@ pub enum SkillCmd {
     Status,
 
     /// `claude` 에서 등록을 걷어낸다. 심은 파일은 남긴다
-    #[command(after_help = "\
-  이 저장소의 설치를 범위마다 `claude plugin uninstall` 하고, 마켓플레이스를
+    #[command(after_help = "  이 저장소의 설치를 범위마다 `claude plugin uninstall` 하고, 마켓플레이스를
   `claude plugin marketplace remove` 한다. 사람의 settings 에서 두 키를 지우는
   것은 `claude` 가 한다 — 우리는 남의 JSON 을 만지지 않는다.
 

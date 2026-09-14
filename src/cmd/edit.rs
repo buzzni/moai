@@ -21,6 +21,28 @@ struct Edited {
     /// 묶음 → 멤버에서 읽은 칸. 고친 줄과 그 자식만.
     read: super::Read,
     changed: bool,
+    /// `-e none` 을 받았는데도 남은 소속 — 에픽과 그것을 넘긴 id 부모.
+    kept: Option<Inherited>,
+}
+
+/// `-e none` 이 못 끊은 소속. `--json` 에는 `inherited_epic` 으로 선다 — 키가 없다는
+/// 것이 "끊겼거나 끊을 뜻이 없었다" 는 뜻이다.
+#[derive(serde::Serialize)]
+struct Inherited {
+    epic: String,
+    parent: String,
+}
+
+/// 남은 소속의 키. 모르는 필드로 같은 이름을 든 줄을 가려내는 데도 쓴다.
+const INHERITED: &str = "inherited_epic";
+
+/// 기계 출력 — 줄 하나에 남은 소속을 곁들인다. 기존 키는 그대로 두고 더하기만 한다.
+#[derive(serde::Serialize)]
+struct Out<'a> {
+    #[serde(flatten)]
+    row: super::Row<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inherited_epic: Option<&'a Inherited>,
 }
 
 pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
@@ -79,10 +101,20 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         // 끝나는 것과 같아야 한다 — 되풀이해 부르는 것이 흔하고, 그때
         // 한쪽만 1 로 끝나면 받는 쪽이 재시도를 못 짠다.
         let changed = *i != before;
+        // **`-e none` 이 못 끊는 소속을 묻는다** (moai-w5gz). 이슈의 뜻은 `report` 가
+        // 판단한다 — 여기서는 비우라고 적었는지만 본다. 바뀐 것이 없어도 묻는다: 필드가
+        // 원래 비어 있던 에픽 밑 자식이 가장 흔한 자리다.
+        let cut = args.epic.as_deref().is_some_and(|e| super::clearable(e).is_none());
+        let kept = |issues: &[Issue]| {
+            cut.then(|| crate::report::epic_from_parent(issues, &args.id)).flatten().map(|(e, p)| {
+                Inherited { epic: e.to_string(), parent: p.to_string() }
+            })
+        };
         if !changed {
             // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
             // 키가 사라지면 받는 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
             let read = super::read_of(issues, cfg, &[before.id.as_str()]);
+            let kept = kept(issues);
             return Ok((
                 vec![],
                 Edited {
@@ -92,6 +124,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                     shelved: Vec::new(),
                     read,
                     changed: false,
+                    kept,
                 },
             ));
         }
@@ -125,12 +158,31 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             .collect();
         // 묶음의 칸도 멤버에서 읽는다 — 제 줄만 들고 나가면 상세가 손으로 둔 칸을 그린다.
         let read = super::read_of(issues, cfg, &near);
-        Ok((vec![], Edited { issue: out, epic, children, shelved, read, changed: true }))
+        let kept = kept(issues);
+        Ok((vec![], Edited { issue: out, epic, children, shelved, read, changed: true, kept }))
     })?;
 
-    let Edited { issue: edited, epic, children, shelved, read, changed } = done;
+    let Edited { issue: edited, epic, children, shelved, read, changed, kept } = done;
     if ctx.json {
-        return super::json_line(&super::Row::from(&edited, &read));
+        // **이 키는 우리 것이다** — `Row` 가 `derived_status` 를 걷는 것과 같은 까닭이다.
+        // `--json` 을 되써 넣어 모르는 필드로 든 줄이면 한 객체에 같은 키가 둘 서거나,
+        // 끊긴 줄이 안 끊긴 것처럼 읽힌다. 파일의 값은 그대로 둔다.
+        let shown = match edited.rest.contains_key(INHERITED) {
+            false => std::borrow::Cow::Borrowed(&edited),
+            true => {
+                let mut own = edited.clone();
+                own.rest.remove(INHERITED);
+                std::borrow::Cow::Owned(own)
+            }
+        };
+        let row = super::Row::from(&shown, &read);
+        return super::json_line(&Out { row, inherited_epic: kept.as_ref() });
+    }
+    if let Some(k) = &kept {
+        eprintln!(
+            "moai: {} 는 에픽 {} 에 그대로 든다 — 부모 {} 에서 오는 소속이라 -e none 으로 안 끊긴다. 옮기려면 `moai edit {} -e <다른 에픽>`",
+            edited.id, k.epic, k.parent, edited.id
+        );
     }
     if !changed {
         return Ok(vec![format!(

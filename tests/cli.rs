@@ -995,6 +995,72 @@ fn edit_says_so_when_nothing_was_asked_for() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("무엇을 고칠지"));
 }
 
+/// **`-e none` 이 못 끊는 소속은 끊기지 않았다고 말한다** (moai-w5gz). id 부모에서
+/// 오는 소속 — 이슈 밑 자식(부모의 에픽을 물려받는다)과 에픽 밑 자식(moai-9t3l) — 은
+/// 필드가 아니라 자리에서 오므로, 필드를 비워도 그대로 남는다. 조용하면 사람은 뺀
+/// 줄 안다. 사람에게는 한 줄로, `--json` 에는 더한 키로 댄다.
+#[test]
+fn edit_says_when_epic_none_cannot_cut_a_parents_membership() {
+    let s = init("editkept");
+    let epic = add(s.path(), &["에픽", "--type", "epic"]);
+    let other = add(s.path(), &["딴 에픽", "--type", "epic"]);
+    let parent = add(s.path(), &["부모", "-e", &epic]);
+    let child = add(s.path(), &["자식", "--parent", &parent, "-e", &other]);
+    let review = add(s.path(), &["리뷰", "--parent", &epic]);
+    let top = add(s.path(), &["홀로 선 이슈", "-e", &epic]);
+    let inner = ok(s.path(), &["epic", "add", "에픽 밑 에픽", "--parent", &epic, "-q"]).trim().to_string();
+
+    let says = |id: &str, from: &str| {
+        let out = moai(s.path(), &["edit", id, "-e", "none"]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        let lines: Vec<&str> = err.lines().filter(|l| l.contains(&format!("부모 {from}"))).collect();
+        assert_eq!(lines.len(), 1, "{id}: 부모 {from} 에서 온 소속을 한 줄로 안 댔다 — {err:?}");
+        assert!(lines[0].contains(&epic) && lines[0].contains("-e <"), "{id}: 에픽과 옮기는 길이 없다 — {err:?}");
+    };
+    // 이슈 밑 자식 — 제 필드는 비워지고, 소속은 부모의 에픽으로 돌아간다.
+    says(&child, &parent);
+    assert!(!line_of(s.path(), &child).contains("\"epic\""), "필드는 비워져야 한다");
+    assert!(ok(s.path(), &["show", "-e", &epic]).contains(&child));
+    // 에픽 밑 자식 — 비울 필드가 없어 바뀐 것이 없어도 말한다.
+    says(&review, &epic);
+
+    let json = ok(s.path(), &["edit", &review, "-e", "none", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(&format!(r#""inherited_epic":{{"epic":"{epic}","parent":"{epic}"}}"#)), "{json}");
+    let json = ok(s.path(), &["edit", &child, "-e", "none", "--json"]);
+    assert!(json.contains(&format!(r#""inherited_epic":{{"epic":"{epic}","parent":"{parent}"}}"#)), "{json}");
+
+    // 끊긴 것, 끊을 뜻이 없던 것, 소속을 안 받는 줄은 조용하다.
+    for args in [
+        vec!["edit", top.as_str(), "-e", "none"],
+        vec!["edit", review.as_str(), "--tag", "x"],
+        vec!["edit", inner.as_str(), "-e", "none"],
+    ] {
+        let out = moai(s.path(), &args);
+        assert!(out.status.success());
+        assert!(out.stderr.is_empty(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let mut j = args.clone();
+        j.push("--json");
+        let json = ok(s.path(), &j);
+        assert!(!json.contains("inherited_epic"), "{args:?}: {json}");
+    }
+
+    // **이 키도 우리 것이다** — `derived_status` 와 같은 까닭. `--json` 을 되써 넣어
+    // 모르는 필드로 든 줄이면 한 객체에 같은 키가 둘 서거나, 끊긴 줄이 안 끊긴 것처럼 읽힌다.
+    let doctored: String = issues(s.path())
+        .lines()
+        .map(|l| format!("{}{}\n", &l[..l.len() - 1], r#","inherited_epic":"거짓"}"#))
+        .collect();
+    std::fs::write(s.path().join(".moai/issues.jsonl"), doctored).unwrap();
+    let json = ok(s.path(), &["edit", &review, "-e", "none", "--json"]);
+    assert_eq!(json.matches(r#""inherited_epic""#).count(), 1, "같은 키가 두 번 났다 — {json}");
+    assert!(!json.contains("거짓"), "{json}");
+    let json = ok(s.path(), &["edit", &top, "-e", "none", "--json"]);
+    assert!(!json.contains("inherited_epic"), "파일의 값이 끊긴 줄에 샜다 — {json}");
+    assert!(line_of(s.path(), &top).contains(r#""inherited_epic":"거짓""#), "모르는 필드를 잃었다");
+}
+
 #[test]
 fn rm_removes_and_names_what_it_broke() {
     let s = init("rm");
@@ -2396,6 +2462,96 @@ fn help_says_what_to_type_next() {
     }
     // 명령 목록도 그대로 있다
     assert!(out.contains("milestone") && out.contains("note"), "{out}");
+}
+
+/// 도움말에서 들여쓰기를 잃은 줄.
+///
+/// clap 이 그리는 몫에서 `Usage:` 뒤에 들여쓰지 않고 서는 줄은 `Options:` 같은
+/// 머리(`:` 로 끝남)뿐이다 — 설명은 모두 들여쓴다. 그러니 `Usage:` 뒤의 들여쓰지
+/// 않은 머리 아닌 줄은 `after_help` 의 글이고, **그 뒤에 머리 없이 들여쓴 줄이
+/// 다시 서면** 앞 줄이 제 들여쓰기를 잃은 것이다. `after_help = "\` 의 줄 잇기가
+/// 개행과 함께 다음 줄의 앞 공백까지 먹어 첫 줄만 왼쪽 끝에 붙던 모양이 정확히
+/// 이것이다 (moai-p63y). 바로 밑 줄만 보면 첫 문단이 한 줄인 것(`hook`)을 놓친다.
+fn lost_indent(help: &str) -> Vec<String> {
+    let mut bad = Vec::new();
+    let mut prose: Option<&str> = None;
+    for l in help.lines().skip_while(|l| !l.starts_with("Usage:")).skip(1) {
+        if l.trim().is_empty() {
+            continue;
+        }
+        if l.starts_with(char::is_whitespace) {
+            if let Some(p) = prose.take() {
+                bad.push(format!("{p}\n{l}"));
+            }
+        } else if l.trim_end().ends_with(':') {
+            prose = None;
+        } else {
+            prose = prose.or(Some(l));
+        }
+    }
+    bad
+}
+
+/// 도움말의 `Commands:` 밑에 선 이름들. `help` 는 clap 이 만드는 것이라 뺀다.
+fn subcommands(help: &str) -> Vec<String> {
+    help.lines()
+        .skip_while(|l| !l.starts_with("Commands:"))
+        .skip(1)
+        .take_while(|l| l.starts_with("  "))
+        .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+        .filter(|c| c != "help")
+        .collect()
+}
+
+/// 모든 명령(하위 명령까지)의 `--help` 에서 예시·설명 줄이 들여쓰기를 지킨다.
+/// **명령 목록은 바이너리의 도움말에서 읽는다** — 새 명령이 `after_help = "\` 로
+/// 같은 덫을 밟아도 이름을 적어 넣지 않고 걸린다.
+#[test]
+fn every_help_keeps_its_indent() {
+    let s = init("helpindent");
+    // 판정이 헛돌지 않는지 먼저 본다 — 고치기 전 `status --help` 의 모양 그대로.
+    let head = "Usage: moai status [OPTIONS]\n\nOptions:\n  -h, --help  Print help\n\n";
+    for broken in [
+        "아무것도 막지 않는다. 승인도 통과도 없다.\n  대신 에픽에 안 붙은 이슈를 드러낸다.\n",
+        "사람이 손으로 부를 일은 없다.\n\n  **아무것도 막지 않고**\n",
+    ] {
+        let found = lost_indent(&format!("{head}{broken}"));
+        assert_eq!(found.len(), 1, "판정이 잃은 들여쓰기를 못 알아본다 — {broken:?}");
+    }
+    for fine in [
+        "예시:\n  moai add \"제목\"\n\n한 번에 여럿:\n  moai add --from -\n\n제목은 `--` 로 시작해도 된다.\n",
+        "  아무것도 막지 않는다.\n  대신 드러낸다.\n",
+    ] {
+        let found = lost_indent(&format!("{head}{fine}"));
+        assert!(found.is_empty(), "멀쩡한 글을 잡는다 — {found:?}");
+    }
+
+    let mut queue: Vec<Vec<String>> = vec![vec![]];
+    let mut seen = Vec::new();
+    let mut with_examples = 0;
+    let mut bad = Vec::new();
+    while let Some(path) = queue.pop() {
+        let mut args: Vec<&str> = path.iter().map(String::as_str).collect();
+        args.push("--help");
+        let help = ok(s.path(), &args);
+        if help.lines().any(|l| l.starts_with("  moai ")) {
+            with_examples += 1;
+        }
+        for b in lost_indent(&help) {
+            bad.push(format!("moai {} --help:\n{b}", path.join(" ")));
+        }
+        for c in subcommands(&help) {
+            let mut next = path.clone();
+            next.push(c);
+            queue.push(next);
+        }
+        seen.push(path.join(" "));
+    }
+    // 훑기가 실제로 돌았는지 — 하위 명령까지 내려갔고 예시 줄을 가진 도움말을 봤다.
+    assert!(seen.len() > 20, "명령 목록을 못 읽었다 — {seen:?}");
+    assert!(seen.iter().any(|c| c == "skill install"), "하위 명령으로 안 내려갔다 — {seen:?}");
+    assert!(with_examples >= 8, "예시 줄이 있는 도움말이 {with_examples} 개뿐이다 — {seen:?}");
+    assert!(bad.is_empty(), "들여쓰기를 잃은 줄:\n\n{}", bad.join("\n\n"));
 }
 
 /// 인자 없이 부른 것도 `--json` 이 돈다 — 에이전트가 첫 호출부터 기계로 읽는다.
