@@ -1081,3 +1081,4 @@
 {"ts":"2026-09-13T23:44:08Z","id":"moai-xs9x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"한눈 보기 이름·id·머리에 경로 해시로 고른 16색(청록·초록·파랑), 색 끄면 바이트 그대로, TUI 는 style::project_colour 로 재사용"}
 {"ts":"2026-09-13T23:54:51Z","id":"moai-o04b","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"사용자 설정에서 프로젝트 색을 정해 경로 해시를 덮는다 — 팔레트 안의 색만 받는다"}
 {"ts":"2026-09-13T23:54:51Z","id":"moai-a94u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"사용자 결정으로 이번 에픽의 이슈 moai-o04b 에 옮겼다 (moai-4ia9)"}
+{"ts":"2026-09-14T00:27:34Z","id":"moai-t8r8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai init 의 prefix 에 최대 길이를 두고 짧게 쓰도록 유도한다 — 길면 id 를 칠 때마다 손이 는다"}
