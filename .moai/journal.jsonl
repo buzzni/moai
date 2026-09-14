@@ -1338,3 +1338,4 @@
 {"ts":"2026-09-14T06:55:54Z","id":"moai-hudg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"갱신(2026-09-14): 진행 바탕 자체가 걷혔다(moai-u3r2, d1a780b) — 확정표의 SPC t p 진행 바탕 토글은 할 일이 없어 빠진다. SPC t 에는 w 워크트리·r 원문↔그리기만 남는다"}
 {"ts":"2026-09-14T07:01:48Z","id":"moai-zcuh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"TUI 만 켠다(사용자 선택). App 기본값 true, 첫 읽기(cmd::tui)는 gather(!json) 후 App::overlaid 로 origin·경고·watched 를 들인다. --json 은 겹치지 않는다. 층에 올라가면 기본값(켬)으로 돌린다 — 끈 것은 그 프로젝트에 매인다. CLI --worktree 기본값은 그대로."}
 {"ts":"2026-09-14T07:02:12Z","id":"moai-zcuh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"구현·시험 끝. 커밋과 /code-review 는 사용자 확인 대기"}
+{"ts":"2026-09-14T07:13:54Z","id":"moai-08af","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
