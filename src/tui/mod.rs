@@ -1157,6 +1157,75 @@ impl App {
             .collect();
     }
 
+    /// 사용자 설정에 적어 둔 보기를 입힌다(moai-2bzp) — 칸 숨김·미룸·정렬·열. 없는 키는 처음값
+    /// 그대로다. **읽기는 관대하다**: 모르는 낱말·틀린 키는 한 줄 알림으로 대고 나머지를 입힌다 —
+    /// 틀린 키 하나로 탐색기가 안 뜨면 설정이 도구를 막는다.
+    pub fn load_look(&mut self) {
+        let (look, mut problems) = crate::user_config::read_look(self.user_config.as_deref());
+        self.apply_look(&look, &mut problems);
+        if !problems.is_empty() {
+            self.notice = Some(format!("보기 설정 — {}", problems.join(" · ")));
+        }
+        self.see();
+    }
+
+    fn apply_look(&mut self, look: &crate::user_config::Look, problems: &mut Vec<String>) {
+        if let Some(hidden) = &look.hidden {
+            self.view.hidden = hidden.clone();
+        }
+        if let Some(d) = look.hide_deferred {
+            self.view.hide_deferred = d;
+        }
+        if let Some(s) = &look.sort {
+            match keys::Order::named(s) {
+                Some(o) => self.order.0 = o,
+                None => problems.push(format!(
+                    "`sort = \"{s}\"` 는 모르는 차례다 — {} 중 하나",
+                    keys::Order::ALL.map(keys::Order::name).join("·")
+                )),
+            }
+        }
+        if let Some(r) = look.sort_reversed {
+            self.order.1 = r;
+        }
+        if let Some(words) = &look.fields {
+            let mut fields = view::Fields::none();
+            for w in words {
+                match view::Field::named(w) {
+                    Some(f) if !fields.shows(f) => fields.toggle(f),
+                    Some(_) => {}
+                    None => problems.push(format!(
+                        "`fields` 의 `{w}` 는 모르는 열이다 — {} 중에서",
+                        view::Field::ALL.map(view::Field::name).join("·")
+                    )),
+                }
+            }
+            self.fields = fields;
+        }
+    }
+
+    /// 지금 보기를 설정에 적을 모양으로.
+    fn look_now(&self) -> crate::user_config::Look {
+        crate::user_config::Look {
+            hidden: Some(self.view.hidden.clone()),
+            hide_deferred: Some(self.view.hide_deferred),
+            sort: Some(self.order.0.name().to_string()),
+            sort_reversed: Some(self.order.1),
+            fields: Some(view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name().to_string()).collect()),
+        }
+    }
+
+    /// 지금 보기를 사용자 설정에 적는다 — **토글마다**. 끝낼 때 한 번 적으면 Ctrl-C·터미널이 닫힌
+    /// 때 잃는다. 같은 보기면 파일을 안 건드린다(`Doc::set_look`). 설정 자리가 없으면(시험·설정
+    /// 없는 기계) 적지 않는다. **못 적어도 화면은 바뀐 대로다** — 알림 한 줄로 댄다.
+    fn save_look(&mut self) {
+        let Some(path) = self.user_config.clone() else { return };
+        let look = self.look_now();
+        if let Err(e) = crate::user_config::update(&path, |doc| doc.set_look(&look)) {
+            self.notice = Some(format!("보기를 설정에 못 적었다 — {}", crate::text::one_line(&e.to_string())));
+        }
+    }
+
     /// 보기 토글 하나(`SPC s`). **커서는 줄의 정체로 붙든다** — 숨긴 줄에 서 있었으면 그 자리
     /// 가까이 남는다. 첨자로 두면 위에서 줄이 빠질 때마다 커서가 딴 이슈로 미끄러진다.
     fn look(&mut self, act: keys::Browse) {
@@ -1184,6 +1253,7 @@ impl App {
                 self.detail.rewind();
             }
         }
+        self.save_look();
     }
 
     /// 지금 디렉터리의 줄들. 차례는 고른 것(`SPC o`)이다.
@@ -1313,7 +1383,10 @@ impl App {
             }
             B::Column(_) | B::Done | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act),
             // 열은 줄을 더하거나 빼지 않는다 — 커서를 붙들 까닭이 없다.
-            B::Cell(f) => self.fields.toggle(f),
+            B::Cell(f) => {
+                self.fields.toggle(f);
+                self.save_look();
+            }
             B::Raw => {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
@@ -3382,6 +3455,51 @@ mod tests {
         assert_eq!(on(&a).as_deref(), Some("argos-0001"));
         assert_eq!(a.filter_text.as_deref(), Some("type=epic"), "거름망을 대신 풀었다");
         assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다"));
+    }
+
+    /// **보기가 새 줄을 가리면 거름망이 아니라 보기를 댄다**(moai-fmv5 리뷰, 시험은 moai-2bzp) —
+    /// Esc 는 거름망만 풀어, "Esc 로 푼다" 를 대면 누른 키가 아무것도 안 한다.
+    #[test]
+    fn the_view_hiding_the_new_line_names_the_view_not_the_filter() {
+        let (_scratch, mut a) = writable("land-view");
+        a.hit("SPC s 1");
+        assert!(add_idea(&mut a, "argos-0002").is_some());
+        assert_eq!(a.issues.len(), 2, "쓰기가 안 닿았다");
+        assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002 — 보기에 가려 안 보인다 · SPC s a 로 모두 보인다"));
+    }
+
+    /// **보기·정렬·열은 누를 때마다 사용자 설정에 적히고 다음 실행이 읽는다**(moai-2bzp).
+    #[test]
+    fn the_look_is_saved_on_each_toggle_and_read_by_the_next_run() {
+        let s = Scratch::new("look-save");
+        let user = s.0.join("user.toml");
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.hit("SPC s d");
+        a.hit("SPC s z");
+        a.hit("SPC o u");
+        a.hit("SPC o u");
+        a.hit("SPC c a");
+        a.hit("SPC c i");
+        let text = std::fs::read_to_string(&user).expect("보기가 설정에 안 적혔다");
+        assert!(text.contains("[tui]") && text.contains("sort = \"updated\""), "{text}");
+
+        let mut b = App::new(Vec::new(), cfg(), Path::new());
+        b.user_config = Some(user.clone());
+        b.load_look();
+        assert_eq!((b.view.clone(), b.order, b.fields), (a.view.clone(), a.order, a.fields), "다음 실행이 다른 보기로 떴다");
+        assert_eq!(b.notice, None);
+
+        // 모르는 낱말은 알리고 나머지는 입힌다.
+        std::fs::write(&user, "[tui]\nsort = \"nope\"\nhide_deferred = true\nfields = [\"id\", \"what\"]\n").unwrap();
+        let mut c = App::new(Vec::new(), cfg(), Path::new());
+        c.user_config = Some(user);
+        c.load_look();
+        assert!(c.view.hide_deferred, "틀린 키 하나로 나머지를 버렸다");
+        assert_eq!(c.order, Default::default());
+        assert!(c.fields.shows(view::Field::Id) && !c.fields.shows(view::Field::Priority));
+        let said = c.notice.unwrap_or_default();
+        assert!(said.contains("nope") && said.contains("what"), "{said}");
     }
 
     /// 닫는 함수가 댄 id 가 다시 읽은 목록에 없으면 **커서는 두고 그렇다고 말한다.**

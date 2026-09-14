@@ -54,6 +54,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.user = ctx.user.clone();
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
+    // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다 — 설정 자리를 넣은 **뒤에** 읽는다(moai-2bzp).
+    app.load_look();
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     screen(app)
@@ -113,6 +115,8 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let mut app = App::on_projects(crate::tui::layer::Layer::read(config.as_deref(), None));
     app.user = ctx.user.clone();
     app.user_config = config;
+    // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다 — 설정 자리를 넣은 **뒤에** 읽는다(moai-2bzp).
+    app.load_look();
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     screen(app)

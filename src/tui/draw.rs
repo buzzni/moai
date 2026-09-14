@@ -504,7 +504,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let sorted = (app.order != Default::default()).then(|| {
         format!("정렬 {}{}", app.order.0.word(), if app.order.1 { " 거꾸로" } else { "" })
     });
-    let parts: Vec<String> = [app.view.badge(), sorted].into_iter().flatten().collect();
+    let parts: Vec<String> = [app.view.badge(&app.cfg.statuses), sorted].into_iter().flatten().collect();
     let look = (!parts.is_empty() && !app.on_layer()).then(|| format!("[{}]", parts.join(" · ")));
     let look = look.filter(|l| crate::text::width(l) + 3 + 8 <= room);
     let room = match &look {

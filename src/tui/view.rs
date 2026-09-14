@@ -40,8 +40,12 @@ impl View {
     }
 
     /// 경로 줄에 댈 한 마디 — `done·미룸 숨김`. 숨긴 것이 없으면 없다.
-    pub fn badge(&self) -> Option<String> {
-        let mut names: Vec<&str> = self.hidden.iter().map(String::as_str).collect();
+    ///
+    /// **이 프로젝트의 칸(`known`)만 댄다**(moai-2bzp). 보기는 사람의 설정이라 프로젝트를 옮겨도
+    /// 이어지는데, 다른 프로젝트에만 있는 칸 이름까지 대면 여기서는 번호 토글이 없어 걷을 길이 없다.
+    /// 그 이름은 버리지 않고 들고 있다 — 그 칸이 있는 프로젝트로 돌아가면 다시 숨는다.
+    pub fn badge(&self, known: &[String]) -> Option<String> {
+        let mut names: Vec<&str> = self.hidden.iter().filter(|h| known.contains(h)).map(String::as_str).collect();
         if self.hide_deferred {
             names.push("미룸");
         }
@@ -89,6 +93,27 @@ impl Field {
     fn bit(self) -> u8 {
         1 << self as u8
     }
+
+    pub const ALL: [Field; 7] =
+        [Field::Id, Field::Priority, Field::Assignee, Field::Created, Field::Updated, Field::Tally, Field::Tags];
+
+    /// 설정 파일에 적는 이름(moai-2bzp). 화면의 낱말([`Field::word`])과 따로 둔다 — 낱말을 다듬은 날
+    /// 이미 적힌 설정이 안 읽히면 그건 다듬기가 아니라 마이그레이션이다.
+    pub fn name(self) -> &'static str {
+        match self {
+            Field::Id => "id",
+            Field::Priority => "priority",
+            Field::Assignee => "assignee",
+            Field::Created => "created",
+            Field::Updated => "updated",
+            Field::Tally => "tally",
+            Field::Tags => "tags",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<Field> {
+        Field::ALL.into_iter().find(|f| f.name() == name)
+    }
 }
 
 /// 켜 둔 열. 복사로 다닌다 — 키 표의 켜짐(`Ctx`)이 이것을 그대로 든다.
@@ -103,6 +128,11 @@ impl Default for Fields {
 }
 
 impl Fields {
+    /// 아무 열도 안 켠 것 — 설정에서 읽은 이름을 하나씩 켤 때 쓴다.
+    pub fn none() -> Fields {
+        Fields(0)
+    }
+
     pub fn shows(self, f: Field) -> bool {
         self.0 & f.bit() != 0
     }
@@ -157,9 +187,22 @@ mod tests {
 
     #[test]
     fn the_badge_names_what_is_hidden() {
-        assert_eq!(View::default().badge(), None);
-        assert_eq!(View::hiding("done").badge().as_deref(), Some("done 숨김"));
+        let known: Vec<String> = ["todo", "review", "done"].map(String::from).to_vec();
+        assert_eq!(View::default().badge(&known), None);
+        assert_eq!(View::hiding("done").badge(&known).as_deref(), Some("done 숨김"));
         let v = View { hidden: vec!["review".into(), "done".into()], hide_deferred: true };
-        assert_eq!(v.badge().as_deref(), Some("review·done·미룸 숨김"));
+        assert_eq!(v.badge(&known).as_deref(), Some("review·done·미룸 숨김"));
+        // 다른 프로젝트의 칸 이름은 들고만 있고 대지 않는다.
+        let elsewhere = View { hidden: vec!["blocked".into(), "done".into()], hide_deferred: false };
+        assert_eq!(elsewhere.badge(&known).as_deref(), Some("done 숨김"));
+        assert_eq!(View::hiding("blocked").badge(&known), None);
+    }
+
+    #[test]
+    fn field_names_round_trip() {
+        for f in Field::ALL {
+            assert_eq!(Field::named(f.name()), Some(f));
+        }
+        assert_eq!(Field::named("우선순위"), None, "화면 낱말을 설정 이름으로 받았다");
     }
 }

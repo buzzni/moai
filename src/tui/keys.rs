@@ -323,6 +323,25 @@ impl Order {
             Order::Title => "제목",
         }
     }
+
+    pub const ALL: [Order; 6] =
+        [Order::Priority, Order::Created, Order::Updated, Order::Column, Order::Assignee, Order::Title];
+
+    /// 설정 파일에 적는 이름(moai-2bzp) — 화면 낱말과 따로다(`view::Field::name` 과 같은 까닭).
+    pub fn name(self) -> &'static str {
+        match self {
+            Order::Priority => "priority",
+            Order::Created => "created",
+            Order::Updated => "updated",
+            Order::Column => "status",
+            Order::Assignee => "assignee",
+            Order::Title => "title",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<Order> {
+        Order::ALL.into_iter().find(|o| o.name() == name)
+    }
 }
 
 /// 칸 토글에 번호를 줄 수 있는 칸 수 — `1`~`9`. 넘는 칸은 번호가 없고 `SPC s a` 로만 돌아온다.
