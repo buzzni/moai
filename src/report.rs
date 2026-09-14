@@ -696,7 +696,8 @@ pub fn is_blocked(
 /// **막는가의 뜻은 여기 하나다.** `ready`·`held`·`status` 와 탐색기 상세가 이것으로
 /// 가른다. 한때 탐색기가 [`is_blocked`] 를 손으로 베껴, 없는 id 를 가리키는 막음을
 /// `ready` 는 안 막힌 것으로 고르는데 상세는 "막힘" 이라 그렸다(moai-af64).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Blocker {
     /// 안 끝났다 — 막는다.
     Open,
@@ -742,6 +743,49 @@ pub fn blocker(column: Option<&str>, out_of_plan: bool, waiting: Waiting) -> Blo
         Some(_) if waiting == Waiting::Nothing => Blocker::Empty,
         Some(_) => Blocker::Open,
     }
+}
+
+/// 줄 하나의 막음 하나를 가른 것 — CLI 상세가 그리는 재료([`blocks_of`]).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Block<'a> {
+    pub id: &'a str,
+    /// 막는 줄. 없는 id 면 `None`.
+    #[serde(skip)]
+    pub issue: Option<&'a Issue>,
+    /// [`blocker`] 의 답.
+    #[serde(rename = "state")]
+    pub blocker: Blocker,
+    /// 막는 줄을 계획에서 뺀 줄([`deferred_roots`]). 계획에 있으면 `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root: Option<&'a str>,
+    /// 막는 묶음이 미뤄 뺀 멤버만 기다리면 그 멤버들([`Stand::aside`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub aside: Vec<&'a str>,
+}
+
+/// 줄 하나가 적은 막음(`blocked_by`)을 **적힌 차례대로** 하나씩 가른다.
+///
+/// **`ready` 가 고르는 그 자로 가른다**(`blocking` → [`blocker`]) — 상세가 규칙을 손으로
+/// 베끼면 없는 id 를 가리키는 막음을 `ready` 는 안 막힌 것으로 고르는데 상세는 "막힘" 이라
+/// 그린다(moai-af64 에서 탐색기가 실제로 그랬다). 막음이 없으면 소속 지도를 안 세운다 —
+/// 일 하나를 펼치는 흔한 길이다.
+pub fn blocks_of<'a>(all: &'a [Issue], cfg: &Config, i: &'a Issue) -> Vec<Block<'a>> {
+    if i.blocked_by.is_empty() {
+        return Vec::new();
+    }
+    let group = groups(all);
+    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|x| (x.id.as_str(), x)).collect();
+    let (roots, states, waits) = blocking(all, cfg, &group, &by_id);
+    i.blocked_by
+        .iter()
+        .map(|b| {
+            let issue = by_id.get(b.as_str()).copied();
+            let root = roots.get(b.as_str()).copied();
+            let (waiting, aside) = waits.get(b.as_str()).map_or((Waiting::Live, Vec::new()), |(w, a)| (*w, a.clone()));
+            let blocker = blocker(issue.map(|x| column(x, &states)), root.is_some(), waiting);
+            Block { id: b.as_str(), issue, blocker, root, aside }
+        })
+        .collect()
 }
 
 /// id 로 막는 줄을 찾아 그 서 있는 칸을 댄다. 없으면 `None`.
