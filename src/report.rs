@@ -464,13 +464,15 @@ fn stands<'x>(i: &Issue, states: &BTreeMap<&str, &'x str>) -> Option<&'x str> {
 pub struct Stand<'a, 'c> {
     /// 서 있는 칸.
     pub column: &'c str,
-    /// 셀 멤버 가운데 **계획 자리가 가장 늦게 바뀐 때**(`Issue::planned` — 칸을 옮긴 때와
-    /// 미루거나 도로 집은 때 중 늦은 것). 셀 멤버가 없으면 묶음이 생긴 때다.
-    /// **적힌 `status_since` 는 안 쓴다** — 아무 데서도 안 읽히는 칸의 시각이라,
-    /// `--stale` 이 그것으로 재면 오늘 진행 중이 된 에픽을 "열흘째 멈춰 있다" 고 한다.
-    /// **도로 집은 때도 센다** — 접어 둔 멤버를 도로 집으면 칸은 안 옮겨도 셀 멤버가 바뀌어
-    /// 묶음의 칸이 움직인다. 칸 이동만 보면 그 순간 done 에서 되돌아 나온 묶음이 "열흘째"
-    /// 로 서고, 그것에 막힌 줄이 곧장 `blocked_stale` 로 꾸짖힌다(moai-xib6).
+    /// 셀 멤버 가운데 **칸을 가장 늦게 옮긴 때**(멤버의 `status_since`). 셀 멤버가 없으면
+    /// 묶음이 생긴 때다. **묶음 제 줄에 적힌 `status_since` 는 안 쓴다** — 아무 데서도 안
+    /// 읽히는 칸의 시각이라, `--stale` 이 그것으로 재면 오늘 진행 중이 된 에픽을 "열흘째
+    /// 멈춰 있다" 고 한다.
+    ///
+    /// **미루거나 도로 집은 때(`planned_at`)는 안 센다**(moai-cxk8). 이 시각은 방치와 막힘을
+    /// 재는 시계라, 세면 멤버를 `defer`→`--undo` 하는 것만으로 에픽의 `--stale` 과 그 에픽에
+    /// 막힌 줄의 `blocked_stale` 이 새로 선다 — 미루기가 경고를 지우는 손잡이가 된다. 미뤄
+    /// 둔 동안에도 막음은 이어졌다(미룬 막음도 막는다, moai-2sea).
     pub since: &'a str,
     /// 셀 멤버 가운데 **적힌 칸이 시작한 칸**(`Config::is_started` — 첫 칸도 done 도 아님)인 일이 있는가 —
     /// 지금 누가 그 묶음 밑에서 손대고 있다는 말.
@@ -554,7 +556,7 @@ pub fn group_stands_in<'a, 'c>(
             let counted = counted(g, &members, shelf.as_ref(), roots);
             let since = counted
                 .iter()
-                .map(|m| m.planned())
+                .map(|m| m.status_since.as_str())
                 .max()
                 .unwrap_or(g.created_at.as_str());
             // 칸 자리가 아니라 뜻으로 묻는다(moai-p415) — 두 칸짜리 설정에는 시작한 칸이 없어 거짓이다.
@@ -1481,18 +1483,27 @@ const WIP_STALE_DAYS: i64 = 2;
 /// 만큼 거슬린 적이 아직 없다.
 const BLOCKED_STALE_DAYS: i64 = 3;
 
-/// 막힌 줄이 **지금 막힌 채로 선 때** — 제 계획 자리가 바뀐 때(`Issue::planned`)와, 지금
-/// 막는 줄들이 다시 선 때 중 **가장 이른 것** 가운데 늦은 것.
+/// 막힌 줄이 **지금 막힌 채로 선 때** — 제 칸을 옮긴 때(`status_since`)와, 지금 막는
+/// 줄들이 다시 선 때 중 **가장 이른 것** 가운데 늦은 것.
 ///
 /// 막는 줄 쪽은 가장 이른 것을 쓴다 — 오래 막아 온 줄이 하나라도 있으면 그동안 줄곧 막혀
 /// 있었다. 가장 늦은 것을 쓰면 막는 줄 둘 중 하나가 오늘 칸을 옮기는 것만으로 열흘 막힌
 /// 줄이 경고에서 사라진다.
 ///
-/// 막는 줄이 선 때는 일이면 그 줄의 계획 자리가 바뀐 때(done 에서 되돌아 나왔으면 그때),
-/// 묶음이면 읽은 칸의 셈이 움직인 때([`Stand::since`])와 묶음 제 미룸을 도로 집은 때
-/// (`planned_at`) 중 늦은 것이다 — 미룬 묶음에 막힌 줄은 `blocked_by_deferred` 로 따로
-/// 서다가, 묶음을 도로 집는 순간 멤버의 셈만 보면 곧장 "N일째" 가 된다. 막힌 줄의 칸 나이로만 재면,
-/// 끝난 에픽에 멤버를 더하는 순간 그 에픽에 막힌 오래된 줄이 곧장 "N일째" 로 섰다.
+/// 막는 줄이 선 때는 일이면 그 줄의 칸을 옮긴 때(done 에서 되돌아 나왔으면 그때), 묶음이면
+/// 읽은 칸의 셈이 움직인 때([`Stand::since`])다. 막힌 줄의 칸 나이로만 재면, 끝난 에픽에
+/// 멤버를 더하는 순간 그 에픽에 막힌 오래된 줄이 곧장 "N일째" 로 섰다(moai-xib6).
+///
+/// **미루거나 도로 집은 때(`planned_at`)는 어느 쪽에서도 안 센다**(moai-cxk8). 세면 막힌
+/// 줄이나 막는 줄을 `defer`→`--undo` 하는 것만으로 열흘 막힘이 0일로 돌아간다 —
+/// `planned_at` 을 `status_since` 와 따로 둔 까닭(미루기가 방치 경고를 지우는 손잡이)이
+/// 경고 쪽으로 돌아온다.
+/// - 막는 쪽: 미룬 막음도 막으므로(moai-2sea) 미뤄 둔 동안에도 막힘은 이어졌고
+///   `blocked_by_deferred` 로 드러나 있었다. 그래서 미뤘던 묶음을 도로 집으면 그것에 막힌
+///   줄은 곧장 "N일째" 로 선다 — 그 막힘은 실제로 이어졌던 것이다.
+/// - 막힌 줄 제 쪽: 미뤄 둔 줄은 계획 밖이라 경고에 안 드는데, 그동안에도 막음은 안
+///   풀렸다. 도로 집는 순간 곧장 "N일째" 로 서는 것이 참말이다.
+///
 /// **파생값이라 저장하지 않는다** — 막는 줄을 옮길 때 막힌 줄을 같이 쓰게 된다.
 fn blocked_since<'a>(
     i: &'a Issue,
@@ -1506,14 +1517,11 @@ fn blocked_since<'a>(
         .filter_map(|b| by_id.get(b.as_str()).copied())
         .filter(|x| blocker(Some(column(x, states)), false, waiting_of(&x.id, waits)).blocks())
         .map(|x| match is_group(x) {
-            true => {
-                let counted = group_since.get(x.id.as_str()).copied().unwrap_or(x.created_at.as_str());
-                x.planned_at.as_deref().map_or(counted, |p| counted.max(p))
-            }
-            false => x.planned(),
+            true => group_since.get(x.id.as_str()).copied().unwrap_or(x.created_at.as_str()),
+            false => x.status_since.as_str(),
         })
         .min()
-        .map_or(i.planned(), |b| b.max(i.planned()))
+        .map_or(i.status_since.as_str(), |b| b.max(i.status_since.as_str()))
 }
 /// 한 번에 이보다 많이 벌이면 알린다.
 const WIP_LIMIT: usize = 3;
@@ -2335,25 +2343,34 @@ mod tests {
         (added.created_at, added.status_since) = (today.into(), today.into());
         assert!(!stale(&[epic(), finished(), added, blocked("argos-0001")]), "막 다시 막은 줄을 N일째로 꾸짖는다");
 
-        // 접어 둔 멤버를 오늘 도로 집었다 — 칸은 안 옮겼어도 셈이 움직였다.
-        let mut back = member("argos-0003", "argos-0001", "todo");
-        back.planned_at = Some(today.into());
-        assert!(!stale(&[epic(), finished(), back, blocked("argos-0001")]), "도로 집은 때를 안 본다");
-
         // 막는 이슈가 오늘 done 에서 되돌아 나왔다.
         let mut reopened = make("argos-0001", Kind::Issue, "todo");
         reopened.status_since = today.into();
         assert!(!stale(&[reopened, blocked("argos-0001")]));
 
+        // **미루기·도로 집기는 막힘 시계를 새로 세우지 않는다**(moai-cxk8). 새로 세우면
+        // `defer`→`--undo` 두 번이 열흘 막힘 경고를 지우는 손잡이가 된다. 막는 줄을 미뤄 둔
+        // 동안은 미룬 막음도 막아(moai-2sea) `blocked_by_deferred` 로 드러나 있었고, 막힌 줄
+        // 제가 미뤄 둔 동안은 경고에 안 들었지만 막음은 안 풀렸다.
+        // 접어 둔 멤버를 오늘 도로 집었다.
+        let mut back = member("argos-0003", "argos-0001", "todo");
+        back.planned_at = Some(today.into());
+        assert!(stale(&[epic(), finished(), back, blocked("argos-0001")]), "멤버를 도로 집은 것이 열흘 막힘을 지웠다");
+
         // 막힌 줄 제가 오늘 도로 집혔다.
         let mut mine = blocked("argos-0005");
         mine.planned_at = Some(today.into());
-        assert!(!stale(&[make("argos-0005", Kind::Issue, "todo"), mine]));
+        assert!(stale(&[make("argos-0005", Kind::Issue, "todo"), mine]), "제 줄을 미뤘다 도로 집은 것이 열흘 막힘을 지웠다");
 
-        // 미뤄 둔 에픽을 오늘 도로 집었다 — 멤버의 셈은 안 움직였어도 막음이 다시 섰다.
+        // 막는 이슈를 오늘 미뤘다가 도로 집었다.
+        let mut shuffled = make("argos-0005", Kind::Issue, "todo");
+        shuffled.planned_at = Some(today.into());
+        assert!(stale(&[shuffled, blocked("argos-0005")]), "막는 줄을 미뤘다 도로 집은 것이 열흘 막힘을 지웠다");
+
+        // 미뤄 둔 에픽을 오늘 도로 집었다.
         let mut undone = epic();
         undone.planned_at = Some(today.into());
-        assert!(!stale(&[undone, finished(), member("argos-0003", "argos-0001", "todo"), blocked("argos-0001")]), "묶음 제 도로 집기를 안 본다");
+        assert!(stale(&[undone, finished(), member("argos-0003", "argos-0001", "todo"), blocked("argos-0001")]), "묶음을 도로 집은 것이 열흘 막힘을 지웠다");
 
         // 오래 막아 온 줄이 남아 있으면, 다른 막는 줄이 오늘 움직여도 줄곧 막혀 있었다.
         let mut two = blocked("argos-0005");
