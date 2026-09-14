@@ -538,9 +538,13 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
         let began = std::time::Instant::now();
         term.draw(|f| crate::tui::draw::screen(f, app))?;
         let step = spin_step(began.elapsed());
-        // **돌 것이 없으면 빠른 걸음으로 깨지 않는다.** 다 끝난 판을 열어 둔
-        // 채로 둔 사람의 CPU 를 초당 여덟 번 깨울 까닭이 없다.
-        let spinning = app.spinning();
+        // **화면에 도는 것이 없으면 빠른 걸음으로 깨지 않는다.** 다 끝난 판을 열어 둔
+        // 채로 둔 사람의 CPU 를 초당 여덟 번 깨울 까닭이 없고, 집은 일이 다른 에픽 안이나
+        // 스크롤 밖에 있어 안 보일 때도 같다(moai-5jh6). 판단은 방금 그린 버퍼가 한다
+        // (`draw::screen` 이 `App::spun` 에 적는다) — 보이는 줄을 여기서 다시 세면 목록의
+        // 스크롤 창·상세의 굴림·폼의 덮음을 그리는 쪽과 따로 맞춰야 한다. 스크롤·이동·다시
+        // 읽기로 보이는 것이 바뀌면 다음 프레임이 그린 뒤 따라온다.
+        let spinning = app.spun;
         // **시간으로 센다, 한가함으로 세지 않는다.** 이벤트가 오는 동안에만
         // 안 보면 — 키를 누르고 있거나 창을 끄는 내내 — 바뀐 것을 못 본다.
         // 하필 그때가 쓰는 사람이 화면을 보고 있는 때다.
