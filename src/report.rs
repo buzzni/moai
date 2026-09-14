@@ -169,8 +169,9 @@ pub fn deferred_roots_in<'a>(
 /// 그것이면 된다. 그러나 도로 집는 말을 대는 자리가 그것만 대면, 제 줄도 미뤘고 미룬
 /// 에픽에도 든 줄은 하나를 풀고도 여전히 빠진 채 그제야 다음을 댄다(moai-phzi).
 ///
-/// 키는 [`deferred_roots`] 와 같다. **읽은 칸이 done 인 묶음의 미룸은 안 댄다** — 그 묶음은
-/// 계획에서 빠진 것으로 안 세므로([`deferred_roots_in`]) 풀 것이 없다.
+/// 키는 [`deferred_roots`] 와 같다. **읽은 칸이 done 인 묶음의 미룸도 댄다** — 그 묶음 줄만
+/// 계획 밖으로 안 셀 뿐([`deferred_roots_in`]), 그 밑의 줄은 가까운 미룸을 풀면 그 묶음을
+/// 뿌리로 받아 여전히 빠진다(리뷰 moai-ha03.qlr). 걸음이 같은 묶음을 두 번 짚어도 한 번만 댄다.
 pub fn deferred_sources(all: &[Issue]) -> BTreeMap<&str, Vec<&str>> {
     if !all.iter().any(is_put_off) {
         return BTreeMap::new();
@@ -180,19 +181,17 @@ pub fn deferred_sources(all: &[Issue]) -> BTreeMap<&str, Vec<&str>> {
     let shelf = Shelf::new(all, &epic_of, &mile_of);
     roots
         .iter()
-        .map(|(&id, &nearest)| {
+        .map(|(&id, _)| {
             // 걸음은 같은 묶음을 두 번 짚는다 — 자식과 부모가 같은 에픽에 들면 둘 다에서.
             // 거르지 않으면 `moai defer E E --undo` 를 댄다.
             let mut every: Vec<&str> = Vec::new();
             for r in shelf.every(id) {
-                if roots.contains_key(r) && !every.contains(&r) {
+                // **done 으로 읽은 묶음의 미룸도 댄다.** 그 묶음 줄만 계획 밖으로 안 셀 뿐, 그
+                // 밑의 줄은 가까운 미룸을 풀면 그 묶음을 뿌리로 받아 여전히 빠진다 — 거르면
+                // 하나를 풀고서야 다음을 댄다(moai-phzi). 첫째가 늘 가까운 것이라 비지도 않는다.
+                if !every.contains(&r) {
                     every.push(r);
                 }
-            }
-            // 짚은 미룸이 전부 done 으로 읽은 묶음이면 비는데, 줄은 여전히 계획 밖이다
-            // (`deferred_roots` 가 그 묶음을 댄다). 비우면 `moai defer  --undo` 를 댄다.
-            if every.is_empty() {
-                every.push(nearest);
             }
             (id, every)
         })
@@ -2972,6 +2971,18 @@ mod tests {
         let under_done = vec![mile, finished, empty];
         assert_eq!(deferred_roots(&under_done)["argos-000e"], "argos-000m");
         assert_eq!(deferred_sources(&under_done)["argos-000e"], ["argos-000m"], "도로 집을 곳이 비었다");
+
+        // done 으로 읽은 미룬 마일스톤도 댄다 — 미룬 에픽 E 를 풀면 그 밑 X 는 M 을 뿌리로 받아
+        // 여전히 빠진다. 거르면 E 를 풀고서야 M 을 댄다.
+        let mut m = make("argos-00mm", Kind::Milestone, "todo");
+        m.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut e = make("argos-00ee", Kind::Epic, "todo");
+        e.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        e.milestone = Some("argos-00mm".into());
+        let mut d = make("argos-00dd", Kind::Issue, "done");
+        d.milestone = Some("argos-00mm".into());
+        let two = vec![m, e, member("argos-00xx", "argos-00ee", "todo"), d];
+        assert_eq!(deferred_sources(&two)["argos-00xx"], ["argos-00ee", "argos-00mm"], "done 으로 읽은 묶음의 미룸을 뺐다");
     }
 
     /// `ready` 가 미룬 막음에 대는 도로 집는 말도 풀어야 할 미룸을 다 댄다(moai-g2a1).
