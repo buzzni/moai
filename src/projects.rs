@@ -137,7 +137,8 @@ pub struct Added {
     pub path: PathBuf,
     /// 새로 넣었나. `false` 면 이미 있었다 — 실패가 아니다.
     pub added: bool,
-    /// 그 디렉터리에 `.moai` 가 있나. 없으면 "init 전" 이다.
+    /// 그 디렉터리에 `.moai` 가 있나. 없으면 "init 전" 이다. 못 봐서 모르면(권한) `true` 쪽이다 —
+    /// 그 까닭은 `unreadable` 이 대고, "init 하라" 는 틀린 말을 하지 않는다.
     pub initialized: bool,
     /// 등록은 했는데 그 저장소를 못 읽는다 — 설정이 깨졌거나 스냅샷을 못 연다. 사람이 읽을
     /// 한 줄. **등록을 막지 않는다** — 쓰는 곳은 사람의 설정이지 그 저장소가 아니다.
@@ -164,10 +165,12 @@ pub fn add(config: &Path, input: &Path, cwd: &Path) -> R<Added> {
         }
         doc.add(&dir)
     })?;
-    let initialized = dir.join(".moai").is_dir();
-    let unreadable = match State::at(&dir) {
-        State::Unreadable(e) => Some(e),
-        _ => None,
+    // **한 번 열어 둘 다 읽는다.** `.moai` 를 따로 `is_dir` 로 보면 권한이 없어 못 본 `.moai`
+    // 가 "init 전" 으로 접혀, 못 읽는다는 줄 옆에 `init` 하라는 틀린 말이 선다 (`Repo::open`).
+    let (initialized, unreadable) = match State::at(&dir) {
+        State::Unreadable(e) => (true, Some(e)),
+        State::Uninit | State::Missing => (false, None),
+        State::Open { .. } => (true, None),
     };
     Ok(Added { path: dir, added, initialized, unreadable })
 }

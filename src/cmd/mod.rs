@@ -204,9 +204,7 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
             String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
         out.push(String::new());
         out.push("여기는 아직 moai 저장소가 아니다 — `moai init` 으로 시작한다".into());
-        if outside {
-            out.push("다른 곳의 프로젝트를 여기서 한눈에 보려면 `moai project add <dir>` 로 등록한다".into());
-        }
+        out.push("다른 곳의 프로젝트를 여기서 한눈에 보려면 `moai project add <dir>` 로 등록한다".into());
         // **목록이 빈 까닭이 설정의 문제면 그것을 댄다.** 세션은 여기서 시작하는데, 설정이
         // 깨져 등록한 것이 안 읽힌 사람에게 "등록한 것이 없다, 더하라" 만 하면 정반대를
         // 믿고 깨진 파일에 `project add` 를 친다. `status`·`ready`·`tui` 는 이미 이 줄을 댄다
