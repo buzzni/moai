@@ -1031,10 +1031,15 @@ pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
     let rooted = rooted_thoughts(&by_id);
     let mut out = BTreeMap::new();
     for i in all {
-        let got = if i.kind == Kind::Epic {
-            milestone_stood(i)
-        } else {
-            match epic_of.get(i.id.as_str()) {
+        let got = match i.kind {
+            Kind::Epic => milestone_stood(i),
+            // **마일스톤 줄은 어느 마일스톤에도 안 든다**(moai-8tav). 뿌리에 서는 줄이라
+            // (`nav::Ctx::home`, `misplaced`) 제 `milestone` 필드도, 이슈 밑에 id 로 선
+            // 자리도 소속이 못 된다. 여기서 값을 주면 `moai show --milestone M2` 가 마일스톤
+            // 줄 M1 을 내는데 `moai show M2` 는 `멤버 0/0` 이라 말하고, 훅은 M1 밑의 일을
+            // M2 를 쥔 워크트리의 일로 센다 — 자리를 정하는 자와 세는 자가 갈린다.
+            Kind::Milestone => None,
+            Kind::Issue | Kind::Idea => match epic_of.get(i.id.as_str()) {
                 // 에픽이 있으면 **그 에픽이 선 곳**이다. 제 줄에서 시작하면 제
                 // 마일스톤이 이기고, 그러면 트리는 에픽 밑에 두는데 셈만 딴 곳으로 간다.
                 //
@@ -1050,7 +1055,7 @@ pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
                 // 에픽이 없으면 **접힌 맨 위 줄에서부터** 센다. 제 줄에서 시작하면
                 // 부모 밑에 그려진 자식이 제 마일스톤으로 세어진다(moai-uqoe).
                 None => fold_top(i, &by_id, &rooted).and_then(|top| climb(top, &by_id, &rooted, joins(i))),
-            }
+            },
         };
         // **못 받은 줄도 지도를 쓴다 — 같은 id 의 뒷줄이 이긴다.** 멤버는 에픽 줄을
         // `by_id`(뒷줄이 이긴다)로 찾는데, 받은 줄만 적으면 같은 id 의 앞줄이 받은
@@ -1082,8 +1087,8 @@ fn milestone_stood(epic: &Issue) -> Option<&str> {
 /// **마일스톤인 조상을 만나면 그 마일스톤이다** — 부모가 에픽이면 그 에픽이듯
 /// (moai-9t3l). `--parent <마일스톤>` 의 자식이 `(마일스톤 없음)` 으로 빠지지 않는다.
 /// 제 `milestone` 이 먼저다: 에픽에서 제 `epic` 이 먼저인 것과 같은 차례다.
-/// `joins` 는 맨 처음 줄의 것이다 — 이슈 밑에 id 로 선 마일스톤 줄도 이슈를 맨 위
-/// 줄로 받아 여기 온다.
+/// `joins` 는 맨 처음 줄의 것이다. 마일스톤 줄은 여기 오지 않는다 — [`milestones`] 가
+/// 그 종류에 값을 안 준다(moai-8tav). 이슈 밑에 id 로 선 마일스톤 줄도 그렇다.
 fn climb<'a>(
     top: &'a Issue,
     by_id: &BTreeMap<&'a str, &'a Issue>,
@@ -1595,6 +1600,23 @@ const NO_EPIC_RATIO: f64 = 0.15;
 const NO_EPIC_MIN: usize = 5;
 /// 흐름을 재는 창.
 const FLOW_DAYS: i64 = 7;
+/// 지금보다 이만큼(초) 넘게 뒤인 시각은 "먼 미래" 로 본다(moai-ugjp). 하루 — 겹쳐 보는 다른
+/// 기계의 몇 초~몇 분 앞선 시계나 시간대 실수는 안 걸리고, 손으로 고친 2099 는 걸린다.
+const FUTURE_SLACK_SECS: i64 = 86_400;
+
+/// 줄이 든 시각 다섯 가운데 하나라도 지금보다 [`FUTURE_SLACK_SECS`] 넘게 뒤인가.
+///
+/// 도구는 제 시계로만 적으므로 그런 시각은 손으로 고친 줄이나 크게 틀린 시계에서 온다.
+/// 나이는 0 아래로 안 내려가서(`days_since`, moai-fix6) 목록에서는 "오늘" 로 숨는다.
+/// 못 읽는 시각은 여기서 따지지 않는다 — 읽기는 관대하다.
+fn far_ahead(i: &Issue, now: &str) -> bool {
+    let Some(now) = crate::model::parse_rfc3339(now) else { return false };
+    [Some(i.created_at.as_str()), Some(i.updated_at.as_str()), Some(i.status_since.as_str()), i.deferred_at.as_deref(), i.planned_at.as_deref()]
+        .into_iter()
+        .flatten()
+        .filter_map(crate::model::parse_rfc3339)
+        .any(|t| t - now > FUTURE_SLACK_SECS)
+}
 /// 담아 둔 생각이 이만큼 쌓이면 알린다.
 ///
 /// **담는 비용을 0 으로 만들면 쌓인다.** 쌓이는 것 자체는 문제가 아니고,
@@ -2045,6 +2067,12 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     if !dangling_blockers.is_empty() {
         warnings.push(Warning::new("dangling_blocked_by", ids_of(&dangling_blockers)));
     }
+    // 먼 미래 시각(moai-ugjp). **경고지 깨진 데이터가 아니다** — 줄은 읽히고 고칠 것일 뿐이라
+    // 종료 코드를 안 바꾼다(사람이 정했다). 종류를 안 가린다: 시각은 모든 줄이 든다.
+    let ahead: Vec<&Issue> = issues.iter().filter(|i| far_ahead(i, now)).collect();
+    if !ahead.is_empty() {
+        warnings.push(Warning::new("future_timestamp", ids_of(&ahead)));
+    }
     // 모르는 필드는 **버리지 않고 들고 있다.** 들고 있다는 사실만 비춘다 —
     // 2단계 바이너리가 쓴 파일을 1단계가 만졌다는 뜻일 수 있다.
     let carrying: Vec<&Issue> = issues.iter().filter(|i| !i.rest.is_empty()).collect();
@@ -2145,8 +2173,10 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 빼면 오늘 셋을 미루는 것만으로 `생성 5 · 쌓이는 중 +5` 가
     // `생성 2 · +2` 가 되어, 미루기가 쌓임 경고를 지우는 손잡이가 된다.
     // 나이는 0 아래로 안 내려간다(`days_since`) — 조금 미래로 찍힌 줄도 오늘 것으로 센다.
+    // **먼 미래 시각을 든 줄은 통째로 뺀다**(moai-ugjp) — 2099 는 "최근" 이 아니고, 셈에 넣으면
+    // 위 `future_timestamp` 가 드러낸 오타가 흐름 숫자로도 새어 나온다.
     let within = |at: &str| days_since(at, now).is_some_and(|d| d < FLOW_DAYS);
-    let happened: Vec<&Issue> = issues.iter().filter(|i| is_work(i)).collect();
+    let happened: Vec<&Issue> = issues.iter().filter(|i| is_work(i) && !far_ahead(i, now)).collect();
     let created = happened.iter().filter(|i| within(&i.created_at)).count();
     let closed =
         happened.iter().filter(|i| i.status.is_done() && within(&i.status_since)).count();
@@ -2956,6 +2986,32 @@ mod tests {
         // 자리는 안 바꿔도 못 쓸 참조는 드러난다.
         assert_eq!(broken(&issues).get("argos-0001"), Some(&Misplace::Epic));
         assert!(!misplaced(&issues).contains_key("argos-0001"), "에픽 줄을 제 epic 으로 길 잃게 했다");
+    }
+
+    /// **마일스톤 줄은 어느 마일스톤에도 안 든다**(moai-8tav). 제 `milestone` 필드로도, 마일스톤을
+    /// 든 이슈 밑에 id 로 서도 — `nav` 는 마일스톤을 언제나 뿌리에 둔다. 마일스톤 줄 밑의 일은
+    /// 여전히 그 마일스톤에 든다.
+    #[test]
+    fn a_milestone_line_belongs_to_no_milestone() {
+        let stone = |mut i: Issue, m: &str| {
+            i.milestone = Some(m.into());
+            i
+        };
+        let issues = vec![
+            make("argos-m002", Kind::Milestone, "todo"),
+            stone(make("argos-m001", Kind::Milestone, "todo"), "argos-m002"), // 제 필드
+            stone(make("argos-0001", Kind::Issue, "todo"), "argos-m002"),
+            make("argos-0001.aa1", Kind::Milestone, "todo"), // 마일스톤을 든 이슈 밑 id
+            make("argos-m001.bb2", Kind::Issue, "todo"),     // 마일스톤 줄 밑의 일
+        ];
+        let m = milestones(&issues);
+        assert_eq!(m.get("argos-m001"), None, "마일스톤 줄이 제 milestone 필드로 다른 마일스톤에 들었다");
+        assert_eq!(m.get("argos-0001.aa1"), None, "이슈 밑 마일스톤 줄이 그 이슈의 마일스톤에 들었다");
+        assert_eq!(m.get("argos-m001.bb2").copied(), Some("argos-m001"), "마일스톤 줄 밑의 일이 제 마일스톤을 잃었다");
+        // 머리글이 세는 멤버와 같은 것을 말한다 — 마일스톤 줄은 어느 쪽에도 안 선다.
+        let m2 = issues.iter().find(|i| i.id == "argos-m002").unwrap();
+        assert!(group_members(&issues, m2).iter().all(|i| i.kind != Kind::Milestone));
+        assert!(!misplaced(&issues).contains_key("argos-m001"));
     }
 
     /// 묶음은 일이 아니다. 세면 보드의 숫자가 할 일과 묶음을 합친 것이 된다.
@@ -3887,6 +3943,41 @@ mod tests {
         let apart = [Unreadable { id: Some("argos-0002") }, Unreadable { id: None }];
         let st = status(&issues, &apart, &cfg(), "2026-09-01T00:00:00Z");
         assert!(!st.warnings.iter().any(|w| w.kind == "duplicate_id"), "{:?}", st.warnings);
+    }
+
+    /// **먼 미래 시각을 든 줄을 드러낸다**(moai-ugjp). 나이는 0 아래로 안 내려가서(moai-fix6)
+    /// 2099 같은 오타가 목록에서 "오늘" 로 숨고 흐름 셈에도 들었다. 도구는 제 시계로만 적으니
+    /// 그런 시각은 손으로 고친 줄이나 크게 틀린 시계에서 온다. 사람이 정한 대로 — 경고지
+    /// 깨진 데이터가 아니고(종료 코드 0), 문턱은 하루, 시각 다섯을 다 보고, 흐름에서 뺀다.
+    #[test]
+    fn a_row_stamped_far_in_the_future_is_named_and_left_out_of_the_flow() {
+        let now = "2026-09-11T00:00:00Z";
+        let at = |id: &str, t: &str| {
+            let mut i = make(id, Kind::Issue, "todo");
+            (i.created_at, i.updated_at, i.status_since) = (now.into(), now.into(), now.into());
+            if !t.is_empty() {
+                i.created_at = t.into();
+            }
+            i
+        };
+        let typo = at("argos-0001", "2099-09-11T00:00:00Z");
+        let skewed = at("argos-0002", "2026-09-11T12:00:00Z"); // 옆 기계 시계가 반나절 빠르다 — 문턱 안
+        let plain = at("argos-0003", "");
+        let mut late_deferral = at("argos-0004", "");
+        late_deferral.deferred_at = Some("2026-09-13T00:00:00Z".into()); // 이틀 뒤 — 시각 다섯을 다 본다
+        let mut late_plan = at("argos-0005", "");
+        late_plan.planned_at = Some("2027-01-01T00:00:00Z".into());
+        let st = status(&[typo, skewed, plain, late_deferral, late_plan], &[], &cfg(), now);
+
+        let w = st.warnings.iter().find(|w| w.kind == "future_timestamp").expect("먼 미래 시각을 안 말한다");
+        assert_eq!(w.ids, ["argos-0001", "argos-0004", "argos-0005"], "{w:?}");
+        assert!(!w.fatal && !w.notice && !st.broken(), "경고로 비영 종료한다 — {w:?}");
+        // 흐름은 먼 미래 시각을 "최근" 으로 세지 않는다 — 걸린 줄은 통째로 빠진다.
+        assert_eq!(st.flow.created, 2, "{:?}", st.flow);
+
+        // 문턱 안이면 말하지 않는다.
+        let ok = status(&[at("argos-0002", "2026-09-11T23:59:00Z")], &[], &cfg(), now);
+        assert!(!ok.warnings.iter().any(|w| w.kind == "future_timestamp"), "{:?}", ok.warnings);
     }
 
     /// **경고는 id 를 한 번씩만 댄다** (moai-ddtg). 같은 id 의 줄이 둘이면 줄마다 id
