@@ -308,6 +308,16 @@ impl Issue {
                 return Err(format!("{}: {what} id 형식이 아니다 — {v:?}", self.id));
             }
         }
+        // **마일스톤 줄은 다른 마일스톤에 들지 않는다**(moai-bg55, 사용자와 정함). 그 필드는
+        // 소속으로 안 센다(`report::milestones`, moai-jwnr) — 조용히 받으면 적은 사람은 걸린 줄
+        // 안다. 지금 쓰는 줄만 잰다(`store::with_write`): 이미 적힌 옛 줄은 읽히고, 그 줄을
+        // 손댈 때 비우는 길을 댄다.
+        if self.kind == Kind::Milestone && self.milestone.is_some() {
+            return Err(format!(
+                "{}: 마일스톤은 다른 마일스톤에 들지 않는다 — 마일스톤은 뿌리에 선다. 비우려면 `moai edit {} --milestone none`",
+                self.id, self.id
+            ));
+        }
         for b in &self.blocked_by {
             if b == &self.id {
                 return Err(format!("{}: 스스로를 막을 수 없다", self.id));
@@ -870,6 +880,20 @@ mod tests {
             assert!(e.contains(want), "{want} 를 기대했는데 {e:?}");
         }
         assert!(issue().validate(&c).is_ok());
+
+        // 마일스톤 줄은 제 milestone 을 못 든다(moai-bg55). 다른 종류는 여전히 든다.
+        let mut stone = issue();
+        stone.kind = Kind::Milestone;
+        assert!(stone.validate(&c).is_ok());
+        stone.milestone = Some("argos-9k2p".into());
+        let e = stone.validate(&c).unwrap_err();
+        assert!(e.contains("다른 마일스톤에 들지 않는다") && e.contains("--milestone none"), "{e:?}");
+        for kind in [Kind::Issue, Kind::Epic, Kind::Idea] {
+            let mut i = issue();
+            i.kind = kind;
+            i.milestone = Some("argos-9k2p".into());
+            assert!(i.validate(&c).is_ok(), "{kind:?} 가 마일스톤을 못 들었다");
+        }
     }
 
     #[test]
