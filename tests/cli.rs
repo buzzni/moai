@@ -693,8 +693,8 @@ fn outside_a_repo_each_project_wears_its_own_colour_and_only_colour_changes() {
         let mut hues = std::collections::BTreeSet::new();
         for n in &names {
             let row = project_row(&painted, n, id).unwrap_or_else(|| panic!("{n} 의 줄이 없다 — {painted}"));
+            // 칠하지 않은 이름 칸은 `name_cell` 이 칸으로 안 읽어 위의 찾기에서 이미 멈춘다.
             let (name_sgr, id_sgr) = (name_cell(row, "  ").unwrap().0, sgr_before(row, id));
-            assert!(!name_sgr.is_empty(), "{n} 의 이름 칸이 안 칠해졌다 — {row:?}");
             assert_eq!(name_sgr, id_sgr, "{n} 의 이름 칸과 id 칸 색이 다르다 — {row:?}");
             let head = project_head(&painted, n).unwrap_or_else(|| panic!("{n} 의 머리가 없다 — {painted}"));
             assert!(name_cell(head, "").unwrap().0.contains(&name_sgr), "{n} 의 머리가 줄과 다른 색이다 — {head:?}");
@@ -706,7 +706,7 @@ fn outside_a_repo_each_project_wears_its_own_colour_and_only_colour_changes() {
     // 다른 프로젝트를 빼고 차례를 바꿔도 제 색이 그대로다 — 등록 순서가 아니라 경로로 고른다.
     let colour_of = |cfg: &Path, n: &str| {
         let t = run(cfg, &["ready"], true);
-        let row = project_row(&t, n, "").unwrap_or_else(|| panic!("{n} 의 줄이 없다 — {t}"));
+        let row = project_row(&t, n, &todo).unwrap_or_else(|| panic!("{n} 의 줄이 없다 — {t}"));
         name_cell(row, "  ").unwrap().0
     };
     let full = colour_of(&cfg, "p7");

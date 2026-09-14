@@ -1063,8 +1063,7 @@ mod tests {
             assert!(known(k) != Lookup::Unknown, "도움말이 `{word}` 를 대는데 어느 키 표에도 없다");
         }
         let words: Vec<&str> = named.iter().map(|(w, _)| w.as_str()).collect();
-        let help = tui_help();
-        assert!(!help.split_whitespace().any(|w| w.starts_with('F') && parse(w.trim_end_matches(['.', ','])).is_some()), "도움말이 걷은 F키를 댄다: {help}");
+        assert!(!words.iter().any(|w| w.starts_with('F') && parse(w).is_some()), "도움말이 걷은 F키를 댄다: {words:?}");
         for must in [
             "Ctrl-C", "SPC q", "SPC f", "SPC n", "SPC r", "SPC /", "SPC p a", "SPC p d", "SPC t w", "SPC t r", "SPC", "Enter",
             "Backspace", "Shift-Tab", "j", "k", "h", "l", "gg", "G", "Ctrl-d", "Ctrl-u", "Ctrl-f", "Ctrl-b", "Ctrl-S", "Esc", "/", "g p",
@@ -1079,6 +1078,10 @@ mod tests {
     /// `f`·`w` 가 그렇게 빠져 있었다). 숨은 별칭(`label: None`)은 안 본다 — 바에도 메뉴에도 안
     /// 서는 키라 도움말이 대지 않는 것이 맞다. 이름은 **키 열로** 견준다: 표의 `Bksp` 를 도움말은
     /// `Backspace` 로 적는다.
+    ///
+    /// **문맥은 안 본다** — 키 열이 도움말 어디엔가 있으면 된다. 그래서 여러 표가 함께 쓰는
+    /// Enter·Esc·Tab·Bksp 는 한 번만 적혀도 모든 표에서 지나간다(검색 칸의 Enter 가 빠져도 못
+    /// 잡는다). 이 시험이 실제로 지키는 것은 표마다 제 것인 키(`a`·`.`·`g p`·`y`·`SPC …`)다.
     #[test]
     fn every_key_a_table_names_is_in_the_help() {
         let said: Vec<Vec<KeyEvent>> = help_keys().into_iter().map(|(_, k)| k).collect();

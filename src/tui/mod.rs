@@ -1159,15 +1159,20 @@ impl App {
             B::Reload => self.reload(),
             // 켜고 끄는 것은 **다시 읽는 것**이다. 겹친 줄은 적재 때 한 번 세는 것이라
             // (`states`·거름망·경고), 들고 있는 것에 덧칠하면 셈이 옛 줄로 남는다.
-            // 켰는데 옆을 못 찾았으면 그 까닭을 댄다 — 아무것도 안 바뀐 화면만 남으면 누른 키가
-            // 고장 난 줄 안다. 옆이 없을 뿐(찾았는데 비었다)이면 말하지 않는다: 그것은 사실 그대로다.
+            // **켰는데 겹칠 것이 없으면 한 번 말한다**(moai-d5vn). 경로 줄은 옆이 없으면 비므로, 말이
+            // 없으면 메뉴만 닫힌 똑같은 화면이 남아 누른 키가 고장 난 줄 안다. 못 찾았으면 그 까닭을,
+            // 찾았는데 비었으면 없다고 댄다. 알림이라 다음 키에 걷힌다. 읽기가 실패했으면 `trouble` 이
+            // 이미 그 까닭을 대므로 겹쳐 말하지 않는다 — 그래서 옛 `unfound` 를 먼저 비운다.
             B::Worktree => {
                 self.worktree = !self.worktree;
+                self.unfound = None;
                 self.reload();
-                if self.worktree
-                    && let Some(why) = &self.unfound
-                {
-                    self.notice = Some(format!("{} 옆 워크트리를 못 찾았다 — {}", crate::style::BRANCH_GLYPH, crate::text::one_line(why)));
+                if self.worktree && self.trouble.is_none() && self.origin.labels().is_empty() {
+                    let g = crate::style::BRANCH_GLYPH;
+                    self.notice = Some(match &self.unfound {
+                        Some(why) => format!("{g} 옆 워크트리를 못 찾았다 — {}", crate::text::one_line(why)),
+                        None => format!("{g} 옆 워크트리 없음 — 겹칠 줄이 없다"),
+                    });
                 }
             }
             B::Raw => {
@@ -2758,11 +2763,12 @@ mod tests {
         assert!(said.contains("git 저장소가 아니다") && said.contains("옆 워크트리"), "{said}");
         a.hit("SPC r");
         assert_eq!(a.notice, None, "시키지 않은 다시 읽기가 까닭을 또 댔다");
-        // 찾으면 말이 없다.
+        // 찾았는데 옆이 비었으면 까닭 없이 없다고만 한다 — 경로 줄이 비어 달리 알 길이 없다.
         a.read = prepare_found;
         a.hit("SPC t w");
         a.hit("SPC t w");
-        assert_eq!(a.notice, None, "찾았는데 못 찾았다고 한다");
+        let said = a.notice.clone().expect("켰는데 겹칠 것이 없다고 안 한다");
+        assert!(said.contains("옆 워크트리 없음") && !said.contains("못 찾았다"), "{said}");
     }
 
     fn prepare_found(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
