@@ -96,7 +96,7 @@ pub fn registered_paths(config: &Path) -> Vec<PathBuf> {
 }
 
 fn shown(path: &Path) -> String {
-    crate::text::sanitize(&path.display().to_string())
+    crate::text::one_line(&path.display().to_string())
 }
 
 /// `~`·`~/…` 를 홈으로 푼다. **여기서 푸는 까닭**은 창([`super::picker`])이 조각이라
@@ -145,7 +145,7 @@ impl App {
                 Err(e) => why = e,
             }
         }
-        self.notice = Some(format!("! 고르기 창을 못 열었다 — {}", crate::text::sanitize(&why)));
+        self.notice = Some(format!("! 고르기 창을 못 열었다 — {}", crate::text::one_line(&why)));
     }
 
     /// 창이 열린 동안의 키. **무엇을 할지는 창이 정하고**([`Picker::key`]) 여기는 그대로 한다.
@@ -173,7 +173,7 @@ impl App {
         let Mode::Pick(p) = &mut self.mode else { return };
         match list_dir(&to, &registered, p.show_hidden) {
             Ok(at) => p.show(at),
-            Err(e) => p.error = Some(format!("못 연다 — {}", crate::text::sanitize(&e))),
+            Err(e) => p.error = Some(format!("못 연다 — {}", crate::text::one_line(&e))),
         }
     }
 

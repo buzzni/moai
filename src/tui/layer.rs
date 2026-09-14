@@ -404,7 +404,7 @@ impl App {
         let why = match into {
             None => "담을 곳 없이 연 폼이다 — Esc 로 닫고 프로젝트 안에서 다시 n".to_string(),
             Some(t) if self.on_layer() => {
-                let name = crate::text::sanitize(&t.name);
+                let name = crate::text::one_line(&t.name);
                 match self.layer.as_ref().and_then(|l| l.position(&t.path)) {
                     Some(at) => {
                         self.enter_project(at);
@@ -418,7 +418,7 @@ impl App {
                     None => format!("{name} 이 프로젝트 층에서 빠졌다 — Esc 로 닫고 다시 고른다"),
                 }
             }
-            Some(t) => format!("폼을 연 곳({})과 지금 선 곳이 다르다 — Esc 로 닫고 다시 n", crate::text::sanitize(&t.name)),
+            Some(t) => format!("폼을 연 곳({})과 지금 선 곳이 다르다 — Esc 로 닫고 다시 n", crate::text::one_line(&t.name)),
         };
         self.notice = None;
         self.trouble = Some(format!("쓰지 못했다 — {}", why.trim()));

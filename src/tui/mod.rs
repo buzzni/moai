@@ -332,6 +332,12 @@ pub struct App {
     /// 손잡이를 같이 버리면 루프가 걷힌 화면에 모른 채 그린다. [`App::follow`] 가
     /// 걸음마다 끝난 것을 join 해 패닉이면 되던진다. [`DISCARDED_KEPT`] 개까지 든다.
     discarded: Vec<std::thread::JoinHandle<()>>,
+    /// [`DISCARDED_KEPT`] 를 넘겨 **아직 도는 채로 놓은** 손잡이 수. 그 스레드가 터지면
+    /// 터미널이 걷히는데 되던질 길이 없다 — 화면이 그것을 말한다(`draw::banner`).
+    /// **붙박이다.** `trouble` 은 다음에 성공한 다시 읽기가 걷는데, 놓는 때가 곧 F5·`w`·
+    /// 쓰기가 새 읽기를 띄운 때라 몇백 ms 뒤에 사라진다. 놓은 스레드는 다시 볼 길이
+    /// 없으므로 세션 내내 남긴다.
+    let_go: usize,
     /// 다시 읽는 길. 진짜 길은 [`prepare`] 다. **시험이 갈아 끼운다** — 스레드에서
     /// 짓는 읽기가 패닉하는 때는 진짜 파일로는 못 만든다.
     read: fn(&Repo, bool) -> crate::fail::R<Fresh>,
@@ -440,6 +446,7 @@ impl App {
             watched: Vec::new(),
             pending: None,
             discarded: Vec::new(),
+            let_go: 0,
             read: prepare,
             keep,
             remembered,
@@ -581,7 +588,7 @@ impl App {
                 // 층이 있으면 **어느 프로젝트에** 담겼는지도 댄다 — 같은 id 가 두 프로젝트에 있을 수
                 // 있어 id 만으로는 어디인지 모른다(moai-fccv). 층이 없으면 프로젝트는 하나뿐이다.
                 let what = match self.project() {
-                    Some(p) => format!("{} · {id}", crate::text::sanitize(&p.name)),
+                    Some(p) => format!("{} · {id}", crate::text::one_line(&p.name)),
                     None => id.clone(),
                 };
                 let told = match self.land(&id) {
@@ -628,8 +635,16 @@ impl App {
         if self.discarded.len() >= DISCARDED_KEPT {
             // 이만큼 안 끝났으면 읽기가 멈춘 것이다(느린 원격 디스크 따위). 기다리면
             // 루프가 같이 멈추므로 가장 오래된 것을 놓는다 — 그 하나만 1b63abe 이전
-            // 처지로 돌아간다.
-            self.discarded.remove(0);
+            // 처지로 돌아간다. **놓기 직전에 한 번 더 본다** — 거둔 뒤 그새 끝났으면
+            // 놓을 까닭이 없고, 패닉이면 여기서 되던진다. 그래도 돌면 놓고 센다.
+            let oldest = self.discarded.remove(0);
+            if oldest.is_finished() {
+                if let Err(payload) = oldest.join() {
+                    std::panic::resume_unwind(payload);
+                }
+            } else {
+                self.let_go += 1;
+            }
         }
         self.discarded.push(handle);
     }
@@ -686,8 +701,19 @@ impl App {
     /// 아예 안 돌리면 멤버를 집은 에픽이 `▸` 로 멈춰 서서, 목록 뿌리에서 무엇이 움직이는지
     /// 안 보인다(moai-x5eg). `--worktree` 로 겹친 줄도 겹친 칸으로 센다 — 옆에서 집은
     /// 멤버가 이 탐색기의 에픽을 돌린다.
+    ///
+    /// **계획에서 뺀 줄은 안 돈다**(moai-tawj) — 제가 미뤘든 부모·에픽·마일스톤에서
+    /// 물려받았든(`nav::Index::deferred_root`). 묶음이 미룬 멤버로 안 도는 것과 같은
+    /// 자다: 미룬 일은 칸이 `in_progress` 여도 지금 누가 손대는 줄이 아니다. 묶음 제
+    /// 줄에도 건다 — 칸 셈은 묶음 제 미룸으로 멤버를 안 빼(`report::counted`) 미룬
+    /// 에픽이 `busy` 로 남는데, 그 멤버는 물려받은 미룸으로 멈추니 에픽만 혼자 돈다.
+    /// 그래서 이 자로는 **줄이 돌면 그 위 묶음도 돌고, 묶음이 돌면 그 밑에 도는 줄이
+    /// 있다.**
     pub fn spins(&self, at: usize) -> bool {
         let i = &self.issues[at];
+        if self.index.deferred_root(&i.id).is_some() {
+            return false;
+        }
         let busy = !crate::report::is_group(i) || self.states.get(&i.id).is_some_and(|s| s.busy);
         busy && crate::style::spins(self.column(at))
     }
@@ -1156,6 +1182,31 @@ impl App {
         }
     }
 
+    /// 붙여 넣은 글(moai-od9q) — 루프가 bracketed paste 로 받은 `Event::Paste`. **키로
+    /// 풀지 않는다.** 풀면 붙인 글의 탭이 Tab 으로 폼의 칸을 옮기고, 줄바꿈이 Enter 로
+    /// 검색을 걸거나 제목을 떠나며, 탐색 중에 붙인 `q` 는 탐색기를 끝낸다.
+    ///
+    /// 글은 **지금 열린 글칸 하나에만** 들어간다 — 검색·거름망·누군지 묻는 칸·폼의 포커스 칸·
+    /// 고르기 창의 경로 칸. 무엇으로 받을지(한 줄로 잇기·줄로 가르기·걸러낼 글자)는 칸이 정한다.
+    /// 받을 칸이 없으면 삼키고 그렇다고 말한다 — 말없이 삼키면 붙여넣기가 고장 난 줄 안다.
+    /// 해제 물음에서는 **다른 키처럼** 물음을 거둔다: 붙인 글 속 `y` 는 답이 아니다.
+    pub fn paste(&mut self, s: &str) {
+        self.notice = None;
+        // 층에서는 `/`·`f` 가 안 열린다(`layer::refused`) — 열리는 칸만 댄다.
+        let open = if self.on_layer() { "`n`" } else { "`/`·`f`·`n`" };
+        match &mut self.mode {
+            Mode::Browse => self.notice = Some(format!("붙여 넣을 칸이 없다 — {open} 으로 칸을 열고 붙인다")),
+            Mode::Grep(input) | Mode::Filter(input) => input.paste(s),
+            Mode::Ask(ask) => {
+                ask.input.paste(s);
+                ask.error = None;
+            }
+            Mode::Idea(form) => form.paste(s),
+            Mode::Pick(picker) => picker.paste(s),
+            Mode::Unregister(_) => self.mode = Mode::Browse,
+        }
+    }
+
     /// 누군지 묻는 칸이 먹지 않은 키 — Enter·Esc.
     ///
     /// **받은 것은 `model::Actor::parse` 로 잰다** — `--user`·`MOAI_ACTOR` 와 같은
@@ -1475,18 +1526,36 @@ mod tests {
         assert!(a.spinning());
 
         // **미룬 멤버는 묶음을 안 돌린다.** 칸 셈이 그 멤버를 빼므로(`report::counted`)
-        // 곁들이도 뺀다 — 에픽은 끝난 멤버만 남아 `done` 으로 읽힌다. 미룬 일 제 줄은
-        // 제 칸대로 돈다: 줄 하나의 글리프는 제 칸을 말한다.
+        // 곁들이도 뺀다 — 에픽은 끝난 멤버만 남아 `done` 으로 읽힌다. **미룬 일 제 줄도
+        // 안 돈다**(moai-tawj) — 계획에서 뺀 일이 "지금 손대는 중" 으로 보이면 안 되고,
+        // 돌면 탐색기를 스피너 걸음으로 깨운다. 글리프는 칸을 여전히 말한다(`▸` 가 아닌
+        // 멈춘 `in_progress` 글리프).
         issues[3].deferred_at = Some("2026-09-02T00:00:00Z".into());
         a.adopt(issues.clone());
         assert_eq!(a.column(1), "done");
-        assert_eq!(spun(&a), ["argos-0003"], "미룬 멤버가 묶음을 돌린다");
+        assert_eq!(a.column(3), "in_progress");
+        assert!(spun(&a).is_empty(), "미룬 일이 돈다 — {:?}", spun(&a));
+        assert!(!a.spinning(), "미룬 일 하나가 탐색기를 빠른 걸음으로 깨운다");
 
-        // **묶음 제가 받은 미룸으로는 멤버를 안 뺀다** — 에픽을 미뤄도 집은 멤버는 센다.
+        // **묶음을 미루면 그 밑이 다 멈춘다.** 칸 셈은 묶음 제 미룸으로 멤버를 안 빼
+        // 에픽은 여전히 `in_progress` 로 읽히지만, 에픽도 멤버도 계획에서 빠졌다 — 멤버는
+        // 물려받은 미룸으로 안 돌고, 묶음이 혼자 돌면 도는 멤버 하나 없이 도는 줄이 선다.
         issues[3].deferred_at = None;
         issues[1].deferred_at = Some("2026-09-02T00:00:00Z".into());
+        a.adopt(issues.clone());
+        assert_eq!(a.column(1), "in_progress", "제 미룸으로 집은 멤버를 뺐다");
+        assert!(spun(&a).is_empty(), "미룬 에픽 밑이 돈다 — {:?}", spun(&a));
+
+        // **부모를 미뤄도 같다** — 물려받은 미룸으로 빠진 자식은 안 돌고, 에픽도 그 자식으로
+        // 안 바쁘다. 줄이 돌면 그 위의 묶음도 돌고, 묶음이 돌면 그 밑에 도는 줄이 있다.
+        issues[1].deferred_at = None;
+        issues[3].status = Status::new("todo");
+        issues[3].deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let mut child = member("argos-0003.a1b", "argos-0001");
+        child.status = Status::new("in_progress");
+        issues.push(child);
         a.adopt(issues);
-        assert!(spun(&a).contains(&"argos-0001"), "제 미룸으로 집은 멤버를 뺐다 — {:?}", spun(&a));
+        assert!(spun(&a).is_empty(), "미룬 부모 밑의 자식이 돈다 — {:?}", spun(&a));
 
         // 깨우는 쪽은 줄마다의 답을 모은 것이다.
         assert_eq!(a.spinning(), !spun(&a).is_empty());
@@ -1950,6 +2019,39 @@ mod tests {
         assert_eq!(a.mode, Mode::Browse);
     }
 
+    /// **붙여넣기는 열린 글칸에 글로만 들어간다**(moai-od9q). 키로 읽지 않는다 — 탐색 중에
+    /// 붙인 `q` 가 끝내지 않고, 검색칸에 붙인 줄바꿈이 Enter 로 걸리지 않는다. 받을 칸이
+    /// 없으면 말없이 삼키지 않고 그렇다고 한다. 해제 물음에 붙인 `y` 는 답이 아니다.
+    #[test]
+    fn a_paste_lands_in_the_open_field_and_never_acts_as_keys() {
+        let mut a = app();
+        a.paste("q\n");
+        assert!(!a.quit, "탐색 중에 붙인 q 가 끝냈다");
+        assert_eq!(a.mode, Mode::Browse);
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("붙여")), "받을 칸이 없는데 말이 없다 — {:?}", a.notice);
+        a.key(key(KeyCode::Down));
+        assert_eq!(a.notice, None, "붙여넣기의 말이 다음 키에 안 걷혔다");
+
+        a.key(key(KeyCode::Char('/')));
+        a.paste("qu\tit\n");
+        assert_eq!(a.mode, Mode::Grep(Input::new("qu it")), "줄바꿈이 Enter 로 걸렸다");
+        a.key(key(KeyCode::Esc));
+
+        a.key(key(KeyCode::Char('f')));
+        a.paste("status=todo");
+        assert_eq!(a.mode, Mode::Filter(Input::new("status=todo")));
+        a.key(key(KeyCode::Esc));
+
+        a.key(key(KeyCode::Char('n')));
+        a.paste("제목\t이어\n본문");
+        let Mode::Idea(form) = &a.mode else { panic!("폼이 닫혔다 — {:?}", a.mode) };
+        assert_eq!((form.title.text(), form.field), ("제목 이어 본문", super::form::Field::Title));
+
+        a.mode = Mode::Unregister(register::Unregister { path: "/w/one".into(), name: "one".into() });
+        a.paste("y");
+        assert_eq!(a.mode, Mode::Browse, "해제 물음이 안 거둬졌다");
+    }
+
     /// 들고 있던 길이 사라지면 **갈 수 있는 데까지만** 남긴다. 없는 자리에 서
     /// 있으면 빈 목록이 나오고, 사람은 자료가 사라진 줄 안다.
     #[test]
@@ -2249,11 +2351,24 @@ mod tests {
         assert!(a.loading());
         a.key(key(KeyCode::F(5)));
         assert_eq!(a.discarded.len(), DISCARDED_KEPT, "든 손잡이가 상한을 넘었다");
+        // **도는 것을 놓았으면 화면이 말한다**(moai-j9on) — 그 스레드가 터지면 터미널이
+        // 걷히는데 되던질 손잡이가 없다. 다시 읽기가 걷는 `trouble` 이 아니라 붙박이다:
+        // F5 가 짓는 읽기가 끝나는 순간 걷히면 몇백 ms 뒤에 사라진다.
+        assert_eq!(a.let_go, 1);
+        let said = super::draw::tests_banner(&mut a);
+        assert!(said.contains("다시 읽기 1개를 놓았다"), "도는 스레드를 말없이 놓았다 — {said:?}");
 
         drop(tx);
         discarded_settle(&a);
         a.follow();
         assert!(!a.reaping());
+        settle(&mut a);
+        let said = super::draw::tests_banner(&mut a);
+        assert!(said.contains("다시 읽기 1개를 놓았다"), "다시 읽기가 놓은 것의 말을 걷었다 — {said:?}");
+        // 붙박이라 **쓰기의 알림 뒤에** 선다 — 앞에 서면 세션 내내 80칸에서 알림을 밀어낸다.
+        a.notice = Some("✓ 담음".into());
+        let said = super::draw::tests_banner(&mut a);
+        assert!(said.find("✓ 담음") < said.find("다시 읽기 1개"), "놓은 것의 말이 알림을 앞질렀다 — {said:?}");
     }
 
     /// **꽉 찬 채로 버릴 때 가장 오래된 것이 그새 패닉으로 끝났으면 놓지 않고 되던진다.**

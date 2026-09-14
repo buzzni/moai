@@ -141,6 +141,16 @@ impl Picker {
         self.error = None;
     }
 
+    /// 붙여 넣은 글(moai-od9q). **경로 칸으로 간다** — 열려 있으면 커서 자리에, 닫혀 있으면
+    /// 붙인 글로 연다. 이 창에서 붙이는 글은 경로뿐이고, 키로 읽으면 `q` 가 창을 닫고 `a` 가
+    /// 커서의 줄을 등록한다. 닫힌 칸을 지금 디렉터리로 채워 열지 않는다(`g` 와 다르다) —
+    /// 붙이는 경로는 대개 절대경로라 앞에 붙은 디렉터리를 사람이 지워야 한다. 상대경로여도
+    /// Enter 가 지금 디렉터리에 붙인다.
+    pub fn paste(&mut self, s: &str) {
+        self.error = None;
+        self.typing.get_or_insert_with(Input::default).paste(s);
+    }
+
     /// 키 하나. Ctrl-C 는 여기 오기 전에 든 쪽이 받는다 — 어느 모드에서든 나가는 길이다.
     ///
     /// - **↑↓·PageUp/Down·Home/End** 커서
@@ -348,6 +358,21 @@ mod tests {
         assert_eq!(press(&mut p, KeyCode::Esc), Act::Stay);
         assert_eq!(p.typing, None);
         assert_eq!(press(&mut p, KeyCode::Esc), Act::Close, "칸을 닫은 뒤 Esc 가 창을 안 닫았다");
+    }
+
+    /// **붙여넣기는 경로 칸으로 간다**(moai-od9q). 칸이 열려 있으면 커서 자리에, 닫혀 있으면
+    /// 붙인 글로 칸을 연다 — 창에서 붙이는 글은 경로뿐이고, 글자를 키로 읽으면 `q` 가 창을
+    /// 닫고 `a` 가 엉뚱한 줄을 등록한다. 끝의 줄바꿈은 Enter 가 아니다.
+    #[test]
+    fn a_paste_goes_into_the_path_field() {
+        let mut p = Picker::new(listing("/w", &["apps"]));
+        p.paste("/srv/qa\n");
+        assert_eq!(p.typing.as_ref().map(Input::text), Some("/srv/qa"), "붙인 경로로 칸을 안 열었다");
+        assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/srv/qa".into()));
+
+        press(&mut p, KeyCode::Char('g'));
+        p.paste("apps");
+        assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/apps".into()));
     }
 
     /// `.` 은 숨은 것 보이기를 뒤집고 같은 층을 다시 읽으라고 한다. Esc·q 는 닫는다.
