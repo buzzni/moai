@@ -477,6 +477,8 @@ Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽�
 - 자리가 `<루트>/.claude/worktrees/*` 인 세션은 이 저장소에서 **일하는 중**이다.
   지켜보되 맡기지 않는다
 - **다른 디렉터리의 세션은 건드리지 않는다**
+- **맡기기를 거절한 세션은 후보에서 빼고 다시 보내지 않는다.** 제 사람이 준 일만
+  받는 세션이 있다 — 한 번 거절했으면 그 뒤로는 알림도 걸지 않는다
 - 이 파일은 문서에 없는 속 파일이라 판이 바뀌면 필드가 달라질 수 있다. 못 읽으면
   `ListAgents` 로 이름을 보고, 그 세션에 `pwd` 와 지금 하는 일을 물어 가린다
 
@@ -488,22 +490,43 @@ Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽�
     1. main 에서 펼친다 — idea 를 일감으로 바꾸는 길은 `moai idea promote <id> --from -`
        하나다. 이슈 하나짜리여도 에픽 + 이슈로 펼친다. `--dry-run` 을 먼저 본다
     2. 멤버를 `moai mv <멤버> in_progress` 로 집고 main 에
-       "chore(tracker): <에픽> 를 워크트리에서 집는다" 로 커밋한다
+       "chore(tracker): <에픽> 를 워크트리에서 집는다" 로 커밋한다.
+       main 에서 커밋하기 전에는 언제나 `git status` 를 본다 — 아래 "공유 main" 을 따른다
     3. `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> main` 으로
        로컬 main 에서 뜨고 EnterWorktree(path) 로 들어간다. 이름은 idea id 가
        아니라 펼친 에픽 id 다
     4. 노트에 없는 설계 결정은 추측하지 말고 AskUserQuestion 으로 묻는다 —
        사람이 일꾼 창을 보고 있다
     5. 리뷰 이슈를 세워(규칙 3) `/code-review high --fix`. 반영은 별도 fix: 커밋,
-       넘긴 것은 이슈 번호와 함께 노트
-    6. 워크트리에서 main 을 받아 충돌을 푼다
-    7. ExitWorktree(keep) 로 루트로 돌아온다 — 워크트리 안에서 그것을 지우면 세션의
+       넘긴 것은 이슈 번호와 함께 노트.
+       워크트리에서 `/code-review` 가 규칙 3 에 막히면 — 지금 훅은 그 워크트리의
+       스냅샷만 읽어 main 에서 집은 리뷰 이슈를 못 본다(moai-iz38, 에픽 moai-wofj
+       에서 고치는 중) — 같은 관점·단계·`--fix` 범위로 리뷰 서브에이전트를 돌린다.
+       리뷰 이슈·원문 노트·닫는 `-m` 은 그대로 남긴다
+    6. 멤버의 일이 다 끝나면 병합 전에 에픽 전체를 `/code-review max --fix` 로 본다 —
+       가지가 main 을 떠난 자리(`git merge-base main HEAD`)부터의 diff 다. 리뷰
+       이슈를 따로 세운다(`-t review --parent <에픽>`). 막히면 5 의 길로 간다
+    7. 워크트리에서 main 을 받아 충돌을 푼다
+    8. ExitWorktree(keep) 로 루트로 돌아온다 — 워크트리 안에서 그것을 지우면 세션의
        자리가 사라진 디렉터리에 남아 감독이 다시는 이 세션을 루트로 못 본다.
-       옆 세션과 병합이 겹치면 먼저 알린 뒤 루트에서 `git merge worktree-<에픽>`.
-       시험 통과를 보고 멤버·리뷰 이슈를 done 으로 커밋
-    8. 루트에서 `git worktree remove .claude/worktrees/<에픽>` 과
+       옆 세션과 병합이 겹치면 먼저 알린 뒤 루트에서 `git merge worktree-<에픽> -m "merge: …"`
+       로 **한 번에** 병합한다 — `--no-commit` 으로 열어 두지 않는다.
+       **`moai mv <멤버> done` 은 그 병합이 실제로 끝난 뒤에만 친다** — 병합 전에
+       옮겼다가 되돌린 일꾼이 있었다. 시험 통과를 보고 멤버·리뷰 이슈를 done 으로 커밋
+    9. 루트에서 `git worktree remove .claude/worktrees/<에픽>` 과
        `git branch -d worktree-<에픽>` 으로 워크트리와 가지를 지운다
-    9. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 한두 줄 요약, 넘긴 것·새 idea
+    10. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 한두 줄 요약, 넘긴 것·새 idea
+
+### 공유 main
+
+루트 체크아웃은 **모든 세션이 같이 쓴다.** 한 세션이 `git merge --no-commit` 으로
+병합을 열어 둔 사이에 다른 세션이 트래커 노트를 커밋하면, 그 커밋이 남의 병합을
+제 제목으로 봉인한다 — 실제로 그렇게 됐다. 그래서 감독이든 일꾼이든, 트래커 노트
+하나라도 main 에서 `git commit` 하기 전에:
+
+- `git status` 를 본다. `.git/MERGE_HEAD` 가 있거나 "still merging" 이면 **커밋하지
+  않는다.** 그 병합을 연 세션이 끝낼 때까지 기다린다
+- 제 병합은 `git merge <가지> -m "…"` 한 번으로 끝낸다. `--no-commit` 을 쓰지 않는다
 
 **4. 기다린다.** 일하는 세션에는 메시지 없이 `notify_when_idle: true` 로
 걸어 둔다. **`ListAgents` 를 되풀이해 훑지 않는다** — 알림이 온다.
@@ -599,5 +622,26 @@ mod tests {
         assert!(reference.contains(promote), "참고 문서의 펼치기 줄이 바뀌었다");
         assert!(supervise.contains(promote), "감독이 promote 를 안 가르친다");
         assert!(!supervise.contains("moai add "), "감독이 promote 말고 다른 길을 가르친다");
+    }
+
+    /// **첫 실행에서 일꾼들이 실제로 걸려 넘어진 세 자리가 절차에 선다.** 리뷰가
+    /// 워크트리에서 막힐 때의 길, 병합 뒤에만 done, 에픽 끝의 max 리뷰 — 셋 중
+    /// 하나라도 빠지면 다음 일꾼이 같은 자리에서 또 넘어진다.
+    #[test]
+    fn the_worker_brief_carries_what_the_first_run_tripped_on() {
+        let supervise = supervise();
+        for (piece, why) in [
+            ("리뷰 서브에이전트", "워크트리에서 /code-review 가 막힐 때의 길이 없다"),
+            ("moai-iz38", "막히는 까닭을 가리키는 이슈가 없다"),
+            ("병합이 실제로 끝난 뒤에만", "병합 전에 done 으로 옮기지 말라는 말이 없다"),
+            ("/code-review max --fix", "에픽 끝의 max 리뷰가 없다"),
+            ("--parent <에픽>", "max 리뷰 이슈를 에픽에 매는 줄이 없다"),
+            ("ExitWorktree(keep)", "루트로 돌아오는 걸음이 없다"),
+            ("MERGE_HEAD", "남이 열어 둔 병합을 봉인하지 말라는 말이 없다"),
+            ("`--no-commit` 을 쓰지 않는다", "병합을 한 번에 끝내라는 말이 없다"),
+            ("거절한 세션", "맡기기를 거절한 세션을 빼라는 말이 없다"),
+        ] {
+            assert!(supervise.contains(piece), "{why} — {piece}");
+        }
     }
 }
