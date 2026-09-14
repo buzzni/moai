@@ -25,6 +25,46 @@ struct Edited {
     kept: Option<Inherited>,
     /// `--milestone none` 을 받았는데도 남은 마일스톤 — 그것을 넘긴 에픽이나 id 부모.
     kept_milestone: Option<InheritedMilestone>,
+    /// 고친 줄의 막음을 가른 답. 상세가 `show <id>` 와 같은 막음 줄을 그린다(moai-xe74).
+    blocked: Blocked,
+}
+
+/// 락 밖으로 들고 나오는 막음 답. **여기서 챙긴다** — `report::Block` 은 줄 전부를 빌리는데
+/// 락을 놓으면 줄 전부가 없고, 다시 읽으면 위 `epic`·`shelved` 가 피한 두 번 파싱과 틈이
+/// 돌아온다. 그래서 막는 줄의 복사본과 답을 소유한 모양으로 옮긴다.
+#[derive(Default)]
+struct Blocked {
+    /// 막는 줄 가운데 있는 것들 — 제목과 미룬 시각을 그린다.
+    issues: Vec<Issue>,
+    /// 적힌 차례대로 (막는 id, 답, 그 줄을 계획에서 뺀 줄, 미뤄 뺀 멤버).
+    answers: Vec<(String, crate::report::Blocker, Option<String>, Vec<String>)>,
+}
+
+impl Blocked {
+    /// 막음이 없으면 소속 지도를 안 세운다(`report::blocks_of`).
+    fn of(all: &[Issue], cfg: &crate::config::Config, i: &Issue) -> Blocked {
+        let found = crate::report::blocks_of(all, cfg, i);
+        Blocked {
+            issues: found.iter().filter_map(|b| b.issue.cloned()).collect(),
+            answers: found
+                .iter()
+                .map(|b| (b.id.to_string(), b.blocker, b.root.map(str::to_string), b.aside.iter().map(|s| s.to_string()).collect()))
+                .collect(),
+        }
+    }
+
+    fn blocks(&self) -> Vec<crate::report::Block<'_>> {
+        self.answers
+            .iter()
+            .map(|(id, blocker, root, aside)| crate::report::Block {
+                id: id.as_str(),
+                issue: self.issues.iter().find(|x| x.id == *id),
+                blocker: *blocker,
+                root: root.as_deref(),
+                aside: aside.iter().map(String::as_str).collect(),
+            })
+            .collect()
+    }
 }
 
 /// `-e none` 이 못 끊은 소속. `--json` 에는 `inherited_epic` 으로 선다 — 키가 없다는
@@ -153,6 +193,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                     changed: false,
                     kept,
                     kept_milestone,
+                    // 바뀐 것이 없으면 상세를 안 그린다.
+                    blocked: Blocked::default(),
                 },
             ));
         }
@@ -188,10 +230,12 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         let read = super::read_of(issues, cfg, &near);
         let kept = kept(issues);
         let kept_milestone = kept_milestone(issues);
-        Ok((vec![], Edited { issue: out, epic, children, shelved, read, changed: true, kept, kept_milestone }))
+        // 막음도 **락 안에서 본 모습으로** 가른다 — `ready` 의 자(`report::blocks_of`)다.
+        let blocked = Blocked::of(issues, cfg, &out);
+        Ok((vec![], Edited { issue: out, epic, children, shelved, read, changed: true, kept, kept_milestone, blocked }))
     })?;
 
-    let Edited { issue: edited, epic, children, shelved, read, changed, kept, kept_milestone } = done;
+    let Edited { issue: edited, epic, children, shelved, read, changed, kept, kept_milestone, blocked } = done;
     if ctx.json {
         // **이 키는 우리 것이다** — `Row` 가 `derived_status` 를 걷는 것과 같은 까닭이다.
         // `--json` 을 되써 넣어 모르는 필드로 든 줄이면 한 객체에 같은 키가 둘 서거나,
@@ -255,8 +299,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         roots: shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect(),
         states: read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect(),
         origin: None,
-        // 쓴 뒤의 줄 전부는 쓰기 안에서만 있어 막음을 가를 재료가 없다 — `show <id>` 가 그린다.
-        blocks: Vec::new(),
+        blocks: blocked.blocks(),
     };
     Ok(view::detail(&edited, epic.as_ref(), &children, &seen, &repo.config, &at, false))
 }

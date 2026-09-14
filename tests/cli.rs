@@ -170,6 +170,52 @@ fn init_refuses_to_change_the_prefix() {
     assert!(moai(s.path(), &["init", "argos"]).status.success());
 }
 
+/// **새로 심는 접두어는 8자까지다**(moai-f7xs). 사람이 준 긴 것은 거절하고 짧은 후보를 대며
+/// 아무것도 안 만든다. 디렉터리 이름에서 만든 긴 것은 머리글자로 줄이고 그렇다고 말한다.
+/// 이미 긴 접두어로 심긴 저장소는 막지 않는다 — 읽기는 관대하게, 접두어는 못 바꾸는 값이다.
+#[test]
+fn init_keeps_a_new_prefix_short() {
+    let s = Scratch::new("shortprefix");
+    let out = moai(s.path(), &["init", "my-company-backend"]);
+    assert!(!out.status.success(), "긴 접두어를 받았다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("8자까지") && err.contains("`mcb`"), "{err}");
+    assert!(!s.path().join(".moai").exists(), "거절하고도 .moai 를 만들었다");
+    // 모양이 틀린 긴 접두어는 모양을 먼저 말한다 — 길이 오류가 틀린 후보(`MyCompan`)를 대면 안 된다.
+    let out = moai(s.path(), &["init", "MyCompanyBackend"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("소문자") && !err.contains("8자까지"), "{err}");
+
+    // 디렉터리 이름에서 만든 긴 것은 줄인다.
+    let long = s.path().join("my-company-backend");
+    std::fs::create_dir_all(&long).unwrap();
+    let out = ok(&long, &["init"]);
+    assert!(out.contains("접두어는 `mcb`") && out.contains("줄였다"), "{out}");
+    assert!(add(&long, &["첫 이슈"]).starts_with("mcb-"), "줄인 접두어로 id 를 안 냈다");
+
+    // 기계 출력은 줄였을 때만 원래 이름을 싣는다.
+    let other = s.path().join("another-long-name-here");
+    std::fs::create_dir_all(&other).unwrap();
+    let json = ok(&other, &["init", "--json"]);
+    assert!(json.contains("\"prefix\":\"alnh\"") && json.contains("\"shortened_from\":\"another-long-name-here\""), "{json}");
+    let short = s.path().join("argos");
+    std::fs::create_dir_all(&short).unwrap();
+    assert!(!ok(&short, &["init", "--json"]).contains("shortened_from"), "안 줄였는데 원래 이름을 실었다");
+
+    // 이미 긴 접두어로 심긴 저장소는 다시 불러도, 이슈를 만들어도 된다.
+    let old = s.path().join("old");
+    std::fs::create_dir_all(old.join(".moai")).unwrap();
+    std::fs::write(old.join(".moai/config.toml"), "prefix = \"my-company-backend\"\n").unwrap();
+    std::fs::write(old.join(".moai/issues.jsonl"), "").unwrap();
+    std::fs::write(old.join(".moai/journal.jsonl"), "").unwrap();
+    assert!(ok(&old, &["init"]).contains("이미 심겨 있다"));
+    assert!(ok(&old, &["init", "my-company-backend"]).contains("이미 심겨 있다"), "같은 긴 접두어로 다시 부른 것을 막았다");
+    let out = moai(&old, &["init", "another-long-one"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("나중에 못 바꾼다") && !err.contains("8자까지"), "{err}");
+    assert!(add(&old, &["옛 저장소의 이슈"]).starts_with("my-company-backend-"), "옛 긴 접두어를 막았다");
+}
+
 /// 남의 .gitignore 를 지우지 않고 빠진 줄만 덧붙인다.
 #[test]
 fn init_appends_to_an_existing_gitignore() {
@@ -596,6 +642,56 @@ fn a_colour_chosen_in_the_user_config_beats_the_hash_and_only_colour_changes() {
     assert!(ls.status.success() && String::from_utf8_lossy(&ls.stderr).contains("\"red\""), "{}", text(&ls));
 }
 
+/// 줄 **맨 앞의** 칠한 칸 — (SGR, 글). `indent` 를 떼고 곧바로 SGR 이 이어져야 칸이다.
+///
+/// 한눈 보기의 줄은 `  <SGR>이름<리셋>  <SGR>id<리셋> …`, 머리는 `<SGR>이름<리셋>  경로` 다.
+/// **이름은 이 자리로 찾는다** — 줄 어디서든 `이름<리셋>` 을 찾으면 무작위 id 의 끝이 이름과
+/// 같을 때(`argos-i3p1` 과 `p1`) 남의 줄을 제 줄로 읽어 시험이 흔들렸다(moai-7ccd).
+fn name_cell<'a>(line: &'a str, indent: &str) -> Option<(String, &'a str)> {
+    let mut rest = line.strip_prefix(indent)?;
+    let mut sgr = String::new();
+    while let Some(tail) = rest.strip_prefix("\u{1b}[") {
+        let end = tail.find('m')?;
+        if !tail[..end].chars().all(|c| c.is_ascii_digit() || c == ';') {
+            return None;
+        }
+        sgr.push_str(&rest[..end + 3]);
+        rest = &tail[end + 1..];
+    }
+    let (text, _) = rest.split_once("\u{1b}[0m")?;
+    (!sgr.is_empty()).then_some((sgr, text))
+}
+
+/// 프로젝트 `name` 의 일 줄 중 `id` 가 든 것.
+fn project_row<'a>(painted: &'a str, name: &str, id: &str) -> Option<&'a str> {
+    painted.lines().find(|l| name_cell(l, "  ").is_some_and(|(_, n)| n == name) && l.contains(id))
+}
+
+/// 프로젝트 `name` 의 머리 줄.
+fn project_head<'a>(painted: &'a str, name: &str) -> Option<&'a str> {
+    painted.lines().find(|l| !l.starts_with(' ') && name_cell(l, "").is_some_and(|(_, n)| n == name))
+}
+
+/// **줄 찾기는 id 의 끝에 속지 않는다**(moai-7ccd). 옛 찾기(`이름<리셋>` 이 줄 어디든 있다)는
+/// `p0` 의 줄에 선 `argos-i3p1` 을 `p1` 의 줄로 읽었다 — 그 무작위 id 를 손으로 박아 본다.
+#[test]
+fn a_project_row_is_found_by_its_name_cell_not_by_an_id_that_ends_like_it() {
+    let painted = "\u{1b}[1m\u{1b}[32mp0\u{1b}[0m  /w/p0   1건
+  \u{1b}[32mp0\u{1b}[0m   \u{1b}[32margos-i3p1\u{1b}[0m  p2  집을 일
+
+\u{1b}[1m\u{1b}[35mp1\u{1b}[0m  /w/p1   1건
+  \u{1b}[35mp1\u{1b}[0m   \u{1b}[35margos-i3p1\u{1b}[0m  p2  집을 일
+";
+    let old = painted.lines().find(|l| l.starts_with("  ") && l.contains("p1\u{1b}[0m") && l.contains("argos-i3p1")).unwrap();
+    assert!(old.contains("\u{1b}[32mp0"), "옛 찾기가 틀리는 자리를 못 만들었다 — {old:?}");
+    let row = project_row(painted, "p1", "argos-i3p1").expect("p1 의 줄이 없다");
+    assert_eq!(name_cell(row, "  "), Some(("\u{1b}[35m".to_string(), "p1")), "{row:?}");
+    let head = project_head(painted, "p1").expect("p1 의 머리가 없다");
+    assert_eq!(name_cell(head, ""), Some(("\u{1b}[1m\u{1b}[35m".to_string(), "p1")), "{head:?}");
+    assert_eq!(project_row(painted, "p", "argos-i3p1"), None, "이름의 앞부분으로 줄을 찾았다");
+    assert_eq!(project_row(painted, "i3p1", ""), None, "id 로 줄을 찾았다");
+}
+
 /// **프로젝트마다 색이 다르고, 한 프로젝트의 줄은 한 색이다** (moai-xs9x). 색은 경로로
 /// 고른다 — 다른 프로젝트를 더하고 빼도 제 색이 그대로다. 색을 끄면 글자는 칠하기 전과
 /// 바이트까지 같다: 이름이 곁에 서서 **색이 혼자 뜻을 지지 않는다.**
@@ -642,15 +738,12 @@ fn outside_a_repo_each_project_wears_its_own_colour_and_only_colour_changes() {
 
         let mut hues = std::collections::BTreeSet::new();
         for n in &names {
-            let row = painted
-                .lines()
-                .find(|l| l.starts_with("  ") && l.contains(&format!("{n}\u{1b}[0m")) && l.contains(id.as_str()))
-                .unwrap_or_else(|| panic!("{n} 의 줄이 없다 — {painted}"));
-            let (name_sgr, id_sgr) = (sgr_before(row, n), sgr_before(row, id));
-            assert!(!name_sgr.is_empty(), "{n} 의 이름 칸이 안 칠해졌다 — {row:?}");
+            let row = project_row(&painted, n, id).unwrap_or_else(|| panic!("{n} 의 줄이 없다 — {painted}"));
+            // 칠하지 않은 이름 칸은 `name_cell` 이 칸으로 안 읽어 위의 찾기에서 이미 멈춘다.
+            let (name_sgr, id_sgr) = (name_cell(row, "  ").unwrap().0, sgr_before(row, id));
             assert_eq!(name_sgr, id_sgr, "{n} 의 이름 칸과 id 칸 색이 다르다 — {row:?}");
-            let head = painted.lines().find(|l| !l.starts_with(' ') && l.contains(&format!("{n}\u{1b}[0m  "))).unwrap();
-            assert!(sgr_before(head, n).contains(&name_sgr), "{n} 의 머리가 줄과 다른 색이다 — {head:?}");
+            let head = project_head(&painted, n).unwrap_or_else(|| panic!("{n} 의 머리가 없다 — {painted}"));
+            assert!(name_cell(head, "").unwrap().0.contains(&name_sgr), "{n} 의 머리가 줄과 다른 색이다 — {head:?}");
             hues.insert(name_sgr);
         }
         assert!(hues.len() > 1, "열세 프로젝트가 한 색이다 — {painted}");
@@ -659,8 +752,8 @@ fn outside_a_repo_each_project_wears_its_own_colour_and_only_colour_changes() {
     // 다른 프로젝트를 빼고 차례를 바꿔도 제 색이 그대로다 — 등록 순서가 아니라 경로로 고른다.
     let colour_of = |cfg: &Path, n: &str| {
         let t = run(cfg, &["ready"], true);
-        let row = t.lines().find(|l| l.starts_with("  ") && l.contains(&format!("{n}\u{1b}[0m"))).unwrap().to_string();
-        sgr_before(&row, n)
+        let row = project_row(&t, n, &todo).unwrap_or_else(|| panic!("{n} 의 줄이 없다 — {t}"));
+        name_cell(row, "  ").unwrap().0
     };
     let full = colour_of(&cfg, "p7");
     let alone = s.path().join("alone.toml");
@@ -1198,6 +1291,26 @@ fn show_draws_each_blocker_with_the_words_ready_uses() {
     assert!(json.contains("\"blockers\":[") && json.contains(&format!("{{\"id\":\"{a}\",\"state\":\"done\"}}")), "{json}");
     assert!(json.contains(&format!("{{\"id\":\"{c}\",\"state\":\"missing\"}}")), "{json}");
     assert!(!ok(s.path(), &["show", &a, "--json"]).contains("\"blockers\""), "막음이 없는데 blockers 키가 섰다");
+}
+
+/// **`edit` 뒤의 상세도 막음을 그린다**(moai-xe74) — `show <id>` 와 글자까지 같은 줄이다.
+/// 막는 줄이 끝나면 풀림으로 바뀐 것도 쓴 그 자리에서 보인다.
+#[test]
+fn edit_detail_draws_the_same_blocker_lines_as_show() {
+    let s = init("editblocks");
+    let a = add(s.path(), &["먼저 할 것"]);
+    let b = add(s.path(), &["막히는 것"]);
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+    let line = |out: &str| out.lines().find(|l| l.contains(a.as_str()) && !l.starts_with(b.as_str())).unwrap_or_default().to_string();
+
+    let edited = ok(s.path(), &["edit", &b, "-p", "1"]);
+    assert!(line(&edited).contains("막힘") && line(&edited).contains("먼저 할 것"), "edit 상세에 막음 줄이 없다\n{edited}");
+    assert_eq!(line(&edited), line(&ok(s.path(), &["show", &b])), "edit 과 show 가 같은 막음을 다르게 그린다");
+
+    ok(s.path(), &["mv", &a, "done"]);
+    let edited = ok(s.path(), &["edit", &b, "-p", "2"]);
+    assert!(line(&edited).contains("풀림"), "끝난 막음이 풀림으로 안 섰다\n{edited}");
+    assert_eq!(line(&edited), line(&ok(s.path(), &["show", &b])));
 }
 
 /// 메모는 스냅샷을 건드리지 않고 저널에만 쌓인다.
@@ -2244,6 +2357,51 @@ fn the_body_is_drawn_but_the_raw_text_stays_reachable() {
         "무엇이 문제인지 말하지 않았다\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+/// **되뽑은 계획은 도로 들어간다.** `show <에픽> --as-plan` 의 출력을 그대로
+/// `add --from` 에 넣으면 같은 모양의 에픽이 선다 — 이 짝이 틀로 쓰는 계약이다.
+#[test]
+fn an_epic_comes_back_out_as_a_plan_that_goes_back_in() {
+    let s = init("asplan");
+    let made = from_stdin(
+        s.path(),
+        &["add", "--from", "-"],
+        "# 릴리스 #release\n- 바이너리를 올린다\n- [p1] 태그를 단다 #git\n",
+    );
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let epic = field(&ok(s.path(), &["show", "epic", "--json"]), "id");
+
+    let plan = ok(s.path(), &["show", &epic, "--as-plan"]);
+    assert_eq!(plan, "# 릴리스 #release\n- [p1] 태그를 단다 #git\n- 바이너리를 올린다\n");
+
+    let again = init("asplanagain");
+    let back = from_stdin(again.path(), &["add", "--from", "-"], &plan);
+    assert!(back.status.success(), "되뽑은 계획이 도로 안 들어간다\n{}", String::from_utf8_lossy(&back.stderr));
+    let epic2 = field(&ok(again.path(), &["show", "epic", "--json"]), "id");
+    assert_eq!(ok(again.path(), &["show", &epic2, "--as-plan"]), plan);
+
+    let json = ok(s.path(), &["show", &epic, "--as-plan", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(r##""plan":"# 릴리스 #release\n"##), "{json}");
+    assert!(json.contains(r#""lossy":[]"#), "{json}");
+
+    // 도로 못 들어가는 제목은 조용히 틀리지 않고 이름을 댄다. 실패로는 안 끝난다.
+    let wip = add(s.path(), &["[WIP] 반쯤", "-e", &epic]);
+    let out = moai(s.path(), &["show", &epic, "--as-plan"]);
+    assert!(out.status.success(), "경고로 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&wip), "{}", String::from_utf8_lossy(&out.stderr));
+    let json = ok(s.path(), &["show", &epic, "--as-plan", "--json"]);
+    assert!(json.contains(&format!(r#""lossy":["{wip}"]"#)), "{json}");
+
+    // 에픽이 아닌 것과 목록 자리는 거절한다 — 조용히 엉뚱한 계획을 내지 않는다.
+    let lone = add(s.path(), &["그냥 이슈"]);
+    for args in [vec!["show", lone.as_str(), "--as-plan"], vec!["show", "--as-plan"], vec!["show", &epic, "--as-plan", "--raw"]] {
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{args:?} 를 말없이 먹었다");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("--as-plan"), "무엇이 문제인지 말하지 않았다 — {args:?}\n{err}");
+    }
 }
 
 /// **하나를 집은 자리에서 버려지는 필터가 없다.** 걸러지지 않은 그 이슈를
