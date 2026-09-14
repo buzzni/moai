@@ -19,6 +19,8 @@ pub struct Input {
     /// 커서의 바이트 자리. **늘 grapheme 경계에 선다** — 여기가 어긋나면
     /// `insert` 가 글자 가운데를 찔러 패닉하거나 이모지를 둘로 가른다.
     at: usize,
+    /// 경로를 적는 칸이다([`Input::path`]). 낱말 지우기가 경로 가름자에서도 멈춘다.
+    path: bool,
 }
 
 /// 칸 하나에 그릴 것. [`Input::view`] 가 낸다.
@@ -39,7 +41,15 @@ impl Input {
     pub fn new(s: &str) -> Input {
         let text: String = s.chars().filter(|c| !c.is_control()).collect();
         let at = text.len();
-        Input { text, at }
+        Input { text, at, path: false }
+    }
+
+    /// 경로를 적는 칸으로 연다(moai-8dna). 다른 것은 [`Input::new`] 와 같고, Ctrl-W·Alt-Backspace
+    /// 가 빈칸뿐 아니라 `/`(Windows 는 `\` 도)에서도 멈춰 **한 층씩** 지운다 — 빈칸만 보면
+    /// `/home/coder/work` 가 통째로 날아간다. 경로 칸에만 두는 것은 사용자와 정했다: 거름망의
+    /// `tag=a/b` 같은 글에서는 빈칸이 낱말이고, 두 키는 어느 칸에서든 같은 일을 한다(moai-979m).
+    pub fn path(s: &str) -> Input {
+        Input { path: true, ..Input::new(s) }
     }
 
     pub fn text(&self) -> &str {
@@ -50,9 +60,23 @@ impl Input {
     /// 그렇다(빈 칸의 Backspace 도 칸의 것이다). 거짓이면 Enter·Esc·Tab·
     /// Ctrl-C 처럼 칸을 든 쪽이 정할 키다.
     pub fn key(&mut self, k: KeyEvent) -> bool {
+        self.key_on(k, cfg!(windows))
+    }
+
+    /// [`Input::key`] 를 **운영체제를 받아** 한다 — Windows 없이도 Windows 의 갈래를 시험하려고
+    /// 나눴다(moai-d3tp). 부르는 곳은 `key` 하나다.
+    fn key_on(&mut self, k: KeyEvent, windows: bool) -> bool {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
         match k.code {
+            // **Windows 의 AltGr 글자는 Ctrl+Alt 로 온다**(moai-d3tp) — crossterm 이 독일어 자판의
+            // `@`·`€` 를 CONTROL|ALT 를 단 글자로 낸다. 거기서만 글자로 받는다: 리눅스·맥은 AltGr
+            // 글자가 수식자 없이 오므로, 거기서 받으면 Ctrl-Alt-u 가 `u` 로 찍힌다. 사용자와 정했다.
+            // **대가: Windows 에서는 어느 자판이든 Ctrl+Alt+글자가 그 글자로 찍힌다** — crossterm 이
+            // 그냥 누른 Ctrl+Alt+u 도 `ToUnicodeEx` 로 `u` 를 채워 AltGr 글자와 같은 모양으로 내서
+            // 둘을 가를 길이 없다. 그래서 Ctrl-Alt-u·Ctrl-Alt-w 는 지우기가 아니라 글자다. 표가 칸보다
+            // 먼저 보는 Ctrl-C(끝내기)·Ctrl-S(담기)는 그대로 듣는다(리뷰 moai-979m.jws).
+            KeyCode::Char(c) if windows && ctrl && alt => self.put(c),
             // Ctrl-U 는 커서 앞만이 아니라 **전부** 지운다. 지금 `/`·`f` 가 그렇게
             // 하고 있고, 옮기면서 뜻을 바꾸지 않는다.
             KeyCode::Char('u') if ctrl => {
@@ -60,18 +84,15 @@ impl Input {
                 self.at = 0;
             }
             KeyCode::Char('w') if ctrl => self.rub_word(),
+            // **Alt-Backspace 도 낱말 하나를 지운다**(moai-979m) — 셸에 익은 손이 이것으로 지운다.
+            // **자리는 Ctrl-W 와 같다**: 빈칸만 낱말의 경계로 본다 — readline 의 Meta-DEL 처럼
+            // 두 키를 가르지 않기로 정했다. 경로 칸만 `/` 에서도 멈춘다([`Input::path`], moai-8dna).
+            // Ctrl 까지 붙은 것은 받지 않는다(아래 줄이 든 쪽에 돌려준다).
+            KeyCode::Backspace if alt && !ctrl => self.rub_word(),
             // 그 밖의 Ctrl·Alt 는 글자가 아니다. raw mode 에서는 Ctrl-C 가
             // 신호로 오지 않으므로, 여기서 `c` 로 먹으면 나갈 길이 막힌다.
             _ if ctrl || alt => return false,
-            KeyCode::Char(c) => {
-                // 먹기는 하되 넣지는 않는다. 흘려보내면 든 쪽이 그것을 이동키로
-                // 읽을 수 있다.
-                if !c.is_control() {
-                    self.text.insert(self.at, c);
-                    self.at += c.len_utf8();
-                    self.snap();
-                }
-            }
+            KeyCode::Char(c) => self.put(c),
             KeyCode::Backspace => {
                 let from = self.prev();
                 self.text.replace_range(from..self.at, "");
@@ -148,12 +169,23 @@ impl Input {
         self.at = bounds.take_while(|&i| i <= self.at).last().unwrap_or(0);
     }
 
-    /// Ctrl-W. 커서 앞의 빈칸을 넘고 낱말 하나를 지운다 — 셸과 같다.
+    /// 친 글자 하나를 커서 자리에 넣는다. 제어문자는 먹기는 하되 넣지는 않는다 — 흘려보내면
+    /// 든 쪽이 그것을 이동키로 읽을 수 있다.
+    fn put(&mut self, c: char) {
+        if !c.is_control() {
+            self.text.insert(self.at, c);
+            self.at += c.len_utf8();
+            self.snap();
+        }
+    }
+
+    /// Ctrl-W·Alt-Backspace. 커서 앞의 빈칸을 넘고 낱말 하나를 지운다 — 셸과 같다.
+    /// 경로 칸이면 가름자도 빈칸처럼 넘고 멈춘다: `/home/coder/` 는 `/home/` 가 된다.
     fn rub_word(&mut self) {
         let mut from = self.at;
         let mut seen_word = false;
         for (i, g) in self.text[..self.at].grapheme_indices(true).rev() {
-            let blank = g.chars().all(char::is_whitespace);
+            let blank = g.chars().all(|c| c.is_whitespace() || (self.path && std::path::is_separator(c)));
             if blank && seen_word {
                 break;
             }
@@ -211,7 +243,7 @@ impl Input {
     /// 커서 뒤를 떼어 새 칸으로 낸다. 떼인 칸의 커서는 맨 앞이다 — Enter 가 줄을
     /// 나눈 뒤 커서는 새 줄 머리에 선다.
     pub(super) fn split_off(&mut self) -> Input {
-        Input { text: self.text.split_off(self.at), at: 0 }
+        Input { text: self.text.split_off(self.at), at: 0, path: self.path }
     }
 
     /// 뒤에 칸 하나를 잇는다. 커서는 **이은 자리**에 선다 — 앞 줄 끝의 Backspace 도
@@ -362,6 +394,14 @@ mod tests {
         press(&mut i, KeyCode::Left);
         ctrl(&mut i, 'w');
         assert_eq!(shown(&i), "한글 |뒤", "커서 뒤는 남는다");
+
+        // 경로 칸이 아니면 `/` 는 낱말의 일부다 — 거름망의 `tag=a/b` 가 한 낱말이다(moai-8dna).
+        let mut i = typed("tag=a/b/c");
+        ctrl(&mut i, 'w');
+        assert_eq!(shown(&i), "|");
+        let mut i = Input::path("a /b/c");
+        ctrl(&mut i, 'w');
+        assert_eq!(shown(&i), "a /b/|", "경로 칸이 `/` 에서 안 멈췄다");
     }
 
     /// 한글 한 자는 한 걸음이고 한 번에 지워진다. 바이트로 걸으면 커서가
@@ -463,6 +503,45 @@ mod tests {
         assert!(!i.key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT)));
         assert!(i.key(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::SHIFT)), "대문자가 막혔다");
         assert_eq!(shown(&i), "abC|");
+    }
+
+    /// **Alt-Backspace 는 낱말 하나를 지운다**(moai-979m) — readline 의 Meta-DEL. 셸에 익은 손이
+    /// 이것으로 낱말을 지운다. moai-zag3 에서 칸이 Alt 를 글자로 안 치며 무동작이 됐었다. Ctrl-W 와
+    /// 같은 자리를 지운다.
+    #[test]
+    fn alt_backspace_rubs_a_word_like_ctrl_w() {
+        let mut alt = typed("ab  cd");
+        assert!(alt.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT)), "Alt-Backspace 를 칸이 안 먹었다");
+        let mut w = typed("ab  cd");
+        ctrl(&mut w, 'w');
+        assert_eq!(shown(&alt), shown(&w), "Ctrl-W 와 다른 자리를 지웠다");
+        assert_eq!(shown(&alt), "ab  |");
+    }
+
+    /// **Ctrl+Alt 가 붙은 글자는 Windows 에서만 글자다**(moai-d3tp). Windows 의 AltGr 글자(`@`·`€`)가
+    /// 그렇게 오고, 리눅스·맥에서는 AltGr 글자가 수식자 없이 오므로 Ctrl-Alt-u 가 `u` 로 찍히면
+    /// 안 된다. **한계: 실제 Windows 터미널에서는 확인하지 못했다** — crossterm 이 내는 모양을
+    /// `KeyEvent` 로 흉내 내 `key_on` 의 두 갈래를 잰다.
+    #[test]
+    fn a_ctrl_alt_character_is_a_character_only_on_windows() {
+        let altgr = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL | KeyModifiers::ALT);
+        let mut win = typed("a");
+        assert!(win.key_on(altgr('@'), true), "Windows 에서 AltGr 글자를 안 먹었다");
+        assert!(win.key_on(altgr('€'), true));
+        assert_eq!(shown(&win), "a@€|");
+        let mut unix = typed("a");
+        assert!(!unix.key_on(altgr('@'), false), "Windows 가 아닌데 Ctrl+Alt 글자를 먹었다");
+        assert_eq!(shown(&unix), "a|");
+        // Windows 에서는 AltGr 이 Ctrl 조합보다 먼저다 — Ctrl-Alt-u 는 전부 지우기가 아니라 `u` 다.
+        // (Windows 가 아니면 이 조합은 전과 같이 Ctrl-U 로 읽힌다.)
+        let mut win_u = typed("a");
+        assert!(win_u.key_on(altgr('u'), true));
+        assert_eq!(shown(&win_u), "au|");
+        // Windows 에서도 Ctrl 만·Alt 만 붙은 글자는 여전히 든 쪽의 것이다 — Ctrl-C 로 나갈 길을 막지 않는다.
+        assert!(!win.key_on(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), true));
+        assert!(!win.key_on(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT), true));
+        // 이 빌드의 `key` 는 제 운영체제를 넘긴다.
+        assert_eq!(typed("a").key(altgr('@')), cfg!(windows));
     }
 
     #[test]

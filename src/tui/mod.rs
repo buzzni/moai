@@ -1271,7 +1271,8 @@ impl App {
         // **Alt 는 옮기면서 바뀌었다.** 옛 `typing()` 은 Alt 를 안 보고 `Alt-b` 를
         // `b` 로, `Alt-Backspace` 를 한 글자 지우기로 먹었다. 칸은 Alt 조합을
         // 글자로 치지 않으므로(Alt 를 Meta 로 보내는 터미널에서 `b` 가 찍히는 것은
-        // 사람이 친 것이 아니다) 이제 둘 다 아무 일도 하지 않는다.
+        // 사람이 친 것이 아니다) `Alt-b` 는 아무 일도 하지 않는다. `Alt-Backspace` 는
+        // 칸이 Ctrl-W 처럼 낱말 하나를 지운다(moai-979m) — 여기까지 안 온다.
         let Lookup::Run(act) = keys::lookup(keys::PROMPT, &[k]) else { return };
         if matches!(self.mode, Mode::Ask(_)) {
             self.answer(act);
