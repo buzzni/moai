@@ -241,6 +241,7 @@ impl Repo {
         // 다물면 그 동사만 쓰는 쪽은 파일이 상했다는 것을 영영 모른다(moai-relb).
         // 낱말이 달라야 해서 수를 갈라 둔다 — "그대로 두고 썼다" 는 쓴 자리의 말이다.
         if after != before {
+            // 사람이 정한 권한은 `write_atomic` 이 지킨다. 저널은 제자리에 덧붙이므로 원래 안 풀린다.
             write_atomic(&self.issues_path(), after.as_bytes())?;
             CARRIED.store(opaque.len(), std::sync::atomic::Ordering::Relaxed);
             HELD.store(0, std::sync::atomic::Ordering::Relaxed);
@@ -442,14 +443,17 @@ pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor
 }
 
 /// temp 에 쓰고 `rename` 으로 갈아끼운다. 독자는 옛 파일 아니면 새 파일만 본다.
+///
+/// **옛 파일의 권한을 바꿔 끼우기 전에** 임시 파일에 입힌다. 새로 만든 임시 파일은 umask
+/// 권한이라, 그대로 `rename` 하면 사람이 `chmod 600` 해 둔 파일이 쓰기 한 번에 남도 읽는
+/// 파일로 바뀐다. 바꾼 뒤에 입히면 그 사이 잠깐 열려 있으므로 앞에서 한다. 파일이 없던
+/// 처음 쓰기만 umask 를 따른다.
+///
+/// **고르는 인자를 두지 않는다.** 한때 권한을 넘기는 `write_atomic_as` 가 곁에 따로 있어
+/// 사용자 설정만 그것을 불렀고, `issues.jsonl` 은 권한 없는 쪽을 불러 풀렸다 (moai-c1s3).
+/// 지키지 않아야 할 쓰기가 없으니 잊을 자리도 없앤다.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
-    write_atomic_as(path, bytes, None)
-}
-
-/// [`write_atomic`] 이되 **바꿔 끼우기 전에** 임시 파일에 권한을 입힌다. 새로 만든 임시
-/// 파일은 umask 권한이라, 그대로 `rename` 하면 사람이 `chmod 600` 해 둔 파일이 쓰기 한
-/// 번에 남도 읽는 파일로 바뀐다. 바꾼 뒤에 입히면 그 사이 잠깐 열려 있으므로 앞에서 한다.
-pub(crate) fn write_atomic_as(path: &Path, bytes: &[u8], perms: Option<std::fs::Permissions>) -> R<()> {
+    let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
     let dir = path.parent().ok_or_else(|| Fail::new("경로에 디렉터리가 없다"))?;
     let tmp = dir.join(format!(
         "{}.tmp.{}",

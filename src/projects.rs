@@ -48,19 +48,26 @@ pub fn open(reg: &Registry) -> Vec<Project> {
     reg.projects
         .iter()
         .zip(crate::user_config::names(&reg.projects))
-        .map(|(p, name)| {
-            let state = match Repo::open(&p.path) {
-                Ok(Opened::Repo(repo)) => match repo.read() {
-                    Ok(load) => State::Open { repo, load },
-                    Err(e) => State::Unreadable(e.message),
-                },
-                Ok(Opened::Uninit) => State::Uninit,
-                Ok(Opened::Missing) => State::Missing,
-                Err(e) => State::Unreadable(e.message),
-            };
-            Project { path: p.path.clone(), name, hue: p.hue, state }
-        })
+        .map(|(p, name)| Project { path: p.path.clone(), name, hue: p.hue, state: State::at(&p.path) })
         .collect()
+}
+
+impl State {
+    /// 준 디렉터리 그 자리를 연다. **실패하지 않는다** — 못 여는 것도 상태다.
+    ///
+    /// 한눈 보기·`project ls`·`project add` 가 같은 자로 잰다. 등록이 따로 들여다보면
+    /// 설정이 깨진 저장소를 `add` 는 조용히 받고 `ls` 는 "못 읽는다" 로 말한다 (moai-9omq).
+    fn at(dir: &Path) -> State {
+        match Repo::open(dir) {
+            Ok(Opened::Repo(repo)) => match repo.read() {
+                Ok(load) => State::Open { repo, load },
+                Err(e) => State::Unreadable(e.message),
+            },
+            Ok(Opened::Uninit) => State::Uninit,
+            Ok(Opened::Missing) => State::Missing,
+            Err(e) => State::Unreadable(e.message),
+        }
+    }
 }
 
 impl Project {
@@ -130,8 +137,12 @@ pub struct Added {
     pub path: PathBuf,
     /// 새로 넣었나. `false` 면 이미 있었다 — 실패가 아니다.
     pub added: bool,
-    /// 그 디렉터리에 `.moai` 가 있나. 없으면 "init 전" 이다.
+    /// 그 디렉터리에 `.moai` 가 있나. 없으면 "init 전" 이다. 못 봐서 모르면(권한) `true` 쪽이다 —
+    /// 그 까닭은 `unreadable` 이 대고, "init 하라" 는 틀린 말을 하지 않는다.
     pub initialized: bool,
+    /// 등록은 했는데 그 저장소를 못 읽는다 — 설정이 깨졌거나 스냅샷을 못 연다. 사람이 읽을
+    /// 한 줄. **등록을 막지 않는다** — 쓰는 곳은 사람의 설정이지 그 저장소가 아니다.
+    pub unreadable: Option<String>,
 }
 
 /// 디렉터리 하나를 등록한다. **CLI `moai project add` 와 TUI 층의 `a` 가 함께 부른다** —
@@ -154,8 +165,14 @@ pub fn add(config: &Path, input: &Path, cwd: &Path) -> R<Added> {
         }
         doc.add(&dir)
     })?;
-    let initialized = dir.join(".moai").is_dir();
-    Ok(Added { path: dir, added, initialized })
+    // **한 번 열어 둘 다 읽는다.** `.moai` 를 따로 `is_dir` 로 보면 권한이 없어 못 본 `.moai`
+    // 가 "init 전" 으로 접혀, 못 읽는다는 줄 옆에 `init` 하라는 틀린 말이 선다 (`Repo::open`).
+    let (initialized, unreadable) = match State::at(&dir) {
+        State::Unreadable(e) => (true, Some(e)),
+        State::Uninit | State::Missing => (false, None),
+        State::Open { .. } => (true, None),
+    };
+    Ok(Added { path: dir, added, initialized, unreadable })
 }
 
 /// 뺀 결과 — [`remove`] 가 낸다.

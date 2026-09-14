@@ -187,11 +187,15 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
     use clap::CommandFactory;
     let found = crate::store::Repo::find();
     // `.moai` 밖이어도 등록한 프로젝트가 있으면 한눈 보기가 곧 시작점이다 (`status` 가
-    // 그 길로 간다). 설정이 깨진 저장소 안(`Err`)은 전처럼 도움말이다.
+    // 그 길로 간다).
+    //
+    // **설정이 깨진 저장소 안(`Err`)은 도움말이 아니다** — 아래 `status` 로 가서 다른 명령과
+    // 같은 말·같은 종료 코드로 그 설정을 댄다. 도움말로 접으면 "아직 moai 저장소가 아니다"
+    // 를 믿은 사람이 제 저장소에 `init` 을 다시 친다 (moai-byih).
     let outside = matches!(found, Ok(None));
     let reg = outside.then(|| crate::user_config::read(crate::user_config::path().as_deref()));
     let registered = reg.as_ref().is_some_and(|r| !r.projects.is_empty());
-    if found.as_ref().map_or(true, Option::is_none) && !registered {
+    if outside && !registered {
         let mut help = Vec::new();
         crate::cli::Cli::command()
             .write_help(&mut help)
@@ -200,9 +204,7 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
             String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
         out.push(String::new());
         out.push("여기는 아직 moai 저장소가 아니다 — `moai init` 으로 시작한다".into());
-        if outside {
-            out.push("다른 곳의 프로젝트를 여기서 한눈에 보려면 `moai project add <dir>` 로 등록한다".into());
-        }
+        out.push("다른 곳의 프로젝트를 여기서 한눈에 보려면 `moai project add <dir>` 로 등록한다".into());
         // **목록이 빈 까닭이 설정의 문제면 그것을 댄다.** 세션은 여기서 시작하는데, 설정이
         // 깨져 등록한 것이 안 읽힌 사람에게 "등록한 것이 없다, 더하라" 만 하면 정반대를
         // 믿고 깨진 파일에 `project add` 를 친다. `status`·`ready`·`tui` 는 이미 이 줄을 댄다

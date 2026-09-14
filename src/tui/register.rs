@@ -188,9 +188,12 @@ impl App {
             Ok(added) => {
                 self.relayer(Some(&added.path));
                 let what = if added.added { "✓ 등록함" } else { "이미 등록돼 있다" };
+                // 못 읽는 저장소면 CLI `project add` 처럼 그렇다고 댄다 — 조용히 "등록함" 만 서면
+                // 층에서 "못 읽는다" 를 처음 만난다 (moai-9omq).
+                let bad = added.unreadable.as_deref().map(|e| format!(" · ! 못 읽는다 — {}", crate::text::one_line(e))).unwrap_or_default();
                 let bare = if added.initialized { "" } else { " · init 전 — .moai 가 아직 없다" };
                 let back = if self.on_layer() || self.layer.is_none() { "" } else { " · 뿌리에서 Bksp 로 층에 올라가면 보인다" };
-                self.notice = Some(format!("{what} · {}{bare}{back}", shown(&added.path)));
+                self.notice = Some(format!("{what} · {}{bad}{bare}{back}", shown(&added.path)));
                 if let Mode::Pick(p) = &self.mode {
                     let here = p.at.dir.clone();
                     self.relist(&here);

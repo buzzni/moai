@@ -2408,6 +2408,25 @@ fn the_bare_call_speaks_json_too() {
     assert!(out.contains("\"warnings\"") && out.contains("\"flow\""), "{out}");
 }
 
+/// **설정이 깨진 저장소 안의 인자 없는 `moai` 는 그 설정을 댄다** — `status` 와 같은 말,
+/// 같은 종료 코드로. 도움말과 "아직 moai 저장소가 아니다" 를 내면 사람은 제 저장소를
+/// 믿지 못하고 `moai init` 을 다시 친다 (moai-byih).
+#[test]
+fn bare_moai_inside_names_a_broken_repo_config() {
+    let s = init("bare-badcfg");
+    std::fs::write(s.path().join(".moai/config.toml"), "prefix = \"\"\n").unwrap();
+    for json in [false, true] {
+        let flag: &[&str] = if json { &["--json"] } else { &[] };
+        let bare = moai(s.path(), flag);
+        let status = moai(s.path(), &[flag, &["status"]].concat());
+        let said = text(&bare);
+        assert!(!said.contains("아직 moai 저장소가 아니다"), "json={json}\n{said}");
+        assert!(said.contains("config.toml") && said.contains("prefix"), "json={json}: 깨진 설정을 안 댔다\n{said}");
+        assert_eq!(bare.status.code(), status.status.code(), "json={json}\n{said}");
+        assert_eq!(bare.stderr, status.stderr, "json={json}: status 와 다른 말을 한다\n{said}");
+    }
+}
+
 // ── 누가 하는가 ───────────────────────────────────────────────────────
 
 /// `MOAI_ACTOR` 를 걷고 git 이 읽을 설정을 통째로 지정해 돌린다. moai 는 git
@@ -5392,6 +5411,33 @@ fn project_add_is_idempotent() {
     assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
 }
 
+/// **설정이 깨진 `.moai` 도 등록은 하되 못 읽는다고 한 줄 댄다** (moai-9omq). 등록은
+/// 사람의 설정에 쓰는 것이지 그 저장소에 쓰는 것이 아니라 막지 않는다 — 읽기는 관대하다.
+/// 조용히 받으면 "등록함" 을 믿은 사람이 층과 `status` 에서 "못 읽는다" 를 처음 만난다.
+/// `--json` 은 더하기만 한다: `initialized` 는 전처럼 `.moai` 가 있다는 뜻이고, 곁에 `error`.
+#[test]
+fn project_add_names_a_repo_it_cannot_read() {
+    let home = Scratch::new("project-badcfg");
+    let config = home.path().join("config.toml");
+    let bad = init("project-badcfg-repo");
+    std::fs::write(bad.path().join(".moai/config.toml"), "prefix = \"\"\n").unwrap();
+    let good = init("project-goodcfg-repo");
+
+    let said = project_ok(home.path(), &config, &["project", "add", bad.path().to_str().unwrap()]);
+    assert!(said.contains("등록함"), "{said}");
+    assert!(said.contains("못 읽는다") && said.contains("prefix"), "깨진 설정을 안 댔다\n{said}");
+    assert!(std::fs::read_to_string(&config).unwrap().contains("path = "), "등록을 안 했다");
+
+    let json = project_ok(home.path(), &config, &["project", "add", bad.path().to_str().unwrap(), "--json"]);
+    one_json_value(&json);
+    assert!(json.contains("\"initialized\":true") && json.contains("\"error\":\"") && json.contains("prefix"), "{json}");
+
+    let fine = project_ok(home.path(), &config, &["project", "add", good.path().to_str().unwrap(), "--json"]);
+    assert!(!fine.contains("\"error\""), "멀쩡한 저장소에 error 를 달았다\n{fine}");
+    let fine = project_ok(home.path(), &config, &["project", "add", good.path().to_str().unwrap()]);
+    assert!(!fine.contains("못 읽는다"), "{fine}");
+}
+
 /// **링크 철자로 적힌 줄이 있으면 푼 경로를 또 넣지 않는다.** 등록은 링크를 풀어 적지만
 /// 손으로 적은 줄이나 옛 바이너리가 적은 줄은 링크 철자일 수 있다 — 글자로만 견주면 같은
 /// 저장소가 두 줄로 서고, 층에도 `project ls` 에도 둘이 보이며 하나를 빼도 다른 하나가
@@ -5611,6 +5657,27 @@ fn project_writes_keep_the_config_files_permissions() {
         project_ok(home.path(), &config, args);
         let mode = std::fs::metadata(&config).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "{args:?} 뒤에 권한이 {mode:o} 로 바뀌었다");
+    }
+}
+
+/// **스냅샷 쓰기도 사람이 정한 권한을 지킨다** (moai-c1s3). `with_write` 는 매번 임시 파일을
+/// 새로 세워 바꿔 끼우므로, 그대로 두면 `chmod 600` 한 `issues.jsonl` 이 `add` 한 번에 umask
+/// 권한으로 풀린다. 저널은 제자리에 덧붙이므로 원래 안 풀린다 — 함께 재 둔다.
+#[cfg(unix)]
+#[test]
+fn repo_writes_keep_the_snapshot_files_permissions() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let s = init("repo-perms");
+    let files = [s.path().join(".moai/issues.jsonl"), s.path().join(".moai/journal.jsonl")];
+    for f in &files {
+        std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let id = add(s.path(), &["권한"]);
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    ok(s.path(), &["note", &id, "메모"]);
+    for f in &files {
+        let mode = std::fs::metadata(f).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "{} 의 권한이 {mode:o} 로 바뀌었다", f.display());
     }
 }
 
