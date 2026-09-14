@@ -1816,3 +1816,9 @@
 {"ts":"2026-09-14T12:06:07Z","id":"moai-bqo7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"원문 idea: moai-70ix — moai show moai-70ix 의 본문이 설계 메모다"}
 {"ts":"2026-09-14T12:06:07Z","id":"moai-hxz5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"원문 idea: moai-o6e0 — moai show moai-o6e0 의 본문이 설계 메모다"}
 {"ts":"2026-09-14T12:06:07Z","id":"moai-hxz5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:06:09Z","id":"moai-ihps","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"플러그인 bless 스위치 — 시험 스위치의 두 모서리"}
+{"ts":"2026-09-14T12:06:09Z","id":"moai-qzpb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"MOAI_BLESS=0 을 거짓으로 읽는다 — 값이 있기만 하면 다시 쓰던 것을 1 류만 참으로"}
+{"ts":"2026-09-14T12:06:09Z","id":"moai-rqxo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"커밋된 plugin.json 이 깨져도 bless 로 되살린다 — hook_exe panic 전에 다시 쓸 길"}
+{"ts":"2026-09-14T12:06:09Z","id":"moai-ihps","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-x9s4 에서 펼쳤다 — MOAI_BLESS 가 0 도 참으로 읽고, 깨진 plugin.json 은 bless 로 못 고친다"}
+{"ts":"2026-09-14T12:06:09Z","id":"moai-x9s4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ihps 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-09-14T12:06:17Z","id":"moai-i9g6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
