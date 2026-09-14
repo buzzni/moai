@@ -332,6 +332,12 @@ pub struct App {
     /// 손잡이를 같이 버리면 루프가 걷힌 화면에 모른 채 그린다. [`App::follow`] 가
     /// 걸음마다 끝난 것을 join 해 패닉이면 되던진다. [`DISCARDED_KEPT`] 개까지 든다.
     discarded: Vec<std::thread::JoinHandle<()>>,
+    /// [`DISCARDED_KEPT`] 를 넘겨 **아직 도는 채로 놓은** 손잡이 수. 그 스레드가 터지면
+    /// 터미널이 걷히는데 되던질 길이 없다 — 화면이 그것을 말한다(`draw::banner`).
+    /// **붙박이다.** `trouble` 은 다음에 성공한 다시 읽기가 걷는데, 놓는 때가 곧 F5·`w`·
+    /// 쓰기가 새 읽기를 띄운 때라 몇백 ms 뒤에 사라진다. 놓은 스레드는 다시 볼 길이
+    /// 없으므로 세션 내내 남긴다.
+    let_go: usize,
     /// 다시 읽는 길. 진짜 길은 [`prepare`] 다. **시험이 갈아 끼운다** — 스레드에서
     /// 짓는 읽기가 패닉하는 때는 진짜 파일로는 못 만든다.
     read: fn(&Repo, bool) -> crate::fail::R<Fresh>,
@@ -440,6 +446,7 @@ impl App {
             watched: Vec::new(),
             pending: None,
             discarded: Vec::new(),
+            let_go: 0,
             read: prepare,
             keep,
             remembered,
@@ -628,8 +635,16 @@ impl App {
         if self.discarded.len() >= DISCARDED_KEPT {
             // 이만큼 안 끝났으면 읽기가 멈춘 것이다(느린 원격 디스크 따위). 기다리면
             // 루프가 같이 멈추므로 가장 오래된 것을 놓는다 — 그 하나만 1b63abe 이전
-            // 처지로 돌아간다.
-            self.discarded.remove(0);
+            // 처지로 돌아간다. **놓기 직전에 한 번 더 본다** — 거둔 뒤 그새 끝났으면
+            // 놓을 까닭이 없고, 패닉이면 여기서 되던진다. 그래도 돌면 놓고 센다.
+            let oldest = self.discarded.remove(0);
+            if oldest.is_finished() {
+                if let Err(payload) = oldest.join() {
+                    std::panic::resume_unwind(payload);
+                }
+            } else {
+                self.let_go += 1;
+            }
         }
         self.discarded.push(handle);
     }
@@ -2278,11 +2293,20 @@ mod tests {
         assert!(a.loading());
         a.key(key(KeyCode::F(5)));
         assert_eq!(a.discarded.len(), DISCARDED_KEPT, "든 손잡이가 상한을 넘었다");
+        // **도는 것을 놓았으면 화면이 말한다**(moai-j9on) — 그 스레드가 터지면 터미널이
+        // 걷히는데 되던질 손잡이가 없다. 다시 읽기가 걷는 `trouble` 이 아니라 붙박이다:
+        // F5 가 짓는 읽기가 끝나는 순간 걷히면 몇백 ms 뒤에 사라진다.
+        assert_eq!(a.let_go, 1);
+        let said = super::draw::tests_banner(&mut a);
+        assert!(said.contains("다시 읽기 1개를 놓았다"), "도는 스레드를 말없이 놓았다 — {said:?}");
 
         drop(tx);
         discarded_settle(&a);
         a.follow();
         assert!(!a.reaping());
+        settle(&mut a);
+        let said = super::draw::tests_banner(&mut a);
+        assert!(said.contains("다시 읽기 1개를 놓았다"), "다시 읽기가 놓은 것의 말을 걷었다 — {said:?}");
     }
 
     /// **꽉 찬 채로 버릴 때 가장 오래된 것이 그새 패닉으로 끝났으면 놓지 않고 되던진다.**
