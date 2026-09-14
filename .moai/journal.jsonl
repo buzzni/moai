@@ -1551,3 +1551,7 @@
 {"ts":"2026-09-14T09:21:31Z","id":"moai-0wpa.vvf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T09:22:19Z","id":"moai-l11z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"중복 moai-4i82 를 지웠다 (2026-09-14, 사용자와 정함) — moa-issue-e9 가 같은 일(plan_since)을 2분 뒤 main 에서 시작했다가 이쪽을 남기기로 하고 코드를 되돌렸다. 넘긴 조각(CLI 시험·status 도움말·되쓰기 시험)은 이 이슈에 반영됐다."}
 {"ts":"2026-09-14T09:22:19Z","id":"moai-4i82","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"defer·--undo 가 계획 시각을 스냅샷에 적고, --worktree 겹쳐 보기가 칸 이동과 계획 시각 중 늦은 것으로 줄을 고른다"}
+{"ts":"2026-09-14T09:30:51Z","id":"moai-5jh6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"done","to":"review","note":"리뷰에 올린다 — 보일 때만 깨우기·에픽 빛줄기를 한 리뷰로 본다"}
+{"ts":"2026-09-14T09:30:55Z","id":"moai-eomg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"done","to":"review","note":"리뷰에 올린다 — moai-5jh6 과 한 리뷰로 본다"}
+{"ts":"2026-09-14T09:31:09Z","id":"moai-5jh6.hvg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 보일 때만 깨우기·에픽 빛줄기 (5jh6·eomg)"}
+{"ts":"2026-09-14T09:31:17Z","id":"moai-5jh6.hvg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
