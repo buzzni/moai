@@ -1666,3 +1666,8 @@
 {"ts":"2026-09-14T10:31:03Z","id":"moai-j9e8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2v3w 를 펼친 것. 작업 가지는 worktree-moai-2v3w(.claude/worktrees/moai-2v3w) 그대로 — idea 는 훅 규칙 1 의 초점이 못 되어 리뷰 이슈를 자식으로 세울 수 없어 사용자와 정해 펼쳤다(2026-09-14). 고친 것: b754b39."}
 {"ts":"2026-09-14T10:31:20Z","id":"moai-7azq.p3p","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 경고가 판정한 나이를 싣는다 (7azq)"}
 {"ts":"2026-09-14T10:31:28Z","id":"moai-7azq.p3p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T10:31:54Z","id":"moai-7azq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 리뷰 moai-7azq.p3p(서브에이전트가 d0207a0 을 보는 중)의 원문과 판단을 적고 반영 → 리뷰 닫기 → worktree-moai-7azq 에 main 을 받아 전체 시험 → main 에서 머지(워크트리에서 나와야 main 을 향한 git 이 풀린다) → 7azq done 과 트래커 커밋."}
+{"ts":"2026-09-14T10:32:04Z","id":"moai-j9e8.9jb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 못 읽는 줄 셈을 프로세스 동안 쌓기 (j9e8)"}
+{"ts":"2026-09-14T10:32:12Z","id":"moai-j9e8.9jb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T10:32:51Z","id":"moai-j9e8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 리뷰 moai-j9e8.9jb(/code-review high --fix, worktree-moai-2v3w) 결과를 받아 원문·판단 노트 → 리뷰 닫기 → 가지에서 cargo test → main 에 머지 → j9e8 done 과 트래커 커밋"}
+{"ts":"2026-09-14T10:32:54Z","id":"moai-j9e8.9jb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 백그라운드 /code-review high --fix worktree-moai-2v3w 가 도는 중. 끝나면 원문을 note -b - 로, 판단을 따로 적고 mv done -m"}
