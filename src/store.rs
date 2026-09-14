@@ -109,7 +109,13 @@ impl Repo {
     /// `status` 는 앞의 것일 때만 등록한 프로젝트를 보여 줘야 한다 — 뒤의 것까지
     /// 한눈 보기로 넘기면 제 저장소의 깨진 설정이 남의 프로젝트 목록 뒤에 숨는다.
     pub fn find() -> R<Option<Repo>> {
-        let mut dir = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
+        let dir = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
+        Repo::find_from(&dir)
+    }
+
+    /// [`Repo::find`] 를 준 디렉터리에서 — 훅이 명령이 가리키는 트래커(`-C`·`cd`)를 찾을 때 쓴다.
+    pub fn find_from(dir: &Path) -> R<Option<Repo>> {
+        let mut dir = dir.to_path_buf();
         loop {
             // **못 들여다보는 조상은 건너뛴다** (`is_dir` 이 `false` 로 접는다). 위로 찾는
             // 길에서는 권한 없는 남의 디렉터리를 지나는 것이 흔한 일이라, [`Repo::open`]

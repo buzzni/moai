@@ -275,7 +275,9 @@ fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
         return super::json_line(&serde_json::json!({ "id": epic.id, "plan": md, "lossy": lossy }));
     }
     for id in &lossy {
-        eprintln!("moai: {id} 의 제목은 이 형식으로 도로 넣으면 달리 읽힌다 (앞머리 `[` 나 끝의 `#낱말`) — 넣기 전에 고친다");
+        // 앞머리 `[`·끝의 `#낱말` 은 render 가 이스케이프한다(moai-a5pz). 여기 오는 것은 원래
+        // 역슬래시를 든 제목처럼 이스케이프로도 못 담는 것뿐이라 까닭을 하나로 단정하지 않는다.
+        eprintln!("moai: {id} 의 제목은 이 형식으로 도로 넣으면 달리 읽힌다 — 넣기 전에 고친다");
     }
     Ok(md.lines().map(str::to_string).collect())
 }

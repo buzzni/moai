@@ -88,6 +88,32 @@ pub fn shelved_by<S: AsRef<str>>(roots: &[S]) -> String {
     )
 }
 
+/// 한 줄에 이름을 대는 풀린 일의 수. 넘으면 `moai ready` 로 넘긴다.
+const UNBLOCKED_SHOWN: usize = 3;
+
+/// `moai mv <id> done` 뒤 **이로써 집을 수 있게 된 일** 한 줄(moai-942k, `report::unblocked`).
+/// 없으면 `None` — 말할 것이 없을 때 출력이 전과 같다.
+///
+/// **흐린 한 줄이다.** 옮긴 줄이 주인공이고 이것은 곁들임이다. 색이 혼자 뜻을 지지 않게
+/// `↳ 풀림` 을 앞에 둔다. 여럿이면 앞 몇 건만 대고 나머지는 `moai ready` 가 낸다 —
+/// 제목을 다 달면 막음 하나를 푼 에픽 닫기가 화면을 채운다.
+pub fn unblocked_line(freed: &[Issue]) -> Option<String> {
+    if freed.is_empty() {
+        return None;
+    }
+    let named: Vec<String> = freed
+        .iter()
+        .take(UNBLOCKED_SHOWN)
+        .map(|i| format!("{} {}", paint(style::ID, &one_line(&i.id)), paint(style::DIM, &clip(&one_line(&i.title), 40))))
+        .collect();
+    let rest = freed.len().saturating_sub(UNBLOCKED_SHOWN);
+    let more = match rest {
+        0 => String::new(),
+        n => paint(style::DIM, &format!("  외 {n}건 — `moai ready`")),
+    };
+    Some(format!("{}  {}{more}", paint(style::DIM, "↳ 풀림"), named.join(&paint(style::DIM, " · "))))
+}
+
 /// 칠한 글과 **칠하지 않은 폭**을 받아 채운다 — [`cell`] 이 한 가지 색만 칠할 수
 /// 있어, 브랜치 머리표처럼 두 색이 든 칸이 이 길로 온다.
 fn pad(painted: &str, w_text: usize, w: usize) -> String {
