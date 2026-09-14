@@ -1058,44 +1058,129 @@ mod tests {
     /// 걷고 도움말을 안 고치면 여기서 이름을 대며 멈춘다.
     #[test]
     fn every_key_the_help_names_is_in_a_table() {
-        use clap::CommandFactory;
-        let cli = crate::cli::Cli::command();
-        let help = cli.find_subcommand("tui").and_then(|c| c.get_after_help()).map(|h| h.to_string()).expect("tui 도움말이 없다");
-        let mut named = Vec::new();
-        // `SPC t w` 는 띄어 적은 한 열이다 — SPC 뒤에 이어지는 한 글자 낱말을 열로 묶는다.
-        let words: Vec<&str> =
-            help.split(|c: char| c.is_whitespace() || "·,()`".contains(c)).map(|w| w.trim_end_matches(['.', '|'])).filter(|w| !w.is_empty()).collect();
-        let mut i = 0;
-        let mut joined: Vec<String> = Vec::new();
-        while i < words.len() {
-            let mut word = words[i].to_string();
-            if word == "SPC" {
-                while words.get(i + 1).is_some_and(|w| w.len() == 1 && w.is_ascii()) {
-                    i += 1;
-                    word = format!("{word} {}", words[i]);
-                }
-            }
-            joined.push(word);
-            i += 1;
+        let named = help_keys();
+        for (word, k) in &named {
+            assert!(known(k) != Lookup::Unknown, "도움말이 `{word}` 를 대는데 어느 키 표에도 없다");
         }
-        for word in &joined {
-            let word = word.as_str();
-            let Some(k) = parse_seq(word) else { continue };
-            let known = lookup(ANYWHERE, &k) != Lookup::Unknown
-                || lookup(MENU, &k) != Lookup::Unknown
-                || lookup(BROWSE, &k) != Lookup::Unknown
-                || lookup(PICK, &k) != Lookup::Unknown
-                || lookup(JOT, &k) != Lookup::Unknown;
-            assert!(known, "도움말이 `{word}` 를 대는데 어느 키 표에도 없다");
-            named.push(word);
-        }
-        assert!(!joined.iter().any(|w| w.starts_with('F') && parse(w).is_some()), "도움말이 걷은 F키를 댄다: {joined:?}");
+        let words: Vec<&str> = named.iter().map(|(w, _)| w.as_str()).collect();
+        let help = tui_help();
+        assert!(!help.split_whitespace().any(|w| w.starts_with('F') && parse(w.trim_end_matches(['.', ','])).is_some()), "도움말이 걷은 F키를 댄다: {help}");
         for must in [
             "Ctrl-C", "SPC q", "SPC f", "SPC n", "SPC r", "SPC /", "SPC p a", "SPC p d", "SPC t w", "SPC t r", "SPC", "Enter",
-            "Backspace", "Shift-Tab", "j", "k", "h", "l", "gg", "G", "Ctrl-d", "Ctrl-u", "Ctrl-f", "Ctrl-b", "Ctrl-S", "Esc", "/",
+            "Backspace", "Shift-Tab", "j", "k", "h", "l", "gg", "G", "Ctrl-d", "Ctrl-u", "Ctrl-f", "Ctrl-b", "Ctrl-S", "Esc", "/", "g p",
+            ".",
         ] {
-            assert!(named.contains(&must), "도움말에서 `{must}` 를 못 뽑았다 — 뽑기가 헛돈다: {named:?}");
+            assert!(words.contains(&must), "도움말에서 `{must}` 를 못 뽑았다 — 뽑기가 헛돈다: {words:?}");
         }
+    }
+
+    /// **표에 이름 붙은 키는 `moai tui --help` 가 댄다**(moai-3l4l) — 위 시험의 거꾸로다. 위만 있으면
+    /// 표에 키를 더하고 도움말을 안 고쳐도 지나가, 도움말이 표의 절반만 대는 채로 낡는다(F5·F3·`/`·
+    /// `f`·`w` 가 그렇게 빠져 있었다). 숨은 별칭(`label: None`)은 안 본다 — 바에도 메뉴에도 안
+    /// 서는 키라 도움말이 대지 않는 것이 맞다. 이름은 **키 열로** 견준다: 표의 `Bksp` 를 도움말은
+    /// `Backspace` 로 적는다.
+    #[test]
+    fn every_key_a_table_names_is_in_the_help() {
+        let said: Vec<Vec<KeyEvent>> = help_keys().into_iter().map(|(_, k)| k).collect();
+        let mut missing = Vec::new();
+        let mut check = |table: &str, rows: Vec<(&'static str, &'static [Key])>| {
+            for (name, seq) in rows {
+                let told = said.iter().any(|k| k.len() == seq.len() && seq.iter().zip(k).all(|(key, ev)| key.matches(*ev)));
+                if !told {
+                    missing.push(format!("{table}: {name}"));
+                }
+            }
+        };
+        check("ANYWHERE", named(ANYWHERE));
+        check("BROWSE", named(BROWSE));
+        check("MENU", named(MENU));
+        check("PROMPT", named(PROMPT));
+        check("PICK", named(PICK));
+        check("PATH", named(PATH));
+        check("JOT", named(JOT));
+        check("CONFIRM", named(CONFIRM));
+        assert!(missing.is_empty(), "표에 이름 붙은 키를 `moai tui --help` 가 안 댄다: {missing:?}");
+    }
+
+    fn tui_help() -> String {
+        use clap::CommandFactory;
+        let cli = crate::cli::Cli::command();
+        cli.find_subcommand("tui").and_then(|c| c.get_after_help()).map(|h| h.to_string()).expect("tui 도움말이 없다")
+    }
+
+    /// 표의 이름 붙은 줄 — (이름, 키 열).
+    fn named<A>(table: &[Bind<A>]) -> Vec<(&'static str, &'static [Key])> {
+        table.iter().filter_map(|b| b.label.map(|l| (l, b.seq))).collect()
+    }
+
+    fn bare<A>(l: Lookup<A>) -> Lookup<()> {
+        match l {
+            Lookup::Run(_) => Lookup::Run(()),
+            Lookup::Pending => Lookup::Pending,
+            Lookup::Unknown => Lookup::Unknown,
+        }
+    }
+
+    /// 어느 표에서든 그 열의 뜻. 모르면 `Unknown`.
+    fn known(k: &[KeyEvent]) -> Lookup<()> {
+        let tables = [
+            bare(lookup(ANYWHERE, k)),
+            bare(lookup(MENU, k)),
+            bare(lookup(BROWSE, k)),
+            bare(lookup(PICK, k)),
+            bare(lookup(JOT, k)),
+            bare(lookup(PROMPT, k)),
+            bare(lookup(PATH, k)),
+            bare(lookup(CONFIRM, k)),
+        ];
+        if tables.contains(&Lookup::Run(())) {
+            Lookup::Run(())
+        } else if tables.contains(&Lookup::Pending) {
+            Lookup::Pending
+        } else {
+            Lookup::Unknown
+        }
+    }
+
+    /// 도움말에서 키 이름으로 읽히는 낱말을 전부 뽑는다 — (적힌 낱말, 키 열).
+    ///
+    /// **띄어 적은 열(`SPC t w`·`g p`)을 한 낱말로 묶는다**: 어느 표에서 접두어로 읽히는 낱말 뒤에
+    /// 한 글자 낱말이 이어지면, 열이 접두어인 동안 붙인다. `.` 은 그 자체로 키다(고르기 창의 숨은 것)
+    /// — **띄어 쓴 자리에 홀로 선** `` `.` `` 만 키로 읽는다. 문장 끝의 `.` 은 떼고, `줄).` 처럼 괄호
+    /// 뒤에 남은 `.` 도 키가 아니다 — 그것까지 읽으면 도움말이 `.` 을 안 대도 시험이 지나간다.
+    fn help_keys() -> Vec<(String, Vec<KeyEvent>)> {
+        let help = tui_help();
+        let words: Vec<&str> = help
+            .split_whitespace()
+            .flat_map(|token| -> Vec<&str> {
+                if token.trim_matches('`') == "." {
+                    return vec!["."];
+                }
+                token
+                    .split(|c: char| "·,()`".contains(c))
+                    .map(|w| w.trim_end_matches(['.', '|']))
+                    .filter(|w| !w.is_empty() && *w != ".")
+                    .collect()
+            })
+            .collect();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < words.len() {
+            let mut word = words[i].to_string();
+            if let Some(mut k) = parse_seq(&word) {
+                while known(&k) == Lookup::Pending
+                    && let Some(next) = words.get(i + 1).filter(|w| w.len() == 1 && w.is_ascii())
+                    && let Some(more) = parse(next)
+                {
+                    k.push(more);
+                    word = format!("{word} {next}");
+                    i += 1;
+                }
+                out.push((word, k));
+            }
+            i += 1;
+        }
+        out
     }
 
     fn layer() -> Ctx {
