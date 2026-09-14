@@ -1319,7 +1319,7 @@ fn project_head(p: &crate::projects::Project, tail: &str) -> String {
 }
 
 /// 열지 못한 프로젝트의 한 줄. **무엇을 하면 되는지를 함께 댄다.**
-fn unopened<T>(p: &crate::projects::Project, s: &crate::projects::Seen<T>) -> String {
+pub(crate) fn unopened<T>(p: &crate::projects::Project, s: &crate::projects::Seen<T>) -> String {
     use crate::projects::Seen;
     let at = shell_arg(&p.path);
     match s {

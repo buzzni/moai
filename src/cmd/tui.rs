@@ -12,7 +12,11 @@ use crate::store::Repo;
 use std::io::IsTerminal;
 
 pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    // `.moai` 밖이면 등록한 프로젝트의 층에서 시작한다(moai-ujpu). **설정이 깨진 저장소
+    // 안(`Err`)은 층으로 새지 않는다** — 제 저장소의 깨진 설정이 남의 목록 뒤에 숨는다.
+    let Some(repo) = Repo::find()? else {
+        return outside(ctx, args);
+    };
     // **재는 것이 읽는 것보다 먼저다.** 읽고 나서 재면 그 사이에 떨어진 쓰기가
     // "이미 본 것" 으로 적혀 그 뒤로 영영 바뀐 줄 모른다. 먼저 재면 최악이
     // 헛 알림 하나고, 빠진 알림보다 헛 알림이 싸다.
@@ -36,16 +40,112 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         return super::json_line(&rows);
     }
 
-    // **TTY 가 아니면 켜지 않는다.** 파이프에 대고 대체 화면을 켜면 그 자리에서
-    // 멈춰 서고, 부른 쪽은 왜 멈췄는지 알 길이 없다.
-    if !std::io::stdout().is_terminal() {
+    refuse_without_terminal()?;
+
+    // 등록한 프로젝트가 있으면 층을 얹는다 — 뿌리에서 한 칸 더 올라가면 층이다(결정 3).
+    // **남의 프로젝트는 여기서 안 읽는다**: 처음 올라갈 때 읽는다. 안에서 띄운 사람의 첫
+    // 화면을 등록한 저장소 수만큼 늦출 까닭이 없다.
+    let layer = crate::tui::layer::Layer::read(crate::user_config::path().as_deref(), Some(&repo.root));
+    let mut app = App::open(repo, load, index, path, stamp);
+    if layer.registered() {
+        app = app.with_layer(layer);
+    }
+    app.user = ctx.user.clone();
+    screen(app)
+}
+
+/// `.moai` 밖에서 부른 탐색기 — 등록한 프로젝트의 층.
+///
+/// **등록한 것이 없으면 `status`·`ready` 와 같은 말로 멈춘다**(`cmd::nothing_registered`).
+/// 보여줄 것이 없는데 빈 화면을 켜면 `.moai` 밖에서 부른 실수가 성공으로 읽힌다.
+fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
+    let config = crate::user_config::path();
+    let reg = crate::user_config::read(config.as_deref());
+    if reg.projects.is_empty() {
+        return Err(super::nothing_registered(&reg));
+    }
+    // `--path` 는 한 프로젝트 안의 id 다. 어느 프로젝트인지 모르는 채로 받으면 id 가 겹치는
+    // 두 프로젝트 중 하나를 말없이 고르게 된다.
+    if args.path.is_some() {
         return Err(Fail::coded(
-            "터미널이 아니라 탐색기를 띄우지 않는다.\n      \
-             목록만 필요하면 `moai tui --json` 이다",
+            "`--path` 는 프로젝트 안의 id 다 — `moai -C <dir> tui --path <id>` 로 그 프로젝트에서 연다",
             super::code::BAD_INPUT,
         ));
     }
+    if ctx.json {
+        let now = crate::model::now();
+        let projects = crate::projects::open(&reg);
+        let rows: Vec<ProjectRow> = projects
+            .iter()
+            .map(|p| {
+                let seen = p.seen(|repo, load| {
+                    let sum = crate::tui::layer::summarize(repo, load, &now);
+                    Counted {
+                        counts: sum.counts.into_iter().collect(),
+                        picked: sum.picked.into_iter().map(|i| i.id).collect(),
+                        warnings: sum.warnings,
+                        unreadable: sum.unreadable,
+                    }
+                });
+                ProjectRow {
+                    title: &p.name,
+                    kind: "project",
+                    dir: matches!(seen, crate::projects::Seen::Ok(_)),
+                    path: &p.path,
+                    seen,
+                }
+            })
+            .collect();
+        // 사용자 설정의 문제는 말만 한다 — 한눈 보기와 같다. stderr 라 `--json` 을 흐리지 않는다.
+        for problem in &reg.problems {
+            eprintln!("{problem}");
+        }
+        return super::json_line(&rows);
+    }
+    refuse_without_terminal()?;
+    let mut app = App::on_projects(crate::tui::layer::Layer::read(config.as_deref(), None));
+    app.user = ctx.user.clone();
+    screen(app)
+}
 
+/// 층의 `--json` 한 줄. **탐색기 줄(`Row`)과 같은 키를 쓴다** — `title`·`kind`·`dir`·`path`.
+/// 다른 것은 손잡이의 뜻 하나다: 프로젝트 줄의 `path` 는 `--path` 가 아니라 디렉터리라
+/// `moai -C <path> tui --json` 으로 들어간다. 상태 낱말은 `project ls --json`·한눈 보기와
+/// 같다(`projects::Seen`).
+#[derive(serde::Serialize)]
+struct ProjectRow<'a> {
+    title: &'a str,
+    kind: &'static str,
+    dir: bool,
+    path: &'a std::path::Path,
+    #[serde(flatten)]
+    seen: crate::projects::Seen<'a, Counted>,
+}
+
+/// 연 프로젝트의 셈 — 화면의 층이 쓰는 그 셈(`layer::summarize`)이다.
+#[derive(serde::Serialize)]
+struct Counted {
+    counts: std::collections::BTreeMap<String, usize>,
+    picked: Vec<String>,
+    warnings: usize,
+    unreadable: usize,
+}
+
+/// **TTY 가 아니면 켜지 않는다.** 파이프에 대고 대체 화면을 켜면 그 자리에서
+/// 멈춰 서고, 부른 쪽은 왜 멈췄는지 알 길이 없다.
+fn refuse_without_terminal() -> R<()> {
+    if std::io::stdout().is_terminal() {
+        return Ok(());
+    }
+    Err(Fail::coded(
+        "터미널이 아니라 탐색기를 띄우지 않는다.\n      \
+         목록만 필요하면 `moai tui --json` 이다",
+        super::code::BAD_INPUT,
+    ))
+}
+
+/// 화면을 켜고 끝날 때까지 돈다.
+fn screen(mut app: App) -> R<Vec<String>> {
     // 터미널 복구는 ratatui 에 맡긴다 — `try_init` 이 raw mode·대체 화면을 켜고
     // **되돌리는 패닉 훅까지** 건다. 손으로 짜면 어느 이른 return 하나가
     // 사용자 셸을 망가뜨린다.
@@ -54,8 +154,6 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 부르고 그것은 `.expect()` 다 — 통제 터미널이 없거나 크기를 못 얻으면
     // 101 번 패닉이 나고, `--json` 으로 부른 쪽은 약속된 오류 객체 대신
     // 역추적 문구를 받는다. 여기서 받아 `Fail` 로 바꾼다.
-    let mut app = App::open(repo, load, index, path, stamp);
-    app.user = ctx.user.clone();
     let mut term = ratatui::try_init().map_err(|e| Fail::new(format!("터미널을 열지 못했다: {e}")))?;
     let out = loop_until_quit(&mut term, &mut app);
     ratatui::restore();
@@ -201,7 +299,8 @@ fn spin_step(drew: std::time::Duration) -> std::time::Duration {
 }
 
 fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result<()> {
-    let mut stale_due = std::time::Instant::now() + TICK;
+    // 층에서 시작하면 읽기가 이미 돌 수 있다 — 첫 걸음부터 빠르게 받는다.
+    let mut stale_due = std::time::Instant::now() + if app.loading() { LOAD_POLL } else { TICK };
     let mut spin_due = std::time::Instant::now() + SPIN_TICK;
     while !app.quit {
         let began = std::time::Instant::now();
@@ -225,6 +324,10 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
             }
         }
         let now = std::time::Instant::now();
+        // 키가 읽기를 띄웠으면(층으로 올라가기 따위) 느린 걸음까지 기다리지 않고 받으러 깬다.
+        if app.loading() {
+            stale_due = stale_due.min(now + LOAD_POLL);
+        }
         if now >= stale_due {
             app.follow();
             stale_due = now + if app.loading() || app.reaping() { LOAD_POLL } else { TICK };

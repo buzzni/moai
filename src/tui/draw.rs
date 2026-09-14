@@ -6,6 +6,7 @@
 
 use super::form::{Field, Form};
 use super::scroll::Scroll;
+use super::layer::{Look, Place, Shut};
 use super::{App, Input, Mode, Pane, Row};
 use crate::nav::Entry;
 use crate::report::Blocker;
@@ -217,6 +218,13 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 옆 워크트리의 문제는 **급하지 않다** — 제 파일은 멀쩡하고, 그 줄만 빠진 채로
     // 겹쳐 보고 있다.
     parts.extend(app.elsewhere.iter().cloned());
+    // 사용자 설정의 문제는 **층에서만** 말한다 — 등록 목록의 일이라 프로젝트 안의 화면과는
+    // 상관이 없고, 급하지도 않다(읽을 수 있는 항목은 그대로 섰다).
+    if app.on_layer()
+        && let Some(l) = &app.layer
+    {
+        parts.extend(l.problems.iter().map(|p| crate::text::sanitize(p).replace('\n', " ")));
+    }
     // 알림 하나뿐이면 `!` 를 안 붙인다 — 담긴 것을 경보처럼 말하면 담을 때마다 무언가
     // 잘못된 줄 안다.
     let lead = if parts.len() == 1 && app.notice.is_some() { "" } else { "! " };
@@ -236,7 +244,7 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
     };
     // **겹쳐 보는 중이면 늘 보인다** — 거름망 뱃지와 같은 까닭이다. 옆에서 온 줄에만
     // `⎇` 가 붙으므로, 옆이 조용하면 켜진 화면과 꺼진 화면이 똑같이 보인다.
-    let overlay = app.worktree.then(|| {
+    let overlay = (app.worktree && !app.on_layer()).then(|| {
         let trees = app.origin.labels();
         let names = if trees.is_empty() { "옆 워크트리 없음".to_string() } else { trees.join(", ") };
         clip(&format!("{} {names}  w 로 끈다", style::BRANCH_GLYPH), w / 2)
@@ -254,7 +262,17 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
         Some(t) => room.saturating_sub(crate::text::width(t) + 3),
         None => room,
     };
-    let mut spans = vec![Span::styled(clip(&app.crumbs(), room), bold())];
+    // **어느 프로젝트인지 늘 앞에 선다**(층이 있을 때). 경로는 뒤에서부터 잘리므로 이름이
+    // 앞이면 깊이 들어가도 남는다 — 대신 이름이 줄을 다 먹지 않게 반까지만 준다.
+    let mut spans = Vec::new();
+    let mut room = room;
+    if let Some(p) = app.project() {
+        let name = clip(&crate::text::sanitize(&p.name), (room / 2).max(1));
+        room = room.saturating_sub(crate::text::width(&name) + 1);
+        spans.push(Span::styled(name, project_style(&p.path)));
+        spans.push(Span::styled(":", bold()));
+    }
+    spans.push(Span::styled(clip(&app.crumbs(), room), bold()));
     if let Some(t) = read_at {
         spans.push(Span::raw("   "));
         spans.push(Span::styled(t, dim()));
@@ -369,7 +387,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         .iter()
         .filter_map(|r| match r {
             Row::Item(e) => e.at(),
-            Row::Up => None,
+            Row::Up | Row::Project(_) => None,
         })
         .filter(|&at| crate::report::is_work(&app.issues[at]))
         .collect();
@@ -386,9 +404,14 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // **줄이 있으면 "비었다" 라고 하지 않는다.** 셈은 config 에 있는 칸의 일만
     // 세므로, 묶음만 있는 디렉터리·바구니만 있는 디렉터리·config 에 없는 칸에
     // 선 줄에서는 비어 있고, 그때 제목이 목록과 정면으로 어긋난다.
-    let title = match (counts.is_empty(), rows.is_empty()) {
+    // `..` 은 줄로 안 센다 — 층이 있으면 프로젝트 뿌리에도 서므로, 세면 빈 프로젝트가
+    // " 1줄 " 로 서고 "비었다" 에 영영 못 닿는다.
+    let lines = rows.iter().filter(|r| !matches!(r, Row::Up)).count();
+    let title = match (counts.is_empty(), lines == 0) {
+        // 층의 줄은 일이 아니라 프로젝트다 — 칸 셈은 줄마다 곁에 선다.
+        _ if app.on_layer() => format!(" 프로젝트 {}곳 ", rows.len()),
         (_, true) => " 비었다 ".to_string(),
-        (true, false) => format!(" {}줄 ", rows.len()),
+        (true, false) => format!(" {lines}줄 "),
         (false, _) => format!(" {} ", counts.join("  ")),
     };
     // **자리는 프레임을 넘어 산다**(`App::list`). 매번 새로 세면 훑는 자리가 0 으로
@@ -438,8 +461,10 @@ fn scroll_mark(f: &mut Frame, s: &Scroll, at: Rect, hint: &str, focused: bool) {
 
 /// 한 줄: `id  p· 제목`. 디렉터리는 제목 뒤에 `/` 가 붙는다 — MC 와 같다.
 fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
-    let Row::Item(e) = r else {
-        return Line::from(Span::styled("..", dim()));
+    let e = match r {
+        Row::Item(e) => e,
+        Row::Up => return Line::from(Span::styled("..", dim())),
+        Row::Project(at) => return place_line(app, *at, budget),
     };
     let is_dir = matches!(e, Entry::Dir { .. });
     let Some(at) = e.at() else {
@@ -502,7 +527,10 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
 
     let lines = match app.current_of(rows) {
         None => vec![Line::from(Span::styled("없다", dim()))],
+        // 프로젝트 뿌리의 `..` 은 층으로 간다 — 어디로 가는지 말한다.
+        Some(Row::Up) if app.path.is_empty() => vec![Line::from(Span::styled("프로젝트 층으로", dim()))],
         Some(Row::Up) => vec![Line::from(Span::styled("한 층 위로", dim()))],
+        Some(Row::Project(at)) => place_about(app, at, inner.width as usize),
         Some(Row::Item(e)) => match e.at() {
             Some(idx) => about(app, idx, &e, inner.width as usize),
             // 바구니는 제 줄이 없다. 밑에 무엇이 있는지만 센다.
@@ -866,6 +894,131 @@ fn field<'a>(k: &str, v: &str, w: usize, room: usize) -> Line<'a> {
     ])
 }
 
+/// 프로젝트 이름을 칠하는 **한 곳** — 경로 줄·층의 줄·층의 상세가 모두 이것을 부른다.
+///
+/// 색은 CLI 한눈 보기와 같은 `style::project_colour` 다(moai-xs9x). **경로로 고른다** —
+/// 이름은 등록 목록을 따라 바뀌는 파생값이라, 이름으로 고르면 프로젝트 하나를 더할 때
+/// 옆 프로젝트의 색이 바뀌고 두 표면이 같은 프로젝트를 다른 색으로 칠한다. 무게는 CLI
+/// 머리와 같은 `HEAD` 다. 칠하는 곳에는 늘 이름이 곁에 선다 — 색이 혼자 뜻을 지지 않는다.
+fn project_style(path: &std::path::Path) -> Style {
+    from_anstyle(style::project_colour(path).effects(style::HEAD.get_effects()))
+}
+
+/// 층의 한 줄: `이름/  ·3 ▸1 ✓12  여기  /경로`. 들어갈 수 있는 것만 `/` 가 붙는다.
+///
+/// **칸은 글리프와 수로** 선다 — 칸 이름까지 적으면 80칸의 왼쪽 칸에 두 칸도 안 들어간다.
+/// 글리프가 뜻을 지므로 색이 혼자 말하지 않고, 이름은 오른쪽 상세가 댄다. 못 여는 것은
+/// CLI 한눈 보기와 같은 말을 잘라서 낸다 — 무엇인지는 앞머리(`init 전`·`디렉터리가 없다`·
+/// `못 읽는다`)에 있어 잘려도 남는다.
+fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
+    let Some(p) = app.layer.as_ref().and_then(|l| l.places.get(at)) else {
+        return Line::from("");
+    };
+    let room = budget.saturating_sub(crate::text::width(CURSOR));
+    let enterable = matches!(p.look, Look::Open { .. } | Look::Unread);
+    // 이름이 줄을 다 먹으면 무엇이 서 있는지가 안 보인다 — 반까지만. `/` 는 자른 뒤에 붙인다.
+    let mut name = clip(&crate::text::sanitize(&p.name), (room / 2).max(2).saturating_sub(1));
+    if enterable {
+        name.push('/');
+    }
+    let mut spans = vec![Span::styled(name, project_style(&p.path)), Span::raw("  ")];
+    match &p.look {
+        Look::Unread => spans.push(Span::styled("읽는 중", dim())),
+        Look::Open { sum, .. } => {
+            let shown: Vec<Span> = sum
+                .counts
+                .iter()
+                .filter(|(_, n)| *n > 0)
+                .flat_map(|(st, n)| [Span::styled(format!("{}{n}", style::glyph(st)), status(st)), Span::raw(" ")])
+                .collect();
+            if shown.is_empty() {
+                spans.push(Span::styled("비었다", dim()));
+            } else {
+                spans.extend(shown);
+            }
+            if sum.warnings > 0 || sum.unreadable > 0 {
+                spans.push(Span::styled(" !", from_anstyle(style::WARN)));
+            }
+        }
+        Look::Shut { state, said } => spans.push(Span::styled(said.clone(), shut_style(*state))),
+    }
+    if p.launched {
+        spans.push(Span::styled(if p.registered { "  여기" } else { "  여기 · 등록 안 됨" }, dim()));
+    }
+    spans.push(Span::styled(format!("  {}", crate::text::sanitize(&p.path.display().to_string())), dim()));
+    fit(Line::from(spans), room)
+}
+
+/// 못 여는 프로젝트의 색 — CLI 한눈 보기(`view::unopened`)와 같은 무게다. init 전은
+/// 고칠 것이 아니라 흐리게, 사라진 것은 경고, 못 읽는 것은 오류. 뜻은 말이 진다.
+fn shut_style(s: Shut) -> Style {
+    match s {
+        Shut::Uninit => dim(),
+        Shut::Missing => from_anstyle(style::WARN),
+        Shut::Unreadable => from_anstyle(style::ERROR),
+    }
+}
+
+/// 층의 줄에 커서가 섰을 때 — 그 프로젝트의 한눈 보기. `moai status` 가 `.moai` 밖에서
+/// 내는 한 덩어리와 같은 셈이다(칸별 수·집은 것·드러난 것).
+fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
+    let Some(p) = app.layer.as_ref().and_then(|l| l.places.get(at)) else {
+        return vec![Line::from(Span::styled("없다", dim()))];
+    };
+    let place: &Place = p;
+    let mut out = wrapped(&place.name, w, project_style(&place.path));
+    out.extend(wrapped(&place.path.display().to_string(), w, dim()));
+    match (place.launched, place.registered) {
+        (true, true) => out.push(Line::from(Span::styled("여기서 띄웠다", dim()))),
+        // 고칠 명령에는 **그 뿌리를** 댄다. `.` 이라 적으면 하위 디렉터리에서 띄운 사람이 그
+        // 하위 디렉터리를 등록한다 — 그곳은 `.moai` 가 없어 "init 전" 으로 선다.
+        (true, false) => {
+            let at = crate::text::shell_word(&crate::text::sanitize(&place.path.display().to_string()));
+            out.extend(wrapped(&format!("여기서 띄웠다 · 등록 안 됨 — `moai project add {at}` 로 더하면 어디서든 보인다"), w, dim()))
+        }
+        _ => {}
+    }
+    out.push(Line::from(""));
+    match &place.look {
+        Look::Unread => out.push(Line::from(Span::styled("읽는 중", dim()))),
+        Look::Shut { state, said } => out.extend(wrapped(said, w, shut_style(*state))),
+        Look::Open { sum, .. } => {
+            for (st, n) in &sum.counts {
+                out.push(Line::from(Span::styled(format!("{} {st} {n}", style::glyph(st)), status(st))));
+            }
+            out.push(Line::from(""));
+            out.push(Line::from(Span::styled(format!("집은 것 {}건", sum.picked.len()), bold())));
+            for i in &sum.picked {
+                out.push(Line::from(vec![
+                    Span::styled(i.id.clone(), dim()),
+                    Span::raw("  "),
+                    Span::styled(style::glyph(&i.column).to_string(), status(&i.column)),
+                    Span::raw(" "),
+                    Span::raw(crate::text::sanitize(&i.title)),
+                ]));
+            }
+            out.push(Line::from(""));
+            if sum.warnings == 0 {
+                out.push(Line::from(vec![Span::styled("✓", status("done")), Span::raw(" 드러난 문제 없다")]));
+            } else {
+                out.push(Line::from(vec![
+                    Span::styled("!", from_anstyle(style::WARN)),
+                    Span::raw(format!(" 드러난 것 {}건 — 들어가서 `moai status`", sum.warnings)),
+                ]));
+            }
+            if sum.unreadable > 0 {
+                out.push(Line::from(vec![
+                    Span::styled("!", from_anstyle(style::ERROR)),
+                    Span::raw(format!(" 읽을 수 없는 줄 {}개", sum.unreadable)),
+                ]));
+            }
+            out.push(Line::from(""));
+            out.push(Line::from(Span::styled("Enter 로 들어간다", dim())));
+        }
+    }
+    out
+}
+
 fn bold() -> Style {
     Style::new().add_modifier(Modifier::BOLD)
 }
@@ -878,6 +1031,15 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
     // 빽빽한 줄보다 나쁘다. 폭이 모자라면 앞쪽부터 버린다.
     // `w` 는 **맨 먼저 떨어진다.** 켜 둔 동안에는 경로 줄의 뱃지가 끄는 법을 대므로,
     // 좁은 창에서 이 자리를 잃어도 나갈 길을 잃지는 않는다.
+    // **층에서는 층에서 듣는 키만 적는다** — `n`·`f`·`/`·`w` 는 층에서 까닭만 말하고
+    // (`layer::refused`) 나가기는 위가 없다. 적어 두면 누를 때마다 "안 된다" 를 듣는다.
+    if app.on_layer() {
+        let mut optional = vec![key("j·k", "굴리기"), key("F5", "갱신"), key("Tab", pane_name(app.focus.next()))];
+        if app.focus == Pane::Explorer {
+            optional.push(key("Enter", "들어가기"));
+        }
+        return bar(f, at, optional, vec![key("F10", "끝내기")]);
+    }
     let mut optional = vec![
         key("w", if app.worktree { "워크트리 끄기" } else { "워크트리" }),
         key("j·k", "굴리기"),
@@ -914,7 +1076,11 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
         keep.push(key("Esc", "풀기"));
     }
     keep.push(key("F10", "끝내기"));
+    bar(f, at, optional, keep);
+}
 
+/// F키 바를 폭에 맞춰 놓는다. `optional` 은 **뒤에서부터** 들어가고 모자라면 앞쪽이 떨어진다.
+fn bar(f: &mut Frame, at: Rect, mut optional: Vec<Span<'_>>, keep: Vec<Span<'_>>) {
     let width = |v: &[Span]| v.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
     let room = at.width as usize;
     let mut spans: Vec<Span> = Vec::new();
@@ -1674,6 +1840,98 @@ mod tests {
         }
     }
 
+    /// 층을 그림 시험용으로 세운다 — 연 것 하나, init 전 하나, 사라진 것 하나.
+    fn layered(at: super::super::layer::At) -> App {
+        use super::super::layer::{Look, Picked, Shut, Summary};
+        let open = Look::Open {
+            sum: Summary {
+                counts: vec![("todo".into(), 3), ("in_progress".into(), 1), ("review".into(), 0), ("done".into(), 12)],
+                picked: vec![Picked { id: "argos-0004".into(), title: "집은 멤버".into(), column: "in_progress".into() }],
+                warnings: 2,
+                unreadable: 0,
+            },
+        };
+        let bare = Look::Shut { state: Shut::Uninit, said: "· init 전 — `moai -C /w/bare init` 으로 시작하면 여기 보인다".into() };
+        let gone = Look::Shut { state: Shut::Missing, said: "! 디렉터리가 없다  → 옮겼으면 새 자리를 등록하고".into() };
+        let mut a = app();
+        a.layer = Some(super::super::layer::fake(vec![("one", "/w/one", open), ("bare", "/w/bare", bare), ("gone", "/w/gone", gone)], at));
+        a
+    }
+
+    /// **층도 색 없이 80칸에서 읽힌다** — 어디인지(경로 줄), 프로젝트마다 이름·들어갈 수 있는지
+    /// (`/`)·칸 글리프와 수·못 여는 까닭, 오른쪽에 칸 이름별 수와 집은 것. 아래 줄은 층에서
+    /// 듣는 키만 적는다 — `n`·거름망·나가기는 층에서 까닭만 말한다.
+    #[test]
+    fn the_project_layer_reads_without_colour_at_eighty_columns() {
+        use super::super::layer::At;
+        let mut a = layered(At::Layer);
+        a.issues.clear();
+        a.index = crate::nav::Index::of(&[]);
+        a.keep.clear();
+        a.warnings = 0;
+        let lines = render(&mut a, 80, 22);
+        let screen = lines.join("\n");
+        assert!(lines[0].starts_with("프로젝트 층"), "{:?}", lines[0]);
+        assert!(screen.contains("프로젝트 3곳"), "{screen}");
+        let row = lines.iter().find(|l| l.contains("one/")).unwrap_or_else(|| panic!("{screen}"));
+        assert!(row.contains("·3") && row.contains("▸1") && row.contains("✓12") && !row.contains("?0"), "{row:?}");
+        assert!(lines.iter().any(|l| l.contains("bare") && !l.contains("bare/") && l.contains("init 전")), "{screen}");
+        assert!(lines.iter().any(|l| l.contains("gone") && l.contains("디렉터리가 없다")), "{screen}");
+        assert!(screen.contains("in_progress 1") && screen.contains("집은 것 1건") && screen.contains("집은 멤버"), "{screen}");
+        assert!(screen.contains("드러난 것 2건"), "{screen}");
+        let bar = lines.last().unwrap();
+        assert!(bar.contains("Enter 들어가기") && bar.contains("F10 끝내기"), "{bar:?}");
+        for absent in ["담기", "거름망", "Bksp", "워크트리", "F3"] {
+            assert!(!bar.contains(absent), "층에서 안 듣는 키를 적었다 — {absent} in {bar:?}");
+        }
+        for l in &lines {
+            assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
+        }
+    }
+
+    /// **프로젝트 안에서는 경로 줄이 늘 어느 프로젝트인지 댄다.** 뿌리에는 층으로 가는 `..`
+    /// 이 서고 오른쪽이 그곳이 어디인지 말한다. 깊이 들어가 경로가 잘려도 이름은 남는다.
+    #[test]
+    fn inside_a_project_the_path_line_names_it_and_the_root_climbs_to_the_layer() {
+        use super::super::layer::At;
+        let mut a = layered(At::Project("/w/one".into()));
+        a.cursor = 0;
+        let lines = render(&mut a, 80, 12);
+        assert!(lines[0].starts_with("one:/"), "{:?}", lines[0]);
+        let screen = lines.join("\n");
+        assert!(screen.contains("..") && screen.contains("프로젝트 층으로"), "{screen}");
+
+        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(a.path.len(), 1);
+        let lines = render(&mut a, 40, 12);
+        assert!(lines[0].starts_with("one:/아주"), "깊이 들어가자 프로젝트 이름이 잘렸다 — {:?}", lines[0]);
+    }
+
+    /// **프로젝트 이름은 CLI 한눈 보기와 같은 색이다** — 경로 줄에서도 층의 줄에서도
+    /// `style::project_colour(경로)` 를 입는다. 두 표면이 같은 프로젝트를 다른 색으로 칠하면
+    /// 색으로 알아보라던 약속이 거꾸로 선다.
+    #[test]
+    fn a_project_name_wears_the_same_colour_as_in_the_cli_overview() {
+        use super::super::layer::At;
+        let want = from_anstyle(style::project_colour(std::path::Path::new("/w/one"))).fg;
+        let colour_of = |app: &mut App, y: u16, text: &str| {
+            let mut term = Terminal::new(TestBackend::new(80, 12)).unwrap();
+            term.draw(|f| screen(f, app)).unwrap();
+            let buf = term.backend().buffer().clone();
+            let row: String = (0..80).map(|x| buf[(x, y)].symbol().to_string()).collect();
+            let x = row.find(text).map(|b| row[..b].chars().count() as u16).unwrap_or_else(|| panic!("{text} 가 없다 — {row:?}"));
+            buf[(x, y)].fg
+        };
+        let mut inside = layered(At::Project("/w/one".into()));
+        assert_eq!(Some(colour_of(&mut inside, 0, "one")), want, "경로 줄의 이름이 한눈 보기와 다른 색이다");
+        let mut on = layered(At::Layer);
+        on.issues.clear();
+        on.index = crate::nav::Index::of(&[]);
+        on.keep.clear();
+        assert_eq!(Some(colour_of(&mut on, 3, "one/")), want, "층의 줄 이름이 한눈 보기와 다른 색이다");
+    }
+
     /// **좁은 창에서 본문을 그려도 무너지지 않는다.**
     /// `narrow_windows_neither_panic_nor_overflow` 는 본문 없는 이슈로 그리므로
     /// 겹친 목록과 표를 지나는 이 길을 한 번도 밟지 않는다. 줄이 패널 폭 안에
@@ -2235,6 +2493,23 @@ mod tests {
         let mut empty = App::new(Vec::new(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         let lines = render(&mut empty, 60, 10).join("\n");
         assert!(lines.contains("비었다"), "{lines}");
+    }
+
+    /// **층으로 가는 `..` 은 줄로 안 센다** — 층이 있으면 빈 프로젝트의 뿌리에도 `..` 이
+    /// 서는데, 그것을 세면 목록 제목이 " 1줄 " 이 되어 빈 프로젝트를 비었다고 못 한다.
+    #[test]
+    fn an_empty_project_under_the_layer_is_still_called_empty() {
+        use super::super::layer::At;
+        let mut a = layered(At::Project("/w/one".into()));
+        a.issues.clear();
+        a.index = crate::nav::Index::of(&[]);
+        a.keep.clear();
+        a.warnings = 0;
+        a.cursor = 0;
+        assert_eq!(a.rows(), [Row::Up]);
+        let lines = render(&mut a, 60, 10);
+        let title = lines.iter().find(|l| l.contains('┌')).unwrap();
+        assert!(title.contains("비었다") && !title.contains("1줄"), "{title:?}");
     }
 
     /// 글칸의 커서는 **터미널 커서**가 글 안 제 자리에 선다. 한글은 두 칸이고,

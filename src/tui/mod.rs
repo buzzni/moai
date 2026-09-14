@@ -7,6 +7,7 @@ pub mod draw;
 pub mod edit;
 pub mod form;
 pub mod input;
+pub mod layer;
 pub mod scroll;
 
 use crate::config::Config;
@@ -22,9 +23,12 @@ use scroll::{PAGE, Scroll};
 /// 목록의 한 줄. `..` 은 이슈가 아니므로 [`Entry`] 로는 못 담는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
-    /// 한 층 위로. 뿌리가 아닐 때만 맨 앞에 선다 — MC 와 같다.
+    /// 한 층 위로. 뿌리가 아닐 때만 맨 앞에 선다 — MC 와 같다. 프로젝트 층이 있으면
+    /// 프로젝트 뿌리에도 서서 층으로 올라간다.
     Up,
     Item(Entry),
+    /// 프로젝트 층의 한 줄 — `layer.places` 의 첨자다. 정체는 경로다([`Anchor::Project`]).
+    Project(usize),
 }
 
 /// 커서가 선 줄의 **정체**. 첨자(`Entry::at`)와 줄 번호는 다시 읽으면 바뀐다 —
@@ -38,6 +42,8 @@ enum Anchor {
     Up,
     Issue(String),
     Bucket(Seg),
+    /// 이름이 아니라 경로 — 이름은 등록 목록이 바뀌면 달라진다.
+    Project(std::path::PathBuf),
 }
 
 /// 무엇을 받고 있는가. 글을 받는 동안에는 이동키가 글자가 된다.
@@ -182,6 +188,8 @@ fn states_of(issues: &[Issue], cfg: &Config) -> States {
 /// 여기 드는 셈은 전부 `&[Issue]` 에 대한 순수 함수라 스레드로 옮길 수 있다 —
 /// `report`·`query` 를 순수하게 둔 계약이 여기서 값을 한다.
 pub struct Fresh {
+    /// 어느 프로젝트를 읽었나 — 받는 쪽이 지금 프로젝트와 견준다([`App::receive`]).
+    root: std::path::PathBuf,
     stamp: Stamp,
     issues: Vec<Issue>,
     index: Index,
@@ -215,6 +223,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     let issues = g.load.issues;
     let now = crate::model::now();
     Ok(Fresh {
+        root: repo.root.clone(),
         stamp,
         index: Index::of(&issues),
         states: states_of(&issues, &repo.config),
@@ -341,6 +350,10 @@ pub struct App {
     /// 옆 워크트리에서 만난 문제. **배너로 말만 한다** — CLI 가 stderr 로 흘리는
     /// 말인데, 대체 화면 안에서는 그 길을 못 쓴다.
     pub elsewhere: Vec<String>,
+    /// 프로젝트 층([`layer`]). **`None` 이면 등록한 것이 없고 오늘 탐색기 그대로다.** 층이
+    /// 있으면 지금 선 곳(`layer.at`)이 층이거나 한 프로젝트 안이고, 층에 선 동안에는 위의
+    /// 한 프로젝트 자리(`repo`·`issues`·`index`…)가 비었다.
+    pub layer: Option<layer::Layer>,
 }
 
 impl App {
@@ -412,6 +425,7 @@ impl App {
             worktree: false,
             origin: crate::worktree::Origin::default(),
             elsewhere: Vec::new(),
+            layer: None,
         };
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
         // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
@@ -427,23 +441,16 @@ impl App {
     /// 있으면 버린다 — 누르기 **전에** 시작한 읽기라 늦게 도착하면 방금 읽은 것을
     /// 옛 것으로 덮는다(`w` 를 끄기 전 설정으로 읽은 것이면 더더욱).
     pub fn reload(&mut self) {
+        // 층에서 누른 F5 는 사용자 설정부터 다시 읽고 프로젝트를 다시 연다.
+        if self.on_layer() {
+            self.reread_layer();
+            return;
+        }
         if self.repo.is_none() {
             return;
         }
-        // 결과는 버리되 손잡이는 든다 — 그 스레드의 패닉을 다음 걸음이 되던진다.
         if let Some((_, handle)) = self.pending.take() {
-            if self.discarded.len() >= DISCARDED_KEPT {
-                // 놓기 **전에** 끝난 것부터 거둔다. 지난 걸음에 살아 있던 것도 그새 끝났을
-                // 수 있고, 그것이 가장 오래된 자리에 있으면 패닉째 놓게 된다.
-                self.reap();
-            }
-            if self.discarded.len() >= DISCARDED_KEPT {
-                // 이만큼 안 끝났으면 읽기가 멈춘 것이다(느린 원격 디스크 따위). 기다리면
-                // 루프가 같이 멈추므로 가장 오래된 것을 놓는다 — 그 하나만 1b63abe 이전
-                // 처지로 돌아간다.
-                self.discarded.remove(0);
-            }
-            self.discarded.push(handle);
+            self.discard(handle);
         }
         let Some(repo) = &self.repo else { return };
         let fresh = (self.read)(repo, self.worktree);
@@ -453,8 +460,14 @@ impl App {
     /// 다시 읽은 결과를 받는다. **소리 없이 넘기지 않는다** — 실패를 삼키면 갱신이
     /// 아무 일도 안 하는데 사람은 까닭을 못 얻는다. 실패하면 표식을 안 올리므로
     /// 다음 걸음에 다시 해 본다.
+    ///
+    /// **다른 프로젝트에서 지은 것은 버린다.** 프로젝트를 옮길 때 도는 읽기를 이미
+    /// 버리지만([`App::discard`]), 받는 자리에서 한 번 더 뿌리를 견준다 — 떠난
+    /// 프로젝트의 줄이 지금 프로젝트의 화면으로 들어오면 같은 id 가 엉뚱한 줄을
+    /// 가리키고, 그 위에서 쓰면 쓰는 곳은 맞는데 보고 쓴 것이 틀린다.
     fn receive(&mut self, fresh: crate::fail::R<Fresh>) {
         match fresh {
+            Ok(f) if self.repo.as_ref().is_none_or(|r| r.root != f.root) => {}
             Ok(f) => self.apply_fresh(f),
             Err(e) => {
                 self.trouble = Some(format!("다시 읽지 못했다 — {e}"));
@@ -560,7 +573,7 @@ impl App {
 
     /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
     pub fn loading(&self) -> bool {
-        self.pending.is_some()
+        self.pending.is_some() || self.layer_loading()
     }
 
     /// 버린 다시 읽기 스레드가 아직 남았는가. 루프는 이 동안에도 빠른 걸음으로 깬다 —
@@ -569,6 +582,23 @@ impl App {
     /// 때문이다 — 버린 것은 받을 것이 아니다.
     pub fn reaping(&self) -> bool {
         !self.discarded.is_empty()
+    }
+
+    /// 결과는 버리되 손잡이는 든다 — 그 스레드의 패닉을 다음 걸음이 되던진다.
+    /// 다시 읽기(`reload`)와 프로젝트 옮기기가 도는 읽기를 버리는 길이다.
+    fn discard(&mut self, handle: std::thread::JoinHandle<()>) {
+        if self.discarded.len() >= DISCARDED_KEPT {
+            // 놓기 **전에** 끝난 것부터 거둔다. 지난 걸음에 살아 있던 것도 그새 끝났을
+            // 수 있고, 그것이 가장 오래된 자리에 있으면 패닉째 놓게 된다.
+            self.reap();
+        }
+        if self.discarded.len() >= DISCARDED_KEPT {
+            // 이만큼 안 끝났으면 읽기가 멈춘 것이다(느린 원격 디스크 따위). 기다리면
+            // 루프가 같이 멈추므로 가장 오래된 것을 놓는다 — 그 하나만 1b63abe 이전
+            // 처지로 돌아간다.
+            self.discarded.remove(0);
+        }
+        self.discarded.push(handle);
     }
 
     /// 버린 스레드 중 끝난 것을 join 한다. **패닉이면 되던진다** — [`App::follow`] 가
@@ -733,6 +763,7 @@ impl App {
             Row::Item(Entry::Dir { at: Some(at), .. } | Entry::Leaf { at }) => {
                 Anchor::Issue(self.issues[*at].id.clone())
             }
+            Row::Project(at) => Anchor::Project(self.place_path(*at).map(Into::into).unwrap_or_default()),
         }
     }
 
@@ -801,6 +832,8 @@ impl App {
     /// 뒤에도 파일이 또 바뀌었으면(표식은 읽기 전에 쟀다) 다음 걸음이 다시 띄운다.
     pub fn follow(&mut self) {
         self.reap();
+        // 층은 제 표식을 따로 본다 — 층에 선 동안에는 아래(한 프로젝트)가 비어 할 일이 없다.
+        self.follow_layer();
         if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -893,8 +926,11 @@ impl App {
 
     /// 지금 디렉터리의 줄들.
     pub fn rows(&self) -> Vec<Row> {
+        if let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) {
+            return (0..l.places.len()).map(Row::Project).collect();
+        }
         let mut rows: Vec<Row> = Vec::new();
-        if !self.path.is_empty() {
+        if !self.path.is_empty() || self.layer.is_some() {
             rows.push(Row::Up);
         }
         let keep = &self.keep;
@@ -927,6 +963,14 @@ impl App {
         // 멈춘다** — 적다 말고 포커스가 튀면 적던 것을 잃는다.
         if !matches!(self.mode, Mode::Browse) {
             self.typing(k);
+            return;
+        }
+        // 층에서 뜻이 없는 키는 **왜 안 되는지를** 한 줄로 말한다. 특히 `n` 은 담을 프로젝트가
+        // 안 정해졌다 — 띄운 자리에 조용히 쓰면 사람은 보던 줄의 프로젝트에 담긴 줄 안다.
+        if self.on_layer()
+            && let Some(say) = layer::refused(&k)
+        {
+            self.notice = Some(say.to_string());
             return;
         }
         match k.code {
@@ -1147,6 +1191,7 @@ impl App {
                 self.cursor = 0;
                 self.detail.rewind();
             }
+            Some(Row::Project(at)) => self.enter_project(at),
             // 잎은 들어갈 데가 없다. 상세는 오른쪽이 이미 보여 주고 있다.
             _ => {}
         }
@@ -1158,6 +1203,11 @@ impl App {
     /// 하나가 생기면 같은 번호가 옆 에픽을 가리킨다. 그래서 번호는 나온 디렉터리를
     /// 못 찾을 때만(거름망에 빠졌거나 `--path` 로 시작했거나) 쓴다.
     fn leave(&mut self) {
+        // 프로젝트 뿌리에서 한 층 더 — 층이 있으면 그리로 간다(결정 3). 층에 섰으면 위가 없다.
+        if self.path.is_empty() {
+            self.climb();
+            return;
+        }
         if let Some(from) = self.path.pop() {
             self.detail.rewind();
             let fallback = self.remembered.pop().unwrap_or(0);
@@ -1171,6 +1221,9 @@ impl App {
 
     /// 지금 어디인가. 뿌리는 `/`.
     pub fn crumbs(&self) -> String {
+        if self.on_layer() {
+            return "프로젝트 층".into();
+        }
         if self.path.is_empty() {
             return "/".into();
         }
@@ -1423,7 +1476,7 @@ mod tests {
             .iter()
             .filter_map(|r| match r {
                 Row::Item(e) => e.at().map(|at| a.issues[at].id.clone()),
-                Row::Up => None,
+                Row::Up | Row::Project(_) => None,
             })
             .collect()
     }
@@ -2032,6 +2085,25 @@ mod tests {
         assert_eq!(a.issues.len(), 1);
     }
 
+    /// **다른 프로젝트에서 지은 읽기는 안 들인다.** 같은 id 를 쓰는 두 프로젝트에서
+    /// 떠난 쪽의 읽기가 늦게 닿으면, 들이는 순간 지금 프로젝트의 화면이 남의 줄이 된다.
+    #[test]
+    fn a_read_built_for_another_project_is_not_taken() {
+        let (mine_dir, mut a) = writable("receive-mine");
+        let (theirs, _) = writable("receive-theirs");
+        touch_outside(&theirs);
+        let other = Repo { root: theirs.0.clone(), config: cfg() };
+        a.receive(prepare(&other, false));
+        assert_eq!(shown(&a), ["argos-0001"], "남의 프로젝트에서 지은 줄을 들였다");
+        assert!(a.trouble.is_none());
+
+        // 제 것은 들인다 — 막은 것이 뿌리 견주기이지 받기 자체가 아니다.
+        let mine = a.repo.clone().unwrap();
+        touch_outside(&mine_dir);
+        a.receive(prepare(&mine, false));
+        assert_eq!(a.issues.len(), 2);
+    }
+
     /// 판 밖에서 한 줄을 더해 다음 `follow` 가 스레드 읽기를 띄우게 한다.
     fn touch_outside(scratch: &Scratch) {
         let file = scratch.0.join(".moai/issues.jsonl");
@@ -2208,7 +2280,7 @@ mod tests {
     fn on(a: &App) -> Option<String> {
         a.current().and_then(|r| match r {
             Row::Item(e) => e.at().map(|at| a.issues[at].id.clone()),
-            Row::Up => None,
+            Row::Up | Row::Project(_) => None,
         })
     }
 
