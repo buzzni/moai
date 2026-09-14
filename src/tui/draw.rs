@@ -560,9 +560,21 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 고르면 테마가 대비를 뒤집을 수 있다(moai-xs9x). 반전은 어느 테마에서도 읽힌다.
     let room = inner.saturating_sub(crate::text::width(CURSOR));
     let over = Style::new().add_modifier(Modifier::REVERSED);
+    let cursor_at = (!rows.is_empty()).then(|| app.cursor.min(rows.len() - 1));
+    // 커서 줄을 거꾸로 깔았는가 — 그렇다면 위젯의 커서 반전을 끈다. 위젯은 줄을 그린
+    // **뒤에** 커서 스타일을 덮으므로(`List::render`), 켜 두면 걷은 반전이 도로 선다.
+    let mut cursor_shaded = false;
     let items: Vec<ListItem> = rows
         .iter()
-        .map(|r| match row_line(app, r, inner) {
+        .enumerate()
+        .map(|(i, r)| match row_line(app, r, inner) {
+            // **커서 줄은 거꾸로 깐다.** 커서가 줄 전체를 반전하므로 그 위의 반전 바탕은
+            // 안 보인다 — 줄은 반전, 끝난 몫만 반전을 걷는다. 커서라는 뜻은 `>` 가 진다.
+            (line, Some((from, cut))) if app.shade && Some(i) == cursor_at => {
+                cursor_shaded = true;
+                let under = Style::new().remove_modifier(Modifier::REVERSED);
+                ListItem::new(shade(line.style(over), from, cut, room, under))
+            }
             (line, Some((from, cut))) if app.shade => ListItem::new(shade(line, from, cut, room, over)),
             (line, _) => ListItem::new(line),
         })
@@ -624,8 +636,9 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     f.render_stateful_widget(
         List::new(items)
             .block(frame(app, Pane::Explorer).title(title))
-            // 커서는 **색만으로 표시하지 않는다** — 반전과 `>` 를 함께 준다.
-            .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+            // 커서는 **색만으로 표시하지 않는다** — 반전과 `>` 를 함께 준다. 거꾸로 깐 커서
+            // 줄은 반전을 이미 제가 들었다.
+            .highlight_style(if cursor_shaded { Style::new() } else { over })
             .highlight_symbol(CURSOR),
         at,
         &mut state,
@@ -1566,11 +1579,12 @@ pub(super) mod tests {
         );
         let lit = (first..=last).collect::<Vec<_>>();
         assert_eq!(buf[(first, y)].symbol(), "아", "바탕이 제목에서 시작하지 않는다");
-        // 목록 칸의 오른쪽 테두리 앞까지가 100% — 테두리 칸 x 는 제목 줄의 끝에서 찾는다.
-        let border = (first..w).find(|&x| buf[(x, y)].symbol() == "│").expect("테두리가 없다");
+        // 목록 칸의 오른쪽 테두리 앞까지가 100% — 포커스 칸이라 테두리는 굵은 선이다(`frame`).
+        let border = (first..w).find(|&x| buf[(x, y)].symbol() == "┃").expect("테두리가 없다");
         let span = (border - first) as usize;
         let want = crate::text::bar_fill(Some(50), span);
         let got = lit.len();
+        // 두 칸 글자가 경계에 걸리면 한 칸 덜 칠한다(`shade`).
         assert!(got <= want && got + 1 >= want, "50% 가 아니다 — {got}/{span}");
 
         // 끄면 바탕이 없고 셈은 남는다.
@@ -1578,6 +1592,28 @@ pub(super) mod tests {
         term.draw(|f| screen(f, &mut a)).unwrap();
         let buf = term.backend().buffer().clone();
         assert!((0..w).all(|x| !buf[(x, y)].modifier.contains(Modifier::REVERSED)), "껐는데 깔렸다");
+    }
+
+    /// **커서 줄에서는 바탕이 거꾸로 선다** — 커서가 줄 전체를 반전하므로 그대로 두면 진척이
+    /// 사라진다. 끝난 몫은 반전을 걷고, 커서라는 뜻은 `>` 가 진다.
+    #[test]
+    fn the_cursor_row_shows_its_progress_inverted() {
+        let mut a = app();
+        let (w, h) = (80u16, 10u16);
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let text = render(&mut a, w, h);
+        let y = text.iter().position(|l| l.contains("argos-0001")).expect("에픽 줄이 없다") as u16;
+        assert!(text[y as usize].contains("> argos-0001"), "커서 표시가 없다\n{}", text.join("\n"));
+        let rev = |x: u16| buf[(x, y)].modifier.contains(Modifier::REVERSED);
+        let id = (0..w).find(|&x| buf[(x, y)].symbol() == "a").unwrap();
+        let title = (0..w).find(|&x| buf[(x, y)].symbol() == "아").unwrap();
+        // 포커스 칸의 테두리는 굵은 선이다(`frame`).
+        let border = (title..w).find(|&x| matches!(buf[(x, y)].symbol(), "│" | "┃")).unwrap();
+        assert!(rev(id), "커서 줄의 머리가 반전이 아니다");
+        assert!(!rev(title), "끝난 몫이 반전을 안 걷었다");
+        assert!(rev(border - 1), "남은 몫이 반전이 아니다");
     }
 
     /// 진행 바탕을 가르는 조각은 **폭을 지키고 글자 가운데서 안 가른다** — 한 칸이 새면
