@@ -372,6 +372,9 @@ pub struct App {
     /// 올리는 것은 `cmd::tui` 의 루프 하나뿐이고, 그래서 한 프레임 안의
     /// 목록·상세·롤업이 같은 걸음을 본다.
     pub spin: usize,
+    /// **지난 프레임이 도는 것을 화면에 그렸는가.** 루프는 이것으로 다음에 빠른 걸음으로
+    /// 깰지를 정한다(`cmd::tui::loop_until_quit`) — 쓰는 곳은 `draw::screen` 하나뿐이다.
+    pub spun: bool,
     /// 다른 워크트리를 겹쳐 보는가. `w` 가 켜고 끈다 — CLI 의 `--worktree` 와 같은
     /// 길(`worktree::gather`)로 읽는다. **켜진 채로 시작한다**(moai-zcuh): 탐색기는
     /// 사람이 둘러보는 자리라 옆 워크트리에서 집은 일이 안 보이면 보드가 거짓말을
@@ -514,6 +517,7 @@ impl App {
             list: Scroll::default(),
             quit: false,
             spin: 0,
+            spun: false,
             worktree: true,
             origin: crate::worktree::Origin::default(),
             elsewhere: Vec::new(),
@@ -745,20 +749,11 @@ impl App {
         self.take(f.issues, f.index, f.states, f.now);
     }
 
-    /// 돌 것이 한 줄이라도 있는가. **화면에 보이는지까지는 따지지 않는다** —
-    /// 보이는 줄만 가리려면 루프가 그림의 결과를 알아야 하고 그 값은 그린 뒤에야
-    /// 나온다. 틀리는 쪽은 "있는데 안 보인다" 하나뿐이고, 그때 손해는 안 보이는
-    /// 것을 위해 걸음을 재는 것이다. 반대쪽은 안 틀린다 — 화면에 도는 글리프가
-    /// 있으면 그 이슈는 `issues` 에 있으므로 여기가 참이다. 스피너를 그려 놓고
-    /// 아무도 안 깨우는 조합은 그래서 못 생긴다.
-    ///
-    /// **줄마다 묻는 자는 [`App::spins`] 하나다** — 그리는 쪽(`draw::glyph_of`)과 깨우는
-    /// 쪽이 따로 판단하면 한쪽만 고쳐져, 도는데 안 깨우거나 안 도는데 깨운다.
-    pub fn spinning(&self) -> bool {
-        (0..self.issues.len()).any(|at| self.spins(at))
-    }
-
     /// 그 줄이 도는가 — **지금 누가 손대고 있는 줄**이다.
+    ///
+    /// **줄마다 묻는 자는 이것 하나다** — 도는 글리프(`draw::glyph_of`)·칸별 건수·빛줄기가
+    /// 모두 이 답으로 그려지고, 루프는 따로 판단하지 않고 **그려진 화면**으로 깬다
+    /// (`App::spun`, moai-5jh6). 그래서 도는데 안 깨우거나 안 도는데 깨우는 조합이 없다.
     ///
     /// 일은 제 칸이 도는 칸이면 돈다. **묶음은 읽은 칸이 도는 칸이고, 그 밑에 집은 일이
     /// 실제로 있을 때만** 돈다(`report::Stand::busy`). 읽은 칸만 보면 멤버 하나가 끝나고
@@ -1614,30 +1609,34 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
-    /// 루프가 빠른 걸음으로 깰지를 이 답으로 정한다. **거짓을 내면 도는
-    /// 글리프가 첫 칸에 멈춘 채 7초에 한 번만 움직인다** — 스피너가 있는데
-    /// 아무도 깨우지 않는 그 조합이 눈에는 버그로 보이고 코드로는 안 보인다.
+    /// 도는 줄이 있는지 — 줄마다의 답([`App::spins`])을 모은 것. 루프가 깨는 것은 이것이
+    /// 아니라 **그려진 화면**이다(`App::spun`, draw 시험) — 여기는 줄의 자만 본다.
+    fn any_spins(a: &App) -> bool {
+        (0..a.issues.len()).any(|at| a.spins(at))
+    }
+
+    /// 돌 줄이 있는가를 적힌 칸·읽은 칸이 속이지 않는다.
     #[test]
-    fn the_loop_only_wakes_fast_when_something_spins() {
+    fn a_line_spins_only_while_someone_holds_it() {
         let mut a = app();
-        assert!(!a.spinning(), "todo 뿐인데 돈다고 한다");
+        assert!(!any_spins(&a), "todo 뿐인데 돈다고 한다");
         let mut issues = a.issues.clone();
         // 에픽의 적힌 칸으로는 안 돈다 — 묶음의 칸은 멤버에서 읽는다.
         issues[0].status = Status::new("in_progress");
         a.adopt(issues.clone());
-        assert!(!a.spinning(), "멤버가 안 움직인 에픽이 적힌 칸으로 돈다");
+        assert!(!any_spins(&a), "멤버가 안 움직인 에픽이 적힌 칸으로 돈다");
         // 읽은 칸으로도 안 돈다 — 멤버 하나가 끝나기만 해도 묶음은 `in_progress` 로
         // 읽히는데, 그것으로 깨우면 아무도 손대지 않은 저장소에서 화면이 계속 깬다.
         issues[2].status = Status::new("done");
         a.adopt(issues.clone());
-        assert!(!a.spinning(), "일은 멈췄는데 묶음의 읽은 칸으로 돈다");
+        assert!(!any_spins(&a), "일은 멈췄는데 묶음의 읽은 칸으로 돈다");
         issues[3].status = Status::new("in_progress");
         a.adopt(issues);
-        assert!(a.spinning(), "in_progress 가 있는데 안 돈다고 한다");
+        assert!(any_spins(&a), "in_progress 가 있는데 안 돈다고 한다");
     }
 
     /// 줄마다 도는지(`App::spins`) — **묶음은 그 밑에 집은 일이 있을 때만 돈다**
-    /// (moai-x5eg). 깨우는 쪽(`spinning`)은 이 답을 모은 것이어야 한다.
+    /// (moai-x5eg). 글리프·빛줄기가 이 답으로 그려지고, 루프는 그려진 것으로 깬다.
     #[test]
     fn a_group_spins_only_while_a_member_is_held() {
         fn spun(a: &App) -> Vec<&str> {
@@ -1655,13 +1654,13 @@ mod tests {
         // 끝난 것 하나와 첫 칸 하나 — 둘 다 `in_progress` 로 읽히지만 아무도 손대지 않는다.
         assert_eq!((a.column(0), a.column(1)), ("in_progress", "in_progress"));
         assert!(spun(&a).is_empty(), "반쯤 끝난 묶음이 돈다 — {:?}", spun(&a));
-        assert!(!a.spinning());
+        assert!(!any_spins(&a));
 
         // 하나를 집으면 그 일과 에픽, 그리고 **에픽을 거쳐 물려받은 마일스톤**까지 돈다.
         issues[3].status = Status::new("in_progress");
         a.adopt(issues.clone());
         assert_eq!(spun(&a), ["argos-0005", "argos-0001", "argos-0003"]);
-        assert!(a.spinning());
+        assert!(any_spins(&a));
 
         // **미룬 멤버는 묶음을 안 돌린다.** 칸 셈이 그 멤버를 빼므로(`report::counted`)
         // 곁들이도 뺀다 — 에픽은 끝난 멤버만 남아 `done` 으로 읽힌다. **미룬 일 제 줄도
@@ -1673,7 +1672,7 @@ mod tests {
         assert_eq!(a.column(1), "done");
         assert_eq!(a.column(3), "in_progress");
         assert!(spun(&a).is_empty(), "미룬 일이 돈다 — {:?}", spun(&a));
-        assert!(!a.spinning(), "미룬 일 하나가 탐색기를 빠른 걸음으로 깨운다");
+        assert!(!any_spins(&a), "미룬 일 하나가 탐색기를 빠른 걸음으로 깨운다");
 
         // **묶음을 미루면 그 밑이 다 멈춘다.** 칸 셈은 묶음 제 미룸으로 멤버를 안 빼
         // 에픽은 여전히 `in_progress` 로 읽히지만, 에픽도 멤버도 계획에서 빠졌다 — 멤버는
@@ -1695,8 +1694,6 @@ mod tests {
         a.adopt(issues);
         assert!(spun(&a).is_empty(), "미룬 부모 밑의 자식이 돈다 — {:?}", spun(&a));
 
-        // 깨우는 쪽은 줄마다의 답을 모은 것이다.
-        assert_eq!(a.spinning(), !spun(&a).is_empty());
     }
 
     /// 스레드에서 짓는 다시 읽기를 **끝날 때까지** 받는다. 루프가 하는 것을 흉내 낸다.
