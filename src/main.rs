@@ -92,10 +92,17 @@ fn carried() {
     // **쓴 자리와 안 쓴 자리의 말이 다르다.** 안 쓴 명령(`note`·이미 그런
     // `defer`)이 "그대로 두고 썼다" 고 하면 일어나지 않은 쓰기를 주장하고,
     // 아무 말도 안 하면 그 동사만 쓰는 쪽이 상한 파일을 영영 모른다(moai-relb).
-    let said = match (store::carried_unreadable(), store::held_unreadable()) {
-        (0, 0) => return,
-        (0, n) => format!("읽을 수 없는 줄 {n}개가 파일에 있다, 이번 명령은 그 파일을 안 건드렸다"),
-        (n, _) => format!("읽을 수 없는 줄 {n}개를 그대로 두고 썼다"),
+    //
+    // 셈은 호출마다가 아니라 프로세스 전체의 것이다(`store::Tally`) — `moai tui` 는
+    // 여러 번 쓰고 여기를 한 번 지난다. 썼으되 들고 간 줄이 없었으면(깨끗할 때 쓰고
+    // 그 뒤에 상했으면) "안 건드렸다" 도 "그대로 두고 썼다" 도 참이 아니라 있다고만 한다.
+    let said = match store::unreadable_tally() {
+        store::Tally { carried: n @ 1.., .. } => format!("읽을 수 없는 줄 {n}개를 그대로 두고 썼다"),
+        store::Tally { seen: 0, .. } => return,
+        store::Tally { wrote: true, seen: n, .. } => format!("읽을 수 없는 줄 {n}개가 파일에 있다"),
+        store::Tally { wrote: false, seen: n, .. } => {
+            format!("읽을 수 없는 줄 {n}개가 파일에 있다, 이번 명령은 그 파일을 안 건드렸다")
+        }
     };
     let _ = writeln!(
         anstream::stderr().lock(),
