@@ -5660,6 +5660,27 @@ fn project_writes_keep_the_config_files_permissions() {
     }
 }
 
+/// **스냅샷 쓰기도 사람이 정한 권한을 지킨다** (moai-c1s3). `with_write` 는 매번 임시 파일을
+/// 새로 세워 바꿔 끼우므로, 그대로 두면 `chmod 600` 한 `issues.jsonl` 이 `add` 한 번에 umask
+/// 권한으로 풀린다. 저널은 제자리에 덧붙이므로 원래 안 풀린다 — 함께 재 둔다.
+#[cfg(unix)]
+#[test]
+fn repo_writes_keep_the_snapshot_files_permissions() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let s = init("repo-perms");
+    let files = [s.path().join(".moai/issues.jsonl"), s.path().join(".moai/journal.jsonl")];
+    for f in &files {
+        std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let id = add(s.path(), &["권한"]);
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    ok(s.path(), &["note", &id, "메모"]);
+    for f in &files {
+        let mode = std::fs::metadata(f).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "{} 의 권한이 {mode:o} 로 바뀌었다", f.display());
+    }
+}
+
 /// 설정 파일이 없을 때 빼면 아무 일도 안 한다 — 설정 디렉터리조차 만들지 않는다.
 #[test]
 fn project_rm_without_a_config_leaves_no_trace() {

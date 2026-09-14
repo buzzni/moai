@@ -182,9 +182,8 @@ pub fn update<T>(path: &Path, f: impl FnOnce(&mut Doc) -> R<T>) -> R<T> {
     if doc.dirty {
         // **사람이 정한 권한을 지킨다.** 설정은 사람의 파일이다 — `chmod 600` 해 둔 것이
         // 등록 한 번에 0644 로 풀리면 안 되고, 권한까지 추적하는 dotfiles 저장소에 헛 변경이
-        // 뜬다. 파일이 없던 처음 쓰기만 umask 를 따른다.
-        let keep = std::fs::metadata(path).ok().map(|m| m.permissions());
-        crate::store::write_atomic_as(path, doc.render().as_bytes(), keep)?;
+        // 뜬다. 파일이 없던 처음 쓰기만 umask 를 따른다 — `store::write_atomic` 이 한다.
+        crate::store::write_atomic(path, doc.render().as_bytes())?;
     }
     Ok(out)
 }
