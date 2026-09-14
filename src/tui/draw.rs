@@ -474,13 +474,18 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
         Some(b) => w.saturating_sub(crate::text::width(b) + 3),
         None => w,
     };
-    // **겹쳐 보는 중이면 늘 보인다** — 거름망 뱃지와 같은 까닭이다. 옆에서 온 줄에만
-    // `⎇` 가 붙으므로, 옆이 조용하면 켜진 화면과 꺼진 화면이 똑같이 보인다.
+    // **옆 워크트리가 있어 겹쳐 보는 중이면 늘 보인다** — 거름망 뱃지와 같은 까닭이다. 옆에서
+    // 온 줄에만 `⎇` 가 붙으므로, 옆이 조용하면 켜진 화면과 꺼진 화면이 똑같이 보인다.
+    // **옆이 없으면 안 세운다**(moai-d5vn). 겹쳐 보기는 켜진 채로 시작하므로(moai-zcuh) "옆
+    // 워크트리 없음" 을 세우면 모든 프로젝트의 경로 줄 절반을 늘 먹는다 — 옆이 없으면 켜진 화면과
+    // 꺼진 화면이 정말로 같아 가를 것이 없다. 켜짐은 메뉴의 `[켜짐]` 이 댄다. 못 찾은 까닭은
+    // `SPC t w` 로 켰을 때 알림이 댄다(`App::unfound`).
     // **끄는 법은 끌 수 있는 자리에서만 댄다** — 층에서는 `SPC t w` 가 메뉴에 안 서고 말없이
-    // 꺼져 있으므로(`Browse::enabled`), 적어 두면 눌러도 아무 일이 없는 키가 된다.
-    let overlay = app.worktree.then(|| {
-        let trees = app.origin.labels();
-        let names = if trees.is_empty() { "옆 워크트리 없음".to_string() } else { trees.join(", ") };
+    // 꺼져 있으므로(`Browse::enabled`), 적어 두면 눌러도 아무 일이 없는 키가 된다. 키 이름은
+    // 표에서 읽는다 — `w` 가 `SPC t w` 로 옮겨 간 뒤에도 옛 이름을 대던 자리다.
+    let trees = app.origin.labels();
+    let overlay = (app.worktree && !trees.is_empty()).then(|| {
+        let names = trees.join(", ");
         let off = match Browse::Worktree.enabled(&app.key_ctx(rows)) {
             Ok(()) => format!("  {} 로 끈다", label(BROWSE, Browse::Worktree)),
             Err(_) => String::new(),
@@ -1917,6 +1922,21 @@ pub(super) mod tests {
         assert!(!a.worktree, "SPC t w 가 안 껐다");
     }
 
+    /// **옆 워크트리가 없으면 경로 줄은 겹쳐 보기를 말하지 않는다**(moai-d5vn). 겹쳐 보기는 켜진
+    /// 채로 시작하므로(moai-zcuh) 없을 때도 세우면 모든 프로젝트의 경로 줄 절반을 먹는다 — 옆이
+    /// 없으면 켜진 화면과 꺼진 화면이 정말로 같으니 가를 것이 없다. 켜짐은 메뉴의 `[켜짐]` 이 댄다.
+    #[test]
+    fn the_path_line_says_nothing_of_the_overlay_when_no_worktree_sits_beside() {
+        let mut a = app();
+        assert!(a.worktree, "겹쳐 보기가 꺼진 채로 시작했다");
+        assert!(a.origin.labels().is_empty());
+        let lines = render(&mut a, 120, 12);
+        assert!(!lines[0].contains('⎇') && !lines[0].contains("워크트리"), "옆이 없는데 경로 줄이 겹쳐 보기를 댄다\n{}", lines[0]);
+        a.hit("SPC t");
+        let menu = render(&mut a, 120, 12).join("\n");
+        assert!(menu.contains("워크트리 겹쳐 보기 [켜짐]"), "켜진 것을 댈 자리가 없다\n{menu}");
+    }
+
     /// 걸음은 **그린 횟수가 아니라 시계가** 올린다. 다시 그리기만 해서는
     /// 안 돌아야 하고 — 안 그러면 키를 누르는 동안 타이핑 속도로 돈다 —
     /// 한 화면 안에서는 목록과 상세가 **같은 걸음**을 보여야 한다.
@@ -2608,9 +2628,16 @@ pub(super) mod tests {
         for absent in ["거름망", "검색", "Bksp", "워크트리", "F3", "F10"] {
             assert!(!bar.contains(absent), "층에서 안 듣는 키를 적었다 — {absent} in {bar:?}");
         }
-        // 층에서도 겹쳐 보기는 켜져 있어 뱃지가 서지만, `SPC t w` 는 층의 메뉴에 안 서므로 끄는 법을 대지 않는다.
-        assert!(a.worktree && lines[0].contains('⎇'), "{:?}", lines[0]);
-        assert!(!lines[0].contains("로 끈다"), "층에서 안 듣는 끄는 키를 댄다 — {:?}", lines[0]);
+        // 옆 워크트리가 없으면 겹쳐 보기가 켜져 있어도 뱃지가 안 선다(moai-d5vn).
+        assert!(a.worktree && !lines[0].contains('⎇'), "{:?}", lines[0]);
+        // 옆이 있으면 층에서도 뱃지가 서지만, `SPC t w` 는 층의 메뉴에 안 서므로 끄는 법을 대지 않는다.
+        let (_, origin) =
+            crate::worktree::overlay(Vec::new(), vec![crate::worktree::Side::new("feat/x", "/wt", vec![issues()[2].clone()])]);
+        let plain = std::mem::replace(&mut a.origin, origin);
+        let top = render(&mut a, 80, 22).remove(0);
+        assert!(top.contains("⎇ feat/x"), "{top:?}");
+        assert!(!top.contains("로 끈다"), "층에서 안 듣는 끄는 키를 댄다 — {top:?}");
+        a.origin = plain;
         for l in &lines {
             assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
         }
