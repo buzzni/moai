@@ -1462,10 +1462,16 @@ fn ready_names_an_empty_group_that_blocks() {
     assert!(r.contains("멤버가 없는 묶음에 막혀"), "왜 비었는지 안 말한다 — {r}");
     assert!(r.contains(&format!("moai link {epic} --unblocks {work}")), "푸는 말을 안 댄다 — {r}");
     assert!(!r.contains("미뤄 둔 것에 막혀"), "미룬 것이 없는데 미뤘다고 한다 — {r}");
+    // 기계 출력도 빈 묶음을 댄다(moai-w6n2). 도로 집을 것이 없으니 `by`·`undo` 는 안 선다.
+    let json = ok(s.path(), &["ready", "--json"]);
+    assert_eq!(json.trim(), format!(r#"{{"ready":[],"held":[{{"id":"{work}","empty":["{epic}"]}}]}}"#), "{json}");
 
     // 채우면 보통 막음이다 — 까닭을 따로 대지 않는다.
-    add(s.path(), &["락", "-e", &epic]);
+    let lock = add(s.path(), &["락", "-e", &epic]);
     assert!(!ok(s.path(), &["ready"]).contains("멤버가 없는"));
+    // 막힌 것이 없으면 held 는 빈 배열로 선다 — 키가 있다 없다로 모양이 흔들리지 않는다.
+    let json = ok(s.path(), &["ready", "--json"]);
+    assert!(json.starts_with(&format!(r#"{{"ready":[{{"id":"{lock}""#)) && json.trim_end().ends_with(r#""held":[]}"#), "{json}");
 }
 
 /// 멤버 없는 에픽은 0% 가 아니다 — "아직 안 한 것" 과 "속을 안 채운 것" 은 다르다.
@@ -3681,6 +3687,16 @@ fn ready_names_the_deferred_blocker_it_is_waiting_on() {
     assert!(r.contains("0건"), "미룬 막음을 끝난 것으로 봤다 — {r}");
     assert!(r.contains("미뤄 둔 것에 막혀"), "왜 비었는지 안 말한다 — {r}");
     assert!(r.contains(&blocked) && r.contains(&blocker), "누가 누구를 막는지 안 댄다 — {r}");
+
+    // **기계 출력도 같은 것을 말한다**(moai-w6n2). 맨 배열이던 때는 `[]` 뿐이라, 에이전트는
+    // 왜 비었는지 모른 채 할 일이 없다고 읽었다. 이제 객체로 감싸 held 를 싣는다.
+    let json = ok(s.path(), &["ready", "--json"]);
+    one_json_value(&json);
+    assert_eq!(
+        json.trim(),
+        format!(r#"{{"ready":[],"held":[{{"id":"{blocked}","by":["{blocker}"],"undo":["{blocker}"]}}]}}"#),
+        "{json}"
+    );
 
     let st = moai(s.path(), &["status", "--json"]);
     assert!(st.status.success(), "경고로 비영 종료했다");
