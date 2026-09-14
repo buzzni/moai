@@ -459,17 +459,7 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
 /// (`prunable`)는 뺀다. 맨몸 저장소는 공용 디렉터리 이름이 `.git` 이 아니라 주 워크트리가 없다.
 /// 겹쳐 보기([`gather`]·[`fresh`])는 HEAD 커밋이 필요해 여전히 git 으로 읽는다.
 fn on_disk(root: &Path) -> Option<Disk> {
-    let top = root.ancestors().find(|d| d.join(".git").exists())?;
-    let dotgit = top.join(".git");
-    let common = if dotgit.is_dir() {
-        dotgit
-    } else {
-        let text = std::fs::read_to_string(&dotgit).ok()?;
-        let gitdir = top.join(text.trim_end().strip_prefix("gitdir:")?.trim());
-        let up = std::fs::read_to_string(gitdir.join("commondir")).ok()?;
-        // `commondir` 는 대개 `../..` 다 — 풀지 않으면 끝 이름이 `..` 라 주 워크트리를 못 알아본다.
-        canonical(&gitdir.join(up.trim_end()))
-    };
+    let (top, common) = git_dirs(root)?;
     let label = |head: &Path| {
         let text = std::fs::read_to_string(head).ok()?;
         let text = text.trim_end();
@@ -522,16 +512,42 @@ pub fn is_linked(root: &Path) -> bool {
     root.ancestors().map(|d| d.join(".git")).find(|g| g.exists()).is_some_and(|g| g.is_file())
 }
 
-/// 두 자리가 **같은 git 저장소의 워크트리인가** — 공용 git 디렉터리가 같다. 못 찾으면 아니다.
+/// 워크트리 꼭대기와 공용 git 디렉터리 — git 이 적어 둔 파일로만 읽는다([`on_disk`]).
+///
+/// 주 워크트리면 공용 디렉터리는 `.git` 그대로(풀지 않는다 — 끝 이름으로 주 워크트리를 알아본다),
+/// 딸린 워크트리면 `gitdir:` 가 가리킨 곳의 `commondir` 를 푼 것이다.
+fn git_dirs(root: &Path) -> Option<(&Path, PathBuf)> {
+    let top = root.ancestors().find(|d| d.join(".git").exists())?;
+    let dotgit = top.join(".git");
+    let common = if dotgit.is_dir() {
+        dotgit
+    } else {
+        let text = std::fs::read_to_string(&dotgit).ok()?;
+        let gitdir = top.join(text.trim_end().strip_prefix("gitdir:")?.trim());
+        let up = std::fs::read_to_string(gitdir.join("commondir")).ok()?;
+        // `commondir` 는 대개 `../..` 다 — 풀지 않으면 끝 이름이 `..` 라 주 워크트리를 못 알아본다.
+        canonical(&gitdir.join(up.trim_end()))
+    };
+    Some((top, common))
+}
+
+/// 두 뿌리가 **같은 git 저장소의 워크트리에서 같은 자리의 트래커인가** — 공용 git 디렉터리가
+/// 같고, 워크트리 꼭대기에서 moai 뿌리까지가 같다. 못 찾으면 아니다.
 ///
 /// 훅이 `-C`·`cd` 로 가리킨 트래커가 세션의 옆 워크트리인지 가른다(moai-23ky). 옆 워크트리면
 /// 세션의 자리로 본다 — 그쪽 눈으로 보면 이 세션이 쥔 일이 "옆의 것" 이라 초점에서 빠져,
 /// `moai -C <main> add` 한 번으로 규칙 1 을 넘는다. 다른 트래커를 가리킬 때만 부른다.
+///
+/// **꼭대기에서의 자리도 견준다.** 공용 디렉터리만 보던 판은 한 저장소에 트래커를 둘 둔
+/// 모노레포(`a/.moai`·`b/.moai`)에서 `moai -C ../b add` 를 `a` 의 초점으로 막고 `b` 의 초점은
+/// 안 봤다. git 을 띄우지 않는다 — 두 번의 `rev-parse` 가 이 길의 값 대부분이었다.
 pub fn same_repo(a: &Path, b: &Path) -> bool {
-    let common = |root: &Path| {
-        git(root, &["rev-parse", "--git-common-dir"]).ok().map(|c| canonical(&root.join(c.trim_end_matches('\n'))))
+    let place = |root: &Path| {
+        let (top, common) = git_dirs(root)?;
+        let rel = canonical(root).strip_prefix(canonical(top)).map(Path::to_path_buf).ok()?;
+        Some((canonical(&common), rel))
     };
-    matches!((common(a), common(b)), (Some(x), Some(y)) if x == y)
+    matches!((place(a), place(b)), (Some(x), Some(y)) if x == y)
 }
 
 /// 워크트리 이름에서 id 후보를 읽는다 — 경로의 끝 이름, 가지 이름, `worktree-` 를 뗀 가지 이름.
@@ -800,6 +816,17 @@ mod tests {
         }
         assert!(!away(&main).contains("gone"), "사라진 워크트리를 이름으로 댄다");
         assert!(away(&base.join("nowhere")).is_empty());
+
+        // **같은 저장소의 같은 자리 트래커만 같다**(moai-23ky) — 옆 워크트리의 main 은 같고, 한
+        // 저장소에 트래커를 둘 둔 모노레포의 `a`·`b` 는 다르다.
+        for d in [main.join("a"), main.join("b"), feat.join("a")] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        assert!(same_repo(&main, &feat), "옆 워크트리를 다른 저장소로 본다");
+        assert!(same_repo(&main.join("a"), &feat.join("a")));
+        assert!(!same_repo(&main.join("a"), &main.join("b")), "모노레포의 다른 트래커를 같은 자리로 본다");
+        assert!(!same_repo(&main.join("a"), &feat), "꼭대기와 하위 트래커를 같은 자리로 본다");
+        assert!(!same_repo(&main, &base.join("nowhere")));
 
         // 하위 디렉터리에서 부르면 `--git-common-dir` 이 상대 경로(`../.git`)로 온다.
         let sub = main.join("sub");

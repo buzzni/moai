@@ -275,7 +275,14 @@ fn route(repo: &Repo, cmd: &str, cwd: &Path) -> (Vec<Route>, Vec<Repo>) {
         .into_iter()
         .map(|dir| {
             let Some(dir) = dir else { return Route::Here };
-            let Ok(Some(found)) = Repo::find_from(&dir).map(|r| r.filter(|_| dir.is_dir())) else {
+            // **없는 자리는 어디인지 모른다 — 세션의 눈으로 본다.** `Nowhere` 로 보내던 판은
+            // `mkdir d && moai -C d add`·`mkdir d && cd d && moai add` 를 아무도 판정하지 않았는데,
+            // 실행할 때는 `d` 가 있어 `moai` 가 위로 찾아 이 트래커에 세운다 — 규칙 1 이 샜다.
+            // `cd /없는곳; moai add` 도 `cd` 가 실패해 세션 자리에서 돈다.
+            if !dir.is_dir() {
+                return Route::Here;
+            }
+            let Ok(Some(found)) = Repo::find_from(&dir) else {
                 return Route::Nowhere;
             };
             if same(&found.root, &repo.root)
