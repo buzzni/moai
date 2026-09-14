@@ -119,7 +119,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             // (`user_config::names`) 한글은 두 칸을 먹는다 — 그대로 두면 `fit` 이 뒤에서부터
             // 자를 때 답하는 키(`y 뺀다`)가 먼저 밀려나, 무엇으로 답하는지 없는 물음이 선다.
             let room = keys.width as usize;
-            let name = clip(&crate::text::sanitize(&u.name), (room / 2).max(1));
+            let name = clip(&crate::text::one_line(&u.name), (room / 2).max(1));
             let line = Line::from(Span::styled(
                 format!(" {name} 을 목록에서 뺄까 — y 뺀다 · 다른 키는 그만 · 디렉터리와 .moai 는 그대로다 "),
                 ask,
@@ -140,7 +140,7 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect) {
     let inner = at.width.saturating_sub(2) as usize;
     let rows = p.rows();
     let items: Vec<ListItem> = rows.iter().map(|r| ListItem::new(dent_line(p, *r, inner))).collect();
-    let dir = crate::text::sanitize(&p.at.dir.display().to_string());
+    let dir = crate::text::one_line(&p.at.dir.display().to_string());
     // 경로는 **뒤가 값지다** — 깊이 들어갈수록 앞은 늘 같은 홈이다. 넘치면 앞을 자른다.
     let room = inner.saturating_sub(crate::text::width(" 프로젝트 등록 ·  ") + 1);
     let title = format!(" 프로젝트 등록 · {} ", crate::text::clip_front(&dir, room));
@@ -187,7 +187,7 @@ fn dent_line<'a>(p: &Picker, r: picker::Row, budget: usize) -> Line<'a> {
         picker::Row::Dir(i) => {
             let Some(d) = p.at.entries.get(i) else { return Line::from("") };
             // 이름이 줄을 다 먹으면 표시가 안 보인다 — 반까지만, `/` 는 자른 뒤에 붙인다.
-            let mut name = clip(&crate::text::sanitize(&d.name), (room / 2).max(2).saturating_sub(1));
+            let mut name = clip(&crate::text::one_line(&d.name), (room / 2).max(2).saturating_sub(1));
             name.push('/');
             (vec![Span::raw(name)], d.moai, d.registered)
         }
@@ -247,7 +247,7 @@ fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool, tint: Style) {
         Some(into) => {
             let room = (title_at.width as usize).saturating_sub(2);
             let label = crate::text::width(" 담을 곳  · 제목 ");
-            let name = clip(&crate::text::sanitize(&into.name), room.saturating_sub(label).min(room / 2).max(1));
+            let name = clip(&crate::text::one_line(&into.name), room.saturating_sub(label).min(room / 2).max(1));
             Line::from(vec![Span::raw(" 담을 곳 "), Span::styled(name, tint), Span::raw(" · 제목 ")])
         }
         None => Line::from(" 생각 담기 · 제목 "),
@@ -301,8 +301,8 @@ const JOT_HEAD_ROOM: u16 = 7;
 fn jot_head<'a>(into: &Target, w: usize, tint: Style) -> Line<'a> {
     const LABEL: &str = " 담을 곳  ";
     let room = w.saturating_sub(crate::text::width(LABEL));
-    let name = clip(&crate::text::sanitize(&into.name), (room / 2).max(1));
-    let path = crate::text::sanitize(&into.path.display().to_string());
+    let name = clip(&crate::text::one_line(&into.name), (room / 2).max(1));
+    let path = crate::text::one_line(&into.path.display().to_string());
     let line = Line::from(vec![
         Span::styled(LABEL, bold()),
         Span::styled(name, tint),
@@ -395,7 +395,7 @@ fn banner(app: &App) -> Option<(String, bool)> {
     if app.on_layer()
         && let Some(l) = &app.layer
     {
-        parts.extend(l.problems.iter().map(|p| crate::text::sanitize(p).replace('\n', " ")));
+        parts.extend(l.problems.iter().map(|p| crate::text::one_line(p)));
     }
     // 층이 **안 선** 까닭은 프로젝트 안에서도 댄다 — 그 화면에서는 층이 없다는 것 말고
     // 달리 알 길이 없다. 급하지 않다(이 프로젝트는 멀쩡하다).
@@ -446,7 +446,7 @@ fn crumbs(f: &mut Frame, app: &App, at: Rect) {
     let mut spans = Vec::new();
     let mut room = room;
     if let Some(p) = app.project() {
-        let name = clip(&crate::text::sanitize(&p.name), (room / 2).max(1));
+        let name = clip(&crate::text::one_line(&p.name), (room / 2).max(1));
         room = room.saturating_sub(crate::text::width(&name) + 1);
         spans.push(Span::styled(name, project_style(p)));
         spans.push(Span::styled(":", bold()));
@@ -1109,7 +1109,7 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
     let room = budget.saturating_sub(crate::text::width(CURSOR));
     let enterable = matches!(p.look, Look::Open { .. } | Look::Unread);
     // 이름이 줄을 다 먹으면 무엇이 서 있는지가 안 보인다 — 반까지만. `/` 는 자른 뒤에 붙인다.
-    let mut name = clip(&crate::text::sanitize(&p.name), (room / 2).max(2).saturating_sub(1));
+    let mut name = clip(&crate::text::one_line(&p.name), (room / 2).max(2).saturating_sub(1));
     if enterable {
         name.push('/');
     }
@@ -1137,7 +1137,7 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
     if p.launched {
         spans.push(Span::styled(if p.registered { "  여기" } else { "  여기 · 등록 안 됨" }, dim()));
     }
-    spans.push(Span::styled(format!("  {}", crate::text::sanitize(&p.path.display().to_string())), dim()));
+    spans.push(Span::styled(format!("  {}", crate::text::one_line(&p.path.display().to_string())), dim()));
     fit(Line::from(spans), room)
 }
 
@@ -1157,14 +1157,16 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
     let Some(p) = app.layer.as_ref().and_then(|l| l.places.get(at)) else {
         return vec![Line::from(Span::styled("없다", dim()))];
     };
-    let mut out = wrapped(&p.name, w, project_style(p));
-    out.extend(wrapped(&p.path.display().to_string(), w, dim()));
+    // 이 층의 글은 전부 **남의 것**이다 — 한 줄 자리는 `one_line` 하나를 지난다. `sanitize` 가
+    // 남긴 줄바꿈·탭은 한 줄 `Line` 안에서 위젯이 말없이 버려 다른 이름으로 읽힌다(moai-9tww).
+    let mut out = wrapped(&crate::text::one_line(&p.name), w, project_style(p));
+    out.extend(wrapped(&crate::text::one_line(&p.path.display().to_string()), w, dim()));
     match (p.launched, p.registered) {
         (true, true) => out.push(Line::from(Span::styled("여기서 띄웠다", dim()))),
         // 고칠 명령에는 **그 뿌리를** 댄다. `.` 이라 적으면 하위 디렉터리에서 띄운 사람이 그
         // 하위 디렉터리를 등록한다 — 그곳은 `.moai` 가 없어 "init 전" 으로 선다.
         (true, false) => {
-            let at = crate::text::shell_word(&crate::text::sanitize(&p.path.display().to_string()));
+            let at = crate::text::shell_word(&crate::text::one_line(&p.path.display().to_string()));
             out.extend(wrapped(&format!("여기서 띄웠다 · 등록 안 됨 — `moai project add {at}` 로 더하면 어디서든 보인다"), w, dim()))
         }
         _ => {}
@@ -1175,9 +1177,9 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
         Look::Shut { state, said } => out.extend(wrapped(said, w, shut_style(*state))),
         Look::Open { sum, .. } => {
             for (st, n) in &sum.counts {
-                // 칸 이름은 **남의 설정 파일**에서 온다 — `wrapped` 를 지나는 옆 줄들처럼 거른다.
+                // 칸 이름은 **남의 설정 파일**에서 온다 — 옆 줄들처럼 한 줄로 거른다.
                 out.push(Line::from(Span::styled(
-                    format!("{} {} {n}", style::glyph(st), crate::text::sanitize(st)),
+                    format!("{} {} {n}", style::glyph(st), crate::text::one_line(st)),
                     status(st),
                 )));
             }
@@ -1185,11 +1187,11 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
             out.push(Line::from(Span::styled(format!("집은 것 {}건", sum.picked.len()), bold())));
             for i in &sum.picked {
                 out.push(Line::from(vec![
-                    Span::styled(crate::text::sanitize(&i.id), dim()),
+                    Span::styled(crate::text::one_line(&i.id), dim()),
                     Span::raw("  "),
                     Span::styled(style::glyph(&i.column).to_string(), status(&i.column)),
                     Span::raw(" "),
-                    Span::raw(crate::text::sanitize(&i.title)),
+                    Span::raw(crate::text::one_line(&i.title)),
                 ]));
             }
             out.push(Line::from(""));
@@ -2824,6 +2826,34 @@ pub(super) mod tests {
         let mut empty = App::new(Vec::new(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         let lines = render(&mut empty, 60, 10).join("\n");
         assert!(lines.contains("비었다"), "{lines}");
+    }
+
+    /// **층의 한 줄 자리는 `text::one_line` 을 지난다**(moai-9tww) — 칸 이름은 남의
+    /// `.moai/config.toml` 이, id·제목은 남의 스냅샷이, 이름·경로는 남의 디렉터리가 정한다.
+    /// `sanitize` 는 줄바꿈과 탭을 남기는데, 한 줄짜리 `Line` 에 든 그것은 위젯이 말없이
+    /// 버려 `in<LF>prog` 가 `inprog` 라는 다른 칸 이름으로 읽힌다. CLI 한눈 보기
+    /// (`view::unopened`·`.moai` 밖 status)와 같은 자로 잇는다.
+    #[test]
+    fn the_layer_folds_foreign_names_into_one_line() {
+        use super::super::layer::{At, Look, Picked, Summary};
+        let mut a = layered(At::Layer);
+        let place = &mut a.layer.as_mut().unwrap().places[0];
+        place.name = "on\te".into();
+        place.look = Look::Open {
+            sum: Summary {
+                counts: vec![("in\nprog\tress\u{1b}[2J".into(), 1)],
+                picked: vec![Picked { id: "argos\t0004".into(), title: "첫 줄\n둘째\t줄".into(), column: "in_progress".into() }],
+                warnings: 0,
+                unreadable: 0,
+            },
+        };
+        let screen = render(&mut a, 140, 22).join("\n");
+        assert!(screen.contains("in  prog ress[2J 1"), "칸 이름이 한 줄로 안 접혔다\n{screen}");
+        assert!(screen.contains("argos 0004"), "id 의 탭이 사라졌다\n{screen}");
+        assert!(screen.contains("첫 줄  둘째 줄"), "제목이 한 줄로 안 접혔다\n{screen}");
+        assert!(screen.contains("on e/"), "목록 줄의 이름에서 탭이 사라졌다\n{screen}");
+        assert!(screen.contains("│  on e "), "상세 머리의 이름에서 탭이 사라졌다\n{screen}");
+        assert!(!screen.contains('\u{1b}'), "{screen}");
     }
 
     /// **층으로 가는 `..` 은 줄로 안 센다** — 층이 있으면 빈 프로젝트의 뿌리에도 `..` 이

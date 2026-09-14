@@ -581,7 +581,7 @@ impl App {
                 // 층이 있으면 **어느 프로젝트에** 담겼는지도 댄다 — 같은 id 가 두 프로젝트에 있을 수
                 // 있어 id 만으로는 어디인지 모른다(moai-fccv). 층이 없으면 프로젝트는 하나뿐이다.
                 let what = match self.project() {
-                    Some(p) => format!("{} · {id}", crate::text::sanitize(&p.name)),
+                    Some(p) => format!("{} · {id}", crate::text::one_line(&p.name)),
                     None => id.clone(),
                 };
                 let told = match self.land(&id) {
