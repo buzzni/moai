@@ -1650,3 +1650,7 @@
 {"ts":"2026-09-14T10:24:27Z","id":"moai-nt0h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-cxk8 에 밀렸다 — 막힘 시계는 planned_at 을 안 센다 (사용자와 정함)"}
 {"ts":"2026-09-14T10:24:31Z","id":"moai-2v3w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T10:24:31Z","id":"moai-2v3w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다시 봄(2026-09-14): 여는 조건이 이미 왔다. `moai tui` 는 cmd::run 안에서 돌고 끝나면 main 의 carried() 를 지난다 — 탐색기에서 여러 번 쓴 뒤 마지막 쓰기가 스냅샷을 안 건드렸으면(예: 끝에 한 것이 note 뿐) 나오면서 '이번 명령은 그 파일을 안 건드렸다' 고 거짓말한다. 고른 것: 프로세스 단위로 '한 번이라도 썼는가' 를 누적(OR). TUI 제 자리 알림은 이미 경고 셈이 따로 비추므로 필요 없다."}
+{"ts":"2026-09-14T10:27:57Z","id":"moai-7azq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"경고가 판정한 나이를 싣는다 — status 목록이 blocked_stale 줄을 막음이 선 때로 댄다"}
+{"ts":"2026-09-14T10:27:57Z","id":"moai-0qr8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-7azq 로 옮겨 작업한다"}
+{"ts":"2026-09-14T10:27:58Z","id":"moai-7azq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T10:27:58Z","id":"moai-7azq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-0qr8 에서 옮김(리뷰 moai-cxk8.l89 가 넘긴 2번). 안: 판정한 자리(report::status)가 id 마다 잰 나이를 Warning 에 싣고(additive JSON 필드), view::preview 는 그것을 쓴다 — 없으면 전처럼 status_since. 나이를 두 자리에서 따로 재면 판정과 표시가 또 갈라진다. blocked_stale 은 blocked_since 로, 다른 날짜 경고는 제 판정 시각으로."}
