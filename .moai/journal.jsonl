@@ -2251,3 +2251,12 @@
 {"ts":"2026-09-14T14:39:18Z","id":"moai-v2jf.lsa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"고칠 것 없음, 넘긴 것 없음 — 읽혔을 때만 설정을 넣는 것·다른 relist 의 None·키 안내·권한 시험을 확인"}
 {"ts":"2026-09-14T14:39:19Z","id":"moai-v2jf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (83c29cc) — 고르기 창의 . 이 다시 읽기에 성공할 때만 숨은 것 보이기를 바꾼다"}
 {"ts":"2026-09-14T14:39:32Z","id":"moai-xqxu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T14:42:22Z","id":"moai-hy2h.b14","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 본 가지 읽기와 heredoc 펜스"}
+{"ts":"2026-09-14T14:42:34Z","id":"moai-hy2h.b14","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T14:42:34Z","id":"moai-hy2h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-14T14:42:34Z","id":"moai-5jxr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-14T14:42:44Z","id":"moai-hy2h.b14","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review high --fix(28152cc) — 워크트리에서 바로 불렀고 막히지 않았는지 감독에 알린다. 결과를 원문·판단 노트로, fix: 커밋 → 에픽 max 리뷰(--parent moai-7ljm) → <본 가지> 받기·시험 → ExitWorktree → MERGE_HEAD 확인 후 --no-ff 병합 → 워크트리 지우고 닫기 → moa-issue-45 보고"}
+{"ts":"2026-09-14T14:43:19Z","id":"moai-dfeg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자와 정한 것 (2026-09-14, 감독 세션 moa-issue-45 이 맡기고 사용자가 받음): .moai 밖에서 등록이 0 건이면 moai tui 는 빈 프로젝트 층을 열고 화면에 'SPC p a 로 디렉터리를 골라 등록한다' 를 세운다. 등록이 들어가면 그 자리에서 층이 선다. --json 은 기계가 읽는 것이라 지금처럼 등록 없음으로 멈춘다. 사람이 보는 화면이라 '빈 화면이 실수를 성공으로 읽힌다' 는 기존 걱정이 안 선다 — 안내 한 줄이 무엇을 할지 댄다."}
+{"ts":"2026-09-14T14:43:19Z","id":"moai-r8kl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"등록이 0 인 채 .moai 밖에서 moai tui 가 빈 프로젝트 층을 열고 SPC p a 로 첫 등록을 안내한다"}
+{"ts":"2026-09-14T14:43:19Z","id":"moai-dfeg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r8kl 로 옮겨 작업한다"}
+{"ts":"2026-09-14T14:43:19Z","id":"moai-r8kl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
