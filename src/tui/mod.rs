@@ -551,11 +551,17 @@ impl App {
                 self.write_failed = false;
                 self.reload();
                 let Touched { id, done } = touched;
+                // 층이 있으면 **어느 프로젝트에** 담겼는지도 댄다 — 같은 id 가 두 프로젝트에 있을 수
+                // 있어 id 만으로는 어디인지 모른다(moai-fccv). 층이 없으면 프로젝트는 하나뿐이다.
+                let what = match self.project() {
+                    Some(p) => format!("{} · {id}", crate::text::sanitize(&p.name)),
+                    None => id.clone(),
+                };
                 let told = match self.land(&id) {
-                    Landing::Shown => format!("✓ {done} · {id}"),
-                    Landing::Hidden => format!("✓ {done} · {id} — 거름망에 가려 안 보인다 · Esc 로 푼다"),
+                    Landing::Shown => format!("✓ {done} · {what}"),
+                    Landing::Hidden => format!("✓ {done} · {what} — 거름망에 가려 안 보인다 · Esc 로 푼다"),
                     // 다시 읽기가 실패했으면 그 까닭은 `trouble` 이 따로 댄다. 담긴 것은 참이다.
-                    Landing::Missing => format!("✓ {done} · {id} — 다시 읽은 목록에 없다"),
+                    Landing::Missing => format!("✓ {done} · {what} — 다시 읽은 목록에 없다"),
                 };
                 self.notice = Some(told);
                 Some(id)
@@ -965,8 +971,8 @@ impl App {
             self.typing(k);
             return;
         }
-        // 층에서 뜻이 없는 키는 **왜 안 되는지를** 한 줄로 말한다. 특히 `n` 은 담을 프로젝트가
-        // 안 정해졌다 — 띄운 자리에 조용히 쓰면 사람은 보던 줄의 프로젝트에 담긴 줄 안다.
+        // 층에서 뜻이 없는 키는 **왜 안 되는지를** 한 줄로 말한다. `n` 은 층에서도 듣는다 —
+        // 커서의 프로젝트를 담을 곳으로 박는다([`App::open_form`]).
         if self.on_layer()
             && let Some(say) = layer::refused(&k)
         {
@@ -992,8 +998,9 @@ impl App {
             KeyCode::Backspace | KeyCode::Left if self.focus == Pane::Explorer => self.leave(),
             KeyCode::Char('/') => self.mode = Mode::Grep(Input::default()),
             KeyCode::Char('f') | KeyCode::F(7) => self.mode = Mode::Filter(Input::default()),
-            // **포커스와 상관없이 연다.** 무엇을 보다가 떠올랐든 담는 칸은 하나다.
-            KeyCode::Char('n') => self.mode = Mode::Idea(Form::default()),
+            // **포커스와 상관없이 연다.** 무엇을 보다가 떠올랐든 담는 칸은 하나다. 담을 곳은
+            // 여는 순간 박힌다 — 층에서는 커서의 프로젝트다(moai-fccv).
+            KeyCode::Char('n') => self.open_form(),
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             KeyCode::Esc => self.clear_filter(),
@@ -1266,16 +1273,25 @@ impl App {
 /// 정규화, 검증, 저널 `create`, 만든 사람이 담당인 것까지. 에픽은 없다: 커서가 선 자리가
 /// 무엇이든 넣지 않는다. 칸은 config 의 첫 칸이다.
 ///
+/// **담는 곳은 폼이 연 순간 박은 프로젝트다**([`form::Target`]) — 커서도, 층이 그새 다시
+/// 읽힌 것도 상관없다([`App::stand_at`]).
+///
 /// 되면 폼을 **닫기만 한다.** 다시 읽기·만든 줄에 커서 두기·`✓ 담김 · id` 알림은
 /// `write` 가 한다(moai-064q) — 여기서 또 하면 한 쓰기에 목록을 두 번 세거나 알림이 둘이
 /// 된다. 안 되면 **아무것도 건드리지 않는다** — 누군지 묻는 중이면 `write` 가 이미 모드를
 /// `Ask` 로 바꿨고, 실패면 폼이 열린 채 까닭이 배너에 선다.
 fn save_idea(app: &mut App) {
     let Mode::Idea(form) = &app.mode else { return };
-    let (title, body) = (form.title(), form.body());
+    let (title, body, into) = (form.title(), form.body(), form.into.clone());
     // 폼이 이미 거절한다. 되돌아온 길(`answer`)도 같은 폼이라 여기 걸릴 일은 없지만,
     // 빈 제목을 `write` 까지 보내면 누군지부터 묻는다 — 거절이 물음 뒤로 밀린다.
     if title.is_empty() {
+        return;
+    }
+    // **폼이 박은 곳에 서야 쓴다**(moai-fccv). 층에서 연 폼이면 여기서 그 프로젝트로 들어가고,
+    // 선 곳이 다르면 쓰지 않는다. `write` 는 `self.repo` 에 쓰므로 여기를 지나면 머리에 보인
+    // 곳이 곧 쓰는 곳이다 — 묻고 이어진 쓰기도 이 함수를 다시 지난다.
+    if !app.stand_at(into.as_ref()) {
         return;
     }
     let at = crate::model::now();
@@ -2571,6 +2587,22 @@ mod tests {
         assert_eq!(form.body.text(), "본문만 있다", "거절하며 적은 것을 지웠다");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
         assert!(a.trouble.is_none(), "빈 제목은 쓰기의 실패가 아니다 — {:?}", a.trouble);
+    }
+
+    /// **담을 곳 없이 연 폼은 저장소가 있어도 안 쓴다** — 쓰는 곳은 폼이 박은 곳이지 지금
+    /// `repo` 가 아니다(moai-fccv). `n` 은 늘 담을 곳을 박으므로 이것은 속을 직접 세운 폼이다.
+    #[test]
+    fn a_form_without_a_target_never_writes() {
+        let (scratch, mut a) = writable("jot-untargeted");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let before = std::fs::read_to_string(&file).unwrap();
+        jotting(&mut a, "여기");
+        assert!(matches!(&a.mode, Mode::Idea(f) if f.into.as_ref().is_some_and(|t| t.path == scratch.0)), "{:?}", a.mode);
+        a.mode = Mode::Idea(Form { title: Input::new("어디에도"), ..Form::default() });
+        a.key(ctrl('s'));
+        assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
+        assert!(a.trouble.as_deref().is_some_and(|t| t.starts_with("쓰지 못했다")), "{:?}", a.trouble);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
     }
 
     /// **Esc 는 빈 폼을 곧바로 닫고, 적던 것이 있으면 한 번 묻는다.** `y` 만 버린다 —
