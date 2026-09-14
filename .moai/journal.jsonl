@@ -2469,3 +2469,6 @@
 {"ts":"2026-09-14T17:20:27Z","id":"moai-pjic","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"정함(2026-09-14): src/git.rs — commits_of(root, ids) 가 git log 를 한 번 부르고 split 이 제목만 id 경계로 가른다. 경계는 앞에 -·.·영숫자가 붙거나 뒤가 자식(.영숫자)으로 이어지면 다른 id. chore(tracker) 커밋은 거르지 않고 Commit.tracker 로 표시만 한다 — 거를지는 그리는 쪽 moai-emcv 가 정한다. 대상은 HEAD 한 가지뿐. 부르는 쪽이 없어 main.rs 에 cfg_attr(not(test), expect(dead_code)) — emcv 에서 지운다"}
 {"ts":"2026-09-14T17:20:29Z","id":"moai-fmv5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-14T17:20:29Z","id":"moai-fmv5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 워크트리 worktree-moai-fmv5(fb15f7b) 에 /code-review high --fix 가 도는 중. 결과 반영(fix 커밋) → main 머지 → done, 리뷰 moai-fmv5.1b6 닫기 → moai-55cp(정렬) 집기."}
+{"ts":"2026-09-14T17:20:39Z","id":"moai-pjic.jd3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — git 층: 커밋 제목의 id 로 커밋 찾기 (pjic)"}
+{"ts":"2026-09-14T17:20:40Z","id":"moai-pjic.jd3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T17:20:43Z","id":"moai-yxae.0vi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — .moai 밖 tui --json 의 객체 계약 (moai-yxae)"}
