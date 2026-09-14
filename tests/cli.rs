@@ -2951,7 +2951,22 @@ fn help_says_what_to_type_next() {
 fn lost_indent(help: &str) -> Vec<String> {
     let mut bad = Vec::new();
     let mut prose: Option<&str> = None;
+    let mut closer: Option<String> = None;
     for l in help.lines().skip_while(|l| !l.starts_with("Usage:")).skip(1) {
+        // **heredoc 블록은 왼쪽 끝이 옳다** — 복사해 돌려면 여는 줄도 닫는 줄도 들여쓰지
+        // 않는다(moai-foc3). 블록 안은 산문도 설명도 아니라 건너뛰고, 닫힌 뒤 새로 센다.
+        if let Some(tag) = &closer {
+            if l == tag {
+                closer = None;
+                prose = None;
+            }
+            continue;
+        }
+        if let Some(tag) = heredoc_tag(l) {
+            closer = Some(tag);
+            prose = None;
+            continue;
+        }
         if l.trim().is_empty() {
             continue;
         }
@@ -2966,6 +2981,35 @@ fn lost_indent(help: &str) -> Vec<String> {
         }
     }
     bad
+}
+
+/// 줄에 heredoc 이 열리면 그 닫는 표시. `<<<` 는 heredoc 이 아니다.
+fn heredoc_tag(line: &str) -> Option<String> {
+    let at = line.match_indices("<<").map(|(i, _)| i).find(|&i| {
+        !line[..i].ends_with('<') && !line[i + 2..].starts_with('<')
+    })?;
+    let rest = line[at + 2..].trim_start_matches('-').trim_start();
+    let rest = rest.trim_start_matches(['\'', '"']);
+    let tag: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+    (!tag.is_empty()).then_some(tag)
+}
+
+/// 모든 명령(하위 명령까지)의 `--help`. **명령 목록은 바이너리의 도움말에서 읽는다.**
+fn every_help(s: &Scratch) -> Vec<(String, String)> {
+    let mut queue: Vec<Vec<String>> = vec![vec![]];
+    let mut all = Vec::new();
+    while let Some(path) = queue.pop() {
+        let mut args: Vec<&str> = path.iter().map(String::as_str).collect();
+        args.push("--help");
+        let help = ok(s.path(), &args);
+        for c in subcommands(&help) {
+            let mut next = path.clone();
+            next.push(c);
+            queue.push(next);
+        }
+        all.push((path.join(" "), help));
+    }
+    all
 }
 
 /// 도움말의 `Commands:` 밑에 선 이름들. `help` 는 clap 이 만드는 것이라 뺀다.
@@ -3002,32 +3046,76 @@ fn every_help_keeps_its_indent() {
         assert!(found.is_empty(), "멀쩡한 글을 잡는다 — {found:?}");
     }
 
-    let mut queue: Vec<Vec<String>> = vec![vec![]];
     let mut seen = Vec::new();
     let mut with_examples = 0;
     let mut bad = Vec::new();
-    while let Some(path) = queue.pop() {
-        let mut args: Vec<&str> = path.iter().map(String::as_str).collect();
-        args.push("--help");
-        let help = ok(s.path(), &args);
+    for (path, help) in every_help(&s) {
         if help.lines().any(|l| l.starts_with("  moai ")) {
             with_examples += 1;
         }
         for b in lost_indent(&help) {
-            bad.push(format!("moai {} --help:\n{b}", path.join(" ")));
+            bad.push(format!("moai {path} --help:\n{b}"));
         }
-        for c in subcommands(&help) {
-            let mut next = path.clone();
-            next.push(c);
-            queue.push(next);
-        }
-        seen.push(path.join(" "));
+        seen.push(path);
     }
     // 훑기가 실제로 돌았는지 — 하위 명령까지 내려갔고 예시 줄을 가진 도움말을 봤다.
     assert!(seen.len() > 20, "명령 목록을 못 읽었다 — {seen:?}");
     assert!(seen.iter().any(|c| c == "skill install"), "하위 명령으로 안 내려갔다 — {seen:?}");
     assert!(with_examples >= 8, "예시 줄이 있는 도움말이 {with_examples} 개뿐이다 — {seen:?}");
     assert!(bad.is_empty(), "들여쓰기를 잃은 줄:\n\n{}", bad.join("\n\n"));
+}
+
+/// **도움말의 heredoc 은 복사해서 그대로 돈다** (moai-foc3).
+///
+/// 들여쓴 heredoc 을 그대로 치면 닫는 표시가 들여써져 셸이 끝을 못 찾는다 — `<<-` 는
+/// 탭만 벗긴다. 한 줄에 `<<'MD' ... MD` 로 줄인 것은 닫히지 않는다. 표시가 `EOF`·`MD`
+/// 면 커밋 메시지나 `moai note -b - <<'MD'` 에 인용할 때 바깥 heredoc 을 일찍 닫는다.
+#[test]
+fn every_help_heredoc_is_copyable() {
+    // 판정이 헛돌지 않는지 먼저 본다.
+    for (broken, why) in [
+        ("  moai add --from - <<'PLAN'\n  # 에픽\n  PLAN\n", "들여쓴 여는 줄"),
+        ("moai add --from - <<'PLAN'\n# 에픽\n  PLAN\n", "들여쓴 닫는 줄"),
+        ("moai note t-1 -b - <<'PLAN' ... PLAN\n", "한 줄로 줄인 것"),
+        ("moai add --from - <<'EOF'\n# 에픽\nEOF\n", "겹치는 표시"),
+    ] {
+        assert!(!copyable_heredocs(broken).is_empty(), "판정이 {why} 을 못 알아본다");
+    }
+    assert!(copyable_heredocs("moai add --from - <<'PLAN'\n# 에픽\nPLAN\n  설명\n").is_empty());
+    assert!(copyable_heredocs("grep x <<< \"hi\"\n").is_empty(), "here-string 을 heredoc 으로 읽는다");
+
+    let s = init("helpheredoc");
+    let mut bad = Vec::new();
+    let mut seen = 0;
+    for (path, help) in every_help(&s) {
+        seen += help.lines().filter(|l| heredoc_tag(l).is_some()).count();
+        for b in copyable_heredocs(&help) {
+            bad.push(format!("moai {path} --help: {b}"));
+        }
+    }
+    assert!(seen >= 4, "도움말에서 heredoc 을 {seen}개밖에 못 찾았다");
+    assert!(bad.is_empty(), "복사해 못 도는 heredoc:\n{}", bad.join("\n"));
+}
+
+/// 복사해 못 도는 heredoc 마다 한 줄.
+fn copyable_heredocs(help: &str) -> Vec<String> {
+    let lines: Vec<&str> = help.lines().collect();
+    let mut bad = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let Some(tag) = heredoc_tag(line) else { continue };
+        if line.starts_with(char::is_whitespace) {
+            bad.push(format!("여는 줄이 들여써졌다 — {line}"));
+        }
+        if matches!(tag.as_str(), "EOF" | "MD") {
+            bad.push(format!("표시 {tag} 는 바깥 heredoc 과 겹친다 — {line}"));
+        }
+        match lines[i + 1..].iter().find(|l| l.trim() == tag) {
+            Some(close) if *close == tag => {}
+            Some(close) => bad.push(format!("닫는 줄이 들여써졌다 — {close:?}")),
+            None => bad.push(format!("닫히지 않는다 — {line}")),
+        }
+    }
+    bad
 }
 
 /// 인자 없이 부른 것도 `--json` 이 돈다 — 에이전트가 첫 호출부터 기계로 읽는다.
