@@ -645,10 +645,18 @@ mod tests {
     fn the_scratch_file_never_reuses_an_existing_name() {
         let d = Dir::new("name");
         let (a, _fa) = scratch_file(&d.0).unwrap();
+        // 다음에 고를 이름들을 남이 먼저 둔다 — 카운터만 믿으면 `create_new` 갈래를 한 번도 안 지난다.
+        let n: usize = a.to_string_lossy().rsplit('-').next().unwrap().trim_end_matches(".md").parse().unwrap();
+        let theirs: Vec<std::path::PathBuf> = (n + 1..=n + 8).map(|k| d.0.join(format!("moai-idea-{}-{k}.md", std::process::id()))).collect();
+        for p in &theirs {
+            std::fs::write(p, "남의 것").unwrap();
+        }
         let (b, _fb) = scratch_file(&d.0).unwrap();
         assert_ne!(a, b);
-        std::fs::write(&a, "남의 것").unwrap();
-        assert_eq!(std::fs::read_to_string(&a).unwrap(), "남의 것");
+        assert!(!theirs.contains(&b), "남이 둔 이름을 열었다 — {}", b.display());
+        for p in &theirs {
+            assert_eq!(std::fs::read_to_string(p).unwrap(), "남의 것", "남이 둔 파일을 덮었다");
+        }
     }
 
     /// 아무리 비싼 프레임에서도 **멈춘 것처럼 보이지는 않는다.** 멈춘 스피너는
