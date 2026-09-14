@@ -1940,3 +1940,6 @@
 {"ts":"2026-09-14T12:37:23Z","id":"moai-xms8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T12:37:23Z","id":"moai-mzoc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T12:37:23Z","id":"moai-4lam","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:37:34Z","id":"moai-dtye.0t0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:39:30Z","id":"moai-rvcb.7u5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"json 키 blocks→blockers 반영(265ea45), 모르는 필드와 덧붙인 키 이름 겹침은 moai-yec5 로 넘겼다, 전체 셈 비용은 held 와 같아 두었다"}
+{"ts":"2026-09-14T12:39:30Z","id":"moai-rvcb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (04da79f) — show <id> 상세의 막음 줄과 --json blockers. edit 상세는 moai-dt5s"}
