@@ -1131,6 +1131,16 @@ fn role_style(r: crate::markdown::Role) -> Style {
     }
 }
 
+/// 펼친 id 가 여러 줄에 쓰였다는 한 줄 (`report::duplicate_lines`). **뒷줄을 열었다고
+/// 말한다** — 트리·탐색기가 고르는 줄과 같다는 것까지 알아야 앞줄을 찾으러 간다.
+pub fn duplicate_note(lines: usize) -> String {
+    format!(
+        "  {}   {}",
+        paint(style::WARN, "중복"),
+        paint(style::WARN, &format!("이 id 의 줄이 {lines}개다 — 파일에서 뒷줄을 연다 (moai status 의 duplicate_id)"))
+    )
+}
+
 /// 저널을 **그대로 찍는다. 접지 않는다.**
 pub fn history(journal: &[JournalEntry], cfg: &Config) -> Vec<String> {
     let mut out = Vec::new();
