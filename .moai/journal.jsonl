@@ -1180,3 +1180,6 @@
 {"ts":"2026-09-14T04:22:21Z","id":"moai-uowi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림 2(2026-09-14): 설계 결정 묶음 'TUI 키 (vi·SPC 메뉴를 먼저 정한다)' — moai-wk14 moai-7fwn moai-6jql moai-zk14 moai-uowi moai-o8q8 를 한 번에 정한다"}
 {"ts":"2026-09-14T04:22:21Z","id":"moai-o8q8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"추림 2(2026-09-14): 설계 결정 묶음 'TUI 키 (vi·SPC 메뉴를 먼저 정한다)' — moai-wk14 moai-7fwn moai-6jql moai-zk14 moai-uowi moai-o8q8 를 한 번에 정한다"}
 {"ts":"2026-09-14T04:26:42Z","id":"moai-tawj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T04:31:02Z","id":"moai-tawj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"App::spins 가 계획에서 뺀 줄(제 미룸·물려받은 미룸, Index::deferred_root)을 안 돌린다 — 일 줄도 묶음 제 줄도. 칸 셈(report)은 그대로"}
+{"ts":"2026-09-14T04:31:02Z","id":"moai-tawj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정: 미룬 묶음 제 줄도 안 돌린다. x5eg 시험은 '에픽을 미뤄도 집은 멤버를 센다' 를 spins 로 보였는데, 그 셈(busy·column)은 그대로 두고 도는지만 뺐다 — 미룬 에픽의 멤버는 물려받은 미룸으로 멈추므로 에픽만 돌면 도는 멤버 없이 도는 묶음이 선다. 부모를 미뤄 빠진 자식도 안 돈다(에픽도 그 자식으로 안 바쁘다)."}
+{"ts":"2026-09-14T04:31:02Z","id":"moai-x4pe","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
