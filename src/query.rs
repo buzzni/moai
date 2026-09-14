@@ -525,6 +525,8 @@ pub enum SortKey {
 ///
 /// - 제 방향은 사람이 먼저 보고 싶은 쪽이다 — 우선순위는 급한 것, 생성·수정은 **새것**,
 ///   칸은 설정의 앞 칸, 담당·제목은 가나다. 담당 없는 줄은 뒤로 간다
+/// - 담당은 **화면에 선 이름**(`model::label`, `naming`)으로 견준다 — 이름만 견주면 `naming = "email"`
+///   에서 담당 열이 가나다로 안 선다(moai-2kyl 단계 리뷰)
 /// - 같으면 [`display_order`] 로 가른다 — 차례가 흔들리지 않는다
 /// - `reversed` 는 가른 것까지 통째로 뒤집는다
 pub fn order_by(
@@ -533,16 +535,18 @@ pub fn order_by(
     a: (&Issue, &str),
     b: (&Issue, &str),
     statuses: &[String],
+    naming: crate::config::Naming,
 ) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let rank = |column: &str| statuses.iter().position(|s| s == column).unwrap_or(statuses.len());
+    let shown = |i: &Issue, name: &str| crate::model::label(name, i.assignee_email.as_deref(), naming).to_lowercase();
     let natural = match key {
         SortKey::Priority => Ordering::Equal,
         SortKey::Created => b.0.created_at.cmp(&a.0.created_at),
         SortKey::Updated => b.0.updated_at.cmp(&a.0.updated_at),
         SortKey::Status => rank(a.1).cmp(&rank(b.1)),
         SortKey::Assignee => match (&a.0.assignee, &b.0.assignee) {
-            (Some(x), Some(y)) => x.to_lowercase().cmp(&y.to_lowercase()),
+            (Some(x), Some(y)) => shown(a.0, x).cmp(&shown(b.0, y)),
             (Some(_), None) => Ordering::Less,
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
@@ -576,7 +580,9 @@ mod tests {
         let statuses: Vec<String> = ["todo", "review", "done"].map(String::from).to_vec();
         let sorted = |key, reversed| {
             let mut idx = vec![0, 1, 2];
-            idx.sort_by(|&x, &y| order_by(key, reversed, (&issues[x], columns[x]), (&issues[y], columns[y]), &statuses));
+            idx.sort_by(|&x, &y| {
+                order_by(key, reversed, (&issues[x], columns[x]), (&issues[y], columns[y]), &statuses, crate::config::Naming::Full)
+            });
             idx.iter().map(|&i| issues[i].id.as_str()).collect::<Vec<_>>()
         };
         assert_eq!(sorted(SortKey::Priority, false), ["a-2", "a-1", "a-3"], "기본 차례와 다르다");
@@ -585,6 +591,18 @@ mod tests {
         assert_eq!(sorted(SortKey::Created, true), ["a-1", "a-3", "a-2"]);
         assert_eq!(sorted(SortKey::Status, false), ["a-2", "a-1", "a-3"], "설정의 칸 차례가 아니다");
         assert_eq!(sorted(SortKey::Assignee, false), ["a-3", "a-1", "a-2"], "담당 없는 줄이 뒤로 안 갔다");
+
+        // **담당은 화면에 선 이름으로 선다**(moai-2kyl 단계 리뷰) — 메일로 대면 메일의 가나다다.
+        let mut mailed = [issues[0].clone(), issues[2].clone()];
+        mailed[0].assignee_email = Some("abe@example.com".into()); // 나래
+        mailed[1].assignee_email = Some("zed@example.com".into()); // 가람
+        let by = |naming| {
+            let mut idx = [0, 1];
+            idx.sort_by(|&x, &y| order_by(SortKey::Assignee, false, (&mailed[x], "todo"), (&mailed[y], "todo"), &statuses, naming));
+            idx.map(|i| mailed[i].id.as_str())
+        };
+        assert_eq!(by(crate::config::Naming::Name), ["a-3", "a-1"]);
+        assert_eq!(by(crate::config::Naming::Email), ["a-1", "a-3"], "메일로 선 담당 열이 가나다가 아니다");
     }
 
     const NOW: &str = "2026-09-11T00:00:00Z";
