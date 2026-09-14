@@ -1079,30 +1079,90 @@ mod tests {
     /// 서는 키라 도움말이 대지 않는 것이 맞다. 이름은 **키 열로** 견준다: 표의 `Bksp` 를 도움말은
     /// `Backspace` 로 적는다.
     ///
-    /// **문맥은 안 본다** — 키 열이 도움말 어디엔가 있으면 된다. 그래서 여러 표가 함께 쓰는
-    /// Enter·Esc·Tab·Bksp 는 한 번만 적혀도 모든 표에서 지나간다(검색 칸의 Enter 가 빠져도 못
-    /// 잡는다). 이 시험이 실제로 지키는 것은 표마다 제 것인 키(`a`·`.`·`g p`·`y`·`SPC …`)다.
+    /// **표마다 그 표를 말하는 문단 안에서만 찾는다**(moai-psqc). 도움말 어디에든 있으면 되던
+    /// 때는 여러 표가 함께 쓰는 Enter·Esc·Tab·Bksp 가 한 번만 적혀도 모든 표에서 지나가, 검색
+    /// 칸의 Enter 가 빠져도 못 잡았다(리뷰 moai-d5vn.txv). 어느 문단인지는 [`SECTIONS`] 가 문단의
+    /// 첫머리 말로 댄다.
     #[test]
     fn every_key_a_table_names_is_in_the_help() {
-        let said: Vec<Vec<KeyEvent>> = help_keys().into_iter().map(|(_, k)| k).collect();
+        let missing = missing_in(&tui_help());
+        assert!(missing.is_empty(), "표에 이름 붙은 키를 `moai tui --help` 의 제 문단이 안 댄다: {missing:?}");
+    }
+
+    /// **다른 문단에만 적힌 키는 그 표의 것으로 안 센다** — 문단 범위가 헛돌지 않는다는 증명.
+    /// 생각 담기 문단에서 Tab 을 지운 도움말은 도움말 전체에는 여전히 Tab 이 있지만(목록 문단의
+    /// 포커스 옮기기), 생각 담기 표(JOT)는 빠졌다고 말해야 한다. 옛 시험(도움말 어디든)은 이것을
+    /// 못 잡았다.
+    ///
+    /// **한계: 같은 문단을 쓰는 표끼리는 서로를 덮는다.** 검색·거름망 칸(PROMPT)은 목록(BROWSE)과
+    /// 한 문단이라, 검색 칸 문장에서 Enter·Esc 를 지워도 같은 문단의 "Enter·l 로 들어가고"·"Esc 가
+    /// 거름망을 푼다" 로 지나간다. 문장까지 좁히는 것은 도움말을 조금만 다듬어도 시험이 깨져
+    /// 사용자가 문단으로 정했다(moai-psqc).
+    #[test]
+    fn a_key_told_only_in_another_paragraph_does_not_count() {
+        let help = tui_help();
+        let phrase = "Tab 이 둘 사이를 옮기고";
+        assert!(help.contains(phrase), "시험이 지울 말이 도움말에 없다 — 문장이 바뀌었으면 여기도 고친다");
+        let broken = help.replace(phrase, "둘 사이를 옮기고");
+        let everywhere: Vec<String> = keys_in(&broken).into_iter().map(|(w, _)| w).collect();
+        assert!(everywhere.iter().any(|w| w == "Tab"), "도움말 전체에서 Tab 이 사라져 증명이 안 된다 — 옛 시험도 잡았을 경우다");
+        assert!(missing_in(&help).is_empty(), "고치기 전 도움말부터 빠진 키가 있다");
+        let missing = missing_in(&broken);
+        assert!(missing.contains(&"JOT: Tab".to_string()), "다른 문단의 Tab 으로 생각 담기가 지나갔다: {missing:?}");
+    }
+
+    /// 표 → 그 표를 말하는 문단들의 첫머리 말. 문단은 빈 줄로 나눈 덩어리다.
+    ///
+    /// - 고르기 창(PICK)은 목록 문단도 본다 — 도움말이 "이동은 목록과 같은 j·k·gg·G" 로 쪽 이동
+    ///   (Ctrl-d 따위)을 목록 문단에 맡긴다
+    /// - 확인(CONFIRM)의 `y` 는 목록에서 빼기(고르기 창 문단)와 생각 담기 문단 둘에서 묻는다
+    const SECTIONS: &[(&str, &[&str])] = &[
+        ("ANYWHERE", &["그 밖의 동작은 SPC"]),
+        ("BROWSE", &["j·k 나 화살표로 이동", "그 밖의 동작은 SPC"]),
+        ("MENU", &["그 밖의 동작은 SPC"]),
+        ("PROMPT", &["j·k 나 화살표로 이동"]),
+        ("PICK", &["SPC p a 는 디렉터리를 골라", "j·k 나 화살표로 이동"]),
+        ("PATH", &["SPC p a 는 디렉터리를 골라"]),
+        ("JOT", &["SPC n 은 프로젝트 안"]),
+        ("CONFIRM", &["SPC p a 는 디렉터리를 골라", "SPC n 은 프로젝트 안"]),
+    ];
+
+    /// `help` 에서 표마다 제 문단([`SECTIONS`])이 안 대는 이름 붙은 키 — `표: 이름`.
+    fn missing_in(help: &str) -> Vec<String> {
+        let paragraphs: Vec<String> = help
+            .split("\n\n")
+            .map(|p| p.to_string())
+            .filter(|p| !p.trim().is_empty())
+            .collect();
+        let section = |head: &str| -> &str {
+            paragraphs
+                .iter()
+                .find(|p| p.trim_start().starts_with(head))
+                .unwrap_or_else(|| panic!("`{head}` 로 시작하는 문단을 못 찾았다 — 도움말 문단이 바뀌었으면 SECTIONS 를 고친다"))
+        };
+        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 8] = [
+            ("ANYWHERE", named(ANYWHERE)),
+            ("BROWSE", named(BROWSE)),
+            ("MENU", named(MENU)),
+            ("PROMPT", named(PROMPT)),
+            ("PICK", named(PICK)),
+            ("PATH", named(PATH)),
+            ("JOT", named(JOT)),
+            ("CONFIRM", named(CONFIRM)),
+        ];
         let mut missing = Vec::new();
-        let mut check = |table: &str, rows: Vec<(&'static str, &'static [Key])>| {
+        for (table, rows) in tables {
+            let heads = SECTIONS.iter().find(|(t, _)| *t == table).map(|(_, h)| *h).unwrap_or_else(|| panic!("{table} 의 문단이 SECTIONS 에 없다"));
+            let text = heads.iter().map(|h| section(h)).collect::<Vec<_>>().join("\n\n");
+            let said: Vec<Vec<KeyEvent>> = keys_in(&text).into_iter().map(|(_, k)| k).collect();
             for (name, seq) in rows {
                 let told = said.iter().any(|k| k.len() == seq.len() && seq.iter().zip(k).all(|(key, ev)| key.matches(*ev)));
                 if !told {
                     missing.push(format!("{table}: {name}"));
                 }
             }
-        };
-        check("ANYWHERE", named(ANYWHERE));
-        check("BROWSE", named(BROWSE));
-        check("MENU", named(MENU));
-        check("PROMPT", named(PROMPT));
-        check("PICK", named(PICK));
-        check("PATH", named(PATH));
-        check("JOT", named(JOT));
-        check("CONFIRM", named(CONFIRM));
-        assert!(missing.is_empty(), "표에 이름 붙은 키를 `moai tui --help` 가 안 댄다: {missing:?}");
+        }
+        missing
     }
 
     fn tui_help() -> String {
@@ -1152,7 +1212,11 @@ mod tests {
     /// — **띄어 쓴 자리에 홀로 선** `` `.` `` 만 키로 읽는다. 문장 끝의 `.` 은 떼고, `줄).` 처럼 괄호
     /// 뒤에 남은 `.` 도 키가 아니다 — 그것까지 읽으면 도움말이 `.` 을 안 대도 시험이 지나간다.
     fn help_keys() -> Vec<(String, Vec<KeyEvent>)> {
-        let help = tui_help();
+        keys_in(&tui_help())
+    }
+
+    /// [`help_keys`] 와 같되 **주어진 글에서** 뽑는다 — 표마다 제 문단만 보려고 나눴다(moai-psqc).
+    fn keys_in(help: &str) -> Vec<(String, Vec<KeyEvent>)> {
         let words: Vec<&str> = help
             .split_whitespace()
             .flat_map(|token| -> Vec<&str> {
