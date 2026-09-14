@@ -3914,9 +3914,6 @@ mod tests {
         assert!(!st.warnings.iter().any(|w| w.kind == "duplicate_id"), "{:?}", st.warnings);
     }
 
-    /// **경고는 id 를 한 번씩만 댄다** (moai-ddtg). 같은 id 의 줄이 둘이면 줄마다 id
-    /// 지도를 물어 같은 id 가 두 번 담겼다 — 사람이 고칠 손잡이는 id 하나고, 셈(`N건`)이
-    /// 줄 수로 부풀면 `moai show -e none` 같은 힌트가 내는 것과도 어긋난다. 세 줄 중복도
     /// **먼 미래 시각을 든 줄을 드러낸다**(moai-ugjp). 나이는 0 아래로 안 내려가서(moai-fix6)
     /// 2099 같은 오타가 목록에서 "오늘" 로 숨고 흐름 셈에도 들었다. 도구는 제 시계로만 적으니
     /// 그런 시각은 손으로 고친 줄이나 크게 틀린 시계에서 온다. 사람이 정한 대로 — 경고지
@@ -3952,6 +3949,9 @@ mod tests {
         assert!(!ok.warnings.iter().any(|w| w.kind == "future_timestamp"), "{:?}", ok.warnings);
     }
 
+    /// **경고는 id 를 한 번씩만 댄다** (moai-ddtg). 같은 id 의 줄이 둘이면 줄마다 id
+    /// 지도를 물어 같은 id 가 두 번 담겼다 — 사람이 고칠 손잡이는 id 하나고, 셈(`N건`)이
+    /// 줄 수로 부풀면 `moai show -e none` 같은 힌트가 내는 것과도 어긋난다. 세 줄 중복도
     /// `duplicate_id` 에 그 id 를 두 번 대지 않는다.
     #[test]
     fn a_warning_names_a_duplicated_id_once() {
