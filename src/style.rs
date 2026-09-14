@@ -21,6 +21,9 @@ pub const IN_PROGRESS: Style = fg(AnsiColor::BrightYellow).bold();
 /// **가장 눈에 띄어야 한다** — 게이트를 없앤 대신 여기가 썩는다.
 pub const REVIEW: Style = fg(AnsiColor::BrightMagenta);
 pub const DONE: Style = fg(AnsiColor::Green).dimmed();
+/// 진행 바의 찬 칸 — 16색 10번(사용자 결정, moai-a46g). `DONE` 과 가른다: 끝난 줄은 흐리게
+/// 물러나야 하고, 바는 눈에 서야 한다.
+pub const BAR: Style = fg(AnsiColor::BrightGreen);
 pub const OTHER: Style = fg(AnsiColor::Cyan);
 
 pub const EPIC: Style = fg(AnsiColor::BrightBlue).bold();
