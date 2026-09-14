@@ -1824,3 +1824,4 @@
 {"ts":"2026-09-14T12:06:17Z","id":"moai-i9g6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T12:06:23Z","id":"moai-qzpb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T12:06:23Z","id":"moai-rqxo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:06:53Z","id":"moai-i9g6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"중복: 같은 idea(moai-bxen)를 다른 세션이 12:03 에 moai-rvcb 로 옮겨 워크트리 moai-rvcb 에서 하고 있다. 추림 3 이 그 옮김을 못 보고 펼쳤다"}
