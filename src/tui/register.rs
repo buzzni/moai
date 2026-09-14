@@ -478,6 +478,24 @@ mod tests {
         assert_eq!(a.mode, Mode::Browse);
     }
 
+    /// **손으로 적은 철자(`a/../b`)도 층의 `d` 로 빠진다.** 글자 정리·링크 풀기가 그 철자를
+    /// 못 만들어, 줄은 남은 채 "이미 목록에 없다" 고 말하던 자리다.
+    #[test]
+    fn a_hand_written_spelling_with_dot_dot_is_removed_by_d() {
+        let s = Scratch::new("dotdot");
+        s.dir("work/a");
+        let b = s.project("work/b");
+        let odd = s.0.join("work/a/../b");
+        let cfg = s.register(&[&odd]);
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        assert_eq!(place_at_cursor(&a), odd);
+        a.key(key(KeyCode::Char('d')));
+        a.key(key(KeyCode::Char('y')));
+        assert!(s.registered().is_empty(), "손으로 적은 철자를 못 뺐다 — {:?}", a.notice);
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("✓ 뺌")), "{:?}", a.notice);
+        assert!(b.is_dir());
+    }
+
     /// 띄운 자리(등록 안 됨) 줄의 `d` 는 묻지 않고 뺄 것이 없다고만 한다.
     #[test]
     fn the_launched_but_unregistered_row_has_nothing_to_unregister() {

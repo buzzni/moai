@@ -160,7 +160,14 @@ pub struct Removed {
 /// **설정 파일이 없으면 뺄 것도 없다.** 그대로 `update` 로 가면 빈 목록에서 아무것도 안
 /// 빼려고 설정 디렉터리를 만든다 — 아무 일도 안 한 명령이 사람의 `~/.config` 에 흔적을 남긴다.
 pub fn remove(config: &Path, input: &Path, cwd: &Path) -> R<Removed> {
-    let spellings = crate::user_config::spellings(input, cwd);
+    let mut spellings = crate::user_config::spellings(input, cwd);
+    // **준 철자 그대로도 견준다.** 손으로 적은 `/w/a/../b` 는 글자 정리로도 링크 풀기로도
+    // 그 철자가 안 나온다 — TUI 의 `d` 는 층의 줄에 적힌 철자를 그대로 주는데, 그것으로
+    // 못 빼면 줄은 남은 채 "이미 목록에 없다" 고 말한다. 대표 철자(`spelled`)는 앞의 것이다.
+    let exact = cwd.join(input);
+    if !spellings.contains(&exact) {
+        spellings.push(exact);
+    }
     let removed: Vec<PathBuf> = if config.exists() {
         crate::user_config::update(config, |doc| {
             let hit: Vec<PathBuf> =

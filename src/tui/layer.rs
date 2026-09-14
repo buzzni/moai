@@ -466,9 +466,11 @@ impl App {
             let l = self.layer.as_ref()?;
             l.position(want).or_else(|| l.places.iter().position(|p| same_dir(&p.path, want)))
         });
-        let found = landed.or_else(|| held.and_then(|a| rows.iter().position(|r| self.anchor_of(r) == a)));
+        let found = landed.or_else(|| held.as_ref().and_then(|a| rows.iter().position(|r| &self.anchor_of(r) == a)));
         let cursor = found.unwrap_or(self.cursor.min(rows.len().saturating_sub(1)));
-        if cursor != self.cursor {
+        // **정체로 가른다, 번호로 가르지 않는다.** 뺀 줄의 번호에 다음 프로젝트가 올라서면 번호는
+        // 같아도 다른 것을 보고, 층이 새로 서며 `..` 이 끼면 번호가 밀려도 같은 것을 본다.
+        if rows.get(cursor).map(|r| self.anchor_of(r)) != held {
             self.detail.rewind();
         }
         self.cursor = cursor;
