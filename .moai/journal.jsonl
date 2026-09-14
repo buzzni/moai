@@ -1965,3 +1965,13 @@
 {"ts":"2026-09-14T12:47:12Z","id":"moai-f7xs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai init 의 prefix 에 최대 길이를 두고 디렉터리 이름에서 짧게 만든다"}
 {"ts":"2026-09-14T12:47:12Z","id":"moai-t8r8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-f7xs 로 옮겨 작업한다 (감독 세션 moa-issue-45 가 맡김)"}
 {"ts":"2026-09-14T12:47:12Z","id":"moai-f7xs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:48:54Z","id":"moai-xe74.q45","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — edit 뒤 상세의 막음 줄 (xe74)"}
+{"ts":"2026-09-14T12:49:06Z","id":"moai-xe74.q45","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:49:16Z","id":"moai-09fq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자와 정한 것 (2026-09-14): 거절한다. 마일스톤 줄에는 --milestone <id> 를 못 적게 막고 까닭을 한 줄로 댄다(none 으로 비우기는 받는다). add --milestone 도 같은 자로 막는다. 이미 적힌 옛 줄은 읽기가 관대하므로 그대로 둔다. moai-jwnr 이후 그 필드는 소속으로 안 세므로 조용히 받으면 사람은 걸린 줄 안다."}
+{"ts":"2026-09-14T12:49:16Z","id":"moai-bg55","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 줄에 --milestone <id> 를 적는 쓰기를 거절한다 — add·edit 같은 자로"}
+{"ts":"2026-09-14T12:49:16Z","id":"moai-zg19","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"옮겨 작업한다 (2026-09-14, 감독 세션 moa-issue-45 이 맡기고 사용자가 받음). joins 인자를 걷을지 판단하고, 걷는다면 milestone_from_above 가 넘기는 값까지 본다."}
+{"ts":"2026-09-14T12:49:16Z","id":"moai-dejq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"climb·stood_at 의 죽은 joins 인자를 정리한다 — milestones() 에서 늘 참인 가드"}
+{"ts":"2026-09-14T12:49:16Z","id":"moai-09fq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-bg55 로 옮겨 작업한다"}
+{"ts":"2026-09-14T12:49:16Z","id":"moai-zg19","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-dejq 로 옮겨 작업한다"}
+{"ts":"2026-09-14T12:49:17Z","id":"moai-bg55","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:49:17Z","id":"moai-dejq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
