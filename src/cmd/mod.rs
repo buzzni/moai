@@ -428,3 +428,45 @@ pub fn shelved(pairs: &[(String, Vec<String>)]) -> Vec<Shelved<'_>> {
         .map(|(id, roots)| Shelved { id, root: roots.first().map_or("", String::as_str), roots })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Issue, Kind, Status};
+
+    fn row_with(rest: &[(&str, &str)]) -> Issue {
+        let mut i = Issue::new("argos-0001".into(), "제목".into(), Kind::Epic, Status::new("todo"), "2026-09-11T04:12:03Z");
+        for (k, v) in rest {
+            i.rest.insert(k.to_string(), serde_json::Value::String(v.to_string()));
+        }
+        i
+    }
+
+    /// **덧붙인 키가 이긴다**(moai-kgu2) — `show` 가 덧붙이는 키 전부에 같은 자로 선다. 겹치지
+    /// 않는 모르는 필드와 곁들인 `derived_status` 는 그대로 남는다.
+    #[test]
+    fn every_appended_key_wins_over_an_unknown_field_and_nothing_else_is_lost() {
+        let i = row_with(&[("members", "가짜"), ("shelved_by", "가짜"), ("duplicate_lines", "가짜"), ("due", "2026-10-01")]);
+        let row = Row::of(&i, Some("in_progress"));
+        let extra = [
+            ("members", "[]".to_string()),
+            ("shelved_by", "\"argos-0002\"".to_string()),
+            ("duplicate_lines", "2".to_string()),
+        ];
+        let out = json_with(&row, &extra).unwrap().join("");
+        for (k, v) in &extra {
+            assert_eq!(out.matches(&format!("\"{k}\":")).count(), 1, "{k} 가 둘 섰다\n{out}");
+            assert!(out.contains(&format!("\"{k}\":{v}")), "{k} 에 우리 값이 안 섰다\n{out}");
+        }
+        assert!(!out.contains("가짜"), "{out}");
+        assert!(out.contains("\"due\":\"2026-10-01\""), "겹치지 않는 모르는 필드까지 걷었다\n{out}");
+        assert!(out.contains("\"derived_status\":\"in_progress\""), "{out}");
+    }
+
+    /// 겹치는 것이 없으면 걷은 모습을 짓지 않는다 — 흔한 길에서 줄을 복제하지 않는다.
+    #[test]
+    fn nothing_to_strip_means_no_copy() {
+        let i = row_with(&[("due", "2026-10-01")]);
+        assert!(Row::of(&i, None).without(&["children", "journal"]).is_none());
+    }
+}
