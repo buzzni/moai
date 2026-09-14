@@ -2421,3 +2421,5 @@
 {"ts":"2026-09-14T17:00:28Z","id":"moai-2kyl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-w0oo 에서 펼쳤다 — TUI 보기 조절 — 칸 토글·정렬·열 토글을 SPC 메뉴로 (거름망 글 입력만으로는 done 숨기기가 너무 힘들다)"}
 {"ts":"2026-09-14T17:00:28Z","id":"moai-w0oo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-2kyl 로 펼쳤다 (이슈 4건)"}
 {"ts":"2026-09-14T17:00:38Z","id":"moai-fmv5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T17:01:48Z","id":"moai-ynsb.0r0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — .moai 밖 status 의 종료 코드 (moai-ynsb)"}
+{"ts":"2026-09-14T17:01:54Z","id":"moai-ynsb.0r0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
