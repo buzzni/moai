@@ -1825,3 +1825,5 @@
 {"ts":"2026-09-14T12:06:23Z","id":"moai-qzpb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T12:06:23Z","id":"moai-rqxo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T12:06:53Z","id":"moai-i9g6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"중복: 같은 idea(moai-bxen)를 다른 세션이 12:03 에 moai-rvcb 로 옮겨 워크트리 moai-rvcb 에서 하고 있다. 추림 3 이 그 옮김을 못 보고 펼쳤다"}
+{"ts":"2026-09-14T12:06:54Z","id":"moai-qzpb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: .claude/worktrees/moai-ihps 에서 cargo build --release 뒤, skill.rs 의 MOAI_BLESS 검사를 값 기준(0·빈 값은 거짓)으로 바꾸고 시험을 붙인다"}
+{"ts":"2026-09-14T12:06:55Z","id":"moai-rqxo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 같은 워크트리에서 the_checked_in_plugin_matches_the_guide 가 hook_exe 실패 시 bless 면 기본 exe 로 다시 쓰게 한다"}
