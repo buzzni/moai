@@ -833,6 +833,29 @@ mod tests {
         assert_eq!(picked(Raw::default()), [("argos-0001", Kind::Epic), ("argos-0002", Kind::Issue)]);
     }
 
+    /// **`--milestone` 은 마일스톤 줄을 다른 마일스톤의 것으로 안 고른다**(moai-8tav). 마일스톤 줄이
+    /// 제 `milestone` 필드로 M2 를 들어도 `moai show M2` 는 `멤버 0/0` 이고 트리는 그 줄을 뿌리에
+    /// 둔다 — 한때 `--milestone M2` 만 그 줄을 냈다. 그 줄 밑의 일은 여전히 제 마일스톤으로 골린다.
+    #[test]
+    fn a_milestone_line_is_not_picked_by_another_milestone() {
+        let stone = |id: &str, m: Option<&str>| {
+            let mut i = issue(id, "todo", &[]);
+            i.kind = Kind::Milestone;
+            i.milestone = m.map(Into::into);
+            i
+        };
+        let all = vec![stone("argos-m002", None), stone("argos-m001", Some("argos-m002")), issue("argos-m001.aa1", "todo", &[])];
+        let cfg = cfg();
+        let wh = Where::of(&all, &cfg);
+        let picked = |m: &str| -> Vec<&str> {
+            let f = Filter::build(Raw { milestone: s(&[m]), ..Raw::default() }).unwrap();
+            all.iter().filter(|i| f.matches(i, NOW, &wh)).map(|i| i.id.as_str()).collect()
+        };
+        assert!(crate::report::group_members(&all, &all[0]).is_empty());
+        assert_eq!(picked("argos-m002"), Vec::<&str>::new(), "마일스톤 줄을 다른 마일스톤의 것으로 골랐다");
+        assert_eq!(picked("argos-m001"), ["argos-m001.aa1"]);
+    }
+
     /// **담아 둔 생각은 기본 목록에서 빠지고, 글로는 찾아진다.** 규칙이
     /// 여기 한 곳에 있어야 화면과 CLI 가 같은 것을 센다 — 이 시험이 그 자리를
     /// 지킨다.
