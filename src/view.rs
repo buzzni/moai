@@ -1468,9 +1468,11 @@ fn problems(out: &mut Vec<String>, reg: &crate::user_config::Registry) {
     }
 }
 
-/// 명령 안내에 넣을 경로 — 제어문자를 걷고 셸이 가를 글자가 있으면 감싼다.
+/// 명령 안내에 넣을 경로 — 붙여 넣으면 그 디렉터리로 풀리게 감싼다. `one_line` 을
+/// 지나지 않는다: 화면용 접기가 탭·줄바꿈을 빈칸으로 바꾸면 없는 디렉터리를 가리킨다.
+/// 한 줄 자리를 지키는 것은 `shell_word` 의 `$'…'` 다.
 fn shell_arg(p: &std::path::Path) -> String {
-    crate::text::shell_word(&one_line(&p.display().to_string()))
+    crate::text::shell_word(&p.display().to_string())
 }
 
 #[cfg(test)]
@@ -1507,6 +1509,25 @@ mod tests {
         let out = plain(&preview(w, &by_id, now, &Origin::default()));
         let row = out.iter().find(|l| l.contains("argos-0002")).expect("막힌 줄이 목록에 없다");
         assert!(row.contains(" 5일"), "판정한 나이를 안 댔다 — {row}");
+        assert!(!row.contains("30일"), "칸 나이를 댔다 — {row}");
+    }
+
+    /// 미룬 것에 막힌 줄은 **막는 줄을 미룬 지 며칠**로 선다(moai-hcx3) — 칸 나이 "30일" 이
+    /// 아니다.
+    #[test]
+    fn a_row_held_by_a_deferral_shows_how_long_ago_it_was_deferred() {
+        let now = "2026-10-11T00:00:00Z";
+        let mut shelved = issue("argos-0001", "미룬 일", "todo");
+        shelved.deferred_at = Some("2026-09-29T00:00:00Z".into()); // 12일 전
+        let mut held = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
+        held.blocked_by = vec!["argos-0001".into()];
+        let issues = vec![shelved, held];
+        let st = crate::report::status(&issues, &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("미룬 것에 막힘 경고가 없다");
+        let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
+        let out = plain(&preview(w, &by_id, now, &Origin::default()));
+        let row = out.iter().find(|l| l.contains("argos-0002")).expect("막힌 줄이 목록에 없다");
+        assert!(row.contains("12일"), "미룬 지 며칠을 안 댔다 — {row}");
         assert!(!row.contains("30일"), "칸 나이를 댔다 — {row}");
     }
 
