@@ -216,6 +216,8 @@ pub struct Fresh {
     unreadable: Vec<Option<String>>,
     origin: crate::worktree::Origin,
     elsewhere: Vec<String>,
+    /// 옆 워크트리를 못 찾은 까닭(`Gathered::unfound`). 사람이 SPC t w 로 켰을 때만 댄다.
+    unfound: Option<String>,
     watched: Vec<(std::path::PathBuf, Stamp)>,
     now: String,
 }
@@ -250,6 +252,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         unreadable,
         origin: g.origin,
         elsewhere: g.trouble,
+        unfound: g.unfound,
         watched: g.watched,
         now,
     })
@@ -386,6 +389,10 @@ pub struct App {
     /// 옆 워크트리에서 만난 문제. **배너로 말만 한다** — CLI 가 stderr 로 흘리는
     /// 말인데, 대체 화면 안에서는 그 길을 못 쓴다.
     pub elsewhere: Vec<String>,
+    /// 옆 워크트리를 **못 찾은** 까닭(`Gathered::unfound`) — git 밖 프로젝트다. 경로 줄에도 배너에도
+    /// 안 세운다: 겹쳐 보기는 켜진 채로 시작해 git 밖 프로젝트를 볼 때마다 시키지 않은 말이 선다.
+    /// 사람이 `SPC t w` 로 **켰을 때만** 알림으로 한 번 댄다(moai-d5vn).
+    pub unfound: Option<String>,
     /// 프로젝트 층([`layer`]). **`None` 이면 등록한 것이 없고 오늘 탐색기 그대로다.** 층이
     /// 있으면 지금 선 곳(`layer.at`)이 층이거나 한 프로젝트 안이고, 층에 선 동안에는 위의
     /// 한 프로젝트 자리(`repo`·`issues`·`index`…)가 비었다.
@@ -521,6 +528,7 @@ impl App {
             worktree: true,
             origin: crate::worktree::Origin::default(),
             elsewhere: Vec::new(),
+            unfound: None,
             layer: None,
             user_config: None,
             launched_at: None,
@@ -744,6 +752,7 @@ impl App {
         self.unreadable = f.unreadable;
         self.origin = f.origin;
         self.elsewhere = f.elsewhere;
+        self.unfound = f.unfound;
         self.watched = f.watched;
         self.warnings = f.warnings;
         self.take(f.issues, f.index, f.states, f.now);
@@ -1150,9 +1159,16 @@ impl App {
             B::Reload => self.reload(),
             // 켜고 끄는 것은 **다시 읽는 것**이다. 겹친 줄은 적재 때 한 번 세는 것이라
             // (`states`·거름망·경고), 들고 있는 것에 덧칠하면 셈이 옛 줄로 남는다.
+            // 켰는데 옆을 못 찾았으면 그 까닭을 댄다 — 아무것도 안 바뀐 화면만 남으면 누른 키가
+            // 고장 난 줄 안다. 옆이 없을 뿐(찾았는데 비었다)이면 말하지 않는다: 그것은 사실 그대로다.
             B::Worktree => {
                 self.worktree = !self.worktree;
                 self.reload();
+                if self.worktree
+                    && let Some(why) = &self.unfound
+                {
+                    self.notice = Some(format!("{} 옆 워크트리를 못 찾았다 — {}", crate::style::BRANCH_GLYPH, crate::text::one_line(why)));
+                }
             }
             B::Raw => {
                 self.raw = !self.raw;
@@ -2715,6 +2731,44 @@ mod tests {
             assert!(std::time::Instant::now() < until, "버린 읽기가 끝나지 않는다");
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
+    }
+
+    /// 옆 워크트리를 **못 찾는** 읽기 — git 밖 프로젝트를 흉내 낸다. 시험 기계의 git 에 기대지 않는다.
+    fn lost(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
+        let mut f = prepare(repo, worktree)?;
+        f.unfound = worktree.then(|| "git 저장소가 아니다".to_string());
+        Ok(f)
+    }
+
+    /// **사람이 SPC t w 로 켰는데 옆을 못 찾으면 까닭을 한 번 댄다**(moai-d5vn). 시작할 때의
+    /// 겹쳐 보기는 시키지 않은 것이라 말하지 않지만, 누른 사람은 아무것도 안 바뀐 화면만 보면
+    /// 키가 고장 난 줄 안다. 알림이라 다음 키에 걷힌다 — 경로 줄에 박아 두면 git 밖 프로젝트를
+    /// 볼 때마다 줄을 먹는다.
+    #[test]
+    fn turning_the_overlay_on_says_why_no_worktree_was_found() {
+        let (_scratch, mut a) = writable("overlay-lost");
+        a.read = lost;
+        assert!(a.worktree);
+        a.hit("SPC t w");
+        assert!(!a.worktree);
+        assert_eq!(a.notice, None, "끌 때 까닭을 댔다");
+        a.hit("SPC t w");
+        assert!(a.worktree);
+        let said = a.notice.clone().expect("켰는데 못 찾은 까닭을 안 댄다");
+        assert!(said.contains("git 저장소가 아니다") && said.contains("옆 워크트리"), "{said}");
+        a.hit("SPC r");
+        assert_eq!(a.notice, None, "시키지 않은 다시 읽기가 까닭을 또 댔다");
+        // 찾으면 말이 없다.
+        a.read = prepare_found;
+        a.hit("SPC t w");
+        a.hit("SPC t w");
+        assert_eq!(a.notice, None, "찾았는데 못 찾았다고 한다");
+    }
+
+    fn prepare_found(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
+        let mut f = prepare(repo, worktree)?;
+        f.unfound = None;
+        Ok(f)
     }
 
     fn boom(_: &Repo, _: bool) -> crate::fail::R<Fresh> {
