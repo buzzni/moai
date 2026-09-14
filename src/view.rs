@@ -1343,12 +1343,13 @@ pub fn projects_ready(
                 marked(k.origin.branch(&i.id), &one_line(&i.title), TITLE_CAP, style::PLAIN).0,
             ));
         }
-        troubles(&mut out, k.trouble);
         let rest = k.picks.len() - shown.len();
         if rest > 0 {
             let go = format!("{rest}건 더 → `moai -C {} ready`", shell_arg(&p.path));
             out.push(format!("  {}", paint(style::DIM, &go)));
         }
+        // 목록 꼬리("N건 더") 뒤에 둔다 — 앞에 두면 그 꼬리가 문제 줄의 연속으로 읽힌다(`projects_status` 와 같은 차례).
+        troubles(&mut out, k.trouble);
         if k.unreadable > 0 {
             out.push(format!(
                 "  {} 읽을 수 없는 줄 {}개 — 어느 줄인지는 `moai -C {} show` 가 낸다",
