@@ -45,13 +45,28 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 누군지 묻는 동안만 아랫줄이 둘이다 — 왜 묻는지와 다시 안 묻게 하는 법은 글칸
     // 뒤에 붙이면 적는 글에 밀려 사라진다. 그 둘이 이 칸의 알맹이다.
     let keys_h = if matches!(app.mode, Mode::Ask(_)) { 2 } else { 1 };
-    let [top, note, body, keys] = Layout::vertical([
+    // SPC 메뉴는 탐색 중에만 선다 — 글칸으로 넘어가면 열이 버려져 저절로 닫힌다.
+    //
+    // **창은 몸통을 밀어 올린다**(moai-apsa). 덮으면 커서가 선 줄이 창 밑에 숨어, 메뉴가 무엇에
+    // 대한 것인지를 잃는다. 목록·상세는 줄어든 높이로 커서를 드러내므로(`Scroll::reveal`) 따로
+    // 굴리지 않는다. 격자에 줄 높이는 몸통의 몫([`menu::BODY_MIN`])을 먼저 남기고 정하고, 그것도
+    // 없으면 격자 없이 접두어 줄 한 줄로 접는다([`menu_line`]).
+    let area = f.area();
+    let open_menu = (matches!(app.mode, Mode::Browse) && menu::open(&app.chord)).then(|| {
+        let items = menu::entries(app.chord.held(), &app.key_ctx(&rows));
+        let left = area.height.saturating_sub(1 + banner_h + keys_h) as usize;
+        let grid = menu::grid(&items, (area.width as usize).saturating_sub(2), menu::rows_for(left));
+        (items, grid)
+    });
+    let panel_h = open_menu.as_ref().map_or(0, |(_, g)| if g.rows == 0 { 0 } else { g.rows as u16 + 1 });
+    let [top, note, body, panel, keys] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(banner_h),
         Constraint::Min(1),
+        Constraint::Length(panel_h),
         Constraint::Length(keys_h),
     ])
-    .areas(f.area());
+    .areas(area);
     let [left, right] =
         Layout::horizontal([Constraint::Percentage(LEFT), Constraint::Min(10)]).areas(body);
 
@@ -97,22 +112,24 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         }
         _ => {}
     }
-    // SPC 메뉴는 탐색 중에만 선다 — 글칸으로 넘어가면 열이 버려져 저절로 닫힌다.
-    if matches!(app.mode, Mode::Browse) && menu::open(&app.chord) {
-        menu_popup(f, app, &rows, body);
+    if let Some((_, grid)) = &open_menu {
+        menu_panel(f, grid, panel);
     }
     // **도는 것이 화면에 남았는지는 다 그린 버퍼에서 읽는다**(moai-5jh6). 목록은 스크롤 창
     // 밖의 줄도 짓고, 상세는 굴린 위쪽 줄도 짓고, 폼은 둘을 통째로 덮는다 — 짓는 쪽에서 세면
     // 그 셋을 따로 따져야 하고, 하나를 빠뜨리면 보이는 스피너가 멈추거나 안 보이는 스피너로
     // 깬다. 버퍼에 스피너 글자가 있으면 그것은 보이는 것이다. 틀리는 쪽은 제목·본문에
     // 스피너 글자를 적은 경우 하나고, 그 손해는 오늘까지의 깨움과 같다(`SPIN_BUDGET` 로 묶인다).
-    // 빛줄기는 따로 안 본다 — 같은 줄의 글리프(`App::spins`)가 늘 그 왼쪽에 서고, 덮는 창은
-    // 오른쪽에 붙거나(메뉴) 통째로 덮어(폼) 빛만 보이고 글리프가 가려지는 화면이 없다.
+    // 빛줄기는 따로 안 본다 — 같은 줄의 글리프(`App::spins`)가 늘 그 왼쪽에 서고, 메뉴는 몸통을
+    // 밀어 올릴 뿐 덮지 않으며 폼은 통째로 덮어, 빛만 보이고 글리프가 가려지는 화면이 없다.
     app.spun = spinner_on(f.buffer_mut());
 
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
-        Mode::Browse => fkeys(f, app, &rows, keys),
+        Mode::Browse => match &open_menu {
+            Some((items, grid)) => menu_line(f, app, items, grid, keys),
+            None => fkeys(f, app, &rows, keys),
+        },
         // 안내 속 키 이름은 표에서 읽는다 — 키를 옮기면 안내도 따라온다.
         Mode::Grep(q) => prompt(f, keys, "검색", q, app.input_error(), &prompt_help("걸기")),
         Mode::Filter(q) => prompt(f, keys, "거름망", q, app.input_error(), &prompt_help("걸기")),
@@ -1368,15 +1385,9 @@ fn bold() -> Style {
 
 /// 맨 아래 키 바. **아직 없는 것은 적지 않는다** — 눌러도 아무 일이
 /// 없는 키를 적어 두면 그것부터 도구를 못 믿게 된다.
+///
+/// 메뉴가 열린 동안은 이 바 대신 접두어 줄([`menu_line`])이 선다.
 fn fkeys(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
-    // 메뉴가 열린 동안은 메뉴에서 나가는 법만 댄다 — 탐색의 키는 메뉴 안에서 안 듣는다.
-    if menu::open(&app.chord) {
-        let mut keep = vec![key(&label(MENU, Menu::Close), Menu::Close.what())];
-        if app.chord.held().len() > 1 {
-            keep.push(key(&label(MENU, Menu::Up), Menu::Up.what()));
-        }
-        return bar(f, at, Vec::new(), keep);
-    }
     let c = app.key_ctx(rows);
     // `g` 가 기다리는 동안은 메뉴와 같은 자리에서 **무엇을 기다리는지** 댄다(moai-k3yi). 뜻 없는
     // 키를 누르면 열이 버려져([`keys::Chord::feed`]) 바가 저절로 돌아온다.
@@ -1447,78 +1458,73 @@ fn browse_hints(app: &App, c: &Ctx) -> (Vec<Hint>, Vec<Hint>) {
     if app.filter_text.is_some() {
         keep.push(hint(&[B::ClearFilter]));
     }
-    keep.push((menu::title(&[LEADER.event()]), MENU_WORD));
+    keep.push((menu::title(&[LEADER.event()]), menu::ROOT));
     (optional, keep)
 }
 
-/// 바의 `SPC 메뉴` 낱말.
-const MENU_WORD: &str = "메뉴";
-
-/// SPC 메뉴 창(moai-7sjm, 모양은 moai-gaum 의 helix 식). 목록·상세 자리의 **아래 오른쪽**에 뜬다 —
-/// 맨 아랫줄 바로 위라 눈이 바에서 멀리 안 간다. 줄은 `키  낱말 [상태]`, 테두리 제목이 지금
-/// 접두어(`SPC t`)를 댄다. 키는 굵게, 낱말은 그대로 — **색 없이도 키와 낱말이 글자로 선다.**
+/// SPC 메뉴 창(moai-7sjm, 모양은 moai-apsa 의 doom emacs which-key 식). 목록·상세 **아래 전체
+/// 폭**에 서고 몸통을 밀어 올린다. 칸은 `키 : 낱말 [상태]` — 격자는 [`menu::grid`] 가 놓았고 여기는
+/// 칠하기만 한다. 키는 굵게, 나머지는 그대로 — **색 없이도 키와 낱말이 글자로 서고**, 묶음은
+/// `+`, 토글은 `[켜짐]` 이 댄다.
 ///
-/// 창이 낮으면 항목을 **여러 열로** 놓는다: 줄을 잘라 낸 채 두면 안 보이는 항목이 없는 줄 안다.
-/// 테두리 설 높이(3)도 없으면 한 줄로 접는다(`SPC  / 검색 · f 거름망 …`). 좁아서 칸이 모자라면
-/// 각 칸이 `…` 로 잘린다 — 키는 칸의 앞이라 남는다.
-///
-/// 키 먹는 칸의 굵은 선 규칙은 목록·상세의 것이라 이 창은 보통 선이다 — 굵은 칸이 둘로
-/// 보이지 않게.
-fn menu_popup(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
-    let held = app.chord.held();
-    let items = menu::entries(held, &app.key_ctx(rows));
-    let name = menu::title(held);
-    let cell = |e: &menu::Entry| -> Line<'static> {
-        let mut spans = vec![Span::styled(e.key.clone(), bold()), Span::raw(format!("  {}", e.what))];
-        if let Some(st) = e.state {
-            spans.push(Span::raw(format!(" {st}")));
-        }
-        Line::from(spans)
-    };
-    let width_of = |l: &Line| l.spans.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
-    if at.height < 3 || at.width < 8 {
-        let mut spans = vec![Span::styled(name, bold()), Span::raw(" ")];
-        for (i, e) in items.iter().enumerate() {
-            spans.push(Span::raw(if i == 0 { " " } else { " · " }));
-            spans.extend(cell(e).spans);
-        }
-        let row = Rect { y: at.y + at.height.saturating_sub(1), height: at.height.min(1), ..at };
-        f.render_widget(Clear, row);
-        f.render_widget(Paragraph::new(fit(Line::from(spans), row.width as usize)), row);
-        return;
-    }
-    const GAP: usize = 3;
-    let n = items.len().max(1);
-    let room_h = (at.height - 2) as usize;
-    let cols = n.div_ceil(room_h);
-    let rows = n.div_ceil(cols);
-    let widest = items.iter().map(|e| width_of(&cell(e))).max().unwrap_or(0);
-    let title = format!(" {name} ");
-    // 안쪽 폭 = 좌우 여백 한 칸씩을 뺀 자리.
-    let room_w = (at.width as usize).saturating_sub(4);
-    let inner = (cols * widest + (cols - 1) * GAP).max(crate::text::width(&title)).min(room_w);
-    let col_w = (inner.saturating_sub((cols - 1) * GAP) / cols).max(1);
-    let lines: Vec<Line> = (0..rows)
+/// 위 가름줄 하나가 몸통과 가른다 — 몸통의 아래 테두리에 바로 붙으므로 선이 없으면 격자의 첫
+/// 줄이 목록의 줄로 읽힌다. 가름줄은 굵지 않다 — 키 먹는 칸의 굵은 선은 목록·상세의 것이다.
+fn menu_panel(f: &mut Frame, grid: &menu::Grid, at: Rect) {
+    let room = at.width.saturating_sub(2) as usize;
+    let lines: Vec<Line> = (0..grid.rows)
         .map(|r| {
             let mut spans = Vec::new();
-            for col in 0..cols {
-                let Some(e) = items.get(col * rows + r) else { continue };
-                if col > 0 {
-                    spans.push(Span::raw(" ".repeat(GAP)));
+            for (c, p) in grid.row(r).enumerate() {
+                if c > 0 {
+                    spans.push(Span::raw(" ".repeat(menu::GAP)));
                 }
-                let c = fit(cell(e), col_w);
-                let pad = col_w.saturating_sub(width_of(&c));
-                spans.extend(c.spans);
-                spans.push(Span::raw(" ".repeat(pad)));
+                spans.push(Span::styled(p.key.clone(), bold()));
+                spans.push(Span::raw(menu::SEP));
+                spans.push(Span::raw(p.text.clone()));
             }
-            Line::from(spans)
+            // 격자가 이미 폭에 맞췄다. 한 열도 안 드는 좁은 창만 여기서 잘린다.
+            fit(Line::from(spans), room)
         })
         .collect();
-    let (w, h) = ((inner + 4) as u16, (rows + 2) as u16);
-    let area = Rect { x: at.x + at.width - w, y: at.y + at.height - h, width: w, height: h };
-    f.render_widget(Clear, area);
-    let block = Block::default().borders(Borders::ALL).title(title).padding(Padding::horizontal(1));
-    f.render_widget(Paragraph::new(lines).block(block), area);
+    let block = Block::default().borders(Borders::TOP).border_style(dim()).padding(Padding::horizontal(1));
+    f.render_widget(Clear, at);
+    f.render_widget(Paragraph::new(lines).block(block), at);
+}
+
+/// 메뉴가 열린 동안의 맨 아랫줄 — 접두어 줄(doom 의 `SPC- <leader>`). 왼쪽에 지금 접두어와 층의
+/// 이름(`SPC t- 토글`), 오른쪽 끝에 나가는 법(`Esc 닫기`·하위 층이면 `Bksp 위로`). 탐색의 키는
+/// 메뉴 안에서 안 들으므로 바의 자리를 이 줄이 통째로 쓴다. 폭이 모자라 못 세운 항목이 있으면
+/// 그 수를 댄다 — 말없이 빠지면 없는 줄 안다.
+///
+/// **격자 설 높이가 없으면 여기로 접는다** — `SPC-  / 검색  f 거름망 …`. 항목이 먼저고 나가는
+/// 법은 자리가 남을 때만 붙는다: Esc 는 어디서든 닫고, 못 누르는 항목은 댈 수 없다.
+fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid, at: Rect) {
+    let held = app.chord.held();
+    let room = at.width as usize;
+    let mut spans = vec![Span::styled(format!("{}-", menu::title(held)), bold())];
+    if grid.rows == 0 {
+        for e in items {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(e.key.clone(), bold()));
+            spans.push(Span::raw(format!(" {}", e.text())));
+        }
+    } else {
+        spans.push(Span::raw(format!(" {}", menu::name(held))));
+        if grid.hidden > 0 {
+            spans.push(Span::styled(format!("  그 밖 {}개 — 창을 넓히면 선다", grid.hidden), dim()));
+        }
+    }
+    let mut exits = vec![key(&label(MENU, Menu::Close), Menu::Close.what())];
+    if held.len() > 1 {
+        exits.push(key(&label(MENU, Menu::Up), Menu::Up.what()));
+    }
+    let width = |v: &[Span]| v.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
+    let used = width(&spans) + width(&exits);
+    if used <= room {
+        spans.push(Span::raw(" ".repeat(room - used)));
+        spans.extend(exits);
+    }
+    f.render_widget(Paragraph::new(fit(Line::from(spans), room)), at);
 }
 
 /// 키 바를 폭에 맞춰 놓는다. `optional` 은 **뒤에서부터** 들어가고 모자라면 앞쪽이 떨어진다.
@@ -1881,7 +1887,7 @@ pub(super) mod tests {
         // 켜는 키는 메뉴가 상태 낱말과 함께 댄다.
         a.hit("SPC t");
         let menu_screen = render(&mut a, 120, 12).join("\n");
-        assert!(menu_screen.contains("w  워크트리 겹쳐 보기 [꺼짐]"), "켜는 키를 안 알린다\n{menu_screen}");
+        assert!(menu_screen.contains("w : 워크트리 겹쳐 보기 [꺼짐]"), "켜는 키를 안 알린다\n{menu_screen}");
         a.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
         // 저장소 없이 세운 App 이라 `w` 는 켜기만 하고 읽지 않는다 — 겹친 결과는 손으로 넣는다.
@@ -2610,11 +2616,11 @@ pub(super) mod tests {
         // 층의 메뉴에는 담기·등록·해제가 서고 거름망·검색·워크트리는 안 선다.
         a.hit("SPC");
         let screen = render(&mut a, 80, 22).join("\n");
-        assert!(screen.contains("n  생각 담기") && screen.contains("p  프로젝트 …"), "{screen}");
-        assert!(!screen.contains("f  거름망") && !screen.contains("/  검색"), "{screen}");
+        assert!(screen.contains("n : 생각 담기") && screen.contains("p : +프로젝트"), "{screen}");
+        assert!(!screen.contains("f : 거름망") && !screen.contains("/ : 검색"), "{screen}");
         a.hit("p");
         let screen = render(&mut a, 80, 22).join("\n");
-        assert!(screen.contains("a  등록") && screen.contains("d  목록에서 빼기"), "{screen}");
+        assert!(screen.contains("a : 등록") && screen.contains("d : 목록에서 빼기"), "{screen}");
         a.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         // `SPC p d` 는 목록 포커스에서만 듣는다 — 상세 포커스의 메뉴에는 없다. `a` 는 남는다.
         a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
@@ -2622,7 +2628,7 @@ pub(super) mod tests {
         assert!(!bar.contains("Enter"), "{bar:?}");
         a.hit("SPC p");
         let screen = render(&mut a, 80, 22).join("\n");
-        assert!(screen.contains("a  등록") && !screen.contains("목록에서 빼기"), "{screen}");
+        assert!(screen.contains("a : 등록") && !screen.contains("목록에서 빼기"), "{screen}");
     }
 
     /// **디렉터리 고르기 창도 색 없이 80칸에서 읽힌다** — 테두리가 지금 디렉터리를 대고(길면
@@ -3514,9 +3520,10 @@ pub(super) mod tests {
         }
     }
 
-    /// **SPC 메뉴는 색 없이 80칸에서 읽힌다**(moai-7sjm). `키  낱말` 줄이 아래 오른쪽에 서고
-    /// 테두리가 지금 접두어를 대며, 토글은 상태를 낱말로 단다. 바는 메뉴에서 나가는 법만 댄다.
-    /// 하위 층에 들어가면 제목이 `SPC t` 가 되고 Bksp 가 선다. 동작을 실행하면 창이 걷힌다.
+    /// **SPC 메뉴는 색 없이 80칸에서 읽힌다**(moai-7sjm, 모양은 moai-apsa). 아래 전체 폭에 가름줄과
+    /// `키 : 낱말` 격자가 서고, 맨 아랫줄은 접두어 줄(`SPC- 메뉴`)이 되어 나가는 법을 오른쪽 끝에
+    /// 댄다. 묶음은 `+`, 토글은 상태를 낱말로 단다. 하위 층이면 `SPC t- 토글` 과 Bksp 가 선다.
+    /// 동작을 실행하면 창이 걷히고 바가 돌아온다.
     #[test]
     fn the_menu_reads_without_colour_at_eighty_columns() {
         let mut a = app();
@@ -3524,13 +3531,16 @@ pub(super) mod tests {
         a.hit("SPC");
         let lines = render(&mut a, 80, 20);
         let screen = lines.join("\n");
-        assert!(lines.iter().any(|l| l.contains("┌ SPC ")), "제목이 접두어를 안 댄다\n{screen}");
-        for row in ["/  검색", "f  거름망", "n  생각 담기", "r  다시 읽기", "q  끝내기", "p  프로젝트 …", "t  토글 …"] {
+        for row in ["/ : 검색", "f : 거름망", "n : 생각 담기", "r : 다시 읽기", "q : 끝내기", "p : +프로젝트", "t : +토글"] {
             assert!(screen.contains(row), "{row:?} 가 없다\n{screen}");
         }
-        assert!(lines[lines.len() - 2].contains('└'), "아래에 안 붙었다\n{screen}");
-        let bar = lines.last().unwrap();
-        assert!(bar.contains("Esc 닫기") && !bar.contains("Bksp") && !bar.contains("SPC 메뉴"), "{bar:?}");
+        // 뿌리 일곱 칸은 한 열로 선다 — 가름줄 · 격자 7줄 · 접두어 줄.
+        let n = lines.len();
+        assert_eq!(lines[n - 9], "─".repeat(80), "전체 폭 가름줄이 아니다\n{screen}");
+        assert!(lines[n - 10].starts_with(['└', '┗']), "몸통이 창 위로 밀려 올라가지 않았다\n{screen}");
+        let bar = &lines[n - 1];
+        assert!(bar.starts_with("SPC- 메뉴") && bar.ends_with("Esc 닫기"), "{bar:?}");
+        assert!(!bar.contains("Bksp") && !bar.contains("SPC 메뉴"), "{bar:?}");
         for l in &lines {
             assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
         }
@@ -3538,23 +3548,52 @@ pub(super) mod tests {
         a.hit("t");
         let lines = render(&mut a, 80, 20);
         let screen = lines.join("\n");
-        assert!(lines.iter().any(|l| l.contains("┌ SPC t ")), "{screen}");
-        assert!(screen.contains("w  워크트리 겹쳐 보기 [켜짐]") && screen.contains("r  원문↔그리기 [그리기]"), "{screen}");
-        assert!(!screen.contains("q  끝내기"), "하위 층에 뿌리가 남았다\n{screen}");
-        assert!(lines.last().unwrap().contains("Bksp 위로"), "{:?}", lines.last());
+        let bar = lines.last().unwrap();
+        assert!(bar.starts_with("SPC t- 토글") && bar.ends_with("Esc 닫기 Bksp 위로"), "{bar:?}");
+        assert!(screen.contains("w : 워크트리 겹쳐 보기 [켜짐]") && screen.contains("r : 원문↔그리기 [그리기]"), "{screen}");
+        assert!(!screen.contains("q : 끝내기"), "하위 층에 뿌리가 남았다\n{screen}");
+        assert_eq!(lines[lines.len() - 4], "─".repeat(80), "하위 층의 창이 제 높이로 줄지 않았다\n{screen}");
 
         a.hit("r");
         assert!(a.raw);
         let lines = render(&mut a, 80, 20);
-        assert!(!lines.iter().any(|l| l.contains("┌ SPC")), "실행했는데 창이 남았다");
+        assert!(!lines.iter().any(|l| *l == "─".repeat(80)), "실행했는데 창이 남았다");
         assert_eq!(lines.last(), before.last(), "실행한 뒤 바가 돌아오지 않았다");
     }
 
-    /// **낮은 창에서도 메뉴 항목이 안 사라진다** — 높이가 모자라면 여러 열로, 테두리 설 높이도
-    /// 없으면 한 줄로 접는다. 어느 줄도 폭을 넘지 않는다.
+    /// **메뉴 창은 어느 폭에서도 `:` 가 줄 서고, 몸통을 밀어 올려도 커서를 잃지 않는다**(moai-apsa).
+    /// 커서를 맨 끝에 두고 창을 연다 — 창이 몸통을 덮으면 커서가 선 줄이 그 밑에 숨는다.
+    #[test]
+    fn the_menu_panel_lines_up_and_keeps_the_cursor_in_sight_at_any_width() {
+        for w in [80u16, 120, 200] {
+            let mut a = app();
+            // 에픽 안으로 들어가 줄이 몸통보다 많은 목록에서 맨 끝 줄에 선다.
+            a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            a.hit("G");
+            let last = a.cursor;
+            assert!(last > 0, "줄이 하나뿐인 목록이라 커서를 가릴 수 없다");
+            a.hit("SPC");
+            let lines = render(&mut a, w, 16);
+            let screen = lines.join("\n");
+            eprintln!("── {w}칸 ──\n{screen}");
+            let n = lines.len();
+            let sep = lines.iter().rposition(|l| *l == "─".repeat(w as usize)).expect("가름줄이 없다");
+            assert_eq!(a.cursor, last, "메뉴가 커서를 옮겼다");
+            assert!(lines[..sep].iter().any(|l| l.starts_with("┃> ")), "{w}칸: 커서가 창에 가려졌다\n{screen}");
+            let colon = |l: &str| l.find(" : ").map(|i| crate::text::width(&l[..i]));
+            let at: Vec<Option<usize>> = lines[sep + 1..n - 1].iter().map(|l| colon(l)).collect();
+            assert!(at.iter().all(|c| c.is_some() && *c == at[0]), "{w}칸: `:` 가 줄 서지 않는다 {at:?}\n{screen}");
+            for l in &lines {
+                assert!(crate::text::width(l) <= w as usize, "{w}칸 넘쳤다: {l:?}");
+            }
+        }
+    }
+
+    /// **낮은 창에서도 메뉴 항목이 안 사라진다** — 높이가 모자라면 줄을 줄이고 열을 늘리며, 몸통을
+    /// 남기고 격자 설 높이도 없으면 접두어 줄 한 줄로 접는다. 어느 줄도 폭을 넘지 않는다.
     #[test]
     fn the_menu_folds_into_columns_or_a_line_in_a_low_window() {
-        for (w, h) in [(80u16, 8u16), (80, 6), (80, 5), (40, 8), (30, 3), (12, 5)] {
+        for (w, h) in [(80u16, 8u16), (80, 7), (80, 6), (80, 5), (40, 8), (30, 3), (12, 5), (200, 10)] {
             let mut a = app();
             a.hit("SPC");
             let lines = render(&mut a, w, h);
