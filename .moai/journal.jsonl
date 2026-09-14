@@ -1979,3 +1979,7 @@
 {"ts":"2026-09-14T13:05:17Z","id":"moai-dejq.b2l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — climb·stood_at 의 죽은 joins 인자 걷기 (moai-dejq)"}
 {"ts":"2026-09-14T13:05:33Z","id":"moai-bg55.oya","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T13:05:33Z","id":"moai-dejq.b2l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T13:06:13Z","id":"moai-bg55","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 리뷰 moai-bg55.oya(/code-review high --fix bb3364b~1..9711510, 백그라운드)의 원문·판단 노트 → 필요하면 fix: 커밋 → 워크트리 moai-bg55 에 main 을 받아 시험 → main 의 남의 .moai 미커밋 줄은 그대로 담고 merge → merge 성공 뒤에만 bg55·dejq·리뷰 둘 done → 워크트리·가지 삭제 → moa-issue-45 에 해시 보고. 코드는 bb3364b, 같은 가지에 moai-dejq(9711510)."}
+{"ts":"2026-09-14T13:06:13Z","id":"moai-dejq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: moai-bg55 와 같은 워크트리·가지(worktree-moai-bg55)에서 커밋 9711510. 리뷰 moai-dejq.b2l 결과를 받아 bg55 와 함께 merge 하고 닫는다."}
+{"ts":"2026-09-14T13:06:13Z","id":"moai-bg55.oya","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 백그라운드 /code-review 결과를 원문(-b -)과 판단 두 노트로 나눠 적고 done -m. 넘긴 것은 이슈 번호와 함께."}
+{"ts":"2026-09-14T13:06:13Z","id":"moai-dejq.b2l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 같은 /code-review(bb3364b~1..9711510) 결과 중 report.rs climb·stood_at 몫을 원문·판단으로 적고 done -m."}
