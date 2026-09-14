@@ -88,6 +88,15 @@ fn decide(event: Event, input: &Input) -> Option<String> {
     // 에이전트가 알아낼 길이 없는 유일한 경고다 — 기준선도 같은 만큼
     // 낮게 잡혀 `Stop` 이 "늘었다" 를 영영 못 본다.
     let unreadable = load.unreadable();
+    // **옆 워크트리가 쥔 일은 제 초점이 아니다** (`hook::held`). 워크트리 목록은 집은 것이
+    // 있을 때만 읽는다 — 훅은 도구 호출마다 돌고, 집은 것이 없으면 뺄 것도 없다.
+    let away = || {
+        if report::wip(&load.issues, &repo.config).is_empty() {
+            std::collections::BTreeSet::new()
+        } else {
+            crate::worktree::away(&repo.root)
+        }
+    };
 
     let decision = match event {
         // **접힌 뒤는 같은 세션이다.** 기준선을 다시 적으면 접기 전에 늘린
@@ -102,7 +111,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             if let Some(path) = session_file(input, &repo, "board") {
                 let _ = std::fs::remove_file(path);
             }
-            crate::hook::carried(&load.issues, &repo.config)
+            crate::hook::carried(&load.issues, &repo.config, &away())
         }
         // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다.
         Event::SessionStart => {
@@ -129,13 +138,13 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 crate::hook::Call::Shell(cmd) => {
                     // 규칙의 차례는 `guard_shell` 이 정한다. 여기는 껍데기의 자리만 준다.
                     let cwd = std::env::current_dir().unwrap_or_else(|_| repo.root.clone());
-                    crate::hook::guard_shell(&load.issues, &repo.config, &repo.root, &cwd, cmd)
+                    crate::hook::guard_shell(&load.issues, &repo.config, &away(), &repo.root, &cwd, cmd)
                 }
                 crate::hook::Call::Edits(path) => {
-                    crate::hook::guard_edit(&load.issues, &repo.config, &repo.root, path)
+                    crate::hook::guard_edit(&load.issues, &repo.config, &away(), &repo.root, path)
                 }
                 crate::hook::Call::Review => {
-                    crate::hook::guard_review(&load.issues, &repo.config)
+                    crate::hook::guard_review(&load.issues, &repo.config, &away())
                 }
                 crate::hook::Call::Other => Decision::Pass,
             }
@@ -149,7 +158,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             // 있다 — 여기 섞이던 때 `defer` 만 해도 "경고가 늘었다" 로 세션이
             // 붙들렸다(moai-c8lb). 기준선도 같은 자로 잰다.
             let warnings: usize = st.warnings.iter().map(|w| w.count).sum();
-            crate::hook::closing(&load.issues, &repo.config, warnings, baseline(input, &repo))
+            crate::hook::closing(&load.issues, &repo.config, &away(), warnings, baseline(input, &repo))
         }),
     };
 

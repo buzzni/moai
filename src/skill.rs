@@ -325,7 +325,7 @@ mod tests {
             let should_deny = DENIED_WHILE_HELD.iter().any(|d| cmd.starts_with(d));
             // 훅이 실제로 부르는 그 차례로 본다 — 손으로 다시 짠 차례는 규칙이
             // 하나 늘 때 여기서 빠진다.
-            let got = guard_shell(&held, &cfg, root, root, &cmd);
+            let got = guard_shell(&held, &cfg, &Default::default(), root, root, &cmd);
             match (&got, should_deny) {
                 (Decision::Pass, false) => {}
                 (Decision::Deny(_), true) => {}
@@ -344,7 +344,7 @@ mod tests {
         let idle = vec![epic_row()];
         for cmd in taught() {
             assert_eq!(
-                guard_shell(&idle, &cfg, root, root, &cmd),
+                guard_shell(&idle, &cfg, &Default::default(), root, root, &cmd),
                 Decision::Pass,
                 "가르치는 명령이 아무것도 안 집은 채로 막힌다 — {cmd}"
             );
@@ -372,7 +372,7 @@ mod tests {
         let all = vec![epic_row(), held_row(), review];
 
         assert_eq!(
-            guard_review(&all, &cfg),
+            guard_review(&all, &cfg, &Default::default()),
             Decision::Pass,
             "가르친 대로 세운 리뷰가 규칙 3 에 막힌다 — {made}"
         );
