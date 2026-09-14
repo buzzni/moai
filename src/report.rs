@@ -3349,6 +3349,48 @@ mod tests {
         assert_eq!(held[0].undo, ["argos-0001"]);
     }
 
+    /// **남은 멤버를 미뤄 접은 묶음도 미룬 일에 막혀 있다**(moai-0gxf). 묶음의 칸은
+    /// 미룬 멤버를 빼고 읽어 `done` 으로 서지만, 그것에 막힌 일을 풀면 같은 미룬 멤버에
+    /// 곧장 막힌 줄은 held 로 서는데 묶음 너머로 막힌 줄만 `ready` 에 선다. 댈 곳은
+    /// 묶음이 아니라 뺀 멤버다 — 묶음에 `--undo` 를 쳐 봐야 미룬 것이 없다.
+    #[test]
+    fn a_group_folded_by_deferring_its_rest_still_holds() {
+        let epic = make("argos-0001", Kind::Epic, "todo");
+        let mut rest = member("argos-0003", "argos-0001", "todo");
+        rest.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut through = make("argos-0004", Kind::Issue, "todo");
+        through.blocked_by = vec!["argos-0001".into()];
+        let mut direct = make("argos-0005", Kind::Issue, "todo");
+        direct.blocked_by = vec!["argos-0003".into()];
+        let issues = vec![epic, member("argos-0002", "argos-0001", "done"), rest, through, direct];
+        assert_eq!(group_states(&issues, &cfg()).get("argos-0001"), Some(&"done"), "칸 셈은 그대로다");
+        assert!(picks(&issues).is_empty(), "미룬 멤버 너머로 막힌 줄을 집으라고 내민다 — {:?}", picks(&issues));
+
+        let held = held(&issues, &cfg());
+        let named: Vec<(&str, &[&str], &[&str])> =
+            held.iter().map(|h| (h.issue.id.as_str(), h.by.as_slice(), h.undo.as_slice())).collect();
+        assert_eq!(
+            named,
+            [("argos-0004", &["argos-0003"][..], &["argos-0003"][..]), ("argos-0005", &["argos-0003"][..], &["argos-0003"][..])]
+        );
+        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z");
+        let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("미룬 것에 막혔다고 안 한다");
+        assert_eq!(w.ids, ["argos-0004", "argos-0005"]);
+
+        // 뺀 멤버를 도로 집으면 묶음은 제 칸으로 막는다 — 미룸 말은 사라진다.
+        let mut back = issues.clone();
+        back[2].deferred_at = None;
+        assert!(held_of(&back).is_empty());
+        assert_eq!(picks(&back), ["argos-0003"], "막힌 둘은 안 풀리고, 도로 집은 멤버만 선다");
+        // 뺀 멤버가 끝나면 풀린다.
+        back[2].status = Status::new("done");
+        assert_eq!(picks(&back), ["argos-0004", "argos-0005"]);
+    }
+
+    fn held_of(issues: &[Issue]) -> Vec<&str> {
+        held(issues, &cfg()).iter().map(|h| h.issue.id.as_str()).collect()
+    }
+
     /// 미룬 마일스톤 밑의 빈 에픽은 `미뤄 둔 것` 으로 세면서 `속이 빈 에픽` 으로
     /// 꾸짖지 않는다. 미룰수록 잔소리가 느는 실패가 물려받은 자리에서 돌아온다.
     #[test]
