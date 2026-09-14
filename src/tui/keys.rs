@@ -80,6 +80,30 @@ impl Key {
         let (code, mods) = normal(k);
         code == self.code && mods.intersection(self.care) == self.want
     }
+
+    /// 이 키를 누른 모양 — 원하는 수식키만 붙인다. 메뉴가 하위 접두어의 열을 만들어 표에서
+    /// 다시 찾을 때 쓴다.
+    pub fn event(self) -> KeyEvent {
+        KeyEvent::new(self.code, self.want)
+    }
+
+    /// 사람에게 대는 한 키의 이름 — 메뉴의 줄과 테두리(`SPC t`).
+    pub fn name(self) -> String {
+        name_of(self.code)
+    }
+}
+
+/// 한 키의 이름. [`parse`] 가 거꾸로 읽는 이름과 같다 — SPC 는 `SPC`, 글자는 그 글자.
+pub fn name_of(code: KeyCode) -> String {
+    match code {
+        KeyCode::Char(' ') => "SPC".into(),
+        KeyCode::Char(c) => c.to_string(),
+        KeyCode::Enter => "Enter".into(),
+        KeyCode::Esc => "Esc".into(),
+        KeyCode::Backspace => "Bksp".into(),
+        KeyCode::Tab => "Tab".into(),
+        other => format!("{other:?}"),
+    }
 }
 
 /// 터미널마다 갈리는 모양을 한 모양으로 편다.
@@ -97,7 +121,7 @@ pub struct Bind<A: 'static> {
     pub seq: &'static [Key],
     pub act: A,
     /// 사람에게 대는 키 이름. **`None` 은 숨은 별칭이다** — 눌러도 되지만 바에도 문구에도 안
-    /// 적는다(`q`·`r`·`m`·F7·Delete·화살표·`h`·`l`·BackTab). 이름은 그 키로 다시 읽혀야 한다 —
+    /// 적는다(화살표·`h`·`l`·BackTab·`SPC /`). 이름은 그 키로 다시 읽혀야 한다 —
     /// 시험이 이름을 키 열로 풀어(`gg`·`g p`) 이 줄의 동작이 나오는지 본다.
     pub label: Option<&'static str>,
 }
@@ -168,6 +192,22 @@ impl Chord {
         !self.held.is_empty()
     }
 
+    /// 기다리는 열. **SPC 로 시작하면 메뉴가 열린 것이고, 열이 곧 메뉴의 층이다**
+    /// ([`super::menu`]).
+    pub fn held(&self) -> &[KeyEvent] {
+        &self.held
+    }
+
+    /// 표를 찾지 않고 키 하나를 붙인다 — 메뉴가 켜진 하위 접두어로 한 층 내려갈 때.
+    pub fn push(&mut self, k: KeyEvent) {
+        self.held.push(k);
+    }
+
+    /// 마지막 키를 뗀다 — 메뉴의 Bksp(한 층 위). 뿌리에서 떼면 열이 비어 메뉴가 닫힌다.
+    pub fn pop(&mut self) {
+        self.held.pop();
+    }
+
     /// 기다리던 열을 버린다. **키가 아닌 길로 자리가 바뀌면 부른다** — 붙여넣기, 글칸으로
     /// 넘어간 모드. 남겨 두면 한참 뒤의 `g` 가 맨 위로 뛴다.
     pub fn clear(&mut self) {
@@ -175,7 +215,38 @@ impl Chord {
     }
 }
 
-/// 동작에 붙은 키 이름. 여럿이면 `·` 로 잇는다(`Ctrl-S·F2`).
+/// 접두어를 누르고 기다리는 동안 **이어 누를 수 있는 키** — `(다음 키 이름, 동작)`, 표의 차례대로.
+/// 이름 붙은 줄만 댄다(숨은 별칭은 바에도 안 적는다). 키 바의 `g → g 맨 위` 가 이것을 읽는다 —
+/// 기다리는 `g` 가 화면에 안 보이면 다음 키가 왜 안 먹는지 모른다(moai-k3yi).
+pub fn next_keys<A: Copy + PartialEq>(table: &[Bind<A>], held: &[KeyEvent]) -> Vec<(String, A)> {
+    let mut out: Vec<(String, A)> = Vec::new();
+    for b in table.iter().filter(|b| {
+        b.label.is_some() && b.seq.len() == held.len() + 1 && b.seq.iter().zip(held).all(|(key, k)| key.matches(*k))
+    }) {
+        let name = b.seq[held.len()].name();
+        if !out.iter().any(|(n, _)| *n == name) {
+            out.push((name, b.act));
+        }
+    }
+    out
+}
+
+/// 이동 하나의 낱말. 바는 이동을 `j·k 이동` 으로 묶어 대지만, 기다리는 `g` 뒤에 무엇이 오는지는
+/// 한 이동씩 대야 한다(`g 맨 위`).
+pub fn move_word(m: Move) -> &'static str {
+    match m {
+        Move::LineUp => "위",
+        Move::LineDown => "아래",
+        Move::HalfUp => "반 쪽 위",
+        Move::HalfDown => "반 쪽 아래",
+        Move::PageUp => "한 쪽 위",
+        Move::PageDown => "한 쪽 아래",
+        Move::Top => "맨 위",
+        Move::Bottom => "맨 아래",
+    }
+}
+
+/// 동작에 붙은 키 이름. 여럿이면 `·` 로 잇는다(`j·k`).
 pub fn label<A: Copy + PartialEq>(table: &[Bind<A>], act: A) -> String {
     labels(table, &[act])
 }
@@ -242,13 +313,21 @@ macro_rules! moves {
     };
 }
 
+/// SPC 메뉴를 여는 키(moai-7sjm).
+pub const LEADER: Key = Key::plain(' ');
+
+/// **바로 누르는 키는 이동·드나들기·포커스·`/`·Esc 뿐이다**(키 지도 moai-hudg). 그 밖의 동작은
+/// SPC 뒤에 선다 — 한 글자 단축키(`q`·`f`·`n`)를 실수로 누를 때마다 앱이 끝나거나 칸이 열리던
+/// 것이 까닭이다. 바로 끝내는 길은 [`ANYWHERE`] 의 Ctrl-C 하나다. F키와 숨은 별칭(`r`·`m`·F7·
+/// Delete)도 걷었다.
+///
+/// **SPC 로 시작하는 줄의 차례가 곧 메뉴의 차례다**([`super::menu::entries`]). 메뉴는 목록을
+/// 따로 적지 않고 이 줄들을 읽는다 — 메뉴에 선 것과 실제로 도는 것이 갈릴 수 없다.
 pub const BROWSE: &[Bind<Browse>] = {
     use Browse::*;
     use KeyCode as C;
     const MOVES: [Bind<Browse>; 14] = moves!(Browse::Step, Key::any);
     &[
-        row!(Quit, None, Key::plain('q')),
-        row!(Quit, Some("F10"), Key::any(C::F(10))),
         row!(FocusNext, Some("Tab"), Key::unshift(C::Tab)),
         row!(FocusPrev, None, Key::shift(C::Tab)),
         MOVES[0],
@@ -272,18 +351,17 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Leave, None, Key::any(C::Left)),
         row!(Leave, None, Key::plain('h')),
         row!(Grep, Some("/"), Key::plain('/')),
-        row!(Filter, Some("f"), Key::plain('f')),
-        row!(Filter, None, Key::any(C::F(7))),
-        row!(Jot, Some("n"), Key::plain('n')),
-        row!(Pick, Some("a"), Key::plain('a')),
-        row!(Unregister, Some("d"), Key::plain('d')),
-        row!(Unregister, None, Key::any(C::Delete)),
         row!(ClearFilter, Some("Esc"), Key::any(C::Esc)),
-        row!(Reload, Some("F5"), Key::any(C::F(5))),
-        row!(Reload, None, Key::plain('r')),
-        row!(Worktree, Some("w"), Key::plain('w')),
-        row!(Raw, Some("F3"), Key::any(C::F(3))),
-        row!(Raw, None, Key::plain('m')),
+        // `/` 는 바로 누르는 키이면서 메뉴에도 선다 — 이름은 바로 누르는 쪽 하나만 댄다.
+        row!(Grep, None, LEADER, Key::plain('/')),
+        row!(Filter, Some("SPC f"), LEADER, Key::plain('f')),
+        row!(Jot, Some("SPC n"), LEADER, Key::plain('n')),
+        row!(Reload, Some("SPC r"), LEADER, Key::plain('r')),
+        row!(Quit, Some("SPC q"), LEADER, Key::plain('q')),
+        row!(Pick, Some("SPC p a"), LEADER, Key::plain('p'), Key::plain('a')),
+        row!(Unregister, Some("SPC p d"), LEADER, Key::plain('p'), Key::plain('d')),
+        row!(Worktree, Some("SPC t w"), LEADER, Key::plain('t'), Key::plain('w')),
+        row!(Raw, Some("SPC t r"), LEADER, Key::plain('t'), Key::plain('r')),
     ]
 };
 
@@ -294,6 +372,12 @@ pub struct Ctx {
     pub layer: bool,
     /// 포커스가 목록에 있나.
     pub list_focus: bool,
+    /// 커서가 선 줄이 **들어갈 데가 없다** — 잎(일 한 줄)이거나 줄이 없다. `..`·디렉터리·층의
+    /// 프로젝트는 들어간다(`..` 은 나간다).
+    pub leaf: bool,
+    /// **나갈 데가 없다** — 프로젝트 뿌리인데 층이 없거나, 층에 섰다. 층이 있는 프로젝트 뿌리는
+    /// 뿌리가 아니다: Bksp 가 층으로 올라간다(`App::leave` → `climb`).
+    pub root: bool,
     pub worktree: bool,
     pub raw: bool,
     /// `Tab`·Shift-Tab 이 가는 칸의 이름.
@@ -311,28 +395,57 @@ pub enum Off {
 }
 
 impl Browse {
-    /// 이 자리에서 되는가. **키 처리·키 바·(뒤의) SPC 메뉴가 같은 판정을 읽는다** — 키
-    /// 처리는 까닭을 알림으로 대고, 바와 메뉴는 켜진 것만 세운다.
+    /// 이 자리에서 되는가. **키 처리·키 바·SPC 메뉴가 같은 판정을 읽는다** — 키 처리는
+    /// 까닭을 알림으로 대고, 바와 메뉴는 켜진 것만 세운다. 메뉴에 안 선 키는 메뉴에서 눌러도
+    /// 모르는 키와 같다([`super::menu::feed`]).
     ///
     /// - 드나드는 키는 **목록 포커스를 탄다.** 상세를 읽다가 누른 Enter·←가 목록을 옮기면
     ///   보던 이슈가 바뀐다
     /// - 해제는 층의 줄에서만, 목록 포커스로 — 지금 선 프로젝트를 빼는 일이 안 생긴다
-    /// - 층에서 프로젝트 안의 줄에 매인 키(거름망·검색·워크트리)는 까닭을 댄다. `n` 은
-    ///   층에서도 듣는다 — 커서의 프로젝트에 담는다(moai-fccv)
+    /// - 층에서 프로젝트 안의 줄에 매인 키(거름망·검색·워크트리)는 켜지지 않는다. 바로 누르는
+    ///   `/` 는 까닭을 댄다. 메뉴의 `SPC f`·`SPC t w` 는 층에서 메뉴에 안 서므로 까닭을 댈
+    ///   자리가 없다 — 워크트리는 말없이 꺼 두고, 거름망은 검색과 한 문장을 쓴다. `n` 은 층에서도
+    ///   듣는다 — 커서의 프로젝트에 담는다(moai-fccv)
     pub fn enabled(self, c: &Ctx) -> Result<(), Off> {
         use Browse::*;
         match self {
             Enter | Leave if !c.list_focus => Err(Off::Quiet),
+            // 커서에서 되는 키만(moai-k3yi): 잎의 Enter·뿌리의 Bksp 는 아무 일도 없다. 까닭을 대지
+            // 않는다 — 들어갈 데 없는 줄에서 Enter 가 조용한 것은 파일 관리자와 같고, 바가 그 키를
+            // 안 적으므로 "적힌 키가 안 듣는다" 가 안 생긴다.
+            Enter if c.leaf => Err(Off::Quiet),
+            Leave if c.root => Err(Off::Quiet),
             Unregister if !(c.layer && c.list_focus) => Err(Off::Quiet),
             Grep | Filter if c.layer => {
                 Err(Off::Why(format!("거름망은 프로젝트 안의 줄에 건다 — {} 로 들어가서 건다", label(BROWSE, Enter))))
             }
-            Worktree if c.layer => Err(Off::Why(format!(
-                "워크트리 겹쳐 보기는 프로젝트 안에서 켠다 — {} 로 들어가서 {}",
-                label(BROWSE, Enter),
-                label(BROWSE, Worktree)
-            ))),
+            Worktree if c.layer => Err(Off::Quiet),
             _ => Ok(()),
+        }
+    }
+
+    /// SPC 메뉴의 낱말. 바([`Browse::what`])보다 자리가 넉넉해 뜻을 풀어 쓴다 — 켜고 끄는 것은
+    /// 무엇을 켜고 끄는지만 대고, 지금 상태는 [`Browse::state`] 가 따로 낸다.
+    pub fn menu_word(self, c: &Ctx) -> &'static str {
+        use Browse::*;
+        match self {
+            Jot => "생각 담기",
+            Reload => "다시 읽기",
+            Pick => "등록",
+            Unregister => "목록에서 빼기",
+            Worktree => "워크트리 겹쳐 보기",
+            Raw => "원문↔그리기",
+            _ => self.what(c),
+        }
+    }
+
+    /// 켜고 끄는 것의 **지금 상태** 낱말. 색이 혼자 뜻을 지지 않는다 — 켜진 것을 색으로만
+    /// 칠하면 색 없는 터미널에서 어느 쪽인지 모른다.
+    pub fn state(self, c: &Ctx) -> Option<&'static str> {
+        match self {
+            Browse::Worktree => Some(if c.worktree { "[켜짐]" } else { "[꺼짐]" }),
+            Browse::Raw => Some(if c.raw { "[원문]" } else { "[그리기]" }),
+            _ => None,
         }
     }
 
@@ -361,6 +474,29 @@ impl Browse {
             Worktree => "워크트리",
             Raw if c.raw => "그리기",
             Raw => "원문",
+        }
+    }
+}
+
+/// SPC 메뉴가 열린 동안 **표보다 먼저** 받는 키(moai-7sjm). Esc 는 탐색에서 거름망을 풀지만,
+/// 메뉴가 열렸으면 메뉴를 닫는 것이 먼저다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Menu {
+    Close,
+    /// 한 층 위. 뿌리에서는 닫는다.
+    Up,
+}
+
+pub const MENU: &[Bind<Menu>] = &[
+    row!(Menu::Close, Some("Esc"), Key::any(KeyCode::Esc)),
+    row!(Menu::Up, Some("Bksp"), Key::any(KeyCode::Backspace)),
+];
+
+impl Menu {
+    pub fn what(self) -> &'static str {
+        match self {
+            Menu::Close => "닫기",
+            Menu::Up => "위로",
         }
     }
 }
@@ -472,9 +608,9 @@ pub const JOT: &[Bind<Jot>] = {
     use Jot::*;
     use KeyCode as C;
     &[
+        // F2 는 걷었다(키 지도 moai-hudg) — F키는 전부 걷는다.
         row!(Save, Some("Ctrl-S"), Key::ctrl('s')),
         row!(Save, None, Key::ctrl('S')),
-        row!(Save, Some("F2"), Key::any(C::F(2))),
         row!(Switch, Some("Tab"), Key::any(C::Tab)),
         row!(Close, Some("Esc"), Key::any(C::Esc)),
         row!(Next, Some("Enter"), Key::unctrl(C::Enter)),
@@ -755,6 +891,7 @@ mod tests {
         each("path", PATH);
         each("jot", JOT);
         each("confirm", CONFIRM);
+        each("menu", MENU);
     }
 
     /// **적힌 키 이름은 그 키다.** 이름을 키로 풀어 표에서 찾으면 그 줄의 동작이 나온다 — 바에
@@ -775,20 +912,23 @@ mod tests {
         each("path", PATH);
         each("jot", JOT);
         each("confirm", CONFIRM);
-        assert_eq!(label(JOT, Jot::Save), "Ctrl-S·F2");
+        each("menu", MENU);
+        assert_eq!(label(JOT, Jot::Save), "Ctrl-S");
         assert_eq!(labels(BROWSE, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)]), "j·k");
         assert_eq!(label(BROWSE, Browse::Step(Move::Top)), "gg", "숨은 별칭 Home 이 이름에 섰다");
         assert_eq!(label(BROWSE, Browse::Enter), "Enter", "숨은 별칭 `l` 이 이름에 섰다 — 층의 거절문이 `Enter·l 로` 가 된다");
         assert_eq!(label(PICK, Pick::Path), "g p");
-        assert_eq!(label(BROWSE, Browse::Quit), "F10", "숨은 별칭 `q` 가 이름에 섰다");
+        assert_eq!(label(BROWSE, Browse::Quit), "SPC q");
+        assert_eq!(label(BROWSE, Browse::Grep), "/", "숨은 별칭 `SPC /` 가 이름에 섰다 — 층의 거절문·붙여넣기 안내가 둘을 댄다");
     }
 
     /// **옮기기 전 코드가 받던 키가 같은 동작이 된다**(moai-gaum 의 키 목록). 수식키가 붙은 모양도
     /// 옛 코드가 받던 그대로다 — 비글자 키는 Ctrl·Alt 를 안 봤고, 창은 통째로 걸렀다.
     ///
     /// **일부러 바꾼 뜻**(moai-ob4c, 키 지도 moai-hudg): `j`·`k` 는 상세 굴리기에서 포커스 칸
-    /// 이동으로, SPC·`b`(상세 한 쪽)는 뜻이 없어졌고(SPC 는 메뉴 자리 — moai-7sjm), 창의 `g` 는
-    /// 경로 적기에서 `gg`·`g p` 의 접두어로 갔다.
+    /// 이동으로, `b`(상세 한 쪽)는 뜻이 없어졌고, 창의 `g` 는 경로 적기에서 `gg`·`g p` 의 접두어로
+    /// 갔다. **moai-7sjm 이 한 글자 단축키와 F키를 SPC 메뉴 뒤로 옮겼다** — 옛 키는 이제 뜻이 없고,
+    /// 같은 동작이 SPC 열에서 나온다.
     #[test]
     fn the_old_inventory_maps_to_the_same_actions() {
         use Browse as B;
@@ -796,9 +936,6 @@ mod tests {
         let ctrl = KeyModifiers::CONTROL;
         let alt = KeyModifiers::ALT;
         let browse = [
-            (press(C::Char('q')), Lookup::Run(B::Quit)),
-            (press(C::F(10)), Lookup::Run(B::Quit)),
-            (with(C::F(10), ctrl), Lookup::Run(B::Quit)),
             (press(C::Tab), Lookup::Run(B::FocusNext)),
             (with(C::Tab, ctrl), Lookup::Run(B::FocusNext)),
             (press(C::BackTab), Lookup::Run(B::FocusPrev)),
@@ -814,24 +951,28 @@ mod tests {
             (press(C::Backspace), Lookup::Run(B::Leave)),
             (press(C::Left), Lookup::Run(B::Leave)),
             (press(C::Char('/')), Lookup::Run(B::Grep)),
-            (press(C::Char('f')), Lookup::Run(B::Filter)),
-            (press(C::F(7)), Lookup::Run(B::Filter)),
-            (press(C::Char('n')), Lookup::Run(B::Jot)),
-            (press(C::Char('a')), Lookup::Run(B::Pick)),
-            (press(C::Char('d')), Lookup::Run(B::Unregister)),
-            (press(C::Delete), Lookup::Run(B::Unregister)),
             (press(C::Esc), Lookup::Run(B::ClearFilter)),
-            (press(C::F(5)), Lookup::Run(B::Reload)),
-            (press(C::Char('r')), Lookup::Run(B::Reload)),
-            (press(C::Char('w')), Lookup::Run(B::Worktree)),
-            (press(C::F(3)), Lookup::Run(B::Raw)),
-            (press(C::Char('m')), Lookup::Run(B::Raw)),
+            // 옮겼다(moai-7sjm) — 바로 누르던 키는 뜻이 없다. **`q` 는 더는 안 끝낸다.**
+            (press(C::Char('q')), Lookup::Unknown),
+            (press(C::F(10)), Lookup::Unknown),
+            (with(C::F(10), ctrl), Lookup::Unknown),
+            (press(C::Char('f')), Lookup::Unknown),
+            (press(C::F(7)), Lookup::Unknown),
+            (press(C::Char('n')), Lookup::Unknown),
+            (press(C::Char('a')), Lookup::Unknown),
+            (press(C::Char('d')), Lookup::Unknown),
+            (press(C::Delete), Lookup::Unknown),
+            (press(C::F(5)), Lookup::Unknown),
+            (press(C::Char('r')), Lookup::Unknown),
+            (press(C::Char('w')), Lookup::Unknown),
+            (press(C::F(3)), Lookup::Unknown),
+            (press(C::Char('m')), Lookup::Unknown),
+            (press(C::Char(' ')), Lookup::Pending),
             // 진행 바탕 토글 `p` 는 main 이 기능째 걷었다(moai-u3r2).
             (press(C::Char('p')), Lookup::Unknown),
             // 뜻을 바꿨다(moai-ob4c) — 포커스 칸 이동. 옛 상세 한 쪽(SPC·`b`)은 걷었다.
             (press(C::Char('j')), Lookup::Run(B::Step(Move::LineDown))),
             (press(C::Char('k')), Lookup::Run(B::Step(Move::LineUp))),
-            (press(C::Char(' ')), Lookup::Unknown),
             (press(C::Char('b')), Lookup::Unknown),
             (with(C::Char('a'), ctrl), Lookup::Unknown),
             (with(C::Char('d'), alt), Lookup::Unknown),
@@ -840,6 +981,22 @@ mod tests {
         ];
         for (k, want) in browse {
             assert_eq!(one(BROWSE, k), want, "탐색 {k:?}");
+        }
+        let sp = press(C::Char(' '));
+        let ch = |c| press(C::Char(c));
+        let menu = [
+            (vec![sp, ch('q')], B::Quit),
+            (vec![sp, ch('/')], B::Grep),
+            (vec![sp, ch('f')], B::Filter),
+            (vec![sp, ch('n')], B::Jot),
+            (vec![sp, ch('r')], B::Reload),
+            (vec![sp, ch('p'), ch('a')], B::Pick),
+            (vec![sp, ch('p'), ch('d')], B::Unregister),
+            (vec![sp, ch('t'), ch('w')], B::Worktree),
+            (vec![sp, ch('t'), ch('r')], B::Raw),
+        ];
+        for (seq, act) in menu {
+            assert_eq!(lookup(BROWSE, &seq), Lookup::Run(act), "메뉴 {seq:?}");
         }
         let pick = [
             (press(C::Up), Lookup::Run(Pick::Step(Move::LineUp))),
@@ -884,7 +1041,7 @@ mod tests {
             (with(C::Char('s'), ctrl), Lookup::Run(Jot::Save)),
             (with(C::Char('S'), ctrl | KeyModifiers::SHIFT), Lookup::Run(Jot::Save)),
             (with(C::Char('s'), CTRL_ALT), Lookup::Run(Jot::Save)),
-            (press(C::F(2)), Lookup::Run(Jot::Save)),
+            (press(C::F(2)), Lookup::Unknown),
             (press(C::Tab), Lookup::Run(Jot::Switch)),
             (press(C::BackTab), Lookup::Run(Jot::Switch)),
             (press(C::Esc), Lookup::Run(Jot::Close)),
@@ -905,19 +1062,37 @@ mod tests {
         let cli = crate::cli::Cli::command();
         let help = cli.find_subcommand("tui").and_then(|c| c.get_after_help()).map(|h| h.to_string()).expect("tui 도움말이 없다");
         let mut named = Vec::new();
-        for word in help.split(|c: char| c.is_whitespace() || "·/,()`".contains(c)) {
-            let word = word.trim_end_matches(['.', '|']);
+        // `SPC t w` 는 띄어 적은 한 열이다 — SPC 뒤에 이어지는 한 글자 낱말을 열로 묶는다.
+        let words: Vec<&str> =
+            help.split(|c: char| c.is_whitespace() || "·,()`".contains(c)).map(|w| w.trim_end_matches(['.', '|'])).filter(|w| !w.is_empty()).collect();
+        let mut i = 0;
+        let mut joined: Vec<String> = Vec::new();
+        while i < words.len() {
+            let mut word = words[i].to_string();
+            if word == "SPC" {
+                while words.get(i + 1).is_some_and(|w| w.len() == 1 && w.is_ascii()) {
+                    i += 1;
+                    word = format!("{word} {}", words[i]);
+                }
+            }
+            joined.push(word);
+            i += 1;
+        }
+        for word in &joined {
+            let word = word.as_str();
             let Some(k) = parse_seq(word) else { continue };
             let known = lookup(ANYWHERE, &k) != Lookup::Unknown
+                || lookup(MENU, &k) != Lookup::Unknown
                 || lookup(BROWSE, &k) != Lookup::Unknown
                 || lookup(PICK, &k) != Lookup::Unknown
                 || lookup(JOT, &k) != Lookup::Unknown;
             assert!(known, "도움말이 `{word}` 를 대는데 어느 키 표에도 없다");
             named.push(word);
         }
+        assert!(!joined.iter().any(|w| w.starts_with('F') && parse(w).is_some()), "도움말이 걷은 F키를 댄다: {joined:?}");
         for must in [
-            "F10", "q", "Enter", "Backspace", "Shift-Tab", "j", "k", "h", "l", "gg", "G", "Ctrl-d", "Ctrl-u", "Ctrl-f", "Ctrl-b",
-            "a", "d", "n", "Ctrl-S", "F2", "Esc",
+            "Ctrl-C", "SPC q", "SPC f", "SPC n", "SPC r", "SPC /", "SPC p a", "SPC p d", "SPC t w", "SPC t r", "SPC", "Enter",
+            "Backspace", "Shift-Tab", "j", "k", "h", "l", "gg", "G", "Ctrl-d", "Ctrl-u", "Ctrl-f", "Ctrl-b", "Ctrl-S", "Esc", "/",
         ] {
             assert!(named.contains(&must), "도움말에서 `{must}` 를 못 뽑았다 — 뽑기가 헛돈다: {named:?}");
         }
@@ -927,16 +1102,15 @@ mod tests {
         Ctx { layer: true, list_focus: true, ..Ctx::default() }
     }
 
-    /// **층의 거절문은 옮기기 전과 한 글자도 같다.** 문구 속 키 이름은 표에서 읽는다.
+    /// **층의 거절문은 옮기기 전과 한 글자도 같다.** 문구 속 키 이름은 표에서 읽는다. 바로 누르는
+    /// 키로 남은 `/` 만 까닭을 댄다.
     #[test]
     fn the_layer_refuses_with_the_same_words() {
         let filter = Off::Why("거름망은 프로젝트 안의 줄에 건다 — Enter 로 들어가서 건다".into());
         assert_eq!(Browse::Grep.enabled(&layer()), Err(filter.clone()));
         assert_eq!(Browse::Filter.enabled(&layer()), Err(filter));
-        assert_eq!(
-            Browse::Worktree.enabled(&layer()),
-            Err(Off::Why("워크트리 겹쳐 보기는 프로젝트 안에서 켠다 — Enter 로 들어가서 w".into()))
-        );
+        // 워크트리는 메뉴에만 있고 층의 메뉴에 안 선다 — 까닭을 댈 자리가 없어 말없이 꺼 둔다(moai-7sjm).
+        assert_eq!(Browse::Worktree.enabled(&layer()), Err(Off::Quiet));
         assert_eq!(Browse::Jot.enabled(&layer()), Ok(()), "층의 `n` 은 커서의 프로젝트에 담는다");
         assert_eq!(Browse::Unregister.enabled(&layer()), Ok(()));
         let detail = Ctx { list_focus: false, ..layer() };
@@ -945,5 +1119,34 @@ mod tests {
         let inside = Ctx { list_focus: true, ..Ctx::default() };
         assert_eq!(Browse::Unregister.enabled(&inside), Err(Off::Quiet), "프로젝트 안에서 해제가 켜졌다");
         assert_eq!(Browse::Worktree.enabled(&inside), Ok(()));
+    }
+
+    /// **드나드는 키는 커서가 선 줄을 탄다**(moai-k3yi). 잎의 Enter 와 뿌리의 Bksp 는 조용히
+    /// 꺼진다 — 바와 키 처리가 이 한 판정을 읽는다. 둘은 서로를 끄지 않는다.
+    #[test]
+    fn enter_and_leave_follow_the_cursor_row() {
+        let base = Ctx { list_focus: true, ..Ctx::default() };
+        assert_eq!(Browse::Enter.enabled(&base), Ok(()));
+        assert_eq!(Browse::Leave.enabled(&base), Ok(()));
+        let leaf = Ctx { leaf: true, ..base };
+        assert_eq!(Browse::Enter.enabled(&leaf), Err(Off::Quiet), "잎에서 Enter 가 켜졌다");
+        assert_eq!(Browse::Leave.enabled(&leaf), Ok(()), "잎이 나가기를 껐다");
+        let root = Ctx { root: true, ..base };
+        assert_eq!(Browse::Leave.enabled(&root), Err(Off::Quiet), "뿌리에서 Bksp 가 켜졌다");
+        assert_eq!(Browse::Enter.enabled(&root), Ok(()), "뿌리가 들어가기를 껐다");
+        // 커서의 사실은 드나드는 키만 끈다 — 다른 동작은 그대로다.
+        let both = Ctx { leaf: true, root: true, ..base };
+        for act in [Browse::Grep, Browse::Filter, Browse::Jot, Browse::Reload, Browse::Quit, Browse::Step(Move::Top)] {
+            assert_eq!(act.enabled(&both), Ok(()), "{act:?}");
+        }
+    }
+
+    /// **기다리는 `g` 뒤에 이어 누를 키는 표에서 읽는다** — 이름 붙은 줄만, 숨은 별칭 없이.
+    #[test]
+    fn next_keys_after_g_come_from_the_table() {
+        let g = [KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)];
+        assert_eq!(next_keys(BROWSE, &g), vec![("g".to_string(), Browse::Step(Move::Top))]);
+        assert_eq!(next_keys(PICK, &g), vec![("g".to_string(), Pick::Step(Move::Top)), ("p".to_string(), Pick::Path)]);
+        assert!(next_keys(BROWSE, &[]).iter().all(|(n, _)| n != "Right" && n != "l"), "숨은 별칭을 댄다");
     }
 }

@@ -78,17 +78,16 @@ pub fn gather(repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::G
 ///
 /// 사용자 설정의 문제는 등록한 것이 있을 때는 화면이 한 줄씩 비추고(`problems`),
 /// 없을 때는 실패 말에 붙는다 — 목록이 빈 까닭이 그것일 수 있다.
-pub fn registered(verb: &str, worktree: bool) -> R<(crate::user_config::Registry, Vec<crate::projects::Project>)> {
+///
+/// `worktree` 면 프로젝트마다 옆 워크트리를 겹친다. 옆에서 만난 문제는 stderr 가 아니라
+/// 그 프로젝트의 줄(`Project::trouble`)이 말한다 — 여럿을 한 번에 보는 화면에서 stderr 의
+/// 한 줄은 어느 프로젝트의 것인지 모른다.
+pub fn registered(worktree: bool) -> R<(crate::user_config::Registry, Vec<crate::projects::Project>)> {
     let reg = crate::user_config::read(crate::user_config::path().as_deref());
     if reg.projects.is_empty() {
         return Err(nothing_registered(&reg));
     }
-    // **`--worktree` 는 아직 프로젝트마다 겹치지 않는다.** 말없이 버리면 겹쳐 본 줄
-    // 알고 읽는다. stderr 라 `--json` 을 흐리지 않는다.
-    if worktree {
-        eprintln!("moai: --worktree 는 등록한 프로젝트 한눈 보기에서는 겹치지 않는다 — `moai -C <dir> {verb} --worktree`");
-    }
-    let projects = crate::projects::open(&reg);
+    let projects = crate::projects::open_with(&reg, worktree);
     Ok((reg, projects))
 }
 
@@ -379,9 +378,22 @@ pub fn json_with<T: serde::Serialize>(base: &T, extra: &[(&str, String)]) -> R<V
 #[derive(serde::Serialize)]
 pub struct Shelved<'a> {
     pub id: &'a str,
+    /// 가장 가까운 미룬 곳.
     pub root: &'a str,
+    /// 도로 집어야 할 곳 **전부**, 가까운 것부터(moai-g2a1). 하나뿐이면 `root` 와 같아
+    /// 안 낸다 — 흔한 경우의 출력을 바꾸지 않는다.
+    #[serde(skip_serializing_if = "one_or_none")]
+    pub roots: &'a [String],
 }
 
-pub fn shelved(pairs: &[(String, String)]) -> Vec<Shelved<'_>> {
-    pairs.iter().map(|(id, root)| Shelved { id, root }).collect()
+fn one_or_none(roots: &&[String]) -> bool {
+    roots.len() <= 1
+}
+
+/// (줄, 풀어야 할 미룸 전부 — 가까운 것부터).
+pub fn shelved(pairs: &[(String, Vec<String>)]) -> Vec<Shelved<'_>> {
+    pairs
+        .iter()
+        .map(|(id, roots)| Shelved { id, root: roots.first().map_or("", String::as_str), roots })
+        .collect()
 }

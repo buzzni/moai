@@ -98,7 +98,7 @@ impl Form {
 
     /// 키 하나. Ctrl-C 는 여기 오기 전에 든 쪽이 받는다 — 어느 모드에서든 나가는 길이다.
     ///
-    /// - **Ctrl-S·F2** 담기. 제목이 비면 거절하고 제목 칸으로 간다
+    /// - **Ctrl-S** 담기. 제목이 비면 거절하고 제목 칸으로 간다
     /// - **Tab·Shift-Tab** 제목 ↔ 본문
     /// - **Enter** 본문에서는 줄을 나누고, 제목에서는 본문으로 간다. **Enter 는 어디서도
     ///   담지 않는다** — 본문에서 손에 익은 Enter 가 제목에서 반쯤 적은 생각을 파일에
@@ -218,22 +218,25 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_s_and_f2_save_only_with_a_title() {
-        for save in [KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL), KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)] {
-            let mut f = Form::default();
-            press(&mut f, KeyCode::Tab);
-            type_in(&mut f, "본문만");
-            assert_eq!(f.key(save), Act::Stay, "{save:?}: 빈 제목으로 담았다");
-            assert_eq!((f.error.as_deref(), f.field), (Some(EMPTY_TITLE), Field::Title), "{save:?}");
-            // 빈칸뿐인 제목도 빈 제목이다
-            type_in(&mut f, "   ");
-            assert_eq!(f.key(save), Act::Stay);
-            // 치면 까닭이 걷힌다
-            type_in(&mut f, "생각");
-            assert_eq!(f.error, None, "치기 시작했는데 까닭이 남았다");
-            assert_eq!(f.key(save), Act::Save, "{save:?}");
-            assert_eq!(f.title(), "생각");
-        }
+    fn ctrl_s_saves_only_with_a_title() {
+        // F2 는 걷었다(moai-7sjm) — 제목이 있어도 아무 일도 없다.
+        let mut f = Form::default();
+        type_in(&mut f, "생각");
+        assert_eq!(f.key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)), Act::Stay, "걷은 F2 가 담았다");
+        let save = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
+        let mut f = Form::default();
+        press(&mut f, KeyCode::Tab);
+        type_in(&mut f, "본문만");
+        assert_eq!(f.key(save), Act::Stay, "{save:?}: 빈 제목으로 담았다");
+        assert_eq!((f.error.as_deref(), f.field), (Some(EMPTY_TITLE), Field::Title), "{save:?}");
+        // 빈칸뿐인 제목도 빈 제목이다
+        type_in(&mut f, "   ");
+        assert_eq!(f.key(save), Act::Stay);
+        // 치면 까닭이 걷힌다
+        type_in(&mut f, "생각");
+        assert_eq!(f.error, None, "치기 시작했는데 까닭이 남았다");
+        assert_eq!(f.key(save), Act::Save, "{save:?}");
+        assert_eq!(f.title(), "생각");
     }
 
     /// 빈 폼은 Esc 한 번에 닫힌다. 적던 것이 있으면 한 번 묻고 `y` 만 버린다.

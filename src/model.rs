@@ -142,6 +142,22 @@ pub struct Issue {
     /// 미루는 것은 칸을 옮기는 일이 아니다.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deferred_at: Option<String>,
+    /// **미루거나 도로 집은 때**(moai-l11z) — `defer` 와 `defer --undo` 가 적는다.
+    ///
+    /// `--worktree` 가 같은 id 의 두 줄 중 무엇을 세울지 [`Issue::planned`] 로 견준다. 칸
+    /// 시각(`status_since`)으로만 견주면 옆에서 늦게 미룬 것이 여기서 먼저 옮긴 칸에 가려진다.
+    /// 그렇다고 미루기가 `status_since` 를 올리면 방치 경고의 시계가 새로 서서 미루기가 경고를
+    /// 지우는 손잡이가 된다 — 그래서 따로 둔다. `deferred_at` 으로는 못 한다: 도로 집으면 지워져
+    /// 시각이 안 남는다.
+    ///
+    /// **칸 이동은 안 적는다** — 그 시각은 `status_since` 가 이미 말하고, 견줄 때 둘 중 늦은
+    /// 것을 쓴다. 그래서 이 필드 전의 줄도, 옛 바이너리가 칸만 옮긴 줄도 옳게 선다.
+    ///
+    /// **겹쳐 보기에만 쓴다. 방치·막힘 시계(`--stale`·`blocked_stale`·묶음의 `Stand::since`)는
+    /// 이것을 안 본다**(moai-cxk8). 보면 `defer`→`--undo` 두 번으로 그 경고가 지워져, 이
+    /// 필드를 `status_since` 와 따로 둔 까닭이 경고 쪽으로 돌아온다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     /// `status` 가 마지막으로 바뀐 때. 방치 검사와 "review 에 6일" 이 여기서 나온다.
@@ -187,6 +203,7 @@ impl Issue {
             milestone: None,
             blocked_by: Vec::new(),
             deferred_at: None,
+            planned_at: None,
             created_at: at.to_string(),
             updated_at: at.to_string(),
             status_since: at.to_string(),
@@ -197,6 +214,15 @@ impl Issue {
 
     pub fn priority(&self) -> u8 {
         self.priority.unwrap_or(DEFAULT_PRIORITY)
+    }
+
+    /// 계획에서의 자리가 마지막으로 바뀐 때 — 칸을 옮긴 때(`status_since`)와 미루거나 도로
+    /// 집은 때(`planned_at`) 중 늦은 것. 시각은 RFC3339 UTC 고정폭이라 문자열로 견준다.
+    pub fn planned(&self) -> &str {
+        match self.planned_at.as_deref() {
+            Some(p) if p > self.status_since.as_str() => p,
+            _ => &self.status_since,
+        }
     }
 
     /// 지금 계획에서 빠져 있는가.
@@ -584,8 +610,12 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
 }
 
 /// `at` 이 `now` 로부터 며칠 전인가. 파싱이 안 되면 `None`.
+///
+/// **`at` 이 `now` 보다 뒤면 0 이다**(moai-fix6). `div_euclid` 는 몇 초만 늦어도 -1 을 돌려,
+/// `--worktree` 로 겹친 다른 기계의 시계가 조금 빠르면 목록에 "-1일" 이 섰다. 그 줄은 오늘
+/// 적힌 것이다. 방치 판정은 안 바뀐다 — 0 은 어느 문턱도 안 넘는다.
 pub fn days_since(at: &str, now: &str) -> Option<i64> {
-    Some((parse_rfc3339(now)? - parse_rfc3339(at)?).div_euclid(86_400))
+    Some((parse_rfc3339(now)? - parse_rfc3339(at)?).div_euclid(86_400).max(0))
 }
 
 #[cfg(test)]
@@ -648,6 +678,20 @@ mod tests {
         ] {
             let i: Issue = serde_json::from_str(line).unwrap();
             assert_eq!(serde_json::to_string(&i).unwrap(), line);
+        }
+    }
+
+    /// 계획 시각도 되쓰면 바이트가 같다 — 도로 집은 줄은 `deferred_at` 없이 `planned_at` 만
+    /// 든다(moai-l11z). 늦은 계획 시각이 [`Issue::planned`] 가 된다.
+    #[test]
+    fn round_trips_a_line_with_a_plan_time() {
+        for line in [
+            r#"{"id":"argos-4aex","title":"제목","status":"todo","deferred_at":"2026-09-12T00:00:00Z","planned_at":"2026-09-12T00:00:00Z","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-12T00:00:00Z","status_since":"2026-09-11T04:12:03Z"}"#,
+            r#"{"id":"argos-4aex","title":"제목","status":"todo","planned_at":"2026-09-13T00:00:00Z","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-13T00:00:00Z","status_since":"2026-09-11T04:12:03Z"}"#,
+        ] {
+            let i: Issue = serde_json::from_str(line).unwrap();
+            assert_eq!(serde_json::to_string(&i).unwrap(), line);
+            assert_eq!(Some(i.planned()), i.planned_at.as_deref(), "늦은 계획 시각이 계획 자리를 바꾼 때가 아니다");
         }
     }
 
@@ -848,6 +892,9 @@ mod tests {
         assert_eq!(days_since("2026-09-08T00:00:00Z", "2026-09-11T04:12:03Z"), Some(3));
         assert_eq!(days_since("2026-09-11T04:12:03Z", "2026-09-11T23:59:59Z"), Some(0));
         assert_eq!(days_since("어제", "2026-09-11T04:12:03Z"), None);
+        // 지금보다 뒤인 시각은 오늘이다 — 몇 초 빠른 옆 기계의 시계가 "-1일" 을 만들던 자리.
+        assert_eq!(days_since("2026-09-11T04:12:05Z", "2026-09-11T04:12:03Z"), Some(0), "몇 초 뒤가 -1일이 됐다");
+        assert_eq!(days_since("2026-09-20T00:00:00Z", "2026-09-11T04:12:03Z"), Some(0));
     }
 
     /// 이름 안에 괄호가 있는 사람이 실제로 있다. 앞에서 괄호를 찾으면

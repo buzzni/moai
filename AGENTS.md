@@ -13,14 +13,15 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. 승인 게이트가 
     moai show -s todo -t bug               필터 (쉼표 = 또는, 반복 = 그리고)
     moai show --tree                       에픽 → 이슈 → 자식
     moai ready --worktree                  옆 워크트리에서 집은 것까지 겹쳐 본다
-    moai tui                               탐색기로 돌아다닌다. n 으로 생각을 담는다
+    moai tui                               탐색기로 돌아다닌다. SPC n 으로 생각을 담는다
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
     moai note <id> "발견한 것"             다음 사람이 읽을 메모
     moai defer <id> -m "왜"                지금 안 할 일을 계획에서 뺀다
 
-모든 명령에 `--json` 이 붙는다.
+모든 명령에 `--json` 이 붙는다. `ready --json` 은 `{"ready":[…],"held":[…]}` —
+`held` 는 미뤄 둔 것·빈 묶음에 막혀 못 집는 일과 도로 집을 곳이다.
 
 **담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
 `-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`
@@ -94,10 +95,11 @@ idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
     moai project ls                        등록한 것과 그 상태
 
 `.moai` 밖에서 부른 `moai`·`moai status`·`moai ready` 는 등록한 프로젝트를
-프로젝트마다 한눈에 낸다. 그 밖의 명령은 어느 프로젝트인지 모르니
+프로젝트마다 한눈에 낸다. `--worktree` 를 붙이면 프로젝트마다 옆 워크트리도
+겹친다. 그 밖의 명령은 어느 프로젝트인지 모르니
 `moai -C <dir> <명령>` 으로 부른다. `moai tui` 에서는 등록한 프로젝트가 맨 위
 층으로 선다 — `.moai` 밖이면 거기서 시작하고, 안이면 뿌리에서 Backspace 로 올라간다.
-층에서 `a` 로 디렉터리를 골라 등록하고(모노레포 하위도 따로), `d` 로 목록에서 뺀다.
+층에서 `SPC p a` 로 디렉터리를 골라 등록하고(모노레포 하위도 따로), `SPC p d` 로 목록에서 뺀다.
 
 ### 기능 요청을 받으면
 
@@ -149,4 +151,9 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 `moai status` 를 한 번 더 돌려 경고가 늘지 않았는지 본다. 경고는 막지 않는다 —
 에픽 없는 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것을 비출 뿐이다. 쌓인 idea 와
 미뤄 둔 것은 경고가 아니라 알림(`notices`)으로 따로 선다.
+
+집은 채 닫으면 다음 세션이 이어받을 한 줄을 그 이슈에 남긴다. 다음 세션은
+`moai show <id>` 의 이력에서 그것을 읽는다.
+
+    moai note <id> "다음: <이어서 할 것>"
 <!-- moai:end -->

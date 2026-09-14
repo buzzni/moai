@@ -31,6 +31,12 @@ pub struct Project {
     /// `style::project_colour(&path, hue)` 로 부른다.
     pub hue: Option<crate::style::Hue>,
     pub state: State,
+    /// `--worktree` 로 겹쳐 연 것이면 줄마다의 출처. 아니면 비었다 — 받는 쪽이 한 규칙으로 읽는다.
+    pub origin: crate::worktree::Origin,
+    /// 옆 워크트리를 겹치다 만난 것. **그 프로젝트 줄에서 말하고 막지 않는다** — stderr 로
+    /// 흘리면 어느 프로젝트의 말인지 모르고, 비영 종료하면 남의 워크트리 하나로 한눈 보기
+    /// 전체가 실패로 읽힌다.
+    pub trouble: Vec<String>,
 }
 
 pub enum State {
@@ -45,10 +51,19 @@ pub enum State {
 
 /// 등록 목록 차례 그대로 연다. **실패하지 않는다.**
 pub fn open(reg: &Registry) -> Vec<Project> {
+    open_with(reg, false)
+}
+
+/// [`open`] 과 같되, `worktree` 면 연 프로젝트마다 옆 워크트리를 겹친다
+/// (`worktree::gather` — `.moai` 안의 `--worktree` 와 같은 자다, moai-x0gb).
+pub fn open_with(reg: &Registry, worktree: bool) -> Vec<Project> {
     reg.projects
         .iter()
         .zip(crate::user_config::names(&reg.projects))
-        .map(|(p, name)| Project { path: p.path.clone(), name, hue: p.hue, state: State::at(&p.path) })
+        .map(|(p, name)| {
+            let (state, origin, trouble) = State::at_with(&p.path, worktree);
+            Project { path: p.path.clone(), name, hue: p.hue, state, origin, trouble }
+        })
         .collect()
 }
 
@@ -58,14 +73,24 @@ impl State {
     /// 한눈 보기·`project ls`·`project add` 가 같은 자로 잰다. 등록이 따로 들여다보면
     /// 설정이 깨진 저장소를 `add` 는 조용히 받고 `ls` 는 "못 읽는다" 로 말한다 (moai-9omq).
     fn at(dir: &Path) -> State {
+        State::at_with(dir, false).0
+    }
+
+    /// 여는 것은 [`State::at`] 과 같고, 연 저장소는 `worktree` 면 옆을 겹쳐 읽는다.
+    /// 옆 워크트리를 못 찾은 것(git 밖)도 문제로 든다 — 겹쳐 보라고 시킨 것이다.
+    fn at_with(dir: &Path, worktree: bool) -> (State, crate::worktree::Origin, Vec<String>) {
+        let lone = |s: State| (s, crate::worktree::Origin::default(), Vec::new());
         match Repo::open(dir) {
-            Ok(Opened::Repo(repo)) => match repo.read() {
-                Ok(load) => State::Open { repo, load },
-                Err(e) => State::Unreadable(e.message),
+            Ok(Opened::Repo(repo)) => match crate::worktree::gather(&repo, worktree) {
+                Ok(g) => {
+                    let trouble = g.unfound.into_iter().chain(g.trouble).collect();
+                    (State::Open { repo, load: g.load }, g.origin, trouble)
+                }
+                Err(e) => lone(State::Unreadable(e.message)),
             },
-            Ok(Opened::Uninit) => State::Uninit,
-            Ok(Opened::Missing) => State::Missing,
-            Err(e) => State::Unreadable(e.message),
+            Ok(Opened::Uninit) => lone(State::Uninit),
+            Ok(Opened::Missing) => lone(State::Missing),
+            Err(e) => lone(State::Unreadable(e.message)),
         }
     }
 }

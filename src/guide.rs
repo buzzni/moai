@@ -67,14 +67,15 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
     moai show -s todo -t bug               필터 (쉼표 = 또는, 반복 = 그리고)
     moai show --tree                       에픽 → 이슈 → 자식
     moai ready --worktree                  옆 워크트리에서 집은 것까지 겹쳐 본다
-    moai tui                               탐색기로 돌아다닌다. n 으로 생각을 담는다
+    moai tui                               탐색기로 돌아다닌다. SPC n 으로 생각을 담는다
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
     moai note <id> "발견한 것"             다음 사람이 읽을 메모
     moai defer <id> -m "왜"                지금 안 할 일을 계획에서 뺀다
 
-모든 명령에 `--json` 이 붙는다."#;
+모든 명령에 `--json` 이 붙는다. `ready --json` 은 `{"ready":[…],"held":[…]}` —
+`held` 는 미뤄 둔 것·빈 묶음에 막혀 못 집는 일과 도로 집을 곳이다."#;
 
 const NO_GATE: &str = "승인 게이트가 없다 — 무엇이든 만들고 무엇이든 옮길 수 있다. 사람을 부르지 않는다.";
 
@@ -138,10 +139,11 @@ const PROJECTS: &str = r#"    moai project add <dir>                 내 설정�
     moai project ls                        등록한 것과 그 상태
 
 `.moai` 밖에서 부른 `moai`·`moai status`·`moai ready` 는 등록한 프로젝트를
-프로젝트마다 한눈에 낸다. 그 밖의 명령은 어느 프로젝트인지 모르니
+프로젝트마다 한눈에 낸다. `--worktree` 를 붙이면 프로젝트마다 옆 워크트리도
+겹친다. 그 밖의 명령은 어느 프로젝트인지 모르니
 `moai -C <dir> <명령>` 으로 부른다. `moai tui` 에서는 등록한 프로젝트가 맨 위
 층으로 선다 — `.moai` 밖이면 거기서 시작하고, 안이면 뿌리에서 Backspace 로 올라간다.
-층에서 `a` 로 디렉터리를 골라 등록하고(모노레포 하위도 따로), `d` 로 목록에서 뺀다."#;
+층에서 `SPC p a` 로 디렉터리를 골라 등록하고(모노레포 하위도 따로), `SPC p d` 로 목록에서 뺀다."#;
 
 const PEOPLE: &str = r#"**담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
 `-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`
@@ -149,7 +151,22 @@ const PEOPLE: &str = r#"**담당은 저절로 붙는다** — 만든 사람이 �
 
 const CLOSING: &str = r#"`moai status` 를 한 번 더 돌려 경고가 늘지 않았는지 본다. 경고는 막지 않는다 —
 에픽 없는 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것을 비출 뿐이다. 쌓인 idea 와
-미뤄 둔 것은 경고가 아니라 알림(`notices`)으로 따로 선다."#;
+미뤄 둔 것은 경고가 아니라 알림(`notices`)으로 따로 선다.
+
+집은 채 닫으면 다음 세션이 이어받을 한 줄을 그 이슈에 남긴다. 다음 세션은
+`moai show <id>` 의 이력에서 그것을 읽는다.
+
+    moai note <id> "다음: <이어서 할 것>""#;
+
+/// 집은 채 닫을 때 남기는 한 줄. `CLOSING` 과 세션을 닫을 때의 붙듦이 같은
+/// 글을 내야 한다 — 안내가 가르친 줄과 훅이 내민 줄이 다르면 둘 다 안 믿는다.
+///
+/// **`status` 가 이것을 비추지 않는다.** 마지막 note 는 저널을 훑어야 나오는
+/// 값이라, 비추는 순간 저널이 `status` 에 읽힌다. `show` 를 한 번 더 치는 것이
+/// 실제로 불편해지면 그때 스냅샷 필드를 논의한다 (moai-0rui).
+pub fn handoff(id: &str) -> String {
+    format!("moai note {id} \"다음: <이어서 할 것>\"")
+}
 
 /// 규칙 셋. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
 fn rules() -> String {
@@ -311,15 +328,20 @@ pub fn reference() -> String {
 
 에이전트가 git 워크트리를 하나씩 잡고 일하면, 지금 워크트리의 보드는 옆에서
 집고 옮긴 것을 모른다. `status`·`ready`·`show` 에 `--worktree` 를 붙이면 옆
-워크트리의 이슈를 겹쳐 본다. 탐색기(`moai tui`)는 겹친 채로 열고 `w` 가 끄고 켠다.
+워크트리의 이슈를 겹쳐 본다. 탐색기(`moai tui`)는 겹친 채로 열고 `SPC t w` 가 끄고 켠다.
 
     moai ready --worktree             옆에서 집은 일은 빠지고 "잡고 있는 것" 에 선다
     moai status --worktree            보드 머리에 "⎇ <워크트리들> 겹쳐 봄"
     moai show --worktree --json       옆에서 온 줄에만 "branch" 키
 
-같은 id 는 `updated_at` 이 가장 늦은 줄이 서고, 같으면 지금 브랜치의 줄이다.
+같은 id 는 계획에서의 자리를 늦게 바꾼 줄 — 칸을 옮기거나(`status_since`) 미루거나
+도로 집은(`planned_at`) 때가 늦은 줄 — 이 서고, 같으면 `updated_at` 이 늦은 줄, 그것도
+같으면 지금 브랜치의 줄이다 — 필드만 고친 것은 옆에서 집은 것을 풀지 않고, 옆에서 늦게
+미룬 것은 여기서 먼저 집은 칸에 가려지지 않는다.
 여기서 `rm` 한 줄은 옆 줄로 되살아나지 않는다 — 갈라진 자리(`git merge-base`)에
 있던 줄이면 여기서 지운 것으로 읽는다. 단 옆에서 그 뒤에 집거나 고친 줄은 선다.
+메모(`moai note`)는 스냅샷을 안 바꿔 고친 것으로 안 센다 — 옆에서 메모만 남긴 줄은 숨고,
+그 메모는 브랜치를 합칠 때 저널에서 드러난다.
 지금 브랜치가 아닌 줄은 제목 앞에 `⎇ <브랜치>` 가 붙는다. **보여줄 때만
 겹친다** — 어느 파일도 바뀌지 않고, 쓰기(`mv`·`edit`)는 언제나 지금 워크트리
 파일에만 간다. 옆 워크트리의 일을 옮기려면 그 워크트리에서 부른다.
@@ -409,6 +431,7 @@ mod tests {
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(skill.contains(piece), "스킬에 없다 — {head}");
         }
+        assert!(CLOSING.contains(&handoff("<id>")), "안내의 핸드오프 줄이 훅과 갈라졌다");
         let rules = rules();
         assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
         for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE, PROJECTS] {

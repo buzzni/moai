@@ -10,6 +10,7 @@ pub mod input;
 pub mod jotfile;
 pub mod keys;
 pub mod layer;
+pub mod menu;
 pub mod picker;
 pub mod register;
 pub mod scroll;
@@ -177,16 +178,23 @@ impl Pane {
 /// 묶음 id → 멤버에서 읽은 것(`report::group_stands`). 이슈를 빌리지 않게 소유한다.
 type States = std::collections::BTreeMap<String, Stood>;
 
-/// 묶음 하나를 읽은 것 — 서 있는 칸과, 그 밑에 집은 일이 있는가(`report::Stand::busy`).
+/// 묶음 하나를 읽은 것 — 서 있는 칸과, 그 밑에 집은 일이 있는가(`report::Stand::busy`),
+/// 미뤄 뺀 멤버 덕에 `done` 으로 섰으면 그 멤버(`report::Stand::aside`).
 struct Stood {
     column: String,
     busy: bool,
+    waiting: crate::report::Waiting,
+    aside: Vec<String>,
 }
 
 fn states_of(issues: &[Issue], cfg: &Config) -> States {
     crate::report::group_stands(issues, cfg)
         .into_iter()
-        .map(|(id, s)| (id.to_string(), Stood { column: s.column.to_string(), busy: s.busy }))
+        .map(|(id, s)| {
+            let aside = s.aside.iter().map(|m| m.to_string()).collect();
+            let stood = Stood { column: s.column.to_string(), busy: s.busy, waiting: s.waiting, aside };
+            (id.to_string(), stood)
+        })
         .collect()
 }
 
@@ -213,7 +221,7 @@ pub struct Fresh {
 }
 
 /// 버린 다시 읽기 손잡이를 이만큼까지 든다(`App::discarded`). 버리는 것은 사람의
-/// 손(F5·`w`·쓰기)이 읽기가 도는 동안 닿을 때뿐이고, 한 읽기는 1만 개에서도 수백 ms
+/// 손(SPC r·SPC t w·쓰기)이 읽기가 도는 동안 닿을 때뿐이고, 한 읽기는 1만 개에서도 수백 ms
 /// 라 보통은 하나도 안 쌓인다. 이것이 차는 것은 읽기가 멈춘 때뿐이다.
 const DISCARDED_KEPT: usize = 8;
 
@@ -286,7 +294,7 @@ pub struct App {
     /// 세려면 수만으로는 모자란다(moai-4dk4).
     pub unreadable: Vec<Option<String>>,
     /// 마지막 갱신이나 쓰기가 **실패한** 까닭 — 무엇을 못 했는지까지 단 쪽이 적는다.
-    /// 조용히 삼키면 F5 가 아무 일도 안 하는데 "바뀌었다" 배너는 붙어 있어, 사람은
+    /// 조용히 삼키면 SPC r 이 아무 일도 안 하는데 "바뀌었다" 배너는 붙어 있어, 사람은
     /// 누르고 또 누르며 까닭을 못 얻는다.
     pub trouble: Option<String>,
     /// `trouble` 이 **쓰기의 실패**인가. 그렇다면 다시 읽기가 성공해도 걷지 않는다 —
@@ -303,7 +311,7 @@ pub struct App {
     pub notice: Option<String>,
     /// 사용자 설정을 못 읽어 **층을 안 세운** 까닭. 층이 서면 층이 제 `problems` 를 대므로
     /// 층이 없을 때만 든다. 붙박이다 — 다시 읽기가 걷는 `trouble` 에 두면 700ms 뒤에
-    /// 사라져 사람은 층이 왜 없는지 끝내 모른다. F5 로 설정을 다시 읽어 층이 서면 걷힌다.
+    /// 사라져 사람은 층이 왜 없는지 끝내 모른다. SPC r 로 설정을 다시 읽어 층이 서면 걷힌다.
     pub unlayered: Option<String>,
     /// `--user` 로 **준 값 그대로**(`Ctx::user` 와 같다), 또는 누군지 묻는 칸에서
     /// 받은 것([`Mode::Ask`]). 쓸 때마다 `model::actor` 로 푼다 — 미리 풀어 두면
@@ -333,14 +341,14 @@ pub struct App {
     /// 탐색에서 접두어(`gg` 의 첫 `g`) 뒤를 기다리는 키 열. **`Mode` 가 아니다** — 탐색이 아닌
     /// 모드는 전부 글칸으로 가므로(`App::key`), 모드로 두면 기다리는 `g` 뒤의 `g` 가 글자로 샌다.
     chord: keys::Chord,
-    /// 버린 다시 읽기(F5·`w`·쓰기가 `pending` 을 버렸을 때)의 손잡이. 결과는 안 받지만
+    /// 버린 다시 읽기(SPC r·SPC t w·쓰기가 `pending` 을 버렸을 때)의 손잡이. 결과는 안 받지만
     /// **패닉은 받는다** — ratatui 의 패닉 훅은 어느 스레드에서 나든 터미널을 걷으므로,
     /// 손잡이를 같이 버리면 루프가 걷힌 화면에 모른 채 그린다. [`App::follow`] 가
     /// 걸음마다 끝난 것을 join 해 패닉이면 되던진다. [`DISCARDED_KEPT`] 개까지 든다.
     discarded: Vec<std::thread::JoinHandle<()>>,
     /// [`DISCARDED_KEPT`] 를 넘겨 **아직 도는 채로 놓은** 손잡이 수. 그 스레드가 터지면
     /// 터미널이 걷히는데 되던질 길이 없다 — 화면이 그것을 말한다(`draw::banner`).
-    /// **붙박이다.** `trouble` 은 다음에 성공한 다시 읽기가 걷는데, 놓는 때가 곧 F5·`w`·
+    /// **붙박이다.** `trouble` 은 다음에 성공한 다시 읽기가 걷는데, 놓는 때가 곧 SPC r·SPC t w·
     /// 쓰기가 새 읽기를 띄운 때라 몇백 ms 뒤에 사라진다. 놓은 스레드는 다시 볼 길이
     /// 없으므로 세션 내내 남긴다.
     let_go: usize,
@@ -364,6 +372,9 @@ pub struct App {
     /// 올리는 것은 `cmd::tui` 의 루프 하나뿐이고, 그래서 한 프레임 안의
     /// 목록·상세·롤업이 같은 걸음을 본다.
     pub spin: usize,
+    /// **지난 프레임이 도는 것을 화면에 그렸는가.** 루프는 이것으로 다음에 빠른 걸음으로
+    /// 깰지를 정한다(`cmd::tui::loop_until_quit`) — 쓰는 곳은 `draw::screen` 하나뿐이다.
+    pub spun: bool,
     /// 다른 워크트리를 겹쳐 보는가. `w` 가 켜고 끈다 — CLI 의 `--worktree` 와 같은
     /// 길(`worktree::gather`)로 읽는다. **켜진 채로 시작한다**(moai-zcuh): 탐색기는
     /// 사람이 둘러보는 자리라 옆 워크트리에서 집은 일이 안 보이면 보드가 거짓말을
@@ -506,6 +517,7 @@ impl App {
             list: Scroll::default(),
             quit: false,
             spin: 0,
+            spun: false,
             worktree: true,
             origin: crate::worktree::Origin::default(),
             elsewhere: Vec::new(),
@@ -523,14 +535,14 @@ impl App {
     }
 
     /// 다시 읽는다. **거름망과 있던 자리는 지키려 애쓴다** — 갱신 한 번에
-    /// 하던 일이 흩어지면 F5 를 안 누르게 되고, 그러면 낡은 화면을 본다.
+    /// 하던 일이 흩어지면 SPC r 을 안 누르게 되고, 그러면 낡은 화면을 본다.
     ///
-    /// **사람이 누른 갱신(F5·`w`)은 그 자리에서 읽는다.** 누른 사람은 결과를 기다리고
+    /// **사람이 누른 갱신(SPC r·SPC t w)은 그 자리에서 읽는다.** 누른 사람은 결과를 기다리고
     /// 있고, `w` 는 켠 뜻대로 읽힌 화면이 곧바로 서야 한다. 스레드에서 짓던 것이
     /// 있으면 버린다 — 누르기 **전에** 시작한 읽기라 늦게 도착하면 방금 읽은 것을
     /// 옛 것으로 덮는다(`w` 를 끄기 전 설정으로 읽은 것이면 더더욱).
     pub fn reload(&mut self) {
-        // 층에서 누른 F5 는 사용자 설정부터 다시 읽고 프로젝트를 다시 연다.
+        // 층에서 누른 SPC r 은 사용자 설정부터 다시 읽고 프로젝트를 다시 연다.
         if self.on_layer() {
             self.reread_layer();
             return;
@@ -737,20 +749,11 @@ impl App {
         self.take(f.issues, f.index, f.states, f.now);
     }
 
-    /// 돌 것이 한 줄이라도 있는가. **화면에 보이는지까지는 따지지 않는다** —
-    /// 보이는 줄만 가리려면 루프가 그림의 결과를 알아야 하고 그 값은 그린 뒤에야
-    /// 나온다. 틀리는 쪽은 "있는데 안 보인다" 하나뿐이고, 그때 손해는 안 보이는
-    /// 것을 위해 걸음을 재는 것이다. 반대쪽은 안 틀린다 — 화면에 도는 글리프가
-    /// 있으면 그 이슈는 `issues` 에 있으므로 여기가 참이다. 스피너를 그려 놓고
-    /// 아무도 안 깨우는 조합은 그래서 못 생긴다.
-    ///
-    /// **줄마다 묻는 자는 [`App::spins`] 하나다** — 그리는 쪽(`draw::glyph_of`)과 깨우는
-    /// 쪽이 따로 판단하면 한쪽만 고쳐져, 도는데 안 깨우거나 안 도는데 깨운다.
-    pub fn spinning(&self) -> bool {
-        (0..self.issues.len()).any(|at| self.spins(at))
-    }
-
     /// 그 줄이 도는가 — **지금 누가 손대고 있는 줄**이다.
+    ///
+    /// **줄마다 묻는 자는 이것 하나다** — 도는 글리프(`draw::glyph_of`)·칸별 건수·빛줄기가
+    /// 모두 이 답으로 그려지고, 루프는 따로 판단하지 않고 **그려진 화면**으로 깬다
+    /// (`App::spun`, moai-5jh6). 그래서 도는데 안 깨우거나 안 도는데 깨우는 조합이 없다.
     ///
     /// 일은 제 칸이 도는 칸이면 돈다. **묶음은 읽은 칸이 도는 칸이고, 그 밑에 집은 일이
     /// 실제로 있을 때만** 돈다(`report::Stand::busy`). 읽은 칸만 보면 멤버 하나가 끝나고
@@ -784,6 +787,17 @@ impl App {
             .then(|| self.states.get(&i.id).map(|s| s.column.as_str()))
             .flatten()
             .unwrap_or(i.status.as_str())
+    }
+
+    /// 그 줄이 묶음이면 막을 때 무엇을 기다리는가와 미뤄 뺀 멤버(`report::Stand::waiting`·
+    /// `aside`). 묶음이 아니면 제 칸대로다. 막음을 가를 때 [`App::column`] 과 함께
+    /// `report::blocker` 에 댄다.
+    pub fn waits(&self, at: usize) -> (crate::report::Waiting, &[String]) {
+        let i = &self.issues[at];
+        crate::report::is_group(i)
+            .then(|| self.states.get(&i.id))
+            .flatten()
+            .map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
     }
 
     /// 새 자료를 받아들이고 어긋난 것을 손본다. **시험이 저장소 없이 부른다** — 진짜
@@ -927,7 +941,7 @@ impl App {
 
     /// 파일이 우리가 읽은 뒤로 바뀌었으면 **저절로 다시 읽는다.**
     ///
-    /// 한때 말만 하고 F5 를 기다렸다(moai-6qdx) — 읽으면 커서가 튀었기 때문이다.
+    /// 한때 말만 하고 F5(지금의 SPC r)를 기다렸다(moai-6qdx) — 읽으면 커서가 튀었기 때문이다.
     /// 커서·기억 자리·굴린 자리가 줄의 정체를 따라가게 된 뒤로(moai-cera) 그 까닭이
     /// 없어졌고, 남은 것은 사람이 배너를 보고 키를 눌러야 하는 수고뿐이었다.
     ///
@@ -941,8 +955,8 @@ impl App {
     /// **겹쳐 보는 동안에는 옆 워크트리 스냅샷도 본다**(`watched`). 옆에서 `mv` 가
     /// 떨어진 것을 모르면 겹쳐 보기를 켠 뜻이 절반만 선다. 스냅샷이 아직 없던 옆
     /// 워크트리도 지켜보므로 거기서 `moai init` 하면 알아챈다. 새로 생긴 워크트리는
-    /// `git worktree list` 를 다시 불러야 알아서 여기서는 못 보고, F5 가 그 길이다 —
-    /// 걸음마다 git 을 띄우는 것은 700ms 마다 프로세스 하나를 만드는 일이다.
+    /// 공용 git 디렉터리의 `worktrees/` 표식으로 알아챈다(`worktree::heads`) — 걸음마다
+    /// git 을 띄우는 것은 700ms 마다 프로세스 하나를 만드는 일이라, 파일만 잰다.
     ///
     /// **읽기는 스레드에서 한다**([`Fresh`]). 짓는 동안은 표식을 다시 재지 않는다 —
     /// 하나가 끝나기 전에 또 띄우면 몰아 쓰는 동안 스레드가 쌓인다. 끝난 것을 들인
@@ -981,7 +995,7 @@ impl App {
             let repo = repo.clone();
             let worktree = self.worktree;
             let read = self.read;
-            // 받는 쪽이 사라졌으면(F5 로 버렸으면) 보내기가 실패한다 — 버린 것이라 그대로 둔다.
+            // 받는 쪽이 사라졌으면(SPC r 로 버렸으면) 보내기가 실패한다 — 버린 것이라 그대로 둔다.
             let handle = std::thread::spawn(move || {
                 let _ = tx.send(read(&repo, worktree));
             });
@@ -1092,14 +1106,17 @@ impl App {
             return;
         }
         // **키의 뜻은 표에서 읽는다**([`keys::BROWSE`]). 표에 없는 키 — Ctrl·Alt 붙은 글자키도
-        // — 는 여기 뜻이 없다: 안 거르면 Ctrl-A 가 등록 창을, Ctrl-D 가 "목록에서 뺄까" 를
-        // 띄운다. 접두어(`g`)는 다음 키를 기다리고, 뜻 없는 다음 키는 그 `g` 와 함께 버린다
-        // ([`keys::Chord::feed`]) — 표에 없는 키를 무시하는 것과 같은 자다.
-        let Some(act) = self.chord.feed(keys::BROWSE, k) else { return };
+        // — 는 여기 뜻이 없다. 접두어(`g`)는 다음 키를 기다리고, 뜻 없는 다음 키는 그 `g` 와 함께
+        // 버린다. SPC 는 메뉴를 열고, 열린 메뉴는 제 규칙(모르는 키 무시·Esc·Bksp)으로 받는다
+        // ([`menu::feed`]) — 메뉴로 누른 동작도 바로 누른 키와 같은 아래 `match` 를 지난다.
+        // 목록은 여기서 **한 번** 센다 — 커서의 사실(`Ctx::leaf`)과 이동의 끝(`step`)이 같은 줄을 읽는다.
+        let rows = self.rows();
+        let ctx = self.key_ctx(&rows);
+        let Some(act) = menu::feed(&mut self.chord, &ctx, k) else { return };
         // **되는지는 한 판정이 가른다**([`keys::Browse::enabled`]) — 키 바가 같은 판정으로
         // 적을 키를 고르므로 둘이 안 갈린다. 층에서 뜻이 없는 키는 왜 안 되는지를 한 줄로
         // 말한다. `n` 은 층에서도 듣는다 — 커서의 프로젝트를 담을 곳으로 박는다([`App::open_form`]).
-        match act.enabled(&self.key_ctx()) {
+        match act.enabled(&ctx) {
             Ok(()) => {}
             Err(keys::Off::Quiet) => return,
             Err(keys::Off::Why(say)) => {
@@ -1112,7 +1129,7 @@ impl App {
             B::Quit => self.quit = true,
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
-            B::Step(m) => self.step(m),
+            B::Step(m) => self.step(m, rows.len()),
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
             // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
@@ -1147,10 +1164,18 @@ impl App {
     }
 
     /// 키 표가 켜짐과 낱말을 가를 값. **여기서 잰다** — 표([`keys`])는 조각이라 `App` 을 모른다.
-    pub fn key_ctx(&self) -> keys::Ctx {
+    ///
+    /// **목록(`rows`)은 든 쪽이 센 것을 받는다.** 커서가 선 줄의 사실(잎인가)은 목록을 세야
+    /// 나오는데, 세는 데 이슈 전부를 훑고 정렬한다 — 그림은 프레임마다 이미 한 번 센 것을
+    /// 넘기고, 키 처리는 키 하나에 한 번 센다. 여기서 따로 세면 바·메뉴·뱃지가 각자 센다.
+    pub fn key_ctx(&self, rows: &[Row]) -> keys::Ctx {
         keys::Ctx {
             layer: self.on_layer(),
             list_focus: self.focus == Pane::Explorer,
+            // [`App::enter`] 가 무언가 하는 줄 — `..`(나가기)·디렉터리·층의 프로젝트.
+            leaf: !matches!(self.current_of(rows), Some(Row::Up | Row::Item(Entry::Dir { .. }) | Row::Project(_))),
+            // [`App::leave`] 가 무언가 하는 자리 — 디렉터리 안이거나, 층이 있는 프로젝트 뿌리.
+            root: self.path.is_empty() && (self.layer.is_none() || self.on_layer()),
             worktree: self.worktree,
             raw: self.raw,
             next_pane: draw::pane_name(self.focus.next()),
@@ -1168,10 +1193,10 @@ impl App {
     ///
     /// 상세의 끝(`End`)은 마지막으로 그린 줄 수로 잰다 — 줄 수는 폭에 달렸고 폭은
     /// 그려야 나온다. 루프는 키 하나마다 한 번 그리므로 그 수는 한 걸음 넘게 낡지 않는다.
-    fn step(&mut self, m: Move) {
+    fn step(&mut self, m: Move, rows: usize) {
         match self.focus {
             Pane::Explorer => {
-                let at = scroll::cursor(m, self.cursor, || self.rows().len());
+                let at = scroll::cursor(m, self.cursor, || rows);
                 self.move_to(at);
             }
             Pane::Detail => self.detail.go(m),
@@ -1254,7 +1279,7 @@ impl App {
         self.chord.clear();
         // 층에서는 `/`·`f` 가 안 열린다 — **키 처리와 같은 판정**([`keys::Browse::enabled`])으로
         // 열리는 칸만 대고, 키 이름은 표에서 읽는다.
-        let ctx = self.key_ctx();
+        let ctx = self.key_ctx(&self.rows());
         let open: Vec<String> = [keys::Browse::Grep, keys::Browse::Filter, keys::Browse::Jot]
             .into_iter()
             .filter(|a| a.enabled(&ctx).is_ok())
@@ -1581,34 +1606,47 @@ mod tests {
         App::new(issues, cfg(), Path::new())
     }
 
+    impl App {
+        /// 사람이 적는 키 이름의 열을 누른다 — `"SPC t w"`. 표의 이름과 같은 글로 시험을 적는다.
+        pub fn hit(&mut self, names: &str) {
+            for k in keys::parse_seq(names).unwrap_or_else(|| panic!("`{names}` 를 키로 못 푼다")) {
+                self.key(k);
+            }
+        }
+    }
+
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
-    /// 루프가 빠른 걸음으로 깰지를 이 답으로 정한다. **거짓을 내면 도는
-    /// 글리프가 첫 칸에 멈춘 채 7초에 한 번만 움직인다** — 스피너가 있는데
-    /// 아무도 깨우지 않는 그 조합이 눈에는 버그로 보이고 코드로는 안 보인다.
+    /// 도는 줄이 있는지 — 줄마다의 답([`App::spins`])을 모은 것. 루프가 깨는 것은 이것이
+    /// 아니라 **그려진 화면**이다(`App::spun`, draw 시험) — 여기는 줄의 자만 본다.
+    fn any_spins(a: &App) -> bool {
+        (0..a.issues.len()).any(|at| a.spins(at))
+    }
+
+    /// 돌 줄이 있는가를 적힌 칸·읽은 칸이 속이지 않는다.
     #[test]
-    fn the_loop_only_wakes_fast_when_something_spins() {
+    fn a_line_spins_only_while_someone_holds_it() {
         let mut a = app();
-        assert!(!a.spinning(), "todo 뿐인데 돈다고 한다");
+        assert!(!any_spins(&a), "todo 뿐인데 돈다고 한다");
         let mut issues = a.issues.clone();
         // 에픽의 적힌 칸으로는 안 돈다 — 묶음의 칸은 멤버에서 읽는다.
         issues[0].status = Status::new("in_progress");
         a.adopt(issues.clone());
-        assert!(!a.spinning(), "멤버가 안 움직인 에픽이 적힌 칸으로 돈다");
+        assert!(!any_spins(&a), "멤버가 안 움직인 에픽이 적힌 칸으로 돈다");
         // 읽은 칸으로도 안 돈다 — 멤버 하나가 끝나기만 해도 묶음은 `in_progress` 로
         // 읽히는데, 그것으로 깨우면 아무도 손대지 않은 저장소에서 화면이 계속 깬다.
         issues[2].status = Status::new("done");
         a.adopt(issues.clone());
-        assert!(!a.spinning(), "일은 멈췄는데 묶음의 읽은 칸으로 돈다");
+        assert!(!any_spins(&a), "일은 멈췄는데 묶음의 읽은 칸으로 돈다");
         issues[3].status = Status::new("in_progress");
         a.adopt(issues);
-        assert!(a.spinning(), "in_progress 가 있는데 안 돈다고 한다");
+        assert!(any_spins(&a), "in_progress 가 있는데 안 돈다고 한다");
     }
 
     /// 줄마다 도는지(`App::spins`) — **묶음은 그 밑에 집은 일이 있을 때만 돈다**
-    /// (moai-x5eg). 깨우는 쪽(`spinning`)은 이 답을 모은 것이어야 한다.
+    /// (moai-x5eg). 글리프·빛줄기가 이 답으로 그려지고, 루프는 그려진 것으로 깬다.
     #[test]
     fn a_group_spins_only_while_a_member_is_held() {
         fn spun(a: &App) -> Vec<&str> {
@@ -1626,13 +1664,13 @@ mod tests {
         // 끝난 것 하나와 첫 칸 하나 — 둘 다 `in_progress` 로 읽히지만 아무도 손대지 않는다.
         assert_eq!((a.column(0), a.column(1)), ("in_progress", "in_progress"));
         assert!(spun(&a).is_empty(), "반쯤 끝난 묶음이 돈다 — {:?}", spun(&a));
-        assert!(!a.spinning());
+        assert!(!any_spins(&a));
 
         // 하나를 집으면 그 일과 에픽, 그리고 **에픽을 거쳐 물려받은 마일스톤**까지 돈다.
         issues[3].status = Status::new("in_progress");
         a.adopt(issues.clone());
         assert_eq!(spun(&a), ["argos-0005", "argos-0001", "argos-0003"]);
-        assert!(a.spinning());
+        assert!(any_spins(&a));
 
         // **미룬 멤버는 묶음을 안 돌린다.** 칸 셈이 그 멤버를 빼므로(`report::counted`)
         // 곁들이도 뺀다 — 에픽은 끝난 멤버만 남아 `done` 으로 읽힌다. **미룬 일 제 줄도
@@ -1644,7 +1682,7 @@ mod tests {
         assert_eq!(a.column(1), "done");
         assert_eq!(a.column(3), "in_progress");
         assert!(spun(&a).is_empty(), "미룬 일이 돈다 — {:?}", spun(&a));
-        assert!(!a.spinning(), "미룬 일 하나가 탐색기를 빠른 걸음으로 깨운다");
+        assert!(!any_spins(&a), "미룬 일 하나가 탐색기를 빠른 걸음으로 깨운다");
 
         // **묶음을 미루면 그 밑이 다 멈춘다.** 칸 셈은 묶음 제 미룸으로 멤버를 안 빼
         // 에픽은 여전히 `in_progress` 로 읽히지만, 에픽도 멤버도 계획에서 빠졌다 — 멤버는
@@ -1666,8 +1704,6 @@ mod tests {
         a.adopt(issues);
         assert!(spun(&a).is_empty(), "미룬 부모 밑의 자식이 돈다 — {:?}", spun(&a));
 
-        // 깨우는 쪽은 줄마다의 답을 모은 것이다.
-        assert_eq!(a.spinning(), !spun(&a).is_empty());
     }
 
     /// 스레드에서 짓는 다시 읽기를 **끝날 때까지** 받는다. 루프가 하는 것을 흉내 낸다.
@@ -1896,13 +1932,13 @@ mod tests {
     #[test]
     fn tab_does_not_move_the_focus_while_typing() {
         for (opener, start) in [
-            (KeyCode::Char('/'), Pane::Explorer),
-            (KeyCode::Char('f'), Pane::Explorer),
-            (KeyCode::Char('/'), Pane::Detail),
+            ("/", Pane::Explorer),
+            ("SPC f", Pane::Explorer),
+            ("/", Pane::Detail),
         ] {
             let mut a = app();
             a.focus = start;
-            a.key(key(opener));
+            a.hit(opener);
             a.key(key(KeyCode::Char('a')));
             a.key(key(KeyCode::Tab));
             a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
@@ -2076,15 +2112,156 @@ mod tests {
 
     #[test]
     fn quitting_works_every_documented_way() {
-        for k in [
-            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-            key(KeyCode::Char('q')),
-            key(KeyCode::F(10)),
-        ] {
+        let mut a = app();
+        a.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(a.quit, "Ctrl-C 로 못 나갔다");
+        let mut a = app();
+        a.hit("SPC q");
+        assert!(a.quit, "SPC q 로 못 나갔다");
+        // 메뉴가 열린 채로도, 하위 층에서도 Ctrl-C 는 끝낸다.
+        for open in ["SPC", "SPC t"] {
             let mut a = app();
-            a.key(k);
-            assert!(a.quit, "{k:?} 로 못 나갔다");
+            a.hit(open);
+            a.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+            assert!(a.quit, "{open} 메뉴에서 Ctrl-C 로 못 나갔다");
         }
+    }
+
+    /// **`q`·F10 은 더는 끝내지 않는다**(키 지도 moai-hudg) — 실수로 누를 때마다 앱이 끝나던 것이
+    /// 옮긴 까닭이다. 목록·상세 포커스 모두, 층에서도.
+    #[test]
+    fn q_and_f10_no_longer_quit_in_browse_or_on_the_layer() {
+        let layered = || {
+            let mut a = app();
+            a.layer = Some(layer::fake(vec![("one", "/w/one", layer::Look::Shut { state: layer::Shut::Missing, said: String::new() })], layer::At::Layer));
+            a
+        };
+        for (mut a, place) in [(app(), "안"), (layered(), "층")] {
+            assert_eq!(a.on_layer(), place == "층");
+            for pane in Pane::ALL {
+                a.focus = pane;
+                for k in [key(KeyCode::Char('q')), key(KeyCode::F(10)), KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT)] {
+                    a.key(k);
+                    assert!(!a.quit, "{place} {pane:?} 에서 {k:?} 가 끝냈다");
+                    assert_eq!(a.mode, Mode::Browse);
+                }
+            }
+        }
+    }
+
+    /// **SPC 메뉴는 App 에서 같은 길을 지난다**(moai-7sjm) — 곧바로 열리고, 모르는 키는 알림 없이
+    /// 무시하고, Esc 가 닫고(거름망은 그대로), 메뉴로 누른 동작은 바로 누르던 키가 하던 그 일을 한다.
+    #[test]
+    fn the_spc_menu_opens_at_once_ignores_unknown_keys_and_runs_the_same_actions() {
+        let mut a = app();
+        a.hit("SPC");
+        assert!(menu::open(&a.chord), "SPC 가 메뉴를 곧바로 안 열었다");
+        let before = (a.cursor, a.focus, a.path.clone());
+        for k in [key(KeyCode::Char('x')), key(KeyCode::Char('j')), key(KeyCode::Enter), key(KeyCode::Tab), key(KeyCode::Char('G'))] {
+            a.key(k);
+            assert!(menu::open(&a.chord), "{k:?} 가 메뉴를 닫았다");
+            assert_eq!(a.notice, None, "{k:?} 가 알림을 달았다");
+            assert_eq!((a.cursor, a.focus, a.path.clone()), before, "{k:?} 가 메뉴 뒤의 목록을 움직였다");
+            assert_eq!(a.mode, Mode::Browse);
+        }
+
+        // Esc 는 메뉴를 닫는 것이 먼저다 — 걸어 둔 거름망은 안 푼다.
+        a.filter_text = Some("tag=x".into());
+        a.key(key(KeyCode::Esc));
+        assert!(!menu::open(&a.chord));
+        assert_eq!(a.filter_text.as_deref(), Some("tag=x"), "메뉴의 Esc 가 거름망까지 풀었다");
+        a.filter_text = None;
+
+        // Bksp 는 한 층 위 — 뒤의 목록을 나가지 않는다.
+        a.key(key(KeyCode::Enter));
+        let inside = a.path.clone();
+        a.hit("SPC t");
+        a.key(key(KeyCode::Backspace));
+        assert_eq!(menu::title(a.chord.held()), "SPC");
+        a.key(key(KeyCode::Backspace));
+        assert!(!menu::open(&a.chord));
+        assert_eq!(a.path, inside, "메뉴의 Bksp 가 목록을 나갔다");
+
+        // 같은 동작 — 거름망 칸, 검색 칸, 폼, 원문, 워크트리, 끝내기.
+        let mut a = app();
+        a.hit("SPC f");
+        assert!(matches!(a.mode, Mode::Filter(_)), "{:?}", a.mode);
+        let mut a = app();
+        a.hit("SPC /");
+        assert!(matches!(a.mode, Mode::Grep(_)), "{:?}", a.mode);
+        let mut a = app();
+        a.hit("SPC n");
+        assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
+        let mut a = app();
+        a.hit("SPC t r");
+        assert!(a.raw && !menu::open(&a.chord));
+        let was = a.worktree;
+        a.hit("SPC t w");
+        assert_eq!(a.worktree, !was);
+    }
+
+    /// **바로 누르던 키는 더는 뜻이 없다**(moai-7sjm) — `f`·`n`·`w`·`a`·`d`·`r`·`m`·Delete·F키. 목록·
+    /// 상세 포커스 모두, 모드도 토글도 알림도 그대로다.
+    #[test]
+    fn the_old_direct_keys_no_longer_act() {
+        let codes = [
+            KeyCode::Char('f'),
+            KeyCode::Char('n'),
+            KeyCode::Char('w'),
+            KeyCode::Char('a'),
+            KeyCode::Char('d'),
+            KeyCode::Char('r'),
+            KeyCode::Char('m'),
+            KeyCode::Char('q'),
+            KeyCode::Delete,
+            KeyCode::F(2),
+            KeyCode::F(3),
+            KeyCode::F(5),
+            KeyCode::F(7),
+            KeyCode::F(10),
+        ];
+        for pane in Pane::ALL {
+            let mut a = app();
+            a.focus = pane;
+            for code in codes {
+                let (raw, worktree) = (a.raw, a.worktree);
+                a.key(key(code));
+                assert_eq!(a.mode, Mode::Browse, "{pane:?} {code:?} 가 칸을 열었다");
+                assert_eq!((a.raw, a.worktree, a.quit), (raw, worktree, false), "{pane:?} {code:?} 가 토글·끝내기를 했다");
+                assert_eq!(a.notice, None, "{pane:?} {code:?}");
+                assert!(!menu::open(&a.chord));
+            }
+        }
+    }
+
+    /// **글칸에서 SPC 는 글자다** — 검색·거름망·폼. 메뉴는 안 열리고 뒤의 `q` 도 글자다.
+    #[test]
+    fn spc_is_text_in_text_fields() {
+        for opener in ["/", "SPC f"] {
+            let mut a = app();
+            a.hit(opener);
+            a.hit("SPC");
+            a.key(key(KeyCode::Char('q')));
+            assert!(!menu::open(&a.chord) && !a.quit, "{opener}: 글칸의 SPC 가 메뉴를 열었다");
+            assert!(matches!(&a.mode, Mode::Grep(q) | Mode::Filter(q) if q.text() == " q"), "{:?}", a.mode);
+        }
+        let mut a = app();
+        a.hit("SPC n");
+        a.hit("SPC");
+        a.key(key(KeyCode::Char('q')));
+        assert!(!menu::open(&a.chord) && !a.quit);
+        assert!(matches!(&a.mode, Mode::Idea(f) if f.title.text() == " q"), "{:?}", a.mode);
+    }
+
+    /// **메뉴가 열린 채 붙여 넣으면 메뉴가 닫힌다** — 붙인 뒤의 `q` 가 옛 SPC 와 이어 끝내지 않게.
+    #[test]
+    fn a_paste_closes_an_open_menu() {
+        let mut a = app();
+        a.hit("SPC t");
+        a.paste("q");
+        assert!(!menu::open(&a.chord), "붙여넣기가 메뉴를 안 닫았다");
+        a.key(key(KeyCode::Char('q')));
+        assert!(!a.quit, "붙인 뒤의 q 가 옛 SPC 와 이어 끝냈다");
     }
 
     /// 뿌리는 `/`, 들어가면 **제목**으로 적는다 — id 를 적으면 사람이 그걸
@@ -2126,14 +2303,14 @@ mod tests {
     #[test]
     fn f_takes_the_same_grammar_as_the_cli() {
         let mut a = app();
-        a.key(key(KeyCode::Char('f')));
+        a.hit("SPC f");
         typed(&mut a, "type=epic");
         assert_eq!(a.filter_text.as_deref(), Some("type=epic"));
         assert_eq!(shown(&a), ["argos-0001", "argos-0002"]);
 
         // 잘못 적으면 걸리지 않고 그 자리에 남는다 — 지우고 다시 치게 하지 않는다
         let mut a = app();
-        a.key(key(KeyCode::Char('f')));
+        a.hit("SPC f");
         typed(&mut a, "statu=todo");
         assert!(matches!(a.mode, Mode::Filter(_)), "잘못 적었는데 넘어갔다");
         assert!(a.input_error().is_some());
@@ -2148,14 +2325,14 @@ mod tests {
         let mut issues = vec![make("argos-0001", Kind::Epic), make("argos-0009", Kind::Issue)];
         issues[1].title = "원자적 쓰기를 고친다".into();
         let mut a = App::new(issues, cfg(), Path::new());
-        a.key(key(KeyCode::Char('f')));
+        a.hit("SPC f");
         typed(&mut a, "grep=원자적 쓰기");
         assert!(a.input_error().is_none(), "{:?}", a.input_error());
         assert_eq!(shown(&a), ["argos-0009"]);
 
         // 여러 조건은 여전히 띄어쓰기로 잇는다
         let mut a = app();
-        a.key(key(KeyCode::Char('f')));
+        a.hit("SPC f");
         typed(&mut a, "type=epic status=todo");
         assert_eq!(shown(&a), ["argos-0001", "argos-0002"]);
     }
@@ -2166,7 +2343,7 @@ mod tests {
     #[test]
     fn an_unknown_column_is_refused_not_silently_empty() {
         let mut a = app();
-        a.key(key(KeyCode::Char('f')));
+        a.hit("SPC f");
         typed(&mut a, "status=in-progress");
         assert!(matches!(a.mode, Mode::Filter(_)), "오타인데 걸렸다");
         assert!(a.input_error().is_some_and(|e| e.contains("칸")), "{:?}", a.input_error());
@@ -2177,9 +2354,9 @@ mod tests {
     /// 한다 — 글자로 먹으면 검색칸에 `c` 가 찍히고 나갈 길이 하나로 줄어든다.
     #[test]
     fn ctrl_c_quits_even_while_typing() {
-        for opener in [KeyCode::Char('/'), KeyCode::Char('f')] {
+        for opener in ["/", "SPC f"] {
             let mut a = app();
-            a.key(key(opener));
+            a.hit(opener);
             a.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
             assert!(a.quit, "{opener:?} 중에 Ctrl-C 를 글자로 먹었다");
             assert!(matches!(&a.mode, Mode::Grep(b) | Mode::Filter(b) if b.text().is_empty()));
@@ -2227,7 +2404,7 @@ mod tests {
         ];
         let mut a = App::new(issues, cfg(), Path::new());
         assert_eq!(a.column(0), "in_progress", "에픽이 제 손으로 걸린다 — 시험이 자손 길을 안 지난다");
-        a.key(key(KeyCode::Char('f')));
+        a.hit("SPC f");
         typed(&mut a, "status=todo");
         assert_eq!(shown(&a), ["argos-0001"], "안 걸린 에픽이 걸린 멤버를 데리고 사라졌다");
     }
@@ -2295,12 +2472,12 @@ mod tests {
         assert_eq!(a.mode, Mode::Grep(Input::new("qu it")), "줄바꿈이 Enter 로 걸렸다");
         a.key(key(KeyCode::Esc));
 
-        a.key(key(KeyCode::Char('f')));
+        a.hit("SPC f");
         a.paste("status=todo");
         assert_eq!(a.mode, Mode::Filter(Input::new("status=todo")));
         a.key(key(KeyCode::Esc));
 
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         a.paste("제목\t이어\n본문");
         let Mode::Idea(form) = &a.mode else { panic!("폼이 닫혔다 — {:?}", a.mode) };
         assert_eq!((form.title.text(), form.field), ("제목 이어 본문", super::form::Field::Title));
@@ -2345,11 +2522,11 @@ mod tests {
     }
 
     /// 갱신해도 걸어 둔 거름망은 살아 있다. 갱신 한 번에 하던 일이 흩어지면
-    /// F5 를 안 누르게 되고, 그러면 낡은 화면을 본다.
+    /// SPC r 을 안 누르게 되고, 그러면 낡은 화면을 본다.
     #[test]
     fn reloading_keeps_the_filter() {
         let mut a = app();
-        a.key(key(KeyCode::Char('f')));
+        a.hit("SPC f");
         typed(&mut a, "type=epic");
         assert_eq!(shown(&a).len(), 2);
 
@@ -2483,7 +2660,7 @@ mod tests {
         assert_ne!(a.now, "읽기 전", "옆 스냅샷이 바뀐 것을 못 알아챘다");
     }
 
-    /// **사람이 누른 갱신이 스레드의 늦은 결과에 덮이지 않는다.** F5 를 누르기 전에
+    /// **사람이 누른 갱신이 스레드의 늦은 결과에 덮이지 않는다.** SPC r 을 누르기 전에
     /// 띄운 읽기는 누른 뒤의 파일보다 옛것일 수 있다.
     #[test]
     fn a_manual_reload_drops_the_read_in_flight() {
@@ -2499,8 +2676,8 @@ mod tests {
         std::fs::write(dir.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&make("argos-0001", Kind::Epic)).unwrap())).unwrap();
         a.follow();
         assert!(a.loading());
-        a.key(key(KeyCode::F(5)));
-        assert!(!a.loading(), "F5 가 짓던 것을 안 버렸다");
+        a.hit("SPC r");
+        assert!(!a.loading(), "SPC r 이 짓던 것을 안 버렸다");
         assert_eq!(a.issues.len(), 1);
     }
 
@@ -2544,7 +2721,7 @@ mod tests {
         panic!("버린 읽기가 터졌다")
     }
 
-    /// **F5 가 버린 읽기가 패닉하면 다음 걸음이 되던진다.** 패닉 훅은 이미 터미널을
+    /// **SPC r 이 버린 읽기가 패닉하면 다음 걸음이 되던진다.** 패닉 훅은 이미 터미널을
     /// 걷었다 — 손잡이를 같이 버리면 루프는 걷힌 화면에 모른 채 그린다(1b63abe 가
     /// 받은 스레드에만 막은 구멍).
     #[test]
@@ -2556,10 +2733,10 @@ mod tests {
         assert!(a.loading());
         // 사람이 누른 갱신은 진짜 길로 읽는다 — 터지는 것은 버린 스레드뿐이다.
         a.read = prepare;
-        a.key(key(KeyCode::F(5)));
-        assert!(!a.loading(), "F5 가 짓던 것을 안 버렸다");
+        a.hit("SPC r");
+        assert!(!a.loading(), "SPC r 이 짓던 것을 안 버렸다");
         assert!(a.reaping(), "버린 손잡이를 안 들었다 — 루프가 빠른 걸음으로 안 깬다");
-        assert_eq!(a.issues.len(), 2, "F5 가 제 자리에서 안 읽었다");
+        assert_eq!(a.issues.len(), 2, "SPC r 이 제 자리에서 안 읽었다");
 
         discarded_settle(&a);
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.follow()));
@@ -2568,14 +2745,14 @@ mod tests {
     }
 
     /// **버린 읽기가 제대로 끝나면 join 만 하고 결과는 안 들인다.** 다시 읽으러 가지도
-    /// 않는다 — F5 가 표식을 이미 올렸다.
+    /// 않는다 — SPC r 이 표식을 이미 올렸다.
     #[test]
     fn a_discarded_read_that_finishes_is_joined_and_ignored() {
         let (scratch, mut a) = writable("discard-ok");
         touch_outside(&scratch);
         a.follow();
         assert!(a.loading());
-        a.key(key(KeyCode::F(5)));
+        a.hit("SPC r");
         assert!(a.reaping());
         let stamp = a.stamp;
 
@@ -2608,11 +2785,11 @@ mod tests {
         touch_outside(&scratch);
         a.follow();
         assert!(a.loading());
-        a.key(key(KeyCode::F(5)));
+        a.hit("SPC r");
         assert_eq!(a.discarded.len(), DISCARDED_KEPT, "든 손잡이가 상한을 넘었다");
         // **도는 것을 놓았으면 화면이 말한다**(moai-j9on) — 그 스레드가 터지면 터미널이
         // 걷히는데 되던질 손잡이가 없다. 다시 읽기가 걷는 `trouble` 이 아니라 붙박이다:
-        // F5 가 짓는 읽기가 끝나는 순간 걷히면 몇백 ms 뒤에 사라진다.
+        // SPC r 이 짓는 읽기가 끝나는 순간 걷히면 몇백 ms 뒤에 사라진다.
         assert_eq!(a.let_go, 1);
         let said = super::draw::tests_banner(&mut a);
         assert!(said.contains("다시 읽기 1개를 놓았다"), "도는 스레드를 말없이 놓았다 — {said:?}");
@@ -2652,7 +2829,7 @@ mod tests {
         let (ptx, prx) = std::sync::mpsc::channel();
         a.pending = Some((prx, std::thread::spawn(move || drop(ptx))));
 
-        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.key(key(KeyCode::F(5)))));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.hit("SPC r")));
         drop(tx);
         let payload = caught.expect_err("꽉 찼을 때 끝난 패닉을 거두지 않고 놓았다");
         assert_eq!(payload.downcast_ref::<&str>(), Some(&"가장 오래된 것이 터졌다"));
@@ -2768,7 +2945,7 @@ mod tests {
     #[test]
     fn a_filter_hiding_the_new_line_is_said_not_silent() {
         let (_scratch, mut a) = writable("land-hidden");
-        a.key(key(KeyCode::Char('f')));
+        a.hit("SPC f");
         typed(&mut a, "type=epic");
         let (path, cursor) = (a.path.clone(), a.cursor);
 
@@ -2909,7 +3086,7 @@ mod tests {
 
     /// `n` 으로 폼을 열어 제목을 적는다.
     fn jotting(a: &mut App, title: &str) {
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         type_in(a, title);
     }
 
@@ -2924,16 +3101,16 @@ mod tests {
                 a.key(key(KeyCode::Enter));
             }
             a.focus = focus;
-            a.key(key(KeyCode::Char('n')));
+            a.hit("SPC n");
             assert_eq!(a.mode, Mode::Idea(Form::default()), "{inside} {focus:?}");
             a.key(key(KeyCode::Tab));
             assert_eq!(a.focus, focus, "폼의 Tab 이 탐색기 포커스를 옮겼다");
             a.key(key(KeyCode::Esc));
             assert_eq!((&a.mode, a.focus), (&Mode::Browse, focus));
         }
-        for opener in [KeyCode::Char('/'), KeyCode::Char('f')] {
+        for opener in ["/", "SPC f"] {
             let mut a = app();
-            a.key(key(opener));
+            a.hit(opener);
             a.key(key(KeyCode::Char('n')));
             assert!(matches!(&a.mode, Mode::Grep(q) | Mode::Filter(q) if q.text() == "n"), "{:?}", a.mode);
         }
@@ -2975,9 +3152,11 @@ mod tests {
         assert_eq!((on(&a), a.path.len()), (Some(idea.id.clone()), 0), "만든 줄에 안 섰다");
         assert_eq!(a.notice, Some(format!("✓ 담김 · {}", idea.id)));
 
-        // F2 도 담는다. 제목만으로 된다.
+        // 제목만으로도 담긴다. F2 는 걷었다(moai-7sjm) — 눌러도 폼은 그대로다.
         jotting(&mut a, "하나 더");
         a.key(key(KeyCode::F(2)));
+        assert!(matches!(a.mode, Mode::Idea(_)), "걷은 F2 가 담았다");
+        a.key(ctrl('s'));
         assert_eq!(a.mode, Mode::Browse);
         let made = ideas_in(&repo);
         assert!(made.iter().any(|i| i.title == "하나 더" && i.body.is_none()), "{made:?}");
@@ -3026,7 +3205,7 @@ mod tests {
     #[test]
     fn esc_closes_a_blank_form_at_once_and_asks_before_dropping_what_was_typed() {
         let mut a = app();
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         a.key(key(KeyCode::Esc));
         assert_eq!(a.mode, Mode::Browse, "빈 폼인데 물었다");
 
@@ -3059,7 +3238,7 @@ mod tests {
 
         // 고치고 다시 누르면 담기고 까닭이 걷힌다
         std::fs::remove_dir(&lock).unwrap();
-        a.key(key(KeyCode::F(2)));
+        a.key(ctrl('s'));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
         assert!(a.trouble.is_none());
         assert_eq!(ideas_in(a.repo.as_ref().unwrap()).len(), 1);
@@ -3076,7 +3255,7 @@ mod tests {
 
         // 읽기의 실패는 폼과 상관없다 — 닫아도 남는다
         a.trouble = Some("다시 읽지 못했다 — 시험".into());
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         a.key(key(KeyCode::Esc));
         assert_eq!(a.trouble.as_deref(), Some("다시 읽지 못했다 — 시험"));
     }
@@ -3147,7 +3326,7 @@ mod tests {
         jotting(&mut a, "적던 것");
         let form = a.mode.clone();
 
-        a.key(key(KeyCode::F(2)));
+        a.key(ctrl('s'));
         assert!(matches!(a.mode, Mode::Ask(_)), "{:?}", a.mode);
         type_in(&mut a, "레이븐 (raven@example.com)");
         a.key(key(KeyCode::Esc));
@@ -3167,9 +3346,11 @@ mod tests {
         let (_scratch, mut a) = writable("ask-read");
         a.user = None;
         a.identify = refuse;
-        for k in [KeyCode::Down, KeyCode::Enter, KeyCode::Backspace, KeyCode::F(5), KeyCode::Tab, KeyCode::Char('m')] {
+        for k in [KeyCode::Down, KeyCode::Enter, KeyCode::Backspace, KeyCode::Tab] {
             a.key(key(k));
         }
+        a.hit("SPC r");
+        a.hit("SPC t r");
         a.key(key(KeyCode::Char('/')));
         type_in(&mut a, "제목");
         a.key(key(KeyCode::Enter));
@@ -3180,7 +3361,7 @@ mod tests {
     /// 편집기가 있는 판에서 `n` 을 눌러 루프에 맡긴 요청을 꺼낸다 — 루프가 하는 것을 흉내 낸다.
     fn ask_editor(a: &mut App) -> Edit {
         a.editor = Some("vi".into());
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         assert_eq!(a.mode, Mode::Browse, "편집기가 있는데 안 폼을 열었다");
         a.edit.take().expect("편집기를 청하지 않았다")
     }
@@ -3196,7 +3377,7 @@ mod tests {
         assert!(edit.text.contains(&scratch.0.display().to_string()), "{}", edit.text);
 
         let (_s, mut b) = writable("editor-none");
-        b.key(key(KeyCode::Char('n')));
+        b.hit("SPC n");
         assert_eq!(b.edit, None, "편집기가 없는데 청했다");
         assert!(matches!(&b.mode, Mode::Idea(f) if f.into.is_some()), "{:?}", b.mode);
     }

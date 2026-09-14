@@ -18,7 +18,7 @@ struct Moved {
     already: Vec<String>,
     missing: Vec<String>,
     /// 옮긴 것 중 계획에서 빠진 것 — (그 줄, 실제로 미룬 줄).
-    shelved: Vec<(String, String)>,
+    shelved: Vec<(String, Vec<String>)>,
     /// 옮기려 한 묶음 → 멤버에서 읽은 칸. 적힌 칸은 어디서도 안 읽힌다.
     read: super::Read,
     /// 그 가운데 **끝난 멤버가 있는** 묶음 — 남은 멤버를 미뤄 접히는 것.
@@ -78,11 +78,13 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         // 일을 훅이 "집은 것 없음" 으로 막는 까닭이 아무 데도 없다.
         // 옮긴 것이 없으면 재지 않는다 — 락을 쥔 채 저장소 전체를 걷는 자리다.
         if !m.done.is_empty() {
-            let roots = crate::report::deferred_roots(issues);
+            let roots = crate::report::deferred_sources(issues);
             m.shelved = m
                 .done
                 .iter()
-                .filter_map(|(i, _)| roots.get(i.id.as_str()).map(|r| (i.id.clone(), r.to_string())))
+                .filter_map(|(i, _)| {
+                    roots.get(i.id.as_str()).map(|r| (i.id.clone(), r.iter().map(|s| s.to_string()).collect()))
+                })
                 .collect();
         }
         // **묶음을 옮기려 했으면 서 있는 칸을 잰다.** 막지 않는다 — 쓰기는 한다.

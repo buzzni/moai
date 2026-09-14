@@ -76,8 +76,16 @@ pub fn deferred_for(i: &Issue, root: Option<&str>, now: &str) -> Option<String> 
 /// 물려받은 줄에 `--undo` 를 치면 "이미 그렇다" 로 끝나고 아무것도 안 풀린다.
 /// 제가 미룬 줄이면 그 줄이 곧 미룬 곳이라 말이 하나로 되고, 부르는 쪽이 둘을
 /// 가르는 `if` 를 둘 까닭이 없다.
-pub fn shelved_by(root: &str) -> String {
-    format!("{root} 를 미뤄 둬서 보드와 ready 에서는 빠져 있다 — `moai defer {root} --undo`")
+///
+/// `roots` 는 풀어야 할 미룸 전부다(`report::deferred_sources`, 가까운 것부터). **다 댄다** —
+/// 하나만 대면 그것을 풀고도 여전히 빠진 채 그제야 다음을 댄다(moai-phzi).
+pub fn shelved_by<S: AsRef<str>>(roots: &[S]) -> String {
+    let roots: Vec<&str> = roots.iter().map(AsRef::as_ref).collect();
+    format!(
+        "{} 를 미뤄 둬서 보드와 ready 에서는 빠져 있다 — `moai defer {} --undo`",
+        roots.join(" · "),
+        roots.join(" ")
+    )
 }
 
 /// 칠한 글과 **칠하지 않은 폭**을 받아 채운다 — [`cell`] 이 한 가지 색만 칠할 수
@@ -606,6 +614,8 @@ fn says(w: &Warning) -> String {
         "dangling_milestone" => format!("마일스톤으로 쓸 수 없는 것을 가리키는 줄 {n}건"),
         "orphan_child" => format!("부모 줄이 없는 자식 {n}건"),
         "dangling_blocked_by" => format!("없는 이슈에게 막혀 있다는 것 {n}건"),
+        // 도구는 제 시계로만 적으므로 이런 시각은 손으로 고친 줄이나 틀린 시계다(moai-ugjp).
+        "future_timestamp" => format!("지금보다 하루 넘게 뒤인 시각을 든 줄 {n}건 — 손으로 고친 시각이나 틀린 시계"),
         // **알림이지 경고가 아니다.** 고칠 것이 있다는 말이 아니라, 담아 둔
         // 것을 한 번 펼쳐 볼 때가 됐다는 말이다.
         // **오늘 것에 "0일" 을 붙이지 않는다.** 나이를 말하는 까닭은 오래된
@@ -641,18 +651,10 @@ pub fn status(
     now: &str,
     at: &str,
     origin: &Origin,
+    trouble: usize,
 ) -> Vec<String> {
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    // **겹쳐 본 화면은 머리에서 그렇다고 말한다.** 줄마다 붙는 `⎇` 는 옆에서 온
-    // 줄에만 서므로, 옆 워크트리가 조용하면 겹쳐 본 보드와 제 보드가 똑같이 보인다.
-    let trees = origin.labels();
-    let overlaid = match trees.is_empty() {
-        true => String::new(),
-        false => format!(
-            "   {}",
-            paint(style::BRANCH, &format!("{} {} 겹쳐 봄", style::BRANCH_GLYPH, clip(&trees.join(", "), TITLE_CAP)))
-        ),
-    };
+    let overlaid = overlaid(origin);
     let mut out = vec![
         format!(
             "{}  {}       {}{overlaid}",
@@ -731,7 +733,14 @@ pub fn status(
     // 있으므로 `warnings` 가 비면 고칠 것이 없다 — 생각을 담거나 무언가를 미룬
     // 순간부터 이 줄이 사라지면, 세션을 닫기 전에 "경고가 늘지 않았는지" 보는
     // 사람이 알림을 경고로 읽는다.
-    if st.warnings.is_empty() {
+    //
+    // **옆 워크트리의 문제는 화면에서만 문제로 센다**(moai-cuw2). `report` 에는 넣지 않는다 —
+    // 그쪽은 이 프로젝트의 `&[Issue]` 만 받고, 옆 파일은 이 데이터가 아니다. 그래도 보드가
+    // "✓ 문제 없다" 를 말하면 한 줄씩 알린 stderr 와 제 말을 뒤집는다. 종료 코드는 안 바꾼다.
+    if trouble > 0 {
+        out.push(String::new());
+        out.push(format!("{} 옆 워크트리 문제 {trouble}건 — 한 줄씩은 stderr 에 냈다", paint(style::WARN, "!")));
+    } else if st.warnings.is_empty() {
         out.push(String::new());
         out.push(format!("{} 드러난 문제 없다", paint(style::status_style("done"), "✓")));
     }
@@ -784,7 +793,7 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, origin: &Orig
     const SHOW: usize = 3;
     let mut out = Vec::new();
     // 벌여 놓은 것과 깨진 것은 id 만 한 줄에 늘어놓는다 — 제목이 정보를 안 준다.
-    if matches!(w.kind, "wip_overload" | "duplicate_id" | "orphan_child" | "dangling_blocked_by") {
+    if matches!(w.kind, "wip_overload" | "duplicate_id" | "orphan_child" | "dangling_blocked_by" | "future_timestamp") {
         if !w.ids.is_empty() {
             out.push(format!("    {}", paint(style::DIM, &w.ids.join("   "))));
         }
@@ -814,7 +823,13 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, origin: &Orig
             out.push(format!("    {}", paint(style::ID, id)));
             continue;
         };
-        let age = crate::model::days_since(&i.status_since, now)
+        // **판정한 나이를 댄다**(`Warning::ages`, moai-7azq). 여기서 새로 재면 `blocked_stale`
+        // 처럼 칸 나이로 안 거는 경고에서 판정과 표시가 갈라진다. 안 실린 경고만 칸 나이다.
+        let age = w
+            .ages
+            .get(id)
+            .copied()
+            .or_else(|| crate::model::days_since(&i.status_since, now))
             .map(|d| format!("{d}일"))
             .unwrap_or_default();
         out.push(format!(
@@ -917,7 +932,8 @@ pub fn ready(
 
     // **미뤄 둔 것에 막힌 일은 까닭과 함께 댄다.** 막는 줄은 보드에도 `ready`
     // 에도 없으므로, 여기서 안 대면 목록이 왜 비었는지 아무 데서도 안 나온다.
-    if !held.is_empty() {
+    let shelved: Vec<&crate::report::Held> = held.iter().filter(|h| !h.by.is_empty()).collect();
+    if !shelved.is_empty() {
         out.push(String::new());
         out.push(format!(
             "{} {}",
@@ -926,11 +942,11 @@ pub fn ready(
                 style::DIM,
                 &format!(
                     "미뤄 둔 것에 막혀 못 집는 일 {}건 — 미룬 곳을 도로 집거나 막음을 푼다",
-                    held.len()
+                    shelved.len()
                 )
             )
         ));
-        for h in held {
+        for h in shelved {
             // **도로 집는 말은 미룬 곳을 댄다.** 막는 줄이 미룬 에픽 밑이면 그
             // 줄에 `--undo` 를 쳐 봐야 "이미 그렇다" 로 끝난다.
             out.push(format!(
@@ -939,6 +955,33 @@ pub fn ready(
                 marked(origin.branch(&h.issue.id), &h.issue.title, TITLE_CAP, style::DIM).0,
                 paint(style::DIM, &format!("← {}", h.by.join(" · "))),
                 paint(style::DIM, &format!("moai defer {} --undo", h.undo.join(" "))),
+            ));
+        }
+    }
+
+    // **멤버가 없는 묶음에 막힌 일도 댄다**(moai-1c2l). 그 묶음은 영영 안 풀리는데 끝난
+    // 것도 미룬 것도 아니라, 여기서 안 대면 목록이 까닭 없이 빈다. 도로 집을 것이 없으니
+    // 막음을 푸는 말을 댄다 — 채우면 보통 막음이 된다.
+    let bare: Vec<&crate::report::Held> = held.iter().filter(|h| !h.empty.is_empty()).collect();
+    if !bare.is_empty() {
+        out.push(String::new());
+        out.push(format!(
+            "{} {}",
+            paint(style::WARN, "!"),
+            paint(
+                style::DIM,
+                &format!("멤버가 없는 묶음에 막혀 못 집는 일 {}건 — 멤버를 채우거나 막음을 푼다", bare.len())
+            )
+        ));
+        for h in bare {
+            let unblock: Vec<String> =
+                h.empty.iter().map(|g| format!("moai link {g} --unblocks {}", h.issue.id)).collect();
+            out.push(format!(
+                "  {}  {}  {}  {}",
+                paint(style::ID, &h.issue.id),
+                marked(origin.branch(&h.issue.id), &h.issue.title, TITLE_CAP, style::DIM).0,
+                paint(style::DIM, &format!("← {} 멤버 없음", h.empty.join(" · "))),
+                paint(style::DIM, &unblock.join("  ")),
             ));
         }
     }
@@ -955,6 +998,8 @@ pub struct Seen<'a> {
     pub states: BTreeMap<&'a str, &'a str>,
     /// 다른 워크트리에서 온 줄 (`worktree::overlay`). `--worktree` 가 아니면 비었다.
     pub origin: Option<&'a Origin>,
+    /// 펼친 줄의 막음을 하나씩 가른 것 (`report::blocks_of`). 막음이 없으면 비었다.
+    pub blocks: Vec<crate::report::Block<'a>>,
 }
 
 /// **손으로 옮긴 칸이 서 있는 칸과 다르면** 그렇다고 말하는 낱말. CLI 상세와
@@ -985,6 +1030,31 @@ pub fn group_moved(id: &str, col: &str, closing: bool, finished: bool) -> String
         }
     };
     format!("묶음의 칸은 멤버에서 읽는다. 서 있는 칸은 {col}{fold}")
+}
+
+/// 상세의 막음 한 줄. **탐색기 상세(`tui::draw`)와 같은 낱말이다** — 막힘·풀림·끊김, 미룬
+/// 막음은 "막힘" 에 미룬 까닭을 제목 앞에 둔다(값이 오른쪽부터 잘려도 남는다). 색은 글리프와
+/// 낱말에 함께 붙어 혼자 뜻을 지지 않는다.
+fn block_line(b: &crate::report::Block, branch: Option<&str>, now: &str) -> String {
+    use crate::report::Blocker;
+    let title = b.issue.map(|x| marked(branch, &x.title, TITLE_CAP, style::PLAIN).0).unwrap_or_default();
+    let (label, mark, glyph, what) = match b.blocker {
+        Blocker::Missing => ("끊김", style::ERROR, "!", "없는 이슈라 막지 않는다".to_string()),
+        Blocker::Done => ("풀림", style::status_style("done"), "✓", title),
+        Blocker::Open => ("막힘", style::WARN, "·", title),
+        // 미뤄 뺀 멤버만 기다리는 묶음 — 묶음은 미룬 적이 없으니 그 멤버를 댄다. 첫 멤버와 남은 수만.
+        Blocker::Deferred if !b.aside.is_empty() && b.root.is_none() => {
+            let more = if b.aside.len() > 1 { format!(" 외 {}", b.aside.len() - 1) } else { String::new() };
+            ("막힘", style::WARN, "·", format!("{}  {title}", paint(style::WARN, &format!("미룬 멤버 {}{more}", b.aside[0]))))
+        }
+        // 멤버가 없는 묶음 — 기다릴 일이 없어도 막는다(moai-1c2l).
+        Blocker::Empty => ("막힘", style::WARN, "·", format!("{}  {title}", paint(style::WARN, "멤버 없음"))),
+        Blocker::Deferred => {
+            let shelf = b.issue.and_then(|x| deferred_for(x, b.root, now)).unwrap_or_else(|| "미룸".into());
+            ("막힘", style::WARN, "·", format!("{}  {title}", paint(style::WARN, &shelf)))
+        }
+    };
+    format!("  {}   {} {}  {what}", paint(mark, label), paint(mark, glyph), paint(style::ID, b.id))
 }
 
 /// 단건 상세. **이력은 부르는 쪽이 [`history`] 로 붙인다** — 묶음을 펼치면 멤버를
@@ -1044,6 +1114,12 @@ pub fn detail(
     if let Some(e) = &i.epic {
         let title = epic.map(|e| e.title.as_str()).unwrap_or("(없는 에픽)");
         out.push(format!("  에픽   {}  {title}", paint(style::ID, e)));
+    }
+    // **막음도 상세에서 말한다**(moai-rvcb). id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안
+    // 나오나" 에 답하는 자리인데, 막힘·미룬 막음·끊긴 막음이 탐색기에만 있었다. 막는가는
+    // `report::blocks_of` 가 `ready` 의 자로 가르고, 여기는 받은 답을 낱말로만 옮긴다.
+    for b in &seen.blocks {
+        out.push(block_line(b, branch_of(b.id), now));
     }
     for c in children {
         // **자식 줄도 제 종류와 미룸을 말한다.** 이 목록은 걸러지지 않으므로
@@ -1207,6 +1283,10 @@ pub struct Board<'a> {
     pub status: StatusReport,
     /// 집은 것 (`report::wip`).
     pub picked: Vec<&'a Issue>,
+    /// `--worktree` 로 겹쳤으면 줄마다의 출처 (`Project::origin`).
+    pub origin: &'a Origin,
+    /// 옆 워크트리를 겹치다 만난 것 (`Project::trouble`).
+    pub trouble: &'a [String],
 }
 
 /// 한눈 보기에서 연 프로젝트 하나의 집을 것 — `moai ready` 가 `.moai` 밖에서 낸다.
@@ -1214,6 +1294,30 @@ pub struct Picks<'a> {
     pub picks: Vec<&'a Issue>,
     /// 못 읽는 줄의 수. 그 줄에 있던 일은 목록에서 빠져 있다.
     pub unreadable: usize,
+    pub origin: &'a Origin,
+    pub trouble: &'a [String],
+}
+
+/// 겹쳐 본 화면의 머리 꼬리 — `   ⎇ <워크트리들> 겹쳐 봄`. 안 겹쳤으면 빈 글.
+///
+/// **겹쳐 본 화면은 머리에서 그렇다고 말한다.** 줄마다 붙는 `⎇` 는 옆에서 온
+/// 줄에만 서므로, 옆 워크트리가 조용하면 겹쳐 본 보드와 제 보드가 똑같이 보인다.
+fn overlaid(origin: &Origin) -> String {
+    let trees = origin.labels();
+    match trees.is_empty() {
+        true => String::new(),
+        false => format!(
+            "   {}",
+            paint(style::BRANCH, &format!("{} {} 겹쳐 봄", style::BRANCH_GLYPH, clip(&trees.join(", "), TITLE_CAP)))
+        ),
+    }
+}
+
+/// 옆 워크트리를 겹치다 만난 것을 한 줄씩. **막지 않는다** — `!` 로 말만 한다.
+fn troubles(out: &mut Vec<String>, trouble: &[String]) {
+    for t in trouble {
+        out.push(format!("  {} {}", paint(style::WARN, "!"), one_line(t)));
+    }
 }
 
 /// 한 프로젝트에서 집은 것을 몇 줄까지 보이나. 한눈 보기는 프로젝트가 여럿이라 짧게 끊는다.
@@ -1237,11 +1341,12 @@ pub fn projects_status(
     let w_name = projects.iter().map(|p| width(&one_line(&p.name))).max().unwrap_or(0);
     for (p, s) in projects.iter().zip(seen) {
         out.push(String::new());
-        out.push(project_head(p, ""));
         let crate::projects::Seen::Ok(b) = s else {
+            out.push(project_head(p, ""));
             out.push(unopened(p, s));
             continue;
         };
+        out.push(project_head(p, overlaid(b.origin).trim_start()));
         out.push(board(b.cfg, &b.status.counts));
         let shown = &b.picked[..b.picked.len().min(PICKED_SHOWN)];
         // **id 도 제목도 남의 스냅샷에서 온다** — 읽기는 관대해 `\n` 말고는 아무것도 안 막으므로,
@@ -1257,21 +1362,30 @@ pub fn projects_status(
                 cell(hue, &one_line(&p.name), w_name + 2),
                 cell(hue, id, w_id + 2),
                 paint(style::status_style(i.status.as_str()), style::glyph(i.status.as_str())),
-                clip(&one_line(&i.title), TITLE_CAP),
+                marked(b.origin.branch(&i.id), &one_line(&i.title), TITLE_CAP, style::PLAIN).0,
             ));
         }
         let rest = b.picked.len().saturating_sub(PICKED_SHOWN);
         if rest > 0 {
             out.push(format!("  {}", paint(style::DIM, &format!("집은 것 {rest}건 더"))));
         }
+        troubles(&mut out, b.trouble);
         // **알림은 세지 않는다** — `moai status` 의 "드러난 문제 없다" 와 같은 자다.
         let n = b.status.warnings.len();
         let fatal = b.status.warnings.iter().filter(|w| w.fatal).count();
         let go = paint(style::DIM, &format!("→ `moai -C {} status`", shell_arg(&p.path)));
+        // 옆 워크트리의 문제는 화면에서만 센다 — 위에 `!` 줄로 섰는데 밑에서 "문제 없다" 면
+        // 덩어리가 제 말을 뒤집는다(moai-cuw2, `status` 와 같은 자).
+        let t = b.trouble.len();
+        let beside = match t {
+            0 => String::new(),
+            _ => format!(" · 옆 워크트리 문제 {t}건"),
+        };
         out.push(match (n, fatal) {
-            (0, _) => format!("  {} 드러난 문제 없다", paint(style::status_style("done"), "✓")),
-            (_, 0) => format!("  {} 경고 {n}건  {go}", paint(style::WARN, "!")),
-            (_, f) => format!("  {} 경고 {n}건 (데이터가 깨졌다 {f}건)  {go}", paint(style::ERROR, "!")),
+            (0, _) if t == 0 => format!("  {} 드러난 문제 없다", paint(style::status_style("done"), "✓")),
+            (0, _) => format!("  {} 옆 워크트리 문제 {t}건 — 위 줄", paint(style::WARN, "!")),
+            (_, 0) => format!("  {} 경고 {n}건{beside}  {go}", paint(style::WARN, "!")),
+            (_, f) => format!("  {} 경고 {n}건 (데이터가 깨졌다 {f}건){beside}  {go}", paint(style::ERROR, "!")),
         });
     }
     problems(&mut out, reg);
@@ -1307,7 +1421,7 @@ pub fn projects_ready(
             out.push(unopened(p, s));
             continue;
         };
-        out.push(project_head(p, &format!("{}건", k.picks.len())));
+        out.push(project_head(p, &format!("{}건{}", k.picks.len(), overlaid(k.origin))));
         let shown = &k.picks[..k.picks.len().min(READY_SHOWN)];
         // 남의 스냅샷에서 온 글자다 — 걸러서 찍고 걸러서 잰다(`projects_status` 와 같은 까닭).
         let ids: Vec<String> = shown.iter().map(|i| one_line(&i.id)).collect();
@@ -1319,7 +1433,7 @@ pub fn projects_ready(
                 cell(hue, &one_line(&p.name), w_name + 2),
                 cell(hue, id, w_id + 2),
                 cell(style::priority_style(i.priority()), &format!("p{}", i.priority()), 4),
-                clip(&one_line(&i.title), TITLE_CAP),
+                marked(k.origin.branch(&i.id), &one_line(&i.title), TITLE_CAP, style::PLAIN).0,
             ));
         }
         let rest = k.picks.len() - shown.len();
@@ -1327,6 +1441,8 @@ pub fn projects_ready(
             let go = format!("{rest}건 더 → `moai -C {} ready`", shell_arg(&p.path));
             out.push(format!("  {}", paint(style::DIM, &go)));
         }
+        // 목록 꼬리("N건 더") 뒤에 둔다 — 앞에 두면 그 꼬리가 문제 줄의 연속으로 읽힌다(`projects_status` 와 같은 차례).
+        troubles(&mut out, k.trouble);
         if k.unreadable > 0 {
             out.push(format!(
                 "  {} 읽을 수 없는 줄 {}개 — 어느 줄인지는 `moai -C {} show` 가 낸다",
@@ -1387,9 +1503,11 @@ fn problems(out: &mut Vec<String>, reg: &crate::user_config::Registry) {
     }
 }
 
-/// 명령 안내에 넣을 경로 — 제어문자를 걷고 셸이 가를 글자가 있으면 감싼다.
+/// 명령 안내에 넣을 경로 — 붙여 넣으면 그 디렉터리로 풀리게 감싼다. `one_line` 을
+/// 지나지 않는다: 화면용 접기가 탭·줄바꿈을 빈칸으로 바꾸면 없는 디렉터리를 가리킨다.
+/// 한 줄 자리를 지키는 것은 `shell_word` 의 `$'…'` 다.
 fn shell_arg(p: &std::path::Path) -> String {
-    crate::text::shell_word(&one_line(&p.display().to_string()))
+    crate::text::shell_word(&p.display().to_string())
 }
 
 #[cfg(test)]
@@ -1407,6 +1525,45 @@ mod tests {
 
     fn issue(id: &str, title: &str, status: &str) -> Issue {
         Issue::new(id.into(), title.into(), Kind::Issue, Status::new(status), "2026-09-11T04:12:03Z")
+    }
+
+    /// **경고 목록은 판정한 나이를 댄다**(moai-7azq). 칸에 30일 선 줄이 막음이 5일 전 다시
+    /// 선 것으로 `blocked_stale` 에 걸리면 "5일" 이다 — 여기서 칸 나이를 새로 재면 "3일 넘게
+    /// 막힘" 밑에 "30일" 이 선다.
+    #[test]
+    fn a_warning_row_shows_the_age_it_was_judged_by() {
+        let now = "2026-10-11T00:00:00Z";
+        let mut blocker = issue("argos-0001", "막는 일", "todo");
+        blocker.status_since = "2026-10-06T00:00:00Z".into(); // 5일 전 done 에서 되돌아 나왔다
+        let mut stuck = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
+        stuck.blocked_by = vec!["argos-0001".into()];
+        let issues = vec![blocker, stuck];
+        let st = crate::report::status(&issues, &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "blocked_stale").expect("막힘 경고가 없다");
+        let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
+        let out = plain(&preview(w, &by_id, now, &Origin::default()));
+        let row = out.iter().find(|l| l.contains("argos-0002")).expect("막힌 줄이 목록에 없다");
+        assert!(row.contains(" 5일"), "판정한 나이를 안 댔다 — {row}");
+        assert!(!row.contains("30일"), "칸 나이를 댔다 — {row}");
+    }
+
+    /// 미룬 것에 막힌 줄은 **막는 줄을 미룬 지 며칠**로 선다(moai-hcx3) — 칸 나이 "30일" 이
+    /// 아니다.
+    #[test]
+    fn a_row_held_by_a_deferral_shows_how_long_ago_it_was_deferred() {
+        let now = "2026-10-11T00:00:00Z";
+        let mut shelved = issue("argos-0001", "미룬 일", "todo");
+        shelved.deferred_at = Some("2026-09-29T00:00:00Z".into()); // 12일 전
+        let mut held = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
+        held.blocked_by = vec!["argos-0001".into()];
+        let issues = vec![shelved, held];
+        let st = crate::report::status(&issues, &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("미룬 것에 막힘 경고가 없다");
+        let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
+        let out = plain(&preview(w, &by_id, now, &Origin::default()));
+        let row = out.iter().find(|l| l.contains("argos-0002")).expect("막힌 줄이 목록에 없다");
+        assert!(row.contains("12일"), "미룬 지 며칠을 안 댔다 — {row}");
+        assert!(!row.contains("30일"), "칸 나이를 댔다 — {row}");
     }
 
     fn plain(lines: &[String]) -> Vec<String> {
@@ -1788,7 +1945,7 @@ mod tests {
         let table = |all: &[Issue]| {
             let cfg = cfg();
             let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z");
-            plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", &Origin::default())).join("\n")
+            plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", &Origin::default(), 0)).join("\n")
         };
         let mut epic = issue("argos-0001", "다 끝난 에픽", "todo");
         epic.kind = Kind::Epic;

@@ -19,7 +19,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let Some(repo) = Repo::find()? else {
         return overview(ctx, worktree);
     };
-    let crate::worktree::Gathered { load, origin, .. } = super::gather(&repo, worktree)?;
+    let crate::worktree::Gathered { load, origin, trouble, unfound, .. } = super::gather(&repo, worktree)?;
+    // stderr 에 한 줄씩 낸 것의 수 — 보드가 "문제 없다" 로 그 말을 뒤집지 않게 넘긴다(moai-cuw2).
+    let trouble = trouble.len() + usize::from(unfound.is_some());
     // **그 줄이 쓰는 id** 까지 넘긴다 — id 가 있어야 산 줄과의 중복이
     // 드러난다(moai-4dk4).
     // 옆에서만 온 줄과 겹친 id 는 중복이 아니다 (`Origin::unreadable`).
@@ -50,6 +52,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         &now,
         ".moai/issues.jsonl",
         &origin,
+        trouble,
     ))
 }
 
@@ -59,16 +62,25 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
 /// 데이터로 비영 종료하는 것은 제 파일이라서다. 여기서 보는 것은 남의 저장소일 수
 /// 있고, 그것 하나로 한눈 보기 전체가 실패로 읽히면 나머지를 못 믿는다.
 fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
-    let (reg, projects) = super::registered("status", worktree)?;
+    let (reg, projects) = super::registered(worktree)?;
     let now = model::now();
     let seen: Vec<Seen<view::Board>> = projects
         .iter()
         .map(|p| {
             p.seen(|repo, load| {
+                // 옆에서만 온 줄과 겹친 id 는 중복이 아니다 (`Origin::unreadable`, `run` 과 같다).
+                let unreadable: Vec<report::Unreadable> = p
+                    .origin
+                    .unreadable(load.errors.iter().map(|e| e.id.as_deref()))
+                    .into_iter()
+                    .map(|id| report::Unreadable { id })
+                    .collect();
                 view::Board {
                     cfg: &repo.config,
-                    status: report::status(&load.issues, &load.unreadable(), &repo.config, &now),
+                    status: report::status(&load.issues, &unreadable, &repo.config, &now),
                     picked: report::wip(&load.issues, &repo.config),
+                    origin: &p.origin,
+                    trouble: &p.trouble,
                 }
             })
         })
@@ -79,6 +91,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         struct Said<'a> {
             status: &'a report::StatusReport,
             picked: Vec<super::Row<'a>>,
+            #[serde(skip_serializing_if = "<[String]>::is_empty")]
+            trouble: &'a [String],
         }
         let entries = projects
             .iter()
@@ -88,7 +102,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 path: &p.path,
                 seen: s.map(|b| Said {
                     status: &b.status,
-                    picked: b.picked.iter().map(|i| super::Row::of(i, None)).collect(),
+                    picked: b.picked.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
+                    trouble: &p.trouble,
                 }),
             })
             .collect();

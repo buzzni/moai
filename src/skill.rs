@@ -325,7 +325,7 @@ mod tests {
             let should_deny = DENIED_WHILE_HELD.iter().any(|d| cmd.starts_with(d));
             // 훅이 실제로 부르는 그 차례로 본다 — 손으로 다시 짠 차례는 규칙이
             // 하나 늘 때 여기서 빠진다.
-            let got = guard_shell(&held, &cfg, root, root, &cmd);
+            let got = guard_shell(&held, &cfg, &Default::default(), root, root, &cmd);
             match (&got, should_deny) {
                 (Decision::Pass, false) => {}
                 (Decision::Deny(_), true) => {}
@@ -344,7 +344,7 @@ mod tests {
         let idle = vec![epic_row()];
         for cmd in taught() {
             assert_eq!(
-                guard_shell(&idle, &cfg, root, root, &cmd),
+                guard_shell(&idle, &cfg, &Default::default(), root, root, &cmd),
                 Decision::Pass,
                 "가르치는 명령이 아무것도 안 집은 채로 막힌다 — {cmd}"
             );
@@ -372,7 +372,7 @@ mod tests {
         let all = vec![epic_row(), held_row(), review];
 
         assert_eq!(
-            guard_review(&all, &cfg),
+            guard_review(&all, &cfg, &Default::default()),
             Decision::Pass,
             "가르친 대로 세운 리뷰가 규칙 3 에 막힌다 — {made}"
         );
@@ -640,14 +640,26 @@ mod tests {
     fn the_checked_in_plugin_matches_the_guide() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(DIR);
         let read = |p: &str| std::fs::read_to_string(dir.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+        let bless = blessing(std::env::var("MOAI_BLESS").ok().as_deref());
+        // **깨진 파일도 bless 로 되살린다.** 두 값은 JSON 을 읽어야 나오는데, 병합
+        // 충돌 표시 한 줄로 그 읽기가 실패하면 다시 쓰기에 닿기 전에 멈춰 도구
+        // 밖(`git checkout`)만 남는다. 그래서 bless 일 때만 글자로 찾는다. **아래
+        // 비교는 틀린 값을 못 잡는다** — bless 는 찾은 값으로 먼저 쓰고 견주므로
+        // 제 자신과 같다. 그래서 이름은 맨 윗단 들여쓰기(두 칸)에 매어 찾는다 —
+        // 안 매면 맨 윗단 `name` 이 빠진 글에서 `owner.name` 의 `moai` 를 집는다.
         let manifest = read(".claude-plugin/plugin.json");
-        let exe = hook_exe(&manifest).expect("커밋된 plugin.json 에서 훅의 실행 파일을 못 읽는다");
-        let market: serde_json::Value =
-            serde_json::from_str(&read(".claude-plugin/marketplace.json")).expect("marketplace.json 이 깨졌다");
-        let name = market["name"].as_str().expect("marketplace.json 에 name 이 없다");
+        let exe = hook_exe(&manifest)
+            .or_else(|| loose(&manifest, "command -v -- \\\"").filter(|_| bless))
+            .expect("커밋된 plugin.json 에서 훅의 실행 파일을 못 읽는다 — 깨졌으면 MOAI_BLESS=1 로 다시 쓴다");
+        let market = read(".claude-plugin/marketplace.json");
+        let name = serde_json::from_str::<serde_json::Value>(&market)
+            .ok()
+            .and_then(|v| Some(v.get("name")?.as_str()?.to_string()))
+            .or_else(|| loose(&market, TOP_NAME).filter(|_| bless))
+            .expect("marketplace.json 에서 name 을 못 읽는다 — 깨졌으면 MOAI_BLESS=1 로 다시 쓴다");
 
-        let want = tree_named(name, &exe, &crate::guide::skill(), &crate::guide::reference());
-        if std::env::var_os("MOAI_BLESS").is_some() {
+        let want = tree_named(&name, &exe, &crate::guide::skill(), &crate::guide::reference());
+        if bless {
             for (path, body) in &want {
                 std::fs::write(dir.join(path), body).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             }
@@ -662,5 +674,54 @@ mod tests {
             "{DIR} 이 guide.rs 의 글에서 낡았다: {stale:?}\n  \
              MOAI_BLESS=1 cargo test --release checked_in 으로 다시 쓴다"
         );
+    }
+
+    /// `MOAI_BLESS` 를 켰다고 읽는가. 있기만 하면 참으로 읽으면 끄려고 적은
+    /// `MOAI_BLESS=0` 이 커밋된 트리를 조용히 다시 쓴다.
+    fn blessing(value: Option<&str>) -> bool {
+        matches!(value.map(|v| v.trim().to_ascii_lowercase()).as_deref(), Some("1" | "true" | "yes"))
+    }
+
+    /// `marketplace.json` 맨 윗단의 `name`. `pretty` 가 두 칸으로 들여 쓰고
+    /// `owner`·`plugins` 의 `name` 은 더 깊다.
+    const TOP_NAME: &str = "\n  \"name\": \"";
+
+    /// JSON 으로 못 읽는 글에서 `before` 바로 뒤의 값을 찾는다. 값은 따옴표나
+    /// 역슬래시에서 끝난다 — 훅의 실행 파일은 `quotable` 이라 둘 다 못 품는다.
+    fn loose(text: &str, before: &str) -> Option<String> {
+        let rest = &text[text.find(before)? + before.len()..];
+        Some(rest[..rest.find(['"', '\\'])?].to_string()).filter(|v| !v.is_empty())
+    }
+
+    #[test]
+    fn bless_reads_the_value_not_the_presence() {
+        for on in ["1", "true", "YES", " 1 "] {
+            assert!(blessing(Some(on)), "{on:?} 를 켜짐으로 못 읽는다");
+        }
+        for off in ["0", "", "false", "no"] {
+            assert!(!blessing(Some(off)), "{off:?} 를 켜짐으로 읽는다");
+        }
+        assert!(!blessing(None));
+    }
+
+    /// 병합 충돌 표시가 끼어 JSON 이 깨져도 bless 가 쓸 두 값은 글자로 나온다.
+    #[test]
+    fn a_conflicted_tree_still_yields_its_exe_and_name() {
+        let exe = "/repo/target/release/moai";
+        let files = tree("t", Path::new("/repo"), exe, "# 스킬", "참고");
+        let body = |end: &str| {
+            let (_, b) = files.iter().find(|(p, _)| p.ends_with(end)).unwrap();
+            format!("<<<<<<< HEAD\n{b}=======\n")
+        };
+        let manifest = body("plugin.json");
+        assert_eq!(hook_exe(&manifest), None, "시험이 깨진 매니페스트를 만들지 못했다");
+        assert_eq!(loose(&manifest, "command -v -- \\\"").as_deref(), Some(exe));
+        let name = market("t", Path::new("/repo"));
+        assert_eq!(loose(&body("marketplace.json"), TOP_NAME).as_deref(), Some(name.as_str()));
+        assert_eq!(loose("{}", TOP_NAME), None);
+        // 맨 윗단 name 이 빠지면 owner·plugins 의 `moai` 를 집지 않는다.
+        let headless = body("marketplace.json").replace(&format!("\n  \"name\": \"{name}\","), "");
+        assert_ne!(headless, body("marketplace.json"), "시험이 name 을 못 뺐다");
+        assert_eq!(loose(&headless, TOP_NAME), None);
     }
 }

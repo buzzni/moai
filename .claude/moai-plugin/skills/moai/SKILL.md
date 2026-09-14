@@ -14,14 +14,15 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
     moai show -s todo -t bug               필터 (쉼표 = 또는, 반복 = 그리고)
     moai show --tree                       에픽 → 이슈 → 자식
     moai ready --worktree                  옆 워크트리에서 집은 것까지 겹쳐 본다
-    moai tui                               탐색기로 돌아다닌다. n 으로 생각을 담는다
+    moai tui                               탐색기로 돌아다닌다. SPC n 으로 생각을 담는다
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
     moai note <id> "발견한 것"             다음 사람이 읽을 메모
     moai defer <id> -m "왜"                지금 안 할 일을 계획에서 뺀다
 
-모든 명령에 `--json` 이 붙는다. 담당은 만든 사람이 저절로 맡는다.
+모든 명령에 `--json` 이 붙는다. `ready --json` 은 `{"ready":[…],"held":[…]}` —
+`held` 는 미뤄 둔 것·빈 묶음에 막혀 못 집는 일과 도로 집을 곳이다. 담당은 만든 사람이 저절로 맡는다.
 
 ## 갈림길 셋
 
@@ -80,5 +81,10 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 `moai status` 를 한 번 더 돌려 경고가 늘지 않았는지 본다. 경고는 막지 않는다 —
 에픽 없는 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것을 비출 뿐이다. 쌓인 idea 와
 미뤄 둔 것은 경고가 아니라 알림(`notices`)으로 따로 선다.
+
+집은 채 닫으면 다음 세션이 이어받을 한 줄을 그 이슈에 남긴다. 다음 세션은
+`moai show <id>` 의 이력에서 그것을 읽는다.
+
+    moai note <id> "다음: <이어서 할 것>"
 
 전체 명령과 `--from` 문법은 `references/commands.md` 에 있다.

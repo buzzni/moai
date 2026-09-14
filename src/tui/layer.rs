@@ -40,7 +40,7 @@ pub struct Layer {
     pub places: Vec<Place>,
     /// 사용자 설정을 읽다 만난 것. 층에 선 동안 배너가 비춘다.
     pub problems: Vec<String>,
-    /// 읽은 사용자 설정 파일. F5 가 여기를 다시 읽는다 — **시험은 제 임시 파일을 준다.**
+    /// 읽은 사용자 설정 파일. SPC r 이 여기를 다시 읽는다 — **시험은 제 임시 파일을 준다.**
     /// 환경을 다시 보면 돌리는 사람의 설정을 읽는다.
     pub config: Option<PathBuf>,
     /// `.moai` 안에서 띄웠으면 그 뿌리. 등록돼 있지 않아도 층에 선다.
@@ -148,7 +148,14 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
         State::Missing => Shut::Missing,
         State::Unreadable(_) | State::Open { .. } => Shut::Unreadable,
     };
-    let p = projects::Project { path: path.to_path_buf(), name: name.to_string(), hue: None, state };
+    let p = projects::Project {
+        path: path.to_path_buf(),
+        name: name.to_string(),
+        hue: None,
+        state,
+        origin: Default::default(),
+        trouble: Vec::new(),
+    };
     let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()))).trim().to_string();
     Look::Shut { state: kind, said }
 }
@@ -487,7 +494,7 @@ impl App {
         self.cursor = self.layer.as_ref().and_then(|l| l.position(&from)).unwrap_or(0);
     }
 
-    /// 층의 낡은 줄을 **그 자리에서** 읽는다 — 사람의 손(올라가기·F5)이 부른다. 도는 읽기는
+    /// 층의 낡은 줄을 **그 자리에서** 읽는다 — 사람의 손(올라가기·SPC r)이 부른다. 도는 읽기는
     /// 버린다: 누르기 전에 띄운 것이라 늦게 닿으면 방금 읽은 것을 옛 것으로 덮는다.
     fn refresh_layer(&mut self) {
         let now = crate::model::now();
@@ -503,7 +510,7 @@ impl App {
         }
     }
 
-    /// 층에서 누른 F5 — 사용자 설정부터 다시 읽고 전부 다시 연다. 커서는 보던 프로젝트에 선다.
+    /// 층에서 누른 SPC r — 사용자 설정부터 다시 읽고 전부 다시 연다. 커서는 보던 프로젝트에 선다.
     pub(super) fn reread_layer(&mut self) {
         let held = self.current().and_then(|r| match r {
             Row::Project(at) => self.place_path(at).map(Path::to_path_buf),
@@ -519,7 +526,7 @@ impl App {
         let rows = self.rows().len();
         let found = held.as_ref().and_then(|h| self.layer.as_ref().and_then(|l| l.position(h)));
         self.cursor = found.unwrap_or(self.cursor.min(rows.saturating_sub(1)));
-        // **보던 줄에 그대로 섰으면 되감지 않는다** — 상세를 굴려 놓고 F5 를 누르면 굴린
+        // **보던 줄에 그대로 섰으면 되감지 않는다** — 상세를 굴려 놓고 SPC r 을 누르면 굴린
         // 자리를 잃는다. 정체로 가른다([`App::relayer`] 와 같은 자): 층이 다시 서며 차례가
         // 바뀌어도 같은 프로젝트면 그대로다.
         if found.is_none() || self.place_path(self.cursor) != held.as_deref() {
@@ -529,10 +536,10 @@ impl App {
 
     /// **등록 목록을 이 탐색기가 바꾼 뒤**(층의 `a`·`d`, moai-plvy) 층을 다시 세운다.
     ///
-    /// F5([`App::reread_layer`])와 가르는 것 셋:
+    /// SPC r([`App::reread_layer`])와 가르는 것 셋:
     /// - **선 자리를 둔다.** 프로젝트 안에서 `a` 로 등록해도 층으로 끌어올리지 않는다
     /// - **이미 본 프로젝트는 다시 안 읽는다.** 경로가 같은 줄의 셈과 표식을 옮겨 들고, 새로
-    ///   선 줄만 읽는다(층에 섰을 때, 그 자리에서). F5 는 사람이 "전부 다시" 를 누른 것이지만
+    ///   선 줄만 읽는다(층에 섰을 때, 그 자리에서). SPC r 은 사람이 "전부 다시" 를 누른 것이지만
     ///   이것은 한 줄을 더하거나 뺀 것이라, 등록 수만큼 저장소를 다시 읽을 까닭이 없다
     /// - **층이 없었으면 세운다.** `.moai` 안에서 띄웠고 등록이 0 이었던 경우다. 띄운 자리가
     ///   `At::Project` 로 서므로 지금 프로젝트는 그대로이고, 뿌리에 `..` 이 새로 서도 커서는
@@ -835,7 +842,7 @@ mod tests {
         // one 의 argos-0002 에 서고 거름망을 건다 — two 에서 argos-0002 는 다른 자리의 다른 줄이다.
         a.key(key(KeyCode::End));
         assert_eq!(a.current(), Some(Row::Item(crate::nav::Entry::Leaf { at: 1 })));
-        a.key(key(KeyCode::Char('f')));
+        a.hit("SPC f");
         for c in "status=in_progress".chars() {
             a.key(key(KeyCode::Char(c)));
         }
@@ -876,7 +883,7 @@ mod tests {
 
         a.key(key(KeyCode::Enter));
         assert!(a.worktree, "프로젝트에 들어갔는데 겹쳐 보기가 꺼져 있다");
-        a.key(key(KeyCode::Char('w')));
+        a.hit("SPC t w");
         assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
 
         a.key(key(KeyCode::Home));
@@ -1070,12 +1077,19 @@ mod tests {
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
         a.user = Some("레이븐 (raven@example.com)".into());
 
-        for (c, word) in [('f', "거름망"), ('/', "거름망"), ('w', "워크트리")] {
-            a.key(key(KeyCode::Char(c)));
-            assert_eq!(a.mode, Mode::Browse, "{c} 가 층에서 칸을 열었다");
-            assert!(a.notice.as_deref().is_some_and(|n| n.contains(word)), "{c}: {:?}", a.notice);
+        // 바로 누르는 `/` 는 까닭을 댄다.
+        a.key(key(KeyCode::Char('/')));
+        assert_eq!(a.mode, Mode::Browse, "/ 가 층에서 칸을 열었다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("거름망")), "{:?}", a.notice);
+        // 메뉴의 거름망·워크트리는 층의 메뉴에 안 선다 — 눌러도 모르는 키라 메뉴만 떠 있다(moai-7sjm).
+        for path in ["SPC f", "SPC t w"] {
+            a.hit(path);
+            assert_eq!(a.mode, Mode::Browse, "{path} 가 층에서 칸을 열었다");
+            assert!(super::super::menu::open(&a.chord), "{path}: 안 선 키가 메뉴를 닫았다");
+            a.key(key(KeyCode::Esc));
+            assert!(!super::super::menu::open(&a.chord));
         }
-        assert!(a.worktree, "층에서 w 가 겹쳐 보기를 건드렸다");
+        assert!(a.worktree, "층에서 SPC t w 가 겹쳐 보기를 건드렸다");
 
         // **거들쇠가 붙어도 새지 않는다.** `refused` 는 Ctrl·Alt 를 그냥 넘기므로, 키를
         // 나누는 쪽이 안 거르면 Ctrl-A 가 등록 창을, Ctrl-D 가 "목록에서 뺄까" 를 띄운다 —
@@ -1087,19 +1101,18 @@ mod tests {
             }
         }
         assert!(a.worktree, "Ctrl-w 가 겹쳐 보기를 건드렸다");
-        // **숨은 별칭 F7 도 수식키가 붙든 말든 같은 까닭으로 거절한다**(moai-nc7w). 옛 `refused` 는
-        // 수식키 붙은 키를 통째로 넘겨, 키를 나누는 쪽의 `F(7)` 이 층에서 거름망 칸을 열었다.
+        // **걷은 F7 은 수식키가 붙든 말든 아무 일도 없다**(moai-7sjm) — 옛 `refused` 는 수식키 붙은
+        // 키를 통째로 넘겨 `F(7)` 이 층에서 거름망 칸을 열었다(moai-nc7w).
         for m in [KeyModifiers::NONE, KeyModifiers::CONTROL, KeyModifiers::ALT] {
             a.key(KeyEvent::new(KeyCode::F(7), m));
-            assert_eq!(a.mode, Mode::Browse, "{m:?}-F7 가 층에서 거름망 칸을 열었다");
-            assert!(a.notice.as_deref().is_some_and(|n| n.contains("거름망")), "{m:?}-F7: {:?}", a.notice);
+            assert_eq!((&a.mode, &a.notice), (&Mode::Browse, &None), "{m:?}-F7 가 뜻을 했다");
         }
         assert_eq!(files(), was, "층에서 누른 키가 파일을 바꿨다");
         assert!(!one.join(".moai/journal.jsonl").exists() && !two.join(".moai/journal.jsonl").exists());
 
         // 들어가면 `n` 은 오늘처럼 폼을 연다.
         a.key(key(KeyCode::Enter));
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         assert!(matches!(a.mode, Mode::Idea(_)));
     }
 
@@ -1149,7 +1162,7 @@ mod tests {
         assert_eq!(a.here(), Some(two.clone()));
         let before = snapshots(&[&one]);
 
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         assert_eq!(target(&a), Some(two.clone()), "폼이 선 프로젝트를 담을 곳으로 안 박았다");
         type_in(&mut a, "two 에 담을 것");
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
@@ -1171,16 +1184,16 @@ mod tests {
         let (one, two, mut a) = on_layer_with_twins(&s);
         let before = snapshots(&[&one, &two]);
 
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         assert!(a.on_layer(), "폼을 열며 프로젝트로 들어갔다");
         assert_eq!(target(&a), Some(one.clone()));
         a.key(key(KeyCode::Esc));
         assert!(a.on_layer() && a.mode == Mode::Browse, "빈 폼을 닫았는데 들어갔다");
         assert_eq!(snapshots(&[&one, &two]), before);
 
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         type_in(&mut a, "one 에 담을 것");
-        a.key(key(KeyCode::F(2)));
+        a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
         assert_eq!(a.here(), Some(one.clone()), "담은 프로젝트로 안 들어갔다");
         assert_eq!(ideas_at(&one), ["one 에 담을 것"]);
@@ -1201,7 +1214,7 @@ mod tests {
         let s = Scratch::new("jot-fixed");
         let (one, two, mut a) = on_layer_with_twins(&s);
         let before = snapshots(&[&two]);
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         type_in(&mut a, "one 의 생각");
 
         // 폼이 열린 동안에는 키로 못 옮기므로 속을 직접 흔든다 — 등록 차례가 뒤집히고, 층이
@@ -1214,20 +1227,20 @@ mod tests {
         assert_eq!(a.place_path(0), Some(two.as_path()), "판이 다르다 — 차례가 안 뒤집혔다");
         assert_eq!(target(&a), Some(one.clone()), "층이 다시 읽히자 담을 곳이 바뀌었다");
 
-        a.key(key(KeyCode::F(2)));
+        a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
         assert_eq!(ideas_at(&one), ["one 의 생각"]);
         assert_eq!(snapshots(&[&two]), before, "커서가 옮겨 간 프로젝트에 담겼다");
 
         // 프로젝트 안에서 연 폼인데 선 곳이 그새 다른 프로젝트면 **쓰지 않는다.**
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         type_in(&mut a, "one 에만");
         a.climb();
         let two_at = a.layer.as_ref().unwrap().position(&two).unwrap();
         a.enter_project(two_at);
         assert_eq!(a.here(), Some(two.clone()));
         let (one_before, two_before) = (snapshots(&[&one]), snapshots(&[&two]));
-        a.key(key(KeyCode::F(2)));
+        a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert!(matches!(&a.mode, Mode::Idea(f) if f.title.text() == "one 에만"), "선 곳이 다른데 폼이 닫혔다 — {:?}", a.mode);
         assert!(a.trouble.as_deref().is_some_and(|t| t.starts_with("쓰지 못했다") && t.contains("one")), "{:?}", a.trouble);
         assert_eq!((snapshots(&[&one]), snapshots(&[&two])), (one_before, two_before), "머리에 보인 곳 말고 다른 곳에 썼다");
@@ -1241,7 +1254,7 @@ mod tests {
         let (one, two, mut a) = on_layer_with_twins(&s);
         let before = snapshots(&[&two]);
         a.editor = Some("vi".into());
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         let edit = a.edit.take().expect("층에서 편집기를 안 청했다");
         assert_eq!(edit.into.as_ref().map(|t| t.path.clone()), Some(one.clone()));
         assert!(a.on_layer(), "편집기를 청하며 층을 떠났다");
@@ -1263,12 +1276,12 @@ mod tests {
     fn a_target_dropped_from_the_layer_is_not_written_elsewhere() {
         let s = Scratch::new("jot-dropped");
         let (one, two, mut a) = on_layer_with_twins(&s);
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         type_in(&mut a, "갈 데 없는 것");
         s.register(&[&two]);
         a.reread_layer();
         let before = snapshots(&[&one, &two]);
-        a.key(key(KeyCode::F(2)));
+        a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
         assert!(a.on_layer());
         assert!(a.trouble.as_deref().is_some_and(|t| t.contains("빠졌다")), "{:?}", a.trouble);
@@ -1289,11 +1302,11 @@ mod tests {
         let cfg = s.register(&[&bare, &gone]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
 
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         assert_eq!(a.mode, Mode::Browse, "init 전 프로젝트에 폼을 열었다");
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("init 전")), "{:?}", a.notice);
         a.key(key(KeyCode::Down));
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         assert_eq!(a.mode, Mode::Browse);
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("디렉터리가 없다")), "{:?}", a.notice);
         assert!(!bare.join(".moai").exists() && !gone.exists(), "못 여는 프로젝트에 무언가 만들었다");
@@ -1301,7 +1314,7 @@ mod tests {
         std::fs::create_dir_all(bare.join(".moai")).unwrap();
         std::fs::write(bare.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
         a.key(key(KeyCode::Up));
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         assert_eq!(target(&a), Some(bare), "init 한 뒤에도 층의 옛 셈을 보고 안 열었다");
     }
 
@@ -1321,17 +1334,17 @@ mod tests {
         a.identify = nobody;
         let before = snapshots(&[&one]);
         a.key(key(KeyCode::Down));
-        a.key(key(KeyCode::Char('n')));
+        a.hit("SPC n");
         assert_eq!(target(&a), Some(two.clone()));
         type_in(&mut a, "two 의 생각");
-        a.key(key(KeyCode::F(2)));
+        a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert!(matches!(a.mode, Mode::Ask(_)), "{:?}", a.mode);
         assert!(ideas_at(&two).is_empty(), "묻기 전에 썼다");
 
         // 묻는 칸을 Esc 로 물리면 폼이 돌아오고 담을 곳은 그대로다.
         a.key(key(KeyCode::Esc));
         assert_eq!(target(&a), Some(two.clone()));
-        a.key(key(KeyCode::F(2)));
+        a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         type_in(&mut a, "레이븐 (raven@example.com)");
         a.key(key(KeyCode::Enter));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
@@ -1361,10 +1374,10 @@ mod tests {
         assert_eq!(a.repo.as_ref().map(|r| r.root.clone()), Some(two));
     }
 
-    /// **층의 F5 는 사용자 설정부터 다시 읽는다** — 밖에서 `moai project add` 한 것이 선다.
+    /// **층의 SPC r 은 사용자 설정부터 다시 읽는다** — 밖에서 `moai project add` 한 것이 선다.
     /// 커서는 보던 프로젝트(경로)에 선다.
     #[test]
-    fn f5_on_the_layer_rereads_the_registration_and_keeps_the_cursor_on_its_project() {
+    fn spc_r_on_the_layer_rereads_the_registration_and_keeps_the_cursor_on_its_project() {
         let s = Scratch::new("f5");
         let (one, two) = twins(&s);
         let three = s.project("three", &[]);
@@ -1374,7 +1387,7 @@ mod tests {
         assert_eq!(a.current(), Some(Row::Project(1)));
 
         s.register(&[&three, &one, &two]);
-        a.key(key(KeyCode::F(5)));
+        a.hit("SPC r");
         assert_eq!(names(&a), ["three", "one", "two"]);
         assert_eq!(a.current(), Some(Row::Project(2)), "보던 프로젝트를 놓쳤다");
         assert!(matches!(look(&a, "three"), Look::Open { .. }));

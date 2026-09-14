@@ -135,10 +135,18 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
 
 /// 겹칠 줄들을 **제 워크트리가 먼저**인 차례로 받아 하나로 보인다.
 ///
-/// 같은 id 는 `updated_at` 이 가장 늦은 줄이 선다. **같으면 앞선 쪽** — 제
-/// 워크트리가 맨 앞이라 동률이면 지금 브랜치의 줄이고, 남끼리는 git 이 댄
-/// 차례다. 결정적이어야 부를 때마다 같은 줄이 선다. 시각은 RFC3339 UTC
-/// 고정폭이라 문자열로 견준다(`model::now`).
+/// 같은 id 는 **계획에서의 자리를 늦게 바꾼 줄**([`Issue::planned`] — 칸을 옮기거나
+/// 미루거나 도로 집은 때)이 통째로 선다. 같으면
+/// `updated_at` 이 늦은 줄, 그것도 같으면 앞선 쪽 — 제 워크트리가 맨 앞이라
+/// 동률이면 지금 브랜치의 줄이고, 남끼리는 git 이 댄 차례다. 결정적이어야 부를
+/// 때마다 같은 줄이 선다. 시각은 RFC3339 UTC 고정폭이라 문자열로 견준다(`model::now`).
+///
+/// **칸이 먼저인 까닭** — 제목·우선순위·태그를 고친 것도 `updated_at` 을 올린다.
+/// 그것으로만 견주면 옆에서 집은 뒤 여기서 우선순위 하나만 고쳐도 옆 줄이 가려져
+/// `ready --worktree` 가 옆에서 잡은 일을 다시 집으라고 낸다(moai-2f5g). 칸만 보면
+/// 옆에서 늦게 미룬 것이 여기서 먼저 집은 칸에 가려진다 — 미루기는 칸을 안 옮긴다
+/// (moai-l11z). 필드마다
+/// 따로 고르지는 않는다 — 한 줄의 출처가 둘이면 `⎇` 와 이력을 읽을 뿌리가 갈린다.
 ///
 /// **제 줄은 한 줄도 접지 않는다.** 제 파일에 같은 id 가 둘이면 둘 다 남긴다 —
 /// 여기서 접으면 `moai status` 의 `duplicate_id` 가 `--worktree` 를 붙인
@@ -147,7 +155,9 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
 /// **여기서 지운 줄은 되살리지 않는다.** 옆에만 있는 줄이 갈라진 자리
 /// ([`Side::base`])에도 있었고 그 뒤로 옆에서 안 만졌으면 세우지 않는다. 옆에서
 /// 그 뒤에 집거나 고쳤으면 세운다 — 지운 것과 옆의 작업이 부딪힌 것을 감추면
-/// 옆에서 하던 일이 화면에서 사라진다. 옆에서 지운 줄(여기에만 있다)은 그대로
+/// 옆에서 하던 일이 화면에서 사라진다. **메모는 만진 것으로 안 센다** — `note` 는
+/// 스냅샷을 안 바꾸고, 그것을 세려고 옆 저널을 읽으면 "저널은 상태 계산에 읽히지
+/// 않는다" 가 무너진다(moai-dyeu, 사용자와 정함). 옆에서 지운 줄(여기에만 있다)은 그대로
 /// 둔다 — 그 삭제는 브랜치가 합쳐질 때 반영된다.
 pub fn overlay(mine: Vec<Issue>, others: Vec<Side>) -> (Vec<Issue>, Origin) {
     let mut shown = mine;
@@ -164,7 +174,7 @@ pub fn overlay(mine: Vec<Issue>, others: Vec<Side>) -> (Vec<Issue>, Origin) {
         origin.trees.push((label, root));
         for i in issues {
             match at.get(&i.id) {
-                Some(&k) if i.updated_at > shown[k].updated_at => {
+                Some(&k) if (i.planned(), i.updated_at.as_str()) > (shown[k].planned(), shown[k].updated_at.as_str()) => {
                     origin.from.insert(i.id.clone(), tree);
                     shown[k] = i;
                 }
@@ -204,6 +214,9 @@ pub struct Gathered {
     ///
     /// **재는 것이 읽는 것보다 먼저다** — 읽고 나서 재면 그 사이에 떨어진 쓰기가
     /// "이미 본 것" 으로 적혀 영영 안 보인다(`cmd::tui::run` 과 같은 까닭).
+    ///
+    /// 워크트리들의 HEAD 가 움직인 것을 알리는 git 파일도 든다([`heads`]) — 갈라진 자리가
+    /// 바뀌면 지운 줄 숨김의 답이 바뀐다(moai-pqrq).
     pub watched: Vec<(PathBuf, crate::store::Stamp)>,
 }
 
@@ -226,7 +239,8 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let mut trouble = Vec::new();
     let mut unfound = None;
     let mut others = Vec::new();
-    let mut watched = Vec::new();
+    // HEAD 가 움직인 것도 다시 읽을 까닭이다 — **`others_of` 가 HEAD 를 읽기 전에** 잰다.
+    let mut watched = heads(&repo.root);
     match others_of(&repo.root) {
         Err(why) => unfound = Some(why),
         Ok((mine, trees)) => {
@@ -264,6 +278,54 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, watched })
 }
 
+/// 워크트리들의 HEAD 가 움직인 것을 알아챌 git 파일과 **지금 잰** 표식 — 제 워크트리와
+/// 옆 워크트리 모두.
+///
+/// 갈라진 자리(`merge-base`)는 두 HEAD 에서 나오므로, 어느 쪽이든 커밋·merge·checkout 하면
+/// 지운 줄 숨김([`Side::base`])의 답이 바뀐다. 스냅샷 파일만 지켜보면 탐색기는 다른 까닭으로
+/// 다시 읽을 때까지 낡은 답을 든다(moai-pqrq).
+///
+/// **git 은 한 번만 부른다**(공용 git 디렉터리를 찾는 데) — 탐색기는 다시 읽을 때마다 여기를
+/// 지난다. 나머지는 파일을 직접 본다: 공용 디렉터리의 `HEAD`(주 워크트리), `worktrees/*/HEAD`
+/// (딸린 워크트리), 그 HEAD 가 가리키는 가지 파일, `packed-refs`. 커밋·merge 는 가지 파일을,
+/// checkout·떼어 낸 HEAD 의 커밋은 HEAD 파일을 갈아끼우고, `pack-refs` 는 가지 파일을 지우고
+/// `packed-refs` 를 쓴다.
+///
+/// **HEAD 파일을 잰 뒤에 그 안을 읽어** 가지를 찾는다 — 그 사이에 HEAD 가 바뀌면 HEAD 표식이
+/// 이미 달라 다음 걸음이 다시 읽는다. 못 찾으면(git 밖, 가지를 파일로 두지 않는 저장소) 비어
+/// 있고 말하지 않는다 — 전처럼 스냅샷만 지켜본다.
+fn heads(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
+    // `--path-format=absolute` 는 git 2.31 부터고, 그 전 rev-parse 는 모르는 플래그를 **출력에
+    // 그대로 되뱉고 성공한다** — 경로가 두 줄이 되어 표식이 영영 안 바뀐다. 상대 경로는 `-C`
+    // 로 준 디렉터리에서 푼 것이라 `root` 에 붙인다(절대 경로면 `join` 이 그대로 둔다).
+    let Ok(common) = git(root, &["rev-parse", "--git-common-dir"]) else {
+        return Vec::new();
+    };
+    let common = root.join(common.trim_end_matches('\n'));
+    // 워크트리가 생기거나 없어지면 이 디렉터리의 수정 시각이 바뀐다 — git 을 안 띄우고도
+    // 새 워크트리를 다시 읽을 까닭으로 센다.
+    let worktrees = common.join("worktrees");
+    let mut files = vec![common.join("HEAD")];
+    // 목록을 읽기 **전에** 잰다 — 읽고 나서 재면 그 사이에 생긴 워크트리를 놓친다.
+    let mut watched = vec![(worktrees.clone(), crate::store::stamp(&worktrees))];
+    if let Ok(linked) = std::fs::read_dir(&worktrees) {
+        let mut linked: Vec<PathBuf> = linked.filter_map(Result::ok).map(|e| e.path().join("HEAD")).collect();
+        linked.sort();
+        files.extend(linked);
+    }
+    for head in files {
+        watched.push((head.clone(), crate::store::stamp(&head)));
+        let Ok(text) = std::fs::read_to_string(&head) else { continue };
+        if let Some(branch) = text.trim_end().strip_prefix("ref: ") {
+            let file = common.join(branch);
+            watched.push((file.clone(), crate::store::stamp(&file)));
+        }
+    }
+    let packed = common.join("packed-refs");
+    watched.push((packed.clone(), crate::store::stamp(&packed)));
+    watched
+}
+
 /// 제 워크트리의 HEAD 와, 다른 워크트리마다 (워크트리, 그 안의 moai 뿌리).
 ///
 /// moai 뿌리가 워크트리 꼭대기가 아닐 수 있다(`.moai/` 를 하위 디렉터리에 둔
@@ -289,6 +351,32 @@ fn others_of(root: &Path) -> Result<(Option<String>, Vec<(Tree, PathBuf)>), Stri
             })
             .collect(),
     ))
+}
+
+/// 옆 워크트리들의 **이름이 가리키는 id 후보** — 훅이 초점에서 뺄 것(`hook::held`).
+///
+/// **못 찾으면 비어 있다.** git 이 없거나 저장소가 아니면 옆도 없는 것이고, 그러면
+/// 전처럼 스냅샷의 집은 줄이 다 제 초점이다. 훅은 무엇이 어긋나도 조용해야 한다.
+pub fn away(root: &Path) -> BTreeSet<String> {
+    others_of(root).map(|(_, trees)| names(trees.iter().map(|(t, _)| t))).unwrap_or_default()
+}
+
+/// 워크트리 이름에서 id 후보를 읽는다 — 경로의 끝 이름, 가지 이름, `worktree-` 를 뗀 가지 이름.
+///
+/// 규약(CLAUDE.md "워크트리")이 `.claude/worktrees/<id>` 에 `worktree-<id>` 가지로 뜬다.
+/// **집은 곳을 스냅샷에 적지 않는다.** 집기는 main 에서 커밋하니 적히는 곳은 늘 main 이고,
+/// 워크트리를 치운 뒤에도 그 줄은 남는다 — 지금 살아 있는 워크트리에서 읽는 파생값이다.
+/// 후보일 뿐이라 id 인지는 받는 쪽이 줄과 견준다.
+pub fn names<'a>(trees: impl IntoIterator<Item = &'a Tree>) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for t in trees {
+        if let Some(name) = t.path.file_name() {
+            out.insert(name.to_string_lossy().into_owned());
+        }
+        out.insert(t.label.strip_prefix("worktree-").unwrap_or(&t.label).to_string());
+        out.insert(t.label.clone());
+    }
+    out
 }
 
 /// 제 HEAD 와 옆 HEAD 가 갈라진 자리의 스냅샷 — id → 그때의 `updated_at` ([`Side::base`]).
@@ -363,6 +451,18 @@ mod tests {
         );
     }
 
+    /// 규약대로 뜬 워크트리는 디렉터리와 가지 둘 다로 id 를 댄다. 규약 밖의 이름도
+    /// 후보로는 선다 — id 인지는 훅이 줄과 견준다.
+    #[test]
+    fn a_worktree_names_its_work_by_directory_and_branch() {
+        let src = "worktree /repo/.claude/worktrees/moai-ab12\0HEAD 1111111aaaa\0branch refs/heads/worktree-moai-ab12\0\0\
+                   worktree /elsewhere/x\0HEAD 2222222bbbb\0branch refs/heads/moai-cd34\0\0";
+        let got = names(&parse(src));
+        for want in ["moai-ab12", "moai-cd34", "x"] {
+            assert!(got.contains(want), "{want} 가 없다 — {got:?}");
+        }
+    }
+
     /// 경로에 줄바꿈이 들어도 한 워크트리다.
     #[test]
     fn a_newline_in_a_path_does_not_split_the_worktree() {
@@ -413,6 +513,115 @@ mod tests {
         assert_eq!(origin.root("m-0001"), Some(Path::new("/wt/feat/x")));
         assert_eq!(shown[1].status.as_str(), "todo", "이른 남의 줄이 제 줄을 덮었다");
         assert_eq!(origin.branch("m-0002"), None, "제 줄인데 출처가 붙었다");
+    }
+
+    /// 칸을 늦게 옮긴 줄이 선다 — 그 뒤에 필드만 고친 줄은 칸을 덮지 못한다(moai-2f5g).
+    #[test]
+    fn a_later_move_beats_a_later_field_edit() {
+        let mut picked = issue("m-0001", "in_progress", "2026-09-12T00:00:00Z");
+        picked.status_since = "2026-09-12T00:00:00Z".into();
+        let edited = issue("m-0001", "todo", "2026-09-13T00:00:00Z");
+        let (shown, origin) = overlay(vec![edited], vec![tree("feat/x", vec![picked])]);
+        assert_eq!(shown[0].status.as_str(), "in_progress", "늦은 필드 편집이 옆에서 집은 것을 풀었다");
+        assert_eq!(origin.branch("m-0001"), Some("feat/x"));
+
+        // 거꾸로 — 여기서 늦게 옮겼으면 옆의 늦은 필드 편집이 덮지 못한다.
+        let mut moved = issue("m-0002", "done", "2026-09-12T00:00:00Z");
+        moved.status_since = "2026-09-12T00:00:00Z".into();
+        let theirs = issue("m-0002", "todo", "2026-09-13T00:00:00Z");
+        let (shown, origin) = overlay(vec![moved], vec![tree("feat/x", vec![theirs])]);
+        assert_eq!(shown[0].status.as_str(), "done");
+        assert_eq!(origin.branch("m-0002"), None);
+    }
+
+    /// 옆에서 늦게 미룬 것·도로 집은 것이 여기서 먼저 옮긴 칸에 안 가려진다(moai-l11z). 미루기는
+    /// `status_since` 를 안 올리고, 도로 집기는 `deferred_at` 을 지운다 — 남는 시각은 `planned_at` 이다.
+    #[test]
+    fn a_later_defer_or_undo_beats_an_earlier_move() {
+        let (t1, t2, t3, t4) =
+            ("2026-09-12T00:00:00Z", "2026-09-13T00:00:00Z", "2026-09-14T00:00:00Z", "2026-09-15T00:00:00Z");
+        let mut picked = issue("m-0001", "in_progress", t1);
+        picked.status_since = t1.into();
+        let mut shelved = issue("m-0001", "todo", t2);
+        shelved.deferred_at = Some(t2.into());
+        shelved.planned_at = Some(t2.into());
+        let (shown, origin) = overlay(vec![picked], vec![tree("feat/x", vec![shelved.clone()])]);
+        assert!(shown[0].is_deferred(), "옆에서 늦게 미룬 것이 여기서 먼저 집은 줄에 가려졌다");
+        assert_eq!(origin.branch("m-0001"), Some("feat/x"));
+
+        // 도로 집으면 `deferred_at` 은 사라져도 `planned_at` 이 늦어 이긴다. 여기 줄은 칸을
+        // 도로 집은 줄보다 늦게 옮겼다 — 칸 시각만 보면 여기 미룬 줄이 선다.
+        let mut here = shelved.clone();
+        here.status_since = t2.into();
+        let mut back = issue("m-0001", "todo", t3);
+        back.planned_at = Some(t3.into());
+        let (shown, origin) = overlay(vec![here], vec![tree("feat/x", vec![back])]);
+        assert!(!shown[0].is_deferred(), "옆에서 도로 집은 것이 여기서 미룬 줄에 가려졌다");
+        assert_eq!(origin.branch("m-0001"), Some("feat/x"));
+
+        // 미룬 뒤에 칸을 옮긴 줄은 `planned_at` 이 낡았어도 이긴다 — 옛 바이너리는 칸만 옮긴다.
+        let mut moved = shelved.clone();
+        moved.status = Status::new("review");
+        moved.status_since = t4.into();
+        let mut later_shelf = issue("m-0001", "todo", t3);
+        later_shelf.deferred_at = Some(t3.into());
+        later_shelf.planned_at = Some(t3.into());
+        let (shown, origin) = overlay(vec![later_shelf], vec![tree("feat/x", vec![moved])]);
+        assert_eq!(shown[0].status.as_str(), "review", "늦게 옮긴 칸이 그 전의 미룸에 졌다");
+        assert_eq!(origin.branch("m-0001"), Some("feat/x"));
+    }
+
+    /// 어느 워크트리에서든 커밋·`pack-refs`·떼어 낸 checkout 이 지켜보는 표식을 바꾼다 —
+    /// 탐색기가 갈라진 자리가 바뀐 것을 알아챈다(moai-pqrq).
+    #[test]
+    fn a_moved_head_in_any_worktree_changes_a_watched_stamp() {
+        let base = std::env::temp_dir().join(format!("moai-heads-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (main, feat) = (base.join("main"), base.join("feat"));
+        std::fs::create_dir_all(&main).unwrap();
+        // 물려받은 `GIT_DIR` 이 남으면 여기서의 git 이 바깥 저장소를 건드린다(tests/cli.rs 의 `git` 과 같은 까닭).
+        let run = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+                .args(args)
+                .current_dir(dir)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../feat", "-b", "feat/x"]);
+
+        let seen = heads(&main);
+        let has = |tail: &str| seen.iter().any(|(p, _)| p.ends_with(tail));
+        for tail in [".git/HEAD", "worktrees/feat/HEAD", "refs/heads/main", "refs/heads/feat/x", "packed-refs"] {
+            assert!(has(tail), "{tail} 를 안 지켜본다 — {seen:#?}");
+        }
+        let changed = |was: &[(PathBuf, crate::store::Stamp)]| was.iter().any(|(p, s)| crate::store::stamp(p) != *s);
+        assert!(!changed(&seen), "아무것도 안 했는데 표식이 바뀌었다");
+
+        run(&feat, &["commit", "-q", "--allow-empty", "-m", "b"]);
+        assert!(changed(&seen), "옆 워크트리의 커밋을 못 알아챈다");
+        let seen = heads(&main);
+        run(&main, &["pack-refs", "--all"]);
+        assert!(changed(&seen), "pack-refs 를 못 알아챈다");
+        let seen = heads(&main);
+        run(&feat, &["checkout", "-q", "--detach"]);
+        assert!(changed(&seen), "떼어 낸 checkout 을 못 알아챈다");
+        let seen = heads(&main);
+        run(&main, &["worktree", "add", "-q", "../more", "-b", "more"]);
+        assert!(changed(&seen), "새로 생긴 워크트리를 못 알아챈다");
+
+        // 하위 디렉터리에서 부르면 `--git-common-dir` 이 상대 경로(`../.git`)로 온다.
+        let sub = main.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        let seen = heads(&sub);
+        assert!(seen.iter().any(|(p, s)| p.ends_with("refs/heads/more") && s.is_some()), "하위에서 가지 파일을 못 찾는다 — {seen:#?}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.

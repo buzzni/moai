@@ -23,6 +23,48 @@ struct Edited {
     changed: bool,
     /// `-e none` 을 받았는데도 남은 소속 — 에픽과 그것을 넘긴 id 부모.
     kept: Option<Inherited>,
+    /// `--milestone none` 을 받았는데도 남은 마일스톤 — 그것을 넘긴 에픽이나 id 부모.
+    kept_milestone: Option<InheritedMilestone>,
+    /// 고친 줄의 막음을 가른 답. 상세가 `show <id>` 와 같은 막음 줄을 그린다(moai-xe74).
+    blocked: Blocked,
+}
+
+/// 락 밖으로 들고 나오는 막음 답. **여기서 챙긴다** — `report::Block` 은 줄 전부를 빌리는데
+/// 락을 놓으면 줄 전부가 없고, 다시 읽으면 위 `epic`·`shelved` 가 피한 두 번 파싱과 틈이
+/// 돌아온다. 그래서 막는 줄의 복사본과 답을 소유한 모양으로 옮긴다.
+#[derive(Default)]
+struct Blocked {
+    /// 막는 줄 가운데 있는 것들 — 제목과 미룬 시각을 그린다.
+    issues: Vec<Issue>,
+    /// 적힌 차례대로 (막는 id, 답, 그 줄을 계획에서 뺀 줄, 미뤄 뺀 멤버).
+    answers: Vec<(String, crate::report::Blocker, Option<String>, Vec<String>)>,
+}
+
+impl Blocked {
+    /// 막음이 없으면 소속 지도를 안 세운다(`report::blocks_of`).
+    fn of(all: &[Issue], cfg: &crate::config::Config, i: &Issue) -> Blocked {
+        let found = crate::report::blocks_of(all, cfg, i);
+        Blocked {
+            issues: found.iter().filter_map(|b| b.issue.cloned()).collect(),
+            answers: found
+                .iter()
+                .map(|b| (b.id.to_string(), b.blocker, b.root.map(str::to_string), b.aside.iter().map(|s| s.to_string()).collect()))
+                .collect(),
+        }
+    }
+
+    fn blocks(&self) -> Vec<crate::report::Block<'_>> {
+        self.answers
+            .iter()
+            .map(|(id, blocker, root, aside)| crate::report::Block {
+                id: id.as_str(),
+                issue: self.issues.iter().find(|x| x.id == *id),
+                blocker: *blocker,
+                root: root.as_deref(),
+                aside: aside.iter().map(String::as_str).collect(),
+            })
+            .collect()
+    }
 }
 
 /// `-e none` 이 못 끊은 소속. `--json` 에는 `inherited_epic` 으로 선다 — 키가 없다는
@@ -33,8 +75,19 @@ struct Inherited {
     parent: String,
 }
 
+/// `--milestone none` 이 못 끊은 마일스톤(moai-0lmn). `--json` 에는 `inherited_milestone`
+/// 으로 선다. 넘긴 자리는 `epic` 이나 `parent` 둘 중 하나만 선다 — 옮기는 길이 달라서다.
+#[derive(serde::Serialize)]
+struct InheritedMilestone {
+    milestone: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    epic: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent: Option<String>,
+}
+
 /// 남은 소속의 키. 모르는 필드로 같은 이름을 든 줄을 가려내는 데도 쓴다.
-const INHERITED: &str = "inherited_epic";
+const INHERITED: [&str; 2] = ["inherited_epic", "inherited_milestone"];
 
 /// 기계 출력 — 줄 하나에 남은 소속을 곁들인다. 기존 키는 그대로 두고 더하기만 한다.
 #[derive(serde::Serialize)]
@@ -43,6 +96,8 @@ struct Out<'a> {
     row: super::Row<'a>,
     #[serde(skip_serializing_if = "Option::is_none")]
     inherited_epic: Option<&'a Inherited>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inherited_milestone: Option<&'a InheritedMilestone>,
 }
 
 pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
@@ -110,11 +165,23 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 Inherited { epic: e.to_string(), parent: p.to_string() }
             })
         };
+        // `--milestone none` 도 같다(moai-0lmn) — 에픽과 부모가 마일스톤을 이긴다.
+        let cut_milestone = args.milestone.as_deref().is_some_and(|m| super::clearable(m).is_none());
+        let kept_milestone = |issues: &[Issue]| {
+            use crate::report::Above;
+            let (m, above) = cut_milestone.then(|| crate::report::milestone_from_above(issues, &args.id))??;
+            let (epic, parent) = match above {
+                Above::Epic(e) => (Some(e.to_string()), None),
+                Above::Parent(p) => (None, Some(p.to_string())),
+            };
+            Some(InheritedMilestone { milestone: m.to_string(), epic, parent })
+        };
         if !changed {
             // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
             // 키가 사라지면 받는 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
             let read = super::read_of(issues, cfg, &[before.id.as_str()]);
             let kept = kept(issues);
+            let kept_milestone = kept_milestone(issues);
             return Ok((
                 vec![],
                 Edited {
@@ -125,6 +192,9 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                     read,
                     changed: false,
                     kept,
+                    kept_milestone,
+                    // 바뀐 것이 없으면 상세를 안 그린다.
+                    blocked: Blocked::default(),
                 },
             ));
         }
@@ -159,30 +229,63 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         // 묶음의 칸도 멤버에서 읽는다 — 제 줄만 들고 나가면 상세가 손으로 둔 칸을 그린다.
         let read = super::read_of(issues, cfg, &near);
         let kept = kept(issues);
-        Ok((vec![], Edited { issue: out, epic, children, shelved, read, changed: true, kept }))
+        let kept_milestone = kept_milestone(issues);
+        // 막음도 **락 안에서 본 모습으로** 가른다 — `ready` 의 자(`report::blocks_of`)다.
+        let blocked = Blocked::of(issues, cfg, &out);
+        Ok((vec![], Edited { issue: out, epic, children, shelved, read, changed: true, kept, kept_milestone, blocked }))
     })?;
 
-    let Edited { issue: edited, epic, children, shelved, read, changed, kept } = done;
+    let Edited { issue: edited, epic, children, shelved, read, changed, kept, kept_milestone, blocked } = done;
     if ctx.json {
         // **이 키는 우리 것이다** — `Row` 가 `derived_status` 를 걷는 것과 같은 까닭이다.
         // `--json` 을 되써 넣어 모르는 필드로 든 줄이면 한 객체에 같은 키가 둘 서거나,
         // 끊긴 줄이 안 끊긴 것처럼 읽힌다. 파일의 값은 그대로 둔다.
-        let shown = match edited.rest.contains_key(INHERITED) {
+        let shown = match INHERITED.iter().any(|k| edited.rest.contains_key(*k)) {
             false => std::borrow::Cow::Borrowed(&edited),
             true => {
                 let mut own = edited.clone();
-                own.rest.remove(INHERITED);
+                own.rest.retain(|k, _| !INHERITED.contains(&k.as_str()));
                 std::borrow::Cow::Owned(own)
             }
         };
         let row = super::Row::from(&shown, &read);
-        return super::json_line(&Out { row, inherited_epic: kept.as_ref() });
+        return super::json_line(&Out {
+            row,
+            inherited_epic: kept.as_ref(),
+            inherited_milestone: kept_milestone.as_ref(),
+        });
     }
     if let Some(k) = &kept {
         eprintln!(
             "moai: {} 는 에픽 {} 에 그대로 든다 — 부모 {} 에서 오는 소속이라 -e none 으로 안 끊긴다. 옮기려면 `moai edit {} -e <다른 에픽>`",
             edited.id, k.epic, k.parent, edited.id
         );
+    }
+    if let Some(k) = &kept_milestone {
+        // 넘긴 자리마다 빼는 길이 다르다 — 에픽 멤버는 에픽을 옮기거나 에픽의 마일스톤을
+        // 고치고, 부모 밑 자식은 id 를 못 옮기니 부모의 마일스톤을 고친다.
+        // 조상이 마일스톤 줄 자신이면(`--parent <마일스톤>`) 소속은 id 자리에서 온다 —
+        // 그 마일스톤의 필드를 고치라고 대면 아무것도 안 바뀐다.
+        match (&k.epic, &k.parent) {
+            (None, Some(p)) if *p == k.milestone => eprintln!(
+                "moai: {} 는 마일스톤 {} 에 그대로 든다 — id 가 그 마일스톤 밑에 서 있어 --milestone none 으로 안 끊긴다",
+                edited.id, k.milestone
+            ),
+            (epic, parent) => {
+                let (from, way) = match (epic, parent) {
+                    (Some(e), _) => (
+                        format!("에픽 {e}"),
+                        format!("`moai edit {} -e <다른 에픽>` 이나 `moai edit {e} --milestone none`", edited.id),
+                    ),
+                    (None, Some(p)) => (format!("조상 {p}"), format!("`moai edit {p} --milestone none`")),
+                    (None, None) => unreachable!("넘긴 자리는 에픽이나 조상이다"),
+                };
+                eprintln!(
+                    "moai: {} 는 마일스톤 {} 에 그대로 든다 — {from} 에서 오는 마일스톤이라 --milestone none 으로 안 끊긴다. 빼려면 {way}",
+                    edited.id, k.milestone
+                );
+            }
+        }
     }
     if !changed {
         return Ok(vec![format!(
@@ -196,6 +299,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         roots: shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect(),
         states: read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect(),
         origin: None,
+        blocks: blocked.blocks(),
     };
     Ok(view::detail(&edited, epic.as_ref(), &children, &seen, &repo.config, &at, false))
 }
