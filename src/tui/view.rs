@@ -49,9 +49,88 @@ impl View {
     }
 }
 
+/// 목록 줄에 붙일 수 있는 열(moai-g7p8). 제목과 칸 글리프는 늘 선다 — 끄면 줄이 무엇인지 모른다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    Id,
+    Priority,
+    Assignee,
+    Created,
+    Updated,
+    /// 묶음의 `끝난/일` 셈.
+    Tally,
+    Tags,
+}
+
+impl Field {
+    pub fn word(self) -> &'static str {
+        match self {
+            Field::Id => "id",
+            Field::Priority => "우선순위",
+            Field::Assignee => "담당",
+            Field::Created => "생성",
+            Field::Updated => "수정",
+            Field::Tally => "셈",
+            Field::Tags => "태그",
+        }
+    }
+
+    /// 좁을 때 **걷는 차례** — 작을수록 먼저 걷힌다(사람의 결정: 날짜 → 담당 → 태그). id·우선순위·
+    /// 셈은 원래 목록 줄에 있던 것이라 이 차례로 걷지 않는다 — 켜 두면 제목 몫을 줄여서라도 선다.
+    pub fn drop_rank(self) -> Option<u8> {
+        match self {
+            Field::Created | Field::Updated => Some(0),
+            Field::Assignee => Some(1),
+            Field::Tags => Some(2),
+            Field::Id | Field::Priority | Field::Tally => None,
+        }
+    }
+
+    fn bit(self) -> u8 {
+        1 << self as u8
+    }
+}
+
+/// 켜 둔 열. 복사로 다닌다 — 키 표의 켜짐(`Ctx`)이 이것을 그대로 든다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fields(u8);
+
+/// **처음에는 원래 목록 줄 그대로다** — id·우선순위·셈. 열 토글이 생긴 날 화면이 바뀌면 안 된다.
+impl Default for Fields {
+    fn default() -> Fields {
+        Fields(Field::Id.bit() | Field::Priority.bit() | Field::Tally.bit())
+    }
+}
+
+impl Fields {
+    pub fn shows(self, f: Field) -> bool {
+        self.0 & f.bit() != 0
+    }
+
+    pub fn toggle(&mut self, f: Field) {
+        self.0 ^= f.bit();
+    }
+
+    /// 둘 다 켠 열.
+    pub fn both(self, other: Fields) -> Fields {
+        Fields(self.0 & other.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fields_start_as_the_old_row_and_toggle_one_at_a_time() {
+        let mut f = Fields::default();
+        assert!(f.shows(Field::Id) && f.shows(Field::Priority) && f.shows(Field::Tally));
+        assert!(!f.shows(Field::Assignee) && !f.shows(Field::Created) && !f.shows(Field::Tags));
+        f.toggle(Field::Assignee);
+        assert!(f.shows(Field::Assignee) && f.shows(Field::Id), "하나를 켜며 다른 것을 건드렸다");
+        f.toggle(Field::Assignee);
+        assert_eq!(f, Fields::default());
+    }
 
     #[test]
     fn a_hidden_column_comes_back_when_toggled_again() {

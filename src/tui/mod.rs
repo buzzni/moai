@@ -375,6 +375,8 @@ pub struct App {
     shown: Vec<bool>,
     /// 목록 차례와 거꾸로인가(moai-55cp). 기본은 우선순위 차례다.
     pub order: (keys::Order, bool),
+    /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)다.
+    pub fields: view::Fields,
     /// 층마다 커서를 기억한다. 들어갔다 나오면 **있던 자리로 돌아온다** —
     /// 매번 맨 위로 튕기면 형제 여럿을 훑는 일이 못 할 짓이 된다.
     remembered: Vec<usize>,
@@ -541,6 +543,7 @@ impl App {
             view: view::View::hiding(crate::config::DONE),
             shown: Vec::new(),
             order: Default::default(),
+            fields: Default::default(),
             remembered,
             list: Scroll::default(),
             quit: false,
@@ -1309,6 +1312,8 @@ impl App {
                 }
             }
             B::Column(_) | B::Done | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act),
+            // 열은 줄을 더하거나 빼지 않는다 — 커서를 붙들 까닭이 없다.
+            B::Cell(f) => self.fields.toggle(f),
             B::Raw => {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
@@ -1346,6 +1351,7 @@ impl App {
             deferred_hidden: self.view.hide_deferred,
             order: self.order.0,
             order_reversed: self.order.1,
+            fields: self.fields,
             next_pane: draw::pane_name(self.focus.next()),
             prev_pane: draw::pane_name(self.focus.prev()),
         }
