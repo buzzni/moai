@@ -178,7 +178,18 @@ pub fn deferred_sources(all: &[Issue]) -> BTreeMap<&str, Vec<&str>> {
     }
     let (epic_of, mile_of) = (groups(all), milestones(all));
     let roots = deferred_roots_in(all, &epic_of, &mile_of);
-    let shelf = Shelf::new(all, &epic_of, &mile_of);
+    deferred_sources_in(all, &epic_of, &mile_of, &roots)
+}
+
+/// [`deferred_sources`] 와 같은 것. 소속 지도와 계획 밖 줄을 이미 가진 쪽(`status`)이 두 번
+/// 걷지 않게 받는다 — 거기서 다시 부르면 묶음 멤버 셈과 미룸 걸음을 한 번 더 한다.
+pub fn deferred_sources_in<'a>(
+    all: &'a [Issue],
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    mile_of: &BTreeMap<&'a str, &'a str>,
+    roots: &BTreeMap<&'a str, &'a str>,
+) -> BTreeMap<&'a str, Vec<&'a str>> {
+    let shelf = Shelf::new(all, epic_of, mile_of);
     roots
         .iter()
         .map(|(&id, _)| {
@@ -1865,29 +1876,39 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 2-3. 미뤄 둔 것에 막힌 것. **날짜를 안 기다린다** — 계획이 스스로
     //      모순된 자리라(지금 할 일이 지금 안 할 일을 기다린다) 사흘 둔다고
     //      풀리지 않는다. 막지는 않는다.
-    //      **나이는 막는 쪽을 미룬 지 며칠이다**(moai-hcx3). 칸 나이를 대면 "미룬 것에 N일
-    //      막힘" 으로 읽히는데 그 줄이 칸에 머문 날수일 뿐이다. 막는 줄마다 그것을 계획에서
-    //      빼는 미룸 전부(`deferred_sources` — 물려받은 조상의 미룸까지) 가운데 가장 이른
-    //      `deferred_at`, 막는 줄이 여럿이면 그중 가장 이른 것 — 모순이 선 때다.
+    //      **나이는 모순이 선 때부터다**(moai-hcx3) — 막는 쪽을 미룬 날과 이 막음이 선 날
+    //      ([`blocked_since`]) 가운데 늦은 것. 칸 나이를 대면 "미룬 것에 N일 막힘" 으로 읽히는데
+    //      그 줄이 칸에 머문 날수일 뿐이다.
+    //      - 미룬 날: 막는 줄마다 그것을 계획에서 빼는 미룸 전부(`deferred_sources_in` —
+    //        물려받은 조상의 미룸까지) 가운데 가장 이른 `deferred_at`, 막는 줄이 여럿이면 그중
+    //        가장 이른 것.
+    //      - 막음이 선 날로 누른다: 40일 전에 미룬 줄에 오늘 막힌 줄은 모순이 오늘 섰다. 막는
+    //        줄이 어제 done 에서 되돌아 나왔어도 그렇다. `blocked_stale` 과 같은 자다.
     let waiting: Vec<&Issue> =
         work.iter().copied().filter(|i| !i.status.is_done() && by_deferred(i)).collect();
     if !waiting.is_empty() {
-        let sources = deferred_sources(issues);
-        let shelved_since = |i: &Issue| -> &str {
-            holding(i, &by_id, &out_of_plan, &states, &waits)
-                .0
-                .iter()
-                .filter_map(|b| sources.get(b))
-                .flatten()
-                .filter_map(|r| by_id.get(r).and_then(|x| x.deferred_at.as_deref()))
-                .min()
-                // 계획 밖인 줄은 언제나 미룬 곳이 있다(`deferred_roots_in` ⊆ `deferred_sources`).
-                // 못 찾으면 나이를 안 싣는다 — 빈 시각은 `days_since` 가 거른다.
-                .unwrap_or("")
-        };
+        let sources = deferred_sources_in(issues, &group, &mile_of, &roots);
+        // 시각은 줄과 같은 수명이라, 받는 자리(`Warning::ages`)의 서명으로 추론되게 그 자리에 둔다.
         warnings.push(
             Warning::new("blocked_by_deferred", ids_of(&waiting))
-                .ages(shelved_since, &waiting, now)
+                .ages(
+                    |i| {
+                        let shelved = holding(i, &by_id, &out_of_plan, &states, &waits)
+                            .0
+                            .iter()
+                            .filter_map(|b| sources.get(b))
+                            .flatten()
+                            .filter_map(|r| by_id.get(r).and_then(|x| x.deferred_at.as_deref()))
+                            .min();
+                        // 계획 밖인 줄은 언제나 미룬 곳이 있다(`deferred_roots_in` ⊆
+                        // `deferred_sources_in`). 못 찾으면 나이를 안 싣는다 — 빈 시각은
+                        // `days_since` 가 거른다.
+                        let Some(shelved) = shelved else { return "" };
+                        shelved.max(blocked_since(i, &by_id, &states, &waits, &group_since))
+                    },
+                    &waiting,
+                    now,
+                )
                 .hint("moai show --deferred"),
         );
     }
@@ -2508,12 +2529,41 @@ mod tests {
         let mut epic = make("argos-0002", Kind::Epic, "todo");
         epic.deferred_at = Some("2026-09-11T00:00:00Z".into());
         let under = member("argos-0003", "argos-0002", "todo");
-        assert_eq!(aged(&[epic, under, held("argos-0009", &["argos-0003"])], "argos-0009"), Some(20));
+        assert_eq!(aged(&[epic.clone(), under.clone(), held("argos-0009", &["argos-0003"])], "argos-0009"), Some(20));
 
-        // 미룬 막음이 둘이면 가장 이른 것 — 모순이 선 때다.
+        // 미룬 막음이 둘이면 가장 이른 것 — 모순이 선 때다. 칸 나이(30일)와 안 겹치게 26일.
         let mut older = make("argos-0004", Kind::Issue, "todo");
-        older.deferred_at = Some("2026-09-01T00:00:00Z".into());
-        assert_eq!(aged(&[shelved, older, held("argos-0009", &["argos-0001", "argos-0004"])], "argos-0009"), Some(30));
+        older.deferred_at = Some("2026-09-05T00:00:00Z".into());
+        assert_eq!(aged(&[shelved.clone(), older, held("argos-0009", &["argos-0001", "argos-0004"])], "argos-0009"), Some(26));
+
+        // 한 막는 줄의 미룸이 둘이면(제 미룸 40일, 에픽 20일) 가장 이른 것. 막음은 그보다 먼저 섰다.
+        let mut both = member("argos-0003", "argos-0002", "todo");
+        both.deferred_at = Some("2026-08-22T00:00:00Z".into());
+        both.status_since = "2026-08-01T00:00:00Z".into();
+        let mut long_held = held("argos-0009", &["argos-0003"]);
+        long_held.status_since = "2026-08-01T00:00:00Z".into();
+        assert_eq!(aged(&[epic.clone(), both, long_held], "argos-0009"), Some(40));
+
+        // **막음이 선 날로 누른다.** 40일 전에 미룬 줄에 이틀 전 막힌 줄은 모순이 이틀째다.
+        let mut fresh = held("argos-0009", &["argos-0003"]);
+        fresh.status_since = "2026-09-29T00:00:00Z".into();
+        assert_eq!(aged(&[epic.clone(), under.clone(), fresh], "argos-0009"), Some(2), "막음보다 이른 미룸으로 셌다");
+        // 막는 줄이 어제 done 에서 되돌아 나와 미룬 에픽 밑에 다시 섰다.
+        let mut reopened = member("argos-0003", "argos-0002", "todo");
+        reopened.status_since = "2026-09-30T00:00:00Z".into();
+        assert_eq!(aged(&[epic.clone(), reopened, held("argos-0009", &["argos-0003"])], "argos-0009"), Some(1));
+
+        // 묶음을 제가 미뤘다 — 그 묶음을 미룬 날.
+        let mut shelved_epic = make("argos-0002", Kind::Epic, "todo");
+        shelved_epic.deferred_at = Some("2026-09-16T00:00:00Z".into());
+        assert_eq!(aged(&[shelved_epic, under.clone(), held("argos-0009", &["argos-0002"])], "argos-0009"), Some(15));
+
+        // 끝난 것으로 읽는 묶음이 미룬 멤버를 기다린다 — 묶음이 아니라 그 멤버를 미룬 날.
+        let open_epic = make("argos-0002", Kind::Epic, "todo");
+        let mut aside = member("argos-0005", "argos-0002", "todo");
+        aside.deferred_at = Some("2026-09-21T00:00:00Z".into());
+        let rows = [open_epic, member("argos-0006", "argos-0002", "done"), aside, held("argos-0009", &["argos-0002"])];
+        assert_eq!(aged(&rows, "argos-0009"), Some(10));
     }
 
     /// 막는 쪽이 사라지면 `ready` 는 조용히 넘어가지만 `status` 는 드러낸다.
