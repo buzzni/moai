@@ -1375,6 +1375,18 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     out
 }
 
+/// **이로써 풀린 일** — 쓰기 전(`before`)에는 [`ready`] 가 아니었고 쓴 뒤(`after`)에는
+/// ready 인 일(moai-942k). `moai mv <id> done` 이 한 줄로 댄다.
+///
+/// **고르는 자는 `ready` 하나다.** 막음·미룸·열린 자식·묶음 칸의 규칙을 여기서 다시 재면
+/// `ready` 가 내는 것과 이 줄이 대는 것이 갈린다 — 두 번 불러 견준다. 차례는 `after` 의
+/// `ready` 차례 그대로다. **저장하지 않는다** — 막힌 줄의 "풀렸나" 는 막는 줄을 닫을
+/// 때마다 달라지는 파생값이다.
+pub fn unblocked<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
+    let was: BTreeSet<&str> = ready(before, cfg).into_iter().map(|i| i.id.as_str()).collect();
+    ready(after, cfg).into_iter().filter(|i| !was.contains(i.id.as_str())).collect()
+}
+
 /// 막음을 재는 데 드는 것 — 계획에서 빠진 줄(뺀 곳과 함께)과, 막는 묶음의 읽은 칸.
 ///
 /// **필요할 때만 센다.** 미룬 줄이 없으면 물려받을 것도 없고, 묶음에 막힌 줄이 하나도
@@ -2661,6 +2673,33 @@ mod tests {
         ];
         let got: Vec<&str> = ready(&issues, &cfg()).iter().map(|i| i.id.as_str()).collect();
         assert_eq!(got, ["argos-0004"]);
+    }
+
+    /// **이로써 풀린 일만 댄다**(moai-942k). 막는 줄과 마지막 자식을 닫으면 막혔던 줄과 부모가
+    /// 새로 ready 가 된다. 닫은 줄, 원래 ready 이던 줄, 여전히 막힌 줄은 안 댄다.
+    #[test]
+    fn unblocked_names_only_what_the_write_just_freed() {
+        let mut blocked = make("argos-0002", Kind::Issue, "todo");
+        blocked.blocked_by = vec!["argos-0001".into()];
+        let mut still = make("argos-0006", Kind::Issue, "todo");
+        still.blocked_by = vec!["argos-0001".into(), "argos-0005".into()];
+        let before = vec![
+            make("argos-0001", Kind::Issue, "in_progress"), // 막는 줄
+            blocked,
+            make("argos-0003", Kind::Issue, "todo"),        // 부모
+            make("argos-0003.aaa", Kind::Issue, "todo"),    // 그 마지막 자식
+            make("argos-0004", Kind::Issue, "todo"),        // 원래 ready
+            make("argos-0005", Kind::Issue, "todo"),        // 아직 안 닫힌 막는 줄
+            still,
+        ];
+        let mut after = before.clone();
+        for i in after.iter_mut().filter(|i| i.id == "argos-0001" || i.id == "argos-0003.aaa") {
+            i.status = Status::new("done");
+        }
+        let got: BTreeSet<&str> = unblocked(&before, &after, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(got, BTreeSet::from(["argos-0002", "argos-0003"]));
+        // 아무것도 안 바꾼 쓰기는 풀린 것이 없다.
+        assert!(unblocked(&before, &before, &cfg()).is_empty());
     }
 
     /// 급한 것 먼저, 그다음 끝나가는 에픽 먼저.
