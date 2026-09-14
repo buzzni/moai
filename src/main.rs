@@ -9,8 +9,6 @@ mod cmd;
 mod config;
 mod draft;
 mod fail;
-// 시험은 이미 부르므로 시험 빌드에서는 기대가 어긋난다 — 바이너리에만 건다.
-#[cfg_attr(not(test), expect(dead_code, reason = "커밋 칸은 moai-emcv 가 show 에서 부른다 — 그때 이 줄이 경고로 지우라고 한다"))]
 mod git;
 mod guide;
 mod hook;

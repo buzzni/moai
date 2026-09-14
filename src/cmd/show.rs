@@ -313,6 +313,13 @@ fn one(
         origin: Some(origin),
         blocks: report::blocks_of(all, &repo.config, issue),
     };
+    // **커밋은 저장하지 않고 git 에서 읽는다**(moai-1w2l) — 커밋 제목에 이 id 를 적은 것.
+    // git 이 없거나 저장소 밖이면 칸을 비운다. 커밋 칸 하나 때문에 상세가 안 열리는 것이
+    // 빈 칸보다 비싸다(그 모서리의 말투는 moai-mauw).
+    let commits = crate::git::commits_of(&repo.root, &[issue.id.as_str()])
+        .ok()
+        .and_then(|mut by_id| by_id.remove(&issue.id))
+        .unwrap_or_default();
 
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();
@@ -346,6 +353,11 @@ fn one(
         // `blocks` 는 받는 쪽이 "B 가 A 를 막는다" 로 거꾸로 읽는다.
         if !seen.blocks.is_empty() {
             extra.push(("blockers",serde_json::to_string(&seen.blocks).map_err(|e| Fail::new(e.to_string()))?));
+        }
+        // 트래커 커밋까지 **전부** 낸다 — `tracker` 표시가 붙으니 거를지는 받는 쪽이 정한다.
+        // 사람 화면만 뺀다(`view::commits`). 커밋이 없으면 키를 안 단다.
+        if !commits.is_empty() {
+            extra.push(("commits", serde_json::to_string(&commits).map_err(|e| Fail::new(e.to_string()))?));
         }
         return super::json_with(
             &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),
@@ -404,6 +416,7 @@ fn one(
             }
         }
     }
+    out.extend(view::commits(&commits));
     out.extend(view::history(&journal, &repo.config));
     Ok(out)
 }
