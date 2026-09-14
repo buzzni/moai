@@ -1034,8 +1034,8 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     for b in &i.blocked_by {
         let at = app.index.find(b);
         let root = app.index.deferred_root(b);
-        let aside = at.map_or(&[][..], |at| app.aside(at));
-        let (label, text) = match crate::report::blocker(at.map(|at| app.column(at)), root.is_some(), !aside.is_empty()) {
+        let (waiting, aside) = at.map_or((crate::report::Waiting::Live, &[][..]), |at| app.waits(at));
+        let (label, text) = match crate::report::blocker(at.map(|at| app.column(at)), root.is_some(), waiting) {
             Blocker::Missing => ("끊김", format!("! {b}  없는 이슈라 막지 않는다")),
             Blocker::Done => ("풀림", format!("✓ {b}  {}", app.title_of(b))),
             Blocker::Open => ("막힘", format!("· {b}  {}", app.title_of(b))),
@@ -1043,10 +1043,15 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
             // `ready` 에도 없으므로 미뤘다는 말을 붙인다. 낱말은 상세 머리가 쓰는 자리다.
             // **제목 앞에 둔다** — 값은 오른쪽부터 잘리므로, 뒤에 붙이면 흔한 길이의
             // 제목에서 이 줄을 그냥 "막힘" 과 가르는 유일한 말이 통째로 사라진다.
-            // 미뤄 뺀 멤버 덕에 닫힌 것으로 선 묶음이면 묶음은 미룬 적이 없다 — 그 멤버를 댄다.
+            // 미뤄 뺀 멤버만 기다리는 묶음이면 묶음은 미룬 적이 없다 — 그 멤버를 댄다.
+            // **첫 멤버와 남은 수만** 댄다: 값은 오른쪽부터 잘리므로 다 늘어놓으면 큰 에픽을
+            // 미뤘을 때 제목이 통째로 사라진다(리뷰 moai-2sea.tns).
             Blocker::Deferred if !aside.is_empty() => {
-                ("막힘", format!("· {b}  미룬 멤버 {}  {}", aside.join(" "), app.title_of(b)))
+                let more = if aside.len() > 1 { format!(" 외 {}", aside.len() - 1) } else { String::new() };
+                ("막힘", format!("· {b}  미룬 멤버 {}{more}  {}", aside[0], app.title_of(b)))
             }
+            // 멤버가 없는 묶음 — 기다릴 일이 없어도 막는다(moai-1c2l). 채울 자리라고 댄다.
+            Blocker::Empty => ("막힘", format!("· {b}  멤버 없음  {}", app.title_of(b))),
             Blocker::Deferred => {
                 let shelf = at
                     .and_then(|at| crate::view::deferred_for(&app.issues[at], root, &app.now))
@@ -2056,7 +2061,9 @@ pub(super) mod tests {
         };
         // (막는 쪽을 꾸미는 법, 상세에 나와야 할 낱말, 나오면 안 될 낱말)
         type Case = (&'static str, fn(&mut Vec<Issue>), &'static [&'static str], &'static [&'static str]);
-        let cases: [Case; 5] = [
+        let cases: [Case; 6] = [
+            // 멤버가 없는 묶음 — 풀지 않고 비었다고 댄다(moai-1c2l).
+            ("빈 묶음", |v| v[6].epic = None, &["막힘", "멤버 없음"], &["풀림"]),
             ("끊긴 막음", |_| {}, &["끊김", "argos-9999"], &["막힘", "풀림"]),
             ("미뤄 둔 막음", |v| v[4].deferred_at = Some("2026-09-02T00:00:00Z".into()), &["막힘", "미룸"], &["풀림"]),
             ("멤버가 다 끝난 묶음", |v| v[6].status = Status::new("done"), &["풀림"], &["막힘"]),

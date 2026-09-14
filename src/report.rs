@@ -443,13 +443,51 @@ pub struct Stand<'a, 'c> {
     /// `todo` 로 서면서 도는 글리프를 낸다. 시작한 칸이 첫 칸과 같은 두 칸짜리 설정에서는
     /// 시작했다는 말 자체가 없으므로 언제나 거짓이다.
     pub busy: bool,
-    /// 칸이 `done` 으로 읽혔는데 **그 셈에서 미뤄 뺀 안 끝난 멤버** — 그 밖에는 비었다.
+    /// 이 묶음이 막을 때 **무엇을 기다리는가**([`Waiting`]). 칸만으로는 모른다.
+    pub waiting: Waiting,
+    /// [`Waiting::Shelved`] 일 때 **칸 셈에서 미뤄 뺀 안 끝난 멤버** — 그 밖에는 비었다.
     ///
     /// 칸은 "지금 할 것이 남았나" 를 말하므로 뺀 멤버를 안 센다. 그런데 그 칸으로 막음을
     /// 풀면, 같은 미룬 멤버에 곧장 막힌 줄은 held 로 서고 묶음 너머로 막힌 줄은 `ready`
     /// 에 선다(moai-0gxf). 미룬 일은 끝난 일이 아니다 — 막음은 이것으로 그 멤버를 댄다
     /// ([`blocker`]).
     pub aside: Vec<&'a str>,
+}
+
+/// 묶음이 막을 때 기다리는 것.
+///
+/// 묶음의 칸은 "지금 할 것이 남았나" 를 말하므로, 막음을 가르는 데는 모자란다 — 칸이
+/// `done` 이어도 미룬 멤버를 기다릴 수 있고(moai-0gxf), 첫 칸이어도 기다릴 일이 하나도
+/// 없을 수 있다(moai-1c2l). 둘 다 **막되 까닭을 댄다**([`held`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waiting {
+    /// 제 칸대로다 — 센 멤버에 안 끝난 일이 있거나, 전부 끝났다.
+    Live,
+    /// 센 멤버에 안 끝난 일이 없는데 미뤄 뺀 안 끝난 멤버가 있다([`Stand::aside`]).
+    Shelved,
+    /// 멤버가 하나도 없다 — 채우기 전에는 영영 안 풀린다.
+    Nothing,
+}
+
+/// 멤버(`of`)와 칸 셈에 든 멤버(`counted`)로 [`Waiting`] 과 뺀 안 끝난 멤버를 정한다.
+fn waiting_in<'a>(of: &[&'a Issue], counted: &[&'a Issue]) -> (Waiting, Vec<&'a str>) {
+    if of.is_empty() {
+        return (Waiting::Nothing, Vec::new());
+    }
+    if counted.iter().any(|m| !m.status.is_done()) {
+        return (Waiting::Live, Vec::new());
+    }
+    // 센 멤버가 전부 끝났거나 없다 — 안 끝난 멤버는 곧 미뤄 뺀 멤버다.
+    let aside: Vec<&str> = of.iter().filter(|m| !m.status.is_done()).map(|m| m.id.as_str()).collect();
+    let waiting = if aside.is_empty() { Waiting::Live } else { Waiting::Shelved };
+    (waiting, aside)
+}
+
+/// 제 칸대로가 아닌 묶음 → 기다리는 것과 뺀 멤버. `Live` 인 묶음은 안 든다.
+pub type Waits<'a> = BTreeMap<&'a str, (Waiting, Vec<&'a str>)>;
+
+fn waiting_of(id: &str, waits: &Waits) -> Waiting {
+    waits.get(id).map_or(Waiting::Live, |w| w.0)
 }
 
 /// [`group_states_in`] 과 같은 한 번의 셈에서 칸과 시각을 함께 낸다.
@@ -476,37 +514,25 @@ pub fn group_stands_in<'a, 'c>(
             let busy = started != cfg.first_status()
                 && counted.iter().any(|m| m.status.as_str() == started);
             let column = column_of(&counted, cfg);
-            // `done` 으로 읽혔으면 센 멤버는 전부 끝났다 — 안 끝난 멤버는 곧 뺀 멤버다.
-            let aside = if column == crate::config::DONE {
-                members
-                    .get(&(g.kind, g.id.as_str()))
-                    .into_iter()
-                    .flatten()
-                    .filter(|m| !m.status.is_done())
-                    .map(|m| m.id.as_str())
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            (g.id.as_str(), Stand { column, since, busy, aside })
+            let of = members.get(&(g.kind, g.id.as_str())).map(Vec::as_slice).unwrap_or_default();
+            let (waiting, aside) = waiting_in(of, &counted);
+            (g.id.as_str(), Stand { column, since, busy, waiting, aside })
         })
         .collect()
 }
 
-/// 막음을 가르는 데 드는 묶음 쪽 재료 — 읽은 칸과, 미뤄 뺀 멤버 덕에 `done` 으로 선
-/// 묶음의 그 멤버([`Stand::aside`]). 한 번의 셈에서 둘로 가른다.
-fn split_stands<'a, 'c>(
-    stands: BTreeMap<&'a str, Stand<'a, 'c>>,
-) -> (BTreeMap<&'a str, &'c str>, BTreeMap<&'a str, Vec<&'a str>>) {
+/// 막음을 가르는 데 드는 묶음 쪽 재료 — 읽은 칸과, 제 칸대로가 아닌 묶음이 기다리는
+/// 것([`Waits`]). 한 번의 셈에서 둘로 가른다.
+fn split_stands<'a, 'c>(stands: BTreeMap<&'a str, Stand<'a, 'c>>) -> (BTreeMap<&'a str, &'c str>, Waits<'a>) {
     let mut states = BTreeMap::new();
-    let mut aside = BTreeMap::new();
+    let mut waits = BTreeMap::new();
     for (id, s) in stands {
         states.insert(id, s.column);
-        if !s.aside.is_empty() {
-            aside.insert(id, s.aside);
+        if s.waiting != Waiting::Live {
+            waits.insert(id, (s.waiting, s.aside));
         }
     }
-    (states, aside)
+    (states, waits)
 }
 
 /// (종류, 묶음 id) → 그 묶음의 일. **롤업과 같은 자다** — 물려받은 소속까지, 일만.
@@ -587,18 +613,18 @@ pub fn has_finished_member(all: &[Issue], group: &Issue) -> bool {
 /// 에픽이면 적힌 칸은 안 읽힌다 — 믿으면 진행 중인 에픽을 손으로 done 에 둔
 /// 순간 막힌 일이 `ready` 에 서고, 다 끝난 에픽은 적힌 칸을 옮기기 전까지 영영 막는다.
 ///
-/// `aside` 는 미뤄 뺀 멤버 덕에 `done` 으로 선 묶음이다([`Stand::aside`]) — 그 묶음은
-/// 아직 막는다.
+/// `waits` 는 제 칸대로가 아닌 묶음이다([`Waits`]) — 칸이 `done` 이어도 미룬 멤버를
+/// 기다리면 아직 막는다.
 pub fn is_blocked(
     i: &Issue,
     by_id: &BTreeMap<&str, &Issue>,
     states: &BTreeMap<&str, &str>,
-    aside: &BTreeMap<&str, Vec<&str>>,
+    waits: &Waits,
 ) -> bool {
     // 미룸은 막는가를 바꾸지 않는다 — 미룬 막음도 막는다([`Blocker::blocks`]).
     i.blocked_by
         .iter()
-        .any(|b| blocker(standing(b, by_id, states), false, aside.contains_key(b.as_str())).blocks())
+        .any(|b| blocker(standing(b, by_id, states), false, waiting_of(b, waits)).blocks())
 }
 
 /// `blocked_by` 에 적힌 막음 하나가 지금 무엇인가.
@@ -617,28 +643,36 @@ pub enum Blocker {
     /// 그런 id 가 없다 — 막지 않는다. 끊긴 참조는 `moai status` 가
     /// `dangling_blocked_by` 로 드러내지, `ready` 가 영원히 막지 않는다.
     Missing,
+    /// 멤버가 하나도 없는 묶음이다 — **막는다**(moai-1c2l). 끊긴 참조와 달리 채울 자리가
+    /// 있다: 막음을 걸어 둔 빈 에픽은 대개 아직 안 채운 계획이다. 풀지 않는 대신 `ready`
+    /// 가 비었다고 댄다([`held`]).
+    Empty,
 }
 
 impl Blocker {
     /// 이 막음이 막히는 쪽을 `ready` 에서 빼는가.
     pub fn blocks(self) -> bool {
-        matches!(self, Blocker::Open | Blocker::Deferred)
+        matches!(self, Blocker::Open | Blocker::Deferred | Blocker::Empty)
     }
 }
 
 /// 막음 하나를 가른다. `column` 은 막는 줄이 **서 있는** 칸([`column`] — 묶음이면 읽은
 /// 칸)이고 그 id 가 없으면 `None`, `out_of_plan` 은 그 줄이 계획에서 빠졌는가
-/// ([`deferred_roots`] 에 드는가)다. `aside` 는 막는 줄이 **미뤄 뺀 멤버 덕에** `done`
-/// 으로 선 묶음인가다([`Stand::aside`]) — 그러면 끝난 것이 아니라 미룬 일을 기다린다.
+/// ([`deferred_roots`] 에 드는가)다. `waiting` 은 막는 줄이 묶음일 때 무엇을 기다리는가
+/// ([`Waiting`], 묶음이 아니면 `Live`) — 미뤄 뺀 멤버만 기다리면 칸이 `done` 이어도
+/// 미룬 막음이고, 멤버가 없으면 빈 막음이다.
+///
+/// **묶음 제 미룸이 빈 막음보다 먼저다** — 도로 집는 말이 곧 풀 길이다.
 ///
 /// **답만 여기서 정하고 재료는 부르는 쪽이 댄다.** 탐색기는 서 있는 칸과 미룸을 적재
 /// 때 이미 세어 들고 있어, 저장소 전부를 받는 꼴로 두면 프레임마다 그 셈을 다시 한다.
-pub fn blocker(column: Option<&str>, out_of_plan: bool, aside: bool) -> Blocker {
+pub fn blocker(column: Option<&str>, out_of_plan: bool, waiting: Waiting) -> Blocker {
     match column {
         None => Blocker::Missing,
-        Some(_) if aside => Blocker::Deferred,
+        Some(_) if waiting == Waiting::Shelved => Blocker::Deferred,
         Some(crate::config::DONE) => Blocker::Done,
         Some(_) if out_of_plan => Blocker::Deferred,
+        Some(_) if waiting == Waiting::Nothing => Blocker::Empty,
         Some(_) => Blocker::Open,
     }
 }
@@ -1129,12 +1163,12 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
 pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let group = groups(issues);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    let (roots, states, aside) = blocking(issues, cfg, &group, &by_id);
+    let (roots, states, waits) = blocking(issues, cfg, &group, &by_id);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     let mut out: Vec<&Issue> = issues
         .iter()
         // 값싼 막음 검사를 먼저 한다 — `unblocked_pick` 은 자식을 찾느라 목록을 걷는다.
-        .filter(|i| !is_blocked(i, &by_id, &states, &aside) && unblocked_pick(i, issues, cfg, &out_of_plan))
+        .filter(|i| !is_blocked(i, &by_id, &states, &waits) && unblocked_pick(i, issues, cfg, &out_of_plan))
         .collect();
 
     let progress: BTreeMap<Option<String>, u8> =
@@ -1167,7 +1201,7 @@ fn blocking<'a, 'c>(
     cfg: &'c Config,
     epic_of: &BTreeMap<&'a str, &'a str>,
     by_id: &BTreeMap<&'a str, &'a Issue>,
-) -> (BTreeMap<&'a str, &'a str>, BTreeMap<&'a str, &'c str>, BTreeMap<&'a str, Vec<&'a str>>) {
+) -> (BTreeMap<&'a str, &'a str>, BTreeMap<&'a str, &'c str>, Waits<'a>) {
     let shelved = issues.iter().any(is_put_off);
     let by_group = issues.iter().any(|i| {
         i.blocked_by.iter().any(|b| by_id.get(b.as_str()).is_some_and(|x| is_group(x)))
@@ -1177,12 +1211,12 @@ fn blocking<'a, 'c>(
     }
     let mile_of = milestones(issues);
     let roots = deferred_roots_in(issues, epic_of, &mile_of);
-    let (states, aside) = if by_group {
+    let (states, waits) = if by_group {
         split_stands(group_stands_in(issues, cfg, epic_of, &mile_of, &roots))
     } else {
         (BTreeMap::new(), BTreeMap::new())
     };
-    (roots, states, aside)
+    (roots, states, waits)
 }
 
 /// 막음만 빼면 집을 수 있는가. `ready` 와 `held` 가 **같은 자로** 고른다 —
@@ -1217,6 +1251,9 @@ pub struct Held<'a> {
     pub by: Vec<&'a str>,
     /// `by` 를 풀려면 도로 집어야 할 줄 — 막는 줄이 미룬 에픽 밑이면 그 에픽.
     pub undo: Vec<&'a str>,
+    /// 막는 것 중 **멤버가 하나도 없는 묶음**([`Blocker::Empty`]). 도로 집을 것이 없으니
+    /// `undo` 에 안 든다 — 채우거나 막음을 풀어야 풀린다.
+    pub empty: Vec<&'a str>,
 }
 
 /// 막음만 아니면 집을 일인데, **안 끝난 막음 중 하나라도 미뤄 둔 것**인 줄.
@@ -1226,62 +1263,68 @@ pub struct Held<'a> {
 /// 까닭 없이 비고, 막는 줄은 어느 목록에도 없어 풀 길이 안 보인다.
 /// 그래서 **드러내되 고르지는 않는다.** 도로 집을지 막음을 풀지는 사람 몫이다.
 pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
-    // 미룬 줄이 없으면 미룬 막음도 없다 — 소속 지도를 안 세운다.
-    if !issues.iter().any(is_put_off) {
+    // 막음이 하나도 없으면 막혀 못 집는 일도 없다 — 소속 지도를 안 세운다.
+    if !issues.iter().any(|i| !i.blocked_by.is_empty()) {
         return Vec::new();
     }
     let group = groups(issues);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    let (roots, states, aside) = blocking(issues, cfg, &group, &by_id);
+    let (roots, states, waits) = blocking(issues, cfg, &group, &by_id);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     // 값싼 막음 검사를 먼저 한다. `unblocked_pick` 은 자식을 찾느라 목록을
     // 한 번 걷는다 — 모든 줄에 먼저 부르면 `ready` 가 부를 때마다 제곱이다.
     let mut out: Vec<Held> = issues
         .iter()
         .filter_map(|i| {
-            let by = deferred_blockers(i, &by_id, &out_of_plan, &states, &aside);
-            (!by.is_empty()).then_some((i, by))
+            let (by, empty) = holding(i, &by_id, &out_of_plan, &states, &waits);
+            (!by.is_empty() || !empty.is_empty()).then_some((i, by, empty))
         })
-        .filter(|(i, _)| unblocked_pick(i, issues, cfg, &out_of_plan))
-        .map(|(i, by)| {
+        .filter(|(i, _, _)| unblocked_pick(i, issues, cfg, &out_of_plan))
+        .map(|(i, by, empty)| {
             let mut undo: Vec<&str> = by.iter().filter_map(|b| roots.get(b).copied()).collect();
             undo.sort_unstable();
             undo.dedup();
-            Held { issue: i, by, undo }
+            Held { issue: i, by, undo, empty }
         })
         .collect();
     out.sort_by(|a, b| crate::query::display_order(a.issue, b.issue));
     out
 }
 
-/// `i` 를 막는 것 중 안 끝났고 계획에서 빠진 것.
+/// `i` 를 막는 것 중 **까닭을 따로 대야 하는 것** — (안 끝났고 계획에서 빠진 것, 멤버가
+/// 없는 묶음).
 ///
-/// 막는 것이 미뤄 뺀 멤버 덕에 `done` 으로 선 묶음이면 **묶음 대신 그 멤버를** 댄다 —
-/// 도로 집을 곳은 그 멤버의 미룸이지 미룬 적 없는 묶음이 아니다. 둘로 한 멤버에 닿으면
-/// 한 번만 댄다.
-fn deferred_blockers<'a>(
+/// 막는 것이 미뤄 뺀 멤버만 기다리는 묶음이면 **묶음 대신 그 멤버를** 댄다 — 도로 집을
+/// 곳은 그 멤버의 미룸이지 미룬 적 없는 묶음이 아니다. 둘로 한 멤버에 닿으면 한 번만 댄다.
+fn holding<'a>(
     i: &Issue,
     by_id: &BTreeMap<&str, &'a Issue>,
     out_of_plan: &BTreeSet<&str>,
     states: &BTreeMap<&str, &str>,
-    aside: &BTreeMap<&str, Vec<&'a str>>,
-) -> Vec<&'a str> {
-    let mut out: Vec<&str> = Vec::new();
+    waits: &Waits<'a>,
+) -> (Vec<&'a str>, Vec<&'a str>) {
+    let (mut by, mut empty): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
     for x in i.blocked_by.iter().filter_map(|b| by_id.get(b.as_str()).copied()) {
-        let set_aside = aside.get(x.id.as_str());
-        if blocker(Some(column(x, states)), out_of_plan.contains(x.id.as_str()), set_aside.is_some())
-            != Blocker::Deferred
-        {
-            continue;
-        }
-        let named = set_aside.map_or_else(|| vec![x.id.as_str()], Clone::clone);
-        for id in named {
-            if !out.contains(&id) {
-                out.push(id);
+        let id = x.id.as_str();
+        let wait = waits.get(id);
+        let waiting = wait.map_or(Waiting::Live, |w| w.0);
+        match blocker(Some(column(x, states)), out_of_plan.contains(id), waiting) {
+            Blocker::Deferred => {
+                let named = match wait {
+                    Some((Waiting::Shelved, aside)) => aside.clone(),
+                    _ => vec![id],
+                };
+                for n in named {
+                    if !by.contains(&n) {
+                        by.push(n);
+                    }
+                }
             }
+            Blocker::Empty => empty.push(id),
+            Blocker::Open | Blocker::Done | Blocker::Missing => {}
         }
     }
-    out
+    (by, empty)
 }
 
 
@@ -1473,7 +1516,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 셈이라 따로 부르면 `moai status` 한 번에 같은 걸음을 두 벌 걷는다.
     let mile_of = milestones(issues);
     let roots = deferred_roots_in(issues, &group, &mile_of);
-    let (states, aside) = split_stands(group_stands_in(issues, cfg, &group, &mile_of, &roots));
+    let (states, waits) = split_stands(group_stands_in(issues, cfg, &group, &mile_of, &roots));
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     let work: Vec<&Issue> =
         issues.iter().filter(|i| is_work(i) && !out_of_plan.contains(i.id.as_str())).collect();
@@ -1583,13 +1626,13 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 미뤄 둔 것에 막힌 것은 **아래 2-3 이 제 이름으로** 말한다. 여기서도
     // 세면 같은 줄이 두 번 나오고, 이쪽 말로는 막는 줄을 어디서 찾는지 모른다.
     let by_deferred =
-        |i: &Issue| !deferred_blockers(i, &by_id, &out_of_plan, &states, &aside).is_empty();
+        |i: &Issue| !holding(i, &by_id, &out_of_plan, &states, &waits).0.is_empty();
     let stuck: Vec<&Issue> = work
         .iter()
         .copied()
         .filter(|i| {
             !i.status.is_done()
-                && is_blocked(i, &by_id, &states, &aside)
+                && is_blocked(i, &by_id, &states, &waits)
                 && !by_deferred(i)
                 && days_since(&i.status_since, now).is_some_and(|d| d > BLOCKED_STALE_DAYS)
         })
@@ -2032,13 +2075,13 @@ mod tests {
     /// `ready` 가 빼는 것과 `held` 가 대는 것이 이 표 하나에서 나온다.
     #[test]
     fn a_blocker_is_judged_in_one_place() {
-        assert_eq!(blocker(None, false, false), Blocker::Missing);
-        assert_eq!(blocker(None, true, false), Blocker::Missing);
-        assert_eq!(blocker(Some("done"), true, false), Blocker::Done);
-        assert_eq!(blocker(Some("todo"), true, false), Blocker::Deferred);
-        assert_eq!(blocker(Some("review"), false, false), Blocker::Open);
+        assert_eq!(blocker(None, false, Waiting::Live), Blocker::Missing);
+        assert_eq!(blocker(None, true, Waiting::Live), Blocker::Missing);
+        assert_eq!(blocker(Some("done"), true, Waiting::Live), Blocker::Done);
+        assert_eq!(blocker(Some("todo"), true, Waiting::Live), Blocker::Deferred);
+        assert_eq!(blocker(Some("review"), false, Waiting::Live), Blocker::Open);
         // 미뤄 뺀 멤버 덕에 done 으로 선 묶음은 끝난 것이 아니다(moai-0gxf).
-        assert_eq!(blocker(Some("done"), false, true), Blocker::Deferred);
+        assert_eq!(blocker(Some("done"), false, Waiting::Shelved), Blocker::Deferred);
         let blocks: Vec<bool> =
             [Blocker::Open, Blocker::Deferred, Blocker::Done, Blocker::Missing].map(Blocker::blocks).to_vec();
         assert_eq!(blocks, [true, true, false, false]);
@@ -3385,6 +3428,60 @@ mod tests {
         // 뺀 멤버가 끝나면 풀린다.
         back[2].status = Status::new("done");
         assert_eq!(picks(&back), ["argos-0004", "argos-0005"]);
+    }
+
+    /// **기다릴 일이 없는 묶음이 막아도 까닭을 댄다**(moai-1c2l). 끝난 멤버 없이 전부
+    /// 미룬 묶음은 첫 칸이라 막는데, 그 칸은 미룬 멤버만 기다린다 — 접은 묶음(moai-0gxf)과
+    /// 같은 말을 한다. 멤버가 하나도 없는 묶음은 영영 안 풀리니 비었다고 댄다. 둘 다
+    /// 막음은 풀지 않는다 — 미룬 일은 끝난 일이 아니고, 빈 에픽은 채울 자리다.
+    #[test]
+    fn a_group_with_nothing_live_to_wait_on_says_why_it_blocks() {
+        let blocked_by = |id: &str| {
+            let mut x = make("argos-0009", Kind::Issue, "todo");
+            x.blocked_by = vec![id.into()];
+            x
+        };
+        type Said = (String, Vec<String>, Vec<String>, Vec<String>);
+        let said = |issues: &[Issue]| -> Vec<Said> {
+            let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+            held(issues, &cfg()).iter().map(|h| (h.issue.id.clone(), s(&h.by), s(&h.undo), s(&h.empty))).collect()
+        };
+        let row = |by: &[&str], undo: &[&str], empty: &[&str]| -> Said {
+            let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+            ("argos-0009".into(), s(by), s(undo), s(empty))
+        };
+
+        // 끝난 멤버 없이 전부 미뤘다 — 칸은 첫 칸이지만 기다리는 것은 미룬 멤버뿐이다.
+        let mut rest = member("argos-0002", "argos-0001", "todo");
+        rest.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let shelved = vec![make("argos-0001", Kind::Epic, "todo"), rest, blocked_by("argos-0001")];
+        assert!(picks(&shelved).is_empty());
+        assert_eq!(said(&shelved), [row(&["argos-0002"], &["argos-0002"], &[])]);
+
+        // 멤버가 하나도 없다 — 도로 집을 것이 없으니 비었다고 댄다.
+        let empty = vec![make("argos-0001", Kind::Epic, "todo"), blocked_by("argos-0001")];
+        assert!(picks(&empty).is_empty(), "빈 에픽이 막음을 풀었다");
+        assert_eq!(said(&empty), [row(&[], &[], &["argos-0001"])]);
+        // 빈 마일스톤도 같다.
+        let stone = vec![make("argos-0001", Kind::Milestone, "todo"), blocked_by("argos-0001")];
+        assert_eq!(said(&stone), [row(&[], &[], &["argos-0001"])]);
+
+        // 빈 묶음을 제가 미뤘으면 그 미룸이 먼저다 — 도로 집는 말이 풀 길이다.
+        let mut put_off = make("argos-0001", Kind::Epic, "todo");
+        put_off.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let own = vec![put_off, blocked_by("argos-0001")];
+        assert_eq!(said(&own), [row(&["argos-0001"], &["argos-0001"], &[])]);
+
+        // 멤버를 채우면 보통 막음이다 — 까닭을 따로 대지 않는다.
+        let mut filled = empty.clone();
+        filled.push(member("argos-0003", "argos-0001", "todo"));
+        assert!(said(&filled).is_empty(), "{:?}", said(&filled));
+        assert_eq!(picks(&filled), ["argos-0003"]);
+
+        // 막음 셈은 탐색기와 한 자리다.
+        assert_eq!(blocker(Some("todo"), false, Waiting::Nothing), Blocker::Empty);
+        assert_eq!(blocker(Some("todo"), true, Waiting::Nothing), Blocker::Deferred);
+        assert!(Blocker::Empty.blocks());
     }
 
     fn held_of(issues: &[Issue]) -> Vec<&str> {

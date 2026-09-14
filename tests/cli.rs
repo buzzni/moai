@@ -1380,6 +1380,24 @@ fn moving_a_group_writes_and_says_where_it_stands() {
     assert!(!ok(s.path(), &["mv", &held, "done"]).contains("서 있는 칸"));
 }
 
+/// **빈 묶음이 막으면 `ready` 가 까닭을 댄다**(moai-1c2l). 멤버 없는 에픽은 영영 안
+/// 풀리는데 끝난 것도 미룬 것도 아니라, 안 대면 목록이 까닭 없이 빈다.
+#[test]
+fn ready_names_an_empty_group_that_blocks() {
+    let s = init("emptyblock");
+    let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
+    let work = add(s.path(), &["원자적 쓰기"]);
+    ok(s.path(), &["link", &epic, "--blocks", &work]);
+    let r = ok(s.path(), &["ready"]);
+    assert!(r.contains("멤버가 없는 묶음에 막혀"), "왜 비었는지 안 말한다 — {r}");
+    assert!(r.contains(&format!("moai link {epic} --unblocks {work}")), "푸는 말을 안 댄다 — {r}");
+    assert!(!r.contains("미뤄 둔 것에 막혀"), "미룬 것이 없는데 미뤘다고 한다 — {r}");
+
+    // 채우면 보통 막음이다 — 까닭을 따로 대지 않는다.
+    add(s.path(), &["락", "-e", &epic]);
+    assert!(!ok(s.path(), &["ready"]).contains("멤버가 없는"));
+}
+
 /// 멤버 없는 에픽은 0% 가 아니다 — "아직 안 한 것" 과 "속을 안 채운 것" 은 다르다.
 #[test]
 fn an_empty_epic_reads_as_empty_not_zero() {

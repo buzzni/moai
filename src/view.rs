@@ -908,7 +908,8 @@ pub fn ready(
 
     // **미뤄 둔 것에 막힌 일은 까닭과 함께 댄다.** 막는 줄은 보드에도 `ready`
     // 에도 없으므로, 여기서 안 대면 목록이 왜 비었는지 아무 데서도 안 나온다.
-    if !held.is_empty() {
+    let shelved: Vec<&crate::report::Held> = held.iter().filter(|h| !h.by.is_empty()).collect();
+    if !shelved.is_empty() {
         out.push(String::new());
         out.push(format!(
             "{} {}",
@@ -917,11 +918,11 @@ pub fn ready(
                 style::DIM,
                 &format!(
                     "미뤄 둔 것에 막혀 못 집는 일 {}건 — 미룬 곳을 도로 집거나 막음을 푼다",
-                    held.len()
+                    shelved.len()
                 )
             )
         ));
-        for h in held {
+        for h in shelved {
             // **도로 집는 말은 미룬 곳을 댄다.** 막는 줄이 미룬 에픽 밑이면 그
             // 줄에 `--undo` 를 쳐 봐야 "이미 그렇다" 로 끝난다.
             out.push(format!(
@@ -930,6 +931,33 @@ pub fn ready(
                 marked(origin.branch(&h.issue.id), &h.issue.title, TITLE_CAP, style::DIM).0,
                 paint(style::DIM, &format!("← {}", h.by.join(" · "))),
                 paint(style::DIM, &format!("moai defer {} --undo", h.undo.join(" "))),
+            ));
+        }
+    }
+
+    // **멤버가 없는 묶음에 막힌 일도 댄다**(moai-1c2l). 그 묶음은 영영 안 풀리는데 끝난
+    // 것도 미룬 것도 아니라, 여기서 안 대면 목록이 까닭 없이 빈다. 도로 집을 것이 없으니
+    // 막음을 푸는 말을 댄다 — 채우면 보통 막음이 된다.
+    let bare: Vec<&crate::report::Held> = held.iter().filter(|h| !h.empty.is_empty()).collect();
+    if !bare.is_empty() {
+        out.push(String::new());
+        out.push(format!(
+            "{} {}",
+            paint(style::WARN, "!"),
+            paint(
+                style::DIM,
+                &format!("멤버가 없는 묶음에 막혀 못 집는 일 {}건 — 멤버를 채우거나 막음을 푼다", bare.len())
+            )
+        ));
+        for h in bare {
+            let unblock: Vec<String> =
+                h.empty.iter().map(|g| format!("moai link {g} --unblocks {}", h.issue.id)).collect();
+            out.push(format!(
+                "  {}  {}  {}  {}",
+                paint(style::ID, &h.issue.id),
+                marked(origin.branch(&h.issue.id), &h.issue.title, TITLE_CAP, style::DIM).0,
+                paint(style::DIM, &format!("← {} 멤버 없음", h.empty.join(" · "))),
+                paint(style::DIM, &unblock.join("  ")),
             ));
         }
     }

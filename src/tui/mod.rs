@@ -182,6 +182,7 @@ type States = std::collections::BTreeMap<String, Stood>;
 struct Stood {
     column: String,
     busy: bool,
+    waiting: crate::report::Waiting,
     aside: Vec<String>,
 }
 
@@ -190,7 +191,8 @@ fn states_of(issues: &[Issue], cfg: &Config) -> States {
         .into_iter()
         .map(|(id, s)| {
             let aside = s.aside.iter().map(|m| m.to_string()).collect();
-            (id.to_string(), Stood { column: s.column.to_string(), busy: s.busy, aside })
+            let stood = Stood { column: s.column.to_string(), busy: s.busy, waiting: s.waiting, aside };
+            (id.to_string(), stood)
         })
         .collect()
 }
@@ -791,14 +793,15 @@ impl App {
             .unwrap_or(i.status.as_str())
     }
 
-    /// 그 줄이 미뤄 뺀 멤버 덕에 `done` 으로 선 묶음이면 그 멤버(`report::Stand::aside`).
-    /// 막음을 가를 때 [`App::column`] 과 함께 `report::blocker` 에 댄다.
-    pub fn aside(&self, at: usize) -> &[String] {
+    /// 그 줄이 묶음이면 막을 때 무엇을 기다리는가와 미뤄 뺀 멤버(`report::Stand::waiting`·
+    /// `aside`). 묶음이 아니면 제 칸대로다. 막음을 가를 때 [`App::column`] 과 함께
+    /// `report::blocker` 에 댄다.
+    pub fn waits(&self, at: usize) -> (crate::report::Waiting, &[String]) {
         let i = &self.issues[at];
         crate::report::is_group(i)
             .then(|| self.states.get(&i.id))
             .flatten()
-            .map_or(&[], |s| s.aside.as_slice())
+            .map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
     }
 
     /// 새 자료를 받아들이고 어긋난 것을 손본다. **시험이 저장소 없이 부른다** — 진짜
