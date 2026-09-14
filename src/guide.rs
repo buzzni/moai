@@ -92,11 +92,13 @@ idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
 에픽 하나 + 이슈 3~7개로 쪼갠 안을 사람에게 **한 번** 보여주고 물어본다.
 "좋다" 를 받으면 `moai add --from -` 로 한 번에 만든다 (`--dry-run` 으로 먼저 봐도 된다).
 
-    moai add --from - <<'MD'
-    # 에픽 제목
-    - [p1] 첫 이슈 #enhancement
-    - [p2] 둘째 이슈
-    MD"#;
+```sh
+moai add --from - <<'MD'
+# 에픽 제목
+- [p1] 첫 이슈 #enhancement
+- [p2] 둘째 이슈
+MD
+```"#;
 
 const IDEAS: &str = r#"    moai idea add "반짝 떠오른 것"                 담기
     moai idea add "긴 생각" -b -                   본문은 stdin 에서
@@ -105,10 +107,12 @@ const IDEAS: &str = r#"    moai idea add "반짝 떠오른 것"                 
 
 때가 되면 하나를 에픽과 이슈로 펼친다. 펼치면 그 생각은 닫힌다.
 
-    moai idea promote <id> --from - <<'MD'
-    # 에픽 제목
-    - [p1] 첫 이슈 #enhancement
-    MD"#;
+```sh
+moai idea promote <id> --from - <<'MD'
+# 에픽 제목
+- [p1] 첫 이슈 #enhancement
+MD
+```"#;
 
 const DEFERRING: &str = r#"    moai defer <id> -m "다음 분기에"       계획에서 잠시 뺀다
     moai defer <id> --undo                 도로 집는다
@@ -357,11 +361,13 @@ pub fn reference() -> String {
 `#` 줄은 에픽, `-` 줄은 바로 위 에픽의 이슈다. `[pN]` 과 `#태그` 는 없어도 된다.
 제목이 `[` 로 시작하거나 끝에 `#낱말` 이 붙으면 `\[`·`\#` 로 적는다 (`- \[WIP] 이슈 \#12`).
 
-    moai add --from - <<'MD'
-    # 저장 계층
-    - [p1] 원자적으로 쓴다 #enhancement
-    - 잘린 줄을 복구한다 #bug
-    MD
+```sh
+moai add --from - <<'MD'
+# 저장 계층
+- [p1] 원자적으로 쓴다 #enhancement
+- 잘린 줄을 복구한다 #bug
+MD
+```
 
 `--dry-run` 이 heredoc 오타로 엉뚱한 여섯 개를 만드는 것을 막는다.
 
@@ -428,8 +434,9 @@ pub fn reference() -> String {
 /// **`~/.claude/sessions/*.json` 은 Claude Code 의 속 파일이다.** 문서에 없고
 /// 판마다 바뀔 수 있어, 글이 그렇다고 밝히고 못 읽을 때의 길을 함께 준다.
 ///
-/// **모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 글에 적지 않고, `main` 은 그
-/// 저장소의 본 가지로 바꿔 읽게 한다. 워크트리 안의 규칙 3 이 main 에서 집은 리뷰를
+/// **모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 글에 적지 않고, 가지 이름을 박지
+/// 않는다 — 감독이 루트 체크아웃의 지금 가지를 읽어 `<본 가지>` 에 채운다(사용자 결정,
+/// moai-7ljm). 일꾼이 뜨고 병합하는 곳이 그 체크아웃이라 원격 기본 가지보다 어긋날 틈이 없다. 워크트리 안의 규칙 3 이 main 에서 집은 리뷰를
 /// 못 보는 것은 moai-iz38(에픽 moai-wofj)이지만, 남의 저장소에서 그 id 는 아무것도 안
 /// 가리키고 고친 뒤에는 거짓이 된다.
 pub fn supervise() -> String {
@@ -446,8 +453,17 @@ description: 같은 저장소에서 놀고 있는 Claude 세션들에 쌓인 ide
 대신 설계를 정하지 않는다. 병합은 일꾼이 하고, 겹치는 병합은 일꾼끼리 먼저
 알린다.
 
-아래의 `main` 은 이 저장소의 본 가지다. 이름이 다르면(`master`·`develop`) 명령에서도
-일꾼에게 싣는 글에서도 그 이름으로 바꾼다.
+**본 가지는 바퀴를 시작할 때 루트에서 한 번 읽는다.** 일꾼이 워크트리를 뜨고 병합하는
+곳이 루트 체크아웃이라 그 체크아웃의 지금 가지가 본 가지다 — 원격의 기본 가지는 루트와
+다를 수 있고 낡았을 수 있다. 루트가 detached 면 `origin/HEAD`, 그것도 없으면 `main` 이다.
+`<루트>` 는 2 의 스크립트가 찾는 자리다.
+
+```sh
+b=$(git -C <루트> branch --show-current); [ -n "$b" ] || b=$(git -C <루트> symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||'); echo "${{b:-main}}"
+```
+
+읽은 이름을 아래 명령의 `<본 가지>` 와 일꾼에게 싣는 글의 `<본 가지>` 에 채운다.
+**일꾼은 다시 읽지 않는다** — 워크트리 안에서 읽으면 제 가지가 나온다.
 
 ## 한 바퀴
 
@@ -471,36 +487,38 @@ Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽�
 (`CLAUDE_CONFIG_DIR` 를 옮겼으면 그 아래다). 모노레포의 하위 프로젝트면 `.moai` 가
 있는 그 하위가 루트다.
 
-    python3 - "$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)" "$(git rev-parse --show-toplevel)" <<'PY'
-    import glob, json, os, sys
-    if not sys.argv[1]:
-        sys.exit("git 저장소 안에서 부른다")
-    top, here = os.path.realpath(sys.argv[2]), os.path.realpath(os.getcwd())
-    while here not in (top, os.path.dirname(here)) and not os.path.isdir(os.path.join(here, ".moai")):
-        here = os.path.dirname(here)
-    root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
-    trees = os.path.join(root, ".claude", "worktrees") + os.sep
-    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-    unread = 0
-    for f in glob.glob(os.path.join(home, "sessions", "*.json")):
-        try:
-            s = json.load(open(f))
-            os.kill(s["pid"], 0)
-            cwd = os.path.realpath(s["cwd"]) if s["cwd"] else None
-        except OSError:
-            continue
-        except (ValueError, KeyError, TypeError, OverflowError):
-            unread += 1
-            continue
-        if cwd is None:
-            unread += 1
-        elif cwd == root:
-            print("루트    ", s.get("status"), s.get("name"))
-        elif cwd.startswith(trees):
-            print("워크트리", s.get("status"), s.get("name"), cwd)
-    if unread:
-        print("못 읽은 파일", unread)
-    PY
+```sh
+python3 - "$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)" "$(git rev-parse --show-toplevel)" <<'PY'
+import glob, json, os, sys
+if not sys.argv[1]:
+    sys.exit("git 저장소 안에서 부른다")
+top, here = os.path.realpath(sys.argv[2]), os.path.realpath(os.getcwd())
+while here not in (top, os.path.dirname(here)) and not os.path.isdir(os.path.join(here, ".moai")):
+    here = os.path.dirname(here)
+root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
+trees = os.path.join(root, ".claude", "worktrees") + os.sep
+home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+unread = 0
+for f in glob.glob(os.path.join(home, "sessions", "*.json")):
+    try:
+        s = json.load(open(f))
+        os.kill(s["pid"], 0)
+        cwd = os.path.realpath(s["cwd"]) if s["cwd"] else None
+    except OSError:
+        continue
+    except (ValueError, KeyError, TypeError, OverflowError):
+        unread += 1
+        continue
+    if cwd is None:
+        unread += 1
+    elif cwd == root:
+        print("루트    ", s.get("status"), s.get("name"))
+    elif cwd.startswith(trees):
+        print("워크트리", s.get("status"), s.get("name"), cwd)
+if unread:
+    print("못 읽은 파일", unread)
+PY
+```
 
 - **맡기는 것은 자리가 루트이고 `idle`·`waiting` 인 세션뿐이다.** `busy` 는
   일하는 중이고, 그 밖의 값(`shell` 따위)은 뜻을 모르니 맡기지 않는다
@@ -519,7 +537,7 @@ Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽�
   체크아웃이다
 
 **3. 보낸다.** 놀고 있는 세션 하나에 idea **하나**를 `SendMessage` 로 보낸다.
-일꾼은 이 대화를 모르니 아래 글을 **통째로** 싣는다 — 일꾼이 받는 것은 이 글뿐이라,
+일꾼은 이 대화를 모르니 아래 글을 `<내 이름>`·`<id>`·`<제목>`·`<본 가지>` 를 채워 **통째로** 싣는다 — 일꾼이 받는 것은 이 글뿐이라,
 일꾼이 지킬 것은 모두 이 안에 있다.
 
 {brief}
@@ -534,7 +552,7 @@ Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽�
 
 **5. 보고를 확인하고 다음을 보낸다.** 보고를 믿기 전에 셋을 본다.
 
-    git merge-base --is-ancestor <머지 해시> main && echo 있다   머지가 main 에 있는가
+    git merge-base --is-ancestor <머지 해시> <본 가지> && echo 있다   머지가 본 가지에 있는가
     moai show <에픽>                       펼친 에픽과 멤버가 done 인가
     git worktree list                      그 워크트리가 사라졌는가
 
@@ -545,11 +563,11 @@ Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽�
 셋이 맞으면 그 세션에 다음 idea 를 보낸다. 어긋나면 그 세션에 무엇이 남았는지
 묻고, 대신 끝내지 않는다.
 
-## 공유 main
+## 공유 루트
 
 루트 체크아웃은 **모든 세션이 같이 쓴다.** 한 세션이 병합을 열어 둔 사이(`MERGE_HEAD`)에
 다른 세션이 트래커 노트를 커밋하면, 그 커밋이 남의 병합을 제 제목으로 봉인한다 — 실제로
-그렇게 됐다. 그래서 감독이든 일꾼이든 main 에서는:
+그렇게 됐다. 그래서 감독이든 일꾼이든 루트에서는:
 
 - 트래커 커밋에 경로를 준다 — `git commit -m "…" -- .moai/`. 병합이 열려 있으면 git 이
   경로 준 커밋을 거절하니, 그 병합을 연 세션이 끝낼 때까지 기다렸다 다시 친다. 경로 없는
@@ -582,30 +600,31 @@ fn brief() -> String {
     format!(
         r#"    감독 세션(<내 이름>)이 idea <id> 를 맡긴다 — <제목>.
     먼저 읽을 것: moai show <id>
-    1. main 에서 펼친다 — idea 를 일감으로 바꾸는 길은 `moai idea promote <id> --from -`
+    본 가지: <본 가지> — 아래의 가지 이름이다. 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다
+    1. 루트에서 펼친다 — idea 를 일감으로 바꾸는 길은 `moai idea promote <id> --from -`
        하나다. 이슈 하나짜리여도 에픽 + 이슈로 펼친다. `--dry-run` 을 먼저 본다.
        그 idea 가 이미 done 이면(누가 펼쳤다) 펼치지 말고 감독에게 알린다 — 다시 펼치면
        에픽이 둘 선다
-    2. 멤버를 `moai mv <멤버> in_progress` 로 집고 main 에 커밋한다. 루트는 모든 세션이
+    2. 멤버를 `moai mv <멤버> in_progress` 로 집고 루트에서 커밋한다. 루트는 모든 세션이
        같이 쓴다 — 남이 병합을 열어 둔 사이(MERGE_HEAD)에 친 커밋은 그 병합을 제 제목으로
        봉인한다. 그래서 트래커 커밋에는 경로를 준다. 병합이 열려 있으면 git 이 거절하니,
        그 병합이 끝나기를 기다렸다 다시 친다
          git commit -m "chore(tracker): <에픽> 를 워크트리에서 집는다" -- .moai/
-    3. 2 의 커밋 뒤 곧바로 `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> main`
-       으로 로컬 main 에서 뜨고 EnterWorktree(path) 로 들어간다. 이름은 idea id 가 아니라
+    3. 2 의 커밋 뒤 곧바로 `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> <본 가지>`
+       로 로컬 <본 가지> 에서 뜨고 EnterWorktree(path) 로 들어간다. 이름은 idea id 가 아니라
        펼친 에픽 id 다. 워크트리가 서기 전에는 루트의 다른 세션들이 이 멤버를 제 초점으로 읽는다
     4. 노트에 없는 설계 결정은 추측하지 말고 AskUserQuestion 으로 묻는다 —
        사람이 일꾼 창을 보고 있다
     5. 리뷰 이슈를 세워(규칙 3) `/code-review high --fix`. 반영은 별도 fix: 커밋,
        넘긴 것은 이슈 번호와 함께 노트.
-       main 에서 세우거나 집은 리뷰 이슈를 워크트리의 훅이 못 봐서 막힐 때만 — 훅은 그
+       루트에서 세우거나 집은 리뷰 이슈를 워크트리의 훅이 못 봐서 막힐 때만 — 훅은 그
        워크트리의 스냅샷만 읽는다 — 같은 관점·단계·`--fix` 범위로 리뷰 서브에이전트를
        돌린다. 리뷰 이슈·관점(`-b`)·원문 노트·닫는 `-m` 은 그대로 남긴다. 관점이 없다
        같은 다른 거절은 돌아가지 않고 거절문이 내는 명령대로 고친다
-    6. 멤버의 일이 다 끝나면 워크트리에서 main 을 받아 충돌을 풀고 시험을 돌린다. 고칠
+    6. 멤버의 일이 다 끝나면 워크트리에서 <본 가지> 를 받아 충돌을 풀고 시험을 돌린다. 고칠
        것은 여기서 고친다 — 워크트리가 남아 있는 동안 루트에서는 규칙 2 가 편집을 막는다
-    7. 병합 전에 에픽 전체를 `/code-review max --fix` 로 본다 — 가지가 main 을 떠난
-       자리(`git merge-base main HEAD`)부터의 diff 다. 6 에서 main 을 받았으니 충돌을 푼
+    7. 병합 전에 에픽 전체를 `/code-review max --fix` 로 본다 — 가지가 <본 가지> 를 떠난
+       자리(`git merge-base <본 가지> HEAD`)부터의 diff 다. 6 에서 <본 가지> 를 받았으니 충돌을 푼
        자리도 든다. 리뷰 이슈를 따로 세운다. 막히면 5 의 길로 간다
          {review}
     8. ExitWorktree(keep) 로 루트로 돌아온다 — 워크트리 안에서 그것을 지우면 세션의
@@ -623,7 +642,7 @@ fn brief() -> String {
        워크트리의 것으로 읽어 `-m` 없는 리뷰 닫기를 못 막는다. 리뷰 이슈는 무엇이
        나왔는지를 남기며 닫는다
 {close}
-       시험 통과를 보고 2 처럼 경로를 준 커밋으로 main 에 남긴다
+       시험 통과를 보고 2 처럼 경로를 준 커밋으로 루트에 남긴다
     11. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 펼친 에픽 id, 한두 줄 요약,
        넘긴 것·새 idea"#
     )
@@ -740,8 +759,8 @@ mod tests {
         let removed = brief.find("git worktree remove").expect("워크트리를 지우는 걸음이 없다");
         let closed = brief.find("moai mv <리뷰 id> done").expect("리뷰를 닫는 걸음이 없다");
         assert!(removed < closed, "워크트리를 지우기 전에 리뷰를 닫는다");
-        // 에픽 리뷰는 main 을 받은 뒤다 — 먼저 보면 충돌을 푼 자리가 리뷰 없이 main 에 선다.
-        let synced = brief.find("main 을 받아").expect("main 을 받는 걸음이 없다");
+        // 에픽 리뷰는 본 가지를 받은 뒤다 — 먼저 보면 충돌을 푼 자리가 리뷰 없이 main 에 선다.
+        let synced = brief.find("<본 가지> 를 받아").expect("본 가지를 받는 걸음이 없다");
         let reviewed = brief.find("/code-review max --fix").expect("에픽 리뷰 걸음이 없다");
         assert!(synced < reviewed, "main 을 받기 전에 에픽 전체를 리뷰한다");
         assert!(brief.contains("이미 done 이면"), "누가 펼친 idea 를 또 펼쳐 에픽이 둘 선다");
@@ -772,5 +791,35 @@ mod tests {
             })
             .collect();
         assert!(ids.is_empty(), "이 저장소의 이슈 id 가 섰다 — {ids:?}");
+    }
+    /// **일꾼에게 싣는 글은 가지 이름을 박지 않는다.** `main` 을 박으면 `develop`·`trunk`
+    /// 저장소에서 워크트리 뜨기부터 실패한다. 감독이 읽어 채울 자리와 읽는 한 줄이 선다.
+    #[test]
+    fn the_brief_names_no_branch() {
+        let (brief, supervise) = (brief(), supervise());
+        assert!(!brief.contains("main"), "일꾼 글이 가지 이름을 박았다");
+        assert!(brief.contains("<본 가지>"), "일꾼 글에 본 가지 자리가 없다");
+        assert!(supervise.contains("branch --show-current"), "감독이 루트의 가지를 안 읽는다");
+        // 포맷 문자열의 `${{b:-main}}` 이 셸의 `${b:-main}` 으로 풀렸는가.
+        assert!(supervise.contains("echo \"${b:-main}\""), "본 가지 한 줄이 포맷에서 깨졌다");
+    }
+
+    /// **heredoc 은 들여쓰지 않는다.** 4칸 들여쓴 블록을 그대로 복사하면 닫는 표시도
+    /// 들여써져 셸이 끝을 못 찾는다 — `<<-` 는 탭만 벗긴다. 여는 줄도 닫는 줄도 왼쪽 끝이다.
+    #[test]
+    fn heredocs_are_copyable_as_written() {
+        let mut seen = 0;
+        for text in [agents(), skill(), reference(), supervise()] {
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                let Some(at) = line.find("<<'") else { continue };
+                let rest = &line[at + 3..];
+                let tag = &rest[..rest.find('\'').expect("heredoc 표시의 닫는 따옴표가 없다")];
+                assert!(!line.starts_with(' '), "heredoc 여는 줄이 들여써졌다 — {line}");
+                assert!(lines[i + 1..].contains(&tag), "닫는 {tag} 가 왼쪽 끝에 없다 — {line}");
+                seen += 1;
+            }
+        }
+        assert!(seen >= 5, "heredoc 을 {seen}개밖에 못 찾았다");
     }
 }

@@ -42,11 +42,13 @@ idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
 에픽 하나 + 이슈 3~7개로 쪼갠 안을 사람에게 **한 번** 보여주고 물어본다.
 "좋다" 를 받으면 `moai add --from -` 로 한 번에 만든다 (`--dry-run` 으로 먼저 봐도 된다).
 
-    moai add --from - <<'MD'
-    # 에픽 제목
-    - [p1] 첫 이슈 #enhancement
-    - [p2] 둘째 이슈
-    MD
+```sh
+moai add --from - <<'MD'
+# 에픽 제목
+- [p1] 첫 이슈 #enhancement
+- [p2] 둘째 이슈
+MD
+```
 
 ### 지금 범위가 아닌 것은 담는다
 
@@ -57,10 +59,12 @@ idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
 
 때가 되면 하나를 에픽과 이슈로 펼친다. 펼치면 그 생각은 닫힌다.
 
-    moai idea promote <id> --from - <<'MD'
-    # 에픽 제목
-    - [p1] 첫 이슈 #enhancement
-    MD
+```sh
+moai idea promote <id> --from - <<'MD'
+# 에픽 제목
+- [p1] 첫 이슈 #enhancement
+MD
+```
 
 ### 이미 있는 일을 지금 안 할 때
 

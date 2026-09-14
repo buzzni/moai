@@ -58,11 +58,13 @@
 `#` 줄은 에픽, `-` 줄은 바로 위 에픽의 이슈다. `[pN]` 과 `#태그` 는 없어도 된다.
 제목이 `[` 로 시작하거나 끝에 `#낱말` 이 붙으면 `\[`·`\#` 로 적는다 (`- \[WIP] 이슈 \#12`).
 
-    moai add --from - <<'MD'
-    # 저장 계층
-    - [p1] 원자적으로 쓴다 #enhancement
-    - 잘린 줄을 복구한다 #bug
-    MD
+```sh
+moai add --from - <<'MD'
+# 저장 계층
+- [p1] 원자적으로 쓴다 #enhancement
+- 잘린 줄을 복구한다 #bug
+MD
+```
 
 `--dry-run` 이 heredoc 오타로 엉뚱한 여섯 개를 만드는 것을 막는다.
 
@@ -87,10 +89,12 @@
 
 때가 되면 하나를 에픽과 이슈로 펼친다. 펼치면 그 생각은 닫힌다.
 
-    moai idea promote <id> --from - <<'MD'
-    # 에픽 제목
-    - [p1] 첫 이슈 #enhancement
-    MD
+```sh
+moai idea promote <id> --from - <<'MD'
+# 에픽 제목
+- [p1] 첫 이슈 #enhancement
+MD
+```
 
 ## 미루기
 
