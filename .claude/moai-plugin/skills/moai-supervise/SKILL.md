@@ -9,13 +9,14 @@ description: 같은 저장소에서 놀고 있는 Claude 세션들에 쌓인 ide
 대신 설계를 정하지 않는다. 병합은 일꾼이 하고, 겹치는 병합은 일꾼끼리 먼저
 알린다.
 
-**본 가지는 바퀴를 시작할 때 루트에서 한 번 읽는다.** 일꾼이 워크트리를 뜨고 병합하는
+**본 가지는 바퀴를 시작할 때 한 번 읽는다.** 일꾼이 워크트리를 뜨고 병합하는
 곳이 루트 체크아웃이라 그 체크아웃의 지금 가지가 본 가지다 — 원격의 기본 가지는 루트와
 다를 수 있고 낡았을 수 있다. 루트가 detached 면 `origin/HEAD`, 그것도 없으면 `main` 이다.
-`<루트>` 는 2 의 스크립트가 첫 줄 `루트 자리` 로 내는 경로다.
+루트 체크아웃은 `git worktree list` 의 첫 자리라, 아래 한 줄은 저장소 어디서 불러도 —
+워크트리 안에서도 — 루트의 가지를 낸다. 아무것도 안 나오면 git 이 낸 오류를 보고 멈춘다.
 
 ```sh
-b=$(git -C <루트> branch --show-current); [ -n "$b" ] || b=$(git -C <루트> symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||'); echo "${b:-main}"
+if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/^$/s|^branch refs/heads/||p'); [ -n "$b" ] || b=$(git symbolic-ref -q refs/remotes/origin/HEAD | sed 's|^refs/remotes/origin/||'); echo "${b:-main}"; fi
 ```
 
 읽은 이름을 아래 명령의 `<본 가지>` 와 일꾼에게 싣는 글의 `<본 가지>` 에 채운다.
@@ -41,7 +42,7 @@ b=$(git -C <루트> branch --show-current); [ -n "$b" ] || b=$(git -C <루트> s
 **2. 일꾼을 찾는다.** `ListAgents` 는 세션의 자리(cwd)를 안 보여 준다.
 Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽는다
 (`CLAUDE_CONFIG_DIR` 를 옮겼으면 그 아래다). 모노레포의 하위 프로젝트면 `.moai` 가
-있는 그 하위가 루트다.
+있는 그 하위가 루트다. 스크립트는 첫 줄 `루트 자리` 에 그 `<루트>` 를 낸다.
 
 ```sh
 python3 - "$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)" "$(git rev-parse --show-toplevel)" <<'PY'

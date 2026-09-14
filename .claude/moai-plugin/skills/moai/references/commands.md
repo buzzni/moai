@@ -59,11 +59,11 @@
 제목이 `[` 로 시작하거나 끝에 `#낱말` 이 붙으면 `\[`·`\#` 로 적는다 (`- \[WIP] 이슈 \#12`).
 
 ```sh
-moai add --from - <<'MD'
+moai add --from - <<'PLAN'
 # 저장 계층
 - [p1] 원자적으로 쓴다 #enhancement
 - 잘린 줄을 복구한다 #bug
-MD
+PLAN
 ```
 
 `--dry-run` 이 heredoc 오타로 엉뚱한 여섯 개를 만드는 것을 막는다.
@@ -90,10 +90,10 @@ MD
 때가 되면 하나를 에픽과 이슈로 펼친다. 펼치면 그 생각은 닫힌다.
 
 ```sh
-moai idea promote <id> --from - <<'MD'
+moai idea promote <id> --from - <<'PLAN'
 # 에픽 제목
 - [p1] 첫 이슈 #enhancement
-MD
+PLAN
 ```
 
 ## 미루기
@@ -121,12 +121,14 @@ MD
 
 리뷰 전문은 **마지막 `text` 블록**이다.
 
-    python3 -c "
-    import json,sys
-    t=[c['text'] for l in open(sys.argv[1])
-       for c in json.loads(l).get('message',{}).get('content') or []
-       if isinstance(c, dict) and c.get('type') == 'text']
-    print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
+```sh
+python3 -c "
+import json,sys
+t=[c['text'] for l in open(sys.argv[1])
+   for c in json.loads(l).get('message',{}).get('content') or []
+   if isinstance(c, dict) and c.get('type') == 'text']
+print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
+```
 
 **마지막 줄을 그냥 집지 않는다.** 한 턴의 블록이 줄마다 나뉘어 적히고 생각·
 도구 호출도 섞여, 마지막 줄이 글이 아닐 때가 있다. 그러면 빈 글이 넘어가고

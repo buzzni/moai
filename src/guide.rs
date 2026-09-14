@@ -93,11 +93,11 @@ idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
 "좋다" 를 받으면 `moai add --from -` 로 한 번에 만든다 (`--dry-run` 으로 먼저 봐도 된다).
 
 ```sh
-moai add --from - <<'MD'
+moai add --from - <<'PLAN'
 # 에픽 제목
 - [p1] 첫 이슈 #enhancement
 - [p2] 둘째 이슈
-MD
+PLAN
 ```"#;
 
 const IDEAS: &str = r#"    moai idea add "반짝 떠오른 것"                 담기
@@ -108,10 +108,10 @@ const IDEAS: &str = r#"    moai idea add "반짝 떠오른 것"                 
 때가 되면 하나를 에픽과 이슈로 펼친다. 펼치면 그 생각은 닫힌다.
 
 ```sh
-moai idea promote <id> --from - <<'MD'
+moai idea promote <id> --from - <<'PLAN'
 # 에픽 제목
 - [p1] 첫 이슈 #enhancement
-MD
+PLAN
 ```"#;
 
 const DEFERRING: &str = r#"    moai defer <id> -m "다음 분기에"       계획에서 잠시 뺀다
@@ -362,11 +362,11 @@ pub fn reference() -> String {
 제목이 `[` 로 시작하거나 끝에 `#낱말` 이 붙으면 `\[`·`\#` 로 적는다 (`- \[WIP] 이슈 \#12`).
 
 ```sh
-moai add --from - <<'MD'
+moai add --from - <<'PLAN'
 # 저장 계층
 - [p1] 원자적으로 쓴다 #enhancement
 - 잘린 줄을 복구한다 #bug
-MD
+PLAN
 ```
 
 `--dry-run` 이 heredoc 오타로 엉뚱한 여섯 개를 만드는 것을 막는다.
@@ -396,12 +396,14 @@ MD
 
 리뷰 전문은 **마지막 `text` 블록**이다.
 
-    python3 -c "
-    import json,sys
-    t=[c['text'] for l in open(sys.argv[1])
-       for c in json.loads(l).get('message',{{}}).get('content') or []
-       if isinstance(c, dict) and c.get('type') == 'text']
-    print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
+```sh
+python3 -c "
+import json,sys
+t=[c['text'] for l in open(sys.argv[1])
+   for c in json.loads(l).get('message',{{}}).get('content') or []
+   if isinstance(c, dict) and c.get('type') == 'text']
+print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
+```
 
 **마지막 줄을 그냥 집지 않는다.** 한 턴의 블록이 줄마다 나뉘어 적히고 생각·
 도구 호출도 섞여, 마지막 줄이 글이 아닐 때가 있다. 그러면 빈 글이 넘어가고
@@ -436,9 +438,11 @@ MD
 ///
 /// **모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 글에 적지 않고, 가지 이름을 박지
 /// 않는다 — 감독이 루트 체크아웃의 지금 가지를 읽어 `<본 가지>` 에 채운다(사용자 결정,
-/// moai-7ljm). 일꾼이 뜨고 병합하는 곳이 그 체크아웃이라 원격 기본 가지보다 어긋날 틈이 없다. 워크트리 안의 규칙 3 이 main 에서 집은 리뷰를
-/// 못 보는 것은 moai-iz38(에픽 moai-wofj)이지만, 남의 저장소에서 그 id 는 아무것도 안
-/// 가리키고 고친 뒤에는 거짓이 된다.
+/// moai-7ljm). 일꾼이 뜨고 병합하는 곳이 그 체크아웃이라 원격 기본 가지보다 덜 어긋난다.
+/// **다만 틈은 남는다** — 루트가 detached 이거나 바퀴 사이에 루트의 가지가 바뀌면, 일꾼의
+/// 루트 커밋·병합은 루트 HEAD 로 가고 워크트리는 `<본 가지>` 에서 뜬다(moai-dubz).
+/// 워크트리 안의 규칙 3 이 루트에서 집은 리뷰를 못 보는 것은 moai-iz38(에픽 moai-wofj)이지만,
+/// 남의 저장소에서 그 id 는 아무것도 안 가리키고 고친 뒤에는 거짓이 된다.
 pub fn supervise() -> String {
     let brief = brief();
     format!(
@@ -453,13 +457,14 @@ description: 같은 저장소에서 놀고 있는 Claude 세션들에 쌓인 ide
 대신 설계를 정하지 않는다. 병합은 일꾼이 하고, 겹치는 병합은 일꾼끼리 먼저
 알린다.
 
-**본 가지는 바퀴를 시작할 때 루트에서 한 번 읽는다.** 일꾼이 워크트리를 뜨고 병합하는
+**본 가지는 바퀴를 시작할 때 한 번 읽는다.** 일꾼이 워크트리를 뜨고 병합하는
 곳이 루트 체크아웃이라 그 체크아웃의 지금 가지가 본 가지다 — 원격의 기본 가지는 루트와
 다를 수 있고 낡았을 수 있다. 루트가 detached 면 `origin/HEAD`, 그것도 없으면 `main` 이다.
-`<루트>` 는 2 의 스크립트가 첫 줄 `루트 자리` 로 내는 경로다.
+루트 체크아웃은 `git worktree list` 의 첫 자리라, 아래 한 줄은 저장소 어디서 불러도 —
+워크트리 안에서도 — 루트의 가지를 낸다. 아무것도 안 나오면 git 이 낸 오류를 보고 멈춘다.
 
 ```sh
-b=$(git -C <루트> branch --show-current); [ -n "$b" ] || b=$(git -C <루트> symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||'); echo "${{b:-main}}"
+if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/^$/s|^branch refs/heads/||p'); [ -n "$b" ] || b=$(git symbolic-ref -q refs/remotes/origin/HEAD | sed 's|^refs/remotes/origin/||'); echo "${{b:-main}}"; fi
 ```
 
 읽은 이름을 아래 명령의 `<본 가지>` 와 일꾼에게 싣는 글의 `<본 가지>` 에 채운다.
@@ -485,7 +490,7 @@ b=$(git -C <루트> branch --show-current); [ -n "$b" ] || b=$(git -C <루트> s
 **2. 일꾼을 찾는다.** `ListAgents` 는 세션의 자리(cwd)를 안 보여 준다.
 Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽는다
 (`CLAUDE_CONFIG_DIR` 를 옮겼으면 그 아래다). 모노레포의 하위 프로젝트면 `.moai` 가
-있는 그 하위가 루트다.
+있는 그 하위가 루트다. 스크립트는 첫 줄 `루트 자리` 에 그 `<루트>` 를 낸다.
 
 ```sh
 python3 - "$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)" "$(git rev-parse --show-toplevel)" <<'PY'
@@ -697,9 +702,14 @@ mod tests {
 
     /// 포맷 문자열 안의 `{{`·`}}` 가 제대로 풀렸는가. 참고 문서의 파이썬 한 줄이
     /// 딕셔너리를 쓰므로, 한 번 틀리면 복사해 친 명령이 문법 오류로 죽는다.
+    ///
+    /// **여러 줄 명령은 들여쓰지 않는다.** 4칸 들여쓴 채 복사하면 파이썬 소스 줄이 공백으로
+    /// 시작해 `IndentationError` 로 죽고, 파이프 끝의 `moai note` 는 빈 글을 받아 원문을 못 남긴다.
     #[test]
     fn the_python_one_liner_survives_formatting() {
-        assert!(reference().contains(".get('message',{}).get('content')"));
+        let reference = reference();
+        assert!(reference.contains(".get('message',{}).get('content')"));
+        assert!(reference.contains("\npython3 -c \"\nimport json,sys\n"), "리뷰 원문을 꺼내는 파이썬이 들여써졌다");
     }
 
     /// 스킬의 frontmatter 는 **첫 줄**에서 시작해야 읽힌다.
@@ -760,10 +770,10 @@ mod tests {
         let removed = brief.find("git worktree remove").expect("워크트리를 지우는 걸음이 없다");
         let closed = brief.find("moai mv <리뷰 id> done").expect("리뷰를 닫는 걸음이 없다");
         assert!(removed < closed, "워크트리를 지우기 전에 리뷰를 닫는다");
-        // 에픽 리뷰는 본 가지를 받은 뒤다 — 먼저 보면 충돌을 푼 자리가 리뷰 없이 main 에 선다.
+        // 에픽 리뷰는 본 가지를 받은 뒤다 — 먼저 보면 충돌을 푼 자리가 리뷰 없이 본 가지에 선다.
         let synced = brief.find("<본 가지> 를 받아").expect("본 가지를 받는 걸음이 없다");
         let reviewed = brief.find("/code-review max --fix").expect("에픽 리뷰 걸음이 없다");
-        assert!(synced < reviewed, "main 을 받기 전에 에픽 전체를 리뷰한다");
+        assert!(synced < reviewed, "본 가지를 받기 전에 에픽 전체를 리뷰한다");
         assert!(brief.contains("이미 done 이면"), "누가 펼친 idea 를 또 펼쳐 에픽이 둘 선다");
         for (piece, why) in [
             ("거절한 세션", "맡기기를 거절한 세션을 빼라는 말이 없다"),
@@ -795,38 +805,87 @@ mod tests {
     }
     /// **일꾼에게 싣는 글은 가지 이름을 박지 않는다.** `main` 을 박으면 `develop`·`trunk`
     /// 저장소에서 워크트리 뜨기부터 실패한다. 감독이 읽어 채울 자리와 읽는 한 줄이 선다.
+    ///
+    /// **낱말로 가른다.** 글자로 찾으면 `master`·`develop` 을 박은 글은 지나가고 `remain` 은
+    /// 막힌다. 감독이 제 손으로 치는 병합 확인도 같은 자리를 쓰는지 본다.
     #[test]
     fn the_brief_names_no_branch() {
         let (brief, supervise) = (brief(), supervise());
-        assert!(!brief.contains("main"), "일꾼 글이 가지 이름을 박았다");
+        let named: Vec<&str> = brief
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .filter(|w| ["main", "master", "develop", "trunk"].contains(w))
+            .collect();
+        assert!(named.is_empty(), "일꾼 글이 가지 이름을 박았다 — {named:?}");
         assert!(brief.contains("<본 가지>"), "일꾼 글에 본 가지 자리가 없다");
-        assert!(supervise.contains("branch --show-current"), "감독이 루트의 가지를 안 읽는다");
+        assert!(
+            supervise.contains("git merge-base --is-ancestor <머지 해시> <본 가지>"),
+            "감독의 병합 확인이 본 가지 자리를 안 쓴다"
+        );
+        // 루트의 가지는 `git worktree list` 의 첫 자리에서 읽는다 — `-C <루트>` 로 읽으면 옮겨
+        // 적은 경로가 틀릴 때 조용히 `main` 이 나오고, 워크트리 안에서 짐작한 자리는 제 가지를 낸다.
+        assert!(supervise.contains("if w=$(git worktree list --porcelain); then"), "감독이 루트의 가지를 안 읽는다");
         // 포맷 문자열의 `${{b:-main}}` 이 셸의 `${b:-main}` 으로 풀렸는가.
         assert!(supervise.contains("echo \"${b:-main}\""), "본 가지 한 줄이 포맷에서 깨졌다");
     }
 
     /// **heredoc 은 들여쓰지 않는다.** 4칸 들여쓴 블록을 그대로 복사하면 닫는 표시도
     /// 들여써져 셸이 끝을 못 찾는다 — `<<-` 는 탭만 벗긴다. 여는 줄도 닫는 줄도 왼쪽 끝이다.
+    ///
+    /// **종료어는 글을 싸는 데 흔히 쓰는 `MD`·`EOF` 가 아니다.** 가르친 글을 제 heredoc
+    /// (`moai note <id> -b - <<'MD'`, 커밋의 `<<'EOF'`)에 옮겨 담으면 셸이 인용된 그 줄에서
+    /// 바깥 heredoc 을 끝내, 메모는 잘려 적히고 남은 글은 명령으로 돈다.
     #[test]
     fn heredocs_are_copyable_as_written() {
-        let mut seen = 0;
-        for text in [agents(), skill(), reference(), supervise()] {
+        // 표면마다 센다 — 합쳐 세면 두 표면에 드는 조각이, 한 표면에만 있는 heredoc 이 빠진
+        // 자리를 메운다.
+        for (name, text, want) in
+            [("agents", agents(), 2), ("skill", skill(), 1), ("reference", reference(), 2), ("supervise", supervise(), 1)]
+        {
             let lines: Vec<&str> = text.lines().collect();
+            let mut seen = 0;
             for (i, line) in lines.iter().enumerate() {
-                let Some(at) = line.find("<<'") else { continue };
-                let rest = &line[at + 3..];
-                let tag = &rest[..rest.find('\'').expect("heredoc 표시의 닫는 따옴표가 없다")];
-                assert!(!line.starts_with(' '), "heredoc 여는 줄이 들여써졌다 — {line}");
-                // 뒤에 오는 첫 닫는 줄을 본다 — 아무 데서나 찾으면 들여쓴 닫는 줄을 뒤의
-                // 다른 heredoc 의 닫는 줄이 가린다.
+                let Some(tag) = heredoc_tag(line) else { continue };
+                assert!(!line.starts_with([' ', '\t']), "{name}: heredoc 여는 줄이 들여써졌다 — {line}");
+                assert!(
+                    !["MD", "EOF"].contains(&tag.as_str()),
+                    "{name}: 종료어 {tag} 가 글을 싸는 heredoc 과 겹친다 — {line}"
+                );
+                // 닫는 줄은 그 블록 안에서 찾는다 — 펜스나 다음 heredoc 을 넘어가면 뒤의 같은
+                // 종료어가, 빠지거나 들여써진 닫는 줄을 가린다.
                 let close = lines[i + 1..]
                     .iter()
+                    .take_while(|l| !l.trim_start().starts_with("```") && heredoc_tag(l).is_none())
                     .find(|l| l.trim() == tag)
-                    .unwrap_or_else(|| panic!("닫는 {tag} 가 없다 — {line}"));
-                assert_eq!(*close, tag, "닫는 {tag} 가 왼쪽 끝에 없다 — {line}");
+                    .unwrap_or_else(|| panic!("{name}: 닫는 {tag} 가 그 블록 안에 없다 — {line}"));
+                assert_eq!(*close, tag, "{name}: 닫는 {tag} 가 왼쪽 끝에 없다 — {line}");
                 seen += 1;
             }
+            assert!(seen >= want, "{name} 에서 heredoc 을 {seen}개밖에 못 찾았다 — {want}개는 있다");
         }
-        assert!(seen >= 5, "heredoc 을 {seen}개밖에 못 찾았다");
+    }
+
+    /// 줄에서 heredoc 을 여는 `<<` 의 종료어. 셸이 읽는 모양을 따른다 — `<<-`, 띄어 쓴
+    /// `<< 'X'`, 따옴표나 역슬래시로 싼 것, 맨 낱말. `<<<` 와 산술(`$((x << 2))`) 속 `<<` 는
+    /// heredoc 이 아니다 — 숫자로 여는 맨 낱말도 자리 옮김으로 읽는다.
+    fn heredoc_tag(line: &str) -> Option<String> {
+        let mut from = 0;
+        loop {
+            let at = from + line[from..].find("<<")?;
+            let rest = &line[at + 2..];
+            from = at + 2 + (rest.len() - rest.trim_start_matches('<').len());
+            let before = &line[..at];
+            if rest.starts_with('<') || before.matches("((").count() > before.matches("))").count() {
+                continue;
+            }
+            let word = rest.strip_prefix('-').unwrap_or(rest).trim_start_matches([' ', '\t']);
+            let bare = |s: &str| s.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect::<String>();
+            let tag = match word.chars().next()? {
+                q @ ('\'' | '"') => word[1..].split_once(q)?.0.to_string(),
+                '\\' => bare(&word[1..]),
+                d if d.is_ascii_digit() => continue,
+                _ => bare(word),
+            };
+            return (!tag.is_empty()).then_some(tag);
+        }
     }
 }

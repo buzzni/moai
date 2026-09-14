@@ -40,11 +40,11 @@ idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
 "좋다" 를 받으면 `moai add --from -` 로 한 번에 만든다 (`--dry-run` 으로 먼저 봐도 된다).
 
 ```sh
-moai add --from - <<'MD'
+moai add --from - <<'PLAN'
 # 에픽 제목
 - [p1] 첫 이슈 #enhancement
 - [p2] 둘째 이슈
-MD
+PLAN
 ```
 
 ## 훅이 실제로 보는 것 셋
