@@ -1570,7 +1570,9 @@ pub struct Warning {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oldest: Option<i64>,
     /// id → **판정에 쓴 나이(일)**. 날짜로 거는 경고(`stale_review`·`blocked_stale`·
-    /// `stale_progress`)만 싣는다.
+    /// `stale_progress`)와, 나이가 제 뜻을 갖는 `blocked_by_deferred`(막는 쪽을 **미룬 지**
+    /// 며칠 — 지금 할 일이 지금 안 할 일을 기다린 날수, moai-hcx3)만 싣는다. 안 실린 경고의
+    /// 나이 열은 칸 나이다.
     ///
     /// 보이는 쪽이 나이를 새로 재면 판정과 표시가 갈라진다 — `blocked_stale` 은 막음이 다시
     /// 선 때([`blocked_since`])로 재는데 목록이 제 칸 나이를 내면, 칸에 30일 선 줄이 "3일
@@ -1863,11 +1865,30 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 2-3. 미뤄 둔 것에 막힌 것. **날짜를 안 기다린다** — 계획이 스스로
     //      모순된 자리라(지금 할 일이 지금 안 할 일을 기다린다) 사흘 둔다고
     //      풀리지 않는다. 막지는 않는다.
+    //      **나이는 막는 쪽을 미룬 지 며칠이다**(moai-hcx3). 칸 나이를 대면 "미룬 것에 N일
+    //      막힘" 으로 읽히는데 그 줄이 칸에 머문 날수일 뿐이다. 막는 줄마다 그것을 계획에서
+    //      빼는 미룸 전부(`deferred_sources` — 물려받은 조상의 미룸까지) 가운데 가장 이른
+    //      `deferred_at`, 막는 줄이 여럿이면 그중 가장 이른 것 — 모순이 선 때다.
     let waiting: Vec<&Issue> =
         work.iter().copied().filter(|i| !i.status.is_done() && by_deferred(i)).collect();
     if !waiting.is_empty() {
+        let sources = deferred_sources(issues);
+        let shelved_since = |i: &Issue| -> &str {
+            holding(i, &by_id, &out_of_plan, &states, &waits)
+                .0
+                .iter()
+                .filter_map(|b| sources.get(b))
+                .flatten()
+                .filter_map(|r| by_id.get(r).and_then(|x| x.deferred_at.as_deref()))
+                .min()
+                // 계획 밖인 줄은 언제나 미룬 곳이 있다(`deferred_roots_in` ⊆ `deferred_sources`).
+                // 못 찾으면 나이를 안 싣는다 — 빈 시각은 `days_since` 가 거른다.
+                .unwrap_or("")
+        };
         warnings.push(
-            Warning::new("blocked_by_deferred", ids_of(&waiting)).hint("moai show --deferred"),
+            Warning::new("blocked_by_deferred", ids_of(&waiting))
+                .ages(shelved_since, &waiting, now)
+                .hint("moai show --deferred"),
         );
     }
 
@@ -2459,6 +2480,40 @@ mod tests {
         let w = st.warnings.iter().find(|w| w.kind == "dangling_blocked_by").expect("끊긴 막음 경고가 없다");
         assert!(w.ages.is_empty());
         assert!(!serde_json::to_string(w).unwrap().contains("\"ages\""));
+    }
+
+    /// **미룬 것에 막힌 줄의 나이는 막는 쪽을 미룬 지 며칠이다**(moai-hcx3). 칸 나이를 대면
+    /// "미룬 것에 N일 막힘" 으로 읽히는데 뜻이 다르다. 물려받은 미룸은 조상이 미뤄진 날,
+    /// 막는 줄이 여럿이면 가장 이른 미룸이다.
+    #[test]
+    fn a_row_held_by_a_deferral_is_aged_from_the_deferral() {
+        let now = "2026-10-01T00:00:00Z";
+        let held = |id: &str, by: &[&str]| {
+            let mut x = make(id, Kind::Issue, "todo"); // `make` 은 09-01 — 칸에 30일
+            x.blocked_by = by.iter().map(|b| b.to_string()).collect();
+            x
+        };
+        let aged = |issues: &[Issue], id: &str| {
+            let st = status(issues, &[], &cfg(), now);
+            let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("미룬 것에 막힘 경고가 없다");
+            w.ages.get(id).copied()
+        };
+
+        // 제 줄을 12일 전에 미뤘다.
+        let mut shelved = make("argos-0001", Kind::Issue, "todo");
+        shelved.deferred_at = Some("2026-09-19T00:00:00Z".into());
+        assert_eq!(aged(&[shelved.clone(), held("argos-0009", &["argos-0001"])], "argos-0009"), Some(12), "칸 나이를 댔다");
+
+        // 막는 줄은 20일 전에 미룬 에픽 밑이다 — 그 에픽을 미룬 날로 센다.
+        let mut epic = make("argos-0002", Kind::Epic, "todo");
+        epic.deferred_at = Some("2026-09-11T00:00:00Z".into());
+        let under = member("argos-0003", "argos-0002", "todo");
+        assert_eq!(aged(&[epic, under, held("argos-0009", &["argos-0003"])], "argos-0009"), Some(20));
+
+        // 미룬 막음이 둘이면 가장 이른 것 — 모순이 선 때다.
+        let mut older = make("argos-0004", Kind::Issue, "todo");
+        older.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        assert_eq!(aged(&[shelved, older, held("argos-0009", &["argos-0001", "argos-0004"])], "argos-0009"), Some(30));
     }
 
     /// 막는 쪽이 사라지면 `ready` 는 조용히 넘어가지만 `status` 는 드러낸다.
