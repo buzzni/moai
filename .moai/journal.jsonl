@@ -2319,3 +2319,6 @@
 {"ts":"2026-09-14T16:20:41Z","id":"moai-foc3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-sr5i 에서 펼쳤다 — moai --help 의 heredoc 예시가 2칸 들여쓰여 그대로 복사하면 닫는 EOF 를 셸이 못 찾는다 — cli.rs 40·125·395 (moai-hy2h.b14 리뷰가 diff 밖이라 넘김)"}
 {"ts":"2026-09-14T16:20:41Z","id":"moai-sr5i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-foc3 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-14T16:21:01Z","id":"moai-vdmh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T16:23:28Z","id":"moai-a5it","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC 메뉴 색·격자 — 단축키 f10b00(진행 바 색)·콜론 f08b00·실행 항목 f12b00·+그룹 f13b00, 열마다 6칸이고 넘치면 옆 열에 다시 6칸"}
+{"ts":"2026-09-14T16:23:33Z","id":"moai-ik31","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자가 열마다 6칸으로 정했다 — moai-a5it 에 같이 담김"}
+{"ts":"2026-09-14T16:23:51Z","id":"moai-foc3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(사용자, 2026-09-14): --help 의 heredoc 은 블록(여는 줄~닫는 줄)만 들여쓰기 없이 왼쪽 끝에 두고 표시는 PLAN. add --help 의 줄 끝 설명은 블록 밖 목록으로 뺀다. 들여쓰기 시험은 heredoc 블록만 예외로 두고, 새 시험이 모든 명령의 --help heredoc 을 훑는다. note 의 한 줄 '<<MD ... MD' 도 복사해 도는 꼴로"}
