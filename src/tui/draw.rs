@@ -754,6 +754,55 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     f.render_widget(Paragraph::new(lines).scroll((top, 0)), inner);
 }
 
+/// 한 줄을 **칸 `cut` 에서** 두 스타일로 가른다 — 앞은 제 스타일에 `over` 를 덧입고
+/// 뒤는 그대로. 줄은 `room` 칸까지 공백으로 채운다: 바탕은 글자가 없는 칸에도 깔려야
+/// 테두리 끝까지가 100% 로 읽힌다. 줄이 `room` 보다 넓으면 자르지 않는다 — 부르는 쪽이
+/// 먼저 맞춘다([`fit`]).
+///
+/// **글자 가운데서 가르지 않는다.** 두 칸 글자가 경계에 걸리면 뒤로 보낸다 — 덜
+/// 칠하는 쪽이다. 99% 가 꽉 차 보이면 안 되는 `text::bar_fill` 과 같은 쪽의 거짓말이다.
+/// 폭 0 글자(결합 문자)는 앞 글자를 따라간다.
+#[cfg_attr(not(test), allow(dead_code))]
+fn shade(line: Line<'_>, cut: usize, room: usize, over: Style) -> Line<'static> {
+    fn part(spans: &mut Vec<Span<'static>>, run: &mut String, style: Style) {
+        if !run.is_empty() {
+            spans.push(Span::styled(std::mem::take(run), style));
+        }
+    }
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut col = 0;
+    let mut on = cut > 0;
+    for span in line.spans {
+        let (base, lit) = (span.style, span.style.patch(over));
+        let mut run = String::new();
+        let mut run_on = on;
+        for c in span.content.chars() {
+            let w = crate::text::width(c.encode_utf8(&mut [0; 4]));
+            if w > 0 {
+                on = col + w <= cut;
+            }
+            if on != run_on {
+                part(&mut spans, &mut run, if run_on { lit } else { base });
+                run_on = on;
+            }
+            run.push(c);
+            col += w;
+        }
+        part(&mut spans, &mut run, if run_on { lit } else { base });
+    }
+    if col < room {
+        let lit_pad = cut.min(room).saturating_sub(col);
+        if lit_pad > 0 {
+            spans.push(Span::styled(" ".repeat(lit_pad), over));
+        }
+        let rest = room - col - lit_pad;
+        if rest > 0 {
+            spans.push(Span::raw(" ".repeat(rest)));
+        }
+    }
+    Line::from(spans).style(line.style)
+}
+
 /// 칸의 테두리. **포커스 있는 칸은 굵은 선에 초록이다.**
 ///
 /// 색만 바꾸면 색 없는 터미널·색맹인 눈에서 포커스가 통째로 사라지고, 그러면
@@ -1456,6 +1505,38 @@ pub(super) mod tests {
 
     fn app() -> App {
         App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new())
+    }
+
+    /// 진행 바탕을 가르는 조각은 **폭을 지키고 글자 가운데서 안 가른다** — 한 칸이 새면
+    /// 줄이 테두리를 넘고, 두 칸 글자를 가르면 반쪽 글자가 선다.
+    #[test]
+    fn shading_splits_on_cell_boundaries_and_fills_the_room() {
+        let lit = Style::new().add_modifier(Modifier::REVERSED);
+        let width = |l: &Line| l.spans.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
+        let text = |l: &Line, want: bool| {
+            l.spans
+                .iter()
+                .filter(|s| s.style.add_modifier.contains(Modifier::REVERSED) == want)
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        };
+        let line = || Line::from(vec![Span::styled("ab", dim()), Span::raw("한글")]);
+
+        // 경계(3칸)가 두 칸 글자 가운데 — 그 글자는 뒤로 간다.
+        let got = shade(line(), 3, 10, lit);
+        assert_eq!((text(&got, true).as_str(), text(&got, false).as_str()), ("ab", "한글    "));
+        // 글 뒤 빈칸까지 칠한다. 덧입어도 제 색은 남는다.
+        let got = shade(line(), 8, 10, lit);
+        assert_eq!((text(&got, true).as_str(), text(&got, false).as_str()), ("ab한글  ", "  "));
+        assert_eq!(got.spans[0].style.fg, Some(Color::DarkGray), "제 색을 잃었다");
+        // 양 끝.
+        assert_eq!(text(&shade(line(), 0, 10, lit), true), "");
+        assert_eq!(text(&shade(line(), 10, 10, lit), false), "");
+        for cut in 0..=12 {
+            let got = shade(line(), cut, 10, lit);
+            assert_eq!(width(&got), 10, "폭이 샜다 @ {cut}");
+            assert!(crate::text::width(&text(&got, true)) <= cut, "경계를 넘겨 칠했다 @ {cut}");
+        }
     }
 
     /// 색 없이 글자만 봐도 읽힌다 — 경로, id, 우선순위, 칸 글리프, 제목, F키 바.
