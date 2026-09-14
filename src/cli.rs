@@ -204,9 +204,10 @@ pub enum Cmd {
     #[command(after_help = "  마일스톤과 에픽이 디렉터리처럼 동작한다. 왼쪽에서 돌아다니면 커서가 머문
   것의 정보가 오른쪽에 나온다.
 
-  화살표로 이동, Enter 로 들어가고 Backspace 로 나온다. F10 이나 q 로 끝낸다.
-  Tab·Shift-Tab 이 목록과 상세 사이로 포커스를 옮기고, 화살표·PageUp/Down·
-  Home/End 는 포커스 있는 칸을 움직인다. j·k 는 어디서든 상세를 굴린다.
+  j·k 나 화살표로 이동, Enter·l 로 들어가고 Backspace·h 로 나온다. gg·Home 이 맨
+  위, G·End 가 맨 아래, Ctrl-d·Ctrl-u 가 반 쪽, Ctrl-f·Ctrl-b(PageDown·PageUp)가 한
+  쪽이다. F10 이나 q 로 끝낸다. Tab·Shift-Tab 이 목록과 상세 사이로 포커스를
+  옮기고, 이동키는 모두 포커스 있는 칸을 움직인다 — 상세를 굴리려면 Tab 으로 간다.
 
   등록한 프로젝트(`moai project add`)가 있으면 맨 위에 프로젝트 층이 선다.
   `.moai` 밖에서 띄우면 층에서 시작하고, 안에서 띄우면 그 프로젝트의 뿌리에서

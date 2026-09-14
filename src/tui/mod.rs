@@ -22,7 +22,7 @@ use form::{Act, Form};
 use input::Input;
 use keys::Lookup;
 use ratatui::crossterm::event::KeyEvent;
-use scroll::{PAGE, Scroll};
+use scroll::{Move, Scroll};
 
 /// 목록의 한 줄. `..` 은 이슈가 아니므로 [`Entry`] 로는 못 담는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -329,6 +329,9 @@ pub struct App {
     /// 스레드에서 짓고 있는 다시 읽기. 끝나면 [`App::follow`] 가 받아 들인다.
     /// 손잡이는 스레드가 죽었을 때 그 패닉을 루프로 되던지려고 든다.
     pending: Option<(std::sync::mpsc::Receiver<crate::fail::R<Fresh>>, std::thread::JoinHandle<()>)>,
+    /// 탐색에서 접두어(`gg` 의 첫 `g`) 뒤를 기다리는 키 열. **`Mode` 가 아니다** — 탐색이 아닌
+    /// 모드는 전부 글칸으로 가므로(`App::key`), 모드로 두면 기다리는 `g` 뒤의 `g` 가 글자로 샌다.
+    chord: keys::Chord,
     /// 버린 다시 읽기(F5·`w`·쓰기가 `pending` 을 버렸을 때)의 손잡이. 결과는 안 받지만
     /// **패닉은 받는다** — ratatui 의 패닉 훅은 어느 스레드에서 나든 터미널을 걷으므로,
     /// 손잡이를 같이 버리면 루프가 걷힌 화면에 모른 채 그린다. [`App::follow`] 가
@@ -474,6 +477,7 @@ impl App {
             stamp: None,
             watched: Vec::new(),
             pending: None,
+            chord: keys::Chord::default(),
             discarded: Vec::new(),
             let_go: 0,
             read: prepare,
@@ -1060,13 +1064,16 @@ impl App {
         // 글을 받는 동안에는 이동키가 글자다. 먼저 가로챈다. **`Tab` 도 여기서
         // 멈춘다** — 적다 말고 포커스가 튀면 적던 것을 잃는다.
         if !matches!(self.mode, Mode::Browse) {
+            // 기다리던 열은 탐색의 것이다 — 글칸에서 돌아온 뒤의 `g` 가 옛 `g` 와 잇지 않게.
+            self.chord.clear();
             self.typing(k);
             return;
         }
         // **키의 뜻은 표에서 읽는다**([`keys::BROWSE`]). 표에 없는 키 — Ctrl·Alt 붙은 글자키도
         // — 는 여기 뜻이 없다: 안 거르면 Ctrl-A 가 등록 창을, Ctrl-D 가 "목록에서 뺄까" 를
-        // 띄운다.
-        let Lookup::Run(act) = keys::lookup(keys::BROWSE, &[k]) else { return };
+        // 띄운다. 접두어(`g`)는 다음 키를 기다리고, 뜻 없는 다음 키는 그 `g` 와 함께 버린다
+        // ([`keys::Chord::feed`]) — 표에 없는 키를 무시하는 것과 같은 자다.
+        let Some(act) = self.chord.feed(keys::BROWSE, k) else { return };
         // **되는지는 한 판정이 가른다**([`keys::Browse::enabled`]) — 키 바가 같은 판정으로
         // 적을 키를 고르므로 둘이 안 갈린다. 층에서 뜻이 없는 키는 왜 안 되는지를 한 줄로
         // 말한다. `n` 은 층에서도 듣는다 — 커서의 프로젝트를 담을 곳으로 박는다([`App::open_form`]).
@@ -1083,7 +1090,7 @@ impl App {
             B::Quit => self.quit = true,
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
-            B::Step => self.step(k),
+            B::Step(m) => self.step(m),
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
             // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
@@ -1114,14 +1121,6 @@ impl App {
                 // 엉뚱한 데가 나온다.
                 self.detail.rewind();
             }
-            // 상세를 굴린다. **왼쪽은 그대로 둔다** — 오른쪽만 길어서 못 보는
-            // 것이므로, 굴리려고 커서를 옮기게 하면 보던 이슈를 잃는다.
-            // **포커스와 상관없이 듣는다** — 포커스가 생기기 전부터 손에 익은
-            // 사람이 있고, 목록에 선 채로 상세를 한 칸 굴리는 길이 여전히 쓸모 있다.
-            B::DetailDown => self.detail.by(1),
-            B::DetailUp => self.detail.by(-1),
-            B::DetailPageDown => self.detail.by(PAGE as isize),
-            B::DetailPageUp => self.detail.by(-(PAGE as isize)),
         }
     }
 
@@ -1137,21 +1136,23 @@ impl App {
         }
     }
 
-    /// 이동키 하나를 **포커스 있는 칸에** 준다. 두 칸이 같은 조각([`scroll`])으로
-    /// 굴러 걸음(`PAGE`)도 끝의 뜻도 같다.
+    /// 이동 하나를 **포커스 있는 칸에** 준다. 두 칸이 같은 조각([`scroll`])으로
+    /// 굴러 걸음(`PAGE`·`HALF`)도 끝의 뜻도 같다.
+    ///
+    /// **`j`·`k` 도 여기로 온다**(moai-ob4c). 한때 `j`·`k` 는 포커스와 상관없이 상세를
+    /// 굴렸다 — 목록에 선 채 상세를 한 줄 굴리는 길이었다. vi 대로 포커스 칸을 움직이게
+    /// 바꿨다(키 지도 moai-hudg): 같은 키가 칸마다 다른 칸을 움직이면 Tab 이 무엇을 바꾸는지
+    /// 흐려진다. 상세는 Tab 으로 가서 굴린다.
     ///
     /// 상세의 끝(`End`)은 마지막으로 그린 줄 수로 잰다 — 줄 수는 폭에 달렸고 폭은
     /// 그려야 나온다. 루프는 키 하나마다 한 번 그리므로 그 수는 한 걸음 넘게 낡지 않는다.
-    fn step(&mut self, k: KeyEvent) {
+    fn step(&mut self, m: Move) {
         match self.focus {
             Pane::Explorer => {
-                if let Some(at) = scroll::cursor(k, self.cursor, || self.rows().len()) {
-                    self.move_to(at);
-                }
+                let at = scroll::cursor(m, self.cursor, || self.rows().len());
+                self.move_to(at);
             }
-            Pane::Detail => {
-                self.detail.key(k);
-            }
+            Pane::Detail => self.detail.go(m),
         }
     }
 
@@ -1227,6 +1228,8 @@ impl App {
     /// 해제 물음에서는 **다른 키처럼** 물음을 거둔다: 붙인 글 속 `y` 는 답이 아니다.
     pub fn paste(&mut self, s: &str) {
         self.notice = None;
+        // 기다리던 `g` 는 버린다 — 붙인 뒤의 `g` 하나가 붙이기 전의 `g` 와 이어 맨 위로 뛰지 않게.
+        self.chord.clear();
         // 층에서는 `/`·`f` 가 안 열린다 — **키 처리와 같은 판정**([`keys::Browse::enabled`])으로
         // 열리는 칸만 대고, 키 이름은 표에서 읽는다.
         let ctx = self.key_ctx();
@@ -1819,18 +1822,146 @@ mod tests {
         }
     }
 
-    /// `j`/`k` 는 **포커스와 상관없이** 상세를 굴린다 — 손에 익은 사람이 이미 있다.
+    /// **`j`/`k` 는 포커스 칸을 움직인다**(moai-ob4c, 키 지도 moai-hudg). 옛 뜻 — 목록에 선 채
+    /// 상세를 굴리기 — 는 없앴다: 목록에서 `j` 는 커서를 옮기고 상세는 그대로다. 뜻이 조용히
+    /// 바뀐 키라 옛 기대를 뒤집어 따로 잰다.
     #[test]
-    fn j_and_k_still_scroll_the_detail_from_either_pane() {
+    fn j_and_k_move_the_focused_pane_and_no_longer_scroll_the_detail_from_the_list() {
+        let mut a = app();
+        drawn(&mut a, 10, 40);
+        a.key(key(KeyCode::Char('j')));
+        a.key(key(KeyCode::Char('j')));
+        a.key(key(KeyCode::Char('k')));
+        assert_eq!((a.cursor, a.detail.offset(), a.focus), (1, 0, Pane::Explorer), "목록 포커스에서 `j` 가 상세를 굴렸다");
+
+        a.key(key(KeyCode::Tab));
+        drawn(&mut a, 10, 40);
+        a.key(key(KeyCode::Char('j')));
+        a.key(key(KeyCode::Char('j')));
+        a.key(key(KeyCode::Char('k')));
+        assert_eq!((a.cursor, a.detail.offset()), (1, 1), "상세 포커스에서 `j` 가 목록을 움직였다");
+    }
+
+    /// **SPC·`b` 는 더는 상세를 넘기지 않는다** — SPC 는 메뉴(moai-7sjm)의 자리다. 한 쪽은
+    /// Ctrl-f·Ctrl-b·PageDown·PageUp 이다.
+    #[test]
+    fn space_and_b_no_longer_page_the_detail() {
         for start in Pane::ALL {
             let mut a = app();
             a.focus = start;
             drawn(&mut a, 10, 40);
-            a.key(key(KeyCode::Char('j')));
-            a.key(key(KeyCode::Char('j')));
-            a.key(key(KeyCode::Char('k')));
-            assert_eq!((a.cursor, a.detail.offset(), a.focus), (0, 1, start), "{start:?}");
+            a.key(key(KeyCode::Char(' ')));
+            a.key(key(KeyCode::Char('b')));
+            assert_eq!((a.cursor, a.detail.offset(), a.path.len()), (0, 0, 0), "{start:?}");
+            assert_eq!(a.mode, Mode::Browse);
         }
+    }
+
+    /// **vi 이동은 포커스 칸에서 화살표와 같은 일을 한다** — `gg`·`G`(SHIFT 붙어 와도)·
+    /// Ctrl-d·Ctrl-u(반 쪽)·Ctrl-f·Ctrl-b(한 쪽). `g` 하나로는 안 움직이고 기다린다.
+    #[test]
+    fn vi_movement_keys_act_in_the_focused_pane() {
+        let many: Vec<Issue> = (1..=30).map(|n| make(&format!("argos-{n:04}"), Kind::Issue)).collect();
+        let mut a = App::new(many, cfg(), Path::new());
+        let big_g = KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT);
+        let (half, page) = (scroll::HALF, scroll::PAGE);
+
+        a.key(ctrl('d'));
+        assert_eq!(a.cursor, half, "Ctrl-d 가 반 쪽을 안 갔다");
+        a.key(ctrl('f'));
+        assert_eq!(a.cursor, half + page, "Ctrl-f 가 한 쪽을 안 갔다");
+        a.key(ctrl('u'));
+        assert_eq!(a.cursor, page);
+        a.key(ctrl('b'));
+        assert_eq!(a.cursor, 0);
+        a.key(big_g);
+        assert_eq!(a.cursor, 29, "SHIFT 붙은 `G` 가 맨 아래로 안 갔다");
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!(a.cursor, 29, "`g` 하나에 움직였다");
+        assert!(a.chord.waiting());
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!((a.cursor, a.chord.waiting()), (0, false), "`gg` 가 맨 위로 안 갔다");
+        a.key(key(KeyCode::Char('l')));
+        assert_eq!(a.path.len(), 0, "잎에서 `l` 이 무언가 했다");
+
+        a.key(key(KeyCode::Tab));
+        drawn(&mut a, 10, 40);
+        a.key(ctrl('d'));
+        assert_eq!(a.detail.offset(), half);
+        a.key(ctrl('f'));
+        assert_eq!(a.detail.offset(), half + page);
+        a.key(ctrl('u'));
+        a.key(ctrl('b'));
+        assert_eq!(a.detail.offset(), 0);
+        a.key(big_g);
+        assert_eq!(a.detail.offset(), 30, "상세에서 `G` 가 끝에 안 닿았다");
+        a.key(key(KeyCode::Char('g')));
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!((a.cursor, a.detail.offset()), (0, 0), "상세에서 `gg` 가 목록을 움직였거나 첫 줄로 안 갔다");
+    }
+
+    /// **`h`·`l` 은 나가기·들어가기** — Bksp·Enter 와 같고, 같은 까닭으로 목록 포커스를 탄다.
+    #[test]
+    fn h_and_l_leave_and_enter_from_the_list_only() {
+        let mut a = app();
+        a.key(key(KeyCode::Char('l')));
+        assert_eq!(a.path.len(), 1, "`l` 이 안 들어갔다");
+        a.key(key(KeyCode::Tab));
+        a.key(key(KeyCode::Char('h')));
+        assert_eq!(a.path.len(), 1, "상세 포커스에서 `h` 가 나갔다");
+        a.key(key(KeyCode::Tab));
+        a.key(key(KeyCode::Char('h')));
+        assert!(a.path.is_empty(), "`h` 가 안 나갔다");
+    }
+
+    /// **기다리는 `g` 뒤에 뜻 없는 키가 오면 둘 다 버린다** — 그 키도 제 뜻을 안 한다(모르는 키
+    /// 무시와 같은 자). 버린 뒤의 `g` 하나는 다시 기다린다.
+    #[test]
+    fn an_unknown_key_after_g_is_ignored_and_clears_the_wait() {
+        let mut a = app();
+        a.key(key(KeyCode::Char('j')));
+        for k in [key(KeyCode::Char('x')), key(KeyCode::Char('j')), key(KeyCode::Tab), key(KeyCode::Enter), key(KeyCode::Char('/'))] {
+            a.key(key(KeyCode::Char('g')));
+            a.key(k);
+            assert!(!a.chord.waiting(), "`g` 뒤의 {k:?} 가 열을 안 버렸다");
+            assert_eq!((a.cursor, a.focus, a.path.len()), (1, Pane::Explorer, 0), "`g` 뒤의 {k:?} 가 제 뜻을 했다");
+            assert_eq!(a.mode, Mode::Browse, "`g` 뒤의 {k:?} 가 칸을 열었다");
+        }
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!(a.cursor, 1);
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!(a.cursor, 0);
+    }
+
+    /// **기다리는 열은 탐색 밖으로 새지 않는다.** 붙여넣기가 열을 버리고, 글칸에서는
+    /// `g`·`j`·`k`·`h`·`l`·`G` 가 글자다. 글칸에 들어간 사이 버린 열은 돌아와 잇지 않는다.
+    #[test]
+    fn a_waiting_g_does_not_leak_into_paste_or_text_fields() {
+        let mut a = app();
+        a.key(key(KeyCode::Char('j')));
+        a.key(key(KeyCode::Char('g')));
+        a.paste("x");
+        assert!(!a.chord.waiting(), "붙여넣기가 기다리던 `g` 를 안 버렸다");
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!(a.cursor, 1, "붙여넣기 전의 `g` 와 이어 `gg` 가 됐다");
+        a.key(key(KeyCode::Esc));
+
+        a.key(key(KeyCode::Char('/')));
+        for c in "gjkhlGg".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        assert!(matches!(&a.mode, Mode::Grep(b) if b.text() == "gjkhlGg"), "글칸에서 vi 키가 글자가 아니다 — {:?}", a.mode);
+        assert_eq!(a.cursor, 1);
+        assert!(!a.chord.waiting(), "글칸의 `g` 가 탐색의 열에 쌓였다");
+
+        // 키가 아닌 길로 모드가 바뀌어도 — 기다리던 `g` 는 글칸의 키가 버린다
+        a.mode = Mode::Browse;
+        a.key(key(KeyCode::Char('g')));
+        a.mode = Mode::Filter(Input::default());
+        a.key(key(KeyCode::Char('x')));
+        a.mode = Mode::Browse;
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!(a.cursor, 1, "글칸을 거친 뒤의 `g` 가 옛 `g` 와 이었다");
     }
 
     /// 잎에서 Enter 는 아무 일도 하지 않는다 — 들어갈 데가 없다.
