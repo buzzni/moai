@@ -201,15 +201,26 @@ fn escape_value(value: &str, before: &str, after: &str) -> String {
     let at_end = after
         .split_whitespace()
         .all(|w| w.strip_prefix('#').is_some_and(|t| !t.is_empty()));
+    // 값 앞뒤의 빈칸은 split_parts 가 깎는다 — 판정은 빈칸을 뗀 알맹이로 한다. 안 떼면 ` [p0] x` 가
+    // `[` 로 시작하지 않는 것으로, `x #inj  ` 의 끝 낱말이 빈 낱말로 보여 이스케이프를 비껴간다.
+    let core = value.trim();
+    let lead = &value[..value.len() - value.trim_start().len()];
+    let trail = &value[lead.len() + core.len()..];
+    // 값 앞이 빈칸 없이 붙은 글이면 값의 첫 낱말은 앞 글과 한 낱말이라 태그로 안 읽힌다 —
+    // 거기에 `\` 를 넣으면 `끝\#a` 처럼 제목에 역슬래시가 샌다.
+    let glued = lead.is_empty() && !before.is_empty() && !before.ends_with(char::is_whitespace);
     let mut v = if at_end {
-        map_trailing_words(value, |w| w.strip_prefix('#').filter(|t| !t.is_empty()).map(|t| format!("\\#{t}")))
+        let split = if glued { core.find(char::is_whitespace).unwrap_or(core.len()) } else { 0 };
+        let (stuck, free) = core.split_at(split);
+        stuck.to_string()
+            + &map_trailing_words(free, |w| w.strip_prefix('#').filter(|t| !t.is_empty()).map(|t| format!("\\#{t}")))
     } else {
-        value.to_string()
+        core.to_string()
     };
     if at_start && v.starts_with('[') {
         v.insert(0, '\\');
     }
-    v
+    format!("{lead}{v}{trail}")
 }
 
 /// 못 읽은 줄은 **전부** 모아 한 번에 말한다. 하나씩 고치게 하면 여섯 줄짜리
@@ -310,8 +321,10 @@ fn body(i: &Issue) -> String {
         s.push('\\');
     }
     s.push_str(&title);
+    // 태그의 `{{` 도 제목과 같이 `\{{` 로 쓴다(리뷰 moai-xqxu.fc3) — 안 쓰면 `#{{a}}` 가 채우지 않은
+    // 변수로 거절돼 되뽑은 계획이 도로 안 들어간다.
     for t in &i.tags {
-        s.push_str(&format!(" #{t}"));
+        s.push_str(&format!(" #{}", t.replace("{{", "\\{{")));
     }
     s
 }
@@ -501,7 +514,8 @@ mod tests {
     #[test]
     fn titles_with_braces_round_trip_through_fill() {
         let epic = issue("{{version}} 문법", Kind::Epic, None, &[]);
-        let a = issue("겹친 {{{a}}} 와 {{ 빈칸 }}", Kind::Issue, Some(1), &["x"]);
+        // 태그의 `{{` 도 되돌아온다(리뷰 moai-xqxu.fc3).
+        let a = issue("겹친 {{{a}}} 와 {{ 빈칸 }}", Kind::Issue, Some(1), &["x", "{{t}}"]);
         let b = issue("{{", Kind::Issue, None, &[]);
         let md = render(&epic, &[&a, &b]);
         assert!(md.starts_with("# \\{{version}} 문법\n"), "{md}");
@@ -530,6 +544,25 @@ mod tests {
                 ("끝에 x #injected", None, &[][..]),
                 ("끝에 x #injected", None, &["release".to_string()][..]),
                 ("가운데 x #injected 뒤", None, &[][..]),
+            ],
+            "{filled}"
+        );
+        // 값 앞뒤의 빈칸이 이스케이프를 비껴가지 않고, 앞 글에 붙은 값에는 역슬래시가 새지 않는다.
+        let filled = fill(
+            "# e\n- {{a}}\n- {{b}}\n- 끝 {{c}}\n- 끝{{d}}\n",
+            &vars(&[("a", " [p0] 몰래"), ("b", "\u{3000}[p0] 몰래"), ("c", "x #inj  "), ("d", "#a #b")]),
+        )
+        .unwrap();
+        let got = one(&filled);
+        let seen: Vec<(&str, Option<u8>, &[String])> = got.iter().map(|d| (d.title.as_str(), d.priority, d.tags.as_slice())).collect();
+        assert_eq!(
+            seen,
+            [
+                ("e", None, &[][..]),
+                ("[p0] 몰래", None, &[][..]),
+                ("[p0] 몰래", None, &[][..]),
+                ("끝 x #inj", None, &[][..]),
+                ("끝#a #b", None, &[][..]),
             ],
             "{filled}"
         );
