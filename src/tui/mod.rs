@@ -1515,6 +1515,22 @@ impl App {
         self.mode = Mode::Idea(form);
         save_idea(self);
     }
+
+    /// **아직 안 담긴 글** — (제목, 본문). 루프가 오류로 끝나며 버릴 뻔한 것을 남기는 쪽이 묻는다
+    /// (moai-y3r7). 폼이 열려 있거나(담기 실패·적는 중), 누구냐 묻는 칸 뒤에 폼이 서 있을 때다.
+    /// **빈칸뿐인 폼은 없다** — 잃을 것이 없다([`Form::is_blank`]). 제목이 비고 본문만 있어도
+    /// 적은 것이라 낸다.
+    pub fn unsaved(&self) -> Option<(String, Option<String>)> {
+        let form = match &self.mode {
+            Mode::Idea(form) => form,
+            Mode::Ask(ask) => match ask.back.as_ref() {
+                Mode::Idea(form) => form,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        (!form.is_blank()).then(|| (form.title(), form.body()))
+    }
 }
 
 /// 폼에 적힌 생각 하나를 담는다. **[`Retry`] 로도 넘긴다** — 누군지 묻고 받으면
@@ -3547,6 +3563,31 @@ mod tests {
         a.key(ctrl('s'));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
         assert_eq!(ideas_in(a.repo.as_ref().unwrap()).len(), 1);
+    }
+
+    /// **아직 안 담긴 글을 찾는다**(moai-y3r7). 루프가 오류로 끝날 때 남길 글이다 — 폼에
+    /// 열린 채든(담기 실패), 누구냐 묻는 칸 뒤에 서 있든. 빈 폼과 탐색은 남길 것이 없다.
+    #[test]
+    fn unsaved_text_is_found_in_an_open_form_or_behind_a_question() {
+        let (scratch, mut a) = writable("unsaved-fail");
+        assert_eq!(a.unsaved(), None, "탐색 중인데 남길 글이 있다고 한다");
+        std::fs::create_dir_all(scratch.0.join(".moai/lock")).unwrap();
+        let edit = ask_editor(&mut a);
+        a.edited(edit.into, Ok("못 담길 것\n\n긴 본문".into()));
+        assert_eq!(a.unsaved(), Some(("못 담길 것".to_string(), Some("긴 본문".to_string()))), "{:?}", a.mode);
+
+        let (_s, mut b) = writable("unsaved-ask");
+        b.user = None;
+        b.identify = nobody;
+        let edit = ask_editor(&mut b);
+        b.edited(edit.into, Ok("물어볼 것".into()));
+        assert!(matches!(b.mode, Mode::Ask(_)), "{:?}", b.mode);
+        assert_eq!(b.unsaved(), Some(("물어볼 것".to_string(), None)), "묻는 칸 뒤의 폼을 못 봤다");
+
+        let (_s, mut c) = writable("unsaved-blank");
+        c.hit("SPC n");
+        assert!(matches!(c.mode, Mode::Idea(_)), "{:?}", c.mode);
+        assert_eq!(c.unsaved(), None, "빈 폼을 남길 글로 셌다");
     }
 
     /// 빈 디렉터리에서도 무너지지 않는다.

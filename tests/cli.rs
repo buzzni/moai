@@ -1388,6 +1388,37 @@ fn show_json_keys_win_over_unknown_fields_of_the_same_name() {
     assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
 }
 
+/// **끊긴 에픽을 든 생각 밑에 접힌 줄은 트리와 status 가 같게 읽는다**(moai-uni2) — 길 잃은
+/// 부모의 묶음이다. 트리는 그 줄을 `(길 잃음)` 안의 생각 밑에 그리므로, status 가 그 줄을
+/// "에픽 없는 이슈" 로 세면 `moai show -e none` 을 가리키며 고칠 수 없는 줄을 고치라 한다.
+/// 고칠 곳은 생각의 끊긴 에픽 하나고, `dangling_epic` 이 그것을 댄다.
+#[test]
+fn a_child_under_a_lost_thought_is_not_counted_as_having_no_epic() {
+    let s = init("lostthought");
+    // 마일스톤을 쓰는 저장소여야 `no_milestone` 도 같은 자로 읽는지 본다.
+    let stone = add(s.path(), &["v1", "--type", "milestone"]);
+    let epic = add(s.path(), &["지울 에픽", "--type", "epic", "--milestone", &stone]);
+    let thought = add(s.path(), &["생각", "--type", "idea", "-e", &epic]);
+    let child = add(s.path(), &["생각 밑의 일", "--parent", &thought]);
+    assert!(moai(s.path(), &["rm", &epic]).status.success());
+
+    let tree = ok(s.path(), &["show", "--tree"]);
+    let lost_at = tree.find("(길 잃음)").unwrap_or_else(|| panic!("길 잃음 바구니가 없다\n{tree}"));
+    assert!(tree[lost_at..].contains(&child), "트리가 자식을 길 잃음 밖에 그렸다\n{tree}");
+
+    let st = ok(s.path(), &["status", "--json"]);
+    let warning = |kind: &str| st.split("{\"kind\":").find(|w| w.starts_with(&format!("\"{kind}\""))).map(str::to_string);
+    assert!(warning("dangling_epic").is_some_and(|w| w.contains(&thought)), "고칠 곳(생각의 끊긴 에픽)을 안 댄다\n{st}");
+    assert!(
+        !warning("no_epic").is_some_and(|w| w.contains(&child)),
+        "트리가 길 잃음에 그린 줄을 status 는 에픽 없는 이슈로 센다\n{st}"
+    );
+    assert!(
+        !warning("no_milestone").is_some_and(|w| w.contains(&child)),
+        "트리가 길 잃음에 그린 줄을 status 는 마일스톤 없는 일로 센다\n{st}"
+    );
+}
+
 /// 메모는 스냅샷을 건드리지 않고 저널에만 쌓인다.
 #[test]
 fn note_only_touches_the_journal() {
@@ -5382,6 +5413,14 @@ fn a_moai_call_is_judged_by_the_tracker_it_points_at() {
     // 같은 줄의 제 자리 토막은 여전히 제 트래커로 본다.
     let why = refusal(&bash(&a, &format!("moai -C {bp} add \"딴 일\" && moai add \"또 딴 일\"")));
     assert!(why.contains(&held), "{why}");
+    // 하위 셸의 `cd` 는 뒤로 안 이어진다 — 뒷토막은 제 자리에 선다.
+    let why = refusal(&bash(&a, &format!("(cd {bp} && moai status); moai add \"딴 일\"")));
+    assert!(why.contains(&held), "묶음 밖 토막을 남의 트래커로 보냈다 — {why}");
+    // 아직 없는 디렉터리는 실행할 때 생겨 `moai` 가 위로 찾아 이 트래커에 세운다 — 아무도 안 보면 샌다.
+    for cmd in ["mkdir fresh && moai -C fresh add \"딴 일\"", "mkdir fresh && cd fresh && moai add \"딴 일\""] {
+        let why = refusal(&bash(&a, cmd));
+        assert!(why.contains(&held), "없는 디렉터리를 거쳐 규칙 1 을 넘었다 — {cmd}\n{why}");
+    }
 
     // 거꾸로 — B 가 쥔 것이 있으면 B 에 세우는 줄은 B 의 초점으로 막힌다.
     let theirs = field(&ok(b.path(), &["add", "저기서 할 일", "--json"]), "id");
