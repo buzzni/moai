@@ -1749,3 +1749,5 @@
 {"ts":"2026-09-14T12:04:05Z","id":"moai-8m81","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLI moai show <id> 상세가 막음 줄을 탐색기와 같은 낱말(막힘·풀림·끊김·미룸)로 그린다"}
 {"ts":"2026-09-14T12:04:05Z","id":"moai-bxen","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-8m81 로 옮겨 작업한다"}
 {"ts":"2026-09-14T12:04:05Z","id":"moai-8m81","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T12:05:37Z","id":"moai-rvcb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"중복 moai-8m81 을 지웠다 (2026-09-14, 사용자와 정함) — 옆 세션이 같은 moai-bxen 을 1분 뒤 main 에서 집었다가(c79d2f5) 코드 없이 접었다. 이쪽을 남긴다."}
+{"ts":"2026-09-14T12:05:37Z","id":"moai-8m81","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"CLI moai show <id> 상세가 막음 줄을 탐색기와 같은 낱말(막힘·풀림·끊김·미룸)로 그린다"}
