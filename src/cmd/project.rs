@@ -4,8 +4,8 @@
 //! `.moai` 밖 어디서도 선다. 누가 했는지도 묻지 않는다 — 이력이 남는 파일이
 //! 아니라서, 사람을 모르는 기계에서 등록이 멈추면 도구가 고장 난 것으로 보인다.
 //!
-//! 파일을 읽고 쓰는 길은 전부 `user_config` 에 있다. 여기는 argv 를 그 길로
-//! 옮기고 나온 것을 그린다.
+//! 파일을 읽고 쓰는 길은 전부 `user_config` 에 있고, 등록·해제의 알맹이는 TUI 와 함께 쓰는
+//! `projects::add`·`projects::remove` 다. 여기는 argv 를 그 길로 옮기고 나온 것을 그린다.
 //!
 //! **상대경로는 지금 자리에 붙인다.** `-C <dir>` 을 주면 `main` 이 먼저 그리로
 //! 옮겨 가므로 그 디렉터리가 기준이다 — `git -C` 가 "거기서 시작한 것처럼" 인 것과
@@ -21,11 +21,8 @@ use std::path::{Path, PathBuf};
 
 pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     let config = writable_config()?;
-    let dir = user_config::resolve_dir(input, &cwd()?)?;
-    let added = user_config::update(&config, |doc| doc.add(&dir))?;
-    // `.moai` 는 **준 디렉터리에서만** 본다. 위로 찾아 올라가면 모노레포의
-    // `apps/a` 가 루트의 `.moai` 를 제 것으로 읽고, 그러면 따로 등록한 뜻이 없다.
-    let initialized = dir.join(".moai").is_dir();
+    // 적는 길은 TUI 층의 `a` 와 하나다 — 링크 풀기·멱등·`.moai` 를 준 자리에서만 보기.
+    let projects::Added { path: dir, added, initialized } = projects::add(&config, input, &cwd()?)?;
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -56,20 +53,8 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
 
 pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     let config = writable_config()?;
-    let spellings = user_config::spellings(input, &cwd()?);
-    // **설정 파일이 없으면 뺄 것도 없다.** 그대로 `update` 로 가면 빈 목록에서
-    // 아무것도 안 빼려고 설정 디렉터리를 만든다 — 아무 일도 안 한 명령이 사람의
-    // `~/.config` 에 흔적을 남긴다.
-    let removed: Vec<PathBuf> = if config.exists() {
-        user_config::update(&config, |doc| {
-            let hit: Vec<PathBuf> =
-                doc.projects().0.into_iter().map(|p| p.path).filter(|p| spellings.contains(p)).collect();
-            doc.remove(&spellings);
-            Ok(hit)
-        })?
-    } else {
-        Vec::new()
-    };
+    // 빼는 길은 TUI 층의 `d` 와 하나다 — 철자 여럿으로 견주고, 설정 파일이 없으면 안 만든다.
+    let projects::Removed { spelled, removed } = projects::remove(&config, input, &cwd()?)?;
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -80,14 +65,14 @@ pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
             removed: &'a [PathBuf],
             config: &'a Path,
         }
-        return super::json_line(&Out { path: &spellings[0], removed: &removed, config: &config });
+        return super::json_line(&Out { path: &spelled, removed: &removed, config: &config });
     }
 
     if removed.is_empty() {
         return Ok(vec![format!(
             "{}  {}",
             paint(style::DIM, "등록돼 있지 않다"),
-            sanitize(&spellings[0].display().to_string())
+            sanitize(&spelled.display().to_string())
         )]);
     }
     let mut out: Vec<String> =
