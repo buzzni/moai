@@ -818,7 +818,11 @@ pub fn epic_from_parent<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, &'a 
     Some((epic, crate::id::parent_of(&line.id)?))
 }
 
-/// 마일스톤을 넘긴 자리 — 제 에픽이거나 id 부모다.
+/// 마일스톤을 넘긴 자리 — 제 에픽이거나, 그 마일스톤을 실제로 든 id 조상이다.
+///
+/// `Parent` 는 **바로 위 부모가 아니라 값을 든 조상**이다. 손자가 조부의 마일스톤을
+/// 받을 때 바로 위 부모를 대면, 그 부모를 고치라는 안내는 아무것도 안 바꾼다.
+/// 조상이 마일스톤 줄 자신이면(`--parent <마일스톤>`) 그 id 가 마일스톤과 같다.
 #[derive(Debug, PartialEq)]
 pub enum Above<'a> {
     Epic(&'a str),
@@ -842,12 +846,15 @@ pub fn milestone_from_above<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, 
         return Some((milestone, Above::Epic(e)));
     }
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
-    let top = fold_top(line, &by_id, &rooted_thoughts(&by_id))?;
-    // 접히지 않은 줄은 제 필드가 먼저다 — `climb` 과 같은 차례.
-    if top.id == line.id && line.milestone.is_some() {
+    let rooted = rooted_thoughts(&by_id);
+    let top = fold_top(line, &by_id, &rooted)?;
+    // 값을 든 줄은 `climb` 이 읽는 그 줄이다 — 자를 따로 두면 안내가 셈과 어긋난다.
+    // 그 줄이 제 줄이면 제 필드가 답이다(접히지 않은 줄의 제 `milestone`).
+    let source = stood_at(top, &by_id, &rooted, joins(line))?;
+    if source.id == line.id {
         return None;
     }
-    Some((milestone, Above::Parent(crate::id::parent_of(&line.id)?)))
+    Some((milestone, Above::Parent(source.id.as_str())))
 }
 
 /// **뿌리로 올라간 생각** — 제 부모 밑에 접히지 않는 idea 의 id.
@@ -1007,18 +1014,34 @@ fn climb<'a>(
     rooted: &BTreeSet<&str>,
     joins: bool,
 ) -> Option<&'a str> {
+    let at = stood_at(top, by_id, rooted, joins)?;
+    match at.kind {
+        Kind::Epic => milestone_stood(at),
+        Kind::Milestone if joins => Some(at.id.as_str()),
+        _ => at.milestone.as_deref(),
+    }
+}
+
+/// [`climb`] 이 마일스톤을 읽는 **그 줄** — 에픽 줄, 마일스톤인 조상, 또는 제
+/// `milestone` 을 든 줄. [`milestone_from_above`] 가 넘긴 자리를 댈 때도 이것을 쓴다.
+fn stood_at<'a>(
+    top: &'a Issue,
+    by_id: &BTreeMap<&'a str, &'a Issue>,
+    rooted: &BTreeSet<&str>,
+    joins: bool,
+) -> Option<&'a Issue> {
     let mut cur = top;
     loop {
         if cur.kind == Kind::Epic {
-            return milestone_stood(cur);
+            return Some(cur);
         }
         // 받는 줄이면 `top` 은 언제나 이슈나 생각이다(`fold_top` 이 그 종류로만 오른다) —
         // 그래서 여기 서는 마일스톤은 늘 조상이다.
         if joins && cur.kind == Kind::Milestone {
-            return Some(cur.id.as_str());
+            return Some(cur);
         }
-        if let Some(m) = &cur.milestone {
-            return Some(m.as_str());
+        if cur.milestone.is_some() {
+            return Some(cur);
         }
         // 부모가 뿌리로 올라간 생각이면 거기서 멈춘다 — `groups` 와 같은 자다.
         cur = crate::id::parent_of(&cur.id)

@@ -220,18 +220,28 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     if let Some(k) = &kept_milestone {
         // 넘긴 자리마다 빼는 길이 다르다 — 에픽 멤버는 에픽을 옮기거나 에픽의 마일스톤을
         // 고치고, 부모 밑 자식은 id 를 못 옮기니 부모의 마일스톤을 고친다.
-        let (from, way) = match (&k.epic, &k.parent) {
-            (Some(e), _) => (
-                format!("에픽 {e}"),
-                format!("`moai edit {} -e <다른 에픽>` 이나 `moai edit {e} --milestone none`", edited.id),
+        // 조상이 마일스톤 줄 자신이면(`--parent <마일스톤>`) 소속은 id 자리에서 온다 —
+        // 그 마일스톤의 필드를 고치라고 대면 아무것도 안 바뀐다.
+        match (&k.epic, &k.parent) {
+            (None, Some(p)) if *p == k.milestone => eprintln!(
+                "moai: {} 는 마일스톤 {} 에 그대로 든다 — id 가 그 마일스톤 밑에 서 있어 --milestone none 으로 안 끊긴다",
+                edited.id, k.milestone
             ),
-            (None, Some(p)) => (format!("부모 {p}"), format!("`moai edit {p} --milestone none`")),
-            (None, None) => unreachable!("넘긴 자리는 에픽이나 부모다"),
-        };
-        eprintln!(
-            "moai: {} 는 마일스톤 {} 에 그대로 든다 — {from} 에서 오는 마일스톤이라 --milestone none 으로 안 끊긴다. 빼려면 {way}",
-            edited.id, k.milestone
-        );
+            (epic, parent) => {
+                let (from, way) = match (epic, parent) {
+                    (Some(e), _) => (
+                        format!("에픽 {e}"),
+                        format!("`moai edit {} -e <다른 에픽>` 이나 `moai edit {e} --milestone none`", edited.id),
+                    ),
+                    (None, Some(p)) => (format!("조상 {p}"), format!("`moai edit {p} --milestone none`")),
+                    (None, None) => unreachable!("넘긴 자리는 에픽이나 조상이다"),
+                };
+                eprintln!(
+                    "moai: {} 는 마일스톤 {} 에 그대로 든다 — {from} 에서 오는 마일스톤이라 --milestone none 으로 안 끊긴다. 빼려면 {way}",
+                    edited.id, k.milestone
+                );
+            }
+        }
     }
     if !changed {
         return Ok(vec![format!(
