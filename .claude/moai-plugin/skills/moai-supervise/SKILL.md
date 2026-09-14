@@ -12,7 +12,7 @@ description: 같은 저장소에서 놀고 있는 Claude 세션들에 쌓인 ide
 **본 가지는 바퀴를 시작할 때 루트에서 한 번 읽는다.** 일꾼이 워크트리를 뜨고 병합하는
 곳이 루트 체크아웃이라 그 체크아웃의 지금 가지가 본 가지다 — 원격의 기본 가지는 루트와
 다를 수 있고 낡았을 수 있다. 루트가 detached 면 `origin/HEAD`, 그것도 없으면 `main` 이다.
-`<루트>` 는 2 의 스크립트가 찾는 자리다.
+`<루트>` 는 2 의 스크립트가 첫 줄 `루트 자리` 로 내는 경로다.
 
 ```sh
 b=$(git -C <루트> branch --show-current); [ -n "$b" ] || b=$(git -C <루트> symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||'); echo "${b:-main}"
@@ -53,6 +53,7 @@ while here not in (top, os.path.dirname(here)) and not os.path.isdir(os.path.joi
     here = os.path.dirname(here)
 root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
 trees = os.path.join(root, ".claude", "worktrees") + os.sep
+print("루트 자리", root)
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 unread = 0
 for f in glob.glob(os.path.join(home, "sessions", "*.json")):
