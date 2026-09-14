@@ -2187,7 +2187,7 @@ fn promote_fills_a_template_too() {
 fn init_writes_an_agents_block() {
     let s = init("agents");
     let md = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
-    assert!(md.contains("<!-- moai:begin -->") && md.contains("<!-- moai:end -->"));
+    assert!(md.contains("<!-- moai:begin v:") && md.contains("<!-- moai:end -->"));
     assert!(md.contains("moai status") && md.contains("승인 게이트가 없다"), "{md}");
     // 훅이 서는 규칙도 같은 출처에서 온다 — 스킬에만 적혀 있던 자리다.
     assert!(md.contains("리뷰도 이슈다"), "규칙 셋이 빠졌다\n{md}");
@@ -2209,7 +2209,7 @@ fn init_keeps_what_someone_else_wrote() {
     ok(s.path(), &["init", "argos"]);
     let md = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
     assert!(md.starts_with(mine), "{md}");
-    assert_eq!(md.matches("<!-- moai:begin -->").count(), 1);
+    assert_eq!(md.matches("<!-- moai:begin").count(), 1);
 }
 
 /// **훑기 목록이 명령을 빠뜨리면 여기서 걸린다.**

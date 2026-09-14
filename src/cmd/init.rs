@@ -4,17 +4,38 @@ use super::{Ctx, Fail, R};
 use crate::config::DEFAULT_STATUSES;
 use std::path::Path;
 
-const BEGIN: &str = "<!-- moai:begin -->";
+/// 여는 마커의 **머리**. 뒤에 메타(`v:`·`hash:`)가 붙고 `-->` 로 닫힌다 — 머리로 찾아야
+/// 메타가 없던 옛 맨 마커(`<!-- moai:begin -->`)도 같은 블록으로 알아본다.
+const BEGIN: &str = "<!-- moai:begin";
 const END: &str = "<!-- moai:end -->";
+
+/// 블록을 여는 마커 한 줄 — `<!-- moai:begin v:<버전> hash:<8자> -->` (moai-leyw).
+///
+/// **해시는 블록 글 위의 것이다**, 파일 전체가 아니라. 블록 밖은 사람의 산문이라 그것이
+/// 바뀌었다고 블록이 낡은 것이 아니다. 버전은 사람이 읽으라고 둔다 — 낡음을 가르는 것은
+/// 글이다: 크레이트 버전은 안내 글이 바뀌어도 그대로일 때가 많다.
+fn begin_marker(block: &str) -> String {
+    format!("{BEGIN} v:{} hash:{:08x} -->", env!("CARGO_PKG_VERSION"), fnv1a(block))
+}
+
+/// FNV-1a 32비트. **std 의 해셔를 안 쓴다** — `DefaultHasher` 는 러스트 버전마다 값이 달라질 수
+/// 있다고 문서가 밝혀, 새로 빌드한 바이너리가 멀쩡한 블록의 해시를 다르게 읽는다. 크레이트를
+/// 들일 만한 일도 아니다: 충돌에 강할 까닭이 없고(적대적 입력이 아니다) 여섯 줄이다.
+fn fnv1a(s: &str) -> u32 {
+    s.bytes().fold(0x811c_9dc5, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193))
+}
 
 /// 마커 사이만 갈아 끼운다. 사람이 쓴 산문은 **한 글자도 건드리지 않는다.**
 ///
 /// 남의 파일에 제 것을 쓰는 도구는 이 약속을 지켜야만 신뢰를 얻는다.
 fn with_block(existing: &str, block: &str) -> String {
-    let body = format!("{BEGIN}
+    let body = format!("{}
 {block}{END}
-");
-    match (existing.find(BEGIN), existing.find(END)) {
+", begin_marker(block));
+    // 여는 마커는 머리부터 그 줄의 `-->` 까지다 — 메타가 무엇이든(없어도) 통째로 갈아 끼운다.
+    let begin = existing.find(BEGIN);
+    let end = begin.and_then(|a| existing[a..].find(END).map(|b| a + b));
+    match (begin, end) {
         (Some(a), Some(b)) if b > a => {
             let tail = &existing[b + END.len()..];
             format!("{}{body}{}", &existing[..a], tail.strip_prefix('\n').unwrap_or(tail))
@@ -349,7 +370,34 @@ mod tests {
     #[test]
     fn an_empty_file_gets_just_the_block() {
         let got = with_block("", "내용\n");
-        assert_eq!(got, format!("{BEGIN}\n내용\n{END}\n"));
+        assert_eq!(got, format!("{}\n내용\n{END}\n", begin_marker("내용\n")));
+    }
+
+    /// **마커는 이 바이너리의 버전과 블록의 해시를 든다**(moai-leyw). 옛 맨 마커
+    /// (`<!-- moai:begin -->`)도 알아보고 갈아 끼운다 — 못 알아보면 이미 심긴 저장소마다
+    /// 블록이 둘 선다. 다시 넣어도 바이트가 같다.
+    #[test]
+    fn the_marker_carries_version_and_hash_and_replaces_a_bare_one() {
+        let first = with_block("", "내용\n").lines().next().unwrap().to_string();
+        assert_eq!(first, format!("<!-- moai:begin v:{} hash:{:08x} -->", env!("CARGO_PKG_VERSION"), fnv1a("내용\n")));
+
+        let old = "# 산문\n\n<!-- moai:begin -->\n옛 내용\n<!-- moai:end -->\n꼬리\n";
+        let new = with_block(old, "내용\n");
+        assert_eq!(new, format!("# 산문\n\n{first}\n내용\n{END}\n꼬리\n"));
+        assert_eq!(with_block(&new, "내용\n"), new, "다시 넣었더니 바뀌었다");
+
+        let changed = with_block(&new, "새 내용\n");
+        assert_eq!(changed.matches(BEGIN).count(), 1, "{changed}");
+        assert!(changed.contains(&format!("hash:{:08x} -->\n새 내용\n", fnv1a("새 내용\n"))), "{changed}");
+    }
+
+    /// 해시는 **공개된 FNV-1a 32비트**다 — std 의 해셔는 러스트 버전마다 값이 바뀌어, 새로
+    /// 빌드한 바이너리가 멀쩡한 블록을 낡았다고 읽는다.
+    #[test]
+    fn the_hash_is_plain_fnv1a() {
+        assert_eq!(fnv1a(""), 0x811c_9dc5);
+        assert_eq!(fnv1a("a"), 0xe40c_292c);
+        assert_eq!(fnv1a("foobar"), 0xbf9c_f968);
     }
 
     #[test]
