@@ -61,14 +61,13 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
 
 /// `.moai` 밖에서 부른 탐색기 — 등록한 프로젝트의 층.
 ///
-/// **등록한 것이 없으면 `status`·`ready` 와 같은 말로 멈춘다**(`cmd::nothing_registered`).
-/// 보여줄 것이 없는데 빈 화면을 켜면 `.moai` 밖에서 부른 실수가 성공으로 읽힌다.
+/// **등록한 것이 없어도 화면은 빈 층을 연다**(moai-r8kl, 사용자와 정함). 층이 `SPC p a` 를
+/// 대므로 빈 화면이 성공으로 읽히지 않고, 그 자리에서 첫 등록을 한다 — 전에는 그러려면 어느
+/// `.moai` 안에서 띄워야 했다. **`--json` 은 `status`·`ready` 와 같은 말로 멈춘다**
+/// (`cmd::nothing_registered`) — 기계에게 빈 배열은 "등록한 것이 다 비었다" 로 읽힌다.
 fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let config = crate::user_config::path();
     let reg = crate::user_config::read(config.as_deref());
-    if reg.projects.is_empty() {
-        return Err(super::nothing_registered(&reg));
-    }
     // `--path` 는 한 프로젝트 안의 id 다. 어느 프로젝트인지 모르는 채로 받으면 id 가 겹치는
     // 두 프로젝트 중 하나를 말없이 고르게 된다.
     if args.path.is_some() {
@@ -78,6 +77,9 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         ));
     }
     if ctx.json {
+        if reg.projects.is_empty() {
+            return Err(super::nothing_registered(&reg));
+        }
         let now = crate::model::now();
         let projects = crate::projects::open(&reg);
         let rows: Vec<ProjectRow> = projects
