@@ -2423,3 +2423,18 @@
 {"ts":"2026-09-14T17:00:38Z","id":"moai-fmv5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T17:01:48Z","id":"moai-ynsb.0r0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — .moai 밖 status 의 종료 코드 (moai-ynsb)"}
 {"ts":"2026-09-14T17:01:54Z","id":"moai-ynsb.0r0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T17:03:49Z","id":"moai-1w2l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이슈에 닿은 커밋을 git 에서 읽는다 — 저장하지 않는 커밋 칸"}
+{"ts":"2026-09-14T17:03:49Z","id":"moai-pjic","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"git 층: id 로 커밋을 찾는 함수 — git log --grep 을 한 번 불러 id 별로 가른다"}
+{"ts":"2026-09-14T17:03:49Z","id":"moai-emcv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show <id> 상세에 커밋 칸을 그리고 --json 에 commits 를 낸다"}
+{"ts":"2026-09-14T17:03:49Z","id":"moai-mauw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"git 이 없거나 저장소 밖일 때·느린 저장소일 때 조용히 비운다 — 측정과 상한"}
+{"ts":"2026-09-14T17:03:49Z","id":"moai-a4i0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 상세에도 같은 커밋 칸"}
+{"ts":"2026-09-14T17:03:49Z","id":"moai-wqm7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"규약·가이드 — 커밋 제목에 (<id>) 를 넣는 것이 연결 고리임을 AGENTS 블록에 적는다"}
+{"ts":"2026-09-14T17:03:49Z","id":"moai-1w2l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-1mvz 에서 펼쳤다 — 이슈에 고친 커밋(git hash)을 잇는 방법 — Jira·GitHub issue 처럼 show 에서 커밋이 보이게"}
+{"ts":"2026-09-14T17:03:49Z","id":"moai-1mvz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-1w2l 로 펼쳤다 (이슈 5건)"}
+{"ts":"2026-09-14T17:04:07Z","id":"moai-1w2l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"설계(2026-09-14, 사용자와 정함): moai-1mvz 의 길 1 — 커밋을 저장하지 않고 git log 에서 파생으로 읽는다. report·query 는 &[Issue] 순수 함수로 두고 git 을 부르는 것은 cmd 쪽 층에서만 한다. 브랜치·워크트리 전용 커밋은 범위 밖"}
+{"ts":"2026-09-14T17:04:07Z","id":"moai-pjic","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"설계: src/worktree.rs 의 git() 을 끌어낸다. id 경계 — moai-rvcb 가 moai-rvcb.7u5 의 커밋을 잡지 않게 정확히 그 id 만. chore(tracker) 커밋을 낼지·거를지·따로 묶을지 정한다"}
+{"ts":"2026-09-14T17:04:07Z","id":"moai-emcv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"설계: 상세에 해시·제목 한 줄씩, --json 에 commits:[{hash,subject}]. 시험은 임시 저장소에 id 든 커밋을 만들어 돈다"}
+{"ts":"2026-09-14T17:04:07Z","id":"moai-mauw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"설계: git 없음·저장소 밖·이력 없음이면 칸을 비우고 비영 종료하지 않는다(status 가 아무것도 막지 않는 것과 같은 뜻). 큰 저장소에서 재고 상한을 둔다"}
+{"ts":"2026-09-14T17:04:07Z","id":"moai-a4i0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"설계: 탐색기 상세 창에 같은 칸. 이동마다 git 을 부르지 않게 캐시"}
+{"ts":"2026-09-14T17:04:07Z","id":"moai-wqm7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"설계: 커밋 제목에 (<id>) 를 넣는 것이 연결 고리임을 moai init 관리 블록(AGENTS)에 적는다 — 새 저장소는 CLAUDE.md 규약을 모른다"}
+{"ts":"2026-09-14T17:04:07Z","id":"moai-pjic","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
