@@ -2118,3 +2118,5 @@
 {"ts":"2026-09-14T13:40:20Z","id":"moai-uni2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"끊긴 에픽을 든 생각 밑에 접힌 줄을 status 도 에픽 없음으로 안 센다 — 트리처럼 길 잃은 부모의 묶음으로 읽는다"}
 {"ts":"2026-09-14T13:40:20Z","id":"moai-xy3z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-uni2 로 옮겨 작업한다"}
 {"ts":"2026-09-14T13:40:20Z","id":"moai-uni2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T13:41:19Z","id":"moai-psqc.172","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — tui --help 표→도움말 시험을 문단·문장으로 좁힘 (psqc)"}
+{"ts":"2026-09-14T13:41:37Z","id":"moai-psqc.172","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
