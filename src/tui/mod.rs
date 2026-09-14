@@ -2365,6 +2365,10 @@ mod tests {
         settle(&mut a);
         let said = super::draw::tests_banner(&mut a);
         assert!(said.contains("다시 읽기 1개를 놓았다"), "다시 읽기가 놓은 것의 말을 걷었다 — {said:?}");
+        // 붙박이라 **쓰기의 알림 뒤에** 선다 — 앞에 서면 세션 내내 80칸에서 알림을 밀어낸다.
+        a.notice = Some("✓ 담음".into());
+        let said = super::draw::tests_banner(&mut a);
+        assert!(said.find("✓ 담음") < said.find("다시 읽기 1개"), "놓은 것의 말이 알림을 앞질렀다 — {said:?}");
     }
 
     /// **꽉 찬 채로 버릴 때 가장 오래된 것이 그새 패닉으로 끝났으면 놓지 않고 되던진다.**

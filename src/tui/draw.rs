@@ -373,18 +373,19 @@ fn banner(app: &App) -> Option<(String, bool)> {
         parts.push(t.clone());
         urgent = true;
     }
-    // 도는 채로 놓은 다시 읽기는 **실패 곁에 붙박는다** — 그것이 터지면 화면이 걷히고
-    // 탐색기는 모른다. 사람이 할 수 있는 것은 나갔다 다시 여는 것뿐이다(moai-j9on).
-    if app.let_go > 0 {
-        parts.push(format!("멈춘 다시 읽기 {}개를 놓았다 — 그것이 터지면 화면이 걷힌다 · 나갔다 다시 연다", app.let_go));
-        urgent = true;
-    }
     // 쓰기의 알림은 **실패 바로 뒤, 붙박이들 앞이다.** 다음 키에 사라지는 말이라 뒤에
     // 서면 80칸에서 "드러난 것 N건" 에 밀려 잘리고, 그러면 담긴 것을 확인할 길이 없다.
     // 실패보다 앞서지 않는다 — 둘이 함께 서는 것은 담긴 뒤 다시 읽기가 실패했을 때고,
     // 그때 사람이 할 일은 실패 쪽에 있다. 알림만으로는 급하지 않다(`✓` 가 뜻을 진다).
     if let Some(n) = &app.notice {
         parts.push(n.clone());
+    }
+    // 도는 채로 놓은 다시 읽기는 **붙박이다** — 그것이 터지면 화면이 걷히고 탐색기는
+    // 모른다. 사람이 할 수 있는 것은 나갔다 다시 여는 것뿐이다(moai-j9on). 급하지만 알림
+    // **뒤에** 선다: 세션 내내 남는 긴 말이 앞에 서면 80칸에서 이후 모든 쓰기의 알림을 밀어낸다.
+    if app.let_go > 0 {
+        parts.push(format!("멈춘 다시 읽기 {}개를 놓았다 — 그것이 터지면 화면이 걷힌다 · 나갔다 다시 연다", app.let_go));
+        urgent = true;
     }
     if !app.unreadable.is_empty() {
         parts.push(format!("읽을 수 없는 줄 {}개 — 그 줄은 빠진 채로 보고 있다", app.unreadable.len()));
@@ -583,7 +584,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         .filter_map(|st| {
             let n = work.iter().filter(|&&at| app.issues[at].status.as_str() == st).count();
             // 글리프만으로는 뜻이 약하다. 칸 이름을 같이 적는다.
-            (n > 0).then(|| format!("{} {st} {n}", style::spin_glyph(st, app.spin)))
+            (n > 0).then(|| format!("{} {st} {n}", count_glyph(app, &work, st)))
         })
         .collect();
     // **줄이 있으면 "비었다" 라고 하지 않는다.** 셈은 config 에 있는 칸의 일만
@@ -833,6 +834,14 @@ fn glyph_of(app: &App, at: usize) -> &'static str {
     if app.spins(at) { style::spin_glyph(col, app.spin) } else { style::glyph(col) }
 }
 
+/// 칸별 건수의 글리프. **센 줄 가운데 도는 줄이 있을 때만 돈다**([`App::spins`]) — 칸
+/// 이름만 보고 돌리면 미룬 `in_progress` 하나뿐인 칸이, 루프가 빠른 걸음으로 안 깨우는
+/// (`App::spinning`) 스피너의 한 프레임에 멈춰 선다. 멈춘 스피너는 일이 멈췄다는 거짓말이다.
+fn count_glyph(app: &App, work: &[usize], st: &str) -> &'static str {
+    let turning = work.iter().any(|&at| app.issues[at].status.as_str() == st && app.spins(at));
+    if turning { style::spin_glyph(st, app.spin) } else { style::glyph(st) }
+}
+
 /// 그 항목 안으로 들어간 경로. 요약을 세려면 그 밑을 봐야 한다.
 fn deeper(app: &App, e: &Entry) -> crate::nav::Path {
     let mut p = app.path.clone();
@@ -1048,7 +1057,7 @@ fn rollup<'a>(app: &App, path: &crate::nav::Path, w: usize) -> Vec<Line<'a>> {
         .iter()
         .filter_map(|st| {
             let n = work.iter().filter(|&&at| app.issues[at].status.as_str() == st).count();
-            (n > 0).then(|| Span::styled(format!("{} {st} {n}   ", style::spin_glyph(st, app.spin)), status(st)))
+            (n > 0).then(|| Span::styled(format!("{} {st} {n}   ", count_glyph(app, &work, st)), status(st)))
         })
         .collect();
     out.push(Line::from(counts));
@@ -1912,6 +1921,24 @@ pub(super) mod tests {
         assert!(style::SPIN.iter().any(|g| row.contains(g)), "집은 멤버가 있는데 묶음이 안 돈다\n{lines}");
         assert!(!lines.contains("▸ in_progress"), "상세 머리만 멈췄다\n{lines}");
         assert!(a.spinning(), "도는 화면을 안 깨운다");
+    }
+
+    /// **미룬 `in_progress` 하나뿐인 칸은 건수 글리프도 안 돈다**(moai-tawj) — 줄은 멈추는데
+    /// 목록 머리·롤업의 건수만 칸 이름으로 돌리면, 루프가 빠른 걸음으로 안 깨우는 스피너의
+    /// 한 프레임에 멈춰 선다.
+    #[test]
+    fn a_deferred_pick_does_not_spin_the_counts_either() {
+        let mut issues = issues();
+        issues[2].deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        assert!(!a.spinning());
+        let root = render(&mut a, 120, 16).join("\n");
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let inside = render(&mut a, 120, 16).join("\n");
+        for lines in [&root, &inside] {
+            assert!(!style::SPIN.iter().any(|g| lines.contains(g)), "안 깨우는 스피너가 섰다\n{lines}");
+        }
+        assert!(inside.contains("▸ in_progress 1"), "건수에 정지 글리프가 없다\n{inside}");
     }
 
     /// **목록과 상세가 묶음의 읽은 칸을 그린다** — CLI 와 같은 자. 손으로 옮긴
