@@ -55,7 +55,9 @@ pub fn commits_of(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Comm
         return Ok(BTreeMap::new());
     }
     let format = format!("--format=%H{FS}%s{RS}");
-    let mut args = vec!["log", "--fixed-strings", format.as_str()];
+    // `log.showSignature` 를 켠 사람이면 git 이 서명 검사 줄을 레코드 앞 표준 출력에 끼워
+    // 해시 자리에 `No signature\n<hash>` 가 들어온다 — 설정과 무관하게 끈다.
+    let mut args = vec!["log", "--no-show-signature", "--fixed-strings", format.as_str()];
     let greps: Vec<String> = ids.iter().map(|id| format!("--grep={id}")).collect();
     args.extend(greps.iter().map(String::as_str));
     args.push("HEAD");
