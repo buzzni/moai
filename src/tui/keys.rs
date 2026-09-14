@@ -8,7 +8,7 @@
 //! **조각이다.** `KeyEvent` 와 표만 안다 — `App`·터미널·저장소를 모른다. 켜짐을 가르는 값
 //! ([`Ctx`])은 든 쪽이 재서 넘긴다. 그래서 시험이 터미널 없이 표를 훑는다.
 //!
-//! **한 줄은 키의 열이다**([`Bind::seq`]). 오늘 표에는 한 키짜리만 있지만, `g g`·`SPC t p`
+//! **한 줄은 키의 열이다**([`Bind::seq`]). 오늘 표에는 한 키짜리만 있지만, `g g`·`SPC t w`
 //! 같은 접두어를 줄 하나로 적을 수 있고 [`lookup`] 이 [`Lookup::Pending`] 으로 "더 기다린다"
 //! 를 낸다. 기다리는 동안의 열은 든 쪽이 들고 다음 키를 붙여 다시 부른다.
 
@@ -164,7 +164,6 @@ pub enum Browse {
     Reload,
     Worktree,
     Raw,
-    Shade,
     DetailDown,
     DetailUp,
     DetailPageDown,
@@ -202,7 +201,6 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Worktree, Some("w"), Key::plain('w')),
         row!(Raw, Some("F3"), Key::any(C::F(3))),
         row!(Raw, None, Key::plain('m')),
-        row!(Shade, Some("p"), Key::plain('p')),
         row!(DetailDown, Some("j"), Key::plain('j')),
         row!(DetailUp, Some("k"), Key::plain('k')),
         row!(DetailPageDown, None, Key::plain(' ')),
@@ -219,7 +217,6 @@ pub struct Ctx {
     pub list_focus: bool,
     pub worktree: bool,
     pub raw: bool,
-    pub shade: bool,
     /// `Tab`·Shift-Tab 이 가는 칸의 이름.
     pub next_pane: &'static str,
     pub prev_pane: &'static str,
@@ -283,8 +280,6 @@ impl Browse {
             Worktree => "워크트리",
             Raw if c.raw => "그리기",
             Raw => "원문",
-            Shade if c.shade => "진행 끄기",
-            Shade => "진행 바탕",
             DetailDown | DetailUp | DetailPageDown | DetailPageUp => "굴리기",
         }
     }
@@ -523,19 +518,19 @@ mod tests {
     }
 
     /// **접두어는 기다린다.** 오늘 표에는 접두어가 없어 조그만 표로 잰다 — `g g` 는 맨 위,
-    /// `SPC t p` 는 셋째 키에 선다. 모르는 둘째 키는 뜻이 없다.
+    /// `SPC t w` 는 셋째 키에 선다. 모르는 둘째 키는 뜻이 없다.
     #[test]
     fn a_prefix_waits_for_the_rest_of_its_row() {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         enum Fx {
             Top,
             Bottom,
-            Shade,
+            Worktree,
         }
         const FX: &[Bind<Fx>] = &[
             row!(Fx::Top, Some("gg"), Key::plain('g'), Key::plain('g')),
             row!(Fx::Bottom, Some("G"), Key::plain('G')),
-            row!(Fx::Shade, Some("SPC t p"), Key::plain(' '), Key::plain('t'), Key::plain('p')),
+            row!(Fx::Worktree, Some("SPC t w"), Key::plain(' '), Key::plain('t'), Key::plain('w')),
         ];
         let g = press(KeyCode::Char('g'));
         let sp = press(KeyCode::Char(' '));
@@ -546,7 +541,7 @@ mod tests {
         assert_eq!(lookup(FX, &[with(KeyCode::Char('G'), KeyModifiers::SHIFT)]), Lookup::Run(Fx::Bottom));
         assert_eq!(lookup(FX, &[sp]), Lookup::Pending);
         assert_eq!(lookup(FX, &[sp, t]), Lookup::Pending);
-        assert_eq!(lookup(FX, &[sp, t, press(KeyCode::Char('p'))]), Lookup::Run(Fx::Shade));
+        assert_eq!(lookup(FX, &[sp, t, press(KeyCode::Char('w'))]), Lookup::Run(Fx::Worktree));
         assert_eq!(lookup(FX, &[press(KeyCode::Char('x'))]), Lookup::Unknown);
     }
 
@@ -631,7 +626,8 @@ mod tests {
             (press(C::Char('w')), Lookup::Run(B::Worktree)),
             (press(C::F(3)), Lookup::Run(B::Raw)),
             (press(C::Char('m')), Lookup::Run(B::Raw)),
-            (press(C::Char('p')), Lookup::Run(B::Shade)),
+            // 진행 바탕 토글 `p` 는 main 이 기능째 걷었다(moai-u3r2).
+            (press(C::Char('p')), Lookup::Unknown),
             (press(C::Char('j')), Lookup::Run(B::DetailDown)),
             (press(C::Char('k')), Lookup::Run(B::DetailUp)),
             (press(C::Char(' ')), Lookup::Run(B::DetailPageDown)),

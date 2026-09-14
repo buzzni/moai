@@ -321,9 +321,6 @@ pub struct App {
     /// 본문을 그리지 않고 원문 그대로 보는가. 그린 글은 기호가 지워져
     /// 되돌릴 수 없다 — 긁어 붙이거나 마크다운을 고칠 때 이 길이 필요하다.
     pub raw: bool,
-    /// 에픽·마일스톤 줄에 진행 바탕을 까는가(moai-94uf). **세션만 든다, 켜진 채로 시작한다** —
-    /// 포커스 없이 여러 묶음의 진척을 한눈에 보는 것이 이 탐색기의 쓸모라서다.
-    pub shade: bool,
     /// 마지막으로 읽은 파일의 (고친 때, 길이).
     stamp: Stamp,
     /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과 그 표식(`worktree::gather`
@@ -436,7 +433,6 @@ impl App {
             focus: Pane::default(),
             detail: Scroll::default(),
             raw: false,
-            shade: true,
             filter_text: None,
             repo: None,
             now: crate::model::now(),
@@ -1091,9 +1087,6 @@ impl App {
                 // 엉뚱한 데가 나온다.
                 self.detail.rewind();
             }
-            // 진행 바탕을 켜고 끈다(moai-94uf). 세는 것은 그대로고 그리는 것만 바뀌므로 다시
-            // 읽지 않는다 — `w` 와 다른 까닭이다.
-            B::Shade => self.shade = !self.shade,
             // 상세를 굴린다. **왼쪽은 그대로 둔다** — 오른쪽만 길어서 못 보는
             // 것이므로, 굴리려고 커서를 옮기게 하면 보던 이슈를 잃는다.
             // **포커스와 상관없이 듣는다** — 포커스가 생기기 전부터 손에 익은
@@ -1112,7 +1105,6 @@ impl App {
             list_focus: self.focus == Pane::Explorer,
             worktree: self.worktree,
             raw: self.raw,
-            shade: self.shade,
             next_pane: draw::pane_name(self.focus.next()),
             prev_pane: draw::pane_name(self.focus.prev()),
         }
