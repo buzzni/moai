@@ -314,7 +314,7 @@ impl Issue {
         // 손댈 때 비우는 길을 댄다.
         if self.kind == Kind::Milestone && self.milestone.is_some() {
             return Err(format!(
-                "{}: 마일스톤은 다른 마일스톤에 들지 않는다 — 마일스톤은 뿌리에 선다. 비우려면 `moai edit {} --milestone none`",
+                "{}: 마일스톤은 다른 마일스톤에 들지 않는다 — 마일스톤은 뿌리에 선다. 만들 때면 `--milestone` 을 빼고, 이미 적힌 줄이면 `moai edit {} --milestone none` 으로 비운다",
                 self.id, self.id
             ));
         }

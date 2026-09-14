@@ -1081,7 +1081,11 @@ fn a_milestone_line_refuses_a_milestone_but_old_lines_do_not_block() {
     refused(&["edit", &m1, "--milestone", &m2], &m1);
     let before = issues(s.path());
     let out = moai(s.path(), &["milestone", "add", "M3", "--milestone", &m2]);
-    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("다른 마일스톤에 들지 않는다"), "만들 때 받았다");
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(!out.status.success() && err.contains("다른 마일스톤에 들지 않는다"), "만들 때 받았다 — {err:?}");
+    // 만들 때는 **빼라고** 댄다. 거절된 새 줄의 id 는 저장되지 않으므로, 그 id 로 `moai edit` 를
+    // 치라고 대면 시킨 대로 친 명령이 "못 찾았다" 로 끝난다(리뷰 moai-bg55.oya).
+    assert!(err.contains("`--milestone` 을 빼고"), "만들 때 뺄 길을 안 댔다 — {err:?}");
     assert_eq!(issues(s.path()), before, "거절한 만들기가 파일을 바꿨다");
     // 이슈·에픽은 여전히 마일스톤에 든다.
     add(s.path(), &["일", "--milestone", &m2]);
