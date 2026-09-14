@@ -1348,6 +1348,9 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
         return bar(f, at, optional, vec![key("F10", "끝내기")]);
     }
     let mut optional = vec![
+        // **진행 바탕 키가 가장 먼저 떨어진다.** 바탕은 켜진 채 시작하고 눈에 보이는 것이라
+        // 끄는 법을 몰라도 잃는 길이 없다 — 80칸의 빠듯한 자리를 나갈 길·`Tab`·`F3` 에서 뺏지 않는다.
+        key("p", if app.shade { "진행 끄기" } else { "진행 바탕" }),
         // **프로젝트 안에서는 맨 먼저 떨어진다.** 등록은 층의 일이고 층에서는 늘 보이지만,
         // 등록이 0 인 채 `.moai` 안에서 띄우면 층이 없어 이 키가 첫 등록의 길이다(moai-plvy).
         key("a", "프로젝트 등록"),
@@ -1592,6 +1595,20 @@ pub(super) mod tests {
         term.draw(|f| screen(f, &mut a)).unwrap();
         let buf = term.backend().buffer().clone();
         assert!((0..w).all(|x| !buf[(x, y)].modifier.contains(Modifier::REVERSED)), "껐는데 깔렸다");
+    }
+
+    /// `p` 가 진행 바탕을 켜고 끄고, 키 바가 **지금 누르면 무엇이 되는지**를 댄다 —
+    /// `w 워크트리 끄기`·`F3 원문` 과 같은 자.
+    #[test]
+    fn p_toggles_the_progress_shade_and_the_bar_says_which_way() {
+        let mut a = app();
+        assert!(a.shade, "켜진 채 시작하지 않는다");
+        let bar = render(&mut a, 140, 14).last().cloned().unwrap_or_default();
+        assert!(bar.contains("p 진행 끄기"), "{bar:?}");
+        a.key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
+        assert!(!a.shade, "p 가 안 껐다");
+        let bar = render(&mut a, 140, 14).last().cloned().unwrap_or_default();
+        assert!(bar.contains("p 진행 바탕"), "{bar:?}");
     }
 
     /// **커서 줄에서는 바탕이 거꾸로 선다** — 커서가 줄 전체를 반전하므로 그대로 두면 진척이
