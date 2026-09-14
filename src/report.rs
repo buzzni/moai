@@ -926,7 +926,7 @@ pub fn milestone_from_above<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, 
     let top = fold_top(line, &by_id, &rooted)?;
     // 값을 든 줄은 `climb` 이 읽는 그 줄이다 — 자를 따로 두면 안내가 셈과 어긋난다.
     // 그 줄이 제 줄이면 제 필드가 답이다(접히지 않은 줄의 제 `milestone`).
-    let source = stood_at(top, &by_id, &rooted, joins(line))?;
+    let source = stood_at(top, &by_id, &rooted)?;
     if source.id == line.id {
         return None;
     }
@@ -1054,7 +1054,7 @@ pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
                 Some(e) => by_id.get(e).filter(|e| e.kind == Kind::Epic).and_then(|e| milestone_stood(e)),
                 // 에픽이 없으면 **접힌 맨 위 줄에서부터** 센다. 제 줄에서 시작하면
                 // 부모 밑에 그려진 자식이 제 마일스톤으로 세어진다(moai-uqoe).
-                None => fold_top(i, &by_id, &rooted).and_then(|top| climb(top, &by_id, &rooted, joins(i))),
+                None => fold_top(i, &by_id, &rooted).and_then(|top| climb(top, &by_id, &rooted)),
             },
         };
         // **못 받은 줄도 지도를 쓴다 — 같은 id 의 뒷줄이 이긴다.** 멤버는 에픽 줄을
@@ -1087,18 +1087,20 @@ fn milestone_stood(epic: &Issue) -> Option<&str> {
 /// **마일스톤인 조상을 만나면 그 마일스톤이다** — 부모가 에픽이면 그 에픽이듯
 /// (moai-9t3l). `--parent <마일스톤>` 의 자식이 `(마일스톤 없음)` 으로 빠지지 않는다.
 /// 제 `milestone` 이 먼저다: 에픽에서 제 `epic` 이 먼저인 것과 같은 차례다.
-/// `joins` 는 맨 처음 줄의 것이다. 마일스톤 줄은 여기 오지 않는다 — [`milestones`] 가
-/// 그 종류에 값을 안 준다(moai-8tav). 이슈 밑에 id 로 선 마일스톤 줄도 그렇다.
+/// **여기 오는 줄은 늘 일이다**([`joins`] 가 받는 이슈·생각). 마일스톤 줄은 오지 않는다 —
+/// [`milestones`] 가 그 종류에 값을 안 준다(moai-8tav). 이슈 밑에 id 로 선 마일스톤 줄도
+/// 그렇다. 에픽 줄은 [`milestones`]·[`milestone_from_above`] 가 먼저 제 필드로 돌아간다.
+/// 한때 받는 줄인지를 인자로 넘겼는데 늘 참이라 걷었다(moai-dejq) — 거짓일 수 없는 가드는
+/// "마일스톤 줄도 여기 온다" 는 없는 길을 읽는 사람에게 말한다.
 fn climb<'a>(
     top: &'a Issue,
     by_id: &BTreeMap<&'a str, &'a Issue>,
     rooted: &BTreeSet<&str>,
-    joins: bool,
 ) -> Option<&'a str> {
-    let at = stood_at(top, by_id, rooted, joins)?;
+    let at = stood_at(top, by_id, rooted)?;
     match at.kind {
         Kind::Epic => milestone_stood(at),
-        Kind::Milestone if joins => Some(at.id.as_str()),
+        Kind::Milestone => Some(at.id.as_str()),
         _ => at.milestone.as_deref(),
     }
 }
@@ -1109,16 +1111,15 @@ fn stood_at<'a>(
     top: &'a Issue,
     by_id: &BTreeMap<&'a str, &'a Issue>,
     rooted: &BTreeSet<&str>,
-    joins: bool,
 ) -> Option<&'a Issue> {
     let mut cur = top;
     loop {
         if cur.kind == Kind::Epic {
             return Some(cur);
         }
-        // 받는 줄이면 `top` 은 언제나 이슈나 생각이다(`fold_top` 이 그 종류로만 오른다) —
-        // 그래서 여기 서는 마일스톤은 늘 조상이다.
-        if joins && cur.kind == Kind::Milestone {
+        // `top` 은 언제나 이슈나 생각이다(부르는 쪽이 일만 넘기고 `fold_top` 도 그 종류로만
+        // 오른다) — 그래서 여기 서는 마일스톤은 늘 조상이다.
+        if cur.kind == Kind::Milestone {
             return Some(cur);
         }
         if cur.milestone.is_some() {
