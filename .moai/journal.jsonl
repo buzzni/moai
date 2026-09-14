@@ -2453,3 +2453,14 @@
 {"ts":"2026-09-14T17:07:02Z","id":"moai-ynsb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"92b8350 을 main 에 머지 — .moai 밖 status 는 등록 없음·깨진 설정에서 rc 0, ready·tui --json 은 그대로 멈춤"}
 {"ts":"2026-09-14T17:12:48Z","id":"moai-kndp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색창에서 `/` 검색 기능 사용시 개선 요청"}
 {"ts":"2026-09-14T17:15:22Z","id":"moai-yxae","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T17:16:53Z","id":"moai-0ock","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI `/` 검색 — 범위를 돌리고 찾은 글자를 비춘다"}
+{"ts":"2026-09-14T17:16:53Z","id":"moai-kojj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"검색 칸에서 Tab 으로 범위를 돈다 — 전체→id→제목→태그→본문, Shift-Tab 역순"}
+{"ts":"2026-09-14T17:16:53Z","id":"moai-yio7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"목록 줄 id·제목에서 찾은 글자를 밝은 파랑+굵게 칠한다"}
+{"ts":"2026-09-14T17:16:53Z","id":"moai-00le","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"치는 동안 바로 거르고 칸 옆에 걸린 수를 낸다"}
+{"ts":"2026-09-14T17:16:53Z","id":"moai-fmmg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"배지·다시 읽기·도움말에 범위를 싣는다 (`[/id:0004]`)"}
+{"ts":"2026-09-14T17:16:53Z","id":"moai-0ock","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-kndp 에서 펼쳤다 — 탐색창에서 `/` 검색 기능 사용시 개선 요청"}
+{"ts":"2026-09-14T17:16:53Z","id":"moai-kndp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-0ock 로 펼쳤다 (이슈 4건)"}
+{"ts":"2026-09-14T17:17:02Z","id":"moai-kojj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T17:17:02Z","id":"moai-yio7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T17:17:02Z","id":"moai-00le","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T17:17:03Z","id":"moai-fmmg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
