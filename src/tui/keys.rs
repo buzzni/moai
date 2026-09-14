@@ -8,10 +8,11 @@
 //! **조각이다.** `KeyEvent` 와 표만 안다 — `App`·터미널·저장소를 모른다. 켜짐을 가르는 값
 //! ([`Ctx`])은 든 쪽이 재서 넘긴다. 그래서 시험이 터미널 없이 표를 훑는다.
 //!
-//! **한 줄은 키의 열이다**([`Bind::seq`]). 오늘 표에는 한 키짜리만 있지만, `g g`·`SPC t w`
-//! 같은 접두어를 줄 하나로 적을 수 있고 [`lookup`] 이 [`Lookup::Pending`] 으로 "더 기다린다"
-//! 를 낸다. 기다리는 동안의 열은 든 쪽이 들고 다음 키를 붙여 다시 부른다.
+//! **한 줄은 키의 열이다**([`Bind::seq`]). `gg`·`g p`·`SPC t w` 같은 접두어를 줄 하나로 적고
+//! [`lookup`] 이 [`Lookup::Pending`] 으로 "더 기다린다" 를 낸다. 기다리는 동안의 열은 든 쪽이
+//! [`Chord`] 로 들고 다음 키를 붙여 다시 부른다.
 
+use super::scroll::Move;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 const CTRL_ALT: KeyModifiers = KeyModifiers::CONTROL.union(KeyModifiers::ALT);
@@ -41,6 +42,13 @@ impl Key {
     /// Ctrl 과 함께 누른 글자. **Alt 는 안 본다** — 오늘 Ctrl-C·Ctrl-S 가 그렇다.
     pub const fn ctrl(c: char) -> Key {
         Key { code: KeyCode::Char(c), want: KeyModifiers::CONTROL, care: KeyModifiers::CONTROL }
+    }
+
+    /// Ctrl 과 함께, **Alt 없이** 누른 글자 — vi 이동(Ctrl-d·Ctrl-u·Ctrl-f·Ctrl-b). 새로 더하는
+    /// 글자 조합은 정확히 견준다: Ctrl-Alt-d 가 반 쪽을 내리면 터미널이 Alt 를 Esc 로 보낼 때
+    /// 사람이 안 친 이동이 생긴다. Ctrl-C·Ctrl-S 는 옛 모양 그대로 [`Key::ctrl`] 이다.
+    pub const fn chord(c: char) -> Key {
+        Key { code: KeyCode::Char(c), want: KeyModifiers::CONTROL, care: CTRL_ALT }
     }
 
     /// Ctrl·Alt 없이 누른 키.
@@ -89,8 +97,8 @@ pub struct Bind<A: 'static> {
     pub seq: &'static [Key],
     pub act: A,
     /// 사람에게 대는 키 이름. **`None` 은 숨은 별칭이다** — 눌러도 되지만 바에도 문구에도 안
-    /// 적는다(`q`·`r`·`m`·F7·Delete·→·←·BackTab). 이름은 그 키로 다시 읽혀야 한다 — 시험이
-    /// 이름을 키로 풀어 이 줄의 동작이 나오는지 본다.
+    /// 적는다(`q`·`r`·`m`·F7·Delete·화살표·`h`·`l`·BackTab). 이름은 그 키로 다시 읽혀야 한다 —
+    /// 시험이 이름을 키 열로 풀어(`gg`·`g p`) 이 줄의 동작이 나오는지 본다.
     pub label: Option<&'static str>,
 }
 
@@ -124,6 +132,49 @@ pub fn lookup<A: Copy>(table: &[Bind<A>], seq: &[KeyEvent]) -> Lookup<A> {
     hits.first().map_or(Lookup::Unknown, |b| Lookup::Run(b.act))
 }
 
+/// 접두어를 기다리는 동안의 키 열(`gg` 의 첫 `g`). **든 쪽의 상태 안에 둔다** — 탐색이면
+/// `App`, 고르기 창이면 [`super::picker::Picker`]. `Mode` 로 두면 탐색이 아닌 모드는 전부 글칸
+/// 취급이라 기다리는 `g` 뒤의 `g` 가 글자로 샌다.
+///
+/// **시계가 없다.** vim 은 `timeoutlen` 으로 풀지만, 시계를 넣으면 조각이 시간을 알아야 하고
+/// (순수성 가드) 시험이 기다려야 한다. 뜻 없는 다음 키가 열을 버린다 — 그 키도 버린다. `g`
+/// 다음의 `j` 를 `j` 로 살리면 "모르는 키 무시" 가 열 하나에서만 달라진다.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Chord {
+    held: Vec<KeyEvent>,
+}
+
+impl Chord {
+    /// 키 하나를 붙여 찾는다. 동작이면 열을 비우고 낸다. 더 기다리면 열을 들고 `None`.
+    /// 뜻이 없으면 **열을 버리고** `None` — 다음 키는 처음부터 다시 찾는다.
+    pub fn feed<A: Copy>(&mut self, table: &[Bind<A>], k: KeyEvent) -> Option<A> {
+        self.held.push(k);
+        match lookup(table, &self.held) {
+            Lookup::Run(act) => {
+                self.held.clear();
+                Some(act)
+            }
+            Lookup::Pending => None,
+            Lookup::Unknown => {
+                self.held.clear();
+                None
+            }
+        }
+    }
+
+    /// 기다리는 중인가.
+    #[cfg(test)]
+    pub fn waiting(&self) -> bool {
+        !self.held.is_empty()
+    }
+
+    /// 기다리던 열을 버린다. **키가 아닌 길로 자리가 바뀌면 부른다** — 붙여넣기, 글칸으로
+    /// 넘어간 모드. 남겨 두면 한참 뒤의 `g` 가 맨 위로 뛴다.
+    pub fn clear(&mut self) {
+        self.held.clear();
+    }
+}
+
 /// 동작에 붙은 키 이름. 여럿이면 `·` 로 잇는다(`Ctrl-S·F2`).
 pub fn label<A: Copy + PartialEq>(table: &[Bind<A>], act: A) -> String {
     labels(table, &[act])
@@ -151,8 +202,8 @@ pub enum Browse {
     Quit,
     FocusNext,
     FocusPrev,
-    /// 이동키 하나를 포커스 칸에 준다 — 어느 키였는지는 든 쪽이 키로 가른다.
-    Step,
+    /// 이동 하나를 **포커스 칸에** 준다 — 목록이면 커서, 상세면 굴리기.
+    Step(Move),
     Enter,
     Leave,
     Grep,
@@ -164,30 +215,62 @@ pub enum Browse {
     Reload,
     Worktree,
     Raw,
-    DetailDown,
-    DetailUp,
-    DetailPageDown,
-    DetailPageUp,
+}
+
+/// 탐색의 이동(moai-ob4c, 키 지도 moai-hudg). **vi 키에 이름을 붙이고 화살표·Home·End·PgUp/Dn
+/// 은 숨은 별칭이다** — 바가 한 이름만 대야 좁은 창에서 덜 떨어진다. 드나들기만 거꾸로다:
+/// `Enter`·`Bksp` 가 이름이고 `l`·`h` 가 별칭이다. 층의 거절문이 "Enter 로 들어가서" 를
+/// 대는데, 둘을 다 이름으로 두면 문구가 `Enter·l 로` 가 되고 80칸 바가 네 칸을 더 먹는다.
+macro_rules! moves {
+    ($step:path, $plain:path) => {
+        [
+            row!($step(Move::LineDown), Some("j"), Key::plain('j')),
+            row!($step(Move::LineUp), Some("k"), Key::plain('k')),
+            row!($step(Move::Top), Some("gg"), Key::plain('g'), Key::plain('g')),
+            row!($step(Move::Bottom), Some("G"), Key::plain('G')),
+            row!($step(Move::HalfDown), Some("Ctrl-d"), Key::chord('d')),
+            row!($step(Move::HalfUp), Some("Ctrl-u"), Key::chord('u')),
+            row!($step(Move::PageDown), Some("Ctrl-f"), Key::chord('f')),
+            row!($step(Move::PageUp), Some("Ctrl-b"), Key::chord('b')),
+            row!($step(Move::LineDown), None, $plain(KeyCode::Down)),
+            row!($step(Move::LineUp), None, $plain(KeyCode::Up)),
+            row!($step(Move::Top), None, $plain(KeyCode::Home)),
+            row!($step(Move::Bottom), None, $plain(KeyCode::End)),
+            row!($step(Move::PageDown), None, $plain(KeyCode::PageDown)),
+            row!($step(Move::PageUp), None, $plain(KeyCode::PageUp)),
+        ]
+    };
 }
 
 pub const BROWSE: &[Bind<Browse>] = {
     use Browse::*;
     use KeyCode as C;
+    const MOVES: [Bind<Browse>; 14] = moves!(Browse::Step, Key::any);
     &[
         row!(Quit, None, Key::plain('q')),
         row!(Quit, Some("F10"), Key::any(C::F(10))),
         row!(FocusNext, Some("Tab"), Key::unshift(C::Tab)),
         row!(FocusPrev, None, Key::shift(C::Tab)),
-        row!(Step, None, Key::any(C::Up)),
-        row!(Step, None, Key::any(C::Down)),
-        row!(Step, None, Key::any(C::Home)),
-        row!(Step, None, Key::any(C::End)),
-        row!(Step, None, Key::any(C::PageUp)),
-        row!(Step, None, Key::any(C::PageDown)),
+        MOVES[0],
+        MOVES[1],
+        MOVES[2],
+        MOVES[3],
+        MOVES[4],
+        MOVES[5],
+        MOVES[6],
+        MOVES[7],
+        MOVES[8],
+        MOVES[9],
+        MOVES[10],
+        MOVES[11],
+        MOVES[12],
+        MOVES[13],
         row!(Enter, Some("Enter"), Key::any(C::Enter)),
         row!(Enter, None, Key::any(C::Right)),
+        row!(Enter, None, Key::plain('l')),
         row!(Leave, Some("Bksp"), Key::any(C::Backspace)),
         row!(Leave, None, Key::any(C::Left)),
+        row!(Leave, None, Key::plain('h')),
         row!(Grep, Some("/"), Key::plain('/')),
         row!(Filter, Some("f"), Key::plain('f')),
         row!(Filter, None, Key::any(C::F(7))),
@@ -201,10 +284,6 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Worktree, Some("w"), Key::plain('w')),
         row!(Raw, Some("F3"), Key::any(C::F(3))),
         row!(Raw, None, Key::plain('m')),
-        row!(DetailDown, Some("j"), Key::plain('j')),
-        row!(DetailUp, Some("k"), Key::plain('k')),
-        row!(DetailPageDown, None, Key::plain(' ')),
-        row!(DetailPageUp, None, Key::plain('b')),
     ]
 };
 
@@ -265,7 +344,9 @@ impl Browse {
             Quit => "끝내기",
             FocusNext => c.next_pane,
             FocusPrev => c.prev_pane,
-            Step => "이동",
+            // 상세에서는 커서가 없다 — 굴린다.
+            Step(_) if !c.list_focus => "굴리기",
+            Step(_) => "이동",
             Enter => "들어가기",
             Leave => "나가기",
             Grep => "검색",
@@ -280,7 +361,6 @@ impl Browse {
             Worktree => "워크트리",
             Raw if c.raw => "그리기",
             Raw => "원문",
-            DetailDown | DetailUp | DetailPageDown | DetailPageUp => "굴리기",
         }
     }
 }
@@ -300,8 +380,8 @@ pub const PROMPT: &[Bind<Prompt>] = &[
 /// 고르기 창(moai-plvy).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pick {
-    /// 이동키 — 어느 키였는지는 [`super::scroll::cursor`] 가 가른다.
-    Step,
+    /// 커서 이동 — 탐색의 목록과 같은 키([`moves!`]).
+    Step(Move),
     Enter,
     Up,
     Register,
@@ -310,24 +390,40 @@ pub enum Pick {
     Close,
 }
 
-/// 창은 **Ctrl·Alt 붙은 키를 전부 거른다** — 줄이 모두 `bare` 다.
+/// 창은 **Ctrl·Alt 붙은 키를 거른다** — 줄이 모두 `bare` 다. 넷만 다르다: vi 의 쪽 이동
+/// (Ctrl-d·Ctrl-u·Ctrl-f·Ctrl-b)은 탐색과 같은 [`Key::chord`] 다.
+///
+/// **경로 적기는 `g p` 다**(옛 `g`). `g` 가 `gg`(맨 위)의 접두어가 되어 한 키 동작으로 둘 수
+/// 없다 — 같은 열이 동작이면서 접두어이면 표의 잘못이다. `g` 뒤에 "가는 곳" 을 잇는 모양은
+/// helix 의 goto·yazi 의 `g` 계열과 같다(moai-gaum).
 pub const PICK: &[Bind<Pick>] = {
     use KeyCode as C;
     use Pick::*;
+    const MOVES: [Bind<Pick>; 14] = moves!(Pick::Step, Key::bare);
     &[
-        row!(Step, None, Key::bare(C::Up)),
-        row!(Step, None, Key::bare(C::Down)),
-        row!(Step, None, Key::bare(C::Home)),
-        row!(Step, None, Key::bare(C::End)),
-        row!(Step, None, Key::bare(C::PageUp)),
-        row!(Step, None, Key::bare(C::PageDown)),
+        MOVES[0],
+        MOVES[1],
+        MOVES[2],
+        MOVES[3],
+        MOVES[4],
+        MOVES[5],
+        MOVES[6],
+        MOVES[7],
+        MOVES[8],
+        MOVES[9],
+        MOVES[10],
+        MOVES[11],
+        MOVES[12],
+        MOVES[13],
         row!(Enter, Some("Enter"), Key::bare(C::Enter)),
         row!(Enter, None, Key::bare(C::Right)),
+        row!(Enter, None, Key::plain('l')),
         row!(Up, Some("Bksp"), Key::bare(C::Backspace)),
         row!(Up, None, Key::bare(C::Left)),
+        row!(Up, None, Key::plain('h')),
         row!(Register, Some("a"), Key::plain('a')),
         row!(Hidden, Some("."), Key::plain('.')),
-        row!(Path, Some("g"), Key::plain('g')),
+        row!(Path, Some("g p"), Key::plain('g'), Key::plain('p')),
         row!(Close, Some("Esc"), Key::bare(C::Esc)),
         row!(Close, None, Key::plain('q')),
     ]
@@ -337,7 +433,7 @@ impl Pick {
     pub fn what(self, show_hidden: bool) -> &'static str {
         use Pick::*;
         match self {
-            Step => "이동",
+            Step(_) => "이동",
             Enter => "들어가기",
             Up => "위로",
             Register => "등록",
@@ -407,6 +503,24 @@ pub enum Confirm {
 
 pub const CONFIRM: &[Bind<Confirm>] =
     &[row!(Confirm::Yes, Some("y"), Key::plain('y')), row!(Confirm::Yes, None, Key::plain('Y'))];
+
+/// 사람이 적는 키 이름을 키 **열**로 푼다 — `g p` 는 띄어 적은 둘, `gg` 는 같은 글자 둘.
+/// 키 이름이 아니면 `None`. 같은 글자 둘만 붙여 읽는다 — `Tab` 같은 이름을 글자 셋으로 읽지
+/// 않고, 도움말의 낱말(`to`)이 키 열로 잡히지 않게.
+#[cfg(test)]
+pub fn parse_seq(name: &str) -> Option<Vec<KeyEvent>> {
+    if name.contains(' ') {
+        return name.split(' ').map(parse).collect();
+    }
+    if let Some(k) = parse(name) {
+        return Some(vec![k]);
+    }
+    let cs: Vec<char> = name.chars().collect();
+    match cs[..] {
+        [a, b] if a == b && a.is_ascii_alphabetic() => Some(vec![KeyEvent::new(KeyCode::Char(a), KeyModifiers::NONE); 2]),
+        _ => None,
+    }
+}
 
 /// 사람이 적는 키 이름을 키로 푼다 — 표의 이름과 도움말의 낱말이 정말 그 키인지 시험이 잰다.
 /// 키 이름이 아니면 `None`.
@@ -490,10 +604,19 @@ mod tests {
     /// 띄우면 터미널에서 손에 익은 키가 엉뚱한 일을 한다.
     #[test]
     fn ctrl_and_alt_on_letters_are_exact() {
-        for c in ['a', 'd', 'f', 'n', 'q', 'w', '/', 'j', 'p'] {
+        for c in ['a', 'n', 'q', 'w', '/', 'j', 'p', 'g', 'h', 'l'] {
             for m in [KeyModifiers::CONTROL, KeyModifiers::ALT, CTRL_ALT] {
                 assert_eq!(one(BROWSE, with(KeyCode::Char(c), m)), Lookup::Unknown, "{m:?}-{c}");
                 assert_eq!(one(PICK, with(KeyCode::Char(c), m)), Lookup::Unknown, "창 {m:?}-{c}");
+            }
+        }
+        // vi 의 쪽 이동은 Ctrl 만 — Alt 가 함께 붙으면 아니다(`Key::chord`).
+        for (c, m) in [('d', Move::HalfDown), ('u', Move::HalfUp), ('f', Move::PageDown), ('b', Move::PageUp)] {
+            assert_eq!(one(BROWSE, with(KeyCode::Char(c), KeyModifiers::CONTROL)), Lookup::Run(Browse::Step(m)), "Ctrl-{c}");
+            assert_eq!(one(PICK, with(KeyCode::Char(c), KeyModifiers::CONTROL)), Lookup::Run(Pick::Step(m)), "창 Ctrl-{c}");
+            for mods in [KeyModifiers::ALT, CTRL_ALT] {
+                assert_eq!(one(BROWSE, with(KeyCode::Char(c), mods)), Lookup::Unknown, "{mods:?}-{c}");
+                assert_eq!(one(PICK, with(KeyCode::Char(c), mods)), Lookup::Unknown, "창 {mods:?}-{c}");
             }
         }
         assert_eq!(one(ANYWHERE, with(KeyCode::Char('c'), KeyModifiers::CONTROL)), Lookup::Run(Anywhere::Quit));
@@ -517,8 +640,8 @@ mod tests {
         assert_eq!(one(JOT, with(KeyCode::Tab, KeyModifiers::SHIFT)), Lookup::Run(Jot::Switch));
     }
 
-    /// **접두어는 기다린다.** 오늘 표에는 접두어가 없어 조그만 표로 잰다 — `g g` 는 맨 위,
-    /// `SPC t w` 는 셋째 키에 선다. 모르는 둘째 키는 뜻이 없다.
+    /// **접두어는 기다린다.** 조그만 표로 잰다 — `g g` 는 맨 위, `SPC t w` 는 셋째 키에 선다.
+    /// 모르는 둘째 키는 뜻이 없다. 실제 표의 `gg`·`g p` 도 같다.
     #[test]
     fn a_prefix_waits_for_the_rest_of_its_row() {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -543,6 +666,76 @@ mod tests {
         assert_eq!(lookup(FX, &[sp, t]), Lookup::Pending);
         assert_eq!(lookup(FX, &[sp, t, press(KeyCode::Char('w'))]), Lookup::Run(Fx::Worktree));
         assert_eq!(lookup(FX, &[press(KeyCode::Char('x'))]), Lookup::Unknown);
+
+        let p = press(KeyCode::Char('p'));
+        assert_eq!(lookup(BROWSE, &[g]), Lookup::Pending);
+        assert_eq!(lookup(BROWSE, &[g, g]), Lookup::Run(Browse::Step(Move::Top)));
+        assert_eq!(lookup(BROWSE, &[g, p]), Lookup::Unknown, "탐색에는 `g p` 가 없다");
+        assert_eq!(lookup(PICK, &[g]), Lookup::Pending);
+        assert_eq!(lookup(PICK, &[g, g]), Lookup::Run(Pick::Step(Move::Top)));
+        assert_eq!(lookup(PICK, &[g, p]), Lookup::Run(Pick::Path));
+        assert_eq!(lookup(PICK, &[g, press(KeyCode::Char('j'))]), Lookup::Unknown);
+    }
+
+    /// **기다리는 열은 [`Chord`] 가 든다.** 동작이 나오면 비고, 뜻 없는 다음 키는 열과 함께
+    /// 버려진다 — 버린 뒤의 `g` 하나는 옛 `g` 와 이어지지 않는다.
+    #[test]
+    fn a_chord_holds_a_prefix_and_drops_it_on_an_unknown_key() {
+        let g = press(KeyCode::Char('g'));
+        let mut c = Chord::default();
+        assert_eq!(c.feed(BROWSE, g), None);
+        assert!(c.waiting());
+        assert_eq!(c.feed(BROWSE, g), Some(Browse::Step(Move::Top)));
+        assert!(!c.waiting());
+
+        for k in [press(KeyCode::Char('x')), press(KeyCode::Char('j')), press(KeyCode::Esc), press(KeyCode::Char(' '))] {
+            assert_eq!(c.feed(BROWSE, g), None);
+            assert_eq!(c.feed(BROWSE, k), None, "`g` 뒤의 {k:?} 가 제 뜻을 했다");
+            assert!(!c.waiting(), "`g` 뒤의 {k:?} 가 열을 안 버렸다");
+        }
+        assert_eq!(c.feed(BROWSE, g), None, "버린 열의 `g` 와 이어졌다");
+        c.clear();
+        assert!(!c.waiting());
+        // 한 키짜리는 기다리지 않는다
+        assert_eq!(c.feed(BROWSE, press(KeyCode::Char('j'))), Some(Browse::Step(Move::LineDown)));
+        assert_eq!(c.feed(PICK, g), None);
+        assert_eq!(c.feed(PICK, press(KeyCode::Char('p'))), Some(Pick::Path));
+    }
+
+    /// **vi 이동**(moai-ob4c, 키 지도 moai-hudg) — 탐색과 고르기 창이 같은 키로 같은 이동을
+    /// 낸다. 대문자 `G` 는 SHIFT 가 붙어 와도 맨 아래다. `h`·`l` 은 나가기·들어가기.
+    #[test]
+    fn vi_movement_is_the_same_in_browse_and_the_picker() {
+        use KeyCode as C;
+        let ctrl = |c| with(C::Char(c), KeyModifiers::CONTROL);
+        let g = press(C::Char('g'));
+        let cases: Vec<(Vec<KeyEvent>, Move)> = vec![
+            (vec![press(C::Char('j'))], Move::LineDown),
+            (vec![press(C::Down)], Move::LineDown),
+            (vec![press(C::Char('k'))], Move::LineUp),
+            (vec![press(C::Up)], Move::LineUp),
+            (vec![g, g], Move::Top),
+            (vec![press(C::Home)], Move::Top),
+            (vec![with(C::Char('G'), KeyModifiers::SHIFT)], Move::Bottom),
+            (vec![press(C::Char('G'))], Move::Bottom),
+            (vec![press(C::End)], Move::Bottom),
+            (vec![ctrl('d')], Move::HalfDown),
+            (vec![ctrl('u')], Move::HalfUp),
+            (vec![ctrl('f')], Move::PageDown),
+            (vec![press(C::PageDown)], Move::PageDown),
+            (vec![ctrl('b')], Move::PageUp),
+            (vec![press(C::PageUp)], Move::PageUp),
+        ];
+        for (seq, m) in cases {
+            assert_eq!(lookup(BROWSE, &seq), Lookup::Run(Browse::Step(m)), "탐색 {seq:?}");
+            assert_eq!(lookup(PICK, &seq), Lookup::Run(Pick::Step(m)), "창 {seq:?}");
+        }
+        assert_eq!(one(BROWSE, press(C::Char('h'))), Lookup::Run(Browse::Leave));
+        assert_eq!(one(BROWSE, press(C::Char('l'))), Lookup::Run(Browse::Enter));
+        assert_eq!(one(PICK, press(C::Char('h'))), Lookup::Run(Pick::Up));
+        assert_eq!(one(PICK, press(C::Char('l'))), Lookup::Run(Pick::Enter));
+        // 소문자 `g` 하나는 맨 아래가 아니다 — SHIFT 를 떼고 견주어도 글자는 다르다.
+        assert_eq!(one(BROWSE, with(C::Char('g'), KeyModifiers::SHIFT)), Lookup::Pending);
     }
 
     /// **어느 줄도 가려지지 않고, 어느 줄도 다른 줄의 접두어가 아니다.** 줄마다 그 키를 눌러
@@ -571,8 +764,8 @@ mod tests {
         fn each<A: Copy + PartialEq + std::fmt::Debug>(name: &str, table: &[Bind<A>]) {
             for b in table.iter().filter(|b| b.label.is_some()) {
                 let label = b.label.unwrap();
-                let k = parse(label).unwrap_or_else(|| panic!("{name}: `{label}` 를 키로 못 푼다"));
-                assert_eq!(lookup(table, &[k]), Lookup::Run(b.act), "{name}: `{label}`");
+                let seq = parse_seq(label).unwrap_or_else(|| panic!("{name}: `{label}` 를 키로 못 푼다"));
+                assert_eq!(lookup(table, &seq), Lookup::Run(b.act), "{name}: `{label}`");
             }
         }
         each("anywhere", ANYWHERE);
@@ -583,12 +776,19 @@ mod tests {
         each("jot", JOT);
         each("confirm", CONFIRM);
         assert_eq!(label(JOT, Jot::Save), "Ctrl-S·F2");
-        assert_eq!(labels(BROWSE, &[Browse::DetailDown, Browse::DetailUp]), "j·k");
+        assert_eq!(labels(BROWSE, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)]), "j·k");
+        assert_eq!(label(BROWSE, Browse::Step(Move::Top)), "gg", "숨은 별칭 Home 이 이름에 섰다");
+        assert_eq!(label(BROWSE, Browse::Enter), "Enter", "숨은 별칭 `l` 이 이름에 섰다 — 층의 거절문이 `Enter·l 로` 가 된다");
+        assert_eq!(label(PICK, Pick::Path), "g p");
         assert_eq!(label(BROWSE, Browse::Quit), "F10", "숨은 별칭 `q` 가 이름에 섰다");
     }
 
     /// **옮기기 전 코드가 받던 키가 같은 동작이 된다**(moai-gaum 의 키 목록). 수식키가 붙은 모양도
     /// 옛 코드가 받던 그대로다 — 비글자 키는 Ctrl·Alt 를 안 봤고, 창은 통째로 걸렀다.
+    ///
+    /// **일부러 바꾼 뜻**(moai-ob4c, 키 지도 moai-hudg): `j`·`k` 는 상세 굴리기에서 포커스 칸
+    /// 이동으로, SPC·`b`(상세 한 쪽)는 뜻이 없어졌고(SPC 는 메뉴 자리 — moai-7sjm), 창의 `g` 는
+    /// 경로 적기에서 `gg`·`g p` 의 접두어로 갔다.
     #[test]
     fn the_old_inventory_maps_to_the_same_actions() {
         use Browse as B;
@@ -603,12 +803,12 @@ mod tests {
             (with(C::Tab, ctrl), Lookup::Run(B::FocusNext)),
             (press(C::BackTab), Lookup::Run(B::FocusPrev)),
             (with(C::Tab, KeyModifiers::SHIFT), Lookup::Run(B::FocusPrev)),
-            (press(C::Up), Lookup::Run(B::Step)),
-            (with(C::Down, ctrl), Lookup::Run(B::Step)),
-            (press(C::Home), Lookup::Run(B::Step)),
-            (press(C::End), Lookup::Run(B::Step)),
-            (press(C::PageUp), Lookup::Run(B::Step)),
-            (with(C::PageDown, KeyModifiers::SHIFT), Lookup::Run(B::Step)),
+            (press(C::Up), Lookup::Run(B::Step(Move::LineUp))),
+            (with(C::Down, ctrl), Lookup::Run(B::Step(Move::LineDown))),
+            (press(C::Home), Lookup::Run(B::Step(Move::Top))),
+            (press(C::End), Lookup::Run(B::Step(Move::Bottom))),
+            (press(C::PageUp), Lookup::Run(B::Step(Move::PageUp))),
+            (with(C::PageDown, KeyModifiers::SHIFT), Lookup::Run(B::Step(Move::PageDown))),
             (press(C::Enter), Lookup::Run(B::Enter)),
             (press(C::Right), Lookup::Run(B::Enter)),
             (press(C::Backspace), Lookup::Run(B::Leave)),
@@ -628,10 +828,11 @@ mod tests {
             (press(C::Char('m')), Lookup::Run(B::Raw)),
             // 진행 바탕 토글 `p` 는 main 이 기능째 걷었다(moai-u3r2).
             (press(C::Char('p')), Lookup::Unknown),
-            (press(C::Char('j')), Lookup::Run(B::DetailDown)),
-            (press(C::Char('k')), Lookup::Run(B::DetailUp)),
-            (press(C::Char(' ')), Lookup::Run(B::DetailPageDown)),
-            (press(C::Char('b')), Lookup::Run(B::DetailPageUp)),
+            // 뜻을 바꿨다(moai-ob4c) — 포커스 칸 이동. 옛 상세 한 쪽(SPC·`b`)은 걷었다.
+            (press(C::Char('j')), Lookup::Run(B::Step(Move::LineDown))),
+            (press(C::Char('k')), Lookup::Run(B::Step(Move::LineUp))),
+            (press(C::Char(' ')), Lookup::Unknown),
+            (press(C::Char('b')), Lookup::Unknown),
             (with(C::Char('a'), ctrl), Lookup::Unknown),
             (with(C::Char('d'), alt), Lookup::Unknown),
             (press(C::Char('x')), Lookup::Unknown),
@@ -641,8 +842,8 @@ mod tests {
             assert_eq!(one(BROWSE, k), want, "탐색 {k:?}");
         }
         let pick = [
-            (press(C::Up), Lookup::Run(Pick::Step)),
-            (press(C::PageDown), Lookup::Run(Pick::Step)),
+            (press(C::Up), Lookup::Run(Pick::Step(Move::LineUp))),
+            (press(C::PageDown), Lookup::Run(Pick::Step(Move::PageDown))),
             (with(C::Up, ctrl), Lookup::Unknown),
             (press(C::Enter), Lookup::Run(Pick::Enter)),
             (press(C::Right), Lookup::Run(Pick::Enter)),
@@ -651,7 +852,8 @@ mod tests {
             (press(C::Left), Lookup::Run(Pick::Up)),
             (press(C::Char('a')), Lookup::Run(Pick::Register)),
             (press(C::Char('.')), Lookup::Run(Pick::Hidden)),
-            (press(C::Char('g')), Lookup::Run(Pick::Path)),
+            // 뜻을 바꿨다(moai-ob4c) — 경로 적기는 `g p`, `g` 하나는 기다린다.
+            (press(C::Char('g')), Lookup::Pending),
             (press(C::Esc), Lookup::Run(Pick::Close)),
             (press(C::Char('q')), Lookup::Run(Pick::Close)),
             (with(C::Esc, ctrl), Lookup::Unknown),
@@ -705,15 +907,18 @@ mod tests {
         let mut named = Vec::new();
         for word in help.split(|c: char| c.is_whitespace() || "·/,()`".contains(c)) {
             let word = word.trim_end_matches(['.', '|']);
-            let Some(k) = parse(word) else { continue };
-            let known = lookup(ANYWHERE, &[k]) != Lookup::Unknown
-                || lookup(BROWSE, &[k]) != Lookup::Unknown
-                || lookup(PICK, &[k]) != Lookup::Unknown
-                || lookup(JOT, &[k]) != Lookup::Unknown;
+            let Some(k) = parse_seq(word) else { continue };
+            let known = lookup(ANYWHERE, &k) != Lookup::Unknown
+                || lookup(BROWSE, &k) != Lookup::Unknown
+                || lookup(PICK, &k) != Lookup::Unknown
+                || lookup(JOT, &k) != Lookup::Unknown;
             assert!(known, "도움말이 `{word}` 를 대는데 어느 키 표에도 없다");
             named.push(word);
         }
-        for must in ["F10", "q", "Enter", "Backspace", "Shift-Tab", "j", "a", "d", "n", "Ctrl-S", "F2", "Esc"] {
+        for must in [
+            "F10", "q", "Enter", "Backspace", "Shift-Tab", "j", "k", "h", "l", "gg", "G", "Ctrl-d", "Ctrl-u", "Ctrl-f", "Ctrl-b",
+            "a", "d", "n", "Ctrl-S", "F2", "Esc",
+        ] {
             assert!(named.contains(&must), "도움말에서 `{must}` 를 못 뽑았다 — 뽑기가 헛돈다: {named:?}");
         }
     }

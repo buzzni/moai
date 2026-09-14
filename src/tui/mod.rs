@@ -7,6 +7,7 @@ pub mod draw;
 pub mod edit;
 pub mod form;
 pub mod input;
+pub mod jotfile;
 pub mod keys;
 pub mod layer;
 pub mod picker;
@@ -22,7 +23,7 @@ use form::{Act, Form};
 use input::Input;
 use keys::Lookup;
 use ratatui::crossterm::event::KeyEvent;
-use scroll::{PAGE, Scroll};
+use scroll::{Move, Scroll};
 
 /// 목록의 한 줄. `..` 은 이슈가 아니므로 [`Entry`] 로는 못 담는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -329,6 +330,9 @@ pub struct App {
     /// 스레드에서 짓고 있는 다시 읽기. 끝나면 [`App::follow`] 가 받아 들인다.
     /// 손잡이는 스레드가 죽었을 때 그 패닉을 루프로 되던지려고 든다.
     pending: Option<(std::sync::mpsc::Receiver<crate::fail::R<Fresh>>, std::thread::JoinHandle<()>)>,
+    /// 탐색에서 접두어(`gg` 의 첫 `g`) 뒤를 기다리는 키 열. **`Mode` 가 아니다** — 탐색이 아닌
+    /// 모드는 전부 글칸으로 가므로(`App::key`), 모드로 두면 기다리는 `g` 뒤의 `g` 가 글자로 샌다.
+    chord: keys::Chord,
     /// 버린 다시 읽기(F5·`w`·쓰기가 `pending` 을 버렸을 때)의 손잡이. 결과는 안 받지만
     /// **패닉은 받는다** — ratatui 의 패닉 훅은 어느 스레드에서 나든 터미널을 걷으므로,
     /// 손잡이를 같이 버리면 루프가 걷힌 화면에 모른 채 그린다. [`App::follow`] 가
@@ -387,6 +391,25 @@ pub struct App {
     pub launched_at: Option<std::path::PathBuf>,
     /// 고르기 창을 마지막으로 닫은 디렉터리 — 다시 열면 여기서 연다.
     pick_from: Option<std::path::PathBuf>,
+    /// 생각 담기를 적을 외부 편집기(moai-08af). **있으면 `n` 이 안 폼 대신 이것을 연다** —
+    /// 둘을 고르는 키나 설정은 없다(둘째 어휘). `cmd::tui` 가 띄울 때 한 번 고른다
+    /// ([`jotfile::pick`]). 시험이 세운 App 은 없어 안 폼을 연다 — 여기서 환경을 읽으면
+    /// 시험이 돌리는 사람의 `$EDITOR` 에 달린다.
+    pub editor: Option<String>,
+    /// 루프에 맡긴 "편집기로 열어 달라". **App 은 터미널을 모른다** — 터미널을 내리고 편집기를
+    /// 기다리고 다시 올리는 것은 루프가 하고, 받은 글은 [`App::edited`] 로 돌려준다.
+    pub edit: Option<Edit>,
+}
+
+/// 편집기로 적어 달라는 요청. 담을 곳은 **여는 순간 박힌 것**이다(moai-fccv) — 편집기가
+/// 도는 사이 층이 다시 읽혀도 돌아온 글은 이 곳으로 간다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Edit {
+    pub into: Option<form::Target>,
+    /// 파일에 먼저 적을 글([`jotfile::template`]).
+    pub text: String,
+    /// 띄울 편집기([`App::editor`] 를 연 순간 옮긴 것).
+    pub editor: String,
 }
 
 impl App {
@@ -474,6 +497,7 @@ impl App {
             stamp: None,
             watched: Vec::new(),
             pending: None,
+            chord: keys::Chord::default(),
             discarded: Vec::new(),
             let_go: 0,
             read: prepare,
@@ -489,6 +513,8 @@ impl App {
             user_config: None,
             launched_at: None,
             pick_from: None,
+            editor: None,
+            edit: None,
         };
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
         // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
@@ -1060,13 +1086,16 @@ impl App {
         // 글을 받는 동안에는 이동키가 글자다. 먼저 가로챈다. **`Tab` 도 여기서
         // 멈춘다** — 적다 말고 포커스가 튀면 적던 것을 잃는다.
         if !matches!(self.mode, Mode::Browse) {
+            // 기다리던 열은 탐색의 것이다 — 글칸에서 돌아온 뒤의 `g` 가 옛 `g` 와 잇지 않게.
+            self.chord.clear();
             self.typing(k);
             return;
         }
         // **키의 뜻은 표에서 읽는다**([`keys::BROWSE`]). 표에 없는 키 — Ctrl·Alt 붙은 글자키도
         // — 는 여기 뜻이 없다: 안 거르면 Ctrl-A 가 등록 창을, Ctrl-D 가 "목록에서 뺄까" 를
-        // 띄운다.
-        let Lookup::Run(act) = keys::lookup(keys::BROWSE, &[k]) else { return };
+        // 띄운다. 접두어(`g`)는 다음 키를 기다리고, 뜻 없는 다음 키는 그 `g` 와 함께 버린다
+        // ([`keys::Chord::feed`]) — 표에 없는 키를 무시하는 것과 같은 자다.
+        let Some(act) = self.chord.feed(keys::BROWSE, k) else { return };
         // **되는지는 한 판정이 가른다**([`keys::Browse::enabled`]) — 키 바가 같은 판정으로
         // 적을 키를 고르므로 둘이 안 갈린다. 층에서 뜻이 없는 키는 왜 안 되는지를 한 줄로
         // 말한다. `n` 은 층에서도 듣는다 — 커서의 프로젝트를 담을 곳으로 박는다([`App::open_form`]).
@@ -1083,7 +1112,7 @@ impl App {
             B::Quit => self.quit = true,
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
-            B::Step => self.step(k),
+            B::Step(m) => self.step(m),
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
             // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
@@ -1114,14 +1143,6 @@ impl App {
                 // 엉뚱한 데가 나온다.
                 self.detail.rewind();
             }
-            // 상세를 굴린다. **왼쪽은 그대로 둔다** — 오른쪽만 길어서 못 보는
-            // 것이므로, 굴리려고 커서를 옮기게 하면 보던 이슈를 잃는다.
-            // **포커스와 상관없이 듣는다** — 포커스가 생기기 전부터 손에 익은
-            // 사람이 있고, 목록에 선 채로 상세를 한 칸 굴리는 길이 여전히 쓸모 있다.
-            B::DetailDown => self.detail.by(1),
-            B::DetailUp => self.detail.by(-1),
-            B::DetailPageDown => self.detail.by(PAGE as isize),
-            B::DetailPageUp => self.detail.by(-(PAGE as isize)),
         }
     }
 
@@ -1137,21 +1158,23 @@ impl App {
         }
     }
 
-    /// 이동키 하나를 **포커스 있는 칸에** 준다. 두 칸이 같은 조각([`scroll`])으로
-    /// 굴러 걸음(`PAGE`)도 끝의 뜻도 같다.
+    /// 이동 하나를 **포커스 있는 칸에** 준다. 두 칸이 같은 조각([`scroll`])으로
+    /// 굴러 걸음(`PAGE`·`HALF`)도 끝의 뜻도 같다.
+    ///
+    /// **`j`·`k` 도 여기로 온다**(moai-ob4c). 한때 `j`·`k` 는 포커스와 상관없이 상세를
+    /// 굴렸다 — 목록에 선 채 상세를 한 줄 굴리는 길이었다. vi 대로 포커스 칸을 움직이게
+    /// 바꿨다(키 지도 moai-hudg): 같은 키가 칸마다 다른 칸을 움직이면 Tab 이 무엇을 바꾸는지
+    /// 흐려진다. 상세는 Tab 으로 가서 굴린다.
     ///
     /// 상세의 끝(`End`)은 마지막으로 그린 줄 수로 잰다 — 줄 수는 폭에 달렸고 폭은
     /// 그려야 나온다. 루프는 키 하나마다 한 번 그리므로 그 수는 한 걸음 넘게 낡지 않는다.
-    fn step(&mut self, k: KeyEvent) {
+    fn step(&mut self, m: Move) {
         match self.focus {
             Pane::Explorer => {
-                if let Some(at) = scroll::cursor(k, self.cursor, || self.rows().len()) {
-                    self.move_to(at);
-                }
+                let at = scroll::cursor(m, self.cursor, || self.rows().len());
+                self.move_to(at);
             }
-            Pane::Detail => {
-                self.detail.key(k);
-            }
+            Pane::Detail => self.detail.go(m),
         }
     }
 
@@ -1227,6 +1250,8 @@ impl App {
     /// 해제 물음에서는 **다른 키처럼** 물음을 거둔다: 붙인 글 속 `y` 는 답이 아니다.
     pub fn paste(&mut self, s: &str) {
         self.notice = None;
+        // 기다리던 `g` 는 버린다 — 붙인 뒤의 `g` 하나가 붙이기 전의 `g` 와 이어 맨 위로 뛰지 않게.
+        self.chord.clear();
         // 층에서는 `/`·`f` 가 안 열린다 — **키 처리와 같은 판정**([`keys::Browse::enabled`])으로
         // 열리는 칸만 대고, 키 이름은 표에서 읽는다.
         let ctx = self.key_ctx();
@@ -1319,13 +1344,25 @@ impl App {
         }
     }
 
+    /// 들어간 층에서 커서가 설 줄 — **`..` 너머 첫 줄**(moai-cm13). 비었으면 `..`.
+    ///
+    /// `..` 에 세우면 들어가자마자 누른 Enter(·`l`) 한 번이 도로 나온다 — 두 번 누르면 들어갔다
+    /// 나온 제자리다. 고르기 창(`Picker::new`)이 첫 하위 디렉터리에, 안에서 띄운 탐색기
+    /// (`App::with_layer`)가 첫 항목에 서는 것과 같은 자다. `..` 은 `k`·`gg`·Home 한 번 거리다
+    /// — vi 키가 서기 전에는 `..` 에 세워 두는 것이 나가는 길을 보이는 값이었지만, 이제
+    /// `h`·Bksp 가 어느 줄에서든 나간다.
+    fn first_row(&self) -> usize {
+        let rows = self.rows();
+        usize::from(rows.len() > 1 && rows.first() == Some(&Row::Up))
+    }
+
     fn enter(&mut self) {
         match self.current() {
             Some(Row::Up) => self.leave(),
             Some(Row::Item(Entry::Dir { seg, .. })) => {
                 self.remembered.push(self.cursor);
                 self.path.push(seg);
-                self.cursor = 0;
+                self.cursor = self.first_row();
                 self.detail.rewind();
             }
             Some(Row::Project(at)) => self.enter_project(at),
@@ -1392,6 +1429,40 @@ impl App {
             Some(at) => self.issues[at].title.clone(),
             None => format!("{id}  {MISSING}"),
         }
+    }
+}
+
+impl App {
+    /// 편집기가 돌려준 것을 받는다(moai-08af). `got` 은 파일의 글이거나, 담지 않을 까닭
+    /// (편집기가 0 이 아닌 코드로 끝났다·못 띄웠다·못 읽었다)이다.
+    ///
+    /// **담는 길은 안 폼과 한 길이다.** 받은 제목·본문으로 폼을 세우고 [`save_idea`] 를
+    /// 부른다 — 박힌 곳에 서기(moai-fccv)·`write`·누구냐 묻고 다시 부르기(moai-nmv2)·쓴 뒤
+    /// 커서와 알림(moai-064q)이 전부 같다. 그래서 **담기가 실패하면 적은 글이 폼에 열린 채
+    /// 남는다** — 까닭은 배너에 서고, 고치고 다시 담거나 Esc 로 버린다. 적은 것이 임시
+    /// 파일과 함께 사라지지 않는다.
+    ///
+    /// 까닭이 왔거나 제목이 비면 **아무것도 안 쓰고** 한 줄 알린다. 폼도 안 연다 — 편집기를
+    /// 오류로 끝낸 것(vim 의 `:cq`)과 비워 닫은 것은 그만두겠다는 뜻이다(git 과 같다).
+    pub fn edited(&mut self, into: Option<form::Target>, got: Result<String, String>) {
+        let text = match got {
+            Ok(text) => text,
+            Err(why) => {
+                self.notice = Some(format!("담지 않았다 — {}", crate::text::one_line(&why)));
+                return;
+            }
+        };
+        let Some((title, body)) = jotfile::parse(&text) else {
+            self.notice = Some("담지 않았다 — 제목이 비었다".into());
+            return;
+        };
+        let mut form = Form::new(into);
+        form.title = Input::new(&title);
+        if let Some(body) = &body {
+            form.body = edit::Editor::new(body);
+        }
+        self.mode = Mode::Idea(form);
+        save_idea(self);
     }
 }
 
@@ -1655,6 +1726,27 @@ mod tests {
         assert_eq!(a.rows().first(), Some(&Row::Up));
     }
 
+    /// **들어가면 `..` 너머 첫 줄에 선다**(moai-cm13). `..` 에 세우면 들어가자마자 누른 Enter
+    /// 한 번이 도로 나와 Enter 두 번이 제자리다. `..` 은 `k` 한 번 거리에 남는다. 빈
+    /// 디렉터리는 `..` 뿐이라 거기 선다.
+    #[test]
+    fn entering_lands_past_the_up_row() {
+        let mut a = app();
+        a.key(key(KeyCode::Enter));
+        assert_eq!((a.path.len(), a.cursor), (1, 1), "들어가서 `..` 에 섰다");
+        assert!(matches!(a.current(), Some(Row::Item(_))), "{:?}", a.current());
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.path.len(), 1, "들어가자마자 누른 Enter 가 도로 나왔다");
+        a.key(key(KeyCode::Char('k')));
+        assert_eq!(a.current(), Some(Row::Up), "`..` 이 `k` 한 번 거리에 없다");
+        a.key(key(KeyCode::Char('l')));
+        assert!(a.path.is_empty());
+
+        a.key(key(KeyCode::Char('j')));
+        a.key(key(KeyCode::Char('l')));
+        assert_eq!((a.path.len(), a.current()), (1, Some(Row::Up)), "빈 디렉터리에서 `..` 말고 설 데가 없다");
+    }
+
     /// 들어갔다 나오면 **있던 자리로 돌아온다**. 매번 맨 위로 튕기면 못 쓴다.
     #[test]
     fn leaving_puts_the_cursor_back_where_it_was() {
@@ -1819,18 +1911,146 @@ mod tests {
         }
     }
 
-    /// `j`/`k` 는 **포커스와 상관없이** 상세를 굴린다 — 손에 익은 사람이 이미 있다.
+    /// **`j`/`k` 는 포커스 칸을 움직인다**(moai-ob4c, 키 지도 moai-hudg). 옛 뜻 — 목록에 선 채
+    /// 상세를 굴리기 — 는 없앴다: 목록에서 `j` 는 커서를 옮기고 상세는 그대로다. 뜻이 조용히
+    /// 바뀐 키라 옛 기대를 뒤집어 따로 잰다.
     #[test]
-    fn j_and_k_still_scroll_the_detail_from_either_pane() {
+    fn j_and_k_move_the_focused_pane_and_no_longer_scroll_the_detail_from_the_list() {
+        let mut a = app();
+        drawn(&mut a, 10, 40);
+        a.key(key(KeyCode::Char('j')));
+        a.key(key(KeyCode::Char('j')));
+        a.key(key(KeyCode::Char('k')));
+        assert_eq!((a.cursor, a.detail.offset(), a.focus), (1, 0, Pane::Explorer), "목록 포커스에서 `j` 가 상세를 굴렸다");
+
+        a.key(key(KeyCode::Tab));
+        drawn(&mut a, 10, 40);
+        a.key(key(KeyCode::Char('j')));
+        a.key(key(KeyCode::Char('j')));
+        a.key(key(KeyCode::Char('k')));
+        assert_eq!((a.cursor, a.detail.offset()), (1, 1), "상세 포커스에서 `j` 가 목록을 움직였다");
+    }
+
+    /// **SPC·`b` 는 더는 상세를 넘기지 않는다** — SPC 는 메뉴(moai-7sjm)의 자리다. 한 쪽은
+    /// Ctrl-f·Ctrl-b·PageDown·PageUp 이다.
+    #[test]
+    fn space_and_b_no_longer_page_the_detail() {
         for start in Pane::ALL {
             let mut a = app();
             a.focus = start;
             drawn(&mut a, 10, 40);
-            a.key(key(KeyCode::Char('j')));
-            a.key(key(KeyCode::Char('j')));
-            a.key(key(KeyCode::Char('k')));
-            assert_eq!((a.cursor, a.detail.offset(), a.focus), (0, 1, start), "{start:?}");
+            a.key(key(KeyCode::Char(' ')));
+            a.key(key(KeyCode::Char('b')));
+            assert_eq!((a.cursor, a.detail.offset(), a.path.len()), (0, 0, 0), "{start:?}");
+            assert_eq!(a.mode, Mode::Browse);
         }
+    }
+
+    /// **vi 이동은 포커스 칸에서 화살표와 같은 일을 한다** — `gg`·`G`(SHIFT 붙어 와도)·
+    /// Ctrl-d·Ctrl-u(반 쪽)·Ctrl-f·Ctrl-b(한 쪽). `g` 하나로는 안 움직이고 기다린다.
+    #[test]
+    fn vi_movement_keys_act_in_the_focused_pane() {
+        let many: Vec<Issue> = (1..=30).map(|n| make(&format!("argos-{n:04}"), Kind::Issue)).collect();
+        let mut a = App::new(many, cfg(), Path::new());
+        let big_g = KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT);
+        let (half, page) = (scroll::HALF, scroll::PAGE);
+
+        a.key(ctrl('d'));
+        assert_eq!(a.cursor, half, "Ctrl-d 가 반 쪽을 안 갔다");
+        a.key(ctrl('f'));
+        assert_eq!(a.cursor, half + page, "Ctrl-f 가 한 쪽을 안 갔다");
+        a.key(ctrl('u'));
+        assert_eq!(a.cursor, page);
+        a.key(ctrl('b'));
+        assert_eq!(a.cursor, 0);
+        a.key(big_g);
+        assert_eq!(a.cursor, 29, "SHIFT 붙은 `G` 가 맨 아래로 안 갔다");
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!(a.cursor, 29, "`g` 하나에 움직였다");
+        assert!(a.chord.waiting());
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!((a.cursor, a.chord.waiting()), (0, false), "`gg` 가 맨 위로 안 갔다");
+        a.key(key(KeyCode::Char('l')));
+        assert_eq!(a.path.len(), 0, "잎에서 `l` 이 무언가 했다");
+
+        a.key(key(KeyCode::Tab));
+        drawn(&mut a, 10, 40);
+        a.key(ctrl('d'));
+        assert_eq!(a.detail.offset(), half);
+        a.key(ctrl('f'));
+        assert_eq!(a.detail.offset(), half + page);
+        a.key(ctrl('u'));
+        a.key(ctrl('b'));
+        assert_eq!(a.detail.offset(), 0);
+        a.key(big_g);
+        assert_eq!(a.detail.offset(), 30, "상세에서 `G` 가 끝에 안 닿았다");
+        a.key(key(KeyCode::Char('g')));
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!((a.cursor, a.detail.offset()), (0, 0), "상세에서 `gg` 가 목록을 움직였거나 첫 줄로 안 갔다");
+    }
+
+    /// **`h`·`l` 은 나가기·들어가기** — Bksp·Enter 와 같고, 같은 까닭으로 목록 포커스를 탄다.
+    #[test]
+    fn h_and_l_leave_and_enter_from_the_list_only() {
+        let mut a = app();
+        a.key(key(KeyCode::Char('l')));
+        assert_eq!(a.path.len(), 1, "`l` 이 안 들어갔다");
+        a.key(key(KeyCode::Tab));
+        a.key(key(KeyCode::Char('h')));
+        assert_eq!(a.path.len(), 1, "상세 포커스에서 `h` 가 나갔다");
+        a.key(key(KeyCode::Tab));
+        a.key(key(KeyCode::Char('h')));
+        assert!(a.path.is_empty(), "`h` 가 안 나갔다");
+    }
+
+    /// **기다리는 `g` 뒤에 뜻 없는 키가 오면 둘 다 버린다** — 그 키도 제 뜻을 안 한다(모르는 키
+    /// 무시와 같은 자). 버린 뒤의 `g` 하나는 다시 기다린다.
+    #[test]
+    fn an_unknown_key_after_g_is_ignored_and_clears_the_wait() {
+        let mut a = app();
+        a.key(key(KeyCode::Char('j')));
+        for k in [key(KeyCode::Char('x')), key(KeyCode::Char('j')), key(KeyCode::Tab), key(KeyCode::Enter), key(KeyCode::Char('/'))] {
+            a.key(key(KeyCode::Char('g')));
+            a.key(k);
+            assert!(!a.chord.waiting(), "`g` 뒤의 {k:?} 가 열을 안 버렸다");
+            assert_eq!((a.cursor, a.focus, a.path.len()), (1, Pane::Explorer, 0), "`g` 뒤의 {k:?} 가 제 뜻을 했다");
+            assert_eq!(a.mode, Mode::Browse, "`g` 뒤의 {k:?} 가 칸을 열었다");
+        }
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!(a.cursor, 1);
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!(a.cursor, 0);
+    }
+
+    /// **기다리는 열은 탐색 밖으로 새지 않는다.** 붙여넣기가 열을 버리고, 글칸에서는
+    /// `g`·`j`·`k`·`h`·`l`·`G` 가 글자다. 글칸에 들어간 사이 버린 열은 돌아와 잇지 않는다.
+    #[test]
+    fn a_waiting_g_does_not_leak_into_paste_or_text_fields() {
+        let mut a = app();
+        a.key(key(KeyCode::Char('j')));
+        a.key(key(KeyCode::Char('g')));
+        a.paste("x");
+        assert!(!a.chord.waiting(), "붙여넣기가 기다리던 `g` 를 안 버렸다");
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!(a.cursor, 1, "붙여넣기 전의 `g` 와 이어 `gg` 가 됐다");
+        a.key(key(KeyCode::Esc));
+
+        a.key(key(KeyCode::Char('/')));
+        for c in "gjkhlGg".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        assert!(matches!(&a.mode, Mode::Grep(b) if b.text() == "gjkhlGg"), "글칸에서 vi 키가 글자가 아니다 — {:?}", a.mode);
+        assert_eq!(a.cursor, 1);
+        assert!(!a.chord.waiting(), "글칸의 `g` 가 탐색의 열에 쌓였다");
+
+        // 키가 아닌 길로 모드가 바뀌어도 — 기다리던 `g` 는 글칸의 키가 버린다
+        a.mode = Mode::Browse;
+        a.key(key(KeyCode::Char('g')));
+        a.mode = Mode::Filter(Input::default());
+        a.key(key(KeyCode::Char('x')));
+        a.mode = Mode::Browse;
+        a.key(key(KeyCode::Char('g')));
+        assert_eq!(a.cursor, 1, "글칸을 거친 뒤의 `g` 가 옛 `g` 와 이었다");
     }
 
     /// 잎에서 Enter 는 아무 일도 하지 않는다 — 들어갈 데가 없다.
@@ -2209,9 +2429,10 @@ mod tests {
         a.adopt(gone);
         assert!(a.cursor < a.rows().len(), "목록 밖에 섰다");
 
-        // `..` 에 서 있으면 `..` 에 남는다.
+        // `..` 에 서 있으면 `..` 에 남는다. 들어가면 첫 줄에 서므로(moai-cm13) `..` 로 올라간다.
         let mut b = app();
         b.key(key(KeyCode::Enter));
+        b.key(key(KeyCode::Home));
         let mut more = b.issues.clone();
         more.push(member("argos-0000", "argos-0001"));
         b.adopt(more);
@@ -2954,6 +3175,113 @@ mod tests {
         a.key(key(KeyCode::Enter));
         settle(&mut a);
         assert_eq!(a.mode, Mode::Browse);
+    }
+
+    /// 편집기가 있는 판에서 `n` 을 눌러 루프에 맡긴 요청을 꺼낸다 — 루프가 하는 것을 흉내 낸다.
+    fn ask_editor(a: &mut App) -> Edit {
+        a.editor = Some("vi".into());
+        a.key(key(KeyCode::Char('n')));
+        assert_eq!(a.mode, Mode::Browse, "편집기가 있는데 안 폼을 열었다");
+        a.edit.take().expect("편집기를 청하지 않았다")
+    }
+
+    /// **편집기가 있으면 `n` 은 폼을 안 열고 루프에 편집기를 청한다.** 담을 곳은 여는 순간
+    /// 박히고 안내 글이 그곳을 댄다. 편집기가 없으면 오늘처럼 안 폼이다.
+    #[test]
+    fn n_asks_the_loop_for_the_editor_when_there_is_one() {
+        let (scratch, mut a) = writable("editor-ask");
+        let edit = ask_editor(&mut a);
+        assert_eq!(edit.into.as_ref().map(|t| t.path.clone()), Some(scratch.0.clone()));
+        assert_eq!(edit.editor, "vi");
+        assert!(edit.text.contains(&scratch.0.display().to_string()), "{}", edit.text);
+
+        let (_s, mut b) = writable("editor-none");
+        b.key(key(KeyCode::Char('n')));
+        assert_eq!(b.edit, None, "편집기가 없는데 청했다");
+        assert!(matches!(&b.mode, Mode::Idea(f) if f.into.is_some()), "{:?}", b.mode);
+    }
+
+    /// **편집기에서 받은 글은 폼과 같은 길로 담긴다** — 첫 줄 제목, 한 줄 띄우고 본문, 주석은
+    /// 걷고. 담기면 폼은 안 남고 커서와 알림은 `write` 가 한다.
+    #[test]
+    fn the_edited_text_is_saved_like_the_form() {
+        let (_scratch, mut a) = writable("editor-save");
+        let edit = ask_editor(&mut a);
+        let text = format!("  편집기에서 온 것 \n\n## 설계\n둘째 줄\n{}", edit.text);
+        a.edited(edit.into, Ok(text));
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
+        let repo = a.repo.clone().unwrap();
+        let made = ideas_in(&repo);
+        assert_eq!(made.len(), 1, "{made:?}");
+        assert_eq!((made[0].title.as_str(), made[0].body.as_deref()), ("편집기에서 온 것", Some("## 설계\n둘째 줄")));
+        assert_eq!(made[0].epic, None);
+        assert_eq!(on(&a), Some(made[0].id.clone()));
+        assert_eq!(a.notice, Some(format!("✓ 담김 · {}", made[0].id)));
+    }
+
+    /// **편집기가 오류로 끝났거나 제목이 비면 아무것도 안 쓴다** — 누군지도 안 묻고, 폼도 안
+    /// 열고, 한 줄로 까닭을 댄다.
+    #[test]
+    fn a_failed_or_empty_edit_writes_nothing_and_says_so() {
+        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+            panic!("담지 않을 글인데 누군지 물었다")
+        }
+        let (scratch, mut a) = writable("editor-nothing");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let before = std::fs::read_to_string(&file).unwrap();
+        a.identify = refuse;
+        for (got, says) in [
+            (Err("편집기가 3 로 끝났다(vi)".to_string()), "3 로 끝났다"),
+            (Ok(String::new()), "제목이 비었다"),
+            // 안 고치고 닫은 안내 글 그대로
+            (Ok(jotfile::template(None)), "제목이 비었다"),
+        ] {
+            let edit = ask_editor(&mut a);
+            a.edited(edit.into, got);
+            assert_eq!(a.mode, Mode::Browse, "{:?}", a.mode);
+            assert!(a.notice.as_deref().is_some_and(|n| n.starts_with("담지 않았다") && n.contains(says)), "{says} {:?}", a.notice);
+            assert!(a.trouble.is_none(), "그만둔 것은 실패가 아니다 — {:?}", a.trouble);
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+        }
+    }
+
+    /// **누군지 모르면 편집기에서 온 글도 묻고, 받으면 그 글이 박힌 곳에 담긴다.** 묻는 칸
+    /// 뒤에 선 것은 받은 글로 채운 폼이다 — Esc 로 그만둬도 글은 폼에 남는다.
+    #[test]
+    fn an_edit_that_needs_a_name_asks_and_then_lands_in_the_fixed_project() {
+        let (scratch, mut a) = writable("editor-ask-who");
+        let file = scratch.0.join(".moai/issues.jsonl");
+        let before = std::fs::read_to_string(&file).unwrap();
+        a.user = None;
+        a.identify = nobody;
+        let edit = ask_editor(&mut a);
+        a.edited(edit.into, Ok("물어볼 것\n\n본문".into()));
+        let Mode::Ask(ask) = &a.mode else { panic!("모르는데 안 물었다 — {:?}", a.mode) };
+        assert!(matches!(ask.back.as_ref(), Mode::Idea(f) if f.title.text() == "물어볼 것" && f.body.text() == "본문"), "{:?}", ask.back);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before, "묻기 전에 썼다");
+
+        type_in(&mut a, "레이븐 (raven@example.com)");
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
+        let made = ideas_in(a.repo.as_ref().unwrap());
+        assert_eq!((made.len(), made[0].title.as_str(), made[0].body.as_deref()), (1, "물어볼 것", Some("본문")));
+    }
+
+    /// **담기가 실패하면 편집기에서 적은 글이 폼에 열린 채 남는다** — 임시 파일과 함께 사라지지
+    /// 않는다. 고치고 다시 담으면 담긴다.
+    #[test]
+    fn a_failed_save_of_an_edit_keeps_the_text_in_the_form() {
+        let (scratch, mut a) = writable("editor-fail");
+        let lock = scratch.0.join(".moai/lock");
+        std::fs::create_dir_all(&lock).unwrap();
+        let edit = ask_editor(&mut a);
+        a.edited(edit.into, Ok("못 담길 것\n\n긴 본문".into()));
+        assert!(matches!(&a.mode, Mode::Idea(f) if f.title.text() == "못 담길 것" && f.body.text() == "긴 본문"), "{:?}", a.mode);
+        assert!(a.trouble.as_deref().is_some_and(|t| t.starts_with("쓰지 못했다")), "{:?}", a.trouble);
+        std::fs::remove_dir(&lock).unwrap();
+        a.key(ctrl('s'));
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
+        assert_eq!(ideas_in(a.repo.as_ref().unwrap()).len(), 1);
     }
 
     /// 빈 디렉터리에서도 무너지지 않는다.

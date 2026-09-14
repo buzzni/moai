@@ -24,6 +24,30 @@ pub struct Tree {
     pub path: PathBuf,
     /// 화면에 댈 이름 — 브랜치, 떼어 낸 HEAD 면 커밋 앞 일곱 자.
     pub label: String,
+    /// 그 워크트리의 HEAD 커밋. 갈라진 자리(`merge-base`)를 찾는 데 쓴다.
+    pub head: String,
+}
+
+/// 겹칠 옆 워크트리 하나의 줄들.
+#[derive(Debug, Default)]
+pub struct Side {
+    pub label: String,
+    /// 그 워크트리의 moai 뿌리 — 이력을 읽을 곳.
+    pub root: PathBuf,
+    pub issues: Vec<Issue>,
+    /// 제 워크트리와 **갈라진 자리의 스냅샷**에 있던 id → 그때의 `updated_at`.
+    ///
+    /// 옆에만 있는 줄이 "여기서 지웠다" 인지 "여기서 아직 안 받았다" 인지는 지금
+    /// 스냅샷 둘로는 못 가른다. 갈라진 자리에 있었으면 이쪽 역사에도 있었던 줄이니
+    /// 여기서 지운 것이다. 저널이 아니라 **커밋된 스냅샷**을 읽는다 — 저널은 상태
+    /// 계산에 읽히지 않는다(moai-0a0u). 못 찾으면 비어 있고, 그러면 전처럼 다 선다.
+    pub base: BTreeMap<String, String>,
+}
+
+impl Side {
+    pub fn new(label: impl Into<String>, root: impl Into<PathBuf>, issues: Vec<Issue>) -> Side {
+        Side { label: label.into(), root: root.into(), issues, base: BTreeMap::new() }
+    }
 }
 
 /// 줄 id → 그 줄을 보여 준 워크트리. **제 워크트리에서 온 줄은 없다** — 없다는
@@ -104,7 +128,7 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
             (None, Some(h)) => h.chars().take(7).collect(),
             (None, None) => continue,
         };
-        out.push(Tree { path, label });
+        out.push(Tree { path, label, head: head.unwrap_or_default().to_string() });
     }
     out
 }
@@ -119,7 +143,13 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
 /// **제 줄은 한 줄도 접지 않는다.** 제 파일에 같은 id 가 둘이면 둘 다 남긴다 —
 /// 여기서 접으면 `moai status` 의 `duplicate_id` 가 `--worktree` 를 붙인
 /// 순간에만 사라져, 깨진 파일이 멀쩡해 보인다.
-pub fn overlay(mine: Vec<Issue>, others: Vec<(String, PathBuf, Vec<Issue>)>) -> (Vec<Issue>, Origin) {
+///
+/// **여기서 지운 줄은 되살리지 않는다.** 옆에만 있는 줄이 갈라진 자리
+/// ([`Side::base`])에도 있었고 그 뒤로 옆에서 안 만졌으면 세우지 않는다. 옆에서
+/// 그 뒤에 집거나 고쳤으면 세운다 — 지운 것과 옆의 작업이 부딪힌 것을 감추면
+/// 옆에서 하던 일이 화면에서 사라진다. 옆에서 지운 줄(여기에만 있다)은 그대로
+/// 둔다 — 그 삭제는 브랜치가 합쳐질 때 반영된다.
+pub fn overlay(mine: Vec<Issue>, others: Vec<Side>) -> (Vec<Issue>, Origin) {
     let mut shown = mine;
     let mut origin = Origin::default();
     // id → `shown` 의 자리. 제 줄이 둘이면 **뒷자리를** 적는다 — `store::Load::get`·
@@ -130,7 +160,7 @@ pub fn overlay(mine: Vec<Issue>, others: Vec<(String, PathBuf, Vec<Issue>)>) -> 
     for (k, i) in shown.iter().enumerate() {
         at.insert(i.id.clone(), k);
     }
-    for (tree, (label, root, issues)) in others.into_iter().enumerate() {
+    for (tree, Side { label, root, issues, base }) in others.into_iter().enumerate() {
         origin.trees.push((label, root));
         for i in issues {
             match at.get(&i.id) {
@@ -139,6 +169,7 @@ pub fn overlay(mine: Vec<Issue>, others: Vec<(String, PathBuf, Vec<Issue>)>) -> 
                     shown[k] = i;
                 }
                 Some(_) => {}
+                None if base.get(&i.id).is_some_and(|then| i.updated_at <= *then) => {}
                 None => {
                     at.insert(i.id.clone(), shown.len());
                     origin.added.insert(i.id.clone());
@@ -198,7 +229,8 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let mut watched = Vec::new();
     match others_of(&repo.root) {
         Err(why) => unfound = Some(why),
-        Ok(trees) => {
+        Ok((mine, trees)) => {
+            let here: std::collections::HashSet<&str> = load.issues.iter().map(|i| i.id.as_str()).collect();
             for (tree, root) in trees {
                 let path = root.join(".moai").join("issues.jsonl");
                 watched.push((path.clone(), crate::store::stamp(&path)));
@@ -214,7 +246,14 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                                 other.errors.len()
                             ));
                         }
-                        others.push((tree.label, root, other.issues));
+                        // 갈라진 자리는 옆에만 있는 줄을 가를 때만 쓴다. 다 여기에도 있으면
+                        // git 을 두 번 더 부르지 않는다 — 탐색기는 다시 읽을 때마다 여기를 지난다.
+                        let lonely = other.issues.iter().any(|i| !here.contains(i.id.as_str()));
+                        let base = match mine.as_deref() {
+                            Some(m) if lonely => base_of(&repo.root, m, &tree.head),
+                            _ => BTreeMap::new(),
+                        };
+                        others.push(Side { base, ..Side::new(tree.label, root, other.issues) });
                     }
                 }
             }
@@ -225,42 +264,63 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, watched })
 }
 
-/// 다른 워크트리마다 (워크트리, 그 안의 moai 뿌리).
+/// 제 워크트리의 HEAD 와, 다른 워크트리마다 (워크트리, 그 안의 moai 뿌리).
 ///
 /// moai 뿌리가 워크트리 꼭대기가 아닐 수 있다(`.moai/` 를 하위 디렉터리에 둔
 /// 저장소). **제 뿌리가 꼭대기에서 떨어진 만큼 남의 꼭대기에서도 떨어뜨린다** —
 /// 같은 저장소의 워크트리는 같은 나무 모양이다.
-fn others_of(root: &Path) -> Result<Vec<(Tree, PathBuf)>, String> {
-    let git = |args: &[&str]| -> Result<String, String> {
-        let out = std::process::Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(args)
-            .output()
-            .map_err(|e| format!("git 을 부르지 못해 워크트리를 못 찾았다 — {e}"))?;
-        if !out.status.success() {
-            return Err(format!(
-                "워크트리를 못 찾았다 — {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ));
-        }
-        String::from_utf8(out.stdout).map_err(|e| format!("워크트리 목록을 못 읽었다 — {e}"))
-    };
-    let top = git(&["rev-parse", "--show-toplevel"])?;
+fn others_of(root: &Path) -> Result<(Option<String>, Vec<(Tree, PathBuf)>), String> {
+    let top = git(root, &["rev-parse", "--show-toplevel"])?;
     let top = canonical(Path::new(top.trim_end_matches('\n')));
     let rel = canonical(root).strip_prefix(&top).map(Path::to_path_buf).unwrap_or_default();
     // `-z` 는 git 2.36 부터다. 그 전 git 에서 거절되면 줄로 가른 것을 NUL 로 바꿔
     // 같은 파서로 읽는다 — 줄바꿈 든 경로만 잃고, 겹쳐 보기 전체를 잃지는 않는다.
-    let listed = git(&["worktree", "list", "--porcelain", "-z"])
-        .or_else(|_| git(&["worktree", "list", "--porcelain"]).map(|s| s.replace('\n', "\0")))?;
-    Ok(parse(&listed)
-        .into_iter()
-        .filter(|t| canonical(&t.path) != top)
-        .map(|t| {
-            let root = t.path.join(&rel);
-            (t, root)
-        })
-        .collect())
+    let listed = git(root, &["worktree", "list", "--porcelain", "-z"])
+        .or_else(|_| git(root, &["worktree", "list", "--porcelain"]).map(|s| s.replace('\n', "\0")))?;
+    let (mine, others): (Vec<Tree>, Vec<Tree>) = parse(&listed).into_iter().partition(|t| canonical(&t.path) == top);
+    let mine = mine.into_iter().next().map(|t| t.head).filter(|h| !h.is_empty());
+    Ok((
+        mine,
+        others
+            .into_iter()
+            .map(|t| {
+                let root = t.path.join(&rel);
+                (t, root)
+            })
+            .collect(),
+    ))
+}
+
+/// 제 HEAD 와 옆 HEAD 가 갈라진 자리의 스냅샷 — id → 그때의 `updated_at` ([`Side::base`]).
+///
+/// **못 찾으면 비어 있고, 말하지 않는다.** 이어지지 않는 역사, 아직 커밋이 없는 브랜치,
+/// 그 커밋에 스냅샷이 없는 것(moai 를 들이기 전에 갈라졌다)은 모두 "지운 줄을 가를
+/// 바탕이 없다" 는 뜻이라 전처럼 다 세운다. 옆 파일이 멀쩡한데 말이 서면 안 된다.
+fn base_of(root: &Path, mine: &str, theirs: &str) -> BTreeMap<String, String> {
+    let mut then = BTreeMap::new();
+    let Ok(base) = git(root, &["merge-base", mine, theirs]) else { return then };
+    // `<커밋>:./<경로>` 는 `-C` 로 준 디렉터리에서 푼다 — moai 뿌리가 꼭대기가 아니어도 된다.
+    let Ok(src) = git(root, &["show", &format!("{}:./.moai/issues.jsonl", base.trim())]) else { return then };
+    for i in crate::store::parse_issues(&src).issues {
+        let at = then.entry(i.id).or_insert_with(String::new);
+        if i.updated_at > *at {
+            *at = i.updated_at;
+        }
+    }
+    then
+}
+
+fn git(root: &Path, args: &[&str]) -> Result<String, String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(|e| format!("git 을 부르지 못해 워크트리를 못 찾았다 — {e}"))?;
+    if !out.status.success() {
+        return Err(format!("워크트리를 못 찾았다 — {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    String::from_utf8(out.stdout).map_err(|e| format!("워크트리 목록을 못 읽었다 — {e}"))
 }
 
 /// 견줄 수 있는 경로. 못 풀면(사라진 경로) 받은 그대로 — 그런 경로는 어차피
@@ -280,8 +340,8 @@ mod tests {
         i
     }
 
-    fn tree(label: &str, issues: Vec<Issue>) -> (String, PathBuf, Vec<Issue>) {
-        (label.into(), PathBuf::from(format!("/wt/{label}")), issues)
+    fn tree(label: &str, issues: Vec<Issue>) -> Side {
+        Side::new(label, format!("/wt/{label}"), issues)
     }
 
     #[test]
@@ -307,7 +367,35 @@ mod tests {
     #[test]
     fn a_newline_in_a_path_does_not_split_the_worktree() {
         let got = parse("worktree /a\nb\0HEAD 1234567890\0branch refs/heads/nl\0\0");
-        assert_eq!(got, [Tree { path: PathBuf::from("/a\nb"), label: "nl".into() }]);
+        assert_eq!(got, [Tree { path: PathBuf::from("/a\nb"), label: "nl".into(), head: "1234567890".into() }]);
+    }
+
+    /// 옆에만 있는 줄이 갈라진 자리에 있었으면 여기서 지운 것이다 — 옆에서 그 뒤로 안
+    /// 만졌으면 안 서고, 만졌으면 선다. 갈라진 자리에 없던 줄은 전처럼 선다.
+    #[test]
+    fn a_line_removed_here_since_the_fork_is_not_revived_unless_touched_there() {
+        let at = "2026-09-12T00:00:00Z";
+        let later = "2026-09-13T00:00:00Z";
+        let mut side = tree("feat/x", vec![
+            issue("m-0001", "todo", at),
+            issue("m-0002", "in_progress", later),
+            issue("m-0003", "todo", at),
+        ]);
+        side.base = [("m-0001".to_string(), at.to_string()), ("m-0002".to_string(), at.to_string())].into();
+        let (shown, origin) = overlay(vec![], vec![side]);
+        let ids: Vec<&str> = shown.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["m-0002", "m-0003"], "지운 줄이 되살았거나 옆의 작업이 사라졌다");
+        assert_eq!(origin.branch("m-0001"), None);
+        assert_eq!(origin.unreadable([Some("m-0001")].into_iter()), [Some("m-0001")]);
+
+        // 둘째 워크트리가 같은 줄을 그 뒤에 만졌으면 그 줄은 선다.
+        let mut quiet = tree("a", vec![issue("m-0001", "todo", at)]);
+        quiet.base = [("m-0001".to_string(), at.to_string())].into();
+        let mut busy = tree("b", vec![issue("m-0001", "review", later)]);
+        busy.base = quiet.base.clone();
+        let (shown, origin) = overlay(vec![], vec![quiet, busy]);
+        assert_eq!(shown.len(), 1);
+        assert_eq!(origin.branch("m-0001"), Some("b"));
     }
 
     #[test]

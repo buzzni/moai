@@ -6,6 +6,7 @@
 
 use super::form::{Field, Form, Target};
 use super::keys::{BROWSE, Browse, CONFIRM, Confirm, Goto, JOT, Jot, PATH, PICK, PROMPT, Pick, Prompt, label, labels};
+use super::scroll::Move;
 use super::scroll::Scroll;
 use super::layer::{Look, Place, Shut};
 use super::picker::{self, Picker};
@@ -771,8 +772,15 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     f.render_widget(block.title(" 상세 "), at);
     // **굴리는 키를 표시 곁에서 말한다.** 아래 F키 바는 좁으면 뒤에서부터 키를
     // 떨어뜨리는데, 80칸이면 떨어지는 것이 하필 `j·k` 다. 알림은 그것이
-    // 가리키는 것 곁에 둔다.
-    let hint = format!(" ({})", labels(BROWSE, &[Browse::DetailDown, Browse::DetailUp]));
+    // 가리키는 것 곁에 둔다. **지금 자리에서 듣는 키를 댄다** — `j·k` 는 포커스 칸을
+    // 움직이므로(moai-ob4c) 목록에 선 사람에게 `j·k` 라 적으면 누른 대로 커서가 옮겨 가고
+    // 보던 상세가 바뀐다. 목록에서는 상세로 가는 키를 댄다.
+    let hint = if app.focus == Pane::Detail {
+        labels(BROWSE, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)])
+    } else {
+        label(BROWSE, Browse::FocusNext)
+    };
+    let hint = format!(" ({hint})");
     scroll_mark(f, &app.detail, at, &hint, app.focus == Pane::Detail);
     // **넘친 줄은 잘렸다고 말한다.** `Wrap` 을 끈 뒤로 폭을 넘는 줄은 위젯이
     // 표시도 없이 잘라 낸다 — 태그 줄, 롤업의 칸별 건수, `F3` 원문, 접지
@@ -1348,7 +1356,7 @@ fn browse_hints(app: &App) -> (Vec<Hint>, Vec<Hint>) {
     // "안 된다" 를 듣는다. `n` 은 층에서도 듣는다 — 커서의 프로젝트에 담는다(moai-fccv).
     if app.on_layer() {
         let optional = shown(&[
-            &[B::DetailDown, B::DetailUp],
+            &[B::Step(Move::LineDown), B::Step(Move::LineUp)],
             &[B::Reload],
             &[B::FocusNext],
             &[B::Jot],
@@ -1364,7 +1372,7 @@ fn browse_hints(app: &App) -> (Vec<Hint>, Vec<Hint>) {
         // 등록이 0 인 채 `.moai` 안에서 띄우면 층이 없어 이 키가 첫 등록의 길이다(moai-plvy).
         &[B::Pick],
         &[B::Worktree],
-        &[B::DetailDown, B::DetailUp],
+        &[B::Step(Move::LineDown), B::Step(Move::LineUp)],
         // **`F5` 는 `n` 보다 먼저 떨어진다.** 파일이 바뀌면 저절로 다시 읽으므로(`App::follow`)
         // F5 를 누를 일은 드물고, 생각을 담는 길은 이 탐색기가 처음 여는 쓰기다 — 80칸에서
         // 둘 중 하나만 남는다면 담는 길이다.
@@ -1611,6 +1619,9 @@ pub(super) mod tests {
     fn only_a_held_issue_title_glints_in_the_list() {
         let mut a = app();
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        // 커서는 `..` 에 둔다 — 들어가면 첫 줄(끝난 멤버)에 서는데(moai-cm13), 커서 줄의 모양이
+        // 제목 칸을 가려 여기서 재려는 빛과 섞인다.
+        a.key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
         // 가운데 칸이 제목 첫 글자에 오는 걸음.
         a.spin = 2;
         let (w, h) = (80u16, 10u16);
@@ -1695,7 +1706,7 @@ pub(super) mod tests {
         theirs.updated_at = "2026-09-02T00:00:00Z".into();
         let (all, origin) = crate::worktree::overlay(
             issues(),
-            vec![("feat/x".into(), std::path::PathBuf::from("/wt"), vec![theirs])],
+            vec![crate::worktree::Side::new("feat/x", "/wt", vec![theirs])],
         );
         a.adopt(all);
         a.origin = origin;
@@ -1869,7 +1880,6 @@ pub(super) mod tests {
 
         // 에픽 안으로 들어가 멤버(잎)를 본다 → 그 이슈의 낱낱
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let lines = render(&mut a, 100, 16).join("\n");
         assert!(lines.contains("argos-0003"), "이슈 id 가 없다\n{lines}");
         assert!(lines.contains("멤버"), "제목이 없다\n{lines}");
@@ -1886,7 +1896,6 @@ pub(super) mod tests {
         issues[1].blocked_by = vec!["argos-0001".into()];
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let lines = render(&mut a, 100, 20).join("\n");
         assert!(lines.contains("막힘"), "{lines}");
         assert!(lines.contains("아주 긴"), "막는 것의 제목이 없다\n{lines}");
@@ -1899,7 +1908,6 @@ pub(super) mod tests {
         issues[1].body = Some("앞\u{1b}[2J뒤".into());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let lines = render(&mut a, 100, 20).join("\n");
         assert!(lines.contains("앞[2J뒤"), "제어문자가 안 걸러졌다\n{lines}");
     }
@@ -2023,7 +2031,6 @@ pub(super) mod tests {
             issues[1].blocked_by = vec!["argos-0001".into()];
             let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
             a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-            a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
             render(&mut a, 100, 20).join("\n")
         };
         let lines = drawn(true);
@@ -2250,7 +2257,6 @@ pub(super) mod tests {
         issues[1].body = Some("**굵게** 한 줄\n\n- 하나\n- 둘\n".into());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
         let drawn = render(&mut a, 100, 22).join("\n");
         assert!(!drawn.contains("**"), "굵게 기호가 남았다\n{drawn}");
@@ -2364,7 +2370,7 @@ pub(super) mod tests {
         assert!(screen.contains("숨은 것 2개") && screen.contains("그 밖 7개"), "{screen}");
         assert_eq!(lines.iter().filter(|l| l.contains('┏')).count(), 1, "창이 뒤 칸을 다 못 덮었다\n{screen}");
         let bar = lines.last().unwrap();
-        for hint in ["Enter 들어가기", "Bksp 위로", "g 경로 적기", "a 등록", "Esc 닫기"] {
+        for hint in ["Enter 들어가기", "Bksp 위로", "g p 경로 적기", "a 등록", "Esc 닫기"] {
             assert!(bar.contains(hint), "80칸에서 `{hint}` 가 없다 — {bar:?}");
         }
         for l in &lines {
@@ -2456,7 +2462,6 @@ pub(super) mod tests {
             let mut a =
                 App::new(issues.clone(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
             a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-            a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
             for l in render(&mut a, w, 30) {
                 assert!(crate::text::width(&l) <= w as usize, "{w}칸을 넘었다 — {l:?}");
             }
@@ -2491,15 +2496,18 @@ pub(super) mod tests {
         issues[1].body = Some(body);
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
         let first = render(&mut a, 100, 16).join("\n");
         assert!(first.contains("1번째"), "{first}");
         assert!(!first.contains("40번째"), "다 보이면 굴릴 것이 없다\n{first}");
-        assert!(first.contains("↓ ") && first.contains("줄 (j·k)"), "남은 줄을 안 알린다\n{first}");
+        // 목록에 섰으니 상세로 가는 키를 댄다 — `j·k` 는 여기서 커서를 옮긴다(moai-ob4c).
+        assert!(first.contains("↓ ") && first.contains("줄 (Tab)"), "남은 줄을 안 알린다\n{first}");
+        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        let focused = render(&mut a, 100, 16).join("\n");
+        assert!(focused.contains("줄 (j·k)"), "상세 포커스에서 굴리는 키를 안 댄다\n{focused}");
 
         for _ in 0..12 {
-            a.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+            a.key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
         }
         let last = render(&mut a, 100, 16).join("\n");
         assert!(last.contains("40번째"), "끝까지 못 굴렸다\n{last}");
@@ -2527,7 +2535,6 @@ pub(super) mod tests {
         issues[1].body = Some("```\nlet very_long = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\";\n```\n".into());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
         for raw in [false, true] {
             if raw {
@@ -2554,10 +2561,10 @@ pub(super) mod tests {
         issues[1].body = Some((1..=40).map(|n| format!("{n}번째 줄이다\n\n")).collect::<String>());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
+        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         for _ in 0..80 {
-            a.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+            a.key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
         }
         let end = render(&mut a, 100, 16).join("\n");
         assert!(end.contains("40번째"), "끝을 지나쳐 빈 화면이 됐다\n{end}");
@@ -2575,7 +2582,6 @@ pub(super) mod tests {
         issues[1].tags = (1..=20).map(|n| format!("아주긴태그이름{n}")).collect();
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let out = render(&mut a, 100, 20);
         let tagline = out.iter().find(|l| l.contains("아주긴태그이름1")).expect("태그 줄이 없다");
         assert!(tagline.contains('…'), "잘렸는데 표시가 없다 — {tagline:?}");
@@ -2589,10 +2595,11 @@ pub(super) mod tests {
         issues[1].body = Some((1..=40).map(|n| format!("{n}번째\n\n")).collect::<String>());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let _ = render(&mut a, 100, 16);
-        a.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        a.key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
         assert!(a.detail.offset() > 0);
+        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         a.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
         assert_eq!(a.detail.offset(), 0, "굴린 자리를 들고 다른 줄로 갔다");
     }
@@ -2606,7 +2613,6 @@ pub(super) mod tests {
         issues[1].body = Some((1..=40).map(|n| format!("{n}번째 줄이다\n\n")).collect::<String>());
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         let cursor = a.cursor;
 
         a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));

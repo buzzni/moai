@@ -5559,6 +5559,27 @@ fn worktree_trouble_is_told_but_never_fails_the_command() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("워크트리를 못 찾았다"));
 }
 
+/// **여기서 지운 줄은 옆 줄로 되살아나지 않는다**(moai-0a0u). 갈라진 뒤 옆에서 안
+/// 만진 줄은 사라지고, 옆에서 집은 줄은 지웠어도 선다 — 부딪힌 것을 감추면 옆에서
+/// 하던 일이 안 보인다. 옆에서 새로 만든 줄은 전처럼 선다.
+#[test]
+fn worktree_does_not_revive_a_line_removed_here() {
+    let t = trees("wtrm");
+    let main = t.main();
+    ok(&main, &["rm", &t.tied, &t.picked]);
+
+    let shown = ok(&main, &["show", "--worktree"]);
+    assert!(!shown.contains(&t.tied), "여기서 지운 줄이 옆 줄로 되살았다\n{shown}");
+    assert!(shown.contains(&t.made), "{shown}");
+    let picked = shown.lines().find(|l| l.starts_with(t.picked.as_str()));
+    assert!(picked.is_some_and(|l| l.contains("⎇ feat/x")), "옆에서 집은 일이 사라졌다\n{shown}");
+
+    let ready = ok(&main, &["ready", "--worktree", "--json"]);
+    assert!(!ready.contains(&t.tied), "지운 일을 집으라고 낸다\n{ready}");
+    let status = ok(&main, &["status", "--worktree", "--json"]);
+    assert!(!status.contains(&t.tied), "{status}");
+}
+
 // ── moai project ────────────────────────────────────────────────────────────
 
 /// **등록 시험은 저마다 제 설정 파일을 쓴다.** [`isolated`] 의 `MOAI_CONFIG` 는

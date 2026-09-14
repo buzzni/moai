@@ -10,7 +10,7 @@
 //! 보지도 않을 디렉터리 이름까지 읽는다.
 
 use super::input::Input;
-use super::keys::{Goto, Lookup, PATH, PICK, Pick, label, lookup};
+use super::keys::{Chord, Goto, Lookup, PATH, PICK, Pick, label, lookup};
 use super::scroll::Scroll;
 use ratatui::crossterm::event::KeyEvent;
 use std::path::{Path, PathBuf};
@@ -62,8 +62,10 @@ pub struct Picker {
     pub list: Scroll,
     /// 점 디렉터리도 보이나. **꺼진 채 연다** — 홈에서 열면 `.cache`·`.local` 이 줄을 먼저 먹는다.
     pub show_hidden: bool,
-    /// `g` 로 연 경로 적기 칸.
+    /// `g p` 로 연 경로 적기 칸.
     pub typing: Option<Input>,
+    /// `g` 뒤를 기다리는 열(`gg` 맨 위·`g p` 경로 적기). **창 안에 둔다** — 창이 닫히면 함께 버려진다.
+    pub chord: Chord,
     /// 마지막 키가 못 한 까닭(못 읽는 디렉터리·거절된 등록). **다음 키에 걷힌다.**
     pub error: Option<String>,
 }
@@ -93,7 +95,15 @@ pub fn here_is_already_open() -> String {
 impl Picker {
     /// 첫 층으로 연다. 커서는 첫 하위 디렉터리에 선다 — 고르러 들어온 사람이 먼저 보는 것은 밑이다.
     pub fn new(at: Listing) -> Picker {
-        let mut p = Picker { at, cursor: 0, list: Scroll::default(), show_hidden: false, typing: None, error: None };
+        let mut p = Picker {
+            at,
+            cursor: 0,
+            list: Scroll::default(),
+            show_hidden: false,
+            typing: None,
+            chord: Chord::default(),
+            error: None,
+        };
         p.cursor = p.first_dir();
         p
     }
@@ -148,22 +158,24 @@ impl Picker {
 
     /// 붙여 넣은 글(moai-od9q). **경로 칸으로 간다** — 열려 있으면 커서 자리에, 닫혀 있으면
     /// 붙인 글로 연다. 이 창에서 붙이는 글은 경로뿐이고, 키로 읽으면 `q` 가 창을 닫고 `a` 가
-    /// 커서의 줄을 등록한다. 닫힌 칸을 지금 디렉터리로 채워 열지 않는다(`g` 와 다르다) —
+    /// 커서의 줄을 등록한다. 닫힌 칸을 지금 디렉터리로 채워 열지 않는다(`g p` 와 다르다) —
     /// 붙이는 경로는 대개 절대경로라 앞에 붙은 디렉터리를 사람이 지워야 한다. 상대경로여도
     /// Enter 가 지금 디렉터리에 붙인다.
     pub fn paste(&mut self, s: &str) {
         self.error = None;
+        // 기다리던 `g` 는 버린다 — 칸을 닫은 뒤의 `g` 가 붙여넣기 전의 `g` 와 이어 맨 위로 뛰지 않게.
+        self.chord.clear();
         self.typing.get_or_insert_with(Input::default).paste(s);
     }
 
     /// 키 하나. Ctrl-C 는 여기 오기 전에 든 쪽이 받는다 — 어느 모드에서든 나가는 길이다.
     ///
-    /// - **↑↓·PageUp/Down·Home/End** 커서
-    /// - **Enter·→** 들어가기 (`..` 이면 위로)
-    /// - **Bksp·←** 한 층 위로
+    /// - **j·k·gg·G·Ctrl-d/u/f/b** (↑↓·Home/End·PageUp/Down) 커서
+    /// - **Enter·l·→** 들어가기 (`..` 이면 위로)
+    /// - **Bksp·h·←** 한 층 위로
     /// - **a** 커서가 선 디렉터리를 등록 (`./` 이면 지금 디렉터리)
     /// - **.** 점 디렉터리 보이기·감추기
-    /// - **g** 경로 적기 — 지금 디렉터리를 채워 연다. 상대경로면 지금 디렉터리에 붙는다
+    /// - **g p** 경로 적기 — 지금 디렉터리를 채워 연다. 상대경로면 지금 디렉터리에 붙는다
     /// - **Esc·q** 닫기
     pub fn key(&mut self, k: KeyEvent) -> Act {
         self.error = None;
@@ -193,18 +205,17 @@ impl Picker {
                 Lookup::Pending | Lookup::Unknown => Act::Stay,
             };
         }
-        // 키의 뜻은 표([`PICK`])에서 읽는다. 창의 줄은 전부 Ctrl·Alt 없이 누른 키라, 거들쇠가
-        // 붙은 키는 표에 없어 아무 일도 없다.
-        let Lookup::Run(act) = lookup(PICK, &[k]) else { return Act::Stay };
-        if act == Pick::Step {
-            if let Some(at) = super::scroll::cursor(k, self.cursor, || self.rows().len()) {
-                self.cursor = at;
-            }
+        // 키의 뜻은 표([`PICK`])에서 읽는다. 창의 줄은 vi 쪽 이동(Ctrl-d 등)말고는 Ctrl·Alt 없이
+        // 누른 키라, 거들쇠가 붙은 키는 표에 없어 아무 일도 없다. `g` 는 다음 키를 기다린다 —
+        // 뜻 없는 다음 키는 기다린 `g` 와 함께 버려진다([`Chord::feed`]).
+        let Some(act) = self.chord.feed(PICK, k) else { return Act::Stay };
+        if let Pick::Step(m) = act {
+            self.cursor = super::scroll::cursor(m, self.cursor, || self.rows().len());
             return Act::Stay;
         }
         let row = self.current();
         match act {
-            Pick::Step => Act::Stay,
+            Pick::Step(_) => Act::Stay,
             Pick::Enter => match row {
                 Some(r @ (Row::Up | Row::Dir(_))) => self.path_of(r).map_or(Act::Stay, Act::Go),
                 // `./` 은 이미 여기다 — 들어갈 데가 없다. **조용히 먹지 않는다**: 아랫줄이
@@ -249,6 +260,12 @@ mod tests {
 
     fn press(p: &mut Picker, code: KeyCode) -> Act {
         p.key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    /// 경로 적기 칸을 연다 — `g p`.
+    fn path(p: &mut Picker) -> Act {
+        assert_eq!(press(p, KeyCode::Char('g')), Act::Stay);
+        press(p, KeyCode::Char('p'))
     }
 
     fn dent(name: &str) -> Dent {
@@ -334,20 +351,22 @@ mod tests {
         assert_eq!(p.current(), Some(Row::Dir(0)));
     }
 
-    /// `g` 는 지금 디렉터리를 채운 칸을 연다. Enter 면 거기로, 상대경로는 지금 디렉터리에
-    /// 붙는다. Esc 는 칸만 닫고 창은 둔다. **칸이 열린 동안 `q`·`a` 는 글자다.**
+    /// `g p` 는 지금 디렉터리를 채운 칸을 연다. Enter 면 거기로, 상대경로는 지금 디렉터리에
+    /// 붙는다. Esc 는 칸만 닫고 창은 둔다. **칸이 열린 동안 `q`·`a`·vi 키(`j`·`k`·`g`·`h`·`l`·`G`)는
+    /// 글자다** — `g` 가 칸 안에서 다시 기다리면 경로에 `g` 를 못 친다.
     #[test]
-    fn g_opens_a_path_field_whose_keys_are_letters() {
+    fn g_p_opens_a_path_field_whose_keys_are_letters() {
         let mut p = Picker::new(listing("/w", &["apps"]));
-        press(&mut p, KeyCode::Char('g'));
+        path(&mut p);
         assert_eq!(p.typing.as_ref().map(Input::text), Some("/w/"));
-        for c in "qa".chars() {
+        for c in "qajkgghlGp".chars() {
             assert_eq!(press(&mut p, KeyCode::Char(c)), Act::Stay);
         }
-        assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/qa".into()));
+        assert!(!p.chord.waiting(), "칸 안의 `g` 가 기다린다");
+        assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/qajkgghlGp".into()));
         assert_eq!(p.typing, None);
 
-        press(&mut p, KeyCode::Char('g'));
+        path(&mut p);
         p.typing = Some(Input::new("apps/sub"));
         assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/apps/sub".into()), "상대경로가 지금 디렉터리에 안 붙었다");
 
@@ -355,15 +374,15 @@ mod tests {
         // 가장 먼저 치는 것이 이것이고, 붙여 버리면 `…/~/work` 를 찾다 없다고 한다.
         // 홈이 어디인지는 드는 쪽(`register::expand_home`)이 안다 — 여기는 조각이다.
         for typed in ["~", "~/work/argos"] {
-            press(&mut p, KeyCode::Char('g'));
+            path(&mut p);
             p.typing = Some(Input::new(typed));
             assert_eq!(press(&mut p, KeyCode::Enter), Act::Go(typed.into()), "`~` 를 지금 디렉터리에 붙였다");
         }
         // `~` 로 시작하지 않는 것은 그대로 붙는다 — `~x` 는 그냥 이름이다.
-        press(&mut p, KeyCode::Char('g'));
+        path(&mut p);
         p.typing = Some(Input::new("~x"));
         assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/~x".into()));
-        press(&mut p, KeyCode::Char('g'));
+        path(&mut p);
         assert_eq!(press(&mut p, KeyCode::Esc), Act::Stay);
         assert_eq!(p.typing, None);
         assert_eq!(press(&mut p, KeyCode::Esc), Act::Close, "칸을 닫은 뒤 Esc 가 창을 안 닫았다");
@@ -379,9 +398,64 @@ mod tests {
         assert_eq!(p.typing.as_ref().map(Input::text), Some("/srv/qa"), "붙인 경로로 칸을 안 열었다");
         assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/srv/qa".into()));
 
-        press(&mut p, KeyCode::Char('g'));
+        path(&mut p);
         p.paste("apps");
         assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/apps".into()));
+    }
+
+    /// **vi 이동**(moai-ob4c) — `j`·`k`, `gg`·`G`, Ctrl-d·Ctrl-u 가 커서를, `h`·`l` 이 위로·들어가기를
+    /// 한다. 기다리는 `g` 뒤에 뜻 없는 키가 오면 둘 다 버린다.
+    #[test]
+    fn vi_keys_move_the_cursor_and_go_in_and_out() {
+        let names: Vec<String> = (0..30).map(|n| format!("d{n:02}")).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let mut p = Picker::new(listing("/w", &refs));
+        // 줄: `./`·`..`·d00…d29 — 여는 자리는 d00(2)
+        assert_eq!(p.cursor, 2);
+        press(&mut p, KeyCode::Char('j'));
+        assert_eq!(p.cursor, 3);
+        press(&mut p, KeyCode::Char('k'));
+        assert_eq!(p.cursor, 2);
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        p.key(ctrl('d'));
+        assert_eq!(p.cursor, 2 + crate::tui::scroll::HALF);
+        p.key(ctrl('u'));
+        assert_eq!(p.cursor, 2);
+        p.key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+        assert_eq!(p.current(), Some(Row::Dir(29)), "SHIFT 붙은 `G` 가 맨 아래로 안 갔다");
+        assert_eq!(press(&mut p, KeyCode::Char('g')), Act::Stay);
+        assert_eq!(p.current(), Some(Row::Dir(29)), "`g` 하나에 움직였다");
+        press(&mut p, KeyCode::Char('g'));
+        assert_eq!(p.cursor, 0, "`gg` 가 맨 위로 안 갔다");
+
+        // 뜻 없는 둘째 키는 버린다 — `g` 뒤의 `j` 도, `a` 도 제 뜻을 안 한다
+        p.cursor = 2;
+        for c in ['x', 'j', 'a', 'q'] {
+            press(&mut p, KeyCode::Char('g'));
+            assert_eq!(press(&mut p, KeyCode::Char(c)), Act::Stay, "`g {c}` 가 무언가 했다");
+            assert_eq!((p.cursor, p.typing.is_some(), p.chord.waiting()), (2, false, false), "`g {c}`");
+        }
+
+        assert_eq!(press(&mut p, KeyCode::Char('l')), Act::Go("/w/d00".into()));
+        assert_eq!(press(&mut p, KeyCode::Char('h')), Act::Go("/".into()));
+        // Esc 는 기다리던 `g` 를 버린다 — 창을 닫지 않는다
+        press(&mut p, KeyCode::Char('g'));
+        assert_eq!(press(&mut p, KeyCode::Esc), Act::Stay, "`g` 뒤의 Esc 가 창을 닫았다");
+        assert_eq!(press(&mut p, KeyCode::Esc), Act::Close);
+    }
+
+    /// **붙여넣기는 기다리던 `g` 를 버린다** — 칸을 닫은 뒤의 `g` 가 붙이기 전의 `g` 와 이어
+    /// 맨 위로 뛰지 않는다.
+    #[test]
+    fn a_paste_drops_a_waiting_g() {
+        let mut p = Picker::new(listing("/w", &["a", "b"]));
+        press(&mut p, KeyCode::Char('j'));
+        press(&mut p, KeyCode::Char('g'));
+        p.paste("x");
+        assert!(!p.chord.waiting());
+        press(&mut p, KeyCode::Esc);
+        press(&mut p, KeyCode::Char('g'));
+        assert_eq!(p.current(), Some(Row::Dir(1)), "붙이기 전의 `g` 와 이어졌다");
     }
 
     /// `.` 은 숨은 것 보이기를 뒤집고 같은 층을 다시 읽으라고 한다. Esc·q 는 닫는다.
