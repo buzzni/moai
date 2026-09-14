@@ -2276,3 +2276,9 @@
 {"ts":"2026-09-14T14:57:39Z","id":"moai-8dna","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"고르기 창 경로 칸(g p)의 낱말 지우기가 / 에서 멈춘다"}
 {"ts":"2026-09-14T14:57:47Z","id":"moai-jzye","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-8dna 로 옮겼다 — 사용자가 경로 칸만 / 경계로 골랐다"}
 {"ts":"2026-09-14T14:57:48Z","id":"moai-8dna","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T14:57:57Z","id":"moai-m23n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자와 정한 것 (2026-09-14, 감독 세션 moa-issue-45 이 맡김): init 이 .gitignore 에 /.claude/worktrees/ 하나만 넣는다(.claude/ 통째는 저장소가 커밋하는 설정·스킬을 가려서 안 한다). 같은 뜻의 철자(/.claude/worktrees/·.claude/worktrees/·끝 슬래시 없는 것)나 .claude/ 를 통째로 막는 줄이 이미 있으면 안 더한다. 끄는 플래그는 두지 않는다 — lock·tmp 줄처럼 늘 넣는다. 없는 .gitignore 는 지금처럼 만든다."}
+{"ts":"2026-09-14T14:57:58Z","id":"moai-9m3u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 이 워크트리 자리를 gitignore 한다"}
+{"ts":"2026-09-14T14:57:58Z","id":"moai-mxtb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai init 이 .gitignore 에 /.claude/worktrees/ 를 넣는다 — 감독 일꾼이 그 자리에 워크트리를 뜬다"}
+{"ts":"2026-09-14T14:57:58Z","id":"moai-9m3u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-m23n 에서 펼쳤다 — moai init 이 다른 저장소에서 .claude/worktrees/ 를 gitignore 하지 않는다 — 감독 일꾼 절차가 그 자리에 워크트리를 뜬다 (moai-hxma.grs max 리뷰가 diff 밖이라 넘김)"}
+{"ts":"2026-09-14T14:57:58Z","id":"moai-m23n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-9m3u 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-14T14:57:58Z","id":"moai-mxtb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
