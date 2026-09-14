@@ -359,11 +359,12 @@ pub fn reference() -> String {
 
 `--dry-run` 이 heredoc 오타로 엉뚱한 여섯 개를 만드는 것을 막는다.
 
-되풀이하는 계획은 파일로 두고 `{{이름}}` 을 `--var 이름=값` 으로 채운다. 저장소의
-`.moai/templates/<이름>.md` 에 두는 것이 관례고 `--from <경로>` 로 부른다. 변수는 전부 필수다 —
-못 채운 이름·빈 값·계획에 없는 이름·같은 이름 두 번은 거절하고 아무것도 안 만든다. 값은 제목
-글자라 우선순위·태그를 못 바꾸고, 제목에 글자 `{{` 가 들면 `\{{` 로 적는다. `idea promote --from`
-도 같은 `--var` 를 받는다.
+되풀이하는 계획은 파일로 두고 `{{{{이름}}}}` 을 `--var 이름=값` 으로 채운다(이름은 영문·숫자·`_`·`-`,
+빈칸 없이). 저장소의 `.moai/templates/<이름>.md` 에 두는 것이 관례고 `--from <경로>` 로 부른다.
+변수는 전부 필수다 — 못 채운 이름·빈 값·줄바꿈이 든 값·계획에 없는 이름·같은 이름 두 번은 거절하고
+아무것도 안 만든다. 값은 적힌 그대로 제목 글자가 되므로 변수는 제목 자리에만 둔다(태그·우선순위
+자리면 거절). 템플릿의 제목에 글자 `{{{{` 를 쓰려면 `\{{{{` 로 적는다. `idea promote --from` 도 같은
+`--var` 를 받는다.
 
     moai add --from .moai/templates/release.md --var version=1.2 --dry-run
 
@@ -469,6 +470,17 @@ mod tests {
     #[test]
     fn the_python_one_liner_survives_formatting() {
         assert!(reference().contains(".get('message',{}).get('content')"));
+    }
+
+    /// 템플릿 문법의 `{{`·`\{{` 도 포맷을 지나 그대로 선다. 한 번 틀려 참고 문서가 `{이름}` 과 `\{` 를
+    /// 가르쳤고, 그대로 쓴 템플릿은 변수가 아니라 글자가 됐다.
+    #[test]
+    fn the_template_syntax_survives_formatting() {
+        let reference = reference();
+        for want in ["`{{이름}}`", "`{{`", "`\\{{`"] {
+            assert!(reference.contains(want), "참고 문서에 {want} 가 없다 — 포맷이 중괄호를 깎았다");
+        }
+        assert!(!reference.contains("`{이름}`"), "참고 문서가 `{{{{이름}}}}` 을 `{{이름}}` 으로 깎았다");
     }
 
     /// 스킬의 frontmatter 는 **첫 줄**에서 시작해야 읽힌다.
