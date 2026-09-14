@@ -99,6 +99,20 @@ impl Naming {
     }
 }
 
+/// 접두어의 **모양** — 소문자·숫자·`-`, `-` 로 시작하거나 끝나지 않는다. 길이는 안 본다:
+/// 그것은 새로 심을 때만 거는 규칙이다(`cmd::init::PREFIX_MAX`). 읽는 자리와 심는 자리가 같은
+/// 규칙을 쓰도록 한 곳에 둔다 — 심는 자리가 길이를 먼저 보면 모양이 틀린 긴 접두어에 그 자체로
+/// 틀린 짧은 후보를 댔다(리뷰 moai-f7xs.z1x).
+pub fn check_prefix(prefix: &str) -> Result<(), String> {
+    if !prefix.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-') {
+        return Err(format!("`prefix` 는 소문자·숫자·`-` 만 쓴다 — {prefix:?}"));
+    }
+    if prefix.starts_with('-') || prefix.ends_with('-') {
+        return Err(format!("`prefix` 는 `-` 로 시작하거나 끝날 수 없다 — {prefix:?}"));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     /// id 접두어. 그 저장소의 프로젝트명이다.
@@ -120,15 +134,7 @@ impl Config {
         let prefix = scalar(src, "prefix")?
             .filter(|p| !p.is_empty())
             .ok_or("`prefix` 가 없다")?;
-        if !prefix
-            .bytes()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
-        {
-            return Err(format!("`prefix` 는 소문자·숫자·`-` 만 쓴다 — {prefix:?}"));
-        }
-        if prefix.starts_with('-') || prefix.ends_with('-') {
-            return Err(format!("`prefix` 는 `-` 로 시작하거나 끝날 수 없다 — {prefix:?}"));
-        }
+        check_prefix(&prefix)?;
 
         let raw = scalar(src, "statuses")?.unwrap_or_else(|| DEFAULT_STATUSES.into());
         let statuses: Vec<String> = raw
