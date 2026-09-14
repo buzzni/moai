@@ -1023,21 +1023,19 @@ fn role_style(r: crate::markdown::Role) -> Style {
 }
 
 /// 그 밑의 진척. **`nav` 가 자리를 정한 그대로 센다** — `report::rollup_of` 로
-/// 세면 자리 규칙과 세는 규칙이 달라 머리글과 줄 수가 어긋난다.
+/// 세면 자리 규칙과 세는 규칙이 달라 머리글과 줄 수가 어긋난다. 목록 줄의 진행
+/// 바탕도 같은 셈([`crate::nav::Index::progress`])을 쓴다.
 fn rollup<'a>(app: &App, path: &crate::nav::Path, w: usize) -> Vec<Line<'a>> {
-    let kids = app.index.descendants(path);
-    let work: Vec<usize> =
-        kids.iter().copied().filter(|&at| crate::report::is_work(&app.issues[at])).collect();
-    if work.is_empty() {
+    let progress = app.index.progress(&app.issues, path);
+    let Some(percent) = progress.percent() else {
         // **없는 것과 안 세는 것은 다르다.** 담아 둔 생각은 자리로는 여기
         // 걸리지만(왼쪽 목록이 그 줄을 낸다) 진행률로는 안 센다 — 세기
         // 시작하면 담을수록 그 부모가 덜 끝난 것으로 보인다. 둘을 한 낱말로
         // 뭉치면 줄이 보이는데 `자식 없음` 이라 말한다(moai-lhbh).
-        let word = if kids.is_empty() { "자식 없음" } else { "셀 일 없음" };
+        let word = if progress.kids == 0 { "자식 없음" } else { "셀 일 없음" };
         return vec![Line::from(Span::styled(word, dim()))];
-    }
-    let done = work.iter().filter(|&&at| app.issues[at].status.is_done()).count();
-    let percent = (done * 100 / work.len()) as u8;
+    };
+    let (work, done) = (&progress.work, progress.done);
 
     // `clamp(10, 24)` 뒤에는 10 이상이라 뺄셈이 넘칠 수 없고 6 아래로도 안
     // 간다 — 지키는 척하는 `.saturating_sub`·`.max` 는 지우고 뜻만 남긴다.
