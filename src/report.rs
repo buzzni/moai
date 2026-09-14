@@ -1470,10 +1470,16 @@ const WIP_STALE_DAYS: i64 = 2;
 const BLOCKED_STALE_DAYS: i64 = 3;
 
 /// 막힌 줄이 **지금 막힌 채로 선 때** — 제 계획 자리가 바뀐 때(`Issue::planned`)와, 지금
-/// 막는 줄마다 그 줄이 다시 선 때 중 가장 늦은 것.
+/// 막는 줄들이 다시 선 때 중 **가장 이른 것** 가운데 늦은 것.
+///
+/// 막는 줄 쪽은 가장 이른 것을 쓴다 — 오래 막아 온 줄이 하나라도 있으면 그동안 줄곧 막혀
+/// 있었다. 가장 늦은 것을 쓰면 막는 줄 둘 중 하나가 오늘 칸을 옮기는 것만으로 열흘 막힌
+/// 줄이 경고에서 사라진다.
 ///
 /// 막는 줄이 선 때는 일이면 그 줄의 계획 자리가 바뀐 때(done 에서 되돌아 나왔으면 그때),
-/// 묶음이면 읽은 칸의 셈이 움직인 때([`Stand::since`])다. 막힌 줄의 칸 나이로만 재면,
+/// 묶음이면 읽은 칸의 셈이 움직인 때([`Stand::since`])와 묶음 제 미룸을 도로 집은 때
+/// (`planned_at`) 중 늦은 것이다 — 미룬 묶음에 막힌 줄은 `blocked_by_deferred` 로 따로
+/// 서다가, 묶음을 도로 집는 순간 멤버의 셈만 보면 곧장 "N일째" 가 된다. 막힌 줄의 칸 나이로만 재면,
 /// 끝난 에픽에 멤버를 더하는 순간 그 에픽에 막힌 오래된 줄이 곧장 "N일째" 로 섰다.
 /// **파생값이라 저장하지 않는다** — 막는 줄을 옮길 때 막힌 줄을 같이 쓰게 된다.
 fn blocked_since<'a>(
@@ -1488,10 +1494,14 @@ fn blocked_since<'a>(
         .filter_map(|b| by_id.get(b.as_str()).copied())
         .filter(|x| blocker(Some(column(x, states)), false, waiting_of(&x.id, waits)).blocks())
         .map(|x| match is_group(x) {
-            true => group_since.get(x.id.as_str()).copied().unwrap_or(x.created_at.as_str()),
+            true => {
+                let counted = group_since.get(x.id.as_str()).copied().unwrap_or(x.created_at.as_str());
+                x.planned_at.as_deref().map_or(counted, |p| counted.max(p))
+            }
             false => x.planned(),
         })
-        .fold(i.planned(), |a, b| a.max(b))
+        .min()
+        .map_or(i.planned(), |b| b.max(i.planned()))
 }
 /// 한 번에 이보다 많이 벌이면 알린다.
 const WIP_LIMIT: usize = 3;
@@ -2327,6 +2337,18 @@ mod tests {
         let mut mine = blocked("argos-0005");
         mine.planned_at = Some(today.into());
         assert!(!stale(&[make("argos-0005", Kind::Issue, "todo"), mine]));
+
+        // 미뤄 둔 에픽을 오늘 도로 집었다 — 멤버의 셈은 안 움직였어도 막음이 다시 섰다.
+        let mut undone = epic();
+        undone.planned_at = Some(today.into());
+        assert!(!stale(&[undone, finished(), member("argos-0003", "argos-0001", "todo"), blocked("argos-0001")]), "묶음 제 도로 집기를 안 본다");
+
+        // 오래 막아 온 줄이 남아 있으면, 다른 막는 줄이 오늘 움직여도 줄곧 막혀 있었다.
+        let mut two = blocked("argos-0005");
+        two.blocked_by.push("argos-0006".into());
+        let mut moved = make("argos-0006", Kind::Issue, "in_progress");
+        moved.status_since = today.into();
+        assert!(stale(&[make("argos-0005", Kind::Issue, "todo"), moved, two]), "오늘 움직인 막음 하나가 열흘 막힘을 가린다");
     }
 
     /// 막는 쪽이 사라지면 `ready` 는 조용히 넘어가지만 `status` 는 드러낸다.
