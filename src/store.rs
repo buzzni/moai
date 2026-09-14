@@ -251,9 +251,12 @@ impl Repo {
             // 사람이 정한 권한은 `write_atomic` 이 지킨다. 저널은 제자리에 덧붙이므로 원래 안 풀린다.
             write_atomic(&self.issues_path(), after.as_bytes())?;
         }
-        let mut tally = TALLY.lock().unwrap_or_else(|e| e.into_inner());
-        *tally = tally.after(wrote, opaque.len());
-        drop(tally);
+        let mut tallies = TALLY.lock().unwrap_or_else(|e| e.into_inner());
+        match tallies.iter_mut().find(|(root, _)| *root == self.root) {
+            Some((_, t)) => *t = t.after(wrote, opaque.len()),
+            None => tallies.push((self.root.clone(), Tally::default().after(wrote, opaque.len()))),
+        }
+        drop(tallies);
         if !entries.is_empty() {
             self.append_journal(&entries)?;
         }
@@ -334,10 +337,13 @@ impl Tally {
     }
 }
 
-static TALLY: std::sync::Mutex<Tally> = std::sync::Mutex::new(Tally { wrote: false, carried: 0, seen: 0 });
+/// **저장소마다 따로 센다.** 탐색기는 층에서 여러 프로젝트에 쓴다 — 하나로 접으면
+/// A 에서 들고 간 줄을 B 의 말로 내거나, A 가 상한 것을 B 의 깨끗한 쓰기가 덮어
+/// 입을 다문다. 처음 쓴 차례대로 둔다.
+static TALLY: std::sync::Mutex<Vec<(PathBuf, Tally)>> = std::sync::Mutex::new(Vec::new());
 
-pub fn unreadable_tally() -> Tally {
-    *TALLY.lock().unwrap_or_else(|e| e.into_inner())
+pub fn unreadable_tallies() -> Vec<(PathBuf, Tally)> {
+    TALLY.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// 파일이 그때 그것인지 가늠하는 표식. 고친 때만 보면 놓친다 — rename 으로
