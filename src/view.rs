@@ -1216,7 +1216,7 @@ pub fn projects_status(
         let shown = &b.picked[..b.picked.len().min(PICKED_SHOWN)];
         // 보인 것끼리 id 폭을 맞춘다 — 자식 id(`x-1a2b.3`)가 섞이면 줄마다 제 폭으로는 제목 칸이 어긋난다.
         let w_id = shown.iter().map(|i| width(&i.id)).max().unwrap_or(0);
-        let hue = style::project_colour(&p.path);
+        let hue = style::project_colour(&p.path, p.hue);
         for i in shown {
             out.push(format!(
                 "  {}{}{}  {}",
@@ -1276,7 +1276,7 @@ pub fn projects_ready(
         out.push(project_head(p, &format!("{}건", k.picks.len())));
         let shown = &k.picks[..k.picks.len().min(READY_SHOWN)];
         let w_id = shown.iter().map(|i| width(&i.id)).max().unwrap_or(0);
-        let hue = style::project_colour(&p.path);
+        let hue = style::project_colour(&p.path, p.hue);
         for i in shown {
             out.push(format!(
                 "  {}{}{}{}",
@@ -1314,7 +1314,7 @@ fn overview_head(what: &str, count: &str, reg: &crate::user_config::Registry) ->
 
 fn project_head(p: &crate::projects::Project, tail: &str) -> String {
     let at = sanitize(&p.path.display().to_string());
-    let head = style::project_colour(&p.path).effects(style::HEAD.get_effects());
+    let head = style::project_colour(&p.path, p.hue).effects(style::HEAD.get_effects());
     format!("{}  {}   {tail}", paint(head, &sanitize(&p.name)), paint(style::DIM, &at)).trim_end().to_string()
 }
 

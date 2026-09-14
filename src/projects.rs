@@ -26,6 +26,9 @@ pub struct Project {
     /// ([`crate::user_config::names`] — `moai project ls` 와 같은 자다). 등록 목록이 바뀌면
     /// 달라질 수 있어 **정체로 쓰지 않는다** — 정체는 `path` 다.
     pub name: String,
+    /// 사용자 설정에 정한 색 — 없으면 경로로 고른다. 칠하는 쪽은 늘
+    /// `style::project_colour(&path, hue)` 로 부른다.
+    pub hue: Option<crate::style::Hue>,
     pub state: State,
 }
 
@@ -54,7 +57,7 @@ pub fn open(reg: &Registry) -> Vec<Project> {
                 Ok(Opened::Missing) => State::Missing,
                 Err(e) => State::Unreadable(e.message),
             };
-            Project { path: p.path.clone(), name, state }
+            Project { path: p.path.clone(), name, hue: p.hue, state }
         })
         .collect()
 }

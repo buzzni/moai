@@ -455,6 +455,147 @@ fn outside_a_repo_each_registered_project_stands_apart_even_with_the_same_ids() 
     assert!(!block(&rd, "two/api").contains(&id), "집은 일이 ready 에 섰다 — {rd}");
 }
 
+/// 글에서 SGR 을 걷는다 — 색을 얹은 화면과 끈 화면이 글자로 같은지 견줄 때.
+fn strip_sgr(t: &str) -> String {
+    let mut o = String::new();
+    let mut rest = t;
+    while let Some(at) = rest.find("\u{1b}[") {
+        o.push_str(&rest[..at]);
+        let tail = &rest[at..];
+        rest = &tail[tail.find('m').unwrap() + 1..];
+    }
+    o.push_str(rest);
+    o
+}
+
+/// 낱말 바로 앞에 이어 붙은 SGR 덩어리 — 칠하지 않았으면 빈 글자다.
+fn sgr_before(line: &str, word: &str) -> String {
+    let at = line.find(&format!("{word}\u{1b}[0m")).unwrap_or_else(|| panic!("{word} 가 칠해지지 않았다 — {line:?}"));
+    let mut head = &line[..at];
+    let mut sgr = String::new();
+    while let Some(esc) = head.rfind('\u{1b}') {
+        let seq = &head[esc..];
+        let body = seq.strip_prefix("\u{1b}[").and_then(|b| b.strip_suffix('m'));
+        if !body.is_some_and(|b| b.chars().all(|c| c.is_ascii_digit() || c == ';')) {
+            break;
+        }
+        sgr.insert_str(0, seq);
+        head = &head[..esc];
+    }
+    sgr
+}
+
+/// **사용자 설정에 정한 색이 경로 해시를 이긴다** (moai-o04b) — 한눈 보기의 이름·id·머리와
+/// `project ls` 의 이름이 다 따라온다. 틀린 값은 한 줄로 비추고 해시 색으로 서며 0 으로 끝나고,
+/// 명령은 틀린 값을 거절해 파일을 안 건드린다. `auto` 로 되돌리면 설정 바이트와 색이 처음으로
+/// 돌아온다. 색을 끈 화면은 어느 때나 한 바이트도 안 바뀐다 — 칠하는 것만 바뀐다.
+#[test]
+fn a_colour_chosen_in_the_user_config_beats_the_hash_and_only_colour_changes() {
+    let s = Scratch::new("ovchosen");
+    let out = dir_in(&s, "out");
+    let one = dir_in(&s, "one");
+    ok(&one, &["init", "argos"]);
+    let picked = add(&one, &["집은 일"]);
+    ok(&one, &["mv", &picked, "in_progress"]);
+    let todo = add(&one, &["집을 일"]);
+    let cfg = registry(&s, &[&one]);
+    let original = std::fs::read_to_string(&cfg).unwrap();
+    let one_arg = one.to_str().unwrap();
+
+    let run = |args: &[&str], colour: bool| {
+        let mut cmd = isolated(BIN);
+        cmd.args(args).current_dir(&out).env("MOAI_CONFIG", &cfg).env("MOAI_NOW", NOW);
+        if colour {
+            cmd.arg("--color").arg("always").env_remove("NO_COLOR");
+        } else {
+            cmd.env("NO_COLOR", "1");
+        }
+        cmd.output().unwrap()
+    };
+    let stdout = |args: &[&str], colour: bool| {
+        let o = run(args, colour);
+        assert!(o.status.success(), "{args:?} → {}", text(&o));
+        String::from_utf8(o.stdout).unwrap()
+    };
+    // 한 화면에서 프로젝트 `one` 이 입은 색 — 이름 칸·id 칸·머리가 한 색인지도 여기서 본다.
+    let worn = |cmd: &str, id: &str| -> String {
+        let t = stdout(&[cmd], true);
+        let row = t.lines().find(|l| l.starts_with("  ") && l.contains("one\u{1b}[0m") && l.contains(id)).unwrap_or_else(|| panic!("{t}"));
+        let name = sgr_before(row, "one");
+        assert_eq!(name, sgr_before(row, id), "이름 칸과 id 칸 색이 다르다 — {row:?}");
+        let head = t.lines().find(|l| !l.starts_with(' ') && l.contains("one\u{1b}[0m  ")).unwrap();
+        assert!(sgr_before(head, "one").contains(&name), "머리가 줄과 다른 색이다 — {head:?}");
+        assert_eq!(strip_sgr(&t), stdout(&[cmd], false), "색을 얹으며 글자가 바뀌었다");
+        name
+    };
+    let listed = || {
+        let t = stdout(&["project", "ls"], true);
+        sgr_before(t.lines().find(|l| l.starts_with('\u{1b}') && l.contains("one\u{1b}[0m")).unwrap(), "one")
+    };
+    let plain_ready = stdout(&["ready"], false);
+    let plain_status = stdout(&["status"], false);
+    let plain_ls = stdout(&["project", "ls"], false);
+    let unchanged = |why: &str| {
+        assert_eq!(stdout(&["ready"], false), plain_ready, "{why}: 색을 끈 ready 가 바뀌었다");
+        assert_eq!(stdout(&["status"], false), plain_status, "{why}: 색을 끈 status 가 바뀌었다");
+        assert_eq!(stdout(&["project", "ls"], false), plain_ls, "{why}: 색을 끈 project ls 가 바뀌었다");
+    };
+
+    let hashed = worn("ready", &todo);
+    assert_eq!(worn("status", &picked), hashed);
+    assert_eq!(listed(), hashed, "project ls 의 이름이 한눈 보기와 다른 색이다");
+    // 해시가 고른 것과 **다른** 색을 고른다 — 같은 색을 고르면 이겼는지 못 가린다.
+    let (target, code) = [("cyan", "[36m"), ("green", "[32m"), ("blue", "[34m")]
+        .into_iter()
+        .find(|(_, c)| !hashed.contains(c))
+        .unwrap();
+
+    let set = stdout(&["project", "color", one_arg, target, "--json"], false);
+    assert!(set.contains(&format!("\"color\":\"{target}\"")) && set.contains("\"was\":null") && set.contains("\"changed\":true"), "{set}");
+    assert!(std::fs::read_to_string(&cfg).unwrap().contains(&format!("color = \"{target}\"")));
+    for (cmd, id) in [("ready", &todo), ("status", &picked)] {
+        let now = worn(cmd, id);
+        assert!(now.contains(code) && now != hashed, "{cmd}: 정한 색({target})이 해시를 못 이겼다 — {now:?}");
+    }
+    assert!(listed().contains(code), "project ls 가 정한 색을 안 입었다");
+    let json = stdout(&["project", "ls", "--json"], false);
+    assert!(json.contains(&format!("\"color\":\"{target}\"")), "{json}");
+    unchanged("색을 정한 뒤");
+
+    // 명령은 팔레트 밖 색을 거절하고, 받는 이름을 대며, 파일을 안 건드린다.
+    let before = std::fs::read_to_string(&cfg).unwrap();
+    for bad in ["red", "magenta", "Green"] {
+        let o = run(&["project", "color", one_arg, bad, "--json"], false);
+        assert!(!o.status.success(), "{bad} 를 받았다");
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(err.contains("\"code\":\"bad_input\"") && err.contains("cyan·green·blue") && err.contains("auto"), "{bad} → {err}");
+        assert_eq!(std::fs::read_to_string(&cfg).unwrap(), before, "{bad} 로 설정을 고쳤다");
+    }
+    // 등록 안 된 디렉터리에는 색을 못 정한다 — 저절로 등록하지도 않는다.
+    let o = run(&["project", "color", out.to_str().unwrap(), target, "--json"], false);
+    assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("\"code\":\"not_found\""), "{}", text(&o));
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), before);
+
+    // `auto` 는 정한 것을 지운다 — 설정 바이트도 색도 처음으로 돌아온다.
+    let back = stdout(&["project", "color", one_arg, "auto", "--json"], false);
+    assert!(back.contains("\"color\":null") && back.contains(&format!("\"was\":\"{target}\"")), "{back}");
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), original, "auto 로 되돌렸는데 설정 바이트가 다르다");
+    assert_eq!(worn("ready", &todo), hashed, "auto 로 되돌렸는데 해시 색이 아니다");
+    assert_eq!(listed(), hashed);
+    let again = stdout(&["project", "color", one_arg, "auto", "--json"], false);
+    assert!(again.contains("\"changed\":false"), "{again}");
+
+    // 손으로 적은 틀린 값은 한 줄로 비추고 해시 색으로 서며 0 으로 끝난다.
+    std::fs::write(&cfg, format!("{original}color = \"red\"\n")).unwrap();
+    let o = run(&["ready"], false);
+    assert!(o.status.success(), "{}", text(&o));
+    let said = String::from_utf8(o.stdout).unwrap();
+    assert!(said.contains("\"red\" 는 프로젝트 색이 아니다") && said.contains("경로로 고른 색을 쓴다"), "{said}");
+    assert_eq!(worn("ready", &todo), hashed, "틀린 값이 해시 색을 흔들었다");
+    let ls = run(&["project", "ls"], false);
+    assert!(ls.status.success() && String::from_utf8_lossy(&ls.stderr).contains("\"red\""), "{}", text(&ls));
+}
+
 /// **프로젝트마다 색이 다르고, 한 프로젝트의 줄은 한 색이다** (moai-xs9x). 색은 경로로
 /// 고른다 — 다른 프로젝트를 더하고 빼도 제 색이 그대로다. 색을 끄면 글자는 칠하기 전과
 /// 바이트까지 같다: 이름이 곁에 서서 **색이 혼자 뜻을 지지 않는다.**
@@ -490,33 +631,7 @@ fn outside_a_repo_each_project_wears_its_own_colour_and_only_colour_changes() {
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8(o.stdout).unwrap()
     };
-    let strip = |t: &str| {
-        let mut o = String::new();
-        let mut rest = t;
-        while let Some(at) = rest.find("\u{1b}[") {
-            o.push_str(&rest[..at]);
-            let tail = &rest[at..];
-            rest = &tail[tail.find('m').unwrap() + 1..];
-        }
-        o.push_str(rest);
-        o
-    };
-    // 낱말 바로 앞에 이어 붙은 SGR 덩어리 — 칠하지 않았으면 빈 글자다.
-    let sgr_before = |line: &str, word: &str| -> String {
-        let at = line.find(&format!("{word}\u{1b}[0m")).unwrap_or_else(|| panic!("{word} 가 칠해지지 않았다 — {line:?}"));
-        let mut head = &line[..at];
-        let mut sgr = String::new();
-        while let Some(esc) = head.rfind('\u{1b}') {
-            let seq = &head[esc..];
-            let body = seq.strip_prefix("\u{1b}[").and_then(|b| b.strip_suffix('m'));
-            if !body.is_some_and(|b| b.chars().all(|c| c.is_ascii_digit() || c == ';')) {
-                break;
-            }
-            sgr.insert_str(0, seq);
-            head = &head[..esc];
-        }
-        sgr
-    };
+    let strip = strip_sgr;
 
     let cfg = registry(&s, &all);
     for (cmd, id) in [("ready", &todo), ("status", &picked)] {
@@ -1579,8 +1694,12 @@ fn every_command_still_speaks_json() {
     }
     // 쓰는 `project` 동사는 제 설정 파일로 — 공용 집을 비워 둔다.
     let config = s.path().join("user-config.toml");
-    for args in [["project", "add", ".", "--json"], ["project", "rm", ".", "--json"]] {
-        one_json_value(&project_ok(s.path(), &config, &args));
+    for args in [
+        &["project", "add", ".", "--json"][..],
+        &["project", "color", ".", "green", "--json"],
+        &["project", "rm", ".", "--json"],
+    ] {
+        one_json_value(&project_ok(s.path(), &config, args));
     }
     // 한 번에 만들기도 배열 하나를 낸다
     let bulk = from_stdin(s.path(), &["add", "--from", "-", "--json"], "# 가\n- 나\n");

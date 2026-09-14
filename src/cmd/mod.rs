@@ -153,6 +153,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Project(ProjectCmd::Add { path }) => project::add(&ctx, &path),
         Cmd::Project(ProjectCmd::Ls) => project::ls(&ctx),
         Cmd::Project(ProjectCmd::Rm { path }) => project::rm(&ctx, &path),
+        Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(&ctx, &path, &hue),
         Cmd::Add(a) => add::run(&ctx, a, None),
         Cmd::Show(a) => show::run(&ctx, a, None),
         Cmd::Mv(a) => mv::run(&ctx, a),
