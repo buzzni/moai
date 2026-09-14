@@ -177,16 +177,21 @@ impl Pane {
 /// 묶음 id → 멤버에서 읽은 것(`report::group_stands`). 이슈를 빌리지 않게 소유한다.
 type States = std::collections::BTreeMap<String, Stood>;
 
-/// 묶음 하나를 읽은 것 — 서 있는 칸과, 그 밑에 집은 일이 있는가(`report::Stand::busy`).
+/// 묶음 하나를 읽은 것 — 서 있는 칸과, 그 밑에 집은 일이 있는가(`report::Stand::busy`),
+/// 미뤄 뺀 멤버 덕에 `done` 으로 섰으면 그 멤버(`report::Stand::aside`).
 struct Stood {
     column: String,
     busy: bool,
+    aside: Vec<String>,
 }
 
 fn states_of(issues: &[Issue], cfg: &Config) -> States {
     crate::report::group_stands(issues, cfg)
         .into_iter()
-        .map(|(id, s)| (id.to_string(), Stood { column: s.column.to_string(), busy: s.busy }))
+        .map(|(id, s)| {
+            let aside = s.aside.iter().map(|m| m.to_string()).collect();
+            (id.to_string(), Stood { column: s.column.to_string(), busy: s.busy, aside })
+        })
         .collect()
 }
 
@@ -784,6 +789,16 @@ impl App {
             .then(|| self.states.get(&i.id).map(|s| s.column.as_str()))
             .flatten()
             .unwrap_or(i.status.as_str())
+    }
+
+    /// 그 줄이 미뤄 뺀 멤버 덕에 `done` 으로 선 묶음이면 그 멤버(`report::Stand::aside`).
+    /// 막음을 가를 때 [`App::column`] 과 함께 `report::blocker` 에 댄다.
+    pub fn aside(&self, at: usize) -> &[String] {
+        let i = &self.issues[at];
+        crate::report::is_group(i)
+            .then(|| self.states.get(&i.id))
+            .flatten()
+            .map_or(&[], |s| s.aside.as_slice())
     }
 
     /// 새 자료를 받아들이고 어긋난 것을 손본다. **시험이 저장소 없이 부른다** — 진짜
