@@ -614,6 +614,8 @@ fn says(w: &Warning) -> String {
         "dangling_milestone" => format!("마일스톤으로 쓸 수 없는 것을 가리키는 줄 {n}건"),
         "orphan_child" => format!("부모 줄이 없는 자식 {n}건"),
         "dangling_blocked_by" => format!("없는 이슈에게 막혀 있다는 것 {n}건"),
+        // 도구는 제 시계로만 적으므로 이런 시각은 손으로 고친 줄이나 틀린 시계다(moai-ugjp).
+        "future_timestamp" => format!("지금보다 하루 넘게 뒤인 시각을 든 줄 {n}건 — 손으로 고친 시각이나 틀린 시계"),
         // **알림이지 경고가 아니다.** 고칠 것이 있다는 말이 아니라, 담아 둔
         // 것을 한 번 펼쳐 볼 때가 됐다는 말이다.
         // **오늘 것에 "0일" 을 붙이지 않는다.** 나이를 말하는 까닭은 오래된
@@ -791,7 +793,7 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, origin: &Orig
     const SHOW: usize = 3;
     let mut out = Vec::new();
     // 벌여 놓은 것과 깨진 것은 id 만 한 줄에 늘어놓는다 — 제목이 정보를 안 준다.
-    if matches!(w.kind, "wip_overload" | "duplicate_id" | "orphan_child" | "dangling_blocked_by") {
+    if matches!(w.kind, "wip_overload" | "duplicate_id" | "orphan_child" | "dangling_blocked_by" | "future_timestamp") {
         if !w.ids.is_empty() {
             out.push(format!("    {}", paint(style::DIM, &w.ids.join("   "))));
         }

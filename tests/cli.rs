@@ -1246,6 +1246,26 @@ fn show_draws_each_blocker_with_the_words_ready_uses() {
     assert!(!ok(s.path(), &["show", &a, "--json"]).contains("\"blockers\""), "막음이 없는데 blockers 키가 섰다");
 }
 
+/// **`edit` 뒤의 상세도 막음을 그린다**(moai-xe74) — `show <id>` 와 글자까지 같은 줄이다.
+/// 막는 줄이 끝나면 풀림으로 바뀐 것도 쓴 그 자리에서 보인다.
+#[test]
+fn edit_detail_draws_the_same_blocker_lines_as_show() {
+    let s = init("editblocks");
+    let a = add(s.path(), &["먼저 할 것"]);
+    let b = add(s.path(), &["막히는 것"]);
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+    let line = |out: &str| out.lines().find(|l| l.contains(a.as_str()) && !l.starts_with(b.as_str())).unwrap_or_default().to_string();
+
+    let edited = ok(s.path(), &["edit", &b, "-p", "1"]);
+    assert!(line(&edited).contains("막힘") && line(&edited).contains("먼저 할 것"), "edit 상세에 막음 줄이 없다\n{edited}");
+    assert_eq!(line(&edited), line(&ok(s.path(), &["show", &b])), "edit 과 show 가 같은 막음을 다르게 그린다");
+
+    ok(s.path(), &["mv", &a, "done"]);
+    let edited = ok(s.path(), &["edit", &b, "-p", "2"]);
+    assert!(line(&edited).contains("풀림"), "끝난 막음이 풀림으로 안 섰다\n{edited}");
+    assert_eq!(line(&edited), line(&ok(s.path(), &["show", &b])));
+}
+
 /// 메모는 스냅샷을 건드리지 않고 저널에만 쌓인다.
 #[test]
 fn note_only_touches_the_journal() {
