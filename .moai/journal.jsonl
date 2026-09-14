@@ -2498,3 +2498,4 @@
 {"ts":"2026-09-14T17:28:22Z","id":"moai-pjic","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (ee2f0ff) — src/git.rs commits_of: 커밋 제목의 id 로 커밋을 찾는다. 리뷰 moai-pjic.jd3 반영(a072e34), 넘긴 것은 moai-h2zx"}
 {"ts":"2026-09-14T17:28:35Z","id":"moai-emcv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T17:31:22Z","id":"moai-fmv5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 머지(dbc2346), 합친 main 에서 시험 742·267 통과"}
+{"ts":"2026-09-14T17:31:25Z","id":"moai-55cp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
