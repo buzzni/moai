@@ -57,6 +57,9 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
                 continue;
             }
             i.deferred_at = (!back).then(|| at.clone());
+            // 도로 집으면 `deferred_at` 이 지워져 시각이 안 남는다 — 겹쳐 볼 때 견줄 시각은 여기
+            // 둔다(`Issue::planned_at`).
+            i.planned_at = Some(at.clone());
             i.updated_at = at.clone();
             // **필드 변경은 저널에 안 적는다** (CLAUDE.md). 저널을 접어야
             // 답이 나오는 물음이 생기면 그 답은 스냅샷의 필드가 되어야 하고,
