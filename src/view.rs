@@ -330,6 +330,12 @@ fn is_loose(e: &crate::nav::Entry) -> bool {
     matches!(e, Entry::Leaf { .. } | Entry::Dir { seg: Seg::Issue(_), .. })
 }
 
+/// 머리글로 그려지는가 — 빈 줄로 갈라 서고 그 밑을 거느린다 ([`place`]).
+fn is_head(e: &crate::nav::Entry) -> bool {
+    use crate::nav::{Entry, Seg};
+    matches!(e, Entry::Dir { seg: Seg::Milestone(_) | Seg::Epic(_), at: Some(_) } | Entry::Dir { at: None, .. })
+}
+
 fn is_lost(e: &crate::nav::Entry) -> bool {
     use crate::nav::{Entry, Seg};
     matches!(e, Entry::Dir { seg: Seg::Lost, .. })
@@ -386,7 +392,15 @@ fn walk(
 ) {
     let entries = cx.index.entries_where(cx.all, path, cx.keep);
     if !groups_here(path) {
-        for e in &entries {
+        // **머리글 없는 줄을 먼저, 머리글을 뒤에.** 에픽 안에는 머리글이 설 것이 없어
+        // 차례 그대로지만, `(길 잃음)` 안에는 마일스톤이 끊긴 에픽이 머리글로 서고
+        // 에픽이 끊긴 잎이 곁에 선다. 받은 차례대로 놓으면 그 잎이 에픽 머리글 바로
+        // 밑에 들여쓰여 멤버로 읽혔다(moai-44k8). 앞에 두면 바구니 머리글 밑에 서고,
+        // 에픽 머리글은 빈 줄로 갈라 제 멤버만 거느린다 — 아래 소속 없는 줄을
+        // 머리글로 가르는 것과 같은 까닭이다.
+        let (heads, rows): (Vec<&crate::nav::Entry>, Vec<&crate::nav::Entry>) =
+            entries.iter().partition(|e| is_head(e));
+        for e in rows.into_iter().chain(heads) {
             place(out, drawn, cx, path, e, depth);
         }
         return;
@@ -1689,6 +1703,35 @@ mod tests {
         // 들어가면, 앞선 에픽의 멤버보다 한 칸 깊어 남의 손자로 읽힌다.
         let pad = |l: &str| l.len() - l.trim_start().len();
         assert_eq!(pad(&out[at_loose]), pad(&out[at_epic]), "들여쓰기가 어긋났다\n{joined}");
+    }
+
+    /// **`(길 잃음)` 안에서도 남의 머리글 밑에 붙지 않는다** (moai-44k8). 마일스톤이
+    /// 끊긴 에픽은 바구니 안에서 머리글(0/0)을 달고, 에픽이 끊긴 이슈는 같은 바구니의
+    /// 잎이다. 받은 차례대로 놓으면 잎이 그 에픽 머리글 바로 밑에 한 칸 들여쓰여 멤버로
+    /// 읽혔다 — 뿌리·마일스톤에서 소속 없는 줄을 머리글로 가른 것과 같은 자리다. 그
+    /// 에픽의 진짜 멤버는 여전히 그 밑에 선다.
+    #[test]
+    fn a_lost_leaf_is_not_drawn_under_a_lost_epic() {
+        let mut milestone = issue("argos-m001", "v0.1", "todo");
+        milestone.kind = Kind::Milestone;
+        let mut epic = issue("argos-e001", "잃은 에픽", "todo");
+        epic.kind = Kind::Epic;
+        epic.milestone = Some("argos-zzzz".into());
+        let mut stray = issue("argos-0001", "끊긴 이슈", "todo");
+        stray.epic = Some("argos-zzzz".into());
+        let mut member = issue("argos-0002", "잃은 에픽의 멤버", "todo");
+        member.epic = Some("argos-e001".into());
+
+        let all = vec![milestone, epic, stray, member];
+        let rolls = crate::report::rollup(&all, &cfg());
+        let index = crate::nav::Index::of(&all);
+        let out = plain(&tree(&all, &index, &|_| true, &rolls, &Origin::default()).0);
+        let joined = out.join("\n");
+        let at = |needle: &str| out.iter().position(|l| l.contains(needle)).unwrap_or_else(|| panic!("{needle}\n{joined}"));
+
+        let (bucket, head, stray, member) = (at("(길 잃음)"), at("argos-e001"), at("끊긴 이슈"), at("멤버"));
+        assert!(bucket < stray && stray < head, "끊긴 이슈가 잃은 에픽 머리글 밑에 섰다\n{joined}");
+        assert!(head < member, "잃은 에픽의 멤버가 제 머리글 밑을 떠났다\n{joined}");
     }
 
     /// **같은 id 의 에픽 줄 둘이어도 멤버는 한 번, 두 줄은 다 보인다.** 폴더는
