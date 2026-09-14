@@ -215,6 +215,37 @@ impl Chord {
     }
 }
 
+/// 접두어를 누르고 기다리는 동안 **이어 누를 수 있는 키** — `(다음 키 이름, 동작)`, 표의 차례대로.
+/// 이름 붙은 줄만 댄다(숨은 별칭은 바에도 안 적는다). 키 바의 `g → g 맨 위` 가 이것을 읽는다 —
+/// 기다리는 `g` 가 화면에 안 보이면 다음 키가 왜 안 먹는지 모른다(moai-k3yi).
+pub fn next_keys<A: Copy + PartialEq>(table: &[Bind<A>], held: &[KeyEvent]) -> Vec<(String, A)> {
+    let mut out: Vec<(String, A)> = Vec::new();
+    for b in table.iter().filter(|b| {
+        b.label.is_some() && b.seq.len() == held.len() + 1 && b.seq.iter().zip(held).all(|(key, k)| key.matches(*k))
+    }) {
+        let name = b.seq[held.len()].name();
+        if !out.iter().any(|(n, _)| *n == name) {
+            out.push((name, b.act));
+        }
+    }
+    out
+}
+
+/// 이동 하나의 낱말. 바는 이동을 `j·k 이동` 으로 묶어 대지만, 기다리는 `g` 뒤에 무엇이 오는지는
+/// 한 이동씩 대야 한다(`g 맨 위`).
+pub fn move_word(m: Move) -> &'static str {
+    match m {
+        Move::LineUp => "위",
+        Move::LineDown => "아래",
+        Move::HalfUp => "반 쪽 위",
+        Move::HalfDown => "반 쪽 아래",
+        Move::PageUp => "한 쪽 위",
+        Move::PageDown => "한 쪽 아래",
+        Move::Top => "맨 위",
+        Move::Bottom => "맨 아래",
+    }
+}
+
 /// 동작에 붙은 키 이름. 여럿이면 `·` 로 잇는다(`j·k`).
 pub fn label<A: Copy + PartialEq>(table: &[Bind<A>], act: A) -> String {
     labels(table, &[act])
@@ -341,6 +372,12 @@ pub struct Ctx {
     pub layer: bool,
     /// 포커스가 목록에 있나.
     pub list_focus: bool,
+    /// 커서가 선 줄이 **들어갈 데가 없다** — 잎(일 한 줄)이거나 줄이 없다. `..`·디렉터리·층의
+    /// 프로젝트는 들어간다(`..` 은 나간다).
+    pub leaf: bool,
+    /// **나갈 데가 없다** — 프로젝트 뿌리인데 층이 없거나, 층에 섰다. 층이 있는 프로젝트 뿌리는
+    /// 뿌리가 아니다: Bksp 가 층으로 올라간다(`App::leave` → `climb`).
+    pub root: bool,
     pub worktree: bool,
     pub raw: bool,
     /// `Tab`·Shift-Tab 이 가는 칸의 이름.
@@ -373,6 +410,11 @@ impl Browse {
         use Browse::*;
         match self {
             Enter | Leave if !c.list_focus => Err(Off::Quiet),
+            // 커서에서 되는 키만(moai-k3yi): 잎의 Enter·뿌리의 Bksp 는 아무 일도 없다. 까닭을 대지
+            // 않는다 — 들어갈 데 없는 줄에서 Enter 가 조용한 것은 파일 관리자와 같고, 바가 그 키를
+            // 안 적으므로 "적힌 키가 안 듣는다" 가 안 생긴다.
+            Enter if c.leaf => Err(Off::Quiet),
+            Leave if c.root => Err(Off::Quiet),
             Unregister if !(c.layer && c.list_focus) => Err(Off::Quiet),
             Grep | Filter if c.layer => {
                 Err(Off::Why(format!("거름망은 프로젝트 안의 줄에 건다 — {} 로 들어가서 건다", label(BROWSE, Enter))))
@@ -1077,5 +1119,34 @@ mod tests {
         let inside = Ctx { list_focus: true, ..Ctx::default() };
         assert_eq!(Browse::Unregister.enabled(&inside), Err(Off::Quiet), "프로젝트 안에서 해제가 켜졌다");
         assert_eq!(Browse::Worktree.enabled(&inside), Ok(()));
+    }
+
+    /// **드나드는 키는 커서가 선 줄을 탄다**(moai-k3yi). 잎의 Enter 와 뿌리의 Bksp 는 조용히
+    /// 꺼진다 — 바와 키 처리가 이 한 판정을 읽는다. 둘은 서로를 끄지 않는다.
+    #[test]
+    fn enter_and_leave_follow_the_cursor_row() {
+        let base = Ctx { list_focus: true, ..Ctx::default() };
+        assert_eq!(Browse::Enter.enabled(&base), Ok(()));
+        assert_eq!(Browse::Leave.enabled(&base), Ok(()));
+        let leaf = Ctx { leaf: true, ..base };
+        assert_eq!(Browse::Enter.enabled(&leaf), Err(Off::Quiet), "잎에서 Enter 가 켜졌다");
+        assert_eq!(Browse::Leave.enabled(&leaf), Ok(()), "잎이 나가기를 껐다");
+        let root = Ctx { root: true, ..base };
+        assert_eq!(Browse::Leave.enabled(&root), Err(Off::Quiet), "뿌리에서 Bksp 가 켜졌다");
+        assert_eq!(Browse::Enter.enabled(&root), Ok(()), "뿌리가 들어가기를 껐다");
+        // 커서의 사실은 드나드는 키만 끈다 — 다른 동작은 그대로다.
+        let both = Ctx { leaf: true, root: true, ..base };
+        for act in [Browse::Grep, Browse::Filter, Browse::Jot, Browse::Reload, Browse::Quit, Browse::Step(Move::Top)] {
+            assert_eq!(act.enabled(&both), Ok(()), "{act:?}");
+        }
+    }
+
+    /// **기다리는 `g` 뒤에 이어 누를 키는 표에서 읽는다** — 이름 붙은 줄만, 숨은 별칭 없이.
+    #[test]
+    fn next_keys_after_g_come_from_the_table() {
+        let g = [KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)];
+        assert_eq!(next_keys(BROWSE, &g), vec![("g".to_string(), Browse::Step(Move::Top))]);
+        assert_eq!(next_keys(PICK, &g), vec![("g".to_string(), Pick::Step(Move::Top)), ("p".to_string(), Pick::Path)]);
+        assert!(next_keys(BROWSE, &[]).iter().all(|(n, _)| n != "Right" && n != "l"), "숨은 별칭을 댄다");
     }
 }
