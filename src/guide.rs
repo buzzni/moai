@@ -461,9 +461,11 @@ Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽�
         try:
             s = json.load(open(f))
             os.kill(s["pid"], 0)
-        except (OSError, ValueError, KeyError):
+            cwd = os.path.realpath(s["cwd"]) if s.get("cwd") else None
+        except (OSError, ValueError, KeyError, TypeError):
             continue
-        cwd = os.path.realpath(s.get("cwd", ""))
+        if cwd is None:
+            continue
         if cwd == root:
             print("루트    ", s.get("status"), s.get("name"))
         elif cwd.startswith(trees):
@@ -494,10 +496,14 @@ Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽�
        사람이 일꾼 창을 보고 있다
     5. 리뷰 이슈를 세워(규칙 3) `/code-review high --fix`. 반영은 별도 fix: 커밋,
        넘긴 것은 이슈 번호와 함께 노트
-    6. main 을 받아 충돌을 풀고, 옆 세션과 병합이 겹치면 먼저 알린 뒤 main 에서
-       `git merge worktree-<에픽>`. 시험 통과를 보고 멤버·리뷰 이슈를 done 으로 커밋
-    7. 워크트리와 가지를 지운다
-    8. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 한두 줄 요약, 넘긴 것·새 idea
+    6. 워크트리에서 main 을 받아 충돌을 푼다
+    7. ExitWorktree(keep) 로 루트로 돌아온다 — 워크트리 안에서 그것을 지우면 세션의
+       자리가 사라진 디렉터리에 남아 감독이 다시는 이 세션을 루트로 못 본다.
+       옆 세션과 병합이 겹치면 먼저 알린 뒤 루트에서 `git merge worktree-<에픽>`.
+       시험 통과를 보고 멤버·리뷰 이슈를 done 으로 커밋
+    8. 루트에서 `git worktree remove .claude/worktrees/<에픽>` 과
+       `git branch -d worktree-<에픽>` 으로 워크트리와 가지를 지운다
+    9. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 한두 줄 요약, 넘긴 것·새 idea
 
 **4. 기다린다.** 일하는 세션에는 메시지 없이 `notify_when_idle: true` 로
 걸어 둔다. **`ListAgents` 를 되풀이해 훑지 않는다** — 알림이 온다.
