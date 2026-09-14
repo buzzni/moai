@@ -686,8 +686,19 @@ impl App {
     /// 아예 안 돌리면 멤버를 집은 에픽이 `▸` 로 멈춰 서서, 목록 뿌리에서 무엇이 움직이는지
     /// 안 보인다(moai-x5eg). `--worktree` 로 겹친 줄도 겹친 칸으로 센다 — 옆에서 집은
     /// 멤버가 이 탐색기의 에픽을 돌린다.
+    ///
+    /// **계획에서 뺀 줄은 안 돈다**(moai-tawj) — 제가 미뤘든 부모·에픽·마일스톤에서
+    /// 물려받았든(`nav::Index::deferred_root`). 묶음이 미룬 멤버로 안 도는 것과 같은
+    /// 자다: 미룬 일은 칸이 `in_progress` 여도 지금 누가 손대는 줄이 아니다. 묶음 제
+    /// 줄에도 건다 — 칸 셈은 묶음 제 미룸으로 멤버를 안 빼(`report::counted`) 미룬
+    /// 에픽이 `busy` 로 남는데, 그 멤버는 물려받은 미룸으로 멈추니 에픽만 혼자 돈다.
+    /// 그래서 이 자로는 **줄이 돌면 그 위 묶음도 돌고, 묶음이 돌면 그 밑에 도는 줄이
+    /// 있다.**
     pub fn spins(&self, at: usize) -> bool {
         let i = &self.issues[at];
+        if self.index.deferred_root(&i.id).is_some() {
+            return false;
+        }
         let busy = !crate::report::is_group(i) || self.states.get(&i.id).is_some_and(|s| s.busy);
         busy && crate::style::spins(self.column(at))
     }
@@ -1475,18 +1486,36 @@ mod tests {
         assert!(a.spinning());
 
         // **미룬 멤버는 묶음을 안 돌린다.** 칸 셈이 그 멤버를 빼므로(`report::counted`)
-        // 곁들이도 뺀다 — 에픽은 끝난 멤버만 남아 `done` 으로 읽힌다. 미룬 일 제 줄은
-        // 제 칸대로 돈다: 줄 하나의 글리프는 제 칸을 말한다.
+        // 곁들이도 뺀다 — 에픽은 끝난 멤버만 남아 `done` 으로 읽힌다. **미룬 일 제 줄도
+        // 안 돈다**(moai-tawj) — 계획에서 뺀 일이 "지금 손대는 중" 으로 보이면 안 되고,
+        // 돌면 탐색기를 스피너 걸음으로 깨운다. 글리프는 칸을 여전히 말한다(`▸` 가 아닌
+        // 멈춘 `in_progress` 글리프).
         issues[3].deferred_at = Some("2026-09-02T00:00:00Z".into());
         a.adopt(issues.clone());
         assert_eq!(a.column(1), "done");
-        assert_eq!(spun(&a), ["argos-0003"], "미룬 멤버가 묶음을 돌린다");
+        assert_eq!(a.column(3), "in_progress");
+        assert!(spun(&a).is_empty(), "미룬 일이 돈다 — {:?}", spun(&a));
+        assert!(!a.spinning(), "미룬 일 하나가 탐색기를 빠른 걸음으로 깨운다");
 
-        // **묶음 제가 받은 미룸으로는 멤버를 안 뺀다** — 에픽을 미뤄도 집은 멤버는 센다.
+        // **묶음을 미루면 그 밑이 다 멈춘다.** 칸 셈은 묶음 제 미룸으로 멤버를 안 빼
+        // 에픽은 여전히 `in_progress` 로 읽히지만, 에픽도 멤버도 계획에서 빠졌다 — 멤버는
+        // 물려받은 미룸으로 안 돌고, 묶음이 혼자 돌면 도는 멤버 하나 없이 도는 줄이 선다.
         issues[3].deferred_at = None;
         issues[1].deferred_at = Some("2026-09-02T00:00:00Z".into());
+        a.adopt(issues.clone());
+        assert_eq!(a.column(1), "in_progress", "제 미룸으로 집은 멤버를 뺐다");
+        assert!(spun(&a).is_empty(), "미룬 에픽 밑이 돈다 — {:?}", spun(&a));
+
+        // **부모를 미뤄도 같다** — 물려받은 미룸으로 빠진 자식은 안 돌고, 에픽도 그 자식으로
+        // 안 바쁘다. 줄이 돌면 그 위의 묶음도 돌고, 묶음이 돌면 그 밑에 도는 줄이 있다.
+        issues[1].deferred_at = None;
+        issues[3].status = Status::new("todo");
+        issues[3].deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let mut child = member("argos-0003.a1b", "argos-0001");
+        child.status = Status::new("in_progress");
+        issues.push(child);
         a.adopt(issues);
-        assert!(spun(&a).contains(&"argos-0001"), "제 미룸으로 집은 멤버를 뺐다 — {:?}", spun(&a));
+        assert!(spun(&a).is_empty(), "미룬 부모 밑의 자식이 돈다 — {:?}", spun(&a));
 
         // 깨우는 쪽은 줄마다의 답을 모은 것이다.
         assert_eq!(a.spinning(), !spun(&a).is_empty());
