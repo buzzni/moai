@@ -353,6 +353,32 @@ fn others_of(root: &Path) -> Result<(Option<String>, Vec<(Tree, PathBuf)>), Stri
     ))
 }
 
+/// 옆 워크트리들의 **이름이 가리키는 id 후보** — 훅이 초점에서 뺄 것(`hook::held`).
+///
+/// **못 찾으면 비어 있다.** git 이 없거나 저장소가 아니면 옆도 없는 것이고, 그러면
+/// 전처럼 스냅샷의 집은 줄이 다 제 초점이다. 훅은 무엇이 어긋나도 조용해야 한다.
+pub fn away(root: &Path) -> BTreeSet<String> {
+    others_of(root).map(|(_, trees)| names(trees.iter().map(|(t, _)| t))).unwrap_or_default()
+}
+
+/// 워크트리 이름에서 id 후보를 읽는다 — 경로의 끝 이름, 가지 이름, `worktree-` 를 뗀 가지 이름.
+///
+/// 규약(CLAUDE.md "워크트리")이 `.claude/worktrees/<id>` 에 `worktree-<id>` 가지로 뜬다.
+/// **집은 곳을 스냅샷에 적지 않는다.** 집기는 main 에서 커밋하니 적히는 곳은 늘 main 이고,
+/// 워크트리를 치운 뒤에도 그 줄은 남는다 — 지금 살아 있는 워크트리에서 읽는 파생값이다.
+/// 후보일 뿐이라 id 인지는 받는 쪽이 줄과 견준다.
+pub fn names<'a>(trees: impl IntoIterator<Item = &'a Tree>) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for t in trees {
+        if let Some(name) = t.path.file_name() {
+            out.insert(name.to_string_lossy().into_owned());
+        }
+        out.insert(t.label.strip_prefix("worktree-").unwrap_or(&t.label).to_string());
+        out.insert(t.label.clone());
+    }
+    out
+}
+
 /// 제 HEAD 와 옆 HEAD 가 갈라진 자리의 스냅샷 — id → 그때의 `updated_at` ([`Side::base`]).
 ///
 /// **못 찾으면 비어 있고, 말하지 않는다.** 이어지지 않는 역사, 아직 커밋이 없는 브랜치,
@@ -423,6 +449,18 @@ mod tests {
                 ("/tmp/detached".into(), "3333333".into()),
             ]
         );
+    }
+
+    /// 규약대로 뜬 워크트리는 디렉터리와 가지 둘 다로 id 를 댄다. 규약 밖의 이름도
+    /// 후보로는 선다 — id 인지는 훅이 줄과 견준다.
+    #[test]
+    fn a_worktree_names_its_work_by_directory_and_branch() {
+        let src = "worktree /repo/.claude/worktrees/moai-ab12\0HEAD 1111111aaaa\0branch refs/heads/worktree-moai-ab12\0\0\
+                   worktree /elsewhere/x\0HEAD 2222222bbbb\0branch refs/heads/moai-cd34\0\0";
+        let got = names(&parse(src));
+        for want in ["moai-ab12", "moai-cd34", "x"] {
+            assert!(got.contains(want), "{want} 가 없다 — {got:?}");
+        }
     }
 
     /// 경로에 줄바꿈이 들어도 한 워크트리다.

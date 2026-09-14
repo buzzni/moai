@@ -324,7 +324,7 @@ pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     // 없으면 조상을 타는 셈(`put_off`)을 아예 안 돌린다.
     let held: Vec<&Issue> = issues
         .iter()
-        .filter(|i| is_work(i) && !i.status.is_done() && i.status.as_str() != cfg.first_status())
+        .filter(|i| is_work(i) && cfg.is_started(i.status.as_str()))
         .collect();
     if held.is_empty() {
         return held;
@@ -407,8 +407,10 @@ pub fn group_members<'a>(all: &'a [Issue], group: &Issue) -> Vec<&'a Issue> {
 ///   그 밑이 전부 물려받는데, 그것으로 빼면 절반 끝난 에픽이 미뤘다는 이유로
 ///   `done` 이 된다
 /// - 셀 멤버가 없으면 첫 칸, 전부 끝났으면 `done`, 전부 첫 칸이면 첫 칸,
-///   아니면 **시작한 칸** (`Config::started_status`). 멤버가 모두 `review` 여도
-///   시작한 칸이다 — 묶음이 설 칸은 "안 했다·하는 중·끝났다" 셋이다
+///   아니면 **시작한 멤버가 선 칸 중 설정 차례로 가장 앞 칸**(moai-p415) — 묶음은 제일
+///   덜 간 일만큼 가 있다. 시작한 멤버가 없으면(끝난 것과 첫 칸뿐) 설정의 첫 시작 칸
+///   (`Config::started_status`)이다. 칸 자리로만 고르면 칸이 더 있는 설정
+///   (`todo,blocked,in_progress,review,done`)에서 멤버가 in_progress 인 에픽이 `blocked` 로 읽혔다
 pub fn group_states<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, &'c str> {
     group_stands(all, cfg).into_iter().map(|(id, s)| (id, s.column)).collect()
 }
@@ -471,8 +473,11 @@ pub struct Stand<'a, 'c> {
     /// 재는 시계라, 세면 멤버를 `defer`→`--undo` 하는 것만으로 에픽의 `--stale` 과 그 에픽에
     /// 막힌 줄의 `blocked_stale` 이 새로 선다 — 미루기가 경고를 지우는 손잡이가 된다. 미뤄
     /// 둔 동안에도 막음은 이어졌다(미룬 막음도 막는다, moai-2sea).
+    ///
+    /// **소속을 옮긴 때도 안 센다**(moai-bbzg) — 같은 까닭이다. `edit -e` 로 들어온 옛 멤버는 제
+    /// 옛 칸 시각으로 세므로, 끝난 묶음이 그것으로 다시 열려도 이 시각은 안 움직인다.
     pub since: &'a str,
-    /// 셀 멤버 가운데 **적힌 칸이 시작한 칸**(`Config::started_status`)인 일이 있는가 —
+    /// 셀 멤버 가운데 **적힌 칸이 시작한 칸**(`Config::is_started` — 첫 칸도 done 도 아님)인 일이 있는가 —
     /// 지금 누가 그 묶음 밑에서 손대고 있다는 말.
     ///
     /// 읽은 칸만으로는 이 말을 못 한다. 묶음은 멤버 하나가 끝나고 나머지가 첫 칸이기만
@@ -557,9 +562,13 @@ pub fn group_stands_in<'a, 'c>(
                 .map(|m| m.status_since.as_str())
                 .max()
                 .unwrap_or(g.created_at.as_str());
-            let started = cfg.started_status();
-            let busy = started != cfg.first_status()
-                && counted.iter().any(|m| m.status.as_str() == started);
+            // 칸 자리가 아니라 뜻으로 묻는다(moai-p415) — 두 칸짜리 설정에는 시작한 칸이 없어 거짓이다.
+            // **설정이 아는 칸만 센다** — `column_of` 가 설정의 칸에서만 고르므로, 모르는 칸
+            // 멤버로 바쁘다고 하면 묶음은 대신 선 시작 칸에서 돌고 그 밑에 도는 줄은 없다.
+            let busy = counted.iter().any(|m| {
+                let s = m.status.as_str();
+                cfg.knows(s) && cfg.is_started(s)
+            });
             let column = column_of(&counted, cfg);
             let of = members.get(&(g.kind, g.id.as_str())).map(Vec::as_slice).unwrap_or_default();
             let (waiting, aside) = waiting_in(of, &counted);
@@ -642,7 +651,13 @@ fn column_of<'c>(counted: &[&Issue], cfg: &'c Config) -> &'c str {
     } else if reads_done(counted) {
         crate::config::DONE
     } else {
-        cfg.started_status()
+        // 시작한 멤버가 선 칸 중 설정 차례로 가장 앞 칸(moai-p415). 없으면(끝난 것과 첫 칸뿐)
+        // 설정의 첫 시작 칸이다 — 반쯤 했지만 아무도 손대지 않은 자리를 말할 칸이 따로 없다.
+        cfg.statuses
+            .iter()
+            .map(String::as_str)
+            .find(|s| cfg.is_started(s) && counted.iter().any(|m| m.status.as_str() == *s))
+            .unwrap_or(cfg.started_status())
     }
 }
 
@@ -1469,6 +1484,12 @@ const WIP_STALE_DAYS: i64 = 2;
 /// `blocked_by` 를 적은 시각은 여전히 안 잰다 — 오래된 두 줄 사이에 오늘 막음을 걸면
 /// 곧장 선다. 그것을 재려면 그 시각을 스냅샷에 적어야 하는데, 링크 하나에 시각을 달
 /// 만큼 거슬린 적이 아직 없다.
+///
+/// **소속을 옮긴 때도 안 잰다**(moai-bbzg, 사용자와 정함). `moai edit <id> -e <끝난 에픽>` 으로
+/// 옛 일을 넣어 에픽이 다시 열려도 그 에픽의 [`Stand::since`] 는 멤버의 옛 칸 시각이라, 그 에픽에
+/// 막힌 줄이 곧장 선다 — `moai add` 로 새 멤버를 만들 때만 새로 선다. 소속 이동 시각을 세면 멤버를
+/// 뺐다 도로 넣는 것만으로 막힘 시계가 0일로 돌아가, 미루기에서 막은 손잡이(moai-cxk8)가 소속
+/// 쪽에 다시 생긴다.
 const BLOCKED_STALE_DAYS: i64 = 3;
 
 /// 막힌 줄이 **지금 막힌 채로 선 때** — 제 칸을 옮긴 때(`status_since`)와, 지금 막는
@@ -1548,6 +1569,14 @@ pub struct Warning {
     /// `kind` 를 같이 보지 않고서는 숫자를 읽을 수 없다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oldest: Option<i64>,
+    /// id → **판정에 쓴 나이(일)**. 날짜로 거는 경고(`stale_review`·`blocked_stale`·
+    /// `stale_progress`)만 싣는다.
+    ///
+    /// 보이는 쪽이 나이를 새로 재면 판정과 표시가 갈라진다 — `blocked_stale` 은 막음이 다시
+    /// 선 때([`blocked_since`])로 재는데 목록이 제 칸 나이를 내면, 칸에 30일 선 줄이 "3일
+    /// 넘게 막힘" 밑에 "30일" 로 섰다(moai-7azq). 잰 자리가 싣고 보이는 쪽은 읽기만 한다.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub ages: BTreeMap<String, i64>,
     /// 고칠 것이 아니라 알려 주는 것. **`fatal` 옆에 데이터로 둔다** —
     /// 이 판단이 `view` 에만 있으면 `view` 를 건너뛴 표면(TUI·`--json`)이
     /// 알림을 경고로 세고, 담을수록 화면이 시끄러워진다.
@@ -1575,9 +1604,24 @@ impl Warning {
             ratio: None,
             hint: None,
             oldest: None,
+            ages: BTreeMap::new(),
             notice: false,
             fatal: false,
         }
+    }
+    /// 줄마다 판정에 쓴 나이를 싣는다. **잰 시각을 받는다** — 판정과 같은 시각으로 재야
+    /// 표시가 판정과 안 갈라진다. 담긴 id 만 싣는다.
+    ///
+    /// **같은 id 의 줄이 둘이면 파일에서 뒤의 줄이 이긴다** — 보이는 쪽의 id 지도
+    /// (`view::status` 의 `by_id`)가 뒷줄의 칸·제목을 내므로, 앞줄 나이를 실으면 한 줄에
+    /// 두 줄의 값이 섞인다. 겹친 id 자체는 `duplicate_id` 가 따로 말한다.
+    fn ages<'x>(mut self, of: impl Fn(&'x Issue) -> &'x str, rows: &[&'x Issue], now: &str) -> Warning {
+        for i in rows {
+            if let Some(d) = days_since(of(i), now) {
+                self.ages.insert(i.id.clone(), d);
+            }
+        }
+        self
     }
     fn hint(mut self, h: &str) -> Warning {
         self.hint = Some(h.to_string());
@@ -1787,6 +1831,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
         warnings.push(
             Warning::new("stale_review", ids_of(&rotting))
                 .days(REVIEW_STALE_DAYS)
+                .ages(|i| i.status_since.as_str(), &rotting, now)
                 .hint("moai show -s review --stale 3"),
         );
     }
@@ -1808,7 +1853,11 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
         })
         .collect();
     if !stuck.is_empty() {
-        warnings.push(Warning::new("blocked_stale", ids_of(&stuck)).days(BLOCKED_STALE_DAYS));
+        warnings.push(
+            Warning::new("blocked_stale", ids_of(&stuck))
+                .days(BLOCKED_STALE_DAYS)
+                .ages(|i| blocked_since(i, &by_id, &states, &waits, &group_since), &stuck, now),
+        );
     }
 
     // 2-3. 미뤄 둔 것에 막힌 것. **날짜를 안 기다린다** — 계획이 스스로
@@ -1826,7 +1875,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     let wip: Vec<&Issue> = work
         .iter()
         .copied()
-        .filter(|i| !i.status.is_done() && i.status.as_str() != cfg.first_status())
+        .filter(|i| cfg.is_started(i.status.as_str()))
         .collect();
     // 문턱은 id 로 잰다 — 위 `no_epic` 과 같은 까닭이다.
     let overload = Warning::new("wip_overload", ids_of(&wip));
@@ -1844,7 +1893,11 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
         })
         .collect();
     if !forgotten.is_empty() {
-        warnings.push(Warning::new("stale_progress", ids_of(&forgotten)).days(WIP_STALE_DAYS));
+        warnings.push(
+            Warning::new("stale_progress", ids_of(&forgotten))
+                .days(WIP_STALE_DAYS)
+                .ages(|i| i.status_since.as_str(), &forgotten, now),
+        );
     }
 
     // 5. 계획만 세우고 안 채운 것 / 채우고 안 접은 것.
@@ -2368,6 +2421,46 @@ mod tests {
         assert!(stale(&[make("argos-0005", Kind::Issue, "todo"), moved, two]), "오늘 움직인 막음 하나가 열흘 막힘을 가린다");
     }
 
+    /// **경고가 판정한 나이를 싣는다**(moai-7azq). 목록이 줄마다 제 칸 나이를 새로 재면, 칸에
+    /// 30일 선 줄이 막음이 5일 전 다시 선 것으로 `blocked_stale` 에 걸려도 "30일" 로 선다.
+    #[test]
+    fn a_warning_carries_the_age_it_was_judged_by() {
+        let now = "2026-10-01T00:00:00Z";
+        // 막는 줄은 5일 전 done 에서 되돌아 나왔다. 막힌 줄은 `make` 이 09-01 에 만들어 칸에 30일.
+        let mut blocker = make("argos-0001", Kind::Issue, "todo");
+        blocker.status_since = "2026-09-26T00:00:00Z".into();
+        let mut stuck = make("argos-0002", Kind::Issue, "todo");
+        stuck.blocked_by = vec!["argos-0001".into()];
+        let st = status(&[blocker, stuck], &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "blocked_stale").expect("막힘 경고가 없다");
+        assert_eq!(w.ages.get("argos-0002"), Some(&5), "칸 나이를 댔다 — {w:?}");
+        assert_eq!(w.ages.len(), w.ids.len());
+
+        // 칸 나이로 거는 경고는 칸 나이를 싣는다.
+        let mut picked = make("argos-0003", Kind::Issue, "in_progress");
+        picked.status_since = "2026-09-11T00:00:00Z".into();
+        let st = status(&[picked], &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "stale_progress").expect("잊은 것 경고가 없다");
+        assert_eq!(w.ages.get("argos-0003"), Some(&20));
+
+        // 같은 id 의 줄이 둘 다 걸리면 뒷줄의 나이다 — 보이는 쪽이 뒷줄의 칸·제목을 낸다.
+        let mut front = make("argos-0005", Kind::Issue, "review");
+        front.status_since = "2026-09-21T00:00:00Z".into(); // 10일
+        let mut back = make("argos-0005", Kind::Issue, "review");
+        back.status_since = "2026-09-27T00:00:00Z".into(); // 4일
+        let st = status(&[front, back], &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "stale_review").expect("썩는 review 경고가 없다");
+        assert_eq!(w.ages.get("argos-0005"), Some(&4), "앞줄 나이를 뒷줄 옆에 댔다");
+
+        // 날짜로 안 거는 경고는 안 싣는다 — JSON 에서 키가 사라진다.
+        let mut blocked = make("argos-0004", Kind::Issue, "todo");
+        blocked.blocked_by = vec!["argos-9999".into()];
+        let st = status(&[blocked], &[], &cfg(), now);
+        let w = st.warnings.iter().find(|w| w.kind == "dangling_blocked_by").expect("끊긴 막음 경고가 없다");
+        assert!(w.ages.is_empty());
+        assert!(!serde_json::to_string(w).unwrap().contains("\"ages\""));
+    }
+
     /// 막는 쪽이 사라지면 `ready` 는 조용히 넘어가지만 `status` 는 드러낸다.
     #[test]
     fn status_warns_about_a_dangling_blocker() {
@@ -2861,7 +2954,8 @@ mod tests {
             ("in_progress", &["todo", "todo"][..], "todo"),
             ("done", &["todo", "in_progress"][..], "in_progress"),
             ("todo", &["todo", "done"][..], "in_progress"),
-            ("todo", &["review", "review"][..], "in_progress"),
+            // 시작한 멤버 중 가장 앞 칸에 선다(moai-p415) — 전에는 "하는 중" 한 칸으로 접었다.
+            ("todo", &["review", "review"][..], "review"),
             ("todo", &["done", "done"][..], "done"),
         ] {
             let mut issues = vec![make("argos-0001", Kind::Epic, stored)];
@@ -3169,9 +3263,46 @@ mod tests {
         assert_eq!(stands["argos-0007"].since, "2026-09-01T00:00:00Z");
     }
 
+    /// **묶음은 시작한 멤버 중 가장 앞 칸에 선다**(moai-p415). 칸 자리로 "시작한 칸" 을 고르면
+    /// `todo,blocked,in_progress,review,done` 에서 멤버가 in_progress 인 에픽이 `blocked` 로
+    /// 읽혔다. 시작한 멤버가 없으면(끝난 것과 첫 칸뿐) 설정의 첫 시작 칸이다.
+    #[test]
+    fn a_group_stands_in_its_least_advanced_started_members_column() {
+        let cfg = Config::parse("prefix = \"argos\"\nstatuses = \"todo, blocked, in_progress, review, done\"\n").unwrap();
+        let rows = |cols: &[&str]| {
+            let mut issues = vec![make("argos-0001", Kind::Epic, "todo")];
+            for (n, c) in cols.iter().enumerate() {
+                issues.push(member(&format!("argos-000{}", n + 2), "argos-0001", c));
+            }
+            issues
+        };
+        let read = |cols: &[&str]| group_states(&rows(cols), &cfg)["argos-0001"].to_string();
+        assert_eq!(read(&["in_progress", "todo"]), "in_progress", "시작한 칸을 자리로 골랐다");
+        assert_eq!(read(&["review", "done"]), "review");
+        assert_eq!(read(&["blocked", "in_progress"]), "blocked");
+        assert_eq!(read(&["done", "todo"]), "blocked", "시작한 멤버가 없으면 첫 시작 칸이다");
+        assert_eq!(read(&["todo", "todo"]), "todo");
+        assert_eq!(read(&[]), "todo");
+        assert_eq!(read(&["done", "done"]), "done");
+
+        let working = rows(&["in_progress", "todo"]);
+        assert!(group_stands(&working, &cfg)["argos-0001"].busy, "in_progress 멤버가 있는데 안 바쁘다");
+        let resting = rows(&["done", "todo"]);
+        assert!(!group_stands(&resting, &cfg)["argos-0001"].busy, "아무도 손대지 않았는데 바쁘다");
+        // 설정에 없는 칸의 멤버는 칸 셈이 못 고르니 바쁨으로도 안 센다 — 세면 묶음이 대신 선
+        // 시작 칸에서 도는데 그 밑에 도는 줄이 없다.
+        let unknown = rows(&["qa", "todo"]);
+        let stand = &group_stands(&unknown, &cfg)["argos-0001"];
+        assert_eq!((stand.column, stand.busy), ("blocked", false), "모르는 칸 멤버로 바쁘다고 했다");
+    }
+
     /// **읽은 칸과 "집은 멤버가 있다" 는 다른 말이다.** 끝난 멤버 하나와 첫 칸 하나로도
     /// 묶음은 시작한 칸으로 읽히지만 아무도 손대지 않는다(moai-x5eg). 두 칸짜리 설정에는
     /// 시작했다는 말이 없어 언제나 거짓이다.
+    ///
+    /// `review` 멤버도 시작한 것으로 센다(moai-p415) — "시작했다" 의 뜻이 `Config::is_started`
+    /// 하나다. 도는 글리프는 여전히 칸 이름(`style::spins`)이 가르므로, review 에 선 묶음은
+    /// 바빠도 안 돈다.
     #[test]
     fn a_group_is_busy_only_with_a_member_in_the_started_column() {
         let issues = vec![
@@ -3187,7 +3318,8 @@ mod tests {
         let stands = group_stands(&issues, &cfg);
         let read = |id: &str| (stands[id].column, stands[id].busy);
         assert_eq!(read("argos-0001"), ("in_progress", false), "반쯤 끝난 에픽을 바쁘다고 한다");
-        assert_eq!(read("argos-0004"), ("in_progress", false), "review 멤버를 집은 것으로 셌다");
+        assert_eq!(read("argos-0004"), ("review", true), "review 멤버의 칸·시작을 잘못 읽었다");
+        assert!(!crate::style::spins(read("argos-0004").0), "review 에 선 묶음이 돈다");
         assert_eq!(read("argos-0006"), ("in_progress", true));
 
         let two = Config::parse("prefix = \"argos\"\nstatuses = \"todo, done\"\n").unwrap();

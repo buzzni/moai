@@ -92,19 +92,41 @@ fn carried() {
     // **쓴 자리와 안 쓴 자리의 말이 다르다.** 안 쓴 명령(`note`·이미 그런
     // `defer`)이 "그대로 두고 썼다" 고 하면 일어나지 않은 쓰기를 주장하고,
     // 아무 말도 안 하면 그 동사만 쓰는 쪽이 상한 파일을 영영 모른다(moai-relb).
-    let said = match (store::carried_unreadable(), store::held_unreadable()) {
-        (0, 0) => return,
-        (0, n) => format!("읽을 수 없는 줄 {n}개가 파일에 있다, 이번 명령은 그 파일을 안 건드렸다"),
-        (n, _) => format!("읽을 수 없는 줄 {n}개를 그대로 두고 썼다"),
-    };
-    let _ = writeln!(
-        anstream::stderr().lock(),
-        // **어느 줄인지 아는 명령을 댄다.** `moai status` 는 수만 말하고
-        // 줄 번호와 까닭은 `report_load_errors` 를 지나는 쪽(`show`·`ready`)
-        // 만 낸다 — 없는 답을 가리키면 손으로 고칠 길이 도구 밖에만 남는다.
-        "{}{said} — 어느 줄인지는 `moai show` 가 낸다",
-        style::paint(style::WARN, "moai: ")
-    );
+    //
+    // 셈은 호출마다가 아니라 프로세스 전체의 것이다(`store::Tally`) — `moai tui` 는
+    // 여러 번 쓰고 여기를 한 번 지난다. 썼으되 들고 간 줄이 없었으면(깨끗할 때 쓰고
+    // 그 뒤에 상했으면) "안 건드렸다" 도 "그대로 두고 썼다" 도 참이 아니라 있다고만 한다.
+    //
+    // **프로젝트마다 한 줄이다.** 탐색기는 층에서 여러 프로젝트에 쓴다 — 여기서 부른
+    // 자리의 저장소가 아닌 곳이면 `-C` 로 그 뿌리를 댄다. 대지 않으면 `moai show` 가
+    // 엉뚱한 저장소의 줄을 내거나 "init 하라" 고 한다.
+    let tallies = store::unreadable_tallies();
+    if tallies.iter().all(|(_, t)| t.carried == 0 && t.seen == 0) {
+        return;
+    }
+    let here = store::Repo::find().ok().flatten().map(|r| r.root);
+    for (root, tally) in tallies {
+        let said = match tally {
+            store::Tally { carried: n @ 1.., .. } => format!("읽을 수 없는 줄 {n}개를 그대로 두고 썼다"),
+            store::Tally { seen: 0, .. } => continue,
+            store::Tally { wrote: true, seen: n, .. } => format!("읽을 수 없는 줄 {n}개가 파일에 있다"),
+            store::Tally { wrote: false, seen: n, .. } => {
+                format!("읽을 수 없는 줄 {n}개가 파일에 있다, 이번 명령은 그 파일을 안 건드렸다")
+            }
+        };
+        let show = match &here {
+            Some(h) if *h == root => "moai show".to_string(),
+            _ => format!("moai -C {} show", root.display()),
+        };
+        let _ = writeln!(
+            anstream::stderr().lock(),
+            // **어느 줄인지 아는 명령을 댄다.** `moai status` 는 수만 말하고
+            // 줄 번호와 까닭은 `report_load_errors` 를 지나는 쪽(`show`·`ready`)
+            // 만 낸다 — 없는 답을 가리키면 손으로 고칠 길이 도구 밖에만 남는다.
+            "{}{said} — 어느 줄인지는 `{show}` 가 낸다",
+            style::paint(style::WARN, "moai: ")
+        );
+    }
 }
 
 fn print(lines: &[String]) {
