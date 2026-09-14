@@ -710,7 +710,13 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize) -> Line<'a> {
 
     let title_w = crate::text::width(&title);
     let mut spans = head;
-    spans.push(Span::raw(title));
+    // 집은 **일**의 제목에는 빛줄기가 흐른다(moai-fy99). 묶음은 안 흐른다 — 묶음의 도는
+    // 글리프는 "밑에 집은 것이 있다" 는 말이고, 손대는 줄은 그 밑의 이슈다.
+    if !is_dir && app.spins(at) {
+        spans.extend(shimmer(title, app.spin));
+    } else {
+        spans.push(Span::raw(title));
+    }
     if !tally.is_empty() {
         // 셈은 **테두리 끝에 오른쪽 정렬**한다(moai-1krv) — 줄마다 제목 길이를 따라 들쭉날쭉하면
         // 여러 에픽의 셈을 한 줄로 훑어 내려갈 수 없다. 제목과의 틈은 채움 칸이 진다.
@@ -773,6 +779,49 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 줄 수가 u16 을 넘는 본문이면 거기서 멈춘다 — 넘겨 접으면 첫 줄로 튄다.
     let top = u16::try_from(app.detail.offset()).unwrap_or(u16::MAX);
     f.render_widget(Paragraph::new(lines).scroll((top, 0)), inner);
+}
+
+/// 빛줄기가 지나간 뒤 다시 들어오기까지 쉬는 칸 수. 쉬지 않으면 띠가 끝에 닿자마자 앞에서
+/// 다시 떠서 흐르는 것이 아니라 깜빡이는 것으로 보인다.
+const GLINT_REST: usize = 8;
+
+/// 빛줄기의 띠 — **가장자리는 보통 노랑, 가운데는 밝은 노랑 굵게.** 16색 안에서 짓는
+/// 그라데이션이다(`style` 의 기본 16색 규칙, 사용자 선택 moai-fy99). 노랑은 집은 칸의 색
+/// (`style::IN_PROGRESS`)이라 빛이 칸의 뜻과 어긋나지 않는다. 흰색은 밝은 바탕에서 사라져 안 쓴다.
+fn glint() -> [Style; 3] {
+    let edge = Style::new().fg(Color::Yellow);
+    [edge, from_anstyle(style::IN_PROGRESS), edge]
+}
+
+/// 집은 이슈의 제목을 **빛줄기가 왼쪽에서 오른쪽으로 흐르는** 조각들로 낸다. 걸음은 도는
+/// 글리프와 같은 `App::spin` 이다 — 따로 시계를 두면 둘이 다른 박자로 움직이고, 도는
+/// 것이 없을 때 루프가 안 깨우는 규칙(`App::spinning`)도 그대로 따른다.
+///
+/// **뜻은 글리프가 진다.** 빛줄기는 곁들임이라 색이 없는 화면에서 사라져도 잃는 것이 없다.
+/// 글자와 폭은 그대로다 — 스타일만 칸마다 바꾼다. 두 칸 글자는 시작 칸으로 띠에 든다.
+fn shimmer(title: String, frame: usize) -> Vec<Span<'static>> {
+    let band = glint();
+    let cycle = crate::text::width(&title) + band.len() + GLINT_REST;
+    // 띠의 앞머리(오른쪽 끝 바로 뒤)가 서는 칸. 0 에서 들어와 제목 끝을 지나 쉰다.
+    let head = frame % cycle;
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut run = String::new();
+    let mut run_style: Option<Style> = None;
+    let mut col = 0usize;
+    for c in title.chars() {
+        let w = crate::text::width(c.encode_utf8(&mut [0; 4]));
+        let style = (col < head).then(|| head - 1 - col).and_then(|back| band.get(back).copied());
+        if style != run_style && !run.is_empty() {
+            spans.push(Span::styled(std::mem::take(&mut run), run_style.unwrap_or_default()));
+        }
+        run_style = style;
+        run.push(c);
+        col += w;
+    }
+    if !run.is_empty() {
+        spans.push(Span::styled(run, run_style.unwrap_or_default()));
+    }
+    spans
 }
 
 /// 칸의 테두리. **포커스 있는 칸은 굵은 선에 초록이다.**
@@ -1477,6 +1526,66 @@ pub(super) mod tests {
 
     fn app() -> App {
         App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new())
+    }
+
+    /// 빛줄기는 **글자와 폭을 그대로 두고** 스타일만 칸마다 바꾸며, 한 걸음에 한 칸씩 흐르고,
+    /// 제목 끝을 지나 쉬었다가 앞에서 다시 들어온다.
+    #[test]
+    fn a_glint_flows_one_cell_per_step_and_keeps_the_text() {
+        let title = "집은 멤버 제목";
+        let lit = |spans: &[Span]| -> Vec<usize> {
+            let mut col = 0;
+            let mut out = Vec::new();
+            for s in spans {
+                for c in s.content.chars() {
+                    if s.style.add_modifier.contains(Modifier::BOLD) {
+                        out.push(col);
+                    }
+                    col += crate::text::width(c.encode_utf8(&mut [0; 4]));
+                }
+            }
+            out
+        };
+        let cycle = crate::text::width(title) + glint().len() + GLINT_REST;
+        for frame in 0..cycle * 2 {
+            let spans = shimmer(title.to_string(), frame);
+            let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+            assert_eq!(text, title, "글자가 바뀌었다 @ {frame}");
+        }
+        // 들어오기 전과 쉬는 동안에는 빛이 없다.
+        assert!(lit(&shimmer(title.to_string(), 0)).is_empty(), "들어오기 전에 빛났다");
+        assert!(lit(&shimmer(title.to_string(), cycle - 1)).is_empty(), "쉬는 동안 빛났다");
+        // 가운데 칸(굵게)이 걸음마다 오른쪽으로 간다. 가운데는 앞머리 두 칸 뒤라, 걸음 4 는
+        // `은`(2칸), 걸음 7 은 `멤`(5칸)에 선다 — 두 칸 글자의 뒤 칸에 서는 걸음은 글자가 없어
+        // 굵은 칸도 없다(가장자리 노랑만 남는다).
+        let a = lit(&shimmer(title.to_string(), 4));
+        let b = lit(&shimmer(title.to_string(), 7));
+        assert_eq!((a.as_slice(), b.as_slice()), ([2].as_slice(), [5].as_slice()), "빛이 제자리에 안 선다");
+        assert!(!a.is_empty() && !b.is_empty() && b[0] > a[0], "빛이 안 흐른다 — {a:?} → {b:?}");
+        assert_eq!(shimmer(title.to_string(), 5), shimmer(title.to_string(), 5 + cycle), "한 바퀴가 제자리로 안 온다");
+    }
+
+    /// 목록에서 **집은 이슈의 제목만** 빛난다 — 끝난 멤버와 묶음 줄은 안 흐른다.
+    #[test]
+    fn only_a_held_issue_title_glints_in_the_list() {
+        let mut a = app();
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        // 가운데 칸이 제목 첫 글자에 오는 걸음.
+        a.spin = 2;
+        let (w, h) = (80u16, 10u16);
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let text = render(&mut a, w, h);
+        // **제목 칸만** 본다 — 칸 글리프(`IN_PROGRESS`, 밝은 노랑 굵게)가 같은 줄에 있어 줄
+        // 전체를 보면 빛줄기 없이도 참이 된다.
+        let glints_from = |row: &str, first: &str| {
+            let y = text.iter().position(|l| l.contains(row)).unwrap_or_else(|| panic!("{row} 가 없다")) as u16;
+            let x0 = (0..w).find(|&x| buf[(x, y)].symbol() == first).unwrap_or_else(|| panic!("{first} 가 없다"));
+            (x0..w / 2).any(|x| buf[(x, y)].modifier.contains(Modifier::BOLD) && buf[(x, y)].fg == Color::LightYellow)
+        };
+        assert!(glints_from("argos-0004", "집"), "집은 이슈 제목에 빛이 없다\n{}", text.join("\n"));
+        assert!(!glints_from("argos-0003", "멤"), "끝난 멤버가 빛났다\n{}", text.join("\n"));
     }
 
     /// 에픽 줄은 **끝난/일 셈을 테두리 바로 앞에 오른쪽 정렬로** 댄다 — 제목 길이와 상관없이
