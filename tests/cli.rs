@@ -4984,6 +4984,61 @@ fn a_review_picked_in_main_opens_the_review_inside_the_worktree() {
     assert!(out.trim().is_empty(), "main 에서 집은 리뷰를 못 보고 막는다\n{out}");
 }
 
+/// **`moai` 는 그 명령이 가리키는 저장소의 트래커로 판정한다** (moai-23ky) — `-C`·`--dir`
+/// 나 앞의 `cd`. 세션 자리의 트래커로 판정하던 훅은 남의 프로젝트에 세우는 줄을 제
+/// 초점으로 막았고, 남의 프로젝트가 쥔 초점은 못 봤다.
+#[test]
+fn a_moai_call_is_judged_by_the_tracker_it_points_at() {
+    let a = init("hookaimA");
+    let b = init("hookaimB");
+    let held = field(&ok(a.path(), &["add", "여기서 할 일", "--json"]), "id");
+    ok(a.path(), &["mv", &held, "in_progress"]);
+    let bash = |s: &Scratch, cmd: &str| tool_at(s, s.path(), "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+    let bp = b.path().display().to_string();
+
+    // A 가 쥔 것으로 B 에 세우는 줄을 막지 않는다.
+    for cmd in [
+        format!("moai -C {bp} add \"딴 일\""),
+        format!("moai --dir={bp} add \"딴 일\""),
+        format!("cd {bp} && moai add \"딴 일\""),
+    ] {
+        let out = bash(&a, &cmd);
+        assert!(out.trim().is_empty(), "남의 트래커에 세우는 줄을 제 초점으로 막았다 — {cmd}\n{out}");
+    }
+    // 같은 줄의 제 자리 토막은 여전히 제 트래커로 본다.
+    let why = refusal(&bash(&a, &format!("moai -C {bp} add \"딴 일\" && moai add \"또 딴 일\"")));
+    assert!(why.contains(&held), "{why}");
+
+    // 거꾸로 — B 가 쥔 것이 있으면 B 에 세우는 줄은 B 의 초점으로 막힌다.
+    let theirs = field(&ok(b.path(), &["add", "저기서 할 일", "--json"]), "id");
+    ok(b.path(), &["mv", &theirs, "in_progress"]);
+    ok(a.path(), &["mv", &held, "done"]);
+    let why = refusal(&bash(&a, &format!("moai -C {bp} add \"딴 일\"")));
+    assert!(why.contains(&theirs), "가리킨 트래커의 초점을 못 봤다 — {why}");
+}
+
+/// 워크트리 세션이 `-C <main>` 으로 트래커를 만진다 — **같은 저장소의 워크트리는 이 세션의
+/// 자리다.** main 의 눈으로만 보면 이 워크트리가 쥔 일은 "옆의 것" 이라 초점에서 빠져,
+/// `-C <main>` 한 번으로 규칙 1 을 넘는다. main 에서 방금 집은 줄은 겹쳐 보고 안다.
+#[test]
+fn a_worktree_session_touching_main_is_still_that_session() {
+    let s = Scratch::new("hookaimwt");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let mp = main.display().to_string();
+    let bash = |cmd: &str| tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+
+    let why = refusal(&bash(&format!("moai -C {mp} add \"딴 일\"")));
+    assert!(why.contains(&id), "main 을 가리키면 제 초점을 잃는다 — {why}");
+    let out = bash(&format!("moai -C {mp} add \"자식\" --parent {id}"));
+    assert!(out.trim().is_empty(), "제 일의 자식을 막았다\n{out}");
+
+    // main 에서 둘째 일을 집었다 — 워크트리 스냅샷은 모르지만 막지 않는다(moai-iaa4 의 자리).
+    let next = field(&ok(&main, &["add", "둘째 일", "--json"]), "id");
+    ok(&main, &["mv", &next, "in_progress"]);
+    let out = bash(&format!("moai -C {mp} add \"둘째의 자식\" --parent {next}"));
+    assert!(out.trim().is_empty(), "main 에서 방금 집은 일의 자식을 막았다\n{out}");
+}
+
 /// 규칙 2 의 껍데기 쪽은 **stdin 의 `cwd` 로** 상대 경로를 푼다. 훅 프로세스를
 /// 저장소 뿌리에서 띄우고 `cwd` 만 하위 디렉터리로 준다 — 뿌리로 푸는 판은 여기서
 /// `a.md` 를 대고, 트래커 안에 서서 친 `../src` 쓰기는 놓친다. 단위 시험은 순수

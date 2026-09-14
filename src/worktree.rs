@@ -399,6 +399,18 @@ pub fn away(root: &Path) -> BTreeSet<String> {
     others_of(root).map(|(_, trees)| names(trees.iter().map(|(t, _)| t))).unwrap_or_default()
 }
 
+/// 두 자리가 **같은 git 저장소의 워크트리인가** — 공용 git 디렉터리가 같다. 못 찾으면 아니다.
+///
+/// 훅이 `-C`·`cd` 로 가리킨 트래커가 세션의 옆 워크트리인지 가른다(moai-23ky). 옆 워크트리면
+/// 세션의 자리로 본다 — 그쪽 눈으로 보면 이 세션이 쥔 일이 "옆의 것" 이라 초점에서 빠져,
+/// `moai -C <main> add` 한 번으로 규칙 1 을 넘는다. 다른 트래커를 가리킬 때만 부른다.
+pub fn same_repo(a: &Path, b: &Path) -> bool {
+    let common = |root: &Path| {
+        git(root, &["rev-parse", "--git-common-dir"]).ok().map(|c| canonical(&root.join(c.trim_end_matches('\n'))))
+    };
+    matches!((common(a), common(b)), (Some(x), Some(y)) if x == y)
+}
+
 /// 워크트리 이름에서 id 후보를 읽는다 — 경로의 끝 이름, 가지 이름, `worktree-` 를 뗀 가지 이름.
 ///
 /// 규약(CLAUDE.md "워크트리")이 `.claude/worktrees/<id>` 에 `worktree-<id>` 가지로 뜬다.

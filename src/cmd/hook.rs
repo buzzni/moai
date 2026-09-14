@@ -14,7 +14,9 @@ use crate::report;
 use crate::store::Repo;
 use crate::{model, view};
 use serde::Serialize;
+use std::collections::BTreeSet;
 use std::io::Read;
+use std::path::Path;
 
 /// 계약이 받는 모양. 이벤트 이름이 안에 한 번 더 들어간다.
 #[derive(Serialize)]
@@ -134,29 +136,43 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             crate::hook::board(&lines)
         }),
         Event::PreToolUse => {
-            let call = crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input);
-            let judge = |issues: &[model::Issue], away: &std::collections::BTreeSet<String>| match call {
-                crate::hook::Call::Shell(cmd) => {
-                    // 규칙의 차례는 `guard_shell` 이 정한다. 여기는 껍데기의 자리만 준다.
-                    let cwd = std::env::current_dir().unwrap_or_else(|_| repo.root.clone());
-                    crate::hook::guard_shell(issues, &repo.config, away, &repo.root, &cwd, cmd)
-                }
-                crate::hook::Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, &repo.root, path),
-                crate::hook::Call::Review => crate::hook::guard_review(issues, &repo.config, away),
-                crate::hook::Call::Other => Decision::Pass,
+            use crate::hook::Call;
+            let call = Call::read(input.tool_name.as_deref(), &input.tool_input);
+            let cwd = std::env::current_dir().unwrap_or_else(|_| repo.root.clone());
+            let (routes, there) = match call {
+                Call::Shell(cmd) => route(&repo, cmd, &cwd),
+                _ => (Vec::new(), Vec::new()),
             };
-            // **막기 전에 옆 워크트리와 겹쳐 한 번 더 본다**(moai-w2iy). 워크트리의 스냅샷은
-            // main 에서 방금 세우고 집은 줄을 모른다 — 그것만 보고 막으면 시킨 대로 한 일이
-            // 막힌다. 겹쳐 봐도 막힐 때만 막고, 까닭은 제 스냅샷의 것을 낸다(고칠 명령이
-            // 이 자리의 트래커에 듣는다). 겹쳐 보기는 막을 때만 치른다 — 지나가는 호출은
-            // 전과 같은 값이다.
-            match judge(&load.issues, &away()) {
-                deny @ Decision::Deny(_) => match crate::worktree::fresh(&repo, load.issues.clone()) {
-                    Some((issues, away)) if judge(&issues, &away) == Decision::Pass => Decision::Pass,
-                    _ => deny,
-                },
-                other => other,
+            let mine = |k: usize| !matches!(routes.get(k), Some(r) if *r != Route::Here);
+            let decision = settle(&repo, &load.issues, &away, &|issues, away| match call {
+                // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
+                Call::Shell(cmd) => crate::hook::guard_shell_in(issues, &repo.config, away, &repo.root, &cwd, cmd, &mine),
+                Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, &repo.root, path),
+                Call::Review => crate::hook::guard_review(issues, &repo.config, away),
+                Call::Other => Decision::Pass,
+            });
+            // 다른 트래커를 가리키는 토막은 **그 트래커가 본다**(moai-23ky).
+            let mut decision = decision;
+            if let Call::Shell(cmd) = call {
+                for (n, other) in there.iter().enumerate() {
+                    if decision != Decision::Pass {
+                        break;
+                    }
+                    let Ok(theirs) = other.read() else { continue };
+                    let away = || {
+                        if report::wip(&theirs.issues, &other.config).is_empty() {
+                            BTreeSet::new()
+                        } else {
+                            crate::worktree::away(&other.root)
+                        }
+                    };
+                    let only = |k: usize| routes.get(k) == Some(&Route::There(n));
+                    decision = settle(other, &theirs.issues, &away, &|issues, away| {
+                        crate::hook::guard_moai(issues, &other.config, away, cmd, &only)
+                    });
+                }
             }
+            decision
         }
         // **이미 한 번 붙들었으면 보낸다.** 이 표를 안 보면 무한히 돈다.
         Event::Stop if input.stop_hook_active => Decision::Pass,
@@ -185,6 +201,64 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             serde_json::to_string(&Hold { decision: "block", reason }).ok()
         }
     }
+}
+
+/// 판정하되, **막으면 옆 워크트리와 겹쳐 한 번 더 본다**(moai-w2iy).
+///
+/// 워크트리의 스냅샷은 main 에서 방금 세우고 집은 줄을 모른다 — 그것만 보고 막으면 시킨 대로
+/// 한 일이 막힌다. 겹쳐 봐도 막힐 때만 막고, 까닭은 제 스냅샷의 것을 낸다(고칠 명령이 이 자리의
+/// 트래커에 듣는다). **겹쳐 보기는 막을 때만 치른다** — 지나가는 호출은 전과 같은 값이다.
+fn settle(
+    repo: &Repo,
+    issues: &[model::Issue],
+    away: &dyn Fn() -> BTreeSet<String>,
+    judge: &dyn Fn(&[model::Issue], &BTreeSet<String>) -> Decision,
+) -> Decision {
+    match judge(issues, &away()) {
+        deny @ Decision::Deny(_) => match crate::worktree::fresh(repo, issues.to_vec()) {
+            Some((issues, away)) if judge(&issues, &away) == Decision::Pass => Decision::Pass,
+            _ => deny,
+        },
+        other => other,
+    }
+}
+
+/// 껍데기 토막 하나를 판정할 트래커.
+#[derive(Debug, PartialEq)]
+enum Route {
+    /// 세션 자리의 트래커 — 같은 저장소의 옆 워크트리를 가리켜도 여기다(`worktree::same_repo`).
+    Here,
+    /// 가리킨 자리에 트래커가 없다. `moai` 가 스스로 실패하니 아무도 판정하지 않는다.
+    Nowhere,
+    /// 다른 트래커 — `route` 가 돌려준 목록의 자리.
+    There(usize),
+}
+
+/// 토막마다 판정할 트래커를 가른다(`hook::aimed`). 가리킨 곳이 없으면 디스크를 안 짚는다 —
+/// 대부분의 호출은 `-C`·`cd` 가 없어 여기서 아무것도 안 읽는다.
+fn route(repo: &Repo, cmd: &str, cwd: &Path) -> (Vec<Route>, Vec<Repo>) {
+    let same = |a: &Path, b: &Path| a == b || std::fs::canonicalize(a).ok().zip(std::fs::canonicalize(b).ok()).is_some_and(|(x, y)| x == y);
+    let mut there: Vec<Repo> = Vec::new();
+    let routes = crate::hook::aimed(cmd, cwd)
+        .into_iter()
+        .map(|dir| {
+            let Some(dir) = dir else { return Route::Here };
+            let Ok(Some(found)) = Repo::find_from(&dir).map(|r| r.filter(|_| dir.is_dir())) else {
+                return Route::Nowhere;
+            };
+            if same(&found.root, &repo.root) || crate::worktree::same_repo(&found.root, &repo.root) {
+                return Route::Here;
+            }
+            match there.iter().position(|r| same(&r.root, &found.root)) {
+                Some(n) => Route::There(n),
+                None => {
+                    there.push(found);
+                    Route::There(there.len() - 1)
+                }
+            }
+        })
+        .collect();
+    (routes, there)
 }
 
 /// 이 세션이 열릴 때 적어 둔 경고 수. 없으면 견줄 것이 없다.
