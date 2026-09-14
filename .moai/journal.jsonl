@@ -2482,3 +2482,8 @@
 {"ts":"2026-09-14T17:22:42Z","id":"moai-yxae.0vi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 지적 2건(주석이 tui --json 을 아직 멈추는 쪽으로 셈) 모두 반영 — 0e4704b. 코드 지적은 없다. 넘긴 것 없음"}
 {"ts":"2026-09-14T17:22:42Z","id":"moai-yxae.0vi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"주석 지적 2건 반영(0e4704b), 코드 지적 없음, 넘긴 것 없음"}
 {"ts":"2026-09-14T17:22:42Z","id":"moai-yxae","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"57010bf·0e4704b 를 main 에 머지 — .moai 밖 tui --json 은 {projects,problems,config}, 등록 없음·깨진 설정도 rc 0"}
+{"ts":"2026-09-14T17:25:07Z","id":"moai-opjn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"좁은 터미널에서도 --help 의 heredoc 이 접히지 않게"}
+{"ts":"2026-09-14T17:25:07Z","id":"moai-1c6h","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"좁은 터미널 폭에서 모든 명령의 --help heredoc 여는 줄이 한 줄로 남는다"}
+{"ts":"2026-09-14T17:25:07Z","id":"moai-opjn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-rl6a 에서 펼쳤다 — 좁은 터미널에서 clap wrap_help 가 --help 의 heredoc 여는 줄을 접어(COLUMNS=30 에서 <<'NOTE' 가 다음 줄로) 복사하면 heredoc 이 사라진다 — 여는 줄을 짧게 하거나 after_help 를 안 접게 (moai-vdmh.a2y 리뷰가 넘김)"}
+{"ts":"2026-09-14T17:25:07Z","id":"moai-rl6a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-opjn 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-14T17:25:07Z","id":"moai-1c6h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
