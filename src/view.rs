@@ -76,8 +76,16 @@ pub fn deferred_for(i: &Issue, root: Option<&str>, now: &str) -> Option<String> 
 /// 물려받은 줄에 `--undo` 를 치면 "이미 그렇다" 로 끝나고 아무것도 안 풀린다.
 /// 제가 미룬 줄이면 그 줄이 곧 미룬 곳이라 말이 하나로 되고, 부르는 쪽이 둘을
 /// 가르는 `if` 를 둘 까닭이 없다.
-pub fn shelved_by(root: &str) -> String {
-    format!("{root} 를 미뤄 둬서 보드와 ready 에서는 빠져 있다 — `moai defer {root} --undo`")
+///
+/// `roots` 는 풀어야 할 미룸 전부다(`report::deferred_sources`, 가까운 것부터). **다 댄다** —
+/// 하나만 대면 그것을 풀고도 여전히 빠진 채 그제야 다음을 댄다(moai-phzi).
+pub fn shelved_by<S: AsRef<str>>(roots: &[S]) -> String {
+    let roots: Vec<&str> = roots.iter().map(AsRef::as_ref).collect();
+    format!(
+        "{} 를 미뤄 둬서 보드와 ready 에서는 빠져 있다 — `moai defer {} --undo`",
+        roots.join(" · "),
+        roots.join(" ")
+    )
 }
 
 /// 칠한 글과 **칠하지 않은 폭**을 받아 채운다 — [`cell`] 이 한 가지 색만 칠할 수
