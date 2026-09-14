@@ -1485,3 +1485,4 @@
 {"ts":"2026-09-14T08:50:03Z","id":"moai-l11z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-bh3h 에서 옮김(출처 리뷰 moai-q65n.xi1). 사용자와 정한 것(2026-09-14): 새 스냅샷 필드 planned_at — 칸 이동·defer·--undo 가 모두 올린다. 겹칠 때 (planned_at, updated_at) 로 견주고, 필드가 없는 옛 줄은 status_since 로 대신한다. status_since 의 뜻(칸이 바뀐 때, 방치·'review 에 N일')은 그대로 둔다 — defer 가 status_since 를 올리면 미루기가 방치 경고를 지우는 손잡이가 된다(비권장으로 버림). max(status_since, deferred_at) 안은 --undo 가 시각을 안 남겨 옆의 늦은 undo 가 여전히 가려져 버림."}
 {"ts":"2026-09-14T08:52:25Z","id":"moai-5jh6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 가 화면에 보이는 줄에 도는 것이 있을 때만 빠른 걸음으로 깨운다 — 안 보이는 집은 일로 다시 그리지 않는다"}
 {"ts":"2026-09-14T08:52:25Z","id":"moai-eomg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽·마일스톤 줄에도 빛줄기 — 밑에 집은 일이 있을 때(도는 묶음)"}
+{"ts":"2026-09-14T08:56:43Z","id":"moai-k3yi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
