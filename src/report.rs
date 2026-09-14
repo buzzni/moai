@@ -324,7 +324,7 @@ pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     // 없으면 조상을 타는 셈(`put_off`)을 아예 안 돌린다.
     let held: Vec<&Issue> = issues
         .iter()
-        .filter(|i| is_work(i) && !i.status.is_done() && i.status.as_str() != cfg.first_status())
+        .filter(|i| is_work(i) && cfg.is_started(i.status.as_str()))
         .collect();
     if held.is_empty() {
         return held;
@@ -407,8 +407,10 @@ pub fn group_members<'a>(all: &'a [Issue], group: &Issue) -> Vec<&'a Issue> {
 ///   그 밑이 전부 물려받는데, 그것으로 빼면 절반 끝난 에픽이 미뤘다는 이유로
 ///   `done` 이 된다
 /// - 셀 멤버가 없으면 첫 칸, 전부 끝났으면 `done`, 전부 첫 칸이면 첫 칸,
-///   아니면 **시작한 칸** (`Config::started_status`). 멤버가 모두 `review` 여도
-///   시작한 칸이다 — 묶음이 설 칸은 "안 했다·하는 중·끝났다" 셋이다
+///   아니면 **시작한 멤버가 선 칸 중 설정 차례로 가장 앞 칸**(moai-p415) — 묶음은 제일
+///   덜 간 일만큼 가 있다. 시작한 멤버가 없으면(끝난 것과 첫 칸뿐) 설정의 첫 시작 칸
+///   (`Config::started_status`)이다. 칸 자리로만 고르면 칸이 더 있는 설정
+///   (`todo,blocked,in_progress,review,done`)에서 멤버가 in_progress 인 에픽이 `blocked` 로 읽혔다
 pub fn group_states<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, &'c str> {
     group_stands(all, cfg).into_iter().map(|(id, s)| (id, s.column)).collect()
 }
@@ -475,7 +477,7 @@ pub struct Stand<'a, 'c> {
     /// **소속을 옮긴 때도 안 센다**(moai-bbzg) — 같은 까닭이다. `edit -e` 로 들어온 옛 멤버는 제
     /// 옛 칸 시각으로 세므로, 끝난 묶음이 그것으로 다시 열려도 이 시각은 안 움직인다.
     pub since: &'a str,
-    /// 셀 멤버 가운데 **적힌 칸이 시작한 칸**(`Config::started_status`)인 일이 있는가 —
+    /// 셀 멤버 가운데 **적힌 칸이 시작한 칸**(`Config::is_started` — 첫 칸도 done 도 아님)인 일이 있는가 —
     /// 지금 누가 그 묶음 밑에서 손대고 있다는 말.
     ///
     /// 읽은 칸만으로는 이 말을 못 한다. 묶음은 멤버 하나가 끝나고 나머지가 첫 칸이기만
@@ -560,9 +562,13 @@ pub fn group_stands_in<'a, 'c>(
                 .map(|m| m.status_since.as_str())
                 .max()
                 .unwrap_or(g.created_at.as_str());
-            let started = cfg.started_status();
-            let busy = started != cfg.first_status()
-                && counted.iter().any(|m| m.status.as_str() == started);
+            // 칸 자리가 아니라 뜻으로 묻는다(moai-p415) — 두 칸짜리 설정에는 시작한 칸이 없어 거짓이다.
+            // **설정이 아는 칸만 센다** — `column_of` 가 설정의 칸에서만 고르므로, 모르는 칸
+            // 멤버로 바쁘다고 하면 묶음은 대신 선 시작 칸에서 돌고 그 밑에 도는 줄은 없다.
+            let busy = counted.iter().any(|m| {
+                let s = m.status.as_str();
+                cfg.knows(s) && cfg.is_started(s)
+            });
             let column = column_of(&counted, cfg);
             let of = members.get(&(g.kind, g.id.as_str())).map(Vec::as_slice).unwrap_or_default();
             let (waiting, aside) = waiting_in(of, &counted);
@@ -645,7 +651,13 @@ fn column_of<'c>(counted: &[&Issue], cfg: &'c Config) -> &'c str {
     } else if reads_done(counted) {
         crate::config::DONE
     } else {
-        cfg.started_status()
+        // 시작한 멤버가 선 칸 중 설정 차례로 가장 앞 칸(moai-p415). 없으면(끝난 것과 첫 칸뿐)
+        // 설정의 첫 시작 칸이다 — 반쯤 했지만 아무도 손대지 않은 자리를 말할 칸이 따로 없다.
+        cfg.statuses
+            .iter()
+            .map(String::as_str)
+            .find(|s| cfg.is_started(s) && counted.iter().any(|m| m.status.as_str() == *s))
+            .unwrap_or(cfg.started_status())
     }
 }
 
@@ -1835,7 +1847,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     let wip: Vec<&Issue> = work
         .iter()
         .copied()
-        .filter(|i| !i.status.is_done() && i.status.as_str() != cfg.first_status())
+        .filter(|i| cfg.is_started(i.status.as_str()))
         .collect();
     // 문턱은 id 로 잰다 — 위 `no_epic` 과 같은 까닭이다.
     let overload = Warning::new("wip_overload", ids_of(&wip));
@@ -2870,7 +2882,8 @@ mod tests {
             ("in_progress", &["todo", "todo"][..], "todo"),
             ("done", &["todo", "in_progress"][..], "in_progress"),
             ("todo", &["todo", "done"][..], "in_progress"),
-            ("todo", &["review", "review"][..], "in_progress"),
+            // 시작한 멤버 중 가장 앞 칸에 선다(moai-p415) — 전에는 "하는 중" 한 칸으로 접었다.
+            ("todo", &["review", "review"][..], "review"),
             ("todo", &["done", "done"][..], "done"),
         ] {
             let mut issues = vec![make("argos-0001", Kind::Epic, stored)];
@@ -3178,9 +3191,46 @@ mod tests {
         assert_eq!(stands["argos-0007"].since, "2026-09-01T00:00:00Z");
     }
 
+    /// **묶음은 시작한 멤버 중 가장 앞 칸에 선다**(moai-p415). 칸 자리로 "시작한 칸" 을 고르면
+    /// `todo,blocked,in_progress,review,done` 에서 멤버가 in_progress 인 에픽이 `blocked` 로
+    /// 읽혔다. 시작한 멤버가 없으면(끝난 것과 첫 칸뿐) 설정의 첫 시작 칸이다.
+    #[test]
+    fn a_group_stands_in_its_least_advanced_started_members_column() {
+        let cfg = Config::parse("prefix = \"argos\"\nstatuses = \"todo, blocked, in_progress, review, done\"\n").unwrap();
+        let rows = |cols: &[&str]| {
+            let mut issues = vec![make("argos-0001", Kind::Epic, "todo")];
+            for (n, c) in cols.iter().enumerate() {
+                issues.push(member(&format!("argos-000{}", n + 2), "argos-0001", c));
+            }
+            issues
+        };
+        let read = |cols: &[&str]| group_states(&rows(cols), &cfg)["argos-0001"].to_string();
+        assert_eq!(read(&["in_progress", "todo"]), "in_progress", "시작한 칸을 자리로 골랐다");
+        assert_eq!(read(&["review", "done"]), "review");
+        assert_eq!(read(&["blocked", "in_progress"]), "blocked");
+        assert_eq!(read(&["done", "todo"]), "blocked", "시작한 멤버가 없으면 첫 시작 칸이다");
+        assert_eq!(read(&["todo", "todo"]), "todo");
+        assert_eq!(read(&[]), "todo");
+        assert_eq!(read(&["done", "done"]), "done");
+
+        let working = rows(&["in_progress", "todo"]);
+        assert!(group_stands(&working, &cfg)["argos-0001"].busy, "in_progress 멤버가 있는데 안 바쁘다");
+        let resting = rows(&["done", "todo"]);
+        assert!(!group_stands(&resting, &cfg)["argos-0001"].busy, "아무도 손대지 않았는데 바쁘다");
+        // 설정에 없는 칸의 멤버는 칸 셈이 못 고르니 바쁨으로도 안 센다 — 세면 묶음이 대신 선
+        // 시작 칸에서 도는데 그 밑에 도는 줄이 없다.
+        let unknown = rows(&["qa", "todo"]);
+        let stand = &group_stands(&unknown, &cfg)["argos-0001"];
+        assert_eq!((stand.column, stand.busy), ("blocked", false), "모르는 칸 멤버로 바쁘다고 했다");
+    }
+
     /// **읽은 칸과 "집은 멤버가 있다" 는 다른 말이다.** 끝난 멤버 하나와 첫 칸 하나로도
     /// 묶음은 시작한 칸으로 읽히지만 아무도 손대지 않는다(moai-x5eg). 두 칸짜리 설정에는
     /// 시작했다는 말이 없어 언제나 거짓이다.
+    ///
+    /// `review` 멤버도 시작한 것으로 센다(moai-p415) — "시작했다" 의 뜻이 `Config::is_started`
+    /// 하나다. 도는 글리프는 여전히 칸 이름(`style::spins`)이 가르므로, review 에 선 묶음은
+    /// 바빠도 안 돈다.
     #[test]
     fn a_group_is_busy_only_with_a_member_in_the_started_column() {
         let issues = vec![
@@ -3196,7 +3246,8 @@ mod tests {
         let stands = group_stands(&issues, &cfg);
         let read = |id: &str| (stands[id].column, stands[id].busy);
         assert_eq!(read("argos-0001"), ("in_progress", false), "반쯤 끝난 에픽을 바쁘다고 한다");
-        assert_eq!(read("argos-0004"), ("in_progress", false), "review 멤버를 집은 것으로 셌다");
+        assert_eq!(read("argos-0004"), ("review", true), "review 멤버의 칸·시작을 잘못 읽었다");
+        assert!(!crate::style::spins(read("argos-0004").0), "review 에 선 묶음이 돈다");
         assert_eq!(read("argos-0006"), ("in_progress", true));
 
         let two = Config::parse("prefix = \"argos\"\nstatuses = \"todo, done\"\n").unwrap();
