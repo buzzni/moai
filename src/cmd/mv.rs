@@ -23,6 +23,8 @@ struct Moved {
     read: super::Read,
     /// 그 가운데 **끝난 멤버가 있는** 묶음 — 남은 멤버를 미뤄 접히는 것.
     finished: std::collections::BTreeSet<String>,
+    /// `done` 으로 옮겨 **이로써 집을 수 있게 된 일**(moai-942k, `report::unblocked`).
+    unblocked: Vec<Issue>,
 }
 
 pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
@@ -47,6 +49,9 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let moved: Moved = repo.with_write(|issues, cfg, _| {
         let mut m = Moved::default();
         let mut entries = Vec::new();
+        // **닫을 때만 전의 모습을 뜬다.** 풀리는 것은 끝낼 때뿐이다 — 다른 칸으로의 이동은
+        // 막음을 풀지 않고, 락을 쥔 채 목록을 한 벌 더 복사하는 값은 그때만 치른다.
+        let before = to.is_done().then(|| issues.clone());
         for id in ids {
             // #a-partial: 하나가 없다고 나머지를 안 옮기지 않는다.
             let Some(i) = issues.iter_mut().find(|i| &i.id == id) else {
@@ -99,6 +104,10 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             .filter(|g| m.read.contains_key(&g.id) && crate::report::has_finished_member(issues, g))
             .map(|g| g.id.clone())
             .collect();
+        // 이로써 풀린 일. 옮긴 것이 없으면 풀린 것도 없다. 판단은 `report` 가 한다.
+        if let Some(before) = before.filter(|_| !m.done.is_empty()) {
+            m.unblocked = crate::report::unblocked(&before, issues, cfg).into_iter().cloned().collect();
+        }
         Ok((entries, m))
     })?;
 
@@ -127,6 +136,9 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             /// 한 줄과 같은 것이다 — 이미 그 칸이던 묶음은 `already` 에 id 뿐이라,
             /// 여기 없으면 되풀이해 부른 쪽만 그 칸을 모른다.
             stands: Vec<Stands<'a>>,
+            /// 이로써 집을 수 있게 된 일. **늘 싣는다** — 없으면 `[]`. 다른 목록 키와 같은
+            /// 모양이라 받는 쪽이 키가 있는지 가르지 않는다.
+            unblocked: Vec<super::Row<'a>>,
         }
         return super::json_line(&Out {
             moved: moved.done.iter().map(|(i, _)| super::Row::from(i, &moved.read)).collect(),
@@ -139,6 +151,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 .filter(|(_, col)| col.as_str() != to.as_str())
                 .map(|(id, col)| Stands { id, derived_status: col })
                 .collect(),
+            unblocked: moved.unblocked.iter().map(|i| super::Row::of(i, None)).collect(),
         });
     }
 
@@ -191,5 +204,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             paint(style::DIM, &crate::view::shelved_by(root))
         ));
     }
+    // **이로써 풀린 일은 한 줄.** 없으면 말하지 않는다 — 출력이 전과 같다.
+    out.extend(crate::view::unblocked_line(&moved.unblocked));
     Ok(out)
 }

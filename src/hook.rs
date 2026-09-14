@@ -140,7 +140,7 @@ pub fn carried(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>) -> Decis
 ///
 /// 계약의 `tool_name`·`tool_input` 을 여기까지 접어 두면, 판정 함수들이 JSON
 /// 모양에 묶이지 않고 시험이 값 하나만 만들면 된다.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Call<'a> {
     /// 껍데기에 친 명령.
     Shell(&'a str),
@@ -803,12 +803,41 @@ fn theirs<'a>(issues: &'a [Issue], away: &'a BTreeSet<String>) -> impl Fn(&Issue
     }
 }
 
+/// **누구의 것인지 모르는** 집은 줄 — 옆 딸린 워크트리의 스냅샷에도 벌여 놓인(또는 거기서 늦게
+/// 옮긴) 줄(`elsewhere`, `worktree::held_elsewhere`)이다 (moai-ntl6, 사용자 결정 B).
+///
+/// 이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다.
+/// **이 줄로는 막지도 붙들지도 않는다** — 받는 쪽은 이것을 `away` 에 더한 좁은 초점으로 한 번
+/// 더 판정해, 풀릴 때만 푼다. 새로 막는 일은 없다. **제 워크트리 이름이 가리키는 일은 확실히
+/// 제 것이라 빼지 않는다**(`own`) — 이름으로 가르던 판정은 그대로다. 대가: main 이 제 몫으로
+/// 집은 뒤 갈라진 워크트리가 생기면 그 집기는 `Stop` 이 더는 안 붙든다(사용자가 받아들였다).
+pub fn unsure(issues: &[Issue], cfg: &Config, elsewhere: &BTreeSet<String>, own: &BTreeSet<String>) -> BTreeSet<String> {
+    if elsewhere.is_empty() {
+        return BTreeSet::new();
+    }
+    let named_mine = theirs(issues, own);
+    report::wip(issues, cfg)
+        .into_iter()
+        .filter(|i| elsewhere.contains(&i.id) && !named_mine(i))
+        .map(|i| i.id.clone())
+        .collect()
+}
+
 /// 규칙 1 — **집은 것 밖에 새 이슈를 세우지 않는다.**
 ///
 /// 초점 밖에 세우면 그 줄이 어느 일에서 나왔는지를 잃고, 에픽을 닫아도 남은
 /// 것이 어디 있는지 아무도 모른다. 지금 할 일이 아니면 `idea` 로 담는다 —
 /// 그쪽은 이 규칙에서 언제나 자유롭다.
+///
+/// 훅은 토막을 고르는 [`guard_shell_in`] 으로 부른다. 토막 전부를 보는 이 모양은 시험이 쓴다.
+#[cfg(test)]
 pub fn guard_create(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str) -> Decision {
+    create_in(issues, cfg, away, cmd, &|_| true)
+}
+
+/// [`guard_create`] 를 `only` 가 고른 토막에만 — 다른 트래커를 가리키는 토막은 그 트래커의
+/// 줄로 본다([`aimed`]).
+fn create_in(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str, only: &dyn Fn(usize) -> bool) -> Decision {
     let focus = held(issues, cfg, away);
     if focus.is_empty() {
         return Decision::Pass;
@@ -816,7 +845,7 @@ pub fn guard_create(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd
     let unit = unit_of(issues, &focus);
 
     // **토막마다 본다.** `cd /repo && moai add …` 의 뒷토막이 진짜 생성이다.
-    let makes = segments(cmd).into_iter().find(|seg| {
+    let makes = segments(cmd).into_iter().enumerate().filter(|(k, _)| only(*k)).map(|(_, seg)| seg).find(|seg| {
         // `add` 만 본다. `idea add` 는 담는 자리고, `--from` 은 에픽과 그
         // 자식들을 한 단위로 세우는 자리라 새는 줄이 아니다.
         //
@@ -878,8 +907,19 @@ pub fn guard_create(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd
 ///
 /// **`defer` 는 막지 않는다.** 안 하기로 한 리뷰에 결과를 적으라고 하면
 /// 그것은 규칙이 아니라 덫이다.
+///
+/// 훅은 토막을 고르는 [`guard_shell_in`] 으로 부른다. 토막 전부를 보는 이 모양은 시험이 쓴다.
+#[cfg(test)]
 pub fn guard_close(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str) -> Decision {
-    for seg in segments(cmd) {
+    close_in(issues, cfg, away, cmd, &|_| true)
+}
+
+/// [`guard_close`] 를 `only` 가 고른 토막에만 — [`create_in`] 과 같은 까닭.
+fn close_in(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str, only: &dyn Fn(usize) -> bool) -> Decision {
+    for (k, seg) in segments(cmd).into_iter().enumerate() {
+        if !only(k) {
+            continue;
+        }
         let Some(args) = moai_args(&seg) else { continue };
         let verbs = positionals(args);
         // `moai mv <id>... <칸>` — 맨 끝이 갈 칸이고 그 앞이 전부 옮길 것이다.
@@ -997,6 +1037,9 @@ pub fn guard_writes(
 /// **리뷰를 부르는 명령도 나머지 규칙을 지난다.** 명령 전체를 리뷰로만 보던
 /// 판은 `moai mv <리뷰> done && /code-review high` 한 줄로 닫기 규칙과 규칙 1 을
 /// 통째로 넘겼다.
+///
+/// 훅은 토막을 고르는 [`guard_shell_in`] 으로 부른다. 토막 전부를 보는 이 모양은 시험이 쓴다.
+#[cfg(test)]
 pub fn guard_shell(
     issues: &[Issue],
     cfg: &Config,
@@ -1005,11 +1048,22 @@ pub fn guard_shell(
     cwd: &Path,
     cmd: &str,
 ) -> Decision {
-    let decision = guard_create(issues, cfg, away, cmd);
-    if decision != Decision::Pass {
-        return decision;
-    }
-    let decision = guard_close(issues, cfg, away, cmd);
+    guard_shell_in(issues, cfg, away, root, cwd, cmd, &|_| true)
+}
+
+/// [`guard_shell`] 을 세션 자리의 트래커로 — 만들기·닫기 규칙은 `only` 가 고른 `moai` 토막만
+/// 본다. 다른 트래커를 가리키는 토막은 [`guard_moai`] 가 그 트래커의 줄로 본다(moai-23ky).
+/// 쓰기와 리뷰는 세션 자리의 규칙이라 명령 전체를 본다.
+pub fn guard_shell_in(
+    issues: &[Issue],
+    cfg: &Config,
+    away: &BTreeSet<String>,
+    root: &Path,
+    cwd: &Path,
+    cmd: &str,
+    only: &dyn Fn(usize) -> bool,
+) -> Decision {
+    let decision = guard_moai(issues, cfg, away, cmd, only);
     if decision != Decision::Pass {
         return decision;
     }
@@ -1047,11 +1101,7 @@ fn shell_writes(cmd: &str, cfg: &Config) -> Vec<String> {
             _ => {}
         }
         for path in found {
-            let unknowable = path.is_empty()
-                || path == "-"
-                || path.starts_with('~')
-                || path.contains(['$', '`', '*', '?', '[', '(', ')', '{', '}']);
-            if unknowable || (moved && !Path::new(&path).is_absolute()) {
+            if unknowable(&path) || (moved && !Path::new(&path).is_absolute()) {
                 continue;
             }
             out.push(path);
@@ -1064,6 +1114,71 @@ fn shell_writes(cmd: &str, cfg: &Config) -> Vec<String> {
         }
     }
     out
+}
+
+/// 글자만으로는 **어디인지 모르는 경로** — 변수·틸드·글롭·프로세스 치환·`-`. 모르는 자리는
+/// 지어내지 않는다.
+fn unknowable(path: &str) -> bool {
+    path.is_empty()
+        || path == "-"
+        || path.starts_with('~')
+        || path.contains(['$', '`', '*', '?', '[', '(', ')', '{', '}'])
+}
+
+/// 만들기·닫기 규칙 — 트래커 하나에 대고 `only` 가 고른 `moai` 토막을 본다.
+///
+/// 다른 트래커를 가리키는 토막([`aimed`])은 **그 트래커의 줄로** 본다(moai-23ky). 세션 자리의
+/// 줄로 보던 판은 남의 프로젝트에 세우는 줄을 제 초점으로 막았고, 남의 프로젝트가 쥔 초점은 못 봤다.
+pub fn guard_moai(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str, only: &dyn Fn(usize) -> bool) -> Decision {
+    let decision = create_in(issues, cfg, away, cmd, only);
+    if decision != Decision::Pass {
+        return decision;
+    }
+    close_in(issues, cfg, away, cmd, only)
+}
+
+/// 토막마다 **그 `moai` 가 도는 자리** — `-C`·`--dir` 나 앞의 `cd`·`pushd` 가 세션의 자리
+/// (`cwd`)를 옮겼으면 그 디렉터리, 아니면 `None`. 차례는 [`segments`] 와 같다 — 받는 쪽이
+/// 토막 번호로 가른다. `moai` 가 아닌 토막은 언제나 `None` 이다.
+///
+/// **모르면 `None` 이다** — 세션의 자리로 본다. 변수·틸드 뒤, `cd -`·`popd`·인자 없는 `cd`
+/// 뒤는 어디인지 글자로 모른다. 지어낸 자리로 보내면 규칙이 새고, 세션 자리로 보는 것은 고치기
+/// 전의 판정 그대로다. 괄호 묶음 안의 `cd` 가 밖으로 이어지는 것은 가르지 않는다 — 드문 모양이고,
+/// 틀려도 명령이 가리킨 트래커 쪽으로 틀린다.
+pub fn aimed(cmd: &str, cwd: &Path) -> Vec<Option<PathBuf>> {
+    let here = resolve(".", cwd);
+    let mut at = Some(here.clone());
+    segments(cmd)
+        .iter()
+        .map(|seg| {
+            let words = command_of(seg);
+            match words.first().map(|w| basename(w)) {
+                Some("cd" | "pushd") => {
+                    let arg = words[1..].iter().find(|w| !w.starts_with('-') || w.as_str() == "-");
+                    at = match (at.take(), arg) {
+                        // `pushd +1`·`-1` 은 스택을 돌리는 것이지 경로가 아니다 — 어디인지 모른다.
+                        (Some(base), Some(a)) if !unknowable(a) && !a.starts_with('+') => Some(resolve(a, &base)),
+                        _ => None,
+                    };
+                    None
+                }
+                Some("popd") => {
+                    at = None;
+                    None
+                }
+                _ => {
+                    let args = moai_args(seg)?;
+                    let base = at.clone()?;
+                    let dir = match flag_values(args, &["-C", "--dir"]).last() {
+                        Some(d) if unknowable(d) => return None,
+                        Some(d) => resolve(d, &base),
+                        None => base,
+                    };
+                    (dir != here).then_some(dir)
+                }
+            }
+        })
+        .collect()
 }
 
 /// 이 토막이 **하나를 집는가** — `moai mv <id>… <칸>` 의 칸이 벌여 놓는 칸이다.
@@ -1504,6 +1619,71 @@ mod tests {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), review("t-1.aa", "in_progress", None)];
         let why = denied(&guard_review(&all, &cfg(), &away(&["t-1"]))).to_string();
         assert!(!why.contains("t-1.aa"), "옆의 리뷰를 집으라고 한다\n{why}");
+    }
+
+    /// 옆 딸린 워크트리에도 벌여 놓인 줄만 누구의 것인지 모른다 — **제 워크트리 이름이 가리키는
+    /// 일은 확실히 제 것이라** 거기 있어도 빼지 않는다(moai-ntl6).
+    #[test]
+    fn only_work_also_held_elsewhere_is_unsure_and_my_named_work_stays_mine() {
+        let all = vec![
+            epic("t-e"),
+            under("t-1", "in_progress", "t-e"),
+            issue("t-2", "in_progress"),
+            issue("t-3", "in_progress"),
+            issue("t-4", "todo"),
+        ];
+        let elsewhere = away(&["t-1", "t-2", "t-4"]);
+        let got: Vec<String> = unsure(&all, &cfg(), &elsewhere, &away(&["t-e"])).into_iter().collect();
+        assert_eq!(got, ["t-2"], "제 에픽의 일이나 안 집은 줄을 모른다고 했다");
+        assert!(unsure(&all, &cfg(), &here(), &here()).is_empty());
+    }
+
+    // ── 명령이 가리키는 트래커 ────────────────────────────────────────
+
+    /// 토막마다 그 `moai` 가 도는 자리를 읽는다 — `-C`·`--dir`·앞의 `cd`. 모르는 자리는
+    /// 세션의 자리(`None`)다.
+    #[test]
+    fn each_moai_segment_knows_where_it_runs() {
+        let at = |cmd: &str| -> Vec<Option<String>> {
+            aimed(cmd, Path::new("/a/b")).into_iter().map(|d| d.map(|p| p.display().to_string())).collect()
+        };
+        let there = |p: &str| Some(p.to_string());
+        assert_eq!(at("moai add x"), [None]);
+        assert_eq!(at("moai -C /c add x"), [there("/c")]);
+        assert_eq!(at("moai --dir=../c add x"), [there("/a/c")]);
+        assert_eq!(at("moai add x -C/c"), [there("/c")]);
+        assert_eq!(at("moai -C . add x"), [None], "제자리를 남의 자리로 읽었다");
+        assert_eq!(at("cd /c && moai add x; moai -C d mv t-1 done"), [None, there("/c"), there("/c/d")]);
+        assert_eq!(at("cd .. && moai add x"), [None, there("/a")]);
+        // 모르는 자리는 지어내지 않는다.
+        assert_eq!(at("cd $HOME && moai add x"), [None, None]);
+        assert_eq!(at("cd /c && cd - && moai add x"), [None, None, None]);
+        assert_eq!(at("cd && moai add x"), [None, None]);
+        assert_eq!(at("pushd /c && pushd +1 && moai add x"), [None, None, None], "스택 돌리기를 경로로 읽었다");
+        assert_eq!(at("moai -C $X add x"), [None]);
+        // `moai` 가 아닌 토막은 어디도 안 가리킨다.
+        assert_eq!(at("echo -C /c"), [None]);
+    }
+
+    /// 다른 트래커를 가리키는 토막은 제 초점으로 안 본다 — 그 토막만 뺀다(moai-23ky).
+    #[test]
+    fn a_segment_aimed_elsewhere_is_left_to_that_tracker() {
+        let mine = vec![issue("t-1", "in_progress")];
+        let root = Path::new("/a");
+        let judge = |cmd: &str| {
+            let dirs = aimed(cmd, root);
+            guard_shell_in(&mine, &cfg(), &here(), root, root, cmd, &|k| dirs[k].is_none())
+        };
+        assert_eq!(judge("moai -C /b add \"딴 일\""), Decision::Pass);
+        assert_eq!(judge("cd /b && moai add \"딴 일\""), Decision::Pass);
+        assert!(denied(&judge("moai -C /b add \"딴 일\" && moai add \"또\"")).contains("t-1"));
+
+        // 가리킨 트래커가 쥔 것이 있으면 그 줄로 막는다.
+        let theirs = vec![issue("t-9", "in_progress")];
+        let cmd = "moai -C /b add \"딴 일\"";
+        let dirs = aimed(cmd, root);
+        let why = denied(&guard_moai(&theirs, &cfg(), &here(), cmd, &|k| dirs[k].is_some())).to_string();
+        assert!(why.contains("t-9"), "{why}");
     }
 
     // ── 무엇을 부르려는가 ────────────────────────────────────────────
