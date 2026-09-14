@@ -20,9 +20,9 @@ fn assignee_of(arg: Option<&str>, by: &Actor) -> (Option<String>, Option<String>
 
 /// `--from` 이 받는 한 덩이. `-` 이면 stdin, 아니면 파일이다.
 ///
-/// **`add --from` 과 `idea promote --from` 이 이 한 길을 같이 쓴다.** 갈라지면
-/// 한쪽만 파일을 받거나 한쪽만 오류 문장이 달라진다.
-pub fn read_source(from: &str) -> R<String> {
+/// [`read_plan`] 만 부른다 — `add --from` 과 `idea promote --from` 은 그쪽 한 길로 읽는다. 여기를
+/// 따로 부르면 템플릿 채우기를 건너뛴 계획이 선다.
+fn read_source(from: &str) -> R<String> {
     match from {
         "-" => {
             let mut s = String::new();
@@ -32,6 +32,51 @@ pub fn read_source(from: &str) -> R<String> {
         }
         path => std::fs::read_to_string(path).map_err(|e| Fail::new(format!("{path}: {e}"))),
     }
+}
+
+/// `--from` 의 계획 한 덩이를 읽어 **형식을 읽고 템플릿 변수를 채운다**(moai-cypw).
+///
+/// `add --from` 과 `idea promote --from` 이 **이것만** 부른다 — 한쪽만 `--var` 를 받거나 한쪽만
+/// 거절 문장이 달라지지 않게. 읽기와 채우기는 `draft::fill` 한 자리다 — 값은 형식을 안 지나 늘
+/// 제목 글자다.
+///
+/// `--var` 는 `이름=값` 이다. `=` 이 없거나 이름이 비거나 변수 이름의 모양(`draft::is_var_name`)이
+/// 아니면 그 인자를 대며 거절하고, **같은 이름을 두 번 주면 거절한다** — 어느 값이 이길지 조용히
+/// 고르면 템플릿이 사람이 안 적은 계획을 찍는다. 이 거절과 `fill` 의 거절은 모두 `bad_input` 이다.
+pub fn read_plan(from: &str, vars: &[String]) -> R<Vec<draft::Draft>> {
+    let bad = |msg: String| Fail::coded(msg, super::code::BAD_INPUT);
+    let mut pairs: Vec<(&str, &str)> = Vec::new();
+    // 틀린 `--var` 는 **전부** 모아 한 번에 말한다 — `fill`·`parse` 가 줄을 그렇게 말하는 것과 같다.
+    let mut errors: Vec<String> = Vec::new();
+    for raw in vars {
+        let Some((name, value)) = raw.split_once('=').filter(|(n, _)| !n.is_empty()) else {
+            errors.push(format!("`--var {raw}` 는 `이름=값` 이 아니다"));
+            continue;
+        };
+        let why = if !draft::is_var_name(name) {
+            // 이름은 계획이 변수로 읽는 모양 그대로다 — 안 그러면 `{{버전}}` 이 든 계획에 `--var 버전=…` 을
+            // 준 사람이 "계획에 없는 변수" 라는 틀린 말을 듣는다.
+            "의 이름은 영문·숫자·`_`·`-` 로 적는다 — 계획의 `{{이름}}` 도 그 모양일 때만 변수다"
+        } else if value.contains(['\n', '\r']) {
+            // 제목은 한 줄이다 — 줄바꿈이 든 값은 여러 줄 제목을 세운다.
+            "의 값에 줄바꿈이 들었다 — 값은 한 줄이다"
+        } else if value.trim().is_empty() {
+            // **빈 값은 거절한다**(사람이 정했다, 리뷰 moai-cypw.nn4). 셸 변수가 비어 `--var version=$VERSION`
+            // 이 빈 값이 되면 "릴리스 " 같은 반쯤 채운 제목이 조용히 선다 — 전부 필수가 막으려던 그것이다.
+            "의 값이 비었다 — 채울 값을 준다"
+        } else if pairs.iter().any(|(k, _)| *k == name) {
+            "를 두 번 줬다 — 어느 값을 쓸지 하나만 준다"
+        } else {
+            pairs.push((name, value));
+            continue;
+        };
+        errors.push(format!("`--var {name}` {why}"));
+    }
+    if !errors.is_empty() {
+        return Err(bad(errors.join("\n      ")));
+    }
+    let src = read_source(from)?;
+    draft::fill(&src, &pairs).map_err(bad)
 }
 
 /// `-` 이면 stdin. `add` 와 `edit` 이 같은 규칙을 쓴다.
@@ -86,7 +131,20 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
                 ));
             }
         }
-        return bulk(ctx, &repo, from, args.dry_run, args.assignee.clone());
+        return bulk(ctx, &repo, from, &args.var, args.dry_run, args.assignee.clone());
+    }
+    // **`--var` 도 `--from` 이 있어야 뜻이 있다**(moai-cypw) — 아래 `--dry-run` 과 같은 까닭이다.
+    // 조용히 버리면 템플릿을 채운 줄 안 사람이 `{{이름}}` 이 아닌 제목 하나를 만든다.
+    if !args.var.is_empty() {
+        // idea 가 템플릿을 쓰는 길은 펼치기다 — 위의 `--from` 거절이 idea 에 가리키는 곳과 같게 댄다.
+        let how = match kind_override.or(args.kind) {
+            Some(Kind::Idea) => "moai idea promote <id> --from <파일> --var 이름=값",
+            _ => "moai add --from <파일> --var 이름=값",
+        };
+        return Err(Fail::coded(
+            format!("`--var` 는 `--from` 과 함께 쓴다 — 템플릿 파일의 `{{{{이름}}}}` 을 채우는 것이다\n      `{how}`"),
+            super::code::BAD_INPUT,
+        ));
     }
     // **연습이라 적힌 명령이 쓰면 안 된다.** 여기 닿았다는 것은 `--from` 이
     // 없다는 뜻이고, 하나짜리에는 연습 길이 없어 `--dry-run` 이 그대로 만들고
@@ -193,9 +251,8 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
 ///
 /// 하나씩 만들면 에이전트가 중간에 흘리고, 중간에 죽으면 반만 남은 계획이
 /// 남는다. 한 번의 쓰기라 다 되거나 하나도 안 된다.
-fn bulk(ctx: &Ctx, repo: &Repo, from: &str, dry_run: bool, assignee: Option<String>) -> R<Vec<String>> {
-    let src = read_source(from)?;
-    let drafts = draft::parse(&src).map_err(|e| Fail::coded(e, super::code::BAD_INPUT))?;
+fn bulk(ctx: &Ctx, repo: &Repo, from: &str, vars: &[String], dry_run: bool, assignee: Option<String>) -> R<Vec<String>> {
+    let drafts = read_plan(from, vars)?;
 
     if dry_run {
         if ctx.json {
