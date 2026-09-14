@@ -603,7 +603,7 @@ pub struct EditArgs {
     #[arg(short, long, value_name = "id|none")]
     pub epic: Option<String>,
 
-    /// 마일스톤을 옮긴다 (`none` 이면 뺀다)
+    /// 마일스톤을 옮긴다 (`none` 이면 제 필드를 뺀다 — 에픽·부모에게서 오는 마일스톤은 남는다)
     #[arg(long, value_name = "id|none")]
     pub milestone: Option<String>,
 
