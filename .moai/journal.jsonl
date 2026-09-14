@@ -1624,3 +1624,11 @@
 {"ts":"2026-09-14T10:13:32Z","id":"moai-nt0h","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"blocked_since 가 막는 줄과 막힌 줄의 조상(부모·에픽·마일스톤)을 도로 집은 때도 센다"}
 {"ts":"2026-09-14T10:13:33Z","id":"moai-qot0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-nt0h 로 옮겨 작업한다"}
 {"ts":"2026-09-14T10:13:33Z","id":"moai-nt0h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T10:14:13Z","id":"moai-xs19","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅의 초점 — 옆 워크트리가 쥔 일은 제 초점이 아니다"}
+{"ts":"2026-09-14T10:14:13Z","id":"moai-asjt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옆 워크트리 이름(worktree-<id>·.claude/worktrees/<id>)이 가리키는 일과 그 밑을 훅의 초점에서 뺀다"}
+{"ts":"2026-09-14T10:14:13Z","id":"moai-xs19","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-0yrv 에서 펼쳤다 — 규칙 1 이 다른 워크트리 세션이 집은 것까지 초점으로 세어 main 의 add 를 막는다 — 워크트리 원칙이 서면 늘 막힌다"}
+{"ts":"2026-09-14T10:14:13Z","id":"moai-0yrv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-xs19 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-14T10:14:32Z","id":"moai-cxk8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"blocked_stale·Stand::since 를 칸 시각으로 잰다 — 미루기·도로 집기로 막힘 시계가 새로 서지 않는다"}
+{"ts":"2026-09-14T10:14:32Z","id":"moai-yvxs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-cxk8 로 옮겨 작업한다"}
+{"ts":"2026-09-14T10:14:32Z","id":"moai-cxk8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T10:14:32Z","id":"moai-cxk8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-yvxs 에서 옮김. 사용자와 정한 것(2026-09-14): 막힘 시계는 미루기·도로 집기로 새로 서지 않는다. 까닭 — 미룬 막음도 막으므로(moai-2sea) 미뤄 둔 동안에도 막힘은 이어졌고 그동안 blocked_by_deferred 로 드러나 있었다. defer→--undo 두 번으로 blocked_stale 이 0일로 돌아가면 planned_at 을 만들 때 status_since 를 안 올린 까닭(미루기가 방치 경고를 지우는 손잡이)이 경고 쪽으로 돌아온다. 그래서 blocked_since 는 칸 시각(status_since, 묶음은 멤버의 칸 시각으로 선 Stand::since)으로 재고 planned_at 은 --worktree 겹치기에만 쓴다. Stand::since 도 status_since 로 되돌린다. 대가로 받아들인 것: 미뤘던 묶음을 도로 집으면 막힌 줄이 곧장 N일째로 선다(moai-xib6.moh 리뷰 2번을 되돌림) — 그 막힘은 실제로 이어졌던 것이다."}
