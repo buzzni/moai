@@ -535,7 +535,6 @@ impl Browse {
             Unregister => "목록에서 빼기",
             Worktree => "워크트리 겹쳐 보기",
             Raw => "원문↔그리기",
-            Deferred => "미룸",
             ShowAll => "모두 보이기",
             Sort(o) => o.word(),
             Cell(f) => f.word(),
