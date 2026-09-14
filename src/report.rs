@@ -38,14 +38,25 @@ pub struct Roll {
     pub column: Option<String>,
 }
 
-/// 이슈 id → 그것이 속한 에픽의 **제목**. 화면이 필요한 것은 id 가 아니라
+/// 줄 → 그것이 속한 에픽의 제목 ([`epic_labels`]). 키는 **id 와 그 줄의 종류**다.
+pub type EpicLabels<'a> = BTreeMap<(&'a str, Kind), String>;
+
+/// 줄 → 그것이 속한 에픽의 **제목**. 화면이 필요한 것은 id 가 아니라
 /// 제목이고, 소속 판정(`groups`)과 제목 찾기를 한 번에 끝내 둔다.
-pub fn epic_labels(all: &[Issue]) -> BTreeMap<&str, String> {
-    let titles: BTreeMap<&str, &str> = all.iter().map(|i| (i.id.as_str(), i.title.as_str())).collect();
+///
+/// **키에 종류를 싣는다.** `groups` 는 id 지도라 같은 id 의 뒷줄 — 그 줄의 종류로 —
+/// 셈한 값이다. id 만으로 찾으면 종류가 다른 쌍둥이에게 가려진 줄([`eclipsed`])이
+/// 쌍둥이 에픽의 제목을 달아, 트리는 `(길 잃음)`·`-e` 는 어느 에픽에도 안 고르는 그
+/// 줄이 목록 칸에서만 멤버로 섰다(moai-b5lu). 뒷줄의 종류로 키를 짜면 가려진 줄은
+/// 저절로 못 찾고, 같은 종류의 쌍둥이는 전처럼 같은 칸을 받는다. 찾는 쪽은
+/// `(i.id, i.kind)` 로 묻는다.
+pub fn epic_labels(all: &[Issue]) -> EpicLabels<'_> {
+    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
     groups(all)
         .into_iter()
-        .map(|(id, epic)| {
-            (id, titles.get(epic).copied().unwrap_or("(없는 에픽)").to_string())
+        .filter_map(|(id, epic)| {
+            let title = by_id.get(epic).map_or("(없는 에픽)", |e| e.title.as_str());
+            by_id.get(id).map(|row| ((id, row.kind), title.to_string()))
         })
         .collect()
 }
@@ -1433,12 +1444,18 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     let mut warnings = Vec::new();
     let mut notices = Vec::new();
 
+    // **가려진 줄은 소속으로 꾸짖지 않는다** (1·1-2). 소속 지도의 값은 쌍둥이의
+    // 종류로 셈한 것이라 그 줄의 것이 아니고, 그 줄은 `(길 잃음)` 에 서며 힌트
+    // (`moai show -e none`·`--milestone none`)의 거름망도 안 고른다 — 세면 경고가
+    // 가리킨 명령이 침묵한다(moai-b5lu). `duplicate_id` 가 그 id 를 따로 드러낸다.
+    let eclipsed = eclipsed(issues);
+
     // 1. 에픽에 안 붙은 것. 마일스톤이 아직 없으므로 **제일 중요한 신호**다
     //    — "물어보지 않고 만든 이슈" 의 지문이다.
     let loose: Vec<&Issue> = work
         .iter()
         .copied()
-        .filter(|i| !i.status.is_done() && !group.contains_key(i.id.as_str()))
+        .filter(|i| !i.status.is_done() && !eclipsed(i) && !group.contains_key(i.id.as_str()))
         .collect();
     // **분모는 미룬 일까지 센다.** 에픽을 통째로 미루면 그 멤버만 `work` 에서 빠져,
     // 원래 있던 소속 없는 일 하나가 "열린 것의 100%" 로 선다 — 미루기 하나로 경고가
@@ -1462,7 +1479,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
             .iter()
             .copied()
             .filter(|i| {
-                !i.status.is_done()
+                !i.status.is_done() && !eclipsed(i)
                     && (!mile.contains_key(i.id.as_str())
                         || placed.get(i.id.as_str()) == Some(&Misplace::Milestone))
             })
@@ -3156,6 +3173,40 @@ mod tests {
         for kind in ["orphan_child", "dangling_blocked_by", "duplicate_id"] {
             let w = st.warnings.iter().find(|w| w.kind == kind).unwrap_or_else(|| panic!("{kind} 가 없다"));
             assert_eq!((w.ids.as_slice(), w.count), (&["argos-0009.aaa".to_string()][..], 1), "{w:?}");
+        }
+    }
+
+    /// **가려진 줄은 쌍둥이의 소속을 달지도, 쌍둥이의 소속으로 세지도 않는다** (moai-b5lu).
+    /// 종류가 다른 쌍둥이에게 id 가 가려진 줄([`eclipsed`])은 트리에서 `(길 잃음)`,
+    /// 롤업·`-e`/`--milestone` 거름망에서 어느 묶음에도 안 든다. 그런데 에픽 칸은 id 로
+    /// 찾아 그 줄에 쌍둥이 에픽의 제목을 냈고, `no_epic`·`no_milestone` 은 쌍둥이의 지도
+    /// 값으로 세어 경고에 선 줄을 힌트(`moai show -e none`)가 안 냈다.
+    #[test]
+    fn an_eclipsed_row_borrows_no_membership_from_its_twin() {
+        let epic = make("argos-e001", Kind::Epic, "todo");
+        // 앞줄 이슈는 에픽이 없고, 뒷줄 생각이 그 에픽에 든다 — 에픽 칸이 흐르는 쪽.
+        let bare = make("argos-0001", Kind::Issue, "todo");
+        let mut held = make("argos-0001", Kind::Idea, "todo");
+        held.epic = Some("argos-e001".into());
+        let rows = [epic, bare, held];
+        let labels = epic_labels(&rows);
+        assert_eq!(labels.get(&("argos-0001", Kind::Idea)).map(String::as_str), Some("argos-e001 제목"));
+        assert_eq!(labels.get(&("argos-0001", Kind::Issue)), None, "가려진 줄이 쌍둥이 에픽을 달았다 — {labels:?}");
+
+        // 앞줄 이슈는 에픽·마일스톤이 있고 뒷줄 생각은 없다 — 경고가 쌍둥이 값으로 세는 쪽.
+        let stone = make("argos-m001", Kind::Milestone, "todo");
+        let mut placed = make("argos-e002", Kind::Epic, "todo");
+        placed.milestone = Some("argos-m001".into());
+        let mut member = make("argos-0002", Kind::Issue, "todo");
+        member.epic = Some("argos-e002".into());
+        let mut shadowed = make("argos-0003", Kind::Issue, "todo");
+        shadowed.epic = Some("argos-e002".into());
+        let loose_thought = make("argos-0003", Kind::Idea, "todo");
+        let rows = vec![stone, placed, member, shadowed, loose_thought];
+        let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z");
+        for kind in ["no_epic", "no_milestone"] {
+            let named = st.warnings.iter().filter(|w| w.kind == kind).flat_map(|w| w.ids.iter()).any(|id| id == "argos-0003");
+            assert!(!named, "{kind} 가 가려진 줄을 쌍둥이 값으로 셌다 — {:?}", st.warnings);
         }
     }
 

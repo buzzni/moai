@@ -164,7 +164,7 @@ pub fn list(
     issues: &[Issue],
     cfg: &Config,
     hidden: Hidden,
-    epics: &BTreeMap<&str, String>,
+    epics: &crate::report::EpicLabels,
     asked_deferred: bool,
     wh: &crate::query::Where,
     origin: &Origin,
@@ -179,7 +179,7 @@ pub fn list(
     }
 
     let show_tags = issues.iter().any(|i| !i.tags.is_empty());
-    let show_epic = issues.iter().any(|i| epics.contains_key(i.id.as_str()));
+    let show_epic = issues.iter().any(|i| epics.contains_key(&(i.id.as_str(), i.kind)));
     // 미룸 표를 달지 말지는 **부르는 쪽의 물음**에서 온다. 한때 결과의 내용
     // 으로 정했는데(`any(|i| !i.is_deferred())`), 그러면 `--all` 이 마침 전부
     // 미룬 것만 냈을 때 표가 통째로 사라져 계획 밖의 줄이 일과 똑같이 보인다 —
@@ -193,7 +193,7 @@ pub fn list(
     // 에픽 열은 **제목**을 보여준다. id 를 보여주면 사람이 그걸 다시 찾아봐야 한다.
     let epics: Vec<String> = issues
         .iter()
-        .map(|i| match epics.get(i.id.as_str()) {
+        .map(|i| match epics.get(&(i.id.as_str(), i.kind)) {
             None => "—".into(),
             Some(t) => clip(t, EPIC_CAP),
         })
@@ -844,7 +844,7 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, origin: &Orig
 /// 집을 수 있는 일. 그리고 이미 벌여 놓은 것.
 pub fn ready(
     picks: &[&Issue],
-    epics: &BTreeMap<&str, String>,
+    epics: &crate::report::EpicLabels,
     wip: &[&Issue],
     held: &[crate::report::Held],
     origin: &Origin,
@@ -865,7 +865,7 @@ pub fn ready(
         let w_tags = tags.iter().map(|t| width(t)).max().unwrap_or(0);
 
         for ((i, (title, w_this)), tag) in picks.iter().zip(&heads).zip(&tags) {
-            let epic = match epics.get(i.id.as_str()) {
+            let epic = match epics.get(&(i.id.as_str(), i.kind)) {
                 None => "에픽 없음".to_string(),
                 Some(t) => clip(t, EPIC_CAP),
             };
@@ -1401,7 +1401,7 @@ mod tests {
         Config::parse("prefix = \"argos\"\n").unwrap()
     }
 
-    fn no_epics() -> BTreeMap<&'static str, String> {
+    fn no_epics() -> crate::report::EpicLabels<'static> {
         BTreeMap::new()
     }
 
@@ -1493,7 +1493,7 @@ mod tests {
             mine,
             vec![("feat/x".into(), std::path::PathBuf::from("/wt"), theirs)],
         );
-        let tagged: BTreeMap<&str, String> = all.iter().map(|i| (i.id.as_str(), "에픽".to_string())).collect();
+        let tagged: crate::report::EpicLabels = all.iter().map(|i| ((i.id.as_str(), i.kind), "에픽".to_string())).collect();
         let out = plain(&list(&all, &cfg(), Hidden::default(), &tagged, false, &Default::default(), &origin));
         assert!(out[1].contains("여기 일") && !out[1].contains('⎇'), "{out:#?}");
         assert!(out[2].contains("⎇ feat/x 옆 일"), "{out:#?}");
@@ -1582,12 +1582,12 @@ mod tests {
     fn the_epic_column_shows_a_title() {
         let mut i = issue("argos-0002", "멤버", "todo");
         i.epic = Some("argos-0001".into());
-        let labels = BTreeMap::from([("argos-0002", "저장 계층".to_string())]);
+        let labels = BTreeMap::from([(("argos-0002", Kind::Issue), "저장 계층".to_string())]);
         let out = plain(&list(&[i.clone()], &cfg(), Hidden::default(), &labels, false, &Default::default(), &Origin::default()));
         assert!(out[1].contains("저장 계층") && !out[1].contains("argos-0001"), "{out:#?}");
 
         // 없는 에픽을 가리켜도 죽지 않고 그렇다고 말한다
-        let dangling = BTreeMap::from([("argos-0002", "(없는 에픽)".to_string())]);
+        let dangling = BTreeMap::from([(("argos-0002", Kind::Issue), "(없는 에픽)".to_string())]);
         let out = plain(&list(&[i], &cfg(), Hidden::default(), &dangling, false, &Default::default(), &Origin::default()));
         assert!(out[1].contains("(없는 에픽)"), "{out:#?}");
     }
@@ -1815,7 +1815,7 @@ mod tests {
         a.epic = Some("argos-0001".into());
         let b = issue("argos-0003", "떠 있는 것", "todo");
         let wip = issue("argos-0004", "잡고 있는 것", "in_progress");
-        let labels = BTreeMap::from([("argos-0002", "저장 계층".to_string())]);
+        let labels = BTreeMap::from([(("argos-0002", Kind::Issue), "저장 계층".to_string())]);
 
         let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[], &Origin::default()));
         let joined = out.join("\n");
