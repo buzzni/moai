@@ -2041,3 +2041,4 @@
 {"ts":"2026-09-14T13:04:26Z","id":"moai-xe74.q45","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"발견 0 — 고칠 것 없음. --json 에서도 막음을 세는 비용은 read·shelved 와 같은 길이라 두었다"}
 {"ts":"2026-09-14T13:04:26Z","id":"moai-xe74","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (7d20fb8) — edit 뒤 상세도 show <id> 와 같은 막음 줄"}
 {"ts":"2026-09-14T13:05:03Z","id":"moai-gmt9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"main 머지는 61f562c 다. 내가 머지를 올려 둔(MERGE_HEAD) 사이에 옆 세션이 제 트래커 커밋을 치면서 그 머지를 함께 확정해, 제목이 'chore(tracker): moai-hxma …' 로 섰다. 내용은 worktree-moai-gmt9 전체이고, 확정 직전 같은 나무에서 cargo test 695+250 이 지났다. 공유 main 이라 제목을 고치려 역사를 다시 쓰지 않는다."}
+{"ts":"2026-09-14T13:06:04Z","id":"moai-f7xs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 — init 이 새 접두어를 8자까지 받고 디렉터리 이름은 줄인다"}
