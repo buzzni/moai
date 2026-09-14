@@ -2250,3 +2250,4 @@
 {"ts":"2026-09-14T14:35:20Z","id":"moai-5jxr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T14:39:18Z","id":"moai-v2jf.lsa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"고칠 것 없음, 넘긴 것 없음 — 읽혔을 때만 설정을 넣는 것·다른 relist 의 None·키 안내·권한 시험을 확인"}
 {"ts":"2026-09-14T14:39:19Z","id":"moai-v2jf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (83c29cc) — 고르기 창의 . 이 다시 읽기에 성공할 때만 숨은 것 보이기를 바꾼다"}
+{"ts":"2026-09-14T14:39:32Z","id":"moai-xqxu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
