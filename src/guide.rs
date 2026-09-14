@@ -317,7 +317,8 @@ pub fn reference() -> String {
     moai status --worktree            보드 머리에 "⎇ <워크트리들> 겹쳐 봄"
     moai show --worktree --json       옆에서 온 줄에만 "branch" 키
 
-같은 id 는 `updated_at` 이 가장 늦은 줄이 서고, 같으면 지금 브랜치의 줄이다.
+같은 id 는 칸을 늦게 옮긴 줄(`status_since`)이 서고, 같으면 `updated_at` 이 늦은
+줄, 그것도 같으면 지금 브랜치의 줄이다 — 필드만 고친 것은 옆에서 집은 것을 풀지 않는다.
 여기서 `rm` 한 줄은 옆 줄로 되살아나지 않는다 — 갈라진 자리(`git merge-base`)에
 있던 줄이면 여기서 지운 것으로 읽는다. 단 옆에서 그 뒤에 집거나 고친 줄은 선다.
 지금 브랜치가 아닌 줄은 제목 앞에 `⎇ <브랜치>` 가 붙는다. **보여줄 때만

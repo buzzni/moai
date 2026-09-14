@@ -5535,6 +5535,24 @@ fn worktree_does_not_revive_a_line_removed_here() {
     assert!(!status.contains(&t.tied), "{status}");
 }
 
+/// 옆에서 집은 뒤 **여기서 필드만 늦게 고쳐도** 옆에서 집은 것이 풀리지 않는다
+/// (moai-2f5g). 겹치는 규칙이 칸을 옮긴 시각을 먼저 본다.
+#[test]
+fn worktree_a_later_field_edit_here_does_not_unpick_what_another_worktree_picked() {
+    let t = trees("wtedit");
+    let main = t.main();
+    ok_at(&main, "2026-09-13T00:00:00Z", &["edit", &t.picked, "-p", "0"]);
+
+    let ready = ok(&main, &["ready", "--worktree", "--json"]);
+    assert!(ready.contains("\"branch\":\"feat/x\""), "{ready}");
+    let picks = ok(&main, &["ready", "--worktree"]);
+    let offered: String = picks.lines().take_while(|l| !l.starts_with('!')).collect::<Vec<_>>().join("\n");
+    assert!(!offered.contains(&t.picked), "여기서 우선순위만 고쳤는데 옆에서 집은 일을 집으라고 낸다\n{picks}");
+    let shown = ok(&main, &["show", "--worktree"]);
+    let line = shown.lines().find(|l| l.starts_with(t.picked.as_str())).unwrap_or_default();
+    assert!(line.contains("▸  ⎇ feat/x"), "옆에서 집은 줄이 안 섰다\n{shown}");
+}
+
 // ── moai project ────────────────────────────────────────────────────────────
 
 /// **등록 시험은 저마다 제 설정 파일을 쓴다.** [`isolated`] 의 `MOAI_CONFIG` 는
