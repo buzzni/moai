@@ -1154,6 +1154,59 @@ fn edit_says_when_epic_none_cannot_cut_a_parents_membership() {
     assert!(line_of(s.path(), &top).contains(r#""inherited_epic":"거짓""#), "모르는 필드를 잃었다");
 }
 
+/// **마일스톤 줄에는 `--milestone <id>` 를 못 적는다**(moai-bg55, 사용자와 정함). 그 필드는
+/// 소속으로 안 세므로(moai-jwnr) 조용히 받으면 적은 사람은 걸린 줄 안다. 만들 때도 고칠
+/// 때도 같은 자로 거절하고 파일은 한 바이트도 안 바뀐다. **엄함은 지금 쓰는 줄에만** —
+/// 이미 그 필드를 든 옛 줄은 다른 쓰기를 막지 않고, 그 줄을 손댈 때 비우는 길을 댄다.
+#[test]
+fn a_milestone_line_refuses_a_milestone_but_old_lines_do_not_block() {
+    let s = init("stonestone");
+    let m2 = ok(s.path(), &["milestone", "add", "M2", "-q"]).trim().to_string();
+    let m1 = ok(s.path(), &["milestone", "add", "M1", "-q"]).trim().to_string();
+    let refused = |args: &[&str], id: &str| {
+        let before = issues(s.path());
+        let out = moai(s.path(), args);
+        assert!(!out.status.success(), "{args:?} 를 받았다");
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(err.contains("다른 마일스톤에 들지 않는다") && err.contains(&format!("moai edit {id} --milestone none")), "{args:?}: {err:?}");
+        assert_eq!(issues(s.path()), before, "{args:?}: 거절했는데 파일이 바뀌었다");
+    };
+    refused(&["edit", &m1, "--milestone", &m2], &m1);
+    let before = issues(s.path());
+    let out = moai(s.path(), &["milestone", "add", "M3", "--milestone", &m2]);
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(!out.status.success() && err.contains("다른 마일스톤에 들지 않는다"), "만들 때 받았다 — {err:?}");
+    // 만들 때는 **빼라고** 댄다. 거절된 새 줄의 id 는 저장되지 않으므로, 그 id 로 `moai edit` 를
+    // 치라고 대면 시킨 대로 친 명령이 "못 찾았다" 로 끝난다(리뷰 moai-bg55.oya).
+    assert!(err.contains("`--milestone` 을 빼고"), "만들 때 뺄 길을 안 댔다 — {err:?}");
+    assert_eq!(issues(s.path()), before, "거절한 만들기가 파일을 바꿨다");
+    // 이슈·에픽은 여전히 마일스톤에 든다.
+    add(s.path(), &["일", "--milestone", &m2]);
+    add(s.path(), &["에픽", "--type", "epic", "--milestone", &m2]);
+
+    // 옛 바이너리가 쓴 줄 — 필드를 든 마일스톤 줄을 파일에 직접 둔다.
+    let file = s.path().join(".moai/issues.jsonl");
+    let src = std::fs::read_to_string(&file).unwrap();
+    let old = src
+        .lines()
+        .map(|l| match l.contains(&format!("\"id\":\"{m1}\"")) {
+            true => l.replacen("\"created_at\"", &format!("\"milestone\":\"{m2}\",\"created_at\""), 1),
+            false => l.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(&file, &old).unwrap();
+    // 그 줄을 안 건드리는 쓰기는 지나간다.
+    add(s.path(), &["딴 일"]);
+    assert!(line_of(s.path(), &m1).contains(&format!("\"milestone\":\"{m2}\"")), "안 건드린 옛 줄의 필드를 지웠다");
+    // 그 줄을 손대면 거절하고 비우는 길을 댄다 — 그 길을 치면 지나간다.
+    refused(&["edit", &m1, "--title", "M1 새 제목"], &m1);
+    ok(s.path(), &["edit", &m1, "--milestone", "none"]);
+    // 키로 찾는다 — 마일스톤 줄은 `"kind":"milestone"` 을 들어 낱말만 찾으면 늘 걸린다.
+    assert!(!line_of(s.path(), &m1).contains("\"milestone\":"), "--milestone none 이 옛 줄을 못 비웠다");
+}
+
 /// **`--milestone none` 도 못 끊는 소속은 끊기지 않았다고 말한다** (moai-0lmn). 에픽이
 /// 마일스톤을 이기고 부모도 이기므로, 제 필드를 비워도 에픽이나 부모가 선 마일스톤에
 /// 그대로 든다 — `-e none` 과 같은 모양이라 같은 말투로 댄다.
@@ -1311,6 +1364,28 @@ fn edit_detail_draws_the_same_blocker_lines_as_show() {
     let edited = ok(s.path(), &["edit", &b, "-p", "2"]);
     assert!(line(&edited).contains("풀림"), "끝난 막음이 풀림으로 안 섰다\n{edited}");
     assert_eq!(line(&edited), line(&ok(s.path(), &["show", &b])));
+}
+
+/// **덧붙인 키가 이긴다**(moai-kgu2) — 줄이 모르는 필드로 `children`·`blockers` 를 들고 있어도
+/// `show --json` 은 그 키를 한 번씩만, 우리 값으로 낸다. 파일은 한 바이트도 안 바뀐다.
+#[test]
+fn show_json_keys_win_over_unknown_fields_of_the_same_name() {
+    let s = init("showkeys");
+    let a = add(s.path(), &["막는 것"]);
+    let b = add(s.path(), &["막히는 것"]);
+    ok(s.path(), &["link", &a, "--blocks", &b]);
+    let doctored = issues(s.path()).replace(
+        &format!("\"id\":\"{b}\","),
+        &format!("\"id\":\"{b}\",\"children\":[\"가짜\"],\"blockers\":\"가짜\","),
+    );
+    std::fs::write(s.path().join(".moai/issues.jsonl"), &doctored).unwrap();
+
+    let json = ok(s.path(), &["show", &b, "--json"]);
+    assert_eq!(json.matches("\"children\":").count(), 1, "children 키가 둘 섰다\n{json}");
+    assert_eq!(json.matches("\"blockers\":").count(), 1, "blockers 키가 둘 섰다\n{json}");
+    assert!(json.contains("\"children\":[]") && !json.contains("가짜"), "모르는 필드가 덧붙인 키를 이겼다\n{json}");
+    assert!(json.contains(&format!("\"blockers\":[{{\"id\":\"{a}\"")), "{json}");
+    assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
 }
 
 /// 메모는 스냅샷을 건드리지 않고 저널에만 쌓인다.
