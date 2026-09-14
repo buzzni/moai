@@ -542,6 +542,45 @@ fn outside_a_repo_the_overview_speaks_json() {
     assert!(rd.contains("\"unreadable\":0"), "{rd}");
 }
 
+/// **`.moai` 밖의 `tui --json` 은 프로젝트 층의 줄을 낸다**(moai-ujpu) — 탐색기 줄과 같은
+/// 키(`title`·`kind`·`dir`·`path`)에 한눈 보기와 같은 상태 낱말. 프로젝트 줄의 `path` 는
+/// 디렉터리라 `-C` 로 들어간다. 등록 차례 그대로다. `--path` 는 어느 프로젝트의 id 인지
+/// 몰라 거절하고, 등록한 것이 없으면 `status` 와 같은 말로 멈춘다.
+#[test]
+fn outside_a_repo_tui_json_lists_the_project_layer() {
+    let s = Scratch::new("ovtui");
+    let (good, bare, out) = (dir_in(&s, "good"), dir_in(&s, "bare"), dir_in(&s, "out"));
+    ok(&good, &["init", "argos"]);
+    let picked = add(&good, &["집은 일"]);
+    ok(&good, &["mv", &picked, "in_progress"]);
+    let cfg = registry(&s, &[&good, &bare]);
+
+    let rows = ok_with(&out, &cfg, &["tui", "--json"]);
+    one_json_value(&rows);
+    let good_at = format!(
+        "[{{\"title\":\"good\",\"kind\":\"project\",\"dir\":true,\"path\":{:?},\"state\":\"ok\",\"counts\":{{",
+        good.to_str().unwrap()
+    );
+    assert!(rows.starts_with(&good_at), "{rows}");
+    assert!(rows.contains(&format!("\"picked\":[\"{picked}\"]")) && rows.contains("\"in_progress\":1"), "{rows}");
+    let bare_at = format!(
+        "{{\"title\":\"bare\",\"kind\":\"project\",\"dir\":false,\"path\":{:?},\"state\":\"uninitialized\"}}]",
+        bare.to_str().unwrap()
+    );
+    assert!(rows.trim_end().ends_with(&bare_at), "{rows}");
+
+    // 들어가는 손잡이는 디렉터리다 — 거기서 부르면 오늘의 `tui --json` 이다.
+    let inside = ok_with(&out, &cfg, &["-C", good.to_str().unwrap(), "tui", "--json"]);
+    assert!(inside.contains(&format!("\"id\":\"{picked}\"")), "{inside}");
+
+    let o = moai_with(&out, &cfg, &["tui", "--json", "--path", &picked]);
+    assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("-C <dir> tui --path"), "{}", text(&o));
+
+    let empty = registry(&s, &[]);
+    let o = moai_with(&out, &empty, &["tui", "--json"]);
+    assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("moai project add"), "{}", text(&o));
+}
+
 /// 등록한 것이 없으면 **전처럼 실패하되** 등록하는 길을 댄다. 보여줄 것이 없는데 0 으로
 /// 끝나면 `.moai` 밖에서 부른 실수가 성공으로 읽힌다. 설정 파일이 깨져 목록이 빈 것이면
 /// 그 까닭도 함께 말한다.

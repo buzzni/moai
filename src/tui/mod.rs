@@ -7,6 +7,7 @@ pub mod draw;
 pub mod edit;
 pub mod form;
 pub mod input;
+pub mod layer;
 pub mod scroll;
 
 use crate::config::Config;
@@ -22,9 +23,12 @@ use scroll::{PAGE, Scroll};
 /// 목록의 한 줄. `..` 은 이슈가 아니므로 [`Entry`] 로는 못 담는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
-    /// 한 층 위로. 뿌리가 아닐 때만 맨 앞에 선다 — MC 와 같다.
+    /// 한 층 위로. 뿌리가 아닐 때만 맨 앞에 선다 — MC 와 같다. 프로젝트 층이 있으면
+    /// 프로젝트 뿌리에도 서서 층으로 올라간다.
     Up,
     Item(Entry),
+    /// 프로젝트 층의 한 줄 — `layer.places` 의 첨자다. 정체는 경로다([`Anchor::Project`]).
+    Project(usize),
 }
 
 /// 커서가 선 줄의 **정체**. 첨자(`Entry::at`)와 줄 번호는 다시 읽으면 바뀐다 —
@@ -38,6 +42,8 @@ enum Anchor {
     Up,
     Issue(String),
     Bucket(Seg),
+    /// 이름이 아니라 경로 — 이름은 등록 목록이 바뀌면 달라진다.
+    Project(std::path::PathBuf),
 }
 
 /// 무엇을 받고 있는가. 글을 받는 동안에는 이동키가 글자가 된다.
@@ -344,6 +350,10 @@ pub struct App {
     /// 옆 워크트리에서 만난 문제. **배너로 말만 한다** — CLI 가 stderr 로 흘리는
     /// 말인데, 대체 화면 안에서는 그 길을 못 쓴다.
     pub elsewhere: Vec<String>,
+    /// 프로젝트 층([`layer`]). **`None` 이면 등록한 것이 없고 오늘 탐색기 그대로다.** 층이
+    /// 있으면 지금 선 곳(`layer.at`)이 층이거나 한 프로젝트 안이고, 층에 선 동안에는 위의
+    /// 한 프로젝트 자리(`repo`·`issues`·`index`…)가 비었다.
+    pub layer: Option<layer::Layer>,
 }
 
 impl App {
@@ -415,6 +425,7 @@ impl App {
             worktree: false,
             origin: crate::worktree::Origin::default(),
             elsewhere: Vec::new(),
+            layer: None,
         };
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
         // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
@@ -430,6 +441,11 @@ impl App {
     /// 있으면 버린다 — 누르기 **전에** 시작한 읽기라 늦게 도착하면 방금 읽은 것을
     /// 옛 것으로 덮는다(`w` 를 끄기 전 설정으로 읽은 것이면 더더욱).
     pub fn reload(&mut self) {
+        // 층에서 누른 F5 는 사용자 설정부터 다시 읽고 프로젝트를 다시 연다.
+        if self.on_layer() {
+            self.reread_layer();
+            return;
+        }
         if self.repo.is_none() {
             return;
         }
@@ -557,7 +573,7 @@ impl App {
 
     /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
     pub fn loading(&self) -> bool {
-        self.pending.is_some()
+        self.pending.is_some() || self.layer_loading()
     }
 
     /// 버린 다시 읽기 스레드가 아직 남았는가. 루프는 이 동안에도 빠른 걸음으로 깬다 —
@@ -747,6 +763,7 @@ impl App {
             Row::Item(Entry::Dir { at: Some(at), .. } | Entry::Leaf { at }) => {
                 Anchor::Issue(self.issues[*at].id.clone())
             }
+            Row::Project(at) => Anchor::Project(self.place_path(*at).map(Into::into).unwrap_or_default()),
         }
     }
 
@@ -815,6 +832,8 @@ impl App {
     /// 뒤에도 파일이 또 바뀌었으면(표식은 읽기 전에 쟀다) 다음 걸음이 다시 띄운다.
     pub fn follow(&mut self) {
         self.reap();
+        // 층은 제 표식을 따로 본다 — 층에 선 동안에는 아래(한 프로젝트)가 비어 할 일이 없다.
+        self.follow_layer();
         if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -907,8 +926,11 @@ impl App {
 
     /// 지금 디렉터리의 줄들.
     pub fn rows(&self) -> Vec<Row> {
+        if let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) {
+            return (0..l.places.len()).map(Row::Project).collect();
+        }
         let mut rows: Vec<Row> = Vec::new();
-        if !self.path.is_empty() {
+        if !self.path.is_empty() || self.layer.is_some() {
             rows.push(Row::Up);
         }
         let keep = &self.keep;
@@ -941,6 +963,14 @@ impl App {
         // 멈춘다** — 적다 말고 포커스가 튀면 적던 것을 잃는다.
         if !matches!(self.mode, Mode::Browse) {
             self.typing(k);
+            return;
+        }
+        // 층에서 뜻이 없는 키는 **왜 안 되는지를** 한 줄로 말한다. 특히 `n` 은 담을 프로젝트가
+        // 안 정해졌다 — 띄운 자리에 조용히 쓰면 사람은 보던 줄의 프로젝트에 담긴 줄 안다.
+        if self.on_layer()
+            && let Some(say) = layer::refused(&k)
+        {
+            self.notice = Some(say.to_string());
             return;
         }
         match k.code {
@@ -1161,6 +1191,7 @@ impl App {
                 self.cursor = 0;
                 self.detail.rewind();
             }
+            Some(Row::Project(at)) => self.enter_project(at),
             // 잎은 들어갈 데가 없다. 상세는 오른쪽이 이미 보여 주고 있다.
             _ => {}
         }
@@ -1172,6 +1203,11 @@ impl App {
     /// 하나가 생기면 같은 번호가 옆 에픽을 가리킨다. 그래서 번호는 나온 디렉터리를
     /// 못 찾을 때만(거름망에 빠졌거나 `--path` 로 시작했거나) 쓴다.
     fn leave(&mut self) {
+        // 프로젝트 뿌리에서 한 층 더 — 층이 있으면 그리로 간다(결정 3). 층에 섰으면 위가 없다.
+        if self.path.is_empty() {
+            self.climb();
+            return;
+        }
         if let Some(from) = self.path.pop() {
             self.detail.rewind();
             let fallback = self.remembered.pop().unwrap_or(0);
@@ -1185,6 +1221,9 @@ impl App {
 
     /// 지금 어디인가. 뿌리는 `/`.
     pub fn crumbs(&self) -> String {
+        if self.on_layer() {
+            return "프로젝트 층".into();
+        }
         if self.path.is_empty() {
             return "/".into();
         }
@@ -1437,7 +1476,7 @@ mod tests {
             .iter()
             .filter_map(|r| match r {
                 Row::Item(e) => e.at().map(|at| a.issues[at].id.clone()),
-                Row::Up => None,
+                Row::Up | Row::Project(_) => None,
             })
             .collect()
     }
@@ -2241,7 +2280,7 @@ mod tests {
     fn on(a: &App) -> Option<String> {
         a.current().and_then(|r| match r {
             Row::Item(e) => e.at().map(|at| a.issues[at].id.clone()),
-            Row::Up => None,
+            Row::Up | Row::Project(_) => None,
         })
     }
 

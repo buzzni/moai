@@ -517,8 +517,11 @@ mod tests {
     /// 보고 [`components_know_neither_the_terminal_nor_the_store`] 가 훑는다 — 새
     /// 파일이 조각이 아니면 이유를 적어 여기 더한다. 목록을 조각 쪽으로 두면 새 조각이
     /// 목록에 안 올라 조용히 안 훑인다.
-    const NOT_COMPONENTS: [(&str, &str); 2] =
-        [("mod.rs", "App — 저장소(Repo)를 들고 키를 칸에 나눈다"), ("draw.rs", "그림 — Frame 에 찍는다")];
+    const NOT_COMPONENTS: [(&str, &str); 3] = [
+        ("mod.rs", "App — 저장소(Repo)를 들고 키를 칸에 나눈다"),
+        ("draw.rs", "그림 — Frame 에 찍는다"),
+        ("layer.rs", "프로젝트 층 — 등록한 프로젝트를 열고(Repo·사용자 설정) 스레드에서 읽는다"),
+    ];
 
     /// 조각 코드가 **밖으로 뻗는 길**(소문자로 시작하는 `::` 경로) 가운데 허락되지 않은 것.
     ///

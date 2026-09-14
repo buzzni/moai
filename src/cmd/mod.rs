@@ -81,14 +81,7 @@ pub fn gather(repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::G
 pub fn registered(verb: &str, worktree: bool) -> R<(crate::user_config::Registry, Vec<crate::projects::Project>)> {
     let reg = crate::user_config::read(crate::user_config::path().as_deref());
     if reg.projects.is_empty() {
-        let mut msg = format!(
-            "{}\n등록한 프로젝트도 없다 — `moai project add <dir>` 로 더하면 `.moai` 밖에서 한눈에 본다",
-            crate::store::NOT_A_REPO
-        );
-        for p in &reg.problems {
-            msg.push_str(&format!("\n{p}"));
-        }
-        return Err(Fail::new(msg));
+        return Err(nothing_registered(&reg));
     }
     // **`--worktree` 는 아직 프로젝트마다 겹치지 않는다.** 말없이 버리면 겹쳐 본 줄
     // 알고 읽는다. stderr 라 `--json` 을 흐리지 않는다.
@@ -97,6 +90,19 @@ pub fn registered(verb: &str, worktree: bool) -> R<(crate::user_config::Registry
     }
     let projects = crate::projects::open(&reg);
     Ok((reg, projects))
+}
+
+/// `.moai` 밖인데 등록한 것도 없을 때의 말 — `status`·`ready`·`tui` 가 같은 말로 멈춘다.
+/// 목록이 빈 까닭이 사용자 설정의 문제일 수 있어 그것도 붙인다.
+pub fn nothing_registered(reg: &crate::user_config::Registry) -> Fail {
+    let mut msg = format!(
+        "{}\n등록한 프로젝트도 없다 — `moai project add <dir>` 로 더하면 `.moai` 밖에서 한눈에 본다",
+        crate::store::NOT_A_REPO
+    );
+    for p in &reg.problems {
+        msg.push_str(&format!("\n{p}"));
+    }
+    Fail::new(msg)
 }
 
 /// 읽다 만난 잘못된 줄을 stderr 로 알린다. 결과는 그대로 낸다.
