@@ -3547,8 +3547,7 @@ mod tests {
     /// 시작했다는 말이 없어 언제나 거짓이다.
     ///
     /// `review` 멤버도 시작한 것으로 센다(moai-p415) — "시작했다" 의 뜻이 `Config::is_started`
-    /// 하나다. 도는 글리프는 여전히 칸 이름(`style::spins`)이 가르므로, review 에 선 묶음은
-    /// 바빠도 안 돈다.
+    /// 하나다. 도는 글리프도 같은 뜻을 쓰므로(moai-q59j) review 에 선 바쁜 묶음은 돈다.
     #[test]
     fn a_group_is_busy_only_with_a_member_in_the_started_column() {
         let issues = vec![
@@ -3565,7 +3564,7 @@ mod tests {
         let read = |id: &str| (stands[id].column, stands[id].busy);
         assert_eq!(read("argos-0001"), ("in_progress", false), "반쯤 끝난 에픽을 바쁘다고 한다");
         assert_eq!(read("argos-0004"), ("review", true), "review 멤버의 칸·시작을 잘못 읽었다");
-        assert!(!crate::style::spins(read("argos-0004").0), "review 에 선 묶음이 돈다");
+        assert!(cfg.is_started(read("argos-0004").0), "review 에 선 바쁜 묶음이 시작한 칸이 아니다");
         assert_eq!(read("argos-0006"), ("in_progress", true));
 
         let two = Config::parse("prefix = \"argos\"\nstatuses = \"todo, done\"\n").unwrap();
