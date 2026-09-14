@@ -260,14 +260,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                                 other.errors.len()
                             ));
                         }
-                        // 갈라진 자리는 옆에만 있는 줄을 가를 때만 쓴다. 다 여기에도 있으면
-                        // git 을 두 번 더 부르지 않는다 — 탐색기는 다시 읽을 때마다 여기를 지난다.
-                        let lonely = other.issues.iter().any(|i| !here.contains(i.id.as_str()));
-                        let base = match mine.as_deref() {
-                            Some(m) if lonely => base_of(&repo.root, m, &tree.head),
-                            _ => BTreeMap::new(),
-                        };
-                        others.push(Side { base, ..Side::new(tree.label, root, other.issues) });
+                        others.push(side(&repo.root, &here, mine.as_deref(), tree, root, other.issues));
                     }
                 }
             }
@@ -276,6 +269,51 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let Load { issues, errors } = load;
     let (issues, origin) = overlay(issues, others);
     Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, watched })
+}
+
+/// 옆 워크트리 하나의 줄을 겹칠 모양으로 — 옆에만 있는 줄이 있으면 갈라진 자리([`Side::base`])를 댄다.
+///
+/// 갈라진 자리는 옆에만 있는 줄을 가를 때만 쓴다. 다 여기에도 있으면 git 을 두 번 더 부르지
+/// 않는다 — 탐색기는 다시 읽을 때마다 여기를 지난다.
+fn side(
+    repo_root: &Path,
+    here: &std::collections::HashSet<&str>,
+    mine: Option<&str>,
+    tree: Tree,
+    root: PathBuf,
+    issues: Vec<Issue>,
+) -> Side {
+    let lonely = issues.iter().any(|i| !here.contains(i.id.as_str()));
+    let base = match mine {
+        Some(m) if lonely => base_of(repo_root, m, &tree.head),
+        _ => BTreeMap::new(),
+    };
+    Side { base, ..Side::new(tree.label, root, issues) }
+}
+
+/// 제 줄을 **옆 워크트리의 스냅샷과 겹친 것**과, 옆 워크트리의 이름이 가리키는 id 후보([`away`]
+/// 와 같은 자) — 훅이 막기 전에 한 번 더 비춰 보는 자리다(moai-w2iy).
+///
+/// 트래커는 main 에서 만지는 것이 규약이라(CLAUDE.md "워크트리"), 워크트리의 스냅샷(HEAD)은
+/// main 에서 방금 세우고 집은 줄을 모른다. 그 낡은 스냅샷만 보고 막으면 시킨 대로 한 일이
+/// 막힌다. 겹치는 규칙은 `--worktree` 와 같다([`overlay`]) — 훅만의 셈을 따로 두지 않는다.
+///
+/// **git 목록은 한 번만 읽는다** — 겹칠 줄과 이름 후보가 한 목록에서 나온다. 못 찾으면 `None`
+/// 이고, 남의 못 읽는 줄은 말없이 빼고 겹친다 — 훅은 무엇이 어긋나도 조용해야 한다.
+pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, BTreeSet<String>)> {
+    let (head, trees) = others_of(&repo.root).ok()?;
+    let away = names(trees.iter().map(|(t, _)| t));
+    let mut others = Vec::new();
+    {
+        let here: std::collections::HashSet<&str> = mine.iter().map(|i| i.id.as_str()).collect();
+        for (tree, root) in trees {
+            let Ok(Some(other)) = crate::store::read_snapshot(&root.join(".moai").join("issues.jsonl")) else {
+                continue;
+            };
+            others.push(side(&repo.root, &here, head.as_deref(), tree, root, other.issues));
+        }
+    }
+    Some((overlay(mine, others).0, away))
 }
 
 /// 워크트리들의 HEAD 가 움직인 것을 알아챌 git 파일과 **지금 잰** 표식 — 제 워크트리와

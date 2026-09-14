@@ -4937,6 +4937,53 @@ fn the_hook_leaves_what_a_named_worktree_holds_to_that_worktree() {
     assert!(own.contains(&format!("moai mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
 }
 
+/// 규약대로 일을 main 에서 집고 그 이름의 워크트리를 띄운 저장소. (main, 워크트리, 집은 id)
+fn picked_in_a_worktree(s: &Scratch) -> (PathBuf, PathBuf, String) {
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "워크트리에서 할 일", "--json"]), "id");
+    ok(&main, &["mv", &id, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    let dir = format!(".claude/worktrees/{id}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{id}")]);
+    let inside = main.join(&dir);
+    (main, inside, id)
+}
+
+/// 도구 호출 하나를 `cwd` 자리의 세션으로 부른다.
+fn tool_at(s: &Scratch, cwd: &Path, tool: &str, body: &str) -> String {
+    let input = format!(
+        "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"{tool}\",\"tool_input\":{body}}}",
+        json_str(&cwd.display().to_string())
+    );
+    String::from_utf8(hook_in(s, cwd, "pre-tool-use", &input).stdout).unwrap()
+}
+
+/// **워크트리 안의 리뷰 규칙은 main 에서 집은 리뷰를 본다** (moai-w2iy). 트래커는 main 에서
+/// 만지는 것이 규약이라, 리뷰 이슈는 main 스냅샷에만 있고 워크트리의 스냅샷(HEAD)에는
+/// 없다 — 제 스냅샷만 읽던 훅은 시킨 대로 세우고 집은 리뷰를 "없다" 로 막았다.
+#[test]
+fn a_review_picked_in_main_opens_the_review_inside_the_worktree() {
+    let s = Scratch::new("hookreviewwt");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let review = "{\"skill\":\"code-review\",\"args\":\"high\"}";
+
+    // 리뷰 이슈가 어디에도 없으면 여전히 막는다 — 겹쳐 봐도 풀리지 않는다.
+    let why = refusal(&tool_at(&s, &inside, "Skill", review));
+    assert!(why.contains(&format!("--parent {id}")), "{why}");
+
+    let r = field(
+        &ok(&main, &["add", "리뷰 — 워크트리 일", "-t", "review", "--parent", &id, "-b", "무엇을 왜 보는가", "--json"]),
+        "id",
+    );
+    ok(&main, &["mv", &r, "in_progress"]);
+    let out = tool_at(&s, &inside, "Skill", review);
+    assert!(out.trim().is_empty(), "main 에서 집은 리뷰를 못 보고 막는다\n{out}");
+}
+
 /// 규칙 2 의 껍데기 쪽은 **stdin 의 `cwd` 로** 상대 경로를 푼다. 훅 프로세스를
 /// 저장소 뿌리에서 띄우고 `cwd` 만 하위 디렉터리로 준다 — 뿌리로 푸는 판은 여기서
 /// `a.md` 를 대고, 트래커 안에 서서 친 `../src` 쓰기는 놓친다. 단위 시험은 순수

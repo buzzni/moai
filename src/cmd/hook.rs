@@ -134,19 +134,28 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             crate::hook::board(&lines)
         }),
         Event::PreToolUse => {
-            match crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input) {
+            let call = crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input);
+            let judge = |issues: &[model::Issue], away: &std::collections::BTreeSet<String>| match call {
                 crate::hook::Call::Shell(cmd) => {
                     // 규칙의 차례는 `guard_shell` 이 정한다. 여기는 껍데기의 자리만 준다.
                     let cwd = std::env::current_dir().unwrap_or_else(|_| repo.root.clone());
-                    crate::hook::guard_shell(&load.issues, &repo.config, &away(), &repo.root, &cwd, cmd)
+                    crate::hook::guard_shell(issues, &repo.config, away, &repo.root, &cwd, cmd)
                 }
-                crate::hook::Call::Edits(path) => {
-                    crate::hook::guard_edit(&load.issues, &repo.config, &away(), &repo.root, path)
-                }
-                crate::hook::Call::Review => {
-                    crate::hook::guard_review(&load.issues, &repo.config, &away())
-                }
+                crate::hook::Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, &repo.root, path),
+                crate::hook::Call::Review => crate::hook::guard_review(issues, &repo.config, away),
                 crate::hook::Call::Other => Decision::Pass,
+            };
+            // **막기 전에 옆 워크트리와 겹쳐 한 번 더 본다**(moai-w2iy). 워크트리의 스냅샷은
+            // main 에서 방금 세우고 집은 줄을 모른다 — 그것만 보고 막으면 시킨 대로 한 일이
+            // 막힌다. 겹쳐 봐도 막힐 때만 막고, 까닭은 제 스냅샷의 것을 낸다(고칠 명령이
+            // 이 자리의 트래커에 듣는다). 겹쳐 보기는 막을 때만 치른다 — 지나가는 호출은
+            // 전과 같은 값이다.
+            match judge(&load.issues, &away()) {
+                deny @ Decision::Deny(_) => match crate::worktree::fresh(&repo, load.issues.clone()) {
+                    Some((issues, away)) if judge(&issues, &away) == Decision::Pass => Decision::Pass,
+                    _ => deny,
+                },
+                other => other,
             }
         }
         // **이미 한 번 붙들었으면 보낸다.** 이 표를 안 보면 무한히 돈다.
