@@ -50,9 +50,19 @@ impl Input {
     /// 그렇다(빈 칸의 Backspace 도 칸의 것이다). 거짓이면 Enter·Esc·Tab·
     /// Ctrl-C 처럼 칸을 든 쪽이 정할 키다.
     pub fn key(&mut self, k: KeyEvent) -> bool {
+        self.key_on(k, cfg!(windows))
+    }
+
+    /// [`Input::key`] 를 **운영체제를 받아** 한다 — Windows 없이도 Windows 의 갈래를 시험하려고
+    /// 나눴다(moai-d3tp). 부르는 곳은 `key` 하나다.
+    fn key_on(&mut self, k: KeyEvent, windows: bool) -> bool {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
         match k.code {
+            // **Windows 의 AltGr 글자는 Ctrl+Alt 로 온다**(moai-d3tp) — crossterm 이 독일어 자판의
+            // `@`·`€` 를 CONTROL|ALT 를 단 글자로 낸다. 거기서만 글자로 받는다: 리눅스·맥은 AltGr
+            // 글자가 수식자 없이 오므로, 거기서 받으면 Ctrl-Alt-u 가 `u` 로 찍힌다. 사용자와 정했다.
+            KeyCode::Char(c) if windows && ctrl && alt => self.put(c),
             // Ctrl-U 는 커서 앞만이 아니라 **전부** 지운다. 지금 `/`·`f` 가 그렇게
             // 하고 있고, 옮기면서 뜻을 바꾸지 않는다.
             KeyCode::Char('u') if ctrl => {
@@ -60,18 +70,13 @@ impl Input {
                 self.at = 0;
             }
             KeyCode::Char('w') if ctrl => self.rub_word(),
+            // **Alt-Backspace 도 낱말 하나를 지운다**(moai-979m) — readline 의 Meta-DEL. 셸에 익은
+            // 손이 이것으로 지운다. Ctrl 까지 붙은 것은 받지 않는다(아래 줄이 든 쪽에 돌려준다).
+            KeyCode::Backspace if alt && !ctrl => self.rub_word(),
             // 그 밖의 Ctrl·Alt 는 글자가 아니다. raw mode 에서는 Ctrl-C 가
             // 신호로 오지 않으므로, 여기서 `c` 로 먹으면 나갈 길이 막힌다.
             _ if ctrl || alt => return false,
-            KeyCode::Char(c) => {
-                // 먹기는 하되 넣지는 않는다. 흘려보내면 든 쪽이 그것을 이동키로
-                // 읽을 수 있다.
-                if !c.is_control() {
-                    self.text.insert(self.at, c);
-                    self.at += c.len_utf8();
-                    self.snap();
-                }
-            }
+            KeyCode::Char(c) => self.put(c),
             KeyCode::Backspace => {
                 let from = self.prev();
                 self.text.replace_range(from..self.at, "");
@@ -148,7 +153,17 @@ impl Input {
         self.at = bounds.take_while(|&i| i <= self.at).last().unwrap_or(0);
     }
 
-    /// Ctrl-W. 커서 앞의 빈칸을 넘고 낱말 하나를 지운다 — 셸과 같다.
+    /// 친 글자 하나를 커서 자리에 넣는다. 제어문자는 먹기는 하되 넣지는 않는다 — 흘려보내면
+    /// 든 쪽이 그것을 이동키로 읽을 수 있다.
+    fn put(&mut self, c: char) {
+        if !c.is_control() {
+            self.text.insert(self.at, c);
+            self.at += c.len_utf8();
+            self.snap();
+        }
+    }
+
+    /// Ctrl-W·Alt-Backspace. 커서 앞의 빈칸을 넘고 낱말 하나를 지운다 — 셸과 같다.
     fn rub_word(&mut self) {
         let mut from = self.at;
         let mut seen_word = false;
@@ -463,6 +478,45 @@ mod tests {
         assert!(!i.key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT)));
         assert!(i.key(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::SHIFT)), "대문자가 막혔다");
         assert_eq!(shown(&i), "abC|");
+    }
+
+    /// **Alt-Backspace 는 낱말 하나를 지운다**(moai-979m) — readline 의 Meta-DEL. 셸에 익은 손이
+    /// 이것으로 낱말을 지운다. moai-zag3 에서 칸이 Alt 를 글자로 안 치며 무동작이 됐었다. Ctrl-W 와
+    /// 같은 자리를 지운다.
+    #[test]
+    fn alt_backspace_rubs_a_word_like_ctrl_w() {
+        let mut alt = typed("ab  cd");
+        assert!(alt.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT)), "Alt-Backspace 를 칸이 안 먹었다");
+        let mut w = typed("ab  cd");
+        ctrl(&mut w, 'w');
+        assert_eq!(shown(&alt), shown(&w), "Ctrl-W 와 다른 자리를 지웠다");
+        assert_eq!(shown(&alt), "ab  |");
+    }
+
+    /// **Ctrl+Alt 가 붙은 글자는 Windows 에서만 글자다**(moai-d3tp). Windows 의 AltGr 글자(`@`·`€`)가
+    /// 그렇게 오고, 리눅스·맥에서는 AltGr 글자가 수식자 없이 오므로 Ctrl-Alt-u 가 `u` 로 찍히면
+    /// 안 된다. **한계: 실제 Windows 터미널에서는 확인하지 못했다** — crossterm 이 내는 모양을
+    /// `KeyEvent` 로 흉내 내 `key_on` 의 두 갈래를 잰다.
+    #[test]
+    fn a_ctrl_alt_character_is_a_character_only_on_windows() {
+        let altgr = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL | KeyModifiers::ALT);
+        let mut win = typed("a");
+        assert!(win.key_on(altgr('@'), true), "Windows 에서 AltGr 글자를 안 먹었다");
+        assert!(win.key_on(altgr('€'), true));
+        assert_eq!(shown(&win), "a@€|");
+        let mut unix = typed("a");
+        assert!(!unix.key_on(altgr('@'), false), "Windows 가 아닌데 Ctrl+Alt 글자를 먹었다");
+        assert_eq!(shown(&unix), "a|");
+        // Windows 에서는 AltGr 이 Ctrl 조합보다 먼저다 — Ctrl-Alt-u 는 전부 지우기가 아니라 `u` 다.
+        // (Windows 가 아니면 이 조합은 전과 같이 Ctrl-U 로 읽힌다.)
+        let mut win_u = typed("a");
+        assert!(win_u.key_on(altgr('u'), true));
+        assert_eq!(shown(&win_u), "au|");
+        // Windows 에서도 Ctrl 만·Alt 만 붙은 글자는 여전히 든 쪽의 것이다 — Ctrl-C 로 나갈 길을 막지 않는다.
+        assert!(!win.key_on(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), true));
+        assert!(!win.key_on(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT), true));
+        // 이 빌드의 `key` 는 제 운영체제를 넘긴다.
+        assert_eq!(typed("a").key(altgr('@')), cfg!(windows));
     }
 
     #[test]

@@ -420,11 +420,17 @@ mod tests {
             assert!(!press(&mut e, code), "{code:?} 를 칸이 먹었다");
         }
         for m in [KeyModifiers::CONTROL, KeyModifiers::ALT] {
-            for code in [KeyCode::Enter, KeyCode::Char('s'), KeyCode::Char('c'), KeyCode::Up, KeyCode::Backspace] {
+            for code in [KeyCode::Enter, KeyCode::Char('s'), KeyCode::Char('c'), KeyCode::Up] {
                 assert!(!e.key(KeyEvent::new(code, m)), "{m:?}+{code:?} 를 칸이 먹었다");
             }
         }
+        assert!(!e.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL)), "Ctrl+Backspace 를 칸이 먹었다");
         assert_eq!(shown(&e), "ab\ncd|");
+        // **Alt-Backspace 는 한 줄 칸과 같이 커서 줄의 낱말 하나를 지운다**(moai-979m) — 본문도 줄의 키를
+        // `Input::key` 에 맡기므로 Ctrl-W·Ctrl-U 처럼 칸의 것이다.
+        let mut words = typed("ab\ncd ef");
+        assert!(words.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT)), "본문 칸이 Alt-Backspace 를 안 먹었다");
+        assert_eq!(shown(&words), "ab\ncd |");
         assert!(e.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)));
         assert_eq!(shown(&e), "ab\n|", "Ctrl-U 가 커서 줄 밖을 지웠다");
     }
