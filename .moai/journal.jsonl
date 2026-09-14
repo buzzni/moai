@@ -2411,3 +2411,4 @@
 {"ts":"2026-09-14T16:57:24Z","id":"moai-a46g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"진행 바를 터미널 16색 10번(밝은 초록)으로"}
 {"ts":"2026-09-14T16:57:24Z","id":"moai-a46g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T16:57:26Z","id":"moai-w0oo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 보기 조절 — 칸 토글·정렬·열 토글을 SPC 메뉴로 (거름망 글 입력만으로는 done 숨기기가 너무 힘들다)"}
+{"ts":"2026-09-14T17:00:12Z","id":"moai-1mvz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이슈에 고친 커밋(git hash)을 잇는 방법 — Jira·GitHub issue 처럼 show 에서 커밋이 보이게"}
