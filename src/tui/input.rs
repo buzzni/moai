@@ -19,6 +19,8 @@ pub struct Input {
     /// 커서의 바이트 자리. **늘 grapheme 경계에 선다** — 여기가 어긋나면
     /// `insert` 가 글자 가운데를 찔러 패닉하거나 이모지를 둘로 가른다.
     at: usize,
+    /// 경로를 적는 칸이다([`Input::path`]). 낱말 지우기가 경로 가름자에서도 멈춘다.
+    path: bool,
 }
 
 /// 칸 하나에 그릴 것. [`Input::view`] 가 낸다.
@@ -39,7 +41,15 @@ impl Input {
     pub fn new(s: &str) -> Input {
         let text: String = s.chars().filter(|c| !c.is_control()).collect();
         let at = text.len();
-        Input { text, at }
+        Input { text, at, path: false }
+    }
+
+    /// 경로를 적는 칸으로 연다(moai-8dna). 다른 것은 [`Input::new`] 와 같고, Ctrl-W·Alt-Backspace
+    /// 가 빈칸뿐 아니라 `/`(Windows 는 `\` 도)에서도 멈춰 **한 층씩** 지운다 — 빈칸만 보면
+    /// `/home/coder/work` 가 통째로 날아간다. 경로 칸에만 두는 것은 사용자와 정했다: 거름망의
+    /// `tag=a/b` 같은 글에서는 빈칸이 낱말이고, 두 키는 어느 칸에서든 같은 일을 한다(moai-979m).
+    pub fn path(s: &str) -> Input {
+        Input { path: true, ..Input::new(s) }
     }
 
     pub fn text(&self) -> &str {
@@ -75,9 +85,9 @@ impl Input {
             }
             KeyCode::Char('w') if ctrl => self.rub_word(),
             // **Alt-Backspace 도 낱말 하나를 지운다**(moai-979m) — 셸에 익은 손이 이것으로 지운다.
-            // **자리는 Ctrl-W 와 같다**: 빈칸만 낱말의 경계로 본다. readline 의 Meta-DEL 은 `/` 같은
-            // 글자에서도 멈추지만(`/home/coder/work` 에서 `work` 만), 여기서는 경로를 통째로 지운다 —
-            // Ctrl-W 와 같은 동작으로 정했다. Ctrl 까지 붙은 것은 받지 않는다(아래 줄이 든 쪽에 돌려준다).
+            // **자리는 Ctrl-W 와 같다**: 빈칸만 낱말의 경계로 본다 — readline 의 Meta-DEL 처럼
+            // 두 키를 가르지 않기로 정했다. 경로 칸만 `/` 에서도 멈춘다([`Input::path`], moai-8dna).
+            // Ctrl 까지 붙은 것은 받지 않는다(아래 줄이 든 쪽에 돌려준다).
             KeyCode::Backspace if alt && !ctrl => self.rub_word(),
             // 그 밖의 Ctrl·Alt 는 글자가 아니다. raw mode 에서는 Ctrl-C 가
             // 신호로 오지 않으므로, 여기서 `c` 로 먹으면 나갈 길이 막힌다.
@@ -170,11 +180,12 @@ impl Input {
     }
 
     /// Ctrl-W·Alt-Backspace. 커서 앞의 빈칸을 넘고 낱말 하나를 지운다 — 셸과 같다.
+    /// 경로 칸이면 가름자도 빈칸처럼 넘고 멈춘다: `/home/coder/` 는 `/home/` 가 된다.
     fn rub_word(&mut self) {
         let mut from = self.at;
         let mut seen_word = false;
         for (i, g) in self.text[..self.at].grapheme_indices(true).rev() {
-            let blank = g.chars().all(char::is_whitespace);
+            let blank = g.chars().all(|c| c.is_whitespace() || (self.path && std::path::is_separator(c)));
             if blank && seen_word {
                 break;
             }
@@ -232,7 +243,7 @@ impl Input {
     /// 커서 뒤를 떼어 새 칸으로 낸다. 떼인 칸의 커서는 맨 앞이다 — Enter 가 줄을
     /// 나눈 뒤 커서는 새 줄 머리에 선다.
     pub(super) fn split_off(&mut self) -> Input {
-        Input { text: self.text.split_off(self.at), at: 0 }
+        Input { text: self.text.split_off(self.at), at: 0, path: self.path }
     }
 
     /// 뒤에 칸 하나를 잇는다. 커서는 **이은 자리**에 선다 — 앞 줄 끝의 Backspace 도
@@ -383,6 +394,14 @@ mod tests {
         press(&mut i, KeyCode::Left);
         ctrl(&mut i, 'w');
         assert_eq!(shown(&i), "한글 |뒤", "커서 뒤는 남는다");
+
+        // 경로 칸이 아니면 `/` 는 낱말의 일부다 — 거름망의 `tag=a/b` 가 한 낱말이다(moai-8dna).
+        let mut i = typed("tag=a/b/c");
+        ctrl(&mut i, 'w');
+        assert_eq!(shown(&i), "|");
+        let mut i = Input::path("a /b/c");
+        ctrl(&mut i, 'w');
+        assert_eq!(shown(&i), "a /b/|", "경로 칸이 `/` 에서 안 멈췄다");
     }
 
     /// 한글 한 자는 한 걸음이고 한 번에 지워진다. 바이트로 걸으면 커서가

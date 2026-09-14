@@ -806,6 +806,14 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     let inner = block.inner(at);
 
     let lines = match app.current_of(rows) {
+        // **빈 층은 할 일을 댄다**(moai-r8kl). 등록이 0 인 채 `.moai` 밖에서 띄운 자리다 — "없다"
+        // 만 서면 밖에서 부른 실수가 멀쩡한 빈 목록으로 읽힌다.
+        None if app.on_layer() => {
+            let mut out = vec![Line::from(Span::styled("등록한 프로젝트가 없다", bold())), Line::from("")];
+            let how = format!("{} 로 디렉터리를 골라 등록한다", label(BROWSE, Browse::Pick));
+            out.extend(wrapped(&how, inner.width as usize, dim()));
+            out
+        }
         None => vec![Line::from(Span::styled("없다", dim()))],
         // 프로젝트 뿌리의 `..` 은 층으로 간다 — 어디로 가는지 말한다.
         Some(Row::Up) if app.path.is_empty() => vec![Line::from(Span::styled("프로젝트 층으로", dim()))],

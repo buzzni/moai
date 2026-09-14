@@ -980,6 +980,16 @@ fn outside_a_repo_with_nothing_registered_it_fails_and_says_how_to_register() {
     let help = ok_with(&out, &cfg, &[]);
     assert!(help.contains("moai init") && help.contains("moai project add"), "{help}");
 
+    // **탐색기만 다르다**(moai-r8kl) — 사람이 보는 화면이라 빈 층을 열고 `SPC p a` 를 댄다. 여기는
+    // 터미널이 아니라 그 까닭으로 멈추고, 등록이 없다는 말로는 안 멈춘다. `--json` 은 기계가
+    // 읽으니 `status`·`ready` 와 같은 말로 멈춘다.
+    let o = moai_with(&out, &cfg, &["tui"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(!o.status.success() && err.contains("터미널이 아니라") && !err.contains("moai project add"), "{err}");
+    let o = moai_with(&out, &cfg, &["tui", "--json"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(!o.status.success() && err.contains("moai project add"), "{err}");
+
     std::fs::write(&cfg, "project = 3\n").unwrap();
     let o = moai_with(&out, &cfg, &["status"]);
     assert!(!o.status.success());
