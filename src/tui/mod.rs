@@ -690,6 +690,12 @@ impl App {
                 };
                 let told = match self.land(&id) {
                     Landing::Shown => format!("✓ {done} · {what}"),
+                    // **무엇이 가렸는지 가른다**(moai-fmv5) — 보기가 가린 줄에 "Esc 로 푼다" 를 대면
+                    // Esc 는 거름망만 풀어 누른 키가 아무것도 안 한다.
+                    Landing::Hidden if self.index.find(&id).is_some_and(|at| !self.shown.get(at).copied().unwrap_or(true)) => format!(
+                        "✓ {done} · {what} — 보기에 가려 안 보인다 · {} 로 모두 보인다",
+                        keys::label(keys::BROWSE, keys::Browse::ShowAll)
+                    ),
                     Landing::Hidden => format!(
                         "✓ {done} · {what} — 거름망에 가려 안 보인다 · {} 로 푼다",
                         keys::label(keys::BROWSE, keys::Browse::ClearFilter)
