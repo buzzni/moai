@@ -179,8 +179,12 @@ fn init_keeps_a_new_prefix_short() {
     let out = moai(s.path(), &["init", "my-company-backend"]);
     assert!(!out.status.success(), "긴 접두어를 받았다");
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("8자까지") && err.contains("moai init mcb"), "{err}");
+    assert!(err.contains("8자까지") && err.contains("`mcb`"), "{err}");
     assert!(!s.path().join(".moai").exists(), "거절하고도 .moai 를 만들었다");
+    // 모양이 틀린 긴 접두어는 모양을 먼저 말한다 — 길이 오류가 틀린 후보(`MyCompan`)를 대면 안 된다.
+    let out = moai(s.path(), &["init", "MyCompanyBackend"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("소문자") && !err.contains("8자까지"), "{err}");
 
     // 디렉터리 이름에서 만든 긴 것은 줄인다.
     let long = s.path().join("my-company-backend");
@@ -205,6 +209,10 @@ fn init_keeps_a_new_prefix_short() {
     std::fs::write(old.join(".moai/issues.jsonl"), "").unwrap();
     std::fs::write(old.join(".moai/journal.jsonl"), "").unwrap();
     assert!(ok(&old, &["init"]).contains("이미 심겨 있다"));
+    assert!(ok(&old, &["init", "my-company-backend"]).contains("이미 심겨 있다"), "같은 긴 접두어로 다시 부른 것을 막았다");
+    let out = moai(&old, &["init", "another-long-one"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("나중에 못 바꾼다") && !err.contains("8자까지"), "{err}");
     assert!(add(&old, &["옛 저장소의 이슈"]).starts_with("my-company-backend-"), "옛 긴 접두어를 막았다");
 }
 

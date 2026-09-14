@@ -58,14 +58,21 @@ const GITIGNORE: &str = "\
 /// 길도 없다.
 pub const PREFIX_MAX: usize = 8;
 
-/// 긴 접두어의 짧은 후보. [`PREFIX_MAX`] 이하면 그대로, 넘으면 하이픈 낱말이 둘 이상일 때
-/// 머리글자(`my-company-backend` → `mcb`), 낱말이 하나면 앞에서 [`PREFIX_MAX`] 자.
+/// 긴 접두어의 짧은 후보. **모양이 맞는 접두어만 받는다**(`config::check_prefix`) — 그래야
+/// 내는 것도 모양이 맞는다. [`PREFIX_MAX`] 이하면 그대로, 넘으면 뜻을 더 남기는 것부터:
+/// 1. 하이픈을 빼서 들어가면 그것 — `moa-issue` → `moaissue`. 머리글자(`mi`)는 알아보기
+///    어렵고 접두어는 나중에 못 바꾼다(리뷰 moai-f7xs.z1x, 사용자와 정함)
+/// 2. 낱말이 둘 이상이면 머리글자 — `my-company-backend` → `mcb`
+/// 3. 낱말이 하나면 앞에서 [`PREFIX_MAX`] 자
 fn shorten(prefix: &str) -> String {
     if prefix.chars().count() <= PREFIX_MAX {
         return prefix.to_string();
     }
     let words: Vec<&str> = prefix.split('-').filter(|w| !w.is_empty()).collect();
-    if words.len() >= 2 {
+    let joined: String = words.concat();
+    if words.len() >= 2 && joined.chars().count() <= PREFIX_MAX {
+        joined
+    } else if words.len() >= 2 {
         words.iter().filter_map(|w| w.chars().next()).take(PREFIX_MAX).collect()
     } else {
         prefix.chars().take(PREFIX_MAX).collect()
@@ -142,18 +149,25 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         // **사람이 준 긴 접두어는 거절한다** — 쓰기는 엄하게. `init` 은 한 번 부르는 명령이라
         // 다시 부르는 비용이 작고, 거절문이 짧은 후보를 댄다. 이미 심긴 저장소의 긴 접두어는
         // 위 갈래가 그대로 받는다.
-        (Some(p), false) if p.chars().count() > PREFIX_MAX => {
-            return Err(Fail::coded(
-                format!(
-                    "접두어는 {PREFIX_MAX}자까지다 — `{p}` 는 {}자다. id 를 칠 때마다 붙는다\n      \
-                     짧게: `moai init {}`",
-                    p.chars().count(),
-                    shorten(p)
-                ),
-                super::code::BAD_INPUT,
-            ));
+        // **모양을 먼저 본다** — 길이를 먼저 보면 `MyCompanyBackend` 에 그 자체로 틀린
+        // `MyCompan` 을 후보로 대, 따라 친 쪽이 둘째 오류를 만났다(리뷰 moai-f7xs.z1x).
+        // 후보는 명령줄이 아니라 접두어만 댄다 — `-C`·`--no-agents` 를 줬던 명령을 다시 짜서
+        // 대면 붙여 넣은 자리에 엉뚱하게 심는다.
+        (Some(p), false) => {
+            crate::config::check_prefix(p).map_err(Fail::new)?;
+            if p.chars().count() > PREFIX_MAX {
+                return Err(Fail::coded(
+                    format!(
+                        "접두어는 {PREFIX_MAX}자까지다 — `{p}` 는 {}자다. id 를 칠 때마다 붙는다\n      \
+                         짧은 후보: `{}`",
+                        p.chars().count(),
+                        shorten(p)
+                    ),
+                    super::code::BAD_INPUT,
+                ));
+            }
+            p.to_string()
         }
-        (Some(p), false) => p.to_string(),
         (None, true) => crate::config::Config::load(&root).map_err(Fail::new)?.prefix,
         // **디렉터리 이름에서 만든 것은 줄여서 쓴다** — 사람이 고른 이름이 아니라 거절할
         // 까닭이 없다. 줄였다는 것은 출력이 말한다.
@@ -322,15 +336,17 @@ mod tests {
         }
     }
 
-    /// **긴 접두어는 머리글자로, 낱말이 하나면 앞 8자로 줄인다**(moai-f7xs). 8자 이하는 그대로.
+    /// **긴 접두어는 하이픈을 빼 들어가면 그것, 아니면 머리글자, 낱말이 하나면 앞 8자로
+    /// 줄인다**(moai-f7xs). 8자 이하는 그대로.
     #[test]
     fn a_long_prefix_is_shortened_to_initials_or_cut() {
         for (full, want) in [
             ("argos", "argos"),
             ("backend8", "backend8"),
-            ("moa-issue", "mi"),
+            ("moa-issue", "moaissue"),
             ("my-company-backend", "mcb"),
             ("my-2nd-project-x", "m2px"),
+            ("2024-plan-final-draft", "2pfd"),
             ("supercalifragilistic", "supercal"),
             ("a-b-c-d-e-f-g-h-i-j", "abcdefgh"),
         ] {
