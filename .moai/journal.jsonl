@@ -1293,3 +1293,4 @@
 {"ts":"2026-09-14T06:04:04Z","id":"moai-k3yi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"키 지도 확정(moai-hudg): 진행 바탕 토글 p(140426f)를 SPC t p 로 옮기며 키 바에서도 뺀다. 바에 늘 남는 것은 SPC 메뉴와 Esc 풀기(걸려 있을 때)"}
 {"ts":"2026-09-14T06:04:05Z","id":"moai-08af","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"생각 담기(n)를 외부 편집기로 연다 — git 커밋 메시지처럼 첫 줄 제목·둘째 줄부터 본문, # 주석 안내"}
 {"ts":"2026-09-14T06:04:05Z","id":"moai-3u19","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"? 로 여는 전체 키 팝업 — 모드마다 되는 키를 lazygit·yazi 처럼 한 창에, 치는 대로 거르기"}
+{"ts":"2026-09-14T06:11:03Z","id":"moai-nc7w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
