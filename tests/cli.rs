@@ -5091,6 +5091,17 @@ fn a_worktree_session_touching_main_is_still_that_session() {
     ok(&main, &["mv", &next, "in_progress"]);
     let out = bash(&format!("moai -C {mp} add \"둘째의 자식\" --parent {next}"));
     assert!(out.trim().is_empty(), "main 에서 방금 집은 일의 자식을 막았다\n{out}");
+
+    // 거꾸로 — 세션은 main 에 서 있고 명령이 워크트리로 들어간다(에이전트 스레드는 자리가 main
+    // 으로 돌아온다). **딸린 워크트리를 가리키면 그 워크트리의 일로 본다** — main 의 눈으로는
+    // 그 워크트리의 일이 "옆의 것" 이라 제 단위 안의 줄이 막히고, 단위 밖의 줄은 샌다.
+    ok(&main, &["mv", &next, "done"]);
+    let ip = inside.display().to_string();
+    let from_main = |cmd: &str| tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+    let out = from_main(&format!("cd {ip} && moai add \"자식\" --parent {id}"));
+    assert!(out.trim().is_empty(), "워크트리로 들어가 제 일의 자식을 세우는 것을 막았다\n{out}");
+    let why = refusal(&from_main(&format!("moai -C {ip} add \"딴 일\"")));
+    assert!(why.contains(&id), "워크트리를 가리킨 단위 밖 줄을 그 워크트리의 초점으로 못 막는다 — {why}");
 }
 
 /// 규칙 2 의 껍데기 쪽은 **stdin 의 `cwd` 로** 상대 경로를 푼다. 훅 프로세스를

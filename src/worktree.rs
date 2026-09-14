@@ -438,9 +438,11 @@ fn trees_on_disk(root: &Path) -> Option<Vec<Tree>> {
     if let Ok(linked) = std::fs::read_dir(common.join("worktrees")) {
         for entry in linked.filter_map(Result::ok) {
             let dir = entry.path();
+            // `worktree.useRelativePaths` 면 이 경로는 이 디렉터리에서 푼 상대 경로다 — 프로세스의
+            // 자리로 풀면 멀쩡한 워크트리가 "사라졌다" 로 빠진다(`join` 은 절대 경로면 그대로 둔다).
             let Some(path) = std::fs::read_to_string(dir.join("gitdir"))
                 .ok()
-                .and_then(|g| Path::new(g.trim_end()).parent().map(Path::to_path_buf))
+                .and_then(|g| canonical(&dir.join(g.trim_end())).parent().map(Path::to_path_buf))
                 .filter(|p| p.exists())
             else {
                 continue;
@@ -451,6 +453,16 @@ fn trees_on_disk(root: &Path) -> Option<Vec<Tree>> {
     }
     let top = canonical(top);
     Some(all.into_iter().filter(|t| canonical(&t.path) != top).collect())
+}
+
+/// 이 자리가 **딸린 워크트리 안인가** — 가장 가까운 `.git` 이 디렉터리가 아니라 `gitdir:` 파일이다.
+/// git 을 띄우지 않는다. git 밖이면 아니다.
+///
+/// 훅이 `-C`·`cd` 로 가리킨 트래커를 누구의 눈으로 볼지 가른다(moai-23ky). 딸린 워크트리는 그
+/// 이름이 곧 거기서 하는 일이라 그 워크트리의 눈으로 보고, 모두의 집기가 모이는 main 은 세션의
+/// 눈으로 본다.
+pub fn is_linked(root: &Path) -> bool {
+    root.ancestors().map(|d| d.join(".git")).find(|g| g.exists()).is_some_and(|g| g.is_file())
 }
 
 /// 두 자리가 **같은 git 저장소의 워크트리인가** — 공용 git 디렉터리가 같다. 못 찾으면 아니다.

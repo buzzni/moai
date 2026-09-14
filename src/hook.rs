@@ -1136,7 +1136,8 @@ pub fn aimed(cmd: &str, cwd: &Path) -> Vec<Option<PathBuf>> {
                 Some("cd" | "pushd") => {
                     let arg = words[1..].iter().find(|w| !w.starts_with('-') || w.as_str() == "-");
                     at = match (at.take(), arg) {
-                        (Some(base), Some(a)) if !unknowable(a) => Some(resolve(a, &base)),
+                        // `pushd +1`·`-1` 은 스택을 돌리는 것이지 경로가 아니다 — 어디인지 모른다.
+                        (Some(base), Some(a)) if !unknowable(a) && !a.starts_with('+') => Some(resolve(a, &base)),
                         _ => None,
                     };
                     None
@@ -1621,6 +1622,7 @@ mod tests {
         assert_eq!(at("cd $HOME && moai add x"), [None, None]);
         assert_eq!(at("cd /c && cd - && moai add x"), [None, None, None]);
         assert_eq!(at("cd && moai add x"), [None, None]);
+        assert_eq!(at("pushd /c && pushd +1 && moai add x"), [None, None, None], "스택 돌리기를 경로로 읽었다");
         assert_eq!(at("moai -C $X add x"), [None]);
         // `moai` 가 아닌 토막은 어디도 안 가리킨다.
         assert_eq!(at("echo -C /c"), [None]);

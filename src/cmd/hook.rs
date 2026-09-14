@@ -224,9 +224,16 @@ fn settle(
 }
 
 /// 껍데기 토막 하나를 판정할 트래커.
+///
+/// **누구의 눈으로 보는가는 딸린 워크트리가 정한다.** 세션과 가리킨 곳 중 딸린 워크트리가 있으면
+/// 그 워크트리의 일이다 — 이름이 곧 거기서 하는 일이다. main 은 모두의 집기가 모이는 자리라 그
+/// 눈으로는 워크트리의 일이 "옆의 것" 이 된다. 그래서 워크트리 세션이 `-C <main>` 으로 가리키면
+/// 세션의 눈(`Here`)으로 보고 — 안 그러면 `-C <main>` 한 번으로 규칙 1 을 넘는다 — main 에 선
+/// 세션이 `cd <워크트리>` 로 들어가면 그 워크트리의 눈(`There`)으로 본다. 에이전트 스레드는 자리가
+/// main 으로 돌아와 늘 이 모양으로 친다.
 #[derive(Debug, PartialEq)]
 enum Route {
-    /// 세션 자리의 트래커 — 같은 저장소의 옆 워크트리를 가리켜도 여기다(`worktree::same_repo`).
+    /// 세션 자리의 트래커 — 같은 저장소의 main 워크트리를 가리켜도 여기다(`worktree::same_repo`).
     Here,
     /// 가리킨 자리에 트래커가 없다. `moai` 가 스스로 실패하니 아무도 판정하지 않는다.
     Nowhere,
@@ -246,7 +253,9 @@ fn route(repo: &Repo, cmd: &str, cwd: &Path) -> (Vec<Route>, Vec<Repo>) {
             let Ok(Some(found)) = Repo::find_from(&dir).map(|r| r.filter(|_| dir.is_dir())) else {
                 return Route::Nowhere;
             };
-            if same(&found.root, &repo.root) || crate::worktree::same_repo(&found.root, &repo.root) {
+            if same(&found.root, &repo.root)
+                || (!crate::worktree::is_linked(&found.root) && crate::worktree::same_repo(&found.root, &repo.root))
+            {
                 return Route::Here;
             }
             match there.iter().position(|r| same(&r.root, &found.root)) {
