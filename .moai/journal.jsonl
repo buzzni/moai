@@ -1122,3 +1122,5 @@
 {"ts":"2026-09-14T01:12:58Z","id":"moai-fccv.233","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"낮은 창 머리 접기 반영(ed505f3), 두 번 읽기는 idea moai-76lq 로 넘김, 층에서 담은 뒤 프로젝트 안에 남는 것은 설계대로"}
 {"ts":"2026-09-14T01:13:06Z","id":"moai-fccv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"n 은 여는 순간 박은 프로젝트(경로)에만 담는다 — 폼 머리 담을 곳·층에서는 커서의 프로젝트·못 여는 곳은 폼 안 엶·알림에 이름 — a6e1f98 ed505f3"}
 {"ts":"2026-09-14T01:35:35Z","id":"moai-plvy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"TUI 층의 a(디렉터리 고르기 창·모노레포 하위·init 전 허용·멱등)와 d(한 번 묻고 목록에서만) — CLI 와 같은 projects::add·remove — e419892 b054843 e3b747f 3e32966"}
+{"ts":"2026-09-14T01:59:15Z","id":"moai-4ia9.wpz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-4ia9 여러 프로젝트 보기 전체 (max)"}
+{"ts":"2026-09-14T01:59:15Z","id":"moai-4ia9.wpz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
