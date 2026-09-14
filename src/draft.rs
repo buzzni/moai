@@ -11,7 +11,11 @@
 //! # 에픽 제목                     `#` 줄은 에픽
 //! - [p1] 이슈 제목 #bug           `-` 줄은 바로 위 에픽의 이슈
 //! - 이슈 제목                     [pN] 과 #태그 는 없어도 된다
+//! - \[WIP] 제목 \#12              `[`·끝의 `#낱말` 이 제목이면 `\` 를 앞에 둔다
 //! ```
+//!
+//! **이스케이프는 두 자리뿐이다**(moai-a5pz) — 앞머리 `\[` 와 끝쪽에 이어진 `\#낱말`.
+//! 오타(`[P1]`·`[x]`)는 조용히 제목이 되지 않고 전처럼 줄 번호와 거절한다.
 //!
 //! **JSON 입력은 두지 않는다.** 에이전트가 Bash heredoc 안에서 중첩 JSON 을
 //! 이스케이프하는 것이 마크다운을 쓰는 것보다 훨씬 잘 깨진다. 그리고 사람도
@@ -52,6 +56,11 @@ fn split_parts(raw: &str, n: usize) -> Result<(String, Option<u8>, Vec<String>),
         priority = Some(p);
         rest = tail.trim();
     }
+    // `\[` 로 시작하면 우선순위가 아니라 제목의 `[` 다(moai-a5pz) — `[pN]` 을 뗀 **뒤에** 본다.
+    // 떼는 것은 역슬래시 하나뿐이다.
+    if rest.starts_with("\\[") {
+        rest = &rest[1..];
+    }
 
     let mut tags = Vec::new();
     while let Some((head, last)) = rest.rsplit_once(char::is_whitespace) {
@@ -68,7 +77,16 @@ fn split_parts(raw: &str, n: usize) -> Result<(String, Option<u8>, Vec<String>),
     if rest.is_empty() {
         return Err(format!("{n}줄: 제목이 없다 — {raw:?}"));
     }
-    Ok((rest.to_string(), priority, tags))
+    // 제목 끝쪽에 이어진 `\#낱말` 은 태그가 아니라 제목의 `#낱말` 이다(moai-a5pz). 가운데
+    // 것은 원래 태그로 안 읽히므로 이스케이프도 안 하고 풀지도 않는다 — render 와 같은 자리.
+    let mut words: Vec<String> = rest.split(' ').map(str::to_string).collect();
+    for w in words.iter_mut().rev() {
+        match w.strip_prefix("\\#") {
+            Some(t) if !t.is_empty() => *w = format!("#{t}"),
+            _ => break,
+        }
+    }
+    Ok((words.join(" "), priority, tags))
 }
 
 /// 못 읽은 줄은 **전부** 모아 한 번에 말한다. 하나씩 고치게 하면 여섯 줄짜리
@@ -150,12 +168,27 @@ pub fn render(epic: &Issue, members: &[&Issue]) -> String {
 }
 
 /// 글머리(`#`·`-`)를 뗀 한 줄 — [`split_parts`] 가 읽는 바로 그 자리.
+///
+/// **제목은 parse 가 달리 읽을 자리만 이스케이프한다**(moai-a5pz) — 앞머리 `[` 는 `\[`,
+/// 끝쪽에 이어진 `#낱말` 은 `\#낱말`. 가운데 `#` 은 원래 태그로 안 읽혀 그대로 둔다.
 fn body(i: &Issue) -> String {
     let mut s = String::new();
     if let Some(p) = i.priority {
         s.push_str(&format!("[p{p}] "));
     }
-    s.push_str(&crate::text::one_line(&i.title));
+    let title = crate::text::one_line(&i.title);
+    let mut words: Vec<String> = title.split(' ').map(str::to_string).collect();
+    for w in words.iter_mut().rev() {
+        match w.strip_prefix('#') {
+            Some(t) if !t.is_empty() => *w = format!("\\#{t}"),
+            _ => break,
+        }
+    }
+    let title = words.join(" ");
+    if title.starts_with('[') {
+        s.push('\\');
+    }
+    s.push_str(&title);
     for t in &i.tags {
         s.push_str(&format!(" #{t}"));
     }
@@ -164,10 +197,10 @@ fn body(i: &Issue) -> String {
 
 /// [`render`] 가 쓴 줄을 [`parse`] 가 **다르게 읽는** 줄의 id.
 ///
-/// 형식에 이스케이프가 없어 `[WIP] 반쯤` 은 우선순위로 읽혀 거부되고 `이슈 #12` 는
-/// 끝 낱말이 태그로 먹힌다. render 안에서는 고칠 수 없다 — 고치면 parse 가 받는 것이
-/// 바뀐다. 그래서 **조용히 틀리지 않고 이름을 댄다**(moai-nb8d.j61). 되뽑은 글은
-/// 사람이 다듬는 틀이라 거절하지는 않는다.
+/// 앞머리 `[` 와 끝의 `#낱말` 은 이제 이스케이프로 도로 들어간다(moai-a5pz). 남는 것은
+/// 이스케이프로도 못 담는 제목 — 원래 역슬래시로 시작하거나 끝의 `#낱말` 앞에 역슬래시를
+/// 든 제목 같은 것이다. 견주는 제목은 `one_line` 을 지난 것이라 줄바꿈은 안 짚는다. **조용히 틀리지 않고 이름을 댄다**(moai-nb8d.j61). 되뽑은
+/// 글은 사람이 다듬는 틀이라 거절하지는 않는다 — 안전망으로 남긴다(사람이 정했다).
 ///
 /// 판정은 짝이 직접 한다 — 쓴 줄을 도로 읽어 견준다. 규칙을 따로 적으면 parse 가
 /// 바뀌는 날 이쪽만 옛 규칙으로 남는다.
@@ -221,22 +254,57 @@ mod tests {
         assert_eq!(one(&md).len(), 2, "줄바꿈이 이슈를 하나 더 만들었다");
     }
 
-    /// 형식이 담지 못하는 제목은 이름이 불린다. 앞머리 `[` 는 우선순위로, 끝의
-    /// `#낱말` 은 태그로 읽혀 도로 넣으면 거부되거나 조용히 바뀐다.
+    /// **앞머리 `[` 와 끝의 `#낱말` 을 든 제목도 도로 들어간다**(moai-a5pz). 형식에
+    /// 이스케이프가 없던 때는 `[WIP] 반쯤` 이 우선순위로 읽혀 거부되고 `이슈 #12` 는 끝
+    /// 낱말이 태그로 먹혔다(리뷰 moai-nb8d.j61). render 는 필요한 자리만 `\[`·`\#` 로 쓰고
+    /// parse 가 푼다 — render → parse 가 같은 계획이다.
     #[test]
-    fn titles_the_format_cannot_hold_are_named() {
-        let epic = issue("가", Kind::Epic, None, &[]);
-        let mut wip = issue("[WIP] 반쯤", Kind::Issue, None, &[]);
-        wip.id = "x-wip".into();
-        let mut hash = issue("이슈 #12 를 고친다 #12", Kind::Issue, Some(1), &[]);
-        hash.id = "x-hash".into();
-        let mut fine = issue("--json 이 #1 에서 깨진다", Kind::Issue, Some(0), &["bug"]);
-        fine.id = "x-fine".into();
-        assert_eq!(lossy(&epic, &[&wip, &hash, &fine]), ["x-wip", "x-hash"]);
+    fn titles_with_a_leading_bracket_or_trailing_hashes_round_trip() {
+        let epic = issue("[릴리스] 준비 #2", Kind::Epic, Some(2), &["release"]);
+        let wip = issue("[WIP] 반쯤", Kind::Issue, None, &[]);
+        let hash = issue("이슈 #12 를 고친다 #12", Kind::Issue, Some(1), &["bug"]);
+        let two = issue("끝이 #a #b", Kind::Issue, None, &[]);
+        let lone = issue("#12", Kind::Issue, None, &["x"]);
+        let middle = issue("--json 이 #1 에서 깨진다", Kind::Issue, Some(0), &["bug"]);
+        let all = [&wip, &hash, &two, &lone, &middle];
+        let md = render(&epic, &all);
+        assert_eq!(
+            md,
+            "# [p2] \\[릴리스] 준비 \\#2 #release\n- \\[WIP] 반쯤\n- [p1] 이슈 #12 를 고친다 \\#12 #bug\n- 끝이 \\#a \\#b\n- \\#12 #x\n- [p0] --json 이 #1 에서 깨진다 #bug\n",
+            "가운데 # 은 이스케이프하지 않는다"
+        );
+        let got = one(&md);
+        for (d, i) in got.iter().zip(std::iter::once(&epic).chain(all)) {
+            assert_eq!((d.title.as_str(), d.priority, d.tags.as_slice()), (i.title.as_str(), i.priority, i.tags.as_slice()), "{md}");
+        }
+        assert!(lossy(&epic, &all).is_empty(), "되돌아 읽히는데 lossy 가 짚었다");
+    }
 
-        // 짝이 실제로 그렇게 읽는지 — 판정이 헛짚은 것이 아님을 본다.
-        let md = render(&epic, &[&wip]);
-        assert!(parse(&md).is_err(), "{md}");
+    /// 사람이 손으로 쓸 때도 같은 이스케이프를 받고, **오타는 여전히 거절한다** — `[P1]`
+    /// 이 조용히 제목이 되면 우선순위를 잃은 것을 아무도 모른다(사람이 정했다, moai-a5pz).
+    #[test]
+    fn escapes_are_read_by_hand_and_typos_are_still_refused() {
+        // 가운데 `#` 은 원래 태그로 안 읽혀 이스케이프가 필요 없다 — 끝쪽의 `\#` 만 푼다.
+        let got = one("# 가\n- \\[x] 체크박스처럼 #todo\n- 우선 #1 과 \\#2\n- [p1] \\[p2] 는 제목\n");
+        assert_eq!((got[1].title.as_str(), got[1].priority, got[1].tags.as_slice()), ("[x] 체크박스처럼", None, &["todo".to_string()][..]));
+        assert_eq!((got[2].title.as_str(), got[2].tags.len()), ("우선 #1 과 #2", 0));
+        assert_eq!((got[3].title.as_str(), got[3].priority), ("[p2] 는 제목", Some(1)), "우선순위 뒤의 이스케이프를 못 풀었다");
+        let e = parse("# 가\n- [P1] 대문자\n- [x] 체크박스\n").unwrap_err();
+        assert!(e.contains("2줄") && e.contains("3줄"), "오타를 제목으로 받았다 — {e}");
+    }
+
+    /// 이스케이프로도 못 담는 제목은 **여전히 이름이 불린다** — lossy 는 짝이 도로 읽어
+    /// 견주는 안전망이다(사람이 정했다). 원래 역슬래시로 시작하는 제목은 이스케이프를 푸는
+    /// 규칙과 부딪친다. 줄바꿈은 `one_line` 한 줄로 견주므로 여기서 안 짚는다 —
+    /// `a_title_that_spans_lines_stays_one_line` 이 따로 본다.
+    #[test]
+    fn titles_even_escaping_cannot_hold_are_still_named() {
+        let epic = issue("가", Kind::Epic, None, &[]);
+        let mut slash = issue("\\[이미 역슬래시]", Kind::Issue, None, &[]);
+        slash.id = "x-slash".into();
+        let mut fine = issue("[WIP] 반쯤", Kind::Issue, None, &[]);
+        fine.id = "x-fine".into();
+        assert_eq!(lossy(&epic, &[&slash, &fine]), ["x-slash"]);
     }
 
     /// 멤버가 없는 에픽도 도로 들어가는 계획이다 — 에픽 줄 하나.
