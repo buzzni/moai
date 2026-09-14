@@ -45,12 +45,16 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 등록한 프로젝트가 있으면 층을 얹는다 — 뿌리에서 한 칸 더 올라가면 층이다(결정 3).
     // **남의 프로젝트는 여기서 안 읽는다**: 처음 올라갈 때 읽는다. 안에서 띄운 사람의 첫
     // 화면을 등록한 저장소 수만큼 늦출 까닭이 없다.
-    let layer = crate::tui::layer::Layer::read(crate::user_config::path().as_deref(), Some(&repo.root));
+    let config = crate::user_config::path();
+    let layer = crate::tui::layer::Layer::read(config.as_deref(), Some(&repo.root));
     let mut app = App::open(repo, load, index, path, stamp);
     if layer.registered() {
         app = app.with_layer(layer);
     }
     app.user = ctx.user.clone();
+    // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
+    app.user_config = config;
+    app.here = std::env::current_dir().ok();
     screen(app)
 }
 
@@ -105,6 +109,8 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     refuse_without_terminal()?;
     let mut app = App::on_projects(crate::tui::layer::Layer::read(config.as_deref(), None));
     app.user = ctx.user.clone();
+    app.user_config = config;
+    app.here = std::env::current_dir().ok();
     screen(app)
 }
 

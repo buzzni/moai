@@ -7,6 +7,7 @@
 use super::form::{Field, Form, Target};
 use super::scroll::Scroll;
 use super::layer::{Look, Place, Shut};
+use super::picker::{self, Picker};
 use super::{App, Input, Mode, Pane, Row};
 use crate::nav::Entry;
 use crate::report::Blocker;
@@ -85,6 +86,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     .unwrap_or_default();
     match &mut app.mode {
         Mode::Idea(form) => jot(f, form, body, true, tint),
+        Mode::Pick(p) => pick(f, p, body),
         Mode::Ask(ask) => {
             if let Mode::Idea(form) = ask.back.as_mut() {
                 jot(f, form, body, false, tint);
@@ -107,7 +109,132 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             prompt(f, line, "누구", &ask.input, ask.error.clone(), "이름 (메일)  Enter 쓰기  Esc 그만");
         }
         Mode::Idea(form) => jot_keys(f, form, keys),
+        Mode::Pick(p) => match &p.typing {
+            Some(input) => prompt(f, keys, "경로", input, p.error.clone(), "Enter 가기  Esc 그만"),
+            None => pick_keys(f, p, keys),
+        },
+        Mode::Unregister(u) => {
+            let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
+            let name = crate::text::sanitize(&u.name);
+            let line = Line::from(Span::styled(
+                format!(" {name} 을 목록에서 뺄까 — y 뺀다 · 다른 키는 그만 · 디렉터리와 .moai 는 그대로다 "),
+                ask,
+            ));
+            f.render_widget(Paragraph::new(fit(line, keys.width as usize)), keys);
+        }
     }
+}
+
+/// 디렉터리 고르기 창(moai-plvy). 목록·상세 자리를 **폼처럼 통째로** 덮는다 — 뒤 칸의
+/// 테두리와 커서가 비치면 어느 `>` 가 이 창의 것인지 안 읽힌다([`jot`] 와 같은 까닭).
+///
+/// 창의 테두리가 곧 지금 디렉터리를 댄다. 줄마다 `.moai` 와 `✓ 등록됨` 을 **낱말로** 붙인다 —
+/// 색이 혼자 뜻을 지지 않는다. 감춘 점 디렉터리와 상한에 잘린 수는 아래 테두리 왼쪽에
+/// 말한다: 조용히 안 보이면 거기 없는 줄 안다. 굴릴 것이 남았다는 표시는 목록과 같은 자리(오른쪽)다.
+fn pick(f: &mut Frame, p: &mut Picker, at: Rect) {
+    f.render_widget(Clear, at);
+    let inner = at.width.saturating_sub(2) as usize;
+    let rows = p.rows();
+    let items: Vec<ListItem> = rows.iter().map(|r| ListItem::new(dent_line(p, *r, inner))).collect();
+    let dir = crate::text::sanitize(&p.at.dir.display().to_string());
+    // 경로는 **뒤가 값지다** — 깊이 들어갈수록 앞은 늘 같은 홈이다. 넘치면 앞을 자른다.
+    let room = inner.saturating_sub(crate::text::width(" 프로젝트 등록 ·  ") + 1);
+    let title = format!(" 프로젝트 등록 · {} ", clip_front(&dir, room));
+    let mut foot: Vec<String> = Vec::new();
+    if p.at.hidden > 0 {
+        foot.push(format!("숨은 것 {}개 · . 로 보인다", p.at.hidden));
+    }
+    if p.at.cut > 0 {
+        foot.push(format!("그 밖 {}개 — g 로 경로를 적는다", p.at.cut));
+    }
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(from_anstyle(style::FOCUS))
+        .title(title);
+    if !foot.is_empty() {
+        // 오른쪽의 굴림 표시(`↑ N줄 · ↓ N줄`)와 겹치지 않게 그 몫을 남긴다.
+        block = block.title_bottom(Line::from(Span::styled(clip(&format!(" {} ", foot.join(" · ")), inner.saturating_sub(20)), dim())));
+    }
+    let selected = (!rows.is_empty()).then_some(p.cursor.min(rows.len().saturating_sub(1)));
+    p.list.fit(at.height.saturating_sub(2) as usize, rows.len());
+    if let Some(at) = selected {
+        p.list.reveal(at);
+    }
+    let mut state = ListState::default().with_offset(p.list.offset()).with_selected(selected);
+    f.render_stateful_widget(
+        List::new(items).block(block).highlight_style(Style::new().add_modifier(Modifier::REVERSED)).highlight_symbol(CURSOR),
+        at,
+        &mut state,
+    );
+    scroll_mark(f, &p.list, at, "", true);
+}
+
+/// 앞을 잘라 뒤를 남긴다 — `…/apps/a`.
+fn clip_front(s: &str, room: usize) -> String {
+    if crate::text::width(s) <= room {
+        return s.to_string();
+    }
+    if room == 0 {
+        return String::new();
+    }
+    let mut out: Vec<char> = Vec::new();
+    let mut used = 1; // `…`
+    for c in s.chars().rev() {
+        let w = crate::text::width(&c.to_string());
+        if used + w > room {
+            break;
+        }
+        used += w;
+        out.push(c);
+    }
+    std::iter::once('…').chain(out.into_iter().rev()).collect()
+}
+
+/// 창의 한 줄: `apps/  .moai  ✓ 등록됨`. `./` 은 지금 디렉터리, `..` 은 위로.
+fn dent_line<'a>(p: &Picker, r: picker::Row, budget: usize) -> Line<'a> {
+    let room = budget.saturating_sub(crate::text::width(CURSOR));
+    let (mut spans, moai, registered) = match r {
+        picker::Row::Here => (
+            vec![Span::styled("./", bold()), Span::styled("  이 디렉터리", dim())],
+            p.at.moai,
+            p.at.registered,
+        ),
+        picker::Row::Up => return Line::from(vec![Span::styled("..", dim()), Span::styled("  위로", dim())]),
+        picker::Row::Dir(i) => {
+            let Some(d) = p.at.entries.get(i) else { return Line::from("") };
+            // 이름이 줄을 다 먹으면 표시가 안 보인다 — 반까지만, `/` 는 자른 뒤에 붙인다.
+            let mut name = clip(&crate::text::sanitize(&d.name), (room / 2).max(2).saturating_sub(1));
+            name.push('/');
+            (vec![Span::raw(name)], d.moai, d.registered)
+        }
+    };
+    if moai {
+        spans.push(Span::styled("  .moai", Style::new().fg(Color::Cyan)));
+    }
+    if registered {
+        spans.push(Span::styled("  ✓ 등록됨", status("done")));
+    }
+    fit(Line::from(spans), room)
+}
+
+/// 창이 열린 동안의 맨 아랫줄. 못 한 까닭이 있으면 그것이 줄을 차지한다 — 폼과 같다.
+/// 등록과 닫기는 **늘 남는다**: 창을 연 까닭과 나갈 길이다.
+fn pick_keys(f: &mut Frame, p: &Picker, at: Rect) {
+    if let Some(e) = &p.error {
+        let line = Line::from(vec![
+            Span::styled(" ! ", Style::new().fg(Color::Black).bg(Color::LightRed)),
+            Span::styled(format!(" {e}"), Style::new().fg(Color::LightRed)),
+        ]);
+        return f.render_widget(Paragraph::new(fit(line, at.width as usize)), at);
+    }
+    let optional = vec![
+        key(".", if p.show_hidden { "숨은 것 감추기" } else { "숨은 것" }),
+        key("g", "경로 적기"),
+        key("Bksp", "위로"),
+        key("Enter", "들어가기"),
+    ];
+    bar(f, at, optional, vec![key("a", "등록"), key("Esc", "닫기")]);
 }
 
 /// 생각 담기 폼. 제목 칸(세 줄) 밑에 본문 칸이 남은 높이를 다 먹는다.
@@ -1101,14 +1228,23 @@ fn fkeys(f: &mut Frame, app: &App, at: Rect) {
     // (`layer::refused`) 나가기는 위가 없다. 적어 두면 누를 때마다 "안 된다" 를 듣는다.
     // `n` 은 층에서도 듣는다 — 커서의 프로젝트에 담는다(moai-fccv).
     if app.on_layer() {
-        let mut optional =
-            vec![key("j·k", "굴리기"), key("F5", "갱신"), key("Tab", pane_name(app.focus.next())), key("n", "담기")];
+        let mut optional = vec![
+            key("j·k", "굴리기"),
+            key("F5", "갱신"),
+            key("Tab", pane_name(app.focus.next())),
+            key("n", "담기"),
+            key("a", "등록"),
+        ];
+        // `d` 는 커서가 선 줄을 뺀다 — 드나드는 키처럼 목록 포커스를 탄다(`App::key`).
         if app.focus == Pane::Explorer {
-            optional.push(key("Enter", "들어가기"));
+            optional.extend([key("d", "해제"), key("Enter", "들어가기")]);
         }
         return bar(f, at, optional, vec![key("F10", "끝내기")]);
     }
     let mut optional = vec![
+        // **프로젝트 안에서는 맨 먼저 떨어진다.** 등록은 층의 일이고 층에서는 늘 보이지만,
+        // 등록이 0 인 채 `.moai` 안에서 띄우면 층이 없어 이 키가 첫 등록의 길이다(moai-plvy).
+        key("a", "프로젝트 등록"),
         key("w", if app.worktree { "워크트리 끄기" } else { "워크트리" }),
         key("j·k", "굴리기"),
         // **`F5` 는 `n` 보다 먼저 떨어진다.** 파일이 바뀌면 저절로 다시 읽으므로(`App::follow`)
@@ -1231,7 +1367,7 @@ fn priority(p: u8) -> Style {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::config::Config;
     use crate::model::{Issue, Kind, Status};
@@ -1279,7 +1415,7 @@ mod tests {
     /// 센다. 앞 글자의 폭만큼 건너뛰어야 화면에 있는 것과 같은 줄이 된다.
     /// **`&mut` 다.** 훑는 자리는 프레임을 넘어 살아야 하므로 `screen` 이
     /// App 에 되적는다 — 시험도 진짜 화면과 같은 길을 지난다.
-    pub(super) fn render(app: &mut App, w: u16, h: u16) -> Vec<String> {
+    pub(in crate::tui) fn render(app: &mut App, w: u16, h: u16) -> Vec<String> {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
         term.draw(|f| screen(f, app)).unwrap();
         let buf = term.backend().buffer().clone();
@@ -1950,12 +2086,71 @@ mod tests {
         let bar = lines.last().unwrap();
         assert!(bar.contains("Enter 들어가기") && bar.contains("F10 끝내기"), "{bar:?}");
         assert!(bar.contains("n 담기"), "층에서도 듣는 `n` 을 안 적었다 — {bar:?}");
+        assert!(bar.contains("a 등록") && bar.contains("d 해제"), "80칸에서 등록·해제 키가 잘렸다 — {bar:?}");
         for absent in ["거름망", "Bksp", "워크트리", "F3"] {
             assert!(!bar.contains(absent), "층에서 안 듣는 키를 적었다 — {absent} in {bar:?}");
         }
         for l in &lines {
             assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
         }
+        // `d` 는 목록 포커스에서만 듣는다(`App::key`) — 상세 포커스의 바에는 없다. `a` 는 남는다.
+        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        let bar = render(&mut a, 80, 22).last().cloned().unwrap_or_default();
+        assert!(bar.contains("a 등록") && !bar.contains("d 해제") && !bar.contains("Enter"), "{bar:?}");
+    }
+
+    /// **디렉터리 고르기 창도 색 없이 80칸에서 읽힌다** — 테두리가 지금 디렉터리를 대고(길면
+    /// 앞을 자른다), 줄마다 `./`·`..`·`이름/` 에 `.moai`·`✓ 등록됨` 이 낱말로 붙는다. 감춘 수와
+    /// 잘린 수가 아래 테두리에, 등록·닫기가 아랫줄에 늘 선다. 굵은 칸은 창 하나다.
+    #[test]
+    fn the_directory_picker_reads_without_colour_at_eighty_columns() {
+        use super::super::layer::At;
+        use super::super::picker::{Dent, Listing};
+        let mut a = layered(At::Layer);
+        let dir = "/home/raven/아주/깊은/작업/디렉터리/여러/겹/mono";
+        let at = Listing {
+            dir: dir.into(),
+            entries: vec![
+                Dent { name: "apps".into(), moai: false, registered: false },
+                Dent { name: "argos".into(), moai: true, registered: true },
+                Dent { name: "bare".into(), moai: false, registered: true },
+            ],
+            cut: 7,
+            hidden: 2,
+            moai: true,
+            registered: false,
+        };
+        a.mode = Mode::Pick(Picker::new(at));
+        let lines = render(&mut a, 80, 16);
+        let screen = lines.join("\n");
+        assert!(lines.iter().any(|l| l.contains("프로젝트 등록") && l.contains("mono")), "{screen}");
+        assert!(lines.iter().any(|l| l.contains("./") && l.contains("이 디렉터리") && l.contains(".moai")), "{screen}");
+        assert!(lines.iter().any(|l| l.contains("..") && l.contains("위로")), "{screen}");
+        assert!(lines.iter().any(|l| l.contains("> apps/")), "커서가 첫 하위 디렉터리에 안 섰다\n{screen}");
+        assert!(lines.iter().any(|l| l.contains("argos/") && l.contains(".moai") && l.contains("✓ 등록됨")), "{screen}");
+        assert!(lines.iter().any(|l| l.contains("bare/") && !l.contains(".moai") && l.contains("✓ 등록됨")), "{screen}");
+        assert!(screen.contains("숨은 것 2개") && screen.contains("그 밖 7개"), "{screen}");
+        assert_eq!(lines.iter().filter(|l| l.contains('┏')).count(), 1, "창이 뒤 칸을 다 못 덮었다\n{screen}");
+        let bar = lines.last().unwrap();
+        for hint in ["Enter 들어가기", "Bksp 위로", "g 경로 적기", "a 등록", "Esc 닫기"] {
+            assert!(bar.contains(hint), "80칸에서 `{hint}` 가 없다 — {bar:?}");
+        }
+        for l in &lines {
+            assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
+        }
+        // 좁고 낮아도 무너지지 않는다
+        for (w, h) in [(20u16, 5u16), (40, 8), (1, 1)] {
+            for l in render(&mut a, w, h) {
+                assert!(crate::text::width(&l) <= w as usize, "{w}x{h}: {l:?}");
+            }
+        }
+
+        // 해제를 묻는 줄 — 무엇을 빼는지, y, 디렉터리는 그대로라는 것.
+        a.mode = Mode::Unregister(super::super::register::Unregister { path: "/w/one".into(), name: "one".into() });
+        let bar = render(&mut a, 80, 16).last().cloned().unwrap_or_default();
+        assert!(bar.contains("one 을 목록에서 뺄까") && bar.contains("y 뺀다"), "{bar:?}");
+        let wide = render(&mut a, 120, 16).last().cloned().unwrap_or_default();
+        assert!(wide.contains("디렉터리와 .moai 는 그대로다"), "{wide:?}");
     }
 
     /// **프로젝트 안에서는 경로 줄이 늘 어느 프로젝트인지 댄다.** 뿌리에는 층으로 가는 `..`
