@@ -1061,6 +1061,65 @@ fn edit_says_when_epic_none_cannot_cut_a_parents_membership() {
     assert!(line_of(s.path(), &top).contains(r#""inherited_epic":"거짓""#), "모르는 필드를 잃었다");
 }
 
+/// **`--milestone none` 도 못 끊는 소속은 끊기지 않았다고 말한다** (moai-0lmn). 에픽이
+/// 마일스톤을 이기고 부모도 이기므로, 제 필드를 비워도 에픽이나 부모가 선 마일스톤에
+/// 그대로 든다 — `-e none` 과 같은 모양이라 같은 말투로 댄다.
+#[test]
+fn edit_says_when_milestone_none_cannot_cut_an_inherited_milestone() {
+    let s = init("editkeptms");
+    let ms = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
+    let epic = add(s.path(), &["에픽", "--type", "epic", "--milestone", &ms]);
+    let member = add(s.path(), &["멤버", "-e", &epic, "--milestone", &ms]);
+    let parent = add(s.path(), &["부모", "--milestone", &ms]);
+    let child = add(s.path(), &["자식", "--parent", &parent]);
+    let top = add(s.path(), &["홀로 선 이슈", "--milestone", &ms]);
+
+    let says = |id: &str, from: &str| {
+        let out = moai(s.path(), &["edit", id, "--milestone", "none"]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        let lines: Vec<&str> = err.lines().filter(|l| l.contains(from)).collect();
+        assert_eq!(lines.len(), 1, "{id}: {from} 에서 온 마일스톤을 한 줄로 안 댔다 — {err:?}");
+        assert!(lines[0].contains(&ms) && lines[0].contains("--milestone none"), "{id}: {err:?}");
+    };
+    // 에픽 멤버 — 제 필드는 비워지고, 소속은 에픽이 선 마일스톤으로 남는다.
+    says(&member, &format!("에픽 {epic}"));
+    assert!(!line_of(s.path(), &member).contains("\"milestone\""), "필드는 비워져야 한다");
+    assert!(ok(s.path(), &["show", "--milestone", &ms]).contains(&member));
+    // 부모 밑 자식 — 비울 필드가 없어 바뀐 것이 없어도 말한다.
+    says(&child, &format!("부모 {parent}"));
+
+    let json = ok(s.path(), &["edit", &member, "--milestone", "none", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{ms}","epic":"{epic}"}}"#)), "{json}");
+    let json = ok(s.path(), &["edit", &child, "--milestone", "none", "--json"]);
+    assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{ms}","parent":"{parent}"}}"#)), "{json}");
+
+    // 모르는 필드로 든 같은 이름은 끊긴 줄에 새지 않는다.
+    let doctored: String = issues(s.path())
+        .lines()
+        .map(|l| format!("{}{}\n", &l[..l.len() - 1], r#","inherited_milestone":"거짓"}"#))
+        .collect();
+    std::fs::write(s.path().join(".moai/issues.jsonl"), doctored).unwrap();
+    let json = ok(s.path(), &["edit", &member, "--milestone", "none", "--json"]);
+    assert_eq!(json.matches(r#""inherited_milestone""#).count(), 1, "같은 키가 두 번 났다 — {json}");
+
+    // 끊긴 것, 끊을 뜻이 없던 것, 제 필드에만 서는 에픽 줄은 조용하다.
+    for args in [
+        vec!["edit", top.as_str(), "--milestone", "none"],
+        vec!["edit", child.as_str(), "--tag", "x"],
+        vec!["edit", epic.as_str(), "--milestone", "none"],
+    ] {
+        let out = moai(s.path(), &args);
+        assert!(out.status.success());
+        assert!(out.stderr.is_empty(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let mut j = args.clone();
+        j.push("--json");
+        let json = ok(s.path(), &j);
+        assert!(!json.contains("inherited_milestone"), "{args:?}: {json}");
+    }
+}
+
 #[test]
 fn rm_removes_and_names_what_it_broke() {
     let s = init("rm");
