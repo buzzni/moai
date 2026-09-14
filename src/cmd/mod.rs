@@ -187,11 +187,15 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
     use clap::CommandFactory;
     let found = crate::store::Repo::find();
     // `.moai` 밖이어도 등록한 프로젝트가 있으면 한눈 보기가 곧 시작점이다 (`status` 가
-    // 그 길로 간다). 설정이 깨진 저장소 안(`Err`)은 전처럼 도움말이다.
+    // 그 길로 간다).
+    //
+    // **설정이 깨진 저장소 안(`Err`)은 도움말이 아니다** — 아래 `status` 로 가서 다른 명령과
+    // 같은 말·같은 종료 코드로 그 설정을 댄다. 도움말로 접으면 "아직 moai 저장소가 아니다"
+    // 를 믿은 사람이 제 저장소에 `init` 을 다시 친다 (moai-byih).
     let outside = matches!(found, Ok(None));
     let reg = outside.then(|| crate::user_config::read(crate::user_config::path().as_deref()));
     let registered = reg.as_ref().is_some_and(|r| !r.projects.is_empty());
-    if found.as_ref().map_or(true, Option::is_none) && !registered {
+    if outside && !registered {
         let mut help = Vec::new();
         crate::cli::Cli::command()
             .write_help(&mut help)

@@ -2408,6 +2408,25 @@ fn the_bare_call_speaks_json_too() {
     assert!(out.contains("\"warnings\"") && out.contains("\"flow\""), "{out}");
 }
 
+/// **설정이 깨진 저장소 안의 인자 없는 `moai` 는 그 설정을 댄다** — `status` 와 같은 말,
+/// 같은 종료 코드로. 도움말과 "아직 moai 저장소가 아니다" 를 내면 사람은 제 저장소를
+/// 믿지 못하고 `moai init` 을 다시 친다 (moai-byih).
+#[test]
+fn bare_moai_inside_names_a_broken_repo_config() {
+    let s = init("bare-badcfg");
+    std::fs::write(s.path().join(".moai/config.toml"), "prefix = \"\"\n").unwrap();
+    for json in [false, true] {
+        let flag: &[&str] = if json { &["--json"] } else { &[] };
+        let bare = moai(s.path(), flag);
+        let status = moai(s.path(), &[flag, &["status"]].concat());
+        let said = text(&bare);
+        assert!(!said.contains("아직 moai 저장소가 아니다"), "json={json}\n{said}");
+        assert!(said.contains("config.toml") && said.contains("prefix"), "json={json}: 깨진 설정을 안 댔다\n{said}");
+        assert_eq!(bare.status.code(), status.status.code(), "json={json}\n{said}");
+        assert_eq!(bare.stderr, status.stderr, "json={json}: status 와 다른 말을 한다\n{said}");
+    }
+}
+
 // ── 누가 하는가 ───────────────────────────────────────────────────────
 
 /// `MOAI_ACTOR` 를 걷고 git 이 읽을 설정을 통째로 지정해 돌린다. moai 는 git
