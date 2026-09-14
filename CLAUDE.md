@@ -117,6 +117,26 @@
   `--json` 을 실제로 부르는 것은 `every_command_still_speaks_json` 이고, 그쪽
   목록은 손으로 적는다 (인자가 필요한 명령을 어떻게 부를지는 사람이 정한다)
 
+## 워크트리
+
+**moai 에서 집은 일은 모두 워크트리에서 한다.** main(이나 develop)에서 직접
+하면 여러 세션이 같은 가지에 쌓아, 병합할 때 서로 끝나기를 기다려야 한다.
+
+    moai mv <id> in_progress                      main 에서 집는다
+    git commit -m "chore(tracker): <id> 를 워크트리에서 집는다"
+    git worktree add -b worktree-moai-<id> .claude/worktrees/moai-<id> main
+    (작업 · 커밋 · 필요하면 main 을 받는다)
+    git merge worktree-moai-<id>                  main 에서, "merge: … (<id>)"
+    moai mv <id> done                             "chore(tracker): <id> 를 main 머지와 함께 닫는다"
+
+- **집기는 main 에서 커밋한다.** 옆 세션의 `moai ready --worktree` 와 보드가
+  누가 무엇을 쥐었는지 보려면 그 줄이 main 에 있어야 한다
+- **가지는 로컬 `main` 에서 뜬다.** `EnterWorktree` 에 `name` 만 주면
+  `origin/main` 에서 뜨는데, 그쪽은 로컬보다 한참 낡았을 수 있다 (2026-09-14
+  에 91커밋 뒤였다).
+  `git worktree add` 로 만든 뒤 `EnterWorktree` 에 `path` 로 들어간다
+- 워크트리마다 `target/` 이 따로다. 처음 한 번 `cargo build --release` 가 든다
+
 ## 커밋
 
     feat(report): 에픽 롤업·트리·ready
