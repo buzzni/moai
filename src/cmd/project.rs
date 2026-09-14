@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     let config = writable_config()?;
     // 적는 길은 TUI 층의 `a` 와 하나다 — 링크 풀기·멱등·`.moai` 를 준 자리에서만 보기.
-    let projects::Added { path: dir, added, initialized } = projects::add(&config, input, &cwd()?)?;
+    let projects::Added { path: dir, added, initialized, unreadable } = projects::add(&config, input, &cwd()?)?;
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -31,9 +31,14 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
             /// 새로 넣었나. `false` 면 이미 있었다 — 실패가 아니다.
             added: bool,
             initialized: bool,
+            /// 그 저장소를 못 읽는 까닭 — `project ls --json` 의 `unreadable` 상태와 같은 말이다.
+            /// **읽을 때는 키가 없다.** 늘 달면 전부터 내던 줄이 바뀐다.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            error: Option<&'a str>,
             config: &'a Path,
         }
-        return super::json_line(&Out { path: &dir, added, initialized, config: &config });
+        let error = unreadable.as_deref();
+        return super::json_line(&Out { path: &dir, added, initialized, error, config: &config });
     }
 
     let shown = one_line(&dir.display().to_string());
@@ -42,6 +47,10 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     } else {
         format!("{}  {shown}", paint(style::DIM, "이미 등록돼 있다"))
     }];
+    // 한 줄은 `project ls` 의 끝 칸과 같은 말이다 — 두 화면이 같은 디렉터리를 달리 부르지 않는다.
+    if let Some(error) = &unreadable {
+        out.push(format!("  {} 못 읽는다 — {}", paint(style::ERROR, "!"), one_line(error)));
+    }
     if !initialized {
         out.push(paint(
             style::DIM,

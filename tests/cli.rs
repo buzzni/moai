@@ -5411,6 +5411,33 @@ fn project_add_is_idempotent() {
     assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
 }
 
+/// **설정이 깨진 `.moai` 도 등록은 하되 못 읽는다고 한 줄 댄다** (moai-9omq). 등록은
+/// 사람의 설정에 쓰는 것이지 그 저장소에 쓰는 것이 아니라 막지 않는다 — 읽기는 관대하다.
+/// 조용히 받으면 "등록함" 을 믿은 사람이 층과 `status` 에서 "못 읽는다" 를 처음 만난다.
+/// `--json` 은 더하기만 한다: `initialized` 는 전처럼 `.moai` 가 있다는 뜻이고, 곁에 `error`.
+#[test]
+fn project_add_names_a_repo_it_cannot_read() {
+    let home = Scratch::new("project-badcfg");
+    let config = home.path().join("config.toml");
+    let bad = init("project-badcfg-repo");
+    std::fs::write(bad.path().join(".moai/config.toml"), "prefix = \"\"\n").unwrap();
+    let good = init("project-goodcfg-repo");
+
+    let said = project_ok(home.path(), &config, &["project", "add", bad.path().to_str().unwrap()]);
+    assert!(said.contains("등록함"), "{said}");
+    assert!(said.contains("못 읽는다") && said.contains("prefix"), "깨진 설정을 안 댔다\n{said}");
+    assert!(std::fs::read_to_string(&config).unwrap().contains("path = "), "등록을 안 했다");
+
+    let json = project_ok(home.path(), &config, &["project", "add", bad.path().to_str().unwrap(), "--json"]);
+    one_json_value(&json);
+    assert!(json.contains("\"initialized\":true") && json.contains("\"error\":\"") && json.contains("prefix"), "{json}");
+
+    let fine = project_ok(home.path(), &config, &["project", "add", good.path().to_str().unwrap(), "--json"]);
+    assert!(!fine.contains("\"error\""), "멀쩡한 저장소에 error 를 달았다\n{fine}");
+    let fine = project_ok(home.path(), &config, &["project", "add", good.path().to_str().unwrap()]);
+    assert!(!fine.contains("못 읽는다"), "{fine}");
+}
+
 /// **링크 철자로 적힌 줄이 있으면 푼 경로를 또 넣지 않는다.** 등록은 링크를 풀어 적지만
 /// 손으로 적은 줄이나 옛 바이너리가 적은 줄은 링크 철자일 수 있다 — 글자로만 견주면 같은
 /// 저장소가 두 줄로 서고, 층에도 `project ls` 에도 둘이 보이며 하나를 빼도 다른 하나가
