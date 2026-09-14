@@ -489,6 +489,10 @@ pub struct ShowArgs {
     #[arg(long)]
     pub tree: bool,
 
+    /// 에픽 하나를 `add --from` 이 받는 마크다운으로 되뽑는다 — 되풀이할 계획의 틀
+    #[arg(long)]
+    pub as_plan: bool,
+
     #[command(flatten)]
     pub worktree: WorktreeArg,
 
