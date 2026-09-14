@@ -241,7 +241,10 @@ impl App {
                     // 그새 밖에서 뺐다. 층은 방금 다시 읽어 그 줄이 사라졌다.
                     format!("이미 목록에 없다 · {}", shown(path))
                 } else {
-                    format!("✓ 뺌 · {} — 목록에서만 뺐다, 디렉터리와 .moai 는 그대로다", shown(path))
+                    // 뺀 것을 **다** 댄다 — 손으로 링크 철자와 푼 철자를 둘 다 적었으면 둘이 함께
+                    // 빠진다(CLI `rm` 도 뺀 줄마다 적는다). 하나만 대면 사라진 다른 줄을 모른다.
+                    let gone: Vec<String> = r.removed.iter().map(|p| shown(p)).collect();
+                    format!("✓ 뺌 · {} — 목록에서만 뺐다, 디렉터리와 .moai 는 그대로다", gone.join(", "))
                 });
             }
             Err(e) => self.notice = Some(format!("! 빼지 못했다 — {}", one_line(&e.message))),
