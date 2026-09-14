@@ -10,8 +10,9 @@
 //! 보지도 않을 디렉터리 이름까지 읽는다.
 
 use super::input::Input;
+use super::keys::{Goto, Lookup, PATH, PICK, Pick, lookup};
 use super::scroll::Scroll;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use std::path::{Path, PathBuf};
 
 /// 하위 디렉터리 하나.
@@ -166,11 +167,9 @@ impl Picker {
             if input.key(k) {
                 return Act::Stay;
             }
-            if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
-                return Act::Stay;
-            }
-            return match k.code {
-                KeyCode::Enter => {
+            // 칸이 안 먹은 키는 표([`PATH`])가 가른다. Ctrl·Alt 붙은 키는 표에 없어 아무 일도 없다.
+            return match lookup(PATH, &[k]) {
+                Lookup::Run(Goto::Go) => {
                     let text = input.text().trim().to_string();
                     self.typing = None;
                     // **`~` 는 든 쪽이 푼다.** 여기는 조각이라 홈을 모른다(환경을 안 본다).
@@ -183,23 +182,26 @@ impl Picker {
                         t => Act::Go(self.at.dir.join(t)),
                     }
                 }
-                KeyCode::Esc => {
+                Lookup::Run(Goto::Cancel) => {
                     self.typing = None;
                     Act::Stay
                 }
-                _ => Act::Stay,
+                Lookup::Pending | Lookup::Unknown => Act::Stay,
             };
         }
-        if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
-            return Act::Stay;
-        }
-        if let Some(at) = super::scroll::cursor(k, self.cursor, || self.rows().len()) {
-            self.cursor = at;
+        // 키의 뜻은 표([`PICK`])에서 읽는다. 창의 줄은 전부 Ctrl·Alt 없이 누른 키라, 거들쇠가
+        // 붙은 키는 표에 없어 아무 일도 없다.
+        let Lookup::Run(act) = lookup(PICK, &[k]) else { return Act::Stay };
+        if act == Pick::Step {
+            if let Some(at) = super::scroll::cursor(k, self.cursor, || self.rows().len()) {
+                self.cursor = at;
+            }
             return Act::Stay;
         }
         let row = self.current();
-        match k.code {
-            KeyCode::Enter | KeyCode::Right => match row {
+        match act {
+            Pick::Step => Act::Stay,
+            Pick::Enter => match row {
                 Some(r @ (Row::Up | Row::Dir(_))) => self.path_of(r).map_or(Act::Stay, Act::Go),
                 // `./` 은 이미 여기다 — 들어갈 데가 없다. **조용히 먹지 않는다**: 아랫줄이
                 // `Enter 들어가기` 를 대고 있고, 하위 디렉터리가 없는 자리에서는 커서가
@@ -210,8 +212,8 @@ impl Picker {
                 }
                 None => Act::Stay,
             },
-            KeyCode::Backspace | KeyCode::Left => self.path_of(Row::Up).map_or(Act::Stay, Act::Go),
-            KeyCode::Char('a') => match row {
+            Pick::Up => self.path_of(Row::Up).map_or(Act::Stay, Act::Go),
+            Pick::Register => match row {
                 Some(Row::Up) => {
                     self.error = Some(UP_IS_NOT_A_PROJECT.into());
                     Act::Stay
@@ -219,11 +221,11 @@ impl Picker {
                 Some(r) => self.path_of(r).map_or(Act::Stay, Act::Register),
                 None => Act::Stay,
             },
-            KeyCode::Char('.') => {
+            Pick::Hidden => {
                 self.show_hidden = !self.show_hidden;
                 Act::Go(self.at.dir.clone())
             }
-            KeyCode::Char('g') => {
+            Pick::Path => {
                 let mut text = self.at.dir.display().to_string();
                 if !text.ends_with(std::path::MAIN_SEPARATOR) {
                     text.push(std::path::MAIN_SEPARATOR);
@@ -231,8 +233,7 @@ impl Picker {
                 self.typing = Some(Input::new(&text));
                 Act::Stay
             }
-            KeyCode::Esc | KeyCode::Char('q') => Act::Close,
-            _ => Act::Stay,
+            Pick::Close => Act::Close,
         }
     }
 }
@@ -240,6 +241,7 @@ impl Picker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
     fn press(p: &mut Picker, code: KeyCode) -> Act {
         p.key(KeyEvent::new(code, KeyModifiers::NONE))

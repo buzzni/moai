@@ -868,7 +868,7 @@ fn frame(app: &App, pane: Pane) -> Block<'static> {
 }
 
 /// 칸의 이름. F키 바가 `Tab` 이 **어디로 가는지** 댄다.
-fn pane_name(p: Pane) -> &'static str {
+pub(super) fn pane_name(p: Pane) -> &'static str {
     match p {
         Pane::Explorer => "목록",
         Pane::Detail => "상세",

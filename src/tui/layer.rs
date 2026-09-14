@@ -20,7 +20,6 @@ use crate::nav::Index;
 use crate::projects::{self, State};
 use crate::store::{Opened, Repo};
 use crate::user_config;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
@@ -257,23 +256,6 @@ impl Layer {
 
     fn position(&self, path: &Path) -> Option<usize> {
         self.places.iter().position(|p| p.path == path)
-    }
-}
-
-/// 층에서 뜻이 없는 키가 **왜 아무 일도 안 하는지**. 조용히 먹으면 고장 난 것으로 보인다.
-///
-/// `n` 은 여기 없다 — 층에서는 커서의 프로젝트를 담을 곳으로 박아 폼을 연다
-/// ([`App::open_form`], moai-fccv).
-pub fn refused(k: &KeyEvent) -> Option<&'static str> {
-    if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
-        return None;
-    }
-    match k.code {
-        KeyCode::Char('/') | KeyCode::Char('f') | KeyCode::F(7) => {
-            Some("거름망은 프로젝트 안의 줄에 건다 — Enter 로 들어가서 건다")
-        }
-        KeyCode::Char('w') => Some("워크트리 겹쳐 보기는 프로젝트 안에서 켠다 — Enter 로 들어가서 w"),
-        _ => None,
     }
 }
 
@@ -687,6 +669,7 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use crate::model::{Issue, Kind, Status};
     use crate::nav::Path as NavPath;
     use crate::tui::{Mode, stamp_of};
@@ -1095,6 +1078,13 @@ mod tests {
             }
         }
         assert!(!a.worktree, "Ctrl-w 가 겹쳐 보기를 켰다");
+        // **숨은 별칭 F7 도 수식키가 붙든 말든 같은 까닭으로 거절한다**(moai-nc7w). 옛 `refused` 는
+        // 수식키 붙은 키를 통째로 넘겨, 키를 나누는 쪽의 `F(7)` 이 층에서 거름망 칸을 열었다.
+        for m in [KeyModifiers::NONE, KeyModifiers::CONTROL, KeyModifiers::ALT] {
+            a.key(KeyEvent::new(KeyCode::F(7), m));
+            assert_eq!(a.mode, Mode::Browse, "{m:?}-F7 가 층에서 거름망 칸을 열었다");
+            assert!(a.notice.as_deref().is_some_and(|n| n.contains("거름망")), "{m:?}-F7: {:?}", a.notice);
+        }
         assert_eq!(files(), was, "층에서 누른 키가 파일을 바꿨다");
         assert!(!one.join(".moai/journal.jsonl").exists() && !two.join(".moai/journal.jsonl").exists());
 

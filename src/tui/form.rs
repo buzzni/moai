@@ -13,7 +13,8 @@
 
 use super::edit::Editor;
 use super::input::Input;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use super::keys::{CONFIRM, Confirm, JOT, Jot, Lookup, lookup};
+use ratatui::crossterm::event::KeyEvent;
 
 /// 폼 안의 어느 칸이 키를 먹는가. **폼 안의 포커스다** — 탐색기의 [`super::Pane`] 은
 /// 폼이 열려 있는 동안 그대로 남고, 닫으면 보던 칸으로 돌아간다.
@@ -108,27 +109,27 @@ impl Form {
     pub fn key(&mut self, k: KeyEvent) -> Act {
         if self.leaving {
             self.leaving = false;
-            let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-            return match k.code {
-                KeyCode::Char('y' | 'Y') if plain => Act::Close,
+            return match lookup(CONFIRM, &[k]) {
+                Lookup::Run(Confirm::Yes) => Act::Close,
                 _ => Act::Stay,
             };
         }
-        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        match k.code {
-            KeyCode::Char('s' | 'S') if ctrl => return self.save(),
-            KeyCode::F(2) => return self.save(),
-            // 터미널에 따라 `Shift-Tab` 이 `BackTab` 으로도 Shift 붙은 `Tab` 으로도 온다.
-            KeyCode::Tab | KeyCode::BackTab => {
+        // 키의 뜻은 표([`JOT`])에서 읽는다.
+        let act = lookup(JOT, &[k]);
+        match act {
+            Lookup::Run(Jot::Save) => return self.save(),
+            // 터미널에 따라 `Shift-Tab` 이 `BackTab` 으로도 Shift 붙은 `Tab` 으로도 온다 — 표가 한 줄로 받는다.
+            Lookup::Run(Jot::Switch) => {
                 self.field = self.field.other();
                 return Act::Stay;
             }
-            KeyCode::Esc if self.is_blank() => return Act::Close,
-            KeyCode::Esc => {
+            Lookup::Run(Jot::Close) if self.is_blank() => return Act::Close,
+            Lookup::Run(Jot::Close) => {
                 self.leaving = true;
                 return Act::Stay;
             }
-            _ => {}
+            // 제목의 Enter 는 **칸이 먼저 받는다** — 본문의 Enter 는 줄을 나눈다.
+            Lookup::Run(Jot::Next) | Lookup::Pending | Lookup::Unknown => {}
         }
         let eaten = match self.field {
             Field::Title => self.title.key(k),
@@ -136,7 +137,7 @@ impl Form {
         };
         if eaten {
             self.error = None;
-        } else if self.field == Field::Title && k.code == KeyCode::Enter && !ctrl {
+        } else if self.field == Field::Title && act == Lookup::Run(Jot::Next) {
             self.field = Field::Body;
         }
         Act::Stay
@@ -178,6 +179,7 @@ impl Form {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
     fn press(f: &mut Form, code: KeyCode) -> Act {
         f.key(KeyEvent::new(code, KeyModifiers::NONE))
