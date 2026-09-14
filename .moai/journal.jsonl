@@ -1305,3 +1305,17 @@
 {"ts":"2026-09-14T06:15:39Z","id":"moai-1krv.3my","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 주석 고침 반영(fix 커밋). 테마별 검정/초록 대비는 사용자가 막대 색을 고른 것이라 넘길 이슈 없음 — 안 읽힌다는 보고가 오면 새로 연다"}
 {"ts":"2026-09-14T06:15:39Z","id":"moai-1krv.3my","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"주석 반영, 테마 대비는 사용자 판단"}
 {"ts":"2026-09-14T06:15:39Z","id":"moai-1krv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"초록 바탕·검정 글자, 셈 오른쪽 정렬, 층 줄은 이름 뒤부터"}
+{"ts":"2026-09-14T06:28:35Z","id":"moai-u3r2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"목록 줄 진행 바탕을 걷고 n/n 셈만 오른쪽 정렬로 남긴다"}
+{"ts":"2026-09-14T06:28:35Z","id":"moai-u3r2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T06:34:34Z","id":"moai-u3r2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"바탕·p·shade 걷고 오른쪽 정렬 셈만 남김"}
+{"ts":"2026-09-14T06:34:34Z","id":"moai-fy99","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"집은 이슈 제목에 흐르는 빛줄기 애니메이션 — 16색"}
+{"ts":"2026-09-14T06:34:35Z","id":"moai-fy99","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T06:40:22Z","id":"moai-fy99.6hv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 집은 이슈 제목 빛줄기 (moai-fy99)"}
+{"ts":"2026-09-14T06:40:22Z","id":"moai-fy99.6hv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T06:40:42Z","id":"moai-fy99.6hv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-14T06:40:42Z","id":"moai-fy99.6hv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰(/code-review high --fix HEAD~1..HEAD)가 백그라운드에서 도는 중 — 결과가 오면 원문과 판단을 노트로 적고 done"}
+{"ts":"2026-09-14T06:40:42Z","id":"moai-fy99","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-14T06:45:24Z","id":"moai-fy99.6hv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"## 리뷰 원문 — /code-review high --fix HEAD~1..HEAD (집은 이슈 제목 빛줄기)\n\n1. `src/tui/draw.rs:716` (중간): 자식을 둔 집은 이슈는 안 빛난다. `!is_dir && app.spins(at)` 로 갈랐는데 자식 둔 이슈도 디렉터리 줄로 서서, in_progress 부모 이슈는 글리프만 돌고 빛줄기가 없다. 고침: `!crate::report::is_group(i)` — 에픽·마일스톤만 멈춘다.\n2. `src/tui/draw.rs:808` (중간): 한글 제목에서 빛이 흐르지 않고 깜빡인다. 두 칸 글자가 시작 칸의 띠 색만 받아, 가운데가 뒤 칸에 서는 걸음(하나 걸러)마다 굵은 칸이 없다. 고침: 덮는 칸 중 가장 밝은 띠를 준다. 시험이 걸음 5(`은` 의 뒤 칸)와 제목 안 모든 걸음에 굵은 칸이 있음을 본다.\n\n확인: `cargo test --bin moai tui::` 219 통과. clippy 는 바뀐 줄에 새 경고 없음(draw.rs:1137 은 이 커밋 밖).\n넘긴 것: 자식 둔 집은 이슈의 렌더 시험 — 지금 시험 자료에 그런 이슈가 없어 안 더했다."}
+{"ts":"2026-09-14T06:45:24Z","id":"moai-fy99.6hv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 1·2 반영(fix 커밋), 시험 전체(단위 601·CLI 238) 통과 확인. 자식 둔 이슈의 렌더 시험은 넘김 — is_group 한 줄이 규칙이고 report::is_group 은 제 시험이 있다. 빛이 안 서는 보고가 오면 그때 자료를 더한다. clippy draw.rs:1137 은 이 일 밖이라 손대지 않음."}
+{"ts":"2026-09-14T06:45:24Z","id":"moai-fy99.6hv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"두 결함 반영, 부모 이슈 렌더 시험은 넘김"}
+{"ts":"2026-09-14T06:45:24Z","id":"moai-fy99","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"16색 빛줄기 — 자식 둔 이슈 포함, 한글 제목에서 안 깜빡임"}
