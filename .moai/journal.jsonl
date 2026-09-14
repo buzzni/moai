@@ -1975,3 +1975,7 @@
 {"ts":"2026-09-14T12:49:16Z","id":"moai-zg19","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-dejq 로 옮겨 작업한다"}
 {"ts":"2026-09-14T12:49:17Z","id":"moai-bg55","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-14T12:49:17Z","id":"moai-dejq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T13:05:12Z","id":"moai-bg55.oya","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 마일스톤 줄에 마일스톤을 적는 쓰기 거절 (moai-bg55)"}
+{"ts":"2026-09-14T13:05:17Z","id":"moai-dejq.b2l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — climb·stood_at 의 죽은 joins 인자 걷기 (moai-dejq)"}
+{"ts":"2026-09-14T13:05:33Z","id":"moai-bg55.oya","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-14T13:05:33Z","id":"moai-dejq.b2l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
