@@ -900,7 +900,7 @@ impl App {
         self.reapply();
         self.see();
         let rows = self.rows();
-        let found = held.and_then(|a| rows.iter().position(|r| self.anchor_of(r) == a));
+        let found = held.and_then(|a| self.row_of(&rows, &a));
         // **굴린 자리는 같은 줄일 때만 둔다.** 다른 이슈로 옮겨 섰는데 굴린 수가 남으면
         // 그 이슈를 첫 줄부터 못 본다 — 커서를 옮길 때 0 으로 되돌리는 것(`move_to`)과
         // 같은 까닭이다. 같은 줄이면 본문이 바뀌었어도 두고, 넘치면 그림이 자른다.
@@ -924,7 +924,7 @@ impl App {
         let was = std::mem::replace(&mut self.path, home);
         let want = Anchor::Issue(id.to_string());
         let rows = self.rows();
-        let Some(row) = rows.iter().position(|r| self.anchor_of(r) == want) else {
+        let Some(row) = self.row_of(&rows, &want) else {
             self.path = was;
             return Landing::Hidden;
         };
@@ -1085,13 +1085,25 @@ impl App {
     /// 걸린 거름망에 **제 줄이 걸린** 이슈 수. 걸린 것을 품어 남은 디렉터리는 안 센다.
     /// 보기(`SPC s`)가 숨긴 줄도 안 센다 — 세어 놓고 목록에 없으면 셈이 거짓말이 된다.
     pub fn hit_count(&self) -> usize {
-        (0..self.keep.len()).filter(|&at| self.keep[at] && self.shown.get(at).copied().unwrap_or(true)).count()
+        (0..self.keep.len()).filter(|&at| self.visible(at)).count()
     }
 
     /// 거름망에 걸렸는데 **보기(`SPC s`)가 숨긴** 이슈 수(moai-2kyl 단계 리뷰). 검색 칸이 `N건` 곁에 댄다 —
     /// 끝난 일을 찾는데 `0건` 만 서면 없는 줄 알고, 까닭을 대는 경로 줄의 뱃지는 좁으면 빠진다.
     pub fn veiled_count(&self) -> usize {
-        (0..self.keep.len()).filter(|&at| self.keep[at] && !self.shown.get(at).copied().unwrap_or(true)).count()
+        (0..self.keep.len()).filter(|&at| self.keep[at] && !self.visible(at)).count()
+    }
+
+    /// 이 줄이 목록에 서는가 — 거름망에 걸리고(`keep`) 보기가 숨기지 않았다(`shown`). **판정은 여기
+    /// 하나다** — 목록·검색 셈·가린 셈이 저마다 적으면 한쪽만 고쳐져 셈이 목록과 어긋난다. `shown`
+    /// 이 빈 때(층에서 막 내려와 아직 안 센 때)는 보인다.
+    fn visible(&self, at: usize) -> bool {
+        self.keep[at] && self.shown.get(at).copied().unwrap_or(true)
+    }
+
+    /// 목록에서 그 정체의 줄 자리. 커서를 붙드는 곳(다시 읽기·보기 토글·쓰기·층)이 같은 자로 찾는다.
+    fn row_of(&self, rows: &[Row], want: &Anchor) -> Option<usize> {
+        rows.iter().position(|r| self.anchor_of(r) == *want)
     }
 
     /// 지금 디렉터리에 **보기만 가린 줄**이 있는가 — 거름망은 지나는데 보기가 숨긴 것(moai-2kyl 단계 리뷰).
@@ -1296,7 +1308,7 @@ impl App {
         }
         self.see();
         let rows = self.rows();
-        match held.and_then(|a| rows.iter().position(|r| self.anchor_of(r) == a)) {
+        match held.and_then(|a| self.row_of(&rows, &a)) {
             Some(at) => self.cursor = at,
             None => {
                 self.cursor = self.cursor.min(rows.len().saturating_sub(1));
@@ -1315,12 +1327,11 @@ impl App {
         if !self.path.is_empty() || self.layer.is_some() {
             rows.push(Row::Up);
         }
-        let (keep, shown) = (&self.keep, &self.shown);
         // **보기는 줄마다 건다** — 숨긴 칸의 묶음이라도 보이는 멤버가 있으면 디렉터리는 선다
         // (`Index::entries_where`). done 에픽 밑에 남은 todo 가 폴더째 사라지면 안 된다.
         rows.extend(
             self.index
-                .entries_sorted(&self.issues, &self.path, &|at| keep[at] && shown.get(at).copied().unwrap_or(true), &|a, b| {
+                .entries_sorted(&self.issues, &self.path, &|at| self.visible(at), &|a, b| {
                     // 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다. 담당은 화면에 선 이름으로.
                     crate::query::order_by(
                         Self::sort_key(self.order.0),

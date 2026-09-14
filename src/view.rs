@@ -48,7 +48,8 @@ pub fn short_stamp(at: &str) -> String {
     }
 }
 
-fn tags_of(i: &Issue) -> String {
+/// `#a #b` — 태그를 사람에게 댈 때의 모양. CLI 표·상세와 탐색기의 목록 열·상세가 같이 쓴다.
+pub fn tags_of(i: &Issue) -> String {
     i.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
 }
 
