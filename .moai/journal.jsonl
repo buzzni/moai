@@ -2542,3 +2542,5 @@
 {"ts":"2026-09-14T18:28:24Z","id":"moai-2bzp.2h4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 1·2 반영(fix 커밋). 넘긴 셋 — 중복 말은 틀리지 않으나 시끄러워 idea moai-z0q6 로 담았다(층이 없을 때 load_look 의 파싱 실패 알림을 거른다). 커서: cmd::tui 가 load_look 을 여는 즉시 부르고 그때 커서는 0 이라 조일 것이 없다 — 그대로. SPC s a 가 다른 프로젝트의 칸 이름도 걷는 것은 '모두 보이기' 의 뜻 그대로 둔다."}
 {"ts":"2026-09-14T18:28:24Z","id":"moai-2bzp.2h4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"2건 반영(모르는 낱말 보존·인라인 tui 쓰기). 중복 말은 idea moai-z0q6, 커서·SPC s a 는 뜻대로라 그대로"}
 {"ts":"2026-09-14T18:31:31Z","id":"moai-2bzp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 머지(83878a9), 합친 main 에서 시험 759·267 통과"}
+{"ts":"2026-09-14T18:31:32Z","id":"moai-2kyl.ghg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 TUI 보기 조절 단계 리뷰 (max)"}
+{"ts":"2026-09-14T18:31:33Z","id":"moai-2kyl.ghg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
