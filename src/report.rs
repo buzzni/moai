@@ -1031,10 +1031,15 @@ pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
     let rooted = rooted_thoughts(&by_id);
     let mut out = BTreeMap::new();
     for i in all {
-        let got = if i.kind == Kind::Epic {
-            milestone_stood(i)
-        } else {
-            match epic_of.get(i.id.as_str()) {
+        let got = match i.kind {
+            Kind::Epic => milestone_stood(i),
+            // **마일스톤 줄은 어느 마일스톤에도 안 든다**(moai-8tav). 뿌리에 서는 줄이라
+            // (`nav::Ctx::home`, `misplaced`) 제 `milestone` 필드도, 이슈 밑에 id 로 선
+            // 자리도 소속이 못 된다. 여기서 값을 주면 `moai show --milestone M2` 가 마일스톤
+            // 줄 M1 을 내는데 `moai show M2` 는 `멤버 0/0` 이라 말하고, 훅은 M1 밑의 일을
+            // M2 를 쥔 워크트리의 일로 센다 — 자리를 정하는 자와 세는 자가 갈린다.
+            Kind::Milestone => None,
+            Kind::Issue | Kind::Idea => match epic_of.get(i.id.as_str()) {
                 // 에픽이 있으면 **그 에픽이 선 곳**이다. 제 줄에서 시작하면 제
                 // 마일스톤이 이기고, 그러면 트리는 에픽 밑에 두는데 셈만 딴 곳으로 간다.
                 //
@@ -1050,7 +1055,7 @@ pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
                 // 에픽이 없으면 **접힌 맨 위 줄에서부터** 센다. 제 줄에서 시작하면
                 // 부모 밑에 그려진 자식이 제 마일스톤으로 세어진다(moai-uqoe).
                 None => fold_top(i, &by_id, &rooted).and_then(|top| climb(top, &by_id, &rooted, joins(i))),
-            }
+            },
         };
         // **못 받은 줄도 지도를 쓴다 — 같은 id 의 뒷줄이 이긴다.** 멤버는 에픽 줄을
         // `by_id`(뒷줄이 이긴다)로 찾는데, 받은 줄만 적으면 같은 id 의 앞줄이 받은
@@ -1082,8 +1087,8 @@ fn milestone_stood(epic: &Issue) -> Option<&str> {
 /// **마일스톤인 조상을 만나면 그 마일스톤이다** — 부모가 에픽이면 그 에픽이듯
 /// (moai-9t3l). `--parent <마일스톤>` 의 자식이 `(마일스톤 없음)` 으로 빠지지 않는다.
 /// 제 `milestone` 이 먼저다: 에픽에서 제 `epic` 이 먼저인 것과 같은 차례다.
-/// `joins` 는 맨 처음 줄의 것이다 — 이슈 밑에 id 로 선 마일스톤 줄도 이슈를 맨 위
-/// 줄로 받아 여기 온다.
+/// `joins` 는 맨 처음 줄의 것이다. 마일스톤 줄은 여기 오지 않는다 — [`milestones`] 가
+/// 그 종류에 값을 안 준다(moai-8tav). 이슈 밑에 id 로 선 마일스톤 줄도 그렇다.
 fn climb<'a>(
     top: &'a Issue,
     by_id: &BTreeMap<&'a str, &'a Issue>,
@@ -2981,6 +2986,32 @@ mod tests {
         // 자리는 안 바꿔도 못 쓸 참조는 드러난다.
         assert_eq!(broken(&issues).get("argos-0001"), Some(&Misplace::Epic));
         assert!(!misplaced(&issues).contains_key("argos-0001"), "에픽 줄을 제 epic 으로 길 잃게 했다");
+    }
+
+    /// **마일스톤 줄은 어느 마일스톤에도 안 든다**(moai-8tav). 제 `milestone` 필드로도, 마일스톤을
+    /// 든 이슈 밑에 id 로 서도 — `nav` 는 마일스톤을 언제나 뿌리에 둔다. 마일스톤 줄 밑의 일은
+    /// 여전히 그 마일스톤에 든다.
+    #[test]
+    fn a_milestone_line_belongs_to_no_milestone() {
+        let stone = |mut i: Issue, m: &str| {
+            i.milestone = Some(m.into());
+            i
+        };
+        let issues = vec![
+            make("argos-m002", Kind::Milestone, "todo"),
+            stone(make("argos-m001", Kind::Milestone, "todo"), "argos-m002"), // 제 필드
+            stone(make("argos-0001", Kind::Issue, "todo"), "argos-m002"),
+            make("argos-0001.aa1", Kind::Milestone, "todo"), // 마일스톤을 든 이슈 밑 id
+            make("argos-m001.bb2", Kind::Issue, "todo"),     // 마일스톤 줄 밑의 일
+        ];
+        let m = milestones(&issues);
+        assert_eq!(m.get("argos-m001"), None, "마일스톤 줄이 제 milestone 필드로 다른 마일스톤에 들었다");
+        assert_eq!(m.get("argos-0001.aa1"), None, "이슈 밑 마일스톤 줄이 그 이슈의 마일스톤에 들었다");
+        assert_eq!(m.get("argos-m001.bb2").copied(), Some("argos-m001"), "마일스톤 줄 밑의 일이 제 마일스톤을 잃었다");
+        // 머리글이 세는 멤버와 같은 것을 말한다 — 마일스톤 줄은 어느 쪽에도 안 선다.
+        let m2 = issues.iter().find(|i| i.id == "argos-m002").unwrap();
+        assert!(group_members(&issues, m2).iter().all(|i| i.kind != Kind::Milestone));
+        assert!(!misplaced(&issues).contains_key("argos-m001"));
     }
 
     /// 묶음은 일이 아니다. 세면 보드의 숫자가 할 일과 묶음을 합친 것이 된다.
