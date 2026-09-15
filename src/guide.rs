@@ -489,6 +489,7 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
     moai status --json                     warnings 에서 kind 가 "stranded" 인 것의 ids
                                            (워크트리 안이면 `--worktree` 를 붙여야 선다)
     moai show <id>                         `자리` 줄 — 어느 워크트리였나, 없으면 "없다"
+                                           (워크트리 안이면 여기도 `--worktree` 가 있어야 선다)
 
 `stranded` 는 집었는데 살아 있는 워크트리가 그 일을 안 쥔 줄이다 — 워크트리가 사라졌다.
 집은 지 한 시간이 안 된 줄은 안 뜬다(일꾼이 워크트리를 띄우는 틈이다). **워크트리는

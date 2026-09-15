@@ -5743,14 +5743,22 @@ fn status_names_picked_work_with_no_live_worktree_and_still_exits_zero() {
 #[test]
 fn show_names_the_worktree_a_picked_row_lives_in() {
     let s = Scratch::new("showplace");
-    let (main, _inside, id) = picked_in_a_worktree(&s);
+    let (main, inside, id) = picked_in_a_worktree(&s);
     let lost = field(&ok(&main, &["add", "세션이 죽은 일", "--json"]), "id");
     ok(&main, &["mv", &lost, "in_progress"]);
     let idle = field(&ok(&main, &["add", "안 집은 일", "--json"]), "id");
 
+    let place = |out: &str| -> String {
+        out.lines()
+            .find(|l| l.trim_start().starts_with("자리"))
+            .unwrap_or_else(|| panic!("자리 줄이 없다\n{out}"))
+            .to_string()
+    };
     let out = ok(&main, &["show", &id]);
-    let line = out.lines().find(|l| l.trim_start().starts_with("자리")).unwrap_or_else(|| panic!("자리 줄이 없다\n{out}"));
+    let line = place(&out);
     assert!(line.contains(&format!(".claude/worktrees/{id}")) && line.contains(&format!("worktree-{id}")), "{line}");
+    // **경로는 뿌리에서 잰 것이다** — 절대 경로가 그대로 나가면 위의 `contains` 도 지나가므로 여기서 못박는다.
+    assert!(!line.contains(&main.display().to_string()), "뿌리에서 안 잘랐다\n{line}");
     let json = ok(&main, &["show", &id, "--json"]);
     assert!(json.contains("\"workplaces\":[{") && json.contains(&format!("\"branch\":\"worktree-{id}\"")), "{json}");
 
@@ -5761,6 +5769,28 @@ fn show_names_the_worktree_a_picked_row_lives_in() {
     let out = ok(&main, &["show", &idle]);
     assert!(!out.contains("자리"), "안 집은 줄에 자리를 세웠다\n{out}");
     assert!(!ok(&main, &["show", &idle, "--json"]).contains("workplaces"));
+
+    // **제 워크트리 안에서 펼쳐도 자리는 빈 칸이 아니다** — 뿌리와 같은 자리라 잘라 내면 아무것도
+    // 안 남는다. 딸린 워크트리는 `--worktree` 로 겹쳐 봐야 자리를 잰다.
+    let line = place(&ok(&inside, &["show", &id, "--worktree"]));
+    assert!(line.split_whitespace().nth(1).is_some_and(|p| !p.starts_with('(')), "자리 칸이 비었다\n{line}");
+    assert!(!ok(&inside, &["show", &id, "--worktree", "--json"]).contains("\"path\":\"\""));
+
+    // **겹쳐 보지 않은 딸린 워크트리는 자리를 말하지 않는다**(moai-4370 과 같은 까닭) — 그 스냅샷은
+    // 갈라질 때의 main 이라, main 이 놓은 줄을 거기서는 아직 집힌 것으로 보고 "자리 없다" 로 댄다.
+    let there = field(&ok(&main, &["add", "옆에서 할 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "자리 잃은 줄을 커밋한다"]);
+    let dir = format!(".claude/worktrees/{there}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{there}")]);
+    let side = main.join(&dir);
+    ok_at(&main, LATER, &["mv", &lost, "todo"]);
+    let out = ok(&side, &["show", &lost]);
+    assert!(!out.contains("자리"), "낡은 스냅샷으로 자리를 댔다\n{out}");
+    assert!(!ok(&side, &["show", &lost, "--json"]).contains("workplaces"));
+    // 겹쳐 보면 main 의 칸이 들어와 아예 집은 줄이 아니다 — 그때도 "자리 없다" 는 안 선다.
+    let out = ok(&side, &["show", &lost, "--worktree"]);
+    assert!(!out.contains("자리"), "겹쳐 보고도 자리를 댔다\n{out}");
 }
 
 /// 도구 호출 하나를 `cwd` 자리의 세션으로 부른다.

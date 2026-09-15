@@ -113,7 +113,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         if args.as_plan {
             return plan(ctx, &load.issues, issue, args.raw);
         }
-        return one(ctx, &repo, &load.issues, issue, args.raw, &origin);
+        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree);
     }
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
@@ -290,6 +290,7 @@ fn one(
     issue: &Issue,
     raw: bool,
     origin: &crate::worktree::Origin,
+    worktree: bool,
 ) -> R<Vec<String>> {
     // **에픽도 뒷줄로 푼다** — 펼친 줄을 고른 자(`Load::get`)와 같다(moai-e0ro).
     let epic = issue.epic.as_ref().and_then(|e| all.iter().rfind(|i| &i.id == e));
@@ -310,12 +311,22 @@ fn one(
         std::iter::once(issue.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
     // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 스냅샷을 다
     // 풀 까닭이 없다. 경로는 저장소 뿌리에서 잰다: 규약의 자리(`.claude/worktrees/<id>`)가 그대로 읽힌다.
-    let trees: Vec<report::Workplace> = if report::wip(all, &repo.config).iter().any(|i| i.id == issue.id) {
+    //
+    // **딸린 워크트리에서는 겹쳐 볼 때만 잰다** — `status` 의 `stranded` 와 같은 까닭(moai-4370).
+    // 그 스냅샷은 갈라질 때의 main 이라 그 뒤 main 에서 놓은 줄이 거기서는 아직 집혀 있고, 그것으로
+    // 재면 멀쩡히 끝난 일에 "자리 없다" 를 붙여 감독이 그 말대로 남에게 다시 준다.
+    let look = worktree || !crate::worktree::is_linked(&repo.root);
+    let trees: Vec<report::Workplace> = if look && report::wip(all, &repo.config).iter().any(|i| i.id == issue.id) {
+        // 뿌리도 같은 자로 푼다 — 워크트리 경로는 이미 푼 것이라(`worktree::canonical`) 심볼릭
+        // 링크를 낀 뿌리로는 하나도 안 잘린다.
+        let root = std::fs::canonicalize(&repo.root).unwrap_or_else(|_| repo.root.clone());
         crate::worktree::workplaces(&repo.root, &repo.config)
             .into_iter()
             .map(|mut t| {
-                if let Ok(rel) = t.path.strip_prefix(&repo.root) {
-                    t.path = rel.to_path_buf();
+                if let Ok(rel) = t.path.strip_prefix(&root) {
+                    // 제 워크트리 안에서 펼치면 뿌리와 같은 자리다 — 빈 경로로 두면 사람 화면의
+                    // `자리` 칸이 통째로 비고 `--json` 의 `path` 가 `""` 로 나간다.
+                    t.path = if rel.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { rel.to_path_buf() };
                 }
                 t
             })
