@@ -152,7 +152,10 @@ const PROJECTS: &str = r#"    moai project add <dir>                 내 설정�
 
 /// 커밋과 이슈를 잇는 고리(moai-wqm7). **새 저장소는 이 저장소의 CLAUDE.md 규약을 모른다** —
 /// 여기 안 적으면 커밋 칸(`show <id>`·탐색기 상세)이 늘 빈다.
-const COMMITS: &str = r#"커밋 제목에 그 커밋이 닿은 이슈 id 를 적는다 — `feat: 막음 줄을 그린다 (moai-rvcb)`.
+///
+/// **예시 제목의 id 는 `<id>` 로 둔다.** 이 글은 모든 저장소에 심긴다 — 이 저장소의 이슈 id 를
+/// 박으면 남의 저장소에서는 아무것도 안 가리키고, 접두사가 다른 저장소에 `moai-` 를 가르친다.
+const COMMITS: &str = r#"커밋 제목에 그 커밋이 닿은 이슈 id 를 적는다 — `feat: 막음 줄을 그린다 (<id>)`.
 moai 는 커밋을 이슈에 저장하지 않는다. `moai show <id>` 와 탐색기 상세가 **커밋 제목에 적힌
 id** 로 그 이슈의 커밋을 그때그때 찾아 낸다. 해시를 노트에 옮겨 적지 않는다 — squash·rebase
 한 번에 낡고, 이슈를 닫는 커밋은 제 해시를 미리 모른다.
@@ -724,7 +727,10 @@ mod tests {
     #[test]
     fn the_commit_guide_teaches_what_the_commit_column_reads() {
         let example = COMMITS.split('`').nth(1).expect("예시 제목이 없다");
-        assert_eq!(crate::git::ids_in(example).collect::<Vec<_>>(), ["moai-rvcb"], "예시 제목 {example:?}");
+        assert!(example.contains("<id>"), "예시 제목에 이 저장소의 id 를 박았다 — {example:?}");
+        // 자리에 어떤 저장소의 id 가 들어가도 그 id 하나만 읽힌다.
+        let subject = example.replace("<id>", "web-a1b2");
+        assert_eq!(crate::git::ids_in(&subject).collect::<Vec<_>>(), ["web-a1b2"], "예시 제목 {subject:?}");
         assert!(COMMITS.contains(&format!("`{}:`", crate::git::TRACKER)), "트래커 커밋의 머리가 git 이 거르는 것과 다르다");
     }
 
