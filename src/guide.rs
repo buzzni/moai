@@ -100,6 +100,20 @@ moai add --from - <<'PLAN'
 PLAN
 ```"#;
 
+/// 에이전트가 이슈에 적는 글의 모양(moai-j8aq). **권고다** — 어겨도 아무것도 막히지 않는다.
+/// 훅이 이것을 검사하지 않는 것은 결정이다(사용자, moai-mthy): 글 스타일 검사는 린트이고,
+/// 린트는 곧 게이트다.
+const WRITING: &str = r#"**첫 줄이 제목, 한 줄 띄우고 그 아래가 본문이다.** 본문은 마크다운으로 적고
+`-b -` 로 stdin 에서 넘긴다 — 제목만 인자로 주고 본문은 heredoc 으로 흘린다.
+
+- **제목은 짧게.** 무엇이 어긋났는지 한 줄이다. 보드와 `ready` 와 탐색기 목록은 제목만 보여 준다
+- **본문은 서술형으로 적지 않는다.** 겪은 일을 문단으로 늘어놓는 대신 목록으로 가른다 —
+  무엇이 어긋났는가, 무엇을 봤는가, 어디를 고치는가
+- **이모지를 쓰지 않는다** — 제목에도 본문에도. 터미널마다 폭이 달라 보드와 표가 어긋난다
+
+지킬 것은 다음 세션이 `moai show <id>` 로 읽는다는 것 하나다. 이 셋은 그래서 있는 권고이지
+검사하는 규칙이 아니다."#;
+
 const IDEAS: &str = r#"    moai idea add "반짝 떠오른 것"                 담기
     moai idea add "긴 생각" -b -                   본문은 stdin 에서
     moai idea ls                                   쌓인 것 보기
@@ -245,6 +259,10 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 
 {FORKS}
 
+### 이슈에 적는 글
+
+{WRITING}
+
 ### 지금 범위가 아닌 것은 담는다
 
 {IDEAS}
@@ -317,6 +335,10 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
 ## 갈림길 셋
 
 {FORKS}
+
+## 이슈에 적는 글
+
+{WRITING}
 
 ## 훅이 실제로 보는 것 셋
 
@@ -711,7 +733,7 @@ mod tests {
     #[test]
     fn both_surfaces_carry_the_same_pieces() {
         let (agents, skill, reference) = (agents(), skill(), reference());
-        for piece in [CHEATSHEET, FORKS, NO_GATE, CLOSING] {
+        for piece in [CHEATSHEET, FORKS, NO_GATE, WRITING, CLOSING] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(skill.contains(piece), "스킬에 없다 — {head}");
@@ -737,6 +759,22 @@ mod tests {
         let subject = example.replace("<id>", "web-a1b2");
         assert_eq!(crate::git::ids_in(&subject).collect::<Vec<_>>(), ["web-a1b2"], "예시 제목 {subject:?}");
         assert!(COMMITS.contains(&format!("`{}:`", crate::git::TRACKER)), "트래커 커밋의 머리가 git 이 거르는 것과 다르다");
+    }
+
+    /// **이모지를 쓰지 말라는 글이 제 손으로 이모지를 쓰지 않는다**(moai-j8aq). 가르치는 글이
+    /// 제 규칙을 어기면 읽는 쪽은 그것을 규칙이 아니라 취향으로 읽는다.
+    ///
+    /// 세는 것은 이모지 자리(U+1F300 위)뿐이다. `✓`·`⎇` 같은 글리프는 보드가 색 대신 쓰는
+    /// 기호라 여기서 막으면 안 된다 — 색이 혼자 뜻을 지지 않게 하는 쪽이 먼저다.
+    #[test]
+    fn the_style_piece_obeys_itself() {
+        assert!(WRITING.contains("이모지"), "글 스타일에 이모지 이야기가 없다");
+        for (surface, text) in
+            [("AGENTS 블록", agents()), ("스킬", skill()), ("참고 문서", reference()), ("감독 스킬", supervise())]
+        {
+            let found: String = text.chars().filter(|c| *c >= '\u{1F300}').collect();
+            assert!(found.is_empty(), "{surface} 이 이모지를 쓴다 — {found}");
+        }
     }
 
     /// 규칙의 이름이 스킬에 그대로 선다. 훅의 거절문 쪽은 `hook` 의 시험이 본다.
