@@ -512,10 +512,18 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> bool {
     // 라벨 칸은 `{label:<7} : ` 로 박았다 — 일곱 칸과 " : " 세 칸.
     let told_w =
         told.iter().map(|(_, said)| HEADER_LABEL_W + crate::text::width(said)).max().unwrap_or(0);
-    // 로고와 파이프를 세우고도 오른쪽에 정보 줄이 **통째로** 설 만큼 남아야 로고를 그린다.
+    // 번호 붙은 프로젝트는 재기 전에 한 덩이씩 짓는다 — **재는 쪽과 그리는 쪽이 같은 것을
+    // 본다.** 폭만 따로 세면 로고를 물릴지 정한 자와 실제로 선 칸이 갈린다.
+    let tags = numbered_projects(app);
+    let cell = tags.iter().map(Numbered::len_hint).max().unwrap_or(0);
+    // 로고와 파이프를 세우고도 오른쪽이 **통째로** 설 만큼 남아야 로고를 그린다.
     // 어림잡은 상한을 두었더니(24칸) 55칸짜리 창에서 로고를 지키고 메일을 `raven@bu` 에서
-    // 자르는 화면이 나왔다 — 정보 줄의 실제 폭으로 잰다.
-    let with_logo = (at.width as usize) >= logo_w + HEADER_GAP * 2 + 1 + told_w;
+    // 자르는 화면이 나왔다 — 오른쪽의 실제 폭으로 잰다.
+    // **번호 칸도 함께 잰다**(리뷰). 사람·판 줄만 재던 때는 80칸에서 로고를 지키고 번호를
+    // 통째로 지우는 화면이 났다 — 그 번호가 숫자 키를 설명하는 유일한 자리라, 로고를 지키자고
+    // 지울 것이 아니다(메일을 안 자르는 것과 같은 자).
+    let want = if cell == 0 { 0 } else { HEADER_GAP + cell };
+    let with_logo = (at.width as usize) >= logo_w + HEADER_GAP * 2 + 1 + told_w + want;
     let lines: Vec<Line> = LOGO
         .iter()
         .enumerate()
@@ -537,7 +545,9 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> bool {
         .collect();
     let logo_cells = if with_logo { logo_w + HEADER_GAP } else { 0 };
     let from = logo_cells + 1 + HEADER_GAP + told_w + HEADER_GAP;
-    let (lines, glinted) = with_projects(app, lines, at.width as usize, from);
+    let (lines, glinted) = with_projects(app, lines, at.width as usize, from, &tags, cell);
+    // 넘치면 `…` 를 남긴다 — 위젯에 맡기면 말없이 잘려 잘렸다는 표시마저 사라진다(`clip`).
+    let lines: Vec<Line> = lines.into_iter().map(|l| fit(l, at.width as usize)).collect();
     f.render_widget(Paragraph::new(lines), at);
     glinted
 }
@@ -554,10 +564,12 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> bool {
 /// `app.spun = spinner_on(…)` 이 그 위에 덮어쓴다. 목록의 빛은 곁의 스피너 글리프가 버퍼에
 /// 남아 대신 말해 주지만, 헤더에는 그 글리프가 없어 빛만으로는 읽히지 않는다.
 fn with_projects<'a>(
-    app: &mut App,
+    app: &App,
     mut lines: Vec<Line<'a>>,
     width: usize,
     from: usize,
+    tags: &[Numbered],
+    cell: usize,
 ) -> (Vec<Line<'a>>, bool) {
     let Some(layer) = app.layer.as_ref() else { return (lines, false) };
     // `<0>` 은 층이다 — 층에 서 있으면 그것이 선 자리다.
@@ -565,30 +577,26 @@ fn with_projects<'a>(
         crate::tui::layer::At::Layer => Some(0),
         crate::tui::layer::At::Project(p) => layer.position(p).map(|at| at + 1),
     };
-    let names: Vec<String> = std::iter::once("전체".to_string()).chain(layer.places.iter().map(|p| p.name.clone())).collect();
-    let room = width.saturating_sub(from);
-    let widest = names.iter().enumerate().map(|(n, name)| numbered(n, name).len_hint()).max().unwrap_or(0);
-    if room < widest {
+    if width.saturating_sub(from) < cell {
         return (lines, false);
     }
     let mut glinted = false;
-    for (n, name) in names.iter().enumerate() {
+    for (n, tag) in tags.iter().enumerate() {
         let row = n % LOGO.len();
         let col = n / LOGO.len();
-        let at = from + col * (widest + HEADER_GAP * 2);
-        if at + widest > width {
+        let at = from + col * (cell + HEADER_GAP * 2);
+        if at + cell > width {
             break;
         }
         let pad = at.saturating_sub(line_width(&lines[row]));
         lines[row].spans.push(Span::raw(" ".repeat(pad)));
-        let tag = numbered(n, name);
         // 번호는 SPC 메뉴의 키와 같은 색으로 잘 보이게 둔다(사용자 결정) — 키라는 것이 색으로도 읽힌다.
-        lines[row].spans.push(Span::styled(tag.key, Style::new().fg(MENU_KEY)));
+        lines[row].spans.push(Span::styled(tag.key.clone(), Style::new().fg(MENU_KEY)));
         if here == Some(n) {
             glinted = true;
-            lines[row].spans.extend(shimmer(tag.name, app.spin));
+            lines[row].spans.extend(shimmer(tag.name.clone(), app.spin));
         } else {
-            lines[row].spans.push(Span::styled(tag.name, dim()));
+            lines[row].spans.push(Span::styled(tag.name.clone(), dim()));
         }
     }
     (lines, glinted)
@@ -604,6 +612,16 @@ impl Numbered {
     fn len_hint(&self) -> usize {
         crate::text::width(&self.key) + crate::text::width(&self.name)
     }
+}
+
+/// 헤더에 설 덩이들 — `<0> 전체`(프로젝트 층)와 등록 차례. 층이 없으면 비었다.
+fn numbered_projects(app: &App) -> Vec<Numbered> {
+    let Some(layer) = app.layer.as_ref() else { return Vec::new() };
+    std::iter::once("전체")
+        .chain(layer.places.iter().map(|p| p.name.as_str()))
+        .enumerate()
+        .map(|(n, name)| numbered(n, name))
+        .collect()
 }
 
 fn numbered(n: usize, name: &str) -> Numbered {
@@ -1241,8 +1259,7 @@ pub(super) fn pane_name(p: Pane) -> &'static str {
 
 /// 한 줄을 패널 폭에 맞춘다. 넘치면 `…` 를 남긴다.
 fn fit(line: Line<'_>, room: usize) -> Line<'_> {
-    let w: usize = line.spans.iter().map(|s| crate::text::width(&s.content)).sum();
-    if w <= room {
+    if line_width(&line) <= room {
         return line;
     }
     // `…` 한 칸을 남겨 두고 조각을 차례로 담는다. **표시는 한 번만 붙인다** —
@@ -3279,6 +3296,25 @@ pub(super) mod tests {
             assert!(head.contains("레이븐 (raven@buzzni.com)"), "{w}칸에서 사람이 잘렸다\n{head}");
             assert!(head.contains("최신 확인 안 함"), "{w}칸에서 판이 잘렸다\n{head}");
         }
+    }
+
+    /// **로고를 지키자고 번호를 지우지 않는다**(리뷰). 사람·판 줄만 재던 때는 이름이 긴
+    /// 프로젝트 하나로 80칸에서 로고가 서고 번호가 통째로 사라졌다 — 그 번호가 숫자 키를
+    /// 설명하는 유일한 자리라, 메일을 안 자르는 것과 같은 자로 로고가 먼저 물러난다.
+    #[test]
+    fn the_logo_yields_before_the_project_numbers_vanish() {
+        use super::super::layer::{At, Look, Shut};
+        let mut a = app();
+        a.identify = |_| Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() });
+        let shut = Look::Shut { state: Shut::Uninit, said: "· init 전".into() };
+        a.layer = Some(super::super::layer::fake(vec![("moai-supervise", "/w/moai-supervise", shut)], At::Layer));
+        let narrow = render(&mut a, 80, 24)[..6].join("\n");
+        assert!(narrow.contains("<1> moai-supervise"), "80칸에서 번호가 통째로 사라졌다\n{narrow}");
+        assert!(!narrow.contains('▀'), "번호를 지우고 로고를 지켰다\n{narrow}");
+        // 둘 다 들어가는 폭에서는 둘 다 선다 — 물러나는 것은 모자랄 때뿐이다.
+        let wide = render(&mut a, 100, 24)[..6].join("\n");
+        assert!(wide.contains("<1> moai-supervise"), "넓은 창에 번호가 없다\n{wide}");
+        assert!(wide.contains('▀'), "넓은 창에 로고가 없다\n{wide}");
     }
 
     /// 층을 그림 시험용으로 세운다 — 연 것 하나, init 전 하나, 사라진 것 하나.
