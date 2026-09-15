@@ -31,7 +31,11 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         .map(|id| report::Unreadable { id })
         .collect();
     let now = model::now();
-    let st = report::status(&load.issues, &unreadable, &repo.config, &now);
+    let mut st = report::status(&load.issues, &unreadable, &repo.config, &now);
+    // **자리 없는 집은 줄은 여기서만 싣는다**(moai-4370) — 까닭은 `report::stranded`. 치명이 아니라
+    // 아래 종료 코드는 안 바뀐다.
+    let trees = crate::worktree::workplaces(&repo.root, &load.issues, &repo.config);
+    st.warnings.extend(report::stranded(&load.issues, &repo.config, &trees, &now));
 
     if st.broken() {
         super::note_partial();

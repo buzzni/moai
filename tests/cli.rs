@@ -5680,6 +5680,35 @@ fn picked_in_a_worktree(s: &Scratch) -> (PathBuf, PathBuf, String) {
     (main, inside, id)
 }
 
+/// **집었는데 일하는 워크트리가 없는 줄은 `status` 가 비춘다**(moai-4370) — 세션이 죽어도 칸은
+/// `in_progress` 로 남는다. 막지 않는다: 종료 코드는 0 이고 `--json` 의 `warnings` 에 선다. 워크트리가
+/// 뜬 일은 안 세고, 방금 집은 일은 워크트리가 뜰 틈을 준다.
+#[test]
+fn status_names_picked_work_with_no_live_worktree_and_still_exits_zero() {
+    let s = Scratch::new("stranded");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let lost = field(&ok(&main, &["add", "세션이 죽은 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+
+    // 방금 집은 일은 아직 안 센다.
+    let out = ok(&main, &["status"]);
+    assert!(!out.contains("일하는 워크트리가 없는"), "워크트리가 뜰 틈을 안 줬다\n{out}");
+
+    let out = isolated(BIN).arg("status").current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
+    assert!(out.status.success(), "경고로 비영 종료했다");
+    let text = String::from_utf8(out.stdout).unwrap();
+    let block: String = text.split("집었는데 일하는 워크트리가 없는 것 1건").nth(1).expect(&text).split("\n\n").next().unwrap().into();
+    assert!(block.contains(&lost) && !block.contains(&id), "워크트리가 뜬 일까지 셌다\n{text}");
+    assert!(block.contains("moai mv <id> todo"), "고칠 손을 안 댔다\n{text}");
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(json.contains("\"kind\":\"stranded\"") && json.contains(&lost), "{json}");
+
+    // 워크트리를 치우면 그 일도 자리를 잃는다. 워크트리가 하나도 없으면 조용하다 — 그때는 main 에서 일한다.
+    git(&main, &["worktree", "remove", "--force", &inside.display().to_string()]);
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(!json.contains("\"stranded\""), "워크트리를 안 쓰는 저장소에서 떠들었다\n{json}");
+}
+
 /// 도구 호출 하나를 `cwd` 자리의 세션으로 부른다.
 fn tool_at(s: &Scratch, cwd: &Path, tool: &str, body: &str) -> String {
     let input = format!(

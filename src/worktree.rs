@@ -427,25 +427,51 @@ impl Disk {
 pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> (BTreeSet<String>, BTreeSet<String>) {
     let Some(disk) = on_disk(root) else { return Default::default() };
     let own = names(disk.all.iter().filter(|(_, _, me)| *me).map(|(t, ..)| t));
-    let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
     let mut out = BTreeSet::new();
     for (tree, linked, me) in &disk.all {
         if *me || !*linked {
             continue;
         }
-        let path = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
-        let Ok(Some(side)) = crate::store::read_snapshot(&path) else { continue };
-        out.extend(crate::report::wip(&side.issues, cfg).into_iter().map(|i| i.id.clone()));
-        for i in &side.issues {
-            let later = by_id
-                .get(i.id.as_str())
-                .is_some_and(|m| (i.planned(), i.updated_at.as_str()) > (m.planned(), m.updated_at.as_str()));
-            if later {
-                out.insert(i.id.clone());
-            }
-        }
+        out.extend(holds(&disk, tree, mine, cfg));
     }
     (out, own)
+}
+
+/// 딸린 워크트리 하나의 스냅샷이 쥔 줄 — [`held_elsewhere`] 의 한 워크트리 몫. 못 읽으면 비어 있다.
+fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let path = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
+    let Ok(Some(side)) = crate::store::read_snapshot(&path) else { return out };
+    let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
+    out.extend(crate::report::wip(&side.issues, cfg).into_iter().map(|i| i.id.clone()));
+    for i in &side.issues {
+        let later = by_id
+            .get(i.id.as_str())
+            .is_some_and(|m| (i.planned(), i.updated_at.as_str()) > (m.planned(), m.updated_at.as_str()));
+        if later {
+            out.insert(i.id.clone());
+        }
+    }
+    out
+}
+
+/// 살아 있는 **딸린** 워크트리마다 자리 하나(moai-ir8q) — 판정은 `report::places`·`report::stranded`.
+///
+/// main 워크트리는 안 든다 — 모두의 집기가 모이는 자리라 거기 선 줄은 "어디서 하는가" 에 답이
+/// 안 된다. 제 워크트리는 이름만 싣고 스냅샷은 안 읽는다([`crate::report::Workplace::holds`]).
+/// 파일만 읽는다. 저장소가 아니면 비어 있다.
+pub fn workplaces(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> Vec<crate::report::Workplace> {
+    let Some(disk) = on_disk(root) else { return Vec::new() };
+    disk.all
+        .iter()
+        .filter(|(_, linked, _)| *linked)
+        .map(|(tree, _, me)| crate::report::Workplace {
+            path: tree.path.clone(),
+            branch: tree.label.clone(),
+            names: names([tree]),
+            holds: if *me { BTreeSet::new() } else { holds(&disk, tree, mine, cfg) },
+        })
+        .collect()
 }
 
 /// 제 워크트리가 아닌 워크트리들을 **git 을 띄우지 않고** 읽는다 — 이름 후보([`away`])만 쓴다.

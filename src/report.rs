@@ -344,6 +344,104 @@ pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     held.into_iter().filter(|i| !out.contains(i.id.as_str())).collect()
 }
 
+/// 이 줄이 `names` 가 가리키는 일인가 — 그 줄 자신이나 조상이 들었거나, 그 에픽·마일스톤이
+/// 들었다. 워크트리 이름(`worktree::names`)으로 **그 워크트리의 일**을 가르는 자 하나다 — 훅의
+/// 초점(`hook::held`)과 집은 줄의 자리([`places`])가 같은 자로 재야, 초점에서 뺀 줄을 자리 없다고
+/// 하거나 그 반대가 되지 않는다.
+pub fn claimed<'a>(issues: &'a [Issue], names: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
+    let (epics, stones) = if names.is_empty() {
+        (Default::default(), Default::default())
+    } else {
+        (groups(issues), milestones(issues))
+    };
+    move |i: &Issue| {
+        !names.is_empty()
+            && std::iter::successors(Some(i.id.as_str()), |id| crate::id::parent_of(id)).any(|id| {
+                names.contains(id)
+                    || epics.get(id).is_some_and(|e| names.contains(*e))
+                    || stones.get(id).is_some_and(|m| names.contains(*m))
+            })
+    }
+}
+
+/// 살아 있는 딸린 워크트리 하나 — 집은 일이 서 있을 수 있는 자리(moai-ir8q).
+///
+/// **스냅샷에 적지 않는다.** 집기는 main 에서 커밋하니 적히는 곳은 늘 main 이고, 워크트리를
+/// 치운 뒤에도 적힌 자리는 남아 거짓말한다 — 그러면 그것을 바로잡는 명령이 필요해진다. 그래서
+/// 부르는 쪽(`worktree::workplaces`)이 git 이 적어 둔 파일에서 그때그때 읽어 여기 담고, 판정은
+/// 이 자료와 `&[Issue]` 만 받는 순수 함수([`places`]·[`stranded`])가 한다.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Workplace {
+    /// 워크트리의 꼭대기.
+    pub path: std::path::PathBuf,
+    /// 브랜치. 떼어 낸 HEAD 면 커밋 앞 일곱 자.
+    pub branch: String,
+    /// 이름이 가리키는 id 후보 — 디렉터리 이름, 브랜치, `worktree-` 를 뗀 브랜치.
+    #[serde(skip)]
+    pub names: BTreeSet<String>,
+    /// 그 워크트리의 스냅샷이 쥔 줄(`worktree::held_elsewhere` 와 같은 자). 이름이 id 가 아닌
+    /// 워크트리(에이전트 격리 따위)가 쥔 일을 가른다. 제 워크트리는 비운다 — 제 스냅샷에는
+    /// main 에서 집은 남의 일도 다 벌여 놓여 있다.
+    #[serde(skip)]
+    pub holds: BTreeSet<String>,
+}
+
+/// 집은 줄(`wip`) → 그 일이 서 있는 워크트리들. **자리 없는 줄은 빈 목록으로 선다** — 키가 없는
+/// 것은 안 집은 줄이다. 받는 쪽이 "안 집음" 과 "집었는데 자리 없음" 을 한 지도로 가른다.
+pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> BTreeMap<String, Vec<&'a Workplace>> {
+    let picked = wip(issues, cfg);
+    let mut out: BTreeMap<String, Vec<&Workplace>> = picked.iter().map(|i| (i.id.clone(), Vec::new())).collect();
+    for t in trees {
+        let named = claimed(issues, &t.names);
+        for i in &picked {
+            if named(i) || t.holds.contains(&i.id) {
+                out.entry(i.id.clone()).or_default().push(t);
+            }
+        }
+    }
+    out
+}
+
+/// 방금 집은 줄에 워크트리가 뜰 틈. 규약은 main 에서 집기를 커밋한 **뒤** 워크트리를 띄우므로,
+/// 그 사이에 부른 `status`(감독이 배정 전에 부른다)가 "자리 없음" 으로 읽으면 멀쩡히 일을 시작한
+/// 세션의 줄을 남에게 다시 준다.
+const STRANDED_GRACE_SECS: i64 = 3600;
+
+/// 집었는데 **일하는 워크트리가 없는** 줄(moai-4370). 세션이 죽으면 칸은 `in_progress` 로 남는다.
+///
+/// - **워크트리를 하나도 안 쓰는 저장소에서는 조용하다** — 거기서는 모든 일이 main 에서 돌아,
+///   집은 줄마다 떠든다
+/// - 미룬 것은 [`wip`] 이 이미 뺐다
+/// - **막지 않는다.** 치명이 아니라 종료 코드를 안 바꾼다. 고치는 손은 셋이고 사람이 고른다 —
+///   이어 할 것이면 새 워크트리를 띄우고, 놓을 것이면 `todo` 로, 지금 안 할 것이면 미룬다
+/// - **`status()` 에 안 넣는다.** 훅의 기준선과 `Stop` 이 `status()` 의 경고를 세는데, 이것은 남의
+///   세션이 워크트리를 치우는 것만으로 늘어 제 일과 상관없이 세션을 붙든다. `moai status` 만 싣는다
+pub fn stranded(issues: &[Issue], cfg: &Config, trees: &[Workplace], now: &str) -> Option<Warning> {
+    if trees.is_empty() {
+        return None;
+    }
+    let at = places(issues, cfg, trees);
+    let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
+    let now_s = crate::model::parse_rfc3339(now);
+    let lost: Vec<&Issue> = at
+        .iter()
+        .filter(|(_, v)| v.is_empty())
+        .filter_map(|(id, _)| by_id.get(id.as_str()).copied())
+        .filter(|i| {
+            match (now_s, crate::model::parse_rfc3339(&i.status_since)) {
+                (Some(n), Some(s)) => n - s >= STRANDED_GRACE_SECS,
+                // 시각을 못 읽으면 틈을 줄 까닭도 못 잰다 — 비춘다.
+                _ => true,
+            }
+        })
+        .collect();
+    (!lost.is_empty()).then(|| {
+        Warning::new("stranded", ids_of(&lost))
+            .ages(|i| i.status_since.as_str(), &lost, now)
+            .hint("moai mv <id> todo  ·  moai defer <id> -m \"왜\"")
+    })
+}
+
 /// 같은 id 를 쓰는 줄이 **둘 이상이면** 그 수. 하나뿐이면 `None`.
 ///
 /// 상세는 뒷줄을 연다(`store::Load::get`). 앞줄을 말없이 가리면 깨진 파일을 보는
@@ -2284,6 +2382,70 @@ mod tests {
         let mut i = make(id, Kind::Issue, status);
         i.epic = Some(epic.into());
         i
+    }
+
+    fn tree(path: &str, branch: &str, holds: &[&str]) -> Workplace {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        Workplace {
+            path: path.into(),
+            branch: branch.into(),
+            names: [name, branch, branch.strip_prefix("worktree-").unwrap_or(branch)].iter().map(|s| s.to_string()).collect(),
+            holds: holds.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// **집은 줄의 자리는 워크트리에서 파생한다**(moai-ir8q) — 이름이 그 줄·조상·에픽을 가리키거나,
+    /// 옆 스냅샷이 그 줄을 쥐었으면 그 워크트리다. 안 집은 줄은 자리를 안 묻는다.
+    #[test]
+    fn a_picked_row_is_placed_by_worktree_name_ancestor_epic_or_side_snapshot() {
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "todo"),
+            member("argos-0002", "argos-0001", "in_progress"),
+            make("argos-0002.a", Kind::Issue, "review"),
+            make("argos-0003", Kind::Issue, "in_progress"),
+            make("argos-0004", Kind::Issue, "in_progress"),
+            make("argos-0005", Kind::Issue, "todo"),
+        ];
+        let trees = vec![
+            tree("/r/.claude/worktrees/argos-0001", "worktree-argos-0001", &[]),
+            tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &["argos-0003"]),
+            tree("/r/.claude/worktrees/argos-0005", "worktree-argos-0005", &[]),
+        ];
+        let at = places(&issues, &cfg(), &trees);
+        let branches = |id: &str| at.get(id).map(|v| v.iter().map(|w| w.branch.as_str()).collect::<Vec<_>>());
+        assert_eq!(branches("argos-0002"), Some(vec!["worktree-argos-0001"]), "에픽 이름으로 못 찾았다");
+        assert_eq!(branches("argos-0002.a"), Some(vec!["worktree-argos-0001"]), "부모의 에픽으로 못 찾았다");
+        assert_eq!(branches("argos-0003"), Some(vec!["worktree-agent-x"]), "옆 스냅샷으로 못 찾았다");
+        assert_eq!(branches("argos-0004"), Some(vec![]), "자리 없는 집은 줄은 빈 목록으로 선다");
+        assert_eq!(branches("argos-0005"), None, "안 집은 줄의 자리를 셌다");
+    }
+
+    /// **자리 없는 집은 줄을 경고로 비춘다**(moai-4370). 워크트리를 하나도 안 쓰는 저장소는 조용하고,
+    /// 방금 집은 줄은 워크트리가 뜰 틈(한 시간)을 준다. 미룬 것은 안 센다. 막지 않는다 — 치명이 아니다.
+    #[test]
+    fn stranded_names_picked_rows_no_live_worktree_holds() {
+        let now = "2026-09-15T12:00:00Z";
+        let old = |id: &str| {
+            let mut i = make(id, Kind::Issue, "in_progress");
+            i.status_since = "2026-09-15T08:00:00Z".into();
+            i
+        };
+        let mut fresh = make("argos-0003", Kind::Issue, "in_progress");
+        fresh.status_since = "2026-09-15T11:30:00Z".into();
+        let mut shelved = old("argos-0004");
+        shelved.deferred_at = Some("2026-09-15T09:00:00Z".into());
+        let issues = vec![old("argos-0001"), old("argos-0002"), fresh, shelved];
+        let trees = vec![tree("/r/.claude/worktrees/argos-0002", "worktree-argos-0002", &[])];
+
+        let w = stranded(&issues, &cfg(), &trees, now).expect("자리 없는 줄을 못 봤다");
+        assert_eq!(w.kind, "stranded");
+        assert_eq!(w.ids, ["argos-0001"], "{w:?}");
+        assert!(!w.fatal && !w.notice);
+        assert!(w.hint.as_deref().is_some_and(|h| h.contains("moai mv <id> todo")), "{w:?}");
+
+        assert!(stranded(&issues, &cfg(), &[], now).is_none(), "워크트리를 안 쓰는 저장소에서 떠들었다");
+        let all_placed = vec![tree("/r/w", "worktree-argos-0001", &[]), trees[0].clone()];
+        assert!(stranded(&issues, &cfg(), &all_placed, now).is_none());
     }
 
     /// **길 잃은 생각 밑에 접힌 일은 에픽 없는 이슈로 안 센다**(moai-uni2). 멀쩡한 생각 밑의
