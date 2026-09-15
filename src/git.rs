@@ -130,8 +130,27 @@ const FS: char = '\u{1f}';
 
 /// `git log` 에 줄 서식. **[`records`] 가 가르는 자와 한 자리에서 짓는다** — 한쪽만 고치면
 /// 제목 자리에 다른 필드가 들어오고, 그것을 알려 주는 것이 없다.
+///
+/// 본문(`%b`)까지 받는 것은 트레일러 줄 때문이다([`trailed`], moai-dig5).
 fn format_arg() -> String {
-    format!("--format=%H{FS}%s")
+    format!("--format=%H{FS}%s{FS}%b")
+}
+
+/// 본문에서 id 를 세는 **유일한 자리** — `Refs:`·`Closes:`·`Fixes:` 로 시작하는 줄(moai-dig5,
+/// 2026-09-15 사용자 결정).
+///
+/// squash 병합은 합친 커밋들의 제목을 본문의 `* <제목>` 줄로 옮긴다. 제목만 세면 그 커밋들이
+/// 통째로 사라지고, 본문을 다 세면 트래커 커밋이 나열한 id 와 "넘긴 것은 …" 같은 문장이 전부
+/// 걸린다 — 이 저장소에서 재니 커밋-이슈 연결이 931 에서 1514 로 붇었다. 트레일러는 squash 를
+/// 그대로 지나가면서 그 둘 사이를 가른다.
+fn trailed<'a>(body: &'a str, id: &str) -> bool {
+    body.lines().filter(|l| is_trailer(l.trim_start())).any(|l| words(l).any(|w| w == id))
+}
+
+/// 트레일러 줄인가. 낱말은 대소문자를 안 가린다 — `refs:` 로 적는 사람이 흔하다.
+fn is_trailer(line: &str) -> bool {
+    // **글자 경계로 자른다** — 바이트로 자르면 한글로 시작하는 줄에서 panic 한다(`get` 은 None 이다).
+    ["refs:", "closes:", "fixes:"].iter().any(|head| line.get(..head.len()).is_some_and(|h| h.eq_ignore_ascii_case(head)))
 }
 
 /// 지금 가지(`HEAD`)에서 제목에 `ids` 중 하나가 적힌 커밋을 id 별로 모은다. 새것이 먼저다.
@@ -184,9 +203,9 @@ const SKEW: i64 = 86_400;
 /// `git log` 이 낸 레코드를 id 별로 가른다. git 을 부르지 않는 순수한 반쪽이다.
 pub fn split(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
     let mut out: BTreeMap<String, Vec<Commit>> = BTreeMap::new();
-    for (hash, subject) in records(log) {
+    for (hash, subject, body) in records(log) {
         for id in ids {
-            if names(subject, id) {
+            if names(subject, id) || trailed(body, id) {
                 out.entry((*id).to_string()).or_default().push(Commit {
                     hash: hash.to_string(),
                     subject: subject.to_string(),
@@ -255,9 +274,11 @@ pub fn table(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Commit>>,
 pub fn table_of(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
     let known: std::collections::HashSet<&str> = ids.iter().copied().collect();
     let mut out: BTreeMap<String, Vec<Commit>> = BTreeMap::new();
-    for (hash, subject) in records(log) {
+    for (hash, subject, body) in records(log) {
         let mut seen: Vec<&str> = Vec::new();
-        for id in words(subject).filter(|w| known.contains(w)) {
+        // 제목의 낱말과 **트레일러 줄의 낱말**을 같은 자로 본다(moai-dig5).
+        let trailers = body.lines().filter(|l| is_trailer(l.trim_start()));
+        for id in words(subject).chain(trailers.flat_map(words)).filter(|w| known.contains(w)) {
             // 한 제목에 같은 id 를 두 번 적어도 커밋은 한 번이다.
             if seen.contains(&id) {
                 continue;
@@ -278,10 +299,15 @@ pub fn table_of(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
 /// **해시 자리가 해시 모양이 아니면 버린다.** `-z` 가 이미 레코드를 지키지만, 지키는 것이
 /// 하나뿐이면 그것이 어긋난 날(옛 git, 다른 서식) 지어낸 해시가 화면과 `--json` 으로 그대로
 /// 나간다. 여기서 한 번 더 보면 그 길이 막힌다 — `%H` 는 언제나 16진수다.
-fn records(log: &str) -> impl Iterator<Item = (&str, &str)> {
+fn records(log: &str) -> impl Iterator<Item = (&str, &str, &str)> {
     log.split('\0')
-        .filter_map(|record| record.split_once(FS))
-        .filter(|(hash, _)| !hash.is_empty() && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+        .filter_map(|record| {
+            let (hash, rest) = record.split_once(FS)?;
+            // 본문이 없는 커밋도 있다 — 그때 `%b` 는 빈 글자다.
+            let (subject, body) = rest.split_once(FS).unwrap_or((rest, ""));
+            Some((hash, subject, body))
+        })
+        .filter(|(hash, _, _)| !hash.is_empty() && hash.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 #[cfg(test)]
@@ -311,14 +337,16 @@ pub(crate) mod tests {
 
     /// **제목이 레코드를 못 쪼갠다**(`-z`). 제어 문자를 담은 제목 하나로 저장소에 없는
     /// 해시를 지어내 남의 이슈 커밋 칸에 세울 수 있었다.
+    ///
+    /// 필드를 **첫** [`FS`] 에서만 가르므로, 제목에 든 `FS` 뒤는 본문 자리로 밀린다 — 거기서는
+    /// 트레일러 줄만 세니(moai-dig5) 그 글이 남의 이슈에 붙지도 않는다.
     #[test]
     fn a_subject_cannot_forge_a_record() {
         let forged = "\u{1e}deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\u{1f}feat: 가짜 (moai-bbbb)";
         let got = split(&rec("c1", &format!("chore: 멀쩡한 것 (moai-aaaa){forged}")), &["moai-aaaa", "moai-bbbb"]);
         assert_eq!(got["moai-aaaa"].len(), 1);
         assert_eq!(got["moai-aaaa"][0].hash, "c1", "지어낸 해시가 들었다");
-        // 제목이 `moai-bbbb` 를 정말로 적었으니 그 이슈에도 붙는다 — 다만 해시는 진짜다.
-        assert_eq!(got["moai-bbbb"][0].hash, "c1", "지어낸 해시가 들었다");
+        assert!(!got.contains_key("moai-bbbb"), "제목이 밀어 넣은 글이 남의 이슈에 붙었다");
     }
 
     #[test]
@@ -333,6 +361,44 @@ pub(crate) mod tests {
     }
 
     #[test]
+    /// **squash 병합이 본문으로 옮긴 id 는 트레일러 줄에서만 센다**(moai-dig5, 2026-09-15 사용자 결정).
+    ///
+    /// GitHub 의 기본 단추인 squash 는 합친 커밋들의 제목을 전부 본문의 `* <제목>` 줄로 옮긴다 —
+    /// 제목만 세면 다섯 중 넷의 커밋 칸이 말없이 빈다. 그렇다고 본문을 다 세면 이 저장소에서만
+    /// 커밋-이슈 연결이 931 → 1514 로 붇는다(트래커 커밋이 본문에 나열한 id, "넘긴 것은 …" 같은
+    /// 문장이 전부 걸린다). `Refs:`·`Closes:`·`Fixes:` 줄은 squash 를 그대로 지나가고 제목 예산도
+    /// 안 쓰므로 그 줄만 센다.
+    ///
+    /// **진짜 squash 로 잰다** — 손으로 지은 본문은 git 이 실제로 무엇을 옮기는지를 안 보여 준다.
+    #[test]
+    fn a_squashed_body_counts_only_its_trailers() {
+        let dir = std::env::temp_dir().join(format!("moai-git-squash-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| run_git(&dir, None, args);
+        git(&["init", "-q"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "첫 커밋"]);
+        git(&["checkout", "-q", "-b", "feat"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "feat: 첫 걸음 (moai-aaaa)"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "fix: 둘째 걸음 (moai-bbbb)\n\nRefs: moai-cccc"]);
+        git(&["checkout", "-q", "main"]);
+        git(&["merge", "-q", "--squash", "feat"]);
+        // squash 가 지어 준 본문 그대로 커밋한다 — 제목만 이쪽이 적는다.
+        let made = std::fs::read_to_string(dir.join(".git/SQUASH_MSG")).unwrap();
+        git(&["commit", "-q", "--allow-empty", "-m", &format!("feat: 가지를 합친다 (moai-dddd)\n\n{made}")]);
+
+        let ids = ["moai-aaaa", "moai-bbbb", "moai-cccc", "moai-dddd"];
+        let got = table(&dir, &ids).unwrap();
+        let has = |id: &str| got.get(id).is_some_and(|c: &Vec<Commit>| c.iter().any(|c| c.subject.contains("가지를 합친다")));
+        assert!(has("moai-dddd"), "제목의 id 를 못 찾았다");
+        assert!(has("moai-cccc"), "본문의 Refs: 트레일러를 안 셌다 — squash 를 쓰면 여기만 남는다");
+        assert!(!has("moai-aaaa") && !has("moai-bbbb"), "본문에 옮겨진 제목까지 셌다 — 트래커 커밋이 나열한 id 가 죄다 걸린다");
+        // `show` 도 같은 답이다.
+        let one = commits_of(&dir, &["moai-cccc"], None).unwrap();
+        assert_eq!(one["moai-cccc"].len(), 1, "show 가 트레일러를 안 셌다 — 두 표면이 갈렸다");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// **형식에 안 맞는 id 의 줄도 커밋 칸을 읽는다**(moai-ynhj). `Issue::validate` 는 `is_valid` 를
     /// **쓸 때만** 건다 — 들여오거나 손으로 고친 줄은 `argos-4ae`(본체가 짧다)처럼 어긋난 id 를 들 수
     /// 있고, 그런 줄도 목록·탐색기에는 멀쩡히 선다. 커밋이 그 id 를 그대로 적었는데 칸만 영영 비면
