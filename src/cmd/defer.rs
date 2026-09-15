@@ -35,20 +35,15 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     if args.msg.is_some() && msg.is_none() {
         return Err(Fail::new("까닭이 비었다"));
     }
-    // **모르는 칸은 거절한다** — `mv --from` 과 같은 자다. 오타를 "안 맞았다" 로
-    // 읽으면 아무것도 안 하면서 0 아닌 코드만 내, 부르는 쪽이 까닭을 못 읽는다.
-    //
-    // **누구인지 묻기 전에 본다** — `mv` 와 같은 차례다. 뒤에 두면 신원 없는 기계에서
-    // 칸 오타가 "누가 하는지 모른다" 로 덮여, 여기 적은 까닭이 그대로 무너진다.
     let from = args.from.map(crate::model::Status::new);
-    if let Some(f) = &from {
-        repo.config.require_known(f.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
-    }
-
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
 
     let (moved, read): (Moved, super::Read) = repo.with_write(|issues, cfg, _| {
+        // **칸부터 보고 누구인지는 그다음이다** — `mv` 와 같은 차례다. 뒤에 두면 신원
+        // 없는 기계에서 칸 오타가 "누가 하는지 모른다" 로 덮인다. 칸 검사가 줄을 봐야
+        // 하므로(`check_from`) 둘 다 락 안으로 들어왔다.
+        super::check_from(from.as_ref().map(crate::model::Status::as_str), issues, cfg)?;
+        let by = model::actor(ctx.user.as_deref(), &repo.root)?;
         let mut m = Moved::default();
         let mut entries = Vec::new();
         // **묶음에는 `--from` 을 못 쓴다 — `mv` 와 한 자다**(사람이 정했다,

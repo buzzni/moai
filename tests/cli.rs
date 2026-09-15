@@ -8029,6 +8029,31 @@ fn a_from_column_that_does_not_exist_is_refused() {
     assert!(!line_of(s.path(), &id).contains("\"deferred_at\""), "거절하면서 미뤘다");
 }
 
+/// **config 가 더는 모르는 칸도 줄이 거기 있으면 받는다** (moai-hym7). 칸 이름을 바꾸면
+/// 옛 이름에 선 줄이 남는데, 그 이름을 오타로 보고 거절하면 그 줄은 **영영** `--from`
+/// 으로 못 집는다 — 남의 낡은 줄 하나가 쓰기를 막는 자리다(CLAUDE.md). 검사가 노리는
+/// 것은 오타지 낡음이 아니므로, 아무 줄도 서 있지 않은 이름만 거절한다.
+#[test]
+fn a_from_column_the_config_forgot_still_works_while_a_row_sits_there() {
+    let s = init("mv-from-renamed");
+    let id = add(s.path(), &["옛 칸에 선 일"]);
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    let cfg = s.path().join(".moai/config.toml");
+    let renamed = std::fs::read_to_string(&cfg).unwrap().replace("in_progress", "doing");
+    std::fs::write(&cfg, renamed).unwrap();
+
+    // 줄은 아직 `in_progress` 에 서 있다 — 설정만 그 이름을 잊었다.
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""));
+    ok(s.path(), &["mv", &id, "done", "--from", "in_progress"]);
+    assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "옛 칸에 선 줄을 못 집었다");
+
+    // 아무 줄도 안 선 이름은 그대로 거절한다 — 오타 검사는 살아 있다.
+    let out = moai(s.path(), &["mv", &id, "todo", "--from", "in_progress"]);
+    assert!(!out.status.success(), "이제 아무도 안 선 옛 칸이 통과했다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("in_progress"), "{}", text(&out));
+    assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "거절하면서 옮겼다");
+}
+
 /// **같은 id 를 두 번 적어도 제가 방금 쓴 값과 겨루지 않는다.** `--from` 이 재는 것은
 /// 부르는 쪽이 본 칸이지 이 명령이 만든 칸이 아니다 — 돌면서 그때그때 보던 판은 한 줄을
 /// `moved` 와 `stale` 에 함께 세우고 0 아닌 코드를 냈다. 그 코드를 "못 집었다" 로 읽는

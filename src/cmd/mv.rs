@@ -45,17 +45,14 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let to = Status::new(tail[0].clone());
 
     repo.config.require_known(to.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
-    // **`--from` 의 오타는 옮길 칸과 같은 자로 거절한다.** 모르는 칸을 그냥 "안 맞았다"
-    // 로 읽으면 아무것도 안 옮기면서 0 아닌 코드만 내, 에이전트가 영영 아무 일도 못
-    // 집는 까닭이 어디에도 안 남는다.
     let from = args.from.map(Status::new);
-    if let Some(f) = &from {
-        repo.config.require_known(f.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
-    }
 
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
     let moved: Moved = repo.with_write(|issues, cfg, _| {
+        // **칸부터 보고 누구인지는 그다음이다.** 신원 없는 기계에서 칸 오타가 "누가
+        // 하는지 모른다" 로 덮이면, 부르는 쪽은 둘을 글로만 가를 수 있다. 칸 검사가
+        // 줄을 봐야 하므로(`check_from`) 둘 다 락 안에서 잰다.
+        let by = model::actor(ctx.user.as_deref(), &repo.root)?;
         let mut m = Moved::default();
         let mut entries = Vec::new();
         // **닫을 때만 전의 모습을 뜬다.** 풀리는 것은 끝낼 때뿐이다 — 다른 칸으로의 이동은
@@ -71,6 +68,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         // 명령이 만든 칸이 아니다 — 돌면서 그때그때 보면 같은 id 를 두 번 적은 한
         // 명령이 제가 방금 쓴 값과 겨뤄, 옮겨 놓고도 진다.
         let asked_all: Vec<&str> = ids.iter().map(String::as_str).collect();
+        super::check_from(from.as_ref().map(Status::as_str), issues, cfg)?;
         // **묶음에는 `--from` 을 못 쓴다**(사람이 정했다, moai-8xwi.rzg). 묶음의 칸은
         // 멤버에서 읽고 쓰기는 줄에 적힌 칸에 한다 — 두 축이 갈려 있어, 재는 것이 맞아도
         // 쓰는 것은 아무도 안 지킨다. 겨루는 둘이 같은 에픽에 같은 `--from` 을 걸면 둘 다
