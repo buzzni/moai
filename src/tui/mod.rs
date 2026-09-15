@@ -1197,9 +1197,18 @@ impl App {
     ///
     /// 입힌 뒤의 보기를 `App::saved` 로 든다 — 모르는 낱말·틀린 값은 화면의 보기에 없으니, 이 세션이
     /// 그 키를 안 바꾸는 한 적을 때 파일의 것이 그대로 남는다(`Doc::merge_look`).
+    ///
+    /// **시험만 부른다**(moai-u8cs) — 띄우는 길은 층과 한 번 읽은 설정을 나눠 [`App::adopt_look`] 을 부른다.
+    #[cfg(test)]
     pub fn load_look(&mut self) {
-        let (look, mut problems) = crate::user_config::read_look(self.user_config.as_deref());
-        self.apply_look(&look, &mut problems);
+        let (look, problems) = crate::user_config::read_look(self.user_config.as_deref());
+        self.adopt_look(&look, problems);
+    }
+
+    /// 이미 읽은 보기를 입힌다 — [`App::load_look`] 와 같되 파일을 안 읽는다. 띄우는 길(`cmd::tui`)이
+    /// 층과 한 번 읽은 설정을 나눠 쓸 때 부른다(moai-u8cs). `problems` 는 읽다 만난 까닭이다.
+    pub fn adopt_look(&mut self, look: &crate::user_config::Look, mut problems: Vec<String>) {
+        self.apply_look(look, &mut problems);
         self.saved = self.look_now();
         if !problems.is_empty() {
             self.notice = Some(format!("보기 설정 — {}", problems.join(" · ")));

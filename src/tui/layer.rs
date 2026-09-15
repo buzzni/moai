@@ -169,7 +169,7 @@ fn look_at(paths: &[PathBuf], now: &str) -> Vec<Looked> {
     let reg = user_config::Registry {
         path: None,
         projects: paths.iter().map(|p| user_config::Project { path: p.clone(), hue: None }).collect(),
-        problems: Vec::new(),
+        ..user_config::Registry::default()
     };
     projects::open(&reg)
         .into_iter()
@@ -192,7 +192,11 @@ impl Layer {
     /// 방향으로만 선다. 등록돼 있으면 그 줄에 표시만 붙는다. 이름은 띄운 자리까지 넣고
     /// 가른다 — 같은 화면에 같은 이름이 둘 서면 안 된다.
     pub fn read(config: Option<&Path>, launch: Option<&Path>) -> Layer {
-        let reg = user_config::read(config);
+        Layer::of(user_config::read(config), config, launch)
+    }
+
+    /// 이미 읽은 설정으로 층을 세운다(moai-u8cs) — 띄울 때 보기와 같은 한 번의 읽기를 나눠 쓴다.
+    pub fn of(reg: user_config::Registry, config: Option<&Path>, launch: Option<&Path>) -> Layer {
         let found = launch.and_then(|l| reg.projects.iter().position(|p| same_dir(&p.path, l)));
         let mut entries = reg.projects.clone();
         let extra = match (launch, found) {
