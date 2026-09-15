@@ -188,7 +188,7 @@ impl Layer {
     /// 사용자 설정을 읽어 층을 세운다. 줄은 아직 안 읽었다([`Look::Unread`]).
     ///
     /// `launch` 는 `.moai` 안에서 띄웠을 때의 뿌리다. **등록돼 있지 않아도 맨 앞에 선다** —
-    /// 빼면 Bksp 로 올라간 뒤 내려올 길이 없어, 디렉터리처럼 드나든다는 약속이 한
+    /// 빼면 `0` 으로 층에 올라간 뒤 내려올 길이 없어, 디렉터리처럼 드나든다는 약속이 한
     /// 방향으로만 선다. 등록돼 있으면 그 줄에 표시만 붙는다. 이름은 띄운 자리까지 넣고
     /// 가른다 — 같은 화면에 같은 이름이 둘 서면 안 된다.
     pub fn read(config: Option<&Path>, launch: Option<&Path>) -> Layer {
@@ -256,8 +256,22 @@ impl Layer {
         }
     }
 
-    pub(super) fn position(&self, path: &Path) -> Option<usize> {
+    fn position(&self, path: &Path) -> Option<usize> {
         self.places.iter().position(|p| p.path == path)
+    }
+
+    /// 지금 선 자리의 **헤더 번호** — `0` 이 층(`<0> 전체`)이고 그다음이 등록 차례다. 목록에서
+    /// 빠진 경로에 서 있으면 번호가 없다.
+    ///
+    /// **한 곳에서 읽는다.** 헤더가 빛을 세울 자리를 고르는 것(`draw::with_projects`)과 맨
+    /// 숫자가 "이미 그 자리인가" 를 가르는 것(`App::key` 의 [`super::keys::Browse::Project`])이
+    /// 같은 답을 봐야 한다 — 따로 세면 한쪽의 첨자 기준만 옮겨도 헤더는 `<2>` 를 빛내는데 `2` 가
+    /// 그 프로젝트를 다시 열어 커서와 굴린 자리를 첫 줄로 튕긴다.
+    pub(super) fn number(&self) -> Option<usize> {
+        match &self.at {
+            At::Layer => Some(0),
+            At::Project(p) => self.position(p).map(|at| at + 1),
+        }
     }
 }
 
@@ -291,8 +305,6 @@ impl App {
         app
     }
 
-    /// `.moai` 안에서 띄운 탐색기에 층을 얹는다. 첫 화면은 오늘처럼 첫 항목에 선다 — 새로
-    /// 선 `..` 에 커서를 두면 여는 순간의 Enter 가 층으로 올라간다.
     /// 안에서 띄운 탐색기에 층을 얹는다 — **등록한 것이 읽혔을 때만.** 설정이 깨져 하나도
     /// 안 읽혔으면 층은 안 서지만 까닭을 [`App::unlayered`] 에 붙여 배너가 댄다. 층이
     /// 조용히 사라지면 여러 프로젝트 보기가 고장 난 줄만 알고, 같은 자리의 `moai status`
@@ -309,11 +321,12 @@ impl App {
         app
     }
 
+    /// 층을 얹기만 한다 — **커서는 안 건드린다.** 한때 여기서 `..` 너머 첫 줄로 밀었는데,
+    /// 층이 서면서 뿌리에 `..` 이 새로 생기던 시절의 일이다. 뿌리의 `..` 을 걷은 뒤(moai-i784)
+    /// 층이 서도 줄은 하나도 안 밀리므로 밀 것이 없고, 미는 척하는 한 줄이 남아 있으면 그것을
+    /// 위해 뿌리의 목록을 통째로 세고 정렬하는 값(`first_row` → `rows`)을 띄울 때마다 치른다.
     pub fn with_layer(mut self, layer: Layer) -> App {
         self.layer = Some(layer);
-        if self.path.is_empty() && self.cursor == 0 {
-            self.cursor = self.first_row();
-        }
         self
     }
 
@@ -451,10 +464,14 @@ impl App {
         let Some(repo) = self.open_place(at) else { return };
         let Some(layer) = &mut self.layer else { return };
         let path = layer.places[at].path.clone();
-        match (self.read)(&repo, true) {
+        // **겹쳐 보기를 켠다는 말은 한 번만 적는다.** 읽는 값이 이 깃발을 타므로 읽기에 건네는
+        // 것과 App 에 남기는 것이 갈리면 목록은 겹친 줄인데 뱃지는 꺼진 화면이 난다. 세우는
+        // 것은 **읽은 뒤**다 — 못 읽으면 선 자리도 깃발도 그대로여야 한다.
+        let overlay = true;
+        match (self.read)(&repo, overlay) {
             Ok(fresh) => {
                 layer.at = At::Project(path);
-                self.worktree = true;
+                self.worktree = overlay;
                 self.filter_text = None;
                 // 쓰기 실패의 까닭도 떠난 프로젝트의 것이다 — 걷어야 `apply_fresh` 가 `trouble`
                 // 을 비운다.
@@ -470,13 +487,15 @@ impl App {
                 self.remembered.clear();
                 self.cursor = 0;
                 self.detail.rewind();
-                // **들이기가 붙드는 정체는 여기서 버린다.** 층을 거쳐 왔으면 들이기 전 목록이
-                // 비어 붙들 것이 없지만, 헤더의 번호(moai-o133)로 옆 프로젝트에 바로 건너뛰면
-                // 떠난 프로젝트의 줄이 그대로 남아 있다 — 두 프로젝트가 같은 prefix 를 쓰면
-                // (`argos-0001`) 들이기가 그 id 로 커서를 붙들어 남의 줄 번호에 선다.
+                // 층을 거쳐 왔으면 들이기 전 목록이 비어 붙들 것이 없지만, 헤더의 번호
+                // (moai-o133)로 옆 프로젝트에 바로 건너뛰면 떠난 프로젝트의 줄이 그대로 남아
+                // 있다 — 두 프로젝트가 같은 prefix 를 쓰면(`argos-0001`) 들이기가 그 id 로
+                // 커서를 붙들어 남의 줄 번호에 선다.
                 self.apply_fresh(fresh);
-                // 그래서 들인 **뒤에** 첫 줄로 다시 세운다 — 디렉터리에 들어갈 때와 같은 자
-                // (`App::first_row`, moai-cm13).
+                // **들이기가 붙든 정체는 이 한 줄이 버린다 — 지우지 말 것**(리뷰). 위의
+                // `cursor = 0` 은 붙들 줄을 옛 목록의 **첫 줄**로 바꿀 뿐 정체 자체를 없애지
+                // 못한다(`App::take` 가 옛 자료로 `current()` 를 잰다). 디렉터리에 들어갈 때와
+                // 같은 자다(`App::first_row`, moai-cm13).
                 self.cursor = self.first_row();
             }
             Err(e) => self.notice = Some(format!("들어가지 못했다 — {e}")),
@@ -965,9 +984,9 @@ mod tests {
         assert!(a.layer.is_none() && a.unlayered.is_none(), "멀쩡한 빈 설정에 까닭을 달았다");
     }
 
-    /// **`.moai` 안에서 띄우면 그 안에서 시작하고, 뿌리에서 Bksp 로 층에 올라가 띄운 자리에
-    /// 선다**(결정 3). 등록 안 된 자리는 층 맨 앞에 서서 도로 내려갈 수 있다. 남의 프로젝트는
-    /// 올라갈 때 처음 읽는다.
+    /// **`.moai` 안에서 띄우면 그 안에서 시작하고, `0` 으로 층에 올라가 띄운 자리에 선다**
+    /// (결정 3, 올라가는 키는 moai-i784 에서 Bksp 에서 `0` 으로 옮겼다). 등록 안 된 자리는 층
+    /// 맨 앞에 서서 도로 내려갈 수 있다. 남의 프로젝트는 올라갈 때 처음 읽는다.
     #[test]
     fn launched_inside_it_starts_inside_and_climbs_to_where_it_was_launched() {
         let s = Scratch::new("inside");
@@ -1209,6 +1228,37 @@ mod tests {
         a.hit("1");
         assert_eq!(a.focus, super::super::Pane::Explorer, "프로젝트로 건너뛰었는데 포커스가 상세에 남았다");
         assert_ne!(a.here(), Some(two), "1 이 첫 프로젝트로 안 갔다");
+
+        // **이미 그 자리여도 돌아온다**(리뷰). 안 옮기는 갈래로 떨어지면 포커스를 안 건드려,
+        // 고치려던 그 막힌 화면(층의 상세)에 그대로 남는 길이 남는다.
+        a.hit("Tab");
+        a.hit("1");
+        assert_eq!(a.focus, super::super::Pane::Explorer, "이미 선 프로젝트의 번호를 누르니 포커스가 상세에 남았다");
+        a.hit("0");
+        a.hit("Tab");
+        assert_eq!(a.focus, super::super::Pane::Detail, "시험의 전제 — 층에서도 상세로 간다");
+        a.hit("0");
+        assert!(a.on_layer());
+        assert_eq!(a.focus, super::super::Pane::Explorer, "층에서 누른 `0` 이 포커스를 안 돌렸다");
+    }
+
+    /// **못 들어가면 포커스도 그대로다**(리뷰). `enter_project` 는 실패하면 선 자리를 안 바꾸고
+    /// 까닭만 알림으로 다는데, 부르는 쪽이 포커스만 옮기면 읽던 상세가 키를 잃는다.
+    #[test]
+    fn a_failed_digit_jump_leaves_the_focus_where_it_was() {
+        let s = Scratch::new("digit-jump-fail");
+        let (one, two, mut a) = on_layer_with_twins(&s);
+        a.hit("1");
+        assert_eq!(a.here(), Some(one.clone()), "1 이 첫 프로젝트로 안 갔다");
+        a.hit("Tab");
+        assert_eq!(a.focus, super::super::Pane::Detail, "시험의 전제 — 상세에 포커스가 갔다");
+
+        // 둘째 프로젝트를 통째로 치운다 — `open_place` 가 못 열고 `enter_project` 는 알림만 단다.
+        std::fs::remove_dir_all(&two).unwrap();
+        a.hit("2");
+        assert_eq!(a.here(), Some(one), "못 여는 프로젝트로 들어가 버렸다");
+        assert!(a.notice.is_some(), "못 들어갔는데 아무 말도 없다");
+        assert_eq!(a.focus, super::super::Pane::Detail, "못 들어갔는데 포커스만 옮겼다");
     }
 
     /// **맨 숫자가 프로젝트를 고른다**(moai-o133) — `1`·`2` 는 등록 차례의 프로젝트로 바로 들어가고,

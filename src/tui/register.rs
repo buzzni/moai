@@ -202,10 +202,14 @@ impl App {
                 // 층에서 "못 읽는다" 를 처음 만난다 (moai-9omq).
                 let bad = added.unreadable.as_deref().map(|e| format!(" · ! 못 읽는다 — {}", crate::text::one_line(e))).unwrap_or_default();
                 let bare = if added.initialized { "" } else { " · init 전 — .moai 가 아직 없다" };
+                // **층으로 가는 키를 대는 자리다** — 뿌리의 `..` 을 걷은 뒤(moai-i784) Bksp 는
+                // 디렉터리만 올라간다. 옛 글대로 Bksp 를 대면 방금 등록한 프로젝트를 보러 가는
+                // 바로 그 화면이 아무 일도 안 하는 키를 대고, 없는 키를 적어 두면 그것부터
+                // 도구를 못 믿게 된다(키 바와 같은 까닭).
                 let back = if self.on_layer() || self.layer.is_none() {
                     String::new()
                 } else {
-                    format!(" · 뿌리에서 {} 로 층에 올라가면 보인다", label(BROWSE, Browse::Leave))
+                    format!(" · {} 로 층에 올라가면 보인다", label(BROWSE, Browse::Project(0)))
                 };
                 self.notice = Some(format!("{what} · {}{bad}{bare}{back}", shown(&added.path)));
                 if let Mode::Pick(p) = &self.mode {
@@ -677,7 +681,11 @@ mod tests {
         press(&mut a, &[KeyCode::Backspace]);
         point(&mut a, "other");
         a.key(key(KeyCode::Char('a')));
-        assert!(a.notice.as_deref().is_some_and(|n| n.contains("Bksp")), "{:?}", a.notice);
+        // **알림이 대는 키는 층으로 가는 키다**(리뷰) — 뿌리의 `..` 을 걷은 뒤(moai-i784) Bksp
+        // 는 디렉터리만 올라간다. 방금 등록한 것을 보러 갈 화면이 안 듣는 키를 대면 안 된다.
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(said.contains("0 로 층에 올라가면"), "층으로 가는 키를 안 댔다 — {said:?}");
+        assert!(!said.contains("Bksp"), "걷어 낸 키를 아직 댄다 — {said:?}");
         press(&mut a, &[KeyCode::Esc]);
 
         assert_eq!(s.registered(), [other.clone()]);

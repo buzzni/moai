@@ -30,8 +30,9 @@ use scroll::{Move, Scroll};
 /// 목록의 한 줄. `..` 은 이슈가 아니므로 [`Entry`] 로는 못 담는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
-    /// 한 층 위로. 뿌리가 아닐 때만 맨 앞에 선다 — MC 와 같다. 프로젝트 층이 있으면
-    /// 프로젝트 뿌리에도 서서 층으로 올라간다.
+    /// 한 층 위로. 뿌리가 아닐 때만 맨 앞에 선다 — MC 와 같다. **디렉터리에만 선다**
+    /// (moai-i784): 층이 있어도 프로젝트 뿌리에는 안 서고, 층으로는 헤더의 `0`
+    /// ([`keys::Browse::Project`])이 간다 — 같은 글자가 두 데로 가지 않게.
     Up,
     Item(Entry),
     /// 프로젝트 층의 한 줄 — `layer.places` 의 첨자다. 정체는 경로다([`Anchor::Project`]).
@@ -1547,23 +1548,25 @@ impl App {
             // `0` 을 누르면 층에 서는데, 층의 상세에는 듣는 키가 없어 Enter 가 조용하고 키 바도
             // 그 키를 안 적는다 — 무엇을 눌러야 할지 없는 화면이 선다. 층으로든 프로젝트로든
             // 건너뛰는 것은 목록을 보러 가는 일이다.
-            B::Project(n) => match usize::from(n) {
-                0 if !self.on_layer() => {
+            B::Project(n) => {
+                // **선 자리의 번호는 한 곳에서 읽는다**([`layer::Layer::number`]) — 헤더가 빛을
+                // 세울 자리를 고르는 자와 같아야 한다. 따로 세면 헤더는 `<2>` 를 빛내는데 `2` 는
+                // 그 프로젝트를 다시 열어 커서와 굴린 자리를 첫 줄로 튕긴다.
+                let here = self.layer.as_ref().and_then(layer::Layer::number);
+                match usize::from(n) {
+                    at if here == Some(at) => {}
+                    0 => self.climb(),
+                    at => self.enter_project(at - 1),
+                }
+                // **간 자리를 보고 포커스를 돌린다**(리뷰 moai-i784.pzh, 그리고 이 리뷰).
+                // 이미 그 자리였어도 돌린다 — 누른 사람은 목록을 보러 온 것이고, 층의 상세에는
+                // 듣는 키가 없어 거기 남으면 무엇을 눌러야 할지 없는 화면이 선다. 거꾸로 **못
+                // 들어갔으면 건드리지 않는다**: `enter_project` 는 실패하면 아무것도 안 바꾸고
+                // 까닭만 알림으로 다는데, 포커스만 옮기면 읽던 상세가 키를 잃는다.
+                if self.layer.as_ref().and_then(layer::Layer::number) == Some(usize::from(n)) {
                     self.focus = Pane::Explorer;
-                    self.climb();
                 }
-                0 => {}
-                at => {
-                    let same = self.layer.as_ref().and_then(|l| match &l.at {
-                        layer::At::Project(p) => l.position(p),
-                        layer::At::Layer => None,
-                    });
-                    if same != Some(at - 1) {
-                        self.focus = Pane::Explorer;
-                        self.enter_project(at - 1);
-                    }
-                }
-            },
+            }
             B::Grep => {
                 self.grep_was = Some((self.filter_text.clone(), self.grep_in, self.cursor));
                 self.mode = Mode::Grep(Input::default(), GrepIn::All);
@@ -1878,13 +1881,16 @@ impl App {
         }
     }
 
-    /// 들어간 층에서 커서가 설 줄 — **`..` 너머 첫 줄**(moai-cm13). 비었으면 `..`.
+    /// 들어간 디렉터리에서 커서가 설 줄 — **`..` 너머 첫 줄**(moai-cm13). 비었으면 `..`.
     ///
     /// `..` 에 세우면 들어가자마자 누른 Enter(·`l`) 한 번이 도로 나온다 — 두 번 누르면 들어갔다
-    /// 나온 제자리다. 고르기 창(`Picker::new`)이 첫 하위 디렉터리에, 안에서 띄운 탐색기
-    /// (`App::with_layer`)가 첫 항목에 서는 것과 같은 자다. `..` 은 `k`·`gg`·Home 한 번 거리다
-    /// — vi 키가 서기 전에는 `..` 에 세워 두는 것이 나가는 길을 보이는 값이었지만, 이제
-    /// `h`·Bksp 가 어느 줄에서든 나간다.
+    /// 나온 제자리다. 고르기 창(`Picker::new`)이 첫 하위 디렉터리에 서는 것과 같은 자다.
+    /// `..` 은 `k`·`gg`·Home 한 번 거리다 — vi 키가 서기 전에는 `..` 에 세워 두는 것이 나가는
+    /// 길을 보이는 값이었지만, 이제 `h`·Bksp 가 어느 줄에서든 나간다.
+    ///
+    /// **프로젝트 뿌리에서는 늘 0 이다** — `..` 은 디렉터리에만 서므로(moai-i784) 넘을 줄이
+    /// 없다. 그래도 `enter_project` 가 이것을 부르는 것은 들이기(`apply_fresh`)가 떠난
+    /// 프로젝트의 id 로 커서를 붙들 수 있어서고, 그 한 줄이 그것을 지운다.
     fn first_row(&self) -> usize {
         let rows = self.rows();
         usize::from(rows.len() > 1 && rows.first() == Some(&Row::Up))
@@ -3858,9 +3864,11 @@ mod tests {
         assert!(!a.view.hides(crate::config::DONE));
     }
 
-    /// **적어 둔 보기를 입힌 뒤에 층을 얹는다**(moai-2kyl 단계 리뷰 — `cmd/tui.rs::run` 의 차례). 층은 첫 화면의
-    /// 커서를 `..` 너머 첫 줄에 세운다(`App::with_layer`). 처음값 보기(done 숨김)로 세우면 끝난 줄뿐인 뿌리에서
-    /// 커서가 `..` 에 서고, 적어 둔 보기가 그 줄을 보여도 첫 Enter 가 층으로 올라간다.
+    /// **적어 둔 보기를 입힌 뒤에 층을 얹는다**(moai-2kyl 단계 리뷰 — `cmd/tui.rs::run` 의 차례).
+    /// 처음값 보기(done 숨김)로 세우면 끝난 줄뿐인 뿌리가 통째로 비어, 층을 먼저 얹은 화면은
+    /// 적어 둔 보기가 그 줄을 도로 보여도 커서가 목록 밖에 남는다. 뿌리의 `..` 을 걷은
+    /// 뒤(moai-i784)로 `with_layer` 는 커서를 안 건드리므로, 이 시험이 재는 것은 커서가 **첫
+    /// 줄**(그 끝난 줄)에 서는가다.
     #[test]
     fn the_saved_look_is_on_before_the_layer_places_the_first_cursor() {
         let s = Scratch::new("look-layer");

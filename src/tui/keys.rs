@@ -364,8 +364,14 @@ impl Sorting {
     }
 }
 
-/// 칸 토글에 번호를 줄 수 있는 칸 수 — `1`~`9`. 넘는 칸은 번호가 없고 `SPC s a` 로만 돌아온다.
+/// 번호를 줄 수 있는 수 — `1`~`9`. 칸 토글(`SPC s <n>`)과 프로젝트 건너뛰기([`Browse::Project`])
+/// 가 같은 상한을 쓴다. 넘는 칸은 번호가 없고 `SPC s a` 로만 돌아오며, 넘는 프로젝트는 층에서
+/// 골라 들어간다.
 pub const NUMBERED: usize = 9;
+
+/// **한 자리 키를 넘기지 않는다.** 두 자리를 받기 시작하면 한 자리 키가 다음 글쇠를 기다리느라
+/// 늦어지고, 헤더의 `<n>`(`draw::numbered`)도 칸 폭이 어긋난다.
+const _: () = assert!(NUMBERED < 10);
 
 /// 탐색의 이동(moai-ob4c, 키 지도 moai-hudg). **vi 키에 이름을 붙이고 화살표·Home·End·PgUp/Dn
 /// 은 숨은 별칭이다** — 바가 한 이름만 대야 좁은 창에서 덜 떨어진다. 드나들기만 거꾸로다:
@@ -905,12 +911,39 @@ mod tests {
     #[test]
     fn a_bare_digit_goes_to_that_project() {
         assert_eq!(one(BROWSE, press(KeyCode::Char('0'))), Lookup::Run(Browse::Project(0)));
-        for n in 1..=9u8 {
+        // **표는 [`NUMBERED`] 까지 댄다** — 헤더가 그 상한으로 `<n>` 을 적고(`draw::numbered`)
+        // `Ctx::projects` 도 그것으로 자르는데, 표만 짧으면 헤더가 안 듣는 키를 대고 표만 길면
+        // 아무도 안 알려 주는 키가 산다.
+        for n in 1..=NUMBERED as u8 {
             let c = char::from_digit(u32::from(n), 10).unwrap();
             assert_eq!(one(BROWSE, press(KeyCode::Char(c))), Lookup::Run(Browse::Project(n)), "{c}");
         }
+        for n in NUMBERED as u8 + 1..=9 {
+            let c = char::from_digit(u32::from(n), 10).unwrap();
+            assert_eq!(one(BROWSE, press(KeyCode::Char(c))), Lookup::Unknown, "상한 너머 {c} 가 표에 있다");
+        }
         // SPC 뒤의 숫자는 그대로 칸 토글이다 — 두 길이 안 겹친다.
         assert_eq!(lookup(BROWSE, &[pressed(&LEADER), press(KeyCode::Char('s')), press(KeyCode::Char('1'))]), Lookup::Run(Browse::Column(0)));
+    }
+
+    /// **맨 숫자는 등록한 수만큼만 듣는다**(moai-o133). 층이 없으면 `0` 까지 조용하고, 등록한
+    /// 수를 넘는 번호도 조용하다 — 없는 자리로 보내면 무엇이 일어났는지 모른다.
+    ///
+    /// 키 표의 단위 시험은 `Ctx::default()` 로 짓느라 `projects` 가 0 이라 이 갈래를 아무도
+    /// 안 밟았다(리뷰) — 판정을 뒤집어도 그림 시험이 우연히 밟는 몇 갈래에서만 잡힌다.
+    #[test]
+    fn a_bare_digit_is_quiet_past_the_projects_that_exist() {
+        let none = Ctx { list_focus: true, ..Ctx::default() };
+        assert_eq!(Browse::Project(0).enabled(&none), Err(Off::Quiet), "층이 없는데 `0` 이 켜졌다");
+        let three = Ctx { projects: 3, ..none };
+        for n in 0..=3u8 {
+            assert_eq!(Browse::Project(n).enabled(&three), Ok(()), "{n} 이 안 듣는다");
+        }
+        for n in 4..=NUMBERED as u8 {
+            assert_eq!(Browse::Project(n).enabled(&three), Err(Off::Quiet), "등록 안 된 {n} 이 듣는다");
+        }
+        // 상세에 포커스가 가도 듣는다 — 건너뛰기는 선 줄이 아니라 화면 전체를 옮기는 일이다.
+        assert_eq!(Browse::Project(1).enabled(&Ctx { list_focus: false, ..three }), Ok(()));
     }
 
     /// **글자 키의 Ctrl·Alt 는 정확히 견준다.** Ctrl-A 가 등록 창을, Ctrl-D 가 "뺄까" 를
