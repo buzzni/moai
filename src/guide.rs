@@ -860,13 +860,15 @@ mod tests {
     #[test]
     fn the_example_link_says_whose_repository_it_is() {
         let path = "examples/bash-agent/agent.sh";
+        // **집는 것은 모든 자리다.** 첫 자리만 보면 뒤에 맨 경로를 하나 더 적어도
+        // 이 시험이 지나간다 — 걸러야 할 것은 바로 그 둘째 줄이다.
         for (surface, text) in [("AGENTS 블록", agents()), ("스킬", skill()), ("참고 문서", reference())] {
-            let Some(at) = text.find(path) else { continue };
-            let before = &text[..at];
-            assert!(
-                before.ends_with("moai 저장소의 `"),
-                "{surface} 이 {path} 를 어느 저장소의 것인지 없이 가리킨다"
-            );
+            for (at, _) in text.match_indices(path) {
+                assert!(
+                    text[..at].ends_with("moai 저장소의 `"),
+                    "{surface} 이 {path} 를 어느 저장소의 것인지 없이 가리킨다"
+                );
+            }
         }
     }
 

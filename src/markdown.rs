@@ -18,6 +18,17 @@
 
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
+/// 폭을 넘기는 인라인 코드 덩이 하나를 어떻게 할까. **표면이 정한다** — 소프트랩이
+/// 있는 곳과 없는 곳이 다르다(사용자 결정, moai-krh7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Overflow {
+    /// 끊지 않고 폭을 넘긴 채 둔다. 셸은 화면에서만 접어, 복사하면 온전한 한 줄이다.
+    Keep,
+    /// 글자에서 끊는다. 탐색기처럼 **소프트랩이 없는** 표면의 길이다 — 안 끊으면
+    /// 꼬리가 `…` 로 잘려 화면에서 아예 사라진다.
+    Break,
+}
+
 /// 글 한 조각이 지는 뜻.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
@@ -445,15 +456,17 @@ impl Fold {
 /// 띄어쓰기 없이 길게 이어지고 한 글자가 두 칸이라 낱말 단위로만 접으면 한 줄이
 /// 통째로 넘치고, 늘 글자에서 끊으면 영문 낱말이 가운데서 잘린다. 둘 다 본다.
 ///
-/// **인라인 코드만은 끊지 않는다**(사용자 결정, moai-syp8). 코드 안의 공백은 접는
-/// 자리가 아니고, 조각 하나가 폭을 넘겨도 한 줄로 둔다 — 터미널이 화면에서만 접어
-/// 복사하면 온전한 한 줄로 돌아온다. 잘린 명령을 복사해 돌리는 것보다, 줄이
-/// 오른쪽으로 삐져나가는 편이 싸다. `--help` 의 접기를 끈 것과 같은 까닭이다
-/// (moai-opjn).
+/// **인라인 코드 안의 공백은 어느 표면에서도 접는 자리가 아니다**(사용자 결정,
+/// moai-syp8). 거기서 끊으면 복사한 명령이 두 줄로 갈린다.
+///
+/// 폭을 넘기는 코드 덩이 하나를 어떻게 할지는 `overflow` 가 정한다 — **표면마다
+/// 다르기 때문이다**(사용자 결정, moai-krh7). 셸은 긴 줄을 화면에서만 접어 복사하면
+/// 온전하지만(`Overflow::Keep`), 탐색기는 소프트랩이 없어 그 줄의 꼬리를 `…` 로
+/// 잘라 버린다(`Overflow::Break`) — 거기서는 끊어 보여 주는 편이 낫다.
 ///
 /// **접는 것이 칠하는 것보다 먼저다.** 칠한 뒤 접으면 이스케이프가 폭에 세어져
 /// 줄이 짧아지고, 끊긴 자리에 색이 열린 채로 남는다.
-pub fn wrap_spans(spans: &[Span], max: usize) -> Vec<Vec<Span>> {
+pub fn wrap_spans(spans: &[Span], max: usize, overflow: Overflow) -> Vec<Vec<Span>> {
     if max == 0 {
         return vec![Vec::new()];
     }
@@ -469,20 +482,34 @@ pub fn wrap_spans(spans: &[Span], max: usize) -> Vec<Vec<Span>> {
     let mut space: Option<usize> = None;
 
     // 코드는 한 덩이로 움직인다 — 이어지는 `Code` 글자를 한 단위로 묶어 잰다.
-    let mut units: Vec<Vec<(char, Role)>> = Vec::new();
-    for &(c, role) in &chars {
+    // 묶는 것은 **자리**뿐이다. 덩이마다 `Vec` 을 새로 잡으면 본문 한 벌에
+    // 글자 수만큼의 할당이 생긴다 — 묶이는 것은 코드뿐인데 값은 글자마다 낸다.
+    let mut units: Vec<std::ops::Range<usize>> = Vec::new();
+    for (n, &(_, role)) in chars.iter().enumerate() {
         match units.last_mut() {
-            Some(last) if role == Role::Code && last.last().is_some_and(|(_, r)| *r == Role::Code) => {
-                last.push((c, role))
-            }
-            _ => units.push(vec![(c, role)]),
+            Some(last) if role == Role::Code && chars[last.end - 1].1 == Role::Code => last.end = n + 1,
+            _ => units.push(n..n + 1),
         }
+    }
+    // 끊어도 되는 표면에서는 폭을 넘기는 덩이만 글자로 되돌린다. 폭에 드는 덩이는
+    // 그대로 둔다 — 안쪽 공백에서 끊기지 않는 것은 어느 표면에서나 같다.
+    if overflow == Overflow::Break {
+        units = units
+            .into_iter()
+            .flat_map(|u| {
+                if span_cols(&chars[u.clone()]) > max { (u.start..u.end).map(|n| n..n + 1).collect() } else { vec![u] }
+            })
+            .collect();
     }
 
     for unit in units {
         // 단위의 폭이다 — 코드는 덩이째, 나머지는 글자 하나.
-        let cw: usize = unit.iter().map(|(c, _)| crate::text::width(c.encode_utf8(&mut [0u8; 4]))).sum();
-        let (c, _) = unit[0];
+        let cw = span_cols(&chars[unit.clone()]);
+        let (c, role) = chars[unit.start];
+        // **코드 글자는 어느 표면에서도 잃지 않는다.** 끊는 표면에서 폭을 넘긴 덩이는
+        // 글자로 되돌아오지만, 그 글자 사이의 공백을 접는 자리로 삼으면 거기서 공백이
+        // 걷혀 명령의 낱말이 붙어 버린다 — 눈으로 읽을 수도 없는 줄이 된다.
+        let in_code = role == Role::Code;
         if w + cw > max && !line.is_empty() {
             match space {
                 Some(at) if at > 0 => {
@@ -492,7 +519,7 @@ pub fn wrap_spans(spans: &[Span], max: usize) -> Vec<Vec<Span>> {
                     }
                     trim_end(&mut line);
                     lines.push(std::mem::take(&mut line));
-                    w = rest.iter().map(|(c, _)| crate::text::width(c.encode_utf8(&mut [0u8; 4]))).sum();
+                    w = span_cols(&rest);
                     line = rest;
                 }
                 _ => {
@@ -502,12 +529,20 @@ pub fn wrap_spans(spans: &[Span], max: usize) -> Vec<Vec<Span>> {
             }
             space = None;
         }
-        // 코드 덩이가 통째로 움직이므로 여기 걸리는 공백은 코드 **앞**의 자리뿐이다.
-        // 코드 안의 공백은 단위 안에 있어 접는 자리가 되지 않는다.
-        if c == ' ' {
+        // **끊긴 자리의 공백은 새 줄의 머리가 되지 않는다.** 띄어쓴 자리에서 끊을
+        // 때는 위에서 `rest` 의 머리 공백을 걷지만, 끊을 자리가 없어 그냥 넘긴
+        // 줄(`_`)에서는 그 공백이 다음 줄 첫 글자로 남는다 — 폭을 넘는 코드 덩이가
+        // 지나간 뒤 늘 이 길을 탄다. 그대로 두면 다음 줄이 한 칸 밀리거나
+        // (`  가 온다.` 가 `   가 온다.` 로), 공백 하나뿐인 줄이 문단 가운데 선다.
+        if c == ' ' && !in_code && line.is_empty() && !lines.is_empty() {
+            continue;
+        }
+        // 코드 덩이가 통째로 움직이므로 여기 걸리는 공백은 코드 **앞**의 자리뿐이고,
+        // 글자로 되돌린 코드의 공백은 `in_code` 가 막는다.
+        if c == ' ' && !in_code {
             space = Some(line.len());
         }
-        line.extend(unit);
+        line.extend_from_slice(&chars[unit]);
         w += cw;
     }
     trim_end(&mut line);
@@ -519,6 +554,12 @@ pub fn wrap_spans(spans: &[Span], max: usize) -> Vec<Vec<Span>> {
     }
     // 이어지는 같은 뜻을 한 조각으로 되묶는다.
     lines.into_iter().map(regroup).collect()
+}
+
+/// 글자마다 달아 둔 뜻을 걷고 **표시 폭**만 센다. 한글 한 자가 두 칸이라
+/// 글자 수로 세면 접는 자리가 밀린다.
+fn span_cols(chars: &[(char, Role)]) -> usize {
+    chars.iter().map(|(c, _)| crate::text::width(c.encode_utf8(&mut [0u8; 4]))).sum()
 }
 
 fn trim_end(line: &mut Vec<(char, Role)>) {
@@ -568,18 +609,18 @@ pub fn span_width(spans: &[Span]) -> usize {
 
 /// 블록들을 폭에 맞춰 **줄**로 편다. 줄 하나는 조각의 열이고, 글머리·막대·
 /// 들여쓰기도 조각으로 들어간다. 빈 줄은 빈 열이다.
-pub fn layout(blocks: &[Block], width: usize) -> Vec<Vec<Span>> {
+pub fn layout(blocks: &[Block], width: usize, overflow: Overflow) -> Vec<Vec<Span>> {
     let mut out: Vec<Vec<Span>> = Vec::new();
     for (n, b) in blocks.iter().enumerate() {
         if n > 0 {
             out.push(Vec::new());
         }
-        lay_one(&mut out, b, width);
+        lay_one(&mut out, b, width, overflow);
     }
     out
 }
 
-fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize) {
+fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize, overflow: Overflow) {
     match b {
         Block::Heading { level, spans } => {
             // **`#` 를 남긴다.** 색을 끄면 `anstream` 이 굵게까지 걷어내므로,
@@ -601,13 +642,13 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize) {
                 .collect();
             // 이어지는 줄은 `#` 폭만큼 물려 쓴다.
             let hang = " ".repeat(crate::text::width(&hash));
-            flow(out, &spans, &hash, &hang, width);
+            flow(out, &spans, &hash, &hang, width, overflow);
         }
-        Block::Para(spans) => flow(out, &marked(spans), "", "", width),
+        Block::Para(spans) => flow(out, &marked(spans), "", "", width, overflow),
         Block::Quote { quote, spans } => {
             // 인용은 **색이 아니라 세로줄**로 말한다.
             let bar = bars((*quote).max(1));
-            flow(out, &marked(spans), &bar, &bar, width);
+            flow(out, &marked(spans), &bar, &bar, width, overflow);
         }
         Block::List { quote, items } => {
             let bar = bars(*quote);
@@ -620,7 +661,7 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize) {
                 // 이어지는 줄은 글머리 폭만큼 물려 쓴다 — 안 그러면 둘째 줄이
                 // 다음 항목처럼 보인다.
                 let hang = format!("{bar}{pad}{}", " ".repeat(crate::text::width(&bullet)));
-                flow(out, &marked(&it.spans), &format!("{bar}{pad}{bullet}"), &hang, width);
+                flow(out, &marked(&it.spans), &format!("{bar}{pad}{bullet}"), &hang, width, overflow);
             }
         }
         Block::Code { quote, lines, .. } => {
@@ -631,7 +672,7 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize) {
             }
         }
         Block::Rule => out.push(vec![mark("─".repeat(width.min(40)))]),
-        Block::Table { head, rows } => lay_table(out, head, rows, width),
+        Block::Table { head, rows } => lay_table(out, head, rows, width, overflow),
     }
 }
 
@@ -642,13 +683,13 @@ const THIN_GAP: &str = "│";
 
 /// 표를 포기하고 칸마다 한 줄로. **칸 사이가 칸보다 넓어지는 폭**에서는 어떤
 /// 줄맞춤도 뜻이 없다 — 그래도 글자는 잃지 않는다.
-fn lay_table_as_lines(out: &mut Vec<Vec<Span>>, head: &Row, rows: &[Row], width: usize) {
+fn lay_table_as_lines(out: &mut Vec<Vec<Span>>, head: &Row, rows: &[Row], width: usize, overflow: Overflow) {
     for (n, r) in std::iter::once(head).chain(rows).enumerate() {
         if n > 0 {
             out.push(vec![mark("─".repeat(width.min(8)))]);
         }
         for cell in r.iter().filter(|c| !c.is_empty()) {
-            flow(out, cell, "", "", width);
+            flow(out, cell, "", "", width, overflow);
         }
     }
 }
@@ -658,7 +699,7 @@ fn lay_table_as_lines(out: &mut Vec<Vec<Span>>, head: &Row, rows: &[Row], width:
 /// 좁아서 다 안 들어가면 **칸을 줄이되 버리지는 않는다.** 오른쪽 칸을 조용히
 /// 떨어뜨리면 보는 쪽은 그 칸이 애초에 없는 줄 안다. 줄인 자리에는 `…` 가
 /// 남아 잘렸다는 것이 보인다 — 목록의 긴 제목을 다루는 방식과 같다.
-fn lay_table(out: &mut Vec<Vec<Span>>, head: &[Cell], rows: &[Row], width: usize) {
+fn lay_table(out: &mut Vec<Vec<Span>>, head: &[Cell], rows: &[Row], width: usize, overflow: Overflow) {
     let cols = head.len().max(rows.iter().map(Vec::len).max().unwrap_or(0));
     if cols == 0 {
         return;
@@ -698,7 +739,7 @@ fn lay_table(out: &mut Vec<Vec<Span>>, head: &[Cell], rows: &[Row], width: usize
     // **칸 하나씩이라도 들어가야 표다.** 칸 사이만 견주면 1칸짜리 칸들이
     // 그 위로 더해져 그대로 넘친다.
     if cols + gaps > width {
-        lay_table_as_lines(out, &head, &rows, width);
+        lay_table_as_lines(out, &head, &rows, width, overflow);
         return;
     }
     let budget = width - gaps;
@@ -812,7 +853,7 @@ fn marked(spans: &[Span]) -> Vec<Span> {
         .collect()
 }
 
-fn flow(out: &mut Vec<Vec<Span>>, spans: &[Span], first: &str, hang: &str, width: usize) {
+fn flow(out: &mut Vec<Vec<Span>>, spans: &[Span], first: &str, hang: &str, width: usize, overflow: Overflow) {
     // 들여쓴 만큼을 뺀 몫이 글의 폭이다. **글 자리로 두 칸을 남긴다** — 한
     // 칸만 남기면 두 칸짜리 한글 한 자가 그 줄에서 넘치고, 넉넉히 여덟 칸을
     // 잡으면 좁은 패널에서 `들여쓰기 + 8` 이 폭을 넘어 위젯이 그 줄을 다시
@@ -830,7 +871,7 @@ fn flow(out: &mut Vec<Vec<Span>>, spans: &[Span], first: &str, hang: &str, width
     let hang = crate::text::clip(hang, room);
     let lead = crate::text::width(&first).max(crate::text::width(&hang));
     let budget = width.saturating_sub(lead).max(2);
-    for (n, line) in wrap_spans(spans, budget).into_iter().enumerate() {
+    for (n, line) in wrap_spans(spans, budget, overflow).into_iter().enumerate() {
         let lead: &str = if n == 0 { &first } else { &hang };
         let mut row = Vec::new();
         if !lead.is_empty() {
@@ -1005,7 +1046,7 @@ mod tests {
         ];
         for t in texts {
             for max in 4..40 {
-                for line in wrap_spans(&[plain(t)], max) {
+                for line in wrap_spans(&[plain(t)], max, Overflow::Keep) {
                     let w: usize =
                         line.iter().map(|s| crate::text::width(&s.text)).sum();
                     assert!(w <= max, "{t:?} @ {max} → {line:?} ({w}칸)");
@@ -1018,7 +1059,7 @@ mod tests {
     #[test]
     fn wrapping_keeps_the_roles() {
         let spans = vec![plain("앞 "), strong("아주 긴 굵은 글이 여기 이어진다"), plain(" 뒤")];
-        let lines = wrap_spans(&spans, 12);
+        let lines = wrap_spans(&spans, 12, Overflow::Keep);
         assert!(lines.len() > 1, "안 접혔다 — {lines:?}");
         // 굵은 글은 어느 줄에 걸리든 굵은 채로 남는다
         let bold: String = lines
@@ -1041,7 +1082,7 @@ mod tests {
         let flat = |spans: &[Span]| spans.iter().map(|s| s.text.as_str()).collect::<String>();
         let cmd = "moai note moai-4aex -b - <<'NOTE'";
         for max in [12, 20, 40, 76] {
-            let lines = wrap_spans(&[plain("보기: "), code(cmd), plain(" 처럼 적는다")], max);
+            let lines = wrap_spans(&[plain("보기: "), code(cmd), plain(" 처럼 적는다")], max, Overflow::Keep);
             let whole = lines.iter().any(|l| flat(l).contains(cmd));
             assert!(whole, "코드가 갈렸다 @ {max} — {:?}", lines.iter().map(|l| flat(l)).collect::<Vec<_>>());
             // 코드 조각의 글자는 하나도 잃지 않는다.
@@ -1049,19 +1090,60 @@ mod tests {
                 lines.iter().flatten().filter(|s| s.role == Role::Code).map(|s| s.text.as_str()).collect();
             assert_eq!(code_text, cmd, "코드 글자가 바뀌었다 @ {max}");
         }
+        // **끊는 표면에서도 코드 안의 공백은 접는 자리가 아니다.** 폭에 드는 코드는
+        // 통째로 서고, 폭을 넘긴 것만 글자에서 끊긴다 — 탐색기에는 소프트랩이 없어
+        // 안 끊으면 `fit` 이 꼬리를 `…` 로 잘라 화면에서 잃는다(moai-krh7).
+        let lines = wrap_spans(&[plain("보기: "), code(cmd), plain(" 처럼")], 20, Overflow::Break);
+        let drawn: Vec<String> = lines.iter().map(|l| flat(l)).collect();
+        assert!(!drawn.iter().any(|l| l.contains(cmd)), "폭을 넘겼는데 안 끊었다 — {drawn:?}");
+        for line in &lines {
+            let w: usize = line.iter().map(|s| crate::text::width(&s.text)).sum();
+            assert!(w <= 20, "끊는 표면인데 폭을 넘겼다 — {drawn:?} ({w}칸)");
+        }
+        let kept: String = lines.iter().flatten().filter(|s| s.role == Role::Code).map(|s| s.text.as_str()).collect();
+        assert_eq!(kept, cmd, "끊으면서 코드 글자를 잃었다 — {drawn:?}");
+        // 폭에 드는 코드는 끊는 표면에서도 한 덩이다.
+        let short = wrap_spans(&[plain("앞 "), code("moai mv x done"), plain(" 뒤")], 20, Overflow::Break);
+        assert!(short.iter().any(|l| flat(l).contains("moai mv x done")), "폭에 드는 코드를 끊었다 — {short:?}");
+
         // 코드 뒤의 산문은 여전히 접힌다 — 안 끊는 것은 코드뿐이다.
-        let lines = wrap_spans(&[code("ab"), plain(" 뒤에 오는 긴 산문이 여기 이어진다")], 12);
+        let lines = wrap_spans(&[code("ab"), plain(" 뒤에 오는 긴 산문이 여기 이어진다")], 12, Overflow::Keep);
         assert!(lines.len() > 1, "산문까지 안 접혔다 — {lines:?}");
+    }
+
+    /// **끊긴 자리의 공백은 다음 줄 머리에 남지 않는다.** 폭을 넘는 코드 덩이는 끊을
+    /// 자리 없이 그냥 넘어가는데(`_`), 그 뒤의 공백이 빈 줄에 얹히면 다음 줄이 한 칸
+    /// 밀려 문단의 왼쪽이 들쭉날쭉해지고, 코드 앞에서 그러면 공백 하나뿐인 줄이 문단
+    /// 가운데 서서 문단이 갈린 것처럼 읽힌다.
+    #[test]
+    fn a_break_does_not_leave_a_space_at_the_head_of_the_next_line() {
+        let flat = |spans: &[Span]| spans.iter().map(|s| s.text.as_str()).collect::<String>();
+        let long = "moai add \"aaa bbb ccc\" -t bug -e moai-4aex --milestone v0.1";
+        // 코드 **뒤**: 줄이 한 칸 밀리는 자리.
+        // 코드 **앞**: 산문이 폭을 꽉 채워 끊을 자리가 없는 자리.
+        let cases: [Vec<Span>; 2] = [
+            vec![plain("보기: "), code(long), plain(" 처럼 적는다")],
+            vec![plain(&"x".repeat(40)), plain(" "), code(long), plain(" 끝.")],
+        ];
+        for spans in cases {
+            for max in [20, 40] {
+                for line in wrap_spans(&spans, max, Overflow::Keep) {
+                    let text = flat(&line);
+                    assert!(!text.starts_with(' '), "줄이 공백으로 시작한다 @ {max} — {text:?}");
+                    assert!(!(text.trim().is_empty() && !text.is_empty()), "공백뿐인 줄 @ {max}");
+                }
+            }
+        }
     }
 
     /// 될 수 있으면 낱말 가운데서 안 끊는다.
     #[test]
     fn wrapping_prefers_spaces() {
         let flat = |spans: &[Span]| spans.iter().map(|s| s.text.as_str()).collect::<String>();
-        let lines = wrap_spans(&[plain("alpha beta")], 7);
+        let lines = wrap_spans(&[plain("alpha beta")], 7, Overflow::Keep);
         assert_eq!(lines.iter().map(|l| flat(l)).collect::<Vec<_>>(), ["alpha", "beta"]);
         // 낱말 하나가 폭보다 길면 그때는 글자에서 끊는다
-        let lines = wrap_spans(&[plain("alphabetagamma")], 6);
+        let lines = wrap_spans(&[plain("alphabetagamma")], 6, Overflow::Keep);
         assert_eq!(lines.iter().map(|l| flat(l)).collect::<Vec<_>>(), ["alphab", "etagam", "ma"]);
     }
 
@@ -1071,7 +1153,7 @@ mod tests {
     #[test]
     fn layout_is_what_both_surfaces_share() {
         let blocks = parse("**굵게**\n\n- 하나\n  - 속\n\n> 인용\n\n    코드\n");
-        let lines = layout(&blocks, 40);
+        let lines = layout(&blocks, 40, Overflow::Keep);
         let flat: Vec<String> =
             lines.iter().map(|l| l.iter().map(|s| s.text.as_str()).collect()).collect();
 
@@ -1090,7 +1172,7 @@ mod tests {
     #[test]
     fn wrapped_list_items_hang_under_their_bullet() {
         let blocks = parse("- 아주 길어서 반드시 접히고도 남을 한 줄이 여기 들어간다\n");
-        let flat: Vec<String> = layout(&blocks, 20)
+        let flat: Vec<String> = layout(&blocks, 20, Overflow::Keep)
             .iter()
             .map(|l| l.iter().map(|s| s.text.as_str()).collect())
             .collect();
@@ -1103,7 +1185,7 @@ mod tests {
     #[test]
     fn table_columns_line_up_by_display_width() {
         let blocks = parse("| 후보 | 판 |\n|---|---|\n| termimad | 0.35 |\n| 한글이름 | 1.0 |\n");
-        let lines: Vec<String> = layout(&blocks, 60)
+        let lines: Vec<String> = layout(&blocks, 60, Overflow::Keep)
             .iter()
             .map(|l| l.iter().map(|s| s.text.as_str()).collect())
             .collect();
@@ -1127,7 +1209,7 @@ mod tests {
         let blocks = parse(
             "| 후보 | 무엇 |\n|---|---|\n| termimad | 터미널용 마크다운 렌더러인데 설명이 아주 길다 |\n",
         );
-        let lines: Vec<String> = layout(&blocks, 28)
+        let lines: Vec<String> = layout(&blocks, 28, Overflow::Keep)
             .iter()
             .map(|l| l.iter().map(|s| s.text.as_str()).collect())
             .collect();
@@ -1150,7 +1232,7 @@ mod tests {
     #[test]
     fn a_heading_keeps_a_mark_that_survives_without_colour() {
         for src in ["# 큰 제목\n", "### 작은 제목\n"] {
-            let flat: String = layout(&parse(src), 40)
+            let flat: String = layout(&parse(src), 40, Overflow::Keep)
                 .iter()
                 .flat_map(|l| l.iter().map(|s| s.text.clone()))
                 .collect();
@@ -1162,7 +1244,7 @@ mod tests {
     /// 모듈 문서가 "주소는 따로 낸다" 고 적고 있으니 실제로 내야 한다.
     #[test]
     fn a_link_keeps_its_address() {
-        let flat: String = layout(&parse("근거는 [여기](https://example.com/a) 다\n"), 60)
+        let flat: String = layout(&parse("근거는 [여기](https://example.com/a) 다\n"), 60, Overflow::Keep)
             .iter()
             .flat_map(|l| l.iter().map(|s| s.text.clone()))
             .collect();
@@ -1176,7 +1258,7 @@ mod tests {
     fn a_table_never_exceeds_the_width_it_was_given() {
         let wide = "| a | b | c | d | e | f |\n|---|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 | 6 |\n";
         for max in 4..40 {
-            for line in layout(&parse(wide), max) {
+            for line in layout(&parse(wide), max, Overflow::Keep) {
                 let w: usize = line.iter().map(|s| crate::text::width(&s.text)).sum();
                 assert!(w <= max, "폭 {max} 에서 {w}칸 — {line:?}");
             }
@@ -1188,7 +1270,7 @@ mod tests {
     fn no_block_exceeds_the_width_it_was_given() {
         let src = "###### 깊은 제목\n\n- 하나\n  - 둘\n    - 셋이 길게 이어진다\n\n> 인용한 줄\n";
         for max in 4..40 {
-            for line in layout(&parse(src), max) {
+            for line in layout(&parse(src), max, Overflow::Keep) {
                 let w: usize = line.iter().map(|s| crate::text::width(&s.text)).sum();
                 assert!(w <= max, "폭 {max} 에서 {w}칸 — {line:?}");
             }
@@ -1210,7 +1292,7 @@ mod tests {
     }
 
     fn flat(src: &str, w: usize) -> Vec<String> {
-        layout(&parse(src), w)
+        layout(&parse(src), w, Overflow::Keep)
             .iter()
             .map(|l| l.iter().map(|s| s.text.as_str()).collect())
             .collect()
@@ -1372,7 +1454,7 @@ mod tests {
         ];
         for body in bodies {
             for w in 0..40 {
-                for line in layout(&parse(body), w) {
+                for line in layout(&parse(body), w, Overflow::Keep) {
                     // 글머리·들여쓰기는 줄지 않는다. 넘지 않아야 하는 것은
                     // **글의 몫**이고, 그 바닥은 두 칸(한글 한 자)이다.
                     let lead = line

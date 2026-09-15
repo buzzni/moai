@@ -1245,7 +1245,9 @@ pub fn body_lines(body: &str) -> Vec<String> {
     // **줄로 펴는 일은 `markdown` 이 한다.** 글머리·들여쓰기 같은 결정이
     // 표면마다 갈라지면 CLI 와 탐색기가 같은 본문을 다르게 그린다.
     // 여기가 할 일은 뜻을 색으로 옮기는 것뿐이다.
-    crate::markdown::layout(&blocks, BODY)
+    // 셸은 폭을 넘긴 줄을 화면에서만 접는다 — 긴 인라인 코드를 끊지 않아야
+    // 복사한 명령이 온전하다(moai-krh7).
+    crate::markdown::layout(&blocks, BODY, crate::markdown::Overflow::Keep)
         .iter()
         .map(|line| {
             // 빈 줄은 빈 줄이다. 들여쓰기를 얹으면 줄 끝에 뜻 없는 공백이
