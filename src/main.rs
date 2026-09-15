@@ -10,6 +10,7 @@ mod config;
 mod draft;
 mod fail;
 mod git;
+mod git_leaks;
 mod guide;
 mod hook;
 mod id;

@@ -68,6 +68,13 @@ impl Origin {
         self.from.get(id).map(|&k| self.trees[k].0.as_str())
     }
 
+    /// 줄을 보태 온 옆 워크트리의 뿌리들 — [`Origin::root`] 가 댈 수 있는 자리 전부. 탐색기가
+    /// 이 뿌리마다 커밋 표를 짓는다(moai-a4i0). 줄을 하나도 안 보탠 곳은 뺀다 — 찾을 id 가 없다.
+    pub fn roots(&self) -> Vec<&Path> {
+        let used: BTreeSet<usize> = self.from.values().copied().collect();
+        used.into_iter().map(|k| self.trees[k].1.as_path()).collect()
+    }
+
     /// 겹쳐 본 워크트리의 이름들 — 줄을 하나도 안 보탠 곳까지. 겹쳐 봤는데 옆이
     /// 조용한 것과 아예 안 겹쳐 본 것을 화면이 가를 수 있어야 한다.
     pub fn labels(&self) -> Vec<&str> {
@@ -332,7 +339,9 @@ pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, BTreeSet<Stri
 /// **HEAD 파일을 잰 뒤에 그 안을 읽어** 가지를 찾는다 — 그 사이에 HEAD 가 바뀌면 HEAD 표식이
 /// 이미 달라 다음 걸음이 다시 읽는다. 못 찾으면(git 밖, 가지를 파일로 두지 않는 저장소) 비어
 /// 있고 말하지 않는다 — 전처럼 스냅샷만 지켜본다.
-fn heads(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
+///
+/// 겹쳐 보지 않는 탐색기도 부른다 — 커밋 칸의 표(moai-a4i0)는 HEAD 가 움직여야 낡는다.
+pub fn heads(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
     // `--path-format=absolute` 는 git 2.31 부터고, 그 전 rev-parse 는 모르는 플래그를 **출력에
     // 그대로 되뱉고 성공한다** — 경로가 두 줄이 되어 표식이 영영 안 바뀐다. 상대 경로는 `-C`
     // 로 준 디렉터리에서 푼 것이라 `root` 에 붙인다(절대 경로면 `join` 이 그대로 둔다).
@@ -764,17 +773,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         let (main, feat) = (base.join("main"), base.join("feat"));
         std::fs::create_dir_all(&main).unwrap();
-        // 물려받은 `GIT_DIR` 이 남으면 여기서의 git 이 바깥 저장소를 건드린다(tests/cli.rs 의 `git` 과 같은 까닭).
         let run = |dir: &Path, args: &[&str]| {
-            let out = std::process::Command::new("git")
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
-                .args(args)
-                .current_dir(dir)
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE")
-                .output()
-                .unwrap();
+            let out = crate::git::isolated(dir).args(args).output().unwrap();
             assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         };
         run(&main, &["init", "-q"]);

@@ -1288,6 +1288,17 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
         out.push(Line::from(Span::styled("─".repeat(w.min(40)), dim())));
         out.extend(body_lines(body, w, app.raw));
     }
+    // **커밋은 CLI 상세와 같은 자리, 본문 뒤다**(moai-a4i0). 무엇을 그릴지는 `view::commit_lines`
+    // 가 정한다. 표는 다시 읽기 스레드가 지어 온 것이라 여기서 git 을 부르지 않는다.
+    let drawn = crate::view::commit_lines(app.commits_of(&i.id));
+    if !drawn.is_empty() {
+        out.push(Line::from(""));
+        out.push(Line::from(Span::styled("커밋", bold())));
+        for (short, subject) in drawn {
+            // 제목은 폭에서 잘린다(`fit`) — 한 커밋이 한 줄이어야 해시와 제목이 짝으로 읽힌다.
+            out.push(Line::from(vec![Span::styled(short.to_string(), dim()), Span::raw("  "), Span::raw(subject)]));
+        }
+    }
     out
 }
 
@@ -2423,6 +2434,36 @@ pub(super) mod tests {
         let lines = render(&mut a, 100, 20).join("\n");
         assert!(lines.contains("막힘"), "{lines}");
         assert!(lines.contains("아주 긴"), "막는 것의 제목이 없다\n{lines}");
+    }
+
+    /// **상세가 그 줄에 닿은 커밋을 그린다**(moai-a4i0) — CLI 상세와 같은 자로: 트래커 커밋은
+    /// 빼고, 해시는 일곱 자, 제목의 제어문자는 걷는다. 표가 없는 줄은 칸도 없다.
+    #[test]
+    fn detail_draws_the_commits_that_name_the_line() {
+        let mut a = every(issues());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let id = a.current().and_then(|r| match r {
+            Row::Item(e) => e.at().map(|at| a.issues[at].id.clone()),
+            _ => None,
+        });
+        let id = id.expect("에픽 안의 첫 줄이 이슈가 아니다");
+        let root = std::path::PathBuf::from("/moai-a4i0-없는-뿌리");
+        a.repo = Some(crate::store::Repo { root: root.clone(), config: a.cfg.clone() });
+        let commit = |hash: &str, subject: &str, tracker| crate::git::Commit { hash: hash.into(), subject: subject.into(), tracker };
+        let lines = render(&mut a, 100, 30).join("\n");
+        assert!(!lines.contains("커밋"), "표가 없는데 커밋 칸이 섰다\n{lines}");
+
+        a.commits.insert(
+            root,
+            [(id.clone(), vec![
+                commit("aaaaaaa1111", &format!("chore(tracker): {id} 를 닫는다"), true),
+                commit("bbbbbbb2222", &format!("feat: 고친다\u{1b}[2J ({id})"), false),
+            ])]
+            .into(),
+        );
+        let lines = render(&mut a, 100, 30).join("\n");
+        assert!(lines.contains("커밋") && lines.contains(&format!("bbbbbbb  feat: 고친다[2J ({id})")), "{lines}");
+        assert!(!lines.contains("aaaaaaa") && !lines.contains("bbbbbbb2"), "트래커 커밋을 그렸거나 해시를 안 줄였다\n{lines}");
     }
 
     /// 본문에 든 ESC 가 화면을 다시 칠하지 못한다.

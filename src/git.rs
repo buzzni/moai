@@ -7,6 +7,7 @@
 //! 그때그때 읽는다 — 이슈를 닫는 트래커 커밋은 제 해시를 미리 알 수 없고, 적어 둔
 //! 해시는 squash·rebase 한 번에 낡는다. id 로 다시 찾으면 둘 다 없다.
 
+use crate::git_leaks::LEAKS;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -20,12 +21,61 @@ pub enum Error {
 }
 
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 받는다.
+///
+/// **물려받은 환경은 릴리스에서 걷지 않는다** — 걷는 것은 시험 빌드뿐이다([`command`], moai-g1a3).
+/// 그래서 git 훅이나 딸린 워크트리의 `rebase -x` 가 내보낸 `GIT_DIR` 은 `-C root` 를 이긴다. `root` 가 그
+/// 훅이 도는 워크트리의 꼭대기면 같은 저장소라 답이 같지만, 옆 워크트리·다른 저장소·하위 디렉터리의
+/// 트래커를 가리키면 엉뚱한 가지·저장소·꼭대기를 읽는다(리뷰 moai-v9ai.q6f 가 짚었다).
+///
+/// **출력은 UTF-8 로 달라고 한다.** 표준 출력 전체를 UTF-8 로 읽으므로, `i18n.logOutputEncoding` 을
+/// cp949 같은 것으로 둔 사람에게는 한글 제목 한 줄이 [`Error::NotUtf8`] 이 되어 — ASCII 제목까지 같이 —
+/// `show` 의 커밋 칸이 통째로 말없이 빈다.
 pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
-    let out = std::process::Command::new("git").arg("-C").arg(root).args(args).output().map_err(Error::Spawn)?;
+    let out = command()
+        .arg("-C")
+        .arg(root)
+        .args(["-c", "i18n.logOutputEncoding=UTF-8"])
+        .args(args)
+        .output()
+        .map_err(Error::Spawn)?;
     if !out.status.success() {
         return Err(Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()));
     }
     String::from_utf8(out.stdout).map_err(Error::NotUtf8)
+}
+
+/// git 을 띄울 명령 — **시험의 git 은 모두 여기서 시작한다.** 시험 빌드만 [`LEAKS`] 를 걷는다.
+///
+/// [`run`] 과 임시 저장소를 만드는 도우미(`isolated`)가 따로 걷으면 걷는 목록이 갈라진다. 한때
+/// 도우미는 셋만 걷고 `run` 은 열을 걷어, pre-receive 훅 안에서는 도우미가 바깥 객체 저장소에 쓰고
+/// `run` 은 임시 저장소를 읽었다(moai-g1a3). `#[cfg(test)]` 가 아니라 `cfg!(test)` 인 것은 릴리스
+/// 빌드에서도 이 코드가 타입 검사를 받게 하려는 것이다.
+pub fn command() -> std::process::Command {
+    let mut cmd = std::process::Command::new("git");
+    if cfg!(test) {
+        for var in LEAKS {
+            cmd.env_remove(var);
+        }
+    }
+    cmd
+}
+
+/// 시험이 임시 저장소를 만들 때 쓰는 git — `dir` 에서 돌고, 커밋할 이름과 기본 가지를 준다.
+///
+/// **돌리는 사람의 git 설정도 안 읽는다**(tests/cli.rs 의 `isolated` 와 같은 자). 전역
+/// `commit.gpgsign` 이면 임시 저장소의 커밋이 서명을 못 해 멈추고, 전역 `core.hooksPath` 면 그 사람의
+/// 훅이 `-m a` 같은 커밋 제목을 막는다.
+///
+/// 걷기는 여기서 끝난다 — 시험이 제 값을 줄 것은 이 뒤에 `.env` 로 덮는다.
+#[cfg(test)]
+pub fn isolated(dir: &Path) -> std::process::Command {
+    let mut cmd = command();
+    cmd.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    cmd
 }
 
 /// 이슈 제목에 id 가 적힌 커밋 하나. `moai show --json` 의 `commits` 가 이 모양 그대로다.
@@ -39,7 +89,7 @@ pub struct Commit {
 }
 
 /// 트래커 커밋의 머리. `moai init` 이 쓰는 안내(`guide`)가 이 머리를 가르친다.
-const TRACKER: &str = "chore(tracker)";
+pub const TRACKER: &str = "chore(tracker)";
 
 /// 레코드와 필드를 가르는 글자. 커밋 제목에는 제어 문자가 들지 않는다.
 const RS: char = '\u{1e}';
@@ -90,8 +140,7 @@ const SKEW: i64 = 86_400;
 /// `git log` 이 낸 레코드를 id 별로 가른다. git 을 부르지 않는 순수한 반쪽이다.
 pub fn split(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
     let mut out: BTreeMap<String, Vec<Commit>> = BTreeMap::new();
-    for record in log.split(RS) {
-        let Some((hash, subject)) = record.trim_start_matches('\n').split_once(FS) else { continue };
+    for (hash, subject) in records(log) {
         for id in ids {
             if names(subject, id) {
                 out.entry((*id).to_string()).or_default().push(Commit {
@@ -105,25 +154,55 @@ pub fn split(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
     out
 }
 
-/// `text` 가 `id` 를 **그 id 로** 적었는가.
-///
-/// 앞뒤가 id 의 일부로 이어지면 다른 id 다. `moai-rvcb` 는 자식 `moai-rvcb.7u5` 도,
-/// 가지 이름 `worktree-moai-rvcb` 도 아니다 — 앞은 그래서 `-`·`.` 까지 막는다. 뒤의
-/// `.` 은 자식으로 이어질 때만 막는다: 문장 끝 `(moai-rvcb).` 는 그 id 다.
+/// `text` 가 `id` 를 **그 id 로** 적었는가 — [`ids_in`] 이 뽑는 낱말 하나가 곧 그 id 일 때.
 fn names(text: &str, id: &str) -> bool {
-    let joins = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
-    text.match_indices(id).any(|(at, _)| {
-        let before = text[..at].chars().next_back();
-        let mut after = text[at + id.len()..].chars();
-        let next = after.next();
-        let free_before = before.is_none_or(|c| !(joins(c) || c == '.'));
-        let free_after = match next {
-            None => true,
-            Some('.') => after.next().is_none_or(|c| !c.is_ascii_alphanumeric()),
-            Some(c) => !joins(c),
-        };
-        free_before && free_after
-    })
+    ids_in(text).any(|t| t == id)
+}
+
+/// 글에 적힌 id 모양의 낱말들. **id 를 가르는 자는 이것 하나다** — `show` 가 id 하나를 찾을
+/// 때([`split`])도, 탐색기가 이력 전부를 한 번에 가를 때([`table`])도 이 자로 가른다.
+///
+/// 낱말은 id 에 드는 글자(영숫자·`_`·`-`·`.`)가 이어진 한 덩어리고, 끝의 `.` 은 문장 부호로
+/// 떼어 낸다. 그래서 앞뒤가 id 의 일부로 이어지면 다른 낱말이다 — `moai-rvcb` 는 자식
+/// `moai-rvcb.7u5` 도, 가지 이름 `worktree-moai-rvcb` 도 아니고, 문장 끝 `(moai-rvcb).` 는
+/// 그 id 다. 한글 조사가 붙어도(`moai-rvcb를`) 그 id 다.
+pub fn ids_in(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')))
+        .map(|t| t.trim_end_matches('.'))
+        .filter(|t| crate::id::is_valid(t))
+}
+
+/// 지금 가지(`HEAD`)의 이력 **전부**를 한 번 걸어 제목에 적힌 id → 커밋 표를 짓는다. 새것이 먼저다.
+///
+/// 탐색기가 쓴다(moai-a4i0). 커서를 옮길 때마다 [`commits_of`] 를 부르면 걸음마다 git 이
+/// 뜨고 그리는 루프가 그만큼 멈칫한다 — 표는 다시 읽기 스레드에서 한 번 짓고 상세는 찾기만
+/// 한다. 전부 걸으므로 `commits_of` 의 생성일 상한이 가리는 모서리(moai-g8cd)도 여기서는 없다.
+/// 표에는 없는 id 의 낱말도 드는데, 찾는 쪽이 있는 id 로만 찾으므로 해가 없다.
+pub fn table(root: &Path) -> Result<BTreeMap<String, Vec<Commit>>, Error> {
+    let format = format!("--format=%H{FS}%s{RS}");
+    let log = run(root, &["log", "--no-show-signature", format.as_str(), "HEAD"])?;
+    let mut out: BTreeMap<String, Vec<Commit>> = BTreeMap::new();
+    for (hash, subject) in records(&log) {
+        let mut seen: Vec<&str> = Vec::new();
+        for id in ids_in(subject) {
+            // 한 제목에 같은 id 를 두 번 적어도 커밋은 한 번이다.
+            if seen.contains(&id) {
+                continue;
+            }
+            seen.push(id);
+            out.entry(id.to_string()).or_default().push(Commit {
+                hash: hash.to_string(),
+                subject: subject.to_string(),
+                tracker: subject.starts_with(TRACKER),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// `git log` 이 낸 레코드를 (해시, 제목) 으로.
+fn records(log: &str) -> impl Iterator<Item = (&str, &str)> {
+    log.split(RS).filter_map(|record| record.trim_start_matches('\n').split_once(FS))
 }
 
 #[cfg(test)]
@@ -166,23 +245,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("moai-git-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        // 물려받은 `GIT_DIR` 이 남으면 여기서의 git 이 바깥 저장소를 건드린다(tests/cli.rs 의 `git` 과 같은 까닭).
         let git = |args: &[&str]| {
-            let out = std::process::Command::new("git")
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
-                .args(args)
-                .current_dir(&dir)
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE")
-                .output()
-                .unwrap();
+            let out = isolated(&dir).args(args).output().unwrap();
             assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         };
         git(&["init", "-q"]);
         git(&["commit", "-q", "--allow-empty", "-m", "feat: 고친다 (moai-aaaa)"]);
         git(&["commit", "-q", "--allow-empty", "-m", "chore: 딴 일\n\nmoai-aaaa 를 곁에 봤다"]);
         git(&["commit", "-q", "--allow-empty", "-m", "fix: 리뷰 (moai-aaaa.b1c)"]);
+        // 로그를 딴 인코딩으로 달라는 사람의 설정이 있어도 제목을 읽는다 — `run` 이 UTF-8 로 달라고 한다.
+        git(&["config", "i18n.logOutputEncoding", "EUC-KR"]);
 
         let got = commits_of(&dir, &["moai-aaaa", "moai-aaaa.b1c"], None).unwrap();
         let subjects = |id: &str| got[id].iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
@@ -192,20 +264,79 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **git 훅 안에서 돌아도 시험의 git 은 제 임시 저장소만 본다**(moai-g1a3).
+    ///
+    /// 물려받은 환경을 바꿔 보려면 시험을 한 겹 더 띄워야 한다 — 병렬로 도는 시험 안에서 환경을
+    /// 바꾸면 남의 시험까지 바뀐다(tests/cli.rs 의 `tests_do_not_read_the_runners_home` 과 같은 까닭).
+    /// 그래서 훅이 실제로 내보내는 것을 심은 채 이 바이너리를 다시 불러 git 을 부르는 시험들만 돌린다.
+    ///
+    /// **심는 값은 [`LEAKS`] 가 아니라 git 이 훅에 내보낸 모양이다** — 목록에서 한 이름이 빠지면 여기서
+    /// 드러나야 하므로, 목록을 그대로 심으면 아무것도 못 잰다. 걷기가 빠지면 도우미의 커밋이 격리
+    /// 경로(`GIT_QUARANTINE_PATH`)나 바깥 설정의 서명(`GIT_CONFIG_PARAMETERS`)에 막혀 안쪽이 깨진다.
+    /// 가리키는 곳은 이 시험의 임시 디렉터리라, 걷기가 빠져도 바깥 저장소는 안 건드린다.
+    #[test]
+    fn git_tests_see_their_own_repos_inside_a_hook() {
+        let dir = std::env::temp_dir().join(format!("moai-git-hook-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let outer = dir.join("outer.git");
+        let incoming = outer.join("objects/tmp_objdir-incoming");
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            // 이 시험 자신은 뺀다 — 안 그러면 제가 저를 다시 부른다.
+            .args(["git::tests::", "worktree::tests::", "--skip", "git_tests_see_their_own_repos_inside_a_hook"])
+            .env("GIT_DIR", &outer)
+            .env("GIT_INDEX_FILE", outer.join("index"))
+            .env("GIT_OBJECT_DIRECTORY", &incoming)
+            .env("GIT_ALTERNATE_OBJECT_DIRECTORIES", outer.join("objects"))
+            .env("GIT_QUARANTINE_PATH", &incoming)
+            .env("GIT_CONFIG_PARAMETERS", "'commit.gpgsign=true' 'gpg.program=false'")
+            .output()
+            .unwrap();
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(out.status.success(), "훅의 환경에서 git 을 부르는 시험이 깨졌다\n{said}");
+        // 안쪽이 아무것도 안 돌고 초록으로 끝나면 이 시험은 아무것도 안 본 것이다.
+        for ran in ["a_real_log_matches_subjects_not_bodies", "a_moved_head_in_any_worktree_changes_a_watched_stamp"] {
+            assert!(said.contains(&format!("{ran} ... ok")), "안쪽에서 {ran} 가 돌지 않았다\n{said}");
+        }
+    }
+
+    /// **git 은 [`command`] 에서만 띄운다.** 도우미가 따로 띄우면 시험 빌드의 걷기를 못 받아, 훅 안에서
+    /// 그 도우미만 바깥 저장소를 본다 — 0a7b828 이 `run` 만 고쳤을 때 임시 저장소를 만드는 도우미 셋이
+    /// 그렇게 남아 90a0be9 가 셋을 따로 고쳐야 했다. 새 도우미가 또 그러지 않게 소스를 읽어 이름을 댄다.
+    #[test]
+    fn git_is_spawned_only_through_command() {
+        let needle = concat!("Command::new(", "\"git\")");
+        let mut found = Vec::new();
+        let mut dirs = vec![std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().filter_map(Result::ok) {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    for (n, line) in text.lines().enumerate() {
+                        if line.contains(needle) {
+                            found.push(format!("{}:{}", path.display(), n + 1));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(found.len() == 1 && found[0].contains("git.rs:"), "git 을 `git::command` 밖에서 띄운다 — {found:#?}");
+    }
+
     /// 이슈가 생기기 전의 커밋은 걷지 않는다 — 단, 시계가 늦은 기계의 커밋은 하루까지 받는다.
     #[test]
     fn walking_stops_before_the_issue_was_born_but_forgives_a_slow_clock() {
         let dir = std::env::temp_dir().join(format!("moai-git-since-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        // 시계는 걷기 **뒤에** 덮는다 — 순서가 뒤집히면 걷기가 이 시험의 고정 시계를 지운다.
         let git = |at: &str, args: &[&str]| {
-            let out = std::process::Command::new("git")
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+            let out = isolated(&dir)
                 .args(args)
-                .current_dir(&dir)
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE")
                 .env("GIT_AUTHOR_DATE", at)
                 .env("GIT_COMMITTER_DATE", at)
                 .output()
@@ -223,6 +354,49 @@ mod tests {
         let subjects: Vec<&str> = got["moai-aaaa"].iter().map(|c| c.subject.as_str()).collect();
         assert_eq!(subjects, ["고친다 (moai-aaaa)", "시계 늦은 기계 (moai-aaaa)"]);
         assert_eq!(commits_of(&dir, &["moai-aaaa"], None).unwrap()["moai-aaaa"].len(), 3, "상한 없이는 다 걷는다");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ids_in_splits_words_the_way_names_reads_them() {
+        let got: Vec<&str> = ids_in("fix: 리뷰 (moai-aaaa.b1c, moai-bbbb). worktree-moai-cccc 에서 moai-dddd를 봤다").collect();
+        assert_eq!(got, ["moai-aaaa.b1c", "moai-bbbb", "worktree-moai-cccc", "moai-dddd"]);
+        assert_eq!(ids_in("chore(tracker): 없음 v1.2 a-b").count(), 0, "id 모양이 아닌 낱말을 id 로 읽었다");
+    }
+
+    /// 탐색기의 표는 [`commits_of`] 와 **같은 답**을 낸다 — 같은 자로 가르고, 새것이 먼저고,
+    /// 트래커 커밋은 표시만 한다. 날짜가 거꾸로 선 커밋 밑의 커밋도 놓치지 않는다(moai-g8cd).
+    #[test]
+    fn the_table_answers_as_commits_of_without_the_date_cut() {
+        let dir = std::env::temp_dir().join(format!("moai-git-table-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // 시계는 걷기 **뒤에** 덮는다 — 순서가 뒤집히면 걷기가 이 시험의 고정 시계를 지운다.
+        let git = |at: &str, args: &[&str]| {
+            let out = isolated(&dir)
+                .args(args)
+                .env("GIT_AUTHOR_DATE", at)
+                .env("GIT_COMMITTER_DATE", at)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        git("2026-01-03T09:00:00Z", &["init", "-q"]);
+        git("2026-01-03T09:00:00Z", &["commit", "-q", "--allow-empty", "-m", "feat: 고친다 (moai-aaaa)"]);
+        git("2026-01-03T10:00:00Z", &["commit", "-q", "--allow-empty", "-m", "fix: 리뷰 (moai-aaaa.b1c) moai-aaaa.b1c"]);
+        // rebase 로 옛 작성 시각이 커밋 시각이 된 커밋 — `--since` 는 여기서 걷기를 끊는다.
+        git("2025-12-01T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", "chore(tracker): moai-aaaa 를 닫는다"]);
+
+        let table = table(&dir).unwrap();
+        let born = crate::model::parse_rfc3339("2026-01-03T00:00:00Z");
+        let subjects = |c: &[Commit]| c.iter().map(|c| (c.subject.clone(), c.tracker)).collect::<Vec<_>>();
+        assert_eq!(
+            subjects(&table["moai-aaaa"]),
+            [("chore(tracker): moai-aaaa 를 닫는다".to_string(), true), ("feat: 고친다 (moai-aaaa)".to_string(), false)]
+        );
+        assert_eq!(table["moai-aaaa.b1c"].len(), 1, "한 제목에 두 번 적은 id 를 두 커밋으로 셌다");
+        assert!(commits_of(&dir, &["moai-aaaa"], born).unwrap().is_empty(), "이 시험이 흉내 낸 모서리가 사라졌다");
+        assert_eq!(subjects(&table["moai-aaaa"]), subjects(&commits_of(&dir, &["moai-aaaa"], None).unwrap()["moai-aaaa"]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

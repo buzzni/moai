@@ -55,6 +55,10 @@ impl Drop for Scratch {
 ///   `MOAI_ACTOR` 를 내보내거나 `cd` 하면 아래 `.env` 로 준 값과 자리를 bash 안에서 덮는다.
 ///   `ENV`·`SHELLOPTS`·`POSIXLY_CORRECT` 는 걷지 않는다 — 비대화형 bash 는 그것들로
 ///   시작 파일을 읽지 않는다(재 봤다). 걷는 목록은 **재 본 것만** 늘린다
+/// - `COLUMNS` — clap 이 도움말을 접을 때 읽는 폭. 지금은 접기를 꺼 안 읽지만(moai-opjn),
+///   그것이 돌아오는 날을 지키는 `narrow_terminals_keep_heredoc_openers_whole` 는 폭 하나만
+///   바꿔 기준과 견준다. 기준이 돌리는 사람의 창 폭을 물려받으면 좁은 셸에서는 훑기가 접힌
+///   `Commands:` 줄을 명령 이름으로 읽어, 접힘을 대는 대신 엉뚱한 이름으로 넘어진다
 ///
 /// 시험이 제 값을 주려면 이 뒤에 `.env` 로 덮는다. `PATH` 는 두고 간다 — moai 가
 /// git 을 부르고, `claude` 가 없는 자리가 필요한 시험은 `Claude` 가 따로 만든다.
@@ -72,6 +76,7 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env_remove("MOAI_ACTOR")
         .env_remove("MOAI_NOW")
+        .env_remove("COLUMNS")
         // 사용자 설정은 **없는 파일**을 가리킨다. 등록한 프로젝트가 새면 `.moai`
         // 밖에서 부르는 시험이 돌리는 사람의 프로젝트를 본다. `XDG_CONFIG_HOME` 도
         // 걷는다 — `MOAI_CONFIG` 를 덮어쓴 시험이 그것을 지우면 그다음 자리다.
@@ -84,19 +89,11 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
     cmd
 }
 
-/// 물려받으면 git 이 바깥 저장소나 바깥 설정을 보게 되는 변수들.
-const GIT_LEAKS: &[&str] = &[
-    "GIT_CONFIG_COUNT",
-    "GIT_CONFIG_PARAMETERS",
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_COMMON_DIR",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_NAMESPACE",
-    "GIT_PREFIX",
-];
+// 물려받으면 git 이 바깥 저장소나 바깥 설정을 보게 되는 변수들 — 단위 시험(`git::command`)과 **한 파일**을
+// 읽는다. 따로 된 크레이트라 `use` 로는 못 가져가고, 두 벌로 두면 한쪽에만 더한 변수가 말없이 갈라진다.
+#[path = "../src/git_leaks.rs"]
+mod git_leaks;
+use git_leaks::LEAKS as GIT_LEAKS;
 
 fn moai(dir: &Path, args: &[&str]) -> Output {
     isolated(BIN)
@@ -3263,6 +3260,58 @@ fn every_help_heredoc_is_copyable() {
     }
     assert!(seen >= 4, "도움말에서 heredoc 을 {seen}개밖에 못 찾았다");
     assert!(bad.is_empty(), "복사해 못 도는 heredoc:\n{}", bad.join("\n"));
+}
+
+/// **좁은 터미널에서도 heredoc 여는 줄이 접히지 않는다** (moai-opjn).
+///
+/// clap 의 `wrap_help` 는 도움말을 터미널 폭에 맞춰 낱말 사이에 **실제 개행**을 넣어
+/// 접는다. 여는 줄이 두 줄로 갈리면 복사한 명령은 heredoc 없이 돈다 — `-b -` 는 본문 대신
+/// 터미널을 기다리고, 다음 줄로 밀린 `<<'NOTE'` 는 명령 없는 heredoc 이 되어 본문을
+/// 삼킨다. 그래서 `wrap_help` 를 뺐다 — 뺀 채로는 clap 이 `COLUMNS` 를 안 읽어 이 시험은
+/// 폭과 무관하게 초록이다. **지키는 것은 누가 그 기능을 다시 켜는 날이다.** 켜지면 시험에
+/// 터미널이 없어 clap 이 `COLUMNS` 로 폭을 정하고, 좁힌 폭에서 도움말이 달라져 붉어진다.
+///
+/// **여는 줄만 보지 않고 도움말을 통째로 견준다.** 예시 명령도 같은 까닭으로 복사해 돌아야
+/// 하고, 여는 줄만 보면 잡는 힘이 예시 줄이 우연히 몇 칸인지에 매인다 — clap 은 폭에 드는
+/// 줄을 가르지 않아서, `30`·`45` 로 보던 때는 26칸짜리 `moai add --from - <<'PLAN'` 을 어느
+/// 폭에서도 못 갈랐다(moai-opjn.l0i). 폭은 가장 짧은 여는 줄보다 좁게 둔다.
+#[test]
+fn narrow_terminals_keep_heredoc_openers_whole() {
+    const NARROW: usize = 20;
+    let s = init("helpnarrow");
+    let mut openers = 0;
+    let mut bad = Vec::new();
+    for (path, full) in every_help(&s) {
+        openers += full.lines().filter(|l| heredoc_tag(l).is_some()).count();
+        let narrow = help_at(&s, &path, NARROW);
+        if narrow != full {
+            let split: Vec<&str> = full.lines().filter(|l| !narrow.lines().any(|n| n == *l)).collect();
+            // 도움말마다 한 줄 — 여는 줄이 갈렸으면 그것을, 아니면 처음 갈린 줄을 댄다.
+            let shown = split.iter().find(|l| heredoc_tag(l).is_some()).or(split.first());
+            let shown = shown.copied().unwrap_or("(갈린 줄은 없고 무언가 더 붙었다)");
+            bad.push(format!("COLUMNS={NARROW} moai {path} --help: {}줄 갈림 — {shown}", split.len()));
+        }
+    }
+    assert!(openers >= 4, "heredoc 여는 줄을 {openers}개밖에 못 봤다");
+    assert!(bad.is_empty(), "좁은 터미널에서 접힌 도움말:\n{}", bad.join("\n"));
+}
+
+/// `COLUMNS` 를 준 채 부른 `moai <path> --help`. 견줄 기준이 `every_help`(`ok`)라서 폭 말고는
+/// `moai` 와 같은 환경으로 부른다 — 다른 것이 섞이면 달라진 까닭이 폭이 아닐 수 있다.
+fn help_at(s: &Scratch, path: &str, columns: usize) -> String {
+    let mut args: Vec<&str> = path.split_whitespace().collect();
+    args.push("--help");
+    let out = isolated(BIN)
+        .args(&args)
+        .current_dir(s.path())
+        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", columns.to_string())
+        .output()
+        .expect("moai 를 실행하지 못했다");
+    assert!(out.status.success(), "COLUMNS={columns} moai {args:?} 가 실패했다\n{}", text(&out));
+    String::from_utf8(out.stdout).unwrap()
 }
 
 /// 복사해 못 도는 heredoc 마다 한 줄.
