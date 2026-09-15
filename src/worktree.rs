@@ -405,6 +405,9 @@ struct Disk {
     rel: PathBuf,
     /// (워크트리, 딸린 워크트리인가, 제 워크트리인가).
     all: Vec<(Tree, bool, bool)>,
+    /// 딸린 워크트리의 꼭대기 → 뜬 시각(RFC3339). git 이 `worktree add` 때 한 번 적고 안 고치는
+    /// `worktrees/<이름>/commondir` 의 고친 때다. 못 읽으면 없다.
+    born: BTreeMap<PathBuf, String>,
 }
 
 impl Disk {
@@ -432,27 +435,32 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
         if *me || !*linked {
             continue;
         }
-        out.extend(holds(&disk, tree, mine, cfg));
+        let (open, later) = holds(&disk, tree, mine, cfg);
+        out.extend(open);
+        out.extend(later);
     }
     (out, own)
 }
 
-/// 딸린 워크트리 하나의 스냅샷이 쥔 줄 — [`held_elsewhere`] 의 한 워크트리 몫. 못 읽으면 비어 있다.
-fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) -> BTreeSet<String> {
-    let mut out = BTreeSet::new();
+/// 딸린 워크트리 하나의 스냅샷이 쥔 줄 — [`held_elsewhere`] 의 한 워크트리 몫. (벌여 놓인 줄,
+/// 여기보다 늦게 만진 줄). 앞의 것에는 갈라질 때 물려받은 줄도 들고, 뒤의 것은 그 워크트리가
+/// 실제로 만진 흔적이다 — [`workplaces`] 가 둘을 따로 싣는다. 못 읽으면 비어 있다.
+fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) -> (BTreeSet<String>, BTreeSet<String>) {
     let path = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
-    let Ok(Some(side)) = crate::store::read_snapshot(&path) else { return out };
+    let Ok(Some(side)) = crate::store::read_snapshot(&path) else { return Default::default() };
     let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
-    out.extend(crate::report::wip(&side.issues, cfg).into_iter().map(|i| i.id.clone()));
-    for i in &side.issues {
-        let later = by_id
-            .get(i.id.as_str())
-            .is_some_and(|m| (i.planned(), i.updated_at.as_str()) > (m.planned(), m.updated_at.as_str()));
-        if later {
-            out.insert(i.id.clone());
-        }
-    }
-    out
+    let open = crate::report::wip(&side.issues, cfg).into_iter().map(|i| i.id.clone()).collect();
+    let later = side
+        .issues
+        .iter()
+        .filter(|i| {
+            by_id
+                .get(i.id.as_str())
+                .is_some_and(|m| (i.planned(), i.updated_at.as_str()) > (m.planned(), m.updated_at.as_str()))
+        })
+        .map(|i| i.id.clone())
+        .collect();
+    (open, later)
 }
 
 /// 살아 있는 **딸린** 워크트리마다 자리 하나(moai-ir8q) — 판정은 `report::places`·`report::stranded`.
@@ -465,11 +473,16 @@ pub fn workplaces(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> V
     disk.all
         .iter()
         .filter(|(_, linked, _)| *linked)
-        .map(|(tree, _, me)| crate::report::Workplace {
-            path: tree.path.clone(),
-            branch: tree.label.clone(),
-            names: names([tree]),
-            holds: if *me { BTreeSet::new() } else { holds(&disk, tree, mine, cfg) },
+        .map(|(tree, _, me)| {
+            let (holds, touched) = if *me { Default::default() } else { holds(&disk, tree, mine, cfg) };
+            crate::report::Workplace {
+                path: tree.path.clone(),
+                branch: tree.label.clone(),
+                names: names([tree]),
+                holds,
+                touched,
+                born: disk.born.get(&tree.path).cloned(),
+            }
         })
         .collect()
 }
@@ -495,6 +508,7 @@ fn on_disk(root: &Path) -> Option<Disk> {
         })
     };
     let mut all = Vec::new();
+    let mut born = BTreeMap::new();
     if common.file_name().is_some_and(|n| n == ".git")
         && let (Some(path), Some(label)) = (common.parent(), label(&common.join("HEAD")))
     {
@@ -513,6 +527,14 @@ fn on_disk(root: &Path) -> Option<Disk> {
                 continue;
             };
             let Some(label) = label(&dir.join("HEAD")) else { continue };
+            let made = std::fs::metadata(dir.join("commondir"))
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| crate::model::format_rfc3339(d.as_secs() as i64));
+            if let Some(made) = made {
+                born.insert(path.clone(), made);
+            }
             all.push((Tree { path, label, head: String::new() }, true));
         }
     }
@@ -525,7 +547,7 @@ fn on_disk(root: &Path) -> Option<Disk> {
             (t, linked, me)
         })
         .collect();
-    Some(Disk { rel, all })
+    Some(Disk { rel, all, born })
 }
 
 /// 이 자리가 **딸린 워크트리 안인가** — 가장 가까운 `.git` 이 디렉터리가 아니라 `gitdir:` 파일이다.

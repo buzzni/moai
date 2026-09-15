@@ -379,22 +379,44 @@ pub struct Workplace {
     /// 이름이 가리키는 id 후보 — 디렉터리 이름, 브랜치, `worktree-` 를 뗀 브랜치.
     #[serde(skip)]
     pub names: BTreeSet<String>,
-    /// 그 워크트리의 스냅샷이 쥔 줄(`worktree::held_elsewhere` 와 같은 자). 이름이 id 가 아닌
-    /// 워크트리(에이전트 격리 따위)가 쥔 일을 가른다. 제 워크트리는 비운다 — 제 스냅샷에는
-    /// main 에서 집은 남의 일도 다 벌여 놓여 있다.
+    /// 그 워크트리의 스냅샷에 벌여 놓인 줄. 이름이 id 가 아닌 워크트리(에이전트 격리 따위)가 쥔
+    /// 일을 가른다. **이름이 id 인 워크트리에는 안 쓴다**([`places`]) — 갈라질 때 main 에 벌여
+    /// 놓였던 남의 일이 다 물려 들어와 있어서다. 제 워크트리는 비운다 — 같은 까닭.
     #[serde(skip)]
     pub holds: BTreeSet<String>,
+    /// 그 워크트리에서 여기보다 늦게 옮기거나 고친 줄. 물려받은 것이 아니라 그 워크트리가 실제로
+    /// 만진 흔적이라 이름과 상관없이 쓴다. 제 워크트리는 비운다.
+    #[serde(skip)]
+    pub touched: BTreeSet<String>,
+    /// 워크트리가 뜬 시각(RFC3339). 이름이 id 가 아닌 워크트리의 `holds` 에서 **뜨기 직전에 집은
+    /// 줄만** 고르는 데 쓴다([`places`]). 못 읽었으면 `None` 이고, 그러면 `holds` 를 다 믿는다.
+    #[serde(skip)]
+    pub born: Option<String>,
 }
 
 /// 집은 줄(`wip`) → 그 일이 서 있는 워크트리들. **자리 없는 줄은 빈 목록으로 선다** — 키가 없는
 /// 것은 안 집은 줄이다. 받는 쪽이 "안 집음" 과 "집었는데 자리 없음" 을 한 지도로 가른다.
+///
+/// **이름이 id 인 워크트리는 스냅샷의 벌여 놓인 줄([`Workplace::holds`])로 안 가른다.** 규약상
+/// 워크트리는 main 에서 뜨므로 그 스냅샷에는 갈라질 때 main 에 벌여 놓였던 줄이 전부 있다 —
+/// 그것을 세면 세션이 죽어 자리를 잃은 줄도 그 뒤에 뜬 워크트리 아무 데나 "자리" 로 잡혀,
+/// 새 워크트리가 하나 뜨는 순간 `stranded` 에서 사라진다.
 pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> BTreeMap<String, Vec<&'a Workplace>> {
     let picked = wip(issues, cfg);
     let mut out: BTreeMap<String, Vec<&Workplace>> = picked.iter().map(|i| (i.id.clone(), Vec::new())).collect();
     for t in trees {
         let named = claimed(issues, &t.names);
+        let nameless = !issues.iter().any(|i| t.names.contains(&i.id));
+        let born = t.born.as_deref().and_then(crate::model::parse_rfc3339);
+        // 이름 없는 워크트리가 쥔 일은 **뜨기 직전 한 시간 안에 집은 줄**이다(사용자 결정,
+        // moai-ir8q.beq) — 규약은 집고 곧바로 워크트리를 띄운다. 그보다 먼저 집혀 물려받은 줄과,
+        // 뜬 뒤에 본 가지를 받아 들어온 줄은 그 워크트리의 일이 아니다.
+        let fresh = |i: &Issue| match (born, crate::model::parse_rfc3339(&i.status_since)) {
+            (Some(b), Some(s)) => s <= b + BORN_SLACK_SECS && b - s <= STRANDED_GRACE_SECS,
+            _ => true,
+        };
         for i in &picked {
-            if named(i) || t.holds.contains(&i.id) {
+            if named(i) || t.touched.contains(&i.id) || (nameless && t.holds.contains(&i.id) && fresh(i)) {
                 out.entry(i.id.clone()).or_default().push(t);
             }
         }
@@ -406,6 +428,10 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> BTr
 /// 그 사이에 부른 `status`(감독이 배정 전에 부른다)가 "자리 없음" 으로 읽으면 멀쩡히 일을 시작한
 /// 세션의 줄을 남에게 다시 준다.
 const STRANDED_GRACE_SECS: i64 = 3600;
+
+/// 워크트리가 뜬 시각과 집기 시각을 견줄 때 두는 틈 — 두 시각은 다른 시계(파일의 고친 때와
+/// `MOAI_NOW`·모아 둔 시각)에서 오고, 초 단위로 떨어진다.
+const BORN_SLACK_SECS: i64 = 60;
 
 /// 집었는데 **일하는 워크트리가 없는** 줄(moai-4370). 세션이 죽으면 칸은 `in_progress` 로 남는다.
 ///
@@ -2391,6 +2417,8 @@ mod tests {
             branch: branch.into(),
             names: [name, branch, branch.strip_prefix("worktree-").unwrap_or(branch)].iter().map(|s| s.to_string()).collect(),
             holds: holds.iter().map(|s| s.to_string()).collect(),
+            touched: BTreeSet::new(),
+            born: None,
         }
     }
 
@@ -2418,6 +2446,54 @@ mod tests {
         assert_eq!(branches("argos-0003"), Some(vec!["worktree-agent-x"]), "옆 스냅샷으로 못 찾았다");
         assert_eq!(branches("argos-0004"), Some(vec![]), "자리 없는 집은 줄은 빈 목록으로 선다");
         assert_eq!(branches("argos-0005"), None, "안 집은 줄의 자리를 셌다");
+    }
+
+    /// **이름이 id 인 워크트리는 물려받은 벌여 놓인 줄로 자리를 안 댄다.** main 에서 뜬 워크트리의
+    /// 스냅샷에는 갈라질 때 main 에 집혀 있던 줄이 다 있다 — 그것을 세면 세션이 죽은 줄도 그 뒤에
+    /// 뜬 워크트리 아무 데나 자리가 잡혀 `stranded` 가 영영 안 선다. 그 워크트리에서 늦게 만진 줄은
+    /// 이름과 상관없이 자리로 센다.
+    #[test]
+    fn a_named_worktree_does_not_place_rows_it_merely_inherited() {
+        let issues = vec![
+            make("argos-0001", Kind::Issue, "in_progress"),
+            make("argos-0002", Kind::Issue, "in_progress"),
+            make("argos-0003", Kind::Issue, "in_progress"),
+        ];
+        let mut named = tree("/r/.claude/worktrees/argos-0002", "worktree-argos-0002", &["argos-0001", "argos-0002", "argos-0003"]);
+        named.touched.insert("argos-0003".into());
+        let trees = vec![named];
+        let at = places(&issues, &cfg(), &trees);
+        assert_eq!(at["argos-0001"].len(), 0, "물려받은 줄을 이름 있는 워크트리의 자리로 셌다");
+        assert_eq!(at["argos-0002"].len(), 1);
+        assert_eq!(at["argos-0003"].len(), 1, "늦게 만진 줄을 자리로 안 셌다");
+    }
+
+    /// **이름 없는 워크트리는 뜨기 직전 한 시간 안에 집은 줄만 쥔다**(사용자 결정). 그보다 먼저 집혀
+    /// 물려받은 줄, 뜬 뒤에 집은 줄은 그 워크트리의 자리가 아니다 — 안 그러면 에이전트 격리 워크트리
+    /// 하나가 자리 잃은 줄을 전부 가린다. 뜬 시각을 못 읽으면 전처럼 다 믿는다.
+    #[test]
+    fn a_nameless_worktree_holds_only_what_was_picked_just_before_it_was_made() {
+        let picked_at = |id: &str, at: &str| {
+            let mut i = make(id, Kind::Issue, "in_progress");
+            i.status_since = at.into();
+            i
+        };
+        let issues = vec![
+            picked_at("argos-0001", "2026-09-15T08:00:00Z"), // 세 시간 전 — 물려받았다
+            picked_at("argos-0002", "2026-09-15T10:40:00Z"), // 이십 분 전 — 이 워크트리의 일
+            picked_at("argos-0003", "2026-09-15T11:30:00Z"), // 뜬 뒤 — 본 가지를 받아 들어왔다
+        ];
+        let mut agent = tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &["argos-0001", "argos-0002", "argos-0003"]);
+        agent.born = Some("2026-09-15T11:00:00Z".into());
+        let trees = vec![agent.clone()];
+        let at = places(&issues, &cfg(), &trees);
+        let counts: Vec<usize> = ["argos-0001", "argos-0002", "argos-0003"].iter().map(|id| at[*id].len()).collect();
+        assert_eq!(counts, [0, 1, 0]);
+
+        agent.born = None;
+        let trees = vec![agent];
+        let at = places(&issues, &cfg(), &trees);
+        assert!(at.values().all(|v| v.len() == 1), "뜬 시각을 모르는데 쥔 줄을 버렸다");
     }
 
     /// **자리 없는 집은 줄을 경고로 비춘다**(moai-4370). 워크트리를 하나도 안 쓰는 저장소는 조용하고,
