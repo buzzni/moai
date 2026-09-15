@@ -2606,3 +2606,10 @@
 {"ts":"2026-09-15T00:09:04Z","id":"moai-u8cs.aes","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-15T00:09:04Z","id":"moai-u8cs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-15T00:09:05Z","id":"moai-u8cs","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 워크트리 worktree-moai-u8cs 에 /code-review high --fix. 결과 반영 → 리뷰 moai-u8cs.aes 원문·판단 → main 머지 → done → moai-zrzo 집기."}
+{"ts":"2026-09-15T02:42:37Z","id":"moai-crcu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색창의 컬럼 이름이 붙어야 한다."}
+{"ts":"2026-09-15T02:53:20Z","id":"moai-1pwk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"읽지 않은 문서에 대한 표시"}
+{"ts":"2026-09-15T04:48:58Z","id":"moai-f9z7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"agent 가 moai 에 이슈를 발행할때 적는 글의 스타일"}
+{"ts":"2026-09-15T04:56:28Z","id":"moai-hzen","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"i8n 도입"}
+{"ts":"2026-09-15T05:01:28Z","id":"moai-si2j","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"doctor 기능 추가"}
+{"ts":"2026-09-15T05:35:06Z","id":"moai-amxk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"프로그램 상단 해더에 로고와 각종 정보 띄우기"}
+{"ts":"2026-09-15T06:06:54Z","id":"moai-u8cs","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 세션이 끊겨 멈춘 /code-review high --fix 를 다시 걸었다(워크트리 worktree-moai-u8cs, 77f0dc0, 고친 흔적 없음). 결과 반영 → 리뷰 moai-u8cs.aes 원문·판단 → main 머지 → done → moai-zrzo 집기."}
