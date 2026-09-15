@@ -5975,6 +5975,16 @@ fn status_reads_a_side_snapshot_only_when_a_place_is_still_missing() {
     assert!(out.contains("자리   모른다"), "{out}");
     assert!(ok_at(&main, LATER, &["show", &lost, "--json"]).contains("\"place\":\"unknown\""));
 
+    // **겹쳐 볼 때는 같은 워크트리를 두 번 말하지 않는다** — `--worktree` 면 `gather` 가 옆 스냅샷을
+    // 빠짐없이 열어 `⎇ <가지>: …` 로 이미 냈다. 두 줄로 내면 보드의 `옆 워크트리 문제 N건` 이
+    // 깨진 워크트리 하나를 둘로 세어, 보는 쪽이 두 곳이 깨진 줄로 읽는다.
+    let out =
+        isolated(BIN).args(["status", "--worktree"]).current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert_eq!(said.lines().count(), 1, "깨진 워크트리 하나를 두 줄로 말했다\n{said}");
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("옆 워크트리 문제 1건"), "깨진 워크트리 하나를 둘로 셌다\n{text}");
+
     // 스냅샷이 멀쩡해지면 자리 없음이 제대로 선다.
     std::fs::remove_dir(&broken).unwrap();
     std::fs::copy(main.join(".moai/issues.jsonl"), &broken).unwrap();

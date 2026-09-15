@@ -1037,10 +1037,11 @@ pub struct Seen<'a> {
     pub origin: Option<&'a Origin>,
     /// 펼친 줄의 막음을 하나씩 가른 것 (`report::blocks_of`). 막음이 없으면 비었다.
     pub blocks: Vec<crate::report::Block<'a>>,
-    /// 펼친 줄이 서 있는 워크트리들 (`report::places`, moai-6opu). `None` 이면 줄을 안 세운다 — 안
+    /// 펼친 줄이 **어디에 서 있는가** (`report::places`, moai-6opu). `None` 이면 줄을 안 세운다 — 안
     /// 집은 줄, 워크트리를 안 쓰는 저장소, **안 재 본 자리**(쓰는 길인 `edit`, 겹쳐 보지 않은
-    /// 딸린 워크트리). `Some` 인데 비었으면 집었는데 자리가 없다. 셋을 가르는 것은 `None` 이
-    /// 아무 말도 안 한다는 것뿐이라, 안 잰 것을 "자리 없다" 로 말하는 일은 없다.
+    /// 딸린 워크트리). 자리가 안 보이는 까닭(`Fresh`·`Unknown`·`Lost`)은 `Place` 가 이미 갈랐으니
+    /// 여기서 다시 판단하지 않는다 — 안 잰 것(`None`)만이 아무 말도 안 하는 자리라, 그것을
+    /// "자리 없다" 로 말하는 일은 없다.
     pub places: Option<crate::report::Place<'a>>,
 }
 

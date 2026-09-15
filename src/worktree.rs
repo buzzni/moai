@@ -546,8 +546,10 @@ pub fn workplaces(
         born: disk.admin.get(&tree.path).and_then(|dir| born_of(dir)),
         unknown: false,
     };
-    let mut out: Vec<crate::report::Workplace> =
-        disk.all.iter().filter(|(_, linked, _)| *linked).map(|(tree, ..)| bare(tree)).collect();
+    // **거를 자를 한 번만 적는다** — 자리와 그 워크트리를 아래에서 `zip` 으로 맞추므로, 거르는
+    // 줄이 둘이면 한쪽만 고쳐졌을 때 자리가 남의 워크트리의 스냅샷을 받아 든다.
+    let linked: Vec<&Tree> = disk.all.iter().filter(|(_, linked, _)| *linked).map(|(tree, ..)| tree).collect();
+    let mut out: Vec<crate::report::Workplace> = linked.iter().map(|tree| bare(tree)).collect();
     // 이름만으로 자리가 다 잡히면(또는 집은 줄이 없으면) 스냅샷을 한 벌도 안 판다. **`At` 만이
     // 안 파도 되는 답이다** — 여기 `out` 은 아직 `holds`·`touched` 가 비고 `unknown` 도 거짓이라
     // 이 판정은 오로지 이름으로 잡혔는지만 본다(그래서 시계와 무관하다).
@@ -557,7 +559,7 @@ pub fn workplaces(
     {
         return out;
     }
-    for (place, (tree, ..)) in out.iter_mut().zip(disk.all.iter().filter(|(_, linked, _)| *linked)) {
+    for (place, tree) in out.iter_mut().zip(&linked) {
         // **제 워크트리도 남과 같은 자로 잰다.** 한때 비워 두었더니, 이름이 id 가 아닌
         // 워크트리(에이전트 격리)가 제가 하고 있는 일을 제 화면에서 "자리 없다" 로 댔다.
         match holds(&disk, tree, mine, cfg) {
