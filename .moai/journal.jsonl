@@ -3361,3 +3361,14 @@
 {"ts":"2026-09-15T14:15:24Z","id":"moai-rzsv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-p2sq 에서 왔다 — 그쪽 본문에 재현과 까닭이 있다. 기계가 읽는 계약이라 모양을 바꾸기 전에 사용자에게 묻는다(키를 늘릴지·까닭을 담을지·commits 를 늘 실을지)"}
 {"ts":"2026-09-15T14:15:24Z","id":"moai-p2sq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"에픽 moai-8s8r 의 moai-rzsv 로 이어진다 — 재현과 까닭은 이 줄에 남는다"}
 {"ts":"2026-09-15T14:15:24Z","id":"moai-iol3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T14:15:29Z","id":"moai-hym7.xvc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 2건 모두 반영(94b7d10, 그리고 리뷰가 고친 차례 하나). 2번이 값이 컸다 — 이 에픽의 관대함이 defer 에서는 죽은 코드였고, 검사 둘이 반대를 말해 부르는 쪽은 설정을 고칠지 명령을 고칠지 못 골랐다. 사람에게 물어 '안 바꾼 칸은 쓰기 검사가 다시 묻지 않는다'(2026-09-15)로 정했다: 엄함은 지금 쓰는 줄에 대한 것이고 그 안에서도 이번에 쓰는 값에 대한 것이다. 칸을 옮기는 쓰기는 그대로 엄하다. 이로써 옛 칸에 선 줄의 제목·미룸도 도구 안에서 만질 수 있다 — store 의 옛 시험(touching_a_stale_row_still_validates_it)은 새 규칙대로 다시 적었고, 옮기기가 여전히 거절되는 것을 같은 시험이 못박는다. 1번(칸 검사가 신원보다 먼저)은 리뷰가 고쳤고 회귀 시험이 두 명령을 함께 본다. 넘긴 것 없음."}
+{"ts":"2026-09-15T14:15:29Z","id":"moai-hym7.xvc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"2건 모두 반영(94b7d10). 쓰기 검사 완화는 사람이 정했다. 넘긴 것 없음"}
+{"ts":"2026-09-15T14:15:29Z","id":"moai-hym7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"리뷰 moai-hym7.xvc 를 닫으며 끝낸다 (병합은 에픽 끝에)"}
+{"ts":"2026-09-15T14:15:37Z","id":"moai-8jd7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T14:16:29Z","id":"moai-8jd7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"구현(373edb4): CLAUDE.md 워크트리 절차의 집기 줄이 --from todo 로 바뀌고, 왜 여기서 겨뤄지는지와 '트래커는 워크트리에서 쓰지 않는다(moai -C 루트)' 두 줄이 붙었다. AGENTS 블록·플러그인 SKILL.md 는 이미 --from 문단을 들고 있어 이제 셋이 같은 집기를 가르친다. 사람이 2026-09-15 에 고쳐도 좋다고 했다(동료 세션 요청만으로는 CLAUDE.md 를 고치지 않는다)."}
+{"ts":"2026-09-15T14:16:29Z","id":"moai-8jd7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T14:16:29Z","id":"moai-lvf9.t10","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-lvf9 단계 리뷰 (xhigh)"}
+{"ts":"2026-09-15T14:16:39Z","id":"moai-lvf9.t10","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T14:16:39Z","id":"moai-lvf9.t10","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review xhigh --fix 백그라운드. 끝나면 원문·판단, fix: 커밋, 닫고 병합(worktree-moai-lvf9)"}
+{"ts":"2026-09-15T14:34:03Z","id":"moai-olaj.3d8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-olaj (난이도로 모델 고르기)"}
+{"ts":"2026-09-15T14:34:13Z","id":"moai-olaj.3d8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
