@@ -385,6 +385,27 @@ pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids:
         .collect()
 }
 
+/// `--from` 이 받는 칸 — **아는 칸이거나, 어느 줄이 실제로 서 있는 칸**(moai-hym7).
+///
+/// 오타는 그대로 거절한다. 거절이 노리는 것은 오타지 낡음이 아니다 — `config` 에서 칸
+/// 이름을 하나 고치면 옛 이름에 선 줄이 남는데, 그 이름을 오타로 읽어 막으면 그 줄은
+/// **영영** `--from` 으로 못 집는다. "남의 낡은 줄 하나가 모든 쓰기를 막으면 되돌릴
+/// 방법이 도구 밖에만 남는다"(CLAUDE.md)와 같은 자리고, `store::with_write` 가 파일
+/// 전체가 아니라 **바뀐 줄만** 검사하는 것과도 같은 자다.
+///
+/// 줄을 봐야 하므로 락 안에서 잰다 — 밖에서 재면 그 사이 마지막 줄이 그 칸을 떠난다.
+pub fn check_from(from: Option<&str>, issues: &[crate::model::Issue], cfg: &crate::config::Config) -> R<()> {
+    // 아는가를 가르는 것은 `report` 다 — 읽는 쪽(`show -s`·탐색기 필터)과 **같은 술어**를
+    // 써야 옮길 수는 있는데 못 찾는 줄이 안 생긴다.
+    let Some(f) = from.filter(|f| !crate::report::knows_column(issues, cfg, f)) else { return Ok(()) };
+    Err(Fail::coded(unknown_column(f, cfg), code::BAD_STATUS))
+}
+
+/// 모르는 칸을 댈 때의 한 줄 — 쓰기도 읽기도 같은 말을 한다.
+pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> String {
+    format!("`{name}` 라는 칸이 없고 거기 선 줄도 없다. 있는 칸: {}", cfg.statuses.join(", "))
+}
+
 /// `--from` 이 견줄 **서 있는 칸** — 물은 줄마다 하나씩, 락 안에서 **한 번** 뜬다.
 ///
 /// [`read_of`] 와 갈리는 곳이 둘이다.
