@@ -666,6 +666,16 @@ fn says(w: &Warning) -> String {
         // 것은 "손질이 사라진다" 다 — 한 낱말로 뭉치면 그 중 한쪽이 반드시 거짓말이 된다.
         "agents_stale" => "AGENTS.md 블록이 다르다 — 다른 바이너리가 쓴 것이라 이쪽이 더 낡았을 수 있다 (다시 빌드해 보고)".to_string(),
         "agents_hand_edited" => "AGENTS.md 블록을 손으로 고쳤다 — 다시 심으면 그 손질은 사라진다".to_string(),
+        // **파일마다 결과를 따로 말한다**(moai-2f99) — `.gitignore` 에 `/.claude/worktrees/` 가
+        // 없는 것과 `.gitattributes` 에 `merge=union` 이 없는 것은 결과가 아주 다르다. 한 낱말로
+        // 뭉치면 그 중 한쪽이 반드시 거짓말이 된다(바로 위 `agents_stale` 을 가른 것과 같은 까닭).
+        // **무엇이 빠졌는지는 `preview` 가 한 줄씩 낸다** — 규칙 줄은 제 안에 띄어쓰기를 여럿 들어
+        // (`.moai/journal.jsonl  text eol=lf merge=union`) 한 줄에 이어 붙이면 어디서 한 줄이
+        // 끝나는지 안 보인다.
+        "gitignore_rules" => format!(".gitignore 에 moai 가 쓰는 자리 {n}줄이 빠졌다 — 옆 워크트리가 `git add -A` 에 딸려간다"),
+        "gitattributes_rules" => {
+            format!(".gitattributes 에 moai 가 쓰는 자리 {n}줄이 빠졌다 — 저널이 머지에서 충돌하고 줄 끝이 흔들린다")
+        }
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
@@ -1254,7 +1264,9 @@ pub fn body_lines(body: &str) -> Vec<String> {
     // **줄로 펴는 일은 `markdown` 이 한다.** 글머리·들여쓰기 같은 결정이
     // 표면마다 갈라지면 CLI 와 탐색기가 같은 본문을 다르게 그린다.
     // 여기가 할 일은 뜻을 색으로 옮기는 것뿐이다.
-    crate::markdown::layout(&blocks, BODY)
+    // 셸은 폭을 넘긴 줄을 화면에서만 접는다 — 긴 인라인 코드를 끊지 않아야
+    // 복사한 명령이 온전하다(moai-krh7).
+    crate::markdown::layout(&blocks, BODY, crate::markdown::Overflow::Keep)
         .iter()
         .map(|line| {
             // 빈 줄은 빈 줄이다. 들여쓰기를 얹으면 줄 끝에 뜻 없는 공백이
@@ -1773,17 +1785,31 @@ mod tests {
         assert!(out.contains("`0.2`"), "색을 끄니 코드가 그냥 글이 됐다\n{out}");
     }
 
-    /// 그린 줄은 폭을 넘지 않는다. 한글이 두 칸이라 글자 수로 세면 걸린다.
+    /// 그린 줄은 폭을 넘지 않는다 — **폭을 넘기는 인라인 코드 한 덩이만 빼고**
+    /// (moai-krh7). 한글이 두 칸이라 글자 수로 세면 걸린다.
     ///
     /// 상한은 `BODY` 에 들여쓰기(`PAD`)를 더한 값이다. 여유를 더 주면 그만큼
-    /// 넘치는 줄을 통과시킨다.
+    /// 넘치는 줄을 통과시킨다. 셸은 넘긴 줄을 화면에서만 접어 복사하면 온전하니
+    /// 코드는 끊지 않는데(`Overflow::Keep`), **넘길 수 있는 것이 그것뿐이라는
+    /// 것까지 여기서 잰다** — 안 그러면 산문이 넘쳐도 이 시험이 지나간다.
     #[test]
     fn drawn_lines_stay_within_the_width() {
-        let body = "아주 긴 한글 문장이 폭을 넘도록 이어지고 또 이어지고 계속 이어진다. \
-                    여기에 `코드` 와 **굵게** 도 섞여 있어서 접는 자리가 조각 가운데에 걸린다.\n";
+        let long = "moai add \"아주 긴 제목을 가진 이슈\" -t bug -e moai-4aex --milestone v0.1 -b -";
+        let body = format!(
+            "아주 긴 한글 문장이 폭을 넘도록 이어지고 또 이어지고 계속 이어진다. \
+             여기에 `코드` 와 **굵게** 도 섞여 있어서 접는 자리가 조각 가운데에 걸린다. \
+             폭을 넘기는 것은 `{long}` 한 덩이뿐이다.\n"
+        );
         let max = BODY + width(PAD);
-        for l in plain(&body_lines(body)) {
-            assert!(width(&l) <= max, "{l:?} ({}칸)", width(&l));
+        let drawn = plain(&body_lines(&body));
+        // **넘기는 줄이 실제로 나야 아래 고리가 뜻이 있다.** 코드를 끊기 시작하면
+        // 넘는 줄이 하나도 없어져 이 시험이 빈 채로 지나간다.
+        assert!(drawn.iter().any(|l| l.contains(long)), "긴 명령이 갈렸다 — {drawn:?}");
+        for l in &drawn {
+            if width(l) <= max {
+                continue;
+            }
+            assert!(l.contains(long), "코드도 아닌 줄이 폭을 넘었다 — {l:?} ({}칸)", width(l));
         }
     }
 

@@ -77,6 +77,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 대는지는 `agents_notice` 가 정하고, 훅의 보드가 같은 것을 싣는다. 한눈 보기(`.moai` 밖)는
     // 남의 저장소라 안 본다.
     st.notices.extend(crate::cmd::init::agents_notice(&repo.root, ctx.chdir));
+    // 빠진 딸린 파일 규칙도 같은 자리다(moai-2f99) — `init` 이 한 번 말하고 마는 것을 여기가 잇는다.
+    st.notices.extend(crate::cmd::init::dotfile_notice(&repo.root, ctx.chdir));
 
     if st.broken() {
         super::note_partial();

@@ -127,6 +127,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             // 시작하는 것이 바로 이 보드를 받는 새 세션이다. 세션의 셸 자리는 stdin 의 `cwd` 라
             // 이미 여기로 옮겨 왔다(`-C` 가 아니다).
             st.notices.extend(crate::cmd::init::agents_notice(&repo.root, false));
+            st.notices.extend(crate::cmd::init::dotfile_notice(&repo.root, false));
             let lines =
                 view::status(
                     &st,
