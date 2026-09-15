@@ -143,87 +143,14 @@ fn format_arg() -> String {
 /// 통째로 사라지고, 본문을 다 세면 트래커 커밋이 나열한 id 와 "넘긴 것은 …" 같은 문장이 전부
 /// 걸린다 — 이 저장소에서 재니 커밋-이슈 연결이 931 에서 1514 로 붇었다. 트레일러는 squash 를
 /// 그대로 지나가면서 그 둘 사이를 가른다.
-fn trailed<'a>(body: &'a str, id: &str) -> bool {
-    body.lines().filter(|l| is_trailer(l.trim_start())).any(|l| words(l).any(|w| w == id))
+fn trailed(body: &str) -> impl Iterator<Item = &str> {
+    body.lines().filter(|l| is_trailer(l.trim_start())).flat_map(words)
 }
 
 /// 트레일러 줄인가. 낱말은 대소문자를 안 가린다 — `refs:` 로 적는 사람이 흔하다.
 fn is_trailer(line: &str) -> bool {
     // **글자 경계로 자른다** — 바이트로 자르면 한글로 시작하는 줄에서 panic 한다(`get` 은 None 이다).
     ["refs:", "closes:", "fixes:"].iter().any(|head| line.get(..head.len()).is_some_and(|h| h.eq_ignore_ascii_case(head)))
-}
-
-/// 지금 가지(`HEAD`)에서 제목에 `ids` 중 하나가 적힌 커밋을 id 별로 모은다. 새것이 먼저다.
-///
-/// **git 은 한 번만 부른다.** id 마다 부르면 탐색기가 줄을 옮길 때마다 프로세스가
-/// id 수만큼 뜬다. `--grep` 을 여럿 주면 git 은 그중 하나라도 맞는 커밋을 낸다.
-/// git 의 `--grep` 은 본문까지 훑으므로 거른 뒤 [`split`] 이 제목과 id 경계를 다시 본다.
-///
-/// **걷는 범위는 `born`(epoch 초) 에서 막는다**(moai-mauw). 비용은 `--grep` 이 아니라 커밋을
-/// 걷는 일 자체다 — 이 저장소 커밋 1천 개에서 `--grep` 을 빼도, 맞은 수를 `-n` 으로 막아도
-/// 45ms 그대로였고 `--since` 만 4ms 로 줄였다. 그 이슈의 id 는 이슈가 생기기 전에는 없었으니
-/// 그보다 오래된 커밋이 그 id 를 적었을 리 없어, 커밋 시각이 조상에서 자손으로 (하루 안쪽으로)
-/// 늘어나는 한 이 상한은 **아무것도 가리지 않는다** — 그 전제가 깨지는 모서리는 [`SKEW`] 에 적었다.
-/// 개수(`-n`)나 기간으로 막으면 오래된 이슈의 커밋이 사라지는 대가가 있다.
-pub fn commits_of(root: &Path, ids: &[&str], born: Option<i64>) -> Result<BTreeMap<String, Vec<Commit>>, Error> {
-    if ids.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-    let format = format_arg();
-    // `log.showSignature` 를 켠 사람이면 git 이 서명 검사 줄을 레코드 앞 표준 출력에 끼워
-    // 해시 자리에 `No signature\n<hash>` 가 들어온다 — 설정과 무관하게 끈다.
-    let mut args = vec!["log", "-z", "--no-show-signature", "--fixed-strings", format.as_str()];
-    // **1970 앞의 상한은 안 단다.** git 의 날짜 파서는 못 읽은 글을 **오류가 아니라 `now`**
-    // 로 읽어, 그런 상한을 주면 커밋이 하나도 안 걸리고 그것이 "커밋이 없다" 로 보인다.
-    // 그 시각의 이슈는 어차피 이력 전체보다 오래됐으니 상한이 줄일 것도 없다.
-    let since = born.filter(|b| *b >= SKEW).map(|b| format!("--since={}", crate::model::format_rfc3339(b - SKEW)));
-    args.extend(since.as_deref());
-    let greps: Vec<String> = ids.iter().map(|id| format!("--grep={id}")).collect();
-    args.extend(greps.iter().map(String::as_str));
-    // `--` 를 단다 — 저장소에 `HEAD` 라는 **파일**이 있으면 git 이 가지인지 경로인지 모른다며
-    // 128 로 끝나고, 그러면 커밋 칸이 까닭도 없이 영영 빈다.
-    args.extend(["HEAD", "--"]);
-    Ok(split(&read_log(root, &args)?, ids))
-}
-
-/// 이슈의 `created_at` 과 커밋 시각이 다른 시계에서 올 때의 여유 — 하루.
-///
-/// 커밋 시각은 커밋한 기계의 시계고 `created_at` 은 이슈를 만든 기계의 시계다. 시계가 늦은
-/// 기계에서 한 커밋은 이슈보다 먼저 한 것처럼 찍힌다.
-///
-/// **이 여유가 못 받는 모서리가 하나 있다.** 걷기가 경로를 제한하지 않는 이 `git log` 에서
-/// `--since` 는 거르기가 아니라 **끊기**다 — 커밋 시각이 상한보다 이른 커밋을 하나 만나면 그
-/// 커밋의 조상으로는 더 걷지 않는다(참아 주는 몇 개는 경로를 제한한 걷기에만 있다). 그래서
-/// 이슈의 커밋 **위에** 커밋 시각이 하루 넘게 이른 커밋이 얹히면 — 시계가 하루 넘게 늦은 기계의
-/// 커밋, `rebase`·`am --committer-date-is-author-date` 로 옛 작성 시각을 커밋 시각에 옮긴 커밋 —
-/// 그 밑의 커밋 칸이 말없이 빈다. `--since-as-filter` 는 끊지 않고 거르지만 그러려고 이력을
-/// 끝까지 걸어 이 상한이 줄인 값을 통째로 버리므로, 드문 모서리보다 매 `show` 의 값을 골랐다.
-const SKEW: i64 = 86_400;
-
-/// `git log` 이 낸 레코드를 id 별로 가른다. git 을 부르지 않는 순수한 반쪽이다.
-pub fn split(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
-    let mut out: BTreeMap<String, Vec<Commit>> = BTreeMap::new();
-    for (hash, subject, body) in records(log) {
-        for id in ids {
-            if names(subject, id) || trailed(body, id) {
-                out.entry((*id).to_string()).or_default().push(Commit {
-                    hash: hash.to_string(),
-                    subject: subject.to_string(),
-                    tracker: subject.starts_with(TRACKER),
-                });
-            }
-        }
-    }
-    out
-}
-
-/// `text` 가 `id` 를 **그 id 로** 적었는가 — [`words`] 가 뽑는 낱말 하나가 곧 그 id 일 때.
-///
-/// **형식은 안 본다**(moai-ynhj). 찾는 id 는 파일에 실제로 있는 줄의 id 이고, `is_valid` 는 **쓸 때만**
-/// 거는 자다 — 들여오거나 손으로 고친 줄은 형식이 어긋난 id 를 들 수 있는데, 그런 줄도 목록과 탐색기에는
-/// 멀쩡히 선다. 커밋이 그 id 를 그대로 적었는데 칸만 비면 읽기가 쓰기보다 엄해진다.
-fn names(text: &str, id: &str) -> bool {
-    words(text).any(|t| t == id)
 }
 
 /// 글을 id 가 될 수 있는 낱말로 가른다 — **경계를 정하는 자는 이것 하나다.**
@@ -239,7 +166,7 @@ fn words(text: &str) -> impl Iterator<Item = &str> {
 
 /// 글에 적힌 **형식에 맞는** id 낱말들 — [`words`] 중 `id::is_valid` 를 지나는 것.
 ///
-/// 커밋을 찾는 두 길([`split`]·[`table`])은 이것을 안 쓴다. 그쪽은 **파일에 있는 id** 와 낱말을
+/// 커밋을 찾는 길([`table_of`])은 이것을 안 쓴다. 그쪽은 **파일에 있는 id** 와 낱말을
 /// 견주므로 형식을 물을 까닭이 없고, 물으면 형식이 어긋난 줄의 칸이 영영 빈다(moai-ynhj).
 /// 이 자는 "이 글이 id 를 적었는가" 를 파일 없이 물어야 하는 곳 — 가르치는 글의 예시가 실제로
 /// 읽히는지 보는 `guide` 의 시험 — 이 쓴다.
@@ -255,19 +182,23 @@ pub fn ids_in(text: &str) -> impl Iterator<Item = &str> {
 
 /// 지금 가지(`HEAD`)의 이력 **전부**를 한 번 걸어 제목에 적힌 id → 커밋 표를 짓는다. 새것이 먼저다.
 ///
-/// 탐색기가 쓴다(moai-a4i0). 커서를 옮길 때마다 [`commits_of`] 를 부르면 걸음마다 git 이
-/// 뜨고 그리는 루프가 그만큼 멈칫한다 — 표는 다시 읽기 스레드에서 한 번 짓고 상세는 찾기만
-/// 한다. 전부 걸으므로 `commits_of` 의 생성일 상한이 가리는 모서리(moai-g8cd)도 여기서는 없다.
+/// **두 표면이 이 하나를 쓴다**(moai-hws2) — 탐색기는 이슈 전부의 id 로 한 번(moai-a4i0), `show` 는
+/// 펼친 id 하나로 부른다. 탐색기 쪽은 다시 읽기 스레드가 지어 두므로 커서를 옮길 때마다 git 이 안 뜬다.
+///
+/// **이력을 끝까지 걷는다.** 한때 `show` 만 이슈의 생성일에서 끊었는데, `git log --since` 는 거르기가
+/// 아니라 **끊기**라 날짜가 거꾸로 선 커밋(rebase·늦은 시계) 하나가 그 밑을 통째로 가렸다 — 같은
+/// 물음에 두 표면이 다른 답을 냈다. 대가는 긴 이력에서의 걷기 값이다(흉내 낸 2만 커밋 저장소에서
+/// `show` 한 번이 10ms → 164ms, 2026-09-15 사용자 결정).
 ///
 /// **`ids` 는 파일에 있는 줄의 id 다**(moai-ynhj). 형식으로 거르는 대신 있는 id 와 견주므로,
-/// 형식이 어긋난 줄도 제 커밋을 찾고([`split`] 과 같은 답이다) 표에는 id 아닌 낱말이 안 선다.
+/// 형식이 어긋난 줄도 제 커밋을 찾고 표에는 id 아닌 낱말이 안 선다.
 pub fn table(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Commit>>, Error> {
     let format = format_arg();
     let log = read_log(root, &["log", "-z", "--no-show-signature", format.as_str(), "HEAD", "--"])?;
     Ok(table_of(&log, ids))
 }
 
-/// [`table`] 의 **git 을 안 부르는 반쪽** — [`split`] 과 `commits_of` 의 사이와 같은 가름이다.
+/// [`table`] 의 **git 을 안 부르는 반쪽.**
 ///
 /// 낱말을 있는 id 집합에서 찾는다. 이력 전부와 이슈 전부가 만나는 자리라 id 마다 제목을 다시
 /// 훑으면 곱이 된다 — 커밋 1천 × 이슈 1천이면 백만 번이다.
@@ -277,8 +208,7 @@ pub fn table_of(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
     for (hash, subject, body) in records(log) {
         let mut seen: Vec<&str> = Vec::new();
         // 제목의 낱말과 **트레일러 줄의 낱말**을 같은 자로 본다(moai-dig5).
-        let trailers = body.lines().filter(|l| is_trailer(l.trim_start()));
-        for id in words(subject).chain(trailers.flat_map(words)).filter(|w| known.contains(w)) {
+        for id in words(subject).chain(trailed(body)).filter(|w| known.contains(w)) {
             // 한 제목에 같은 id 를 두 번 적어도 커밋은 한 번이다.
             if seen.contains(&id) {
                 continue;
@@ -343,14 +273,16 @@ pub(crate) mod tests {
     #[test]
     fn a_subject_cannot_forge_a_record() {
         let forged = "\u{1e}deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\u{1f}feat: 가짜 (moai-bbbb)";
-        let got = split(&rec("c1", &format!("chore: 멀쩡한 것 (moai-aaaa){forged}")), &["moai-aaaa", "moai-bbbb"]);
+        let got = table_of(&rec("c1", &format!("chore: 멀쩡한 것 (moai-aaaa){forged}")), &["moai-aaaa", "moai-bbbb"]);
         assert_eq!(got["moai-aaaa"].len(), 1);
         assert_eq!(got["moai-aaaa"][0].hash, "c1", "지어낸 해시가 들었다");
         assert!(!got.contains_key("moai-bbbb"), "제목이 밀어 넣은 글이 남의 이슈에 붙었다");
     }
 
+    /// 낱말 경계 — 찾는 쪽([`table_of`])이 이 자로 id 를 가른다.
     #[test]
     fn an_id_is_named_only_as_itself() {
+        let names = |text: &str, id: &str| words(text).any(|w| w == id);
         assert!(names("merge: 막음 줄 (moai-rvcb)", "moai-rvcb"));
         assert!(names("moai-rvcb 를 닫는다", "moai-rvcb"));
         assert!(names("닫았다 moai-rvcb.", "moai-rvcb"), "문장 끝의 점은 자식이 아니다");
@@ -360,7 +292,6 @@ pub(crate) mod tests {
         assert!(names("리뷰 moai-rvcb.7u5 를 닫는다", "moai-rvcb.7u5"));
     }
 
-    #[test]
     /// **squash 병합이 본문으로 옮긴 id 는 트레일러 줄에서만 센다**(moai-dig5, 2026-09-15 사용자 결정).
     ///
     /// GitHub 의 기본 단추인 squash 는 합친 커밋들의 제목을 전부 본문의 `* <제목>` 줄로 옮긴다 —
@@ -394,7 +325,7 @@ pub(crate) mod tests {
         assert!(has("moai-cccc"), "본문의 Refs: 트레일러를 안 셌다 — squash 를 쓰면 여기만 남는다");
         assert!(!has("moai-aaaa") && !has("moai-bbbb"), "본문에 옮겨진 제목까지 셌다 — 트래커 커밋이 나열한 id 가 죄다 걸린다");
         // `show` 도 같은 답이다.
-        let one = commits_of(&dir, &["moai-cccc"], None).unwrap();
+        let one = table(&dir, &["moai-cccc"]).unwrap();
         assert_eq!(one["moai-cccc"].len(), 1, "show 가 트레일러를 안 셌다 — 두 표면이 갈렸다");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -404,12 +335,12 @@ pub(crate) mod tests {
     /// 있고, 그런 줄도 목록·탐색기에는 멀쩡히 선다. 커밋이 그 id 를 그대로 적었는데 칸만 영영 비면
     /// "읽기는 관대하고 쓰기는 엄하다" 가 깨진다.
     ///
-    /// **두 표면이 같은 답을 내야 한다** — `show` 는 [`split`], 탐색기는 [`table`] 로 찾는다.
+    /// **두 표면이 같은 답을 내야 한다** — 둘 다 [`table`] 로 찾는다(moai-hws2).
     #[test]
     fn a_malformed_id_still_finds_its_commits() {
         let odd = "argos-4ae";
         let log = [rec("c2", &format!("feat: 들여온 줄을 고친다 ({odd})")), rec("c1", "chore: 딴 일")].concat();
-        let got = split(&log, &[odd]);
+        let got = table_of(&log, &[odd]);
         assert_eq!(got[odd].len(), 1, "형식에 안 맞는 id 의 커밋을 show 가 못 찾는다");
         let table = table_of(&log, &[odd]);
         assert_eq!(table[odd].len(), 1, "같은 커밋을 탐색기가 못 찾는다");
@@ -426,7 +357,7 @@ pub(crate) mod tests {
             rec("c1", "feat: 다른 것 (moai-bbbb, moai-aaaa)"),
         ]
         .concat();
-        let got = split(&log, &["moai-aaaa", "moai-bbbb", "moai-cccc"]);
+        let got = table_of(&log, &["moai-aaaa", "moai-bbbb", "moai-cccc"]);
         let a: Vec<(&str, bool)> = got["moai-aaaa"].iter().map(|c| (c.hash.as_str(), c.tracker)).collect();
         assert_eq!(a, [("c3", true), ("c2", false), ("c1", false)]);
         assert_eq!(got["moai-bbbb"].len(), 1);
@@ -447,7 +378,7 @@ pub(crate) mod tests {
         // 로그를 딴 인코딩으로 달라는 사람의 설정이 있어도 제목을 읽는다 — `run` 이 UTF-8 로 달라고 한다.
         git(&["config", "i18n.logOutputEncoding", "EUC-KR"]);
 
-        let got = commits_of(&dir, &["moai-aaaa", "moai-aaaa.b1c"], None).unwrap();
+        let got = table(&dir, &["moai-aaaa", "moai-aaaa.b1c"]).unwrap();
         let subjects = |id: &str| got[id].iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
         assert_eq!(subjects("moai-aaaa"), ["feat: 고친다 (moai-aaaa)"]);
         assert_eq!(subjects("moai-aaaa.b1c"), ["fix: 리뷰 (moai-aaaa.b1c)"]);
@@ -552,27 +483,6 @@ pub(crate) mod tests {
         assert!(missing.is_empty(), "git 이 대는 지역 환경이 목록에 없다 — git_leaks.rs 에 더한다: {missing:?}");
     }
 
-    /// 이슈가 생기기 전의 커밋은 걷지 않는다 — 단, 시계가 늦은 기계의 커밋은 하루까지 받는다.
-    #[test]
-    fn walking_stops_before_the_issue_was_born_but_forgives_a_slow_clock() {
-        let dir = std::env::temp_dir().join(format!("moai-git-since-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let git = |at: &str, args: &[&str]| run_git(&dir, Some(at), args);
-        git("2026-01-01T00:00:00Z", &["init", "-q"]);
-        // 같은 id 가 이슈보다 이틀 먼저 적혔다 — 그 id 는 아직 없었으니 다른 저장소에서 온 우연이다.
-        git("2026-01-01T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", "옛것 (moai-aaaa)"]);
-        git("2026-01-02T12:00:00Z", &["commit", "-q", "--allow-empty", "-m", "시계 늦은 기계 (moai-aaaa)"]);
-        git("2026-01-03T09:00:00Z", &["commit", "-q", "--allow-empty", "-m", "고친다 (moai-aaaa)"]);
-
-        let born = crate::model::parse_rfc3339("2026-01-03T00:00:00Z");
-        let got = commits_of(&dir, &["moai-aaaa"], born).unwrap();
-        let subjects: Vec<&str> = got["moai-aaaa"].iter().map(|c| c.subject.as_str()).collect();
-        assert_eq!(subjects, ["고친다 (moai-aaaa)", "시계 늦은 기계 (moai-aaaa)"]);
-        assert_eq!(commits_of(&dir, &["moai-aaaa"], None).unwrap()["moai-aaaa"].len(), 3, "상한 없이는 다 걷는다");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     #[test]
     fn ids_in_splits_words_the_way_names_reads_them() {
         let got: Vec<&str> = ids_in("fix: 리뷰 (moai-aaaa.b1c, moai-bbbb). worktree-moai-cccc 에서 moai-dddd를 봤다").collect();
@@ -580,11 +490,12 @@ pub(crate) mod tests {
         assert_eq!(ids_in("chore(tracker): 없음 v1.2 a-b").count(), 0, "id 모양이 아닌 낱말을 id 로 읽었다");
     }
 
-    /// 탐색기의 표는 [`commits_of`] 와 **같은 답**을 낸다 — 같은 자로 가르고, 새것이 먼저고,
-    /// 트래커 커밋은 표시만 한다. 날짜가 거꾸로 선 커밋 밑의 커밋도 놓치지 않는다(moai-g8cd).
+    /// 표는 **이력 전부를 걷는다** — 새것이 먼저고, 트래커 커밋은 표시만 하고, 날짜가 거꾸로 선
+    /// 커밋 밑의 커밋도 놓치지 않는다(moai-hws2). `show` 도 이 표를 쓰므로 두 표면의 답이 같다 —
+    /// CLI 쪽은 tests/cli.rs 의 `show_sees_commits_under_a_backdated_one` 이 따로 본다.
     #[test]
-    fn the_table_answers_as_commits_of_without_the_date_cut() {
-        let dir = std::env::temp_dir().join(format!("moai-git-table-{}", std::process::id()));
+    fn the_table_walks_the_whole_history() {
+        let dir = std::env::temp_dir().join(format!("moai-git-table-{}-{:?}", std::process::id(), std::thread::current().id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let git = |at: &str, args: &[&str]| run_git(&dir, Some(at), args);
@@ -595,15 +506,13 @@ pub(crate) mod tests {
         git("2025-12-01T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", "chore(tracker): moai-aaaa 를 닫는다"]);
 
         let table = table(&dir, &["moai-aaaa", "moai-aaaa.b1c"]).unwrap();
-        let born = crate::model::parse_rfc3339("2026-01-03T00:00:00Z");
         let subjects = |c: &[Commit]| c.iter().map(|c| (c.subject.clone(), c.tracker)).collect::<Vec<_>>();
         assert_eq!(
             subjects(&table["moai-aaaa"]),
-            [("chore(tracker): moai-aaaa 를 닫는다".to_string(), true), ("feat: 고친다 (moai-aaaa)".to_string(), false)]
+            [("chore(tracker): moai-aaaa 를 닫는다".to_string(), true), ("feat: 고친다 (moai-aaaa)".to_string(), false)],
+            "날짜가 거꾸로 선 커밋 밑을 못 봤다"
         );
         assert_eq!(table["moai-aaaa.b1c"].len(), 1, "한 제목에 두 번 적은 id 를 두 커밋으로 셌다");
-        assert!(commits_of(&dir, &["moai-aaaa"], born).unwrap().is_empty(), "이 시험이 흉내 낸 모서리가 사라졌다");
-        assert_eq!(subjects(&table["moai-aaaa"]), subjects(&commits_of(&dir, &["moai-aaaa"], None).unwrap()["moai-aaaa"]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

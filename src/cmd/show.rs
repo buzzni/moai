@@ -348,9 +348,10 @@ fn one(
     // 고장이 아니라 흔한 쓰임이라 `show` 마다 한 줄씩 탓하면 그것이 잔소리다.
     // **커밋도 줄이 온 워크트리의 `HEAD` 에서 읽는다** — 이력과 같은 까닭. `--worktree` 로
     // 옆에서 집은 일을 펼치면 그 일을 고친 커밋은 저쪽 가지에만 있다.
-    // 걷기는 이슈가 생긴 때에서 멈춘다(`git::commits_of`). 못 읽는 `created_at` 이면 다 걷는다.
+    // **탐색기와 같은 자로 읽는다**(moai-hws2) — `git::table` 하나가 이력 전부를 걷는다. 생성일에서
+    // 끊던 때는 날짜가 거꾸로 선 커밋 하나가 그 밑을 통째로 가려, 같은 물음에 두 표면이 다른 답을 냈다.
     let root = origin.root(&issue.id).unwrap_or(&repo.root);
-    let commits = crate::git::commits_of(root, &[issue.id.as_str()], model::parse_rfc3339(&issue.created_at))
+    let commits = crate::git::table(root, &[issue.id.as_str()])
         .ok()
         .and_then(|mut by_id| by_id.remove(&issue.id))
         .unwrap_or_default();
