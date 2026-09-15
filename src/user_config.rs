@@ -90,6 +90,8 @@ pub struct Registry {
     pub projects: Vec<Project>,
     /// 사람이 읽을 한 줄씩. 비어 있으면 아무 일 없다.
     pub problems: Vec<String>,
+    /// 적어 둔 화면 언어(moai-slfv). 없으면 `None` 이고 영어로 떨어진다.
+    pub lang: Option<String>,
     /// 적어 둔 탐색기 보기와 그것을 읽다 만난 까닭(moai-2bzp). **같은 파싱에서 함께 읽는다**(moai-u8cs) —
     /// 탐색기를 띄우면 층과 보기가 저마다 파일을 읽고 파싱해 한 번 띄울 때 설정을 두세 번 읽었다.
     /// 까닭을 `problems` 와 따로 드는 것은 대는 자리가 달라서다 — 층의 문제는 층이, 보기의 문제는 알림이 댄다.
@@ -121,6 +123,7 @@ pub fn read(path: Option<&Path>) -> Registry {
             let (projects, problems) = doc.projects();
             reg.projects = projects;
             reg.problems = problems.into_iter().map(at).collect();
+            reg.lang = doc.lang();
             let (look, problems) = doc.look();
             reg.look = look;
             reg.look_problems = problems.into_iter().map(at).collect();
@@ -361,6 +364,14 @@ impl Doc {
         removed
     }
 
+    /// 적어 둔 화면 언어(moai-slfv). **사람의 설정이지 프로젝트의 것이 아니다** — 같은 사람이
+    /// 프로젝트를 옮겨 다녀도 읽는 말은 그대로고, 한 프로젝트를 여럿이 볼 때 서로 다른 말로
+    /// 읽는다. 없거나 낱말이 아니면 `None` 이고 [`crate::i18n::pick`] 이 영어로 떨어진다 —
+    /// 여기서 까닭을 쌓지 않는 것은, 글자 하나 때문에 도구가 안 도는 것처럼 보이면 안 돼서다.
+    pub fn lang(&self) -> Option<String> {
+        self.doc.get(I18N)?.as_table_like()?.get(LANG)?.as_str().map(String::from)
+    }
+
     /// 적어 둔 탐색기 보기와, 못 읽은 키의 까닭(moai-2bzp). **관대하게 읽는다** — 틀린 키 하나가
     /// 나머지 보기를 버리게 두지 않는다. `[tui]` 가 없으면 빈 `Look` 이다.
     pub fn look(&self) -> (Look, Vec<String>) {
@@ -437,6 +448,10 @@ impl Doc {
         Ok(())
     }
 }
+
+/// 화면 언어가 사는 표(moai-slfv).
+const I18N: &str = "i18n";
+const LANG: &str = "lang";
 
 /// 탐색기 보기가 사는 표(moai-2bzp).
 const TUI: &str = "tui";
@@ -1029,6 +1044,19 @@ mod tests {
         assert!(unreadable.problems.len() == 1 && unreadable.problems[0].starts_with(&format!("{}: ", d.display())), "{unreadable:?}");
         assert_eq!(unreadable.look_problems, unreadable.problems, "못 읽은 파일의 까닭이 층과 보기에 같게 안 섰다");
         assert_eq!(read(None).look_problems, Vec::<String>::new(), "자리를 모르는 것은 보기의 문제가 아니다");
+    }
+
+    /// **언어는 `[i18n] lang` 에서 읽는다**(moai-slfv) — 사람의 설정이지 프로젝트의 것이 아니다.
+    /// 없거나 틀린 값이면 `None` 이고, 고르는 쪽이 영어로 떨어진다. 여기서 멈추지 않는 것은
+    /// 글자 하나 때문에 도구가 안 도는 셈이기 때문이다.
+    #[test]
+    fn the_language_is_read_from_the_i18n_table() {
+        assert_eq!(Doc::parse("[i18n]\nlang = \"ko\"\n").unwrap().lang(), Some("ko".to_string()));
+        assert_eq!(Doc::parse("[[project]]\npath = \"/a\"\n").unwrap().lang(), None, "표가 없으면 없는 것이다");
+        assert_eq!(Doc::parse("[i18n]\nlang = 3\n").unwrap().lang(), None, "낱말이 아닌 값을 받았다");
+        assert_eq!(Doc::parse("i18n = 3\n").unwrap().lang(), None, "표가 아닌 i18n 에서 멈췄다");
+        let reg = read(None);
+        assert_eq!(reg.lang, None, "자리를 모르면 언어도 없다");
     }
 
     /// **틀린 보기 키는 알리고 나머지는 읽는다**(moai-2bzp). `tui` 가 표가 아니면 읽기는 비고 쓰기는 멈춘다.
