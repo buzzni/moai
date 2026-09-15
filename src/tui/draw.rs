@@ -743,7 +743,9 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     let [names_at, list_at] =
         Layout::vertical([Constraint::Length(head_h), Constraint::Min(0)]).areas(inner_at);
     if head_h == 1 {
-        let dirs = rows.iter().any(|r| matches!(r, Row::Item(Entry::Dir { .. })));
+        // 셈 이름은 **셈이 설 수 있는 줄이 있을 때만** — 바구니(`at: None`)는 제 줄이 없어 셈을
+        // 안 내므로, 바구니뿐인 디렉터리에서 `n/n` 만 서면 그 밑에 아무것도 없다.
+        let dirs = rows.iter().any(|r| matches!(r, Row::Item(Entry::Dir { at: Some(_), .. })));
         f.render_widget(Paragraph::new(names_line(common, id_w, dirs, inner)), names_at);
     }
     app.list.fit(list_at.height as usize, rows.len());
@@ -863,23 +865,26 @@ fn row_line<'a>(
     // 내려갈 수 있게 한다(셈을 오른쪽 정렬한 까닭과 같다). 담당·날짜가 없으면 `—` 로, 태그가 없으면
     // 빈칸으로 자리를 지킨다 — 태그 없는 줄이 흔해 `—` 가 줄마다 서면 눈이 거기 걸린다.
     // 날짜는 `+`(생성)·`✎`(수정) 글리프로 가른다 — 둘 다 `MM-DD` 라 글리프 없이는 어느 쪽인지 모른다.
+    // **폭은 `RIGHT` 하나가 정한다** — 줄과 이름 줄이 같은 자를 써야 맨 위의 이름이 값과 맞는다.
+    // **날짜도 채운다**: `created_at` 이 짧으면(읽기는 관대하다) `+—` 두 칸으로 서서 그 줄만 오른쪽
+    // 열이 네 칸 밀린다 — 고정 폭의 까닭이 그 줄에서 사라진다.
     let mut cells: Vec<(Field, String)> = RIGHT
         .into_iter()
-        .filter(|f| fields.shows(*f))
-        .map(|f| {
+        .filter(|(f, _, _)| fields.shows(*f))
+        .map(|(f, _, w)| {
             let text = match f {
-                Field::Tags => pad(&clip(&crate::view::tags_of(i), TAGS_W), TAGS_W),
-                Field::Assignee => pad(
-                    &clip(&i.assignee.as_deref().map_or("—".into(), |a| crate::model::label(a, i.assignee_email.as_deref(), app.cfg.naming)), WHO_W),
-                    WHO_W,
-                ),
+                Field::Tags => crate::view::tags_of(i),
+                Field::Assignee => i
+                    .assignee
+                    .as_deref()
+                    .map_or("—".into(), |a| crate::model::label(a, i.assignee_email.as_deref(), app.cfg.naming)),
                 Field::Created => format!("+{}", i.created_at.get(5..10).unwrap_or("—")),
                 Field::Updated => format!("✎{}", i.updated_at.get(5..10).unwrap_or("—")),
                 Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => {
                     unreachable!("오른쪽 열이 아니다")
                 }
             };
-            (f, text)
+            (f, pad(&clip(&text, w), w))
         })
         .collect();
     // 셈은 오른쪽 열이 있으면 **폭을 고정한다** — 셈 없는 잎과 있는 묶음의 날짜가 한 줄에 선다.
@@ -903,7 +908,7 @@ fn row_line<'a>(
     }
     // 켠 오른쪽 열 가운데 걷힌 것을 끈다 — 안 켠 열은 `cells` 에도 없어 꺼진 채다.
     let mut kept = fields;
-    for f in RIGHT {
+    for (f, _, _) in RIGHT {
         kept.set(f, cells.iter().any(|(c, _)| *c == f));
     }
     let right = right_of(&cells);
@@ -973,57 +978,43 @@ fn names_line<'a>(fields: super::view::Fields, id_w: usize, dirs: bool, budget: 
     }
     left.push_str("S  TITLE");
     let mut right = String::new();
-    for f in RIGHT {
+    for (f, name, w) in RIGHT {
         if fields.shows(f) {
             right.push_str("  ");
-            right.push_str(&pad(cell_name(f), cell_width(f)));
+            right.push_str(&pad(name, w));
         }
     }
+    // 셈은 오른쪽 열이 섰을 때만 폭을 고정한다 — 줄의 `tally_cell` 과 같은 갈림이다.
+    let alone = right.is_empty();
     if fields.shows(Field::Tally) && dirs {
         right.push_str("  ");
-        if right.len() > 2 {
-            right.push_str(&format!("{:>TALLY_W$}", "n/n"));
-        } else {
+        if alone {
             right.push_str("n/n");
+        } else {
+            right.push_str(&format!("{:>TALLY_W$}", "n/n"));
         }
     }
     let gap = budget.saturating_sub(crate::text::width(&left) + crate::text::width(&right));
     Line::from(Span::styled(format!("{left}{}{right}", " ".repeat(gap)), dim()))
 }
 
-/// 열 이름 줄에 적는 이름.
-fn cell_name(f: super::view::Field) -> &'static str {
+/// 오른쪽 열이 줄에 서는 **차례**, 이름 줄에 적는 **이름**, 그리고 그 **폭** — 한 벌로 둔다.
+/// 줄(`row_line`)과 이름 줄(`names_line`)과 걷힘 셈이 모두 이 표 하나를 훑는다: 자가 둘이면 열을
+/// 하나 더하는 날 맨 위의 이름만 어긋난 채 아무것도 안 알려 준다.
+const RIGHT: [(super::view::Field, &str, usize); 4] = {
     use super::view::Field;
-    match f {
-        Field::Tags => "TAGS",
-        Field::Assignee => "WHO",
-        Field::Created => "MADE",
-        Field::Updated => "EDIT",
-        Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => "",
-    }
-}
-
-/// 오른쪽 열 하나의 폭 — 줄과 이름 줄이 같은 자를 쓴다.
-fn cell_width(f: super::view::Field) -> usize {
-    use super::view::Field;
-    match f {
-        Field::Tags => TAGS_W,
-        Field::Assignee => WHO_W,
-        // `+09-14`·`✎09-14` 여섯 칸.
-        Field::Created | Field::Updated => 6,
-        Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => 0,
-    }
-}
-
-/// 오른쪽 열이 줄에 서는 차례이자, 걷힘을 셀 때와 이름을 적을 때 훑는 목록 — 한 벌로 둔다.
-const RIGHT: [super::view::Field; 4] = {
-    use super::view::Field;
-    [Field::Tags, Field::Assignee, Field::Created, Field::Updated]
+    [
+        (Field::Tags, "TAGS", TAGS_W),
+        (Field::Assignee, "WHO", WHO_W),
+        (Field::Created, "MADE", DATE_W),
+        (Field::Updated, "EDIT", DATE_W),
+    ]
 };
 
-/// 오른쪽 열의 폭 — 담당·태그. 날짜는 `+MM-DD` 여섯 칸으로 저절로 고정이다.
+/// 오른쪽 열의 폭 — 담당·태그·날짜. 날짜는 `+MM-DD`·`✎MM-DD` 여섯 칸이다.
 const WHO_W: usize = 10;
 const TAGS_W: usize = 14;
+const DATE_W: usize = 6;
 /// 오른쪽 열이 있을 때 셈의 고정 폭 — `123/456`.
 const TALLY_W: usize = 7;
 /// 오른쪽 열을 걷기 전에 제목에 남기는 칸.
