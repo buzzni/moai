@@ -3020,3 +3020,12 @@
 {"ts":"2026-09-15T10:38:40Z","id":"moai-gq1c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"d3eb96e — 못 읽는 .gitignore·.gitattributes 를 안 건드리고 손으로 더할 줄을 댄다"}
 {"ts":"2026-09-15T10:38:40Z","id":"moai-knn0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"4edb4c8 — init 은 제가 쓴 것만 말한다"}
 {"ts":"2026-09-15T10:38:40Z","id":"moai-2vrw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"d3a88e3 — FNV 를 text.rs 에 fnv1a32·fnv1a64 로 모으고 style 의 셋째 벌도 잇는다(68082e7)"}
+{"ts":"2026-09-15T10:40:20Z","id":"moai-humk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 이 딸린 파일에 걸려도 저장소를 반쯤 남기지 않는다"}
+{"ts":"2026-09-15T10:40:20Z","id":"moai-0dwc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 쓰는 .gitignore·.gitattributes 도 건너뛰고 나머지를 심는다"}
+{"ts":"2026-09-15T10:40:20Z","id":"moai-ejgp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"--json 의 unreadable 이 이름과 까닭을 함께 싣는다"}
+{"ts":"2026-09-15T10:40:20Z","id":"moai-humk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-u70j 에서 펼쳤다 — init 이 .gitignore·.gitattributes 를 못 쓸 때는 .moai 를 심은 뒤 멈춘다 — 읽기는 넘어가게 고쳤는데 쓰기는 ? 로 끊어, 반쯤 심긴 저장소가 남는다 (리뷰 moai-educ.van, init.rs:523)"}
+{"ts":"2026-09-15T10:40:20Z","id":"moai-u70j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-humk 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-09-15T10:40:33Z","id":"moai-humk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(2026-09-15, 사용자): (1) 못 쓰는 .gitignore·.gitattributes 도 건너뛰고 나머지를 심는다 — 못 읽는 자리(moai-gq1c)와 같은 자다. 무엇을 손으로 더할지 대고 rc 0, 다시 부르면 그때 채운다. 미리 재고 심기 전에 멈추는 길은 안 간다: 읽기 전용 파일 하나가 이미 심긴 저장소의 AGENTS 블록 갱신까지 막는다. (2) --json 의 unreadable 은 이름→까닭 객체가 된다 — 기계가 '다시 인코딩하라'와 'chmod 하라'를 가른다. 이번 에픽에서 만든 키라 읽는 쪽이 아직 없다"}
+{"ts":"2026-09-15T10:40:34Z","id":"moai-q8ls","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ejgp 로 옮겼다 (에픽 moai-humk, 2026-09-15) — promote 는 idea 하나만 받는다"}
+{"ts":"2026-09-15T10:40:34Z","id":"moai-q8ls","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ejgp 가 이어받는다 (에픽 moai-humk)"}
+{"ts":"2026-09-15T10:40:34Z","id":"moai-0dwc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
