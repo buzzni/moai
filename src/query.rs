@@ -546,22 +546,43 @@ pub fn order_by(
         SortKey::Updated => b.0.updated_at.cmp(&a.0.updated_at),
         SortKey::Status => rank(a.1).cmp(&rank(b.1)),
         SortKey::Assignee => match (&a.0.assignee, &b.0.assignee) {
-            (Some(x), Some(y)) => folded(&shown(a.0, x), &shown(b.0, y)),
+            (Some(x), Some(y)) => caseless(&shown(a.0, x), &shown(b.0, y)),
             (Some(_), None) => Ordering::Less,
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
         },
-        SortKey::Title => folded(&a.0.title, &b.0.title),
+        SortKey::Title => caseless(&a.0.title, &b.0.title),
     };
     let order = natural.then_with(|| display_order(a.0, b.0));
     if reversed { order.reverse() } else { order }
 }
 
 /// 대소문자를 접어 견준다 — **견줄 때마다 소문자 문자열을 짓지 않는다**(moai-zrzo). 정렬은 줄 수 × log
-/// 번 견주고 목록은 키마다 센다. 글자마다 접은 것을 차례로 견주므로 `to_lowercase()` 로 지어 견준 것과
-/// 차례가 같다 — 다른 것은 그리스어 낱말 끝 시그마(Σ→ς) 하나다: 여기서는 늘 σ 로 접는다.
-fn folded(a: &str, b: &str) -> std::cmp::Ordering {
-    a.chars().flat_map(char::to_lowercase).cmp(b.chars().flat_map(char::to_lowercase))
+/// 번 견주고 목록은 키마다 센다. 차례는 `to_lowercase()` 로 지어 견준 것과 **한 치도 안 갈린다**(moai-y61p
+/// 단계 리뷰):
+/// - **바이트가 같은 머리는 건너뛴다** — 접어도 같다. 담당은 대개 한 사람이고 제목도 머리가 같은 것이 흔한데,
+///   같은 글을 끝까지 글자마다 접어 걷던 것이 옛 식(한 번에 접는 ASCII 길)보다 느렸다
+/// - **둘 다 ASCII 면 바이트로 접는다** — `Update…`·`update…` 처럼 머리에서 대소문자만 갈리면 건너뛸 머리가 없다
+/// - **Σ 가 든 글은 옛 식대로 지어 견준다.** 문자열의 `to_lowercase` 는 낱말 끝 Σ 를 앞뒤 글자를 보고 ς 로
+///   접는데 글자마다 접으면 늘 σ 다 — 같은 글끼리만이 아니라 `ΟΔΟΣ ΑΛΦΑ`·`οδος βητα` 처럼 다른 글의 차례도
+///   뒤집혔다. 앞뒤를 보고 접히는 글자는 이 하나뿐이다. 머리를 건너뛰기 **전에** 본다 — 앞 글자가 머리에 있다
+/// - 그 밖에는 자른 자리를 글자 머리로 물린다(두 글에서 같은 자리다) — 바이트가 같으면 글자 경계도 같다
+///
+/// 이름이 `folded` 가 아닌 것은 이 모듈에서 그 낱말이 이미 "길 잃은 줄 밑에 접힌 줄"(`Where::folded`)이라서다.
+fn caseless(a: &str, b: &str) -> std::cmp::Ordering {
+    let same = |a: &str, b: &str| a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
+    if a.is_ascii() && b.is_ascii() {
+        let n = same(a, b);
+        return a.as_bytes()[n..].iter().map(u8::to_ascii_lowercase).cmp(b.as_bytes()[n..].iter().map(u8::to_ascii_lowercase));
+    }
+    if a.contains('Σ') || b.contains('Σ') {
+        return a.to_lowercase().cmp(&b.to_lowercase());
+    }
+    let mut n = same(a, b);
+    while !a.is_char_boundary(n) {
+        n -= 1;
+    }
+    a[n..].chars().flat_map(char::to_lowercase).cmp(b[n..].chars().flat_map(char::to_lowercase))
 }
 
 #[cfg(test)]
@@ -610,6 +631,45 @@ mod tests {
         };
         assert_eq!(by(crate::config::Naming::Name), ["a-3", "a-1"]);
         assert_eq!(by(crate::config::Naming::Email), ["a-1", "a-3"], "메일로 선 담당 열이 가나다가 아니다");
+
+        // **제목·담당은 대소문자를 접어 가나다로 선다**(moai-y61p 단계 리뷰). 접지 않고 견주면 `Banana` 가 `apple`
+        // 앞에 서고, 견줌이 같다고 내면 기본 차례(a-1 먼저)로 선다 — 둘 다 아래 차례와 갈린다.
+        let mut cased = [issues[0].clone(), issues[2].clone()];
+        (cased[0].title, cased[0].assignee) = ("Banana".into(), Some("Bob".into())); // a-1
+        (cased[1].title, cased[1].assignee) = ("apple".into(), Some("alice".into())); // a-3
+        let by_key = |key| {
+            let mut idx = [0, 1];
+            idx.sort_by(|&x, &y| order_by(key, false, (&cased[x], "todo"), (&cased[y], "todo"), &statuses, crate::config::Naming::Full));
+            idx.map(|i| cased[i].id.as_str())
+        };
+        assert_eq!(by_key(SortKey::Title), ["a-3", "a-1"], "제목이 대소문자를 접어 가나다로 안 섰다");
+        assert_eq!(by_key(SortKey::Assignee), ["a-3", "a-1"], "담당이 대소문자를 접어 가나다로 안 섰다");
+    }
+
+    /// **접어 견준 차례는 소문자로 지어 견준 차례와 같다**(moai-y61p 단계 리뷰) — 낱말 끝 Σ 까지. 글자마다만
+    /// 접으면 대문자로 적은 그리스어 제목·담당이 소문자로 적은 것과 자리를 바꿔 섰다, 다른 글이어도.
+    /// 같은 머리를 건너뛰는 자리가 글자 가운데에 떨어지는 글(`é`·`É` 는 첫 바이트가 같다)도 함께 본다.
+    #[test]
+    fn caseless_orders_exactly_like_lowercased_strings() {
+        let pairs = [
+            ("ΟΔΟΣ ΑΛΦΑ", "οδος βητα"),
+            ("ΟΔΟΣ", "οδος"),
+            ("ΝΙΚΟΣ (a@x)", "Νικος (m@x)"),
+            ("ΣΣ", "Σσ"),
+            ("ΑΣ한", "ΑΣΑ"),
+            ("레이븐 (raven@buzzni.com)", "레이븐 (raven@buzzni.com)"),
+            ("Bump serde from 1.0.1 to 1.0.2", "bump Serde from 1.0.1 to 1.0.10"),
+            ("Update the loader", "update the Loader"),
+            ("a[", "A_"),
+            ("İstanbul", "i\u{307}stanbul"),
+            ("é", "É"),
+            ("aé", "aÉb"),
+            ("", "a"),
+        ];
+        for (a, b) in pairs {
+            assert_eq!(caseless(a, b), a.to_lowercase().cmp(&b.to_lowercase()), "{a:?} · {b:?}");
+            assert_eq!(caseless(b, a), b.to_lowercase().cmp(&a.to_lowercase()), "{b:?} · {a:?}");
+        }
     }
 
     const NOW: &str = "2026-09-11T00:00:00Z";
