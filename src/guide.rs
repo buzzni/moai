@@ -736,6 +736,19 @@ PY
   `pwd` 와 지금 하는 일을 물어 가린다 — 원격·클라우드 세션은 같은 경로를 대도 다른
   체크아웃이다
 
+**2-1. 모델을 고른다 — 난이도 한 낱말로.** 리뷰 등급을 고르는 그 축이다. 축을 둘로 두면
+브리프가 판단을 두 벌 들고, 어긋나는 날 싼 모델이 쓰기 경로를 맡는다.
+
+| 난이도 | 무엇으로 재나 | 모델 | 리뷰 |
+|---|---|---|---|
+| `low` | 글·주석·한 줄 고침, 동작이 안 바뀐다 | `haiku` | `low` |
+| `medium` | 한 파일 안의 동작 변경, 시험으로 둘러싸인 것 | `sonnet` | `medium` |
+| `high` | 여러 파일·쓰기 경로·저장 형식·훅, 되돌리기 어려운 것 | `opus` | `high` |
+
+에픽 끝의 리뷰(`xhigh`·`max`)는 언제나 `opus` 다 — 멤버마다 싸게 지나갔어도 한 번은 비싼
+눈으로 전체를 본다. **망설여지면 한 단계 올린다.** 감독은 코드를 읽기 전에 고르므로 이것은
+제안이고, 마지막 자는 이슈를 읽은 일꾼이다.
+
 **3. 보낸다.** 놀고 있는 세션 하나에 idea **하나**를 `SendMessage` 로 보낸다.
 일꾼은 이 대화를 모르니 아래 글을 `<내 이름>`·`<id>`·`<제목>`·`<본 가지>`·`<루트>` 를 채워
 **통째로** 싣는다 — 일꾼이 받는 것은 이 글뿐이라, 일꾼이 지킬 것은 모두 이 안에 있다.
@@ -801,6 +814,8 @@ fn brief() -> String {
     format!(
         r#"    감독 세션(<내 이름>)이 idea <id> 를 맡긴다 — <제목>.
     먼저 읽을 것: moai show <id>
+    모델: <모델> (<등급> — <까닭>) — 난이도로 고른 제안이다. 읽어 보니 더 어려우면
+       한 단계 올린다(haiku → sonnet → opus). 리뷰 등급도 같은 축이다
     본 가지: <본 가지> — 아래의 가지 이름이다. 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다
     1. 루트에서 펼친다 — idea 를 일감으로 바꾸는 길은 `moai idea promote <id> --from -`
        하나다. 이슈 하나짜리여도 에픽 + 이슈로 펼친다. `--dry-run` 을 먼저 본다.
@@ -1114,6 +1129,30 @@ mod tests {
         ] {
             assert!(supervise.contains(piece), "{why} — {piece}");
         }
+    }
+
+    /// **난이도 한 낱말이 모델과 리뷰 등급을 함께 정한다**(moai-84kd, 2026-09-15 사용자 결정).
+    ///
+    /// 축을 따로 두면 브리프가 판단을 두 벌 들고, 둘이 어긋나는 날 싼 모델이 쓰기 경로를 맡는다.
+    /// 그래서 짝은 리뷰 등급과 같은 낱말 위에 선다 — low·medium·high 가 그대로 haiku·sonnet·opus 다.
+    /// **브리프에 실려야 뜻이 있다**: 감독 스킬에만 적힌 규칙은 일꾼이 받는 글에 없다(`brief`).
+    #[test]
+    fn the_supervisor_picks_a_model_by_difficulty() {
+        let (supervise, brief) = (supervise(), brief());
+        // **표의 줄에서 찾는다** — 글에서 `low` 를 그냥 찾으면 `lowError` 같은 낱말에 걸린다.
+        for (level, model) in [("low", "haiku"), ("medium", "sonnet"), ("high", "opus")] {
+            let row = supervise
+                .lines()
+                .find(|l| l.starts_with("| `") && l.contains(&format!("`{level}`")))
+                .unwrap_or_else(|| panic!("난이도 {level} 의 줄이 표에 없다"));
+            assert!(row.contains(model), "{level} 의 짝이 {model} 이 아니다 — {row}");
+        }
+        assert!(supervise.contains("모델"), "감독이 모델을 고른다는 말이 없다");
+        // 에픽 끝은 멤버마다 싸게 지나갔어도 한 번은 비싼 눈으로 본다.
+        let end = supervise.find("xhigh").expect("에픽 끝 등급이 표 둘레에 없다");
+        assert!(supervise[end..].lines().next().unwrap_or_default().contains("opus"), "에픽 끝 리뷰가 opus 가 아니다");
+        // 일꾼이 받는 글에 그 자리가 있어야 감독이 채운다.
+        assert!(brief.contains("모델:"), "브리프에 모델 자리가 없다 — 감독이 골라도 일꾼은 모른다");
     }
 
     /// **감독 스킬은 모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 적으면 남의 저장소에서는
