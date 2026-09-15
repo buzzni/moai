@@ -82,19 +82,11 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
     cmd
 }
 
-/// 물려받으면 git 이 바깥 저장소나 바깥 설정을 보게 되는 변수들.
-const GIT_LEAKS: &[&str] = &[
-    "GIT_CONFIG_COUNT",
-    "GIT_CONFIG_PARAMETERS",
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_COMMON_DIR",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_NAMESPACE",
-    "GIT_PREFIX",
-];
+// 물려받으면 git 이 바깥 저장소나 바깥 설정을 보게 되는 변수들 — 단위 시험(`git::command`)과 **한 파일**을
+// 읽는다. 따로 된 크레이트라 `use` 로는 못 가져가고, 두 벌로 두면 한쪽에만 더한 변수가 말없이 갈라진다.
+#[path = "../src/git_leaks.rs"]
+mod git_leaks;
+use git_leaks::LEAKS as GIT_LEAKS;
 
 fn moai(dir: &Path, args: &[&str]) -> Output {
     isolated(BIN)
