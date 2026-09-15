@@ -289,6 +289,11 @@ pub enum Browse {
     /// 설정의 n 번째 칸(0부터)을 보이고 숨긴다(moai-fmv5). **칸 이름이 설정에서 오므로 글자가
     /// 아니라 번호로 누른다** — 글자로 두면 설정에 따라 키가 겹친다.
     Column(u8),
+    /// 그 번호의 프로젝트로 바로 간다(moai-o133). `0` 은 전체 — 프로젝트 층이다.
+    ///
+    /// **SPC 없이 바로 누른다**(사용자 결정). 헤더가 `<0>`~`<9>` 로 그 번호를 대고, 그것이
+    /// 이 키를 설명하는 유일한 자리다. `SPC s 1`(칸 토글)과는 SPC 하나로 갈라진다.
+    Project(u8),
     /// done 을 보이고 숨긴다 — 가장 자주 누를 것이라 번호와 따로 선다.
     Done,
     /// 미룬 것을 보이고 숨긴다. 칸이 아니라 `deferred_at` 축이다.
@@ -361,8 +366,14 @@ impl Sorting {
     }
 }
 
-/// 칸 토글에 번호를 줄 수 있는 칸 수 — `1`~`9`. 넘는 칸은 번호가 없고 `SPC s a` 로만 돌아온다.
+/// 번호를 줄 수 있는 수 — `1`~`9`. 칸 토글(`SPC s <n>`)과 프로젝트 건너뛰기([`Browse::Project`])
+/// 가 같은 상한을 쓴다. 넘는 칸은 번호가 없고 `SPC s a` 로만 돌아오며, 넘는 프로젝트는 층에서
+/// 골라 들어간다.
 pub const NUMBERED: usize = 9;
+
+/// **한 자리 키를 넘기지 않는다.** 두 자리를 받기 시작하면 한 자리 키가 다음 글쇠를 기다리느라
+/// 늦어지고, 헤더의 `<n>`(`draw::numbered`)도 칸 폭이 어긋난다.
+const _: () = assert!(NUMBERED < 10);
 
 /// 탐색의 이동(moai-ob4c, 키 지도 moai-hudg). **vi 키에 이름을 붙이고 화살표·Home·End·PgUp/Dn
 /// 은 숨은 별칭이다** — 바가 한 이름만 대야 좁은 창에서 덜 떨어진다. 드나들기만 거꾸로다:
@@ -426,6 +437,17 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Leave, Some("Bksp"), Key::any(C::Backspace)),
         row!(Leave, None, Key::any(C::Left)),
         row!(Leave, None, Key::plain('h')),
+        // 맨 숫자 — 헤더의 `<0>`~`<9>` 다. 첫 줄만 이름을 단다(번호 칸 줄과 같은 규칙).
+        row!(Project(0), Some("0"), Key::plain('0')),
+        row!(Project(1), None, Key::plain('1')),
+        row!(Project(2), None, Key::plain('2')),
+        row!(Project(3), None, Key::plain('3')),
+        row!(Project(4), None, Key::plain('4')),
+        row!(Project(5), None, Key::plain('5')),
+        row!(Project(6), None, Key::plain('6')),
+        row!(Project(7), None, Key::plain('7')),
+        row!(Project(8), None, Key::plain('8')),
+        row!(Project(9), None, Key::plain('9')),
         row!(Grep, Some("/"), Key::plain('/')),
         row!(ClearFilter, Some("Esc"), Key::any(C::Esc)),
         // `/` 는 바로 누르는 키이면서 메뉴에도 선다 — 이름은 바로 누르는 쪽 하나만 댄다.
@@ -481,13 +503,17 @@ pub struct Ctx {
     /// 커서가 선 줄이 **들어갈 데가 없다** — 잎(일 한 줄)이거나 줄이 없다. `..`·디렉터리·층의
     /// 프로젝트는 들어간다(`..` 은 나간다).
     pub leaf: bool,
-    /// **나갈 데가 없다** — 프로젝트 뿌리인데 층이 없거나, 층에 섰다. 층이 있는 프로젝트 뿌리는
-    /// 뿌리가 아니다: Bksp 가 층으로 올라간다(`App::leave` → `climb`).
+    /// **나갈 데가 없다** — 디렉터리 안이 아니다(프로젝트 뿌리이거나 층에 섰다). **층이 있어도
+    /// 뿌리는 뿌리다**(moai-i784): Bksp 는 디렉터리만 올라가고, 층으로는 헤더의 `0`
+    /// ([`Browse::Project`])이 간다.
     pub root: bool,
     pub worktree: bool,
     pub raw: bool,
     /// 번호를 받은 칸 수 — 설정의 칸 수와 [`NUMBERED`] 중 작은 것.
     pub columns: usize,
+    /// 번호를 받은 프로젝트 수 — 등록한 수와 [`NUMBERED`] 중 작은 것. `0`(전체)은 층이 있으면
+    /// 늘 듣는다. 층이 없으면 0 이고, 그러면 숫자 키가 통째로 조용하다.
+    pub projects: usize,
     /// 숨긴 칸 — n 번째 비트가 설정의 n 번째 칸. 이름을 들지 않는다: 이 값은 복사로 다닌다.
     pub hidden: u16,
     pub done_hidden: bool,
@@ -532,6 +558,15 @@ impl Browse {
             // 않는다 — 들어갈 데 없는 줄에서 Enter 가 조용한 것은 파일 관리자와 같고, 바가 그 키를
             // 안 적으므로 "적힌 키가 안 듣는다" 가 안 생긴다.
             Enter if c.leaf => Err(Off::Quiet),
+            // **뜻이 없어진 키는 조용히 먹지 않는다**(리뷰 moai-lur8.met). 층이 있는 뿌리에서
+            // Bksp·h·← 는 여태 층으로 올라갔다 — 손에 익은 사람도, 낡은 AGENTS.md 를 읽은
+            // 에이전트도 그것을 누른다. 대신 갈 키를 대 준다. 뒤의 조용한 갈래는 층이 없어
+            // 애초에 위가 없던 자리다: 거기서 말하면 있지도 않은 길을 말하는 셈이다.
+            Leave if c.root && c.projects > 0 => Err(Off::Why(format!(
+                "{} 는 디렉터리만 올라간다 — 프로젝트 층으로는 {} 로 간다",
+                label(BROWSE, Leave),
+                label(BROWSE, Project(0))
+            ))),
             Leave if c.root => Err(Off::Quiet),
             Unregister if !(c.layer && c.list_focus) => Err(Off::Quiet),
             Grep | Filter if c.layer => {
@@ -546,6 +581,9 @@ impl Browse {
             // 믿는다. `raw` 는 설정에 안 남으니 미리 켜 둘 값어치도 없다.
             FocusNext | FocusPrev | Raw if !c.detail => Err(Off::Quiet),
             Column(n) if usize::from(n) >= c.columns => Err(Off::Quiet),
+            // 등록한 프로젝트가 없으면 층 자체가 없다 — 헤더도 번호를 안 대므로 `0`(전체)까지
+            // 조용하다. 등록한 수를 넘는 번호도 같다: 없는 자리로 보내면 무엇이 일어났는지 모른다.
+            Project(n) if c.projects == 0 || usize::from(n) > c.projects => Err(Off::Quiet),
             _ => Ok(()),
         }
     }
@@ -613,6 +651,8 @@ impl Browse {
             Raw => "원문",
             // 칸의 이름은 설정에서 온다 — 메뉴가 이름을 붙인다(`menu::entries`).
             Column(_) => "칸",
+            // 어느 프로젝트인지는 헤더가 번호 곁에 이름으로 댄다.
+            Project(_) => "프로젝트",
             Done => "done",
             Deferred => "미룸",
             ShowAll => "모두",
@@ -888,6 +928,46 @@ mod tests {
         // 오늘 표에서도 — SHIFT 붙은 `/`·SPC 는 그 키다(자판에 따라 SHIFT 가 붙어 온다).
         assert_eq!(one(BROWSE, with(KeyCode::Char('/'), KeyModifiers::SHIFT)), Lookup::Run(Browse::Grep));
         assert_eq!(one(CONFIRM, with(KeyCode::Char('Y'), KeyModifiers::SHIFT)), Lookup::Run(Confirm::Yes));
+    }
+
+    /// **맨 숫자는 프로젝트로 간다**(moai-o133) — `0` 은 전체(층), `1`~`9` 는 그 번호의 프로젝트다.
+    /// `SPC s 1`(칸 토글)과는 갈라져 있다: 그쪽은 SPC 를 먼저 누른다.
+    #[test]
+    fn a_bare_digit_goes_to_that_project() {
+        assert_eq!(one(BROWSE, press(KeyCode::Char('0'))), Lookup::Run(Browse::Project(0)));
+        // **표는 [`NUMBERED`] 까지 댄다** — 헤더가 그 상한으로 `<n>` 을 적고(`draw::numbered`)
+        // `Ctx::projects` 도 그것으로 자르는데, 표만 짧으면 헤더가 안 듣는 키를 대고 표만 길면
+        // 아무도 안 알려 주는 키가 산다.
+        for n in 1..=NUMBERED as u8 {
+            let c = char::from_digit(u32::from(n), 10).unwrap();
+            assert_eq!(one(BROWSE, press(KeyCode::Char(c))), Lookup::Run(Browse::Project(n)), "{c}");
+        }
+        for n in NUMBERED as u8 + 1..=9 {
+            let c = char::from_digit(u32::from(n), 10).unwrap();
+            assert_eq!(one(BROWSE, press(KeyCode::Char(c))), Lookup::Unknown, "상한 너머 {c} 가 표에 있다");
+        }
+        // SPC 뒤의 숫자는 그대로 칸 토글이다 — 두 길이 안 겹친다.
+        assert_eq!(lookup(BROWSE, &[pressed(&LEADER), press(KeyCode::Char('s')), press(KeyCode::Char('1'))]), Lookup::Run(Browse::Column(0)));
+    }
+
+    /// **맨 숫자는 등록한 수만큼만 듣는다**(moai-o133). 층이 없으면 `0` 까지 조용하고, 등록한
+    /// 수를 넘는 번호도 조용하다 — 없는 자리로 보내면 무엇이 일어났는지 모른다.
+    ///
+    /// 키 표의 단위 시험은 `Ctx::default()` 로 짓느라 `projects` 가 0 이라 이 갈래를 아무도
+    /// 안 밟았다(리뷰) — 판정을 뒤집어도 그림 시험이 우연히 밟는 몇 갈래에서만 잡힌다.
+    #[test]
+    fn a_bare_digit_is_quiet_past_the_projects_that_exist() {
+        let none = Ctx { list_focus: true, ..Ctx::default() };
+        assert_eq!(Browse::Project(0).enabled(&none), Err(Off::Quiet), "층이 없는데 `0` 이 켜졌다");
+        let three = Ctx { projects: 3, ..none };
+        for n in 0..=3u8 {
+            assert_eq!(Browse::Project(n).enabled(&three), Ok(()), "{n} 이 안 듣는다");
+        }
+        for n in 4..=NUMBERED as u8 {
+            assert_eq!(Browse::Project(n).enabled(&three), Err(Off::Quiet), "등록 안 된 {n} 이 듣는다");
+        }
+        // 상세에 포커스가 가도 듣는다 — 건너뛰기는 선 줄이 아니라 화면 전체를 옮기는 일이다.
+        assert_eq!(Browse::Project(1).enabled(&Ctx { list_focus: false, ..three }), Ok(()));
     }
 
     /// **글자 키의 Ctrl·Alt 는 정확히 견준다.** Ctrl-A 가 등록 창을, Ctrl-D 가 "뺄까" 를

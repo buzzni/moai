@@ -30,8 +30,9 @@ use scroll::{Move, Scroll};
 /// 목록의 한 줄. `..` 은 이슈가 아니므로 [`Entry`] 로는 못 담는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
-    /// 한 층 위로. 뿌리가 아닐 때만 맨 앞에 선다 — MC 와 같다. 프로젝트 층이 있으면
-    /// 프로젝트 뿌리에도 서서 층으로 올라간다.
+    /// 한 층 위로. 뿌리가 아닐 때만 맨 앞에 선다 — MC 와 같다. **디렉터리에만 선다**
+    /// (moai-i784): 층이 있어도 프로젝트 뿌리에는 안 서고, 층으로는 헤더의 `0`
+    /// ([`keys::Browse::Project`])이 간다 — 같은 글자가 두 데로 가지 않게.
     Up,
     Item(Entry),
     /// 프로젝트 층의 한 줄 — `layer.places` 의 첨자다. 정체는 경로다([`Anchor::Project`]).
@@ -359,6 +360,18 @@ pub struct App {
     /// 그쪽은 `MOAI_ACTOR` 와 이 기계의 git 설정을 읽어, 갈아 끼우지 않으면
     /// "누군지 모를 때" 를 시험한 결과가 돌리는 사람의 설정에 달린다.
     identify: fn(Option<&str>, &std::path::Path) -> crate::fail::R<crate::model::Actor>,
+    /// 헤더가 적을 사람을 푼 것 — 열쇠는 [`Self::user`] 와 **그 프로젝트의 `naming`** 이다.
+    /// **프레임마다 풀지 않는다**: `model::actor` 는 `git config` 를 프로세스로 **두 번**
+    /// 띄우는데, 그리는 쪽에서 부르면 묵혀 둔 화면도 초당 셋(`TICK`), 도는 것이 있으면 초당
+    /// 열여섯(`SPIN_TICK`), 읽는 동안에는 초당 예순(`LOAD_POLL`) 번 그것을 띄운다 — 키를
+    /// 누르고 있는 내내도 같다. 묻는 칸에서 사람을 받아 `user` 가 바뀌면 열쇠가 어긋나 저절로
+    /// 다시 푼다.
+    ///
+    /// **`naming` 도 열쇠에 든다**(리뷰). 묵힌 것은 `model::label` 을 이미 지난 글이고 그 모양은
+    /// 프로젝트 설정이 정한다 — 열쇠에서 빼면 `naming = "email"` 인 프로젝트로 건너뛴 뒤에도
+    /// 헤더가 떠난 프로젝트의 `이름 (메일)` 을 그대로 이고 있다. 설정은 화면만 바꾸는 것이라,
+    /// 화면이 안 바뀌면 그 설정은 없는 것과 같다.
+    header_user: Option<(Option<String>, crate::config::Naming, std::path::PathBuf, String)>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
     /// 상세의 굴린 자리. **왼쪽 커서를 옮기면 첫 줄로 돌아간다** — 다른
@@ -575,6 +588,7 @@ impl App {
             notice: None,
             user: None,
             identify: crate::model::actor,
+            header_user: None,
             warnings: 0,
             stamp: None,
             watched: Vec::new(),
@@ -783,6 +797,39 @@ impl App {
                 None
             }
         }
+    }
+
+    /// 헤더가 적을 사람. 처음 한 번만 풀고 [`Self::user`] 나 그 프로젝트의 `naming` 이
+    /// 바뀌면 다시 푼다 — 까닭은 `header_user` 에 적었다.
+    ///
+    /// **누군지 몰라도 묻지 않는다.** 여는 화면은 읽기고, 읽기는 사람을 묻지 않는다 —
+    /// 여기서 [`Mode::Ask`] 를 세우면 설정 없는 기계에서 탐색기가 묻는 칸으로 열린다.
+    pub fn told_user(&mut self) -> &str {
+        // 열쇠는 **견주기만** 한다 — 프레임마다 도는 자리라 짓지 않는다.
+        let at = self.user_root();
+        let fresh = self
+            .header_user
+            .as_ref()
+            .is_none_or(|(u, n, r, _)| *u != self.user || *n != self.cfg.naming || r.as_path() != at);
+        if fresh {
+            let (at, naming) = (at.to_path_buf(), self.cfg.naming);
+            let said = (self.identify)(self.user.as_deref(), &at)
+                .map(|a| crate::model::label(&a.name, Some(&a.email), naming))
+                .unwrap_or_else(|_| "—".into());
+            self.header_user = Some((self.user.clone(), naming, at, said));
+        }
+        self.header_user.as_ref().map_or("—", |(_, _, _, said)| said.as_str())
+    }
+
+    /// 사람을 물을 자리 — 선 프로젝트의 뿌리다(moai-d3sy). 층에 서 있으면 아직 프로젝트가
+    /// 없으니 띄운 자리에서 읽고, 그것도 없으면 지금 자리다. **뿌리가 바뀌면 사람도 다시
+    /// 푼다** — 프로젝트마다 git 설정이 다를 수 있고, 헤더는 지금 선 프로젝트를 말해야 한다.
+    fn user_root(&self) -> &std::path::Path {
+        self.repo
+            .as_ref()
+            .map(|r| r.root.as_path())
+            .or(self.launched_at.as_deref())
+            .unwrap_or(std::path::Path::new("."))
     }
 
     /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
@@ -1467,7 +1514,10 @@ impl App {
             return (0..l.places.len()).map(Row::Project).collect();
         }
         let mut rows: Vec<Row> = Vec::new();
-        if !self.path.is_empty() || self.layer.is_some() {
+        // **`..` 은 디렉터리에만 선다**(moai-i784). 프로젝트 뿌리에 한 줄 더 세워 층으로
+        // 올려 보내던 길은 걷었다 — 층으로 가는 길은 헤더의 `0` 하나다(사용자 결정).
+        // 길이 둘이면 뿌리의 `..` 이 디렉터리의 `..` 과 다른 데로 가, 같은 글자가 두 뜻을 진다.
+        if !self.path.is_empty() {
             rows.push(Row::Up);
         }
         // **보기는 줄마다 건다** — 숨긴 칸의 묶음이라도 보이는 멤버가 있으면 디렉터리는 선다
@@ -1552,6 +1602,31 @@ impl App {
             // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
             B::Enter => self.enter(),
             B::Leave => self.leave(),
+            // **헤더의 번호로 바로 간다**(moai-o133). `0` 은 전체 — 층이다. 이미 그 자리면
+            // 아무 일도 안 한다: 같은 프로젝트를 다시 열면 커서와 굴린 자리가 첫 줄로 튄다.
+            // **건너뛰면 포커스는 목록으로 돌아온다**(리뷰 moai-i784.pzh). 상세에 포커스를 둔 채
+            // `0` 을 누르면 층에 서는데, 층의 상세에는 듣는 키가 없어 Enter 가 조용하고 키 바도
+            // 그 키를 안 적는다 — 무엇을 눌러야 할지 없는 화면이 선다. 층으로든 프로젝트로든
+            // 건너뛰는 것은 목록을 보러 가는 일이다.
+            B::Project(n) => {
+                // **선 자리의 번호는 한 곳에서 읽는다**([`layer::Layer::number`]) — 헤더가 빛을
+                // 세울 자리를 고르는 자와 같아야 한다. 따로 세면 헤더는 `<2>` 를 빛내는데 `2` 는
+                // 그 프로젝트를 다시 열어 커서와 굴린 자리를 첫 줄로 튕긴다.
+                let here = self.layer.as_ref().and_then(layer::Layer::number);
+                match usize::from(n) {
+                    at if here == Some(at) => {}
+                    0 => self.climb(),
+                    at => self.enter_project(at - 1),
+                }
+                // **간 자리를 보고 포커스를 돌린다**(리뷰 moai-i784.pzh, 그리고 이 리뷰).
+                // 이미 그 자리였어도 돌린다 — 누른 사람은 목록을 보러 온 것이고, 층의 상세에는
+                // 듣는 키가 없어 거기 남으면 무엇을 눌러야 할지 없는 화면이 선다. 거꾸로 **못
+                // 들어갔으면 건드리지 않는다**: `enter_project` 는 실패하면 아무것도 안 바꾸고
+                // 까닭만 알림으로 다는데, 포커스만 옮기면 읽던 상세가 키를 잃는다.
+                if self.layer.as_ref().and_then(layer::Layer::number) == Some(usize::from(n)) {
+                    self.focus = Pane::Explorer;
+                }
+            }
             B::Grep => {
                 self.grep_was = Some((self.filter_text.clone(), self.grep_in, self.cursor));
                 self.mode = Mode::Grep(Input::default(), GrepIn::All);
@@ -1621,11 +1696,12 @@ impl App {
             list_focus: self.focus == Pane::Explorer,
             // [`App::enter`] 가 무언가 하는 줄 — `..`(나가기)·디렉터리·층의 프로젝트.
             leaf: !matches!(self.current_of(rows), Some(Row::Up | Row::Item(Entry::Dir { .. }) | Row::Project(_))),
-            // [`App::leave`] 가 무언가 하는 자리 — 디렉터리 안이거나, 층이 있는 프로젝트 뿌리.
-            root: self.path.is_empty() && (self.layer.is_none() || self.on_layer()),
+            // [`App::leave`] 가 무언가 하는 자리 — 디렉터리 안뿐이다. 층으로는 `0` 이 간다(moai-i784).
+            root: self.path.is_empty(),
             worktree: self.worktree,
             raw: self.raw,
             columns: self.cfg.statuses.len().min(keys::NUMBERED),
+            projects: self.layer.as_ref().map_or(0, |l| l.places.len().min(keys::NUMBERED)),
             hidden: self
                 .cfg
                 .statuses
@@ -1875,13 +1951,16 @@ impl App {
         }
     }
 
-    /// 들어간 층에서 커서가 설 줄 — **`..` 너머 첫 줄**(moai-cm13). 비었으면 `..`.
+    /// 들어간 디렉터리에서 커서가 설 줄 — **`..` 너머 첫 줄**(moai-cm13). 비었으면 `..`.
     ///
     /// `..` 에 세우면 들어가자마자 누른 Enter(·`l`) 한 번이 도로 나온다 — 두 번 누르면 들어갔다
-    /// 나온 제자리다. 고르기 창(`Picker::new`)이 첫 하위 디렉터리에, 안에서 띄운 탐색기
-    /// (`App::with_layer`)가 첫 항목에 서는 것과 같은 자다. `..` 은 `k`·`gg`·Home 한 번 거리다
-    /// — vi 키가 서기 전에는 `..` 에 세워 두는 것이 나가는 길을 보이는 값이었지만, 이제
-    /// `h`·Bksp 가 어느 줄에서든 나간다.
+    /// 나온 제자리다. 고르기 창(`Picker::new`)이 첫 하위 디렉터리에 서는 것과 같은 자다.
+    /// `..` 은 `k`·`gg`·Home 한 번 거리다 — vi 키가 서기 전에는 `..` 에 세워 두는 것이 나가는
+    /// 길을 보이는 값이었지만, 이제 `h`·Bksp 가 어느 줄에서든 나간다.
+    ///
+    /// **프로젝트 뿌리에서는 늘 0 이다** — `..` 은 디렉터리에만 서므로(moai-i784) 넘을 줄이
+    /// 없다. 그래도 `enter_project` 가 이것을 부르는 것은 들이기(`apply_fresh`)가 떠난
+    /// 프로젝트의 id 로 커서를 붙들 수 있어서고, 그 한 줄이 그것을 지운다.
     fn first_row(&self) -> usize {
         let rows = self.rows();
         usize::from(rows.len() > 1 && rows.first() == Some(&Row::Up))
@@ -1908,9 +1987,9 @@ impl App {
     /// 하나가 생기면 같은 번호가 옆 에픽을 가리킨다. 그래서 번호는 나온 디렉터리를
     /// 못 찾을 때만(거름망에 빠졌거나 `--path` 로 시작했거나) 쓴다.
     fn leave(&mut self) {
-        // 프로젝트 뿌리에서 한 층 더 — 층이 있으면 그리로 간다(결정 3). 층에 섰으면 위가 없다.
+        // **뿌리에서는 아무 일도 없다**(moai-i784). 층으로는 헤더의 `0` 으로 간다 — Bksp 가
+        // 디렉터리와 프로젝트 층 두 군데로 가면 같은 키가 어디로 갈지 자리마다 달라진다.
         if self.path.is_empty() {
-            self.climb();
             return;
         }
         if let Some(from) = self.path.pop() {
@@ -3908,9 +3987,11 @@ mod tests {
         assert!(!a.view.hides(crate::config::DONE));
     }
 
-    /// **적어 둔 보기를 입힌 뒤에 층을 얹는다**(moai-2kyl 단계 리뷰 — `cmd/tui.rs::run` 의 차례). 층은 첫 화면의
-    /// 커서를 `..` 너머 첫 줄에 세운다(`App::with_layer`). 처음값 보기(done 숨김)로 세우면 끝난 줄뿐인 뿌리에서
-    /// 커서가 `..` 에 서고, 적어 둔 보기가 그 줄을 보여도 첫 Enter 가 층으로 올라간다.
+    /// **적어 둔 보기를 입힌 뒤에 층을 얹는다**(moai-2kyl 단계 리뷰 — `cmd/tui.rs::run` 의 차례).
+    /// 처음값 보기(done 숨김)로 세우면 끝난 줄뿐인 뿌리가 통째로 비어, 층을 먼저 얹은 화면은
+    /// 적어 둔 보기가 그 줄을 도로 보여도 커서가 목록 밖에 남는다. 뿌리의 `..` 을 걷은
+    /// 뒤(moai-i784)로 `with_layer` 는 커서를 안 건드리므로, 이 시험이 재는 것은 커서가 **첫
+    /// 줄**(그 끝난 줄)에 서는가다.
     #[test]
     fn the_saved_look_is_on_before_the_layer_places_the_first_cursor() {
         let s = Scratch::new("look-layer");
@@ -3922,8 +4003,8 @@ mod tests {
         a.user_config = Some(user);
         a.load_look();
         let a = a.with_layer(layer::fake(vec![("argos", "/x", layer::Look::Unread)], layer::At::Project("/x".into())));
-        assert_eq!(a.rows().len(), 2, "시험의 전제 — `..` 과 끝난 줄 하나");
-        assert_eq!(a.cursor, 1, "첫 화면이 `..` 에 섰다");
+        assert_eq!(a.rows().len(), 1, "시험의 전제 — 끝난 줄 하나 (뿌리에 `..` 은 없다)");
+        assert_eq!(a.cursor, 0, "첫 화면이 그 줄에 안 섰다");
     }
 
     /// 닫는 함수가 댄 id 가 다시 읽은 목록에 없으면 **커서는 두고 그렇다고 말한다.**

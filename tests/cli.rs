@@ -7819,6 +7819,46 @@ fn the_bash_agent_example_skips_a_job_a_neighbour_claimed_first() {
     assert!(line_of(s.path(), &contested).contains("\"status\":\"in_progress\""), "남이 집은 일을 닫았다");
 }
 
+/// **못 돌린 것을 "남이 집었다" 로 읽지 않는다.** 0 아닌 코드는 겨루다 진 것에도,
+/// 신원 없음·락 걸림·칸 오타·깨진 줄에도 똑같이 붙는다. 실패를 진 것으로 읽으면 같은
+/// 줄이 다시 나와 `seen` 이 "또 집을 일로 나왔다" 며 엉뚱한 까닭을 댄다 — 가르는 것은
+/// stdout 이다: 진 것은 줄을 내고, 실패는 stderr 만 내며 stdout 이 빈다.
+#[cfg(unix)]
+#[test]
+fn the_bash_agent_example_stops_when_a_claim_fails_instead_of_losing() {
+    let s = init("agent-claimfail");
+    let id = add(s.path(), &["집히면 안 되는 일"]);
+    // 집기만 실패하게 한다 — moai 가 락을 못 잡거나 신원을 모를 때의 모양이다.
+    let wrapper = s.path().join("moai-locked.sh");
+    write_exe(
+        &wrapper,
+        &format!("#!/bin/sh\nif [ \"$1\" = mv ]; then echo '{{\"error\":\"잠겨 있다\",\"code\":\"locked\"}}' >&2; exit 1; fi\nexec '{BIN}' \"$@\"\n"),
+    );
+    let work = work_script(&s, "echo 했다");
+
+    let out = agent_cmd(s.path(), &work, &wrapper).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out));
+    assert!(worked(&s).is_empty(), "못 집은 일을 했다\n{}", text(&out));
+    assert!(!text(&out).contains("또 집을 일로 나왔다"), "실패를 겨루기로 읽어 엉뚱한 까닭을 댔다\n{}", text(&out));
+    assert!(line_of(s.path(), &id).contains("\"status\":\"todo\""), "안 집힌 줄이 움직였다");
+}
+
+/// **`--from` 이 맞았다고 집은 것은 아니다.** 첫 칸이 곧 집는 칸인 설정에서는 칸이 맞고도
+/// 아무것도 안 옮기고 `already` 로 0 을 낸다 — `moved` 를 안 보면 여럿이 같은 일을 한다.
+/// 예제의 옛 판이 `.moved | length` 로 지키던 자리고, 그 말이 그 주석에 적혀 있었다.
+#[cfg(unix)]
+#[test]
+fn the_bash_agent_example_does_not_mistake_already_for_a_claim() {
+    let s = init("agent-already");
+    std::fs::write(s.path().join(".moai/config.toml"), "prefix = \"agent-already\"\nstatuses = \"in_progress,review,done\"\n").unwrap();
+    add(s.path(), &["첫 칸이 곧 집는 칸인 일"]);
+    let work = work_script(&s, "echo 했다");
+
+    let out = agent(s.path(), &work);
+    assert!(worked(&s).is_empty(), "집지도 않은 일을 했다\n{}", text(&out));
+    assert_eq!(out.status.code(), Some(1), "집은 것이 없는데 조용히 끝났다\n{}", text(&out));
+}
+
 /// **채비가 안 됐으면 아무것도 집지 않는다.** 집은 뒤에야 알면 맨 위 일이 in_progress 에
 /// 박히고, 다시 부를 때마다 그다음 일이 또 박힌다 — 되돌리는 말은 사람 몫이다.
 #[cfg(unix)]
@@ -7925,4 +7965,169 @@ fn the_bash_agent_example_does_not_wait_for_a_child_the_job_left_running() {
     assert!(started.elapsed() < std::time::Duration::from_secs(20), "띄워 둔 자식을 기다렸다");
     assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "닫지 않았다\n{}", text(&out));
     assert!(ok(s.path(), &["show", &id]).contains("띄웠다"), "노트가 안 남았다");
+}
+
+/// **집기는 본 칸이 그대로일 때만 먹는다** (moai-f8q1). `ready` 와 `mv` 사이에 옆
+/// 에이전트가 같은 줄을 집고 닫기까지 하면, 뒤늦은 `mv` 가 `done` 을 `in_progress` 로
+/// 되연다. `--from <칸>` 을 적으면 락 안에서 다시 보고 칸이 달라졌으면 안 옮긴다.
+#[test]
+fn a_move_from_a_column_only_lands_while_the_row_is_still_there() {
+    let s = init("mv-from");
+    let id = add(s.path(), &["겨루는 일"]);
+    ok(s.path(), &["mv", &id, "in_progress", "--from", "todo"]);
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""));
+
+    // 뒤늦은 집기. 칸이 이미 달라졌으니 아무것도 안 옮기고 **부분 실패**로 끝난다.
+    let out = moai(s.path(), &["mv", &id, "review", "--from", "todo"]);
+    assert!(!out.status.success(), "진 집기가 성공으로 끝났다\n{}", text(&out));
+    let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(said.contains(&id) && said.contains("in_progress"), "지금 칸을 말하지 않는다\n{said}");
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""), "진 집기가 칸을 덮었다");
+    assert!(!journal(s.path()).contains("\"to\":\"review\""), "안 옮긴 것을 저널에 적었다");
+}
+
+/// 진 줄은 `--json` 에도 선다 — 사람 출력에만 있으면 받는 쪽이 두 표면 중 하나를
+/// 못 믿는다. **지금 칸을 함께 준다**: 그것이 없으면 진 쪽이 한 번 더 물어야 한다.
+#[test]
+fn a_lost_claim_stands_in_the_json_with_the_column_it_found() {
+    let s = init("mv-from-json");
+    let id = add(s.path(), &["겨루는 일"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let out = moai(s.path(), &["mv", &id, "in_progress", "--from", "todo", "--json"]);
+    assert!(!out.status.success(), "진 집기가 성공으로 끝났다");
+    let json = String::from_utf8(out.stdout).unwrap();
+    one_json_value(&json);
+    assert!(json.contains("\"stale\":[{"), "진 줄 목록이 없다\n{json}");
+    assert!(json.contains(&format!("\"id\":\"{id}\"")) && json.contains("\"status\":\"done\""), "{json}");
+    assert!(json.contains("\"moved\":[]"), "{json}");
+}
+
+/// 안 적으면 지금과 똑같다 — 막지 않는다. 승인 게이트를 만들지 않는 것이 이 도구의
+/// 밑동이라, 칸 검사는 **부르는 쪽이 골라 켜는 것**이다.
+#[test]
+fn a_move_without_from_still_never_refuses() {
+    let s = init("mv-from-off");
+    let id = add(s.path(), &["되감는 일"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    ok(s.path(), &["mv", &id, "todo"]);
+    assert!(line_of(s.path(), &id).contains("\"status\":\"todo\""));
+}
+
+/// 모르는 칸은 옮길 칸과 같은 자로 거절한다 — 오타가 "아무것도 안 옮겼다" 로
+/// 조용히 넘어가면 에이전트는 영영 아무 일도 못 집는다. **`defer` 도 같은 자다** —
+/// 한쪽만 시험하면 두 벌로 적힌 검사가 갈릴 때 한쪽만 잡힌다.
+#[test]
+fn a_from_column_that_does_not_exist_is_refused() {
+    let s = init("mv-from-bad");
+    let id = add(s.path(), &["일"]);
+    for args in [vec!["mv", &id, "done", "--from", "없는칸"], vec!["defer", &id, "--from", "없는칸"]] {
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{args:?}");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("없는칸"), "{args:?}\n{}", text(&out));
+    }
+    assert!(line_of(s.path(), &id).contains("\"status\":\"todo\""), "거절하면서 옮겼다");
+    assert!(!line_of(s.path(), &id).contains("\"deferred_at\""), "거절하면서 미뤘다");
+}
+
+/// **같은 id 를 두 번 적어도 제가 방금 쓴 값과 겨루지 않는다.** `--from` 이 재는 것은
+/// 부르는 쪽이 본 칸이지 이 명령이 만든 칸이 아니다 — 돌면서 그때그때 보던 판은 한 줄을
+/// `moved` 와 `stale` 에 함께 세우고 0 아닌 코드를 냈다. 그 코드를 "못 집었다" 로 읽는
+/// 것이 `--from` 의 계약이라, 집어 놓고 버리는 일이 된다.
+#[test]
+fn a_repeated_id_does_not_race_the_write_this_command_just_made() {
+    let s = init("mv-from-twice");
+    let id = add(s.path(), &["되풀이"]);
+    let out = moai(s.path(), &["mv", &id, &id, "in_progress", "--from", "todo", "--json"]);
+    assert!(out.status.success(), "제가 쓴 값과 겨뤘다\n{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    one_json_value(&json);
+    assert!(json.contains("\"stale\":[]"), "{json}");
+    assert!(json.contains("\"already\":[\"") && json.contains("\"moved\":[{"), "{json}");
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""));
+}
+
+/// **둘이 같은 줄을 집으면 하나만 이긴다.** 조용한 손실이 이 도구가 못 견디는 유일한
+/// 실패 모드고, 집기가 그것을 두 에이전트에게 열어 주면 같은 일을 둘이 한다.
+#[test]
+fn only_one_racer_claims_a_row() {
+    let s = init("mv-race");
+    let id = add(s.path(), &["하나뿐인 일"]);
+    let kids: Vec<_> = (0..8)
+        .map(|_| {
+            isolated(BIN)
+                .args(["mv", &id, "in_progress", "--from", "todo"])
+                .current_dir(s.path())
+                .env("MOAI_ACTOR", "테스터 (tester@example.com)")
+                .env("NO_COLOR", "1")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    let won = kids.into_iter().map(|k| k.wait_with_output().unwrap()).filter(|o| o.status.success()).count();
+    assert_eq!(won, 1, "집기를 이긴 것이 하나가 아니다");
+    assert_eq!(journal(s.path()).matches("\"to\":\"in_progress\"").count(), 1, "옮긴 줄이 저널에 여럿이다");
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""));
+}
+
+/// **미루기도 본 칸이 그대로일 때만 먹는다** (moai-o5ss). 옆에서 집어 일하기
+/// 시작한 줄을 뒤늦은 `defer` 가 계획 밖으로 빼면, 일하던 쪽은 제 일이 보드에서
+/// 사라진 까닭을 어디서도 못 읽는다. `--undo` 도 같은 자로 잰다.
+#[test]
+fn a_defer_from_a_column_only_lands_while_the_row_is_still_there() {
+    let s = init("defer-from");
+    let id = add(s.path(), &["겨루는 일"]);
+    ok(s.path(), &["mv", &id, "in_progress"]);
+
+    let out = moai(s.path(), &["defer", &id, "-m", "나중에", "--from", "todo"]);
+    assert!(!out.status.success(), "진 미루기가 성공으로 끝났다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("in_progress"), "지금 칸을 말하지 않는다\n{}", text(&out));
+    assert!(!line_of(s.path(), &id).contains("\"deferred_at\""), "진 미루기가 계획에서 뺐다");
+    assert!(!journal(s.path()).contains("나중에"), "안 미룬 줄에 까닭을 적었다");
+
+    // 본 칸이 맞으면 그대로 먹는다. 되돌리기도 같은 자를 받는다.
+    ok(s.path(), &["defer", &id, "--from", "in_progress", "-m", "나중에"]);
+    assert!(line_of(s.path(), &id).contains("\"deferred_at\""));
+    let lost = moai(s.path(), &["defer", &id, "--undo", "--from", "todo", "--json"]);
+    assert!(!lost.status.success(), "진 되돌리기가 성공으로 끝났다");
+    let json = String::from_utf8(lost.stdout).unwrap();
+    one_json_value(&json);
+    assert!(json.contains("\"stale\":[{") && json.contains("\"status\":\"in_progress\""), "{json}");
+    assert!(line_of(s.path(), &id).contains("\"deferred_at\""), "진 되돌리기가 도로 집었다");
+    ok(s.path(), &["defer", &id, "--undo", "--from", "in_progress"]);
+    assert!(!line_of(s.path(), &id).contains("\"deferred_at\""));
+}
+
+/// **묶음에는 `--from` 이 없다** (사람이 정했다, moai-8xwi.rzg). 묶음의 칸은 멤버에서
+/// 읽고 쓰기는 줄에 적힌 칸(미루기면 `deferred_at`)에 한다 — 재는 축과 쓰는 축이 갈려
+/// 있어, 겨루는 둘이 같은 `--from` 을 걸면 **둘 다 이긴다.** 먹는 척하는 가드는 안
+/// 쓰느니만 못하므로 아예 거절하고, 무엇을 대신 하면 되는지 함께 낸다.
+#[test]
+fn a_group_cannot_be_claimed_with_from() {
+    let s = init("from-group");
+    let epic = ok(s.path(), &["epic", "add", "묶음", "-q"]).trim().to_string();
+    let member = add(s.path(), &["멤버", "-e", &epic]);
+    ok(s.path(), &["mv", &member, "in_progress"]);
+    // 줄에 적힌 칸은 아직 첫 칸이고 읽은 칸만 움직였다 — 어느 칸을 줘도 마찬가지다.
+    assert!(line_of(s.path(), &epic).contains("\"status\":\"todo\""), "{}", line_of(s.path(), &epic));
+
+    for args in [
+        vec!["mv", &epic, "done", "--from", "in_progress"],
+        vec!["mv", &epic, "done", "--from", "todo"],
+        vec!["defer", &epic, "-m", "접는다", "--from", "in_progress"],
+    ] {
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "묶음에 --from 이 먹었다: {args:?}\n{}", text(&out));
+        let said = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(said.contains("멤버에서 읽는다") && said.contains(&epic), "까닭을 안 댄다\n{said}");
+    }
+    // **말만 보고 끝내지 않는다.** 거절하면서 쓰는 것이 여기서 제일 나쁜 일이다.
+    assert!(line_of(s.path(), &epic).contains("\"status\":\"todo\""), "거절하면서 옮겼다");
+    assert!(!line_of(s.path(), &epic).contains("\"deferred_at\""), "거절하면서 미뤘다");
+    assert!(!journal(s.path()).contains("\"to\":\"done\""), "안 옮긴 것을 저널에 적었다");
+
+    // `--from` 없이는 그대로 된다 — 묶음을 접는 길(AGENTS.md)이 막히지 않는다.
+    ok(s.path(), &["defer", &epic, "-m", "접는다"]);
+    assert!(line_of(s.path(), &epic).contains("\"deferred_at\""));
 }

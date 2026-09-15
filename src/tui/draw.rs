@@ -29,6 +29,38 @@ const LEFT: u16 = 55;
 /// 커서. 목록의 글자는 늘 이 폭만큼 안쪽에서 시작한다.
 const CURSOR: &str = "> ";
 
+/// 맨 위 헤더 — 로고 다섯 줄과 문구 한 줄, 그래서 여섯 줄이다(moai-mzet).
+///
+/// 로고 오른쪽은 파이프로 갈라 사람·판·프로젝트 번호가 선다. **좁으면 로고만 뺀다** — 파이프
+/// 오른쪽은 남긴다. 거기 서는 번호가 숫자 키를 설명하는 유일한 자리라, 헤더를 통째로 숨기면
+/// 그 키를 아무도 모른다.
+const LOGO: [&str; 6] = [
+    "• ▌ ▄ ·.        ▄▄▄· ▪",
+    "·██ ▐███▪ ▄█▀▄ ▐█ ▀█ ██",
+    "▐█ ▌▐▌▐█·▐█▌.▐▌▄█▀▀█ ▐█·",
+    "██ ██▌▐█▌▐█▌.▐▌▐█▪ ▐▌▐█▌",
+    "▀▀  █▪▀▀▀ ▀█▄▀▪ ▀  ▀ ▀▀▀",
+    "Issue tracker for AI agent",
+];
+
+/// 헤더의 줄 수. [`LOGO`] 와 같은 수여야 한다 — 파이프는 로고가 없는 줄에도 선다.
+const HEADER_H: u16 = LOGO.len() as u16;
+
+/// 헤더가 서려면 화면이 이만큼은 돼야 한다. 헤더 여섯 줄 + 경로 줄 + 키 줄을 내주고도
+/// 몸통에 열여섯 줄이 남는 높이다 — 그보다 짧으면 헤더가 목록을 먹는다.
+const HEADER_MIN_H: u16 = HEADER_H + 18;
+
+/// 로고와 파이프 사이, 파이프와 정보 사이의 여백 한 칸씩.
+const HEADER_GAP: usize = 1;
+
+/// 정보 줄의 라벨 칸 — `User`·`Version` 이 줄 서는 폭.
+const HEADER_LABEL: usize = 7;
+
+/// `<라벨 칸> : ` — 라벨과 " : " 세 칸. 정보 줄의 붙박이 앞자리다. **라벨을 [`pad`] 로
+/// 채우므로 글자 수가 아니라 표시 폭이다** — `{k:<7}` 은 글자를 세어, 한글 라벨을 쓰는 날
+/// 잰 폭과 선 폭이 두 칸씩 어긋나고 그만큼 번호 칸이 밀린다(`label_width` 와 같은 까닭).
+const HEADER_LABEL_W: usize = HEADER_LABEL + 3;
+
 /// 좌우 여백. **`CURSOR` 에서 잰다** — 우측 패널의 여백도 이 값인데, 숫자를
 /// 따로 적어 두면 커서 글리프를 바꾼 날 두 패널이 말없이 갈라진다. 한쪽만
 /// 테두리에 붙으면 같은 화면에서 규칙이 둘이 되고, 붙은 쪽이 답답하게 읽힌다.
@@ -53,14 +85,20 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 굴리지 않는다. 격자에 줄 높이는 몸통의 몫([`menu::BODY_MIN`])을 먼저 남기고 정하고, 그것도
     // 없으면 격자 없이 접두어 줄 한 줄로 접는다([`menu_line`]).
     let area = f.area();
+    // 헤더는 짧은 터미널에서는 서지 않는다 — 여섯 줄을 내주면 목록이 한두 줄만 남는다.
+    // **격자보다 먼저 센다** — 격자가 몸통에 [`menu::BODY_MIN`] 을 남기는지는 헤더를
+    // 뺀 높이로 따져야 한다. 지금은 [`menu::MAX_ROWS`] 가 먼저 걸려 답이 같지만,
+    // 그 상한이 올라가는 날 헤더 몫만큼 몸통을 덜 남기고도 격자가 선다.
+    let header_h = if area.height >= HEADER_MIN_H { HEADER_H } else { 0 };
     let open_menu = (matches!(app.mode, Mode::Browse) && menu::open(&app.chord)).then(|| {
         let items = menu::entries(app.chord.held(), &app.key_ctx(&rows), &app.cfg.statuses);
-        let left = area.height.saturating_sub(1 + banner_h + keys_h) as usize;
+        let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
         let grid = menu::grid(&items, (area.width as usize).saturating_sub(2), menu::rows_for(left));
         (items, grid)
     });
     let panel_h = open_menu.as_ref().map_or(0, |(_, g)| if g.rows == 0 { 0 } else { g.rows as u16 + 1 });
-    let [top, note, body, panel, keys] = Layout::vertical([
+    let [head, top, note, body, panel, keys] = Layout::vertical([
+        Constraint::Length(header_h),
         Constraint::Length(1),
         Constraint::Length(banner_h),
         Constraint::Min(1),
@@ -78,6 +116,11 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         (body, None)
     };
 
+    // 헤더의 빛(`with_projects`)은 버퍼로 못 읽는다 — 빛줄기는 제 글자를 안 남긴다.
+    // 들고 있다가 아래에서 스피너와 함께 센다.
+    // 번호를 실제로 적었는지도 같이 받는다 — 키 바가 층으로 가는 `0` 을 댈지 그 답으로 가른다.
+    let (header_glint, header_numbered) =
+        if header_h > 0 { header(f, app, head) } else { (false, false) };
     crumbs(f, app, &rows, top);
     if let Some((text, urgent)) = banner(app) {
         let style = if urgent {
@@ -132,13 +175,17 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 스피너 글자를 적은 경우 하나고, 그 손해는 오늘까지의 깨움과 같다(`SPIN_BUDGET` 로 묶인다).
     // 빛줄기는 따로 안 본다 — 같은 줄의 글리프(`App::spins`)가 늘 그 왼쪽에 서고, 메뉴는 몸통을
     // 밀어 올릴 뿐 덮지 않으며 폼은 통째로 덮어, 빛만 보이고 글리프가 가려지는 화면이 없다.
-    app.spun = spinner_on(f.buffer_mut());
+    // **헤더의 빛만 예외다**(`header_glint`) — 헤더의 빛줄기 곁에는 스피너 글리프가 없어
+    // 버퍼에 아무 자취도 안 남는다. 그래서 그린 쪽이 들고 온 것을 여기서 함께 센다.
+    // **아는 쪽을 먼저 본다** — 훑기는 화면의 모든 칸을 도는 일이고 `spinner_on` 은 아무것도
+    // 안 바꾸므로, 헤더가 이미 답을 들고 왔으면 그 값을 치를 까닭이 없다.
+    app.spun = header_glint || spinner_on(f.buffer_mut());
 
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
         Mode::Browse => match &open_menu {
             Some((items, grid)) => menu_line(f, app, items, grid, keys),
-            None => fkeys(f, app, &rows, keys),
+            None => fkeys(f, app, &rows, keys, !header_numbered),
         },
         // 안내 속 키 이름은 표에서 읽는다 — 키를 옮기면 안내도 따라온다.
         Mode::Grep(q, g) => prompt(f, keys, &grep_label(*g), q, app.input_error(), &grep_help(app, q)),
@@ -472,6 +519,180 @@ fn banner(app: &App) -> Option<(String, bool)> {
     let lead = if parts.len() == 1 && app.notice.is_some() { "" } else { "! " };
     (!parts.is_empty()).then(|| (format!(" {lead}{} ", parts.join("   ·   ")), urgent))
 }
+
+/// 맨 위 여섯 줄 — 로고와, 그 오른쪽을 가르는 파이프.
+///
+/// 파이프 오른쪽은 사람·판(moai-56jf) 두 줄과 번호 붙은 프로젝트(moai-mr83)다.
+///
+/// 돌려주는 것은 둘이다 — **빛**("지금 선 프로젝트에 빛이 섰는가", [`screen`] 이 `App::spun` 에
+/// 함께 센다)과 **번호**("프로젝트 번호를 실제로 적었는가"). 번호는 키 바가 읽는다(리뷰):
+/// 헤더가 서 있어도 폭이 모자라면 번호가 빠지는데, 그 번호가 층으로 가는 `0` 을 대는 유일한
+/// 자리라 빠진 화면에서는 바가 대신 대야 한다.
+fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
+    let logo_w = LOGO.iter().map(|l| crate::text::width(l)).max().unwrap_or(0);
+    let told = told_of(app);
+    // 라벨 칸은 `<라벨 칸> : ` 로 박았다 — [`HEADER_LABEL`] 칸과 " : " 세 칸.
+    let told_w =
+        told.iter().map(|(_, said)| HEADER_LABEL_W + crate::text::width(said)).max().unwrap_or(0);
+    // 번호 붙은 프로젝트는 재기 전에 한 덩이씩 짓는다 — **재는 쪽과 그리는 쪽이 같은 것을
+    // 본다.** 폭만 따로 세면 로고를 물릴지 정한 자와 실제로 선 칸이 갈린다.
+    let tags = numbered_projects(app);
+    let cell = tags.iter().map(Numbered::len_hint).max().unwrap_or(0);
+    // 로고와 파이프를 세우고도 오른쪽이 **통째로** 설 만큼 남아야 로고를 그린다.
+    // 어림잡은 상한을 두었더니(24칸) 55칸짜리 창에서 로고를 지키고 메일을 `raven@bu` 에서
+    // 자르는 화면이 나왔다 — 오른쪽의 실제 폭으로 잰다.
+    // **번호 칸도 함께 잰다**(리뷰). 사람·판 줄만 재던 때는 80칸에서 로고를 지키고 번호를
+    // 통째로 지우는 화면이 났다 — 그 번호가 숫자 키를 설명하는 유일한 자리라, 로고를 지키자고
+    // 지울 것이 아니다(메일을 안 자르는 것과 같은 자).
+    let want = if cell == 0 { 0 } else { HEADER_GAP + cell };
+    let with_logo = (at.width as usize) >= logo_w + HEADER_GAP * 2 + 1 + told_w + want;
+    let lines: Vec<Line> = LOGO
+        .iter()
+        .enumerate()
+        .map(|(n, row)| {
+            let mut spans = Vec::new();
+            if with_logo {
+                spans.push(Span::styled(pad(row, logo_w), dim()));
+                spans.push(Span::raw(" ".repeat(HEADER_GAP)));
+            }
+            spans.push(Span::styled("│", dim()));
+            if let Some((label, said)) = told.get(n) {
+                spans.push(Span::raw(" ".repeat(HEADER_GAP)));
+                spans.push(Span::styled(format!("{} : ", pad(label, HEADER_LABEL)), dim()));
+                spans.push(Span::raw(said.clone()));
+            }
+            Line::from(spans)
+        })
+        .collect();
+    let logo_cells = if with_logo { logo_w + HEADER_GAP } else { 0 };
+    let from = logo_cells + 1 + HEADER_GAP + told_w + HEADER_GAP;
+    let (lines, glinted, numbered) = with_projects(app, lines, at.width as usize, from, &tags, cell);
+    // 넘치면 `…` 를 남긴다 — 위젯에 맡기면 말없이 잘려 잘렸다는 표시마저 사라진다(`clip`).
+    let lines: Vec<Line> = lines.into_iter().map(|l| fit(l, at.width as usize)).collect();
+    f.render_widget(Paragraph::new(lines), at);
+    (glinted, numbered)
+}
+
+/// 헤더 셋째 칸 — 번호 붙은 프로젝트. `<0>` 은 전체(프로젝트 층)고 그다음이 등록 차례다.
+///
+/// **번호는 아홉까지다**(사용자 결정). 숫자 키는 열 개뿐이고 `<0>` 이 전체를 가져갔다.
+/// 열째부터는 번호 없이 이름만 서고, 층에서 골라 들어간다 — 번호를 두 자리로 받기 시작하면
+/// 한 자리 키가 다음 글쇠를 기다리느라 늦어진다.
+///
+/// **지금 선 자리는 빛이 지나간다**([`shimmer`], 작업 중인 줄과 같은 애니메이션). 빛이 섰는지를
+/// 돌려주고, [`screen`] 이 그것을 `App::spun` 에 함께 센다 — 안 세면 루프가 빠른 걸음으로 안
+/// 깨어나 빛이 멈춘다. **여기서 `app.spun` 을 켜 봐야 소용없다**: 다 그린 뒤 버퍼를 훑는
+/// `app.spun = spinner_on(…)` 이 그 위에 덮어쓴다. 목록의 빛은 곁의 스피너 글리프가 버퍼에
+/// 남아 대신 말해 주지만, 헤더에는 그 글리프가 없어 빛만으로는 읽히지 않는다.
+fn with_projects<'a>(
+    app: &App,
+    mut lines: Vec<Line<'a>>,
+    width: usize,
+    from: usize,
+    tags: &[Numbered],
+    cell: usize,
+) -> (Vec<Line<'a>>, bool, bool) {
+    let Some(layer) = app.layer.as_ref() else { return (lines, false, false) };
+    // `<0>` 은 층이다 — 층에 서 있으면 그것이 선 자리다. **번호는 층이 센다**
+    // ([`layer::Layer::number`]) — 맨 숫자가 "이미 그 자리인가" 를 가르는 자와 같아야 한다.
+    let here = layer.number();
+    let (mut glinted, mut numbered) = (false, false);
+    for (n, tag) in tags.iter().enumerate() {
+        let row = n % LOGO.len();
+        let col = n / LOGO.len();
+        let at = from + col * (cell + HEADER_GAP * 2);
+        // **칸의 자리는 넓은 덩이(`cell`)로 맞추되, 설지 말지는 제 폭으로 가른다**(리뷰).
+        // `cell` 로 갈랐더니 이름 긴 프로젝트 하나가 **모든** 번호를 지웠다 — 70칸에서
+        // `<0> 전체` 와 `<1> one` 은 넉넉히 서는데 열째의 긴 이름이 잰 상한이라 통째로
+        // 빠졌고, 그러면 층으로 가는 `0` 을 대는 자리가 화면에서 사라진다.
+        //
+        // **못 드는 덩이는 건너뛴다, 걸음을 멈추지 않는다**(리뷰). 한 열의 여섯 줄은 같은
+        // 칸(`at`)에서 시작하고 제 폭만 다르다 — 멈추면 긴 이름 **뒤에** 선 짧은 이름까지
+        // 같이 지워져, 고친 자리가 한 줄 밀려 그대로 돌아온다.
+        if at + tag.len_hint() > width {
+            continue;
+        }
+        numbered = true;
+        let pad = at.saturating_sub(spans_width(&lines[row].spans));
+        lines[row].spans.push(Span::raw(" ".repeat(pad)));
+        // 번호는 SPC 메뉴의 키와 같은 색으로 잘 보이게 둔다(사용자 결정) — 키라는 것이 색으로도 읽힌다.
+        lines[row].spans.push(Span::styled(tag.key.clone(), Style::new().fg(MENU_KEY)));
+        if here == Some(n) {
+            glinted = true;
+            lines[row].spans.extend(shimmer(tag.name.clone(), app.spin));
+        } else {
+            lines[row].spans.push(Span::styled(tag.name.clone(), dim()));
+        }
+    }
+    (lines, glinted, numbered)
+}
+
+/// `<n> 이름` 한 덩이. 번호가 없는 열째부터는 번호 자리를 공백으로 맞춰 이름이 한 줄로 선다.
+struct Numbered {
+    key: String,
+    name: String,
+}
+
+impl Numbered {
+    fn len_hint(&self) -> usize {
+        crate::text::width(&self.key) + crate::text::width(&self.name)
+    }
+}
+
+/// 헤더에 설 덩이들 — `<0> 전체`(프로젝트 층)와 등록 차례. 층이 없으면 비었다.
+///
+/// **이름은 한 줄로 접는다**(`text::one_line`) — 등록한 디렉터리 이름은 남이 지은 글이라
+/// 줄바꿈도 탭도 escape 도 들 수 있다. 층의 줄과 경로 줄이 이미 그렇게 접으므로(moai-9tww)
+/// 여기만 날로 두면 같은 프로젝트가 두 표면에서 다른 이름으로 서고, 접지 않은 글자는 폭
+/// 셈까지 어긋내 번호 칸이 밀린다.
+fn numbered_projects(app: &App) -> Vec<Numbered> {
+    let Some(layer) = app.layer.as_ref() else { return Vec::new() };
+    std::iter::once("전체".to_string())
+        .chain(layer.places.iter().map(|p| crate::text::one_line(&p.name)))
+        .enumerate()
+        .map(|(n, name)| numbered(n, name))
+        .collect()
+}
+
+/// **번호의 상한은 키 표에서 읽는다**([`keys::NUMBERED`]) — `Ctx::projects` 가 그것으로
+/// 잘라 [`Browse::Project`] 를 켜고 끄므로, 여기서 숫자를 손으로 적으면 헤더가 안 듣는 키를
+/// 대거나(상한을 내린 날) 듣는 키를 안 대는(올린 날) 화면이 난다. 번호 없는 자리의 공백도
+/// `<n> ` 의 폭에서 잰다 — 두 자리를 받게 되는 날 이름이 한 칸씩 어긋나지 않게.
+fn numbered(n: usize, name: String) -> Numbered {
+    let key = if n <= keys::NUMBERED { format!("<{n}> ") } else { " ".repeat(NO_NUMBER_W) };
+    Numbered { key, name }
+}
+
+/// 번호 없는 자리의 폭 — 가장 큰 번호가 서는 `<n> ` 만큼.
+const NO_NUMBER_W: usize = "<> ".len() + keys::NUMBERED.ilog10() as usize + 1;
+
+/// 조각들의 표시 폭. 칸을 맞추거나 잘라야 할 곳은 모두 이것으로 잰다 — 같은 셈을 자리마다
+/// 손으로 적으면 한쪽만 `crate::text::width` 를 안 지나는 날 두 자가 갈라진다.
+///
+/// **ratatui 의 `Line::width()` 를 안 쓴다**: 이 저장소의 폭은 `text` 모듈 하나가 정하고
+/// (CLI 표와 TUI 가 같은 자리에서 잘려야 한다), 그 자를 안 지나는 셈을 들이면 그 약속이
+/// 조용히 깨진다.
+fn spans_width(spans: &[Span]) -> usize {
+    spans.iter().map(|s| crate::text::width(&s.content)).sum()
+}
+
+/// 파이프 오른쪽 줄들 — 위에서부터 사람, 판. 그 밑은 번호 붙은 프로젝트가 채운다(moai-mr83).
+///
+/// **누군지 모르면 그 자리를 비우고 넘어간다**(moai-56jf). 여는 화면은 읽기고, 읽기는 사람을
+/// 묻지 않는다 — 여기서 `Mode::Ask` 를 세우면 설정 없는 기계에서 탐색기가 묻는 칸으로 열린다.
+///
+/// **사람은 `App` 이 들고 있는 것을 받아 쓴다**(`App::told_user`). 여기서 `model::actor` 를
+/// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
+/// 깜빡임 한 번마다 도는 자리다.
+fn told_of(app: &mut App) -> [(&'static str, String); 2] {
+    let user = app.told_user().to_string();
+    [("User", user), ("Version", VERSION_SAID.to_string())]
+}
+
+/// 판 줄의 글. 서버의 최신판은 아직 없다 — 빈 자리를 두면 "고장" 으로 읽히므로 없다는 것을
+/// 낱말로 적는다. **짓는 것이 아니라 박아 둔다**: 컴파일 때 다 정해진 글이라 프레임마다
+/// 새로 지을 까닭이 없다(그리는 자리는 키 하나·깜빡임 한 번마다 돈다).
+const VERSION_SAID: &str = concat!(env!("CARGO_PKG_VERSION"), " · 최신 확인 안 함");
 
 fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let w = at.width as usize;
@@ -856,7 +1077,7 @@ fn row_line<'a>(
     // 커서 자리 + 머리글 폭. **`CURSOR` 에서 잰다** — 숫자를 손으로 적으면
     // 글리프를 바꾼 날 제목 몫이 한두 칸 넉넉해지고, 넘친 줄은 위젯이 말없이
     // 잘라 내 잘렸다는 `…` 마저 사라진다.
-    let mut head_w = head.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
+    let mut head_w = spans_width(&head);
     // 셈은 **제목보다 먼저 자리를 얻는다** — 긴 제목에 밀려 잘리면 진척을 말하는 것이
     // 사라진다. 자는 상세 롤업과 같다(`Index::progress`).
     let tally = match (fields.shows(Field::Tally) && is_dir).then(|| app.index.progress(&app.issues, &deeper(app, e))) {
@@ -1082,8 +1303,8 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
             out
         }
         None => vec![Line::from(Span::styled("없다", dim()))],
-        // 프로젝트 뿌리의 `..` 은 층으로 간다 — 어디로 가는지 말한다.
-        Some(Row::Up) if app.path.is_empty() => vec![Line::from(Span::styled("프로젝트 층으로", dim()))],
+        // `..` 은 디렉터리에만 선다(moai-i784) — 뿌리에서 층으로 가던 갈래는 걷었으므로
+        // 이 줄이 가는 데는 한 곳뿐이다.
         Some(Row::Up) => vec![Line::from(Span::styled("한 층 위로", dim()))],
         Some(Row::Project(at)) => place_about(app, at, inner.width as usize),
         Some(Row::Item(e)) => match e.at() {
@@ -1213,8 +1434,7 @@ pub(super) fn pane_name(p: Pane) -> &'static str {
 
 /// 한 줄을 패널 폭에 맞춘다. 넘치면 `…` 를 남긴다.
 fn fit(line: Line<'_>, room: usize) -> Line<'_> {
-    let w: usize = line.spans.iter().map(|s| crate::text::width(&s.content)).sum();
-    if w <= room {
+    if spans_width(&line.spans) <= room {
         return line;
     }
     // `…` 한 칸을 남겨 두고 조각을 차례로 담는다. **표시는 한 번만 붙인다** —
@@ -1700,7 +1920,10 @@ fn bold() -> Style {
 /// 없는 키를 적어 두면 그것부터 도구를 못 믿게 된다.
 ///
 /// 메뉴가 열린 동안은 이 바 대신 접두어 줄([`menu_line`])이 선다.
-fn fkeys(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
+/// `unnumbered` 는 **헤더가 프로젝트 번호를 안 적었다**는 뜻이다 — 짧아 헤더가 아예 안 섰거나,
+/// 서긴 섰는데 좁아 번호가 빠졌거나(리뷰). 그린 쪽([`header`])이 재서 넘긴다: 여기서 높이만
+/// 다시 재면 좁고 긴 창에서 번호도 바도 `0` 을 안 대, 층으로 가는 길이 화면에서 사라진다.
+fn fkeys(f: &mut Frame, app: &App, rows: &[Row], at: Rect, unnumbered: bool) {
     let c = app.key_ctx(rows);
     // `g` 가 기다리는 동안은 메뉴와 같은 자리에서 **무엇을 기다리는지** 댄다(moai-k3yi). 뜻 없는
     // 키를 누르면 열이 버려져([`keys::Chord::feed`]) 바가 저절로 돌아온다.
@@ -1712,7 +1935,7 @@ fn fkeys(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
             .collect();
         return bar(f, at, Vec::new(), vec![waiting(app.chord.held(), next)]);
     }
-    let (optional, keep) = browse_hints(app, &c);
+    let (optional, keep) = browse_hints(app, &c, unnumbered);
     let spans = |v: Vec<(String, &str)>| v.iter().map(|(k, what)| key(k, what)).collect();
     bar(f, at, spans(optional), spans(keep));
 }
@@ -1733,7 +1956,7 @@ fn waiting(held: &[ratatui::crossterm::event::KeyEvent], next: Vec<Hint>) -> Spa
 /// **이름·낱말·켜짐은 키 표에서 읽는다**([`keys::BROWSE`]·[`keys::Browse::enabled`]). 여기서
 /// 정하는 것은 **차례**뿐이다 — 무엇이 먼저 떨어지는가. 켜지지 않은 동작은 적지 않으므로
 /// 키 처리와 바가 한 판정을 읽고, 둘이 갈릴 수 없다.
-fn browse_hints(app: &App, c: &Ctx) -> (Vec<Hint>, Vec<Hint>) {
+fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) {
     use Browse as B;
     let hint = |acts: &[Browse]| -> Hint { (labels(BROWSE, acts), acts[0].what(c)) };
     let shown = |order: &[&[Browse]]| -> Vec<Hint> {
@@ -1751,11 +1974,24 @@ fn browse_hints(app: &App, c: &Ctx) -> (Vec<Hint>, Vec<Hint>) {
     // `h·l`·`Ctrl-C` 는 적지 않는다: 드나들기의 이름은 Enter·Bksp 하나고(층의 거절문도 그 이름을
     // 댄다), 끝내기는 메뉴의 `q` 가 대며 Ctrl-C 까지 늘 남기면 80칸 거름망 켠 목록에서 `j·k` 가
     // 떨어진다. 둘 다 `moai tui --help` 에 있다.
+    // **헤더가 번호를 안 대면 층으로 가는 키를 바가 댄다**(moai-c2s3). 뿌리의 `..` 을 걷은 뒤
+    // 층으로 가는 길은 `0` 하나인데, 그 키를 대는 자리가 헤더의 번호뿐이라 번호가 빠지면
+    // 화면 어디에도 안 적힌다. 헤더가 번호를 적었으면 여기서는 뺀다 — 같은 키를 두 군데서
+    // 적으면 좁은 바에서 다른 키가 그만큼 먼저 떨어진다.
+    //
+    // **가르는 것은 높이가 아니라 "적었는가" 다**(리뷰). 높이로 가르던 때는 짧으면 바가,
+    // 길면 헤더가 댄다고 보았는데, 헤더는 **좁아도** 번호를 뺀다 — 55칸 24줄에서 헤더가
+    // 서고 번호가 빠지면 둘 다 입을 다물어 층으로 가는 길이 화면에서 사라졌다.
+    //
+    // **맨 앞에 둔다** — 폭이 모자라면 이것이 가장 먼저 떨어진다. 층은 한 화면 건너의 일이고,
+    // 이동(`j·k`)과 드나들기는 지금 보는 목록을 쓰는 키라 그쪽이 먼저다.
     let optional = if app.on_layer() {
         shown(&[&[B::Step(Move::LineDown), B::Step(Move::LineUp)], &[B::FocusNext], &[B::Enter]])
     } else {
-        shown(&[
-            &[B::Step(Move::LineDown), B::Step(Move::LineUp)],
+        // 층에 선 갈래는 위에서 이미 갈렸다 — 여기 오면 층 밖이다.
+        let mut order: Vec<&[Browse]> = if unnumbered { vec![&[B::Project(0)]] } else { Vec::new() };
+        order.extend([
+            &[B::Step(Move::LineDown), B::Step(Move::LineUp)][..],
             // **`Tab` 은 가는 곳을 댄다** — 가는 곳을 적으면 이 줄도 글자로 지금 자리를 말한다.
             &[B::FocusNext],
             &[B::Grep],
@@ -1764,7 +2000,8 @@ fn browse_hints(app: &App, c: &Ctx) -> (Vec<Hint>, Vec<Hint>) {
             // 가 된다. 실제로 눌러 재는 것은 `the_key_bar_names_only_keys_that_act_in_the_focused_pane` 이다.
             &[B::Leave],
             &[B::Enter],
-        ])
+        ]);
+        shown(&order)
     };
     // 늘 남는 것: 걸어 둔 거름망을 푸는 길, 그리고 나머지 전부로 가는 메뉴.
     let mut keep = Vec::new();
@@ -1844,8 +2081,7 @@ fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid,
     if held.len() > 1 {
         exits.push(key(&label(MENU, Menu::Up), Menu::Up.what()));
     }
-    let width = |v: &[Span]| v.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
-    let used = width(&spans) + width(&exits);
+    let used = spans_width(&spans) + spans_width(&exits);
     if used <= room {
         spans.push(Span::raw(" ".repeat(room - used)));
         spans.extend(exits);
@@ -1855,11 +2091,10 @@ fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid,
 
 /// 키 바를 폭에 맞춰 놓는다. `optional` 은 **뒤에서부터** 들어가고 모자라면 앞쪽이 떨어진다.
 fn bar(f: &mut Frame, at: Rect, mut optional: Vec<Span<'_>>, keep: Vec<Span<'_>>) {
-    let width = |v: &[Span]| v.iter().map(|s| crate::text::width(&s.content)).sum::<usize>();
     let room = at.width as usize;
     let mut spans: Vec<Span> = Vec::new();
     while let Some(next) = optional.pop() {
-        if width(&spans) + crate::text::width(&next.content) + width(&keep) > room {
+        if spans_width(&spans) + crate::text::width(&next.content) + spans_width(&keep) > room {
             break;
         }
         spans.push(next);
@@ -3160,9 +3395,7 @@ pub(super) mod tests {
     #[test]
     fn detail_labels_line_up_by_display_width() {
         // 값은 마지막 span 이다. 그 앞의 폭이 값이 시작하는 칸이다.
-        let starts_at = |l: &Line| {
-            l.spans[..l.spans.len() - 1].iter().map(|s| crate::text::width(&s.content)).sum::<usize>()
-        };
+        let starts_at = |l: &Line| spans_width(&l.spans[..l.spans.len() - 1]);
         let w = label_width(&[("에픽".into(), "값".into()), ("마일스톤".into(), "값".into())]);
         let short = field("에픽", "값", w, 40);
         let long = field("마일스톤", "값", w, 40);
@@ -3245,6 +3478,240 @@ pub(super) mod tests {
                 assert!(!bar.contains(gone), "{w}칸 바에 옮긴 키 `{gone}` 가 남았다 — {bar:?}");
             }
         }
+    }
+
+    /// **맨 위 여섯 줄은 헤더다**(moai-mzet) — 로고 다섯 줄과 문구 한 줄, 그 오른쪽을 파이프가
+    /// 가른다. 경로 줄은 그 밑으로 내려간다.
+    #[test]
+    fn the_header_stands_six_rows_of_logo_and_a_pipe() {
+        let mut a = app();
+        let lines = render(&mut a, 100, 24);
+        assert!(lines[5].contains("Issue tracker for AI agent"), "문구가 여섯째 줄이 아니다 — {:?}", &lines[..6]);
+        for (n, line) in lines[..6].iter().enumerate() {
+            assert!(line.contains('│'), "{n}번째 헤더 줄에 파이프가 없다 — {line:?}");
+        }
+        assert!(lines[..5].iter().any(|l| l.contains('▀')), "로고를 안 그린다 — {:?}", &lines[..5]);
+        // 헤더는 목록을 덮지 않는다 — 밑의 칸이 그만큼 내려갔을 뿐이다.
+        assert!(lines[6..].iter().any(|l| l.contains("argos-0001")), "목록이 헤더에 먹혔다");
+    }
+
+    /// **파이프 오른쪽 첫 두 줄은 사람과 판이다**(moai-56jf) — User 는 이름과 메일,
+    /// Version 은 이 바이너리의 판이다. 서버 최신판은 아직 없으니 그 자리를 낱말로 적어 둔다.
+    #[test]
+    fn the_header_names_the_user_and_the_version() {
+        let mut a = app();
+        a.identify = |_, _| Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() });
+        let lines = render(&mut a, 100, 24);
+        let head = lines[..6].join("\n");
+        assert!(head.contains("User") && head.contains("레이븐 (raven@buzzni.com)"), "사람이 없다\n{head}");
+        assert!(head.contains(&format!("Version : {}", env!("CARGO_PKG_VERSION"))), "판이 없다\n{head}");
+        assert!(head.contains("최신 확인 안 함"), "서버 최신판 자리가 없다\n{head}");
+    }
+
+    /// **누군지 몰라도 헤더는 서고 묻지 않는다**(moai-56jf). 읽기는 사람을 묻지 않는다 —
+    /// 여는 순간 묻는 칸이 서면 설정 없는 기계에서 도구가 고장 난 것으로 보인다.
+    #[test]
+    fn a_machine_without_an_identity_still_draws_the_header() {
+        let mut a = app();
+        a.identify = |_, _| Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험", crate::fail::code::NO_ACTOR));
+        let lines = render(&mut a, 100, 24);
+        let head = lines[..6].join("\n");
+        assert!(head.contains("User") && head.contains('—'), "모르는 자리를 안 비웠다\n{head}");
+        assert!(head.contains("Version"), "판까지 같이 사라졌다\n{head}");
+        assert_eq!(a.mode, Mode::Browse, "헤더를 그리다 사람을 물었다");
+    }
+
+    /// **사람은 프레임마다 다시 풀지 않는다**(moai-56jf). `model::actor` 는 `git config` 를
+    /// 프로세스로 두 번 띄우는데, 그리는 자리는 키 하나·깜빡임 한 번마다 도는 자리다 —
+    /// 여기서 풀면 묵혀 둔 화면이 초당 여섯 개씩 프로세스를 띄운다. 묻는 칸에서 사람을
+    /// 받으면(`user` 가 바뀌면) 그때는 다시 푼다.
+    #[test]
+    fn the_header_resolves_the_user_once_not_every_frame() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        fn counted(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() })
+        }
+        let mut a = app();
+        a.identify = counted;
+        for _ in 0..5 {
+            let _ = render(&mut a, 100, 24);
+        }
+        assert_eq!(CALLS.load(Ordering::SeqCst), 1, "프레임마다 git 을 띄웠다");
+        // 묻는 칸에서 사람을 받으면 그 사람이 서야 한다 — 묵힌 것이 남으면 답한 보람이 없다.
+        a.user = Some("다른 이 (other@buzzni.com)".into());
+        let lines = render(&mut a, 100, 24);
+        assert_eq!(CALLS.load(Ordering::SeqCst), 2, "사람이 바뀌었는데 묵힌 것을 그대로 썼다");
+        assert!(lines[..6].join("\n").contains("레이븐"), "다시 푼 값이 안 섰다");
+        // **`naming` 이 바뀌면 다시 푼다**(리뷰). 묵힌 것은 `model::label` 을 이미 지난 글이라
+        // 그 모양을 프로젝트 설정이 정한다 — `naming = "email"` 인 프로젝트로 건너뛰고도
+        // 떠난 프로젝트의 `이름 (메일)` 이 그대로 서면 그 설정은 없는 것과 같다.
+        a.cfg.naming = crate::config::Naming::Email;
+        let lines = render(&mut a, 100, 24);
+        let head = lines[..6].join("\n");
+        assert!(head.contains("raven@buzzni.com") && !head.contains("레이븐"), "옆 프로젝트의 표기가 따라왔다\n{head}");
+    }
+
+    /// **로고가 안 들면 헤더는 로고만 뺀다**(moai-mzet) — 파이프 오른쪽은 좁아도 남는다.
+    /// 거기 서는 프로젝트 번호가 숫자 키를 설명하는 유일한 자리라, 통째로 숨기면 키를 아무도 모른다.
+    #[test]
+    fn a_narrow_header_drops_the_logo_and_keeps_the_pipe() {
+        let mut a = app();
+        let lines = render(&mut a, 40, 24);
+        assert!(!lines[..6].iter().any(|l| l.contains('▀')), "40칸에 로고를 우겨 넣었다 — {:?}", &lines[..6]);
+        assert!(lines[0].contains('│'), "좁아도 파이프는 남는다 — {:?}", lines[0]);
+    }
+
+    /// **짧은 터미널에는 헤더가 서지 않는다**(moai-mzet) — 여섯 줄을 내주면 목록이 한두 줄만 남는다.
+    #[test]
+    fn a_short_terminal_keeps_its_rows_for_the_list() {
+        let mut a = app();
+        let lines = render(&mut a, 100, 14);
+        assert!(!lines[..6].iter().any(|l| l.contains("Issue tracker")), "짧은 터미널에 헤더가 섰다 — {:?}", &lines[..6]);
+    }
+
+    /// **헤더가 안 서는 짧은 터미널에서는 키 바가 `0` 을 댄다**(moai-c2s3). 뿌리의 `..` 을
+    /// 걷은 뒤(moai-i784) 층으로 가는 길은 `0` 하나인데, 그 키를 대는 자리가 헤더의 번호뿐이라
+    /// 헤더가 빠지면 화면 어디에도 층으로 가는 길이 안 적힌다.
+    #[test]
+    fn a_short_terminal_names_the_layer_key_in_the_bar() {
+        use super::super::layer::At;
+        let mut a = layered(At::Project("/w/one".into()));
+        let short = render(&mut a, 100, 14).last().cloned().unwrap_or_default();
+        assert!(short.contains("0 프로젝트"), "헤더가 없는데 층으로 가는 키를 아무도 안 댄다 — {short:?}");
+
+        // 헤더가 서면 번호가 이름과 함께 서므로 바에서는 뺀다 — 같은 말을 두 번 적지 않는다.
+        let tall = render(&mut a, 100, 24);
+        assert!(tall[..6].join("\n").contains("<0> 전체"), "헤더가 번호를 안 댄다");
+        assert!(!tall.last().cloned().unwrap_or_default().contains("0 프로젝트"), "헤더와 바가 같은 키를 두 번 적는다");
+    }
+
+    /// **좁은 창도 짧은 창과 같다**(리뷰) — 헤더는 서지만 번호가 빠지는 폭이 있다. 높이만 보고
+    /// 가르던 때는 그 창에서 헤더도 바도 `0` 을 안 대, 뿌리의 `..` 을 걷은 뒤로 층으로 가는 길이
+    /// 화면 어디에도 안 적혔다. 가르는 것은 높이가 아니라 **번호를 실제로 적었는가** 다.
+    #[test]
+    fn a_narrow_header_without_numbers_hands_the_layer_key_to_the_bar() {
+        use super::super::layer::At;
+        let mut a = layered(At::Project("/w/one".into()));
+        // 이름이 길면 사람 줄이 오른쪽을 다 먹어, 넉넉한 폭에서도 번호가 못 선다.
+        a.identify = |_, _| Ok(crate::model::Actor { name: "a".repeat(70), email: "someone@example.com".into() });
+        let lines = render(&mut a, 100, 24);
+        let head = lines[..6].join("\n");
+        assert!(head.contains('│'), "시험의 전제 — 100칸 24줄에 헤더는 선다\n{head}");
+        assert!(!head.contains("<0>"), "시험의 전제 — 사람 줄이 다 먹어 번호가 안 든다\n{head}");
+        let bar = lines.last().cloned().unwrap_or_default();
+        assert!(bar.contains("0 프로젝트"), "번호가 빠졌는데 바도 층으로 가는 키를 안 댄다 — {bar:?}");
+    }
+
+    /// **이름 하나가 번호를 통째로 지우지 않는다**(리뷰). 칸의 자리는 가장 넓은 덩이로 맞추되
+    /// 설지 말지는 제 폭으로 가른다 — 넓은 덩이로 갈랐더니 이름 긴 프로젝트 하나가 넉넉히 서는
+    /// `<0> 전체` 까지 끌고 나갔고, 그러면 층으로 가는 `0` 을 대는 자리가 사라진다.
+    #[test]
+    fn one_long_name_does_not_take_the_other_numbers_with_it() {
+        use super::super::layer::{At, Look, Shut};
+        let shut = || Look::Shut { state: Shut::Uninit, said: "· init 전".into() };
+        let mut a = app();
+        a.identify = |_, _| Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() });
+        a.layer = Some(super::super::layer::fake(
+            vec![("one", "/w/one", shut()), ("a-very-long-project-name-goes-here", "/w/two", shut())],
+            At::Project("/w/one".into()),
+        ));
+        let head = render(&mut a, 70, 24)[..6].join("\n");
+        assert!(head.contains("<0> 전체") && head.contains("<1> one"), "긴 이름 하나가 남의 번호까지 지웠다\n{head}");
+
+        // **차례가 바뀌어도 같다**(리뷰). 안 드는 덩이에서 걸음을 멈추면 같은 열의 **뒤에** 선
+        // 짧은 이름까지 함께 사라진다 — 한 열의 여섯 줄은 같은 칸에서 시작하므로, 앞 줄이 못
+        // 섰다는 것이 뒷줄도 못 선다는 뜻이 아니다.
+        a.layer = Some(super::super::layer::fake(
+            vec![("a-very-long-project-name-goes-here", "/w/two", shut()), ("one", "/w/one", shut())],
+            At::Project("/w/one".into()),
+        ));
+        let head = render(&mut a, 70, 24)[..6].join("\n");
+        assert!(head.contains("<0> 전체") && head.contains("<2> one"), "긴 이름이 뒤에 선 번호까지 지웠다\n{head}");
+    }
+
+    /// **파이프 오른쪽 셋째 칸은 번호 붙은 프로젝트다**(moai-mr83) — `<0>` 은 전체(층),
+    /// 그다음이 등록 차례다. 지금 선 프로젝트는 빛이 지나간다 — 그래서 루프가 계속 깨어난다.
+    #[test]
+    fn the_header_numbers_the_projects_and_glints_on_the_one_we_stand_in() {
+        use super::super::layer::At;
+        let mut a = layered(At::Project("/w/one".into()));
+        let lines = render(&mut a, 120, 24);
+        let head = lines[..6].join("\n");
+        assert!(head.contains("<0> 전체"), "전체가 없다\n{head}");
+        for (n, name) in [(1, "one"), (2, "bare"), (3, "gone")] {
+            assert!(head.contains(&format!("<{n}> {name}")), "{n}번이 없다\n{head}");
+        }
+        assert!(a.spun, "선 프로젝트가 안 빛난다 — 루프가 헤더를 안 깨운다");
+    }
+
+    /// **번호는 1~9 까지다**(사용자 결정) — 열째부터는 번호 없이 이름만 선다. 숫자 키가
+    /// 열 개뿐이라 `<10>` 은 한 번에 누를 수 없고, 두 자리를 받기 시작하면 한 자리 키가 늦어진다.
+    #[test]
+    fn a_tenth_project_stands_without_a_number() {
+        use super::super::layer::{At, Look, Shut};
+        let shut = || Look::Shut { state: Shut::Uninit, said: "· init 전".into() };
+        let places: Vec<(String, String, Look)> =
+            (1..=11).map(|n| (format!("p{n}"), format!("/w/p{n}"), shut())).collect();
+        let mut a = app();
+        a.layer = Some(super::super::layer::fake(
+            places.iter().map(|(n, p, _)| (n.as_str(), p.as_str(), shut())).collect(),
+            At::Layer,
+        ));
+        let head = render(&mut a, 160, 24)[..6].join("\n");
+        assert!(head.contains("<9> p9"), "아홉째에 번호가 없다\n{head}");
+        assert!(!head.contains("<10>"), "열째에 번호를 줬다\n{head}");
+        assert!(head.contains("p10"), "번호 없는 프로젝트가 아예 사라졌다\n{head}");
+    }
+
+    /// **헤더의 빛은 혼자서도 루프를 깨운다**(리뷰). 목록의 빛은 곁의 스피너 글리프가
+    /// 버퍼에 남아 `spinner_on` 이 대신 읽어 주지만, 헤더의 빛줄기는 제 글자를 안 남긴다 —
+    /// 그리는 쪽에서 `app.spun` 을 켜 봐야 다 그린 뒤의 `app.spun = spinner_on(…)` 이
+    /// 덮어써, 화면에 도는 줄이 하나도 없으면 헤더의 빛이 그 자리에서 멈췄다.
+    #[test]
+    fn the_header_glint_wakes_the_loop_with_no_spinner_on_screen() {
+        use super::super::layer::At;
+        let mut a = layered(At::Project("/w/one".into()));
+        a.issues.clear();
+        a.index = crate::nav::Index::of(&[]);
+        a.keep.clear();
+        let lines = render(&mut a, 120, 24);
+        assert!(lines[..6].join("\n").contains("<1> one"), "{:?}", &lines[..6]);
+        assert!(!lines.iter().any(|l| l.contains('▸')), "도는 줄이 남아 시험이 헛돈다");
+        assert!(a.spun, "헤더의 빛이 혼자면 루프를 안 깨운다 — 빛이 그 자리에서 멈춘다");
+    }
+
+    /// **로고를 지키자고 정보를 자르지 않는다**(리뷰). 어림잡은 상한을 두었더니 55칸에서
+    /// 로고가 서고 메일이 `raven@bu` 에서 잘렸다 — 정보 줄의 실제 폭으로 잰다.
+    #[test]
+    fn the_logo_yields_before_the_user_line_is_cut() {
+        let mut a = app();
+        a.identify = |_, _| Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() });
+        for w in [51u16, 55, 60, 66, 80] {
+            let head = render(&mut a, w, 24)[..6].join("\n");
+            assert!(head.contains("레이븐 (raven@buzzni.com)"), "{w}칸에서 사람이 잘렸다\n{head}");
+            assert!(head.contains("최신 확인 안 함"), "{w}칸에서 판이 잘렸다\n{head}");
+        }
+    }
+
+    /// **로고를 지키자고 번호를 지우지 않는다**(리뷰). 사람·판 줄만 재던 때는 이름이 긴
+    /// 프로젝트 하나로 80칸에서 로고가 서고 번호가 통째로 사라졌다 — 그 번호가 숫자 키를
+    /// 설명하는 유일한 자리라, 메일을 안 자르는 것과 같은 자로 로고가 먼저 물러난다.
+    #[test]
+    fn the_logo_yields_before_the_project_numbers_vanish() {
+        use super::super::layer::{At, Look, Shut};
+        let mut a = app();
+        a.identify = |_, _| Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() });
+        let shut = Look::Shut { state: Shut::Uninit, said: "· init 전".into() };
+        a.layer = Some(super::super::layer::fake(vec![("moai-supervise", "/w/moai-supervise", shut)], At::Layer));
+        let narrow = render(&mut a, 80, 24)[..6].join("\n");
+        assert!(narrow.contains("<1> moai-supervise"), "80칸에서 번호가 통째로 사라졌다\n{narrow}");
+        assert!(!narrow.contains('▀'), "번호를 지우고 로고를 지켰다\n{narrow}");
+        // 둘 다 들어가는 폭에서는 둘 다 선다 — 물러나는 것은 모자랄 때뿐이다.
+        let wide = render(&mut a, 100, 24)[..6].join("\n");
+        assert!(wide.contains("<1> moai-supervise"), "넓은 창에 번호가 없다\n{wide}");
+        assert!(wide.contains('▀'), "넓은 창에 로고가 없다\n{wide}");
     }
 
     /// 층을 그림 시험용으로 세운다 — 연 것 하나, init 전 하나, 사라진 것 하나.
@@ -3383,17 +3850,17 @@ pub(super) mod tests {
         assert!(wide.contains("디렉터리와 .moai 는 그대로다"), "{wide:?}");
     }
 
-    /// **프로젝트 안에서는 경로 줄이 늘 어느 프로젝트인지 댄다.** 뿌리에는 층으로 가는 `..`
-    /// 이 서고 오른쪽이 그곳이 어디인지 말한다. 깊이 들어가 경로가 잘려도 이름은 남는다.
+    /// **프로젝트 안에서는 경로 줄이 늘 어느 프로젝트인지 댄다.** 뿌리에 `..` 은 서지 않는다
+    /// (moai-i784) — 층으로는 헤더의 `0` 이 간다. 깊이 들어가 경로가 잘려도 이름은 남는다.
     #[test]
-    fn inside_a_project_the_path_line_names_it_and_the_root_climbs_to_the_layer() {
+    fn inside_a_project_the_path_line_names_it_and_the_root_has_no_way_up() {
         use super::super::layer::At;
         let mut a = layered(At::Project("/w/one".into()));
         a.cursor = 0;
         let lines = render(&mut a, 80, 12);
         assert!(lines[0].starts_with("one:/"), "{:?}", lines[0]);
         let screen = lines.join("\n");
-        assert!(screen.contains("..") && screen.contains("프로젝트 층으로"), "{screen}");
+        assert!(!screen.contains("프로젝트 층으로"), "뿌리에 층으로 가는 줄이 남았다\n{screen}");
 
         a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -3701,6 +4168,10 @@ pub(super) mod tests {
                     a.focus = pane;
                     let before = render(&mut a, 120, 14);
                     a.key(press(code));
+                    // **말만 한 것은 듣는 것이 아니다**(리뷰 moai-lur8.met). 층이 있는 뿌리의
+                    // Bksp 는 "층으로는 0 으로 간다" 는 한 줄만 낸다 — 화면은 바뀌지만 그
+                    // 키가 하는 일은 없으므로 바에 설 자리도 아니다. 알림을 걷고 견준다.
+                    a.notice = None;
                     let acts = render(&mut a, 120, 14) != before;
                     let bar = before.last().cloned().unwrap_or_default();
                     assert_eq!(bar.contains(hint), acts, "{place:?}·{pane:?} 에서 {code:?} 가 듣는가 {acts} — 바 {bar:?}");
@@ -3720,7 +4191,8 @@ pub(super) mod tests {
         InsideLeaf,
         /// 에픽 안, 커서가 `..` 위.
         InsideUp,
-        /// 층이 있는 프로젝트 뿌리, 커서가 잎 위 — Bksp 가 층으로 올라간다.
+        /// 층이 있는 프로젝트 뿌리, 커서가 잎 위 — 층이 있어도 뿌리는 뿌리라 Bksp 는
+        /// 안 듣는다(moai-i784). 층으로는 `0` 이 간다.
         LayeredRootLeaf,
         /// 층이 있는 프로젝트의 에픽 안, 커서가 `..` 위 — 드나드는 키가 둘 다 듣는다.
         LayeredInsideUp,
@@ -3759,8 +4231,9 @@ pub(super) mod tests {
         }
     }
 
-    /// **커서가 잎이면 Enter, 층 없는 뿌리면 Bksp 가 바에서 빠지고 그 키는 조용히 아무 일도 안
-    /// 한다**(moai-k3yi, moai-uowi 흡수). 층이 있는 프로젝트 뿌리의 Bksp 는 층으로 올라가므로 선다.
+    /// **커서가 잎이면 Enter, 뿌리면 Bksp 가 바에서 빠지고 그 키는 조용히 아무 일도 안
+    /// 한다**(moai-k3yi, moai-uowi 흡수). **층이 있어도 뿌리는 뿌리다**(moai-i784) — Bksp 는
+    /// 디렉터리만 올라가므로 층이 있는 프로젝트 뿌리에서도 빠진다.
     #[test]
     fn the_key_bar_follows_the_row_under_the_cursor() {
         let bar_at = |a: &mut App| render(a, 80, 14).last().cloned().unwrap_or_default();
@@ -3777,9 +4250,10 @@ pub(super) mod tests {
         let bar = bar_at(&mut a);
         assert!(bar.contains("Enter 들어가기") && !bar.contains("Bksp"), "에픽 위·층 없는 뿌리 — {bar:?}");
 
+        // 층이 있어도 뿌리는 뿌리다 — Bksp 는 디렉터리만 올라가므로 여기서는 바에 안 선다(moai-i784).
         let mut a = Place::LayeredRootLeaf.app();
         let bar = bar_at(&mut a);
-        assert!(bar.contains("Bksp 나가기") && !bar.contains("Enter"), "층이 있는 뿌리의 잎 — {bar:?}");
+        assert!(!bar.contains("Bksp") && !bar.contains("Enter"), "층이 있는 뿌리의 잎 — {bar:?}");
 
         let mut a = Place::InsideUp.app();
         let bar = bar_at(&mut a);
@@ -3804,6 +4278,10 @@ pub(super) mod tests {
                     Some("/ 검색"),
                     Some("Tab 상세"),
                     Some("j·k 이동"),
+                    // 14줄이라 헤더가 안 선다 — 층으로 가는 `0` 을 바가 대신 댄다(moai-c2s3).
+                    // 맨 앞에 두므로 폭이 모자라면 이것이 먼저 떨어진다: 80칸에서는 `Bksp 나가기`
+                    // 가 함께 설 자리가 없다: 드나드는 키 **둘 다** 선 줄에서만 이 칸이 빠진다.
+                    (c.projects > 0 && (c.leaf || c.root)).then_some("0 프로젝트"),
                     Some("Esc 풀기"),
                     Some("SPC 메뉴"),
                 ]
@@ -3879,7 +4357,11 @@ pub(super) mod tests {
                     (a.worktree, a.raw) = (on, on);
                     let c = a.key_ctx(&a.rows());
                     seen.insert((c.list_focus, c.leaf, c.root));
-                    let (optional, keep) = browse_hints(&a, &c);
+                    // **헤더가 번호를 댄 화면과 안 댄 화면을 둘 다 돈다**(리뷰). 하나로 못
+                    // 박으면 바가 대신 대는 `0` 이 이 훑기를 통째로 비껴간다 — 그 키가 바에만
+                    // 서는 화면이 있으니, 표에 있고 켜져 있고 표의 낱말을 쓰는지를 같이 잰다.
+                    for unnumbered in [false, true] {
+                    let (optional, keep) = browse_hints(&a, &c, unnumbered);
                     assert!(keep.last().is_some_and(|(k, w)| k == "SPC" && *w == "메뉴"), "{c:?}: 메뉴로 가는 길이 늘 남지 않는다");
                     assert_eq!(lookup(BROWSE, &[parse("SPC").unwrap()]), Lookup::Pending, "SPC 가 메뉴를 안 연다");
                     for (names, what) in optional.iter().chain(&keep[..keep.len() - 1]) {
@@ -3889,6 +4371,7 @@ pub(super) mod tests {
                             assert_eq!(act.enabled(&c), Ok(()), "{c:?}: 켜지지 않은 `{name}` 가 바에 섰다");
                             assert_eq!(act.what(&c), *what, "{c:?}: `{name}`");
                         }
+                    }
                     }
                 }
             }
@@ -4510,7 +4993,7 @@ pub(super) mod tests {
         a.keep.clear();
         a.warnings = 0;
         a.cursor = 0;
-        assert_eq!(a.rows(), [Row::Up]);
+        assert!(a.rows().is_empty(), "빈 프로젝트 뿌리에 줄이 섰다 — `..` 은 디렉터리에만 선다");
         let lines = render(&mut a, 60, 10);
         let title = lines.iter().find(|l| l.contains('┌')).unwrap();
         assert!(title.contains("비었다") && !title.contains("1줄"), "{title:?}");

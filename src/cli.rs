@@ -160,7 +160,13 @@ PLAN
 
   moai mv moai-4aex in_progress
   moai mv moai-4aex moai-9k2p done
-  moai mv moai-4aex review -m \"테스트는 다음 이슈로 뺐다\"")]
+  moai mv moai-4aex review -m \"테스트는 다음 이슈로 뺐다\"
+
+  여럿이 같은 .moai 를 쓰면 본 칸을 함께 준다. `--from` 은 락 안에서 다시 보고
+  그 칸일 때만 옮긴다 — 진 쪽은 stderr 한 줄과 0 아닌 코드를 받는다. 그때는
+  **id 를 하나만** 준다: 여럿이면 이긴 줄과 진 줄이 한 코드에 섞인다.
+
+  moai mv moai-4aex in_progress --from todo")]
     Mv(MvArgs),
     /// 제목·본문·태그·에픽·우선순위를 고친다
     Edit(EditArgs),
@@ -189,7 +195,13 @@ NOTE
   경고에서 빠지고, 쌓이면 `moai status` 가 한 줄로 비춘다. 에픽·마일스톤·
   부모를 미루면 그 밑의 일도 같이 빠진다.
 
-  `moai show --deferred` 로 미뤄 둔 것만 본다.")]
+  `moai show --deferred` 로 미뤄 둔 것만 본다.
+
+  `--from <칸>` 은 `mv --from` 과 같은 자다 — 옆에서 집어 **칸이 움직인** 줄을
+  뒤늦은 미루기가 계획 밖으로 빼지 않는다. 미루기는 칸을 안 바꾸므로, 겨루는
+  둘이 **둘 다 미루는** 것은 이것으로 안 갈린다.
+
+  moai defer moai-4aex -m \"다음 분기\" --from todo")]
     Defer(DeferArgs),
 
     /// 하나가 다른 것을 막는다 (또는 그 막음을 없앤다)
@@ -233,6 +245,8 @@ NOTE
   있는 칸을 움직인다 — 상세를 굴리려면 Tab 으로 간다. / 가 검색, Esc 가 걸어 둔
   거름망을 푼다. 검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며, 검색은 치는 대로
   목록을 거르고 Tab·Shift-Tab 이 찾을 자리를 전체·id·제목·태그·본문으로 돌린다.
+  맨 위 헤더가 등록한 프로젝트마다 번호를 대고, 그 숫자를 SPC 없이 그대로 누르면 그
+  프로젝트로 바로 간다 — 0 은 전체, 곧 프로젝트 층이다.
 
   그 밖의 동작은 SPC 를 누르면 곧바로 뜨는 메뉴에 있다. 메뉴는 그 자리에서 되는 것만
   세우고, 모르는 키는 무시하며, Esc 로 닫고 Backspace 로 한 층 올라간다.
@@ -256,9 +270,10 @@ NOTE
   이어진다(`moai project add` 가 쓰는 파일과 같다).
 
   등록한 프로젝트(`moai project add`)가 있으면 맨 위에 프로젝트 층이 선다.
-  `.moai` 밖에서 띄우면 층에서 시작하고, 안에서 띄우면 그 프로젝트의 뿌리에서
-  Backspace 로 올라간다. 층에서는 Enter 로 들어간다. 등록한 것이 없는데 밖에서 띄우면
-  빈 층이 서서 SPC p a 로 첫 프로젝트를 더하라고 댄다(`--json` 은 등록 없음으로 멈춘다).
+  `.moai` 밖에서 띄우면 층에서 시작하고, 안에서 띄우면 그 프로젝트 안에서 시작한다.
+  층으로는 0 으로 간다 — Backspace 는 디렉터리만 올라간다. 층에서는 Enter 로 들어간다.
+  등록한 것이 없는데 밖에서 띄우면 빈 층이 서서 SPC p a 로 첫 프로젝트를 더하라고
+  댄다(`--json` 은 등록 없음으로 멈춘다).
 
   SPC p a 는 디렉터리를 골라 프로젝트로 등록하는 창을 연다 — 띄운 자리에서 한 층씩
   드나들고(Enter·Backspace, 이동은 목록과 같은 j·k·gg·G), `.moai` 가 있는 것과 이미
@@ -639,6 +654,13 @@ pub struct MvArgs {
     /// 이 이동에 한 줄 메모 (저널에만 남는다)
     #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
     pub msg: Option<String>,
+
+    /// 아직 이 칸에 있을 때만 옮긴다 (겨루는 집기)
+    ///
+    /// 안 주면 지금까지처럼 무엇도 막지 않는다. 주면 락 안에서 다시 보고, 그
+    /// 사이에 칸이 달라진 줄은 건드리지 않은 채 부분 실패로 선다.
+    #[arg(long, value_name = "칸")]
+    pub from: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -690,6 +712,13 @@ pub struct DeferArgs {
     /// 왜 미루는가 (저널에만 남는다)
     #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
     pub msg: Option<String>,
+
+    /// 아직 이 칸에 있을 때만 미루거나 도로 집는다 (겨루는 집기)
+    ///
+    /// `mv --from` 과 같은 자다. 옆에서 집어 일하기 시작한 줄을 뒤늦게 계획
+    /// 밖으로 빼지 않는다. 안 주면 지금까지처럼 아무것도 막지 않는다.
+    #[arg(long, value_name = "칸")]
+    pub from: Option<String>,
 }
 
 #[derive(Args, Debug)]

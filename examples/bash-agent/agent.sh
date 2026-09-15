@@ -44,11 +44,23 @@ while :; do
   case $seen in *" $id "*) echo "$id 가 또 집을 일로 나왔다 — 사람이 볼 차례다" >&2; exit 1 ;; esac
   seen+="$id "
   title=$(jq -r '.ready[0].title' <<<"$queue")
-  # 집기는 락 안에서 한 번 판정된다. 옆 에이전트가 같은 줄을 먼저 집었으면 `moved` 가 비고
-  # `already` 에 선다 — 종료 코드는 0 이라, 안 보면 둘이 같은 일을 한다. 겨루는 것은 같은
+  col=$(jq -r '.ready[0].status' <<<"$queue")
+  # **본 칸을 함께 준다.** `--from` 은 락 안에서 다시 보고 그 칸일 때만 옮긴다 — 옆
+  # 에이전트가 이 사이에 먼저 집었거나 닫기까지 했으면 여기서 갈린다. 겨루는 것은 같은
   # `.moai` 를 쓰는 에이전트끼리다 — 워크트리마다 따로 돌리면 서로의 집기를 못 본다.
-  claimed=$("$moai" mv "$id" in_progress --json | jq '.moved | length')
-  [ "$claimed" -gt 0 ] || continue
+  #
+  # **0 아닌 코드를 전부 "졌다" 로 읽지 않는다.** 신원 없음·락 걸림·칸 오타·깨진 줄도
+  # 같은 코드로 온다. 가르는 것은 stdout 이다 — 겨루다 진 것은 `stale` 을 담은 줄을
+  # 내고, 실패는 `{"code":…}` 를 stderr 에 내고 stdout 이 빈다. 실패를 "남이 집었다"
+  # 로 읽으면 같은 줄이 다시 나와 아래 `seen` 이 엉뚱한 까닭을 대며 멈춘다.
+  claim=$("$moai" mv "$id" in_progress --json --from "$col") || {
+    [ -n "$claim" ] || exit 1
+    continue
+  }
+  # **`--from` 이 맞았다고 집은 것은 아니다.** 첫 칸이 곧 집는 칸인 설정
+  # (`statuses = "in_progress,…"`)에서는 칸이 맞고도 아무것도 안 옮기고 `already` 로
+  # 0 을 낸다 — 안 보면 둘이 같은 일을 한다.
+  [ "$(jq '.moved | length' <<<"$claim")" -gt 0 ] || continue
   printf '%s  집었다  %s\n' "$id" "$title"
   code=0
   "$work" "$id" "$title" >"$log" 2>&1 || code=$?
@@ -66,6 +78,8 @@ while :; do
   # 않는다. **묶음을 미룬 것도 센다** — `deferred_at` 은 제 줄에 적힌 것뿐이라 미룬 에픽의
   # 멤버는 null 이고, 계획 밖인지는 `shelved_by` 가 말한다(제 줄이면 제 id, 물려받았으면 그 위).
   if jq -e '.status == "in_progress" and .shelved_by == null' <<<"$("$moai" show "$id" --json)" >/dev/null; then
-    "$moai" mv "$id" "done"   # 따옴표는 이것이 셸 낱말이 아니라 칸 이름이라는 표시다(SC1010)
+    # 닫을 때도 본 칸을 준다 — `show` 와 이 줄 사이는 집을 때와 똑같은 틈이고, 여기서
+    # 덮으면 남이 옮겨 둔 `review` 가 사라진다. 진 것은 실패가 아니라 남의 일이다.
+    "$moai" mv "$id" "done" --from in_progress || true   # 따옴표는 이것이 셸 낱말이 아니라 칸 이름이라는 표시다(SC1010)
   fi
 done
