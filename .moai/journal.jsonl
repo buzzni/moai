@@ -2652,3 +2652,15 @@
 {"ts":"2026-09-15T06:37:52Z","id":"moai-mauw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 리뷰 moai-mauw.3co(/code-review high --fix main...worktree-moai-mauw)가 백그라운드에서 돈다. 끝나면 원문·판단 노트 → fix 커밋 → 시험 → ExitWorktree(keep) 뒤 main 에서 트래커 커밋(이 노트·리뷰 이슈 포함)·merge → mauw·3co 닫기 → 워크트리 지우기. 기능 커밋은 worktree-moai-mauw 의 534596b"}
 {"ts":"2026-09-15T06:41:22Z","id":"moai-epb0.27f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — init 관리 블록 마커·--check·status 알림 (moai-epb0)"}
 {"ts":"2026-09-15T06:41:31Z","id":"moai-epb0.27f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T06:43:32Z","id":"moai-40ht","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"집었는데 일하는 곳이 없는 줄 — 워크트리에서 자리를 셈해 status·show·감독이 비춘다"}
+{"ts":"2026-09-15T06:43:32Z","id":"moai-ir8q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"집은 줄의 자리(워크트리 경로·가지)를 워크트리 이름·옆 스냅샷에서 파생한다 — 저장하지 않는 순수 함수"}
+{"ts":"2026-09-15T06:43:32Z","id":"moai-4370","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"status 경고 — 워크트리를 쓰는 저장소에서 집혔는데 자리가 없는 줄을 권하는 명령과 함께 비춘다 (종료 0)"}
+{"ts":"2026-09-15T06:43:32Z","id":"moai-6opu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show <id> 가 집은 줄의 자리를 낸다 (--json 에도)"}
+{"ts":"2026-09-15T06:43:32Z","id":"moai-qjem","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai-supervise 가 배정 전 status --json 에서 자리 없는 줄을 먼저 거둔다"}
+{"ts":"2026-09-15T06:43:32Z","id":"moai-40ht","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-si2j 에서 펼쳤다 — doctor 기능 추가"}
+{"ts":"2026-09-15T06:43:32Z","id":"moai-si2j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-40ht 로 펼쳤다 (이슈 4건)"}
+{"ts":"2026-09-15T06:43:40Z","id":"moai-40ht","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-15): 새 명령 없이 status 경고 + 권하는 명령, 종료 0. 판정은 살아 있는 딸린 워크트리 이름(id·에픽·부모 id)과 옆 스냅샷(held_elsewhere) — 워크트리를 안 쓰는 저장소는 조용, Claude 세션 파일은 안 읽는다. 자리는 파생이고 저장하지 않는다. 감독은 배정 전 status --json 에서 자리 없는 줄을 먼저 거둔다."}
+{"ts":"2026-09-15T06:43:40Z","id":"moai-ir8q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T06:43:40Z","id":"moai-4370","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T06:43:41Z","id":"moai-6opu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T06:43:41Z","id":"moai-qjem","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
