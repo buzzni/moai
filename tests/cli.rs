@@ -2246,7 +2246,7 @@ fn promote_fills_a_template_too() {
 fn init_writes_an_agents_block() {
     let s = init("agents");
     let md = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
-    assert!(md.contains("<!-- moai:begin -->") && md.contains("<!-- moai:end -->"));
+    assert!(md.contains("<!-- moai:begin v:") && md.contains("<!-- moai:end -->"));
     assert!(md.contains("moai status") && md.contains("승인 게이트가 없다"), "{md}");
     // 훅이 서는 규칙도 같은 출처에서 온다 — 스킬에만 적혀 있던 자리다.
     assert!(md.contains("리뷰도 이슈다"), "규칙 셋이 빠졌다\n{md}");
@@ -2259,6 +2259,111 @@ fn init_writes_an_agents_block() {
     assert!(!off.path().join("AGENTS.md").exists());
 }
 
+/// **`init --check` 은 AGENTS.md 블록을 `current`·`stale`·`missing` 으로 답하고 아무것도 안
+/// 쓴다**(moai-mstm). 낡음으로는 0 이 아닌 적이 없다 — 낡음은 알릴 것이지 실패가 아니다
+/// (2026-09-14 사용자 결정). 비영은 파일을 못 읽을 때뿐이다.
+/// 옛 맨 마커도, 손으로 고친 블록도 `stale` 이다. 다시 심은 뒤에는 `current` 이고, 한 번 더
+/// 심어도 바이트가 같다.
+#[test]
+fn init_check_says_current_stale_or_missing_and_writes_nothing() {
+    let s = Scratch::new("initcheck");
+    let md = s.path().join("AGENTS.md");
+    let check = |want: &str| {
+        let before = std::fs::read_to_string(&md).ok();
+        let said = ok(s.path(), &["init", "--check"]);
+        assert!(said.contains(want), "{want}: {said}");
+        let js = ok(s.path(), &["init", "--check", "--json"]);
+        one_json_value(&js);
+        assert_eq!(field(&js, "agents"), want, "{js}");
+        assert_eq!(std::fs::read_to_string(&md).ok(), before, "{want}: --check 가 AGENTS.md 를 썼다");
+    };
+
+    check("missing");
+    assert!(!s.path().join(".moai").exists(), "--check 가 .moai 를 심었다");
+
+    std::fs::write(&md, "# 산문\n\n<!-- moai:begin -->\n옛 내용\n<!-- moai:end -->\n").unwrap();
+    check("stale");
+
+    ok(s.path(), &["init", "argos"]);
+    check("current");
+    let once = std::fs::read_to_string(&md).unwrap();
+    assert!(once.starts_with("# 산문\n\n<!-- moai:begin v:"), "{once}");
+    ok(s.path(), &["init"]);
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), once, "다시 심었더니 바뀌었다");
+
+    // 블록 안을 손으로 고치면 낡은 것이다 — 다음 `init` 이 덮어쓴다.
+    std::fs::write(&md, once.replace("승인 게이트가 없다", "승인 게이트가 있다")).unwrap();
+    check("stale");
+}
+
+/// **못 읽는 AGENTS.md 는 덮어쓰지 않는다**(리뷰 moai-epb0.27f). `init` 이 그것을 빈 글로 읽던
+/// 때는 UTF-8 이 아닌 파일(CP949 로 저장한 한국어 산문 따위)이 블록 하나로 통째로 바뀌었고,
+/// 같은 파일에 `--check` 는 못 읽는다고 답했다. 둘이 한 길로 읽고, `init` 은 아무것도 심기 전에 멈춘다.
+#[test]
+fn init_never_overwrites_an_agents_md_it_cannot_read() {
+    let s = Scratch::new("agentsunreadable");
+    let md = s.path().join("AGENTS.md");
+    let mine = b"# \xb1\xd4\xbe\xe0 (CP949)\n\nhuman text\n";
+    std::fs::write(&md, mine).unwrap();
+
+    let out = moai(s.path(), &["init", "argos"]);
+    assert!(!out.status.success(), "못 읽는 파일로 init 이 성공했다 — {}", text(&out));
+    assert!(text(&out).contains("--no-agents"), "비켜 갈 길을 안 댄다 — {}", text(&out));
+    assert_eq!(std::fs::read(&md).unwrap(), mine, "못 읽는 AGENTS.md 를 덮어썼다");
+    assert!(!s.path().join(".moai").exists(), "멈추기 전에 .moai 를 심었다");
+    assert!(!moai(s.path(), &["init", "--check"]).status.success());
+
+    ok(s.path(), &["init", "argos", "--no-agents"]);
+    assert_eq!(std::fs::read(&md).unwrap(), mine);
+}
+
+/// **`status` 는 낡은 AGENTS.md 블록을 알림(`notices`)으로 비춘다**(moai-mj45). 경고가 아니다 —
+/// 종료 코드도 "드러난 문제 없다" 도 그대로다. **없는 블록은 말하지 않는다**: `--no-agents` 로
+/// 안 쓰기로 한 저장소를 영영 조른다(2026-09-14 사용자 결정). 다시 심으면 사라진다.
+///
+/// 훅이 싣는 보드도 같은 알림을 든다 — 훅의 보드는 화면과 같은 말을 해야 한다. 하위 디렉터리에서
+/// 부르면 고칠 명령이 `-C <뿌리>` 를 댄다: 맨 `moai init` 은 부른 자리에 둘째 트래커를 심는다.
+#[test]
+fn status_notices_a_stale_agents_block_but_not_a_missing_one() {
+    let s = init("agentsnotice");
+    let md = s.path().join("AGENTS.md");
+    let quiet = |why: &str| {
+        let st = ok(s.path(), &["status"]);
+        assert!(!st.contains("AGENTS.md"), "{why}: {st}");
+        assert!(!ok(s.path(), &["status", "--json"]).contains("agents_"), "{why}");
+    };
+    quiet("갓 심은 블록");
+
+    let fresh = std::fs::read_to_string(&md).unwrap();
+    std::fs::write(&md, fresh.replace("승인 게이트가 없다", "승인 게이트가 있다")).unwrap();
+    let st = ok(s.path(), &["status"]);
+    assert!(st.contains("+ AGENTS.md 블록을 손으로 고쳤다") && st.contains("`moai init`"), "{st}");
+    let board = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "agents")));
+    assert!(board.contains("AGENTS.md 블록을 손으로 고쳤다"), "훅의 보드에 알림이 없다 — {board}");
+
+    let sub = s.path().join("src").join("deep");
+    std::fs::create_dir_all(&sub).unwrap();
+    let root = std::fs::canonicalize(s.path()).unwrap();
+    let below = ok(&sub, &["status"]);
+    assert!(below.contains(&format!("`moai -C {} init`", root.display())), "하위에서 뿌리를 안 댄다 — {below}");
+    assert!(!sub.join(".moai").exists());
+    // `-C` 로 본 셸도 뿌리에 있지 않다 — 등록한 프로젝트를 한눈에 보다 `moai -C <프로젝트> status` 로 들어온 자리.
+    let outside = Scratch::new("agentsnotice-outside");
+    let there = ok(outside.path(), &["-C", &s.path().display().to_string(), "status"]);
+    assert!(there.contains(&format!("`moai -C {} init`", root.display())), "-C 로 본 셸에 뿌리를 안 댄다 — {there}");
+    assert!(st.contains("드러난 문제 없다"), "알림이 문제로 섰다 — {st}");
+    let js = ok(s.path(), &["status", "--json"]);
+    let notices = &js[js.find("\"notices\"").expect("notices 가 없다")..];
+    assert!(notices.contains("\"kind\":\"agents_hand_edited\""), "알림 자리에 없다 — {js}");
+    assert!(!js[..js.find("\"notices\"").unwrap()].contains("agents_"), "경고로 셌다 — {js}");
+
+    ok(s.path(), &["init"]);
+    quiet("다시 심은 뒤");
+
+    std::fs::remove_file(&md).unwrap();
+    quiet("블록이 없는 저장소");
+}
+
 /// 남의 산문은 한 글자도 건드리지 않는다.
 #[test]
 fn init_keeps_what_someone_else_wrote() {
@@ -2268,7 +2373,7 @@ fn init_keeps_what_someone_else_wrote() {
     ok(s.path(), &["init", "argos"]);
     let md = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
     assert!(md.starts_with(mine), "{md}");
-    assert_eq!(md.matches("<!-- moai:begin -->").count(), 1);
+    assert_eq!(md.matches("<!-- moai:begin").count(), 1);
 }
 
 /// **훑기 목록이 명령을 빠뜨리면 여기서 걸린다.**
