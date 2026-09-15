@@ -358,7 +358,7 @@ pub struct App {
     /// 누가 쓰는가를 푸는 길. 진짜 길은 `model::actor` 다. **시험이 갈아 끼운다** —
     /// 그쪽은 `MOAI_ACTOR` 와 이 기계의 git 설정을 읽어, 갈아 끼우지 않으면
     /// "누군지 모를 때" 를 시험한 결과가 돌리는 사람의 설정에 달린다.
-    identify: fn(Option<&str>) -> crate::fail::R<crate::model::Actor>,
+    identify: fn(Option<&str>, &std::path::Path) -> crate::fail::R<crate::model::Actor>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
     /// 상세의 굴린 자리. **왼쪽 커서를 옮기면 첫 줄로 돌아간다** — 다른
@@ -718,7 +718,7 @@ impl App {
             self.write_failed = true;
             return None;
         };
-        let by = (self.identify)(self.user.as_deref());
+        let by = (self.identify)(self.user.as_deref(), &repo.root);
         if let Err(e) = &by
             && e.code == crate::fail::code::NO_ACTOR
         {
@@ -3932,9 +3932,9 @@ mod tests {
 
     /// 누군지 모르는 기계. **이 기계의 git 설정도 `MOAI_ACTOR` 도 안 본다** — 준 것만
     /// 푼다. 진짜 길(`model::actor`)을 쓰면 이 시험들이 돌리는 사람의 설정에 달린다.
-    fn nobody(user: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+    fn nobody(user: Option<&str>, root: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
         match user {
-            Some(raw) => crate::model::actor(Some(raw)),
+            Some(raw) => crate::model::actor(Some(raw), root),
             None => Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험\n\n  고칠 명령", crate::fail::code::NO_ACTOR)),
         }
     }
@@ -4036,7 +4036,7 @@ mod tests {
     /// 파일은 그대로고 폼은 까닭을 달고 제목 칸에 선다.
     #[test]
     fn an_empty_title_is_refused_in_place_and_nothing_is_asked() {
-        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
             panic!("빈 제목인데 누군지 물었다")
         }
         let (scratch, mut a) = writable("jot-empty");
@@ -4231,7 +4231,7 @@ mod tests {
     /// 동안 물으면 설정 없는 기계에서 도구가 고장 난 것으로 보인다.
     #[test]
     fn reading_never_asks_who() {
-        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
             panic!("읽기가 누군지 물었다")
         }
         let (_scratch, mut a) = writable("ask-read");
@@ -4295,7 +4295,7 @@ mod tests {
     /// 열고, 한 줄로 까닭을 댄다.
     #[test]
     fn a_failed_or_empty_edit_writes_nothing_and_says_so() {
-        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
             panic!("담지 않을 글인데 누군지 물었다")
         }
         let (scratch, mut a) = writable("editor-nothing");
