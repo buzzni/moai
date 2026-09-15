@@ -3887,6 +3887,10 @@ pub(super) mod tests {
                     a.focus = pane;
                     let before = render(&mut a, 120, 14);
                     a.key(press(code));
+                    // **말만 한 것은 듣는 것이 아니다**(리뷰 moai-lur8.met). 층이 있는 뿌리의
+                    // Bksp 는 "층으로는 0 으로 간다" 는 한 줄만 낸다 — 화면은 바뀌지만 그
+                    // 키가 하는 일은 없으므로 바에 설 자리도 아니다. 알림을 걷고 견준다.
+                    a.notice = None;
                     let acts = render(&mut a, 120, 14) != before;
                     let bar = before.last().cloned().unwrap_or_default();
                     assert_eq!(bar.contains(hint), acts, "{place:?}·{pane:?} 에서 {code:?} 가 듣는가 {acts} — 바 {bar:?}");

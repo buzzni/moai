@@ -1211,6 +1211,19 @@ mod tests {
         (one, two, a)
     }
 
+    /// **뿌리의 Bksp 는 조용히 먹히지 않고 갈 키를 댄다**(리뷰 moai-lur8.met) — 여태 그 키가
+    /// 층으로 올라갔으므로, 아무 말 없이 안 듣는 것은 고장으로 읽힌다.
+    #[test]
+    fn backspace_at_a_layered_root_names_the_key_that_replaced_it() {
+        let s = Scratch::new("bksp-says");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.hit("1");
+        a.key(key(KeyCode::Backspace));
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(said.contains('0') && said.contains("프로젝트 층"), "갈 키를 안 댄다 — {said:?}");
+        assert!(!a.on_layer(), "말만 하고 올라가 버렸다");
+    }
+
     /// **건너뛰면 포커스가 목록으로 돌아온다**(리뷰 moai-i784.pzh) — 층의 상세에는 듣는 키가
     /// 없어, 상세에 포커스를 둔 채 `0` 을 누르면 무엇을 눌러야 할지 없는 화면이 선다.
     #[test]

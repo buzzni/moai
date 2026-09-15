@@ -551,6 +551,15 @@ impl Browse {
             // 않는다 — 들어갈 데 없는 줄에서 Enter 가 조용한 것은 파일 관리자와 같고, 바가 그 키를
             // 안 적으므로 "적힌 키가 안 듣는다" 가 안 생긴다.
             Enter if c.leaf => Err(Off::Quiet),
+            // **뜻이 없어진 키는 조용히 먹지 않는다**(리뷰 moai-lur8.met). 층이 있는 뿌리에서
+            // Bksp·h·← 는 여태 층으로 올라갔다 — 손에 익은 사람도, 낡은 AGENTS.md 를 읽은
+            // 에이전트도 그것을 누른다. 대신 갈 키를 대 준다. 뒤의 조용한 갈래는 층이 없어
+            // 애초에 위가 없던 자리다: 거기서 말하면 있지도 않은 길을 말하는 셈이다.
+            Leave if c.root && c.projects > 0 => Err(Off::Why(format!(
+                "{} 는 디렉터리만 올라간다 — 프로젝트 층으로는 {} 로 간다",
+                label(BROWSE, Leave),
+                label(BROWSE, Project(0))
+            ))),
             Leave if c.root => Err(Off::Quiet),
             Unregister if !(c.layer && c.list_focus) => Err(Off::Quiet),
             Grep | Filter if c.layer => {
