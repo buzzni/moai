@@ -5,7 +5,9 @@ edition = "2024"
 description = "이슈 트래커. 승인 게이트 없음. 규율은 `moai status` 가 비춘다."
 
 [dependencies]
-clap          = { version = "4", features = ["derive", "color", "wrap_help"] }
+# `wrap_help` 는 켜지 않는다 — 도움말에 실제 개행을 넣어 좁은 창에서 예시 명령이 복사하면
+# 깨진다. 까닭은 src/cli.rs 의 `Cli` 위 주석에 있다 (moai-opjn).
+clap          = { version = "4", features = ["derive", "color"] }
 serde         = { version = "1", features = ["derive"] }
 serde_json    = "1"
 anstream      = "1"
