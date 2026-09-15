@@ -655,6 +655,7 @@ fn says(w: &Warning) -> String {
             Some(d) if d > 0 => format!("미뤄 둔 것 {n}건 (가장 오래된 것 {d}일)"),
             _ => format!("미뤄 둔 것 {n}건"),
         },
+        "agents_stale" => "AGENTS.md 블록이 낡았다 — 이 바이너리가 쓸 안내와 다르다".to_string(),
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는

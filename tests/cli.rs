@@ -2238,6 +2238,39 @@ fn init_check_says_current_stale_or_missing_and_writes_nothing() {
     check("stale");
 }
 
+/// **`status` 는 낡은 AGENTS.md 블록을 알림(`notices`)으로 비춘다**(moai-mj45). 경고가 아니다 —
+/// 종료 코드도 "드러난 문제 없다" 도 그대로다. **없는 블록은 말하지 않는다**: `--no-agents` 로
+/// 안 쓰기로 한 저장소를 영영 조른다(2026-09-14 사용자 결정). 다시 심으면 사라진다.
+#[test]
+fn status_notices_a_stale_agents_block_but_not_a_missing_one() {
+    let s = init("agentsnotice");
+    let md = s.path().join("AGENTS.md");
+    let quiet = |why: &str| {
+        let st = ok(s.path(), &["status"]);
+        assert!(!st.contains("AGENTS.md"), "{why}: {st}");
+        assert!(!ok(s.path(), &["status", "--json"]).contains("agents_stale"), "{why}");
+    };
+    quiet("갓 심은 블록");
+
+    let fresh = std::fs::read_to_string(&md).unwrap();
+    std::fs::write(&md, fresh.replace("승인 게이트가 없다", "승인 게이트가 있다")).unwrap();
+    let out = moai(s.path(), &["status"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let st = String::from_utf8_lossy(&out.stdout);
+    assert!(st.contains("+ AGENTS.md 블록이 낡았다") && st.contains("moai init"), "{st}");
+    assert!(st.contains("드러난 문제 없다"), "알림이 문제로 섰다 — {st}");
+    let js = ok(s.path(), &["status", "--json"]);
+    let notices = &js[js.find("\"notices\"").expect("notices 가 없다")..];
+    assert!(notices.contains("\"kind\":\"agents_stale\""), "알림 자리에 없다 — {js}");
+    assert!(!js[..js.find("\"notices\"").unwrap()].contains("agents_stale"), "경고로 셌다 — {js}");
+
+    ok(s.path(), &["init"]);
+    quiet("다시 심은 뒤");
+
+    std::fs::remove_file(&md).unwrap();
+    quiet("블록이 없는 저장소");
+}
+
 /// 남의 산문은 한 글자도 건드리지 않는다.
 #[test]
 fn init_keeps_what_someone_else_wrote() {

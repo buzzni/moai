@@ -1795,6 +1795,17 @@ impl Warning {
         self.notice = true;
         self
     }
+
+    /// AGENTS.md 의 관리 블록이 이 바이너리가 쓸 글에서 낡았다는 **알림**(moai-mj45).
+    ///
+    /// 이슈에서 오는 말이 아니라 [`status`] 가 만들지 않는다 — 여기는 `&[Issue]` 만 받는 순수
+    /// 함수라 파일을 안 읽는다. 읽는 쪽(`cmd::status`)이 `cmd::init::agents_state` 로 재고 이것을
+    /// `notices` 에 얹는다. 모양을 여기 두는 것은 알림의 낱말(`kind`·`hint`)이 한 곳에 서게 해서다.
+    /// **경고가 아니다**: 낡은 안내는 고칠 일이 아니라 다시 심을 일이고, Stop 훅이 세는
+    /// `warnings` 에 들면 도구를 새로 빌드할 때마다 세션이 붙들린다.
+    pub fn agents_stale() -> Warning {
+        Warning::new("agents_stale", Vec::new()).count(1).notice().hint("moai init")
+    }
 }
 
 /// 만드는 속도와 끝내는 속도. **한 줄로 전체 건강을 말하는 숫자다.**
