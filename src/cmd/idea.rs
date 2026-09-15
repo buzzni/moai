@@ -70,7 +70,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     }
 
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref())?;
+    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
     let (made, read): (Vec<Issue>, super::Read) = repo.with_write(|issues, cfg, reserved| {
         // 펼칠 것이 정말 idea 인지 **먼저** 본다. 나중에 보면 만들어진 id 가
         // 오류 메시지에 실려 나가고, 받는 쪽은 그게 남은 줄 안다.
