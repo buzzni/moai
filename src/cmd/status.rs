@@ -147,7 +147,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 // (`worktree::stranded_at`). 한때 이 화면에만 없어, 프로젝트 밖에서 보드를 보는
                 // 사람은 죽은 세션의 일을 영영 못 봤다. 옆 워크트리를 겹치는지는 부른 쪽을 따른다.
                 let mut status = report::status(&load.issues, &unreadable, &repo.config, &now);
-                let (lost, _) =
+                let (lost, blind) =
                     crate::worktree::stranded_at(&repo.root, &repo.config, &load.issues, worktree, &now);
                 status.warnings.extend(lost);
                 view::Board {
@@ -156,6 +156,10 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     picked: report::wip(&load.issues, &repo.config),
                     origin: &p.origin,
                     trouble: &p.trouble,
+                    // **못 읽은 워크트리는 여기서도 센다**(리뷰 moai-p3bs.op2) — 밖에서는 `gather`
+                    // 가 겹쳐 보지 않으면 옆 스냅샷을 아예 안 열어 `trouble` 이 비고, 그러면 죽은
+                    // 세션과 못 읽는 워크트리가 함께 있는 저장소가 "드러난 문제 없다" 로 선다.
+                    blind: blind.len(),
                 }
             })
         })

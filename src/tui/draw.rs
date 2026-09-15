@@ -1908,6 +1908,14 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                     Span::raw(format!(" 집었는데 일하는 워크트리가 없는 것 {}건", sum.stranded)),
                 ]));
             }
+            // **못 읽은 워크트리도 댄다**(리뷰 moai-p3bs.op2) — 그것이 있으면 위의 수는 "센 결과
+            // 0" 이 아니라 "못 셌다" 다. 안 대면 층이 그 둘을 같은 화면으로 낸다.
+            if sum.blind > 0 {
+                out.push(Line::from(vec![
+                    Span::styled("!", from_anstyle(style::WARN)),
+                    Span::raw(format!(" 스냅샷을 못 읽은 워크트리 {}곳 — 자리를 다 못 셌다", sum.blind)),
+                ]));
+            }
             if sum.unreadable > 0 {
                 out.push(Line::from(vec![
                     Span::styled("!", from_anstyle(style::ERROR)),
@@ -3732,6 +3740,7 @@ pub(super) mod tests {
                 picked: vec![Picked { id: "argos-0004".into(), title: "집은 멤버".into(), column: "in_progress".into() }],
                 warnings: 2,
                 stranded: 0,
+                blind: 0,
                 unreadable: 0,
             },
         };
@@ -4981,6 +4990,7 @@ pub(super) mod tests {
                 picked: vec![Picked { id: "argos\t0004".into(), title: "첫 줄\n둘째\t줄".into(), column: "in_progress".into() }],
                 warnings: 0,
                 stranded: 0,
+                blind: 0,
                 unreadable: 0,
             },
         };

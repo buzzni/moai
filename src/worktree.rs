@@ -685,6 +685,13 @@ pub fn stranded_at(
 ) -> (Option<crate::report::Warning>, Vec<crate::report::Workplace>) {
     let trees = workplaces(root, cfg, worktree, issues);
     let warning = crate::report::stranded(issues, cfg, &trees, now);
+    // **자를 것이 없으면 꼭대기도 안 잰다** — [`main_top`] 은 [`on_disk`] 를 한 벌 더 읽는데
+    // (`read_dir` 과 워크트리마다 파일 둘·`canonicalize`), 바로 위 [`workplaces`] 가 이미 같은
+    // 것을 읽었다. 못 읽은 워크트리는 드물고, 이 함수는 이제 표면 셋이 부른다 — 층은 등록한
+    // 프로젝트마다 스레드에서 부르므로 흔한 길에서 그 값을 두 번 치를 까닭이 없다.
+    if !trees.iter().any(|t| t.unknown) {
+        return (warning, Vec::new());
+    }
     let top = main_top(root).unwrap_or_else(|| root.to_path_buf());
     let unknown = trees
         .iter()

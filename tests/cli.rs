@@ -542,8 +542,18 @@ fn the_overview_counts_work_with_no_live_worktree() {
 
     let inside = ok_at(&one, LATER, &["status"]);
     assert!(inside.contains("일하는 워크트리가 없는 것 1건"), "안쪽이 안 비췄다\n{inside}");
-    // 안쪽이 세는 경고 수 — 밖에서도 같은 수를 말해야 한다.
-    let want = ok_at(&one, LATER, &["status", "--json"]).matches("\"kind\":").count().to_string();
+    // 안쪽이 세는 경고 수 — 밖에서도 같은 수를 말해야 한다. **`warnings` 안만 센다**:
+    // `"kind":` 는 `notices` 에도 붙어, 통째로 세면 알림 하나가 서는 날 이 시험이 자기가
+    // 재겠다고 한 것과 아무 상관 없는 까닭으로 깨진다.
+    let json = ok_at(&one, LATER, &["status", "--json"]);
+    let want = json
+        .split("\"warnings\":[")
+        .nth(1)
+        .and_then(|r| r.split("],\"notices\":").next())
+        .unwrap_or_else(|| panic!("경고 배열을 못 찾았다\n{json}"))
+        .matches("\"kind\":")
+        .count()
+        .to_string();
     let n = |t: &str| t.split("경고 ").nth(1).and_then(|r| r.split('건').next()).map(str::to_string);
 
     let out_text = isolated(BIN)
@@ -584,6 +594,35 @@ fn the_overview_counts_work_with_no_live_worktree() {
     let layer = String::from_utf8(layer.stdout).unwrap();
     assert!(layer.contains("\"stranded\":1"), "층이 자리 없는 줄을 안 셌다\n{layer}");
     assert!(layer.contains("\"warnings\":2"), "층의 경고 수에 안 들었다\n{layer}");
+
+    // **못 읽은 워크트리가 있으면 "센 결과 0" 이 아니라 "못 셌다" 다**(리뷰 moai-p3bs.op2) —
+    // 밖에서는 옆 스냅샷을 아예 안 여므로, 세지 못했다는 사실이 여기서 사라지면 죽은 세션이
+    // 통째로 조용해진다.
+    let snap = one.join(".claude/worktrees/agent-x/.moai/issues.jsonl");
+    std::fs::remove_file(&snap).unwrap();
+    std::fs::create_dir(&snap).unwrap();
+    let blind = isolated(BIN)
+        .args(["status"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let blind = String::from_utf8(blind.stdout).unwrap();
+    let mine = block(&blind, "one");
+    assert!(!mine.contains("드러난 문제 없다"), "못 셌는데 문제 없다고 했다\n{blind}");
+    assert!(mine.contains("옆 워크트리 문제"), "못 읽은 워크트리를 안 셌다\n{blind}");
+    let layer = isolated(BIN)
+        .args(["tui", "--json"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let layer = String::from_utf8(layer.stdout).unwrap();
+    assert!(layer.contains("\"unreadable_worktrees\":1"), "층이 못 읽은 워크트리를 안 댔다\n{layer}");
 }
 
 /// **같은 id 가 두 프로젝트에 있어도 섞이지 않는다.** 접두어가 같은 두 저장소는 흔하고,

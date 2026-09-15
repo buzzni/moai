@@ -103,6 +103,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),
                         warnings: sum.warnings,
                         stranded: sum.stranded,
+                        unreadable_worktrees: sum.blind,
                         unreadable: sum.unreadable,
                     }
                 });
@@ -167,6 +168,9 @@ struct Counted {
     /// 없으면 키를 안 단다: 늘 `0` 을 달면 옛 판과 견주는 쪽이 새 뜻을 얻은 줄 모른다.
     #[serde(skip_serializing_if = "is_zero")]
     stranded: usize,
+    /// 스냅샷을 못 읽은 워크트리의 수 — 있으면 위의 수는 "센 결과 0" 이 아니라 "못 셌다" 다.
+    #[serde(skip_serializing_if = "is_zero")]
+    unreadable_worktrees: usize,
     unreadable: usize,
 }
 

@@ -1393,6 +1393,11 @@ pub struct Board<'a> {
     pub origin: &'a Origin,
     /// 옆 워크트리를 겹치다 만난 것 (`Project::trouble`).
     pub trouble: &'a [String],
+    /// 자리를 재다 **못 읽은** 워크트리의 수(moai-p3bs.op2). 그런 워크트리가 있으면 자리 판정이
+    /// 통째로 `모른다` 로 접혀 경고가 조용해지는데(`report::places` 의 `blind`), 여기서 세지 않으면
+    /// 이 덩어리가 "드러난 문제 없다" 로 그 침묵을 덮는다 — 안쪽 `moai status` 는 같은 사실을
+    /// stderr 와 `옆 워크트리 문제` 로 이미 말한다.
+    pub blind: usize,
 }
 
 /// 한눈 보기에서 연 프로젝트 하나의 집을 것 — `moai ready` 가 `.moai` 밖에서 낸다.
@@ -1482,7 +1487,7 @@ pub fn projects_status(
         let go = paint(style::DIM, &format!("→ `moai -C {} status`", shell_arg(&p.path)));
         // 옆 워크트리의 문제는 화면에서만 센다 — 위에 `!` 줄로 섰는데 밑에서 "문제 없다" 면
         // 덩어리가 제 말을 뒤집는다(moai-cuw2, `status` 와 같은 자).
-        let t = b.trouble.len();
+        let t = b.trouble.len() + b.blind;
         let beside = match t {
             0 => String::new(),
             _ => format!(" · 옆 워크트리 문제 {t}건"),

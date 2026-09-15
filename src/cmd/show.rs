@@ -312,16 +312,27 @@ fn one(
     // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 스냅샷을 다
     // 풀 까닭이 없다. 언제 재는지(딸린 워크트리에서는 겹쳐 볼 때만)는 `worktree::workplaces` 가
     // 한 곳에서 정한다 — 명령마다 두었더니 `status` 와 여기가 서로 다른 답을 냈다(moai-6opu.p65).
-    let trees: Vec<report::Workplace> = if report::placeable(all, &repo.config, issue) {
-        // 경로는 **main 워크트리의 꼭대기**에서 잰다(moai-fygk): 규약의 자리
-        // (`.claude/worktrees/<id>`)가 어느 자리에서 펼치든 같은 글자로 나와, 그대로
-        // `EnterWorktree` 에 옮길 수 있다. 제 꼭대기로 재면 딸린 워크트리 안에서 펼쳤을 때 **옆
-        // 워크트리가 하나도 안 잘려** 기계의 절대 경로가 그대로 나간다 — 규약상 세션은 대개
-        // 워크트리 안에서 도므로 그쪽이 흔한 자리다. 뿌리(`.moai` 가 든 곳)로 재면 `.moai` 를
-        // 아래에 둔 저장소에서 같은 일이 난다. 워크트리 경로는 이미 푼 것이라
-        // (`worktree::canonical`) 꼭대기도 같은 자로 푼다 — 심볼릭 링크를 낀 자리로는 안 잘린다.
-        let root = crate::worktree::main_top(&repo.root).unwrap_or_else(|| repo.root.clone());
+    let found = if report::placeable(all, &repo.config, issue) {
         crate::worktree::workplaces(&repo.root, &repo.config, worktree, all)
+    } else {
+        Vec::new()
+    };
+    // 경로는 **main 워크트리의 꼭대기**에서 잰다(moai-fygk): 규약의 자리
+    // (`.claude/worktrees/<id>`)가 어느 자리에서 펼치든 같은 글자로 나와, 그대로
+    // `EnterWorktree` 에 옮길 수 있다. 제 꼭대기로 재면 딸린 워크트리 안에서 펼쳤을 때 **옆
+    // 워크트리가 하나도 안 잘려** 기계의 절대 경로가 그대로 나간다 — 규약상 세션은 대개
+    // 워크트리 안에서 도므로 그쪽이 흔한 자리다. 뿌리(`.moai` 가 든 곳)로 재면 `.moai` 를
+    // 아래에 둔 저장소에서 같은 일이 난다. 워크트리 경로는 이미 푼 것이라
+    // (`worktree::canonical`) 꼭대기도 같은 자로 푼다 — 심볼릭 링크를 낀 자리로는 안 잘린다.
+    //
+    // **잴 자리가 없으면 꼭대기도 안 잰다** — `main_top` 은 `worktree::on_disk` 를 한 벌 읽는데,
+    // 딸린 워크트리 안에서 겹쳐 보지 않았거나 워크트리를 안 쓰는 저장소면 `workplaces` 가 빈
+    // 목록을 내므로(그쪽이 흔한 길이다) 그 값이 통째로 헛일이다.
+    let trees: Vec<report::Workplace> = if found.is_empty() {
+        found
+    } else {
+        let root = crate::worktree::main_top(&repo.root).unwrap_or_else(|| repo.root.clone());
+        found
             .into_iter()
             .map(|mut t| {
                 if let Ok(rel) = t.path.strip_prefix(&root) {
@@ -332,8 +343,6 @@ fn one(
                 t
             })
             .collect()
-    } else {
-        Vec::new()
     };
     // 워크트리가 없으면 `places` 가 아무 키도 안 내므로(moai-tbin) 여기 가드를 따로 두지 않는다 —
     // 두면 "자리를 물을 수 있는가" 를 재는 자가 둘이 된다.
