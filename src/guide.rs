@@ -316,6 +316,12 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 
 {PROJECTS}
 
+### 화면의 말
+
+기본은 영어다. 다른 말로 보려면 `MOAI_LANG=ko moai status` 처럼 주거나, 사용자 설정에
+`[i18n]` 의 `lang = "ko"` 를 적는다 (환경변수가 설정을 이긴다). 되는 말은 en·ko·zh·ja·es 고,
+아직 안 옮긴 글은 영어로 나온다. 번역을 보태는 길은 moai 저장소의 `i18n/README.md` 에 있다.
+
 ### 기능 요청을 받으면
 
 1. `moai status` 로 이미 있는 에픽을 본다. 겹칠 것 같으면 `moai show -g <키워드>`.
