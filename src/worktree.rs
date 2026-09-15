@@ -921,11 +921,30 @@ mod tests {
         assert_eq!(origin.branch("m-0001"), Some("feat/x"));
     }
 
+    /// **임시 자리가 어느 체크아웃 안이어도 그 저장소의 워크트리가 새지 않는다**(moai-46xz).
+    ///
+    /// 파일로 읽는 반쪽은 `Path::ancestors()` 로 `.git` 을 찾아 올라간다. 컨테이너나 CI 에서
+    /// `TMPDIR` 이 체크아웃 밑이면 시험의 임시 자리 위에 그 체크아웃이 서고, 만들지도 않은
+    /// 워크트리 이름이 답에 섞인다 — 환경 변수를 걷어서는 못 막는 길이다. 그래서 임시 자리에
+    /// 빈 `.git` 울타리를 세운다([`Scratch::fenced`]).
+    ///
+    /// 여기서는 그 상황을 **이 저장소 안에 자리를 잡아** 그대로 흉내 낸다. 이 체크아웃은
+    /// 워크트리가 딸린 진짜 저장소라, 울타리가 없으면 그 이름들이 그대로 나온다.
+    #[test]
+    fn a_temp_place_inside_a_checkout_does_not_leak_that_repos_worktrees() {
+        let inside = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/tmp");
+        std::fs::create_dir_all(&inside).unwrap();
+        let dir = crate::scratch::Scratch::fenced_in(&inside, "fence");
+        assert!(away(dir.path()).is_empty(), "울타리 위의 저장소가 새어 나왔다 — {:?}", away(dir.path()));
+        assert!(away(&dir.join("nowhere")).is_empty(), "없는 자리에서도 위의 저장소를 읽었다");
+        assert!(!is_linked(dir.path()), "울타리를 딸린 워크트리로 읽었다");
+    }
+
     /// 어느 워크트리에서든 커밋·`pack-refs`·떼어 낸 checkout 이 지켜보는 표식을 바꾼다 —
     /// 탐색기가 갈라진 자리가 바뀐 것을 알아챈다(moai-pqrq).
     #[test]
     fn a_moved_head_in_any_worktree_changes_a_watched_stamp() {
-        let scratch = crate::scratch::Scratch::new("heads");
+        let scratch = crate::scratch::Scratch::fenced("heads");
         let base = scratch.path().to_path_buf();
         let (main, feat) = (base.join("main"), base.join("feat"));
         std::fs::create_dir_all(&main).unwrap();

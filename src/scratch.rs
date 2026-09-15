@@ -27,9 +27,14 @@ pub struct Scratch(PathBuf);
 impl Scratch {
     /// `<자리>/moai-<이름>-<pid>-<스레드>-<셈>` 을 만든다. 이미 있으면 지우고 새로 만든다.
     pub fn new(name: &str) -> Scratch {
+        Scratch::in_place(&base(), name)
+    }
+
+    /// 자리를 받아 세운다. 이름 짓는 법은 [`Scratch::new`] 와 같다.
+    fn in_place(base: &Path, name: &str) -> Scratch {
         use std::sync::atomic::{AtomicU32, Ordering};
         static NTH: AtomicU32 = AtomicU32::new(0);
-        let dir = base().join(format!(
+        let dir = base.join(format!(
             "moai-{name}-{}-{:?}-{}",
             std::process::id(),
             std::thread::current().id(),
@@ -45,6 +50,27 @@ impl Scratch {
     pub fn real(name: &str) -> Scratch {
         let mut s = Scratch::new(name);
         s.0 = std::fs::canonicalize(&s.0).unwrap_or_else(|e| panic!("{}: {e}", s.0.display()));
+        s
+    }
+
+    /// 빈 `.git` 울타리를 세운 자리(moai-46xz). **위로 새지 않는다.**
+    ///
+    /// `worktree` 의 파일로 읽는 반쪽은 `Path::ancestors()` 를 타고 올라가 `.git` 을 처음
+    /// 만나는 곳을 저장소 꼭대기로 읽는다. 임시 자리가 어느 체크아웃 **안**이면
+    /// (컨테이너·CI 에서 `TMPDIR` 이 그렇게 잡힌다) 그 체크아웃이 꼭대기로 잡혀, 시험이
+    /// 만들지도 않은 워크트리 이름이 답에 섞인다. 울타리가 그 훑기를 여기서 멈춘다.
+    ///
+    /// 울타리는 **빈 디렉터리**다. 그 안에 워크트리 목록이 없으니 이름은 하나도 안 나온다.
+    /// 밑에 진짜 저장소를 만드는 시험은 영향이 없다 — 훑기가 그 저장소를 먼저 만난다.
+    pub fn fenced(name: &str) -> Scratch {
+        Scratch::fenced_in(&base(), name)
+    }
+
+    /// 자리를 골라 세우는 울타리. 임시 자리가 체크아웃 안일 때를 **흉내 내는** 시험이 쓴다 —
+    /// 그런 시험은 `TMPDIR` 을 못 바꾼다(한 판의 모든 스레드가 그것을 함께 본다).
+    pub fn fenced_in(base: &Path, name: &str) -> Scratch {
+        let s = Scratch::in_place(base, name);
+        std::fs::create_dir_all(s.0.join(".git")).unwrap_or_else(|e| panic!("{}: {e}", s.0.display()));
         s
     }
 
