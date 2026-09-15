@@ -3562,6 +3562,56 @@ fn a_malformed_git_identity_is_refused_too() {
     assert_eq!(issues(s.path()).lines().count(), 0, "거절했는데 줄이 남았다");
 }
 
+/// **훅이 내보낸 저장소 변수가 `-C` 를 이기지 못한다**(moai-ztdf). git 훅과 딸린 워크트리의
+/// `rebase -x` 는 `GIT_DIR` 무리를 내보내고, 그것은 `git -C <경로>` 를 이긴다. 그대로 두면
+/// 저장소 R 의 훅에서 부른 `moai -C P` 가 R 의 `user.name` 을 읽어 **P 의 저널에 남의 이름을
+/// 영구히** 적는다. 이력이 목적인 파일이라 되돌리기 어렵다 — 커밋 칸도 남의 이력을 읽는다.
+///
+/// 쓰는 사람과 읽는 화면 **둘 다** 본다: 담당·저널의 이름, 그리고 `show` 의 커밋 칸.
+#[test]
+fn an_inherited_git_dir_does_not_beat_the_project_we_were_given() {
+    let s = init("hookenv");
+    let theirs = s.path().join("theirs");
+    std::fs::create_dir_all(&theirs).unwrap();
+    // R — 훅이 도는 남의 저장소. 이름도 커밋도 이쪽에만 있다.
+    git(&theirs, &["init", "-q"]);
+    git(&theirs, &["config", "user.name", "남의 이름"]);
+    git(&theirs, &["config", "user.email", "theirs@example.com"]);
+    git(&theirs, &["commit", "-q", "--allow-empty", "-m", "feat: 남의 커밋 (argos-9999)"]);
+    // P — moai 프로젝트. 이 저장소의 사람이 적혀 있다.
+    git(s.path(), &["init", "-q"]);
+    git(s.path(), &["config", "user.name", "내 이름"]);
+    git(s.path(), &["config", "user.email", "mine@example.com"]);
+
+    // 훅이 실제로 내보내는 모양 그대로 — 저장소를 가리키는 변수만 심는다.
+    let in_hook = |args: &[&str]| {
+        isolated(BIN)
+            .args(args)
+            .current_dir(&theirs)
+            .env("GIT_DIR", theirs.join(".git"))
+            .env("GIT_WORK_TREE", &theirs)
+            .env("GIT_INDEX_FILE", theirs.join(".git/index"))
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+    let project = s.path().to_str().unwrap();
+    let made = in_hook(&["-C", project, "add", "훅 안에서 만든 것", "--json"]);
+    let said = String::from_utf8_lossy(&made.stdout).to_string();
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    assert!(said.contains(r#""assignee":"내 이름""#), "훅 저장소의 사람을 담당으로 적었다\n{said}");
+    let j = journal(s.path());
+    assert!(!j.contains("남의 이름"), "훅 저장소 주인의 이름이 이 프로젝트의 저널에 남았다\n{j}");
+
+    // 읽는 쪽도 같다 — 커밋 칸은 이 프로젝트의 이력에서 읽는다. R 의 커밋이 걸리면 안 된다.
+    let id = add(s.path(), &["볼 것"]);
+    git(&theirs, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 남의 이력이 샜다 ({id})")]);
+    let shown = in_hook(&["-C", project, "show", &id]);
+    let shown = String::from_utf8_lossy(&shown.stdout);
+    assert!(!shown.contains("남의 이력이 샜다"), "훅 저장소의 커밋을 이 이슈에 붙였다\n{shown}");
+}
+
 /// 읽기는 사람을 묻지 않는다. 물으면 설정 없는 기계에서 `moai show` 가 죽고,
 /// 그건 보러 온 사람에게 도구가 고장 난 것으로 보인다.
 #[test]
