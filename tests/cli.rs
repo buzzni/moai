@@ -7051,3 +7051,77 @@ fn project_rm_without_a_config_leaves_no_trace() {
     assert!(out.contains("등록돼 있지 않다"), "{out}");
     assert!(!home.path().join("cfg").exists(), "아무것도 안 뺀 명령이 설정 디렉터리를 만들었다");
 }
+
+/// `examples/bash-agent/agent.sh` 를 **실제로 돌린다** (moai-0j1y). 예제는 계약 시험을
+/// 겸한다 — `ready --json` 의 모양(`{"ready":[…],"held":[…]}`)이나 `mv`·`note` 의 인자가
+/// 바뀌면 예제가 조용히 썩는 대신 여기서 떨어진다. bash·jq 가 없는 기계에서는 건너뛰지
+/// 않고 실패한다 — 건너뛰는 시험은 아무도 안 보는 사이 예제를 썩힌다(사람이 정했다).
+#[cfg(unix)]
+fn agent(dir: &Path, work: &Path) -> Output {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/bash-agent/agent.sh");
+    isolated("bash")
+        .arg(script)
+        .current_dir(dir)
+        .env("MOAI", BIN)
+        .env("AGENT_WORK", work)
+        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("bash 를 실행하지 못했다 — 예제 시험에는 bash 와 jq 가 있어야 한다")
+}
+
+/// 일 명령 대역. 받은 id 를 기록에 적고 `body` 를 돈다 — 그 출력이 노트가 된다.
+#[cfg(unix)]
+fn work_script(s: &Scratch, body: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt as _;
+    let path = s.path().join("work.sh");
+    let log = s.path().join("worked");
+    std::fs::write(&path, format!("#!/bin/sh\necho \"$1\" >> '{}'\n{body}\n", log.display())).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+#[cfg(unix)]
+#[test]
+fn the_bash_agent_example_works_the_ready_queue_until_it_is_empty() {
+    let s = init("agent-loop");
+    let later = add(s.path(), &["나중 일", "-p", "2"]);
+    let first = add(s.path(), &["급한 일", "-p", "1"]);
+    let parked = add(s.path(), &["미룬 일", "-p", "0"]);
+    ok(s.path(), &["defer", &parked, "-m", "지금 아님"]);
+    let work = work_script(&s, "echo \"$1 을 끝냈다: $2\"");
+
+    let out = agent(s.path(), &work);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "예제가 실패했다\nstdout: {stdout}\nstderr: {stderr}");
+
+    let worked = std::fs::read_to_string(s.path().join("worked")).unwrap();
+    assert_eq!(worked.lines().collect::<Vec<_>>(), [first.as_str(), later.as_str()], "ready 차례대로 집지 않았다");
+    for (id, title) in [(&first, "급한 일"), (&later, "나중 일")] {
+        assert!(line_of(s.path(), id).contains("\"status\":\"done\""), "{id} 가 done 이 아니다");
+        let shown = ok(s.path(), &["show", id]);
+        assert!(shown.contains(&format!("{id} 을 끝냈다: {title}")), "일 명령의 출력이 노트로 안 남았다\n{shown}");
+    }
+    assert!(line_of(s.path(), &parked).contains("\"status\":\"todo\""), "미룬 일을 집었다");
+    assert!(stdout.contains("집을 일이 없다"), "{stdout}");
+}
+
+#[cfg(unix)]
+#[test]
+fn the_bash_agent_example_stops_on_a_failed_job_and_leaves_it_picked() {
+    let s = init("agent-fail");
+    let id = add(s.path(), &["깨지는 일", "-p", "1"]);
+    let other = add(s.path(), &["다음 일", "-p", "3"]);
+    let work = work_script(&s, "echo 컴파일이 깨졌다; exit 3");
+
+    let out = agent(s.path(), &work);
+    assert!(!out.status.success(), "일이 실패했는데 예제가 성공으로 끝났다");
+    let worked = std::fs::read_to_string(s.path().join("worked")).unwrap();
+    assert_eq!(worked.lines().collect::<Vec<_>>(), [id.as_str()], "실패한 뒤에도 돌았다");
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""), "실패한 일을 내려놓았다");
+    let shown = ok(s.path(), &["show", &id]);
+    assert!(shown.contains("실패(3): 컴파일이 깨졌다"), "실패 코드와 출력이 노트로 안 남았다\n{shown}");
+    assert!(line_of(s.path(), &other).contains("\"status\":\"todo\""));
+}
