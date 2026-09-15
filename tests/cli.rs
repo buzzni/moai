@@ -7058,11 +7058,16 @@ fn project_rm_without_a_config_leaves_no_trace() {
 /// 않고 실패한다 — 건너뛰는 시험은 아무도 안 보는 사이 예제를 썩힌다(사람이 정했다).
 #[cfg(unix)]
 fn agent(dir: &Path, work: &Path) -> Output {
+    agent_with(dir, work, Path::new(BIN))
+}
+
+#[cfg(unix)]
+fn agent_with(dir: &Path, work: &Path, moai: &Path) -> Output {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/bash-agent/agent.sh");
     isolated("bash")
         .arg(script)
         .current_dir(dir)
-        .env("MOAI", BIN)
+        .env("MOAI", moai)
         .env("AGENT_WORK", work)
         .env("MOAI_ACTOR", "테스터 (tester@example.com)")
         .env("MOAI_NOW", NOW)
@@ -7124,4 +7129,47 @@ fn the_bash_agent_example_stops_on_a_failed_job_and_leaves_it_picked() {
     let shown = ok(s.path(), &["show", &id]);
     assert!(shown.contains("실패(3): 컴파일이 깨졌다"), "실패 코드와 출력이 노트로 안 남았다\n{shown}");
     assert!(line_of(s.path(), &other).contains("\"status\":\"todo\""));
+}
+
+/// 공백뿐인 출력도 끝낸 일이다. `note` 는 빈 메모를 거절하므로, 그대로 넘기면 끝낸 일이
+/// in_progress 로 남은 채 루프가 실패로 멈춘다.
+#[cfg(unix)]
+#[test]
+fn the_bash_agent_example_closes_a_job_whose_output_is_blank() {
+    let s = init("agent-blank");
+    let id = add(s.path(), &["말없는 일", "-p", "1"]);
+    let work = work_script(&s, "printf '  \\n'");
+
+    let out = agent(s.path(), &work);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "공백 출력에 멈췄다");
+    assert!(ok(s.path(), &["show", &id]).contains("(출력 없음)"));
+}
+
+/// `ready` 와 `mv` 사이에 옆 에이전트가 같은 줄을 먼저 집으면 `mv` 는 `already` 로 0 을
+/// 낸다. 종료 코드만 믿으면 둘이 같은 일을 한다 — 예제는 `moved` 를 보고 넘어가야 한다.
+#[cfg(unix)]
+#[test]
+fn the_bash_agent_example_skips_a_job_a_neighbour_claimed_first() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let s = init("agent-race");
+    let contested = add(s.path(), &["다툰 일", "-p", "1"]);
+    let other = add(s.path(), &["남은 일", "-p", "2"]);
+    // 이 에이전트의 `mv <contested> in_progress` 바로 앞에 옆 에이전트가 끼어든다.
+    let wrapper = s.path().join("moai-race.sh");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = mv ] && [ \"$2\" = {contested} ] && [ \"$3\" = in_progress ]; then '{BIN}' mv {contested} in_progress >/dev/null; fi\nexec '{BIN}' \"$@\"\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let work = work_script(&s, "echo 했다");
+
+    let out = agent_with(s.path(), &work, &wrapper);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let worked = std::fs::read_to_string(s.path().join("worked")).unwrap();
+    assert_eq!(worked.lines().collect::<Vec<_>>(), [other.as_str()], "남이 집은 일을 또 했다");
+    assert!(line_of(s.path(), &contested).contains("\"status\":\"in_progress\""), "남이 집은 일을 닫았다");
 }

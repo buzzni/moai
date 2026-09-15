@@ -12,14 +12,24 @@ moai=${MOAI:-moai} work=${AGENT_WORK:?AGENT_WORK 에 일할 명령을 준다}
 
 while :; do
   queue=$("$moai" ready --json)                       # {"ready":[…],"held":[…]}
+  # `.moai` 밖이면 등록한 프로젝트마다의 한눈 보기(`{"projects":…}`)가 온다 — 그걸 빈 큐로 읽으면
+  # 할 일이 쌓여 있는데 "집을 일이 없다" 로 조용히 끝난다.
+  jq -e 'has("ready")' <<<"$queue" >/dev/null 2>&1 || {
+    echo "moai 저장소(.moai 가 있는 디렉터리) 안에서 돌린다: $queue" >&2; exit 2
+  }
   id=$(jq -r '.ready[0].id // empty' <<<"$queue")
   if [ -z "$id" ]; then
     echo "집을 일이 없다 (막혀 기다리는 것 $(jq '.held | length' <<<"$queue")건)"; exit 0
   fi
   title=$(jq -r '.ready[0].title' <<<"$queue")
-  "$moai" mv "$id" in_progress
+  # 집기는 락 안에서 한 번 판정된다. 옆 에이전트가 같은 줄을 먼저 집었으면 `moved` 가 비고
+  # `already` 에 선다 — 종료 코드는 0 이라, 안 보면 둘이 같은 일을 한다.
+  claimed=$("$moai" mv "$id" in_progress --json | jq '.moved | length')
+  [ "$claimed" -gt 0 ] || continue
   if out=$("$work" "$id" "$title" 2>&1); then
-    printf '%s\n' "${out:-(출력 없음)}" | "$moai" note "$id" -b -
+    # 공백뿐인 출력은 `note` 가 빈 메모로 거절한다 — 끝낸 일이 in_progress 로 남은 채 멈춘다.
+    [[ $out = *[![:space:]]* ]] || out='(출력 없음)'
+    printf '%s\n' "$out" | "$moai" note "$id" -b -
     "$moai" mv "$id" done
   else
     printf '실패(%s): %s\n' "$?" "$out" | "$moai" note "$id" -b -; exit 1
