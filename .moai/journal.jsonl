@@ -3372,3 +3372,9 @@
 {"ts":"2026-09-15T14:16:39Z","id":"moai-lvf9.t10","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review xhigh --fix 백그라운드. 끝나면 원문·판단, fix: 커밋, 닫고 병합(worktree-moai-lvf9)"}
 {"ts":"2026-09-15T14:34:03Z","id":"moai-olaj.3d8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-olaj (난이도로 모델 고르기)"}
 {"ts":"2026-09-15T14:34:13Z","id":"moai-olaj.3d8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T14:36:32Z","id":"moai-50mn.mgo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 읽음 저장·안 읽음 판정 (50mn, high)"}
+{"ts":"2026-09-15T14:36:32Z","id":"moai-u8oh.x85","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — moai read 명령 (u8oh, high)"}
+{"ts":"2026-09-15T14:36:32Z","id":"moai-z9pc.9av","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — [NEW] 와 읽음 키 (z9pc, medium)"}
+{"ts":"2026-09-15T14:36:44Z","id":"moai-50mn.mgo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T14:36:45Z","id":"moai-z9pc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"커밋 aa57681"}
+{"ts":"2026-09-15T14:36:45Z","id":"moai-j038","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"멤버 셋 다 커밋 — 9212e64(50mn)·8d28538(u8oh)·aa57681(z9pc), 시험 814·290 통과. 사용자 결정 하나 더: 읽음 키는 SPC m(SPC r 다시 읽기는 그대로), 바로 누르는 r 은 그 줄. 다음: 리뷰 셋(50mn.mgo high · u8oh.x85 high · z9pc.9av medium) 차례로 → 에픽 끝 max → main 머지 → 감독 보고."}
