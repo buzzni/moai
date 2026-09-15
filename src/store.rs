@@ -229,8 +229,15 @@ impl Repo {
 
         for i in issues.iter_mut() {
             i.normalize();
-            if original.iter().find(|o| o.id == i.id) != Some(&*i) {
-                i.validate(&self.config)?;
+            let was = original.iter().find(|o| o.id == i.id);
+            if was != Some(&*i) {
+                // **칸을 안 건드린 쓰기는 칸 이름을 다시 안 묻는다**(moai-hym7, 사람이
+                // 정했다). 바뀐 줄만 재는 것과 같은 까닭이 한 겹 더 든 것이다 — `config`
+                // 에서 칸 이름을 고치면 옛 이름에 선 줄이 남는데, 그 줄을 미루거나 제목만
+                // 고치는 것까지 막으면 그 줄은 도구 안에서 영영 못 만진다. 옮기는 쓰기는
+                // 그대로 엄하다: 갈 칸은 이번에 쓰는 값이라 여기가 서지 않는다.
+                let kept = was.is_some_and(|o| o.status == i.status);
+                i.validate_keeping(&self.config, kept)?;
             }
         }
         issues.sort_by(|a, b| a.id.cmp(&b.id));
@@ -845,9 +852,12 @@ mod tests {
         assert_eq!(load.get("argos-0001").unwrap().status.as_str(), "옛날칸");
     }
 
-    /// 그 줄을 직접 건드리면 그때는 검사한다.
+    /// 그 줄을 직접 건드려도 **안 바꾼 칸은 다시 안 묻는다** (moai-hym7, 사람이 정했다).
+    /// 한때 여기서 거절했는데, 그러면 `config` 에서 칸 이름을 고친 순간 옛 이름에 선 줄은
+    /// 제목 하나 못 고치고 미루지도 못해 도구 안에서 영영 못 만진다. 엄함은 이번에 쓰는
+    /// 값에 대한 것이다 — **칸을 옮기는** 쓰기는 그대로 거절한다(아래).
     #[test]
-    fn touching_a_stale_row_still_validates_it() {
+    fn touching_a_stale_row_keeps_its_column_but_cannot_move_it_to_a_missing_one() {
         let (r, d) = repo("stale_touch");
         let mut old = issue("argos-0001");
         old.status = Status::new("옛날칸");
@@ -857,12 +867,21 @@ mod tests {
         )
         .unwrap();
 
+        r.with_write(|issues, _, _| {
+            issues[0].title = "고친 제목".into();
+            Ok((vec![], ()))
+        })
+        .expect("옛 칸에 선 줄의 제목을 못 고쳤다");
+        assert_eq!(r.read().unwrap().get("argos-0001").unwrap().title, "고친 제목");
+        assert_eq!(r.read().unwrap().get("argos-0001").unwrap().status.as_str(), "옛날칸");
+
         let e = r
             .with_write(|issues, _, _| {
-                issues[0].title = "고친 제목".into();
+                issues[0].status = Status::new("또 없는 칸");
                 Ok((vec![], ()))
             })
-            .unwrap_err().message;
+            .unwrap_err()
+            .message;
         assert!(e.contains("라는 칸이 없다"), "{e}");
     }
 

@@ -1047,11 +1047,12 @@ pub struct Seen<'a> {
     pub origin: Option<&'a Origin>,
     /// 펼친 줄의 막음을 하나씩 가른 것 (`report::blocks_of`). 막음이 없으면 비었다.
     pub blocks: Vec<crate::report::Block<'a>>,
-    /// 펼친 줄이 서 있는 워크트리들 (`report::places`, moai-6opu). `None` 이면 줄을 안 세운다 — 안
+    /// 펼친 줄이 **어디에 서 있는가** (`report::places`, moai-6opu). `None` 이면 줄을 안 세운다 — 안
     /// 집은 줄, 워크트리를 안 쓰는 저장소, **안 재 본 자리**(쓰는 길인 `edit`, 겹쳐 보지 않은
-    /// 딸린 워크트리). `Some` 인데 비었으면 집었는데 자리가 없다. 셋을 가르는 것은 `None` 이
-    /// 아무 말도 안 한다는 것뿐이라, 안 잰 것을 "자리 없다" 로 말하는 일은 없다.
-    pub places: Option<Vec<&'a crate::report::Workplace>>,
+    /// 딸린 워크트리). 자리가 안 보이는 까닭(`Fresh`·`Unknown`·`Lost`)은 `Place` 가 이미 갈랐으니
+    /// 여기서 다시 판단하지 않는다 — 안 잰 것(`None`)만이 아무 말도 안 하는 자리라, 그것을
+    /// "자리 없다" 로 말하는 일은 없다.
+    pub places: Option<crate::report::Place<'a>>,
 }
 
 /// **손으로 옮긴 칸이 서 있는 칸과 다르면** 그렇다고 말하는 낱말. CLI 상세와
@@ -1170,16 +1171,24 @@ pub fn detail(
     // **어디서 하던 일인지 댄다**(moai-6opu) — 세션이 죽은 뒤 이어받는 쪽이 들어갈 자리다. 없으면
     // 없다고 한다: 같은 자(`report::places`)로 잰 지금의 자리다.
     //
-    // **`status` 의 `stranded` 와 같은 줄이 아니다.** 저쪽은 방금 집은 줄에 워크트리가 뜰 틈
-    // (`report::STRANDED_GRACE_SECS`, 한 시간)을 주는데 여기는 안 준다 — 규약대로 집고 커밋한 뒤
-    // 워크트리를 띄우는 사이에 펼치면 여기만 "없다" 로 선다. 이 줄은 "지금 보이는가" 를,
-    // `stranded` 는 "이만큼 지났는데도 안 보이는가" 를 말한다.
-    match seen.places.as_deref() {
-        Some([]) => out.push(format!("  자리   {}", paint(style::WARN, "없다 — 일하는 워크트리가 안 보인다"))),
-        Some(trees) => {
+    // **`status` 의 `stranded` 와 같은 답이다**(moai-xn9n) — 한 시간 틈도, 못 읽은 워크트리도
+    // `report::places` 가 한 곳에서 가른다. 한때 여기만 틈이 없어, 규약대로 집고 커밋한 뒤
+    // 워크트리를 띄우는 사이에 펼치면 멀쩡한 줄이 버려진 것처럼 섰다.
+    match &seen.places {
+        Some(crate::report::Place::At(trees)) => {
             for t in trees {
                 out.push(format!("  자리   {}  {}", t.path.display(), paint(style::BRANCH, &format!("({})", t.branch))));
             }
+        }
+        Some(crate::report::Place::Fresh) => {
+            out.push(format!("  자리   {}", paint(style::DIM, "아직 안 보인다 — 방금 집었다")))
+        }
+        Some(crate::report::Place::Unknown) => out.push(format!(
+            "  자리   {}",
+            paint(style::DIM, "모른다 — 못 읽은 워크트리가 있다")
+        )),
+        Some(crate::report::Place::Lost) => {
+            out.push(format!("  자리   {}", paint(style::WARN, "없다 — 일하는 워크트리가 안 보인다")))
         }
         None => {}
     }
