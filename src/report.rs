@@ -474,10 +474,20 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
     let picked: BTreeMap<&str, &Issue> = wip(issues, cfg).into_iter().map(|i| (i.id.as_str(), i)).collect();
     let mut found: BTreeMap<&str, Vec<&Workplace>> = picked.keys().map(|id| (*id, Vec::new())).collect();
     if trees.is_empty() || picked.is_empty() {
-        return settle(&picked, found, trees, now, &BTreeMap::new(), &BTreeMap::new());
+        return settle(&picked, found, trees, now, &BTreeMap::new(), &BTreeMap::new(), &BTreeSet::new());
     }
     // **소속 지도는 한 번만 짓는다**(`claims`) — 워크트리마다 바뀌는 것은 이름뿐이다.
     let (epics, stones) = (groups(issues), milestones(issues));
+    // 굴려 올릴 수 있는 id — **뒷줄이 이긴다**(`by_id`·`eclipsed` 와 같은 자). 종류 다른 쌍둥이에게
+    // 가려진 묶음 줄은 여기 안 든다: `placeable` 이 `group_members` 를 거쳐 그것을 빼므로,
+    // 여기서 들이면 `show` 는 아무 말도 안 하는데 `status` 만 그 id 를 세는 어긋남이 된다.
+    let groupish: BTreeSet<&str> = {
+        let mut kinds: BTreeMap<&str, bool> = BTreeMap::new();
+        for i in issues {
+            kinds.insert(i.id.as_str(), is_group(i));
+        }
+        kinds.into_iter().filter(|(_, g)| *g).map(|(id, _)| id).collect()
+    };
     for t in trees {
         let named = |i: &Issue| claims(&epics, &stones, &t.names, i);
         // **이름이 집은 줄을 하나도 못 가리키면 이름 없는 워크트리다.** "이 이름을 쓰는 줄이
@@ -504,7 +514,7 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
             }
         }
     }
-    settle(&picked, found, trees, now, &epics, &stones)
+    settle(&picked, found, trees, now, &epics, &stones, &groupish)
 }
 
 /// 찾은 자리를 [`Place`] 로 굳히고 **묶음의 자리를 멤버에서 굴려 올린다**(moai-0h8m).
@@ -519,6 +529,7 @@ fn settle<'a>(
     now: &str,
     epics: &BTreeMap<&str, &str>,
     stones: &BTreeMap<&str, &str>,
+    groupish: &BTreeSet<&str>,
 ) -> BTreeMap<String, Place<'a>> {
     let blind = trees.iter().any(|t| t.unknown);
     let now_s = crate::model::parse_rfc3339(now);
@@ -556,7 +567,17 @@ fn settle<'a>(
             .flatten()
             .collect();
         for g in gs {
-            roll.entry(g).or_default().push(id);
+            // **묶음인 id 에만 굴려 올린다**(`groupish`). 소속 지도(`groups`)는 `epic` 에 적힌 글자를
+            // 그대로 낸다 — 끊긴 참조도, 이슈 id 를 가리키는 것도 그대로다(`misplaced` 가 따로
+            // 드러낸다). 거르지 않으면 그 글자가 키를 받고, `stranded` 가 `by_id` 로 그것을 찾아
+            // **집지도 않은 todo 줄**을 "자리 없는 집은 줄" 로 셌다. 거르는 자는 `placeable` 과
+            // 같다: `is_group` 이고, 종류 다른 쌍둥이에게 가려지지 않은 줄(`eclipsed`).
+            //
+            // **집은 줄의 자리는 덮지 않는다.** 같은 id 의 쌍둥이(묶음 줄 하나, 집힌 이슈 하나)가
+            // 있으면 아래 `extend` 가 그 줄이 제 워크트리에서 찾은 자리를 굴림으로 갈아치운다.
+            if groupish.contains(g) && !picked.contains_key(g) {
+                roll.entry(g).or_default().push(id);
+            }
         }
     }
     let rolled: Vec<(String, Place)> = roll
@@ -2684,6 +2705,27 @@ mod tests {
         assert_eq!(branches("argos-0002"), both);
         assert_eq!(branches("argos-0001"), both, "에픽이 자리를 겹쳐 냈다");
         assert_eq!(branches("argos-0009"), both, "마일스톤이 같은 자리를 두 번 냈다");
+    }
+
+    /// **묶음이 아닌 id 로는 굴려 올리지 않는다.** 소속 지도(`groups`)는 `epic` 에 적힌 글자를
+    /// 그대로 내므로 끊긴 참조도 이슈 id 도 값이 된다 — 그것에 키를 주면 `stranded` 가 그 id 를
+    /// `by_id` 로 찾아 **집지도 않은 줄**을 "자리 없는 집은 줄" 로 세고, `show <그 id>` 는
+    /// `placeable` 이 막아 아무 말도 안 해 두 표면이 갈린다.
+    #[test]
+    fn a_broken_epic_reference_never_becomes_a_place() {
+        let issues = vec![
+            // 이슈인데 남의 `epic` 이 가리킨다 — 묶음이 아니다.
+            make("argos-0007", Kind::Issue, "todo"),
+            member("argos-0002", "argos-0007", "in_progress"),
+            // 아예 없는 id 를 가리키는 줄.
+            member("argos-0003", "argos-0404", "in_progress"),
+        ];
+        let trees = vec![tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &[])];
+        let at = places(&issues, &cfg(), &trees, LATER);
+        assert_eq!(at.keys().map(String::as_str).collect::<Vec<_>>(), ["argos-0002", "argos-0003"], "{at:?}");
+        let w = stranded(&issues, &cfg(), &trees, LATER).expect("자리 없는 줄을 안 비췄다");
+        assert_eq!(w.ids, ["argos-0002", "argos-0003"], "집지도 않은 줄을 자리 없음으로 셌다");
+        assert_eq!(w.count, 2);
     }
 
     /// **이름이 id 인 워크트리는 물려받은 벌여 놓인 줄로 자리를 안 댄다.** main 에서 뜬 워크트리의
