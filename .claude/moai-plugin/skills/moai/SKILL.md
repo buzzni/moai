@@ -19,6 +19,7 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
     moai note <id> "발견한 것"             다음 사람이 읽을 메모
+    moai read <id>                         읽었다고 적는다 — [NEW] 가 내린다. --all 은 내게 온 것 전부
     moai defer <id> -m "왜"                지금 안 할 일을 계획에서 뺀다
 
 모든 명령에 `--json` 이 붙는다. `ready --json` 은 `{"ready":[…],"held":[…]}` —

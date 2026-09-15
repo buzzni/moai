@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:322333ec -->
+<!-- moai:begin v:0.1.0 hash:b800bd36 -->
 ## 이슈 트래커 — moai
 
 이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
@@ -18,6 +18,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. 승인 게이트가 
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
     moai note <id> "발견한 것"             다음 사람이 읽을 메모
+    moai read <id>                         읽었다고 적는다 — [NEW] 가 내린다. --all 은 내게 온 것 전부
     moai defer <id> -m "왜"                지금 안 할 일을 계획에서 뺀다
 
 모든 명령에 `--json` 이 붙는다. `ready --json` 은 `{"ready":[…],"held":[…]}` —
