@@ -1258,6 +1258,24 @@ pub fn duplicate_note(lines: usize) -> String {
     )
 }
 
+/// 이 이슈에 닿은 커밋 — 짧은 해시와 제목(moai-emcv). 이력 바로 앞에 선다.
+///
+/// **트래커 커밋은 그리지 않는다.** 집기·닫기만 적은 커밋이라 사람이 찾는 "무엇이 고쳤나"
+/// 가 아니고, 이력이 이미 같은 것을 말한다. `--json` 은 `tracker` 표시와 함께 전부 낸다.
+pub fn commits(commits: &[crate::git::Commit]) -> Vec<String> {
+    let code: Vec<&crate::git::Commit> = commits.iter().filter(|c| !c.tracker).collect();
+    if code.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![String::new(), paint(style::HEAD, "커밋")];
+    for c in code {
+        let short = c.hash.get(..7).unwrap_or(&c.hash);
+        // 제목도 파일 밖에서 온 글이다 — 제어문자를 걷어낸다(`body_lines` 와 같은 까닭).
+        out.push(format!("  {}   {}", paint(style::ID, short), crate::text::sanitize(&c.subject)));
+    }
+    out
+}
+
 /// 저널을 **그대로 찍는다. 접지 않는다.**
 pub fn history(journal: &[JournalEntry], cfg: &Config) -> Vec<String> {
     let mut out = Vec::new();
