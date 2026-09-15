@@ -638,6 +638,13 @@ pub struct MvArgs {
     /// 이 이동에 한 줄 메모 (저널에만 남는다)
     #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
     pub msg: Option<String>,
+
+    /// 아직 이 칸에 있을 때만 옮긴다 (겨루는 집기)
+    ///
+    /// 안 주면 지금까지처럼 무엇도 막지 않는다. 주면 락 안에서 다시 보고, 그
+    /// 사이에 칸이 달라진 줄은 건드리지 않은 채 부분 실패로 선다.
+    #[arg(long, value_name = "칸")]
+    pub from: Option<String>,
 }
 
 #[derive(Args, Debug)]

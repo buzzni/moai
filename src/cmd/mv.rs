@@ -17,6 +17,8 @@ struct Moved {
     /// 이미 그 칸에 있던 것.
     already: Vec<String>,
     missing: Vec<String>,
+    /// `--from` 을 걸었는데 그 사이 칸이 달라진 줄 — (그 줄, 지금 칸).
+    stale: Vec<(String, Status)>,
     /// 옮긴 것 중 계획에서 빠진 것 — (그 줄, 실제로 미룬 줄).
     shelved: Vec<(String, Vec<String>)>,
     /// 옮기려 한 묶음 → 멤버에서 읽은 칸. 적힌 칸은 어디서도 안 읽힌다.
@@ -43,6 +45,13 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let to = Status::new(tail[0].clone());
 
     repo.config.require_known(to.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
+    // **`--from` 의 오타는 옮길 칸과 같은 자로 거절한다.** 모르는 칸을 그냥 "안 맞았다"
+    // 로 읽으면 아무것도 안 옮기면서 0 아닌 코드만 내, 에이전트가 영영 아무 일도 못
+    // 집는 까닭이 어디에도 안 남는다.
+    let from = args.from.map(Status::new);
+    if let Some(f) = &from {
+        repo.config.require_known(f.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
+    }
 
     let at = model::now();
     let by = model::actor(ctx.user.as_deref())?;
@@ -58,6 +67,16 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 m.missing.push(id.clone());
                 continue;
             };
+            // **본 칸이 그대로일 때만 옮긴다.** 락 안에서 다시 읽은 줄로 재므로,
+            // `ready` 와 이 자리 사이에 옆 에이전트가 집고 닫기까지 했어도 여기서
+            // 갈린다. 이미 갈 칸에 있는 것보다 **먼저** 본다 — 남이 옮겨 둔 것을
+            // "이미 그 칸" 으로 읽으면 진 쪽이 이겼다고 믿는다.
+            if let Some(f) = &from {
+                if &i.status != f {
+                    m.stale.push((i.id.clone(), i.status.clone()));
+                    continue;
+                }
+            }
             if i.status == to {
                 // 옮길 것이 없어도 **적어 온 말은 버리지 않는다.** 되풀이해
                 // 부르는 것(재시도·다른 에이전트가 먼저 옮긴 뒤)이 흔하고,
@@ -115,6 +134,12 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         super::note_partial();
         eprintln!("moai: {id} 를 못 찾았다");
     }
+    // **진 집기도 못 찾은 줄과 같은 자리다.** 종료 코드로 갈려야 jq 없는 껍데기가
+    // 이긴 쪽과 진 쪽을 가른다 — 여기서 실패로 끝내지는 않는다(나머지 id 는 옮겼다).
+    for (id, now) in &moved.stale {
+        super::note_partial();
+        eprintln!("moai: {id} 는 이미 {now} 다 — 안 옮겼다");
+    }
 
     if ctx.json {
         // **옮긴 것만 내면 나머지를 말할 자리가 없다.** 이미 그 칸이던 것과
@@ -126,10 +151,18 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             derived_status: &'a str,
         }
         #[derive(serde::Serialize)]
+        struct Stale<'a> {
+            id: &'a str,
+            /// 락 안에서 본 지금 칸. **함께 주지 않으면 진 쪽이 한 번 더 물어야 한다.**
+            status: &'a str,
+        }
+        #[derive(serde::Serialize)]
         struct Out<'a> {
             moved: Vec<super::Row<'a>>,
             already: &'a [String],
             missing: &'a [String],
+            /// `--from` 에 걸려 안 옮긴 줄. 사람 출력의 한 줄과 같은 것이다.
+            stale: Vec<Stale<'a>>,
             /// 옮겼어도 계획 밖인 것과 도로 집을 줄. 사람 출력의 안내와 같은 것이다.
             shelved: Vec<super::Shelved<'a>>,
             /// 옮기려 한 묶음 가운데 **서 있는 칸이 적은 칸과 다른 것.** 사람 출력의
@@ -144,6 +177,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             moved: moved.done.iter().map(|(i, _)| super::Row::from(i, &moved.read)).collect(),
             already: &moved.already,
             missing: &moved.missing,
+            stale: moved.stale.iter().map(|(id, now)| Stale { id, status: now.as_str() }).collect(),
             shelved: super::shelved(&moved.shelved),
             stands: moved
                 .read
@@ -173,6 +207,13 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             "{}  {}",
             paint(style::ID, id),
             paint(style::DIM, &format!("이미 {to} 다"))
+        ));
+    }
+    for (id, now) in &moved.stale {
+        out.push(format!(
+            "{}  {}",
+            paint(style::ID, id),
+            paint(style::DIM, &format!("이미 {now} 다 — 안 옮겼다"))
         ));
     }
     // 묶음의 칸이 적은 칸과 다르면 한 줄. 같으면 말하지 않는다 — 멤버가 다 끝난

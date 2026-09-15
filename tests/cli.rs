@@ -7495,3 +7495,86 @@ fn the_bash_agent_example_does_not_wait_for_a_child_the_job_left_running() {
     assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "닫지 않았다\n{}", text(&out));
     assert!(ok(s.path(), &["show", &id]).contains("띄웠다"), "노트가 안 남았다");
 }
+
+/// **집기는 본 칸이 그대로일 때만 먹는다** (moai-f8q1). `ready` 와 `mv` 사이에 옆
+/// 에이전트가 같은 줄을 집고 닫기까지 하면, 뒤늦은 `mv` 가 `done` 을 `in_progress` 로
+/// 되연다. `--from <칸>` 을 적으면 락 안에서 다시 보고 칸이 달라졌으면 안 옮긴다.
+#[test]
+fn a_move_from_a_column_only_lands_while_the_row_is_still_there() {
+    let s = init("mv-from");
+    let id = add(s.path(), &["겨루는 일"]);
+    ok(s.path(), &["mv", &id, "in_progress", "--from", "todo"]);
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""));
+
+    // 뒤늦은 집기. 칸이 이미 달라졌으니 아무것도 안 옮기고 **부분 실패**로 끝난다.
+    let out = moai(s.path(), &["mv", &id, "review", "--from", "todo"]);
+    assert!(!out.status.success(), "진 집기가 성공으로 끝났다\n{}", text(&out));
+    let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(said.contains(&id) && said.contains("in_progress"), "지금 칸을 말하지 않는다\n{said}");
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""), "진 집기가 칸을 덮었다");
+    assert!(!journal(s.path()).contains("\"to\":\"review\""), "안 옮긴 것을 저널에 적었다");
+}
+
+/// 진 줄은 `--json` 에도 선다 — 사람 출력에만 있으면 받는 쪽이 두 표면 중 하나를
+/// 못 믿는다. **지금 칸을 함께 준다**: 그것이 없으면 진 쪽이 한 번 더 물어야 한다.
+#[test]
+fn a_lost_claim_stands_in_the_json_with_the_column_it_found() {
+    let s = init("mv-from-json");
+    let id = add(s.path(), &["겨루는 일"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let out = moai(s.path(), &["mv", &id, "in_progress", "--from", "todo", "--json"]);
+    assert!(!out.status.success(), "진 집기가 성공으로 끝났다");
+    let json = String::from_utf8(out.stdout).unwrap();
+    one_json_value(&json);
+    assert!(json.contains("\"stale\":[{"), "진 줄 목록이 없다\n{json}");
+    assert!(json.contains(&format!("\"id\":\"{id}\"")) && json.contains("\"status\":\"done\""), "{json}");
+    assert!(json.contains("\"moved\":[]"), "{json}");
+}
+
+/// 안 적으면 지금과 똑같다 — 막지 않는다. 승인 게이트를 만들지 않는 것이 이 도구의
+/// 밑동이라, 칸 검사는 **부르는 쪽이 골라 켜는 것**이다.
+#[test]
+fn a_move_without_from_still_never_refuses() {
+    let s = init("mv-from-off");
+    let id = add(s.path(), &["되감는 일"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    ok(s.path(), &["mv", &id, "todo"]);
+    assert!(line_of(s.path(), &id).contains("\"status\":\"todo\""));
+}
+
+/// 모르는 칸은 옮길 칸과 같은 자로 거절한다 — 오타가 "아무것도 안 옮겼다" 로
+/// 조용히 넘어가면 에이전트는 영영 아무 일도 못 집는다.
+#[test]
+fn a_from_column_that_does_not_exist_is_refused() {
+    let s = init("mv-from-bad");
+    let id = add(s.path(), &["일"]);
+    let out = moai(s.path(), &["mv", &id, "done", "--from", "없는칸"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("없는칸"), "{}", text(&out));
+    assert!(line_of(s.path(), &id).contains("\"status\":\"todo\""), "거절하면서 옮겼다");
+}
+
+/// **둘이 같은 줄을 집으면 하나만 이긴다.** 조용한 손실이 이 도구가 못 견디는 유일한
+/// 실패 모드고, 집기가 그것을 두 에이전트에게 열어 주면 같은 일을 둘이 한다.
+#[test]
+fn only_one_racer_claims_a_row() {
+    let s = init("mv-race");
+    let id = add(s.path(), &["하나뿐인 일"]);
+    let kids: Vec<_> = (0..8)
+        .map(|_| {
+            isolated(BIN)
+                .args(["mv", &id, "in_progress", "--from", "todo"])
+                .current_dir(s.path())
+                .env("MOAI_ACTOR", "테스터 (tester@example.com)")
+                .env("NO_COLOR", "1")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    let won = kids.into_iter().filter(|_| true).map(|k| k.wait_with_output().unwrap()).filter(|o| o.status.success()).count();
+    assert_eq!(won, 1, "집기를 이긴 것이 하나가 아니다");
+    assert_eq!(journal(s.path()).matches("\"to\":\"in_progress\"").count(), 1, "옮긴 줄이 저널에 여럿이다");
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""));
+}
