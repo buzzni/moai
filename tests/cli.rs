@@ -2414,6 +2414,27 @@ fn init_never_overwrites_a_dotfile_it_cannot_read() {
     assert!(now.starts_with("build/\n") && now.contains(".moai/lock"), "{now}");
 }
 
+/// **`init` 은 제가 쓴 것만 말한다**(moai-knn0). 블록이 이미 맞으면 "맞췄다" 도 `"agents":true`
+/// 도 거짓말이다 — 낡았다는 알림을 보고 부른 사람이 그 줄만 보고는 무엇이 바뀌었는지 모른다.
+/// `gitattributes`·`gitignore` 가 이미 쓴 때만 말하는 자리라 셋을 한 자로 맞춘다.
+#[test]
+fn init_says_only_what_it_wrote() {
+    let s = init("saidwrote");
+    // 갓 심은 자리: 블록을 썼다고 말한다.
+    let first = ok(s.path(), &["init", "--json"]);
+    assert!(first.contains("\"agents\":false"), "안 썼는데 썼다고 한다 — {first}");
+
+    let md = s.path().join("AGENTS.md");
+    let fresh = std::fs::read_to_string(&md).unwrap();
+    std::fs::write(&md, fresh.replace("승인 게이트가 없다", "승인 게이트가 있다")).unwrap();
+    let wrote = ok(s.path(), &["init", "--json"]);
+    assert!(wrote.contains("\"agents\":true"), "고친 블록을 다시 썼는데 안 썼다고 한다 — {wrote}");
+
+    let said = ok(s.path(), &["init"]);
+    assert!(!said.contains("블록을 맞췄다"), "안 쓰고 맞췄다고 한다 — {said}");
+    assert!(said.contains("이미 다 맞아 있다"), "그대로인데 아무 말도 안 한다 — {said}");
+}
+
 /// 남의 산문은 한 글자도 건드리지 않는다.
 #[test]
 fn init_keeps_what_someone_else_wrote() {

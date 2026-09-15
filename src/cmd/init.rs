@@ -535,18 +535,24 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
 
     // `AGENTS.md` **하나만** 쓴다. `CLAUDE.md` 에도 같은 것을 쓰면 곧 갈라지고,
     // 갈라진 두 벌 중 어느 것이 참인지 아무도 모른다.
+    // **쓴 때만 `true` 다**(moai-knn0). 늘 참이던 때는 "블록을 맞췄다" 가 아무것도 안 쓴 자리에도
+    // 서서 `이미 다 맞아 있다` 가 `--no-agents` 말고는 닿지 않았고, 낡았다는 알림을 보고 부른
+    // 사람이 그 줄만으로는 무엇이 바뀌었는지 몰랐다. `gitattributes`·`gitignore` 가 이미 그 뜻이다.
     let agents = match &agents_now {
         None => false,
         Some(existing) => {
             let next = with_block(existing, &crate::guide::agents());
-            if next != *existing {
+            let changed = next != *existing;
+            if changed {
                 std::fs::write(&agents_path, next)
                     .map_err(|e| Fail::new(format!("{}: {e}", agents_path.display())))?;
             }
-            true
+            changed
         }
     };
-    let claude_needs_pointer = agents
+    // **`agents` 가 아니라 "AGENTS.md 를 다뤘는가" 로 묻는다** — `agents` 는 이제 *쓴* 때만 참이라
+    // (moai-knn0) 그것으로 물으면 블록이 이미 맞는 저장소에서는 이 안내가 영영 안 선다.
+    let claude_needs_pointer = agents_now.is_some()
         && root.join("CLAUDE.md").exists()
         && !std::fs::read_to_string(root.join("CLAUDE.md"))
             .unwrap_or_default()
