@@ -3302,3 +3302,10 @@
 {"ts":"2026-09-15T13:47:17Z","id":"moai-i0fg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"에픽 moai-lk8a 의 멤버 moai-uu47 로 들어갔다"}
 {"ts":"2026-09-15T13:47:17Z","id":"moai-i0fg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-uu47 로 옮겨 세웠다 (에픽 moai-lk8a)"}
 {"ts":"2026-09-15T13:47:18Z","id":"moai-shgx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T13:49:31Z","id":"moai-olaj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"난이도로 모델을 고른다 — 감독이 싣고 일꾼이 남긴다"}
+{"ts":"2026-09-15T13:49:31Z","id":"moai-84kd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독이 난이도로 모델을 골라 브리프에 싣는다"}
+{"ts":"2026-09-15T13:49:31Z","id":"moai-lzfq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일꾼이 모델을 올릴 수 있고 일한 모델을 note 로 남긴다"}
+{"ts":"2026-09-15T13:49:31Z","id":"moai-olaj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-cf8t 에서 펼쳤다 — 작업 난이도에 따른 모델 자동 선택"}
+{"ts":"2026-09-15T13:49:31Z","id":"moai-cf8t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-olaj 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-09-15T13:49:48Z","id":"moai-olaj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(2026-09-15, 사용자): (1) 난이도는 리뷰 등급과 **같은 축**이다(7e08426) — 글·주석·한 줄=low, 한 파일 안의 동작=medium, 여러 파일·쓰기 경로·저장 형식·훅=high. 한 낱말이 모델과 리뷰 등급을 같이 정해 브리프가 판단을 두 벌 들지 않는다. (2) 짝: low→haiku-4.5, medium→sonnet-5, high→opus-5, 에픽 끝 리뷰(xhigh·max)→opus-5. (3) 감독이 브리프에 제안하고, 일꾼이 읽고 한 단계 **올릴 수 있다** — 올린 까닭은 note 에. 리뷰 서브에이전트는 리뷰 이슈 -b 가 정한 등급을 그대로 따른다(싼 모델이 쓰기 경로를 리뷰하지 않는다). (4) 일한 모델은 **닫을 때 이슈에 note** 로 남긴다 — 'model: opus-5 (high — 쓰기 경로)'. 필드를 더하지 않는다: 저널은 상태 계산에 안 읽히고 파생값은 저장하지 않는다"}
+{"ts":"2026-09-15T13:49:49Z","id":"moai-84kd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
