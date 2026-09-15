@@ -1,4 +1,8 @@
 {
   "status.issues": "Issues {n}",
-  "status.epics": "· Epics {n}"
+  "status.epics": "· Epics {n}",
+  "status.milestone_label": "Milestones",
+  "status.epic_label": "Epics",
+  "ready.count": "Ready to pick  {n}",
+  "ready.none": "Nothing. `moai show` shows what is waiting"
 }

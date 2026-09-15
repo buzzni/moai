@@ -1,3 +1,8 @@
 {
-  "status.issues": "问题 {n}"
+  "status.issues": "问题 {n}",
+  "status.epics": "· 史诗 {n}",
+  "status.milestone_label": "里程碑",
+  "status.epic_label": "史诗",
+  "ready.count": "可以着手的工作  {n} 项",
+  "ready.none": "没有。用 `moai show` 查看积压的内容"
 }

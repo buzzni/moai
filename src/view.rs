@@ -3,6 +3,7 @@
 //! 표를 쓰는 이상 폭 계산이 필요하다. 한글은 터미널에서 두 칸을 먹으므로
 //! `len()` 으로 맞추면 한글 제목이 섞인 표가 전부 어긋난다.
 
+use crate::i18n::{fill, t};
 use crate::config::Config;
 use crate::model::{Issue, JournalEntry, Kind};
 use crate::report::{Roll, StatusReport, Warning, is_group};
@@ -695,8 +696,8 @@ pub fn status(
     let mut out = vec![
         format!(
             "{}  {}       {}{overlaid}",
-            paint(style::HEAD, &format!("이슈 {}", st.total)),
-            paint(style::DIM, &format!("· 에픽 {}", st.epics.len())),
+            paint(style::HEAD, &fill(t("status.issues"), &[("n", &st.total.to_string())])),
+            paint(style::DIM, &fill(t("status.epics"), &[("n", &st.epics.len().to_string())])),
             paint(style::DIM, at),
         ),
         String::new(),
@@ -705,7 +706,7 @@ pub fn status(
     out.push(board(cfg, &st.counts));
 
     let shelved = crate::report::put_off(issues);
-    for (label, rolls) in [("마일스톤", &st.milestones), ("에픽", &st.epics)] {
+    for (label, rolls) in [(t("status.milestone_label"), &st.milestones), (t("status.epic_label"), &st.epics)] {
         if rolls.is_empty() {
             continue;
         }
@@ -901,10 +902,10 @@ pub fn ready(
     held: &[crate::report::Held],
     origin: &Origin,
 ) -> Vec<String> {
-    let mut out = vec![format!("집을 수 있는 일  {}건", picks.len())];
+    let mut out = vec![fill(t("ready.count"), &[("n", &picks.len().to_string())])];
     if picks.is_empty() {
         out.push(String::new());
-        out.push(paint(style::DIM, "없다. `moai show` 로 무엇이 밀려 있는지 본다"));
+        out.push(paint(style::DIM, t("ready.none")));
     } else {
         out.push(String::new());
         let heads: Vec<(String, usize)> = picks
@@ -2077,13 +2078,14 @@ mod tests {
 
         let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[], &Origin::default()));
         let joined = out.join("\n");
-        assert!(joined.contains("2건"), "{joined}");
+        // **글자는 말묶음에서 온다**(moai-zeyv) — 여기에 한국어를 박으면 기본 언어(영어)에서 깨진다.
+        assert!(joined.contains(&fill(t("ready.count"), &[("n", "2")])), "{joined}");
         assert!(joined.contains("저장 계층") && joined.contains("에픽 없음"), "{joined}");
         assert!(joined.contains("이미 잡고 있는 것 1건"), "{joined}");
         assert!(joined.contains("argos-0004"), "{joined}");
 
         let empty = plain(&ready(&[], &labels, &[], &[], &Origin::default())).join("\n");
-        assert!(empty.contains("0건") && empty.contains("무엇이 밀려 있는지"), "{empty}");
+        assert!(empty.contains(&fill(t("ready.count"), &[("n", "0")])) && empty.contains(t("ready.none")), "{empty}");
     }
 
     /// 없는 에픽을 가리켜도 상세가 죽지 않는다 — 드러내되 막지 않는다.

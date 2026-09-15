@@ -91,7 +91,13 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // 걷는다 — `MOAI_CONFIG` 를 덮어쓴 시험이 그것을 지우면 그다음 자리다.
         .env("MOAI_CONFIG", home.join("moai-config-unset/config.toml"))
         .env_remove("XDG_CONFIG_HOME")
-        .env_remove("BASH_ENV");
+        .env_remove("BASH_ENV")
+        // **시험은 한국어 화면을 본다**(moai-zeyv). 기본은 영어지만(사용자 결정) 이 저장소의
+        // 시험은 글자를 그대로 견주는 것이 수백 줄이라, 여기서 언어를 못 박는다 — 안 박으면
+        // 글자를 말묶음으로 옮길 때마다 시험이 "말이 바뀐 것" 인지 "동작이 바뀐 것" 인지를
+        // 못 가른다. 영어 화면은 `english_is_the_default_when_nothing_picks_a_language` 가
+        // 이 변수를 걷고 따로 잰다.
+        .env("MOAI_LANG", "ko");
     cmd
 }
 
@@ -130,6 +136,44 @@ fn init(name: &str) -> Scratch {
 
 fn issues(dir: &Path) -> String {
     std::fs::read_to_string(dir.join(".moai/issues.jsonl")).unwrap()
+}
+
+/// **아무도 고르지 않으면 화면은 영어다**(moai-zeyv, 사용자 결정). 나머지 시험이 `MOAI_LANG=ko`
+/// 를 박고 도는 것과 짝이다 — 그 줄이 빠지면 여기서만 통과하고 화면은 통째로 영어가 된다.
+///
+/// **`MOAI_LANG` 으로 한국어·일본어도 함께 잰다** — 고르는 길이 도는지, 그리고 두 칸 글자가
+/// 섞여도 줄이 서는지. 어느 말이든 같은 수를 대는 것으로 그 화면이 같은 화면임을 잰다.
+#[test]
+fn english_is_the_default_when_nothing_picks_a_language() {
+    let s = init("lang");
+    ok(s.path(), &["add", "첫 일"]);
+    let say = |lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(["status"]).current_dir(s.path()).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+        match lang {
+            Some(l) => cmd.env("MOAI_LANG", l),
+            None => cmd.env_remove("MOAI_LANG"),
+        };
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let english = say(None);
+    assert!(english.contains("Issues 1"), "아무도 안 골랐는데 영어가 아니다\n{english}");
+    // **옮긴 줄만 잰다** — 경고·흐름은 아직 한국어다(표면 하나씩 옮긴다, moai-80qw).
+    let head = |screen: &str| screen.lines().next().unwrap_or_default().to_string();
+    assert!(!head(&english).contains("이슈"), "영어 화면의 머리에 한국어가 남았다\n{english}");
+
+    let korean = say(Some("ko"));
+    assert!(korean.contains("이슈 1"), "MOAI_LANG=ko 가 안 들었다\n{korean}");
+
+    // 없는 키는 영어로 떨어진다 — 화면이 비지 않는다.
+    let japanese = say(Some("ja_JP.UTF-8"));
+    assert!(japanese.contains("課題 1"), "로캘 모양의 MOAI_LANG 이 안 들었다\n{japanese}");
+
+    // 말이 달라도 같은 화면이다 — 줄 수가 같다.
+    assert_eq!(english.lines().count(), korean.lines().count(), "영어와 한국어의 줄 수가 다르다");
+    assert_eq!(english.lines().count(), japanese.lines().count(), "영어와 일본어의 줄 수가 다르다");
 }
 
 #[test]

@@ -7,9 +7,6 @@
 //! **크레이트를 들이지 않는다**(사용자 결정). 이 도구의 글에는 복수형·지역 서식 규칙이 거의
 //! 없어 표 하나와 [`say`] 하나면 되고, 새 축의 의존성은 전이 의존과 빌드 시간을 새로 진다.
 
-// **아직 부르는 자리가 없다.** 뼈대(moai-slfv)와 글자 옮기기(moai-zeyv)를 한 커밋에 섞지
-// 않으려고 가른 것이라, 첫 표면이 `t!` 를 부르는 그 커밋에서 이 줄을 지운다.
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -86,6 +83,19 @@ pub fn t(key: &'static str) -> &'static str {
     say(current(), key)
 }
 
+/// 글 안의 `{이름}` 자리를 채운다 — `fill(t("status.issues"), &[("n", "12")])`.
+///
+/// **자리는 이름으로 둔다**(`{n}`), 차례가 아니다. 번역은 말차례가 달라지는 일이라, 자리를
+/// 차례로 두면 번역자가 순서를 바꾸는 순간 값이 엉뚱한 자리에 든다. 모르는 이름은 그대로
+/// 남는다 — 화면에 `{n}` 이 보이면 무엇이 안 채워졌는지 그 자리에서 읽힌다.
+pub fn fill(text: &str, vars: &[(&str, &str)]) -> String {
+    let mut out = text.to_string();
+    for (name, value) in vars {
+        out = out.replace(&format!("{{{name}}}"), value);
+    }
+    out
+}
+
 /// 그 언어의 표. 한 번만 읽어 들고 있는다 — 매 줄 JSON 을 다시 푸는 자리가 아니다.
 fn table(lang: Lang) -> &'static HashMap<String, String> {
     static TABLES: OnceLock<HashMap<&'static str, HashMap<String, String>>> = OnceLock::new();
@@ -153,8 +163,9 @@ mod tests {
     #[test]
     fn a_missing_key_falls_back_to_english_then_to_the_key_itself() {
         assert_eq!(say(Lang::Ko, "status.issues"), "이슈 {n}");
-        // ja 에는 아직 이 키가 없다 — 영어가 받는다.
-        assert_eq!(say(Lang::Ja, "status.epics"), say(Lang::En, "status.epics"));
+        // es 에는 아직 이 키가 없다 — 영어가 받는다. **번역은 원래 덜 된 채로 산다**:
+        // 다섯을 함께 채우게 하지 않는 것이 결정이고, 이 줄이 그 결정이 도는 증거다.
+        assert_eq!(say(Lang::Es, "status.milestone_label"), say(Lang::En, "status.milestone_label"));
         assert_eq!(say(Lang::En, "nothing.here"), "nothing.here"); // i18n:없는-키
         assert_eq!(say(Lang::Ko, "nothing.here"), "nothing.here"); // i18n:없는-키
     }

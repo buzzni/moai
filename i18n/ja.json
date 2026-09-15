@@ -1,3 +1,8 @@
 {
-  "status.issues": "課題 {n}"
+  "status.issues": "課題 {n}",
+  "status.epics": "· エピック {n}",
+  "status.milestone_label": "マイルストーン",
+  "status.epic_label": "エピック",
+  "ready.count": "着手できる作業  {n}件",
+  "ready.none": "ない。`moai show` で滞っているものを見る"
 }
