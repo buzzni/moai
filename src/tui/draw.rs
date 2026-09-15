@@ -5080,7 +5080,7 @@ pub(super) mod tests {
     fn a_long_filter_still_shows_its_error() {
         let q = "tag=parser grep=원자적 쓰기 원자적 쓰기 원자적 쓰기 원자적 쓰기 status=xyz";
         let (row, x, around) = filter_cells(q, 80);
-        assert!(row.contains("`xyz` 라는 칸이 없다"), "오류가 밀려났다: {row}");
+        assert!(row.contains("`xyz` 라는 칸이 없고"), "오류가 밀려났다: {row}");
         assert!(!row.contains("Enter 걸기"), "{row}");
         // 커서 바로 앞 칸이 친 글의 마지막 글자이고, 커서 칸은 비었다.
         assert_eq!((around.0.as_str(), around.1.as_str()), ("z", " "), "{x} {row}");
@@ -5092,7 +5092,7 @@ pub(super) mod tests {
     #[test]
     fn a_short_filter_draws_as_before() {
         let (row, x) = filter_line("status=xyz", 80);
-        assert!(row.starts_with(" 거름망  status=xyz    `xyz` 라는 칸이 없다"), "{row}");
+        assert!(row.starts_with(" 거름망  status=xyz    `xyz` 라는 칸이 없고"), "{row}");
         assert_eq!(x, 9 + 10);
         let (row, _) = filter_line("tag=parser", 80);
         assert!(row.starts_with(" 거름망  tag=parser    Enter 걸기  Esc 그만"), "{row}");

@@ -8356,6 +8356,90 @@ fn a_from_column_that_does_not_exist_is_refused() {
     assert!(!line_of(s.path(), &id).contains("\"deferred_at\""), "거절하면서 미뤘다");
 }
 
+/// **config 가 더는 모르는 칸도 줄이 거기 있으면 받는다** (moai-hym7). 칸 이름을 바꾸면
+/// 옛 이름에 선 줄이 남는데, 그 이름을 오타로 보고 거절하면 그 줄은 **영영** `--from`
+/// 으로 못 집는다 — 남의 낡은 줄 하나가 쓰기를 막는 자리다(CLAUDE.md). 검사가 노리는
+/// 것은 오타지 낡음이 아니므로, 아무 줄도 서 있지 않은 이름만 거절한다.
+#[test]
+fn a_from_column_the_config_forgot_still_works_while_a_row_sits_there() {
+    let s = init("mv-from-renamed");
+    let id = add(s.path(), &["옛 칸에 선 일"]);
+    let other = add(s.path(), &["옛 칸에 선 둘째"]);
+    ok(s.path(), &["mv", &id, &other, "in_progress"]);
+    let cfg = s.path().join(".moai/config.toml");
+    let renamed = std::fs::read_to_string(&cfg).unwrap().replace("in_progress", "doing");
+    std::fs::write(&cfg, renamed).unwrap();
+
+    // 줄은 아직 `in_progress` 에 서 있다 — 설정만 그 이름을 잊었다.
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""));
+    ok(s.path(), &["mv", &id, "done", "--from", "in_progress"]);
+    assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "옛 칸에 선 줄을 못 집었다");
+
+    // **미루기도 같은 자다.** 미룬 줄은 옛 칸에 그대로 서 있으므로, 쓰기 검사가 칸
+    // 이름을 다시 물으면 `--from` 이 통과시킨 줄을 쓰기가 거절한다 — 검사 둘이 서로
+    // 반대를 말하면 부르는 쪽은 어디를 고칠지 못 고른다(moai-hym7.xvc 가 짚었다).
+    ok(s.path(), &["defer", &other, "-m", "다음에", "--from", "in_progress"]);
+    assert!(line_of(s.path(), &other).contains("\"deferred_at\""), "옛 칸에 선 줄을 못 미뤘다");
+    ok(s.path(), &["defer", &other, "--undo", "--from", "in_progress"]);
+    assert!(!line_of(s.path(), &other).contains("\"deferred_at\""), "옛 칸에 선 줄을 못 도로 집었다");
+
+    // **제목 고치기와 막기도 같은 자다.** `store::with_write` 만 풀고 `edit`·`link` 가
+    // 제 손으로 칸 이름을 다시 물으면 옛 칸에 선 줄은 제목 하나 못 고치고 막음도 못
+    // 푼다 — 도구 안에서 영영 못 만지는 줄이 되어, 푼 것이 헛일이 된다. 탐색기는
+    // `with_write` 만 지나므로 여기서 갈리면 두 표면이 서로 다른 말을 한다.
+    ok(s.path(), &["edit", &other, "--title", "고친 제목"]);
+    assert!(line_of(s.path(), &other).contains("고친 제목"), "옛 칸에 선 줄의 제목을 못 고쳤다");
+    assert!(line_of(s.path(), &other).contains("\"status\":\"in_progress\""), "제목만 고쳤는데 칸이 움직였다");
+    ok(s.path(), &["link", &id, "--blocks", &other]);
+    assert!(line_of(s.path(), &other).contains("\"blocked_by\""), "옛 칸에 선 줄을 못 막았다");
+    ok(s.path(), &["link", &id, "--unblocks", &other]);
+
+    // **읽기가 쓰기보다 엄하면 안 된다** (moai-lvf9.t10). 옮길 수는 있는데 못 찾는 줄이
+    // 생기면, 칸 이름을 바꾼 뒤 정리하려는 사람이 그 줄에 닿을 길이 없다.
+    let listed = ok(s.path(), &["show", "-s", "in_progress"]);
+    assert!(listed.contains(&other), "옛 칸에 선 줄을 못 찾는다\n{listed}");
+
+    // 칸을 **옮기는** 쓰기는 그대로 엄하다 — 갈 칸이 아는 칸이어야 한다.
+    let out = moai(s.path(), &["mv", &other, "doing"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!moai(s.path(), &["mv", &other, "in_progress"]).status.success(), "모르는 칸으로 옮겼다");
+
+    // 아무 줄도 안 선 이름은 그대로 거절한다 — 오타 검사는 살아 있다.
+    let out = moai(s.path(), &["mv", &id, "todo", "--from", "in_progress"]);
+    assert!(!out.status.success(), "이제 아무도 안 선 옛 칸이 통과했다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("in_progress"), "{}", text(&out));
+    assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "거절하면서 옮겼다");
+}
+
+/// **칸 오타는 사람을 못 찾는 것보다 먼저 선다** — `mv` 와 `defer` 가 한 자다.
+/// 뒤로 밀리면 신원 없는 기계(CI·훅)에서 오타가 "누가 하는지 모른다" 로 덮여, 부르는
+/// 쪽이 받는 `code` 가 `bad_status` 가 아니라 `no_actor` 가 된다 — 고칠 곳이 설정인지
+/// 명령인지가 갈리는 자리다. 한쪽만 시험하면 두 벌로 적힌 차례가 갈릴 때 한쪽만 잡힌다.
+///
+/// **`bad_status` 를 내는 검사는 하나도 빠짐없이 먼저 선다.** 오타만 앞세우고 묶음
+/// 가드를 사람 뒤에 두면, 같은 자의 잘못이 `--from` 의 값에 따라 두 `code` 로 갈린다 —
+/// 오타는 `bad_status`, 묶음은 `no_actor`. 부르는 쪽은 그것을 가를 방법이 없다.
+#[test]
+fn a_bad_from_column_is_named_before_the_missing_person() {
+    let s = init("from-before-who");
+    let id = add(s.path(), &["일"]);
+    let epic = add(s.path(), &["묶음", "--type", "epic"]);
+    add(s.path(), &["멤버", "-e", &epic]);
+    let cases = [
+        vec!["mv", &id, "done", "--from", "없는칸"],
+        vec!["defer", &id, "--from", "없는칸"],
+        vec!["mv", &epic, "done", "--from", "todo"],
+        vec!["defer", &epic, "--from", "todo"],
+    ];
+    for args in cases {
+        let out = without_user(s.path(), &args);
+        assert!(!out.status.success(), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("칸"), "{args:?} 가 칸 대신 사람을 말했다\n{err}");
+        assert!(!err.contains("--user"), "{args:?} 가 사람을 먼저 물었다\n{err}");
+    }
+}
+
 /// **같은 id 를 두 번 적어도 제가 방금 쓴 값과 겨루지 않는다.** `--from` 이 재는 것은
 /// 부르는 쪽이 본 칸이지 이 명령이 만든 칸이 아니다 — 돌면서 그때그때 보던 판은 한 줄을
 /// `moved` 와 `stale` 에 함께 세우고 0 아닌 코드를 냈다. 그 코드를 "못 집었다" 로 읽는

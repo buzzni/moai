@@ -267,6 +267,17 @@ impl Issue {
 
     /// 쓰기는 읽기보다 엄하다. 읽기는 아는 만큼 보여주고, 쓰기는 거부한다.
     pub fn validate(&self, cfg: &crate::config::Config) -> Result<(), String> {
+        self.validate_keeping(cfg, false)
+    }
+
+    /// [`Issue::validate`] 와 같되, `kept_status` 면 **칸 이름은 다시 묻지 않는다**.
+    ///
+    /// 엄함은 *지금 쓰는 줄*에 대한 것이고(CLAUDE.md), 그 안에서도 **이번에 쓰는 값**에
+    /// 대한 것이다 — `config` 에서 칸 이름을 고치면 옛 이름에 선 줄이 남는데, 그 줄을
+    /// 미루거나(`defer`) 제목만 고치려 해도 칸 이름 때문에 막히면 그 줄은 도구 안에서
+    /// 영영 못 만진다(moai-hym7, 사람이 정했다). 칸을 **옮기는** 쓰기는 그대로 엄하다 —
+    /// 갈 칸은 바뀌는 값이라 `kept_status` 가 서지 않는다.
+    pub fn validate_keeping(&self, cfg: &crate::config::Config, kept_status: bool) -> Result<(), String> {
         if !crate::id::is_valid(&self.id) {
             return Err(format!("id 형식이 아니다 — {:?}", self.id));
         }
@@ -290,7 +301,9 @@ impl Issue {
                 return Err(format!("{}: {what}은 한 줄이다 — {v:?}", self.id));
             }
         }
-        cfg.require_known(self.status.as_str()).map_err(|e| format!("{}: {e}", self.id))?;
+        if !kept_status {
+            cfg.require_known(self.status.as_str()).map_err(|e| format!("{}: {e}", self.id))?;
+        }
         if self.priority.is_some_and(|p| p > MAX_PRIORITY) {
             return Err(format!(
                 "{}: 우선순위는 0~{MAX_PRIORITY} 다 — {:?}",
