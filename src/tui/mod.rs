@@ -253,6 +253,11 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     // 읽기 **전에** 잰다. 뒤에 재면 읽고 재는 사이의 쓰기를 놓치고, 놓친
     // 것은 영영 안 돌아온다. 먼저 재면 최악이 헛 갱신 하나다.
     let stamp = stamp_of(repo);
+    // **겹쳐 보지 않아도 HEAD 는 지켜본다**(moai-a4i0). 겹쳐 보면 `gather` 가 이미 잰다. 안 재면
+    // `SPC t w` 로 끈 동안 커밋을 해도 스냅샷이 안 바뀌어 커밋 칸이 낡은 채 선다. `gather` 에
+    // 두지 않는 것은 CLI 명령마다 git 을 한 번 더 띄우게 되어서다 — 지켜보는 것은 탐색기뿐이다.
+    // **이것도 읽기 전에 잰다** — 읽는 동안 떨어진 커밋을 뒤에 재면 놓친다(위와 같은 까닭).
+    let heads = if worktree { Vec::new() } else { crate::worktree::heads(&repo.root) };
     let g = crate::worktree::gather(repo, worktree)?;
     // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
     let unreadable: Vec<Option<String>> = g
@@ -264,12 +269,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     let issues = g.load.issues;
     let now = crate::model::now();
     let mut watched = g.watched;
-    // **겹쳐 보지 않아도 HEAD 는 지켜본다**(moai-a4i0). 겹쳐 보면 `gather` 가 이미 잰다. 안 재면
-    // `SPC t w` 로 끈 동안 커밋을 해도 스냅샷이 안 바뀌어 커밋 칸이 낡은 채 선다. `gather` 에
-    // 두지 않는 것은 CLI 명령마다 git 을 한 번 더 띄우게 되어서다 — 지켜보는 것은 탐색기뿐이다.
-    if !worktree {
-        watched.extend(crate::worktree::heads(&repo.root));
-    }
+    watched.extend(heads);
     Ok(Fresh {
         root: repo.root.clone(),
         stamp,
@@ -358,7 +358,7 @@ pub struct App {
     /// 누가 쓰는가를 푸는 길. 진짜 길은 `model::actor` 다. **시험이 갈아 끼운다** —
     /// 그쪽은 `MOAI_ACTOR` 와 이 기계의 git 설정을 읽어, 갈아 끼우지 않으면
     /// "누군지 모를 때" 를 시험한 결과가 돌리는 사람의 설정에 달린다.
-    identify: fn(Option<&str>) -> crate::fail::R<crate::model::Actor>,
+    identify: fn(Option<&str>, &std::path::Path) -> crate::fail::R<crate::model::Actor>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
     /// 상세의 굴린 자리. **왼쪽 커서를 옮기면 첫 줄로 돌아간다** — 다른
@@ -369,11 +369,13 @@ pub struct App {
     pub raw: bool,
     /// 마지막으로 읽은 파일의 (고친 때, 길이).
     stamp: Stamp,
-    /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과 그 표식(`worktree::gather`
-    /// 가 읽기 **전에** 잰 것). 꺼져 있으면 비었다.
+    /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과, 어느 때든 지켜보는 HEAD·가지
+    /// 파일·`packed-refs` 의 표식(읽기 **전에** 잰 것 — `worktree::gather`·[`prepare`]).
     watched: Vec<(std::path::PathBuf, Stamp)>,
-    /// 이슈에 닿은 커밋 표([`Commits`]). 다시 읽은 뒤마다 새로 짓는다 — 커밋이 새로 서면
-    /// 표식(`watched`·HEAD)이 바뀌어 다시 읽기가 돈다. 새 표가 올 때까지는 옛 표를 든다.
+    /// 이슈에 닿은 커밋 표([`Commits`]). **표식(`watched`)이 움직였을 때만 새로 짓는다** —
+    /// 거기 HEAD·가지 파일이 들어 있어 그것이 곧 "커밋이 섰는가" 다. 다시 읽을 때마다
+    /// 지으면 스냅샷 쓰기 하나(`mv` 한 번, 옆 세션의 쓰기 하나)마다 뿌리마다 이력을 통째로
+    /// 걷는다 — 커밋이 안 선 것을 알면서 걷는 일이다. 새 표가 올 때까지는 옛 표를 든다.
     commits: Commits,
     /// 표만 짓는 스레드([`App::follow_commits`]). **한 번에 하나만 돈다** — 도는 동안 다시 읽기가
     /// 또 들어오면 `commits_due` 만 세우고, 이것이 끝나면 곧바로 하나를 더 띄운다.
@@ -719,7 +721,7 @@ impl App {
             self.write_failed = true;
             return None;
         };
-        let by = (self.identify)(self.user.as_deref());
+        let by = (self.identify)(self.user.as_deref(), &repo.root);
         if let Err(e) = &by
             && e.code == crate::fail::code::NO_ACTOR
         {
@@ -847,10 +849,11 @@ impl App {
         self.origin = f.origin;
         self.elsewhere = f.elsewhere;
         self.unfound = f.unfound;
+        // 표는 **표식이 움직였을 때만** 다음 걸음에 스레드가 짓는다(`App::commits`·
+        // `follow_commits`). 도는 것이 있으면 그 답은 받되 이 읽기보다 낡았을 수 있어
+        // 끝나는 대로 하나를 더 띄운다.
+        self.commits_due |= self.watched != f.watched;
         self.watched = f.watched;
-        // 표는 다음 걸음에 스레드가 짓는다(`follow_commits`). 도는 것이 있으면 그 답은 받되
-        // 이 읽기보다 낡았을 수 있어 끝나는 대로 하나를 더 띄운다.
-        self.commits_due = true;
         self.warnings = f.warnings;
         self.take(f.issues, f.index, f.states, f.now);
     }
@@ -1127,7 +1130,10 @@ impl App {
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
                 Ok(table) => {
                     self.commits_job = None;
-                    self.commits = table;
+                    // **뿌리마다 덮는다.** `commit_tables` 는 이번에 git 이 답을 안 준 뿌리를
+                    // 통째로 빼고 오므로(`.ok()`), 받은 것을 그대로 넣으면 한 번 어긋난 걸음에
+                    // 옛 표가 사라져 커밋 칸이 말없이 빈다 — 다음 표는 표식이 움직여야 온다.
+                    self.commits.extend(table);
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     if let Some((_, handle)) = self.commits_job.take()
@@ -1135,6 +1141,9 @@ impl App {
                     {
                         std::panic::resume_unwind(payload);
                     }
+                    // 패닉 없이 사라졌다. 다시 읽기는 여기서 다음 걸음에 또 띄우므로
+                    // (`follow` 의 `moved`) 표도 같게 다시 세운다 — 안 세우면 그 세션 내내 언다.
+                    self.commits_due = true;
                 }
             }
         }
@@ -3315,12 +3324,8 @@ mod tests {
         let dir = scratch.0.clone();
         let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
         std::fs::write(dir.join(".moai/issues.jsonl"), line(&make("argos-0001", Kind::Epic))).unwrap();
-        let git = |msg: &str| {
-            let out = crate::git::isolated(&dir).args(["commit", "-q", "--allow-empty", "-m", msg]).output().unwrap();
-            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        };
-        let init = crate::git::isolated(&dir).args(["init", "-q"]).output().unwrap();
-        assert!(init.status.success());
+        let git = |msg: &str| crate::git::tests::run_git(&dir, None, &["commit", "-q", "--allow-empty", "-m", msg]);
+        crate::git::tests::run_git(&dir, None, &["init", "-q"]);
         git("feat: 처음 (argos-0001)");
 
         let repo = Repo { root: dir.clone(), config: cfg() };
@@ -3354,10 +3359,13 @@ mod tests {
         gathered(&mut a);
         assert_eq!(subjects(&a), ["fix: 다음 (argos-0001)", "feat: 처음 (argos-0001)"], "커밋이 섰는데 표를 새로 안 가져왔다");
 
-        // 겹쳐 보기를 꺼도(`SPC t w`) HEAD 를 지켜본다.
+        // 겹쳐 보기를 꺼도(`SPC t w`) HEAD 를 지켜본다 — 끈 읽기도 HEAD 표식을 들고 온다.
         a.worktree = false;
         a.reload();
-        assert!(a.gathering_commits() && a.commits_job.is_none(), "루프에서 도는 다시 읽기가 표를 그 자리에서 지었다");
+        assert!(a.commits_job.is_none(), "루프에서 도는 다시 읽기가 표를 그 자리에서 지었다");
+        assert!(a.watched.iter().any(|(p, _)| p.ends_with("HEAD")), "겹쳐 보기를 끄자 HEAD 를 안 지켜본다");
+        // 커밋이 안 섰으니 표도 다시 안 짓는다 — 쓰기 하나마다 이력을 통째로 걷지 않는다.
+        assert!(!a.gathering_commits(), "표식이 그대로인데 표를 다시 지으러 갔다");
         gathered(&mut a);
         std::thread::sleep(std::time::Duration::from_millis(10));
         git("fix: 끈 뒤 (argos-0001)");
@@ -4023,9 +4031,9 @@ mod tests {
 
     /// 누군지 모르는 기계. **이 기계의 git 설정도 `MOAI_ACTOR` 도 안 본다** — 준 것만
     /// 푼다. 진짜 길(`model::actor`)을 쓰면 이 시험들이 돌리는 사람의 설정에 달린다.
-    fn nobody(user: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+    fn nobody(user: Option<&str>, root: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
         match user {
-            Some(raw) => crate::model::actor(Some(raw)),
+            Some(raw) => crate::model::actor(Some(raw), root),
             None => Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험\n\n  고칠 명령", crate::fail::code::NO_ACTOR)),
         }
     }
@@ -4127,7 +4135,7 @@ mod tests {
     /// 파일은 그대로고 폼은 까닭을 달고 제목 칸에 선다.
     #[test]
     fn an_empty_title_is_refused_in_place_and_nothing_is_asked() {
-        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
             panic!("빈 제목인데 누군지 물었다")
         }
         let (scratch, mut a) = writable("jot-empty");
@@ -4322,7 +4330,7 @@ mod tests {
     /// 동안 물으면 설정 없는 기계에서 도구가 고장 난 것으로 보인다.
     #[test]
     fn reading_never_asks_who() {
-        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
             panic!("읽기가 누군지 물었다")
         }
         let (_scratch, mut a) = writable("ask-read");
@@ -4386,7 +4394,7 @@ mod tests {
     /// 열고, 한 줄로 까닭을 댄다.
     #[test]
     fn a_failed_or_empty_edit_writes_nothing_and_says_so() {
-        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
             panic!("담지 않을 글인데 누군지 물었다")
         }
         let (scratch, mut a) = writable("editor-nothing");

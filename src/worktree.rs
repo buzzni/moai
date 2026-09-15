@@ -438,6 +438,12 @@ struct Disk {
     rel: PathBuf,
     /// (워크트리, 딸린 워크트리인가, 제 워크트리인가).
     all: Vec<(Tree, bool, bool)>,
+    /// 딸린 워크트리의 꼭대기 → git 이 그 워크트리를 적어 둔 디렉터리(`worktrees/<이름>`).
+    ///
+    /// **뜬 때는 여기서 재지 않는다** — [`on_disk`] 는 훅이 도구 호출마다 지나는 길이고
+    /// ([`away`]), 뜬 때를 읽는 것은 [`workplaces`] 뿐이다. 여기서 `stat` 을 걸면 훅이 쓰지도
+    /// 않을 값을 워크트리 수만큼 읽는다 — moai-n2jh 가 이 길에서 git 두 번을 걷어낸 자리다.
+    admin: BTreeMap<PathBuf, PathBuf>,
 }
 
 impl Disk {
@@ -460,25 +466,116 @@ impl Disk {
 pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> (BTreeSet<String>, BTreeSet<String>) {
     let Some(disk) = on_disk(root) else { return Default::default() };
     let own = names(disk.all.iter().filter(|(_, _, me)| *me).map(|(t, ..)| t));
-    let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
     let mut out = BTreeSet::new();
     for (tree, linked, me) in &disk.all {
         if *me || !*linked {
             continue;
         }
-        let path = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
-        let Ok(Some(side)) = crate::store::read_snapshot(&path) else { continue };
-        out.extend(crate::report::wip(&side.issues, cfg).into_iter().map(|i| i.id.clone()));
-        for i in &side.issues {
-            let later = by_id
-                .get(i.id.as_str())
-                .is_some_and(|m| (i.planned(), i.updated_at.as_str()) > (m.planned(), m.updated_at.as_str()));
-            if later {
-                out.insert(i.id.clone());
-            }
-        }
+        let (open, later) = holds(&disk, tree, mine, cfg);
+        out.extend(open);
+        out.extend(later);
     }
     (out, own)
+}
+
+/// 딸린 워크트리 하나의 스냅샷이 쥔 줄 — [`held_elsewhere`] 의 한 워크트리 몫. (벌여 놓인 줄,
+/// 여기보다 늦게 만진 줄). 앞의 것에는 갈라질 때 물려받은 줄도 들고, 뒤의 것은 그 워크트리가
+/// 실제로 만진 흔적이다 — [`workplaces`] 가 둘을 따로 싣는다. 못 읽으면 비어 있다.
+fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) -> (BTreeSet<String>, BTreeSet<String>) {
+    let path = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
+    let Ok(Some(side)) = crate::store::read_snapshot(&path) else { return Default::default() };
+    let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
+    let open = crate::report::wip(&side.issues, cfg).into_iter().map(|i| i.id.clone()).collect();
+    let later = side
+        .issues
+        .iter()
+        .filter(|i| {
+            // 여기에 없는 줄은 그 워크트리에서 세운 것이다 — 그것도 만진 흔적이다.
+            by_id
+                .get(i.id.as_str())
+                .is_none_or(|m| (i.planned(), i.updated_at.as_str()) > (m.planned(), m.updated_at.as_str()))
+        })
+        .map(|i| i.id.clone())
+        .collect();
+    (open, later)
+}
+
+/// 살아 있는 **딸린** 워크트리마다 자리 하나(moai-ir8q) — 판정은 `report::places`·`report::stranded`.
+///
+/// main 워크트리는 안 든다 — 모두의 집기가 모이는 자리라 거기 선 줄은 "어디서 하는가" 에 답이
+/// 안 된다. 파일만 읽는다. 저장소가 아니면 비어 있다.
+///
+/// **딸린 워크트리 안에서는 `worktree` 일 때만 잰다.** 그 스냅샷은 갈라질 때의 main 이라, 그 뒤
+/// main 에서 끝내거나 놓은 줄이 거기서는 아직 집혀 있다 — 그것으로 재면 끝난 일을 "자리 없다" 로
+/// 대고, 감독이 그 말대로 남에게 다시 준다. 집기가 적히는 곳은 main 이고 `--worktree` 가 그것을
+/// 겹친다. **이 판단은 여기 한 곳에만 둔다** — 부르는 명령마다 두었더니 `status` 에만 걸리고
+/// `show` 에는 안 걸려 감독 안내의 두 줄이 서로 다른 답을 냈다(moai-6opu.p65).
+///
+/// **"늦게 만진 줄" 은 main 의 스냅샷 파일에 대어 잰다** — 부르는 쪽의 파일도, 부르는 쪽이 든
+/// 줄도 아니다. 집기가 적히는 곳이 main 하나라 모두가 견줄 바닥도 거기 하나고, 딸린 워크트리에서
+/// 제 파일에 대면 그 파일은 갈라질 때의 main 이라 **그 뒤 main 이 옮긴 줄이 전부 "옆이 만졌다"**
+/// 로 서서 한 줄이 워크트리 여럿에 동시에 선다. main 에서 부르면 같은 파일이라 답이 안 바뀐다.
+/// 못 읽으면 옆의 줄이 다 만진 흔적이 된다 — 자리를 넉넉히 대는 쪽으로 틀린다.
+pub fn workplaces(root: &Path, cfg: &crate::config::Config, worktree: bool) -> Vec<crate::report::Workplace> {
+    if !worktree && is_linked(root) {
+        return Vec::new();
+    }
+    let Some(disk) = on_disk(root) else { return Vec::new() };
+    let base = disk
+        .all
+        .iter()
+        .find(|(_, linked, _)| !*linked)
+        .map(|(t, ..)| t.path.join(&disk.rel))
+        .unwrap_or_else(|| root.to_path_buf());
+    let own = crate::store::read_snapshot(&base.join(".moai").join("issues.jsonl"));
+    let mine: &[Issue] = match &own {
+        Ok(Some(load)) => &load.issues,
+        _ => &[],
+    };
+    disk.all
+        .iter()
+        .filter(|(_, linked, _)| *linked)
+        .map(|(tree, ..)| {
+            // **제 워크트리도 남과 같은 자로 잰다.** 한때 비워 두었더니, 이름이 id 가 아닌
+            // 워크트리(에이전트 격리)가 제가 하고 있는 일을 제 화면에서 "자리 없다" 로 댔다.
+            let (holds, touched) = holds(&disk, tree, mine, cfg);
+            crate::report::Workplace {
+                path: tree.path.clone(),
+                branch: tree.label.clone(),
+                names: names([tree]),
+                holds,
+                touched,
+                born: disk.admin.get(&tree.path).and_then(|dir| born_of(dir)),
+            }
+        })
+        .collect()
+}
+
+/// 그 워크트리가 뜬 때(RFC3339) — **git 이 파일 안에 적어 둔 시각**이다. `worktrees/<이름>/logs/HEAD`
+/// 첫 줄이 `worktree add` 가 HEAD 를 처음 세운 기록이고, 거기 사람 뒤에 epoch 초가 있다.
+///
+/// **파일의 고친 때로 재지 않는다**(리뷰 moai-40ht.hom, 사용자 결정) — 시각을 안 지키는 복사
+/// (`cp -r`·`rsync` 의 `--times` 없는 판·Docker `COPY`·백업 복원)가 그것을 통째로 새로 해,
+/// `.moai` 는 하나도 안 바뀌었는데 저장소의 집은 줄이 전부 "자리 없다" 로 뒤집힌다.
+///
+/// 못 읽으면(`core.logAllRefUpdates=false`) 없고, 그러면 부르는 쪽이 `holds` 를 다 믿는다
+/// ([`crate::report::places`]) — 산 일을 남에게 다시 주는 쪽이 더 비싸다.
+fn born_of(dir: &Path) -> Option<String> {
+    let log = std::fs::read_to_string(dir.join("logs").join("HEAD")).ok()?;
+    // `<옛> <새> <이름> <메일> <epoch> <시간대>\t<무엇>` — 메일은 `>` 로 닫힌다.
+    let head = log.lines().next()?;
+    let at = head.split_once('>')?.1;
+    let secs: i64 = at.split_whitespace().next()?.parse().ok()?;
+    Some(crate::model::format_rfc3339(secs))
+}
+
+/// 이 트래커가 든 **워크트리의 꼭대기** — [`workplaces`] 의 경로를 여기서 잰다. git 을 띄우지
+/// 않는다. 저장소가 아니면 없다.
+///
+/// 뿌리(`.moai` 가 든 디렉터리)로 재면 안 된다 — 모노레포처럼 `.moai` 가 아래에 있으면 워크트리
+/// 경로가 그 밑에 없어 하나도 안 잘리고, 기계의 절대 경로가 `--json` 으로 그대로 나간다.
+pub fn top_of(root: &Path) -> Option<PathBuf> {
+    git_dirs(root).map(|(top, _)| canonical(top))
 }
 
 /// 제 워크트리가 아닌 워크트리들을 **git 을 띄우지 않고** 읽는다 — 이름 후보([`away`])만 쓴다.
@@ -502,14 +599,18 @@ fn on_disk(root: &Path) -> Option<Disk> {
         })
     };
     let mut all = Vec::new();
+    let mut admin = BTreeMap::new();
     if common.file_name().is_some_and(|n| n == ".git")
         && let (Some(path), Some(label)) = (common.parent(), label(&common.join("HEAD")))
     {
         all.push((Tree { path: path.to_path_buf(), label, head: String::new() }, false));
     }
     if let Ok(linked) = std::fs::read_dir(common.join("worktrees")) {
-        for entry in linked.filter_map(Result::ok) {
-            let dir = entry.path();
+        // **차례를 고정한다** — `read_dir` 의 차례는 파일 시스템이 정하는 것이라, 그대로 두면
+        // `moai show --json` 의 `workplaces` 와 사람 화면의 `자리` 줄이 부를 때마다 뒤바뀐다.
+        let mut dirs: Vec<PathBuf> = linked.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+        dirs.sort();
+        for dir in dirs {
             // `worktree.useRelativePaths` 면 이 경로는 이 디렉터리에서 푼 상대 경로다 — 프로세스의
             // 자리로 풀면 멀쩡한 워크트리가 "사라졌다" 로 빠진다(`join` 은 절대 경로면 그대로 둔다).
             let Some(path) = std::fs::read_to_string(dir.join("gitdir"))
@@ -520,6 +621,7 @@ fn on_disk(root: &Path) -> Option<Disk> {
                 continue;
             };
             let Some(label) = label(&dir.join("HEAD")) else { continue };
+            admin.insert(path.clone(), dir);
             all.push((Tree { path, label, head: String::new() }, true));
         }
     }
@@ -532,7 +634,7 @@ fn on_disk(root: &Path) -> Option<Disk> {
             (t, linked, me)
         })
         .collect();
-    Some(Disk { rel, all })
+    Some(Disk { rel, all, admin })
 }
 
 /// 이 자리가 **딸린 워크트리 안인가** — 가장 가까운 `.git` 이 디렉터리가 아니라 `gitdir:` 파일이다.

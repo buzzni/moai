@@ -1245,7 +1245,7 @@ fn wrapped<'a>(text: &str, w: usize, style: Style) -> Vec<Line<'a>> {
         text: crate::text::sanitize(text),
         role: crate::markdown::Role::Plain,
     }];
-    crate::markdown::wrap_spans(&spans, w.max(2))
+    crate::markdown::wrap_spans(&spans, w.max(2), crate::markdown::Overflow::Break)
         .into_iter()
         .map(|line| {
             Line::from(
@@ -1454,7 +1454,10 @@ fn body_lines<'a>(body: &str, w: usize, raw: bool) -> Vec<Line<'a>> {
     // **패널 폭 그대로 편다.** 넉넉한 바닥값을 얹으면 좁은 창에서 패널보다 넓은
     // 줄이 나오고, 그 줄은 `Paragraph` 가 말없이 다시 접는다 — 다시 접힌 줄은
     // 글머리 밑으로 물리지 않고 표의 칸도 맞지 않는다. `markdown` 은 0 도 받는다.
-    crate::markdown::layout(&blocks, w)
+    // **여기는 끊는다.** 탐색기에는 소프트랩이 없어, 폭을 넘긴 줄은 아래
+    // `fit` 이 `…` 로 잘라 꼬리가 화면에서 사라진다 — 셸과 달리 안 끊는 것이
+    // 더 많이 잃는다(사용자 결정, moai-krh7). 원문은 `SPC t r` 에 있다.
+    crate::markdown::layout(&blocks, w, crate::markdown::Overflow::Break)
         .into_iter()
         .map(|line| {
             Line::from(

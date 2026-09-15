@@ -33,17 +33,14 @@ pub fn market(prefix: &str, root: &Path) -> String {
     format!("moai-{prefix}-{:04x}", stable(root.to_string_lossy().as_bytes()) % 0x1_0000)
 }
 
-/// 손으로 적은 FNV-1a. **`DefaultHasher` 를 쓰지 않는다** — 그 알고리즘은
-/// rustc 판 사이에 바뀌어도 된다고 문서가 밝혀 두었다. 이름과 판이 그것에
-/// 기대면 컴파일러를 올린 날 이름이 바뀌고, 옛 등록은 `지우지 않는다` 는
-/// 약속 때문에 그대로 남아 훅이 두 벌 돈다 — 보드도 거절문도 두 번이다.
+/// 손으로 적은 FNV-1a 64비트([`crate::text::fnv1a64`], moai-2vrw). **`DefaultHasher` 를 쓰지
+/// 않는다** — 그 알고리즘은 rustc 판 사이에 바뀌어도 된다고 문서가 밝혀 두었다. 이름과 판이
+/// 그것에 기대면 컴파일러를 올린 날 이름이 바뀌고, 옛 등록은 `지우지 않는다` 는 약속 때문에
+/// 그대로 남아 훅이 두 벌 돈다 — 보드도 거절문도 두 번이다.
+///
+/// **너비를 줄이지 않는다.** 값이 바뀌면 이미 심긴 플러그인이 모두 판이 달라진 것으로 보인다.
 fn stable(bytes: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in bytes {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    h
+    crate::text::fnv1a64(bytes)
 }
 
 /// 훅이 걸리는 자리와 그때 부를 이벤트.

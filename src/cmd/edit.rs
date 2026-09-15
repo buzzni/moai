@@ -295,6 +295,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         states: read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect(),
         origin: None,
         blocks: blocked.blocks(),
+        places: None,
     };
     Ok(view::detail(&edited, epic.as_ref(), &children, &seen, &repo.config, &at, false))
 }

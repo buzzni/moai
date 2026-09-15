@@ -13,7 +13,10 @@ use anstyle::Style;
 use std::collections::BTreeMap;
 
 /// 제목이 이보다 길면 자른다. 표가 접히면 표가 아니다.
-const TITLE_CAP: usize = 44;
+///
+/// **`guide` 의 예시가 이 자를 빌려 쓴다** — 제목을 짧게 쓰라고 가르치는 예시가 제 보드에서
+/// 잘리지 않는지 보려면 숫자를 옮겨 적는 대신 여기를 읽어야 한다.
+pub const TITLE_CAP: usize = 44;
 /// 에픽 열은 곁다리라 더 짧게 자른다.
 const EPIC_CAP: usize = 20;
 /// 진행 막대 칸 수.
@@ -627,6 +630,9 @@ fn says(w: &Warning) -> String {
         // 같은 이슈가 두 번 나오는 것이 말이 안 되게 보인다.
         "wip_overload" => format!("한 번에 벌여 놓은 것 {n}건 — 하나씩 끝내는 편이 낫다"),
         "stale_progress" => format!("집어 놓고 {}일 넘게 안 건드린 것 {n}건", w.days.unwrap_or(0)),
+        // **죽었다고 단정하지 않는다.** 워크트리 없이 main 에서 하는 일일 수도 있다 — 그래서 고칠
+        // 손을 하나로 정하지 않고, 이어 할 것이면 워크트리를 다시 띄우라는 길까지 댄다.
+        "stranded" => format!("집었는데 일하는 워크트리가 없는 것 {n}건 — 이어 하려면 워크트리를 다시 띄운다"),
         // `days` 는 "막힌 기간" 이 아니라 "지금 칸에 머문 기간" 이다 — 막 막힌
         // 것을 "며칠째 막혀 있다" 고 잘못 말하지 않으려고 이렇게 적는다.
         "blocked_stale" => format!("막힌 채로 {}일 넘게 멈춰 있는 것 {n}건", w.days.unwrap_or(0)),
@@ -656,6 +662,10 @@ fn says(w: &Warning) -> String {
             Some(d) if d > 0 => format!("미뤄 둔 것 {n}건 (가장 오래된 것 {d}일)"),
             _ => format!("미뤄 둔 것 {n}건"),
         },
+        // **낡음의 두 얼굴을 다른 낱말로 낸다**(moai-mj45). 앞의 것은 "다시 빌드부터" 고, 뒤의
+        // 것은 "손질이 사라진다" 다 — 한 낱말로 뭉치면 그 중 한쪽이 반드시 거짓말이 된다.
+        "agents_stale" => "AGENTS.md 블록이 다르다 — 다른 바이너리가 쓴 것이라 이쪽이 더 낡았을 수 있다 (다시 빌드해 보고)".to_string(),
+        "agents_hand_edited" => "AGENTS.md 블록을 손으로 고쳤다 — 다시 심으면 그 손질은 사라진다".to_string(),
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
@@ -1027,6 +1037,11 @@ pub struct Seen<'a> {
     pub origin: Option<&'a Origin>,
     /// 펼친 줄의 막음을 하나씩 가른 것 (`report::blocks_of`). 막음이 없으면 비었다.
     pub blocks: Vec<crate::report::Block<'a>>,
+    /// 펼친 줄이 서 있는 워크트리들 (`report::places`, moai-6opu). `None` 이면 줄을 안 세운다 — 안
+    /// 집은 줄, 워크트리를 안 쓰는 저장소, **안 재 본 자리**(쓰는 길인 `edit`, 겹쳐 보지 않은
+    /// 딸린 워크트리). `Some` 인데 비었으면 집었는데 자리가 없다. 셋을 가르는 것은 `None` 이
+    /// 아무 말도 안 한다는 것뿐이라, 안 잰 것을 "자리 없다" 로 말하는 일은 없다.
+    pub places: Option<Vec<&'a crate::report::Workplace>>,
 }
 
 /// **손으로 옮긴 칸이 서 있는 칸과 다르면** 그렇다고 말하는 낱말. CLI 상세와
@@ -1142,6 +1157,22 @@ pub fn detail(
         let title = epic.map(|e| e.title.as_str()).unwrap_or("(없는 에픽)");
         out.push(format!("  에픽   {}  {title}", paint(style::ID, e)));
     }
+    // **어디서 하던 일인지 댄다**(moai-6opu) — 세션이 죽은 뒤 이어받는 쪽이 들어갈 자리다. 없으면
+    // 없다고 한다: 같은 자(`report::places`)로 잰 지금의 자리다.
+    //
+    // **`status` 의 `stranded` 와 같은 줄이 아니다.** 저쪽은 방금 집은 줄에 워크트리가 뜰 틈
+    // (`report::STRANDED_GRACE_SECS`, 한 시간)을 주는데 여기는 안 준다 — 규약대로 집고 커밋한 뒤
+    // 워크트리를 띄우는 사이에 펼치면 여기만 "없다" 로 선다. 이 줄은 "지금 보이는가" 를,
+    // `stranded` 는 "이만큼 지났는데도 안 보이는가" 를 말한다.
+    match seen.places.as_deref() {
+        Some([]) => out.push(format!("  자리   {}", paint(style::WARN, "없다 — 일하는 워크트리가 안 보인다"))),
+        Some(trees) => {
+            for t in trees {
+                out.push(format!("  자리   {}  {}", t.path.display(), paint(style::BRANCH, &format!("({})", t.branch))));
+            }
+        }
+        None => {}
+    }
     // **막음도 상세에서 말한다**(moai-rvcb). id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안
     // 나오나" 에 답하는 자리인데, 막힘·미룬 막음·끊긴 막음이 탐색기에만 있었다. 막는가는
     // `report::blocks_of` 가 `ready` 의 자로 가르고, 여기는 받은 답을 낱말로만 옮긴다.
@@ -1214,7 +1245,9 @@ pub fn body_lines(body: &str) -> Vec<String> {
     // **줄로 펴는 일은 `markdown` 이 한다.** 글머리·들여쓰기 같은 결정이
     // 표면마다 갈라지면 CLI 와 탐색기가 같은 본문을 다르게 그린다.
     // 여기가 할 일은 뜻을 색으로 옮기는 것뿐이다.
-    crate::markdown::layout(&blocks, BODY)
+    // 셸은 폭을 넘긴 줄을 화면에서만 접는다 — 긴 인라인 코드를 끊지 않아야
+    // 복사한 명령이 온전하다(moai-krh7).
+    crate::markdown::layout(&blocks, BODY, crate::markdown::Overflow::Keep)
         .iter()
         .map(|line| {
             // 빈 줄은 빈 줄이다. 들여쓰기를 얹으면 줄 끝에 뜻 없는 공백이
@@ -1274,12 +1307,14 @@ pub fn commits(commits: &[crate::git::Commit]) -> Vec<String> {
 ///
 /// **트래커 커밋은 그리지 않는다.** 집기·닫기만 적은 커밋이라 사람이 찾는 "무엇이 고쳤나"
 /// 가 아니고, 이력이 이미 같은 것을 말한다. `--json` 은 `tracker` 표시와 함께 전부 낸다.
-/// 제목도 파일 밖에서 온 글이라 제어문자를 걷어낸다(`body_lines` 와 같은 까닭).
+/// 제목도 파일 밖에서 온 글이라 **한 줄짜리로 걷어낸다**(`text::one_line`) — `sanitize` 가
+/// 남기는 탭이 그대로 나가면 CLI 에서는 탭 자리까지 칸이 밀리고 탐색기에서는 폭을 재는
+/// 자가 0으로 세어 글자째 사라진다. 한 커밋은 한 줄이라야 해시와 제목이 짝으로 읽힌다.
 pub fn commit_lines(commits: &[crate::git::Commit]) -> Vec<(&str, String)> {
     commits
         .iter()
         .filter(|c| !c.tracker)
-        .map(|c| (c.hash.get(..7).unwrap_or(&c.hash), crate::text::sanitize(&c.subject)))
+        .map(|c| (c.hash.get(..7).unwrap_or(&c.hash), crate::text::one_line(&c.subject)))
         .collect()
 }
 
@@ -1731,17 +1766,31 @@ mod tests {
         assert!(out.contains("`0.2`"), "색을 끄니 코드가 그냥 글이 됐다\n{out}");
     }
 
-    /// 그린 줄은 폭을 넘지 않는다. 한글이 두 칸이라 글자 수로 세면 걸린다.
+    /// 그린 줄은 폭을 넘지 않는다 — **폭을 넘기는 인라인 코드 한 덩이만 빼고**
+    /// (moai-krh7). 한글이 두 칸이라 글자 수로 세면 걸린다.
     ///
     /// 상한은 `BODY` 에 들여쓰기(`PAD`)를 더한 값이다. 여유를 더 주면 그만큼
-    /// 넘치는 줄을 통과시킨다.
+    /// 넘치는 줄을 통과시킨다. 셸은 넘긴 줄을 화면에서만 접어 복사하면 온전하니
+    /// 코드는 끊지 않는데(`Overflow::Keep`), **넘길 수 있는 것이 그것뿐이라는
+    /// 것까지 여기서 잰다** — 안 그러면 산문이 넘쳐도 이 시험이 지나간다.
     #[test]
     fn drawn_lines_stay_within_the_width() {
-        let body = "아주 긴 한글 문장이 폭을 넘도록 이어지고 또 이어지고 계속 이어진다. \
-                    여기에 `코드` 와 **굵게** 도 섞여 있어서 접는 자리가 조각 가운데에 걸린다.\n";
+        let long = "moai add \"아주 긴 제목을 가진 이슈\" -t bug -e moai-4aex --milestone v0.1 -b -";
+        let body = format!(
+            "아주 긴 한글 문장이 폭을 넘도록 이어지고 또 이어지고 계속 이어진다. \
+             여기에 `코드` 와 **굵게** 도 섞여 있어서 접는 자리가 조각 가운데에 걸린다. \
+             폭을 넘기는 것은 `{long}` 한 덩이뿐이다.\n"
+        );
         let max = BODY + width(PAD);
-        for l in plain(&body_lines(body)) {
-            assert!(width(&l) <= max, "{l:?} ({}칸)", width(&l));
+        let drawn = plain(&body_lines(&body));
+        // **넘기는 줄이 실제로 나야 아래 고리가 뜻이 있다.** 코드를 끊기 시작하면
+        // 넘는 줄이 하나도 없어져 이 시험이 빈 채로 지나간다.
+        assert!(drawn.iter().any(|l| l.contains(long)), "긴 명령이 갈렸다 — {drawn:?}");
+        for l in &drawn {
+            if width(l) <= max {
+                continue;
+            }
+            assert!(l.contains(long), "코드도 아닌 줄이 폭을 넘었다 — {l:?} ({}칸)", width(l));
         }
     }
 

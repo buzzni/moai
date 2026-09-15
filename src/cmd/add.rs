@@ -175,7 +175,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 오류 메시지에 실려 나가고, 받는 쪽은 그게 만들어진 줄 안다.
     repo.config.require_known(status.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref())?;
+    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
 
     // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
@@ -267,7 +267,7 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, vars: &[String], dry_run: bool, assi
     }
 
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref())?;
+    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
     let who = assignee_of(assignee.as_deref(), &by);
     let (made, read): (Vec<Issue>, super::Read) = repo.with_write(|issues, cfg, reserved| {
         let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, &who, &by, &at)?;
