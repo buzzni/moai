@@ -198,26 +198,40 @@ pub fn split(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
     out
 }
 
-/// `text` 가 `id` 를 **그 id 로** 적었는가 — [`ids_in`] 이 뽑는 낱말 하나가 곧 그 id 일 때.
+/// `text` 가 `id` 를 **그 id 로** 적었는가 — [`words`] 가 뽑는 낱말 하나가 곧 그 id 일 때.
+///
+/// **형식은 안 본다**(moai-ynhj). 찾는 id 는 파일에 실제로 있는 줄의 id 이고, `is_valid` 는 **쓸 때만**
+/// 거는 자다 — 들여오거나 손으로 고친 줄은 형식이 어긋난 id 를 들 수 있는데, 그런 줄도 목록과 탐색기에는
+/// 멀쩡히 선다. 커밋이 그 id 를 그대로 적었는데 칸만 비면 읽기가 쓰기보다 엄해진다.
 fn names(text: &str, id: &str) -> bool {
-    ids_in(text).any(|t| t == id)
+    words(text).any(|t| t == id)
 }
 
-/// 글에 적힌 id 모양의 낱말들. **id 를 가르는 자는 이것 하나다** — `show` 가 id 하나를 찾을
-/// 때([`split`])도, 탐색기가 이력 전부를 한 번에 가를 때([`table`])도 이 자로 가른다.
+/// 글을 id 가 될 수 있는 낱말로 가른다 — **경계를 정하는 자는 이것 하나다.**
 ///
-/// 낱말은 id 에 드는 글자(영숫자·`_`·`-`·`.`)가 이어진 한 덩어리고, 끝의 `.` 은 문장 부호로
-/// 떼어 낸다. 그래서 앞뒤가 id 의 일부로 이어지면 다른 낱말이다 — `moai-rvcb` 는 자식
-/// `moai-rvcb.7u5` 도, 가지 이름 `worktree-moai-rvcb` 도 아니고, 문장 끝 `(moai-rvcb).` 는
-/// 그 id 다. 한글 조사가 붙어도(`moai-rvcb를`) 그 id 다.
-///
-/// **`-`·`.` 로 시작하는 낱말은 id 가 아니다.** 접두어가 그 한 글자뿐인 것을
-/// `id::is_valid` 는 통과시켜(`--json` 은 접두어 `-` 에 본체 `json`), 제목에 적힌 플래그가
-/// id 로 읽힌다. 찾는 쪽은 있는 id 로만 찾아 답이 틀리지는 않지만, 표가 그만큼 헛되이 부푼다.
-pub fn ids_in(text: &str) -> impl Iterator<Item = &str> {
+/// 낱말은 id 에 드는 글자(영숫자·`_`·`-`·`.`)가 이어진 한 덩어리고, 끝의 `.` 은 문장 부호로 떼어 낸다.
+/// 그래서 앞뒤가 id 의 일부로 이어지면 다른 낱말이다 — `moai-rvcb` 는 자식 `moai-rvcb.7u5` 도, 가지 이름
+/// `worktree-moai-rvcb` 도 아니고, 문장 끝 `(moai-rvcb).` 는 그 id 다. 한글 조사가 붙어도 그 id 다.
+fn words(text: &str) -> impl Iterator<Item = &str> {
     text.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')))
         .map(|t| t.trim_end_matches('.'))
-        .filter(|t| !t.starts_with(['-', '.']) && crate::id::is_valid(t))
+        .filter(|t| !t.is_empty())
+}
+
+/// 글에 적힌 **형식에 맞는** id 낱말들 — [`words`] 중 `id::is_valid` 를 지나는 것.
+///
+/// 커밋을 찾는 두 길([`split`]·[`table`])은 이것을 안 쓴다. 그쪽은 **파일에 있는 id** 와 낱말을
+/// 견주므로 형식을 물을 까닭이 없고, 물으면 형식이 어긋난 줄의 칸이 영영 빈다(moai-ynhj).
+/// 이 자는 "이 글이 id 를 적었는가" 를 파일 없이 물어야 하는 곳 — 가르치는 글의 예시가 실제로
+/// 읽히는지 보는 `guide` 의 시험 — 이 쓴다.
+///
+/// **`-`·`.` 로 시작하는 낱말은 뺀다.** 접두어가 그 한 글자뿐인 것을 `id::is_valid` 는
+/// 통과시켜(`--json` 은 접두어 `-` 에 본체 `json`), 제목에 적힌 플래그가 id 로 읽힌다.
+///
+/// 파일을 안 보고 묻는 자리가 시험뿐이라 시험 빌드에만 선다 — 쓰는 곳이 생기면 그때 연다.
+#[cfg(test)]
+pub fn ids_in(text: &str) -> impl Iterator<Item = &str> {
+    words(text).filter(|t| !t.starts_with(['-', '.']) && crate::id::is_valid(t))
 }
 
 /// 지금 가지(`HEAD`)의 이력 **전부**를 한 번 걸어 제목에 적힌 id → 커밋 표를 짓는다. 새것이 먼저다.
@@ -225,14 +239,25 @@ pub fn ids_in(text: &str) -> impl Iterator<Item = &str> {
 /// 탐색기가 쓴다(moai-a4i0). 커서를 옮길 때마다 [`commits_of`] 를 부르면 걸음마다 git 이
 /// 뜨고 그리는 루프가 그만큼 멈칫한다 — 표는 다시 읽기 스레드에서 한 번 짓고 상세는 찾기만
 /// 한다. 전부 걸으므로 `commits_of` 의 생성일 상한이 가리는 모서리(moai-g8cd)도 여기서는 없다.
-/// 표에는 없는 id 의 낱말도 드는데, 찾는 쪽이 있는 id 로만 찾으므로 해가 없다.
-pub fn table(root: &Path) -> Result<BTreeMap<String, Vec<Commit>>, Error> {
+///
+/// **`ids` 는 파일에 있는 줄의 id 다**(moai-ynhj). 형식으로 거르는 대신 있는 id 와 견주므로,
+/// 형식이 어긋난 줄도 제 커밋을 찾고([`split`] 과 같은 답이다) 표에는 id 아닌 낱말이 안 선다.
+pub fn table(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Commit>>, Error> {
     let format = format_arg();
     let log = read_log(root, &["log", "-z", "--no-show-signature", format.as_str(), "HEAD", "--"])?;
+    Ok(table_of(&log, ids))
+}
+
+/// [`table`] 의 **git 을 안 부르는 반쪽** — [`split`] 과 `commits_of` 의 사이와 같은 가름이다.
+///
+/// 낱말을 있는 id 집합에서 찾는다. 이력 전부와 이슈 전부가 만나는 자리라 id 마다 제목을 다시
+/// 훑으면 곱이 된다 — 커밋 1천 × 이슈 1천이면 백만 번이다.
+pub fn table_of(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
+    let known: std::collections::HashSet<&str> = ids.iter().copied().collect();
     let mut out: BTreeMap<String, Vec<Commit>> = BTreeMap::new();
-    for (hash, subject) in records(&log) {
+    for (hash, subject) in records(log) {
         let mut seen: Vec<&str> = Vec::new();
-        for id in ids_in(subject) {
+        for id in words(subject).filter(|w| known.contains(w)) {
             // 한 제목에 같은 id 를 두 번 적어도 커밋은 한 번이다.
             if seen.contains(&id) {
                 continue;
@@ -245,7 +270,7 @@ pub fn table(root: &Path) -> Result<BTreeMap<String, Vec<Commit>>, Error> {
             });
         }
     }
-    Ok(out)
+    out
 }
 
 /// `git log -z` 가 낸 레코드를 (해시, 제목) 으로. 가르는 자의 까닭은 [`FS`] 에 있다.
@@ -305,6 +330,26 @@ pub(crate) mod tests {
         assert!(!names("Merge branch 'worktree-moai-rvcb'", "moai-rvcb"), "가지 이름이 id 로 읽혔다");
         assert!(!names("moai-rvcbx", "moai-rvcb"));
         assert!(names("리뷰 moai-rvcb.7u5 를 닫는다", "moai-rvcb.7u5"));
+    }
+
+    #[test]
+    /// **형식에 안 맞는 id 의 줄도 커밋 칸을 읽는다**(moai-ynhj). `Issue::validate` 는 `is_valid` 를
+    /// **쓸 때만** 건다 — 들여오거나 손으로 고친 줄은 `argos-4ae`(본체가 짧다)처럼 어긋난 id 를 들 수
+    /// 있고, 그런 줄도 목록·탐색기에는 멀쩡히 선다. 커밋이 그 id 를 그대로 적었는데 칸만 영영 비면
+    /// "읽기는 관대하고 쓰기는 엄하다" 가 깨진다.
+    ///
+    /// **두 표면이 같은 답을 내야 한다** — `show` 는 [`split`], 탐색기는 [`table`] 로 찾는다.
+    #[test]
+    fn a_malformed_id_still_finds_its_commits() {
+        let odd = "argos-4ae";
+        let log = [rec("c2", &format!("feat: 들여온 줄을 고친다 ({odd})")), rec("c1", "chore: 딴 일")].concat();
+        let got = split(&log, &[odd]);
+        assert_eq!(got[odd].len(), 1, "형식에 안 맞는 id 의 커밋을 show 가 못 찾는다");
+        let table = table_of(&log, &[odd]);
+        assert_eq!(table[odd].len(), 1, "같은 커밋을 탐색기가 못 찾는다");
+        // 그래도 **아무 낱말이나 id 가 되지는 않는다** — 표는 있는 id 로만 선다.
+        assert!(!table.contains_key("chore"), "id 가 아닌 낱말이 표에 섰다");
+        assert!(!table.contains_key("feat"), "id 가 아닌 낱말이 표에 섰다");
     }
 
     #[test]
@@ -483,7 +528,7 @@ pub(crate) mod tests {
         // rebase 로 옛 작성 시각이 커밋 시각이 된 커밋 — `--since` 는 여기서 걷기를 끊는다.
         git("2025-12-01T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", "chore(tracker): moai-aaaa 를 닫는다"]);
 
-        let table = table(&dir).unwrap();
+        let table = table(&dir, &["moai-aaaa", "moai-aaaa.b1c"]).unwrap();
         let born = crate::model::parse_rfc3339("2026-01-03T00:00:00Z");
         let subjects = |c: &[Commit]| c.iter().map(|c| (c.subject.clone(), c.tracker)).collect::<Vec<_>>();
         assert_eq!(

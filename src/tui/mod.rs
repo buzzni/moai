@@ -239,8 +239,12 @@ fn commit_roots(repo: &Repo, origin: &crate::worktree::Origin) -> Vec<std::path:
 }
 
 /// 뿌리마다 [`crate::git::table`] 을 짓는다. **어느 스레드에서 불러도 같다.**
-fn commit_tables(roots: &[std::path::PathBuf]) -> Commits {
-    roots.iter().filter_map(|root| crate::git::table(root).ok().map(|t| (root.clone(), t))).collect()
+///
+/// `ids` 는 지금 들고 있는 줄의 id 다 — 표는 그것들과 낱말을 견줘 서므로, 형식이 어긋난 줄도
+/// 제 커밋을 찾고 id 아닌 낱말은 표에 안 선다(moai-ynhj).
+fn commit_tables(roots: &[std::path::PathBuf], ids: &[String]) -> Commits {
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    roots.iter().filter_map(|root| crate::git::table(root, &ids).ok().map(|t| (root.clone(), t))).collect()
 }
 
 /// 버린 다시 읽기 손잡이를 이만큼까지 든다(`App::discarded`). 버리는 것은 사람의
@@ -1150,9 +1154,12 @@ impl App {
         let Some(repo) = &self.repo else { return };
         self.commits_due = false;
         let roots = commit_roots(repo, &self.origin);
+        // **스레드로 넘길 것은 값이다** — 빌린 `issues` 를 넘기면 그 스레드가 도는 동안 다시 읽기가
+        // 목록을 갈아 끼울 수 없다.
+        let ids: Vec<String> = self.issues.iter().map(|i| i.id.clone()).collect();
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
-            let _ = tx.send(commit_tables(&roots));
+            let _ = tx.send(commit_tables(&roots, &ids));
         });
         self.commits_job = Some((rx, handle));
     }
