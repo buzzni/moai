@@ -68,6 +68,15 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let home = Path::new(env!("CARGO_TARGET_TMPDIR")).join("moai-cli-home");
     std::fs::create_dir_all(&home).unwrap();
     let mut cmd = Command::new(program);
+    // **걷기가 먼저다.** `Command` 의 환경은 이름마다 마지막에 부른 것이 이긴다 —
+    // 아래 `.env` 보다 뒤에 두면, 목록에 `GIT_CONFIG_GLOBAL` 같은 이름이 느는 날
+    // 이 루프가 방금 세운 격리를 도로 지운다. `git::isolated` 도 같은 차례다.
+    // 그날 `the_fake_claude_command_starts_from_the_isolated_one` 도 같이 고친다 —
+    // 그쪽은 목록의 **모든** 이름이 걷혔는지 보므로, 여기서 덮어 준 이름에 걸린다.
+    // 차례를 되돌려 달래지 않는다. 그게 이 차례가 막는 바로 그 덫이다.
+    for var in git_leaks::swept(true) {
+        cmd.env_remove(var);
+    }
     cmd.env("HOME", &home)
         .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("CLAUDE_CODE_PLUGIN_CACHE_DIR")
@@ -83,9 +92,6 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         .env("MOAI_CONFIG", home.join("moai-config-unset/config.toml"))
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("BASH_ENV");
-    for var in GIT_LEAKS {
-        cmd.env_remove(var);
-    }
     cmd
 }
 
@@ -93,7 +99,6 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
 // 읽는다. 따로 된 크레이트라 `use` 로는 못 가져가고, 두 벌로 두면 한쪽에만 더한 변수가 말없이 갈라진다.
 #[path = "../src/git_leaks.rs"]
 mod git_leaks;
-use git_leaks::LEAKS as GIT_LEAKS;
 
 fn moai(dir: &Path, args: &[&str]) -> Output {
     isolated(BIN)
@@ -2378,6 +2383,80 @@ fn status_notices_a_stale_agents_block_but_not_a_missing_one() {
     quiet("블록이 없는 저장소");
 }
 
+/// **못 읽는 `.gitignore`·`.gitattributes` 는 안 건드린다**(moai-gq1c). 빈 글로 치고 쓰던 때는
+/// CP949 로 적은 남의 파일이 moai 줄만 남기고 통째로 사라졌다 — 되돌릴 길은 git 뿐이다.
+/// **멈추지는 않는다**(2026-09-15 사용자 결정): 나머지는 다 심고, 그 자리에 무엇을 손으로
+/// 더할지 대며 0 으로 끝난다. AGENTS.md 가 멈추는 자리인 까닭은 그쪽이 도구가 쓴 블록을
+/// 통째로 갈아 끼우는 자리라서다.
+#[test]
+fn init_never_overwrites_a_dotfile_it_cannot_read() {
+    let s = Scratch::new("badignore");
+    // CP949 로 적힌 남의 줄 — UTF-8 로는 못 읽는다.
+    let theirs: &[u8] = b"\xc7\xd1\xb1\xdb\nbuild/\n";
+    std::fs::write(s.path().join(".gitignore"), theirs).unwrap();
+
+    let out = moai(s.path(), &["init", "argos"]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(std::fs::read(s.path().join(".gitignore")).unwrap(), theirs, "못 읽는 파일을 덮었다");
+    assert!(said.contains(".gitignore") && said.contains("못 읽어"), "{said}");
+    // **붙여 넣을 수 있어야 한다** — 한 줄에 하나씩이라야 규칙이 선다. 쉼표로 잇던 때는
+    // `.gitattributes` 의 두 줄이 한 줄이 되어 `journal.jsonl` 이 `merge=union` 을 못 받았다.
+    assert!(
+        said.lines().any(|l| l.trim() == ".moai/lock"),
+        "손으로 더할 줄을 한 줄에 하나씩 안 댔다 — {said}"
+    );
+    // 나머지는 다 심는다.
+    assert!(s.path().join(".moai/issues.jsonl").exists(), "나머지를 안 심었다");
+    assert!(std::fs::read_to_string(s.path().join(".gitattributes")).unwrap().contains(".moai/issues.jsonl"));
+    assert!(std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap().contains("moai:begin"));
+
+    let js = ok(s.path(), &["init", "--json"]);
+    one_json_value(&js);
+    assert!(js.contains("\"gitignore\":false"), "{js}");
+    assert!(js.contains("\"unreadable\":[\".gitignore\"]"), "못 읽은 자리를 기계에게 안 말했다 — {js}");
+
+    // `.gitattributes` 도 같은 자리다 — 둘 다 못 읽으면 둘 다 든다.
+    std::fs::write(s.path().join(".gitattributes"), theirs).unwrap();
+    let both = ok(s.path(), &["init", "--json"]);
+    assert!(both.contains("\"unreadable\":[\".gitattributes\",\".gitignore\"]"), "{both}");
+    assert_eq!(std::fs::read(s.path().join(".gitattributes")).unwrap(), theirs, "못 읽는 파일을 덮었다");
+
+    // 읽히게 고치면 그때 넣는다 — 남의 줄은 그대로 두고 뒤에 붙는다.
+    std::fs::write(s.path().join(".gitattributes"), "").unwrap();
+    std::fs::write(s.path().join(".gitignore"), "build/\n").unwrap();
+    ok(s.path(), &["init"]);
+    let now = std::fs::read_to_string(s.path().join(".gitignore")).unwrap();
+    assert!(now.starts_with("build/\n") && now.contains(".moai/lock"), "{now}");
+    // 고친 뒤에는 기계에게도 남은 것이 없다고 말한다.
+    let clean = ok(s.path(), &["init", "--json"]);
+    assert!(!clean.contains("unreadable"), "다 읽히는데 못 읽었다고 한다 — {clean}");
+}
+
+/// **`init` 은 제가 쓴 것만 말한다**(moai-knn0). 블록이 이미 맞으면 "맞췄다" 도 `"agents":true`
+/// 도 거짓말이다 — 낡았다는 알림을 보고 부른 사람이 그 줄만 보고는 무엇이 바뀌었는지 모른다.
+/// `gitattributes`·`gitignore` 가 이미 쓴 때만 말하는 자리라 셋을 한 자로 맞춘다.
+#[test]
+fn init_says_only_what_it_wrote() {
+    let s = init("saidwrote");
+    // 갓 심은 자리를 다시 부르면 블록이 이미 맞는다 — 그러니 안 썼다고 말한다.
+    let first = ok(s.path(), &["init", "--json"]);
+    assert!(first.contains("\"agents\":false"), "안 썼는데 썼다고 한다 — {first}");
+
+    let md = s.path().join("AGENTS.md");
+    let fresh = std::fs::read_to_string(&md).unwrap();
+    let edited = fresh.replace("승인 게이트가 없다", "승인 게이트가 있다");
+    // 안내 글이 바뀌어 이 낱말이 사라지면 아래 단언이 엉뚱한 것을 탓한다 — 여기서 먼저 잡는다.
+    assert_ne!(edited, fresh, "시험이 블록을 못 고쳤다 — 안내 글에서 찾는 낱말이 사라졌다");
+    std::fs::write(&md, edited).unwrap();
+    let wrote = ok(s.path(), &["init", "--json"]);
+    assert!(wrote.contains("\"agents\":true"), "고친 블록을 다시 썼는데 안 썼다고 한다 — {wrote}");
+
+    let said = ok(s.path(), &["init"]);
+    assert!(!said.contains("블록을 맞췄다"), "안 쓰고 맞췄다고 한다 — {said}");
+    assert!(said.contains("이미 다 맞아 있다"), "그대로인데 아무 말도 안 한다 — {said}");
+}
+
 /// 남의 산문은 한 글자도 건드리지 않는다.
 #[test]
 fn init_keeps_what_someone_else_wrote() {
@@ -3586,6 +3665,97 @@ fn a_malformed_git_identity_is_refused_too() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("git config user.email"), "{err}");
     assert_eq!(issues(s.path()).lines().count(), 0, "거절했는데 줄이 남았다");
+}
+
+/// **훅이 내보낸 저장소 변수가 `-C` 를 이기지 못한다**(moai-ztdf). git 훅과 딸린 워크트리의
+/// `rebase -x` 는 `GIT_DIR` 무리를 내보내고, 그것은 `git -C <경로>` 를 이긴다. 그대로 두면
+/// 저장소 R 의 훅에서 부른 `moai -C P` 가 R 의 `user.name` 을 읽어 **P 의 저널에 남의 이름을
+/// 영구히** 적는다. 이력이 목적인 파일이라 되돌리기 어렵다 — 커밋 칸도 남의 이력을 읽는다.
+///
+/// 쓰는 사람과 읽는 화면 **둘 다** 본다: 담당·저널의 이름과 메일, 그리고 `show` 의 커밋 칸.
+///
+/// **커밋 칸은 없는 것과 있는 것을 같이 본다.** 없는 것만 보면 커밋 칸이 통째로 비어도 초록이라,
+/// 이 시험이 "P 의 이력을 읽는다" 와 "아무 이력도 안 읽는다" 를 못 가른다.
+///
+/// **시각은 고정한다**(`git_at`). 걷기가 `created_at`(= `MOAI_NOW`) 에서 끊기므로, 커밋을 기계 시계로
+/// 찍으면 시계가 그보다 이른 기계에서 양쪽 다 안 보여 이 시험이 조용히 초록이 된다.
+///
+/// **심는 것은 `REPO` 무리뿐이다.** `GIT_CONFIG_PARAMETERS`(바깥 `git -c` 가 내보낸다)는 릴리스가 안
+/// 걷어 아직 사람을 이긴다 — 그쪽은 `git_leaks.rs` 의 `TEST` 에 적어 뒀고, 여기서는 안 잰다.
+///
+/// **고치기 전에 빨갰던 것은 쓰는 쪽이다.** 읽는 쪽(커밋 칸)은 옛 `git::output` 이 이미 `GIT_DIR` 무리
+/// 셋을 릴리스에서도 걷고 있어 그때도 초록이었다 — 여기 남긴 까닭은 앞으로의 방벽이다.
+#[test]
+fn an_inherited_git_dir_does_not_beat_the_project_we_were_given() {
+    let s = init("hookenv");
+    let theirs = s.path().join("theirs");
+    std::fs::create_dir_all(&theirs).unwrap();
+    // R — 훅이 도는 남의 저장소. 이름도 커밋도 이쪽에만 있다.
+    git(&theirs, &["init", "-q"]);
+    git(&theirs, &["config", "user.name", "남의 이름"]);
+    git(&theirs, &["config", "user.email", "theirs@example.com"]);
+    // P — moai 프로젝트. 이 저장소의 사람이 적혀 있다.
+    git(s.path(), &["init", "-q"]);
+    git(s.path(), &["config", "user.name", "내 이름"]);
+    git(s.path(), &["config", "user.email", "mine@example.com"]);
+
+    // 훅이 실제로 내보내는 모양 그대로 — 저장소를 가리키는 변수만, 다만 **`REPO` 를 통째로** 심는다
+    // (목록은 `#[path]` 로 이미 들어와 있다). 몇 개만 골라 심으면 안 심은 이름이 `TEST` 로 옮겨져도
+    // 모든 시험이 초록이라, 이 변경이 실제로 가른 경계를 아무것도 붙잡지 못한다. **여기가 그 경계를
+    // 붙잡는 유일한 자리다** — 단위 시험은 `cfg!(test)` 라 두 무리를 구별하지 못한다.
+    //
+    // **값은 git 이 그 이름에 기대하는 꼴로 준다.** 불리언 자리에 경로를 주면 git 이 `bad boolean
+    // environment value` 로 죽어, 걷기가 무너진 날 시험이 내는 말이 "남의 사람을 적었다" 가 아니라
+    // 생 stderr 가 된다 — 회귀는 잡히는데 무엇이 깨졌는지를 못 가리킨다.
+    let planted: Vec<(&'static str, String)> = git_leaks::REPO
+        .iter()
+        .map(|&var| {
+            let path = |rel: &str| theirs.join(rel).to_str().unwrap().to_string();
+            let at = match var {
+                "GIT_INDEX_FILE" => path(".git/index"),
+                // 사람을 읽는 `git config` 를 곧장 R 의 설정으로 돌린다 — 가장 날카로운 탐침이다.
+                "GIT_CONFIG" => path(".git/config"),
+                "GIT_OBJECT_DIRECTORY" | "GIT_ALTERNATE_OBJECT_DIRECTORIES" => path(".git/objects"),
+                "GIT_SHALLOW_FILE" => path(".git/shallow"),
+                "GIT_GRAFT_FILE" => path(".git/info/grafts"),
+                "GIT_WORK_TREE" | "GIT_PREFIX" | "GIT_CEILING_DIRECTORIES" => path(""),
+                // 불리언으로 읽는 것들.
+                "GIT_IMPLICIT_WORK_TREE" | "GIT_NO_REPLACE_OBJECTS" | "GIT_DISCOVERY_ACROSS_FILESYSTEM" => "1".into(),
+                "GIT_NAMESPACE" => "theirs".into(),
+                "GIT_REPLACE_REF_BASE" => "refs/replace/".into(),
+                _ => path(".git"),
+            };
+            (var, at)
+        })
+        .collect();
+    let in_hook = |args: &[&str]| {
+        let mut cmd = isolated(BIN);
+        cmd.args(args).current_dir(&theirs).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+        for (var, at) in &planted {
+            cmd.env(var, at);
+        }
+        cmd.output().unwrap()
+    };
+    let project = s.path().to_str().unwrap();
+    let made = in_hook(&["-C", project, "add", "훅 안에서 만든 것", "--json"]);
+    let said = String::from_utf8_lossy(&made.stdout).to_string();
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    // **메일도 본다.** 파일에는 이름과 메일이 갈라져 있어, 이름만 보면 절반이 새도 초록이다.
+    assert!(said.contains(r#""assignee":"내 이름""#), "훅 저장소의 사람을 담당으로 적었다\n{said}");
+    assert!(said.contains(r#""assignee_email":"mine@example.com""#), "훅 저장소의 메일을 담당으로 적었다\n{said}");
+    let j = journal(s.path());
+    assert!(!j.contains("남의 이름"), "훅 저장소 주인의 이름이 이 프로젝트의 저널에 남았다\n{j}");
+    assert!(!j.contains("theirs@example.com"), "훅 저장소 주인의 메일이 이 프로젝트의 저널에 남았다\n{j}");
+
+    // 읽는 쪽도 같다 — 커밋 칸은 이 프로젝트의 이력에서 읽는다. R 의 커밋이 걸리면 안 된다.
+    let id = field(&said, "id");
+    git_at(s.path(), NOW, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 이 저장소의 커밋 ({id})")]);
+    git_at(&theirs, NOW, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 남의 이력이 샜다 ({id})")]);
+    let shown = in_hook(&["-C", project, "show", &id]);
+    assert!(shown.status.success(), "{}", String::from_utf8_lossy(&shown.stderr));
+    let shown = String::from_utf8_lossy(&shown.stdout);
+    assert!(shown.contains("이 저장소의 커밋"), "이 프로젝트의 커밋이 커밋 칸에 안 섰다 — 빈 칸은 아무것도 못 잰다\n{shown}");
+    assert!(!shown.contains("남의 이력이 샜다"), "훅 저장소의 커밋을 이 이슈에 붙였다\n{shown}");
 }
 
 /// 읽기는 사람을 묻지 않는다. 물으면 설정 없는 기계에서 `moai show` 가 죽고,
@@ -6274,14 +6444,19 @@ fn the_fake_claude_command_starts_from_the_isolated_one() {
     let removed = |var: &str| matches!(envs.get(std::ffi::OsStr::new(var)), Some(None));
     let set = |var: &str| envs.get(std::ffi::OsStr::new(var)).copied().flatten();
 
+    // 설정 파일을 가리키는 둘은 **걷은 뒤 제 값으로 박는다**(`isolated`) — 돌리는 사람의 `~/.gitconfig`
+    // 를 안 읽게 하려면 비우는 것만으로는 모자라 `/dev/null` 을 대야 한다. 그것은 아래에서 따로 본다.
+    let pinned = ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"];
     for var in
         ["MOAI_ACTOR", "MOAI_NOW", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "XDG_CONFIG_HOME", "BASH_ENV"]
             .iter()
-            .chain(GIT_LEAKS)
+            .chain(git_leaks::swept(true))
+            .filter(|var| !pinned.contains(&&***var))
     {
         assert!(removed(var), "{var} 를 안 걷었다");
     }
     assert_eq!(set("GIT_CONFIG_GLOBAL"), Some(std::ffi::OsStr::new("/dev/null")));
+    assert_eq!(set("GIT_CONFIG_SYSTEM"), Some(std::ffi::OsStr::new("/dev/null")));
     // 사용자 설정은 공용 빈 집 밑의 **없는** 파일이다. 집을 덮어도 이 자리는 따라가지 않는다.
     let config = Path::new(set("MOAI_CONFIG").expect("MOAI_CONFIG 를 안 줬다"));
     assert!(config.starts_with(env!("CARGO_TARGET_TMPDIR")) && !config.exists(), "사용자 설정이 격리되지 않았다 — {}", config.display());
