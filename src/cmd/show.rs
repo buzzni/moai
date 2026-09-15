@@ -310,17 +310,15 @@ fn one(
     let near: Vec<&str> =
         std::iter::once(issue.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
     // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 스냅샷을 다
-    // 풀 까닭이 없다. 경로는 저장소 뿌리에서 잰다: 규약의 자리(`.claude/worktrees/<id>`)가 그대로 읽힌다.
-    //
-    // **딸린 워크트리에서는 겹쳐 볼 때만 잰다** — `status` 의 `stranded` 와 같은 까닭(moai-4370).
-    // 그 스냅샷은 갈라질 때의 main 이라 그 뒤 main 에서 놓은 줄이 거기서는 아직 집혀 있고, 그것으로
-    // 재면 멀쩡히 끝난 일에 "자리 없다" 를 붙여 감독이 그 말대로 남에게 다시 준다.
-    let look = worktree || !crate::worktree::is_linked(&repo.root);
-    let trees: Vec<report::Workplace> = if look && report::wip(all, &repo.config).iter().any(|i| i.id == issue.id) {
-        // 뿌리도 같은 자로 푼다 — 워크트리 경로는 이미 푼 것이라(`worktree::canonical`) 심볼릭
-        // 링크를 낀 뿌리로는 하나도 안 잘린다.
-        let root = std::fs::canonicalize(&repo.root).unwrap_or_else(|_| repo.root.clone());
-        crate::worktree::workplaces(&repo.root, &repo.config)
+    // 풀 까닭이 없다. 언제 재는지(딸린 워크트리에서는 겹쳐 볼 때만)는 `worktree::workplaces` 가
+    // 한 곳에서 정한다 — 명령마다 두었더니 `status` 와 여기가 서로 다른 답을 냈다(moai-6opu.p65).
+    let trees: Vec<report::Workplace> = if report::wip(all, &repo.config).iter().any(|i| i.id == issue.id) {
+        // 경로는 **워크트리의 꼭대기**에서 잰다: 규약의 자리(`.claude/worktrees/<id>`)가 그대로
+        // 읽힌다. 뿌리(`.moai` 가 든 곳)로 재면 `.moai` 를 아래에 둔 저장소에서 하나도 안 잘려
+        // 기계의 절대 경로가 그대로 나간다. 워크트리 경로는 이미 푼 것이라(`worktree::canonical`)
+        // 꼭대기도 같은 자로 푼다 — 심볼릭 링크를 낀 자리로는 하나도 안 잘린다.
+        let root = crate::worktree::top_of(&repo.root).unwrap_or_else(|| repo.root.clone());
+        crate::worktree::workplaces(&repo.root, &repo.config, worktree)
             .into_iter()
             .map(|mut t| {
                 if let Ok(rel) = t.path.strip_prefix(&root) {
@@ -390,12 +388,12 @@ fn one(
         if !seen.blocks.is_empty() {
             extra.push(("blockers",serde_json::to_string(&seen.blocks).map_err(|e| Fail::new(e.to_string()))?));
         }
-        // 트래커 커밋까지 **전부** 낸다 — `tracker` 표시가 붙으니 거를지는 받는 쪽이 정한다.
-        // 사람 화면만 뺀다(`view::commits`). 커밋이 없으면 키를 안 단다.
         // 사람 화면의 `자리` 줄과 같은 답. 줄을 안 세우는 자리에서는 키도 안 단다.
         if let Some(p) = &seen.places {
             extra.push(("workplaces", serde_json::to_string(p).map_err(|e| Fail::new(e.to_string()))?));
         }
+        // 트래커 커밋까지 **전부** 낸다 — `tracker` 표시가 붙으니 거를지는 받는 쪽이 정한다.
+        // 사람 화면만 뺀다(`view::commits`). 커밋이 없으면 키를 안 단다.
         if !commits.is_empty() {
             extra.push(("commits", serde_json::to_string(&commits).map_err(|e| Fail::new(e.to_string()))?));
         }

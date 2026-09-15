@@ -1151,7 +1151,12 @@ pub fn detail(
         out.push(format!("  에픽   {}  {title}", paint(style::ID, e)));
     }
     // **어디서 하던 일인지 댄다**(moai-6opu) — 세션이 죽은 뒤 이어받는 쪽이 들어갈 자리다. 없으면
-    // 없다고 한다: `status` 의 `stranded` 와 같은 답(`report::places`)이다.
+    // 없다고 한다: 같은 자(`report::places`)로 잰 지금의 자리다.
+    //
+    // **`status` 의 `stranded` 와 같은 줄이 아니다.** 저쪽은 방금 집은 줄에 워크트리가 뜰 틈
+    // (`report::STRANDED_GRACE_SECS`, 한 시간)을 주는데 여기는 안 준다 — 규약대로 집고 커밋한 뒤
+    // 워크트리를 띄우는 사이에 펼치면 여기만 "없다" 로 선다. 이 줄은 "지금 보이는가" 를,
+    // `stranded` 는 "이만큼 지났는데도 안 보이는가" 를 말한다.
     match seen.places.as_deref() {
         Some([]) => out.push(format!("  자리   {}", paint(style::WARN, "없다 — 일하는 워크트리가 안 보인다"))),
         Some(trees) => {
