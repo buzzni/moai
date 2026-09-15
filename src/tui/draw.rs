@@ -502,7 +502,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC s` 가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
     let sorted = (app.order != Default::default()).then(|| {
-        format!("정렬 {}{}", app.order.0.word(), if app.order.1 { " 거꾸로" } else { "" })
+        format!("정렬 {}{}", app.order.by.word(), if app.order.reversed { " 거꾸로" } else { "" })
     });
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
@@ -818,12 +818,14 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize, fields: super::view::Fields) 
     // 내려갈 수 있게 한다(셈을 오른쪽 정렬한 까닭과 같다). 담당·날짜가 없으면 `—` 로, 태그가 없으면
     // 빈칸으로 자리를 지킨다 — 태그 없는 줄이 흔해 `—` 가 줄마다 서면 눈이 거기 걸린다.
     // 날짜는 `+`(생성)·`✎`(수정) 글리프로 가른다 — 둘 다 `MM-DD` 라 글리프 없이는 어느 쪽인지 모른다.
-    let mut cells: Vec<(Field, String)> = [Field::Tags, Field::Assignee, Field::Created, Field::Updated]
+    // 줄에 서는 차례이자 걷힘을 셀 때 훑는 목록 — 한 벌로 둔다.
+    const RIGHT: [Field; 4] = [Field::Tags, Field::Assignee, Field::Created, Field::Updated];
+    let mut cells: Vec<(Field, String)> = RIGHT
         .into_iter()
         .filter(|f| fields.shows(*f))
         .map(|f| {
             let text = match f {
-                Field::Tags => pad(&clip(&i.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" "), TAGS_W), TAGS_W),
+                Field::Tags => pad(&clip(&crate::view::tags_of(i), TAGS_W), TAGS_W),
                 Field::Assignee => pad(
                     &clip(&i.assignee.as_deref().map_or("—".into(), |a| crate::model::label(a, i.assignee_email.as_deref(), app.cfg.naming)), WHO_W),
                     WHO_W,
@@ -854,13 +856,11 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize, fields: super::view::Fields) 
         let least = cells.iter().filter_map(|(f, _)| f.drop_rank()).min().expect("오른쪽 열은 걷는 차례가 있다");
         cells.retain(|(f, _)| f.drop_rank() != Some(least));
     }
-    let kept = [Field::Tags, Field::Assignee, Field::Created, Field::Updated]
-        .into_iter()
-        .filter(|f| fields.shows(*f) && !cells.iter().any(|(c, _)| c == f))
-        .fold(fields, |mut k, f| {
-            k.toggle(f);
-            k
-        });
+    // 켠 오른쪽 열 가운데 걷힌 것을 끈다 — 안 켠 열은 `cells` 에도 없어 꺼진 채다.
+    let mut kept = fields;
+    for f in RIGHT {
+        kept.set(f, cells.iter().any(|(c, _)| *c == f));
+    }
     let right = right_of(&cells);
     // **좁으면 스피너부터 걷는다**(moai-q59j). 목록 줄의 글리프는 두 칸(`⠋▸`·` ·`)인데, 제목
     // 한 글자와 디렉터리 `/` 가 들어갈 자리가 없으면 멈춘 글리프 한 칸만 남긴다 — 뜻은 글리프가
@@ -1207,8 +1207,7 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     // 라벨 줄은 **모아 두고 폭을 재서** 낸다.
     let mut fields: Vec<(String, String)> = Vec::new();
     if !i.tags.is_empty() {
-        let tags = i.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ");
-        out.push(Line::from(Span::styled(tags, Style::new().fg(Color::Cyan))));
+        out.push(Line::from(Span::styled(crate::view::tags_of(i), Style::new().fg(Color::Cyan))));
     }
     if let Some(a) = &i.assignee {
         fields.push((
