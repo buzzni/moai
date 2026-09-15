@@ -445,6 +445,12 @@ impl Fold {
 /// 띄어쓰기 없이 길게 이어지고 한 글자가 두 칸이라 낱말 단위로만 접으면 한 줄이
 /// 통째로 넘치고, 늘 글자에서 끊으면 영문 낱말이 가운데서 잘린다. 둘 다 본다.
 ///
+/// **인라인 코드만은 끊지 않는다**(사용자 결정, moai-syp8). 코드 안의 공백은 접는
+/// 자리가 아니고, 조각 하나가 폭을 넘겨도 한 줄로 둔다 — 터미널이 화면에서만 접어
+/// 복사하면 온전한 한 줄로 돌아온다. 잘린 명령을 복사해 돌리는 것보다, 줄이
+/// 오른쪽으로 삐져나가는 편이 싸다. `--help` 의 접기를 끈 것과 같은 까닭이다
+/// (moai-opjn).
+///
 /// **접는 것이 칠하는 것보다 먼저다.** 칠한 뒤 접으면 이스케이프가 폭에 세어져
 /// 줄이 짧아지고, 끊긴 자리에 색이 열린 채로 남는다.
 pub fn wrap_spans(spans: &[Span], max: usize) -> Vec<Vec<Span>> {
@@ -462,8 +468,21 @@ pub fn wrap_spans(spans: &[Span], max: usize) -> Vec<Vec<Span>> {
     let mut w = 0usize;
     let mut space: Option<usize> = None;
 
+    // 코드는 한 덩이로 움직인다 — 이어지는 `Code` 글자를 한 단위로 묶어 잰다.
+    let mut units: Vec<Vec<(char, Role)>> = Vec::new();
     for &(c, role) in &chars {
-        let cw = crate::text::width(c.encode_utf8(&mut [0u8; 4]));
+        match units.last_mut() {
+            Some(last) if role == Role::Code && last.last().is_some_and(|(_, r)| *r == Role::Code) => {
+                last.push((c, role))
+            }
+            _ => units.push(vec![(c, role)]),
+        }
+    }
+
+    for unit in units {
+        // 단위의 폭이다 — 코드는 덩이째, 나머지는 글자 하나.
+        let cw: usize = unit.iter().map(|(c, _)| crate::text::width(c.encode_utf8(&mut [0u8; 4]))).sum();
+        let (c, _) = unit[0];
         if w + cw > max && !line.is_empty() {
             match space {
                 Some(at) if at > 0 => {
@@ -483,10 +502,12 @@ pub fn wrap_spans(spans: &[Span], max: usize) -> Vec<Vec<Span>> {
             }
             space = None;
         }
+        // 코드 덩이가 통째로 움직이므로 여기 걸리는 공백은 코드 **앞**의 자리뿐이다.
+        // 코드 안의 공백은 단위 안에 있어 접는 자리가 되지 않는다.
         if c == ' ' {
             space = Some(line.len());
         }
-        line.push((c, role));
+        line.extend(unit);
         w += cw;
     }
     trim_end(&mut line);
@@ -1007,6 +1028,30 @@ mod tests {
             .map(|s| s.text.as_str())
             .collect();
         assert_eq!(bold.replace(' ', ""), "아주긴굵은글이여기이어진다");
+    }
+
+    /// **인라인 코드는 끊지 않는다**(moai-syp8, 사용자 결정). 코드 안의 공백은 접는 자리가
+    /// 아니고, 조각 하나가 폭을 넘겨도 한 줄로 둔다 — 터미널이 화면에서만 접으니 복사하면
+    /// 온전한 한 줄로 돌아온다. `--help` 의 접기를 끈 것과 같은 까닭이다(moai-opjn).
+    ///
+    /// 여기가 무너지면 `moai show` 가 본문 속 명령에 **실제 개행**을 넣고, 그것을 복사해
+    /// 돌린 셸은 잘린 명령을 본다.
+    #[test]
+    fn code_spans_are_never_broken() {
+        let flat = |spans: &[Span]| spans.iter().map(|s| s.text.as_str()).collect::<String>();
+        let cmd = "moai note moai-4aex -b - <<'NOTE'";
+        for max in [12, 20, 40, 76] {
+            let lines = wrap_spans(&[plain("보기: "), code(cmd), plain(" 처럼 적는다")], max);
+            let whole = lines.iter().any(|l| flat(l).contains(cmd));
+            assert!(whole, "코드가 갈렸다 @ {max} — {:?}", lines.iter().map(|l| flat(l)).collect::<Vec<_>>());
+            // 코드 조각의 글자는 하나도 잃지 않는다.
+            let code_text: String =
+                lines.iter().flatten().filter(|s| s.role == Role::Code).map(|s| s.text.as_str()).collect();
+            assert_eq!(code_text, cmd, "코드 글자가 바뀌었다 @ {max}");
+        }
+        // 코드 뒤의 산문은 여전히 접힌다 — 안 끊는 것은 코드뿐이다.
+        let lines = wrap_spans(&[code("ab"), plain(" 뒤에 오는 긴 산문이 여기 이어진다")], 12);
+        assert!(lines.len() > 1, "산문까지 안 접혔다 — {lines:?}");
     }
 
     /// 될 수 있으면 낱말 가운데서 안 끊는다.
