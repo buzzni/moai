@@ -870,6 +870,10 @@ fn brief() -> String {
        로 되돌리고 EnterWorktree(path) 로 워크트리에 돌아가 6 부터 다시 한다
     9. 병합이 실제로 끝났으면 루트에서 `git worktree remove .claude/worktrees/<에픽>` 과
        `git branch -d worktree-<에픽>` 으로 워크트리와 가지를 지운다
+    9-1. 닫기 전에 **무엇이 이 일을 했는지** 멤버마다 한 줄로 남긴다. 올렸으면 올린 까닭까지
+       — 다음 사람이 "이만한 일에 무엇이 붙었나" 를 거기서 읽는다. 필드가 아니라 노트다:
+       저널은 상태 계산에 안 읽히고 파생값은 저장하지 않는다
+         moai note <멤버> "model: <모델> (<등급> — <까닭>)"
     10. 그 뒤에 닫는다. **`moai mv <멤버> done` 은 그 병합이 실제로 끝난 뒤에만 친다** —
        병합 전에 옮겼다가 되돌린 일꾼이 있었다. 워크트리가 남아 있으면 훅이 이 일을 옆
        워크트리의 것으로 읽어 `-m` 없는 리뷰 닫기를 못 막는다. 리뷰 이슈는 무엇이
@@ -1153,6 +1157,28 @@ mod tests {
         assert!(supervise[end..].lines().next().unwrap_or_default().contains("opus"), "에픽 끝 리뷰가 opus 가 아니다");
         // 일꾼이 받는 글에 그 자리가 있어야 감독이 채운다.
         assert!(brief.contains("모델:"), "브리프에 모델 자리가 없다 — 감독이 골라도 일꾼은 모른다");
+    }
+
+    /// **일꾼이 마지막 자이고, 일한 모델은 닫을 때 남는다**(moai-lzfq, 2026-09-15 사용자 결정).
+    ///
+    /// 감독은 코드를 읽기 전에 고르므로 제안일 뿐이다 — 읽어 보니 쓰기 경로면 일꾼이 올린다.
+    /// 남기는 자리는 **노트 하나**다: 저널은 상태 계산에 안 읽히고 파생값은 저장하지 않으니
+    /// 필드가 아니라 이력으로 남는다(CLAUDE.md 의 되돌리지 않을 결정 둘).
+    #[test]
+    fn the_worker_may_raise_the_model_and_records_it_when_closing() {
+        let brief = brief();
+        assert!(brief.contains("한 단계 올린다"), "일꾼이 모델을 올릴 길이 없다");
+        // 올린 까닭이 남아야 다음 사람이 그 판단을 읽는다.
+        let raise = brief.find("한 단계 올린다").expect("올리는 자리가 없다");
+        assert!(brief[raise..].contains("까닭"), "올린 까닭을 남기라는 말이 없다 — {}", &brief[raise..raise + 120.min(brief.len() - raise)]);
+        // **닫는 자리에 선다** — 일이 끝난 뒤라야 무엇이 실제로 그 일을 했는지 안다.
+        let note = brief.find("model:").expect("일한 모델을 남기는 걸음이 없다");
+        let done = brief.find("moai mv <멤버> done").expect("멤버를 닫는 걸음이 없다");
+        assert!(note > done.saturating_sub(400), "모델 노트가 닫는 자리에서 멀다");
+        // `moai note` 로 남긴다. 워크트리에서 부르는 줄이지만 `-C <루트>` 는 4-1 이 한 번만
+        // 말한다 — 줄마다 박으면 그 규칙이 바뀌는 날 고칠 자리가 브리프 곳곳에 흩어진다.
+        let line = brief[..note].lines().last().unwrap_or_default();
+        assert!(line.trim().starts_with("moai note "), "노트가 아닌 것으로 남긴다 — {line}");
     }
 
     /// **감독 스킬은 모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 적으면 남의 저장소에서는
