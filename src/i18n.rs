@@ -64,18 +64,39 @@ pub fn pick(env: Option<&str>, setting: Option<&str>) -> Lang {
         .unwrap_or_default()
 }
 
-/// 이 판이 실제로 쓸 언어 — **한 프로세스에 한 번만 정한다.**
+/// 이 판이 쓸 언어와, 설정에서 그것을 읽다 만난 까닭 — **한 프로세스에 한 번만 정한다.**
 ///
 /// 매 줄 설정 파일을 다시 읽을 까닭이 없고, 한 번 돌 동안 말이 바뀌면 같은 화면에 두 말이
 /// 섞인다. 고르는 자(`MOAI_LANG` → 설정 → 영어)는 [`pick`] 하나고 그쪽이 시험을 받는다 —
 /// 여기는 환경과 파일에서 값을 길어 오는 껍데기다.
+///
+/// **긷는 것은 `get_or_init` 밖에서 한다**(리뷰 moai-80qw). 설정을 읽는 길
+/// (`user_config::read` → `Doc::lang`)은 제 글자를 화면에 내는 자리고, 그 글자가 언젠가
+/// [`t`] 를 지나면 닫히는 중인 문을 안에서 다시 두드리는 꼴이 된다 — `OnceLock` 의 재진입은
+/// 영영 안 풀리고, 모든 명령이 아무 말 없이 멈춘다. 값을 먼저 길어 두면 그럴 자리가 없다.
+fn picked() -> &'static (Lang, Vec<String>) {
+    static PICKED: OnceLock<(Lang, Vec<String>)> = OnceLock::new();
+    if let Some(got) = PICKED.get() {
+        return got;
+    }
+    let env = std::env::var("MOAI_LANG").ok();
+    let reg = crate::user_config::read(crate::user_config::path().as_deref());
+    let lang = pick(env.as_deref(), reg.lang.as_deref());
+    PICKED.get_or_init(|| (lang, reg.lang_problems))
+}
+
+/// 이 판이 실제로 쓸 언어.
 pub fn current() -> Lang {
-    static PICKED: OnceLock<Lang> = OnceLock::new();
-    *PICKED.get_or_init(|| {
-        let env = std::env::var("MOAI_LANG").ok();
-        let setting = crate::user_config::read(crate::user_config::path().as_deref()).lang;
-        pick(env.as_deref(), setting.as_deref())
-    })
+    picked().0
+}
+
+/// 설정에 적은 말이 틀렸을 때의 한 줄(리뷰 moai-80qw). 비어 있으면 아무 일 없다.
+///
+/// **막지 않는다** — 대는 쪽은 stderr 로 말만 하고 종료 코드를 안 건드린다. 글자 하나 때문에
+/// 도구가 안 도는 것처럼 보이면 안 된다는 것은 [`pick`] 이 영어로 떨어지는 까닭과 같다.
+/// 여기서 새로 읽지 않는다 — 말을 고를 때 이미 읽은 것을 그대로 낸다.
+pub fn problems() -> &'static [String] {
+    &picked().1
 }
 
 /// 지금 언어로 그 키의 글자. 부르는 자리는 이것 하나만 쓴다.
@@ -88,11 +109,26 @@ pub fn t(key: &'static str) -> &'static str {
 /// **자리는 이름으로 둔다**(`{n}`), 차례가 아니다. 번역은 말차례가 달라지는 일이라, 자리를
 /// 차례로 두면 번역자가 순서를 바꾸는 순간 값이 엉뚱한 자리에 든다. 모르는 이름은 그대로
 /// 남는다 — 화면에 `{n}` 이 보이면 무엇이 안 채워졌는지 그 자리에서 읽힌다.
+///
+/// **한 번만 훑는다**(리뷰 moai-80qw) — 채운 값은 다시 안 본다. 이름마다 `replace` 를 걸면
+/// 앞서 채운 값 **안의** `{이름}` 을 뒤의 짝이 또 채운다: 제목이 `{n}` 인 이슈 하나가 제
+/// 자리에 셈을 받아 들이고 진짜 셈 자리는 사라진다. 그러면 `vars` 의 차례가 결과를 바꾸는
+/// 셈이라, 이름으로 둔 뜻이 거기서 도로 무너진다.
 pub fn fill(text: &str, vars: &[(&str, &str)]) -> String {
-    let mut out = text.to_string();
-    for (name, value) in vars {
-        out = out.replace(&format!("{{{name}}}"), value);
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut rest = text;
+    while let Some(at) = rest.find('{') {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        // 닫히지 않은 `{` 는 글자다 — 남은 것을 그대로 넘긴다.
+        let Some(close) = rest.find('}') else { break };
+        match vars.iter().find(|(name, _)| *name == &rest[1..close]) {
+            Some((_, value)) => out.push_str(value),
+            None => out.push_str(&rest[..=close]),
+        }
+        rest = &rest[close + 1..];
     }
+    out.push_str(rest);
     out
 }
 
@@ -158,14 +194,40 @@ mod tests {
         assert_eq!(pick(Some("kr"), Some("ko")), Lang::Ko, "모르는 환경값이 설정까지 버렸다");
     }
 
+    /// **채운 값은 다시 안 본다**(리뷰 moai-80qw) — 그리고 `vars` 의 차례가 결과를 안 바꾼다.
+    ///
+    /// 이름마다 `replace` 를 걸던 때는 앞서 넣은 값 **안의** `{이름}` 을 뒤의 짝이 또 채웠다.
+    /// 이 트래커에서 `{n}` 은 얼마든지 있을 수 있는 제목이라, 그런 이슈 하나가 제 자리에 셈을
+    /// 받아 들이고 진짜 셈 자리는 화면에서 사라진다.
+    #[test]
+    fn a_filled_value_is_not_filled_again_and_the_order_does_not_matter() {
+        assert_eq!(fill("{title} — {n}건", &[("title", "{n} 를 고친다"), ("n", "3")]), "{n} 를 고친다 — 3건");
+        assert_eq!(fill("{title} — {n}건", &[("n", "3"), ("title", "{n} 를 고친다")]), "{n} 를 고친다 — 3건");
+        // 모르는 이름은 그대로 남는다 — 무엇이 안 채워졌는지 그 자리에서 읽힌다.
+        assert_eq!(fill("{a}{b}", &[("a", "1")]), "1{b}");
+        // 닫히지 않은 `{` 도 글자다. 자리가 없는 글은 그대로 지난다.
+        assert_eq!(fill("{ 열린 채", &[("n", "1")]), "{ 열린 채");
+        assert_eq!(fill("자리 없음", &[("n", "1")]), "자리 없음");
+    }
+
     /// **없는 키는 영어로 떨어지고, 영어에도 없으면 키 그대로 난다.** 빈 줄은 무엇이
     /// 사라졌는지도 안 알려 준다.
     #[test]
     fn a_missing_key_falls_back_to_english_then_to_the_key_itself() {
         assert_eq!(say(Lang::Ko, "status.issues"), "이슈 {n}");
-        // es 에는 아직 이 키가 없다 — 영어가 받는다. **번역은 원래 덜 된 채로 산다**:
-        // 다섯을 함께 채우게 하지 않는 것이 결정이고, 이 줄이 그 결정이 도는 증거다.
-        assert_eq!(say(Lang::Es, "status.milestone_label"), say(Lang::En, "status.milestone_label"));
+        // **번역은 원래 덜 된 채로 산다** — 다섯을 함께 채우게 하지 않는 것이 결정이고, 빠진
+        // 키는 영어가 받는다. **어느 키가 비었는지는 여기서 고른다**(리뷰 moai-80qw): 특정
+        // 말의 특정 구멍을 글자로 박으면, 안내가 시킨 대로 그 자리를 채운 번역자가 제 번역과
+        // 아무 상관없는 이 시험을 깬다. 시험 때문에 실려 나가는 번역 파일은 시험 자료가 아니다.
+        // 다 채워진 날에는 잴 구멍이 없고, 그것도 정상이다.
+        let en = table(Lang::En);
+        let hole = Lang::ALL.into_iter().filter(|l| *l != Lang::En).find_map(|l| {
+            let theirs = table(l);
+            en.keys().find(|k| !theirs.contains_key(*k)).map(|k| (l, k.as_str()))
+        });
+        if let Some((lang, key)) = hole {
+            assert_eq!(say(lang, key), say(Lang::En, key), "{}: `{key}` 가 영어로 안 떨어졌다", lang.code());
+        }
         assert_eq!(say(Lang::En, "nothing.here"), "nothing.here"); // i18n:없는-키
         assert_eq!(say(Lang::Ko, "nothing.here"), "nothing.here"); // i18n:없는-키
     }
@@ -246,16 +308,38 @@ mod tests {
     /// **어느 갈래가 남의 파일을 가리키는지도 잰다** — `bundle()` 의 `include_str!` 은 다섯
     /// 줄이 나란해 한 줄을 잘못 이어도 컴파일이 통과하고, ja·zh·es 는 담긴 키가 같아
     /// 나머지 시험이 그것을 못 본다.
+    ///
+    /// **제 이름의 파일과 글자로 견준다**(리뷰 moai-80qw). 겹치는지만 보면 두 갈래가 서로의
+    /// 파일을 **맞바꾼** 것을 못 본다 — 둘 다 남아 있으니 겹치지 않고, `table` 과의 비교는
+    /// 같은 `bundle()` 을 양쪽에 놓아 제 자신과 견주는 셈이다. 실제로 ja·zh 를 맞바꿔 재 보니
+    /// 일곱 시험이 다 통과했고, 일본어를 고른 사람에게 중국어가 나갔다.
     #[test]
     fn every_bundle_parses_and_is_wired_to_its_own_file() {
-        let mut seen = std::collections::HashSet::new();
+        let dir = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/i18n"));
         for lang in Lang::ALL {
             let one: HashMap<String, String> =
                 serde_json::from_str(lang.bundle()).unwrap_or_else(|e| panic!("{}: {e}", lang.code()));
             assert!(!one.is_empty(), "{} 표가 비었다", lang.code());
             assert_eq!(table(lang), &one, "{} 는 실릴 때와 읽힐 때가 다르다", lang.code());
-            assert!(seen.insert(lang.bundle()), "{} 가 남의 말묶음 파일을 가리킨다", lang.code());
+            let file = dir.join(format!("{}.json", lang.code()));
+            let said = std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+            assert_eq!(lang.bundle(), said, "{} 가 제 말묶음 파일을 안 가리킨다", lang.code());
         }
+        // **디렉터리에 있는 말묶음은 다 실린다.** `ALL` 은 손으로 적는 목록이라 새 갈래를
+        // `code()`·`bundle()` 에만 더하면 컴파일이 통과하고(둘은 빠짐없는 `match` 지만
+        // `[Lang; 5]` 는 그대로 선다), 그 말은 `parse` 에도 안 걸리고 시험도 안 훑어 영영
+        // 안 선다 — 안내가 대는 "다섯 자리" 중 이 자리만 컴파일러가 안 잡는다.
+        let mut on_disk: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .collect();
+        let mut listed: Vec<String> = Lang::ALL.into_iter().map(|l| l.code().to_string()).collect();
+        on_disk.sort();
+        listed.sort();
+        assert_eq!(on_disk, listed, "i18n/ 의 말묶음과 `Lang::ALL` 이 다르다 — 갈래를 더하며 `ALL` 을 빠뜨렸다");
     }
 
     /// **번역이 자리를 잃으면 수가 화면에서 사라진다.** `"ready.count": "着手できる作業"` 처럼
@@ -275,9 +359,26 @@ mod tests {
             assert!(key.contains('.'), "영어 표의 `{key}` 에 점이 없다 — 소스를 훑는 시험이 이 키를 못 본다");
             assert!(!text.trim().is_empty(), "영어 표의 `{key}` 가 비었다");
         }
+        // **셈이 드는 자리는 영어에 있어야 한다**(리뷰 moai-80qw). 아래 비교는 번역을 영어와
+        // 견주므로, 영어가 `{n}` 을 잃으면 번역도 나란히 잃은 채로 통과한다 — 그러면 모든
+        // 말에서 수가 사라지고, 화면을 견주는 시험도 제 기댓값을 같은 표에서 길어 못 본다.
+        for key in ["status.issues", "status.epics", "ready.count"] {
+            let text = en.get(key).unwrap_or_else(|| panic!("영어 표에 `{key}` 가 없다"));
+            assert!(places(text).contains("n"), "영어 표의 `{key}` 에 `{{n}}` 이 없다 — 그 줄에서 수가 사라진다");
+        }
         for lang in Lang::ALL {
             for (key, text) in table(lang) {
                 assert!(!text.trim().is_empty(), "{}: `{key}` 가 비었다 — 그 줄이 화면에서 사라진다", lang.code());
+                // **한 줄이어야 한다**(리뷰 moai-80qw). JSON 값에는 `\n` 도 ESC 도 담기고,
+                // 안내는 번역자에게 러스트를 몰라도 된다고 말한다 — 머리 글에 개행 하나가 들면
+                // 그 아래 표가 통째로 어긋나고 ESC 는 화면을 다시 칠한다. `view` 가 파일 밖에서
+                // 온 글을 `text::one_line` 으로 거르는 것과 같은 자리고, 여기는 실릴 때 한 번만
+                // 재면 되므로 매 줄 거르는 값을 안 치른다.
+                assert!(
+                    !text.chars().any(char::is_control),
+                    "{}: `{key}` 에 제어 글자가 들었다 — 화면 글은 한 줄이다",
+                    lang.code()
+                );
                 let Some(source) = en.get(key) else {
                     panic!("{}: `{key}` 를 영어 표가 모른다 — 새 키는 영어부터고, 지운 키는 함께 지운다", lang.code())
                 };

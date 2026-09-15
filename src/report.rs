@@ -1967,6 +1967,12 @@ impl Warning {
     /// 갈린다**(2026-09-15 사용자 결정). 뭉뚱그려 `moai init` 만 대면, main 을 받고 아직 다시
     /// 빌드 안 한 세션이 그 말을 따라 **새 안내를 옛 글로 되돌리고** 그 되돌림이 머지로 실린다.
     /// 기계도 가르라고 `kind` 를 따로 둔다.
+    /// 사용자 설정에서 못 읽은 것(리뷰 moai-80qw). **셈만 든다** — 어느 파일의 어느 값인지는
+    /// 부르는 쪽이 이미 stderr 로 한 줄씩 냈다. 보드에 그 긴 줄을 또 실으면 표를 밀어낸다.
+    pub fn user_config(n: usize) -> Warning {
+        Warning::new("user_config", Vec::new()).count(n).notice()
+    }
+
     pub fn agents_stale(root: Option<&str>, edited: bool) -> Warning {
         let hint = match root {
             None => "moai init".to_string(),

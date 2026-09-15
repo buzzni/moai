@@ -3,8 +3,8 @@
 //! 표를 쓰는 이상 폭 계산이 필요하다. 한글은 터미널에서 두 칸을 먹으므로
 //! `len()` 으로 맞추면 한글 제목이 섞인 표가 전부 어긋난다.
 
-use crate::i18n::{fill, t};
 use crate::config::Config;
+use crate::i18n::{fill, t};
 use crate::model::{Issue, JournalEntry, Kind};
 use crate::report::{Roll, StatusReport, Warning, is_group};
 use crate::style::{self, paint};
@@ -665,6 +665,10 @@ fn says(w: &Warning) -> String {
         },
         // **낡음의 두 얼굴을 다른 낱말로 낸다**(moai-mj45). 앞의 것은 "다시 빌드부터" 고, 뒤의
         // 것은 "손질이 사라진다" 다 — 한 낱말로 뭉치면 그 중 한쪽이 반드시 거짓말이 된다.
+        // **어느 값인지는 여기서 안 댄다**(리뷰 moai-80qw) — 파일 자리까지 든 줄은 길어 표를
+        // 밀어내므로 부르는 쪽이 stderr 로 이미 한 줄씩 냈다. 여기 서는 뜻은 "그 말을 놓쳤으면
+        // 위를 봐라" 다: 이 줄이 없으면 보드가 "드러난 문제 없다" 로 방금 한 말을 뒤집는다.
+        "user_config" => format!("사용자 설정에서 못 읽은 것 {n}건 — 한 줄씩은 stderr 에 냈다"),
         "agents_stale" => "AGENTS.md 블록이 다르다 — 다른 바이너리가 쓴 것이라 이쪽이 더 낡았을 수 있다 (다시 빌드해 보고)".to_string(),
         "agents_hand_edited" => "AGENTS.md 블록을 손으로 고쳤다 — 다시 심으면 그 손질은 사라진다".to_string(),
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
@@ -2079,13 +2083,18 @@ mod tests {
         let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[], &Origin::default()));
         let joined = out.join("\n");
         // **글자는 말묶음에서 온다**(moai-zeyv) — 여기에 한국어를 박으면 기본 언어(영어)에서 깨진다.
+        // **셈이 화면에 닿는지는 따로 잰다**(리뷰 moai-80qw) — 기댓값도 같은 `t()` 를 지나므로,
+        // 머리 글이 `{n}` 을 잃으면 양쪽이 나란히 잃어 이 줄만으로는 아무것도 안 잡힌다.
         assert!(joined.contains(&fill(t("ready.count"), &[("n", "2")])), "{joined}");
+        assert!(out[0].contains('2'), "머리 줄에 셈이 없다 — {:?}", out[0]);
         assert!(joined.contains("저장 계층") && joined.contains("에픽 없음"), "{joined}");
         assert!(joined.contains("이미 잡고 있는 것 1건"), "{joined}");
         assert!(joined.contains("argos-0004"), "{joined}");
 
-        let empty = plain(&ready(&[], &labels, &[], &[], &Origin::default())).join("\n");
-        assert!(empty.contains(&fill(t("ready.count"), &[("n", "0")])) && empty.contains(t("ready.none")), "{empty}");
+        let empty = plain(&ready(&[], &labels, &[], &[], &Origin::default()));
+        let joined = empty.join("\n");
+        assert!(joined.contains(&fill(t("ready.count"), &[("n", "0")])) && joined.contains(t("ready.none")), "{joined}");
+        assert!(empty[0].contains('0'), "빈 머리 줄에 셈이 없다 — {:?}", empty[0]);
     }
 
     /// 없는 에픽을 가리켜도 상세가 죽지 않는다 — 드러내되 막지 않는다.

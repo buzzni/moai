@@ -92,6 +92,12 @@ pub struct Registry {
     pub problems: Vec<String>,
     /// 적어 둔 화면 언어(moai-slfv). 없으면 `None` 이고 영어로 떨어진다.
     pub lang: Option<String>,
+    /// 그 언어를 읽다 만난 까닭(리뷰 moai-80qw). **`problems` 에도 같이 든다** — 대는 자리가
+    /// 둘이라서다. `.moai` 밖의 한눈 보기는 `problems` 로 대지만, 저장소 **안**의 `moai status`
+    /// 는 등록 목록을 아예 안 읽으므로(`cmd::status` 의 결정 3) 이 자리로만 닿는다. 하나로
+    /// 줄이면 두 화면 중 하나가 이 줄을 잃고, 그러면 틀린 설정이 조용히 영어가 된다 —
+    /// 그것을 막자는 것이 [`Doc::lang`] 의 까닭이었다.
+    pub lang_problems: Vec<String>,
     /// 적어 둔 탐색기 보기와 그것을 읽다 만난 까닭(moai-2bzp). **같은 파싱에서 함께 읽는다**(moai-u8cs) —
     /// 탐색기를 띄우면 층과 보기가 저마다 파일을 읽고 파싱해 한 번 띄울 때 설정을 두세 번 읽었다.
     /// 까닭을 `problems` 와 따로 드는 것은 대는 자리가 달라서다 — 층의 문제는 층이, 보기의 문제는 알림이 댄다.
@@ -125,7 +131,8 @@ pub fn read(path: Option<&Path>) -> Registry {
             reg.problems = problems.into_iter().map(at).collect();
             let (lang, lang_problems) = doc.lang();
             reg.lang = lang;
-            reg.problems.extend(lang_problems.into_iter().map(at));
+            reg.lang_problems = lang_problems.into_iter().map(at).collect();
+            reg.problems.extend(reg.lang_problems.iter().cloned());
             let (look, problems) = doc.look();
             reg.look = look;
             reg.look_problems = problems.into_iter().map(at).collect();
@@ -1082,6 +1089,18 @@ mod tests {
         assert!(lang("[i18n]\nlang = \"kr\"\n").0.is_none(), "모르는 코드를 값으로 들였다");
         let reg = read(None);
         assert_eq!(reg.lang, None, "자리를 모르면 언어도 없다");
+
+        // **까닭은 두 자리에 든다**(리뷰 moai-80qw) — `.moai` 밖의 한눈 보기가 대는 `problems`
+        // 와, 저장소 안의 `status` 가 대는 `lang_problems`. 한쪽만 채우면 나머지 화면에서
+        // 오타가 조용히 영어가 된다.
+        let d = scratch("lang-problems");
+        let path = d.join("config.toml");
+        std::fs::write(&path, "[i18n]\nlang = \"kr\"\n").unwrap();
+        let bad = read(Some(&path));
+        let said = format!("{}: `i18n.lang` 은 en·ko·zh·ja·es 중 하나다 — \"kr\"", path.display());
+        assert_eq!(bad.lang_problems, vec![said.clone()]);
+        assert!(bad.problems.contains(&said), "밖에서 대는 자리에 안 섰다: {:?}", bad.problems);
+        assert_eq!(bad.lang, None, "틀린 값을 들였다");
     }
 
     /// **틀린 보기 키는 알리고 나머지는 읽는다**(moai-2bzp). `tui` 가 표가 아니면 읽기는 비고 쓰기는 멈춘다.

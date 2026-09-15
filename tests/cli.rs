@@ -164,11 +164,12 @@ fn every_language_keeps_the_ready_table_in_line() {
             .filter(|l| l.contains("argos-"))
             .map(|l| {
                 let p = l.find("p2").expect("우선순위 칸이 없다");
-                let epic = l.rfind("에픽 없음").expect("에픽 칸이 없다");
-                (cells(&l[..p]), cells(&l[..epic]))
+                (cells(&l[..p]), last_column(l))
             })
             .collect();
         assert!(starts.len() >= 3, "{lang}: 표에 줄이 모자라다\n{screen}");
+        // **잰 자리가 0 이면 아무것도 안 잰 것이다** — 아래 두 줄은 다 0 이어도 통과한다.
+        assert!(starts.iter().all(|(p, e)| *p > 0 && *e > *p), "{lang}: 열을 못 찾았다 — {starts:?}\n{screen}");
         assert!(starts.windows(2).all(|w| w[0].0 == w[1].0), "{lang}: 우선순위 열이 줄마다 다른 칸에서 선다 — {starts:?}\n{screen}");
         assert!(starts.windows(2).all(|w| w[0].1 == w[1].1), "{lang}: 제목 뒤 열이 줄마다 다른 칸에서 선다 — {starts:?}\n{screen}");
     }
@@ -177,6 +178,18 @@ fn every_language_keeps_the_ready_table_in_line() {
 /// 화면에서 그 글이 차지하는 **칸 수**. 한글·일본어·중국어는 한 글자가 두 칸이다.
 fn cells(s: &str) -> usize {
     unicode_width::UnicodeWidthStr::width(s)
+}
+
+/// 그 줄의 **마지막 열이 서는 칸.** 열 사이는 두 칸 이상 벌어지므로 마지막 틈 뒤가 그 자리다.
+///
+/// **글자로 찾지 않는다**(리뷰 moai-80qw). 전에는 `에픽 없음` 을 `rfind` 로 짚었는데, 그 낱말은
+/// 말묶음으로 옮겨 갈 차례에 있는 것이라 옮기는 날 en·ja·zh·es 에서 `expect` 가 터진다 —
+/// 번역이 처음으로 잰 칸에 들어오는 바로 그때, 어긋남을 재는 대신 시험이 죽는다.
+fn last_column(l: &str) -> usize {
+    let line = l.trim_end();
+    let Some(gap) = line.rfind("  ") else { return 0 };
+    let tail = &line[gap..];
+    cells(&line[..gap + (tail.len() - tail.trim_start().len())])
 }
 
 /// **아무도 고르지 않으면 화면은 영어다**(moai-zeyv, 사용자 결정). 나머지 시험이 `MOAI_LANG=ko`
@@ -215,6 +228,50 @@ fn english_is_the_default_when_nothing_picks_a_language() {
     // 말이 달라도 같은 화면이다 — 줄 수가 같다.
     assert_eq!(english.lines().count(), korean.lines().count(), "영어와 한국어의 줄 수가 다르다");
     assert_eq!(english.lines().count(), japanese.lines().count(), "영어와 일본어의 줄 수가 다르다");
+}
+
+/// **설정에 적은 말도 든다**(moai-slfv), 그리고 **틀리면 저장소 안에서도 댄다**(리뷰 moai-80qw).
+///
+/// 여기까지 오는 길(`Doc::lang` → `Registry::lang` → `i18n::pick`)은 `MOAI_LANG` 만 재는
+/// 시험들이 한 줄도 안 밟던 자리다 — 그 길이 끊어져도 다 푸르고, `[i18n] lang` 을 적어 둔
+/// 사람만 조용히 영어를 본다. 틀린 값은 **stderr 로** 대고 종료 코드는 안 바꾼다: `status` 는
+/// 아무것도 막지 않는다.
+#[test]
+fn the_config_picks_the_language_and_a_bad_one_is_named() {
+    let s = init("lang-config");
+    ok(s.path(), &["add", "첫 일"]);
+    let config = s.path().join("user/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let run = |body: &str| {
+        std::fs::write(&config, body).unwrap();
+        let mut cmd = isolated(BIN);
+        cmd.args(["status"])
+            .current_dir(s.path())
+            .env("MOAI_CONFIG", &config)
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            .env_remove("MOAI_LANG");
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "설정 하나로 멈췄다\n{}", String::from_utf8_lossy(&out.stderr));
+        (String::from_utf8(out.stdout).unwrap(), String::from_utf8(out.stderr).unwrap())
+    };
+
+    let (screen, said) = run("[i18n]\nlang = \"ja\"\n");
+    assert!(screen.contains("課題 1"), "설정에 적은 말이 안 들었다\n{screen}");
+    assert!(said.is_empty(), "멀쩡한 설정에 할 말이 생겼다 — {said}");
+
+    // **환경이 설정을 이긴다** — 같은 파일을 두고 `MOAI_LANG` 을 주면 그쪽이다.
+    let mut cmd = isolated(BIN);
+    cmd.args(["status"]).current_dir(s.path()).env("MOAI_CONFIG", &config).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+    let out = cmd.output().expect("moai 를 실행하지 못했다");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("이슈 1"), "MOAI_LANG 이 설정에 졌다");
+
+    // **오타는 조용히 영어가 되지 않는다.** 이 줄이 없으면 고친 설정이 왜 안 듣는지 알 길이 없다.
+    let (screen, said) = run("[i18n]\nlang = \"kr\"\n");
+    assert!(screen.contains("Issues 1"), "모르는 값에서 영어로 안 떨어졌다\n{screen}");
+    assert!(said.contains("`i18n.lang`") && said.contains("\"kr\""), "틀린 설정을 아무도 안 댔다 — {said:?}");
+    // 보드도 그것을 안다 — 없으면 "드러난 문제 없다" 가 방금 stderr 에 한 말을 뒤집는다.
+    assert!(screen.contains("사용자 설정에서 못 읽은 것 1건"), "보드가 stderr 의 말을 모른다\n{screen}");
 }
 
 #[test]
