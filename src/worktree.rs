@@ -929,12 +929,23 @@ mod tests {
     /// 빈 `.git` 울타리를 세운다([`Scratch::fenced`]).
     ///
     /// 여기서는 그 상황을 **이 저장소 안에 자리를 잡아** 그대로 흉내 낸다. 이 체크아웃은
-    /// 워크트리가 딸린 진짜 저장소라, 울타리가 없으면 그 이름들이 그대로 나온다.
+    /// 진짜 저장소라, 울타리가 없으면 그 꼭대기가 그대로 잡힌다.
+    ///
+    /// **먼저 울타리 없는 자리로 견준다.** `away` 만 보면 워크트리가 하나도 안 딸린 새
+    /// 클론에서는 울타리를 걷어내도 양쪽이 똑같이 비어, 이 시험이 아무것도 안 본 채
+    /// 초록으로 끝난다. 훑기가 어디서 멈추는가(`top_of`)가 울타리가 지는 값이다.
     #[test]
     fn a_temp_place_inside_a_checkout_does_not_leak_that_repos_worktrees() {
         let inside = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/tmp");
         std::fs::create_dir_all(&inside).unwrap();
+
+        // 울타리 없는 자리는 위의 체크아웃을 꼭대기로 읽는다 — 이 시험이 막는 그 길이다.
+        let bare = crate::scratch::Scratch::in_place(&inside, "fence-none");
+        let above = top_of(bare.path());
+        assert!(above.is_some_and(|t| t != *bare.path()), "임시 자리가 체크아웃 밖이다 — 이 시험이 흉내 낼 것이 없다");
+
         let dir = crate::scratch::Scratch::fenced_in(&inside, "fence");
+        assert_eq!(top_of(dir.path()).as_deref(), Some(canonical(dir.path()).as_path()), "훑기가 울타리를 넘어갔다");
         assert!(away(dir.path()).is_empty(), "울타리 위의 저장소가 새어 나왔다 — {:?}", away(dir.path()));
         assert!(away(&dir.join("nowhere")).is_empty(), "없는 자리에서도 위의 저장소를 읽었다");
         assert!(!is_linked(dir.path()), "울타리를 딸린 워크트리로 읽었다");

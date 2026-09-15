@@ -12,9 +12,14 @@
 //!
 //! ## 자리
 //!
-//! `CARGO_TARGET_TMPDIR` 이 있으면 거기, 없으면 `std::env::temp_dir()` 이다.
-//! 앞엣것은 `cargo` 가 이 크레이트의 `target` 밑에 주는 자리라, 시험이 남긴 것이
-//! 기계의 `/tmp` 가 아니라 `cargo clean` 으로 함께 사라진다.
+//! `std::env::temp_dir()` 다. **`CARGO_TARGET_TMPDIR` 은 여기서 못 쓴다** — cargo 는
+//! 그것을 통합 시험·벤치 타깃에만 주고, 이 모듈은 바이너리 타깃의 단위 시험으로
+//! 컴파일되므로 `option_env!` 가 늘 `None` 이었다(`tests/cli.rs` 는 통합 시험이라
+//! `env!` 로 그것을 곧바로 읽는다). 있는 척하는 갈래는 걷어냈다.
+//!
+//! 저장소 안(`target/` 밑)으로 옮기지도 않는다 — 울타리 없는 자리마다 위의 `.git` 이
+//! 꼭대기로 잡혀 moai-46xz 가 통째로 돌아온다([`Scratch::fenced`]). 치우는 일은
+//! `Drop` 이 맡으므로 `/tmp` 에 쌓이지 않는다.
 
 use std::path::{Path, PathBuf};
 
@@ -30,8 +35,10 @@ impl Scratch {
         Scratch::in_place(&base(), name)
     }
 
-    /// 자리를 받아 세운다. 이름 짓는 법은 [`Scratch::new`] 와 같다.
-    fn in_place(base: &Path, name: &str) -> Scratch {
+    /// 자리를 받아 세운다. 이름 짓는 법은 [`Scratch::new`] 와 같다. 울타리는 없다 —
+    /// [`Scratch::fenced_in`] 이 이것 위에 세우고, 울타리가 실제로 일하는지 견주는
+    /// 시험이 대조군으로 쓴다.
+    pub fn in_place(base: &Path, name: &str) -> Scratch {
         use std::sync::atomic::{AtomicU32, Ordering};
         static NTH: AtomicU32 = AtomicU32::new(0);
         let dir = base.join(format!(
@@ -92,12 +99,9 @@ impl Drop for Scratch {
     }
 }
 
-/// 임시 자리의 뿌리. `cargo` 가 주는 자리를 먼저 쓴다.
+/// 임시 자리의 뿌리. 모듈 머리의 "자리" 가 왜 이것뿐인지를 적어 둔다.
 fn base() -> PathBuf {
-    match option_env!("CARGO_TARGET_TMPDIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => std::env::temp_dir(),
-    }
+    std::env::temp_dir()
 }
 
 #[cfg(test)]
