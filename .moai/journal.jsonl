@@ -3423,3 +3423,4 @@
 {"ts":"2026-09-15T15:01:30Z","id":"moai-50mn.mgo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"2건 반영(ec697ea), 넘긴 둘은 idea 로"}
 {"ts":"2026-09-15T15:01:30Z","id":"moai-50mn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"리뷰 moai-50mn.mgo 닫음. 머지는 에픽 moai-j038 과 함께"}
 {"ts":"2026-09-15T15:01:30Z","id":"moai-u8oh.x85","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T15:01:37Z","id":"moai-50mn.mgo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"넘긴 것의 번호: 3 → idea moai-alt9, 4 → idea moai-x3yn."}
