@@ -26,11 +26,10 @@ fn hash_of(block: &str) -> String {
     format!("hash:{:08x}", fnv1a(block))
 }
 
-/// FNV-1a 32비트. **std 의 해셔를 안 쓴다** — `DefaultHasher` 는 러스트 버전마다 값이 달라질 수
-/// 있다고 문서가 밝혀, 새로 빌드한 바이너리가 멀쩡한 블록의 해시를 다르게 읽는다. 크레이트를
-/// 들일 만한 일도 아니다: 충돌에 강할 까닭이 없고(적대적 입력이 아니다) 여섯 줄이다.
+/// 마커가 대는 해시 — 해셔 자체는 [`crate::text::fnv1a32`] 다(moai-2vrw). `skill` 의 64비트와
+/// 나란히 한 자리에 있어야 "왜 std 해셔가 아닌가" 를 두 곳에 적지 않는다.
 fn fnv1a(s: &str) -> u32 {
-    s.bytes().fold(0x811c_9dc5, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193))
+    crate::text::fnv1a32(s.as_bytes())
 }
 
 /// 여는 마커 줄인가. **줄머리에서 머리로 시작하고, 머리 바로 뒤가 띄어쓰기이고, `-->` 로
