@@ -49,12 +49,58 @@ pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
     String::from_utf8(output(root, args)?).map_err(Error::NotUtf8)
 }
 
-/// `git log` 의 출력. **글자가 깨져도 읽는다**(읽기는 관대하고 쓰기는 엄하다).
-/// `i18n.logOutputEncoding` 을 legacy 로 둔 저장소나 옛 커밋 하나의 인코딩 때문에 이력
-/// 전체를 못 읽으면 커밋 칸이 까닭도 없이 영영 빈다 — 제목은 어차피 `text::sanitize`
-/// 를 지나 그려지고, 해시는 [`records`] 가 모양으로 한 번 더 거른다.
-fn read_log(root: &Path, args: &[&str]) -> Result<String, Error> {
-    Ok(String::from_utf8_lossy(&output(root, args)?).into_owned())
+/// `git log` 을 띄우고 **레코드를 하나씩 흘려 보낸다**(moai-iol3).
+///
+/// 이력을 통째로 들고 있지 않는다. `%b` 를 더한 뒤로 이력 전체는 커밋 하나에 수백 바이트씩
+/// 붙어, 커밋 2만 개짜리 저장소에서 `show` 한 번이 13MB 를 읽고 그것을 다시 `String` 으로
+/// 옮겼다 — 화면에 서는 것은 그중 커밋 몇 줄뿐이다. 이제 드는 것은 **레코드 하나**뿐이다.
+///
+/// **글자가 깨져도 읽는다**(읽기는 관대하고 쓰기는 엄하다). `i18n.logOutputEncoding` 을 legacy 로
+/// 둔 저장소나 옛 커밋 하나의 인코딩 때문에 이력 전체를 못 읽으면 커밋 칸이 까닭도 없이 영영
+/// 빈다 — 제목은 어차피 `text::sanitize` 를 지나 그려지고, 해시는 [`records_of`] 가 모양으로 한 번
+/// 더 거른다.
+///
+/// **git 이 비영으로 끝나면 실패다.** 레코드를 흘려 받는 동안은 그것을 모르므로, 다 읽은 뒤에
+/// 끝을 보고 판단한다 — 반쯤 읽은 이력을 답으로 내면 커밋 칸이 조용히 짧아진다.
+fn stream_log<T>(root: &Path, args: &[&str], mut take: impl FnMut(&str, &str, &str) -> Option<T>) -> Result<Vec<T>, Error> {
+    use std::io::Read;
+    let mut child = command()
+        .arg("-C")
+        .arg(root)
+        .args(["-c", "i18n.logOutputEncoding=UTF-8"])
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(Error::Spawn)?;
+    let mut out = child.stdout.take().expect("stdout 을 파이프로 달라고 했다");
+    let mut buf: Vec<u8> = Vec::new();
+    let mut chunk = [0u8; 16 * 1024];
+    let mut got = Vec::new();
+    let mut keep = |record: &[u8], got: &mut Vec<T>| {
+        let text = String::from_utf8_lossy(record);
+        if let Some((hash, subject, body)) = records_of(&text) {
+            got.extend(take(hash, subject, body));
+        }
+    };
+    loop {
+        let read = out.read(&mut chunk).map_err(Error::Spawn)?;
+        if read == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..read]);
+        // 레코드는 NUL 로 끝난다(`-z`). 마지막 조각은 아직 덜 왔을 수 있으니 버퍼에 남긴다.
+        while let Some(at) = buf.iter().position(|b| *b == 0) {
+            keep(&buf[..at], &mut got);
+            buf.drain(..=at);
+        }
+    }
+    keep(&buf, &mut got);
+    let end = child.wait_with_output().map_err(Error::Spawn)?;
+    if !end.status.success() {
+        return Err(Error::Failed(String::from_utf8_lossy(&end.stderr).trim().to_string()));
+    }
+    Ok(got)
 }
 
 /// git 을 띄울 명령 — **moai 가 부르는 git 은 모두 여기서 시작한다.** moai 가 띄우는 **다른** 프로그램
@@ -206,31 +252,50 @@ pub fn table(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Commit>>,
         return Ok(BTreeMap::new());
     }
     let format = format_arg();
-    let log = read_log(root, &["log", "-z", "--no-show-signature", format.as_str(), "HEAD", "--"])?;
-    Ok(table_of(&log, ids))
+    let known: std::collections::HashSet<&str> = ids.iter().copied().collect();
+    // **레코드를 하나씩 받아 걸러 담는다**(moai-iol3) — 이력 전체가 아니라 맞은 커밋만 든다.
+    let hits = stream_log(root, &["log", "-z", "--no-show-signature", format.as_str(), "HEAD", "--"], |hash, subject, body| {
+        let named = named_in(subject, body, &known);
+        (!named.is_empty()).then(|| (named.into_iter().map(str::to_string).collect::<Vec<_>>(), commit_of(hash, subject)))
+    })?;
+    let mut out: BTreeMap<String, Vec<Commit>> = BTreeMap::new();
+    for (ids, commit) in hits {
+        for id in ids {
+            out.entry(id).or_default().push(commit.clone());
+        }
+    }
+    Ok(out)
+}
+
+/// 이 커밋이 대는 id 들 — 제목의 낱말과 **트레일러 줄의 낱말**을 같은 자로 본다(moai-dig5).
+/// 한 커밋이 같은 id 를 두 번 적어도 한 번만 든다.
+fn named_in<'a>(subject: &'a str, body: &'a str, known: &std::collections::HashSet<&str>) -> Vec<&'a str> {
+    let mut named: Vec<&str> = Vec::new();
+    for id in words(subject).chain(trailed(body)).filter(|w| known.contains(w)) {
+        if !named.contains(&id) {
+            named.push(id);
+        }
+    }
+    named
+}
+
+fn commit_of(hash: &str, subject: &str) -> Commit {
+    Commit { hash: hash.to_string(), subject: subject.to_string(), tracker: subject.starts_with(TRACKER) }
 }
 
 /// [`table`] 의 **git 을 안 부르는 반쪽.**
 ///
 /// 낱말을 있는 id 집합에서 찾는다. 이력 전부와 이슈 전부가 만나는 자리라 id 마다 제목을 다시
 /// 훑으면 곱이 된다 — 커밋 1천 × 이슈 1천이면 백만 번이다.
+/// 시험 빌드에만 선다 — 진짜 길은 [`table`] 이 흘려 읽는다(moai-iol3). 가르는 자([`named_in`]·
+/// [`records_of`])는 둘이 같은 것을 쓰므로, 이 자리로 못 박은 뜻은 흘려 읽는 쪽에도 그대로 선다.
+#[cfg(test)]
 pub fn table_of(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
     let known: std::collections::HashSet<&str> = ids.iter().copied().collect();
     let mut out: BTreeMap<String, Vec<Commit>> = BTreeMap::new();
     for (hash, subject, body) in records(log) {
-        let mut seen: Vec<&str> = Vec::new();
-        // 제목의 낱말과 **트레일러 줄의 낱말**을 같은 자로 본다(moai-dig5).
-        for id in words(subject).chain(trailed(body)).filter(|w| known.contains(w)) {
-            // 한 제목에 같은 id 를 두 번 적어도 커밋은 한 번이다.
-            if seen.contains(&id) {
-                continue;
-            }
-            seen.push(id);
-            out.entry(id.to_string()).or_default().push(Commit {
-                hash: hash.to_string(),
-                subject: subject.to_string(),
-                tracker: subject.starts_with(TRACKER),
-            });
+        for id in named_in(subject, body, &known) {
+            out.entry(id.to_string()).or_default().push(commit_of(hash, subject));
         }
     }
     out
@@ -248,17 +313,20 @@ pub fn table_of(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
 /// 제목에는 그 id 를 안 적고도 남의 커밋 칸에 선다 — 화면에 그리는 제목은 첫 `FS` 에서
 /// 잘리므로 **왜 거기 섰는지 보이지도 않는다.** 본문에 그 글자를 담은 커밋은 트레일러를
 /// 잃을 뿐이라, 모르는 쪽으로 기우는 값이 싸다.
+#[cfg(test)]
 fn records(log: &str) -> impl Iterator<Item = (&str, &str, &str)> {
-    log.split('\0')
-        .filter_map(|record| {
-            let mut fields = record.split(FS);
-            let hash = fields.next()?;
-            let subject = fields.next()?;
-            // 본문이 없는 커밋도 있다 — 그때 `%b` 는 빈 글자다.
-            let body = fields.next().unwrap_or("");
-            Some((hash, subject, if fields.next().is_some() { "" } else { body }))
-        })
-        .filter(|(hash, _, _)| !hash.is_empty() && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+    log.split('\0').filter_map(records_of)
+}
+
+/// 레코드 **하나**를 가른다 — 흘려 읽는 쪽([`stream_log`])과 통째로 읽는 쪽([`records`])이 같은 자를 쓴다.
+fn records_of(record: &str) -> Option<(&str, &str, &str)> {
+    let mut fields = record.split(FS);
+    let hash = fields.next()?;
+    let subject = fields.next()?;
+    // 본문이 없는 커밋도 있다 — 그때 `%b` 는 빈 글자다.
+    let body = fields.next().unwrap_or("");
+    let sane = !hash.is_empty() && hash.bytes().all(|b| b.is_ascii_hexdigit());
+    sane.then_some((hash, subject, if fields.next().is_some() { "" } else { body }))
 }
 
 #[cfg(test)]
