@@ -298,6 +298,8 @@ pub enum Browse {
     Sort(Order),
     /// 목록 줄의 열 하나를 켜고 끈다(moai-g7p8).
     Cell(super::view::Field),
+    /// 오른쪽 상세 칸을 보이고 숨긴다(moai-ymnu).
+    Detail,
 }
 
 /// 목록 차례. **조각이라 `query::SortKey` 를 모른다** — `App` 이 둘을 잇는다.
@@ -463,6 +465,9 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Cell(super::view::Field::Updated), Some("SPC c u"), LEADER, Key::plain('c'), Key::plain('u')),
         row!(Cell(super::view::Field::Tally), Some("SPC c n"), LEADER, Key::plain('c'), Key::plain('n')),
         row!(Cell(super::view::Field::Tags), Some("SPC c g"), LEADER, Key::plain('c'), Key::plain('g')),
+        row!(Cell(super::view::Field::Names), Some("SPC c h"), LEADER, Key::plain('c'), Key::plain('h')),
+        row!(Cell(super::view::Field::Branch), Some("SPC c w"), LEADER, Key::plain('c'), Key::plain('w')),
+        row!(Detail, Some("SPC t d"), LEADER, Key::plain('t'), Key::plain('d')),
     ]
 };
 
@@ -491,6 +496,8 @@ pub struct Ctx {
     pub sorting: Sorting,
     /// 켜 둔 목록 열.
     pub fields: super::view::Fields,
+    /// 오른쪽 상세 칸이 보이나.
+    pub detail: bool,
     /// `Tab`·Shift-Tab 이 가는 칸의 이름.
     pub next_pane: &'static str,
     pub prev_pane: &'static str,
@@ -533,6 +540,11 @@ impl Browse {
             Worktree if c.layer => Err(Off::Quiet),
             // 보기는 프로젝트 안의 줄에 건다 — 층에서는 그룹째 메뉴에 안 선다(`menu::live`).
             Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer => Err(Off::Quiet),
+            // 상세를 숨기면 갈 칸이 하나뿐이라 Tab 은 아무 일도 안 하고, 원문↔그리기는 상세의
+            // 글에만 걸리므로(`draw::about` 의 `app.raw`) 눌러도 화면이 그대로다. **눌러도 아무
+            // 일이 없는 키는 바에도 메뉴에도 안 선다** — 그런 키가 하나 서면 거기부터 도구를 못
+            // 믿는다. `raw` 는 설정에 안 남으니 미리 켜 둘 값어치도 없다.
+            FocusNext | FocusPrev | Raw if !c.detail => Err(Off::Quiet),
             Column(n) if usize::from(n) >= c.columns => Err(Off::Quiet),
             _ => Ok(()),
         }
@@ -550,6 +562,7 @@ impl Browse {
             Worktree => "워크트리 겹쳐 보기",
             Raw => "원문↔그리기",
             ShowAll => "모두 보이기",
+            Detail => "상세 칸",
             Sort(o) => o.word(),
             Cell(f) => f.word(),
             _ => self.what(c),
@@ -568,6 +581,7 @@ impl Browse {
             // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
             Browse::Sort(o) if o == c.sorting.by => Some(if c.sorting.reversed { "[● 거꾸로]" } else { "[● 차례]" }),
             Browse::Cell(f) => Some(shown(!c.fields.shows(f))),
+            Browse::Detail => Some(shown(!c.detail)),
             _ => None,
         }
     }
@@ -604,6 +618,7 @@ impl Browse {
             ShowAll => "모두",
             Sort(_) => "정렬",
             Cell(_) => "열",
+            Detail => "상세",
         }
     }
 }
@@ -1470,8 +1485,14 @@ mod tests {
         out
     }
 
+    /// 프로젝트 안, 목록 포커스, 상세 칸이 보이는 자리 — 탐색기의 처음값이다. **`detail` 을 켜
+    /// 둔다**: 숨김을 fixture 의 처음값으로 두면 Tab·원문↔그리기가 늘 꺼진 채로 재어진다.
+    fn inside() -> Ctx {
+        Ctx { list_focus: true, detail: true, ..Ctx::default() }
+    }
+
     fn layer() -> Ctx {
-        Ctx { layer: true, list_focus: true, ..Ctx::default() }
+        Ctx { layer: true, ..inside() }
     }
 
     /// **층의 거절문은 옮기기 전과 한 글자도 같다.** 문구 속 키 이름은 표에서 읽는다. 바로 누르는
@@ -1488,16 +1509,31 @@ mod tests {
         let detail = Ctx { list_focus: false, ..layer() };
         assert_eq!(Browse::Unregister.enabled(&detail), Err(Off::Quiet));
         assert_eq!(Browse::Enter.enabled(&detail), Err(Off::Quiet));
-        let inside = Ctx { list_focus: true, ..Ctx::default() };
-        assert_eq!(Browse::Unregister.enabled(&inside), Err(Off::Quiet), "프로젝트 안에서 해제가 켜졌다");
-        assert_eq!(Browse::Worktree.enabled(&inside), Ok(()));
+        assert_eq!(Browse::Unregister.enabled(&inside()), Err(Off::Quiet), "프로젝트 안에서 해제가 켜졌다");
+        assert_eq!(Browse::Worktree.enabled(&inside()), Ok(()));
+    }
+
+    /// **상세를 숨기면 상세에만 걸리는 키가 다 꺼진다**(moai-ymnu 리뷰) — Tab 은 갈 칸이 없고,
+    /// 원문↔그리기는 상세의 글에만 걸린다. 나머지는 그대로 듣는다.
+    #[test]
+    fn hiding_the_detail_turns_off_what_only_acts_there() {
+        let shut = Ctx { detail: false, ..inside() };
+        for act in [Browse::FocusNext, Browse::FocusPrev, Browse::Raw] {
+            assert_eq!(act.enabled(&shut), Err(Off::Quiet), "{act:?} 가 숨긴 상세에서 켜졌다");
+            assert_eq!(act.enabled(&inside()), Ok(()), "{act:?} 가 보이는 상세에서 꺼졌다");
+        }
+        for act in [Browse::Detail, Browse::Worktree, Browse::Grep, Browse::Step(Move::LineDown)] {
+            assert_eq!(act.enabled(&shut), Ok(()), "{act:?} 가 상세와 함께 꺼졌다");
+        }
     }
 
     /// **드나드는 키는 커서가 선 줄을 탄다**(moai-k3yi). 잎의 Enter 와 뿌리의 Bksp 는 조용히
     /// 꺼진다 — 바와 키 처리가 이 한 판정을 읽는다. 둘은 서로를 끄지 않는다.
     #[test]
     fn enter_and_leave_follow_the_cursor_row() {
-        let base = Ctx { list_focus: true, ..Ctx::default() };
+        // 탐색기의 처음값으로 잰다(`inside`) — `Ctx::default()` 는 상세가 숨은 자리라, 그것으로
+        // 재면 상세에 매인 판정이 늘 꺼진 채로 지나간다.
+        let base = inside();
         assert_eq!(Browse::Enter.enabled(&base), Ok(()));
         assert_eq!(Browse::Leave.enabled(&base), Ok(()));
         let leaf = Ctx { leaf: true, ..base };

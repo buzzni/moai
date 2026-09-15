@@ -2383,6 +2383,56 @@ fn status_notices_a_stale_agents_block_but_not_a_missing_one() {
     quiet("블록이 없는 저장소");
 }
 
+/// **못 쓰는 `.gitignore` 에 걸려도 저장소를 반쯤 남기지 않는다**(moai-0dwc). 읽기 실패는
+/// 넘어가게 고쳤는데 쓰기 실패는 `?` 로 끊어, `.moai/` 는 이미 심긴 채 `.gitattributes` 도
+/// AGENTS 블록도 없는 저장소가 남았다. 못 읽는 자리와 같은 자다(2026-09-15 사용자 결정):
+/// 건너뛰고 나머지를 심고, 손으로 더할 줄을 대고 0 으로 끝난다. 읽히고 쓰이게 고친 뒤 다시
+/// 부르면 그때 채운다 — 미리 재고 심기 전에 멈추면 읽기 전용 파일 하나가 이미 심긴 저장소의
+/// AGENTS 블록 갱신까지 막는다.
+#[cfg(unix)]
+#[test]
+fn init_finishes_even_when_a_dotfile_cannot_be_written() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("rodotfile");
+    let ignore = s.path().join(".gitignore");
+    // 한 줄은 이미 들어 있다 — 못 쓴 자리가 **빠진 줄만** 대는지 여기서 본다.
+    let theirs = "build/\n.moai/lock\n";
+    std::fs::write(&ignore, theirs).unwrap();
+    std::fs::set_permissions(&ignore, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().append(true).open(&ignore).is_ok() {
+        return; // root 는 권한을 안 본다
+    }
+
+    let out = moai(s.path(), &["init", "argos"]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(std::fs::read_to_string(&ignore).unwrap(), theirs, "못 쓰는 파일이 바뀌었다");
+    // **낱말로 가른다** — 못 읽은 자리와 같은 말을 하면 사람이 권한 대신 인코딩을 고치러 간다.
+    assert!(said.contains(".gitignore 에 못 썼다"), "{said}");
+    assert!(!said.contains("못 읽어"), "쓰기 실패를 읽기 실패라 한다 — {said}");
+    // **빠진 줄만 댄다**(리뷰 moai-humk) — 읽기는 됐으니 무엇이 이미 있는지 안다. 통째로 대면
+    // 따라 붙여 넣은 사람의 파일에 같은 줄이 둘 선다.
+    assert!(said.lines().any(|l| l.trim() == "/.claude/worktrees/"), "빠진 줄을 안 댔다 — {said}");
+    assert!(!said.lines().any(|l| l.trim() == ".moai/lock"), "이미 있는 줄을 더하라고 한다 — {said}");
+    // 반쯤 심긴 저장소를 남기지 않는다 — 나머지는 다 선다.
+    assert!(s.path().join(".moai/issues.jsonl").exists(), ".moai 를 안 심었다");
+    assert!(std::fs::read_to_string(s.path().join(".gitattributes")).unwrap().contains("merge=union"));
+    assert!(std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap().contains("moai:begin"));
+    // 못 쓴 자리도 이름→(갈래, 까닭)으로 선다(moai-ejgp). **갈래가 실려야** 기계가 가른다 —
+    // `Permission denied` 는 못 읽을 때도 못 쓸 때도 똑같이 떠서 까닭 글만으로는 안 갈린다.
+    let js = ok(s.path(), &["init", "--json"]);
+    one_json_value(&js);
+    assert!(js.contains("\"untouched\":{\".gitignore\":{\"kind\":\"unwritable\","), "{js}");
+    assert!(js.contains("Permission denied"), "{js}");
+
+    // 쓸 수 있게 고치고 다시 부르면 그때 채운다 — 남의 줄은 그대로다.
+    std::fs::set_permissions(&ignore, std::fs::Permissions::from_mode(0o644)).unwrap();
+    ok(s.path(), &["init"]);
+    let now = std::fs::read_to_string(&ignore).unwrap();
+    assert!(now.starts_with(theirs) && now.contains("/.claude/worktrees/"), "{now}");
+    assert_eq!(now.matches(".moai/lock").count(), 1, "이미 있던 줄을 또 넣었다 — {now}");
+}
+
 /// **못 읽는 `.gitignore`·`.gitattributes` 는 안 건드린다**(moai-gq1c). 빈 글로 치고 쓰던 때는
 /// CP949 로 적은 남의 파일이 moai 줄만 남기고 통째로 사라졌다 — 되돌릴 길은 git 뿐이다.
 /// **멈추지는 않는다**(2026-09-15 사용자 결정): 나머지는 다 심고, 그 자리에 무엇을 손으로
@@ -2414,12 +2464,15 @@ fn init_never_overwrites_a_dotfile_it_cannot_read() {
     let js = ok(s.path(), &["init", "--json"]);
     one_json_value(&js);
     assert!(js.contains("\"gitignore\":false"), "{js}");
-    assert!(js.contains("\"unreadable\":[\".gitignore\"]"), "못 읽은 자리를 기계에게 안 말했다 — {js}");
+    // **이름만이 아니라 갈래와 까닭까지**(moai-ejgp) — 기계가 '다시 인코딩하라' 와 'chmod 하라'
+    // 를 가른다. 까닭 글만으로는 안 갈린다: 권한으로 못 읽는 파일도 `Permission denied` 다.
+    assert!(js.contains("\"untouched\":{\".gitignore\":{\"kind\":\"unreadable\","), "갈래를 안 실었다 — {js}");
+    assert!(js.contains("UTF-8"), "까닭을 안 실었다 — {js}");
 
     // `.gitattributes` 도 같은 자리다 — 둘 다 못 읽으면 둘 다 든다.
     std::fs::write(s.path().join(".gitattributes"), theirs).unwrap();
     let both = ok(s.path(), &["init", "--json"]);
-    assert!(both.contains("\"unreadable\":[\".gitattributes\",\".gitignore\"]"), "{both}");
+    assert!(both.contains("\"untouched\":{\".gitattributes\":{") && both.contains("},\".gitignore\":{"), "{both}");
     assert_eq!(std::fs::read(s.path().join(".gitattributes")).unwrap(), theirs, "못 읽는 파일을 덮었다");
 
     // 읽히게 고치면 그때 넣는다 — 남의 줄은 그대로 두고 뒤에 붙는다.
@@ -2430,7 +2483,7 @@ fn init_never_overwrites_a_dotfile_it_cannot_read() {
     assert!(now.starts_with("build/\n") && now.contains(".moai/lock"), "{now}");
     // 고친 뒤에는 기계에게도 남은 것이 없다고 말한다.
     let clean = ok(s.path(), &["init", "--json"]);
-    assert!(!clean.contains("unreadable"), "다 읽히는데 못 읽었다고 한다 — {clean}");
+    assert!(!clean.contains("untouched"), "다 읽히는데 못 읽었다고 한다 — {clean}");
 }
 
 /// **`init` 은 제가 쓴 것만 말한다**(moai-knn0). 블록이 이미 맞으면 "맞췄다" 도 `"agents":true`

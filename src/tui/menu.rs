@@ -259,12 +259,14 @@ mod tests {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
     }
 
+    /// **`detail` 은 켜 둔다** — 탐색기의 처음값은 상세 칸이 보이는 것이고(`App::detail_open`),
+    /// 숨김을 fixture 의 처음값으로 두면 Tab·원문↔그리기가 여기서 늘 꺼진 채로 재어진다.
     fn inside() -> Ctx {
-        Ctx { list_focus: true, ..Ctx::default() }
+        Ctx { list_focus: true, detail: true, ..Ctx::default() }
     }
 
     fn layer() -> Ctx {
-        Ctx { layer: true, list_focus: true, ..Ctx::default() }
+        Ctx { layer: true, ..inside() }
     }
 
     fn keys_of(e: &[Entry]) -> Vec<&str> {
@@ -414,7 +416,7 @@ mod tests {
         }
         feed(&mut ch, &c, k('t'));
         assert_eq!(title(ch.held()), "SPC t");
-        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["w", "r"]);
+        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["w", "r", "d"]);
         feed(&mut ch, &c, k('x'));
         assert_eq!(title(ch.held()), "SPC t", "하위 층의 모르는 키가 메뉴를 옮겼다");
         feed(&mut ch, &c, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
@@ -439,7 +441,8 @@ mod tests {
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &layer(), &[])), ["a", "d"]);
         let detail = Ctx { list_focus: false, ..layer() };
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &detail, &[])), ["a"], "상세 포커스에서 해제가 섰다");
-        assert_eq!(keys_of(&entries(&[k(' '), k('t')], &layer(), &[])), ["r"], "층에서 워크트리가 섰다");
+        // 층에서도 상세 칸은 있다 — 숨기기(`d`)는 서고 워크트리 겹쳐 보기(`w`)만 빠진다.
+        assert_eq!(keys_of(&entries(&[k(' '), k('t')], &layer(), &[])), ["r", "d"], "층에서 워크트리가 섰다");
 
         let mut ch = Chord::default();
         for x in [' ', 't', 'w'] {
@@ -457,8 +460,12 @@ mod tests {
     #[test]
     fn toggles_show_their_state_in_words() {
         let states = |c: Ctx| -> Vec<Option<&'static str>> { entries(&[k(' '), k('t')], &c, &[]).iter().map(|e| e.state).collect() };
-        assert_eq!(states(inside()), [Some("[꺼짐]"), Some("[그리기]")]);
-        assert_eq!(states(Ctx { worktree: true, raw: true, ..inside() }), [Some("[켜짐]"), Some("[원문]")]);
+        assert_eq!(states(inside()), [Some("[꺼짐]"), Some("[그리기]"), Some("[보임]")]);
+        assert_eq!(states(Ctx { worktree: true, raw: true, ..inside() }), [Some("[켜짐]"), Some("[원문]"), Some("[보임]")]);
+        // **상세를 숨기면 원문↔그리기가 빠진다** — 그 키는 상세의 글에만 걸려, 서 있어 봐야
+        // 눌러도 화면이 그대로다(moai-ymnu 리뷰).
+        assert_eq!(states(Ctx { detail: false, ..inside() }), [Some("[꺼짐]"), Some("[숨김]")]);
+        assert_eq!(keys_of(&entries(&[k(' '), k('t')], &Ctx { detail: false, ..inside() }, &[])), ["w", "d"]);
     }
 
     /// **이름 없는 하위 접두어가 없다.** 표에 SPC 줄을 더하며 새 접두어를 만들면 여기서 멈춘다.
