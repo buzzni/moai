@@ -150,6 +150,22 @@ const PROJECTS: &str = r#"    moai project add <dir>                 내 설정�
 층에서 `SPC p a` 로 디렉터리를 골라 등록하고(모노레포 하위도 따로), `SPC p d` 로 목록에서 뺀다.
 등록한 것이 없으면 밖에서 띄워도 빈 층이 서서 `SPC p a` 를 댄다."#;
 
+/// 커밋과 이슈를 잇는 고리(moai-wqm7). **새 저장소는 이 저장소의 CLAUDE.md 규약을 모른다** —
+/// 여기 안 적으면 커밋 칸(`show <id>`·탐색기 상세)이 늘 빈다.
+///
+/// **예시 제목의 id 는 `<id>` 로 둔다.** 이 글은 모든 저장소에 심긴다 — 이 저장소의 이슈 id 를
+/// 박으면 남의 저장소에서는 아무것도 안 가리키고, 접두사가 다른 저장소에 `moai-` 를 가르친다.
+const COMMITS: &str = r#"커밋 제목에 그 커밋이 닿은 이슈 id 를 적는다 — `feat: 막음 줄을 그린다 (<id>)`.
+moai 는 커밋을 이슈에 저장하지 않는다. `moai show <id>` 와 탐색기 상세가 **커밋 제목에 적힌
+id** 로 그 이슈의 커밋을 그때그때 찾아 낸다. 해시를 노트에 옮겨 적지 않는다 — squash·rebase
+한 번에 낡고, 이슈를 닫는 커밋은 제 해시를 미리 모른다.
+
+- **제목에** 적는다. 본문에만 적은 id 는 안 센다
+- id 는 낱말째 맞춘다. 자식(`<id>.x1y`)의 커밋은 부모의 것이 아니다 — 리뷰를 반영한 커밋은
+  리뷰 이슈 id 로 그 리뷰에 붙고, 워크트리를 합치는 `merge: … (<id>)` 가 그 일에 붙는다
+- 집기·닫기만 담는 커밋은 `chore(tracker):` 로 시작한다. 상세는 그것을 빼고 그린다
+  (`--json` 의 `commits` 에는 `tracker` 표시와 함께 남는다)"#;
+
 const PEOPLE: &str = r#"**담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
 `-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`
 에서 오고, 거기 없으면 `--user "이름 (메일)"` 이나 `MOAI_ACTOR` 로 준다."#;
@@ -253,6 +269,10 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 4. 작업 중 발견한 것 중 지금 범위가 아닌 것은 `moai idea add` 로 담아 둔다.
 5. 왜 그렇게 정했는지는 `moai note <id>` 로 이슈에 붙인다. 다음 세션이
    `moai show <id>` 로 그것을 읽는다.
+
+### 커밋에 id 를 적는다
+
+{COMMITS}
 
 도구가 자라 이 블록이 낡으면 `moai init` 을 다시 부른다. 이슈와 저널은
 건드리지 않고 이 블록만 다시 쓴다.
@@ -397,6 +417,10 @@ PLAN
 ## 사람
 
 {PEOPLE}
+
+## 커밋에 id 를 적는다
+
+{COMMITS}
 
 ## 리뷰가 낸 글을 찾는 법
 
@@ -690,11 +714,24 @@ mod tests {
         assert!(CLOSING.contains(&handoff("<id>")), "안내의 핸드오프 줄이 훅과 갈라졌다");
         let rules = rules();
         assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
-        for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE, PROJECTS] {
+        for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE, PROJECTS, COMMITS] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(reference.contains(piece), "참고 문서에 없다 — {head}");
         }
+    }
+
+    /// **가르친 커밋 제목을 커밋 칸이 실제로 읽는다**(moai-wqm7). 예시 제목에서 id 를 못 뽑거나
+    /// 트래커 커밋의 머리가 `git` 이 거르는 머리와 다르면, 시킨 대로 커밋해도 칸이 비거나 트래커
+    /// 커밋이 상세에 선다.
+    #[test]
+    fn the_commit_guide_teaches_what_the_commit_column_reads() {
+        let example = COMMITS.split('`').nth(1).expect("예시 제목이 없다");
+        assert!(example.contains("<id>"), "예시 제목에 이 저장소의 id 를 박았다 — {example:?}");
+        // 자리에 어떤 저장소의 id 가 들어가도 그 id 하나만 읽힌다.
+        let subject = example.replace("<id>", "web-a1b2");
+        assert_eq!(crate::git::ids_in(&subject).collect::<Vec<_>>(), ["web-a1b2"], "예시 제목 {subject:?}");
+        assert!(COMMITS.contains(&format!("`{}:`", crate::git::TRACKER)), "트래커 커밋의 머리가 git 이 거르는 것과 다르다");
     }
 
     /// 규칙의 이름이 스킬에 그대로 선다. 훅의 거절문 쪽은 `hook` 의 시험이 본다.
