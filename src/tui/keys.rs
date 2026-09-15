@@ -540,8 +540,11 @@ impl Browse {
             Worktree if c.layer => Err(Off::Quiet),
             // 보기는 프로젝트 안의 줄에 건다 — 층에서는 그룹째 메뉴에 안 선다(`menu::live`).
             Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer => Err(Off::Quiet),
-            // 상세를 숨기면 갈 칸이 하나뿐이다 — Tab 은 아무 일도 안 한다.
-            FocusNext | FocusPrev if !c.detail => Err(Off::Quiet),
+            // 상세를 숨기면 갈 칸이 하나뿐이라 Tab 은 아무 일도 안 하고, 원문↔그리기는 상세의
+            // 글에만 걸리므로(`draw::about` 의 `app.raw`) 눌러도 화면이 그대로다. **눌러도 아무
+            // 일이 없는 키는 바에도 메뉴에도 안 선다** — 그런 키가 하나 서면 거기부터 도구를 못
+            // 믿는다. `raw` 는 설정에 안 남으니 미리 켜 둘 값어치도 없다.
+            FocusNext | FocusPrev | Raw if !c.detail => Err(Off::Quiet),
             Column(n) if usize::from(n) >= c.columns => Err(Off::Quiet),
             _ => Ok(()),
         }
@@ -1482,8 +1485,14 @@ mod tests {
         out
     }
 
+    /// 프로젝트 안, 목록 포커스, 상세 칸이 보이는 자리 — 탐색기의 처음값이다. **`detail` 을 켜
+    /// 둔다**: 숨김을 fixture 의 처음값으로 두면 Tab·원문↔그리기가 늘 꺼진 채로 재어진다.
+    fn inside() -> Ctx {
+        Ctx { list_focus: true, detail: true, ..Ctx::default() }
+    }
+
     fn layer() -> Ctx {
-        Ctx { layer: true, list_focus: true, ..Ctx::default() }
+        Ctx { layer: true, ..inside() }
     }
 
     /// **층의 거절문은 옮기기 전과 한 글자도 같다.** 문구 속 키 이름은 표에서 읽는다. 바로 누르는
@@ -1500,9 +1509,22 @@ mod tests {
         let detail = Ctx { list_focus: false, ..layer() };
         assert_eq!(Browse::Unregister.enabled(&detail), Err(Off::Quiet));
         assert_eq!(Browse::Enter.enabled(&detail), Err(Off::Quiet));
-        let inside = Ctx { list_focus: true, ..Ctx::default() };
-        assert_eq!(Browse::Unregister.enabled(&inside), Err(Off::Quiet), "프로젝트 안에서 해제가 켜졌다");
-        assert_eq!(Browse::Worktree.enabled(&inside), Ok(()));
+        assert_eq!(Browse::Unregister.enabled(&inside()), Err(Off::Quiet), "프로젝트 안에서 해제가 켜졌다");
+        assert_eq!(Browse::Worktree.enabled(&inside()), Ok(()));
+    }
+
+    /// **상세를 숨기면 상세에만 걸리는 키가 다 꺼진다**(moai-ymnu 리뷰) — Tab 은 갈 칸이 없고,
+    /// 원문↔그리기는 상세의 글에만 걸린다. 나머지는 그대로 듣는다.
+    #[test]
+    fn hiding_the_detail_turns_off_what_only_acts_there() {
+        let shut = Ctx { detail: false, ..inside() };
+        for act in [Browse::FocusNext, Browse::FocusPrev, Browse::Raw] {
+            assert_eq!(act.enabled(&shut), Err(Off::Quiet), "{act:?} 가 숨긴 상세에서 켜졌다");
+            assert_eq!(act.enabled(&inside()), Ok(()), "{act:?} 가 보이는 상세에서 꺼졌다");
+        }
+        for act in [Browse::Detail, Browse::Worktree, Browse::Grep, Browse::Step(Move::LineDown)] {
+            assert_eq!(act.enabled(&shut), Ok(()), "{act:?} 가 상세와 함께 꺼졌다");
+        }
     }
 
     /// **드나드는 키는 커서가 선 줄을 탄다**(moai-k3yi). 잎의 Enter 와 뿌리의 Bksp 는 조용히

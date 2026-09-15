@@ -199,7 +199,11 @@ const fn widest_bit() -> u32 {
 }
 
 impl Fields {
-    /// 아무 열도 안 켠 것 — 설정에서 읽은 이름을 하나씩 켤 때 쓴다.
+    /// 아무 열도 안 켠 것 — **비트 가드가 쓴다**(`every_column_owns_a_bit_and_stands_in_all`).
+    /// 설정을 입히는 길은 처음값에서 시작하므로(moai-3fnf 리뷰, `App::apply_look`) 화면 코드에는
+    /// 이 자리가 없다. 시험에만 서므로 `#[cfg(test)]` — 안 그러면 release 빌드마다 죽은 코드
+    /// 경고가 한 줄 선다.
+    #[cfg(test)]
     pub fn none() -> Fields {
         Fields(0)
     }

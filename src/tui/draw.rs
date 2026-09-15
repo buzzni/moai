@@ -69,10 +69,13 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     ])
     .areas(area);
     // **상세를 숨기면 목록이 폭을 다 쓴다**(moai-ymnu) — 빈 칸을 남겨 두면 숨긴 뜻이 없다.
-    let [left, right] = if app.detail_open {
-        Layout::horizontal([Constraint::Percentage(LEFT), Constraint::Min(10)]).areas(body)
+    // 숨겼을 때 상세의 자리는 **없다**(`None`) — 폭 0 짜리 유령 칸을 몸통 오른쪽 끝 밖에 두면
+    // 그것이 자리인 줄 알고 그리는 코드가 언젠가 버퍼 밖에 대고 말없이 아무것도 안 그린다.
+    let (left, right) = if app.detail_open {
+        let [left, right] = Layout::horizontal([Constraint::Percentage(LEFT), Constraint::Min(10)]).areas(body);
+        (left, Some(right))
     } else {
-        [body, Rect::new(body.x + body.width, body.y, 0, body.height)]
+        (body, None)
     };
 
     crumbs(f, app, &rows, top);
@@ -86,7 +89,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         f.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), note);
     }
     list(f, app, left, &rows);
-    if app.detail_open {
+    if let Some(right) = right {
         detail(f, app, right, &rows);
     }
     // 폼은 목록과 상세 자리를 **통째로** 덮는다. 가장자리를 비워 뒤를 비치게 해 봤더니
