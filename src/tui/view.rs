@@ -78,6 +78,9 @@ pub enum Field {
     /// 묶음의 `끝난/일` 셈.
     Tally,
     Tags,
+    /// 목록 맨 위의 **열 이름 줄**(moai-3fnf). 값이 아니라 줄 하나지만 켜고 끄는 자리가 열과 같아
+    /// 여기 든다 — `SPC c` 밑에 서고 설정에도 열과 같은 자리에 적힌다.
+    Names,
 }
 
 impl Field {
@@ -90,6 +93,7 @@ impl Field {
             Field::Updated => "수정",
             Field::Tally => "셈",
             Field::Tags => "태그",
+            Field::Names => "열 이름",
         }
     }
 
@@ -100,16 +104,24 @@ impl Field {
             Field::Created | Field::Updated => Some(0),
             Field::Assignee => Some(1),
             Field::Tags => Some(2),
-            Field::Id | Field::Priority | Field::Tally => None,
+            Field::Id | Field::Priority | Field::Tally | Field::Names => None,
         }
     }
 
-    fn bit(self) -> u8 {
-        1 << self as u8
+    fn bit(self) -> u16 {
+        1 << self as u16
     }
 
-    pub const ALL: [Field; 7] =
-        [Field::Id, Field::Priority, Field::Assignee, Field::Created, Field::Updated, Field::Tally, Field::Tags];
+    pub const ALL: [Field; 8] = [
+        Field::Id,
+        Field::Priority,
+        Field::Assignee,
+        Field::Created,
+        Field::Updated,
+        Field::Tally,
+        Field::Tags,
+        Field::Names,
+    ];
 
     /// 설정 파일에 적는 이름(moai-2bzp). 화면의 낱말([`Field::word`])과 따로 둔다 — 낱말을 다듬은 날
     /// 이미 적힌 설정이 안 읽히면 그건 다듬기가 아니라 마이그레이션이다.
@@ -122,6 +134,7 @@ impl Field {
             Field::Updated => "updated",
             Field::Tally => "tally",
             Field::Tags => "tags",
+            Field::Names => "names",
         }
     }
 
@@ -130,14 +143,16 @@ impl Field {
     }
 }
 
-/// 켜 둔 열. 복사로 다닌다 — 키 표의 켜짐(`Ctx`)이 이것을 그대로 든다.
+/// 켜 둔 열. 복사로 다닌다 — 키 표의 켜짐(`Ctx`)이 이것을 그대로 든다. **`u16` 이다**(moai-3fnf) —
+/// 여덟 열에서 꽉 차는 `u8` 로 두면 아홉째 열을 더하는 날 `Field::Id` 와 비트가 겹친다(moai-7pd5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Fields(u8);
+pub struct Fields(u16);
 
-/// **처음에는 원래 목록 줄 그대로다** — id·우선순위·셈. 열 토글이 생긴 날 화면이 바뀌면 안 된다.
+/// **처음에는 원래 목록 줄에 열 이름을 얹은 것**이다 — id·우선순위·셈·열 이름. 열 이름이 기본 켬인 것은
+/// 사용자 결정이고(moai-3fnf), 줄이 적은 창에서는 `SPC c h` 로 끈다.
 impl Default for Fields {
     fn default() -> Fields {
-        Fields(Field::Id.bit() | Field::Priority.bit() | Field::Tally.bit())
+        Fields(Field::Id.bit() | Field::Priority.bit() | Field::Tally.bit() | Field::Names.bit())
     }
 }
 

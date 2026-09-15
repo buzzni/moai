@@ -644,10 +644,22 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // **오른쪽 열을 걷는 것은 목록 전체가 함께 정한다**(moai-g7p8 리뷰). 줄마다 정하면 머리글이
     // 긴 줄(`⎇ 브랜치`·`p10`)만 날짜를 걷어 같은 폭에서 열이 들쭉날쭉 선다 — 고정 폭의 까닭이
     // 사라진다. 제일 많이 걷힌 줄의 열에 맞춘다(걷는 차례가 하나라 그 열은 모든 줄에 들어간다).
+    // **id 열의 폭은 목록이 정한다**(moai-3fnf) — 줄마다 제 길이로 서면 그 뒤가 밀려 열 이름 줄이
+    // 어느 줄과도 안 맞는다. 보이는 줄이 아니라 이 디렉터리의 줄 전부로 잰다: 굴릴 때마다 열이
+    // 들썩이지 않아야 한다.
+    let id_w = rows
+        .iter()
+        .filter_map(|r| match r {
+            Row::Item(e) => e.at(),
+            Row::Up | Row::Project(_) => None,
+        })
+        .map(|at| crate::text::width(&app.issues[at].id))
+        .max()
+        .unwrap_or(0);
     let (mut items, kept): (Vec<ListItem>, Vec<super::view::Fields>) = rows
         .iter()
         .map(|r| {
-            let (line, kept) = row_line(app, r, inner, app.fields);
+            let (line, kept) = row_line(app, r, inner, app.fields, id_w);
             (ListItem::new(line), kept)
         })
         .unzip();
@@ -657,7 +669,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // (`Index::progress`)이 프레임마다 두 번 돈다.
     for ((item, r), k) in items.iter_mut().zip(rows).zip(&kept) {
         if *k != common {
-            *item = ListItem::new(row_line(app, r, inner, common).0);
+            *item = ListItem::new(row_line(app, r, inner, common, id_w).0);
         }
     }
 
@@ -712,18 +724,33 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 그리기만 한다: 커서가 이미 보이는 자리를 주므로 위젯이 다시 옮기지 않는다.
     // 줄 하나가 한 줄이라 높이가 곧 줄 수다.
     let selected = (!rows.is_empty()).then_some(app.cursor.min(rows.len().saturating_sub(1)));
-    app.list.fit(at.height.saturating_sub(2) as usize, rows.len());
+    // **열 이름 줄은 목록 안쪽 첫 줄에 따로 선다**(moai-3fnf) — 줄로 넣으면 굴릴 때 딸려 올라가고
+    // 커서가 그 위에 설 수 있다. 그래서 테두리를 먼저 그리고 안쪽을 이름 줄과 목록으로 가른다.
+    // **줄이 없으면 안 세운다**: 빈 디렉터리에서 이름만 서면 무엇의 이름인지 알 수 없다.
+    let block = frame(app, Pane::Explorer).title(title);
+    let inner_at = block.inner(at);
+    f.render_widget(block, at);
+    // **층에서는 안 세운다** — 층의 줄은 이슈가 아니라 프로젝트라 id·P·TITLE 이 뜻이 없다.
+    let head_h = u16::from(
+        common.shows(super::view::Field::Names) && !app.on_layer() && !rows.is_empty() && inner_at.height > 1,
+    );
+    let [names_at, list_at] =
+        Layout::vertical([Constraint::Length(head_h), Constraint::Min(0)]).areas(inner_at);
+    if head_h == 1 {
+        let dirs = rows.iter().any(|r| matches!(r, Row::Item(Entry::Dir { .. })));
+        f.render_widget(Paragraph::new(names_line(common, id_w, dirs, inner)), names_at);
+    }
+    app.list.fit(list_at.height as usize, rows.len());
     if let Some(at) = selected {
         app.list.reveal(at);
     }
     let mut state = ListState::default().with_offset(app.list.offset()).with_selected(selected);
     f.render_stateful_widget(
         List::new(items)
-            .block(frame(app, Pane::Explorer).title(title))
             // 커서는 **색만으로 표시하지 않는다** — 반전과 `>` 를 함께 준다.
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
             .highlight_symbol(CURSOR),
-        at,
+        list_at,
         &mut state,
     );
     scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer);
@@ -759,7 +786,13 @@ fn scroll_mark(f: &mut Frame, s: &Scroll, at: Rect, hint: &str, focused: bool) {
 /// **진행 바탕은 두 번 깔아 보고 걷었다**(moai-u3r2). 반전도 막대 색 초록도 줄마다 덩어리가
 /// 서서 목록이 정신없었다 — 사용자 판단. 셈 글자만으로 한눈에 읽힌다.
 /// 켠 열 가운데 이 줄에 실제로 선 것을 함께 낸다 — 걷기를 목록 전체에 맞추려고(`list`).
-fn row_line<'a>(app: &App, r: &Row, budget: usize, fields: super::view::Fields) -> (Line<'a>, super::view::Fields) {
+fn row_line<'a>(
+    app: &App,
+    r: &Row,
+    budget: usize,
+    fields: super::view::Fields,
+    id_w: usize,
+) -> (Line<'a>, super::view::Fields) {
     // 이 파일의 `Field` 는 폼의 칸이다(`form::Field`) — 목록 열은 여기서만 가린다.
     use super::view::Field;
     let e = match r {
@@ -784,7 +817,9 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize, fields: super::view::Fields) 
     // id·우선순위는 켜 둔 것만 선다(`SPC c`, moai-g7p8). 칸 글리프는 늘 선다.
     let mut head = Vec::new();
     if fields.shows(Field::Id) {
-        head.push(Span::styled(i.id.clone(), dim()));
+        // **id 는 폭을 맞춘다**(moai-3fnf) — 줄마다 길이가 다르면 그 뒤의 열이 줄마다 밀려, 맨 위의
+        // 열 이름 줄이 어느 줄과도 안 맞는다. 폭은 목록이 정한다(`list`).
+        head.push(Span::styled(pad(&i.id, id_w), dim()));
         head.push(Span::raw("  "));
     }
     if fields.shows(Field::Priority) {
@@ -818,8 +853,6 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize, fields: super::view::Fields) 
     // 내려갈 수 있게 한다(셈을 오른쪽 정렬한 까닭과 같다). 담당·날짜가 없으면 `—` 로, 태그가 없으면
     // 빈칸으로 자리를 지킨다 — 태그 없는 줄이 흔해 `—` 가 줄마다 서면 눈이 거기 걸린다.
     // 날짜는 `+`(생성)·`✎`(수정) 글리프로 가른다 — 둘 다 `MM-DD` 라 글리프 없이는 어느 쪽인지 모른다.
-    // 줄에 서는 차례이자 걷힘을 셀 때 훑는 목록 — 한 벌로 둔다.
-    const RIGHT: [Field; 4] = [Field::Tags, Field::Assignee, Field::Created, Field::Updated];
     let mut cells: Vec<(Field, String)> = RIGHT
         .into_iter()
         .filter(|f| fields.shows(*f))
@@ -832,7 +865,7 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize, fields: super::view::Fields) 
                 ),
                 Field::Created => format!("+{}", i.created_at.get(5..10).unwrap_or("—")),
                 Field::Updated => format!("✎{}", i.updated_at.get(5..10).unwrap_or("—")),
-                Field::Id | Field::Priority | Field::Tally => unreachable!("오른쪽 열이 아니다"),
+                Field::Id | Field::Priority | Field::Tally | Field::Names => unreachable!("오른쪽 열이 아니다"),
             };
             (f, text)
         })
@@ -909,6 +942,72 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize, fields: super::view::Fields) 
     }
     (Line::from(spans), kept)
 }
+
+/// 목록 맨 위의 **열 이름 줄**(moai-3fnf, 사용자 결정 2026-09-15) — 켠 열만, 줄과 **같은 폭·같은
+/// 차례**로 선다. 이름은 짧은 영어다: 값보다 눈에 안 띄고, 설정에 적는 필드 이름(`id`·`priority`)과
+/// 이어진다. 흐리게 칠하는 것도 같은 까닭이다 — 뜻은 아래 줄의 값이 진다.
+///
+/// 커서 자리만큼 들여 쓴다(목록 위젯이 줄마다 그만큼 민다). 오른쪽 열은 줄과 같이 테두리 끝에
+/// 붙이고, `⎇ <가지>` 가 붙은 줄은 제목이 그만큼 밀리므로 `TITLE` 은 그 표시가 없는 줄에 맞춘다.
+fn names_line<'a>(fields: super::view::Fields, id_w: usize, dirs: bool, budget: usize) -> Line<'a> {
+    use super::view::Field;
+    let mut left = " ".repeat(crate::text::width(CURSOR));
+    if fields.shows(Field::Id) {
+        left.push_str(&pad("id", id_w));
+        left.push_str("  ");
+    }
+    if fields.shows(Field::Priority) {
+        left.push_str("P  ");
+    }
+    left.push_str("S  TITLE");
+    let mut right = String::new();
+    for f in RIGHT {
+        if fields.shows(f) {
+            right.push_str("  ");
+            right.push_str(&pad(cell_name(f), cell_width(f)));
+        }
+    }
+    if fields.shows(Field::Tally) && dirs {
+        right.push_str("  ");
+        if right.len() > 2 {
+            right.push_str(&format!("{:>TALLY_W$}", "n/n"));
+        } else {
+            right.push_str("n/n");
+        }
+    }
+    let gap = budget.saturating_sub(crate::text::width(&left) + crate::text::width(&right));
+    Line::from(Span::styled(format!("{left}{}{right}", " ".repeat(gap)), dim()))
+}
+
+/// 열 이름 줄에 적는 이름.
+fn cell_name(f: super::view::Field) -> &'static str {
+    use super::view::Field;
+    match f {
+        Field::Tags => "TAGS",
+        Field::Assignee => "WHO",
+        Field::Created => "MADE",
+        Field::Updated => "EDIT",
+        Field::Id | Field::Priority | Field::Tally | Field::Names => "",
+    }
+}
+
+/// 오른쪽 열 하나의 폭 — 줄과 이름 줄이 같은 자를 쓴다.
+fn cell_width(f: super::view::Field) -> usize {
+    use super::view::Field;
+    match f {
+        Field::Tags => TAGS_W,
+        Field::Assignee => WHO_W,
+        // `+09-14`·`✎09-14` 여섯 칸.
+        Field::Created | Field::Updated => 6,
+        Field::Id | Field::Priority | Field::Tally | Field::Names => 0,
+    }
+}
+
+/// 오른쪽 열이 줄에 서는 차례이자, 걷힘을 셀 때와 이름을 적을 때 훑는 목록 — 한 벌로 둔다.
+const RIGHT: [super::view::Field; 4] = {
+    use super::view::Field;
+    [Field::Tags, Field::Assignee, Field::Created, Field::Updated]
+};
 
 /// 오른쪽 열의 폭 — 담당·태그. 날짜는 `+MM-DD` 여섯 칸으로 저절로 고정이다.
 const WHO_W: usize = 10;
@@ -1950,9 +2049,12 @@ pub(super) mod tests {
         every(issues())
     }
 
+    /// **열 이름 줄은 꺼 둔다**(moai-3fnf) — 줄 하나를 먹어 좁은 창 시험의 자리 셈을 다 바꾼다.
+    /// 이름 줄은 제 시험(`the_list_names_its_columns_where_the_values_stand`)이 켜서 본다.
     fn every(issues: Vec<Issue>) -> App {
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.view = super::super::view::View::default();
+        a.fields.set(super::super::view::Field::Names, false);
         a.see();
         a
     }
@@ -1993,6 +2095,41 @@ pub(super) mod tests {
         }
         a.hit("SPC c i");
         assert!(!row_by(&mut a, 240, "레이븐").contains("argos-0001"), "끈 id 가 목록 줄에 남았다");
+    }
+
+    /// **목록 맨 위에 켠 열의 이름이 선다**(moai-3fnf) — 짧은 영어로, 값과 같은 자리에. 안 켠 열의
+    /// 이름은 안 서고, `SPC c h` 로 줄째 끈다. id 는 폭을 맞춰 그 뒤의 열이 줄마다 안 밀린다.
+    #[test]
+    fn the_list_names_its_columns_where_the_values_stand() {
+        let mut is = issues();
+        for i in &mut is {
+            i.assignee = Some("레이븐".into());
+        }
+        let mut a = every(is);
+        a.hit("SPC c a");
+        a.hit("SPC c h");
+        let seen = |a: &mut App| render(a, 120, 12).into_iter().map(|l| l.split('│').next().unwrap_or_default().to_string()).collect::<Vec<_>>();
+        // 글자 수가 아니라 **화면 칸**으로 잰다 — 한글은 한 글자가 두 칸이고 바이트로는 셋이다.
+        let col = |l: &str, at: usize| crate::text::width(&l[..at]);
+        let lines = seen(&mut a);
+        let names = lines.iter().find(|l| l.contains("TITLE")).unwrap_or_else(|| panic!("열 이름 줄이 없다\n{}", lines.join("\n")));
+        assert!(names.contains("id") && names.contains("P") && names.contains("WHO"), "{names:?}");
+        assert!(!names.contains("MADE") && !names.contains("TAGS"), "안 켠 열의 이름이 섰다 — {names:?}");
+        // 이름은 값과 같은 자리에 — 담당 열의 시작 칸이 같다.
+        let row = lines.iter().find(|l| l.contains("레이븐")).expect("담당이 선 줄이 없다");
+        assert_eq!(
+            col(row, row.find("레이븐").unwrap()),
+            col(names, names.find("WHO").unwrap()),
+            "이름이 값과 다른 자리에 섰다\n{names:?}\n{row:?}"
+        );
+        // 이름 줄은 목록의 첫 줄 **위**에 서고 굴러 사라지지 않는다 — 커서가 그 위에 못 선다.
+        let first = lines.iter().position(|l| l.contains("argos-")).expect("줄이 없다");
+        assert_eq!(lines.iter().position(|l| l.contains("TITLE")), Some(first - 1));
+
+        a.hit("SPC c h");
+        assert!(!seen(&mut a).iter().any(|l| l.contains("TITLE")), "SPC c h 가 열 이름 줄을 안 걷었다");
+        a.hit("SPC c h");
+        assert!(seen(&mut a).iter().any(|l| l.contains("TITLE")), "다시 눌러도 안 돌아왔다");
     }
 
     /// **열을 걷는 것은 목록 전체가 함께 정한다**(moai-g7p8 리뷰). 머리글이 긴 줄(`p10`)만 날짜를
@@ -2129,6 +2266,8 @@ pub(super) mod tests {
         // 제목 칸을 가린다.
         let glints = |a: &mut App, row: &str, first: &str| {
             a.spin = 2;
+            // 열 이름 줄은 꺼 둔다(moai-3fnf) — 그림을 두 번 뜨며 줄 자리가 어긋난다.
+            a.fields.set(super::super::view::Field::Names, false);
             let (w, h) = (100u16, 14u16);
             let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
             term.draw(|f| screen(f, a)).unwrap();
@@ -3630,6 +3769,8 @@ pub(super) mod tests {
             })
             .collect();
         let mut a = App::new(many, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        // 열 이름 줄은 꺼 둔다(moai-3fnf) — 안쪽 한 줄을 먹어 아래 셈이 다 밀린다. 그 줄은 제 시험이 본다.
+        a.fields.set(super::super::view::Field::Names, false);
         // 창 14줄 → 경로·배너·키 바를 뺀 몸통 11줄 → 테두리를 뺀 목록 안쪽 9줄.
         // 30줄 중 21줄이 아래에 숨는다.
         let lines = render(&mut a, 100, 14);
@@ -3682,6 +3823,8 @@ pub(super) mod tests {
             Issue::new(format!("argos-{n:04}"), format!("일 {n}"), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z")
         };
         let mut a = App::new((1..=30).map(make).collect(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        // 열 이름 줄은 꺼 둔다(moai-3fnf) — 안쪽 줄 수를 하나 먹는다.
+        a.fields.set(super::super::view::Field::Names, false);
         a.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
         let _ = render(&mut a, 100, 14);
         a.cursor = 11; // 다시 읽혀 커서가 위쪽 줄에 섰다

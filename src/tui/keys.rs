@@ -463,6 +463,7 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Cell(super::view::Field::Updated), Some("SPC c u"), LEADER, Key::plain('c'), Key::plain('u')),
         row!(Cell(super::view::Field::Tally), Some("SPC c n"), LEADER, Key::plain('c'), Key::plain('n')),
         row!(Cell(super::view::Field::Tags), Some("SPC c g"), LEADER, Key::plain('c'), Key::plain('g')),
+        row!(Cell(super::view::Field::Names), Some("SPC c h"), LEADER, Key::plain('c'), Key::plain('h')),
     ]
 };
 

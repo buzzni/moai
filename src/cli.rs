@@ -244,6 +244,7 @@ NOTE
     SPC s 1  설정의 첫 칸 [보임/숨김] — 둘째 칸부터 번호가 차례로 는다
     SPC o p  우선순위   SPC o c  생성   SPC o u  수정   SPC o s  칸   SPC o a  담당   SPC o t  제목
     SPC c i  id   SPC c p  우선순위   SPC c a  담당   SPC c c  생성   SPC c u  수정   SPC c n  셈   SPC c g  태그
+    SPC c h  열 이름 줄 [보임/숨김]
   바로 끝내는 키는 Ctrl-C 하나다 — 어디서든, 글을 적는 중에도 끝낸다.
 
   목록은 처음에 done 을 숨긴다 — 경로 줄의 [done 숨김] 이 그것을 댄다. 보기는 거름망과
