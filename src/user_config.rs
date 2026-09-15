@@ -424,7 +424,12 @@ impl Doc {
             changed |= put_value(t, SORT_REVERSED, new.sort_reversed.map(toml_edit::Value::from));
         }
         changed |= merge_words(t, FIELDS, base.fields.as_deref(), new.fields.as_deref());
-        changed |= merge_words(t, FIELDS_KNOWN, base.fields_known.as_deref(), new.fields_known.as_deref());
+        // **`fields_known` 은 빼지 않고 더하기만 한다**(moai-6bc0 단계 리뷰) — `base` 를 비워 두는 까닭이다.
+        // 이 키는 사람이 고른 것이 아니라 *적는 쪽이 아는 열 전부*라, 여기 있는데 이 바이너리가 모르는
+        // 이름은 **새 바이너리가 적어 둔 것**이다. 그것을 빼면 그쪽의 다음 실행이 제가 적어 둔 열을
+        // "몰랐던 열" 로 읽어 사람이 끈 것을 도로 켠다 — 낱말 배열을 합치는 까닭(`남이 더한 낱말은
+        // 남는다`)이 여기서는 더 세게 걸린다.
+        changed |= merge_words(t, FIELDS_KNOWN, None, new.fields_known.as_deref());
         if base.detail != new.detail {
             changed |= put_value(t, DETAIL, new.detail.map(toml_edit::Value::from));
         }
@@ -1098,6 +1103,18 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("sort = \"title\"  # 새것 먼저") && text.contains("# 끝난 일은 늘 숨긴다"), "{text}");
         assert_eq!(read_look(Some(&path)).0.hidden, Some(Vec::new()), "{text}");
+
+        // **`fields_known` 은 더하기만 한다**(moai-6bc0 단계 리뷰) — 새 바이너리가 적어 둔 열 이름을
+        // 이쪽이 지우면, 그쪽의 다음 실행이 제가 적어 둔 열을 "몰랐던 열" 로 읽어 사람이 끈 것을
+        // 도로 켠다. 이 바이너리가 아는 목록은 세션 내내 같은 값이라 base 와 견줄 자가 없다.
+        let newer = Look { fields_known: Some(vec!["id".into(), "estimate".into()]), ..c.clone() };
+        update(&path, |doc| doc.merge_look(&c, &newer)).unwrap();
+        let older = Look { fields_known: Some(vec!["id".into(), "priority".into()]), ..c.clone() };
+        update(&path, |doc| doc.merge_look(&newer, &older)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let known = read_look(Some(&path)).0.fields_known.unwrap_or_default();
+        assert!(known.contains(&"estimate".to_string()), "옆 바이너리가 아는 열을 지웠다\n{text}");
+        assert!(known.contains(&"priority".to_string()), "이 바이너리가 아는 열을 안 적었다\n{text}");
     }
 
     /// 바꾼 것이 없으면 파일을 건드리지 않는다 — 헛 쓰기도 헛 diff 도 없다.

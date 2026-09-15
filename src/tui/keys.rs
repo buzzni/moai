@@ -1531,7 +1531,9 @@ mod tests {
     /// 꺼진다 — 바와 키 처리가 이 한 판정을 읽는다. 둘은 서로를 끄지 않는다.
     #[test]
     fn enter_and_leave_follow_the_cursor_row() {
-        let base = Ctx { list_focus: true, ..Ctx::default() };
+        // 탐색기의 처음값으로 잰다(`inside`) — `Ctx::default()` 는 상세가 숨은 자리라, 그것으로
+        // 재면 상세에 매인 판정이 늘 꺼진 채로 지나간다.
+        let base = inside();
         assert_eq!(Browse::Enter.enabled(&base), Ok(()));
         assert_eq!(Browse::Leave.enabled(&base), Ok(()));
         let leaf = Ctx { leaf: true, ..base };

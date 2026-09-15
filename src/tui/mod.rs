@@ -1310,6 +1310,17 @@ impl App {
     pub fn adopt_look(&mut self, look: &crate::user_config::Look, mut problems: Vec<String>) {
         self.apply_look(look, &mut problems);
         self.saved = self.look_now();
+        // **열만은 파일이 적은 것을 그대로 든다**(moai-6bc0 단계 리뷰). 다른 키는 입힌 결과가 곧 파일의
+        // 값이지만 `fields` 는 아니다 — 파일이 몰랐던 열은 기본값으로 서므로 켜진 채인데 파일에는 없다.
+        // 그것을 "이미 적혀 있다" 로 들면 그 열 이름은 영영 파일에 안 적히고, `fields_known` 이 적히는
+        // 순간 다음 실행이 그 빈자리를 "사람이 껐다" 로 읽어 켜 둔 열이 꺼진다.
+        //
+        // **모르는 낱말은 걸러 둔다** — 새 바이너리가 적은 낱말까지 base 로 들면 이쪽 토글 한 번이
+        // 그것을 지운다(`merge_words` 가 base 에 있고 new 에 없는 낱말을 뺀다).
+        if let Some(words) = &look.fields {
+            self.saved.fields = Some(words.iter().filter(|w| view::Field::named(w).is_some()).cloned().collect());
+        }
+        self.saved.fields_known = look.fields_known.clone();
         if !problems.is_empty() {
             self.notice = Some(format!("보기 설정 — {}", problems.join(" · ")));
         }
@@ -2190,6 +2201,33 @@ mod tests {
         let mut c = App::new(Vec::new(), cfg(), Path::new());
         c.adopt_look(&off, Vec::new());
         assert!(!c.fields.shows(view::Field::Names), "끈 열이 다음 실행에 되살아났다");
+    }
+
+    /// **끈 새 열은 파일을 한 바퀴 돌고도 꺼진 채다**(moai-6bc0 단계 리뷰). `look_now()` 끼리 견주는
+    /// 것만으로는 못 잡는다 — `fields_known` 은 이 바이너리가 아는 열 전부라 세션 내내 같은 값이고,
+    /// 적는 길이 `App::saved` 와의 **차이만** 옮기므로 그 키가 파일에 영영 안 적힐 수 있다. 그러면
+    /// 끈 것(`fields` 에서 빠진 것)을 다음 실행이 "그 열을 몰랐다" 로 읽어 도로 켠다.
+    #[test]
+    fn turning_off_a_new_column_survives_a_trip_through_the_file() {
+        let s = Scratch::new("fields-known");
+        let user = s.0.join("user.toml");
+        // 이 키를 모르던 바이너리가 적어 둔 설정 — `fields_known` 이 없다.
+        std::fs::write(&user, "[tui]\nfields = [\"id\", \"priority\", \"tally\"]\n").unwrap();
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        assert!(a.fields.shows(view::Field::Names), "옛 설정에 새 열이 안 떴다");
+        a.hit("SPC c h");
+        assert!(!a.fields.shows(view::Field::Names));
+
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(text.contains("fields_known"), "끈 것을 가를 자를 안 적었다\n{text}");
+        let mut b = App::new(Vec::new(), cfg(), Path::new());
+        b.user_config = Some(user);
+        b.load_look();
+        assert!(!b.fields.shows(view::Field::Names), "끈 열이 다음 실행에 도로 켜졌다\n{text}");
+        assert!(b.fields.shows(view::Field::Branch), "같이 안 끈 열까지 꺼졌다\n{text}");
+        assert_eq!(b.notice, None, "제가 적은 설정을 읽으며 말이 섰다");
     }
 
     /// **`SPC o` 가 차례를 고르고, 같은 키를 다시 누르면 거꾸로 선다**(moai-55cp). 다른 키로 가면

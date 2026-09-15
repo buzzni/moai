@@ -48,11 +48,12 @@ pub struct Side {
 }
 
 impl Side {
-    /// 이름만으로 세운다 — 후보는 가지 이름에서 낸다([`names`] 의 절반). 디렉터리 이름까지 아는
-    /// 곳은 [`gather`] 다.
+    /// 이름만으로 세운다 — 후보는 가지 이름에서 낸다([`names`] 의 절반, **같은 함수로**). 디렉터리
+    /// 이름까지 아는 곳은 [`gather`] 다.
     pub fn new(label: impl Into<String>, root: impl Into<PathBuf>, issues: Vec<Issue>) -> Side {
         let label = label.into();
-        let holds = [label.strip_prefix("worktree-").unwrap_or(&label).to_string(), label.clone()].into();
+        let mut holds = BTreeSet::new();
+        from_label(&label, &mut holds);
         Side { label, root: root.into(), issues, base: BTreeMap::new(), holds }
     }
 }
@@ -594,10 +595,17 @@ pub fn names<'a>(trees: impl IntoIterator<Item = &'a Tree>) -> BTreeSet<String> 
         if let Some(name) = t.path.file_name() {
             out.insert(name.to_string_lossy().into_owned());
         }
-        out.insert(t.label.strip_prefix("worktree-").unwrap_or(&t.label).to_string());
-        out.insert(t.label.clone());
+        from_label(&t.label, &mut out);
     }
     out
+}
+
+/// 가지 이름 하나가 가리키는 id 후보 — 이름 그대로와 `worktree-` 를 뗀 것. **[`names`] 와
+/// [`Side::new`] 가 같이 쓴다**(moai-6bc0 단계 리뷰): 자가 둘이면 화면이 ⎇ 를 다는 규칙과 훅이
+/// 옆의 일을 가르는 규칙이 언젠가 조용히 갈라진다.
+fn from_label(label: &str, out: &mut BTreeSet<String>) {
+    out.insert(label.strip_prefix("worktree-").unwrap_or(label).to_string());
+    out.insert(label.to_string());
 }
 
 /// 제 HEAD 와 옆 HEAD 가 갈라진 자리의 스냅샷 — id → 그때의 `updated_at` ([`Side::base`]).

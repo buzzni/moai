@@ -653,22 +653,13 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // **오른쪽 열을 걷는 것은 목록 전체가 함께 정한다**(moai-g7p8 리뷰). 줄마다 정하면 머리글이
     // 긴 줄(`⎇ 브랜치`·`p10`)만 날짜를 걷어 같은 폭에서 열이 들쭉날쭉 선다 — 고정 폭의 까닭이
     // 사라진다. 제일 많이 걷힌 줄의 열에 맞춘다(걷는 차례가 하나라 그 열은 모든 줄에 들어간다).
-    // **id 열의 폭은 목록이 정한다**(moai-3fnf) — 줄마다 제 길이로 서면 그 뒤가 밀려 열 이름 줄이
-    // 어느 줄과도 안 맞는다. 보이는 줄이 아니라 이 디렉터리의 줄 전부로 잰다: 굴릴 때마다 열이
-    // 들썩이지 않아야 한다.
-    let id_w = rows
-        .iter()
-        .filter_map(|r| match r {
-            Row::Item(e) => e.at(),
-            Row::Up | Row::Project(_) => None,
-        })
-        .map(|at| crate::text::width(&app.issues[at].id))
-        .max()
-        .unwrap_or(0);
+    // **왼쪽 열의 폭은 목록이 정한다**(moai-3fnf) — 줄마다 제 길이로 서면 그 뒤가 밀려 열 이름 줄이
+    // 어느 줄과도 안 맞는다.
+    let cols = Head::of(app, rows);
     let (mut items, kept): (Vec<ListItem>, Vec<super::view::Fields>) = rows
         .iter()
         .map(|r| {
-            let (line, kept) = row_line(app, r, inner, app.fields, id_w);
+            let (line, kept) = row_line(app, r, inner, app.fields, cols);
             (ListItem::new(line), kept)
         })
         .unzip();
@@ -678,7 +669,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // (`Index::progress`)이 프레임마다 두 번 돈다.
     for ((item, r), k) in items.iter_mut().zip(rows).zip(&kept) {
         if *k != common {
-            *item = ListItem::new(row_line(app, r, inner, common, id_w).0);
+            *item = ListItem::new(row_line(app, r, inner, common, cols).0);
         }
     }
 
@@ -749,7 +740,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         // 셈 이름은 **셈이 설 수 있는 줄이 있을 때만** — 바구니(`at: None`)는 제 줄이 없어 셈을
         // 안 내므로, 바구니뿐인 디렉터리에서 `n/n` 만 서면 그 밑에 아무것도 없다.
         let dirs = rows.iter().any(|r| matches!(r, Row::Item(Entry::Dir { at: Some(_), .. })));
-        f.render_widget(Paragraph::new(names_line(common, id_w, dirs, inner)), names_at);
+        f.render_widget(Paragraph::new(names_line(common, cols, dirs, inner)), names_at);
     }
     app.list.fit(list_at.height as usize, rows.len());
     if let Some(at) = selected {
@@ -802,7 +793,7 @@ fn row_line<'a>(
     r: &Row,
     budget: usize,
     fields: super::view::Fields,
-    id_w: usize,
+    cols: Head,
 ) -> (Line<'a>, super::view::Fields) {
     // 이 파일의 `Field` 는 폼의 칸이다(`form::Field`) — 목록 열은 여기서만 가린다.
     use super::view::Field;
@@ -829,12 +820,14 @@ fn row_line<'a>(
     let mut head = Vec::new();
     if fields.shows(Field::Id) {
         // **id 는 폭을 맞춘다**(moai-3fnf) — 줄마다 길이가 다르면 그 뒤의 열이 줄마다 밀려, 맨 위의
-        // 열 이름 줄이 어느 줄과도 안 맞는다. 폭은 목록이 정한다(`list`).
-        head.push(Span::styled(pad(&i.id, id_w), dim()));
+        // 열 이름 줄이 어느 줄과도 안 맞는다. 폭은 목록이 정한다(`Head::of`).
+        head.push(Span::styled(pad(&i.id, cols.id), dim()));
         head.push(Span::raw("  "));
     }
     if fields.shows(Field::Priority) {
-        head.push(Span::styled(format!("p{}", i.priority()), priority(i.priority())));
+        // **우선순위도 폭을 맞춘다**(moai-6bc0 단계 리뷰) — `p10` 이 한 줄이라도 있으면 그 줄만 칸·제목이
+        // 한 칸 밀려, id 를 맞춘 까닭이 바로 옆에서 무너진다.
+        head.push(Span::styled(pad(&format!("p{}", i.priority()), cols.priority), priority(i.priority())));
         head.push(Span::raw(" "));
     }
     // 칸은 글리프로도 말한다. 색이 없는 터미널에서도 뜻이 남아야 한다.
@@ -975,15 +968,18 @@ fn row_line<'a>(
 ///
 /// 커서 자리만큼 들여 쓴다(목록 위젯이 줄마다 그만큼 민다). 오른쪽 열은 줄과 같이 테두리 끝에
 /// 붙이고, `⎇ <가지>` 가 붙은 줄은 제목이 그만큼 밀리므로 `TITLE` 은 그 표시가 없는 줄에 맞춘다.
-fn names_line<'a>(fields: super::view::Fields, id_w: usize, dirs: bool, budget: usize) -> Line<'a> {
+fn names_line<'a>(fields: super::view::Fields, cols: Head, dirs: bool, budget: usize) -> Line<'a> {
     use super::view::Field;
     let mut left = " ".repeat(crate::text::width(CURSOR));
-    if fields.shows(Field::Id) {
-        left.push_str(&pad("id", id_w));
+    // **잴 줄이 없으면 이름도 안 적는다** — 바구니뿐인 디렉터리는 id·우선순위 열을 아예 안 내므로,
+    // 그래도 이름을 세우면 그 폭만큼 `TITLE` 이 값보다 오른쪽에 선다.
+    if fields.shows(Field::Id) && cols.id > 0 {
+        left.push_str(&pad("id", cols.id));
         left.push_str("  ");
     }
-    if fields.shows(Field::Priority) {
-        left.push_str("P  ");
+    if fields.shows(Field::Priority) && cols.priority > 0 {
+        left.push_str(&pad("P", cols.priority));
+        left.push(' ');
     }
     left.push_str("S  TITLE");
     let mut right = String::new();
@@ -993,18 +989,50 @@ fn names_line<'a>(fields: super::view::Fields, id_w: usize, dirs: bool, budget: 
             right.push_str(&pad(name, w));
         }
     }
-    // 셈은 오른쪽 열이 섰을 때만 폭을 고정한다 — 줄의 `tally_cell` 과 같은 갈림이다.
+    // 셈은 오른쪽 열이 섰을 때만 폭을 고정한다 — 줄의 `tally_cell` 과 **같은 갈림이어야 한다**.
+    // 줄은 오른쪽 열이 서면 셈이 없는 잎에도 그 폭을 비워 두므로(moai-6bc0 단계 리뷰), 이름 줄이
+    // 그 자리를 안 비우면 켠 이름이 통째로 일곱 칸 넘게 오른쪽으로 밀려 값과 안 맞는다 — 묶음 없는
+    // 디렉터리(에픽 안)에서 늘 그랬다. 셈이 설 줄이 없으면 **자리만 지키고 이름은 안 적는다**:
+    // 바구니뿐인 디렉터리에서 `n/n` 만 서면 그 밑에 아무것도 없다.
     let alone = right.is_empty();
-    if fields.shows(Field::Tally) && dirs {
+    if fields.shows(Field::Tally) && (dirs || !alone) {
         right.push_str("  ");
+        let name = if dirs { "n/n" } else { "" };
         if alone {
-            right.push_str("n/n");
+            right.push_str(name);
         } else {
-            right.push_str(&format!("{:>TALLY_W$}", "n/n"));
+            right.push_str(&format!("{name:>TALLY_W$}"));
         }
     }
     let gap = budget.saturating_sub(crate::text::width(&left) + crate::text::width(&right));
     Line::from(Span::styled(format!("{left}{}{right}", " ".repeat(gap)), dim()))
+}
+
+/// 왼쪽 열(id·우선순위)의 폭 — **목록 전체가 한 번 정한다**(moai-3fnf). 줄마다 제 길이로 서면 그
+/// 뒤의 칸 글리프·제목이 줄마다 밀려, 맨 위의 열 이름 줄이 어느 줄과도 안 맞는다.
+///
+/// **보이는 줄이 아니라 이 디렉터리의 줄 전부로 잰다** — 굴릴 때마다 열이 들썩이지 않아야 한다.
+#[derive(Clone, Copy, Default)]
+struct Head {
+    id: usize,
+    priority: usize,
+}
+
+impl Head {
+    fn of(app: &App, rows: &[Row]) -> Head {
+        let mut w = Head::default();
+        for at in rows.iter().filter_map(|r| match r {
+            Row::Item(e) => e.at(),
+            Row::Up | Row::Project(_) => None,
+        }) {
+            let i = &app.issues[at];
+            w.id = w.id.max(crate::text::width(&i.id));
+            // `p` 한 칸 + 숫자. 글자로 짓지 않는다 — 줄마다 한 번씩 버리는 `String` 이다.
+            let p = i.priority();
+            w.priority = w.priority.max(1 + if p >= 100 { 3 } else if p >= 10 { 2 } else { 1 });
+        }
+        w
+    }
 }
 
 /// 오른쪽 열이 줄에 서는 **차례**, 이름 줄에 적는 **이름**, 그리고 그 **폭** — 한 벌로 둔다.
@@ -2142,6 +2170,45 @@ pub(super) mod tests {
         assert!(!seen(&mut a).iter().any(|l| l.contains("TITLE")), "SPC c h 가 열 이름 줄을 안 걷었다");
         a.hit("SPC c h");
         assert!(seen(&mut a).iter().any(|l| l.contains("TITLE")), "다시 눌러도 안 돌아왔다");
+    }
+
+    /// **이름 줄은 묶음 없는 디렉터리에서도 값 위에 선다**(moai-6bc0 단계 리뷰). 줄은 오른쪽 열이
+    /// 서면 셈이 없는 잎에도 셈의 폭(`TALLY_W`)을 비워 두는데, 이름 줄이 그 자리를 안 비우면 켠
+    /// 이름이 통째로 아홉 칸 오른쪽으로 밀린다 — 에픽 안이 늘 그런 자리다.
+    ///
+    /// **우선순위도 폭을 맞춘다** — `p10` 한 줄이 있으면 그 줄만 칸 글리프와 제목이 한 칸 밀려,
+    /// id 를 맞춘 까닭이 바로 옆에서 무너진다.
+    #[test]
+    fn the_column_names_hold_their_place_inside_a_group() {
+        let mut is = issues();
+        for i in &mut is {
+            i.assignee = Some("레이븐".into());
+        }
+        // 에픽 안의 잎 하나만 우선순위가 자리를 더 먹는다.
+        is[1].priority = Some(10);
+        let mut a = every(is);
+        a.hit("SPC c a");
+        a.hit("SPC c h");
+        // 에픽 안으로 — 묶음이 없어 어느 줄도 셈을 안 낸다.
+        a.hit("Enter");
+        let lines: Vec<String> =
+            render(&mut a, 120, 12).into_iter().map(|l| l.split('│').next().unwrap_or_default().to_string()).collect();
+        let screen = lines.join("\n");
+        // 글자 수가 아니라 **화면 칸**으로 잰다 — 한글은 한 글자가 두 칸이고 바이트로는 셋이다.
+        let col = |l: &str, needle: &str| {
+            crate::text::width(&l[..l.find(needle).unwrap_or_else(|| panic!("`{needle}` 가 없다 — {l:?}"))])
+        };
+        let names = lines.iter().find(|l| l.contains("TITLE")).unwrap_or_else(|| panic!("열 이름 줄이 없다\n{screen}"));
+        let held = lines.iter().find(|l| l.contains("집은 멤버")).unwrap_or_else(|| panic!("집은 멤버 줄이 없다\n{screen}"));
+        let plain = lines
+            .iter()
+            .find(|l| l.contains("멤버") && !l.contains("집은") && !l.contains("TITLE"))
+            .unwrap_or_else(|| panic!("멤버 줄이 없다\n{screen}"));
+        for row in [held, plain] {
+            assert_eq!(col(row, "레이븐"), col(names, "WHO"), "WHO 가 값과 다른 자리에 섰다\n{names:?}\n{row:?}");
+        }
+        assert_eq!(col(plain, "멤버"), col(held, "집은"), "p10 줄만 제목이 밀렸다\n{plain:?}\n{held:?}");
+        assert_eq!(col(plain, "멤버"), col(names, "TITLE"), "TITLE 이 제목과 다른 자리에 섰다\n{names:?}\n{plain:?}");
     }
 
     /// **그 이슈를 이름에 단 옆 가지가 있으면 제목 앞에 ⎇ 가 선다**(moai-nxt4, 사용자 결정) — 집기를
@@ -3860,6 +3927,30 @@ pub(super) mod tests {
         // 짧은 목록과 다 들어가는 상세에는 표시가 없다
         let lines = render(&mut app(), 100, 20).join("\n");
         assert!(!lines.contains('↓') && !lines.contains('↑'), "굴릴 것이 없는데 표시가 섰다\n{lines}");
+    }
+
+    /// **굴림 셈은 열 이름 줄이 먹은 한 줄을 뺀다**(moai-6bc0 단계 리뷰). 위 시험은 자리 셈을 지키려고
+    /// 이름 줄을 꺼 두는데, 사람이 실제로 보는 것은 켜진 쪽이다 — 그쪽을 도는 시험이 하나도 없으면
+    /// 굴림이 테두리 안쪽 전체를 창으로 잡아도 아무도 안 잡는다. 그러면 맨 아랫줄이 이름 줄 밑에
+    /// 숨어 커서가 화면 밖에 선다.
+    #[test]
+    fn the_scroll_window_gives_the_column_names_their_row() {
+        let many: Vec<Issue> = (1..=30)
+            .map(|n| {
+                Issue::new(format!("argos-{n:04}"), format!("일 {n}"), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z")
+            })
+            .collect();
+        let mut a = App::new(many, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        assert!(a.fields.shows(super::super::view::Field::Names), "열 이름 줄이 기본 켬이 아니다");
+        // 목록 안쪽 9줄 가운데 한 줄은 이름 줄이다 — 30줄 중 22줄이 아래에 숨는다.
+        let lines = render(&mut a, 100, 14);
+        let bottom = lines.iter().rev().find(|l| l.contains('└')).cloned().unwrap_or_default();
+        assert!(bottom.contains("↓ 22줄"), "이름 줄이 먹은 한 줄을 굴림 셈이 안 뺐다\n{}", lines.join("\n"));
+
+        a.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        let lines = render(&mut a, 100, 14);
+        assert!(lines.iter().any(|l| l.contains("> argos-0030")), "끝의 커서가 이름 줄 밑에 숨었다\n{}", lines.join("\n"));
+        assert!(lines.iter().any(|l| l.contains("TITLE")), "굴리니 이름 줄이 딸려 올라갔다\n{}", lines.join("\n"));
     }
 
     /// **포커스 칸의 스크롤 표시는 테두리의 초록을 끊지 않는다.** 표시가 회색으로
