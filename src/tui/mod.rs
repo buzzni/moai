@@ -412,8 +412,10 @@ pub struct App {
     shown: Vec<bool>,
     /// 목록 차례와 그 방향(moai-55cp). 기본은 우선순위 차례다.
     pub order: keys::Sorting,
-    /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)다.
+    /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)에 열 이름 줄이 얹힌다.
     pub fields: view::Fields,
+    /// 오른쪽 상세 칸이 보이나(moai-ymnu). 숨기면 목록이 폭을 다 쓴다. 설정에 남는다.
+    pub detail_open: bool,
     /// 설정에 적혀 있다고 이 세션이 아는 보기 — 읽은 뒤와 적은 뒤의 [`App::look_now`](moai-2kyl 단계 리뷰).
     /// **적을 때 이것과 지금의 차이만 옮긴다**(`Doc::merge_look`). 화면이 든 보기를 통째로 적으면 그사이
     /// 옆 탐색기·손·새 바이너리가 적은 것을 토글 한 번이 되돌린다. 새 바이너리가 적은 모르는 낱말을 들고
@@ -589,6 +591,7 @@ impl App {
             shown: Vec::new(),
             order: Default::default(),
             fields: Default::default(),
+            detail_open: true,
             saved: Default::default(),
             remembered,
             list: Scroll::default(),
@@ -1361,6 +1364,12 @@ impl App {
             }
             self.fields = fields;
         }
+        if let Some(open) = look.detail {
+            self.detail_open = open;
+            if !open {
+                self.focus = Pane::Explorer;
+            }
+        }
     }
 
     /// 지금 보기를 설정에 적을 모양으로.
@@ -1371,6 +1380,7 @@ impl App {
             sort: Some(self.order.by.name().to_string()),
             sort_reversed: Some(self.order.reversed),
             fields: Some(view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name().to_string()).collect()),
+            detail: Some(self.detail_open),
         }
     }
 
@@ -1548,6 +1558,15 @@ impl App {
                 self.fields.toggle(f);
                 self.save_look();
             }
+            // 상세를 숨기면 **포커스를 목록으로 되돌린다** — 안 보이는 칸에 포커스가 남으면
+            // 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다(moai-ymnu).
+            B::Detail => {
+                self.detail_open = !self.detail_open;
+                if !self.detail_open {
+                    self.focus = Pane::Explorer;
+                }
+                self.save_look();
+            }
             B::Raw => {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
@@ -1585,6 +1604,7 @@ impl App {
             deferred_hidden: self.view.hide_deferred,
             sorting: self.order,
             fields: self.fields,
+            detail: self.detail_open,
             next_pane: draw::pane_name(self.focus.next()),
             prev_pane: draw::pane_name(self.focus.prev()),
         }
@@ -3727,6 +3747,7 @@ mod tests {
         a.hit("SPC o u");
         a.hit("SPC c a");
         a.hit("SPC c i");
+        a.hit("SPC t d");
         let text = std::fs::read_to_string(&user).expect("보기가 설정에 안 적혔다");
         assert!(text.contains("[tui]") && text.contains("sort = \"updated\""), "{text}");
 
@@ -3734,6 +3755,7 @@ mod tests {
         b.user_config = Some(user.clone());
         b.load_look();
         assert_eq!((b.view.clone(), b.order, b.fields), (a.view.clone(), a.order, a.fields), "다음 실행이 다른 보기로 떴다");
+        assert!(!b.detail_open && !a.detail_open, "숨긴 상세 칸이 다음 실행에 안 이어졌다");
         assert_eq!(b.notice, None);
 
         // 모르는 낱말은 알리고 나머지는 입힌다. 모르는 차례의 방향은 우선순위에 입히지 않는다 — 아무도 안

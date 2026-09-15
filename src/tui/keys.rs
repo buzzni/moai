@@ -298,6 +298,8 @@ pub enum Browse {
     Sort(Order),
     /// 목록 줄의 열 하나를 켜고 끈다(moai-g7p8).
     Cell(super::view::Field),
+    /// 오른쪽 상세 칸을 보이고 숨긴다(moai-ymnu).
+    Detail,
 }
 
 /// 목록 차례. **조각이라 `query::SortKey` 를 모른다** — `App` 이 둘을 잇는다.
@@ -465,6 +467,7 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Cell(super::view::Field::Tags), Some("SPC c g"), LEADER, Key::plain('c'), Key::plain('g')),
         row!(Cell(super::view::Field::Names), Some("SPC c h"), LEADER, Key::plain('c'), Key::plain('h')),
         row!(Cell(super::view::Field::Branch), Some("SPC c w"), LEADER, Key::plain('c'), Key::plain('w')),
+        row!(Detail, Some("SPC t d"), LEADER, Key::plain('t'), Key::plain('d')),
     ]
 };
 
@@ -493,6 +496,8 @@ pub struct Ctx {
     pub sorting: Sorting,
     /// 켜 둔 목록 열.
     pub fields: super::view::Fields,
+    /// 오른쪽 상세 칸이 보이나.
+    pub detail: bool,
     /// `Tab`·Shift-Tab 이 가는 칸의 이름.
     pub next_pane: &'static str,
     pub prev_pane: &'static str,
@@ -535,6 +540,8 @@ impl Browse {
             Worktree if c.layer => Err(Off::Quiet),
             // 보기는 프로젝트 안의 줄에 건다 — 층에서는 그룹째 메뉴에 안 선다(`menu::live`).
             Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer => Err(Off::Quiet),
+            // 상세를 숨기면 갈 칸이 하나뿐이다 — Tab 은 아무 일도 안 한다.
+            FocusNext | FocusPrev if !c.detail => Err(Off::Quiet),
             Column(n) if usize::from(n) >= c.columns => Err(Off::Quiet),
             _ => Ok(()),
         }
@@ -552,6 +559,7 @@ impl Browse {
             Worktree => "워크트리 겹쳐 보기",
             Raw => "원문↔그리기",
             ShowAll => "모두 보이기",
+            Detail => "상세 칸",
             Sort(o) => o.word(),
             Cell(f) => f.word(),
             _ => self.what(c),
@@ -570,6 +578,7 @@ impl Browse {
             // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
             Browse::Sort(o) if o == c.sorting.by => Some(if c.sorting.reversed { "[● 거꾸로]" } else { "[● 차례]" }),
             Browse::Cell(f) => Some(shown(!c.fields.shows(f))),
+            Browse::Detail => Some(shown(!c.detail)),
             _ => None,
         }
     }
@@ -606,6 +615,7 @@ impl Browse {
             ShowAll => "모두",
             Sort(_) => "정렬",
             Cell(_) => "열",
+            Detail => "상세",
         }
     }
 }

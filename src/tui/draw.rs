@@ -68,8 +68,12 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Constraint::Length(keys_h),
     ])
     .areas(area);
-    let [left, right] =
-        Layout::horizontal([Constraint::Percentage(LEFT), Constraint::Min(10)]).areas(body);
+    // **상세를 숨기면 목록이 폭을 다 쓴다**(moai-ymnu) — 빈 칸을 남겨 두면 숨긴 뜻이 없다.
+    let [left, right] = if app.detail_open {
+        Layout::horizontal([Constraint::Percentage(LEFT), Constraint::Min(10)]).areas(body)
+    } else {
+        [body, Rect::new(body.x + body.width, body.y, 0, body.height)]
+    };
 
     crumbs(f, app, &rows, top);
     if let Some((text, urgent)) = banner(app) {
@@ -82,7 +86,9 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         f.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), note);
     }
     list(f, app, left, &rows);
-    detail(f, app, right, &rows);
+    if app.detail_open {
+        detail(f, app, right, &rows);
+    }
     // 폼은 목록과 상세 자리를 **통째로** 덮는다. 가장자리를 비워 뒤를 비치게 해 봤더니
     // 뒤 칸의 테두리와 커서(`>`)가 폼의 테두리에 겹쳐 어느 선이 어느 칸인지 안 읽혔다.
     // 닫으면 보던 자리 그대로 돌아온다 — 경로 줄은 폼 위에 그대로 서 있다.
@@ -2170,6 +2176,30 @@ pub(super) mod tests {
         assert!(row(&mut a).contains("worktree-argos"), "다시 눌러도 안 돌아왔다");
     }
 
+    /// **`SPC t d` 가 상세 칸을 숨기고 목록이 폭을 다 쓴다**(moai-ymnu, 사용자 결정) — 숨긴 채
+    /// 포커스가 상세에 남으면 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다.
+    #[test]
+    fn the_detail_pane_hides_and_the_list_takes_the_width() {
+        let mut a = app();
+        let wide = render(&mut a, 100, 12);
+        assert!(wide.iter().any(|l| l.contains("상세")), "상세 칸이 원래 없다");
+        a.hit("Tab");
+        assert_eq!(a.focus, Pane::Detail);
+
+        a.hit("SPC t d");
+        let lines = render(&mut a, 100, 12);
+        assert!(!lines.iter().any(|l| l.contains("상세")), "SPC t d 가 상세를 안 숨겼다\n{}", lines.join("\n"));
+        assert_eq!(a.focus, Pane::Explorer, "안 보이는 칸에 포커스가 남았다");
+        let border = lines.iter().find(|l| l.contains('┓')).expect("목록 테두리가 없다");
+        assert_eq!(crate::text::width(border), 100, "목록이 폭을 다 안 썼다 — {border:?}");
+        // 갈 칸이 하나뿐이니 Tab 은 아무 일도 안 한다.
+        a.hit("Tab");
+        assert_eq!(a.focus, Pane::Explorer);
+
+        a.hit("SPC t d");
+        assert!(render(&mut a, 100, 12).iter().any(|l| l.contains("상세")), "다시 눌러도 안 돌아왔다");
+    }
+
     /// **열을 걷는 것은 목록 전체가 함께 정한다**(moai-g7p8 리뷰). 머리글이 긴 줄(`p10`)만 날짜를
     /// 걷으면 같은 폭에서 오른쪽 열이 줄마다 어긋난다.
     #[test]
@@ -4150,8 +4180,10 @@ pub(super) mod tests {
         let bar = lines.last().unwrap();
         assert!(bar.starts_with("SPC t- 토글") && bar.ends_with("Esc 닫기 Bksp 위로"), "{bar:?}");
         assert!(screen.contains("w : 워크트리 겹쳐 보기 [켜짐]") && screen.contains("r : 원문↔그리기 [그리기]"), "{screen}");
+        assert!(screen.contains("d : 상세 칸 [보임]"), "{screen}");
         assert!(!screen.contains("q : 끝내기"), "하위 층에 뿌리가 남았다\n{screen}");
-        assert_eq!(lines[lines.len() - 4], "─".repeat(80), "하위 층의 창이 제 높이로 줄지 않았다\n{screen}");
+        // 토글 셋이라 창이 세 줄 + 가름줄 하나다.
+        assert_eq!(lines[lines.len() - 5], "─".repeat(80), "하위 층의 창이 제 높이로 줄지 않았다\n{screen}");
 
         a.hit("r");
         assert!(a.raw);

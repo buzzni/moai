@@ -414,7 +414,7 @@ mod tests {
         }
         feed(&mut ch, &c, k('t'));
         assert_eq!(title(ch.held()), "SPC t");
-        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["w", "r"]);
+        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["w", "r", "d"]);
         feed(&mut ch, &c, k('x'));
         assert_eq!(title(ch.held()), "SPC t", "하위 층의 모르는 키가 메뉴를 옮겼다");
         feed(&mut ch, &c, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
@@ -439,7 +439,8 @@ mod tests {
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &layer(), &[])), ["a", "d"]);
         let detail = Ctx { list_focus: false, ..layer() };
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &detail, &[])), ["a"], "상세 포커스에서 해제가 섰다");
-        assert_eq!(keys_of(&entries(&[k(' '), k('t')], &layer(), &[])), ["r"], "층에서 워크트리가 섰다");
+        // 층에서도 상세 칸은 있다 — 숨기기(`d`)는 서고 워크트리 겹쳐 보기(`w`)만 빠진다.
+        assert_eq!(keys_of(&entries(&[k(' '), k('t')], &layer(), &[])), ["r", "d"], "층에서 워크트리가 섰다");
 
         let mut ch = Chord::default();
         for x in [' ', 't', 'w'] {
@@ -457,8 +458,12 @@ mod tests {
     #[test]
     fn toggles_show_their_state_in_words() {
         let states = |c: Ctx| -> Vec<Option<&'static str>> { entries(&[k(' '), k('t')], &c, &[]).iter().map(|e| e.state).collect() };
-        assert_eq!(states(inside()), [Some("[꺼짐]"), Some("[그리기]")]);
-        assert_eq!(states(Ctx { worktree: true, raw: true, ..inside() }), [Some("[켜짐]"), Some("[원문]")]);
+        assert_eq!(states(inside()), [Some("[꺼짐]"), Some("[그리기]"), Some("[숨김]")]);
+        assert_eq!(states(Ctx { worktree: true, raw: true, detail: true, ..inside() }), [
+            Some("[켜짐]"),
+            Some("[원문]"),
+            Some("[보임]")
+        ]);
     }
 
     /// **이름 없는 하위 접두어가 없다.** 표에 SPC 줄을 더하며 새 접두어를 만들면 여기서 멈춘다.

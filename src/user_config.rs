@@ -379,6 +379,7 @@ impl Doc {
             sort: look_one(t, SORT, "낱말이어야", word, &mut problems),
             sort_reversed: look_one(t, SORT_REVERSED, "true·false 여야", Item::as_bool, &mut problems),
             fields: look_words(t, FIELDS, &mut problems),
+            detail: look_one(t, DETAIL, "true·false 여야", Item::as_bool, &mut problems),
         };
         (look, problems)
     }
@@ -422,6 +423,9 @@ impl Doc {
             changed |= put_value(t, SORT_REVERSED, new.sort_reversed.map(toml_edit::Value::from));
         }
         changed |= merge_words(t, FIELDS, base.fields.as_deref(), new.fields.as_deref());
+        if base.detail != new.detail {
+            changed |= put_value(t, DETAIL, new.detail.map(toml_edit::Value::from));
+        }
         self.dirty |= changed;
         Ok(())
     }
@@ -434,6 +438,7 @@ const HIDE_DEFERRED: &str = "hide_deferred";
 const SORT: &str = "sort";
 const SORT_REVERSED: &str = "sort_reversed";
 const FIELDS: &str = "fields";
+const DETAIL: &str = "detail";
 
 /// 탐색기의 보기 — 사람이 마지막으로 고른 것(moai-2bzp). **낱말로 든다** — 무슨 낱말이 있는지는
 /// 탐색기가 안다. 이 모듈이 조각의 타입을 알면 설정 파일의 모양이 화면 코드에 매인다. 없는 키는
@@ -443,6 +448,7 @@ const FIELDS: &str = "fields";
 /// [tui]
 /// hidden = ["done"]
 /// hide_deferred = false
+/// detail = true
 /// sort = "updated"
 /// sort_reversed = false
 /// fields = ["id", "priority", "tally", "assignee"]
@@ -454,6 +460,8 @@ pub struct Look {
     pub sort: Option<String>,
     pub sort_reversed: Option<bool>,
     pub fields: Option<Vec<String>>,
+    /// 오른쪽 상세 칸이 보이나(moai-ymnu).
+    pub detail: Option<bool>,
 }
 
 /// 설정에서 보기만 읽는다. 파일이 없으면 빈 `Look` 이고 문제도 아니다. 깨진 파일은 까닭 한 줄 —
@@ -963,6 +971,7 @@ mod tests {
             sort: Some("updated".into()),
             sort_reversed: Some(false),
             fields: Some(vec!["id".into(), "assignee".into()]),
+            detail: Some(false),
         };
         update(&path, |doc| doc.merge_look(&Look::default(), &look)).unwrap();
         let (back, problems) = read_look(Some(&path));
@@ -1058,6 +1067,7 @@ mod tests {
             sort: Some("updated".into()),
             sort_reversed: Some(false),
             fields: Some(vec!["id".into()]),
+            detail: Some(true),
         };
         let a = Look { fields: Some(vec!["id".into(), "assignee".into()]), ..base.clone() };
         let b = Look { hide_deferred: Some(true), ..base.clone() };
