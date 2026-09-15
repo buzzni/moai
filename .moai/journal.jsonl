@@ -2959,3 +2959,14 @@
 {"ts":"2026-09-15T10:00:00Z","id":"moai-4370","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-15T10:00:03Z","id":"moai-6opu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-15T10:00:06Z","id":"moai-qjem","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-15T10:00:46Z","id":"moai-krh7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai show 본문의 코드가 복사해 도는 모양으로 그려진다"}
+{"ts":"2026-09-15T10:00:46Z","id":"moai-syp8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"인라인 코드를 공백에서 끊지 않는다"}
+{"ts":"2026-09-15T10:00:46Z","id":"moai-xtu8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"폭보다 긴 코드 조각도 끊지 않고 한 줄로 둔다"}
+{"ts":"2026-09-15T10:00:46Z","id":"moai-nnda","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"examples/bash-agent 로 가는 한 줄 링크"}
+{"ts":"2026-09-15T10:00:46Z","id":"moai-krh7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-kvd9 에서 펼쳤다 — moai show 본문의 인라인 코드가 폭 76 에서 공백마다 갈려 복사한 명령이 잘린다"}
+{"ts":"2026-09-15T10:00:46Z","id":"moai-kvd9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-krh7 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-15T10:00:56Z","id":"moai-gq1c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T10:00:56Z","id":"moai-knn0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T10:00:57Z","id":"moai-2vrw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T10:00:57Z","id":"moai-educ.van","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review xhigh --fix b69ce81..d3a88e3 이 worktree-moai-educ 안에서 돈다. 끝나면 원문·판단 두 노트로 적고 done -m"}
+{"ts":"2026-09-15T10:00:57Z","id":"moai-educ","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 셋 커밋 완료 — gq1c d3eb96e · knn0 4edb4c8 · 2vrw d3a88e3 (main 받은 뒤 798+285 통과). 리뷰 moai-educ.van 을 닫고 main 에 --no-ff 머지 → 워크트리·가지 삭제 → 셋 done → moa-issue-14 에 보고. 멤버별 리뷰는 건너뛰고 에픽 끝 xhigh 하나로 모았다(셋 다 한 파일 수준, 까닭은 van 의 -b)"}
