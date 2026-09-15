@@ -160,7 +160,13 @@ PLAN
 
   moai mv moai-4aex in_progress
   moai mv moai-4aex moai-9k2p done
-  moai mv moai-4aex review -m \"테스트는 다음 이슈로 뺐다\"")]
+  moai mv moai-4aex review -m \"테스트는 다음 이슈로 뺐다\"
+
+  여럿이 같은 .moai 를 쓰면 본 칸을 함께 준다. `--from` 은 락 안에서 다시 보고
+  그 칸일 때만 옮긴다 — 진 쪽은 stderr 한 줄과 0 아닌 코드를 받는다. 그때는
+  **id 를 하나만** 준다: 여럿이면 이긴 줄과 진 줄이 한 코드에 섞인다.
+
+  moai mv moai-4aex in_progress --from todo")]
     Mv(MvArgs),
     /// 제목·본문·태그·에픽·우선순위를 고친다
     Edit(EditArgs),
@@ -189,7 +195,13 @@ NOTE
   경고에서 빠지고, 쌓이면 `moai status` 가 한 줄로 비춘다. 에픽·마일스톤·
   부모를 미루면 그 밑의 일도 같이 빠진다.
 
-  `moai show --deferred` 로 미뤄 둔 것만 본다.")]
+  `moai show --deferred` 로 미뤄 둔 것만 본다.
+
+  `--from <칸>` 은 `mv --from` 과 같은 자다 — 옆에서 집어 **칸이 움직인** 줄을
+  뒤늦은 미루기가 계획 밖으로 빼지 않는다. 미루기는 칸을 안 바꾸므로, 겨루는
+  둘이 **둘 다 미루는** 것은 이것으로 안 갈린다.
+
+  moai defer moai-4aex -m \"다음 분기\" --from todo")]
     Defer(DeferArgs),
 
     /// 하나가 다른 것을 막는다 (또는 그 막음을 없앤다)
@@ -642,6 +654,13 @@ pub struct MvArgs {
     /// 이 이동에 한 줄 메모 (저널에만 남는다)
     #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
     pub msg: Option<String>,
+
+    /// 아직 이 칸에 있을 때만 옮긴다 (겨루는 집기)
+    ///
+    /// 안 주면 지금까지처럼 무엇도 막지 않는다. 주면 락 안에서 다시 보고, 그
+    /// 사이에 칸이 달라진 줄은 건드리지 않은 채 부분 실패로 선다.
+    #[arg(long, value_name = "칸")]
+    pub from: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -693,6 +712,13 @@ pub struct DeferArgs {
     /// 왜 미루는가 (저널에만 남는다)
     #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
     pub msg: Option<String>,
+
+    /// 아직 이 칸에 있을 때만 미루거나 도로 집는다 (겨루는 집기)
+    ///
+    /// `mv --from` 과 같은 자다. 옆에서 집어 일하기 시작한 줄을 뒤늦게 계획
+    /// 밖으로 빼지 않는다. 안 주면 지금까지처럼 아무것도 막지 않는다.
+    #[arg(long, value_name = "칸")]
+    pub from: Option<String>,
 }
 
 #[derive(Args, Debug)]
