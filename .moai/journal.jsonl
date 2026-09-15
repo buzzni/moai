@@ -2618,3 +2618,6 @@
 {"ts":"2026-09-15T06:08:42Z","id":"moai-u8cs.aes","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 없음 — 입력·답·차례·부작용이 전과 같음을 확인받았다"}
 {"ts":"2026-09-15T06:11:03Z","id":"moai-u8cs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 머지, 합친 main 에서 시험 통과(769 passed 268 passed )"}
 {"ts":"2026-09-15T06:11:04Z","id":"moai-zrzo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T06:13:09Z","id":"moai-1c6h.eo7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: high 리뷰는 끝났다 — 원문·판단 노트 붙었고 fix 는 8f97c04 로 워크트리 가지에 있다. 남은 것은 에픽 max(moai-opjn.l0i) 뒤 병합과 함께 done"}
+{"ts":"2026-09-15T06:13:09Z","id":"moai-1c6h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: eo7(high) 반영 끝(8f97c04). 에픽 max 리뷰 moai-opjn.l0i 를 워크트리에서 부르고, main 받기·시험 → --no-ff 병합 → 이 이슈와 두 리뷰를 done"}
+{"ts":"2026-09-15T06:13:09Z","id":"moai-opjn.l0i","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 아직 /code-review max --fix 를 부르지 않았다(노트 없음). 워크트리 moai-opjn 에서 main..HEAD 를 대상으로 부르고 원문·판단 노트를 붙인다"}
