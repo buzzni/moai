@@ -539,8 +539,12 @@ fn malformed(what: &str, raw: &str) -> Fail {
 
 /// git 저장소 밖에서도 전역 설정을 읽는다 — moai 는 `.moai/` 만 찾지 git 을
 /// 요구하지 않으므로, `git init` 전에도 이 값이 있을 수 있다.
+///
+/// git 은 [`crate::git::command`] 로 띄운다 — 시험 빌드가 물려받은 저장소 변수를
+/// 걷는 자리가 거기 하나여야, 새 시험이 이 길로 사람을 물어도 바깥 저장소의
+/// 이름을 읽지 않는다(moai-g1a3).
 fn git_config(key: &str) -> Option<String> {
-    let out = std::process::Command::new("git").args(["config", key]).output().ok()?;
+    let out = crate::git::command().args(["config", key]).output().ok()?;
     if !out.status.success() {
         return None;
     }

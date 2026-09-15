@@ -1952,6 +1952,29 @@ impl Warning {
         self.notice = true;
         self
     }
+
+    /// AGENTS.md 의 관리 블록이 이 바이너리가 쓸 글에서 낡았다는 **알림**(moai-mj45).
+    ///
+    /// 이슈에서 오는 말이 아니라 [`status`] 가 만들지 않는다 — 여기는 `&[Issue]` 만 받는 순수
+    /// 함수라 파일을 안 읽는다. 읽는 쪽(`cmd::init::agents_notice`)이 재고, `status` 와 훅의 보드가
+    /// 이것을 `notices` 에 얹는다. 모양을 여기 두는 것은 알림의 낱말(`kind`·`hint`)이 한 곳에 서게
+    /// 해서다. **경고가 아니다**: 낡은 안내는 고칠 일이 아니라 다시 심을 일이고, Stop 훅이 세는
+    /// `warnings` 에 들면 도구를 새로 빌드할 때마다 세션이 붙들린다.
+    ///
+    /// `root` 는 부른 사람의 셸이 뿌리에 있지 않을 때의 뿌리(셸에 붙여 넣을 모양)다 — `init` 은
+    /// 부른 자리에 심으므로 고칠 명령이 `-C` 로 거기를 댄다.
+    /// `edited` 면 블록 안을 사람이 고친 것이고, 아니면 어떤 바이너리가 쓴 그대로다 — **낱말이
+    /// 갈린다**(2026-09-15 사용자 결정). 뭉뚱그려 `moai init` 만 대면, main 을 받고 아직 다시
+    /// 빌드 안 한 세션이 그 말을 따라 **새 안내를 옛 글로 되돌리고** 그 되돌림이 머지로 실린다.
+    /// 기계도 가르라고 `kind` 를 따로 둔다.
+    pub fn agents_stale(root: Option<&str>, edited: bool) -> Warning {
+        let hint = match root {
+            None => "moai init".to_string(),
+            Some(r) => format!("moai -C {r} init"),
+        };
+        let kind = if edited { "agents_hand_edited" } else { "agents_stale" };
+        Warning::new(kind, Vec::new()).count(1).notice().hint(&hint)
+    }
 }
 
 /// 만드는 속도와 끝내는 속도. **한 줄로 전체 건강을 말하는 숫자다.**

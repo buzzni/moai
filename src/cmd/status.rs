@@ -37,6 +37,10 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 안에서 겹쳐 보지 않았으면 빈 목록이 오고, 그러면 `stranded` 가 조용하다.
     let trees = crate::worktree::workplaces(&repo.root, &repo.config, worktree);
     st.warnings.extend(report::stranded(&load.issues, &repo.config, &trees, &now));
+    // **낡은 AGENTS.md 블록은 알림이다**(moai-mj45, 2026-09-14 사용자 결정). 언제 서고 무엇을
+    // 대는지는 `agents_notice` 가 정하고, 훅의 보드가 같은 것을 싣는다. 한눈 보기(`.moai` 밖)는
+    // 남의 저장소라 안 본다.
+    st.notices.extend(crate::cmd::init::agents_notice(&repo.root, ctx.chdir));
 
     if st.broken() {
         super::note_partial();

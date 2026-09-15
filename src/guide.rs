@@ -275,7 +275,8 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 {COMMITS}
 
 도구가 자라 이 블록이 낡으면 `moai init` 을 다시 부른다. 이슈와 저널은
-건드리지 않고 이 블록만 다시 쓴다.
+건드리지 않고 이 블록만 다시 쓴다. 낡았는지만 보려면 `moai init --check` —
+아무것도 안 쓰고 `current`·`stale`·`missing` 으로 답한다.
 
 ### 훅이 실제로 보는 것 셋
 

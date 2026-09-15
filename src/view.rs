@@ -659,6 +659,10 @@ fn says(w: &Warning) -> String {
             Some(d) if d > 0 => format!("미뤄 둔 것 {n}건 (가장 오래된 것 {d}일)"),
             _ => format!("미뤄 둔 것 {n}건"),
         },
+        // **낡음의 두 얼굴을 다른 낱말로 낸다**(moai-mj45). 앞의 것은 "다시 빌드부터" 고, 뒤의
+        // 것은 "손질이 사라진다" 다 — 한 낱말로 뭉치면 그 중 한쪽이 반드시 거짓말이 된다.
+        "agents_stale" => "AGENTS.md 블록이 다르다 — 다른 바이너리가 쓴 것이라 이쪽이 더 낡았을 수 있다 (다시 빌드해 보고)".to_string(),
+        "agents_hand_edited" => "AGENTS.md 블록을 손으로 고쳤다 — 다시 심으면 그 손질은 사라진다".to_string(),
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
@@ -1298,12 +1302,14 @@ pub fn commits(commits: &[crate::git::Commit]) -> Vec<String> {
 ///
 /// **트래커 커밋은 그리지 않는다.** 집기·닫기만 적은 커밋이라 사람이 찾는 "무엇이 고쳤나"
 /// 가 아니고, 이력이 이미 같은 것을 말한다. `--json` 은 `tracker` 표시와 함께 전부 낸다.
-/// 제목도 파일 밖에서 온 글이라 제어문자를 걷어낸다(`body_lines` 와 같은 까닭).
+/// 제목도 파일 밖에서 온 글이라 **한 줄짜리로 걷어낸다**(`text::one_line`) — `sanitize` 가
+/// 남기는 탭이 그대로 나가면 CLI 에서는 탭 자리까지 칸이 밀리고 탐색기에서는 폭을 재는
+/// 자가 0으로 세어 글자째 사라진다. 한 커밋은 한 줄이라야 해시와 제목이 짝으로 읽힌다.
 pub fn commit_lines(commits: &[crate::git::Commit]) -> Vec<(&str, String)> {
     commits
         .iter()
         .filter(|c| !c.tracker)
-        .map(|c| (c.hash.get(..7).unwrap_or(&c.hash), crate::text::sanitize(&c.subject)))
+        .map(|c| (c.hash.get(..7).unwrap_or(&c.hash), crate::text::one_line(&c.subject)))
         .collect()
 }
 
