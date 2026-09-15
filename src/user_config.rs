@@ -25,6 +25,7 @@
 use crate::fail::{Fail, R, code};
 use crate::store::Lock;
 use crate::style::Hue;
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
@@ -94,7 +95,12 @@ pub struct Registry {
     /// 탐색기를 띄우면 층과 보기가 저마다 파일을 읽고 파싱해 한 번 띄울 때 설정을 두세 번 읽었다.
     /// 까닭을 `problems` 와 따로 드는 것은 대는 자리가 달라서다 — 층의 문제는 층이, 보기의 문제는 알림이 댄다.
     pub look: Look,
+    /// 보기·읽음을 읽다 만난 까닭. `problems`(층이 대는 것)와 따로 든다 — 대는 자리가 다르다.
     pub look_problems: Vec<String>,
+    /// 이슈 id → **내가 마지막으로 본 때**(RFC3339, moai-50mn). 여기 없는 줄은 한 번도 안 본 것이다.
+    /// 트래커가 아니라 내 설정에 드는 까닭: 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에
+    /// 적으면 읽기만 해도 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다(사용자 결정 2026-09-15).
+    pub read: BTreeMap<String, String>,
 }
 
 /// 설정을 관대하게 읽는다. 파일이 없으면 빈 목록이고 문제도 아니다 — 아직
@@ -124,6 +130,9 @@ pub fn read(path: Option<&Path>) -> Registry {
             let (look, problems) = doc.look();
             reg.look = look;
             reg.look_problems = problems.into_iter().map(at).collect();
+            let (read, problems) = doc.read_marks();
+            reg.read = read;
+            reg.look_problems.extend(problems.into_iter().map(at));
         }
         // 못 읽었거나 깨진 까닭은 **층과 보기가 둘 다 댄다** — 따로 읽던 때와 같다(moai-z0q6 이 따로 본다).
         Err(e) => {
@@ -436,6 +445,60 @@ impl Doc {
         self.dirty |= changed;
         Ok(())
     }
+
+    /// 적어 둔 읽음 — 이슈 id → 마지막으로 본 때(moai-50mn). **관대하게 읽는다**: 낱말이 아닌 값은
+    /// 까닭 한 줄로 대고 건너뛴다. `[read]` 가 없으면 빈 표다.
+    pub fn read_marks(&self) -> (BTreeMap<String, String>, Vec<String>) {
+        let mut problems = Vec::new();
+        let Some(item) = self.doc.get(READ) else {
+            return (BTreeMap::new(), problems);
+        };
+        let Some(t) = item.as_table_like() else {
+            problems.push(format!("`{READ}` 는 `[{READ}]` 표여야 한다 — 지금은 {}", item.type_name()));
+            return (BTreeMap::new(), problems);
+        };
+        let mut marks = BTreeMap::new();
+        for (id, at) in t.iter() {
+            match at.as_str() {
+                Some(when) => {
+                    marks.insert(id.to_string(), when.to_string());
+                }
+                None => problems.push(format!("`{READ}.{id}` 는 때를 적은 낱말이어야 한다 — 지금은 {}", at.type_name())),
+            }
+        }
+        (marks, problems)
+    }
+
+    /// 읽은 때를 적는다 — **준 id 만 손댄다**(moai-50mn). 남이 적은 줄도, 이 바이너리가 모르는 id 도
+    /// 그대로 둔다: 읽음은 사람마다 쌓이는 것이라 지울 까닭이 없고, 락 안에서 다시 읽은 파일을
+    /// 통째로 덮으면 옆 탐색기가 방금 읽은 줄이 사라진다(`Doc::merge_look` 과 같은 까닭).
+    ///
+    /// 같은 때가 이미 적혀 있으면 아무것도 안 한다 — 헛 쓰기가 없다. **`read` 가 표가 아니면 적지
+    /// 않는다** — 무엇인지 모르는 값을 덮으면 되돌릴 수 없다.
+    pub fn mark_read(&mut self, marks: &BTreeMap<String, String>) -> R<()> {
+        if marks.is_empty() {
+            return Ok(());
+        }
+        match self.doc.get(READ) {
+            None => {
+                self.doc.insert(READ, Item::Table(Table::new()));
+            }
+            Some(item) if item.is_table_like() => {}
+            Some(item) => {
+                return Err(Fail::new(format!(
+                    "`{READ}` 가 `[{READ}]` 표가 아니라({}) 읽음을 적지 않는다 — 손으로 고친다",
+                    item.type_name()
+                )));
+            }
+        }
+        let t = self.doc.get_mut(READ).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
+        for (id, when) in marks {
+            if put_value(t, id, Some(toml_edit::Value::from(when.as_str()))) {
+                self.dirty = true;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// 탐색기 보기가 사는 표(moai-2bzp).
@@ -447,6 +510,8 @@ const SORT_REVERSED: &str = "sort_reversed";
 const FIELDS: &str = "fields";
 const DETAIL: &str = "detail";
 const FIELDS_KNOWN: &str = "fields_known";
+/// 읽음이 사는 표(moai-50mn) — 이슈 id → 내가 마지막으로 본 때.
+const READ: &str = "read";
 
 /// 탐색기의 보기 — 사람이 마지막으로 고른 것(moai-2bzp). **낱말로 든다** — 무슨 낱말이 있는지는
 /// 탐색기가 안다. 이 모듈이 조각의 타입을 알면 설정 파일의 모양이 화면 코드에 매인다. 없는 키는
