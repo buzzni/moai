@@ -89,6 +89,7 @@ pub fn t(key: &str) -> &'static str {
 /// 그 언어의 표. 한 번만 읽어 들고 있는다 — 매 줄 JSON 을 다시 푸는 자리가 아니다.
 fn table(lang: Lang) -> &'static HashMap<String, String> {
     static TABLES: OnceLock<HashMap<&'static str, HashMap<String, String>>> = OnceLock::new();
+    static NONE: OnceLock<HashMap<String, String>> = OnceLock::new();
     let all = TABLES.get_or_init(|| {
         Lang::ALL
             .into_iter()
@@ -100,7 +101,10 @@ fn table(lang: Lang) -> &'static HashMap<String, String> {
             })
             .collect()
     });
-    &all[lang.code()]
+    // **`ALL` 에서 빠진 갈래도 빈 표다.** `code()`·`bundle()` 은 새 갈래를 빠뜨리면 컴파일이
+    // 잡지만 `ALL: [Lang; 5]` 은 그대로 서고, 색인(`all[…]`)으로 들면 그 갈래가 화면에 닿는
+    // 순간 패닉이다 — 깨진 JSON 을 빈 표로 받는 것과 같은 까닭으로 여기서도 멈추지 않는다.
+    all.get(lang.code()).unwrap_or_else(|| NONE.get_or_init(Default::default))
 }
 
 /// 그 키의 글자. **없으면 영어로, 영어에도 없으면 키 그대로** 낸다.
@@ -171,12 +175,21 @@ mod tests {
     }
 
     /// 실린 표가 다섯 다 읽힌다 — JSON 하나가 깨져 조용히 빈 표가 되는 것을 여기서 잡는다.
+    ///
+    /// **읽히는 길로도 잰다**([`table`]). 여기서만 따로 파싱하면 `table` 의
+    /// `unwrap_or_default` 가 삼킨 것이 안 보이고, 시험은 통과하는데 화면은 영어로 떨어진다.
+    /// **어느 갈래가 남의 파일을 가리키는지도 잰다** — `bundle()` 의 `include_str!` 은 다섯
+    /// 줄이 나란해 한 줄을 잘못 이어도 컴파일이 통과하고, ja·zh·es 는 담긴 키가 같아
+    /// 나머지 시험이 그것을 못 본다.
     #[test]
-    fn every_bundle_parses() {
+    fn every_bundle_parses_and_is_wired_to_its_own_file() {
+        let mut seen = std::collections::HashSet::new();
         for lang in Lang::ALL {
             let one: HashMap<String, String> =
                 serde_json::from_str(lang.bundle()).unwrap_or_else(|e| panic!("{}: {e}", lang.code()));
             assert!(!one.is_empty(), "{} 표가 비었다", lang.code());
+            assert_eq!(table(lang), &one, "{} 는 실릴 때와 읽힐 때가 다르다", lang.code());
+            assert!(seen.insert(lang.bundle()), "{} 가 남의 말묶음 파일을 가리킨다", lang.code());
         }
     }
 }
