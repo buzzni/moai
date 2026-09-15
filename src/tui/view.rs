@@ -176,6 +176,28 @@ impl Default for Fields {
     }
 }
 
+/// **열 하나가 비트 하나다.** 열이 [`Fields`] 의 폭을 넘기는 날 `1 << n` 이 감싸 첫 열과 비트가
+/// 겹치고, release 에서는 그 감싸기가 조용하다 — 화면에서 id 를 끄면 새 열이 같이 꺼진다.
+/// 그날 **컴파일이 멈추게** 못 박는다(moai-ggqf, moai-7pd5 가 적어 둔 것).
+const _: () = assert!(
+    widest_bit() < u16::BITS,
+    "열이 Fields 의 비트 폭을 넘었다 — Fields 와 Field::bit 를 더 넓은 정수로 옮겨라"
+);
+
+/// [`Field::ALL`] 가운데 가장 큰 비트 자리. `Field::bit` 이 쓰는 그 자리다.
+const fn widest_bit() -> u32 {
+    let mut widest = 0;
+    let mut at = 0;
+    while at < Field::ALL.len() {
+        let bit = Field::ALL[at] as u32;
+        if bit > widest {
+            widest = bit;
+        }
+        at += 1;
+    }
+    widest
+}
+
 impl Fields {
     /// 아무 열도 안 켠 것 — 설정에서 읽은 이름을 하나씩 켤 때 쓴다.
     pub fn none() -> Fields {
@@ -224,6 +246,36 @@ mod tests {
         f.set(Field::Id, false);
         f.set(Field::Id, false);
         assert!(!f.shows(Field::Id) && f.shows(Field::Priority), "끈 것을 끄며 켰거나 옆 열을 건드렸다");
+    }
+
+    /// **열마다 제 비트를 쓴다**(moai-ggqf) — 둘이 같은 비트를 쓰면 하나를 끄며 다른 하나가 꺼진다.
+    /// `Field::ALL` 에 빠진 열도 여기서 걸린다: 빠진 열은 설정에 저장되지도, 폭 가드에 세이지도 않는다.
+    #[test]
+    fn every_column_owns_a_bit_and_stands_in_all() {
+        let mut seen = Fields::none();
+        for f in Field::ALL {
+            assert!(!seen.shows(f), "{} 가 앞 열과 같은 비트를 쓴다", f.name());
+            seen.set(f, true);
+        }
+        for f in Field::ALL {
+            assert!(seen.shows(f), "{} 를 켰는데 꺼졌다 — 비트가 겹친다", f.name());
+        }
+        // 갈래를 빠짐없이 적는 match — 새 열을 더하면 여기서 멈추고, ALL 에도 넣으라고 댄다.
+        for f in Field::ALL {
+            let in_all = match f {
+                Field::Id
+                | Field::Priority
+                | Field::Assignee
+                | Field::Created
+                | Field::Updated
+                | Field::Tally
+                | Field::Tags
+                | Field::Names
+                | Field::Branch => true,
+            };
+            assert!(in_all);
+        }
+        assert_eq!(Field::ALL.len(), 9, "열을 더했으면 ALL 과 이 시험을 함께 고친다");
     }
 
     /// 이 프로젝트의 칸 — 시험마다 같은 설정이다.
