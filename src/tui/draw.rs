@@ -53,9 +53,8 @@ const HEADER_MIN_H: u16 = HEADER_H + 18;
 /// 로고와 파이프 사이, 파이프와 정보 사이의 여백 한 칸씩.
 const HEADER_GAP: usize = 1;
 
-/// 파이프 오른쪽에 사람과 메일 한 줄이 설 만큼. 이만큼도 안 남으면 로고를 뺀다 —
-/// 로고를 지키고 정보를 자르면, 숫자 키를 설명하는 유일한 자리가 사라진다.
-const HEADER_INFO_MIN: usize = 24;
+/// `{label:<7} : ` — 라벨 일곱 칸과 " : " 세 칸. 정보 줄의 붙박이 앞자리다.
+const HEADER_LABEL_W: usize = 7 + 3;
 
 /// 좌우 여백. **`CURSOR` 에서 잰다** — 우측 패널의 여백도 이 값인데, 숫자를
 /// 따로 적어 두면 커서 글리프를 바꾼 날 두 패널이 말없이 갈라진다. 한쪽만
@@ -105,9 +104,9 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     let [left, right] =
         Layout::horizontal([Constraint::Percentage(LEFT), Constraint::Min(10)]).areas(body);
 
-    if header_h > 0 {
-        header(f, app, head);
-    }
+    // 헤더의 빛(`with_projects`)은 버퍼로 못 읽는다 — 빛줄기는 제 글자를 안 남긴다.
+    // 들고 있다가 아래에서 스피너와 함께 센다.
+    let header_glint = header_h > 0 && header(f, app, head);
     crumbs(f, app, &rows, top);
     if let Some((text, urgent)) = banner(app) {
         let style = if urgent {
@@ -160,7 +159,9 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 스피너 글자를 적은 경우 하나고, 그 손해는 오늘까지의 깨움과 같다(`SPIN_BUDGET` 로 묶인다).
     // 빛줄기는 따로 안 본다 — 같은 줄의 글리프(`App::spins`)가 늘 그 왼쪽에 서고, 메뉴는 몸통을
     // 밀어 올릴 뿐 덮지 않으며 폼은 통째로 덮어, 빛만 보이고 글리프가 가려지는 화면이 없다.
-    app.spun = spinner_on(f.buffer_mut());
+    // **헤더의 빛만 예외다**(`header_glint`) — 헤더의 빛줄기 곁에는 스피너 글리프가 없어
+    // 버퍼에 아무 자취도 안 남는다. 그래서 그린 쪽이 들고 온 것을 여기서 함께 센다.
+    app.spun = spinner_on(f.buffer_mut()) || header_glint;
 
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
@@ -503,13 +504,18 @@ fn banner(app: &App) -> Option<(String, bool)> {
 
 /// 맨 위 여섯 줄 — 로고와, 그 오른쪽을 가르는 파이프.
 ///
-/// 파이프 오른쪽은 아직 빈 채로 둔다. 사람·판(moai-56jf)과 번호 붙은 프로젝트(moai-mr83)가
-/// 그 자리에 선다 — 줄과 칸을 먼저 세워 두면 그쪽은 글자만 채운다.
-fn header(f: &mut Frame, app: &mut App, at: Rect) {
+/// 파이프 오른쪽은 사람·판(moai-56jf) 두 줄과 번호 붙은 프로젝트(moai-mr83)다.
+/// 돌려주는 값은 "지금 선 프로젝트에 빛이 섰는가" 다 — [`screen`] 이 `App::spun` 에 함께 센다.
+fn header(f: &mut Frame, app: &mut App, at: Rect) -> bool {
     let logo_w = LOGO.iter().map(|l| crate::text::width(l)).max().unwrap_or(0);
-    // 로고와 파이프를 세우고도 오른쪽에 정보 한 줄이 설 만큼 남아야 로고를 그린다.
-    let with_logo = (at.width as usize) >= logo_w + HEADER_GAP * 2 + 1 + HEADER_INFO_MIN;
     let told = told_of(app);
+    // 라벨 칸은 `{label:<7} : ` 로 박았다 — 일곱 칸과 " : " 세 칸.
+    let told_w =
+        told.iter().map(|(_, said)| HEADER_LABEL_W + crate::text::width(said)).max().unwrap_or(0);
+    // 로고와 파이프를 세우고도 오른쪽에 정보 줄이 **통째로** 설 만큼 남아야 로고를 그린다.
+    // 어림잡은 상한을 두었더니(24칸) 55칸짜리 창에서 로고를 지키고 메일을 `raven@bu` 에서
+    // 자르는 화면이 나왔다 — 정보 줄의 실제 폭으로 잰다.
+    let with_logo = (at.width as usize) >= logo_w + HEADER_GAP * 2 + 1 + told_w;
     let lines: Vec<Line> = LOGO
         .iter()
         .enumerate()
@@ -529,12 +535,11 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) {
             Line::from(spans)
         })
         .collect();
-    // 라벨 칸은 `{label:<7} : ` 로 박았다 — 일곱 칸과 " : " 세 칸.
-    let told_w = told.iter().map(|(_, said)| 7 + 3 + crate::text::width(said)).max().unwrap_or(0);
     let logo_cells = if with_logo { logo_w + HEADER_GAP } else { 0 };
     let from = logo_cells + 1 + HEADER_GAP + told_w + HEADER_GAP;
-    let lines = with_projects(app, lines, at.width as usize, from);
+    let (lines, glinted) = with_projects(app, lines, at.width as usize, from);
     f.render_widget(Paragraph::new(lines), at);
+    glinted
 }
 
 /// 헤더 셋째 칸 — 번호 붙은 프로젝트. `<0>` 은 전체(프로젝트 층)고 그다음이 등록 차례다.
@@ -543,10 +548,18 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) {
 /// 열째부터는 번호 없이 이름만 서고, 층에서 골라 들어간다 — 번호를 두 자리로 받기 시작하면
 /// 한 자리 키가 다음 글쇠를 기다리느라 늦어진다.
 ///
-/// **지금 선 자리는 빛이 지나간다**([`shimmer`], 작업 중인 줄과 같은 애니메이션). 그래서
-/// `App::spun` 을 켠다 — 그리지 않으면 루프가 빠른 걸음으로 안 깨어나 빛이 멈춘다.
-fn with_projects<'a>(app: &mut App, mut lines: Vec<Line<'a>>, width: usize, from: usize) -> Vec<Line<'a>> {
-    let Some(layer) = app.layer.as_ref() else { return lines };
+/// **지금 선 자리는 빛이 지나간다**([`shimmer`], 작업 중인 줄과 같은 애니메이션). 빛이 섰는지를
+/// 돌려주고, [`screen`] 이 그것을 `App::spun` 에 함께 센다 — 안 세면 루프가 빠른 걸음으로 안
+/// 깨어나 빛이 멈춘다. **여기서 `app.spun` 을 켜 봐야 소용없다**: 다 그린 뒤 버퍼를 훑는
+/// `app.spun = spinner_on(…)` 이 그 위에 덮어쓴다. 목록의 빛은 곁의 스피너 글리프가 버퍼에
+/// 남아 대신 말해 주지만, 헤더에는 그 글리프가 없어 빛만으로는 읽히지 않는다.
+fn with_projects<'a>(
+    app: &mut App,
+    mut lines: Vec<Line<'a>>,
+    width: usize,
+    from: usize,
+) -> (Vec<Line<'a>>, bool) {
+    let Some(layer) = app.layer.as_ref() else { return (lines, false) };
     // `<0>` 은 층이다 — 층에 서 있으면 그것이 선 자리다.
     let here = match &layer.at {
         crate::tui::layer::At::Layer => Some(0),
@@ -556,7 +569,7 @@ fn with_projects<'a>(app: &mut App, mut lines: Vec<Line<'a>>, width: usize, from
     let room = width.saturating_sub(from);
     let widest = names.iter().enumerate().map(|(n, name)| numbered(n, name).len_hint()).max().unwrap_or(0);
     if room < widest {
-        return lines;
+        return (lines, false);
     }
     let mut glinted = false;
     for (n, name) in names.iter().enumerate() {
@@ -578,8 +591,7 @@ fn with_projects<'a>(app: &mut App, mut lines: Vec<Line<'a>>, width: usize, from
             lines[row].spans.push(Span::styled(tag.name, dim()));
         }
     }
-    app.spun |= glinted;
-    lines
+    (lines, glinted)
 }
 
 /// `<n> 이름` 한 덩이. 번호가 없는 열째부터는 번호 자리를 공백으로 맞춰 이름이 한 줄로 선다.
@@ -3237,6 +3249,36 @@ pub(super) mod tests {
         assert!(head.contains("<9> p9"), "아홉째에 번호가 없다\n{head}");
         assert!(!head.contains("<10>"), "열째에 번호를 줬다\n{head}");
         assert!(head.contains("p10"), "번호 없는 프로젝트가 아예 사라졌다\n{head}");
+    }
+
+    /// **헤더의 빛은 혼자서도 루프를 깨운다**(리뷰). 목록의 빛은 곁의 스피너 글리프가
+    /// 버퍼에 남아 `spinner_on` 이 대신 읽어 주지만, 헤더의 빛줄기는 제 글자를 안 남긴다 —
+    /// 그리는 쪽에서 `app.spun` 을 켜 봐야 다 그린 뒤의 `app.spun = spinner_on(…)` 이
+    /// 덮어써, 화면에 도는 줄이 하나도 없으면 헤더의 빛이 그 자리에서 멈췄다.
+    #[test]
+    fn the_header_glint_wakes_the_loop_with_no_spinner_on_screen() {
+        use super::super::layer::At;
+        let mut a = layered(At::Project("/w/one".into()));
+        a.issues.clear();
+        a.index = crate::nav::Index::of(&[]);
+        a.keep.clear();
+        let lines = render(&mut a, 120, 24);
+        assert!(lines[..6].join("\n").contains("<1> one"), "{:?}", &lines[..6]);
+        assert!(!lines.iter().any(|l| l.contains('▸')), "도는 줄이 남아 시험이 헛돈다");
+        assert!(a.spun, "헤더의 빛이 혼자면 루프를 안 깨운다 — 빛이 그 자리에서 멈춘다");
+    }
+
+    /// **로고를 지키자고 정보를 자르지 않는다**(리뷰). 어림잡은 상한을 두었더니 55칸에서
+    /// 로고가 서고 메일이 `raven@bu` 에서 잘렸다 — 정보 줄의 실제 폭으로 잰다.
+    #[test]
+    fn the_logo_yields_before_the_user_line_is_cut() {
+        let mut a = app();
+        a.identify = |_| Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() });
+        for w in [51u16, 55, 60, 66, 80] {
+            let head = render(&mut a, w, 24)[..6].join("\n");
+            assert!(head.contains("레이븐 (raven@buzzni.com)"), "{w}칸에서 사람이 잘렸다\n{head}");
+            assert!(head.contains("최신 확인 안 함"), "{w}칸에서 판이 잘렸다\n{head}");
+        }
     }
 
     /// 층을 그림 시험용으로 세운다 — 연 것 하나, init 전 하나, 사라진 것 하나.
