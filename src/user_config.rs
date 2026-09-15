@@ -123,7 +123,9 @@ pub fn read(path: Option<&Path>) -> Registry {
             let (projects, problems) = doc.projects();
             reg.projects = projects;
             reg.problems = problems.into_iter().map(at).collect();
-            reg.lang = doc.lang();
+            let (lang, lang_problems) = doc.lang();
+            reg.lang = lang;
+            reg.problems.extend(lang_problems.into_iter().map(at));
             let (look, problems) = doc.look();
             reg.look = look;
             reg.look_problems = problems.into_iter().map(at).collect();
@@ -368,8 +370,27 @@ impl Doc {
     /// 프로젝트를 옮겨 다녀도 읽는 말은 그대로고, 한 프로젝트를 여럿이 볼 때 서로 다른 말로
     /// 읽는다. 없거나 낱말이 아니면 `None` 이고 [`crate::i18n::pick`] 이 영어로 떨어진다 —
     /// 여기서 까닭을 쌓지 않는 것은, 글자 하나 때문에 도구가 안 도는 것처럼 보이면 안 돼서다.
-    pub fn lang(&self) -> Option<String> {
-        self.doc.get(I18N)?.as_table_like()?.get(LANG)?.as_str().map(String::from)
+    /// **틀린 값은 알린다**(리뷰 moai-slfv.vrw). `lang = "kr"` 오타나 `lang = 3` 은 조용히
+    /// 영어가 되는데, 그러면 고친 설정이 왜 안 듣는지 알 길이 없다 — `look()` 이 틀린 보기 키를
+    /// 대는 것과 같은 자다. 이 까닭은 **막지 않는다**: `problems` 는 알림이지 게이트가 아니다.
+    pub fn lang(&self) -> (Option<String>, Vec<String>) {
+        let mut problems = Vec::new();
+        let Some(item) = self.doc.get(I18N) else { return (None, problems) };
+        let Some(t) = item.as_table_like() else {
+            problems.push(format!("`{I18N}` 은 `[{I18N}]` 표여야 한다 — 지금은 {}", item.type_name()));
+            return (None, problems);
+        };
+        let Some(item) = t.get(LANG) else { return (None, problems) };
+        let Some(raw) = item.as_str() else {
+            problems.push(format!("`{I18N}.{LANG}` 은 낱말이어야 한다 — 지금은 {}", item.type_name()));
+            return (None, problems);
+        };
+        if crate::i18n::Lang::parse(raw).is_none() {
+            let known: Vec<&str> = crate::i18n::Lang::ALL.into_iter().map(crate::i18n::Lang::code).collect();
+            problems.push(format!("`{I18N}.{LANG}` 은 {} 중 하나다 — {raw:?}", known.join("·")));
+            return (None, problems);
+        }
+        (Some(raw.to_string()), problems)
     }
 
     /// 적어 둔 탐색기 보기와, 못 읽은 키의 까닭(moai-2bzp). **관대하게 읽는다** — 틀린 키 하나가
@@ -1051,10 +1072,14 @@ mod tests {
     /// 글자 하나 때문에 도구가 안 도는 셈이기 때문이다.
     #[test]
     fn the_language_is_read_from_the_i18n_table() {
-        assert_eq!(Doc::parse("[i18n]\nlang = \"ko\"\n").unwrap().lang(), Some("ko".to_string()));
-        assert_eq!(Doc::parse("[[project]]\npath = \"/a\"\n").unwrap().lang(), None, "표가 없으면 없는 것이다");
-        assert_eq!(Doc::parse("[i18n]\nlang = 3\n").unwrap().lang(), None, "낱말이 아닌 값을 받았다");
-        assert_eq!(Doc::parse("i18n = 3\n").unwrap().lang(), None, "표가 아닌 i18n 에서 멈췄다");
+        let lang = |src: &str| Doc::parse(src).unwrap().lang();
+        assert_eq!(lang("[i18n]\nlang = \"ko\"\n"), (Some("ko".to_string()), vec![]));
+        assert_eq!(lang("[[project]]\npath = \"/a\"\n"), (None, vec![]), "표가 없으면 없는 것이다");
+        // **틀린 값은 알린다** — 조용히 영어가 되면 고친 설정이 왜 안 듣는지 알 길이 없다.
+        assert_eq!(lang("[i18n]\nlang = 3\n").1, ["`i18n.lang` 은 낱말이어야 한다 — 지금은 integer"]);
+        assert_eq!(lang("i18n = 3\n").1, ["`i18n` 은 `[i18n]` 표여야 한다 — 지금은 integer"]);
+        assert_eq!(lang("[i18n]\nlang = \"kr\"\n").1, ["`i18n.lang` 은 en·ko·zh·ja·es 중 하나다 — \"kr\""]);
+        assert!(lang("[i18n]\nlang = \"kr\"\n").0.is_none(), "모르는 코드를 값으로 들였다");
         let reg = read(None);
         assert_eq!(reg.lang, None, "자리를 모르면 언어도 없다");
     }

@@ -82,7 +82,7 @@ pub fn current() -> Lang {
 }
 
 /// 지금 언어로 그 키의 글자. 부르는 자리는 이것 하나만 쓴다.
-pub fn t(key: &str) -> &'static str {
+pub fn t(key: &'static str) -> &'static str {
     say(current(), key)
 }
 
@@ -113,27 +113,12 @@ fn table(lang: Lang) -> &'static HashMap<String, String> {
 /// 읽히고, 빈 줄은 무엇이 사라졌는지도 안 알려 준다. 영어 표가 모든 키를 갖는 것은 시험이
 /// 잰다(moai-f2a6) — 다른 언어는 비어 있어도 통과한다. 다섯을 함께 채우게 하면 글 한 줄 고칠
 /// 때마다 다섯을 고쳐야 하고, 모르는 언어에 기계번역이 들어온다.
-pub fn say(lang: Lang, key: &str) -> &'static str {
-    table(lang)
-        .get(key)
-        .or_else(|| table(Lang::En).get(key))
-        .map(String::as_str)
-        .unwrap_or_else(|| leak(key))
-}
-
-/// 못 찾은 키를 화면에 그대로 낼 때 쓴다. 키는 소스에 박힌 몇 개뿐이라 새는 양이 유한하다.
-fn leak(key: &str) -> &'static str {
-    static SEEN: OnceLock<std::sync::Mutex<Vec<&'static str>>> = OnceLock::new();
-    let seen = SEEN.get_or_init(Default::default);
-    let mut seen = seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    match seen.iter().find(|s| **s == key) {
-        Some(s) => s,
-        None => {
-            let s: &'static str = Box::leak(key.to_string().into_boxed_str());
-            seen.push(s);
-            s
-        }
-    }
+/// **키는 소스에 박힌 글자다**(`&'static str`, 리뷰 moai-slfv.vrw). 자료로 지은 키
+/// (`format!("kind.{k}")`)를 받으면 못 찾은 키를 화면에 내려고 그 글자를 영영 들고 있어야
+/// 하고, 그러면 새는 양이 자료 수만큼 는다. 타입이 그것을 막으면 그럴 자리가 없다 — 칸 이름
+/// 처럼 설정에서 오는 낱말은 애초에 번역할 것이 아니라 그대로 내는 값이다.
+pub fn say(lang: Lang, key: &'static str) -> &'static str {
+    table(lang).get(key).or_else(|| table(Lang::En).get(key)).map_or(key, String::as_str)
 }
 
 #[cfg(test)]
