@@ -3257,3 +3257,4 @@
 {"ts":"2026-09-15T13:22:52Z","id":"moai-8jd7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 의 워크트리 절차가 --from 으로 집는 것을 가르친다"}
 {"ts":"2026-09-15T13:23:00Z","id":"moai-lvf9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(2026-09-15, 사람): --from 은 '아는 칸이거나 어느 줄이 실제로 있는 칸' 을 받는다 — 오타는 그대로 거절하면서, config 가 칸 이름을 바꾼 뒤에도 옛 칸에 남은 줄을 집을 수 있다. '남의 낡은 줄 하나가 모든 쓰기를 막지 않는다' 와 같은 자다. CLAUDE.md 의 워크트리 절차도 --from 으로 집는 것을 가르치게 고친다(사람이 좋다고 했다)."}
 {"ts":"2026-09-15T13:23:00Z","id":"moai-hym7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T13:24:46Z","id":"moai-lur8.met","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"고친 것 열은 66fa725, 조용히 먹던 뿌리의 Bksp 는 e79d64a. 넘긴 것 넷은 moai-k8t0·moai-fbpa·moai-l6wm·moai-xrrn 으로 세웠다"}
