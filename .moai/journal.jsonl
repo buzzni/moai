@@ -3258,3 +3258,6 @@
 {"ts":"2026-09-15T13:23:00Z","id":"moai-lvf9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(2026-09-15, 사람): --from 은 '아는 칸이거나 어느 줄이 실제로 있는 칸' 을 받는다 — 오타는 그대로 거절하면서, config 가 칸 이름을 바꾼 뒤에도 옛 칸에 남은 줄을 집을 수 있다. '남의 낡은 줄 하나가 모든 쓰기를 막지 않는다' 와 같은 자다. CLAUDE.md 의 워크트리 절차도 --from 으로 집는 것을 가르치게 고친다(사람이 좋다고 했다)."}
 {"ts":"2026-09-15T13:23:00Z","id":"moai-hym7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-15T13:24:46Z","id":"moai-lur8.met","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"고친 것 열은 66fa725, 조용히 먹던 뿌리의 Bksp 는 e79d64a. 넘긴 것 넷은 moai-k8t0·moai-fbpa·moai-l6wm·moai-xrrn 으로 세웠다"}
+{"ts":"2026-09-15T13:26:56Z","id":"moai-3d5u.nql","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 리뷰가 아직 돈다 — dotfile_rules 를 gitignore_rules·gitattributes_rules 둘로 가르고 빠진 줄을 preview 로 옮기는 중이다. 끝나면 원문·판단 두 노트로 적고 done -m, 갈린 kind 는 moa-issue-21 에 다시 알린다"}
+{"ts":"2026-09-15T13:26:56Z","id":"moai-780n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: a1880ba 로 커밋됨. 리뷰 moai-3d5u.nql 이 끝나면 에픽과 함께 main 에 머지하고 done"}
+{"ts":"2026-09-15T13:26:57Z","id":"moai-2f99","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: f6b7e48 로 커밋됨. 리뷰가 알림 kind 를 둘로 가르는 중 — 반영한 뒤 에픽과 함께 머지하고 done"}
