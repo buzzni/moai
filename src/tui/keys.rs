@@ -553,10 +553,9 @@ impl Browse {
             // 보기는 프로젝트 안의 줄에 건다 — 층에서는 그룹째 메뉴에 안 선다(`menu::live`).
             Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer => Err(Off::Quiet),
             Column(n) if usize::from(n) >= c.columns => Err(Off::Quiet),
-            // 등록한 프로젝트가 없으면 층 자체가 없다 — 헤더도 번호를 안 대므로 조용하다.
-            // 등록한 수를 넘는 번호도 같다: 없는 자리로 보내면 무엇이 일어났는지 모른다.
-            Project(n) if usize::from(n) > c.projects => Err(Off::Quiet),
-            Project(_) if c.projects == 0 => Err(Off::Quiet),
+            // 등록한 프로젝트가 없으면 층 자체가 없다 — 헤더도 번호를 안 대므로 `0`(전체)까지
+            // 조용하다. 등록한 수를 넘는 번호도 같다: 없는 자리로 보내면 무엇이 일어났는지 모른다.
+            Project(n) if c.projects == 0 || usize::from(n) > c.projects => Err(Off::Quiet),
             _ => Ok(()),
         }
     }

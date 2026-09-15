@@ -441,13 +441,29 @@ impl App {
     /// 것은 지금의 디렉터리다. 못 열면 층에 선 채 그 까닭을 알림으로 댄다(그 줄도 고쳐 선다).
     ///
     /// 읽기는 그 자리에서 한다. 누른 사람은 결과를 기다리고 있다(`App::reload` 와 같다).
+    ///
+    /// **한 프로젝트에 매인 것은 여기서 푼다.** 한때 이 길은 층을 거쳐서만 닿았고, 푸는 일은
+    /// [`App::climb`] 하나가 맡았다 — 헤더의 번호(moai-o133)가 옆 프로젝트로 바로 건너뛰는
+    /// 길을 내면서 그 길이 안 도는 드나들기가 생겼다. 안 풀면 떠난 프로젝트의 거름망(그 줄과
+    /// 칸 이름에 매인 것이다)과 끈 겹쳐 보기와 쓰기 실패가 다음 프로젝트의 화면으로 그대로
+    /// 넘어온다. **겹쳐 보기는 읽기 전에 되돌린다** — 읽는 값이 그 깃발을 탄다.
     pub(super) fn enter_project(&mut self, at: usize) {
         let Some(repo) = self.open_place(at) else { return };
         let Some(layer) = &mut self.layer else { return };
         let path = layer.places[at].path.clone();
-        match (self.read)(&repo, self.worktree) {
+        match (self.read)(&repo, true) {
             Ok(fresh) => {
                 layer.at = At::Project(path);
+                self.worktree = true;
+                self.filter_text = None;
+                // 쓰기 실패의 까닭도 떠난 프로젝트의 것이다 — 걷어야 `apply_fresh` 가 `trouble`
+                // 을 비운다.
+                self.write_failed = false;
+                // 스레드에서 짓던 읽기는 떠난 프로젝트의 것이다. 늦게 닿아도 `App::receive` 가
+                // 뿌리를 견줘 버리지만, 그때까지 `App::follow` 는 이 프로젝트의 읽기를 안 띄운다.
+                if let Some((_, handle)) = self.pending.take() {
+                    self.discard(handle);
+                }
                 self.cfg = repo.config.clone();
                 self.repo = Some(repo);
                 self.path.clear();
@@ -1186,6 +1202,31 @@ mod tests {
         a.hit("2");
         a.hit("7");
         assert_eq!(a.here(), Some(two), "없는 번호가 선 자리를 흔들었다");
+    }
+
+    /// **건너뛰어도 떠난 프로젝트의 것은 안 따라온다**(리뷰). 거름망은 한 프로젝트의 줄과 칸
+    /// 이름에 매이고 끈 겹쳐 보기는 그 프로젝트에 매인 뜻이라 올라올 때 풀리는데(`climb`),
+    /// 맨 숫자는 층을 안 거쳐 그 길이 안 돈다 — 안 풀면 옆 프로젝트가 시키지도 않은 거른
+    /// 화면으로, 끈 화면으로 열린다.
+    #[test]
+    fn a_digit_jump_drops_what_is_bound_to_the_project_it_leaves() {
+        let s = Scratch::new("digit-jump-clean");
+        let (one, two, mut a) = on_layer_with_twins(&s);
+        a.hit("1");
+        assert_eq!(a.here(), Some(one), "1 이 첫째 프로젝트로 안 갔다");
+        a.hit("SPC f");
+        for c in "status=in_progress".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.filter_text.as_deref(), Some("status=in_progress"));
+        a.hit("SPC t w");
+        assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
+
+        a.hit("2");
+        assert_eq!(a.here(), Some(two), "2 가 둘째 프로젝트로 안 갔다");
+        assert_eq!(a.filter_text, None, "거름망이 옆 프로젝트로 따라왔다");
+        assert!(a.worktree, "끈 겹쳐 보기가 옆 프로젝트로 따라왔다");
     }
 
     /// **프로젝트 안에서 `n` 은 그 프로젝트에만 담는다.** 같은 id 를 쓰는 두 프로젝트 중 선
