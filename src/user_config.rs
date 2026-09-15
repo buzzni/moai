@@ -90,6 +90,11 @@ pub struct Registry {
     pub projects: Vec<Project>,
     /// 사람이 읽을 한 줄씩. 비어 있으면 아무 일 없다.
     pub problems: Vec<String>,
+    /// 적어 둔 탐색기 보기와 그것을 읽다 만난 까닭(moai-2bzp). **같은 파싱에서 함께 읽는다**(moai-u8cs) —
+    /// 탐색기를 띄우면 층과 보기가 저마다 파일을 읽고 파싱해 한 번 띄울 때 설정을 두세 번 읽었다.
+    /// 까닭을 `problems` 와 따로 드는 것은 대는 자리가 달라서다 — 층의 문제는 층이, 보기의 문제는 알림이 댄다.
+    pub look: Look,
+    pub look_problems: Vec<String>,
 }
 
 /// 설정을 관대하게 읽는다. 파일이 없으면 빈 목록이고 문제도 아니다 — 아직
@@ -100,17 +105,22 @@ pub struct Registry {
 pub fn read(path: Option<&Path>) -> Registry {
     let Some(path) = path else {
         return Registry {
-            path: None,
-            projects: Vec::new(),
             problems: vec!["사용자 설정의 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 이 다 없다".into()],
+            ..Registry::default()
         };
     };
     let mut reg = Registry { path: Some(path.to_path_buf()), ..Registry::default() };
+    let at = |e: String| format!("{}: {e}", path.display());
+    // 못 읽은 까닭은 **층과 보기가 둘 다 댄다** — 따로 읽던 때와 같다.
+    let unreadable = |reg: &mut Registry, e: String| {
+        reg.problems.push(at(e.clone()));
+        reg.look_problems.push(at(e));
+    };
     let src = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return reg,
         Err(e) => {
-            reg.problems.push(format!("{}: {e}", path.display()));
+            unreadable(&mut reg, e.to_string());
             return reg;
         }
     };
@@ -118,9 +128,12 @@ pub fn read(path: Option<&Path>) -> Registry {
         Ok(doc) => {
             let (projects, problems) = doc.projects();
             reg.projects = projects;
-            reg.problems = problems.into_iter().map(|p| format!("{}: {p}", path.display())).collect();
+            reg.problems = problems.into_iter().map(at).collect();
+            let (look, problems) = doc.look();
+            reg.look = look;
+            reg.look_problems = problems.into_iter().map(at).collect();
         }
-        Err(e) => reg.problems.push(format!("{}: {e}", path.display())),
+        Err(e) => unreadable(&mut reg, e),
     }
     reg
 }
@@ -363,11 +376,12 @@ impl Doc {
             problems.push(format!("`{TUI}` 는 `[{TUI}]` 표여야 한다 — 지금은 {}", item.type_name()));
             return (Look::default(), problems);
         };
+        let word = |i: &Item| i.as_str().map(String::from);
         let look = Look {
             hidden: look_words(t, HIDDEN, &mut problems),
-            hide_deferred: look_flag(t, HIDE_DEFERRED, &mut problems),
-            sort: look_word(t, SORT, &mut problems),
-            sort_reversed: look_flag(t, SORT_REVERSED, &mut problems),
+            hide_deferred: look_one(t, HIDE_DEFERRED, "true·false 여야", Item::as_bool, &mut problems),
+            sort: look_one(t, SORT, "낱말이어야", word, &mut problems),
+            sort_reversed: look_one(t, SORT_REVERSED, "true·false 여야", Item::as_bool, &mut problems),
             fields: look_words(t, FIELDS, &mut problems),
         };
         (look, problems)
@@ -446,24 +460,12 @@ pub struct Look {
     pub fields: Option<Vec<String>>,
 }
 
-/// 설정에서 보기를 읽는다. 파일이 없으면 빈 `Look` 이고 문제도 아니다. 깨진 파일은 까닭 한 줄 —
-/// 탐색기는 그래도 처음값으로 뜬다.
+/// 설정에서 보기만 읽는다. 파일이 없으면 빈 `Look` 이고 문제도 아니다. 깨진 파일은 까닭 한 줄 —
+/// 탐색기는 그래도 처음값으로 뜬다. **시험만 부른다** — 띄우는 길은 [`read`] 한 번으로 층과 보기를 함께 얻는다.
+#[cfg(test)]
 pub fn read_look(path: Option<&Path>) -> (Look, Vec<String>) {
-    let Some(path) = path else {
-        return (Look::default(), Vec::new());
-    };
-    let at = |e: String| vec![format!("{}: {e}", path.display())];
-    match std::fs::read_to_string(path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Look::default(), Vec::new()),
-        Err(e) => (Look::default(), at(e.to_string())),
-        Ok(src) => match Doc::parse(&src) {
-            Ok(doc) => {
-                let (look, problems) = doc.look();
-                (look, problems.into_iter().flat_map(at).collect())
-            }
-            Err(e) => (Look::default(), at(e)),
-        },
-    }
+    let reg = read(path);
+    (reg.look, reg.look_problems)
 }
 
 fn look_words(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<String>) -> Option<Vec<String>> {
@@ -485,22 +487,21 @@ fn look_words(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<String
     )
 }
 
-fn look_word(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<String>) -> Option<String> {
+/// 값 하나를 읽는다 — 없으면 `None`, 모양이 틀리면 `None` 과 까닭 한 줄(`want` 는 `낱말이어야` 처럼
+/// "한다" 앞에 올 말). 낱말·참거짓이 저마다 같은 틀을 적고 있었다(moai-u8cs).
+fn look_one<T>(
+    t: &dyn toml_edit::TableLike,
+    key: &str,
+    want: &str,
+    pick: impl Fn(&Item) -> Option<T>,
+    problems: &mut Vec<String>,
+) -> Option<T> {
     let item = t.get(key)?;
-    let w = item.as_str().map(String::from);
-    if w.is_none() {
-        problems.push(format!("`{TUI}.{key}` 는 낱말이어야 한다 — 지금은 {}", item.type_name()));
+    let v = pick(item);
+    if v.is_none() {
+        problems.push(format!("`{TUI}.{key}` 는 {want} 한다 — 지금은 {}", item.type_name()));
     }
-    w
-}
-
-fn look_flag(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<String>) -> Option<bool> {
-    let item = t.get(key)?;
-    let b = item.as_bool();
-    if b.is_none() {
-        problems.push(format!("`{TUI}.{key}` 는 true·false 여야 한다 — 지금은 {}", item.type_name()));
-    }
-    b
+    v
 }
 
 /// 낱말 배열 하나에 이 세션이 바꾼 만큼만 옮긴다(`Doc::merge_look`). 바뀐 것이 있으면 참.
@@ -986,6 +987,26 @@ mod tests {
         update(&path, |doc| doc.merge_look(&look, &Look { sort: Some("title".into()), ..Look::default() })).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("hidden") && text.contains("sort = \"title\"") && text.contains("extra = 1"), "{text}");
+    }
+
+    /// **한 번의 읽기가 등록과 보기를 함께 낸다**(moai-u8cs) — 따로 읽던 `read_look` 과 같은 답이고,
+    /// 깨진 파일의 까닭은 층(`problems`)과 보기(`look_problems`) 둘 다에 선다.
+    #[test]
+    fn one_read_gives_the_projects_and_the_look() {
+        let d = scratch("one-read");
+        let path = d.join("config.toml");
+        std::fs::write(&path, "[[project]]\npath = \"/a\"\n\n[tui]\nsort = \"title\"\nhide_deferred = 3\n").unwrap();
+        let reg = read(Some(&path));
+        assert_eq!(reg.projects.len(), 1);
+        assert_eq!(reg.look.sort.as_deref(), Some("title"));
+        assert_eq!(reg.look_problems.len(), 1, "{:?}", reg.look_problems);
+        assert!(reg.problems.is_empty(), "보기의 까닭이 층으로 샜다: {:?}", reg.problems);
+        assert_eq!(read_look(Some(&path)), (reg.look.clone(), reg.look_problems.clone()));
+
+        std::fs::write(&path, "[[project]\n").unwrap();
+        let broken = read(Some(&path));
+        assert_eq!((broken.problems.len(), broken.look_problems.len()), (1, 1));
+        assert_eq!(read(None).look_problems, Vec::<String>::new(), "자리를 모르는 것은 보기의 문제가 아니다");
     }
 
     /// **틀린 보기 키는 알리고 나머지는 읽는다**(moai-2bzp). `tui` 가 표가 아니면 읽기는 비고 쓰기는 멈춘다.

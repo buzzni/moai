@@ -502,7 +502,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC s` 가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
     let sorted = (app.order != Default::default()).then(|| {
-        format!("정렬 {}{}", app.order.0.word(), if app.order.1 { " 거꾸로" } else { "" })
+        format!("정렬 {}{}", app.order.by.word(), if app.order.reversed { " 거꾸로" } else { "" })
     });
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
@@ -856,13 +856,11 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize, fields: super::view::Fields) 
         let least = cells.iter().filter_map(|(f, _)| f.drop_rank()).min().expect("오른쪽 열은 걷는 차례가 있다");
         cells.retain(|(f, _)| f.drop_rank() != Some(least));
     }
-    let kept = RIGHT
-        .into_iter()
-        .filter(|f| fields.shows(*f) && !cells.iter().any(|(c, _)| c == f))
-        .fold(fields, |mut k, f| {
-            k.toggle(f);
-            k
-        });
+    // 켠 오른쪽 열 가운데 걷힌 것을 끈다 — 안 켠 열은 `cells` 에도 없어 꺼진 채다.
+    let mut kept = fields;
+    for f in RIGHT {
+        kept.set(f, cells.iter().any(|(c, _)| *c == f));
+    }
     let right = right_of(&cells);
     // **좁으면 스피너부터 걷는다**(moai-q59j). 목록 줄의 글리프는 두 칸(`⠋▸`·` ·`)인데, 제목
     // 한 글자와 디렉터리 `/` 가 들어갈 자리가 없으면 멈춘 글리프 한 칸만 남긴다 — 뜻은 글리프가
@@ -1289,6 +1287,17 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
         out.push(Line::from(""));
         out.push(Line::from(Span::styled("─".repeat(w.min(40)), dim())));
         out.extend(body_lines(body, w, app.raw));
+    }
+    // **커밋은 CLI 상세와 같은 자리, 본문 뒤다**(moai-a4i0). 무엇을 그릴지는 `view::commit_lines`
+    // 가 정한다. 표는 다시 읽기 스레드가 지어 온 것이라 여기서 git 을 부르지 않는다.
+    let drawn = crate::view::commit_lines(app.commits_of(&i.id));
+    if !drawn.is_empty() {
+        out.push(Line::from(""));
+        out.push(Line::from(Span::styled("커밋", bold())));
+        for (short, subject) in drawn {
+            // 제목은 폭에서 잘린다(`fit`) — 한 커밋이 한 줄이어야 해시와 제목이 짝으로 읽힌다.
+            out.push(Line::from(vec![Span::styled(short.to_string(), dim()), Span::raw("  "), Span::raw(subject)]));
+        }
     }
     out
 }
@@ -2425,6 +2434,36 @@ pub(super) mod tests {
         let lines = render(&mut a, 100, 20).join("\n");
         assert!(lines.contains("막힘"), "{lines}");
         assert!(lines.contains("아주 긴"), "막는 것의 제목이 없다\n{lines}");
+    }
+
+    /// **상세가 그 줄에 닿은 커밋을 그린다**(moai-a4i0) — CLI 상세와 같은 자로: 트래커 커밋은
+    /// 빼고, 해시는 일곱 자, 제목의 제어문자는 걷는다. 표가 없는 줄은 칸도 없다.
+    #[test]
+    fn detail_draws_the_commits_that_name_the_line() {
+        let mut a = every(issues());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let id = a.current().and_then(|r| match r {
+            Row::Item(e) => e.at().map(|at| a.issues[at].id.clone()),
+            _ => None,
+        });
+        let id = id.expect("에픽 안의 첫 줄이 이슈가 아니다");
+        let root = std::path::PathBuf::from("/moai-a4i0-없는-뿌리");
+        a.repo = Some(crate::store::Repo { root: root.clone(), config: a.cfg.clone() });
+        let commit = |hash: &str, subject: &str, tracker| crate::git::Commit { hash: hash.into(), subject: subject.into(), tracker };
+        let lines = render(&mut a, 100, 30).join("\n");
+        assert!(!lines.contains("커밋"), "표가 없는데 커밋 칸이 섰다\n{lines}");
+
+        a.commits.insert(
+            root,
+            [(id.clone(), vec![
+                commit("aaaaaaa1111", &format!("chore(tracker): {id} 를 닫는다"), true),
+                commit("bbbbbbb2222", &format!("feat: 고친다\u{1b}[2J ({id})"), false),
+            ])]
+            .into(),
+        );
+        let lines = render(&mut a, 100, 30).join("\n");
+        assert!(lines.contains("커밋") && lines.contains(&format!("bbbbbbb  feat: 고친다[2J ({id})")), "{lines}");
+        assert!(!lines.contains("aaaaaaa") && !lines.contains("bbbbbbb2"), "트래커 커밋을 그렸거나 해시를 안 줄였다\n{lines}");
     }
 
     /// 본문에 든 ESC 가 화면을 다시 칠하지 못한다.

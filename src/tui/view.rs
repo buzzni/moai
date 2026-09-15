@@ -155,6 +155,16 @@ impl Fields {
         self.0 ^= f.bit();
     }
 
+    /// 켜거나 끈다 — 지금 어느 쪽이든 `on` 이 된다(moai-zrzo). 없던 때는 `shows` 로 물은 뒤 `toggle` 로
+    /// 흉내 냈다.
+    pub fn set(&mut self, f: Field, on: bool) {
+        if on {
+            self.0 |= f.bit();
+        } else {
+            self.0 &= !f.bit();
+        }
+    }
+
     /// 둘 다 켠 열.
     pub fn both(self, other: Fields) -> Fields {
         Fields(self.0 & other.0)
@@ -174,6 +184,11 @@ mod tests {
         assert!(f.shows(Field::Assignee) && f.shows(Field::Id), "하나를 켜며 다른 것을 건드렸다");
         f.toggle(Field::Assignee);
         assert_eq!(f, Fields::default());
+        f.set(Field::Id, true);
+        assert_eq!(f, Fields::default(), "켜진 것을 켜며 껐다");
+        f.set(Field::Id, false);
+        f.set(Field::Id, false);
+        assert!(!f.shows(Field::Id) && f.shows(Field::Priority), "끈 것을 끄며 켰거나 옆 열을 건드렸다");
     }
 
     /// 이 프로젝트의 칸 — 시험마다 같은 설정이다.

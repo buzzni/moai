@@ -28,8 +28,8 @@ pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
     String::from_utf8(out.stdout).map_err(Error::NotUtf8)
 }
 
-/// 이슈 제목에 id 가 적힌 커밋 하나.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 이슈 제목에 id 가 적힌 커밋 하나. `moai show --json` 의 `commits` 가 이 모양 그대로다.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Commit {
     pub hash: String,
     pub subject: String,
@@ -50,7 +50,14 @@ const FS: char = '\u{1f}';
 /// **git 은 한 번만 부른다.** id 마다 부르면 탐색기가 줄을 옮길 때마다 프로세스가
 /// id 수만큼 뜬다. `--grep` 을 여럿 주면 git 은 그중 하나라도 맞는 커밋을 낸다.
 /// git 의 `--grep` 은 본문까지 훑으므로 거른 뒤 [`split`] 이 제목과 id 경계를 다시 본다.
-pub fn commits_of(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Commit>>, Error> {
+///
+/// **걷는 범위는 `born`(epoch 초) 에서 막는다**(moai-mauw). 비용은 `--grep` 이 아니라 커밋을
+/// 걷는 일 자체다 — 이 저장소 커밋 1천 개에서 `--grep` 을 빼도, 맞은 수를 `-n` 으로 막아도
+/// 45ms 그대로였고 `--since` 만 4ms 로 줄였다. 그 이슈의 id 는 이슈가 생기기 전에는 없었으니
+/// 그보다 오래된 커밋이 그 id 를 적었을 리 없어, 커밋 시각이 조상에서 자손으로 (하루 안쪽으로)
+/// 늘어나는 한 이 상한은 **아무것도 가리지 않는다** — 그 전제가 깨지는 모서리는 [`SKEW`] 에 적었다.
+/// 개수(`-n`)나 기간으로 막으면 오래된 이슈의 커밋이 사라지는 대가가 있다.
+pub fn commits_of(root: &Path, ids: &[&str], born: Option<i64>) -> Result<BTreeMap<String, Vec<Commit>>, Error> {
     if ids.is_empty() {
         return Ok(BTreeMap::new());
     }
@@ -58,17 +65,32 @@ pub fn commits_of(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Comm
     // `log.showSignature` 를 켠 사람이면 git 이 서명 검사 줄을 레코드 앞 표준 출력에 끼워
     // 해시 자리에 `No signature\n<hash>` 가 들어온다 — 설정과 무관하게 끈다.
     let mut args = vec!["log", "--no-show-signature", "--fixed-strings", format.as_str()];
+    let since = born.map(|b| format!("--since={}", crate::model::format_rfc3339(b - SKEW)));
+    args.extend(since.as_deref());
     let greps: Vec<String> = ids.iter().map(|id| format!("--grep={id}")).collect();
     args.extend(greps.iter().map(String::as_str));
     args.push("HEAD");
     Ok(split(&run(root, &args)?, ids))
 }
 
+/// 이슈의 `created_at` 과 커밋 시각이 다른 시계에서 올 때의 여유 — 하루.
+///
+/// 커밋 시각은 커밋한 기계의 시계고 `created_at` 은 이슈를 만든 기계의 시계다. 시계가 늦은
+/// 기계에서 한 커밋은 이슈보다 먼저 한 것처럼 찍힌다.
+///
+/// **이 여유가 못 받는 모서리가 하나 있다.** 걷기가 경로를 제한하지 않는 이 `git log` 에서
+/// `--since` 는 거르기가 아니라 **끊기**다 — 커밋 시각이 상한보다 이른 커밋을 하나 만나면 그
+/// 커밋의 조상으로는 더 걷지 않는다(참아 주는 몇 개는 경로를 제한한 걷기에만 있다). 그래서
+/// 이슈의 커밋 **위에** 커밋 시각이 하루 넘게 이른 커밋이 얹히면 — 시계가 하루 넘게 늦은 기계의
+/// 커밋, `rebase`·`am --committer-date-is-author-date` 로 옛 작성 시각을 커밋 시각에 옮긴 커밋 —
+/// 그 밑의 커밋 칸이 말없이 빈다. `--since-as-filter` 는 끊지 않고 거르지만 그러려고 이력을
+/// 끝까지 걸어 이 상한이 줄인 값을 통째로 버리므로, 드문 모서리보다 매 `show` 의 값을 골랐다.
+const SKEW: i64 = 86_400;
+
 /// `git log` 이 낸 레코드를 id 별로 가른다. git 을 부르지 않는 순수한 반쪽이다.
 pub fn split(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
     let mut out: BTreeMap<String, Vec<Commit>> = BTreeMap::new();
-    for record in log.split(RS) {
-        let Some((hash, subject)) = record.trim_start_matches('\n').split_once(FS) else { continue };
+    for (hash, subject) in records(log) {
         for id in ids {
             if names(subject, id) {
                 out.entry((*id).to_string()).or_default().push(Commit {
@@ -82,25 +104,55 @@ pub fn split(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
     out
 }
 
-/// `text` 가 `id` 를 **그 id 로** 적었는가.
-///
-/// 앞뒤가 id 의 일부로 이어지면 다른 id 다. `moai-rvcb` 는 자식 `moai-rvcb.7u5` 도,
-/// 가지 이름 `worktree-moai-rvcb` 도 아니다 — 앞은 그래서 `-`·`.` 까지 막는다. 뒤의
-/// `.` 은 자식으로 이어질 때만 막는다: 문장 끝 `(moai-rvcb).` 는 그 id 다.
+/// `text` 가 `id` 를 **그 id 로** 적었는가 — [`ids_in`] 이 뽑는 낱말 하나가 곧 그 id 일 때.
 fn names(text: &str, id: &str) -> bool {
-    let joins = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
-    text.match_indices(id).any(|(at, _)| {
-        let before = text[..at].chars().next_back();
-        let mut after = text[at + id.len()..].chars();
-        let next = after.next();
-        let free_before = before.is_none_or(|c| !(joins(c) || c == '.'));
-        let free_after = match next {
-            None => true,
-            Some('.') => after.next().is_none_or(|c| !c.is_ascii_alphanumeric()),
-            Some(c) => !joins(c),
-        };
-        free_before && free_after
-    })
+    ids_in(text).any(|t| t == id)
+}
+
+/// 글에 적힌 id 모양의 낱말들. **id 를 가르는 자는 이것 하나다** — `show` 가 id 하나를 찾을
+/// 때([`split`])도, 탐색기가 이력 전부를 한 번에 가를 때([`table`])도 이 자로 가른다.
+///
+/// 낱말은 id 에 드는 글자(영숫자·`_`·`-`·`.`)가 이어진 한 덩어리고, 끝의 `.` 은 문장 부호로
+/// 떼어 낸다. 그래서 앞뒤가 id 의 일부로 이어지면 다른 낱말이다 — `moai-rvcb` 는 자식
+/// `moai-rvcb.7u5` 도, 가지 이름 `worktree-moai-rvcb` 도 아니고, 문장 끝 `(moai-rvcb).` 는
+/// 그 id 다. 한글 조사가 붙어도(`moai-rvcb를`) 그 id 다.
+pub fn ids_in(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')))
+        .map(|t| t.trim_end_matches('.'))
+        .filter(|t| crate::id::is_valid(t))
+}
+
+/// 지금 가지(`HEAD`)의 이력 **전부**를 한 번 걸어 제목에 적힌 id → 커밋 표를 짓는다. 새것이 먼저다.
+///
+/// 탐색기가 쓴다(moai-a4i0). 커서를 옮길 때마다 [`commits_of`] 를 부르면 걸음마다 git 이
+/// 뜨고 그리는 루프가 그만큼 멈칫한다 — 표는 다시 읽기 스레드에서 한 번 짓고 상세는 찾기만
+/// 한다. 전부 걸으므로 `commits_of` 의 생성일 상한이 가리는 모서리(moai-g8cd)도 여기서는 없다.
+/// 표에는 없는 id 의 낱말도 드는데, 찾는 쪽이 있는 id 로만 찾으므로 해가 없다.
+pub fn table(root: &Path) -> Result<BTreeMap<String, Vec<Commit>>, Error> {
+    let format = format!("--format=%H{FS}%s{RS}");
+    let log = run(root, &["log", "--no-show-signature", format.as_str(), "HEAD"])?;
+    let mut out: BTreeMap<String, Vec<Commit>> = BTreeMap::new();
+    for (hash, subject) in records(&log) {
+        let mut seen: Vec<&str> = Vec::new();
+        for id in ids_in(subject) {
+            // 한 제목에 같은 id 를 두 번 적어도 커밋은 한 번이다.
+            if seen.contains(&id) {
+                continue;
+            }
+            seen.push(id);
+            out.entry(id.to_string()).or_default().push(Commit {
+                hash: hash.to_string(),
+                subject: subject.to_string(),
+                tracker: subject.starts_with(TRACKER),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// `git log` 이 낸 레코드를 (해시, 제목) 으로.
+fn records(log: &str) -> impl Iterator<Item = (&str, &str)> {
+    log.split(RS).filter_map(|record| record.trim_start_matches('\n').split_once(FS))
 }
 
 #[cfg(test)]
@@ -161,11 +213,92 @@ mod tests {
         git(&["commit", "-q", "--allow-empty", "-m", "chore: 딴 일\n\nmoai-aaaa 를 곁에 봤다"]);
         git(&["commit", "-q", "--allow-empty", "-m", "fix: 리뷰 (moai-aaaa.b1c)"]);
 
-        let got = commits_of(&dir, &["moai-aaaa", "moai-aaaa.b1c"]).unwrap();
+        let got = commits_of(&dir, &["moai-aaaa", "moai-aaaa.b1c"], None).unwrap();
         let subjects = |id: &str| got[id].iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
         assert_eq!(subjects("moai-aaaa"), ["feat: 고친다 (moai-aaaa)"]);
         assert_eq!(subjects("moai-aaaa.b1c"), ["fix: 리뷰 (moai-aaaa.b1c)"]);
         assert_eq!(got["moai-aaaa"][0].hash.len(), 40, "해시를 줄여 받았다");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 이슈가 생기기 전의 커밋은 걷지 않는다 — 단, 시계가 늦은 기계의 커밋은 하루까지 받는다.
+    #[test]
+    fn walking_stops_before_the_issue_was_born_but_forgives_a_slow_clock() {
+        let dir = std::env::temp_dir().join(format!("moai-git-since-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |at: &str, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+                .args(args)
+                .current_dir(&dir)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .env("GIT_AUTHOR_DATE", at)
+                .env("GIT_COMMITTER_DATE", at)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        git("2026-01-01T00:00:00Z", &["init", "-q"]);
+        // 같은 id 가 이슈보다 이틀 먼저 적혔다 — 그 id 는 아직 없었으니 다른 저장소에서 온 우연이다.
+        git("2026-01-01T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", "옛것 (moai-aaaa)"]);
+        git("2026-01-02T12:00:00Z", &["commit", "-q", "--allow-empty", "-m", "시계 늦은 기계 (moai-aaaa)"]);
+        git("2026-01-03T09:00:00Z", &["commit", "-q", "--allow-empty", "-m", "고친다 (moai-aaaa)"]);
+
+        let born = crate::model::parse_rfc3339("2026-01-03T00:00:00Z");
+        let got = commits_of(&dir, &["moai-aaaa"], born).unwrap();
+        let subjects: Vec<&str> = got["moai-aaaa"].iter().map(|c| c.subject.as_str()).collect();
+        assert_eq!(subjects, ["고친다 (moai-aaaa)", "시계 늦은 기계 (moai-aaaa)"]);
+        assert_eq!(commits_of(&dir, &["moai-aaaa"], None).unwrap()["moai-aaaa"].len(), 3, "상한 없이는 다 걷는다");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ids_in_splits_words_the_way_names_reads_them() {
+        let got: Vec<&str> = ids_in("fix: 리뷰 (moai-aaaa.b1c, moai-bbbb). worktree-moai-cccc 에서 moai-dddd를 봤다").collect();
+        assert_eq!(got, ["moai-aaaa.b1c", "moai-bbbb", "worktree-moai-cccc", "moai-dddd"]);
+        assert_eq!(ids_in("chore(tracker): 없음 v1.2 a-b").count(), 0, "id 모양이 아닌 낱말을 id 로 읽었다");
+    }
+
+    /// 탐색기의 표는 [`commits_of`] 와 **같은 답**을 낸다 — 같은 자로 가르고, 새것이 먼저고,
+    /// 트래커 커밋은 표시만 한다. 날짜가 거꾸로 선 커밋 밑의 커밋도 놓치지 않는다(moai-g8cd).
+    #[test]
+    fn the_table_answers_as_commits_of_without_the_date_cut() {
+        let dir = std::env::temp_dir().join(format!("moai-git-table-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |at: &str, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+                .args(args)
+                .current_dir(&dir)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .env("GIT_AUTHOR_DATE", at)
+                .env("GIT_COMMITTER_DATE", at)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        git("2026-01-03T09:00:00Z", &["init", "-q"]);
+        git("2026-01-03T09:00:00Z", &["commit", "-q", "--allow-empty", "-m", "feat: 고친다 (moai-aaaa)"]);
+        git("2026-01-03T10:00:00Z", &["commit", "-q", "--allow-empty", "-m", "fix: 리뷰 (moai-aaaa.b1c) moai-aaaa.b1c"]);
+        // rebase 로 옛 작성 시각이 커밋 시각이 된 커밋 — `--since` 는 여기서 걷기를 끊는다.
+        git("2025-12-01T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", "chore(tracker): moai-aaaa 를 닫는다"]);
+
+        let table = table(&dir).unwrap();
+        let born = crate::model::parse_rfc3339("2026-01-03T00:00:00Z");
+        let subjects = |c: &[Commit]| c.iter().map(|c| (c.subject.clone(), c.tracker)).collect::<Vec<_>>();
+        assert_eq!(
+            subjects(&table["moai-aaaa"]),
+            [("chore(tracker): moai-aaaa 를 닫는다".to_string(), true), ("feat: 고친다 (moai-aaaa)".to_string(), false)]
+        );
+        assert_eq!(table["moai-aaaa.b1c"].len(), 1, "한 제목에 두 번 적은 id 를 두 커밋으로 셌다");
+        assert!(commits_of(&dir, &["moai-aaaa"], born).unwrap().is_empty(), "이 시험이 흉내 낸 모서리가 사라졌다");
+        assert_eq!(subjects(&table["moai-aaaa"]), subjects(&commits_of(&dir, &["moai-aaaa"], None).unwrap()["moai-aaaa"]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

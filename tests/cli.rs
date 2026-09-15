@@ -1421,6 +1421,68 @@ fn show_draws_each_blocker_with_the_words_ready_uses() {
     assert!(!ok(s.path(), &["show", &a, "--json"]).contains("\"blockers\""), "막음이 없는데 blockers 키가 섰다");
 }
 
+/// **상세가 이 이슈에 닿은 커밋을 그린다**(moai-emcv) — 커밋 제목에 id 를 적은 것을 git 에서
+/// 읽는다. 트래커 커밋은 사람 화면에서 빼고 `--json` 에는 표시와 함께 낸다. 자식의 커밋은
+/// 부모의 것이 아니다. git 저장소가 아니면 칸도 키도 없이 상세가 그대로 열린다.
+#[test]
+fn show_draws_the_commits_that_name_the_issue() {
+    let s = init("showcommits");
+    let a = add(s.path(), &["고칠 것"]);
+    git(s.path(), &["init", "-q"]);
+    git(s.path(), &["commit", "-q", "--allow-empty", "-m", &format!("chore(tracker): {a} 를 워크트리에서 집는다")]);
+    git(s.path(), &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({a})")]);
+    git(s.path(), &["commit", "-q", "--allow-empty", "-m", &format!("fix: 리뷰 ({a}.x1y)")]);
+    let hash = git(s.path(), &["rev-parse", "HEAD~1"]).trim().to_string();
+
+    let shown = ok(s.path(), &["show", &a]);
+    assert!(shown.contains(&format!("{}   feat: 고친다 ({a})", &hash[..7])), "고친 커밋이 없다\n{shown}");
+    assert!(!shown.contains("chore(tracker)"), "트래커 커밋을 사람 화면에 그렸다\n{shown}");
+    assert!(!shown.contains("fix: 리뷰"), "자식의 커밋을 부모에 그렸다\n{shown}");
+    let (commits_at, history_at) = (shown.find("\n커밋\n"), shown.find("\n이력\n"));
+    assert!(commits_at.is_some() && commits_at < history_at, "커밋이 이력 앞에 안 섰다\n{shown}");
+
+    let json = ok(s.path(), &["show", &a, "--json"]);
+    assert!(
+        json.contains(&format!("\"commits\":[{{\"hash\":\"{hash}\",\"subject\":\"feat: 고친다 ({a})\",\"tracker\":false}}")),
+        "새 커밋이 먼저, 해시는 줄이지 않고 낸다\n{json}"
+    );
+    assert!(json.contains("\"tracker\":true"), "트래커 커밋을 --json 에서도 뺐다\n{json}");
+
+    let bare = init("showcommitsbare");
+    let b = add(bare.path(), &["git 밖"]);
+    let shown = ok(bare.path(), &["show", &b]);
+    assert!(!shown.contains("\n커밋\n"), "{shown}");
+    assert!(!ok(bare.path(), &["show", &b, "--json"]).contains("\"commits\""), "커밋이 없는데 commits 키가 섰다");
+}
+
+/// **git 을 못 쓰는 자리에서 상세는 말없이 열린다**(moai-mauw) — git 이 PATH 에 없을 때도, 커밋이
+/// 하나도 없는 저장소에서도. 커밋 칸만 비고, 종료 코드도 표준 오류도 그대로다.
+#[test]
+fn show_opens_quietly_where_git_cannot_answer() {
+    let s = init("showcommitsnogit");
+    let a = add(s.path(), &["고칠 것"]);
+    let quiet = |out: Output, why: &str| {
+        let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success() && stdout.contains("고칠 것"), "{why}: 상세가 안 열렸다\n{stdout}\n{stderr}");
+        assert!(stderr.is_empty() && !stdout.contains("\n커밋\n"), "{why}: 말없이 비우지 않았다\n{stdout}\n{stderr}");
+    };
+
+    let empty = s.path().join("no-git-bin");
+    std::fs::create_dir_all(&empty).unwrap();
+    let no_git = isolated(BIN)
+        .args(["show", &a])
+        .current_dir(s.path())
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .env("PATH", &empty)
+        .output()
+        .expect("moai 를 실행하지 못했다");
+    quiet(no_git, "git 이 없다");
+
+    git(s.path(), &["init", "-q"]);
+    quiet(moai(s.path(), &["show", &a]), "커밋이 없는 저장소");
+}
+
 /// **`edit` 뒤의 상세도 막음을 그린다**(moai-xe74) — `show <id>` 와 글자까지 같은 줄이다.
 /// 막는 줄이 끝나면 풀림으로 바뀐 것도 쓴 그 자리에서 보인다.
 #[test]
@@ -6494,6 +6556,10 @@ fn worktree_keeps_ready_from_offering_what_another_worktree_picked() {
     // 옆에서 온 줄의 이력은 **그 워크트리의 저널**에서 읽는다.
     let one = ok(&main, &["show", &t.picked, "--worktree"]);
     assert!(one.contains("⎇ feat/x") && one.contains("todo → in_progress"), "{one}");
+    // 커밋도 **그 워크트리의 가지**에서 읽는다 — 일을 고친 커밋은 저쪽에만 있다(moai-emcv).
+    git(&t.s.path().join("feat"), &["commit", "-q", "--allow-empty", "-m", &format!("feat: 옆에서 고친다 ({})", t.picked)]);
+    let one = ok(&main, &["show", &t.picked, "--worktree"]);
+    assert!(one.contains("feat: 옆에서 고친다"), "옆 가지의 커밋을 이쪽 HEAD 에서 찾았다\n{one}");
     let _ = &t.epic;
 }
 
