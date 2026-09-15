@@ -1271,7 +1271,7 @@ mod tests {
         let report = brief.find("SendMessage to").expect("보고 걸음이 없다");
         assert!(at > report, "보고보다 먼저 비우라고 한다");
         let tail = &brief[at..];
-        assert!(brief.contains("트래커"), "왜 지워도 되는지가 없다");
+        assert!(tail.contains("트래커"), "왜 지워도 되는지가 없다");
         for (piece, why) in [("리뷰", "리뷰가 도는 중에는 지우지 말라는 말이 없다"), ("기다리", "답을 기다리는 중을 안 가린다")] {
             assert!(tail.contains(piece), "{why}");
         }
