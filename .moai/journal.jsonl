@@ -3003,3 +3003,4 @@
 {"ts":"2026-09-15T10:29:40Z","id":"moai-3fnf.26o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"5건 반영(ba863dd), 10번은 사용자 결정으로 fields_known(737193e). 넘긴 것은 idea moai-4zfl·moai-hy5v"}
 {"ts":"2026-09-15T10:29:41Z","id":"moai-3fnf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"리뷰 moai-3fnf.26o 닫음. 머지는 에픽 moai-6bc0 과 함께"}
 {"ts":"2026-09-15T10:29:41Z","id":"moai-nxt4.rgg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T10:29:56Z","id":"moai-3fnf.26o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"앞 노트 바로잡음 — 셸이 역따옴표 안을 명령으로 삼켜 낱말 둘이 빠졌고 idea 번호를 잘못 적었다.\n- 10번은 사용자에게 물어 fields_known 을 더했다(737193e): 적을 때 아는 열 전부를 곁에 적고, 읽는 쪽은 그 목록에 없는 열을 기본값으로 세운다. 그 키가 없던 옛 설정은 Field::BEFORE_KNOWN(그때의 어휘)으로 읽어, 그때 있던 열의 \"안 적힘\" 은 껐다로 남는다.\n- 넘긴 것의 진짜 번호: 6·7·8 과 4 의 남은 것 → moai-7aar, 9 → moai-kjvh."}
