@@ -65,9 +65,11 @@ fn read_log(root: &Path, args: &[&str]) -> Result<String, Error> {
 /// 저널에 영구히** 적는다. 사람·시계·해시([`TEST`](crate::git_leaks::TEST))는 시험 빌드에서만 걷는다 —
 /// 커밋 훅에서 사람이 일부러 준 값을 릴리스가 지울 까닭이 없다.
 ///
-/// **이 걷기가 세우는 것은 "어느 저장소" 까지다.** 사람은 아직 그만큼 안 선다 — `model::git_config` 는
-/// `-C` 를 안 대 프로세스 자리로 읽고, `TEST` 에 둔 `GIT_CONFIG_PARAMETERS` 는 릴리스에서 그 읽기를
-/// 이긴다. 둘 다 moai-ztdf 리뷰가 재서 [`TEST`](crate::git_leaks::TEST) 와 `model::git_config` 에 적어 뒀다.
+/// **이 걷기와 `-C` 는 한 겹이 아니라 두 겹이다 — 서로를 가리지 않는다.** 걷기는 물려받은 변수가 `-C` 를
+/// **이기지 못하게** 하고, `-C` 는 어느 저장소를 볼지를 **정한다.** 한쪽만 서면 그만큼만 샌다: 걷기 없이
+/// `-C` 만 대면 훅이 내보낸 `GIT_DIR`·`GIT_CONFIG_PARAMETERS` 가 그것을 덮고(moai-ztdf), `-C` 없이 걷기만
+/// 하면 프로세스 자리가 답을 정해 뿌리 **밑**의 겹친 저장소가 사람을 갈아 치웠다(moai-d3sy). 이제 사람도
+/// 커밋 칸도 `-C <.moai 뿌리>` 한 자에서 온다 — `model::git_config` 와 [`output`] 이 같은 자를 댄다.
 ///
 /// **환경으로 준 대체 객체 저장소는 버린다**(`GIT_OBJECT_DIRECTORY`·`GIT_ALTERNATE_OBJECT_DIRECTORIES`).
 /// moai 가 읽는 것은 이미 받아들여진 `HEAD` 의 이력뿐이라 잃을 값이 없고, 남기면 `-C` 로 댄 저장소가

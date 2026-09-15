@@ -41,7 +41,7 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
         return Err(empty());
     }
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref())?;
+    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
     let entry = JournalEntry::note(&args.id, &text, &at, &by);
 
     repo.with_write(|issues, _, _| {

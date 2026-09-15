@@ -3680,8 +3680,12 @@ fn a_malformed_git_identity_is_refused_too() {
 /// **시각은 고정한다**(`git_at`). 걷기가 `created_at`(= `MOAI_NOW`) 에서 끊기므로, 커밋을 기계 시계로
 /// 찍으면 시계가 그보다 이른 기계에서 양쪽 다 안 보여 이 시험이 조용히 초록이 된다.
 ///
-/// **심는 것은 `REPO` 무리뿐이다.** `GIT_CONFIG_PARAMETERS`(바깥 `git -c` 가 내보낸다)는 릴리스가 안
-/// 걷어 아직 사람을 이긴다 — 그쪽은 `git_leaks.rs` 의 `TEST` 에 적어 뒀고, 여기서는 안 잰다.
+/// **심는 것은 `REPO` 무리뿐이다** — 그 무리에는 `GIT_CONFIG_PARAMETERS`·`GIT_CONFIG_COUNT` 도 든다
+/// (바깥 `git -c` 가 내보낸다. 2026-09-15 사용자 결정으로 `TEST` 에서 옮겨 왔고, 릴리스도 걷는다).
+/// **주 워크트리의 커밋 훅은 `GIT_DIR` 을 안 주므로 가장 흔한 훅 모양에서는 그것이 유일하게 새는
+/// 길이다** — 그래서 아래 `planted` 는 그 이름에 `.git` 경로가 아니라 **R 의 사람을 실제로 담은**
+/// 설정을 준다. 경로를 주면 git 이 `bogus format` 으로 죽어, 걷기가 무너진 날 이 시험이 "남의 사람을
+/// 적었다" 대신 생 stderr 를 낸다.
 ///
 /// **고치기 전에 빨갰던 것은 쓰는 쪽이다.** 읽는 쪽(커밋 칸)은 옛 `git::output` 이 이미 `GIT_DIR` 무리
 /// 셋을 릴리스에서도 걷고 있어 그때도 초록이었다 — 여기 남긴 까닭은 앞으로의 방벽이다.
@@ -3719,6 +3723,13 @@ fn an_inherited_git_dir_does_not_beat_the_project_we_were_given() {
                 "GIT_SHALLOW_FILE" => path(".git/shallow"),
                 "GIT_GRAFT_FILE" => path(".git/info/grafts"),
                 "GIT_WORK_TREE" | "GIT_PREFIX" | "GIT_CEILING_DIRECTORIES" => path(""),
+                // 설정을 **값으로** 넣는 것. 바깥 `git -c user.name=… commit` 이 훅에 내보내는 꼴
+                // 그대로다 — `-C <P>` 를 대도 이것은 이기므로, 걷기가 무너지면 P 의 저널에 R 의
+                // 이름이 적힌다. 경로를 주면 git 이 형식 오류로 죽어 그 경계를 못 잰다.
+                "GIT_CONFIG_PARAMETERS" => "'user.name=남의 이름' 'user.email=theirs@example.com'".into(),
+                // 짝이 되는 `GIT_CONFIG_KEY_0`·`GIT_CONFIG_VALUE_0` 은 번호가 붙어 목록에 못 적는다 —
+                // 이 세는 값 하나를 걷는 것이 그것들을 통째로 무르는 길이라, 여기서는 그 꼴만 맞춘다.
+                "GIT_CONFIG_COUNT" => "0".into(),
                 // 불리언으로 읽는 것들.
                 "GIT_IMPLICIT_WORK_TREE" | "GIT_NO_REPLACE_OBJECTS" | "GIT_DISCOVERY_ACROSS_FILESYSTEM" => "1".into(),
                 "GIT_NAMESPACE" => "theirs".into(),
@@ -3756,6 +3767,59 @@ fn an_inherited_git_dir_does_not_beat_the_project_we_were_given() {
     let shown = String::from_utf8_lossy(&shown.stdout);
     assert!(shown.contains("이 저장소의 커밋"), "이 프로젝트의 커밋이 커밋 칸에 안 섰다 — 빈 칸은 아무것도 못 잰다\n{shown}");
     assert!(!shown.contains("남의 이력이 샜다"), "훅 저장소의 커밋을 이 이슈에 붙였다\n{shown}");
+}
+
+/// **사람은 부른 자리가 아니라 그 프로젝트에서 온다**(moai-d3sy). 환경을 다 걷어도(moai-ztdf) 어느
+/// 저장소의 사람인지는 여전히 `git config` 를 **어디서** 부르는가가 정했다 — 프로젝트 P 안에 딴
+/// 저장소가 겹쳐 있으면(`P/vendor`, 흔한 모양이다) 거기서 부른 `moai add` 가 P 의 저널에 그 저장소의
+/// 이름을 영구히 적는다. 커밋 칸은 같은 명령에서 P 를 읽으므로, 한 명령이 두 저장소를 보고 있었다.
+///
+/// 환경 변수는 하나도 안 심는다 — 이 축은 그것 없이도 샌다.
+#[test]
+fn the_person_comes_from_the_project_not_the_directory_we_stand_in() {
+    let s = init("nestedrepo");
+    git(s.path(), &["init", "-q"]);
+    git(s.path(), &["config", "user.name", "프로젝트 주인"]);
+    git(s.path(), &["config", "user.email", "project@example.com"]);
+    // P 안에 겹친 저장소 — 제 사람이 따로 적혀 있다.
+    let vendor = s.path().join("vendor");
+    std::fs::create_dir_all(&vendor).unwrap();
+    git(&vendor, &["init", "-q"]);
+    git(&vendor, &["config", "user.name", "벤더 봇"]);
+    git(&vendor, &["config", "user.email", "bot@vendor.example"]);
+
+    // `-C` 도 환경도 없다. 그 밑에서 그냥 부른다 — `.moai` 는 위로 찾아 P 가 나온다.
+    let made = isolated(BIN)
+        .args(["add", "겹친 저장소 안에서 만든 것", "--json"])
+        .current_dir(&vendor)
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&made.stdout).to_string();
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    assert!(said.contains(r#""assignee":"프로젝트 주인""#), "겹친 저장소의 사람을 담당으로 적었다\n{said}");
+    assert!(said.contains(r#""assignee_email":"project@example.com""#), "겹친 저장소의 메일을 적었다\n{said}");
+    let j = journal(s.path());
+    assert!(!j.contains("벤더 봇") && !j.contains("bot@vendor.example"), "겹친 저장소의 사람이 저널에 남았다\n{j}");
+
+    // 사람을 아무 데서도 못 찾으면 **그대로 멈춘다** — 이 고침이 그 규약을 건드리지 않는다.
+    let nameless = Scratch::new("nestedrepo-nameless");
+    ok(nameless.path(), &["init", "argos"]);
+    let inner = nameless.path().join("vendor");
+    std::fs::create_dir_all(&inner).unwrap();
+    git(&inner, &["init", "-q"]);
+    git(&inner, &["config", "user.name", "벤더 봇"]);
+    git(&inner, &["config", "user.email", "bot@vendor.example"]);
+    let out = isolated(BIN)
+        .args(["add", "이름 없는 프로젝트"])
+        .current_dir(&inner)
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "겹친 저장소의 사람으로 적고 지나갔다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("git config user.name"), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
 /// 읽기는 사람을 묻지 않는다. 물으면 설정 없는 기계에서 `moai show` 가 죽고,

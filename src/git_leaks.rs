@@ -52,8 +52,9 @@ pub const REPO: &[&str] = &[
     "GIT_NAMESPACE",
     "GIT_PREFIX",
     "GIT_IMPLICIT_WORK_TREE",
-    // **설정 파일을 통째로 딴 데로 돌린다.** `model::git_config` 는 말 그대로 `git config <키>` 라,
-    // 이것 하나로 사람이 남의 파일에서 온다 — `-C` 는 못 이긴다(재 봤다).
+    // **설정 파일을 통째로 딴 데로 돌린다.** `model::git_config` 가 `-C <뿌리>` 를 대도(moai-d3sy)
+    // 이것 하나로 사람이 남의 파일에서 온다 — `-C` 는 못 이긴다(재 봤다). 걷기가 `-C` 의 대체가
+    // 아니라 짝인 까닭이 여기 있다.
     "GIT_CONFIG",
     // **이력을 조용히 끊거나 고쳐 쓴다.** 커밋 칸은 `git log` 하나로 서므로, 남으면 이슈에 커밋이
     // 없는 것처럼 보인다 — `GIT_SHALLOW_FILE` 하나로 세 줄이 두 줄이 되는 것을 쟀다.

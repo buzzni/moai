@@ -1348,9 +1348,9 @@ mod tests {
     /// 담기면 그 프로젝트 파일에만 선다.
     #[test]
     fn the_question_and_its_retry_stay_on_the_fixed_project() {
-        fn nobody(user: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+        fn nobody(user: Option<&str>, root: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
             match user {
-                Some(raw) => crate::model::actor(Some(raw)),
+                Some(raw) => crate::model::actor(Some(raw), root),
                 None => Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험", crate::fail::code::NO_ACTOR)),
             }
         }

@@ -47,12 +47,12 @@ fn resolve(target: Option<&str>) -> R<Target> {
 /// 는 `build` 안에서야 항이 되므로 손이 닿지 않아 `me` 라는 이름을 찾게 되고,
 /// 미리 푼 `이름 (메일)` 은 뒤이어 쉼표로 다시 쪼개져 이름에 쉼표가 든 사람을
 /// 영영 못 찾는다. 쪼개진 뒤의 항을 바꾸면 두 문제가 같이 없어진다.
-fn resolve_me(sel: &mut [Sel], ctx: &Ctx) -> R<()> {
+fn resolve_me(sel: &mut [Sel], ctx: &Ctx, root: &std::path::Path) -> R<()> {
     for one in sel {
         if let Sel::Is(v) = one
             && v == "me"
         {
-            let me = model::actor(ctx.user.as_deref())?;
+            let me = model::actor(ctx.user.as_deref(), root)?;
             *one = Sel::Is(format!("{} ({})", me.name, me.email));
         }
     }
@@ -163,7 +163,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         filter: a.filter,
     })
     .map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
-    resolve_me(&mut filter.assignee, ctx)?;
+    resolve_me(&mut filter.assignee, ctx, &repo.root)?;
 
     // 모르는 칸은 거부한다. 조용히 0건을 내면 `-s in-progress` 같은 오타가
     // "그 칸은 비었다" 와 구별되지 않는다 — `add`·`mv` 는 이미 거부한다.

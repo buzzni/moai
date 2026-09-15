@@ -3,6 +3,7 @@
 use crate::fail::{Fail, R, code};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::Path;
 
 /// 우선순위를 안 적었을 때의 값. 기본값은 파일에 쓰지 않는다 (§정규화).
 pub const DEFAULT_PRIORITY: u8 = 2;
@@ -484,7 +485,11 @@ pub fn someone(name: &str) -> Actor {
 /// 나중에 누구도 되짚지 못한다 — 이력이 남는 것이 목적인 파일에 이름 없는 줄을
 /// 채우느니 한 번 물어보는 편이 싸다. 막는 것은 *사람을 부르는 게이트가 아니라*
 /// 입력이 모자라다는 말이고, `--user` 와 `MOAI_ACTOR` 둘 다 사람 없이 채워진다.
-pub fn actor(flag: Option<&str>) -> R<Actor> {
+///
+/// **`root` 는 그 트래커의 `.moai` 뿌리다**(moai-d3sy). git 설정을 거기서 읽어야 이슈가 선 프로젝트와
+/// 사람이 같은 자에서 온다 — 뿌리 밑에 딴 저장소가 겹쳐 있을 때 부른 자리가 사람을 정하면, 그 저널에
+/// 남의 이름이 영구히 남는다. `--user`·`MOAI_ACTOR` 는 뿌리와 상관없이 그대로 이긴다.
+pub fn actor(flag: Option<&str>, root: &Path) -> R<Actor> {
     // 플래그는 비어 있어도 **준 것이다.** `--user "$NAME"` 에서 변수가 비었을 때
     // 조용히 git 설정으로 넘어가면 엉뚱한 사람 이름으로 저널이 쌓인다 — 이
     // 기능이 막으려던 바로 그 실패다. 환경변수는 다르다: 빈 값은 관례상 없는 것이다.
@@ -496,7 +501,7 @@ pub fn actor(flag: Option<&str>) -> R<Actor> {
     {
         return Actor::parse(raw.trim()).ok_or_else(|| malformed("MOAI_ACTOR", raw.trim()));
     }
-    match (git_config("user.name"), git_config("user.email")) {
+    match (git_config(root, "user.name"), git_config(root, "user.email")) {
         // git 이 준 값도 `--user` 와 **같은 자로 잰다.** 한쪽만 통과시키면
         // `--user "레이븐 (raven)"` 은 거절당하는데 `user.email = raven` 은
         // 통과해, 이 도구가 스스로 모양이 아니라고 부르는 값이 되돌릴 수 없는
@@ -546,13 +551,15 @@ fn malformed(what: &str, raw: &str) -> Fail {
 /// `moai -C <다른 프로젝트>` 가 훅 저장소의 이름을 그 프로젝트 저널에 영구히
 /// 적던 자리가 여기다.
 ///
-/// **`-C` 를 안 댄다 — 어느 저장소의 사람인지는 프로세스 자리가 정한다.** `-C`
-/// 를 푸는 곳은 `main` 하나고(`set_current_dir`), 사람을 묻기 전에 옮긴다. 그
-/// 차례가 뒤집히거나 `.moai` 뿌리 **밑에** 딴 저장소가 있으면(서브모듈·vendor)
-/// 사람은 그쪽에서, 커밋 칸은 `-C <뿌리>` 로 이쪽에서 와 한 명령이 두 저장소를
-/// 본다 — 뿌리를 받아 `-C` 로 대는 것이 바른 자리다(moai-ztdf 리뷰).
-fn git_config(key: &str) -> Option<String> {
-    let out = crate::git::command().args(["config", key]).output().ok()?;
+/// **`-C <뿌리>` 를 댄다**(moai-d3sy). 그 이슈가 어느 프로젝트의 것인지는 `.moai`
+/// 뿌리가 정하므로, 사람도 같은 자에서 와야 한다. 프로세스 자리로 읽던 때는 뿌리
+/// **밑에** 딴 저장소가 있으면(서브모듈·vendor) 사람은 그쪽에서, 커밋 칸은
+/// `-C <뿌리>` 로 이쪽에서 와 한 명령이 두 저장소를 봤다.
+///
+/// 뿌리가 git 저장소가 아니어도 된다 — git 은 거기서 위로 찾고, 끝내 못 찾으면
+/// 전역 설정을 낸다. moai 는 `.moai/` 만 찾지 git 을 요구하지 않는다.
+fn git_config(root: &Path, key: &str) -> Option<String> {
+    let out = crate::git::command().arg("-C").arg(root).args(["config", key]).output().ok()?;
     if !out.status.success() {
         return None;
     }
