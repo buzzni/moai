@@ -1430,17 +1430,20 @@ fn show_draws_each_blocker_with_the_words_ready_uses() {
 
 /// **상세가 이 이슈에 닿은 커밋을 그린다**(moai-emcv) — 커밋 제목에 id 를 적은 것을 git 에서
 /// 읽는다. 트래커 커밋은 사람 화면에서 빼고 `--json` 에는 표시와 함께 낸다. 자식의 커밋은
-/// 부모의 것이 아니다. 이슈가 생기기 전의 커밋은 안 걷는다(moai-mauw). git 저장소가 아니면
-/// 칸도 키도 없이 상세가 그대로 열린다.
+/// 부모의 것이 아니다. git 저장소가 아니면 칸도 키도 없이 상세가 그대로 열린다.
 ///
-/// **커밋 시각을 고정한다.** 걷기 상한이 `created_at`(= `MOAI_NOW`) 에서 나오므로, 커밋을
-/// 기계 시계로 찍으면 시계가 그보다 이른 기계에서 이 시험이 까닭도 없이 빨개진다.
+/// **이슈보다 먼저 찍힌 커밋도 낸다**(moai-hws2) — 그 id 를 적었으면 그 이슈의 커밋이다. 한때는
+/// 생성일에서 걷기를 끊어 그런 커밋을 뺐는데, `--since` 는 거르기가 아니라 끊기라 날짜가 거꾸로 선
+/// 커밋 하나가 그 밑을 통째로 가렸다(`show_sees_commits_under_a_backdated_one`).
+///
+/// **커밋 시각은 그래도 고정한다** — 차례는 커밋 시각이 정하고, 기계 시계로 찍으면 `LATER` 로 찍은
+/// 커밋들과의 앞뒤가 돌리는 기계마다 달라진다.
 #[test]
 fn show_draws_the_commits_that_name_the_issue() {
     let s = init("showcommits");
     let a = add(s.path(), &["고칠 것"]);
     git(s.path(), &["init", "-q"]);
-    // 이슈보다 이틀 먼저 찍힌 커밋 — 그 id 는 아직 없었으니 걷기가 여기서 멈춘다.
+    // 이슈보다 이틀 먼저 찍힌 커밋 — rebase 가 옛 시각을 옮긴 꼴이다. 그 id 를 적었으니 센다.
     git_at(s.path(), "2026-09-09T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", &format!("feat: 옛것 ({a})")]);
     git_at(s.path(), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("chore(tracker): {a} 를 워크트리에서 집는다")]);
     git_at(s.path(), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({a})")]);
@@ -1451,7 +1454,7 @@ fn show_draws_the_commits_that_name_the_issue() {
     assert!(shown.contains(&format!("{}   feat: 고친다 ({a})", &hash[..7])), "고친 커밋이 없다\n{shown}");
     assert!(!shown.contains("chore(tracker)"), "트래커 커밋을 사람 화면에 그렸다\n{shown}");
     assert!(!shown.contains("fix: 리뷰"), "자식의 커밋을 부모에 그렸다\n{shown}");
-    assert!(!shown.contains("옛것"), "이슈가 생기기 전의 커밋까지 걸었다\n{shown}");
+    assert!(shown.contains("옛것"), "이슈보다 먼저 찍힌 커밋을 뺐다 — 그 id 를 적은 커밋이다\n{shown}");
     let (commits_at, history_at) = (shown.find("\n커밋\n"), shown.find("\n이력\n"));
     assert!(commits_at.is_some() && commits_at < history_at, "커밋이 이력 앞에 안 섰다\n{shown}");
 
@@ -3908,6 +3911,26 @@ fn an_inherited_git_dir_does_not_beat_the_project_we_were_given() {
     let shown = String::from_utf8_lossy(&shown.stdout);
     assert!(shown.contains("이 저장소의 커밋"), "이 프로젝트의 커밋이 커밋 칸에 안 섰다 — 빈 칸은 아무것도 못 잰다\n{shown}");
     assert!(!shown.contains("남의 이력이 샜다"), "훅 저장소의 커밋을 이 이슈에 붙였다\n{shown}");
+}
+
+/// **날짜가 거꾸로 선 커밋 밑도 본다**(moai-hws2). `show` 는 이슈가 생긴 때에서 걷기를 끊었는데,
+/// `git log --since` 는 거르기가 아니라 **끊기**라 그보다 이른 커밋을 하나 만나면 그 아래를 통째로
+/// 안 본다 — `rebase`·`am --committer-date-is-author-date`·하루 넘게 늦은 시계가 그런 커밋을 만든다.
+/// 탐색기는 이력을 다 걸어 이미 보이던 것이라, 같은 물음에 두 표면이 다른 답을 냈다.
+#[test]
+fn show_sees_commits_under_a_backdated_one() {
+    let s = init("backdated");
+    let id = add(s.path(), &["고칠 것"]);
+    git(s.path(), &["init", "-q"]);
+    git_at(s.path(), NOW, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({id})")]);
+    // rebase 가 옛 작성 시각을 커밋 시각으로 옮긴 커밋 — 이 이슈가 생기기 한참 전이다.
+    git_at(s.path(), "2020-01-01T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", "chore: 옛 날짜로 얹힌 커밋"]);
+
+    let shown = ok(s.path(), &["show", &id]);
+    assert!(shown.contains("feat: 고친다"), "날짜가 거꾸로 선 커밋 밑을 못 봤다\n{shown}");
+    let json = ok(s.path(), &["show", &id, "--json"]);
+    assert!(json.contains("feat: 고친다"), "--json 도 같은 답이어야 한다\n{json}");
+    assert!(!json.contains("옛 날짜로 얹힌"), "id 를 안 적은 커밋이 붙었다\n{json}");
 }
 
 /// **사람은 부른 자리가 아니라 그 프로젝트에서 온다**(moai-d3sy). 환경을 다 걷어도(moai-ztdf) 어느
@@ -7232,9 +7255,9 @@ fn git(dir: &Path, args: &[&str]) -> String {
     git_run(dir, None, args)
 }
 
-/// 커밋 시각까지 고정해 돌린다. **시각이 답을 가르는 시험은 기계 시계에 매이면 안 된다** —
-/// `show` 의 커밋 칸은 걷기를 `created_at`(= `MOAI_NOW`) 에서 끊으므로(`git::commits_of`),
-/// 커밋을 기계 시계로 찍으면 시계가 그보다 이른 기계에서 답이 달라진다.
+/// 커밋 시각까지 고정해 돌린다. **차례가 답을 가르는 시험은 기계 시계에 매이면 안 된다** —
+/// 커밋 칸은 `git log` 의 차례(커밋 시각) 그대로 서므로(`git::table`), 일부만 기계 시계로
+/// 찍으면 고정한 커밋들과의 앞뒤가 돌리는 기계마다 달라진다.
 fn git_at(dir: &Path, at: &str, args: &[&str]) -> String {
     git_run(dir, Some(at), args)
 }
