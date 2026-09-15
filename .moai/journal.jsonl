@@ -2629,3 +2629,5 @@
 {"ts":"2026-09-15T06:19:36Z","id":"moai-zrzo.5fw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 반영할 것 없음. 넘긴 것 없음."}
 {"ts":"2026-09-15T06:19:37Z","id":"moai-zrzo.5fw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 없음 — hunk 마다 옛 식과 같음을 확인받았다"}
 {"ts":"2026-09-15T06:21:57Z","id":"moai-zrzo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 머지, 합친 main 에서 시험 통과(769 passed 268 passed )"}
+{"ts":"2026-09-15T06:22:23Z","id":"moai-y61p.hyq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 TUI 보기 조절 코드 정리 단계 리뷰 (max)"}
+{"ts":"2026-09-15T06:22:24Z","id":"moai-y61p.hyq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
