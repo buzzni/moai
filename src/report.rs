@@ -402,10 +402,11 @@ pub struct Workplace {
     /// 줄만** 고르는 데 쓴다([`places`]). 못 읽었으면 `None` 이고, 그러면 `holds` 를 다 믿는다.
     #[serde(skip)]
     pub born: Option<String>,
-    /// 그 워크트리의 스냅샷을 **열어 보려 했는데 못 읽었다**(moai-lt7h) — 머지 충돌 중이거나,
-    /// `moai init` 전에 갈라졌거나, 권한이 없다. `holds`·`touched` 가 비어 있는 것이 "아무도 거기서
-    /// 일 안 한다" 가 아니라 "모른다" 라는 뜻이다. 안 열어 봤으면 거짓이다 — 열어 볼 까닭이 없으면
-    /// 안 연다([`crate::worktree::workplaces`]).
+    /// 그 워크트리의 스냅샷을 **열어 보려 했는데 못 읽었다**(moai-lt7h) — 머지 충돌 중이거나
+    /// 권한이 없다. `holds`·`touched` 가 비어 있는 것이 "아무도 거기서 일 안 한다" 가 아니라
+    /// "모른다" 라는 뜻이다. 안 열어 봤으면 거짓이다 — 열어 볼 까닭이 없으면 안 연다
+    /// ([`crate::worktree::workplaces`]). **스냅샷이 아예 없는 워크트리도 거짓이다** — 거기 적힐
+    /// 수 있는 줄이 없어 "안 쥐었다" 가 사실이다(`crate::worktree::holds`).
     #[serde(skip)]
     pub unknown: bool,
 }
@@ -425,7 +426,7 @@ pub enum Place<'a> {
     Lost,
 }
 
-impl Place<'_> {
+impl<'a> Place<'a> {
     /// 기계가 읽는 한 낱말 — `--json` 의 `place`.
     pub fn word(&self) -> &'static str {
         match self {
@@ -435,9 +436,8 @@ impl Place<'_> {
             Place::Lost => "lost",
         }
     }
-}
 
-impl<'a> Place<'a> {
+    /// 서 있는 워크트리들 — `At` 이 아니면 비어 있다. `--json` 의 `workplaces`.
     pub fn at(&self) -> &[&'a Workplace] {
         match self {
             Place::At(v) => v,
@@ -544,7 +544,14 @@ fn settle<'a>(
     let mut roll: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for id in picked.keys() {
         let epic = epics.get(id).copied();
-        for g in [epic, stones.get(id).copied(), epic.and_then(|e| stones.get(e).copied())].into_iter().flatten() {
+        // **한 묶음에 같은 멤버를 두 번 걸지 않는다.** 에픽에 마일스톤이 있으면 뒤의 두 자리가
+        // 같은 마일스톤을 낸다(`milestones` 는 이슈에게 제 에픽이 선 곳을 준다) — 두 번 걸면
+        // 그 멤버의 자리가 아래에서 두 벌로 펴져 같은 워크트리가 두 줄로 선다.
+        let gs: BTreeSet<&str> = [epic, stones.get(id).copied(), epic.and_then(|e| stones.get(e).copied())]
+            .into_iter()
+            .flatten()
+            .collect();
+        for g in gs {
             roll.entry(g).or_default().push(id);
         }
     }
@@ -552,10 +559,12 @@ fn settle<'a>(
         .into_iter()
         .filter_map(|(g, members)| {
             let mut mine: Vec<&Place> = members.iter().filter_map(|m| out.get(*m)).collect();
+            // 차례는 줄 하나를 가르는 자(위의 `match`)와 같다 — 갈리면 에픽이 `모른다` 라고 하는데
+            // 그 멤버는 `방금 집었다` 라고 한다.
             mine.sort_by_key(|p| match p {
                 Place::At(_) => 0,
-                Place::Unknown => 1,
-                Place::Fresh => 2,
+                Place::Fresh => 1,
+                Place::Unknown => 2,
                 Place::Lost => 3,
             });
             let best = mine.first()?;
@@ -563,8 +572,16 @@ fn settle<'a>(
                 // 여러 멤버가 서로 다른 워크트리에 서 있으면 그 전부를 낸다 — 한 곳만 내면
                 // 이어받는 세션이 나머지를 못 본다.
                 Place::At(_) => {
-                    let mut at: Vec<&Workplace> = mine.iter().flat_map(|p| p.at().iter().copied()).collect();
-                    at.dedup_by_key(|t| t.path.clone());
+                    // **먼저 본 것을 남긴다** — `dedup` 은 잇닿은 것만 걷어내는데 멤버마다 자리
+                    // 차례가 달라 같은 워크트리가 떨어져 두 번 든다(A 가 `[t1,t2]`, B 가 `[t1]`).
+                    // 차례는 `trees` 의 것을 지킨다 — 경로로 다시 정렬하면 사람 화면의 `자리` 줄이
+                    // 일 하나를 펼쳤을 때와 그 에픽을 펼쳤을 때 서로 다른 차례로 선다.
+                    let mut seen: BTreeSet<&std::path::Path> = BTreeSet::new();
+                    let at: Vec<&Workplace> = mine
+                        .iter()
+                        .flat_map(|p| p.at().iter().copied())
+                        .filter(|t| seen.insert(t.path.as_path()))
+                        .collect();
                     Place::At(at)
                 }
                 other => (*other).clone(),
@@ -2637,6 +2654,32 @@ mod tests {
         // **묶음의 자리는 멤버에서 굴려 올린다**(moai-0h8m) — 워크트리 이름이 에픽 id 라 이어받는
         // 세션이 에픽부터 읽는다.
         assert_eq!(branches("argos-0001"), Some(vec!["worktree-argos-0001"]), "에픽이 멤버의 자리를 못 냈다");
+    }
+
+    /// **굴려 올린 자리에 같은 워크트리가 두 번 서지 않는다.** 마일스톤은 멤버를 두 길로 받는다
+    /// (이슈의 마일스톤, 그리고 그 이슈가 든 에픽의 마일스톤) — 같은 것이라 한 번만 걸어야 하고,
+    /// 여러 자리에 선 멤버를 합칠 때 잇닿지 않은 중복까지 걷어내야 한다. 안 그러면 `moai show
+    /// <마일스톤>` 이 같은 `자리` 줄을 두 번 낸다.
+    #[test]
+    fn a_rolled_up_place_names_each_worktree_once() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.milestone = Some("argos-0009".into());
+        let issues = vec![
+            make("argos-0009", Kind::Milestone, "todo"),
+            epic,
+            member("argos-0002", "argos-0001", "in_progress"),
+        ];
+        // 이름이 그 줄을 가리키는 워크트리와 그 에픽을 가리키는 워크트리 — 멤버 하나가 둘에 선다.
+        let trees = vec![
+            tree("/r/.claude/worktrees/argos-0001", "worktree-argos-0001", &[]),
+            tree("/r/.claude/worktrees/argos-0002", "worktree-argos-0002", &[]),
+        ];
+        let at = places(&issues, &cfg(), &trees, LATER);
+        let branches = |id: &str| at.get(id).map(|p| p.at().iter().map(|w| w.branch.as_str()).collect::<Vec<_>>());
+        let both = Some(vec!["worktree-argos-0001", "worktree-argos-0002"]);
+        assert_eq!(branches("argos-0002"), both);
+        assert_eq!(branches("argos-0001"), both, "에픽이 자리를 겹쳐 냈다");
+        assert_eq!(branches("argos-0009"), both, "마일스톤이 같은 자리를 두 번 냈다");
     }
 
     /// **이름이 id 인 워크트리는 물려받은 벌여 놓인 줄로 자리를 안 댄다.** main 에서 뜬 워크트리의

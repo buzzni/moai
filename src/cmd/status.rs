@@ -35,7 +35,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **자리 없는 집은 줄은 여기서만 싣는다**(moai-4370) — 까닭은 `report::stranded`. 치명이 아니라
     // 아래 종료 코드는 안 바뀐다. 언제 재는지는 `worktree::workplaces` 가 정한다 — 딸린 워크트리
     // 안에서 겹쳐 보지 않았으면 빈 목록이 오고, 그러면 `stranded` 가 조용하다.
-    let trees = crate::worktree::workplaces(&repo.root, &repo.config, worktree);
+    let trees = crate::worktree::workplaces(&repo.root, &repo.config, worktree, &load.issues);
     st.warnings.extend(report::stranded(&load.issues, &repo.config, &trees, &now));
     // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정에서 그 워크트리는 "아무도
     // 없다" 가 아니라 "모른다" 로 빠지므로(`report::Place::Unknown`), 말이 없으면 경고가 조용한

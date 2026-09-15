@@ -318,7 +318,7 @@ fn one(
         // 기계의 절대 경로가 그대로 나간다. 워크트리 경로는 이미 푼 것이라(`worktree::canonical`)
         // 꼭대기도 같은 자로 푼다 — 심볼릭 링크를 낀 자리로는 하나도 안 잘린다.
         let root = crate::worktree::top_of(&repo.root).unwrap_or_else(|| repo.root.clone());
-        crate::worktree::workplaces(&repo.root, &repo.config, worktree)
+        crate::worktree::workplaces(&repo.root, &repo.config, worktree, all)
             .into_iter()
             .map(|mut t| {
                 if let Ok(rel) = t.path.strip_prefix(&root) {

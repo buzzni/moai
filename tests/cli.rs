@@ -5982,6 +5982,36 @@ fn status_reads_a_side_snapshot_only_when_a_place_is_still_missing() {
     assert!(text.contains("일하는 워크트리가 없는 것 1건") && text.contains(&lost), "{text}");
 }
 
+/// **팔지 말지는 부르는 쪽이 거는 줄로 잰다**(moai-7igy). 겹쳐 보는 쪽(`--worktree`)은 옆에서
+/// 만들고 집은 줄까지 `stranded` 와 `자리` 에 거는데, 팔 까닭을 main 의 스냅샷으로만 재면 그 줄은
+/// 거기 없어 "이름으로 다 잡혔다" 에 조용히 들어간다 — 그러면 `holds` 가 빈 채로 나가 살아 있는
+/// 세션의 일이 통째로 자리를 잃는다.
+#[test]
+fn overlaying_places_work_that_only_a_side_worktree_knows_about() {
+    let s = Scratch::new("placeside");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    // main 의 집은 줄은 이름으로 잡힌다 — 이것만 보면 더 팔 까닭이 없어 보인다.
+    let named = field(&ok(&main, &["add", "이름이 붙은 일", "--json"]), "id");
+    ok(&main, &["mv", &named, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", &format!(".claude/worktrees/{named}"), "-b", &format!("worktree-{named}")]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-x", "-b", "worktree-agent-x"]);
+
+    // 이름이 id 가 아닌 워크트리가 제 줄을 만들고 집는다 — main 의 스냅샷에는 없다.
+    let side = main.join(".claude/worktrees/agent-x");
+    let mine = field(&ok(&side, &["add", "옆에서 만든 일", "--json"]), "id");
+    ok(&side, &["mv", &mine, "in_progress"]);
+
+    let text = ok_at(&main, LATER, &["status", "--worktree"]);
+    assert!(!text.contains("일하는 워크트리가 없는"), "옆에서 집은 산 일을 자리 없음으로 셌다\n{text}");
+    let out = ok_at(&main, LATER, &["show", &mine, "--worktree"]);
+    assert!(out.contains("자리   .claude/worktrees/agent-x"), "{out}");
+}
+
 /// **`show <에픽>` 도 자리를 낸다**(moai-0h8m) — 워크트리 이름은 규약상 에픽 id 라, 이어받는 세션이
 /// 에픽부터 읽는다. 묶음은 집히지 않으므로 멤버의 자리를 굴려 올린다.
 #[test]

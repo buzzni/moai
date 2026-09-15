@@ -458,11 +458,21 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
 /// 여기보다 늦게 만진 줄). 앞의 것에는 갈라질 때 물려받은 줄도 들고, 뒤의 것은 그 워크트리가
 /// 실제로 만진 흔적이다 — [`workplaces`] 가 둘을 따로 싣는다.
 ///
-/// **못 읽으면 `None` 이다**(moai-lt7h) — 빈 답과 가른다. 머지 충돌 중이거나 `moai init` 전에
-/// 갈라진 워크트리를 "아무도 거기서 일 안 한다" 로 읽으면, 거기서 도는 일이 통째로 자리를 잃는다.
+/// **열려다 못 열면 `None` 이다**(moai-lt7h) — 빈 답과 가른다. 머지 충돌 중이거나 권한이 없는
+/// 워크트리를 "아무도 거기서 일 안 한다" 로 읽으면, 거기서 도는 일이 통째로 자리를 잃는다.
+///
+/// **스냅샷이 아예 없는 것은 모르는 것이 아니다.** `moai init` 전에 갈라졌거나 이 도구와 아무
+/// 상관 없는 가지를 띄운 워크트리다 — 거기에 적힐 수 있는 줄이 없으니 "아무것도 안 쥐었다" 가
+/// 사실이고, 이것을 모름으로 세면 그런 워크트리 하나가 저장소 전체의 `stranded` 를 영영 재운다
+/// ([`crate::report::places`] 의 `blind`). 스냅샷 없는 워크트리를 두고 말하지 않는 것은 이미 선
+/// 규약이다(`worktree_writes_nothing_and_skips_trees_without_a_snapshot`).
 fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) -> Option<(BTreeSet<String>, BTreeSet<String>)> {
     let path = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
-    let Ok(Some(side)) = crate::store::read_snapshot(&path) else { return None };
+    let side = match crate::store::read_snapshot(&path) {
+        Ok(Some(side)) => side,
+        Ok(None) => return Some(Default::default()),
+        Err(_) => return None,
+    };
     let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
     let open = crate::report::wip(&side.issues, cfg).into_iter().map(|i| i.id.clone()).collect();
     let later = side
@@ -500,7 +510,18 @@ fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) 
 /// 안 열고, 있으면 **이름으로 먼저 가른 뒤** 그래도 자리를 못 찾은 줄이 남을 때만 연다. `moai
 /// status` 는 세션마다·훅마다 도는데 이 저장소에서 워크트리 일곱이면 스냅샷 여덟 벌을 다시 파
 /// 40→95ms(따뜻)·138→458ms(참)이었다. 이름이 답을 내는 흔한 경우에는 한 벌로 돌아온다.
-pub fn workplaces(root: &Path, cfg: &crate::config::Config, worktree: bool) -> Vec<crate::report::Workplace> {
+///
+/// **팔 까닭은 부르는 쪽의 줄로 잰다**(`asked`) — `touched` 의 기준인 `mine`(main 의 스냅샷,
+/// moai-40ht.hom) 으로 재면 안 된다. `--worktree` 로 겹쳐 본 쪽은 옆 워크트리에서 만들고 집은
+/// 줄까지 `places`·`stranded` 에 거는데, main 의 스냅샷에는 그 줄이 없어 "이름으로 다 잡혔다" 로
+/// 읽힌다 — 그러면 `holds` 가 빈 채로 나가 그 줄이 통째로 `Lost` 로 서고, 살아 있는 세션의 일이
+/// `stranded` 경고와 `show` 의 `자리 없다` 로 뒤집힌다.
+pub fn workplaces(
+    root: &Path,
+    cfg: &crate::config::Config,
+    worktree: bool,
+    asked: &[Issue],
+) -> Vec<crate::report::Workplace> {
     if !worktree && is_linked(root) {
         return Vec::new();
     }
@@ -527,10 +548,12 @@ pub fn workplaces(root: &Path, cfg: &crate::config::Config, worktree: bool) -> V
     };
     let mut out: Vec<crate::report::Workplace> =
         disk.all.iter().filter(|(_, linked, _)| *linked).map(|(tree, ..)| bare(tree)).collect();
-    // 이름만으로 자리가 다 잡히면(또는 집은 줄이 없으면) 스냅샷을 한 벌도 안 판다.
-    if crate::report::places(mine, cfg, &out, &crate::model::now())
+    // 이름만으로 자리가 다 잡히면(또는 집은 줄이 없으면) 스냅샷을 한 벌도 안 판다. **`At` 만이
+    // 안 파도 되는 답이다** — 여기 `out` 은 아직 `holds`·`touched` 가 비고 `unknown` 도 거짓이라
+    // 이 판정은 오로지 이름으로 잡혔는지만 본다(그래서 시계와 무관하다).
+    if crate::report::places(asked, cfg, &out, &crate::model::now())
         .values()
-        .all(|p| !matches!(p, crate::report::Place::Lost | crate::report::Place::Fresh))
+        .all(|p| matches!(p, crate::report::Place::At(_)))
     {
         return out;
     }
