@@ -841,14 +841,20 @@ fn row_line<'a>(
     let glyph_at = head.len();
     head.push(Span::styled(row_glyph(app, at), status(app.column(at))));
     head.push(Span::raw(" "));
-    // 다른 워크트리에서 온 줄은 제목 **앞에** `⎇ <브랜치>` — CLI 목록과 같은 자리다.
-    // 머리글에 넣어 재므로 제목 몫이 그만큼 줄고, 잘린 제목은 여전히 `…` 를 남긴다.
-    // **그 이슈를 이름에 단 옆 가지**가 있으면 제목 앞에 `⎇ <가지>`(moai-nxt4, 사용자 결정) — 집기를
-    // main 에 커밋하는 규약에서는 옛 자(줄이 옆에서 왔나)가 거의 안 서서 표시가 사라졌다.
+    // **그 이슈를 이름에 단 옆 가지**가 있으면 제목 **앞에** `⎇ <가지>`(moai-nxt4, 사용자 결정) —
+    // 자리는 CLI 목록의 머리표와 같지만 **자는 다르다**: CLI 는 여전히 출처(`Origin::branch`)로 서고
+    // 여기는 옆 가지 이름으로 선다. 집기를 main 에 커밋하는 규약에서는 옛 자(줄이 옆에서 왔나)가
+    // 거의 안 서서 표시가 사라졌다. 머리글에 넣어 재므로 제목 몫이 그만큼 줄고, 잘린 제목은 여전히
+    // `…` 를 남긴다.
+    //
+    // **뒤에서 자르지 않고 앞에서 자른다**(`clip_front`) — 규약의 `worktree-moai-3fnf` 는 열여덟
+    // 칸이라 [`BRANCH_CAP`] 을 늘 넘는데, 앞을 남기면 어느 줄이든 `worktree-moai-3…` 한 가지로만
+    // 서서 이름이 아무 말도 안 한다. 이 이름에서 일하는 것은 꼬리(그 이슈의 id)다.
     if fields.shows(Field::Branch)
         && let Some(b) = app.origin.working(&i.id)
     {
-        head.push(Span::styled(format!("{} {}", style::BRANCH_GLYPH, clip(b, BRANCH_CAP)), branch()));
+        let name = crate::text::clip_front(b, BRANCH_CAP);
+        head.push(Span::styled(format!("{} {name}", style::BRANCH_GLYPH), branch()));
         head.push(Span::raw(" "));
     }
     // 커서 자리 + 머리글 폭. **`CURSOR` 에서 잰다** — 숫자를 손으로 적으면
@@ -2156,15 +2162,17 @@ pub(super) mod tests {
         let text = seen(&mut a);
         // **목록 줄만 본다** — 경로 줄도 옆 워크트리 이름을 대므로 `argos-0004` 로만 찾으면 그 줄이 먼저 걸린다.
         let held = text.lines().find(|l| l.contains("집은 멤버")).unwrap_or_else(|| panic!("줄이 없다\n{text}"));
-        // 긴 가지 이름은 `BRANCH_CAP` 까지만 서고 `…` 가 남는다 — 제목 몫을 지킨다.
-        assert!(held.contains(style::BRANCH_GLYPH) && held.contains("worktree-argos"), "{held:?}");
+        // 긴 가지 이름은 `BRANCH_CAP` 까지만 서고 `…` 가 남는다 — 제목 몫을 지킨다. **남는 쪽은
+        // 꼬리다**: 규약의 가지 이름은 앞이 다 `worktree-` 라, 앞을 남기면 어느 줄이든 한 가지로만 선다.
+        // **`argos-0004` 로 찾지 않는다** — id 열이 같은 줄에 그 id 를 이미 대므로 표시를 꺼도 걸린다.
+        assert!(held.contains(&format!("{} …tree-argos-0004", style::BRANCH_GLYPH)), "{held:?}");
 
         // **줄의 표시만 본다** — 경로 줄의 `⎇ <옆 워크트리>`(겹쳐 보기가 켜졌다는 말)는 `SPC t w` 의 몫이다.
         let row = |a: &mut App| seen(a).lines().find(|l| l.contains("집은 멤버")).unwrap_or_default().to_string();
         a.hit("SPC c w");
         assert!(!row(&mut a).contains(style::BRANCH_GLYPH), "SPC c w 가 줄의 표시를 안 걷었다");
         a.hit("SPC c w");
-        assert!(row(&mut a).contains("worktree-argos"), "다시 눌러도 안 돌아왔다");
+        assert!(row(&mut a).contains(style::BRANCH_GLYPH), "다시 눌러도 안 돌아왔다");
     }
 
     /// **`SPC t d` 가 상세 칸을 숨기고 목록이 폭을 다 쓴다**(moai-ymnu, 사용자 결정) — 숨긴 채

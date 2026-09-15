@@ -42,11 +42,18 @@ pub struct Side {
     /// 여기서 지운 것이다. 저널이 아니라 **커밋된 스냅샷**을 읽는다 — 저널은 상태
     /// 계산에 읽히지 않는다(moai-0a0u). 못 찾으면 비어 있고, 그러면 전처럼 다 선다.
     pub base: BTreeMap<String, String>,
+    /// 이 워크트리가 쥐었다고 볼 id 후보 — [`names`] 가 낸 것(디렉터리 이름·가지 이름·`worktree-`
+    /// 를 뗀 이름). 훅이 옆의 일을 가르는 자와 **같은 자**다(moai-nxt4 리뷰).
+    pub holds: BTreeSet<String>,
 }
 
 impl Side {
+    /// 이름만으로 세운다 — 후보는 가지 이름에서 낸다([`names`] 의 절반). 디렉터리 이름까지 아는
+    /// 곳은 [`gather`] 다.
     pub fn new(label: impl Into<String>, root: impl Into<PathBuf>, issues: Vec<Issue>) -> Side {
-        Side { label: label.into(), root: root.into(), issues, base: BTreeMap::new() }
+        let label = label.into();
+        let holds = [label.strip_prefix("worktree-").unwrap_or(&label).to_string(), label.clone()].into();
+        Side { label, root: root.into(), issues, base: BTreeMap::new(), holds }
     }
 }
 
@@ -55,8 +62,8 @@ impl Side {
 #[derive(Debug, Default)]
 pub struct Origin {
     from: BTreeMap<String, usize>,
-    /// (이름, 그 워크트리의 moai 뿌리). 뿌리는 이력(저널)을 읽을 때 쓴다.
-    trees: Vec<(String, PathBuf)>,
+    /// (이름, 그 워크트리의 moai 뿌리, 쥐었다고 볼 id 후보). 뿌리는 이력(저널)을 읽을 때 쓴다.
+    trees: Vec<(String, PathBuf, BTreeSet<String>)>,
     /// 제 파일에는 없고 옆에서만 온 줄. 제 줄을 **덮은** 것과 가른다 —
     /// [`Origin::unreadable`] 이 그 차이로 거짓 중복을 거른다.
     added: BTreeSet<String>,
@@ -68,22 +75,18 @@ impl Origin {
         self.from.get(id).map(|&k| self.trees[k].0.as_str())
     }
 
-    /// **그 이슈를 이름에 단 옆 가지**(moai-nxt4) — `worktree-moai-3fnf` 처럼. 규약대로 일감마다
-    /// 가지를 그 id 로 띄우므로(CLAUDE.md), 이것이 곧 "누가 무엇을 쥐고 있나" 다.
+    /// **그 이슈를 쥔 옆 워크트리**(moai-nxt4) — 그 워크트리의 이름 후보([`names`])에 id 가 들면.
+    /// 규약대로 일감마다 그 id 로 가지를 띄우고 워크트리를 그 이름으로 만드므로, 이것이 곧
+    /// "누가 무엇을 쥐고 있나" 다.
+    ///
+    /// **훅과 같은 자다**(moai-nxt4 리뷰) — `hook::held` 가 옆의 일을 초점에서 뺄 때 쓰는 [`away`]
+    /// 와 같은 후보를 본다. 자가 둘이면 화면은 ⎇ 를 다는데 훅은 "옆이 쥐었다" 를 모르는 줄이 생긴다.
+    /// 후보는 **통째로 같아야** 한다 — 자식 id(`부모.자식`)의 가지가 부모 줄에 붙지 않는다.
     ///
     /// [`Origin::branch`] 와 가르는 것: 그쪽은 **줄이 어디서 왔나**(스냅샷의 출처)이고, 집기를
     /// main 에 커밋하는 지금 규약에서는 양쪽 줄이 같아 거의 안 선다 — 목록의 ⎇ 가 사라진 까닭이다.
-    ///
-    /// 자식 id(`moai-3fnf.abc`)의 가지가 부모 줄에 붙지 않게 **마디로 가른다** — 이름이 id 로
-    /// 끝나거나 id 뒤에 `-`·`/`·`.` 가 와야 그 이슈의 가지다.
     pub fn working(&self, id: &str) -> Option<&str> {
-        self.trees.iter().map(|(l, _)| l.as_str()).find(|label| {
-            label.match_indices(id).any(|(at, _)| {
-                let before = label[..at].chars().next_back();
-                let after = label[at + id.len()..].chars().next();
-                before.is_none_or(|c| !c.is_alphanumeric()) && after.is_none_or(|c| !c.is_alphanumeric() && c != '.')
-            })
-        })
+        self.trees.iter().find(|(.., holds)| holds.contains(id)).map(|(label, ..)| label.as_str())
     }
 
     /// 줄을 보태 온 옆 워크트리의 뿌리들 — [`Origin::root`] 가 댈 수 있는 자리 전부. 탐색기가
@@ -96,7 +99,7 @@ impl Origin {
     /// 겹쳐 본 워크트리의 이름들 — 줄을 하나도 안 보탠 곳까지. 겹쳐 봤는데 옆이
     /// 조용한 것과 아예 안 겹쳐 본 것을 화면이 가를 수 있어야 한다.
     pub fn labels(&self) -> Vec<&str> {
-        self.trees.iter().map(|(l, _)| l.as_str()).collect()
+        self.trees.iter().map(|(l, ..)| l.as_str()).collect()
     }
 
     /// 다른 브랜치에서 온 줄 전부 — id → 브랜치. `--json` 이 이 모양으로 낸다.
@@ -195,8 +198,8 @@ pub fn overlay(mine: Vec<Issue>, others: Vec<Side>) -> (Vec<Issue>, Origin) {
     for (k, i) in shown.iter().enumerate() {
         at.insert(i.id.clone(), k);
     }
-    for (tree, Side { label, root, issues, base }) in others.into_iter().enumerate() {
-        origin.trees.push((label, root));
+    for (tree, Side { label, root, issues, base, holds }) in others.into_iter().enumerate() {
+        origin.trees.push((label, root, holds));
         for i in issues {
             match at.get(&i.id) {
                 Some(&k) if (i.planned(), i.updated_at.as_str()) > (shown[k].planned(), shown[k].updated_at.as_str()) => {
@@ -313,7 +316,9 @@ fn side(
         Some(m) if lonely => base_of(repo_root, m, &tree.head),
         _ => BTreeMap::new(),
     };
-    Side { base, ..Side::new(tree.label, root, issues) }
+    // 이름 후보는 훅과 같은 자로 낸다 — 디렉터리 이름까지 여기서 안다.
+    let holds = names([&tree]);
+    Side { base, holds, ..Side::new(tree.label, root, issues) }
 }
 
 /// 제 줄을 **옆 워크트리의 스냅샷과 겹친 것**과, 옆 워크트리의 이름이 가리키는 id 후보([`away`]
@@ -710,24 +715,27 @@ mod tests {
         assert_eq!(origin.branch("m-0001"), Some("b"));
     }
 
-    /// **그 이슈를 이름에 단 가지를 찾는다**(moai-nxt4) — 줄이 어디서 왔는지와 따로다. 집기를 main 에
+    /// **그 이슈를 쥔 옆 워크트리를 찾는다**(moai-nxt4) — 줄이 어디서 왔는지와 따로다. 집기를 main 에
     /// 커밋하면 양쪽 줄이 같아 출처는 안 서는데, 옆에서 그 일을 쥐고 있다는 것은 여전히 보여야 한다.
+    /// **훅과 같은 자**([`names`])로 가른다 — 후보가 통째로 같아야 쥔 것이다(moai-nxt4 리뷰).
     #[test]
-    fn a_sibling_branch_named_for_the_issue_is_found() {
+    fn a_sibling_worktree_holding_the_issue_is_found() {
         let (_, origin) = overlay(vec![issue("moai-3fnf", "in_progress", "2026-09-15T00:00:00Z")], vec![
             tree("worktree-moai-3fnf", vec![]),
             tree("feat/moai-9xyz-따로", vec![]),
         ]);
-        assert_eq!(origin.working("moai-3fnf"), Some("worktree-moai-3fnf"));
+        assert_eq!(origin.working("moai-3fnf"), Some("worktree-moai-3fnf"), "`worktree-` 를 뗀 이름이 안 걸렸다");
         assert_eq!(origin.branch("moai-3fnf"), None, "제 줄인데 출처가 붙었다");
-        assert_eq!(origin.working("moai-9xyz"), Some("feat/moai-9xyz-따로"), "마디로 끊긴 id 를 못 찾는다");
+        // 이름 **통째로** 같아야 한다 — 훅(`away`·`hook::held`)과 같은 자다.
+        assert_eq!(origin.working("moai-9xyz"), None, "id 가 이름의 한 토막일 뿐인데 쥐었다고 했다");
         assert_eq!(origin.working("moai-3fn"), None, "id 의 앞토막이 남의 가지에 걸렸다");
-        assert_eq!(origin.working("moai-9xy"), None);
-        // 자식의 가지는 부모 줄에 안 붙는다 — `moai-3fnf.abc` 가 `moai-3fnf` 를 물들이면
-        // 부모가 제가 집힌 줄 안다.
+        // 자식의 워크트리는 부모 줄에 안 붙는다 — 부모가 제가 집힌 줄 안다.
         let (_, child) = overlay(vec![], vec![tree("worktree-moai-3fnf.abc", vec![])]);
         assert_eq!(child.working("moai-3fnf"), None);
         assert_eq!(child.working("moai-3fnf.abc"), Some("worktree-moai-3fnf.abc"));
+        // 가지 이름 그대로도 후보다 — `-b` 없이 띄운 워크트리.
+        let (_, plain) = overlay(vec![], vec![tree("moai-3fnf", vec![])]);
+        assert_eq!(plain.working("moai-3fnf"), Some("moai-3fnf"));
     }
 
     #[test]

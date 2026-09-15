@@ -96,7 +96,9 @@ impl Field {
             Field::Tally => "셈",
             Field::Tags => "태그",
             Field::Names => "열 이름",
-            Field::Branch => "워크트리",
+            // `SPC t w`(`keys::Toggle::Worktree`)가 이미 "워크트리" 다 — 같은 낱말을 두 줄에
+            // 세우면 메뉴에서 어느 쪽이 겹쳐 보기고 어느 쪽이 줄의 표시인지 못 가른다.
+            Field::Branch => "옆 가지",
         }
     }
 
