@@ -192,6 +192,19 @@ NOTE
   `moai show --deferred` 로 미뤄 둔 것만 본다.")]
     Defer(DeferArgs),
 
+    /// 읽었다고 표시한다 (내 설정에만 남는다)
+    #[command(after_help = "  moai read moai-4aex              이 줄을 읽음으로
+  moai read --all                  내게 온 것 가운데 안 읽은 것 전부
+  moai read -e moai-9k2p           그 에픽의 멤버와 그 밑까지
+
+  **트래커에 안 쓴다.** 읽음은 사람마다 다른 값이라 이슈 줄에 적으면 읽기만 해도
+  남과 부딪힌다. 내 설정(`moai project add` 가 쓰는 그 파일)의 [read] 표에
+  이슈 id 와 지금을 적고, 그 뒤에 그 줄이 바뀌면 다시 안 읽음이 된다.
+
+  안 읽은 줄은 탐색기 목록에서 제목 앞에 [NEW] 로 선다 — 내게 할당된 것과 그 밑
+  (자식·리뷰·에픽 멤버)만 센다.")]
+    Read(ReadArgs),
+
     /// 하나가 다른 것을 막는다 (또는 그 막음을 없앤다)
     #[command(after_help = "  moai link moai-4aex --blocks moai-9k2p     4aex 가 9k2p 를 막는다
   moai link moai-4aex --unblocks moai-9k2p   그 막음을 없앤다
@@ -690,6 +703,21 @@ pub struct DeferArgs {
     /// 왜 미루는가 (저널에만 남는다)
     #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
     pub msg: Option<String>,
+}
+
+/// `moai read` — 읽었다고 표시한다.
+#[derive(Args, Debug)]
+pub struct ReadArgs {
+    #[arg(value_name = "id")]
+    pub ids: Vec<String>,
+
+    /// 내게 온 것 가운데 안 읽은 것 전부
+    #[arg(long)]
+    pub all: bool,
+
+    /// 그 에픽(또는 묶음)의 멤버와 그 밑까지
+    #[arg(short, long, value_name = "에픽")]
+    pub epic: Option<String>,
 }
 
 #[derive(Args, Debug)]

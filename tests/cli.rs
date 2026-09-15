@@ -2569,7 +2569,43 @@ const JSON_SWEEP: &[&str] = &[
     "issue", "epic", "milestone", "idea",
     // 사용자 설정을 고친다. `add`·`rm` 은 제 설정 파일로 따로 부른다 — 공용 집에 쓰면 안 된다.
     "project",
+    // 읽음도 사용자 설정에 적는다. 시험의 `MOAI_CONFIG` 는 그 시험만의 임시 자리다.
+    "read",
 ];
+
+/// **읽음은 내 설정에만 적힌다**(moai-u8oh, 사용자 결정) — 트래커 파일은 한 바이트도 안 바뀐다.
+/// `--all` 은 내게 온 것 가운데 안 읽은 것을, `-e` 는 그 에픽의 멤버와 그 밑까지 적는다.
+#[test]
+fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
+    let s = init("readmark");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let epic = field(&mine(&["add", "에픽", "--type", "epic", "--json"]), "id");
+    let member = field(&mine(&["add", "멤버", "-e", &epic, "--json"]), "id");
+    let before = issues(s.path());
+
+    let out = mine(&["read", &member, "--json"]);
+    assert!(out.contains(&member), "{out}");
+    let saved = std::fs::read_to_string(&cfg).unwrap();
+    assert!(saved.contains("[read]") && saved.contains(&member), "{saved}");
+    assert_eq!(issues(s.path()), before, "읽었다고 트래커가 바뀌었다");
+
+    // 두 번째는 적을 것이 없다 — 시계가 고정(MOAI_NOW)이라 같은 때가 이미 적혀 있다.
+    assert!(mine(&["read", &member]).contains("읽음으로 적을 것이 없다"));
+
+    // `-e` 는 에픽 자신과 멤버를 함께 적는다.
+    assert!(mine(&["read", "-e", &epic, "--json"]).contains(&epic));
+
+    // 없는 줄은 말하고 넘어간다 — 나머지를 안 적지 않는다.
+    let another = field(&mine(&["add", "또 하나", "--json"]), "id");
+    let out = moai_with(s.path(), &cfg, &["read", "없는-줄", &another, "--json"]);
+    assert!(out.status.success(), "하나가 없다고 멈췄다");
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&another));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("없는-줄"));
+
+    // `--all` 은 내게 온 것 가운데 안 읽은 것 — 담당은 만든 사람이라 다 내 것이다.
+    assert!(mine(&["read", "--all", "--json"]).contains("\"read\""));
+}
 
 /// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.
 #[test]
@@ -2612,7 +2648,11 @@ fn every_command_still_speaks_json() {
     // 위 시험은 초록인데 그 명령의 `--json` 은 아무도 안 본 것이 된다 —
     // 없는 안전망을 있다고 믿는 것이 제일 나쁘다.
     // `init` 과 `add` 는 위에서 바탕을 세우며 이미 `--json` 으로 부른다.
-    for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add"].contains(c)) {
+    // `read` 는 **제 설정 파일로** 따로 부른다 — 공용 집의 없는 파일에 쓰면 그 격리가 깨진다
+    // (`project add`·`rm` 과 같은 까닭). 부르는 것은 위의 `read_marks_…` 시험이다.
+    let own = s.path().join("sweep-read.toml");
+    one_json_value(&ok_with(s.path(), &own, &["read", &id, "--json"]));
+    for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add", "read"].contains(c)) {
         assert!(
             cases.iter().any(|a| a[0] == *cmd),
             "`{cmd}` 가 JSON_SWEEP 에는 있는데 실제로 부르지 않는다"
