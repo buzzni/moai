@@ -358,6 +358,21 @@ enum Added {
     Already,
     /// 못 읽어서 안 건드렸다. 안에 든 것은 그 까닭이다.
     Unreadable(String),
+    /// 읽기는 됐는데 못 썼다(읽기 전용 파일·체크아웃). 안에 든 것은 그 까닭이다.
+    ///
+    /// **읽기 실패와 가르는 까닭은 말뿐이다** — 사람이 할 일이 다르다(인코딩 vs 권한). 둘 다
+    /// 건너뛰고 나머지를 심는 것은 같다(moai-0dwc).
+    Unwritable(String),
+}
+
+impl Added {
+    /// 못 건드린 까닭 — 건드렸으면 `None`.
+    fn trouble(&self) -> Option<&str> {
+        match self {
+            Added::Wrote | Added::Already => None,
+            Added::Unreadable(why) | Added::Unwritable(why) => Some(why),
+        }
+    }
 }
 
 /// 이미 있는 파일에는 **빠진 줄만** 덧붙인다. 남의 내용을 지우지 않는다.
@@ -369,18 +384,23 @@ enum Added {
 /// **멈추지는 않는다**(2026-09-15 사용자 결정). AGENTS.md 는 도구가 쓴 블록을 통째로 갈아 끼우는
 /// 자리라 멈추지만, 여기는 줄 몇 개를 덧붙이는 자리다 — 그 하나로 `.moai` 도 못 심고 AGENTS 블록도
 /// 못 고치면 고칠 길이 도구 밖에만 남는다. 무엇을 손으로 더할지는 부르는 쪽([`run`])이 댄다.
-fn ensure_lines(path: &Path, block: &str) -> Result<Added, String> {
+///
+/// **쓰기 실패도 같다**(moai-0dwc). 한때 읽기만 넘어가고 쓰기는 `Err` 로 끊었는데, 그 끊김은
+/// `.moai/` 를 만든 **뒤에** 와서 `.gitattributes` 도 AGENTS 블록도 없는 반쯤 심긴 저장소를
+/// 남겼다 — 읽기 전용 파일 하나가 `init` 을 통째로 막는 셈이기도 했다. **`Err` 를 안 낸다**:
+/// 여기서 실패해도 심는 일은 이어져야 한다.
+fn ensure_lines(path: &Path, block: &str) -> Added {
     let existing = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Ok(Added::Unreadable(e.to_string())),
+        Err(e) => return Added::Unreadable(e.to_string()),
     };
     let missing: Vec<&str> = block
         .lines()
         .filter(|l| !l.trim().is_empty() && !existing.lines().any(|e| covers(e, l)))
         .collect();
     if missing.is_empty() {
-        return Ok(Added::Already);
+        return Added::Already;
     }
     let mut out = existing;
     if !out.is_empty() && !out.ends_with('\n') {
@@ -391,8 +411,10 @@ fn ensure_lines(path: &Path, block: &str) -> Result<Added, String> {
     }
     out.push_str(&missing.join("\n"));
     out.push('\n');
-    std::fs::write(path, out).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(Added::Wrote)
+    match std::fs::write(path, out) {
+        Ok(()) => Added::Wrote,
+        Err(e) => Added::Unwritable(e.to_string()),
+    }
 }
 
 /// 이미 있는 줄 `have` 가 넣으려는 줄 `want` 를 **이미 막고 있는가**(moai-mxtb).
@@ -517,16 +539,14 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         }
     }
 
-    let attrs = ensure_lines(&root.join(".gitattributes"), GITATTRIBUTES).map_err(Fail::new)?;
-    let ignore = ensure_lines(&root.join(".gitignore"), GITIGNORE).map_err(Fail::new)?;
-    // 못 읽어 못 건드린 자리 — 이름과 까닭과 **손으로 더할 줄**을 함께 든다(moai-gq1c). 줄을 안
-    // 대면 사람은 도구가 무엇을 넣으려 했는지 모른 채 파일만 고치게 된다.
-    let untouched: Vec<(&str, &str, &str)> = [(".gitattributes", &attrs, GITATTRIBUTES), (".gitignore", &ignore, GITIGNORE)]
+    let attrs = ensure_lines(&root.join(".gitattributes"), GITATTRIBUTES);
+    let ignore = ensure_lines(&root.join(".gitignore"), GITIGNORE);
+    // 못 건드린 자리 — 이름과 까닭과 **손으로 더할 줄**을 함께 든다(moai-gq1c, moai-0dwc). 줄을 안
+    // 대면 사람은 도구가 무엇을 넣으려 했는지 모른 채 파일만 고치게 된다. 못 읽은 것과 못 쓴 것을
+    // 가르는 것은 **말뿐이다** — 사람이 할 일이 인코딩과 권한으로 갈린다.
+    let untouched: Vec<(&str, &Added, &str)> = [(".gitattributes", &attrs, GITATTRIBUTES), (".gitignore", &ignore, GITIGNORE)]
         .into_iter()
-        .filter_map(|(name, done, block)| match done {
-            Added::Unreadable(why) => Some((name, why.as_str(), block)),
-            _ => None,
-        })
+        .filter(|(_, done, _)| done.trouble().is_some())
         .collect();
 
     // `AGENTS.md` **하나만** 쓴다. `CLAUDE.md` 에도 같은 것을 쓰면 곧 갈라지고,
@@ -570,7 +590,9 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         // **못 건드린 자리는 기계에게도 말한다.** `false` 만 보면 "이미 다 있었다" 와 구별이
         // 안 되고, 그 차이가 곧 사람이 손볼 것이 남았는지다.
         if !untouched.is_empty() {
-            v["unreadable"] = serde_json::json!(untouched.iter().map(|(name, ..)| *name).collect::<Vec<_>>());
+            v["unreadable"] = serde_json::json!(
+                untouched.iter().map(|(name, done, _)| (*name, done.trouble().unwrap_or_default())).collect::<std::collections::BTreeMap<_, _>>()
+            );
         }
         return super::json_line(&v);
     }
@@ -599,9 +621,13 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     if ignore == Added::Wrote {
         out.push("  .gitignore 에 moai 가 쓰는 자리(lock·tmp·워크트리)를 넣었다".into());
     }
-    for (name, why, block) in &untouched {
-        out.push(format!("  {name} 를 못 읽어 안 건드렸다 — {why}"));
-        out.push("    손으로 더할 줄 (읽히게 고치고 `moai init` 을 다시 불러도 된다):".into());
+    for (name, done, block) in &untouched {
+        // 못 읽은 것과 못 쓴 것은 **사람이 할 일이 다르다** — 인코딩을 고칠 일과 권한을 열 일이다.
+        out.push(match done {
+            Added::Unwritable(why) => format!("  {name} 에 못 썼다 — {why}"),
+            _ => format!("  {name} 를 못 읽어 안 건드렸다 — {}", done.trouble().unwrap_or_default()),
+        });
+        out.push("    손으로 더할 줄 (고치고 `moai init` 을 다시 불러도 된다):".into());
         // **한 줄에 하나씩 낸다** — 쉼표로 이으면 붙여 넣은 것이 한 줄이 되어 규칙이 안 선다.
         // `.gitattributes` 는 더 나쁘다: `<패턴> text eol=lf, <패턴> …` 은 첫 패턴에 쓰레기
         // 속성을 달 뿐이라 `journal.jsonl` 이 `merge=union` 을 영영 못 받는다.
