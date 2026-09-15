@@ -3059,3 +3059,7 @@
 {"ts":"2026-09-15T11:06:29Z","id":"moai-ejgp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-15T11:06:29Z","id":"moai-humk.tgr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review xhigh --fix 8c3a553..8b2401e 이 worktree-moai-humk 안에서 돈다. 끝나면 원문·판단 두 노트로 적고 done -m"}
 {"ts":"2026-09-15T11:06:29Z","id":"moai-humk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 둘이 한 커밋 8b2401e 에 들었다(까닭은 그 메시지에 적었다 — 갈라 커밋하면 가운데 상태에서 시험이 붉다). main 받은 뒤 798+287 통과. 리뷰 moai-humk.tgr 을 닫고 main 에 --no-ff 머지 → 워크트리·가지 삭제 → 둘 done → moa-issue-14 에 보고"}
+{"ts":"2026-09-15T11:09:25Z","id":"moai-ggqf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"열 비트가 넘치면 시험이 잡는다 — Field::ALL 과 Fields 의 폭을 견준다"}
+{"ts":"2026-09-15T11:09:25Z","id":"moai-7pd5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"에픽 moai-6bc0 에서 둘 다 풀렸다 — (1) Fields 를 u16 으로 넓힌 것이 5934469, (2) 새 기본 열이 옛 설정에 안 뜨던 것은 사용자 결정으로 fields_known 을 더해 737193e. 남은 것(열이 열여섯을 넘길 때 잡을 장치)은 moai-ggqf 로 세웠다."}
+{"ts":"2026-09-15T11:09:25Z","id":"moai-7pd5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-6bc0 에서 둘 다 풀렸고, 남은 한 조각은 moai-ggqf 로 세웠다"}
+{"ts":"2026-09-15T11:09:25Z","id":"moai-ggqf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
