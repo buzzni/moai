@@ -835,7 +835,11 @@ fn row_line<'a>(
     head.push(Span::raw(" "));
     // 다른 워크트리에서 온 줄은 제목 **앞에** `⎇ <브랜치>` — CLI 목록과 같은 자리다.
     // 머리글에 넣어 재므로 제목 몫이 그만큼 줄고, 잘린 제목은 여전히 `…` 를 남긴다.
-    if let Some(b) = app.origin.branch(&i.id) {
+    // **그 이슈를 이름에 단 옆 가지**가 있으면 제목 앞에 `⎇ <가지>`(moai-nxt4, 사용자 결정) — 집기를
+    // main 에 커밋하는 규약에서는 옛 자(줄이 옆에서 왔나)가 거의 안 서서 표시가 사라졌다.
+    if fields.shows(Field::Branch)
+        && let Some(b) = app.origin.working(&i.id)
+    {
         head.push(Span::styled(format!("{} {}", style::BRANCH_GLYPH, clip(b, BRANCH_CAP)), branch()));
         head.push(Span::raw(" "));
     }
@@ -865,7 +869,9 @@ fn row_line<'a>(
                 ),
                 Field::Created => format!("+{}", i.created_at.get(5..10).unwrap_or("—")),
                 Field::Updated => format!("✎{}", i.updated_at.get(5..10).unwrap_or("—")),
-                Field::Id | Field::Priority | Field::Tally | Field::Names => unreachable!("오른쪽 열이 아니다"),
+                Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => {
+                    unreachable!("오른쪽 열이 아니다")
+                }
             };
             (f, text)
         })
@@ -987,7 +993,7 @@ fn cell_name(f: super::view::Field) -> &'static str {
         Field::Assignee => "WHO",
         Field::Created => "MADE",
         Field::Updated => "EDIT",
-        Field::Id | Field::Priority | Field::Tally | Field::Names => "",
+        Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => "",
     }
 }
 
@@ -999,7 +1005,7 @@ fn cell_width(f: super::view::Field) -> usize {
         Field::Assignee => WHO_W,
         // `+09-14`·`✎09-14` 여섯 칸.
         Field::Created | Field::Updated => 6,
-        Field::Id | Field::Priority | Field::Tally | Field::Names => 0,
+        Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => 0,
     }
 }
 
@@ -2132,6 +2138,38 @@ pub(super) mod tests {
         assert!(seen(&mut a).iter().any(|l| l.contains("TITLE")), "다시 눌러도 안 돌아왔다");
     }
 
+    /// **그 이슈를 이름에 단 옆 가지가 있으면 제목 앞에 ⎇ 가 선다**(moai-nxt4, 사용자 결정) — 집기를
+    /// main 에 커밋하는 규약에서 옛 자(줄이 옆에서 왔나)로는 안 서던 표시다. `SPC c w` 가 끄고 켠다.
+    #[test]
+    fn a_row_held_in_a_sibling_worktree_wears_the_branch_mark() {
+        let mut a = every(issues());
+        let (shown, origin) = crate::worktree::overlay(a.issues.clone(), vec![crate::worktree::Side::new(
+            "worktree-argos-0004",
+            "/wt/argos-0004",
+            vec![],
+        )]);
+        a.adopt(shown);
+        a = a.overlaid(origin, Vec::new(), Vec::new());
+        let seen = |a: &mut App| render(a, 120, 12).join("\n");
+        // 가지 없는 줄에는 안 붙는다 — 뿌리의 에픽 줄로 본다.
+        let root = seen(&mut a);
+        let epic = root.lines().find(|l| l.contains("아주 긴")).expect("에픽 줄이 없다");
+        assert!(!epic.contains(style::BRANCH_GLYPH), "가지 없는 줄에 표시가 붙었다 — {epic:?}");
+        a.hit("Enter"); // 멤버는 에픽 안에 산다
+        let text = seen(&mut a);
+        // **목록 줄만 본다** — 경로 줄도 옆 워크트리 이름을 대므로 `argos-0004` 로만 찾으면 그 줄이 먼저 걸린다.
+        let held = text.lines().find(|l| l.contains("집은 멤버")).unwrap_or_else(|| panic!("줄이 없다\n{text}"));
+        // 긴 가지 이름은 `BRANCH_CAP` 까지만 서고 `…` 가 남는다 — 제목 몫을 지킨다.
+        assert!(held.contains(style::BRANCH_GLYPH) && held.contains("worktree-argos"), "{held:?}");
+
+        // **줄의 표시만 본다** — 경로 줄의 `⎇ <옆 워크트리>`(겹쳐 보기가 켜졌다는 말)는 `SPC t w` 의 몫이다.
+        let row = |a: &mut App| seen(a).lines().find(|l| l.contains("집은 멤버")).unwrap_or_default().to_string();
+        a.hit("SPC c w");
+        assert!(!row(&mut a).contains(style::BRANCH_GLYPH), "SPC c w 가 줄의 표시를 안 걷었다");
+        a.hit("SPC c w");
+        assert!(row(&mut a).contains("worktree-argos"), "다시 눌러도 안 돌아왔다");
+    }
+
     /// **열을 걷는 것은 목록 전체가 함께 정한다**(moai-g7p8 리뷰). 머리글이 긴 줄(`p10`)만 날짜를
     /// 걷으면 같은 폭에서 오른쪽 열이 줄마다 어긋난다.
     #[test]
@@ -2376,9 +2414,11 @@ pub(super) mod tests {
         let lines = render(&mut a, 120, 12);
         let screen = lines.join("\n");
         let row = lines.iter().find(|l| l.contains("argos-0004") && l.contains("집은 멤버")).expect("줄이 없다");
-        assert!(row.contains("⎇ feat/x 집은 멤버"), "목록에 머리표가 없다\n{screen}");
+        // **목록 줄의 ⎇ 는 출처가 아니라 그 이슈를 이름에 단 옆 가지에 붙는다**(moai-nxt4, 사용자 결정) —
+        // `feat/x` 는 그 이슈의 가지가 아니므로 줄에는 안 선다. 어디서 온 줄인지는 상세가 댄다.
+        assert!(!row.contains(style::BRANCH_GLYPH), "출처만으로 목록에 머리표가 섰다\n{screen}");
         assert!(lines[0].contains("⎇ feat/x") && lines[0].contains("SPC t w 로 끈다"), "켜졌다고 안 말한다\n{screen}");
-        assert!(screen.matches("⎇ feat/x").count() >= 3, "상세에 머리표가 없다\n{screen}");
+        assert!(screen.matches("⎇ feat/x").count() >= 2, "상세에 머리표가 없다\n{screen}");
 
         a.hit("SPC t w");
         assert!(!a.worktree, "SPC t w 가 안 껐다");

@@ -81,6 +81,8 @@ pub enum Field {
     /// 목록 맨 위의 **열 이름 줄**(moai-3fnf). 값이 아니라 줄 하나지만 켜고 끄는 자리가 열과 같아
     /// 여기 든다 — `SPC c` 밑에 서고 설정에도 열과 같은 자리에 적힌다.
     Names,
+    /// 제목 앞의 `⎇ <가지>` — 그 이슈를 이름에 단 옆 가지(moai-nxt4).
+    Branch,
 }
 
 impl Field {
@@ -94,6 +96,7 @@ impl Field {
             Field::Tally => "셈",
             Field::Tags => "태그",
             Field::Names => "열 이름",
+            Field::Branch => "워크트리",
         }
     }
 
@@ -104,7 +107,7 @@ impl Field {
             Field::Created | Field::Updated => Some(0),
             Field::Assignee => Some(1),
             Field::Tags => Some(2),
-            Field::Id | Field::Priority | Field::Tally | Field::Names => None,
+            Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => None,
         }
     }
 
@@ -112,7 +115,7 @@ impl Field {
         1 << self as u16
     }
 
-    pub const ALL: [Field; 8] = [
+    pub const ALL: [Field; 9] = [
         Field::Id,
         Field::Priority,
         Field::Assignee,
@@ -121,6 +124,7 @@ impl Field {
         Field::Tally,
         Field::Tags,
         Field::Names,
+        Field::Branch,
     ];
 
     /// 설정 파일에 적는 이름(moai-2bzp). 화면의 낱말([`Field::word`])과 따로 둔다 — 낱말을 다듬은 날
@@ -135,6 +139,7 @@ impl Field {
             Field::Tally => "tally",
             Field::Tags => "tags",
             Field::Names => "names",
+            Field::Branch => "branch",
         }
     }
 
@@ -152,7 +157,7 @@ pub struct Fields(u16);
 /// 사용자 결정이고(moai-3fnf), 줄이 적은 창에서는 `SPC c h` 로 끈다.
 impl Default for Fields {
     fn default() -> Fields {
-        Fields(Field::Id.bit() | Field::Priority.bit() | Field::Tally.bit() | Field::Names.bit())
+        Fields(Field::Id.bit() | Field::Priority.bit() | Field::Tally.bit() | Field::Names.bit() | Field::Branch.bit())
     }
 }
 

@@ -68,6 +68,24 @@ impl Origin {
         self.from.get(id).map(|&k| self.trees[k].0.as_str())
     }
 
+    /// **그 이슈를 이름에 단 옆 가지**(moai-nxt4) — `worktree-moai-3fnf` 처럼. 규약대로 일감마다
+    /// 가지를 그 id 로 띄우므로(CLAUDE.md), 이것이 곧 "누가 무엇을 쥐고 있나" 다.
+    ///
+    /// [`Origin::branch`] 와 가르는 것: 그쪽은 **줄이 어디서 왔나**(스냅샷의 출처)이고, 집기를
+    /// main 에 커밋하는 지금 규약에서는 양쪽 줄이 같아 거의 안 선다 — 목록의 ⎇ 가 사라진 까닭이다.
+    ///
+    /// 자식 id(`moai-3fnf.abc`)의 가지가 부모 줄에 붙지 않게 **마디로 가른다** — 이름이 id 로
+    /// 끝나거나 id 뒤에 `-`·`/`·`.` 가 와야 그 이슈의 가지다.
+    pub fn working(&self, id: &str) -> Option<&str> {
+        self.trees.iter().map(|(l, _)| l.as_str()).find(|label| {
+            label.match_indices(id).any(|(at, _)| {
+                let before = label[..at].chars().next_back();
+                let after = label[at + id.len()..].chars().next();
+                before.is_none_or(|c| !c.is_alphanumeric()) && after.is_none_or(|c| !c.is_alphanumeric() && c != '.')
+            })
+        })
+    }
+
     /// 줄을 보태 온 옆 워크트리의 뿌리들 — [`Origin::root`] 가 댈 수 있는 자리 전부. 탐색기가
     /// 이 뿌리마다 커밋 표를 짓는다(moai-a4i0). 줄을 하나도 안 보탠 곳은 뺀다 — 찾을 id 가 없다.
     pub fn roots(&self) -> Vec<&Path> {
@@ -690,6 +708,26 @@ mod tests {
         let (shown, origin) = overlay(vec![], vec![quiet, busy]);
         assert_eq!(shown.len(), 1);
         assert_eq!(origin.branch("m-0001"), Some("b"));
+    }
+
+    /// **그 이슈를 이름에 단 가지를 찾는다**(moai-nxt4) — 줄이 어디서 왔는지와 따로다. 집기를 main 에
+    /// 커밋하면 양쪽 줄이 같아 출처는 안 서는데, 옆에서 그 일을 쥐고 있다는 것은 여전히 보여야 한다.
+    #[test]
+    fn a_sibling_branch_named_for_the_issue_is_found() {
+        let (_, origin) = overlay(vec![issue("moai-3fnf", "in_progress", "2026-09-15T00:00:00Z")], vec![
+            tree("worktree-moai-3fnf", vec![]),
+            tree("feat/moai-9xyz-따로", vec![]),
+        ]);
+        assert_eq!(origin.working("moai-3fnf"), Some("worktree-moai-3fnf"));
+        assert_eq!(origin.branch("moai-3fnf"), None, "제 줄인데 출처가 붙었다");
+        assert_eq!(origin.working("moai-9xyz"), Some("feat/moai-9xyz-따로"), "마디로 끊긴 id 를 못 찾는다");
+        assert_eq!(origin.working("moai-3fn"), None, "id 의 앞토막이 남의 가지에 걸렸다");
+        assert_eq!(origin.working("moai-9xy"), None);
+        // 자식의 가지는 부모 줄에 안 붙는다 — `moai-3fnf.abc` 가 `moai-3fnf` 를 물들이면
+        // 부모가 제가 집힌 줄 안다.
+        let (_, child) = overlay(vec![], vec![tree("worktree-moai-3fnf.abc", vec![])]);
+        assert_eq!(child.working("moai-3fnf"), None);
+        assert_eq!(child.working("moai-3fnf.abc"), Some("worktree-moai-3fnf.abc"));
     }
 
     #[test]
