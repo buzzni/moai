@@ -23,13 +23,11 @@ struct Moved {
     /// 도로 집으라 했는데 **아직 계획 밖인 것** — (그 줄, 실제로 미룬 줄).
     shelved: Vec<(String, Vec<String>)>,
     /// `--from` 을 걸었는데 그 사이 칸이 달라진 줄 — (그 줄, 지금 칸).
-    stale: Vec<(String, crate::model::Status)>,
+    stale: Vec<(String, String)>,
 }
 
 pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
-    let at = model::now();
-    let by = model::actor(ctx.user.as_deref())?;
     let back = args.undo;
     // **빈 까닭은 안 적는다.** `moai note` 가 같은 자리에서 거절하는데 여기만
     // 받으면, 이력에 내용 없는 `note:` 줄이 부를 때마다 하나씩 쌓인다.
@@ -39,20 +37,40 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     }
     // **모르는 칸은 거절한다** — `mv --from` 과 같은 자다. 오타를 "안 맞았다" 로
     // 읽으면 아무것도 안 하면서 0 아닌 코드만 내, 부르는 쪽이 까닭을 못 읽는다.
+    //
+    // **누구인지 묻기 전에 본다** — `mv` 와 같은 차례다. 뒤에 두면 신원 없는 기계에서
+    // 칸 오타가 "누가 하는지 모른다" 로 덮여, 여기 적은 까닭이 그대로 무너진다.
     let from = args.from.map(crate::model::Status::new);
     if let Some(f) = &from {
         repo.config.require_known(f.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
     }
 
+    let at = model::now();
+    let by = model::actor(ctx.user.as_deref())?;
+
     let (moved, read): (Moved, super::Read) = repo.with_write(|issues, cfg, _| {
         let mut m = Moved::default();
         let mut entries = Vec::new();
-        // 묶음은 화면이 보여 준 칸으로 잰다 — `mv` 와 한 자다(사람이 정했다,
-        // moai-o5ss.l07). `moai defer <묶음>` 은 AGENTS.md 가 시키는 길이라, 여기서
-        // 적힌 칸과 견주면 시키는 대로 친 명령이 "이미 todo 다" 로 떨어진다.
+        // **묶음에는 `--from` 을 못 쓴다 — `mv` 와 한 자다**(사람이 정했다,
+        // moai-8xwi.rzg). 묶음의 칸은 멤버에서 읽고 미루기는 제 줄의 `deferred_at` 에
+        // 쓴다. 재는 축과 쓰는 축이 갈려 있어 겨루는 둘이 다 이긴다. `moai defer <묶음>`
+        // 은 AGENTS.md 가 시키는 길이지만, 거기에 겨루는 가드는 원래 없었다.
+        // 돌기 전에 한 번만 뜨는 까닭은 `standing_of` 가 적었다.
         let asked: Vec<&str> = args.ids.iter().map(String::as_str).collect();
+        if from.is_some() {
+            if let Some(g) = issues.iter().find(|i| asked.contains(&i.id.as_str()) && crate::report::is_group(i)) {
+                return Err(Fail::coded(
+                    format!(
+                        "묶음의 칸은 멤버에서 읽는다 — {} 에는 `--from` 을 못 쓴다\n      \
+                         묶음은 `--from` 없이 미룬다",
+                        g.id
+                    ),
+                    super::code::BAD_STATUS,
+                ));
+            }
+        }
         let seen: super::Read =
-            if from.is_some() { super::read_of(issues, cfg, &asked) } else { Default::default() };
+            if from.is_some() { super::standing_of(issues, cfg, &asked) } else { Default::default() };
         for id in &args.ids {
             // #a-partial: 하나가 없다고 나머지를 안 미루지 않는다.
             let Some(i) = issues.iter_mut().find(|i| &i.id == id) else {
@@ -63,10 +81,12 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             // 옆에서 집어 일하기 시작한 줄을 뒤늦은 미루기가 계획 밖으로 빼면,
             // 일하던 쪽은 제 일이 보드에서 사라진 까닭을 어디서도 못 읽는다.
             // 이미 그 모양인지보다 **먼저** 본다(`mv` 와 같은 차례다).
-            let stands = seen.get(&i.id).map(String::as_str).unwrap_or(i.status.as_str());
-            if from.as_ref().is_some_and(|f| stands != f.as_str()) {
-                m.stale.push((i.id.clone(), crate::model::Status::new(stands.to_string())));
-                continue;
+            if let Some(f) = &from {
+                let stands = seen.get(&i.id).map(String::as_str).unwrap_or(i.status.as_str());
+                if stands != f.as_str() {
+                    m.stale.push((i.id.clone(), stands.to_string()));
+                    continue;
+                }
             }
             if i.is_deferred() == !back {
                 // **시각을 밀지 않는다.** 밀면 "언제부터 미뤄 뒀나" 가 마지막
@@ -131,19 +151,13 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         // **바뀐 것만 내면 나머지를 말할 자리가 없다.** 사람 출력에는 있는데
         // 기계 출력에만 없으면 받는 쪽이 두 표면 중 하나를 못 믿게 된다.
         #[derive(serde::Serialize)]
-        struct Stale<'a> {
-            id: &'a str,
-            /// 락 안에서 본 지금 칸. 함께 주지 않으면 진 쪽이 한 번 더 물어야 한다.
-            status: &'a str,
-        }
-        #[derive(serde::Serialize)]
         struct Out<'a> {
             deferred: bool,
             changed: Vec<super::Row<'a>>,
             already: &'a [String],
             missing: &'a [String],
             /// `--from` 에 걸려 그대로 둔 줄. 사람 쪽의 stderr 한 줄과 같은 것이다.
-            stale: Vec<Stale<'a>>,
+            stale: Vec<super::Stale<'a>>,
             /// 도로 집으라 했는데 아직 계획 밖인 것과, 실제로 도로 집어야 할 줄.
             shelved: Vec<super::Shelved<'a>>,
         }
@@ -152,7 +166,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             changed: moved.done.iter().map(|i| super::Row::from(i, &read)).collect(),
             already: &moved.already,
             missing: &moved.missing,
-            stale: moved.stale.iter().map(|(id, now)| Stale { id, status: now.as_str() }).collect(),
+            stale: super::stale(&moved.stale),
             shelved: super::shelved(&moved.shelved),
         });
     }

@@ -2931,3 +2931,9 @@
 {"ts":"2026-09-15T10:31:33Z","id":"moai-jra2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"39dfe8f 에서 '본 칸과 견준다' 로 실제로 다뤘다"}
 {"ts":"2026-09-15T10:31:42Z","id":"moai-o5ss.l07","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"5건 중 4건 반영(39dfe8f). 묶음 --from 은 사람이 '본 칸' 으로 정했고 idea moai-jra2 는 그것으로 닫혔다. 진 줄의 -m 은 사람이 '버린다' 로 정해 그대로 둔다"}
 {"ts":"2026-09-15T10:31:42Z","id":"moai-o5ss","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"리뷰 moai-o5ss.l07 을 닫으며 끝낸다"}
+{"ts":"2026-09-15T10:31:49Z","id":"moai-s4d5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T10:39:10Z","id":"moai-s4d5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"구현(89a2887): guide 치트시트 밑에 --from 문단(겨루는 집기·defer 도 같은 자·안 쓰면 안 막음), moai init 이 AGENTS.md 블록과 플러그인 SKILL.md 를 다시 씀, plugin.json 해시 갱신. 예제 agent.sh 는 mv --json 의 moved 세기 대신 ready 가 준 .ready[0].status 를 --from 으로 돌려주고 종료 코드로 진 집기를 가른다. 793+288 통과."}
+{"ts":"2026-09-15T10:39:10Z","id":"moai-s4d5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T10:39:11Z","id":"moai-8xwi.rzg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-8xwi 단계 리뷰 (max)"}
+{"ts":"2026-09-15T10:39:22Z","id":"moai-8xwi.rzg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T10:39:22Z","id":"moai-8xwi.rzg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review max --fix 백그라운드. 끝나면 원문·판단, fix: 커밋, 닫고 moai-s4d5 도 닫은 뒤 main 받아 병합(worktree-moai-8xwi)"}

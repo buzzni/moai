@@ -2801,7 +2801,10 @@ mod tests {
             assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
         // 갈 칸이 여전히 첫 칸·끝난 칸이면 집은 것이 아니다 — `--from` 이 그것을 가리지 않는다.
-        for cmd in ["moai mv t-1 done --from in_progress && echo x > src/store.rs"] {
+        for cmd in [
+            "moai mv t-1 done --from in_progress && echo x > src/store.rs",
+            "moai mv t-1 todo --from in_progress && echo x > src/store.rs",
+        ] {
             assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
     }
