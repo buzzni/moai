@@ -379,6 +379,8 @@ impl Doc {
             sort: look_one(t, SORT, "낱말이어야", word, &mut problems),
             sort_reversed: look_one(t, SORT_REVERSED, "true·false 여야", Item::as_bool, &mut problems),
             fields: look_words(t, FIELDS, &mut problems),
+            fields_known: look_words(t, FIELDS_KNOWN, &mut problems),
+            detail: look_one(t, DETAIL, "true·false 여야", Item::as_bool, &mut problems),
         };
         (look, problems)
     }
@@ -422,6 +424,15 @@ impl Doc {
             changed |= put_value(t, SORT_REVERSED, new.sort_reversed.map(toml_edit::Value::from));
         }
         changed |= merge_words(t, FIELDS, base.fields.as_deref(), new.fields.as_deref());
+        // **`fields_known` 은 빼지 않고 더하기만 한다**(moai-6bc0 단계 리뷰) — `base` 를 비워 두는 까닭이다.
+        // 이 키는 사람이 고른 것이 아니라 *적는 쪽이 아는 열 전부*라, 여기 있는데 이 바이너리가 모르는
+        // 이름은 **새 바이너리가 적어 둔 것**이다. 그것을 빼면 그쪽의 다음 실행이 제가 적어 둔 열을
+        // "몰랐던 열" 로 읽어 사람이 끈 것을 도로 켠다 — 낱말 배열을 합치는 까닭(`남이 더한 낱말은
+        // 남는다`)이 여기서는 더 세게 걸린다.
+        changed |= merge_words(t, FIELDS_KNOWN, None, new.fields_known.as_deref());
+        if base.detail != new.detail {
+            changed |= put_value(t, DETAIL, new.detail.map(toml_edit::Value::from));
+        }
         self.dirty |= changed;
         Ok(())
     }
@@ -434,6 +445,8 @@ const HIDE_DEFERRED: &str = "hide_deferred";
 const SORT: &str = "sort";
 const SORT_REVERSED: &str = "sort_reversed";
 const FIELDS: &str = "fields";
+const DETAIL: &str = "detail";
+const FIELDS_KNOWN: &str = "fields_known";
 
 /// 탐색기의 보기 — 사람이 마지막으로 고른 것(moai-2bzp). **낱말로 든다** — 무슨 낱말이 있는지는
 /// 탐색기가 안다. 이 모듈이 조각의 타입을 알면 설정 파일의 모양이 화면 코드에 매인다. 없는 키는
@@ -443,9 +456,11 @@ const FIELDS: &str = "fields";
 /// [tui]
 /// hidden = ["done"]
 /// hide_deferred = false
+/// detail = true
 /// sort = "updated"
 /// sort_reversed = false
 /// fields = ["id", "priority", "tally", "assignee"]
+/// fields_known = ["id", "priority", "assignee", "created", "updated", "tally", "tags", "names", "branch"]
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Look {
@@ -454,6 +469,13 @@ pub struct Look {
     pub sort: Option<String>,
     pub sort_reversed: Option<bool>,
     pub fields: Option<Vec<String>>,
+    /// **적은 쪽이 알던 열 전부**(moai-3fnf 리뷰, 사용자 결정 2026-09-15). `fields` 는 켠 것만 담아
+    /// "안 적혔다" 가 "껐다" 와 "그 열을 몰랐다" 둘 다를 뜻했다 — 그래서 새 열이 옛 설정을 가진
+    /// 사람에게 영영 안 떴다. 이 목록에 없는 열은 **탐색기의 기본값**으로 선다. 옛 설정에는 이 키가
+    /// 없으니 새 열이 기본대로 서고, 한 번 적히고 나면 끈 열은 끈 채로 남는다.
+    pub fields_known: Option<Vec<String>>,
+    /// 오른쪽 상세 칸이 보이나(moai-ymnu).
+    pub detail: Option<bool>,
 }
 
 /// 설정에서 보기만 읽는다. 파일이 없으면 빈 `Look` 이고 문제도 아니다. 깨진 파일은 까닭 한 줄 —
@@ -963,6 +985,8 @@ mod tests {
             sort: Some("updated".into()),
             sort_reversed: Some(false),
             fields: Some(vec!["id".into(), "assignee".into()]),
+            fields_known: None,
+            detail: Some(false),
         };
         update(&path, |doc| doc.merge_look(&Look::default(), &look)).unwrap();
         let (back, problems) = read_look(Some(&path));
@@ -1058,6 +1082,8 @@ mod tests {
             sort: Some("updated".into()),
             sort_reversed: Some(false),
             fields: Some(vec!["id".into()]),
+            fields_known: None,
+            detail: Some(true),
         };
         let a = Look { fields: Some(vec!["id".into(), "assignee".into()]), ..base.clone() };
         let b = Look { hide_deferred: Some(true), ..base.clone() };
@@ -1077,6 +1103,18 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("sort = \"title\"  # 새것 먼저") && text.contains("# 끝난 일은 늘 숨긴다"), "{text}");
         assert_eq!(read_look(Some(&path)).0.hidden, Some(Vec::new()), "{text}");
+
+        // **`fields_known` 은 더하기만 한다**(moai-6bc0 단계 리뷰) — 새 바이너리가 적어 둔 열 이름을
+        // 이쪽이 지우면, 그쪽의 다음 실행이 제가 적어 둔 열을 "몰랐던 열" 로 읽어 사람이 끈 것을
+        // 도로 켠다. 이 바이너리가 아는 목록은 세션 내내 같은 값이라 base 와 견줄 자가 없다.
+        let newer = Look { fields_known: Some(vec!["id".into(), "estimate".into()]), ..c.clone() };
+        update(&path, |doc| doc.merge_look(&c, &newer)).unwrap();
+        let older = Look { fields_known: Some(vec!["id".into(), "priority".into()]), ..c.clone() };
+        update(&path, |doc| doc.merge_look(&newer, &older)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let known = read_look(Some(&path)).0.fields_known.unwrap_or_default();
+        assert!(known.contains(&"estimate".to_string()), "옆 바이너리가 아는 열을 지웠다\n{text}");
+        assert!(known.contains(&"priority".to_string()), "이 바이너리가 아는 열을 안 적었다\n{text}");
     }
 
     /// 바꾼 것이 없으면 파일을 건드리지 않는다 — 헛 쓰기도 헛 diff 도 없다.
