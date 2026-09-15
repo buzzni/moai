@@ -29,6 +29,34 @@ const LEFT: u16 = 55;
 /// 커서. 목록의 글자는 늘 이 폭만큼 안쪽에서 시작한다.
 const CURSOR: &str = "> ";
 
+/// 맨 위 헤더 — 로고 다섯 줄과 문구 한 줄, 그래서 여섯 줄이다(moai-mzet).
+///
+/// 로고 오른쪽은 파이프로 갈라 사람·판·프로젝트 번호가 선다. **좁으면 로고만 뺀다** — 파이프
+/// 오른쪽은 남긴다. 거기 서는 번호가 숫자 키를 설명하는 유일한 자리라, 헤더를 통째로 숨기면
+/// 그 키를 아무도 모른다.
+const LOGO: [&str; 6] = [
+    "• ▌ ▄ ·.        ▄▄▄· ▪",
+    "·██ ▐███▪ ▄█▀▄ ▐█ ▀█ ██",
+    "▐█ ▌▐▌▐█·▐█▌.▐▌▄█▀▀█ ▐█·",
+    "██ ██▌▐█▌▐█▌.▐▌▐█▪ ▐▌▐█▌",
+    "▀▀  █▪▀▀▀ ▀█▄▀▪ ▀  ▀ ▀▀▀",
+    "Issue tracker for AI agent",
+];
+
+/// 헤더의 줄 수. [`LOGO`] 와 같은 수여야 한다 — 파이프는 로고가 없는 줄에도 선다.
+const HEADER_H: u16 = LOGO.len() as u16;
+
+/// 헤더가 서려면 화면이 이만큼은 돼야 한다. 헤더 여섯 줄 + 경로 줄 + 키 줄을 내주고도
+/// 몸통에 열여섯 줄이 남는 높이다 — 그보다 짧으면 헤더가 목록을 먹는다.
+const HEADER_MIN_H: u16 = HEADER_H + 18;
+
+/// 로고와 파이프 사이, 파이프와 정보 사이의 여백 한 칸씩.
+const HEADER_GAP: usize = 1;
+
+/// 파이프 오른쪽에 사람과 메일 한 줄이 설 만큼. 이만큼도 안 남으면 로고를 뺀다 —
+/// 로고를 지키고 정보를 자르면, 숫자 키를 설명하는 유일한 자리가 사라진다.
+const HEADER_INFO_MIN: usize = 24;
+
 /// 좌우 여백. **`CURSOR` 에서 잰다** — 우측 패널의 여백도 이 값인데, 숫자를
 /// 따로 적어 두면 커서 글리프를 바꾼 날 두 패널이 말없이 갈라진다. 한쪽만
 /// 테두리에 붙으면 같은 화면에서 규칙이 둘이 되고, 붙은 쪽이 답답하게 읽힌다.
@@ -60,7 +88,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         (items, grid)
     });
     let panel_h = open_menu.as_ref().map_or(0, |(_, g)| if g.rows == 0 { 0 } else { g.rows as u16 + 1 });
-    let [top, note, body, panel, keys] = Layout::vertical([
+    // 헤더는 짧은 터미널에서는 서지 않는다 — 여섯 줄을 내주면 목록이 한두 줄만 남는다.
+    let header_h = if area.height >= HEADER_MIN_H { HEADER_H } else { 0 };
+    let [head, top, note, body, panel, keys] = Layout::vertical([
+        Constraint::Length(header_h),
         Constraint::Length(1),
         Constraint::Length(banner_h),
         Constraint::Min(1),
@@ -71,6 +102,9 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     let [left, right] =
         Layout::horizontal([Constraint::Percentage(LEFT), Constraint::Min(10)]).areas(body);
 
+    if header_h > 0 {
+        header(f, head);
+    }
     crumbs(f, app, &rows, top);
     if let Some((text, urgent)) = banner(app) {
         let style = if urgent {
@@ -462,6 +496,30 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 잘못된 줄 안다.
     let lead = if parts.len() == 1 && app.notice.is_some() { "" } else { "! " };
     (!parts.is_empty()).then(|| (format!(" {lead}{} ", parts.join("   ·   ")), urgent))
+}
+
+/// 맨 위 여섯 줄 — 로고와, 그 오른쪽을 가르는 파이프.
+///
+/// 파이프 오른쪽은 아직 빈 채로 둔다. 사람·판(moai-56jf)과 번호 붙은 프로젝트(moai-mr83)가
+/// 그 자리에 선다 — 줄과 칸을 먼저 세워 두면 그쪽은 글자만 채운다.
+fn header(f: &mut Frame, at: Rect) {
+    let logo_w = LOGO.iter().map(|l| crate::text::width(l)).max().unwrap_or(0);
+    // 로고와 파이프를 세우고도 오른쪽에 정보 한 줄이 설 만큼 남아야 로고를 그린다.
+    let with_logo = (at.width as usize) >= logo_w + HEADER_GAP * 2 + 1 + HEADER_INFO_MIN;
+    let lines: Vec<Line> = LOGO
+        .iter()
+        .map(|row| {
+            let mut spans = Vec::new();
+            if with_logo {
+                let pad = logo_w.saturating_sub(crate::text::width(row));
+                spans.push(Span::styled(format!("{row}{:pad$}", "", pad = pad), dim()));
+                spans.push(Span::raw(" ".repeat(HEADER_GAP)));
+            }
+            spans.push(Span::styled("│", dim()));
+            Line::from(spans)
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), at);
 }
 
 fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
@@ -2964,6 +3022,39 @@ pub(super) mod tests {
                 assert!(!bar.contains(gone), "{w}칸 바에 옮긴 키 `{gone}` 가 남았다 — {bar:?}");
             }
         }
+    }
+
+    /// **맨 위 여섯 줄은 헤더다**(moai-mzet) — 로고 다섯 줄과 문구 한 줄, 그 오른쪽을 파이프가
+    /// 가른다. 경로 줄은 그 밑으로 내려간다.
+    #[test]
+    fn the_header_stands_six_rows_of_logo_and_a_pipe() {
+        let mut a = app();
+        let lines = render(&mut a, 100, 24);
+        assert!(lines[5].contains("Issue tracker for AI agent"), "문구가 여섯째 줄이 아니다 — {:?}", &lines[..6]);
+        for (n, line) in lines[..6].iter().enumerate() {
+            assert!(line.contains('│'), "{n}번째 헤더 줄에 파이프가 없다 — {line:?}");
+        }
+        assert!(lines[..5].iter().any(|l| l.contains('▀')), "로고를 안 그린다 — {:?}", &lines[..5]);
+        // 헤더는 목록을 덮지 않는다 — 밑의 칸이 그만큼 내려갔을 뿐이다.
+        assert!(lines[6..].iter().any(|l| l.contains("argos-0001")), "목록이 헤더에 먹혔다");
+    }
+
+    /// **로고가 안 들면 헤더는 로고만 뺀다**(moai-mzet) — 파이프 오른쪽은 좁아도 남는다.
+    /// 거기 서는 프로젝트 번호가 숫자 키를 설명하는 유일한 자리라, 통째로 숨기면 키를 아무도 모른다.
+    #[test]
+    fn a_narrow_header_drops_the_logo_and_keeps_the_pipe() {
+        let mut a = app();
+        let lines = render(&mut a, 40, 24);
+        assert!(!lines[..6].iter().any(|l| l.contains('▀')), "40칸에 로고를 우겨 넣었다 — {:?}", &lines[..6]);
+        assert!(lines[0].contains('│'), "좁아도 파이프는 남는다 — {:?}", lines[0]);
+    }
+
+    /// **짧은 터미널에는 헤더가 서지 않는다**(moai-mzet) — 여섯 줄을 내주면 목록이 한두 줄만 남는다.
+    #[test]
+    fn a_short_terminal_keeps_its_rows_for_the_list() {
+        let mut a = app();
+        let lines = render(&mut a, 100, 14);
+        assert!(!lines[..6].iter().any(|l| l.contains("Issue tracker")), "짧은 터미널에 헤더가 섰다 — {:?}", &lines[..6]);
     }
 
     /// 층을 그림 시험용으로 세운다 — 연 것 하나, init 전 하나, 사라진 것 하나.
