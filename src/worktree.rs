@@ -925,8 +925,8 @@ mod tests {
     /// 탐색기가 갈라진 자리가 바뀐 것을 알아챈다(moai-pqrq).
     #[test]
     fn a_moved_head_in_any_worktree_changes_a_watched_stamp() {
-        let base = std::env::temp_dir().join(format!("moai-heads-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let scratch = crate::scratch::Scratch::new("heads");
+        let base = scratch.path().to_path_buf();
         let (main, feat) = (base.join("main"), base.join("feat"));
         std::fs::create_dir_all(&main).unwrap();
         let run = |dir: &Path, args: &[&str]| {

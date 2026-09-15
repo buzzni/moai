@@ -600,6 +600,7 @@ impl Drop for Lock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use crate::model::{Kind, Status};
 
     const T: &str = "2026-09-11T04:12:03Z";
@@ -608,19 +609,22 @@ mod tests {
         Issue::new(id.into(), format!("{id} 의 제목"), Kind::Issue, Status::new("todo"), T)
     }
 
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("moai-store-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+    /// `.moai` 한 벌이 든 임시 저장소. **돌려받은 것을 묶어 둔다** — 흘리면 그 줄
+    /// 끝에서 디렉터리가 지워진다.
+    fn scratch(name: &str) -> Scratch {
+        let dir = Scratch::new(&format!("store-{name}"));
         std::fs::create_dir_all(dir.join(".moai")).unwrap();
         std::fs::write(dir.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
         std::fs::write(dir.join(".moai/issues.jsonl"), "").unwrap();
         dir
     }
 
-    fn repo(name: &str) -> (Repo, PathBuf) {
+    /// 임시 저장소와 **그 자리를 쥔 것**. 둘째를 놓으면 디렉터리가 사라지므로
+    /// 부르는 쪽이 시험이 끝날 때까지 들고 있어야 한다.
+    fn repo(name: &str) -> (Repo, Scratch) {
         let root = scratch(name);
         let config = Config::load(&root).unwrap();
-        (Repo { root: root.clone(), config }, root)
+        (Repo { root: root.to_path_buf(), config }, root)
     }
 
     #[test]
@@ -709,7 +713,7 @@ mod tests {
         })
         .expect("스냅샷을 썼는데 실패로 냈다 — 다시 부르면 둘 선다");
         assert_eq!(r.read().unwrap().issues.len(), 1);
-        assert!(journal_misses().iter().any(|(root, _)| *root == d), "못 남긴 것을 안 셌다");
+        assert!(journal_misses().iter().any(|(root, _)| root == d.path()), "못 남긴 것을 안 셌다");
 
         let e = r.with_write(|_, _, _| Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &by)], ())));
         assert!(e.is_err(), "저널만 적는 쓰기가 아무것도 안 담았는데 성공으로 끝났다");
@@ -931,7 +935,7 @@ mod tests {
     #[test]
     fn open_tells_uninit_missing_and_broken_apart() {
         let root = scratch("open");
-        assert!(matches!(Repo::open(&root), Ok(Opened::Repo(r)) if r.root == root));
+        assert!(matches!(Repo::open(&root), Ok(Opened::Repo(r)) if r.root == *root.path()));
 
         let bare = root.join("bare");
         std::fs::create_dir_all(&bare).unwrap();
@@ -947,6 +951,5 @@ mod tests {
         std::fs::create_dir_all(broken.join(".moai")).unwrap();
         std::fs::write(broken.join(".moai/config.toml"), "prefix = \"\"\n").unwrap();
         assert!(Repo::open(&broken).is_err(), "깨진 설정을 init 전으로 접었다");
-        let _ = std::fs::remove_dir_all(&root);
     }
 }

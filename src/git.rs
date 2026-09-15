@@ -325,9 +325,8 @@ pub(crate) mod tests {
     /// git 의 `--grep` 은 본문도 훑는다 — 본문에만 id 가 든 커밋은 그 이슈의 커밋이 아니다.
     #[test]
     fn a_real_log_matches_subjects_not_bodies() {
-        let dir = std::env::temp_dir().join(format!("moai-git-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let scratch = crate::scratch::Scratch::new("git");
+        let dir = scratch.path().to_path_buf();
         let git = |args: &[&str]| run_git(&dir, None, args);
         git(&["init", "-q"]);
         git(&["commit", "-q", "--allow-empty", "-m", "feat: 고친다 (moai-aaaa)"]);
@@ -341,7 +340,6 @@ pub(crate) mod tests {
         assert_eq!(subjects("moai-aaaa"), ["feat: 고친다 (moai-aaaa)"]);
         assert_eq!(subjects("moai-aaaa.b1c"), ["fix: 리뷰 (moai-aaaa.b1c)"]);
         assert_eq!(got["moai-aaaa"][0].hash.len(), 40, "해시를 줄여 받았다");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// **git 훅 안에서 돌아도 시험의 git 은 제 임시 저장소만 본다**(moai-g1a3).
@@ -359,9 +357,8 @@ pub(crate) mod tests {
     /// `TEST` 를 안 걷는다는 것은 여기서 안 드러난다. 그쪽은 tests/cli.rs 가 진짜 바이너리로 본다.
     #[test]
     fn git_tests_see_their_own_repos_inside_a_hook() {
-        let dir = std::env::temp_dir().join(format!("moai-git-hook-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let scratch = crate::scratch::Scratch::new("git-hook");
+        let dir = scratch.path().to_path_buf();
         let outer = dir.join("outer.git");
         let incoming = outer.join("objects/tmp_objdir-incoming");
         let out = std::process::Command::new(std::env::current_exe().unwrap())
@@ -376,7 +373,6 @@ pub(crate) mod tests {
             .output()
             .unwrap();
         let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-        let _ = std::fs::remove_dir_all(&dir);
         assert!(out.status.success(), "훅의 환경에서 git 을 부르는 시험이 깨졌다\n{said}");
         // 안쪽이 아무것도 안 돌고 초록으로 끝나면 이 시험은 아무것도 안 본 것이다.
         for ran in ["a_real_log_matches_subjects_not_bodies", "a_moved_head_in_any_worktree_changes_a_watched_stamp"] {
@@ -444,9 +440,8 @@ pub(crate) mod tests {
     /// 이슈가 생기기 전의 커밋은 걷지 않는다 — 단, 시계가 늦은 기계의 커밋은 하루까지 받는다.
     #[test]
     fn walking_stops_before_the_issue_was_born_but_forgives_a_slow_clock() {
-        let dir = std::env::temp_dir().join(format!("moai-git-since-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let scratch = crate::scratch::Scratch::new("git-since");
+        let dir = scratch.path().to_path_buf();
         let git = |at: &str, args: &[&str]| run_git(&dir, Some(at), args);
         git("2026-01-01T00:00:00Z", &["init", "-q"]);
         // 같은 id 가 이슈보다 이틀 먼저 적혔다 — 그 id 는 아직 없었으니 다른 저장소에서 온 우연이다.
@@ -459,7 +454,6 @@ pub(crate) mod tests {
         let subjects: Vec<&str> = got["moai-aaaa"].iter().map(|c| c.subject.as_str()).collect();
         assert_eq!(subjects, ["고친다 (moai-aaaa)", "시계 늦은 기계 (moai-aaaa)"]);
         assert_eq!(commits_of(&dir, &["moai-aaaa"], None).unwrap()["moai-aaaa"].len(), 3, "상한 없이는 다 걷는다");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -473,9 +467,8 @@ pub(crate) mod tests {
     /// 트래커 커밋은 표시만 한다. 날짜가 거꾸로 선 커밋 밑의 커밋도 놓치지 않는다(moai-g8cd).
     #[test]
     fn the_table_answers_as_commits_of_without_the_date_cut() {
-        let dir = std::env::temp_dir().join(format!("moai-git-table-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let scratch = crate::scratch::Scratch::new("git-table");
+        let dir = scratch.path().to_path_buf();
         let git = |at: &str, args: &[&str]| run_git(&dir, Some(at), args);
         git("2026-01-03T09:00:00Z", &["init", "-q"]);
         git("2026-01-03T09:00:00Z", &["commit", "-q", "--allow-empty", "-m", "feat: 고친다 (moai-aaaa)"]);
@@ -493,6 +486,5 @@ pub(crate) mod tests {
         assert_eq!(table["moai-aaaa.b1c"].len(), 1, "한 제목에 두 번 적은 id 를 두 커밋으로 셌다");
         assert!(commits_of(&dir, &["moai-aaaa"], born).unwrap().is_empty(), "이 시험이 흉내 낸 모서리가 사라졌다");
         assert_eq!(subjects(&table["moai-aaaa"]), subjects(&commits_of(&dir, &["moai-aaaa"], None).unwrap()["moai-aaaa"]));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

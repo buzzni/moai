@@ -777,33 +777,13 @@ fn lexical(p: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use std::collections::HashMap;
-
-    /// 시험 하나의 임시 디렉터리. **놓을 때 지운다** — 이름에 pid 가 들어 돌 때마다 새로
-    /// 서므로, 안 지우면 `cargo test` 한 번마다 시험 수만큼 `/tmp` 에 쌓인다(층·등록 시험의
-    /// `Scratch` 와 같다). 패닉으로 끝나도 `Drop` 이 돈다.
-    struct Scratch(PathBuf);
-
-    impl std::ops::Deref for Scratch {
-        type Target = Path;
-        fn deref(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     /// **돌려받은 것을 묶어 둔다** — `scratch(..).canonicalize()` 처럼 곧바로 흘리면
     /// 그 줄 끝에서 디렉터리가 지워진다.
     fn scratch(name: &str) -> Scratch {
-        let dir = std::env::temp_dir().join(format!("moai-user-config-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        Scratch(dir)
+        Scratch::new(&format!("user-config-{name}"))
     }
 
     fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<OsString> {

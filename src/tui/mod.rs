@@ -2186,6 +2186,7 @@ fn split_filter(q: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
     use crate::model::{Kind, Status};
 
@@ -2297,8 +2298,8 @@ mod tests {
     /// 끈 것(`fields` 에서 빠진 것)을 다음 실행이 "그 열을 몰랐다" 로 읽어 도로 켠다.
     #[test]
     fn turning_off_a_new_column_survives_a_trip_through_the_file() {
-        let s = Scratch::new("fields-known");
-        let user = s.0.join("user.toml");
+        let s = scratch("fields-known");
+        let user = s.join("user.toml");
         // 이 키를 모르던 바이너리가 적어 둔 설정 — `fields_known` 이 없다.
         std::fs::write(&user, "[tui]\nfields = [\"id\", \"priority\", \"tally\"]\n").unwrap();
         let mut a = App::new(Vec::new(), cfg(), Path::new());
@@ -2466,29 +2467,13 @@ mod tests {
         }
     }
 
-    /// 진짜 파일을 쓰는 시험이 쓰는 임시 자리. **터져도 치운다** — 바로
-    /// `remove_dir_all` 을 부르면 assert 하나가 터질 때마다 찌꺼기가 남고,
-    /// 이름이 pid 라 다음 실행이 그것을 치우지도 못한다.
-    struct Scratch(std::path::PathBuf);
-
-    impl Scratch {
-        fn new(name: &str) -> Scratch {
-            let dir = std::env::temp_dir().join(format!(
-                "moai-tui-{name}-{}-{:?}",
-                std::process::id(),
-                std::thread::current().id()
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(dir.join(".moai")).unwrap();
-            std::fs::write(dir.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
-            Scratch(dir)
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
+    /// `.moai` 한 벌을 얹은 임시 저장소. 자리를 만들고 지우는 일(터져도 치우는 것까지)은
+    /// [`Scratch`] 가 한다.
+    fn scratch(name: &str) -> Scratch {
+        let dir = Scratch::new(&format!("tui-{name}"));
+        std::fs::create_dir_all(dir.join(".moai")).unwrap();
+        std::fs::write(dir.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        dir
     }
 
     /// 지금 보이는 줄의 id 들 (`..` 은 뺀다).
@@ -3184,8 +3169,8 @@ mod tests {
     /// 한 번 걸러 버리면 그 뒤로 영영 못 알아챈다.
     #[test]
     fn a_file_that_appears_later_is_still_noticed() {
-        let scratch = Scratch::new("appear");
-        let dir = scratch.0.clone();
+        let scratch = scratch("appear");
+        let dir = scratch.path().to_path_buf();
         let repo = Repo { root: dir.clone(), config: cfg() };
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
@@ -3359,8 +3344,8 @@ mod tests {
     /// 다시 읽어도 커서는 보던 줄에 남는다.
     #[test]
     fn it_notices_a_changed_file_and_rereads_it() {
-        let scratch = Scratch::new("reload");
-        let dir = scratch.0.clone();
+        let scratch = scratch("reload");
+        let dir = scratch.path().to_path_buf();
         let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
         std::fs::write(dir.join(".moai/issues.jsonl"), line(&make("argos-0001", Kind::Epic))).unwrap();
 
@@ -3399,8 +3384,8 @@ mod tests {
     /// 표를 짓지 않는다 — 그 자리에서 이력을 걸으면 쓸 때마다 화면이 멈춘다.
     #[test]
     fn it_gathers_commits_after_opening_and_again_when_head_moves() {
-        let scratch = Scratch::new("commits");
-        let dir = scratch.0.clone();
+        let scratch = scratch("commits");
+        let dir = scratch.path().to_path_buf();
         let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
         std::fs::write(dir.join(".moai/issues.jsonl"), line(&make("argos-0001", Kind::Epic))).unwrap();
         let git = |msg: &str| crate::git::tests::run_git(&dir, None, &["commit", "-q", "--allow-empty", "-m", msg]);
@@ -3515,8 +3500,8 @@ mod tests {
     /// 안 바뀌었으면 읽지 않는다.
     #[test]
     fn a_change_in_a_watched_worktree_snapshot_rereads_too() {
-        let scratch = Scratch::new("watched");
-        let dir = scratch.0.clone();
+        let scratch = scratch("watched");
+        let dir = scratch.path().to_path_buf();
         std::fs::write(dir.join(".moai/issues.jsonl"), "").unwrap();
         let repo = Repo { root: dir.clone(), config: cfg() };
         let stamp = stamp_of(&repo);
@@ -3540,8 +3525,8 @@ mod tests {
     /// 띄운 읽기는 누른 뒤의 파일보다 옛것일 수 있다.
     #[test]
     fn a_manual_reload_drops_the_read_in_flight() {
-        let scratch = Scratch::new("inflight");
-        let dir = scratch.0.clone();
+        let scratch = scratch("inflight");
+        let dir = scratch.path().to_path_buf();
         std::fs::write(dir.join(".moai/issues.jsonl"), "").unwrap();
         let repo = Repo { root: dir.clone(), config: cfg() };
         let stamp = stamp_of(&repo);
@@ -3564,7 +3549,7 @@ mod tests {
         let (mine_dir, mut a) = writable("receive-mine");
         let (theirs, _) = writable("receive-theirs");
         touch_outside(&theirs);
-        let other = Repo { root: theirs.0.clone(), config: cfg() };
+        let other = Repo { root: theirs.path().to_path_buf(), config: cfg() };
         a.receive(prepare(&other, false));
         assert_eq!(shown(&a), ["argos-0001"], "남의 프로젝트에서 지은 줄을 들였다");
         assert!(a.trouble.is_none());
@@ -3578,7 +3563,7 @@ mod tests {
 
     /// 판 밖에서 한 줄을 더해 다음 `follow` 가 스레드 읽기를 띄우게 한다.
     fn touch_outside(scratch: &Scratch) {
-        let file = scratch.0.join(".moai/issues.jsonl");
+        let file = scratch.join(".moai/issues.jsonl");
         let mut src = std::fs::read_to_string(&file).unwrap();
         src.push_str(&format!("{}\n", serde_json::to_string(&make("argos-0003", Kind::Issue)).unwrap()));
         std::fs::write(&file, src).unwrap();
@@ -3754,8 +3739,8 @@ mod tests {
     /// `--user` 로 준다** — `MOAI_ACTOR` 를 시험에서 바꾸면 같은 프로세스의 다른
     /// 시험이 그 값을 본다.
     fn writable(name: &str) -> (Scratch, App) {
-        let scratch = Scratch::new(name);
-        let dir = scratch.0.clone();
+        let scratch = scratch(name);
+        let dir = scratch.path().to_path_buf();
         std::fs::write(
             dir.join(".moai/issues.jsonl"),
             format!("{}\n", serde_json::to_string(&make("argos-0001", Kind::Epic)).unwrap()),
@@ -3784,7 +3769,7 @@ mod tests {
     #[test]
     fn a_write_lands_in_the_file_and_the_screen_rereads_it() {
         let (scratch, mut a) = writable("write");
-        let file = scratch.0.join(".moai/issues.jsonl");
+        let file = scratch.join(".moai/issues.jsonl");
         a.trouble = Some("다시 읽지 못했다 — 옛 까닭".into());
 
         assert_eq!(add_idea(&mut a, "argos-0002").as_deref(), Some("argos-0002"));
@@ -3901,8 +3886,8 @@ mod tests {
     /// **보기·정렬·열은 누를 때마다 사용자 설정에 적히고 다음 실행이 읽는다**(moai-2bzp).
     #[test]
     fn the_look_is_saved_on_each_toggle_and_read_by_the_next_run() {
-        let s = Scratch::new("look-save");
-        let user = s.0.join("user.toml");
+        let s = scratch("look-save");
+        let user = s.join("user.toml");
         let mut a = App::new(Vec::new(), cfg(), Path::new());
         a.user_config = Some(user.clone());
         a.hit("SPC s d");
@@ -3953,8 +3938,8 @@ mod tests {
     /// — 화면이 든 보기를 통째로 적으면 옆에서 켠 열을 내 토글 한 번이 지운다.
     #[test]
     fn two_explorers_keep_each_others_toggles() {
-        let s = Scratch::new("look-two");
-        let user = s.0.join("user.toml");
+        let s = scratch("look-two");
+        let user = s.join("user.toml");
         let open = || {
             let mut x = App::new(Vec::new(), cfg(), Path::new());
             x.user_config = Some(user.clone());
@@ -3994,8 +3979,8 @@ mod tests {
     /// 줄**(그 끝난 줄)에 서는가다.
     #[test]
     fn the_saved_look_is_on_before_the_layer_places_the_first_cursor() {
-        let s = Scratch::new("look-layer");
-        let user = s.0.join("user.toml");
+        let s = scratch("look-layer");
+        let user = s.join("user.toml");
         std::fs::write(&user, "[tui]\nhidden = []\n").unwrap();
         let mut finished = make("argos-0001", Kind::Issue);
         finished.status = Status::new("done");
@@ -4022,7 +4007,7 @@ mod tests {
     #[test]
     fn a_write_drops_the_read_in_flight_and_keeps_the_outside_change() {
         let (scratch, mut a) = writable("write-inflight");
-        let file = scratch.0.join(".moai/issues.jsonl");
+        let file = scratch.join(".moai/issues.jsonl");
         let mut src = std::fs::read_to_string(&file).unwrap();
         src.push_str(&format!("{}\n", serde_json::to_string(&make("argos-0003", Kind::Issue)).unwrap()));
         std::fs::write(&file, src).unwrap();
@@ -4041,7 +4026,7 @@ mod tests {
     #[test]
     fn a_refused_write_says_why_and_touches_nothing() {
         let (scratch, mut a) = writable("write-refused");
-        let file = scratch.0.join(".moai/issues.jsonl");
+        let file = scratch.join(".moai/issues.jsonl");
         let before = std::fs::read_to_string(&file).unwrap();
         let stamp = a.stamp;
         // 앞 쓰기의 알림이 남아 있으면 실패한 이번 쓰기가 담긴 것으로 읽힌다.
@@ -4075,7 +4060,7 @@ mod tests {
     #[test]
     fn a_failed_write_survives_the_background_reread() {
         let (scratch, mut a) = writable("write-sticky");
-        let file = scratch.0.join(".moai/issues.jsonl");
+        let file = scratch.join(".moai/issues.jsonl");
         let out = a.write(|_| {}, |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> { Err("락".into()) });
         assert!(out.is_none());
 
@@ -4096,7 +4081,7 @@ mod tests {
     #[test]
     fn a_malformed_user_stops_the_write_on_screen_without_asking() {
         let (scratch, mut a) = writable("write-actor");
-        let file = scratch.0.join(".moai/issues.jsonl");
+        let file = scratch.join(".moai/issues.jsonl");
         let before = std::fs::read_to_string(&file).unwrap();
         a.user = Some("이름만".into());
 
@@ -4220,7 +4205,7 @@ mod tests {
             panic!("빈 제목인데 누군지 물었다")
         }
         let (scratch, mut a) = writable("jot-empty");
-        let file = scratch.0.join(".moai/issues.jsonl");
+        let file = scratch.join(".moai/issues.jsonl");
         let before = std::fs::read_to_string(&file).unwrap();
         a.identify = refuse;
         jotting(&mut a, "   ");
@@ -4239,10 +4224,10 @@ mod tests {
     #[test]
     fn a_form_without_a_target_never_writes() {
         let (scratch, mut a) = writable("jot-untargeted");
-        let file = scratch.0.join(".moai/issues.jsonl");
+        let file = scratch.join(".moai/issues.jsonl");
         let before = std::fs::read_to_string(&file).unwrap();
         jotting(&mut a, "여기");
-        assert!(matches!(&a.mode, Mode::Idea(f) if f.into.as_ref().is_some_and(|t| t.path == scratch.0)), "{:?}", a.mode);
+        assert!(matches!(&a.mode, Mode::Idea(f) if f.into.as_ref().is_some_and(|t| t.path == *scratch.path())), "{:?}", a.mode);
         a.mode = Mode::Idea(Form { title: Input::new("어디에도"), ..Form::default() });
         a.key(ctrl('s'));
         assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
@@ -4257,7 +4242,7 @@ mod tests {
     fn a_save_whose_journal_fails_closes_as_saved_and_says_so() {
         use std::os::unix::fs::PermissionsExt;
         let (scratch, mut a) = writable("jot-nojournal");
-        let journal = scratch.0.join(".moai/journal.jsonl");
+        let journal = scratch.join(".moai/journal.jsonl");
         std::fs::write(&journal, "").unwrap();
         std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o444)).unwrap();
         if std::fs::OpenOptions::new().append(true).open(&journal).is_ok() {
@@ -4298,7 +4283,7 @@ mod tests {
     #[test]
     fn a_failed_save_keeps_the_form_and_closing_it_clears_the_reason() {
         let (scratch, mut a) = writable("jot-fail");
-        let lock = scratch.0.join(".moai/lock");
+        let lock = scratch.join(".moai/lock");
         // 락 파일 자리에 디렉터리를 두면 `with_write` 가 락을 못 열고 곧바로 물러난다.
         std::fs::create_dir_all(&lock).unwrap();
         jotting(&mut a, "못 담길 것");
@@ -4338,8 +4323,8 @@ mod tests {
     #[test]
     fn an_unknown_actor_is_asked_once_and_the_write_goes_on() {
         let (scratch, mut a) = writable("ask");
-        let file = scratch.0.join(".moai/issues.jsonl");
-        let config = scratch.0.join(".moai/config.toml");
+        let file = scratch.join(".moai/issues.jsonl");
+        let config = scratch.join(".moai/config.toml");
         let (before, config_before) = (std::fs::read_to_string(&file).unwrap(), std::fs::read_to_string(&config).unwrap());
         a.user = None;
         a.identify = nobody;
@@ -4390,7 +4375,7 @@ mod tests {
     #[test]
     fn esc_on_the_question_writes_nothing_and_gives_the_form_back() {
         let (scratch, mut a) = writable("ask-esc");
-        let file = scratch.0.join(".moai/issues.jsonl");
+        let file = scratch.join(".moai/issues.jsonl");
         let before = std::fs::read_to_string(&file).unwrap();
         a.user = None;
         a.identify = nobody;
@@ -4443,9 +4428,9 @@ mod tests {
     fn n_asks_the_loop_for_the_editor_when_there_is_one() {
         let (scratch, mut a) = writable("editor-ask");
         let edit = ask_editor(&mut a);
-        assert_eq!(edit.into.as_ref().map(|t| t.path.clone()), Some(scratch.0.clone()));
+        assert_eq!(edit.into.as_ref().map(|t| t.path.clone()), Some(scratch.path().to_path_buf()));
         assert_eq!(edit.editor, "vi");
-        assert!(edit.text.contains(&scratch.0.display().to_string()), "{}", edit.text);
+        assert!(edit.text.contains(&scratch.path().display().to_string()), "{}", edit.text);
 
         let (_s, mut b) = writable("editor-none");
         b.hit("SPC n");
@@ -4479,7 +4464,7 @@ mod tests {
             panic!("담지 않을 글인데 누군지 물었다")
         }
         let (scratch, mut a) = writable("editor-nothing");
-        let file = scratch.0.join(".moai/issues.jsonl");
+        let file = scratch.join(".moai/issues.jsonl");
         let before = std::fs::read_to_string(&file).unwrap();
         a.identify = refuse;
         for (got, says) in [
@@ -4502,7 +4487,7 @@ mod tests {
     #[test]
     fn an_edit_that_needs_a_name_asks_and_then_lands_in_the_fixed_project() {
         let (scratch, mut a) = writable("editor-ask-who");
-        let file = scratch.0.join(".moai/issues.jsonl");
+        let file = scratch.join(".moai/issues.jsonl");
         let before = std::fs::read_to_string(&file).unwrap();
         a.user = None;
         a.identify = nobody;
@@ -4524,7 +4509,7 @@ mod tests {
     #[test]
     fn a_failed_save_of_an_edit_keeps_the_text_in_the_form() {
         let (scratch, mut a) = writable("editor-fail");
-        let lock = scratch.0.join(".moai/lock");
+        let lock = scratch.join(".moai/lock");
         std::fs::create_dir_all(&lock).unwrap();
         let edit = ask_editor(&mut a);
         a.edited(edit.into, Ok("못 담길 것\n\n긴 본문".into()));
@@ -4542,7 +4527,7 @@ mod tests {
     fn unsaved_text_is_found_in_an_open_form_or_behind_a_question() {
         let (scratch, mut a) = writable("unsaved-fail");
         assert_eq!(a.unsaved(), None, "탐색 중인데 남길 글이 있다고 한다");
-        std::fs::create_dir_all(scratch.0.join(".moai/lock")).unwrap();
+        std::fs::create_dir_all(scratch.join(".moai/lock")).unwrap();
         let edit = ask_editor(&mut a);
         a.edited(edit.into, Ok("못 담길 것\n\n긴 본문".into()));
         assert_eq!(a.unsaved(), Some(("못 담길 것".to_string(), Some("긴 본문".to_string()))), "{:?}", a.mode);
