@@ -2741,3 +2741,4 @@
 {"ts":"2026-09-15T07:56:23Z","id":"moai-opjn.l0i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"시험·주석 결함 넷을 ff93960 으로 반영, markdown 인라인 코드 갈림은 idea moai-kvd9 로 넘김, every_help 훑기 중복은 의도라 넘김"}
 {"ts":"2026-09-15T07:56:24Z","id":"moai-1c6h.eo7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"결함 없음, 시험 주석 말투 하나 8f97c04 로 반영, 넘긴 것 없음"}
 {"ts":"2026-09-15T07:56:24Z","id":"moai-1c6h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"1104e47 로 main 병합"}
+{"ts":"2026-09-15T07:56:40Z","id":"moai-wqm7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 에 머지 (f8a3b9f) — AGENTS 블록·참고 문서에 커밋 제목의 (<id>) 규약. 리뷰 moai-wqm7.s1d 반영(632adf4), 넘긴 것 없음"}
