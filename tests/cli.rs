@@ -6603,6 +6603,19 @@ fn show_names_the_worktree_a_picked_row_lives_in() {
     assert!(!out.contains("자리"), "안 집은 줄에 자리를 세웠다\n{out}");
     assert!(!ok(&main, &["show", &idle, "--json"]).contains("workplaces"));
 
+    // **딸린 워크트리 안에서 펼쳐도 경로는 main 에서 잰 상대 경로다**(moai-fygk) — 제 꼭대기로
+    // 재면 옆 워크트리가 하나도 안 잘려 기계의 절대 경로가 그대로 나간다. 규약상 세션은 대개
+    // 워크트리 안에서 도므로 그쪽이 흔한 자리다.
+    let other = field(&ok(&main, &["add", "옆에서 할 일 하나 더", "--json"]), "id");
+    ok(&main, &["mv", &other, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "하나 더 집는다"]);
+    let dir2 = format!(".claude/worktrees/{other}");
+    git(&main, &["worktree", "add", "-q", &dir2, "-b", &format!("worktree-{other}")]);
+    let line = place(&ok(&inside, &["show", &other, "--worktree"]));
+    assert!(line.contains(&dir2), "main 에서 잰 상대 경로가 아니다\n{line}");
+    assert!(!line.contains(&main.display().to_string()), "옆 워크트리가 절대 경로로 샜다\n{line}");
+
     // **제 워크트리 안에서 펼쳐도 자리는 빈 칸이 아니다** — 뿌리와 같은 자리라 잘라 내면 아무것도
     // 안 남는다. 딸린 워크트리는 `--worktree` 로 겹쳐 봐야 자리를 잰다.
     let line = place(&ok(&inside, &["show", &id, "--worktree"]));
