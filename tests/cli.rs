@@ -1450,6 +1450,34 @@ fn show_draws_the_commits_that_name_the_issue() {
     assert!(!ok(bare.path(), &["show", &b, "--json"]).contains("\"commits\""), "커밋이 없는데 commits 키가 섰다");
 }
 
+/// **git 을 못 쓰는 자리에서 상세는 말없이 열린다**(moai-mauw) — git 이 PATH 에 없을 때도, 커밋이
+/// 하나도 없는 저장소에서도. 커밋 칸만 비고, 종료 코드도 표준 오류도 그대로다.
+#[test]
+fn show_opens_quietly_where_git_cannot_answer() {
+    let s = init("showcommitsnogit");
+    let a = add(s.path(), &["고칠 것"]);
+    let quiet = |out: Output, why: &str| {
+        let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success() && stdout.contains("고칠 것"), "{why}: 상세가 안 열렸다\n{stdout}\n{stderr}");
+        assert!(stderr.is_empty() && !stdout.contains("\n커밋\n"), "{why}: 말없이 비우지 않았다\n{stdout}\n{stderr}");
+    };
+
+    let empty = s.path().join("no-git-bin");
+    std::fs::create_dir_all(&empty).unwrap();
+    let no_git = isolated(BIN)
+        .args(["show", &a])
+        .current_dir(s.path())
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .env("PATH", &empty)
+        .output()
+        .expect("moai 를 실행하지 못했다");
+    quiet(no_git, "git 이 없다");
+
+    git(s.path(), &["init", "-q"]);
+    quiet(moai(s.path(), &["show", &a]), "커밋이 없는 저장소");
+}
+
 /// **`edit` 뒤의 상세도 막음을 그린다**(moai-xe74) — `show <id>` 와 글자까지 같은 줄이다.
 /// 막는 줄이 끝나면 풀림으로 바뀐 것도 쓴 그 자리에서 보인다.
 #[test]

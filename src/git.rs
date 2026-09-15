@@ -50,7 +50,14 @@ const FS: char = '\u{1f}';
 /// **git 은 한 번만 부른다.** id 마다 부르면 탐색기가 줄을 옮길 때마다 프로세스가
 /// id 수만큼 뜬다. `--grep` 을 여럿 주면 git 은 그중 하나라도 맞는 커밋을 낸다.
 /// git 의 `--grep` 은 본문까지 훑으므로 거른 뒤 [`split`] 이 제목과 id 경계를 다시 본다.
-pub fn commits_of(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Commit>>, Error> {
+///
+/// **걷는 범위는 `born`(epoch 초) 에서 막는다**(moai-mauw). 비용은 `--grep` 이 아니라 커밋을
+/// 걷는 일 자체다 — 이 저장소 커밋 1천 개에서 `--grep` 을 빼도, 맞은 수를 `-n` 으로 막아도
+/// 45ms 그대로였고 `--since` 만 4ms 로 줄였다. 그 이슈의 id 는 이슈가 생기기 전에는 없었으니
+/// 그보다 오래된 커밋이 그 id 를 적었을 리 없어, 이 상한은 **아무것도 가리지 않는다**.
+/// 개수(`-n`)나 기간으로 막으면 오래된 이슈의 커밋이 사라지는 대가가 있다. [`SKEW`] 는 다른
+/// 기계의 느린 시계 몫이다.
+pub fn commits_of(root: &Path, ids: &[&str], born: Option<i64>) -> Result<BTreeMap<String, Vec<Commit>>, Error> {
     if ids.is_empty() {
         return Ok(BTreeMap::new());
     }
@@ -58,11 +65,20 @@ pub fn commits_of(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Comm
     // `log.showSignature` 를 켠 사람이면 git 이 서명 검사 줄을 레코드 앞 표준 출력에 끼워
     // 해시 자리에 `No signature\n<hash>` 가 들어온다 — 설정과 무관하게 끈다.
     let mut args = vec!["log", "--no-show-signature", "--fixed-strings", format.as_str()];
+    let since = born.map(|b| format!("--since={}", crate::model::format_rfc3339(b - SKEW)));
+    args.extend(since.as_deref());
     let greps: Vec<String> = ids.iter().map(|id| format!("--grep={id}")).collect();
     args.extend(greps.iter().map(String::as_str));
     args.push("HEAD");
     Ok(split(&run(root, &args)?, ids))
 }
+
+/// 이슈의 `created_at` 과 커밋 시각이 다른 시계에서 올 때의 여유 — 하루.
+///
+/// 커밋 시각은 커밋한 기계의 시계고 `created_at` 은 이슈를 만든 기계의 시계다. 시계가 늦은
+/// 기계에서 한 커밋은 이슈보다 먼저 한 것처럼 찍힌다. 또 git 의 `--since` 는 날짜가 거꾸로 선
+/// 커밋 몇 개까지만 참고 걷기를 멈추므로, 날짜가 뒤섞인 머지 이력도 이 여유가 받는다.
+const SKEW: i64 = 86_400;
 
 /// `git log` 이 낸 레코드를 id 별로 가른다. git 을 부르지 않는 순수한 반쪽이다.
 pub fn split(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
@@ -161,11 +177,45 @@ mod tests {
         git(&["commit", "-q", "--allow-empty", "-m", "chore: 딴 일\n\nmoai-aaaa 를 곁에 봤다"]);
         git(&["commit", "-q", "--allow-empty", "-m", "fix: 리뷰 (moai-aaaa.b1c)"]);
 
-        let got = commits_of(&dir, &["moai-aaaa", "moai-aaaa.b1c"]).unwrap();
+        let got = commits_of(&dir, &["moai-aaaa", "moai-aaaa.b1c"], None).unwrap();
         let subjects = |id: &str| got[id].iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
         assert_eq!(subjects("moai-aaaa"), ["feat: 고친다 (moai-aaaa)"]);
         assert_eq!(subjects("moai-aaaa.b1c"), ["fix: 리뷰 (moai-aaaa.b1c)"]);
         assert_eq!(got["moai-aaaa"][0].hash.len(), 40, "해시를 줄여 받았다");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 이슈가 생기기 전의 커밋은 걷지 않는다 — 단, 시계가 늦은 기계의 커밋은 하루까지 받는다.
+    #[test]
+    fn walking_stops_before_the_issue_was_born_but_forgives_a_slow_clock() {
+        let dir = std::env::temp_dir().join(format!("moai-git-since-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |at: &str, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+                .args(args)
+                .current_dir(&dir)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .env("GIT_AUTHOR_DATE", at)
+                .env("GIT_COMMITTER_DATE", at)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        git("2026-01-01T00:00:00Z", &["init", "-q"]);
+        // 같은 id 가 이슈보다 이틀 먼저 적혔다 — 그 id 는 아직 없었으니 다른 저장소에서 온 우연이다.
+        git("2026-01-01T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", "옛것 (moai-aaaa)"]);
+        git("2026-01-02T12:00:00Z", &["commit", "-q", "--allow-empty", "-m", "시계 늦은 기계 (moai-aaaa)"]);
+        git("2026-01-03T09:00:00Z", &["commit", "-q", "--allow-empty", "-m", "고친다 (moai-aaaa)"]);
+
+        let born = crate::model::parse_rfc3339("2026-01-03T00:00:00Z");
+        let got = commits_of(&dir, &["moai-aaaa"], born).unwrap();
+        let subjects: Vec<&str> = got["moai-aaaa"].iter().map(|c| c.subject.as_str()).collect();
+        assert_eq!(subjects, ["고친다 (moai-aaaa)", "시계 늦은 기계 (moai-aaaa)"]);
+        assert_eq!(commits_of(&dir, &["moai-aaaa"], None).unwrap()["moai-aaaa"].len(), 3, "상한 없이는 다 걷는다");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
