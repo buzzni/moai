@@ -3,12 +3,17 @@
 use crate::model::Kind;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+// **도움말은 접지 않는다** — clap 의 `wrap_help` 를 뺐다(사용자 결정, moai-opjn). 그것은
+// 터미널 폭에 맞춰 낱말 사이에 실제 개행을 넣어, 좁은 창에서 heredoc 여는 줄과 예시
+// 명령이 두 줄로 갈려 복사하면 깨졌다. 긴 줄은 터미널이 화면에서만 접고, 복사하면 한
+// 줄로 돌아온다. clap 에는 문단 하나만 안 접는 설정이 없어 전체를 끈다 — `help_template`
+// 에 적은 글자는 안 접히지만, 그리로 옮기면 명령마다 도움말을 손으로 그려야 한다.
+// `narrow_terminals_keep_heredoc_openers_whole` 가 좁은 `COLUMNS` 로 모든 도움말을 통째로 견준다.
 #[derive(Parser, Debug)]
 #[command(
     name = "moai",
     version,
     about = "이슈 트래커. 승인 게이트 없음. 규율은 `moai status` 가 비춘다.",
-    max_term_width = 100,
     after_help = "\
 세션은 이렇게 시작한다:
 

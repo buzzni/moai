@@ -111,20 +111,12 @@ pub fn read(path: Option<&Path>) -> Registry {
     };
     let mut reg = Registry { path: Some(path.to_path_buf()), ..Registry::default() };
     let at = |e: String| format!("{}: {e}", path.display());
-    // 못 읽은 까닭은 **층과 보기가 둘 다 댄다** — 따로 읽던 때와 같다.
-    let unreadable = |reg: &mut Registry, e: String| {
-        reg.problems.push(at(e.clone()));
-        reg.look_problems.push(at(e));
-    };
-    let src = match std::fs::read_to_string(path) {
-        Ok(s) => s,
+    let parsed = match std::fs::read_to_string(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return reg,
-        Err(e) => {
-            unreadable(&mut reg, e.to_string());
-            return reg;
-        }
+        Err(e) => Err(e.to_string()),
+        Ok(src) => Doc::parse(&src),
     };
-    match Doc::parse(&src) {
+    match parsed {
         Ok(doc) => {
             let (projects, problems) = doc.projects();
             reg.projects = projects;
@@ -133,7 +125,11 @@ pub fn read(path: Option<&Path>) -> Registry {
             reg.look = look;
             reg.look_problems = problems.into_iter().map(at).collect();
         }
-        Err(e) => unreadable(&mut reg, e),
+        // 못 읽었거나 깨진 까닭은 **층과 보기가 둘 다 댄다** — 따로 읽던 때와 같다(moai-z0q6 이 따로 본다).
+        Err(e) => {
+            reg.problems = vec![at(e)];
+            reg.look_problems = reg.problems.clone();
+        }
     }
     reg
 }
@@ -469,11 +465,7 @@ pub fn read_look(path: Option<&Path>) -> (Look, Vec<String>) {
 }
 
 fn look_words(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<String>) -> Option<Vec<String>> {
-    let item = t.get(key)?;
-    let Some(a) = item.as_array() else {
-        problems.push(format!("`{TUI}.{key}` 는 낱말 배열이어야 한다 — 지금은 {}", item.type_name()));
-        return None;
-    };
+    let a = look_one(t, key, "낱말 배열이어야", Item::as_array, problems)?;
     Some(
         a.iter()
             .filter_map(|v| {
@@ -488,12 +480,13 @@ fn look_words(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<String
 }
 
 /// 값 하나를 읽는다 — 없으면 `None`, 모양이 틀리면 `None` 과 까닭 한 줄(`want` 는 `낱말이어야` 처럼
-/// "한다" 앞에 올 말). 낱말·참거짓이 저마다 같은 틀을 적고 있었다(moai-u8cs).
-fn look_one<T>(
-    t: &dyn toml_edit::TableLike,
+/// "한다" 앞에 올 말). 낱말·참거짓·낱말 배열이 저마다 같은 틀을 적고 있었다(moai-u8cs, 배열은 moai-y61p 단계 리뷰).
+/// `pick` 은 표 안의 값을 빌려 낼 수 있다(`Item::as_array`) — 그래서 수명을 표에 묶는다.
+fn look_one<'a, T>(
+    t: &'a dyn toml_edit::TableLike,
     key: &str,
     want: &str,
-    pick: impl Fn(&Item) -> Option<T>,
+    pick: impl Fn(&'a Item) -> Option<T>,
     problems: &mut Vec<String>,
 ) -> Option<T> {
     let item = t.get(key)?;
@@ -989,8 +982,9 @@ mod tests {
         assert!(!text.contains("hidden") && text.contains("sort = \"title\"") && text.contains("extra = 1"), "{text}");
     }
 
-    /// **한 번의 읽기가 등록과 보기를 함께 낸다**(moai-u8cs) — 따로 읽던 `read_look` 과 같은 답이고,
-    /// 깨진 파일의 까닭은 층(`problems`)과 보기(`look_problems`) 둘 다에 선다.
+    /// **한 번의 읽기가 등록과 보기를 함께 낸다**(moai-u8cs) — 보기의 까닭은 따로 읽던 때의 글 그대로 보기에만
+    /// 서고, 못 읽었거나 깨진 파일의 까닭은 층(`problems`)과 보기(`look_problems`) 둘 다에 선다. **글자로 견준다**
+    /// (moai-y61p 단계 리뷰) — `read_look` 과 견주면 `read` 를 저 자신과 견주는 셈이라 아무것도 못 잡는다.
     #[test]
     fn one_read_gives_the_projects_and_the_look() {
         let d = scratch("one-read");
@@ -999,13 +993,17 @@ mod tests {
         let reg = read(Some(&path));
         assert_eq!(reg.projects.len(), 1);
         assert_eq!(reg.look.sort.as_deref(), Some("title"));
-        assert_eq!(reg.look_problems.len(), 1, "{:?}", reg.look_problems);
+        assert_eq!(reg.look_problems, [format!("{}: `tui.hide_deferred` 는 true·false 여야 한다 — 지금은 integer", path.display())]);
         assert!(reg.problems.is_empty(), "보기의 까닭이 층으로 샜다: {:?}", reg.problems);
-        assert_eq!(read_look(Some(&path)), (reg.look.clone(), reg.look_problems.clone()));
 
         std::fs::write(&path, "[[project]\n").unwrap();
         let broken = read(Some(&path));
-        assert_eq!((broken.problems.len(), broken.look_problems.len()), (1, 1));
+        assert_eq!(broken.problems.len(), 1, "{broken:?}");
+        assert_eq!(broken.look_problems, broken.problems, "깨진 파일의 까닭이 층과 보기에 같게 안 섰다");
+        // 못 여는 자리(디렉터리)도 같다 — 없는 파일(NotFound)만 문제가 아니다.
+        let unreadable = read(Some(&d));
+        assert!(unreadable.problems.len() == 1 && unreadable.problems[0].starts_with(&format!("{}: ", d.display())), "{unreadable:?}");
+        assert_eq!(unreadable.look_problems, unreadable.problems, "못 읽은 파일의 까닭이 층과 보기에 같게 안 섰다");
         assert_eq!(read(None).look_problems, Vec::<String>::new(), "자리를 모르는 것은 보기의 문제가 아니다");
     }
 
@@ -1018,7 +1016,15 @@ mod tests {
         assert_eq!(look.sort, None);
         assert_eq!(look.fields, Some(vec!["id".to_string()]));
         assert_eq!(look.hide_deferred, Some(true));
-        assert_eq!(problems.len(), 3, "{problems:?}");
+        // 까닭 글은 판독기를 한 틀(`look_one`)로 모으기 전의 글 그대로다 — 글자로 박는다(moai-y61p 단계 리뷰).
+        assert_eq!(
+            problems,
+            [
+                "`tui.hidden` 는 낱말 배열이어야 한다 — 지금은 string",
+                "`tui.sort` 는 낱말이어야 한다 — 지금은 integer",
+                "`tui.fields` 의 `7` 는 낱말이 아니다 — 건너뛴다",
+            ]
+        );
 
         let title = Look { sort: Some("title".into()), ..Look::default() };
         let mut odd = Doc::parse("tui = 3\n").unwrap();
