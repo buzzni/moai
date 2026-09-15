@@ -21,6 +21,19 @@ pub enum Error {
     NotUtf8(std::string::FromUtf8Error),
 }
 
+/// 받는 쪽에 낼 한 줄. `show --json` 의 `commits_error` 가 이것을 싣는다(moai-rzsv) — 사람
+/// 화면은 여전히 말이 없다. **무엇을 못 했는지까지 적는다**: "git 이 없다" 와 "저장소가 아니다" 는
+/// 받는 쪽이 할 일이 다르다.
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Spawn(e) => write!(f, "git 을 부르지 못했다 — {e}"),
+            Error::Failed(why) => write!(f, "git 이 이력을 못 냈다 — {why}"),
+            Error::NotUtf8(e) => write!(f, "git 이 낸 글을 못 읽었다 — {e}"),
+        }
+    }
+}
+
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 바이트로 받는다.
 ///
 /// 어느 저장소를 볼지는 **`-C root` 가 정한다** — 물려받은 `GIT_DIR` 무리를 걷는 것은 [`command`] 고,

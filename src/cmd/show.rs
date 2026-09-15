@@ -350,11 +350,13 @@ fn one(
     // 옆에서 집은 일을 펼치면 그 일을 고친 커밋은 저쪽 가지에만 있다.
     // **탐색기와 같은 자로 읽는다**(moai-hws2) — `git::table` 하나가 이력 전부를 걷는다. 생성일에서
     // 끊던 때는 날짜가 거꾸로 선 커밋 하나가 그 밑을 통째로 가려, 같은 물음에 두 표면이 다른 답을 냈다.
+    // **기계에게는 그 침묵을 가른다**(moai-rzsv) — `--json` 은 `commits` 를 늘 내고, git 을 못 읽었을
+    // 때만 `commits_error` 를 단다. 사람 화면은 그대로다.
     let root = origin.root(&issue.id).unwrap_or(&repo.root);
-    let commits = crate::git::table(root, &[issue.id.as_str()])
-        .ok()
-        .and_then(|mut by_id| by_id.remove(&issue.id))
-        .unwrap_or_default();
+    let (commits, commits_error) = match crate::git::table(root, &[issue.id.as_str()]) {
+        Ok(mut by_id) => (by_id.remove(&issue.id).unwrap_or_default(), None),
+        Err(e) => (Vec::new(), Some(crate::text::one_line(&e.to_string()))),
+    };
 
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();
@@ -399,9 +401,15 @@ fn one(
             extra.push(("place", serde_json::to_string(p.word()).map_err(|e| Fail::new(e.to_string()))?));
         }
         // 트래커 커밋까지 **전부** 낸다 — `tracker` 표시가 붙으니 거를지는 받는 쪽이 정한다.
-        // 사람 화면만 뺀다(`view::commits`). 커밋이 없으면 키를 안 단다.
-        if !commits.is_empty() {
-            extra.push(("commits", serde_json::to_string(&commits).map_err(|e| Fail::new(e.to_string()))?));
+        // 사람 화면만 뺀다(`view::commits`).
+        //
+        // **키는 늘 선다**(moai-rzsv, 2026-09-15 사용자 결정). 빈 배열도 사실이고, 그것과 "git 을
+        // 못 읽었다" 를 가르는 것이 `commits_error` 다 — 없으면 정말 아무도 그 id 를 안 적은 것이다.
+        // 없으면 키를 안 다는 `blockers` 와 다른 까닭: 막음은 이슈가 제 파일에 적는 값이라 없음이
+        // 곧 답이지만, 커밋은 **바깥에 물어서** 오므로 못 물은 것과 없는 것이 다르다.
+        extra.push(("commits", serde_json::to_string(&commits).map_err(|e| Fail::new(e.to_string()))?));
+        if let Some(why) = &commits_error {
+            extra.push(("commits_error", serde_json::to_string(why).map_err(|e| Fail::new(e.to_string()))?));
         }
         return super::json_with(
             &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),

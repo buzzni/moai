@@ -1469,7 +1469,8 @@ fn show_draws_the_commits_that_name_the_issue() {
     let b = add(bare.path(), &["git 밖"]);
     let shown = ok(bare.path(), &["show", &b]);
     assert!(!shown.contains("\n커밋\n"), "{shown}");
-    assert!(!ok(bare.path(), &["show", &b, "--json"]).contains("\"commits\""), "커밋이 없는데 commits 키가 섰다");
+    // `--json` 은 빈 배열과 까닭을 낸다(moai-rzsv) — 그 가름은 `json_tells_no_commits_apart_from_no_git` 이 본다.
+    assert!(ok(bare.path(), &["show", &b, "--json"]).contains(r#""commits":[]"#), "빈 배열을 안 냈다");
 }
 
 /// **git 을 못 쓰는 자리에서 상세는 말없이 열린다**(moai-mauw) — git 이 PATH 에 없을 때도, 커밋이
@@ -3911,6 +3912,42 @@ fn an_inherited_git_dir_does_not_beat_the_project_we_were_given() {
     let shown = String::from_utf8_lossy(&shown.stdout);
     assert!(shown.contains("이 저장소의 커밋"), "이 프로젝트의 커밋이 커밋 칸에 안 섰다 — 빈 칸은 아무것도 못 잰다\n{shown}");
     assert!(!shown.contains("남의 이력이 샜다"), "훅 저장소의 커밋을 이 이슈에 붙였다\n{shown}");
+}
+
+/// **`--json` 은 "커밋 없음" 의 까닭을 가른다**(moai-rzsv, 2026-09-15 사용자 결정). 사람 화면은
+/// 그대로 말없이 빈 칸이지만(moai-mauw), 기계는 셋을 갈라야 한다 — 진짜로 아무도 안 고친 이슈,
+/// git 이 없는 기계, git 저장소가 아닌 자리. 못 가르면 에이전트가 끝난 일을 다시 하거나 손댄
+/// 이슈를 안 손댄 것으로 보고한다.
+///
+/// `commits` 는 **늘 선다**(빈 배열도 사실이다). git 을 못 읽었을 때만 `commits_error` 가 붙는다.
+#[test]
+fn json_tells_no_commits_apart_from_no_git() {
+    let s = init("jsonnocommits");
+    let id = add(s.path(), &["고칠 것"]);
+
+    // git 저장소가 아닌 자리 — 빈 배열에 까닭이 붙는다.
+    let outside = ok(s.path(), &["show", &id, "--json"]);
+    assert!(outside.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{outside}");
+    assert!(outside.contains(r#""commits_error":"#), "git 을 못 읽은 까닭이 없다\n{outside}");
+
+    // 저장소이고 이력도 있지만 이 이슈를 댄 커밋은 없다 — 빈 배열만, 까닭은 없다.
+    git(s.path(), &["init", "-q"]);
+    git_at(s.path(), NOW, &["commit", "-q", "--allow-empty", "-m", "chore: 아무 id 도 안 대는 커밋"]);
+    let none = ok(s.path(), &["show", &id, "--json"]);
+    assert!(none.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{none}");
+    assert!(!none.contains("commits_error"), "멀쩡히 읽었는데 까닭을 달았다\n{none}");
+
+    // 커밋이 있으면 그대로 선다.
+    git_at(s.path(), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({id})")]);
+    let some = ok(s.path(), &["show", &id, "--json"]);
+    assert!(some.contains(r#""subject":"feat: 고친다"#), "커밋을 안 냈다\n{some}");
+    assert!(!some.contains("commits_error"), "멀쩡히 읽었는데 까닭을 달았다\n{some}");
+
+    // 사람 화면은 그대로다 — 까닭을 화면에 늘어놓지 않는다(moai-mauw).
+    let bare = init("jsonnocommits-bare");
+    let b = add(bare.path(), &["git 밖"]);
+    let shown = ok(bare.path(), &["show", &b]);
+    assert!(!shown.contains("커밋") && !shown.contains("commits_error"), "사람 화면이 시끄러워졌다\n{shown}");
 }
 
 /// **날짜가 거꾸로 선 커밋 밑도 본다**(moai-hws2). `show` 는 이슈가 생긴 때에서 걷기를 끊었는데,
