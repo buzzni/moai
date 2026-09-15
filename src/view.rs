@@ -1030,6 +1030,9 @@ pub struct Seen<'a> {
     pub origin: Option<&'a Origin>,
     /// 펼친 줄의 막음을 하나씩 가른 것 (`report::blocks_of`). 막음이 없으면 비었다.
     pub blocks: Vec<crate::report::Block<'a>>,
+    /// 펼친 줄이 서 있는 워크트리들 (`report::places`, moai-6opu). `None` 이면 줄을 안 세운다 — 안
+    /// 집은 줄, 워크트리를 안 쓰는 저장소. `Some` 인데 비었으면 집었는데 자리가 없다.
+    pub places: Option<Vec<&'a crate::report::Workplace>>,
 }
 
 /// **손으로 옮긴 칸이 서 있는 칸과 다르면** 그렇다고 말하는 낱말. CLI 상세와
@@ -1144,6 +1147,17 @@ pub fn detail(
     if let Some(e) = &i.epic {
         let title = epic.map(|e| e.title.as_str()).unwrap_or("(없는 에픽)");
         out.push(format!("  에픽   {}  {title}", paint(style::ID, e)));
+    }
+    // **어디서 하던 일인지 댄다**(moai-6opu) — 세션이 죽은 뒤 이어받는 쪽이 들어갈 자리다. 없으면
+    // 없다고 한다: `status` 의 `stranded` 와 같은 답(`report::places`)이다.
+    match seen.places.as_deref() {
+        Some([]) => out.push(format!("  자리   {}", paint(style::WARN, "없다 — 일하는 워크트리가 안 보인다"))),
+        Some(trees) => {
+            for t in trees {
+                out.push(format!("  자리   {}  {}", t.path.display(), paint(style::BRANCH, &format!("({})", t.branch))));
+            }
+        }
+        None => {}
     }
     // **막음도 상세에서 말한다**(moai-rvcb). id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안
     // 나오나" 에 답하는 자리인데, 막힘·미룬 막음·끊긴 막음이 탐색기에만 있었다. 막는가는

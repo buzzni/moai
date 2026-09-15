@@ -308,11 +308,30 @@ fn one(
     // 저장소 전부의 소속과 미룸을 걷는 것은 통째로 헛일이다(`group_states_of`).
     let near: Vec<&str> =
         std::iter::once(issue.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
+    // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 스냅샷을 다
+    // 풀 까닭이 없다. 경로는 저장소 뿌리에서 잰다: 규약의 자리(`.claude/worktrees/<id>`)가 그대로 읽힌다.
+    let trees: Vec<report::Workplace> = if report::wip(all, &repo.config).iter().any(|i| i.id == issue.id) {
+        crate::worktree::workplaces(&repo.root, all, &repo.config)
+            .into_iter()
+            .map(|mut t| {
+                if let Ok(rel) = t.path.strip_prefix(&repo.root) {
+                    t.path = rel.to_path_buf();
+                }
+                t
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let places = (!trees.is_empty())
+        .then(|| report::places(all, &repo.config, &trees).remove(&issue.id))
+        .flatten();
     let seen = view::Seen {
         roots: report::deferred_roots(all),
         states: report::group_states_of(all, &repo.config, &near),
         origin: Some(origin),
         blocks: report::blocks_of(all, &repo.config, issue),
+        places,
     };
     // **커밋은 저장하지 않고 git 에서 읽는다**(moai-1w2l) — 커밋 제목에 이 id 를 적은 것.
     // git 이 없거나 저장소 밖이면 칸을 비운다. 커밋 칸 하나 때문에 상세가 안 열리는 것이
@@ -359,6 +378,10 @@ fn one(
         }
         // 트래커 커밋까지 **전부** 낸다 — `tracker` 표시가 붙으니 거를지는 받는 쪽이 정한다.
         // 사람 화면만 뺀다(`view::commits`). 커밋이 없으면 키를 안 단다.
+        // 사람 화면의 `자리` 줄과 같은 답. 줄을 안 세우는 자리에서는 키도 안 단다.
+        if let Some(p) = &seen.places {
+            extra.push(("workplaces", serde_json::to_string(p).map_err(|e| Fail::new(e.to_string()))?));
+        }
         if !commits.is_empty() {
             extra.push(("commits", serde_json::to_string(&commits).map_err(|e| Fail::new(e.to_string()))?));
         }

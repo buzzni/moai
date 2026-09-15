@@ -5709,6 +5709,32 @@ fn status_names_picked_work_with_no_live_worktree_and_still_exits_zero() {
     assert!(!json.contains("\"stranded\""), "워크트리를 안 쓰는 저장소에서 떠들었다\n{json}");
 }
 
+/// **`show <id>` 는 집은 줄이 어느 워크트리에서 돌고 있는지 댄다**(moai-6opu) — 이어받는 세션이
+/// 그 자리로 들어가면 된다. 자리 없는 집은 줄은 그렇다고 말한다. 안 집은 줄과 워크트리를 안 쓰는
+/// 저장소에는 줄을 안 세운다. `--json` 도 같은 것을 `workplaces` 로 낸다.
+#[test]
+fn show_names_the_worktree_a_picked_row_lives_in() {
+    let s = Scratch::new("showplace");
+    let (main, _inside, id) = picked_in_a_worktree(&s);
+    let lost = field(&ok(&main, &["add", "세션이 죽은 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+    let idle = field(&ok(&main, &["add", "안 집은 일", "--json"]), "id");
+
+    let out = ok(&main, &["show", &id]);
+    let line = out.lines().find(|l| l.trim_start().starts_with("자리")).unwrap_or_else(|| panic!("자리 줄이 없다\n{out}"));
+    assert!(line.contains(&format!(".claude/worktrees/{id}")) && line.contains(&format!("worktree-{id}")), "{line}");
+    let json = ok(&main, &["show", &id, "--json"]);
+    assert!(json.contains("\"workplaces\":[{") && json.contains(&format!("\"branch\":\"worktree-{id}\"")), "{json}");
+
+    let out = ok(&main, &["show", &lost]);
+    assert!(out.contains("자리   없다"), "자리 없는 줄을 말하지 않았다\n{out}");
+    assert!(ok(&main, &["show", &lost, "--json"]).contains("\"workplaces\":[]"));
+
+    let out = ok(&main, &["show", &idle]);
+    assert!(!out.contains("자리"), "안 집은 줄에 자리를 세웠다\n{out}");
+    assert!(!ok(&main, &["show", &idle, "--json"]).contains("workplaces"));
+}
+
 /// 도구 호출 하나를 `cwd` 자리의 세션으로 부른다.
 fn tool_at(s: &Scratch, cwd: &Path, tool: &str, body: &str) -> String {
     let input = format!(
