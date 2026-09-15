@@ -2785,3 +2785,15 @@
 {"ts":"2026-09-15T08:37:03Z","id":"moai-g1a3.gbq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"도우미 셋의 LEAKS 통일(90a0be9)과 문서 링크(3f4804f)를 반영했다. 넘긴 것 없음"}
 {"ts":"2026-09-15T08:37:03Z","id":"moai-v9ai.q6f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"격리 통일(dec2d66)·로그 UTF-8(b153e66)·머지 뒤 raw spawn 셋(8df456b)을 반영. 넘긴 것은 moai-reja(릴리스 환경 걷기)·moai-2lu3(임시 디렉터리 Drop)·moai-r2a5(TMPDIR 이 체크아웃 안)"}
 {"ts":"2026-09-15T08:37:03Z","id":"moai-g1a3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-15T08:38:19Z","id":"moai-6bc0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 목록·상세 — 열 이름, 워크트리 표시, 상세 숨기기"}
+{"ts":"2026-09-15T08:38:19Z","id":"moai-3fnf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"목록에 열 이름 줄을 붙인다 — 영어 약어, 숨김·보이기 토글에 같이 선다"}
+{"ts":"2026-09-15T08:38:19Z","id":"moai-nxt4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"워크트리로 집은 줄의 ⎇ 표시를 되살리고 SPC c 에서 끄고 켠다"}
+{"ts":"2026-09-15T08:38:19Z","id":"moai-ymnu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"상세 창을 SPC 메뉴에서 보이고 숨긴다 — 설정에 남는다"}
+{"ts":"2026-09-15T08:38:19Z","id":"moai-6bc0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-crcu 에서 펼쳤다 — 탐색창의 컬럼 이름이 붙어야 한다."}
+{"ts":"2026-09-15T08:38:19Z","id":"moai-crcu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-6bc0 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-15T08:38:39Z","id":"moai-6bc0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-15, AskUserQuestion 넷 다 권장안):\n1. 열 이름은 영어 약어 — `id · P · S · TITLE · WHO · MADE · EDIT · TAGS`. 값보다 눈에 안 띄게, 설정에 적히는 필드 이름(id·priority)과 이어진다.\n2. 열 이름 줄은 SPC c 의 토글 하나로 끄고 켠다. **기본은 켬**이고 설정에 저장한다 — 줄이 적은 창에서는 사람이 꺼서 한 줄을 번다.\n3. 상세 창 숨김은 [tui] 에 저장해 다음 실행에도 이어진다(보기·정렬·열과 같은 자리).\n4. ⎇ 표시는 **옆 가지가 그 이슈를 집었으면** 붙인다 — `worktree-moai-<id>` 처럼 이슈 이름이 붙은 가지가 있으면 ⎇ 와 가지 이름. 집기를 main 에 커밋하는 지금 규약에서 옛 판정(옆 워크트리에서 온 줄)은 거의 안 서서 표시가 사라진 것이다."}
+{"ts":"2026-09-15T08:38:39Z","id":"moai-nycl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-6bc0 으로 옮겼다 — 멤버 moai-nxt4. 원인: ⎇ 는 '옆 워크트리에서 온 줄'(Origin::from)에만 붙는데, 집기를 main 에 커밋하면 양쪽 줄이 같아 옆에서 왔다고 볼 근거가 없다. 사용자 결정으로 판정을 '옆 가지가 그 이슈를 집었나' 로 바꾼다."}
+{"ts":"2026-09-15T08:38:40Z","id":"moai-nycl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"에픽 moai-6bc0 의 moai-nxt4 로 옮겼다 (promote 는 idea 하나만 받는다)"}
+{"ts":"2026-09-15T08:38:40Z","id":"moai-642v","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-6bc0 으로 옮겼다 — 멤버 moai-ymnu. 사용자 결정: 숨김은 [tui] 에 저장해 다음 실행에도 이어진다."}
+{"ts":"2026-09-15T08:38:40Z","id":"moai-642v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"에픽 moai-6bc0 의 moai-ymnu 로 옮겼다"}
+{"ts":"2026-09-15T08:38:41Z","id":"moai-3fnf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
