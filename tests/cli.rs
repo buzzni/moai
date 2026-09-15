@@ -138,6 +138,47 @@ fn issues(dir: &Path) -> String {
     std::fs::read_to_string(dir.join(".moai/issues.jsonl")).unwrap()
 }
 
+/// **말이 바뀌어도 표는 안 깨진다**(moai-i44x) — 한글·일본어·중국어는 한 글자가 두 칸이라,
+/// 글자 수로 재는 자리가 하나라도 있으면 그 말에서만 열이 어긋난다.
+///
+/// 다섯 말로 `ready` 를 돌려 **열이 같은 칸에서 시작하는지**를 표시 폭으로 잰다. 글자 수로
+/// 재면 영어에서는 맞고 한국어·일본어에서만 틀리므로, 한 말로만 재는 시험은 이것을 못 본다.
+#[test]
+fn every_language_keeps_the_ready_table_in_line() {
+    let s = init("wide");
+    // **글자 수와 칸 수가 크게 엇갈리는 제목을 섞는다** — 한글 제목은 글자 수보다 칸 수가
+    // 곱절이라, 글자 수로 채우는 코드는 여기서만 어긋난다.
+    ok(s.path(), &["add", "짧은 일"]);
+    ok(s.path(), &["add", "아주 긴 한글 제목이 여기에 들어간다"]);
+    ok(s.path(), &["add", "plain ascii"]);
+    for lang in ["en", "ko", "ja", "zh", "es"] {
+        let mut cmd = isolated(BIN);
+        cmd.args(["ready"]).current_dir(s.path()).env("MOAI_NOW", NOW).env("NO_COLOR", "1").env("MOAI_LANG", lang);
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "{lang}: {}", String::from_utf8_lossy(&out.stderr));
+        let screen = String::from_utf8(out.stdout).unwrap();
+        // **제목 뒤의 열이 서는 자리를 잰다** — 제목이 두 칸 글자라, 글자 수로 채우면 여기서
+        // 어긋난다. 우선순위(`p2`)는 id 뒤라 ASCII 만 앞서므로 그것만 재면 못 잡는다.
+        let starts: Vec<(usize, usize)> = screen
+            .lines()
+            .filter(|l| l.contains("argos-"))
+            .map(|l| {
+                let p = l.find("p2").expect("우선순위 칸이 없다");
+                let epic = l.rfind("에픽 없음").expect("에픽 칸이 없다");
+                (cells(&l[..p]), cells(&l[..epic]))
+            })
+            .collect();
+        assert!(starts.len() >= 3, "{lang}: 표에 줄이 모자라다\n{screen}");
+        assert!(starts.windows(2).all(|w| w[0].0 == w[1].0), "{lang}: 우선순위 열이 줄마다 다른 칸에서 선다 — {starts:?}\n{screen}");
+        assert!(starts.windows(2).all(|w| w[0].1 == w[1].1), "{lang}: 제목 뒤 열이 줄마다 다른 칸에서 선다 — {starts:?}\n{screen}");
+    }
+}
+
+/// 화면에서 그 글이 차지하는 **칸 수**. 한글·일본어·중국어는 한 글자가 두 칸이다.
+fn cells(s: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width(s)
+}
+
 /// **아무도 고르지 않으면 화면은 영어다**(moai-zeyv, 사용자 결정). 나머지 시험이 `MOAI_LANG=ko`
 /// 를 박고 도는 것과 짝이다 — 그 줄이 빠지면 여기서만 통과하고 화면은 통째로 영어가 된다.
 ///
