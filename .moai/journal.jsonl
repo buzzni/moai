@@ -3044,3 +3044,4 @@
 {"ts":"2026-09-15T10:48:03Z","id":"moai-ya06","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 구현 넷은 worktree-moai-ya06 의 fd545a8 에 있다. 리뷰 moai-7igy.bc9(high) 진행 중 — 반영 뒤 lt7h·xn9n·0h8m 리뷰(medium), 에픽 전체 max, main 받기(빌드 → moai init → bless 차례), 루트에서 머지, 워크트리·가지 삭제, 멤버 done, 감독 moa-issue-14 에 보고."}
 {"ts":"2026-09-15T10:51:14Z","id":"moai-i784.pzh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 —  걷어내기"}
 {"ts":"2026-09-15T10:51:21Z","id":"moai-i784.pzh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T10:54:13Z","id":"moai-d3sy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
