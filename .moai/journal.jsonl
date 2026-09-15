@@ -3167,3 +3167,4 @@
 {"ts":"2026-09-15T12:41:06Z","id":"moai-qysy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2f99 로 옮겼다 (에픽 moai-3d5u, 2026-09-15) — promote 는 idea 하나만 받는다"}
 {"ts":"2026-09-15T12:41:06Z","id":"moai-qysy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-2f99 가 이어받는다 (에픽 moai-3d5u)"}
 {"ts":"2026-09-15T12:41:07Z","id":"moai-780n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T12:48:41Z","id":"moai-6bc0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"main 머지(da62c96), 합친 main 에서 시험 812·289 통과"}
