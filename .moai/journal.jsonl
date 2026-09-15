@@ -3132,3 +3132,4 @@
 {"ts":"2026-09-15T12:25:49Z","id":"moai-syp8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"dd71a30 로 main 병합"}
 {"ts":"2026-09-15T12:25:49Z","id":"moai-xtu8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"dd71a30 로 main 병합"}
 {"ts":"2026-09-15T12:25:49Z","id":"moai-nnda","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"dd71a30 로 main 병합"}
+{"ts":"2026-09-15T12:26:40Z","id":"moai-n2fz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일꾼 절차: 워크트리 안에서 트래커를 고치지 않는다 — 리뷰 서브에이전트가 부른 moai idea add 가 워크트리 쪽 .moai 를 바꿔 병합에서 스냅샷이 충돌했다 (moai-krh7 에서 겪음)"}
