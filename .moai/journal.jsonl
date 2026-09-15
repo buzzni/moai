@@ -2947,3 +2947,7 @@
 {"ts":"2026-09-15T09:50:48Z","id":"moai-3fnf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 워크트리 worktree-moai-6bc0(커밋 5934469)에 /code-review high --fix 가 도는 중. 결과 반영 → 리뷰 moai-3fnf.26o 원문·판단 → 이어서 nxt4.rgg(medium)·ymnu.fo1(medium) → 에픽 끝 xhigh → main 머지."}
 {"ts":"2026-09-15T09:52:57Z","id":"moai-educ.van","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-educ (init 파일 보호·말·해셔)"}
 {"ts":"2026-09-15T09:53:06Z","id":"moai-educ.van","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T09:57:45Z","id":"moai-mthy.tu9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"결함 여덟 반영(36d703b), 플러그인 판 문제는 idea moai-apn6 로 넘김. 참고 문서 제목이 다른 파일을 가리키던 것은 직접 판단해 한 줄 안내로 반영"}
+{"ts":"2026-09-15T09:57:45Z","id":"moai-j8aq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"1619917 로 main 병합"}
+{"ts":"2026-09-15T09:57:45Z","id":"moai-1xf2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"1619917 로 main 병합"}
+{"ts":"2026-09-15T09:57:45Z","id":"moai-we5p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"1619917 로 main 병합"}
