@@ -3214,6 +3214,13 @@ pub(super) mod tests {
         let lines = render(&mut a, 100, 24);
         assert_eq!(CALLS.load(Ordering::SeqCst), 2, "사람이 바뀌었는데 묵힌 것을 그대로 썼다");
         assert!(lines[..6].join("\n").contains("레이븐"), "다시 푼 값이 안 섰다");
+        // **`naming` 이 바뀌면 다시 푼다**(리뷰). 묵힌 것은 `model::label` 을 이미 지난 글이라
+        // 그 모양을 프로젝트 설정이 정한다 — `naming = "email"` 인 프로젝트로 건너뛰고도
+        // 떠난 프로젝트의 `이름 (메일)` 이 그대로 서면 그 설정은 없는 것과 같다.
+        a.cfg.naming = crate::config::Naming::Email;
+        let lines = render(&mut a, 100, 24);
+        let head = lines[..6].join("\n");
+        assert!(head.contains("raven@buzzni.com") && !head.contains("레이븐"), "옆 프로젝트의 표기가 따라왔다\n{head}");
     }
 
     /// **로고가 안 들면 헤더는 로고만 뺀다**(moai-mzet) — 파이프 오른쪽은 좁아도 남는다.

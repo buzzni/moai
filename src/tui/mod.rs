@@ -359,12 +359,18 @@ pub struct App {
     /// 그쪽은 `MOAI_ACTOR` 와 이 기계의 git 설정을 읽어, 갈아 끼우지 않으면
     /// "누군지 모를 때" 를 시험한 결과가 돌리는 사람의 설정에 달린다.
     identify: fn(Option<&str>) -> crate::fail::R<crate::model::Actor>,
-    /// 헤더가 적을 사람을 푼 것 — 열쇠는 [`Self::user`] 다. **프레임마다 풀지 않는다**:
-    /// `model::actor` 는 `git config` 를 프로세스로 **두 번** 띄우는데, 그리는 쪽에서
-    /// 부르면 묵혀 둔 화면도 초당 셋(`TICK`), 도는 것이 있으면 초당 열여섯(`SPIN_TICK`),
-    /// 읽는 동안에는 초당 예순(`LOAD_POLL`) 번 그것을 띄운다 — 키를 누르고 있는 내내도
-    /// 같다. 묻는 칸에서 사람을 받아 `user` 가 바뀌면 열쇠가 어긋나 저절로 다시 푼다.
-    header_user: Option<(Option<String>, String)>,
+    /// 헤더가 적을 사람을 푼 것 — 열쇠는 [`Self::user`] 와 **그 프로젝트의 `naming`** 이다.
+    /// **프레임마다 풀지 않는다**: `model::actor` 는 `git config` 를 프로세스로 **두 번**
+    /// 띄우는데, 그리는 쪽에서 부르면 묵혀 둔 화면도 초당 셋(`TICK`), 도는 것이 있으면 초당
+    /// 열여섯(`SPIN_TICK`), 읽는 동안에는 초당 예순(`LOAD_POLL`) 번 그것을 띄운다 — 키를
+    /// 누르고 있는 내내도 같다. 묻는 칸에서 사람을 받아 `user` 가 바뀌면 열쇠가 어긋나 저절로
+    /// 다시 푼다.
+    ///
+    /// **`naming` 도 열쇠에 든다**(리뷰). 묵힌 것은 `model::label` 을 이미 지난 글이고 그 모양은
+    /// 프로젝트 설정이 정한다 — 열쇠에서 빼면 `naming = "email"` 인 프로젝트로 건너뛴 뒤에도
+    /// 헤더가 떠난 프로젝트의 `이름 (메일)` 을 그대로 이고 있다. 설정은 화면만 바꾸는 것이라,
+    /// 화면이 안 바뀌면 그 설정은 없는 것과 같다.
+    header_user: Option<(Option<String>, crate::config::Naming, String)>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
     /// 상세의 굴린 자리. **왼쪽 커서를 옮기면 첫 줄로 돌아간다** — 다른
@@ -787,19 +793,21 @@ impl App {
         }
     }
 
-    /// 헤더가 적을 사람. 처음 한 번만 풀고 [`Self::user`] 가 바뀌면 다시 푼다 — 까닭은
-    /// `header_user` 에 적었다.
+    /// 헤더가 적을 사람. 처음 한 번만 풀고 [`Self::user`] 나 그 프로젝트의 `naming` 이
+    /// 바뀌면 다시 푼다 — 까닭은 `header_user` 에 적었다.
     ///
     /// **누군지 몰라도 묻지 않는다.** 여는 화면은 읽기고, 읽기는 사람을 묻지 않는다 —
     /// 여기서 [`Mode::Ask`] 를 세우면 설정 없는 기계에서 탐색기가 묻는 칸으로 열린다.
     pub fn told_user(&mut self) -> &str {
-        if self.header_user.as_ref().is_none_or(|(key, _)| *key != self.user) {
+        // 열쇠는 **견주기만** 한다 — 프레임마다 도는 자리라 짓지 않는다.
+        let fresh = self.header_user.as_ref().is_none_or(|(u, n, _)| *u != self.user || *n != self.cfg.naming);
+        if fresh {
             let said = (self.identify)(self.user.as_deref())
                 .map(|a| crate::model::label(&a.name, Some(&a.email), self.cfg.naming))
                 .unwrap_or_else(|_| "—".into());
-            self.header_user = Some((self.user.clone(), said));
+            self.header_user = Some((self.user.clone(), self.cfg.naming, said));
         }
-        self.header_user.as_ref().map_or("—", |(_, said)| said.as_str())
+        self.header_user.as_ref().map_or("—", |(_, _, said)| said.as_str())
     }
 
     /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
