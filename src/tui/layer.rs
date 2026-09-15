@@ -1192,6 +1192,25 @@ mod tests {
         (one, two, a)
     }
 
+    /// **건너뛰면 포커스가 목록으로 돌아온다**(리뷰 moai-i784.pzh) — 층의 상세에는 듣는 키가
+    /// 없어, 상세에 포커스를 둔 채 `0` 을 누르면 무엇을 눌러야 할지 없는 화면이 선다.
+    #[test]
+    fn a_digit_jump_puts_the_focus_back_on_the_list() {
+        let s = Scratch::new("digit-focus");
+        let (_one, two, mut a) = on_layer_with_twins(&s);
+        a.hit("2");
+        a.hit("Tab");
+        assert_eq!(a.focus, super::super::Pane::Detail, "시험의 전제 — 상세에 포커스가 갔다");
+        a.hit("0");
+        assert!(a.on_layer());
+        assert_eq!(a.focus, super::super::Pane::Explorer, "층에 섰는데 포커스가 상세에 남았다");
+
+        a.hit("Tab");
+        a.hit("1");
+        assert_eq!(a.focus, super::super::Pane::Explorer, "프로젝트로 건너뛰었는데 포커스가 상세에 남았다");
+        assert_ne!(a.here(), Some(two), "1 이 첫 프로젝트로 안 갔다");
+    }
+
     /// **맨 숫자가 프로젝트를 고른다**(moai-o133) — `1`·`2` 는 등록 차례의 프로젝트로 바로 들어가고,
     /// `0` 은 층으로 돌아온다. 헤더가 그 번호를 대므로 어디서 눌러도 같은 자리로 간다.
     #[test]

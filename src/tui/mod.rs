@@ -1543,8 +1543,15 @@ impl App {
             B::Leave => self.leave(),
             // **헤더의 번호로 바로 간다**(moai-o133). `0` 은 전체 — 층이다. 이미 그 자리면
             // 아무 일도 안 한다: 같은 프로젝트를 다시 열면 커서와 굴린 자리가 첫 줄로 튄다.
+            // **건너뛰면 포커스는 목록으로 돌아온다**(리뷰 moai-i784.pzh). 상세에 포커스를 둔 채
+            // `0` 을 누르면 층에 서는데, 층의 상세에는 듣는 키가 없어 Enter 가 조용하고 키 바도
+            // 그 키를 안 적는다 — 무엇을 눌러야 할지 없는 화면이 선다. 층으로든 프로젝트로든
+            // 건너뛰는 것은 목록을 보러 가는 일이다.
             B::Project(n) => match usize::from(n) {
-                0 if !self.on_layer() => self.climb(),
+                0 if !self.on_layer() => {
+                    self.focus = Pane::Explorer;
+                    self.climb();
+                }
                 0 => {}
                 at => {
                     let same = self.layer.as_ref().and_then(|l| match &l.at {
@@ -1552,6 +1559,7 @@ impl App {
                         layer::At::Layer => None,
                     });
                     if same != Some(at - 1) {
+                        self.focus = Pane::Explorer;
                         self.enter_project(at - 1);
                     }
                 }
