@@ -5,7 +5,8 @@ use crate::config::DEFAULT_STATUSES;
 use std::path::Path;
 
 /// 여는 마커의 **머리**. 뒤에 메타(`v:`·`hash:`)가 붙고 `-->` 로 닫힌다 — 머리로 찾아야
-/// 메타가 없던 옛 맨 마커(`<!-- moai:begin -->`)도 같은 블록으로 알아본다.
+/// 메타가 없던 옛 맨 마커(`<!-- moai:begin -->`)도 같은 블록으로 알아본다. 머리가 마커가 되는
+/// 것은 **줄 하나를 통째로 차지할 때뿐이다**([`is_begin`]).
 const BEGIN: &str = "<!-- moai:begin";
 const END: &str = "<!-- moai:end -->";
 
@@ -13,9 +14,16 @@ const END: &str = "<!-- moai:end -->";
 ///
 /// **해시는 블록 글 위의 것이다**, 파일 전체가 아니라. 블록 밖은 사람의 산문이라 그것이
 /// 바뀌었다고 블록이 낡은 것이 아니다. 버전은 사람이 읽으라고 둔다 — 낡음을 가르는 것은
-/// 글이다: 크레이트 버전은 안내 글이 바뀌어도 그대로일 때가 많다.
+/// 글이다: 크레이트 버전은 안내 글이 바뀌어도 그대로일 때가 많다. 그래서 **글이 같으면 이미
+/// 선 마커를 그대로 둔다**([`kept_marker`]) — 마커의 버전은 그 글을 처음 쓴 바이너리의 것이다.
 fn begin_marker(block: &str) -> String {
-    format!("{BEGIN} v:{} hash:{:08x} -->", env!("CARGO_PKG_VERSION"), fnv1a(block))
+    format!("{BEGIN} v:{} {} -->", env!("CARGO_PKG_VERSION"), hash_of(block))
+}
+
+/// 마커가 대는 해시 조각 `hash:<8자>`. 쓰는 곳([`begin_marker`])과 알아보는 곳([`kept_marker`])이
+/// 같은 글자를 쓴다.
+fn hash_of(block: &str) -> String {
+    format!("hash:{:08x}", fnv1a(block))
 }
 
 /// FNV-1a 32비트. **std 의 해셔를 안 쓴다** — `DefaultHasher` 는 러스트 버전마다 값이 달라질 수
@@ -25,32 +33,132 @@ fn fnv1a(s: &str) -> u32 {
     s.bytes().fold(0x811c_9dc5, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193))
 }
 
+/// 여는 마커 줄인가. **줄머리에서 머리로 시작하고, 머리 바로 뒤가 띄어쓰기이고, `-->` 로
+/// 끝나야 한다**(리뷰 moai-epb0.27f). 머리를 파일 어디서나 찾던 때는 산문이 마커를 적어 보인
+/// 자리(`` `<!-- moai:begin v:… -->` 줄로 연다 ``)나 `<!-- moai:beginning -->` 이 블록의
+/// 시작이 되어, 거기서 진짜 닫는 마커까지의 산문이 블록으로 먹혔다. 파일 첫 줄의 BOM 은 건넌다.
+fn is_begin(line: &str) -> bool {
+    line.trim_start_matches('\u{feff}')
+        .trim_end()
+        .strip_prefix(BEGIN)
+        .is_some_and(|rest| rest.starts_with(' ') && rest.ends_with("-->"))
+}
+
+/// 닫는 마커 줄인가. 여는 쪽과 같이 줄 하나를 통째로 차지할 때만.
+fn is_end(line: &str) -> bool {
+    line.trim_end() == END
+}
+
+/// 머지 충돌 표시 줄인가 — `<<<<<<<`·`>>>>>>>` 에 가지 이름이 붙거나 아무것도 안 붙는다.
+fn is_conflict(line: &str, mark: &str) -> bool {
+    line.strip_prefix(mark).is_some_and(|rest| rest.starts_with(' ') || rest.trim_end().is_empty())
+}
+
+/// 파일에 선 관리 블록의 자리들, 위에서부터 — `(시작, 끝)` 은 여는 마커 줄의 첫 바이트와 닫는
+/// 마커 줄(개행까지)의 끝이다. **쓰는 길([`with_block`])과 보는 길([`block_state`])이 이 하나로
+/// 블록을 찾는다** — 따로 찾으면 `check` 가 `missing` 이라 한 파일의 블록을 `init` 이 갈아
+/// 끼우거나, 그 반대가 된다.
+///
+/// - **짝은 닫는 마커에 가장 가까운 여는 마커다.** 닫는 줄을 잃은 여는 마커(머지·손질)부터 재면
+///   그 뒤의 산문이 블록으로 먹힌다 — `init` 이 덧붙인 새 블록과 짝지어져 다음 `init` 이 그
+///   사이를 지웠다. 짝 잃은 여는 마커는 산문으로 남는다.
+/// - **여는 마커 바로 위가 머지 충돌의 첫 줄이면 거기부터 한 블록이다.** 마커에 해시가 실려,
+///   두 가지가 저마다 안내를 고치고 `init` 하면 첫 줄에서 충돌한다. 그 충돌은 블록 안의 것이라
+///   다시 심으면 풀린다 — `<<<<<<<` 를 산문으로 남기면 그 줄을 인 채 `current` 로 읽혔다.
+///   충돌이 닫히기 전에 만난 여는 마커는 같은 블록의 다른 쪽이다.
+/// - 둘째부터는 **겹친 블록**이다. 새 마커를 못 알아보는 옛 바이너리가 `init` 마다 덧붙인다.
+fn blocks(text: &str) -> Vec<(usize, usize)> {
+    let mut found = Vec::new();
+    let mut open: Option<usize> = None;
+    let mut conflict = false;
+    let mut prev: Option<(usize, &str)> = None;
+    let mut at = 0;
+    for line in text.split_inclusive('\n') {
+        if is_begin(line) {
+            match prev {
+                _ if open.is_some() && conflict => {}
+                Some((p, l)) if is_conflict(l, "<<<<<<<") => {
+                    open = Some(p);
+                    conflict = true;
+                }
+                // BOM 은 산문 쪽에 둔다 — 갈아 끼우며 같이 지우면 파일 머리가 바뀐다.
+                _ => {
+                    open = Some(at + line.len() - line.trim_start_matches('\u{feff}').len());
+                    conflict = false;
+                }
+            }
+        } else if is_conflict(line, ">>>>>>>") {
+            conflict = false;
+        } else if is_end(line) {
+            if let Some(start) = open.take() {
+                found.push((start, at + line.len()));
+            }
+            conflict = false;
+        }
+        prev = Some((at, line));
+        at += line.len();
+    }
+    found
+}
+
 /// 마커 사이만 갈아 끼운다. 사람이 쓴 산문은 **한 글자도 건드리지 않는다.**
 ///
 /// 남의 파일에 제 것을 쓰는 도구는 이 약속을 지켜야만 신뢰를 얻는다.
+///
+/// 블록은 [`blocks`] 로 찾는다. 첫 블록을 갈아 끼우고 **겹친 블록은 지운다** — 그 사이 산문은
+/// 두고, 빈 줄뿐이면 같이 걷는다. **줄 끝은 파일의 것을 따른다**: CRLF 로 체크아웃한 파일에 LF
+/// 블록을 쓰면 늘 `stale` 이었고, 체크아웃하고 `init` 할 때마다 빈 줄이 하나씩 붙었다.
 fn with_block(existing: &str, block: &str) -> String {
-    let body = format!("{}
-{block}{END}
-", begin_marker(block));
-    // 여는 마커는 머리부터 그 줄의 `-->` 까지다 — 메타가 무엇이든(없어도) 통째로 갈아 끼운다.
-    let begin = existing.find(BEGIN);
-    let end = begin.and_then(|a| existing[a..].find(END).map(|b| a + b));
-    match (begin, end) {
-        (Some(a), Some(b)) if b > a => {
-            let tail = &existing[b + END.len()..];
-            format!("{}{body}{}", &existing[..a], tail.strip_prefix('\n').unwrap_or(tail))
+    debug_assert!(block.ends_with('\n'), "블록은 개행으로 끝나야 닫는 마커가 제 줄에 선다");
+    let found = blocks(existing);
+    let crlf = match found.first() {
+        Some(&(start, _)) => existing[start..].split_inclusive('\n').next().is_some_and(|l| l.ends_with("\r\n")),
+        None => existing.contains("\r\n"),
+    };
+    let nl = if crlf { "\r\n" } else { "\n" };
+    let written = if crlf { block.replace('\n', "\r\n") } else { block.to_string() };
+    let Some(&(start, stop)) = found.first() else {
+        let body = format!("{}{nl}{written}{END}{nl}", begin_marker(block));
+        if existing.trim().is_empty() {
+            return body;
         }
-        _ if existing.trim().is_empty() => body,
-        _ => {
-            let mut out = existing.to_string();
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-            out.push('\n');
-            out.push_str(&body);
-            out
+        let mut out = existing.to_string();
+        if !out.ends_with('\n') {
+            out.push_str(nl);
         }
+        out.push_str(nl);
+        out.push_str(&body);
+        return out;
+    };
+    let marker = kept_marker(&existing[start..stop], &written, block).map_or_else(|| begin_marker(block), str::to_string);
+    let mut out = format!("{}{marker}{nl}{written}{END}{nl}", &existing[..start]);
+    let mut at = stop;
+    for &(s, e) in &found[1..] {
+        let between = &existing[at..s];
+        if !between.trim().is_empty() {
+            out.push_str(between);
+        }
+        at = e;
     }
+    out.push_str(&existing[at..]);
+    // 파일 끝의 겹친 블록을 걷었으면 그것을 덧붙이며 끼운 빈 줄 하나도 걷는다 — 덧붙이기 전의
+    // 파일로 돌아간다. 중간의 것은 둔다: 걷으면 앞뒤 산문이 한 문단으로 붙는다.
+    if found.len() > 1 && at == existing.len() && out.ends_with(&format!("{nl}{nl}")) {
+        out.truncate(out.len() - nl.len());
+    }
+    out
+}
+
+/// 이미 선 여는 마커를 그대로 둘 것인가 — **블록 글이 쓸 글과 같고, 마커가 그 글의 해시를 댈 때.**
+///
+/// 새로 쓰면 버전만 다른 블록이 글은 같은데 `stale` 이 되고, 버전이 다른 바이너리 둘이 한
+/// 저장소에서 첫 줄을 번갈아 고쳐 헛 diff 를 낸다. 해시가 안 맞거나(손으로 고친 마커) 없으면
+/// (옛 맨 마커) 새로 쓴다.
+fn kept_marker<'a>(span: &'a str, written: &str, block: &str) -> Option<&'a str> {
+    let first = span.split_inclusive('\n').next()?;
+    let body = span.get(first.len()..span.rfind(END)?)?;
+    let marker = first.trim_end();
+    (is_begin(first) && body == written && marker.ends_with(&format!(" {} -->", hash_of(block)))).then_some(marker)
 }
 
 /// AGENTS.md 블록이 지금 바이너리가 쓸 글과 어떤가(moai-mstm).
@@ -59,22 +167,22 @@ fn with_block(existing: &str, block: &str) -> String {
 pub enum BlockState {
     /// 다시 심어도 바이트가 같다.
     Current,
-    /// 블록은 있는데 다시 심으면 바뀐다 — 옛 바이너리가 썼거나, 옛 맨 마커거나, 손으로 고쳤다.
+    /// 블록은 있는데 다시 심으면 바뀐다 — 다른 바이너리가 썼거나, 옛 맨 마커거나, 손으로
+    /// 고쳤거나, 블록이 겹쳤거나, 마커에 머지 충돌이 남았다.
     Stale,
     /// 파일이 없거나 마커 한 쌍이 없다.
     Missing,
 }
 
-/// 파일 글(없으면 `None`)을 보고 블록의 상태를 가른다. **순수하다** — `status` 가 같은 자로 잰다.
+/// 파일 글(없는 파일은 빈 글)을 보고 블록의 상태를 가른다. **순수하다** — `init --check` 와
+/// `status` 가 같은 자로 잰다.
 ///
 /// **낡음을 가르는 것은 해시가 아니라 다시 심은 결과다.** 마커의 해시만 견주면 블록 안을
-/// 손으로 고친 것을 못 보고(마커는 그대로다), 버전만 바뀐 것을 낡았다고 한다. [`with_block`]
-/// 이 그대로 돌려주면 `init` 이 할 일이 없다는 뜻이라 그것이 곧 `current` 다 — 쓰는 길과 보는
-/// 길이 한 자를 쓰니 둘이 어긋날 수 없다.
-pub fn block_state(existing: Option<&str>, block: &str) -> BlockState {
-    let Some(text) = existing else { return BlockState::Missing };
-    let paired = text.find(BEGIN).is_some_and(|a| text[a..].contains(END));
-    if !paired {
+/// 손으로 고친 것을 못 본다(마커는 그대로다). [`with_block`] 이 그대로 돌려주면 `init` 이 할
+/// 일이 없다는 뜻이라 그것이 곧 `current` 다 — 쓰는 길과 보는 길이 한 자를 쓰니 둘이 어긋날 수
+/// 없다. 버전만 다른 블록은 [`kept_marker`] 가 마커를 두므로 다시 심어도 같아 `current` 다.
+fn block_state(text: &str, block: &str) -> BlockState {
+    if blocks(text).is_empty() {
         BlockState::Missing
     } else if with_block(text, block) == text {
         BlockState::Current
@@ -83,21 +191,76 @@ pub fn block_state(existing: Option<&str>, block: &str) -> BlockState {
     }
 }
 
+/// 낡은 까닭 둘(moai-mj45, 2026-09-15 사용자 결정). **마커가 제 블록 글의 해시를 대는지가 가른다.**
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stale {
+    /// 마커가 제 글의 해시를 댄다 — **어떤 바이너리가 쓴 그대로다.** 그 바이너리가 이쪽보다
+    /// 새것일 수 있다: main 을 받고 아직 다시 빌드 안 한 워크트리가 그렇다. 여기서 `init` 을
+    /// 치면 새 안내가 옛 글로 되돌아가고, 그 되돌림이 다음 머지로 main 에 실린다.
+    Binary,
+    /// 해시가 제 글을 안 대거나(손으로 고쳤다) 아예 없다(옛 맨 마커). `init` 은 그 손질을 버린다.
+    Edited,
+}
+
+/// 낡은 블록이 둘 중 어느 쪽인가. 파일에 선 **첫 블록**의 마커와 그 본문을 견준다.
+///
+/// 줄 끝은 파일의 것을 따르므로(CRLF) 본문을 LF 로 되돌려 잰다 — 쓸 때 해시는 LF 글 위에서
+/// 났다([`begin_marker`]). 블록이 없으면 `Edited` 로 친다: 마커가 없으니 어느 바이너리가 썼다고
+/// 말할 수 없고, 그때의 `init` 은 실제로 사람 글을 갈아 끼운다.
+fn stale_kind(text: &str) -> Stale {
+    let Some(&(start, stop)) = blocks(text).first() else { return Stale::Edited };
+    let span = &text[start..stop];
+    let Some(first) = span.split_inclusive('\n').next() else { return Stale::Edited };
+    let body = span.get(first.len()..span.rfind(END).unwrap_or(span.len())).unwrap_or_default();
+    let said = hash_of(&body.replace("\r\n", "\n"));
+    if first.trim_end().ends_with(&format!(" {said} -->")) { Stale::Binary } else { Stale::Edited }
+}
+
+/// AGENTS.md 를 읽는다. **없는 파일만 `None` 이다** — 못 읽는 파일(권한·UTF-8 아님)을 빈 글로 치면
+/// `init` 이 블록 하나로 덮어써 사람의 산문이 통째로 사라졌다. 보는 길([`agents_state`])과 쓰는
+/// 길([`run`])이 이 하나로 읽는다.
+fn read_agents(path: &Path) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => Ok(Some(t)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
 /// 이 디렉터리의 AGENTS.md 를 읽어 [`block_state`] 로 가른다. 없는 파일은 `missing` 이고, 못 읽는
 /// 파일(권한·UTF-8 아님)만 `Err` 다 — 그때는 상태를 지어내지 않는다.
 pub fn agents_state(root: &Path) -> Result<BlockState, String> {
-    let path = root.join("AGENTS.md");
-    let existing = match std::fs::read_to_string(&path) {
-        Ok(t) => Some(t),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(format!("{}: {e}", path.display())),
-    };
-    Ok(block_state(existing.as_deref(), &crate::guide::agents()))
+    let text = read_agents(&root.join("AGENTS.md"))?.unwrap_or_default();
+    Ok(block_state(&text, &crate::guide::agents()))
 }
 
-/// `moai init --check`. **아무것도 안 쓰고, 늘 0 이다**(2026-09-14 사용자 결정) — 경고로 비영
-/// 종료하면 에이전트가 실패로 읽고, 그러면 게이트다. `.moai` 가 없어도 선다: 보는 것은 AGENTS.md
-/// 하나고, 심기 전에 부르는 것도 자연스럽다.
+/// 이 저장소의 AGENTS.md 블록이 낡았다는 알림(moai-mj45). **`status` 와 훅의 보드가 이 하나를
+/// 싣는다** — 훅의 보드는 `moai status` 와 같은 말을 해야 하고(`hook::board`), 낡은 안내를 모르고
+/// 시작하는 것이 그 보드를 받는 새 세션이다.
+///
+/// `stale` 일 때만 선다(2026-09-14 사용자 결정) — `missing` 을 말하면 `--no-agents` 로 안 쓰기로
+/// 한 저장소를 영영 조른다. 못 읽는 파일도 입을 다문다: 세션의 시작점이 안내 파일 하나로 실패해
+/// 보이면 안 되고, 까닭은 `moai init --check` 가 댄다.
+///
+/// **부른 사람의 셸이 뿌리에 있지 않을 수 있으면 고칠 명령에 `-C <뿌리>` 를 댄다** — 부른 자리가
+/// 뿌리가 아니거나(`chdir` 이 아니어도) `-C` 로 옮겨 왔을 때. 재는 것은 뿌리의 AGENTS.md 인데
+/// `init` 은 부른 자리에 심는다: 하위 디렉터리에서, 또는 `moai -C <프로젝트> status` 를 본 셸에서
+/// 맨 `moai init` 을 따라 치면 그 자리에 트래커가 하나 더 섰다.
+pub fn agents_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
+    if agents_state(root) != Ok(BlockState::Stale) {
+        return None;
+    }
+    // **어느 쪽 낡음인지까지 말한다**(2026-09-15 사용자 결정). 한 낱말로 뭉뚱그려 `moai init` 만
+    // 대면, 아직 다시 빌드 안 한 바이너리를 든 세션이 그 말을 따라 새 안내를 옛 글로 되돌린다.
+    let text = read_agents(&root.join("AGENTS.md")).ok().flatten().unwrap_or_default();
+    let here = std::env::current_dir().ok();
+    let away = (chdir || here.as_deref() != Some(root)).then(|| crate::text::shell_word(&root.display().to_string()));
+    Some(crate::report::Warning::agents_stale(away.as_deref(), stale_kind(&text) == Stale::Edited))
+}
+
+/// `moai init --check`. **아무것도 안 쓰고, 파일을 못 읽을 때만 0 이 아니다**(2026-09-14 사용자
+/// 결정) — 낡음으로 비영 종료하면 에이전트가 실패로 읽고, 그러면 게이트다. `.moai` 가 없어도
+/// 선다: 보는 것은 AGENTS.md 하나고, 심기 전에 부르는 것도 자연스럽다.
 pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let state = agents_state(&root).map_err(Fail::new)?;
@@ -106,7 +269,17 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     }
     Ok(vec![match state {
         BlockState::Current => "AGENTS.md 블록: current — 이 바이너리가 쓸 글과 같다".into(),
-        BlockState::Stale => "AGENTS.md 블록: stale — `moai init` 으로 다시 심는다. 블록 밖의 산문은 안 건드린다".into(),
+        BlockState::Stale => {
+            let text = read_agents(&root.join("AGENTS.md")).map_err(Fail::new)?.unwrap_or_default();
+            match stale_kind(&text) {
+                Stale::Binary =>
+                    "AGENTS.md 블록: stale — 다른 바이너리가 쓴 그대로다. 그쪽이 더 새것일 수 있으니 다시 빌드해 보고 `moai init`"
+                        .into(),
+                Stale::Edited =>
+                    "AGENTS.md 블록: stale — 블록 안을 손으로 고쳤다. `moai init` 은 그 손질을 버린다 (블록 밖의 산문은 안 건드린다)"
+                        .into(),
+            }
+        }
         BlockState::Missing => {
             "AGENTS.md 블록: missing — `moai init` 이 심는다. `--no-agents` 로 안 쓰기로 했으면 그대로 둔다".into()
         }
@@ -299,6 +472,19 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // 설정을 먼저 검사한다 — 접두어가 형식에 안 맞으면 파일을 만들기 전에 멈춘다.
     crate::config::Config::parse(&config).map_err(Fail::new)?;
 
+    // AGENTS.md 도 **아무것도 심기 전에** 읽는다. 못 읽는 파일(UTF-8 아님·권한)을 빈 글로 치면
+    // 블록 하나로 덮어써 사람의 산문이 통째로 사라졌다 — 멈추되, `.moai/` 를 만든 뒤에 멈추면
+    // 반쯤 심긴 저장소가 남는다. `--check` 가 같은 파일에 같은 까닭을 댄다(`read_agents`).
+    let agents_path = root.join("AGENTS.md");
+    let agents_now = if no_agents {
+        None
+    } else {
+        let read = read_agents(&agents_path).map_err(|e| {
+            Fail::new(format!("{e}\n      못 읽는 AGENTS.md 는 덮어쓰지 않는다 — 읽히게 고치거나 `--no-agents` 로 부른다"))
+        })?;
+        Some(read.unwrap_or_default())
+    };
+
     if !again {
         std::fs::create_dir_all(&dir)
             .map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
@@ -317,17 +503,16 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
 
     // `AGENTS.md` **하나만** 쓴다. `CLAUDE.md` 에도 같은 것을 쓰면 곧 갈라지고,
     // 갈라진 두 벌 중 어느 것이 참인지 아무도 모른다.
-    let agents_path = root.join("AGENTS.md");
-    let agents = if no_agents {
-        false
-    } else {
-        let existing = std::fs::read_to_string(&agents_path).unwrap_or_default();
-        let next = with_block(&existing, &crate::guide::agents());
-        if next != existing {
-            std::fs::write(&agents_path, next)
-                .map_err(|e| Fail::new(format!("{}: {e}", agents_path.display())))?;
+    let agents = match &agents_now {
+        None => false,
+        Some(existing) => {
+            let next = with_block(existing, &crate::guide::agents());
+            if next != *existing {
+                std::fs::write(&agents_path, next)
+                    .map_err(|e| Fail::new(format!("{}: {e}", agents_path.display())))?;
+            }
+            true
         }
-        true
     };
     let claude_needs_pointer = agents
         && root.join("CLAUDE.md").exists()
@@ -417,14 +602,167 @@ mod tests {
     /// `moai init` 을 안 부르면 이 저장소의 에이전트가 옛 글을 배운다 —
     /// 탐색기가 idea 를 담게 된 뒤에도 "읽기 전용" 이라 적혀 있었다(`moai-ka9p`).
     /// 블록 밖의 산문은 사람의 것이라 보지 않는다.
+    /// `moai status` 가 재는 함수 그대로 잰다 — 규칙을 여기 한 벌 더 적으면 둘이 갈라진다.
     #[test]
     fn the_checked_in_agents_block_matches_the_guide() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("AGENTS.md");
-        let existing = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-        assert!(
-            with_block(&existing, &crate::guide::agents()) == existing,
+        assert_eq!(
+            agents_state(Path::new(env!("CARGO_MANIFEST_DIR"))),
+            Ok(BlockState::Current),
             "AGENTS.md 블록이 guide.rs 의 글에서 낡았다 — `moai init` 을 다시 부른다"
         );
+    }
+
+    /// 블록을 찾는 자([`blocks`])가 기대는 것 — 안내 글이 개행으로 끝나고, 마커나 충돌 표시로
+    /// 읽힐 줄을 안 든다. 들면 다시 심을 때마다 블록이 제 글 중간에서 잘린다.
+    #[test]
+    fn the_guide_block_ends_with_a_newline_and_holds_no_marker_lines() {
+        let guide = crate::guide::agents();
+        assert!(guide.ends_with('\n'));
+        for line in guide.lines() {
+            assert!(!is_begin(line) && !is_end(line), "마커로 읽힐 줄 — {line}");
+            assert!(!is_conflict(line, "<<<<<<<") && !is_conflict(line, ">>>>>>>"), "충돌로 읽힐 줄 — {line}");
+        }
+    }
+
+    /// 다시 심은 것을 한 번 더 심어도 같고, 그것이 `current` 다 — 아니면 `status` 가 `init` 을 권하고
+    /// 그 `init` 이 또 무언가를 바꾸는 고리가 선다.
+    fn settle(what: &str, before: &str, block: &str) -> String {
+        let once = with_block(before, block);
+        assert_eq!(with_block(&once, block), once, "{what}: 다시 심었더니 바뀌었다");
+        assert_eq!(block_state(&once, block), BlockState::Current, "{what}: 심은 뒤에도 current 가 아니다\n{once}");
+        once
+    }
+
+    /// **산문이 마커를 적어 보인 자리는 블록이 아니다**(리뷰 moai-epb0.27f). 머리를 파일 어디서나
+    /// 찾던 때는 거기부터 진짜 닫는 마커까지를 먹어, `stale — 블록 밖의 산문은 안 건드린다` 를
+    /// 말한 뒤 따라 친 `init` 이 산문을 지웠다.
+    #[test]
+    fn prose_that_quotes_the_marker_is_not_the_block() {
+        let block = "## 안내\n본문\n";
+        let fresh = with_block("", block);
+        for prose in [
+            "아래 `<!-- moai:begin v:… -->` 부터는 moai 가 관리한다.\n",
+            "`<!-- moai:begin -->` 과 `<!-- moai:end -->` 사이는 관리된다.\n",
+            "<!-- moai:beginning-of-team-notes -->\n",
+            "<!-- moai:begin~end 사이는 moai 가 관리 -->\n",
+        ] {
+            let text = format!("# 규약\n\n{prose}\n## 사람 메모\n지우면 안 되는 산문\n\n{fresh}");
+            assert_eq!(block_state(&text, block), BlockState::Current, "{prose}");
+            assert_eq!(settle(prose, &text.replace("본문", "고친 본문"), block), text, "{prose}");
+        }
+    }
+
+    /// **닫는 줄을 잃은 여는 마커는 뒤의 산문을 먹지 않는다.** 가장 먼저 만난 여는 마커로 짝을
+    /// 짓던 때는 `missing` → `init` 이 블록을 덧붙임 → `stale` → 둘째 `init` 이 그 사이 산문을
+    /// 지웠다.
+    #[test]
+    fn an_orphaned_begin_marker_never_eats_the_prose_after_it() {
+        let block = "## 안내\n본문\n";
+        let text = "# 우리 규약\n\n<!-- moai:begin -->\n반쯤 지운 옛 블록\n\n## 사람 메모\n지우면 안 되는 산문\n";
+        assert_eq!(block_state(text, block), BlockState::Missing);
+        let once = settle("짝 잃은 마커", text, block);
+        assert!(once.starts_with(text), "산문을 건드렸다 — {once}");
+    }
+
+    /// **겹친 블록은 하나로 접는다.** 새 마커를 못 알아보는 옛 바이너리는 `init` 마다 맨 마커
+    /// 블록을 덧붙인다 — 첫 블록만 보던 때는 그 파일이 `current` 였고 `init` 도 그대로 뒀다.
+    /// 사이에 선 산문은 둔다.
+    #[test]
+    fn blocks_appended_by_an_older_binary_fold_into_one() {
+        let block = "## 안내\n본문\n";
+        let fresh = with_block("", block);
+        let old = "\n<!-- moai:begin -->\n## 옛 안내\n<!-- moai:end -->\n";
+        let piled = format!("{fresh}{old}{old}{old}");
+        assert_eq!(block_state(&piled, block), BlockState::Stale);
+        assert_eq!(settle("겹친 블록", &piled, block), fresh);
+
+        let tailed = format!("{fresh}\n## 사람 꼬리\n산문\n{old}");
+        assert_eq!(settle("꼬리 뒤에 겹친 블록", &tailed, block), format!("{fresh}\n## 사람 꼬리\n산문\n"));
+    }
+
+    /// **낡음은 두 얼굴이다**(moai-mj45, 2026-09-15 사용자 결정). 마커가 제 글의 해시를 대면 어떤
+    /// 바이너리가 쓴 그대로고(그쪽이 더 새것일 수 있다), 안 대면 사람이 블록 안을 고친 것이다.
+    /// 가르지 않으면 아직 다시 빌드 안 한 세션이 `moai init` 을 따라 쳐 새 안내를 옛 글로 되돌린다.
+    #[test]
+    fn a_stale_block_says_whether_a_binary_or_a_person_wrote_it() {
+        let ours = "## 안내\n새 글\n";
+        let theirs = with_block("", "## 안내\n남이 쓴 글\n");
+        assert_eq!(block_state(&theirs, ours), BlockState::Stale);
+        assert_eq!(stale_kind(&theirs), Stale::Binary, "마커가 제 글의 해시를 대는데 손질로 읽었다");
+
+        // 블록 안을 한 글자 고치면 마커의 해시가 그 글을 더는 안 댄다.
+        let edited = theirs.replace("남이 쓴 글", "사람이 고친 글");
+        assert_eq!(stale_kind(&edited), Stale::Edited);
+        // 옛 맨 마커는 댈 해시가 없다 — `init` 이 갈아 끼우면 그 안의 글은 사라진다.
+        assert_eq!(stale_kind("<!-- moai:begin -->\n옛 글\n<!-- moai:end -->\n"), Stale::Edited);
+        // CRLF 로 체크아웃한 파일도 같은 자로 잰다 — 해시는 LF 글 위에서 났다.
+        assert_eq!(stale_kind(&theirs.replace('\n', "\r\n")), Stale::Binary);
+    }
+
+    /// **글이 같으면 버전만 다른 마커는 `current` 이고 그대로 둔다** — 낡음을 가르는 것은 글이다.
+    /// 해시가 다른 글을 대거나(손으로 고친 마커), 해시가 없거나(옛 맨 마커), 글을 고쳤으면 `stale` 이다.
+    #[test]
+    fn only_the_text_decides_staleness_not_the_version() {
+        let block = "## 안내\n본문\n";
+        let fresh = with_block("", block);
+        let older = fresh.replacen(&format!("v:{}", env!("CARGO_PKG_VERSION")), "v:0.0.1", 1);
+        assert_ne!(older, fresh);
+        assert_eq!(block_state(&older, block), BlockState::Current);
+        assert_eq!(with_block(&older, block), older, "버전만 다른 마커를 고쳐 썼다");
+
+        for (what, text) in [
+            ("해시가 다른 글을 댄다", fresh.replacen(&hash_of(block), "hash:deadbeef", 1)),
+            ("옛 맨 마커", format!("{BEGIN} -->\n{block}{END}\n")),
+            ("글을 고쳤다", older.replace("본문", "고친 본문")),
+        ] {
+            assert_eq!(block_state(&text, block), BlockState::Stale, "{what}");
+            assert_eq!(settle(what, &text, block), fresh, "{what}");
+        }
+    }
+
+    /// **마커 줄에 난 머지 충돌은 다시 심으면 풀린다**(리뷰 moai-epb0.27f). 해시가 첫 줄에 실려
+    /// 두 가지가 저마다 안내를 고치면 거기서 충돌한다 — 첫 여는 마커부터 갈아 끼우던 때는
+    /// `<<<<<<< HEAD` 가 블록 위에 남은 채 `current` 로 읽혀 그대로 커밋됐다.
+    #[test]
+    fn a_merge_conflict_on_the_marker_is_healed_by_replanting() {
+        let block = "## 안내\n본문\n";
+        let fresh = with_block("", block);
+        let (ours, theirs) = (begin_marker("우리 글\n"), begin_marker("남의 글\n"));
+        for (what, text) in [
+            ("마커 줄만", format!("# 산문\n\n<<<<<<< HEAD\n{ours}\n=======\n{theirs}\n>>>>>>> b\n{block}{END}\n꼬리\n")),
+            (
+                "마커와 첫 줄",
+                format!("# 산문\n\n<<<<<<< HEAD\n{ours}\n## 우리\n=======\n{theirs}\n## 남\n>>>>>>> b\n본문\n{END}\n꼬리\n"),
+            ),
+            (
+                "diff3",
+                format!(
+                    "# 산문\n\n<<<<<<< HEAD\n{ours}\n||||||| base\n{}\n=======\n{theirs}\n>>>>>>> b\n{block}{END}\n꼬리\n",
+                    begin_marker(block)
+                ),
+            ),
+        ] {
+            assert_eq!(block_state(&text, block), BlockState::Stale, "{what}");
+            assert_eq!(settle(what, &text, block), format!("# 산문\n\n{fresh}꼬리\n"), "{what}");
+        }
+    }
+
+    /// **줄 끝과 BOM 은 파일의 것을 따른다.** CRLF 로 체크아웃한 블록은 글이 같으면 `current` 고,
+    /// LF 로 갈아 끼우던 때는 늘 `stale` 에 체크아웃·`init` 을 돌 때마다 빈 줄이 하나씩 붙었다.
+    #[test]
+    fn line_endings_and_a_bom_are_the_files_own() {
+        let block = "## 안내\n본문\n";
+        let fresh = with_block("", block);
+        let crlf = format!("# 산문\r\n\r\n{}꼬리\r\n", fresh.replace('\n', "\r\n"));
+        assert_eq!(block_state(&crlf, block), BlockState::Current);
+        assert_eq!(settle("CRLF 고친 글", &crlf.replace("본문", "고친 본문"), block), crlf);
+
+        let appended = settle("CRLF 에 덧붙임", "# 산문\r\n", block);
+        assert!(!appended.replace("\r\n", "").contains('\n'), "LF 가 섞였다 — {appended:?}");
+
+        let bom = format!("\u{feff}{fresh}");
+        assert_eq!(block_state(&bom, block), BlockState::Current);
+        assert_eq!(settle("BOM", &bom.replace("본문", "고친 본문"), block), bom);
     }
 
     #[test]

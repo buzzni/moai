@@ -32,13 +32,10 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         .collect();
     let now = model::now();
     let mut st = report::status(&load.issues, &unreadable, &repo.config, &now);
-    // **낡은 AGENTS.md 블록은 알림이다**(moai-mj45, 2026-09-14 사용자 결정). `stale` 일 때만 —
-    // `missing` 을 말하면 `--no-agents` 로 안 쓰기로 한 저장소를 영영 조른다. 못 읽는 파일도
-    // 입을 다문다: 세션의 시작점이 안내 파일 하나로 실패해 보이면 안 되고, 까닭은
-    // `moai init --check` 가 댄다. 한눈 보기(`.moai` 밖)는 남의 저장소라 안 본다.
-    if crate::cmd::init::agents_state(&repo.root) == Ok(crate::cmd::init::BlockState::Stale) {
-        st.notices.push(report::Warning::agents_stale());
-    }
+    // **낡은 AGENTS.md 블록은 알림이다**(moai-mj45, 2026-09-14 사용자 결정). 언제 서고 무엇을
+    // 대는지는 `agents_notice` 가 정하고, 훅의 보드가 같은 것을 싣는다. 한눈 보기(`.moai` 밖)는
+    // 남의 저장소라 안 본다.
+    st.notices.extend(crate::cmd::init::agents_notice(&repo.root, ctx.chdir));
 
     if st.broken() {
         super::note_partial();

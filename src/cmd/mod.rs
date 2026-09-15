@@ -32,6 +32,9 @@ pub struct Ctx {
     /// `--user` 를 **푼 값이 아니라 준 값 그대로** 들고 있다. 여기서 미리
     /// 풀면 읽기만 하는 명령(`show`·`status`)까지 사용자 정보를 요구한다.
     pub user: Option<String>,
+    /// `-C` 로 자리를 옮겨 불렀는가. 그러면 부른 사람의 셸은 여기가 아니다 — 부른 자리에서
+    /// 도는 명령(`init`)을 일러 줄 때 `-C <뿌리>` 를 붙여야 엉뚱한 자리에 심지 않는다.
+    pub chdir: bool,
 }
 
 /// 할 수 있는 것은 다 하고, 된 것과 안 된 것을 둘 다 보고한 뒤 비영 종료한다.
@@ -140,7 +143,7 @@ pub fn name_load_errors(path: &std::path::Path, errors: &[crate::store::LoadErro
 }
 
 pub fn run(cli: Cli) -> R<Vec<String>> {
-    let ctx = Ctx { json: cli.json, user: cli.user };
+    let ctx = Ctx { json: cli.json, user: cli.user, chdir: cli.dir.is_some() };
     let Some(cmd) = cli.cmd else {
         return opening(&ctx);
     };
@@ -148,7 +151,8 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         // 새 명령을 두지 않고 `init` 의 플래그로 둔다 — 고치는 길(`init`)과 보는 길이 한 이름에 있어야
         // `stale` 을 본 사람이 무엇을 칠지 안다(moai-mstm).
         Cmd::Init { check: true, .. } => init::check(&ctx),
-        Cmd::Init { prefix, no_agents, .. } => init::run(&ctx, prefix.as_deref(), no_agents),
+        // 필드를 다 적는다 — `..` 로 받으면 `init` 에 새 플래그를 더해도 여기서 조용히 버려진다.
+        Cmd::Init { prefix, no_agents, check: false } => init::run(&ctx, prefix.as_deref(), no_agents),
         Cmd::Hook { event } => hook::run(&ctx, event),
         Cmd::Skill(SkillCmd::Install { scope, dry_run }) => {
             skill::install(&ctx, scope.as_str(), dry_run)

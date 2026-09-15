@@ -122,7 +122,11 @@ fn decide(event: Event, input: &Input) -> Option<String> {
         }
         Event::UserPromptSubmit => once_per_session(input, &repo, "board", || {
             let now = model::now();
-            let st = report::status(&load.issues, &unreadable, &repo.config, &now);
+            let mut st = report::status(&load.issues, &unreadable, &repo.config, &now);
+            // `moai status` 와 같은 알림을 싣는다(`agents_notice`) — 낡은 AGENTS.md 를 모르고
+            // 시작하는 것이 바로 이 보드를 받는 새 세션이다. 세션의 셸 자리는 stdin 의 `cwd` 라
+            // 이미 여기로 옮겨 왔다(`-C` 가 아니다).
+            st.notices.extend(crate::cmd::init::agents_notice(&repo.root, false));
             let lines =
                 view::status(
                     &st,

@@ -331,7 +331,7 @@ NOTE
         /// AGENTS.md 를 건드리지 않는다
         #[arg(long)]
         no_agents: bool,
-        /// 아무것도 안 쓰고 AGENTS.md 블록이 current·stale·missing 인지만 본다. 늘 0 으로 끝난다
+        /// 아무것도 안 쓰고 AGENTS.md 블록이 current·stale·missing 인지만 본다. 파일을 못 읽을 때만 0 이 아니다
         #[arg(long, conflicts_with_all = ["prefix", "no_agents"])]
         check: bool,
     },
