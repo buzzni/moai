@@ -2574,7 +2574,9 @@ const JSON_SWEEP: &[&str] = &[
 ];
 
 /// **읽음은 내 설정에만 적힌다**(moai-u8oh, 사용자 결정) — 트래커 파일은 한 바이트도 안 바뀐다.
-/// `--all` 은 내게 온 것 가운데 안 읽은 것을, `-e` 는 그 에픽의 멤버와 그 밑까지 적는다.
+/// `--all` 은 내게 온 것 가운데 안 읽은 것을, `-e` 는 그 묶음(에픽·마일스톤)의 멤버와 **그 밑까지**
+/// 적는다 — 물려받은 소속도 센다(moai-u8cs 리뷰). 없는 줄은 #a-partial 대로 말하고 비영으로 끝나고,
+/// id 를 준 길은 누군지 몰라도 적는다.
 #[test]
 fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
     let s = init("readmark");
@@ -2582,6 +2584,9 @@ fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
     let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
     let epic = field(&mine(&["add", "에픽", "--type", "epic", "--json"]), "id");
     let member = field(&mine(&["add", "멤버", "-e", &epic, "--json"]), "id");
+    // 멤버의 자식 — **제 `epic` 을 안 적고 부모에게서 받는다**(`moai add --parent`). `-e` 가
+    // 줄의 `epic` 필드만 보던 때 이 줄이 통째로 빠졌다(moai-u8cs 리뷰).
+    let child = field(&mine(&["add", "자식", "--parent", &member, "--json"]), "id");
     let before = issues(s.path());
 
     let out = mine(&["read", &member, "--json"]);
@@ -2593,18 +2598,46 @@ fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
     // 두 번째는 적을 것이 없다 — 시계가 고정(MOAI_NOW)이라 같은 때가 이미 적혀 있다.
     assert!(mine(&["read", &member]).contains("읽음으로 적을 것이 없다"));
 
-    // `-e` 는 에픽 자신과 멤버를 함께 적는다.
-    assert!(mine(&["read", "-e", &epic, "--json"]).contains(&epic));
+    // `-e` 는 에픽 자신과 멤버와 **그 밑까지** 함께 적는다. 자식이 빠지면 "그 밑까지" 가 거짓이다.
+    let out = mine(&["read", "-e", &epic, "--json"]);
+    assert!(out.contains(&epic) && out.contains(&child), "에픽 자신이나 멤버의 자식이 빠졌다 — {out}");
 
-    // 없는 줄은 말하고 넘어간다 — 나머지를 안 적지 않는다.
+    // 마일스톤도 묶음이다 — 묶음 줄 하나만 적고 멤버를 흘리지 않는다.
+    let stone = field(&mine(&["milestone", "add", "v1", "--json"]), "id");
+    let dated = field(&mine(&["add", "마일 이슈", "--milestone", &stone, "--json"]), "id");
+    let out = mine(&["read", "-e", &stone, "--json"]);
+    assert!(out.contains(&dated), "마일스톤의 멤버가 빠졌다 — {out}");
+
+    // #a-partial — 없는 줄은 말하고 나머지는 적되, **비영으로 끝난다**. 0 으로 끝나면 고리를
+    // 짜는 쪽이 오타 친 id 를 적힌 것으로 세고 넘어간다.
     let another = field(&mine(&["add", "또 하나", "--json"]), "id");
     let out = moai_with(s.path(), &cfg, &["read", "없는-줄", &another, "--json"]);
-    assert!(out.status.success(), "하나가 없다고 멈췄다");
-    assert!(String::from_utf8_lossy(&out.stdout).contains(&another));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&another), "하나가 없다고 나머지를 안 적었다");
     assert!(String::from_utf8_lossy(&out.stderr).contains("없는-줄"));
+    assert!(!out.status.success(), "못 찾은 것이 있는데 0 으로 끝났다");
 
-    // `--all` 은 내게 온 것 가운데 안 읽은 것 — 담당은 만든 사람이라 다 내 것이다.
-    assert!(mine(&["read", "--all", "--json"]).contains("\"read\""));
+    // 없는 묶음도 같은 자리다 — 조용히 빈 손으로 끝나면 오타를 친 줄 모른다.
+    let out = moai_with(s.path(), &cfg, &["read", "-e", "없는-에픽", "--json"]);
+    assert!(!out.status.success(), "없는 묶음인데 0 으로 끝났다");
+    assert!(String::from_utf8_lossy(&out.stdout).contains(r#""missing":["없는-에픽"]"#), "{out:?}");
+
+    // **누군지 몰라도 id 를 준 길은 적는다** — 저널에 안 쓰니 이름 없는 줄이 남을 자리가 없다.
+    // 담당을 재는 `--all` 만 사람을 묻는다.
+    let bare = isolated(BIN)
+        .args(["read", &member])
+        .current_dir(s.path())
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("moai 를 실행하지 못했다");
+    assert!(bare.status.success(), "{}", String::from_utf8_lossy(&bare.stderr));
+
+    // `--all` 은 내게 온 것 가운데 **안 읽은 것만** — 위에서 다 읽었으니 새로 만든 줄 하나뿐이다.
+    let late = field(&mine(&["add", "늦게 온 것", "--json"]), "id");
+    let out = mine(&["read", "--all", "--json"]);
+    assert!(out.contains(&late), "안 읽은 줄이 안 들었다 — {out}");
+    assert!(!out.contains(&member), "이미 읽은 줄을 다시 적었다 — {out}");
 }
 
 /// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.

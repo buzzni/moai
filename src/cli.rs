@@ -712,7 +712,9 @@ pub struct DeferArgs {
 /// `moai read` — 읽었다고 표시한다.
 #[derive(Args, Debug)]
 pub struct ReadArgs {
-    #[arg(value_name = "id")]
+    /// 무엇을 읽었는지는 **언제나 대야 한다** — 인자 없이 부르면 아무 줄도 안 적으면서
+    /// 성공으로 끝나, 사람은 다 적힌 줄 알고 넘어간다. `--all`·`-e` 가 그 자리를 채운다.
+    #[arg(value_name = "id", required_unless_present_any = ["all", "epic"])]
     pub ids: Vec<String>,
 
     /// 내게 온 것 가운데 안 읽은 것 전부
