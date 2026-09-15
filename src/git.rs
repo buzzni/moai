@@ -7,7 +7,7 @@
 //! 그때그때 읽는다 — 이슈를 닫는 트래커 커밋은 제 해시를 미리 알 수 없고, 적어 둔
 //! 해시는 squash·rebase 한 번에 낡는다. id 로 다시 찾으면 둘 다 없다.
 
-use crate::git_leaks::LEAKS;
+use crate::git_leaks::{REPO, TEST};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -22,12 +22,9 @@ pub enum Error {
 
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 바이트로 받는다.
 ///
-/// **저장소를 가리키는 환경 변수는 릴리스에서도 걷는다**(moai-1w2l 단계 리뷰). `-C root` 로 어느
-/// 저장소인지 이미 댔는데 물려받은 `GIT_DIR` 이 남으면 git 은 그쪽을 읽는다 — moai 는 훅 안에서도
-/// 딸린 워크트리의 `rebase -x` 안에서도 돈다. 걷지 않으면 뿌리마다 따로 읽는 커밋 표가 뿌리와
-/// 상관없이 **같은 저장소**를 재고, 옆 워크트리의 커밋이 이쪽 것으로 서며 `show --worktree` 는
-/// 엉뚱한 가지를 읽는다(리뷰 moai-v9ai.q6f 가 짚은 자리이기도 하다). 시험 빌드는 [`command`] 가
-/// [`LEAKS`] 전부를 걷는다 — 여기서 걷는 셋은 릴리스에서도 걷어야 하는 것이다.
+/// 어느 저장소를 볼지는 **`-C root` 가 정한다** — 물려받은 `GIT_DIR` 무리는 [`command`] 가 걷었다
+/// (moai-ztdf). 걷지 않으면 그 무리가 `-C` 를 이겨, 뿌리마다 따로 읽는 커밋 표가 뿌리와 상관없이
+/// 같은 저장소를 재고 `show --worktree` 가 엉뚱한 가지를 읽는다.
 ///
 /// **출력은 UTF-8 로 달라고 한다.** `i18n.logOutputEncoding` 을 cp949 같은 것으로 둔 사람에게는
 /// 한글 제목 한 줄이 깨져 — ASCII 제목까지 같이 — 커밋 칸이 통째로 빌 수 있다. 그래도 깨진 채로
@@ -38,9 +35,6 @@ fn output(root: &Path, args: &[&str]) -> Result<Vec<u8>, Error> {
         .arg(root)
         .args(["-c", "i18n.logOutputEncoding=UTF-8"])
         .args(args)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_COMMON_DIR")
         .output()
         .map_err(Error::Spawn)?;
     if !out.status.success() {
@@ -63,7 +57,14 @@ fn read_log(root: &Path, args: &[&str]) -> Result<String, Error> {
     Ok(String::from_utf8_lossy(&output(root, args)?).into_owned())
 }
 
-/// git 을 띄울 명령 — **시험의 git 은 모두 여기서 시작한다.** 시험 빌드만 [`LEAKS`] 를 걷는다.
+/// git 을 띄울 명령 — **moai 의 git 은 모두 여기서 시작한다.**
+///
+/// **저장소를 가리키는 변수는 릴리스에서도 걷는다**([`REPO`], moai-ztdf). 그것들은 `git -C <경로>` 를
+/// 이기므로, 걷지 않으면 훅 안에서 부른 `moai -C <다른 프로젝트>` 가 훅 저장소를 읽는다 — 커밋 칸과
+/// 워크트리 겹쳐 보기가 남의 이력을 내고, `model::git_config` 는 **남의 이름을 그 프로젝트 저널에
+/// 영구히** 적는다. 어느 저장소를 볼지는 언제나 `-C` 나 `.moai` 찾기가 정한다는 것이 이 도구의 규칙이고,
+/// 이 걷기가 그 규칙을 실제로 세운다. 사람·시계·해시([`TEST`])는 시험 빌드에서만 걷는다 — 커밋 훅에서
+/// 사람이 일부러 준 값을 릴리스가 지울 까닭이 없다.
 ///
 /// [`run`] 과 임시 저장소를 만드는 도우미(`isolated`)가 따로 걷으면 걷는 목록이 갈라진다. 한때
 /// 도우미는 셋만 걷고 `run` 은 열을 걷어, pre-receive 훅 안에서는 도우미가 바깥 객체 저장소에 쓰고
@@ -71,8 +72,11 @@ fn read_log(root: &Path, args: &[&str]) -> Result<String, Error> {
 /// 빌드에서도 이 코드가 타입 검사를 받게 하려는 것이다.
 pub fn command() -> std::process::Command {
     let mut cmd = std::process::Command::new("git");
+    for var in REPO {
+        cmd.env_remove(var);
+    }
     if cfg!(test) {
-        for var in LEAKS {
+        for var in TEST {
             cmd.env_remove(var);
         }
     }

@@ -83,7 +83,7 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         .env("MOAI_CONFIG", home.join("moai-config-unset/config.toml"))
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("BASH_ENV");
-    for var in GIT_LEAKS {
+    for var in git_leaks() {
         cmd.env_remove(var);
     }
     cmd
@@ -93,7 +93,10 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
 // 읽는다. 따로 된 크레이트라 `use` 로는 못 가져가고, 두 벌로 두면 한쪽에만 더한 변수가 말없이 갈라진다.
 #[path = "../src/git_leaks.rs"]
 mod git_leaks;
-use git_leaks::LEAKS as GIT_LEAKS;
+/// 시험은 두 무리를 다 걷는다 — 릴리스가 걷는 저장소 무리(`REPO`)와 시험만 걷는 사람·시계·해시(`TEST`).
+fn git_leaks() -> impl Iterator<Item = &'static &'static str> {
+    git_leaks::REPO.iter().chain(git_leaks::TEST)
+}
 
 fn moai(dir: &Path, args: &[&str]) -> Output {
     isolated(BIN)
@@ -6188,7 +6191,7 @@ fn the_fake_claude_command_starts_from_the_isolated_one() {
     for var in
         ["MOAI_ACTOR", "MOAI_NOW", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "XDG_CONFIG_HOME", "BASH_ENV"]
             .iter()
-            .chain(GIT_LEAKS)
+            .chain(git_leaks())
     {
         assert!(removed(var), "{var} 를 안 걷었다");
     }
