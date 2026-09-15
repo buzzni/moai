@@ -3378,3 +3378,14 @@
 {"ts":"2026-09-15T14:36:44Z","id":"moai-50mn.mgo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-15T14:36:45Z","id":"moai-z9pc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"커밋 aa57681"}
 {"ts":"2026-09-15T14:36:45Z","id":"moai-j038","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"멤버 셋 다 커밋 — 9212e64(50mn)·8d28538(u8oh)·aa57681(z9pc), 시험 814·290 통과. 사용자 결정 하나 더: 읽음 키는 SPC m(SPC r 다시 읽기는 그대로), 바로 누르는 r 은 그 줄. 다음: 리뷰 셋(50mn.mgo high · u8oh.x85 high · z9pc.9av medium) 차례로 → 에픽 끝 max → main 머지 → 감독 보고."}
+{"ts":"2026-09-15T14:37:57Z","id":"moai-iol3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"측정(2026-09-15, 흉내 낸 커밋 2만 개·본문 있는 저장소, moai 프로세스의 VmHWM 만 — 자식 git 은 뺐다): 통째로 읽기 12.8·13.1MB → 흘려 읽기 5.6·5.8MB. 시간은 280 → 276·318ms 로 그대로다 — 걷기 값은 git 쪽이고 이 고침이 줄인 것은 우리가 든 것뿐이다. 이 저장소(커밋 1150개)에서는 둘 다 눈에 안 띈다"}
+{"ts":"2026-09-15T14:38:15Z","id":"moai-iol3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"33e3c8b (가지 worktree-moai-8s8r) — 흘려 읽기. moai 프로세스 최대 12.8 → 5.6MB, 시간은 그대로"}
+{"ts":"2026-09-15T14:38:16Z","id":"moai-rzsv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T14:38:35Z","id":"moai-shgx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"c473495 — scratch.rs 한 벌로 모으고 Scratch 네 벌을 그리로"}
+{"ts":"2026-09-15T14:38:35Z","id":"moai-shgx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽의 남은 둘(moai-46xz TMPDIR, moai-uu47 cli.rs 도우미) → 리뷰(low~medium) → 에픽 끝 xhigh → main 받기 → --no-ff 병합 뒤 done. /tmp 에 쌓인 옛 moai-store-* 4,785개를 지울지는 사용자에게 물어 둔 상태"}
+{"ts":"2026-09-15T14:42:09Z","id":"moai-84kd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T14:42:10Z","id":"moai-lzfq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T14:42:10Z","id":"moai-olaj.3d8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review xhigh --fix b90ab75..bbaae98 이 worktree-moai-olaj 안에서 돈다(.moai 와 cargo fmt 는 건드리지 말라고 일렀다). 끝나면 원문·판단 두 노트로 적고 done -m"}
+{"ts":"2026-09-15T14:42:10Z","id":"moai-olaj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 둘 커밋됨 — 84kd 2a499bb · lzfq bbaae98. main 받아 plugin.json 충돌은 bless 로 풀었다(0e6d89e), 846+306 통과. 리뷰 moai-olaj.3d8 을 닫고 main 에 --no-ff 머지 → 워크트리·가지 삭제 → 둘 done → moa-issue-14 에 보고"}
+{"ts":"2026-09-15T14:42:10Z","id":"moai-84kd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: opus-5 (medium — 감독 스킬 글과 표, 시험이 둘러싼 자리)"}
+{"ts":"2026-09-15T14:42:10Z","id":"moai-lzfq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: opus-5 (medium — 브리프 걸음과 훅이 훑는 명령 줄)"}
