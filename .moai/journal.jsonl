@@ -2797,3 +2797,22 @@
 {"ts":"2026-09-15T08:38:40Z","id":"moai-642v","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-6bc0 으로 옮겼다 — 멤버 moai-ymnu. 사용자 결정: 숨김은 [tui] 에 저장해 다음 실행에도 이어진다."}
 {"ts":"2026-09-15T08:38:40Z","id":"moai-642v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"에픽 moai-6bc0 의 moai-ymnu 로 옮겼다"}
 {"ts":"2026-09-15T08:38:41Z","id":"moai-3fnf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T08:38:45Z","id":"moai-n0xu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ensure_lines 도 못 읽는 .gitignore/.gitattributes 를 moai 줄만 남기고 덮는다 — read_agents 와 같은 자로 거절해야 한다 (리뷰 moai-epb0.27f)"}
+{"ts":"2026-09-15T08:38:46Z","id":"moai-s16f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 이 아무것도 안 썼을 때도 'AGENTS.md 블록을 맞췄다'·\"agents\":true 로 말한다 — '이미 다 맞아 있다' 가 --no-agents 말고는 닿지 않는 자리 (blame 25d0897, 리뷰 moai-epb0.27f)"}
+{"ts":"2026-09-15T08:38:46Z","id":"moai-3w5l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"FNV 해셔가 init(32비트)과 skill::stable(64비트)에 따로 있다 — text.rs 에 하나로 모은다. init 마커의 8자 계약은 그대로 (리뷰 moai-epb0.27f)"}
+{"ts":"2026-09-15T08:39:00Z","id":"moai-mthy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이슈 글 스타일 — 에이전트가 적는 제목과 본문"}
+{"ts":"2026-09-15T08:39:00Z","id":"moai-j8aq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"AGENTS 블록에 글 스타일 한 문단"}
+{"ts":"2026-09-15T08:39:00Z","id":"moai-1xf2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai 스킬에 스타일 예시와 흔한 어긋남"}
+{"ts":"2026-09-15T08:39:00Z","id":"moai-we5p","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"AGENTS.md 재생성과 플러그인 bless 로 문구를 맞춘다"}
+{"ts":"2026-09-15T08:39:00Z","id":"moai-mthy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-f9z7 에서 펼쳤다 — agent 가 moai 에 이슈를 발행할때 적는 글의 스타일"}
+{"ts":"2026-09-15T08:39:00Z","id":"moai-f9z7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-mthy 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-15T08:39:06Z","id":"moai-lur8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 상단 헤더 — 로고·사람·판·번호 붙은 프로젝트"}
+{"ts":"2026-09-15T08:39:06Z","id":"moai-mzet","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"헤더 자리와 로고 — 맨 위 여섯 줄과 파이프 칸을 긋는다"}
+{"ts":"2026-09-15T08:39:06Z","id":"moai-56jf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"사람과 판 — User 는 git config 이름·메일, Version 은 이 바이너리의 판"}
+{"ts":"2026-09-15T08:39:06Z","id":"moai-mr83","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"번호 붙은 프로젝트 목록 — <0> 은 전체, 고른 것은 빛이 지나간다"}
+{"ts":"2026-09-15T08:39:06Z","id":"moai-o133","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"숫자 키로 프로젝트를 바로 옮긴다 — 다른 모드의 숫자와 갈라 둔다"}
+{"ts":"2026-09-15T08:39:06Z","id":"moai-i784","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기에서 `..` 로 프로젝트를 옮기는 길을 걷어낸다"}
+{"ts":"2026-09-15T08:39:06Z","id":"moai-c2s3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"도움말과 키 지도를 새 길에 맞춘다"}
+{"ts":"2026-09-15T08:39:06Z","id":"moai-lur8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-amxk 에서 펼쳤다 — 프로그램 상단 해더에 로고와 각종 정보 띄우기"}
+{"ts":"2026-09-15T08:39:06Z","id":"moai-amxk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-lur8 로 펼쳤다 (이슈 6건)"}
+{"ts":"2026-09-15T08:39:15Z","id":"moai-mzet","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
