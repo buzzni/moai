@@ -20,13 +20,40 @@ pub enum Error {
 }
 
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 받는다.
+///
+/// 물려받은 환경은 **그대로 넘긴다** — 사용자가 git 훅 안에서 moai 를 부르면 그 저장소를
+/// 읽는 것이 맞다. 시험 빌드만 [`LEAKS`] 를 걷는다(moai-g1a3).
 pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
-    let out = std::process::Command::new("git").arg("-C").arg(root).args(args).output().map_err(Error::Spawn)?;
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("-C").arg(root).args(args);
+    #[cfg(test)]
+    for var in LEAKS {
+        cmd.env_remove(var);
+    }
+    let out = cmd.output().map_err(Error::Spawn)?;
     if !out.status.success() {
         return Err(Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()));
     }
     String::from_utf8(out.stdout).map_err(Error::NotUtf8)
 }
+
+/// 물려받으면 git 이 바깥 저장소나 바깥 설정을 보게 되는 변수들. git 훅이나
+/// `git rebase -x 'cargo test'` 안에서 git 이 이것들을 내보내고, 그러면 `git -C <임시 저장소>`
+/// 도 `GIT_DIR` 이 가리키는 바깥 저장소를 읽는다. tests/cli.rs 의 `GIT_LEAKS` 와 같은 목록이다 —
+/// 그쪽은 따로 된 크레이트라 이것을 못 가져다 쓴다.
+#[cfg(test)]
+pub const LEAKS: &[&str] = &[
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+];
 
 /// 이슈 제목에 id 가 적힌 커밋 하나. `moai show --json` 의 `commits` 가 이 모양 그대로다.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
