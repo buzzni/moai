@@ -2857,3 +2857,4 @@
 {"ts":"2026-09-15T08:53:25Z","id":"moai-1xf2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-15T08:56:46Z","id":"moai-mzet.w2r","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 헤더 자리와 로고"}
 {"ts":"2026-09-15T08:56:52Z","id":"moai-mzet.w2r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T08:59:11Z","id":"moai-1w2l.wcv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (d337bb0) — 고침 넷 반영(51e7609·3aaf435·67a583e·d30ef62), 설계 넷은 moai-g8cd 노트와 idea moai-94xm·moai-9np9·moai-p2sq 로 넘겼다"}
