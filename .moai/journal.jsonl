@@ -2617,3 +2617,4 @@
 {"ts":"2026-09-15T06:08:42Z","id":"moai-u8cs.aes","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 반영할 것 없음. 넘긴 것 없음."}
 {"ts":"2026-09-15T06:08:42Z","id":"moai-u8cs.aes","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 없음 — 입력·답·차례·부작용이 전과 같음을 확인받았다"}
 {"ts":"2026-09-15T06:11:03Z","id":"moai-u8cs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 머지, 합친 main 에서 시험 통과(769 passed 268 passed )"}
+{"ts":"2026-09-15T06:11:04Z","id":"moai-zrzo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
