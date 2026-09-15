@@ -46,7 +46,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     }
 
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref())?;
+    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
 
     let (moved, read): (Moved, super::Read) = repo.with_write(|issues, cfg, _| {
         let mut m = Moved::default();

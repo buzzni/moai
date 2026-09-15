@@ -1,8 +1,12 @@
-//! 글자 폭을 다루는 순수 유틸. **이슈의 뜻을 모른다.**
+//! 글자와 바이트를 다루는 순수 유틸. **이슈의 뜻을 모른다.**
 //!
 //! 한글은 터미널에서 두 칸을 먹는다. `len()`·`chars().count()` 로 맞추면
 //! 한글 제목이 섞인 표가 전부 어긋난다. CLI 표(`view`)와 TUI 가 같은 자를
 //! 써야 두 표면이 같은 자리에서 잘린다.
+//!
+//! 파일 끝에는 **FNV-1a 해셔 한 벌**이 산다(moai-2vrw) — `init` 의 마커, `skill` 의
+//! 플러그인 판, 프로젝트 색이 모두 여기를 지난다. 상수와 "왜 `DefaultHasher` 가
+//! 아닌가" 를 한 자리에만 적으려는 것이지 값을 합치려는 것이 아니다.
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -158,9 +162,55 @@ pub fn shell_word(s: &str) -> String {
     if plain { s.to_string() } else { format!("'{}'", s.replace('\'', r"'\''")) }
 }
 
+/// FNV-1a 32비트 — `init` 의 관리 블록 마커가 대는 `hash:<8자>`.
+///
+/// **std 의 해셔를 안 쓴다.** `DefaultHasher` 는 러스트 버전마다 값이 달라질 수 있다고 문서가
+/// 밝혀, 새로 빌드한 바이너리가 멀쩡한 블록의 해시를 다르게 읽는다. 크레이트를 들일 일도
+/// 아니다: 적대적 입력이 아니라 충돌에 강할 까닭이 없고 한 줄이다.
+pub fn fnv1a32(bytes: &[u8]) -> u32 {
+    bytes.iter().fold(0x811c_9dc5, |h: u32, b| (h ^ u32::from(*b)).wrapping_mul(0x0100_0193))
+}
+
+/// FNV-1a 64비트의 시작값. **여러 조각을 이어 세는 쪽**([`fnv1a64_from`])이 첫 씨앗으로 든다.
+pub const FNV64_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV64_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// FNV-1a 64비트 — `skill` 의 플러그인 판과 훅 이름.
+///
+/// **너비를 32 로 줄이지 않는다**(moai-2vrw, 2026-09-15 사용자 결정). 값이 바뀌면 이미 심긴
+/// 플러그인이 모두 판이 달라진 것으로 보여 헛 갱신이 돈다. 같은 자리에 둘을 나란히 두는 것은
+/// 상수와 까닭을 한 곳에 모으려는 것이지 값을 합치려는 것이 아니다.
+pub fn fnv1a64(bytes: &[u8]) -> u64 {
+    fnv1a64_from(FNV64_OFFSET, bytes)
+}
+
+/// 이어 세는 FNV-1a 64비트 — 앞서 센 값을 씨앗으로 받는다.
+///
+/// **조각마다 부르는 쪽이 있다**: `style::Hue::of_path` 는 경로를 조각으로 나눠 세고 사이에 0 을
+/// 끼운다. 그쪽에 셈을 한 벌 더 적으면 상수(`OFFSET`·`PRIME`)가 두 자리에 서고, 한쪽만 고치는
+/// 날 프로젝트 색이 통째로 바뀐다.
+pub fn fnv1a64_from(seed: u64, bytes: &[u8]) -> u64 {
+    bytes.iter().fold(seed, |h: u64, b| (h ^ u64::from(*b)).wrapping_mul(FNV64_PRIME))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **공개된 시험값을 박아 둔다.** 두 너비가 한 자리로 오며 값이 바뀌면 AGENTS.md 마커가
+    /// 통째로 낡은 것이 되고 심긴 플러그인이 모두 헛 갱신을 받는다.
+    #[test]
+    fn fnv1a_matches_the_published_vectors() {
+        assert_eq!(fnv1a32(b""), 0x811c_9dc5);
+        assert_eq!(fnv1a32(b"a"), 0xe40c_292c);
+        assert_eq!(fnv1a32(b"foobar"), 0xbf9c_f968);
+        assert_eq!(fnv1a64(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a64(b"a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a64(b"foobar"), 0x8594_4171_f739_67e8);
+        // 이어 세는 쪽은 한 번에 센 것과 같아야 한다 — `style` 이 경로를 조각으로 나눠 센다.
+        assert_eq!(fnv1a64_from(fnv1a64(b"foo"), b"bar"), fnv1a64(b"foobar"));
+        assert_eq!(fnv1a64_from(FNV64_OFFSET, b"foobar"), fnv1a64(b"foobar"));
+    }
 
     #[test]
     fn shell_word_quotes_only_what_the_shell_would_split() {

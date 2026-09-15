@@ -54,7 +54,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     }
 
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref())?;
+    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
     let moved: Moved = repo.with_write(|issues, cfg, _| {
         let mut m = Moved::default();
         let mut entries = Vec::new();

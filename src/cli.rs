@@ -251,11 +251,12 @@ NOTE
     SPC /  검색            SPC f  거름망         SPC n  생각 담기
     SPC r  다시 읽기       SPC q  끝내기
     SPC p a  등록          SPC p d  목록에서 빼기
-    SPC t w  워크트리 겹쳐 보기 [켜짐/꺼짐]    SPC t r  원문↔그리기
+    SPC t w  워크트리 겹쳐 보기 [켜짐/꺼짐]    SPC t r  원문↔그리기    SPC t d  상세 칸 [보임/숨김]
     SPC s d  done [보임/숨김]    SPC s z  미룸    SPC s a  모두 보이기
     SPC s 1  설정의 첫 칸 [보임/숨김] — 둘째 칸부터 번호가 차례로 는다
     SPC o p  우선순위   SPC o c  생성   SPC o u  수정   SPC o s  칸   SPC o a  담당   SPC o t  제목
     SPC c i  id   SPC c p  우선순위   SPC c a  담당   SPC c c  생성   SPC c u  수정   SPC c n  셈   SPC c g  태그
+    SPC c h  열 이름 줄 [보임/숨김]    SPC c w  ⎇ 옆 가지 표시 [보임/숨김] — SPC t w 로 겹쳐 봐야 선다
   바로 끝내는 키는 Ctrl-C 하나다 — 어디서든, 글을 적는 중에도 끝낸다.
 
   목록은 처음에 done 을 숨긴다 — 경로 줄의 [done 숨김] 이 그것을 댄다. 보기는 거름망과

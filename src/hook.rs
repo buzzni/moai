@@ -831,19 +831,7 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &BTreeSet<String>) -> V
 /// 뺀 옆의 리뷰 줄을 규칙 3 이 "집으라" 고 대면, 이미 옆에서 집은 줄이라 시킨 대로 해도
 /// 안 풀린다.
 fn theirs<'a>(issues: &'a [Issue], away: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
-    let (epics, stones) = if away.is_empty() {
-        (Default::default(), Default::default())
-    } else {
-        (report::groups(issues), report::milestones(issues))
-    };
-    move |i: &Issue| {
-        !away.is_empty()
-            && std::iter::successors(Some(i.id.as_str()), |id| crate::id::parent_of(id)).any(|id| {
-                away.contains(id)
-                    || epics.get(id).is_some_and(|e| away.contains(*e))
-                    || stones.get(id).is_some_and(|m| away.contains(*m))
-            })
-    }
+    report::claimed(issues, away)
 }
 
 /// **누구의 것인지 모르는** 집은 줄 — 옆 딸린 워크트리의 스냅샷에도 벌여 놓인(또는 거기서 늦게
