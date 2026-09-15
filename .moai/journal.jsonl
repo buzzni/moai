@@ -3286,3 +3286,19 @@
 {"ts":"2026-09-15T13:45:18Z","id":"moai-2f99","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"f6b7e48·06760ac — 빠진 규칙을 파일마다 알림과 --check 가 비춘다"}
 {"ts":"2026-09-15T13:45:21Z","id":"moai-97ga","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"c6b0a08 로 main 병합"}
 {"ts":"2026-09-15T13:45:21Z","id":"moai-70ip","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"c6b0a08 로 main 병합 — 조사로 끝났고 판은 그대로"}
+{"ts":"2026-09-15T13:45:47Z","id":"moai-hym7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"구현(1f4340c): cmd::check_from 이 '아는 칸이거나 어느 줄이 실제로 선 칸' 을 받는다. 줄을 봐야 해서 검사가 with_write 락 안으로 들어갔고, model::actor 도 그 뒤로 옮겨 칸 오타가 신원 오류에 안 덮인다. 시험(먼저 빨강): config 의 in_progress 를 doing 으로 바꾼 뒤에도 옛 칸에 선 줄을 --from in_progress 로 집고, 아무도 안 선 뒤에는 거절. 835+300 통과. (트래커는 이제 워크트리가 아니라 -C 루트로 쓴다 — c6b0a08)"}
+{"ts":"2026-09-15T13:45:57Z","id":"moai-hym7.xvc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — --from 이 받는 칸과 락 안으로 옮긴 검사"}
+{"ts":"2026-09-15T13:46:08Z","id":"moai-hym7.xvc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T13:46:08Z","id":"moai-hym7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T13:46:08Z","id":"moai-hym7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 리뷰 moai-hym7.xvc 가 닫히면 멤버 moai-8jd7(CLAUDE.md 워크트리 절차에 --from)과 guide 의 '겨루는 집기' 한 줄(opjn-54 가 넘겨줬다), 그 뒤 에픽 끝 xhigh 리뷰와 병합(worktree-moai-lvf9)"}
+{"ts":"2026-09-15T13:47:07Z","id":"moai-lk8a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시험 바닥 다지기 — 임시 자리와 도우미"}
+{"ts":"2026-09-15T13:47:07Z","id":"moai-shgx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"임시 디렉터리를 Drop 하나로 모은다"}
+{"ts":"2026-09-15T13:47:07Z","id":"moai-46xz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TMPDIR 이 체크아웃 안이어도 워크트리 시험이 안 흔들린다"}
+{"ts":"2026-09-15T13:47:07Z","id":"moai-uu47","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"cli.rs 시험 도우미의 env 블록을 한 자리로"}
+{"ts":"2026-09-15T13:47:07Z","id":"moai-lk8a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2lu3 에서 펼쳤다 — 시험의 임시 디렉터리를 Drop 하나로 모은다 — 깨진 시험이 남긴 pid 이름 디렉터리를 아무도 안 지운다"}
+{"ts":"2026-09-15T13:47:07Z","id":"moai-2lu3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-lk8a 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-15T13:47:17Z","id":"moai-r2a5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"에픽 moai-lk8a 의 멤버 moai-46xz 로 들어갔다"}
+{"ts":"2026-09-15T13:47:17Z","id":"moai-r2a5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-46xz 로 옮겨 세웠다 (에픽 moai-lk8a)"}
+{"ts":"2026-09-15T13:47:17Z","id":"moai-i0fg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"에픽 moai-lk8a 의 멤버 moai-uu47 로 들어갔다"}
+{"ts":"2026-09-15T13:47:17Z","id":"moai-i0fg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-uu47 로 옮겨 세웠다 (에픽 moai-lk8a)"}
+{"ts":"2026-09-15T13:47:18Z","id":"moai-shgx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
