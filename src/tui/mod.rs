@@ -223,6 +223,26 @@ pub struct Fresh {
     now: String,
 }
 
+/// 뿌리(이 프로젝트, 줄을 보탠 옆 워크트리) → 그 가지의 id → 커밋 표(`git::table`, moai-a4i0).
+/// **표만 짓는 스레드에서 짓는다**([`App::follow_commits`]) — 커서를 옮길 때마다 git 을 부르면
+/// 걸음마다 루프가 멈칫한다. 다시 읽기([`prepare`])에도 태우지 않는다: 쓰기·SPC r·SPC t w 는 그
+/// 읽기를 **루프에서** 부르므로, 거기서 이력을 뿌리마다 끝까지 걸으면 쓸 때마다 화면이 멈춘다.
+/// git 을 못 쓰는 뿌리는 빠진다 — 상세의 커밋 칸이 말없이 빈다(`show` 와 같은 자리, moai-mauw).
+pub type Commits = std::collections::BTreeMap<
+    std::path::PathBuf,
+    std::collections::BTreeMap<String, Vec<crate::git::Commit>>,
+>;
+
+/// 커밋 표를 지을 뿌리 — 이 프로젝트와, 줄을 보태 온 옆 워크트리.
+fn commit_roots(repo: &Repo, origin: &crate::worktree::Origin) -> Vec<std::path::PathBuf> {
+    std::iter::once(repo.root.as_path()).chain(origin.roots()).map(std::path::Path::to_path_buf).collect()
+}
+
+/// 뿌리마다 [`crate::git::table`] 을 짓는다. **어느 스레드에서 불러도 같다.**
+fn commit_tables(roots: &[std::path::PathBuf]) -> Commits {
+    roots.iter().filter_map(|root| crate::git::table(root).ok().map(|t| (root.clone(), t))).collect()
+}
+
 /// 버린 다시 읽기 손잡이를 이만큼까지 든다(`App::discarded`). 버리는 것은 사람의
 /// 손(SPC r·SPC t w·쓰기)이 읽기가 도는 동안 닿을 때뿐이고, 한 읽기는 1만 개에서도 수백 ms
 /// 라 보통은 하나도 안 쌓인다. 이것이 차는 것은 읽기가 멈춘 때뿐이다.
@@ -243,6 +263,13 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         .collect();
     let issues = g.load.issues;
     let now = crate::model::now();
+    let mut watched = g.watched;
+    // **겹쳐 보지 않아도 HEAD 는 지켜본다**(moai-a4i0). 겹쳐 보면 `gather` 가 이미 잰다. 안 재면
+    // `SPC t w` 로 끈 동안 커밋을 해도 스냅샷이 안 바뀌어 커밋 칸이 낡은 채 선다. `gather` 에
+    // 두지 않는 것은 CLI 명령마다 git 을 한 번 더 띄우게 되어서다 — 지켜보는 것은 탐색기뿐이다.
+    if !worktree {
+        watched.extend(crate::worktree::heads(&repo.root));
+    }
     Ok(Fresh {
         root: repo.root.clone(),
         stamp,
@@ -254,7 +281,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         origin: g.origin,
         elsewhere: g.trouble,
         unfound: g.unfound,
-        watched: g.watched,
+        watched,
         now,
     })
 }
@@ -345,6 +372,16 @@ pub struct App {
     /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과 그 표식(`worktree::gather`
     /// 가 읽기 **전에** 잰 것). 꺼져 있으면 비었다.
     watched: Vec<(std::path::PathBuf, Stamp)>,
+    /// 이슈에 닿은 커밋 표([`Commits`]). 다시 읽은 뒤마다 새로 짓는다 — 커밋이 새로 서면
+    /// 표식(`watched`·HEAD)이 바뀌어 다시 읽기가 돈다. 새 표가 올 때까지는 옛 표를 든다.
+    commits: Commits,
+    /// 표만 짓는 스레드([`App::follow_commits`]). **한 번에 하나만 돈다** — 도는 동안 다시 읽기가
+    /// 또 들어오면 `commits_due` 만 세우고, 이것이 끝나면 곧바로 하나를 더 띄운다.
+    commits_job: Option<(std::sync::mpsc::Receiver<Commits>, std::thread::JoinHandle<()>)>,
+    /// 지금 든 표(나 도는 스레드)보다 새 표가 필요한가. 연 순간과 다시 읽은 뒤마다 선다 —
+    /// **여는 읽기와 다시 읽기는 표를 안 짓는다**, 첫 화면도 쓰기도 git 이 이력을 걷는 동안
+    /// 붙잡을 까닭이 없다.
+    commits_due: bool,
     /// 스레드에서 짓고 있는 다시 읽기. 끝나면 [`App::follow`] 가 받아 들인다.
     /// 손잡이는 스레드가 죽었을 때 그 패닉을 루프로 되던지려고 든다.
     pending: Option<(std::sync::mpsc::Receiver<crate::fail::R<Fresh>>, std::thread::JoinHandle<()>)>,
@@ -537,6 +574,9 @@ impl App {
             warnings: 0,
             stamp: None,
             watched: Vec::new(),
+            commits: Commits::new(),
+            commits_job: None,
+            commits_due: true,
             pending: None,
             chord: keys::Chord::default(),
             discarded: Vec::new(),
@@ -805,6 +845,9 @@ impl App {
         self.elsewhere = f.elsewhere;
         self.unfound = f.unfound;
         self.watched = f.watched;
+        // 표는 다음 걸음에 스레드가 짓는다(`follow_commits`). 도는 것이 있으면 그 답은 받되
+        // 이 읽기보다 낡았을 수 있어 끝나는 대로 하나를 더 띄운다.
+        self.commits_due = true;
         self.warnings = f.warnings;
         self.take(f.issues, f.index, f.states, f.now);
     }
@@ -898,12 +941,20 @@ impl App {
         self.repair_path();
         // 거름망은 이슈 첨자에 매인 것이라 반드시 다시 센다.
         self.reapply();
+        self.regrip(held);
+    }
+
+    /// 줄이 바뀐 뒤(다시 읽기·보기 토글) 보기를 다시 세고 **붙들어 둔 정체의 줄에 커서를 다시 세운다.**
+    /// 그 줄이 사라졌으면(지워졌거나 가려졌으면) 전처럼 그 번호를 목록 안으로 자른 자리에 선다.
+    /// `take`·`look` 이 같은 규칙을 저마다 다른 모양으로 적고 있었다(moai-y61p 단계 리뷰).
+    ///
+    /// **굴린 자리는 같은 줄일 때만 둔다.** 다른 이슈로 옮겨 섰는데 굴린 수가 남으면
+    /// 그 이슈를 첫 줄부터 못 본다 — 커서를 옮길 때 0 으로 되돌리는 것(`move_to`)과
+    /// 같은 까닭이다. 같은 줄이면 본문이 바뀌었어도 두고, 넘치면 그림이 자른다.
+    fn regrip(&mut self, held: Option<Anchor>) {
         self.see();
         let rows = self.rows();
         let found = held.and_then(|a| self.row_of(&rows, &a));
-        // **굴린 자리는 같은 줄일 때만 둔다.** 다른 이슈로 옮겨 섰는데 굴린 수가 남으면
-        // 그 이슈를 첫 줄부터 못 본다 — 커서를 옮길 때 0 으로 되돌리는 것(`move_to`)과
-        // 같은 까닭이다. 같은 줄이면 본문이 바뀌었어도 두고, 넘치면 그림이 자른다.
         if found.is_none() {
             self.detail.rewind();
         }
@@ -1019,6 +1070,7 @@ impl App {
         self.reap();
         // 층은 제 표식을 따로 본다 — 층에 선 동안에는 아래(한 프로젝트)가 비어 할 일이 없다.
         self.follow_layer();
+        self.follow_commits();
         if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -1055,6 +1107,52 @@ impl App {
             });
             self.pending = Some((rx, handle));
         }
+    }
+
+    /// 새 커밋 표가 필요하면(`commits_due`) 짓는 스레드를 띄우고, 다 지었으면 받는다(moai-a4i0).
+    ///
+    /// **다시 읽기 손잡이(`pending`)와 따로 든다.** 그쪽에 태우면 연 직후 파일이 안 바뀌었는데도
+    /// 저장소를 통째로 다시 세고, `loading` 이 참이 되어 안 바뀐 화면을 읽는 중이라 말한다.
+    /// 다시 읽기([`prepare`]) 안에서 짓지도 않는다 — 그 읽기는 쓰기마다 루프에서 돈다.
+    /// 스레드가 죽으면 다시 읽기와 같게 패닉을 되던진다 — 터미널은 이미 걷혔다.
+    ///
+    /// 도는 동안 다시 읽기가 또 들어와도 버리고 새로 띄우지 않는다 — 버린 손잡이가 쌓이고 git 이
+    /// 겹쳐 돈다. 받은 답은 든 표보다는 새것이라 들이고, 필요하면 곧바로 하나를 더 띄운다.
+    fn follow_commits(&mut self) {
+        if let Some((rx, _)) = &self.commits_job {
+            match rx.try_recv() {
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Ok(table) => {
+                    self.commits_job = None;
+                    self.commits = table;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    if let Some((_, handle)) = self.commits_job.take()
+                        && let Err(payload) = handle.join()
+                    {
+                        std::panic::resume_unwind(payload);
+                    }
+                }
+            }
+        }
+        if !self.commits_due {
+            return;
+        }
+        let Some(repo) = &self.repo else { return };
+        self.commits_due = false;
+        let roots = commit_roots(repo, &self.origin);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let _ = tx.send(commit_tables(&roots));
+        });
+        self.commits_job = Some((rx, handle));
+    }
+
+    /// 커밋 표를 짓는 스레드가 돌거나 띄울 참인가. 루프가 이 동안은 빠른 걸음으로 깨어 받는다 —
+    /// 느린 걸음이면 연 뒤·다시 읽은 뒤 한동안 커밋 칸이 빈다(낡는다). [`App::loading`] 과 가르는
+    /// 까닭은 [`App::follow_commits`].
+    pub fn gathering_commits(&self) -> bool {
+        self.commits_job.is_some() || (self.commits_due && self.repo.is_some())
     }
 
     /// 들고 있는 `filter_text` 를 지금 `issues` 에 다시 건다. 못 걸면 푼다.
@@ -1191,22 +1289,21 @@ impl App {
             .collect();
     }
 
-    /// 사용자 설정에 적어 둔 보기를 입힌다(moai-2bzp) — 칸 숨김·미룸·정렬·열. 없는 키는 처음값
-    /// 그대로다. **읽기는 관대하다**: 모르는 낱말·틀린 키는 한 줄 알림으로 대고 나머지를 입힌다 —
-    /// 틀린 키 하나로 탐색기가 안 뜨면 설정이 도구를 막는다.
-    ///
-    /// 입힌 뒤의 보기를 `App::saved` 로 든다 — 모르는 낱말·틀린 값은 화면의 보기에 없으니, 이 세션이
-    /// 그 키를 안 바꾸는 한 적을 때 파일의 것이 그대로 남는다(`Doc::merge_look`).
-    ///
-    /// **시험만 부른다**(moai-u8cs) — 띄우는 길은 층과 한 번 읽은 설정을 나눠 [`App::adopt_look`] 을 부른다.
+    /// 설정 자리(`App::user_config`)에서 보기를 읽어 [`App::adopt_look`] 에 넘긴다. **시험만 부른다**(moai-u8cs) —
+    /// 띄우는 길(`cmd::tui`)은 층과 한 번 읽은 설정을 나눠 `adopt_look` 을 바로 부른다.
     #[cfg(test)]
     pub fn load_look(&mut self) {
         let (look, problems) = crate::user_config::read_look(self.user_config.as_deref());
         self.adopt_look(&look, problems);
     }
 
-    /// 이미 읽은 보기를 입힌다 — [`App::load_look`] 와 같되 파일을 안 읽는다. 띄우는 길(`cmd::tui`)이
-    /// 층과 한 번 읽은 설정을 나눠 쓸 때 부른다(moai-u8cs). `problems` 는 읽다 만난 까닭이다.
+    /// 사용자 설정에 적어 둔 보기를 입힌다(moai-2bzp) — 칸 숨김·미룸·정렬·열. 없는 키는 처음값
+    /// 그대로다. **읽기는 관대하다**: 모르는 낱말·틀린 키는 한 줄 알림으로 대고 나머지를 입힌다 —
+    /// 틀린 키 하나로 탐색기가 안 뜨면 설정이 도구를 막는다. `problems` 는 설정을 읽다 만난 까닭이다.
+    /// **파일은 안 읽는다**(moai-u8cs) — 띄우는 길(`cmd::tui`)이 층과 한 번 읽은 설정을 나눠 준다.
+    ///
+    /// 입힌 뒤의 보기를 `App::saved` 로 든다 — 모르는 낱말·틀린 값은 화면의 보기에 없으니, 이 세션이
+    /// 그 키를 안 바꾸는 한 적을 때 파일의 것이 그대로 남는다(`Doc::merge_look`).
     pub fn adopt_look(&mut self, look: &crate::user_config::Look, mut problems: Vec<String>) {
         self.apply_look(look, &mut problems);
         self.saved = self.look_now();
@@ -1316,15 +1413,7 @@ impl App {
             B::Sort(o) => self.order = self.order.press(o),
             _ => return,
         }
-        self.see();
-        let rows = self.rows();
-        match held.and_then(|a| self.row_of(&rows, &a)) {
-            Some(at) => self.cursor = at,
-            None => {
-                self.cursor = self.cursor.min(rows.len().saturating_sub(1));
-                self.detail.rewind();
-            }
-        }
+        self.regrip(held);
         self.save_look();
     }
 
@@ -1797,6 +1886,13 @@ impl App {
         out
     }
 
+    /// 그 줄에 닿은 커밋. **줄이 온 워크트리의 가지에서 읽는다** — `show` 와 같은 까닭이다:
+    /// `--worktree` 로 옆에서 집은 일을 고친 커밋은 저쪽 가지에만 있다. 표가 없으면 빈 것이다.
+    pub fn commits_of(&self, id: &str) -> &[crate::git::Commit] {
+        let root = self.origin.root(id).or(self.repo.as_ref().map(|r| r.root.as_path()));
+        root.and_then(|r| self.commits.get(r)).and_then(|t| t.get(id)).map_or(&[], Vec::as_slice)
+    }
+
     /// id 를 제목으로 푼다. 없으면 **끊겼다고 적는다** — id 만 내면 그것이
     /// 그저 제목 없는 줄인지 없는 것을 가리키는 참조인지 알 길이 없다.
     /// 훑지 않는다. 이 함수는 막는 것마다·소속마다·프레임마다 불린다.
@@ -2058,6 +2154,10 @@ mod tests {
         assert_eq!(a.cursor, 1, "커서가 보던 줄(argos-0001)을 놓쳤다");
         a.hit("SPC o c");
         assert_eq!(row_ids(&a), ["argos-0003", "argos-0001", "argos-0002"], "다시 눌렀는데 안 뒤집혔다");
+        // 메뉴의 표시도 같은 한 벌(`Ctx::sorting`)을 읽는다 — 고른 차례에만 붙고 방향은 낱말로 댄다(moai-y61p 단계 리뷰).
+        let ctx = a.key_ctx(&a.rows());
+        assert_eq!(keys::Browse::Sort(keys::Order::Created).state(&ctx), Some("[● 거꾸로]"), "메뉴가 고른 차례·방향을 모른다");
+        assert_eq!(keys::Browse::Sort(keys::Order::Priority).state(&ctx), None, "고르지 않은 차례에 표시가 붙었다");
         a.hit("SPC o t");
         assert_eq!(a.order, keys::Sorting { by: keys::Order::Title, reversed: false }, "다른 키가 거꾸로를 물려받았다");
         a.hit("SPC o p");
@@ -3106,6 +3206,74 @@ mod tests {
         assert_eq!(a.issues.len(), 2, "바뀐 것을 저절로 안 읽었다");
         assert_eq!(a.path, [Seg::Epic("argos-0001".into())], "읽고 나서 자리를 잃었다");
         assert!(a.trouble.is_none());
+    }
+
+    /// **연 뒤 커밋 표를 스레드에서 짓고, 커밋이 새로 서면 다시 읽은 뒤 새 표를 짓는다**
+    /// (moai-a4i0). 연 순간에는 표가 없다 — 여는 읽기가 git 을 기다리지 않는다. 표를 짓는 것은
+    /// 파일을 다시 읽는 일이 아니라 `loading` 이 아니다. 루프에서 도는 다시 읽기(쓰기·SPC r)도
+    /// 표를 짓지 않는다 — 그 자리에서 이력을 걸으면 쓸 때마다 화면이 멈춘다.
+    #[test]
+    fn it_gathers_commits_after_opening_and_again_when_head_moves() {
+        let scratch = Scratch::new("commits");
+        let dir = scratch.0.clone();
+        let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
+        std::fs::write(dir.join(".moai/issues.jsonl"), line(&make("argos-0001", Kind::Epic))).unwrap();
+        let git = |msg: &str| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+                .args(["commit", "-q", "--allow-empty", "-m", msg])
+                .current_dir(&dir)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        };
+        let init = std::process::Command::new("git").args(["init", "-q"]).current_dir(&dir).env_remove("GIT_DIR").env_remove("GIT_WORK_TREE").output().unwrap();
+        assert!(init.status.success());
+        git("feat: 처음 (argos-0001)");
+
+        let repo = Repo { root: dir.clone(), config: cfg() };
+        // 탐색기가 여는 그대로 — 겹쳐 본 채로 연다(`cmd::tui::run`).
+        let g = crate::worktree::gather(&repo, true).unwrap();
+        let (stamp, index) = (stamp_of(&repo), Index::of(&g.load.issues));
+        let mut a = App::open(repo, g.load, index, Path::new(), stamp).overlaid(g.origin, g.trouble, g.watched);
+        assert!(a.commits_of("argos-0001").is_empty(), "여는 읽기가 git 을 기다렸다");
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        a.follow();
+        assert!(!a.loading(), "표를 짓느라 파일을 다시 읽으러 갔다");
+        while a.gathering_commits() {
+            assert!(std::time::Instant::now() < until, "표를 다 못 지었다");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            a.follow();
+        }
+        let subjects = |a: &App| a.commits_of("argos-0001").iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
+        assert_eq!(subjects(&a), ["feat: 처음 (argos-0001)"]);
+
+        // 다시 읽기가 끝난 뒤 표까지 받는다.
+        let gathered = |a: &mut App| {
+            settle(a);
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while a.loading() || a.gathering_commits() {
+                assert!(std::time::Instant::now() < until, "표를 다 못 지었다");
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                a.follow();
+            }
+        };
+        git("fix: 다음 (argos-0001)");
+        gathered(&mut a);
+        assert_eq!(subjects(&a), ["fix: 다음 (argos-0001)", "feat: 처음 (argos-0001)"], "커밋이 섰는데 표를 새로 안 가져왔다");
+
+        // 겹쳐 보기를 꺼도(`SPC t w`) HEAD 를 지켜본다.
+        a.worktree = false;
+        a.reload();
+        assert!(a.gathering_commits() && a.commits_job.is_none(), "루프에서 도는 다시 읽기가 표를 그 자리에서 지었다");
+        gathered(&mut a);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        git("fix: 끈 뒤 (argos-0001)");
+        gathered(&mut a);
+        assert_eq!(subjects(&a).first().map(String::as_str), Some("fix: 끈 뒤 (argos-0001)"), "겹쳐 보기를 끄자 HEAD 를 안 지켜본다");
     }
 
     /// **다시 읽어도 커서는 보던 줄에 선다.** 위에 줄이 생기거나 사라져도, 칸이
