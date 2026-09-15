@@ -3045,3 +3045,6 @@
 {"ts":"2026-09-15T10:51:14Z","id":"moai-i784.pzh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 —  걷어내기"}
 {"ts":"2026-09-15T10:51:21Z","id":"moai-i784.pzh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-15T10:54:13Z","id":"moai-d3sy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T10:58:09Z","id":"moai-ejgp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T10:58:21Z","id":"moai-humk.tgr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-humk (init 쓰기 실패·unreadable 계약)"}
+{"ts":"2026-09-15T10:58:29Z","id":"moai-humk.tgr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
