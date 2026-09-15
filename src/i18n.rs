@@ -155,8 +155,77 @@ mod tests {
         assert_eq!(say(Lang::Ko, "status.issues"), "이슈 {n}");
         // ja 에는 아직 이 키가 없다 — 영어가 받는다.
         assert_eq!(say(Lang::Ja, "status.epics"), say(Lang::En, "status.epics"));
-        assert_eq!(say(Lang::En, "nothing.here"), "nothing.here");
-        assert_eq!(say(Lang::Ko, "nothing.here"), "nothing.here");
+        assert_eq!(say(Lang::En, "nothing.here"), "nothing.here"); // i18n:없는-키
+        assert_eq!(say(Lang::Ko, "nothing.here"), "nothing.here"); // i18n:없는-키
+    }
+
+    /// **영어 표가 소스가 쓰는 키를 다 갖는다**(moai-f2a6) — 새 키는 영어부터다.
+    ///
+    /// 소스에서 `t("…")`·`say(…, "…")` 가 든 키를 읽어 영어 표와 견준다. 없는 키는 화면에
+    /// `status.issues` 같은 글자로 그대로 나므로, 이 시험이 그 자리를 **붙이기 전에** 잡는다.
+    /// 다른 언어는 **안 잰다**(사용자 결정) — 다섯을 함께 채우게 하면 글 한 줄 고칠 때마다
+    /// 다섯을 고쳐야 하고, 모르는 언어에 기계번역이 들어온다. 그쪽은 영어로 떨어진다.
+    #[test]
+    fn english_has_every_key_the_source_asks_for() {
+        let en = table(Lang::En);
+        let mut asked: Vec<(String, String)> = Vec::new();
+        let mut dirs = vec![std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().filter_map(Result::ok) {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|e| e != "rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (n, line) in text.lines().enumerate() {
+                    // 일부러 없는 키를 부르는 줄(떨어짐 시험)은 뺀다 — 표에 있으면 그 시험이 죽는다.
+                    if line.contains("i18n:없는-키") {
+                        continue;
+                    }
+                    for key in keys_in(line) {
+                        asked.push((key, format!("{}:{}", path.display(), n + 1)));
+                    }
+                }
+            }
+        }
+        assert!(asked.len() >= 2, "소스에서 키를 하나도 못 읽었다 — 읽는 자가 헛돈다");
+        let missing: Vec<&(String, String)> = asked.iter().filter(|(k, _)| !en.contains_key(k)).collect();
+        assert!(missing.is_empty(), "영어 표에 없는 키를 소스가 부른다 — {missing:#?}");
+    }
+
+    /// `t("키")`·`say(…, "키")` 의 키만 뽑는다. 이 시험 자신이 쓰는 글(`"nothing.here"` 같은)은
+    /// 부르는 모양이 아니라 안 걸린다.
+    fn keys_in(line: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for (head, skip) in [("t(\"", 0), ("say(", 1)] {
+            let mut rest = line;
+            let mut eaten = 0usize;
+            while let Some(at) = rest.find(head) {
+                // **이름 끝의 `t(` 는 이 부름이 아니다** — `parent("…")`·`insert("…")` 가 그렇게 걸렸다.
+                // 앞 글자가 이름의 일부면 건너뛴다. `i18n::t(` 의 `:` 는 이름 글자가 아니라 지나간다.
+                let before = line[..eaten + at].chars().next_back();
+                let joined = before.is_some_and(|c| c.is_alphanumeric() || c == '_');
+                eaten += at + head.len();
+                rest = &rest[at + head.len()..];
+                if joined {
+                    continue;
+                }
+                // `say(lang, "키")` 는 따옴표가 둘째 인자다 — 여는 따옴표까지 건너뛴다.
+                let quoted = if skip == 0 { Some(rest) } else { rest.split_once('"').map(|(_, r)| r) };
+                let Some(quoted) = quoted else { continue };
+                if let Some((key, _)) = quoted.split_once('"')
+                    && key.contains('.')
+                    && !key.contains(' ')
+                {
+                    out.push(key.to_string());
+                }
+            }
+        }
+        out
     }
 
     /// 실린 표가 다섯 다 읽힌다 — JSON 하나가 깨져 조용히 빈 표가 되는 것을 여기서 잡는다.
