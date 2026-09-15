@@ -2738,3 +2738,6 @@
 {"ts":"2026-09-15T07:52:12Z","id":"moai-9793","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 등급을 난이도로 고른다 — 기능은 low~high, 에픽 끝은 xhigh~max"}
 {"ts":"2026-09-15T07:52:12Z","id":"moai-gw09","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 리뷰 절과 감독 일꾼 절차의 리뷰 등급을 난이도에 따라 고르게 바꾼다"}
 {"ts":"2026-09-15T07:52:22Z","id":"moai-gw09","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T07:56:23Z","id":"moai-opjn.l0i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"시험·주석 결함 넷을 ff93960 으로 반영, markdown 인라인 코드 갈림은 idea moai-kvd9 로 넘김, every_help 훑기 중복은 의도라 넘김"}
+{"ts":"2026-09-15T07:56:24Z","id":"moai-1c6h.eo7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"결함 없음, 시험 주석 말투 하나 8f97c04 로 반영, 넘긴 것 없음"}
+{"ts":"2026-09-15T07:56:24Z","id":"moai-1c6h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"1104e47 로 main 병합"}
