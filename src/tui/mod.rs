@@ -373,8 +373,8 @@ pub struct App {
     /// 이슈 첨자 → 보기에 보이는가. `keep` 과 같은 까닭으로 **보기나 자료가 바뀔 때만** 센다
     /// ([`App::see`]) — 묶음의 칸과 물려받은 미룸을 줄마다 프레임마다 다시 풀지 않는다.
     shown: Vec<bool>,
-    /// 목록 차례와 거꾸로인가(moai-55cp). 기본은 우선순위 차례다.
-    pub order: (keys::Order, bool),
+    /// 목록 차례와 그 방향(moai-55cp). 기본은 우선순위 차례다.
+    pub order: keys::Sorting,
     /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)다.
     pub fields: view::Fields,
     /// 설정에 적혀 있다고 이 세션이 아는 보기 — 읽은 뒤와 적은 뒤의 [`App::look_now`](moai-2kyl 단계 리뷰).
@@ -1236,7 +1236,7 @@ impl App {
             None => true,
             Some(s) => match keys::Order::named(s) {
                 Some(o) => {
-                    self.order.0 = o;
+                    self.order.by = o;
                     true
                 }
                 None => {
@@ -1249,14 +1249,13 @@ impl App {
             },
         };
         if sort_known && let Some(r) = look.sort_reversed {
-            self.order.1 = r;
+            self.order.reversed = r;
         }
         if let Some(words) = &look.fields {
             let mut fields = view::Fields::none();
             for w in words {
                 match view::Field::named(w) {
-                    Some(f) if !fields.shows(f) => fields.toggle(f),
-                    Some(_) => {}
+                    Some(f) => fields.set(f, true),
                     None => problems.push(format!(
                         "`fields` 의 `{w}` 는 모르는 열이다 — {} 중에서",
                         view::Field::ALL.map(view::Field::name).join("·")
@@ -1272,8 +1271,8 @@ impl App {
         crate::user_config::Look {
             hidden: Some(self.view.hidden.clone()),
             hide_deferred: Some(self.view.hide_deferred),
-            sort: Some(self.order.0.name().to_string()),
-            sort_reversed: Some(self.order.1),
+            sort: Some(self.order.by.name().to_string()),
+            sort_reversed: Some(self.order.reversed),
             fields: Some(view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name().to_string()).collect()),
         }
     }
@@ -1297,9 +1296,12 @@ impl App {
 
     /// 보기 토글 하나(`SPC s`). **커서는 줄의 정체로 붙든다** — 숨긴 줄에 서 있었으면 그 자리
     /// 가까이 남는다. 첨자로 두면 위에서 줄이 빠질 때마다 커서가 딴 이슈로 미끄러진다.
-    fn look(&mut self, act: keys::Browse) {
+    ///
+    /// `rows` 는 키 처리가 **이미 센 목록**이다(moai-zrzo) — 여기서 `current()` 로 다시 세면 토글 한 번에
+    /// 목록을 세 번 센다(키 처리·붙들 줄·바뀐 뒤).
+    fn look(&mut self, act: keys::Browse, rows: &[Row]) {
         use keys::Browse as B;
-        let held = self.current().map(|r| self.anchor_of(&r));
+        let held = self.current_of(rows).map(|r| self.anchor_of(&r));
         match act {
             B::Column(n) => {
                 if let Some(s) = self.cfg.statuses.get(usize::from(n)).cloned() {
@@ -1311,8 +1313,7 @@ impl App {
             // 이 프로젝트의 칸만 걷는다 — 다른 프로젝트에만 있는 칸 이름은 여기서 아무것도 안 숨겼으니
             // 들고 있는다(`View::show_all`).
             B::ShowAll => self.view.show_all(&self.cfg.statuses),
-            // 고른 것을 다시 누르면 거꾸로, 다른 것을 누르면 그것의 제 방향으로.
-            B::Sort(o) => self.order = (o, self.order.0 == o && !self.order.1),
+            B::Sort(o) => self.order = self.order.press(o),
             _ => return,
         }
         self.see();
@@ -1343,8 +1344,8 @@ impl App {
                 .entries_sorted(&self.issues, &self.path, &|at| self.visible(at), &|a, b| {
                     // 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다. 담당은 화면에 선 이름으로.
                     crate::query::order_by(
-                        Self::sort_key(self.order.0),
-                        self.order.1,
+                        Self::sort_key(self.order.by),
+                        self.order.reversed,
                         (&self.issues[a], self.column(a)),
                         (&self.issues[b], self.column(b)),
                         &self.cfg.statuses,
@@ -1452,7 +1453,7 @@ impl App {
                     });
                 }
             }
-            B::Column(_) | B::Done | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act),
+            B::Column(_) | B::Done | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act, &rows),
             // 열은 줄을 더하거나 빼지 않는다 — 커서를 붙들 까닭이 없다.
             B::Cell(f) => {
                 self.fields.toggle(f);
@@ -1493,8 +1494,7 @@ impl App {
                 .fold(0, |bits, (n, _)| bits | 1 << n),
             done_hidden: self.view.hides(crate::config::DONE),
             deferred_hidden: self.view.hide_deferred,
-            order: self.order.0,
-            order_reversed: self.order.1,
+            sorting: self.order,
             fields: self.fields,
             next_pane: draw::pane_name(self.focus.next()),
             prev_pane: draw::pane_name(self.focus.prev()),
@@ -2059,7 +2059,7 @@ mod tests {
         a.hit("SPC o c");
         assert_eq!(row_ids(&a), ["argos-0003", "argos-0001", "argos-0002"], "다시 눌렀는데 안 뒤집혔다");
         a.hit("SPC o t");
-        assert_eq!(a.order, (keys::Order::Title, false), "다른 키가 거꾸로를 물려받았다");
+        assert_eq!(a.order, keys::Sorting { by: keys::Order::Title, reversed: false }, "다른 키가 거꾸로를 물려받았다");
         a.hit("SPC o p");
         assert_eq!(a.order, Default::default());
     }
@@ -3622,7 +3622,7 @@ mod tests {
         let c = open();
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(c.fields.shows(view::Field::Assignee), "옆 탐색기가 켠 열을 지웠다\n{text}");
-        assert!(!c.view.hides(crate::config::DONE) && c.order == (keys::Order::Updated, false), "{text}");
+        assert!(!c.view.hides(crate::config::DONE) && c.order == keys::Sorting { by: keys::Order::Updated, reversed: false }, "{text}");
     }
 
     /// **숨김은 이 프로젝트의 칸에만 건다**(moai-2kyl 단계 리뷰). 다른 프로젝트에서 숨긴 칸 이름이 이 프로젝트의
