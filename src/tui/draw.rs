@@ -505,7 +505,7 @@ fn banner(app: &App) -> Option<(String, bool)> {
 ///
 /// 파이프 오른쪽은 아직 빈 채로 둔다. 사람·판(moai-56jf)과 번호 붙은 프로젝트(moai-mr83)가
 /// 그 자리에 선다 — 줄과 칸을 먼저 세워 두면 그쪽은 글자만 채운다.
-fn header(f: &mut Frame, app: &App, at: Rect) {
+fn header(f: &mut Frame, app: &mut App, at: Rect) {
     let logo_w = LOGO.iter().map(|l| crate::text::width(l)).max().unwrap_or(0);
     // 로고와 파이프를 세우고도 오른쪽에 정보 한 줄이 설 만큼 남아야 로고를 그린다.
     let with_logo = (at.width as usize) >= logo_w + HEADER_GAP * 2 + 1 + HEADER_INFO_MIN;
@@ -536,10 +536,12 @@ fn header(f: &mut Frame, app: &App, at: Rect) {
 ///
 /// **누군지 모르면 그 자리를 비우고 넘어간다**(moai-56jf). 여는 화면은 읽기고, 읽기는 사람을
 /// 묻지 않는다 — 여기서 `Mode::Ask` 를 세우면 설정 없는 기계에서 탐색기가 묻는 칸으로 열린다.
-fn told_of(app: &App) -> Vec<(&'static str, String)> {
-    let user = (app.identify)(app.user.as_deref())
-        .map(|a| crate::model::label(&a.name, Some(&a.email), app.cfg.naming))
-        .unwrap_or_else(|_| "—".into());
+///
+/// **사람은 `App` 이 들고 있는 것을 받아 쓴다**(`App::told_user`). 여기서 `model::actor` 를
+/// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
+/// 깜빡임 한 번마다 도는 자리다.
+fn told_of(app: &mut App) -> Vec<(&'static str, String)> {
+    let user = app.told_user().to_string();
     // 서버의 최신판은 아직 없다. 빈 자리를 두면 "고장" 으로 읽히므로 없다는 것을 낱말로 적는다.
     let version = format!("{} · 최신 확인 안 함", env!("CARGO_PKG_VERSION"));
     vec![("User", user), ("Version", version)]
@@ -3086,6 +3088,31 @@ pub(super) mod tests {
         assert!(head.contains("User") && head.contains('—'), "모르는 자리를 안 비웠다\n{head}");
         assert!(head.contains("Version"), "판까지 같이 사라졌다\n{head}");
         assert_eq!(a.mode, Mode::Browse, "헤더를 그리다 사람을 물었다");
+    }
+
+    /// **사람은 프레임마다 다시 풀지 않는다**(moai-56jf). `model::actor` 는 `git config` 를
+    /// 프로세스로 두 번 띄우는데, 그리는 자리는 키 하나·깜빡임 한 번마다 도는 자리다 —
+    /// 여기서 풀면 묵혀 둔 화면이 초당 여섯 개씩 프로세스를 띄운다. 묻는 칸에서 사람을
+    /// 받으면(`user` 가 바뀌면) 그때는 다시 푼다.
+    #[test]
+    fn the_header_resolves_the_user_once_not_every_frame() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        fn counted(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() })
+        }
+        let mut a = app();
+        a.identify = counted;
+        for _ in 0..5 {
+            let _ = render(&mut a, 100, 24);
+        }
+        assert_eq!(CALLS.load(Ordering::SeqCst), 1, "프레임마다 git 을 띄웠다");
+        // 묻는 칸에서 사람을 받으면 그 사람이 서야 한다 — 묵힌 것이 남으면 답한 보람이 없다.
+        a.user = Some("다른 이 (other@buzzni.com)".into());
+        let lines = render(&mut a, 100, 24);
+        assert_eq!(CALLS.load(Ordering::SeqCst), 2, "사람이 바뀌었는데 묵힌 것을 그대로 썼다");
+        assert!(lines[..6].join("\n").contains("레이븐"), "다시 푼 값이 안 섰다");
     }
 
     /// **로고가 안 들면 헤더는 로고만 뺀다**(moai-mzet) — 파이프 오른쪽은 좁아도 남는다.
