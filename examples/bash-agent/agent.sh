@@ -44,11 +44,13 @@ while :; do
   case $seen in *" $id "*) echo "$id 가 또 집을 일로 나왔다 — 사람이 볼 차례다" >&2; exit 1 ;; esac
   seen+="$id "
   title=$(jq -r '.ready[0].title' <<<"$queue")
-  # 집기는 락 안에서 한 번 판정된다. 옆 에이전트가 같은 줄을 먼저 집었으면 `moved` 가 비고
-  # `already` 에 선다 — 종료 코드는 0 이라, 안 보면 둘이 같은 일을 한다. 겨루는 것은 같은
-  # `.moai` 를 쓰는 에이전트끼리다 — 워크트리마다 따로 돌리면 서로의 집기를 못 본다.
-  claimed=$("$moai" mv "$id" in_progress --json | jq '.moved | length')
-  [ "$claimed" -gt 0 ] || continue
+  col=$(jq -r '.ready[0].status' <<<"$queue")
+  # **본 칸을 함께 준다.** `--from` 은 락 안에서 다시 보고 그 칸일 때만 옮긴다 — 옆
+  # 에이전트가 이 사이에 먼저 집었거나 닫기까지 했으면 여기서 갈리고, 진 쪽은 0 아닌
+  # 코드를 받는다. 지워진 줄도 같은 코드로 오고, 둘 다 뜻은 하나다: 내 일이 아니다.
+  # 겨루는 것은 같은 `.moai` 를 쓰는 에이전트끼리다 — 워크트리마다 따로 돌리면
+  # 서로의 집기를 못 본다.
+  "$moai" mv "$id" in_progress --from "$col" || continue
   printf '%s  집었다  %s\n' "$id" "$title"
   code=0
   "$work" "$id" "$title" >"$log" 2>&1 || code=$?
