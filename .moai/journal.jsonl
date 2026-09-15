@@ -3055,3 +3055,7 @@
 {"ts":"2026-09-15T10:59:10Z","id":"moai-nxt4.rgg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"6건 반영(3·4·5·6·7 과 리뷰가 넘긴 1·2 를 직접 판단해 반영, 6409814). 8 은 moai-boej, 9 는 사용자 결정"}
 {"ts":"2026-09-15T10:59:10Z","id":"moai-nxt4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"리뷰 moai-nxt4.rgg 닫음. 머지는 에픽 moai-6bc0 과 함께"}
 {"ts":"2026-09-15T10:59:10Z","id":"moai-ymnu.fo1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T11:06:29Z","id":"moai-0dwc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T11:06:29Z","id":"moai-ejgp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T11:06:29Z","id":"moai-humk.tgr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review xhigh --fix 8c3a553..8b2401e 이 worktree-moai-humk 안에서 돈다. 끝나면 원문·판단 두 노트로 적고 done -m"}
+{"ts":"2026-09-15T11:06:29Z","id":"moai-humk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 둘이 한 커밋 8b2401e 에 들었다(까닭은 그 메시지에 적었다 — 갈라 커밋하면 가운데 상태에서 시험이 붉다). main 받은 뒤 798+287 통과. 리뷰 moai-humk.tgr 을 닫고 main 에 --no-ff 머지 → 워크트리·가지 삭제 → 둘 done → moa-issue-14 에 보고"}
