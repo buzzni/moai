@@ -22,7 +22,7 @@ pub enum Error {
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 받는다.
 ///
 /// 물려받은 환경은 **그대로 넘긴다** — 사용자가 git 훅 안에서 moai 를 부르면 그 저장소를
-/// 읽는 것이 맞다. 시험 빌드만 [`LEAKS`] 를 걷는다(moai-g1a3).
+/// 읽는 것이 맞다. 시험 빌드만 `LEAKS` 를 걷는다(moai-g1a3).
 pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
     let mut cmd = std::process::Command::new("git");
     cmd.arg("-C").arg(root).args(args);
