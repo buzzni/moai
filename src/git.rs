@@ -7,6 +7,7 @@
 //! 그때그때 읽는다 — 이슈를 닫는 트래커 커밋은 제 해시를 미리 알 수 없고, 적어 둔
 //! 해시는 squash·rebase 한 번에 낡는다. id 로 다시 찾으면 둘 다 없다.
 
+use crate::git_leaks::LEAKS;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -21,14 +22,21 @@ pub enum Error {
 
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 바이트로 받는다.
 ///
-/// **저장소를 가리키는 환경 변수는 걷는다.** `-C root` 로 어느 저장소인지 이미 댔는데
-/// 물려받은 `GIT_DIR` 이 남으면 git 은 그쪽을 읽는다 — moai 는 훅 안에서도 돌고, 훅은
-/// 그 변수를 물려준다. 걷지 않으면 `--worktree` 로 뿌리마다 따로 읽는 커밋 표가
-/// 뿌리와 상관없이 **같은 저장소**를 재고, 옆 워크트리의 커밋이 이쪽 것으로 선다.
+/// **저장소를 가리키는 환경 변수는 릴리스에서도 걷는다**(moai-1w2l 단계 리뷰). `-C root` 로 어느
+/// 저장소인지 이미 댔는데 물려받은 `GIT_DIR` 이 남으면 git 은 그쪽을 읽는다 — moai 는 훅 안에서도
+/// 딸린 워크트리의 `rebase -x` 안에서도 돈다. 걷지 않으면 뿌리마다 따로 읽는 커밋 표가 뿌리와
+/// 상관없이 **같은 저장소**를 재고, 옆 워크트리의 커밋이 이쪽 것으로 서며 `show --worktree` 는
+/// 엉뚱한 가지를 읽는다(리뷰 moai-v9ai.q6f 가 짚은 자리이기도 하다). 시험 빌드는 [`command`] 가
+/// [`LEAKS`] 전부를 걷는다 — 여기서 걷는 셋은 릴리스에서도 걷어야 하는 것이다.
+///
+/// **출력은 UTF-8 로 달라고 한다.** `i18n.logOutputEncoding` 을 cp949 같은 것으로 둔 사람에게는
+/// 한글 제목 한 줄이 깨져 — ASCII 제목까지 같이 — 커밋 칸이 통째로 빌 수 있다. 그래도 깨진 채로
+/// 오는 이력은 [`read_log`] 가 관대하게 읽는다.
 fn output(root: &Path, args: &[&str]) -> Result<Vec<u8>, Error> {
-    let out = std::process::Command::new("git")
+    let out = command()
         .arg("-C")
         .arg(root)
+        .args(["-c", "i18n.logOutputEncoding=UTF-8"])
         .args(args)
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
@@ -53,6 +61,40 @@ pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
 /// 를 지나 그려지고, 해시는 [`records`] 가 모양으로 한 번 더 거른다.
 fn read_log(root: &Path, args: &[&str]) -> Result<String, Error> {
     Ok(String::from_utf8_lossy(&output(root, args)?).into_owned())
+}
+
+/// git 을 띄울 명령 — **시험의 git 은 모두 여기서 시작한다.** 시험 빌드만 [`LEAKS`] 를 걷는다.
+///
+/// [`run`] 과 임시 저장소를 만드는 도우미(`isolated`)가 따로 걷으면 걷는 목록이 갈라진다. 한때
+/// 도우미는 셋만 걷고 `run` 은 열을 걷어, pre-receive 훅 안에서는 도우미가 바깥 객체 저장소에 쓰고
+/// `run` 은 임시 저장소를 읽었다(moai-g1a3). `#[cfg(test)]` 가 아니라 `cfg!(test)` 인 것은 릴리스
+/// 빌드에서도 이 코드가 타입 검사를 받게 하려는 것이다.
+pub fn command() -> std::process::Command {
+    let mut cmd = std::process::Command::new("git");
+    if cfg!(test) {
+        for var in LEAKS {
+            cmd.env_remove(var);
+        }
+    }
+    cmd
+}
+
+/// 시험이 임시 저장소를 만들 때 쓰는 git — `dir` 에서 돌고, 커밋할 이름과 기본 가지를 준다.
+///
+/// **돌리는 사람의 git 설정도 안 읽는다**(tests/cli.rs 의 `isolated` 와 같은 자). 전역
+/// `commit.gpgsign` 이면 임시 저장소의 커밋이 서명을 못 해 멈추고, 전역 `core.hooksPath` 면 그 사람의
+/// 훅이 `-m a` 같은 커밋 제목을 막는다.
+///
+/// 걷기는 여기서 끝난다 — 시험이 제 값을 줄 것은 이 뒤에 `.env` 로 덮는다.
+#[cfg(test)]
+pub fn isolated(dir: &Path) -> std::process::Command {
+    let mut cmd = command();
+    cmd.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    cmd
 }
 
 /// 이슈 제목에 id 가 적힌 커밋 하나. `moai show --json` 의 `commits` 가 이 모양 그대로다.
@@ -219,17 +261,9 @@ pub(crate) mod tests {
     /// 이 그냥 실패해 이 시험이 보려던 것과 아무 상관 없이 빨개진다. `at` 을 주면 작성·커밋
     /// 시각을 고정한다 — 시각이 답을 가르는 시험은 기계 시계에 매이면 안 된다.
     pub(crate) fn run_git(dir: &Path, at: Option<&str>, args: &[&str]) {
-        let mut cmd = std::process::Command::new("git");
-        cmd.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_COMMON_DIR")
-            .env_remove("GIT_INDEX_FILE");
+        // 걷기와 격리는 `isolated` 하나가 안다(moai-g1a3) — 여기서 목록을 다시 적으면 둘이 갈라진다.
+        let mut cmd = isolated(dir);
+        cmd.args(args);
         if let Some(at) = at {
             cmd.env("GIT_AUTHOR_DATE", at).env("GIT_COMMITTER_DATE", at);
         }
@@ -290,6 +324,8 @@ pub(crate) mod tests {
         git(&["commit", "-q", "--allow-empty", "-m", "feat: 고친다 (moai-aaaa)"]);
         git(&["commit", "-q", "--allow-empty", "-m", "chore: 딴 일\n\nmoai-aaaa 를 곁에 봤다"]);
         git(&["commit", "-q", "--allow-empty", "-m", "fix: 리뷰 (moai-aaaa.b1c)"]);
+        // 로그를 딴 인코딩으로 달라는 사람의 설정이 있어도 제목을 읽는다 — `run` 이 UTF-8 로 달라고 한다.
+        git(&["config", "i18n.logOutputEncoding", "EUC-KR"]);
 
         let got = commits_of(&dir, &["moai-aaaa", "moai-aaaa.b1c"], None).unwrap();
         let subjects = |id: &str| got[id].iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
@@ -297,6 +333,69 @@ pub(crate) mod tests {
         assert_eq!(subjects("moai-aaaa.b1c"), ["fix: 리뷰 (moai-aaaa.b1c)"]);
         assert_eq!(got["moai-aaaa"][0].hash.len(), 40, "해시를 줄여 받았다");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **git 훅 안에서 돌아도 시험의 git 은 제 임시 저장소만 본다**(moai-g1a3).
+    ///
+    /// 물려받은 환경을 바꿔 보려면 시험을 한 겹 더 띄워야 한다 — 병렬로 도는 시험 안에서 환경을
+    /// 바꾸면 남의 시험까지 바뀐다(tests/cli.rs 의 `tests_do_not_read_the_runners_home` 과 같은 까닭).
+    /// 그래서 훅이 실제로 내보내는 것을 심은 채 이 바이너리를 다시 불러 git 을 부르는 시험들만 돌린다.
+    ///
+    /// **심는 값은 [`LEAKS`] 가 아니라 git 이 훅에 내보낸 모양이다** — 목록에서 한 이름이 빠지면 여기서
+    /// 드러나야 하므로, 목록을 그대로 심으면 아무것도 못 잰다. 걷기가 빠지면 도우미의 커밋이 격리
+    /// 경로(`GIT_QUARANTINE_PATH`)나 바깥 설정의 서명(`GIT_CONFIG_PARAMETERS`)에 막혀 안쪽이 깨진다.
+    /// 가리키는 곳은 이 시험의 임시 디렉터리라, 걷기가 빠져도 바깥 저장소는 안 건드린다.
+    #[test]
+    fn git_tests_see_their_own_repos_inside_a_hook() {
+        let dir = std::env::temp_dir().join(format!("moai-git-hook-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let outer = dir.join("outer.git");
+        let incoming = outer.join("objects/tmp_objdir-incoming");
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            // 이 시험 자신은 뺀다 — 안 그러면 제가 저를 다시 부른다.
+            .args(["git::tests::", "worktree::tests::", "--skip", "git_tests_see_their_own_repos_inside_a_hook"])
+            .env("GIT_DIR", &outer)
+            .env("GIT_INDEX_FILE", outer.join("index"))
+            .env("GIT_OBJECT_DIRECTORY", &incoming)
+            .env("GIT_ALTERNATE_OBJECT_DIRECTORIES", outer.join("objects"))
+            .env("GIT_QUARANTINE_PATH", &incoming)
+            .env("GIT_CONFIG_PARAMETERS", "'commit.gpgsign=true' 'gpg.program=false'")
+            .output()
+            .unwrap();
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(out.status.success(), "훅의 환경에서 git 을 부르는 시험이 깨졌다\n{said}");
+        // 안쪽이 아무것도 안 돌고 초록으로 끝나면 이 시험은 아무것도 안 본 것이다.
+        for ran in ["a_real_log_matches_subjects_not_bodies", "a_moved_head_in_any_worktree_changes_a_watched_stamp"] {
+            assert!(said.contains(&format!("{ran} ... ok")), "안쪽에서 {ran} 가 돌지 않았다\n{said}");
+        }
+    }
+
+    /// **git 은 [`command`] 에서만 띄운다.** 도우미가 따로 띄우면 시험 빌드의 걷기를 못 받아, 훅 안에서
+    /// 그 도우미만 바깥 저장소를 본다 — 0a7b828 이 `run` 만 고쳤을 때 임시 저장소를 만드는 도우미 셋이
+    /// 그렇게 남아 90a0be9 가 셋을 따로 고쳐야 했다. 새 도우미가 또 그러지 않게 소스를 읽어 이름을 댄다.
+    #[test]
+    fn git_is_spawned_only_through_command() {
+        let needle = concat!("Command::new(", "\"git\")");
+        let mut found = Vec::new();
+        let mut dirs = vec![std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().filter_map(Result::ok) {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    for (n, line) in text.lines().enumerate() {
+                        if line.contains(needle) {
+                            found.push(format!("{}:{}", path.display(), n + 1));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(found.len() == 1 && found[0].contains("git.rs:"), "git 을 `git::command` 밖에서 띄운다 — {found:#?}");
     }
 
     /// 이슈가 생기기 전의 커밋은 걷지 않는다 — 단, 시계가 늦은 기계의 커밋은 하루까지 받는다.

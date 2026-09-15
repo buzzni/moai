@@ -944,12 +944,20 @@ impl App {
         self.repair_path();
         // 거름망은 이슈 첨자에 매인 것이라 반드시 다시 센다.
         self.reapply();
+        self.regrip(held);
+    }
+
+    /// 줄이 바뀐 뒤(다시 읽기·보기 토글) 보기를 다시 세고 **붙들어 둔 정체의 줄에 커서를 다시 세운다.**
+    /// 그 줄이 사라졌으면(지워졌거나 가려졌으면) 전처럼 그 번호를 목록 안으로 자른 자리에 선다.
+    /// `take`·`look` 이 같은 규칙을 저마다 다른 모양으로 적고 있었다(moai-y61p 단계 리뷰).
+    ///
+    /// **굴린 자리는 같은 줄일 때만 둔다.** 다른 이슈로 옮겨 섰는데 굴린 수가 남으면
+    /// 그 이슈를 첫 줄부터 못 본다 — 커서를 옮길 때 0 으로 되돌리는 것(`move_to`)과
+    /// 같은 까닭이다. 같은 줄이면 본문이 바뀌었어도 두고, 넘치면 그림이 자른다.
+    fn regrip(&mut self, held: Option<Anchor>) {
         self.see();
         let rows = self.rows();
         let found = held.and_then(|a| self.row_of(&rows, &a));
-        // **굴린 자리는 같은 줄일 때만 둔다.** 다른 이슈로 옮겨 섰는데 굴린 수가 남으면
-        // 그 이슈를 첫 줄부터 못 본다 — 커서를 옮길 때 0 으로 되돌리는 것(`move_to`)과
-        // 같은 까닭이다. 같은 줄이면 본문이 바뀌었어도 두고, 넘치면 그림이 자른다.
         if found.is_none() {
             self.detail.rewind();
         }
@@ -1290,22 +1298,21 @@ impl App {
             .collect();
     }
 
-    /// 사용자 설정에 적어 둔 보기를 입힌다(moai-2bzp) — 칸 숨김·미룸·정렬·열. 없는 키는 처음값
-    /// 그대로다. **읽기는 관대하다**: 모르는 낱말·틀린 키는 한 줄 알림으로 대고 나머지를 입힌다 —
-    /// 틀린 키 하나로 탐색기가 안 뜨면 설정이 도구를 막는다.
-    ///
-    /// 입힌 뒤의 보기를 `App::saved` 로 든다 — 모르는 낱말·틀린 값은 화면의 보기에 없으니, 이 세션이
-    /// 그 키를 안 바꾸는 한 적을 때 파일의 것이 그대로 남는다(`Doc::merge_look`).
-    ///
-    /// **시험만 부른다**(moai-u8cs) — 띄우는 길은 층과 한 번 읽은 설정을 나눠 [`App::adopt_look`] 을 부른다.
+    /// 설정 자리(`App::user_config`)에서 보기를 읽어 [`App::adopt_look`] 에 넘긴다. **시험만 부른다**(moai-u8cs) —
+    /// 띄우는 길(`cmd::tui`)은 층과 한 번 읽은 설정을 나눠 `adopt_look` 을 바로 부른다.
     #[cfg(test)]
     pub fn load_look(&mut self) {
         let (look, problems) = crate::user_config::read_look(self.user_config.as_deref());
         self.adopt_look(&look, problems);
     }
 
-    /// 이미 읽은 보기를 입힌다 — [`App::load_look`] 와 같되 파일을 안 읽는다. 띄우는 길(`cmd::tui`)이
-    /// 층과 한 번 읽은 설정을 나눠 쓸 때 부른다(moai-u8cs). `problems` 는 읽다 만난 까닭이다.
+    /// 사용자 설정에 적어 둔 보기를 입힌다(moai-2bzp) — 칸 숨김·미룸·정렬·열. 없는 키는 처음값
+    /// 그대로다. **읽기는 관대하다**: 모르는 낱말·틀린 키는 한 줄 알림으로 대고 나머지를 입힌다 —
+    /// 틀린 키 하나로 탐색기가 안 뜨면 설정이 도구를 막는다. `problems` 는 설정을 읽다 만난 까닭이다.
+    /// **파일은 안 읽는다**(moai-u8cs) — 띄우는 길(`cmd::tui`)이 층과 한 번 읽은 설정을 나눠 준다.
+    ///
+    /// 입힌 뒤의 보기를 `App::saved` 로 든다 — 모르는 낱말·틀린 값은 화면의 보기에 없으니, 이 세션이
+    /// 그 키를 안 바꾸는 한 적을 때 파일의 것이 그대로 남는다(`Doc::merge_look`).
     pub fn adopt_look(&mut self, look: &crate::user_config::Look, mut problems: Vec<String>) {
         self.apply_look(look, &mut problems);
         self.saved = self.look_now();
@@ -1415,15 +1422,7 @@ impl App {
             B::Sort(o) => self.order = self.order.press(o),
             _ => return,
         }
-        self.see();
-        let rows = self.rows();
-        match held.and_then(|a| self.row_of(&rows, &a)) {
-            Some(at) => self.cursor = at,
-            None => {
-                self.cursor = self.cursor.min(rows.len().saturating_sub(1));
-                self.detail.rewind();
-            }
-        }
+        self.regrip(held);
         self.save_look();
     }
 
@@ -2164,6 +2163,10 @@ mod tests {
         assert_eq!(a.cursor, 1, "커서가 보던 줄(argos-0001)을 놓쳤다");
         a.hit("SPC o c");
         assert_eq!(row_ids(&a), ["argos-0003", "argos-0001", "argos-0002"], "다시 눌렀는데 안 뒤집혔다");
+        // 메뉴의 표시도 같은 한 벌(`Ctx::sorting`)을 읽는다 — 고른 차례에만 붙고 방향은 낱말로 댄다(moai-y61p 단계 리뷰).
+        let ctx = a.key_ctx(&a.rows());
+        assert_eq!(keys::Browse::Sort(keys::Order::Created).state(&ctx), Some("[● 거꾸로]"), "메뉴가 고른 차례·방향을 모른다");
+        assert_eq!(keys::Browse::Sort(keys::Order::Priority).state(&ctx), None, "고르지 않은 차례에 표시가 붙었다");
         a.hit("SPC o t");
         assert_eq!(a.order, keys::Sorting { by: keys::Order::Title, reversed: false }, "다른 키가 거꾸로를 물려받았다");
         a.hit("SPC o p");

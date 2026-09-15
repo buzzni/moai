@@ -192,11 +192,14 @@ impl Layer {
     /// 방향으로만 선다. 등록돼 있으면 그 줄에 표시만 붙는다. 이름은 띄운 자리까지 넣고
     /// 가른다 — 같은 화면에 같은 이름이 둘 서면 안 된다.
     pub fn read(config: Option<&Path>, launch: Option<&Path>) -> Layer {
-        Layer::of(user_config::read(config), config, launch)
+        Layer::of(&user_config::read(config), launch)
     }
 
     /// 이미 읽은 설정으로 층을 세운다(moai-u8cs) — 띄울 때 보기와 같은 한 번의 읽기를 나눠 쓴다.
-    pub fn of(reg: user_config::Registry, config: Option<&Path>, launch: Option<&Path>) -> Layer {
+    ///
+    /// **설정 자리는 읽은 것(`Registry::path`)에서 든다**(moai-y61p 단계 리뷰). 자리를 따로 받으면 줄은 한 파일에서
+    /// 세우고 다시 읽기(SPC r)·등록·해제는 다른 파일에 하는 층이 설 수 있다.
+    pub fn of(reg: &user_config::Registry, launch: Option<&Path>) -> Layer {
         let found = launch.and_then(|l| reg.projects.iter().position(|p| same_dir(&p.path, l)));
         let mut entries = reg.projects.clone();
         let extra = match (launch, found) {
@@ -225,7 +228,7 @@ impl Layer {
             Some(p) => At::Project(p.path.clone()),
             None => At::Layer,
         };
-        Layer { at, places, problems: reg.problems, config: config.map(Path::to_path_buf), launch: launch.map(Path::to_path_buf), pending: None }
+        Layer { at, places, problems: reg.problems.clone(), config: reg.path.clone(), launch: launch.map(Path::to_path_buf), pending: None }
     }
 
     /// 등록한 프로젝트가 하나라도 있는가. **없으면 층을 세우지 않는다** — 띄운 자리 하나뿐인
