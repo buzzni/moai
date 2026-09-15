@@ -2674,3 +2674,11 @@
 {"ts":"2026-09-15T06:49:41Z","id":"moai-mstm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: worktree-moai-epb0 에 커밋됨. 에픽 리뷰 moai-epb0.27f(max --fix) 결과를 반영하고 main 에 머지한 뒤 done"}
 {"ts":"2026-09-15T06:49:41Z","id":"moai-mj45","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: worktree-moai-epb0 에 커밋됨. 에픽 리뷰 moai-epb0.27f(max --fix) 결과를 반영하고 main 에 머지한 뒤 done"}
 {"ts":"2026-09-15T06:49:41Z","id":"moai-epb0.27f","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 백그라운드 /code-review max --fix e873a26..d0d50d5 결과를 원문·판단 두 노트로 적고 done -m 으로 닫는다"}
+{"ts":"2026-09-15T06:52:33Z","id":"moai-nqdc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에이전트 루프 예제 — ready --json 으로 사람 없이 도는 bash 20줄"}
+{"ts":"2026-09-15T06:52:33Z","id":"moai-0j1y","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"examples/bash-agent/agent.sh — ready --json 첫 줄을 집어 일하고 note·done, 빌 때까지. cli.rs 가 임시 저장소에서 돌려 계약 시험을 겸한다"}
+{"ts":"2026-09-15T06:52:33Z","id":"moai-nqdc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ubtx 에서 펼쳤다 — `examples/` 에 bash 20줄 에이전트 루프 예제 — ready → 집기 → 일 → done 을 --json 으로"}
+{"ts":"2026-09-15T06:52:33Z","id":"moai-ubtx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-nqdc 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-15T06:52:43Z","id":"moai-nqdc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(2026-09-15, 사람): bash + jq 하나만. tests/cli.rs 가 임시 저장소에서 예제를 실제로 돌려 이슈가 done·노트로 끝나는지 본다 — bash·jq 가 없으면 건너뛰지 않고 실패한다. 일 명령은 환경변수로 바꿔 끼운다. 문서 링크는 지금 안 둔다(epb0 이 guide·AGENTS 를 고치는 중) — idea 로 담는다. python·멀티 에이전트 판도 idea."}
+{"ts":"2026-09-15T06:52:43Z","id":"moai-2eqy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"examples/bash-agent 로 가는 한 줄 링크 — guide 참조 또는 AGENTS 블록 (epb0 머지 뒤)"}
+{"ts":"2026-09-15T06:52:43Z","id":"moai-b73t","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"python·멀티 에이전트(워크트리 + ready --worktree) 에이전트 루프 예제 — bash 판(moai-nqdc) 다음"}
+{"ts":"2026-09-15T06:52:43Z","id":"moai-0j1y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
