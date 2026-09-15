@@ -373,8 +373,8 @@ pub struct App {
     /// 이슈 첨자 → 보기에 보이는가. `keep` 과 같은 까닭으로 **보기나 자료가 바뀔 때만** 센다
     /// ([`App::see`]) — 묶음의 칸과 물려받은 미룸을 줄마다 프레임마다 다시 풀지 않는다.
     shown: Vec<bool>,
-    /// 목록 차례와 거꾸로인가(moai-55cp). 기본은 우선순위 차례다.
-    pub order: (keys::Order, bool),
+    /// 목록 차례와 그 방향(moai-55cp). 기본은 우선순위 차례다.
+    pub order: keys::Sorting,
     /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)다.
     pub fields: view::Fields,
     /// 설정에 적혀 있다고 이 세션이 아는 보기 — 읽은 뒤와 적은 뒤의 [`App::look_now`](moai-2kyl 단계 리뷰).
@@ -900,7 +900,7 @@ impl App {
         self.reapply();
         self.see();
         let rows = self.rows();
-        let found = held.and_then(|a| rows.iter().position(|r| self.anchor_of(r) == a));
+        let found = held.and_then(|a| self.row_of(&rows, &a));
         // **굴린 자리는 같은 줄일 때만 둔다.** 다른 이슈로 옮겨 섰는데 굴린 수가 남으면
         // 그 이슈를 첫 줄부터 못 본다 — 커서를 옮길 때 0 으로 되돌리는 것(`move_to`)과
         // 같은 까닭이다. 같은 줄이면 본문이 바뀌었어도 두고, 넘치면 그림이 자른다.
@@ -924,7 +924,7 @@ impl App {
         let was = std::mem::replace(&mut self.path, home);
         let want = Anchor::Issue(id.to_string());
         let rows = self.rows();
-        let Some(row) = rows.iter().position(|r| self.anchor_of(r) == want) else {
+        let Some(row) = self.row_of(&rows, &want) else {
             self.path = was;
             return Landing::Hidden;
         };
@@ -1085,13 +1085,25 @@ impl App {
     /// 걸린 거름망에 **제 줄이 걸린** 이슈 수. 걸린 것을 품어 남은 디렉터리는 안 센다.
     /// 보기(`SPC s`)가 숨긴 줄도 안 센다 — 세어 놓고 목록에 없으면 셈이 거짓말이 된다.
     pub fn hit_count(&self) -> usize {
-        (0..self.keep.len()).filter(|&at| self.keep[at] && self.shown.get(at).copied().unwrap_or(true)).count()
+        (0..self.keep.len()).filter(|&at| self.visible(at)).count()
     }
 
     /// 거름망에 걸렸는데 **보기(`SPC s`)가 숨긴** 이슈 수(moai-2kyl 단계 리뷰). 검색 칸이 `N건` 곁에 댄다 —
     /// 끝난 일을 찾는데 `0건` 만 서면 없는 줄 알고, 까닭을 대는 경로 줄의 뱃지는 좁으면 빠진다.
     pub fn veiled_count(&self) -> usize {
-        (0..self.keep.len()).filter(|&at| self.keep[at] && !self.shown.get(at).copied().unwrap_or(true)).count()
+        (0..self.keep.len()).filter(|&at| self.keep[at] && !self.visible(at)).count()
+    }
+
+    /// 이 줄이 목록에 서는가 — 거름망에 걸리고(`keep`) 보기가 숨기지 않았다(`shown`). **판정은 여기
+    /// 하나다** — 목록·검색 셈·가린 셈이 저마다 적으면 한쪽만 고쳐져 셈이 목록과 어긋난다. `shown`
+    /// 이 빈 때(층에서 막 내려와 아직 안 센 때)는 보인다.
+    fn visible(&self, at: usize) -> bool {
+        self.keep[at] && self.shown.get(at).copied().unwrap_or(true)
+    }
+
+    /// 목록에서 그 정체의 줄 자리. 커서를 붙드는 곳(다시 읽기·보기 토글·쓰기·층)이 같은 자로 찾는다.
+    fn row_of(&self, rows: &[Row], want: &Anchor) -> Option<usize> {
+        rows.iter().position(|r| self.anchor_of(r) == *want)
     }
 
     /// 지금 디렉터리에 **보기만 가린 줄**이 있는가 — 거름망은 지나는데 보기가 숨긴 것(moai-2kyl 단계 리뷰).
@@ -1185,9 +1197,18 @@ impl App {
     ///
     /// 입힌 뒤의 보기를 `App::saved` 로 든다 — 모르는 낱말·틀린 값은 화면의 보기에 없으니, 이 세션이
     /// 그 키를 안 바꾸는 한 적을 때 파일의 것이 그대로 남는다(`Doc::merge_look`).
+    ///
+    /// **시험만 부른다**(moai-u8cs) — 띄우는 길은 층과 한 번 읽은 설정을 나눠 [`App::adopt_look`] 을 부른다.
+    #[cfg(test)]
     pub fn load_look(&mut self) {
-        let (look, mut problems) = crate::user_config::read_look(self.user_config.as_deref());
-        self.apply_look(&look, &mut problems);
+        let (look, problems) = crate::user_config::read_look(self.user_config.as_deref());
+        self.adopt_look(&look, problems);
+    }
+
+    /// 이미 읽은 보기를 입힌다 — [`App::load_look`] 와 같되 파일을 안 읽는다. 띄우는 길(`cmd::tui`)이
+    /// 층과 한 번 읽은 설정을 나눠 쓸 때 부른다(moai-u8cs). `problems` 는 읽다 만난 까닭이다.
+    pub fn adopt_look(&mut self, look: &crate::user_config::Look, mut problems: Vec<String>) {
+        self.apply_look(look, &mut problems);
         self.saved = self.look_now();
         if !problems.is_empty() {
             self.notice = Some(format!("보기 설정 — {}", problems.join(" · ")));
@@ -1215,7 +1236,7 @@ impl App {
             None => true,
             Some(s) => match keys::Order::named(s) {
                 Some(o) => {
-                    self.order.0 = o;
+                    self.order.by = o;
                     true
                 }
                 None => {
@@ -1228,14 +1249,13 @@ impl App {
             },
         };
         if sort_known && let Some(r) = look.sort_reversed {
-            self.order.1 = r;
+            self.order.reversed = r;
         }
         if let Some(words) = &look.fields {
             let mut fields = view::Fields::none();
             for w in words {
                 match view::Field::named(w) {
-                    Some(f) if !fields.shows(f) => fields.toggle(f),
-                    Some(_) => {}
+                    Some(f) => fields.set(f, true),
                     None => problems.push(format!(
                         "`fields` 의 `{w}` 는 모르는 열이다 — {} 중에서",
                         view::Field::ALL.map(view::Field::name).join("·")
@@ -1251,8 +1271,8 @@ impl App {
         crate::user_config::Look {
             hidden: Some(self.view.hidden.clone()),
             hide_deferred: Some(self.view.hide_deferred),
-            sort: Some(self.order.0.name().to_string()),
-            sort_reversed: Some(self.order.1),
+            sort: Some(self.order.by.name().to_string()),
+            sort_reversed: Some(self.order.reversed),
             fields: Some(view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name().to_string()).collect()),
         }
     }
@@ -1276,9 +1296,12 @@ impl App {
 
     /// 보기 토글 하나(`SPC s`). **커서는 줄의 정체로 붙든다** — 숨긴 줄에 서 있었으면 그 자리
     /// 가까이 남는다. 첨자로 두면 위에서 줄이 빠질 때마다 커서가 딴 이슈로 미끄러진다.
-    fn look(&mut self, act: keys::Browse) {
+    ///
+    /// `rows` 는 키 처리가 **이미 센 목록**이다(moai-zrzo) — 여기서 `current()` 로 다시 세면 토글 한 번에
+    /// 목록을 세 번 센다(키 처리·붙들 줄·바뀐 뒤).
+    fn look(&mut self, act: keys::Browse, rows: &[Row]) {
         use keys::Browse as B;
-        let held = self.current().map(|r| self.anchor_of(&r));
+        let held = self.current_of(rows).map(|r| self.anchor_of(&r));
         match act {
             B::Column(n) => {
                 if let Some(s) = self.cfg.statuses.get(usize::from(n)).cloned() {
@@ -1290,13 +1313,12 @@ impl App {
             // 이 프로젝트의 칸만 걷는다 — 다른 프로젝트에만 있는 칸 이름은 여기서 아무것도 안 숨겼으니
             // 들고 있는다(`View::show_all`).
             B::ShowAll => self.view.show_all(&self.cfg.statuses),
-            // 고른 것을 다시 누르면 거꾸로, 다른 것을 누르면 그것의 제 방향으로.
-            B::Sort(o) => self.order = (o, self.order.0 == o && !self.order.1),
+            B::Sort(o) => self.order = self.order.press(o),
             _ => return,
         }
         self.see();
         let rows = self.rows();
-        match held.and_then(|a| rows.iter().position(|r| self.anchor_of(r) == a)) {
+        match held.and_then(|a| self.row_of(&rows, &a)) {
             Some(at) => self.cursor = at,
             None => {
                 self.cursor = self.cursor.min(rows.len().saturating_sub(1));
@@ -1315,16 +1337,15 @@ impl App {
         if !self.path.is_empty() || self.layer.is_some() {
             rows.push(Row::Up);
         }
-        let (keep, shown) = (&self.keep, &self.shown);
         // **보기는 줄마다 건다** — 숨긴 칸의 묶음이라도 보이는 멤버가 있으면 디렉터리는 선다
         // (`Index::entries_where`). done 에픽 밑에 남은 todo 가 폴더째 사라지면 안 된다.
         rows.extend(
             self.index
-                .entries_sorted(&self.issues, &self.path, &|at| keep[at] && shown.get(at).copied().unwrap_or(true), &|a, b| {
+                .entries_sorted(&self.issues, &self.path, &|at| self.visible(at), &|a, b| {
                     // 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다. 담당은 화면에 선 이름으로.
                     crate::query::order_by(
-                        Self::sort_key(self.order.0),
-                        self.order.1,
+                        Self::sort_key(self.order.by),
+                        self.order.reversed,
                         (&self.issues[a], self.column(a)),
                         (&self.issues[b], self.column(b)),
                         &self.cfg.statuses,
@@ -1432,7 +1453,7 @@ impl App {
                     });
                 }
             }
-            B::Column(_) | B::Done | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act),
+            B::Column(_) | B::Done | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act, &rows),
             // 열은 줄을 더하거나 빼지 않는다 — 커서를 붙들 까닭이 없다.
             B::Cell(f) => {
                 self.fields.toggle(f);
@@ -1473,8 +1494,7 @@ impl App {
                 .fold(0, |bits, (n, _)| bits | 1 << n),
             done_hidden: self.view.hides(crate::config::DONE),
             deferred_hidden: self.view.hide_deferred,
-            order: self.order.0,
-            order_reversed: self.order.1,
+            sorting: self.order,
             fields: self.fields,
             next_pane: draw::pane_name(self.focus.next()),
             prev_pane: draw::pane_name(self.focus.prev()),
@@ -2039,7 +2059,7 @@ mod tests {
         a.hit("SPC o c");
         assert_eq!(row_ids(&a), ["argos-0003", "argos-0001", "argos-0002"], "다시 눌렀는데 안 뒤집혔다");
         a.hit("SPC o t");
-        assert_eq!(a.order, (keys::Order::Title, false), "다른 키가 거꾸로를 물려받았다");
+        assert_eq!(a.order, keys::Sorting { by: keys::Order::Title, reversed: false }, "다른 키가 거꾸로를 물려받았다");
         a.hit("SPC o p");
         assert_eq!(a.order, Default::default());
     }
@@ -3602,7 +3622,7 @@ mod tests {
         let c = open();
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(c.fields.shows(view::Field::Assignee), "옆 탐색기가 켠 열을 지웠다\n{text}");
-        assert!(!c.view.hides(crate::config::DONE) && c.order == (keys::Order::Updated, false), "{text}");
+        assert!(!c.view.hides(crate::config::DONE) && c.order == keys::Sorting { by: keys::Order::Updated, reversed: false }, "{text}");
     }
 
     /// **숨김은 이 프로젝트의 칸에만 건다**(moai-2kyl 단계 리뷰). 다른 프로젝트에서 숨긴 칸 이름이 이 프로젝트의

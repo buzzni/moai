@@ -28,8 +28,8 @@ pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
     String::from_utf8(out.stdout).map_err(Error::NotUtf8)
 }
 
-/// 이슈 제목에 id 가 적힌 커밋 하나.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 이슈 제목에 id 가 적힌 커밋 하나. `moai show --json` 의 `commits` 가 이 모양 그대로다.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Commit {
     pub hash: String,
     pub subject: String,

@@ -104,7 +104,8 @@ pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
         match lookup(BROWSE, &seq) {
             Lookup::Run(act) if act.enabled(c).is_ok() => {
                 let what = match act {
-                    Browse::Column(n) => columns.get(usize::from(n)).map_or("칸", String::as_str),
+                    // 설정에 이름이 없으면 표의 낱말로 — 낱말은 표 한 곳에만 둔다.
+                    Browse::Column(n) => columns.get(usize::from(n)).map_or(act.menu_word(c), String::as_str),
                     _ => act.menu_word(c),
                 };
                 out.push(Entry { key: next.name(), what: what.into(), state: act.state(c) });

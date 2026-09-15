@@ -539,22 +539,29 @@ pub fn order_by(
 ) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let rank = |column: &str| statuses.iter().position(|s| s == column).unwrap_or(statuses.len());
-    let shown = |i: &Issue, name: &str| crate::model::label(name, i.assignee_email.as_deref(), naming).to_lowercase();
+    let shown = |i: &Issue, name: &str| crate::model::label(name, i.assignee_email.as_deref(), naming);
     let natural = match key {
         SortKey::Priority => Ordering::Equal,
         SortKey::Created => b.0.created_at.cmp(&a.0.created_at),
         SortKey::Updated => b.0.updated_at.cmp(&a.0.updated_at),
         SortKey::Status => rank(a.1).cmp(&rank(b.1)),
         SortKey::Assignee => match (&a.0.assignee, &b.0.assignee) {
-            (Some(x), Some(y)) => shown(a.0, x).cmp(&shown(b.0, y)),
+            (Some(x), Some(y)) => folded(&shown(a.0, x), &shown(b.0, y)),
             (Some(_), None) => Ordering::Less,
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
         },
-        SortKey::Title => a.0.title.to_lowercase().cmp(&b.0.title.to_lowercase()),
+        SortKey::Title => folded(&a.0.title, &b.0.title),
     };
     let order = natural.then_with(|| display_order(a.0, b.0));
     if reversed { order.reverse() } else { order }
+}
+
+/// 대소문자를 접어 견준다 — **견줄 때마다 소문자 문자열을 짓지 않는다**(moai-zrzo). 정렬은 줄 수 × log
+/// 번 견주고 목록은 키마다 센다. 글자마다 접은 것을 차례로 견주므로 `to_lowercase()` 로 지어 견준 것과
+/// 차례가 같다 — 다른 것은 그리스어 낱말 끝 시그마(Σ→ς) 하나다: 여기서는 늘 σ 로 접는다.
+fn folded(a: &str, b: &str) -> std::cmp::Ordering {
+    a.chars().flat_map(char::to_lowercase).cmp(b.chars().flat_map(char::to_lowercase))
 }
 
 #[cfg(test)]
