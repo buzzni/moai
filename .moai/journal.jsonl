@@ -3101,3 +3101,14 @@
 {"ts":"2026-09-15T11:41:26Z","id":"moai-0h8m.6s7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 묶음의 자리 굴리기 (0h8m)"}
 {"ts":"2026-09-15T11:41:31Z","id":"moai-0h8m.6s7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-15T11:44:01Z","id":"moai-d3sy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 에 머지 (cec54e4) — model::actor 가 뿌리를 받아 git config 를 -C 로 읽는다. 리뷰 moai-d3sy.94g 반영(7237a78), 넘긴 것 없음"}
+{"ts":"2026-09-15T11:45:44Z","id":"moai-17ly","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"커밋 칸의 모서리 셋 — 읽기는 관대하게, 찾기는 같은 답으로"}
+{"ts":"2026-09-15T11:45:44Z","id":"moai-ynhj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"형식에 안 맞는 id 의 줄도 커밋 칸을 읽는다 — ids_in 이 is_valid 로 걸러 읽기가 좁아졌다"}
+{"ts":"2026-09-15T11:45:44Z","id":"moai-dig5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"squash 병합이 본문으로 옮긴 id 를 센다 — 무엇을 셀지 정하고 그대로 가르친다"}
+{"ts":"2026-09-15T11:45:44Z","id":"moai-hws2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show 와 탐색기가 커밋을 같은 답으로 낸다 — 날짜가 거꾸로 선 커밋 밑"}
+{"ts":"2026-09-15T11:45:44Z","id":"moai-17ly","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-94xm 에서 펼쳤다 — 커밋 칸이 형식에 안 맞는 id 의 줄에서 영영 빈다 — ids_in 이 is_valid 로 걸러 읽기가 좁아졌다"}
+{"ts":"2026-09-15T11:45:44Z","id":"moai-94xm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-17ly 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-15T11:45:58Z","id":"moai-dig5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-9np9 에서 왔다 — 그쪽 본문에 재현과 고를 길이 있다. 정할 것: 본문의 id 를 셀지, 센다면 Refs:/Closes: 트레일러 줄만 셀지. 본문 아무 데나 세면 트래커 커밋이 나열한 id 가 죄다 걸린다"}
+{"ts":"2026-09-15T11:45:58Z","id":"moai-hws2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-g8cd 에서 왔다 — 그쪽 본문과 노트 셋에 재현·측정·고를 길 셋이 있다. a4i0 가 git::table 을 내 길 (3) 의 재료는 이미 섰고, 남은 것은 show 가 그 표를 쓰는 값이 비용(2만 커밋 흉내 저장소 10ms → 164ms)에 맞는가다"}
+{"ts":"2026-09-15T11:45:58Z","id":"moai-9np9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"에픽 moai-17ly 의 moai-dig5 로 이어진다 — 본문의 재현과 고를 길은 이 줄에 남는다"}
+{"ts":"2026-09-15T11:45:58Z","id":"moai-g8cd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"에픽 moai-17ly 의 moai-hws2 로 이어진다 — 재현·측정과 고를 길 셋은 이 줄에 남는다"}
+{"ts":"2026-09-15T11:45:59Z","id":"moai-ynhj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
