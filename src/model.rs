@@ -540,9 +540,17 @@ fn malformed(what: &str, raw: &str) -> Fail {
 /// git 저장소 밖에서도 전역 설정을 읽는다 — moai 는 `.moai/` 만 찾지 git 을
 /// 요구하지 않으므로, `git init` 전에도 이 값이 있을 수 있다.
 ///
-/// git 은 [`crate::git::command`] 로 띄운다 — 시험 빌드가 물려받은 저장소 변수를
-/// 걷는 자리가 거기 하나여야, 새 시험이 이 길로 사람을 물어도 바깥 저장소의
-/// 이름을 읽지 않는다(moai-g1a3).
+/// git 은 [`crate::git::command`] 로 띄운다 — 물려받은 저장소 변수를 걷는 자리가
+/// 거기 하나여야, 새 시험이 이 길로 사람을 물어도 바깥 저장소의 이름을 읽지
+/// 않는다(moai-g1a3). 릴리스도 거기서 걷는다(moai-ztdf) — 훅 안에서 부른
+/// `moai -C <다른 프로젝트>` 가 훅 저장소의 이름을 그 프로젝트 저널에 영구히
+/// 적던 자리가 여기다.
+///
+/// **`-C` 를 안 댄다 — 어느 저장소의 사람인지는 프로세스 자리가 정한다.** `-C`
+/// 를 푸는 곳은 `main` 하나고(`set_current_dir`), 사람을 묻기 전에 옮긴다. 그
+/// 차례가 뒤집히거나 `.moai` 뿌리 **밑에** 딴 저장소가 있으면(서브모듈·vendor)
+/// 사람은 그쪽에서, 커밋 칸은 `-C <뿌리>` 로 이쪽에서 와 한 명령이 두 저장소를
+/// 본다 — 뿌리를 받아 `-C` 로 대는 것이 바른 자리다(moai-ztdf 리뷰).
 fn git_config(key: &str) -> Option<String> {
     let out = crate::git::command().args(["config", key]).output().ok()?;
     if !out.status.success() {

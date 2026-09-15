@@ -7,7 +7,7 @@
 //! 그때그때 읽는다 — 이슈를 닫는 트래커 커밋은 제 해시를 미리 알 수 없고, 적어 둔
 //! 해시는 squash·rebase 한 번에 낡는다. id 로 다시 찾으면 둘 다 없다.
 
-use crate::git_leaks::{REPO, TEST};
+use crate::git_leaks::swept;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -22,9 +22,8 @@ pub enum Error {
 
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 바이트로 받는다.
 ///
-/// 어느 저장소를 볼지는 **`-C root` 가 정한다** — 물려받은 `GIT_DIR` 무리는 [`command`] 가 걷었다
-/// (moai-ztdf). 걷지 않으면 그 무리가 `-C` 를 이겨, 뿌리마다 따로 읽는 커밋 표가 뿌리와 상관없이
-/// 같은 저장소를 재고 `show --worktree` 가 엉뚱한 가지를 읽는다.
+/// 어느 저장소를 볼지는 **`-C root` 가 정한다** — 물려받은 `GIT_DIR` 무리를 걷는 것은 [`command`] 고,
+/// 걷지 않으면 무엇이 깨지는지는 [`crate::git_leaks`] 에 있다(moai-ztdf). 여기서 다시 적지 않는다.
 ///
 /// **출력은 UTF-8 로 달라고 한다.** `i18n.logOutputEncoding` 을 cp949 같은 것으로 둔 사람에게는
 /// 한글 제목 한 줄이 깨져 — ASCII 제목까지 같이 — 커밋 칸이 통째로 빌 수 있다. 그래도 깨진 채로
@@ -57,14 +56,22 @@ fn read_log(root: &Path, args: &[&str]) -> Result<String, Error> {
     Ok(String::from_utf8_lossy(&output(root, args)?).into_owned())
 }
 
-/// git 을 띄울 명령 — **moai 의 git 은 모두 여기서 시작한다.**
+/// git 을 띄울 명령 — **moai 가 부르는 git 은 모두 여기서 시작한다.** moai 가 띄우는 **다른** 프로그램
+/// (`skill install` 의 `claude`, 편집기)은 환경을 그대로 물려받는다.
 ///
-/// **저장소를 가리키는 변수는 릴리스에서도 걷는다**([`REPO`], moai-ztdf). 그것들은 `git -C <경로>` 를
-/// 이기므로, 걷지 않으면 훅 안에서 부른 `moai -C <다른 프로젝트>` 가 훅 저장소를 읽는다 — 커밋 칸과
-/// 워크트리 겹쳐 보기가 남의 이력을 내고, `model::git_config` 는 **남의 이름을 그 프로젝트 저널에
-/// 영구히** 적는다. 어느 저장소를 볼지는 언제나 `-C` 나 `.moai` 찾기가 정한다는 것이 이 도구의 규칙이고,
-/// 이 걷기가 그 규칙을 실제로 세운다. 사람·시계·해시([`TEST`])는 시험 빌드에서만 걷는다 — 커밋 훅에서
-/// 사람이 일부러 준 값을 릴리스가 지울 까닭이 없다.
+/// **저장소를 가리키는 변수는 릴리스에서도 걷는다**([`REPO`](crate::git_leaks::REPO), moai-ztdf). 그것들은
+/// `git -C <경로>` 를 이기므로, 걷지 않으면 훅 안에서 부른 `moai -C <다른 프로젝트>` 가 훅 저장소를 읽는다
+/// — 커밋 칸과 워크트리 겹쳐 보기가 남의 이력을 내고, `model::git_config` 는 **남의 이름을 그 프로젝트
+/// 저널에 영구히** 적는다. 사람·시계·해시([`TEST`](crate::git_leaks::TEST))는 시험 빌드에서만 걷는다 —
+/// 커밋 훅에서 사람이 일부러 준 값을 릴리스가 지울 까닭이 없다.
+///
+/// **이 걷기가 세우는 것은 "어느 저장소" 까지다.** 사람은 아직 그만큼 안 선다 — `model::git_config` 는
+/// `-C` 를 안 대 프로세스 자리로 읽고, `TEST` 에 둔 `GIT_CONFIG_PARAMETERS` 는 릴리스에서 그 읽기를
+/// 이긴다. 둘 다 moai-ztdf 리뷰가 재서 [`TEST`](crate::git_leaks::TEST) 와 `model::git_config` 에 적어 뒀다.
+///
+/// **환경으로 준 대체 객체 저장소는 버린다**(`GIT_OBJECT_DIRECTORY`·`GIT_ALTERNATE_OBJECT_DIRECTORIES`).
+/// moai 가 읽는 것은 이미 받아들여진 `HEAD` 의 이력뿐이라 잃을 값이 없고, 남기면 `-C` 로 댄 저장소가
+/// 바깥 객체 저장소에 쓴다.
 ///
 /// [`run`] 과 임시 저장소를 만드는 도우미(`isolated`)가 따로 걷으면 걷는 목록이 갈라진다. 한때
 /// 도우미는 셋만 걷고 `run` 은 열을 걷어, pre-receive 훅 안에서는 도우미가 바깥 객체 저장소에 쓰고
@@ -72,13 +79,8 @@ fn read_log(root: &Path, args: &[&str]) -> Result<String, Error> {
 /// 빌드에서도 이 코드가 타입 검사를 받게 하려는 것이다.
 pub fn command() -> std::process::Command {
     let mut cmd = std::process::Command::new("git");
-    for var in REPO {
+    for var in swept(cfg!(test)) {
         cmd.env_remove(var);
-    }
-    if cfg!(test) {
-        for var in TEST {
-            cmd.env_remove(var);
-        }
     }
     cmd
 }
@@ -258,6 +260,7 @@ fn records(log: &str) -> impl Iterator<Item = (&str, &str)> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::git_leaks::{REPO, TEST};
 
     /// 시험이 쓰는 git. **바깥 저장소와 바깥 설정을 함께 끊는다** — `tests/cli.rs` 의
     /// `isolated` 와 같은 자다. 물려받은 `GIT_DIR` 이 남으면 여기서의 git 이 바깥 저장소를
@@ -345,10 +348,13 @@ pub(crate) mod tests {
     /// 바꾸면 남의 시험까지 바뀐다(tests/cli.rs 의 `tests_do_not_read_the_runners_home` 과 같은 까닭).
     /// 그래서 훅이 실제로 내보내는 것을 심은 채 이 바이너리를 다시 불러 git 을 부르는 시험들만 돌린다.
     ///
-    /// **심는 값은 [`LEAKS`] 가 아니라 git 이 훅에 내보낸 모양이다** — 목록에서 한 이름이 빠지면 여기서
-    /// 드러나야 하므로, 목록을 그대로 심으면 아무것도 못 잰다. 걷기가 빠지면 도우미의 커밋이 격리
+    /// **심는 값은 [`REPO`]·[`TEST`] 가 아니라 git 이 훅에 내보낸 모양이다** — 목록에서 한 이름이 빠지면
+    /// 여기서 드러나야 하므로, 목록을 그대로 심으면 아무것도 못 잰다. 걷기가 빠지면 도우미의 커밋이 격리
     /// 경로(`GIT_QUARANTINE_PATH`)나 바깥 설정의 서명(`GIT_CONFIG_PARAMETERS`)에 막혀 안쪽이 깨진다.
     /// 가리키는 곳은 이 시험의 임시 디렉터리라, 걷기가 빠져도 바깥 저장소는 안 건드린다.
+    ///
+    /// **이 시험은 시험 빌드만 잰다.** 안쪽도 `cfg!(test)` 라 `REPO` 와 `TEST` 를 다 걷는다 — 릴리스가
+    /// `TEST` 를 안 걷는다는 것은 여기서 안 드러난다. 그쪽은 tests/cli.rs 가 진짜 바이너리로 본다.
     #[test]
     fn git_tests_see_their_own_repos_inside_a_hook() {
         let dir = std::env::temp_dir().join(format!("moai-git-hook-{}", std::process::id()));
@@ -400,6 +406,37 @@ pub(crate) mod tests {
             }
         }
         assert!(found.len() == 1 && found[0].contains("git.rs:"), "git 을 `git::command` 밖에서 띄운다 — {found:#?}");
+    }
+
+    /// **걷는 목록이 git 이 대는 것보다 좁으면 안 된다**(moai-ztdf 리뷰).
+    ///
+    /// `git rev-parse --local-env-vars` 는 git 이 스스로 "저장소 지역 환경" 으로 세는 이름을 낸다 —
+    /// 서브모듈로 들어갈 때 git 이 제 손으로 걷는 바로 그 목록이다. [`REPO`]·[`TEST`] 는 손으로 적은
+    /// 것이라, git 이 이름을 하나 더하면 조용히 낡는다. 낡은 것이 드러나는 자리가 남의 커밋 칸이나
+    /// 남의 저널뿐이면 그때는 이미 늦으니, git 에게 직접 물어 여기서 먼저 터지게 한다. 처음 물었을 때
+    /// 여섯이 빠져 있었다(`GIT_CONFIG`·`GIT_SHALLOW_FILE`·`GIT_GRAFT_FILE` 등).
+    ///
+    /// **어느 목록인지는 안 본다 — 경계는 여기서 안 붙잡힌다.** 릴리스가 걷는 것은 `REPO` 뿐인데
+    /// `GIT_CONFIG_PARAMETERS`·`GIT_CONFIG_COUNT` 는 git 이 대는데도 `TEST` 에 있어, 여기서 목록을
+    /// 가리면 오늘 당장 빨갛다. 그래서 이 시험은 **빠진 이름이 없다** 만 지키고, 릴리스가 걷느냐는
+    /// tests/cli.rs 의 `an_inherited_git_dir_does_not_beat_the_project_we_were_given` 이 `REPO` 를
+    /// 통째로 심어서 붙잡는다. 새 이름을 `TEST` 에 넣어 이 시험을 달래는 것은 그쪽을 못 속인다.
+    #[test]
+    fn the_leak_list_covers_what_git_calls_local() {
+        // **`isolated` 로 띄운다** — `git::tests` 의 git 은 모두 그렇다. 맨 `command()` 면 돌리는 사람의
+        // 전역·시스템 설정을 읽고 카고의 자리에서 돈다.
+        let out = isolated(Path::new(env!("CARGO_MANIFEST_DIR")))
+            .args(["rev-parse", "--local-env-vars"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let said = String::from_utf8_lossy(&out.stdout).into_owned();
+        let missing: Vec<&str> = said
+            .lines()
+            .map(str::trim)
+            .filter(|n| !n.is_empty() && !REPO.contains(n) && !TEST.contains(n))
+            .collect();
+        assert!(missing.is_empty(), "git 이 대는 지역 환경이 목록에 없다 — git_leaks.rs 에 더한다: {missing:?}");
     }
 
     /// 이슈가 생기기 전의 커밋은 걷지 않는다 — 단, 시계가 늦은 기계의 커밋은 하루까지 받는다.
