@@ -3762,7 +3762,8 @@ fn show_sees_commits_under_a_backdated_one() {
     let shown = ok(s.path(), &["show", &id]);
     assert!(shown.contains("feat: 고친다"), "날짜가 거꾸로 선 커밋 밑을 못 봤다\n{shown}");
     let json = ok(s.path(), &["show", &id, "--json"]);
-    assert!(json.contains("\"commits\":["), "--json 도 같은 답이어야 한다\n{json}");
+    assert!(json.contains("feat: 고친다"), "--json 도 같은 답이어야 한다\n{json}");
+    assert!(!json.contains("옛 날짜로 얹힌"), "id 를 안 적은 커밋이 붙었다\n{json}");
 }
 
 /// **사람은 부른 자리가 아니라 그 프로젝트에서 온다**(moai-d3sy). 환경을 다 걷어도(moai-ztdf) 어느
@@ -6914,9 +6915,9 @@ fn git(dir: &Path, args: &[&str]) -> String {
     git_run(dir, None, args)
 }
 
-/// 커밋 시각까지 고정해 돌린다. **시각이 답을 가르는 시험은 기계 시계에 매이면 안 된다** —
-/// `show` 의 커밋 칸은 걷기를 `created_at`(= `MOAI_NOW`) 에서 끊으므로(`git::commits_of`),
-/// 커밋을 기계 시계로 찍으면 시계가 그보다 이른 기계에서 답이 달라진다.
+/// 커밋 시각까지 고정해 돌린다. **차례가 답을 가르는 시험은 기계 시계에 매이면 안 된다** —
+/// 커밋 칸은 `git log` 의 차례(커밋 시각) 그대로 서므로(`git::table`), 일부만 기계 시계로
+/// 찍으면 고정한 커밋들과의 앞뒤가 돌리는 기계마다 달라진다.
 fn git_at(dir: &Path, at: &str, args: &[&str]) -> String {
     git_run(dir, Some(at), args)
 }

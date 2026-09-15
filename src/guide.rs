@@ -837,6 +837,11 @@ mod tests {
     /// **가르친 커밋 제목을 커밋 칸이 실제로 읽는다**(moai-wqm7). 예시 제목에서 id 를 못 뽑거나
     /// 트래커 커밋의 머리가 `git` 이 거르는 머리와 다르면, 시킨 대로 커밋해도 칸이 비거나 트래커
     /// 커밋이 상세에 선다.
+    ///
+    /// **가르친 트레일러 낱말도 함께 잰다**(moai-dig5). 이 글은 squash 로 합치는 저장소에
+    /// `Refs: <id>` 를 달라고 시킨다 — 그 낱말을 `git::trailed` 가 안 읽으면 시킨 대로 단
+    /// 저장소의 커밋 칸이 통째로 빈다. 낱말은 글에서 뽑아 견준다: 손으로 두 벌 적으면
+    /// 한쪽만 고쳐도 여기가 안 붉어진다.
     #[test]
     fn the_commit_guide_teaches_what_the_commit_column_reads() {
         let example = COMMITS.split('`').nth(1).expect("예시 제목이 없다");
@@ -845,6 +850,22 @@ mod tests {
         let subject = example.replace("<id>", "web-a1b2");
         assert_eq!(crate::git::ids_in(&subject).collect::<Vec<_>>(), ["web-a1b2"], "예시 제목 {subject:?}");
         assert!(COMMITS.contains(&format!("`{}:`", crate::git::TRACKER)), "트래커 커밋의 머리가 git 이 거르는 것과 다르다");
+
+        let rule = COMMITS.lines().find(|l| l.contains("본문은")).expect("본문 규칙이 없다");
+        let heads: Vec<&str> = rule.split('`').skip(1).step_by(2).collect();
+        assert!(heads.len() >= 3, "가르친 트레일러 낱말이 셋이 안 된다 — {rule:?}");
+        for head in heads {
+            let line = format!("{head} web-a1b2");
+            assert!(
+                crate::git::trailed(&line).any(|w| w == "web-a1b2"),
+                "가르친 트레일러를 커밋 칸이 안 읽는다 — {line:?}"
+            );
+            // squash 가 담는 모양(네 칸 들여쓴 줄)도 같게 읽는다.
+            assert!(
+                crate::git::trailed(&format!("    {line}")).any(|w| w == "web-a1b2"),
+                "squash 가 들여쓴 트레일러를 못 읽는다 — {line:?}"
+            );
+        }
     }
 
     /// **이모지를 쓰지 말라는 글이 제 손으로 이모지를 쓰지 않는다**(moai-j8aq). 가르치는 글이
