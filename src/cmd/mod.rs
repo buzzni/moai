@@ -395,14 +395,15 @@ pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids:
 ///
 /// 줄을 봐야 하므로 락 안에서 잰다 — 밖에서 재면 그 사이 마지막 줄이 그 칸을 떠난다.
 pub fn check_from(from: Option<&str>, issues: &[crate::model::Issue], cfg: &crate::config::Config) -> R<()> {
-    let Some(f) = from.filter(|f| !cfg.knows(f)) else { return Ok(()) };
-    if issues.iter().any(|i| i.status.as_str() == f) {
-        return Ok(());
-    }
-    Err(Fail::coded(
-        format!("`{f}` 라는 칸이 없고 거기 선 줄도 없다. 있는 칸: {}", cfg.statuses.join(", ")),
-        code::BAD_STATUS,
-    ))
+    // 아는가를 가르는 것은 `report` 다 — 읽는 쪽(`show -s`·탐색기 필터)과 **같은 술어**를
+    // 써야 옮길 수는 있는데 못 찾는 줄이 안 생긴다.
+    let Some(f) = from.filter(|f| !crate::report::knows_column(issues, cfg, f)) else { return Ok(()) };
+    Err(Fail::coded(unknown_column(f, cfg), code::BAD_STATUS))
+}
+
+/// 모르는 칸을 댈 때의 한 줄 — 쓰기도 읽기도 같은 말을 한다.
+pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> String {
+    format!("`{name}` 라는 칸이 없고 거기 선 줄도 없다. 있는 칸: {}", cfg.statuses.join(", "))
 }
 
 /// `--from` 이 견줄 **서 있는 칸** — 물은 줄마다 하나씩, 락 안에서 **한 번** 뜬다.

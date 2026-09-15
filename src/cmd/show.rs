@@ -167,8 +167,14 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
 
     // 모르는 칸은 거부한다. 조용히 0건을 내면 `-s in-progress` 같은 오타가
     // "그 칸은 비었다" 와 구별되지 않는다 — `add`·`mv` 는 이미 거부한다.
+    //
+    // **어느 줄이 선 칸이면 받는다** — `--from` 과 같은 술어다(moai-hym7, 사람이 정했다).
+    // `config` 에서 칸 이름을 고친 뒤 옛 이름에 선 줄은 옮길 수는 있는데 못 찾으면,
+    // 읽기가 쓰기보다 엄해져 "읽기는 관대하고 쓰기는 엄하다" 가 뒤집힌다.
     for s in &filter.status {
-        repo.config.require_known(s).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
+        if !crate::report::knows_column(&load.issues, &repo.config, s) {
+            return Err(Fail::coded(super::unknown_column(s, &repo.config), super::code::BAD_STATUS));
+        }
     }
 
     let now = model::now();

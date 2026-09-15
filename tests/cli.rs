@@ -8055,6 +8055,23 @@ fn a_from_column_the_config_forgot_still_works_while_a_row_sits_there() {
     assert!(line_of(s.path(), &other).contains("\"deferred_at\""), "옛 칸에 선 줄을 못 미뤘다");
     ok(s.path(), &["defer", &other, "--undo", "--from", "in_progress"]);
     assert!(!line_of(s.path(), &other).contains("\"deferred_at\""), "옛 칸에 선 줄을 못 도로 집었다");
+
+    // **제목 고치기와 막기도 같은 자다.** `store::with_write` 만 풀고 `edit`·`link` 가
+    // 제 손으로 칸 이름을 다시 물으면 옛 칸에 선 줄은 제목 하나 못 고치고 막음도 못
+    // 푼다 — 도구 안에서 영영 못 만지는 줄이 되어, 푼 것이 헛일이 된다. 탐색기는
+    // `with_write` 만 지나므로 여기서 갈리면 두 표면이 서로 다른 말을 한다.
+    ok(s.path(), &["edit", &other, "--title", "고친 제목"]);
+    assert!(line_of(s.path(), &other).contains("고친 제목"), "옛 칸에 선 줄의 제목을 못 고쳤다");
+    assert!(line_of(s.path(), &other).contains("\"status\":\"in_progress\""), "제목만 고쳤는데 칸이 움직였다");
+    ok(s.path(), &["link", &id, "--blocks", &other]);
+    assert!(line_of(s.path(), &other).contains("\"blocked_by\""), "옛 칸에 선 줄을 못 막았다");
+    ok(s.path(), &["link", &id, "--unblocks", &other]);
+
+    // **읽기가 쓰기보다 엄하면 안 된다** (moai-lvf9.t10). 옮길 수는 있는데 못 찾는 줄이
+    // 생기면, 칸 이름을 바꾼 뒤 정리하려는 사람이 그 줄에 닿을 길이 없다.
+    let listed = ok(s.path(), &["show", "-s", "in_progress"]);
+    assert!(listed.contains(&other), "옛 칸에 선 줄을 못 찾는다\n{listed}");
+
     // 칸을 **옮기는** 쓰기는 그대로 엄하다 — 갈 칸이 아는 칸이어야 한다.
     let out = moai(s.path(), &["mv", &other, "doing"]);
     assert!(out.status.success(), "{}", text(&out));
@@ -8071,15 +8088,27 @@ fn a_from_column_the_config_forgot_still_works_while_a_row_sits_there() {
 /// 뒤로 밀리면 신원 없는 기계(CI·훅)에서 오타가 "누가 하는지 모른다" 로 덮여, 부르는
 /// 쪽이 받는 `code` 가 `bad_status` 가 아니라 `no_actor` 가 된다 — 고칠 곳이 설정인지
 /// 명령인지가 갈리는 자리다. 한쪽만 시험하면 두 벌로 적힌 차례가 갈릴 때 한쪽만 잡힌다.
+///
+/// **`bad_status` 를 내는 검사는 하나도 빠짐없이 먼저 선다.** 오타만 앞세우고 묶음
+/// 가드를 사람 뒤에 두면, 같은 자의 잘못이 `--from` 의 값에 따라 두 `code` 로 갈린다 —
+/// 오타는 `bad_status`, 묶음은 `no_actor`. 부르는 쪽은 그것을 가를 방법이 없다.
 #[test]
 fn a_bad_from_column_is_named_before_the_missing_person() {
     let s = init("from-before-who");
     let id = add(s.path(), &["일"]);
-    for args in [vec!["mv", &id, "done", "--from", "없는칸"], vec!["defer", &id, "--from", "없는칸"]] {
+    let epic = add(s.path(), &["묶음", "--type", "epic"]);
+    add(s.path(), &["멤버", "-e", &epic]);
+    let cases = [
+        vec!["mv", &id, "done", "--from", "없는칸"],
+        vec!["defer", &id, "--from", "없는칸"],
+        vec!["mv", &epic, "done", "--from", "todo"],
+        vec!["defer", &epic, "--from", "todo"],
+    ];
+    for args in cases {
         let out = without_user(s.path(), &args);
         assert!(!out.status.success(), "{args:?}");
         let err = String::from_utf8_lossy(&out.stderr);
-        assert!(err.contains("없는칸"), "{args:?} 가 칸 대신 사람을 말했다\n{err}");
+        assert!(err.contains("칸"), "{args:?} 가 칸 대신 사람을 말했다\n{err}");
         assert!(!err.contains("--user"), "{args:?} 가 사람을 먼저 물었다\n{err}");
     }
 }

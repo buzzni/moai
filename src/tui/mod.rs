@@ -1288,8 +1288,11 @@ impl App {
         // 칸 이름은 `Filter::build` 가 모른다 — 저장소가 정하는 것이라
         // `config` 에 있다. `cmd/show.rs` 와 같은 자로 잰다: 조용히 0건을 내면
         // `status=in-progress` 같은 오타가 "그 칸은 비었다" 와 구별되지 않는다.
+        // 어느 줄이 선 칸이면 받는다 — `show -s`·`--from` 과 같은 술어다(moai-hym7).
         for s in &filter.status {
-            self.cfg.require_known(s)?;
+            if !crate::report::knows_column(&self.issues, &self.cfg, s) {
+                return Err(crate::cmd::unknown_column(s, &self.cfg));
+            }
         }
         // 시계는 **적재마다** 고정한 것을 쓴다. 여기서 다시 잡으면 `stale=`
         // 같은 물음이 화면의 나머지와 다른 시각으로 판정된다.
@@ -1945,7 +1948,11 @@ impl App {
         match &self.mode {
             Mode::Filter(q) if !q.text().trim().is_empty() => match self.build_filter(&self.mode) {
                 Err(e) => Some(e),
-                Ok(f) => f.status.iter().find_map(|s| self.cfg.require_known(s).err()),
+                Ok(f) => f
+                    .status
+                    .iter()
+                    .find(|s| !crate::report::knows_column(&self.issues, &self.cfg, s))
+                    .map(|s| crate::cmd::unknown_column(s, &self.cfg)),
             },
             _ => None,
         }

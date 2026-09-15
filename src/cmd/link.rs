@@ -89,9 +89,14 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
             } else {
                 t.blocked_by.retain(|b| b != &args.id);
             }
+            let kept = t.status.clone();
             t.updated_at = at.clone();
             t.normalize();
-            t.validate(cfg)?;
+            // **안 바꾼 칸은 다시 안 묻는다 — `store::with_write`·`edit` 과 한 자다**
+            // (moai-hym7). 막음은 `blocked_by` 에 쓰지 칸에 쓰지 않으므로, 여기서 칸
+            // 이름을 다시 물으면 `config` 에서 칸 이름을 고친 뒤 옛 이름에 선 줄은
+            // 막지도 풀지도 못한다 — 끊긴 참조를 도구 안에서 못 없애는 자리다.
+            t.validate_keeping(cfg, t.status == kept)?;
             out.push((t.clone(), wants_block));
         }
         // 막히는 쪽이 묶음일 수 있다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는

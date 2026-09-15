@@ -48,19 +48,17 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let from = args.from.map(Status::new);
 
     let at = model::now();
+    // **누구인지는 락 밖에서 묻는다.** `model::actor` 는 `git` 을 두 번 띄운다 — 그것을
+    // 락 안에 두면 같은 `.moai` 를 쓰는 옆 세션들이 그 subprocess 만큼 더 기다린다.
+    // **말하는 차례는 그대로다**: 결과를 여기서 펴지 않고 아래 칸 검사 뒤에 편다.
+    let who = model::actor(ctx.user.as_deref(), &repo.root);
     let moved: Moved = repo.with_write(|issues, cfg, _| {
-        // **칸부터 보고 누구인지는 그다음이다.** 신원 없는 기계에서 칸 오타가 "누가
+        // **칸부터 다 보고 누구인지는 그다음이다.** 신원 없는 기계에서 칸 오타가 "누가
         // 하는지 모른다" 로 덮이면, 부르는 쪽은 둘을 글로만 가를 수 있다. 칸 검사가
-        // 줄을 봐야 하므로(`check_from`) 둘 다 락 안에서 잰다. **두 줄의 차례가
-        // 곧 이 규칙이다** — 아래로 내리면 `defer` 와 갈려 같은 오타가 명령마다
-        // 다른 `code` 로 나간다.
+        // 줄을 봐야 하므로(`check_from`) 락 안에서 잰다. **`bad_status` 를 내는 검사는
+        // 하나도 빠짐없이 `who?` 위에 선다** — 하나라도 아래로 내려가면 그 오타만
+        // `no_actor` 로 덮여, 같은 자의 잘못이 명령마다 다른 `code` 로 나간다.
         super::check_from(from.as_ref().map(Status::as_str), issues, cfg)?;
-        let by = model::actor(ctx.user.as_deref(), &repo.root)?;
-        let mut m = Moved::default();
-        let mut entries = Vec::new();
-        // **닫을 때만 전의 모습을 뜬다.** 풀리는 것은 끝낼 때뿐이다 — 다른 칸으로의 이동은
-        // 막음을 풀지 않고, 락을 쥔 채 목록을 한 벌 더 복사하는 값은 그때만 치른다.
-        let before = to.is_done().then(|| issues.clone());
         // **묶음은 화면이 보여 준 칸으로 잰다**(사람이 정했다, moai-o5ss.l07). 에픽·
         // 마일스톤의 칸은 멤버에서 읽히고 줄에 적힌 칸은 어디서도 안 읽히므로, 적힌 칸과
         // 견주면 보드가 `in_progress` 를 그리는 에픽에 `--from in_progress` 가 "이미
@@ -87,6 +85,13 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 ));
             }
         }
+        let by = who?;
+        let mut m = Moved::default();
+        let mut entries = Vec::new();
+        // **닫을 때만 전의 모습을 뜬다.** 풀리는 것은 끝낼 때뿐이다 — 다른 칸으로의 이동은
+        // 막음을 풀지 않고, 락을 쥔 채 목록을 한 벌 더 복사하는 값은 그때만 치른다.
+        // 거절이 다 끝난 자리에서 뜬다 — 위에서 물러날 판에 한 벌 베끼지 않는다.
+        let before = to.is_done().then(|| issues.clone());
         let seen: super::Read =
             if from.is_some() { super::standing_of(issues, cfg, &asked_all) } else { Default::default() };
         for id in ids {
