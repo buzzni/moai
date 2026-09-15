@@ -257,8 +257,12 @@ NOTE
     SPC s 1  설정의 첫 칸 [보임/숨김] — 둘째 칸부터 번호가 차례로 는다
     SPC o p  우선순위   SPC o c  생성   SPC o u  수정   SPC o s  칸   SPC o a  담당   SPC o t  제목
     SPC c i  id   SPC c p  우선순위   SPC c a  담당   SPC c c  생성   SPC c u  수정   SPC c n  셈   SPC c g  태그
+    r  이 줄을 읽음으로      SPC m a  안 읽은 것 전부      SPC m r  이 묶음의 멤버 전부
     SPC c h  열 이름 줄 [보임/숨김]    SPC c w  ⎇ 옆 가지 표시 [보임/숨김] — SPC t w 로 겹쳐 봐야 선다
   바로 끝내는 키는 Ctrl-C 하나다 — 어디서든, 글을 적는 중에도 끝낸다.
+
+  내게 온 것(담당이 나이거나 그 밑) 가운데 마지막으로 본 뒤에 바뀐 줄은 제목 앞에 [NEW] 가
+  선다. 읽음은 내 설정에만 남고 트래커는 안 바뀐다 — CLI 로는 `moai read` 다.
 
   목록은 처음에 done 을 숨긴다 — 경로 줄의 [done 숨김] 이 그것을 댄다. 보기는 거름망과
   따로라 Esc 로 안 풀리고, 둘은 함께 걸린다. 정렬은 급한 것·새것·앞 칸·가나다가 위고,

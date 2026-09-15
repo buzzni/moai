@@ -416,6 +416,15 @@ pub struct App {
     pub order: keys::Sorting,
     /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)에 열 이름 줄이 얹힌다.
     pub fields: view::Fields,
+    /// **안 읽은 줄의 id**(moai-z9pc) — 내게 온 것 가운데 내가 마지막으로 본 뒤에 바뀐 것
+    /// (`query::unread`). 적재마다 한 번 센다: 줄마다 프레임마다 담당·조상을 다시 풀지 않는다.
+    pub unread: std::collections::BTreeSet<String>,
+    /// 내 설정에 적힌 읽음 — 이슈 id → 마지막으로 본 때. 읽음을 적을 때 함께 민다.
+    seen: std::collections::BTreeMap<String, String>,
+    /// 내가 누구인가 — `이름 (메일)`. **띄울 때 한 번 풀어 둔다**(moai-z9pc): 여기서 `model::actor`
+    /// 를 부르면 다시 읽기마다 사람을 묻는 길이 열려 "읽기는 사람을 묻지 않는다" 가 무너진다
+    /// (`reading_never_asks_who`). 모르면 `None` 이고 그러면 [NEW] 가 한 줄도 안 선다.
+    pub me: Option<String>,
     /// 오른쪽 상세 칸이 보이나(moai-ymnu). 숨기면 목록이 폭을 다 쓴다. 설정에 남는다.
     pub detail_open: bool,
     /// 설정에 적혀 있다고 이 세션이 아는 보기 — 읽은 뒤와 적은 뒤의 [`App::look_now`](moai-2kyl 단계 리뷰).
@@ -594,6 +603,9 @@ impl App {
             order: Default::default(),
             fields: Default::default(),
             detail_open: true,
+            unread: Default::default(),
+            seen: Default::default(),
+            me: None,
             saved: Default::default(),
             remembered,
             list: Scroll::default(),
@@ -959,6 +971,7 @@ impl App {
     /// 같은 까닭이다. 같은 줄이면 본문이 바뀌었어도 두고, 넘치면 그림이 자른다.
     fn regrip(&mut self, held: Option<Anchor>) {
         self.see();
+        self.recount_unread();
         let rows = self.rows();
         let found = held.and_then(|a| self.row_of(&rows, &a));
         if found.is_none() {
@@ -1316,6 +1329,22 @@ impl App {
     ///
     /// 입힌 뒤의 보기를 `App::saved` 로 든다 — 모르는 낱말·틀린 값은 화면의 보기에 없으니, 이 세션이
     /// 그 키를 안 바꾸는 한 적을 때 파일의 것이 그대로 남는다(`Doc::merge_look`).
+    /// 적어 둔 읽음을 든다(moai-z9pc) — 보기와 같은 한 번의 읽기에서 온다(`user_config::read`).
+    pub fn adopt_read(&mut self, seen: std::collections::BTreeMap<String, String>) {
+        self.seen = seen;
+        self.recount_unread();
+    }
+
+    /// 안 읽은 줄을 다시 센다. **누군지 모르면 아무것도 안 센다** — 읽기는 사람을 묻지 않는다
+    /// (CLAUDE.md). 그러면 [NEW] 가 한 줄도 안 서고, 그것이 설정 없는 기계의 옳은 화면이다.
+    fn recount_unread(&mut self) {
+        let Some(me) = &self.me else {
+            self.unread.clear();
+            return;
+        };
+        self.unread = crate::query::unread(&self.issues, me, &self.seen).into_iter().map(str::to_string).collect();
+    }
+
     pub fn adopt_look(&mut self, look: &crate::user_config::Look, mut problems: Vec<String>) {
         self.apply_look(look, &mut problems);
         self.saved = self.look_now();
@@ -1433,6 +1462,51 @@ impl App {
             Ok(()) => self.saved = look,
             Err(e) => self.notice = Some(format!("보기를 설정에 못 적었다 — {}", crate::text::one_line(&e.to_string()))),
         }
+    }
+
+    /// 읽었다고 적는다(moai-z9pc) — `r`(이 줄)·`SPC m a`(안 읽은 것 전부)·`SPC m r`(이 묶음의 멤버).
+    ///
+    /// **내 설정에만 쓴다**(`user_config::update`) — 트래커 파일은 안 건드린다. 락을 잡는 쓰기라
+    /// 실패할 수 있고, 그때는 화면도 안 바꾼다: 다음에 다시 누르면 된다. 설정 자리를 모르면
+    /// (시험·설정 없는 기계) 화면에서만 걷는다 — 읽기는 사람을 묻지 않는다.
+    fn mark_read(&mut self, act: keys::Browse, rows: &[Row]) {
+        use keys::Browse as B;
+        let here = self.current_of(rows).and_then(|r| match r {
+            Row::Item(e) => e.at().map(|at| self.issues[at].id.clone()),
+            Row::Up | Row::Project(_) => None,
+        });
+        let ids: Vec<String> = match act {
+            B::Read => here.into_iter().collect(),
+            B::ReadAll => self.unread.iter().cloned().collect(),
+            // 묶음은 커서가 선 줄이 **든** 곳이다 — 에픽 안에서 눌러도 그 에픽의 멤버가 다 선다.
+            B::ReadGroup => {
+                let Some(id) = here else { return };
+                let group = self.index.home_of(self.index.find(&id).unwrap_or_default()).clone();
+                self.issues
+                    .iter()
+                    .enumerate()
+                    .filter(|(at, _)| self.index.home_of(*at).starts_with(&group))
+                    .map(|(_, i)| i.id.clone())
+                    .collect()
+            }
+            _ => return,
+        };
+        let ids: Vec<String> = ids.into_iter().filter(|id| self.unread.contains(id)).collect();
+        if ids.is_empty() {
+            self.notice = Some("읽음으로 적을 것이 없다".into());
+            return;
+        }
+        let marks: std::collections::BTreeMap<String, String> =
+            ids.iter().map(|id| (id.clone(), self.now.clone())).collect();
+        if let Some(path) = self.user_config.clone()
+            && let Err(e) = crate::user_config::update(&path, |doc| doc.mark_read(&marks))
+        {
+            self.notice = Some(format!("읽음을 설정에 못 적었다 — {}", crate::text::one_line(&e.to_string())));
+            return;
+        }
+        self.seen.extend(marks);
+        self.recount_unread();
+        self.notice = Some(format!("✓ 읽음 · {}", if ids.len() == 1 { ids[0].clone() } else { format!("{}줄", ids.len()) }));
     }
 
     /// 보기 토글 하나(`SPC s`). **커서는 줄의 정체로 붙든다** — 숨긴 줄에 서 있었으면 그 자리
@@ -1594,6 +1668,8 @@ impl App {
             }
             // 상세를 숨기면 **포커스를 목록으로 되돌린다** — 안 보이는 칸에 포커스가 남으면
             // 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다(moai-ymnu).
+            // **읽음은 시킬 때만 선다**(사용자 결정) — 커서가 지나갔다고, 상세를 봤다고 서지 않는다.
+            B::Read | B::ReadAll | B::ReadGroup => self.mark_read(act, &rows),
             B::Detail => {
                 self.detail_open = !self.detail_open;
                 if !self.detail_open {
@@ -2872,8 +2948,10 @@ mod tests {
         assert_eq!(a.worktree, !was);
     }
 
-    /// **바로 누르던 키는 더는 뜻이 없다**(moai-7sjm) — `f`·`n`·`w`·`a`·`d`·`r`·`m`·Delete·F키. 목록·
+    /// **바로 누르던 키는 더는 뜻이 없다**(moai-7sjm) — `f`·`n`·`w`·`a`·`d`·`m`·Delete·F키. 목록·
     /// 상세 포커스 모두, 모드도 토글도 알림도 그대로다.
+    ///
+    /// `r` 은 빠졌다 — 사용자 결정으로 **읽음**이 그 자리를 받았다(moai-z9pc). 그 키는 제 시험이 본다.
     #[test]
     fn the_old_direct_keys_no_longer_act() {
         let codes = [
@@ -2882,7 +2960,6 @@ mod tests {
             KeyCode::Char('w'),
             KeyCode::Char('a'),
             KeyCode::Char('d'),
-            KeyCode::Char('r'),
             KeyCode::Char('m'),
             KeyCode::Char('q'),
             KeyCode::Delete,

@@ -300,6 +300,12 @@ pub enum Browse {
     Cell(super::view::Field),
     /// 오른쪽 상세 칸을 보이고 숨긴다(moai-ymnu).
     Detail,
+    /// 이 줄을 읽음으로(moai-z9pc). 바로 누르는 `r` 이다 — 가장 자주 하는 것이라.
+    Read,
+    /// 보이는 줄 가운데 안 읽은 것 전부.
+    ReadAll,
+    /// 커서가 선 줄이 든 묶음(에픽·마일스톤)의 멤버 전부.
+    ReadGroup,
 }
 
 /// 목록 차례. **조각이라 `query::SortKey` 를 모른다** — `App` 이 둘을 잇는다.
@@ -427,6 +433,9 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Leave, None, Key::any(C::Left)),
         row!(Leave, None, Key::plain('h')),
         row!(Grep, Some("/"), Key::plain('/')),
+        // 읽음은 손이 제일 자주 가는 것이라 **바로 누른다**(moai-z9pc). 옛 `r`(다시 읽기)은
+        // moai-7sjm 이 `SPC r` 로 옮겨 이 자리가 비어 있었다.
+        row!(Read, Some("r"), Key::plain('r')),
         row!(ClearFilter, Some("Esc"), Key::any(C::Esc)),
         // `/` 는 바로 누르는 키이면서 메뉴에도 선다 — 이름은 바로 누르는 쪽 하나만 댄다.
         row!(Grep, None, LEADER, Key::plain('/')),
@@ -468,6 +477,10 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Cell(super::view::Field::Names), Some("SPC c h"), LEADER, Key::plain('c'), Key::plain('h')),
         row!(Cell(super::view::Field::Branch), Some("SPC c w"), LEADER, Key::plain('c'), Key::plain('w')),
         row!(Detail, Some("SPC t d"), LEADER, Key::plain('t'), Key::plain('d')),
+        // **읽음은 `SPC m`(mark) 밑이다**(사용자 결정 2026-09-15) — `SPC r` 은 손에 익은 다시 읽기로
+        // 그대로 둔다. 바로 누르는 `r` 은 그 줄 하나라 여기 없다(아래 바로 누르는 키 줄에 있다).
+        row!(ReadAll, Some("SPC m a"), LEADER, Key::plain('m'), Key::plain('a')),
+        row!(ReadGroup, Some("SPC m r"), LEADER, Key::plain('m'), Key::plain('r')),
     ]
 };
 
@@ -563,6 +576,9 @@ impl Browse {
             Raw => "원문↔그리기",
             ShowAll => "모두 보이기",
             Detail => "상세 칸",
+            Read => "이 줄을 읽음으로",
+            ReadAll => "안 읽은 것 전부",
+            ReadGroup => "이 묶음의 멤버 전부",
             Sort(o) => o.word(),
             Cell(f) => f.word(),
             _ => self.what(c),
@@ -619,6 +635,7 @@ impl Browse {
             Sort(_) => "정렬",
             Cell(_) => "열",
             Detail => "상세",
+            Read | ReadAll | ReadGroup => "읽음",
         }
     }
 }
@@ -1117,7 +1134,9 @@ mod tests {
             (press(C::Char('d')), Lookup::Unknown),
             (press(C::Delete), Lookup::Unknown),
             (press(C::F(5)), Lookup::Unknown),
-            (press(C::Char('r')), Lookup::Unknown),
+            // `r` 은 읽음이다(moai-z9pc) — 옛 `r`(다시 읽기)은 moai-7sjm 이 `SPC r` 로 옮겼고,
+            // 사용자 결정으로 그 자리는 그대로 두고 이 글자를 읽음에 줬다.
+            (press(C::Char('r')), Lookup::Run(B::Read)),
             (press(C::Char('w')), Lookup::Unknown),
             (press(C::F(3)), Lookup::Unknown),
             (press(C::Char('m')), Lookup::Unknown),
@@ -1144,6 +1163,8 @@ mod tests {
             (vec![sp, ch('f')], B::Filter),
             (vec![sp, ch('n')], B::Jot),
             (vec![sp, ch('r')], B::Reload),
+            (vec![sp, ch('m'), ch('a')], B::ReadAll),
+            (vec![sp, ch('m'), ch('r')], B::ReadGroup),
             (vec![sp, ch('p'), ch('a')], B::Pick),
             (vec![sp, ch('p'), ch('d')], B::Unregister),
             (vec![sp, ch('t'), ch('w')], B::Worktree),
