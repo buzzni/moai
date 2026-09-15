@@ -684,10 +684,12 @@ mod tests {
         let layer = a.layer.as_ref().expect("등록했는데 층이 안 섰다");
         assert_eq!(layer.at, At::Project(here.clone()), "등록하다 프로젝트에서 튕겨 나왔다");
         assert_eq!(a.repo.as_ref().map(|r| r.root.clone()), Some(here.clone()));
-        assert_eq!(a.rows().first(), Some(&Row::Up), "층이 섰는데 뿌리에 `..` 이 없다");
-        assert_eq!(a.current(), held, "`..` 이 서면서 커서가 옆 줄로 밀렸다");
+        // 층이 서도 뿌리에 `..` 은 없다 — 층으로는 `0` 이 간다(moai-i784).
+        assert!(!a.rows().contains(&Row::Up), "뿌리에 `..` 이 섰다");
+        assert_eq!(a.current(), held, "층이 서면서 커서가 옆 줄로 밀렸다");
 
-        press(&mut a, &[KeyCode::Home, KeyCode::Backspace]);
+        press(&mut a, &[KeyCode::Home]);
+        a.hit("0");
         assert!(a.on_layer());
         let places: Vec<(PathBuf, bool)> =
             a.layer.as_ref().unwrap().places.iter().map(|p| (p.path.clone(), p.registered)).collect();

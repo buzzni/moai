@@ -1129,7 +1129,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         }
         None => vec![Line::from(Span::styled("없다", dim()))],
         // 프로젝트 뿌리의 `..` 은 층으로 간다 — 어디로 가는지 말한다.
-        Some(Row::Up) if app.path.is_empty() => vec![Line::from(Span::styled("프로젝트 층으로", dim()))],
+        // `..` 은 디렉터리에만 선다(moai-i784) — 뿌리에서 층으로 가던 갈래는 걷었다.
         Some(Row::Up) => vec![Line::from(Span::styled("한 층 위로", dim()))],
         Some(Row::Project(at)) => place_about(app, at, inner.width as usize),
         Some(Row::Item(e)) => match e.at() {
@@ -3453,17 +3453,17 @@ pub(super) mod tests {
         assert!(wide.contains("디렉터리와 .moai 는 그대로다"), "{wide:?}");
     }
 
-    /// **프로젝트 안에서는 경로 줄이 늘 어느 프로젝트인지 댄다.** 뿌리에는 층으로 가는 `..`
-    /// 이 서고 오른쪽이 그곳이 어디인지 말한다. 깊이 들어가 경로가 잘려도 이름은 남는다.
+    /// **프로젝트 안에서는 경로 줄이 늘 어느 프로젝트인지 댄다.** 뿌리에 `..` 은 서지 않는다
+    /// (moai-i784) — 층으로는 헤더의 `0` 이 간다. 깊이 들어가 경로가 잘려도 이름은 남는다.
     #[test]
-    fn inside_a_project_the_path_line_names_it_and_the_root_climbs_to_the_layer() {
+    fn inside_a_project_the_path_line_names_it_and_the_root_has_no_way_up() {
         use super::super::layer::At;
         let mut a = layered(At::Project("/w/one".into()));
         a.cursor = 0;
         let lines = render(&mut a, 80, 12);
         assert!(lines[0].starts_with("one:/"), "{:?}", lines[0]);
         let screen = lines.join("\n");
-        assert!(screen.contains("..") && screen.contains("프로젝트 층으로"), "{screen}");
+        assert!(!screen.contains("프로젝트 층으로"), "뿌리에 층으로 가는 줄이 남았다\n{screen}");
 
         a.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -3847,9 +3847,10 @@ pub(super) mod tests {
         let bar = bar_at(&mut a);
         assert!(bar.contains("Enter 들어가기") && !bar.contains("Bksp"), "에픽 위·층 없는 뿌리 — {bar:?}");
 
+        // 층이 있어도 뿌리는 뿌리다 — Bksp 는 디렉터리만 올라가므로 여기서는 바에 안 선다(moai-i784).
         let mut a = Place::LayeredRootLeaf.app();
         let bar = bar_at(&mut a);
-        assert!(bar.contains("Bksp 나가기") && !bar.contains("Enter"), "층이 있는 뿌리의 잎 — {bar:?}");
+        assert!(!bar.contains("Bksp") && !bar.contains("Enter"), "층이 있는 뿌리의 잎 — {bar:?}");
 
         let mut a = Place::InsideUp.app();
         let bar = bar_at(&mut a);
@@ -4550,7 +4551,7 @@ pub(super) mod tests {
         a.keep.clear();
         a.warnings = 0;
         a.cursor = 0;
-        assert_eq!(a.rows(), [Row::Up]);
+        assert!(a.rows().is_empty(), "빈 프로젝트 뿌리에 줄이 섰다 — `..` 은 디렉터리에만 선다");
         let lines = render(&mut a, 60, 10);
         let title = lines.iter().find(|l| l.contains('┌')).unwrap();
         assert!(title.contains("비었다") && !title.contains("1줄"), "{title:?}");

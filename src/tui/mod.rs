@@ -1445,7 +1445,10 @@ impl App {
             return (0..l.places.len()).map(Row::Project).collect();
         }
         let mut rows: Vec<Row> = Vec::new();
-        if !self.path.is_empty() || self.layer.is_some() {
+        // **`..` 은 디렉터리에만 선다**(moai-i784). 프로젝트 뿌리에 한 줄 더 세워 층으로
+        // 올려 보내던 길은 걷었다 — 층으로 가는 길은 헤더의 `0` 하나다(사용자 결정).
+        // 길이 둘이면 뿌리의 `..` 이 디렉터리의 `..` 과 다른 데로 가, 같은 글자가 두 뜻을 진다.
+        if !self.path.is_empty() {
             rows.push(Row::Up);
         }
         // **보기는 줄마다 건다** — 숨긴 칸의 묶음이라도 보이는 멤버가 있으면 디렉터리는 선다
@@ -1605,8 +1608,8 @@ impl App {
             list_focus: self.focus == Pane::Explorer,
             // [`App::enter`] 가 무언가 하는 줄 — `..`(나가기)·디렉터리·층의 프로젝트.
             leaf: !matches!(self.current_of(rows), Some(Row::Up | Row::Item(Entry::Dir { .. }) | Row::Project(_))),
-            // [`App::leave`] 가 무언가 하는 자리 — 디렉터리 안이거나, 층이 있는 프로젝트 뿌리.
-            root: self.path.is_empty() && (self.layer.is_none() || self.on_layer()),
+            // [`App::leave`] 가 무언가 하는 자리 — 디렉터리 안뿐이다. 층으로는 `0` 이 간다(moai-i784).
+            root: self.path.is_empty(),
             worktree: self.worktree,
             raw: self.raw,
             columns: self.cfg.statuses.len().min(keys::NUMBERED),
@@ -1892,9 +1895,9 @@ impl App {
     /// 하나가 생기면 같은 번호가 옆 에픽을 가리킨다. 그래서 번호는 나온 디렉터리를
     /// 못 찾을 때만(거름망에 빠졌거나 `--path` 로 시작했거나) 쓴다.
     fn leave(&mut self) {
-        // 프로젝트 뿌리에서 한 층 더 — 층이 있으면 그리로 간다(결정 3). 층에 섰으면 위가 없다.
+        // **뿌리에서는 아무 일도 없다**(moai-i784). 층으로는 헤더의 `0` 으로 간다 — Bksp 가
+        // 디렉터리와 프로젝트 층 두 군데로 가면 같은 키가 어디로 갈지 자리마다 달라진다.
         if self.path.is_empty() {
-            self.climb();
             return;
         }
         if let Some(from) = self.path.pop() {
@@ -3853,8 +3856,8 @@ mod tests {
         a.user_config = Some(user);
         a.load_look();
         let a = a.with_layer(layer::fake(vec![("argos", "/x", layer::Look::Unread)], layer::At::Project("/x".into())));
-        assert_eq!(a.rows().len(), 2, "시험의 전제 — `..` 과 끝난 줄 하나");
-        assert_eq!(a.cursor, 1, "첫 화면이 `..` 에 섰다");
+        assert_eq!(a.rows().len(), 1, "시험의 전제 — 끝난 줄 하나 (뿌리에 `..` 은 없다)");
+        assert_eq!(a.cursor, 0, "첫 화면이 그 줄에 안 섰다");
     }
 
     /// 닫는 함수가 댄 id 가 다시 읽은 목록에 없으면 **커서는 두고 그렇다고 말한다.**

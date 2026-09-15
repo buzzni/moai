@@ -865,7 +865,8 @@ mod tests {
         assert!(!a.on_layer());
         assert_eq!(a.project().map(|p| p.path.clone()), Some(one.clone()));
         assert_eq!(a.repo.as_ref().map(|r| r.root.clone()), Some(one.clone()), "선 프로젝트와 쓸 저장소가 어긋났다");
-        assert_eq!(a.rows().first(), Some(&Row::Up), "프로젝트 뿌리에 층으로 가는 `..` 이 없다");
+        // 뿌리에 `..` 은 없다 — 층으로는 `0` 이 간다(moai-i784).
+        assert!(!a.rows().contains(&Row::Up), "프로젝트 뿌리에 `..` 이 섰다");
         assert_eq!(titles(&a), ["one 의 첫 줄", "one 의 둘째 줄"]);
 
         // one 의 argos-0002 에 서고 거름망을 건다 — two 에서 argos-0002 는 다른 자리의 다른 줄이다.
@@ -879,7 +880,7 @@ mod tests {
         assert_eq!(a.filter_text.as_deref(), Some("status=in_progress"));
 
         a.key(key(KeyCode::Home));
-        a.key(key(KeyCode::Backspace));
+        a.hit("0");
         assert!(a.on_layer() && a.repo.is_none() && a.issues.is_empty(), "층에 올라왔는데 프로젝트의 줄이 남았다");
         assert_eq!(a.current(), Some(Row::Project(0)), "떠난 프로젝트에 안 섰다");
         assert_eq!(a.filter_text, None, "한 프로젝트에 건 거름망이 층까지 따라왔다");
@@ -888,13 +889,16 @@ mod tests {
         a.key(key(KeyCode::Enter));
         assert_eq!(a.repo.as_ref().map(|r| r.root.clone()), Some(two.clone()));
         assert_eq!(titles(&a), ["two 의 집은 줄", "two 의 줄"], "옛 프로젝트의 줄이 섞였다");
-        // **들어가면 `..` 너머 첫 줄에 선다**(moai-cm13). 한때 여기서 `..` 에 선다를 결정으로
-        // 못 박았는데, 그러면 들어가자마자 누른 Enter 가 층으로 되올라가 Enter 두 번이 제자리다.
-        // 디렉터리·고르기 창·안에서 띄운 첫 화면(`with_layer`)과 같은 자로 맞췄다. 옛 커서의 id
-        // (one 의 argos-0002, 둘째 줄)를 따라가지 않는 것은 그대로 잰다.
-        assert_eq!(a.cursor, 1, "들어가서 `..` 에 섰거나 옛 커서의 id 를 따라갔다");
+        // **들어가면 첫 줄에 선다.** 뿌리에 `..` 이 없어진 뒤로는(moai-i784) 그것이 곧 첫 이슈다 —
+        // 한때 `..` 에 세웠다가 들어가자마자 누른 Enter 가 층으로 되올라가 Enter 두 번이 제자리인
+        // 것을 고쳤는데(moai-cm13), 이제 그 줄 자체가 없어 같은 일이 생길 자리가 아예 없다.
+        // 옛 커서의 id(one 의 argos-0002, 둘째 줄)를 따라가지 않는 것은 그대로 잰다.
+        assert_eq!(a.cursor, 0, "들어가서 첫 줄에 안 섰거나 옛 커서의 id 를 따라갔다");
 
+        // 뿌리의 ← 는 이제 아무 일도 안 한다 — 층으로는 `0` 이 간다.
         a.key(key(KeyCode::Left));
+        assert!(!a.on_layer(), "뿌리의 ← 가 층으로 올라갔다");
+        a.hit("0");
         assert_eq!(a.current(), Some(Row::Project(1)));
     }
 
@@ -921,7 +925,7 @@ mod tests {
         assert!(!view.hides(crate::config::DONE), "프로젝트 안에서 SPC s d 가 done 을 안 보였다");
 
         a.key(key(KeyCode::Home));
-        a.key(key(KeyCode::Backspace));
+        a.hit("0");
         assert!(a.on_layer());
         assert!(a.worktree, "층에 올라왔는데 끈 것이 따라왔다 — 되켤 키가 여기 없다");
 
@@ -976,10 +980,10 @@ mod tests {
         let mut a = App::open(repo, load, index, NavPath::new(), stamp).with_layer(Layer::read(Some(&cfg), Some(&here)));
         assert!(!a.on_layer());
         assert_eq!(titles(&a), ["여기 줄"]);
-        assert_eq!(a.cursor, 1, "첫 화면이 새로 선 `..` 에 섰다");
+        assert_eq!(a.cursor, 0, "뿌리에 `..` 이 없는데 커서가 한 칸 내려가 섰다");
         assert!(matches!(look(&a, "one"), Look::Unread), "안에서 띄웠는데 남의 프로젝트를 먼저 읽었다");
 
-        a.key(key(KeyCode::Backspace));
+        a.hit("0");
         assert!(a.on_layer());
         assert_eq!(names(&a), ["here", "one", "two"]);
         let at = a.layer.as_ref().unwrap();
@@ -1076,7 +1080,7 @@ mod tests {
         write_lines(&two, &[("argos-0001", "two 의 집은 줄", "in_progress")]);
         a.follow();
         assert!(!a.loading(), "안에 있는 동안 남의 프로젝트를 읽으러 갔다");
-        a.key(key(KeyCode::Backspace));
+        a.hit("0");
         let Look::Open { sum } = look(&a, "two") else { panic!() };
         assert_eq!(sum.picked.len(), 1, "올라갈 때 바뀐 것을 안 읽었다");
     }
@@ -1444,7 +1448,7 @@ mod tests {
         write_lines(&one, &[("argos-0001", "one 의 새 줄", "todo")]);
         a.follow();
         assert!(a.loading(), "바뀐 것을 보고도 안 읽었다");
-        a.key(key(KeyCode::Backspace));
+        a.hit("0");
         a.key(key(KeyCode::Down));
         a.key(key(KeyCode::Enter));
         settle(&mut a);
