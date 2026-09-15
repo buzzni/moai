@@ -481,68 +481,72 @@ pub fn wrap_spans(spans: &[Span], max: usize, overflow: Overflow) -> Vec<Vec<Spa
     let mut w = 0usize;
     let mut space: Option<usize> = None;
 
-    // 코드는 한 덩이로 움직인다 — 이어지는 `Code` 글자를 한 단위로 묶어 잰다.
-    // 묶는 것은 **자리**뿐이다. 덩이마다 `Vec` 을 새로 잡으면 본문 한 벌에
-    // 글자 수만큼의 할당이 생긴다 — 묶이는 것은 코드뿐인데 값은 글자마다 낸다.
-    let mut units: Vec<std::ops::Range<usize>> = Vec::new();
-    for (n, &(_, role)) in chars.iter().enumerate() {
-        match units.last_mut() {
-            Some(last) if role == Role::Code && chars[last.end - 1].1 == Role::Code => last.end = n + 1,
-            _ => units.push(n..n + 1),
+    // 코드는 한 덩이로 움직인다 — 이어지는 `Code` 글자가 한 단위이고, 나머지는
+    // 글자 하나가 한 단위다. **자리로만 센다** — 단위마다 `Vec` 을 새로 잡으면
+    // 본문 한 벌에 글자 수만큼의 할당이 생기고, 탐색기는 그 값을 프레임마다 낸다.
+    let mut at = 0usize;
+    // 끊는 표면에서 글자로 되돌린 덩이의 끝. **덩이는 한 번만 잰다** — 글자마다
+    // 덩이를 다시 훑으면 덩이 길이의 제곱만큼 폭을 세게 된다.
+    let mut broken_to = 0usize;
+    while at < chars.len() {
+        let mut end = at + 1;
+        if at >= broken_to && chars[at].1 == Role::Code {
+            while end < chars.len() && chars[end].1 == Role::Code {
+                end += 1;
+            }
+            // 끊어도 되는 표면에서는 폭을 넘기는 덩이만 글자로 되돌린다. 폭에 드는
+            // 덩이는 그대로 둔다 — 안쪽 공백에서 끊기지 않는 것은 어느 표면에서나 같다.
+            if overflow == Overflow::Break && span_cols(&chars[at..end]) > max {
+                broken_to = end;
+                end = at + 1;
+            }
         }
-    }
-    // 끊어도 되는 표면에서는 폭을 넘기는 덩이만 글자로 되돌린다. 폭에 드는 덩이는
-    // 그대로 둔다 — 안쪽 공백에서 끊기지 않는 것은 어느 표면에서나 같다.
-    if overflow == Overflow::Break {
-        units = units
-            .into_iter()
-            .flat_map(|u| {
-                if span_cols(&chars[u.clone()]) > max { (u.start..u.end).map(|n| n..n + 1).collect() } else { vec![u] }
-            })
-            .collect();
-    }
+        let unit = &chars[at..end];
+        at = end;
 
-    for unit in units {
         // 단위의 폭이다 — 코드는 덩이째, 나머지는 글자 하나.
-        let cw = span_cols(&chars[unit.clone()]);
-        let (c, role) = chars[unit.start];
+        let cw = span_cols(unit);
+        let (c, role) = unit[0];
         // **코드 글자는 어느 표면에서도 잃지 않는다.** 끊는 표면에서 폭을 넘긴 덩이는
         // 글자로 되돌아오지만, 그 글자 사이의 공백을 접는 자리로 삼으면 거기서 공백이
         // 걷혀 명령의 낱말이 붙어 버린다 — 눈으로 읽을 수도 없는 줄이 된다.
-        let in_code = role == Role::Code;
+        let breakable_space = c == ' ' && role != Role::Code;
         if w + cw > max && !line.is_empty() {
-            match space {
-                Some(at) if at > 0 => {
-                    let mut rest: Vec<(char, Role)> = line.split_off(at);
-                    while rest.first().is_some_and(|(c, _)| *c == ' ') {
-                        rest.remove(0);
-                    }
-                    trim_end(&mut line);
-                    lines.push(std::mem::take(&mut line));
-                    w = span_cols(&rest);
-                    line = rest;
+            if let Some(sp) = space.filter(|&sp| sp > 0) {
+                let mut rest: Vec<(char, Role)> = line.split_off(sp);
+                while rest.first().is_some_and(|(c, _)| *c == ' ') {
+                    rest.remove(0);
                 }
-                _ => {
-                    lines.push(std::mem::take(&mut line));
-                    w = 0;
-                }
+                trim_end(&mut line);
+                lines.push(std::mem::take(&mut line));
+                w = span_cols(&rest);
+                line = rest;
+            }
+            // **띄어쓴 자리에서 끊고도 안 들어가면 한 번 더 끊는다.** 코드 덩이는
+            // 여러 칸이라 남은 꼬리에 그대로 얹히면 그 줄이 폭을 넘고, 소프트랩이
+            // 없는 표면에서는 그 줄의 꼬리가 `…` 로 잘려 사라진다 — 끊기로 한
+            // 표면에서 넘는 줄이 남으면 `Overflow::Break` 가 값을 못 한다.
+            // 글자 하나짜리 단위는 두 칸을 넘지 않아 여기 못 닿는다.
+            if w + cw > max && !line.is_empty() {
+                lines.push(std::mem::take(&mut line));
+                w = 0;
             }
             space = None;
         }
         // **끊긴 자리의 공백은 새 줄의 머리가 되지 않는다.** 띄어쓴 자리에서 끊을
         // 때는 위에서 `rest` 의 머리 공백을 걷지만, 끊을 자리가 없어 그냥 넘긴
-        // 줄(`_`)에서는 그 공백이 다음 줄 첫 글자로 남는다 — 폭을 넘는 코드 덩이가
+        // 줄에서는 그 공백이 다음 줄 첫 글자로 남는다 — 폭을 넘는 코드 덩이가
         // 지나간 뒤 늘 이 길을 탄다. 그대로 두면 다음 줄이 한 칸 밀리거나
         // (`  가 온다.` 가 `   가 온다.` 로), 공백 하나뿐인 줄이 문단 가운데 선다.
-        if c == ' ' && !in_code && line.is_empty() && !lines.is_empty() {
+        if breakable_space && line.is_empty() && !lines.is_empty() {
             continue;
         }
         // 코드 덩이가 통째로 움직이므로 여기 걸리는 공백은 코드 **앞**의 자리뿐이고,
-        // 글자로 되돌린 코드의 공백은 `in_code` 가 막는다.
-        if c == ' ' && !in_code {
+        // 글자로 되돌린 코드의 공백은 `breakable_space` 가 막는다.
+        if breakable_space {
             space = Some(line.len());
         }
-        line.extend_from_slice(&chars[unit]);
+        line.extend_from_slice(unit);
         w += cw;
     }
     trim_end(&mut line);
@@ -1127,11 +1131,60 @@ mod tests {
         ];
         for spans in cases {
             for max in [20, 40] {
-                for line in wrap_spans(&spans, max, Overflow::Keep) {
-                    let text = flat(&line);
-                    assert!(!text.starts_with(' '), "줄이 공백으로 시작한다 @ {max} — {text:?}");
-                    assert!(!(text.trim().is_empty() && !text.is_empty()), "공백뿐인 줄 @ {max}");
+                // **두 표면 다 본다.** 끊는 쪽은 덩이를 글자로 되돌려 길이 갈리는데,
+                // 머리 공백을 걷는 일은 갈리지 않는다.
+                for overflow in [Overflow::Keep, Overflow::Break] {
+                    for line in wrap_spans(&spans, max, overflow) {
+                        let text = flat(&line);
+                        // 코드 안의 공백은 명령의 일부라 머리에 와도 남는다 — 걷어야
+                        // 하는 것은 접느라 생긴 산문의 공백뿐이다.
+                        if line.first().is_some_and(|s| s.role == Role::Code) {
+                            continue;
+                        }
+                        assert!(!text.starts_with(' '), "줄이 공백으로 시작한다 @ {max} {overflow:?} — {text:?}");
+                        assert!(!(text.trim().is_empty() && !text.is_empty()), "공백뿐인 줄 @ {max} {overflow:?}");
+                    }
                 }
+            }
+        }
+    }
+
+    /// **끊기로 한 표면에서는 어느 폭에서도 줄이 폭을 넘지 않는다**(moai-krh7).
+    /// 탐색기에는 소프트랩이 없어 넘긴 줄은 `fit` 이 `…` 로 잘라 꼬리를 잃는다 —
+    /// 넘는 줄이 하나라도 남으면 `Overflow::Break` 가 값을 못 한다.
+    ///
+    /// **코드를 섞어야 이 자리에 닿는다.** 산문만으로는 한 단위가 두 칸을 넘지
+    /// 않아, 띄어쓴 자리에서 끊고 남은 꼬리에 다음 단위를 얹어도 폭 안이다.
+    /// 코드 덩이는 여러 칸이라 그 꼬리에 얹히면 그대로 넘긴다.
+    #[test]
+    fn breaking_never_exceeds_the_width() {
+        let cases: [Vec<Span>; 4] = [
+            vec![plain("보기: "), code("moai add \"제목\" -t bug -e moai-4aex"), plain(" 처럼 적는다")],
+            // 산문이 폭을 꽉 채운 뒤 짧은 코드가 오는 자리 — 꼬리에 덩이가 얹힌다.
+            vec![plain("x "), plain(&"a".repeat(18)), code("bcd")],
+            vec![plain(&"가".repeat(12)), code("moai mv x done"), plain(" 뒤가 이어진다")],
+            vec![code("ab"), plain(" 사이 "), code("cd"), plain(" 끝")],
+        ];
+        for spans in &cases {
+            for max in 2..40 {
+                for line in wrap_spans(spans, max, Overflow::Break) {
+                    let w: usize = line.iter().map(|s| crate::text::width(&s.text)).sum();
+                    let text: String = line.iter().map(|s| s.text.as_str()).collect();
+                    assert!(w <= max, "{text:?} @ {max} ({w}칸)");
+                }
+            }
+        }
+        // 블록을 지나도 같다 — 글머리를 뺀 몫이 글의 폭이다.
+        let body = "- `moai add \"제목\" -t bug -e moai-4aex --milestone v0.1` 로 만든다\n";
+        for w in 0..40 {
+            for line in layout(&parse(body), w, Overflow::Break) {
+                let lead = line
+                    .first()
+                    .filter(|s| s.role == Role::Mark)
+                    .map_or(0, |s| crate::text::width(&s.text));
+                let text: String = line.iter().map(|s| s.text.as_str()).collect();
+                let got = crate::text::width(&text);
+                assert!(got <= w.max(lead + 2), "@ {w} → {text:?} ({got}칸)");
             }
         }
     }
@@ -1454,16 +1507,20 @@ mod tests {
         ];
         for body in bodies {
             for w in 0..40 {
-                for line in layout(&parse(body), w, Overflow::Keep) {
-                    // 글머리·들여쓰기는 줄지 않는다. 넘지 않아야 하는 것은
-                    // **글의 몫**이고, 그 바닥은 두 칸(한글 한 자)이다.
-                    let lead = line
-                        .first()
-                        .filter(|s| s.role == Role::Mark)
-                        .map_or(0, |s| crate::text::width(&s.text));
-                    let text: String = line.iter().map(|s| s.text.as_str()).collect();
-                    let got = crate::text::width(&text);
-                    assert!(got <= w.max(lead + 2), "{body:?} @ {w} → {text:?} ({got}칸)");
+                // **두 표면 다 본다.** 이 본문에는 코드가 없어 갈릴 데가 없는데,
+                // 한쪽만 재면 갈라진 날 한쪽은 아무도 안 본 채로 지나간다.
+                for overflow in [Overflow::Keep, Overflow::Break] {
+                    for line in layout(&parse(body), w, overflow) {
+                        // 글머리·들여쓰기는 줄지 않는다. 넘지 않아야 하는 것은
+                        // **글의 몫**이고, 그 바닥은 두 칸(한글 한 자)이다.
+                        let lead = line
+                            .first()
+                            .filter(|s| s.role == Role::Mark)
+                            .map_or(0, |s| crate::text::width(&s.text));
+                        let text: String = line.iter().map(|s| s.text.as_str()).collect();
+                        let got = crate::text::width(&text);
+                        assert!(got <= w.max(lead + 2), "{body:?} @ {w} {overflow:?} → {text:?} ({got}칸)");
+                    }
                 }
             }
         }
