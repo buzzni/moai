@@ -1182,6 +1182,58 @@ mod tests {
         assert!(known.contains(&"priority".to_string()), "이 바이너리가 아는 열을 안 적었다\n{text}");
     }
 
+    /// **읽음도 준 키만 손댄다**(moai-50mn) — `merge_look` 과 같은 약속이라 같은 자로 시험한다.
+    /// 남이 적은 줄도 이 바이너리가 모르는 id 도 남고, 주석은 그대로고, 같은 때면 안 쓴다.
+    /// `.` 이 든 자식 id(`a-0002.rv`)는 **낱말 키로 따옴표에 싸여야** 한다 — 맨 키로 적히면
+    /// 다음 읽기가 그것을 점 찍은 키로 보아 `a-0002` 표 밑의 `rv` 로 읽고, 그 줄의 읽음이
+    /// 통째로 사라진다.
+    #[test]
+    fn a_read_mark_keeps_what_others_wrote_and_the_comments() {
+        let d = scratch("read-marks");
+        let path = d.join("config.toml");
+        let src = "[read]\n# 남이 적어 둔 것\n\"m-0001\" = \"2026-09-01T00:00:00Z\"  # 뒤 주석\nm-0002 = \"2026-09-02T00:00:00Z\"\n";
+        std::fs::write(&path, src).unwrap();
+        let mark = |ids: &[(&str, &str)]| {
+            let marks: BTreeMap<String, String> = ids.iter().map(|(i, w)| (i.to_string(), w.to_string())).collect();
+            update(&path, |doc| doc.mark_read(&marks)).unwrap();
+        };
+
+        mark(&[("m-0002", "2026-09-10T00:00:00Z"), ("m-0003.rv", "2026-09-10T00:00:00Z")]);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# 남이 적어 둔 것"), "안 바꾼 키 위 주석이 달라졌다\n{text}");
+        assert!(text.contains("\"m-0001\" = \"2026-09-01T00:00:00Z\"  # 뒤 주석"), "안 준 id 를 건드렸다\n{text}");
+        assert!(text.contains("\"m-0003.rv\""), "`.` 이 든 자식 id 를 맨 키로 적었다 — 다음 읽기가 못 찾는다\n{text}");
+        assert_eq!(
+            read(Some(&path)).read,
+            [
+                ("m-0001".to_string(), "2026-09-01T00:00:00Z".to_string()),
+                ("m-0002".to_string(), "2026-09-10T00:00:00Z".to_string()),
+                ("m-0003.rv".to_string(), "2026-09-10T00:00:00Z".to_string()),
+            ]
+            .into(),
+            "{text}"
+        );
+
+        // 같은 때를 다시 적으면 파일을 안 건드린다 — 헛 쓰기도 헛 diff 도 없다.
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        mark(&[("m-0002", "2026-09-10T00:00:00Z")]);
+        update(&path, |doc| doc.mark_read(&BTreeMap::new())).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "같은 값에 헛 쓰기를 했다");
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
+
+        // **`read` 가 표가 아니면 적지 않는다** — 무엇인지 모르는 값을 덮으면 되돌릴 수 없다.
+        let mut odd = Doc::parse("read = 3\n").unwrap();
+        assert_eq!(odd.read_marks().1.len(), 1, "표가 아닌 것을 까닭 없이 지나쳤다");
+        assert!(odd.mark_read(&[("m-0001".to_string(), "T".to_string())].into()).is_err());
+        assert!(!odd.changed(), "안 적기로 해 놓고 파일을 더럽혔다");
+
+        // 읽히는 인라인 표는 쓰기도 받는다 — `merge_look` 과 같은 자리다.
+        let mut inline = Doc::parse("read = { \"m-0001\" = \"T\" }\n").unwrap();
+        inline.mark_read(&[("m-0002".to_string(), "U".to_string())].into()).unwrap();
+        assert_eq!(inline.read_marks().0.len(), 2, "{}", inline.render());
+    }
+
     /// 바꾼 것이 없으면 파일을 건드리지 않는다 — 헛 쓰기도 헛 diff 도 없다.
     #[test]
     fn a_no_op_update_leaves_the_file_alone() {

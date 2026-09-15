@@ -572,10 +572,14 @@ pub fn unread<'a>(issues: &'a [Issue], me: &str, seen: &BTreeMap<String, String>
     if mine.is_empty() {
         return BTreeSet::new();
     }
-    let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
+    // **소속은 `report::groups` 에 묻는다**(moai-j038 리뷰). 줄마다 `epic` 필드를 손으로 훑으면
+    // 소속을 재는 자가 둘이 된다 — `epic_from_parent` 가 적어 둔 그대로다: *소속을 따로 재면 둘은
+    // 언젠가 어긋난다.* 지금은 답이 같지만, 갈리는 날 보드가 세는 소속과 [NEW] 가 서는 소속이
+    // 달라지고 그 어긋남은 화면에서만 보인다. 이 지도는 `Where::of` 도 같은 자에게 묻는다.
+    let epics = crate::report::groups(issues);
     issues
         .iter()
-        .filter(|i| for_me(i, &mine, &by_id))
+        .filter(|i| for_me(i, &mine, &epics))
         .filter(|i| seen.get(&i.id).is_none_or(|when| i.updated_at.as_str() > when.as_str()))
         .map(|i| i.id.as_str())
         .collect()
@@ -584,11 +588,12 @@ pub fn unread<'a>(issues: &'a [Issue], me: &str, seen: &BTreeMap<String, String>
 /// 그 줄이 **내게 온 것**인가 — 제가 내 것이거나, 조상(`부모.자식`)이 내 것이거나, 저나 조상의
 /// 에픽이 내 것이다. 자식은 제 에픽을 따로 안 적고 부모에게서 물려받으므로(`moai add --parent`)
 /// 조상까지 훑어야 내 에픽에 달린 리뷰가 든다.
-fn for_me(i: &Issue, mine: &BTreeSet<&str>, by_id: &BTreeMap<&str, &Issue>) -> bool {
-    std::iter::successors(Some(i.id.as_str()), |id| crate::id::parent_of(id)).any(|id| {
-        mine.contains(id)
-            || by_id.get(id).and_then(|line| line.epic.as_deref()).is_some_and(|epic| mine.contains(epic))
-    })
+///
+/// **`report::claims` 와 같은 걸음이다** — 마일스톤만 안 센다(사용자 결정: 담당·조상·에픽).
+/// 둘이 갈리면 보드가 세는 소속과 [NEW] 가 서는 소속이 어긋나므로, 고칠 때는 같이 고친다.
+fn for_me(i: &Issue, mine: &BTreeSet<&str>, epics: &BTreeMap<&str, &str>) -> bool {
+    std::iter::successors(Some(i.id.as_str()), |id| crate::id::parent_of(id))
+        .any(|id| mine.contains(id) || epics.get(id).is_some_and(|e| mine.contains(*e)))
 }
 
 /// 대소문자를 접어 견준다 — **견줄 때마다 소문자 문자열을 짓지 않는다**(moai-zrzo). 정렬은 줄 수 × log
