@@ -3156,3 +3156,5 @@
 {"ts":"2026-09-15T12:32:50Z","id":"moai-6bc0.e5o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"넘긴 것의 번호: 10 → moai-6s0w, 11·12 → moai-aq6w, 13 → moai-n2ue."}
 {"ts":"2026-09-15T12:32:50Z","id":"moai-6bc0.e5o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"9건 반영(9bcbb40), 넘긴 넷은 moai-6s0w·moai-aq6w·moai-n2ue"}
 {"ts":"2026-09-15T12:32:50Z","id":"moai-ggqf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"에픽 리뷰(xhigh)가 함께 봤다 — 지적 없음. 커밋 442c58f"}
+{"ts":"2026-09-15T12:38:09Z","id":"moai-0dwc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"8b2401e — 못 쓰는 딸린 파일도 건너뛰고 나머지를 심는다, ensure_lines 는 Err 를 안 낸다"}
+{"ts":"2026-09-15T12:38:09Z","id":"moai-ejgp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"8b2401e·0430850 — untouched 가 이름→{kind,why} 를 싣는다(사용자가 리뷰 모양 채택)"}
