@@ -13,7 +13,10 @@ use anstyle::Style;
 use std::collections::BTreeMap;
 
 /// 제목이 이보다 길면 자른다. 표가 접히면 표가 아니다.
-const TITLE_CAP: usize = 44;
+///
+/// **`guide` 의 예시가 이 자를 빌려 쓴다** — 제목을 짧게 쓰라고 가르치는 예시가 제 보드에서
+/// 잘리지 않는지 보려면 숫자를 옮겨 적는 대신 여기를 읽어야 한다.
+pub const TITLE_CAP: usize = 44;
 /// 에픽 열은 곁다리라 더 짧게 자른다.
 const EPIC_CAP: usize = 20;
 /// 진행 막대 칸 수.
