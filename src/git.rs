@@ -7,6 +7,7 @@
 //! 그때그때 읽는다 — 이슈를 닫는 트래커 커밋은 제 해시를 미리 알 수 없고, 적어 둔
 //! 해시는 squash·rebase 한 번에 낡는다. id 로 다시 찾으면 둘 다 없다.
 
+use crate::git_leaks::LEAKS;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -21,39 +22,56 @@ pub enum Error {
 
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 받는다.
 ///
-/// 물려받은 환경은 **그대로 넘긴다** — 사용자가 git 훅 안에서 moai 를 부르면 그 저장소를
-/// 읽는 것이 맞다. 시험 빌드만 `LEAKS` 를 걷는다(moai-g1a3).
+/// **물려받은 환경은 릴리스에서 걷지 않는다** — 걷는 것은 시험 빌드뿐이다([`command`], moai-g1a3).
+/// 그래서 git 훅이나 딸린 워크트리의 `rebase -x` 가 내보낸 `GIT_DIR` 은 `-C root` 를 이긴다. `root` 가 그
+/// 훅이 도는 워크트리의 꼭대기면 같은 저장소라 답이 같지만, 옆 워크트리·다른 저장소·하위 디렉터리의
+/// 트래커를 가리키면 엉뚱한 가지·저장소·꼭대기를 읽는다(리뷰 moai-v9ai.q6f 가 짚었다).
 pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
-    let mut cmd = std::process::Command::new("git");
-    cmd.arg("-C").arg(root).args(args);
-    #[cfg(test)]
-    for var in LEAKS {
-        cmd.env_remove(var);
-    }
-    let out = cmd.output().map_err(Error::Spawn)?;
+    let out = command()
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(Error::Spawn)?;
     if !out.status.success() {
         return Err(Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()));
     }
     String::from_utf8(out.stdout).map_err(Error::NotUtf8)
 }
 
-/// 물려받으면 git 이 바깥 저장소나 바깥 설정을 보게 되는 변수들. git 훅이나
-/// `git rebase -x 'cargo test'` 안에서 git 이 이것들을 내보내고, 그러면 `git -C <임시 저장소>`
-/// 도 `GIT_DIR` 이 가리키는 바깥 저장소를 읽는다. tests/cli.rs 의 `GIT_LEAKS` 와 같은 목록이다 —
-/// 그쪽은 따로 된 크레이트라 이것을 못 가져다 쓴다.
+/// git 을 띄울 명령 — **시험의 git 은 모두 여기서 시작한다.** 시험 빌드만 [`LEAKS`] 를 걷는다.
+///
+/// [`run`] 과 임시 저장소를 만드는 도우미(`isolated`)가 따로 걷으면 걷는 목록이 갈라진다. 한때
+/// 도우미는 셋만 걷고 `run` 은 열을 걷어, pre-receive 훅 안에서는 도우미가 바깥 객체 저장소에 쓰고
+/// `run` 은 임시 저장소를 읽었다(moai-g1a3). `#[cfg(test)]` 가 아니라 `cfg!(test)` 인 것은 릴리스
+/// 빌드에서도 이 코드가 타입 검사를 받게 하려는 것이다.
+pub fn command() -> std::process::Command {
+    let mut cmd = std::process::Command::new("git");
+    if cfg!(test) {
+        for var in LEAKS {
+            cmd.env_remove(var);
+        }
+    }
+    cmd
+}
+
+/// 시험이 임시 저장소를 만들 때 쓰는 git — `dir` 에서 돌고, 커밋할 이름과 기본 가지를 준다.
+///
+/// **돌리는 사람의 git 설정도 안 읽는다**(tests/cli.rs 의 `isolated` 와 같은 자). 전역
+/// `commit.gpgsign` 이면 임시 저장소의 커밋이 서명을 못 해 멈추고, 전역 `core.hooksPath` 면 그 사람의
+/// 훅이 `-m a` 같은 커밋 제목을 막는다.
+///
+/// 걷기는 여기서 끝난다 — 시험이 제 값을 줄 것은 이 뒤에 `.env` 로 덮는다.
 #[cfg(test)]
-pub const LEAKS: &[&str] = &[
-    "GIT_CONFIG_COUNT",
-    "GIT_CONFIG_PARAMETERS",
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_COMMON_DIR",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_NAMESPACE",
-    "GIT_PREFIX",
-];
+pub fn isolated(dir: &Path) -> std::process::Command {
+    let mut cmd = command();
+    cmd.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    cmd
+}
 
 /// 이슈 제목에 id 가 적힌 커밋 하나. `moai show --json` 의 `commits` 가 이 모양 그대로다.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -193,16 +211,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("moai-git-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        // 물려받은 `GIT_DIR` 이 남으면 여기서의 git 이 바깥 저장소를 건드린다(tests/cli.rs 의 `git` 과 같은 까닭).
         let git = |args: &[&str]| {
-            let mut cmd = std::process::Command::new("git");
-            cmd.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
-                .args(args)
-                .current_dir(&dir);
-            for var in LEAKS {
-                cmd.env_remove(var);
-            }
-            let out = cmd.output().unwrap();
+            let out = isolated(&dir).args(args).output().unwrap();
             assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         };
         git(&["init", "-q"]);
@@ -218,23 +228,83 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **git 훅 안에서 돌아도 시험의 git 은 제 임시 저장소만 본다**(moai-g1a3).
+    ///
+    /// 물려받은 환경을 바꿔 보려면 시험을 한 겹 더 띄워야 한다 — 병렬로 도는 시험 안에서 환경을
+    /// 바꾸면 남의 시험까지 바뀐다(tests/cli.rs 의 `tests_do_not_read_the_runners_home` 과 같은 까닭).
+    /// 그래서 훅이 실제로 내보내는 것을 심은 채 이 바이너리를 다시 불러 git 을 부르는 시험들만 돌린다.
+    ///
+    /// **심는 값은 [`LEAKS`] 가 아니라 git 이 훅에 내보낸 모양이다** — 목록에서 한 이름이 빠지면 여기서
+    /// 드러나야 하므로, 목록을 그대로 심으면 아무것도 못 잰다. 걷기가 빠지면 도우미의 커밋이 격리
+    /// 경로(`GIT_QUARANTINE_PATH`)나 바깥 설정의 서명(`GIT_CONFIG_PARAMETERS`)에 막혀 안쪽이 깨진다.
+    /// 가리키는 곳은 이 시험의 임시 디렉터리라, 걷기가 빠져도 바깥 저장소는 안 건드린다.
+    #[test]
+    fn git_tests_see_their_own_repos_inside_a_hook() {
+        let dir = std::env::temp_dir().join(format!("moai-git-hook-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let outer = dir.join("outer.git");
+        let incoming = outer.join("objects/tmp_objdir-incoming");
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            // 이 시험 자신은 뺀다 — 안 그러면 제가 저를 다시 부른다.
+            .args(["git::tests::", "worktree::tests::", "--skip", "git_tests_see_their_own_repos_inside_a_hook"])
+            .env("GIT_DIR", &outer)
+            .env("GIT_INDEX_FILE", outer.join("index"))
+            .env("GIT_OBJECT_DIRECTORY", &incoming)
+            .env("GIT_ALTERNATE_OBJECT_DIRECTORIES", outer.join("objects"))
+            .env("GIT_QUARANTINE_PATH", &incoming)
+            .env("GIT_CONFIG_PARAMETERS", "'commit.gpgsign=true' 'gpg.program=false'")
+            .output()
+            .unwrap();
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(out.status.success(), "훅의 환경에서 git 을 부르는 시험이 깨졌다\n{said}");
+        // 안쪽이 아무것도 안 돌고 초록으로 끝나면 이 시험은 아무것도 안 본 것이다.
+        for ran in ["a_real_log_matches_subjects_not_bodies", "a_moved_head_in_any_worktree_changes_a_watched_stamp"] {
+            assert!(said.contains(&format!("{ran} ... ok")), "안쪽에서 {ran} 가 돌지 않았다\n{said}");
+        }
+    }
+
+    /// **git 은 [`command`] 에서만 띄운다.** 도우미가 따로 띄우면 시험 빌드의 걷기를 못 받아, 훅 안에서
+    /// 그 도우미만 바깥 저장소를 본다 — 0a7b828 이 `run` 만 고쳤을 때 임시 저장소를 만드는 도우미 셋이
+    /// 그렇게 남아 90a0be9 가 셋을 따로 고쳐야 했다. 새 도우미가 또 그러지 않게 소스를 읽어 이름을 댄다.
+    #[test]
+    fn git_is_spawned_only_through_command() {
+        let needle = concat!("Command::new(", "\"git\")");
+        let mut found = Vec::new();
+        let mut dirs = vec![std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().filter_map(Result::ok) {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    for (n, line) in text.lines().enumerate() {
+                        if line.contains(needle) {
+                            found.push(format!("{}:{}", path.display(), n + 1));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(found.len() == 1 && found[0].contains("git.rs:"), "git 을 `git::command` 밖에서 띄운다 — {found:#?}");
+    }
+
     /// 이슈가 생기기 전의 커밋은 걷지 않는다 — 단, 시계가 늦은 기계의 커밋은 하루까지 받는다.
     #[test]
     fn walking_stops_before_the_issue_was_born_but_forgives_a_slow_clock() {
         let dir = std::env::temp_dir().join(format!("moai-git-since-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        // 시계는 걷기 **뒤에** 덮는다 — 순서가 뒤집히면 걷기가 이 시험의 고정 시계를 지운다.
         let git = |at: &str, args: &[&str]| {
-            let mut cmd = std::process::Command::new("git");
-            cmd.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+            let out = isolated(&dir)
                 .args(args)
-                .current_dir(&dir)
                 .env("GIT_AUTHOR_DATE", at)
-                .env("GIT_COMMITTER_DATE", at);
-            for var in LEAKS {
-                cmd.env_remove(var);
-            }
-            let out = cmd.output().unwrap();
+                .env("GIT_COMMITTER_DATE", at)
+                .output()
+                .unwrap();
             assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         };
         git("2026-01-01T00:00:00Z", &["init", "-q"]);

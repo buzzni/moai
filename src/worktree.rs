@@ -764,16 +764,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         let (main, feat) = (base.join("main"), base.join("feat"));
         std::fs::create_dir_all(&main).unwrap();
-        // 물려받은 `GIT_DIR` 이 남으면 여기서의 git 이 바깥 저장소를 건드린다(tests/cli.rs 의 `git` 과 같은 까닭).
         let run = |dir: &Path, args: &[&str]| {
-            let mut cmd = std::process::Command::new("git");
-            cmd.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
-                .args(args)
-                .current_dir(dir);
-            for var in crate::git::LEAKS {
-                cmd.env_remove(var);
-            }
-            let out = cmd.output().unwrap();
+            let out = crate::git::isolated(dir).args(args).output().unwrap();
             assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         };
         run(&main, &["init", "-q"]);
