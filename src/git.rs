@@ -195,15 +195,14 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         // 물려받은 `GIT_DIR` 이 남으면 여기서의 git 이 바깥 저장소를 건드린다(tests/cli.rs 의 `git` 과 같은 까닭).
         let git = |args: &[&str]| {
-            let out = std::process::Command::new("git")
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+            let mut cmd = std::process::Command::new("git");
+            cmd.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
                 .args(args)
-                .current_dir(&dir)
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE")
-                .output()
-                .unwrap();
+                .current_dir(&dir);
+            for var in LEAKS {
+                cmd.env_remove(var);
+            }
+            let out = cmd.output().unwrap();
             assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         };
         git(&["init", "-q"]);
@@ -226,17 +225,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let git = |at: &str, args: &[&str]| {
-            let out = std::process::Command::new("git")
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+            let mut cmd = std::process::Command::new("git");
+            cmd.args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
                 .args(args)
                 .current_dir(&dir)
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE")
                 .env("GIT_AUTHOR_DATE", at)
-                .env("GIT_COMMITTER_DATE", at)
-                .output()
-                .unwrap();
+                .env("GIT_COMMITTER_DATE", at);
+            for var in LEAKS {
+                cmd.env_remove(var);
+            }
+            let out = cmd.output().unwrap();
             assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         };
         git("2026-01-01T00:00:00Z", &["init", "-q"]);
