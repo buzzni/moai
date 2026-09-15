@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:033b2827 -->
+<!-- moai:begin v:0.1.0 hash:322333ec -->
 ## 이슈 트래커 — moai
 
 이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
@@ -22,6 +22,8 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. 승인 게이트가 
 
 모든 명령에 `--json` 이 붙는다. `ready --json` 은 `{"ready":[…],"held":[…]}` —
 `held` 는 미뤄 둔 것·빈 묶음에 막혀 못 집는 일과 도로 집을 곳이다.
+그것으로 사람 없이 도는 고리를 짤 수 있다. moai 저장소의 `examples/bash-agent/agent.sh`
+가 bash 와 jq 만으로 집고·일하고·닫는 한 벌이다.
 
 **담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
 `-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`

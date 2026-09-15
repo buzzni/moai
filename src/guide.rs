@@ -75,7 +75,9 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
     moai defer <id> -m "왜"                지금 안 할 일을 계획에서 뺀다
 
 모든 명령에 `--json` 이 붙는다. `ready --json` 은 `{"ready":[…],"held":[…]}` —
-`held` 는 미뤄 둔 것·빈 묶음에 막혀 못 집는 일과 도로 집을 곳이다."#;
+`held` 는 미뤄 둔 것·빈 묶음에 막혀 못 집는 일과 도로 집을 곳이다.
+그것으로 사람 없이 도는 고리를 짤 수 있다. moai 저장소의 `examples/bash-agent/agent.sh`
+가 bash 와 jq 만으로 집고·일하고·닫는 한 벌이다."#;
 
 const NO_GATE: &str = "승인 게이트가 없다 — 무엇이든 만들고 무엇이든 옮길 수 있다. 사람을 부르지 않는다.";
 
@@ -850,6 +852,21 @@ mod tests {
         {
             let found: String = text.chars().filter(|c| emoji(*c)).collect();
             assert!(found.is_empty(), "{surface} 이 이모지를 쓴다 — {found}");
+        }
+    }
+
+    /// **심는 글이 가리키는 파일은 이 저장소의 것이라고 말한다**(moai-nnda). 이 글은 모든
+    /// 저장소에 심긴다 — 상대 경로로 적으면 남의 저장소에서는 없는 파일을 가리킨다.
+    #[test]
+    fn the_example_link_says_whose_repository_it_is() {
+        let path = "examples/bash-agent/agent.sh";
+        for (surface, text) in [("AGENTS 블록", agents()), ("스킬", skill()), ("참고 문서", reference())] {
+            let Some(at) = text.find(path) else { continue };
+            let before = &text[..at];
+            assert!(
+                before.ends_with("moai 저장소의 `"),
+                "{surface} 이 {path} 를 어느 저장소의 것인지 없이 가리킨다"
+            );
         }
     }
 
