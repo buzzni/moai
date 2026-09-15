@@ -3284,3 +3284,5 @@
 {"ts":"2026-09-15T13:45:12Z","id":"moai-3sn1.7l1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"결함 열 중 여덟 반영(d0391a7), 고도(훅이 막을까 경고할까)는 idea moai-fcyf 로 넘김, 해시 비트 폭은 있던 성질이라 그대로"}
 {"ts":"2026-09-15T13:45:17Z","id":"moai-780n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"a1880ba — 읽기 전용 AGENTS.md 도 건너뛰고 나머지를 심는다(06760ac 로 write_atomic)"}
 {"ts":"2026-09-15T13:45:18Z","id":"moai-2f99","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"f6b7e48·06760ac — 빠진 규칙을 파일마다 알림과 --check 가 비춘다"}
+{"ts":"2026-09-15T13:45:21Z","id":"moai-97ga","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"c6b0a08 로 main 병합"}
+{"ts":"2026-09-15T13:45:21Z","id":"moai-70ip","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"c6b0a08 로 main 병합 — 조사로 끝났고 판은 그대로"}
