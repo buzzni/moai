@@ -34,8 +34,14 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let mut st = report::status(&load.issues, &unreadable, &repo.config, &now);
     // **자리 없는 집은 줄은 여기서만 싣는다**(moai-4370) — 까닭은 `report::stranded`. 치명이 아니라
     // 아래 종료 코드는 안 바뀐다.
-    let trees = crate::worktree::workplaces(&repo.root, &load.issues, &repo.config);
-    st.warnings.extend(report::stranded(&load.issues, &repo.config, &trees, &now));
+    //
+    // **딸린 워크트리에서는 겹쳐 볼 때만 싣는다.** 그 스냅샷은 갈라질 때의 main 이라, 그 뒤 main 에서
+    // 끝내거나 놓은 줄이 거기서는 아직 집혀 있다 — 그것으로 재면 끝난 일을 "자리 없다" 로 대고,
+    // 감독이 그 말대로 남에게 다시 준다. 집기가 적히는 곳은 main 이고, `--worktree` 가 그것을 겹친다.
+    if worktree || !crate::worktree::is_linked(&repo.root) {
+        let trees = crate::worktree::workplaces(&repo.root, &repo.config);
+        st.warnings.extend(report::stranded(&load.issues, &repo.config, &trees, &now));
+    }
 
     if st.broken() {
         super::note_partial();

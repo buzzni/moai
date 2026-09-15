@@ -311,7 +311,7 @@ fn one(
     // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 스냅샷을 다
     // 풀 까닭이 없다. 경로는 저장소 뿌리에서 잰다: 규약의 자리(`.claude/worktrees/<id>`)가 그대로 읽힌다.
     let trees: Vec<report::Workplace> = if report::wip(all, &repo.config).iter().any(|i| i.id == issue.id) {
-        crate::worktree::workplaces(&repo.root, all, &repo.config)
+        crate::worktree::workplaces(&repo.root, &repo.config)
             .into_iter()
             .map(|mut t| {
                 if let Ok(rel) = t.path.strip_prefix(&repo.root) {

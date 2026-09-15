@@ -5703,8 +5703,36 @@ fn status_names_picked_work_with_no_live_worktree_and_still_exits_zero() {
     let json = ok_at(&main, LATER, &["status", "--json"]);
     assert!(json.contains("\"kind\":\"stranded\"") && json.contains(&lost), "{json}");
 
+    // **물려받은 줄은 자리가 아니다**(moai-ir8q.beq). 자리 잃은 줄이 커밋된 뒤 다른 일의 워크트리가
+    // 뜨면 그 스냅샷에도 벌여 놓여 있다 — 그것을 자리로 세면 워크트리가 하나 뜨는 순간 사라진다.
+    // 그 워크트리 안에서 집은 줄은 거기서 만진 흔적이라 자리다 — `--worktree` 로 겹쳐 봐도 그렇다.
+    let there = field(&ok(&main, &["add", "옆에서 할 일", "--json"]), "id");
+    let moved = field(&ok(&main, &["add", "옆에서 집을 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "자리 잃은 줄을 커밋한다"]);
+    let dir = format!(".claude/worktrees/{there}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{there}")]);
+    let side = main.join(&dir);
+    ok_at(&side, "2026-09-11T06:00:00Z", &["mv", &moved, "in_progress"]);
+    let stranded_ids = |json: &str| -> String {
+        json.split("\"kind\":\"stranded\"").nth(1).map(|t| t.split('}').next().unwrap().to_string()).unwrap_or_default()
+    };
+    for args in [&["status", "--json"][..], &["status", "--worktree", "--json"][..]] {
+        let json = ok_at(&main, LATER, args);
+        let ids = stranded_ids(&json);
+        assert!(ids.contains(&lost), "{args:?}: 물려받은 줄로 자리를 댔다\n{json}");
+        assert!(!ids.contains(&moved), "{args:?}: 워크트리 안에서 집은 줄을 자리 없다고 했다\n{json}");
+    }
+
+    // **딸린 워크트리의 스냅샷은 갈라질 때의 main 이다** — 그 뒤 main 에서 놓은 줄이 거기서는 아직
+    // 집혀 있다. 겹쳐 보지 않고 그것으로 재면 끝난 일을 남에게 다시 준다.
+    ok(&main, &["mv", &lost, "todo"]);
+    let json = ok_at(&side, LATER, &["status", "--json"]);
+    assert!(!json.contains("\"stranded\""), "낡은 스냅샷으로 자리 없는 줄을 댔다\n{json}");
+
     // 워크트리를 치우면 그 일도 자리를 잃는다. 워크트리가 하나도 없으면 조용하다 — 그때는 main 에서 일한다.
     git(&main, &["worktree", "remove", "--force", &inside.display().to_string()]);
+    git(&main, &["worktree", "remove", "--force", &side.display().to_string()]);
     let json = ok_at(&main, LATER, &["status", "--json"]);
     assert!(!json.contains("\"stranded\""), "워크트리를 안 쓰는 저장소에서 떠들었다\n{json}");
 }

@@ -454,9 +454,10 @@ fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) 
         .issues
         .iter()
         .filter(|i| {
+            // 여기에 없는 줄은 그 워크트리에서 세운 것이다 — 그것도 만진 흔적이다.
             by_id
                 .get(i.id.as_str())
-                .is_some_and(|m| (i.planned(), i.updated_at.as_str()) > (m.planned(), m.updated_at.as_str()))
+                .is_none_or(|m| (i.planned(), i.updated_at.as_str()) > (m.planned(), m.updated_at.as_str()))
         })
         .map(|i| i.id.clone())
         .collect();
@@ -468,8 +469,18 @@ fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) 
 /// main 워크트리는 안 든다 — 모두의 집기가 모이는 자리라 거기 선 줄은 "어디서 하는가" 에 답이
 /// 안 된다. 제 워크트리는 이름만 싣고 스냅샷은 안 읽는다([`crate::report::Workplace::holds`]).
 /// 파일만 읽는다. 저장소가 아니면 비어 있다.
-pub fn workplaces(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> Vec<crate::report::Workplace> {
+///
+/// **"늦게 만진 줄" 은 제 스냅샷 파일에 대어 잰다** — 부르는 쪽이 든 줄이 아니다. `--worktree` 로
+/// 겹친 줄은 옆에서 늦은 줄을 이미 제 것으로 삼아, 그것에 대면 옆이 만진 흔적이 하나도 안 남는다:
+/// 옆 워크트리에서 집은 줄이 겹쳐 본 순간에만 자리 없다고 선다. 제 파일을 못 읽으면 옆의 줄이
+/// 다 만진 흔적이 된다 — 자리를 넉넉히 대는 쪽으로 틀린다.
+pub fn workplaces(root: &Path, cfg: &crate::config::Config) -> Vec<crate::report::Workplace> {
     let Some(disk) = on_disk(root) else { return Vec::new() };
+    let own = crate::store::read_snapshot(&root.join(".moai").join("issues.jsonl"));
+    let mine: &[Issue] = match &own {
+        Ok(Some(load)) => &load.issues,
+        _ => &[],
+    };
     disk.all
         .iter()
         .filter(|(_, linked, _)| *linked)
