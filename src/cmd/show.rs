@@ -361,13 +361,15 @@ fn one(
         // 생각은 거기서 빠진다 — 찾으려면 `moai show --type idea -e <에픽>`. 한때
         // 여기만 에픽에 한해 제 `epic` 을 적은 줄을 내, 마일스톤은 키가 없고
         // 물려받은 자식은 화면에만 있었다(moai-qizs).
-        let members: Vec<&str> =
-            report::group_members(all, issue).iter().map(|m| m.id.as_str()).collect();
         let mut extra = vec![
             ("children", serde_json::to_string(&ids).map_err(|e| Fail::new(e.to_string()))?),
             ("journal", serde_json::to_string(&journal).map_err(|e| Fail::new(e.to_string()))?),
         ];
+        // **묶음일 때만 멤버를 고른다** — `group_members` 는 저장소 전체로 지도를 짓는다. 일 하나를
+        // `--json` 으로 펼치는 흔한 길에서 그것을 짓고 버리던 자리다.
         if report::is_group(issue) {
+            let members: Vec<&str> =
+                report::group_members(all, issue).iter().map(|m| m.id.as_str()).collect();
             extra.push((
                 "members",
                 serde_json::to_string(&members).map_err(|e| Fail::new(e.to_string()))?,

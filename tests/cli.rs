@@ -5968,12 +5968,27 @@ fn status_reads_a_side_snapshot_only_when_a_place_is_still_missing() {
     let out = isolated(BIN).arg("status").current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
     let said = String::from_utf8(out.stderr).unwrap();
     assert!(said.contains("못 읽었다") && said.contains("agent-x"), "못 읽은 워크트리를 말하지 않았다\n{said}");
+    // **떠들어도 0 으로 끝난다** — 이것은 남의 워크트리의 문제고, `moai status` 는 아무것도 막지
+    // 않는다(CLAUDE.md). 비영으로 끝나는 순간 에이전트가 이것을 고장으로 읽는다.
+    assert!(out.status.success(), "못 읽은 워크트리로 비영 종료했다");
     // **못 읽은 워크트리가 있으면 자리 없다고 단정하지 않는다**(moai-lt7h) — 거기일 수 있다.
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(!text.contains("일하는 워크트리가 없는"), "모르는 것을 자리 없음으로 셌다\n{text}");
     let out = ok_at(&main, LATER, &["show", &lost]);
     assert!(out.contains("자리   모른다"), "{out}");
     assert!(ok_at(&main, LATER, &["show", &lost, "--json"]).contains("\"place\":\"unknown\""));
+    // **기계도 같은 것을 가른다**(리뷰 moai-ya06) — `stranded` 가 조용한 것이 "자리 잃은 일이
+    // 없다" 인지 "못 셌다" 인지를 `--json` 만 읽는 쪽도 알아야 한다. 감독 스킬이 이 목록으로 죽은
+    // 세션의 일을 거두므로, 그 침묵이 곧 일을 영영 안 거두는 것이 된다.
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(!json.contains("\"stranded\""), "모르는 것을 자리 없음으로 셌다\n{json}");
+    // 가지와 **경로를 함께** 낸다 — 떼어 낸 HEAD 는 이름이 커밋 앞 일곱 자라 가지만으로는 두
+    // 워크트리가 글자까지 같아진다. 경로는 `show` 와 같이 꼭대기에서 줄여 절대 경로를 안 낸다.
+    assert!(
+        json.contains(r#""unreadable_worktrees":[{"path":".claude/worktrees/agent-x","branch":"worktree-agent-x"}]"#),
+        "기계에게는 안 댔다\n{json}"
+    );
+    assert!(!json.contains(&main.display().to_string()), "기계의 절대 경로가 그대로 나갔다\n{json}");
 
     // **겹쳐 볼 때는 같은 워크트리를 두 번 말하지 않는다** — `--worktree` 면 `gather` 가 옆 스냅샷을
     // 빠짐없이 열어 `⎇ <가지>: …` 로 이미 냈다. 두 줄로 내면 보드의 `옆 워크트리 문제 N건` 이
@@ -5990,6 +6005,47 @@ fn status_reads_a_side_snapshot_only_when_a_place_is_still_missing() {
     std::fs::copy(main.join(".moai/issues.jsonl"), &broken).unwrap();
     let text = ok_at(&main, LATER, &["status"]);
     assert!(text.contains("일하는 워크트리가 없는 것 1건") && text.contains(&lost), "{text}");
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(!json.contains("unreadable_worktrees"), "다 읽었는데 못 읽었다고 했다\n{json}");
+}
+
+/// **`gather` 가 실제로 셌을 때만 입을 다문다**(리뷰 moai-ya06). `--worktree` 면 그쪽이 같은
+/// 워크트리를 `⎇ <가지>: …` 로 이미 내므로 여기서는 안 내는데, 그 전제는 **`gather` 가 옆을
+/// 셀 수 있었을 때만** 선다 — 저쪽은 git 을 불러 세고(`others_of`) 이쪽은 git 이 적어 둔 파일만
+/// 읽으므로(`on_disk`), git 이 없으면 저쪽은 "못 찾았다" 한 줄만 내고 워크트리를 한 곳도 안
+/// 대는데 이쪽은 그대로 찾아 낸다. 그때까지 입을 다물면 깨진 워크트리를 아무도 말하지 않고
+/// `stranded` 까지 조용해진다.
+#[test]
+fn overlaying_without_git_still_names_an_unreadable_worktree() {
+    let s = Scratch::new("placenogit");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "처음"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-x", "-b", "worktree-agent-x"]);
+    // 워크트리가 갈라진 **뒤에** 집는다 — 옆 스냅샷에는 없으니 이름으로도 스냅샷으로도 안 잡힌다.
+    let lost = field(&ok(&main, &["add", "자리 없는 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+    let broken = main.join(".claude/worktrees/agent-x/.moai/issues.jsonl");
+    std::fs::remove_file(&broken).unwrap();
+    std::fs::create_dir(&broken).unwrap();
+
+    // git 을 못 부르게 한다 — `gather` 는 옆을 못 세고, `workplaces` 는 파일로 그대로 센다.
+    let empty = s.path().join("nogit");
+    std::fs::create_dir_all(&empty).unwrap();
+    let out = isolated(BIN)
+        .args(["status", "--worktree"])
+        .current_dir(&main)
+        .env("PATH", &empty)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert!(out.status.success(), "git 이 없다고 비영 종료했다\n{said}");
+    assert!(said.contains("못 읽었다") && said.contains("agent-x"), "아무도 깨진 워크트리를 안 댔다\n{said}");
 }
 
 /// **팔지 말지는 부르는 쪽이 거는 줄로 잰다**(moai-7igy). 겹쳐 보는 쪽(`--worktree`)은 옆에서
