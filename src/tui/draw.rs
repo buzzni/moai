@@ -81,15 +81,18 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 굴리지 않는다. 격자에 줄 높이는 몸통의 몫([`menu::BODY_MIN`])을 먼저 남기고 정하고, 그것도
     // 없으면 격자 없이 접두어 줄 한 줄로 접는다([`menu_line`]).
     let area = f.area();
+    // 헤더는 짧은 터미널에서는 서지 않는다 — 여섯 줄을 내주면 목록이 한두 줄만 남는다.
+    // **격자보다 먼저 센다** — 격자가 몸통에 [`menu::BODY_MIN`] 을 남기는지는 헤더를
+    // 뺀 높이로 따져야 한다. 지금은 [`menu::MAX_ROWS`] 가 먼저 걸려 답이 같지만,
+    // 그 상한이 올라가는 날 헤더 몫만큼 몸통을 덜 남기고도 격자가 선다.
+    let header_h = if area.height >= HEADER_MIN_H { HEADER_H } else { 0 };
     let open_menu = (matches!(app.mode, Mode::Browse) && menu::open(&app.chord)).then(|| {
         let items = menu::entries(app.chord.held(), &app.key_ctx(&rows), &app.cfg.statuses);
-        let left = area.height.saturating_sub(1 + banner_h + keys_h) as usize;
+        let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
         let grid = menu::grid(&items, (area.width as usize).saturating_sub(2), menu::rows_for(left));
         (items, grid)
     });
     let panel_h = open_menu.as_ref().map_or(0, |(_, g)| if g.rows == 0 { 0 } else { g.rows as u16 + 1 });
-    // 헤더는 짧은 터미널에서는 서지 않는다 — 여섯 줄을 내주면 목록이 한두 줄만 남는다.
-    let header_h = if area.height >= HEADER_MIN_H { HEADER_H } else { 0 };
     let [head, top, note, body, panel, keys] = Layout::vertical([
         Constraint::Length(header_h),
         Constraint::Length(1),
