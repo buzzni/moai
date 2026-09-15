@@ -2634,3 +2634,4 @@
 {"ts":"2026-09-15T06:22:34Z","id":"moai-y61p.hyq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"대상 커밋 바로잡음: 이 에픽의 것은 4b069c1(m1ym) 77f0dc0(u8cs) d7e2bb7(zrzo) 셋이다 — b6ec00a·579d746 은 옆 세션의 커밋이라 뺀다."}
 {"ts":"2026-09-15T06:24:31Z","id":"moai-y61p.hyq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 워크트리 worktree-moai-y61p-review 에 /code-review max --fix 가 도는 중(4b069c1 77f0dc0 d7e2bb7). 결과 반영(fix 커밋) → 원문·판단 노트 → main 머지 → 이 리뷰 done → 워크트리 치우기."}
 {"ts":"2026-09-15T06:29:47Z","id":"moai-emcv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (37d45a2) — show <id> 상세의 커밋 칸과 --json commits. 리뷰 moai-emcv.q3a 반영(b6ec00a), 넘긴 것 없음. 느린 저장소 상한은 moai-mauw"}
+{"ts":"2026-09-15T06:30:32Z","id":"moai-mauw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
