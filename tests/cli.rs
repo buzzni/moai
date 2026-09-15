@@ -3930,8 +3930,14 @@ fn json_tells_no_commits_apart_from_no_git() {
     assert!(outside.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{outside}");
     assert!(outside.contains(r#""commits_error":"#), "git 을 못 읽은 까닭이 없다\n{outside}");
 
-    // 저장소이고 이력도 있지만 이 이슈를 댄 커밋은 없다 — 빈 배열만, 까닭은 없다.
+    // 갓 만든 저장소 — **커밋이 하나도 없는 것은 실패가 아니다.** `git log HEAD` 가 죽는 자리라
+    // 그대로 두면 `commits_error` 가 "여기서는 못 물어봤다" 로 서서 받는 쪽이 정반대로 읽는다.
     git(s.path(), &["init", "-q"]);
+    let unborn = ok(s.path(), &["show", &id, "--json"]);
+    assert!(unborn.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{unborn}");
+    assert!(!unborn.contains("commits_error"), "커밋 없는 저장소를 못 읽은 것으로 냈다\n{unborn}");
+
+    // 저장소이고 이력도 있지만 이 이슈를 댄 커밋은 없다 — 빈 배열만, 까닭은 없다.
     git_at(s.path(), NOW, &["commit", "-q", "--allow-empty", "-m", "chore: 아무 id 도 안 대는 커밋"]);
     let none = ok(s.path(), &["show", &id, "--json"]);
     assert!(none.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{none}");
