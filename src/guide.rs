@@ -60,6 +60,35 @@ pub fn close_steps(id: &str) -> String {
     REVIEW_STEPS.lines().skip(1).map(|l| l.replace("<id>", id)).collect::<Vec<_>>().join("\n")
 }
 
+/// 난이도 한 낱말 — **모델과 리뷰 등급을 함께 정하는 그 축**이다. 낱말·모델·잣대 셋.
+///
+/// 감독이 읽는 표와 일꾼이 받는 글이 같은 잣대를 두 벌 적으면 한쪽만 고쳐도 아무도
+/// 안 붉어진다 — 실제로 두 벌이 서 있었고 이미 낱말이 갈라져 있었다. 두 표면 모두
+/// 여기서 글을 받는다.
+pub const DIFFICULTY: [(&str, &str, &str); 3] = [
+    ("low", "haiku", "글·주석·한 줄 고침, 동작이 안 바뀐다"),
+    ("medium", "sonnet", "한 파일 안의 동작 변경, 시험으로 둘러싸인 것"),
+    ("high", "opus", "여러 파일·쓰기 경로·저장 형식·훅, 되돌리기 어려운 것"),
+];
+
+/// 감독이 읽는 표의 줄들. 머리(`| 난이도 | …`)는 표면이 적는다.
+fn difficulty_rows() -> String {
+    DIFFICULTY
+        .iter()
+        .map(|(level, model, how)| format!("| `{level}` | {how} | `{model}` | `{level}` |"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 일꾼이 받는 글의 잣대. 모델 칸은 뺀다 — 일꾼의 모델은 머리의 `모델:` 줄이 준다.
+fn difficulty_rubric(by: &str) -> String {
+    DIFFICULTY
+        .iter()
+        .map(|(level, _, how)| format!("{by}`{level}` — {how}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 const CHEATSHEET: &str = r#"    moai status                            보드 · 경고 · 흐름 (세션은 여기서 시작)
     moai ready                             지금 집을 수 있는 일
     moai show <id>                         본문·자식·이력. 왜 그렇게 정했는지가 여기 있다
@@ -605,6 +634,7 @@ print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
 /// 남의 저장소에서 그 id 는 아무것도 안 가리키고 고친 뒤에는 거짓이 된다.
 pub fn supervise() -> String {
     let brief = brief();
+    let rows = difficulty_rows();
     format!(
         r#"---
 name: moai-supervise
@@ -666,6 +696,8 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
 
       감독 세션(<내 이름>)이 <에픽> 의 멈춘 일을 맡긴다 — 앞 세션이 끝을 못 냈다.
       먼저 읽을 것: moai show <에픽> (이력·노트) · moai show <멤버> (자리도 — 자리는 일에만 선다)
+      모델: <모델> (<등급> — <까닭>) — 2-1 에서 고른 제안이다. 읽어 보니 더 어려우면
+         `/model` 로 한 단계 올린다(haiku → sonnet → opus). 잇는 글의 9-1 이 이것을 남긴다
       본 가지: <본 가지> — 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다
       루트: <루트> — 2 의 `루트 자리`. 트래커를 고치는 것은 언제나 이 자리다(3 의 글의 4-1)
       - 워크트리가 있으면 EnterWorktree(path) 로 들어가 `git log <본 가지>..HEAD` 와
@@ -757,18 +789,19 @@ PY
 
 | 난이도 | 무엇으로 재나 | 모델 | 리뷰 |
 |---|---|---|---|
-| `low` | 글·주석·한 줄 고침, 동작이 안 바뀐다 | `haiku` | `low` |
-| `medium` | 한 파일 안의 동작 변경, 시험으로 둘러싸인 것 | `sonnet` | `medium` |
-| `high` | 여러 파일·쓰기 경로·저장 형식·훅, 되돌리기 어려운 것 | `opus` | `high` |
+{rows}
 
 에픽 끝의 리뷰(`xhigh`·`max`)는 언제나 `opus` 다 — 멤버마다 싸게 지나갔어도 한 번은 비싼
 눈으로 전체를 본다. **망설여지면 한 단계 올린다.** 감독은 코드를 읽기 전에 고르므로 이것은
 제안이고, 마지막 자는 이슈를 읽은 일꾼이다.
 
 **3. 보낸다.** 놀고 있는 세션 하나에 idea **하나**를 `SendMessage` 로 보낸다.
-일꾼은 이 대화를 모르니 아래 글을 `<내 이름>`·`<id>`·`<제목>`·`<본 가지>`·`<루트>` 를 채워
+일꾼은 이 대화를 모르니 아래 글을
+`<내 이름>`·`<id>`·`<제목>`·`<본 가지>`·`<모델>`·`<등급>`·`<까닭>`·`<루트>` 를 채워
 **통째로** 싣는다 — 일꾼이 받는 것은 이 글뿐이라, 일꾼이 지킬 것은 모두 이 안에 있다.
 `<루트>` 는 2 의 `루트 자리` 다. **안 채우면** 일꾼이 워크트리 안에서 제 자리를 루트로 읽는다.
+`<모델>`·`<등급>`·`<까닭>` 은 2-1 에서 고른 짝과 그 까닭이다. **안 채우면** 그 자리표시자가
+그대로 실려, 일꾼이 닫을 때 남기는 노트가 무엇이 일했는지 대신 `<모델>` 이라고 적는다.
 
 {brief}
 
@@ -827,11 +860,12 @@ PY
 fn brief() -> String {
     let review = make_review("--parent <에픽>");
     let close = indent(&close_steps("<리뷰 id>"), "       ");
+    let rubric = difficulty_rubric("       ");
     format!(
         r#"    감독 세션(<내 이름>)이 idea <id> 를 맡긴다 — <제목>.
     먼저 읽을 것: moai show <id>
     모델: <모델> (<등급> — <까닭>) — 난이도로 고른 제안이다. 읽어 보니 더 어려우면
-       한 단계 올린다(haiku → sonnet → opus). 리뷰 등급도 같은 축이다
+       `/model` 로 한 단계 올린다(haiku → sonnet → opus). 리뷰 등급도 같은 축이다
     본 가지: <본 가지> — 아래의 가지 이름이다. 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다
     1. 루트에서 펼친다 — idea 를 일감으로 바꾸는 길은 `moai idea promote <id> --from -`
        하나다. 이슈 하나짜리여도 에픽 + 이슈로 펼친다. `--dry-run` 을 먼저 본다.
@@ -859,10 +893,10 @@ fn brief() -> String {
        적은 적이 있다. 이미 적었으면 `git checkout -- .moai` 로 되돌리고, 그 줄이 이미
        커밋됐으면 그 커밋까지 되돌린 뒤 루트에서 다시 담는다
     5. 리뷰 이슈를 세워(규칙 3) `/code-review <등급> --fix`. 등급은 개발한 난이도로
-       `low`·`medium`·`high` 에서 고른다 — 글·한 줄은 low, 한 파일 안의 동작은 medium,
-       여러 파일·쓰기 경로·저장 형식·훅은 high. 망설여지면 한 단계 올리고, 고른 등급과
-       까닭은 관점(`-b`)에 한 줄로 적는다. 반영은 별도 fix: 커밋,
-       넘긴 것은 이슈 번호와 함께 노트.
+       `low`·`medium`·`high` 에서 고른다 — 머리의 모델을 고른 그 잣대다.
+{rubric}
+       망설여지면 한 단계 올리고, 고른 등급과 까닭은 관점(`-b`)에 한 줄로 적는다.
+       반영은 별도 fix: 커밋, 넘긴 것은 이슈 번호와 함께 노트.
        루트에서 세우거나 집은 리뷰 이슈를 워크트리의 훅이 못 봐서 막힐 때만 — 훅은 그
        워크트리의 스냅샷만 읽는다 — 같은 관점·단계·`--fix` 범위로 리뷰 서브에이전트를
        돌린다. 리뷰 이슈·관점(`-b`)·원문 노트·닫는 `-m` 은 그대로 남긴다. 관점이 없다
@@ -1186,14 +1220,32 @@ mod tests {
                 .lines()
                 .find(|l| l.starts_with("| `") && l.contains(&format!("`{level}`")))
                 .unwrap_or_else(|| panic!("난이도 {level} 의 줄이 표에 없다"));
-            assert!(row.contains(model), "{level} 의 짝이 {model} 이 아니다 — {row}");
+            // **칸째로 맨다.** 그냥 `contains` 로 재면 잣대 글에 `opus` 가 한 번 들기만 해도
+            // 모델 칸이 비어 있는 채로 지나간다.
+            assert!(row.contains(&format!("| `{model}` |")), "{level} 의 짝이 {model} 이 아니다 — {row}");
         }
         assert!(supervise.contains("모델"), "감독이 모델을 고른다는 말이 없다");
-        // 에픽 끝은 멤버마다 싸게 지나갔어도 한 번은 비싼 눈으로 본다.
-        let end = supervise.find("xhigh").expect("에픽 끝 등급이 표 둘레에 없다");
-        assert!(supervise[end..].lines().next().unwrap_or_default().contains("opus"), "에픽 끝 리뷰가 opus 가 아니다");
-        // 일꾼이 받는 글에 그 자리가 있어야 감독이 채운다.
+        // 에픽 끝은 멤버마다 싸게 지나갔어도 한 번은 비싼 눈으로 본다. **브리프 앞에서만
+        // 찾는다** — 브리프에도 `xhigh` 가 있어, 표 둘레에서 이 줄이 사라지면 첫 자리가
+        // 브리프로 미끄러져 엉뚱한 줄을 재고도 초록이 된다.
+        let head = &supervise[..supervise.find(&brief).expect("감독이 싣는 글이 brief 가 아니다")];
+        let end = head.find("xhigh").expect("에픽 끝 등급이 표 둘레에 없다");
+        assert!(head[end..].lines().next().unwrap_or_default().contains("opus"), "에픽 끝 리뷰가 opus 가 아니다");
+        // 일꾼이 받는 글에 그 자리가 있어야 감독이 채운다. 감독이 채울 것에 들지 않으면
+        // 자리표시자가 그대로 실린다.
         assert!(brief.contains("모델:"), "브리프에 모델 자리가 없다 — 감독이 골라도 일꾼은 모른다");
+        for slot in ["<모델>", "<등급>", "<까닭>"] {
+            assert!(
+                head.contains(&format!("`{slot}`")),
+                "감독이 채울 자리 목록에 {slot} 가 없다 — 그대로 실려 노트에 자리표시자가 남는다"
+            );
+        }
+        // **잣대는 한 벌이다.** 표와 일꾼이 받는 글이 같은 낱말에서 나오는지 본다 —
+        // 한쪽에 손으로 다시 적으면 여기서 붉어진다.
+        for (level, _, how) in DIFFICULTY {
+            assert!(supervise.contains(how), "감독의 표에 {level} 의 잣대가 없다 — {how}");
+            assert!(brief.contains(how), "일꾼이 받는 글에 {level} 의 잣대가 없다 — {how}");
+        }
     }
 
     /// **일꾼이 마지막 자이고, 일한 모델은 닫을 때 남는다**(moai-lzfq, 2026-09-15 사용자 결정).
@@ -1204,16 +1256,26 @@ mod tests {
     #[test]
     fn the_worker_may_raise_the_model_and_records_it_when_closing() {
         let brief = brief();
-        assert!(brief.contains("한 단계 올린다"), "일꾼이 모델을 올릴 길이 없다");
-        // 올린 까닭이 남아야 다음 사람이 그 판단을 읽는다.
-        let raise = brief.find("한 단계 올린다").expect("올리는 자리가 없다");
-        assert!(brief[raise..].contains("까닭"), "올린 까닭을 남기라는 말이 없다 — {}", &brief[raise..raise + 120.min(brief.len() - raise)]);
+        // **올리는 길이 명령으로 선다.** "올린다" 만 적으면 일꾼이 무엇을 쳐야 하는지
+        // 모르고, 그러면 9-1 의 노트는 실제로 일한 것이 아니라 바람을 적는다.
+        let raise = brief.find("한 단계 올린다").expect("일꾼이 모델을 올릴 길이 없다");
+        // 알리는 글은 **글자로 자른다** — 바이트로 자르면 한글 한가운데서 끊겨, 실패를
+        // 알리려던 자리가 제가 먼저 죽는다.
+        assert!(
+            brief[..raise].contains("`/model`"),
+            "무엇으로 올리는지가 없다 — {}",
+            brief[raise..].chars().take(40).collect::<String>()
+        );
         // **닫는 자리에 선다** — 일이 끝난 뒤라야 무엇이 실제로 그 일을 했는지 안다.
+        // 위아래 둘 다 맨다: 아래만 재던 판은 노트를 보고 뒤 어디로 옮겨도 초록이었다.
         let note = brief.find("model:").expect("일한 모델을 남기는 걸음이 없다");
         let done = brief.find("moai mv <멤버> done").expect("멤버를 닫는 걸음이 없다");
-        assert!(note > done.saturating_sub(400), "모델 노트가 닫는 자리에서 멀다");
-        // `moai note` 로 남긴다. 워크트리에서 부르는 줄이지만 `-C <루트>` 는 4-1 이 한 번만
-        // 말한다 — 줄마다 박으면 그 규칙이 바뀌는 날 고칠 자리가 브리프 곳곳에 흩어진다.
+        assert!(note < done && done - note < 400, "모델 노트가 닫는 자리에서 멀다");
+        // 올린 까닭이 남아야 다음 사람이 그 판단을 읽는다 — 그 자리는 이 노트다.
+        let line = brief[note..].lines().next().unwrap_or_default();
+        assert!(line.contains("<까닭>"), "노트에 까닭 자리가 없다 — {line}");
+        // `moai note` 로 남긴다. 9-1 은 8 에서 루트로 돌아오고 9 에서 워크트리를 지운
+        // 뒤라 맨 `moai` 가 맞다 — 4-1 의 `-C <루트>` 는 워크트리 안에서만 드는 규칙이다.
         let line = brief[..note].lines().last().unwrap_or_default();
         assert!(line.trim().starts_with("moai note "), "노트가 아닌 것으로 남긴다 — {line}");
     }
