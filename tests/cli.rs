@@ -5933,6 +5933,119 @@ fn picked_in_a_worktree(s: &Scratch) -> (PathBuf, PathBuf, String) {
     (main, inside, id)
 }
 
+/// **집었는데 일하는 워크트리가 없는 줄은 `status` 가 비춘다**(moai-4370) — 세션이 죽어도 칸은
+/// `in_progress` 로 남는다. 막지 않는다: 종료 코드는 0 이고 `--json` 의 `warnings` 에 선다. 워크트리가
+/// 뜬 일은 안 세고, 방금 집은 일은 워크트리가 뜰 틈을 준다.
+#[test]
+fn status_names_picked_work_with_no_live_worktree_and_still_exits_zero() {
+    let s = Scratch::new("stranded");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let lost = field(&ok(&main, &["add", "세션이 죽은 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+
+    // 방금 집은 일은 아직 안 센다.
+    let out = ok(&main, &["status"]);
+    assert!(!out.contains("일하는 워크트리가 없는"), "워크트리가 뜰 틈을 안 줬다\n{out}");
+
+    let out = isolated(BIN).arg("status").current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
+    assert!(out.status.success(), "경고로 비영 종료했다");
+    let text = String::from_utf8(out.stdout).unwrap();
+    let block: String = text.split("집었는데 일하는 워크트리가 없는 것 1건").nth(1).expect(&text).split("\n\n").next().unwrap().into();
+    assert!(block.contains(&lost) && !block.contains(&id), "워크트리가 뜬 일까지 셌다\n{text}");
+    assert!(block.contains("moai mv <id> todo"), "고칠 손을 안 댔다\n{text}");
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(json.contains("\"kind\":\"stranded\"") && json.contains(&lost), "{json}");
+
+    // **물려받은 줄은 자리가 아니다**(moai-ir8q.beq). 자리 잃은 줄이 커밋된 뒤 다른 일의 워크트리가
+    // 뜨면 그 스냅샷에도 벌여 놓여 있다 — 그것을 자리로 세면 워크트리가 하나 뜨는 순간 사라진다.
+    // 그 워크트리 안에서 집은 줄은 거기서 만진 흔적이라 자리다 — `--worktree` 로 겹쳐 봐도 그렇다.
+    let there = field(&ok(&main, &["add", "옆에서 할 일", "--json"]), "id");
+    let moved = field(&ok(&main, &["add", "옆에서 집을 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "자리 잃은 줄을 커밋한다"]);
+    let dir = format!(".claude/worktrees/{there}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{there}")]);
+    let side = main.join(&dir);
+    ok_at(&side, "2026-09-11T06:00:00Z", &["mv", &moved, "in_progress"]);
+    let stranded_ids = |json: &str| -> String {
+        json.split("\"kind\":\"stranded\"").nth(1).map(|t| t.split('}').next().unwrap().to_string()).unwrap_or_default()
+    };
+    for args in [&["status", "--json"][..], &["status", "--worktree", "--json"][..]] {
+        let json = ok_at(&main, LATER, args);
+        let ids = stranded_ids(&json);
+        assert!(ids.contains(&lost), "{args:?}: 물려받은 줄로 자리를 댔다\n{json}");
+        assert!(!ids.contains(&moved), "{args:?}: 워크트리 안에서 집은 줄을 자리 없다고 했다\n{json}");
+    }
+
+    // **딸린 워크트리의 스냅샷은 갈라질 때의 main 이다** — 그 뒤 main 에서 놓은 줄이 거기서는 아직
+    // 집혀 있다. 겹쳐 보지 않고 그것으로 재면 끝난 일을 남에게 다시 준다.
+    ok(&main, &["mv", &lost, "todo"]);
+    let json = ok_at(&side, LATER, &["status", "--json"]);
+    assert!(!json.contains("\"stranded\""), "낡은 스냅샷으로 자리 없는 줄을 댔다\n{json}");
+
+    // 워크트리를 치우면 그 일도 자리를 잃는다. 워크트리가 하나도 없으면 조용하다 — 그때는 main 에서 일한다.
+    git(&main, &["worktree", "remove", "--force", &inside.display().to_string()]);
+    git(&main, &["worktree", "remove", "--force", &side.display().to_string()]);
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(!json.contains("\"stranded\""), "워크트리를 안 쓰는 저장소에서 떠들었다\n{json}");
+}
+
+/// **`show <id>` 는 집은 줄이 어느 워크트리에서 돌고 있는지 댄다**(moai-6opu) — 이어받는 세션이
+/// 그 자리로 들어가면 된다. 자리 없는 집은 줄은 그렇다고 말한다. 안 집은 줄과 워크트리를 안 쓰는
+/// 저장소에는 줄을 안 세운다. `--json` 도 같은 것을 `workplaces` 로 낸다.
+#[test]
+fn show_names_the_worktree_a_picked_row_lives_in() {
+    let s = Scratch::new("showplace");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let lost = field(&ok(&main, &["add", "세션이 죽은 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+    let idle = field(&ok(&main, &["add", "안 집은 일", "--json"]), "id");
+
+    let place = |out: &str| -> String {
+        out.lines()
+            .find(|l| l.trim_start().starts_with("자리"))
+            .unwrap_or_else(|| panic!("자리 줄이 없다\n{out}"))
+            .to_string()
+    };
+    let out = ok(&main, &["show", &id]);
+    let line = place(&out);
+    assert!(line.contains(&format!(".claude/worktrees/{id}")) && line.contains(&format!("worktree-{id}")), "{line}");
+    // **경로는 뿌리에서 잰 것이다** — 절대 경로가 그대로 나가면 위의 `contains` 도 지나가므로 여기서 못박는다.
+    assert!(!line.contains(&main.display().to_string()), "뿌리에서 안 잘랐다\n{line}");
+    let json = ok(&main, &["show", &id, "--json"]);
+    assert!(json.contains("\"workplaces\":[{") && json.contains(&format!("\"branch\":\"worktree-{id}\"")), "{json}");
+
+    let out = ok(&main, &["show", &lost]);
+    assert!(out.contains("자리   없다"), "자리 없는 줄을 말하지 않았다\n{out}");
+    assert!(ok(&main, &["show", &lost, "--json"]).contains("\"workplaces\":[]"));
+
+    let out = ok(&main, &["show", &idle]);
+    assert!(!out.contains("자리"), "안 집은 줄에 자리를 세웠다\n{out}");
+    assert!(!ok(&main, &["show", &idle, "--json"]).contains("workplaces"));
+
+    // **제 워크트리 안에서 펼쳐도 자리는 빈 칸이 아니다** — 뿌리와 같은 자리라 잘라 내면 아무것도
+    // 안 남는다. 딸린 워크트리는 `--worktree` 로 겹쳐 봐야 자리를 잰다.
+    let line = place(&ok(&inside, &["show", &id, "--worktree"]));
+    assert!(line.split_whitespace().nth(1).is_some_and(|p| !p.starts_with('(')), "자리 칸이 비었다\n{line}");
+    assert!(!ok(&inside, &["show", &id, "--worktree", "--json"]).contains("\"path\":\"\""));
+
+    // **겹쳐 보지 않은 딸린 워크트리는 자리를 말하지 않는다**(moai-4370 과 같은 까닭) — 그 스냅샷은
+    // 갈라질 때의 main 이라, main 이 놓은 줄을 거기서는 아직 집힌 것으로 보고 "자리 없다" 로 댄다.
+    let there = field(&ok(&main, &["add", "옆에서 할 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "자리 잃은 줄을 커밋한다"]);
+    let dir = format!(".claude/worktrees/{there}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{there}")]);
+    let side = main.join(&dir);
+    ok_at(&main, LATER, &["mv", &lost, "todo"]);
+    let out = ok(&side, &["show", &lost]);
+    assert!(!out.contains("자리"), "낡은 스냅샷으로 자리를 댔다\n{out}");
+    assert!(!ok(&side, &["show", &lost, "--json"]).contains("workplaces"));
+    // 겹쳐 보면 main 의 칸이 들어와 아예 집은 줄이 아니다 — 그때도 "자리 없다" 는 안 선다.
+    let out = ok(&side, &["show", &lost, "--worktree"]);
+    assert!(!out.contains("자리"), "겹쳐 보고도 자리를 댔다\n{out}");
+}
+
 /// 도구 호출 하나를 `cwd` 자리의 세션으로 부른다.
 fn tool_at(s: &Scratch, cwd: &Path, tool: &str, body: &str) -> String {
     let input = format!(
