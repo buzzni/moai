@@ -696,6 +696,13 @@ pub struct DeferArgs {
     /// 왜 미루는가 (저널에만 남는다)
     #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
     pub msg: Option<String>,
+
+    /// 아직 이 칸에 있을 때만 미루거나 도로 집는다 (겨루는 집기)
+    ///
+    /// `mv --from` 과 같은 자다. 옆에서 집어 일하기 시작한 줄을 뒤늦게 계획
+    /// 밖으로 빼지 않는다. 안 주면 지금까지처럼 아무것도 막지 않는다.
+    #[arg(long, value_name = "칸")]
+    pub from: Option<String>,
 }
 
 #[derive(Args, Debug)]

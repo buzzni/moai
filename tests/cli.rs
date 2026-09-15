@@ -7578,3 +7578,31 @@ fn only_one_racer_claims_a_row() {
     assert_eq!(journal(s.path()).matches("\"to\":\"in_progress\"").count(), 1, "옮긴 줄이 저널에 여럿이다");
     assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""));
 }
+
+/// **미루기도 본 칸이 그대로일 때만 먹는다** (moai-o5ss). 옆에서 집어 일하기
+/// 시작한 줄을 뒤늦은 `defer` 가 계획 밖으로 빼면, 일하던 쪽은 제 일이 보드에서
+/// 사라진 까닭을 어디서도 못 읽는다. `--undo` 도 같은 자로 잰다.
+#[test]
+fn a_defer_from_a_column_only_lands_while_the_row_is_still_there() {
+    let s = init("defer-from");
+    let id = add(s.path(), &["겨루는 일"]);
+    ok(s.path(), &["mv", &id, "in_progress"]);
+
+    let out = moai(s.path(), &["defer", &id, "-m", "나중에", "--from", "todo"]);
+    assert!(!out.status.success(), "진 미루기가 성공으로 끝났다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("in_progress"), "지금 칸을 말하지 않는다\n{}", text(&out));
+    assert!(!line_of(s.path(), &id).contains("\"deferred_at\""), "진 미루기가 계획에서 뺐다");
+    assert!(!journal(s.path()).contains("나중에"), "안 미룬 줄에 까닭을 적었다");
+
+    // 본 칸이 맞으면 그대로 먹는다. 되돌리기도 같은 자를 받는다.
+    ok(s.path(), &["defer", &id, "--from", "in_progress", "-m", "나중에"]);
+    assert!(line_of(s.path(), &id).contains("\"deferred_at\""));
+    let lost = moai(s.path(), &["defer", &id, "--undo", "--from", "todo", "--json"]);
+    assert!(!lost.status.success(), "진 되돌리기가 성공으로 끝났다");
+    let json = String::from_utf8(lost.stdout).unwrap();
+    one_json_value(&json);
+    assert!(json.contains("\"stale\":[{") && json.contains("\"status\":\"in_progress\""), "{json}");
+    assert!(line_of(s.path(), &id).contains("\"deferred_at\""), "진 되돌리기가 도로 집었다");
+    ok(s.path(), &["defer", &id, "--undo", "--from", "in_progress"]);
+    assert!(!line_of(s.path(), &id).contains("\"deferred_at\""));
+}

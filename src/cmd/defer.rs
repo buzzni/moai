@@ -22,6 +22,8 @@ struct Moved {
     missing: Vec<String>,
     /// 도로 집으라 했는데 **아직 계획 밖인 것** — (그 줄, 실제로 미룬 줄).
     shelved: Vec<(String, Vec<String>)>,
+    /// `--from` 을 걸었는데 그 사이 칸이 달라진 줄 — (그 줄, 지금 칸).
+    stale: Vec<(String, crate::model::Status)>,
 }
 
 pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
@@ -35,6 +37,12 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     if args.msg.is_some() && msg.is_none() {
         return Err(Fail::new("까닭이 비었다"));
     }
+    // **모르는 칸은 거절한다** — `mv --from` 과 같은 자다. 오타를 "안 맞았다" 로
+    // 읽으면 아무것도 안 하면서 0 아닌 코드만 내, 부르는 쪽이 까닭을 못 읽는다.
+    let from = args.from.map(crate::model::Status::new);
+    if let Some(f) = &from {
+        repo.config.require_known(f.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
+    }
 
     let (moved, read): (Moved, super::Read) = repo.with_write(|issues, cfg, _| {
         let mut m = Moved::default();
@@ -45,6 +53,14 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
                 m.missing.push(id.clone());
                 continue;
             };
+            // **본 칸이 그대로일 때만 손댄다.** 락 안에서 다시 읽은 줄로 잰다 —
+            // 옆에서 집어 일하기 시작한 줄을 뒤늦은 미루기가 계획 밖으로 빼면,
+            // 일하던 쪽은 제 일이 보드에서 사라진 까닭을 어디서도 못 읽는다.
+            // 이미 그 모양인지보다 **먼저** 본다(`mv` 와 같은 차례다).
+            if from.as_ref().is_some_and(|f| &i.status != f) {
+                m.stale.push((i.id.clone(), i.status.clone()));
+                continue;
+            }
             if i.is_deferred() == !back {
                 // **시각을 밀지 않는다.** 밀면 "언제부터 미뤄 뒀나" 가 마지막
                 // 으로 명령을 친 때가 되고, `status` 의 나이가 거짓말한다.
@@ -97,16 +113,30 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         super::note_partial();
         eprintln!("moai: {id} 를 못 찾았다");
     }
+    // 진 줄은 못 찾은 줄과 같은 표면 하나(stderr)와 같은 종료 코드로 선다 —
+    // `mv --from` 과 한 자다. 나머지 id 는 그대로 처리한다.
+    for (id, now) in &moved.stale {
+        super::note_partial();
+        eprintln!("moai: {id} 는 이미 {now} 다 — 그대로 뒀다");
+    }
 
     if ctx.json {
         // **바뀐 것만 내면 나머지를 말할 자리가 없다.** 사람 출력에는 있는데
         // 기계 출력에만 없으면 받는 쪽이 두 표면 중 하나를 못 믿게 된다.
+        #[derive(serde::Serialize)]
+        struct Stale<'a> {
+            id: &'a str,
+            /// 락 안에서 본 지금 칸. 함께 주지 않으면 진 쪽이 한 번 더 물어야 한다.
+            status: &'a str,
+        }
         #[derive(serde::Serialize)]
         struct Out<'a> {
             deferred: bool,
             changed: Vec<super::Row<'a>>,
             already: &'a [String],
             missing: &'a [String],
+            /// `--from` 에 걸려 그대로 둔 줄. 사람 쪽의 stderr 한 줄과 같은 것이다.
+            stale: Vec<Stale<'a>>,
             /// 도로 집으라 했는데 아직 계획 밖인 것과, 실제로 도로 집어야 할 줄.
             shelved: Vec<super::Shelved<'a>>,
         }
@@ -115,6 +145,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             changed: moved.done.iter().map(|i| super::Row::from(i, &read)).collect(),
             already: &moved.already,
             missing: &moved.missing,
+            stale: moved.stale.iter().map(|(id, now)| Stale { id, status: now.as_str() }).collect(),
             shelved: super::shelved(&moved.shelved),
         });
     }
