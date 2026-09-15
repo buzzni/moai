@@ -502,7 +502,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC s` 가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
     let sorted = (app.order != Default::default()).then(|| {
-        format!("정렬 {}{}", app.order.0.word(), if app.order.1 { " 거꾸로" } else { "" })
+        format!("정렬 {}{}", app.order.by.word(), if app.order.reversed { " 거꾸로" } else { "" })
     });
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
@@ -856,13 +856,11 @@ fn row_line<'a>(app: &App, r: &Row, budget: usize, fields: super::view::Fields) 
         let least = cells.iter().filter_map(|(f, _)| f.drop_rank()).min().expect("오른쪽 열은 걷는 차례가 있다");
         cells.retain(|(f, _)| f.drop_rank() != Some(least));
     }
-    let kept = RIGHT
-        .into_iter()
-        .filter(|f| fields.shows(*f) && !cells.iter().any(|(c, _)| c == f))
-        .fold(fields, |mut k, f| {
-            k.toggle(f);
-            k
-        });
+    // 켠 오른쪽 열 가운데 걷힌 것을 끈다 — 안 켠 열은 `cells` 에도 없어 꺼진 채다.
+    let mut kept = fields;
+    for f in RIGHT {
+        kept.set(f, cells.iter().any(|(c, _)| *c == f));
+    }
     let right = right_of(&cells);
     // **좁으면 스피너부터 걷는다**(moai-q59j). 목록 줄의 글리프는 두 칸(`⠋▸`·` ·`)인데, 제목
     // 한 글자와 디렉터리 `/` 가 들어갈 자리가 없으면 멈춘 글리프 한 칸만 남긴다 — 뜻은 글리프가

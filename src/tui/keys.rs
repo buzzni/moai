@@ -344,6 +344,21 @@ impl Order {
     }
 }
 
+/// 고른 차례와 그 방향 — **한 벌이다**(moai-zrzo). `(Order, bool)` 튜플로 들면 `.0`·`.1` 이 무엇인지
+/// 부르는 자리마다 다시 읽어야 한다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Sorting {
+    pub by: Order,
+    pub reversed: bool,
+}
+
+impl Sorting {
+    /// 차례 키를 눌렀을 때 — 고른 것을 다시 누르면 거꾸로, 다른 것을 누르면 그것의 제 방향으로.
+    pub fn press(self, by: Order) -> Sorting {
+        Sorting { by, reversed: self.by == by && !self.reversed }
+    }
+}
+
 /// 칸 토글에 번호를 줄 수 있는 칸 수 — `1`~`9`. 넘는 칸은 번호가 없고 `SPC s a` 로만 돌아온다.
 pub const NUMBERED: usize = 9;
 
@@ -472,9 +487,8 @@ pub struct Ctx {
     pub hidden: u16,
     pub done_hidden: bool,
     pub deferred_hidden: bool,
-    /// 고른 차례와 거꾸로인가.
-    pub order: Order,
-    pub order_reversed: bool,
+    /// 고른 차례와 그 방향.
+    pub sorting: Sorting,
     /// 켜 둔 목록 열.
     pub fields: super::view::Fields,
     /// `Tab`·Shift-Tab 이 가는 칸의 이름.
@@ -552,7 +566,7 @@ impl Browse {
             Browse::Done => Some(shown(c.done_hidden)),
             Browse::Deferred => Some(shown(c.deferred_hidden)),
             // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
-            Browse::Sort(o) if o == c.order => Some(if c.order_reversed { "[● 거꾸로]" } else { "[● 차례]" }),
+            Browse::Sort(o) if o == c.sorting.by => Some(if c.sorting.reversed { "[● 거꾸로]" } else { "[● 차례]" }),
             Browse::Cell(f) => Some(shown(!c.fields.shows(f))),
             _ => None,
         }
