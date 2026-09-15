@@ -22,15 +22,11 @@ fn begin_marker(block: &str) -> String {
 
 /// 마커가 대는 해시 조각 `hash:<8자>`. 쓰는 곳([`begin_marker`])과 알아보는 곳([`kept_marker`])이
 /// 같은 글자를 쓴다.
+///
+/// 해셔는 [`crate::text::fnv1a32`] 다(moai-2vrw) — `skill` 의 64비트와 나란히 한 자리에 있어야
+/// "왜 std 해셔가 아닌가" 를 두 곳에 적지 않는다. 공개된 시험값은 그 자리에서 박혀 있다.
 fn hash_of(block: &str) -> String {
-    format!("hash:{:08x}", fnv1a(block))
-}
-
-/// FNV-1a 32비트. **std 의 해셔를 안 쓴다** — `DefaultHasher` 는 러스트 버전마다 값이 달라질 수
-/// 있다고 문서가 밝혀, 새로 빌드한 바이너리가 멀쩡한 블록의 해시를 다르게 읽는다. 크레이트를
-/// 들일 만한 일도 아니다: 충돌에 강할 까닭이 없고(적대적 입력이 아니다) 여섯 줄이다.
-fn fnv1a(s: &str) -> u32 {
-    s.bytes().fold(0x811c_9dc5, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193))
+    format!("hash:{:08x}", crate::text::fnv1a32(block.as_bytes()))
 }
 
 /// 여는 마커 줄인가. **줄머리에서 머리로 시작하고, 머리 바로 뒤가 띄어쓰기이고, `-->` 로
@@ -353,15 +349,38 @@ fn prefix_from(dir: &Path) -> Option<String> {
     (!out.is_empty()).then_some(out)
 }
 
+/// [`ensure_lines`] 가 한 일.
+#[derive(Debug, PartialEq, Eq)]
+enum Added {
+    /// 빠진 줄을 덧붙였다.
+    Wrote,
+    /// 이미 다 있었다 — 파일은 안 건드렸다.
+    Already,
+    /// 못 읽어서 안 건드렸다. 안에 든 것은 그 까닭이다.
+    Unreadable(String),
+}
+
 /// 이미 있는 파일에는 **빠진 줄만** 덧붙인다. 남의 내용을 지우지 않는다.
-fn ensure_lines(path: &Path, block: &str) -> Result<bool, String> {
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
+///
+/// **못 읽는 파일은 안 건드린다**(moai-gq1c). `unwrap_or_default` 로 빈 글로 치던 때는 CP949 로
+/// 적힌 남의 `.gitignore` 가 moai 줄만 남기고 통째로 사라졌다 — 덧붙이는 자리라 더 나쁘다:
+/// 사람은 제 줄이 그대로 있으리라 믿는다. 없는 파일만 빈 글이다.
+///
+/// **멈추지는 않는다**(2026-09-15 사용자 결정). AGENTS.md 는 도구가 쓴 블록을 통째로 갈아 끼우는
+/// 자리라 멈추지만, 여기는 줄 몇 개를 덧붙이는 자리다 — 그 하나로 `.moai` 도 못 심고 AGENTS 블록도
+/// 못 고치면 고칠 길이 도구 밖에만 남는다. 무엇을 손으로 더할지는 부르는 쪽([`run`])이 댄다.
+fn ensure_lines(path: &Path, block: &str) -> Result<Added, String> {
+    let existing = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Ok(Added::Unreadable(e.to_string())),
+    };
     let missing: Vec<&str> = block
         .lines()
         .filter(|l| !l.trim().is_empty() && !existing.lines().any(|e| covers(e, l)))
         .collect();
     if missing.is_empty() {
-        return Ok(false);
+        return Ok(Added::Already);
     }
     let mut out = existing;
     if !out.is_empty() && !out.ends_with('\n') {
@@ -373,7 +392,7 @@ fn ensure_lines(path: &Path, block: &str) -> Result<bool, String> {
     out.push_str(&missing.join("\n"));
     out.push('\n');
     std::fs::write(path, out).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(true)
+    Ok(Added::Wrote)
 }
 
 /// 이미 있는 줄 `have` 가 넣으려는 줄 `want` 를 **이미 막고 있는가**(moai-mxtb).
@@ -500,21 +519,36 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
 
     let attrs = ensure_lines(&root.join(".gitattributes"), GITATTRIBUTES).map_err(Fail::new)?;
     let ignore = ensure_lines(&root.join(".gitignore"), GITIGNORE).map_err(Fail::new)?;
+    // 못 읽어 못 건드린 자리 — 이름과 까닭과 **손으로 더할 줄**을 함께 든다(moai-gq1c). 줄을 안
+    // 대면 사람은 도구가 무엇을 넣으려 했는지 모른 채 파일만 고치게 된다.
+    let untouched: Vec<(&str, &str, &str)> = [(".gitattributes", &attrs, GITATTRIBUTES), (".gitignore", &ignore, GITIGNORE)]
+        .into_iter()
+        .filter_map(|(name, done, block)| match done {
+            Added::Unreadable(why) => Some((name, why.as_str(), block)),
+            _ => None,
+        })
+        .collect();
 
     // `AGENTS.md` **하나만** 쓴다. `CLAUDE.md` 에도 같은 것을 쓰면 곧 갈라지고,
     // 갈라진 두 벌 중 어느 것이 참인지 아무도 모른다.
+    // **쓴 때만 `true` 다**(moai-knn0). 늘 참이던 때는 "블록을 맞췄다" 가 아무것도 안 쓴 자리에도
+    // 서서 `이미 다 맞아 있다` 가 `--no-agents` 말고는 닿지 않았고, 낡았다는 알림을 보고 부른
+    // 사람이 그 줄만으로는 무엇이 바뀌었는지 몰랐다. `gitattributes`·`gitignore` 가 이미 그 뜻이다.
     let agents = match &agents_now {
         None => false,
         Some(existing) => {
             let next = with_block(existing, &crate::guide::agents());
-            if next != *existing {
+            let changed = next != *existing;
+            if changed {
                 std::fs::write(&agents_path, next)
                     .map_err(|e| Fail::new(format!("{}: {e}", agents_path.display())))?;
             }
-            true
+            changed
         }
     };
-    let claude_needs_pointer = agents
+    // **`agents` 가 아니라 "AGENTS.md 를 다뤘는가" 로 묻는다** — `agents` 는 이제 *쓴* 때만 참이라
+    // (moai-knn0) 그것으로 물으면 블록이 이미 맞는 저장소에서는 이 안내가 영영 안 선다.
+    let claude_needs_pointer = agents_now.is_some()
         && root.join("CLAUDE.md").exists()
         && !std::fs::read_to_string(root.join("CLAUDE.md"))
             .unwrap_or_default()
@@ -525,13 +559,18 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             "root": root.display().to_string(),
             "prefix": prefix,
             "created": !again,
-            "gitattributes": attrs,
-            "gitignore": ignore,
+            "gitattributes": attrs == Added::Wrote,
+            "gitignore": ignore == Added::Wrote,
             "agents": agents,
         });
         // 줄였을 때만 싣는다 — 늘 `null` 을 두면 줄이지 않은 대부분의 줄이 헛 키를 든다.
         if let Some(full) = &shortened {
             v["shortened_from"] = serde_json::json!(full);
+        }
+        // **못 건드린 자리는 기계에게도 말한다.** `false` 만 보면 "이미 다 있었다" 와 구별이
+        // 안 되고, 그 차이가 곧 사람이 손볼 것이 남았는지다.
+        if !untouched.is_empty() {
+            v["unreadable"] = serde_json::json!(untouched.iter().map(|(name, ..)| *name).collect::<Vec<_>>());
         }
         return super::json_line(&v);
     }
@@ -554,16 +593,31 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             ),
         );
     }
-    if attrs {
+    if attrs == Added::Wrote {
         out.push("  .gitattributes 에 병합 규칙을 넣었다".into());
     }
-    if ignore {
+    if ignore == Added::Wrote {
         out.push("  .gitignore 에 moai 가 쓰는 자리(lock·tmp·워크트리)를 넣었다".into());
+    }
+    for (name, why, block) in &untouched {
+        out.push(format!("  {name} 를 못 읽어 안 건드렸다 — {why}"));
+        out.push("    손으로 더할 줄 (읽히게 고치고 `moai init` 을 다시 불러도 된다):".into());
+        // **한 줄에 하나씩 낸다** — 쉼표로 이으면 붙여 넣은 것이 한 줄이 되어 규칙이 안 선다.
+        // `.gitattributes` 는 더 나쁘다: `<패턴> text eol=lf, <패턴> …` 은 첫 패턴에 쓰레기
+        // 속성을 달 뿐이라 `journal.jsonl` 이 `merge=union` 을 영영 못 받는다.
+        // 주석과 빈 줄은 뺀다 — 손으로 더할 것은 규칙 줄이다.
+        for line in block.lines().filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#')) {
+            out.push(format!("      {line}"));
+        }
     }
     if agents {
         out.push("  AGENTS.md 블록을 맞췄다".into());
     }
-    if again && out.len() == 1 {
+    // **줄 수가 아니라 한 일로 묻는다.** 줄을 세던 때는 이 자리 위에 줄 하나를 더하는 것만으로
+    // 이 안내가 말없이 사라졌다 — `moai-knn0` 전까지 `agents` 가 늘 참이라 실제로 그랬다.
+    // `Already` 는 "다 있어서 안 건드렸다" 뿐이다 — 못 읽은 자리는 `Unreadable` 이라 여기서 걸린다.
+    let did_nothing = attrs == Added::Already && ignore == Added::Already && !agents;
+    if again && did_nothing {
         out.push("  이미 다 맞아 있다".into());
     }
     if claude_needs_pointer {
@@ -776,6 +830,7 @@ mod tests {
     /// 블록이 둘 선다. 다시 넣어도 바이트가 같다.
     #[test]
     fn the_marker_carries_version_and_hash_and_replaces_a_bare_one() {
+        let fnv1a = |s: &str| crate::text::fnv1a32(s.as_bytes());
         let first = with_block("", "내용\n").lines().next().unwrap().to_string();
         assert_eq!(first, format!("<!-- moai:begin v:{} hash:{:08x} -->", env!("CARGO_PKG_VERSION"), fnv1a("내용\n")));
 
@@ -787,15 +842,6 @@ mod tests {
         let changed = with_block(&new, "새 내용\n");
         assert_eq!(changed.matches(BEGIN).count(), 1, "{changed}");
         assert!(changed.contains(&format!("hash:{:08x} -->\n새 내용\n", fnv1a("새 내용\n"))), "{changed}");
-    }
-
-    /// 해시는 **공개된 FNV-1a 32비트**다 — std 의 해셔는 러스트 버전마다 값이 바뀌어, 새로
-    /// 빌드한 바이너리가 멀쩡한 블록을 낡았다고 읽는다.
-    #[test]
-    fn the_hash_is_plain_fnv1a() {
-        assert_eq!(fnv1a(""), 0x811c_9dc5);
-        assert_eq!(fnv1a("a"), 0xe40c_292c);
-        assert_eq!(fnv1a("foobar"), 0xbf9c_f968);
     }
 
     #[test]

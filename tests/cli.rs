@@ -2383,6 +2383,80 @@ fn status_notices_a_stale_agents_block_but_not_a_missing_one() {
     quiet("블록이 없는 저장소");
 }
 
+/// **못 읽는 `.gitignore`·`.gitattributes` 는 안 건드린다**(moai-gq1c). 빈 글로 치고 쓰던 때는
+/// CP949 로 적은 남의 파일이 moai 줄만 남기고 통째로 사라졌다 — 되돌릴 길은 git 뿐이다.
+/// **멈추지는 않는다**(2026-09-15 사용자 결정): 나머지는 다 심고, 그 자리에 무엇을 손으로
+/// 더할지 대며 0 으로 끝난다. AGENTS.md 가 멈추는 자리인 까닭은 그쪽이 도구가 쓴 블록을
+/// 통째로 갈아 끼우는 자리라서다.
+#[test]
+fn init_never_overwrites_a_dotfile_it_cannot_read() {
+    let s = Scratch::new("badignore");
+    // CP949 로 적힌 남의 줄 — UTF-8 로는 못 읽는다.
+    let theirs: &[u8] = b"\xc7\xd1\xb1\xdb\nbuild/\n";
+    std::fs::write(s.path().join(".gitignore"), theirs).unwrap();
+
+    let out = moai(s.path(), &["init", "argos"]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(std::fs::read(s.path().join(".gitignore")).unwrap(), theirs, "못 읽는 파일을 덮었다");
+    assert!(said.contains(".gitignore") && said.contains("못 읽어"), "{said}");
+    // **붙여 넣을 수 있어야 한다** — 한 줄에 하나씩이라야 규칙이 선다. 쉼표로 잇던 때는
+    // `.gitattributes` 의 두 줄이 한 줄이 되어 `journal.jsonl` 이 `merge=union` 을 못 받았다.
+    assert!(
+        said.lines().any(|l| l.trim() == ".moai/lock"),
+        "손으로 더할 줄을 한 줄에 하나씩 안 댔다 — {said}"
+    );
+    // 나머지는 다 심는다.
+    assert!(s.path().join(".moai/issues.jsonl").exists(), "나머지를 안 심었다");
+    assert!(std::fs::read_to_string(s.path().join(".gitattributes")).unwrap().contains(".moai/issues.jsonl"));
+    assert!(std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap().contains("moai:begin"));
+
+    let js = ok(s.path(), &["init", "--json"]);
+    one_json_value(&js);
+    assert!(js.contains("\"gitignore\":false"), "{js}");
+    assert!(js.contains("\"unreadable\":[\".gitignore\"]"), "못 읽은 자리를 기계에게 안 말했다 — {js}");
+
+    // `.gitattributes` 도 같은 자리다 — 둘 다 못 읽으면 둘 다 든다.
+    std::fs::write(s.path().join(".gitattributes"), theirs).unwrap();
+    let both = ok(s.path(), &["init", "--json"]);
+    assert!(both.contains("\"unreadable\":[\".gitattributes\",\".gitignore\"]"), "{both}");
+    assert_eq!(std::fs::read(s.path().join(".gitattributes")).unwrap(), theirs, "못 읽는 파일을 덮었다");
+
+    // 읽히게 고치면 그때 넣는다 — 남의 줄은 그대로 두고 뒤에 붙는다.
+    std::fs::write(s.path().join(".gitattributes"), "").unwrap();
+    std::fs::write(s.path().join(".gitignore"), "build/\n").unwrap();
+    ok(s.path(), &["init"]);
+    let now = std::fs::read_to_string(s.path().join(".gitignore")).unwrap();
+    assert!(now.starts_with("build/\n") && now.contains(".moai/lock"), "{now}");
+    // 고친 뒤에는 기계에게도 남은 것이 없다고 말한다.
+    let clean = ok(s.path(), &["init", "--json"]);
+    assert!(!clean.contains("unreadable"), "다 읽히는데 못 읽었다고 한다 — {clean}");
+}
+
+/// **`init` 은 제가 쓴 것만 말한다**(moai-knn0). 블록이 이미 맞으면 "맞췄다" 도 `"agents":true`
+/// 도 거짓말이다 — 낡았다는 알림을 보고 부른 사람이 그 줄만 보고는 무엇이 바뀌었는지 모른다.
+/// `gitattributes`·`gitignore` 가 이미 쓴 때만 말하는 자리라 셋을 한 자로 맞춘다.
+#[test]
+fn init_says_only_what_it_wrote() {
+    let s = init("saidwrote");
+    // 갓 심은 자리를 다시 부르면 블록이 이미 맞는다 — 그러니 안 썼다고 말한다.
+    let first = ok(s.path(), &["init", "--json"]);
+    assert!(first.contains("\"agents\":false"), "안 썼는데 썼다고 한다 — {first}");
+
+    let md = s.path().join("AGENTS.md");
+    let fresh = std::fs::read_to_string(&md).unwrap();
+    let edited = fresh.replace("승인 게이트가 없다", "승인 게이트가 있다");
+    // 안내 글이 바뀌어 이 낱말이 사라지면 아래 단언이 엉뚱한 것을 탓한다 — 여기서 먼저 잡는다.
+    assert_ne!(edited, fresh, "시험이 블록을 못 고쳤다 — 안내 글에서 찾는 낱말이 사라졌다");
+    std::fs::write(&md, edited).unwrap();
+    let wrote = ok(s.path(), &["init", "--json"]);
+    assert!(wrote.contains("\"agents\":true"), "고친 블록을 다시 썼는데 안 썼다고 한다 — {wrote}");
+
+    let said = ok(s.path(), &["init"]);
+    assert!(!said.contains("블록을 맞췄다"), "안 쓰고 맞췄다고 한다 — {said}");
+    assert!(said.contains("이미 다 맞아 있다"), "그대로인데 아무 말도 안 한다 — {said}");
+}
+
 /// 남의 산문은 한 글자도 건드리지 않는다.
 #[test]
 fn init_keeps_what_someone_else_wrote() {
@@ -5970,6 +6044,119 @@ fn picked_in_a_worktree(s: &Scratch) -> (PathBuf, PathBuf, String) {
     git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{id}")]);
     let inside = main.join(&dir);
     (main, inside, id)
+}
+
+/// **집었는데 일하는 워크트리가 없는 줄은 `status` 가 비춘다**(moai-4370) — 세션이 죽어도 칸은
+/// `in_progress` 로 남는다. 막지 않는다: 종료 코드는 0 이고 `--json` 의 `warnings` 에 선다. 워크트리가
+/// 뜬 일은 안 세고, 방금 집은 일은 워크트리가 뜰 틈을 준다.
+#[test]
+fn status_names_picked_work_with_no_live_worktree_and_still_exits_zero() {
+    let s = Scratch::new("stranded");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let lost = field(&ok(&main, &["add", "세션이 죽은 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+
+    // 방금 집은 일은 아직 안 센다.
+    let out = ok(&main, &["status"]);
+    assert!(!out.contains("일하는 워크트리가 없는"), "워크트리가 뜰 틈을 안 줬다\n{out}");
+
+    let out = isolated(BIN).arg("status").current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
+    assert!(out.status.success(), "경고로 비영 종료했다");
+    let text = String::from_utf8(out.stdout).unwrap();
+    let block: String = text.split("집었는데 일하는 워크트리가 없는 것 1건").nth(1).expect(&text).split("\n\n").next().unwrap().into();
+    assert!(block.contains(&lost) && !block.contains(&id), "워크트리가 뜬 일까지 셌다\n{text}");
+    assert!(block.contains("moai mv <id> todo"), "고칠 손을 안 댔다\n{text}");
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(json.contains("\"kind\":\"stranded\"") && json.contains(&lost), "{json}");
+
+    // **물려받은 줄은 자리가 아니다**(moai-ir8q.beq). 자리 잃은 줄이 커밋된 뒤 다른 일의 워크트리가
+    // 뜨면 그 스냅샷에도 벌여 놓여 있다 — 그것을 자리로 세면 워크트리가 하나 뜨는 순간 사라진다.
+    // 그 워크트리 안에서 집은 줄은 거기서 만진 흔적이라 자리다 — `--worktree` 로 겹쳐 봐도 그렇다.
+    let there = field(&ok(&main, &["add", "옆에서 할 일", "--json"]), "id");
+    let moved = field(&ok(&main, &["add", "옆에서 집을 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "자리 잃은 줄을 커밋한다"]);
+    let dir = format!(".claude/worktrees/{there}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{there}")]);
+    let side = main.join(&dir);
+    ok_at(&side, "2026-09-11T06:00:00Z", &["mv", &moved, "in_progress"]);
+    let stranded_ids = |json: &str| -> String {
+        json.split("\"kind\":\"stranded\"").nth(1).map(|t| t.split('}').next().unwrap().to_string()).unwrap_or_default()
+    };
+    for args in [&["status", "--json"][..], &["status", "--worktree", "--json"][..]] {
+        let json = ok_at(&main, LATER, args);
+        let ids = stranded_ids(&json);
+        assert!(ids.contains(&lost), "{args:?}: 물려받은 줄로 자리를 댔다\n{json}");
+        assert!(!ids.contains(&moved), "{args:?}: 워크트리 안에서 집은 줄을 자리 없다고 했다\n{json}");
+    }
+
+    // **딸린 워크트리의 스냅샷은 갈라질 때의 main 이다** — 그 뒤 main 에서 놓은 줄이 거기서는 아직
+    // 집혀 있다. 겹쳐 보지 않고 그것으로 재면 끝난 일을 남에게 다시 준다.
+    ok(&main, &["mv", &lost, "todo"]);
+    let json = ok_at(&side, LATER, &["status", "--json"]);
+    assert!(!json.contains("\"stranded\""), "낡은 스냅샷으로 자리 없는 줄을 댔다\n{json}");
+
+    // 워크트리를 치우면 그 일도 자리를 잃는다. 워크트리가 하나도 없으면 조용하다 — 그때는 main 에서 일한다.
+    git(&main, &["worktree", "remove", "--force", &inside.display().to_string()]);
+    git(&main, &["worktree", "remove", "--force", &side.display().to_string()]);
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(!json.contains("\"stranded\""), "워크트리를 안 쓰는 저장소에서 떠들었다\n{json}");
+}
+
+/// **`show <id>` 는 집은 줄이 어느 워크트리에서 돌고 있는지 댄다**(moai-6opu) — 이어받는 세션이
+/// 그 자리로 들어가면 된다. 자리 없는 집은 줄은 그렇다고 말한다. 안 집은 줄과 워크트리를 안 쓰는
+/// 저장소에는 줄을 안 세운다. `--json` 도 같은 것을 `workplaces` 로 낸다.
+#[test]
+fn show_names_the_worktree_a_picked_row_lives_in() {
+    let s = Scratch::new("showplace");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let lost = field(&ok(&main, &["add", "세션이 죽은 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+    let idle = field(&ok(&main, &["add", "안 집은 일", "--json"]), "id");
+
+    let place = |out: &str| -> String {
+        out.lines()
+            .find(|l| l.trim_start().starts_with("자리"))
+            .unwrap_or_else(|| panic!("자리 줄이 없다\n{out}"))
+            .to_string()
+    };
+    let out = ok(&main, &["show", &id]);
+    let line = place(&out);
+    assert!(line.contains(&format!(".claude/worktrees/{id}")) && line.contains(&format!("worktree-{id}")), "{line}");
+    // **경로는 뿌리에서 잰 것이다** — 절대 경로가 그대로 나가면 위의 `contains` 도 지나가므로 여기서 못박는다.
+    assert!(!line.contains(&main.display().to_string()), "뿌리에서 안 잘랐다\n{line}");
+    let json = ok(&main, &["show", &id, "--json"]);
+    assert!(json.contains("\"workplaces\":[{") && json.contains(&format!("\"branch\":\"worktree-{id}\"")), "{json}");
+
+    let out = ok(&main, &["show", &lost]);
+    assert!(out.contains("자리   없다"), "자리 없는 줄을 말하지 않았다\n{out}");
+    assert!(ok(&main, &["show", &lost, "--json"]).contains("\"workplaces\":[]"));
+
+    let out = ok(&main, &["show", &idle]);
+    assert!(!out.contains("자리"), "안 집은 줄에 자리를 세웠다\n{out}");
+    assert!(!ok(&main, &["show", &idle, "--json"]).contains("workplaces"));
+
+    // **제 워크트리 안에서 펼쳐도 자리는 빈 칸이 아니다** — 뿌리와 같은 자리라 잘라 내면 아무것도
+    // 안 남는다. 딸린 워크트리는 `--worktree` 로 겹쳐 봐야 자리를 잰다.
+    let line = place(&ok(&inside, &["show", &id, "--worktree"]));
+    assert!(line.split_whitespace().nth(1).is_some_and(|p| !p.starts_with('(')), "자리 칸이 비었다\n{line}");
+    assert!(!ok(&inside, &["show", &id, "--worktree", "--json"]).contains("\"path\":\"\""));
+
+    // **겹쳐 보지 않은 딸린 워크트리는 자리를 말하지 않는다**(moai-4370 과 같은 까닭) — 그 스냅샷은
+    // 갈라질 때의 main 이라, main 이 놓은 줄을 거기서는 아직 집힌 것으로 보고 "자리 없다" 로 댄다.
+    let there = field(&ok(&main, &["add", "옆에서 할 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "자리 잃은 줄을 커밋한다"]);
+    let dir = format!(".claude/worktrees/{there}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{there}")]);
+    let side = main.join(&dir);
+    ok_at(&main, LATER, &["mv", &lost, "todo"]);
+    let out = ok(&side, &["show", &lost]);
+    assert!(!out.contains("자리"), "낡은 스냅샷으로 자리를 댔다\n{out}");
+    assert!(!ok(&side, &["show", &lost, "--json"]).contains("workplaces"));
+    // 겹쳐 보면 main 의 칸이 들어와 아예 집은 줄이 아니다 — 그때도 "자리 없다" 는 안 선다.
+    let out = ok(&side, &["show", &lost, "--worktree"]);
+    assert!(!out.contains("자리"), "겹쳐 보고도 자리를 댔다\n{out}");
 }
 
 /// 도구 호출 하나를 `cwd` 자리의 세션으로 부른다.

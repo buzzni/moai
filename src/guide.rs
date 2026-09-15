@@ -100,6 +100,47 @@ moai add --from - <<'PLAN'
 PLAN
 ```"#;
 
+/// 에이전트가 이슈에 적는 글의 모양(moai-j8aq). **권고다** — 어겨도 아무것도 막히지 않는다.
+/// 훅이 이것을 검사하지 않는 것은 결정이다(사용자, moai-mthy): 글 스타일 검사는 린트이고,
+/// 린트는 곧 게이트다.
+const WRITING: &str = r#"**제목과 본문은 따로 넘긴다.** 제목은 인자로 주고, 본문은 마크다운으로 적어
+`-b -` 로 stdin 에서 흘린다 — heredoc 이 편하다. 제목을 본문에 다시 적지 않는다.
+
+- **제목은 짧게.** 무엇이 어긋났는지 한 줄이다. 보드와 `ready` 와 탐색기 목록은 제목만 보여 준다
+- **본문은 서술형으로 적지 않는다.** 겪은 일을 문단으로 늘어놓는 대신 목록으로 가른다 —
+  무엇이 어긋났는가, 무엇을 봤는가, 어디를 고치는가
+- **이모지를 쓰지 않는다** — 제목에도 본문에도. 터미널마다 폭이 달라 보드와 표가 어긋난다
+
+지킬 것은 다음 세션이 `moai show <id>` 로 읽는다는 것 하나다. 이 셋은 그래서 있는 권고이지
+검사하는 규칙이 아니다."#;
+
+/// 글 스타일의 예시(moai-1xf2). **참고 문서에만 둔다** — AGENTS 블록과 SKILL.md 는 언제나
+/// 읽히는 자리라 예시 한 벌이 모든 세션의 값이 된다. 규칙은 짧게 늘 보이고, 예시는 부를 때 온다.
+///
+/// **예시는 moai 의 동작을 주장하지 않는다.** 이 글은 모든 저장소에 심긴다 — 읽는 쪽의 코드를
+/// 두고 쓴 예시라야 어디서 읽어도 뜻이 서고, 이 저장소의 파일 이름을 박으면 남의 저장소에서는
+/// 아무것도 안 가리킨다. 첫 판은 `moai edit --tag` 가 빈 태그를 그대로 쓴다고 적었는데
+/// (`src/cmd/edit.rs` 와 `query::split_tags` 는 처음부터 빈 낱말을 걸렀다) 없는 버그를
+/// 예시로 내민 셈이었다. 자리는 `<파일>:<줄>` 처럼 자리 표시로 둔다.
+const WRITING_EXAMPLE: &str = r#"규칙은 `SKILL.md` 의 "이슈에 적는 글" 에 있다. 여기는 그것을 지킨 한 벌이다.
+제목은 인자로, 본문은 `-b -` 로 넘긴다.
+
+```sh
+moai add "빈 태그를 못 걸러 필터가 전부를 낸다" -t bug -e <에픽> -b - <<'BODY'
+- 무엇: 태그를 정규화할 때 빈 낱말이 그대로 남는다
+- 무엇을 봤나: 그 태그로 거른 목록이 아무것도 안 거르고 전부를 낸다
+- 어디: 태그를 정규화하는 자리(<파일>:<줄>). 빈 낱말을 거르면 끝난다
+BODY
+```
+
+흔한 어긋남 셋.
+
+- **제목에 겪은 일을 다 적는다** — "어제 …하다가 …해서 …인 것 같은데 확인이 필요함".
+  보드와 `ready` 는 그 줄을 잘라 내고, 자른 앞쪽에는 대개 무엇이 어긋났는지가 없다
+- **본문을 문단으로 적는다** — 다음 세션은 그 문단에서 "어디를 고치는가" 를 다시 찾아야 한다.
+  판단과 근거와 다음 걸음을 줄로 가르면 `moai show` 한 번으로 끝난다
+- **이모지로 급한 것을 알린다** — 급한 것은 우선순위(`-p 1`)로 적는다. `ready` 가 읽는 것은 그쪽이다"#;
+
 const IDEAS: &str = r#"    moai idea add "반짝 떠오른 것"                 담기
     moai idea add "긴 생각" -b -                   본문은 stdin 에서
     moai idea ls                                   쌓인 것 보기
@@ -245,6 +286,10 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 
 {FORKS}
 
+### 이슈에 적는 글
+
+{WRITING}
+
 ### 지금 범위가 아닌 것은 담는다
 
 {IDEAS}
@@ -318,6 +363,10 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
 ## 갈림길 셋
 
 {FORKS}
+
+## 이슈에 적는 글
+
+{WRITING}
 
 ## 훅이 실제로 보는 것 셋
 
@@ -418,6 +467,10 @@ PLAN
 ## 사람
 
 {PEOPLE}
+
+## 이슈에 적는 글 — 예시
+
+{WRITING_EXAMPLE}
 
 ## 커밋에 id 를 적는다
 
@@ -523,6 +576,41 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
 **일꾼은 다시 읽지 않는다** — 워크트리 안에서 읽으면 제 가지가 나온다.
 
 ## 한 바퀴
+
+**0. 먼저 거둔다 — 자리를 잃은 일.** 세션이 죽으면 집은 줄은 `in_progress` 로 남고
+아무도 이어 하지 않는다. 새 idea 를 고르기 전에 본다.
+
+    moai status --json                     warnings 에서 kind 가 "stranded" 인 것의 ids
+                                           (워크트리 안이면 `--worktree` 를 붙여야 선다)
+    moai show <id>                         `자리` 줄 — 어느 워크트리였나, 없으면 "없다"
+                                           (워크트리 안이면 여기도 `--worktree` 가 있어야 선다)
+
+`stranded` 는 집었는데 살아 있는 워크트리가 그 일을 안 쥔 줄이다 — 워크트리가 사라졌거나,
+**워크트리 없이 루트에서 하던 일**이다. 둘은 이 줄만으로 안 갈린다: 2 의 세션 목록에서 루트에
+산 세션이 있으면 그쪽일 수 있으니, 맡기기 전에 그 세션에 무엇을 쥐고 있는지 묻는다.
+집은 지 한 시간이 안 된 줄은 안 뜬다(일꾼이 워크트리를 띄우는 틈이다). **워크트리는
+남았는데 거기서 일하던 세션이 죽은 것은 `stranded` 에 안 뜬다** — `git worktree list` 의
+워크트리 중 2 의 스크립트에 `워크트리` 줄로 안 나오는 것이 그것이다.
+
+- 그런 일이 있으면 **새 idea 보다 먼저** 놀고 있는 세션 하나에 이어 하기를 맡긴다. 3 의
+  글 대신 아래를 싣고, 그 뒤에 3 의 글의 5~11 을 **통째로** 잇는다
+
+      감독 세션(<내 이름>)이 <에픽> 의 멈춘 일을 맡긴다 — 앞 세션이 끝을 못 냈다.
+      먼저 읽을 것: moai show <에픽> (이력·노트) · moai show <멤버> (자리도 — 자리는 일에만 선다)
+      본 가지: <본 가지> — 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다
+      - 워크트리가 있으면 EnterWorktree(path) 로 들어가 `git log <본 가지>..HEAD` 와
+        `git status` 로 어디까지 했는지 읽고 이어 한다
+      - 없으면 루트에서 다시 뜬다. 가지가 남아 있으면 그 가지로
+        (`git worktree add .claude/worktrees/<에픽> worktree-<에픽>`), 없으면
+        `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> <본 가지>`
+      - 멤버의 칸은 이미 집혀 있다 — 다시 집지 않는다
+      - 아래 걸음들이 가리키는 `2` 는 **경로를 준 트래커 커밋**이다 — 루트는 모든 세션이
+        같이 쓰니 `git commit -m "…" -- .moai/` 로 친다. 병합이 열려 있으면(MERGE_HEAD)
+        git 이 거절하니 그 병합이 끝나기를 기다렸다 다시 친다
+
+- **이어 할지 놓을지는 감독이 정하지 않는다.** 놓을 일로 보이면(`moai mv <id> todo`·
+  `moai defer <id> -m "왜"`) 사람에게 묻는다
+- 이어 하기를 맡긴 일은 idea 와 같이 그 보고를 확인할 때까지 다시 안 보낸다
 
 **1. 고른다.** 쌓인 idea 에서 지금 벌여 놓은 일과 부딪히지 않는 것만 남긴다.
 
@@ -728,7 +816,7 @@ mod tests {
     #[test]
     fn both_surfaces_carry_the_same_pieces() {
         let (agents, skill, reference) = (agents(), skill(), reference());
-        for piece in [CHEATSHEET, FORKS, NO_GATE, CLOSING] {
+        for piece in [CHEATSHEET, FORKS, NO_GATE, WRITING, CLOSING] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(skill.contains(piece), "스킬에 없다 — {head}");
@@ -754,6 +842,65 @@ mod tests {
         let subject = example.replace("<id>", "web-a1b2");
         assert_eq!(crate::git::ids_in(&subject).collect::<Vec<_>>(), ["web-a1b2"], "예시 제목 {subject:?}");
         assert!(COMMITS.contains(&format!("`{}:`", crate::git::TRACKER)), "트래커 커밋의 머리가 git 이 거르는 것과 다르다");
+    }
+
+    /// **이모지를 쓰지 말라는 글이 제 손으로 이모지를 쓰지 않는다**(moai-j8aq). 가르치는 글이
+    /// 제 규칙을 어기면 읽는 쪽은 그것을 규칙이 아니라 취향으로 읽는다.
+    ///
+    /// 세는 자리는 넷이다 — 이모지 판(U+1F300 위), **이모지로 그리라는 표시(U+FE0F)**, 그리고
+    /// 기호 판의 이모지 구역(U+2600–U+27BF·U+2B00–U+2BFF). 판 위만 세면 `⚠️`·`❗`·`✅` 가
+    /// 그대로 지나간다 — 실제로 에이전트가 제일 잘 쓰는 것이 그 셋이다.
+    ///
+    /// `⎇`·`→` 같은 글리프는 구역 밖이라 저절로 살고, 구역 안의 `✓` 만 따로 뺀다 — 보드가 색
+    /// 대신 쓰는 기호라 여기서 막으면 안 된다. 색이 혼자 뜻을 지지 않게 하는 쪽이 먼저다.
+    #[test]
+    fn the_style_piece_obeys_itself() {
+        assert!(WRITING.contains("이모지"), "글 스타일에 이모지 이야기가 없다");
+        let emoji = |c: char| {
+            c != '✓'
+                && (c >= '\u{1F300}'
+                    || matches!(c, '\u{FE0F}' | '\u{2600}'..='\u{27BF}' | '\u{2B00}'..='\u{2BFF}'))
+        };
+        for (surface, text) in
+            [("AGENTS 블록", agents()), ("스킬", skill()), ("참고 문서", reference()), ("감독 스킬", supervise())]
+        {
+            let found: String = text.chars().filter(|c| emoji(*c)).collect();
+            assert!(found.is_empty(), "{surface} 이 이모지를 쓴다 — {found}");
+        }
+    }
+
+    /// **예시가 제 스타일을 지킨다**(moai-1xf2). 스타일을 가르치는 글에서 예시가 어긋나면
+    /// 읽는 쪽은 규칙이 아니라 예시를 따라 적는다 — 예시가 실제 글이고 규칙은 설명이다.
+    ///
+    /// 제목의 잣대는 **보드가 실제로 쓰는 자**다 — `view::TITLE_CAP` 을 `text::width` 로 잰다.
+    /// 손으로 적은 숫자를 `chars().count()` 로 재던 판은 둘 다 틀렸다: 한글 한 글자는 두 칸이라
+    /// 글자 수로 재면 상한이 두 배로 늘고, 그렇게 지나간 첫 예시 제목이 48칸으로 보드에서
+    /// 실제로 잘렸다 — 짧게 쓰라고 가르치는 글이 잘리는 제목을 내밀고 있었다.
+    ///
+    /// 규칙이 아니라 **예시에만** 매는 잣대다 — 이슈 제목을 셈해 막는 자리는 없다.
+    #[test]
+    fn the_style_example_obeys_the_style() {
+        let reference = reference();
+        assert!(reference.contains(WRITING_EXAMPLE), "참고 문서에 글 스타일 예시가 없다");
+        // 여는 `moai add "` 에 맨다 — 첫 따옴표로 찾으면 앞 산문에 따옴표가 하나 들면
+        // 조용히 엉뚱한 토막을 제목으로 재고도 초록이다.
+        let title = WRITING_EXAMPLE
+            .split_once("moai add \"")
+            .and_then(|(_, rest)| rest.split_once('"'))
+            .map(|(t, _)| t)
+            .expect("예시 명령에 제목이 없다");
+        let cap = crate::view::TITLE_CAP;
+        let w = crate::text::width(title);
+        assert!(w <= cap, "예시 제목이 보드({cap}칸)에서 잘린다 — {w}칸, {title}");
+        assert!(!title.contains('\n'), "예시 제목이 두 줄이다 — {title}");
+        // 본문은 목록이고, 가르친 갈래는 셋이다(무엇이 어긋났는가·무엇을 봤는가·어디를 고치는가).
+        // 여는 줄에서 자른다 — 닫는 줄(`BODY\n`)로 자르면 heredoc 뒤의 글을 본문으로 읽는다.
+        let body = WRITING_EXAMPLE.split("<<'BODY'\n").nth(1).expect("예시 본문이 없다");
+        let lines = body.lines().take_while(|l| *l != "BODY");
+        assert!(lines.clone().count() >= 3, "예시 본문이 가르친 세 갈래를 다 안 보여 준다");
+        for line in lines {
+            assert!(line.starts_with("- "), "예시 본문이 목록이 아니다 — {line}");
+        }
     }
 
     /// 규칙의 이름이 스킬에 그대로 선다. 훅의 거절문 쪽은 `hook` 의 시험이 본다.
@@ -923,7 +1070,7 @@ mod tests {
         // 표면마다 센다 — 합쳐 세면 두 표면에 드는 조각이, 한 표면에만 있는 heredoc 이 빠진
         // 자리를 메운다.
         for (name, text, want) in
-            [("agents", agents(), 2), ("skill", skill(), 1), ("reference", reference(), 2), ("supervise", supervise(), 1)]
+            [("agents", agents(), 2), ("skill", skill(), 1), ("reference", reference(), 3), ("supervise", supervise(), 1)]
         {
             let lines: Vec<&str> = text.lines().collect();
             let mut seen = 0;
