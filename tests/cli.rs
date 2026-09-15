@@ -2336,6 +2336,42 @@ fn init_never_overwrites_an_agents_md_it_cannot_read() {
     assert_eq!(std::fs::read(&md).unwrap(), mine);
 }
 
+/// **못 쓰는 AGENTS.md 도 건너뛰고 나머지를 심는다**(moai-780n, 2026-09-15 사용자 결정). 읽기
+/// 전용 파일 하나로 `?` 에 끊기던 때는 `.moai/` 와 `.gitattributes` 는 이미 선 채 접두어도 딸린
+/// 파일 안내도 못 찍고 exit 1 이었다 — 같은 실행이 만든 안내가 통째로 삼켜졌다. **못 읽는 것과
+/// 다르다**: 그쪽은 아무것도 심기 전에 멈춰 남의 산문을 지키지만, 여기는 못 쓰는 것뿐이라 잃을
+/// 산문이 없다. 쓸 수 있게 고치고 다시 부르면 그때 블록이 선다.
+#[cfg(unix)]
+#[test]
+fn init_finishes_even_when_agents_md_cannot_be_written() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("agentsro");
+    let md = s.path().join("AGENTS.md");
+    let mine = "# 우리 규약\n\n손으로 쓴 것.\n";
+    std::fs::write(&md, mine).unwrap();
+    std::fs::set_permissions(&md, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().append(true).open(&md).is_ok() {
+        return; // root 는 권한을 안 본다
+    }
+
+    let out = moai(s.path(), &["init", "argos"]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), mine, "못 쓰는 AGENTS.md 가 바뀌었다");
+    assert!(said.contains("AGENTS.md") && said.contains("못 썼다"), "{said}");
+    // **같은 실행이 만든 나머지 말이 삼켜지지 않는다** — 접두어도, 딸린 파일도 그대로 선다.
+    assert!(said.contains("argos"), "접두어를 안 찍었다 — {said}");
+    assert!(s.path().join(".moai/issues.jsonl").exists() && s.path().join(".gitattributes").exists(), "{said}");
+    let js = ok(s.path(), &["init", "--json"]);
+    assert!(js.contains("\"AGENTS.md\":{\"kind\":\"unwritable\"") && js.contains("\"agents\":false"), "{js}");
+
+    // 쓸 수 있게 고치면 그때 블록이 선다 — 산문은 그대로 위에 남는다.
+    std::fs::set_permissions(&md, std::fs::Permissions::from_mode(0o644)).unwrap();
+    ok(s.path(), &["init"]);
+    let now = std::fs::read_to_string(&md).unwrap();
+    assert!(now.starts_with(mine) && now.contains("moai:begin"), "{now}");
+}
+
 /// **`status` 는 낡은 AGENTS.md 블록을 알림(`notices`)으로 비춘다**(moai-mj45). 경고가 아니다 —
 /// 종료 코드도 "드러난 문제 없다" 도 그대로다. **없는 블록은 말하지 않는다**: `--no-agents` 로
 /// 안 쓰기로 한 저장소를 영영 조른다(2026-09-14 사용자 결정). 다시 심으면 사라진다.

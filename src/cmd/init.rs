@@ -582,18 +582,34 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // **쓴 때만 `true` 다**(moai-knn0). 늘 참이던 때는 "블록을 맞췄다" 가 아무것도 안 쓴 자리에도
     // 서서 `이미 다 맞아 있다` 가 `--no-agents` 말고는 닿지 않았고, 낡았다는 알림을 보고 부른
     // 사람이 그 줄만으로는 무엇이 바뀌었는지 몰랐다. `gitattributes`·`gitignore` 가 이미 그 뜻이다.
+    // **못 써도 끊지 않는다**(moai-780n, 2026-09-15 사용자 결정). 읽기 전용 파일 하나로 `?` 에
+    // 끊기던 때는 `.moai/` 와 `.gitattributes` 는 이미 선 채 접두어도 딸린 파일 안내도 못 찍고
+    // 끝났다 — 같은 실행이 만든 말이 통째로 삼켜졌다. **못 읽는 것과는 다르다**: 그쪽은 아무것도
+    // 심기 전에 멈춰 남의 산문을 지키지만(위의 `read_agents`), 여기서 잃을 산문은 없다. 안 써진
+    // 블록은 다음 `init` 이 채우고, 그 사이는 `init --check` 와 `status` 가 말한다.
+    let mut agents_trouble = None;
     let agents = match &agents_now {
         None => false,
         Some(existing) => {
             let next = with_block(existing, &crate::guide::agents());
-            let changed = next != *existing;
-            if changed {
-                std::fs::write(&agents_path, next)
-                    .map_err(|e| Fail::new(format!("{}: {e}", agents_path.display())))?;
+            if next == *existing {
+                false
+            } else {
+                match std::fs::write(&agents_path, next) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        agents_trouble = Some(Added::Unwritable { why: e.to_string(), missing: Vec::new() });
+                        false
+                    }
+                }
             }
-            changed
         }
     };
+    // 딸린 파일과 **한 자리에서 말한다** — 못 건드린 것은 이름·갈래·까닭으로 함께 선다. 블록은
+    // 줄 몇 개가 아니라 통째로 갈아 끼우는 글이라 "손으로 더할 줄" 이 없다(빈 글을 넘긴다):
+    // 사람이 할 일은 쓸 수 있게 고치고 다시 부르는 것뿐이고, 그 말은 [`hand`] 가 빈 자리에서 낸다.
+    let untouched: Vec<(&str, &Added, &str)> =
+        untouched.into_iter().chain(agents_trouble.iter().map(|t| ("AGENTS.md", t, ""))).collect();
     // **`agents` 가 아니라 "AGENTS.md 를 다뤘는가" 로 묻는다** — `agents` 는 이제 *쓴* 때만 참이라
     // (moai-knn0) 그것으로 물으면 블록이 이미 맞는 저장소에서는 이 안내가 영영 안 선다.
     let claude_needs_pointer = agents_now.is_some()
@@ -668,6 +684,12 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             Added::Wrote | Added::Already => continue,
         };
         out.push(head);
+        // **댈 줄이 없는 자리도 있다** — AGENTS.md 블록은 줄 몇 개가 아니라 통째로 갈아 끼우는
+        // 글이라 손으로 옮겨 적을 것이 아니다. 그 자리는 상태를 보는 길을 대신 댄다(moai-780n).
+        if done.hand(block).is_empty() {
+            out.push("    쓸 수 있게 고치고 다시 부른다 — `moai init --check` 가 블록 상태를 말한다".into());
+            continue;
+        }
         out.push("    손으로 더할 줄 (고치고 `moai init` 을 다시 불러도 된다):".into());
         // **한 줄에 하나씩 낸다** — 쉼표로 이으면 붙여 넣은 것이 한 줄이 되어 규칙이 안 선다.
         // `.gitattributes` 는 더 나쁘다: `<패턴> text eol=lf, <패턴> …` 은 첫 패턴에 쓰레기
@@ -683,7 +705,9 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // **줄 수가 아니라 한 일로 묻는다.** 줄을 세던 때는 이 자리 위에 줄 하나를 더하는 것만으로
     // 이 안내가 말없이 사라졌다 — `moai-knn0` 전까지 `agents` 가 늘 참이라 실제로 그랬다.
     // `Already` 는 "다 있어서 안 건드렸다" 뿐이다 — 못 읽은 자리는 `Unreadable` 이라 여기서 걸린다.
-    let did_nothing = attrs == Added::Already && ignore == Added::Already && !agents;
+    // **못 건드린 자리가 있으면 "다 맞아 있다" 가 아니다**(moai-780n) — 못 쓴 AGENTS.md 는 딸린
+    // 파일이 둘 다 `Already` 여도 남은 일이다.
+    let did_nothing = attrs == Added::Already && ignore == Added::Already && !agents && untouched.is_empty();
     if again && did_nothing {
         out.push("  이미 다 맞아 있다".into());
     }
