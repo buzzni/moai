@@ -529,7 +529,79 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) {
             Line::from(spans)
         })
         .collect();
+    // 라벨 칸은 `{label:<7} : ` 로 박았다 — 일곱 칸과 " : " 세 칸.
+    let told_w = told.iter().map(|(_, said)| 7 + 3 + crate::text::width(said)).max().unwrap_or(0);
+    let logo_cells = if with_logo { logo_w + HEADER_GAP } else { 0 };
+    let from = logo_cells + 1 + HEADER_GAP + told_w + HEADER_GAP;
+    let lines = with_projects(app, lines, at.width as usize, from);
     f.render_widget(Paragraph::new(lines), at);
+}
+
+/// 헤더 셋째 칸 — 번호 붙은 프로젝트. `<0>` 은 전체(프로젝트 층)고 그다음이 등록 차례다.
+///
+/// **번호는 아홉까지다**(사용자 결정). 숫자 키는 열 개뿐이고 `<0>` 이 전체를 가져갔다.
+/// 열째부터는 번호 없이 이름만 서고, 층에서 골라 들어간다 — 번호를 두 자리로 받기 시작하면
+/// 한 자리 키가 다음 글쇠를 기다리느라 늦어진다.
+///
+/// **지금 선 자리는 빛이 지나간다**([`shimmer`], 작업 중인 줄과 같은 애니메이션). 그래서
+/// `App::spun` 을 켠다 — 그리지 않으면 루프가 빠른 걸음으로 안 깨어나 빛이 멈춘다.
+fn with_projects<'a>(app: &mut App, mut lines: Vec<Line<'a>>, width: usize, from: usize) -> Vec<Line<'a>> {
+    let Some(layer) = app.layer.as_ref() else { return lines };
+    // `<0>` 은 층이다 — 층에 서 있으면 그것이 선 자리다.
+    let here = match &layer.at {
+        crate::tui::layer::At::Layer => Some(0),
+        crate::tui::layer::At::Project(p) => layer.position(p).map(|at| at + 1),
+    };
+    let names: Vec<String> = std::iter::once("전체".to_string()).chain(layer.places.iter().map(|p| p.name.clone())).collect();
+    let room = width.saturating_sub(from);
+    let widest = names.iter().enumerate().map(|(n, name)| numbered(n, name).len_hint()).max().unwrap_or(0);
+    if room < widest {
+        return lines;
+    }
+    let mut glinted = false;
+    for (n, name) in names.iter().enumerate() {
+        let row = n % LOGO.len();
+        let col = n / LOGO.len();
+        let at = from + col * (widest + HEADER_GAP * 2);
+        if at + widest > width {
+            break;
+        }
+        let pad = at.saturating_sub(line_width(&lines[row]));
+        lines[row].spans.push(Span::raw(" ".repeat(pad)));
+        let tag = numbered(n, name);
+        // 번호는 SPC 메뉴의 키와 같은 색으로 잘 보이게 둔다(사용자 결정) — 키라는 것이 색으로도 읽힌다.
+        lines[row].spans.push(Span::styled(tag.key, Style::new().fg(MENU_KEY)));
+        if here == Some(n) {
+            glinted = true;
+            lines[row].spans.extend(shimmer(tag.name, app.spin));
+        } else {
+            lines[row].spans.push(Span::styled(tag.name, dim()));
+        }
+    }
+    app.spun |= glinted;
+    lines
+}
+
+/// `<n> 이름` 한 덩이. 번호가 없는 열째부터는 번호 자리를 공백으로 맞춰 이름이 한 줄로 선다.
+struct Numbered {
+    key: String,
+    name: String,
+}
+
+impl Numbered {
+    fn len_hint(&self) -> usize {
+        crate::text::width(&self.key) + crate::text::width(&self.name)
+    }
+}
+
+fn numbered(n: usize, name: &str) -> Numbered {
+    let key = if n <= 9 { format!("<{n}> ") } else { "    ".to_string() };
+    Numbered { key, name: name.to_string() }
+}
+
+/// 지금까지 그린 줄의 표시 폭. 칸을 맞추려면 앞선 조각들의 폭을 알아야 한다.
+fn line_width(line: &Line) -> usize {
+    line.spans.iter().map(|s| crate::text::width(&s.content)).sum()
 }
 
 /// 파이프 오른쪽 줄들 — 위에서부터 사람, 판. 그 밑은 번호 붙은 프로젝트가 채운다(moai-mr83).
@@ -3131,6 +3203,40 @@ pub(super) mod tests {
         let mut a = app();
         let lines = render(&mut a, 100, 14);
         assert!(!lines[..6].iter().any(|l| l.contains("Issue tracker")), "짧은 터미널에 헤더가 섰다 — {:?}", &lines[..6]);
+    }
+
+    /// **파이프 오른쪽 셋째 칸은 번호 붙은 프로젝트다**(moai-mr83) — `<0>` 은 전체(층),
+    /// 그다음이 등록 차례다. 지금 선 프로젝트는 빛이 지나간다 — 그래서 루프가 계속 깨어난다.
+    #[test]
+    fn the_header_numbers_the_projects_and_glints_on_the_one_we_stand_in() {
+        use super::super::layer::At;
+        let mut a = layered(At::Project("/w/one".into()));
+        let lines = render(&mut a, 120, 24);
+        let head = lines[..6].join("\n");
+        assert!(head.contains("<0> 전체"), "전체가 없다\n{head}");
+        for (n, name) in [(1, "one"), (2, "bare"), (3, "gone")] {
+            assert!(head.contains(&format!("<{n}> {name}")), "{n}번이 없다\n{head}");
+        }
+        assert!(a.spun, "선 프로젝트가 안 빛난다 — 루프가 헤더를 안 깨운다");
+    }
+
+    /// **번호는 1~9 까지다**(사용자 결정) — 열째부터는 번호 없이 이름만 선다. 숫자 키가
+    /// 열 개뿐이라 `<10>` 은 한 번에 누를 수 없고, 두 자리를 받기 시작하면 한 자리 키가 늦어진다.
+    #[test]
+    fn a_tenth_project_stands_without_a_number() {
+        use super::super::layer::{At, Look, Shut};
+        let shut = || Look::Shut { state: Shut::Uninit, said: "· init 전".into() };
+        let places: Vec<(String, String, Look)> =
+            (1..=11).map(|n| (format!("p{n}"), format!("/w/p{n}"), shut())).collect();
+        let mut a = app();
+        a.layer = Some(super::super::layer::fake(
+            places.iter().map(|(n, p, _)| (n.as_str(), p.as_str(), shut())).collect(),
+            At::Layer,
+        ));
+        let head = render(&mut a, 160, 24)[..6].join("\n");
+        assert!(head.contains("<9> p9"), "아홉째에 번호가 없다\n{head}");
+        assert!(!head.contains("<10>"), "열째에 번호를 줬다\n{head}");
+        assert!(head.contains("p10"), "번호 없는 프로젝트가 아예 사라졌다\n{head}");
     }
 
     /// 층을 그림 시험용으로 세운다 — 연 것 하나, init 전 하나, 사라진 것 하나.

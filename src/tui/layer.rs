@@ -256,7 +256,7 @@ impl Layer {
         }
     }
 
-    fn position(&self, path: &Path) -> Option<usize> {
+    pub(super) fn position(&self, path: &Path) -> Option<usize> {
         self.places.iter().position(|p| p.path == path)
     }
 }
