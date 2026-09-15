@@ -2664,3 +2664,8 @@
 {"ts":"2026-09-15T06:43:40Z","id":"moai-4370","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-15T06:43:41Z","id":"moai-6opu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-15T06:43:41Z","id":"moai-qjem","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T06:49:13Z","id":"moai-leyw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T06:49:13Z","id":"moai-mstm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T06:49:13Z","id":"moai-mj45","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-15T06:49:14Z","id":"moai-epb0.27f","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review max --fix e873a26..d0d50d5 이 worktree-moai-epb0 안에서 돈다. 끝나면 원문·판단 두 노트, done -m"}
+{"ts":"2026-09-15T06:49:14Z","id":"moai-epb0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 세 이슈(leyw 1d34ab2 · mstm f455546 · mj45 d0d50d5)는 worktree-moai-epb0 에 커밋됨, main 받은 뒤 테스트 771+270 통과. 리뷰 moai-epb0.27f 를 닫고 main 에 --no-ff 머지 → 워크트리·가지 삭제 → 셋 done → moa-issue-14 에 보고"}
