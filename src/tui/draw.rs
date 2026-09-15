@@ -106,7 +106,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Layout::horizontal([Constraint::Percentage(LEFT), Constraint::Min(10)]).areas(body);
 
     if header_h > 0 {
-        header(f, head);
+        header(f, app, head);
     }
     crumbs(f, app, &rows, top);
     if let Some((text, urgent)) = banner(app) {
@@ -505,13 +505,15 @@ fn banner(app: &App) -> Option<(String, bool)> {
 ///
 /// 파이프 오른쪽은 아직 빈 채로 둔다. 사람·판(moai-56jf)과 번호 붙은 프로젝트(moai-mr83)가
 /// 그 자리에 선다 — 줄과 칸을 먼저 세워 두면 그쪽은 글자만 채운다.
-fn header(f: &mut Frame, at: Rect) {
+fn header(f: &mut Frame, app: &App, at: Rect) {
     let logo_w = LOGO.iter().map(|l| crate::text::width(l)).max().unwrap_or(0);
     // 로고와 파이프를 세우고도 오른쪽에 정보 한 줄이 설 만큼 남아야 로고를 그린다.
     let with_logo = (at.width as usize) >= logo_w + HEADER_GAP * 2 + 1 + HEADER_INFO_MIN;
+    let told = told_of(app);
     let lines: Vec<Line> = LOGO
         .iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(n, row)| {
             let mut spans = Vec::new();
             if with_logo {
                 let pad = logo_w.saturating_sub(crate::text::width(row));
@@ -519,10 +521,28 @@ fn header(f: &mut Frame, at: Rect) {
                 spans.push(Span::raw(" ".repeat(HEADER_GAP)));
             }
             spans.push(Span::styled("│", dim()));
+            if let Some((label, said)) = told.get(n) {
+                spans.push(Span::raw(" ".repeat(HEADER_GAP)));
+                spans.push(Span::styled(format!("{label:<7} : "), dim()));
+                spans.push(Span::raw(said.clone()));
+            }
             Line::from(spans)
         })
         .collect();
     f.render_widget(Paragraph::new(lines), at);
+}
+
+/// 파이프 오른쪽 줄들 — 위에서부터 사람, 판. 그 밑은 번호 붙은 프로젝트가 채운다(moai-mr83).
+///
+/// **누군지 모르면 그 자리를 비우고 넘어간다**(moai-56jf). 여는 화면은 읽기고, 읽기는 사람을
+/// 묻지 않는다 — 여기서 `Mode::Ask` 를 세우면 설정 없는 기계에서 탐색기가 묻는 칸으로 열린다.
+fn told_of(app: &App) -> Vec<(&'static str, String)> {
+    let user = (app.identify)(app.user.as_deref())
+        .map(|a| crate::model::label(&a.name, Some(&a.email), app.cfg.naming))
+        .unwrap_or_else(|_| "—".into());
+    // 서버의 최신판은 아직 없다. 빈 자리를 두면 "고장" 으로 읽히므로 없다는 것을 낱말로 적는다.
+    let version = format!("{} · 최신 확인 안 함", env!("CARGO_PKG_VERSION"));
+    vec![("User", user), ("Version", version)]
 }
 
 fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
@@ -3040,6 +3060,32 @@ pub(super) mod tests {
         assert!(lines[..5].iter().any(|l| l.contains('▀')), "로고를 안 그린다 — {:?}", &lines[..5]);
         // 헤더는 목록을 덮지 않는다 — 밑의 칸이 그만큼 내려갔을 뿐이다.
         assert!(lines[6..].iter().any(|l| l.contains("argos-0001")), "목록이 헤더에 먹혔다");
+    }
+
+    /// **파이프 오른쪽 첫 두 줄은 사람과 판이다**(moai-56jf) — User 는 이름과 메일,
+    /// Version 은 이 바이너리의 판이다. 서버 최신판은 아직 없으니 그 자리를 낱말로 적어 둔다.
+    #[test]
+    fn the_header_names_the_user_and_the_version() {
+        let mut a = app();
+        a.identify = |_| Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() });
+        let lines = render(&mut a, 100, 24);
+        let head = lines[..6].join("\n");
+        assert!(head.contains("User") && head.contains("레이븐 (raven@buzzni.com)"), "사람이 없다\n{head}");
+        assert!(head.contains(&format!("Version : {}", env!("CARGO_PKG_VERSION"))), "판이 없다\n{head}");
+        assert!(head.contains("최신 확인 안 함"), "서버 최신판 자리가 없다\n{head}");
+    }
+
+    /// **누군지 몰라도 헤더는 서고 묻지 않는다**(moai-56jf). 읽기는 사람을 묻지 않는다 —
+    /// 여는 순간 묻는 칸이 서면 설정 없는 기계에서 도구가 고장 난 것으로 보인다.
+    #[test]
+    fn a_machine_without_an_identity_still_draws_the_header() {
+        let mut a = app();
+        a.identify = |_| Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험", crate::fail::code::NO_ACTOR));
+        let lines = render(&mut a, 100, 24);
+        let head = lines[..6].join("\n");
+        assert!(head.contains("User") && head.contains('—'), "모르는 자리를 안 비웠다\n{head}");
+        assert!(head.contains("Version"), "판까지 같이 사라졌다\n{head}");
+        assert_eq!(a.mode, Mode::Browse, "헤더를 그리다 사람을 물었다");
     }
 
     /// **로고가 안 들면 헤더는 로고만 뺀다**(moai-mzet) — 파이프 오른쪽은 좁아도 남는다.
