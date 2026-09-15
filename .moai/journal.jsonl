@@ -2691,3 +2691,4 @@
 {"ts":"2026-09-15T06:53:43Z","id":"moai-v9ai","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-h2zx 에서 펼쳤다 — 시험의 git 호출이 물려받은 GIT_DIR 로 바깥 저장소를 읽는다 — git 훅·rebase -x 안에서 cargo test 가 깨진다"}
 {"ts":"2026-09-15T06:53:43Z","id":"moai-h2zx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-v9ai 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-15T06:53:49Z","id":"moai-g1a3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T06:55:46Z","id":"moai-mauw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"main 에 머지 (7479093) — 커밋 칸 걷기를 이슈 created_at - 하루에서 멈춘다(2만 커밋 흉내 저장소 164→10ms), git 없음·커밋 없는 저장소는 말없이 빈 칸. 리뷰 moai-mauw.3co 반영(687d96c), 넘긴 것은 moai-g8cd"}
