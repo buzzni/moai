@@ -16,9 +16,27 @@ use std::path::Path;
 pub enum Error {
     /// git 을 띄우지 못했다 — 설치돼 있지 않은 기계가 가장 흔하다.
     Spawn(std::io::Error),
-    /// git 이 비영으로 끝났다. 저장소 밖이거나 커밋이 하나도 없는 가지다.
+    /// git 이 비영으로 끝났다. 저장소 밖인 것이 가장 흔하다 — **커밋이 하나도 없는 가지는
+    /// 여기 안 든다**([`table`] 의 `--ignore-missing`).
     Failed(String),
+    /// 띄우기는 했는데 **읽다 끊겼다.** [`Spawn`](Error::Spawn) 과 갈라 두는 까닭은 `commits_error`
+    /// 에 있다 — "git 이 없다" 로 읽으면 받는 쪽이 있지도 않은 git 을 깔러 간다.
+    Stream(std::io::Error),
     NotUtf8(std::string::FromUtf8Error),
+}
+
+/// 받는 쪽에 낼 한 줄. `show --json` 의 `commits_error` 가 이것을 싣는다(moai-rzsv) — 사람
+/// 화면은 여전히 말이 없다. **무엇을 못 했는지까지 적는다**: "git 이 없다" 와 "저장소가 아니다" 는
+/// 받는 쪽이 할 일이 다르다.
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Spawn(e) => write!(f, "git 을 부르지 못했다 — {e}"),
+            Error::Failed(why) => write!(f, "git 이 이력을 못 냈다 — {why}"),
+            Error::Stream(e) => write!(f, "git 이 내던 이력이 끊겼다 — {e}"),
+            Error::NotUtf8(e) => write!(f, "git 이 낸 글을 못 읽었다 — {e}"),
+        }
+    }
 }
 
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 바이트로 받는다.
@@ -28,19 +46,31 @@ pub enum Error {
 ///
 /// **출력은 UTF-8 로 달라고 한다.** `i18n.logOutputEncoding` 을 cp949 같은 것으로 둔 사람에게는
 /// 한글 제목 한 줄이 깨져 — ASCII 제목까지 같이 — 커밋 칸이 통째로 빌 수 있다. 그래도 깨진 채로
-/// 오는 이력은 [`read_log`] 가 관대하게 읽는다.
+/// 오는 이력은 [`stream_log`] 가 관대하게 읽는다.
 fn output(root: &Path, args: &[&str]) -> Result<Vec<u8>, Error> {
-    let out = command()
-        .arg("-C")
-        .arg(root)
-        .args(["-c", "i18n.logOutputEncoding=UTF-8"])
-        .args(args)
-        .output()
-        .map_err(Error::Spawn)?;
+    let out = invocation(root, args).output().map_err(Error::Spawn)?;
     if !out.status.success() {
         return Err(Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()));
     }
     Ok(out.stdout)
+}
+
+/// `root` 에 대고 부를 git 한 번 — **인자를 짓는 자리는 여기 하나다.**
+///
+/// 한 번에 받는 [`output`] 과 흘려 받는 [`stream_log`] 가 같은 것을 부른다. 두 곳에서 따로
+/// 지으면 `-C` 나 `-c i18n.logOutputEncoding=UTF-8` 을 한쪽에만 더하는 날이 오고, 그러면 같은
+/// 물음에 두 길이 다른 답을 낸다 — 걷는 목록이 갈라져 났던 moai-g1a3 와 같은 자리다.
+///
+/// **표준 입력은 끊는다.** `Command::output` 은 제 손으로 끊는데 `spawn` 은 물려준다 — 한쪽만
+/// 끊기면 흘려 읽는 길에서만 git 이 이쪽의 입력을 물려받는다.
+fn invocation(root: &Path, args: &[&str]) -> std::process::Command {
+    let mut cmd = command();
+    cmd.arg("-C")
+        .arg(root)
+        .args(["-c", "i18n.logOutputEncoding=UTF-8"])
+        .args(args)
+        .stdin(std::process::Stdio::null());
+    cmd
 }
 
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 받는다. 글자가 깨졌으면 실패다 —
@@ -49,12 +79,83 @@ pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
     String::from_utf8(output(root, args)?).map_err(Error::NotUtf8)
 }
 
-/// `git log` 의 출력. **글자가 깨져도 읽는다**(읽기는 관대하고 쓰기는 엄하다).
-/// `i18n.logOutputEncoding` 을 legacy 로 둔 저장소나 옛 커밋 하나의 인코딩 때문에 이력
-/// 전체를 못 읽으면 커밋 칸이 까닭도 없이 영영 빈다 — 제목은 어차피 `text::sanitize`
-/// 를 지나 그려지고, 해시는 [`records`] 가 모양으로 한 번 더 거른다.
-fn read_log(root: &Path, args: &[&str]) -> Result<String, Error> {
-    Ok(String::from_utf8_lossy(&output(root, args)?).into_owned())
+/// `git log` 을 띄우고 **레코드를 하나씩 흘려 보낸다**(moai-iol3).
+///
+/// 이력을 통째로 들고 있지 않는다. `%b` 를 더한 뒤로 이력 전체는 커밋 하나에 수백 바이트씩
+/// 붙어, 커밋 2만 개짜리 저장소에서 `show` 한 번이 13MB 를 읽고 그것을 다시 `String` 으로
+/// 옮겼다 — 화면에 서는 것은 그중 커밋 몇 줄뿐이다. 이제 드는 것은 **레코드 하나**뿐이다.
+///
+/// **글자가 깨져도 읽는다**(읽기는 관대하고 쓰기는 엄하다). `i18n.logOutputEncoding` 을 legacy 로
+/// 둔 저장소나 옛 커밋 하나의 인코딩 때문에 이력 전체를 못 읽으면 커밋 칸이 까닭도 없이 영영
+/// 빈다 — 제목은 어차피 `text::sanitize` 를 지나 그려지고, 해시는 [`records_of`] 가 모양으로 한 번
+/// 더 거른다.
+///
+/// **git 이 비영으로 끝나면 실패다.** 레코드를 흘려 받는 동안은 그것을 모르므로, 다 읽은 뒤에
+/// 끝을 보고 판단한다 — 반쯤 읽은 이력을 답으로 내면 커밋 칸이 조용히 짧아진다.
+///
+/// **표준 오류는 딴 실이 함께 비운다.** 둘 다 파이프로 받아 놓고 한쪽만 읽으면, git 이 경고를
+/// 파이프 크기(보통 64KB)만큼 뱉는 순간 git 은 stderr 쓰기에서 멈추고 이쪽은 stdout 읽기에서
+/// 멈춰 **둘 다 영영 안 끝난다** — 탐색기의 커밋 스레드가 그렇게 잠들면 아무도 못 깨운다.
+/// `Command::output` 이 안 걸리던 자리라, 흘려 읽기로 옮기며 같은 것을 손으로 세운다.
+fn stream_log(root: &Path, args: &[&str], mut take: impl FnMut(&str, &str, &str)) -> Result<(), Error> {
+    use std::io::Read;
+    let mut child = invocation(root, args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(Error::Spawn)?;
+    let mut out = child.stdout.take().expect("stdout 을 파이프로 달라고 했다");
+    let mut said = child.stderr.take().expect("stderr 를 파이프로 달라고 했다");
+    let sink = std::thread::spawn(move || {
+        let mut why = Vec::new();
+        let _ = said.read_to_end(&mut why);
+        why
+    });
+    let mut buf: Vec<u8> = Vec::new();
+    let mut chunk = [0u8; 16 * 1024];
+    let mut keep = |record: &[u8]| {
+        let text = String::from_utf8_lossy(record);
+        if let Some((hash, subject, body)) = records_of(&text) {
+            take(hash, subject, body);
+        }
+    };
+    let read = loop {
+        let got = match out.read(&mut chunk) {
+            Ok(got) => got,
+            // **신호 하나에 이력이 통째로 사라지지 않는다.** 손으로 부르는 `read` 는 `EINTR` 을
+            // 안 되돌린다 — `Command::output` 이 쓰던 `read_to_end` 는 되돌렸다.
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => break Err(Error::Stream(e)),
+        };
+        if got == 0 {
+            // 레코드는 NUL 로 **끝나므로** 보통 여기서 남는 것이 없다. 안 끝내는 git 을 만나도
+            // 마지막 레코드를 잃지 않게 한 번 더 건넨다 — 빈 조각은 `records_of` 가 버린다.
+            keep(&buf);
+            break Ok(());
+        }
+        buf.extend_from_slice(&chunk[..got]);
+        // **한 조각에서 찾은 레코드는 한 번에 걷는다.** 레코드마다 `drain` 하면 남은 꼬리를
+        // 그때마다 앞으로 미느라, 읽은 바이트의 몇십 배를 옮긴다 — 흘려 읽기로 아낀 것을
+        // 거기서 도로 쓴다.
+        let mut at = 0;
+        while let Some(end) = buf[at..].iter().position(|b| *b == 0) {
+            keep(&buf[at..at + end]);
+            at += end + 1;
+        }
+        buf.drain(..at);
+    };
+    // 읽다 끊겼으면 **아이를 거둔다** — 안 거두면 좀비가 남고 git 은 닫힌 파이프에 계속 쓴다.
+    if read.is_err() {
+        let _ = child.kill();
+    }
+    drop(out);
+    let end = child.wait();
+    let why = sink.join().unwrap_or_default();
+    read?;
+    if !end.map_err(Error::Stream)?.success() {
+        return Err(Error::Failed(String::from_utf8_lossy(&why).trim().to_string()));
+    }
+    Ok(())
 }
 
 /// git 을 띄울 명령 — **moai 가 부르는 git 은 모두 여기서 시작한다.** moai 가 띄우는 **다른** 프로그램
@@ -127,10 +228,10 @@ pub const TRACKER: &str = "chore(tracker)";
 /// 레코드를 가르면 그런 제목 하나가 레코드를 둘로 쪼개 **저장소에 없는 해시**를 지어낸다 —
 /// 남이 보낸 커밋 한 줄로 남의 이슈 커밋 칸에 가짜 줄을 세울 수 있었다. NUL 은 커밋
 /// 메시지에 들지 않는다. 필드는 **앞에서부터** 가르므로 제목에 FS 가 들어도 해시 자리는
-/// 못 건드리고, 그 뒤로 밀려난 글이 본문 행세를 못 하게 [`records`] 가 필드 수를 센다.
+/// 못 건드리고, 그 뒤로 밀려난 글이 본문 행세를 못 하게 [`records_of`] 가 필드 수를 센다.
 const FS: char = '\u{1f}';
 
-/// `git log` 에 줄 서식. **[`records`] 가 가르는 자와 한 자리에서 짓는다** — 한쪽만 고치면
+/// `git log` 에 줄 서식. **[`records_of`] 가 가르는 자와 한 자리에서 짓는다** — 한쪽만 고치면
 /// 제목 자리에 다른 필드가 들어오고, 그것을 알려 주는 것이 없다.
 ///
 /// 본문(`%b`)까지 받는 것은 트레일러 줄 때문이다([`trailed`], moai-dig5).
@@ -206,31 +307,60 @@ pub fn table(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Commit>>,
         return Ok(BTreeMap::new());
     }
     let format = format_arg();
-    let log = read_log(root, &["log", "-z", "--no-show-signature", format.as_str(), "HEAD", "--"])?;
-    Ok(table_of(&log, ids))
+    let known: std::collections::HashSet<&str> = ids.iter().copied().collect();
+    let mut out: BTreeMap<String, Vec<Commit>> = BTreeMap::new();
+    // **레코드를 하나씩 받아 걸러 담는다**(moai-iol3) — 이력 전체가 아니라 맞은 커밋만 든다.
+    // 표를 여기서 바로 쌓는다: 맞은 것을 한 번 담았다가 다시 펼치면 커밋마다 제목과 해시를
+    // 두 벌씩 짓게 되고, 그 중간 그릇은 [`table_of`] 에는 없는 것이라 두 길이 또 갈린다.
+    //
+    // **`--ignore-missing` 은 갓 만든 저장소를 실패로 안 센다**(moai-rzsv 리뷰). `git log HEAD` 는
+    // 커밋이 하나도 없는 가지에서 `fatal: bad revision 'HEAD'` 로 죽는데, 그것을 실패로 세면
+    // `commits_error` 가 "여기서는 못 물어봤다" 로 서서 받는 쪽이 정반대로 읽는다 — 물어본 것은
+    // 맞고 답이 빈 것이다. 저장소 밖은 그대로 실패다(`--ignore-missing` 은 리비전만 봐준다).
+    stream_log(
+        root,
+        &["log", "--ignore-missing", "-z", "--no-show-signature", format.as_str(), "HEAD", "--"],
+        |hash, subject, body| {
+            for id in named_in(subject, body, &known) {
+                out.entry(id.to_string()).or_default().push(commit_of(hash, subject));
+            }
+        },
+    )?;
+    Ok(out)
+}
+
+/// 이 커밋이 대는 id 들 — 제목의 낱말과 **트레일러 줄의 낱말**을 같은 자로 본다(moai-dig5).
+/// 한 커밋이 같은 id 를 두 번 적어도 한 번만 든다.
+fn named_in<'a>(subject: &'a str, body: &'a str, known: &std::collections::HashSet<&str>) -> Vec<&'a str> {
+    let mut named: Vec<&str> = Vec::new();
+    for id in words(subject).chain(trailed(body)).filter(|w| known.contains(w)) {
+        if !named.contains(&id) {
+            named.push(id);
+        }
+    }
+    named
+}
+
+fn commit_of(hash: &str, subject: &str) -> Commit {
+    Commit { hash: hash.to_string(), subject: subject.to_string(), tracker: subject.starts_with(TRACKER) }
 }
 
 /// [`table`] 의 **git 을 안 부르는 반쪽.**
 ///
 /// 낱말을 있는 id 집합에서 찾는다. 이력 전부와 이슈 전부가 만나는 자리라 id 마다 제목을 다시
 /// 훑으면 곱이 된다 — 커밋 1천 × 이슈 1천이면 백만 번이다.
+/// 시험 빌드에만 선다 — 진짜 길은 [`table`] 이 흘려 읽는다(moai-iol3). 레코드를 가르고 담는
+/// 자([`records_of`]·[`named_in`]·[`commit_of`])는 둘이 같은 것을 쓰므로, 이 자리로 못 박은 뜻은
+/// 흘려 읽는 쪽에도 그대로 선다. **다만 레코드를 NUL 로 끊는 일만은 두 벌이다** — 이쪽은 다 받은
+/// 글을 `split`, 저쪽은 오는 바이트를 조각째 — 그래서 조각 경계는 [`table`] 을 실제로 돌려
+/// 재야 한다(`a_record_that_spans_a_read_chunk_survives`).
+#[cfg(test)]
 pub fn table_of(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
     let known: std::collections::HashSet<&str> = ids.iter().copied().collect();
     let mut out: BTreeMap<String, Vec<Commit>> = BTreeMap::new();
     for (hash, subject, body) in records(log) {
-        let mut seen: Vec<&str> = Vec::new();
-        // 제목의 낱말과 **트레일러 줄의 낱말**을 같은 자로 본다(moai-dig5).
-        for id in words(subject).chain(trailed(body)).filter(|w| known.contains(w)) {
-            // 한 제목에 같은 id 를 두 번 적어도 커밋은 한 번이다.
-            if seen.contains(&id) {
-                continue;
-            }
-            seen.push(id);
-            out.entry(id.to_string()).or_default().push(Commit {
-                hash: hash.to_string(),
-                subject: subject.to_string(),
-                tracker: subject.starts_with(TRACKER),
-            });
+        for id in named_in(subject, body, &known) {
+            out.entry(id.to_string()).or_default().push(commit_of(hash, subject));
         }
     }
     out
@@ -248,17 +378,20 @@ pub fn table_of(log: &str, ids: &[&str]) -> BTreeMap<String, Vec<Commit>> {
 /// 제목에는 그 id 를 안 적고도 남의 커밋 칸에 선다 — 화면에 그리는 제목은 첫 `FS` 에서
 /// 잘리므로 **왜 거기 섰는지 보이지도 않는다.** 본문에 그 글자를 담은 커밋은 트레일러를
 /// 잃을 뿐이라, 모르는 쪽으로 기우는 값이 싸다.
+#[cfg(test)]
 fn records(log: &str) -> impl Iterator<Item = (&str, &str, &str)> {
-    log.split('\0')
-        .filter_map(|record| {
-            let mut fields = record.split(FS);
-            let hash = fields.next()?;
-            let subject = fields.next()?;
-            // 본문이 없는 커밋도 있다 — 그때 `%b` 는 빈 글자다.
-            let body = fields.next().unwrap_or("");
-            Some((hash, subject, if fields.next().is_some() { "" } else { body }))
-        })
-        .filter(|(hash, _, _)| !hash.is_empty() && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+    log.split('\0').filter_map(records_of)
+}
+
+/// 레코드 **하나**를 가른다 — 흘려 읽는 쪽([`stream_log`])과 통째로 읽는 쪽(`records`)이 같은 자를 쓴다.
+fn records_of(record: &str) -> Option<(&str, &str, &str)> {
+    let mut fields = record.split(FS);
+    let hash = fields.next()?;
+    let subject = fields.next()?;
+    // 본문이 없는 커밋도 있다 — 그때 `%b` 는 빈 글자다.
+    let body = fields.next().unwrap_or("");
+    let sane = !hash.is_empty() && hash.bytes().all(|b| b.is_ascii_hexdigit());
+    sane.then_some((hash, subject, if fields.next().is_some() { "" } else { body }))
 }
 
 #[cfg(test)]
@@ -330,6 +463,49 @@ pub(crate) mod tests {
         let got = table(&dir, &["moai-bbbb", "moai-cccc"]).unwrap();
         assert!(!got.contains_key("moai-bbbb"), "제목이 밀어 넣은 트레일러가 남의 이슈에 붙었다");
         assert_eq!(got["moai-cccc"].len(), 1, "본문에 적은 트레일러를 안 셌다");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **읽는 조각을 걸치는 레코드도 온전히 선다**(moai-iol3 리뷰). 흘려 읽는 길은 오는 바이트를
+    /// 16KB 씩 받아 NUL 에서 끊는데, 레코드가 그 경계를 걸치면 앞뒤가 따로 읽혀 해시가 잘리거나
+    /// 트레일러가 사라진다 — 레코드를 끊는 일만은 [`table_of`] 쪽과 두 벌이라, 손으로 지은 로그를
+    /// 재는 시험들은 이 길을 하나도 안 밟는다.
+    ///
+    /// 본문을 16KB 보다 크게 키워 **경계를 반드시 걸치게** 하고, 그 뒤 커밋의 제목과 그 커밋 제 본문의
+    /// 트레일러가 둘 다 읽히는지 본다.
+    #[test]
+    fn a_record_that_spans_a_read_chunk_survives() {
+        let dir = std::env::temp_dir().join(format!("moai-git-chunk-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| run_git(&dir, None, args);
+        git(&["init", "-q"]);
+        // 조각(16KB) 을 넉넉히 넘기는 본문. 트레일러는 그 **뒤**에 둔다 — 경계 너머가 안 읽히면 여기서 사라진다.
+        let fat = format!("fix: 큰 본문 (moai-aaaa)\n\n{}\n\nRefs: moai-bbbb", "가".repeat(30_000));
+        git(&["commit", "-q", "--allow-empty", "-m", &fat]);
+        git(&["commit", "-q", "--allow-empty", "-m", "feat: 그 뒤의 것 (moai-cccc)"]);
+
+        let got = table(&dir, &["moai-aaaa", "moai-bbbb", "moai-cccc"]).unwrap();
+        assert_eq!(got["moai-aaaa"].len(), 1, "조각을 걸친 레코드의 제목을 잃었다");
+        assert_eq!(got["moai-aaaa"][0].hash.len(), 40, "조각 경계에서 해시가 잘렸다");
+        assert_eq!(got["moai-bbbb"].len(), 1, "조각 너머의 트레일러를 잃었다");
+        assert_eq!(got["moai-cccc"].len(), 1, "큰 레코드 다음의 커밋을 잃었다");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **커밋이 하나도 없는 저장소는 실패가 아니다**(moai-rzsv 리뷰). `git log HEAD` 는 갓 만든
+    /// 가지에서 `fatal: bad revision 'HEAD'` 로 죽는데, 그것을 `Err` 로 내면 `show --json` 의
+    /// `commits_error` 가 "여기서는 못 물어봤다" 로 서서 받는 쪽이 정반대로 읽는다.
+    ///
+    /// **저장소 밖은 그대로 실패다** — 봐주는 것은 리비전뿐이라, 그 둘이 같은 답이 되면 안 된다.
+    #[test]
+    fn a_repo_without_commits_is_empty_not_broken() {
+        let dir = std::env::temp_dir().join(format!("moai-git-unborn-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(table(&dir, &["moai-aaaa"]).is_err(), "저장소 밖인데 빈 표를 냈다");
+        run_git(&dir, None, &["init", "-q"]);
+        assert!(table(&dir, &["moai-aaaa"]).unwrap().is_empty(), "커밋 없는 저장소를 실패로 셌다");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
