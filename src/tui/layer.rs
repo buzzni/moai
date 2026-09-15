@@ -473,6 +473,13 @@ impl App {
         if let Some((_, handle)) = self.pending.take() {
             self.discard(handle);
         }
+        // 커밋 표도 프로젝트에 매인 것이다(moai-a4i0). 짓던 것을 놓지 않으면 떠난 프로젝트의
+        // 이력을 마저 걷는 동안 층이 빠른 걸음으로 깨어 있고, 그 답이 다음 프로젝트의 표를
+        // 세우는 자리를 막는다(`follow_commits` 는 도는 것이 있으면 새로 안 띄운다).
+        if let Some((_, handle)) = self.commits_job.take() {
+            self.discard(handle);
+        }
+        self.commits = super::Commits::new();
         self.repo = None;
         self.issues = Vec::new();
         self.index = Index::of(&[]);
