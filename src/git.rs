@@ -39,7 +39,7 @@ pub struct Commit {
 }
 
 /// 트래커 커밋의 머리. `moai init` 이 쓰는 안내(`guide`)가 이 머리를 가르친다.
-const TRACKER: &str = "chore(tracker)";
+pub const TRACKER: &str = "chore(tracker)";
 
 /// 레코드와 필드를 가르는 글자. 커밋 제목에는 제어 문자가 들지 않는다.
 const RS: char = '\u{1e}';
