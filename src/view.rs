@@ -666,9 +666,16 @@ fn says(w: &Warning) -> String {
         // 것은 "손질이 사라진다" 다 — 한 낱말로 뭉치면 그 중 한쪽이 반드시 거짓말이 된다.
         "agents_stale" => "AGENTS.md 블록이 다르다 — 다른 바이너리가 쓴 것이라 이쪽이 더 낡았을 수 있다 (다시 빌드해 보고)".to_string(),
         "agents_hand_edited" => "AGENTS.md 블록을 손으로 고쳤다 — 다시 심으면 그 손질은 사라진다".to_string(),
-        // **무엇이 빠졌는지까지 한 줄에 낸다**(moai-2f99) — `.gitignore` 에 `/.claude/worktrees/`
-        // 가 없는 것과 `.gitattributes` 에 `merge=union` 이 없는 것은 결과가 아주 다르다.
-        "dotfile_rules" => format!("{} 에 moai 가 쓰는 자리가 빠졌다 — 옆 워크트리가 `git add -A` 에 딸려간다", w.ids.join(", ")),
+        // **파일마다 결과를 따로 말한다**(moai-2f99) — `.gitignore` 에 `/.claude/worktrees/` 가
+        // 없는 것과 `.gitattributes` 에 `merge=union` 이 없는 것은 결과가 아주 다르다. 한 낱말로
+        // 뭉치면 그 중 한쪽이 반드시 거짓말이 된다(바로 위 `agents_stale` 을 가른 것과 같은 까닭).
+        // **무엇이 빠졌는지는 `preview` 가 한 줄씩 낸다** — 규칙 줄은 제 안에 띄어쓰기를 여럿 들어
+        // (`.moai/journal.jsonl  text eol=lf merge=union`) 한 줄에 이어 붙이면 어디서 한 줄이
+        // 끝나는지 안 보인다.
+        "gitignore_rules" => format!(".gitignore 에 moai 가 쓰는 자리 {n}줄이 빠졌다 — 옆 워크트리가 `git add -A` 에 딸려간다"),
+        "gitattributes_rules" => {
+            format!(".gitattributes 에 moai 가 쓰는 자리 {n}줄이 빠졌다 — 저널이 머지에서 충돌하고 줄 끝이 흔들린다")
+        }
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
@@ -832,11 +839,6 @@ fn board(cfg: &Config, counts: &BTreeMap<String, usize>) -> String {
 fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, origin: &Origin) -> Vec<String> {
     const SHOW: usize = 3;
     let mut out = Vec::new();
-    // **빠진 규칙은 가리킬 이슈가 없다**(moai-2f99). `ids` 에 담긴 것은 파일과 줄이라 id 지도에
-    // 없고, 그 낱말은 이미 `says` 가 냈다 — 여기서 또 내면 같은 글이 두 줄로 선다.
-    if w.kind == "dotfile_rules" {
-        return out;
-    }
     // 벌여 놓은 것과 깨진 것은 id 만 한 줄에 늘어놓는다 — 제목이 정보를 안 준다.
     if matches!(w.kind, "wip_overload" | "duplicate_id" | "orphan_child" | "dangling_blocked_by" | "future_timestamp") {
         if !w.ids.is_empty() {

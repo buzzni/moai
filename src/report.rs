@@ -1967,25 +1967,34 @@ impl Warning {
     /// 갈린다**(2026-09-15 사용자 결정). 뭉뚱그려 `moai init` 만 대면, main 을 받고 아직 다시
     /// 빌드 안 한 세션이 그 말을 따라 **새 안내를 옛 글로 되돌리고** 그 되돌림이 머지로 실린다.
     /// 기계도 가르라고 `kind` 를 따로 둔다.
-    ///
-    /// 딸린 파일에서 빠진 규칙(moai-2f99)도 같은 자리다 — [`Warning::dotfile_rules`].
-    pub fn dotfile_rules(named: &[String], root: Option<&str>) -> Warning {
-        let hint = match root {
-            None => "moai init".to_string(),
-            Some(r) => format!("moai -C {r} init"),
-        };
-        // `ids` 자리에 `파일(빠진 줄…)` 을 담는다 — 이 알림은 이슈를 안 가리키므로 그 자리가
-        // 비어 있고, 화면은 그것을 한 줄씩 그대로 낸다.
-        Warning::new("dotfile_rules", named.to_vec()).notice().hint(&hint)
+    pub fn agents_stale(root: Option<&str>, edited: bool) -> Warning {
+        let kind = if edited { "agents_hand_edited" } else { "agents_stale" };
+        Warning::new(kind, Vec::new()).count(1).notice().hint(&Warning::init_hint(root))
     }
 
-    pub fn agents_stale(root: Option<&str>, edited: bool) -> Warning {
-        let hint = match root {
+    /// 딸린 파일(`.gitignore`·`.gitattributes`)에 moai 가 쓰는 규칙이 빠졌다는 **알림**
+    /// (moai-2f99). 재는 쪽은 `cmd::init::dotfile_gaps` 고, `status` 와 훅의 보드가 이것을
+    /// `notices` 에 얹는다 — [`status`] 는 `&[Issue]` 만 받는 순수 함수라 파일을 안 읽는다.
+    ///
+    /// **파일마다 `kind` 가 다르다**(부르는 쪽이 고른다). 빠졌을 때의 결과가 아주 달라
+    /// (`.gitignore` 는 옆 워크트리가 `git add -A` 에 딸려가는 일, `.gitattributes` 는 저널이
+    /// 머지에서 충돌하는 일) 한 낱말로 뭉치면 그 중 한쪽이 반드시 거짓말이 된다 — 바로 위
+    /// [`Warning::agents_stale`] 이 이미 그 자리다.
+    ///
+    /// `ids` 에는 **빠진 규칙 줄**이 그대로 든다. 이 알림은 이슈를 안 가리키므로 id 지도에 없고,
+    /// 화면은 못 찾은 id 를 그대로 한 줄씩 내는 길을 이미 갖고 있다(`view::preview`) — 이 알림만을
+    /// 위한 갈래를 거기 두지 않는 까닭이고, 그래야 고칠 명령(`hint`)도 같은 길로 따라 나온다.
+    pub fn dotfile_rules(kind: &'static str, missing: &[&str], root: Option<&str>) -> Warning {
+        Warning::new(kind, missing.iter().map(|l| (*l).to_string()).collect()).notice().hint(&Warning::init_hint(root))
+    }
+
+    /// 고칠 명령. 뿌리가 부른 자리와 다르면 `-C` 로 거기를 댄다 — `init` 은 부른 자리에 심으므로
+    /// 그 `-C` 가 없으면 따라 친 쪽에 트래커가 하나 더 선다.
+    fn init_hint(root: Option<&str>) -> String {
+        match root {
             None => "moai init".to_string(),
             Some(r) => format!("moai -C {r} init"),
-        };
-        let kind = if edited { "agents_hand_edited" } else { "agents_stale" };
-        Warning::new(kind, Vec::new()).count(1).notice().hint(&hint)
+        }
     }
 }
 

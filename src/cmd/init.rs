@@ -230,6 +230,69 @@ pub fn agents_state(root: &Path) -> Result<BlockState, String> {
     Ok(block_state(&text, &crate::guide::agents()))
 }
 
+/// 이 저장소가 심는 딸린 파일 — `(이름, 규칙 블록, 알림의 갈래)`. **갈래를 표에 함께 둔다** —
+/// 빠졌을 때의 결과가 파일마다 달라 화면의 낱말이 갈리고(`view::says`), 기계도 `kind` 로 그것을
+/// 가른다. `agents_stale`·`agents_hand_edited` 가 이미 그 자리다.
+const DOTFILES: [(&str, &str, &str); 2] =
+    [(".gitattributes", GITATTRIBUTES, "gitattributes_rules"), (".gitignore", GITIGNORE, "gitignore_rules")];
+
+/// 이 저장소의 딸린 파일에서 **빠진 규칙** — `(파일 이름, 알림의 갈래, 빠진 줄들)`, 빠진 것이
+/// 있는 파일만.
+///
+/// **못 읽는 파일은 여기서 말하지 않는다.** 무엇이 들었는지 모르니 빠졌다고 할 수 없고 — 그 줄이
+/// 이미 있을 수도 있다 — `init` 도 그 파일은 안 건드리므로 한 번 선 알림이 **영영 안 걷힌다.**
+/// 그 자리는 `init` 이 제 이름으로 이미 말한다.
+///
+/// **없는 파일은 통째로 빠진 것이다.** `git add -A` 가 옆 워크트리를 담는 위험이 가장 큰 자리라
+/// (moai-mxtb) 입을 다물면 안 된다. 갈림은 **오류의 갈래로** 짓는다 — `exists()` 로 물으면 못 읽는
+/// 파일과 없는 파일이 정확히 거꾸로 선다.
+pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<&'static str>)> {
+    DOTFILES
+        .into_iter()
+        .filter_map(|(name, block, kind)| {
+            let text = match std::fs::read_to_string(root.join(name)) {
+                Ok(t) => t,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+                Err(_) => return None,
+            };
+            let missing = missing_rules(&text, block);
+            (!missing.is_empty()).then_some((name, kind, missing))
+        })
+        .collect()
+}
+
+/// 고칠 명령이 `-C <뿌리>` 를 대야 하는가 — 그렇다면 셸에 붙여 넣을 모양의 뿌리.
+///
+/// **부른 사람의 셸이 뿌리에 있지 않을 수 있을 때** 댄다 — 부른 자리가 뿌리가 아니거나
+/// (`chdir` 이 아니어도) `-C` 로 옮겨 왔을 때. 재는 것은 뿌리의 파일인데 `init` 은 부른 자리에
+/// 심는다: 하위 디렉터리에서, 또는 `moai -C <프로젝트> status` 를 본 셸에서 맨 `moai init` 을
+/// 따라 치면 그 자리에 트래커가 하나 더 섰다.
+///
+/// **알림마다 따로 재지 않는다** — 한 화면에 서는 두 알림이 서로 다른 뿌리를 대면 그 중 하나는
+/// 반드시 엉뚱한 곳을 가리킨다.
+fn away_root(root: &Path, chdir: bool) -> Option<String> {
+    let here = std::env::current_dir().ok();
+    (chdir || here.as_deref() != Some(root)).then(|| crate::text::shell_word(&root.display().to_string()))
+}
+
+/// 빠진 규칙을 알리는 **알림**(moai-2f99, 2026-09-15 사용자 결정). **파일마다 하나씩 선다** —
+/// `.gitignore` 에 `/.claude/worktrees/` 가 없는 것과 `.gitattributes` 에 `merge=union` 이 없는
+/// 것은 결과가 아주 다르고, 한 줄로 뭉치면 그 중 한쪽이 반드시 거짓말이 된다.
+///
+/// `init` 은 한 번 말하고 만다 — 못 써서 건너뛴 저장소는 `/.claude/worktrees/` 없이 얼마든지 오래
+/// 가고, 그 사이 `git add -A` 한 번이 옆 워크트리를 통째로 담는다(moai-mxtb). 조용히 이어지는
+/// 위험이라 세션이 시작하는 화면에 선다 — 낡은 블록을 거기 둔 것과 같은 까닭이다.
+pub fn dotfile_notice(root: &Path, chdir: bool) -> Vec<crate::report::Warning> {
+    let gaps = dotfile_gaps(root);
+    if gaps.is_empty() {
+        return Vec::new();
+    }
+    let away = away_root(root, chdir);
+    gaps.into_iter()
+        .map(|(_, kind, missing)| crate::report::Warning::dotfile_rules(kind, &missing, away.as_deref()))
+        .collect()
+}
+
 /// 이 저장소의 AGENTS.md 블록이 낡았다는 알림(moai-mj45). **`status` 와 훅의 보드가 이 하나를
 /// 싣는다** — 훅의 보드는 `moai status` 와 같은 말을 해야 하고(`hook::board`), 낡은 안내를 모르고
 /// 시작하는 것이 그 보드를 받는 새 세션이다.
@@ -238,41 +301,7 @@ pub fn agents_state(root: &Path) -> Result<BlockState, String> {
 /// 한 저장소를 영영 조른다. 못 읽는 파일도 입을 다문다: 세션의 시작점이 안내 파일 하나로 실패해
 /// 보이면 안 되고, 까닭은 `moai init --check` 가 댄다.
 ///
-/// **부른 사람의 셸이 뿌리에 있지 않을 수 있으면 고칠 명령에 `-C <뿌리>` 를 댄다** — 부른 자리가
-/// 뿌리가 아니거나(`chdir` 이 아니어도) `-C` 로 옮겨 왔을 때. 재는 것은 뿌리의 AGENTS.md 인데
-/// `init` 은 부른 자리에 심는다: 하위 디렉터리에서, 또는 `moai -C <프로젝트> status` 를 본 셸에서
-/// 맨 `moai init` 을 따라 치면 그 자리에 트래커가 하나 더 섰다.
-/// 이 저장소의 딸린 파일에서 **빠진 규칙** — `(파일 이름, 빠진 줄들)`, 빠진 것이 있는 파일만.
-///
-/// **못 읽는 파일은 여기서 말하지 않는다.** 무엇이 들었는지 모르니 빠졌다고 할 수 없고, 그 파일은
-/// `init` 이 제 자리에서 이미 말한다. 없는 파일은 통째로 빠진 것이다.
-pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, Vec<String>)> {
-    [(".gitattributes", GITATTRIBUTES), (".gitignore", GITIGNORE)]
-        .into_iter()
-        .filter_map(|(name, block)| {
-            let text = std::fs::read_to_string(root.join(name)).ok().or_else(|| root.join(name).exists().then_some(String::new()))?;
-            let missing: Vec<String> = missing_lines(&text, block).into_iter().map(str::to_string).collect();
-            (!missing.is_empty()).then_some((name, missing))
-        })
-        .collect()
-}
-
-/// 빠진 규칙을 알리는 **알림**(moai-2f99, 2026-09-15 사용자 결정).
-///
-/// `init` 은 한 번 말하고 만다 — 못 써서 건너뛴 저장소는 `/.claude/worktrees/` 없이 얼마든지 오래
-/// 가고, 그 사이 `git add -A` 한 번이 옆 워크트리를 통째로 담는다(moai-mxtb). 조용히 이어지는
-/// 위험이라 세션이 시작하는 화면에 선다 — 낡은 블록을 거기 둔 것과 같은 까닭이다.
-pub fn dotfile_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
-    let gaps = dotfile_gaps(root);
-    if gaps.is_empty() {
-        return None;
-    }
-    let here = std::env::current_dir().ok();
-    let away = (chdir || here.as_deref() != Some(root)).then(|| crate::text::shell_word(&root.display().to_string()));
-    let named: Vec<String> = gaps.iter().map(|(name, missing)| format!("{name}({})", missing.join(" "))).collect();
-    Some(crate::report::Warning::dotfile_rules(&named, away.as_deref()))
-}
-
+/// 고칠 명령이 `-C <뿌리>` 를 대야 하는지는 [`away_root`] 가 정한다.
 pub fn agents_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
     if agents_state(root) != Ok(BlockState::Stale) {
         return None;
@@ -280,9 +309,7 @@ pub fn agents_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning>
     // **어느 쪽 낡음인지까지 말한다**(2026-09-15 사용자 결정). 한 낱말로 뭉뚱그려 `moai init` 만
     // 대면, 아직 다시 빌드 안 한 바이너리를 든 세션이 그 말을 따라 새 안내를 옛 글로 되돌린다.
     let text = read_agents(&root.join("AGENTS.md")).ok().flatten().unwrap_or_default();
-    let here = std::env::current_dir().ok();
-    let away = (chdir || here.as_deref() != Some(root)).then(|| crate::text::shell_word(&root.display().to_string()));
-    Some(crate::report::Warning::agents_stale(away.as_deref(), stale_kind(&text) == Stale::Edited))
+    Some(crate::report::Warning::agents_stale(away_root(root, chdir).as_deref(), stale_kind(&text) == Stale::Edited))
 }
 
 /// `moai init --check`. **아무것도 안 쓰고, 파일을 못 읽을 때만 0 이 아니다**(2026-09-14 사용자
@@ -297,7 +324,9 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     if ctx.json {
         let mut v = serde_json::json!({ "agents": state });
         if !gaps.is_empty() {
-            v["missing"] = serde_json::json!(gaps.iter().cloned().collect::<std::collections::BTreeMap<_, _>>());
+            v["missing"] = serde_json::json!(
+                gaps.iter().map(|(name, _, missing)| (*name, missing)).collect::<std::collections::BTreeMap<_, _>>()
+            );
         }
         return super::json_line(&v);
     }
@@ -318,8 +347,11 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
             "AGENTS.md 블록: missing — `moai init` 이 심는다. `--no-agents` 로 안 쓰기로 했으면 그대로 둔다".into()
         }
     }];
-    for (name, missing) in &gaps {
-        out.push(format!("{name}: 규칙 {}개 빠졌다 ({}) — `moai init`", missing.len(), missing.join(" ")));
+    // **규칙끼리는 쉼표로 가른다** — `.gitattributes` 의 규칙은 제 안에 띄어쓰기를 여럿 들어
+    // (`.moai/journal.jsonl  text eol=lf merge=union`) 띄어쓰기로 이으면 어디서 한 줄이 끝나는지
+    // 안 보인다.
+    for (name, _, missing) in &gaps {
+        out.push(format!("{name}: 규칙 {}개 빠졌다 ({}) — `moai init`", missing.len(), missing.join(", ")));
     }
     Ok(out)
 }
@@ -484,14 +516,38 @@ fn ensure_lines(path: &Path, block: &str) -> Added {
     }
 }
 
-/// 이 파일에 아직 없는 `block` 의 줄들. **쓰는 길([`ensure_lines`])과 비추는 길([`dotfile_gaps`])이
-/// 이 하나로 잰다** — 따로 재면 `status` 가 빠졌다고 하는 줄을 `init` 이 이미 있다고 보거나 그
-/// 반대가 되고, 그러면 알림이 영영 안 걷히거나 헛 알림이 선다. 주석과 빈 줄은 규칙이 아니라 뺀다.
+/// 이 파일에 아직 없는 `block` 의 줄들 — **주석도 든다.** 빈 줄만 뺀다.
+///
+/// **쓰는 자리가 주석을 빼면 안 된다**: `.gitattributes` 의 주석은 왜 `issues.jsonl` 에
+/// `merge=union` 을 걸면 안 되는지 적은 유일한 자리다. 빼면 새 저장소가 그 까닭 없이 서고, 다음
+/// 사람이 union 을 다시 건다.
 fn missing_lines<'a>(existing: &str, block: &'a str) -> Vec<&'a str> {
-    block
-        .lines()
-        .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#') && !existing.lines().any(|e| covers(e, l)))
-        .collect()
+    block.lines().filter(|l| !l.trim().is_empty() && !existing.lines().any(|e| covers(e, l))).collect()
+}
+
+/// 그 중 **규칙 줄만** — 주석은 규칙이 아니라 빠졌다고 세지 않는다.
+///
+/// **쓰는 길([`ensure_lines`])과 비추는 길([`dotfile_gaps`])이 한 자에서 갈린다.** 따로 재면
+/// `status` 가 빠졌다고 하는 줄을 `init` 이 이미 있다고 보거나 그 반대가 되고, 그러면 알림이 영영
+/// 안 걷히거나 헛 알림이 선다 — 여기서는 `missing_rules ⊆ missing_lines` 라 그럴 수 없다: 규칙이
+/// 빠졌으면 `init` 이 반드시 그것을 쓰고, `init` 이 할 일이 없으면 알림도 서지 않는다.
+fn missing_rules<'a>(existing: &str, block: &'a str) -> Vec<&'a str> {
+    missing_lines(existing, block).into_iter().filter(|l| !l.trim_start().starts_with('#')).collect()
+}
+
+/// AGENTS.md 를 갈아 끼운다. **못 쓰면 한 글자도 안 바뀐다.**
+///
+/// 먼저 열어 본다 — `rename` 은 파일의 권한을 안 보므로 그것만으로는 읽기 전용 AGENTS.md 를
+/// 소리 없이 갈아 끼운다. 열리면 temp+rename 이다: `fs::write` 는 **열면서 먼저 비워**, 디스크가
+/// 차거나(ENOSPC) 쓰다 죽으면 사람의 산문이 반쯤 잘린 채 남는다. 그 실패가 이제 `Err` 가 아니라
+/// 한 줄 말로 끝나므로(moai-780n) 더 나쁘다 — **"못 썼다" 가 참이려면 못 쓴 자리에 옛 글이 그대로
+/// 있어야 한다.** [`ensure_lines`] 가 `O_APPEND` 로 지키는 것과 같은 약속이고, 산문을 한 글자도
+/// 안 건드린다는 [`with_block`] 의 약속을 실제로 지키는 것도 이쪽이다.
+fn plant(path: &Path, text: &str) -> Result<(), String> {
+    if path.exists() {
+        std::fs::OpenOptions::new().write(true).open(path).map_err(|e| e.to_string())?;
+    }
+    crate::store::write_atomic(path, text.as_bytes()).map_err(|e| e.message)
 }
 
 /// 이미 있는 줄 `have` 가 넣으려는 줄 `want` 를 **이미 막고 있는가**(moai-mxtb).
@@ -644,10 +700,10 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             if next == *existing {
                 false
             } else {
-                match std::fs::write(&agents_path, next) {
+                match plant(&agents_path, &next) {
                     Ok(()) => true,
-                    Err(e) => {
-                        agents_trouble = Some(Added::Unwritable { why: e.to_string(), missing: Vec::new() });
+                    Err(why) => {
+                        agents_trouble = Some(Added::Unwritable { why, missing: Vec::new() });
                         false
                     }
                 }
