@@ -4,5 +4,9 @@
   "status.milestone_label": "マイルストーン",
   "status.epic_label": "エピック",
   "ready.count": "着手できる作業  {n}件",
-  "ready.none": "ない。`moai show` で滞っているものを見る"
+  "ready.none": "ない。`moai show` で滞っているものを見る",
+  "overview.ready": "着手できる作業",
+  "overview.projects": "登録したプロジェクト",
+  "overview.tally": "プロジェクト {places}件 · {n}件",
+  "overview.places": "{places}件"
 }

@@ -1429,7 +1429,11 @@ pub fn projects_status(
     seen: &[crate::projects::Seen<Board>],
     reg: &crate::user_config::Registry,
 ) -> Vec<String> {
-    let mut out = vec![overview_head("등록한 프로젝트", &format!("{}곳", projects.len()), reg)];
+    let mut out = vec![overview_head(
+        t("overview.projects"),
+        &fill(t("overview.places"), &[("places", &projects.len().to_string())]),
+        reg,
+    )];
     let w_name = projects.iter().map(|p| width(&one_line(&p.name))).max().unwrap_or(0);
     for (p, s) in projects.iter().zip(seen) {
         out.push(String::new());
@@ -1500,9 +1504,12 @@ pub fn projects_ready(
             _ => 0,
         })
         .sum();
+    // **한 명령이 두 말로 말하지 않는다**(리뷰 moai-80qw.cb8) — 저장소 안의 `ready` 는
+    // 말묶음에서 머리를 읽는데 여기만 한국어로 박혀 있으면, 같은 명령이 선 자리에 따라
+    // 다른 말로 답한다. 덜 옮긴 것과 서로 어긋나는 것은 다른 일이다.
     let mut out = vec![overview_head(
-        "집을 수 있는 일",
-        &format!("프로젝트 {}곳 · {total}건", projects.len()),
+        t("overview.ready"),
+        &fill(t("overview.tally"), &[("places", &projects.len().to_string()), ("n", &total.to_string())]),
         reg,
     )];
     let w_name = projects.iter().map(|p| width(&one_line(&p.name))).max().unwrap_or(0);

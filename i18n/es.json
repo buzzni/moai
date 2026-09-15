@@ -3,5 +3,9 @@
   "status.epics": "· Épicas {n}",
   "status.epic_label": "Épicas",
   "ready.count": "Listo para tomar  {n}",
-  "ready.none": "Nada. `moai show` muestra lo que está esperando"
+  "ready.none": "Nada. `moai show` muestra lo que está esperando",
+  "overview.ready": "Listo para tomar",
+  "overview.projects": "Proyectos registrados",
+  "overview.tally": "Proyectos {places} · {n}",
+  "overview.places": "{places}"
 }

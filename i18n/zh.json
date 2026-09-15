@@ -4,5 +4,9 @@
   "status.milestone_label": "里程碑",
   "status.epic_label": "史诗",
   "ready.count": "可以着手的工作  {n} 项",
-  "ready.none": "没有。用 `moai show` 查看积压的内容"
+  "ready.none": "没有。用 `moai show` 查看积压的内容",
+  "overview.ready": "可以着手的工作",
+  "overview.projects": "已登记的项目",
+  "overview.tally": "项目 {places} 个 · {n} 项",
+  "overview.places": "{places} 个"
 }

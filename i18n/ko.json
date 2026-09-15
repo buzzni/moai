@@ -4,5 +4,9 @@
   "status.milestone_label": "마일스톤",
   "status.epic_label": "에픽",
   "ready.count": "집을 수 있는 일  {n}건",
-  "ready.none": "없다. `moai show` 로 무엇이 밀려 있는지 본다"
+  "ready.none": "없다. `moai show` 로 무엇이 밀려 있는지 본다",
+  "overview.ready": "집을 수 있는 일",
+  "overview.projects": "등록한 프로젝트",
+  "overview.tally": "프로젝트 {places}곳 · {n}건",
+  "overview.places": "{places}곳"
 }
