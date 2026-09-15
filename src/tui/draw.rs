@@ -1744,6 +1744,7 @@ fn bold() -> Style {
 /// 메뉴가 열린 동안은 이 바 대신 접두어 줄([`menu_line`])이 선다.
 fn fkeys(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let c = app.key_ctx(rows);
+    let headless = f.area().height < HEADER_MIN_H;
     // `g` 가 기다리는 동안은 메뉴와 같은 자리에서 **무엇을 기다리는지** 댄다(moai-k3yi). 뜻 없는
     // 키를 누르면 열이 버려져([`keys::Chord::feed`]) 바가 저절로 돌아온다.
     if !app.chord.held().is_empty() {
@@ -1754,7 +1755,7 @@ fn fkeys(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
             .collect();
         return bar(f, at, Vec::new(), vec![waiting(app.chord.held(), next)]);
     }
-    let (optional, keep) = browse_hints(app, &c);
+    let (optional, keep) = browse_hints(app, &c, headless);
     let spans = |v: Vec<(String, &str)>| v.iter().map(|(k, what)| key(k, what)).collect();
     bar(f, at, spans(optional), spans(keep));
 }
@@ -1775,7 +1776,7 @@ fn waiting(held: &[ratatui::crossterm::event::KeyEvent], next: Vec<Hint>) -> Spa
 /// **이름·낱말·켜짐은 키 표에서 읽는다**([`keys::BROWSE`]·[`keys::Browse::enabled`]). 여기서
 /// 정하는 것은 **차례**뿐이다 — 무엇이 먼저 떨어지는가. 켜지지 않은 동작은 적지 않으므로
 /// 키 처리와 바가 한 판정을 읽고, 둘이 갈릴 수 없다.
-fn browse_hints(app: &App, c: &Ctx) -> (Vec<Hint>, Vec<Hint>) {
+fn browse_hints(app: &App, c: &Ctx, headless: bool) -> (Vec<Hint>, Vec<Hint>) {
     use Browse as B;
     let hint = |acts: &[Browse]| -> Hint { (labels(BROWSE, acts), acts[0].what(c)) };
     let shown = |order: &[&[Browse]]| -> Vec<Hint> {
@@ -1793,11 +1794,20 @@ fn browse_hints(app: &App, c: &Ctx) -> (Vec<Hint>, Vec<Hint>) {
     // `h·l`·`Ctrl-C` 는 적지 않는다: 드나들기의 이름은 Enter·Bksp 하나고(층의 거절문도 그 이름을
     // 댄다), 끝내기는 메뉴의 `q` 가 대며 Ctrl-C 까지 늘 남기면 80칸 거름망 켠 목록에서 `j·k` 가
     // 떨어진다. 둘 다 `moai tui --help` 에 있다.
+    // **헤더가 안 서면 층으로 가는 키를 바가 댄다**(moai-c2s3). 뿌리의 `..` 을 걷은 뒤
+    // 층으로 가는 길은 `0` 하나인데, 그 키를 대는 자리가 헤더의 번호뿐이라 짧은 터미널에서는
+    // 화면 어디에도 안 적힌다. 헤더가 서 있으면 번호가 이름과 함께 서므로 여기서는 뺀다 —
+    // 같은 키를 두 군데서 적으면 좁은 바에서 다른 키가 그만큼 먼저 떨어진다.
+    //
+    // **맨 앞에 둔다** — 폭이 모자라면 이것이 가장 먼저 떨어진다. 층은 한 화면 건너의 일이고,
+    // 이동(`j·k`)과 드나들기는 지금 보는 목록을 쓰는 키라 그쪽이 먼저다.
+    let layer_key: &[&[Browse]] = if headless && !app.on_layer() { &[&[B::Project(0)]] } else { &[] };
     let optional = if app.on_layer() {
         shown(&[&[B::Step(Move::LineDown), B::Step(Move::LineUp)], &[B::FocusNext], &[B::Enter]])
     } else {
-        shown(&[
-            &[B::Step(Move::LineDown), B::Step(Move::LineUp)],
+        let mut order: Vec<&[Browse]> = layer_key.to_vec();
+        order.extend([
+            &[B::Step(Move::LineDown), B::Step(Move::LineUp)][..],
             // **`Tab` 은 가는 곳을 댄다** — 가는 곳을 적으면 이 줄도 글자로 지금 자리를 말한다.
             &[B::FocusNext],
             &[B::Grep],
@@ -1806,7 +1816,8 @@ fn browse_hints(app: &App, c: &Ctx) -> (Vec<Hint>, Vec<Hint>) {
             // 가 된다. 실제로 눌러 재는 것은 `the_key_bar_names_only_keys_that_act_in_the_focused_pane` 이다.
             &[B::Leave],
             &[B::Enter],
-        ])
+        ]);
+        shown(&order)
     };
     // 늘 남는 것: 걸어 둔 거름망을 푸는 길, 그리고 나머지 전부로 가는 메뉴.
     let mut keep = Vec::new();
@@ -3241,6 +3252,22 @@ pub(super) mod tests {
         assert!(!lines[..6].iter().any(|l| l.contains("Issue tracker")), "짧은 터미널에 헤더가 섰다 — {:?}", &lines[..6]);
     }
 
+    /// **헤더가 안 서는 짧은 터미널에서는 키 바가 `0` 을 댄다**(moai-c2s3). 뿌리의 `..` 을
+    /// 걷은 뒤(moai-i784) 층으로 가는 길은 `0` 하나인데, 그 키를 대는 자리가 헤더의 번호뿐이라
+    /// 헤더가 빠지면 화면 어디에도 층으로 가는 길이 안 적힌다.
+    #[test]
+    fn a_short_terminal_names_the_layer_key_in_the_bar() {
+        use super::super::layer::At;
+        let mut a = layered(At::Project("/w/one".into()));
+        let short = render(&mut a, 100, 14).last().cloned().unwrap_or_default();
+        assert!(short.contains("0 프로젝트"), "헤더가 없는데 층으로 가는 키를 아무도 안 댄다 — {short:?}");
+
+        // 헤더가 서면 번호가 이름과 함께 서므로 바에서는 뺀다 — 같은 말을 두 번 적지 않는다.
+        let tall = render(&mut a, 100, 24);
+        assert!(tall[..6].join("\n").contains("<0> 전체"), "헤더가 번호를 안 댄다");
+        assert!(!tall.last().cloned().unwrap_or_default().contains("0 프로젝트"), "헤더와 바가 같은 키를 두 번 적는다");
+    }
+
     /// **파이프 오른쪽 셋째 칸은 번호 붙은 프로젝트다**(moai-mr83) — `<0>` 은 전체(층),
     /// 그다음이 등록 차례다. 지금 선 프로젝트는 빛이 지나간다 — 그래서 루프가 계속 깨어난다.
     #[test]
@@ -3882,6 +3909,10 @@ pub(super) mod tests {
                     Some("/ 검색"),
                     Some("Tab 상세"),
                     Some("j·k 이동"),
+                    // 14줄이라 헤더가 안 선다 — 층으로 가는 `0` 을 바가 대신 댄다(moai-c2s3).
+                    // 맨 앞에 두므로 폭이 모자라면 이것이 먼저 떨어진다: 80칸에서는 `Bksp 나가기`
+                    // 가 함께 설 자리가 없다: 드나드는 키 **둘 다** 선 줄에서만 이 칸이 빠진다.
+                    (c.projects > 0 && (c.leaf || c.root)).then_some("0 프로젝트"),
                     Some("Esc 풀기"),
                     Some("SPC 메뉴"),
                 ]
@@ -3957,7 +3988,8 @@ pub(super) mod tests {
                     (a.worktree, a.raw) = (on, on);
                     let c = a.key_ctx(&a.rows());
                     seen.insert((c.list_focus, c.leaf, c.root));
-                    let (optional, keep) = browse_hints(&a, &c);
+                    // 헤더가 선 화면으로 잰다 — 헤더 없는 화면의 `0` 은 제 시험이 따로 본다.
+                    let (optional, keep) = browse_hints(&a, &c, false);
                     assert!(keep.last().is_some_and(|(k, w)| k == "SPC" && *w == "메뉴"), "{c:?}: 메뉴로 가는 길이 늘 남지 않는다");
                     assert_eq!(lookup(BROWSE, &[parse("SPC").unwrap()]), Lookup::Pending, "SPC 가 메뉴를 안 연다");
                     for (names, what) in optional.iter().chain(&keep[..keep.len() - 1]) {
