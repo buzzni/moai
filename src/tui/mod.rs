@@ -1530,6 +1530,21 @@ impl App {
             // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
             B::Enter => self.enter(),
             B::Leave => self.leave(),
+            // **헤더의 번호로 바로 간다**(moai-o133). `0` 은 전체 — 층이다. 이미 그 자리면
+            // 아무 일도 안 한다: 같은 프로젝트를 다시 열면 커서와 굴린 자리가 첫 줄로 튄다.
+            B::Project(n) => match usize::from(n) {
+                0 if !self.on_layer() => self.climb(),
+                0 => {}
+                at => {
+                    let same = self.layer.as_ref().and_then(|l| match &l.at {
+                        layer::At::Project(p) => l.position(p),
+                        layer::At::Layer => None,
+                    });
+                    if same != Some(at - 1) {
+                        self.enter_project(at - 1);
+                    }
+                }
+            },
             B::Grep => {
                 self.grep_was = Some((self.filter_text.clone(), self.grep_in, self.cursor));
                 self.mode = Mode::Grep(Input::default(), GrepIn::All);
@@ -1595,6 +1610,7 @@ impl App {
             worktree: self.worktree,
             raw: self.raw,
             columns: self.cfg.statuses.len().min(keys::NUMBERED),
+            projects: self.layer.as_ref().map_or(0, |l| l.places.len().min(keys::NUMBERED)),
             hidden: self
                 .cfg
                 .statuses

@@ -1170,6 +1170,24 @@ mod tests {
         (one, two, a)
     }
 
+    /// **맨 숫자가 프로젝트를 고른다**(moai-o133) — `1`·`2` 는 등록 차례의 프로젝트로 바로 들어가고,
+    /// `0` 은 층으로 돌아온다. 헤더가 그 번호를 대므로 어디서 눌러도 같은 자리로 간다.
+    #[test]
+    fn a_bare_digit_jumps_to_that_project_and_zero_comes_back() {
+        let s = Scratch::new("digit-jump");
+        let (one, two, mut a) = on_layer_with_twins(&s);
+        a.hit("2");
+        assert_eq!(a.here(), Some(two.clone()), "2 가 둘째 프로젝트로 안 갔다");
+        a.hit("1");
+        assert_eq!(a.here(), Some(one.clone()), "프로젝트 안에서 누른 1 이 첫째로 안 갔다");
+        a.hit("0");
+        assert!(a.on_layer(), "0 이 층으로 안 돌아왔다");
+        // 등록한 수를 넘는 번호는 아무 일도 안 한다 — 없는 자리로 보내면 무엇이 일어났는지 모른다.
+        a.hit("2");
+        a.hit("7");
+        assert_eq!(a.here(), Some(two), "없는 번호가 선 자리를 흔들었다");
+    }
+
     /// **프로젝트 안에서 `n` 은 그 프로젝트에만 담는다.** 같은 id 를 쓰는 두 프로젝트 중 선
     /// 프로젝트의 파일만 바뀌고, 알림이 어느 프로젝트인지 댄다.
     #[test]

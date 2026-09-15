@@ -289,6 +289,11 @@ pub enum Browse {
     /// 설정의 n 번째 칸(0부터)을 보이고 숨긴다(moai-fmv5). **칸 이름이 설정에서 오므로 글자가
     /// 아니라 번호로 누른다** — 글자로 두면 설정에 따라 키가 겹친다.
     Column(u8),
+    /// 그 번호의 프로젝트로 바로 간다(moai-o133). `0` 은 전체 — 프로젝트 층이다.
+    ///
+    /// **SPC 없이 바로 누른다**(사용자 결정). 헤더가 `<0>`~`<9>` 로 그 번호를 대고, 그것이
+    /// 이 키를 설명하는 유일한 자리다. `SPC s 1`(칸 토글)과는 SPC 하나로 갈라진다.
+    Project(u8),
     /// done 을 보이고 숨긴다 — 가장 자주 누를 것이라 번호와 따로 선다.
     Done,
     /// 미룬 것을 보이고 숨긴다. 칸이 아니라 `deferred_at` 축이다.
@@ -424,6 +429,17 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Leave, Some("Bksp"), Key::any(C::Backspace)),
         row!(Leave, None, Key::any(C::Left)),
         row!(Leave, None, Key::plain('h')),
+        // 맨 숫자 — 헤더의 `<0>`~`<9>` 다. 첫 줄만 이름을 단다(번호 칸 줄과 같은 규칙).
+        row!(Project(0), Some("0"), Key::plain('0')),
+        row!(Project(1), None, Key::plain('1')),
+        row!(Project(2), None, Key::plain('2')),
+        row!(Project(3), None, Key::plain('3')),
+        row!(Project(4), None, Key::plain('4')),
+        row!(Project(5), None, Key::plain('5')),
+        row!(Project(6), None, Key::plain('6')),
+        row!(Project(7), None, Key::plain('7')),
+        row!(Project(8), None, Key::plain('8')),
+        row!(Project(9), None, Key::plain('9')),
         row!(Grep, Some("/"), Key::plain('/')),
         row!(ClearFilter, Some("Esc"), Key::any(C::Esc)),
         // `/` 는 바로 누르는 키이면서 메뉴에도 선다 — 이름은 바로 누르는 쪽 하나만 댄다.
@@ -483,6 +499,9 @@ pub struct Ctx {
     pub raw: bool,
     /// 번호를 받은 칸 수 — 설정의 칸 수와 [`NUMBERED`] 중 작은 것.
     pub columns: usize,
+    /// 번호를 받은 프로젝트 수 — 등록한 수와 [`NUMBERED`] 중 작은 것. `0`(전체)은 층이 있으면
+    /// 늘 듣는다. 층이 없으면 0 이고, 그러면 숫자 키가 통째로 조용하다.
+    pub projects: usize,
     /// 숨긴 칸 — n 번째 비트가 설정의 n 번째 칸. 이름을 들지 않는다: 이 값은 복사로 다닌다.
     pub hidden: u16,
     pub done_hidden: bool,
@@ -534,6 +553,10 @@ impl Browse {
             // 보기는 프로젝트 안의 줄에 건다 — 층에서는 그룹째 메뉴에 안 선다(`menu::live`).
             Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer => Err(Off::Quiet),
             Column(n) if usize::from(n) >= c.columns => Err(Off::Quiet),
+            // 등록한 프로젝트가 없으면 층 자체가 없다 — 헤더도 번호를 안 대므로 조용하다.
+            // 등록한 수를 넘는 번호도 같다: 없는 자리로 보내면 무엇이 일어났는지 모른다.
+            Project(n) if usize::from(n) > c.projects => Err(Off::Quiet),
+            Project(_) if c.projects == 0 => Err(Off::Quiet),
             _ => Ok(()),
         }
     }
@@ -599,6 +622,8 @@ impl Browse {
             Raw => "원문",
             // 칸의 이름은 설정에서 온다 — 메뉴가 이름을 붙인다(`menu::entries`).
             Column(_) => "칸",
+            // 어느 프로젝트인지는 헤더가 번호 곁에 이름으로 댄다.
+            Project(_) => "프로젝트",
             Done => "done",
             Deferred => "미룸",
             ShowAll => "모두",
@@ -873,6 +898,19 @@ mod tests {
         // 오늘 표에서도 — SHIFT 붙은 `/`·SPC 는 그 키다(자판에 따라 SHIFT 가 붙어 온다).
         assert_eq!(one(BROWSE, with(KeyCode::Char('/'), KeyModifiers::SHIFT)), Lookup::Run(Browse::Grep));
         assert_eq!(one(CONFIRM, with(KeyCode::Char('Y'), KeyModifiers::SHIFT)), Lookup::Run(Confirm::Yes));
+    }
+
+    /// **맨 숫자는 프로젝트로 간다**(moai-o133) — `0` 은 전체(층), `1`~`9` 는 그 번호의 프로젝트다.
+    /// `SPC s 1`(칸 토글)과는 갈라져 있다: 그쪽은 SPC 를 먼저 누른다.
+    #[test]
+    fn a_bare_digit_goes_to_that_project() {
+        assert_eq!(one(BROWSE, press(KeyCode::Char('0'))), Lookup::Run(Browse::Project(0)));
+        for n in 1..=9u8 {
+            let c = char::from_digit(u32::from(n), 10).unwrap();
+            assert_eq!(one(BROWSE, press(KeyCode::Char(c))), Lookup::Run(Browse::Project(n)), "{c}");
+        }
+        // SPC 뒤의 숫자는 그대로 칸 토글이다 — 두 길이 안 겹친다.
+        assert_eq!(lookup(BROWSE, &[pressed(&LEADER), press(KeyCode::Char('s')), press(KeyCode::Char('1'))]), Lookup::Run(Browse::Column(0)));
     }
 
     /// **글자 키의 Ctrl·Alt 는 정확히 견준다.** Ctrl-A 가 등록 창을, Ctrl-D 가 "뺄까" 를
