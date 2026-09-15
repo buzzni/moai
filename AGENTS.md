@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:0b0aee17 -->
+<!-- moai:begin v:0.1.0 hash:9f69a0ed -->
 ## 이슈 트래커 — moai
 
 이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
