@@ -2899,3 +2899,11 @@
 {"ts":"2026-09-15T09:13:18Z","id":"moai-3w5l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2vrw 로 옮겼다 (에픽 moai-educ, 2026-09-15) — promote 는 idea 하나만 받는다"}
 {"ts":"2026-09-15T09:13:18Z","id":"moai-3w5l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-2vrw 가 이어받는다 (에픽 moai-educ)"}
 {"ts":"2026-09-15T09:13:18Z","id":"moai-gq1c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T09:16:22Z","id":"moai-8xwi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"겨뤄도 덮지 않는 집기 — mv --from <칸>"}
+{"ts":"2026-09-15T09:16:22Z","id":"moai-f8q1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"mv --from <칸> — 락 안에서 다시 보고 칸이 그대로일 때만 옮긴다. 진 줄은 missing 처럼 부분 실패로 말하고 --json 에 지금 칸과 함께 싣는다. 둘이 겨루는 동시 쓰기 시험"}
+{"ts":"2026-09-15T09:16:22Z","id":"moai-o5ss","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"defer 와 --undo 도 같은 칸 검사를 받는다 — 남이 먼저 옮긴 줄을 덮지 않는다"}
+{"ts":"2026-09-15T09:16:22Z","id":"moai-s4d5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"예제 agent.sh 가 moved 세기 대신 --from 으로 집는다. guide 의 mv 설명에 한 줄"}
+{"ts":"2026-09-15T09:16:22Z","id":"moai-8xwi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-9mck 에서 펼쳤다 — moai mv 에 '아직 그 칸일 때만' 옮기는 집기(예: --from todo) — 에이전트 둘이 ready 와 mv 사이에서 겨루면 먼저 집고 닫은 일을 뒤가 done→in_progress 로 되연다 (moai-0j1y.6iy 가 넘김)"}
+{"ts":"2026-09-15T09:16:22Z","id":"moai-9mck","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-8xwi 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-15T09:16:33Z","id":"moai-8xwi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(2026-09-15, 사람): 모양은 --from <칸> — 안 적으면 지금과 똑같이 막지 않는다(승인 게이트를 만들지 않는다). 칸이 달라져 못 집으면 missing 과 같은 자리로 알린다: 사람 출력 한 줄, stderr 한 줄, 부분 실패 종료 코드 — jq 없는 껍데기에서도 가른다. --json 은 진 줄을 지금 칸과 함께 싣는다. defer/--undo 도 같은 검사를 받는다. 예제 agent.sh 는 moved 세기 대신 --from 으로 집는다. edit 은 이번 범위 밖(조용한 손실이 덜하다) — 필요하면 idea 로."}
+{"ts":"2026-09-15T09:16:33Z","id":"moai-f8q1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
