@@ -3399,3 +3399,6 @@
 {"ts":"2026-09-15T14:48:17Z","id":"moai-t6dd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ready 의 에픽 없음·wip 머리 같은 남은 글자도 말묶음으로"}
 {"ts":"2026-09-15T14:50:53Z","id":"moai-46xz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-15T14:50:54Z","id":"moai-ug3c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 스킬: 창을 비울 때를 일꾼이 알린다 — 에픽 병합·보고 뒤 이어받을 한 줄을 남기고 '지금 /clear 해도 된다'를 사람에게 한 줄로, 리뷰 진행 중·병합 충돌 중·결정 대기 중에는 말라고 함께"}
+{"ts":"2026-09-15T14:51:35Z","id":"moai-gu5g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일꾼이 창을 비워도 되는 때를 알린다 — 머지·보고 뒤 한 줄"}
+{"ts":"2026-09-15T14:51:35Z","id":"moai-ug3c","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-olaj 에 멤버로 더했다 (moai-gu5g, 2026-09-15) — 같은 파일(guide.rs 의 감독 스킬 글)이라 따로 세우면 에픽끼리 겹친다"}
+{"ts":"2026-09-15T14:51:35Z","id":"moai-ug3c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-gu5g 이 이어받는다 (에픽 moai-olaj)"}
