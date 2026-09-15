@@ -94,8 +94,12 @@ pub struct Summary {
     /// config 차례로 칸마다 일의 수. 미룬 것은 뺀다 — 한눈 보기의 보드와 같다.
     pub counts: Vec<(String, usize)>,
     pub picked: Vec<Picked>,
-    /// 드러난 것의 수. 알림은 안 센다.
+    /// 드러난 것의 수. 알림은 안 센다. **자리 없는 줄도 여기 든다** — 층의 `!` 와 "드러난 것
+    /// N건" 이 `moai status` 와 같은 수를 말해야, 층에서 보고 들어간 사람이 다른 수를 안 본다.
     pub warnings: usize,
+    /// 그중 집었는데 일하는 워크트리가 없는 줄(moai-p3bs) — 층은 이것을 낱말로 따로 댄다.
+    /// 죽은 세션을 찾으러 돌아온 사람이 보는 첫 화면이 여기다.
+    pub stranded: usize,
     pub unreadable: usize,
 }
 
@@ -129,13 +133,19 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
     let cfg = &repo.config;
     let unreadable = load.unreadable();
     let st = crate::report::status(&load.issues, &unreadable, cfg, now);
+    // **자리도 여기서 잰다**(moai-p3bs) — `moai status` 와 같은 자(`worktree::stranded_at`). 한때
+    // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
+    // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.
+    let lost = crate::worktree::stranded_at(&repo.root, cfg, &load.issues, false, now).0;
+    let stranded = lost.as_ref().map_or(0, |w| w.count);
     Summary {
         counts: cfg.statuses.iter().map(|s| (s.clone(), st.counts.get(s).copied().unwrap_or(0))).collect(),
         picked: crate::report::wip(&load.issues, cfg)
             .into_iter()
             .map(|i| Picked { id: i.id.clone(), title: i.title.clone(), column: i.status.as_str().to_string() })
             .collect(),
-        warnings: st.warnings.len(),
+        warnings: st.warnings.len() + usize::from(lost.is_some()),
+        stranded,
         unreadable: load.errors.len(),
     }
 }

@@ -654,6 +654,49 @@ pub fn top_of(root: &Path) -> Option<PathBuf> {
     git_dirs(root).map(|(top, _)| canonical(top))
 }
 
+/// **main 워크트리의 꼭대기** — 자리 경로를 여기서 잰다(moai-fygk).
+///
+/// [`top_of`] 로 재면 부르는 쪽이 딸린 워크트리일 때 **옆 워크트리의 경로가 하나도 안 잘린다** —
+/// 규약상 세션은 대개 워크트리 안에서 도므로(CLAUDE.md "워크트리") 그게 흔한 경우다. 딸린
+/// 워크트리는 모두 main 아래 `.claude/worktrees/` 에 서므로, main 에서 재면 어느 자리에서 부르든
+/// 같은 상대 경로가 나온다 — 그래야 그 글자를 그대로 `EnterWorktree` 에 옮길 수 있다.
+///
+/// main 을 못 찾으면(맨몸 저장소) 제 꼭대기로 돌아간다. 저장소가 아니면 없다.
+pub fn main_top(root: &Path) -> Option<PathBuf> {
+    let disk = on_disk(root)?;
+    disk.all
+        .iter()
+        .find(|(_, linked, _)| !*linked)
+        .map(|(t, ..)| canonical(&t.path))
+        .or_else(|| top_of(root))
+}
+
+/// 자리 없는 줄 경고와, 못 읽은 워크트리들 — **표면 셋이 같은 자를 쓴다**(moai-p3bs).
+///
+/// `moai status`·`.moai` 밖 한눈 보기·탐색기의 프로젝트 층이 이것을 부른다. 한때 첫째만 자리를
+/// 셌고, 그래서 **죽은 세션을 찾으러 돌아온 사람이 보는 화면**(층과 밖 한눈 보기)에만 그 말이
+/// 없었다. 경로는 [`main_top`] 에서 잰다.
+pub fn stranded_at(
+    root: &Path,
+    cfg: &crate::config::Config,
+    issues: &[Issue],
+    worktree: bool,
+    now: &str,
+) -> (Option<crate::report::Warning>, Vec<crate::report::Workplace>) {
+    let trees = workplaces(root, cfg, worktree, issues);
+    let warning = crate::report::stranded(issues, cfg, &trees, now);
+    let top = main_top(root).unwrap_or_else(|| root.to_path_buf());
+    let unknown = trees
+        .iter()
+        .filter(|t| t.unknown)
+        .map(|t| crate::report::Workplace {
+            path: t.path.strip_prefix(&top).unwrap_or(&t.path).to_path_buf(),
+            ..t.clone()
+        })
+        .collect();
+    (warning, unknown)
+}
+
 /// 제 워크트리가 아닌 워크트리들을 **git 을 띄우지 않고** 읽는다 — 이름 후보([`away`])만 쓴다.
 ///
 /// 훅은 도구 호출마다 이름 후보를 읽는다. `git rev-parse` 와 `git worktree list` 두 번이 호출당

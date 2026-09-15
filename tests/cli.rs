@@ -523,6 +523,69 @@ fn dir_in(s: &Scratch, rel: &str) -> PathBuf {
     d
 }
 
+/// **`.moai` 밖 한눈 보기도 자리 없는 줄을 비춘다**(moai-p3bs). 죽은 세션을 찾으러 돌아온 사람이
+/// 프로젝트 밖에서 보는 화면이 여기라, 안쪽 `moai status` 에만 그 말이 있으면 못 본다. 경고 수와
+/// `--json` 의 `warnings` 가 안쪽과 같은 수를 말한다.
+#[test]
+fn the_overview_counts_work_with_no_live_worktree() {
+    let s = Scratch::new("ovstranded");
+    let (one, out) = (dir_in(&s, "one"), dir_in(&s, "out"));
+    git(&one, &["init", "-q"]);
+    ok(&one, &["init", "argos"]);
+    let lost = add(&one, &["세션이 죽은 일"]);
+    ok(&one, &["mv", &lost, "in_progress"]);
+    git(&one, &["add", "-A"]);
+    git(&one, &["commit", "-q", "-m", "집는다"]);
+    // 이름이 그 줄을 안 가리키는 워크트리 — 워크트리를 쓰는 저장소라는 표시다.
+    git(&one, &["worktree", "add", "-q", ".claude/worktrees/agent-x", "-b", "worktree-agent-x"]);
+    let cfg = registry(&s, &[&one]);
+
+    let inside = ok_at(&one, LATER, &["status"]);
+    assert!(inside.contains("일하는 워크트리가 없는 것 1건"), "안쪽이 안 비췄다\n{inside}");
+    // 안쪽이 세는 경고 수 — 밖에서도 같은 수를 말해야 한다.
+    let want = ok_at(&one, LATER, &["status", "--json"]).matches("\"kind\":").count().to_string();
+    let n = |t: &str| t.split("경고 ").nth(1).and_then(|r| r.split('건').next()).map(str::to_string);
+
+    let out_text = isolated(BIN)
+        .args(["status"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(out_text.status.success());
+    let text = String::from_utf8(out_text.stdout).unwrap();
+    let mine = block(&text, "one");
+    assert!(!mine.contains("드러난 문제 없다"), "자리 없는 줄을 안 세웠다\n{text}");
+    assert_eq!(n(mine), Some(want), "안쪽과 다른 수를 말한다\n{text}");
+
+    let machine = isolated(BIN)
+        .args(["status", "--json"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let json = String::from_utf8(machine.stdout).unwrap();
+    assert!(json.contains("\"kind\":\"stranded\"") && json.contains(&lost), "{json}");
+
+    // **탐색기의 프로젝트 층도 같은 셈을 쓴다**(`layer::summarize`) — 층은 경고를 수로만 내므로
+    // 그 수에 들었는지와, 무엇인지 대는 `stranded` 키로 본다.
+    let layer = isolated(BIN)
+        .args(["tui", "--json"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let layer = String::from_utf8(layer.stdout).unwrap();
+    assert!(layer.contains("\"stranded\":1"), "층이 자리 없는 줄을 안 셌다\n{layer}");
+    assert!(layer.contains("\"warnings\":2"), "층의 경고 수에 안 들었다\n{layer}");
+}
+
 /// **같은 id 가 두 프로젝트에 있어도 섞이지 않는다.** 접두어가 같은 두 저장소는 흔하고,
 /// 줄을 한데 모아 세면 한쪽에서 집은 일이 다른 쪽 보드에 서거나 `ready` 에서 빠진다.
 /// 디렉터리 이름이 겹치면 위 디렉터리를 붙여 가른다.

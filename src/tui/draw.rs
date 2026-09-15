@@ -1899,6 +1899,15 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                     Span::raw(format!(" 드러난 것 {}건 — 들어가서 `moai status`", sum.warnings)),
                 ]));
             }
+            // **자리 없는 줄은 낱말로 따로 댄다**(moai-p3bs). 위의 수에 이미 들었지만, 죽은
+            // 세션을 찾으러 돌아온 사람이 보는 첫 화면이 여기라 "경고 N건" 만으로는 그것이
+            // 무엇인지 알 수 없다 — 들어가지 않고도 무엇을 이어받을지가 보여야 한다.
+            if sum.stranded > 0 {
+                out.push(Line::from(vec![
+                    Span::styled("!", from_anstyle(style::WARN)),
+                    Span::raw(format!(" 집었는데 일하는 워크트리가 없는 것 {}건", sum.stranded)),
+                ]));
+            }
             if sum.unreadable > 0 {
                 out.push(Line::from(vec![
                     Span::styled("!", from_anstyle(style::ERROR)),
@@ -3722,6 +3731,7 @@ pub(super) mod tests {
                 counts: vec![("todo".into(), 3), ("in_progress".into(), 1), ("review".into(), 0), ("done".into(), 12)],
                 picked: vec![Picked { id: "argos-0004".into(), title: "집은 멤버".into(), column: "in_progress".into() }],
                 warnings: 2,
+                stranded: 0,
                 unreadable: 0,
             },
         };
@@ -4970,6 +4980,7 @@ pub(super) mod tests {
                 counts: vec![("in\nprog\tress\u{1b}[2J".into(), 1)],
                 picked: vec![Picked { id: "argos\t0004".into(), title: "첫 줄\n둘째\t줄".into(), column: "in_progress".into() }],
                 warnings: 0,
+                stranded: 0,
                 unreadable: 0,
             },
         };
