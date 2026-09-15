@@ -3389,3 +3389,13 @@
 {"ts":"2026-09-15T14:42:10Z","id":"moai-olaj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 둘 커밋됨 — 84kd 2a499bb · lzfq bbaae98. main 받아 plugin.json 충돌은 bless 로 풀었다(0e6d89e), 846+306 통과. 리뷰 moai-olaj.3d8 을 닫고 main 에 --no-ff 머지 → 워크트리·가지 삭제 → 둘 done → moa-issue-14 에 보고"}
 {"ts":"2026-09-15T14:42:10Z","id":"moai-84kd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: opus-5 (medium — 감독 스킬 글과 표, 시험이 둘러싼 자리)"}
 {"ts":"2026-09-15T14:42:10Z","id":"moai-lzfq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: opus-5 (medium — 브리프 걸음과 훅이 훑는 명령 줄)"}
+{"ts":"2026-09-15T14:44:38Z","id":"moai-nr7o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"언어를 명령 층에서 한 번 풀어 아래로 준다 — 지금은 그리는 쪽이 설정을 다시 읽는다"}
+{"ts":"2026-09-15T14:44:50Z","id":"moai-zeyv.b2z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 자리·빈 값·낡은 키를 재는 시험은 2f609a0 으로 받았다. 넘긴 것 중 fill 의 이어 치환은 값이 늘 숫자라 지금 닿을 수 없어 그대로 둔다. 설정을 두 번 읽는 것과 단위 시험이 돌리는 사람의 HOME 을 읽는 것은 한 뿌리라 moai-nr7o 로 세웠다 — 명령 층에서 Lang 을 풀어 Ctx 로 내리는 일이고 이 diff 밖이다. 문서는 이 에픽의 moai-hs5i 가 맡는다"}
+{"ts":"2026-09-15T14:44:50Z","id":"moai-zeyv.b2z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"자리 지킴 시험 2f609a0 반영. 넘긴 것은 moai-nr7o(언어를 명령 층에서 풀기)와 moai-hs5i(문서, 이 에픽의 멤버)"}
+{"ts":"2026-09-15T14:44:50Z","id":"moai-zeyv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-15T14:44:51Z","id":"moai-i44x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T14:48:17Z","id":"moai-i44x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-15T14:48:17Z","id":"moai-hs5i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T14:48:17Z","id":"moai-t6dd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ready 의 에픽 없음·wip 머리 같은 남은 글자도 말묶음으로"}
+{"ts":"2026-09-15T14:50:53Z","id":"moai-46xz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-15T14:50:54Z","id":"moai-ug3c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 스킬: 창을 비울 때를 일꾼이 알린다 — 에픽 병합·보고 뒤 이어받을 한 줄을 남기고 '지금 /clear 해도 된다'를 사람에게 한 줄로, 리뷰 진행 중·병합 충돌 중·결정 대기 중에는 말라고 함께"}
