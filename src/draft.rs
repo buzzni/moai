@@ -15,7 +15,8 @@
 //! ```
 //!
 //! **이스케이프는 세 자리뿐이다** — 앞머리 `\[` 와 끝쪽에 이어진 `\#낱말`(moai-a5pz), 그리고 템플릿
-//! 변수로 안 읽힐 글자 `\{{`(moai-xqxu). 오타(`[P1]`·`[x]`)는 조용히 제목이 되지 않고 전처럼 줄
+//! 변수로 안 읽힐 글자 `\{{`(moai-xqxu). `{{` 바로 앞의 역슬래시는 쌍으로 센다 — `\\{{이름}}` 은 글자
+//! 역슬래시 하나와 변수다(moai-nqk5). 오타(`[P1]`·`[x]`)는 조용히 제목이 되지 않고 전처럼 줄
 //! 번호와 거절한다.
 //!
 //! **JSON 입력은 두지 않는다.** 에이전트가 Bash heredoc 안에서 중첩 JSON 을
@@ -116,7 +117,8 @@ fn is_name_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
-/// 글 하나의 `{{이름}}` 을 `vars` 의 값으로 바꾸고 `\{{` 를 글자 `{{` 로 푼다. 만난 변수 이름을
+/// 글 하나의 `{{이름}}` 을 `vars` 의 값으로 바꾸고 `\{{` 를 글자 `{{` 로 푼다 — `{{` 바로 앞의 역슬래시는
+/// 쌍으로 세어 둘마다 글자 하나를 내고, 홀수로 남은 하나만 `{{` 를 글자로 만든다(moai-nqk5). 만난 변수 이름을
 /// 처음 나온 차례로 한 번씩 같이 돌려준다 — 값이 없는 이름은 `{{이름}}` 그대로 둔다.
 ///
 /// - 치환은 한 번뿐이다 — 값 안의 `{{…}}` 는 다시 펴지 않는다
@@ -129,13 +131,17 @@ fn expand<'a>(s: &'a str, vars: &[(&str, &str)]) -> (String, Vec<&'a str>) {
     let mut names: Vec<&str> = Vec::new();
     let mut rest = s;
     while let Some(open) = rest.find("{{") {
-        if rest[..open].ends_with('\\') {
-            out.push_str(&rest[..open - 1]);
+        // `{{` 바로 앞의 역슬래시는 **쌍으로 센다**(moai-nqk5, 사람이 정했다) — 둘이 글자 하나, 홀수면
+        // 남은 하나가 `{{` 를 글자로 만든다. 그래야 `C:\\{{dir}}` 로 역슬래시 뒤에 변수를 둔다.
+        let head = &rest[..open];
+        let slashes = head.len() - head.trim_end_matches('\\').len();
+        out.push_str(&head[..open - slashes]);
+        out.push_str(&"\\".repeat(slashes / 2));
+        if slashes % 2 == 1 {
             out.push_str("{{");
             rest = &rest[open + 2..];
             continue;
         }
-        out.push_str(&rest[..open]);
         let after = &rest[open + 2..];
         let end = after.find(|c: char| !is_name_char(c)).unwrap_or(after.len());
         if end == 0 || !after[end..].starts_with("}}") {
@@ -304,10 +310,10 @@ fn body(i: &Issue) -> String {
     if let Some(p) = i.priority {
         s.push_str(&format!("[p{p}] "));
     }
-    // 제목의 `{{` 는 `\{{` 로 쓴다(moai-xqxu) — `add --from` 은 [`fill`] 로 읽으므로, 안 쓰면 제목의
-    // `{{version}}` 같은 글자가 채우지 않은 변수로 거절된다. 왼쪽부터 겹치지 않게 바꾸면 `{{{` 도
-    // `\{{{` 가 되어 읽은 뒤 제자리로 돌아온다.
-    let title = crate::text::one_line(&i.title).replace("{{", "\\{{");
+    // 제목의 `{{` 는 [`escape_braces`] 로 쓴다(moai-xqxu·moai-nqk5) — `add --from` 은 [`fill`] 로 읽으므로,
+    // 안 쓰면 제목의 `{{version}}` 같은 글자가 채우지 않은 변수로 거절되고, `{{` 앞 역슬래시가 쌍으로
+    // 먹혀 `C:\{{dir}}` 가 제자리로 안 돌아온다.
+    let title = escape_braces(&crate::text::one_line(&i.title));
     let title = map_trailing_words(&title, |w| {
         w.strip_prefix('#').filter(|t| !t.is_empty()).map(|t| format!("\\#{t}"))
     });
@@ -315,12 +321,30 @@ fn body(i: &Issue) -> String {
         s.push('\\');
     }
     s.push_str(&title);
-    // 태그의 `{{` 도 제목과 같이 `\{{` 로 쓴다(리뷰 moai-xqxu.fc3) — 안 쓰면 `#{{a}}` 가 채우지 않은
-    // 변수로 거절돼 되뽑은 계획이 도로 안 들어간다.
+    // 태그의 `{{` 도 제목과 같이 쓴다(리뷰 moai-xqxu.fc3) — 안 쓰면 `#{{a}}` 가 채우지 않은 변수로
+    // 거절돼 되뽑은 계획이 도로 안 들어간다.
     for t in &i.tags {
-        s.push_str(&format!(" #{}", t.replace("{{", "\\{{")));
+        s.push_str(&format!(" #{}", escape_braces(t)));
     }
     s
+}
+
+/// 글자 `{{` 를 [`expand`] 가 도로 글자로 읽는 모양으로 쓴다 — `{{` 바로 앞의 역슬래시 줄은 두 배로,
+/// `{{` 는 `\{{` 로(moai-nqk5). `expand` 가 역슬래시를 쌍으로 세므로 둘이 짝이다. 왼쪽부터 겹치지
+/// 않게 바꾸어 `{{{` 도 제자리로 돌아온다. `{{` 앞이 아닌 역슬래시는 그대로다.
+fn escape_braces(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(open) = rest.find("{{") {
+        let head = &rest[..open];
+        let slashes = head.len() - head.trim_end_matches('\\').len();
+        out.push_str(head);
+        out.push_str(&"\\".repeat(slashes));
+        out.push_str("\\{{");
+        rest = &rest[open + 2..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// [`render`] 가 쓴 줄을 [`parse`] 가 **다르게 읽는** 줄의 id.
@@ -519,6 +543,38 @@ mod tests {
         let b = issue("{{", Kind::Issue, None, &[]);
         let md = render(&epic, &[&a, &b]);
         assert!(md.starts_with("# \\{{version}} 문법\n"), "{md}");
+        let got = fill(&md, &[]).expect("되뽑은 계획이 변수로 거절됐다");
+        for (d, i) in got.iter().zip([&epic, &a, &b]) {
+            assert_eq!((d.title.as_str(), d.priority, d.tags.as_slice()), (i.title.as_str(), i.priority, i.tags.as_slice()), "{md}");
+        }
+        assert!(lossy(&epic, &[&a, &b]).is_empty(), "되돌아 읽히는데 lossy 가 짚었다");
+    }
+
+    /// **`{{` 바로 앞의 역슬래시는 쌍으로 센다**(moai-nqk5, 사람이 정했다) — `\\` 는 글자 역슬래시
+    /// 하나, 홀수면 마지막 하나가 `{{` 를 글자로 만든다. 그래야 `C:\{{dir}}` 같은 제목을 템플릿에 적는다.
+    /// `{{` 앞이 아닌 역슬래시는 그대로다.
+    #[test]
+    fn backslashes_before_braces_count_in_pairs() {
+        let x = [("dir", "x")];
+        assert_eq!(expand("C:\\{{dir}}", &x).0, "C:{{dir}}", "홀수 하나는 전처럼 글자 {{");
+        assert_eq!(expand("C:\\\\{{dir}}", &x).0, "C:\\x", "짝이면 역슬래시 하나와 변수");
+        assert_eq!(expand("C:\\\\\\{{dir}}", &x).0, "C:\\{{dir}}", "셋이면 역슬래시 하나와 글자 {{");
+        assert_eq!(expand("C:\\\\\\\\{{dir}}", &x).0, "C:\\\\x", "넷이면 역슬래시 둘과 변수");
+        assert_eq!(expand("C:\\temp \\\\ {{dir}}", &x).0, "C:\\temp \\\\ x", "{{ 앞이 아닌 역슬래시를 건드렸다");
+        // 짝으로 선 변수도 필수다 — 채우지 않으면 이름을 댄다.
+        assert!(fill("# 경로 \\\\{{dir}}\n", &[]).unwrap_err().contains("dir"));
+        assert_eq!(fill("# 경로 \\\\{{dir}}\n", &x).unwrap()[0].title, "경로 \\x");
+    }
+
+    /// **되뽑은 계획이 `{{` 앞 역슬래시를 든 제목·태그도 되돌린다**(moai-nqk5) — render 가 그 역슬래시를
+    /// 두 배로 쓰고 `{{` 를 `\{{` 로 써, 채우기를 지나 읽어도 같은 제목이다.
+    #[test]
+    fn backslashes_before_braces_round_trip_through_fill() {
+        let epic = issue("C:\\{{dir}} 에 둔다", Kind::Epic, None, &[]);
+        let a = issue("둘 \\\\{{x}} 셋 \\\\\\{{", Kind::Issue, Some(2), &["t\\{{u}}"]);
+        let b = issue("끝이 역슬래시 \\", Kind::Issue, None, &[]);
+        let md = render(&epic, &[&a, &b]);
+        assert!(md.starts_with("# C:\\\\\\{{dir}} 에 둔다\n"), "{md}");
         let got = fill(&md, &[]).expect("되뽑은 계획이 변수로 거절됐다");
         for (d, i) in got.iter().zip([&epic, &a, &b]) {
             assert_eq!((d.title.as_str(), d.priority, d.tags.as_slice()), (i.title.as_str(), i.priority, i.tags.as_slice()), "{md}");
