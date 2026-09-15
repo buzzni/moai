@@ -113,7 +113,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         if args.as_plan {
             return plan(ctx, &load.issues, issue, args.raw);
         }
-        return one(ctx, &repo, &load.issues, issue, args.raw, &origin);
+        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree);
     }
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
@@ -290,6 +290,7 @@ fn one(
     issue: &Issue,
     raw: bool,
     origin: &crate::worktree::Origin,
+    worktree: bool,
 ) -> R<Vec<String>> {
     // **에픽도 뒷줄로 푼다** — 펼친 줄을 고른 자(`Load::get`)와 같다(moai-e0ro).
     let epic = issue.epic.as_ref().and_then(|e| all.iter().rfind(|i| &i.id == e));
@@ -308,11 +309,38 @@ fn one(
     // 저장소 전부의 소속과 미룸을 걷는 것은 통째로 헛일이다(`group_states_of`).
     let near: Vec<&str> =
         std::iter::once(issue.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
+    // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 스냅샷을 다
+    // 풀 까닭이 없다. 언제 재는지(딸린 워크트리에서는 겹쳐 볼 때만)는 `worktree::workplaces` 가
+    // 한 곳에서 정한다 — 명령마다 두었더니 `status` 와 여기가 서로 다른 답을 냈다(moai-6opu.p65).
+    let trees: Vec<report::Workplace> = if report::wip(all, &repo.config).iter().any(|i| i.id == issue.id) {
+        // 경로는 **워크트리의 꼭대기**에서 잰다: 규약의 자리(`.claude/worktrees/<id>`)가 그대로
+        // 읽힌다. 뿌리(`.moai` 가 든 곳)로 재면 `.moai` 를 아래에 둔 저장소에서 하나도 안 잘려
+        // 기계의 절대 경로가 그대로 나간다. 워크트리 경로는 이미 푼 것이라(`worktree::canonical`)
+        // 꼭대기도 같은 자로 푼다 — 심볼릭 링크를 낀 자리로는 하나도 안 잘린다.
+        let root = crate::worktree::top_of(&repo.root).unwrap_or_else(|| repo.root.clone());
+        crate::worktree::workplaces(&repo.root, &repo.config, worktree)
+            .into_iter()
+            .map(|mut t| {
+                if let Ok(rel) = t.path.strip_prefix(&root) {
+                    // 제 워크트리 안에서 펼치면 뿌리와 같은 자리다 — 빈 경로로 두면 사람 화면의
+                    // `자리` 칸이 통째로 비고 `--json` 의 `path` 가 `""` 로 나간다.
+                    t.path = if rel.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { rel.to_path_buf() };
+                }
+                t
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let places = (!trees.is_empty())
+        .then(|| report::places(all, &repo.config, &trees).remove(&issue.id))
+        .flatten();
     let seen = view::Seen {
         roots: report::deferred_roots(all),
         states: report::group_states_of(all, &repo.config, &near),
         origin: Some(origin),
         blocks: report::blocks_of(all, &repo.config, issue),
+        places,
     };
     // **커밋은 저장하지 않고 git 에서 읽는다**(moai-1w2l) — 커밋 제목에 이 id 를 적은 것.
     // git 이 없거나 저장소 밖이거나 커밋이 하나도 없으면 **말없이** 칸을 비운다(moai-mauw).
@@ -359,6 +387,10 @@ fn one(
         // `blocks` 는 받는 쪽이 "B 가 A 를 막는다" 로 거꾸로 읽는다.
         if !seen.blocks.is_empty() {
             extra.push(("blockers",serde_json::to_string(&seen.blocks).map_err(|e| Fail::new(e.to_string()))?));
+        }
+        // 사람 화면의 `자리` 줄과 같은 답. 줄을 안 세우는 자리에서는 키도 안 단다.
+        if let Some(p) = &seen.places {
+            extra.push(("workplaces", serde_json::to_string(p).map_err(|e| Fail::new(e.to_string()))?));
         }
         // 트래커 커밋까지 **전부** 낸다 — `tracker` 표시가 붙으니 거를지는 받는 쪽이 정한다.
         // 사람 화면만 뺀다(`view::commits`). 커밋이 없으면 키를 안 단다.
