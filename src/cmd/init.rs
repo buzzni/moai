@@ -22,14 +22,11 @@ fn begin_marker(block: &str) -> String {
 
 /// 마커가 대는 해시 조각 `hash:<8자>`. 쓰는 곳([`begin_marker`])과 알아보는 곳([`kept_marker`])이
 /// 같은 글자를 쓴다.
+///
+/// 해셔는 [`crate::text::fnv1a32`] 다(moai-2vrw) — `skill` 의 64비트와 나란히 한 자리에 있어야
+/// "왜 std 해셔가 아닌가" 를 두 곳에 적지 않는다. 공개된 시험값은 그 자리에서 박혀 있다.
 fn hash_of(block: &str) -> String {
-    format!("hash:{:08x}", fnv1a(block))
-}
-
-/// 마커가 대는 해시 — 해셔 자체는 [`crate::text::fnv1a32`] 다(moai-2vrw). `skill` 의 64비트와
-/// 나란히 한 자리에 있어야 "왜 std 해셔가 아닌가" 를 두 곳에 적지 않는다.
-fn fnv1a(s: &str) -> u32 {
-    crate::text::fnv1a32(s.as_bytes())
+    format!("hash:{:08x}", crate::text::fnv1a32(block.as_bytes()))
 }
 
 /// 여는 마커 줄인가. **줄머리에서 머리로 시작하고, 머리 바로 뒤가 띄어쓰기이고, `-->` 로
@@ -603,15 +600,24 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         out.push("  .gitignore 에 moai 가 쓰는 자리(lock·tmp·워크트리)를 넣었다".into());
     }
     for (name, why, block) in &untouched {
-        // 주석과 빈 줄은 뺀다 — 손으로 더할 것은 규칙 줄이다.
-        let lines: Vec<&str> = block.lines().filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#')).collect();
         out.push(format!("  {name} 를 못 읽어 안 건드렸다 — {why}"));
-        out.push(format!("    moai 가 쓰는 자리를 손으로 더한다: {}", lines.join(", ")));
+        out.push("    손으로 더할 줄 (읽히게 고치고 `moai init` 을 다시 불러도 된다):".into());
+        // **한 줄에 하나씩 낸다** — 쉼표로 이으면 붙여 넣은 것이 한 줄이 되어 규칙이 안 선다.
+        // `.gitattributes` 는 더 나쁘다: `<패턴> text eol=lf, <패턴> …` 은 첫 패턴에 쓰레기
+        // 속성을 달 뿐이라 `journal.jsonl` 이 `merge=union` 을 영영 못 받는다.
+        // 주석과 빈 줄은 뺀다 — 손으로 더할 것은 규칙 줄이다.
+        for line in block.lines().filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#')) {
+            out.push(format!("      {line}"));
+        }
     }
     if agents {
         out.push("  AGENTS.md 블록을 맞췄다".into());
     }
-    if again && out.len() == 1 {
+    // **줄 수가 아니라 한 일로 묻는다.** 줄을 세던 때는 이 자리 위에 줄 하나를 더하는 것만으로
+    // 이 안내가 말없이 사라졌다 — `moai-knn0` 전까지 `agents` 가 늘 참이라 실제로 그랬다.
+    // `Already` 는 "다 있어서 안 건드렸다" 뿐이다 — 못 읽은 자리는 `Unreadable` 이라 여기서 걸린다.
+    let did_nothing = attrs == Added::Already && ignore == Added::Already && !agents;
+    if again && did_nothing {
         out.push("  이미 다 맞아 있다".into());
     }
     if claude_needs_pointer {
@@ -824,6 +830,7 @@ mod tests {
     /// 블록이 둘 선다. 다시 넣어도 바이트가 같다.
     #[test]
     fn the_marker_carries_version_and_hash_and_replaces_a_bare_one() {
+        let fnv1a = |s: &str| crate::text::fnv1a32(s.as_bytes());
         let first = with_block("", "내용\n").lines().next().unwrap().to_string();
         assert_eq!(first, format!("<!-- moai:begin v:{} hash:{:08x} -->", env!("CARGO_PKG_VERSION"), fnv1a("내용\n")));
 
@@ -835,15 +842,6 @@ mod tests {
         let changed = with_block(&new, "새 내용\n");
         assert_eq!(changed.matches(BEGIN).count(), 1, "{changed}");
         assert!(changed.contains(&format!("hash:{:08x} -->\n새 내용\n", fnv1a("새 내용\n"))), "{changed}");
-    }
-
-    /// 해시는 **공개된 FNV-1a 32비트**다 — std 의 해셔는 러스트 버전마다 값이 바뀌어, 새로
-    /// 빌드한 바이너리가 멀쩡한 블록을 낡았다고 읽는다.
-    #[test]
-    fn the_hash_is_plain_fnv1a() {
-        assert_eq!(fnv1a(""), 0x811c_9dc5);
-        assert_eq!(fnv1a("a"), 0xe40c_292c);
-        assert_eq!(fnv1a("foobar"), 0xbf9c_f968);
     }
 
     #[test]

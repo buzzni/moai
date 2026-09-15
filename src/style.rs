@@ -74,8 +74,9 @@ pub const PROJECT_HUES: [AnsiColor; 3] = [AnsiColor::Cyan, AnsiColor::Green, Ans
 ///   목록을 따라 바뀐다
 /// - 경로는 조각(`components`) 단위로 센다 — 끝 `/` 나 겹 `/` 같은 철자가 색을 가르지
 ///   않게. 링크는 안 푼다(순수 함수로 둔다). 등록이 이미 푼 경로로 적힌다
-/// - FNV-1a 로 세고 MurmurHash3 의 끝섞기(`fmix64`)를 지난다. `DefaultHasher` 는
-///   알고리즘이 바뀔 수 있다고 적혀 있고, 바뀌면 업그레이드 한 번에 모든 프로젝트의
+/// - FNV-1a([`crate::text::fnv1a64_from`])로 세고 MurmurHash3 의 끝섞기(`fmix64`)를
+///   지난다. `DefaultHasher` 는 알고리즘이 바뀔 수 있다고 적혀 있고, 바뀌면
+///   업그레이드 한 번에 모든 프로젝트의
 ///   색이 바뀐다. **끝섞기를 빼지 않는다** — 날 FNV 의 `% 3` 은 끝 글자 하나만 다른
 ///   경로(`/a`…`/f`)를 전부 한 색에 몰고, 형제 디렉터리 300개를 190:100:10 으로 쏠리게 냈다
 /// - **겹치는 것은 받아들인다.** 색은 셋이라 프로젝트가 늘면 겹친다. 겹쳐도 이름이
@@ -116,15 +117,13 @@ impl Hue {
 
     /// 정한 색이 없을 때 경로로 고른다. 까닭은 [`project_colour`] 에 있다.
     pub fn of_path(path: &std::path::Path) -> Hue {
-        const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut h = OFFSET;
+        // 셈 자체는 [`crate::text::fnv1a64_from`] 이다(moai-2vrw) — 여기 한 벌 더 적으면 상수가
+        // 두 자리에 서고, 한쪽만 고치는 날 모든 프로젝트의 색이 바뀐다.
+        let mut h = crate::text::FNV64_OFFSET;
         for part in path.components() {
             // 조각 사이에 0 을 끼운다 — `a/bc` 와 `ab/c` 가 같은 바이트열로 섞이지 않게.
-            for b in part.as_os_str().as_encoded_bytes().iter().chain([&0u8]) {
-                h ^= u64::from(*b);
-                h = h.wrapping_mul(PRIME);
-            }
+            h = crate::text::fnv1a64_from(h, part.as_os_str().as_encoded_bytes());
+            h = crate::text::fnv1a64_from(h, &[0]);
         }
         h ^= h >> 33;
         h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);

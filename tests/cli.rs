@@ -2383,7 +2383,6 @@ fn status_notices_a_stale_agents_block_but_not_a_missing_one() {
 /// **멈추지는 않는다**(2026-09-15 사용자 결정): 나머지는 다 심고, 그 자리에 무엇을 손으로
 /// 더할지 대며 0 으로 끝난다. AGENTS.md 가 멈추는 자리인 까닭은 그쪽이 도구가 쓴 블록을
 /// 통째로 갈아 끼우는 자리라서다.
-#[cfg(unix)]
 #[test]
 fn init_never_overwrites_a_dotfile_it_cannot_read() {
     let s = Scratch::new("badignore");
@@ -2396,7 +2395,12 @@ fn init_never_overwrites_a_dotfile_it_cannot_read() {
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(std::fs::read(s.path().join(".gitignore")).unwrap(), theirs, "못 읽는 파일을 덮었다");
     assert!(said.contains(".gitignore") && said.contains("못 읽어"), "{said}");
-    assert!(said.contains(".moai/lock"), "손으로 더할 줄을 안 댔다 — {said}");
+    // **붙여 넣을 수 있어야 한다** — 한 줄에 하나씩이라야 규칙이 선다. 쉼표로 잇던 때는
+    // `.gitattributes` 의 두 줄이 한 줄이 되어 `journal.jsonl` 이 `merge=union` 을 못 받았다.
+    assert!(
+        said.lines().any(|l| l.trim() == ".moai/lock"),
+        "손으로 더할 줄을 한 줄에 하나씩 안 댔다 — {said}"
+    );
     // 나머지는 다 심는다.
     assert!(s.path().join(".moai/issues.jsonl").exists(), "나머지를 안 심었다");
     assert!(std::fs::read_to_string(s.path().join(".gitattributes")).unwrap().contains(".moai/issues.jsonl"));
@@ -2407,11 +2411,21 @@ fn init_never_overwrites_a_dotfile_it_cannot_read() {
     assert!(js.contains("\"gitignore\":false"), "{js}");
     assert!(js.contains("\"unreadable\":[\".gitignore\"]"), "못 읽은 자리를 기계에게 안 말했다 — {js}");
 
+    // `.gitattributes` 도 같은 자리다 — 둘 다 못 읽으면 둘 다 든다.
+    std::fs::write(s.path().join(".gitattributes"), theirs).unwrap();
+    let both = ok(s.path(), &["init", "--json"]);
+    assert!(both.contains("\"unreadable\":[\".gitattributes\",\".gitignore\"]"), "{both}");
+    assert_eq!(std::fs::read(s.path().join(".gitattributes")).unwrap(), theirs, "못 읽는 파일을 덮었다");
+
     // 읽히게 고치면 그때 넣는다 — 남의 줄은 그대로 두고 뒤에 붙는다.
+    std::fs::write(s.path().join(".gitattributes"), "").unwrap();
     std::fs::write(s.path().join(".gitignore"), "build/\n").unwrap();
     ok(s.path(), &["init"]);
     let now = std::fs::read_to_string(s.path().join(".gitignore")).unwrap();
     assert!(now.starts_with("build/\n") && now.contains(".moai/lock"), "{now}");
+    // 고친 뒤에는 기계에게도 남은 것이 없다고 말한다.
+    let clean = ok(s.path(), &["init", "--json"]);
+    assert!(!clean.contains("unreadable"), "다 읽히는데 못 읽었다고 한다 — {clean}");
 }
 
 /// **`init` 은 제가 쓴 것만 말한다**(moai-knn0). 블록이 이미 맞으면 "맞췄다" 도 `"agents":true`
@@ -2420,13 +2434,16 @@ fn init_never_overwrites_a_dotfile_it_cannot_read() {
 #[test]
 fn init_says_only_what_it_wrote() {
     let s = init("saidwrote");
-    // 갓 심은 자리: 블록을 썼다고 말한다.
+    // 갓 심은 자리를 다시 부르면 블록이 이미 맞는다 — 그러니 안 썼다고 말한다.
     let first = ok(s.path(), &["init", "--json"]);
     assert!(first.contains("\"agents\":false"), "안 썼는데 썼다고 한다 — {first}");
 
     let md = s.path().join("AGENTS.md");
     let fresh = std::fs::read_to_string(&md).unwrap();
-    std::fs::write(&md, fresh.replace("승인 게이트가 없다", "승인 게이트가 있다")).unwrap();
+    let edited = fresh.replace("승인 게이트가 없다", "승인 게이트가 있다");
+    // 안내 글이 바뀌어 이 낱말이 사라지면 아래 단언이 엉뚱한 것을 탓한다 — 여기서 먼저 잡는다.
+    assert_ne!(edited, fresh, "시험이 블록을 못 고쳤다 — 안내 글에서 찾는 낱말이 사라졌다");
+    std::fs::write(&md, edited).unwrap();
     let wrote = ok(s.path(), &["init", "--json"]);
     assert!(wrote.contains("\"agents\":true"), "고친 블록을 다시 썼는데 안 썼다고 한다 — {wrote}");
 
