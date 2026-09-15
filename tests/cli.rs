@@ -38,7 +38,7 @@ impl Drop for Scratch {
 /// 잊는 날 결과가 기계를 따라 달라진다. json 훑기의 `skill status` 가 진짜
 /// `~/.claude/plugins` 를 읽던 것이 그렇게 났다(moai-kebc).
 ///
-/// 걷는 것은 moai 가 실제로 기계에서 읽는 자리뿐이다.
+/// 걷는 것은 moai 와 **시험이 띄우는 셸**이 실제로 기계에서 읽는 자리뿐이다.
 /// - `HOME`·`CLAUDE_CONFIG_DIR`·`CLAUDE_CODE_PLUGIN_CACHE_DIR` — `claude` 의 장부
 /// - git 전역·시스템 설정 — 사람 이름이 `MOAI_ACTOR` 다음에 여기서 온다.
 ///   `GIT_CONFIG_GLOBAL` 을 주면 git 은 `~/.gitconfig` 도 `XDG_CONFIG_HOME` 도 안 본다.
@@ -49,6 +49,12 @@ impl Drop for Scratch {
 /// - `MOAI_CONFIG`·`XDG_CONFIG_HOME` — 사용자 설정(등록한 프로젝트 목록)의 자리
 /// - `MOAI_ACTOR`·`MOAI_NOW` — 셸에 내보내 둔 값이 새면 "사람을 못 찾는다" 와
 ///   "시계를 고정하지 않았다" 를 보려던 시험이 조용히 딴것을 본다
+/// - `BASH_ENV` — bash 를 띄우는 시험(`bash -c`, 예제 루프)이 **켜자마자 읽는 파일**.
+///   비대화형 bash 는 스크립트 첫 줄보다 먼저 그 파일을 돌리고, 그것이 돌리는 사람의
+///   `~/.bashrc` 인 셸이 실제로 있다(이 저장소를 돌리는 자리가 그렇다). 거기서 `MOAI`·
+///   `MOAI_ACTOR` 를 내보내거나 `cd` 하면 아래 `.env` 로 준 값과 자리를 bash 안에서 덮는다.
+///   `ENV`·`SHELLOPTS`·`POSIXLY_CORRECT` 는 걷지 않는다 — 비대화형 bash 는 그것들로
+///   시작 파일을 읽지 않는다(재 봤다). 걷는 목록은 **재 본 것만** 늘린다
 ///
 /// 시험이 제 값을 주려면 이 뒤에 `.env` 로 덮는다. `PATH` 는 두고 간다 — moai 가
 /// git 을 부르고, `claude` 가 없는 자리가 필요한 시험은 `Claude` 가 따로 만든다.
@@ -70,7 +76,8 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // 밖에서 부르는 시험이 돌리는 사람의 프로젝트를 본다. `XDG_CONFIG_HOME` 도
         // 걷는다 — `MOAI_CONFIG` 를 덮어쓴 시험이 그것을 지우면 그다음 자리다.
         .env("MOAI_CONFIG", home.join("moai-config-unset/config.toml"))
-        .env_remove("XDG_CONFIG_HOME");
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("BASH_ENV");
     for var in GIT_LEAKS {
         cmd.env_remove(var);
     }
@@ -5967,9 +5974,10 @@ fn the_fake_claude_command_starts_from_the_isolated_one() {
     let removed = |var: &str| matches!(envs.get(std::ffi::OsStr::new(var)), Some(None));
     let set = |var: &str| envs.get(std::ffi::OsStr::new(var)).copied().flatten();
 
-    for var in ["MOAI_ACTOR", "MOAI_NOW", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "XDG_CONFIG_HOME"]
-        .iter()
-        .chain(GIT_LEAKS)
+    for var in
+        ["MOAI_ACTOR", "MOAI_NOW", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "XDG_CONFIG_HOME", "BASH_ENV"]
+            .iter()
+            .chain(GIT_LEAKS)
     {
         assert!(removed(var), "{var} 를 안 걷었다");
     }
@@ -7058,33 +7066,52 @@ fn project_rm_without_a_config_leaves_no_trace() {
 /// 않고 실패한다 — 건너뛰는 시험은 아무도 안 보는 사이 예제를 썩힌다(사람이 정했다).
 #[cfg(unix)]
 fn agent(dir: &Path, work: &Path) -> Output {
-    agent_with(dir, work, Path::new(BIN))
+    agent_cmd(dir, work, Path::new(BIN))
+        .output()
+        .expect("bash 를 실행하지 못했다 — 예제 시험에는 bash 와 jq 가 있어야 한다")
 }
 
+/// 예제를 띄울 명령. `moai` 자리에 대역을 끼우거나 환경을 더 줄 시험이 이것을 쓴다
+/// (`Claude::command` 와 같은 모양이다).
 #[cfg(unix)]
-fn agent_with(dir: &Path, work: &Path, moai: &Path) -> Output {
+fn agent_cmd(dir: &Path, work: &Path, moai: &Path) -> Command {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/bash-agent/agent.sh");
-    isolated("bash")
-        .arg(script)
+    let mut cmd = isolated("bash");
+    cmd.arg(script)
         .current_dir(dir)
         .env("MOAI", moai)
         .env("AGENT_WORK", work)
         .env("MOAI_ACTOR", "테스터 (tester@example.com)")
         .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
-        .output()
-        .expect("bash 를 실행하지 못했다 — 예제 시험에는 bash 와 jq 가 있어야 한다")
+        .env("NO_COLOR", "1");
+    cmd
+}
+
+/// 실행할 파일을 `dst` 에 내놓는다. 몸은 곁의 `.src` 에 쓰고 **[`place_exe`] 가 옮긴다** —
+/// 이 프로세스가 쓴 inode 를 예제의 bash 가 exec 하면 옆 시험의 fork 와 겹쳐 ETXTBSY 다.
+#[cfg(unix)]
+fn write_exe(dst: &Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let source = dst.with_extension("src");
+    std::fs::write(&source, body).unwrap();
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+    place_exe(&source, dst);
 }
 
 /// 일 명령 대역. 받은 id 를 기록에 적고 `body` 를 돈다 — 그 출력이 노트가 된다.
 #[cfg(unix)]
 fn work_script(s: &Scratch, body: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt as _;
     let path = s.path().join("work.sh");
     let log = s.path().join("worked");
-    std::fs::write(&path, format!("#!/bin/sh\necho \"$1\" >> '{}'\n{body}\n", log.display())).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    write_exe(&path, &format!("#!/bin/sh\necho \"$1\" >> '{}'\n{body}\n", log.display()));
     path
+}
+
+/// 일 명령이 받은 id 들. **한 번도 안 불렸으면 빈 목록이다** — 없는 파일로 터지면 예제가
+/// 왜 일찍 멈췄는지(jq 가 없다, 일 명령을 못 돌린다)를 가린 채 파일 이름만 남는다.
+#[cfg(unix)]
+fn worked(s: &Scratch) -> Vec<String> {
+    std::fs::read_to_string(s.path().join("worked")).unwrap_or_default().lines().map(str::to_string).collect()
 }
 
 #[cfg(unix)]
@@ -7095,22 +7122,27 @@ fn the_bash_agent_example_works_the_ready_queue_until_it_is_empty() {
     let first = add(s.path(), &["급한 일", "-p", "1"]);
     let parked = add(s.path(), &["미룬 일", "-p", "0"]);
     ok(s.path(), &["defer", &parked, "-m", "지금 아님"]);
+    // 미뤄 둔 것에 막힌 줄은 `held` 로 선다 — 큐가 비면 그 수를 댄다. 이것이 없으면 `held`
+    // 가 늘 비어, 키 이름이 바뀌어도(`jq '.held | length'` 는 없는 키에 0 을 낸다) 아무도 안 잡는다.
+    let waiting = add(s.path(), &["막힌 일", "-p", "0"]);
+    ok(s.path(), &["link", &parked, "--blocks", &waiting]);
     let work = work_script(&s, "echo \"$1 을 끝냈다: $2\"");
 
     let out = agent(s.path(), &work);
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(out.status.success(), "예제가 실패했다\nstdout: {stdout}\nstderr: {stderr}");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.status.success(), "예제가 실패했다\n{}", text(&out));
 
-    let worked = std::fs::read_to_string(s.path().join("worked")).unwrap();
-    assert_eq!(worked.lines().collect::<Vec<_>>(), [first.as_str(), later.as_str()], "ready 차례대로 집지 않았다");
+    assert_eq!(worked(&s), [first.as_str(), later.as_str()], "ready 차례대로 집지 않았다\n{}", text(&out));
     for (id, title) in [(&first, "급한 일"), (&later, "나중 일")] {
         assert!(line_of(s.path(), id).contains("\"status\":\"done\""), "{id} 가 done 이 아니다");
         let shown = ok(s.path(), &["show", id]);
         assert!(shown.contains(&format!("{id} 을 끝냈다: {title}")), "일 명령의 출력이 노트로 안 남았다\n{shown}");
     }
-    assert!(line_of(s.path(), &parked).contains("\"status\":\"todo\""), "미룬 일을 집었다");
+    for id in [&parked, &waiting] {
+        assert!(line_of(s.path(), id).contains("\"status\":\"todo\""), "{id} 를 집었다");
+    }
     assert!(stdout.contains("집을 일이 없다"), "{stdout}");
+    assert!(stdout.contains("막힌 일 1건"), "막혀 못 집는 일의 수를 안 댔다\n{stdout}");
 }
 
 #[cfg(unix)]
@@ -7122,28 +7154,40 @@ fn the_bash_agent_example_stops_on_a_failed_job_and_leaves_it_picked() {
     let work = work_script(&s, "echo 컴파일이 깨졌다; exit 3");
 
     let out = agent(s.path(), &work);
-    assert!(!out.status.success(), "일이 실패했는데 예제가 성공으로 끝났다");
-    let worked = std::fs::read_to_string(s.path().join("worked")).unwrap();
-    assert_eq!(worked.lines().collect::<Vec<_>>(), [id.as_str()], "실패한 뒤에도 돌았다");
+    // **1 인지까지 본다.** 아무 비영 종료나 받으면 일 명령을 한 번도 못 돌린 채 멈춘 것
+    // (jq 가 없다·집기 전에 거절했다)도 "일이 실패했다" 로 읽힌다.
+    assert_eq!(out.status.code(), Some(1), "일이 실패하면 1 로 멈춘다\n{}", text(&out));
+    assert_eq!(worked(&s), [id.as_str()], "실패한 뒤에도 돌았다\n{}", text(&out));
     assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""), "실패한 일을 내려놓았다");
     let shown = ok(s.path(), &["show", &id]);
     assert!(shown.contains("실패(3): 컴파일이 깨졌다"), "실패 코드와 출력이 노트로 안 남았다\n{shown}");
     assert!(line_of(s.path(), &other).contains("\"status\":\"todo\""));
 }
 
-/// 공백뿐인 출력도 끝낸 일이다. `note` 는 빈 메모를 거절하므로, 그대로 넘기면 끝낸 일이
-/// in_progress 로 남은 채 루프가 실패로 멈춘다.
+/// 공백뿐인 출력도, UTF-8 이 아닌 출력도 끝낸 일이다. `note` 는 빈 메모를 거절하고
+/// (`trim` 은 유니코드 공백을 턴다) UTF-8 이 아닌 stdin 도 통째로 거절하므로, 그대로 넘기면
+/// 끝낸 일이 in_progress 로 남은 채 루프가 실패로 멈춘다.
+///
+/// **bash 의 `[:space:]` 로 가르지 않는다** — NBSP 는 로캘에 따라 글자로 세어, `note` 가
+/// 빈 메모로 거절하는 것을 스크립트는 글이라고 읽는다. 가르는 자를 `note` 와 맞춘다.
 #[cfg(unix)]
 #[test]
-fn the_bash_agent_example_closes_a_job_whose_output_is_blank() {
-    let s = init("agent-blank");
-    let id = add(s.path(), &["말없는 일", "-p", "1"]);
-    let work = work_script(&s, "printf '  \\n'");
+fn the_bash_agent_example_closes_a_job_whose_output_is_blank_or_not_utf8() {
+    for (name, body, noted) in [
+        ("agent-blank", "printf '  \\n'", "(출력 없음)"),
+        ("agent-nbsp", "printf '\\302\\240\\302\\240\\n'", "(출력 없음)"),
+        ("agent-latin1", "printf 'caf\\351 끝\\n'", "caf\u{fffd} 끝"),
+    ] {
+        let s = init(name);
+        let id = add(s.path(), &["말없는 일", "-p", "1"]);
+        let work = work_script(&s, body);
 
-    let out = agent(s.path(), &work);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "공백 출력에 멈췄다");
-    assert!(ok(s.path(), &["show", &id]).contains("(출력 없음)"));
+        let out = agent(s.path(), &work);
+        assert!(out.status.success(), "{name}: 끝낸 일에 멈췄다\n{}", text(&out));
+        assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "{name}: 닫지 않았다");
+        let shown = ok(s.path(), &["show", &id]);
+        assert!(shown.contains(noted), "{name}: 노트가 {noted:?} 가 아니다\n{shown}");
+    }
 }
 
 /// `ready` 와 `mv` 사이에 옆 에이전트가 같은 줄을 먼저 집으면 `mv` 는 `already` 로 0 을
@@ -7151,25 +7195,129 @@ fn the_bash_agent_example_closes_a_job_whose_output_is_blank() {
 #[cfg(unix)]
 #[test]
 fn the_bash_agent_example_skips_a_job_a_neighbour_claimed_first() {
-    use std::os::unix::fs::PermissionsExt as _;
     let s = init("agent-race");
     let contested = add(s.path(), &["다툰 일", "-p", "1"]);
     let other = add(s.path(), &["남은 일", "-p", "2"]);
     // 이 에이전트의 `mv <contested> in_progress` 바로 앞에 옆 에이전트가 끼어든다.
     let wrapper = s.path().join("moai-race.sh");
-    std::fs::write(
+    write_exe(
         &wrapper,
-        format!(
+        &format!(
             "#!/bin/sh\nif [ \"$1\" = mv ] && [ \"$2\" = {contested} ] && [ \"$3\" = in_progress ]; then '{BIN}' mv {contested} in_progress >/dev/null; fi\nexec '{BIN}' \"$@\"\n"
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let work = work_script(&s, "echo 했다");
 
-    let out = agent_with(s.path(), &work, &wrapper);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let worked = std::fs::read_to_string(s.path().join("worked")).unwrap();
-    assert_eq!(worked.lines().collect::<Vec<_>>(), [other.as_str()], "남이 집은 일을 또 했다");
+    let out = agent_cmd(s.path(), &work, &wrapper).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(worked(&s), [other.as_str()], "남이 집은 일을 또 했다\n{}", text(&out));
     assert!(line_of(s.path(), &contested).contains("\"status\":\"in_progress\""), "남이 집은 일을 닫았다");
+}
+
+/// **채비가 안 됐으면 아무것도 집지 않는다.** 집은 뒤에야 알면 맨 위 일이 in_progress 에
+/// 박히고, 다시 부를 때마다 그다음 일이 또 박힌다 — 되돌리는 말은 사람 몫이다.
+#[cfg(unix)]
+#[test]
+fn the_bash_agent_example_claims_nothing_when_it_cannot_set_itself_up() {
+    let s = init("agent-nowork");
+    let id = add(s.path(), &["건드리면 안 되는 일", "-p", "1"]);
+    let work = work_script(&s, "echo 했다");
+
+    // 일 명령을 못 돌린다.
+    let out = agent(s.path(), &s.path().join("없는-일.sh"));
+    assert_eq!(out.status.code(), Some(2), "못 도는 일 명령을 집기 전에 안 걸렀다\n{}", text(&out));
+    assert!(text(&out).contains("실행할 수 없다"), "{}", text(&out));
+
+    // 일의 출력을 받아 둘 자리가 없다.
+    let out = agent_cmd(s.path(), &work, Path::new(BIN)).env("TMPDIR", s.path().join("없는-자리")).output().unwrap();
+    assert_eq!(out.status.code(), Some(2), "쓸 수 없는 TMPDIR 을 집기 전에 안 걸렀다\n{}", text(&out));
+
+    assert!(line_of(s.path(), &id).contains("\"status\":\"todo\""), "채비가 안 됐는데 일을 집었다");
+    assert!(worked(&s).is_empty(), "일이 돌았다");
+}
+
+/// **일이 스스로 정한 것을 덮지 않는다.** 일이 `defer` 하거나 `review` 로 옮기고 0 으로 끝나면
+/// 그 판단이 남아야 한다 — 안 하기로 한 것을 `done` 으로 옮기지 않는다(AGENTS.md). 첫 칸으로
+/// 되돌린 줄이 `ready` 에 다시 서면 같은 일을 끝없이 도는 대신 멈춘다.
+#[cfg(unix)]
+#[test]
+fn the_bash_agent_example_keeps_what_the_work_command_decided() {
+    let s = init("agent-decides");
+    let epic = ok(s.path(), &["epic", "add", "접을 에픽", "-q"]).trim().to_string();
+    // **묶음을 미룬 것도 센다.** 멤버의 `deferred_at` 은 비어 있고 `shelved_by` 만 그 에픽을 댄다.
+    let member = add(s.path(), &["에픽 멤버", "-p", "0", "-e", &epic]);
+    let shelved = add(s.path(), &["미룰 일", "-p", "1"]);
+    let reviewed = add(s.path(), &["리뷰로 갈 일", "-p", "2"]);
+    let returned = add(s.path(), &["되돌릴 일", "-p", "3"]);
+    let work = work_script(
+        &s,
+        &format!(
+            "case \"$2\" in\n  에픽*) \"$MOAI\" defer {epic} -m 접자 >/dev/null ;;\n  \
+             미룰*) \"$MOAI\" defer \"$1\" -m 지금-아님 >/dev/null ;;\n  \
+             리뷰*) \"$MOAI\" mv \"$1\" review >/dev/null ;;\n  \
+             되돌릴*) \"$MOAI\" mv \"$1\" todo >/dev/null ;;\nesac\necho 했다"
+        ),
+    );
+
+    let out = agent(s.path(), &work);
+    assert_eq!(out.status.code(), Some(1), "되돌린 줄이 또 나왔는데 안 멈췄다\n{}", text(&out));
+    assert_eq!(
+        worked(&s),
+        [member.as_str(), shelved.as_str(), reviewed.as_str(), returned.as_str()],
+        "차례대로 한 번씩 돌지 않았다\n{}",
+        text(&out)
+    );
+    let line = line_of(s.path(), &shelved);
+    assert!(line.contains("\"status\":\"in_progress\"") && line.contains("\"deferred_at\""), "미룬 일을 닫았다 — {line}");
+    assert!(line_of(s.path(), &member).contains("\"status\":\"in_progress\""), "미룬 에픽의 멤버를 닫았다");
+    assert!(line_of(s.path(), &reviewed).contains("\"status\":\"review\""), "리뷰로 보낸 일을 닫았다");
+    assert!(line_of(s.path(), &returned).contains("\"status\":\"todo\""), "되돌린 일을 닫았다");
+}
+
+/// **`.moai` 밖에서는 멈춘다.** 거기서 `ready --json` 은 등록한 프로젝트마다의 한눈 보기
+/// (`{"projects":…}`)를 내는데, 그걸 빈 큐로 읽으면 할 일이 쌓여 있는데 "집을 일이 없다" 로
+/// 조용히 0 을 낸다. 이 시험이 없으면 그 검사를 지워도 나머지 넷이 다 푸르다.
+#[cfg(unix)]
+#[test]
+fn the_bash_agent_example_refuses_to_run_outside_a_repo() {
+    let s = init("agent-outside");
+    let id = add(s.path(), &["등록한 곳의 일", "-p", "1"]);
+    let home = Scratch::new("agent-outside-home");
+    let config = registry(&home, &[s.path()]);
+    let outside = dir_in(&home, "밖");
+    let work = work_script(&s, "echo 했다");
+    // **정말 밖인지부터 본다.** 임시 디렉터리가 어느 `.moai` 밑이면(TMPDIR 을 저장소 안에 둔
+    // 기계) 루프가 그 저장소의 진짜 일을 집어 닫는다 — 그때는 집기 전에 여기서 떨어져야 한다.
+    let probe = moai(&outside, &["ready", "--json"]);
+    assert!(!probe.status.success(), "여기는 어느 저장소 안이다 — 예제를 돌리면 그 저장소를 건드린다\n{}", text(&probe));
+
+    let out = agent_cmd(&outside, &work, Path::new(BIN)).env("MOAI_CONFIG", &config).output().unwrap();
+    assert_eq!(out.status.code(), Some(2), "밖에서 2 로 안 멈췄다\n{}", text(&out));
+    assert!(text(&out).contains("안에서 돌린다"), "{}", text(&out));
+
+    // 등록한 프로젝트가 없으면 `ready` 가 한눈 보기 대신 아예 거절한다(비영 종료). 흔한 쪽은
+    // 이쪽이다 — 그때도 같은 말과 같은 코드로 멈춰야 "일이 실패했다"(1)로 읽히지 않는다.
+    let bare = agent_cmd(&outside, &work, Path::new(BIN)).output().unwrap();
+    assert_eq!(bare.status.code(), Some(2), "등록한 것이 없는 밖에서 2 로 안 멈췄다\n{}", text(&bare));
+    assert!(text(&bare).contains("안에서 돌린다"), "{}", text(&bare));
+
+    assert!(worked(&s).is_empty(), "밖에서 일을 했다");
+    assert!(line_of(s.path(), &id).contains("\"status\":\"todo\""), "밖에서 등록한 프로젝트의 일을 집었다");
+}
+
+/// **일이 띄워 두고 간 자식이 루프를 잡지 않는다.** 출력을 파이프로 받으면 `$(…)` 는 그 파이프를
+/// 물려받은 자식이 죽을 때까지 기다린다 — dev 서버를 띄우고 0 으로 끝난 일이 노트도 없이 멈춘다.
+#[cfg(unix)]
+#[test]
+fn the_bash_agent_example_does_not_wait_for_a_child_the_job_left_running() {
+    let s = init("agent-daemon");
+    let id = add(s.path(), &["서버 띄우는 일", "-p", "1"]);
+    let work = work_script(&s, "sleep 30 &\necho \"띄웠다: $1\"");
+
+    let started = std::time::Instant::now();
+    let out = agent(s.path(), &work);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(started.elapsed() < std::time::Duration::from_secs(20), "띄워 둔 자식을 기다렸다");
+    assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "닫지 않았다\n{}", text(&out));
+    assert!(ok(s.path(), &["show", &id]).contains("띄웠다"), "노트가 안 남았다");
 }
