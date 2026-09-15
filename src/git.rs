@@ -26,10 +26,15 @@ pub enum Error {
 /// 그래서 git 훅이나 딸린 워크트리의 `rebase -x` 가 내보낸 `GIT_DIR` 은 `-C root` 를 이긴다. `root` 가 그
 /// 훅이 도는 워크트리의 꼭대기면 같은 저장소라 답이 같지만, 옆 워크트리·다른 저장소·하위 디렉터리의
 /// 트래커를 가리키면 엉뚱한 가지·저장소·꼭대기를 읽는다(리뷰 moai-v9ai.q6f 가 짚었다).
+///
+/// **출력은 UTF-8 로 달라고 한다.** 표준 출력 전체를 UTF-8 로 읽으므로, `i18n.logOutputEncoding` 을
+/// cp949 같은 것으로 둔 사람에게는 한글 제목 한 줄이 [`Error::NotUtf8`] 이 되어 — ASCII 제목까지 같이 —
+/// `show` 의 커밋 칸이 통째로 말없이 빈다.
 pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
     let out = command()
         .arg("-C")
         .arg(root)
+        .args(["-c", "i18n.logOutputEncoding=UTF-8"])
         .args(args)
         .output()
         .map_err(Error::Spawn)?;
@@ -219,6 +224,8 @@ mod tests {
         git(&["commit", "-q", "--allow-empty", "-m", "feat: 고친다 (moai-aaaa)"]);
         git(&["commit", "-q", "--allow-empty", "-m", "chore: 딴 일\n\nmoai-aaaa 를 곁에 봤다"]);
         git(&["commit", "-q", "--allow-empty", "-m", "fix: 리뷰 (moai-aaaa.b1c)"]);
+        // 로그를 딴 인코딩으로 달라는 사람의 설정이 있어도 제목을 읽는다 — `run` 이 UTF-8 로 달라고 한다.
+        git(&["config", "i18n.logOutputEncoding", "EUC-KR"]);
 
         let got = commits_of(&dir, &["moai-aaaa", "moai-aaaa.b1c"], None).unwrap();
         let subjects = |id: &str| got[id].iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
