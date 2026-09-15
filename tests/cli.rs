@@ -146,6 +146,9 @@ fn init_creates_exactly_three_files() {
     assert!(attrs.contains("journal.jsonl  text eol=lf merge=union"), "{attrs}");
     // 스냅샷에 union 을 걸면 같은 id 를 가진 줄이 둘 생긴다 — 데이터 손상이다.
     assert!(!attrs.contains("issues.jsonl   text eol=lf merge"), "{attrs}");
+    // **까닭도 같이 심는다.** 이 주석이 왜 `issues.jsonl` 에 union 을 걸면 안 되는지 적은 유일한
+    // 자리다 — 빼면 새 저장소가 그 까닭 없이 서고, 다음 사람이 union 을 다시 건다.
+    assert!(attrs.contains("# 스냅샷에는 merge=union 을 쓰지 않는다"), "규칙만 심고 까닭을 뺐다\n{attrs}");
 }
 
 /// 도구가 자라면 AGENTS.md 블록은 반드시 낡는다. 다시 쓸 길이 없으면 새
@@ -2334,6 +2337,91 @@ fn init_never_overwrites_an_agents_md_it_cannot_read() {
 
     ok(s.path(), &["init", "argos", "--no-agents"]);
     assert_eq!(std::fs::read(&md).unwrap(), mine);
+}
+
+/// **못 쓰는 AGENTS.md 도 건너뛰고 나머지를 심는다**(moai-780n, 2026-09-15 사용자 결정). 읽기
+/// 전용 파일 하나로 `?` 에 끊기던 때는 `.moai/` 와 `.gitattributes` 는 이미 선 채 접두어도 딸린
+/// 파일 안내도 못 찍고 exit 1 이었다 — 같은 실행이 만든 안내가 통째로 삼켜졌다. **못 읽는 것과
+/// 다르다**: 그쪽은 아무것도 심기 전에 멈춰 남의 산문을 지키지만, 여기는 못 쓰는 것뿐이라 잃을
+/// 산문이 없다. 쓸 수 있게 고치고 다시 부르면 그때 블록이 선다.
+#[cfg(unix)]
+#[test]
+fn init_finishes_even_when_agents_md_cannot_be_written() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("agentsro");
+    let md = s.path().join("AGENTS.md");
+    let mine = "# 우리 규약\n\n손으로 쓴 것.\n";
+    std::fs::write(&md, mine).unwrap();
+    std::fs::set_permissions(&md, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().append(true).open(&md).is_ok() {
+        return; // root 는 권한을 안 본다
+    }
+
+    let out = moai(s.path(), &["init", "argos"]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), mine, "못 쓰는 AGENTS.md 가 바뀌었다");
+    assert!(said.contains("AGENTS.md") && said.contains("못 썼다"), "{said}");
+    // **같은 실행이 만든 나머지 말이 삼켜지지 않는다** — 접두어도, 딸린 파일도 그대로 선다.
+    assert!(said.contains("argos"), "접두어를 안 찍었다 — {said}");
+    assert!(s.path().join(".moai/issues.jsonl").exists() && s.path().join(".gitattributes").exists(), "{said}");
+    let js = ok(s.path(), &["init", "--json"]);
+    assert!(js.contains("\"AGENTS.md\":{\"kind\":\"unwritable\"") && js.contains("\"agents\":false"), "{js}");
+
+    // 쓸 수 있게 고치면 그때 블록이 선다 — 산문은 그대로 위에 남는다.
+    std::fs::set_permissions(&md, std::fs::Permissions::from_mode(0o644)).unwrap();
+    ok(s.path(), &["init"]);
+    let now = std::fs::read_to_string(&md).unwrap();
+    assert!(now.starts_with(mine) && now.contains("moai:begin"), "{now}");
+}
+
+/// **빠진 딸린 파일 규칙을 `status` 알림과 `init --check` 가 비춘다**(moai-2f99, 2026-09-15 사용자
+/// 결정). `init` 이 한 번 말하고 마는 자리라, 못 써서 건너뛴 저장소는 `/.claude/worktrees/` 없이
+/// 얼마든지 오래 간다 — 그러면 `git add -A` 가 옆 워크트리를 통째로 담는다(moai-mxtb 가 그 줄을
+/// 넣은 까닭). **경고가 아니라 알림이다**: 종료 코드도 "드러난 문제 없다" 도 그대로다.
+#[test]
+fn a_missing_dotfile_rule_shows_in_status_and_check() {
+    let s = init("dotgap");
+    let ignore = s.path().join(".gitignore");
+    // moai 가 넣은 줄 중 하나만 지운다 — 사람이 손으로 지웠거나, 못 써서 건너뛴 자리다.
+    let kept: String = std::fs::read_to_string(&ignore).unwrap().lines().filter(|l| !l.contains("worktrees")).map(|l| format!("{l}\n")).collect();
+    std::fs::write(&ignore, &kept).unwrap();
+
+    let out = moai(s.path(), &["status"]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(said.contains("+ .gitignore") && said.contains("worktrees"), "{said}");
+    // **고칠 명령까지 낸다** — 다른 알림과 같은 자리에 같은 모양으로. 없으면 무엇이 잘못됐다는
+    // 말만 남고 어떻게 고치는지는 아무 데도 없다.
+    assert!(said.contains("→ `moai init`"), "고칠 명령을 안 냈다 — {said}");
+    assert!(said.contains("드러난 문제 없다"), "알림이 문제로 섰다 — {said}");
+    let js = ok(s.path(), &["status", "--json"]);
+    let notices = &js[js.find("\"notices\"").expect("notices 가 없다")..];
+    assert!(notices.contains("\"kind\":\"gitignore_rules\""), "알림 자리에 없다 — {js}");
+
+    let check = ok(s.path(), &["init", "--check"]);
+    assert!(check.contains(".gitignore") && check.contains("worktrees"), "{check}");
+    let cjs = ok(s.path(), &["init", "--check", "--json"]);
+    assert!(cjs.contains("\"missing\":{\".gitignore\":[\"/.claude/worktrees/\"]}"), "{cjs}");
+
+    // **없는 파일은 통째로 빠진 것이다** — `git add -A` 가 옆 워크트리를 담는 위험이 가장 큰
+    // 자리라 입을 다물면 안 된다. 못 읽는 파일과 갈린다: 그쪽은 무엇이 들었는지 모른다.
+    std::fs::remove_file(&ignore).unwrap();
+    let gone = ok(s.path(), &["status"]);
+    assert!(gone.contains(".gitignore") && gone.contains("worktrees"), "없는 .gitignore 를 안 비췄다 — {gone}");
+    // 못 읽는 파일은 말하지 않는다 — `init` 이 안 건드리니 여기서 말하면 그 알림이 영영 안 걷힌다.
+    std::fs::write(&ignore, [0xb0, 0xa1, b'\n']).unwrap();
+    let bad = ok(s.path(), &["status"]);
+    assert!(!bad.contains(".gitignore"), "못 읽는 파일을 빠졌다고 했다 — {bad}");
+    assert!(!ok(s.path(), &["init", "--check", "--json"]).contains("\"missing\":"), "못 읽는 파일을 빠졌다고 했다");
+
+    // 다시 심으면 사라진다.
+    std::fs::write(&ignore, &kept).unwrap();
+    ok(s.path(), &["init"]);
+    let after = ok(s.path(), &["status"]);
+    assert!(!after.contains(".gitignore"), "{after}");
+    // `"missing"` 만 찾으면 `{"agents":"missing"}` 이 걸린다 — 키로 찾는다.
+    assert!(!ok(s.path(), &["init", "--check", "--json"]).contains("\"missing\":"), "채웠는데 아직 빠졌다고 한다");
 }
 
 /// **`status` 는 낡은 AGENTS.md 블록을 알림(`notices`)으로 비춘다**(moai-mj45). 경고가 아니다 —
