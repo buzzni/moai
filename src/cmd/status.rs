@@ -159,7 +159,9 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     // **못 읽은 워크트리는 여기서도 센다**(리뷰 moai-p3bs.op2) — 밖에서는 `gather`
                     // 가 겹쳐 보지 않으면 옆 스냅샷을 아예 안 열어 `trouble` 이 비고, 그러면 죽은
                     // 세션과 못 읽는 워크트리가 함께 있는 저장소가 "드러난 문제 없다" 로 선다.
-                    blind: blind.len(),
+                    // 목록으로 넘긴다 — `trouble` 이 이미 낸 것을 두 번 세지 않는 자와 `--json` 이
+                    // 그 둘을 다 여기서 읽는다(`view::projects_status`, 아래 `Said`).
+                    blind,
                 }
             })
         })
@@ -172,6 +174,13 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             picked: Vec<super::Row<'a>>,
             #[serde(skip_serializing_if = "<[String]>::is_empty")]
             trouble: &'a [String],
+            /// **못 읽은 워크트리는 기계에게도 댄다** — 안쪽 `status --json` 과 같은 키·같은 모양
+            /// (리뷰 moai-ya06). 그런 워크트리가 있으면 자리 판정이 통째로 `모른다` 로 접혀
+            /// `stranded` 가 조용해지는데, 여기 키가 없으면 밖에서 읽는 쪽은 "자리 잃은 일이
+            /// 없다" 와 "못 셌다" 를 못 가른다 — 감독 스킬이 이 목록으로 죽은 세션의 일을 거두므로
+            /// 그 침묵이 곧 일을 영영 안 거두는 것이 된다. 없으면 키를 안 단다.
+            #[serde(skip_serializing_if = "<[report::Workplace]>::is_empty")]
+            unreadable_worktrees: &'a [report::Workplace],
         }
         let entries = projects
             .iter()
@@ -183,6 +192,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     status: &b.status,
                     picked: b.picked.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
                     trouble: &p.trouble,
+                    unreadable_worktrees: &b.blind,
                 }),
             })
             .collect();

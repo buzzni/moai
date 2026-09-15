@@ -612,7 +612,36 @@ fn the_overview_counts_work_with_no_live_worktree() {
     let blind = String::from_utf8(blind.stdout).unwrap();
     let mine = block(&blind, "one");
     assert!(!mine.contains("드러난 문제 없다"), "못 셌는데 문제 없다고 했다\n{blind}");
-    assert!(mine.contains("옆 워크트리 문제"), "못 읽은 워크트리를 안 셌다\n{blind}");
+    assert!(mine.contains("옆 워크트리 문제 1건"), "못 읽은 워크트리를 안 셌다\n{blind}");
+
+    // **겹쳐 보면 `gather` 가 같은 워크트리를 이미 냈다 — 두 번 세지 않는다**(`status` 의
+    // `said_already` 와 같은 자). 겹쳐 세면 깨진 워크트리 하나가 `옆 워크트리 문제 2건` 으로 서서
+    // 보는 쪽이 두 곳이 깨진 줄로 읽는다. **기계도 같은 사실을 안쪽과 같은 키로 받는다** — 없으면
+    // 밖에서 읽는 쪽은 "자리 잃은 일이 없다" 와 "못 셌다" 를 못 가른다.
+    let both = isolated(BIN)
+        .args(["status", "--worktree"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let both = String::from_utf8(both.stdout).unwrap();
+    assert!(block(&both, "one").contains("옆 워크트리 문제 1건"), "한 워크트리를 두 번 셌다\n{both}");
+    let machine = isolated(BIN)
+        .args(["status", "--worktree", "--json"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let machine = String::from_utf8(machine.stdout).unwrap();
+    assert!(
+        machine.contains("\"unreadable_worktrees\":[{\"path\":\".claude/worktrees/agent-x\""),
+        "밖 한눈 보기의 기계 출력이 못 읽은 워크트리를 안 댔다\n{machine}"
+    );
+
     let layer = isolated(BIN)
         .args(["tui", "--json"])
         .current_dir(&out)

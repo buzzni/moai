@@ -645,12 +645,14 @@ fn born_of(dir: &Path) -> Option<String> {
     Some(crate::model::format_rfc3339(secs))
 }
 
-/// 이 트래커가 든 **워크트리의 꼭대기** — [`workplaces`] 의 경로를 여기서 잰다. git 을 띄우지
-/// 않는다. 저장소가 아니면 없다.
+/// 이 트래커가 든 **제** 워크트리의 꼭대기. git 을 띄우지 않는다. 저장소가 아니면 없다.
 ///
 /// 뿌리(`.moai` 가 든 디렉터리)로 재면 안 된다 — 모노레포처럼 `.moai` 가 아래에 있으면 워크트리
 /// 경로가 그 밑에 없어 하나도 안 잘리고, 기계의 절대 경로가 `--json` 으로 그대로 나간다.
-pub fn top_of(root: &Path) -> Option<PathBuf> {
+///
+/// **자리 경로를 이것으로 재지 않는다** — 부르는 쪽이 딸린 워크트리면 옆 워크트리가 하나도 안
+/// 잘린다. 그래서 밖으로는 [`main_top`] 만 낸다(moai-fygk).
+fn top_of(root: &Path) -> Option<PathBuf> {
     git_dirs(root).map(|(top, _)| canonical(top))
 }
 
