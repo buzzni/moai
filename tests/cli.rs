@@ -3654,8 +3654,12 @@ fn a_malformed_git_identity_is_refused_too() {
 /// **시각은 고정한다**(`git_at`). 걷기가 `created_at`(= `MOAI_NOW`) 에서 끊기므로, 커밋을 기계 시계로
 /// 찍으면 시계가 그보다 이른 기계에서 양쪽 다 안 보여 이 시험이 조용히 초록이 된다.
 ///
-/// **심는 것은 `REPO` 무리뿐이다.** `GIT_CONFIG_PARAMETERS`(바깥 `git -c` 가 내보낸다)는 릴리스가 안
-/// 걷어 아직 사람을 이긴다 — 그쪽은 `git_leaks.rs` 의 `TEST` 에 적어 뒀고, 여기서는 안 잰다.
+/// **심는 것은 `REPO` 무리뿐이다** — 그 무리에는 `GIT_CONFIG_PARAMETERS`·`GIT_CONFIG_COUNT` 도 든다
+/// (바깥 `git -c` 가 내보낸다. 2026-09-15 사용자 결정으로 `TEST` 에서 옮겨 왔고, 릴리스도 걷는다).
+/// **주 워크트리의 커밋 훅은 `GIT_DIR` 을 안 주므로 가장 흔한 훅 모양에서는 그것이 유일하게 새는
+/// 길이다** — 그래서 아래 `planted` 는 그 이름에 `.git` 경로가 아니라 **R 의 사람을 실제로 담은**
+/// 설정을 준다. 경로를 주면 git 이 `bogus format` 으로 죽어, 걷기가 무너진 날 이 시험이 "남의 사람을
+/// 적었다" 대신 생 stderr 를 낸다.
 ///
 /// **고치기 전에 빨갰던 것은 쓰는 쪽이다.** 읽는 쪽(커밋 칸)은 옛 `git::output` 이 이미 `GIT_DIR` 무리
 /// 셋을 릴리스에서도 걷고 있어 그때도 초록이었다 — 여기 남긴 까닭은 앞으로의 방벽이다.
@@ -3693,6 +3697,13 @@ fn an_inherited_git_dir_does_not_beat_the_project_we_were_given() {
                 "GIT_SHALLOW_FILE" => path(".git/shallow"),
                 "GIT_GRAFT_FILE" => path(".git/info/grafts"),
                 "GIT_WORK_TREE" | "GIT_PREFIX" | "GIT_CEILING_DIRECTORIES" => path(""),
+                // 설정을 **값으로** 넣는 것. 바깥 `git -c user.name=… commit` 이 훅에 내보내는 꼴
+                // 그대로다 — `-C <P>` 를 대도 이것은 이기므로, 걷기가 무너지면 P 의 저널에 R 의
+                // 이름이 적힌다. 경로를 주면 git 이 형식 오류로 죽어 그 경계를 못 잰다.
+                "GIT_CONFIG_PARAMETERS" => "'user.name=남의 이름' 'user.email=theirs@example.com'".into(),
+                // 짝이 되는 `GIT_CONFIG_KEY_0`·`GIT_CONFIG_VALUE_0` 은 번호가 붙어 목록에 못 적는다 —
+                // 이 세는 값 하나를 걷는 것이 그것들을 통째로 무르는 길이라, 여기서는 그 꼴만 맞춘다.
+                "GIT_CONFIG_COUNT" => "0".into(),
                 // 불리언으로 읽는 것들.
                 "GIT_IMPLICIT_WORK_TREE" | "GIT_NO_REPLACE_OBJECTS" | "GIT_DISCOVERY_ACROSS_FILESYSTEM" => "1".into(),
                 "GIT_NAMESPACE" => "theirs".into(),
