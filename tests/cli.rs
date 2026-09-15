@@ -8037,7 +8037,8 @@ fn a_from_column_that_does_not_exist_is_refused() {
 fn a_from_column_the_config_forgot_still_works_while_a_row_sits_there() {
     let s = init("mv-from-renamed");
     let id = add(s.path(), &["옛 칸에 선 일"]);
-    ok(s.path(), &["mv", &id, "in_progress"]);
+    let other = add(s.path(), &["옛 칸에 선 둘째"]);
+    ok(s.path(), &["mv", &id, &other, "in_progress"]);
     let cfg = s.path().join(".moai/config.toml");
     let renamed = std::fs::read_to_string(&cfg).unwrap().replace("in_progress", "doing");
     std::fs::write(&cfg, renamed).unwrap();
@@ -8047,11 +8048,40 @@ fn a_from_column_the_config_forgot_still_works_while_a_row_sits_there() {
     ok(s.path(), &["mv", &id, "done", "--from", "in_progress"]);
     assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "옛 칸에 선 줄을 못 집었다");
 
+    // **미루기도 같은 자다.** 미룬 줄은 옛 칸에 그대로 서 있으므로, 쓰기 검사가 칸
+    // 이름을 다시 물으면 `--from` 이 통과시킨 줄을 쓰기가 거절한다 — 검사 둘이 서로
+    // 반대를 말하면 부르는 쪽은 어디를 고칠지 못 고른다(moai-hym7.xvc 가 짚었다).
+    ok(s.path(), &["defer", &other, "-m", "다음에", "--from", "in_progress"]);
+    assert!(line_of(s.path(), &other).contains("\"deferred_at\""), "옛 칸에 선 줄을 못 미뤘다");
+    ok(s.path(), &["defer", &other, "--undo", "--from", "in_progress"]);
+    assert!(!line_of(s.path(), &other).contains("\"deferred_at\""), "옛 칸에 선 줄을 못 도로 집었다");
+    // 칸을 **옮기는** 쓰기는 그대로 엄하다 — 갈 칸이 아는 칸이어야 한다.
+    let out = moai(s.path(), &["mv", &other, "doing"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!moai(s.path(), &["mv", &other, "in_progress"]).status.success(), "모르는 칸으로 옮겼다");
+
     // 아무 줄도 안 선 이름은 그대로 거절한다 — 오타 검사는 살아 있다.
     let out = moai(s.path(), &["mv", &id, "todo", "--from", "in_progress"]);
     assert!(!out.status.success(), "이제 아무도 안 선 옛 칸이 통과했다\n{}", text(&out));
     assert!(String::from_utf8_lossy(&out.stderr).contains("in_progress"), "{}", text(&out));
     assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "거절하면서 옮겼다");
+}
+
+/// **칸 오타는 사람을 못 찾는 것보다 먼저 선다** — `mv` 와 `defer` 가 한 자다.
+/// 뒤로 밀리면 신원 없는 기계(CI·훅)에서 오타가 "누가 하는지 모른다" 로 덮여, 부르는
+/// 쪽이 받는 `code` 가 `bad_status` 가 아니라 `no_actor` 가 된다 — 고칠 곳이 설정인지
+/// 명령인지가 갈리는 자리다. 한쪽만 시험하면 두 벌로 적힌 차례가 갈릴 때 한쪽만 잡힌다.
+#[test]
+fn a_bad_from_column_is_named_before_the_missing_person() {
+    let s = init("from-before-who");
+    let id = add(s.path(), &["일"]);
+    for args in [vec!["mv", &id, "done", "--from", "없는칸"], vec!["defer", &id, "--from", "없는칸"]] {
+        let out = without_user(s.path(), &args);
+        assert!(!out.status.success(), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("없는칸"), "{args:?} 가 칸 대신 사람을 말했다\n{err}");
+        assert!(!err.contains("--user"), "{args:?} 가 사람을 먼저 물었다\n{err}");
+    }
 }
 
 /// **같은 id 를 두 번 적어도 제가 방금 쓴 값과 겨루지 않는다.** `--from` 이 재는 것은
