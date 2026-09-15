@@ -37,6 +37,14 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 안에서 겹쳐 보지 않았으면 빈 목록이 오고, 그러면 `stranded` 가 조용하다.
     let trees = crate::worktree::workplaces(&repo.root, &repo.config, worktree);
     st.warnings.extend(report::stranded(&load.issues, &repo.config, &trees, &now));
+    // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정에서 그 워크트리는 "아무도
+    // 없다" 가 아니라 "모른다" 로 빠지므로(`report::Place::Unknown`), 말이 없으면 경고가 조용한
+    // 까닭을 알 길이 없다. 옆 워크트리의 문제로 세는 자리는 `gather` 와 같다 — 종료 코드는
+    // 안 바꾸고, 보드가 "문제 없다" 로 이 말을 뒤집지 않게만 한다.
+    let trouble = trouble + trees.iter().filter(|t| t.unknown).count();
+    for t in trees.iter().filter(|t| t.unknown) {
+        eprintln!("옆 워크트리의 스냅샷을 못 읽었다 — {}", t.path.display());
+    }
     // **낡은 AGENTS.md 블록은 알림이다**(moai-mj45, 2026-09-14 사용자 결정). 언제 서고 무엇을
     // 대는지는 `agents_notice` 가 정하고, 훅의 보드가 같은 것을 싣는다. 한눈 보기(`.moai` 밖)는
     // 남의 저장소라 안 본다.

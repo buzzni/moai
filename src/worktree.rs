@@ -447,7 +447,7 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
         if *me || !*linked {
             continue;
         }
-        let (open, later) = holds(&disk, tree, mine, cfg);
+        let (open, later) = holds(&disk, tree, mine, cfg).unwrap_or_default();
         out.extend(open);
         out.extend(later);
     }
@@ -456,10 +456,13 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
 
 /// 딸린 워크트리 하나의 스냅샷이 쥔 줄 — [`held_elsewhere`] 의 한 워크트리 몫. (벌여 놓인 줄,
 /// 여기보다 늦게 만진 줄). 앞의 것에는 갈라질 때 물려받은 줄도 들고, 뒤의 것은 그 워크트리가
-/// 실제로 만진 흔적이다 — [`workplaces`] 가 둘을 따로 싣는다. 못 읽으면 비어 있다.
-fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) -> (BTreeSet<String>, BTreeSet<String>) {
+/// 실제로 만진 흔적이다 — [`workplaces`] 가 둘을 따로 싣는다.
+///
+/// **못 읽으면 `None` 이다**(moai-lt7h) — 빈 답과 가른다. 머지 충돌 중이거나 `moai init` 전에
+/// 갈라진 워크트리를 "아무도 거기서 일 안 한다" 로 읽으면, 거기서 도는 일이 통째로 자리를 잃는다.
+fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) -> Option<(BTreeSet<String>, BTreeSet<String>)> {
     let path = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
-    let Ok(Some(side)) = crate::store::read_snapshot(&path) else { return Default::default() };
+    let Ok(Some(side)) = crate::store::read_snapshot(&path) else { return None };
     let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
     let open = crate::report::wip(&side.issues, cfg).into_iter().map(|i| i.id.clone()).collect();
     let later = side
@@ -473,7 +476,7 @@ fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) 
         })
         .map(|i| i.id.clone())
         .collect();
-    (open, later)
+    Some((open, later))
 }
 
 /// 살아 있는 **딸린** 워크트리마다 자리 하나(moai-ir8q) — 판정은 `report::places`·`report::stranded`.
@@ -492,6 +495,11 @@ fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) 
 /// 제 파일에 대면 그 파일은 갈라질 때의 main 이라 **그 뒤 main 이 옮긴 줄이 전부 "옆이 만졌다"**
 /// 로 서서 한 줄이 워크트리 여럿에 동시에 선다. main 에서 부르면 같은 파일이라 답이 안 바뀐다.
 /// 못 읽으면 옆의 줄이 다 만진 흔적이 된다 — 자리를 넉넉히 대는 쪽으로 틀린다.
+///
+/// **옆 스냅샷은 셀 일이 있을 때만 판다**(moai-7igy, 사용자 결정). 집은 줄이 하나도 없으면 아예
+/// 안 열고, 있으면 **이름으로 먼저 가른 뒤** 그래도 자리를 못 찾은 줄이 남을 때만 연다. `moai
+/// status` 는 세션마다·훅마다 도는데 이 저장소에서 워크트리 일곱이면 스냅샷 여덟 벌을 다시 파
+/// 40→95ms(따뜻)·138→458ms(참)이었다. 이름이 답을 내는 흔한 경우에는 한 벌로 돌아온다.
 pub fn workplaces(root: &Path, cfg: &crate::config::Config, worktree: bool) -> Vec<crate::report::Workplace> {
     if !worktree && is_linked(root) {
         return Vec::new();
@@ -508,23 +516,36 @@ pub fn workplaces(root: &Path, cfg: &crate::config::Config, worktree: bool) -> V
         Ok(Some(load)) => &load.issues,
         _ => &[],
     };
-    disk.all
-        .iter()
-        .filter(|(_, linked, _)| *linked)
-        .map(|(tree, ..)| {
-            // **제 워크트리도 남과 같은 자로 잰다.** 한때 비워 두었더니, 이름이 id 가 아닌
-            // 워크트리(에이전트 격리)가 제가 하고 있는 일을 제 화면에서 "자리 없다" 로 댔다.
-            let (holds, touched) = holds(&disk, tree, mine, cfg);
-            crate::report::Workplace {
-                path: tree.path.clone(),
-                branch: tree.label.clone(),
-                names: names([tree]),
-                holds,
-                touched,
-                born: disk.admin.get(&tree.path).and_then(|dir| born_of(dir)),
+    let bare = |tree: &Tree| crate::report::Workplace {
+        path: tree.path.clone(),
+        branch: tree.label.clone(),
+        names: names([tree]),
+        holds: BTreeSet::new(),
+        touched: BTreeSet::new(),
+        born: disk.admin.get(&tree.path).and_then(|dir| born_of(dir)),
+        unknown: false,
+    };
+    let mut out: Vec<crate::report::Workplace> =
+        disk.all.iter().filter(|(_, linked, _)| *linked).map(|(tree, ..)| bare(tree)).collect();
+    // 이름만으로 자리가 다 잡히면(또는 집은 줄이 없으면) 스냅샷을 한 벌도 안 판다.
+    if crate::report::places(mine, cfg, &out, &crate::model::now())
+        .values()
+        .all(|p| !matches!(p, crate::report::Place::Lost | crate::report::Place::Fresh))
+    {
+        return out;
+    }
+    for (place, (tree, ..)) in out.iter_mut().zip(disk.all.iter().filter(|(_, linked, _)| *linked)) {
+        // **제 워크트리도 남과 같은 자로 잰다.** 한때 비워 두었더니, 이름이 id 가 아닌
+        // 워크트리(에이전트 격리)가 제가 하고 있는 일을 제 화면에서 "자리 없다" 로 댔다.
+        match holds(&disk, tree, mine, cfg) {
+            Some((holds, touched)) => {
+                place.holds = holds;
+                place.touched = touched;
             }
-        })
-        .collect()
+            None => place.unknown = true,
+        }
+    }
+    out
 }
 
 /// 그 워크트리가 뜬 때(RFC3339) — **git 이 파일 안에 적어 둔 시각**이다. `worktrees/<이름>/logs/HEAD`

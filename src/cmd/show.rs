@@ -312,7 +312,7 @@ fn one(
     // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 스냅샷을 다
     // 풀 까닭이 없다. 언제 재는지(딸린 워크트리에서는 겹쳐 볼 때만)는 `worktree::workplaces` 가
     // 한 곳에서 정한다 — 명령마다 두었더니 `status` 와 여기가 서로 다른 답을 냈다(moai-6opu.p65).
-    let trees: Vec<report::Workplace> = if report::wip(all, &repo.config).iter().any(|i| i.id == issue.id) {
+    let trees: Vec<report::Workplace> = if report::placeable(all, &repo.config, issue) {
         // 경로는 **워크트리의 꼭대기**에서 잰다: 규약의 자리(`.claude/worktrees/<id>`)가 그대로
         // 읽힌다. 뿌리(`.moai` 가 든 곳)로 재면 `.moai` 를 아래에 둔 저장소에서 하나도 안 잘려
         // 기계의 절대 경로가 그대로 나간다. 워크트리 경로는 이미 푼 것이라(`worktree::canonical`)
@@ -333,7 +333,7 @@ fn one(
         Vec::new()
     };
     let places = (!trees.is_empty())
-        .then(|| report::places(all, &repo.config, &trees).remove(&issue.id))
+        .then(|| report::places(all, &repo.config, &trees, &model::now()).remove(&issue.id))
         .flatten();
     let seen = view::Seen {
         roots: report::deferred_roots(all),
@@ -390,7 +390,10 @@ fn one(
         }
         // 사람 화면의 `자리` 줄과 같은 답. 줄을 안 세우는 자리에서는 키도 안 단다.
         if let Some(p) = &seen.places {
-            extra.push(("workplaces", serde_json::to_string(p).map_err(|e| Fail::new(e.to_string()))?));
+            // **자리와 그 뜻을 따로 낸다** — 목록이 비어 있는 까닭이 셋이다(방금 집었다·못 읽은
+            // 워크트리가 있다·자리가 없다). 사람 화면이 가르는 것을 받는 쪽도 가를 수 있어야 한다.
+            extra.push(("workplaces", serde_json::to_string(p.at()).map_err(|e| Fail::new(e.to_string()))?));
+            extra.push(("place", serde_json::to_string(p.word()).map_err(|e| Fail::new(e.to_string()))?));
         }
         // 트래커 커밋까지 **전부** 낸다 — `tracker` 표시가 붙으니 거를지는 받는 쪽이 정한다.
         // 사람 화면만 뺀다(`view::commits`). 커밋이 없으면 키를 안 단다.

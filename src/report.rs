@@ -402,6 +402,48 @@ pub struct Workplace {
     /// 줄만** 고르는 데 쓴다([`places`]). 못 읽었으면 `None` 이고, 그러면 `holds` 를 다 믿는다.
     #[serde(skip)]
     pub born: Option<String>,
+    /// 그 워크트리의 스냅샷을 **열어 보려 했는데 못 읽었다**(moai-lt7h) — 머지 충돌 중이거나,
+    /// `moai init` 전에 갈라졌거나, 권한이 없다. `holds`·`touched` 가 비어 있는 것이 "아무도 거기서
+    /// 일 안 한다" 가 아니라 "모른다" 라는 뜻이다. 안 열어 봤으면 거짓이다 — 열어 볼 까닭이 없으면
+    /// 안 연다([`crate::worktree::workplaces`]).
+    #[serde(skip)]
+    pub unknown: bool,
+}
+
+/// 집은 줄 하나가 **어디에 서 있는가**(moai-xn9n·moai-lt7h). `status` 의 경고와 `show` 의 `자리`
+/// 줄이 같은 답을 받는다 — 한때 앞의 것에만 한 시간 틈이 있어, 방금 집은 줄을 `show` 가 버려진
+/// 것처럼 냈다.
+#[derive(Debug, Clone)]
+pub enum Place<'a> {
+    /// 여기서 돈다. 빈 목록으로는 오지 않는다.
+    At(Vec<&'a Workplace>),
+    /// 자리는 안 보이지만 **방금 집었다** — 규약은 집기를 커밋한 뒤 워크트리를 띄운다.
+    Fresh,
+    /// 자리는 안 보이는데 **못 읽은 워크트리가 있다.** 거기일 수 있다.
+    Unknown,
+    /// 집었는데 일하는 워크트리가 없다. [`stranded`] 가 세는 것이 이것뿐이다.
+    Lost,
+}
+
+impl Place<'_> {
+    /// 기계가 읽는 한 낱말 — `--json` 의 `place`.
+    pub fn word(&self) -> &'static str {
+        match self {
+            Place::At(_) => "at",
+            Place::Fresh => "fresh",
+            Place::Unknown => "unknown",
+            Place::Lost => "lost",
+        }
+    }
+}
+
+impl<'a> Place<'a> {
+    pub fn at(&self) -> &[&'a Workplace] {
+        match self {
+            Place::At(v) => v,
+            _ => &[],
+        }
+    }
 }
 
 /// 경로를 **글자로** 낸다 ([`Workplace::path`]) — serde 의 `Path` 는 UTF-8 이 아닌 경로에서
@@ -421,14 +463,14 @@ fn lossy_path<S: serde::Serializer>(p: &std::path::Path, s: S) -> Result<S::Ok, 
 /// 워크트리는 main 에서 뜨므로 그 스냅샷에는 갈라질 때 main 에 벌여 놓였던 줄이 전부 있다 —
 /// 그것을 세면 세션이 죽어 자리를 잃은 줄도 그 뒤에 뜬 워크트리 아무 데나 "자리" 로 잡혀,
 /// 새 워크트리가 하나 뜨는 순간 `stranded` 에서 사라진다.
-pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> BTreeMap<String, Vec<&'a Workplace>> {
+pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &str) -> BTreeMap<String, Place<'a>> {
     // **같은 id 의 줄이 둘이면 한 번만 센다** — 뒷줄이 선다(`Load::get` 과 같은 자). 줄마다 세면
     // 한 워크트리가 한 id 에 두 번 서서, 받는 쪽이 "두 곳에서 돌고 있다" 로 읽는다(moai-ddtg 에서
     // `Warning::new` 가 같은 까닭으로 id 를 한 번씩만 담는다).
     let picked: BTreeMap<&str, &Issue> = wip(issues, cfg).into_iter().map(|i| (i.id.as_str(), i)).collect();
-    let mut out: BTreeMap<String, Vec<&Workplace>> = picked.keys().map(|id| ((*id).to_string(), Vec::new())).collect();
+    let mut found: BTreeMap<&str, Vec<&Workplace>> = picked.keys().map(|id| (*id, Vec::new())).collect();
     if trees.is_empty() || picked.is_empty() {
-        return out;
+        return settle(&picked, found, trees, now, &BTreeMap::new(), &BTreeMap::new());
     }
     // **소속 지도는 한 번만 짓는다**(`claims`) — 워크트리마다 바뀌는 것은 이름뿐이다.
     let (epics, stones) = (groups(issues), milestones(issues));
@@ -453,12 +495,100 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> BTr
         };
         for (&id, &i) in &picked {
             let here = named(i) || t.touched.contains(id) || (nameless && t.holds.contains(id) && fresh(i));
-            if here && let Some(at) = out.get_mut(id) {
+            if here && let Some(at) = found.get_mut(id) {
                 at.push(t);
             }
         }
     }
+    settle(&picked, found, trees, now, &epics, &stones)
+}
+
+/// 찾은 자리를 [`Place`] 로 굳히고 **묶음의 자리를 멤버에서 굴려 올린다**(moai-0h8m).
+///
+/// 워크트리 이름은 규약상 **에픽 id** 라(`CLAUDE.md` "워크트리"), 이어받는 세션이 `moai show <에픽>`
+/// 을 먼저 읽는다 — 거기 자리가 없으면 어디로 들어갈지 못 정한다. 묶음 자체는 집히지 않으므로
+/// (`wip` 은 일만 낸다) 멤버의 답을 합친다: 하나라도 서 있으면 거기고, 아니면 모름·방금·잃음 차례다.
+fn settle<'a>(
+    picked: &BTreeMap<&str, &Issue>,
+    found: BTreeMap<&str, Vec<&'a Workplace>>,
+    trees: &'a [Workplace],
+    now: &str,
+    epics: &BTreeMap<&str, &str>,
+    stones: &BTreeMap<&str, &str>,
+) -> BTreeMap<String, Place<'a>> {
+    let blind = trees.iter().any(|t| t.unknown);
+    let now_s = crate::model::parse_rfc3339(now);
+    // **틈은 한 곳에서 잰다**(moai-xn9n). 시각을 못 읽으면 틈을 줄 까닭도 못 재니 안 준다.
+    let just_picked = |i: &Issue| match (now_s, crate::model::parse_rfc3339(&i.status_since)) {
+        (Some(n), Some(s)) => n - s < STRANDED_GRACE_SECS,
+        _ => false,
+    };
+    let mut out: BTreeMap<String, Place> = found
+        .into_iter()
+        .map(|(id, at)| {
+            let place = match (at.is_empty(), blind, just_picked(picked[id])) {
+                (false, ..) => Place::At(at),
+                (true, _, true) => Place::Fresh,
+                (true, true, _) => Place::Unknown,
+                (true, false, false) => Place::Lost,
+            };
+            (id.to_string(), place)
+        })
+        .collect();
+    if out.is_empty() {
+        return out;
+    }
+    // **묶음마다 멤버를 다시 훑지 않는다.** `group_members` 는 부를 때마다 소속 지도를 새로 짓는데,
+    // 에픽이 쉰이면 그 값이 `status` 한 번에 쉰 벌이다 — 이미 지어 둔 지도(`epics`·`stones`)를
+    // 거꾸로 타 집은 줄에서 묶음으로 올라간다. 에픽의 마일스톤까지 두 층이다.
+    let mut roll: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for id in picked.keys() {
+        let epic = epics.get(id).copied();
+        for g in [epic, stones.get(id).copied(), epic.and_then(|e| stones.get(e).copied())].into_iter().flatten() {
+            roll.entry(g).or_default().push(id);
+        }
+    }
+    let rolled: Vec<(String, Place)> = roll
+        .into_iter()
+        .filter_map(|(g, members)| {
+            let mut mine: Vec<&Place> = members.iter().filter_map(|m| out.get(*m)).collect();
+            mine.sort_by_key(|p| match p {
+                Place::At(_) => 0,
+                Place::Unknown => 1,
+                Place::Fresh => 2,
+                Place::Lost => 3,
+            });
+            let best = mine.first()?;
+            let rolled = match best {
+                // 여러 멤버가 서로 다른 워크트리에 서 있으면 그 전부를 낸다 — 한 곳만 내면
+                // 이어받는 세션이 나머지를 못 본다.
+                Place::At(_) => {
+                    let mut at: Vec<&Workplace> = mine.iter().flat_map(|p| p.at().iter().copied()).collect();
+                    at.dedup_by_key(|t| t.path.clone());
+                    Place::At(at)
+                }
+                other => (*other).clone(),
+            };
+            Some((g.to_string(), rolled))
+        })
+        .collect();
+    out.extend(rolled);
     out
+}
+
+/// 이 줄에 **자리를 물을 수 있는가** — 집은 일이거나, 집은 멤버를 둔 묶음이다([`places`]).
+///
+/// 부르는 쪽(`cmd/show`)이 워크트리를 읽기 전에 이것으로 판다. 안 집은 줄 하나를 펼치는 흔한 길이
+/// 옆 스냅샷을 다 푸는 값을 치르지 않게 하는 문인데, 그 판정은 이슈의 뜻이라 여기 둔다.
+pub fn placeable(issues: &[Issue], cfg: &Config, i: &Issue) -> bool {
+    let picked = wip(issues, cfg);
+    if picked.iter().any(|w| w.id == i.id) {
+        return true;
+    }
+    is_group(i) && {
+        let mine: BTreeSet<&str> = group_members(issues, i).iter().map(|m| m.id.as_str()).collect();
+        picked.iter().any(|w| mine.contains(w.id.as_str()))
+    }
 }
 
 /// 방금 집은 줄에 워크트리가 뜰 틈. 규약은 main 에서 집기를 커밋한 **뒤** 워크트리를 띄우므로,
@@ -479,20 +609,15 @@ pub fn stranded(issues: &[Issue], cfg: &Config, trees: &[Workplace], now: &str) 
     if trees.is_empty() {
         return None;
     }
-    let at = places(issues, cfg, trees);
+    let at = places(issues, cfg, trees, now);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    let now_s = crate::model::parse_rfc3339(now);
+    // **`Lost` 만 센다.** 방금 집은 것(`Fresh`)과 못 읽은 워크트리가 있어 모르는 것(`Unknown`)은
+    // 자리 없음이 아니다 — 둘을 세면 산 일을 남에게 다시 주는 쪽으로 틀린다.
     let lost: Vec<&Issue> = at
         .iter()
-        .filter(|(_, v)| v.is_empty())
+        .filter(|(_, p)| matches!(p, Place::Lost))
         .filter_map(|(id, _)| by_id.get(id.as_str()).copied())
-        .filter(|i| {
-            match (now_s, crate::model::parse_rfc3339(&i.status_since)) {
-                (Some(n), Some(s)) => n - s >= STRANDED_GRACE_SECS,
-                // 시각을 못 읽으면 틈을 줄 까닭도 못 잰다 — 비춘다.
-                _ => true,
-            }
-        })
+        .filter(|i| is_work(i))
         .collect();
     // **나이는 안 싣는다**(`Warning::ages`). 저것은 **날**로 재는데 이 판정의 문턱은 한 시간이라,
     // 하루가 안 된 것에 다 `0일` 이 붙어 "방금 집었다" 로 읽힌다. 안 실으면 보는 쪽이 칸 나이를
@@ -2477,8 +2602,12 @@ mod tests {
             holds: holds.iter().map(|s| s.to_string()).collect(),
             touched: BTreeSet::new(),
             born: None,
+            unknown: false,
         }
     }
+
+    /// 시험의 시계 — 여기 줄들은 `make` 가 9월 1일에 만들므로 어느 것도 "방금 집은" 것이 아니다.
+    const LATER: &str = "2026-09-15T12:00:00Z";
 
     /// **집은 줄의 자리는 워크트리에서 파생한다**(moai-ir8q) — 이름이 그 줄·조상·에픽을 가리키거나,
     /// 옆 스냅샷이 그 줄을 쥐었으면 그 워크트리다. 안 집은 줄은 자리를 안 묻는다.
@@ -2497,13 +2626,17 @@ mod tests {
             tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &["argos-0003"]),
             tree("/r/.claude/worktrees/argos-0005", "worktree-argos-0005", &[]),
         ];
-        let at = places(&issues, &cfg(), &trees);
-        let branches = |id: &str| at.get(id).map(|v| v.iter().map(|w| w.branch.as_str()).collect::<Vec<_>>());
+        let at = places(&issues, &cfg(), &trees, LATER);
+        let branches = |id: &str| at.get(id).map(|p| p.at().iter().map(|w| w.branch.as_str()).collect::<Vec<_>>());
         assert_eq!(branches("argos-0002"), Some(vec!["worktree-argos-0001"]), "에픽 이름으로 못 찾았다");
         assert_eq!(branches("argos-0002.a"), Some(vec!["worktree-argos-0001"]), "부모의 에픽으로 못 찾았다");
         assert_eq!(branches("argos-0003"), Some(vec!["worktree-agent-x"]), "옆 스냅샷으로 못 찾았다");
         assert_eq!(branches("argos-0004"), Some(vec![]), "자리 없는 집은 줄은 빈 목록으로 선다");
+        assert!(matches!(at["argos-0004"], Place::Lost), "{:?}", at["argos-0004"]);
         assert_eq!(branches("argos-0005"), None, "안 집은 줄의 자리를 셌다");
+        // **묶음의 자리는 멤버에서 굴려 올린다**(moai-0h8m) — 워크트리 이름이 에픽 id 라 이어받는
+        // 세션이 에픽부터 읽는다.
+        assert_eq!(branches("argos-0001"), Some(vec!["worktree-argos-0001"]), "에픽이 멤버의 자리를 못 냈다");
     }
 
     /// **이름이 id 인 워크트리는 물려받은 벌여 놓인 줄로 자리를 안 댄다.** main 에서 뜬 워크트리의
@@ -2520,10 +2653,10 @@ mod tests {
         let mut named = tree("/r/.claude/worktrees/argos-0002", "worktree-argos-0002", &["argos-0001", "argos-0002", "argos-0003"]);
         named.touched.insert("argos-0003".into());
         let trees = vec![named];
-        let at = places(&issues, &cfg(), &trees);
-        assert_eq!(at["argos-0001"].len(), 0, "물려받은 줄을 이름 있는 워크트리의 자리로 셌다");
-        assert_eq!(at["argos-0002"].len(), 1);
-        assert_eq!(at["argos-0003"].len(), 1, "늦게 만진 줄을 자리로 안 셌다");
+        let at = places(&issues, &cfg(), &trees, LATER);
+        assert_eq!(at["argos-0001"].at().len(), 0, "물려받은 줄을 이름 있는 워크트리의 자리로 셌다");
+        assert_eq!(at["argos-0002"].at().len(), 1);
+        assert_eq!(at["argos-0003"].at().len(), 1, "늦게 만진 줄을 자리로 안 셌다");
     }
 
     /// **이름 없는 워크트리는 뜨기 한 시간 전부터 그 뒤로 움직인 줄을 쥔다**(사용자 결정). 그보다
@@ -2545,14 +2678,14 @@ mod tests {
         let mut agent = tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &["argos-0001", "argos-0002", "argos-0003"]);
         agent.born = Some("2026-09-15T11:00:00Z".into());
         let trees = vec![agent.clone()];
-        let at = places(&issues, &cfg(), &trees);
-        let counts: Vec<usize> = ["argos-0001", "argos-0002", "argos-0003"].iter().map(|id| at[*id].len()).collect();
+        let at = places(&issues, &cfg(), &trees, LATER);
+        let counts: Vec<usize> = ["argos-0001", "argos-0002", "argos-0003"].iter().map(|id| at[*id].at().len()).collect();
         assert_eq!(counts, [0, 1, 1]);
 
         agent.born = None;
         let trees = vec![agent];
-        let at = places(&issues, &cfg(), &trees);
-        assert!(at.values().all(|v| v.len() == 1), "뜬 시각을 모르는데 쥔 줄을 버렸다");
+        let at = places(&issues, &cfg(), &trees, LATER);
+        assert!(at.values().all(|p| p.at().len() == 1), "뜬 시각을 모르는데 쥔 줄을 버렸다");
     }
 
     /// **자리 없는 집은 줄을 경고로 비춘다**(moai-4370). 워크트리를 하나도 안 쓰는 저장소는 조용하고,
