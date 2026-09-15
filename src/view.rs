@@ -1245,7 +1245,9 @@ pub fn body_lines(body: &str) -> Vec<String> {
     // **줄로 펴는 일은 `markdown` 이 한다.** 글머리·들여쓰기 같은 결정이
     // 표면마다 갈라지면 CLI 와 탐색기가 같은 본문을 다르게 그린다.
     // 여기가 할 일은 뜻을 색으로 옮기는 것뿐이다.
-    crate::markdown::layout(&blocks, BODY)
+    // 셸은 폭을 넘긴 줄을 화면에서만 접는다 — 긴 인라인 코드를 끊지 않아야
+    // 복사한 명령이 온전하다(moai-krh7).
+    crate::markdown::layout(&blocks, BODY, crate::markdown::Overflow::Keep)
         .iter()
         .map(|line| {
             // 빈 줄은 빈 줄이다. 들여쓰기를 얹으면 줄 끝에 뜻 없는 공백이
@@ -1764,17 +1766,31 @@ mod tests {
         assert!(out.contains("`0.2`"), "색을 끄니 코드가 그냥 글이 됐다\n{out}");
     }
 
-    /// 그린 줄은 폭을 넘지 않는다. 한글이 두 칸이라 글자 수로 세면 걸린다.
+    /// 그린 줄은 폭을 넘지 않는다 — **폭을 넘기는 인라인 코드 한 덩이만 빼고**
+    /// (moai-krh7). 한글이 두 칸이라 글자 수로 세면 걸린다.
     ///
     /// 상한은 `BODY` 에 들여쓰기(`PAD`)를 더한 값이다. 여유를 더 주면 그만큼
-    /// 넘치는 줄을 통과시킨다.
+    /// 넘치는 줄을 통과시킨다. 셸은 넘긴 줄을 화면에서만 접어 복사하면 온전하니
+    /// 코드는 끊지 않는데(`Overflow::Keep`), **넘길 수 있는 것이 그것뿐이라는
+    /// 것까지 여기서 잰다** — 안 그러면 산문이 넘쳐도 이 시험이 지나간다.
     #[test]
     fn drawn_lines_stay_within_the_width() {
-        let body = "아주 긴 한글 문장이 폭을 넘도록 이어지고 또 이어지고 계속 이어진다. \
-                    여기에 `코드` 와 **굵게** 도 섞여 있어서 접는 자리가 조각 가운데에 걸린다.\n";
+        let long = "moai add \"아주 긴 제목을 가진 이슈\" -t bug -e moai-4aex --milestone v0.1 -b -";
+        let body = format!(
+            "아주 긴 한글 문장이 폭을 넘도록 이어지고 또 이어지고 계속 이어진다. \
+             여기에 `코드` 와 **굵게** 도 섞여 있어서 접는 자리가 조각 가운데에 걸린다. \
+             폭을 넘기는 것은 `{long}` 한 덩이뿐이다.\n"
+        );
         let max = BODY + width(PAD);
-        for l in plain(&body_lines(body)) {
-            assert!(width(&l) <= max, "{l:?} ({}칸)", width(&l));
+        let drawn = plain(&body_lines(&body));
+        // **넘기는 줄이 실제로 나야 아래 고리가 뜻이 있다.** 코드를 끊기 시작하면
+        // 넘는 줄이 하나도 없어져 이 시험이 빈 채로 지나간다.
+        assert!(drawn.iter().any(|l| l.contains(long)), "긴 명령이 갈렸다 — {drawn:?}");
+        for l in &drawn {
+            if width(l) <= max {
+                continue;
+            }
+            assert!(l.contains(long), "코드도 아닌 줄이 폭을 넘었다 — {l:?} ({}칸)", width(l));
         }
     }
 

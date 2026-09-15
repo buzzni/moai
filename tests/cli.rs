@@ -2891,6 +2891,32 @@ fn the_body_is_drawn_but_the_raw_text_stays_reachable() {
     );
 }
 
+/// **본문 속 명령은 `moai show` 를 지나도 한 줄로 남는다**(moai-syp8·moai-xtu8).
+///
+/// 본문은 폭 76에 맞춰 접히는데, 인라인 코드 안의 공백까지 접는 자리로 보면 화면에 찍힌
+/// 명령이 두 줄로 갈린다. 그 줄을 복사해 돌린 셸은 잘린 명령을 본다 — 화면이 아니라
+/// **복사한 뒤**가 무너지는 자리라, 여기서 보는 것은 그려진 출력의 한 줄이다.
+///
+/// 폭보다 긴 코드도 끊지 않는다(사용자 결정, moai-krh7). 줄이 오른쪽으로 삐져나가는 것은
+/// 터미널이 화면에서만 접고, 복사하면 온전하다.
+#[test]
+fn a_command_in_a_body_survives_being_drawn() {
+    let s = init("mdcode");
+    // 76칸 안에 드는 명령과, 혼자서 76칸을 넘는 명령을 함께 싣는다.
+    let short = "moai note moai-4aex -b - <<'NOTE'";
+    let long = "moai add \"아주 긴 제목을 가진 이슈를 한 번에 만든다\" -t bug -e moai-4aex --milestone v0.1 -b -";
+    let body = format!("보기 하나는 `{short}` 이고, 폭을 넘기는 것은 `{long}` 이다. 둘 다 복사해 돈다.");
+    let id = add(s.path(), &["제목", "-b", &body]);
+
+    let drawn = ok(s.path(), &["show", &id]);
+    for cmd in [short, long] {
+        assert!(
+            drawn.lines().any(|l| l.contains(cmd)),
+            "그려진 본문에서 명령이 갈렸다 — {cmd}\n{drawn}"
+        );
+    }
+}
+
 /// **되뽑은 계획은 도로 들어간다.** `show <에픽> --as-plan` 의 출력을 그대로
 /// `add --from` 에 넣으면 같은 모양의 에픽이 선다 — 이 짝이 틀로 쓰는 계약이다.
 #[test]
