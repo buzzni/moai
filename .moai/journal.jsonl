@@ -2945,3 +2945,5 @@
 {"ts":"2026-09-15T09:50:06Z","id":"moai-ymnu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"review"}
 {"ts":"2026-09-15T09:50:07Z","id":"moai-6bc0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"멤버 셋 다 워크트리 worktree-moai-6bc0 에 커밋됐다 — 5934469(3fnf)·b4d6c1f(nxt4)·c98a912(ymnu), 시험 784·270 통과(-j 1). 다음: 멤버 리뷰 셋(3fnf.26o high, nxt4.rgg medium, ymnu.fo1 medium)을 차례로 돌린 뒤 에픽 끝 xhigh."}
 {"ts":"2026-09-15T09:50:48Z","id":"moai-3fnf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 워크트리 worktree-moai-6bc0(커밋 5934469)에 /code-review high --fix 가 도는 중. 결과 반영 → 리뷰 moai-3fnf.26o 원문·판단 → 이어서 nxt4.rgg(medium)·ymnu.fo1(medium) → 에픽 끝 xhigh → main 머지."}
+{"ts":"2026-09-15T09:52:57Z","id":"moai-educ.van","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-educ (init 파일 보호·말·해셔)"}
+{"ts":"2026-09-15T09:53:06Z","id":"moai-educ.van","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
