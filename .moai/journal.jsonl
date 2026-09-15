@@ -3133,3 +3133,11 @@
 {"ts":"2026-09-15T12:25:49Z","id":"moai-xtu8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"dd71a30 로 main 병합"}
 {"ts":"2026-09-15T12:25:49Z","id":"moai-nnda","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"dd71a30 로 main 병합"}
 {"ts":"2026-09-15T12:26:40Z","id":"moai-n2fz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일꾼 절차: 워크트리 안에서 트래커를 고치지 않는다 — 리뷰 서브에이전트가 부른 moai idea add 가 워크트리 쪽 .moai 를 바꿔 병합에서 스냅샷이 충돌했다 (moai-krh7 에서 겪음)"}
+{"ts":"2026-09-15T12:27:29Z","id":"moai-3sn1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"워크트리 안에서는 트래커를 고치지 않는다"}
+{"ts":"2026-09-15T12:27:29Z","id":"moai-97ga","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일꾼 지시에 트래커는 루트에서만 고친다는 줄"}
+{"ts":"2026-09-15T12:27:29Z","id":"moai-70ip","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"플러그인 판이 내려가도 되는지 — claude 의 갱신 경로를 확인한다"}
+{"ts":"2026-09-15T12:27:29Z","id":"moai-3sn1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-n2fz 에서 펼쳤다 — 일꾼 절차: 워크트리 안에서 트래커를 고치지 않는다 — 리뷰 서브에이전트가 부른 moai idea add 가 워크트리 쪽 .moai 를 바꿔 병합에서 스냅샷이 충돌했다 (moai-krh7 에서 겪음)"}
+{"ts":"2026-09-15T12:27:29Z","id":"moai-n2fz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3sn1 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-09-15T12:27:39Z","id":"moai-apn6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"에픽 moai-3sn1 의 멤버 moai-70ip 로 들어갔다. 거기서 claude 의 갱신 경로부터 확인한다"}
+{"ts":"2026-09-15T12:27:39Z","id":"moai-apn6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-70ip 으로 옮겨 세웠다 (에픽 moai-3sn1)"}
+{"ts":"2026-09-15T12:27:39Z","id":"moai-97ga","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
