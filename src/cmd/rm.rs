@@ -12,7 +12,7 @@ use crate::style::{self, paint};
 pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref())?;
+    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
 
     let (gone, missing, dangling): (Vec<Issue>, Vec<String>, Vec<String>) =
         repo.with_write(|issues, _, _| {

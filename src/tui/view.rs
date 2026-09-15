@@ -78,6 +78,11 @@ pub enum Field {
     /// 묶음의 `끝난/일` 셈.
     Tally,
     Tags,
+    /// 목록 맨 위의 **열 이름 줄**(moai-3fnf). 값이 아니라 줄 하나지만 켜고 끄는 자리가 열과 같아
+    /// 여기 든다 — `SPC c` 밑에 서고 설정에도 열과 같은 자리에 적힌다.
+    Names,
+    /// 제목 앞의 `⎇ <가지>` — 그 이슈를 이름에 단 옆 가지(moai-nxt4).
+    Branch,
 }
 
 impl Field {
@@ -90,6 +95,10 @@ impl Field {
             Field::Updated => "수정",
             Field::Tally => "셈",
             Field::Tags => "태그",
+            Field::Names => "열 이름",
+            // `SPC t w`(`keys::Toggle::Worktree`)가 이미 "워크트리" 다 — 같은 낱말을 두 줄에
+            // 세우면 메뉴에서 어느 쪽이 겹쳐 보기고 어느 쪽이 줄의 표시인지 못 가른다.
+            Field::Branch => "옆 가지",
         }
     }
 
@@ -100,16 +109,25 @@ impl Field {
             Field::Created | Field::Updated => Some(0),
             Field::Assignee => Some(1),
             Field::Tags => Some(2),
-            Field::Id | Field::Priority | Field::Tally => None,
+            Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => None,
         }
     }
 
-    fn bit(self) -> u8 {
-        1 << self as u8
+    fn bit(self) -> u16 {
+        1 << self as u16
     }
 
-    pub const ALL: [Field; 7] =
-        [Field::Id, Field::Priority, Field::Assignee, Field::Created, Field::Updated, Field::Tally, Field::Tags];
+    pub const ALL: [Field; 9] = [
+        Field::Id,
+        Field::Priority,
+        Field::Assignee,
+        Field::Created,
+        Field::Updated,
+        Field::Tally,
+        Field::Tags,
+        Field::Names,
+        Field::Branch,
+    ];
 
     /// 설정 파일에 적는 이름(moai-2bzp). 화면의 낱말([`Field::word`])과 따로 둔다 — 낱말을 다듬은 날
     /// 이미 적힌 설정이 안 읽히면 그건 다듬기가 아니라 마이그레이션이다.
@@ -122,27 +140,70 @@ impl Field {
             Field::Updated => "updated",
             Field::Tally => "tally",
             Field::Tags => "tags",
+            Field::Names => "names",
+            Field::Branch => "branch",
         }
     }
+
+    /// `fields_known` 이 없던 때(moai-3fnf 앞)의 어휘 — 그때 이미 있던 열이다. 그 설정에서 안 적힌
+    /// 이 열들은 **사람이 끈 것**이고, 여기 없는 열(열 이름 줄·⎇)은 그 바이너리가 몰랐던 것이라
+    /// 기본값으로 선다.
+    pub const BEFORE_KNOWN: [Field; 7] = [
+        Field::Id,
+        Field::Priority,
+        Field::Assignee,
+        Field::Created,
+        Field::Updated,
+        Field::Tally,
+        Field::Tags,
+    ];
 
     pub fn named(name: &str) -> Option<Field> {
         Field::ALL.into_iter().find(|f| f.name() == name)
     }
 }
 
-/// 켜 둔 열. 복사로 다닌다 — 키 표의 켜짐(`Ctx`)이 이것을 그대로 든다.
+/// 켜 둔 열. 복사로 다닌다 — 키 표의 켜짐(`Ctx`)이 이것을 그대로 든다. **`u16` 이다**(moai-3fnf) —
+/// 여덟 열에서 꽉 차는 `u8` 로 두면 아홉째 열을 더하는 날 `Field::Id` 와 비트가 겹친다(moai-7pd5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Fields(u8);
+pub struct Fields(u16);
 
-/// **처음에는 원래 목록 줄 그대로다** — id·우선순위·셈. 열 토글이 생긴 날 화면이 바뀌면 안 된다.
+/// **처음에는 원래 목록 줄에 열 이름을 얹은 것**이다 — id·우선순위·셈·열 이름. 열 이름이 기본 켬인 것은
+/// 사용자 결정이고(moai-3fnf), 줄이 적은 창에서는 `SPC c h` 로 끈다.
 impl Default for Fields {
     fn default() -> Fields {
-        Fields(Field::Id.bit() | Field::Priority.bit() | Field::Tally.bit())
+        Fields(Field::Id.bit() | Field::Priority.bit() | Field::Tally.bit() | Field::Names.bit() | Field::Branch.bit())
     }
 }
 
+/// **열 하나가 비트 하나다.** 열이 [`Fields`] 의 폭을 넘기는 날 `1 << n` 이 감싸 첫 열과 비트가
+/// 겹치고, release 에서는 그 감싸기가 조용하다 — 화면에서 id 를 끄면 새 열이 같이 꺼진다.
+/// 그날 **컴파일이 멈추게** 못 박는다(moai-ggqf, moai-7pd5 가 적어 둔 것).
+const _: () = assert!(
+    widest_bit() < u16::BITS,
+    "열이 Fields 의 비트 폭을 넘었다 — Fields 와 Field::bit 를 더 넓은 정수로 옮겨라"
+);
+
+/// [`Field::ALL`] 가운데 가장 큰 비트 자리. `Field::bit` 이 쓰는 그 자리다.
+const fn widest_bit() -> u32 {
+    let mut widest = 0;
+    let mut at = 0;
+    while at < Field::ALL.len() {
+        let bit = Field::ALL[at] as u32;
+        if bit > widest {
+            widest = bit;
+        }
+        at += 1;
+    }
+    widest
+}
+
 impl Fields {
-    /// 아무 열도 안 켠 것 — 설정에서 읽은 이름을 하나씩 켤 때 쓴다.
+    /// 아무 열도 안 켠 것 — **비트 가드가 쓴다**(`every_column_owns_a_bit_and_stands_in_all`).
+    /// 설정을 입히는 길은 처음값에서 시작하므로(moai-3fnf 리뷰, `App::apply_look`) 화면 코드에는
+    /// 이 자리가 없다. 시험에만 서므로 `#[cfg(test)]` — 안 그러면 release 빌드마다 죽은 코드
+    /// 경고가 한 줄 선다.
+    #[cfg(test)]
     pub fn none() -> Fields {
         Fields(0)
     }
@@ -189,6 +250,36 @@ mod tests {
         f.set(Field::Id, false);
         f.set(Field::Id, false);
         assert!(!f.shows(Field::Id) && f.shows(Field::Priority), "끈 것을 끄며 켰거나 옆 열을 건드렸다");
+    }
+
+    /// **열마다 제 비트를 쓴다**(moai-ggqf) — 둘이 같은 비트를 쓰면 하나를 끄며 다른 하나가 꺼진다.
+    /// `Field::ALL` 에 빠진 열도 여기서 걸린다: 빠진 열은 설정에 저장되지도, 폭 가드에 세이지도 않는다.
+    #[test]
+    fn every_column_owns_a_bit_and_stands_in_all() {
+        let mut seen = Fields::none();
+        for f in Field::ALL {
+            assert!(!seen.shows(f), "{} 가 앞 열과 같은 비트를 쓴다", f.name());
+            seen.set(f, true);
+        }
+        for f in Field::ALL {
+            assert!(seen.shows(f), "{} 를 켰는데 꺼졌다 — 비트가 겹친다", f.name());
+        }
+        // 갈래를 빠짐없이 적는 match — 새 열을 더하면 여기서 멈추고, ALL 에도 넣으라고 댄다.
+        for f in Field::ALL {
+            let in_all = match f {
+                Field::Id
+                | Field::Priority
+                | Field::Assignee
+                | Field::Created
+                | Field::Updated
+                | Field::Tally
+                | Field::Tags
+                | Field::Names
+                | Field::Branch => true,
+            };
+            assert!(in_all);
+        }
+        assert_eq!(Field::ALL.len(), 9, "열을 더했으면 ALL 과 이 시험을 함께 고친다");
     }
 
     /// 이 프로젝트의 칸 — 시험마다 같은 설정이다.

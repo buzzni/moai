@@ -254,6 +254,11 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     // 읽기 **전에** 잰다. 뒤에 재면 읽고 재는 사이의 쓰기를 놓치고, 놓친
     // 것은 영영 안 돌아온다. 먼저 재면 최악이 헛 갱신 하나다.
     let stamp = stamp_of(repo);
+    // **겹쳐 보지 않아도 HEAD 는 지켜본다**(moai-a4i0). 겹쳐 보면 `gather` 가 이미 잰다. 안 재면
+    // `SPC t w` 로 끈 동안 커밋을 해도 스냅샷이 안 바뀌어 커밋 칸이 낡은 채 선다. `gather` 에
+    // 두지 않는 것은 CLI 명령마다 git 을 한 번 더 띄우게 되어서다 — 지켜보는 것은 탐색기뿐이다.
+    // **이것도 읽기 전에 잰다** — 읽는 동안 떨어진 커밋을 뒤에 재면 놓친다(위와 같은 까닭).
+    let heads = if worktree { Vec::new() } else { crate::worktree::heads(&repo.root) };
     let g = crate::worktree::gather(repo, worktree)?;
     // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
     let unreadable: Vec<Option<String>> = g
@@ -265,12 +270,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     let issues = g.load.issues;
     let now = crate::model::now();
     let mut watched = g.watched;
-    // **겹쳐 보지 않아도 HEAD 는 지켜본다**(moai-a4i0). 겹쳐 보면 `gather` 가 이미 잰다. 안 재면
-    // `SPC t w` 로 끈 동안 커밋을 해도 스냅샷이 안 바뀌어 커밋 칸이 낡은 채 선다. `gather` 에
-    // 두지 않는 것은 CLI 명령마다 git 을 한 번 더 띄우게 되어서다 — 지켜보는 것은 탐색기뿐이다.
-    if !worktree {
-        watched.extend(crate::worktree::heads(&repo.root));
-    }
+    watched.extend(heads);
     Ok(Fresh {
         root: repo.root.clone(),
         stamp,
@@ -359,7 +359,7 @@ pub struct App {
     /// 누가 쓰는가를 푸는 길. 진짜 길은 `model::actor` 다. **시험이 갈아 끼운다** —
     /// 그쪽은 `MOAI_ACTOR` 와 이 기계의 git 설정을 읽어, 갈아 끼우지 않으면
     /// "누군지 모를 때" 를 시험한 결과가 돌리는 사람의 설정에 달린다.
-    identify: fn(Option<&str>) -> crate::fail::R<crate::model::Actor>,
+    identify: fn(Option<&str>, &std::path::Path) -> crate::fail::R<crate::model::Actor>,
     /// 헤더가 적을 사람을 푼 것 — 열쇠는 [`Self::user`] 와 **그 프로젝트의 `naming`** 이다.
     /// **프레임마다 풀지 않는다**: `model::actor` 는 `git config` 를 프로세스로 **두 번**
     /// 띄우는데, 그리는 쪽에서 부르면 묵혀 둔 화면도 초당 셋(`TICK`), 도는 것이 있으면 초당
@@ -371,7 +371,7 @@ pub struct App {
     /// 프로젝트 설정이 정한다 — 열쇠에서 빼면 `naming = "email"` 인 프로젝트로 건너뛴 뒤에도
     /// 헤더가 떠난 프로젝트의 `이름 (메일)` 을 그대로 이고 있다. 설정은 화면만 바꾸는 것이라,
     /// 화면이 안 바뀌면 그 설정은 없는 것과 같다.
-    header_user: Option<(Option<String>, crate::config::Naming, String)>,
+    header_user: Option<(Option<String>, crate::config::Naming, std::path::PathBuf, String)>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
     /// 상세의 굴린 자리. **왼쪽 커서를 옮기면 첫 줄로 돌아간다** — 다른
@@ -382,11 +382,13 @@ pub struct App {
     pub raw: bool,
     /// 마지막으로 읽은 파일의 (고친 때, 길이).
     stamp: Stamp,
-    /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과 그 표식(`worktree::gather`
-    /// 가 읽기 **전에** 잰 것). 꺼져 있으면 비었다.
+    /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과, 어느 때든 지켜보는 HEAD·가지
+    /// 파일·`packed-refs` 의 표식(읽기 **전에** 잰 것 — `worktree::gather`·[`prepare`]).
     watched: Vec<(std::path::PathBuf, Stamp)>,
-    /// 이슈에 닿은 커밋 표([`Commits`]). 다시 읽은 뒤마다 새로 짓는다 — 커밋이 새로 서면
-    /// 표식(`watched`·HEAD)이 바뀌어 다시 읽기가 돈다. 새 표가 올 때까지는 옛 표를 든다.
+    /// 이슈에 닿은 커밋 표([`Commits`]). **표식(`watched`)이 움직였을 때만 새로 짓는다** —
+    /// 거기 HEAD·가지 파일이 들어 있어 그것이 곧 "커밋이 섰는가" 다. 다시 읽을 때마다
+    /// 지으면 스냅샷 쓰기 하나(`mv` 한 번, 옆 세션의 쓰기 하나)마다 뿌리마다 이력을 통째로
+    /// 걷는다 — 커밋이 안 선 것을 알면서 걷는 일이다. 새 표가 올 때까지는 옛 표를 든다.
     commits: Commits,
     /// 표만 짓는 스레드([`App::follow_commits`]). **한 번에 하나만 돈다** — 도는 동안 다시 읽기가
     /// 또 들어오면 `commits_due` 만 세우고, 이것이 끝나면 곧바로 하나를 더 띄운다.
@@ -425,8 +427,10 @@ pub struct App {
     shown: Vec<bool>,
     /// 목록 차례와 그 방향(moai-55cp). 기본은 우선순위 차례다.
     pub order: keys::Sorting,
-    /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)다.
+    /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)에 열 이름 줄이 얹힌다.
     pub fields: view::Fields,
+    /// 오른쪽 상세 칸이 보이나(moai-ymnu). 숨기면 목록이 폭을 다 쓴다. 설정에 남는다.
+    pub detail_open: bool,
     /// 설정에 적혀 있다고 이 세션이 아는 보기 — 읽은 뒤와 적은 뒤의 [`App::look_now`](moai-2kyl 단계 리뷰).
     /// **적을 때 이것과 지금의 차이만 옮긴다**(`Doc::merge_look`). 화면이 든 보기를 통째로 적으면 그사이
     /// 옆 탐색기·손·새 바이너리가 적은 것을 토글 한 번이 되돌린다. 새 바이너리가 적은 모르는 낱말을 들고
@@ -603,6 +607,7 @@ impl App {
             shown: Vec::new(),
             order: Default::default(),
             fields: Default::default(),
+            detail_open: true,
             saved: Default::default(),
             remembered,
             list: Scroll::default(),
@@ -730,7 +735,7 @@ impl App {
             self.write_failed = true;
             return None;
         };
-        let by = (self.identify)(self.user.as_deref());
+        let by = (self.identify)(self.user.as_deref(), &repo.root);
         if let Err(e) = &by
             && e.code == crate::fail::code::NO_ACTOR
         {
@@ -801,14 +806,30 @@ impl App {
     /// 여기서 [`Mode::Ask`] 를 세우면 설정 없는 기계에서 탐색기가 묻는 칸으로 열린다.
     pub fn told_user(&mut self) -> &str {
         // 열쇠는 **견주기만** 한다 — 프레임마다 도는 자리라 짓지 않는다.
-        let fresh = self.header_user.as_ref().is_none_or(|(u, n, _)| *u != self.user || *n != self.cfg.naming);
+        let at = self.user_root();
+        let fresh = self
+            .header_user
+            .as_ref()
+            .is_none_or(|(u, n, r, _)| *u != self.user || *n != self.cfg.naming || r.as_path() != at);
         if fresh {
-            let said = (self.identify)(self.user.as_deref())
-                .map(|a| crate::model::label(&a.name, Some(&a.email), self.cfg.naming))
+            let (at, naming) = (at.to_path_buf(), self.cfg.naming);
+            let said = (self.identify)(self.user.as_deref(), &at)
+                .map(|a| crate::model::label(&a.name, Some(&a.email), naming))
                 .unwrap_or_else(|_| "—".into());
-            self.header_user = Some((self.user.clone(), self.cfg.naming, said));
+            self.header_user = Some((self.user.clone(), naming, at, said));
         }
-        self.header_user.as_ref().map_or("—", |(_, _, said)| said.as_str())
+        self.header_user.as_ref().map_or("—", |(_, _, _, said)| said.as_str())
+    }
+
+    /// 사람을 물을 자리 — 선 프로젝트의 뿌리다(moai-d3sy). 층에 서 있으면 아직 프로젝트가
+    /// 없으니 띄운 자리에서 읽고, 그것도 없으면 지금 자리다. **뿌리가 바뀌면 사람도 다시
+    /// 푼다** — 프로젝트마다 git 설정이 다를 수 있고, 헤더는 지금 선 프로젝트를 말해야 한다.
+    fn user_root(&self) -> &std::path::Path {
+        self.repo
+            .as_ref()
+            .map(|r| r.root.as_path())
+            .or(self.launched_at.as_deref())
+            .unwrap_or(std::path::Path::new("."))
     }
 
     /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
@@ -875,10 +896,11 @@ impl App {
         self.origin = f.origin;
         self.elsewhere = f.elsewhere;
         self.unfound = f.unfound;
+        // 표는 **표식이 움직였을 때만** 다음 걸음에 스레드가 짓는다(`App::commits`·
+        // `follow_commits`). 도는 것이 있으면 그 답은 받되 이 읽기보다 낡았을 수 있어
+        // 끝나는 대로 하나를 더 띄운다.
+        self.commits_due |= self.watched != f.watched;
         self.watched = f.watched;
-        // 표는 다음 걸음에 스레드가 짓는다(`follow_commits`). 도는 것이 있으면 그 답은 받되
-        // 이 읽기보다 낡았을 수 있어 끝나는 대로 하나를 더 띄운다.
-        self.commits_due = true;
         self.warnings = f.warnings;
         self.take(f.issues, f.index, f.states, f.now);
     }
@@ -1155,7 +1177,10 @@ impl App {
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
                 Ok(table) => {
                     self.commits_job = None;
-                    self.commits = table;
+                    // **뿌리마다 덮는다.** `commit_tables` 는 이번에 git 이 답을 안 준 뿌리를
+                    // 통째로 빼고 오므로(`.ok()`), 받은 것을 그대로 넣으면 한 번 어긋난 걸음에
+                    // 옛 표가 사라져 커밋 칸이 말없이 빈다 — 다음 표는 표식이 움직여야 온다.
+                    self.commits.extend(table);
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     if let Some((_, handle)) = self.commits_job.take()
@@ -1163,6 +1188,9 @@ impl App {
                     {
                         std::panic::resume_unwind(payload);
                     }
+                    // 패닉 없이 사라졌다. 다시 읽기는 여기서 다음 걸음에 또 띄우므로
+                    // (`follow` 의 `moved`) 표도 같게 다시 세운다 — 안 세우면 그 세션 내내 언다.
+                    self.commits_due = true;
                 }
             }
         }
@@ -1338,6 +1366,17 @@ impl App {
     pub fn adopt_look(&mut self, look: &crate::user_config::Look, mut problems: Vec<String>) {
         self.apply_look(look, &mut problems);
         self.saved = self.look_now();
+        // **열만은 파일이 적은 것을 그대로 든다**(moai-6bc0 단계 리뷰). 다른 키는 입힌 결과가 곧 파일의
+        // 값이지만 `fields` 는 아니다 — 파일이 몰랐던 열은 기본값으로 서므로 켜진 채인데 파일에는 없다.
+        // 그것을 "이미 적혀 있다" 로 들면 그 열 이름은 영영 파일에 안 적히고, `fields_known` 이 적히는
+        // 순간 다음 실행이 그 빈자리를 "사람이 껐다" 로 읽어 켜 둔 열이 꺼진다.
+        //
+        // **모르는 낱말은 걸러 둔다** — 새 바이너리가 적은 낱말까지 base 로 들면 이쪽 토글 한 번이
+        // 그것을 지운다(`merge_words` 가 base 에 있고 new 에 없는 낱말을 뺀다).
+        if let Some(words) = &look.fields {
+            self.saved.fields = Some(words.iter().filter(|w| view::Field::named(w).is_some()).cloned().collect());
+        }
+        self.saved.fields_known = look.fields_known.clone();
         if !problems.is_empty() {
             self.notice = Some(format!("보기 설정 — {}", problems.join(" · ")));
         }
@@ -1380,17 +1419,35 @@ impl App {
             self.order.reversed = r;
         }
         if let Some(words) = &look.fields {
-            let mut fields = view::Fields::none();
+            // **적은 쪽이 알던 열만 그대로 따른다**(사용자 결정 2026-09-15) — `fields` 에 안 적힌 것이
+            // "껐다" 인지 "그 열을 몰랐다" 인지 가르는 것이 `fields_known` 이다. 그 목록에 없는 열은
+            // 여기 기본값으로 선다: 옛 설정을 가진 사람에게도 새 열이 뜨고, 끈 열은 끈 채로 남는다.
+            let mut fields = view::Fields::default();
+            for f in view::Field::ALL {
+                let knew = match &look.fields_known {
+                    Some(known) => known.iter().any(|w| w == f.name()),
+                    // 이 키가 없던 때의 어휘 — 그때 있던 열이면 안 적힌 것이 곧 "껐다" 다.
+                    None => view::Field::BEFORE_KNOWN.contains(&f),
+                };
+                if knew {
+                    fields.set(f, words.iter().any(|w| w == f.name()));
+                }
+            }
             for w in words {
-                match view::Field::named(w) {
-                    Some(f) => fields.set(f, true),
-                    None => problems.push(format!(
+                if view::Field::named(w).is_none() {
+                    problems.push(format!(
                         "`fields` 의 `{w}` 는 모르는 열이다 — {} 중에서",
                         view::Field::ALL.map(view::Field::name).join("·")
-                    )),
+                    ));
                 }
             }
             self.fields = fields;
+        }
+        if let Some(open) = look.detail {
+            self.detail_open = open;
+            if !open {
+                self.focus = Pane::Explorer;
+            }
         }
     }
 
@@ -1402,6 +1459,9 @@ impl App {
             sort: Some(self.order.by.name().to_string()),
             sort_reversed: Some(self.order.reversed),
             fields: Some(view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name().to_string()).collect()),
+            // 이 바이너리가 아는 열 전부 — 다음에 읽는 쪽이 "안 적힌 것" 을 가를 자다.
+            fields_known: Some(view::Field::ALL.into_iter().map(|f| f.name().to_string()).collect()),
+            detail: Some(self.detail_open),
         }
     }
 
@@ -1607,6 +1667,15 @@ impl App {
                 self.fields.toggle(f);
                 self.save_look();
             }
+            // 상세를 숨기면 **포커스를 목록으로 되돌린다** — 안 보이는 칸에 포커스가 남으면
+            // 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다(moai-ymnu).
+            B::Detail => {
+                self.detail_open = !self.detail_open;
+                if !self.detail_open {
+                    self.focus = Pane::Explorer;
+                }
+                self.save_look();
+            }
             B::Raw => {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
@@ -1645,6 +1714,7 @@ impl App {
             deferred_hidden: self.view.hide_deferred,
             sorting: self.order,
             fields: self.fields,
+            detail: self.detail_open,
             next_pane: draw::pane_name(self.focus.next()),
             prev_pane: draw::pane_name(self.focus.prev()),
         }
@@ -2194,6 +2264,58 @@ mod tests {
         assert_eq!(row_ids(&a), ["argos-0001"]);
         a.hit("SPC s a");
         assert_eq!(row_ids(&a).len(), 3, "모두 보이기가 다 안 보인다");
+    }
+
+    /// **옛 설정에도 새 열이 뜬다**(moai-3fnf 리뷰, 사용자 결정) — `fields` 에 안 적힌 것이 "껐다" 인지
+    /// "그 열을 몰랐다" 인지는 `fields_known` 이 가른다. 끈 열은 적히고 나면 끈 채로 남는다.
+    #[test]
+    fn a_column_the_old_config_never_knew_comes_up_on_its_default() {
+        let old = crate::user_config::Look {
+            fields: Some(vec!["id".into(), "priority".into()]),
+            ..crate::user_config::Look::default()
+        };
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&old, Vec::new());
+        assert!(a.fields.shows(view::Field::Names), "옛 설정을 가진 사람에게 열 이름 줄이 안 떴다");
+        assert!(a.fields.shows(view::Field::Branch), "⎇ 도 마찬가지다");
+        assert!(!a.fields.shows(view::Field::Tally), "옛 설정이 끈 열이 되살아났다");
+
+        // 이 바이너리가 적은 설정은 끈 것을 끈 채로 들고 온다.
+        let now = a.look_now();
+        assert_eq!(now.fields_known.as_ref().map(Vec::len), Some(view::Field::ALL.len()));
+        let mut b = App::new(Vec::new(), cfg(), Path::new());
+        b.hit("SPC c h");
+        let off = b.look_now();
+        let mut c = App::new(Vec::new(), cfg(), Path::new());
+        c.adopt_look(&off, Vec::new());
+        assert!(!c.fields.shows(view::Field::Names), "끈 열이 다음 실행에 되살아났다");
+    }
+
+    /// **끈 새 열은 파일을 한 바퀴 돌고도 꺼진 채다**(moai-6bc0 단계 리뷰). `look_now()` 끼리 견주는
+    /// 것만으로는 못 잡는다 — `fields_known` 은 이 바이너리가 아는 열 전부라 세션 내내 같은 값이고,
+    /// 적는 길이 `App::saved` 와의 **차이만** 옮기므로 그 키가 파일에 영영 안 적힐 수 있다. 그러면
+    /// 끈 것(`fields` 에서 빠진 것)을 다음 실행이 "그 열을 몰랐다" 로 읽어 도로 켠다.
+    #[test]
+    fn turning_off_a_new_column_survives_a_trip_through_the_file() {
+        let s = Scratch::new("fields-known");
+        let user = s.0.join("user.toml");
+        // 이 키를 모르던 바이너리가 적어 둔 설정 — `fields_known` 이 없다.
+        std::fs::write(&user, "[tui]\nfields = [\"id\", \"priority\", \"tally\"]\n").unwrap();
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        assert!(a.fields.shows(view::Field::Names), "옛 설정에 새 열이 안 떴다");
+        a.hit("SPC c h");
+        assert!(!a.fields.shows(view::Field::Names));
+
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(text.contains("fields_known"), "끈 것을 가를 자를 안 적었다\n{text}");
+        let mut b = App::new(Vec::new(), cfg(), Path::new());
+        b.user_config = Some(user);
+        b.load_look();
+        assert!(!b.fields.shows(view::Field::Names), "끈 열이 다음 실행에 도로 켜졌다\n{text}");
+        assert!(b.fields.shows(view::Field::Branch), "같이 안 끈 열까지 꺼졌다\n{text}");
+        assert_eq!(b.notice, None, "제가 적은 설정을 읽으며 말이 섰다");
     }
 
     /// **`SPC o` 가 차례를 고르고, 같은 키를 다시 누르면 거꾸로 선다**(moai-55cp). 다른 키로 가면
@@ -3281,12 +3403,8 @@ mod tests {
         let dir = scratch.0.clone();
         let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
         std::fs::write(dir.join(".moai/issues.jsonl"), line(&make("argos-0001", Kind::Epic))).unwrap();
-        let git = |msg: &str| {
-            let out = crate::git::isolated(&dir).args(["commit", "-q", "--allow-empty", "-m", msg]).output().unwrap();
-            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        };
-        let init = crate::git::isolated(&dir).args(["init", "-q"]).output().unwrap();
-        assert!(init.status.success());
+        let git = |msg: &str| crate::git::tests::run_git(&dir, None, &["commit", "-q", "--allow-empty", "-m", msg]);
+        crate::git::tests::run_git(&dir, None, &["init", "-q"]);
         git("feat: 처음 (argos-0001)");
 
         let repo = Repo { root: dir.clone(), config: cfg() };
@@ -3320,10 +3438,13 @@ mod tests {
         gathered(&mut a);
         assert_eq!(subjects(&a), ["fix: 다음 (argos-0001)", "feat: 처음 (argos-0001)"], "커밋이 섰는데 표를 새로 안 가져왔다");
 
-        // 겹쳐 보기를 꺼도(`SPC t w`) HEAD 를 지켜본다.
+        // 겹쳐 보기를 꺼도(`SPC t w`) HEAD 를 지켜본다 — 끈 읽기도 HEAD 표식을 들고 온다.
         a.worktree = false;
         a.reload();
-        assert!(a.gathering_commits() && a.commits_job.is_none(), "루프에서 도는 다시 읽기가 표를 그 자리에서 지었다");
+        assert!(a.commits_job.is_none(), "루프에서 도는 다시 읽기가 표를 그 자리에서 지었다");
+        assert!(a.watched.iter().any(|(p, _)| p.ends_with("HEAD")), "겹쳐 보기를 끄자 HEAD 를 안 지켜본다");
+        // 커밋이 안 섰으니 표도 다시 안 짓는다 — 쓰기 하나마다 이력을 통째로 걷지 않는다.
+        assert!(!a.gathering_commits(), "표식이 그대로인데 표를 다시 지으러 갔다");
         gathered(&mut a);
         std::thread::sleep(std::time::Duration::from_millis(10));
         git("fix: 끈 뒤 (argos-0001)");
@@ -3790,6 +3911,7 @@ mod tests {
         a.hit("SPC o u");
         a.hit("SPC c a");
         a.hit("SPC c i");
+        a.hit("SPC t d");
         let text = std::fs::read_to_string(&user).expect("보기가 설정에 안 적혔다");
         assert!(text.contains("[tui]") && text.contains("sort = \"updated\""), "{text}");
 
@@ -3797,6 +3919,7 @@ mod tests {
         b.user_config = Some(user.clone());
         b.load_look();
         assert_eq!((b.view.clone(), b.order, b.fields), (a.view.clone(), a.order, a.fields), "다음 실행이 다른 보기로 떴다");
+        assert!(!b.detail_open && !a.detail_open, "숨긴 상세 칸이 다음 실행에 안 이어졌다");
         assert_eq!(b.notice, None);
 
         // 모르는 낱말은 알리고 나머지는 입힌다. 모르는 차례의 방향은 우선순위에 입히지 않는다 — 아무도 안
@@ -3989,9 +4112,9 @@ mod tests {
 
     /// 누군지 모르는 기계. **이 기계의 git 설정도 `MOAI_ACTOR` 도 안 본다** — 준 것만
     /// 푼다. 진짜 길(`model::actor`)을 쓰면 이 시험들이 돌리는 사람의 설정에 달린다.
-    fn nobody(user: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+    fn nobody(user: Option<&str>, root: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
         match user {
-            Some(raw) => crate::model::actor(Some(raw)),
+            Some(raw) => crate::model::actor(Some(raw), root),
             None => Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험\n\n  고칠 명령", crate::fail::code::NO_ACTOR)),
         }
     }
@@ -4093,7 +4216,7 @@ mod tests {
     /// 파일은 그대로고 폼은 까닭을 달고 제목 칸에 선다.
     #[test]
     fn an_empty_title_is_refused_in_place_and_nothing_is_asked() {
-        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
             panic!("빈 제목인데 누군지 물었다")
         }
         let (scratch, mut a) = writable("jot-empty");
@@ -4288,7 +4411,7 @@ mod tests {
     /// 동안 물으면 설정 없는 기계에서 도구가 고장 난 것으로 보인다.
     #[test]
     fn reading_never_asks_who() {
-        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
             panic!("읽기가 누군지 물었다")
         }
         let (_scratch, mut a) = writable("ask-read");
@@ -4352,7 +4475,7 @@ mod tests {
     /// 열고, 한 줄로 까닭을 댄다.
     #[test]
     fn a_failed_or_empty_edit_writes_nothing_and_says_so() {
-        fn refuse(_: Option<&str>) -> crate::fail::R<crate::model::Actor> {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
             panic!("담지 않을 글인데 누군지 물었다")
         }
         let (scratch, mut a) = writable("editor-nothing");
