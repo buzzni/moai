@@ -71,11 +71,9 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // `ready` 와 이 자리 사이에 옆 에이전트가 집고 닫기까지 했어도 여기서
             // 갈린다. 이미 갈 칸에 있는 것보다 **먼저** 본다 — 남이 옮겨 둔 것을
             // "이미 그 칸" 으로 읽으면 진 쪽이 이겼다고 믿는다.
-            if let Some(f) = &from {
-                if &i.status != f {
-                    m.stale.push((i.id.clone(), i.status.clone()));
-                    continue;
-                }
+            if from.as_ref().is_some_and(|f| &i.status != f) {
+                m.stale.push((i.id.clone(), i.status.clone()));
+                continue;
             }
             if i.status == to {
                 // 옮길 것이 없어도 **적어 온 말은 버리지 않는다.** 되풀이해
@@ -87,15 +85,18 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 m.already.push(i.id.clone());
                 continue;
             }
-            let from = i.status.clone();
-            entries.push(JournalEntry::status(&i.id, &from, &to, args.msg.clone(), &at, &by));
+            // **`from`(`--from` 의 칸)과 이름이 갈려야 한다.** 둘 다 "떠나는 칸" 이라
+            // 같은 이름을 쓰면 위의 검사와 이 줄이 한 값처럼 읽힌다 — 하나는 부르는
+            // 쪽이 본 칸이고, 이것은 방금 락 안에서 읽은 칸이다.
+            let was = i.status.clone();
+            entries.push(JournalEntry::status(&i.id, &was, &to, args.msg.clone(), &at, &by));
             i.status = to.clone();
             i.status_since = at.clone();
             i.updated_at = at.clone();
             // 저장 직전의 모습으로 맞춰 두고 뜬다 — 안 그러면 `--json` 이
             // 파일에 없는 값(기본 우선순위, 정렬 전 태그)을 말한다.
             i.normalize();
-            m.done.push((i.clone(), from));
+            m.done.push((i.clone(), was));
         }
         // **물려받은 미룸도 여기서 잰다.** 미룬 에픽의 멤버를 집으면 칸은
         // 옮겨져도 보드·`ready`·훅의 초점에서 빠진다 — 말하지 않으면 방금 집은
@@ -136,6 +137,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     }
     // **진 집기도 못 찾은 줄과 같은 자리다.** 종료 코드로 갈려야 jq 없는 껍데기가
     // 이긴 쪽과 진 쪽을 가른다 — 여기서 실패로 끝내지는 않는다(나머지 id 는 옮겼다).
+    // 못 찾은 줄과 **같은 표면 하나**에만 적는다 — 한때 stdout 에도 같은 말을 얹어,
+    // 터미널에서 한 줄이 두 번 떴다.
     for (id, now) in &moved.stale {
         super::note_partial();
         eprintln!("moai: {id} 는 이미 {now} 다 — 안 옮겼다");
@@ -161,7 +164,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             moved: Vec<super::Row<'a>>,
             already: &'a [String],
             missing: &'a [String],
-            /// `--from` 에 걸려 안 옮긴 줄. 사람 출력의 한 줄과 같은 것이다.
+            /// `--from` 에 걸려 안 옮긴 줄. 사람 쪽의 stderr 한 줄과 같은 것이다.
             stale: Vec<Stale<'a>>,
             /// 옮겼어도 계획 밖인 것과 도로 집을 줄. 사람 출력의 안내와 같은 것이다.
             shelved: Vec<super::Shelved<'a>>,
@@ -207,13 +210,6 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             "{}  {}",
             paint(style::ID, id),
             paint(style::DIM, &format!("이미 {to} 다"))
-        ));
-    }
-    for (id, now) in &moved.stale {
-        out.push(format!(
-            "{}  {}",
-            paint(style::ID, id),
-            paint(style::DIM, &format!("이미 {now} 다 — 안 옮겼다"))
         ));
     }
     // 묶음의 칸이 적은 칸과 다르면 한 줄. 같으면 말하지 않는다 — 멤버가 다 끝난

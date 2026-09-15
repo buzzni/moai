@@ -728,8 +728,14 @@ fn moai_args(seg: &[String]) -> Option<&[String]> {
 }
 
 /// 값을 받는 플래그 — 그 값은 자리 인자가 아니다. 전역 플래그(`-C 경로`·
-/// `--user "이름"`·`--color 어떻게`)와 `mv` 의 `-m 글`.
-const TAKES_VALUE: &[&str] = &["-C", "--dir", "--user", "--color", "-m", "--msg"];
+/// `--user "이름"`·`--color 어떻게`)와 `mv` 의 `-m 글`·`--from 칸`.
+///
+/// **`mv` 에 값 받는 플래그를 더하면 여기도 더한다.** 빠뜨리면 그 값이 자리
+/// 인자로 남아 **맨 끝이 갈 칸**이라는 셈이 통째로 어긋난다 — `moai mv <id>
+/// in_progress --from todo` 는 `todo` 로 옮기는 것으로 읽혀 [`picks_up`] 이
+/// 집기를 못 보고, `moai mv <리뷰> done --from review` 는 갈 칸이 `done` 이
+/// 아닌 것으로 읽혀 리뷰 닫기 규칙이 통째로 샌다.
+const TAKES_VALUE: &[&str] = &["-C", "--dir", "--user", "--color", "-m", "--msg", "--from"];
 
 /// `moai` 뒤의 **자리 인자들** — 플래그와 그 값을 걷은 것.
 ///
@@ -2777,6 +2783,36 @@ mod tests {
             "echo x > src/store.rs && moai mv t-1 in_progress",
         ] {
             assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
+        }
+    }
+
+    /// **`--from <칸>` 의 값은 갈 칸이 아니다** (moai-f8q1). 값 받는 플래그로 안 세던
+    /// 판은 `moai mv t-1 in_progress --from todo` 를 `todo` 로 옮기는 것으로 읽어,
+    /// 겨루지 않고 집으라고 만든 그 플래그를 쓴 순간 규칙 2 가 집기를 못 봤다.
+    #[test]
+    fn a_from_column_is_not_the_column_moved_to() {
+        let root = Path::new("/repo");
+        let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        for cmd in [
+            "moai mv t-1 in_progress --from todo && echo x > src/store.rs",
+            "moai mv t-1 --from todo in_progress && echo x > src/store.rs",
+            "moai mv t-1 in_progress --from=todo && echo x > src/store.rs",
+        ] {
+            assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
+        }
+        // 갈 칸이 여전히 첫 칸·끝난 칸이면 집은 것이 아니다 — `--from` 이 그것을 가리지 않는다.
+        for cmd in ["moai mv t-1 done --from in_progress && echo x > src/store.rs"] {
+            assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
+        }
+    }
+
+    /// 같은 빠뜨림의 반대쪽 — `--from` 의 값이 자리 인자로 남으면 갈 칸이 `done` 이
+    /// 아닌 것으로 읽혀 **리뷰 닫기 규칙이 통째로 샌다.**
+    #[test]
+    fn a_from_column_does_not_hide_the_closing_column() {
+        let all = vec![issue("t-1", "in_progress"), review("t-r", "in_progress", None)];
+        for cmd in ["moai mv t-r done --from review", "moai mv t-r --from review done"] {
+            assert!(matches!(guard_close(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
     }
 

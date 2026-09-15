@@ -7573,7 +7573,7 @@ fn only_one_racer_claims_a_row() {
                 .unwrap()
         })
         .collect();
-    let won = kids.into_iter().filter(|_| true).map(|k| k.wait_with_output().unwrap()).filter(|o| o.status.success()).count();
+    let won = kids.into_iter().map(|k| k.wait_with_output().unwrap()).filter(|o| o.status.success()).count();
     assert_eq!(won, 1, "집기를 이긴 것이 하나가 아니다");
     assert_eq!(journal(s.path()).matches("\"to\":\"in_progress\"").count(), 1, "옮긴 줄이 저널에 여럿이다");
     assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""));
