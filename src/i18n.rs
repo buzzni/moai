@@ -257,4 +257,46 @@ mod tests {
             assert!(seen.insert(lang.bundle()), "{} 가 남의 말묶음 파일을 가리킨다", lang.code());
         }
     }
+
+    /// **번역이 자리를 잃으면 수가 화면에서 사라진다.** `"ready.count": "着手できる作業"` 처럼
+    /// `{n}` 을 떨어뜨린 줄은 컴파일도 파싱도 통과하고, 그 언어로 도는 사람만 셈이 없는 화면을
+    /// 본다 — 빠진 키와 달리 영어로 떨어지지도 않는다(값이 **있으니** 그것이 답이다). 빈 값도
+    /// 같다: 머리 줄이 통째로 사라진다.
+    ///
+    /// 그래서 **번역이 든 키만** 영어와 견준다 — 자리 이름이 같은지, 값이 비지 않았는지.
+    /// 키가 아예 없는 것은 안 잰다(es 의 `status.milestone_label`): 그쪽은 영어가 받고,
+    /// 다섯을 함께 채우게 하지 않는 것이 결정이다.
+    #[test]
+    fn every_translation_keeps_the_places_english_marks() {
+        let en = table(Lang::En);
+        for (key, text) in en {
+            // **키에는 점이 있다.** `english_has_every_key_the_source_asks_for` 의 읽는 자가
+            // 점으로 키를 가려내므로, 점 없는 키는 그 시험을 그냥 지나간다.
+            assert!(key.contains('.'), "영어 표의 `{key}` 에 점이 없다 — 소스를 훑는 시험이 이 키를 못 본다");
+            assert!(!text.trim().is_empty(), "영어 표의 `{key}` 가 비었다");
+        }
+        for lang in Lang::ALL {
+            for (key, text) in table(lang) {
+                assert!(!text.trim().is_empty(), "{}: `{key}` 가 비었다 — 그 줄이 화면에서 사라진다", lang.code());
+                let Some(source) = en.get(key) else {
+                    panic!("{}: `{key}` 를 영어 표가 모른다 — 새 키는 영어부터고, 지운 키는 함께 지운다", lang.code())
+                };
+                assert_eq!(places(source), places(text), "{}: `{key}` 의 자리가 영어와 다르다", lang.code());
+            }
+        }
+    }
+
+    /// 글 안의 `{이름}` 들. [`fill`] 이 채우는 자리와 같은 것을 읽는다.
+    fn places(text: &str) -> std::collections::BTreeSet<&str> {
+        let mut out = std::collections::BTreeSet::new();
+        let mut rest = text;
+        while let Some(at) = rest.find('{') {
+            rest = &rest[at + 1..];
+            if let Some((name, tail)) = rest.split_once('}') {
+                out.insert(name);
+                rest = tail;
+            }
+        }
+        out
+    }
 }
