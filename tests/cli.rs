@@ -2200,6 +2200,44 @@ fn init_writes_an_agents_block() {
     assert!(!off.path().join("AGENTS.md").exists());
 }
 
+/// **`init --check` 은 AGENTS.md 블록을 `current`·`stale`·`missing` 으로 답하고 아무것도 안
+/// 쓴다**(moai-mstm). 늘 0 이다 — 낡음은 알릴 것이지 실패가 아니다(2026-09-14 사용자 결정).
+/// 옛 맨 마커도, 손으로 고친 블록도 `stale` 이다. 다시 심은 뒤에는 `current` 이고, 한 번 더
+/// 심어도 바이트가 같다.
+#[test]
+fn init_check_says_current_stale_or_missing_and_writes_nothing() {
+    let s = Scratch::new("initcheck");
+    let md = s.path().join("AGENTS.md");
+    let check = |want: &str| {
+        let before = std::fs::read_to_string(&md).ok();
+        let out = moai(s.path(), &["init", "--check"]);
+        assert!(out.status.success(), "{want}: {}", text(&out));
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(said.contains(want), "{want}: {said}");
+        let js = ok(s.path(), &["init", "--check", "--json"]);
+        one_json_value(&js);
+        assert!(js.contains(&format!("\"agents\":\"{want}\"")), "{js}");
+        assert_eq!(std::fs::read_to_string(&md).ok(), before, "{want}: --check 가 AGENTS.md 를 썼다");
+    };
+
+    check("missing");
+    assert!(!s.path().join(".moai").exists(), "--check 가 .moai 를 심었다");
+
+    std::fs::write(&md, "# 산문\n\n<!-- moai:begin -->\n옛 내용\n<!-- moai:end -->\n").unwrap();
+    check("stale");
+
+    ok(s.path(), &["init", "argos"]);
+    check("current");
+    let once = std::fs::read_to_string(&md).unwrap();
+    assert!(once.starts_with("# 산문\n\n<!-- moai:begin v:"), "{once}");
+    ok(s.path(), &["init"]);
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), once, "다시 심었더니 바뀌었다");
+
+    // 블록 안을 손으로 고치면 낡은 것이다 — 다음 `init` 이 덮어쓴다.
+    std::fs::write(&md, once.replace("승인 게이트가 없다", "승인 게이트가 있다")).unwrap();
+    check("stale");
+}
+
 /// 남의 산문은 한 글자도 건드리지 않는다.
 #[test]
 fn init_keeps_what_someone_else_wrote() {

@@ -145,7 +145,10 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         return opening(&ctx);
     };
     match cmd {
-        Cmd::Init { prefix, no_agents } => init::run(&ctx, prefix.as_deref(), no_agents),
+        // 새 명령을 두지 않고 `init` 의 플래그로 둔다 — 고치는 길(`init`)과 보는 길이 한 이름에 있어야
+        // `stale` 을 본 사람이 무엇을 칠지 안다(moai-mstm).
+        Cmd::Init { check: true, .. } => init::check(&ctx),
+        Cmd::Init { prefix, no_agents, .. } => init::run(&ctx, prefix.as_deref(), no_agents),
         Cmd::Hook { event } => hook::run(&ctx, event),
         Cmd::Skill(SkillCmd::Install { scope, dry_run }) => {
             skill::install(&ctx, scope.as_str(), dry_run)

@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:47fc9948 -->
+<!-- moai:begin v:0.1.0 hash:87af78b3 -->
 ## 이슈 트래커 — moai
 
 이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
@@ -116,7 +116,8 @@ PLAN
    `moai show <id>` 로 그것을 읽는다.
 
 도구가 자라 이 블록이 낡으면 `moai init` 을 다시 부른다. 이슈와 저널은
-건드리지 않고 이 블록만 다시 쓴다.
+건드리지 않고 이 블록만 다시 쓴다. 낡았는지만 보려면 `moai init --check` —
+아무것도 안 쓰고 `current`·`stale`·`missing` 으로 답한다.
 
 ### 훅이 실제로 보는 것 셋
 

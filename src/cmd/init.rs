@@ -53,6 +53,66 @@ fn with_block(existing: &str, block: &str) -> String {
     }
 }
 
+/// AGENTS.md 블록이 지금 바이너리가 쓸 글과 어떤가(moai-mstm).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BlockState {
+    /// 다시 심어도 바이트가 같다.
+    Current,
+    /// 블록은 있는데 다시 심으면 바뀐다 — 옛 바이너리가 썼거나, 옛 맨 마커거나, 손으로 고쳤다.
+    Stale,
+    /// 파일이 없거나 마커 한 쌍이 없다.
+    Missing,
+}
+
+/// 파일 글(없으면 `None`)을 보고 블록의 상태를 가른다. **순수하다** — `status` 가 같은 자로 잰다.
+///
+/// **낡음을 가르는 것은 해시가 아니라 다시 심은 결과다.** 마커의 해시만 견주면 블록 안을
+/// 손으로 고친 것을 못 보고(마커는 그대로다), 버전만 바뀐 것을 낡았다고 한다. [`with_block`]
+/// 이 그대로 돌려주면 `init` 이 할 일이 없다는 뜻이라 그것이 곧 `current` 다 — 쓰는 길과 보는
+/// 길이 한 자를 쓰니 둘이 어긋날 수 없다.
+pub fn block_state(existing: Option<&str>, block: &str) -> BlockState {
+    let Some(text) = existing else { return BlockState::Missing };
+    let paired = text.find(BEGIN).is_some_and(|a| text[a..].contains(END));
+    if !paired {
+        BlockState::Missing
+    } else if with_block(text, block) == text {
+        BlockState::Current
+    } else {
+        BlockState::Stale
+    }
+}
+
+/// 이 디렉터리의 AGENTS.md 를 읽어 [`block_state`] 로 가른다. 없는 파일은 `missing` 이고, 못 읽는
+/// 파일(권한·UTF-8 아님)만 `Err` 다 — 그때는 상태를 지어내지 않는다.
+pub fn agents_state(root: &Path) -> Result<BlockState, String> {
+    let path = root.join("AGENTS.md");
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(t) => Some(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    Ok(block_state(existing.as_deref(), &crate::guide::agents()))
+}
+
+/// `moai init --check`. **아무것도 안 쓰고, 늘 0 이다**(2026-09-14 사용자 결정) — 경고로 비영
+/// 종료하면 에이전트가 실패로 읽고, 그러면 게이트다. `.moai` 가 없어도 선다: 보는 것은 AGENTS.md
+/// 하나고, 심기 전에 부르는 것도 자연스럽다.
+pub fn check(ctx: &Ctx) -> R<Vec<String>> {
+    let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
+    let state = agents_state(&root).map_err(Fail::new)?;
+    if ctx.json {
+        return super::json_line(&serde_json::json!({ "agents": state }));
+    }
+    Ok(vec![match state {
+        BlockState::Current => "AGENTS.md 블록: current — 이 바이너리가 쓸 글과 같다".into(),
+        BlockState::Stale => "AGENTS.md 블록: stale — `moai init` 으로 다시 심는다. 블록 밖의 산문은 안 건드린다".into(),
+        BlockState::Missing => {
+            "AGENTS.md 블록: missing — `moai init` 이 심는다. `--no-agents` 로 안 쓰기로 했으면 그대로 둔다".into()
+        }
+    }])
+}
+
 const GITATTRIBUTES: &str = "\
 # moai — 이슈 트래커
 # 스냅샷에는 merge=union 을 쓰지 않는다. 두 브랜치가 같은 이슈를 고치면
