@@ -6334,6 +6334,173 @@ fn status_names_picked_work_with_no_live_worktree_and_still_exits_zero() {
     assert!(!json.contains("\"stranded\""), "워크트리를 안 쓰는 저장소에서 떠들었다\n{json}");
 }
 
+/// **자리를 셀 일이 없으면 옆 스냅샷을 안 판다**(moai-7igy, 사용자 결정). `moai status` 는 세션마다·
+/// 훅마다 도는데, 워크트리 일곱이면 스냅샷 여덟 벌을 다시 파 40→95ms(따뜻)·138→458ms(참)이었다.
+///
+/// **판 것을 어떻게 아는가** — 깨진 스냅샷을 둔 워크트리를 판 순간 `status` 가 "못 읽었다" 를 낸다
+/// (moai-lt7h). 안 판 경우에는 그 말이 없다. 집은 줄이 없을 때와, 이름으로 자리가 다 잡힐 때가 그렇다.
+#[test]
+fn status_reads_a_side_snapshot_only_when_a_place_is_still_missing() {
+    let s = Scratch::new("placecost");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let named = field(&ok(&main, &["add", "이름이 붙은 일", "--json"]), "id");
+    ok(&main, &["mv", &named, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", &format!(".claude/worktrees/{named}"), "-b", &format!("worktree-{named}")]);
+    // 이름이 id 가 아닌 워크트리 하나 — 판정이 스냅샷으로 넘어가는 유일한 길이다.
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-x", "-b", "worktree-agent-x"]);
+    // 못 읽는 스냅샷 — 깨진 줄은 `store` 가 견디므로(그것이 규약이다) 아예 못 여는 것으로 만든다.
+    let broken = main.join(".claude/worktrees/agent-x/.moai/issues.jsonl");
+    std::fs::remove_file(&broken).unwrap();
+    std::fs::create_dir(&broken).unwrap();
+
+    // 집은 줄이 이름으로 다 자리를 잡았다 — 깨진 스냅샷을 안 판다.
+    let out = isolated(BIN).arg("status").current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert!(said.is_empty(), "이름으로 답이 나왔는데 옆 스냅샷을 팠다\n{said}");
+
+    // 자리를 못 찾은 줄이 생기면 그때 판다 — 그리고 못 읽었다고 말한다.
+    let lost = field(&ok(&main, &["add", "자리 없는 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+    let out = isolated(BIN).arg("status").current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert!(said.contains("못 읽었다") && said.contains("agent-x"), "못 읽은 워크트리를 말하지 않았다\n{said}");
+    // **떠들어도 0 으로 끝난다** — 이것은 남의 워크트리의 문제고, `moai status` 는 아무것도 막지
+    // 않는다(CLAUDE.md). 비영으로 끝나는 순간 에이전트가 이것을 고장으로 읽는다.
+    assert!(out.status.success(), "못 읽은 워크트리로 비영 종료했다");
+    // **못 읽은 워크트리가 있으면 자리 없다고 단정하지 않는다**(moai-lt7h) — 거기일 수 있다.
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(!text.contains("일하는 워크트리가 없는"), "모르는 것을 자리 없음으로 셌다\n{text}");
+    let out = ok_at(&main, LATER, &["show", &lost]);
+    assert!(out.contains("자리   모른다"), "{out}");
+    assert!(ok_at(&main, LATER, &["show", &lost, "--json"]).contains("\"place\":\"unknown\""));
+    // **기계도 같은 것을 가른다**(리뷰 moai-ya06) — `stranded` 가 조용한 것이 "자리 잃은 일이
+    // 없다" 인지 "못 셌다" 인지를 `--json` 만 읽는 쪽도 알아야 한다. 감독 스킬이 이 목록으로 죽은
+    // 세션의 일을 거두므로, 그 침묵이 곧 일을 영영 안 거두는 것이 된다.
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(!json.contains("\"stranded\""), "모르는 것을 자리 없음으로 셌다\n{json}");
+    // 가지와 **경로를 함께** 낸다 — 떼어 낸 HEAD 는 이름이 커밋 앞 일곱 자라 가지만으로는 두
+    // 워크트리가 글자까지 같아진다. 경로는 `show` 와 같이 꼭대기에서 줄여 절대 경로를 안 낸다.
+    assert!(
+        json.contains(r#""unreadable_worktrees":[{"path":".claude/worktrees/agent-x","branch":"worktree-agent-x"}]"#),
+        "기계에게는 안 댔다\n{json}"
+    );
+    assert!(!json.contains(&main.display().to_string()), "기계의 절대 경로가 그대로 나갔다\n{json}");
+
+    // **겹쳐 볼 때는 같은 워크트리를 두 번 말하지 않는다** — `--worktree` 면 `gather` 가 옆 스냅샷을
+    // 빠짐없이 열어 `⎇ <가지>: …` 로 이미 냈다. 두 줄로 내면 보드의 `옆 워크트리 문제 N건` 이
+    // 깨진 워크트리 하나를 둘로 세어, 보는 쪽이 두 곳이 깨진 줄로 읽는다.
+    let out =
+        isolated(BIN).args(["status", "--worktree"]).current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert_eq!(said.lines().count(), 1, "깨진 워크트리 하나를 두 줄로 말했다\n{said}");
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("옆 워크트리 문제 1건"), "깨진 워크트리 하나를 둘로 셌다\n{text}");
+
+    // 스냅샷이 멀쩡해지면 자리 없음이 제대로 선다.
+    std::fs::remove_dir(&broken).unwrap();
+    std::fs::copy(main.join(".moai/issues.jsonl"), &broken).unwrap();
+    let text = ok_at(&main, LATER, &["status"]);
+    assert!(text.contains("일하는 워크트리가 없는 것 1건") && text.contains(&lost), "{text}");
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(!json.contains("unreadable_worktrees"), "다 읽었는데 못 읽었다고 했다\n{json}");
+}
+
+/// **`gather` 가 실제로 셌을 때만 입을 다문다**(리뷰 moai-ya06). `--worktree` 면 그쪽이 같은
+/// 워크트리를 `⎇ <가지>: …` 로 이미 내므로 여기서는 안 내는데, 그 전제는 **`gather` 가 옆을
+/// 셀 수 있었을 때만** 선다 — 저쪽은 git 을 불러 세고(`others_of`) 이쪽은 git 이 적어 둔 파일만
+/// 읽으므로(`on_disk`), git 이 없으면 저쪽은 "못 찾았다" 한 줄만 내고 워크트리를 한 곳도 안
+/// 대는데 이쪽은 그대로 찾아 낸다. 그때까지 입을 다물면 깨진 워크트리를 아무도 말하지 않고
+/// `stranded` 까지 조용해진다.
+#[test]
+fn overlaying_without_git_still_names_an_unreadable_worktree() {
+    let s = Scratch::new("placenogit");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "처음"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-x", "-b", "worktree-agent-x"]);
+    // 워크트리가 갈라진 **뒤에** 집는다 — 옆 스냅샷에는 없으니 이름으로도 스냅샷으로도 안 잡힌다.
+    let lost = field(&ok(&main, &["add", "자리 없는 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+    let broken = main.join(".claude/worktrees/agent-x/.moai/issues.jsonl");
+    std::fs::remove_file(&broken).unwrap();
+    std::fs::create_dir(&broken).unwrap();
+
+    // git 을 못 부르게 한다 — `gather` 는 옆을 못 세고, `workplaces` 는 파일로 그대로 센다.
+    let empty = s.path().join("nogit");
+    std::fs::create_dir_all(&empty).unwrap();
+    let out = isolated(BIN)
+        .args(["status", "--worktree"])
+        .current_dir(&main)
+        .env("PATH", &empty)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert!(out.status.success(), "git 이 없다고 비영 종료했다\n{said}");
+    assert!(said.contains("못 읽었다") && said.contains("agent-x"), "아무도 깨진 워크트리를 안 댔다\n{said}");
+}
+
+/// **팔지 말지는 부르는 쪽이 거는 줄로 잰다**(moai-7igy). 겹쳐 보는 쪽(`--worktree`)은 옆에서
+/// 만들고 집은 줄까지 `stranded` 와 `자리` 에 거는데, 팔 까닭을 main 의 스냅샷으로만 재면 그 줄은
+/// 거기 없어 "이름으로 다 잡혔다" 에 조용히 들어간다 — 그러면 `holds` 가 빈 채로 나가 살아 있는
+/// 세션의 일이 통째로 자리를 잃는다.
+#[test]
+fn overlaying_places_work_that_only_a_side_worktree_knows_about() {
+    let s = Scratch::new("placeside");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    // main 의 집은 줄은 이름으로 잡힌다 — 이것만 보면 더 팔 까닭이 없어 보인다.
+    let named = field(&ok(&main, &["add", "이름이 붙은 일", "--json"]), "id");
+    ok(&main, &["mv", &named, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", &format!(".claude/worktrees/{named}"), "-b", &format!("worktree-{named}")]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-x", "-b", "worktree-agent-x"]);
+
+    // 이름이 id 가 아닌 워크트리가 제 줄을 만들고 집는다 — main 의 스냅샷에는 없다.
+    let side = main.join(".claude/worktrees/agent-x");
+    let mine = field(&ok(&side, &["add", "옆에서 만든 일", "--json"]), "id");
+    ok(&side, &["mv", &mine, "in_progress"]);
+
+    let text = ok_at(&main, LATER, &["status", "--worktree"]);
+    assert!(!text.contains("일하는 워크트리가 없는"), "옆에서 집은 산 일을 자리 없음으로 셌다\n{text}");
+    let out = ok_at(&main, LATER, &["show", &mine, "--worktree"]);
+    assert!(out.contains("자리   .claude/worktrees/agent-x"), "{out}");
+}
+
+/// **`show <에픽>` 도 자리를 낸다**(moai-0h8m) — 워크트리 이름은 규약상 에픽 id 라, 이어받는 세션이
+/// 에픽부터 읽는다. 묶음은 집히지 않으므로 멤버의 자리를 굴려 올린다.
+#[test]
+fn show_rolls_a_groups_place_up_from_its_members() {
+    let s = Scratch::new("placeepic");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "저장 계층", "--json"]), "id");
+    let one = field(&ok(&main, &["add", "첫 일", "-e", &epic, "--json"]), "id");
+    ok(&main, &["mv", &one, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", &format!(".claude/worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+
+    let out = ok_at(&main, LATER, &["show", &epic]);
+    let line = out.lines().find(|l| l.trim_start().starts_with("자리")).unwrap_or_else(|| panic!("에픽에 자리가 없다\n{out}"));
+    assert!(line.contains(&format!(".claude/worktrees/{epic}")), "{line}");
+    assert!(ok_at(&main, LATER, &["show", &epic, "--json"]).contains(&format!("\"branch\":\"worktree-{epic}\"")));
+}
+
 /// **`show <id>` 는 집은 줄이 어느 워크트리에서 돌고 있는지 댄다**(moai-6opu) — 이어받는 세션이
 /// 그 자리로 들어가면 된다. 자리 없는 집은 줄은 그렇다고 말한다. 안 집은 줄과 워크트리를 안 쓰는
 /// 저장소에는 줄을 안 세운다. `--json` 도 같은 것을 `workplaces` 로 낸다.
@@ -6359,9 +6526,15 @@ fn show_names_the_worktree_a_picked_row_lives_in() {
     let json = ok(&main, &["show", &id, "--json"]);
     assert!(json.contains("\"workplaces\":[{") && json.contains(&format!("\"branch\":\"worktree-{id}\"")), "{json}");
 
+    // **방금 집은 줄에는 `status` 와 같은 한 시간 틈을 준다**(moai-xn9n) — 규약은 집고 커밋한 뒤
+    // 워크트리를 띄우므로, 그 사이를 "없다" 로 대면 멀쩡한 줄이 버려진 것처럼 읽힌다.
     let out = ok(&main, &["show", &lost]);
+    assert!(out.contains("자리   아직"), "방금 집은 줄을 버려진 것처럼 냈다\n{out}");
+    assert!(ok(&main, &["show", &lost, "--json"]).contains("\"place\":\"fresh\""));
+    let out = ok_at(&main, LATER, &["show", &lost]);
     assert!(out.contains("자리   없다"), "자리 없는 줄을 말하지 않았다\n{out}");
-    assert!(ok(&main, &["show", &lost, "--json"]).contains("\"workplaces\":[]"));
+    let json = ok_at(&main, LATER, &["show", &lost, "--json"]);
+    assert!(json.contains("\"workplaces\":[]") && json.contains("\"place\":\"lost\""), "{json}");
 
     let out = ok(&main, &["show", &idle]);
     assert!(!out.contains("자리"), "안 집은 줄에 자리를 세웠다\n{out}");
