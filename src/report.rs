@@ -1967,6 +1967,18 @@ impl Warning {
     /// 갈린다**(2026-09-15 사용자 결정). 뭉뚱그려 `moai init` 만 대면, main 을 받고 아직 다시
     /// 빌드 안 한 세션이 그 말을 따라 **새 안내를 옛 글로 되돌리고** 그 되돌림이 머지로 실린다.
     /// 기계도 가르라고 `kind` 를 따로 둔다.
+    ///
+    /// 딸린 파일에서 빠진 규칙(moai-2f99)도 같은 자리다 — [`Warning::dotfile_rules`].
+    pub fn dotfile_rules(named: &[String], root: Option<&str>) -> Warning {
+        let hint = match root {
+            None => "moai init".to_string(),
+            Some(r) => format!("moai -C {r} init"),
+        };
+        // `ids` 자리에 `파일(빠진 줄…)` 을 담는다 — 이 알림은 이슈를 안 가리키므로 그 자리가
+        // 비어 있고, 화면은 그것을 한 줄씩 그대로 낸다.
+        Warning::new("dotfile_rules", named.to_vec()).notice().hint(&hint)
+    }
+
     pub fn agents_stale(root: Option<&str>, edited: bool) -> Warning {
         let hint = match root {
             None => "moai init".to_string(),

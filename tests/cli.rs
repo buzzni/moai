@@ -2372,6 +2372,39 @@ fn init_finishes_even_when_agents_md_cannot_be_written() {
     assert!(now.starts_with(mine) && now.contains("moai:begin"), "{now}");
 }
 
+/// **빠진 딸린 파일 규칙을 `status` 알림과 `init --check` 가 비춘다**(moai-2f99, 2026-09-15 사용자
+/// 결정). `init` 이 한 번 말하고 마는 자리라, 못 써서 건너뛴 저장소는 `/.claude/worktrees/` 없이
+/// 얼마든지 오래 간다 — 그러면 `git add -A` 가 옆 워크트리를 통째로 담는다(moai-mxtb 가 그 줄을
+/// 넣은 까닭). **경고가 아니라 알림이다**: 종료 코드도 "드러난 문제 없다" 도 그대로다.
+#[test]
+fn a_missing_dotfile_rule_shows_in_status_and_check() {
+    let s = init("dotgap");
+    let ignore = s.path().join(".gitignore");
+    // moai 가 넣은 줄 중 하나만 지운다 — 사람이 손으로 지웠거나, 못 써서 건너뛴 자리다.
+    let kept: String = std::fs::read_to_string(&ignore).unwrap().lines().filter(|l| !l.contains("worktrees")).map(|l| format!("{l}\n")).collect();
+    std::fs::write(&ignore, &kept).unwrap();
+
+    let out = moai(s.path(), &["status"]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(said.contains("+ .gitignore") && said.contains("worktrees"), "{said}");
+    assert!(said.contains("드러난 문제 없다"), "알림이 문제로 섰다 — {said}");
+    let js = ok(s.path(), &["status", "--json"]);
+    let notices = &js[js.find("\"notices\"").expect("notices 가 없다")..];
+    assert!(notices.contains("\"kind\":\"dotfile_rules\""), "알림 자리에 없다 — {js}");
+
+    let check = ok(s.path(), &["init", "--check"]);
+    assert!(check.contains(".gitignore") && check.contains("worktrees"), "{check}");
+    let cjs = ok(s.path(), &["init", "--check", "--json"]);
+    assert!(cjs.contains("\"missing\":{\".gitignore\":[\"/.claude/worktrees/\"]}"), "{cjs}");
+
+    // 다시 심으면 사라진다.
+    ok(s.path(), &["init"]);
+    let after = ok(s.path(), &["status"]);
+    assert!(!after.contains(".gitignore"), "{after}");
+    assert!(!ok(s.path(), &["init", "--check", "--json"]).contains("missing"), "채웠는데 아직 빠졌다고 한다");
+}
+
 /// **`status` 는 낡은 AGENTS.md 블록을 알림(`notices`)으로 비춘다**(moai-mj45). 경고가 아니다 —
 /// 종료 코드도 "드러난 문제 없다" 도 그대로다. **없는 블록은 말하지 않는다**: `--no-agents` 로
 /// 안 쓰기로 한 저장소를 영영 조른다(2026-09-14 사용자 결정). 다시 심으면 사라진다.
