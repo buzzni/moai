@@ -151,7 +151,13 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         }
 
         i.normalize();
-        i.validate(cfg)?;
+        // **안 바꾼 칸은 다시 안 묻는다 — `store::with_write` 와 한 자다**(moai-hym7).
+        // 여기서만 엄하면 그쪽을 푼 것이 헛일이 된다: `config` 에서 칸 이름을 고친 뒤
+        // 옛 이름에 선 줄은 제목 하나 못 고쳐 도구 안에서 영영 못 만진다 — 풀려던 바로
+        // 그 자리다. 탐색기는 `with_write` 만 지나므로 두 표면이 갈리기까지 했다.
+        // **칸을 견줘서 정한다** — `true` 로 박으면 여기에 칸을 고치는 길이 나는 날
+        // 그 오타가 조용히 지나간다.
+        i.validate_keeping(cfg, i.status == before.status)?;
         // 바뀐 것이 없어도 실패가 아니다. `mv` 가 이미 그 칸일 때 0 으로
         // 끝나는 것과 같아야 한다 — 되풀이해 부르는 것이 흔하고, 그때
         // 한쪽만 1 로 끝나면 받는 쪽이 재시도를 못 짠다.
