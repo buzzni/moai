@@ -7606,3 +7606,29 @@ fn a_defer_from_a_column_only_lands_while_the_row_is_still_there() {
     ok(s.path(), &["defer", &id, "--undo", "--from", "in_progress"]);
     assert!(!line_of(s.path(), &id).contains("\"deferred_at\""));
 }
+
+/// **묶음은 화면이 보여 준 칸으로 잰다** (사람이 정했다). 에픽의 칸은 멤버에서
+/// 읽히고 줄에 적힌 칸은 어디서도 안 읽힌다 — 적힌 칸과 견주면 보드가
+/// `in_progress` 를 그리는 에픽에 `--from in_progress` 가 "이미 todo 다" 로 떨어져,
+/// `moai defer <묶음>` 이라는 AGENTS.md 가 시키는 길이 그대로 막힌다.
+#[test]
+fn a_group_from_column_is_the_one_read_from_its_members() {
+    let s = init("from-group");
+    let epic = ok(s.path(), &["epic", "add", "묶음", "-q"]).trim().to_string();
+    let member = add(s.path(), &["멤버", "-e", &epic]);
+    ok(s.path(), &["mv", &member, "in_progress"]);
+    // 줄에 적힌 칸은 아직 첫 칸이다 — 읽은 칸만 움직였다.
+    assert!(line_of(s.path(), &epic).contains("\"status\":\"todo\""), "{}", line_of(s.path(), &epic));
+
+    let out = moai(s.path(), &["defer", &epic, "-m", "접는다", "--from", "in_progress"]);
+    assert!(out.status.success(), "읽은 칸으로 걸었는데 떨어졌다\n{}", text(&out));
+    assert!(line_of(s.path(), &epic).contains("\"deferred_at\""), "묶음을 안 미뤘다");
+    ok(s.path(), &["defer", &epic, "--undo"]);
+
+    // 적힌 칸으로 걸면 진다 — 그 칸은 아무 표면도 보여 주지 않는다.
+    let lost = moai(s.path(), &["mv", &epic, "done", "--from", "todo", "--json"]);
+    assert!(!lost.status.success(), "적힌 칸으로 걸었는데 먹었다");
+    let json = String::from_utf8(lost.stdout).unwrap();
+    assert!(json.contains("\"stale\":[{") && json.contains("\"status\":\"in_progress\""), "진 줄이 읽은 칸을 안 말한다\n{json}");
+    assert!(!json.contains("\"stands\":[{"), "안 옮긴 묶음에 서 있는 칸 안내가 붙었다\n{json}");
+}

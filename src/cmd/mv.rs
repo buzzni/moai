@@ -61,6 +61,13 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         // **닫을 때만 전의 모습을 뜬다.** 풀리는 것은 끝낼 때뿐이다 — 다른 칸으로의 이동은
         // 막음을 풀지 않고, 락을 쥔 채 목록을 한 벌 더 복사하는 값은 그때만 치른다.
         let before = to.is_done().then(|| issues.clone());
+        // **묶음은 화면이 보여 준 칸으로 잰다**(사람이 정했다, moai-o5ss.l07). 에픽·
+        // 마일스톤의 칸은 멤버에서 읽히고 줄에 적힌 칸은 어디서도 안 읽히므로, 적힌 칸과
+        // 견주면 보드가 `in_progress` 를 그리는 에픽에 `--from in_progress` 가 "이미
+        // todo 다" 로 떨어진다. 묶음의 제 칸을 옮겨도 읽은 칸은 안 변하니 한 번만 센다.
+        let asked_all: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let seen: super::Read =
+            if from.is_some() { super::read_of(issues, cfg, &asked_all) } else { Default::default() };
         for id in ids {
             // #a-partial: 하나가 없다고 나머지를 안 옮기지 않는다.
             let Some(i) = issues.iter_mut().find(|i| &i.id == id) else {
@@ -71,8 +78,9 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // `ready` 와 이 자리 사이에 옆 에이전트가 집고 닫기까지 했어도 여기서
             // 갈린다. 이미 갈 칸에 있는 것보다 **먼저** 본다 — 남이 옮겨 둔 것을
             // "이미 그 칸" 으로 읽으면 진 쪽이 이겼다고 믿는다.
-            if from.as_ref().is_some_and(|f| &i.status != f) {
-                m.stale.push((i.id.clone(), i.status.clone()));
+            let stands = seen.get(&i.id).map(String::as_str).unwrap_or(i.status.as_str());
+            if from.as_ref().is_some_and(|f| stands != f.as_str()) {
+                m.stale.push((i.id.clone(), Status::new(stands.to_string())));
                 continue;
             }
             if i.status == to {
@@ -116,7 +124,12 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         // 다만 그 칸은 멤버에서 읽히므로(moai-j3b3), 말하지 않으면 옮긴 사람은
         // 에픽이 닫힌 줄 알고 화면은 계속 `in_progress` 를 그린다. 못 찾은 id 는
         // 저절로 빠진다 — `read_of` 가 있는 묶음만 고른다.
-        let asked: Vec<&str> = ids.iter().map(String::as_str).collect();
+        // **진 줄은 여기 안 든다.** 안 옮긴 묶음에까지 "서 있는 칸은 …" 안내를 붙이면
+        // 한 숨에 두 칸을 말한다 — stderr 는 "이미 todo 다", stdout 은 "서 있는 칸은
+        // in_progress". 그리고 그 안내의 뒷말("계획에서 빼려면 `moai defer`")은
+        // 일어나지도 않은 이동을 두고 다음 수를 댄다.
+        let asked: Vec<&str> =
+            ids.iter().map(String::as_str).filter(|id| !m.stale.iter().any(|(s, _)| s.as_str() == *id)).collect();
         m.read = super::read_of(issues, cfg, &asked);
         // 접는 길이 갈리는 자리 — `report` 가 정하고 여기서는 그 답을 나른다.
         m.finished = issues
@@ -195,11 +208,14 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let mut out: Vec<String> = moved
         .done
         .iter()
-        .map(|(i, from)| {
+        // **`was` 다 — `from` 이 아니다.** 바깥에 `--from` 의 칸을 쥔 `from` 이 서 있어,
+        // 같은 이름을 쓰면 여기서 그것을 가리고 둘이 한 값처럼 읽힌다. 하나는 부르는
+        // 쪽이 본 칸이고, 이것은 락 안에서 실제로 떠나온 칸이다.
+        .map(|(i, was)| {
             format!(
                 "{}  {} → {}   {}",
                 paint(style::ID, &i.id),
-                paint(style::status_style(from.as_str()), from.as_str()),
+                paint(style::status_style(was.as_str()), was.as_str()),
                 paint(style::status_style(to.as_str()), to.as_str()),
                 paint(style::DIM, &i.title),
             )

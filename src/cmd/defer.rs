@@ -47,6 +47,12 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     let (moved, read): (Moved, super::Read) = repo.with_write(|issues, cfg, _| {
         let mut m = Moved::default();
         let mut entries = Vec::new();
+        // 묶음은 화면이 보여 준 칸으로 잰다 — `mv` 와 한 자다(사람이 정했다,
+        // moai-o5ss.l07). `moai defer <묶음>` 은 AGENTS.md 가 시키는 길이라, 여기서
+        // 적힌 칸과 견주면 시키는 대로 친 명령이 "이미 todo 다" 로 떨어진다.
+        let asked: Vec<&str> = args.ids.iter().map(String::as_str).collect();
+        let seen: super::Read =
+            if from.is_some() { super::read_of(issues, cfg, &asked) } else { Default::default() };
         for id in &args.ids {
             // #a-partial: 하나가 없다고 나머지를 안 미루지 않는다.
             let Some(i) = issues.iter_mut().find(|i| &i.id == id) else {
@@ -57,8 +63,9 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             // 옆에서 집어 일하기 시작한 줄을 뒤늦은 미루기가 계획 밖으로 빼면,
             // 일하던 쪽은 제 일이 보드에서 사라진 까닭을 어디서도 못 읽는다.
             // 이미 그 모양인지보다 **먼저** 본다(`mv` 와 같은 차례다).
-            if from.as_ref().is_some_and(|f| &i.status != f) {
-                m.stale.push((i.id.clone(), i.status.clone()));
+            let stands = seen.get(&i.id).map(String::as_str).unwrap_or(i.status.as_str());
+            if from.as_ref().is_some_and(|f| stands != f.as_str()) {
+                m.stale.push((i.id.clone(), crate::model::Status::new(stands.to_string())));
                 continue;
             }
             if i.is_deferred() == !back {
