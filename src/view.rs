@@ -1278,12 +1278,14 @@ pub fn commits(commits: &[crate::git::Commit]) -> Vec<String> {
 ///
 /// **트래커 커밋은 그리지 않는다.** 집기·닫기만 적은 커밋이라 사람이 찾는 "무엇이 고쳤나"
 /// 가 아니고, 이력이 이미 같은 것을 말한다. `--json` 은 `tracker` 표시와 함께 전부 낸다.
-/// 제목도 파일 밖에서 온 글이라 제어문자를 걷어낸다(`body_lines` 와 같은 까닭).
+/// 제목도 파일 밖에서 온 글이라 **한 줄짜리로 걷어낸다**(`text::one_line`) — `sanitize` 가
+/// 남기는 탭이 그대로 나가면 CLI 에서는 탭 자리까지 칸이 밀리고 탐색기에서는 폭을 재는
+/// 자가 0으로 세어 글자째 사라진다. 한 커밋은 한 줄이라야 해시와 제목이 짝으로 읽힌다.
 pub fn commit_lines(commits: &[crate::git::Commit]) -> Vec<(&str, String)> {
     commits
         .iter()
         .filter(|c| !c.tracker)
-        .map(|c| (c.hash.get(..7).unwrap_or(&c.hash), crate::text::sanitize(&c.subject)))
+        .map(|c| (c.hash.get(..7).unwrap_or(&c.hash), crate::text::one_line(&c.subject)))
         .collect()
 }
 

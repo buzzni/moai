@@ -1415,21 +1415,28 @@ fn show_draws_each_blocker_with_the_words_ready_uses() {
 
 /// **상세가 이 이슈에 닿은 커밋을 그린다**(moai-emcv) — 커밋 제목에 id 를 적은 것을 git 에서
 /// 읽는다. 트래커 커밋은 사람 화면에서 빼고 `--json` 에는 표시와 함께 낸다. 자식의 커밋은
-/// 부모의 것이 아니다. git 저장소가 아니면 칸도 키도 없이 상세가 그대로 열린다.
+/// 부모의 것이 아니다. 이슈가 생기기 전의 커밋은 안 걷는다(moai-mauw). git 저장소가 아니면
+/// 칸도 키도 없이 상세가 그대로 열린다.
+///
+/// **커밋 시각을 고정한다.** 걷기 상한이 `created_at`(= `MOAI_NOW`) 에서 나오므로, 커밋을
+/// 기계 시계로 찍으면 시계가 그보다 이른 기계에서 이 시험이 까닭도 없이 빨개진다.
 #[test]
 fn show_draws_the_commits_that_name_the_issue() {
     let s = init("showcommits");
     let a = add(s.path(), &["고칠 것"]);
     git(s.path(), &["init", "-q"]);
-    git(s.path(), &["commit", "-q", "--allow-empty", "-m", &format!("chore(tracker): {a} 를 워크트리에서 집는다")]);
-    git(s.path(), &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({a})")]);
-    git(s.path(), &["commit", "-q", "--allow-empty", "-m", &format!("fix: 리뷰 ({a}.x1y)")]);
+    // 이슈보다 이틀 먼저 찍힌 커밋 — 그 id 는 아직 없었으니 걷기가 여기서 멈춘다.
+    git_at(s.path(), "2026-09-09T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", &format!("feat: 옛것 ({a})")]);
+    git_at(s.path(), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("chore(tracker): {a} 를 워크트리에서 집는다")]);
+    git_at(s.path(), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({a})")]);
+    git_at(s.path(), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("fix: 리뷰 ({a}.x1y)")]);
     let hash = git(s.path(), &["rev-parse", "HEAD~1"]).trim().to_string();
 
     let shown = ok(s.path(), &["show", &a]);
     assert!(shown.contains(&format!("{}   feat: 고친다 ({a})", &hash[..7])), "고친 커밋이 없다\n{shown}");
     assert!(!shown.contains("chore(tracker)"), "트래커 커밋을 사람 화면에 그렸다\n{shown}");
     assert!(!shown.contains("fix: 리뷰"), "자식의 커밋을 부모에 그렸다\n{shown}");
+    assert!(!shown.contains("옛것"), "이슈가 생기기 전의 커밋까지 걸었다\n{shown}");
     let (commits_at, history_at) = (shown.find("\n커밋\n"), shown.find("\n이력\n"));
     assert!(commits_at.is_some() && commits_at < history_at, "커밋이 이력 앞에 안 섰다\n{shown}");
 
@@ -6522,14 +6529,27 @@ fn an_empty_note_is_told_apart_from_a_missing_one() {
 
 /// 사람의 git 설정 없이 git 을 돌린다. 커밋에 이름이 필요하니 여기서 준다.
 fn git(dir: &Path, args: &[&str]) -> String {
+    git_run(dir, None, args)
+}
+
+/// 커밋 시각까지 고정해 돌린다. **시각이 답을 가르는 시험은 기계 시계에 매이면 안 된다** —
+/// `show` 의 커밋 칸은 걷기를 `created_at`(= `MOAI_NOW`) 에서 끊으므로(`git::commits_of`),
+/// 커밋을 기계 시계로 찍으면 시계가 그보다 이른 기계에서 답이 달라진다.
+fn git_at(dir: &Path, at: &str, args: &[&str]) -> String {
+    git_run(dir, Some(at), args)
+}
+
+fn git_run(dir: &Path, at: Option<&str>, args: &[&str]) -> String {
     // `isolated` 로 띄운다 — git 훅 안에서 시험이 돌 때 물려받은 `GIT_DIR` 이 남으면
     // 여기서의 `git commit` 이 바깥 저장소에 떨어진다.
-    let out = isolated("git")
-        .args(["-c", "user.name=테스터", "-c", "user.email=tester@example.com", "-c", "init.defaultBranch=main"])
+    let mut cmd = isolated("git");
+    cmd.args(["-c", "user.name=테스터", "-c", "user.email=tester@example.com", "-c", "init.defaultBranch=main"])
         .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("git 을 실행하지 못했다");
+        .current_dir(dir);
+    if let Some(at) = at {
+        cmd.env("GIT_AUTHOR_DATE", at).env("GIT_COMMITTER_DATE", at);
+    }
+    let out = cmd.output().expect("git 을 실행하지 못했다");
     assert!(out.status.success(), "git {args:?} 가 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8(out.stdout).unwrap()
 }
@@ -6654,7 +6674,7 @@ fn worktree_keeps_ready_from_offering_what_another_worktree_picked() {
     let one = ok(&main, &["show", &t.picked, "--worktree"]);
     assert!(one.contains("⎇ feat/x") && one.contains("todo → in_progress"), "{one}");
     // 커밋도 **그 워크트리의 가지**에서 읽는다 — 일을 고친 커밋은 저쪽에만 있다(moai-emcv).
-    git(&t.s.path().join("feat"), &["commit", "-q", "--allow-empty", "-m", &format!("feat: 옆에서 고친다 ({})", t.picked)]);
+    git_at(&t.s.path().join("feat"), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 옆에서 고친다 ({})", t.picked)]);
     let one = ok(&main, &["show", &t.picked, "--worktree"]);
     assert!(one.contains("feat: 옆에서 고친다"), "옆 가지의 커밋을 이쪽 HEAD 에서 찾았다\n{one}");
     let _ = &t.epic;
