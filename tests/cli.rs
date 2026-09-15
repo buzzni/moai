@@ -6471,6 +6471,10 @@ fn worktree_keeps_ready_from_offering_what_another_worktree_picked() {
     // 옆에서 온 줄의 이력은 **그 워크트리의 저널**에서 읽는다.
     let one = ok(&main, &["show", &t.picked, "--worktree"]);
     assert!(one.contains("⎇ feat/x") && one.contains("todo → in_progress"), "{one}");
+    // 커밋도 **그 워크트리의 가지**에서 읽는다 — 일을 고친 커밋은 저쪽에만 있다(moai-emcv).
+    git(&t.s.path().join("feat"), &["commit", "-q", "--allow-empty", "-m", &format!("feat: 옆에서 고친다 ({})", t.picked)]);
+    let one = ok(&main, &["show", &t.picked, "--worktree"]);
+    assert!(one.contains("feat: 옆에서 고친다"), "옆 가지의 커밋을 이쪽 HEAD 에서 찾았다\n{one}");
     let _ = &t.epic;
 }
 

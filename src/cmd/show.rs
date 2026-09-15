@@ -316,7 +316,9 @@ fn one(
     // **커밋은 저장하지 않고 git 에서 읽는다**(moai-1w2l) — 커밋 제목에 이 id 를 적은 것.
     // git 이 없거나 저장소 밖이면 칸을 비운다. 커밋 칸 하나 때문에 상세가 안 열리는 것이
     // 빈 칸보다 비싸다(그 모서리의 말투는 moai-mauw).
-    let commits = crate::git::commits_of(&repo.root, &[issue.id.as_str()])
+    // **커밋도 줄이 온 워크트리의 `HEAD` 에서 읽는다** — 이력과 같은 까닭. `--worktree` 로
+    // 옆에서 집은 일을 펼치면 그 일을 고친 커밋은 저쪽 가지에만 있다.
+    let commits = crate::git::commits_of(origin.root(&issue.id).unwrap_or(&repo.root), &[issue.id.as_str()])
         .ok()
         .and_then(|mut by_id| by_id.remove(&issue.id))
         .unwrap_or_default();
