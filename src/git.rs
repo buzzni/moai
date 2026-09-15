@@ -371,14 +371,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("moai-git-table-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        // 시계는 걷기 **뒤에** 덮는다 — 순서가 뒤집히면 걷기가 이 시험의 고정 시계를 지운다.
         let git = |at: &str, args: &[&str]| {
-            let out = std::process::Command::new("git")
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+            let out = isolated(&dir)
                 .args(args)
-                .current_dir(&dir)
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE")
                 .env("GIT_AUTHOR_DATE", at)
                 .env("GIT_COMMITTER_DATE", at)
                 .output()

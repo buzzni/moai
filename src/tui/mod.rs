@@ -3219,18 +3219,10 @@ mod tests {
         let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
         std::fs::write(dir.join(".moai/issues.jsonl"), line(&make("argos-0001", Kind::Epic))).unwrap();
         let git = |msg: &str| {
-            let out = std::process::Command::new("git")
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
-                .args(["commit", "-q", "--allow-empty", "-m", msg])
-                .current_dir(&dir)
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE")
-                .output()
-                .unwrap();
+            let out = crate::git::isolated(&dir).args(["commit", "-q", "--allow-empty", "-m", msg]).output().unwrap();
             assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         };
-        let init = std::process::Command::new("git").args(["init", "-q"]).current_dir(&dir).env_remove("GIT_DIR").env_remove("GIT_WORK_TREE").output().unwrap();
+        let init = crate::git::isolated(&dir).args(["init", "-q"]).output().unwrap();
         assert!(init.status.success());
         git("feat: 처음 (argos-0001)");
 
