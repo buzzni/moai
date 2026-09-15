@@ -353,15 +353,38 @@ fn prefix_from(dir: &Path) -> Option<String> {
     (!out.is_empty()).then_some(out)
 }
 
+/// [`ensure_lines`] 가 한 일.
+#[derive(Debug, PartialEq, Eq)]
+enum Added {
+    /// 빠진 줄을 덧붙였다.
+    Wrote,
+    /// 이미 다 있었다 — 파일은 안 건드렸다.
+    Already,
+    /// 못 읽어서 안 건드렸다. 안에 든 것은 그 까닭이다.
+    Unreadable(String),
+}
+
 /// 이미 있는 파일에는 **빠진 줄만** 덧붙인다. 남의 내용을 지우지 않는다.
-fn ensure_lines(path: &Path, block: &str) -> Result<bool, String> {
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
+///
+/// **못 읽는 파일은 안 건드린다**(moai-gq1c). `unwrap_or_default` 로 빈 글로 치던 때는 CP949 로
+/// 적힌 남의 `.gitignore` 가 moai 줄만 남기고 통째로 사라졌다 — 덧붙이는 자리라 더 나쁘다:
+/// 사람은 제 줄이 그대로 있으리라 믿는다. 없는 파일만 빈 글이다.
+///
+/// **멈추지는 않는다**(2026-09-15 사용자 결정). AGENTS.md 는 도구가 쓴 블록을 통째로 갈아 끼우는
+/// 자리라 멈추지만, 여기는 줄 몇 개를 덧붙이는 자리다 — 그 하나로 `.moai` 도 못 심고 AGENTS 블록도
+/// 못 고치면 고칠 길이 도구 밖에만 남는다. 무엇을 손으로 더할지는 부르는 쪽([`run`])이 댄다.
+fn ensure_lines(path: &Path, block: &str) -> Result<Added, String> {
+    let existing = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Ok(Added::Unreadable(e.to_string())),
+    };
     let missing: Vec<&str> = block
         .lines()
         .filter(|l| !l.trim().is_empty() && !existing.lines().any(|e| covers(e, l)))
         .collect();
     if missing.is_empty() {
-        return Ok(false);
+        return Ok(Added::Already);
     }
     let mut out = existing;
     if !out.is_empty() && !out.ends_with('\n') {
@@ -373,7 +396,7 @@ fn ensure_lines(path: &Path, block: &str) -> Result<bool, String> {
     out.push_str(&missing.join("\n"));
     out.push('\n');
     std::fs::write(path, out).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(true)
+    Ok(Added::Wrote)
 }
 
 /// 이미 있는 줄 `have` 가 넣으려는 줄 `want` 를 **이미 막고 있는가**(moai-mxtb).
@@ -500,6 +523,15 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
 
     let attrs = ensure_lines(&root.join(".gitattributes"), GITATTRIBUTES).map_err(Fail::new)?;
     let ignore = ensure_lines(&root.join(".gitignore"), GITIGNORE).map_err(Fail::new)?;
+    // 못 읽어 못 건드린 자리 — 이름과 까닭과 **손으로 더할 줄**을 함께 든다(moai-gq1c). 줄을 안
+    // 대면 사람은 도구가 무엇을 넣으려 했는지 모른 채 파일만 고치게 된다.
+    let untouched: Vec<(&str, &str, &str)> = [(".gitattributes", &attrs, GITATTRIBUTES), (".gitignore", &ignore, GITIGNORE)]
+        .into_iter()
+        .filter_map(|(name, done, block)| match done {
+            Added::Unreadable(why) => Some((name, why.as_str(), block)),
+            _ => None,
+        })
+        .collect();
 
     // `AGENTS.md` **하나만** 쓴다. `CLAUDE.md` 에도 같은 것을 쓰면 곧 갈라지고,
     // 갈라진 두 벌 중 어느 것이 참인지 아무도 모른다.
@@ -525,13 +557,18 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             "root": root.display().to_string(),
             "prefix": prefix,
             "created": !again,
-            "gitattributes": attrs,
-            "gitignore": ignore,
+            "gitattributes": attrs == Added::Wrote,
+            "gitignore": ignore == Added::Wrote,
             "agents": agents,
         });
         // 줄였을 때만 싣는다 — 늘 `null` 을 두면 줄이지 않은 대부분의 줄이 헛 키를 든다.
         if let Some(full) = &shortened {
             v["shortened_from"] = serde_json::json!(full);
+        }
+        // **못 건드린 자리는 기계에게도 말한다.** `false` 만 보면 "이미 다 있었다" 와 구별이
+        // 안 되고, 그 차이가 곧 사람이 손볼 것이 남았는지다.
+        if !untouched.is_empty() {
+            v["unreadable"] = serde_json::json!(untouched.iter().map(|(name, ..)| *name).collect::<Vec<_>>());
         }
         return super::json_line(&v);
     }
@@ -554,11 +591,17 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             ),
         );
     }
-    if attrs {
+    if attrs == Added::Wrote {
         out.push("  .gitattributes 에 병합 규칙을 넣었다".into());
     }
-    if ignore {
+    if ignore == Added::Wrote {
         out.push("  .gitignore 에 moai 가 쓰는 자리(lock·tmp·워크트리)를 넣었다".into());
+    }
+    for (name, why, block) in &untouched {
+        // 주석과 빈 줄은 뺀다 — 손으로 더할 것은 규칙 줄이다.
+        let lines: Vec<&str> = block.lines().filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#')).collect();
+        out.push(format!("  {name} 를 못 읽어 안 건드렸다 — {why}"));
+        out.push(format!("    moai 가 쓰는 자리를 손으로 더한다: {}", lines.join(", ")));
     }
     if agents {
         out.push("  AGENTS.md 블록을 맞췄다".into());
