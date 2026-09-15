@@ -630,6 +630,9 @@ fn says(w: &Warning) -> String {
         // 같은 이슈가 두 번 나오는 것이 말이 안 되게 보인다.
         "wip_overload" => format!("한 번에 벌여 놓은 것 {n}건 — 하나씩 끝내는 편이 낫다"),
         "stale_progress" => format!("집어 놓고 {}일 넘게 안 건드린 것 {n}건", w.days.unwrap_or(0)),
+        // **죽었다고 단정하지 않는다.** 워크트리 없이 main 에서 하는 일일 수도 있다 — 그래서 고칠
+        // 손을 하나로 정하지 않고, 이어 할 것이면 워크트리를 다시 띄우라는 길까지 댄다.
+        "stranded" => format!("집었는데 일하는 워크트리가 없는 것 {n}건 — 이어 하려면 워크트리를 다시 띄운다"),
         // `days` 는 "막힌 기간" 이 아니라 "지금 칸에 머문 기간" 이다 — 막 막힌
         // 것을 "며칠째 막혀 있다" 고 잘못 말하지 않으려고 이렇게 적는다.
         "blocked_stale" => format!("막힌 채로 {}일 넘게 멈춰 있는 것 {n}건", w.days.unwrap_or(0)),
@@ -1034,6 +1037,11 @@ pub struct Seen<'a> {
     pub origin: Option<&'a Origin>,
     /// 펼친 줄의 막음을 하나씩 가른 것 (`report::blocks_of`). 막음이 없으면 비었다.
     pub blocks: Vec<crate::report::Block<'a>>,
+    /// 펼친 줄이 서 있는 워크트리들 (`report::places`, moai-6opu). `None` 이면 줄을 안 세운다 — 안
+    /// 집은 줄, 워크트리를 안 쓰는 저장소, **안 재 본 자리**(쓰는 길인 `edit`, 겹쳐 보지 않은
+    /// 딸린 워크트리). `Some` 인데 비었으면 집었는데 자리가 없다. 셋을 가르는 것은 `None` 이
+    /// 아무 말도 안 한다는 것뿐이라, 안 잰 것을 "자리 없다" 로 말하는 일은 없다.
+    pub places: Option<Vec<&'a crate::report::Workplace>>,
 }
 
 /// **손으로 옮긴 칸이 서 있는 칸과 다르면** 그렇다고 말하는 낱말. CLI 상세와
@@ -1148,6 +1156,22 @@ pub fn detail(
     if let Some(e) = &i.epic {
         let title = epic.map(|e| e.title.as_str()).unwrap_or("(없는 에픽)");
         out.push(format!("  에픽   {}  {title}", paint(style::ID, e)));
+    }
+    // **어디서 하던 일인지 댄다**(moai-6opu) — 세션이 죽은 뒤 이어받는 쪽이 들어갈 자리다. 없으면
+    // 없다고 한다: 같은 자(`report::places`)로 잰 지금의 자리다.
+    //
+    // **`status` 의 `stranded` 와 같은 줄이 아니다.** 저쪽은 방금 집은 줄에 워크트리가 뜰 틈
+    // (`report::STRANDED_GRACE_SECS`, 한 시간)을 주는데 여기는 안 준다 — 규약대로 집고 커밋한 뒤
+    // 워크트리를 띄우는 사이에 펼치면 여기만 "없다" 로 선다. 이 줄은 "지금 보이는가" 를,
+    // `stranded` 는 "이만큼 지났는데도 안 보이는가" 를 말한다.
+    match seen.places.as_deref() {
+        Some([]) => out.push(format!("  자리   {}", paint(style::WARN, "없다 — 일하는 워크트리가 안 보인다"))),
+        Some(trees) => {
+            for t in trees {
+                out.push(format!("  자리   {}  {}", t.path.display(), paint(style::BRANCH, &format!("({})", t.branch))));
+            }
+        }
+        None => {}
     }
     // **막음도 상세에서 말한다**(moai-rvcb). id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안
     // 나오나" 에 답하는 자리인데, 막힘·미룬 막음·끊긴 막음이 탐색기에만 있었다. 막는가는
