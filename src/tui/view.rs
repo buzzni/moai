@@ -143,6 +143,19 @@ impl Field {
         }
     }
 
+    /// `fields_known` 이 없던 때(moai-3fnf 앞)의 어휘 — 그때 이미 있던 열이다. 그 설정에서 안 적힌
+    /// 이 열들은 **사람이 끈 것**이고, 여기 없는 열(열 이름 줄·⎇)은 그 바이너리가 몰랐던 것이라
+    /// 기본값으로 선다.
+    pub const BEFORE_KNOWN: [Field; 7] = [
+        Field::Id,
+        Field::Priority,
+        Field::Assignee,
+        Field::Created,
+        Field::Updated,
+        Field::Tally,
+        Field::Tags,
+    ];
+
     pub fn named(name: &str) -> Option<Field> {
         Field::ALL.into_iter().find(|f| f.name() == name)
     }

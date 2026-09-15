@@ -1352,14 +1352,26 @@ impl App {
             self.order.reversed = r;
         }
         if let Some(words) = &look.fields {
-            let mut fields = view::Fields::none();
+            // **적은 쪽이 알던 열만 그대로 따른다**(사용자 결정 2026-09-15) — `fields` 에 안 적힌 것이
+            // "껐다" 인지 "그 열을 몰랐다" 인지 가르는 것이 `fields_known` 이다. 그 목록에 없는 열은
+            // 여기 기본값으로 선다: 옛 설정을 가진 사람에게도 새 열이 뜨고, 끈 열은 끈 채로 남는다.
+            let mut fields = view::Fields::default();
+            for f in view::Field::ALL {
+                let knew = match &look.fields_known {
+                    Some(known) => known.iter().any(|w| w == f.name()),
+                    // 이 키가 없던 때의 어휘 — 그때 있던 열이면 안 적힌 것이 곧 "껐다" 다.
+                    None => view::Field::BEFORE_KNOWN.contains(&f),
+                };
+                if knew {
+                    fields.set(f, words.iter().any(|w| w == f.name()));
+                }
+            }
             for w in words {
-                match view::Field::named(w) {
-                    Some(f) => fields.set(f, true),
-                    None => problems.push(format!(
+                if view::Field::named(w).is_none() {
+                    problems.push(format!(
                         "`fields` 의 `{w}` 는 모르는 열이다 — {} 중에서",
                         view::Field::ALL.map(view::Field::name).join("·")
-                    )),
+                    ));
                 }
             }
             self.fields = fields;
@@ -1380,6 +1392,8 @@ impl App {
             sort: Some(self.order.by.name().to_string()),
             sort_reversed: Some(self.order.reversed),
             fields: Some(view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name().to_string()).collect()),
+            // 이 바이너리가 아는 열 전부 — 다음에 읽는 쪽이 "안 적힌 것" 을 가를 자다.
+            fields_known: Some(view::Field::ALL.into_iter().map(|f| f.name().to_string()).collect()),
             detail: Some(self.detail_open),
         }
     }
@@ -2151,6 +2165,31 @@ mod tests {
         assert_eq!(row_ids(&a), ["argos-0001"]);
         a.hit("SPC s a");
         assert_eq!(row_ids(&a).len(), 3, "모두 보이기가 다 안 보인다");
+    }
+
+    /// **옛 설정에도 새 열이 뜬다**(moai-3fnf 리뷰, 사용자 결정) — `fields` 에 안 적힌 것이 "껐다" 인지
+    /// "그 열을 몰랐다" 인지는 `fields_known` 이 가른다. 끈 열은 적히고 나면 끈 채로 남는다.
+    #[test]
+    fn a_column_the_old_config_never_knew_comes_up_on_its_default() {
+        let old = crate::user_config::Look {
+            fields: Some(vec!["id".into(), "priority".into()]),
+            ..crate::user_config::Look::default()
+        };
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&old, Vec::new());
+        assert!(a.fields.shows(view::Field::Names), "옛 설정을 가진 사람에게 열 이름 줄이 안 떴다");
+        assert!(a.fields.shows(view::Field::Branch), "⎇ 도 마찬가지다");
+        assert!(!a.fields.shows(view::Field::Tally), "옛 설정이 끈 열이 되살아났다");
+
+        // 이 바이너리가 적은 설정은 끈 것을 끈 채로 들고 온다.
+        let now = a.look_now();
+        assert_eq!(now.fields_known.as_ref().map(Vec::len), Some(view::Field::ALL.len()));
+        let mut b = App::new(Vec::new(), cfg(), Path::new());
+        b.hit("SPC c h");
+        let off = b.look_now();
+        let mut c = App::new(Vec::new(), cfg(), Path::new());
+        c.adopt_look(&off, Vec::new());
+        assert!(!c.fields.shows(view::Field::Names), "끈 열이 다음 실행에 되살아났다");
     }
 
     /// **`SPC o` 가 차례를 고르고, 같은 키를 다시 누르면 거꾸로 선다**(moai-55cp). 다른 키로 가면

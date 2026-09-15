@@ -379,6 +379,7 @@ impl Doc {
             sort: look_one(t, SORT, "낱말이어야", word, &mut problems),
             sort_reversed: look_one(t, SORT_REVERSED, "true·false 여야", Item::as_bool, &mut problems),
             fields: look_words(t, FIELDS, &mut problems),
+            fields_known: look_words(t, FIELDS_KNOWN, &mut problems),
             detail: look_one(t, DETAIL, "true·false 여야", Item::as_bool, &mut problems),
         };
         (look, problems)
@@ -423,6 +424,7 @@ impl Doc {
             changed |= put_value(t, SORT_REVERSED, new.sort_reversed.map(toml_edit::Value::from));
         }
         changed |= merge_words(t, FIELDS, base.fields.as_deref(), new.fields.as_deref());
+        changed |= merge_words(t, FIELDS_KNOWN, base.fields_known.as_deref(), new.fields_known.as_deref());
         if base.detail != new.detail {
             changed |= put_value(t, DETAIL, new.detail.map(toml_edit::Value::from));
         }
@@ -439,6 +441,7 @@ const SORT: &str = "sort";
 const SORT_REVERSED: &str = "sort_reversed";
 const FIELDS: &str = "fields";
 const DETAIL: &str = "detail";
+const FIELDS_KNOWN: &str = "fields_known";
 
 /// 탐색기의 보기 — 사람이 마지막으로 고른 것(moai-2bzp). **낱말로 든다** — 무슨 낱말이 있는지는
 /// 탐색기가 안다. 이 모듈이 조각의 타입을 알면 설정 파일의 모양이 화면 코드에 매인다. 없는 키는
@@ -452,6 +455,7 @@ const DETAIL: &str = "detail";
 /// sort = "updated"
 /// sort_reversed = false
 /// fields = ["id", "priority", "tally", "assignee"]
+/// fields_known = ["id", "priority", "assignee", "created", "updated", "tally", "tags", "names", "branch"]
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Look {
@@ -460,6 +464,11 @@ pub struct Look {
     pub sort: Option<String>,
     pub sort_reversed: Option<bool>,
     pub fields: Option<Vec<String>>,
+    /// **적은 쪽이 알던 열 전부**(moai-3fnf 리뷰, 사용자 결정 2026-09-15). `fields` 는 켠 것만 담아
+    /// "안 적혔다" 가 "껐다" 와 "그 열을 몰랐다" 둘 다를 뜻했다 — 그래서 새 열이 옛 설정을 가진
+    /// 사람에게 영영 안 떴다. 이 목록에 없는 열은 **탐색기의 기본값**으로 선다. 옛 설정에는 이 키가
+    /// 없으니 새 열이 기본대로 서고, 한 번 적히고 나면 끈 열은 끈 채로 남는다.
+    pub fields_known: Option<Vec<String>>,
     /// 오른쪽 상세 칸이 보이나(moai-ymnu).
     pub detail: Option<bool>,
 }
@@ -971,6 +980,7 @@ mod tests {
             sort: Some("updated".into()),
             sort_reversed: Some(false),
             fields: Some(vec!["id".into(), "assignee".into()]),
+            fields_known: None,
             detail: Some(false),
         };
         update(&path, |doc| doc.merge_look(&Look::default(), &look)).unwrap();
@@ -1067,6 +1077,7 @@ mod tests {
             sort: Some("updated".into()),
             sort_reversed: Some(false),
             fields: Some(vec!["id".into()]),
+            fields_known: None,
             detail: Some(true),
         };
         let a = Look { fields: Some(vec!["id".into(), "assignee".into()]), ..base.clone() };
