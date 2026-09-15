@@ -114,6 +114,26 @@ const WRITING: &str = r#"**첫 줄이 제목, 한 줄 띄우고 그 아래가 �
 지킬 것은 다음 세션이 `moai show <id>` 로 읽는다는 것 하나다. 이 셋은 그래서 있는 권고이지
 검사하는 규칙이 아니다."#;
 
+/// 글 스타일의 예시(moai-1xf2). **참고 문서에만 둔다** — AGENTS 블록과 SKILL.md 는 언제나
+/// 읽히는 자리라 예시 한 벌이 모든 세션의 값이 된다. 규칙은 짧게 늘 보이고, 예시는 부를 때 온다.
+const WRITING_EXAMPLE: &str = r#"제목은 인자로, 본문은 `-b -` 로 넘긴다.
+
+```sh
+moai add "edit --tag 이 빈 태그를 받아 필터가 빈 줄을 낸다" -t bug -e <에픽> -b - <<'BODY'
+- 무엇: `moai edit <id> --tag ""` 가 빈 태그를 그대로 쓴다
+- 무엇을 봤나: `moai show -t ""` 가 그 줄만 내고, 보드의 태그 칸은 빈 자리로 선다
+- 어디: `src/cmd/edit.rs` 의 태그 정규화. 빈 낱말을 거르면 끝난다
+BODY
+```
+
+흔한 어긋남 셋.
+
+- **제목에 겪은 일을 다 적는다** — "어제 …하다가 …해서 …인 것 같은데 확인이 필요함".
+  보드와 `ready` 는 그 줄을 잘라 내고, 자른 앞쪽에는 대개 무엇이 어긋났는지가 없다
+- **본문을 문단으로 적는다** — 다음 세션은 그 문단에서 "어디를 고치는가" 를 다시 찾아야 한다.
+  판단과 근거와 다음 걸음을 줄로 가르면 `moai show` 한 번으로 끝난다
+- **이모지로 급한 것을 알린다** — 급한 것은 우선순위(`-p 1`)로 적는다. `ready` 가 읽는 것은 그쪽이다"#;
+
 const IDEAS: &str = r#"    moai idea add "반짝 떠오른 것"                 담기
     moai idea add "긴 생각" -b -                   본문은 stdin 에서
     moai idea ls                                   쌓인 것 보기
@@ -439,6 +459,10 @@ PLAN
 ## 사람
 
 {PEOPLE}
+
+## 이슈에 적는 글 — 예시
+
+{WRITING_EXAMPLE}
 
 ## 커밋에 id 를 적는다
 
@@ -774,6 +798,28 @@ mod tests {
         {
             let found: String = text.chars().filter(|c| *c >= '\u{1F300}').collect();
             assert!(found.is_empty(), "{surface} 이 이모지를 쓴다 — {found}");
+        }
+    }
+
+    /// **예시가 제 스타일을 지킨다**(moai-1xf2). 스타일을 가르치는 글에서 예시가 어긋나면
+    /// 읽는 쪽은 규칙이 아니라 예시를 따라 적는다 — 예시가 실제 글이고 규칙은 설명이다.
+    ///
+    /// 제목 길이의 60은 보드가 좁은 창에서 자르기 시작하는 폭에서 왔다. 규칙이 아니라 예시에만
+    /// 매는 잣대다 — 이슈 제목을 셈해 막는 자리는 없다.
+    #[test]
+    fn the_style_example_obeys_the_style() {
+        let reference = reference();
+        assert!(reference.contains(WRITING_EXAMPLE), "참고 문서에 글 스타일 예시가 없다");
+        let title = WRITING_EXAMPLE.split('"').nth(1).expect("예시 명령에 제목이 없다");
+        assert!(title.chars().count() <= 60, "예시 제목이 보드에서 잘릴 만큼 길다 — {title}");
+        assert!(!title.contains('\n'), "예시 제목이 두 줄이다 — {title}");
+        // 본문은 목록이다. 서술형을 막는 글이 서술형 본문을 예시로 내밀면 안 된다.
+        // 여는 줄에서 자른다 — 닫는 줄(`BODY\n`)로 자르면 heredoc 뒤의 글을 본문으로 읽는다.
+        let body = WRITING_EXAMPLE.split("<<'BODY'\n").nth(1).expect("예시 본문이 없다");
+        let lines = body.lines().take_while(|l| *l != "BODY");
+        assert!(lines.clone().count() >= 2, "예시 본문이 한 줄뿐이라 목록으로 안 읽힌다");
+        for line in lines {
+            assert!(line.starts_with("- "), "예시 본문이 목록이 아니다 — {line}");
         }
     }
 
