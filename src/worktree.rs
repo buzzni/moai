@@ -728,6 +728,23 @@ fn from_top(top: Option<&Path>, path: &Path) -> PathBuf {
     }
 }
 
+/// 자리를 재다 못 읽은 워크트리들 — **두 사실을 두 채널로 가른다**(사용자 결정 2026-09-18, 리뷰
+/// moai-rgz9.7vt).
+///
+/// `all` 은 "이 스냅샷이 깨졌다" 고, `blinding` 은 "그래서 자리를 다 못 셌다" 다. 이름이 집은 줄을
+/// 가리키는 워크트리는 못 읽어도 판정을 안 가리므로 `blinding` 에 안 드는데, 그렇다고 깨진 파일을
+/// 아무 데서도 안 말하면 그 워크트리를 고칠 사람이 그것을 영영 모른다 — 고치는 것과 못 센 것은
+/// 다른 말이라 세는 자리를 가른다.
+pub struct Unread {
+    /// 스냅샷을 못 읽은 워크트리 전부 — 사람 화면이 `⎇ <가지>: <경로>` 로 한 줄씩 대고
+    /// `옆 워크트리 문제 N건` 이 센다.
+    pub all: Vec<crate::report::Workplace>,
+    /// 그중 **자리 판정을 가린** 것([`crate::report::blinding`]) — `status --json` 의
+    /// `unreadable_worktrees` 와 탐색기 층의 셈이 이것이다. `stranded` 의 침묵이 "없다" 인지
+    /// "못 셌다" 인지를 가르는 자라, 안 가린 것까지 들면 다 세고도 "못 셌다" 가 된다.
+    pub blinding: Vec<crate::report::Workplace>,
+}
+
 /// 자리 없는 줄 경고와, 못 읽은 워크트리들 — **표면 셋이 같은 자를 쓴다**(moai-p3bs).
 ///
 /// `moai status`·`.moai` 밖 한눈 보기·탐색기의 프로젝트 층이 이것을 부른다. 한때 첫째만 자리를
@@ -739,14 +756,13 @@ pub fn stranded_at(
     issues: &[Issue],
     worktree: bool,
     now: &str,
-) -> (Option<crate::report::Warning>, Vec<crate::report::Workplace>) {
+) -> (Option<crate::report::Warning>, Unread) {
     let trees = workplaces(root, cfg, worktree, issues);
     let warning = crate::report::stranded(issues, cfg, &trees, now);
-    // **판정을 가리는 것만 낸다**(moai-rgz9) — 받는 쪽은 모두 이것을 "자리를 다 못 셌다" 로 댄다.
-    // 이름이 집은 줄을 가리키는 워크트리는 못 읽어도 판정을 안 가리므로(`report::blinding`), 그것까지
-    // 내면 경고는 다 셌는데 화면만 "다 못 셌다" 라고 한다.
-    let blind = crate::report::blinding(issues, cfg, &trees).into_iter().cloned().collect();
-    (warning, blind)
+    let blinding: Vec<crate::report::Workplace> =
+        crate::report::blinding(issues, cfg, &trees).into_iter().cloned().collect();
+    let all = trees.into_iter().filter(|t| t.unknown).collect();
+    (warning, Unread { all, blinding })
 }
 
 /// 제 워크트리가 아닌 워크트리들을 **git 을 띄우지 않고** 읽는다 — 이름 후보([`away`])만 쓴다.

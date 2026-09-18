@@ -6861,14 +6861,15 @@ fn status_reads_a_side_snapshot_only_when_a_place_is_still_missing() {
     assert!(!json.contains("unreadable_worktrees"), "다 읽었는데 못 읽었다고 했다\n{json}");
 }
 
-/// **판정을 안 가리는 못 읽은 워크트리는 "다 못 셌다" 로 세지 않는다**(moai-rgz9·moai-1i9d).
+/// **판정을 안 가리는 못 읽은 워크트리는 말은 하되 "다 못 셌다" 로 세지 않는다**(moai-rgz9·moai-1i9d,
+/// 사용자 결정 2026-09-18).
 /// 규약의 워크트리 이름은 에픽 id 다(`worktree-<에픽>`). 그 워크트리의 스냅샷을 못 읽어도 이름이
 /// 집은 멤버를 가리키므로 그 멤버는 이미 제 자리에 섰고, 딴 줄의 자리도 가리지 않는다 — 그러면
 /// 자리 잃은 딴 줄이 그대로 `stranded` 에 서야 하고, 어느 표면도 "못 읽었다" 를 대지 않아야 한다.
 /// 한때 판정은 에픽 이름을 못 알아봐 딴 줄까지 "모른다" 로 덮었고, 표면은 판정과 따로 못 읽은
 /// 워크트리를 다 세어 화면마다 "자리를 다 못 셌다" 가 섰다.
 #[test]
-fn an_unreadable_epic_worktree_neither_blinds_nor_is_counted_as_blind() {
+fn an_unreadable_epic_worktree_is_told_of_but_does_not_blind() {
     let s = Scratch::new("epicblind");
     let main = s.path().join("main");
     std::fs::create_dir_all(&main).unwrap();
@@ -6887,14 +6888,17 @@ fn an_unreadable_epic_worktree_neither_blinds_nor_is_counted_as_blind() {
     std::fs::remove_file(&broken).unwrap();
     std::fs::create_dir(&broken).unwrap();
 
+    // **깨졌다는 말은 산다**(사용자 결정 2026-09-18) — 판정을 가렸는지와 별개로, 그 스냅샷을 고칠
+    // 사람이 있어야 고쳐진다. 가린 것만 세는 자리는 `--json` 의 `unreadable_worktrees` 와 층이다.
     let out = isolated(BIN).arg("status").current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
     let said = String::from_utf8(out.stderr).unwrap();
-    assert!(!said.contains("못 읽었다"), "판정을 안 가리는 워크트리를 못 읽었다고 댔다\n{said}");
+    assert!(said.contains("못 읽었다") && said.contains(&epic), "깨진 스냅샷을 아무 데서도 안 말했다\n{said}");
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("일하는 워크트리가 없는 것 1건") && text.contains(&lost), "에픽 워크트리가 딴 줄을 가렸다\n{text}");
-    assert!(!text.contains("옆 워크트리 문제"), "{text}");
+    assert!(text.contains("옆 워크트리 문제 1건"), "깨진 스냅샷을 보드가 안 셌다\n{text}");
     let json = ok_at(&main, LATER, &["status", "--json"]);
-    assert!(!json.contains("unreadable_worktrees"), "판정을 안 가리는 워크트리를 기계에게 댔다\n{json}");
+    assert!(!json.contains("unreadable_worktrees"), "판정을 안 가리는 워크트리를 '못 셌다' 로 댔다\n{json}");
+    assert!(json.contains("\"stranded\""), "에픽 워크트리가 딴 줄을 가렸다\n{json}");
     assert!(ok_at(&main, LATER, &["show", &member, "--json"]).contains("\"place\":\"at\""));
 
     // 밖 한눈 보기와 탐색기의 층도 같은 자다(`worktree::stranded_at`).
@@ -6910,7 +6914,7 @@ fn an_unreadable_epic_worktree_neither_blinds_nor_is_counted_as_blind() {
         .output()
         .unwrap();
     let seen = String::from_utf8(seen.stdout).unwrap();
-    assert!(!seen.contains("못 읽었다") && !seen.contains("옆 워크트리 문제"), "{seen}");
+    assert!(seen.contains("못 읽었다") && seen.contains("옆 워크트리 문제 1건"), "밖에서 깨진 스냅샷을 안 댔다\n{seen}");
     assert!(seen.contains(&lost), "밖에서 자리 잃은 줄을 안 댔다\n{seen}");
     let layer = isolated(BIN)
         .args(["tui", "--json"])

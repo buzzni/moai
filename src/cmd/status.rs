@@ -35,7 +35,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **자리 없는 집은 줄은 여기서만 싣는다**(moai-4370) — 까닭은 `report::stranded`. 치명이 아니라
     // 아래 종료 코드는 안 바뀐다. 언제 재는지는 `worktree::workplaces` 가 정한다 — 딸린 워크트리
     // 안에서 겹쳐 보지 않았으면 빈 목록이 오고, 그러면 `stranded` 가 조용하다.
-    let (lost, unknown) = crate::worktree::stranded_at(&repo.root, &repo.config, &load.issues, worktree, &now);
+    let (lost, unread) = crate::worktree::stranded_at(&repo.root, &repo.config, &load.issues, worktree, &now);
     st.warnings.extend(lost);
     // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정에서 그 워크트리는 "아무도
     // 없다" 가 아니라 "모른다" 로 빠지므로(`report::Place::Unknown`), 말이 없으면 경고가 조용한
@@ -57,14 +57,19 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 대지 않는데, 이쪽은 그대로 찾아 낸다 — 그때 입을 다물면 깨진 워크트리를 아무도 안 말하고
     // `stranded` 까지 조용해진다. 그쪽이 실제로 셌을 때만 접는다 — 그 자는 `Gathered::swept` 하나고,
     // 밖 한눈 보기(`view::projects_status`)도 같은 것을 읽는다.
+    //
+    // **여기서 대는 것은 못 읽은 워크트리 전부다**(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt) —
+    // 판정을 가렸는지와 상관없다. 깨진 스냅샷은 고칠 사람이 있어야 고쳐지는데, 이름이 집은 줄을
+    // 가리킨다는 까닭으로 입을 다물면 그 워크트리는 어느 화면에도 안 선다. "못 셌다" 쪽은
+    // `Unread::blinding` 이 따로 센다.
     let said_already = swept;
     if !said_already {
-        for t in &unknown {
+        for t in &unread.all {
             eprintln!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display());
         }
     }
     // 센 것은 **낸 것뿐이다** — `gather` 가 이미 낸 줄은 `trouble` 에 이미 들어 있다.
-    let trouble = trouble + if said_already { 0 } else { unknown.len() };
+    let trouble = trouble + if said_already { 0 } else { unread.all.len() };
     // **낡은 AGENTS.md 블록은 알림이다**(moai-mj45, 2026-09-14 사용자 결정). 언제 서고 무엇을
     // 대는지는 `agents_notice` 가 정하고, 훅의 보드가 같은 것을 싣는다. 한눈 보기(`.moai` 밖)는
     // 남의 저장소라 안 본다.
@@ -97,6 +102,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         // **못 읽은 워크트리는 기계에게도 댄다**(리뷰 moai-ya06). 그런 워크트리가 하나라도 있으면
         // 자리 판정이 통째로 `모른다` 로 접혀 `stranded` 가 조용해지는데(`report::places` 의
         // `blind`), 여기 키가 없으면 받는 쪽은 "자리 잃은 일이 없다" 와 "못 셌다" 를 못 가른다 —
+        // **여기 드는 것은 판정을 가린 워크트리뿐이다**(`Unread::blinding`, moai-rgz9) — 못 읽어도
+        // 이름이 집은 줄을 가리키는 워크트리는 판정을 안 가리니 안 든다. 키 이름은 그대로 두지만
+        // "못 읽은 워크트리 전부" 가 아니다 — 그쪽은 위에서 stderr 에 한 줄씩 낸다.
         // 감독 스킬이 이 목록의 `stranded` 로 죽은 세션의 일을 거두므로, 그 침묵이 곧 일을
         // 영영 안 거두는 것이 된다. 사람 화면은 `옆 워크트리 문제 N건` 으로 이미 가르고, `show
         // --json` 도 같은 사실을 `place` 로 낸다 — 가르는 것을 받는 쪽도 가를 수 있어야 한다.
@@ -105,8 +113,11 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         // 다시 두 뜻이 된다. `--worktree` 여부와 무관하게 단다: `gather` 의 `⎇` 줄은 stderr 라
         // 기계가 읽는 자리에는 어느 쪽에서도 이 사실이 없었다.
         let mut extra = Vec::new();
-        if !unknown.is_empty() {
-            extra.push(("unreadable_worktrees", serde_json::to_string(&unknown).map_err(|e| super::Fail::new(e.to_string()))?));
+        if !unread.blinding.is_empty() {
+            extra.push((
+                "unreadable_worktrees",
+                serde_json::to_string(&unread.blinding).map_err(|e| super::Fail::new(e.to_string()))?,
+            ));
         }
         // **겹쳐 봤을 때만 키를 단다.** 늘 달면 `--worktree` 없이 부른 쪽도 빈
         // 지도를 받아 "겹쳐 봤는데 옆에 아무것도 없다" 로 읽는다.
@@ -166,7 +177,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 // (`worktree::stranded_at`). 한때 이 화면에만 없어, 프로젝트 밖에서 보드를 보는
                 // 사람은 죽은 세션의 일을 영영 못 봤다. 옆 워크트리를 겹치는지는 부른 쪽을 따른다.
                 let mut status = report::status(&load.issues, &unreadable, &repo.config, &now);
-                let (lost, blind) =
+                let (lost, unread) =
                     crate::worktree::stranded_at(&repo.root, &repo.config, &load.issues, worktree, &now);
                 status.warnings.extend(lost);
                 view::Board {
@@ -178,9 +189,11 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     // **못 읽은 워크트리는 여기서도 센다**(리뷰 moai-p3bs.op2) — 밖에서는 `gather`
                     // 가 겹쳐 보지 않으면 옆 스냅샷을 아예 안 열어 `trouble` 이 비고, 그러면 죽은
                     // 세션과 못 읽는 워크트리가 함께 있는 저장소가 "드러난 문제 없다" 로 선다.
-                    // 목록으로 넘긴다 — 사람 화면과 `--json` 이 다 여기서 읽는다(`view::projects_status`,
-                    // 아래 `Said`). `trouble` 이 이미 낸 것인지는 `swept` 가 가른다 — 안쪽과 같은 자다.
-                    blind,
+                    // 목록 둘을 넘긴다 — 사람 화면은 못 읽은 것 전부를 한 줄씩 대고(`unread`),
+                    // `--json` 은 판정을 가린 것만 낸다(`blind`). 안쪽 `status` 와 같은 가름이다.
+                    // `trouble` 이 이미 낸 것인지는 `swept` 가 가른다 — 이것도 안쪽과 같은 자다.
+                    unread: unread.all,
+                    blind: unread.blinding,
                     swept: p.swept,
                 }
             })

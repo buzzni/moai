@@ -1406,7 +1406,11 @@ pub struct Board<'a> {
     /// **수가 아니라 목록으로 든다** — 사람 화면은 한 줄씩 대고(아래 `projects_status`), `--json` 은
     /// 안쪽 `status` 와 같은 모양으로 이 목록을 그대로 낸다.
     pub blind: Vec<crate::report::Workplace>,
-    /// 옆 워크트리를 빠짐없이 열어 봤는가 (`Project::swept`) — 그러면 `blind` 는 `trouble` 이 이미
+    /// 스냅샷을 **못 읽은 워크트리 전부**(`worktree::Unread::all`) — 사람 화면이 한 줄씩 대는 것은
+    /// 이쪽이다(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt). 판정을 안 가려도 깨진 파일은 고칠
+    /// 사람이 알아야 하고, `blind` 는 "그래서 자리를 다 못 셌다" 라는 다른 말이다.
+    pub unread: Vec<crate::report::Workplace>,
+    /// 옆 워크트리를 빠짐없이 열어 봤는가 (`Project::swept`) — 그러면 `unread` 는 `trouble` 이 이미
     /// 말했다. 사람 화면은 두 번 안 세고, `--json` 은 `blind` 를 그대로 낸다(안쪽 `status` 와 같다).
     pub swept: bool,
 }
@@ -1509,7 +1513,7 @@ pub fn projects_status(
         let blind: Vec<String> = if b.swept {
             Vec::new()
         } else {
-            b.blind
+            b.unread
                 .iter()
                 .map(|t| format!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display()))
                 .collect()
