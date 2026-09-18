@@ -45,7 +45,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **가지와 경로를 함께 댄다.** 가지만 대면 떼어 낸 HEAD 의 이름은 커밋 앞 일곱 자라
     // (`Workplace::branch`) 같은 커밋에 선 워크트리 둘이 글자까지 같아져 보는 쪽이 하나로 읽고,
     // 경로만 대면 `gather` 의 `⎇ <가지>` 와 낱말이 갈린다. 경로를 어디서 재는지는
-    // `worktree::stranded_at` 이 정한다 — `show` 와 같은 자다.
+    // `worktree::workplaces` 가 정한다 — `show` 와 같은 자다.
     // **`gather` 가 이미 낸 것은 두 번 안 낸다** — `--worktree` 면 그쪽이 옆 스냅샷을 빠짐없이
     // 열어 같은 워크트리를 `⎇ <가지>: …` 로 냈다. 두 번 내면 stderr 에 같은 워크트리가 낱말만
     // 바꿔 두 줄로 서고, 보드의 `옆 워크트리 문제 N건` 이 하나를 둘로 세어 보는 쪽이 두 곳이

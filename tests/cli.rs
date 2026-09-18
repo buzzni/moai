@@ -613,6 +613,11 @@ fn the_overview_counts_work_with_no_live_worktree() {
     let mine = block(&blind, "one");
     assert!(!mine.contains("드러난 문제 없다"), "못 셌는데 문제 없다고 했다\n{blind}");
     assert!(mine.contains("옆 워크트리 문제 1건"), "못 읽은 워크트리를 안 셌다\n{blind}");
+    // **센 것은 줄로도 댄다** — 수만 서면 `— 위 줄` 이 없는 줄을 가리키고 어느 워크트리인지 모른다.
+    assert!(
+        mine.contains("스냅샷을 못 읽었다 — ⎇ worktree-agent-x: .claude/worktrees/agent-x"),
+        "못 읽은 워크트리를 세기만 하고 대지 않았다\n{blind}"
+    );
 
     // **겹쳐 보면 `gather` 가 같은 워크트리를 이미 냈다 — 두 번 세지 않는다**(`status` 의
     // `said_already` 와 같은 자). 겹쳐 세면 깨진 워크트리 하나가 `옆 워크트리 문제 2건` 으로 서서
@@ -628,6 +633,7 @@ fn the_overview_counts_work_with_no_live_worktree() {
         .unwrap();
     let both = String::from_utf8(both.stdout).unwrap();
     assert!(block(&both, "one").contains("옆 워크트리 문제 1건"), "한 워크트리를 두 번 셌다\n{both}");
+    assert!(!block(&both, "one").contains("스냅샷을 못 읽었다 — ⎇"), "`gather` 가 낸 워크트리를 한 번 더 댔다\n{both}");
     let machine = isolated(BIN)
         .args(["status", "--worktree", "--json"])
         .current_dir(&out)

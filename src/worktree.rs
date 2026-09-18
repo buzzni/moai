@@ -450,6 +450,11 @@ impl Disk {
     fn others(&self) -> impl Iterator<Item = &Tree> {
         self.all.iter().filter(|(_, _, me)| !me).map(|(t, ..)| t)
     }
+
+    /// main 워크트리. 맨몸 저장소면 없다.
+    fn main(&self) -> Option<&Tree> {
+        self.all.iter().find(|(_, linked, _)| !*linked).map(|(t, ..)| t)
+    }
 }
 
 /// 옆 **딸린** 워크트리가 쥐었을 수 있는 줄 id 와, 제 워크트리의 이름 후보 (moai-ntl6, 사용자 결정 B).
@@ -523,7 +528,8 @@ fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) 
 /// 살아 있는 **딸린** 워크트리마다 자리 하나(moai-ir8q) — 판정은 `report::places`·`report::stranded`.
 ///
 /// main 워크트리는 안 든다 — 모두의 집기가 모이는 자리라 거기 선 줄은 "어디서 하는가" 에 답이
-/// 안 된다. 파일만 읽는다. 저장소가 아니면 비어 있다.
+/// 안 된다. 파일만 읽는다. 저장소가 아니면 비어 있다. **경로는 main 워크트리의 꼭대기에서 잰
+/// 상대 경로다**([`main_top`]) — `status`·`show` 가 이 값을 그대로 낸다.
 ///
 /// **딸린 워크트리 안에서는 `worktree` 일 때만 잰다.** 그 스냅샷은 갈라질 때의 main 이라, 그 뒤
 /// main 에서 끝내거나 놓은 줄이 거기서는 아직 집혀 있다 — 그것으로 재면 끝난 일을 "자리 없다" 로
@@ -567,15 +573,6 @@ pub fn workplaces(
         return Vec::new();
     }
     let Some(disk) = on_disk(root) else { return Vec::new() };
-    let bare = |tree: &Tree| crate::report::Workplace {
-        path: tree.path.clone(),
-        branch: tree.label.clone(),
-        names: names([tree]),
-        holds: BTreeSet::new(),
-        touched: BTreeSet::new(),
-        born: None,
-        unknown: false,
-    };
     // **거를 자를 한 번만 적는다** — 자리와 그 워크트리를 아래에서 `zip` 으로 맞추므로, 거르는
     // 줄이 둘이면 한쪽만 고쳐졌을 때 자리가 남의 워크트리의 스냅샷을 받아 든다.
     let linked: Vec<&Tree> = disk.all.iter().filter(|(_, linked, _)| *linked).map(|(tree, ..)| tree).collect();
@@ -584,6 +581,19 @@ pub fn workplaces(
     if linked.is_empty() {
         return Vec::new();
     }
+    // **경로는 여기서 한 번 잰다**([`main_top`]) — 이미 읽은 목록으로 재므로 git 이 적어 둔
+    // 파일을 다시 안 읽는다. 부르는 쪽마다 따로 재던 때는 자가 둘이라 빈 경로를 다루는 법이
+    // 갈렸고, 둘 다 같은 목록을 한 벌 더 읽었다.
+    let top = main_top(&disk, root);
+    let bare = |tree: &Tree| crate::report::Workplace {
+        path: from_top(top.as_deref(), &tree.path),
+        branch: tree.label.clone(),
+        names: names([tree]),
+        holds: BTreeSet::new(),
+        touched: BTreeSet::new(),
+        born: None,
+        unknown: false,
+    };
     let mut out: Vec<crate::report::Workplace> = linked.iter().map(|tree| bare(tree)).collect();
     // 이름만으로 자리가 다 잡히면(또는 집은 줄이 없으면) 스냅샷을 한 벌도 안 판다.
     //
@@ -601,12 +611,7 @@ pub fn workplaces(
     // `holds` 를 가릴 때만 보는 값이라(`report::places`), 안 파는 길에서는 워크트리마다
     // `logs/HEAD` 를 한 번씩 읽고 버리는 헛일이었다(`Disk::admin` 이 같은 까닭으로 `on_disk`
     // 에서 이것을 뺐다).
-    let base = disk
-        .all
-        .iter()
-        .find(|(_, linked, _)| !*linked)
-        .map(|(t, ..)| t.path.join(&disk.rel))
-        .unwrap_or_else(|| root.to_path_buf());
+    let base = disk.main().map(|t| t.path.join(&disk.rel)).unwrap_or_else(|| root.to_path_buf());
     let own = crate::store::read_snapshot(&base.join(".moai").join("issues.jsonl"));
     let mine: &[Issue] = match &own {
         Ok(Some(load)) => &load.issues,
@@ -651,7 +656,7 @@ fn born_of(dir: &Path) -> Option<String> {
 /// 경로가 그 밑에 없어 하나도 안 잘리고, 기계의 절대 경로가 `--json` 으로 그대로 나간다.
 ///
 /// **자리 경로를 이것으로 재지 않는다** — 부르는 쪽이 딸린 워크트리면 옆 워크트리가 하나도 안
-/// 잘린다. 그래서 밖으로는 [`main_top`] 만 낸다(moai-fygk).
+/// 잘린다. 자리 경로는 [`main_top`] 이 재고, 이것은 main 을 못 찾았을 때의 물러설 곳이다(moai-fygk).
 fn top_of(root: &Path) -> Option<PathBuf> {
     git_dirs(root).map(|(top, _)| canonical(top))
 }
@@ -663,21 +668,29 @@ fn top_of(root: &Path) -> Option<PathBuf> {
 /// 워크트리는 모두 main 아래 `.claude/worktrees/` 에 서므로, main 에서 재면 어느 자리에서 부르든
 /// 같은 상대 경로가 나온다 — 그래야 그 글자를 그대로 `EnterWorktree` 에 옮길 수 있다.
 ///
-/// main 을 못 찾으면(맨몸 저장소) 제 꼭대기로 돌아간다. 저장소가 아니면 없다.
-pub fn main_top(root: &Path) -> Option<PathBuf> {
-    let disk = on_disk(root)?;
-    disk.all
-        .iter()
-        .find(|(_, linked, _)| !*linked)
-        .map(|(t, ..)| canonical(&t.path))
-        .or_else(|| top_of(root))
+/// main 을 못 찾으면(맨몸 저장소) 제 꼭대기로 돌아간다. [`workplaces`] 가 이미 읽은 목록으로
+/// 잰다 — git 이 적어 둔 파일을 다시 안 읽는다.
+fn main_top(disk: &Disk, root: &Path) -> Option<PathBuf> {
+    disk.main().map(|t| canonical(&t.path)).or_else(|| top_of(root))
+}
+
+/// 워크트리 경로를 [`main_top`] 에서 잰 것으로. 그 밑이 아니면(main 밖에 만든 워크트리) 그대로다.
+///
+/// **꼭대기와 같은 자리면 `.` 이다** — 맨몸 저장소에서 제 꼭대기로 돌아가 잰 제 워크트리가
+/// 그렇다. 빈 경로로 두면 사람 화면의 `자리` 칸이 통째로 비고 `--json` 의 `path` 가 `""` 로 나간다.
+fn from_top(top: Option<&Path>, path: &Path) -> PathBuf {
+    match top.and_then(|t| path.strip_prefix(t).ok()) {
+        Some(rel) if rel.as_os_str().is_empty() => PathBuf::from("."),
+        Some(rel) => rel.to_path_buf(),
+        None => path.to_path_buf(),
+    }
 }
 
 /// 자리 없는 줄 경고와, 못 읽은 워크트리들 — **표면 셋이 같은 자를 쓴다**(moai-p3bs).
 ///
 /// `moai status`·`.moai` 밖 한눈 보기·탐색기의 프로젝트 층이 이것을 부른다. 한때 첫째만 자리를
 /// 셌고, 그래서 **죽은 세션을 찾으러 돌아온 사람이 보는 화면**(층과 밖 한눈 보기)에만 그 말이
-/// 없었다. 경로는 [`main_top`] 에서 잰다.
+/// 없었다. 경로는 [`workplaces`] 가 이미 [`main_top`] 에서 잰 것이다 — `show` 와 같은 자다.
 pub fn stranded_at(
     root: &Path,
     cfg: &crate::config::Config,
@@ -687,23 +700,7 @@ pub fn stranded_at(
 ) -> (Option<crate::report::Warning>, Vec<crate::report::Workplace>) {
     let trees = workplaces(root, cfg, worktree, issues);
     let warning = crate::report::stranded(issues, cfg, &trees, now);
-    // **자를 것이 없으면 꼭대기도 안 잰다** — [`main_top`] 은 [`on_disk`] 를 한 벌 더 읽는데
-    // (`read_dir` 과 워크트리마다 파일 둘·`canonicalize`), 바로 위 [`workplaces`] 가 이미 같은
-    // 것을 읽었다. 못 읽은 워크트리는 드물고, 이 함수는 이제 표면 셋이 부른다 — 층은 등록한
-    // 프로젝트마다 스레드에서 부르므로 흔한 길에서 그 값을 두 번 치를 까닭이 없다.
-    if !trees.iter().any(|t| t.unknown) {
-        return (warning, Vec::new());
-    }
-    let top = main_top(root).unwrap_or_else(|| root.to_path_buf());
-    let unknown = trees
-        .iter()
-        .filter(|t| t.unknown)
-        .map(|t| crate::report::Workplace {
-            path: t.path.strip_prefix(&top).unwrap_or(&t.path).to_path_buf(),
-            ..t.clone()
-        })
-        .collect();
-    (warning, unknown)
+    (warning, trees.into_iter().filter(|t| t.unknown).collect())
 }
 
 /// 제 워크트리가 아닌 워크트리들을 **git 을 띄우지 않고** 읽는다 — 이름 후보([`away`])만 쓴다.
