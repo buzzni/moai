@@ -41,6 +41,11 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
                                 등록한 프로젝트를 한눈에 낸다
   moai -C <dir> <명령>          그 밖의 명령은 어느 프로젝트인지 댄다
 
+화면의 말을 바꿀 때:
+
+  MOAI_LANG=en moai status      영어 화면으로. en·ko·zh·ja·es 가 된다
+                                늘 쓰려면 사용자 설정의 [i18n] 에 lang = \"en\"
+
 계획을 한 번에 세울 때:
 
 moai add --from - <<'PLAN'
