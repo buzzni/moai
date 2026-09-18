@@ -3950,3 +3950,4 @@
 {"ts":"2026-09-18T09:28:24Z","id":"moai-f3ml.lm7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"high 1건 반영(b23cff8: 규칙 1 이 promote -e 를 생성으로 본다), 넘김 없음"}
 {"ts":"2026-09-18T09:28:25Z","id":"moai-dw63.gwf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"max 15건 — 12 반영, 15 의 남은 둘 직접 반영(f6388df), 13·14 는 에픽이 내건 것이라 멤버 moai-d4e0·moai-8ema 로 첫 칸에 남김, 보고만 한 것은 idea moai-m807·moai-d5cl·moai-chnl"}
 {"ts":"2026-09-18T09:28:33Z","id":"moai-dw63","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 첫 칸에 남긴 멤버 둘(moai-8ema Stop 훅의 defer 권유, moai-d4e0 idea add 에 둘째 물음 비추기)이 에픽을 열어 둔다. 둘 다 훅 동작을 바꾼다 — 마지막 것이 닫힐 때 에픽 끝 리뷰를 다시 돌린다"}
+{"ts":"2026-09-18T09:29:01Z","id":"moai-ghnb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
