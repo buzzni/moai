@@ -21,6 +21,8 @@ mod nav;
 mod projects;
 mod query;
 mod report;
+#[cfg(test)]
+mod scratch;
 mod skill;
 mod store;
 mod style;

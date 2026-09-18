@@ -738,14 +738,12 @@ mod tests {
     }
 
     /// 편집기 시험의 임시 자리. 이름에 **빈칸**을 넣는다 — 경로가 셸에서 쪼개지면 여기서 드러난다.
-    struct Dir(std::path::PathBuf);
+    /// 만들고 지우는 일(터져도 치우는 것까지)은 [`Scratch`](crate::scratch::Scratch) 가 한다.
+    struct Dir(crate::scratch::Scratch);
 
     impl Dir {
         fn new(name: &str) -> Dir {
-            let d = std::env::temp_dir().join(format!("moai-editor {name}-{}-{:?}", std::process::id(), std::thread::current().id()));
-            let _ = std::fs::remove_dir_all(&d);
-            std::fs::create_dir_all(&d).unwrap();
-            Dir(d)
+            Dir(crate::scratch::Scratch::new(&format!("editor {name}")))
         }
 
         /// 가짜 편집기 — 받은 인자와 파일의 권한·글을 옆에 적고, `script` 를 돈다. **진짜 편집기는
@@ -772,17 +770,11 @@ mod tests {
 
         /// 편집기가 끝난 뒤 남은 임시 파일.
         fn leftovers(&self) -> Vec<String> {
-            std::fs::read_dir(&self.0)
+            std::fs::read_dir(self.0.path())
                 .unwrap()
                 .filter_map(|e| e.ok()?.file_name().into_string().ok())
                 .filter(|n| n.starts_with("moai-idea-"))
                 .collect()
-        }
-    }
-
-    impl Drop for Dir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 

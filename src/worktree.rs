@@ -1047,12 +1047,47 @@ mod tests {
         assert_eq!(origin.branch("m-0001"), Some("feat/x"));
     }
 
+    /// **임시 자리가 어느 체크아웃 안이어도 그 저장소의 워크트리가 새지 않는다**(moai-46xz).
+    ///
+    /// 파일로 읽는 반쪽은 `Path::ancestors()` 로 `.git` 을 찾아 올라간다. 컨테이너나 CI 에서
+    /// `TMPDIR` 이 체크아웃 밑이면 시험의 임시 자리 위에 그 체크아웃이 서고, 만들지도 않은
+    /// 워크트리 이름이 답에 섞인다 — 환경 변수를 걷어서는 못 막는 길이다. 그래서 임시 자리에
+    /// 아무것도 없는 저장소를 울타리로 세운다([`Scratch::fenced`]).
+    ///
+    /// **git 으로 읽는 길도 울타리에서 선다**(`heads`·`gather`). 빈 `.git` 디렉터리만 두면 git 은 그것을
+    /// 지나쳐 위의 체크아웃을 잡는다 — 파일로 읽는 반쪽만 보면 그 틈이 안 드러난다.
+    ///
+    /// 여기서는 그 상황을 **이 저장소 안에 자리를 잡아** 그대로 흉내 낸다. 이 체크아웃은
+    /// 진짜 저장소라, 울타리가 없으면 그 꼭대기가 그대로 잡힌다.
+    ///
+    /// **먼저 울타리 없는 자리로 견준다.** `away` 만 보면 워크트리가 하나도 안 딸린 새
+    /// 클론에서는 울타리를 걷어내도 양쪽이 똑같이 비어, 이 시험이 아무것도 안 본 채
+    /// 초록으로 끝난다. 훑기가 어디서 멈추는가(`top_of`)가 울타리가 지는 값이다.
+    #[test]
+    fn a_temp_place_inside_a_checkout_does_not_leak_that_repos_worktrees() {
+        let inside = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/tmp");
+        std::fs::create_dir_all(&inside).unwrap();
+
+        // 울타리 없는 자리는 위의 체크아웃을 꼭대기로 읽는다 — 이 시험이 막는 그 길이다.
+        let bare = crate::scratch::Scratch::in_place(&inside, "fence-none");
+        let above = top_of(bare.path());
+        assert!(above.is_some_and(|t| t != *bare.path()), "임시 자리가 체크아웃 밖이다 — 이 시험이 흉내 낼 것이 없다");
+
+        let dir = crate::scratch::Scratch::fenced_in(&inside, "fence");
+        assert_eq!(top_of(dir.path()).as_deref(), Some(canonical(dir.path()).as_path()), "훑기가 울타리를 넘어갔다");
+        assert!(away(dir.path()).is_empty(), "울타리 위의 저장소가 새어 나왔다 — {:?}", away(dir.path()));
+        assert!(away(&dir.join("nowhere")).is_empty(), "없는 자리에서도 위의 저장소를 읽었다");
+        assert!(!is_linked(dir.path()), "울타리를 딸린 워크트리로 읽었다");
+        let git_top = crate::git::run(dir.path(), &["rev-parse", "--show-toplevel"]).map(|t| PathBuf::from(t.trim_end()));
+        assert_eq!(git_top.ok(), Some(canonical(dir.path())), "git 이 울타리를 지나쳐 위의 저장소를 잡았다");
+    }
+
     /// 어느 워크트리에서든 커밋·`pack-refs`·떼어 낸 checkout 이 지켜보는 표식을 바꾼다 —
     /// 탐색기가 갈라진 자리가 바뀐 것을 알아챈다(moai-pqrq).
     #[test]
     fn a_moved_head_in_any_worktree_changes_a_watched_stamp() {
-        let base = std::env::temp_dir().join(format!("moai-heads-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let scratch = crate::scratch::Scratch::fenced("heads");
+        let base = scratch.path().to_path_buf();
         let (main, feat) = (base.join("main"), base.join("feat"));
         std::fs::create_dir_all(&main).unwrap();
         let run = |dir: &Path, args: &[&str]| {
@@ -1111,7 +1146,6 @@ mod tests {
         std::fs::create_dir_all(&sub).unwrap();
         let seen = heads(&sub);
         assert!(seen.iter().any(|(p, s)| p.ends_with("refs/heads/more") && s.is_some()), "하위에서 가지 파일을 못 찾는다 — {seen:#?}");
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.

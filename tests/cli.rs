@@ -6,6 +6,8 @@ use std::process::{Command, Output, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_moai");
 const NOW: &str = "2026-09-11T04:12:03Z";
+/// 시험이 대는 사람. **한 자리에 둔다** — 글자를 베껴 적으면 한쪽만 고쳐도 아무도 모른다.
+const ACTOR: &str = "테스터 (tester@example.com)";
 
 struct Scratch(PathBuf);
 
@@ -106,15 +108,32 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
 #[path = "../src/git_leaks.rs"]
 mod git_leaks;
 
-fn moai(dir: &Path, args: &[&str]) -> Output {
-    isolated(BIN)
-        .args(args)
-        .current_dir(dir)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
+/// 시험이 부르는 moai 한 벌. **사람·시계·색을 한 자리에서 준다**(moai-uu47).
+///
+/// 이 세 줄이 여덟 군데에 베껴져 있었다. 베낀 자리는 조용히 갈라진다 — `hook_in` 은 사람과
+/// 시계만 주고 색을 안 줘, 다른 자리들과 다른 환경에서 돌고 있었다.
+///
+/// 더 줄 것이 있으면 돌려받아 이어 붙인다(`env`·`current_dir`). 걷어야 할 것은
+/// [`isolated`] 가 이미 걷었다.
+fn staged(args: &[&str]) -> Command {
+    let mut cmd = isolated(BIN);
+    cmd.args(args)
+        .env("MOAI_ACTOR", ACTOR)
         .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
-        .output()
-        .expect("moai 를 실행하지 못했다")
+        .env("NO_COLOR", "1");
+    cmd
+}
+
+/// 시계를 **안 고정한** 한 벌. 겨루기 시험이 쓴다 — 여덟이 같은 시각을 들고 달리면
+/// 겨루는 것이 실제 시계가 아니라 그 값이 된다.
+fn staged_live(args: &[&str]) -> Command {
+    let mut cmd = isolated(BIN);
+    cmd.args(args).env("MOAI_ACTOR", ACTOR).env("NO_COLOR", "1");
+    cmd
+}
+
+fn moai(dir: &Path, args: &[&str]) -> Output {
+    staged(args).current_dir(dir).output().expect("moai 를 실행하지 못했다")
 }
 
 fn ok(dir: &Path, args: &[&str]) -> String {
@@ -550,11 +569,8 @@ fn concurrent_adds_all_survive() {
     let n = 8;
     let kids: Vec<_> = (0..n)
         .map(|i| {
-            isolated(BIN)
-                .args(["add", &format!("동시 {i}"), "-q"])
+            staged_live(&["add", &format!("동시 {i}"), "-q"])
                 .current_dir(s.path())
-                .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-                .env("NO_COLOR", "1")
                 .stdout(Stdio::piped())
                 .spawn()
                 .unwrap()
@@ -636,13 +652,9 @@ fn registry(s: &Scratch, dirs: &[&Path]) -> PathBuf {
 }
 
 fn moai_with(dir: &Path, config: &Path, args: &[&str]) -> Output {
-    isolated(BIN)
-        .args(args)
+    staged(args)
         .current_dir(dir)
         .env("MOAI_CONFIG", config)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
         .output()
         .expect("moai 를 실행하지 못했다")
 }
@@ -2267,14 +2279,7 @@ fn tree_is_refused_on_a_single_issue() {
 // ── S4 — moai status ─────────────────────────────────────────────────
 
 fn at(dir: &Path, now: &str, args: &[&str]) -> Output {
-    isolated(BIN)
-        .args(args)
-        .current_dir(dir)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-        .env("MOAI_NOW", now)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap()
+    staged(args).current_dir(dir).env("MOAI_NOW", now).output().unwrap()
 }
 
 /// **경고가 있어도 종료 코드는 0 이다.**
@@ -2375,12 +2380,8 @@ fn status_is_one_screen_with_everything() {
 
 fn from_stdin(dir: &Path, args: &[&str], input: &str) -> Output {
     use std::io::Write as _;
-    let mut child = isolated(BIN)
-        .args(args)
+    let mut child = staged(args)
         .current_dir(dir)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -3949,12 +3950,8 @@ fn narrow_terminals_keep_heredoc_openers_whole() {
 fn help_at(s: &Scratch, path: &str, columns: usize) -> String {
     let mut args: Vec<&str> = path.split_whitespace().collect();
     args.push("--help");
-    let out = isolated(BIN)
-        .args(&args)
+    let out = staged(&args)
         .current_dir(s.path())
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
         .env("COLUMNS", columns.to_string())
         .output()
         .expect("moai 를 실행하지 못했다");
@@ -6023,11 +6020,8 @@ fn hook_in(s: &Scratch, run_in: &Path, event: &str, input: &str) -> Output {
     use std::io::Write as _;
     let tmp = s.path().join("hooktmp");
     std::fs::create_dir_all(&tmp).unwrap();
-    let mut child = isolated(BIN)
-        .args(["hook", event])
+    let mut child = staged(&["hook", event])
         .current_dir(run_in)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-        .env("MOAI_NOW", NOW)
         .env("TMPDIR", &tmp)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -7621,12 +7615,9 @@ fn git_run(dir: &Path, at: Option<&str>, args: &[&str]) -> String {
 
 /// 시계를 달리 두고 돌린다 — 옆 워크트리의 쓰기가 **더 늦게** 떨어진 것을 흉내 낸다.
 fn ok_at(dir: &Path, now: &str, args: &[&str]) -> String {
-    let out = isolated(BIN)
-        .args(args)
+    let out = staged(args)
         .current_dir(dir)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
         .env("MOAI_NOW", now)
-        .env("NO_COLOR", "1")
         .output()
         .expect("moai 를 실행하지 못했다");
     assert!(out.status.success(), "moai {args:?} 가 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
@@ -8312,7 +8303,7 @@ fn agent_cmd(dir: &Path, work: &Path, moai: &Path) -> Command {
         .current_dir(dir)
         .env("MOAI", moai)
         .env("AGENT_WORK", work)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
+        .env("MOAI_ACTOR", ACTOR)
         .env("MOAI_NOW", NOW)
         .env("NO_COLOR", "1");
     cmd
@@ -8764,11 +8755,8 @@ fn only_one_racer_claims_a_row() {
     let id = add(s.path(), &["하나뿐인 일"]);
     let kids: Vec<_> = (0..8)
         .map(|_| {
-            isolated(BIN)
-                .args(["mv", &id, "in_progress", "--from", "todo"])
+            staged_live(&["mv", &id, "in_progress", "--from", "todo"])
                 .current_dir(s.path())
-                .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-                .env("NO_COLOR", "1")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
