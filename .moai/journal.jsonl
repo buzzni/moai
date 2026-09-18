@@ -3995,3 +3995,8 @@
 {"ts":"2026-09-18T11:06:26Z","id":"moai-c57v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wxkm 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-18T11:06:33Z","id":"moai-ezdp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T11:07:41Z","id":"moai-k9yb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:09:16Z","id":"moai-dlxf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"치운 옆 워크트리의 ⎇ 가 남는다"}
+{"ts":"2026-09-18T11:09:16Z","id":"moai-uyu9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"gather 가 이름만 든 딸린 워크트리의 .git 파일을 지켜본다"}
+{"ts":"2026-09-18T11:09:16Z","id":"moai-dlxf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-557w 에서 펼쳤다 — 스냅샷 없는 옆 워크트리를 rm -rf 로 치우면 탐색기의 ⎇ 가 다음 다시 읽기까지 남는다"}
+{"ts":"2026-09-18T11:09:16Z","id":"moai-557w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-dlxf 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:09:22Z","id":"moai-uyu9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
