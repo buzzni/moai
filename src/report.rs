@@ -1036,23 +1036,38 @@ fn split_stands<'a, 'c>(stands: BTreeMap<&'a str, Stand<'a, 'c>>) -> (BTreeMap<&
 }
 
 /// (종류, 묶음 id) → 그 묶음의 일. **롤업과 같은 자다** — 물려받은 소속까지, 일만.
-/// 목록을 한 번만 걷는다 — 묶음마다 걸으면 제곱이다. **종류로 가른다** — 에픽 지도가
+/// 목록을 종류마다 한 번 걷는다 — 묶음마다 걸으면 제곱이다. **종류로 가른다** — 에픽 지도가
 /// 마일스톤 id 를 가리키는 틀린 참조를 마일스톤의 멤버로 세면 `rollup_of` 와 어긋난다.
 fn members_in<'a>(
     all: &'a [Issue],
     epic_of: &BTreeMap<&'a str, &'a str>,
     mile_of: &BTreeMap<&'a str, &'a str>,
 ) -> BTreeMap<(Kind, &'a str), Vec<&'a Issue>> {
-    let mut members: BTreeMap<(Kind, &str), Vec<&Issue>> = BTreeMap::new();
     let eclipsed = eclipsed(all);
-    for i in all.iter().filter(|i| is_work(i) && !eclipsed(i)) {
-        for (kind, map) in [(Kind::Epic, epic_of), (Kind::Milestone, mile_of)] {
-            if let Some(g) = map.get(i.id.as_str()) {
-                members.entry((kind, g)).or_default().push(i);
-            }
+    let mut members = BTreeMap::new();
+    for (kind, map) in [(Kind::Epic, epic_of), (Kind::Milestone, mile_of)] {
+        for (g, of) in work_under(all, map, &eclipsed) {
+            members.insert((kind, g), of);
         }
     }
     members
+}
+
+/// 묶음 id → 소속 지도 `map` 이 그 묶음에 두는 **일**. [`members_in`] 과 [`rollup_of`] 가 같은
+/// 걸음을 쓴다(moai-isyy) — 롤업이 묶음마다 목록을 다시 걸으면 에픽 E 개에 줄 N 개가 E×N 이고,
+/// 1만 줄에서 `moai status` 의 대부분이 거기 들었다. 셈의 자도 하나가 된다: 일만, 가려진 줄은 빼고.
+fn work_under<'a>(
+    all: &'a [Issue],
+    map: &BTreeMap<&'a str, &'a str>,
+    eclipsed: &impl Fn(&Issue) -> bool,
+) -> BTreeMap<&'a str, Vec<&'a Issue>> {
+    let mut out: BTreeMap<&str, Vec<&Issue>> = BTreeMap::new();
+    for i in all.iter().filter(|i| is_work(i) && !eclipsed(i)) {
+        if let Some(g) = map.get(i.id.as_str()) {
+            out.entry(*g).or_default().push(i);
+        }
+    }
+    out
 }
 
 /// 묶음의 칸을 셀 멤버 — 미룬 멤버는 빼되, **묶음 제가 받은 미룸으로는 안 뺀다.**
@@ -1325,43 +1340,84 @@ pub fn epic_from_parent<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, &'a 
     Some((epic, crate::id::parent_of(&line.id)?))
 }
 
-/// 마일스톤을 넘긴 자리 — 제 에픽이거나, 그 마일스톤을 실제로 든 id 조상이다.
+/// 마일스톤을 정한 자리 — 적은 대로 안 선 줄을 **옮기려면 어디를 고치는가**.
 ///
-/// `Parent` 는 **바로 위 부모가 아니라 값을 든 조상**이다. 손자가 조부의 마일스톤을
-/// 받을 때 바로 위 부모를 대면, 그 부모를 고치라는 안내는 아무것도 안 바꾼다.
-/// 조상이 마일스톤 줄 자신이면(`--parent <마일스톤>`) 그 id 가 마일스톤과 같다.
+/// 자리마다 옮기는 길이 달라 넷으로 가른다. 길을 `cmd` 가 다시 재면 안내가 셈과 어긋난다.
 #[derive(Debug, PartialEq)]
 pub enum Above<'a> {
+    /// 제 에픽 — 에픽을 옮기거나 그 에픽의 마일스톤을 고치면 따라간다.
     Epic(&'a str),
+    /// 에픽으로 **못 쓸** 소속 — 없는 id 거나 에픽이 아닌 줄이다. 줄은 `(길 잃음)` 에 서므로
+    /// ([`misplaced`]) 그 id 의 마일스톤을 고쳐도 안 따라온다. 에픽을 옮기는 길만 있다.
+    Lost(&'a str),
+    /// 그 줄의 `milestone` 이 이 줄 대신 읽히는 id 조상 — 값을 든 조상이거나, 아무도 값을
+    /// 안 들었으면 접힌 맨 위 줄([`fold_top`])이다. **바로 위 부모가 아니다** — 손자가 조부의
+    /// 마일스톤을 받을 때 바로 위 부모를 대면, 그 부모를 고치라는 안내는 아무것도 안 바꾼다.
     Parent(&'a str),
+    /// id 가 그 줄 밑에 서 있어 **필드로는 못 옮긴다** — 마일스톤 줄(`--parent <마일스톤>`)이거나
+    /// 뿌리로 올라간 생각([`rooted_thoughts`]). 그 줄의 필드를 고치라고 대면 아무것도 안 바뀐다.
+    Pinned(&'a str),
 }
 
-/// 제 `milestone` 필드가 아니라 위에서 오는 마일스톤 — `(마일스톤, 넘긴 자리)`.
-/// 제 필드가 답이거나 마일스톤이 없으면 `None` 이다.
+/// `--milestone <wrote>` 를 적은 줄이 **적은 대로 안 서면** — `(선 마일스톤, 정한 자리)`.
+/// 적은 대로 섰으면 `None` 이다(`wrote` 가 `None` 이면 비우라고 적은 것이다). 적은 것과 선 것이
+/// 같으면 말할 것이 없다 — 이긴 쪽이 마침 같은 곳에 서 있다.
 ///
-/// `edit --milestone none` 이 필드를 비워도 이 소속은 남는다(moai-0lmn) — [`milestones`]
-/// 는 에픽이 이기고 부모도 이긴다. [`epic_from_parent`] 와 같은 모양이다. 답은
-/// `milestones` 에서 읽고, 넘긴 자리만 같은 차례(에픽 → 접힌 맨 위 줄)로 가린다.
-/// 에픽 줄은 제 필드에만 서므로 언제나 `None` 이다.
-pub fn milestone_from_above<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, Above<'a>)> {
+/// **선 마일스톤이 없어도 자리는 댄다** — 마일스톤 없는 에픽의 멤버가 `--milestone X` 를 적으면
+/// X 는 필드에만 남고 줄은 `(마일스톤 없음)` 에 선다(moai-mhxf). 그것도 에픽에게 진 것이다.
+/// `edit --milestone none` 이 필드를 비워도 소속이 남는 것(moai-0lmn)과 같은 어긋남이다 —
+/// [`milestones`] 는 에픽이 이기고 부모도 이긴다. [`epic_from_parent`] 와 같은 모양이다.
+///
+/// 답은 `milestones` 에서 읽고, 정한 자리만 같은 차례(에픽 → 접힌 맨 위 줄)로 가린다.
+/// **옮기는 길은 적은 것에 따라 갈린다** — 마일스톤 줄 밑에 id 로 선 줄은 비워서는 못 끊지만,
+/// 그 사이에 접힌 맨 위 줄이 따로 있으면 그 줄의 필드가 마일스톤 조상을 이겨 다른 마일스톤으로는
+/// 옮겨진다. 에픽 줄과 마일스톤 줄은 제 필드에만 서거나 어디에도 안 서므로 언제나 `None` 이다.
+pub fn milestone_from_above<'a>(
+    all: &'a [Issue],
+    id: &str,
+    wrote: Option<&str>,
+) -> Option<(Option<&'a str>, Above<'a>)> {
     let line = all.iter().rev().find(|i| i.id == id)?;
-    if line.kind == Kind::Epic {
+    if !joins(line) {
         return None;
     }
-    let milestone = *milestones(all).get(id)?;
-    if let Some(e) = groups(all).get(id) {
-        return Some((milestone, Above::Epic(e)));
+    let milestone = milestones(all).get(id).copied();
+    if milestone == wrote {
+        return None;
     }
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
+    if let Some(e) = groups(all).get(id) {
+        // 못 쓸 에픽의 멤버는 `(길 잃음)` 에 선다 — `milestones` 가 그 줄에 값을 안 주는 것과
+        // 같은 자(없는 id·종류가 틀린 것)다. 그 id 의 마일스톤을 고치라고 대면 헛말이다.
+        let usable = by_id.get(e).is_some_and(|x| x.kind == Kind::Epic);
+        return Some((milestone, if usable { Above::Epic(e) } else { Above::Lost(e) }));
+    }
     let rooted = rooted_thoughts(&by_id);
-    let top = fold_top(line, &by_id, &rooted)?;
+    let Some(top) = fold_top(line, &by_id, &rooted) else {
+        // 뿌리로 올라간 생각 밑에 접혔다 — 그 밑은 `(마일스톤 없음)` 에 서고(`fold_top`), 어느
+        // 필드를 고쳐도 안 옮겨진다. 조용하면 `show --milestone X` 가 그 줄을 말없이 못 낸다.
+        let thought = std::iter::successors(crate::id::parent_of(&line.id), |p| crate::id::parent_of(p))
+            .find(|p| rooted.contains(p))?;
+        return Some((milestone, Above::Pinned(thought)));
+    };
     // 값을 든 줄은 `climb` 이 읽는 그 줄이다 — 자를 따로 두면 안내가 셈과 어긋난다.
     // 그 줄이 제 줄이면 제 필드가 답이다(접히지 않은 줄의 제 `milestone`).
-    let source = stood_at(top, &by_id, &rooted)?;
-    if source.id == line.id {
-        return None;
+    // 아무도 값을 안 들었으면 정한 것은 접힌 맨 위 줄이다 — 제 필드는 거기서 안 읽힌다.
+    match stood_at(top, &by_id, &rooted) {
+        Some(source) if source.id == line.id => None,
+        // id 가 마일스톤 밑이다. 비우는 것은 못 끊는다. 다른 마일스톤은 접힌 맨 위 줄이 제 줄이
+        // 아니면 그 줄에 적어 옮긴다 — `stood_at` 이 마일스톤 조상보다 그 줄의 필드를 먼저 읽는다.
+        Some(source) if source.kind == Kind::Milestone => Some((
+            milestone,
+            match wrote {
+                Some(_) if top.id != line.id => Above::Parent(top.id.as_str()),
+                _ => Above::Pinned(source.id.as_str()),
+            },
+        )),
+        Some(source) => Some((milestone, Above::Parent(source.id.as_str()))),
+        None if top.id != line.id => Some((milestone, Above::Parent(top.id.as_str()))),
+        None => None,
     }
-    Some((milestone, Above::Parent(source.id.as_str())))
 }
 
 /// **뿌리로 올라간 생각** — 제 부모 밑에 접히지 않는 idea 의 id.
@@ -1395,11 +1451,19 @@ fn rooted_thoughts<'a>(by_id: &BTreeMap<&'a str, &'a Issue>) -> BTreeSet<&'a str
 /// 뿌리로 올라간 생각에서 멈춘다. 생각 제 줄의 소속은 그대로 남는다.
 /// **없는 부모는 넘지 않는다** — 지운 에픽의 자식은 `에픽 없음` 이고, 끊긴 id 는
 /// `orphan_child` 가 드러낸다. 가리키는 필드가 없으니 `(길 잃음)` 이 아니다.
+///
+/// **묶음 줄은 제 필드에서 멈춘다** (moai-k9yb). [`joins`] 가 안 받는 줄이 조상을
+/// 타고 오르면, 에픽인 부모는 거르지만 부모 이슈가 든 `epic` 은 그대로 받아
+/// `epic add --parent <에픽 E 안의 이슈>` 가 `show -e E` 에만 서고 트리에서는
+/// 뿌리에 섰다. 묶음 줄이 무엇을 받는지는 조상의 종류가 아니라 제 종류가 정한다.
 fn epic_through<'a>(
     i: &'a Issue,
     by_id: &BTreeMap<&'a str, &'a Issue>,
     rooted: &BTreeSet<&str>,
 ) -> Option<&'a str> {
+    if !joins(i) {
+        return i.epic.as_deref();
+    }
     let mut cur = i;
     loop {
         if let Some(e) = &cur.epic {
@@ -1408,7 +1472,7 @@ fn epic_through<'a>(
         cur = crate::id::parent_of(&cur.id)
             .and_then(|p| by_id.get(p).copied())
             .filter(|p| !rooted.contains(p.id.as_str()))?;
-        if cur.kind == Kind::Epic && joins(i) {
+        if cur.kind == Kind::Epic {
             return Some(cur.id.as_str());
         }
     }
@@ -1782,14 +1846,12 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
     // 차례가 달라, 같은 화면에서 규칙이 둘이 된다.
     let mut groupings: Vec<&Issue> = issues.iter().filter(|i| i.kind == kind && !eclipsed(i)).collect();
     groupings.sort_by(|a, b| crate::query::display_order(a, b));
+    let members = work_under(issues, &group, &eclipsed);
     let mut out: Vec<Roll> = groupings
         .iter()
         .map(|e| {
-            let members: Vec<&Issue> = issues
-                .iter()
-                .filter(|i| is_work(i) && !eclipsed(i) && group.get(i.id.as_str()) == Some(&e.id.as_str()))
-                .collect();
-            let (counts, total, done, percent) = tally(&members);
+            let of = members.get(e.id.as_str()).map(Vec::as_slice).unwrap_or_default();
+            let (counts, total, done, percent) = tally(of);
             Roll {
                 id: Some(e.id.clone()),
                 title: e.title.clone(),
@@ -1833,10 +1895,13 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let progress: BTreeMap<&str, u8> = stands.iter().map(|(id, s)| (*id, s.progress.unwrap_or(0))).collect();
     let (states, waits) = split_stands(stands);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
+    let eclipsed = eclipsed(issues);
     let mut out: Vec<&Issue> = issues
         .iter()
         // 값싼 막음 검사를 먼저 한다 — `unblocked_pick` 은 자식을 찾느라 목록을 걷는다.
-        .filter(|i| !is_blocked(i, &by_id, &states, &waits) && unblocked_pick(i, issues, cfg, &out_of_plan))
+        .filter(|i| {
+            !is_blocked(i, &by_id, &states, &waits) && unblocked_pick(i, issues, cfg, &out_of_plan, &eclipsed)
+        })
         .collect();
 
     // 급한 것 → 끝나가는 에픽 → 오래된 것. 끝나가는 것을 먼저 집어야
@@ -1896,11 +1961,17 @@ fn blocking<'a, 'c>(
 
 /// 막음만 빼면 집을 수 있는가. `ready` 와 `held` 가 **같은 자로** 고른다 —
 /// 둘이 따로 고르면 `held` 가 댄 줄이 막음을 풀어도 `ready` 에 안 올라온다.
+///
+/// **가려진 줄([`eclipsed`])은 집을 일이 아니다** (moai-lg2t). 그 줄은 트리에서
+/// `(길 잃음)` 에 서고 어느 묶음에도 안 드는데, `ready` 만 그것을 집으라고 내밀며
+/// 에픽 칸에 `에픽 없음` 을 달았다. 그 id 는 `duplicate_id` 로 파일째 쓰기가 막혀
+/// 집어도 `mv` 가 거절한다 — 자리 없는 줄을 내밀 까닭이 없다.
 fn unblocked_pick(
     i: &Issue,
     issues: &[Issue],
     cfg: &Config,
     out_of_plan: &BTreeSet<&str>,
+    eclipsed: &impl Fn(&Issue) -> bool,
 ) -> bool {
     // **끝난 에픽인지는 묻지 않는다.** 묶음의 칸은 멤버에서 읽으므로(`group_states`)
     // 읽은 칸이 done 인 묶음에는 집을 멤버가 이미 없고, 적힌 칸으로 물으면 손으로
@@ -1915,6 +1986,7 @@ fn unblocked_pick(
     };
     is_work(i)                                   // 묶음도 생각도 집는 게 아니다
         && !out_of_plan.contains(i.id.as_str())  // 미뤄 둔 것과 그 밑도
+        && !eclipsed(i)                          // 쌍둥이에게 자리를 뺏긴 줄도
         && i.status.as_str() == cfg.first_status()
         && !has_open_child()
 }
@@ -1947,6 +2019,7 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
     let (roots, states, waits) = blocking(issues, cfg, &group, &by_id);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     let sources = deferred_sources(issues);
+    let eclipsed = eclipsed(issues);
     // 값싼 막음 검사를 먼저 한다. `unblocked_pick` 은 자식을 찾느라 목록을
     // 한 번 걷는다 — 모든 줄에 먼저 부르면 `ready` 가 부를 때마다 제곱이다.
     let mut out: Vec<Held> = issues
@@ -1955,7 +2028,7 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
             let (by, empty) = holding(i, &by_id, &out_of_plan, &states, &waits);
             (!by.is_empty() || !empty.is_empty()).then_some((i, by, empty))
         })
-        .filter(|(i, _, _)| unblocked_pick(i, issues, cfg, &out_of_plan))
+        .filter(|(i, _, _)| unblocked_pick(i, issues, cfg, &out_of_plan, &eclipsed))
         .map(|(i, by, empty)| {
             // **풀어야 할 미룸을 다 댄다**(moai-g2a1). 가까운 하나만 대면 그것을 풀고도 여전히
             // 막힌 채 그제야 다음을 댄다(moai-phzi). 제가 미뤄진 묶음이 멤버도 다 미뤘으면
@@ -4021,6 +4094,8 @@ mod tests {
             own_epic,
             make("argos-0001.aa3", Kind::Idea, "todo"),
             make("argos-0001.ee1", Kind::Epic, "todo"),
+            make("argos-0001.aa1.ee2", Kind::Epic, "todo"),
+            make("argos-0001.aa2.ee3", Kind::Epic, "todo"),
             make("argos-m001.cc1", Kind::Issue, "todo"),
             own_stone,
             make("argos-m001.dd1", Kind::Milestone, "todo"),
@@ -4032,7 +4107,9 @@ mod tests {
             ("argos-0001.aa1.bb1", Some("argos-0001"), Some("argos-m001")), // 사슬을 탄다
             ("argos-0001.aa2", Some("argos-0002"), None),                   // 제 에픽이 이긴다
             ("argos-0001.aa3", Some("argos-0001"), Some("argos-m001")),     // 생각도 받는다
-            ("argos-0001.ee1", Some("argos-0002"), None), // 에픽 줄은 부모 에픽을 안 받는다
+            ("argos-0001.ee1", None, None), // 에픽 줄은 부모 에픽도, 그 에픽이 든 `epic` 도 안 받는다
+            ("argos-0001.aa1.ee2", None, None), // 부모 이슈의 에픽도 안 받는다(moai-k9yb)
+            ("argos-0001.aa2.ee3", None, None), // 부모 이슈가 적은 `epic` 도
             ("argos-m001.cc1", None, Some("argos-m001")),
             ("argos-m001.cc2", None, Some("argos-m002")), // 제 마일스톤이 이긴다
             ("argos-m001.dd1", None, None),               // 마일스톤 줄은 안 받는다
@@ -4995,6 +5072,30 @@ mod tests {
             let named = st.warnings.iter().filter(|w| w.kind == kind).flat_map(|w| w.ids.iter()).any(|id| id == "argos-0003");
             assert!(!named, "{kind} 가 가려진 줄을 쌍둥이 값으로 셌다 — {:?}", st.warnings);
         }
+    }
+
+    /// **가려진 줄은 집을 일이 아니다** (moai-lg2t). 트리에서 `(길 잃음)` 에 서는 줄을
+    /// `ready` 가 내밀면 에픽 칸에 `에픽 없음` 을 달고, 집으려 하면 파일째 쓰기가 막힌다.
+    /// 막혀 있어도 `held` 가 그 줄을 도로 집을 일로 대지 않는다 — 둘은 한 자로 고른다.
+    #[test]
+    fn an_eclipsed_row_is_not_offered_as_work() {
+        let mut shadowed = make("argos-0001", Kind::Issue, "todo");
+        shadowed.blocked_by = vec!["argos-0009".into()];
+        let rows = vec![
+            deferred("argos-0009", "todo"),
+            make("argos-0002", Kind::Issue, "todo"),
+            shadowed,
+            make("argos-0001", Kind::Idea, "todo"),
+            make("argos-0002", Kind::Epic, "todo"),
+        ];
+        let rows = &rows[..];
+        let ids: Vec<&str> = ready(rows, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert!(!ids.contains(&"argos-0001") && !ids.contains(&"argos-0002"), "가려진 줄을 냈다 — {ids:?}");
+        assert!(held(rows, &cfg()).is_empty(), "가려진 줄을 막힌 일로 댔다");
+
+        // 같은 종류의 쌍둥이는 가려지지 않는다 — 같은 값을 같은 자로 읽는다.
+        let twins = vec![make("argos-0003", Kind::Issue, "todo"), make("argos-0003", Kind::Issue, "todo")];
+        assert_eq!(ready(&twins, &cfg()).len(), 2);
     }
 
     // ── 미룬 것이 막고 있으면 까닭을 말한다 ──────────────────────────
