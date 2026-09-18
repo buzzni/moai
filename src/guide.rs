@@ -149,7 +149,7 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
 
 const NO_GATE: &str = "승인 게이트가 없다 — 무엇이든 만들고 무엇이든 옮길 수 있다. 사람을 부르지 않는다.";
 
-const FORKS: &str = r#"**1. `add` 냐 `idea` 냐** — 가르는 것은 하나다. *지금 집을 것인가.*
+const FORKS: &str = r#"**1. `add` 냐 `idea` 냐** — 가르는 것은 *지금 집을 것인가* 다.
 집을 것이면 `moai add`, 나중에 볼 것이면 `moai idea add "떠오른 것"`.
 idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
 **적지 않고 넘어가는 것이 제일 나쁘다.**
