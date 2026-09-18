@@ -21,7 +21,7 @@ pub enum Sel {
 }
 
 /// 줄 하나에 대한 판정 (`Where::eclipsed`).
-type RowTest<'a> = Box<dyn Fn(&Issue) -> bool + 'a>;
+pub type RowTest<'a> = Box<dyn Fn(&Issue) -> bool + 'a>;
 
 /// 소속은 **묶음 전체를 봐야** 알 수 있다 — 자식은 조상에게서 물려받고,
 /// 마일스톤은 에픽을 거쳐 온다. 그래서 이슈 하나만 보고는 못 고른다.
@@ -46,21 +46,30 @@ pub struct Where<'a> {
 }
 
 impl<'a> Where<'a> {
+    /// **한 걸음으로 잰다**([`crate::report::Soil`]) — 소속·미룸·묶음 칸·가려짐·길 잃음은 서로가
+    /// 서로의 재료라, 따로 부르면 `groups` 만 서너 번 돈다.
     pub fn of(all: &'a [Issue], cfg: &'a crate::config::Config) -> Where<'a> {
-        let epic = crate::report::groups(all);
-        let milestone = crate::report::milestones(all);
-        // **미룸을 한 번만 걷는다.** 읽은 칸이 그것을 쓰므로(미룬 멤버는 칸 셈에서
-        // 빠진다) 따로 부르면 조상을 타는 걸음이 두 벌이 된다.
-        let roots = crate::report::deferred_roots_in(all, &epic, &milestone);
-        let stands = crate::report::group_stands_in(all, cfg, &epic, &milestone, &roots);
+        let soil = crate::report::Soil::of(all);
+        let stands = soil.stands(all, cfg);
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();
-        let hidden = crate::report::eclipsed(all);
-        // 길 잃음은 `nav::Ctx::home` 과 같다 — 못 쓸 참조를 든 줄과 가려진 쌍둥이.
-        let lost = crate::report::misplaced(all);
-        let folded = crate::report::under_lost(all, &epic, |i| lost.contains_key(i.id.as_str()) || hidden(i));
-        let eclipsed: Option<RowTest<'a>> = Some(Box::new(hidden));
-        Where { epic, milestone, put_off: roots.into_keys().collect(), states, since, eclipsed, folded }
+        let crate::report::Soil { epic, milestone, roots, kinds, folded, .. } = soil;
+        let eclipsed = Box::new(crate::report::eclipsed_in(kinds));
+        Where::measured(epic, milestone, roots.into_keys().collect(), states, since, eclipsed, folded)
+    }
+
+    /// **이미 잰 것으로 짓는다**(moai-fbdg). 탐색기는 적재 스레드에서 한 번 재어 소유해 두고, 거름망을
+    /// 걸 때마다 그것을 빌려 이 꼴로 짓는다 — 키 하나마다 `Where::of` 를 돌리면 이슈 1만 건에서 300ms 다.
+    pub fn measured(
+        epic: BTreeMap<&'a str, &'a str>,
+        milestone: BTreeMap<&'a str, &'a str>,
+        put_off: BTreeSet<&'a str>,
+        states: BTreeMap<&'a str, &'a str>,
+        since: BTreeMap<&'a str, &'a str>,
+        eclipsed: RowTest<'a>,
+        folded: BTreeSet<&'a str>,
+    ) -> Where<'a> {
+        Where { epic, milestone, put_off, states, since, eclipsed: Some(eclipsed), folded }
     }
 
     /// 그 줄이 서 있는 칸 (`report::column`).

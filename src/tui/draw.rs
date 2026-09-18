@@ -5913,10 +5913,24 @@ mod eyeball {
             issues.push(Issue::new(format!("argos-l{e:04}"), format!("느슨한 일 {e}"), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z"));
         }
         let n = issues.len();
-        let t = std::time::Instant::now();
-        let _ = crate::nav::Index::of(&issues);
-        println!("Index::of {:?}", t.elapsed());
         let cfg = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
+        // 적재 — 색인과 묶음 칸·거름망 지도를 한 걸음으로 잰다(moai-fbdg).
+        let t = std::time::Instant::now();
+        let soil = crate::report::Soil::of(&issues);
+        let index = crate::nav::Index::in_soil(&issues, &soil);
+        let ground = super::super::Ground::in_soil(&issues, &cfg, &soil);
+        println!("적재 한 걸음(Soil+Index+Ground) {:?}", t.elapsed());
+        drop(soil);
+        drop(index);
+        // 거름망 한 번 — 키마다 도는 자리다. 옛 길(`Where::of`)과 견준다.
+        let t = std::time::Instant::now();
+        for _ in 0..10 {
+            let _ = ground.here();
+        }
+        println!("Ground::here 한 번 {:?}", t.elapsed() / 10);
+        let t = std::time::Instant::now();
+        let _ = crate::query::Where::of(&issues, &cfg);
+        println!("Where::of 한 번(옛 길) {:?}", t.elapsed());
         let mut app = super::App::new(issues, cfg, crate::nav::Path::new());
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 50)).unwrap();
         term.draw(|f| super::screen(f, &mut app)).unwrap();

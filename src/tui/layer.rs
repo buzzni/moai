@@ -564,7 +564,7 @@ impl App {
         // 층에서는 읽음 키가 아예 안 선다(`keys::Browse::enabled`) — 층의 줄은 프로젝트라 읽을 줄이 없다.
         self.unread.clear();
         self.index = Index::of(&[]);
-        self.states = Default::default();
+        self.ground = Default::default();
         self.keep = Vec::new();
         self.shown = Vec::new();
         self.unreadable = Vec::new();

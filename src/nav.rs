@@ -108,25 +108,26 @@ pub struct Index {
 impl Index {
     /// 적재·갱신 때 한 번만 만든다. 매 프레임 만들 것이 아니다.
     pub fn of(issues: &[Issue]) -> Index {
+        Index::in_soil(issues, &crate::report::Soil::of(issues))
+    }
+
+    /// [`Index::of`] 와 같은 것. **이미 잰 지도를 받는다**(moai-fbdg) — 탐색기는 적재 때 색인과 묶음
+    /// 칸과 거름망이 쓸 지도를 한 걸음으로 재므로(`report::Soil`), 여기서 다시 지으면 `groups` 가 한
+    /// 벌 더 돈다.
+    pub fn in_soil(issues: &[Issue], soil: &crate::report::Soil<'_>) -> Index {
         // 소속 판정은 새로 짜지 않는다. `report` 가 상속 규칙을 이미 갖고 있고,
         // 둘이 갈라지면 목록이 세는 곳과 그리는 곳이 어긋난다.
-        let epic_of: BTreeMap<String, String> = crate::report::groups(issues)
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-        let milestone_of: BTreeMap<String, String> = crate::report::milestones(issues)
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
+        let epic_of: BTreeMap<String, String> =
+            soil.epic.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let milestone_of: BTreeMap<String, String> =
+            soil.milestone.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         let has_milestones = issues.iter().any(|i| i.kind == Kind::Milestone);
         // **자리를 못 정하는 참조는 `report` 가 정한다.** 여기에 술어를 하나 더
         // 두면 자가 둘이 되고, 탐색기가 `(길 잃음)` 에 넣은 줄에 대해
         // `moai status` 가 침묵하는 일이 그렇게 생겼다.
-        let misplaced: BTreeMap<String, crate::report::Misplace> = crate::report::misplaced(issues)
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
-        let eclipsed = crate::report::eclipsed(issues);
+        let misplaced: BTreeMap<String, crate::report::Misplace> =
+            soil.lost.iter().map(|(k, v)| (k.to_string(), *v)).collect();
+        let eclipsed = soil.eclipsed();
 
         // id → 첨자. 이게 없으면 부모를 찾을 때마다 전체를 훑어 O(이슈 수²·깊이) 다.
         let by_id: BTreeMap<&str, usize> = issues.iter().enumerate().map(|(at, i)| (i.id.as_str(), at)).collect();
@@ -156,10 +157,7 @@ impl Index {
             }
         }
         let by_id = by_id.into_iter().map(|(id, at)| (id.to_string(), at)).collect();
-        let deferred_root = crate::report::deferred_roots(issues)
-            .into_iter()
-            .map(|(id, root)| (id.to_string(), root.to_string()))
-            .collect();
+        let deferred_root = soil.roots.iter().map(|(id, root)| (id.to_string(), root.to_string())).collect();
         // 줄마다 제 자리의 **모든 앞머리**에 센다 — 자리 `p` 밑이란 `homes` 가 `p` 로 시작하는 것이다
         // (`descendants`). 깊이만큼만 돌므로 이슈 수에 비례한다.
         let mut tallies: HashMap<Path, (usize, usize)> = HashMap::new();

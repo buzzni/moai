@@ -19,7 +19,7 @@ pub mod view;
 use crate::config::Config;
 use crate::model::{Issue, Kind, Status};
 use crate::nav::{Entry, Index, Path, Seg};
-use crate::query::{Filter, GrepIn, Raw, Where};
+use crate::query::{Filter, GrepIn, Raw};
 use crate::store::{Load, Repo};
 use form::{Act, Form};
 use input::Input;
@@ -189,24 +189,83 @@ impl Pane {
 /// 묶음 id → 멤버에서 읽은 것(`report::group_stands`). 이슈를 빌리지 않게 소유한다.
 type States = std::collections::BTreeMap<String, Stood>;
 
-/// 묶음 하나를 읽은 것 — 서 있는 칸과, 그 밑에 집은 일이 있는가(`report::Stand::busy`),
-/// 미뤄 뺀 멤버 덕에 `done` 으로 섰으면 그 멤버(`report::Stand::aside`).
+/// 묶음 하나를 읽은 것 — 서 있는 칸과 그 칸의 셈이 마지막으로 움직인 때(`report::Stand::since`),
+/// 그 밑에 집은 일이 있는가(`report::Stand::busy`), 미뤄 뺀 멤버 덕에 `done` 으로 섰으면 그 멤버
+/// (`report::Stand::aside`).
 struct Stood {
     column: String,
+    since: String,
     busy: bool,
     waiting: crate::report::Waiting,
     aside: Vec<String>,
 }
 
-fn states_of(issues: &[Issue], cfg: &Config) -> States {
-    crate::report::group_stands(issues, cfg)
-        .into_iter()
-        .map(|(id, s)| {
-            let aside = s.aside.iter().map(|m| m.to_string()).collect();
-            let stood = Stood { column: s.column.to_string(), busy: s.busy, waiting: s.waiting, aside };
-            (id.to_string(), stood)
-        })
-        .collect()
+/// **파일 전체를 훑어야 아는 것을 소유한 꼴**(moai-fbdg). `report::Soil` 은 이슈를 빌리므로 `App` 이
+/// 들 수 없다 — 적재 때 한 걸음으로 재어 이것으로 소유해 두고, 색인(`nav::Index`)·묶음 칸·거름망이
+/// 그 한 벌을 나눠 쓴다. 따로 셀 때는 `Index::of`·`states_of`·`Where::of` 가 저마다 소속 지도를
+/// 지어, 거름망은 **키 하나마다** 이슈 1만 건에서 300ms 를 치렀다.
+#[derive(Default)]
+pub struct Ground {
+    stands: States,
+    epic: std::collections::BTreeMap<String, String>,
+    milestone: std::collections::BTreeMap<String, String>,
+    put_off: std::collections::BTreeSet<String>,
+    kinds: std::collections::BTreeMap<String, crate::model::Kind>,
+    folded: std::collections::BTreeSet<String>,
+}
+
+impl Ground {
+    fn of(issues: &[Issue], cfg: &Config) -> Ground {
+        Ground::in_soil(issues, cfg, &crate::report::Soil::of(issues))
+    }
+
+    fn in_soil(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) -> Ground {
+        let stands = soil
+            .stands(issues, cfg)
+            .into_iter()
+            .map(|(id, s)| {
+                let aside = s.aside.iter().map(|m| m.to_string()).collect();
+                let stood = Stood {
+                    column: s.column.to_string(),
+                    since: s.since.to_string(),
+                    busy: s.busy,
+                    waiting: s.waiting,
+                    aside,
+                };
+                (id.to_string(), stood)
+            })
+            .collect();
+        Ground {
+            stands,
+            epic: soil.epic.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            milestone: soil.milestone.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            put_off: soil.roots.keys().map(|k| k.to_string()).collect(),
+            kinds: soil.kinds.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            folded: soil.folded.iter().map(|k| k.to_string()).collect(),
+        }
+    }
+
+    /// 거름망이 볼 꼴 — 든 지도를 빌리기만 한다. 짓는 값은 묶음 수에 비례하고(재는 값은 이슈 수에
+    /// 비례한다), 여기서 다시 재는 것은 없다.
+    fn here(&self) -> crate::query::Where<'_> {
+        fn borrow(m: &std::collections::BTreeMap<String, String>) -> std::collections::BTreeMap<&str, &str> {
+            m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
+        }
+        let states = self.stands.iter().map(|(id, s)| (id.as_str(), s.column.as_str())).collect();
+        let since = self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect();
+        let kinds = &self.kinds;
+        let eclipsed: crate::query::RowTest<'_> =
+            Box::new(move |i: &Issue| kinds.get(i.id.as_str()).is_some_and(|k| *k != i.kind));
+        crate::query::Where::measured(
+            borrow(&self.epic),
+            borrow(&self.milestone),
+            self.put_off.iter().map(String::as_str).collect(),
+            states,
+            since,
+            eclipsed,
+            self.folded.iter().map(String::as_str).collect(),
+        )
+    }
 }
 
 /// 다시 읽은 것 — **무거운 셈을 다 마친 모양.** 읽기·색인·칸 지도·경고 셈은
@@ -222,7 +281,7 @@ pub struct Fresh {
     stamp: Stamp,
     issues: Vec<Issue>,
     index: Index,
-    states: States,
+    ground: Ground,
     warnings: usize,
     unreadable: Vec<Option<String>>,
     origin: crate::worktree::Origin,
@@ -281,14 +340,19 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         .map(|id| id.map(str::to_string))
         .collect();
     let issues = g.load.issues;
+    // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸·거름망이 같은 지도를 나눠 쓴다.
+    let soil = crate::report::Soil::of(&issues);
+    let index = Index::in_soil(&issues, &soil);
+    let ground = Ground::in_soil(&issues, &repo.config, &soil);
+    drop(soil);
     let now = crate::model::now();
     let mut watched = g.watched;
     watched.extend(heads);
     Ok(Fresh {
         root: repo.root.clone(),
         stamp,
-        index: Index::of(&issues),
-        states: states_of(&issues, &repo.config),
+        index,
+        ground,
         warnings: warnings_of(&issues, &unreadable, &repo.config, &now),
         issues,
         unreadable,
@@ -316,9 +380,9 @@ fn warnings_of(issues: &[Issue], unreadable: &[Option<String>], cfg: &Config, no
 pub struct App {
     pub issues: Vec<Issue>,
     pub index: Index,
-    /// 묶음 id → 멤버에서 읽은 칸과 집은 멤버가 있는가 (`report::group_stands`). **적재 때 한 번 센다**
-    /// — 프레임마다 세면 줄 하나 그리는 데 저장소를 걷는다.
-    states: States,
+    /// 파일 전체를 훑어야 아는 것 — 묶음이 선 칸, 소속, 물려받은 미룸, 가려짐. **적재 때 한 번 센다**
+    /// — 프레임마다 세면 줄 하나 그리는 데 저장소를 걷고, 거름망은 키 하나마다 그랬다(moai-fbdg).
+    ground: Ground,
     pub cfg: Config,
     pub path: Path,
     pub cursor: usize,
@@ -595,11 +659,11 @@ impl App {
         // 들어간 채로 시작하면(`--path`) 나올 층마다 기억 자리를 만들어 둔다.
         let remembered = vec![0; path.len()];
         let keep = vec![true; issues.len()];
-        let states = states_of(&issues, &cfg);
+        let ground = Ground::of(&issues, &cfg);
         let mut app = App {
             issues,
             index,
-            states,
+            ground,
             cfg,
             path,
             cursor: 0,
@@ -943,7 +1007,7 @@ impl App {
         self.commits_due |= self.watched != f.watched || f.issues.iter().any(|i| !self.commit_ids.contains(&i.id));
         self.watched = f.watched;
         self.warnings = f.warnings;
-        self.take(f.issues, f.index, f.states, f.now);
+        self.take(f.issues, f.index, f.ground, f.now);
     }
 
     /// 그 줄이 도는가 — **지금 누가 손대고 있는 줄**이다.
@@ -972,7 +1036,7 @@ impl App {
         if self.index.deferred_root(&i.id).is_some() {
             return false;
         }
-        let busy = !crate::report::is_group(i) || self.states.get(&i.id).is_some_and(|s| s.busy);
+        let busy = !crate::report::is_group(i) || self.ground.stands.get(&i.id).is_some_and(|s| s.busy);
         // **도는 칸은 설정이 정한다**(moai-q59j) — 시작한 칸 모두(`Config::is_started`). 칸 이름
         // `"in_progress"` 를 박아 두면 칸 이름을 바꾼 설정에서 아무것도 안 돌았다. 설정이 모르는
         // 칸은 안 돈다 — 묶음의 `busy` 와 같은 자다(`report::Stand::busy`). 바쁜 묶음은 늘 시작한
@@ -986,7 +1050,7 @@ impl App {
     pub fn column(&self, at: usize) -> &str {
         let i = &self.issues[at];
         crate::report::is_group(i)
-            .then(|| self.states.get(&i.id).map(|s| s.column.as_str()))
+            .then(|| self.ground.stands.get(&i.id).map(|s| s.column.as_str()))
             .flatten()
             .unwrap_or(i.status.as_str())
     }
@@ -997,7 +1061,7 @@ impl App {
     pub fn waits(&self, at: usize) -> (crate::report::Waiting, &[String]) {
         let i = &self.issues[at];
         crate::report::is_group(i)
-            .then(|| self.states.get(&i.id))
+            .then(|| self.ground.stands.get(&i.id))
             .flatten()
             .map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
     }
@@ -1010,11 +1074,13 @@ impl App {
     /// 안으로 자른 자리에 선다.
     #[cfg(test)]
     pub fn adopt(&mut self, issues: Vec<Issue>) {
-        let index = Index::of(&issues);
-        let states = states_of(&issues, &self.cfg);
+        let soil = crate::report::Soil::of(&issues);
+        let index = Index::in_soil(&issues, &soil);
+        let ground = Ground::in_soil(&issues, &self.cfg, &soil);
+        drop(soil);
         let now = crate::model::now();
         self.warnings = warnings_of(&issues, &self.unreadable, &self.cfg, &now);
-        self.take(issues, index, states, now);
+        self.take(issues, index, ground, now);
     }
 
     /// 이미 센 자료를 들이고 커서·경로·거름망을 맞춘다 — [`App::adopt`] 와 스레드에서
@@ -1023,14 +1089,14 @@ impl App {
         &mut self,
         issues: Vec<Issue>,
         index: Index,
-        states: States,
+        ground: Ground,
         now: String,
     ) {
         // **옛 자료로 잰다** — 줄의 첨자는 옛 `issues` 를 가리킨다.
         let held = self.current().map(|r| self.anchor_of(&r));
         self.issues = issues;
         self.index = index;
-        self.states = states;
+        self.ground = ground;
         self.now = now;
         // 안 읽음은 **줄이 바뀔 때** 센다 — 보기 토글(`look`)도 지나는 `regrip` 에 두면 칸 하나 숨길
         // 때마다 저장소를 걷는다(moai-j038.vna).
@@ -1356,7 +1422,8 @@ impl App {
         // 시계는 **적재마다** 고정한 것을 쓴다. 여기서 다시 잡으면 `stale=`
         // 같은 물음이 화면의 나머지와 다른 시각으로 판정된다.
         let now = self.now.clone();
-        let wh = Where::of(&self.issues, &self.cfg);
+        // **적재 때 잰 것을 빌린다**(moai-fbdg) — 여기서 다시 재면 키 하나마다 소속 지도가 다시 선다.
+        let wh = self.ground.here();
         self.keep = self.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
         self.filter_text = Some(match mode {
             Mode::Grep(_, GrepIn::All) => format!("/{text}"),
