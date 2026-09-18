@@ -13,6 +13,12 @@ use crate::store::Repo;
 use crate::projects::{Entry, Overview, Seen};
 use crate::view;
 
+/// `status --json` 이 보고서에 덧붙이는 키(`run`). 보고서는 필드가 선언된 것뿐이라 걷을 것이
+/// 없다 — 덧붙이는 자리 곁에 목록을 둔다.
+impl super::Appendable for report::StatusReport {
+    const APPENDED: &'static [&'static str] = &["unreadable_worktrees", "branches"];
+}
+
 pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // `.moai` 밖이면 등록한 프로젝트를 한눈에. **안이면 아래 그대로다** — 등록 목록을
     // 읽지도 않는다(결정 3: `.moai` 안의 CLI 는 그 프로젝트만 본다).
@@ -130,7 +136,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         if extra.is_empty() {
             return super::json_line(&st);
         }
-        return super::json_with(&st, &extra, &["unreadable_worktrees", "branches"]);
+        return super::json_with(&st, &extra);
     }
     Ok(view::status(
         &st,

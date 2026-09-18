@@ -298,6 +298,10 @@ pub fn json_line<T: serde::Serialize>(v: &T) -> R<Vec<String>> {
 ///
 /// **줄을 내는 모든 명령이 이것을 지난다.** `show` 만 곁들이면 `add`·`defer`·`link` 를
 /// 읽는 쪽은 같은 에픽을 적힌 칸으로 읽는다 — 키가 없다는 것이 "묶음이 아니다" 라는 뜻이다.
+///
+/// **`rm --json` 만 예외다**(리뷰 moai-fqnr.sqb). 그 `removed` 는 지운 줄의 **파일에 있던 그대로**다 —
+/// 파일에서 사라진 줄의 마지막 기록이라, 여기서 걷으면 사용자가 같은 이름으로 둔 제 필드가 어디에도
+/// 안 남는다. 덧붙이는 키도 없으니 한 객체에 같은 키가 둘 서지도 않는다.
 #[derive(serde::Serialize)]
 pub struct Row<'a> {
     #[serde(flatten)]
@@ -315,8 +319,9 @@ pub struct Row<'a> {
 ///
 /// **한 목록이다.** 명령마다 목록을 두면 걷기가 그 명령에만 선다 — `show <id> --json` 만 걷던
 /// 판에는 되쓴 줄을 `ready`·`show` 목록·`edit` 가 그대로 펴서, 막음 없는 일에 옛 `blockers` 가,
-/// 멀쩡한 git 옆에 옛 `commits_error` 가 섰다. 키를 더하면 여기에 더한다 — [`json_with`] 가
-/// 시험 빌드에서 빠진 이름을 대며 멈춘다(`show` 가 이 목록을 `may` 로 준다).
+/// 멀쩡한 git 옆에 옛 `commits_error` 가 섰다. 키를 더하면 여기에 더한다 — 빠지면 시험이 그
+/// 이름을 대며 붉어진다: `show` 가 덧붙이는 것은 [`json_with`] 가(`Row` 의 [`Appendable`] 이 이
+/// 목록이다), `Row` 의 제 필드와 `edit` 의 `Out` 은 저마다의 시험이 잡는다.
 ///
 /// 사용자가 같은 이름으로 둔 제 필드도 **줄 출력에서** 숨는다 — 받은 값이다(2026-09-18 사용자
 /// 결정). 모르는 필드 보존은 파일의 약속이고, 출력의 약속은 우리 키가 참이라는 것이다. 파일은
@@ -350,8 +355,9 @@ impl<'a> Row<'a> {
         // **이 키들은 우리 것이다**([`OURS`]). `--json` 을 파일에 되써 넣어 그 이름을 모르는
         // 필드로 든 줄이면 화면에서 걷어낸다 — 그대로 두면 한 객체에 같은 키가 둘 서서 깐깐한
         // 파서가 거절하고, 이번에 안 실은 조건부 키는 그 조건이 아닌 지금 옛 값을 말한다.
-        // 흔한 길(겹치는 것이 없다)에서는 줄을 복제하지 않는다.
-        let issue = match OURS.iter().any(|k| issue.rest.contains_key(*k)) {
+        // 흔한 길(겹치는 것이 없다)에서는 줄을 복제하지 않는다. 모르는 필드 쪽에서 훑는다 —
+        // 거의 모든 줄이 모르는 필드가 없어, 그러면 목록을 한 번도 안 짚는다.
+        let issue = match issue.rest.keys().any(|k| OURS.contains(&k.as_str())) {
             false => std::borrow::Cow::Borrowed(issue),
             true => {
                 let mut own = issue.clone();
@@ -373,6 +379,32 @@ impl<'a> Row<'a> {
     pub fn from(issue: &'a crate::model::Issue, read: &'a Read) -> Row<'a> {
         Row::of(issue, read.get(&issue.id).map(String::as_str))
     }
+}
+
+/// [`json_with`] 가 키를 덧붙이는 바탕과, **그 바탕에 덧붙일 수 있는 키 전부.** 바탕이 그 이름을
+/// 제 몸에 안 들고 있어야 한 객체에 같은 키가 둘 서지 않는다(moai-kgu2).
+///
+/// 목록을 타입에 매는 까닭 — 부르는 쪽 인자로 받으면 줄이 아닌 것(`Issue` 그대로)도, 줄에
+/// [`OURS`] 가 아닌 목록을 준 것도 시험 빌드의 확인을 지나, 걷지 않은 이름이 둘 선다.
+pub trait Appendable: serde::Serialize {
+    const APPENDED: &'static [&'static str];
+}
+
+/// 줄은 [`Row::of`] 가 걷는 그 목록이다.
+impl Appendable for Row<'_> {
+    const APPENDED: &'static [&'static str] = OURS;
+}
+
+/// 시험에서 — `out` 이 줄 `line` 에 **덧붙인** 키. `Row` 와 그것을 편 출력이 더하는 이름이
+/// [`OURS`] 에 다 있는지 재는 데 쓴다.
+#[cfg(test)]
+pub fn keys_beyond<T: serde::Serialize>(line: &crate::model::Issue, out: &T) -> Vec<String> {
+    let keys = |v: serde_json::Value| match v {
+        serde_json::Value::Object(m) => m.keys().cloned().collect::<Vec<_>>(),
+        other => panic!("객체가 아니다: {other}"),
+    };
+    let bare = keys(serde_json::to_value(line).unwrap());
+    keys(serde_json::to_value(out).unwrap()).into_iter().filter(|k| !bare.contains(k)).collect()
 }
 
 /// 묶음 id → 멤버에서 읽은 칸. 락 밖으로 들고 나가는 모양이라 제 문자열을 쥔다.
@@ -438,15 +470,15 @@ pub fn standing_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, 
 /// 이미 걷었다 — 이번에 안 실은 조건부 키까지(moai-2l8n). 필드가 선언된 것뿐인 객체
 /// (`StatusReport`)는 걷을 것이 없다. 여기서는 걷지 않는다.
 ///
-/// **`may` 는 걷는 쪽이 아는 이름이다** — 줄이면 [`OURS`], 선언된 객체면 그 명령이 덧붙이는 키.
-/// `extra` 의 키는 모두 거기 있어야 한다 — 시험 빌드에서 확인한다. 목록이 덧붙이는 자리와 떨어져
+/// **`extra` 의 키는 모두 바탕의 [`Appendable::APPENDED`] 에 있어야 한다** — 줄이면 [`OURS`],
+/// 선언된 객체면 그 명령이 덧붙이는 키. 시험 빌드에서 확인한다. 목록이 덧붙이는 자리와 떨어져
 /// 있어, 새 키를 더하고 목록을 잊으면 그 키만 moai-2l8n 이 되살아나는데 그것을 잡을 시험이 따로
 /// 없다. 그 키가 한 번이라도 실리는 시험이 여기서 붉어진다.
-pub fn json_with<T: serde::Serialize>(base: &T, extra: &[(&str, String)], may: &[&str]) -> R<Vec<String>> {
+pub fn json_with<T: Appendable>(base: &T, extra: &[(&str, String)]) -> R<Vec<String>> {
     debug_assert!(
-        extra.iter().all(|(k, _)| may.contains(k)),
-        "덧붙인 키가 `may` 에 없다 — 되써 넣은 줄에서 그 키를 못 걷는다: {:?}",
-        extra.iter().map(|(k, _)| *k).filter(|k| !may.contains(k)).collect::<Vec<_>>()
+        extra.iter().all(|(k, _)| T::APPENDED.contains(k)),
+        "덧붙인 키가 `APPENDED` 에 없다 — 되써 넣은 줄에서 그 키를 못 걷는다: {:?}",
+        extra.iter().map(|(k, _)| *k).filter(|k| !T::APPENDED.contains(k)).collect::<Vec<_>>()
     );
     let mut s = serde_json::to_string(base).map_err(|e| Fail::new(e.to_string()))?;
     if !s.ends_with('}') {
@@ -539,7 +571,7 @@ mod tests {
             ("shelved_by", "\"argos-0002\"".to_string()),
             ("duplicate_lines", "2".to_string()),
         ];
-        let out = json_with(&row, &extra, OURS).unwrap().join("");
+        let out = json_with(&row, &extra).unwrap().join("");
         for (k, v) in &extra {
             assert_eq!(out.matches(&format!("\"{k}\":")).count(), 1, "{k} 가 둘 섰다\n{out}");
             assert!(out.contains(&format!("\"{k}\":{v}")), "{k} 에 우리 값이 안 섰다\n{out}");
@@ -555,7 +587,7 @@ mod tests {
     fn a_conditional_key_left_out_this_time_is_stripped_too() {
         let i = row_with(&[("commits_error", "가짜"), ("due", "2026-10-01")]);
         let row = Row::of(&i, None);
-        let out = json_with(&row, &[("commits", "[]".to_string())], OURS).unwrap().join("");
+        let out = json_with(&row, &[("commits", "[]".to_string())]).unwrap().join("");
         assert!(!out.contains("commits_error"), "{out}");
         assert!(out.contains("\"due\":\"2026-10-01\"") && out.contains("\"commits\":[]"), "{out}");
     }
@@ -570,17 +602,29 @@ mod tests {
         let out = json_line(&Row::of(&i, None)).unwrap().join("");
         assert!(!out.contains("가짜"), "{out}");
         assert!(out.contains("\"due\":\"2026-10-01\""), "{out}");
-        assert_eq!(i.rest.len(), OURS.len() + 1, "출력에서 걷으려다 줄을 바꿨다");
     }
 
-    /// **`may` 에 안 적은 키를 덧붙이면 시험 빌드가 멈춘다** — 목록이 덧붙이는 자리와 떨어져 있어
-    /// 새 키를 더하고 목록을 잊는 것을 잡을 곳이 여기뿐이다(moai-2l8n).
+    /// **`Row` 가 제 필드로 곁들이는 키도 `OURS` 에 있다**(moai-qn5d) — 없으면 되쓴 줄의 같은 이름이
+    /// 안 걷혀 한 객체에 둘 선다. `Row` 에 필드를 더하면 여기서 붉어진다.
+    #[test]
+    fn every_key_a_row_adds_is_in_ours() {
+        let i = row_with(&[]);
+        let row = Row { issue: std::borrow::Cow::Borrowed(&i), derived_status: Some("todo"), branch: Some("feat/x") };
+        let added = keys_beyond(&i, &row);
+        assert!(!added.is_empty(), "곁들인 키를 못 셌다");
+        for k in &added {
+            assert!(OURS.contains(&k.as_str()), "`Row` 가 곁들이는 {k} 가 `OURS` 에 없다");
+        }
+    }
+
+    /// **`APPENDED` 에 안 적은 키를 덧붙이면 시험 빌드가 멈춘다** — 목록이 덧붙이는 자리와 떨어져
+    /// 있어 새 키를 더하고 목록을 잊는 것을 잡을 곳이 여기뿐이다(moai-2l8n).
     #[test]
     #[cfg(debug_assertions)]
-    #[should_panic(expected = "may")]
-    fn an_appended_key_missing_from_may_is_caught() {
+    #[should_panic(expected = "APPENDED")]
+    fn an_appended_key_missing_from_the_list_is_caught() {
         let i = row_with(&[]);
-        let _ = json_with(&Row::of(&i, None), &[("새_키", "[]".to_string())], OURS);
+        let _ = json_with(&Row::of(&i, None), &[("새_키", "[]".to_string())]);
     }
 
     /// 겹치는 것이 없으면 걷은 모습을 짓지 않는다 — 흔한 길에서 줄을 복제하지 않는다.

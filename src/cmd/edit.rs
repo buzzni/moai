@@ -348,3 +348,40 @@ fn fail_if_nothing(args: &EditArgs) -> R<()> {
         Fail::new("무엇을 고칠지 적지 않았다. `moai edit --help` 가 고칠 수 있는 것을 낸다")
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **`Out` 이 줄 곁에 다는 키는 `cmd::OURS` 에 있다**(moai-qn5d) — 없으면 옛 `edit --json` 을
+    /// 되써 넣은 줄의 같은 이름이 안 걷혀, 그 소속이 이제 안 남아도 옛 값이 선다. `Out` 에 필드를
+    /// 더하면 여기서 붉어진다(목록은 주석으로만 매여 있어 잡을 곳이 여기뿐이다).
+    #[test]
+    fn every_key_out_adds_is_in_ours() {
+        let i = Issue::new(
+            "argos-0001".into(),
+            "제목".into(),
+            model::Kind::Issue,
+            model::Status::new("todo"),
+            "2026-09-11T04:12:03Z",
+        );
+        let read = super::super::Read::new();
+        let epic = Inherited { epic: "argos-0002".into(), parent: "argos-0003".into() };
+        let milestone = InheritedMilestone {
+            milestone: Some("argos-0004".into()),
+            epic: Some("argos-0002".into()),
+            parent: None,
+            way: Way::Epic,
+        };
+        let out = Out {
+            row: super::super::Row::from(&i, &read),
+            inherited_epic: Some(&epic),
+            inherited_milestone: Some(&milestone),
+        };
+        let added = super::super::keys_beyond(&i, &out);
+        assert!(!added.is_empty(), "곁들인 키를 못 셌다");
+        for k in &added {
+            assert!(super::super::OURS.contains(&k.as_str()), "`edit --json` 이 곁들이는 {k} 가 `OURS` 에 없다");
+        }
+    }
+}

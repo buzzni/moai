@@ -415,7 +415,6 @@ fn one(
         return super::json_with(
             &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),
             &extra,
-            super::OURS,
         );
     }
 
