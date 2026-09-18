@@ -1116,15 +1116,18 @@ fn close_in(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str, 
         // **지금 보는 것에 매인 리뷰만 본다.** 저장소 전체를 보던 판은, 옛
         // 세션이 남긴 리뷰 줄을 치우려는 사람에게 **돌린 적도 없는 리뷰의
         // 결과**를 지어내라고 요구했다. `closing` 이 같은 줄을 아예 안 세기로
-        // 한 것과도 어긋난다 — 한 규칙의 두 짝은 같은 셈법을 써야 한다.
+        // 한 것과도 어긋난다 — 한 규칙의 두 짝은 같은 셈법을 써야 한다. 옆 워크트리의 리뷰도
+        // 그래서 뺀다 — `closing`·[`guard_review`] 가 안 세는 줄이다(리뷰 moai-dw63.nzw).
         let unit = unit_of(issues, &held(issues, cfg, away));
         let epics = report::groups(issues);
         let out = report::put_off(issues);
+        let theirs = theirs(issues, away);
         let open_review = ids.iter().find_map(|id| {
             issues.iter().find(|i| {
                 i.id == *id
                     && is_review(i, &out)
                     && !i.status.is_done()
+                    && !theirs(i)
                     && (unit.contains(i.id.as_str())
                         || epics.get(i.id.as_str()).is_some_and(|e| unit.contains(e))
                         || crate::id::parent_of(&i.id).is_some_and(|p| unit.contains(p)))
@@ -1689,7 +1692,7 @@ fn refuse(rule: usize, why: String) -> Decision {
 /// 일하는 내내 매 턴이 붙들린다 — 같은 잔소리를 매번 들으면 아무도 안 읽는다.
 ///
 /// `latest` 는 에픽이 닫히는지를 잴 줄이다([`shelving_closes`]) — 받는 쪽이 옆 워크트리까지 겹쳐
-/// 넘긴다. 겹칠 것이 없으면 `issues` 그대로다.
+/// 넘긴다. 겹칠 것이 없으면 `issues` 그대로다. 집은 줄이 **아직 집혀 있는지도** 거기서 되짚는다.
 pub fn closing(
     issues: &[Issue],
     latest: &[Issue],
@@ -1699,7 +1702,16 @@ pub fn closing(
     before: Option<usize>,
 ) -> Decision {
     let mut lines = Vec::new();
-    let wip = held(issues, cfg, away);
+    let mut wip = held(issues, cfg, away);
+    // **겹친 줄에서도 집혀 있는 것만 붙든다**(리뷰 moai-dw63.nzw). 트래커는 main 에서 쓰므로 딸린
+    // 워크트리의 스냅샷은 갈라진 때에 멈춰 있다 — 거기서 `moai -C <루트>` 로 첫 칸에 되돌리거나 미룬
+    // 줄을 제 스냅샷으로만 세면, 그 워크트리에 여는 세션마다 이미 놓은 것을 도로 놓으라고 붙들고,
+    // 이미 미룬 줄에는 `mv` 로는 안 풀리는 "첫 칸에 두면 열린 채 남는다" 를 댔다(`mv` 는 미룸을
+    // 안 푼다). **빼기만 한다** — 옆이 집은 줄을 제 초점에 더하지 않는다.
+    if !wip.is_empty() {
+        let still: BTreeSet<&str> = report::wip(latest, cfg).into_iter().map(|i| i.id.as_str()).collect();
+        wip.retain(|i| still.contains(i.id.as_str()));
+    }
     let epics = report::groups(issues);
     let out_of_plan = report::put_off(issues);
     let closes = shelving_closes(latest, cfg, &wip);
@@ -1723,28 +1735,63 @@ pub fn closing(
             for col in between {
                 lines.push(format!("  moai mv {} {col}", i.id));
             }
-            lines.push(format!("  moai mv {} {last}     {}", i.id, i.title));
+            // **리뷰 줄은 낸 글과 함께 닫는 걸음을 댄다**(리뷰 moai-dw63.nzw). `-m` 없는 `done` 은
+            // 규칙 3 이 막는다 — 훅이 일러 준 명령을 훅이 막는 자리는 덫이다(`guide::REVIEW_STEPS`).
+            if last == crate::config::DONE && is_review(i, &out_of_plan) {
+                lines.push(crate::guide::close_steps(&i.id));
+            } else {
+                lines.push(format!("  moai mv {} {last}     {}", i.id, i.title));
+            }
             // **미루면 에픽이 닫히는 줄에는 미룸의 값을 함께 댄다**(moai-8ema). 미룬 멤버는
             // 에픽의 칸에서 빠지므로, 끝난 멤버 곁에 집은 것만 남은 에픽은 미루는 순간 목적을 못
             // 이룬 채 `done` 으로 선다 — 결정을 기다리는 멤버에 "지금 안 할 것이면" 만 대던 판은
-            // moai-l288 이 막은 문을 훅이 도로 열었다. 되돌아가는 칸(`mv <id> todo`)은 대지
-            // 않는다: 갈 칸은 앞 칸뿐이고(`closing_offers_only_the_columns_ahead`), 에픽을 열어
-            // 두는 데는 집은 채 이어받을 줄을 남기는 것으로 넉넉하다.
-            let (when, also) = match closes.get(i.id.as_str()) {
-                Some(e) => (
-                    format!("{e} 의 목적을 접을 때만 — 집은 것을 미루면 {e} 에 끝난 멤버만 남아 목적을 못 이룬 채 닫힌다"),
-                    " (결정을 기다리는 것도 이쪽이다)",
-                ),
-                None => ("지금 안 할 것이면".to_string(), ""),
+            // moai-l288 이 막은 문을 훅이 도로 열었다.
+            //
+            // **그 줄에는 첫 칸으로 되돌리는 길도 댄다**(moai-1plu, 사용자 결정 A). 갈림길 1 은
+            // 결정을 기다리는 멤버를 첫 칸에 두라 한다. 쥔 채 이어받을 줄만 대던 판은 그 줄을
+            // `in_progress` 에 세워 두어 `stale_progress`·`wip_overload` 가 서고, 워크트리를 치우면
+            // `stranded` 로 서서 그 힌트가 미룸 — 에픽을 닫는 수 — 을 첫 칸과 나란히 댔다. 첫 칸의
+            // 멤버도 에픽을 열어 둔다. 되돌아가는 칸은 이 줄에만 댄다 — 보통 줄은 앞 칸뿐이다
+            // (`closing_offers_only_the_columns_ahead`).
+            //
+            // **무엇을 기다리는지를 `-m` 으로 남긴다**(리뷰 moai-dw63.nzw). 첫 칸의 줄은 `ready` 에
+            // 서고, `ready` 는 끝나가는 에픽을 먼저 세워 마지막 멤버가 맨 위로 온다 — 까닭 없이
+            // 놓으면 다음 세션이 결정 없이 집는다. **리뷰 줄에는 대지 않는다** — 리뷰가 결정을
+            // 기다리면 그 결정은 멤버로 세우고(갈림길 1) 리뷰는 낸 글과 함께 닫는다(규칙 3). 리뷰를
+            // 첫 칸에 되돌리면 낸 글 없이 `ready` 에 서서, 다음 세션이 리뷰 한 판을 다시 돈다.
+            let shuts = closes.get(i.id.as_str()).copied();
+            if let Some(e) = shuts.filter(|_| !is_review(i, &out_of_plan)) {
+                lines.push(format!(
+                    "  moai mv {} {} -m \"무엇을 기다리나\"      결정을 기다리는 것이면 — 첫 칸에 두면 {e} 가 열린 채 남는다",
+                    i.id,
+                    cfg.first_status()
+                ));
+            }
+            let when = match shuts {
+                Some(e) => format!("{e} 의 목적을 접을 때만 — 집은 것을 미루면 {e} 에 끝난 멤버만 남아 목적을 못 이룬 채 닫힌다"),
+                None => "지금 안 할 것이면".to_string(),
             };
             lines.push(format!("  moai defer {} -m \"왜\"      {when}", i.id));
-            lines.push(format!("  {}      이어서 할 것이면{also}", crate::guide::handoff(&i.id)));
+            lines.push(format!("  {}      이어서 할 것이면", crate::guide::handoff(&i.id)));
         }
     }
     // **굴러가는 리뷰와 지금 집은 것에 매인 리뷰만 센다.** 저장소에 남은 옛
     // 리뷰 줄까지 세면 매 세션 같은 줄이 나오고, 그러면 아무도 안 읽는다.
     let unit = unit_of(issues, &wip);
-    for i in issues.iter().filter(|i| is_review(i, &out_of_plan) && !i.status.is_done()) {
+    // **옆 워크트리의 리뷰는 안 센다** — 규칙 3([`guard_review`]·[`close_in`])과 같은 자다(리뷰
+    // moai-dw63.nzw). 세면 옆 일꾼이 같은 에픽에서 돌리는 리뷰를 이 세션에 "낸 글을 붙이고
+    // 닫으라" 고 붙든다. **겹친 줄에서 이미 닫았거나 미룬 리뷰도 안 센다** — 위에서 집은 줄을
+    // 되짚은 것과 같은 자다. 안 그러면 main 에서 닫은 리뷰가 집은 줄에서 빠지는 대신 여기로 돌아온다.
+    let theirs = theirs(issues, away);
+    let settled: BTreeSet<&str> = if unit.is_empty() {
+        BTreeSet::new()
+    } else {
+        let out = report::put_off(latest);
+        latest.iter().filter(|i| i.status.is_done() || out.contains(i.id.as_str())).map(|i| i.id.as_str()).collect()
+    };
+    for i in issues.iter().filter(|i| {
+        is_review(i, &out_of_plan) && !i.status.is_done() && !theirs(i) && !settled.contains(i.id.as_str())
+    }) {
         // **규칙 3 과 같은 셈법이어야 한다.** 여기서 부모를 빼면, 거절문이
         // 시킨 대로 `--parent` 로 세운 리뷰가 규칙 3 은 지나가면서 닫을 때는
         // 아무도 안 챙기는 줄이 된다 — 한 규칙의 두 짝이 서로 다른 말을 한다.
@@ -2877,7 +2924,8 @@ mod tests {
     }
 
     /// **이미 review 인 줄에 review 로 옮기라고 하지 않는다.** 집은 것은 첫 칸도
-    /// 끝난 칸도 아닌 칸 전부라 review 도 집은 것이다 — 갈 곳은 그 뒤 칸뿐이다.
+    /// 끝난 칸도 아닌 칸 전부라 review 도 집은 것이다 — 갈 곳은 그 뒤 칸뿐이다. 되돌아가는
+    /// 칸은 미루면 에픽이 닫히는 줄에만 선다(`closing_warns_before_deferring_the_last_member`).
     #[test]
     fn closing_offers_only_the_columns_ahead() {
         let all = vec![epic("t-e"), under("t-1", "review", "t-e")];
@@ -2886,6 +2934,7 @@ mod tests {
         };
         assert!(why.contains("moai mv t-1 done"), "{why}");
         assert!(!why.contains("moai mv t-1 review"), "제자리걸음을 시킨다\n{why}");
+        assert!(!why.contains("moai mv t-1 todo"), "보통 줄에 되돌아가는 칸을 댄다\n{why}");
     }
 
     /// **에픽을 열어 두는 마지막 멤버에 미룸을 "지금 안 할 것이면" 으로만 대지 않는다**(moai-8ema).
@@ -2902,8 +2951,24 @@ mod tests {
         };
         assert!(why.contains("t-e 의 목적을 접을 때만"), "마지막 멤버를 그냥 미루라고 한다\n{why}");
         assert!(!why.contains("지금 안 할 것이면"), "{why}");
-        assert!(why.contains("결정을 기다리는 것도 이쪽이다"), "열어 둘 길을 안 댄다\n{why}");
-        // 앞 칸만 댄다 — 되돌아가는 칸은 여전히 안 댄다.
+        // **결정을 기다리는 것이면 첫 칸으로 되돌린다**(moai-1plu, 사용자 결정 A) — 갈림길 1 과 한 말.
+        // 무엇을 기다리는지를 `-m` 으로 남긴다 — 첫 칸의 줄은 `ready` 에 선다(리뷰 moai-dw63.nzw).
+        assert!(
+            why.contains(
+                "moai mv t-1 todo -m \"무엇을 기다리나\"      결정을 기다리는 것이면 — 첫 칸에 두면 t-e 가 열린 채 남는다"
+            ),
+            "결정을 기다리는 마지막 멤버에 첫 칸을 안 댄다\n{why}"
+        );
+        // 쥔 채 이어 할 길도 그대로 선다.
+        assert!(why.contains(&format!("{}      이어서 할 것이면", crate::guide::handoff("t-1"))), "{why}");
+
+        // **첫 칸은 설정에서 읽는다** — 첫 칸이 `todo` 가 아닌 저장소에서 `todo` 를 대면 `mv` 가 거절한다.
+        let custom = Config::parse("prefix = \"t\"\nstatuses = \"backlog, doing, done\"\n").unwrap();
+        let there = vec![epic("t-e"), under("t-1", "doing", "t-e"), under("t-2", "done", "t-e")];
+        let Decision::Block(why) = closing(&there, &there, &custom, &here(), 0, None) else {
+            panic!("안 붙들었다");
+        };
+        assert!(why.contains("moai mv t-1 backlog -m"), "설정의 첫 칸을 안 댄다\n{why}");
         assert!(!why.contains("moai mv t-1 todo"), "{why}");
 
         // 남은 멤버가 있으면 미뤄도 에픽이 안 닫힌다 — 보통 줄이다.
@@ -2929,6 +2994,8 @@ mod tests {
             };
             assert!(why.contains("moai defer t-1 -m \"왜\"      지금 안 할 것이면"), "{why}");
             assert!(!why.contains("목적을 접을 때만"), "닫히지 않는 에픽을 댄다\n{why}");
+            // 되돌아가는 칸은 미루면 닫히는 줄에만 댄다 — 보통 줄에는 앞 칸뿐이다.
+            assert!(!why.contains("moai mv t-1 todo"), "{why}");
         }
     }
 
@@ -2956,15 +3023,24 @@ mod tests {
             under("t-2", "done", "t-e"),
             under("t-4", "in_progress", "t-e"),
         ];
-        for (all, warned) in [(open_child, vec!["t-1"]), (held_child, vec!["t-1", "t-1.r"]), (two_held, vec!["t-1", "t-4"])] {
+        // (본 것, 미루면 닫힌다고 댈 줄, 그 가운데 첫 칸 되돌리기를 댈 줄). **리뷰 줄에는 첫 칸을 안
+        // 댄다**(리뷰 moai-dw63.nzw) — 리뷰가 결정을 기다리면 그 결정은 멤버로 세우고 리뷰는 낸 글과
+        // 함께 닫는다. 첫 칸에 되돌린 리뷰는 낸 글 없이 `ready` 에 선다.
+        for (all, warned, parked) in [
+            (open_child, vec!["t-1"], vec!["t-1"]),
+            (held_child, vec!["t-1", "t-1.r"], vec!["t-1"]),
+            (two_held, vec!["t-1", "t-4"], vec!["t-1", "t-4"]),
+        ] {
             let Decision::Block(why) = closing(&all, &all, &cfg(), &here(), 0, None) else {
                 panic!("안 붙들었다");
             };
-            for id in warned {
+            for id in &warned {
                 assert!(
                     why.contains(&format!("moai defer {id} -m \"왜\"      t-e 의 목적을 접을 때만")),
                     "미루면 닫히는 에픽을 안 댄다 — {id}\n{why}"
                 );
+                let offered = why.contains(&format!("moai mv {id} todo -m"));
+                assert_eq!(offered, parked.contains(id), "첫 칸 되돌리기 — {id}\n{why}");
             }
             assert!(!why.contains("지금 안 할 것이면"), "{why}");
         }
@@ -2981,6 +3057,64 @@ mod tests {
             panic!("안 붙들었다");
         };
         assert!(why.contains("t-e 의 목적을 접을 때만"), "main 에서 끝낸 멤버를 못 보고 그냥 미루라고 한다\n{why}");
+    }
+
+    /// **main 에서 이미 놓은 줄은 안 붙든다**(리뷰 moai-dw63.nzw). 딸린 워크트리의 스냅샷은 그 줄을
+    /// 아직 집은 것으로 든다 — 그것만 보면 `moai -C <루트>` 로 첫 칸에 되돌리거나 미룬 줄을, 그
+    /// 워크트리에 여는 세션마다 도로 놓으라고 붙든다. 미룬 줄에 대던 "첫 칸에 두면 열린 채
+    /// 남는다" 는 거짓이었다 — `mv` 는 미룸을 안 푼다.
+    #[test]
+    fn closing_lets_go_of_what_main_has_already_released() {
+        let stale = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), under("t-2", "done", "t-e")];
+        let parked = vec![epic("t-e"), under("t-1", "todo", "t-e"), under("t-2", "done", "t-e")];
+        let mut shelved = under("t-1", "in_progress", "t-e");
+        shelved.deferred_at = Some("2026-01-01T00:00:00Z".into());
+        let deferred = vec![epic("t-e"), shelved, under("t-2", "done", "t-e")];
+        for latest in [parked, deferred] {
+            assert_eq!(closing(&stale, &latest, &cfg(), &here(), 0, None), Decision::Pass, "{latest:?}");
+        }
+        // 겹친 줄에서도 집혀 있으면 그대로 붙든다.
+        let Decision::Block(why) = closing(&stale, &stale, &cfg(), &here(), 0, None) else {
+            panic!("안 붙들었다");
+        };
+        assert!(why.contains("moai mv t-1 todo -m"), "{why}");
+
+        // **main 에서 닫거나 미룬 리뷰는 집은 줄에서 빠진 뒤 "열린 리뷰" 로 돌아오지 않는다.**
+        let reviewing = vec![
+            epic("t-e"),
+            under("t-1", "in_progress", "t-e"),
+            under("t-2", "done", "t-e"),
+            review("t-1.r", "in_progress", None),
+        ];
+        let mut closed = reviewing.clone();
+        closed[3].status = Status::new("done");
+        let mut put_by = reviewing.clone();
+        put_by[3].deferred_at = Some("2026-01-01T00:00:00Z".into());
+        for latest in [closed, put_by] {
+            let Decision::Block(why) = closing(&reviewing, &latest, &cfg(), &here(), 0, None) else {
+                panic!("여기서 집은 t-1 을 안 붙든다");
+            };
+            assert!(why.contains("moai defer t-1 "), "{why}");
+            assert!(!why.contains("t-1.r"), "main 에서 놓은 리뷰를 도로 댄다\n{why}");
+        }
+    }
+
+    /// **집은 리뷰 줄은 낸 글과 함께 닫는 걸음을 댄다**(리뷰 moai-dw63.nzw). `-m` 없는 `done` 을
+    /// 대면 시킨 대로 친 줄을 규칙 3 이 막는다 — 훅이 일러 준 명령을 훅이 막는 덫이다.
+    #[test]
+    fn closing_offers_a_held_review_the_steps_rule_three_lets_through() {
+        let all = vec![issue("t-1", "in_progress"), review("t-r", "in_progress", None)];
+        let Decision::Block(why) = closing(&all, &all, &cfg(), &here(), 0, None) else {
+            panic!("안 붙들었다");
+        };
+        assert!(why.contains(&crate::guide::close_steps("t-r")), "{why}");
+        assert!(!why.contains("moai mv t-r done     "), "규칙 3 이 막는 줄을 댄다\n{why}");
+        assert!(why.contains("moai mv t-r review\n"), "앞 칸은 그대로 댄다\n{why}");
+        // 보통 줄은 그대로다.
+        assert!(why.contains("moai mv t-1 done     제목"), "{why}");
+        let steps = crate::guide::close_steps("t-r");
+        let close = steps.lines().last().unwrap().trim();
+        assert_eq!(guard_close(&all, &cfg(), &here(), close), Decision::Pass, "{close}");
     }
 
     /// 다 옮겼고 경고도 안 늘었으면 조용히 보낸다.
@@ -3013,6 +3147,37 @@ mod tests {
             panic!("안 붙들었다");
         };
         assert!(why.contains("리뷰 이슈 t-r"), "{why}");
+    }
+
+    /// **옆 워크트리가 돌리는 리뷰로는 안 붙든다**(리뷰 moai-dw63.nzw) — 규칙 3 과 같은 자다. 같은
+    /// 에픽의 옆 일꾼이 `--parent` 로 세운 리뷰를 이 세션에 닫으라고 하면, 돌린 적도 없는 리뷰의
+    /// 결과를 적으라는 말이 된다.
+    #[test]
+    fn closing_leaves_the_review_another_worktree_runs() {
+        let all = vec![
+            epic("t-e"),
+            under("t-1", "in_progress", "t-e"),
+            under("t-2", "in_progress", "t-e"),
+            review("t-2.r", "in_progress", None),
+        ];
+        let beside = away(&["t-2"]);
+        let Decision::Block(why) = closing(&all, &all, &cfg(), &beside, 0, None) else {
+            panic!("여기서 집은 것을 안 붙든다");
+        };
+        assert!(why.contains("moai defer t-1"), "{why}");
+        assert!(!why.contains("t-2.r"), "옆 워크트리의 리뷰를 닫으라고 한다\n{why}");
+        let rule = denied(&guard_review(&all, &cfg(), &beside)).to_string();
+        assert!(!rule.contains("t-2.r"), "규칙 3 의 두 짝이 갈렸다\n{rule}");
+        // 닫기 규칙도 같은 자다 — 세지 않는 리뷰에 돌린 적 없는 결과를 요구하지 않는다.
+        assert_eq!(guard_close(&all, &cfg(), &beside, "moai mv t-2.r done"), Decision::Pass);
+        // 여기서 집은 일에 매인 리뷰는 그대로 붙든다.
+        let mut own = all.clone();
+        own.push(review("t-1.r", "todo", None));
+        let Decision::Block(why) = closing(&own, &own, &cfg(), &beside, 0, None) else {
+            panic!("안 붙들었다");
+        };
+        assert!(why.contains("리뷰 이슈 t-1.r"), "{why}");
+        assert!(matches!(guard_close(&own, &cfg(), &beside, "moai mv t-1.r done"), Decision::Deny(_)));
     }
 
     /// 보드는 머리말과 함께 실린다. 머리말이 없으면 보드가 무엇을 하라는
