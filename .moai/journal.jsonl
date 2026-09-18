@@ -3983,3 +3983,4 @@
 {"ts":"2026-09-18T10:33:11Z","id":"moai-5255.9xl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 없음 — 받을 것도 넘길 것도 없다"}
 {"ts":"2026-09-18T10:33:12Z","id":"moai-5255","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — CLAUDE.md 글에서 가지 이름만 바꿈)"}
 {"ts":"2026-09-18T10:33:12Z","id":"moai-5255","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 에 병합했다"}
+{"ts":"2026-09-18T11:05:04Z","id":"moai-r9qa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
