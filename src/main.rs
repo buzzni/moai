@@ -13,6 +13,7 @@ mod git;
 mod git_leaks;
 mod guide;
 mod hook;
+mod i18n;
 mod id;
 mod markdown;
 mod model;
@@ -20,6 +21,8 @@ mod nav;
 mod projects;
 mod query;
 mod report;
+#[cfg(test)]
+mod scratch;
 mod skill;
 mod store;
 mod style;

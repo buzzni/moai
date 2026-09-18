@@ -388,7 +388,8 @@ fn claims(epics: &BTreeMap<&str, &str>, stones: &BTreeMap<&str, &str>, names: &B
 /// 이 자료와 `&[Issue]` 만 받는 순수 함수([`places`]·[`stranded`])가 한다.
 #[derive(Debug, Clone, Serialize)]
 pub struct Workplace {
-    /// 워크트리의 꼭대기.
+    /// 워크트리의 꼭대기 — **main 워크트리의 꼭대기에서 잰 상대 경로**다(`worktree::workplaces`).
+    /// main 밖에 만든 워크트리는 절대 경로 그대로다. 여기서는 워크트리를 가르는 이름으로만 쓴다.
     ///
     /// **글자로 낸다** — `PathBuf` 를 그대로 직렬화하면 UTF-8 이 아닌 경로에서 serde 가 통째로
     /// 실패해, 그 워크트리와 아무 상관 없는 줄의 `moai show --json` 까지 안 열린다. 사람 화면은
@@ -481,6 +482,11 @@ fn lossy_path<S: serde::Serializer>(p: &std::path::Path, s: S) -> Result<S::Ok, 
 /// 키가 없는 것은 안 집은 줄이다. 받는 쪽이 "안 집음" 과 "집었는데 안 보임" 을 한 지도로 가른다.
 /// 집은 멤버를 둔 묶음도 키를 받는다(멤버에서 굴려 올린다, [`settle`]).
 ///
+/// **워크트리가 하나도 없으면 아무 키도 없다**(moai-tbin) — 물을 자리 자체가 없다. 거기서 집은
+/// 줄을 `Lost` 로 채우면, 워크트리를 안 쓰는 저장소(그쪽이 기본이다)의 모든 집은 줄에 빨간
+/// "일하는 워크트리가 안 보인다" 가 붙는다. 한때 그 판정이 부르는 쪽의 `trees.is_empty()` 가드
+/// 두 벌로만 서 있어, 이 순수 함수를 새로 부르는 표면은 그 가드를 세 벌째 적어야 했다.
+///
 /// **자리가 안 보이는 까닭까지 여기서 가른다**(moai-xn9n) — 방금 집어 아직 워크트리가 안 뜬
 /// 것(`STRANDED_GRACE_SECS`, `Place::Fresh`), 못 읽은 워크트리가 있어 모르는 것(`Place::Unknown`),
 /// 정말 자리를 잃은 것(`Place::Lost`)이다. `now` 를 받는 까닭이 이것이다. 한때 이 셋을 [`stranded`]
@@ -498,14 +504,16 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
     // `Warning::new` 가 같은 까닭으로 id 를 한 번씩만 담는다).
     let picked: BTreeMap<&str, &Issue> = wip(issues, cfg).into_iter().map(|i| (i.id.as_str(), i)).collect();
     let mut found: BTreeMap<&str, Vec<&Workplace>> = picked.keys().map(|id| (*id, Vec::new())).collect();
-    if picked.is_empty() {
+    // 둘 다 **빠른 길일 뿐 판정이 아니다** — 아래를 다 돌아도 [`settle`] 이 같은 답(빈 지도)을
+    // 낸다. 계약을 쥔 자는 거기 하나고, 여기는 헛일을 아낄 뿐이라 갈릴 것이 없다.
+    if picked.is_empty() || trees.is_empty() {
         return settle(&picked, found, trees, now, &BTreeMap::new());
     }
     // **소속 지도는 한 번만 짓는다**(`claims`) — 워크트리마다 바뀌는 것은 이름뿐이다.
     let (epics, stones) = (groups(issues), milestones(issues));
-    // **굴릴 곳은 워크트리와 무관하다** — 워크트리가 하나도 없어도 묶음은 키를 받는다(멤버가 다
-    // `Lost` 나 `Fresh` 인 키다). 한때 `trees.is_empty()` 도 여기서 일찍 돌아, 문서와 `placeable`
-    // 은 "집은 멤버를 둔 묶음은 키를 받는다" 라고 하는데 그 길에서만 안 받는 셋째 답이 있었다.
+    // **굴릴 곳은 어느 워크트리가 있느냐와 무관하다**(moai-oepz) — 집은 멤버를 둔 묶음은 그
+    // 멤버가 `At` 이든 `Lost` 든 키를 받는다. 한때 이 줄 위에서 일찍 돌아, 문서와 `placeable` 은
+    // "집은 멤버를 둔 묶음은 키를 받는다" 라고 하는데 그 길에서만 안 받는 셋째 답이 있었다.
     let rolls = rollups(issues, &picked, &epics, &stones);
     for t in trees {
         let named = |i: &Issue| claims(&epics, &stones, &t.names, i);
@@ -596,6 +604,11 @@ fn settle<'a>(
     now: &str,
     rolls: &BTreeMap<&str, Vec<&str>>,
 ) -> BTreeMap<String, Place<'a>> {
+    // **볼 워크트리가 없으면 아무 답도 안 낸다**([`places`]) — "없다" 는 찾아보고 못 찾았을 때의
+    // 말이다. 판정이 여기 있어야 부르는 표면마다 같은 가드를 다시 적지 않는다.
+    if trees.is_empty() {
+        return BTreeMap::new();
+    }
     // **못 읽은 워크트리가 가리는 것은 그 이름이 아무 줄도 안 가리킬 때뿐이다**(사용자 결정,
     // 리뷰 moai-ya06.44t). 이름이 집은 줄을 가리키는 워크트리는 못 읽어도 그 줄이 이미 `At` 이라
     // 가릴 것이 없고, 못 읽었다고 저장소의 다른 줄까지 "모른다" 로 덮으면 치우지 않은 깨진
@@ -683,9 +696,7 @@ const STRANDED_GRACE_SECS: i64 = 3600;
 /// - **`status()` 에 안 넣는다.** 훅의 기준선과 `Stop` 이 `status()` 의 경고를 세는데, 이것은 남의
 ///   세션이 워크트리를 치우는 것만으로 늘어 제 일과 상관없이 세션을 붙든다. `moai status` 만 싣는다
 pub fn stranded(issues: &[Issue], cfg: &Config, trees: &[Workplace], now: &str) -> Option<Warning> {
-    if trees.is_empty() {
-        return None;
-    }
+    // 워크트리가 없으면 [`places`] 가 아무 키도 안 낸다 — 가드를 여기 다시 적지 않는다(moai-tbin).
     let at = places(issues, cfg, trees, now);
     // **집은 줄로 되짚는다.** [`places`] 는 묶음 id 에도 키를 주므로(멤버에서 굴려 올린다) 그것을
     // 걸러야 하는데, **줄 전체로 되짚으면 안 된다** — 그 지도는 뒷줄이 이기니 같은 id 의 묶음
@@ -2178,6 +2189,12 @@ impl Warning {
     /// 갈린다**(2026-09-15 사용자 결정). 뭉뚱그려 `moai init` 만 대면, main 을 받고 아직 다시
     /// 빌드 안 한 세션이 그 말을 따라 **새 안내를 옛 글로 되돌리고** 그 되돌림이 머지로 실린다.
     /// 기계도 가르라고 `kind` 를 따로 둔다.
+    /// 사용자 설정에서 못 읽은 것(리뷰 moai-80qw). **셈만 든다** — 어느 파일의 어느 값인지는
+    /// 부르는 쪽이 이미 stderr 로 한 줄씩 냈다. 보드에 그 긴 줄을 또 실으면 표를 밀어낸다.
+    pub fn user_config(n: usize) -> Warning {
+        Warning::new("user_config", Vec::new()).count(n).notice()
+    }
+
     pub fn agents_stale(root: Option<&str>, edited: bool) -> Warning {
         let kind = if edited { "agents_hand_edited" } else { "agents_stale" };
         Warning::new(kind, Vec::new()).count(1).notice().hint(&Warning::init_hint(root))
@@ -2869,6 +2886,25 @@ mod tests {
         assert!(matches!(at["argos-0003"], Place::Lost), "이름이 가리키는 워크트리가 남의 줄을 덮었다");
         assert!(stranded(&issues, &cfg(), &blind, LATER).is_none(), "모르는 것을 자리 없음으로 셌다");
         assert!(stranded(&issues, &cfg(), &lost, LATER).is_some(), "자리 잃은 줄을 안 비췄다");
+    }
+
+    /// **워크트리가 없으면 아무 키도 없다**(moai-tbin) — "없다" 는 찾아보고 못 찾았을 때의 말이다.
+    /// 그리고 **집은 멤버를 둔 묶음은 언제나 키를 받는다**(moai-oepz) — 문서의 계약과 코드가 한때
+    /// 갈려, 워크트리가 있을 때만 굴림이 섰다.
+    #[test]
+    fn with_no_worktrees_nothing_is_placed_and_groups_always_roll_up() {
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "todo"),
+            member("argos-0002", "argos-0001", "in_progress"),
+        ];
+        assert!(places(&issues, &cfg(), &[], LATER).is_empty(), "볼 워크트리가 없는데 자리를 단정했다");
+        assert!(stranded(&issues, &cfg(), &[], LATER).is_none());
+
+        // 워크트리가 있으면 멤버도 묶음도 키를 받는다 — 자리를 못 찾아도 그렇다.
+        let trees = vec![tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &[])];
+        let at = places(&issues, &cfg(), &trees, LATER);
+        assert!(matches!(at["argos-0002"], Place::Lost), "{:?}", at["argos-0002"]);
+        assert!(matches!(at["argos-0001"], Place::Lost), "묶음이 키를 못 받았다");
     }
 
     /// **굴려 올린 자리의 차례는 `trees` 의 것이다.** 멤버의 답을 이어 붙이면 차례가 멤버 id 를

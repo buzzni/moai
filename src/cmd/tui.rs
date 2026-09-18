@@ -102,6 +102,8 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                         counts: sum.counts.into_iter().collect(),
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),
                         warnings: sum.warnings,
+                        stranded: sum.stranded,
+                        unreadable_worktrees: sum.blind,
                         unreadable: sum.unreadable,
                     }
                 });
@@ -162,7 +164,18 @@ struct Counted {
     counts: std::collections::BTreeMap<String, usize>,
     picked: Vec<String>,
     warnings: usize,
+    /// 그중 집었는데 일하는 워크트리가 없는 줄(moai-p3bs) — 화면의 층이 낱말로 대는 그 수다.
+    /// 없으면 키를 안 단다: 늘 `0` 을 달면 옛 판과 견주는 쪽이 새 뜻을 얻은 줄 모른다.
+    #[serde(skip_serializing_if = "is_zero")]
+    stranded: usize,
+    /// 스냅샷을 못 읽은 워크트리의 수 — 있으면 위의 수는 "센 결과 0" 이 아니라 "못 셌다" 다.
+    #[serde(skip_serializing_if = "is_zero")]
+    unreadable_worktrees: usize,
     unreadable: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// **TTY 가 아니면 켜지 않는다.** 파이프에 대고 대체 화면을 켜면 그 자리에서
@@ -725,14 +738,12 @@ mod tests {
     }
 
     /// 편집기 시험의 임시 자리. 이름에 **빈칸**을 넣는다 — 경로가 셸에서 쪼개지면 여기서 드러난다.
-    struct Dir(std::path::PathBuf);
+    /// 만들고 지우는 일(터져도 치우는 것까지)은 [`Scratch`](crate::scratch::Scratch) 가 한다.
+    struct Dir(crate::scratch::Scratch);
 
     impl Dir {
         fn new(name: &str) -> Dir {
-            let d = std::env::temp_dir().join(format!("moai-editor {name}-{}-{:?}", std::process::id(), std::thread::current().id()));
-            let _ = std::fs::remove_dir_all(&d);
-            std::fs::create_dir_all(&d).unwrap();
-            Dir(d)
+            Dir(crate::scratch::Scratch::new(&format!("editor {name}")))
         }
 
         /// 가짜 편집기 — 받은 인자와 파일의 권한·글을 옆에 적고, `script` 를 돈다. **진짜 편집기는
@@ -759,17 +770,11 @@ mod tests {
 
         /// 편집기가 끝난 뒤 남은 임시 파일.
         fn leftovers(&self) -> Vec<String> {
-            std::fs::read_dir(&self.0)
+            std::fs::read_dir(self.0.path())
                 .unwrap()
                 .filter_map(|e| e.ok()?.file_name().into_string().ok())
                 .filter(|n| n.starts_with("moai-idea-"))
                 .collect()
-        }
-    }
-
-    impl Drop for Dir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 

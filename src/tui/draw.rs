@@ -1823,7 +1823,9 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
             } else {
                 spans.extend(shown);
             }
-            if sum.warnings > 0 || sum.unreadable > 0 {
+            // 못 읽은 워크트리도 `!` 를 세운다 — 한눈 보기가 그것을 `옆 워크트리 문제` 로 세는데
+            // 여기만 조용하면 두 화면이 같은 저장소를 달리 말한다.
+            if sum.warnings > 0 || sum.unreadable > 0 || sum.blind > 0 {
                 spans.push(Span::styled(" !", from_anstyle(style::WARN)));
             }
         }
@@ -1891,13 +1893,37 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                 ]));
             }
             out.push(Line::from(""));
-            if sum.warnings == 0 {
+            // **못 셌으면 "문제 없다" 를 안 세운다** — 아래에 `!` 못 읽은 워크트리 줄이 서는데 위에서
+            // ✓ 를 대면 덩어리가 제 말을 뒤집는다(moai-cuw2, 한눈 보기와 같은 자).
+            if sum.warnings == 0 && sum.blind == 0 {
                 out.push(Line::from(vec![Span::styled("✓", status("done")), Span::raw(" 드러난 문제 없다")]));
-            } else {
+            } else if sum.warnings > 0 {
                 out.push(Line::from(vec![
                     Span::styled("!", from_anstyle(style::WARN)),
                     Span::raw(format!(" 드러난 것 {}건 — 들어가서 `moai status`", sum.warnings)),
                 ]));
+            }
+            // **자리 없는 줄은 낱말로 따로 댄다**(moai-p3bs). 위의 수에 이미 들었지만, 죽은
+            // 세션을 찾으러 돌아온 사람이 보는 첫 화면이 여기라 "경고 N건" 만으로는 그것이
+            // 무엇인지 알 수 없다 — 들어가지 않고도 무엇을 이어받을지가 보여야 한다.
+            //
+            // **감아 낸다**(`Look::Shut` 과 같은 자) — 수가 글 끝에 있어, 80칸의 상세 폭에서 자르면
+            // 정작 몇 건인지가 잘려 나간다.
+            if sum.stranded > 0 {
+                out.extend(wrapped(
+                    &format!("! 집었는데 일하는 워크트리가 없는 것 {}건", sum.stranded),
+                    w,
+                    from_anstyle(style::WARN),
+                ));
+            }
+            // **못 읽은 워크트리도 댄다**(리뷰 moai-p3bs.op2) — 그것이 있으면 위의 수는 "센 결과
+            // 0" 이 아니라 "못 셌다" 다. 안 대면 층이 그 둘을 같은 화면으로 낸다.
+            if sum.blind > 0 {
+                out.extend(wrapped(
+                    &format!("! 스냅샷을 못 읽은 워크트리 {}곳 — 자리를 다 못 셌다", sum.blind),
+                    w,
+                    from_anstyle(style::WARN),
+                ));
             }
             if sum.unreadable > 0 {
                 out.push(Line::from(vec![
@@ -3722,6 +3748,8 @@ pub(super) mod tests {
                 counts: vec![("todo".into(), 3), ("in_progress".into(), 1), ("review".into(), 0), ("done".into(), 12)],
                 picked: vec![Picked { id: "argos-0004".into(), title: "집은 멤버".into(), column: "in_progress".into() }],
                 warnings: 2,
+                stranded: 0,
+                blind: 0,
                 unreadable: 0,
             },
         };
@@ -3787,6 +3815,36 @@ pub(super) mod tests {
         a.hit("SPC p");
         let screen = render(&mut a, 80, 22).join("\n");
         assert!(screen.contains("a : 등록") && !screen.contains("목록에서 빼기"), "{screen}");
+    }
+
+    /// **층은 자리 없는 줄과 못 읽은 워크트리를 낱말로 댄다**(moai-p3bs) — 그리고 못 셌으면 "문제
+    /// 없다" 를 안 세운다. 아래에 `!` 가 서는데 위에서 ✓ 를 대면 덩어리가 제 말을 뒤집고, 줄의
+    /// `!` 가 조용하면 한눈 보기(`옆 워크트리 문제 N건`)와 같은 저장소를 달리 말한다.
+    #[test]
+    fn the_layer_names_stranded_work_and_never_calls_an_uncounted_repo_clean() {
+        use super::super::layer::{At, Look};
+        let mut a = layered(At::Layer);
+        let set = |a: &mut App, warnings: usize, stranded: usize, blind: usize| {
+            let Look::Open { sum } = &mut a.layer.as_mut().unwrap().places[0].look else { panic!("one 이 안 열렸다") };
+            (sum.warnings, sum.stranded, sum.blind) = (warnings, stranded, blind);
+        };
+
+        // 상세는 80칸에서 좁다 — 감아 낸 줄을 이어 붙여 **수까지** 보이는지 본다.
+        let joined = |lines: &[String]| -> String {
+            lines.iter().filter_map(|l| l.split('│').nth(1)).map(str::trim).collect::<Vec<_>>().join(" ")
+        };
+        set(&mut a, 1, 1, 0);
+        let lines = render(&mut a, 80, 22);
+        let pane = joined(&lines);
+        assert!(pane.contains("워크트리가 없는 것 1건"), "80칸에서 수가 잘렸다\n{}", lines.join("\n"));
+
+        set(&mut a, 0, 0, 1);
+        let lines = render(&mut a, 80, 22);
+        let screen = lines.join("\n");
+        assert!(joined(&lines).contains("워크트리 1곳"), "80칸에서 수가 잘렸다\n{screen}");
+        assert!(!screen.contains("드러난 문제 없다"), "못 셌는데 문제 없다고 했다\n{screen}");
+        let row = lines.iter().find(|l| l.contains("one/")).unwrap_or_else(|| panic!("{screen}"));
+        assert!(row.contains(" !"), "못 읽은 워크트리가 있는데 줄이 조용하다 — {row:?}");
     }
 
     /// **디렉터리 고르기 창도 색 없이 80칸에서 읽힌다** — 테두리가 지금 디렉터리를 대고(길면
@@ -4970,6 +5028,8 @@ pub(super) mod tests {
                 counts: vec![("in\nprog\tress\u{1b}[2J".into(), 1)],
                 picked: vec![Picked { id: "argos\t0004".into(), title: "첫 줄\n둘째\t줄".into(), column: "in_progress".into() }],
                 warnings: 0,
+                stranded: 0,
+                blind: 0,
                 unreadable: 0,
             },
         };
