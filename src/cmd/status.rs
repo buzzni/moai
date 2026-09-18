@@ -80,6 +80,24 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 빠진 딸린 파일 규칙도 같은 자리다(moai-2f99) — `init` 이 한 번 말하고 마는 것을 여기가 잇는다.
     st.notices.extend(crate::cmd::init::dotfile_notice(&repo.root, ctx.chdir));
 
+    // **설정에 적은 말이 틀렸으면 여기서 댄다**(리뷰 moai-80qw). `Doc::lang` 이 그 줄을 짓는
+    // 까닭은 "오타가 조용히 영어가 되면 고친 설정이 왜 안 듣는지 알 길이 없다" 였는데
+    // (리뷰 moai-slfv.vrw), 저장소 **안**의 이 명령은 등록 목록을 안 읽으므로(위의 결정 3)
+    // 그 줄이 닿는 자리가 없었다 — 세션이 시작하는 화면이 바로 여기다.
+    //
+    // **긴 말은 stderr 로, 보드에는 셈만.** 어느 파일의 어느 값인지는 한 줄이 길어 보드의
+    // 표를 밀어내고, 그렇다고 stderr 로만 내면 보드가 "드러난 문제 없다" 로 방금 한 말을
+    // 뒤집는다(moai-cuw2). **알림이지 경고가 아니다** — 계획이 아니라 설치가 어긋난 것이라
+    // `agents_stale` 과 같은 자리고, 종료 코드는 안 바뀐다. 말을 고를 때 이미 읽은 것이라
+    // 설정을 다시 읽지 않는다.
+    let said = crate::i18n::problems();
+    for line in said {
+        eprintln!("{line}");
+    }
+    if !said.is_empty() {
+        st.notices.push(report::Warning::user_config(said.len()));
+    }
+
     if st.broken() {
         super::note_partial();
     }
