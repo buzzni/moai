@@ -1845,6 +1845,8 @@ fn show_json_keys_win_over_unknown_fields_of_the_same_name() {
 /// 되써 넣은 줄은 그때의 조건부 키(`commits_error`·`blockers`·…)를 모르는 필드로 들고 있다.
 /// 덧붙인 키만 걷으면, 그 조건이 아닌 지금 옛 값이 그대로 딸려 나가 거짓을 말한다 — git 이
 /// 멀쩡한데 `commits` 옆에 "못 읽었다" 가 선다. 파일은 한 바이트도 안 바뀐다.
+///
+/// 되쓴 줄은 **다른 명령의 출력**에서도 온다 — `edit --json` 의 `inherited_*` 도 여기서 걷는다.
 #[test]
 fn show_json_drops_stale_conditional_keys_carried_by_a_rewritten_line() {
     let s = init("stalekeys");
@@ -1852,24 +1854,26 @@ fn show_json_drops_stale_conditional_keys_carried_by_a_rewritten_line() {
     git(s.path(), &["init", "-q"]);
     git_at(s.path(), NOW, &["commit", "-q", "--allow-empty", "-m", "chore: 첫 커밋"]);
     let stale = [
-        r#""commits_error":"가짜""#,
-        r#""blockers":[{"id":"가짜"}]"#,
-        r#""shelved_by":"가짜""#,
-        r#""workplaces":["가짜"]"#,
-        r#""place":"가짜""#,
-        r#""duplicate_lines":2"#,
-        r#""members":["가짜"]"#,
+        ("commits_error", r#""가짜""#),
+        ("blockers", r#"[{"id":"가짜"}]"#),
+        ("shelved_by", r#""가짜""#),
+        ("workplaces", r#"["가짜"]"#),
+        ("place", r#""가짜""#),
+        ("duplicate_lines", "2"),
+        ("members", r#"["가짜"]"#),
+        ("inherited_epic", r#"{"epic":"가짜","parent":"가짜"}"#),
+        ("inherited_milestone", r#"{"milestone":"가짜"}"#),
     ];
+    let fields: Vec<String> = stale.iter().map(|(k, v)| format!("\"{k}\":{v}")).collect();
     let doctored = issues(s.path()).replace(
         &format!("\"id\":\"{id}\","),
-        &format!("\"id\":\"{id}\",{},\"due\":\"2026-10-01\",", stale.join(",")),
+        &format!("\"id\":\"{id}\",{},\"due\":\"2026-10-01\",", fields.join(",")),
     );
     std::fs::write(s.path().join(".moai/issues.jsonl"), &doctored).unwrap();
 
     let json = ok(s.path(), &["show", &id, "--json"]);
-    for kv in &stale {
-        let key = &kv[..=kv[1..].find('"').unwrap() + 1];
-        assert!(!json.contains(key), "이번에 안 실은 {key} 가 되쓴 줄에서 딸려 나왔다\n{json}");
+    for (k, _) in &stale {
+        assert!(!json.contains(&format!("\"{k}\"")), "이번에 안 실은 {k} 가 되쓴 줄에서 딸려 나왔다\n{json}");
     }
     assert!(json.contains(r#""commits":[]"#), "{json}");
     assert!(json.contains(r#""due":"2026-10-01""#), "조건부 키가 아닌 모르는 필드까지 걷었다\n{json}");
