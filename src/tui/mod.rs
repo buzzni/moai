@@ -215,6 +215,8 @@ pub struct Fresh {
     index: Index,
     states: States,
     warnings: usize,
+    /// 그중 자리 없는 집은 줄의 경고([`lost_of`]) — 0 이나 1.
+    lost: usize,
     unreadable: Vec<Option<String>>,
     origin: crate::worktree::Origin,
     elsewhere: Vec<String>,
@@ -275,12 +277,14 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     let now = crate::model::now();
     let mut watched = g.watched;
     watched.extend(heads);
+    let lost = lost_of(repo, &issues, worktree, &now);
     Ok(Fresh {
         root: repo.root.clone(),
         stamp,
         index: Index::of(&issues),
         states: states_of(&issues, &repo.config),
-        warnings: warnings_of(&issues, &unreadable, &repo.config, &now),
+        warnings: warnings_of(&issues, &unreadable, &repo.config, &now) + lost,
+        lost,
         issues,
         unreadable,
         origin: g.origin,
@@ -289,6 +293,17 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         watched,
         now,
     })
+}
+
+/// 자리 없는 집은 줄의 경고 수 — 0 이나 1(moai-al0x). `moai status` 와 프로젝트 층이 "드러난 것"
+/// 에 싣는 그 한 줄이다(`worktree::stranded_at`). 한때 여기만 안 세어, 층에서 `! 1` 을 보고
+/// 들어온 사람이 안쪽 배너에서 0 을 봤다(사용자 결정 2026-09-18 — 안쪽이 `moai status` 에 맞춘다).
+///
+/// [`warnings_of`] 에 안 넣고 따로 둔 까닭: 그것은 `&[Issue]` 에 대한 순수한 셈이라 못 읽는 줄의
+/// 자가 바뀔 때마다 다시 부르는데, 이것은 디스크의 워크트리를 읽는다(이름으로 안 잡히는 집은 줄이
+/// 있으면 옆 스냅샷을 판다). 읽을 때 한 번 재어 들고, 수를 다시 셀 때는 든 값을 더한다.
+fn lost_of(repo: &Repo, issues: &[Issue], worktree: bool, now: &str) -> usize {
+    usize::from(crate::worktree::stranded_at(&repo.root, &repo.config, issues, worktree, now).0.is_some())
 }
 
 /// **알림은 안 센다.** 배너는 "드러난 것 N건" 이라고 말하는데, 담아 둔
@@ -378,6 +393,8 @@ pub struct App {
     header_user: Option<(Option<String>, crate::config::Naming, std::path::PathBuf, String)>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
+    /// 그중 자리 없는 집은 줄의 경고([`lost_of`]). 읽을 때 재어 들고, `warnings` 를 다시 셀 때 더한다.
+    lost: usize,
     /// 상세의 굴린 자리. **왼쪽 커서를 옮기면 첫 줄로 돌아간다** — 다른
     /// 이슈를 보는데 굴린 자리가 남아 있으면 첫 줄부터 못 본다.
     pub detail: Scroll,
@@ -570,6 +587,11 @@ impl App {
             self.unreadable = unreadable;
             self.warnings = warnings_of(&self.issues, &self.unreadable, &self.cfg, &self.now);
         }
+        // 자리 판정은 저장소가 있어야 잰다 — `build` 는 줄만 받아 못 쟀다.
+        if let Some(repo) = &self.repo {
+            self.lost = lost_of(repo, &self.issues, self.worktree, &self.now);
+            self.warnings += self.lost;
+        }
         self.origin = origin;
         self.elsewhere = elsewhere;
         self.watched = watched;
@@ -612,6 +634,7 @@ impl App {
             identify: crate::model::actor,
             header_user: None,
             warnings: 0,
+            lost: 0,
             stamp: None,
             watched: Vec::new(),
             commits: Commits::new(),
@@ -931,6 +954,7 @@ impl App {
         self.commits_due |= self.watched != f.watched || f.issues.iter().any(|i| !self.commit_ids.contains(&i.id));
         self.watched = f.watched;
         self.warnings = f.warnings;
+        self.lost = f.lost;
         self.take(f.issues, f.index, f.states, f.now);
     }
 
@@ -1001,7 +1025,7 @@ impl App {
         let index = Index::of(&issues);
         let states = states_of(&issues, &self.cfg);
         let now = crate::model::now();
-        self.warnings = warnings_of(&issues, &self.unreadable, &self.cfg, &now);
+        self.warnings = warnings_of(&issues, &self.unreadable, &self.cfg, &now) + self.lost;
         self.take(issues, index, states, now);
     }
 

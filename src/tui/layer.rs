@@ -651,6 +651,7 @@ impl App {
         self.watched = Vec::new();
         self.stamp = None;
         self.warnings = 0;
+        self.lost = 0;
         self.filter_text = None;
         // **보기는 돌리지 않는다**(moai-2bzp). 보기·정렬·열은 사람의 설정이라 사용자 설정에 적혀
         // 프로젝트를 옮겨도 이어진다 — 한때(moai-fmv5) 여기서 처음값으로 돌렸는데, 그러면 저장한
@@ -1325,6 +1326,15 @@ mod tests {
         std::fs::remove_dir_all(s.join("argos-0002")).unwrap();
         settle(&mut a);
         assert_eq!(stranded(&a), 1, "워크트리를 치웠는데 층이 옛 수를 낸다");
+
+        // **들어가도 같은 수다** — 안쪽 배너도 자리 없는 줄을 센다(사용자 결정 2026-09-18). 한때
+        // 층은 `! 1` 인데 들어가면 0 이었다.
+        let Look::Open { sum } = look(&a, "main") else { panic!() };
+        let on_layer = sum.warnings;
+        a.key(key(KeyCode::Enter));
+        assert!(!a.on_layer());
+        assert_eq!(a.warnings, on_layer, "층과 안쪽 배너가 같은 저장소를 달리 센다");
+        assert!(a.warnings >= 1, "안쪽 배너가 자리 없는 줄을 안 셌다");
     }
 
     /// **파일이 그대로여도 시계가 가면 다시 읽는다**(moai-al0x). 요약에는 시계로 재는 것(워크트리가
