@@ -3557,3 +3557,4 @@
 {"ts":"2026-09-18T01:31:07Z","id":"moai-kjvh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-csvw 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-18T01:31:16Z","id":"moai-csvw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"고른 길: 켠 채로 도는 폭 훑기(40·60·80·120)를 더한다. fixture 를 둘로 가르면 every() 를 쓰는 그림 시험 전부가 두 벌 돌아 값보다 비싸고, 이름 줄이 무너지는 자리는 폭 셈이라 폭을 훑는 쪽이 곧장 그 자리를 본다. idea 본문이 댄 두 길 중 고르는 구현 판단이다(감독)"}
 {"ts":"2026-09-18T01:31:17Z","id":"moai-ehmj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T01:32:00Z","id":"moai-yxlq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"887847c 로 main 에 병합"}
