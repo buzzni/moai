@@ -3989,3 +3989,35 @@
 {"ts":"2026-09-18T11:05:59Z","id":"moai-sprn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-1k17 에서 펼쳤다 — 브리프 9-1 과 AGENTS 블록이 옛 model 줄 꼴을 가르친다"}
 {"ts":"2026-09-18T11:05:59Z","id":"moai-1k17","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-sprn 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-18T11:06:07Z","id":"moai-jo8d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:06:26Z","id":"moai-wxkm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"모든 명령의 --help 를 80칸 안으로"}
+{"ts":"2026-09-18T11:06:26Z","id":"moai-ezdp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옵션 열·after_help·long_help 를 80칸 안으로 접고 폭 시험을 모든 명령으로 넓힌다"}
+{"ts":"2026-09-18T11:06:26Z","id":"moai-wxkm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-c57v 에서 펼쳤다 — 다른 명령의 --help 도 80칸을 넘는다 — after_help 글줄과 clap 옵션 열"}
+{"ts":"2026-09-18T11:06:26Z","id":"moai-c57v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wxkm 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:06:33Z","id":"moai-ezdp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:07:41Z","id":"moai-k9yb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:09:16Z","id":"moai-dlxf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"치운 옆 워크트리의 ⎇ 가 남는다"}
+{"ts":"2026-09-18T11:09:16Z","id":"moai-uyu9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"gather 가 이름만 든 딸린 워크트리의 .git 파일을 지켜본다"}
+{"ts":"2026-09-18T11:09:16Z","id":"moai-dlxf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-557w 에서 펼쳤다 — 스냅샷 없는 옆 워크트리를 rm -rf 로 치우면 탐색기의 ⎇ 가 다음 다시 읽기까지 남는다"}
+{"ts":"2026-09-18T11:09:16Z","id":"moai-557w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-dlxf 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:09:22Z","id":"moai-uyu9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:09:51Z","id":"moai-zuke","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"프로젝트를 옮길 때 되돌릴 것을 한 자리로"}
+{"ts":"2026-09-18T11:09:51Z","id":"moai-800o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"climb 과 enter_project 가 한 함수로 되돌리고, 층에서 시작한 읽기·커밋 일감을 버린다"}
+{"ts":"2026-09-18T11:09:51Z","id":"moai-zuke","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xrrn 에서 펼쳤다 — 프로젝트를 옮길 때 되돌릴 것이 climb 과 enter_project 로 갈라져 있다"}
+{"ts":"2026-09-18T11:09:51Z","id":"moai-xrrn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-zuke 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:09:58Z","id":"moai-800o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:10:33Z","id":"moai-fqnr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"조건부 --json 키를 되쓴 줄에서 걷는다"}
+{"ts":"2026-09-18T11:10:33Z","id":"moai-wams","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"json_with 가 낼 수 있는 조건부 키 목록을 받아 이번에 안 실은 것을 rest 에서 걷는다"}
+{"ts":"2026-09-18T11:10:33Z","id":"moai-fqnr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2l8n 에서 펼쳤다 — 조건부 --json 키가 모르는 필드로 남아 거짓을 싣는다 — json_with 에 지울 목록이 없다"}
+{"ts":"2026-09-18T11:10:33Z","id":"moai-2l8n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-fqnr 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:10:42Z","id":"moai-wams","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:17:48Z","id":"moai-uyu9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 워크트리 worktree-moai-dlxf 에 gather 고침과 시험이 커밋 전으로 있다 — 시험 통과 보고 커밋, 에픽 moai-dlxf 끝 리뷰(high) 뒤 병합"}
+{"ts":"2026-09-18T11:20:42Z","id":"moai-lg2t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:21:15Z","id":"moai-dlxf.ost","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 이름만 든 옆 워크트리의 .git 지켜보기"}
+{"ts":"2026-09-18T11:21:25Z","id":"moai-dlxf.ost","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:25:25Z","id":"moai-dlxf.ost","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰 원문 (/code-review high --fix, 3be9108..HEAD, anthropic/opus-5 tokens=59922)\n\n범위: 8f9afe0 (moai-uyu9) 하나와 develop 병합. src/worktree.rs +32줄.\n\n본 것 (gather 319–330):\n- 차례: .git 표식을 tree.path.exists() 보다 먼저 잰다 — 그 사이 치운 워크트리는 바뀐 것으로 잡히고 이름으로 안 든다. 읽은 뒤 생긴 스냅샷은 읽기 전에 잰 스냅샷 경로 표식이 잡는다.\n- 자리: tree.path.join(\".git\") 은 moai 루트가 아니라 워크트리 꼭대기라 모노레포 하위 트래커에서도 맞다. !is_dir() 가 커밋마다 바뀌는 주 워크트리 .git 디렉터리를 뺀다. 주 워크트리 .git 이 gitdir: 파일이면 안정적이라 지켜봐도 해가 없다.\n- 이미 사라진 잠근 워크트리: 없음 → 없음, 다시 생기면 바뀐 것으로 센다.\n- 탐색기: 새 표식은 tui/mod.rs:931 의 같음 견주기와 1183 의 표식 견주기에만 든다. .git 파일은 지울 때·worktree move·repair 때만 바뀌어 헛 다시 읽기는 무시할 만하다.\n- 시험: t-1 을 치운 것은 이 표식으로만 잡힌다(heads 가 보는 worktrees/ 는 rm -rf 로 안 바뀐다). 주 워크트리 경우는 이름이 든 것을 단언해 실제로 그 길을 지난다. is_dir 검사가 없으면 마지막 단언이 깨진다.\n\n건: 없음. 고침: 없음. 넘김: 없음."}
+{"ts":"2026-09-18T11:25:50Z","id":"moai-uyu9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — worktree.rs gather 한 곳과 시험, 브리프는 sonnet 이었으나 이 창의 모델로 돌았다)"}
+{"ts":"2026-09-18T11:25:50Z","id":"moai-uyu9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"3ab0315 로 develop 에 병합"}
+{"ts":"2026-09-18T11:25:50Z","id":"moai-dlxf.ost","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"건 없음 — 반영한 것도 넘긴 것도 없다"}
+{"ts":"2026-09-18T11:26:06Z","id":"moai-dlxf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 3ab0315 로 develop 에 병합하고 닫았다. 스냅샷 없는 옆 워크트리를 rm -rf 로 치우면 이제 탐색기가 .git 표식으로 알아챈다"}
+{"ts":"2026-09-18T11:26:53Z","id":"moai-h0r2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"hook --help 의 이벤트 설명 줄이 80칸을 넘는다"}
+{"ts":"2026-09-18T11:31:55Z","id":"moai-mhxf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
