@@ -60,11 +60,27 @@ pub fn open(reg: &Registry) -> Vec<Project> {
 /// [`open`] 과 같되, `worktree` 면 연 프로젝트마다 옆 워크트리를 겹친다
 /// (`worktree::gather` — `.moai` 안의 `--worktree` 와 같은 자다, moai-x0gb).
 pub fn open_with(reg: &Registry, worktree: bool) -> Vec<Project> {
-    reg.projects
-        .iter()
-        .zip(crate::user_config::names(&reg.projects))
-        .map(|(p, name)| open_one(&p.path, name, p.hue, worktree))
-        .collect()
+    let named: Vec<_> = reg.projects.iter().zip(crate::user_config::names(&reg.projects)).collect();
+    each(&named, |(p, name)| open_one(&p.path, name.clone(), p.hue, worktree))
+}
+
+/// 프로젝트마다 **제 스레드에서** `f` 를 부르고 받은 차례 그대로 모은다(moai-b7o3).
+///
+/// 한눈 보기의 값은 거의 프로젝트마다 디스크를 만지는 데 든다 — 여는 것(`State::at_with`)과
+/// 자리 판정(`worktree::stranded_at`, 이름으로 안 잡히는 집은 줄이 있으면 옆 스냅샷을 다 판다).
+/// 프로젝트끼리 서로 기다릴 까닭이 없어, 차례대로 부르면 값이 등록 수만큼 더해지고 나란히
+/// 부르면 가장 느린 하나만큼이다(이 저장소 하나에 ~170ms). 하나뿐이면 스레드를 안 띄운다.
+///
+/// 한 스레드의 패닉은 부른 쪽으로 되던진다 — 차례대로 부르던 때와 같다.
+pub fn each<T: Sync, U: Send>(items: &[T], f: impl Fn(&T) -> U + Sync) -> Vec<U> {
+    if items.len() < 2 {
+        return items.iter().map(&f).collect();
+    }
+    let f = &f;
+    std::thread::scope(|s| {
+        let runs: Vec<_> = items.iter().map(|item| s.spawn(move || f(item))).collect();
+        runs.into_iter().map(|r| r.join().unwrap_or_else(|e| std::panic::resume_unwind(e))).collect()
+    })
 }
 
 /// 한 자리만 연다 — 이름은 부르는 쪽이 정한다(등록 목록 전체에서 갈리는 파생값이라, 한 줄만
@@ -237,4 +253,31 @@ pub fn remove(config: &Path, input: &Path, cwd: &Path) -> R<Removed> {
     };
     let spelled = spellings.into_iter().next().unwrap_or_default();
     Ok(Removed { spelled, removed })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::each;
+
+    /// **나란히 불러도 차례는 받은 그대로다**(moai-b7o3) — 한눈 보기의 줄 차례가 등록 차례다.
+    /// 먼저 끝난 것이 앞에 서면 부를 때마다 줄이 뒤바뀐다.
+    #[test]
+    fn each_keeps_the_order_it_was_given_even_when_later_items_finish_first() {
+        let delays = [30u64, 0, 15, 0];
+        let got = each(&delays, |ms| {
+            std::thread::sleep(std::time::Duration::from_millis(*ms));
+            *ms
+        });
+        assert_eq!(got, delays);
+        assert_eq!(each(&[7], |n| n * 2), [14], "하나뿐이면 그대로 부른다");
+        assert!(each(&[] as &[u8], |n| *n).is_empty());
+    }
+
+    /// 한 스레드의 패닉은 부른 쪽으로 되던진다 — 차례대로 부르던 때와 같다. 삼키면 그 프로젝트가
+    /// 조용히 빠진 한눈 보기가 선다.
+    #[test]
+    #[should_panic(expected = "둘째가 넘어졌다")]
+    fn each_rethrows_a_panic_from_any_item() {
+        each(&[1, 2, 3], |n| if *n == 2 { panic!("둘째가 넘어졌다") } else { *n });
+    }
 }

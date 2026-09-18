@@ -181,24 +181,31 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     }
     let projects = crate::projects::open_with(&reg, worktree);
     let now = model::now();
+    // **셈은 프로젝트마다 나란히 한다**(moai-b7o3) — 자리 판정이 옆 스냅샷을 파면 그 값이 프로젝트
+    // 마다 더해진다. 보드는 셈을 빌려 쓰므로 셈만 먼저 모으고, 짓는 것은 차례대로 한다.
+    let judged = crate::projects::each(&projects, |p| {
+        let crate::projects::State::Open { repo, load } = &p.state else { return None };
+        // 옆에서만 온 줄과 겹친 id 는 중복이 아니다 (`Origin::unreadable`, `run` 과 같다).
+        let unreadable: Vec<report::Unreadable> = p
+            .origin
+            .unreadable(load.errors.iter().map(|e| e.id.as_deref()))
+            .into_iter()
+            .map(|id| report::Unreadable { id })
+            .collect();
+        // **자리도 여기서 잰다**(moai-p3bs) — 안쪽 `moai status` 와 같은 자
+        // (`worktree::stranded_at`). 한때 이 화면에만 없어, 프로젝트 밖에서 보드를 보는
+        // 사람은 죽은 세션의 일을 영영 못 봤다. 옆 워크트리를 겹치는지는 부른 쪽을 따른다.
+        let mut status = report::status(&load.issues, &unreadable, &repo.config, &now);
+        let (lost, unread) = crate::worktree::stranded_at(&repo.root, &repo.config, &load.issues, worktree, &now);
+        status.warnings.extend(lost);
+        Some((status, unread))
+    });
     let seen: Vec<Seen<view::Board>> = projects
         .iter()
-        .map(|p| {
+        .zip(judged)
+        .map(|(p, judged)| {
             p.seen(|repo, load| {
-                // 옆에서만 온 줄과 겹친 id 는 중복이 아니다 (`Origin::unreadable`, `run` 과 같다).
-                let unreadable: Vec<report::Unreadable> = p
-                    .origin
-                    .unreadable(load.errors.iter().map(|e| e.id.as_deref()))
-                    .into_iter()
-                    .map(|id| report::Unreadable { id })
-                    .collect();
-                // **자리도 여기서 잰다**(moai-p3bs) — 안쪽 `moai status` 와 같은 자
-                // (`worktree::stranded_at`). 한때 이 화면에만 없어, 프로젝트 밖에서 보드를 보는
-                // 사람은 죽은 세션의 일을 영영 못 봤다. 옆 워크트리를 겹치는지는 부른 쪽을 따른다.
-                let mut status = report::status(&load.issues, &unreadable, &repo.config, &now);
-                let (lost, unread) =
-                    crate::worktree::stranded_at(&repo.root, &repo.config, &load.issues, worktree, &now);
-                status.warnings.extend(lost);
+                let (status, unread) = judged.expect("연 프로젝트는 셈이 있다 — 같은 상태로 갈랐다");
                 view::Board {
                     cfg: &repo.config,
                     status,
