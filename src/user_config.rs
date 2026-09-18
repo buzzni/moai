@@ -231,6 +231,13 @@ pub fn update<T>(path: &Path, f: impl FnOnce(&mut Doc) -> R<T>) -> R<T> {
     Ok(out)
 }
 
+/// 손으로 적은 모양을 덮지 않는 거절(`set_hue`·`merge_look`·`mark_read`). **코드는 `broken` 이다**(moai-3owm,
+/// 사용자 결정 2026-09-18) — 깨진 설정에 안 쓰는 것([`update`])과 같은 갈래다. 둘 다 사람이 설정 파일을 손으로
+/// 고쳐야 쓴다는 뜻이라, 받는 쪽이 I/O 실패(`error`)와 가를 수 있어야 한다. 셋이 한 코드를 내야 해서 한 곳에 둔다.
+fn refuse(message: String) -> Fail {
+    Fail::coded(message, code::BROKEN)
+}
+
 /// 그 설정 파일의 락 자리 — 곁의 `<이름>.lock`.
 fn lock_beside(path: &Path) -> PathBuf {
     let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
@@ -356,7 +363,7 @@ impl Doc {
             Some((entry_path(t).ok()?, c.type_name()))
         });
         if let Some((path, shape)) = odd {
-            return Err(Fail::new(format!(
+            return Err(refuse(format!(
                 "{} 의 `{COLOR}` 가 색 낱말이 아니라({shape}) 덮지 않는다 — 손으로 고친다",
                 path.display()
             )));
@@ -566,7 +573,7 @@ impl Doc {
             // 읽기(`look`)가 받는 모양은 쓰기도 받는다 — `tui = { … }` 인라인 표도 표다.
             Some(item) if item.is_table_like() => {}
             Some(item) => {
-                return Err(Fail::new(format!(
+                return Err(refuse(format!(
                     "`{TUI}` 가 `[{TUI}]` 표가 아니라({}) 보기를 적지 않는다 — 손으로 고친다",
                     item.type_name()
                 )));
@@ -597,7 +604,7 @@ impl Doc {
             (!plain).then(|| (key, item.type_name()))
         });
         if let Some((key, shape)) = odd {
-            return Err(Fail::new(format!(
+            return Err(refuse(format!(
                 "`{TUI}.{key}` 가 손으로 적은 모양이라({shape}) 보기를 적지 않는다 — 손으로 고친다"
             )));
         }
@@ -668,14 +675,14 @@ impl Doc {
             Some(item) if item.is_table_like() => {
                 let t = item.as_table_like().expect("표인 것을 봤다");
                 if let Some((id, odd)) = marks.keys().find_map(|id| t.get(id).filter(|v| v.as_str().is_none()).map(|v| (id, v))) {
-                    return Err(Fail::new(format!(
+                    return Err(refuse(format!(
                         "`{READ}` 의 `{id}` 가 때가 아니라({}) 읽음을 적지 않는다 — 손으로 고친다",
                         odd.type_name()
                     )));
                 }
             }
             Some(item) => {
-                return Err(Fail::new(format!(
+                return Err(refuse(format!(
                     "`{READ}` 가 `[{READ}]` 표가 아니라({}) 읽음을 적지 않는다 — 손으로 고친다",
                     item.type_name()
                 )));
@@ -1282,6 +1289,8 @@ mod tests {
                 let e = update(&path, |doc| doc.set_hue(&["/a".into()], hue)).unwrap_err();
                 // 어느 줄인지 경로로 댄다 — 사람이 그 줄을 찾아 고친다.
                 assert!(e.message.contains("/a 의 `color`") && e.message.contains("손으로"), "{}", e.message);
+                // 손으로 고칠 거절은 깨진 설정과 같은 코드다(moai-3owm) — I/O 실패(`error`)와 갈린다.
+                assert_eq!(e.code, code::BROKEN);
                 assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "표 모양 color 를 덮었다");
             }
             // 남의 줄 것은 막지 않는다 — 엄함은 지금 쓰는 줄에 대한 것이다.
@@ -1502,7 +1511,7 @@ mod tests {
         let title = Look { sort: Some("title".into()), ..Look::default() };
         let mut odd = Doc::parse("tui = 3\n").unwrap();
         assert_eq!(odd.look().1.len(), 1);
-        assert!(odd.merge_look(&Look::default(), &title).is_err());
+        assert_eq!(odd.merge_look(&Look::default(), &title).unwrap_err().code, code::BROKEN);
         assert!(!odd.changed());
 
         // 읽히는 인라인 표는 쓰기도 받는다.
@@ -1529,6 +1538,7 @@ mod tests {
         ] {
             let mut doc = Doc::parse(src).unwrap();
             let e = doc.merge_look(&Look::default(), new).expect_err(src);
+            assert_eq!(e.code, code::BROKEN, "{src}");
             assert!(e.to_string().contains(&format!("`tui.{key}`")), "{src}: {e}");
             assert!(!doc.changed(), "{src}");
             assert_eq!(doc.render(), src);
@@ -1644,14 +1654,14 @@ mod tests {
         let dotted_src = "[read]\n# 손으로 적은 자식\nm-0002.rv = \"T\"\n";
         let mut dotted = Doc::parse(dotted_src).unwrap();
         let both: BTreeMap<String, String> = [("m-0002".to_string(), "U".to_string()), ("m-0003".to_string(), "U".to_string())].into();
-        assert!(dotted.mark_read(&both).is_err(), "때가 아닌 자리를 덮었다");
+        assert_eq!(dotted.mark_read(&both).map_err(|e| e.code).unwrap_err(), code::BROKEN, "때가 아닌 자리를 덮었다");
         assert!(!dotted.changed(), "거절해 놓고 옆 id 를 적었다");
         assert_eq!(dotted.render(), dotted_src, "거절해 놓고 문서를 바꿨다");
 
         // **`read` 가 표가 아니면 적지 않는다** — 무엇인지 모르는 값을 덮으면 되돌릴 수 없다.
         let mut odd = Doc::parse("read = 3\n").unwrap();
         assert_eq!(odd.read_marks().1.len(), 1, "표가 아닌 것을 까닭 없이 지나쳤다");
-        assert!(odd.mark_read(&[("m-0001".to_string(), "T".to_string())].into()).is_err());
+        assert_eq!(odd.mark_read(&[("m-0001".to_string(), "T".to_string())].into()).map_err(|e| e.code).unwrap_err(), code::BROKEN);
         assert!(!odd.changed(), "안 적기로 해 놓고 파일을 더럽혔다");
 
         // 읽히는 인라인 표는 쓰기도 받는다 — `merge_look` 과 같은 자리다.
