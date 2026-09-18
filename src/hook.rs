@@ -843,14 +843,27 @@ fn positionals(args: &[String]) -> Vec<&str> {
 /// 판은 뒤의 것을 생성으로 읽어 막았다 — 위와 같은 까닭의 반대쪽이다. 종류를
 /// 고정한 네임스페이스(`issue add --type idea`)는 고정한 쪽이 이기므로
 /// (`add::run` 의 `kind_override.or(args.kind)`) 그대로 생성이다.
+///
+/// **`idea promote -e <에픽>` 도 생성이다**(moai-f3ml.lm7). 새 에픽을 세우는 promote 는
+/// 그 자체로 한 단위라 자유롭지만, `-e` 는 이미 선 에픽에 멤버를 넣는다 — 안 보면
+/// `idea add` 뒤에 `promote -e <남의 에픽>` 으로 `add -e <남의 에픽>` 이 막히는 자리를 지나간다.
 fn creates(seg: &[String]) -> bool {
     let Some(args) = moai_args(seg) else { return false };
     let verbs = positionals(args);
     match verbs.first().copied() {
         Some("add") => flag_values(args, &["--type"]).last().map(String::as_str) != Some("idea"),
         Some("issue" | "epic" | "milestone") => verbs.get(1).copied() == Some("add"),
+        Some("idea") => promotes_into(seg),
         _ => false,
     }
+}
+
+/// 선 에픽에 멤버로 펼치는 `idea promote -e` 인가. `--from` 을 늘 들고 오므로 `--from` 을
+/// 한 단위로 읽어 풀어 주는 자리에서 이것만은 빼야 한다.
+fn promotes_into(seg: &[String]) -> bool {
+    let Some(args) = moai_args(seg) else { return false };
+    positionals(args).get(..2) == Some(&["idea", "promote"][..])
+        && !flag_values(args, &["-e", "--epic"]).is_empty()
 }
 
 /// 지금 집고 있는 것에 매인 단위들 — 그 이슈 자신, 그 에픽, 그 마일스톤, 그 부모.
@@ -958,7 +971,7 @@ fn create_in(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str,
         // `moai add "--from 을 나중에"` 가 규칙을 통째로 지나간다 — 동사를
         // 자리로 읽기로 한 것과 같은 까닭이다.
         creates(seg)
-            && !seg.iter().any(|t| t == "--from" || t.starts_with("--from="))
+            && (promotes_into(seg) || !seg.iter().any(|t| t == "--from" || t.starts_with("--from=")))
             // **도움말은 만들지 않는다.** 우리가 심는 스킬이 "모르면
             // `moai <명령> --help` 를 보라" 고 적어 두는데, 그 길을 막으면
             // 규칙이 제가 시킨 것을 막는다.
@@ -1944,6 +1957,14 @@ mod tests {
 
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add \"안의 일\" -e t-e"), Decision::Pass);
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add \"자식\" --parent t-1"), Decision::Pass);
+
+        // 선 에픽에 펼치는 promote 도 같은 자로 본다 — 안 보면 `idea add` 뒤 `promote -e` 가
+        // `add -e` 가 막히는 자리를 지나간다 (moai-f3ml.lm7). 새 에픽을 세우는 promote 는 그대로다.
+        let into = |e: &str| format!("moai idea promote t-i -e {e} --from -");
+        assert!(matches!(guard_create(&all, &cfg(), &here(), &into("t-x")), Decision::Deny(_)), "남의 에픽에 promote 로 멤버를 세웠다");
+        assert_eq!(guard_create(&all, &cfg(), &here(), &into("t-e")), Decision::Pass);
+        assert_eq!(guard_create(&all, &cfg(), &here(), "moai idea promote t-i --epic=t-e --from -"), Decision::Pass);
+        assert_eq!(guard_create(&all, &cfg(), &here(), "moai idea promote t-i --from -"), Decision::Pass);
     }
 
     /// **소속은 물려받는다.** 자식 이슈를 집었을 때 그 줄의 `epic` 은 비어
