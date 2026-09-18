@@ -60,14 +60,50 @@ pub fn open(reg: &Registry) -> Vec<Project> {
 /// [`open`] 과 같되, `worktree` 면 연 프로젝트마다 옆 워크트리를 겹친다
 /// (`worktree::gather` — `.moai` 안의 `--worktree` 와 같은 자다, moai-x0gb).
 pub fn open_with(reg: &Registry, worktree: bool) -> Vec<Project> {
-    reg.projects
-        .iter()
-        .zip(crate::user_config::names(&reg.projects))
-        .map(|(p, name)| {
-            let (state, origin, trouble, swept) = State::at_with(&p.path, worktree);
-            Project { path: p.path.clone(), name, hue: p.hue, state, origin, trouble, swept }
-        })
-        .collect()
+    let named: Vec<_> = reg.projects.iter().zip(crate::user_config::names(&reg.projects)).collect();
+    each(&named, |(p, name)| open_one(&p.path, name.clone(), p.hue, worktree))
+}
+
+/// 프로젝트마다 **제 스레드에서** `f` 를 부르고 받은 차례 그대로 모은다(moai-b7o3).
+///
+/// 한눈 보기의 값은 거의 프로젝트마다 디스크를 만지는 데 든다 — 여는 것(`State::at_with`)과
+/// 자리 판정(`worktree::stranded_at`, 이름으로 안 잡히는 집은 줄이 있으면 옆 스냅샷을 다 판다).
+/// 프로젝트끼리 서로 기다릴 까닭이 없어, 차례대로 부르면 값이 등록 수만큼 더해지고 나란히
+/// 부르면 가장 느린 하나만큼이다(이 저장소 하나에 ~170ms). 하나뿐이면 스레드를 안 띄운다.
+///
+/// 한 스레드의 패닉은 부른 쪽으로 **그 까닭 그대로** 되던진다 — 차례대로 부르던 때와 같다.
+/// 손잡이를 거두지 않고 `scope` 에 맡기면 std 가 까닭을 `a scoped thread panicked` 한 줄로 갈아
+/// 끼워, 탐색기가 죽으며 남기는 말(`cmd::tui::screen`)에 까닭이 없다(리뷰 moai-3lul.kt0 다시 본 판).
+///
+/// **스레드를 못 띄우면 그 자리에서 부른다.** `Scope::spawn` 은 못 띄우면 패닉하는데, 한눈 보기는
+/// 데이터가 깨졌을 때만 실패한다(CLAUDE.md) — 스레드 한도에 걸린 기계에서 `moai status` 가 101 로
+/// 끝나면 안 된다. 늦어질 뿐 답은 같다.
+///
+/// 받는 값은 항목을 빌려도 된다(`'a`) — 한눈 보기가 연 프로젝트를 빌린 보드를 스레드마다 짓는다.
+pub fn each<'a, T: Sync, U: Send>(items: &'a [T], f: impl Fn(&'a T) -> U + Sync) -> Vec<U> {
+    if items.len() < 2 {
+        return items.iter().map(&f).collect();
+    }
+    let f = &f;
+    std::thread::scope(|s| {
+        let runs: Vec<_> = items
+            .iter()
+            .map(|item| std::thread::Builder::new().spawn_scoped(s, move || f(item)).map_err(|_| item))
+            .collect();
+        runs.into_iter()
+            .map(|run| match run {
+                Ok(handle) => handle.join().unwrap_or_else(|e| std::panic::resume_unwind(e)),
+                Err(item) => f(item),
+            })
+            .collect()
+    })
+}
+
+/// 한 자리만 연다 — 이름은 부르는 쪽이 정한다(등록 목록 전체에서 갈리는 파생값이라, 한 줄만
+/// 보고는 못 정한다). 탐색기의 프로젝트 층이 줄마다 제 스레드에서 이것을 부른다(`tui::layer`).
+pub fn open_one(path: &Path, name: String, hue: Option<crate::style::Hue>, worktree: bool) -> Project {
+    let (state, origin, trouble, swept) = State::at_with(path, worktree);
+    Project { path: path.to_path_buf(), name, hue, state, origin, trouble, swept }
 }
 
 impl State {
@@ -225,7 +261,7 @@ pub fn remove(config: &Path, input: &Path, cwd: &Path) -> R<Removed> {
         crate::user_config::update(config, |doc| {
             let hit: Vec<PathBuf> =
                 doc.projects().0.into_iter().map(|p| p.path).filter(|p| spellings.contains(p)).collect();
-            doc.remove(&spellings);
+            doc.remove(&spellings)?;
             Ok(hit)
         })?
     } else {
@@ -233,4 +269,31 @@ pub fn remove(config: &Path, input: &Path, cwd: &Path) -> R<Removed> {
     };
     let spelled = spellings.into_iter().next().unwrap_or_default();
     Ok(Removed { spelled, removed })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::each;
+
+    /// **나란히 불러도 차례는 받은 그대로다**(moai-b7o3) — 한눈 보기의 줄 차례가 등록 차례다.
+    /// 먼저 끝난 것이 앞에 서면 부를 때마다 줄이 뒤바뀐다.
+    #[test]
+    fn each_keeps_the_order_it_was_given_even_when_later_items_finish_first() {
+        let delays = [30u64, 0, 15, 0];
+        let got = each(&delays, |ms| {
+            std::thread::sleep(std::time::Duration::from_millis(*ms));
+            *ms
+        });
+        assert_eq!(got, delays);
+        assert_eq!(each(&[7], |n| n * 2), [14], "하나뿐이면 그대로 부른다");
+        assert!(each(&[] as &[u8], |n| *n).is_empty());
+    }
+
+    /// 한 스레드의 패닉은 부른 쪽으로 되던진다 — 차례대로 부르던 때와 같다. 삼키면 그 프로젝트가
+    /// 조용히 빠진 한눈 보기가 선다.
+    #[test]
+    #[should_panic(expected = "둘째가 넘어졌다")]
+    fn each_rethrows_a_panic_from_any_item() {
+        each(&[1, 2, 3], |n| if *n == 2 { panic!("둘째가 넘어졌다") } else { *n });
+    }
 }

@@ -572,7 +572,11 @@ fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) 
         Err(_) => return None,
     };
     let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
-    let open = crate::report::wip(&side.issues, cfg).into_iter().map(|i| i.id.clone()).collect();
+    // **벌여 놓인 줄은 자리 셈의 자로 잰다**([`crate::report::started`]) — 가려진 쌍둥이 줄도 든다
+    // (moai-es40, 사용자 결정). `report::wip` 은 그 줄을 빼므로, 그것으로 재면 머지가 남긴 id 충돌
+    // 하나로 이 워크트리에서 도는 줄이 `places` 에서 자리를 잃는다. 훅의 짐작(`hook::unsure`)은
+    // 제 초점(`wip`)과 겹치는 id 만 쓰므로 더 든 id 로 답이 안 바뀐다.
+    let open = crate::report::started(&side.issues, cfg).into_iter().map(|i| i.id.clone()).collect();
     let later = side
         .issues
         .iter()
@@ -664,9 +668,13 @@ pub fn workplaces(
     // 낱말만 건지면 (1) 시계를 한 번 더 읽고 (2) 소속 지도와 굴림까지 지어 버리고 (3) 판정에
     // 변형이 하나 늘 때마다 **디스크를 언제 만지는가**가 조용히 따라 바뀐다. 그래서 그 하나를
     // 재는 자(`report::claimed` — `hook::held` 와 `places` 가 이미 같이 쓴다)를 바로 쓴다.
+    // 집은 줄도 `places` 가 되짚는 그 집합([`crate::report::started`])이다 — `wip` 은 가려진 쌍둥이
+    // 줄을 빼므로(moai-es40), 그것으로 재면 그 줄 하나 때문에 열어야 할 문이 닫혀 스냅샷으로만 찾을
+    // 수 있는 그 줄이 `stranded` 로 선다. 이름으로는 거의 못 찾는다 — 쌍둥이(뒷줄)가 그 id 의 에픽을
+    // `groups` 에서 지워, 규약대로 에픽 이름으로 뜬 워크트리도 그 줄을 못 가리킨다.
     let all_names = names(linked.iter().copied());
     let named = crate::report::claimed(asked, &all_names);
-    if crate::report::wip(asked, cfg).iter().all(|i| named(i)) {
+    if crate::report::started(asked, cfg).iter().all(|i| named(i)) {
         return out;
     }
     // 여기서부터가 파는 길이다 — **뜬 때도 여기서 읽는다.** `born` 은 이름 없는 워크트리의
@@ -891,6 +899,51 @@ pub fn main_root(root: &Path) -> Option<PathBuf> {
     let main = common.parent()?;
     // 빈 `rel` 을 붙이면 끝에 `/` 가 선다 — 내미는 줄이 제 자리를 두 꼴로 쓰게 된다.
     Some(if rel.as_os_str().is_empty() { main.to_path_buf() } else { main.join(rel) })
+}
+
+/// [`workplaces`] 의 답을 바꿀 수 있는 파일과 **지금 잰** 표식 — git 을 띄우지 않는다.
+///
+/// 프로젝트 층(`tui::layer`)이 줄마다 걸음마다 잰다(moai-al0x). 층은 자리 판정을 요약에 싣는데
+/// `.moai` 두 파일만 재면 워크트리를 치우거나 띄워도 SPC r 전까지 옛 수를 낸다. 드는 것:
+/// - 공용 디렉터리의 `worktrees` — `git worktree add`·`remove`·`prune` 이 그 목록을 바꾼다
+/// - 딸린 워크트리마다 `HEAD` — 가지 이름이 곧 이름 후보다([`names`])
+/// - 딸린 워크트리의 `.git` — 제거 명령 없이 `rm -rf` 로 치운 것은 이것만 사라진다([`gather`] 와 같은 까닭)
+/// - 딸린 워크트리의 스냅샷 — 이름으로 안 잡히는 집은 줄이 있으면 판다
+///
+/// 스냅샷은 **안 팔 때도** 잰다 — 파는지는 줄이 정하고(`report::claimed`), 줄이 바뀌면 `.moai` 표식이
+/// 이미 다시 읽게 한다. 재는 것은 `stat` 과 작은 파일 읽기뿐이라 워크트리 수에 비례해도 싸다.
+/// 딸린 워크트리가 뿌리면 비어 있다 — 겹쳐 보지 않는 [`workplaces`] 는 그 자리를 안 잰다.
+pub fn place_marks(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
+    if is_linked(root) {
+        return Vec::new();
+    }
+    let Some((_, common)) = git_dirs(root) else { return Vec::new() };
+    let worktrees = common.join("worktrees");
+    // 목록을 읽기 **전에** 잰다 — 읽고 나서 재면 그 사이에 생긴 워크트리를 놓친다([`heads`] 와 같다).
+    let mut out = vec![(worktrees.clone(), crate::store::stamp(&worktrees))];
+    // **목록은 [`on_disk`] 하나로 읽는다** — 자리 판정이 보는 그 목록이다(리뷰 moai-3lul.kt0).
+    // 여기서 따로 훑으면 `gitdir` 를 푸는 법·거르는 법이 두 벌이 되어, 한쪽만 고쳐질 때 층이
+    // "바뀐 것 없다" 로 서고 판정만 달라진다(그 풀이는 moai-23ky 에서 한 번 고쳐진 자리다).
+    // 경로가 사라진 워크트리는 `on_disk` 가 거르므로, 치우면 이 목록이 짧아져 그 자체가 바뀜이다.
+    let Some(disk) = on_disk(root) else { return out };
+    for (tree, linked, _) in &disk.all {
+        if !linked {
+            continue;
+        }
+        // 가지 이름이 곧 이름 후보다([`names`]) — HEAD 가 움직이면 자리 판정의 답이 바뀐다.
+        if let Some(head) = disk.admin.get(&tree.path).map(|dir| dir.join("HEAD")) {
+            out.push((head.clone(), crate::store::stamp(&head)));
+        }
+        let snapshot = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
+        out.push((snapshot.clone(), crate::store::stamp(&snapshot)));
+        // **딸린 워크트리의 `.git`(`gitdir:` 한 줄)도 든다**([`gather`] 와 같은 까닭). 제거 명령
+        // 없이 디렉터리째 치우면 git 이 적어 둔 `worktrees/<이름>` 은 그대로라 위의 둘이 안
+        // 움직이고, 목록이 짧아진 것은 **목록째 견주는 쪽**(`layer::Marks`)만 본다 — 경로마다
+        // 표식을 견주는 쪽(`App::follow`)은 이 파일이 사라지는 것으로 안다.
+        let dot_git = tree.path.join(".git");
+        out.push((dot_git.clone(), crate::store::stamp(&dot_git)));
+    }
+    out
 }
 
 /// 워크트리 꼭대기와 공용 git 디렉터리 — git 이 적어 둔 파일로만 읽는다([`on_disk`]).
@@ -1244,6 +1297,42 @@ mod tests {
         assert_eq!(main_root(&base), None, "git 밖에서 지어냈다");
     }
 
+    /// **자리 판정을 바꾸는 것은 층의 표식도 바꾼다**(moai-al0x) — 워크트리를 띄우거나, 가지를
+    /// 옮기거나, 옆 스냅샷을 쓰거나, 제거 명령 없이 디렉터리째 치우는 것. 아무것도 안 하면 그대로다.
+    #[test]
+    fn place_marks_move_when_a_worktree_comes_goes_or_writes() {
+        let scratch = crate::scratch::Scratch::fenced("place-marks");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        let changed = |was: &[(PathBuf, crate::store::Stamp)]| place_marks(&main) != was;
+
+        let seen = place_marks(&main);
+        assert!(!changed(&seen), "아무것도 안 했는데 표식이 바뀌었다");
+        run(&main, &["worktree", "add", "-q", "../t-1", "-b", "worktree-t-1"]);
+        assert!(changed(&seen), "새로 띄운 워크트리를 못 알아챈다");
+
+        let seen = place_marks(&main);
+        std::fs::create_dir_all(base.join("t-1/.moai")).unwrap();
+        std::fs::write(base.join("t-1/.moai/issues.jsonl"), "").unwrap();
+        assert!(changed(&seen), "옆 워크트리의 스냅샷이 생긴 것을 못 알아챈다");
+
+        let seen = place_marks(&main);
+        run(&base.join("t-1"), &["checkout", "-q", "-b", "other"]);
+        assert!(changed(&seen), "옆 워크트리가 가지를 옮긴 것을 못 알아챈다 — 이름 후보가 바뀐다");
+
+        let seen = place_marks(&main);
+        std::fs::remove_dir_all(base.join("t-1")).unwrap();
+        assert!(changed(&seen), "디렉터리째 치운 워크트리를 못 알아챈다");
+
+        // 딸린 워크트리를 뿌리로 두면 재지 않는다 — 겹쳐 보지 않는 자리 판정이 그 자리를 안 본다.
+        run(&main, &["worktree", "add", "-q", "../t-2", "-b", "worktree-t-2"]);
+        assert!(place_marks(&base.join("t-2")).is_empty());
+    }
+
     /// 어느 워크트리에서든 커밋·`pack-refs`·떼어 낸 checkout 이 지켜보는 표식을 바꾼다 —
     /// 탐색기가 갈라진 자리가 바뀐 것을 알아챈다(moai-pqrq).
     #[test]
@@ -1372,6 +1461,40 @@ mod tests {
         assert!(got.origin.named_only().iter().any(|l| !l.starts_with("worktree-")), "주 워크트리가 이름만 드는 길로 안 갔다 — {:?}", got.origin.named_only());
         let dirs: Vec<_> = got.watched.iter().filter(|(p, _)| p.ends_with(".git") && p.is_dir()).collect();
         assert!(dirs.is_empty(), "주 워크트리의 .git 디렉터리를 지켜본다 — {dirs:#?}");
+    }
+
+    /// **옆 스냅샷을 팔지와 거기 벌여 놓인 줄은 자리 셈의 자로 잰다**(moai-es40, 에픽 끝 리뷰
+    /// moai-r8gw.b4s) — 종류가 다른 쌍둥이에게 가려진 줄도 든다(`report::started`, 사용자 결정).
+    /// `report::wip` 으로 재면 머지가 남긴 id 충돌 하나로 문이 닫히고 `holds` 에서도 빠져, 스냅샷으로만
+    /// 찾을 수 있는 그 줄이 `stranded` 와 `show` 의 `자리 없다` 로 선다.
+    #[test]
+    fn an_eclipsed_picked_row_opens_and_fills_the_side_snapshot() {
+        let scratch = crate::scratch::Scratch::fenced("eclipsed-holds");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        // 이름이 id 가 아닌 워크트리(에이전트 격리) — 자리는 스냅샷으로만 갈린다.
+        run(&main, &["worktree", "add", "-q", "../agent-x", "-b", "worktree-agent-x"]);
+        // 두 스냅샷 모두 쌍둥이를 든다 — 옆이 develop 을 받았다.
+        let rows = concat!(
+            "{\"id\":\"t-0001\",\"title\":\"집힌 일\",\"status\":\"in_progress\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n",
+            "{\"id\":\"t-0001\",\"kind\":\"epic\",\"title\":\"쌍둥이 에픽\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n",
+        );
+        for dir in [main.clone(), base.join("agent-x")] {
+            std::fs::create_dir_all(dir.join(".moai")).unwrap();
+            std::fs::write(dir.join(".moai/issues.jsonl"), rows).unwrap();
+            std::fs::write(dir.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+        }
+        let cfg = crate::config::Config::parse("prefix = \"t\"\n").unwrap();
+        let mine = crate::store::read_snapshot(&main.join(".moai/issues.jsonl")).unwrap().unwrap().issues;
+        assert!(crate::report::wip(&mine, &cfg).is_empty(), "가려진 줄이 집은 일로 섰다 — 이 시험이 견줄 것이 없다");
+
+        let trees = workplaces(&main, &cfg, false, &mine);
+        let side = trees.iter().find(|t| t.branch == "worktree-agent-x").expect("옆 워크트리가 없다");
+        assert!(side.holds.contains("t-0001"), "가려진 집힌 줄을 옆 스냅샷에서 안 셌다 — {:?}", side.holds);
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.

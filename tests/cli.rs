@@ -997,6 +997,8 @@ fn a_colour_chosen_in_the_user_config_beats_the_hash_and_only_colour_changes() {
         let o = run(&["project", "color", one_arg, word, "--json"], false);
         let err = String::from_utf8_lossy(&o.stderr);
         assert!(!o.status.success() && err.contains("손으로") && err.contains("config.toml") && err.contains(one_arg), "{word} → {}", text(&o));
+        // 깨진 설정과 같은 코드다(moai-3owm) — 기계가 I/O 실패와 갈라 사람에게 넘긴다.
+        assert!(err.contains(r#""code":"broken""#), "{word} → {err}");
         assert_eq!(std::fs::read_to_string(&cfg).unwrap(), table, "{word} 가 표 모양 color 를 덮었다");
     }
 
@@ -1426,6 +1428,179 @@ fn mv_backwards_is_allowed() {
     assert!(out.contains("done → todo"), "{out}");
     // 두 번째는 이미 그 칸이라 아무 일도 없다
     assert!(ok(s.path(), &["mv", &id, "todo"]).contains("이미 todo"), "");
+}
+
+/// **시작·끝 시각은 칸을 옮기는 그 쓰기에 실린다**(moai-38mh).
+///
+/// 시작은 **처음** 첫 칸을 떠난 때 하나고 되집어도 안 덮는다 — `status_since` 는 칸을
+/// 옮길 때마다 새로 서므로 집은 때가 review·done 에서 사라진다. 끝은 done 에 들 때마다
+/// 덮고 done 을 떠나도 **안 지운다**: 소요가 되돌린 판까지 품는다.
+#[test]
+fn mv_stamps_the_first_start_and_the_last_finish() {
+    let s = init("mvtimes");
+    let id = add(s.path(), &["제목"]);
+    assert!(!line_of(s.path(), &id).contains("started_at"), "첫 칸에 선 줄에 시작이 섰다");
+
+    let t1 = "2026-09-11T05:00:00Z";
+    assert!(at(s.path(), t1, &["mv", &id, "in_progress"]).status.success());
+    let line = line_of(s.path(), &id);
+    assert!(line.contains(&format!(r#""started_at":"{t1}""#)), "{line}");
+    assert!(!line.contains("done_at"), "안 끝난 줄에 끝난 때가 섰다 — {line}");
+
+    // 다음 칸으로 가도 시작은 그대로다. 새로 서는 것은 `status_since` 뿐이다.
+    let t2 = "2026-09-11T06:00:00Z";
+    assert!(at(s.path(), t2, &["mv", &id, "review"]).status.success());
+    let line = line_of(s.path(), &id);
+    assert!(line.contains(&format!(r#""started_at":"{t1}""#)), "{line}");
+    assert!(line.contains(&format!(r#""status_since":"{t2}""#)), "{line}");
+
+    let t3 = "2026-09-11T07:00:00Z";
+    assert!(at(s.path(), t3, &["mv", &id, "done"]).status.success());
+    assert!(line_of(s.path(), &id).contains(&format!(r#""done_at":"{t3}""#)));
+
+    // 되돌려도 끝난 때는 안 지워진다 — "아직 안 끝났다" 는 `status` 가 말한다.
+    let t4 = "2026-09-11T08:00:00Z";
+    assert!(at(s.path(), t4, &["mv", &id, "todo"]).status.success());
+    let line = line_of(s.path(), &id);
+    assert!(line.contains(&format!(r#""done_at":"{t3}""#)), "되집었다고 끝난 때를 지웠다 — {line}");
+
+    // 다시 집어도 시작은 처음 것이고, 다시 닫으면 끝은 마지막 것이다.
+    let t5 = "2026-09-11T09:00:00Z";
+    assert!(at(s.path(), t5, &["mv", &id, "in_progress"]).status.success());
+    assert!(line_of(s.path(), &id).contains(&format!(r#""started_at":"{t1}""#)));
+    let t6 = "2026-09-11T10:00:00Z";
+    assert!(at(s.path(), t6, &["mv", &id, "done"]).status.success());
+    let line = line_of(s.path(), &id);
+    assert!(line.contains(&format!(r#""started_at":"{t1}""#)), "{line}");
+    assert!(line.contains(&format!(r#""done_at":"{t6}""#)), "{line}");
+
+    // 첫 칸에서 곧바로 닫은 줄도 시작한 줄이다 — 떠난 때가 시작이다.
+    let quick = add(s.path(), &["곧바로 닫는다"]);
+    assert!(at(s.path(), t2, &["mv", &quick, "done"]).status.success());
+    let line = line_of(s.path(), &quick);
+    assert!(line.contains(&format!(r#""started_at":"{t2}""#)), "{line}");
+    assert!(line.contains(&format!(r#""done_at":"{t2}""#)), "{line}");
+}
+
+/// 적히기만 하고 어느 화면에도 안 서는 필드는 틀려도 아무도 모른다 — 상세와 `--json` 둘 다
+/// 같은 값을 낸다. 아직 첫 칸인 줄에는 그 줄을 안 세운다.
+#[test]
+fn the_start_and_finish_stamps_reach_both_surfaces() {
+    let s = init("mvtimeshow");
+    let id = add(s.path(), &["제목"]);
+    assert!(!ok(s.path(), &["show", &id]).contains("시작"), "안 집은 줄이 시작을 말한다");
+
+    assert!(at(s.path(), "2026-09-11T05:00:00Z", &["mv", &id, "in_progress"]).status.success());
+    let text = ok(s.path(), &["show", &id]);
+    assert!(text.contains("시작   2026-09-11 05:00"), "{text}");
+    // 아직 안 끝났다 — 자리는 서되 값이 없다.
+    assert!(text.contains("끝    —"), "{text}");
+    let json = ok(s.path(), &["show", &id, "--json"]);
+    assert!(json.contains(r#""started_at":"2026-09-11T05:00:00Z""#), "{json}");
+    assert!(!json.contains("done_at"), "{json}");
+}
+
+/// **이미 첫 칸을 떠난 줄에는 거짓 시작을 안 적는다**(리뷰 moai-u5bk.3wq). 이 필드 전에 집은 줄 —
+/// 옛 바이너리가 옮긴 줄 — 을 다음에 옮긴 때로 적으면, review 에서 닫는 순간 시작과 끝이 같아져
+/// 통계가 "0 분에 했다" 로 읽는다. 빈 칸과 0 과 거짓 값은 셋 다 다르다 — 모르면 비우고 끝만 적는다.
+#[test]
+fn a_line_already_under_way_gets_no_false_start() {
+    let s = init("mvlegacy");
+    let id = add(s.path(), &["옛 바이너리가 집은 줄"]);
+    // 옛 바이너리가 09-05 에 review 까지 옮긴 모습 — 칸만 옮기고 시작 시각은 모른다.
+    let old = line_of(s.path(), &id);
+    let moved = old
+        .replace(r#""status":"todo""#, r#""status":"review""#)
+        .replace(&format!(r#""status_since":"{NOW}""#), r#""status_since":"2026-09-05T00:00:00Z""#);
+    assert_ne!(old, moved, "시험이 줄을 못 고쳤다");
+    std::fs::write(s.path().join(".moai/issues.jsonl"), issues(s.path()).replace(&old, &moved)).unwrap();
+
+    let t = "2026-09-12T09:00:00Z";
+    assert!(at(s.path(), t, &["mv", &id, "done"]).status.success());
+    let line = line_of(s.path(), &id);
+    assert!(!line.contains("started_at"), "모르는 시작을 닫은 때로 적었다 — {line}");
+    assert!(line.contains(&format!(r#""done_at":"{t}""#)), "{line}");
+
+    // 상세는 모르는 시작을 `—` 로 대고, `끝` 은 윗줄의 `수정` 과 같은 자리에 선다.
+    let text = ok(s.path(), &["show", &id]);
+    let row = |head: &str| {
+        text.lines()
+            .find(|l| l.trim_start().starts_with(head))
+            .unwrap_or_else(|| panic!("{head} 줄이 없다\n{text}"))
+            .to_string()
+    };
+    let col = |l: &str, w: &str| l.find(w).map(|b| l[..b].chars().count());
+    assert!(row("시작").contains('—'), "{text}");
+    assert_eq!(col(&row("시작"), "끝"), col(&row("생성"), "수정"), "끝이 수정 밑에 안 섰다\n{text}");
+}
+
+/// **칸에 드는 길이 어느 것이든 같은 줄이 선다**(리뷰 moai-u5bk.3wq). 첫 칸 밖에서 만든 줄
+/// (`add -s`)은 만든 때가 곧 첫 칸을 떠난 때고, `done` 에서 만든 줄은 그때 끝났다. 펼쳐 닫은
+/// 생각도 `mv` 로 닫은 생각과 같은 시각을 든다 — 한때 `mv` 만 시각을 적었다.
+#[test]
+fn every_way_into_a_column_stamps_the_same() {
+    let s = init("stampways");
+    let made = |args: &[&str]| {
+        let out = at(s.path(), NOW, args);
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+
+    let going = made(&["add", "만들 때 집은 일", "-s", "in_progress", "-q"]);
+    let line = line_of(s.path(), &going);
+    assert!(line.contains(&format!(r#""started_at":"{NOW}""#)) && !line.contains("done_at"), "{line}");
+    assert!(at(s.path(), "2026-09-12T05:00:00Z", &["mv", &going, "review"]).status.success());
+    assert!(line_of(s.path(), &going).contains(&format!(r#""started_at":"{NOW}""#)), "만든 때의 시작을 덮었다");
+
+    let finished = made(&["add", "이미 끝낸 일", "-s", "done", "-q"]);
+    let line = line_of(s.path(), &finished);
+    assert!(line.contains(&format!(r#""done_at":"{NOW}","started_at":"{NOW}""#)), "{line}");
+
+    let untouched = line_of(s.path(), &made(&["add", "안 집은 일", "-q"]));
+    assert!(!untouched.contains("started_at") && !untouched.contains("done_at"), "첫 칸에서 난 줄에 시각을 적었다 — {untouched}");
+
+    let thought = made(&["idea", "add", "펼칠 생각", "-q"]);
+    let out = from_stdin(s.path(), &["idea", "promote", &thought, "--from", "-"], "# 펼친 에픽\n- 첫 일\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let line = line_of(s.path(), &thought);
+    assert!(line.contains(&format!(r#""done_at":"{NOW}","started_at":"{NOW}""#)), "펼쳐 닫은 생각에 시각이 없다 — {line}");
+}
+
+/// **묶음은 제 줄의 시작·끝을 상세에 안 그린다**(리뷰 moai-u5bk.3wq) — 묶음의 칸은 멤버에서 읽으므로,
+/// 손으로 친 `mv <에픽> done` 이 남긴 시각이 서면 도는 에픽 밑에 `끝` 이 선다. 기계 출력은 적힌 값을
+/// 그대로 낸다 — 적힌 칸(`status`)을 그대로 내는 것과 같은 약속이다.
+#[test]
+fn a_group_does_not_show_its_own_stamps() {
+    let s = init("groupstamps");
+    let epic = ok(s.path(), &["epic", "add", "에픽", "-q"]).trim().to_string();
+    let member = add(s.path(), &["멤버", "-e", &epic]);
+    ok(s.path(), &["mv", &member, "in_progress"]);
+    ok(s.path(), &["mv", &epic, "done"]);
+    let text = ok(s.path(), &["show", &epic]);
+    assert!(!text.lines().any(|l| l.trim_start().starts_with("시작")), "도는 에픽 밑에 제 줄의 시작·끝을 그렸다\n{text}");
+    assert!(ok(s.path(), &["show", &member]).lines().any(|l| l.trim_start().starts_with("시작")), "멤버의 시작까지 걷었다");
+    assert!(ok(s.path(), &["show", &epic, "--json"]).contains("\"done_at\""), "기계 출력이 적힌 값을 걷었다");
+}
+
+/// **깨진 저널 한 줄이 목록도 이력도 넘어뜨리지 않는다**(리뷰 moai-u5bk.3wq). 목록 `--json` 이 `work` 를
+/// 읽으려 저널을 읽는데, 파일을 통째로 UTF-8 로 읽으면 글자 가운데서 끊긴 덧붙이기 한 줄(디스크가
+/// 찼다·죽었다)이 그 뒤로 모든 목록을 실패로 만든다. 깨진 줄만 건너뛴다 — 저널이 늘 해 온 약속이다.
+#[test]
+fn a_torn_journal_line_breaks_neither_the_list_nor_the_history() {
+    let s = init("tornjournal");
+    let id = add(s.path(), &["일"]);
+    ok(s.path(), &["note", &id, "model: anthropic/opus-5 tokens=7 (low — 멀쩡한 줄)"]);
+    let path = s.path().join(".moai/journal.jsonl");
+    let mut torn = std::fs::read(&path).unwrap();
+    // 한글 한 글자(`한` = ED 95 9C)의 앞 두 바이트에서 끊긴 덧붙이기.
+    torn.extend_from_slice(format!(r#"{{"ts":"{NOW}","id":"{id}","kind":"note","by":"t","text":"model: x "#).as_bytes());
+    torn.extend_from_slice(b"\xed\x95");
+    std::fs::write(&path, &torn).unwrap();
+
+    let list = ok(s.path(), &["show", "--json"]);
+    assert!(list.contains(r#""tokens":7"#), "깨진 줄 하나 때문에 멀쩡한 줄까지 잃었다\n{list}");
+    assert!(ok(s.path(), &["show", &id, "--json"]).contains(r#""tokens":7"#));
+    assert!(ok(s.path(), &["show", &id]).contains("멀쩡한 줄"), "이력이 넘어졌다");
 }
 
 /// #a-partial — 하나가 없다고 나머지를 안 옮기지 않는다. 대신 비영으로 끝난다.
@@ -2006,21 +2181,27 @@ fn every_line_printing_command_drops_keys_moai_appends() {
     );
     std::fs::write(s.path().join(".moai/issues.jsonl"), &doctored).unwrap();
 
-    let seen = |args: &[&str]| {
+    // `stands` 는 **그 표면이 언제나 세우는** 키다 — 걷은 뒤 제 값으로 다시 서므로 키가 있는
+    // 것이 옳고, 거짓을 싣지 않았는지는 되쓴 값(`가짜`)이 사라졌는지로 잰다(moai-p8qj 의 `work`).
+    let seen = |args: &[&str], stands: &[&str]| {
         let json = ok(s.path(), args);
         assert!(json.contains(&id), "{args:?} 가 그 줄을 안 냈다\n{json}");
+        assert!(!json.contains("가짜"), "{args:?} 가 되쓴 줄의 옛 값을 냈다\n{json}");
         for (k, _) in &stale {
+            if stands.contains(k) {
+                continue;
+            }
             assert!(!json.contains(&format!("\"{k}\"")), "{args:?} 가 되쓴 줄의 {k} 를 냈다\n{json}");
         }
         assert!(json.contains(r#""due":"2026-10-01""#), "{args:?} 가 겹치지 않는 모르는 필드까지 걷었다\n{json}");
     };
-    seen(&["ready", "--json"]);
-    seen(&["show", "--json"]);
-    seen(&["show", "-s", "todo", "--json"]);
+    seen(&["ready", "--json"], &[]);
+    seen(&["show", "--json"], &["work"]);
+    seen(&["show", "-s", "todo", "--json"], &["work"]);
     assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
     // 쓰는 명령도 같다 — 파일에는 모르는 필드가 그대로 남는다.
-    seen(&["edit", &id, "-p", "1", "--json"]);
-    seen(&["mv", &id, "in_progress", "--json"]);
+    seen(&["edit", &id, "-p", "1", "--json"], &[]);
+    seen(&["mv", &id, "in_progress", "--json"], &[]);
     assert!(line_of(s.path(), &id).contains(r#""place":"lost""#), "모르는 필드를 잃었다");
 }
 
@@ -4708,6 +4889,50 @@ fn show_json_reads_who_did_the_work_from_model_notes() {
     assert!(ok(s.path(), &["show", &id]).contains("tokens 12"), "꼴에 안 맞는 노트가 이력에서 사라졌다");
 }
 
+/// **목록도 `work` 를 낸다**(moai-p8qj). 닫힌 500건의 토큰을 더하려고 `show <id> --json` 을
+/// 500번 부르면 저널 전체를 500번 읽는다 — 목록이 한 번 읽어 id 로 가른다.
+///
+/// 두 표면의 답은 **같아야 한다**. 키는 목록에서도 늘 선다(moai-2l8n).
+#[test]
+fn the_list_json_carries_the_same_work_as_one_expanded_issue() {
+    let s = init("worklist");
+    let mine = add(s.path(), &["내가 한 것"]);
+    let bare = add(s.path(), &["아무도 안 적은 것"]);
+    ok(s.path(), &["note", &mine, "model: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)"]);
+    // 꼴을 옮겨 적은 예는 값이 아니다 — 목록도 하나를 펼칠 때와 같은 자로 읽는다.
+    ok(s.path(), &["note", &bare, "이렇게 적는다\n\n    model: anthropic/opus-5 (low — 예)"]);
+
+    let one = ok(s.path(), &["show", &mine, "--json"]);
+    let list = ok(s.path(), &["show", "--json"]);
+    let row = |list: &str, id: &str| {
+        list.split("{\"id\":")
+            .find(|r| r.starts_with(&format!("\"{id}\"")))
+            .unwrap_or_else(|| panic!("{id} 줄이 목록에 없다\n{list}"))
+            .to_string()
+    };
+    let did = r#""work":[{"provider":"anthropic","model":"opus-5","tokens":182000,"grade":"high","why":"쓰기 경로","#;
+    assert!(one.contains(did), "하나를 펼친 쪽이 안 냈다\n{one}");
+    assert!(row(&list, &mine).contains(did), "목록이 하나를 펼친 쪽과 다른 답을 냈다\n{list}");
+    assert!(row(&list, &bare).contains(r#""work":[]"#), "적은 줄이 없는데 키가 안 섰거나 예를 값으로 읽었다\n{list}");
+    // 걸러진 목록도 같다.
+    let picked = ok(s.path(), &["show", "-s", "todo", "--json"]);
+    assert!(picked.contains(did), "필터를 준 목록이 work 를 잃었다\n{picked}");
+
+    // **차례도 같다**(리뷰 moai-u5bk.3wq) — 파일에 늦게 적혔어도 이른 시각의 줄이 앞이다. 두 표면이
+    // 차례를 따로 세우던 때는 한쪽만 바꿔도 줄 하나짜리 이 시험이 못 잡았다.
+    let early = "model: anthropic/sonnet-5 tokens=5 (low — 먼저 한 판)";
+    assert!(at(s.path(), "2026-09-10T00:00:00Z", &["note", &mine, early]).status.success());
+    let one = ok(s.path(), &["show", &mine, "--json"]);
+    let list = ok(s.path(), &["show", "--json"]);
+    let work = |json: &str| {
+        let rest = &json[json.find("\"work\":").unwrap_or_else(|| panic!("work 가 없다\n{json}"))..];
+        rest[..rest.find("}]").map_or(rest.len(), |e| e + 2)].to_string()
+    };
+    let (in_one, in_list) = (work(&one), work(&row(&list, &mine)));
+    assert_eq!(in_list, in_one, "목록과 하나를 펼친 쪽의 work 가 갈렸다");
+    assert!(in_one.find("sonnet-5") < in_one.find("opus-5"), "이른 시각의 줄이 앞에 안 섰다 — {in_one}");
+}
+
 /// **날짜가 거꾸로 선 커밋 밑도 본다**(moai-hws2). `show` 는 이슈가 생긴 때에서 걷기를 끊었는데,
 /// `git log --since` 는 거르기가 아니라 **끊기**라 그보다 이른 커밋을 하나 만나면 그 아래를 통째로
 /// 안 본다 — `rebase`·`am --committer-date-is-author-date`·하루 넘게 늦은 시계가 그런 커밋을 만든다.
@@ -7336,6 +7561,42 @@ fn status_reads_a_side_snapshot_only_when_a_place_is_still_missing() {
     assert!(!json.contains("unreadable_worktrees"), "다 읽었는데 못 읽었다고 했다\n{json}");
 }
 
+/// **가려진 줄도 옆 스냅샷을 판다**(moai-es40, 에픽 끝 리뷰 moai-r8gw.b4s). `report::wip` 은 종류가 다른
+/// 쌍둥이에게 가려진 줄을 빼지만 자리 셈은 그 줄까지 본다(`report::started`, 사용자 결정) — 팔지 가르는
+/// 문(`worktree::workplaces`)이 `wip` 으로 재면 옆에서 도는 그 줄이 스냅샷을 안 판 채 `stranded` 와
+/// `show` 의 `자리 없다` 로 서고, 감독이 그 말대로 산 일에 둘째 워크트리를 띄운다.
+#[test]
+fn an_eclipsed_picked_row_is_not_stranded_while_a_side_works_it() {
+    let s = Scratch::new("eclipsedplace");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "옆에서 할 일", "--json"]), "id");
+    ok(&main, &["mv", &id, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    // 이름이 id 가 아닌 워크트리(에이전트 격리)가 그 줄을 main 보다 늦게 고쳤다(`touched`).
+    let dir = ".claude/worktrees/agent-x";
+    git(&main, &["worktree", "add", "-q", dir, "-b", "worktree-agent-x"]);
+    ok_at(&main.join(dir), "2026-09-11T06:00:00Z", &["edit", &id, "--tag", "side"]);
+    // 머지가 main 에 같은 id 의 에픽 뒷줄을 남겼다 — 앞줄의 집힌 이슈가 가려진다.
+    let path = main.join(".moai/issues.jsonl");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str(&format!(
+        "{{\"id\":\"{id}\",\"kind\":\"epic\",\"title\":\"쌍둥이 에픽\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+    ));
+    std::fs::write(&path, text).unwrap();
+
+    // `duplicate_id` 는 치명이라 비영으로 끝난다 — 종료 코드가 아니라 경고를 본다.
+    let out = isolated(BIN).args(["status", "--json"]).current_dir(&main).env("MOAI_NOW", LATER).output().unwrap();
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains("\"duplicate_id\""), "쌍둥이를 못 세웠다 — 이 시험이 견줄 것이 없다\n{json}");
+    assert!(!json.contains("\"stranded\""), "옆에서 도는 가려진 줄을 자리 없다고 했다\n{json}");
+    let shown = ok_at(&main, LATER, &["show", &id, "--json"]);
+    assert!(shown.contains("\"place\":\"at\"") && shown.contains(dir), "{shown}");
+}
+
 /// **판정을 안 가리는 못 읽은 워크트리는 말은 하되 "다 못 셌다" 로 세지 않는다**(moai-rgz9·moai-1i9d,
 /// 사용자 결정 2026-09-18).
 /// 규약의 워크트리 이름은 에픽 id 다(`worktree-<에픽>`). 그 워크트리의 스냅샷을 못 읽어도 이름이
@@ -9086,10 +9347,19 @@ fn a_broken_user_config_refuses_writes_but_ls_is_lenient() {
     let json = project_ok(home.path(), &config, &["project", "ls", "--json"]);
     assert!(json.contains("\"projects\":[]") && json.contains("\"problems\":[\""), "{json}");
 
-    for args in [["project", "add", "a", "--json"], ["project", "rm", "a", "--json"]] {
-        let out = project(home.path(), &config, &args);
+    for args in [
+        &["project", "add", "a", "--json"][..],
+        &["project", "rm", "a", "--json"],
+        // 목록의 모양이 틀렸는데 "등록돼 있지 않다"(not_found) 로 새면 그 말이 시키는 `add` 가 거절된다
+        // (moai-gmdu 에픽 리뷰) — 색도 목록을 고치는 쓰기라 같은 거절이다.
+        &["project", "color", "a", "green", "--json"],
+    ] {
+        let out = project(home.path(), &config, args);
         assert!(!out.status.success(), "{args:?} 가 깨진 설정에 썼다");
-        assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"broken""#), "{args:?}\n{}", text(&out));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(r#""code":"broken""#), "{args:?}\n{}", text(&out));
+        // 손으로 고치라는 말에는 **어느 파일인지** 붙는다 — 설정의 자리는 환경이 골라 사람이 모를 수 있다.
+        assert!(err.contains("config.toml"), "{args:?}\n{}", text(&out));
     }
     assert_eq!(std::fs::read_to_string(&config).unwrap(), src);
 }

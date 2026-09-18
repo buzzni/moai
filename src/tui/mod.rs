@@ -215,11 +215,18 @@ pub struct Ground {
 }
 
 /// 적재 한 걸음(moai-fbdg) — 색인과 [`Ground`] 를 **한 번 잰 지도**(`report::Soil`)에서 짓는다. 여는 길
-/// (`cmd::tui`)·다시 읽기([`prepare`])·시험의 들이기([`App::adopt`])가 모두 이것 하나를 지난다 — 한때 여는
-/// 길만 `Index::of` 와 `Ground::of` 를 따로 불러, 첫 화면 앞에서 소속 지도를 두 번 쟀다(moai-xemz 리뷰).
+/// (`cmd::tui`)·다시 읽기([`prepare`])·시험의 들이기([`App::adopt`])가 모두 이 몸([`measure_in`])을
+/// 지난다 — 한때 여는 길만 `Index::of` 와 `Ground::of` 를 따로 불러, 첫 화면 앞에서 소속 지도를 두 번
+/// 쟀다(moai-xemz 리뷰).
 pub fn measure(issues: &[Issue], cfg: &Config) -> (Index, Ground) {
-    let soil = crate::report::Soil::of(issues);
-    (Index::in_soil(issues, &soil), Ground::in_soil(issues, cfg, &soil))
+    measure_in(issues, cfg, &crate::report::Soil::of(issues))
+}
+
+/// [`measure`] 와 같은 것. **이미 잰 지도를 받는다** — 다시 읽기([`prepare`])가 같은 지도를 경고 셈
+/// (`warnings_in`, moai-u5o9)에도 넘긴다. 그 길이 이 몸을 제 자리에 한 벌 더 펴면, 색인·칸 지도에 무엇이
+/// 들고 나는지가 여는 길과 다시 읽는 길에서 갈린다.
+fn measure_in(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) -> (Index, Ground) {
+    (Index::in_soil(issues, soil), Ground::in_soil(issues, cfg, soil))
 }
 
 impl Ground {
@@ -338,6 +345,11 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     // 두지 않는 것은 CLI 명령마다 git 을 한 번 더 띄우게 되어서다 — 지켜보는 것은 탐색기뿐이다.
     // **이것도 읽기 전에 잰다** — 읽는 동안 떨어진 커밋을 뒤에 재면 놓친다(위와 같은 까닭).
     let heads = if worktree { Vec::new() } else { crate::worktree::heads(&repo.root) };
+    // **자리 판정이 보는 것도 지켜본다**(리뷰 moai-3lul.kt0, moai-al0x). [`placed`] 가 밑에서 옆
+    // 워크트리의 있고 없음과 스냅샷을 읽는데, 겹쳐 보지 않을 때의 `watched` 에는 그것이 하나도
+    // 안 들어 — 워크트리를 `rm -rf` 로 치워도 `App::follow` 가 다시 안 읽고 배너만 옛 수로 선다.
+    // 층이 제 줄을 재는 자와 같다(`layer::marks_of`). **읽기 전에** 잰다(위와 같은 까닭).
+    let places = crate::worktree::place_marks(&repo.root);
     let g = crate::worktree::gather(repo, worktree)?;
     // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
     let unreadable: Vec<Option<String>> = g
@@ -347,25 +359,78 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         .map(|id| id.map(str::to_string))
         .collect();
     let issues = g.load.issues;
-    // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸·거름망이 같은 지도를 나눠 쓴다.
-    let (index, ground) = measure(&issues, &repo.config);
+    // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸·거름망, 그리고 경고 셈(moai-u5o9)이 같은 지도를
+    // 나눠 쓴다([`measure_in`]).
     let now = crate::model::now();
+    let soil = crate::report::Soil::of(&issues);
+    let (index, ground) = measure_in(&issues, &repo.config, &soil);
+    let warnings = warnings_in(&issues, &unreadable, &repo.config, &now, &soil);
     let mut watched = g.watched;
-    watched.extend(heads);
+    watch(&mut watched, heads);
+    watch(&mut watched, places);
+    // 옆을 **실제로 겹쳤는가**로 잰다 — 켠 깃발이 아니다([`placed`]).
+    let (lost, said) = placed(repo, &issues, g.swept, &now);
+    let mut elsewhere = g.trouble;
+    elsewhere.extend(said);
     Ok(Fresh {
         root: repo.root.clone(),
         stamp,
         index,
         ground,
-        warnings: warnings_of(&issues, &unreadable, &repo.config, &now),
+        warnings: warnings + lost,
         issues,
         unreadable,
         origin: g.origin,
-        elsewhere: g.trouble,
+        elsewhere,
         unfound: g.unfound,
         watched,
         now,
     })
+}
+
+/// 지켜볼 것에 더한다 — **이미 든 자리는 안 더한다.** `worktree::heads`·`gather`·`worktree::place_marks`
+/// 가 같은 파일(공용 디렉터리의 `worktrees`, 워크트리마다 `HEAD`, 옆 스냅샷)을 저마다 재므로, 그냥 이으면
+/// 걸음마다 같은 파일을 두 번 재고 목록 모양이 읽는 길마다 갈린다 — 띄울 때(`cmd::tui`)와 다시 읽을 때의
+/// 목록이 다르면 [`App::apply_fresh`] 가 그것을 "커밋이 섰다" 로 읽어 안 바뀐 커밋 표를 다시 짓는다.
+/// 먼저 든 쪽의 표식을 둔다 — 둘 다 읽기 전에 잰 것이다.
+pub fn watch(watched: &mut Vec<(std::path::PathBuf, Stamp)>, more: Vec<(std::path::PathBuf, Stamp)>) {
+    for (path, stamp) in more {
+        if !watched.iter().any(|(p, _)| *p == path) {
+            watched.push((path, stamp));
+        }
+    }
+}
+
+/// 자리 판정이 배너에 싣는 것 — 자리 없는 집은 줄의 경고 수(0 이나 1)와, 판 것 가운데 스냅샷을 못
+/// 읽은 옆 워크트리를 대는 말(moai-al0x). `moai status` 와 프로젝트 층이 싣는 그 셈이다
+/// (`worktree::stranded_at`). 한때 여기만 안 세어, 층에서 `! 1` 을 보고 들어온 사람이 안쪽 배너에서
+/// 0 을 봤다(사용자 결정 2026-09-18 — 안쪽이 `moai status` 에 맞춘다).
+///
+/// [`warnings_of`] 에 안 넣고 따로 둔 까닭: 그것은 `&[Issue]` 에 대한 순수한 셈이라 못 읽는 줄의
+/// 자가 바뀔 때마다 다시 부르는데, 이것은 디스크의 워크트리를 읽는다(이름으로 안 잡히는 집은 줄이
+/// 있으면 옆 스냅샷을 판다). 그래서 읽을 때마다 한 번 재어 더한다([`prepare`]·[`App::overlaid`]).
+///
+/// **`overlaid` 는 옆을 실제로 겹쳤는가다**(`Gathered::swept`), 켠 깃발이 아니다. 탐색기의 기본값(켬)
+/// 에서 겹쳤으면 `moai status --worktree` 와 같은 수고, `w` 로 끄면 `moai status` 와 같은 수다. 켰는데
+/// git 을 못 불러 못 겹쳤으면 줄은 제 스냅샷뿐이다 — 딸린 워크트리의 그 스냅샷은 갈라질 때의 main 이라,
+/// 겹친 것으로 재면 main 에서 이미 끝낸 일이 "자리 없다" 로 선다(`workplaces` 가 딸린 워크트리를
+/// 겹쳐 볼 때만 재는 까닭이 그것이다). 딸린 워크트리에서 겹쳐 보면 층·`moai status` 와 갈리는데
+/// (리뷰 moai-3lul.kt0), 화면이 "지금 겹쳐 보는 것" 을 말하는 쪽이 맞다.
+///
+/// **못 읽은 옆 스냅샷은 겹치지 못했을 때만 댄다** — 겹쳤으면 `gather` 가 같은 워크트리를 `elsewhere`
+/// 에 이미 댔다(`moai status` 의 `swept` 와 같은 자). 안 대면 판정이 가려진 0 이 "없다" 로 읽히고,
+/// 층은 같은 저장소에 `!` 를 세운다(리뷰 moai-3lul.kt0 다시 본 판, 사용자 결정 moai-rgz9.7vt).
+fn placed(repo: &Repo, issues: &[Issue], overlaid: bool, now: &str) -> (usize, Vec<String>) {
+    let (lost, unread) = crate::worktree::stranded_at(&repo.root, &repo.config, issues, overlaid, now);
+    let said = match overlaid {
+        true => Vec::new(),
+        false => unread
+            .all
+            .iter()
+            .map(|t| format!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display()))
+            .collect(),
+    };
+    (usize::from(lost.is_some()), said)
 }
 
 /// **알림은 안 센다.** 배너는 "드러난 것 N건" 이라고 말하는데, 담아 둔
@@ -373,12 +438,23 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
 /// 것이 늘었다고 말한다 — 그러면 안 담게 된다. 무엇이 알림인지는
 /// `report` 가 `notices` 로 따로 내므로 여기서 다시 판단하지 않는다.
 fn warnings_of(issues: &[Issue], unreadable: &[Option<String>], cfg: &Config, now: &str) -> usize {
+    warnings_in(issues, unreadable, cfg, now, &crate::report::Soil::of(issues))
+}
+
+/// [`warnings_of`] 와 같은 것. 적재가 이미 잰 지도를 받는다(`report::status_in`, moai-u5o9).
+fn warnings_in<'a>(
+    issues: &'a [Issue],
+    unreadable: &[Option<String>],
+    cfg: &Config,
+    now: &str,
+    soil: &crate::report::Soil<'a>,
+) -> usize {
     // 못 읽는 줄의 id 까지 넘긴다 — 산 줄과의 중복을 `moai status` 와 같은
     // 자로 센다.
     let lines: Vec<crate::report::Unreadable> =
         unreadable.iter().map(|id| crate::report::Unreadable { id: id.as_deref() }).collect();
     // 알림은 `notices` 에 따로 있다 — `warnings` 가 곧 고칠 것이다.
-    crate::report::status(issues, &lines, cfg, now).warnings.len()
+    crate::report::status_in(issues, &lines, cfg, now, soil).warnings.len()
 }
 
 pub struct App {
@@ -463,8 +539,13 @@ pub struct App {
     pub raw: bool,
     /// 마지막으로 읽은 파일의 (고친 때, 길이).
     stamp: Stamp,
+    /// 마지막 읽기를 **들인** 때. 표식이 그대로여도 [`layer::REREAD_EVERY`] 가 지나면 다시 읽는다
+    /// ([`App::follow`], moai-z4r4). 들인 때로 찍는 까닭은 층과 같다(`Layer::adopt`) — 시작한 때로
+    /// 찍으면 한 번 읽는 데 그만큼 걸리는 자리에서 쉬지 않고 다시 읽는다.
+    read_at: Option<std::time::Instant>,
     /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과, 어느 때든 지켜보는 HEAD·가지
-    /// 파일·`packed-refs` 의 표식(읽기 **전에** 잰 것 — `worktree::gather`·[`prepare`]).
+    /// 파일·`packed-refs`, 자리 판정이 보는 옆 워크트리(`worktree::place_marks`)의 표식(읽기 **전에**
+    /// 잰 것 — `worktree::gather`·[`prepare`]). 같은 파일은 한 번만 든다([`watch`]).
     watched: Vec<(std::path::PathBuf, Stamp)>,
     /// 이슈에 닿은 커밋 표([`Commits`]). **표식(`watched`)이 움직였을 때 새로 짓는다** —
     /// 거기 HEAD·가지 파일이 들어 있어 그것이 곧 "커밋이 섰는가" 다. 다시 읽을 때마다
@@ -624,6 +705,8 @@ impl App {
         let ids = load.errors.iter().map(|e| e.id.clone()).collect();
         let mut app = App::build(load.issues, index, ground, cfg, path, ids);
         app.stamp = stamp;
+        // 띄울 때 읽은 것도 들인 읽기다 — 안 찍으면 조용한 저장소에서 시계로는 영영 다시 안 읽는다.
+        app.read_at = Some(std::time::Instant::now());
         app.repo = Some(repo);
         app
     }
@@ -631,11 +714,14 @@ impl App {
     /// 여는 읽기가 겹쳐 본 것을 들인다(`worktree::gather`). 못 읽는 줄은 겹친 뒤의 자로
     /// 다시 센다 — 옆에서 산 줄로 온 id 를 여기서도 못 읽는 줄로 세면 경고가 [`prepare`]
     /// 로 다시 읽은 화면과 갈린다.
+    ///
+    /// `swept` 은 옆을 실제로 겹쳤는가다(`Gathered::swept`) — 자리 판정이 그것으로 잰다([`placed`]).
     pub fn overlaid(
         mut self,
         origin: crate::worktree::Origin,
-        elsewhere: Vec<String>,
+        mut elsewhere: Vec<String>,
         watched: Vec<(std::path::PathBuf, Stamp)>,
+        swept: bool,
     ) -> App {
         let unreadable: Vec<Option<String>> = origin
             .unreadable(self.unreadable.iter().map(Option::as_deref))
@@ -646,6 +732,14 @@ impl App {
         if unreadable != self.unreadable {
             self.unreadable = unreadable;
             self.warnings = warnings_of(&self.issues, &self.unreadable, &self.cfg, &self.now);
+        }
+        // 자리 판정은 저장소가 있어야 잰다 — `build` 는 줄만 받아 못 쟀다. 다시 읽기는
+        // `prepare` 가 같은 자로 세어 [`Fresh::warnings`] 에 실어 온다. 위의 셈에 **한 번만** 더한다 —
+        // 이 길은 여는 읽기 하나가 한 번 지난다.
+        if let Some(repo) = &self.repo {
+            let (lost, said) = placed(repo, &self.issues, self.worktree && swept, &self.now);
+            self.warnings += lost;
+            elsewhere.extend(said);
         }
         self.origin = origin;
         self.elsewhere = elsewhere;
@@ -691,6 +785,7 @@ impl App {
             warnings: 0,
             stamp: None,
             watched: Vec::new(),
+            read_at: None,
             commits: Commits::new(),
             commit_ids: Default::default(),
             commits_job: None,
@@ -1010,6 +1105,7 @@ impl App {
         // 칸 옮기기·메모처럼 id 가 그대로인 쓰기는 여기서 안 걸려 걷기를 새로 사지 않는다.
         self.commits_due |= self.watched != f.watched || f.issues.iter().any(|i| !self.commit_ids.contains(&i.id));
         self.watched = f.watched;
+        self.read_at = Some(std::time::Instant::now());
         self.warnings = f.warnings;
         self.take(f.issues, f.index, f.ground, f.now);
     }
@@ -1118,11 +1214,26 @@ impl App {
     fn regrip(&mut self, held: Option<Anchor>) {
         self.see();
         let rows = self.rows();
-        let found = held.and_then(|a| self.row_of(&rows, &a));
-        if found.is_none() {
+        let at = held.as_ref().and_then(|a| self.row_of(&rows, a)).unwrap_or(self.cursor);
+        self.stand(&rows, at, held.as_ref());
+    }
+
+    /// 이미 센 목록의 `at` 에 **목록 안으로 잘라** 선다. 그 자리의 줄이 `held` 가 아니면 상세를
+    /// 첫 줄로 되감는다(moai-go4o).
+    ///
+    /// **정체로 가른다, 번호로 가르지 않는다.** 뺀 줄의 번호에 다음 프로젝트가 올라서면 번호는
+    /// 같아도 다른 것을 보고, 거꾸로 차례가 바뀌어 번호가 밀려도 정체가 같으면 같은 것을 본다 —
+    /// 굴린 자리가 남으면 다른 줄을 첫 줄부터 못 본다(`move_to` 와 같은 까닭).
+    ///
+    /// 커서를 다시 세우는 자리 — 다시 읽기([`App::regrip`]), 거름망([`App::settle`]), 층 다시 세우기
+    /// (`relayer`·`reread_layer`) — 가 **어디에 서느냐**만 저마다 고르고 서는 법은 이것 하나를 탄다.
+    /// 한때 넷이 저마다 적어, 한쪽은 정체로 한쪽은 경로로 가르고 되감는 갈래 하나는 죽은 코드였고,
+    /// 목록을 두세 번 셌다(`rows()` 뒤 `current()`). 목록은 부르는 쪽이 한 번 세어 넘긴다.
+    fn stand(&mut self, rows: &[Row], at: usize, held: Option<&Anchor>) {
+        self.cursor = at.min(rows.len().saturating_sub(1));
+        if rows.get(self.cursor).map(|r| self.anchor_of(r)).as_ref() != held {
             self.detail.rewind();
         }
-        self.cursor = found.unwrap_or(self.cursor.min(rows.len().saturating_sub(1)));
     }
 
     /// 방금 쓴 줄에 선다. **다시 읽은 뒤에 부른다** — 첨자도 자리도 새 `issues` 에 대해 잰다.
@@ -1258,7 +1369,12 @@ impl App {
             return;
         }
         let Some(repo) = &self.repo else { return };
-        let moved = stamp_of(repo) != self.stamp
+        // **시계도 다시 읽을 까닭이다**(moai-z4r4) — 배너의 수에는 한 시간 틈과 날로 재는 경고가 들어
+        // 파일이 그대로여도 답이 바뀐다. 층과 **같은 자**(`layer::due`)로 재므로, 안 읽으면 틈을 넘긴
+        // 순간 층의 `!` 와 이 배너가 갈린다. 저장소가 서 있으면 읽은 때도 늘 서 있다 — 띄울 때의 첫
+        // 읽기도 들인 읽기로 찍는다(`App::open`).
+        let moved = layer::due(self.read_at)
+            || stamp_of(repo) != self.stamp
             || self.watched.iter().any(|(path, was)| crate::store::stamp(path) != *was);
         if moved {
             let (tx, rx) = std::sync::mpsc::channel();
@@ -1619,7 +1735,14 @@ impl App {
             return;
         }
         match crate::user_config::update(&path, |doc| doc.merge_look(&self.saved, &look)) {
-            Ok(()) => self.saved = look,
+            // 건너뛴 키도 든 것으로 옮긴다(moai-jr3z) — 안 옮기면 다음 저장마다 그 차이가 또 실려 같은 알림이
+            // 토글마다 선다. 알림은 이번 한 번이고, 파일의 손으로 적은 모양은 그대로다.
+            Ok(skipped) => {
+                self.saved = look;
+                if !skipped.is_empty() {
+                    self.notice = Some(format!("보기 일부를 설정에 안 적었다 — {}", skipped.join(" · ")));
+                }
+            }
             Err(e) => self.notice = Some(format!("보기를 설정에 못 적었다 — {}", crate::text::one_line(&e.to_string()))),
         }
     }
@@ -2086,10 +2209,14 @@ impl App {
                 let mode = self.mode.clone();
                 // 잘못 적은 것은 버리지 않고 그 자리에 둔다 — 지우고 다시 치게
                 // 하면 긴 거름망일수록 고치기가 벌이 된다.
+                // 붙든 줄은 **거르기 전**에 잰다 — 첨자가 옛 `keep` 을 가리킨다.
+                let held = self.current().map(|r| self.anchor_of(&r));
                 if self.apply(&mode).is_ok() {
                     self.mode = Mode::Browse;
                     self.grep_was = None;
-                    self.cursor = self.cursor.min(self.rows().len().saturating_sub(1));
+                    // 자른 자리의 줄이 다른 것이면 상세도 첫 줄로(리뷰 moai-3lul.kt0) — 치는 대로 거르는
+                    // 길(`live`)이 이미 그렇게 서고, 여기만 커서를 자르고 굴린 자리를 남겼다.
+                    self.settle(held, self.cursor);
                 }
             }
             keys::Prompt::Cancel => {
@@ -2128,10 +2255,8 @@ impl App {
     /// 바뀌었으면 상세를 첫 줄로 되돌린다** — 치는 대로 거르면 같은 번호에 다른 이슈가
     /// 서는데, 굴린 자리가 남으면 그 이슈를 첫 줄부터 못 본다(`move_to` 와 같은 까닭).
     fn settle(&mut self, held: Option<Anchor>, at: usize) {
-        self.cursor = at.min(self.rows().len().saturating_sub(1));
-        if self.current().map(|r| self.anchor_of(&r)) != held {
-            self.detail.rewind();
-        }
+        let rows = self.rows();
+        self.stand(&rows, at, held.as_ref());
     }
 
     /// 붙여 넣은 글(moai-od9q) — 루프가 bracketed paste 로 받은 `Event::Paste`. **키로
@@ -2259,8 +2384,8 @@ impl App {
     /// 길을 보이는 값이었지만, 이제 `h`·Bksp 가 어느 줄에서든 나간다.
     ///
     /// **프로젝트 뿌리에서는 늘 0 이다** — `..` 은 디렉터리에만 서므로(moai-i784) 넘을 줄이
-    /// 없다. 그래도 `enter_project` 가 이것을 부르는 것은 들이기(`apply_fresh`)가 떠난
-    /// 프로젝트의 id 로 커서를 붙들 수 있어서고, 그 한 줄이 그것을 지운다.
+    /// 없다. 그래서 `enter_project` 는 이것을 안 부른다 — 줄을 비운 뒤 들이므로 붙들 정체가 없어
+    /// 들이기(`apply_fresh`)가 이미 첫 줄에 세운다(moai-go4o).
     fn first_row(&self) -> usize {
         let rows = self.rows();
         usize::from(rows.len() > 1 && rows.first() == Some(&Row::Up))
@@ -2461,6 +2586,19 @@ pub use crate::store::Stamp;
 
 pub fn stamp_of(repo: &Repo) -> Stamp {
     crate::store::stamp(&repo.issues_path())
+}
+
+/// 스레드에서 짓는 읽기(다시 읽기·층)를 **끝날 때까지** 받는다. 루프가 하는 것을 흉내 낸다 —
+/// 시험 셋(여기·층·등록)이 같은 것을 저마다 적던 자리다(리뷰 moai-3lul.kt0).
+#[cfg(test)]
+fn settle_reads(a: &mut App) {
+    a.follow();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while a.loading() {
+        assert!(std::time::Instant::now() < until, "읽기가 끝나지 않는다");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        a.follow();
+    }
 }
 
 /// 한 줄을 `--filter` 토큰들로 쪼갠다.
@@ -2824,16 +2962,7 @@ mod tests {
 
     }
 
-    /// 스레드에서 짓는 다시 읽기를 **끝날 때까지** 받는다. 루프가 하는 것을 흉내 낸다.
-    fn settle(a: &mut App) {
-        a.follow();
-        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while a.loading() {
-            assert!(std::time::Instant::now() < until, "다시 읽기가 끝나지 않는다");
-            std::thread::sleep(std::time::Duration::from_millis(2));
-            a.follow();
-        }
-    }
+    use super::settle_reads as settle;
 
     /// `.moai` 한 벌을 얹은 임시 저장소. 자리를 만들고 지우는 일(터져도 치우는 것까지)은
     /// [`Scratch`] 가 한다.
@@ -3888,7 +4017,7 @@ mod tests {
         let g = crate::worktree::gather(&repo, true).unwrap();
         let stamp = stamp_of(&repo);
         let (index, ground) = measure(&g.load.issues, &repo.config);
-        let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(g.origin, g.trouble, g.watched);
+        let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept);
         assert!(a.commits_of("argos-0001").is_empty(), "여는 읽기가 git 을 기다렸다");
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         a.follow();
@@ -4444,6 +4573,49 @@ mod tests {
         c.hit("SPC o t");
         let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
         assert!(text.contains("sort = \"title\"") && text.contains("sort_reversed = false") && text.contains("\"what\""), "{text}");
+
+        // 차례가 낱말이 아닌 모양이어도 방향만 입히지 않는다(moai-ys7c) — 알림은 차례를 못 읽었다고 한 줄 댄다.
+        std::fs::write(c.user_config.as_ref().unwrap(), "[tui]\nsort = 3\nsort_reversed = true\n").unwrap();
+        let mut d = App::new(Vec::new(), cfg(), Path::new());
+        d.user_config = c.user_config.clone();
+        d.load_look();
+        assert_eq!(d.order, Default::default(), "못 읽은 차례의 방향을 우선순위에 입혔다");
+        assert!(d.notice.clone().unwrap_or_default().contains("tui.sort"), "{:?}", d.notice);
+    }
+
+    /// **표 모양 보기 키 하나가 그 세션의 다른 저장을 막지 않는다**(moai-jr3z, 사용자 결정 2026-09-18). 그 키는
+    /// 건너뛰고 한 번 알리며, 뒤의 토글은 적힌다 — 전에는 거절된 차이를 다음 저장마다 또 실어 숨김·상세가 하나도
+    /// 안 적혔다.
+    #[test]
+    fn a_hand_written_sort_table_does_not_block_the_other_toggles() {
+        let s = scratch("look-odd-sort");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\nsort.by = \"created\"\n").unwrap();
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        a.hit("SPC o t");
+        assert!(a.notice.clone().unwrap_or_default().contains("tui.sort"), "{:?}", a.notice);
+        a.notice = None;
+        a.hit("SPC s d");
+        assert_eq!(a.notice, None, "건너뛴 키를 다음 저장에 또 실었다");
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(text.contains("sort.by = \"created\"") && text.contains("hidden"), "숨김이 안 적혔다\n{text}");
+    }
+
+    /// **깨진 설정은 한 곳에서만 말한다**(moai-5jsn) — 층이 없다는 배너가 파싱 오류를 대므로 보기 알림은 같은
+    /// 말을 다시 안 한다. 띄우는 길(`cmd::tui`)과 같은 차례로 보기를 입히고 층을 얹는다.
+    #[test]
+    fn a_broken_user_config_is_told_once() {
+        let s = scratch("look-broken");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui\nsort = \"title\"\n").unwrap();
+        let reg = crate::user_config::read(Some(&user));
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&reg.look, reg.look_problems.clone());
+        let a = a.attach_layer(layer::Layer::of(&reg, None));
+        assert!(a.unlayered.as_deref().is_some_and(|u| u.contains("TOML")), "층 없음 배너가 까닭을 안 들었다 — {:?}", a.unlayered);
+        assert_eq!(a.notice, None, "같은 파싱 오류를 보기 알림이 또 댔다");
     }
 
     /// **두 탐색기가 저마다 누른 것이 둘 다 남는다**(moai-2kyl 단계 리뷰). 적는 것은 이 세션이 바꾼 만큼이다
