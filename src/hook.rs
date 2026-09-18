@@ -1727,18 +1727,28 @@ pub fn closing(
             // **미루면 에픽이 닫히는 줄에는 미룸의 값을 함께 댄다**(moai-8ema). 미룬 멤버는
             // 에픽의 칸에서 빠지므로, 끝난 멤버 곁에 집은 것만 남은 에픽은 미루는 순간 목적을 못
             // 이룬 채 `done` 으로 선다 — 결정을 기다리는 멤버에 "지금 안 할 것이면" 만 대던 판은
-            // moai-l288 이 막은 문을 훅이 도로 열었다. 되돌아가는 칸(`mv <id> todo`)은 대지
-            // 않는다: 갈 칸은 앞 칸뿐이고(`closing_offers_only_the_columns_ahead`), 에픽을 열어
-            // 두는 데는 집은 채 이어받을 줄을 남기는 것으로 넉넉하다.
-            let (when, also) = match closes.get(i.id.as_str()) {
-                Some(e) => (
-                    format!("{e} 의 목적을 접을 때만 — 집은 것을 미루면 {e} 에 끝난 멤버만 남아 목적을 못 이룬 채 닫힌다"),
-                    " (결정을 기다리는 것도 이쪽이다)",
-                ),
-                None => ("지금 안 할 것이면".to_string(), ""),
+            // moai-l288 이 막은 문을 훅이 도로 열었다.
+            //
+            // **그 줄에는 첫 칸으로 되돌리는 길도 댄다**(moai-1plu, 사용자 결정 A). 갈림길 1 은
+            // 결정을 기다리는 멤버를 첫 칸에 두라 한다. 쥔 채 이어받을 줄만 대던 판은 그 줄을
+            // `in_progress` 에 세워 두어 `stale_progress`·`wip_overload` 가 서고, 워크트리를 치우면
+            // `stranded` 로 서서 그 끝이 미룸 — 에픽을 닫는 수 — 이었다. 첫 칸의 멤버도 에픽을 열어
+            // 둔다. 되돌아가는 칸은 이 줄에만 댄다: 보통 줄에 대면 갈 칸이 앞 칸뿐이라는
+            // `closing_offers_only_the_columns_ahead` 가 도로 흐려진다.
+            let when = match closes.get(i.id.as_str()) {
+                Some(e) => {
+                    if let Some(first) = cfg.statuses.first() {
+                        lines.push(format!(
+                            "  moai mv {} {first}      결정을 기다리는 것이면 — 첫 칸에 두면 {e} 가 열린 채 남는다",
+                            i.id
+                        ));
+                    }
+                    format!("{e} 의 목적을 접을 때만 — 집은 것을 미루면 {e} 에 끝난 멤버만 남아 목적을 못 이룬 채 닫힌다")
+                }
+                None => "지금 안 할 것이면".to_string(),
             };
             lines.push(format!("  moai defer {} -m \"왜\"      {when}", i.id));
-            lines.push(format!("  {}      이어서 할 것이면{also}", crate::guide::handoff(&i.id)));
+            lines.push(format!("  {}      이어서 할 것이면", crate::guide::handoff(&i.id)));
         }
     }
     // **굴러가는 리뷰와 지금 집은 것에 매인 리뷰만 센다.** 저장소에 남은 옛
@@ -2902,9 +2912,11 @@ mod tests {
         };
         assert!(why.contains("t-e 의 목적을 접을 때만"), "마지막 멤버를 그냥 미루라고 한다\n{why}");
         assert!(!why.contains("지금 안 할 것이면"), "{why}");
-        assert!(why.contains("결정을 기다리는 것도 이쪽이다"), "열어 둘 길을 안 댄다\n{why}");
-        // 앞 칸만 댄다 — 되돌아가는 칸은 여전히 안 댄다.
-        assert!(!why.contains("moai mv t-1 todo"), "{why}");
+        // **결정을 기다리는 것이면 첫 칸으로 되돌린다**(moai-1plu, 사용자 결정 A) — 갈림길 1 과 한 말.
+        assert!(
+            why.contains("moai mv t-1 todo      결정을 기다리는 것이면"),
+            "결정을 기다리는 마지막 멤버에 첫 칸을 안 댄다\n{why}"
+        );
 
         // 남은 멤버가 있으면 미뤄도 에픽이 안 닫힌다 — 보통 줄이다.
         let more = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), under("t-2", "done", "t-e"), under("t-3", "todo", "t-e")];
@@ -2929,6 +2941,8 @@ mod tests {
             };
             assert!(why.contains("moai defer t-1 -m \"왜\"      지금 안 할 것이면"), "{why}");
             assert!(!why.contains("목적을 접을 때만"), "닫히지 않는 에픽을 댄다\n{why}");
+            // 되돌아가는 칸은 미루면 닫히는 줄에만 댄다 — 보통 줄에는 앞 칸뿐이다.
+            assert!(!why.contains("moai mv t-1 todo"), "{why}");
         }
     }
 
