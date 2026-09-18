@@ -1478,20 +1478,43 @@ impl App {
         let ids: Vec<String> = match act {
             B::Read => here.into_iter().collect(),
             B::ReadAll => self.unread.iter().cloned().collect(),
-            // 묶음은 커서가 선 줄이 **든** 곳이다 — 에픽 안에서 눌러도 그 에픽의 멤버가 다 선다.
+            // 묶음은 **커서가 선 줄이 든 곳**이고, 커서가 묶음 줄 자체에 섰으면 그 **안**이다
+            // (`draw::deeper` 와 같은 자) — 에픽 줄에서 눌렀는데 그 에픽이 아니라 에픽이 든
+            // 마일스톤이 통째로 서면 누른 사람이 시키지 않은 줄을 읽는다.
+            //
+            // **뿌리는 묶음이 아니다.** 빈 경로로 `starts_with` 를 걸면 모든 줄이 걸려
+            // `SPC m r` 이 `SPC m a` 가 된다 — 에픽 없는 줄에 서서 한 번 누르면 저장소의
+            // 안 읽은 것이 전부 읽음으로 적히고, 되돌리는 길은 도구 밖에만 있다(moai-j038 리뷰).
             B::ReadGroup => {
-                let Some(id) = here else { return };
-                let group = self.index.home_of(self.index.find(&id).unwrap_or_default()).clone();
+                let Some(Row::Item(e)) = self.current_of(rows) else {
+                    self.notice = Some("묶음에 든 줄에서 누른다".into());
+                    return;
+                };
+                let mut group = self.path.clone();
+                if let Entry::Dir { seg, .. } = &e {
+                    group.push(seg.clone());
+                }
+                if group.is_empty() {
+                    self.notice = Some("이 줄은 묶음에 안 든다 — 묶음 안에서 누른다".into());
+                    return;
+                }
+                // 묶음 줄 자체도 든다 — 에픽에 서서 눌렀는데 그 에픽만 [NEW] 로 남으면
+                // 누른 사람은 무엇이 안 읽혔는지 모른다.
                 self.issues
                     .iter()
                     .enumerate()
                     .filter(|(at, _)| self.index.home_of(*at).starts_with(&group))
                     .map(|(_, i)| i.id.clone())
+                    .chain(here)
                     .collect()
             }
             _ => return,
         };
-        let ids: Vec<String> = ids.into_iter().filter(|id| self.unread.contains(id)).collect();
+        // **한 줄은 한 번만 센다** — 커서 줄이 묶음에도 들면 겹치고, 그러면 알림이 "2줄" 이라
+        // 말하면서 한 줄만 읽는다.
+        let mut ids: Vec<String> = ids.into_iter().filter(|id| self.unread.contains(id)).collect();
+        ids.sort();
+        ids.dedup();
         if ids.is_empty() {
             self.notice = Some("읽음으로 적을 것이 없다".into());
             return;
@@ -2946,6 +2969,35 @@ mod tests {
         let was = a.worktree;
         a.hit("SPC t w");
         assert_eq!(a.worktree, !was);
+    }
+
+    /// **`SPC m r` 은 커서가 든 묶음까지만 읽는다**(moai-j038 리뷰). 에픽 밖의 줄에서 누르면
+    /// 그 줄의 자리가 뿌리(빈 경로)라, 빈 경로로 `starts_with` 를 걸던 옛 식은 저장소의 안 읽은
+    /// 줄을 통째로 읽음으로 적었다 — 한 번 적히면 도구 안에 되돌릴 길이 없다.
+    #[test]
+    fn reading_a_group_never_swallows_the_whole_repo() {
+        let mut a = app();
+        for i in &mut a.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.me = Some("레이븐 (raven@example.com)".into());
+        a.recount_unread();
+        let all = a.unread.len();
+        assert_eq!(all, a.issues.len(), "내 줄인데 안 읽음이 빠졌다");
+
+        // 에픽 밖의 줄에서 누른다 — 아무것도 안 읽고 까닭을 댄다.
+        let rows = row_ids(&a);
+        a.cursor = rows.iter().position(|id| id == "argos-0009").expect("에픽 없는 줄이 없다");
+        a.hit("SPC m r");
+        assert_eq!(a.unread.len(), all, "묶음 밖에서 누른 것이 저장소를 통째로 읽었다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("묶음")), "{:?}", a.notice);
+
+        // 에픽 줄에서 누르면 **그 에픽과 그 멤버만** 선다 — 옆 에픽은 그대로다.
+        a.cursor = rows.iter().position(|id| id == "argos-0001").expect("에픽 줄이 없다");
+        a.hit("SPC m r");
+        let left: Vec<&str> = a.unread.iter().map(String::as_str).collect();
+        assert_eq!(left, ["argos-0002", "argos-0009"], "에픽 하나를 읽었는데 남은 것이 다르다");
     }
 
     /// **바로 누르던 키는 더는 뜻이 없다**(moai-7sjm) — `f`·`n`·`w`·`a`·`d`·`m`·Delete·F키. 목록·

@@ -55,8 +55,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let mut app = App::open(repo, load, index, path, stamp).overlaid(origin, trouble, watched);
     app.user = ctx.user.clone();
     // 누군지는 **여기서 한 번** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다.
-    let root = app.here().unwrap_or_else(|| std::path::PathBuf::from("."));
-    app.me = crate::model::actor(ctx.user.as_deref(), &root).ok().map(|a| format!("{} ({})", a.name, a.email));
+    app.me = me_of(ctx, app.here());
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp). 층은 **그다음에** 얹는다: 층이 첫 화면의 커서를
@@ -125,6 +124,10 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     refuse_without_terminal()?;
     let mut app = App::on_projects(crate::tui::layer::Layer::of(&reg, None));
     app.user = ctx.user.clone();
+    // 밖에서 띄워도 누군지는 같은 자로 푼다(moai-j038 리뷰) — 안 풀면 층에서 들어간 프로젝트에
+    // [NEW] 가 한 줄도 안 서고 `SPC m a`·`SPC m r` 이 늘 "적을 것이 없다" 로 답한다. 층에는
+    // 저장소가 없으니 지금 디렉터리에서 묻는다 — 전역 git 설정이면 그것으로 선다.
+    app.me = me_of(ctx, std::env::current_dir().ok());
     app.user_config = config;
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp).
     app.adopt_look(&reg.look, reg.look_problems);
@@ -132,6 +135,13 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     screen(app)
+}
+
+/// 내가 누구인가 — `이름 (메일)`. **띄울 때 한 번만 부른다**(moai-z9pc): 못 풀면 `None` 이고
+/// 그러면 [NEW] 가 한 줄도 안 서지만 탐색기는 그대로 뜬다 — 읽기는 사람을 묻지 않는다.
+fn me_of(ctx: &Ctx, root: Option<std::path::PathBuf>) -> Option<String> {
+    let root = root.unwrap_or_else(|| std::path::PathBuf::from("."));
+    crate::model::actor(ctx.user.as_deref(), &root).ok().map(|a| format!("{} ({})", a.name, a.email))
 }
 
 /// 층의 `--json` 한 줄. **탐색기 줄(`Row`)과 같은 키를 쓴다** — `title`·`kind`·`dir`·`path`.

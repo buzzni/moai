@@ -485,6 +485,9 @@ impl App {
         self.commits = super::Commits::new();
         self.repo = None;
         self.issues = Vec::new();
+        // 안 읽은 id 도 그 프로젝트에 매인 것이다(moai-j038 리뷰) — 두고 오면 층에서 누른
+        // `SPC m a` 가 **떠난 프로젝트의** 줄을 읽음으로 적고, 그 줄은 여기 보이지도 않는다.
+        self.unread.clear();
         self.index = Index::of(&[]);
         self.states = Default::default();
         self.keep = Vec::new();
