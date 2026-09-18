@@ -8848,13 +8848,18 @@ fn agents_cmd(dir: &Path, work: &Path, n: usize) -> Command {
     cmd
 }
 
-/// 예제를 돌릴 저장소 — git 저장소여야 워크트리를 띄운다. 첫 커밋이 있어야 `main` 이 선다.
+/// 예제를 돌릴 저장소 — git 저장소여야 워크트리를 띄운다.
+///
+/// **`.moai` 를 첫 커밋에 싣는다.** 실제 저장소가 그렇고, 그래야 워크트리에도 트래커가 선다 —
+/// 안 실으면 워크트리에 `.moai` 가 아예 없어 "워크트리의 트래커는 안 바뀐다" 는 단언이 헛돈다
+/// (리뷰 moai-pz8m.4zl 이 짚고, 단언을 조이자 실제로 빨개졌다).
 #[cfg(unix)]
 fn agents_repo(name: &str) -> Scratch {
     let s = Scratch::new(name);
     git(s.path(), &["init", "-q"]);
-    git(s.path(), &["commit", "-q", "--allow-empty", "-m", "처음"]);
     ok(s.path(), &["init", "argos"]);
+    git(s.path(), &["add", "-A"]);
+    git(s.path(), &["commit", "-q", "-m", "처음"]);
     s
 }
 
@@ -8865,6 +8870,11 @@ fn agents_repo(name: &str) -> Scratch {
 fn the_python_agents_share_the_queue_and_each_job_runs_once_in_its_own_worktree() {
     let s = agents_repo("agents-crew");
     let ids: Vec<String> = (1..=5).map(|n| add(s.path(), &[&format!("일 {n}"), "-p", "2"])).collect();
+    // **일감을 main 에 싣는다** — 워크트리의 트래커에도 그 줄이 있어야, 예제가 거기에 잘못
+    // 쓰는 날 그 쓰기가 실제로 먹고 아래 단언이 그것을 본다. 안 실으면 그 줄이 없어 쓰기가
+    // 먼저 거절당해, 단언은 늘 지나간다.
+    git(s.path(), &["add", "-A"]);
+    git(s.path(), &["commit", "-q", "-m", "일감"]);
     // 일 명령 대역: 받은 id 와 **돈 자리**를 적는다 — 워크트리 안에서 돌았는지를 거기서 잰다.
     let log = s.path().join("worked");
     let work = s.path().join("work.sh");
@@ -8896,11 +8906,11 @@ fn the_python_agents_share_the_queue_and_each_job_runs_once_in_its_own_worktree(
     for id in &ids {
         assert!(branches.contains(&format!("agent/{id}")), "{id} 의 가지가 없다\n{branches}");
         // **트래커는 뿌리에만 쓴다** — 워크트리의 `.moai` 는 main 에서 뜬 그대로다.
-        let theirs = std::fs::read_to_string(s.path().join(".worktrees").join(id).join(".moai/issues.jsonl")).unwrap_or_default();
+        let theirs = std::fs::read_to_string(s.path().join(".worktrees").join(id).join(".moai/issues.jsonl")).unwrap_or_else(|e| panic!("{id} 의 워크트리 트래커가 없다 — 없으면 이 단언은 아무것도 안 잰다: {e}"));
         assert!(!theirs.contains("in_progress") && !theirs.contains("\"done\""), "{id} 의 워크트리 트래커가 바뀌었다");
     }
     // 병합은 안 한다 — main 은 처음 그대로다.
-    assert_eq!(git(s.path(), &["rev-list", "--count", "main"]).trim(), "1", "예제가 main 에 무언가를 합쳤다");
+    assert_eq!(git(s.path(), &["rev-list", "--count", "main"]).trim(), "2", "예제가 main 에 무언가를 합쳤다");
 }
 
 /// **일이 실패하면 그 일꾼만 멈추고 끝에 1 이다.** 실패한 일은 in_progress 로 남고 노트에 까닭이
