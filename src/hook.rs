@@ -893,7 +893,7 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &BTreeSet<String>) -> V
     if away.is_empty() || wip.is_empty() {
         return wip;
     }
-    let theirs = theirs(issues, away);
+    let theirs = theirs(issues, cfg, away);
     wip.into_iter().filter(|i| !theirs(i)).collect()
 }
 
@@ -901,8 +901,8 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &BTreeSet<String>) -> V
 /// 마일스톤이 들었다. [`held`] 와 그 초점을 쓰는 규칙이 같은 자로 재야 한다 — 초점에서는
 /// 뺀 옆의 리뷰 줄을 규칙 3 이 "집으라" 고 대면, 이미 옆에서 집은 줄이라 시킨 대로 해도
 /// 안 풀린다.
-fn theirs<'a>(issues: &'a [Issue], away: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
-    report::claimed(issues, away)
+fn theirs<'a>(issues: &'a [Issue], cfg: &Config, away: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
+    report::claimed(issues, cfg, away)
 }
 
 /// **누구의 것인지 모르는** 집은 줄 — 옆 딸린 워크트리의 스냅샷에도 벌여 놓인(또는 거기서 늦게
@@ -917,7 +917,7 @@ pub fn unsure(issues: &[Issue], cfg: &Config, elsewhere: &BTreeSet<String>, own:
     if elsewhere.is_empty() {
         return BTreeSet::new();
     }
-    let named_mine = theirs(issues, own);
+    let named_mine = theirs(issues, cfg, own);
     report::wip(issues, cfg)
         .into_iter()
         .filter(|i| elsewhere.contains(&i.id) && !named_mine(i))
@@ -1466,7 +1466,7 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>) -> 
     let out_of_plan = report::put_off(issues);
     // **옆 워크트리의 리뷰는 여기서 안 센다** — 초점에서 뺀 것과 같은 자다([`theirs`]).
     // 세면 main 에서 아무것도 안 집은 세션에 옆이 이미 집은 리뷰를 "집으라" 고 막는다.
-    let theirs = theirs(issues, away);
+    let theirs = theirs(issues, cfg, away);
     let open: Vec<&Issue> = issues
         .iter()
         .filter(|i| is_review(i, &out_of_plan) && !i.status.is_done() && !theirs(i))
@@ -3000,6 +3000,27 @@ mod tests {
         }
         assert_eq!(judge("moai -C . mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
         assert_eq!(judge("cat a > /tmp/x && moai mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
+    }
+
+    /// **머지하고 안 치운 워크트리의 이름은 끝난 일을 가리킬 뿐이다**(moai-9a8m) — 그 이름이
+    /// 닫힌 줄의 자식을 옆의 일로 끌어가면, main 에서 그 자식을 집어도 초점이 비어 규칙 2 가
+    /// "집은 것 없이" 로 막는다. 닫힌 줄 자신은 애초에 초점에 없으니 이름이 남아도 바뀔 것이 없다.
+    #[test]
+    fn a_leftover_worktree_of_a_closed_row_takes_nothing_from_the_focus() {
+        let root = Path::new("/repo");
+        let names = away;
+        let all = vec![
+            epic("t-e"),
+            under("t-1", "done", "t-e"),
+            under("t-1.x", "in_progress", "t-e"),
+            under("t-2", "in_progress", "t-e"),
+        ];
+        let focus = |away: &BTreeSet<String>| held(&all, &cfg(), away).iter().map(|i| i.id.clone()).collect::<Vec<_>>();
+        assert_eq!(focus(&names(&["t-1", "worktree-t-1"])), focus(&here()), "닫힌 줄의 이름이 초점을 바꿨다");
+        assert_eq!(focus(&names(&["t-1"])), ["t-1.x", "t-2"]);
+        assert_eq!(guard_edit(&all, &cfg(), &names(&["t-1"]), root, "/repo/src/x.rs"), Decision::Pass);
+        // 산 이름은 여전히 쥔다 — 옆이 쥔 일은 초점에서 빠진다.
+        assert_eq!(focus(&names(&["t-2"])), ["t-1.x"]);
     }
 
     /// **`--from <칸>` 의 값은 갈 칸이 아니다** (moai-f8q1). 값 받는 플래그로 안 세던

@@ -1067,7 +1067,12 @@ fn row_line<'a>(
     // **뒤에서 자르지 않고 앞에서 자른다**(`clip_front`) — 규약의 `worktree-moai-3fnf` 는 열여덟
     // 칸이라 [`BRANCH_CAP`] 을 늘 넘는데, 앞을 남기면 어느 줄이든 `worktree-moai-3…` 한 가지로만
     // 서서 이름이 아무 말도 안 한다. 이 이름에서 일하는 것은 꼬리(그 이슈의 id)다.
+    //
+    // **닫힌 줄에는 안 단다**(moai-9a8m) — 머지하고 안 치운 워크트리의 이름은 일이 끝난 뒤에도
+    // 남는다. 끝난 일을 "옆에서 쥐고 있다" 로 대면 표시가 아무 말도 안 한다. 훅과 자리가 그 이름을
+    // 안 세는 것(`report::claimed`)과 같은 자다 — 묶음은 멤버에서 읽은 칸으로 잰다.
     if fields.shows(Field::Branch)
+        && app.column(at) != crate::config::DONE
         && let Some(b) = app.origin.working(&i.id)
     {
         let name = crate::text::clip_front(b, BRANCH_CAP);
@@ -2507,6 +2512,26 @@ pub(super) mod tests {
         assert!(!row(&mut a).contains(style::BRANCH_GLYPH), "SPC c w 가 줄의 표시를 안 걷었다");
         a.hit("SPC c w");
         assert!(row(&mut a).contains(style::BRANCH_GLYPH), "다시 눌러도 안 돌아왔다");
+    }
+
+    /// **닫힌 줄에는 ⎇ 가 안 선다**(moai-9a8m) — 머지하고 안 치운 워크트리의 이름은 일이 끝난
+    /// 뒤에도 남는다. 끝난 일을 "옆에서 쥐고 있다" 로 대면 표시가 아무 말도 안 한다.
+    #[test]
+    fn a_closed_row_wears_no_branch_mark_from_a_leftover_worktree() {
+        let mut rows = issues();
+        rows[2].status = Status::new("done");
+        let mut a = every(rows);
+        let (shown, origin) = crate::worktree::overlay(a.issues.clone(), vec![crate::worktree::Side::new(
+            "worktree-argos-0004",
+            "/wt/argos-0004",
+            vec![],
+        )]);
+        a.adopt(shown);
+        a = a.overlaid(origin, Vec::new(), Vec::new());
+        a.hit("Enter");
+        let text = render(&mut a, 120, 12).join("\n");
+        let row = text.lines().find(|l| l.contains("집은 멤버")).unwrap_or_else(|| panic!("줄이 없다\n{text}"));
+        assert!(!row.contains(style::BRANCH_GLYPH), "닫힌 줄에 옛 가지 표시가 섰다 — {row:?}");
     }
 
     /// **`SPC t d` 가 상세 칸을 숨기고 목록이 폭을 다 쓴다**(moai-ymnu, 사용자 결정) — 숨긴 채

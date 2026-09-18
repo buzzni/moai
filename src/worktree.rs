@@ -68,6 +68,11 @@ pub struct Origin {
     /// 제 파일에는 없고 옆에서만 온 줄. 제 줄을 **덮은** 것과 가른다 —
     /// [`Origin::unreadable`] 이 그 차이로 거짓 중복을 거른다.
     added: BTreeSet<String>,
+    /// 스냅샷은 못 겹쳤지만 **이름은 아는** 옆 워크트리 — (이름, 쥐었다고 볼 id 후보)(moai-ncsf).
+    /// 스냅샷이 없거나(moai 를 들이기 전에 갈라졌다) 못 읽혀도 훅의 [`away`] 는 그 이름을 센다.
+    /// 여기서 빠지면 훅은 "옆이 쥐었다" 로 아는 줄에 화면만 `⎇` 를 안 단다. [`Origin::labels`]·
+    /// [`Origin::roots`] 에는 안 든다 — 겹쳐 본 곳도, 줄을 보탠 곳도 아니다.
+    named: Vec<(String, BTreeSet<String>)>,
 }
 
 impl Origin {
@@ -86,8 +91,16 @@ impl Origin {
     ///
     /// [`Origin::branch`] 와 가르는 것: 그쪽은 **줄이 어디서 왔나**(스냅샷의 출처)이고, 집기를
     /// main 에 커밋하는 지금 규약에서는 양쪽 줄이 같아 거의 안 선다 — 목록의 ⎇ 가 사라진 까닭이다.
+    ///
+    /// **스냅샷을 못 읽은 옆 워크트리도 본다**(moai-ncsf) — 훅의 [`away`] 는 디스크의 옆 워크트리
+    /// 전부에서 이름을 내므로, 겹친 곳만 보면 자가 다시 둘이 된다.
     pub fn working(&self, id: &str) -> Option<&str> {
-        self.trees.iter().find(|(.., holds)| holds.contains(id)).map(|(label, ..)| label.as_str())
+        self.trees
+            .iter()
+            .map(|(label, _, holds)| (label, holds))
+            .chain(self.named.iter().map(|(label, holds)| (label, holds)))
+            .find(|(_, holds)| holds.contains(id))
+            .map(|(label, _)| label.as_str())
     }
 
     /// 줄을 보태 온 옆 워크트리의 뿌리들 — [`Origin::root`] 가 댈 수 있는 자리 전부. 탐색기가
@@ -268,6 +281,8 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let mut trouble = Vec::new();
     let mut unfound = None;
     let mut others = Vec::new();
+    // 스냅샷을 못 겹친 옆 워크트리의 이름 — 그래도 이름은 [`Origin::working`] 이 본다.
+    let mut named = Vec::new();
     // HEAD 가 움직인 것도 다시 읽을 까닭이다 — **`others_of` 가 HEAD 를 읽기 전에** 잰다.
     let mut watched = heads(&repo.root);
     match others_of(&repo.root) {
@@ -278,8 +293,11 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                 let path = root.join(".moai").join("issues.jsonl");
                 watched.push((path.clone(), crate::store::stamp(&path)));
                 match crate::store::read_snapshot(&path) {
-                    Err(e) => trouble.push(format!("⎇ {}: {e}", tree.label)),
-                    Ok(None) => {}
+                    Err(e) => {
+                        trouble.push(format!("⎇ {}: {e}", tree.label));
+                        named.push((tree.label.clone(), names([&tree])));
+                    }
+                    Ok(None) => named.push((tree.label.clone(), names([&tree]))),
                     Ok(Some(other)) => {
                         if !other.errors.is_empty() {
                             trouble.push(format!(
@@ -296,7 +314,8 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
         }
     }
     let Load { issues, errors } = load;
-    let (issues, origin) = overlay(issues, others);
+    let (issues, mut origin) = overlay(issues, others);
+    origin.named = named;
     Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, watched })
 }
 
@@ -603,7 +622,7 @@ pub fn workplaces(
     // 변형이 하나 늘 때마다 **디스크를 언제 만지는가**가 조용히 따라 바뀐다. 그래서 그 하나를
     // 재는 자(`report::claimed` — `hook::held` 와 `places` 가 이미 같이 쓴다)를 바로 쓴다.
     let all_names = names(linked.iter().copied());
-    let named = crate::report::claimed(asked, &all_names);
+    let named = crate::report::claimed(asked, cfg, &all_names);
     if crate::report::wip(asked, cfg).iter().all(|i| named(i)) {
         return out;
     }
@@ -1146,6 +1165,42 @@ mod tests {
         std::fs::create_dir_all(&sub).unwrap();
         let seen = heads(&sub);
         assert!(seen.iter().any(|(p, s)| p.ends_with("refs/heads/more") && s.is_some()), "하위에서 가지 파일을 못 찾는다 — {seen:#?}");
+    }
+
+    /// **스냅샷을 못 겹친 옆 워크트리도 이름으로는 쥔다**(moai-ncsf) — 훅의 [`away`] 는 디스크의
+    /// 옆 워크트리 전부에서 이름을 내므로, 겹친 곳만 보면 훅은 "옆이 쥐었다" 로 아는 줄에 화면만
+    /// `⎇` 를 안 단다. moai 를 들이기 전에 갈라진 워크트리(스냅샷이 없다)와 스냅샷이 깨진 워크트리
+    /// 둘 다다. 겹쳐 본 곳(`labels`)에는 안 든다.
+    #[test]
+    fn a_sibling_without_a_readable_snapshot_still_names_what_it_holds() {
+        let scratch = crate::scratch::Scratch::fenced("unread-names");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| {
+            let out = crate::git::isolated(dir).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        // moai 를 들이기 전에 갈라진 워크트리 — 스냅샷이 없다.
+        run(&main, &["worktree", "add", "-q", "../t-1", "-b", "worktree-t-1"]);
+        std::fs::create_dir_all(main.join(".moai")).unwrap();
+        std::fs::write(main.join(".moai/issues.jsonl"), "").unwrap();
+        std::fs::write(main.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+        // 스냅샷이 못 읽히는 워크트리 — 파일 자리에 디렉터리가 섰다.
+        run(&main, &["worktree", "add", "-q", "../t-2", "-b", "worktree-t-2"]);
+        std::fs::create_dir_all(base.join("t-2/.moai/issues.jsonl")).unwrap();
+
+        let crate::store::Opened::Repo(repo) = Repo::open(&main).unwrap() else { panic!("저장소가 안 열렸다") };
+        let got = gather(&repo, true).unwrap();
+        assert_eq!(got.origin.working("t-1"), Some("worktree-t-1"), "스냅샷 없는 워크트리의 이름을 못 봤다");
+        assert_eq!(got.origin.working("t-2"), Some("worktree-t-2"), "스냅샷이 깨진 워크트리의 이름을 못 봤다");
+        assert!(got.origin.labels().is_empty(), "겹치지 않은 곳을 겹쳐 봤다고 댄다 — {:?}", got.origin.labels());
+        assert!(got.trouble.iter().any(|t| t.contains("worktree-t-2")), "깨진 스냅샷을 말하지 않는다 — {:?}", got.trouble);
+        for id in ["t-1", "t-2"] {
+            assert!(away(&main).contains(id), "훅의 자가 {id} 를 안 센다 — 이 시험이 견줄 것이 없다");
+        }
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.

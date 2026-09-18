@@ -359,24 +359,54 @@ pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
 /// 들었다. 워크트리 이름(`worktree::names`)으로 **그 워크트리의 일**을 가르는 자 하나다 — 훅의
 /// 초점(`hook::held`)과 집은 줄의 자리([`places`])가 같은 자로 재야, 초점에서 뺀 줄을 자리 없다고
 /// 하거나 그 반대가 되지 않는다.
-pub fn claimed<'a>(issues: &'a [Issue], names: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
-    let (epics, stones) = if names.is_empty() {
-        (Default::default(), Default::default())
+///
+/// **닫힌 줄을 가리키는 이름은 아무것도 쥐지 않는다**([`shut`], moai-9a8m).
+pub fn claimed<'a>(issues: &'a [Issue], cfg: &Config, names: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
+    let (epics, stones, shut) = if names.is_empty() {
+        Default::default()
     } else {
-        (groups(issues), milestones(issues))
+        (groups(issues), milestones(issues), shut(issues, cfg, names))
     };
-    move |i: &Issue| claims(&epics, &stones, names, i)
+    move |i: &Issue| claims(&epics, &stones, names, &shut, i)
+}
+
+/// `names` 가운데 **닫힌 줄의 id** — 묶음은 멤버에서 읽은 칸으로 잰다([`group_states`]).
+///
+/// 머지하고 안 치운 워크트리(`worktree-<id>`)의 이름은 그 일이 끝난 뒤에도 남는다(moai-boej).
+/// 그 이름을 그대로 세면 셋이 어긋난다 — 목록이 닫힌 줄에 `⎇` 를 달고, 그 뒤 main 에서 그
+/// 줄의 자식(`--parent`)을 집으면 훅이 그것을 옆의 일로 읽어 초점에서 빼(규칙 2 가 "집은 것 없이"
+/// 로 막는다), 자리([`places`])는 그 자식이 옛 워크트리에 있다고 댄다. 이름이 **지금 벌여 놓은**
+/// 일을 가리킬 때만 쥔 것이다 — 끝난 일의 이름은 끝난 뒤에 무엇을 쥐었다고 말할 근거가 없다.
+///
+/// 이름이 가리키는 줄이 묶음일 때만 묶음 칸을 센다 — 훅이 도구 호출마다 지나는 길이다.
+fn shut<'a>(issues: &[Issue], cfg: &Config, names: impl IntoIterator<Item = &'a String>) -> BTreeSet<String> {
+    let names: BTreeSet<&str> = names.into_iter().map(String::as_str).collect();
+    let named: Vec<&Issue> = issues.iter().filter(|i| names.contains(i.id.as_str())).collect();
+    if named.is_empty() {
+        return BTreeSet::new();
+    }
+    let states = if named.iter().any(|i| is_group(i)) { group_states(issues, cfg) } else { BTreeMap::new() };
+    named
+        .into_iter()
+        .filter(|i| column(i, &states) == crate::config::DONE)
+        .map(|i| i.id.clone())
+        .collect()
 }
 
 /// [`claimed`] 의 몸통 — **이미 푼 소속 지도**로 잰다. 워크트리가 여럿이면 지도는 하나고 이름만
 /// 바뀌므로([`places`]), 워크트리마다 `groups`·`milestones` 를 다시 지으면 `moai status` 한 번이
 /// 같은 걸음을 워크트리 수만큼 걷는다 — [`status`] 가 "한 번만 잰다" 고 적어 둔 것과 같은 까닭이다.
-fn claims(epics: &BTreeMap<&str, &str>, stones: &BTreeMap<&str, &str>, names: &BTreeSet<String>, i: &Issue) -> bool {
+fn claims(
+    epics: &BTreeMap<&str, &str>,
+    stones: &BTreeMap<&str, &str>,
+    names: &BTreeSet<String>,
+    shut: &BTreeSet<String>,
+    i: &Issue,
+) -> bool {
+    let named = |id: &str| names.contains(id) && !shut.contains(id);
     !names.is_empty()
         && std::iter::successors(Some(i.id.as_str()), |id| crate::id::parent_of(id)).any(|id| {
-            names.contains(id)
-                || epics.get(id).is_some_and(|e| names.contains(*e))
-                || stones.get(id).is_some_and(|m| names.contains(*m))
+            named(id) || epics.get(id).is_some_and(|e| named(e)) || stones.get(id).is_some_and(|m| named(m))
         })
 }
 
@@ -511,12 +541,13 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
     }
     // **소속 지도는 한 번만 짓는다**(`claims`) — 워크트리마다 바뀌는 것은 이름뿐이다.
     let (epics, stones) = (groups(issues), milestones(issues));
+    let shut = shut(issues, cfg, trees.iter().flat_map(|t| &t.names));
     // **굴릴 곳은 어느 워크트리가 있느냐와 무관하다**(moai-oepz) — 집은 멤버를 둔 묶음은 그
     // 멤버가 `At` 이든 `Lost` 든 키를 받는다. 한때 이 줄 위에서 일찍 돌아, 문서와 `placeable` 은
     // "집은 멤버를 둔 묶음은 키를 받는다" 라고 하는데 그 길에서만 안 받는 셋째 답이 있었다.
     let rolls = rollups(issues, &picked, &epics, &stones);
     for t in trees {
-        let named = |i: &Issue| claims(&epics, &stones, &t.names, i);
+        let named = |i: &Issue| claims(&epics, &stones, &t.names, &shut, i);
         // **이름이 집은 줄을 하나도 못 가리키면 이름 없는 워크트리다.** "이 이름을 쓰는 줄이
         // 있는가" 로 물으면, 끝난 일의 이름으로 뜬 워크트리가 그 자리에서 다른 일을 하고 있어도
         // 이름 있는 것으로 세어져 스냅샷으로 가르는 길이 통째로 닫힌다 — 그 일은 자리를 잃는다.
@@ -547,7 +578,7 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
     // 둘째 자리가 붙는다. 답이 남의 줄에 따라 흔들리느니, 이름이 답한 줄은 이름만으로 답한다.
     for (&id, &i) in &picked {
         let by_name: Vec<&Workplace> =
-            trees.iter().filter(|t| claims(&epics, &stones, &t.names, i)).collect();
+            trees.iter().filter(|t| claims(&epics, &stones, &t.names, &shut, i)).collect();
         if !by_name.is_empty() {
             found.insert(id, by_name);
         }
@@ -2761,6 +2792,37 @@ mod tests {
         // **묶음의 자리는 멤버에서 굴려 올린다**(moai-0h8m) — 워크트리 이름이 에픽 id 라 이어받는
         // 세션이 에픽부터 읽는다.
         assert_eq!(branches("argos-0001"), Some(vec!["worktree-argos-0001"]), "에픽이 멤버의 자리를 못 냈다");
+    }
+
+    /// **닫힌 줄을 가리키는 이름은 아무것도 쥐지 않는다**(moai-9a8m) — 머지하고 안 치운
+    /// `worktree-<id>` 가 그 일이 끝난 뒤 main 에서 집은 자식·멤버를 제 것으로 끌어가면, 자리는
+    /// 옛 워크트리를 대고 훅은 그 집기를 옆의 일로 읽는다. 묶음은 멤버에서 읽은 칸으로 잰다 —
+    /// 멤버가 다시 벌여 놓이면 그 이름은 도로 쥔다.
+    #[test]
+    fn a_name_of_a_closed_row_claims_nothing() {
+        let issues = vec![
+            make("argos-0001", Kind::Issue, "done"),
+            make("argos-0001.a", Kind::Issue, "in_progress"),
+            make("argos-0002", Kind::Epic, "todo"),
+            member("argos-0003", "argos-0002", "done"),
+            make("argos-0004", Kind::Epic, "todo"),
+            member("argos-0005", "argos-0004", "done"),
+            member("argos-0006", "argos-0004", "in_progress"),
+        ];
+        let names: BTreeSet<String> =
+            ["argos-0001", "argos-0002", "argos-0004"].iter().map(|s| s.to_string()).collect();
+        let named = claimed(&issues, &cfg(), &names);
+        assert!(!named(&issues[1]), "닫힌 줄의 이름이 그 자식을 쥐었다");
+        assert!(!named(&issues[3]), "멤버가 다 끝난 에픽의 이름이 쥐었다");
+        assert!(named(&issues[6]), "멤버가 벌여 놓인 에픽의 이름을 닫힌 것으로 봤다");
+
+        let trees = vec![
+            tree("/r/.claude/worktrees/argos-0001", "worktree-argos-0001", &[]),
+            tree("/r/.claude/worktrees/argos-0004", "worktree-argos-0004", &[]),
+        ];
+        let at = places(&issues, &cfg(), &trees, LATER);
+        assert!(matches!(at["argos-0001.a"], Place::Lost), "닫힌 줄의 옛 워크트리에 자리를 댔다 — {:?}", at["argos-0001.a"]);
+        assert_eq!(at["argos-0006"].at().iter().map(|w| w.branch.as_str()).collect::<Vec<_>>(), ["worktree-argos-0004"]);
     }
 
     /// **굴려 올린 자리에 같은 워크트리가 두 번 서지 않는다.** 마일스톤은 멤버를 두 길로 받는다
