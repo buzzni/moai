@@ -882,9 +882,10 @@ pub fn group_states<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a s
 }
 
 /// [`group_states`] 와 같은 셈에서 **칸과 곁들이([`Stand`])를 함께** 낸다. 소속 지도를
-/// 따로 안 든 쪽(탐색기의 적재)이 부른다.
+/// 따로 안 든 쪽이 부른다 — 든 쪽(탐색기의 적재)은 [`Soil::stands`] 다.
 pub fn group_stands<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, Stand<'a, 'c>> {
-    let (epic_of, mile_of) = (groups(all), milestones(all));
+    let epic_of = groups(all);
+    let mile_of = milestones_in(all, &epic_of);
     let roots = deferred_roots_in(all, &epic_of, &mile_of);
     group_stands_in(all, cfg, &epic_of, &mile_of, &roots)
 }
@@ -1547,8 +1548,12 @@ fn passed_down<'a>(
 /// 줄이 받은 값**을 받는다. 다시 읽던 때에는 에픽 줄이 끊긴 `epic` 때문에
 /// `(마일스톤 없음)` 에 서는데 멤버만 그 필드로 세어졌다(moai-0prl).
 pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
+    milestones_in(all, &groups(all))
+}
+
+/// [`milestones`] 와 같은 것. 에픽 지도를 이미 가진 쪽([`Soil`])이 그것을 두 번 짓지 않게 받는다.
+pub fn milestones_in<'a>(all: &'a [Issue], epic_of: &BTreeMap<&'a str, &'a str>) -> BTreeMap<&'a str, &'a str> {
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
-    let epic_of = groups(all);
     let rooted = rooted_thoughts(&by_id);
     let mut out = BTreeMap::new();
     for i in all {
@@ -1704,8 +1709,66 @@ fn fold_top<'a>(
 /// `duplicate_id` 가 그 id 를 따로 드러낸다. 같은 종류의 쌍둥이는 같은 값을 같은 자로
 /// 읽으므로 여기 안 걸린다.
 pub fn eclipsed(all: &[Issue]) -> impl Fn(&Issue) -> bool + '_ {
-    let kind_of: BTreeMap<&str, Kind> = all.iter().map(|i| (i.id.as_str(), i.kind)).collect();
-    move |i| kind_of.get(i.id.as_str()).is_some_and(|k| *k != i.kind)
+    let kind_of = kinds(all);
+    move |i| is_eclipsed(&kind_of, i)
+}
+
+/// id → 그 id 를 **마지막으로 든 줄**의 종류. 가려짐 판정([`is_eclipsed`])이 보는 지도다.
+pub fn kinds(all: &[Issue]) -> BTreeMap<&str, Kind> {
+    all.iter().map(|i| (i.id.as_str(), i.kind)).collect()
+}
+
+/// [`eclipsed`] 의 판정 — `kind_of` 는 [`kinds`] 의 지도다(빌린 id 든 소유한 id 든). **판정은 여기
+/// 하나다**(moai-xemz 리뷰): 지도를 이미 가진 쪽(`Soil`·`query::Where`·탐색기의 `tui::Ground`)이 저마다
+/// 몸을 다시 적으면, 쌍둥이를 가르는 자가 하나만 바뀐 날 CLI 와 탐색기가 같은 줄을 달리 고른다.
+pub fn is_eclipsed<K: std::borrow::Borrow<str> + Ord>(kind_of: &BTreeMap<K, Kind>, i: &Issue) -> bool {
+    kind_of.get(i.id.as_str()).is_some_and(|k| *k != i.kind)
+}
+
+/// **파일 전체를 훑어야 아는 것을 한 걸음으로 잰다**(moai-fbdg) — 소속(에픽·마일스톤), 물려받은
+/// 미룸, 가려진 쌍둥이, 못 쓸 참조, 길 잃음 밑에 접힌 줄. 지도 하나가 다음 지도의 재료라 따로 부르면
+/// `groups` 만 서너 번 돈다: `milestones`·`misplaced` 가 저마다 다시 짓고, 탐색기는 그 위에 색인
+/// (`nav::Index`)·묶음 칸(`group_stands`)·거름망(`query::Where`)이 또 한 벌씩 지었다 — 이슈 1만 건에서
+/// 거름망 한 번이 300ms 였다.
+///
+/// **칸(`Config`)은 안 든다.** 여기까지는 설정을 모르고 재는 것이고, 묶음이 선 칸만 설정을 보므로
+/// [`Soil::stands`] 로 따로 낸다 — 설정 없이 자리만 정하는 쪽(`nav::Index::of`)이 그 값을 안 치른다.
+pub struct Soil<'a> {
+    /// 줄 id → 그 줄이 든 에픽([`groups`]).
+    pub epic: BTreeMap<&'a str, &'a str>,
+    /// 줄 id → 그 줄이 선 마일스톤([`milestones`]).
+    pub milestone: BTreeMap<&'a str, &'a str>,
+    /// 계획에서 빠진 줄 → 그것을 뺀 줄([`deferred_roots`]).
+    pub roots: BTreeMap<&'a str, &'a str>,
+    /// id → 그 id 를 마지막으로 든 줄의 종류([`kinds`]).
+    pub kinds: BTreeMap<&'a str, Kind>,
+    /// 못 쓸 소속 참조를 든 줄([`misplaced`]).
+    pub lost: BTreeMap<&'a str, Misplace>,
+    /// 길 잃은 줄 **밑에 접힌** 줄([`under_lost`]).
+    pub folded: BTreeSet<&'a str>,
+}
+
+impl<'a> Soil<'a> {
+    pub fn of(all: &'a [Issue]) -> Soil<'a> {
+        let epic = groups(all);
+        let milestone = milestones_in(all, &epic);
+        let roots = deferred_roots_in(all, &epic, &milestone);
+        let kinds = kinds(all);
+        let lost = misplaced_in(all, &kinds, &epic, &milestone);
+        // 길 잃음은 `nav::Ctx::home` 과 같다 — 못 쓸 참조를 든 줄과 가려진 쌍둥이.
+        let folded = under_lost(all, &epic, |i| lost.contains_key(i.id.as_str()) || is_eclipsed(&kinds, i));
+        Soil { epic, milestone, roots, kinds, lost, folded }
+    }
+
+    /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가([`is_eclipsed`]).
+    pub fn eclipsed(&self) -> impl Fn(&Issue) -> bool + '_ {
+        |i: &Issue| is_eclipsed(&self.kinds, i)
+    }
+
+    /// 묶음이 **선 칸과 곁들이**([`group_stands`]) — 여기서만 설정을 본다.
+    pub fn stands<'c>(&self, all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, Stand<'a, 'c>> {
+        group_stands_in(all, cfg, &self.epic, &self.milestone, &self.roots)
+    }
 }
 
 /// 소속 참조가 못 쓸 것인 까닭.
@@ -1729,9 +1792,18 @@ pub enum Misplace {
 /// 그래서 판정 차례도 `nav::Ctx::home` 과 같다 — 마일스톤은 뿌리라 볼 것이
 /// 없고, 에픽은 제 마일스톤만, 이슈는 에픽을 먼저 보고 없으면 마일스톤을 본다.
 pub fn misplaced(all: &[Issue]) -> BTreeMap<&str, Misplace> {
-    let kind_of: BTreeMap<&str, Kind> = all.iter().map(|i| (i.id.as_str(), i.kind)).collect();
     let epic_of = groups(all);
-    let mile_of = milestones(all);
+    let mile_of = milestones_in(all, &epic_of);
+    misplaced_in(all, &kinds(all), &epic_of, &mile_of)
+}
+
+/// [`misplaced`] 와 같은 것. 지도를 이미 가진 쪽([`Soil`])이 그것을 다시 짓지 않게 받는다.
+pub fn misplaced_in<'a>(
+    all: &'a [Issue],
+    kind_of: &BTreeMap<&'a str, Kind>,
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    mile_of: &BTreeMap<&'a str, &'a str>,
+) -> BTreeMap<&'a str, Misplace> {
     let usable = |id: Option<&&str>, kind: Kind| id.is_none_or(|id| kind_of.get(*id) == Some(&kind));
 
     let mut out = BTreeMap::new();
