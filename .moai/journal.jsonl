@@ -4472,3 +4472,7 @@
 {"ts":"2026-09-18T13:17:37Z","id":"moai-fg0t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T13:17:40Z","id":"moai-fg0t","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): A — 묶음 줄의 epic 필드는 소속이 아니다. show -e 에서도 빼고 status 경고로 드러낸다"}
 {"ts":"2026-09-18T13:17:41Z","id":"moai-1plu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): A — Stop 훅의 closing 이 moai mv <id> todo 를 함께 댄다(결정을 기다리면 첫 칸에)"}
+{"ts":"2026-09-18T13:18:03Z","id":"moai-h0r2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"감독: 같은 hook.rs 를 고치는 에픽 moai-ju21 로 옮겼다 — 리뷰 한 판으로 같이 본다(사용자: 묶어서 리뷰·작업 시간을 줄인다)"}
+{"ts":"2026-09-18T13:18:04Z","id":"moai-xe6e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"$(moai add …) 와 백틱 안의 moai 호출이 훅의 모든 규칙을 비껴간다"}
+{"ts":"2026-09-18T13:18:04Z","id":"moai-xe6e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pudk 에서 펼쳤다 — $(moai add …) 와 백틱 안의 moai 호출이 훅의 모든 규칙을 비껴간다"}
+{"ts":"2026-09-18T13:18:04Z","id":"moai-pudk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ju21 의 멤버 moai-xe6e 로 펼쳤다"}
