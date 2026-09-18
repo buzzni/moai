@@ -209,8 +209,20 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     crate::query::sort_for_display(&mut shown);
 
     if ctx.json {
-        let rows: Vec<super::Row> =
-            shown.iter().map(|i| super::Row::of(i, wh.states.get(i.id.as_str()).copied()).on(&origin)).collect();
+        // **일한 AI 는 목록에서도 나온다**(moai-p8qj). 닫힌 500건의 토큰을 더하려고
+        // `show <id> --json` 을 500번 부르면 저널 전체를 500번 읽는다 — 여기서는 뿌리마다
+        // 한 번 읽어 id 로 가른다.
+        let work = work_by_id(&repo, &origin, &shown)?;
+        let rows: Vec<Listed> = shown
+            .iter()
+            .map(|i| Listed {
+                row: super::Row::of(i, wh.states.get(i.id.as_str()).copied()).on(&origin),
+                // **키는 늘 선다**(moai-2l8n) — 하나를 펼칠 때와 같은 약속이다. 빈 배열은
+                // "이 일을 한 AI 를 아무도 안 적었다" 는 사실이고, 키가 없으면 되쓴 줄의
+                // 옛 `work` 가 그 자리에서 거짓을 싣는다.
+                work: work.get(i.id.as_str()).map_or(&[], Vec::as_slice),
+            })
+            .collect();
         return super::json_line(&rows);
     }
     if args.tree {
@@ -248,6 +260,56 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         &wh,
         &origin,
     ))
+}
+
+/// 목록의 줄 하나 — 줄에 `work` 를 곁들인다(moai-p8qj).
+///
+/// [`super::Row`] 가 이미 [`super::OURS`] 를 걷었으므로(되써 넣은 줄의 옛 `work`) 한 객체에
+/// 같은 키가 둘 서지 않는다. 하나를 펼치는 쪽은 [`super::json_with`] 로 같은 키를 붙인다 —
+/// 거기는 `journal`·`commits` 까지 붙이는 자리라 모양이 다를 뿐, 이름과 뜻은 하나다.
+///
+/// **곁들이는 키는 [`super::OURS`] 에 있어야 한다** — 필드를 더하면 `OURS` 에도 더한다. 시험
+/// (`every_key_listed_adds_is_in_ours`)이 붉어져 잡는다.
+#[derive(serde::Serialize)]
+struct Listed<'a> {
+    #[serde(flatten)]
+    row: super::Row<'a>,
+    work: &'a [model::Work],
+}
+
+/// 줄이 온 워크트리의 moai 뿌리 — **이력(저널)도 커밋도 거기서 읽는다**(`Origin::root`). 스냅샷은
+/// 옆에서 온 줄을 내는데 이력만 이쪽에서 읽으면 저쪽에서 옮긴 칸·적은 `model:` 줄이 빈다.
+///
+/// 하나를 펼칠 때([`one`])와 목록([`work_by_id`])이 **이 한 자로** 고른다 — 따로 적던 때는 한쪽만
+/// 이쪽 뿌리로 돌려도 아무 시험도 안 붉어졌다(리뷰 moai-u5bk.3wq).
+fn home<'a>(repo: &'a Repo, origin: &'a crate::worktree::Origin, id: &str) -> &'a std::path::Path {
+    origin.root(id).unwrap_or(&repo.root)
+}
+
+/// 그 뿌리의 저널을 읽을 저장소. 설정은 이쪽 것을 빌린다 — 저널을 읽는 데는 안 쓴다.
+fn at_home(repo: &Repo, root: &std::path::Path) -> Repo {
+    Repo { root: root.to_path_buf(), config: repo.config.clone() }
+}
+
+/// 낼 줄들의 `work` — **저널을 뿌리마다 한 번** 읽고, 그 가운데 `model:` 줄을 들 수 있는 줄만
+/// 푼다(`model::may_hold_work`). 답은 하나를 펼칠 때(`model::work_of(&journal)`)와 같다 — 거른
+/// 줄은 `work` 를 못 내는 줄뿐이고, 남은 줄의 차례는 그대로다.
+fn work_by_id(
+    repo: &Repo,
+    origin: &crate::worktree::Origin,
+    shown: &[Issue],
+) -> R<std::collections::BTreeMap<String, Vec<model::Work>>> {
+    let mut by_root: std::collections::BTreeMap<&std::path::Path, BTreeSet<&str>> = Default::default();
+    for i in shown {
+        by_root.entry(home(repo, origin, &i.id)).or_default().insert(i.id.as_str());
+    }
+    let mut out = std::collections::BTreeMap::new();
+    for (root, ids) in by_root {
+        for (id, journal) in at_home(repo, root).journal_by_id(&ids, model::may_hold_work)? {
+            out.insert(id, model::work_of(&journal));
+        }
+    }
+    Ok(out)
 }
 
 /// `--as-plan` — 에픽 하나를 `add --from` 이 받는 마크다운으로 되뽑는다.
@@ -305,10 +367,7 @@ fn one(
     // **이력은 줄이 온 워크트리의 저널에서 읽는다** (`Origin::root`). 스냅샷은
     // 옆 워크트리의 줄을 내는데 이력만 이쪽에서 읽으면, 거기서 옮긴 칸이 이력에
     // 없어 상세의 머리글과 이력이 서로 다른 말을 한다.
-    let journal = match origin.root(&issue.id) {
-        None => repo.journal_of(&issue.id)?,
-        Some(root) => Repo { root: root.to_path_buf(), config: repo.config.clone() }.journal_of(&issue.id)?,
-    };
+    let journal = at_home(repo, home(repo, origin, &issue.id)).journal_of(&issue.id)?;
     // 이 줄과 자식을 계획에서 뺀 줄. **물려받은 미룸까지** — 미룬 에픽의 멤버를
     // 펼쳤을 때 표가 없으면 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다.
     // 묶음의 읽은 칸은 **이 줄과 자식에 대해서만** 센다 — 일 하나를 펼치는 흔한 길에서
@@ -348,7 +407,7 @@ fn one(
     // 끊던 때는 날짜가 거꾸로 선 커밋 하나가 그 밑을 통째로 가려, 같은 물음에 두 표면이 다른 답을 냈다.
     // **기계에게는 그 침묵을 가른다**(moai-rzsv) — `--json` 은 `commits` 를 늘 내고, git 을 못 읽었을
     // 때만 `commits_error` 를 단다. 사람 화면은 그대로다.
-    let root = origin.root(&issue.id).unwrap_or(&repo.root);
+    let root = home(repo, origin, &issue.id);
     let (commits, commits_error) = match crate::git::table(root, &[issue.id.as_str()]) {
         Ok(mut by_id) => (by_id.remove(&issue.id).unwrap_or_default(), None),
         Err(e) => (Vec::new(), Some(e.told(root))),
@@ -472,4 +531,29 @@ fn one(
     out.extend(view::commits(&commits));
     out.extend(view::history(&journal, &repo.config));
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **`Listed` 가 줄 곁에 다는 키도 `cmd::OURS` 에 있다**(moai-qn5d) — 없으면 `show --json` 을
+    /// 되써 넣은 줄의 같은 이름이 안 걷혀 한 객체에 둘 선다. `Listed` 는 `json_with` 를 안 지나
+    /// 그쪽 확인이 안 선다 — `Listed` 에 필드를 더하면 여기서 붉어진다(리뷰 moai-u5bk.3wq).
+    #[test]
+    fn every_key_listed_adds_is_in_ours() {
+        let i = Issue::new(
+            "argos-0001".into(),
+            "제목".into(),
+            Kind::Issue,
+            model::Status::new("todo"),
+            "2026-09-11T04:12:03Z",
+        );
+        let listed = Listed { row: super::super::Row::of(&i, None), work: &[] };
+        let added = super::super::keys_beyond(&i, &listed);
+        assert!(added.iter().any(|k| k == "work"), "곁들인 키를 못 셌다 — {added:?}");
+        for k in &added {
+            assert!(super::super::OURS.contains(&k.as_str()), "`Listed` 가 곁들이는 {k} 가 `OURS` 에 없다");
+        }
+    }
 }
