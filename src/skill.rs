@@ -340,7 +340,8 @@ mod tests {
             // 하나 늘 때 여기서 빠진다.
             let got = guard_shell(&held, &cfg, &Default::default(), root, root, &cmd);
             match (&got, should_deny) {
-                (Decision::Pass, false) => {}
+                // 비추는 줄(`Context`)은 막지 않는다 — `idea add` 에 갈림길 1 의 둘째 물음이 실린다.
+                (Decision::Pass | Decision::Context(_), false) => {}
                 (Decision::Deny(_), true) => {}
                 (Decision::Pass, true) => {
                     panic!("막혀야 하는데 지나간다 — {cmd}")

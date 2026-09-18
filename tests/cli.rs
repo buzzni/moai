@@ -6656,7 +6656,6 @@ fn creation_is_judged_through_the_contract() {
     for free in [
         format!("moai add \"안의 일\" -e {epic}"),
         format!("moai add \"자식\" --parent {id}"),
-        "moai idea add \"떠오른 것\"".to_string(),
         "moai add --from - <<'MD'\n# 딴 에픽\n- 첫 이슈\nMD".to_string(),
         // 리뷰 이야기를 적는 메모는 글자로 가르지 않는다.
         format!("moai note {id} \"code-review 가 moai add 를 짚었다\""),
@@ -6664,6 +6663,12 @@ fn creation_is_judged_through_the_contract() {
         let out = shell_call(&s, &free);
         assert!(out.trim().is_empty(), "막혔다 — {free}\n{out}");
     }
+
+    // 담는 것은 막지 않고 **갈림길 1 의 둘째 물음을 싣는다**(moai-d4e0) — 계약의 `additionalContext` 로.
+    let out = shell_call(&s, "moai idea add \"떠오른 것\"");
+    one_json_value(&out);
+    assert!(!out.contains("permissionDecision"), "담는 것을 막았다\n{out}");
+    assert!(out.contains("\"additionalContext\":\"") && out.contains(&format!("{epic} 가 내건 것")), "{out}");
 }
 
 /// 규칙 2 — 저장소를 고치기 전에 하나를 집는다. **세는 것은 저장소 안의

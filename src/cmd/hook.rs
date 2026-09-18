@@ -160,7 +160,8 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             let mut decision = decision;
             if let Call::Shell(cmd) = call {
                 for (n, other) in there.iter().enumerate() {
-                    if decision != Decision::Pass {
+                    // 비추는 줄(`Context`)에서는 멈추지 않는다 — 남의 트래커가 막을 것을 가린다.
+                    if matches!(decision, Decision::Deny(_)) {
                         break;
                     }
                     let Ok(theirs) = other.read() else { continue };
@@ -172,9 +173,12 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                         }
                     };
                     let only = |k: usize| routes.get(k) == Some(&Route::There(n));
-                    decision = settle(other, &theirs.issues, &away, &|issues, away| {
+                    let theirs = settle(other, &theirs.issues, &away, &|issues, away| {
                         crate::hook::guard_moai(issues, &other.config, away, cmd, &only)
                     });
+                    if decision == Decision::Pass || matches!(theirs, Decision::Deny(_)) {
+                        decision = theirs;
+                    }
                 }
             }
             decision

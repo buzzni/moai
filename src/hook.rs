@@ -1213,15 +1213,20 @@ pub fn guard_shell_in(
     cmd: &str,
     only: &dyn Fn(usize) -> bool,
 ) -> Decision {
-    let decision = guard_moai(issues, cfg, away, cmd, only);
+    // 비추는 줄(`Context`)은 뒤의 규칙이 막을 것을 가리지 않는다 — 들고 있다가 아무도 안 막을 때 낸다.
+    let said = guard_moai(issues, cfg, away, cmd, only);
+    if matches!(said, Decision::Deny(_) | Decision::Block(_)) {
+        return said;
+    }
+    let decision = guard_writes_in(issues, cfg, away, root, cwd, cmd, only);
     if decision != Decision::Pass {
         return decision;
     }
-    let decision = guard_writes_in(issues, cfg, away, root, cwd, cmd, only);
-    if decision != Decision::Pass || !calls_review(cmd) {
+    let decision = if calls_review(cmd) { guard_review(issues, cfg, away) } else { Decision::Pass };
+    if decision != Decision::Pass {
         return decision;
     }
-    guard_review(issues, cfg, away)
+    said
 }
 
 /// 이 명령이 **쓰는 파일들.** 흔한 모양만 본다 — `>`·`>>` 리다이렉션,
@@ -1320,12 +1325,59 @@ fn unknowable(path: &str) -> bool {
 ///
 /// 다른 트래커를 가리키는 토막([`aimed`])은 **그 트래커의 줄로** 본다(moai-23ky). 세션 자리의
 /// 줄로 보던 판은 남의 프로젝트에 세우는 줄을 제 초점으로 막았고, 남의 프로젝트가 쥔 초점은 못 봤다.
+///
+/// 막을 것이 없으면 담는 줄에 한 줄 비출 수 있다([`aside_in`], `Decision::Context`). **비추는
+/// 것은 막는 것을 가리지 않는다** — 받는 쪽은 `Deny` 를 먼저 본다.
 pub fn guard_moai(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str, only: &dyn Fn(usize) -> bool) -> Decision {
     let decision = create_in(issues, cfg, away, cmd, only);
     if decision != Decision::Pass {
         return decision;
     }
-    close_in(issues, cfg, away, cmd, only)
+    let decision = close_in(issues, cfg, away, cmd, only);
+    if decision != Decision::Pass {
+        return decision;
+    }
+    aside_in(issues, cfg, away, cmd, only)
+}
+
+/// 이 토막이 **생각을 담는가** — `idea add` 나 `add --type idea`([`creates`] 가 풀어 주는 둘).
+fn sets_aside(seg: &[String]) -> bool {
+    let Some(args) = moai_args(seg) else { return false };
+    let verbs = positionals(args);
+    let aside = match verbs.first().copied() {
+        Some("idea") => verbs.get(1).copied() == Some("add"),
+        Some("add") => flag_values(args, &["--type"]).last().map(String::as_str) == Some("idea"),
+        _ => false,
+    };
+    aside && !seg.iter().any(|t| t == "-h" || t == "--help")
+}
+
+/// 규칙 1 의 옆짝 — **에픽 일을 집은 채 생각을 담으면 갈림길 1 의 둘째 물음을 비춘다**(moai-d4e0).
+///
+/// 둘째 물음은 `moai add` 의 거절문에만 실렸는데, 실제로 틀리는 자리는 말없이 지나가는
+/// `idea add` 다 — moai-1k17 의 세션은 곧장 그쪽으로 갔다. **막지 않는다**: 에픽이 내건 것인지는
+/// 훅이 못 가르고, idea 는 이 규칙에서 언제나 자유롭다. 결정하는 그 순간에 한 줄 싣는다.
+///
+/// 에픽이 있는 집기만 본다 — 첫 칸에 둔 멤버가 일을 열어 두는 것은 에픽뿐이다([`create_in`]).
+fn aside_in(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str, only: &dyn Fn(usize) -> bool) -> Decision {
+    if !segments(cmd).iter().enumerate().any(|(k, seg)| only(k) && sets_aside(seg)) {
+        return Decision::Pass;
+    }
+    let focus = held(issues, cfg, away);
+    if focus.is_empty() {
+        return Decision::Pass;
+    }
+    let epics = report::groups(issues);
+    let aims: Vec<&str> =
+        focus.iter().filter_map(|i| epics.get(i.id.as_str()).copied()).collect::<BTreeSet<_>>().into_iter().collect();
+    let Some(first) = aims.first() else {
+        return Decision::Pass;
+    };
+    Decision::Context(format!(
+        "갈림길 1 의 둘째 물음 — {} 가 내건 것이 이것 없이도 이뤄지는가. 아니면 idea 가 아니라 안 끝난 이 일이다.\n\
+         지금 못 해도 `moai add \"제목\" -e {first}` 로 세워 첫 칸에 둔다 — 밖으로 내보내면 에픽이 목적을 못 이룬 채 닫힌다.",
+        aims.join("·")
+    ))
 }
 
 /// 토막마다 **그 `moai` 가 도는 자리** — `-C`·`--dir` 나 앞의 `cd`·`pushd` 가 세션의 자리
@@ -1593,6 +1645,8 @@ pub fn closing(
 ) -> Decision {
     let mut lines = Vec::new();
     let wip = held(issues, cfg, away);
+    let epics = report::groups(issues);
+    let out_of_plan = report::put_off(issues);
     if !wip.is_empty() {
         lines.push(
             "아직 집고 있는 것이 있다. 실제로 끝났으면 옮기고, 안 할 것이면 미루고, 이어서 할 것이면 다음 세션에 한 줄 남긴다."
@@ -1614,15 +1668,33 @@ pub fn closing(
                 lines.push(format!("  moai mv {} {col}", i.id));
             }
             lines.push(format!("  moai mv {} {last}     {}", i.id, i.title));
-            lines.push(format!("  moai defer {} -m \"왜\"      지금 안 할 것이면", i.id));
-            lines.push(format!("  {}      이어서 할 것이면", crate::guide::handoff(&i.id)));
+            // **에픽을 열어 두는 마지막 멤버에는 미룸의 값을 함께 댄다**(moai-8ema). 미룬 멤버는
+            // 에픽의 칸에서 빠지므로, 끝난 멤버 곁에 이것 하나 남았을 때 미루면 에픽이 목적을 못
+            // 이룬 채 `done` 으로 선다 — 결정을 기다리는 멤버에 "지금 안 할 것이면" 만 대던 판은
+            // moai-l288 이 막은 문을 훅이 도로 열었다. 되돌아가는 칸(`mv <id> todo`)은 대지
+            // 않는다: 갈 칸은 앞 칸뿐이고(`closing_offers_only_the_columns_ahead`), 에픽을 열어
+            // 두는 데는 집은 채 이어받을 줄을 남기는 것으로 넉넉하다.
+            match last_member_of(issues, &epics, &out_of_plan, i) {
+                Some(e) => {
+                    lines.push(format!(
+                        "  moai defer {} -m \"왜\"      {e} 의 목적을 접을 때만 — 남은 마지막 멤버라 미루면 {e} 가 목적을 못 이룬 채 닫힌다",
+                        i.id
+                    ));
+                    lines.push(format!(
+                        "  {}      이어서 할 것이면 (결정을 기다리는 것도 이쪽이다)",
+                        crate::guide::handoff(&i.id)
+                    ));
+                }
+                None => {
+                    lines.push(format!("  moai defer {} -m \"왜\"      지금 안 할 것이면", i.id));
+                    lines.push(format!("  {}      이어서 할 것이면", crate::guide::handoff(&i.id)));
+                }
+            }
         }
     }
     // **굴러가는 리뷰와 지금 집은 것에 매인 리뷰만 센다.** 저장소에 남은 옛
     // 리뷰 줄까지 세면 매 세션 같은 줄이 나오고, 그러면 아무도 안 읽는다.
     let unit = unit_of(issues, &wip);
-    let epics = report::groups(issues);
-    let out_of_plan = report::put_off(issues);
     for i in issues.iter().filter(|i| is_review(i, &out_of_plan) && !i.status.is_done()) {
         // **규칙 3 과 같은 셈법이어야 한다.** 여기서 부모를 빼면, 거절문이
         // 시킨 대로 `--parent` 로 세운 리뷰가 규칙 3 은 지나가면서 닫을 때는
@@ -1646,6 +1718,26 @@ pub fn closing(
         ));
     }
     if lines.is_empty() { Decision::Pass } else { Decision::Block(lines.join("\n")) }
+}
+
+/// `i` 를 미루면 **제 에픽이 `done` 으로 서는가** — 서면 그 에픽 id.
+///
+/// 에픽의 칸과 같은 자로 잰다(`report::group_states`): 미룬 멤버는 빼고, 남은 멤버가 있고 전부
+/// 끝났으면 `done` 이다. 그러니 `i` 말고 계획에 남은 멤버가 전부 끝났고 그중 하나라도 있으면
+/// 참이다. 끝난 멤버가 없으면 미뤄도 에픽은 첫 칸에 서 닫히지 않는다.
+fn last_member_of<'a>(
+    issues: &'a [Issue],
+    epics: &std::collections::BTreeMap<&str, &'a str>,
+    out_of_plan: &BTreeSet<&str>,
+    i: &Issue,
+) -> Option<&'a str> {
+    let e = *epics.get(i.id.as_str())?;
+    let group = issues.iter().find(|g| g.id == e && g.kind == crate::model::Kind::Epic)?;
+    let rest: Vec<&Issue> = report::group_members(issues, group)
+        .into_iter()
+        .filter(|m| m.id != i.id && !out_of_plan.contains(m.id.as_str()))
+        .collect();
+    (!rest.is_empty() && rest.iter().all(|m| m.status.is_done())).then_some(e)
 }
 
 /// 세지 않는 자리. 저장소 밖, 트래커 자신, 도구 설정, 빌드 산출물.
@@ -1902,6 +1994,39 @@ mod tests {
         let dirs = aimed(cmd, root);
         let why = denied(&guard_moai(&theirs, &cfg(), &here(), cmd, &|k| dirs[k].is_some())).to_string();
         assert!(why.contains("t-9"), "{why}");
+    }
+
+    /// **에픽 일을 집은 채 생각을 담으면 둘째 물음을 비춘다 — 막지 않는다**(moai-d4e0). 거절문에만
+    /// 실으면 실제로 틀리는 자리인 `idea add` 는 말없이 지나간다.
+    #[test]
+    fn setting_an_idea_aside_mid_epic_hears_the_second_question() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let root = Path::new("/repo");
+        for cmd in ["moai idea add \"떠오른 것\"", "cd /repo && moai add --type idea \"떠오른 것\""] {
+            let Decision::Context(said) = guard_shell(&all, &cfg(), &here(), root, root, cmd) else {
+                panic!("안 비춘다 — {cmd}");
+            };
+            assert!(said.contains("t-e 가 내건 것"), "{said}");
+            assert!(said.contains("moai add \"제목\" -e t-e"), "세울 줄을 안 댄다\n{said}");
+        }
+
+        // 집은 것이 없거나, 에픽 없는 일이거나, 도움말이면 조용하다.
+        let loose = vec![issue("t-1", "in_progress")];
+        let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        for (all, cmd) in [
+            (&loose, "moai idea add \"떠오른 것\""),
+            (&idle, "moai idea add \"떠오른 것\""),
+            (&all, "moai idea add --help"),
+            (&all, "moai idea ls"),
+            (&all, "moai note t-1 \"idea add 를 적는다\""),
+        ] {
+            assert_eq!(guard_shell(all, &cfg(), &here(), root, root, cmd), Decision::Pass, "{cmd}");
+        }
+
+        // **비추는 줄이 막는 것을 가리지 않는다** — 같은 명령줄의 규칙 1·3 이 먼저다.
+        for cmd in ["moai idea add \"a\"; moai add \"딴 일\"", "moai idea add \"a\" && /code-review high"] {
+            assert!(matches!(guard_shell(&all, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "{cmd}");
+        }
     }
 
     // ── 무엇을 부르려는가 ────────────────────────────────────────────
@@ -2659,6 +2784,39 @@ mod tests {
         };
         assert!(why.contains("moai mv t-1 done"), "{why}");
         assert!(!why.contains("moai mv t-1 review"), "제자리걸음을 시킨다\n{why}");
+    }
+
+    /// **에픽을 열어 두는 마지막 멤버에 미룸을 "지금 안 할 것이면" 으로만 대지 않는다**(moai-8ema).
+    /// 끝난 멤버 곁에 그것 하나 남았으면, 시킨 대로 미루는 순간 에픽이 목적을 못 이룬 채 `done`
+    /// 으로 선다 — moai-l288 이 막은 문을 훅이 도로 연다.
+    #[test]
+    fn closing_warns_before_deferring_the_last_member() {
+        let mut shelved = under("t-3", "todo", "t-e");
+        shelved.deferred_at = Some("2026-01-01T00:00:00Z".into());
+        // 끝난 것 하나, 미룬 것 하나, 이것 — 미루면 셀 멤버가 끝난 것뿐이다.
+        let last = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), under("t-2", "done", "t-e"), shelved];
+        let Decision::Block(why) = closing(&last, &cfg(), &here(), 0, None) else {
+            panic!("안 붙들었다");
+        };
+        assert!(why.contains("t-e 의 목적을 접을 때만"), "마지막 멤버를 그냥 미루라고 한다\n{why}");
+        assert!(!why.contains("지금 안 할 것이면"), "{why}");
+        assert!(why.contains("결정을 기다리는 것도 이쪽이다"), "열어 둘 길을 안 댄다\n{why}");
+        // 앞 칸만 댄다 — 되돌아가는 칸은 여전히 안 댄다.
+        assert!(!why.contains("moai mv t-1 todo"), "{why}");
+
+        // 남은 멤버가 있으면 미뤄도 에픽이 안 닫힌다 — 보통 줄이다.
+        let more = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), under("t-2", "done", "t-e"), under("t-3", "todo", "t-e")];
+        // 끝난 멤버가 없으면 미뤄도 에픽은 첫 칸이다.
+        let fresh = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        // 에픽 없는 일은 붙들 에픽이 없다.
+        let loose = vec![issue("t-1", "in_progress"), issue("t-2", "done")];
+        for all in [more, fresh, loose] {
+            let Decision::Block(why) = closing(&all, &cfg(), &here(), 0, None) else {
+                panic!("안 붙들었다");
+            };
+            assert!(why.contains("moai defer t-1 -m \"왜\"      지금 안 할 것이면"), "{why}");
+            assert!(!why.contains("목적을 접을 때만"), "닫히지 않는 에픽을 댄다\n{why}");
+        }
     }
 
     /// 다 옮겼고 경고도 안 늘었으면 조용히 보낸다.
