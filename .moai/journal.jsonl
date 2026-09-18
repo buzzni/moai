@@ -3558,3 +3558,9 @@
 {"ts":"2026-09-18T01:31:16Z","id":"moai-csvw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"고른 길: 켠 채로 도는 폭 훑기(40·60·80·120)를 더한다. fixture 를 둘로 가르면 every() 를 쓰는 그림 시험 전부가 두 벌 돌아 값보다 비싸고, 이름 줄이 무너지는 자리는 폭 셈이라 폭을 훑는 쪽이 곧장 그 자리를 본다. idea 본문이 댄 두 길 중 고르는 구현 판단이다(감독)"}
 {"ts":"2026-09-18T01:31:17Z","id":"moai-ehmj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T01:32:00Z","id":"moai-yxlq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"887847c 로 main 에 병합"}
+{"ts":"2026-09-18T01:33:59Z","id":"moai-svvk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"fields_known 이 빈 손 설정 — 적힌 fields 를 말없이 버리지 않는다"}
+{"ts":"2026-09-18T01:33:59Z","id":"moai-4qkj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"fields_known = [] 이면 적힌 fields 를 그대로 따른다"}
+{"ts":"2026-09-18T01:33:59Z","id":"moai-svvk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-n2ue 에서 펼쳤다 — fields_known = [] 이면 fields 를 말없이 버린다"}
+{"ts":"2026-09-18T01:33:59Z","id":"moai-n2ue","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-svvk 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T01:34:07Z","id":"moai-svvk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 빈 fields_known 은 '모든 열을 알았다' 로 읽는다 — 적힌 fields 가 곧 켠 열이고 경고는 안 낸다(읽기는 관대하다). vycf 의 열린 멤버 moai-r9qa(user_config 쓰기의 colour 표)와는 파일(user_config.rs)만 겹칠 수 있고 고치는 자리는 tui/mod.rs 의 fields 해석이라 안 겹친다."}
+{"ts":"2026-09-18T01:34:07Z","id":"moai-4qkj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
