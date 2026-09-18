@@ -238,8 +238,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         ),
     );
     if !made.tags.is_empty() {
-        let tags = made.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ");
-        line.push_str(&format!("   {}", paint(style::TAG, &tags)));
+        line.push_str(&format!("   {}", paint(style::TAG, &crate::view::tags_of(&made))));
     }
     if let Some(e) = &made.epic {
         line.push_str(&format!("   {}", paint(style::DIM, e)));
@@ -347,7 +346,7 @@ pub fn line_of(d: &Draft, id: Option<&str>) -> String {
     let tags = if d.tags.is_empty() {
         String::new()
     } else {
-        format!("   {}", paint(style::TAG, &d.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")))
+        format!("   {}", paint(style::TAG, &crate::view::tag_line(&d.tags)))
     };
     format!("{indent}{head}  {mark}  {}{tags}", d.title).trim_end().to_string()
 }
