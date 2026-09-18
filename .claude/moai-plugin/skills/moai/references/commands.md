@@ -194,6 +194,20 @@ BODY
   판단과 근거와 다음 걸음을 줄로 가르면 `moai show` 한 번으로 끝난다
 - **이모지로 급한 것을 알린다** — 급한 것은 우선순위(`-p 1`)로 적는다. `ready` 가 읽는 것은 그쪽이다
 
+## 한국어 글
+
+늘 보이는 규칙은 `SKILL.md` 의 "한국어 글" 에 있다. 여기는 그 절차다.
+
+- 리뷰 원문은 줄이거나 판단을 섞지 않고 문장만 다듬는다 — 규칙 3 이 `그대로` 옮기라는 것은 그 뜻이다
+- 20줄을 넘는 글은 저장소 밖(스크래치패드나 임시 디렉터리)으로 옮겨 그 자리를 cwd 로 두고
+  `humanize-korean:humanize-korean` 을 부른다. 이 스킬은 cwd 에 `_workspace/` 를 만든다 — 다 쓰면 지운다
+- 다듬은 글이 뜻을 바꿨으면 원래 글로 돌아간다. 다듬기는 문장을 고치는 것이지 사실을 고치는 것이 아니다
+- 플러그인이 없으면 에이전트가 스스로 깔지 않는다 — 사람에게 `moai skill install` 을 다시 부르라고
+  청한다. 그것이 moai 와 같은 scope 로 아래 둘을 함께 깐다. 없어도 moai 는 아무것도 막지 않는다
+
+    korean-skills@korean-skills     https://github.com/DaleSeo/korean-skills
+    humanize-korean@im-not-ai       https://github.com/epoko77-ai/im-not-ai
+
 ## 커밋에 id 를 적는다
 
 커밋 제목에 그 커밋이 닿은 이슈 id 를 적는다 — `feat: 막음 줄을 그린다 (<id>)`.
