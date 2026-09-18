@@ -922,7 +922,7 @@ def parents(pid):
             return
         pid = int(out) if out.isdigit() else 0
 PROMPT = "\u276f"
-DIM = ("38;5;244", "38;5;245", "38;5;246", "38;5;8", "90", "2")
+SGR = "\x1b\\[([0-9;:]*)m"
 def screen(pane, colour=False):
     args = ["capture-pane", "-p"] + (["-e"] if colour else []) + ["-t", pane]
     return tmux(*args).stdout.split("\n")
@@ -938,18 +938,45 @@ def draft(pane):
             head = (PROMPT + " ", "  ")
             return "\n".join((l[2:] if l[:2] in head else l[1:] if l[:1] == PROMPT else l).rstrip() for l in box).strip("\n")
         box.append(line)
+def grey(code):
+    """이 글자색이 흐린 회색인가. 256색 회색 계단과 참색(r=g=b) 을 함께 본다 — Claude Code 의
+    색은 테마의 16진값이라, 판이 참색을 받으면 `38;5;244` 가 아니라 `38;2;136;136;136` 으로 온다."""
+    n = code.split(";")
+    if code == "90":
+        return True
+    if n[:2] == ["38", "5"] and len(n) == 3 and n[2].isdigit():
+        return int(n[2]) == 8 or 232 <= int(n[2]) <= 247
+    if n[:2] == ["38", "2"] and len(n) == 5 and all(p.isdigit() for p in n[2:]):
+        return len(set(n[2:])) == 1 and int(n[2]) < 160
+    return False
+def sgr(code, was):
+    """SGR 한 조각을 (흐림 속성, 흐린 글자색) 으로 접는다. tmux 는 흐림 속성과 글자색을 따로
+    내보내(`\x1b[2m\x1b[37m`), 마지막 조각만 기억하면 흐림이 뒤따르는 색에 덮여 사라진다."""
+    attr, fg = was
+    n = code.split(";")
+    if code in ("", "0"):
+        return False, False
+    if code in ("2", "22"):
+        return code == "2", fg
+    if n[0] in ("38", "39") or (len(n) == 1 and n[0].isdigit() and (30 <= int(n[0]) <= 37 or 90 <= int(n[0]) <= 97)):
+        return attr, grey(code)
+    return was
 def dim_only(pane):
     """입력 칸에 보이는 글이 모두 흐린 색인가 — 사람이 친 글이 아니라 Claude Code 의 제안 글이다."""
     lines = screen(pane, True)
-    at = [i for i, l in enumerate(lines) if PROMPT in l]
+    bare = lambda l: re.sub(SGR, "", l)
+    # 입력 칸은 `draft` 와 **같은 줄**에서 연다. `in` 으로 찾으면 사람이 친 글에 든 프롬프트
+    # 표시가 그 아래로 끌고 가 위의 사람 글을 못 본다. 상자 끝도 `startswith` 로 본다 — 사람이
+    # 붙여 넣은 줄 속의 붙임표 하나에 그 자리에서 참을 내면 사람의 글 뒤에 `/clear` 가 붙는다.
+    at = [i for i, l in enumerate(lines) if bare(l).startswith(PROMPT)]
     for n, line in enumerate(lines[at[-1] :] if at else []):
-        if "─" in line:
+        if bare(line).startswith("─"):
             return True
-        colour = ""
-        for i, piece in enumerate(re.split("\x1b\\[([0-9;]*)m", line)):
+        was = False, False
+        for i, piece in enumerate(re.split(SGR, line)):
             if i % 2:
-                colour = piece
-            elif (piece.replace(PROMPT, " ") if n == 0 else piece).strip() and colour not in DIM:
+                was = sgr(piece, was)
+            elif (piece.replace(PROMPT, " ") if n == 0 else piece).strip() and not any(was):
                 return False
     return False
 def looks(fmt):
@@ -1000,6 +1027,9 @@ else:
     if kept and draft(pane) == kept and dim_only(pane):
         print("위의 `치던 글` 은 흐린 제안 글이었다 — 사람이 친 것이 아니다")
         erased = False
+        # 사람의 글이 아니니 상태줄에 "감독 창에 옮겼다" 고 말하지 않는다 — 그 말을 읽은 사람이
+        # 감독 창에서 제가 쓴 적 없는 글을 찾는다.
+        kept = ""
     else:
         skip("입력 칸을 못 비웠다")
 if (read(f) or {{}}).get("status") != "idle":
@@ -1592,6 +1622,8 @@ mod tests {
             ("pane_synchronized", "묶인 판에 쳐 옆 일꾼의 대화까지 지운다"),
             ("입력 칸을 못 비웠다", "치던 글 뒤에 /clear 가 붙어 프롬프트로 간다"),
             ("dim_only(pane)", "흐린 제안 글에 막혀 창이 영영 안 비워진다"),
+            ("def grey(code)", "참색(`38;2;…`)으로 그린 흐린 글을 못 알아봐 창이 안 비워진다"),
+            ("bare(l).startswith(PROMPT)", "사람이 친 글 속의 프롬프트 표시나 붙임표를 제안 글로 읽어 그 글 뒤에 /clear 가 붙는다"),
             ("l[:2] in head", "옮긴 치던 글이 들여쓰기를 잃거나 앞머리 아닌 줄까지 두 글자 깎인다"),
             ("left is None", "입력 칸을 놓친 화면에 지우는 키를 계속 친다"),
             ("치던 글은 이미 지웠다", "지우다 멈추면 사람의 글이 말없이 사라진다"),
