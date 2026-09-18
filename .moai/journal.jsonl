@@ -3861,3 +3861,6 @@
 {"ts":"2026-09-18T06:50:10Z","id":"moai-prp5.o3r","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=209465 (xhigh — 에픽 끝, 이어 받은 판만 센 값이다. 세션 재시작으로 멈춘 앞 판은 토큰을 모른다)"}
 {"ts":"2026-09-18T06:50:25Z","id":"moai-wilg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 목록 머리를 걷는 차례, 한 파일 안의 그리기 동작)"}
 {"ts":"2026-09-18T06:50:29Z","id":"moai-dutv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 줄과 이름 줄의 짜임 셈을 한 자리로)"}
+{"ts":"2026-09-18T07:05:01Z","id":"moai-dutv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"25d2633 로 main 병합"}
+{"ts":"2026-09-18T07:05:05Z","id":"moai-wilg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"25d2633 로 main 병합"}
+{"ts":"2026-09-18T07:05:16Z","id":"moai-p3wn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"창 비우기가 지우는 사이에 사람이 친 글을 옮기지 않고 지운다"}
