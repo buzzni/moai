@@ -5,7 +5,8 @@
 
 use super::{Ctx, Fail, R};
 use crate::cli::PromoteArgs;
-use crate::model::{self, Issue, JournalEntry, Status};
+use crate::draft::Shape;
+use crate::model::{self, Issue, JournalEntry, Kind, Status};
 use crate::store::Repo;
 use crate::style::{self, paint};
 
@@ -18,7 +19,22 @@ fn not_an_idea(id: &str, i: &Issue) -> Fail {
     )
 }
 
+/// `-e` 로 받은 것이 멤버를 받을 수 있는 에픽인가. **없거나 에픽이 아니면 거절한다** —
+/// `add -e` 는 없는 에픽을 알리고 넘어가지만, 여기서는 idea 가 닫히므로 틀린 자리에 펼친
+/// 것을 되돌릴 길이 도구 밖에만 남는다.
+fn check_epic(issues: &[Issue], id: &str) -> R<()> {
+    let e = issues.iter().find(|i| i.id == id).ok_or_else(|| Fail::not_found(id))?;
+    if e.kind != Kind::Epic {
+        return Err(Fail::coded(
+            format!("{id} 는 에픽이 아니라 {} 다 — `-e` 는 멤버를 받을 에픽을 가리킨다", e.kind.as_str()),
+            super::code::BAD_TARGET,
+        ));
+    }
+    Ok(())
+}
+
 /// idea 하나를 에픽 하나 + 이슈 여럿으로 펼치고, 그 idea 를 닫는다.
+/// `-e <에픽>` 이면 새 에픽 없이 이미 선 에픽의 멤버로 펼친다(moai-f3ml).
 ///
 /// 받는 마크다운은 `add --from` 과 **같은 형식**이다. 형식이 둘이 되면
 /// 에이전트가 어느 쪽 문법인지 매번 틀린다.
@@ -34,7 +50,10 @@ fn not_an_idea(id: &str, i: &Issue) -> Fail {
 pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     // `add --from` 과 **한 길**이다 — 읽기·템플릿 채우기·형식 읽기(moai-cypw).
-    let drafts = crate::cmd::add::read_plan(&args.from, &args.var)?;
+    // `-e` 면 에픽은 이미 있다 — 계획은 그 에픽에 넣을 이슈만 적는다(moai-f3ml).
+    let shape = if args.epic.is_some() { Shape::Members } else { Shape::Plan };
+    let drafts = crate::cmd::add::read_plan(&args.from, &args.var, shape)?;
+    let into = args.epic.as_deref();
 
     // **연습은 저장소를 안 만진다.** AI 가 펼친 안을 사람이 한 번 보고
     // "좋다" 하는 자리라, 여기서 쓰면 그 "좋다" 가 뒤늦은 말이 된다.
@@ -56,15 +75,21 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         if !crate::report::is_idea(thought) {
             return Err(not_an_idea(&args.id, thought));
         }
+        if let Some(e) = into {
+            check_epic(&load.issues, e)?;
+        }
         // **거절은 `--json` 보다 먼저다.** 못 할 일을 하겠다고 말하면 모양이
         // 무엇이든 거절이고, 뒤에 두면 연습이 조용히 "된다" 고 낸다.
         if ctx.json {
-            return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id));
+            return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into);
         }
         let mut out = vec![paint(style::HEAD, "펼칠 것")];
         out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None)));
         out.push(String::new());
         out.push(crate::cmd::add::tally(&drafts));
+        if let Some(e) = into {
+            out.push(paint(style::DIM, &format!("{e} 의 멤버로 든다")));
+        }
         out.push(paint(style::DIM, &format!("{} 는 done 으로 간다", args.id)));
         return Ok(out);
     }
@@ -88,6 +113,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         }
         let title = thought.title.clone();
         let was = thought.status.clone();
+        // 들 에픽도 락 안에서 다시 본다 — 연습과 진짜 사이에 지워졌을 수 있다.
+        if let Some(e) = into {
+            check_epic(issues, e)?;
+        }
         // 담아 둔 생각의 담당을 **갈라진 채로** 물려준다. 펼친 계획의 임자가
         // 없으면 `ready` 가 집으라고 내면서 누가 집는지는 말하지 않는다.
         //
@@ -99,7 +128,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         let heir = (thought.assignee.clone(), thought.assignee_email.clone());
 
         let (mut entries, made) =
-            crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, &heir, &by, &at)?;
+            crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, into, &heir, &by, &at)?;
 
         // **어느 쪽에서 봐도 이어진다.** 펼친 계획에서 "어디서 나왔나" 를
         // 물을 수도, 담아 둔 생각에서 "무엇이 됐나" 를 물을 수도 있다.
@@ -107,8 +136,14 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 뿌리로 선 것(제 에픽이 없는 것)이 펼친 계획의 머리다. **한 번만
         // 고른다** — 두 번 고르면 규칙이 둘이 되고, 갈라진 날 저널의 두 줄이
         // 서로 다른 것을 가리킨다.
-        let grown: Vec<String> =
-            made.iter().filter(|i| i.epic.is_none()).map(|i| i.id.clone()).collect();
+        //
+        // 선 에픽에 펼치면(`-e`) 뿌리가 없다 — 만든 이슈 하나하나가 머리다. 에픽에는 적지
+        // 않는다: 그 에픽은 이 idea 에서 나온 것이 아니다.
+        let grown: Vec<String> = made
+            .iter()
+            .filter(|i| into.is_some() || i.epic.is_none())
+            .map(|i| i.id.clone())
+            .collect();
         for top in &grown {
             entries.push(JournalEntry::note(
                 top,
@@ -118,7 +153,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             ));
         }
         let done = Status::new(crate::config::DONE);
-        let note = format!("{} 로 펼쳤다 (이슈 {}건)", grown.join(" "), made.len() - grown.len());
+        let note = match into {
+            Some(e) => format!("{e} 의 멤버 {} 로 펼쳤다", grown.join(" ")),
+            None => format!("{} 로 펼쳤다 (이슈 {}건)", grown.join(" "), made.len() - grown.len()),
+        };
         // **이미 닫힌 것을 또 닫지 않는다.** `done → done` 을 적으면 저널에
         // 일어나지도 않은 전이가 남고, `status_since` 가 움직여 "언제 닫혔나"
         // 가 마지막 `promote` 시각으로 밀린다. 적어 온 말은 그래도 버리지
@@ -158,6 +196,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     out.extend(drafts.iter().zip(&made).map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id))));
     out.push(String::new());
     out.push(crate::cmd::add::tally(&drafts));
+    if let Some(e) = into {
+        out.push(paint(style::DIM, &format!("{e} 의 멤버로 들었다")));
+    }
     out.push(format!(
         "{}  {}",
         paint(style::ID, &args.id),

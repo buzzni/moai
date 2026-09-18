@@ -178,6 +178,11 @@ fn expand<'a>(s: &'a str, vars: &[(&str, &str)]) -> (String, Vec<&'a str>) {
 /// - **`\{{` 는 글자 `{{` 다**(moai-xqxu) — 역슬래시를 떼고 변수로 세지 않는다. [`render`] 가 제목과
 ///   태그의 `{{` 를 그렇게 써서, 되뽑은 계획이 채우지 않은 변수로 거절되지 않는다
 pub fn fill(src: &str, vars: &[(&str, &str)]) -> Result<Vec<Draft>, String> {
+    fill_as(src, vars, Shape::Plan)
+}
+
+/// [`fill`] 을 [`Shape`] 대로 읽는다.
+pub fn fill_as(src: &str, vars: &[(&str, &str)], shape: Shape) -> Result<Vec<Draft>, String> {
     let (_, names) = expand(src, vars);
     let quote = |v: &[&str]| v.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join("·");
     let missing: Vec<&str> = names.iter().copied().filter(|n| !vars.iter().any(|(k, _)| k == n)).collect();
@@ -198,7 +203,7 @@ pub fn fill(src: &str, vars: &[(&str, &str)]) -> Result<Vec<Draft>, String> {
         errors.push(format!("계획에 없는 변수 {} — 이름이 맞는지 본다", quote(&unknown)));
     }
     // 형식은 값 없이도 읽힌다 — 변수 거절이 있어도 줄 거절까지 한 번에 말한다.
-    let mut drafts = parse(src).unwrap_or_else(|e| {
+    let mut drafts = parse_as(src, shape).unwrap_or_else(|e| {
         errors.push(e);
         Vec::new()
     });
@@ -222,9 +227,25 @@ pub fn fill(src: &str, vars: &[(&str, &str)]) -> Result<Vec<Draft>, String> {
     Ok(drafts)
 }
 
+/// [`parse_as`] 를 [`Shape::Plan`] 으로. 시험만 부른다 — 쓰는 길은 [`fill_as`] 를 지난다.
+#[cfg(test)]
+pub fn parse(src: &str) -> Result<Vec<Draft>, String> {
+    parse_as(src, Shape::Plan)
+}
+
+/// 계획이 무엇을 세우는가. 형식은 하나고, 다른 것은 `#` 줄이 설 자리가 있느냐뿐이다.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Shape {
+    /// 에픽과 그 이슈 — `add --from`, `idea promote`
+    Plan,
+    /// 이미 선 에픽에 넣을 이슈만 — `idea promote -e` (moai-f3ml). 에픽은 이미 있으니
+    /// `#` 줄은 받지 않고, `-` 줄의 `epic` 은 비어 나온다 — 어느 에픽인지는 부르는 쪽이 안다
+    Members,
+}
+
 /// 못 읽은 줄은 **전부** 모아 한 번에 말한다. 하나씩 고치게 하면 여섯 줄짜리
 /// heredoc 을 여섯 번 다시 보낸다.
-pub fn parse(src: &str) -> Result<Vec<Draft>, String> {
+pub fn parse_as(src: &str, shape: Shape) -> Result<Vec<Draft>, String> {
     let mut out: Vec<Draft> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     let mut epic: Option<usize> = None;
@@ -247,7 +268,13 @@ pub fn parse(src: &str) -> Result<Vec<Draft>, String> {
                 }
             },
         };
-        if kind == Kind::Issue && epic.is_none() {
+        if kind == Kind::Epic && shape == Shape::Members {
+            errors.push(format!(
+                "{n}줄: 선 에픽에 펼칠 때는 `# 에픽` 을 적지 않는다 — `- 이슈` 만 적는다 — {l:?}"
+            ));
+            continue;
+        }
+        if kind == Kind::Issue && epic.is_none() && shape == Shape::Plan {
             errors.push(format!(
                 "{n}줄: 어느 에픽의 이슈인지 알 수 없다. 위에 `# 에픽 제목` 을 둔다 — {l:?}"
             ));
@@ -274,7 +301,11 @@ pub fn parse(src: &str) -> Result<Vec<Draft>, String> {
         return Err(errors.join("\n      "));
     }
     if out.is_empty() {
-        return Err("읽을 것이 없다. `# 에픽 제목` 과 `- 이슈 제목` 을 적는다".into());
+        return Err(match shape {
+            Shape::Plan => "읽을 것이 없다. `# 에픽 제목` 과 `- 이슈 제목` 을 적는다",
+            Shape::Members => "읽을 것이 없다. `- 이슈 제목` 을 적는다",
+        }
+        .into());
     }
     Ok(out)
 }
