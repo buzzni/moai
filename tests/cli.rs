@@ -4142,8 +4142,8 @@ fn every_help_fits_in_eighty_columns() {
         args.push("-h");
         let short = ok(s.path(), &args);
         for (flag, text) in [("--help", help.as_str()), ("-h", short.as_str())] {
-            for l in text.lines().filter(|l| cells(l) > 80) {
-                wide.push(format!("moai {path} {flag}  {}: {l}", cells(l)));
+            for l in text.lines().filter(|l| cjk_cells(l) > 80) {
+                wide.push(format!("moai {path} {flag}  {}: {l}", cjk_cells(l)));
             }
         }
     }
