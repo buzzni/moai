@@ -1669,8 +1669,21 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
 
     // 라벨 줄은 **모아 두고 폭을 재서** 낸다.
     let mut fields: Vec<(String, String)> = Vec::new();
+    // 걸린 검색이 태그·본문을 보면 **왜 걸렸는지** 여기서 칠한다(moai-lw7i) — 목록 줄은 id·제목만
+    // 칠하므로, 태그·본문 범위로 찾으면 걸린 줄에 칠한 글자가 하나도 없다.
+    let grep = app.grep_query();
+    let in_tag = grep.filter(|(g, _)| g.sees_tag()).map(|(_, q)| q);
+    let in_body = grep.filter(|(g, _)| g.sees_body()).map(|(_, q)| q);
     if !i.tags.is_empty() {
-        out.push(Line::from(Span::styled(crate::view::tags_of(i), Style::new().fg(Color::Cyan))));
+        // **태그마다 따로 칠한다** — 거름망은 태그 하나씩 견주므로(`GrepIn::hits`), 한 줄로 이은 글에서
+        // 찾으면 `a #b` 처럼 두 태그에 걸친 글을 걸리지도 않은 줄에 칠한다. 모양은 `view::tag_line` 과 같다.
+        let tint = Style::new().fg(Color::Cyan);
+        let mut spans = Vec::new();
+        for (n, t) in i.tags.iter().enumerate() {
+            spans.push(Span::styled(if n == 0 { "#" } else { " #" }, tint));
+            spans.extend(mark(vec![Span::styled(t.clone(), tint)], in_tag));
+        }
+        out.push(Line::from(spans));
     }
     if let Some(a) = &i.assignee {
         fields.push((
@@ -1749,7 +1762,12 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     if let Some(body) = &i.body {
         out.push(Line::from(""));
         out.push(Line::from(Span::styled("─".repeat(w.min(40)), dim())));
-        out.extend(body_lines(body, w, app.raw));
+        // 칠은 **그린 줄마다** 찾는다 — 접힌 줄에 걸친 글과 마크다운이 걷은 기호(`**`)에 걸친 글은 안
+        // 칠해진다. 원문(`SPC t r`)에서는 기호째 칠한다.
+        out.extend(body_lines(body, w, app.raw).into_iter().map(|l| -> Line<'a> {
+            let Line { spans, style, alignment } = l;
+            Line { spans: mark(spans, in_body), style, alignment }
+        }));
     }
     // **커밋은 CLI 상세와 같은 자리, 본문 뒤다**(moai-a4i0). 무엇을 그릴지는 `view::commit_lines`
     // 가 정한다. 표는 다시 읽기 스레드가 지어 온 것이라 여기서 git 을 부르지 않는다.
@@ -5447,6 +5465,32 @@ pub(super) mod tests {
         let prompt = render(&mut a, 100, 20).join("\n");
         assert!(prompt.contains(" 검색·태그 "), "{prompt}");
         assert!(found_text(&mut a).trim().is_empty(), "보지 않는 자리를 칠했다");
+    }
+
+    /// **상세 칸은 태그·본문에서 찾은 글자도 칠한다**(moai-lw7i) — 목록 줄은 id·제목만 칠해, 태그·본문
+    /// 범위로 찾으면 걸린 줄에 칠한 글자가 없어 왜 걸렸는지 안 보인다. 그 범위를 안 보는 검색은 안 칠한다.
+    #[test]
+    fn the_detail_paints_what_it_found_in_tags_and_body() {
+        let painted = |q: &str, tabs: usize| {
+            let mut is = issues();
+            is[0].tags = vec!["quux".into(), "b".into()];
+            is[0].body = Some("본문에 들어간 낱말 zebra 와 quux 가 있다".into());
+            let mut a = every(is);
+            a.key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+            for c in q.chars() {
+                a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+            }
+            for _ in 0..tabs {
+                a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            }
+            found_text(&mut a)
+        };
+        assert!(painted("zebra", 0).contains("zebra"), "전체 범위에서 본문의 찾은 글자를 안 칠했다");
+        assert!(painted("zebra", 4).contains("zebra"), "본문 범위에서 본문의 찾은 글자를 안 칠했다");
+        assert!(painted("quux", 3).contains("quux"), "태그 범위에서 태그의 찾은 글자를 안 칠했다");
+        // 태그와 본문 둘 다에 있는 글 — 범위가 보는 쪽만 칠한다.
+        assert_eq!(painted("quux", 0).matches("quux").count(), 2, "전체 범위는 태그와 본문을 다 칠한다");
+        assert_eq!(painted("quux", 4).matches("quux").count(), 1, "본문 범위인데 태그를 칠했다");
     }
 
     /// **칠은 거름망과 같은 자로 접는다**(moai-4tgv). 거름망은 글을 통째로 `to_lowercase` 해 견준다 —

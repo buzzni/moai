@@ -140,6 +140,15 @@ impl GrepIn {
         matches!(self, GrepIn::All | GrepIn::Title)
     }
 
+    /// 태그·본문을 이 범위가 보는가 — 상세 칸에서 찾은 글자를 칠할 자리를 가른다(moai-lw7i).
+    pub fn sees_tag(self) -> bool {
+        matches!(self, GrepIn::All | GrepIn::Tag)
+    }
+
+    pub fn sees_body(self) -> bool {
+        matches!(self, GrepIn::All | GrepIn::Body)
+    }
+
     /// `q` 는 이미 소문자다([`Filter::build`]).
     pub fn hits(self, i: &Issue, q: &str) -> bool {
         let has = |s: &str| s.to_lowercase().contains(q);
