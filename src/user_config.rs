@@ -479,6 +479,7 @@ impl Doc {
     /// - **낱말 배열(`hidden`·`fields`)은 뺀 낱말만 빼고 더한 낱말만 끝에 더한다** — 남이 더한 낱말은 남는다
     /// - **차례와 방향(`sort`·`sort_reversed`)은 한 벌이다** — 하나를 고르면 둘을 함께 적는다
     /// - **값만 바꾼다** — 키 위의 주석·값 뒤의 주석·여러 줄로 벌인 배열은 그대로다(`put_value`)
+    /// - **바꿀 키가 표 모양이면 하나도 안 적는다**(moai-j7r3) — 낱값으로 덮으면 무엇을 적어 둔 것인지 사라진다
     ///
     /// `None` 으로 바꾼 키는 지운다. 파일이 이미 그렇게 적혀 있으면(옆에서 같게 적었으면) 아무것도 안
     /// 한다 — 헛 쓰기가 없다. **`tui` 가 표가 아니면 적지 않는다** — 무엇인지 모르는 값을 덮으면 되돌릴
@@ -499,6 +500,35 @@ impl Doc {
                     item.type_name()
                 )));
             }
+        }
+        // **이 세션이 적을 키가 손으로 적은 표 모양이면 하나도 안 적고 거절한다**(moai-j7r3) — `set_hue`·
+        // `mark_read` 와 같은 자다. `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을 적어 둔 것인지
+        // 모르는 채 낱값으로 덮이면 사라진다(`put_value` 는 값이 아닌 자리를 그대로 갈아 끼운다). 낱값의
+        // 틀린 값(`sort = 3`·`hidden = "done"`)은 읽기가 까닭을 대는 값이라 고쳐 쓴다. 안 바꿀 키는 안 본다 —
+        // 엄함은 지금 쓰는 줄에 대한 것이다. `fields_known` 은 늘 더하기로 적으니 늘 본다.
+        let t = self.doc.get(TUI).and_then(Item::as_table_like).expect("방금 표로 섰다");
+        let sort = (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed);
+        let touched = [
+            (HIDDEN, true, base.hidden != new.hidden),
+            (HIDE_DEFERRED, false, base.hide_deferred != new.hide_deferred),
+            (SORT, false, sort),
+            (SORT_REVERSED, false, sort),
+            (FIELDS, true, base.fields != new.fields),
+            (FIELDS_KNOWN, true, new.fields_known.is_some()),
+            (DETAIL, false, base.detail != new.detail),
+        ];
+        let odd = touched.into_iter().filter(|(_, _, go)| *go).find_map(|(key, words, _)| {
+            let item = t.get(key)?;
+            let plain = match item {
+                Item::Value(v) => !v.is_inline_table() && (words || !v.is_array()),
+                _ => false,
+            };
+            (!plain).then(|| (key, item.type_name()))
+        });
+        if let Some((key, shape)) = odd {
+            return Err(Fail::new(format!(
+                "`{TUI}.{key}` 가 손으로 적은 모양이라({shape}) 보기를 적지 않는다 — 손으로 고친다"
+            )));
         }
         let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let mut changed = merge_words(t, HIDDEN, base.hidden.as_deref(), new.hidden.as_deref());
@@ -1312,6 +1342,37 @@ mod tests {
         assert_eq!(inline.look().0.sort.as_deref(), Some("created"));
         inline.merge_look(&Look::default(), &title).unwrap();
         assert!(inline.render().contains("sort = \"title\""), "{}", inline.render());
+    }
+
+    /// **바꿀 보기 키가 손으로 적은 표 모양이면 하나도 안 적는다**(moai-j7r3) — `set_hue`·`mark_read` 와
+    /// 같은 자다. 낱값의 틀린 값은 고쳐 쓰고, 이 세션이 안 바꾸는 키는 모양이 어떻든 막지 않는다.
+    #[test]
+    fn a_hand_written_table_look_key_is_refused_not_overwritten() {
+        let title = Look { sort: Some("title".into()), ..Look::default() };
+        let hide = Look { hidden: Some(vec!["done".into()]), ..Look::default() };
+        for (src, new, key) in [
+            ("[tui]\nsort.by = \"created\"\n", &title, "sort"),
+            ("[tui]\nsort = { by = \"created\" }\n", &title, "sort"),
+            ("[tui]\nsort = [\"created\"]\n", &title, "sort"),
+            ("[tui]\nsort_reversed.x = true\n", &title, "sort_reversed"),
+            ("[tui.sort]\nby = \"created\"\n", &title, "sort"),
+            ("[tui]\nhidden = { done = true }\n", &hide, "hidden"),
+            ("[tui]\nhidden.done = true\n", &hide, "hidden"),
+        ] {
+            let mut doc = Doc::parse(src).unwrap();
+            let e = doc.merge_look(&Look::default(), new).expect_err(src);
+            assert!(e.to_string().contains(&format!("`tui.{key}`")), "{src}: {e}");
+            assert!(!doc.changed(), "{src}");
+            assert_eq!(doc.render(), src);
+        }
+        // 낱값의 틀린 값은 읽기가 까닭을 대는 값이다 — 고쳐 쓴다.
+        let mut doc = Doc::parse("[tui]\nsort = 3\nhidden = \"done\"\n").unwrap();
+        doc.merge_look(&Look::default(), &Look { hidden: hide.hidden.clone(), ..title.clone() }).unwrap();
+        assert_eq!(doc.render(), "[tui]\nsort = \"title\"\nhidden = [\"done\"]\n");
+        // 안 바꾸는 키는 모양이 어떻든 막지 않는다.
+        let mut doc = Doc::parse("[tui]\nsort.by = \"created\"\n").unwrap();
+        doc.merge_look(&Look::default(), &hide).unwrap();
+        assert!(doc.render().contains("sort.by = \"created\""), "{}", doc.render());
     }
 
     /// **보기는 이 세션이 바꾼 만큼만 적힌다**(moai-2kyl 단계 리뷰). 같은 설정에서 뜬 두 탐색기가 저마다
