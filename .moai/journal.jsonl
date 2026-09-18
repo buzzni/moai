@@ -4964,3 +4964,4 @@
 {"ts":"2026-09-18T17:13:48Z","id":"moai-p8qj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T17:13:48Z","id":"moai-21zt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T17:13:48Z","id":"moai-mr9w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T17:14:15Z","id":"moai-u5bk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없다 — 멤버 넷을 1a6a649 로 병합해 닫았다. 통계 표면(소요·모델별 합)을 만들 때는 목록 show --json 의 started_at·done_at·work 를 읽는다. started_at 이 없으면 모르는 것이다. 머지 뒤 버그 셈은 idea moai-7cpd"}
