@@ -547,7 +547,15 @@ fn plant(path: &Path, text: &str) -> Result<(), String> {
     if path.exists() {
         std::fs::OpenOptions::new().write(true).open(path).map_err(|e| e.to_string())?;
     }
-    crate::store::write_atomic_in(path, text.as_bytes(), &tmp_dir(path)).map_err(|e| e.message)
+    let first = tmp_dir(path);
+    match crate::store::write_atomic_in(path, text.as_bytes(), &first) {
+        // `.moai/` 에서 못 갈아 끼웠으면 옆자리로 한 번 더 — 까닭은 [`tmp_dir`] 에 적었다. 실패한
+        // 쪽은 임시 파일을 치우고 대상을 안 건드리므로 다시 써도 잃을 것이 없다.
+        Err(_) if path.parent() != Some(first.as_path()) => {
+            crate::store::write_atomic(path, text.as_bytes()).map_err(|e| e.message)
+        }
+        done => done.map_err(|e| e.message),
+    }
 }
 
 /// 뿌리 파일을 갈아 끼울 임시 파일의 자리 — **`.moai/`** 다(moai-3akx, 2026-09-18 사용자 결정).
@@ -556,26 +564,15 @@ fn plant(path: &Path, text: &str) -> Result<(), String> {
 /// `.gitignore` 블록은 `.moai/*.tmp.*` 만 덮는다. 규칙을 더하는 길은 버렸다 — 이미 심긴
 /// 저장소마다 "규칙이 빠졌다" 알림이 새로 선다. `.moai/` 는 `init` 이 이 쓰기보다 먼저 세운다.
 ///
-/// **다른 파일시스템이면 옆자리로 물러선다** — `rename` 이 `EXDEV` 로 실패해 블록을 못 쓰는 것보다
-/// 찌꺼기가 남을 수 있는 쪽이 낫다. 재지 못하면(`.moai` 가 디렉터리가 아니다) 역시 옆자리다.
+/// **거기서 못 쓰면 [`plant`] 가 옆자리로 물러선다 — 미리 재지 않고 써 보고 물러선다.** 다른
+/// 파일시스템이면 `rename` 이 `EXDEV` 로, 읽기 전용 `.moai/` 면 임시 파일 만들기가 막힌다. 장치
+/// 번호로 미리 재던 때는 뒤의 것을 못 봐 쓸 수 있는 `AGENTS.md` 를 "못 썼다" 고 하며 그 파일을
+/// 고치라고 했고, unix 밖에서는 재지도 못했다. 블록을 못 쓰는 것보다 찌꺼기가 남을 수 있는 쪽이
+/// 낫다. `.moai` 가 디렉터리가 아니면 처음부터 옆자리다.
 fn tmp_dir(path: &Path) -> std::path::PathBuf {
     let beside = path.parent().map(Path::to_path_buf).unwrap_or_default();
     let moai = beside.join(".moai");
-    if same_device(&moai, &beside) { moai } else { beside }
-}
-
-#[cfg(unix)]
-fn same_device(a: &Path, b: &Path) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    match (std::fs::metadata(a), std::fs::metadata(b)) {
-        (Ok(x), Ok(y)) => x.is_dir() && x.dev() == y.dev(),
-        _ => false,
-    }
-}
-
-#[cfg(not(unix))]
-fn same_device(a: &Path, _: &Path) -> bool {
-    a.is_dir()
+    if moai.is_dir() { moai } else { beside }
 }
 
 /// 이미 있는 줄 `have` 가 넣으려는 줄 `want` 를 **이미 막고 있는가**(moai-mxtb).
@@ -1107,15 +1104,37 @@ mod tests {
     /// 써 보고, 쓴 뒤 `.moai/` 에도 뿌리에도 찌꺼기가 없는지 본다.
     #[test]
     fn root_files_are_swapped_through_a_temp_file_in_dot_moai() {
-        let s = crate::scratch::Scratch::new("init-tmp");
+        // 울타리(`.git`)는 뿌리의 셈을 흐리고 이 시험은 저장소가 필요 없다 — 맨 자리에 선다.
+        let s = crate::scratch::Scratch::in_place(&crate::scratch::base(), "init-tmp");
         let agents = s.join("AGENTS.md");
         assert_eq!(tmp_dir(&agents), s.path(), ".moai 가 없으면 옆자리다");
         std::fs::create_dir(s.join(".moai")).unwrap();
         assert_eq!(tmp_dir(&agents), s.join(".moai"));
-        plant(&agents, "글\n").unwrap();
+        // **정말 `.moai/` 를 거치는지** 옆자리를 막아 두고 본다 — 옆에 쓰는 `plant` 도 성공하면 둘 다
+        // 찌꺼기를 안 남겨 아래의 단언만으로는 못 가른다. 막은 자리는 디렉터리라 파일을 못 만든다.
+        let beside = s.join(format!("AGENTS.md.tmp.{}", std::process::id()));
+        std::fs::create_dir(&beside).unwrap();
+        let wrote = plant(&agents, "글\n");
+        std::fs::remove_dir(&beside).unwrap();
+        wrote.expect("`.moai/` 를 안 거치고 옆자리에 썼다");
         assert_eq!(std::fs::read_to_string(&agents).unwrap(), "글\n");
         let left = |d: &Path| std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name()).collect::<Vec<_>>();
         assert_eq!(left(&s.join(".moai")), Vec::<std::ffi::OsString>::new());
         assert_eq!(left(s.path()).len(), 2, "뿌리에는 .moai 와 AGENTS.md 뿐이다: {:?}", left(s.path()));
+
+        // **`.moai/` 에 못 쓰면 옆자리로 물러서 쓴다.** 읽기 전용 `.moai/` 에서 쓸 수 있는 AGENTS.md 를
+        // "못 썼다" 고 하며 그 파일을 고치라고 하던 자리다. 권한을 되돌린 뒤에 재야 `Drop` 이 치운다.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let moai = s.join(".moai");
+            std::fs::set_permissions(&moai, std::fs::Permissions::from_mode(0o555)).unwrap();
+            let wrote = plant(&agents, "둘째\n");
+            std::fs::set_permissions(&moai, std::fs::Permissions::from_mode(0o755)).unwrap();
+            wrote.unwrap();
+            assert_eq!(std::fs::read_to_string(&agents).unwrap(), "둘째\n");
+            assert_eq!(left(&moai), Vec::<std::ffi::OsString>::new());
+            assert_eq!(left(s.path()).len(), 2, "옆자리로 물러선 임시 파일이 남았다: {:?}", left(s.path()));
+        }
     }
 }

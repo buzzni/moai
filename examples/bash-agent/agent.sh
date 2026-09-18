@@ -67,7 +67,12 @@ while :; do
   # `note` 는 공백뿐인 메모와 UTF-8 이 아닌 입력을 거절한다 — 그대로 넘기면 끝낸 일이
   # in_progress 로 남은 채 멈춘다. jq 가 깨진 바이트를 U+FFFD 로 바꾸고, 빈 것은 bash 의
   # `[:space:]`(로캘을 탄다)가 아니라 `note` 와 같은 유니코드 공백으로 가른다.
-  out=$(jq -Rrs 'if test("\\S") then . else "(출력 없음)" end' "$log")
+  # **긴 출력은 끝만 적고 그렇다고 밝힌다.** `note` 는 64KB 를 넘는 글을 거절한다(moai-m9a8) —
+  # 그대로 넘기면 `set -e` 가 닫기 전에 루프를 죽인다. 로그는 끝에 지워지니 끝(대개 결론)을 남긴다.
+  # 16000 자는 한 자가 4바이트여도 64KB 안이다.
+  out=$(jq -Rrs 'if test("\\S") | not then "(출력 없음)"
+    elif utf8bytelength > 60000 then "(출력 \(utf8bytelength) 바이트 중 끝 16000 자만 적는다)\n" + .[-16000:]
+    else . end' "$log")
   if [ "$code" -ne 0 ]; then
     # 노트를 못 남겨도 1 로 끝난다 — 실패는 언제나 1 이어야 뒤에서 종료 코드로 가를 수 있다.
     printf '실패(%s): %s\n' "$code" "$out" | "$moai" note "$id" -b - || true

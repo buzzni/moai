@@ -22,6 +22,9 @@ impl Scratch {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
+        if scratch::fenced_base() {
+            scratch::fence(&dir);
+        }
         Scratch(dir)
     }
     fn path(&self) -> &Path {
@@ -108,8 +111,9 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
 #[path = "../src/git_leaks.rs"]
 mod git_leaks;
 
-// 임시 자리의 뿌리 — 단위 시험의 `Scratch` 와 **한 파일**을 읽는다(moai-boc6). 임시 자리가 체크아웃 안이면
-// 울타리 친 뿌리를 쓰는데, 두 벌로 두면 한쪽만 그 울타리를 친다. 쓰는 것은 `base` 뿐이다.
+// 임시 자리의 뿌리와 울타리 — 단위 시험의 `Scratch` 와 **한 파일**을 읽는다(moai-boc6). 임시 자리가 체크아웃
+// 안이면 자리마다 울타리를 치는데, 두 벌로 두면 한쪽만 그 울타리를 친다. 쓰는 것은 `base`·`fenced_base`·`fence` 다.
+// 그 파일의 `#[cfg(test)]` 시험도 여기서 함께 돈다 — 통합 시험도 `cfg(test)` 로 컴파일된다.
 #[path = "../src/scratch.rs"]
 #[allow(dead_code)]
 mod scratch;
@@ -2088,8 +2092,9 @@ fn note_only_touches_the_journal() {
 
 /// **한 번에 적는 글은 64KB 까지다**(moai-m9a8). 리뷰 원문 자리에 대화록 JSONL 이 두 번
 /// 들어가 노트 한 줄이 36만 자가 됐다 — 저널은 덧붙이기만 해 영영 남는다. 넘으면 잘라 적지
-/// 않고 거절하며, 거절문이 무엇을 넣어야 했는지 댄다. 노트·`-m`·본문이 한 자리를 지난다.
-/// **재는 것은 지금 쓰는 글뿐이다** — 이미 큰 본문을 든 줄도 옮길 수 있다.
+/// 않고 거절하며, 거절문이 무엇을 넣어야 했는지 댄다. 노트·`-m`·제목·본문이 한 자리를 지난다 —
+/// 제목은 `create` 가 저널에 옮겨 적으므로 한 줄짜리 대화록이 그 문으로 들어온다.
+/// **재는 것은 지금 쓰는 글뿐이다** — 이미 큰 본문·제목을 든 줄도 옮기고 지울 수 있다.
 #[test]
 fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
     let s = init("big-note");
@@ -2108,11 +2113,16 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
         (vec!["defer", id.as_str(), "-m", big.as_str()], "defer -m"),
         (vec!["edit", id.as_str(), "-b", big.as_str()], "edit -b"),
         (vec!["add", "새것", "-b", big.as_str()], "add -b"),
+        (vec!["add", big.as_str()], "add 제목"),
+        (vec!["edit", id.as_str(), "--title", big.as_str()], "edit --title"),
     ] {
         let out = moai(s.path(), &args);
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success() && err.contains("64KB"), "{what} 가 상한을 넘는 글을 받았다\n{err}");
     }
+    // 계획은 stdin 으로 오므로 argv 의 길이 상한도 없다 — 이 상한이 유일한 문이다.
+    let plan = from_stdin(s.path(), &["add", "--from", "-"], &format!("# 에픽\n- {big}\n"));
+    assert!(!plan.status.success() && String::from_utf8_lossy(&plan.stderr).contains("64KB"), "add --from 이 큰 제목을 받았다");
     assert_eq!(issues(s.path()), before, "거절한 쓰기가 스냅샷을 바꿨다");
     assert_eq!(journal(s.path()), notes, "거절한 쓰기가 저널에 남았다");
 
@@ -2126,6 +2136,14 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
     std::fs::write(&path, text.replace(r#""body":"작다""#, &format!(r#""body":"{big}""#))).unwrap();
     ok(s.path(), &["mv", &id, "in_progress"]);
     ok(s.path(), &["edit", &id, "--title", "새 제목"]);
+
+    // 손으로 넣은 큰 제목도 — 옮기고 **지울 수** 있어야 한다. 저널의 `title` 을 따로 재지 않는 까닭이다:
+    // `rm` 은 그 줄의 제목을 저널에 옮겨 적는데, 거기서 재면 이 줄은 도구 안에서 영영 못 치운다.
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains(r#""title":"새 제목""#), "{text}");
+    std::fs::write(&path, text.replace(r#""title":"새 제목""#, &format!(r#""title":"{big}""#))).unwrap();
+    ok(s.path(), &["mv", &id, "review"]);
+    ok(s.path(), &["rm", &id]);
 }
 
 /// CLI 를 관리할 트래커라 `--json 이 tags 를 빠뜨린다` 같은 제목이 흔하다.
@@ -4582,7 +4600,11 @@ fn json_tells_no_commits_apart_from_no_git() {
     let outside = ok(s.path(), &["show", &id, "--json"]);
     assert!(outside.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{outside}");
     // **까닭은 가를 수 있는 값이다**(moai-6p1n) — 산문을 부분 문자열로 맞추지 않는다.
-    assert!(outside.contains(r#""commits_error":{"kind":"not_a_repo","said":"#), "git 을 못 읽은 까닭이 없다\n{outside}");
+    // 울타리 밑(임시 자리가 체크아웃 안인 기계)에는 "저장소가 아닌 자리" 가 없다 — `git.rs` 의
+    // `a_repo_without_commits_is_empty_not_broken` 와 같은 자리다(moai-boc6).
+    if !scratch::fenced_base() {
+        assert!(outside.contains(r#""commits_error":{"kind":"not_a_repo","said":"#), "git 을 못 읽은 까닭이 없다\n{outside}");
+    }
     let root = s.path().to_str().unwrap();
     assert!(!outside.contains(root), "기계의 절대 경로가 --json 으로 나갔다\n{outside}");
 
@@ -8518,9 +8540,12 @@ fn worktree_trouble_is_told_but_never_fails_the_command() {
     let bare = init("wtnogit");
     let out = moai(bare.path(), &["status", "--worktree"]);
     assert!(out.status.success(), "git 저장소가 아니라고 실패했다");
-    assert!(String::from_utf8_lossy(&out.stderr).contains("워크트리를 못 찾았다"));
-    let board = String::from_utf8_lossy(&out.stdout);
-    assert!(!board.contains("드러난 문제 없다") && board.contains("옆 워크트리 문제 1건"), "{board}");
+    // 울타리 밑에는 "저장소가 아닌 자리" 가 없다(moai-boc6) — 못 찾았다는 말은 그 밖에서만 잰다.
+    if !scratch::fenced_base() {
+        assert!(String::from_utf8_lossy(&out.stderr).contains("워크트리를 못 찾았다"));
+        let board = String::from_utf8_lossy(&out.stdout);
+        assert!(!board.contains("드러난 문제 없다") && board.contains("옆 워크트리 문제 1건"), "{board}");
+    }
     // 겹쳐 보라고 안 시켰으면 옆을 찾지도 않으니 문제도 없다.
     assert!(ok(bare.path(), &["status"]).contains("드러난 문제 없다"));
 }
@@ -9136,6 +9161,8 @@ fn the_bash_agent_example_closes_a_job_whose_output_is_blank_or_not_utf8() {
         ("agent-blank", "printf '  \\n'", "(출력 없음)"),
         ("agent-nbsp", "printf '\\302\\240\\302\\240\\n'", "(출력 없음)"),
         ("agent-latin1", "printf 'caf\\351 끝\\n'", "caf\u{fffd} 끝"),
+        // `note` 의 64KB 상한(moai-m9a8)을 넘는 출력 — 끝만 적고 그렇다고 밝힌 채 닫는다.
+        ("agent-long", "head -c 100000 /dev/zero | tr '\\0' 'x'; printf '\\n마지막 줄\\n'", "끝 16000 자만 적는다"),
     ] {
         let s = init(name);
         let id = add(s.path(), &["말없는 일", "-p", "1"]);
