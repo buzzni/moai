@@ -1395,11 +1395,19 @@ fn rooted_thoughts<'a>(by_id: &BTreeMap<&'a str, &'a Issue>) -> BTreeSet<&'a str
 /// 뿌리로 올라간 생각에서 멈춘다. 생각 제 줄의 소속은 그대로 남는다.
 /// **없는 부모는 넘지 않는다** — 지운 에픽의 자식은 `에픽 없음` 이고, 끊긴 id 는
 /// `orphan_child` 가 드러낸다. 가리키는 필드가 없으니 `(길 잃음)` 이 아니다.
+///
+/// **묶음 줄은 제 필드에서 멈춘다** (moai-k9yb). [`joins`] 가 안 받는 줄이 조상을
+/// 타고 오르면, 에픽인 부모는 거르지만 부모 이슈가 든 `epic` 은 그대로 받아
+/// `epic add --parent <에픽 E 안의 이슈>` 가 `show -e E` 에만 서고 트리에서는
+/// 뿌리에 섰다. 묶음 줄이 무엇을 받는지는 조상의 종류가 아니라 제 종류가 정한다.
 fn epic_through<'a>(
     i: &'a Issue,
     by_id: &BTreeMap<&'a str, &'a Issue>,
     rooted: &BTreeSet<&str>,
 ) -> Option<&'a str> {
+    if !joins(i) {
+        return i.epic.as_deref();
+    }
     let mut cur = i;
     loop {
         if let Some(e) = &cur.epic {
@@ -1408,7 +1416,7 @@ fn epic_through<'a>(
         cur = crate::id::parent_of(&cur.id)
             .and_then(|p| by_id.get(p).copied())
             .filter(|p| !rooted.contains(p.id.as_str()))?;
-        if cur.kind == Kind::Epic && joins(i) {
+        if cur.kind == Kind::Epic {
             return Some(cur.id.as_str());
         }
     }
@@ -4021,6 +4029,8 @@ mod tests {
             own_epic,
             make("argos-0001.aa3", Kind::Idea, "todo"),
             make("argos-0001.ee1", Kind::Epic, "todo"),
+            make("argos-0001.aa1.ee2", Kind::Epic, "todo"),
+            make("argos-0001.aa2.ee3", Kind::Epic, "todo"),
             make("argos-m001.cc1", Kind::Issue, "todo"),
             own_stone,
             make("argos-m001.dd1", Kind::Milestone, "todo"),
@@ -4032,7 +4042,9 @@ mod tests {
             ("argos-0001.aa1.bb1", Some("argos-0001"), Some("argos-m001")), // 사슬을 탄다
             ("argos-0001.aa2", Some("argos-0002"), None),                   // 제 에픽이 이긴다
             ("argos-0001.aa3", Some("argos-0001"), Some("argos-m001")),     // 생각도 받는다
-            ("argos-0001.ee1", Some("argos-0002"), None), // 에픽 줄은 부모 에픽을 안 받는다
+            ("argos-0001.ee1", None, None), // 에픽 줄은 부모 에픽도, 그 에픽이 든 `epic` 도 안 받는다
+            ("argos-0001.aa1.ee2", None, None), // 부모 이슈의 에픽도 안 받는다(moai-k9yb)
+            ("argos-0001.aa2.ee3", None, None), // 부모 이슈가 적은 `epic` 도
             ("argos-m001.cc1", None, Some("argos-m001")),
             ("argos-m001.cc2", None, Some("argos-m002")), // 제 마일스톤이 이긴다
             ("argos-m001.dd1", None, None),               // 마일스톤 줄은 안 받는다
