@@ -409,6 +409,149 @@ impl JournalEntry {
     }
 }
 
+// ── 일한 것 ────────────────────────────────────────────────────────────
+
+/// 이 일을 한 AI 한 줄. 노트의 `model:` 줄에서 읽는다(moai-8f2g).
+///
+///     model: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)
+///
+/// **저장하지 않는다.** 스냅샷에도 저널에도 이 모양의 필드가 없다 — 적는 것은 여전히
+/// `moai note` 한 줄이고, 이것은 그 글을 읽어 낸 값이다(2026-09-18 사용자 결정, 길 1).
+/// 꼴이 틀린 것으로 드러나도 이 파서와 규약 글만 고치면 되고 쌓인 줄은 그대로 남는다.
+///
+/// 빈 자리는 `None` 이다. **0 과 모름은 다르다** — 토큰을 모르면 `tokens=` 를 빼고,
+/// 여기서 `None` 이 된다. 0 을 적으면 0 이다.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Work {
+    pub provider: Option<String>,
+    pub model: String,
+    pub tokens: Option<u64>,
+    pub grade: Option<String>,
+    pub why: Option<String>,
+    /// 그 줄을 적은 저널 줄의 것. 일을 끝낸 때가 아니라 **적은 때**다.
+    pub at: String,
+    pub by: String,
+    pub by_email: Option<String>,
+}
+
+/// 저널에서 일한 것을 모은다 — 노트와 칸 옮김의 `-m` 둘 다, 한 글 안의 줄마다.
+///
+/// **읽기는 관대하다.** 꼴에 안 맞는 줄은 값이 안 될 뿐 노트로 그대로 남는다 — 이력에서
+/// 빠지는 것은 없다. 옛 줄 `model: opus-5 (medium — …)` 은 회사 없이 읽힌다. 모델 이름에서
+/// 회사를 짐작해 채우지 않는다 — 짐작한 값은 통계에서 적힌 값과 갈리지 않는다.
+///
+/// **울타리(```` ``` ````·`~~~`) 안의 줄은 예다.** 리뷰 원문과 결정 노트가 꼴을 그대로 옮겨
+/// 적으니, 그것을 세면 아무도 안 한 일이 토큰째 통계에 선다.
+pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
+    let mut out = Vec::new();
+    for e in journal {
+        let text = match e.kind.as_str() {
+            "note" => e.text.as_deref(),
+            "status" => e.note.as_deref(),
+            _ => None,
+        };
+        let mut fenced = false;
+        for line in text.unwrap_or_default().lines() {
+            let bare = line.trim_start();
+            if bare.starts_with("```") || bare.starts_with("~~~") {
+                fenced = !fenced;
+                continue;
+            }
+            if fenced {
+                continue;
+            }
+            if let Some(w) = parse_work(line) {
+                out.push(Work { at: e.ts.clone(), by: e.by.clone(), by_email: e.by_email.clone(), ..w });
+            }
+        }
+    }
+    out
+}
+
+/// `model: [<회사>/]<모델> [tokens=<수>] [(<등급> — <까닭>)] …` 한 줄. `at`·`by` 는 비워 낸다.
+///
+/// 괄호 뒤는 무엇이 와도 받는다 — 옛 줄이 거기에 사연을 붙였다. 괄호 **앞**에 모르는 것이
+/// 끼면 안 받는다: `tokens 182000` 같은 오타를 모델만 읽고 넘기면 토큰이 조용히 "모름" 이 된다.
+/// 같은 까닭으로 **제자리를 벗어난 `tokens=<수>`**(괄호 안·괄호 뒤)도 안 받는다.
+///
+/// **줄 머리에서 시작한 줄만 받는다.** 들여 쓴 줄은 마크다운의 코드 덩이 — 꼴을 옮겨 적은 예다.
+fn parse_work(line: &str) -> Option<Work> {
+    let rest = line.strip_prefix("model:")?;
+    // `model::actor` 로 시작하는 글줄을 거른다.
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let word_end = |s: &str| s.find(|c: char| c.is_whitespace() || c == '(').unwrap_or(s.len());
+    let rest = rest.trim_start();
+    let head = &rest[..word_end(rest)];
+    let (provider, model) = match head.split_once('/') {
+        None => (None, head),
+        Some((p, m)) if !p.is_empty() && !m.is_empty() && !m.contains('/') => (Some(p.to_string()), m),
+        Some(_) => return None,
+    };
+    // 글줄 끝의 문장 부호는 이름이 아니다 — `opus-5.` 과 `opus-5` 가 통계에서 갈린다.
+    let model = model.trim_end_matches(['.', ',', ';', ':']);
+    // `model: tokens=3` 은 모델을 빠뜨린 줄이지 모델 이름이 `tokens=3` 인 줄이 아니다.
+    if model.is_empty() || head.contains('=') {
+        return None;
+    }
+    let mut rest = rest[head.len()..].trim_start();
+    let mut tokens = None;
+    if let Some(t) = rest.strip_prefix("tokens=") {
+        let end = word_end(t);
+        // 숫자만 받는다 — `u64::from_str` 은 `+5` 도 받는다.
+        let n = &t[..end];
+        if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        tokens = Some(n.parse::<u64>().ok()?);
+        rest = t[end..].trim_start();
+    } else if rest
+        .split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | ','))
+        .any(|w| w.strip_prefix("tokens=").is_some_and(|n| n.starts_with(|c: char| c.is_ascii_digit())))
+    {
+        // `(high) tokens=5` 처럼 제자리를 벗어난 토큰을 모델만 읽고 넘기면 토큰이 조용히 "모름" 이 된다.
+        return None;
+    }
+    let (mut grade, mut why) = (None, None);
+    if let Some(inner) = rest.strip_prefix('(') {
+        let mut depth = 1;
+        let close = inner.char_indices().find_map(|(i, c)| {
+            match c {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                _ => {}
+            }
+            (depth == 0).then_some(i)
+        })?;
+        let inner = inner[..close].trim();
+        // 긴 줄표가 꼴이고, 반각 줄표(`–`, 자동 고침이 바꿔 놓는다)와 손으로 친 붙임표도 받는다.
+        let (g, w) = match inner.split_once(['—', '–']).or_else(|| inner.split_once(" - ")) {
+            Some((g, w)) => (g.trim(), w.trim()),
+            None => (inner, ""),
+        };
+        // 등급은 한 낱말이다(`low`…`max`). 낱말이 여럿이면 등급을 적지 않은 사연으로 읽는다.
+        if g.contains(char::is_whitespace) {
+            why = Some(inner.to_string());
+        } else {
+            grade = (!g.is_empty()).then(|| g.to_string());
+            why = (!w.is_empty()).then(|| w.to_string());
+        }
+    } else if !rest.is_empty() {
+        return None;
+    }
+    Some(Work {
+        provider,
+        model: model.to_string(),
+        tokens,
+        grade,
+        why,
+        at: String::new(),
+        by: String::new(),
+        by_email: None,
+    })
+}
+
 // ── 누가 ──────────────────────────────────────────────────────────────
 
 /// 일을 한 사람. 이름과 메일이 **함께** 다닌다 — 이름만으로는 같은 이름이
@@ -1050,5 +1193,94 @@ mod tests {
             serde_json::to_string(&e).unwrap(),
             r#"{"ts":"2026-09-11T05:02:44Z","id":"argos-4aex","kind":"status","by":"claude","by_email":"claude@example.com","from":"todo","to":"in_progress"}"#
         );
+    }
+
+    fn said(line: &str) -> Option<(Option<String>, String, Option<u64>, Option<String>, Option<String>)> {
+        parse_work(line).map(|w| (w.provider, w.model, w.tokens, w.grade, w.why))
+    }
+
+    fn s(v: &str) -> Option<String> {
+        Some(v.to_string())
+    }
+
+    /// 꼴 전부, 그리고 빠져도 되는 셋(회사·토큰·괄호).
+    #[test]
+    fn a_model_line_reads_with_or_without_its_optional_parts() {
+        assert_eq!(
+            said("model: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)"),
+            Some((s("anthropic"), "opus-5".into(), Some(182000), s("high"), s("쓰기 경로")))
+        );
+        assert_eq!(said("model: anthropic/opus-5 (high — 쓰기 경로)").unwrap().2, None, "모르는 토큰을 채웠다");
+        assert_eq!(said("model: google/gemini-3.8"), Some((s("google"), "gemini-3.8".into(), None, None, None)));
+        assert_eq!(said("model: openai/gpt-6 tokens=0").unwrap().2, Some(0), "0 은 모름이 아니다");
+        assert_eq!(said("model: opus-5(high)"), Some((None, "opus-5".into(), None, s("high"), None)));
+        assert_eq!(said("model: opus-5 (high - 손으로 친 붙임표)").unwrap().4, s("손으로 친 붙임표"));
+        assert_eq!(said("model: opus-5 (high – 자동 고침의 반각 줄표)").unwrap().3, s("high"), "반각 줄표에 등급을 잃었다");
+        assert_eq!(said("model: anthropic/opus-5.").unwrap().1, "opus-5", "문장 부호를 이름에 붙였다");
+    }
+
+    /// 이미 쌓인 옛 줄은 회사 없이 값이 된다 — 모델 이름에서 회사를 짐작하지 않는다.
+    #[test]
+    fn old_model_lines_still_count() {
+        assert_eq!(
+            said("model: opus (medium — 표시 리팩터 두 파일, 쓰기 경로도 동시성도 안 건드린다). 닫기는 05:03 에 다른 세션이 했다"),
+            Some((None, "opus".into(), None, s("medium"), s("표시 리팩터 두 파일, 쓰기 경로도 동시성도 안 건드린다")))
+        );
+        assert_eq!(said("model: opus-5 (medium — 감독 스킬 글 (표 포함))").unwrap().4, s("감독 스킬 글 (표 포함)"));
+    }
+
+    /// 꼴이 아닌 줄은 값이 안 된다 — 노트로만 남는다. 괄호 앞의 오타를 받으면 토큰이 조용히 "모름" 이 된다.
+    #[test]
+    fn what_is_not_the_shape_is_only_a_note() {
+        for line in [
+            "model::actor 가 뿌리를 받는다",
+            "- model: opus-5",
+            "Model: opus-5",
+            "model:",
+            "model: tokens=3",
+            "model: /opus-5",
+            "model: a/b/c",
+            "model: opus-5 tokens=?",
+            "model: opus-5 tokens=182k",
+            "model: opus-5 tokens 182000",
+            "model: opus-5 (high — 닫히지 않은 괄호",
+            "앞에 글이 있는 model: opus-5",
+            "model: opus-5 tokens=+5",
+            "model: opus-5 (high — 쓰기 경로) tokens=182000",
+            "model: opus-5 (high — 쓰기 경로, tokens=182000)",
+            "    model: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)",
+            " model: opus-5",
+        ] {
+            assert_eq!(said(line), None, "{line:?} 를 값으로 읽었다");
+        }
+    }
+
+    /// 노트와 칸 옮김의 `-m` 둘 다, 한 글 안의 줄마다 읽고 적은 사람과 때를 붙인다.
+    #[test]
+    fn work_is_gathered_from_notes_and_moves() {
+        let who = someone("claude");
+        let journal = vec![
+            // 제목은 읽지 않는다 — 꼴에 맞는 제목이라야 이 줄이 그것을 잰다.
+            JournalEntry::create("x-1", "model: sonnet-5", "2026-09-18T01:00:00Z", &who),
+            JournalEntry::note("x-1", "고쳤다\nmodel: anthropic/opus-5 tokens=10 (high — a)\nmodel: anthropic/haiku-4.5", "2026-09-18T02:00:00Z", &who),
+            // 울타리 안의 줄은 꼴을 옮겨 적은 예다.
+            JournalEntry::note("x-1", "꼴은 이렇다\n```\nmodel: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)\n```", "2026-09-18T02:30:00Z", &who),
+            JournalEntry::status(
+                "x-1",
+                &Status::new("review"),
+                &Status::new("done"),
+                Some("model: openai/gpt-6 tokens=5".into()),
+                "2026-09-18T03:00:00Z",
+                &who,
+            ),
+            JournalEntry::note("x-1", "그냥 노트", "2026-09-18T04:00:00Z", &who),
+        ];
+        let work = work_of(&journal);
+        let models: Vec<&str> = work.iter().map(|w| w.model.as_str()).collect();
+        assert_eq!(models, ["opus-5", "haiku-4.5", "gpt-6"]);
+        assert_eq!(work[0].at, "2026-09-18T02:00:00Z");
+        assert_eq!(work[2].at, "2026-09-18T03:00:00Z");
+        assert_eq!(work[0].by, "claude");
+        assert_eq!(work[0].by_email.as_deref(), Some("claude@example.com"));
     }
 }

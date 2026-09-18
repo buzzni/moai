@@ -407,6 +407,11 @@ fn one(
         if let Some(why) = &commits_error {
             extra.push(("commits_error", serde_json::to_string(why).map_err(|e| Fail::new(e.to_string()))?));
         }
+        // 이 일을 한 AI — 노트의 `model:` 줄을 읽은 값(moai-8f2g). 저장하지 않는다.
+        //
+        // **키는 늘 선다**(2026-09-18 사용자 결정). 한 이슈에 여러 세션·모델이 줄을 남기니 배열이고,
+        // 없으면 키를 안 다는 모양은 되쓰기에서 옛 키가 `rest` 에 남아 거짓을 싣는다(moai-2l8n).
+        extra.push(("work", serde_json::to_string(&model::work_of(&journal)).map_err(|e| Fail::new(e.to_string()))?));
         return super::json_with(
             &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),
             &extra,
