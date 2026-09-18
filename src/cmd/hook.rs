@@ -156,24 +156,24 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 Call::Review => crate::hook::guard_review(issues, &repo.config, away),
                 Call::Other => Decision::Pass,
             });
-            // 다른 트래커를 가리키는 토막은 **그 트래커가 본다**(moai-23ky).
+            // 다른 트래커를 가리키는 토막은 **그 트래커가 본다**(moai-23ky). 판정을 잇는 차례는
+            // `Decision::then` 이 정한다 — 막으면 남의 트래커는 묻지 않고, 남이 막으면 제 비춤을 버린다.
             let mut decision = decision;
             if let Call::Shell(cmd) = call {
                 for (n, other) in there.iter().enumerate() {
-                    if decision != Decision::Pass {
-                        break;
-                    }
-                    let Ok(theirs) = other.read() else { continue };
-                    let away = || {
-                        if report::wip(&theirs.issues, &other.config).is_empty() {
-                            BTreeSet::new()
-                        } else {
-                            crate::worktree::away(&other.root)
-                        }
-                    };
-                    let only = |k: usize| routes.get(k) == Some(&Route::There(n));
-                    decision = settle(other, &theirs.issues, &away, &|issues, away| {
-                        crate::hook::guard_moai(issues, &other.config, away, cmd, &only)
+                    decision = decision.then(|| {
+                        let Ok(load) = other.read() else { return Decision::Pass };
+                        let away = || {
+                            if report::wip(&load.issues, &other.config).is_empty() {
+                                BTreeSet::new()
+                            } else {
+                                crate::worktree::away(&other.root)
+                            }
+                        };
+                        let only = |k: usize| routes.get(k) == Some(&Route::There(n));
+                        settle(other, &load.issues, &away, &|issues, away| {
+                            crate::hook::guard_moai(issues, &other.config, away, cmd, &only)
+                        })
                     });
                 }
             }
@@ -194,7 +194,22 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             if !crate::hook::held(&load.issues, &repo.config, &away).is_empty() {
                 away.extend(unsure_of(&repo, &load.issues));
             }
-            crate::hook::closing(&load.issues, &repo.config, &away, warnings, baseline(input, &repo))
+            // **에픽이 닫히는지는 옆까지 겹친 줄로 잰다**(moai-8ema). 트래커는 main 에서 쓰므로 딸린
+            // 워크트리의 스냅샷은 갈라진 때에 멈춰 있다 — 그 사이 main 에서 끝낸 멤버를 아직 벌여 놓은
+            // 것으로 읽으면, 미루는 순간 에픽이 닫히는 마지막 멤버에 "지금 안 할 것이면" 을 그냥 댄다.
+            // 집은 것이 남을 때만 읽는다.
+            let latest = (!crate::hook::held(&load.issues, &repo.config, &away).is_empty())
+                .then(|| crate::worktree::fresh(&repo, load.issues.clone()))
+                .flatten()
+                .map(|(fresh, _)| fresh);
+            crate::hook::closing(
+                &load.issues,
+                latest.as_deref().unwrap_or(&load.issues),
+                &repo.config,
+                &away,
+                warnings,
+                baseline(input, &repo),
+            )
         }),
     };
 
@@ -219,6 +234,10 @@ fn decide(event: Event, input: &Input) -> Option<String> {
 /// 워크트리의 스냅샷은 main 에서 방금 세우고 집은 줄을 모른다 — 그것만 보고 막으면 시킨 대로
 /// 한 일이 막힌다. 겹쳐 봐도 막힐 때만 막고, 까닭은 제 스냅샷의 것을 낸다(고칠 명령이 이 자리의
 /// 트래커에 듣는다). **겹쳐 보기는 막을 때만 치른다** — 지나가는 호출은 전과 같은 값이다.
+///
+/// **다시 본 판정이 안 막으면 풀린 것이다** — 비추는 줄(`Context`)도 푼 답이라 그대로 낸다.
+/// `Pass` 만 풀린 것으로 치던 판은 `idea add` 하나를 곁들인 명령줄을 낡은 스냅샷의 거절로 도로
+/// 막았다(moai-dw63.e31) — 그 거절은 이미 집은 일을 집으라고 시켰다.
 fn settle(
     repo: &Repo,
     issues: &[model::Issue],
@@ -226,25 +245,29 @@ fn settle(
     judge: &dyn Fn(&[model::Issue], &BTreeSet<String>) -> Decision,
 ) -> Decision {
     let first = judge(issues, &away());
-    let Decision::Deny(_) = first else { return first };
-    if let Some((fresh, fresh_away)) = crate::worktree::fresh(repo, issues.to_vec())
-        && judge(&fresh, &fresh_away) == Decision::Pass
+    if first == Decision::Pass {
+        return first;
+    }
+    if first.blocks()
+        && let Some((fresh, fresh_away)) = crate::worktree::fresh(repo, issues.to_vec())
     {
-        return Decision::Pass;
+        let again = judge(&fresh, &fresh_away);
+        if !again.blocks() {
+            return again;
+        }
     }
     // **누구의 것인지 모르는 줄을 빼고 한 번 더 본다**(moai-ntl6, 사용자 결정 B). 좁은 초점으로도
-    // 막히면 그 까닭을 낸다 — 옆 워크트리가 쥐었을 일을 초점으로 대지 않는다.
+    // 막히면 그 까닭을 낸다 — 옆 워크트리가 쥐었을 일을 초점으로 대지 않는다. **비추는 줄도 같은
+    // 자로 좁힌다** — 막지도 붙들지도 않기로 한 줄의 에픽을 제 물음으로 비추면, 그 세션을 남의
+    // 에픽에 세우는 길로 보낸다. 좁힌 초점은 풀기만 한다: 비추기만 하던 명령을 좁혀서 막지는 않는다.
     let unsure = unsure_of(repo, issues);
     if unsure.is_empty() {
         return first;
     }
     let mut narrow = away();
     narrow.extend(unsure);
-    match judge(issues, &narrow) {
-        deny @ Decision::Deny(_) => deny,
-        Decision::Pass => Decision::Pass,
-        _ => first,
-    }
+    let again = judge(issues, &narrow);
+    if again.blocks() && !first.blocks() { first } else { again }
 }
 
 /// 옆 딸린 워크트리가 쥐었을 수 있어 **누구의 것인지 모르는** 집은 줄(`hook::unsure`).
