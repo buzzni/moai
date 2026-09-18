@@ -1413,7 +1413,7 @@ pub struct Board<'a> {
     /// **수가 아니라 목록으로 든다** — 사람 화면은 한 줄씩 대고(아래 `projects_status`), `--json` 은
     /// 안쪽 `status` 와 같은 모양으로 이 목록을 그대로 낸다.
     pub blind: Vec<crate::report::Workplace>,
-    /// 스냅샷을 **못 읽은 워크트리 전부**(`worktree::Unread::all`) — 사람 화면이 한 줄씩 대는 것은
+    /// 판 것 가운데 스냅샷을 **못 읽은 워크트리 전부**(`worktree::Unread::all`) — 사람 화면이 한 줄씩 대는 것은
     /// 이쪽이다(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt). 판정을 안 가려도 깨진 파일은 고칠
     /// 사람이 알아야 하고, `blind` 는 "그래서 자리를 다 못 셌다" 라는 다른 말이다.
     pub unread: Vec<crate::report::Workplace>,

@@ -578,9 +578,13 @@ fn nameless<'i>(
 /// 하나도 못 가리키는 것이다(사용자 결정, 리뷰 moai-ya06.44t). 이름이 집은 줄을 가리키는 워크트리는
 /// 못 읽어도 그 줄이 이미 `At` 이라 가릴 것이 없다.
 ///
-/// "자리를 다 못 셌다" 를 대는 표면(`status` 의 stderr·`unreadable_worktrees`·한눈 보기·층)이
-/// 이것을 센다 — [`places`] 가 `Unknown` 을 세우는 자와 **같아야** 한다(moai-rgz9). 한때 못 읽은
-/// 워크트리를 다 세어, 판정을 안 가리는 제 이름 워크트리 하나로 화면마다 "다 못 셌다" 가 섰다.
+/// **"자리를 다 못 셌다" 를 대는 자리만 이것을 센다** — `status --json` 의 `unreadable_worktrees`,
+/// `tui --json` 의 같은 키, 층 상세의 꼬리말이다. "이 스냅샷이 깨졌다" 를 대는 자리(`status` 의
+/// stderr·한눈 보기의 `옆 워크트리 문제`·층의 `!`)는 못 읽은 것 **전부**를 센다
+/// (`worktree::Unread::all`, 사용자 결정 2026-09-18) — 두 수는 다르다.
+///
+/// [`places`] 가 `Unknown` 을 세우는 자와 **같아야** 한다(moai-rgz9). 한때 못 읽은 워크트리를
+/// 다 세어, 판정을 안 가리는 제 이름 워크트리 하나로 화면마다 "다 못 셌다" 가 섰다.
 pub fn blinding<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> Vec<&'a Workplace> {
     // 값싼 것을 먼저 — 못 읽은 워크트리가 없으면 소속 지도를 안 짓는다.
     if !trees.iter().any(|t| t.unknown) {
@@ -2964,6 +2968,19 @@ mod tests {
         stray[0].unknown = true;
         assert!(matches!(places(&issues, &cfg(), &stray, LATER)["argos-0003"], Place::Unknown));
         assert_eq!(blinding(&issues, &cfg(), &stray).len(), 1);
+
+        // **둘이 섞여 있으면 가린 것만 든다.** 화면은 깨진 스냅샷 둘을 다 대지만
+        // (`worktree::Unread::all`) `unreadable_worktrees` 와 층의 셈은 뒤엣것 하나다 — 두 목록이
+        // 다시 하나로 합쳐지면 여기가 먼저 깨진다.
+        let mut mixed = vec![
+            tree("/r/.claude/worktrees/argos-0001", "worktree-argos-0001", &[]),
+            tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &[]),
+        ];
+        mixed[0].unknown = true;
+        mixed[1].unknown = true;
+        let only: Vec<&str> = blinding(&issues, &cfg(), &mixed).iter().map(|t| t.branch.as_str()).collect();
+        assert_eq!(only, ["worktree-agent-x"], "판정을 안 가리는 에픽 워크트리까지 셌다");
+        assert!(matches!(places(&issues, &cfg(), &mixed, LATER)["argos-0003"], Place::Unknown));
 
         // 집은 줄이 없으면 가릴 판정도 없다 — `places` 는 빈 지도를 내고, 세는 자도 비어야 한다.
         let idle = vec![make("argos-0001", Kind::Epic, "todo")];

@@ -1943,14 +1943,19 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
             }
             // **못 읽은 워크트리도 댄다**(리뷰 moai-p3bs.op2) — 안 대면 층이 "드러난 문제 없다" 로
             // 깨진 스냅샷을 덮고, 그 파일은 고칠 사람이 영영 모른다. **두 사실을 한 줄에 가른다**
-            // (사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt) — 못 읽었다는 것은 언제나 대고
+            // (사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt) — 판 것 가운데 못 읽은 것은 다 대고
             // (`unread`, 한눈 보기의 `옆 워크트리 문제 N건` 과 같은 수), "그래서 자리를 다 못 셌다"
             // 는 판정을 가린 것이 있을 때만 붙인다(`blind`). 가린 것이 없으면 위의 `stranded` 는
             // "센 결과" 라 그대로 믿어도 된다.
+            //
+            // **꼬리말을 못 읽은 총수에 붙이지 않는다** — 셋이 깨졌는데 하나만 판정을 가렸으면
+            // "3곳 — 자리를 다 못 셌다" 는 셋 다 가린 것으로 읽힌다. 가린 수가 총수보다 적으면
+            // 그 수를 대고, 같을 때만 "다" 라고 한다.
             if sum.unread > 0 {
                 let why = match sum.blind {
                     0 => String::new(),
-                    _ => " — 자리를 다 못 셌다".to_string(),
+                    n if n == sum.unread => " — 자리를 다 못 셌다".to_string(),
+                    n => format!(" — 그중 {n}곳이 자리를 가려 다 못 셌다"),
                 };
                 out.extend(wrapped(
                     &format!("! 스냅샷을 못 읽은 워크트리 {}곳{why}", sum.unread),
@@ -4074,6 +4079,14 @@ pub(super) mod tests {
         assert!(!screen.contains("드러난 문제 없다"), "깨진 스냅샷을 두고 문제 없다고 했다\n{screen}");
         let row = lines.iter().find(|l| l.contains("one/")).unwrap_or_else(|| panic!("{screen}"));
         assert!(row.contains(" !"), "깨진 스냅샷이 있는데 줄이 조용하다 — {row:?}");
+
+        // **섞여 있으면 가린 수를 댄다** — 꼬리말이 총수에 붙으면 둘 중 하나만 가렸는데 둘 다
+        // 가린 것으로 읽힌다. "다" 는 못 읽은 것이 모두 가렸을 때만 쓴다.
+        set(&mut a, 0, 0, 2, 1);
+        let lines = render(&mut a, 80, 22);
+        let screen = lines.join("\n");
+        let pane = joined(&lines);
+        assert!(pane.contains("워크트리 2곳 — 그중 1곳이 자리를 가려"), "가린 수를 안 댔다\n{screen}");
     }
 
     /// **디렉터리 고르기 창도 색 없이 80칸에서 읽힌다** — 테두리가 지금 디렉터리를 대고(길면

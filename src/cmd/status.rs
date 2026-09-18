@@ -58,10 +58,11 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // `stranded` 까지 조용해진다. 그쪽이 실제로 셌을 때만 접는다 — 그 자는 `Gathered::swept` 하나고,
     // 밖 한눈 보기(`view::projects_status`)도 같은 것을 읽는다.
     //
-    // **여기서 대는 것은 못 읽은 워크트리 전부다**(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt) —
-    // 판정을 가렸는지와 상관없다. 깨진 스냅샷은 고칠 사람이 있어야 고쳐지는데, 이름이 집은 줄을
-    // 가리킨다는 까닭으로 입을 다물면 그 워크트리는 어느 화면에도 안 선다. "못 셌다" 쪽은
-    // `Unread::blinding` 이 따로 센다.
+    // **여기서 대는 것은 판정을 가렸는지와 상관없이 못 읽은 것 전부다**(사용자 결정 2026-09-18,
+    // 리뷰 moai-rgz9.7vt). 깨진 스냅샷은 고칠 사람이 있어야 고쳐지는데, 이름이 집은 줄을 가리킨다는
+    // 까닭으로 입을 다물면 그 워크트리는 어느 화면에도 안 선다. "못 셌다" 쪽은 `Unread::blinding`
+    // 이 따로 센다. 다만 **판 것 가운데** 다 — 이름만으로 자리가 다 잡히면 `workplaces` 가 옆
+    // 스냅샷을 아예 안 연다(moai-7igy 의 문, idea `moai-7p48`).
     let said_already = swept;
     if !said_already {
         for t in &unread.all {
