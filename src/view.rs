@@ -1122,6 +1122,23 @@ fn block_line(b: &crate::report::Block, branch: Option<&str>, now: &str) -> Stri
     format!("  {}   {} {}  {what}", paint(mark, label), paint(mark, glyph), paint(style::ID, b.id))
 }
 
+/// 상세의 **시작·끝** 두 값(moai-38mh) — CLI 상세와 탐색기 상세가 이 한 자로 그린다. 따로 두면
+/// 어느 줄을 안 세울지가 표면마다 갈린다.
+///
+/// **안 세우는 줄이 둘이다.** 아직 한 번도 첫 칸을 안 떠난 줄은 빈 자리를 그리지 않는다. 그리고
+/// **묶음은 제 줄의 시각을 안 그린다** — 묶음의 칸은 멤버에서 읽고 제 줄에 적힌 칸·칸 시각은 안
+/// 읽는다([`unread_column`], `report` 의 묶음 `since`). 그 줄에 손으로 `mv` 를 쳐서 선 시각을
+/// 그리면 머리 줄은 `in_progress` 인데 그 밑에 `끝` 이 선다(리뷰 moai-u5bk.3wq).
+///
+/// 빈 쪽은 `—` 다 — 이 필드 전에 집은 줄을 닫으면 시작은 모르고 끝만 선다.
+pub fn span_of(i: &Issue) -> Option<(String, String)> {
+    if is_group(i) || (i.started_at.is_none() && i.done_at.is_none()) {
+        return None;
+    }
+    let at = |t: &Option<String>| t.as_deref().map_or_else(|| "—".to_string(), stamp);
+    Some((at(&i.started_at), at(&i.done_at)))
+}
+
 /// 단건 상세. **이력은 부르는 쪽이 [`history`] 로 붙인다** — 묶음을 펼치면 멤버를
 /// 이력 앞에 끼워야 해서, 여기서 붙이면 끼울 자리가 없다.
 ///
@@ -1255,13 +1272,17 @@ pub fn detail(
     // 틀려도 아무도 모른다 — `--json` 만 보는 것은 기계뿐이다. 없으면 줄을 안 세운다: 아직
     // 첫 칸인 줄에 빈 자리를 그리면 생성·수정 줄이 두 배로 길어진다.
     // **끝은 `done_at` 이 섰다고 닫힌 것이 아니다** — 되돌린 줄에도 남는다. 그래서 칸은 위의
-    // 머리 줄이 말하고 여기는 시각만 말한다.
-    if i.started_at.is_some() || i.done_at.is_some() {
-        let at = |t: &Option<String>| match t {
-            Some(t) => paint(style::DIM, &stamp(t)),
-            None => paint(style::DIM, "—"),
-        };
-        out.push(format!("  시작   {}      끝    {}", at(&i.started_at), at(&i.done_at)));
+    // 머리 줄이 말하고 여기는 시각만 말한다. 어느 줄에 세우는지는 `span_of` 가 정한다.
+    if let Some((start, end)) = span_of(i) {
+        // 빈 시작(`—`)은 **윗줄의 생성 시각과 같은 폭으로** 채운다 — 안 채우면 `끝` 이 `수정`
+        // 밑에서 열다섯 칸 왼쪽으로 붙는다.
+        let gap = width(&stamp(&i.created_at)).saturating_sub(width(&start));
+        out.push(format!(
+            "  시작   {}{}      끝    {}",
+            paint(style::DIM, &start),
+            " ".repeat(gap),
+            paint(style::DIM, &end)
+        ));
     }
 
     if let Some(body) = &i.body {

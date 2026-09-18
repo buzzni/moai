@@ -1735,6 +1735,12 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
     // 쪽이 어느 쪽을 믿을지 정해야 한다.
     fields.push(("생성".into(), crate::view::stamp(&i.created_at)));
     fields.push(("수정".into(), crate::view::stamp(&i.updated_at)));
+    // **시작·끝도 같은 자다**(moai-38mh) — 어느 줄에 세울지(아직 안 떠난 줄·묶음은 안 세운다)까지
+    // `view::span_of` 가 정한다. 여기만 없으면 탐색기로 보는 사람에게는 틀린 시각이 안 보인다.
+    if let Some((start, end)) = crate::view::span_of(i) {
+        fields.push(("시작".into(), start));
+        fields.push(("끝".into(), end));
+    }
     let w_label = label_width(&fields);
     out.extend(fields.iter().map(|(k, v)| field(k, v, w_label, w)));
 
@@ -3921,6 +3927,25 @@ pub(super) mod tests {
     fn timestamps_carry_the_year_like_the_cli_does() {
         let lines = render(&mut app(), 100, 16).join("\n");
         assert!(lines.contains("2026-09-01"), "연도가 없다\n{lines}");
+    }
+
+    /// **시작·끝도 CLI 상세와 같은 자로 선다**(moai-38mh, 리뷰 moai-u5bk.3wq) — 탐색기에만 없으면
+    /// 틀린 시각이 탐색기로 보는 사람에게 안 보인다. **묶음은 제 줄의 시각을 안 그린다** — 묶음의
+    /// 칸은 멤버에서 읽으니, 손으로 친 `mv` 가 남긴 시각이 서면 도는 에픽 밑에 `끝` 이 선다.
+    #[test]
+    fn start_and_finish_stand_in_the_detail_but_not_on_a_group() {
+        let mut issues = issues();
+        issues[0].done_at = Some("2026-09-07T08:00:00Z".into()); // 에픽 줄에 손으로 친 `mv … done`
+        issues[1].started_at = Some("2026-09-05T06:00:00Z".into());
+        issues[1].done_at = Some("2026-09-06T07:00:00Z".into());
+        let mut a = every(issues);
+
+        let epic = render(&mut a, 100, 22).join("\n");
+        assert!(!epic.contains("2026-09-07 08:00"), "묶음이 제 줄의 끝을 그렸다\n{epic}");
+
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let member = render(&mut a, 100, 22).join("\n");
+        assert!(member.contains("2026-09-05 06:00") && member.contains("2026-09-06 07:00"), "시작·끝이 없다\n{member}");
     }
 
     /// 본문이 **그려진다.** 기호가 걷히고 목록은 글머리를 얻는다.
