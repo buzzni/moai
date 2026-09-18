@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:8cadfbd4 -->
+<!-- moai:begin v:0.1.0 hash:49864ed2 -->
 ## 이슈 트래커 — moai
 
 이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
@@ -14,7 +14,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. 승인 게이트가 
     moai show --tree                       에픽 → 이슈 → 자식
     moai ready --worktree                  옆 워크트리에서 집은 것까지 겹쳐 본다
     moai tui                               탐색기로 돌아다닌다. SPC n 으로 생각을 담는다
-    moai add "제목" -p 1 -t bug -e <에픽>  만들기
+    moai add '제목' -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
     moai note <id> '발견한 것'             다음 사람이 읽을 메모
@@ -39,7 +39,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. 승인 게이트가 
 ### 갈림길 셋
 
 **1. `add` 냐 `idea` 냐** — 가르는 것은 *지금 집을 것인가* 다.
-집을 것이면 `moai add`, 나중에 볼 것이면 `moai idea add "떠오른 것"`.
+집을 것이면 `moai add`, 나중에 볼 것이면 `moai idea add '떠오른 것'`.
 idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
 **적지 않고 넘어가는 것이 제일 나쁘다.**
 
@@ -100,8 +100,8 @@ PLAN
 
 ### 지금 범위가 아닌 것은 담는다
 
-    moai idea add "반짝 떠오른 것"                 담기
-    moai idea add "긴 생각" -b -                   본문은 stdin 에서
+    moai idea add '반짝 떠오른 것'                 담기
+    moai idea add '긴 생각' -b -                   본문은 stdin 에서
     moai idea ls                                   쌓인 것 보기
     moai show -g <키워드>                          이미 적어 뒀는지 찾기
 
@@ -126,9 +126,9 @@ PLAN
 
 ### 묶음은 둘이다
 
-    moai epic add "저장 계층"                      에픽
-    moai milestone add "v0.1"                      마일스톤
-    moai add "제목" -e <에픽> --milestone <마일스톤>
+    moai epic add '저장 계층'                      에픽
+    moai milestone add 'v0.1'                      마일스톤
+    moai add '제목' -e <에픽> --milestone <마일스톤>
     moai show <에픽|마일스톤 id>                   그 밑에 무엇이 있는지
     moai show --milestone <id>                     그 마일스톤에 딸린 전부
 
@@ -213,7 +213,7 @@ id** 로 그 이슈의 커밋을 그때그때 찾아 낸다. 해시를 노트에
 - 목록 `moai show [거르개] --json` 도 줄마다 같은 `work` 를 낸다 — 여러 이슈를 더할 때는 id 마다
   부르지 말고 목록을 한 번 부른다
 
-### 훅이 실제로 보는 것 셋
+### 훅이 실제로 보는 것 넷
 
 `moai skill install` 로 Claude 에 훅을 심었을 때 선다.
 
@@ -228,7 +228,7 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 **2. 저장소를 고치기 전에 하나를 집는다.** `moai mv <id> in_progress`.
 세는 것은 저장소 안의 일감뿐이다 — `.moai/`·`.claude/`·`target/` 과 저장소
 밖(스크래치패드·임시 파일)은 안 센다. `Edit`·`Write` 뿐 아니라 껍데기로 쓰는
-것(`>`·`>>`·`sed -i`·`tee`)도 센다. 계획에 없던 것이면 `moai add "제목"` 으로
+것(`>`·`>>`·`sed -i`·`tee`)도 센다. 계획에 없던 것이면 `moai add '제목'` 으로
 세우고 그것을 집는다.
 
 **3. 리뷰도 이슈다.** `/code-review` 를 부르기 전에 지금 보는 것에 매인 리뷰
@@ -246,6 +246,13 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 **원문과 판단을 두 노트로 가른다** — 리뷰어가 한 말과 이쪽이 정한 것은 다른
 글이다. 넘긴 것은 **이슈 번호와 함께** 적는다. "넘겼다" 만 적힌 줄은 아무도
 다시 안 본다. 원문을 어디서 찾는지는 스킬의 `references/commands.md` 에 있다.
+
+**4. 사람의 tmux 서버를 죽이지 않는다.** `-L`·`-S` 없는 `tmux kill-server`·`kill-session` 과 tmux 를
+겨눈 `pkill`·`killall` 을 막는다. 세션이 tmux 안에서 돌면 `$TMUX` 가 서 있어,
+맨 `tmux` 는 `TMUX_TMPDIR` 를 무시하고 그 서버에 붙는다 — 한 줄이 그 안의
+세션을 모두 끈다. 시험용 tmux 는 제 서버를 따로 띄운다.
+
+    env -u TMUX tmux -L <고유 이름> …
 
 ### 감독
 

@@ -349,6 +349,11 @@ mod tests {
             checked += 1;
         }
         assert!(checked > 15, "가르치는 명령을 {checked}개밖에 못 찾았다");
+        // 걸음 글에 박힌 줄도 뽑혔다(moai-8na5) — 브리프가 멤버를 집고 닫는 두 줄.
+        let all = taught();
+        for line in ["moai mv t-1 in_progress --from todo", "moai mv t-1 done"] {
+            assert!(all.iter().any(|c| c == line), "걸음 글의 `{line}` 이 훅 시험 밖이다");
+        }
 
         // **아무것도 안 집은 채로도 쓰기 규칙에 안 걸린다.** 가르치는 명령은
         // 트래커를 만질 뿐 저장소 파일을 쓰지 않는다 — `< <리뷰 원문>` 같은
@@ -408,15 +413,32 @@ mod tests {
         // AGENTS 블록도 같은 조각에서 나오고, 감독이 일꾼에게 싣는 글도 리뷰를 세우고
         // 닫는 줄을 같은 조각으로 적으므로 같이 본다.
         let texts = [crate::guide::skill(), crate::guide::reference(), crate::guide::agents(), crate::guide::supervise()];
-        texts
+        // **걸음 글 안에 박힌 `` `moai …` `` 도 뽑는다**(moai-8na5). 줄 머리만 보던 판은 브리프 2·10·12
+        // 의 멤버를 옮기는 줄과 에픽에 남기는 노트를 훅 시험 밖에 두었다 — 거기서 무엇을 바꿔도 초록이었다.
+        // 자리표시자를 든 것만 명령이다 — 글 속의 `` `moai add` `` 는 이름을 부른 것이지 칠 줄이 아니다.
+        let spans = |t: &str| -> Vec<String> {
+            t.split('`')
+                .skip(1)
+                .step_by(2)
+                .map(str::trim)
+                .filter(|s| s.starts_with("moai ") && s.contains('<'))
+                .map(String::from)
+                .collect()
+        };
+        let cmds: Vec<String> = texts
             .iter()
             .flat_map(|t| t.lines())
             .map(str::trim)
-            .filter(|l| l.starts_with("moai ") && !l.contains("<명령>"))
+            .filter(|l| l.starts_with("moai "))
             // 치트시트 줄은 **두 칸 이상 띄우고** 설명을 붙인다. 그 뒤는
             // 명령이 아니다 — 안 자르면 "집기 → review → done" 의 `done` 이
             // 인자로 읽혀, 시험이 제가 만든 허깨비를 잡는다.
-            .map(|l| l.split("  ").next().unwrap_or(l).trim())
+            .map(|l| l.split("  ").next().unwrap_or(l).trim().to_string())
+            .chain(texts.iter().flat_map(|t| t.lines()).flat_map(spans))
+            .filter(|l| !l.contains("<명령>"))
+            .collect();
+        let taught: Vec<String> = cmds
+            .iter()
             .map(|l| {
                 l.replace("<id>", "t-r")
                     .replace("<에픽>", "t-e")
@@ -429,10 +451,8 @@ mod tests {
                     // 감독이 일꾼에게 싣는 글은 멤버를 `<멤버>` 로 부른다. 자리표시자가 남으면 셸
                     // 읽기가 `<`·`>` 를 리다이렉션으로 읽어, 가르친 명령이 아니라 엉뚱한 쓰기를
                     // 잰다 — 9-1 의 노트 줄은 글의 `(` 가 그 쓰기를 못 읽을 것으로 돌려 우연히
-                    // 지나갈 뿐이었다. 집은 일(`t-1`)을 주는 것은 그 줄이 가리키는 것이 멤버라서다.
-                    // **이 줄이 지키는 것은 그것뿐이다**: 노트는 id 를 가리는 규칙이 없어 리뷰 id 를
-                    // 줘도 같고, 멤버를 옮기는 `moai mv <멤버> …` 는 걸음 글 안에 박혀 여기서
-                    // 안 뽑힌다.
+                    // 지나갈 뿐이었다. 집은 일(`t-1`)을 주는 것은 그 줄이 가리키는 것이 멤버라서다 —
+                    // 걸음 글의 `moai mv <멤버> done` 에 리뷰 id 를 주면 규칙 3 이 `-m` 없는 닫기로 막는다.
                     .replace("<멤버>", "t-1")
                     // 되짚기(7-1)가 선 에픽의 멤버로 펼치는 idea. 어느 id 든 규칙이 가리지 않는다.
                     .replace("<idea id>", "t-i")
@@ -440,8 +460,38 @@ mod tests {
                     // 시험의 뿌리로 둔다 — 남으면 `<`·`>` 가 리다이렉션으로 읽혀, 가르친 명령이 아니라
                     // 파일에 쓰는 엉뚱한 명령을 잰다.
                     .replace("<루트>", "/repo")
+                    // 치트시트가 인자 자리를 이렇게 부른다 — 남으면 `<`·`|`·`>` 가 리다이렉션과 파이프로
+                    // 읽혀, 가르친 명령이 아닌 것을 잰다(moai-8na5).
+                    .replace("<에픽|마일스톤 id>", "t-e")
+                    .replace("<dir>", "/tmp/elsewhere")
+                    .replace("<event>", "stop")
             })
-            .collect()
+            .collect();
+        // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로
+        // 읽어, 가르친 명령이 아니라 엉뚱한 쓰기를 잰다 — 그 줄은 우연히 지나가거나 우연히 막힌다.
+        let left: Vec<&String> = taught.iter().filter(|c| placeholder(c).is_some()).collect();
+        assert!(left.is_empty(), "자리표시자가 남은 명령 — 위의 replace 에 더한다: {left:#?}");
+        taught
+    }
+
+    /// 따옴표 밖의 `<낱말>` 꼴 자리표시자 — `<` 바로 뒤가 빈칸이 아니고 `>` 로 닫힌다.
+    /// `-b - < /tmp/x` 의 리다이렉션은 `<` 뒤가 빈칸이라 아니고, `'<무엇을>'` 처럼 따옴표 안은
+    /// 셸이 글자로 읽으니 아니다.
+    fn placeholder(cmd: &str) -> Option<String> {
+        let mut quote = None;
+        let mut chars = cmd.char_indices().peekable();
+        while let Some((at, c)) = chars.next() {
+            match (quote, c) {
+                (None, '\'' | '"') => quote = Some(c),
+                (Some(q), c) if c == q => quote = None,
+                (None, '<') if chars.peek().is_some_and(|(_, n)| !n.is_whitespace() && !matches!(n, '<' | '(')) => {
+                    let end = cmd[at..].find('>')?;
+                    return Some(cmd[at..=at + end].to_string());
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     fn epic_row() -> Issue {
@@ -666,7 +716,7 @@ mod tests {
     /// 심은 체크아웃의 자리에서 나오는 값이라, 이 시험을 부른 자리(워크트리)로
     /// 다시 셈하면 글이 같아도 늘 어긋난다. 여기서 보는 것은 글과 판뿐이다.
     ///
-    /// 다시 쓰는 길: `MOAI_BLESS=1 cargo test --release checked_in` — 같은
+    /// 다시 쓰는 길: `MOAI_BLESS=1 cargo test checked_in` — 같은
     /// `tree_named` 로 트리 전부를 적힌 자리 그대로 다시 쓴다. `skill install` 은
     /// `claude` 등록까지 건드리고 부른 자리의 경로를 적어, 워크트리에서는 못 쓴다.
     #[test]
@@ -709,7 +759,7 @@ mod tests {
         assert!(
             stale.is_empty(),
             "{DIR} 이 guide.rs 의 글에서 낡았다: {stale:?}\n  \
-             MOAI_BLESS=1 cargo test --release checked_in 으로 다시 쓴다"
+             MOAI_BLESS=1 cargo test checked_in 으로 다시 쓴다"
         );
     }
 

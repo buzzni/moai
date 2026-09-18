@@ -4505,11 +4505,6 @@ fn every_help_fits_in_eighty_columns() {
     let mut wide = Vec::new();
     for (path, help) in every_help(&s) {
         seen += 1;
-        // `hook` 의 이벤트 설명은 `src/hook.rs` 의 `Event` doc 주석이 그린다 — 옆 워크트리가 그
-        // 파일을 쥐어 따로 세웠다(moai-h0r2). 그것을 고치면 이 줄을 걷는다.
-        if path == "hook" {
-            continue;
-        }
         let mut args: Vec<&str> = path.split_whitespace().collect();
         args.push("-h");
         let short = ok(s.path(), &args);
@@ -7331,7 +7326,9 @@ fn the_hook_leaves_what_a_named_worktree_holds_to_that_worktree() {
     let inside = main.join(&dir);
     let input = format!("{{\"session_id\":\"s3\",\"cwd\":{}}}", json_str(&inside.display().to_string()));
     let own = String::from_utf8(hook_in(&s, &inside, "stop", &input).stdout).unwrap();
-    assert!(own.contains(&format!("moai mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
+    // 내미는 줄은 main 의 트래커를 겨눈다(moai-gyqh).
+    let root = std::fs::canonicalize(&main).unwrap().display().to_string();
+    assert!(own.contains(&format!("moai -C {root} mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
 }
 
 /// **이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다**
@@ -8068,6 +8065,77 @@ fn the_stop_hook_measures_the_epic_on_what_main_has_closed() {
         held.contains(&format!("{epic} 의 목적을 접을 때만")),
         "main 에서 끝낸 멤버를 못 보고 마지막 멤버를 그냥 미루라고 한다\n{held}"
     );
+
+    // **내미는 명령은 main 의 트래커를 겨눈다**(moai-gyqh) — 워크트리에서 맨 `moai` 로 치면 워크트리의
+    // 스냅샷만 바뀌어 main 은 집은 채로 남고, 이 훅은 제 스냅샷을 보고 조용해진다.
+    let root = std::fs::canonicalize(&main).unwrap().display().to_string();
+    for line in [format!("moai -C {root} mv {id} todo -m"), format!("moai -C {root} defer {id}"), format!("moai -C {root} note {id}")] {
+        assert!(held.contains(&line), "main 을 안 겨눈다 — {line}\n{held}");
+    }
+    assert!(!held.contains("  moai mv") && !held.contains("  moai defer"), "맨 moai 가 남았다\n{held}");
+    // 시킨 대로 치면 main 이 놓는다.
+    let out = staged(&["-C", &root, "mv", id.as_str(), "todo", "-m", "결정을 기다린다"]).current_dir(&inside).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(ok(&main, &["show", &id]).contains("todo"), "main 이 안 놓았다");
+}
+
+/// **main 이 모르는 줄은 main 으로 겨누지 않고, 낡은 칸으로 집으라는 줄은 main 에서 멈춘다**(리뷰
+/// moai-ju21.70g). 워크트리에서 맨 `moai` 로 세운 줄을 겨누면 시킨 대로 친 줄이 "못 찾았다" 로 끝나고,
+/// main 이 이미 닫은 줄을 낡은 스냅샷의 "집으라" 대로 겨누면 main 에서 도로 연다 — `--from` 이 막는다.
+#[test]
+fn the_hook_aims_at_main_only_what_main_knows_alike() {
+    let s = Scratch::new("hookaimknown");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let shared = field(&ok(&main, &["add", "함께 아는 일", "--json"]), "id");
+    let closed = field(&ok(&main, &["add", "main 이 닫을 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/feat", "-b", "feat"]);
+    let inside = main.join(".claude/worktrees/feat");
+    for to in ["in_progress", "done"] {
+        ok(&main, &["mv", &closed, to]);
+    }
+    let local = field(&ok(&inside, &["add", "워크트리에서 세운 일", "--json"]), "id");
+
+    let body = format!("{{\"file_path\":{}}}", json_str(&inside.join("src/x.rs").display().to_string()));
+    let why = refusal(&tool_at(&s, &inside, "Edit", &body));
+    let root = std::fs::canonicalize(&main).unwrap().display().to_string();
+    for id in [&shared, &closed] {
+        assert!(why.contains(&format!("moai -C {root} mv {id} in_progress --from todo")), "main 이 아는 {id} 를 안 겨눈다\n{why}");
+    }
+    assert!(why.contains(&format!("\\n  moai mv {local} in_progress --from todo")), "main 이 모르는 줄을 겨눴다\n{why}");
+    // 그 id 를 모르는 줄은 여전히 겨눈다 — 한 줄에 명령 하나다.
+    assert!(why.contains(&format!("moai -C {root} add '제목'")), "{why}");
+    // 낡은 칸으로 집으라는 줄은 main 에서 멈춘다 — main 이 닫은 일을 도로 열지 않는다.
+    let out = staged(&["-C", &root, "mv", closed.as_str(), "in_progress", "--from", "todo"]).current_dir(&inside).output().unwrap();
+    assert!(!out.status.success(), "낡은 칸으로 main 의 닫힌 일을 옮겼다");
+    assert!(ok(&main, &["show", &closed]).contains("done"), "main 이 닫은 일을 도로 열었다");
+
+    // main 에 트래커가 없으면 아무것도 안 겨눈다 — 그 가지에서 처음 `init` 한 트래커다.
+    let bare = s.path().join("bare");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q"]);
+    git(&bare, &["commit", "-q", "--allow-empty", "-m", "처음"]);
+    git(&bare, &["worktree", "add", "-q", "../bare-feat", "-b", "feat"]);
+    let branch = s.path().join("bare-feat");
+    ok(&branch, &["init", "argos"]);
+    let body = format!("{{\"file_path\":{}}}", json_str(&branch.join("src/x.rs").display().to_string()));
+    let why = refusal(&tool_at(&s, &branch, "Edit", &body));
+    assert!(!why.contains("moai -C"), "트래커 없는 main 을 겨눈다\n{why}");
+}
+
+/// **규칙 4 는 트래커 밖에서도 선다**(리뷰 moai-ju21.70g) — 사람의 tmux 서버는 트래커와 무관하다.
+/// 트래커를 찾은 뒤에만 보던 판은 스크래치패드로 `cd` 해 둔 세션의 `tmux kill-server` 를 보냈다.
+#[test]
+fn the_tmux_rule_stands_outside_a_tracker() {
+    let s = Scratch::new("hooktmuxbare");
+    let bash = |cmd: &str| tool_at(&s, s.path(), "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+    assert!(refusal(&bash("tmux kill-server")).starts_with("규칙 4"), "트래커 밖에서 사람의 서버를 겨눈 줄이 지나간다");
+    assert_eq!(bash("env -u TMUX tmux -L t kill-server"), "", "제 서버를 가리킨 줄을 막는다");
+    assert_eq!(bash("echo x > f"), "", "트래커 밖에서 트래커의 규칙을 세운다");
 }
 
 /// 다른 트래커를 가리키는 토막의 판정도 **같은 차례로 잇는다**(`Decision::then`, moai-dw63.e31) —
