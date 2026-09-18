@@ -3835,3 +3835,5 @@
 {"ts":"2026-09-18T06:09:04Z","id":"moai-jrqy.nn4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=134310 (xhigh — 멤버 하나짜리 에픽 끝 리뷰, 리뷰 서브에이전트가 쓴 것)"}
 {"ts":"2026-09-18T06:09:07Z","id":"moai-jrqy.nn4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"10건 중 7건 반영(03d3866), 넘긴 둘은 idea moai-1k17·moai-mg81, 섞인 줄표는 안 고친다"}
 {"ts":"2026-09-18T06:09:22Z","id":"moai-f4iv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"깨진 스냅샷이 기계가 읽는 자리에서 사라졌다 — JSON 에 키가 없다"}
+{"ts":"2026-09-18T06:12:11Z","id":"moai-8f2g","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — --json 계약과 저널 읽기, 토큰은 이 세션이 제 사용량을 못 봐 뺀다)"}
+{"ts":"2026-09-18T06:12:11Z","id":"moai-8f2g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 에 머지 — note 의 model: 줄을 show --json 의 work 로 읽는다, 규약은 CLAUDE.md"}
