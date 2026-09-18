@@ -985,18 +985,23 @@ fn create_in(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str,
     // 만들어지고, `moai status` 에 "에픽으로 쓸 수 없는 것을 가리키는 줄" 이
     // 하나 는다. 그리고 경고가 늘면 `closing` 이 세션을 붙든다. 훅이 시킨 대로
     // 한 것이 훅에 걸리는 자리는 규칙이 아니라 덫이다.
-    let into_epic = report::groups(issues)
-        .get(head.id.as_str())
+    let epic = report::groups(issues).get(head.id.as_str()).cloned();
+    let into_epic = epic
+        .as_ref()
         .map(|e| format!("\x20 moai add \"제목\" -e {e}        같은 에픽 안에\n"))
         .unwrap_or_default();
+    // **무엇이 내건 것인지는 갈림길 1 과 같은 자로 댄다 — 에픽이다.** "그 일" 로 적던 판은 집은
+    // 이슈가 아니라 에픽이 필요로 하는 것(moai-1k17 이 그 모양)에서 갈림길 1 과 다른 답을 냈다.
+    // 에픽이 없을 때만 집은 일 자신이다.
+    let aim = epic.as_deref().unwrap_or(head.id.as_str());
     refuse(1, format!(
         "지금 집고 있는 것이 있다 — {held}.\n\
          그 단위 안에서 만들거나, 밖의 것이면 담아 둔다. 초점 밖에 이슈를 세우면\n\
          그 줄이 어느 일에서 나왔는지를 잃는다.\n\
          {into_epic}\x20 moai add \"제목\" --parent {}   그 일의 자식으로\n\
          \x20 moai idea add \"제목\"                 지금 할 일이 아니면 담아 둔다\n\
-         그 일이 내건 것이 이것 없이 안 이뤄지면 idea 가 아니다 — 지금 못 해도\n\
-         위의 줄로 세워 첫 칸에 둔다. 밖으로 내보내면 그 일이 목적을 못 이룬 채 닫힌다",
+         {aim} 가 내건 것이 이것 없이 안 이뤄지면 idea 가 아니다 — 지금 못 해도\n\
+         위의 줄로 세워 첫 칸에 둔다. 밖으로 내보내면 {aim} 가 목적을 못 이룬 채 닫힌다",
         head.id
     ))
 }
@@ -1922,7 +1927,9 @@ mod tests {
         assert!(why.contains("idea add"), "담아 두는 길이 없다\n{why}");
         // idea 로 가는 문만 열어 두면 에픽이 내건 것 자체도 그리로 나가 에픽이
         // 목적을 못 이룬 채 닫힌다 (moai-l288).
-        assert!(why.contains("내건 것"), "idea 가 아닌 경우를 안 가른다\n{why}");
+        // 무엇이 내건 것인지는 갈림길 1 처럼 에픽으로 댄다 — 집은 이슈로 대면 에픽만 필요로
+        // 하는 것에서 두 글이 다른 답을 낸다 (moai-dw63.gwf 4번).
+        assert!(why.contains("t-e 가 내건 것"), "idea 가 아닌 경우를 에픽으로 안 가른다\n{why}");
 
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add \"안의 일\" -e t-e"), Decision::Pass);
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add \"자식\" --parent t-1"), Decision::Pass);
