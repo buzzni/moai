@@ -172,6 +172,11 @@ const BRANCH_CHECK: &str = r#"루트에서 커밋·병합하기 전에는 루트
 /// 거둔 일은 3 을 안 받아(4-1 부터), 여기 없으면 이어받은 일꾼만 워크트리 꼭대기에 선다.
 const SUBDIR: &str = r#"cd "$(git -C <루트> rev-parse --show-prefix)""#;
 
+/// **`moai read` 는 여기에 안 든다**(사용자 결정 2026-09-18, `moai-ha5d`). 이 저장소의 에이전트는
+/// 사람과 같은 git 신원·HOME 으로 돌아 사람의 `[read]` 표를 같이 쓴다 — 브리프가 `moai read --all`
+/// 을 가르치면 에이전트가 방금 바꾼 줄에서 **사람의 `[NEW]` 가 내려간다.** 읽음은 사람마다 다른
+/// 값이라는 것이 `cmd/read.rs` 의 전제인데, 신원이 하나면 그 전제가 선 채로 깨진다. 가르치려면
+/// 에이전트용 신원(`MOAI_CONFIG` 를 가르는 길)이 먼저다.
 const CHEATSHEET: &str = r#"    moai status                            보드 · 경고 · 흐름 (세션은 여기서 시작)
     moai ready                             지금 집을 수 있는 일
     moai show <id>                         본문·자식·이력. 왜 그렇게 정했는지가 여기 있다
