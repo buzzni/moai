@@ -204,6 +204,19 @@ NOTE
   moai defer moai-4aex -m \"다음 분기\" --from todo")]
     Defer(DeferArgs),
 
+    /// 읽었다고 표시한다 (내 설정에만 남는다)
+    #[command(after_help = "  moai read moai-4aex              이 줄을 읽음으로
+  moai read --all                  내게 온 것 가운데 안 읽은 것 전부
+  moai read -e moai-9k2p           그 에픽의 멤버와 그 밑까지
+
+  **트래커에 안 쓴다.** 읽음은 사람마다 다른 값이라 이슈 줄에 적으면 읽기만 해도
+  남과 부딪힌다. 내 설정(`moai project add` 가 쓰는 그 파일)의 [read] 표에
+  이슈 id 와 지금을 적고, 그 뒤에 그 줄이 바뀌면 다시 안 읽음이 된다.
+
+  안 읽은 줄은 탐색기 목록에서 제목 앞에 [NEW] 로 선다 — 내게 할당된 것과 그 밑
+  (자식·리뷰·에픽 멤버)만 센다.")]
+    Read(ReadArgs),
+
     /// 하나가 다른 것을 막는다 (또는 그 막음을 없앤다)
     #[command(after_help = "  moai link moai-4aex --blocks moai-9k2p     4aex 가 9k2p 를 막는다
   moai link moai-4aex --unblocks moai-9k2p   그 막음을 없앤다
@@ -243,10 +256,11 @@ NOTE
   위, G·End 가 맨 아래, Ctrl-d·Ctrl-u 가 반 쪽, Ctrl-f·Ctrl-b(PageDown·PageUp)가
   한 쪽이다. Tab·Shift-Tab 이 목록과 상세 사이로 포커스를 옮기고, 이동키는 모두
   포커스 있는 칸을 움직인다 — 상세를 굴리려면 Tab 으로 간다. / 가 검색, Esc 가
-  걸어 둔 거름망을 푼다. 검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며, 검색은
-  치는 대로 목록을 거르고 Tab·Shift-Tab 이 찾을 자리를 전체·id·제목·태그·
-  본문으로 돌린다. 맨 위 헤더가 등록한 프로젝트마다 번호를 대고, 그 숫자를
-  SPC 없이 그대로 누르면 그 프로젝트로 간다 — 0 은 전체, 곧 프로젝트 층이다.
+  걸어 둔 거름망을 푼다. r 은 커서가 선 줄을 읽음으로 적는다(아래 [NEW]).
+  검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며, 검색은 치는 대로 목록을 거르고
+  Tab·Shift-Tab 이 찾을 자리를 전체·id·제목·태그·본문으로 돌린다. 맨 위 헤더가
+  등록한 프로젝트마다 번호를 대고, 그 숫자를 SPC 없이 그대로 누르면 그
+  프로젝트로 바로 간다 — 0 은 전체, 곧 프로젝트 층이다.
 
   그 밖의 동작은 SPC 를 누르면 곧바로 뜨는 메뉴에 있다. 메뉴는 그 자리에서 되는
   것만 세우고, 모르는 키는 무시하며, Esc 로 닫고 Backspace 로 한 층 올라간다.
@@ -263,7 +277,12 @@ NOTE
     SPC c c  생성               SPC c u  수정               SPC c n  셈
     SPC c g  태그               SPC c h  열 이름 줄 [보임/숨김]
     SPC c w  ⎇ 옆 가지 표시 [보임/숨김] — SPC t w 로 겹쳐 봐야 선다
+    SPC m a  안 읽은 것 전부    SPC m r  이 묶음의 멤버 전부
   바로 끝내는 키는 Ctrl-C 하나다 — 어디서든, 글을 적는 중에도 끝낸다.
+
+  내게 온 것(담당이 나이거나 그 밑) 가운데 마지막으로 본 뒤에 바뀐 줄은
+  제목 앞에 [NEW] 가 선다. 읽음은 내 설정에만 남고 트래커는 안 바뀐다 —
+  CLI 로는 `moai read` 다.
 
   목록은 처음에 done 을 숨긴다 — 경로 줄의 [done 숨김] 이 그것을 댄다. 보기는
   거름망과 따로라 Esc 로 안 풀리고, 둘은 함께 걸린다. 정렬은 급한 것·새것·앞
@@ -726,6 +745,25 @@ pub struct DeferArgs {
     /// 밖으로 빼지 않는다. 안 주면 지금까지처럼 아무것도 막지 않는다.
     #[arg(long, value_name = "칸")]
     pub from: Option<String>,
+}
+
+/// `moai read` — 읽었다고 표시한다.
+#[derive(Args, Debug)]
+pub struct ReadArgs {
+    /// 읽음으로 적을 이슈들
+    ///
+    /// 무엇을 읽었는지는 언제나 댄다 — 인자 없이 부르면 아무 줄도 안 적으면서 성공으로 끝나,
+    /// 사람은 다 적힌 줄 알고 넘어간다. `--all`·`-e` 가 그 자리를 채운다.
+    #[arg(value_name = "id", required_unless_present_any = ["all", "epic"])]
+    pub ids: Vec<String>,
+
+    /// 내게 온 것 가운데 안 읽은 것 전부
+    #[arg(long)]
+    pub all: bool,
+
+    /// 그 에픽(또는 묶음)의 멤버와 그 밑까지
+    #[arg(short, long, value_name = "에픽")]
+    pub epic: Option<String>,
 }
 
 #[derive(Args, Debug)]

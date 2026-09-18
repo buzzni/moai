@@ -557,6 +557,46 @@ pub fn order_by(
     if reversed { order.reverse() } else { order }
 }
 
+/// **안 읽은 줄** — 내게 온 것 가운데 내가 마지막으로 본 뒤에 바뀐 것(moai-50mn).
+///
+/// `seen` 은 이슈 id → 마지막으로 본 때(내 설정의 `[read]`). 없는 id 는 **한 번도 안 본 것**이라
+/// 안 읽음이다. 바뀐 때는 스냅샷의 `updated_at` 으로 잰다(사용자 결정 2026-09-15) — 저널의 노트는
+/// 안 센다: 그것을 세려면 저널을 상태 계산에 읽어야 하고, `note` 는 스냅샷을 안 바꾼다.
+///
+/// **내게 온 것**은 담당이 나인 줄과 그 **밑**이다(사용자 결정) — 자식(`부모.자식`)과 그 에픽의
+/// 멤버. 내 에픽에 남이 달아 둔 리뷰를 놓치지 않는다. 담당을 가르는 자는 거름망과 같은
+/// [`Sel::Is`] 하나라 `이름 (메일)`·이름만·메일만이 다 통한다.
+pub fn unread<'a>(issues: &'a [Issue], me: &str, seen: &BTreeMap<String, String>) -> BTreeSet<&'a str> {
+    let want = Sel::Is(me.to_string());
+    let mine: BTreeSet<String> = issues.iter().filter(|i| is_assignee(&want, i)).map(|i| i.id.clone()).collect();
+    if mine.is_empty() {
+        return BTreeSet::new();
+    }
+    // **소속은 `report::groups` 에 묻는다**(moai-50mn.mgo). 줄마다 `epic` 필드를 손으로 훑으면
+    // 소속을 재는 자가 둘이 된다 — `epic_from_parent` 가 적어 둔 그대로다: *소속을 따로 재면 둘은
+    // 언젠가 어긋난다.* 이 지도는 `Where::of` 도 같은 자에게 묻는다.
+    //
+    // **걸음도 따로 두지 않는다**(moai-j038.vna) — 제가·조상이 내 것이거나 저나 조상의 에픽이 내 것인가는
+    // 워크트리의 일을 가르는 [`crate::report::claims`] 와 같은 물음이라 그것을 부른다. 손으로 옮겨 둔
+    // 걸음은 한쪽만 고쳐지는 날 훅이 세는 "그 일" 과 [NEW] 가 서는 "내게 온 것" 을 갈라놓는다.
+    // **마일스톤은 안 센다**(사용자 결정: 담당·조상·에픽) — 마일스톤 지도를 비워 넘긴다.
+    let epics = crate::report::groups(issues);
+    let stones = BTreeMap::new();
+    issues
+        .iter()
+        .filter(|i| crate::report::claims(&epics, &stones, &mine, i))
+        .filter(|i| changed_since_seen(i, seen))
+        .map(|i| i.id.as_str())
+        .collect()
+}
+
+/// 그 줄이 **내가 마지막으로 본 뒤에 바뀌었나** — 한 번도 안 봤거나(`seen` 에 없다) 본 때보다 늦게
+/// 고쳐졌다. 때는 스냅샷의 `updated_at` 이다(사용자 결정 2026-09-15). 안 읽음([`unread`])도, 읽음을 적을
+/// 때 이미 읽은 줄을 거르는 것(`moai read`·탐색기의 `r`)도 이 하나로 잰다(moai-j038.vna).
+pub fn changed_since_seen(i: &Issue, seen: &BTreeMap<String, String>) -> bool {
+    seen.get(&i.id).is_none_or(|when| i.updated_at.as_str() > when.as_str())
+}
+
 /// 대소문자를 접어 견준다 — **견줄 때마다 소문자 문자열을 짓지 않는다**(moai-zrzo). 정렬은 줄 수 × log
 /// 번 견주고 목록은 키마다 센다. 차례는 `to_lowercase()` 로 지어 견준 것과 **한 치도 안 갈린다**(moai-y61p
 /// 단계 리뷰):
@@ -589,6 +629,45 @@ fn caseless(a: &str, b: &str) -> std::cmp::Ordering {
 mod tests {
     use super::*;
     use crate::model::Status;
+
+    /// **안 읽은 줄은 내게 온 것 가운데 마지막으로 본 뒤에 바뀐 것**(moai-50mn, 사용자 결정) —
+    /// 자식과 에픽 멤버까지 세고, 한 번도 안 본 줄은 안 읽음이며, 남의 줄은 세지 않는다.
+    #[test]
+    fn unread_counts_what_came_to_me_and_changed_since_i_looked() {
+        let at = |id: &str, who: Option<&str>, when: &str| {
+            let mut i = Issue::new(id.into(), format!("{id} 제목"), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+            i.assignee = who.map(String::from);
+            // 사람마다 제 메일 — 하나로 뭉뚱그리면 메일로 찾을 때 남의 줄까지 걸린다.
+            i.assignee_email = who.map(|w| if w == "레이븐" { "raven@buzzni.com" } else { "narae@buzzni.com" }.to_string());
+            i.updated_at = when.to_string();
+            i
+        };
+        let (early, late) = ("2026-09-10T00:00:00Z", "2026-09-14T00:00:00Z");
+        let mut epic = at("a-0001", Some("레이븐"), early);
+        epic.kind = Kind::Epic;
+        let mut member = at("a-0002", None, late);
+        member.epic = Some("a-0001".into());
+        let issues = vec![
+            epic,
+            member,                                   // 내 에픽의 멤버 — 남이 만들어도 내게 온 것
+            at("a-0002.rv", None, late),              // 그 줄의 리뷰(자식)
+            at("a-0003", Some("나래"), late),          // 남의 줄
+            at("a-0004", Some("레이븐"), early),       // 내 줄, 본 뒤로 안 바뀜
+        ];
+        let seen: BTreeMap<String, String> =
+            [("a-0001".to_string(), early.to_string()), ("a-0004".to_string(), early.to_string())].into();
+        let ids = |me: &str, seen: &BTreeMap<String, String>| unread(&issues, me, seen).into_iter().collect::<Vec<_>>();
+        assert_eq!(ids("레이븐", &seen), ["a-0002", "a-0002.rv"], "자식·에픽 멤버를 안 세거나 남의 줄을 셌다");
+
+        // 한 번도 안 본 줄은 안 읽음이다 — 본 적 없는 에픽이 목록에 든다.
+        let none = BTreeMap::new();
+        assert_eq!(ids("레이븐", &none), ["a-0001", "a-0002", "a-0002.rv", "a-0004"]);
+
+        // 메일로도 같은 사람이다 — 담당을 가르는 자가 거름망과 하나다.
+        assert_eq!(ids("raven@buzzni.com", &none).len(), 4);
+        // 담당이 나인 줄이 하나도 없으면 아무것도 안 센다.
+        assert!(ids("아무개", &none).is_empty());
+    }
 
     /// **고른 차례는 제 방향이 있고, 같으면 기본 차례로 가르며, 뒤집으면 통째로 뒤집는다**(moai-55cp).
     #[test]

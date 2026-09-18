@@ -1058,6 +1058,13 @@ fn row_line<'a>(
     let glyph_at = head.len();
     head.push(Span::styled(row_glyph(app, at), status(app.column(at))));
     head.push(Span::raw(" "));
+    // **안 읽은 줄은 제목 앞에 `[NEW]`**(moai-z9pc, 사용자 결정) — 글자에만 노랑 바탕·빨강 글자다.
+    // 줄 전체를 칠하지 않는다: 여러 줄이 안 읽은 상태로 서면 목록이 통째로 번쩍인다. 뜻은 낱말이
+    // 지므로 색 없는 터미널에서도 `[NEW]` 가 읽힌다.
+    if app.unread.contains(&i.id) {
+        head.push(Span::styled("[NEW]", Style::new().fg(Color::Red).bg(Color::LightYellow)));
+        head.push(Span::raw(" "));
+    }
     // **그 이슈를 이름에 단 옆 가지**가 있으면 제목 **앞에** `⎇ <가지>`(moai-nxt4, 사용자 결정) —
     // 자리는 CLI 목록의 머리표와 같지만 **자는 다르다**: CLI 는 여전히 출처(`Origin::branch`)로 서고
     // 여기는 옆 가지 이름으로 선다. 집기를 main 에 커밋하는 규약에서는 옛 자(줄이 옆에서 왔나)가
@@ -1989,9 +1996,9 @@ fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) 
         order.iter().filter(|acts| acts[0].enabled(c).is_ok()).map(|acts| hint(acts)).collect()
     };
     // **덜 급한 것부터 떨어뜨린다.** 폭이 모자라면 앞쪽부터 버리고, 뒤 묶음(`keep`)은 늘 남는다.
-    // 바로 누르는 키는 이동·포커스·`/`·드나들기뿐이고(moai-7sjm) 나머지는 `SPC 메뉴` 한 칸이
-    // 댄다 — 메뉴는 그 자리에서 켜진 것만 세우므로 바와 같은 판정을 읽는다. 끝내기(`SPC q`)도
-    // 메뉴에 있고 Ctrl-C 는 어디서든 끝낸다.
+    // 바에 서는 바로 누르는 키는 이동·포커스·`/`·드나들기뿐이고(moai-7sjm, 읽음 `r` 은 `moai tui
+    // --help` 가 댄다) 나머지는 `SPC 메뉴` 한 칸이 댄다 — 메뉴는 그 자리에서 켜진 것만 세우므로 바와
+    // 같은 판정을 읽는다. 끝내기(`SPC q`)도 메뉴에 있고 Ctrl-C 는 어디서든 끝낸다.
     // **층에서는 층에서 듣는 키만 적는다** — `/` 는 층에서 까닭만 말하고(`Browse::enabled` 가
     // 걸러 여기 안 선다) 나가기는 위가 없다.
     // **차례는 커서를 따라 안 바뀐다**(moai-k3yi). 커서가 잎이면 Enter, 뿌리면 Bksp 가 `enabled`
@@ -2531,6 +2538,47 @@ pub(super) mod tests {
 
         a.hit("SPC t d");
         assert!(render(&mut a, 100, 12).iter().any(|l| l.contains("상세")), "다시 눌러도 안 돌아왔다");
+    }
+
+    /// **안 읽은 줄은 제목 앞에 [NEW] 를 단다**(moai-z9pc, 사용자 결정) — 내게 온 것만, 글자에만
+    /// 색이 붙는다. `r` 이 그 줄을, `SPC m a` 가 전부를 읽음으로 적는다.
+    #[test]
+    fn an_unread_line_wears_new_until_it_is_read() {
+        let mut is = issues();
+        for i in &mut is {
+            i.assignee = Some("테스터".into());
+            i.assignee_email = Some("tester@example.com".into());
+        }
+        let mut a = every(is);
+        // 시계를 고정한다 — 읽음은 `App::now` 로 적히고 줄은 2026-09-01 에 고쳐졌다. 환경의 `MOAI_NOW`
+        // 나 늦은 시계가 그보다 앞이면 적은 읽음이 줄을 못 덮어 시험이 기계를 탄다(moai-j038.vna).
+        a.now = "2026-09-13T13:42:07Z".into();
+        a.me = Some("테스터 (tester@example.com)".into());
+        a.recount_unread();
+        assert!(!a.unread.is_empty(), "내 줄인데 안 읽음이 하나도 없다");
+
+        let seen = |a: &mut App| render(a, 120, 12).join("\n");
+        assert!(seen(&mut a).contains("[NEW]"), "안 읽은 줄에 표시가 없다");
+        // 글자에만 색이 붙는다 — 줄 전체가 아니다.
+        let mut term = Terminal::new(TestBackend::new(120, 12)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let y = render(&mut a, 120, 12).iter().position(|l| l.contains("[NEW]")).expect("줄이 없다") as u16;
+        let lit: Vec<u16> = (0..120).filter(|&x| buf[(x, y)].bg == Color::LightYellow).collect();
+        assert_eq!(lit.len(), "[NEW]".len(), "칠한 칸이 낱말보다 넓다 — {lit:?}");
+
+        // `r` 은 커서가 선 줄 하나만.
+        let first = a.unread.len();
+        a.hit("r");
+        assert_eq!(a.unread.len(), first - 1, "r 이 그 줄을 안 읽었다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("읽음")), "{:?}", a.notice);
+
+        // `SPC m a` 는 나머지 전부.
+        a.hit("SPC m a");
+        assert!(a.unread.is_empty(), "SPC m a 가 남긴 것이 있다 — {:?}", a.unread);
+        assert!(!seen(&mut a).contains("[NEW]"), "다 읽었는데 표시가 남았다");
+        a.hit("SPC m a");
+        assert_eq!(a.notice.as_deref(), Some("읽음으로 적을 것이 없다"));
     }
 
     /// **열을 걷는 것은 목록 전체가 함께 정한다**(moai-g7p8 리뷰). 머리글이 긴 줄(`p10`)만 날짜를

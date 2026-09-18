@@ -54,6 +54,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let layer = crate::tui::layer::Layer::of(&reg, Some(&repo.root));
     let mut app = App::open(repo, load, index, path, stamp).overlaid(origin, trouble, watched);
     app.user = ctx.user.clone();
+    // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와
+    // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.
+    let root = app.here().unwrap_or_else(|| ".".into());
+    app.me = app.whoami(&root);
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp). 층은 **그다음에** 얹는다 — 얹는 쪽
@@ -61,6 +65,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 화면에서 갈라지면 안 된다. 한때는 `with_layer` 가 첫 화면의 커서를 `..` 너머로 밀어 차례가
     // 더 크게 걸렸는데, 뿌리의 `..` 을 걷으면서(moai-i784) 그 밀기는 없어졌다(moai-2kyl 단계 리뷰).
     app.adopt_look(&reg.look, reg.look_problems);
+    // 적어 둔 읽음도 같은 한 번의 읽기에서 온다(moai-z9pc).
+    app.adopt_read(reg.read);
     let mut app = app.attach_layer(layer);
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
@@ -123,9 +129,14 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     refuse_without_terminal()?;
     let mut app = App::on_projects(crate::tui::layer::Layer::of(&reg, None));
     app.user = ctx.user.clone();
+    // 밖에서 띄워도 누군지는 같은 자로 푼다(moai-z9pc.9av). 층에는 저장소가 없으니 지금 디렉터리에서
+    // 묻는다 — 전역 git 설정이면 그것으로 선다. 층에서 프로젝트로 들어가면 그 뿌리에서 다시 푼다
+    // (`App::enter_project`) — 프로젝트에만 적힌 git 설정이어도 [NEW] 가 선다.
+    app.me = app.whoami(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
     app.user_config = config;
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp).
     app.adopt_look(&reg.look, reg.look_problems);
+    app.adopt_read(reg.read);
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     screen(app)

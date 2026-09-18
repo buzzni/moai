@@ -324,8 +324,9 @@ fn said(state: &State) -> String {
 }
 
 /// 쓸 설정 파일의 자리. 모르면 **쓰기는 멈춘다** — 어디에 적었는지 모르는 등록은
-/// 다음 `ls` 에서 안 보이는 등록이다.
-fn writable_config() -> R<PathBuf> {
+/// 다음 `ls` 에서 안 보이는 등록이다. `moai read` 도 이것을 부른다 — 같은 조건에 두 명령이
+/// 다른 말(고칠 길을 대는 말과 안 대는 말)을 하지 않게(moai-j038.vna).
+pub(super) fn writable_config() -> R<PathBuf> {
     user_config::path().ok_or_else(|| {
         Fail::coded(
             "사용자 설정의 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 중 하나를 준다",
