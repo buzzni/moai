@@ -169,6 +169,7 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
         state,
         origin: Default::default(),
         trouble: Vec::new(),
+        swept: false,
     };
     let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()))).trim().to_string();
     Look::Shut { state: kind, said }

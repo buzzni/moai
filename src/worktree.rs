@@ -258,6 +258,14 @@ pub struct Gathered {
     /// 프로젝트를 열 때마다 시키지 않은 배너를 세우게 된다(moai-zcuh). 탐색기는 사람이
     /// `SPC t w` 로 켰을 때만 알림으로 댄다(`tui::App::unfound`, moai-d5vn).
     pub unfound: Option<String>,
+    /// **옆 워크트리를 빠짐없이 열어 봤다** — 겹쳐 보라고 시켰고 목록도 찾았다. 그러면 못 읽은 옆
+    /// 스냅샷은 `trouble` 에 `⎇ <가지>: …` 로 이미 섰으니, 자리를 재다 못 읽은 워크트리
+    /// (`stranded_at`)를 받는 쪽은 그것을 다시 말하지 않는다.
+    ///
+    /// **가지 이름으로 견주지 않는다**(moai-rgz9) — 떼어 낸 HEAD 의 이름은 커밋 앞 일곱 자라, 같은
+    /// 커밋에 선 워크트리 둘이 글자까지 같아 하나를 말한 것이 둘을 다 말한 것으로 읽힌다. 한때
+    /// 안쪽 `status` 는 이 자로, 밖 한눈 보기는 가지 이름 앞머리로 걸러 같은 상태에 답이 갈렸다.
+    pub swept: bool,
     /// 읽으러 간 옆 스냅샷마다 **읽기 전에** 잰 표식. 탐색기가 바뀐 것을 알아채는 데
     /// 쓴다. 파일이 없던 곳도 든다 — 거기 스냅샷이 생기는 것도 바뀐 것이다.
     ///
@@ -282,6 +290,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
             origin: Origin::default(),
             trouble: Vec::new(),
             unfound: None,
+            swept: false,
             watched: Vec::new(),
         });
     }
@@ -329,7 +338,8 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let Load { issues, errors } = load;
     let (issues, mut origin) = overlay(issues, others);
     origin.named = named;
-    Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, watched })
+    let swept = unfound.is_none();
+    Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, swept, watched })
 }
 
 /// 옆 워크트리 하나의 줄을 겹칠 모양으로 — 옆에만 있는 줄이 있으면 갈라진 자리([`Side::base`])를 댄다.
@@ -732,7 +742,11 @@ pub fn stranded_at(
 ) -> (Option<crate::report::Warning>, Vec<crate::report::Workplace>) {
     let trees = workplaces(root, cfg, worktree, issues);
     let warning = crate::report::stranded(issues, cfg, &trees, now);
-    (warning, trees.into_iter().filter(|t| t.unknown).collect())
+    // **판정을 가리는 것만 낸다**(moai-rgz9) — 받는 쪽은 모두 이것을 "자리를 다 못 셌다" 로 댄다.
+    // 이름이 집은 줄을 가리키는 워크트리는 못 읽어도 판정을 안 가리므로(`report::blinding`), 그것까지
+    // 내면 경고는 다 셌는데 화면만 "다 못 셌다" 라고 한다.
+    let blind = crate::report::blinding(issues, cfg, &trees).into_iter().cloned().collect();
+    (warning, blind)
 }
 
 /// 제 워크트리가 아닌 워크트리들을 **git 을 띄우지 않고** 읽는다 — 이름 후보([`away`])만 쓴다.

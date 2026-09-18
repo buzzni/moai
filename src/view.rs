@@ -1398,15 +1398,17 @@ pub struct Board<'a> {
     pub origin: &'a Origin,
     /// 옆 워크트리를 겹치다 만난 것 (`Project::trouble`).
     pub trouble: &'a [String],
-    /// 자리를 재다 **못 읽은** 워크트리들(moai-p3bs.op2). 그런 워크트리가 있으면 자리 판정이
-    /// 통째로 `모른다` 로 접혀 경고가 조용해지는데(`report::places` 의 `blind`), 여기서 세지 않으면
+    /// 자리를 재다 **못 읽어 판정을 가린** 워크트리들(moai-p3bs.op2, `report::blinding`). 그런
+    /// 워크트리가 있으면 자리 판정이 `모른다` 로 접혀 경고가 조용해지는데, 여기서 세지 않으면
     /// 이 덩어리가 "드러난 문제 없다" 로 그 침묵을 덮는다 — 안쪽 `moai status` 는 같은 사실을
     /// stderr 와 `옆 워크트리 문제` 로 이미 말한다.
     ///
-    /// **수가 아니라 목록으로 든다** — `trouble` 이 이미 낸 워크트리를 두 번 세지 않으려면 그
-    /// 가지 이름을 견줘야 하고(아래 `projects_status`), `--json` 은 안쪽 `status` 와 같은 모양으로
-    /// 이 목록을 그대로 낸다.
+    /// **수가 아니라 목록으로 든다** — 사람 화면은 한 줄씩 대고(아래 `projects_status`), `--json` 은
+    /// 안쪽 `status` 와 같은 모양으로 이 목록을 그대로 낸다.
     pub blind: Vec<crate::report::Workplace>,
+    /// 옆 워크트리를 빠짐없이 열어 봤는가 (`Project::swept`) — 그러면 `blind` 는 `trouble` 이 이미
+    /// 말했다. 사람 화면은 두 번 안 세고, `--json` 은 `blind` 를 그대로 낸다(안쪽 `status` 와 같다).
+    pub swept: bool,
 }
 
 /// 한눈 보기에서 연 프로젝트 하나의 집을 것 — `moai ready` 가 `.moai` 밖에서 낸다.
@@ -1494,24 +1496,24 @@ pub fn projects_status(
             out.push(format!("  {}", paint(style::DIM, &format!("집은 것 {rest}건 더"))));
         }
         troubles(&mut out, b.trouble);
-        // **`gather` 가 이미 낸 워크트리는 두 번 안 센다**(`cmd::status` 의 `said_already` 와 같은
-        // 자) — `--worktree` 면 그쪽이 옆 스냅샷을 빠짐없이 열어 같은 워크트리를 `⎇ <가지>: …` 로
+        // **`gather` 가 이미 낸 워크트리는 두 번 안 센다** — `cmd::status` 의 `said_already` 와 같은
+        // 자(`Gathered::swept`)다. 옆 스냅샷을 빠짐없이 열었으면 같은 워크트리를 `⎇ <가지>: …` 로
         // 이미 `trouble` 에 담았다. 겹쳐 세면 깨진 워크트리 하나가 `옆 워크트리 문제 2건` 으로 서서
-        // 보는 쪽이 두 곳이 깨진 줄로 읽는다. **`--worktree` 만으로는 못 가른다**(리뷰 moai-ya06 과
-        // 같은 까닭) — git 이 없어 `gather` 가 한 곳도 못 세었을 때는 이쪽이 말해야 한다.
-        let said = |t: &crate::report::Workplace| {
-            let head = format!("⎇ {}:", t.branch);
-            b.trouble.iter().any(|s| s.starts_with(&head))
-        };
+        // 보는 쪽이 두 곳이 깨진 줄로 읽는다. git 이 없어 `gather` 가 한 곳도 못 세었을 때는 이쪽이
+        // 말해야 한다(리뷰 moai-ya06). 한때 여기만 가지 이름 앞머리로 견줘, 같은 커밋에 떼어 낸
+        // HEAD 둘을 하나로 읽었다(moai-rgz9).
+        //
         // **센 것은 한 줄씩 댄다** — 안쪽 `moai status` 가 stderr 에 내는 그 말이다. 수만 세고 줄을
         // 안 내면 아래의 `옆 워크트리 문제 N건 — 위 줄` 이 없는 줄을 가리키고, 보는 쪽은 어느
         // 워크트리를 고칠지 모른다.
-        let blind: Vec<String> = b
-            .blind
-            .iter()
-            .filter(|t| !said(t))
-            .map(|t| format!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display()))
-            .collect();
+        let blind: Vec<String> = if b.swept {
+            Vec::new()
+        } else {
+            b.blind
+                .iter()
+                .map(|t| format!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display()))
+                .collect()
+        };
         troubles(&mut out, &blind);
         // **알림은 세지 않는다** — `moai status` 의 "드러난 문제 없다" 와 같은 자다.
         let n = b.status.warnings.len();

@@ -19,7 +19,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let Some(repo) = Repo::find()? else {
         return overview(ctx, worktree);
     };
-    let crate::worktree::Gathered { load, origin, trouble, unfound, .. } = super::gather(&repo, worktree)?;
+    let crate::worktree::Gathered { load, origin, trouble, unfound, swept, .. } = super::gather(&repo, worktree)?;
     // stderr 에 한 줄씩 낸 것의 수 — 보드가 "문제 없다" 로 그 말을 뒤집지 않게 넘긴다(moai-cuw2).
     let trouble = trouble.len() + usize::from(unfound.is_some());
     // **그 줄이 쓰는 id** 까지 넘긴다 — id 가 있어야 산 줄과의 중복이
@@ -55,8 +55,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // (`others_of`), 여기 `trees` 는 git 이 적어 둔 파일만 읽는다(`on_disk`). git 이 없거나
     // `worktree list` 가 실패하면 `gather` 는 `unfound` 하나만 내고 워크트리를 **한 곳도**
     // 대지 않는데, 이쪽은 그대로 찾아 낸다 — 그때 입을 다물면 깨진 워크트리를 아무도 안 말하고
-    // `stranded` 까지 조용해진다. 그쪽이 실제로 셌을 때만 접는다.
-    let said_already = worktree && unfound.is_none();
+    // `stranded` 까지 조용해진다. 그쪽이 실제로 셌을 때만 접는다 — 그 자는 `Gathered::swept` 하나고,
+    // 밖 한눈 보기(`view::projects_status`)도 같은 것을 읽는다.
+    let said_already = swept;
     if !said_already {
         for t in &unknown {
             eprintln!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display());
@@ -177,9 +178,10 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     // **못 읽은 워크트리는 여기서도 센다**(리뷰 moai-p3bs.op2) — 밖에서는 `gather`
                     // 가 겹쳐 보지 않으면 옆 스냅샷을 아예 안 열어 `trouble` 이 비고, 그러면 죽은
                     // 세션과 못 읽는 워크트리가 함께 있는 저장소가 "드러난 문제 없다" 로 선다.
-                    // 목록으로 넘긴다 — `trouble` 이 이미 낸 것을 두 번 세지 않는 자와 `--json` 이
-                    // 그 둘을 다 여기서 읽는다(`view::projects_status`, 아래 `Said`).
+                    // 목록으로 넘긴다 — 사람 화면과 `--json` 이 다 여기서 읽는다(`view::projects_status`,
+                    // 아래 `Said`). `trouble` 이 이미 낸 것인지는 `swept` 가 가른다 — 안쪽과 같은 자다.
                     blind,
+                    swept: p.swept,
                 }
             })
         })
