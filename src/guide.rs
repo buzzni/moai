@@ -932,7 +932,7 @@ def draft(pane):
     box = []
     for line in lines[at[-1] :] if at else []:
         if line.startswith("─"):
-            # 첫 줄은 프롬프트 + 붙임표, 이어지는 줄은 두 칸 — 그만큼만 벗겨 들여쓰기를 지킨다.
+            # 첫 줄은 프롬프트와 빈칸 하나, 이어지는 줄은 두 칸 — 그만큼만 벗겨 들여쓰기를 지킨다.
             # 그 앞머리가 아닌 줄은 안 자른다 — 화면이 달리 그리는 날 두 글자가 말없이 깎이고,
             # 옮긴 글이 사람에게 남은 단 하나의 복사라 줄어든 것을 아무도 못 본다.
             head = (PROMPT + " ", "  ")
@@ -940,27 +940,34 @@ def draft(pane):
         box.append(line)
 def grey(code):
     """이 글자색이 흐린 회색인가. 256색 회색 계단과 참색(r=g=b) 을 함께 본다 — Claude Code 의
-    색은 테마의 16진값이라, 판이 참색을 받으면 `38;5;244` 가 아니라 `38;2;136;136;136` 으로 온다."""
+    색은 테마의 16진값이라, 판이 참색을 받으면 `38;5;244` 가 아니라 `38;2;136;136;136` 으로 온다.
+    검정 쪽은 회색이 아니다 — 밝은 테마는 사람이 친 글을 `rgb(0,0,0)` 으로 그린다."""
     n = code.split(";")
     if code == "90":
         return True
     if n[:2] == ["38", "5"] and len(n) == 3 and n[2].isdigit():
-        return int(n[2]) == 8 or 232 <= int(n[2]) <= 247
+        return int(n[2]) == 8 or 238 <= int(n[2]) <= 247
     if n[:2] == ["38", "2"] and len(n) == 5 and all(p.isdigit() for p in n[2:]):
-        return len(set(n[2:])) == 1 and int(n[2]) < 160
+        return len(set(n[2:])) == 1 and 64 <= int(n[2]) < 160
     return False
 def sgr(code, was):
-    """SGR 한 조각을 (흐림 속성, 흐린 글자색) 으로 접는다. tmux 는 흐림 속성과 글자색을 따로
-    내보내(`\x1b[2m\x1b[37m`), 마지막 조각만 기억하면 흐림이 뒤따르는 색에 덮여 사라진다."""
-    attr, fg = was
+    """SGR 한 조각을 (흐림 속성, 흐린 글자색, 뒤집힘) 으로 접는다. tmux 는 글자색을 따로 내보내고
+    (`\x1b[2m\x1b[37m`) 속성은 한 조각에 모은다 — 속성이 하나 빠지면 리셋을 앞에 붙여 `0;2`,
+    둘이 한꺼번에 서면 `2;3` 이다. 그래서 속성 조각은 낱낱이 읽는다."""
+    attr, fg, rev = was
     n = code.split(";")
-    if code in ("", "0"):
-        return False, False
-    if code in ("2", "22"):
-        return code == "2", fg
     if n[0] in ("38", "39") or (len(n) == 1 and n[0].isdigit() and (30 <= int(n[0]) <= 37 or 90 <= int(n[0]) <= 97)):
-        return attr, grey(code)
-    return was
+        return attr, grey(code), rev
+    if n[0] in ("48", "58"):
+        return was
+    for p in n:
+        if p in ("", "0"):
+            attr, fg, rev = False, False, False
+        elif p in ("2", "22"):
+            attr = p == "2"
+        elif p in ("7", "27"):
+            rev = p == "7"
+    return attr, fg, rev
 def dim_only(pane):
     """입력 칸에 보이는 글이 모두 흐린 색인가 — 사람이 친 글이 아니라 Claude Code 의 제안 글이다."""
     lines = screen(pane, True)
@@ -969,15 +976,32 @@ def dim_only(pane):
     # 표시가 그 아래로 끌고 가 위의 사람 글을 못 본다. 상자 끝도 `startswith` 로 본다 — 사람이
     # 붙여 넣은 줄 속의 붙임표 하나에 그 자리에서 참을 내면 사람의 글 뒤에 `/clear` 가 붙는다.
     at = [i for i, l in enumerate(lines) if bare(l).startswith(PROMPT)]
-    for n, line in enumerate(lines[at[-1] :] if at else []):
-        if bare(line).startswith("─"):
-            return True
-        was = False, False
+    if not at:
+        return False
+    # 색은 화면 맨 위부터 접는다 — tmux 는 줄이 바뀌어도 같은 색을 다시 내보내지 않아, 접힌
+    # 제안 글의 둘째 줄은 색 조각 없이 온다. 흐린 글자를 하나도 못 봤으면 참이 아니다.
+    was, prompt, cursor, seen = (False, False, False), True, True, False
+    for n, line in enumerate(lines):
+        if n > at[-1] and bare(line).startswith("─"):
+            return seen
         for i, piece in enumerate(re.split(SGR, line)):
             if i % 2:
                 was = sgr(piece, was)
-            elif (piece.replace(PROMPT, " ") if n == 0 else piece).strip() and not any(was):
-                return False
+                continue
+            if n < at[-1]:
+                continue
+            if n == at[-1] and prompt and piece:
+                piece, prompt = piece[1:], False
+            # Claude Code 는 빈 칸의 커서를 제안 글 첫 글자에 뒤집어 그린다(흐림 없이). 프롬프트
+            # 줄의 첫 글자가 뒤집혀 있으면 그 한 칸만 커서로 빼고, 나머지는 그대로 센다.
+            if n == at[-1] and cursor and piece.strip():
+                cursor = False
+                if was[2] and not (was[0] or was[1]):
+                    piece = piece.lstrip()[1:]
+            if piece.strip():
+                if not (was[0] or was[1]):
+                    return False
+                seen = True
     return False
 def looks(fmt):
     return tmux("display-message", "-p", "-t", pane, fmt).stdout.strip()
@@ -1022,15 +1046,22 @@ for _ in range(20):
     tmux("send-keys", "-t", pane, "C-e", "C-u", "DC")
     time.sleep(0.2)
 else:
-    # 지워 보고 가른다(사용자 결정): 안 지워지고 그 글이 모두 흐린 색이면 사람이 친 것이 아니라
-    # Claude Code 의 제안 글이다 — 그것은 `/clear` 앞에 붙지 않으니 그대로 친다.
-    if kept and draft(pane) == kept and dim_only(pane):
-        print("위의 `치던 글` 은 흐린 제안 글이었다 — 사람이 친 것이 아니다")
-        erased = False
-        # 사람의 글이 아니니 상태줄에 "감독 창에 옮겼다" 고 말하지 않는다 — 그 말을 읽은 사람이
-        # 감독 창에서 제가 쓴 적 없는 글을 찾는다.
-        kept = ""
-    else:
+    # 지워 보고 가른다(사용자 결정): 마지막 한 번에도 안 지워진 글이 모두 흐린 색이면 사람이 친
+    # 것이 아니라 Claude Code 의 제안 글이다 — 그것은 `/clear` 앞에 붙지 않으니 그대로 친다.
+    # 치던 글과 같기를 바라지 않는다 — 사람의 글을 지운 빈 칸에 제안 글이 다시 서면, 치던 글은
+    # 이미 옮겼고 남은 것은 제안 글뿐이다.
+    rest = draft(pane)
+    if rest and rest == left and dim_only(pane):
+        if rest == kept:
+            print("위의 `치던 글` 은 흐린 제안 글이었다 — 사람이 친 것이 아니다")
+            erased = False
+            # 사람의 글이 아니니 상태줄에 "감독 창에 옮겼다" 고 말하지 않는다 — 그 말을 읽은 사람이
+            # 감독 창에서 제가 쓴 적 없는 글을 찾는다.
+            kept = ""
+    elif rest != "":
+        # 하나도 안 지워졌으면 그 글은 아직 그 칸에 있다 — "이미 지웠다" 고 하면 감독이 그 창에
+        # 그대로 있는 글을 사람에게 한 벌 더 돌려준다.
+        erased = rest != kept
         skip("입력 칸을 못 비웠다")
 if (read(f) or {{}}).get("status") != "idle":
     skip("그새 idle 이 아니다")
@@ -1076,7 +1107,7 @@ PY
   화면에서 프롬프트 표시(U+276F)가 선 마지막 줄로 읽는다. 그 화면도 세션 파일처럼 문서에 없는
   것이라, 못 읽으면 치지 않는 쪽으로 넘어진다. 지우다가 멈추면 `치던 글은 이미 지웠다` 가
   따라 나온다 — 그때는 옮긴 글을 그 창의 사람에게 돌려준다
-- **옮길 때 앞머리 두 칸만 벗긴다**(사용자 결정). 첫 줄은 프롬프트와 붙임표, 이어지는 줄은
+- **옮길 때 앞머리 두 칸만 벗긴다**(사용자 결정). 첫 줄은 프롬프트와 빈칸 하나, 이어지는 줄은
   두 칸이고 나머지는 화면 그대로다 — 줄마다 다듬으면 들여쓴 코드가 납작해져 돌아간다.
   그 앞머리가 아닌 줄은 **안 자른다** — 화면이 달리 그리는 날 두 글자가 말없이 깎이는데, 옮긴
   글은 사람에게 남은 단 하나의 복사라 줄어든 것을 아무도 못 본다.
@@ -1085,7 +1116,9 @@ PY
   글은 사람이 친 것이 아니라 지워지지도 않는다. 스무 번 쳐도 그대로이고 그 글이 모두 흐린
   색이면(`capture-pane -e`) 제안 글로 보고 `/clear` 를 친다 — 제안 글은 `/clear` 앞에 안 붙는다.
   색으로만 가르지 않는 까닭은, 사람이 친 글을 흐리게 그리는 판이 있으면 그 글 뒤에 `/clear` 가
-  붙기 때문이다. 지워지는 글은 언제나 사람의 것으로 본다
+  붙기 때문이다. 지워지는 글은 언제나 사람의 것으로 본다. Claude Code 는 빈 칸의 커서를 제안 글
+  첫 글자에 뒤집어 그리니 그 한 칸은 글로 안 센다. 사람의 글을 지운 빈 칸에 제안 글이 다시
+  서도 같다 — 치던 글은 이미 옮겼으니 그대로 친다
 - **비우기와 다음 배정을 한 호흡에 하지 않는다.** `/clear` 는 큐에 쌓인 글을 함께 지운다.
   스크립트가 `비웠다` 를 낸 — 세션 id 가 바뀐 — 뒤에 다음 idea 를 보내고, `비웠는지 모른다`
   면 그 창이 어떤지 보기 전에는 보내지 않는다
@@ -1621,7 +1654,10 @@ mod tests {
             ("pane_in_mode", "사람이 복사 모드로 스크롤해 읽는 판에 친다 — `/` 가 검색을 연다"),
             ("pane_synchronized", "묶인 판에 쳐 옆 일꾼의 대화까지 지운다"),
             ("입력 칸을 못 비웠다", "치던 글 뒤에 /clear 가 붙어 프롬프트로 간다"),
-            ("dim_only(pane)", "흐린 제안 글에 막혀 창이 영영 안 비워진다"),
+            // 부르는 자리로 찾는다 — `dim_only(pane)` 만 찾으면 `def` 줄이 먼저 걸려, 부르는 줄을
+            // 지워도 초록이다.
+            ("and dim_only(pane)", "흐린 제안 글에 막혀 창이 영영 안 비워진다"),
+            ("erased = rest != kept", "하나도 안 지운 글을 이미 지웠다고 해 사람에게 한 벌 더 돌려준다"),
             ("def grey(code)", "참색(`38;2;…`)으로 그린 흐린 글을 못 알아봐 창이 안 비워진다"),
             ("bare(l).startswith(PROMPT)", "사람이 친 글 속의 프롬프트 표시나 붙임표를 제안 글로 읽어 그 글 뒤에 /clear 가 붙는다"),
             ("l[:2] in head", "옮긴 치던 글이 들여쓰기를 잃거나 앞머리 아닌 줄까지 두 글자 깎인다"),
@@ -1652,6 +1688,73 @@ mod tests {
         let brief = brief();
         let twelve = brief.rfind("\n    12.").expect("창을 비우는 걸음이 없다");
         assert!(brief[twelve..].contains("감독이 보고를 확인하고 이 창에"), "일꾼이 감독이 비울 수 있다는 것을 모른다");
+    }
+
+    /// **흐린 제안 글은 tmux 가 실제로 내보내는 모양으로 가른다.** 위의 울타리는 함수가 있는지만
+    /// 보고 무엇을 읽는지는 못 본다. Claude Code(2.1.276)는 빈 칸의 커서를 제안 글 첫 글자에
+    /// `\x1b[7m` 으로 그리고 tmux 는 그 다음을 `0;2` 한 조각으로 내보내, 제안 글을 한 번도 못
+    /// 알아봤다. 거꾸로 밝은 테마의 사람 글(`38;2;0;0;0`)과 흐린 글 뒤의 `0;1` 은 흐린 글로 읽혔다.
+    /// 화면은 `capture-pane -e` 가 내는 모양 그대로 적고, 맨 캡처는 거기서 색만 뺀 것이다.
+    #[test]
+    fn the_supervisor_reads_the_dim_suggestion_as_tmux_captures_it() {
+        const HEAD: &str = r##"import re, sys
+SCREEN = [""]
+class Captured:
+    def __init__(self, stdout):
+        self.stdout = stdout
+def tmux(*args):
+    shown = SCREEN[0]
+    return Captured(shown if "-e" in args else re.sub("\x1b\\[[0-9;:]*m", "", shown))
+"##;
+        const CASES: &str = r##"
+E = "\x1b"
+RULE = E + "[38;5;244m" + "─" * 8 + E + "[39m"
+def box(*rows):
+    return "\n".join(["지난 대화", RULE] + list(rows) + [RULE, "  ? for shortcuts", ""])
+CASES = [
+    ("제안 글 — 첫 글자에 뒤집힌 커서, 이어서 0;2", box("❯ " + E + "[7mT" + E + "[0;2mry it" + E + "[0m"), True, "Try it"),
+    ("흐림 뒤에 글자색", box("❯ " + E + "[2m" + E + "[37mTry it" + E + "[0m"), True, "Try it"),
+    ("흐림과 기울임이 한 조각", box("❯ " + E + "[2;3mTry it" + E + "[0m"), True, "Try it"),
+    ("참색 회색", box("❯ " + E + "[38;2;136;136;136mTry it" + E + "[39m"), True, "Try it"),
+    ("접힌 제안 글의 둘째 줄은 색 조각 없이 온다", box("❯ " + E + "[2mTry this", "  and that" + E + "[0m"), True, "Try this\nand that"),
+    ("사람의 글", box("❯ hello"), False, "hello"),
+    ("밝은 테마의 사람 글", box("❯ " + E + "[38;2;0;0;0mhello" + E + "[39m"), False, "hello"),
+    ("흐린 글 뒤의 굵은 사람 글", box("❯ " + E + "[2mx" + E + "[0;1mBOLD" + E + "[0m"), False, "xBOLD"),
+    ("첫 줄에 프롬프트 표시만 친 사람 글", box("❯ ❯❯"), False, "❯❯"),
+    ("커서가 맨 앞에 선 사람 글", box("❯ " + E + "[7mh" + E + "[0mello"), False, "hello"),
+    ("커서 한 칸뿐인 사람 글", box("❯ " + E + "[7mx" + E + "[0m"), False, "x"),
+    ("흐린 첫 줄 아래의 사람 글", box("❯ " + E + "[2mTry" + E + "[0m", "  human"), False, "Try\nhuman"),
+    ("빈 칸", box("❯"), False, ""),
+    ("들여쓴 사람 글", box("❯ def f():", "      return 1"), False, "def f():\n    return 1"),
+]
+bad = []
+for why, shown, dim, text in CASES:
+    SCREEN[0] = shown
+    got = (dim_only("%1"), draft("%1"))
+    if got != (dim, text):
+        bad.append(why + " — " + repr(got) + ", 바란 것 " + repr((dim, text)))
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+"##;
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let supervise = supervise();
+        let open = supervise.find("python3 - '<세션>'").expect("비우는 스크립트가 없다");
+        let script = &supervise[open..open + supervise[open..].find("\nPY\n").expect("스크립트가 안 닫힌다")];
+        let from = script.find("PROMPT = ").expect("프롬프트 표시가 없다");
+        let to = script.find("def looks(").expect("판을 읽는 함수가 없다");
+        let program = format!("{HEAD}{}{CASES}", &script[from..to]);
+        let mut child = Command::new("python3")
+            .arg("-")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("python3 를 실행하지 못했다 — 이 시험에는 python3 가 있어야 한다");
+        child.stdin.take().expect("stdin").write_all(program.as_bytes()).expect("스크립트를 못 넘겼다");
+        let out = child.wait_with_output().expect("python3 가 안 끝났다");
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success(), "입력 칸을 잘못 읽는다:\n{said}");
     }
 
     /// **일꾼이 마지막 자이고, 일한 모델은 닫을 때 남는다**(moai-lzfq, 2026-09-15 사용자 결정).
