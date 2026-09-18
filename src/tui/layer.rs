@@ -62,16 +62,36 @@ pub struct Place {
     /// 이 탐색기를 띄운 자리인가.
     pub launched: bool,
     pub look: Look,
-    /// 읽기 **전에** 잰 표식 — `.moai/issues.jsonl` 과 `.moai/config.toml`.
+    /// 읽기 **전에** 잰 표식 — `.moai/issues.jsonl` 과 `.moai/config.toml`, 옆 워크트리.
     marks: Marks,
+    /// 읽기를 **시작한** 때. [`REREAD_EVERY`] 가 이것으로 잰다 — 안 읽었으면 `None`.
+    read_at: Option<std::time::Instant>,
 }
 
+/// 한 줄을 다시 읽을 까닭이 되는 표식.
+///
 /// 설정 표식까지 재는 까닭: `moai init` 은 설정이 먼저 생기고, 깨진 설정을 고친 것은
 /// 스냅샷 표식으로는 안 보인다. **디렉터리가 있는지도 잰다** — `.moai` 없는 디렉터리가
 /// 지워지거나(init 전 → 없다) 빈 디렉터리로 다시 생기면(없다 → init 전) 두 파일의 표식은
-/// 둘 다 `None` 그대로라, 층이 옛 까닭과 옛 고칠 길을 영영 댄다. 셋 다 `stat` 하나라
-/// 걸음마다 재도 싸다.
-type Marks = (bool, Stamp, Stamp);
+/// 둘 다 `None` 그대로라, 층이 옛 까닭과 옛 고칠 길을 영영 댄다.
+///
+/// **옆 워크트리도 잰다**(moai-al0x, `worktree::place_marks`). 요약에 자리 판정이 실리는데,
+/// 그 답은 워크트리를 띄우거나 치우는 것만으로 바뀐다 — `.moai` 두 파일은 그대로다. 안 재면
+/// 워크트리를 치운 뒤에도 층이 SPC r 전까지 "자리 없는 것 0건" 을 댄다. 모두 `stat` 과 작은
+/// 파일 읽기라 걸음마다 재도 싸다(git 을 안 띄운다).
+#[derive(Debug, Clone, PartialEq, Default)]
+struct Marks {
+    dir: bool,
+    issues: Stamp,
+    config: Stamp,
+    trees: Vec<(PathBuf, Stamp)>,
+}
+
+/// 층에 선 동안 이만큼 지난 줄은 표식이 그대로여도 다시 읽는다(moai-al0x, 사용자 결정 2026-09-18).
+/// 요약에는 시계로 재는 것이 든다 — 방금 집은 줄에 워크트리가 뜰 틈(한 시간, `report::stranded`)과
+/// 날로 재는 경고. 파일은 그대로라 표식으로는 영영 안 보이고, SPC r 전까지 옛 수가 선다. 읽기는
+/// 스레드로 가고([`Layer::launch`]) 층에 선 동안만이라, 1분에 한 번이면 그 값이 화면을 안 멈춘다.
+const REREAD_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// 프로젝트 하나를 본 것.
 pub enum Look {
@@ -125,12 +145,18 @@ pub struct Picked {
 struct Looked {
     path: PathBuf,
     marks: Marks,
+    read_at: std::time::Instant,
     look: Look,
 }
 
 fn marks_of(dir: &Path) -> Marks {
     let moai = dir.join(".moai");
-    (dir.is_dir(), crate::store::stamp(&moai.join("issues.jsonl")), crate::store::stamp(&moai.join("config.toml")))
+    Marks {
+        dir: dir.is_dir(),
+        issues: crate::store::stamp(&moai.join("issues.jsonl")),
+        config: crate::store::stamp(&moai.join("config.toml")),
+        trees: crate::worktree::place_marks(dir),
+    }
 }
 
 /// 같은 디렉터리인가 — 등록 목록이 쓰는 그 자다. 여기에 따로 두면 층이 "같은 프로젝트"
@@ -203,6 +229,7 @@ fn look_at(paths: &[PathBuf], now: &str) -> Vec<Looked> {
 /// 한 경로를 연다. **표식을 먼저 잰다** — 읽고 나서 재면 그 사이의 쓰기가 "이미 본 것"
 /// 으로 적혀 영영 안 보인다(`App::open` 과 같은 까닭).
 fn look_one(path: &Path, now: &str) -> Looked {
+    let read_at = std::time::Instant::now();
     let marks = marks_of(path);
     // 여는 길은 한눈 보기와 같은 `projects::open` 이다 — 상태를 가르는 셈을 두 벌 두지 않는다.
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
@@ -216,7 +243,7 @@ fn look_one(path: &Path, now: &str) -> Looked {
         State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now) },
         state => shut(&p.path, &p.name, state),
     };
-    Looked { path: p.path, marks, look }
+    Looked { path: p.path, marks, read_at, look }
 }
 
 impl Layer {
@@ -256,7 +283,8 @@ impl Layer {
                 name,
                 hue: p.hue,
                 look: Look::Unread,
-                marks: (false, None, None),
+                marks: Marks::default(),
+                read_at: None,
             })
             .collect();
         let at = match places.iter().find(|p| p.launched) {
@@ -272,11 +300,15 @@ impl Layer {
         self.places.iter().any(|p| p.registered)
     }
 
-    /// 다시 읽어야 할 줄 — 아직 안 읽었거나 표식이 바뀐 것.
+    /// 다시 읽어야 할 줄 — 아직 안 읽었거나, 표식이 바뀌었거나, 읽은 지 [`REREAD_EVERY`] 가 지난 것.
     fn stale(&self) -> Vec<PathBuf> {
         self.places
             .iter()
-            .filter(|p| matches!(p.look, Look::Unread) || marks_of(&p.path) != p.marks)
+            .filter(|p| {
+                matches!(p.look, Look::Unread)
+                    || p.read_at.is_some_and(|t| t.elapsed() >= REREAD_EVERY)
+                    || marks_of(&p.path) != p.marks
+            })
             .map(|p| p.path.clone())
             .collect()
     }
@@ -286,6 +318,7 @@ impl Layer {
         for l in looked {
             if let Some(p) = self.places.iter_mut().find(|p| p.path == l.path) {
                 p.marks = l.marks;
+                p.read_at = Some(l.read_at);
                 p.look = l.look;
             }
         }
@@ -403,6 +436,7 @@ impl App {
             self.discard(handle);
         }
         let place = self.layer.as_mut()?.places.get_mut(at)?;
+        let read_at = std::time::Instant::now();
         let marks = marks_of(&place.path);
         let state = match Repo::open(&place.path) {
             // **스냅샷까지 읽어 본다.** 층의 줄이 "못 읽는다" 로 서는 자는 `projects::open`
@@ -420,6 +454,7 @@ impl App {
         };
         place.look = shut(&place.path, &place.name, state);
         place.marks = marks;
+        place.read_at = Some(read_at);
         if let Look::Shut { said, .. } = &place.look {
             self.notice = Some(said.clone());
         }
@@ -701,7 +736,8 @@ impl App {
                 for p in &mut fresh.places {
                     if let Some(o) = old.places.iter_mut().find(|o| o.path == p.path) {
                         p.look = std::mem::replace(&mut o.look, Look::Unread);
-                        p.marks = o.marks;
+                        p.marks = std::mem::take(&mut o.marks);
+                        p.read_at = o.read_at;
                     }
                 }
                 fresh.at = match old.at {
@@ -793,7 +829,8 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
                 registered: true,
                 launched: false,
                 look,
-                marks: (false, None, None),
+                marks: Marks::default(),
+                read_at: None,
             })
             .collect(),
         problems: Vec::new(),
@@ -1231,7 +1268,7 @@ mod tests {
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
-        let before = a.layer.as_ref().unwrap().places[0].marks;
+        let before = a.layer.as_ref().unwrap().places[0].marks.clone();
 
         a.follow();
         assert!(!a.loading(), "아무것도 안 바뀌었는데 읽으러 갔다");
@@ -1258,6 +1295,56 @@ mod tests {
         settle(&mut a);
         let Look::Open { sum } = look(&a, "two") else { panic!() };
         assert_eq!(sum.picked.len(), 1, "올라갈 때 바뀐 것을 안 읽었다");
+    }
+
+    /// **워크트리를 치우면 층이 따라간다**(moai-al0x). 자리 판정은 `.moai` 가 그대로여도 워크트리
+    /// 하나로 답이 바뀐다 — 한때 층은 두 파일만 재어 SPC r 전까지 "자리 없는 것" 을 안 댔다.
+    #[test]
+    fn removing_the_worktree_that_held_a_picked_line_shows_on_the_layer() {
+        let s = Scratch::fenced("layer-worktree-gone");
+        let main = s.project("main", &[("argos-0002", "집은 줄", "in_progress")]);
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../argos-0002", "-b", "worktree-argos-0002"]);
+        // 딸린 워크트리가 하나도 없으면 판정은 조용하다(워크트리 규약을 안 쓰는 저장소) — 하나는 남긴다.
+        run(&main, &["worktree", "add", "-q", "../other", "-b", "other"]);
+        let cfg = s.register(&[&main]);
+        let mut a = layered(&cfg);
+        let stranded = |a: &App| match look(a, "main") {
+            Look::Open { sum } => sum.stranded,
+            _ => panic!("main 이 안 열렸다"),
+        };
+        assert_eq!(stranded(&a), 0, "이름이 쥔 워크트리가 있는데 자리 없다고 댄다");
+
+        std::fs::remove_dir_all(s.join("argos-0002")).unwrap();
+        settle(&mut a);
+        assert_eq!(stranded(&a), 1, "워크트리를 치웠는데 층이 옛 수를 낸다");
+    }
+
+    /// **파일이 그대로여도 시계가 가면 다시 읽는다**(moai-al0x). 요약에는 시계로 재는 것(워크트리가
+    /// 뜰 한 시간 틈, 날로 재는 경고)이 들어, 표식만 보면 SPC r 전까지 옛 수가 선다. 층에 선 동안만이다.
+    #[test]
+    fn a_layer_line_read_long_ago_is_reread_even_if_nothing_changed() {
+        let s = Scratch::new("layer-clock");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.follow();
+        assert!(!a.loading(), "방금 읽은 것을 또 읽으러 갔다");
+
+        let long_ago = std::time::Instant::now().checked_sub(REREAD_EVERY).expect("시계가 1분도 안 돌았다");
+        a.layer.as_mut().unwrap().places[1].read_at = Some(long_ago);
+        assert_eq!(a.layer.as_ref().unwrap().stale(), std::slice::from_ref(&two), "오래된 줄만 골라야 한다");
+        settle(&mut a);
+        let read_at = a.layer.as_ref().unwrap().places[1].read_at.unwrap();
+        assert!(read_at.elapsed() < REREAD_EVERY, "다시 읽고도 읽은 때를 안 올렸다");
+
+        // 안에 들어가 있는 동안은 시계가 가도 남의 줄을 안 읽는다.
+        a.key(key(KeyCode::Enter));
+        a.layer.as_mut().unwrap().places[1].read_at = Some(long_ago);
+        a.follow();
+        assert!(!a.loading(), "안에 있는 동안 시계를 보고 남의 프로젝트를 읽으러 갔다");
     }
 
     /// **`.moai` 없는 디렉터리가 사라지거나 다시 생기는 것도 본다.** 두 파일의 표식은 그
