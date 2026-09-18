@@ -4817,3 +4817,19 @@
 {"ts":"2026-09-18T15:18:16Z","id":"moai-k7wl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — guide 글 두 곳과 AGENTS·플러그인 다시 쓰기)"}
 {"ts":"2026-09-18T15:18:16Z","id":"moai-k7wl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T15:18:24Z","id":"moai-3uc6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없다 — 남은 멤버 k7wl 을 da2a155 로 병합해 에픽이 닫혔다. 리뷰 moai-3uc6.hdi 가 짚은 연 스냅샷 가운데 라는 범위는 글에 반영했다"}
+{"ts":"2026-09-18T15:18:25Z","id":"moai-gyqh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T15:18:34Z","id":"moai-1jay","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:18:34Z","id":"moai-4tgv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:18:34Z","id":"moai-d699","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:18:35Z","id":"moai-fbdg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:18:35Z","id":"moai-lw7i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:18:35Z","id":"moai-m7iy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:18:35Z","id":"moai-rg5q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:18:35Z","id":"moai-shoa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:18:36Z","id":"moai-wt4n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:18:36Z","id":"moai-xemz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 구현·시험 끝(워크트리 worktree-moai-xemz, develop 받음). 16:02 UTC 뒤 리뷰 moai-xemz.p03(max, 범위 git merge-base develop HEAD 부터) 를 돌리고 병합한다"}
+{"ts":"2026-09-18T15:18:40Z","id":"moai-b7o3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"잰 값(rustc 2~3, 등록 넷 — main 과 딸린 워크트리 셋): 밖 moai status 140~160ms → 60~70ms. projects::each 로 열기와 셈을 나란히"}
+{"ts":"2026-09-18T15:18:40Z","id":"moai-b7o3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:18:45Z","id":"moai-es40","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:18:46Z","id":"moai-mr9w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T15:18:46Z","id":"moai-r8gw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: es40 끝(워크트리 worktree-moai-r8gw, 커밋 149b0c1). oxup 은 xemz 병합 뒤 develop 을 받아 report::Soil 로 status·rollup·rollup_of·milestone_from_above 의 소속 지도를 한 벌로 넘긴다"}
