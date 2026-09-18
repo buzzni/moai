@@ -5050,3 +5050,23 @@
 {"ts":"2026-09-18T23:30:16Z","id":"moai-edgj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"in_progress"}
 {"ts":"2026-09-18T23:30:18Z","id":"moai-lr1s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T23:30:21Z","id":"moai-6rrb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T23:42:48Z","id":"moai-5wk4.76z","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 한국어 글 에픽 전체(훅 알림·skill install·안내)"}
+{"ts":"2026-09-18T23:42:53Z","id":"moai-5wk4.76z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T23:42:58Z","id":"moai-edgj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T23:43:00Z","id":"moai-lr1s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T23:43:04Z","id":"moai-6rrb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T23:44:48Z","id":"moai-d3ya","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — TUI 화면 배치 취향, 동작은 틀리지 않는다"}
+{"ts":"2026-09-18T23:44:48Z","id":"moai-dt5q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 안 읽음의 가장자리"}
+{"ts":"2026-09-18T23:44:48Z","id":"moai-omx7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 안 읽음의 가장자리"}
+{"ts":"2026-09-18T23:44:49Z","id":"moai-q4ef","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 안 읽음의 가장자리"}
+{"ts":"2026-09-18T23:44:49Z","id":"moai-rfnv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 안 읽음의 가장자리"}
+{"ts":"2026-09-18T23:44:49Z","id":"moai-15g8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 내부 정리·모서리, 동작 불변이거나 겪은 보고 없음"}
+{"ts":"2026-09-18T23:44:49Z","id":"moai-s63n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 내부 정리·모서리, 동작 불변이거나 겪은 보고 없음"}
+{"ts":"2026-09-18T23:44:49Z","id":"moai-qrnl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 내부 정리·모서리, 동작 불변이거나 겪은 보고 없음"}
+{"ts":"2026-09-18T23:44:50Z","id":"moai-p3rw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 내부 정리·모서리, 동작 불변이거나 겪은 보고 없음"}
+{"ts":"2026-09-18T23:44:50Z","id":"moai-maav","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 내부 정리·모서리, 동작 불변이거나 겪은 보고 없음"}
+{"ts":"2026-09-18T23:44:50Z","id":"moai-0b7s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 내부 정리·모서리, 동작 불변이거나 겪은 보고 없음"}
+{"ts":"2026-09-18T23:44:50Z","id":"moai-uvm9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 내부 정리·모서리, 동작 불변이거나 겪은 보고 없음"}
+{"ts":"2026-09-18T23:44:51Z","id":"moai-zsu8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 내부 정리·모서리, 동작 불변이거나 겪은 보고 없음"}
+{"ts":"2026-09-18T23:44:51Z","id":"moai-bx2q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 써 본 뒤 필요하면"}
+{"ts":"2026-09-18T23:44:51Z","id":"moai-xlpc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 써 본 뒤 필요하면"}
