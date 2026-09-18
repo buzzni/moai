@@ -4402,3 +4402,4 @@
 {"ts":"2026-09-18T12:06:42Z","id":"moai-ezdp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-18T12:06:42Z","id":"moai-wxkm.95w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영 없음. -h 넘침은 --help 범위 밖이라 idea moai-1ovx(에픽 안)에 잰 값과 함께 넘겼다. hook 은 moai-h0r2 몫. NO_COLOR 는 자리가 없어 뺀 채 둔다"}
 {"ts":"2026-09-18T12:06:43Z","id":"moai-800o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — layer.rs 한 파일, 되돌리기 한 함수로 모으고 층 읽기·커밋 일감 버림)"}
+{"ts":"2026-09-18T12:06:51Z","id":"moai-vycf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽 닫힘(fe5fd35). 남은 것은 idea moai-luon·moai-7ype·moai-3vnk·moai-35zk — 설정 쓰기의 CRLF·거절 코드·주석 자리·보기 키 덮기. 7ype 는 set_hue·merge_look·mark_read 셋을 한 번에 정한다"}
