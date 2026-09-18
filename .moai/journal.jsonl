@@ -3503,3 +3503,6 @@
 {"ts":"2026-09-18T00:29:02Z","id":"moai-xyhd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-gbqb 에서 펼쳤다 — 훅의 shell_writes 가 이음사를 안 본다 — 집기와 쓰기를 세미콜론이나 || 로 이으면 집기가 져도 뒤의 쓰기가 지나간다(&& 는 안전). 렉서의 Seg 에 이음사를 싣는 파서 손질 (moai-8xwi.rzg 가 넘김)"}
 {"ts":"2026-09-18T00:29:02Z","id":"moai-gbqb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-xyhd 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-18T00:29:10Z","id":"moai-yxlq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T00:30:31Z","id":"moai-xdli.2b7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 2026-09-18 새 세션에서 main 을 받고(d015c14, 충돌 없음, 847+310 통과) 이 리뷰를 xhigh 로 다시 돌리는 중. 반영 뒤 루트에서 worktree-moai-xdli 머지 → 워크트리·가지 삭제 → p3bs·tbin·oepz·fygk 와 이 리뷰 done → 감독 moa-issue-14 에 보고."}
+{"ts":"2026-09-18T00:31:45Z","id":"moai-olaj.263","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-olaj 전체 (머지 전, gu5g 포함)"}
+{"ts":"2026-09-18T00:31:52Z","id":"moai-olaj.263","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
