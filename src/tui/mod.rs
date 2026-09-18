@@ -1447,6 +1447,11 @@ impl App {
             let mut fields = view::Fields::default();
             for f in view::Field::ALL {
                 let knew = match &look.fields_known {
+                    // **빈 목록은 "모든 열을 알았다" 다**(moai-4qkj, 사용자 결정 2026-09-18). 이 바이너리는
+                    // 늘 열 이름을 다 적으니(`look_now`) 빈 목록은 손으로 적은 것이고, 그 사람이 적은
+                    // `fields` 가 곧 켠 열이다. "아무 열도 몰랐다" 로 읽으면 모든 열이 기본값으로 서고
+                    // 적힌 `fields` 가 한마디 없이 버려진다 — 이 설정에서 그런 자리는 거기 하나였다.
+                    Some(known) if known.is_empty() => true,
                     Some(known) => known.iter().any(|w| w == f.name()),
                     // 이 키가 없던 때의 어휘 — 그때 있던 열이면 안 적힌 것이 곧 "껐다" 다.
                     None => view::Field::BEFORE_KNOWN.contains(&f),
@@ -2316,6 +2321,25 @@ mod tests {
         let mut c = App::new(Vec::new(), cfg(), Path::new());
         c.adopt_look(&off, Vec::new());
         assert!(!c.fields.shows(view::Field::Names), "끈 열이 다음 실행에 되살아났다");
+    }
+
+    /// **빈 `fields_known` 은 "모든 열을 알았다" 다**(moai-4qkj, 사용자 결정 2026-09-18). 이 바이너리는
+    /// 그런 설정을 안 쓰니 손으로 적은 것이고, 그 사람이 적은 `fields` 가 곧 켠 열이다. 한때 모든 열이
+    /// "몰랐던 열" 이 되어 기본값이 서고 적힌 `fields` 는 한마디 없이 버려졌다 — 이 설정에서
+    /// `fields` 가 말없이 무시되는 유일한 자리였다. 경고는 안 낸다: 읽기는 관대하다.
+    #[test]
+    fn an_empty_fields_known_takes_the_written_fields_as_they_are() {
+        let hand = crate::user_config::Look {
+            fields: Some(vec!["id".into()]),
+            fields_known: Some(Vec::new()),
+            ..crate::user_config::Look::default()
+        };
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&hand, Vec::new());
+        for f in view::Field::ALL {
+            assert_eq!(a.fields.shows(f), f == view::Field::Id, "{} 이 적힌 fields 를 안 따랐다", f.name());
+        }
+        assert_eq!(a.notice, None, "관대히 읽을 자리에서 잔소리를 했다");
     }
 
     /// **끈 새 열은 파일을 한 바퀴 돌고도 꺼진 채다**(moai-6bc0 단계 리뷰). `look_now()` 끼리 견주는
