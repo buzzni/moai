@@ -1841,10 +1841,13 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let progress: BTreeMap<&str, u8> = stands.iter().map(|(id, s)| (*id, s.progress.unwrap_or(0))).collect();
     let (states, waits) = split_stands(stands);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
+    let eclipsed = eclipsed(issues);
     let mut out: Vec<&Issue> = issues
         .iter()
         // 값싼 막음 검사를 먼저 한다 — `unblocked_pick` 은 자식을 찾느라 목록을 걷는다.
-        .filter(|i| !is_blocked(i, &by_id, &states, &waits) && unblocked_pick(i, issues, cfg, &out_of_plan))
+        .filter(|i| {
+            !is_blocked(i, &by_id, &states, &waits) && unblocked_pick(i, issues, cfg, &out_of_plan, &eclipsed)
+        })
         .collect();
 
     // 급한 것 → 끝나가는 에픽 → 오래된 것. 끝나가는 것을 먼저 집어야
@@ -1904,11 +1907,17 @@ fn blocking<'a, 'c>(
 
 /// 막음만 빼면 집을 수 있는가. `ready` 와 `held` 가 **같은 자로** 고른다 —
 /// 둘이 따로 고르면 `held` 가 댄 줄이 막음을 풀어도 `ready` 에 안 올라온다.
+///
+/// **가려진 줄([`eclipsed`])은 집을 일이 아니다** (moai-lg2t). 그 줄은 트리에서
+/// `(길 잃음)` 에 서고 어느 묶음에도 안 드는데, `ready` 만 그것을 집으라고 내밀며
+/// 에픽 칸에 `에픽 없음` 을 달았다. 그 id 는 `duplicate_id` 로 파일째 쓰기가 막혀
+/// 집어도 `mv` 가 거절한다 — 자리 없는 줄을 내밀 까닭이 없다.
 fn unblocked_pick(
     i: &Issue,
     issues: &[Issue],
     cfg: &Config,
     out_of_plan: &BTreeSet<&str>,
+    eclipsed: &impl Fn(&Issue) -> bool,
 ) -> bool {
     // **끝난 에픽인지는 묻지 않는다.** 묶음의 칸은 멤버에서 읽으므로(`group_states`)
     // 읽은 칸이 done 인 묶음에는 집을 멤버가 이미 없고, 적힌 칸으로 물으면 손으로
@@ -1923,6 +1932,7 @@ fn unblocked_pick(
     };
     is_work(i)                                   // 묶음도 생각도 집는 게 아니다
         && !out_of_plan.contains(i.id.as_str())  // 미뤄 둔 것과 그 밑도
+        && !eclipsed(i)                          // 쌍둥이에게 자리를 뺏긴 줄도
         && i.status.as_str() == cfg.first_status()
         && !has_open_child()
 }
@@ -1955,6 +1965,7 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
     let (roots, states, waits) = blocking(issues, cfg, &group, &by_id);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     let sources = deferred_sources(issues);
+    let eclipsed = eclipsed(issues);
     // 값싼 막음 검사를 먼저 한다. `unblocked_pick` 은 자식을 찾느라 목록을
     // 한 번 걷는다 — 모든 줄에 먼저 부르면 `ready` 가 부를 때마다 제곱이다.
     let mut out: Vec<Held> = issues
@@ -1963,7 +1974,7 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
             let (by, empty) = holding(i, &by_id, &out_of_plan, &states, &waits);
             (!by.is_empty() || !empty.is_empty()).then_some((i, by, empty))
         })
-        .filter(|(i, _, _)| unblocked_pick(i, issues, cfg, &out_of_plan))
+        .filter(|(i, _, _)| unblocked_pick(i, issues, cfg, &out_of_plan, &eclipsed))
         .map(|(i, by, empty)| {
             // **풀어야 할 미룸을 다 댄다**(moai-g2a1). 가까운 하나만 대면 그것을 풀고도 여전히
             // 막힌 채 그제야 다음을 댄다(moai-phzi). 제가 미뤄진 묶음이 멤버도 다 미뤘으면
@@ -5007,6 +5018,30 @@ mod tests {
             let named = st.warnings.iter().filter(|w| w.kind == kind).flat_map(|w| w.ids.iter()).any(|id| id == "argos-0003");
             assert!(!named, "{kind} 가 가려진 줄을 쌍둥이 값으로 셌다 — {:?}", st.warnings);
         }
+    }
+
+    /// **가려진 줄은 집을 일이 아니다** (moai-lg2t). 트리에서 `(길 잃음)` 에 서는 줄을
+    /// `ready` 가 내밀면 에픽 칸에 `에픽 없음` 을 달고, 집으려 하면 파일째 쓰기가 막힌다.
+    /// 막혀 있어도 `held` 가 그 줄을 도로 집을 일로 대지 않는다 — 둘은 한 자로 고른다.
+    #[test]
+    fn an_eclipsed_row_is_not_offered_as_work() {
+        let mut shadowed = make("argos-0001", Kind::Issue, "todo");
+        shadowed.blocked_by = vec!["argos-0009".into()];
+        let rows = vec![
+            deferred("argos-0009", "todo"),
+            make("argos-0002", Kind::Issue, "todo"),
+            shadowed,
+            make("argos-0001", Kind::Idea, "todo"),
+            make("argos-0002", Kind::Epic, "todo"),
+        ];
+        let rows = &rows[..];
+        let ids: Vec<&str> = ready(rows, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert!(!ids.contains(&"argos-0001") && !ids.contains(&"argos-0002"), "가려진 줄을 냈다 — {ids:?}");
+        assert!(held(rows, &cfg()).is_empty(), "가려진 줄을 막힌 일로 댔다");
+
+        // 같은 종류의 쌍둥이는 가려지지 않는다 — 같은 값을 같은 자로 읽는다.
+        let twins = vec![make("argos-0003", Kind::Issue, "todo"), make("argos-0003", Kind::Issue, "todo")];
+        assert_eq!(ready(&twins, &cfg()).len(), 2);
     }
 
     // ── 미룬 것이 막고 있으면 까닭을 말한다 ──────────────────────────
