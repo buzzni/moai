@@ -3968,3 +3968,18 @@
 {"ts":"2026-09-18T10:14:30Z","id":"moai-ghnb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 일꾼 브리프 글과 그것을 붙드는 시험, 한 파일 안)"}
 {"ts":"2026-09-18T10:14:30Z","id":"moai-a1c1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"f5d20b0 로 main 에 들어갔다"}
 {"ts":"2026-09-18T10:14:30Z","id":"moai-ghnb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"f5d20b0 로 main 에 들어갔다"}
+{"ts":"2026-09-18T10:18:53Z","id":"moai-dw63.e31","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"등급을 xhigh 에서 max 로 올린다 — main 에 들어온 새 리뷰 규약(f5d20b0, moai-bx6t)은 훅을 건드린 멤버가 있는 에픽 끝을 max 로 본다. xhigh 판은 결과 없이 멈췄다. 범위는 main...HEAD(cd0aad0 + main 받기)."}
+{"ts":"2026-09-18T10:20:11Z","id":"moai-dw63.e31","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 워크트리 .claude/worktrees/moai-dw63-hook(가지 worktree-moai-dw63-hook, ceaea1d)에서 /code-review max --fix main...HEAD 를 다시 돌린다. 재부팅으로 max 판이 결과 없이 멈췄다. 끝나면 원문·판단 두 노트, main 머지, 8ema·d4e0·e31 닫기, 감독 moa-issue-bb 에 보고"}
+{"ts":"2026-09-18T10:20:11Z","id":"moai-8ema","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 구현·시험 끝(cd0aad0, 워크트리 moai-dw63-hook). 리뷰 moai-dw63.e31 을 마치고 머지한다"}
+{"ts":"2026-09-18T10:20:12Z","id":"moai-d4e0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 구현·시험 끝(cd0aad0, 워크트리 moai-dw63-hook). 리뷰 moai-dw63.e31 을 마치고 머지한다"}
+{"ts":"2026-09-18T10:24:50Z","id":"moai-dw63.e31","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음(고침): 본 가지가 main 에서 develop 으로 바뀐다(감독 알림). 리뷰 범위는 develop...HEAD, 워크트리에서 받을 때는 git merge develop, 루트 병합은 develop 에서 한다"}
+{"ts":"2026-09-18T10:28:06Z","id":"moai-5255","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 가 본 가지를 main 으로 박아 적는다 — develop 으로 바꿨다"}
+{"ts":"2026-09-18T10:28:28Z","id":"moai-5255","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T10:32:40Z","id":"moai-5255.9xl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — CLAUDE.md 의 본 가지 이름 (moai-5255)"}
+{"ts":"2026-09-18T10:32:46Z","id":"moai-5255.9xl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T10:32:58Z","id":"moai-5255","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: CLAUDE.md 고침은 워크트리 moai-5255 의 497de56. 시험 892+327. low 리뷰 moai-5255.9xl 이 도는 중 — 끝나면 원문·판단 → develop 받기 → 루트에서 --no-ff 병합 → 워크트리·가지 삭제 → done. 리모트 push 는 권한 판정에 막혀 사용자가 직접 친다(1,042 커밋)"}
+{"ts":"2026-09-18T10:33:11Z","id":"moai-5255.9xl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰 원문: 지적 없음. 가지의 바뀐 것은 CLAUDE.md 글 하나 — 워크트리 걸음과 리뷰 범위 명령의 main 을 develop 으로 바꾸고, 2026-09-18 부터 develop 이 기본 가지라는 줄을 더했다. 코드가 없고, 바뀐 줄에 남은 main 이 없다. --fix 로 고칠 것이 없어 파일을 안 건드렸다. diff 만 읽었고 빌드·시험은 안 돌렸다."}
+{"ts":"2026-09-18T10:33:11Z","id":"moai-5255.9xl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 받을 것이 없다. 시험은 일꾼 쪽에서 892+327 을 돌렸다(리뷰는 안 돌렸다). guide.rs 를 안 고친 판단에 리뷰가 따로 말하지 않았다 — 스킬 글이 본 가지를 루트 체크아웃에서 읽고 main 을 박지 말라는 시험이 있다는 근거는 이슈 본문에 있다.\nmodel: anthropic/opus-5 tokens=48288 (low — 글 한 파일, 리뷰 서브에이전트가 쓴 것)"}
+{"ts":"2026-09-18T10:33:11Z","id":"moai-5255.9xl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 없음 — 받을 것도 넘길 것도 없다"}
+{"ts":"2026-09-18T10:33:12Z","id":"moai-5255","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — CLAUDE.md 글에서 가지 이름만 바꿈)"}
+{"ts":"2026-09-18T10:33:12Z","id":"moai-5255","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 에 병합했다"}

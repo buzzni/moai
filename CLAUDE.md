@@ -126,18 +126,18 @@
 
 ## 워크트리
 
-**moai 에서 집은 일은 모두 워크트리에서 한다.** main(이나 develop)에서 직접
+**moai 에서 집은 일은 모두 워크트리에서 한다.** 본 가지(`develop`)에서 직접
 하면 여러 세션이 같은 가지에 쌓아, 병합할 때 서로 끝나기를 기다려야 한다.
 
-    moai mv <id> in_progress --from todo          main 에서 집는다
+    moai mv <id> in_progress --from todo          develop 에서 집는다
     git commit -m "chore(tracker): <id> 를 워크트리에서 집는다"
-    git worktree add -b worktree-moai-<id> .claude/worktrees/moai-<id> main
-    (작업 · 커밋 · 필요하면 main 을 받는다)
-    git merge worktree-moai-<id>                  main 에서, "merge: … (<id>)"
-    moai mv <id> done                             "chore(tracker): <id> 를 main 머지와 함께 닫는다"
+    git worktree add -b worktree-moai-<id> .claude/worktrees/moai-<id> develop
+    (작업 · 커밋 · 필요하면 develop 을 받는다)
+    git merge worktree-moai-<id>                  develop 에서, "merge: … (<id>)"
+    moai mv <id> done                             "chore(tracker): <id> 를 develop 머지와 함께 닫는다"
 
-- **집기는 main 에서 커밋한다.** 옆 세션의 `moai ready --worktree` 와 보드가
-  누가 무엇을 쥐었는지 보려면 그 줄이 main 에 있어야 한다
+- **집기는 develop 에서 커밋한다.** 옆 세션의 `moai ready --worktree` 와 보드가
+  누가 무엇을 쥐었는지 보려면 그 줄이 develop 에 있어야 한다
 - **집을 때 본 칸을 함께 준다** (`--from todo`). 여기는 세션 예닐곱이 같은
   `.moai` 를 쓰는 저장소라 `ready` 와 `mv` 사이가 실제로 겨뤄진다 — 본 칸이
   달라졌으면 옮기지 않고 0 아닌 코드로 말하니, 남이 집은 일을 뒤늦게 덮지
@@ -145,10 +145,12 @@
 - **트래커는 워크트리 안에서 쓰지 않는다.** 워크트리의 `.moai` 를 고치면 병합에서
   스냅샷이 충돌한다 — 노트도 칸 옮김도 `moai -C <루트>` 로 루트에 쓰고, 루트에서
   `git commit -- .moai/` 한다
-- **가지는 로컬 `main` 에서 뜬다.** `EnterWorktree` 에 `name` 만 주면
-  `origin/main` 에서 뜨는데, 그쪽은 로컬보다 한참 낡았을 수 있다 (2026-09-14
+- **가지는 로컬 `develop` 에서 뜬다.** `EnterWorktree` 에 `name` 만 주면
+  `origin/develop` 에서 뜨는데, 그쪽은 로컬보다 한참 낡았을 수 있다 (2026-09-14
   에 91커밋 뒤였다).
   `git worktree add` 로 만든 뒤 `EnterWorktree` 에 `path` 로 들어간다
+- **본 가지는 `develop` 이다.** 2026-09-18 에 사용자가 `main` 에서 바꿨다 — 로컬 가지와
+  GitHub 의 기본 가지 둘 다. 옛 `main` 주소는 GitHub 가 새 이름으로 이어 준다
 - 워크트리마다 `target/` 이 따로다. 처음 한 번 `cargo build --release` 가 든다
 
 ## 커밋
@@ -189,7 +191,7 @@
 
 **에픽의 멤버는 따로 보지 않는다. 멤버가 다 끝나면 에픽 끝에서 한 번 본다.**
 `/code-review <등급> --fix` 의 등급은 **가장 무거운 멤버의 난이도에서 한 칸 위**다.
-범위는 `git merge-base main HEAD` 부터 에픽 전체의 diff 다. 에픽에 안 든 이슈
+범위는 `git merge-base develop HEAD` 부터 에픽 전체의 diff 다. 에픽에 안 든 이슈
 하나는 끝날 때 에픽 밖 이슈 하나 줄(`low`·`medium`·`high`)에서 골라 본다.
 
 | 무엇을 | 등급 | 고르는 자 |
