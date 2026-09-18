@@ -588,6 +588,10 @@ pub fn blinding<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> V
     }
     // 집은 줄이 없으면 가릴 판정도 없다 — [`places`] 의 빠른 길(`blind = false`)과 같은 답이다.
     // 안 거르면 `nameless` 가 빈 목록에 참을 내, 못 읽은 워크트리를 다 "가린다" 로 센다.
+    //
+    // **같은 id 의 줄을 [`places`] 처럼 접지 않아도 답이 같다** — [`claims`] 는 줄에서 `id` 만
+    // 보고 소속은 `epics`·`stones` 지도에서 읽는데, 그 지도는 이미 뒷줄이 이긴다(`groups`). 접는
+    // 값을 아끼되, `claims` 가 줄의 필드를 직접 보게 되면 여기도 저쪽처럼 접어야 한다.
     let picked = wip(issues, cfg);
     if picked.is_empty() {
         return Vec::new();

@@ -1517,7 +1517,7 @@ pub fn projects_status(
         // **센 것은 한 줄씩 댄다** — 안쪽 `moai status` 가 stderr 에 내는 그 말이다. 수만 세고 줄을
         // 안 내면 아래의 `옆 워크트리 문제 N건 — 위 줄` 이 없는 줄을 가리키고, 보는 쪽은 어느
         // 워크트리를 고칠지 모른다.
-        let blind: Vec<String> = if b.swept {
+        let unread: Vec<String> = if b.swept {
             Vec::new()
         } else {
             b.unread
@@ -1525,14 +1525,14 @@ pub fn projects_status(
                 .map(|t| format!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display()))
                 .collect()
         };
-        troubles(&mut out, &blind);
+        troubles(&mut out, &unread);
         // **알림은 세지 않는다** — `moai status` 의 "드러난 문제 없다" 와 같은 자다.
         let n = b.status.warnings.len();
         let fatal = b.status.warnings.iter().filter(|w| w.fatal).count();
         let go = paint(style::DIM, &format!("→ `moai -C {} status`", shell_arg(&p.path)));
         // 옆 워크트리의 문제는 화면에서만 센다 — 위에 `!` 줄로 섰는데 밑에서 "문제 없다" 면
         // 덩어리가 제 말을 뒤집는다(moai-cuw2, `status` 와 같은 자).
-        let t = b.trouble.len() + blind.len();
+        let t = b.trouble.len() + unread.len();
         let beside = match t {
             0 => String::new(),
             _ => format!(" · 옆 워크트리 문제 {t}건"),

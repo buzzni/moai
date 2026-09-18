@@ -100,10 +100,15 @@ pub struct Summary {
     /// 그중 집었는데 일하는 워크트리가 없는 줄(moai-p3bs) — 층은 이것을 낱말로 따로 댄다.
     /// 죽은 세션을 찾으러 돌아온 사람이 보는 첫 화면이 여기다.
     pub stranded: usize,
-    /// 자리를 재다 **못 읽어 판정을 가린** 워크트리의 수(리뷰 moai-p3bs.op2, `report::blinding`).
-    /// 그런 워크트리가 있으면 위의 수가 "센 결과 0" 이 아니라 "못 셌다" 인데, 이것이 없으면 층이
-    /// 그 둘을 같은 화면으로 낸다. 못 읽어도 이름이 집은 줄을 가리키는 워크트리는 판정을 안
-    /// 가리므로 안 센다(moai-rgz9) — 세면 층만 "자리를 다 못 셌다" 라고 한다.
+    /// 스냅샷을 **못 읽은** 워크트리의 수(`worktree::Unread::all`) — 층의 `!` 와 "스냅샷을 못 읽은
+    /// 워크트리 N곳" 이 이것으로 선다(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt). 판정을 안 가려도
+    /// 깨진 파일은 고칠 사람이 알아야 하고, 한눈 보기가 같은 것을 `옆 워크트리 문제 N건` 으로 센다 —
+    /// 여기만 조용하면 두 화면이 같은 저장소를 달리 말한다.
+    pub unread: usize,
+    /// 그중 자리 판정을 **가린** 것(`report::blinding`). 그런 워크트리가 있으면 위의 `stranded` 가
+    /// "센 결과 0" 이 아니라 "못 셌다" 인데, 이것이 없으면 층이 그 둘을 같은 화면으로 낸다.
+    /// 못 읽어도 이름이 집은 줄을 가리키는 워크트리는 판정을 안 가리므로 여기 안 든다(moai-rgz9) —
+    /// 들면 다 세고도 "자리를 다 못 셌다" 가 선다.
     pub blind: usize,
     pub unreadable: usize,
 }
@@ -151,6 +156,7 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
             .collect(),
         warnings: st.warnings.len() + usize::from(lost.is_some()),
         stranded,
+        unread: unread.all.len(),
         blind: unread.blinding.len(),
         unreadable: load.errors.len(),
     }
