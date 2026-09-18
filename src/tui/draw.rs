@@ -2436,6 +2436,86 @@ pub(super) mod tests {
         assert!(seen(&mut a).iter().any(|l| l.contains("TITLE")), "다시 눌러도 안 돌아왔다");
     }
 
+    /// **열 이름 줄을 켠 채로 폭을 훑는다**(moai-ehmj). 그림 시험의 바탕(`every`)은 이 줄을 꺼
+    /// 두고 도는데 — 줄 하나를 먹어 좁은 창 시험의 자리 셈이 다 밀려서다 — 그러면 이름 줄의 폭
+    /// 셈(`names_line`)은 폭 120 한 군데서만 보인다. 그 줄은 제 `clip` 없이 `Paragraph` 가
+    /// 자르므로, 좁은 폭에서 어긋나도 아무 시험도 모른다.
+    ///
+    /// 폭마다 둘을 본다. **선 이름은 값과 같은 칸에 선다**, 그리고 **걷힌 열의 이름은 안 남는다**
+    /// (좁으면 날짜 → 담당 → 태그 차례로 걷힌다). 사용자가 켠 채 보는 그림이 이것이다.
+    #[test]
+    fn the_column_names_stand_over_their_values_at_every_width() {
+        let mut is = issues();
+        for i in &mut is {
+            i.assignee = Some("레이븐".into());
+            i.tags = vec!["tui".into()];
+        }
+        // 화면 칸으로 잰다 — 한글은 한 글자가 두 칸이고 바이트로는 셋이다.
+        let col = |l: &str, needle: &str| l.find(needle).map(|at| crate::text::width(&l[..at]));
+        let mut seen_names = 0;
+        for width in [40u16, 60, 80, 120] {
+            let mut a = App::new(is.clone(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+            a.view = super::super::view::View::default();
+            assert!(a.fields.shows(super::super::view::Field::Names), "열 이름 줄이 기본 켬이 아니다");
+            a.see();
+            a.hit("SPC c a");
+            a.hit("SPC c g");
+            // 목록 칸만 본다 — 상세 칸도 id 와 담당을 대므로 줄 전체에서 찾으면 상세의 줄을 잡는다.
+            let lines: Vec<String> = render(&mut a, width, 16)
+                .into_iter()
+                .map(|l| l.split('│').next().unwrap_or_default().to_string())
+                .collect();
+            let screen = lines.join("\n");
+            let Some(names) = lines.iter().find(|l| l.contains("TITLE")) else {
+                // 이름 줄은 목록 칸이 두 줄 넘게 설 때만 선다. 그 폭에서 안 섰으면 볼 것이 없다.
+                continue;
+            };
+            seen_names += 1;
+            let rows: Vec<&String> = lines.iter().filter(|l| l.contains("argos-")).collect();
+            assert!(!rows.is_empty(), "@{width} 목록 줄이 없다\n{screen}");
+            // TITLE 은 칸 글리프 두 칸 뒤, 제목이 시작하는 칸에 선다.
+            let title = col(names, "TITLE").unwrap();
+            let first = rows[0];
+            let id = first.find("argos-").unwrap();
+            let id_col = crate::text::width(&first[..id]);
+            assert_eq!(col(names, "id"), Some(id_col), "@{width} id 이름이 값과 다른 칸에 섰다\n{names:?}\n{first:?}");
+            assert!(title > id_col, "@{width} TITLE 이 id 보다 앞에 섰다 — {names:?}");
+            // 오른쪽 열 — 선 이름은 값과 같은 칸, 값이 없는 열의 이름은 없다.
+            for (name, value) in [("WHO", "레이븐"), ("TAGS", "#tui")] {
+                let row = rows.iter().find(|l| l.contains(value));
+                match (col(names, name), row) {
+                    (Some(n), Some(r)) => assert_eq!(
+                        n,
+                        col(r, value).unwrap(),
+                        "@{width} {name} 이 값과 다른 칸에 섰다\n{names:?}\n{r:?}"
+                    ),
+                    (Some(_), None) => panic!("@{width} {name} 열은 걷혔는데 이름이 남았다\n{screen}"),
+                    (None, Some(r)) => panic!("@{width} {name} 값은 섰는데 이름이 없다\n{names:?}\n{r:?}"),
+                    (None, None) => {}
+                }
+            }
+            // **셈 열은 좁아도 선다** — 오른쪽 열이 다 걷힌 폭에서 폭 셈이 어긋나는 것은 이것만
+            // 드러낸다. `n/n` 과 값(`1/2`)은 오른쪽 끝을 맞춘다. 이름 줄이 한 칸 넘치면
+            // `Paragraph` 가 말없이 잘라 `n/`, 모자라면 한 칸 왼쪽에 선다.
+            let end = |l: &str, at: usize, len: usize| crate::text::width(&l[..at]) + len;
+            let tally = rows.iter().find_map(|r| {
+                let slash = r.rfind('/')?;
+                let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+                let head = r[..slash].rfind(' ').map_or(0, |b| b + 1);
+                let tail = r[slash + 1..].find(|c: char| !c.is_ascii_digit()).map_or(r.len(), |e| slash + 1 + e);
+                (digits(&r[head..slash]) && digits(&r[slash + 1..tail])).then(|| end(r, head, tail - head))
+            });
+            match (names.find("n/n"), tally) {
+                (Some(at), Some(t)) => {
+                    assert_eq!(end(names, at, 3), t, "@{width} n/n 이 셈 값과 다른 끝에 섰다\n{names:?}\n{screen}")
+                }
+                (None, Some(_)) => panic!("@{width} 셈 값은 섰는데 n/n 이 없다(잘렸나)\n{names:?}"),
+                _ => {}
+            }
+        }
+        assert!(seen_names >= 3, "열 이름 줄이 선 폭이 {seen_names}개뿐이다 — 훑기가 헛돈다");
+    }
+
     /// **이름 줄은 묶음 없는 디렉터리에서도 값 위에 선다**(moai-6bc0 단계 리뷰). 줄은 오른쪽 열이
     /// 서면 셈이 없는 잎에도 셈의 폭(`TALLY_W`)을 비워 두는데, 이름 줄이 그 자리를 안 비우면 켠
     /// 이름이 통째로 아홉 칸 오른쪽으로 밀린다 — 에픽 안이 늘 그런 자리다.
