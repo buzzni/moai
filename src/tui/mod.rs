@@ -3216,7 +3216,7 @@ mod tests {
     #[test]
     fn r_marks_like_the_cli_and_never_rewinds_a_mark_written_elsewhere() {
         let s = Scratch::new("read-marks-tui");
-        let config = s.0.join("user.toml");
+        let config = s.path().join("user.toml");
         let mut a = app();
         for i in &mut a.issues {
             i.assignee = Some("레이븐".into());
