@@ -3781,3 +3781,12 @@
 {"ts":"2026-09-18T05:03:18Z","id":"moai-ocil","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-18T05:09:16Z","id":"moai-ocil","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: opus (medium — 표시 리팩터 두 파일, 쓰기 경로도 동시성도 안 건드린다). 닫기는 05:03 에 다른 세션이 했다 — 이 줄은 일한 창이 뒤늦게 남긴다"}
 {"ts":"2026-09-18T05:09:17Z","id":"moai-57x9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 끝났다"}
+{"ts":"2026-09-18T05:11:15Z","id":"moai-vr2v","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"창 비우기의 \"치던 글\" 을 정확히 읽는다"}
+{"ts":"2026-09-18T05:11:15Z","id":"moai-vuly","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"빈 입력 칸의 제안 글을 치던 글로 읽지 않는다"}
+{"ts":"2026-09-18T05:11:15Z","id":"moai-nuhd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옮긴 치던 글이 들여쓰기를 지킨다"}
+{"ts":"2026-09-18T05:11:15Z","id":"moai-vr2v","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-kqmj 에서 펼쳤다 — 감독의 창 비우기가 빈 입력 칸의 제안 글(흐린 글자)을 치던 글로 읽을 수 있다"}
+{"ts":"2026-09-18T05:11:15Z","id":"moai-kqmj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vr2v 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-09-18T05:11:22Z","id":"moai-ear6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"에픽 moai-vr2v 의 멤버 moai-nuhd 로 펼쳤다 — moai-kqmj 와 같은 '치던 글' 자리라 한 단위로 묶었다"}
+{"ts":"2026-09-18T05:11:22Z","id":"moai-ear6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vr2v 의 멤버 moai-nuhd 로 펼쳤다"}
+{"ts":"2026-09-18T05:11:22Z","id":"moai-vuly","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T05:11:22Z","id":"moai-nuhd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
