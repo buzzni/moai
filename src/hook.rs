@@ -328,6 +328,9 @@ enum Ctx {
     /// `(( … ))`·`$(( … ))` — `>`·`<`·`;`·`&` 가 연산자가 아니라 산술이다.
     /// 괄호 깊이를 든다.
     Arith(usize),
+    /// `` `…` `` — 옛 꼴의 명령 치환. [`Subst`](Ctx::Subst) 처럼 안의 글은 바깥의 낱말 하나고,
+    /// 따로 새 명령으로 다시 읽는다([`Lexer::inner`]). `\` 가 `` ` ``·`\`·`$` 를 감싼다.
+    Tick,
 }
 
 /// 다음 낱말이 무엇의 과녁인가.
@@ -366,6 +369,12 @@ struct Lexer<'a> {
     /// 아니라 그 안의 `cd` 는 뒤로 이어지므로 [`Seg::depth`] 에는 안 든다. 안 세면
     /// `mv && { a; b; }` 의 `;` 가 묶음 밖의 끊김으로 읽혀, 집기가 이겨야만 도는 쓰기를 막는다.
     braces: usize,
+    /// 이 토막의 낱말에 든 명령 치환들의 글 — 토막을 닫을 때 새 명령으로 다시 읽어 **그 앞에**
+    /// 쌓는다(moai-xe6e). 치환의 글을 바깥 낱말 하나로만 두던 판은 `echo "$(moai add x)"` 와
+    /// `` `moai mv <리뷰> done` `` 을 아무 규칙도 안 보고 넘겼다 — 셸은 그것을 먼저 돌린다.
+    inner: Vec<String>,
+    /// 맨 바깥 치환이 `cur` 의 어디서 시작했나 — 그 안에 든 치환은 다시 읽을 때 센다.
+    mark: Option<usize>,
 }
 
 impl<'a> Lexer<'a> {
@@ -383,6 +392,45 @@ impl<'a> Lexer<'a> {
             group: 0,
             join: Join::default(),
             braces: 0,
+            inner: Vec::new(),
+            mark: None,
+        }
+    }
+
+    /// 명령 치환을 연다 — 여는 글자는 이미 `cur` 에 있다. **맨 바깥 것만 자리를 적는다.**
+    fn enter(&mut self, ctx: Ctx) {
+        if !self.opaque() {
+            self.mark = Some(self.cur.len());
+        }
+        self.stack.push(ctx);
+    }
+
+    /// 명령 치환을 닫았다 — 닫는 글자는 아직 `cur` 에 안 넣었다. 맨 바깥 것이었으면 그 글을 적는다.
+    fn leave(&mut self) {
+        if !self.opaque()
+            && let Some(at) = self.mark.take()
+        {
+            self.inner.push(self.cur[at..].to_string());
+        }
+    }
+
+    /// `` `…` `` 안.
+    fn tick(&mut self, c: char) {
+        match c {
+            '`' => {
+                self.stack.pop();
+                self.leave();
+                self.cur.push(c);
+            }
+            '\\' => match self.chars.next() {
+                Some(n @ ('`' | '\\' | '$')) => self.cur.push(n),
+                Some(n) => {
+                    self.cur.push('\\');
+                    self.cur.push(n);
+                }
+                None => self.cur.push('\\'),
+            },
+            _ => self.cur.push(c),
         }
     }
 
@@ -395,6 +443,7 @@ impl<'a> Lexer<'a> {
                 Some(Ctx::Double) => self.double(c),
                 Some(Ctx::Subst(depth)) => self.subst(c, depth),
                 Some(Ctx::Arith(depth)) => self.arith(c, depth),
+                Some(Ctx::Tick) => self.tick(c),
             }
         }
         self.end_by(None);
@@ -420,6 +469,11 @@ impl<'a> Lexer<'a> {
                 self.open(Ctx::Ansi);
             }
             '$' if next == Some('(') => self.dollar(),
+            '`' => {
+                self.cur.push(c);
+                self.had = true;
+                self.enter(Ctx::Tick);
+            }
             // 따옴표 밖의 `\>` 는 글자다. 줄 끝의 `\` 는 줄을 잇는다.
             '\\' => match self.chars.next() {
                 Some('\n') | None => {}
@@ -442,7 +496,7 @@ impl<'a> Lexer<'a> {
                 self.chars.next();
                 self.cur.push(c);
                 self.cur.push('(');
-                self.stack.push(Ctx::Subst(1));
+                self.enter(Ctx::Subst(1));
             }
             '<' => self.read_from(),
             '>' => self.write_to(),
@@ -545,6 +599,9 @@ impl<'a> Lexer<'a> {
     fn double(&mut self, c: char) {
         if c == '$' && self.chars.peek() == Some(&'(') {
             self.dollar();
+        } else if c == '`' && !self.opaque() {
+            self.cur.push(c);
+            self.enter(Ctx::Tick);
         } else {
             self.escaped(c, '"');
         }
@@ -558,7 +615,7 @@ impl<'a> Lexer<'a> {
             self.stack.push(Ctx::Arith(2));
         } else {
             self.cur.push_str("$(");
-            self.stack.push(Ctx::Subst(1));
+            self.enter(Ctx::Subst(1));
         }
     }
 
@@ -572,7 +629,10 @@ impl<'a> Lexer<'a> {
         match c {
             '(' => self.retop(Ctx::Subst(depth + 1)),
             ')' if depth == 1 => {
+                self.cur.pop();
                 self.stack.pop();
+                self.leave();
+                self.cur.push(c);
             }
             ')' => self.retop(Ctx::Subst(depth - 1)),
             '\'' => self.stack.push(Ctx::Single),
@@ -794,6 +854,18 @@ impl<'a> Lexer<'a> {
                 self.join = Join { op, depth: self.level() };
             }
             return;
+        }
+        // **치환은 제 토막보다 먼저 돈다** — 그 앞에, 한 겹 깊은 하위 셸로 쌓는다(moai-xe6e). 깊이를
+        // 더해야 치환 안의 `cd`·`;` 가 바깥 토막의 자리와 집기를 안 흔든다. 첫 토막은 바깥 토막의
+        // 이음사를 받는다 — `mv && echo "$(sed -i …)"` 의 치환도 집기가 이겨야 돈다.
+        let outer = self.level() + 1;
+        for (n, text) in std::mem::take(&mut self.inner).into_iter().enumerate() {
+            for (m, mut s) in Lexer::new(&text).run().into_iter().enumerate() {
+                s.depth += self.group + 1;
+                s.level += outer;
+                s.join = if n == 0 && m == 0 { self.join } else { Join { op: s.join.op, depth: s.join.depth + outer } };
+                self.all.push(s);
+            }
         }
         let mut seg = std::mem::take(&mut self.seg);
         seg.depth = self.group;
@@ -1329,7 +1401,10 @@ pub fn guard_shell_in(
 /// 안 쥐어 준다)와 `! moai mv …`·`! ( moai mv … )` (집기가 져야 뒤가 돈다).
 fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<String> {
     let mut out = Vec::new();
-    let mut moved = false;
+    // `cd` 를 지난 하위 셸의 깊이 — 그 뒤의 상대 경로는 어디인지 모른다. **하위 셸을 나오면
+    // 걷는다**: 치환(moai-xe6e)과 `( cd … )` 의 `cd` 는 괄호 밖으로 안 이어진다. 안 걷던 판은 그
+    // 뒤의 상대 경로 쓰기를 모른다며 버려 샜다.
+    let mut moved: Option<usize> = None;
     // 집기 뒤 `&&` 로만 이어 온 동안의 묶음 깊이 — 이보다 얕거나 같은 자리에서 `&&` 가 아닌
     // 이음사를 만나면 끝난다.
     let mut after_pick: Option<usize> = None;
@@ -1349,7 +1424,7 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
         // 모양인데, `;` 하나로 집기를 끊던 판은 규칙이 시킨 차례를 그대로 친 명령을 막았다.
         // **둘 다 제 하위 셸 안의 것이다** — `( mv || exit 1 ); sed -i …` 의 `exit` 는 괄호만
         // 끝내고, `( set -e; … )` 는 괄호 밖에 안 샌다. 나오면 걷는다.
-        for scope in [&mut strict, &mut bailed] {
+        for scope in [&mut strict, &mut bailed, &mut moved] {
             if scope.is_some_and(|d| seg.depth < d) {
                 *scope = None;
             }
@@ -1395,13 +1470,13 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
             _ => {}
         }
         for path in found {
-            if gate.is_some() || unknowable(&path) || (moved && !Path::new(&path).is_absolute()) {
+            if gate.is_some() || unknowable(&path) || (moved.is_some() && !Path::new(&path).is_absolute()) {
                 continue;
             }
             out.push(path);
         }
         if matches!(head, Some("cd" | "pushd" | "popd")) {
-            moved = true;
+            moved = Some(moved.map_or(seg.depth, |d| d.min(seg.depth)));
         }
         let prefix = &seg.words[..seg.words.len() - words.len()];
         // **`! ( moai mv … )` 의 `!` 는 괄호 밖에 선다**(moai-gtkn). 제 토막의 접두어만 보던 판은
@@ -2245,6 +2320,49 @@ mod tests {
         // **비추는 줄이 막는 것을 가리지 않는다** — 같은 명령줄의 규칙 1·3 이 먼저다.
         for cmd in ["moai idea add \"a\"; moai add \"딴 일\"", "moai idea add \"a\" && /code-review high"] {
             assert!(matches!(guard_shell(&all, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "{cmd}");
+        }
+    }
+
+    /// **명령 치환 안의 `moai` 도 규칙을 지난다**(moai-xe6e). 셸은 치환을 먼저 돌린다 — 그 글을
+    /// 바깥 낱말 하나로만 두던 판은 `$(…)`·`` `…` `` 하나로 규칙 1·2·3 을 통째로 넘겼다.
+    #[test]
+    fn a_command_substitution_is_read_as_a_command() {
+        let root = Path::new("/repo");
+        let held = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), review("t-r", "in_progress", Some("t-e"))];
+        let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        for (all, cmd) in [
+            // 규칙 1 — 집은 것 밖의 생성.
+            (&held, "echo \"$(moai add \"딴 일\")\""),
+            (&held, "echo `moai add 딴일`"),
+            (&held, "x=$(moai add \"딴 일\" --json)"),
+            (&held, "echo \"$(echo \"$(moai add 딴일)\")\""),
+            // 규칙 3 — 낸 글 없이 리뷰를 닫는다.
+            (&held, "echo $(moai mv t-r done)"),
+            // 규칙 2 — 집지 않고 쓴다.
+            (&idle, "echo \"$(sed -i s/a/b/ src/store.rs)\""),
+            (&idle, "echo `echo x > src/store.rs`"),
+            (&idle, "cat <(sed -i s/a/b/ src/store.rs)"),
+            // 치환은 제 토막의 이음사를 받는다 — `;` 뒤의 치환은 집기가 져도 돈다.
+            (&idle, "moai mv t-1 in_progress; echo \"$(sed -i s/a/b/ src/store.rs)\""),
+        ] {
+            assert!(matches!(guard_shell(all, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
+        }
+        for (all, cmd) in [
+            // 치환 안이 아닌 글자 — 홑따옴표, 감싼 백틱, heredoc 본문.
+            (&held, "moai note t-1 '$(moai add x) 와 `moai add y`'"),
+            (&held, "moai note t-1 \"\\`moai add x\\` 는 막힌다\""),
+            (&held, "moai note t-1 -b \"$(cat <<'EOF'\nmoai add \"딴 일\"\nEOF\n)\""),
+            (&held, "git commit -m \"$(cat <<'EOF'\nfix: `moai add` 를 막는다\nEOF\n)\""),
+            // 치환도 집기 뒤에 서면 집기 뒤다.
+            (&idle, "moai mv t-1 in_progress && echo \"$(sed -i s/a/b/ src/store.rs)\""),
+            // 치환 안의 `cd` 는 바깥으로 안 샌다 — 뒤의 상대 경로는 저장소 밖이 아니다.
+            (&held, "echo $(cd /tmp) && echo x > /tmp/y"),
+        ] {
+            assert_eq!(guard_shell(all, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
+        }
+        // 치환 안의 `cd` 가 바깥 토막의 자리를 옮기지 않는다 — 옮기면 상대 경로를 버려 쓰기가 샌다.
+        for cmd in ["echo $(cd /tmp); echo x > src/store.rs", "(cd /tmp); echo x > src/store.rs"] {
+            assert!(matches!(guard_shell(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "하위 셸의 cd 가 바깥으로 샜다 — {cmd}");
         }
     }
 
