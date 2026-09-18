@@ -4536,3 +4536,4 @@
 {"ts":"2026-09-18T13:36:04Z","id":"moai-fg0t","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — report 소속 셈과 broken 한 파일, 시험으로 둘러쌈)"}
 {"ts":"2026-09-18T13:36:04Z","id":"moai-fg0t.b9g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1번(상세가 묶음 줄 epic 을 소속처럼 그림) 반영. add --type epic -e 가 쓸 때 말없는 것은 결정(경고로 드러냄) 대로 두었다"}
 {"ts":"2026-09-18T13:36:04Z","id":"moai-fg0t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T13:36:15Z","id":"moai-z3lo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 전부 닫힘(fg0t 는 사용자 결정 A 로 a971a10). 남은 것은 이 에픽에 달린 idea dmbx·9qk7·thcz — 동작 안 바꾸는 리팩터와 드문 모서리라 에픽 목적과 무관"}
