@@ -357,7 +357,8 @@ struct Lexer<'a> {
     group: usize,
     /// 마지막으로 읽은 이음사 — 다음에 쌓이는 토막의 [`Seg::join`] 이 된다.
     join: Join,
-    /// 몇 겹의 `{ … }` 안인가. **이음사와 집기의 깊이([`Seg::level`])에만 든다** — 하위 셸이
+    /// 몇 겹의 `{ … }` 와 예약어 묶음(`if … fi`) 안인가. **이음사와 집기의 깊이
+    /// ([`Seg::level`])에만 든다** — 하위 셸이
     /// 아니라 그 안의 `cd` 는 뒤로 이어지므로 [`Seg::depth`] 에는 안 든다. 안 세면
     /// `mv && { a; b; }` 의 `;` 가 묶음 밖의 끊김으로 읽혀, 집기가 이겨야만 도는 쓰기를 막는다.
     braces: usize,
@@ -752,6 +753,17 @@ impl<'a> Lexer<'a> {
                 } else if !quoted && word == "}" && self.seg.words.is_empty() && self.braces > 0 {
                     self.braces -= 1;
                     return;
+                } else if !quoted && OPENS.contains(&word.as_str()) && command_of(&self.seg.words).is_empty() {
+                    // **예약어 묶음도 `{ … }` 처럼 센다**(moai-1jvy). `if …; then …; fi` 의 몸통
+                    // `;` 를 묶음 밖의 끊김으로 읽던 판은 `mv && if true; then sed -i …; fi` 를
+                    // 막았다 — 잘못 막는 쪽이라 새지는 않지만, 훅이 안 되는 모양을 늘리면 사람은
+                    // 규칙을 지키는 법이 아니라 피하는 법부터 배운다.
+                    self.braces += 1;
+                } else if !quoted && SHUTS.contains(&word.as_str()) && self.seg.words.is_empty() && self.braces > 0 {
+                    // 닫는 낱말은 `}` 처럼 묶음을 닫을 뿐 명령이 아니다 — 낱말로 남기면 제 토막을
+                    // 세워 안쪽 `;` 를 제 이음사로 들고 선다.
+                    self.braces -= 1;
+                    return;
                 }
                 if !quoted && word == "[[" && command_of(&self.seg.words).is_empty() {
                     self.test = true;
@@ -792,6 +804,16 @@ impl<'a> Lexer<'a> {
         self.group + self.braces
     }
 }
+
+/// 묶음을 여는 예약어 — **명령 자리에 섰을 때만이다**(`echo if` 의 `if` 는 글자다).
+///
+/// 여는 쪽만 센다. `for`·`select`·`while`·`until` 은 `do … done` 으로 닫히는데 `do` 는
+/// [`PREFIXES`] 라 명령 자리를 안 옮기므로, 여는 낱말 하나와 `done` 하나로 짝이 맞는다.
+const OPENS: &[&str] = &["if", "while", "until", "for", "select", "case"];
+
+/// 묶음을 닫는 예약어. **`case` 의 갈래 `)` 는 여기서 안 센다** — 괄호 깊이는
+/// `saturating_sub` 로 0 에 머무르고, 갈래의 몸통은 `esac` 까지 이 묶음 안이다.
+const SHUTS: &[&str] = &["fi", "done", "esac"];
 
 /// 명령 자리 앞에 설 수 있는 것 — 예약어와, 뒤의 명령을 그대로 부르는 것.
 ///
@@ -3483,6 +3505,13 @@ mod tests {
             // 묶음의 리다이렉션은 묶음이 돌기 전에 연다 — 안의 집기와 무관하다.
             "(moai mv t-1 in_progress) > src/cli.rs && echo x > /tmp/y",
             "(moai mv t-1 in_progress; echo ok) > /dev/null && echo x > src/store.rs",
+            // 예약어 묶음을 세도 **집기와 무관하게 도는 몸통은 그대로 막는다**(moai-1jvy).
+            "if true; then echo x > src/store.rs; fi",
+            "moai mv t-1 in_progress; if true; then echo x > src/store.rs; fi",
+            "moai mv t-1 in_progress && if true; then echo ok; fi; echo x > src/store.rs",
+            // 낱말로 선 `if`·`fi` 는 묶음이 아니다 — 깊이를 늘리면 뒤의 `;` 가 집기 뒤로 읽힌다.
+            "moai mv t-1 in_progress && echo if; echo x > src/store.rs",
+            "moai mv t-1 in_progress && echo done; echo x > src/store.rs",
         ] {
             assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
@@ -3513,6 +3542,17 @@ mod tests {
             "(moai mv t-1 in_progress) > /dev/null && echo x > src/store.rs",
             "{ moai mv t-1 in_progress; } > /dev/null && echo x > src/store.rs",
             "moai mv t-1 in_progress && (echo ok) > src/store.rs",
+            // **예약어 묶음의 몸통도 집기 뒤다**(moai-1jvy) — `{ … }` 와 같은 자다.
+            "moai mv t-1 in_progress && if true; then sed -i s/a/b/ src/store.rs; fi",
+            "moai mv t-1 in_progress && if true; then echo x > src/store.rs; else echo y > src/cli.rs; fi",
+            "moai mv t-1 in_progress && while read f; do sed -i s/a/b/ src/store.rs; done",
+            "moai mv t-1 in_progress && until false; do echo x > src/store.rs; done",
+            "moai mv t-1 in_progress && for f in a b; do echo x > src/store.rs; done",
+            "moai mv t-1 in_progress && case x in a) echo x > src/store.rs;; esac",
+            "moai mv t-1 in_progress && if true; then { echo x > src/store.rs; }; fi",
+            "moai mv t-1 in_progress && if true; then\nsed -i s/a/b/ src/store.rs\nfi",
+            // 묶음을 닫은 뒤의 `&&` 는 다시 바깥 깊이다 — 닫는 낱말이 깊이를 안 돌려주면 여기가 샌다.
+            "moai mv t-1 in_progress && if true; then echo ok; fi && echo x > src/store.rs",
         ] {
             assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
