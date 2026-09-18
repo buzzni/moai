@@ -4353,6 +4353,29 @@ mod tests {
         c.hit("SPC o t");
         let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
         assert!(text.contains("sort = \"title\"") && text.contains("sort_reversed = false") && text.contains("\"what\""), "{text}");
+
+        // 차례가 낱말이 아닌 모양이어도 방향만 입히지 않는다(moai-ys7c) — 알림은 차례를 못 읽었다고 한 줄 댄다.
+        std::fs::write(c.user_config.as_ref().unwrap(), "[tui]\nsort = 3\nsort_reversed = true\n").unwrap();
+        let mut d = App::new(Vec::new(), cfg(), Path::new());
+        d.user_config = c.user_config.clone();
+        d.load_look();
+        assert_eq!(d.order, Default::default(), "못 읽은 차례의 방향을 우선순위에 입혔다");
+        assert!(d.notice.clone().unwrap_or_default().contains("tui.sort"), "{:?}", d.notice);
+    }
+
+    /// **깨진 설정은 한 곳에서만 말한다**(moai-5jsn) — 층이 없다는 배너가 파싱 오류를 대므로 보기 알림은 같은
+    /// 말을 다시 안 한다. 띄우는 길(`cmd::tui`)과 같은 차례로 보기를 입히고 층을 얹는다.
+    #[test]
+    fn a_broken_user_config_is_told_once() {
+        let s = scratch("look-broken");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui\nsort = \"title\"\n").unwrap();
+        let reg = crate::user_config::read(Some(&user));
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&reg.look, reg.look_problems.clone());
+        let a = a.attach_layer(layer::Layer::of(&reg, None));
+        assert!(a.unlayered.as_deref().is_some_and(|u| u.contains("TOML")), "층 없음 배너가 까닭을 안 들었다 — {:?}", a.unlayered);
+        assert_eq!(a.notice, None, "같은 파싱 오류를 보기 알림이 또 댔다");
     }
 
     /// **두 탐색기가 저마다 누른 것이 둘 다 남는다**(moai-2kyl 단계 리뷰). 적는 것은 이 세션이 바꾼 만큼이다

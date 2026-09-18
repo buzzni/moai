@@ -103,7 +103,8 @@ pub struct Registry {
     /// 탐색기를 띄우면 층과 보기가 저마다 파일을 읽고 파싱해 한 번 띄울 때 설정을 두세 번 읽었다.
     /// 까닭을 `problems` 와 따로 드는 것은 대는 자리가 달라서다 — 층의 문제는 층이, 보기의 문제는 알림이 댄다.
     pub look: Look,
-    /// 보기·읽음을 읽다 만난 까닭. `problems`(층이 대는 것)와 따로 든다 — 대는 자리가 다르다.
+    /// 보기·읽음을 읽다 만난 까닭. `problems`(층이 대는 것)와 따로 든다 — 대는 자리가 다르다. 파일을 못 읽었거나
+    /// 깨진 까닭은 여기 없다 — 층만 댄다(moai-5jsn).
     pub look_problems: Vec<String>,
     /// 이슈 id → **내가 마지막으로 본 때**(RFC3339, moai-50mn). 여기 없는 줄은 한 번도 안 본 것이다.
     /// 트래커가 아니라 내 설정에 드는 까닭: 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에
@@ -146,11 +147,10 @@ pub fn read(path: Option<&Path>) -> Registry {
             reg.read = read;
             reg.look_problems.extend(problems.into_iter().map(at));
         }
-        // 못 읽었거나 깨진 까닭은 **층과 보기가 둘 다 댄다** — 따로 읽던 때와 같다(moai-z0q6 이 따로 본다).
-        Err(e) => {
-            reg.problems = vec![at(e)];
-            reg.look_problems = reg.problems.clone();
-        }
+        // 못 읽었거나 깨진 까닭은 **층만 댄다**(moai-5jsn). 보기에도 실으면 탐색기가 같은 파싱 오류를 층 없음
+        // 배너와 보기 알림으로 두 번 댔다. 층은 늘 댄다 — 밖에서는 층 화면이, 안에서는 층을 못 세운 배너
+        // (`App::attach_layer`)가. 보기는 처음값으로 뜨고, 그 뒤의 저장은 제 거절(`broken`)을 따로 댄다.
+        Err(e) => reg.problems = vec![at(e)],
     }
     reg
 }
@@ -776,8 +776,8 @@ pub struct Look {
     pub detail: Option<bool>,
 }
 
-/// 설정에서 보기만 읽는다. 파일이 없으면 빈 `Look` 이고 문제도 아니다. 깨진 파일은 까닭 한 줄 —
-/// 탐색기는 그래도 처음값으로 뜬다. **시험만 부른다** — 띄우는 길은 [`read`] 한 번으로 층과 보기를 함께 얻는다.
+/// 설정에서 보기만 읽는다. 파일이 없으면 빈 `Look` 이고 문제도 아니다. 깨진 파일도 까닭 없이 빈 `Look` 이다 —
+/// 그 까닭은 층이 댄다(moai-5jsn). 탐색기는 처음값으로 뜬다. **시험만 부른다** — 띄우는 길은 [`read`] 한 번으로 층과 보기를 함께 얻는다.
 #[cfg(test)]
 pub fn read_look(path: Option<&Path>) -> (Look, Vec<String>) {
     let reg = read(path);
@@ -1513,7 +1513,7 @@ mod tests {
     }
 
     /// **한 번의 읽기가 등록과 보기를 함께 낸다**(moai-u8cs) — 보기의 까닭은 따로 읽던 때의 글 그대로 보기에만
-    /// 서고, 못 읽었거나 깨진 파일의 까닭은 층(`problems`)과 보기(`look_problems`) 둘 다에 선다. **글자로 견준다**
+    /// 서고, 못 읽었거나 깨진 파일의 까닭은 층(`problems`)에만 선다(moai-5jsn). **글자로 견준다**
     /// (moai-y61p 단계 리뷰) — `read_look` 과 견주면 `read` 를 저 자신과 견주는 셈이라 아무것도 못 잡는다.
     #[test]
     fn one_read_gives_the_projects_and_the_look() {
@@ -1529,11 +1529,11 @@ mod tests {
         std::fs::write(&path, "[[project]\n").unwrap();
         let broken = read(Some(&path));
         assert_eq!(broken.problems.len(), 1, "{broken:?}");
-        assert_eq!(broken.look_problems, broken.problems, "깨진 파일의 까닭이 층과 보기에 같게 안 섰다");
+        assert!(broken.look_problems.is_empty(), "깨진 파일의 까닭을 보기에도 실었다 — 탐색기가 두 번 댄다");
         // 못 여는 자리(디렉터리)도 같다 — 없는 파일(NotFound)만 문제가 아니다.
         let unreadable = read(Some(&d));
         assert!(unreadable.problems.len() == 1 && unreadable.problems[0].starts_with(&format!("{}: ", d.display())), "{unreadable:?}");
-        assert_eq!(unreadable.look_problems, unreadable.problems, "못 읽은 파일의 까닭이 층과 보기에 같게 안 섰다");
+        assert!(unreadable.look_problems.is_empty(), "못 읽은 파일의 까닭을 보기에도 실었다");
         assert_eq!(read(None).look_problems, Vec::<String>::new(), "자리를 모르는 것은 보기의 문제가 아니다");
     }
 
