@@ -2452,8 +2452,10 @@ pub(super) mod tests {
         }
         // 화면 칸으로 잰다 — 한글은 한 글자가 두 칸이고 바이트로는 셋이다.
         let col = |l: &str, needle: &str| l.find(needle).map(|at| crate::text::width(&l[..at]));
-        let mut seen_names = 0;
-        for width in [40u16, 60, 80, 120] {
+        // 오른쪽 열은 넓어야 선다 — 담당은 목록 칸이 태그까지 다 담을 만큼 넓은 160 에서야 선다.
+        // 그 폭이 없으면 WHO 의 견줌은 모든 폭에서 `(None, None)` 으로 헛돈다.
+        let mut compared = [0usize; 2];
+        for width in [40u16, 60, 80, 120, 160] {
             let mut a = App::new(is.clone(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
             a.view = super::super::view::View::default();
             assert!(a.fields.shows(super::super::view::Field::Names), "열 이름 줄이 기본 켬이 아니다");
@@ -2466,37 +2468,38 @@ pub(super) mod tests {
                 .map(|l| l.split('│').next().unwrap_or_default().to_string())
                 .collect();
             let screen = lines.join("\n");
-            let Some(names) = lines.iter().find(|l| l.contains("TITLE")) else {
-                // 이름 줄은 목록 칸이 두 줄 넘게 설 때만 선다. 그 폭에서 안 섰으면 볼 것이 없다.
-                continue;
-            };
-            seen_names += 1;
+            // 이름 줄은 **첫 목록 줄 바로 위**다. `TITLE` 로 찾지 않는다 — 좁은 폭에서 `Paragraph` 가
+            // 그 이름을 잘라 내면 이름 줄을 못 찾은 것으로 읽혀, 이 시험이 보려던 폭을 말없이 건너뛴다.
+            let first_at = lines.iter().position(|l| l.contains("argos-")).unwrap_or_else(|| panic!("@{width} 목록 줄이 없다\n{screen}"));
+            let names = &lines[first_at.checked_sub(1).unwrap_or_else(|| panic!("@{width} 목록 줄 위에 줄이 없다\n{screen}"))];
+            assert!(col(names, "id").is_some(), "@{width} 열 이름 줄이 안 섰다\n{screen}");
             let rows: Vec<&String> = lines.iter().filter(|l| l.contains("argos-")).collect();
-            assert!(!rows.is_empty(), "@{width} 목록 줄이 없다\n{screen}");
-            // TITLE 은 칸 글리프 두 칸 뒤, 제목이 시작하는 칸에 선다.
-            let title = col(names, "TITLE").unwrap();
             let first = rows[0];
             let id = first.find("argos-").unwrap();
             let id_col = crate::text::width(&first[..id]);
             assert_eq!(col(names, "id"), Some(id_col), "@{width} id 이름이 값과 다른 칸에 섰다\n{names:?}\n{first:?}");
-            assert!(title > id_col, "@{width} TITLE 이 id 보다 앞에 섰다 — {names:?}");
+            // TITLE 은 제목이 시작하는 칸에 선다. 제목이 한 글자도 못 선 폭이면 이름도 없어야 한다.
+            match (col(names, "TITLE"), col(first, "아주")) {
+                (Some(n), Some(v)) => assert_eq!(n, v, "@{width} TITLE 이 제목과 다른 칸에 섰다\n{names:?}\n{first:?}"),
+                (None, Some(_)) => panic!("@{width} 제목은 섰는데 TITLE 이 없다(잘렸나)\n{names:?}\n{first:?}"),
+                _ => {}
+            }
             // 오른쪽 열 — 선 이름은 값과 같은 칸, 값이 없는 열의 이름은 없다.
-            for (name, value) in [("WHO", "레이븐"), ("TAGS", "#tui")] {
+            for (k, (name, value)) in [("WHO", "레이븐"), ("TAGS", "#tui")].into_iter().enumerate() {
                 let row = rows.iter().find(|l| l.contains(value));
                 match (col(names, name), row) {
-                    (Some(n), Some(r)) => assert_eq!(
-                        n,
-                        col(r, value).unwrap(),
-                        "@{width} {name} 이 값과 다른 칸에 섰다\n{names:?}\n{r:?}"
-                    ),
+                    (Some(n), Some(r)) => {
+                        compared[k] += 1;
+                        assert_eq!(n, col(r, value).unwrap(), "@{width} {name} 이 값과 다른 칸에 섰다\n{names:?}\n{r:?}")
+                    }
                     (Some(_), None) => panic!("@{width} {name} 열은 걷혔는데 이름이 남았다\n{screen}"),
                     (None, Some(r)) => panic!("@{width} {name} 값은 섰는데 이름이 없다\n{names:?}\n{r:?}"),
                     (None, None) => {}
                 }
             }
-            // **셈 열은 좁아도 선다** — 오른쪽 열이 다 걷힌 폭에서 폭 셈이 어긋나는 것은 이것만
-            // 드러낸다. `n/n` 과 값(`1/2`)은 오른쪽 끝을 맞춘다. 이름 줄이 한 칸 넘치면
-            // `Paragraph` 가 말없이 잘라 `n/`, 모자라면 한 칸 왼쪽에 선다.
+            // **셈 이름과 값은 오른쪽 끝을 맞춘다.** 이름 줄이 한 칸 넘치면 `Paragraph` 가 말없이
+            // 잘라 `n/`, 모자라면 한 칸 왼쪽에 선다. 한쪽만 선 것도 어긋남이다 — 값이 잘렸는데 이름만
+            // 남아도, 이름이 잘렸는데 값만 남아도 잡는다.
             let end = |l: &str, at: usize, len: usize| crate::text::width(&l[..at]) + len;
             let tally = rows.iter().find_map(|r| {
                 let slash = r.rfind('/')?;
@@ -2510,10 +2513,11 @@ pub(super) mod tests {
                     assert_eq!(end(names, at, 3), t, "@{width} n/n 이 셈 값과 다른 끝에 섰다\n{names:?}\n{screen}")
                 }
                 (None, Some(_)) => panic!("@{width} 셈 값은 섰는데 n/n 이 없다(잘렸나)\n{names:?}"),
-                _ => {}
+                (Some(_), None) => panic!("@{width} n/n 은 섰는데 셈 값이 없다(잘렸나)\n{screen}"),
+                (None, None) => {}
             }
         }
-        assert!(seen_names >= 3, "열 이름 줄이 선 폭이 {seen_names}개뿐이다 — 훑기가 헛돈다");
+        assert!(compared.iter().all(|&n| n > 0), "WHO·TAGS 가운데 한 번도 견주지 못한 열이 있다 {compared:?} — 훑기가 헛돈다");
     }
 
     /// **이름 줄은 묶음 없는 디렉터리에서도 값 위에 선다**(moai-6bc0 단계 리뷰). 줄은 오른쪽 열이
