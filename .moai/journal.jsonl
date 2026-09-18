@@ -5092,3 +5092,4 @@
 {"ts":"2026-09-18T23:54:58Z","id":"moai-b8aj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 원문을 note -b - 로 그대로 붙이라는 안내가 64KB 거절문과 맞서는 자리가 있다"}
 {"ts":"2026-09-18T23:54:58Z","id":"moai-4u6b","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-18q4 에서 펼쳤다 — 리뷰 원문을 note -b - 로 그대로 붙이라는 안내가 64KB 거절문과 맞서는 자리가 있다"}
 {"ts":"2026-09-18T23:54:58Z","id":"moai-18q4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-4u6b 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T23:56:26Z","id":"moai-en4u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
