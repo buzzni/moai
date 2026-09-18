@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:c69ed63b -->
+<!-- moai:begin v:0.1.0 hash:1415faf3 -->
 ## 이슈 트래커 — moai
 
 이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
@@ -148,7 +148,8 @@ PLAN
 1. `moai status` 로 이미 있는 에픽을 본다. 겹칠 것 같으면 `moai show -g <키워드>`.
 2. 갈림길 3 대로 쪼갠 안을 한 번 보여주고, "좋다" 를 받으면 한 번에 만든다.
 3. `moai mv <id> in_progress` 로 집고, 끝나면 `done` 으로 옮긴다.
-4. 작업 중 발견한 것 중 지금 범위가 아닌 것은 `moai idea add` 로 담아 둔다.
+4. 작업 중 발견한 것 중 지금 범위가 아닌 것은 `moai idea add` 로 담아 둔다 — 에픽이 내건
+   것이면 지금 못 해도 idea 가 아니다(갈림길 1).
 5. 왜 그렇게 정했는지는 `moai note <id>` 로 이슈에 붙인다. 다음 세션이
    `moai show <id>` 로 그것을 읽는다.
 
