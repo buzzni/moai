@@ -2,7 +2,7 @@
 
 이 저장소는 자기 자신을 이 도구로 관리한다. 할 일은 `.moai/issues.jsonl` 에 있다.
 
-    cargo build --release            바이너리는 커밋되지 않는다 (~30초)
+    cargo build --release            바이너리는 커밋되지 않는다 (LTO 라 3~7분, 고친 뒤에도)
     cargo test                       시험은 dev 로 돈다. -j·LTO 끄기·옆 빌드 기다림 없이
     ./target/release/moai            인자 없이 부르면 status 가 나온다
     ./target/release/moai ready      지금 집을 수 있는 일
@@ -158,7 +158,7 @@
   `git worktree add` 로 만든 뒤 `EnterWorktree` 에 `path` 로 들어간다
 - **본 가지는 `develop` 이다.** 2026-09-18 에 사용자가 `main` 에서 바꿨다 — 로컬 가지와
   GitHub 의 기본 가지 둘 다. 옛 `main` 주소는 GitHub 가 새 이름으로 이어 준다
-- 워크트리마다 `target/` 이 따로다. 처음 한 번 `cargo build --release` 가 든다
+- 워크트리마다 `target/` 이 따로다. 처음 한 번 `cargo build --release` 가 든다(3~7분)
 
 ## 커밋
 
@@ -175,7 +175,7 @@
 닫기 전에 그 일을 실제로 한 AI 를 이슈에 한 줄 남긴다(`moai-olaj` 가 정한 자리,
 꼴은 `moai-8f2g` 가 정했다). 통계로 쓰려고 **꼴을 못박는다.**
 
-    moai note <id> "model: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)"
+    moai note <id> 'model: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)'
 
 - `model: <회사>/<모델> tokens=<수> (<등급> — <까닭>)`. 회사는 `anthropic`·`openai`·
   `google`, 모델은 실제 이름(`opus-5`·`sonnet-5`·`gemini-3.8`), 등급은 리뷰 등급과 같은 낱말
@@ -183,7 +183,7 @@
   적지 않는다 — 빈 칸과 0 과 거짓 값은 셋 다 다르다
 - 리뷰 서브에이전트가 쓴 것은 **리뷰 이슈에** 적는다. 부모의 합은 읽는 쪽이 자식까지 더한다
 - 한 이슈에 여러 줄이 서도 된다 — 세션이 바뀌었거나 모델을 올렸으면 그 줄마다 하나
-- **id 하나에 적는다.** `moai mv a b done -m "model: …"` 은 같은 글을 id 마다 적어, 토큰이
+- **id 하나에 적는다.** `moai mv a b done -m 'model: …'` 은 같은 글을 id 마다 적어, 토큰이
   id 수만큼 불어난다
 - `moai show <id> --json` 의 `work` 가 그것을 읽어 낸다. **늘 서는 배열**이고, 꼴에 안 맞는
   줄은 값이 안 될 뿐 노트로 그대로 남는다. 옛 줄(`model: opus-5 (medium — …)`)은 회사 없이
@@ -301,7 +301,7 @@ idea 는 에픽 없이 사는 것이 정상이고 `ready` 에도 보드에도 �
 `moai status` 가 한 줄로 비추고, 때가 되면 `moai idea promote <id> --from -`
 가 그것을 에픽과 이슈로 펼치며 닫는다.
 
-이미 만든 일을 지금 안 하기로 했으면 `moai defer <id> -m "왜"` 다. 칸도 종류도
+이미 만든 일을 지금 안 하기로 했으면 `moai defer <id> -m '왜'` 다. 칸도 종류도
 안 바뀌고 `moai defer <id> --undo` 로 같은 줄이 그대로 돌아온다.
 단 위처럼 에픽을 열어 두려고 첫 칸에 남긴 멤버는 미루지 않는다 — 미룬 멤버는 에픽의
 칸에서 빠져 에픽이 목적을 못 이룬 채 닫힌다. 그 멤버를 미루는 것은 그 목적을 접는 결정이다.

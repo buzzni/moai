@@ -40,7 +40,7 @@ pub fn rule_head(n: usize) -> String {
 pub const REVIEW_STEPS: &str = concat!(
     "  moai mv <id> in_progress      리뷰를 시작할 때\n",
     "  moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로\n",
-    "  moai mv <id> done -m \"<무엇을 반영하고 무엇을 넘겼나>\"",
+    "  moai mv <id> done -m '<무엇을 반영하고 무엇을 넘겼나>'",
 );
 
 /// 리뷰 이슈에 붙는 태그. 훅은 리뷰 줄을 이 글자로 가르고, 가르치는 글은 같은
@@ -50,7 +50,7 @@ pub const REVIEW_TAG: &str = "review";
 /// 리뷰 이슈를 세우는 줄. `anchor` 는 `--parent <id>` 나 `-e <에픽>` 이다 — 규칙
 /// 셋의 글과 두 거절문이 이 한 줄에서 나온다.
 pub fn make_review(anchor: &str) -> String {
-    format!("moai add \"리뷰 — <무엇을 보는가>\" -t {REVIEW_TAG} {anchor} -b \"<무엇을 왜 보는가>\"")
+    format!("moai add '리뷰 — <무엇을 보는가>' -t {REVIEW_TAG} {anchor} -b '<무엇을 왜 보는가>'")
 }
 
 /// 리뷰를 닫는 두 걸음 — `REVIEW_STEPS` 에서 시작 걸음을 빼고 **실제 id** 를 넣은
@@ -137,17 +137,40 @@ fn epic_review_rule() -> String {
 /// 제 손으로 치라고 하면 일꾼은 올렸다고 믿고 9-1 에 안 돈 모델을 적는다. 결정은 "맞추거나
 /// 올린다" 였다 — 제안과 다른 모델로 뜬 창은 먼저 맞춘다.
 ///
+/// **올릴 때는 다시 잰 난이도의 짝으로 간다**(2026-09-18 사용자 결정). "한 단계 올린다" 만
+/// 주던 판은 `low` 로 받아 읽어 보니 `high` 인 일이 가운데 모델에 멈춰, 쓰기 경로를 싼 모델이
+/// 했다 — 난이도 한 낱말이 모델을 정한다는 축과 어긋난다.
+///
 /// 자리 이름은 `<난이도>` 다. `<등급>` 는 7 에서 개발해 본 일꾼이 고르는 리뷰 등급의
 /// 자리라, 감독이 채우는 목록에 같은 이름을 넣으면 읽기 전의 제안이 그 명령에 박힌다.
 fn model_line() -> String {
     let ladder = DIFFICULTY.iter().map(|(_, model, _)| *model).collect::<Vec<_>>().join(" → ");
+    let top = top_model();
     format!(
         r#"모델: <모델> (<난이도> — <까닭>) — 난이도로 고른 제안이다. 모델은 `/model` 로 바꾸는데 그것은
    사람만 친다 — 이 창이 그 모델이 아니면 창을 보는 사람에게 청해 맞추고, 읽어 보니 더
-   어려우면 같은 길로 한 단계 올린다({ladder}). 에픽 끝 리뷰의 등급(7)도 이 잣대로
+   어려우면 다시 잰 난이도의 짝 모델로 같은 길로 올린다 — 한 칸씩이 아니다({ladder}).
+   `low` 로 받았는데 `high` 면 `{top}` 이다. 에픽 끝 리뷰의 등급(7)도 이 잣대로
    멤버를 재어 고른다"#
     )
 }
+
+/// 일꾼 글 머리의 옆 일 줄(moai-alsi). 새 일(`brief`)과 거둔 일(감독 0)이 **같은 줄**을 받는다 —
+/// 4-3 이 "머리의 `옆에서 도는 일`" 을 가리키니, 거둔 쪽 머리에 없으면 이어받은 일꾼은 가리키는
+/// 줄이 없는 규칙을 받는다.
+const BESIDE: &str = "옆에서 도는 일: <옆 일> — 그 파일은 건드리지 않는다(4-3)";
+
+/// 루트 HEAD 를 대조하는 글(moai-gokz, 2026-09-18 사용자 결정). 새 일과 거둔 일이 같은 글을
+/// 받는다 — 거둔 일은 4-1 부터만 이어 받아, 머리에 없으면 8 의 병합 말고는 트래커 커밋이 대조
+/// 없이 엉뚱한 HEAD 에 선다.
+const BRANCH_CHECK: &str = r#"루트에서 커밋·병합하기 전에는 루트가 아직 그 가지에 서 있는지 **대조만** 한다 —
+`git -C <루트> symbolic-ref -q HEAD` 가 `refs/heads/<본 가지>` 가 아니면(detached 이거나 누가
+가지를 바꿨다) 치지 말고 감독에게 알리고 멈춘다. 엉뚱한 HEAD 에 선 병합은 `branch -d` 뒤에
+참조가 하나도 안 남는다"#;
+
+/// 모노레포 하위로 드는 한 줄(moai-ay3b). 새 일의 3 과 거둔 일의 워크트리 걸음이 같은 줄을 쓴다 —
+/// 거둔 일은 3 을 안 받아(4-1 부터), 여기 없으면 이어받은 일꾼만 워크트리 꼭대기에 선다.
+const SUBDIR: &str = r#"cd "$(git -C <루트> rev-parse --show-prefix)""#;
 
 const CHEATSHEET: &str = r#"    moai status                            보드 · 경고 · 흐름 (세션은 여기서 시작)
     moai ready                             지금 집을 수 있는 일
@@ -160,8 +183,8 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
-    moai note <id> "발견한 것"             다음 사람이 읽을 메모
-    moai defer <id> -m "왜"                지금 안 할 일을 계획에서 뺀다
+    moai note <id> '발견한 것'             다음 사람이 읽을 메모
+    moai defer <id> -m '왜'                지금 안 할 일을 계획에서 뺀다
 
 모든 명령에 `--json` 이 붙는다. `ready --json` 은 `{"ready":[…],"held":[…]}` —
 `held` 는 미뤄 둔 것·빈 묶음에 막혀 못 집는 일과 도로 집을 곳이다.
@@ -190,7 +213,7 @@ idea 로 내보내면 에픽이 제 목적을 못 이룬 채 `done` 으로 선�
 `defer` 하는 것은 그 목적을 접는다는 결정이다.
 
 **2. `defer` 냐 `done` 이냐** — 안 하기로 한 것을 `done` 으로 옮기지 않는다.
-`moai defer <id> -m "왜"` 는 칸도 종류도 안 바꾸고, `--undo` 로 같은 줄이
+`moai defer <id> -m '왜'` 는 칸도 종류도 안 바꾸고, `--undo` 로 같은 줄이
 그대로 돌아온다. idea 는 "아직 일이 아닌 것", defer 는 "일이지만 지금은 아닌 것".
 
 **3. 에픽으로 쪼갤 만한가** — 파일 하나로 안 끝나는 요청이면 코드를 쓰기 전에
@@ -260,7 +283,7 @@ moai idea promote <id> --from - <<'PLAN'
 PLAN
 ```"#;
 
-const DEFERRING: &str = r#"    moai defer <id> -m "다음 분기에"       계획에서 잠시 뺀다
+const DEFERRING: &str = r#"    moai defer <id> -m '다음 분기에'       계획에서 잠시 뺀다
     moai defer <id> --undo                 도로 집는다
     moai show --deferred                   미뤄 둔 것만 본다
 
@@ -331,11 +354,13 @@ id** 로 그 이슈의 커밋을 그때그때 찾아 낸다. 해시를 노트에
 /// 저장하지 않는다: 적는 것은 `note` 이고 `work` 는 그 글을 읽은 값이다.
 const WORK: &str = r#"닫기 전에 그 일을 실제로 한 AI 를 이슈에 한 줄 남긴다. 필드가 아니라 노트다.
 
-    moai note <id> "model: <회사>/<모델> tokens=<수> (<등급> — <까닭>)"
+    moai note <id> 'model: <회사>/<모델> tokens=<수> (<등급> — <까닭>)'
 
 - 회사는 `anthropic`·`openai`·`google`, 모델은 실제 이름(`opus-5`·`sonnet-5`), 등급은 리뷰 등급과 같은 낱말
 - **토큰을 모르면 `tokens=` 를 뺀다.** 0 도 어림값도 적지 않는다 — 빈 칸과 0 과 거짓 값은 셋 다 다르다
 - **id 하나에 하나.** 여러 id 에 같은 글을 적으면 토큰이 id 수만큼 불어난다
+- **자유 글은 작은따옴표로 싼다** — 큰따옴표 안의 백틱·`$(…)` 은 셸이 명령으로 풀어 글이 잘린
+  채 0 으로 끝난다. 글에 작은따옴표가 들면 `-b -` 로 stdin 에서 흘린다
 - `moai show <id> --json` 의 `work` 가 그 줄들을 읽어 낸다. **늘 서는 배열**이고, 꼴에 안 맞는 줄은
   값이 안 될 뿐 노트로 남는다. 줄 머리에서 시작한 줄만 센다 — 들여 쓴 줄과 울타리 안의 줄은 예로 읽는다"#;
 
@@ -350,7 +375,7 @@ const CLOSING: &str = r#"`moai status` 를 한 번 더 돌려 경고가 늘지 �
 집은 채 닫으면 다음 세션이 이어받을 한 줄을 그 이슈에 남긴다. 다음 세션은
 `moai show <id>` 의 이력에서 그것을 읽는다.
 
-    moai note <id> "다음: <이어서 할 것>""#;
+    moai note <id> '다음: <이어서 할 것>'"#;
 
 /// 집은 채 닫을 때 남기는 한 줄. `CLOSING` 과 세션을 닫을 때의 붙듦이 같은
 /// 글을 내야 한다 — 안내가 가르친 줄과 훅이 내민 줄이 다르면 둘 다 안 믿는다.
@@ -359,7 +384,7 @@ const CLOSING: &str = r#"`moai status` 를 한 번 더 돌려 경고가 늘지 �
 /// 값이라, 비추는 순간 저널이 `status` 에 읽힌다. `show` 를 한 번 더 치는 것이
 /// 실제로 불편해지면 그때 스냅샷 필드를 논의한다 (moai-0rui).
 pub fn handoff(id: &str) -> String {
-    format!("moai note {id} \"다음: <이어서 할 것>\"")
+    format!("moai note {id} '다음: <이어서 할 것>'")
 }
 
 /// 규칙 셋. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
@@ -738,8 +763,8 @@ print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
 /// **모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 글에 적지 않고, 가지 이름을 박지
 /// 않는다 — 감독이 루트 체크아웃의 지금 가지를 읽어 `<본 가지>` 에 채운다(사용자 결정,
 /// moai-7ljm). 일꾼이 뜨고 병합하는 곳이 그 체크아웃이라 원격 기본 가지보다 덜 어긋난다.
-/// **다만 틈은 남는다** — 루트가 detached 이거나 바퀴 사이에 루트의 가지가 바뀌면, 일꾼의
-/// 루트 커밋·병합은 루트 HEAD 로 가고 워크트리는 `<본 가지>` 에서 뜬다(moai-dubz).
+/// 루트가 detached 면 감독이 보내지 않고, 바퀴 사이에 루트의 가지가 바뀌면 일꾼이 루트 커밋·
+/// 병합 직전의 대조(`BRANCH_CHECK`)로 멈춘다(moai-gokz).
 /// 워크트리 안의 규칙 3 이 루트에서 집은 리뷰를 못 보는 것은 moai-iz38(에픽 moai-wofj)이지만,
 /// 남의 저장소에서 그 id 는 아무것도 안 가리키고 고친 뒤에는 거짓이 된다.
 pub fn supervise() -> String {
@@ -747,6 +772,7 @@ pub fn supervise() -> String {
     let table = difficulty_table();
     let epic_rule = epic_review_rule();
     let reclaim_model = indent(&model_line(), "      ");
+    let reclaim_check = indent(BRANCH_CHECK, "      ");
     format!(
         r#"---
 name: moai-supervise
@@ -756,18 +782,27 @@ description: 같은 저장소에서 놀고 있는 Claude 세션들에 쌓인 ide
 # moai-supervise — 놀고 있는 세션에 idea 를 나눠 준다
 
 감독은 **고르고, 보내고, 확인한다.** 코드를 고치지 않고, 병합하지 않고, 일꾼
-대신 설계를 정하지 않는다. 병합은 일꾼이 하고, 겹치는 병합은 일꾼끼리 먼저
-알린다.
+대신 설계를 정하지 않는다. 병합은 일꾼이 한다. 겹치는 병합은 감독이 보낼 때 파일을
+갈라 막고(1), 그래도 부딪히면 일꾼이 워크트리로 돌아가 푼다.
+
+**보낸 일은 늘 워크트리에서 한다** — 저장소에 워크트리 규약이 없어도. 일꾼 여럿이 한 루트
+체크아웃을 같이 쓰니, 루트에서 고치면 서로의 편집과 커밋이 섞인다. 워크트리는
+`<루트>/.claude/worktrees/` 에 서고 `moai init` 이 그 경로를 gitignore 에 적는다.
 
 **본 가지는 바퀴를 시작할 때 한 번 읽는다.** 일꾼이 워크트리를 뜨고 병합하는
 곳이 루트 체크아웃이라 그 체크아웃의 지금 가지가 본 가지다 — 원격의 기본 가지는 루트와
-다를 수 있고 낡았을 수 있다. 루트가 detached 면 `origin/HEAD`, 그것도 없으면 `main` 이다.
-루트 체크아웃은 `git worktree list` 의 첫 자리라, 아래 한 줄은 저장소 어디서 불러도 —
-워크트리 안에서도 — 루트의 가지를 낸다. 아무것도 안 나오면 git 이 낸 오류를 보고 멈춘다.
+다를 수 있고 낡았을 수 있다. 루트 체크아웃은 `git worktree list` 의 첫 자리라, 아래 한 줄은
+저장소 어디서 불러도 — 워크트리 안에서도 — 루트의 가지를 낸다. 아무것도 안 나오면 git 이 낸
+오류를 보고 멈춘다.
 
 ```sh
-if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/^$/s|^branch refs/heads/||p'); [ -n "$b" ] || b=$(git symbolic-ref -q refs/remotes/origin/HEAD | sed 's|^refs/remotes/origin/||'); echo "${{b:-main}}"; fi
+if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/^$/s|^branch refs/heads/||p'); if [ -n "$b" ]; then echo "$b"; else echo "루트가 detached 다" >&2; fi; fi
 ```
+
+**루트가 detached 면 보내지 않는다.** 일꾼의 집기 커밋과 병합이 가지 없는 HEAD 에 서고,
+확인(`merge-base <본 가지>`)과 `worktree add` 가 실패하고, `branch -d` 가 그 일의 유일한
+참조를 지운다. 원격의 기본 가지로 대신 읽지 않는다 — 루트가 그 가지에 서 있지 않으니 같은
+사고다. 사람에게 루트를 가지에 세워 달라고 하고 멈춘다.
 
 읽은 이름을 아래 명령의 `<본 가지>` 와 일꾼에게 싣는 글의 `<본 가지>` 에 채운다.
 **일꾼은 다시 읽지 않는다** — 워크트리 안에서 읽으면 제 가지가 나온다.
@@ -811,25 +846,33 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
 - 그런 일이 있으면 **새 idea 보다 먼저** 놀고 있는 세션 하나에 이어 하기를 맡긴다. 3 의
   글 대신 아래를 싣고, 그 뒤에 3 의 글의 **4-1 부터 끝까지**를 통째로 잇는다 — 4-1 을 빼면
   이어받은 일꾼이 워크트리 안에서 트래커를 고치고, 끝을 자르면 닫은 뒤의 걸음(창 비우기)이
-  빠진다
+  빠진다. 자리표시자는 3 에서 적은 대로 채운다(`<옆 일>` 도 — 4-3 이 그 줄을 가리킨다)
 
       감독 세션(<내 이름>)이 <에픽> 의 멈춘 일을 맡긴다 — 앞 세션이 끝을 못 냈다.
       먼저 읽을 것: moai show <에픽> (이력·노트) · moai show <멤버> (자리도 — 자리는 일에만 선다)
 {reclaim_model}
-      본 가지: <본 가지> — 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다
+      {BESIDE}
+      본 가지: <본 가지> — 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다.
+{reclaim_check}
       루트: <루트> — 2 의 `루트 자리`. 트래커를 고치는 것은 언제나 이 자리다(3 의 글의 4-1)
       - 워크트리가 있으면 EnterWorktree(path) 로 들어가 `git log <본 가지>..HEAD` 와
         `git status` 로 어디까지 했는지 읽고 이어 한다
       - 없으면 루트에서 다시 뜬다. 가지가 남아 있으면 그 가지로
         (`git worktree add .claude/worktrees/<에픽> worktree-<에픽>`), 없으면
         `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> <본 가지>`
+      - **루트가 저장소 꼭대기가 아니면**(모노레포의 하위 프로젝트) 워크트리에 들어간 뒤 그 안의
+        같은 하위로 옮겨 거기서 일한다 — 꼭대기에 서면 `moai` 가 루트의 `.moai` 를 찾아 쓰고, 훅은
+        `.claude/` 아래의 편집을 안 센다
+          {SUBDIR}
       - 멤버의 칸은 이미 집혀 있다 — 다시 집지 않는다
+      - 9-1 의 노트는 이 창의 몫만 적는다. 까닭 끝에 `거둔 일, 앞 세션 몫은 모른다` 를 붙인다 —
+        앞 세션의 모델과 토큰은 어디에도 안 적혀, 없으면 멤버 전체를 이 창이 한 것으로 읽는다
       - 아래 걸음들이 가리키는 `2` 는 **경로를 준 트래커 커밋**이다 — 루트는 모든 세션이
         같이 쓰니 `git commit -m "…" -- .moai/` 로 친다. 병합이 열려 있으면(MERGE_HEAD)
         git 이 거절하니 그 병합이 끝나기를 기다렸다 다시 친다
 
 - **이어 할지 놓을지는 감독이 정하지 않는다.** 놓을 일로 보이면(`moai mv <id> todo`·
-  `moai defer <id> -m "왜"`) 사람에게 묻는다
+  `moai defer <id> -m '왜'`) 사람에게 묻는다
 - 이어 하기를 맡긴 일은 idea 와 같이 그 보고를 확인할 때까지 다시 안 보낸다
 
 **1. 고른다.** 쌓인 idea 에서 지금 벌여 놓은 일과 부딪히지 않는 것만 남긴다.
@@ -851,11 +894,13 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
 **2. 일꾼을 찾는다.** `ListAgents` 는 세션의 자리(cwd)를 안 보여 준다.
 Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽는다
 (`CLAUDE_CONFIG_DIR` 를 옮겼으면 그 아래다). 모노레포의 하위 프로젝트면 `.moai` 가
-있는 그 하위가 루트다. 스크립트는 첫 줄 `루트 자리` 에 그 `<루트>` 를 낸다.
+있는 그 하위가 루트다. 스크립트는 첫 줄 `루트 자리` 에 그 `<루트>` 를 내고, 루트가 저장소
+꼭대기가 아니면 `하위` 줄에 꼭대기에서 루트까지의 경로를 낸다 — 워크트리는 저장소 전체로 서니
+일꾼이 그 안의 같은 하위로 들어가야 한다(브리프 3).
 
 ```sh
 python3 - "$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)" "$(git rev-parse --show-toplevel)" <<'PY'
-import glob, json, os, sys
+import glob, json, os, subprocess, sys
 if not sys.argv[1]:
     sys.exit("git 저장소 안에서 부른다")
 top, here = os.path.realpath(sys.argv[2]), os.path.realpath(os.getcwd())
@@ -864,7 +909,27 @@ while here not in (top, os.path.dirname(here)) and not os.path.isdir(os.path.joi
 root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
 trees = os.path.join(root, ".claude", "worktrees") + os.sep
 print("루트 자리", root)
+if os.path.relpath(here, top) != ".":
+    print("하위    ", os.path.relpath(here, top))
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+def parents(pid):
+    while pid > 1:
+        yield pid
+        try:
+            out = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        except OSError:
+            return
+        pid = int(out) if out.isdigit() else 0
+def detached(s):
+    """세션 파일이 대는 tmux 판을 이 서버에서 그 세션이 낳지 않았는가 — 떼어 낸 시험 서버의 판이다."""
+    pane = str(s.get("tmux") or "").rpartition(".")[2]
+    if not pane.startswith("%"):
+        return False
+    try:
+        owner = subprocess.run(["tmux", "display-message", "-p", "-t", pane, '#{{pane_pid}}'], capture_output=True, text=True).stdout.strip()
+    except OSError:
+        return False
+    return not owner.isdigit() or int(owner) not in parents(int(s["pid"]))
 unread = 0
 for f in glob.glob(os.path.join(home, "sessions", "*.json")):
     try:
@@ -878,6 +943,8 @@ for f in glob.glob(os.path.join(home, "sessions", "*.json")):
         continue
     if cwd is None:
         unread += 1
+    elif cwd == root and detached(s):
+        print("떼어 낸 판", s.get("status"), s.get("name"))
     elif cwd == root:
         print("루트    ", s.get("status"), s.get("name"))
     elif cwd.startswith(trees):
@@ -891,6 +958,8 @@ PY
   일하는 중이고, 그 밖의 값(`shell` 따위)은 뜻을 모르니 맡기지 않는다
 - **보낸 idea 의 보고를 아직 확인하지 않은 세션은 뺀다.** 일꾼은 펼치고 집고 병합하는
   동안 루트에 있다 — 사람의 답이나 권한을 기다리면 `waiting`, 턴을 마치면 `idle` 로 뜬다
+- **`떼어 낸 판` 은 맡기지 않는다.** 세션 파일이 대는 tmux 판을 이 서버에서 그 세션이 낳지
+  않았다 — 떼어 낸 tmux 서버(`-L`)에서 띄운 시험용 `claude` 다. 자리가 루트라도 일꾼이 아니다
 - 자리가 `<루트>/.claude/worktrees/*` 인 세션은 이 저장소에서 **일하는 중**이다.
   지켜보되 맡기지 않는다
 - **다른 디렉터리의 세션은 건드리지 않는다**
@@ -917,12 +986,15 @@ PY
 
 **3. 보낸다.** 놀고 있는 세션 하나에 idea **하나**를 `SendMessage` 로 보낸다.
 일꾼은 이 대화를 모르니 아래 글을
-`<내 이름>`·`<id>`·`<제목>`·`<본 가지>`·`<모델>`·`<난이도>`·`<까닭>`·`<루트>` 를 채워
+`<내 이름>`·`<id>`·`<제목>`·`<본 가지>`·`<모델>`·`<난이도>`·`<까닭>`·`<옆 일>`·`<루트>` 를 채워
 **통째로** 싣는다 — 일꾼이 받는 것은 이 글뿐이라, 일꾼이 지킬 것은 모두 이 안에 있다.
 `<루트>` 는 2 의 `루트 자리` 다. **안 채우면** 일꾼이 워크트리 안에서 제 자리를 루트로 읽는다.
 `<모델>`·`<난이도>`·`<까닭>` 은 2-1 에서 고른 짝과 그 까닭이다. **안 채우면** 그 자리표시자가
 그대로 실려, 일꾼이 닫을 때 남기는 노트가 무엇이 일했는지 대신 `<모델>` 이라고 적는다.
-`<까닭>` 은 백틱·`$` 없이 적는다 — 9-1 의 큰따옴표 안에 들어가 셸이 그것을 명령으로 푼다.
+`<까닭>` 에는 작은따옴표를 쓰지 않는다 — 9-1 의 작은따옴표를 닫아 뒤의 글이 셸로 샌다.
+`<옆 일>` 은 1 에서 잰 옆 워크트리와 이번 바퀴에 함께 보낸 일, 그리고 그 일이 쥔 파일이다 —
+없으면 `없다`. 감독이 보내기 전에 잰 것은 에픽 도중 새로 필요해진 파일까지 못 덮으니, 일꾼이
+그 파일을 만나면 고치지 않고 멤버로 남겨 보고한다(브리프 4-3).
 `<등급>` 는 채우지 않는다 — 7 에서 개발해 본 일꾼이 고르는 리뷰 등급의 자리다.
 `<회사>`·`<수>` 도 채우지 않는다 — 9-1 에서 일꾼이 제 창에서 읽어 채우는 회사와 토큰이다.
 
@@ -941,6 +1013,11 @@ PY
     git merge-base --is-ancestor <머지 해시> <본 가지> && echo 있다   머지가 본 가지에 있는가
     moai show <에픽>                       펼친 에픽과 멤버가 done 인가
     git worktree list                      그 워크트리가 사라졌는가
+
+**옆이 쥐어 남긴 멤버**(브리프 4-3)는 그 옆 일의 보고를 확인한 뒤 놀고 있는 세션에 보낸다.
+3 의 글을 싣되 `<id>` 에 에픽을 채우고, 1 대신 "이미 펼친 에픽이다 — promote 하지 않고 첫 칸
+멤버를 2 부터 집는다" 를 적는다. 그 전에는 1 의 셈에서 그 파일을 쥔 일로 친다. 그 멤버도 7-1 의
+것처럼 done 이 아니어도 맞다 — 에픽을 열어 두니 에픽도 done 이 아니다.
 
 보고가 브리프 7-1 에서 첫 칸에 남겼다고 댄 멤버는 done 이 아니어도 맞다 — 그 멤버가 에픽을 열어
 두니 에픽도 done 이 아니다. 그 멤버는 idea 가 아니라 1 의 목록에 안 뜨니, 남긴 까닭(사람의
@@ -1085,6 +1162,13 @@ def dim_only(pane):
     return False
 def looks(fmt):
     return tmux("display-message", "-p", "-t", pane, fmt).stdout.strip()
+def shrunk(now, was):
+    """지우기가 깎은 글인가. 한 번 지우면 줄 하나가 비고 다음 줄이 올라올 뿐이라, 남은 줄은 모두
+    앞 판의 줄과 **같은 줄**로 차례대로 선다(빈 줄은 방금 비운 줄이다). 안 맞는 줄이 있으면 그새
+    사람이 친 글이다 — 줄 안에 드는지만 보면 새로 친 한 글자나 다시 친 앞머리가 앞 판의 어느
+    줄에든 들어 못 가른다."""
+    rest = iter(was.split("\n"))
+    return all(not line or line in rest for line in now.split("\n"))
 QUIET = '#{{pane_in_mode}}#{{pane_synchronized}}'
 if not os.environ.get("TMUX"):
     skip("tmux 밖이다")
@@ -1116,12 +1200,28 @@ if kept is None:
 if kept:
     print("치던 글 —", name, pane)
     print(kept)
+seen, ghost = kept, None
 for _ in range(20):
     left = draft(pane)
-    if left == "":
+    if left == "" and ghost is None:
         break
     if left is None or looks(QUIET) != "00":
         skip("지우던 입력 칸을 놓쳤다")
+    # 흐린 글로 보고 지워 본 글이 바뀌었으면 제안 글이 아니었다 — 제안 글은 안 지워진다. 위에 옮겼다.
+    if ghost is not None and left != ghost:
+        skip("사람이 치고 있다", "지우기를 멈췄다. 위에 옮긴 `그새 선 흐린 글` 도 그 창의 사람에게 돌려준다")
+    # 지우는 사이에 사람이 친 글은 옮긴 적이 없다 — 더 지우면 사람에게 남은 복사가 없다(사용자 결정).
+    if not shrunk(left, seen):
+        if not dim_only(pane):
+            print("그새 친 글 —", name, pane)
+            print(left)
+            skip("사람이 치고 있다", "지우기를 멈췄다. 사람에게 비워도 된다고만 짚는다")
+        # 사람의 글을 다 지운 빈 칸에는 흐린 제안 글이 다시 선다 — 친 글이 아니니 멈추지 않는다.
+        # 색으로만 가르지도 않는다: 옮겨 두고 지워 보아, 지워지면 흐리게 그린 사람 글이다(위 `ghost`).
+        print("그새 선 흐린 글 —", name, pane)
+        print(left)
+        ghost = left
+    seen = left
     erased = True
     tmux("send-keys", "-t", pane, "C-e", "C-u", "DC")
     time.sleep(0.2)
@@ -1131,6 +1231,8 @@ else:
     # 치던 글과 같기를 바라지 않는다 — 사람의 글을 지운 빈 칸에 제안 글이 다시 서면, 치던 글은
     # 이미 옮겼고 남은 것은 제안 글뿐이다.
     rest = draft(pane)
+    if ghost is not None and rest != ghost:
+        skip("사람이 치고 있다", "지우기를 멈췄다. 위에 옮긴 `그새 선 흐린 글` 도 그 창의 사람에게 돌려준다")
     if rest and rest == left and dim_only(pane):
         if rest == kept:
             print("위의 `치던 글` 은 흐린 제안 글이었다 — 사람이 친 것이 아니다")
@@ -1138,6 +1240,8 @@ else:
             # 사람의 글이 아니니 상태줄에 "감독 창에 옮겼다" 고 말하지 않는다 — 그 말을 읽은 사람이
             # 감독 창에서 제가 쓴 적 없는 글을 찾는다.
             kept = ""
+        elif rest == ghost:
+            print("위의 `그새 선 흐린 글` 은 제안 글이었다 — 사람이 친 것이 아니다")
     elif rest != "":
         # 하나도 안 지워졌으면 그 글은 아직 그 칸에 있다 — "이미 지웠다" 고 하면 감독이 그 창에
         # 그대로 있는 글을 사람에게 한 벌 더 돌려준다.
@@ -1147,7 +1251,12 @@ if (read(f) or {{}}).get("status") != "idle":
     skip("그새 idle 이 아니다")
 if looks(QUIET) != "00":
     skip("그새 판이 복사 모드로 갔다")
-say = "감독 " + me + ": " + epic + " 보고를 확인했다 — 이 창을 /clear 한다" + (". 치던 글은 감독 창에 옮겼다" if kept else "")
+# 마지막으로 읽은 뒤에 사람이 쳤으면 `/clear` 가 그 글 뒤에 붙는다 — 치기 직전에 한 번 더 읽는다.
+# 비었거나 그대로거나 흐린 제안 글만 새로 섰으면 친다.
+last = draft(pane)
+if last is None or (last not in ("", left) and not dim_only(pane)):
+    skip("그새 입력 칸에 글이 섰다", "지우기를 멈췄다. 사람에게 비워도 된다고만 짚는다")
+say ="감독 " + me + ": " + epic + " 보고를 확인했다 — 이 창을 /clear 한다" + (". 치던 글은 감독 창에 옮겼다" if kept else "")
 for client in tmux("list-clients", "-t", pane, "-F", '#{{client_name}}').stdout.split("\n"):
     if client:
         tmux("display-message", "-c", client, "-d", "8000", "-t", pane, say)
@@ -1199,6 +1308,14 @@ PY
   붙기 때문이다. 지워지는 글은 언제나 사람의 것으로 본다. Claude Code 는 빈 칸의 커서를 제안 글
   첫 글자에 뒤집어 그리니 그 한 칸은 글로 안 센다. 사람의 글을 지운 빈 칸에 제안 글이 다시
   서도 같다 — 치던 글은 이미 옮겼으니 그대로 친다
+- **지우는 사이에 사람이 치면 멈춘다**(사용자 결정). 한 번 지울 때마다 입력 칸을 다시 읽어,
+  앞 판의 줄에서 깎인 것이 아닌 글이 보이면 곧바로 멈추고 `/clear` 를 치지 않는다 — 그 글은 옮긴
+  적이 없어 더 지우면 사람에게 남은 복사가 없다. 새 글은 `그새 친 글` 로 감독 창에 옮기고, 앞서
+  지운 것은 `치던 글은 이미 지웠다` 가 말한다. 합쳐서 계속 지우는 길은 안 고른다 — 사람이 치는
+  중에 `/clear` 가 그 글 뒤에 붙는다. 남은 줄은 앞 판의 줄과 **같아야** 깎인 것이다 — 줄 안에
+  드는지만 보면 새로 친 한 글자가 앞 판 어느 줄에든 든다. 새로 선 글이 모두 흐리면 사람의 글을
+  지운 빈 칸에 다시 선 제안 글일 수 있어 멈추지 않고 `그새 선 흐린 글` 로 옮겨 둔 채 지워 본다 —
+  지워지면 사람이 친 글로 보고 멈춘다. `/clear` 를 치기 직전에도 입력 칸을 한 번 더 읽는다
 - **비우기와 다음 배정을 한 호흡에 하지 않는다.** `/clear` 는 큐에 쌓인 글을 함께 지운다.
   스크립트가 `비웠다` 를 낸 — 세션 id 가 바뀐 — 뒤에 다음 idea 를 보내고, `비웠는지 모른다`
   면 그 창이 어떤지 보기 전에는 보내지 않는다
@@ -1273,13 +1390,18 @@ fn brief() -> String {
     let rubric = indent(&difficulty_rubric(), "       ");
     let top = top_model();
     let epic_rule = indent(&epic_review_rule(), "       ");
+    let branch_check = indent(BRANCH_CHECK, "    ");
     format!(
         r#"    감독 세션(<내 이름>)이 idea <id> 를 맡긴다 — <제목>.
     먼저 읽을 것: moai show <id>
 {model}
-    본 가지: <본 가지> — 아래의 가지 이름이다. 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다
+    {BESIDE}
+    본 가지: <본 가지> — 아래의 가지 이름이다. 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다.
+{branch_check}
     1. 루트에서 펼친다 — idea 를 일감으로 바꾸는 길은 `moai idea promote <id> --from -`
-       하나다. 이슈 하나짜리여도 에픽 + 이슈로 펼친다. `--dry-run` 을 먼저 본다.
+       하나다. 이슈 하나짜리여도 에픽 + 이슈로 펼친다. `--dry-run` 을 먼저 본다 — 이 창이
+       보는 것이지 사람에게 보이고 묻는 것이 아니다. 쪼갠 안을 사람에게 한 번 보이는 것은 사람이
+       직접 청한 일의 걸음이고, 감독이 맡긴 것은 이미 사람이 넘긴 일이다. 설계 결정은 4 로 묻는다.
        그 idea 가 이미 done 이면(누가 펼쳤다) 펼치지 말고 감독에게 알린다 — 다시 펼치면
        에픽이 둘 선다
     2. 멤버를 `moai mv <멤버> in_progress --from todo` 로 집고 루트에서 커밋한다.
@@ -1292,7 +1414,11 @@ fn brief() -> String {
          git commit -m "chore(tracker): <에픽> 를 워크트리에서 집는다" -- .moai/
     3. 2 의 커밋 뒤 곧바로 `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> <본 가지>`
        로 로컬 <본 가지> 에서 뜨고 EnterWorktree(path) 로 들어간다. 이름은 idea id 가 아니라
-       펼친 에픽 id 다. 워크트리가 서기 전에는 루트의 다른 세션들이 이 멤버를 제 초점으로 읽는다
+       펼친 에픽 id 다. 워크트리가 서기 전에는 루트의 다른 세션들이 이 멤버를 제 초점으로 읽는다.
+       **루트가 저장소 꼭대기가 아니면**(모노레포의 하위 프로젝트) 워크트리는 저장소 전체로
+       서니, 들어간 뒤 그 안의 같은 하위로 옮겨 거기서 일한다 — 워크트리 꼭대기에 서면 `moai` 가
+       위로 올라가 루트의 `.moai` 를 찾아 쓰고, 훅은 `.claude/` 아래의 편집을 안 센다
+         {SUBDIR}
     4. 노트에 없는 설계 결정은 추측하지 말고 AskUserQuestion 으로 묻는다 —
        사람이 일꾼 창을 보고 있다
     4-1. **트래커는 언제나 루트의 것을 고친다.** `<루트>` 는 감독이 채운 루트 체크아웃의
@@ -1310,8 +1436,16 @@ fn brief() -> String {
        너무 길다. `-L`/`-S` 없는 `kill-server`·`kill-session` 은 쓰지 않는다: tmux 안에서 맨 `tmux` 는
        사람의 기본 서버로 가 모든 세션을 죽이고, `TMUX_TMPDIR` 로는 안 갇힌다. 속에서 `tmux` 를
        부르는 스크립트는 손으로 `-L` 을 못 주니, 진짜 `tmux` 를 절대 경로로 부르며 `-L` 을 끼우는
-       감싸개를 `PATH` 앞에 두고 돌린다. 남이 띄운 판에는 키를 보내지 않는다.
+       감싸개를 `PATH` 앞에 두고 돌린다. 남이 띄운 판에는 키를 보내지 않는다. 그 서버에서 시험용
+       `claude` 를 띄우면 cwd 를 루트 밖(스크래치패드)으로 둔다 — 루트에서 띄운 세션은 감독의
+       세션 목록에 놀고 있는 일꾼으로 낀다.
        **리뷰 서브에이전트에게도** 이 말을 준다 — 서버 전체를 죽인 것이 리뷰 서브에이전트였다
+    4-3. **옆에서 도는 일이 쥔 파일을 건드려야 하면 고치지 않는다** — 머리의 `옆에서 도는 일`
+       이 대는 파일, 또는 `git worktree list` 의 옆 가지가 이미 고친 파일
+       (`git diff --name-only <본 가지>...<옆 가지>`). 둘이 같은 곳을 고치면 병합에서 한쪽이
+       다른 쪽을 기다린다. 이 에픽이 내건 것이 그것 없이 안 이뤄지면 idea 가 아니라 멤버다 —
+       `moai -C <루트> add '<무엇을>' -e <에픽>` 로 세워 첫 칸에 두고, 11 에서 **옆이 쥐어 남긴
+       멤버**로 그 옆 일과 함께 댄다. 감독이 그 일이 끝난 뒤 보낸다. 미루지 않는다
     5. **멤버마다 리뷰하지 않는다.** 멤버 하나가 끝나면 시험을 돌리고 커밋해 다음 멤버로
        간다 — 리뷰는 멤버가 다 끝난 뒤 7 에서 에픽 전체를 한 번 본다. 리뷰 한 판이 비싸
        멤버 수만큼 부르지 않는다. 멤버 1 의 버그 위에 멤버 2 가 쌓이는 값은 그 한 번에서
@@ -1333,7 +1467,8 @@ fn brief() -> String {
        넘긴 것은 이슈 번호와 함께 노트.
        루트에서 세우거나 집은 리뷰 이슈를 워크트리의 훅이 못 봐서 막힐 때만 — 훅은 그
        워크트리의 스냅샷만 읽는다 — 같은 관점·등급·`--fix` 범위로 리뷰 서브에이전트를
-       돌린다. 리뷰 이슈·관점(`-b`)·원문 노트·닫는 `-m` 은 그대로 남긴다. 관점이 없다
+       돌린다. 서브에이전트는 창의 모델을 물려받으니 `Agent` 의 `model` 에 위 등급의 모델을
+       준다. 리뷰 이슈·관점(`-b`)·원문 노트·닫는 `-m` 은 그대로 남긴다. 관점이 없다
        같은 다른 거절은 돌아가지 않고 거절문이 내는 명령대로 고친다
     7-1. 병합 전에 에픽 도중 담은 idea(`moai -C <루트> show --type idea -e <에픽>` 과 이 창이
        기억하는 것)와 리뷰가 넘긴 것을 되짚는다 — **에픽이 내건
@@ -1350,7 +1485,10 @@ fn brief() -> String {
        그 멤버로 에픽을 닫는 창이 에픽 끝 리뷰를 다시 부른다
     8. ExitWorktree(keep) 로 루트로 돌아온다 — 워크트리 안에서 그것을 지우면 세션의
        자리가 사라진 디렉터리에 남아 감독이 다시는 이 세션을 루트로 못 본다.
-       옆 세션과 병합이 겹치면 먼저 알린 뒤 루트에서 **한 번에** 병합한다.
+       병합 전에 루트가 <본 가지> 에 서 있는지 대조한다 — 어긋나면 병합하지 않고 감독에게 알린다
+         git symbolic-ref -q HEAD                  refs/heads/<본 가지> 여야 한다
+       루트에서 **한 번에** 병합한다. 옆 일꾼과 겹치는 것은 감독이 보낼 때 갈랐고, 그래도
+       부딪히면 아래처럼 되돌리고 워크트리에서 푼다 — 옆 세션을 찾아 알리지 않는다.
        `--no-commit` 을 쓰지 않는다. `--no-ff` 가 없으면 fast-forward 로 끝나 병합 커밋이 안 선다
          git merge --no-ff worktree-<에픽> -m "merge: …"
        루트의 `.moai` 에 커밋 안 된 옆 세션의 줄이 있으면 병합이 거절된다 — 2 처럼 경로를
@@ -1358,7 +1496,7 @@ fn brief() -> String {
        로 되돌리고 EnterWorktree(path) 로 워크트리에 돌아가 6 부터 다시 한다
     9. 병합이 실제로 끝났으면 루트에서 `git worktree remove .claude/worktrees/<에픽>` 과
        `git branch -d worktree-<에픽>` 으로 워크트리와 가지를 지운다
-    9-1. 닫기 전에 **무엇이 이 일을 했는지** 이 창이 한 멤버마다 한 줄로 남긴다 — 7-1 에서 첫 칸에
+    9-1. 닫기 전에 **무엇이 이 일을 했는지** 이 창이 한 멤버마다 한 줄로 남긴다 — 7-1·4-3 에서 첫 칸에
        남긴 멤버는 아무도 안 했으니 빼고. 머리의 제안이 아니라
        이 창에서 **실제로 돈 모델**이다. 아래 줄은 감독이 제안으로 채워 보냈으니, 올렸거나 창이
        처음부터 다른 모델이었으면 모델·난이도를 실제 것으로 고치고 까닭에 그 까닭을 적는다 —
@@ -1368,19 +1506,21 @@ fn brief() -> String {
        감독이 채운 `<모델>` 은 별명(`opus`)이니 모델을 안 바꿨어도 실제 이름으로 고친다.
        `<수>` 는 이 창이 쓴 토큰이다. **토큰을 모르면 `tokens=<수>` 를 통째로 뺀다** — 0 도 어림값도
        적지 않는다. **id 하나에 한 줄** — 여러 id 에 같은 글을 적으면 토큰이 id 수만큼 불어난다.
-       창의 토큰은 멤버마다 가를 수 없으니 **한 멤버에만** 적고, 나머지 멤버의 줄은 `tokens=<수>` 를 뺀다
-         moai note <멤버> "model: <회사>/<모델> tokens=<수> (<난이도> — <까닭>)"
+       창의 토큰은 멤버마다 가를 수 없으니 **한 멤버에만** 적고, 나머지 멤버의 줄은 `tokens=<수>` 를 뺀다.
+       자유 글은 작은따옴표로 싼다 — 큰따옴표 안의 백틱·`$(…)` 은 셸이 명령으로 푼다. 글에
+       작은따옴표가 들면 `-b -` 로 stdin 에서 흘린다
+         moai note <멤버> 'model: <회사>/<모델> tokens=<수> (<난이도> — <까닭>)'
     10. 그 뒤에 닫는다. **`moai mv <멤버> done` 은 그 병합이 실제로 끝난 뒤에만 친다** —
-       병합 전에 옮겼다가 되돌린 일꾼이 있었다. 7-1 에서 첫 칸에 남긴 멤버는 닫지 않는다 — 그
+       병합 전에 옮겼다가 되돌린 일꾼이 있었다. 7-1·4-3 에서 첫 칸에 남긴 멤버는 닫지 않는다 — 그
        멤버가 에픽을 열어 둔다. 워크트리가 남아 있으면 훅이 이 일을 옆
        워크트리의 것으로 읽어 `-m` 없는 리뷰 닫기를 못 막는다. 리뷰 이슈는 무엇이
        나왔는지를 남기며 닫는다
 {close}
        시험 통과를 보고 2 처럼 경로를 준 커밋으로 루트에 남긴다
     11. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 펼친 에픽 id, 한두 줄 요약,
-       넘긴 것·새 idea, 7-1 에서 되찾아 첫 칸에 남긴 멤버
+       넘긴 것·새 idea, 7-1 에서 되찾아 첫 칸에 남긴 멤버, 4-3 에서 옆이 쥐어 남긴 멤버와 그 옆 일
     12. 마지막으로 **창을 비워도 되는 때를 알린다.** 이어받을 한 줄을 남겨
-       (`moai note <에픽> "다음: …"`) 2 처럼 경로를 준 커밋으로 루트에 담고 — 10 의 커밋 뒤에
+       (`moai note <에픽> '다음: …'`) 2 처럼 경로를 준 커밋으로 루트에 담고 — 10 의 커밋 뒤에
        적은 줄이라 안 담으면 공유 루트에 남아 남의 커밋에 쓸려 들어간다 — 그 창을 보는 사람에게
        한 줄로, 지금 `/clear` 해도 된다고. 맥락은 대화가 아니라 트래커에 산다: 이슈 본문·노트·
        리뷰 원문·커밋 메시지. 제 맥락 사용량을 볼 수 있으면 그 수도 그 줄에 담는다.
@@ -1751,6 +1891,9 @@ mod tests {
         let step = &brief[epic..brief[epic..].find("\n    8.").map_or(brief.len(), |n| epic + n)];
         assert!(step.contains(&indent(&rule, "       ")), "브리프 7 에 에픽 끝 등급·모델 규칙이 없다");
         assert!(step.contains("`/model opus`"), "에픽 끝 리뷰의 모델을 맞추라는 말이 일꾼에게 없다");
+        // 훅에 막혀 돌리는 리뷰 서브에이전트도 창의 모델을 물려받는다 — 창을 못 맞췄으면 싼 모델이
+        // 쓰기 경로를 본다. 서브에이전트에는 모델을 직접 준다.
+        assert!(step.contains("`Agent` 의 `model`"), "리뷰 서브에이전트의 모델을 안 준다");
         // 일꾼이 받는 글에 그 자리가 있어야 감독이 채운다. **목록 줄에서 찾는다** — 바로 아래
         // 풀이 글도 세 자리를 적어, 감독 쪽 전체에서 찾으면 목록에서 빠져도 초록이었다.
         assert!(brief.contains("모델:"), "브리프에 모델 자리가 없다 — 감독이 골라도 일꾼은 모른다");
@@ -1854,6 +1997,8 @@ mod tests {
             ("bare(l).startswith(PROMPT)", "사람이 친 글 속의 프롬프트 표시나 붙임표를 제안 글로 읽어 그 글 뒤에 /clear 가 붙는다"),
             ("l[:2] in head", "옮긴 치던 글이 들여쓰기를 잃거나 앞머리 아닌 줄까지 두 글자 깎인다"),
             ("left is None", "입력 칸을 놓친 화면에 지우는 키를 계속 친다"),
+            // 마지막으로 읽은 뒤·치기 전의 틈에 친 글 뒤에도 `/clear` 가 붙는다.
+            ("그새 입력 칸에 글이 섰다", "지운 뒤 치기 전에 사람이 친 글 뒤에 /clear 가 붙는다"),
             ("치던 글은 이미 지웠다", "지우다 멈추면 사람의 글이 말없이 사라진다"),
             ("list-clients", "상태줄의 한 줄이 일꾼의 판이 아니라 감독의 클라이언트에 뜬다"),
             ("print(kept)", "치던 글을 지우기 전에 감독 창에 안 옮긴다"),
@@ -1880,6 +2025,59 @@ mod tests {
         let brief = brief();
         let twelve = brief.rfind("\n    12.").expect("창을 비우는 걸음이 없다");
         assert!(brief[twelve..].contains("감독이 보고를 확인하고 이 창에"), "일꾼이 감독이 비울 수 있다는 것을 모른다");
+    }
+
+    #[test]
+    fn erasing_stops_when_the_person_types_between_the_strokes() {
+        // **지우는 사이에 사람이 친 글은 옮긴 적이 없다**(2026-09-18 사용자 결정). 한 번 읽고 스무
+        // 번 지우던 판은 그 4초 남짓에 친 글자를 옮기지 않고 지웠다. 지우기가 깎은 글과 새 글을
+        // `shrunk` 가 가르는지 실제 파이썬으로 돌려 본다.
+        const CASES: &str = r##"
+import sys
+CASES = [
+    ("첫 줄이 비고 다음 줄이 올라왔다", "b\nc", "a\nb\nc", True),
+    ("다 지웠다", "", "a\nb", True),
+    ("안 지워지는 제안 글", "Try it", "Try it", True),
+    ("줄 끝에 더 쳤다", "b!\nc", "a\nb\nc", False),
+    ("새 줄을 쳤다", "b\nc\nd", "a\nb\nc", False),
+    ("한 줄뿐인 칸에 더 쳤다", "hello there", "hello", False),
+    ("방금 비운 줄이 아직 빈 채로 섰다", "a\n\nc", "a\nb\nc", True),
+    # 줄 안에 드는지만 보던 판은 이 둘을 깎인 글로 읽어 옮기지 않고 지웠다.
+    ("다 지운 칸에 새로 친 한 글자", "o", "hello", False),
+    ("사라진 글을 다시 치는 앞머리", "hel", "hello", False),
+]
+bad = [why for why, now, was, want in CASES if shrunk(now, was) != want]
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+"##;
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let supervise = supervise();
+        let open = supervise.find("python3 - '<세션>'").expect("비우는 스크립트가 없다");
+        let script = &supervise[open..open + supervise[open..].find("\nPY\n").expect("스크립트가 안 닫힌다")];
+        let from = script.find("def shrunk(").expect("지우기가 깎은 글을 가르는 함수가 없다");
+        let to = from + script[from..].find("\nQUIET = ").expect("shrunk 뒤의 줄이 없다");
+        let loop_at = script.find("for _ in range(20):").expect("지우는 고리가 없다");
+        assert!(script[loop_at..].contains("if not shrunk(left, seen):"), "지우는 고리가 사람이 친 글을 안 본다");
+        // 사람의 글을 다 지운 빈 칸에 다시 선 흐린 제안 글은 친 글이 아니다 — 그것에 멈추면 "제안 글이
+        // 다시 서도 그대로 친다"(사용자 결정)가 죽는다. 흐린 글은 옮겨 두고 지워 보아 가른다.
+        let stop = loop_at + script[loop_at..].find("if not shrunk(left, seen):").unwrap();
+        let fresh = &script[stop..stop + script[stop..].find("\n    seen = left").expect("고리가 본 글을 안 넘긴다")];
+        assert!(fresh.contains("if not dim_only(pane):"), "다시 선 제안 글을 사람이 친 글로 읽어 창이 안 비워진다");
+        assert!(fresh.contains("ghost = left"), "흐린 글을 지워 보지 않고 색으로만 가른다");
+        assert!(script[loop_at..].contains("if ghost is not None and left != ghost:"), "지워진 흐린 글을 사람의 글로 안 본다");
+        let program = format!("{}{CASES}", &script[from..to]);
+        let mut child = Command::new("python3")
+            .arg("-")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("python3 를 실행하지 못했다 — 이 시험에는 python3 가 있어야 한다");
+        child.stdin.take().expect("stdin").write_all(program.as_bytes()).expect("스크립트를 못 넘겼다");
+        let out = child.wait_with_output().expect("python3 가 안 끝났다");
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success(), "지우기가 깎은 글과 사람이 친 글을 못 가른다:\n{said}");
     }
 
     /// **흐린 제안 글은 tmux 가 실제로 내보내는 모양으로 가른다.** 위의 울타리는 함수가 있는지만
@@ -1997,6 +2195,17 @@ sys.exit(1 if bad else 0)
         assert!(!supervise.contains("판(`tmux new-session -d`)"), "맨 new-session 을 격리라고 가르친다");
     }
 
+    #[test]
+    fn reclaimed_work_says_it_lost_the_earlier_share() {
+        // **거둔 일의 노트는 앞 세션 몫을 모른다고 말한다**(2026-09-18 사용자 결정). 일한 모델은
+        // 닫을 때만 적어(결정 4), 앞 세션이 하다 죽은 멤버를 거둔 창이 닫으면 통째로 제 몫이 된다.
+        // 집을 때도 적게 넓히지 않고, 통계가 그 줄을 가를 수 있게 까닭에 표시만 한다.
+        let supervise = supervise();
+        let at = supervise.find("의 멈춘 일을 맡긴다").expect("거둔 일을 맡기는 글이 없다");
+        let end = supervise[at..].find("**1. 고른다.**").map_or(supervise.len(), |n| at + n);
+        assert!(supervise[at..end].contains("앞 세션 몫은 모른다"), "거둔 일의 노트가 앞 세션 몫을 삼킨다");
+    }
+
     /// **일꾼이 마지막 자이고, 일한 모델은 닫을 때 남는다**(moai-lzfq, 2026-09-15 사용자 결정).
     ///
     /// 감독은 코드를 읽기 전에 고르므로 제안일 뿐이다 — 읽어 보니 쓰기 경로면 일꾼이 올린다.
@@ -2008,7 +2217,9 @@ sys.exit(1 if bad else 0)
         // **올리는 길이 명령으로 서고, 그 명령을 칠 수 있는 자에게 간다.** "올린다" 만 적으면
         // 일꾼이 무엇을 쳐야 하는지 모른다. 그런데 `/model` 은 사람만 친다 — 에이전트는 붙박이
         // 명령을 못 불러, 제 손으로 치라고 하면 올렸다고 믿고 9-1 에 안 돈 모델을 적는다.
-        let raise = brief.find("한 단계 올린다").expect("일꾼이 모델을 올릴 길이 없다");
+        let raise = brief.find("다시 잰 난이도의 짝 모델로").expect("일꾼이 모델을 올릴 길이 없다");
+        // **한 칸씩이 아니다** — 두 칸 어긋난 제안이 가운데 모델에 멈추면 쓰기 경로를 싼 모델이 한다.
+        assert!(!brief.contains("한 단계 올린다"), "두 칸 어긋난 제안이 한 칸만 오른다");
         // 알리는 글은 **글자로 자른다** — 바이트로 자르면 한글 한가운데서 끊겨, 실패를
         // 알리려던 자리가 제가 먼저 죽는다.
         let shown = brief[raise..].chars().take(40).collect::<String>();
@@ -2045,9 +2256,9 @@ sys.exit(1 if bad else 0)
             let line = text
                 .lines()
                 .map(str::trim)
-                .find(|l| l.starts_with("moai note ") && l.contains("\"model: "))
+                .find(|l| l.starts_with("moai note ") && l.contains("'model: "))
                 .unwrap_or_else(|| panic!("{whose} 에 일한 AI 를 남기는 줄이 없다"));
-            let said = &line[line.find("\"model: ").unwrap() + 1..line.rfind('"').unwrap()];
+            let said = &line[line.find("'model: ").unwrap() + 1..line.rfind('\'').unwrap()];
             let filled = said
                 .replace("<회사>", "anthropic")
                 .replace("<모델>", "opus-5")
@@ -2065,6 +2276,23 @@ sys.exit(1 if bad else 0)
         }
     }
 
+    /// **가르치는 자유 글은 작은따옴표로 싼다**(2026-09-18 사용자 결정). 큰따옴표로 가르친 `-m`·`-b`·
+    /// 노트는 채운 글에 백틱이나 `$(…)` 가 들면 bash 가 명령 치환을 해 글이 잘린 채 0 으로 끝난다 —
+    /// 이 저장소의 노트는 백틱을 자주 쓴다. 한 표면이라도 큰따옴표로 돌아가면 여기서 붉어진다.
+    #[test]
+    fn free_text_is_taught_in_single_quotes() {
+        let texts = [("AGENTS 블록", agents()), ("스킬", skill()), ("참고 문서", reference()), ("감독", supervise())];
+        for (whose, text) in &texts {
+            for line in text.lines().filter(|l| l.contains("moai ")) {
+                for bad in ["-m \"", "-b \"", "moai note <id> \"", "moai note <멤버> \"", "moai note <에픽> \""] {
+                    assert!(!line.contains(bad), "{whose} 가 자유 글을 큰따옴표로 가르친다 — {line}");
+                }
+            }
+        }
+        assert!(make_review("-e <에픽>").contains("-b '<무엇을 왜 보는가>'"), "리뷰 줄의 관점이 작은따옴표가 아니다");
+        assert!(handoff("t-1").ends_with("'다음: <이어서 할 것>'"), "이어받을 줄이 작은따옴표가 아니다");
+    }
+
     /// **감독 스킬은 모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 적으면 남의 저장소에서는
     /// 아무것도 안 가리키고, 고친 뒤에는 거짓이 된다.
     #[test]
@@ -2080,6 +2308,80 @@ sys.exit(1 if bad else 0)
             .collect();
         assert!(ids.is_empty(), "이 저장소의 이슈 id 가 섰다 — {ids:?}");
     }
+    #[test]
+    fn the_supervised_worker_settles_the_three_old_questions() {
+        // 2026-09-18 사용자 결정 셋. (1) 보낸 일은 늘 워크트리 (2) 일꾼은 병합 전에 옆 세션을 찾아
+        // 알리지 않는다 — 찾을 길이 없는 말은 지킬 수 없다 (3) 펼칠 안을 사람에게 다시 묻지 않는다.
+        let (supervise, brief) = (supervise(), brief());
+        let head = &supervise[..supervise.find("## 한 바퀴").expect("한 바퀴가 없다")];
+        assert!(head.contains("**보낸 일은 늘 워크트리에서 한다**"), "워크트리 전제가 머리에 없다");
+        assert!(!supervise.contains("일꾼끼리 먼저"), "일꾼이 찾을 길 없는 옆 세션에 알리라고 한다");
+        assert!(!brief.contains("먼저 알린 뒤"), "일꾼이 찾을 길 없는 옆 세션에 알리라고 한다");
+        let one = brief.find("\n    1. ").expect("1 이 없다");
+        let two = brief.find("\n    2. ").expect("2 가 없다");
+        assert!(brief[one..two].contains("사람에게 보이고 묻는 것이 아니다"), "맡긴 idea 를 펼칠 때 사람에게 또 묻는다");
+    }
+
+    #[test]
+    fn a_file_held_next_door_becomes_a_member_not_an_edit() {
+        // **에픽 도중 새로 필요해진 파일을 옆이 쥐었으면 멤버로 남기고 알린다**(2026-09-18 사용자
+        // 결정). 감독이 보내기 전에 파일을 재도 도중에 새로 필요해진 파일은 못 잰다 — 그런 일이
+        // idea 로 밖에 나가 에픽이 목적을 못 이룬 채 닫힌 적이 있다. 일정 문제가 범위 결정으로 위장한다.
+        let (supervise, brief) = (supervise(), brief());
+        assert!(brief.contains("옆에서 도는 일: <옆 일>"), "일꾼이 옆에서 쥔 파일을 모른다");
+        let list = supervise.lines().find(|l| l.ends_with("를 채워")).expect("감독이 채울 자리 목록이 없다");
+        assert!(list.contains("`<옆 일>`"), "감독이 옆 일을 안 채운다 — {list}");
+        let at = brief.find("\n    4-3. ").expect("4-3 이 없다");
+        let end = brief.find("\n    5. ").expect("5 가 없다");
+        assert!(brief[at..end].contains("-e <에픽>") && brief[at..end].contains("미루지 않는다"), "옆이 쥔 일이 멤버로 안 남는다");
+        let report = brief.find("\n    11. ").expect("11 이 없다");
+        assert!(brief[report..].contains("옆이 쥐어 남긴 멤버"), "보고가 옆이 쥐어 남긴 멤버를 안 댄다");
+        assert!(supervise.contains("**옆이 쥐어 남긴 멤버**"), "감독이 그 멤버를 언제 보낼지 모른다");
+        // 4-3 이 남긴 멤버도 아무도 안 했고 에픽을 열어 둔다 — 9-1 이 모델 줄을 적거나 10 이 닫으면
+        // 에픽이 목적을 못 이룬 채 닫힌다(7-1 의 멤버와 같은 덫).
+        let noted = brief.find("\n    9-1. ").expect("9-1 이 없다");
+        let closed = brief.find("\n    10. ").expect("10 이 없다");
+        assert!(brief[noted..closed].contains("7-1·4-3 에서 첫 칸에"), "9-1 이 4-3 의 멤버에 일한 모델을 남긴다");
+        assert!(brief[closed..report].contains("7-1·4-3 에서 첫 칸에"), "10 이 4-3 의 멤버를 닫는다");
+        // 거둔 일도 4-1 부터 끝까지 받아 4-3 을 받는다 — 4-3 이 가리키는 머리 줄이 거기에도 서야 한다.
+        let head = &supervise[..supervise.find(&brief).expect("감독이 싣는 글이 brief 가 아니다")];
+        assert!(head.contains(&format!("      {BESIDE}")), "거둔 일의 머리에 4-3 이 가리키는 옆 일 줄이 없다");
+    }
+
+    #[test]
+    fn a_test_claude_on_a_detached_server_is_no_worker() {
+        // **떼어 낸 tmux 서버의 시험용 claude 는 일꾼이 아니다**(2026-09-18 사용자 결정). 그 세션도
+        // 세션 파일을 쓰고 cwd 가 루트면 2 의 훑기가 놀고 있는 세션으로 읽어 일을 맡긴다. 판 주인을
+        // 5-1 처럼 보고, 시험하는 쪽에도 루트 밖에서 띄우라고 한다 — 둘 중 하나만 서면 다른 쪽이 샌다.
+        let (supervise, brief) = (supervise(), brief());
+        let two = supervise.find("**2. 일꾼을 찾는다.**").expect("2 가 없다");
+        let three = supervise.find("**2-1. ").expect("2-1 이 없다");
+        let step = &supervise[two..three];
+        assert!(step.contains("elif cwd == root and detached(s):"), "떼어 낸 판을 루트 세션으로 읽는다");
+        // `ps` 가 없는 기계에서 훑기 전체가 역추적으로 죽지 않는다 — 5-1 의 `parents` 와 같은 울타리.
+        let walk = step.find("def parents(pid):").expect("판 주인을 거슬러 오르는 함수가 없다");
+        let walk = &step[walk..walk + step[walk..].find("def detached(").expect("detached 가 없다")];
+        assert!(walk.contains("except OSError:"), "ps 가 없으면 세션 목록이 통째로 죽는다");
+        assert!(step.contains("'#{pane_pid}'"), "판 주인을 포맷이 깨뜨렸다");
+        assert!(step.contains("**`떼어 낸 판` 은 맡기지 않는다.**"), "떼어 낸 판을 어떻게 할지 없다");
+        assert!(brief.contains("cwd 를 루트 밖"), "시험용 claude 를 루트에서 띄운다");
+    }
+
+    #[test]
+    fn the_worker_steps_into_the_subproject_of_a_monorepo() {
+        // **모노레포의 하위가 루트면 워크트리 안의 같은 하위에서 일한다**(2026-09-18 사용자 결정).
+        // 워크트리 꼭대기에 선 일꾼은 `moai` 가 공유 루트의 `.moai` 를 찾아 쓰고, 훅 규칙 2 는
+        // `.claude/` 아래라 편집을 안 센다.
+        let (supervise, brief) = (supervise(), brief());
+        assert!(supervise.contains("print(\"하위    \", os.path.relpath(here, top))"), "감독이 하위 경로를 안 낸다");
+        let three = brief.find("\n    3. ").expect("3 이 없다");
+        let four = brief.find("\n    4. ").expect("4 가 없다");
+        assert!(brief[three..four].contains(SUBDIR), "일꾼이 워크트리 안의 하위로 안 들어간다");
+        // 거둔 일은 4-1 부터만 받아 3 이 없다 — 그 머리에도 같은 줄이 서야 이어받은 일꾼이 꼭대기에 안 선다.
+        let head = &supervise[..supervise.find(&brief).expect("감독이 싣는 글이 brief 가 아니다")];
+        assert!(head.contains(SUBDIR), "거둔 일의 일꾼이 워크트리 꼭대기에 선다");
+    }
+
     /// **일꾼에게 싣는 글은 가지 이름을 박지 않는다.** `main` 을 박으면 `develop`·`trunk`
     /// 저장소에서 워크트리 뜨기부터 실패한다. 감독이 읽어 채울 자리와 읽는 한 줄이 선다.
     ///
@@ -2102,7 +2404,20 @@ sys.exit(1 if bad else 0)
         // 적은 경로가 틀릴 때 조용히 `main` 이 나오고, 워크트리 안에서 짐작한 자리는 제 가지를 낸다.
         assert!(supervise.contains("if w=$(git worktree list --porcelain); then"), "감독이 루트의 가지를 안 읽는다");
         // 포맷 문자열의 `${{b:-main}}` 이 셸의 `${b:-main}` 으로 풀렸는가.
-        assert!(supervise.contains("echo \"${b:-main}\""), "본 가지 한 줄이 포맷에서 깨졌다");
+        assert!(supervise.contains("echo \"$b\""), "본 가지 한 줄이 포맷에서 깨졌다");
+        // **detached 면 멈춘다**(2026-09-18 사용자 결정). `origin/HEAD` 로 대신 읽던 판은 일꾼의
+        // 병합을 가지 없는 HEAD 에 세워 `branch -d` 뒤에 그 일의 참조가 하나도 안 남았다.
+        assert!(!supervise.contains("origin/HEAD"), "detached 루트에서 원격의 기본 가지로 대신 읽는다");
+        assert!(supervise.contains("**루트가 detached 면 보내지 않는다.**"), "detached 루트에서 멈추라는 말이 없다");
+        // 일꾼은 다시 읽지 않되 **대조한다** — 바퀴 중에 루트의 가지가 바뀌어도 병합이 엉뚱한
+        // HEAD 에 서지 않게.
+        let merge = brief.find("git merge --no-ff worktree-<에픽>").expect("병합 걸음이 없다");
+        let eight = brief.find("\n    8.").expect("8 이 없다");
+        assert!(brief[eight..merge].contains("symbolic-ref -q HEAD"), "병합 전에 루트의 가지를 대조하지 않는다");
+        // 커밋 전의 대조는 머리에 선다 — 거둔 일은 머리를 따로 받으니 거기에도 같은 글이 서야 한다.
+        assert!(brief.contains(&indent(BRANCH_CHECK, "    ")), "새 일의 머리에 루트 대조가 없다");
+        let head = &supervise[..supervise.find(&brief).expect("감독이 싣는 글이 brief 가 아니다")];
+        assert!(head.contains(&indent(BRANCH_CHECK, "      ")), "거둔 일의 트래커 커밋이 대조 없이 엉뚱한 HEAD 에 선다");
     }
 
     /// **heredoc 은 들여쓰지 않는다.** 4칸 들여쓴 블록을 그대로 복사하면 닫는 표시도

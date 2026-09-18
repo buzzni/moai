@@ -4677,11 +4677,13 @@ pub(super) mod tests {
             let cut = lines.iter().any(|l| l.contains("#parser") && l.contains('…'));
             assert!(cut, "태그 줄이 표시 없이 잘렸다 (raw={raw})\n{}", lines.join("\n"));
             let code = lines.iter().any(|l| l.contains("aaaa"));
-            assert!(
-                !code || lines.iter().any(|l| l.contains("aaaa") && l.contains('…')),
-                "코드 줄이 표시 없이 잘렸다 (raw={raw})\n{}",
-                lines.join("\n")
-            );
+            // 그린 본문의 코드 블록 줄은 이제 잘리지 않고 이음표(↪)로 접힌다(moai-ip9r).
+            // 원문은 여전히 한 줄이라 잘리면 표시가 서야 한다.
+            let marked = match raw {
+                true => lines.iter().any(|l| l.contains("aaaa") && l.contains('…')),
+                false => lines.iter().any(|l| l.contains('↪')),
+            };
+            assert!(!code || marked, "코드 줄이 표시 없이 잘렸다 (raw={raw})\n{}", lines.join("\n"));
         }
     }
 

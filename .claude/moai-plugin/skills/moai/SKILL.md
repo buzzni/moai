@@ -18,8 +18,8 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
-    moai note <id> "발견한 것"             다음 사람이 읽을 메모
-    moai defer <id> -m "왜"                지금 안 할 일을 계획에서 뺀다
+    moai note <id> '발견한 것'             다음 사람이 읽을 메모
+    moai defer <id> -m '왜'                지금 안 할 일을 계획에서 뺀다
 
 모든 명령에 `--json` 이 붙는다. `ready --json` 은 `{"ready":[…],"held":[…]}` —
 `held` 는 미뤄 둔 것·빈 묶음에 막혀 못 집는 일과 도로 집을 곳이다.
@@ -50,7 +50,7 @@ idea 로 내보내면 에픽이 제 목적을 못 이룬 채 `done` 으로 선�
 `defer` 하는 것은 그 목적을 접는다는 결정이다.
 
 **2. `defer` 냐 `done` 이냐** — 안 하기로 한 것을 `done` 으로 옮기지 않는다.
-`moai defer <id> -m "왜"` 는 칸도 종류도 안 바꾸고, `--undo` 로 같은 줄이
+`moai defer <id> -m '왜'` 는 칸도 종류도 안 바꾸고, `--undo` 로 같은 줄이
 그대로 돌아온다. idea 는 "아직 일이 아닌 것", defer 는 "일이지만 지금은 아닌 것".
 
 **3. 에픽으로 쪼갤 만한가** — 파일 하나로 안 끝나는 요청이면 코드를 쓰기 전에
@@ -97,10 +97,10 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 **3. 리뷰도 이슈다.** `/code-review` 를 부르기 전에 지금 보는 것에 매인 리뷰
 이슈를 세운다.
 
-    moai add "리뷰 — <무엇을 보는가>" -t review --parent <보는 이슈> -b "<무엇을 왜 보는가>"
+    moai add '리뷰 — <무엇을 보는가>' -t review --parent <보는 이슈> -b '<무엇을 왜 보는가>'
     moai mv <id> in_progress      리뷰를 시작할 때
     moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로
-    moai mv <id> done -m "<무엇을 반영하고 무엇을 넘겼나>"
+    moai mv <id> done -m '<무엇을 반영하고 무엇을 넘겼나>'
 
 관점(`-b`)과 닫는 한 줄(`-m`)은 규칙이 **실제로 요구한다.** 없이 부르면
 막히고, 거절문이 고칠 명령을 함께 낸다. **사람을 부르지 않는다** — 그 명령을
@@ -119,6 +119,6 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 집은 채 닫으면 다음 세션이 이어받을 한 줄을 그 이슈에 남긴다. 다음 세션은
 `moai show <id>` 의 이력에서 그것을 읽는다.
 
-    moai note <id> "다음: <이어서 할 것>"
+    moai note <id> '다음: <이어서 할 것>'
 
 전체 명령과 `--from` 문법은 `references/commands.md` 에 있다.

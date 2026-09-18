@@ -1962,6 +1962,58 @@ fn show_json_drops_stale_conditional_keys_carried_by_a_rewritten_line() {
     assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
 }
 
+/// **줄을 내는 명령 전부가 같은 목록으로 걷는다**(moai-qn5d). 걷기가 `show <id> --json` 에만 있으면
+/// 되쓴 줄을 `ready`·`show` 목록·`edit`·`mv` 가 그대로 펴서, 막음 없는 일에 옛 `blockers` 가,
+/// 멀쩡한 git 옆에 옛 `commits_error` 가 선다. 걷는 자리는 `Row::of` 하나다.
+///
+/// 사용자가 같은 이름으로 둔 제 필드도 줄 출력에서 숨는다 — 받은 값이다(2026-09-18 사용자 결정 A).
+/// 파일은 그대로다.
+#[test]
+fn every_line_printing_command_drops_keys_moai_appends() {
+    let s = init("stalerows");
+    let id = add(s.path(), &["되쓴 줄"]);
+    let stale = [
+        ("derived_status", r#""가짜""#),
+        ("branch", r#""가짜""#),
+        ("children", r#"["가짜"]"#),
+        ("journal", r#"["가짜"]"#),
+        ("members", r#"["가짜"]"#),
+        ("shelved_by", r#""가짜""#),
+        ("duplicate_lines", "2"),
+        ("blockers", r#"[{"id":"가짜"}]"#),
+        ("workplaces", r#"["가짜"]"#),
+        ("place", r#""lost""#),
+        ("commits", r#"["가짜"]"#),
+        ("commits_error", r#""가짜""#),
+        ("work", r#"["가짜"]"#),
+        ("inherited_epic", r#"{"epic":"가짜","parent":"가짜"}"#),
+        ("inherited_milestone", r#"{"milestone":"가짜"}"#),
+    ];
+    let fields: Vec<String> = stale.iter().map(|(k, v)| format!("\"{k}\":{v}")).collect();
+    let doctored = issues(s.path()).replace(
+        &format!("\"id\":\"{id}\","),
+        &format!("\"id\":\"{id}\",{},\"due\":\"2026-10-01\",", fields.join(",")),
+    );
+    std::fs::write(s.path().join(".moai/issues.jsonl"), &doctored).unwrap();
+
+    let seen = |args: &[&str]| {
+        let json = ok(s.path(), args);
+        assert!(json.contains(&id), "{args:?} 가 그 줄을 안 냈다\n{json}");
+        for (k, _) in &stale {
+            assert!(!json.contains(&format!("\"{k}\"")), "{args:?} 가 되쓴 줄의 {k} 를 냈다\n{json}");
+        }
+        assert!(json.contains(r#""due":"2026-10-01""#), "{args:?} 가 겹치지 않는 모르는 필드까지 걷었다\n{json}");
+    };
+    seen(&["ready", "--json"]);
+    seen(&["show", "--json"]);
+    seen(&["show", "-s", "todo", "--json"]);
+    assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
+    // 쓰는 명령도 같다 — 파일에는 모르는 필드가 그대로 남는다.
+    seen(&["edit", &id, "-p", "1", "--json"]);
+    seen(&["mv", &id, "in_progress", "--json"]);
+    assert!(line_of(s.path(), &id).contains(r#""place":"lost""#), "모르는 필드를 잃었다");
+}
+
 /// **끊긴 에픽을 든 생각 밑에 접힌 줄은 트리와 status 가 같게 읽는다**(moai-uni2) — 길 잃은
 /// 부모의 묶음이다. 트리는 그 줄을 `(길 잃음)` 안의 생각 밑에 그리므로, status 가 그 줄을
 /// "에픽 없는 이슈" 로 세면 `moai show -e none` 을 가리키며 고칠 수 없는 줄을 고치라 한다.
@@ -3978,6 +4030,8 @@ fn help_says_what_to_type_next() {
     }
     // 명령 목록도 그대로 있다
     assert!(out.contains("milestone") && out.contains("note"), "{out}");
+    // 화면의 말을 바꾸는 길도 선다 — AGENTS.md 에만 있으면 처음 만난 쪽이 못 찾는다(moai-kbky)
+    assert!(out.contains("MOAI_LANG=en") && out.contains("[i18n]"), "{out}");
 }
 
 /// 도움말에서 들여쓰기를 잃은 줄.
@@ -4185,14 +4239,18 @@ fn help_at(s: &Scratch, path: &str, columns: usize) -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
-/// **모든 명령의 `--help` 는 80칸 안이다**(moai-c57v). 도움말은 접지 않으므로(moai-opjn) 넘는
-/// 줄은 좁은 터미널에서 그대로 꺾인다. `tui` 의 글만 보던 시험(moai-lz2t)을 넓혔다 —
+/// **모든 명령의 `--help` 와 `-h` 는 80칸 안이다**(moai-c57v). 도움말은 접지 않으므로(moai-opjn)
+/// 넘는 줄은 좁은 터미널에서 그대로 꺾인다. `tui` 의 글만 보던 시험(moai-lz2t)을 넓혔다 —
 /// after_help 글줄, clap 이 옵션 열 옆에 붙이는 짧은 help, `--help` 가 옵션 밑에 펴는
 /// long_help 문단까지 **그려진 모양 그대로** 잰다. 옵션 열의 폭은 그 명령에서 가장 긴 옵션이
 /// 정하므로, 한 명령에 옵션을 더하는 것만으로 남의 줄이 넘칠 수 있다 — 그래서 글이 아니라
-/// 그린 것을 잰다.
+/// 그린 것을 잰다. `-h` 는 long_help 가 있는 명령에서 모양이 달라(설명이 옵션 열 옆 한 줄)
+/// 따로 불러 잰다(moai-x18p).
 ///
-/// 폭은 `unicode-width` 로 센다 — `·`·`—` 같은 모호폭은 한 칸이다(moai-havc 가 따로 본다).
+/// **모호폭(`·`·`—`·`→`)은 두 칸으로 센다**(사용자 결정, moai-ygki). 한국어 설정의 터미널은
+/// 흔히 그것을 두 칸으로 그려, 한 칸으로 재어 80칸인 줄이 84칸이 되어 꺾였다. 넓게 그리는
+/// 쪽에 맞추면 두 터미널 모두에서 선다. 화면 코드의 `text::width` 는 그대로 한 칸이다 —
+/// 그쪽은 칸을 채워 그리는 셈이라 넓게 세면 한 칸 터미널에서 줄 끝이 빈다.
 #[test]
 fn every_help_fits_in_eighty_columns() {
     let s = init("helpwidth");
@@ -4205,12 +4263,72 @@ fn every_help_fits_in_eighty_columns() {
         if path == "hook" {
             continue;
         }
-        for l in help.lines().filter(|l| cells(l) > 80) {
-            wide.push(format!("moai {path} --help  {}: {l}", cells(l)));
+        let mut args: Vec<&str> = path.split_whitespace().collect();
+        args.push("-h");
+        let short = ok(s.path(), &args);
+        for (flag, text) in [("--help", help.as_str()), ("-h", short.as_str())] {
+            for l in text.lines().filter(|l| cjk_cells(l) > 80) {
+                wide.push(format!("moai {path} {flag}  {}: {l}", cjk_cells(l)));
+            }
         }
     }
     assert!(seen > 20, "명령 목록을 못 읽었다 — {seen}개");
     assert!(wide.is_empty(), "80칸을 넘는 도움말 줄:\n{}", wide.join("\n"));
+}
+
+/// **`-h` 의 설명 열은 한 칸에 선다**(moai-o46r). clap 은 `unicode` 기능 없이는 value_name 을
+/// 글자 수로 세어, `<이름 (메일)>`·`<어떻게>` 가 든 옵션만 설명이 두어 칸 왼쪽에 섰다. 폭 시험은
+/// 넘친 줄만 잡으니 이 어긋남은 못 본다 — 그래서 열이 서는 칸을 따로 잰다. 칸은 clap 과 같은
+/// `cells` 로 센다(모호폭 한 칸) — 넓게 세면 `·` 가 든 옵션 이름이 어긋난 것으로 읽힌다.
+#[test]
+fn every_short_help_aligns_its_descriptions() {
+    let s = init("helpalign");
+    let mut seen = 0;
+    let mut bad = Vec::new();
+    for (path, _) in every_help(&s) {
+        let mut args: Vec<&str> = path.split_whitespace().collect();
+        args.push("-h");
+        let short = ok(s.path(), &args);
+        // clap 은 절(`Arguments:`·`Options:`)마다 따로 맞춘다 — 들이지 않은 줄에서 끊는다.
+        let mut sections: Vec<Vec<(usize, &str)>> = vec![vec![]];
+        for l in short.lines() {
+            if !l.is_empty() && !l.starts_with(' ') {
+                sections.push(vec![]);
+            } else if let Some(c) = description_column(l) {
+                sections.last_mut().unwrap().push((c, l));
+            }
+        }
+        for cols in sections {
+            seen += cols.len();
+            if cols.windows(2).any(|w| w[0].0 != w[1].0) {
+                let rows: Vec<String> = cols.iter().map(|(c, l)| format!("  {c:>3}: {l}")).collect();
+                bad.push(format!("moai {path} -h\n{}", rows.join("\n")));
+            }
+        }
+    }
+    assert!(seen > 100, "설명 열을 못 읽었다 — {seen}줄");
+    assert!(bad.is_empty(), "설명 열이 줄마다 다른 칸에 선 도움말:\n{}", bad.join("\n"));
+}
+
+/// 옵션·인자 줄에서 **설명이 서는 칸.** 두 칸 넘게 들여 `-`·`<`·`[` 로 시작하고, 이름 뒤 두 칸
+/// 넘는 틈 다음이 설명이다. 설명이 다음 줄로 내려간 옵션과 옵션이 아닌 줄은 `None`.
+///
+/// **들여쓰기를 먼저 걷는다** — 짧은 이름 없는 옵션(`      --user <이름 (메일)>`)은 clap 이 여섯
+/// 칸을 들이므로, 두 칸만 걷고 `-` 를 보면 그 줄이 통째로 빠진다. 이 시험이 잡으려던 바로 그
+/// 줄이 거기 있다.
+fn description_column(line: &str) -> Option<usize> {
+    let body = line.strip_prefix("  ")?.trim_start();
+    if !body.starts_with(['-', '<', '[']) {
+        return None;
+    }
+    let gap = body.find("  ")?;
+    let desc = body[gap..].trim_start();
+    (!desc.is_empty()).then(|| cells(&line[..line.len() - desc.len()]))
+}
+
+/// 모호폭을 두 칸으로 센 폭 — 도움말 폭 시험만 쓴다(moai-ygki).
+fn cjk_cells(s: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width_cjk(s)
 }
 
 /// 복사해 못 도는 heredoc 마다 한 줄.
@@ -4465,7 +4583,10 @@ fn json_tells_no_commits_apart_from_no_git() {
     // git 저장소가 아닌 자리 — 빈 배열에 까닭이 붙는다.
     let outside = ok(s.path(), &["show", &id, "--json"]);
     assert!(outside.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{outside}");
-    assert!(outside.contains(r#""commits_error":"#), "git 을 못 읽은 까닭이 없다\n{outside}");
+    // **까닭은 가를 수 있는 값이다**(moai-6p1n) — 산문을 부분 문자열로 맞추지 않는다.
+    assert!(outside.contains(r#""commits_error":{"kind":"not_a_repo","said":"#), "git 을 못 읽은 까닭이 없다\n{outside}");
+    let root = s.path().to_str().unwrap();
+    assert!(!outside.contains(root), "기계의 절대 경로가 --json 으로 나갔다\n{outside}");
 
     // 갓 만든 저장소 — **커밋이 하나도 없는 것은 실패가 아니다.** `git log HEAD` 가 죽는 자리라
     // 그대로 두면 `commits_error` 가 "여기서는 못 물어봤다" 로 서서 받는 쪽이 정반대로 읽는다.
@@ -6980,6 +7101,41 @@ fn picked_in_a_worktree(s: &Scratch) -> (PathBuf, PathBuf, String) {
     (main, inside, id)
 }
 
+/// **자리 경로는 늘 main 에서 잰 상대 경로다**(moai-xpd7·moai-3aec, 2026-09-18 사용자 결정) — main
+/// 밖에 만든 워크트리는 `../` 로 올라가서 잰다. 절대 경로로 두던 판은 한 배열에 두 모양이 섞였고
+/// 기계의 홈 경로가 `--json` 으로 나갔다. main 이 없는 맨몸 저장소는 그 저장소 디렉터리에서 재어,
+/// 어느 워크트리에서 불러도 같은 글자가 나온다.
+#[test]
+fn a_worktree_outside_main_is_named_relative_to_main() {
+    let s = Scratch::new("outsideplace");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "밖에서 할 일", "--json"]), "id");
+    ok(&main, &["mv", &id, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", &format!("../{id}"), "-b", &format!("worktree-{id}")]);
+
+    let json = ok(&main, &["show", &id, "--json"]);
+    assert!(json.contains(&format!(r#""workplaces":[{{"path":"../{id}","#)), "main 밖 워크트리를 ../ 로 안 쟀다\n{json}");
+    let root = s.path().to_str().unwrap();
+    assert!(!json.contains(root), "기계의 절대 경로가 --json 으로 나갔다\n{json}");
+    let line = ok(&main, &["show", &id]);
+    assert!(line.contains(&format!("../{id}")) && !line.contains(root), "사람 화면의 자리가 다른 자로 쟀다\n{line}");
+
+    // 맨몸 저장소 — main 이 없다. 딸린 워크트리 둘 가운데 어디서 불러도 같은 글자다.
+    let bare = s.path().join("repo.git");
+    git(s.path(), &["clone", "-q", "--bare", main.to_str().unwrap(), bare.to_str().unwrap()]);
+    git(&bare, &["worktree", "add", "-q", "../w1", "-b", "w1"]);
+    git(&bare, &["worktree", "add", "-q", &format!("../b-{id}"), &format!("worktree-{id}")]);
+    for at in ["w1".to_string(), format!("b-{id}")] {
+        let json = ok(&s.path().join(&at), &["show", &id, "--json", "--worktree"]);
+        assert!(json.contains(&format!(r#""path":"../b-{id}""#)), "{at} 에서 부르니 다른 자로 쟀다\n{json}");
+    }
+}
+
 /// **집었는데 일하는 워크트리가 없는 줄은 `status` 가 비춘다**(moai-4370) — 세션이 죽어도 칸은
 /// `in_progress` 로 남는다. 막지 않는다: 종료 코드는 0 이고 `--json` 의 `warnings` 에 선다. 워크트리가
 /// 뜬 일은 안 세고, 방금 집은 일은 워크트리가 뜰 틈을 준다.
@@ -7150,6 +7306,11 @@ fn an_unreadable_epic_worktree_is_told_of_but_does_not_blind() {
     assert!(text.contains("옆 워크트리 문제 1건"), "깨진 스냅샷을 보드가 안 셌다\n{text}");
     let json = ok_at(&main, LATER, &["status", "--json"]);
     assert!(!json.contains("unreadable_worktrees"), "판정을 안 가리는 워크트리를 '못 셌다' 로 댔다\n{json}");
+    // **기계도 깨진 스냅샷을 듣는다**(moai-zah3) — 판정을 안 가려도 곁의 키가 댄다.
+    assert!(
+        json.contains(&format!(r#""broken_worktrees":[{{"path":".claude/worktrees/{epic}","branch":"worktree-{epic}"}}]"#)),
+        "깨진 스냅샷이 기계가 읽는 자리에 없다\n{json}"
+    );
     assert!(json.contains("\"stranded\""), "에픽 워크트리가 딴 줄을 가렸다\n{json}");
     assert!(ok_at(&main, LATER, &["show", &member, "--json"]).contains("\"place\":\"at\""));
 
@@ -7179,6 +7340,20 @@ fn an_unreadable_epic_worktree_is_told_of_but_does_not_blind() {
     let layer = String::from_utf8(layer.stdout).unwrap();
     // 층은 0 이면 키를 안 단다 — 서 있으면 셌다는 뜻이다.
     assert!(!layer.contains("\"unreadable_worktrees\"") && layer.contains("\"stranded\":1"), "{layer}");
+    assert!(layer.contains("\"broken_worktrees\":1"), "층의 기계 출력이 깨진 스냅샷을 안 셌다\n{layer}");
+    let machine = isolated(BIN)
+        .args(["status", "--json"])
+        .current_dir(&outside)
+        .env("MOAI_CONFIG", &config)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let machine = String::from_utf8(machine.stdout).unwrap();
+    assert!(
+        machine.contains("\"broken_worktrees\":[") && !machine.contains("\"unreadable_worktrees\""),
+        "밖 한눈 보기의 기계 출력이 안쪽과 다르게 댔다\n{machine}"
+    );
 }
 
 /// **`gather` 가 실제로 셌을 때만 입을 다문다**(리뷰 moai-ya06). `--worktree` 면 그쪽이 같은
