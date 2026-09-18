@@ -2,7 +2,7 @@
 
 이 저장소는 자기 자신을 이 도구로 관리한다. 할 일은 `.moai/issues.jsonl` 에 있다.
 
-    cargo build --release            바이너리는 커밋되지 않는다 (~30초)
+    cargo build --release            바이너리는 커밋되지 않는다 (LTO 라 3~7분, 고친 뒤에도)
     cargo test                       시험은 dev 로 돈다. -j·LTO 끄기·옆 빌드 기다림 없이
     ./target/release/moai            인자 없이 부르면 status 가 나온다
     ./target/release/moai ready      지금 집을 수 있는 일
@@ -158,7 +158,7 @@
   `git worktree add` 로 만든 뒤 `EnterWorktree` 에 `path` 로 들어간다
 - **본 가지는 `develop` 이다.** 2026-09-18 에 사용자가 `main` 에서 바꿨다 — 로컬 가지와
   GitHub 의 기본 가지 둘 다. 옛 `main` 주소는 GitHub 가 새 이름으로 이어 준다
-- 워크트리마다 `target/` 이 따로다. 처음 한 번 `cargo build --release` 가 든다
+- 워크트리마다 `target/` 이 따로다. 처음 한 번 `cargo build --release` 가 든다(3~7분)
 
 ## 커밋
 
