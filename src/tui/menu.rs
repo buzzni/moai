@@ -23,7 +23,7 @@ use ratatui::crossterm::event::KeyEvent;
 
 /// 하위 접두어의 이름. 표에는 동작만 있고 묶음의 이름은 없어 여기 둔다 — 이름 없는 접두어는
 /// 시험(`every_prefix_in_the_menu_has_a_name`)이 막는다.
-const GROUPS: &[(&str, &str)] = &[("SPC p", "프로젝트"), ("SPC t", "토글"), ("SPC s", "보기"), ("SPC o", "정렬"), ("SPC c", "열")];
+const GROUPS: &[(&str, &str)] = &[("SPC p", "프로젝트"), ("SPC t", "토글"), ("SPC s", "보기"), ("SPC o", "정렬"), ("SPC c", "열"), ("SPC m", "읽음")];
 
 /// 메뉴가 열렸나.
 pub fn open(chord: &Chord) -> bool {
@@ -281,9 +281,21 @@ mod tests {
         assert!(open(&ch));
         assert_eq!(title(ch.held()), "SPC");
         let root = entries(ch.held(), &inside(), &[]);
-        assert_eq!(keys_of(&root), ["/", "f", "n", "r", "q", "p", "t", "s", "o", "c"]);
+        assert_eq!(keys_of(&root), ["/", "f", "n", "r", "q", "p", "t", "s", "o", "c", "m"]);
         let what: Vec<&str> = root.iter().map(|e| e.what.as_str()).collect();
-        assert_eq!(what, ["검색", "거름망", "생각 담기", "다시 읽기", "끝내기", "+프로젝트", "+토글", "+보기", "+정렬", "+열"]);
+        assert_eq!(what, [
+            "검색",
+            "거름망",
+            "생각 담기",
+            "다시 읽기",
+            "끝내기",
+            "+프로젝트",
+            "+토글",
+            "+보기",
+            "+정렬",
+            "+열",
+            "+읽음"
+        ]);
     }
 
     /// **칸 토글은 설정의 칸 이름을 번호에 붙이고, 있는 칸 수만큼만 선다**(moai-fmv5). 숨김은
@@ -435,7 +447,10 @@ mod tests {
     fn entries_hide_what_is_not_enabled_here() {
         let root_in = entries(&[k(' ')], &inside(), &[]);
         let root_layer = entries(&[k(' ')], &layer(), &[]);
-        assert_eq!(keys_of(&root_layer), ["n", "r", "q", "p", "t"], "층에서 검색·거름망이 섰다");
+        // 층에서는 읽음(`SPC m`)도 안 선다(moai-j038.vna) — 층의 줄은 프로젝트라 읽을 줄이 없고, 서면
+        // `SPC m a` 가 늘 "적을 것이 없다" 로 답하면서 그 프로젝트의 [NEW] 는 그대로 남는다.
+        assert_eq!(keys_of(&root_layer), ["n", "r", "q", "p", "t"], "층에서 검색·거름망·읽음이 섰다");
+        assert!(keys_of(&root_in).contains(&"m"), "프로젝트 안에서 읽음이 안 섰다");
         assert!(keys_of(&root_in).contains(&"f"));
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &inside(), &[])), ["a"], "프로젝트 안에서 해제가 섰다");
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &layer(), &[])), ["a", "d"]);
