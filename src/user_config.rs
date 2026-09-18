@@ -383,6 +383,13 @@ impl Doc {
         }
         let mut t = Table::new();
         t.insert(PATH, toml_edit::value(text));
+        // 머리 주석과 새 표 사이에 빈 줄 하나 — 주석이 새 표의 것으로 읽히지 않게. 빈 줄은 **새 표의 머리에**
+        // 붙인다. 다시 읽으면 주석과 빈 줄이 새 표의 머리로 붙지만, 빈 줄로 떨어진 주석은 `remove` 가 남긴다
+        // — 도로 빼면 처음 바이트로 돌아온다. 주석이 이미 빈 줄로 끝나도 하나 더 둔다: `remove` 는 빈 줄
+        // 하나를 표의 것으로 보고 함께 빼므로, 안 두면 도로 뺄 때 사람이 둔 빈 줄이 빠진다.
+        if self.head_comment_stays_on_top() {
+            t.decor_mut().set_prefix("\n");
+        }
         match self.doc.get_mut(PROJECT).and_then(Item::as_array_of_tables_mut) {
             Some(aot) => aot.push(t),
             None => {
@@ -395,22 +402,86 @@ impl Doc {
         Ok(true)
     }
 
+    /// 키도 표도 없이 주석만 있는 설정이면 그 주석을 **문서 머리로** 옮긴다(moai-bx7g).
+    ///
+    /// 라이브러리는 마지막 키·표 뒤의 글을 끝 글로 들고 맨 끝에 그린다. 주석만 있는 파일에서는 그 글이
+    /// 전부 끝 글이라, 표 하나를 더하면 머리 주석이 `[[project]]` 밑으로 밀린다. 머리로 옮기면 새 표가
+    /// 그 뒤에 서고, 그 표를 도로 빼면(`remove`) 머리만 남아 **처음 바이트로 돌아온다** — 새 표의 머리에
+    /// 붙이면 표와 함께 주석이 지워진다.
+    ///
+    /// 키나 표가 있는 파일의 끝 글은 옮기지 않는다 — 앞의 것에 붙은 꼬리인지 뒤에 올 것의 머리인지 모르고,
+    /// 옮기면 도로 뺄 때 처음 바이트로 못 돌아온다. 끝에 남는 것은 전과 같다.
+    ///
+    /// 옮겼으면 참 — 부르는 쪽이 새 표 앞에 빈 줄을 둔다.
+    fn head_comment_stays_on_top(&mut self) -> bool {
+        let tail = self.doc.trailing().as_str().unwrap_or_default();
+        if !self.doc.is_empty() || tail.trim().is_empty() {
+            return false;
+        }
+        let mut head = tail.to_string();
+        // 줄바꿈 없이 끝난 주석 뒤에 표 머리가 붙으면 그 줄이 주석이 된다. 도로 빼면 이 줄바꿈이 끝에 남지만
+        // 끝 줄바꿈 모양은 `render` 가 원문대로 돌려놓는다.
+        if !head.ends_with('\n') {
+            head.push('\n');
+        }
+        self.doc.set_trailing("");
+        self.doc.decor_mut().set_prefix(head);
+        true
+    }
+
     /// 경로가 `any_of` 중 하나와 같은 항목을 **모두** 뺀다. 뺀 수를 낸다.
     ///
     /// 한 경로를 여러 철자로 받는 까닭은 [`spellings`] 에 있다. 못 읽는 항목은
     /// 건드리지 않는다 — 무엇을 가리키는지 모르는 줄을 지우면 되돌릴 수 없다.
     /// 목록에서만 뺀다. 그 디렉터리의 `.moai` 는 이 모듈이 모른다.
+    ///
+    /// **뺀 표 머리의 주석 중 빈 줄로 떨어진 윗부분은 남긴다**(moai-bx7g, 사용자 결정 2026-09-18). 라이브러리는
+    /// 표 앞의 주석·빈 줄을 통째로 그 표의 머리로 들어, 표를 빼면 함께 사라진다. 바로 위에 붙은 주석은 그 표의
+    /// 것이지만, 빈 줄 너머의 것은 파일 머리나 앞 것의 꼬리다 — 주석만 있던 설정에 `add` 한 뒤 도로 빼면 머리
+    /// 주석이 사라지던 자리다. 남긴 글은 그 표 뒤에 그려지던 것의 앞에 선다 — 글의 차례가 안 바뀐다.
     pub fn remove(&mut self, any_of: &[PathBuf]) -> usize {
         let Some(aot) = self.doc.get_mut(PROJECT).and_then(Item::as_array_of_tables_mut) else {
             return 0;
         };
         let before = aot.len();
-        aot.retain(|t| !entry_path(t).is_ok_and(|p| any_of.contains(&p)));
+        let mut kept: Vec<(isize, String)> = Vec::new();
+        aot.retain(|t| {
+            let gone = entry_path(t).is_ok_and(|p| any_of.contains(&p));
+            if gone && let (Some(at), Some(head)) = (t.position(), detached_head(t)) {
+                kept.push((at, head));
+            }
+            !gone
+        });
         let removed = before - aot.len();
         if removed > 0 {
             self.dirty = true;
         }
+        // 뒤의 것부터 앞에 붙인다 — 같은 자리 앞에 둘이 서면 파일에 있던 차례대로 선다.
+        kept.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+        for (at, head) in kept {
+            self.put_before_next(at, head);
+        }
         removed
+    }
+
+    /// 파일 차례로 `at` 다음에 그려지는 표의 머리 앞에 `text` 를 붙인다. 뒤에 표가 없으면 끝 글 앞이다.
+    ///
+    /// 차례는 **파일에서 읽은 위치**로 잰다 — 읽은 표는 모두 위치를 들고, 라이브러리가 그 차례로 그린다.
+    /// 점 키·암묵 표는 머리를 안 그려 붙일 자리가 아니다.
+    fn put_before_next(&mut self, at: isize, text: String) {
+        let mut all = Vec::new();
+        header_positions(self.doc.as_table(), &mut all);
+        let next = all.into_iter().filter(|p| *p > at).min();
+        match next.and_then(|p| header_at(self.doc.as_table_mut(), p)) {
+            Some(t) => {
+                let was = t.decor().prefix().and_then(|r| r.as_str()).unwrap_or_default().to_string();
+                t.decor_mut().set_prefix(text + &was);
+            }
+            None => {
+                let was = self.doc.trailing().as_str().unwrap_or_default().to_string();
+                self.doc.set_trailing(text + &was);
+            }
+        }
     }
 
     /// 적어 둔 화면 언어(moai-slfv). **사람의 설정이지 프로젝트의 것이 아니다** — 같은 사람이
@@ -773,6 +844,54 @@ fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::V
     }
     *item = Item::Value(v);
     true
+}
+
+/// 표 머리 앞의 글 중 **마지막 빈 줄 앞까지**(moai-bx7g) — 그 표에 붙지 않은 주석이다. 빈 줄 하나는 표와 함께
+/// 빠진다. 빈 줄이 없거나 그 앞에 주석이 없으면 `None`.
+fn detached_head(t: &Table) -> Option<String> {
+    let prefix = t.decor().prefix()?.as_str()?;
+    let cut = prefix.rfind("\n\n")? + 1;
+    let head = &prefix[..cut];
+    (!head.trim().is_empty()).then(|| head.to_string())
+}
+
+/// 머리를 그리는 표들의 위치 — 점 키·암묵 표는 머리가 없어 뺀다.
+fn header_positions(t: &Table, out: &mut Vec<isize>) {
+    for (_, item) in t.iter() {
+        let subs: Vec<&Table> = match item {
+            Item::Table(s) if !s.is_dotted() && !s.is_implicit() => vec![s],
+            Item::Table(s) => {
+                header_positions(s, out);
+                continue;
+            }
+            Item::ArrayOfTables(a) => a.iter().collect(),
+            _ => continue,
+        };
+        for s in subs {
+            out.extend(s.position());
+            header_positions(s, out);
+        }
+    }
+}
+
+/// 위치가 `at` 인, 머리를 그리는 표.
+fn header_at(t: &mut Table, at: isize) -> Option<&mut Table> {
+    for (_, item) in t.iter_mut() {
+        let subs: Vec<&mut Table> = match item {
+            Item::Table(s) => vec![s],
+            Item::ArrayOfTables(a) => a.iter_mut().collect(),
+            _ => continue,
+        };
+        for s in subs {
+            if s.position() == Some(at) && !s.is_dotted() && !s.is_implicit() {
+                return Some(s);
+            }
+            if let Some(found) = header_at(s, at) {
+                return Some(found);
+            }
+        }
+    }
+    None
 }
 
 /// 항목 표 하나에서 경로를 읽는다. 상대경로는 거절한다 — 부른 자리마다 다른
@@ -1201,6 +1320,55 @@ mod tests {
                 assert_eq!(update(&path, |doc| doc.set_hue(&["/a".into()], None)).unwrap(), 1);
                 assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "color 왕복");
             }
+        }
+    }
+
+    /// **주석만 있는 설정의 머리 주석은 머리에 남는다**(moai-bx7g) — 라이브러리가 그 글을 끝 글로 들어
+    /// 새 `[[project]]` 가 그 앞에 섰다. 도로 빼면 처음 바이트로 돌아온다.
+    #[test]
+    fn a_head_comment_stays_above_the_first_project() {
+        let d = scratch("head-comment");
+        let path = d.join("config.toml");
+        for (src, want) in [
+            ("# 내 설정\n", "# 내 설정\n\n[[project]]\npath = \"/z\"\n"),
+            ("# 내 설정\n\n", "# 내 설정\n\n\n[[project]]\npath = \"/z\"\n"),
+            ("# 내 설정", "# 내 설정\n\n[[project]]\npath = \"/z\""),
+            ("# a\n\n# b\n", "# a\n\n# b\n\n[[project]]\npath = \"/z\"\n"),
+            ("\u{feff}# 내 설정\n", "\u{feff}# 내 설정\n\n[[project]]\npath = \"/z\"\n"),
+        ] {
+            std::fs::write(&path, src).unwrap();
+            assert!(update(&path, |doc| doc.add(Path::new("/z"))).unwrap());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), want, "{src:?}");
+            assert!(update(&path, |doc| doc.add(Path::new("/y"))).unwrap());
+            assert_eq!(read(Some(&path)).projects.len(), 2);
+            assert_eq!(update(&path, |doc| Ok(doc.remove(&["/y".into(), "/z".into()]))).unwrap(), 2);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "add/rm 왕복");
+        }
+
+        // 손으로 적은 파일도 같다 — 빈 줄로 떨어진 주석은 남고 바로 위에 붙은 주석은 표와 함께 빠진다.
+        // 남은 글은 뺀 표 뒤에 그려지던 것 앞에 선다.
+        for (src, gone, want) in [
+            ("# 목록\n\n# a 는 일\n[[project]]\npath = \"/a\"\n", "/a", "# 목록\n"),
+            (
+                "# 목록\n\n[[project]]\npath = \"/a\"\n\n[[project]]\npath = \"/b\"\n",
+                "/a",
+                "# 목록\n\n[[project]]\npath = \"/b\"\n",
+            ),
+            (
+                "# 목록\n\n[[project]]\npath = \"/a\"\n\n[tui]\nsort = \"title\"\n# 꼬리\n",
+                "/a",
+                "# 목록\n\n[tui]\nsort = \"title\"\n# 꼬리\n",
+            ),
+            (
+                "[tui]\nsort = \"title\"\n\n# 여기부터 목록\n\n[[project]]\npath = \"/a\"\n",
+                "/a",
+                "[tui]\nsort = \"title\"\n\n# 여기부터 목록\n",
+            ),
+            ("# 붙은 주석\n[[project]]\npath = \"/a\"\n", "/a", ""),
+        ] {
+            std::fs::write(&path, src).unwrap();
+            assert_eq!(update(&path, |doc| Ok(doc.remove(&[gone.into()]))).unwrap(), 1, "{src:?}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), want, "{src:?}");
         }
     }
 
