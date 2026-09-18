@@ -305,6 +305,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
         Err(why) => unfound = Some(why),
         Ok((mine, trees)) => {
             let here: std::collections::HashSet<&str> = load.issues.iter().map(|i| i.id.as_str()).collect();
+            let mut bases = Bases::new();
             for (tree, root) in trees {
                 let path = root.join(".moai").join("issues.jsonl");
                 watched.push((path.clone(), crate::store::stamp(&path)));
@@ -338,7 +339,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                                 other.errors.len()
                             ));
                         }
-                        others.push(side(&repo.root, &here, mine.as_deref(), tree, root, other.issues));
+                        others.push(side(&repo.root, &here, mine.as_deref(), tree, root, other.issues, &mut bases));
                     }
                 }
             }
@@ -355,6 +356,10 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
 ///
 /// 갈라진 자리는 옆에만 있는 줄을 가를 때만 쓴다. 다 여기에도 있으면 git 을 두 번 더 부르지
 /// 않는다 — 탐색기는 다시 읽을 때마다 여기를 지난다.
+///
+/// **HEAD 가 같은 옆끼리는 갈라진 자리를 나눠 쓴다**(moai-h498). 제 HEAD 는 하나라 옆 HEAD 가
+/// 같으면 `merge-base`·`show` 의 답도 같다 — 갓 뜬 워크트리들은 흔히 같은 커밋에 서 있어(잴 때
+/// 여덟 가운데 셋과 둘), 옆마다 git 을 두 번씩 부르던 판은 훅의 거절 길 하나에 174ms 를 썼다.
 fn side(
     repo_root: &Path,
     here: &std::collections::HashSet<&str>,
@@ -362,10 +367,11 @@ fn side(
     tree: Tree,
     root: PathBuf,
     issues: Vec<Issue>,
+    bases: &mut Bases,
 ) -> Side {
     let lonely = issues.iter().any(|i| !here.contains(i.id.as_str()));
     let base = match mine {
-        Some(m) if lonely => base_of(repo_root, m, &tree.head),
+        Some(m) if lonely => bases.entry(tree.head.clone()).or_insert_with(|| base_of(repo_root, m, &tree.head)).clone(),
         _ => BTreeMap::new(),
     };
     // 이름 후보는 훅과 같은 자로 낸다 — 디렉터리 이름까지 여기서 안다.
@@ -389,11 +395,12 @@ pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, BTreeSet<Stri
     let mut others = Vec::new();
     {
         let here: std::collections::HashSet<&str> = mine.iter().map(|i| i.id.as_str()).collect();
+        let mut bases = Bases::new();
         for (tree, root) in trees {
             let Ok(Some(other)) = crate::store::read_snapshot(&root.join(".moai").join("issues.jsonl")) else {
                 continue;
             };
-            others.push(side(&repo.root, &here, head.as_deref(), tree, root, other.issues));
+            others.push(side(&repo.root, &here, head.as_deref(), tree, root, other.issues, &mut bases));
         }
     }
     Some((overlay(mine, others).0, away))
@@ -946,6 +953,10 @@ fn from_label(label: &str, out: &mut BTreeSet<String>) {
     out.insert(label.strip_prefix("worktree-").unwrap_or(label).to_string());
     out.insert(label.to_string());
 }
+
+/// 옆 HEAD → 그 HEAD 와 갈라진 자리의 스냅샷([`base_of`]). 한 번 겹치는 동안만 든다 — 그 사이에
+/// 제 HEAD 는 하나다.
+type Bases = std::collections::HashMap<String, BTreeMap<String, String>>;
 
 /// 제 HEAD 와 옆 HEAD 가 갈라진 자리의 스냅샷 — id → 그때의 `updated_at` ([`Side::base`]).
 ///
