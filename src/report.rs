@@ -2303,14 +2303,25 @@ const FLOW_DAYS: i64 = 7;
 /// 기계의 몇 초~몇 분 앞선 시계나 시간대 실수는 안 걸리고, 손으로 고친 2099 는 걸린다.
 const FUTURE_SLACK_SECS: i64 = 86_400;
 
-/// 줄이 든 시각 다섯 가운데 하나라도 지금보다 [`FUTURE_SLACK_SECS`] 넘게 뒤인가.
+/// 줄이 든 시각 일곱 가운데 하나라도 지금보다 [`FUTURE_SLACK_SECS`] 넘게 뒤인가.
 ///
 /// 도구는 제 시계로만 적으므로 그런 시각은 손으로 고친 줄이나 크게 틀린 시계에서 온다.
 /// 나이는 0 아래로 안 내려가서(`days_since`, moai-fix6) 목록에서는 "오늘" 로 숨는다.
 /// 못 읽는 시각은 여기서 따지지 않는다 — 읽기는 관대하다.
+///
+/// **시작·끝 시각도 본다**(moai-38mh). 시작은 한 번 적고 안 덮으므로, 틀린 시계로 집은 줄은
+/// 다음 이동이 `status_since`·`updated_at` 을 바로잡은 뒤에도 그 값만 남아 소요를 음수로 만든다.
 fn far_ahead(i: &Issue, now: &str) -> bool {
     let Some(now) = crate::model::parse_rfc3339(now) else { return false };
-    [Some(i.created_at.as_str()), Some(i.updated_at.as_str()), Some(i.status_since.as_str()), i.deferred_at.as_deref(), i.planned_at.as_deref()]
+    [
+        Some(i.created_at.as_str()),
+        Some(i.updated_at.as_str()),
+        Some(i.status_since.as_str()),
+        i.deferred_at.as_deref(),
+        i.planned_at.as_deref(),
+        i.started_at.as_deref(),
+        i.done_at.as_deref(),
+    ]
         .into_iter()
         .flatten()
         .filter_map(crate::model::parse_rfc3339)
@@ -5123,7 +5134,8 @@ mod tests {
     /// **먼 미래 시각을 든 줄을 드러낸다**(moai-ugjp). 나이는 0 아래로 안 내려가서(moai-fix6)
     /// 2099 같은 오타가 목록에서 "오늘" 로 숨고 흐름 셈에도 들었다. 도구는 제 시계로만 적으니
     /// 그런 시각은 손으로 고친 줄이나 크게 틀린 시계에서 온다. 사람이 정한 대로 — 경고지
-    /// 깨진 데이터가 아니고(종료 코드 0), 문턱은 하루, 시각 다섯을 다 보고, 흐름에서 뺀다.
+    /// 깨진 데이터가 아니고(종료 코드 0), 문턱은 하루, 시각을 다 보고, 흐름에서 뺀다.
+    /// **시작·끝 시각도 든다**(moai-38mh) — 시작은 안 덮여, 틀린 시계의 값이 다음 이동 뒤에도 남는다.
     #[test]
     fn a_row_stamped_far_in_the_future_is_named_and_left_out_of_the_flow() {
         let now = "2026-09-11T00:00:00Z";
@@ -5139,13 +5151,17 @@ mod tests {
         let skewed = at("argos-0002", "2026-09-11T12:00:00Z"); // 옆 기계 시계가 반나절 빠르다 — 문턱 안
         let plain = at("argos-0003", "");
         let mut late_deferral = at("argos-0004", "");
-        late_deferral.deferred_at = Some("2026-09-13T00:00:00Z".into()); // 이틀 뒤 — 시각 다섯을 다 본다
+        late_deferral.deferred_at = Some("2026-09-13T00:00:00Z".into()); // 이틀 뒤 — 시각을 다 본다
         let mut late_plan = at("argos-0005", "");
         late_plan.planned_at = Some("2027-01-01T00:00:00Z".into());
-        let st = status(&[typo, skewed, plain, late_deferral, late_plan], &[], &cfg(), now);
+        let mut late_start = at("argos-0006", "");
+        late_start.started_at = Some("2099-01-01T00:00:00Z".into());
+        let mut late_finish = at("argos-0007", "");
+        late_finish.done_at = Some("2099-01-01T00:00:00Z".into());
+        let st = status(&[typo, skewed, plain, late_deferral, late_plan, late_start, late_finish], &[], &cfg(), now);
 
         let w = st.warnings.iter().find(|w| w.kind == "future_timestamp").expect("먼 미래 시각을 안 말한다");
-        assert_eq!(w.ids, ["argos-0001", "argos-0004", "argos-0005"], "{w:?}");
+        assert_eq!(w.ids, ["argos-0001", "argos-0004", "argos-0005", "argos-0006", "argos-0007"], "{w:?}");
         assert!(!w.fatal && !w.notice && !st.broken(), "경고로 비영 종료한다 — {w:?}");
         // 흐름은 먼 미래 시각을 "최근" 으로 세지 않는다 — 걸린 줄은 통째로 빠진다.
         assert_eq!(st.flow.created, 2, "{:?}", st.flow);

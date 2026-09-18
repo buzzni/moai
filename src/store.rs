@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::fail::{Fail, R, code};
 use crate::model::{Actor, Issue, JournalEntry};
 use fs2::FileExt;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -350,22 +350,55 @@ impl Repo {
     /// 이 함수가 `Vec<Issue>` 를 돌려주게 되는 날이 저널을 상태의 원천으로
     /// 삼기 시작한 날이고, 이전 시도가 거기서 복잡해졌다.
     pub fn journal_of(&self, id: &str) -> R<Vec<JournalEntry>> {
+        Ok(self.journal_by_id(&BTreeSet::from([id]), |_| true)?.remove(id).unwrap_or_default())
+    }
+
+    /// 여러 id 의 이력을 **파일 한 번 읽기로** 가른다(moai-p8qj). 없는 id 는 키가 안 선다.
+    ///
+    /// [`Repo::journal_of`] 를 id 마다 부르면 파일 전체를 id 수만큼 읽는다 — 목록이 500줄이면
+    /// 3MB 를 500번이다. 그 함수는 이것의 한 id 짜리라, 읽는 관대함도 차례(`ts`, 같으면 파일
+    /// 차례)도 **한 벌이다** — 둘로 두었던 때는 한쪽 차례만 바꿔도 아무 시험도 안 붉어졌다.
+    ///
+    /// `line` 은 **풀기 전의 줄**을 고른다 — 고른 줄만 JSON 으로 푼다. `journal_of` 는 다 고른다.
+    /// 목록의 `work` 는 `model:` 줄을 들 수 있는 줄만 푼다(`model::may_hold_work`) — 줄 하나 없는
+    /// 목록도 3MB 저널을 통째로 풀던 자리다(리뷰 moai-u5bk.3wq).
+    ///
+    /// **줄마다 따로 읽는다.** 파일을 통째로 UTF-8 로 읽으면 글자 가운데서 끊긴 덧붙이기 한 줄
+    /// (디스크가 찼거나 죽었다 — `with_write` 가 흔한 일로 치는 것)이 파일 전체를 못 읽게 해, 이
+    /// 저널을 읽는 표면이 다 넘어진다. 모르는/깨진 줄은 건너뛴다 — 저널은 상태를 만들지 않으므로
+    /// 여기서 관대해도 답이 틀리지 않는다. 깨진 글자를 `�` 로 바꿔 읽지는 않는다: 그 줄의 `model:`
+    /// 이 망가진 값으로 통계에 선다. `\n` 바이트는 UTF-8 글자 안에 안 나오므로 바이트로 갈라도
+    /// 글자를 자르지 않는다. 파일이 없으면 빈 손이다 — 저널만 없는 저장소는 고장이 아니다.
+    ///
+    /// **여전히 접지 않는다** — 돌려주는 것은 줄 그대로지 상태가 아니다.
+    pub fn journal_by_id(
+        &self,
+        want: &BTreeSet<&str>,
+        line: impl Fn(&str) -> bool,
+    ) -> R<BTreeMap<String, Vec<JournalEntry>>> {
         let path = self.journal_path();
-        let src = match std::fs::read_to_string(&path) {
-            Ok(s) => s,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
             Err(e) => return Err(Fail::new(format!("{}: {e}", path.display()))),
         };
-        let src = src.strip_prefix('\u{feff}').unwrap_or(&src);
-        let mut out: Vec<JournalEntry> = src
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            // 모르는/깨진 줄은 건너뛴다. 저널은 상태를 만들지 않으므로
-            // 여기서 관대해도 답이 틀리지 않는다.
-            .filter_map(|l| serde_json::from_str::<JournalEntry>(l).ok())
-            .filter(|e| e.id == id)
-            .collect();
-        out.sort_by(|a, b| a.ts.cmp(&b.ts));
+        let bytes = bytes.strip_prefix("\u{feff}".as_bytes()).unwrap_or(&bytes);
+        let mut out: BTreeMap<String, Vec<JournalEntry>> = BTreeMap::new();
+        for raw in bytes.split(|b| *b == b'\n') {
+            // `str::lines` 와 같은 줄이다 — `\n` 에서 가르고 끝의 `\r` 을 뗀다.
+            let Ok(l) = std::str::from_utf8(raw) else { continue };
+            let l = l.strip_suffix('\r').unwrap_or(l);
+            if l.trim().is_empty() || !line(l) {
+                continue;
+            }
+            let Ok(e) = serde_json::from_str::<JournalEntry>(l) else { continue };
+            if want.contains(e.id.as_str()) {
+                out.entry(e.id.clone()).or_default().push(e);
+            }
+        }
+        for v in out.values_mut() {
+            v.sort_by(|a, b| a.ts.cmp(&b.ts));
+        }
         Ok(out)
     }
 }
@@ -542,6 +575,9 @@ pub fn new_id(
 /// 저널의 시각은 그 줄의 `created_at` 이다 — 둘을 따로 받으면 어긋날 수 있다.
 /// 돌려주는 줄은 밀어 넣은 것의 사본이다(출력을 짓는 쪽이 쓴다).
 pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor) -> R<(JournalEntry, Issue)> {
+    // 첫 칸 밖에서 나는 줄(`add -s`)은 만든 때가 곧 시작이다 — 칸을 옮기는 쓰기와 같은 뜻으로
+    // 적는다(`Issue::arrive`, moai-38mh).
+    issue.arrive(cfg);
     issue.normalize();
     issue.validate(cfg)?;
     let entry = JournalEntry::create(&issue.id, &issue.title, &issue.created_at, by);

@@ -193,6 +193,39 @@ pub struct Issue {
     pub status_since: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
+    /// **시작·끝은 `body` 뒤에, `done_at` 이 먼저다**(리뷰 moai-u5bk.3wq) — 이 필드를 모르는 옛
+    /// 바이너리는 둘을 `rest` 에 담아 `body` 뒤에 이름 차례로 되쓴다. 같은 자리·같은 차례로 두어야
+    /// 새 바이너리와 옛 바이너리가 번갈아 쓰는 저장소에서 줄마다 헛 diff 가 안 난다.
+    ///
+    /// **마지막으로 `DONE` 에 든 때**(moai-38mh). 들 때마다 덮고, done 을 떠나도 **지우지 않는다**.
+    ///
+    /// 되돌렸다 다시 닫으면 마지막 것이다 — 소요(`done_at` − `started_at`)가 되돌린 판까지
+    /// 품는다. 지우면 done 을 떠난 줄에서 앞의 판이 통째로 사라지는데, 빈 칸과 0 이 다르듯
+    /// "아직 안 끝났다" 와 "그때 끝났었다" 도 다르다(2026-09-18 사용자 결정).
+    ///
+    /// **지금 끝났는가는 `status` 가 말한다.** 이 값이 섰다고 닫힌 줄이 아니다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub done_at: Option<String>,
+    /// **처음으로 첫 칸을 떠난 때** — 일을 시작한 때(moai-38mh). 한 번 적고 **덮지 않는다**.
+    /// 적는 자리는 [`Issue::move_to`]·[`Issue::arrive`] 둘뿐이다.
+    ///
+    /// **저널이 아니라 필드인 까닭.** 이 답은 저널의 칸 옮김을 접어야 나오는데, 접는 쪽은
+    /// 저널이 빠진 쓰기에서 조용히 틀린다 — "스냅샷 먼저, 저널 나중" 이라 저널만 못 적힌
+    /// 쓰기가 있을 수 있고, 통계는 그것을 "안 한 일" 로 읽는다. 여기 두면 칸을 옮기는 그
+    /// 쓰기에 같이 실려 갈리지 않는다(2026-09-18 사용자 결정).
+    ///
+    /// **파생값이 아니다** — 이슈 A 를 옮길 때 A 의 줄에만 쓴다. `status_since` 와 다른 것은
+    /// 덮지 않는다는 것 하나고, 그래서 review·done 으로 가도 안 사라진다.
+    ///
+    /// **모르면 비어 있다.** 이 필드 전에 이미 첫 칸을 떠난 줄(옛 바이너리가 집은 줄 포함)은
+    /// 언제 떠났는지 스냅샷이 모른다 — 다음 이동의 시각을 적으면 그 줄을 닫는 순간 시작과 끝이
+    /// 같아져 통계가 "0 분에 했다" 로 읽는다. 빈 칸과 0 과 거짓 값은 셋 다 다르다(리뷰 moai-u5bk.3wq).
+    ///
+    /// **묶음 줄에도 적힌다** — 묶음의 칸은 멤버에서 읽히므로(moai-j3b3) 그 줄의 이 값은
+    /// `status`·`status_since` 와 똑같이 "누가 이 줄에 `mv` 를 쳤나" 일 뿐이다. 묶음의 기간은
+    /// 멤버의 것으로 잰다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
 
     /// 모르는 필드를 **잃지 않고 되쓴다.**
     ///
@@ -236,6 +269,8 @@ impl Issue {
             created_at: at.to_string(),
             updated_at: at.to_string(),
             status_since: at.to_string(),
+            started_at: None,
+            done_at: None,
             body: None,
             rest: BTreeMap::new(),
         }
@@ -259,6 +294,48 @@ impl Issue {
         self.deferred_at.is_some()
     }
 
+    /// 칸을 옮긴다 — 칸·칸 시각·수정 시각과 **시작·끝 시각**(moai-38mh)을 한 번에 적고, 떠난 칸을
+    /// 돌려준다.
+    ///
+    /// **칸을 옮기는 쓰기는 다 이 길을 지난다**(`mv`·`idea promote`). 길마다 손으로 적던 때는
+    /// `promote` 가 시각을 빠뜨려, 같은 닫기가 어느 동사로 했느냐에 따라 `done_at` 이 서기도 안
+    /// 서기도 했다(리뷰 moai-u5bk.3wq).
+    ///
+    /// 시작은 **줄이 처음으로 칸을 옮기며 첫 칸을 떠날 때** 한 번 적는다. 칸이 한 번이라도
+    /// 바뀌었는지는 `status_since` 가 아직 `created_at` 인지로 안다 — 칸 시각을 옮기는 것은 칸
+    /// 옮기기뿐이다. 그래서 이 필드 전에 집었던 줄(첫 칸에 도로 와 있어도), 옛 바이너리가 옮긴
+    /// 줄, 설정에서 이름이 바뀐 칸에 선 줄은 **언제 시작했는지 모르므로 비워 둔다** — 이번 이동의
+    /// 시각을 적으면 그 줄을 닫는 순간 시작과 끝이 같아진다(`started_at` 의 문서).
+    ///
+    /// 끝은 `done` 에 들 때마다 덮고, 떠나도 지우지 않는다.
+    pub fn move_to(&mut self, to: Status, at: &str, cfg: &crate::config::Config) -> Status {
+        let first = cfg.first_status();
+        // **덮기 전에** 잰다 — 떠나는 칸과, 칸이 한 번도 안 바뀌었는가.
+        let leaves_first = self.status.as_str() == first && self.status_since == self.created_at;
+        let was = std::mem::replace(&mut self.status, to);
+        self.status_since = at.to_string();
+        self.updated_at = at.to_string();
+        if self.started_at.is_none() && leaves_first && self.status.as_str() != first {
+            self.started_at = Some(at.to_string());
+        }
+        if self.status.is_done() {
+            self.done_at = Some(at.to_string());
+        }
+        was
+    }
+
+    /// 새 줄이 **첫 칸 밖에서** 나면(`add -s`) 만든 때가 곧 첫 칸을 떠난 때고, `done` 에서 나면
+    /// 그때 끝났다 — [`Issue::move_to`] 와 같은 뜻을 만드는 쓰기에 적는다. 만드는 쓰기는 다
+    /// `store::admit` 을 지나고, 그것이 부른다.
+    pub fn arrive(&mut self, cfg: &crate::config::Config) {
+        if self.started_at.is_none() && self.status.as_str() != cfg.first_status() {
+            self.started_at = Some(self.created_at.clone());
+        }
+        if self.done_at.is_none() && self.status.is_done() {
+            self.done_at = Some(self.created_at.clone());
+        }
+    }
+
     /// 쓰기 직전에 한 번. 결정적 출력과 기본값 생략을 여기서 보장한다.
     pub fn normalize(&mut self) {
         for t in self.tags.iter_mut() {
@@ -274,6 +351,13 @@ impl Issue {
         }
         if self.body.as_deref().is_some_and(str::is_empty) {
             self.body = None;
+        }
+        // **빈 시각은 없는 시각이다**(moai-38mh) — 손으로 푼 줄의 `"started_at":""` 을 그대로 두면
+        // "이미 적혔다" 로 읽혀 `move_to` 가 영영 안 적고, 상세는 빈 시작을 그린다.
+        for t in [&mut self.started_at, &mut self.done_at] {
+            if t.as_deref().is_some_and(|s| s.trim().is_empty()) {
+                *t = None;
+            }
         }
         // 담당이 없는데 메일만 남는 것을 막는다. 이름 없는 메일은 어느 화면도
         // 그릴 줄 모르고, 그런 줄은 다음 쓰기까지 조용히 살아 있다.
@@ -494,6 +578,19 @@ pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
         }
     }
     out
+}
+
+/// 저널 한 줄 — **풀기 전의 JSON** — 이 [`work_of`] 에서 값을 낼 수 **있는가**(moai-p8qj). 목록의
+/// `--json` 이 저널을 통째로 풀지 않으려고 먼저 거르는 자다(리뷰 moai-u5bk.3wq).
+///
+/// **값을 내는 줄은 빠뜨리지 않는다.** [`parse_work`] 는 `model:` 로 시작한 글줄만 받으니, 값을
+/// 내는 저널 줄의 글에는 `model:` 이 든다. JSON 은 그 글자들을 이스케이프하지 않고 그대로 쓴다 —
+/// 이스케이프는 따옴표·역슬래시·제어문자와 `\uXXXX` 뿐이고, 앞의 것들은 `model:` 의 어느 글자도
+/// 못 낸다. 그래서 날것에 `model:` 도 `\u` 도 없는 줄은 값을 못 낸다. 손으로 쓴 줄이 글자를
+/// `\uXXXX` 로 적었을 수 있어 `\u` 가 든 줄은 다 푼다. 더 받는 것은 괜찮다 — 푼 뒤에
+/// [`work_of`] 가 다시 가른다.
+pub fn may_hold_work(raw: &str) -> bool {
+    raw.contains("model:") || raw.contains("\\u")
 }
 
 /// `model: [<회사>/]<모델> [tokens=<수>] [(<등급> — <까닭>)] …` 한 줄. `at`·`by` 는 비워 낸다.
@@ -870,10 +967,12 @@ mod tests {
         i.epic = Some("argos-9k2p".into());
         i.milestone = Some("argos-m001".into());
         i.body = Some("본문".into());
+        i.started_at = Some("2026-09-11T05:00:00Z".into());
+        i.done_at = Some("2026-09-11T06:00:00Z".into());
         let line = serde_json::to_string(&i).unwrap();
         let want = [
             "id", "title", "kind", "status", "priority", "tags", "assignee", "epic",
-            "milestone", "created_at", "updated_at", "status_since", "body",
+            "milestone", "created_at", "updated_at", "status_since", "body", "done_at", "started_at",
         ];
         let at: Vec<usize> = want
             .iter()
@@ -888,10 +987,117 @@ mod tests {
         for line in [
             r#"{"id":"argos-4aex","title":"제목","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#,
             r#"{"id":"argos-9k2p","title":"에픽","kind":"epic","status":"in_progress","priority":1,"tags":["bug"],"assignee":"claude","epic":"argos-0000","milestone":"argos-m001","created_at":"2026-09-10T09:00:00Z","updated_at":"2026-09-11T05:02:44Z","status_since":"2026-09-10T09:30:00Z","body":"여러\n줄"}"#,
+            r#"{"id":"argos-4aex","title":"제목","status":"done","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-12T04:00:00Z","status_since":"2026-09-12T04:00:00Z","body":"본문","done_at":"2026-09-12T04:00:00Z","started_at":"2026-09-11T05:00:00Z"}"#,
         ] {
             let i: Issue = serde_json::from_str(line).unwrap();
             assert_eq!(serde_json::to_string(&i).unwrap(), line);
         }
+    }
+
+    /// **옛 바이너리가 되쓴 줄과 바이트가 같다**(리뷰 moai-u5bk.3wq). 시작·끝을 모르는 바이너리는
+    /// 둘을 `rest` 에 담아 `body` 뒤에 이름 차례로 쓴다 — 새 바이너리가 다른 자리에 쓰면 두 판이
+    /// 번갈아 쓰는 저장소에서 찍힌 줄마다 헛 diff 가 난다.
+    #[test]
+    fn stamps_land_where_an_older_binary_would_put_them() {
+        let mut new = issue();
+        new.body = Some("본문".into());
+        new.started_at = Some("2026-09-11T05:00:00Z".into());
+        new.done_at = Some("2026-09-12T04:00:00Z".into());
+        let mut old = issue();
+        old.body = Some("본문".into());
+        old.rest.insert("started_at".into(), serde_json::json!("2026-09-11T05:00:00Z"));
+        old.rest.insert("done_at".into(), serde_json::json!("2026-09-12T04:00:00Z"));
+        assert_eq!(serde_json::to_string(&new).unwrap(), serde_json::to_string(&old).unwrap());
+    }
+
+    /// **시작은 줄이 처음으로 첫 칸을 떠날 때 하나다**(moai-38mh, 리뷰 moai-u5bk.3wq). 칸이 이미 한 번
+    /// 바뀐 줄 — 이 필드 전에 집은 줄, 옛 바이너리가 옮긴 줄 — 은 언제 시작했는지 모르므로 비워 둔다.
+    /// 다음 이동의 시각을 적으면 그 줄을 닫는 순간 시작과 끝이 같아져 "0 분에 했다" 가 선다.
+    #[test]
+    fn the_start_is_the_first_departure_and_unknown_stays_empty() {
+        let c = cfg();
+        let (t1, t2, t3) = ("2026-09-11T05:00:00Z", "2026-09-11T06:00:00Z", "2026-09-11T07:00:00Z");
+
+        let mut fresh = issue();
+        assert_eq!(fresh.move_to(Status::new("in_progress"), t1, &c), Status::new("todo"), "떠난 칸을 돌려준다");
+        assert_eq!((fresh.status.as_str(), fresh.status_since.as_str(), fresh.updated_at.as_str()), ("in_progress", t1, t1));
+        assert_eq!(fresh.started_at.as_deref(), Some(t1));
+        fresh.move_to(Status::new("done"), t2, &c);
+        fresh.move_to(Status::new("todo"), t3, &c);
+        fresh.move_to(Status::new("in_progress"), t3, &c);
+        assert_eq!(fresh.started_at.as_deref(), Some(t1), "되집어도 시작은 처음 것이다");
+        assert_eq!(fresh.done_at.as_deref(), Some(t2), "떠나도 끝난 때는 안 지운다");
+
+        // 이 필드 전에 review 까지 간 줄 — 닫아도 시작은 모른다. 끝은 선다.
+        let mut legacy = issue();
+        legacy.status = Status::new("review");
+        legacy.status_since = "2026-09-05T00:00:00Z".into();
+        legacy.move_to(Status::new("done"), t1, &c);
+        assert_eq!((legacy.started_at.as_deref(), legacy.done_at.as_deref()), (None, Some(t1)));
+
+        // 집었다가 첫 칸에 도로 온 옛 줄 — 다시 집은 때는 처음 떠난 때가 아니다.
+        let mut back = issue();
+        back.status_since = "2026-09-05T00:00:00Z".into();
+        back.move_to(Status::new("in_progress"), t1, &c);
+        assert_eq!(back.started_at, None, "칸이 이미 바뀐 줄에 다시 집은 때를 적었다");
+
+        // 첫 칸에서 곧바로 닫은 줄 — 떠난 때가 시작이자 끝이다.
+        let mut quick = issue();
+        quick.move_to(Status::new("done"), t1, &c);
+        assert_eq!((quick.started_at.as_deref(), quick.done_at.as_deref()), (Some(t1), Some(t1)));
+    }
+
+    /// **첫 칸 밖에서 난 줄은 만든 때에 시작했다**(`add -s`) — `move_to` 와 같은 뜻이다. `done` 에서
+    /// 났으면 그때 끝났다. 첫 칸에서 난 줄에는 아무것도 안 적는다.
+    #[test]
+    fn a_line_born_outside_the_first_column_starts_when_it_is_made() {
+        let c = cfg();
+        let born = |status: &str| {
+            let mut i = issue();
+            i.status = Status::new(status);
+            i.arrive(&c);
+            (i.started_at, i.done_at)
+        };
+        let made = Some("2026-09-11T04:12:03Z".to_string());
+        assert_eq!(born("todo"), (None, None));
+        assert_eq!(born("in_progress"), (made.clone(), None));
+        assert_eq!(born("done"), (made.clone(), made));
+    }
+
+    /// 빈 시각은 없는 시각이다 — `""` 이 남으면 `move_to` 가 "이미 적혔다" 로 읽어 영영 안 적는다.
+    #[test]
+    fn an_empty_stamp_is_no_stamp() {
+        let mut i = issue();
+        (i.started_at, i.done_at) = (Some(String::new()), Some(" ".into()));
+        i.normalize();
+        assert_eq!((i.started_at, i.done_at), (None, None));
+    }
+
+    /// **`work` 를 내는 줄은 거르개를 빠짐없이 지난다**(리뷰 moai-u5bk.3wq) — 목록은 거르개에 걸린
+    /// 줄만 푼다. 거르개를 좁히다 한 모양이라도 놓치면 목록과 하나를 펼친 쪽의 `work` 가 갈린다.
+    #[test]
+    fn every_line_that_yields_work_passes_the_prefilter() {
+        let by = someone("raven");
+        let at = "2026-09-11T04:12:03Z";
+        let s = Status::new("todo");
+        let d = Status::new("done");
+        let yielding = [
+            JournalEntry::note("argos-4aex", "model: anthropic/opus-5 tokens=1 (high — 까닭)", at, &by),
+            JournalEntry::note("argos-4aex", "앞 줄\nmodel: anthropic/opus-5", at, &by),
+            JournalEntry::note("argos-4aex", "앞 줄\r\nmodel: opus-5 (low — 옛 꼴)", at, &by),
+            JournalEntry::status("argos-4aex", &s, &d, Some("model: google/gemini-3.8".into()), at, &by),
+            JournalEntry::status("argos-4aex", &s, &d, Some("닫는다\n\nmodel: openai/gpt-6 tokens=5".into()), at, &by),
+        ];
+        for e in &yielding {
+            let raw = serde_json::to_string(e).unwrap();
+            assert!(!work_of(std::slice::from_ref(e)).is_empty(), "시험이 틀렸다 — 값을 안 내는 줄이다: {raw}");
+            assert!(may_hold_work(&raw), "값을 내는 줄을 걸렀다: {raw}");
+        }
+        // 손으로 쓴 줄이 글자를 이스케이프로 적었어도 푼다.
+        assert!(may_hold_work(r#"{"ts":"t","id":"argos-4aex","kind":"note","by":"r","text":"model: opus-5"}"#));
+        // `model:` 이 없는 줄은 안 푼다 — 그것이 이 거르개의 값이다.
+        let plain = serde_json::to_string(&JournalEntry::note("argos-4aex", "그냥 메모", at, &by)).unwrap();
+        assert!(!may_hold_work(&plain), "{plain}");
     }
 
     /// 계획 시각도 되쓰면 바이트가 같다 — 도로 집은 줄은 `deferred_at` 없이 `planned_at` 만

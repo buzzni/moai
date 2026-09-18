@@ -875,6 +875,51 @@ pub fn is_linked(root: &Path) -> bool {
     root.ancestors().map(|d| d.join(".git")).find(|g| g.exists()).is_some_and(|g| g.is_file())
 }
 
+/// [`workplaces`] 의 답을 바꿀 수 있는 파일과 **지금 잰** 표식 — git 을 띄우지 않는다.
+///
+/// 프로젝트 층(`tui::layer`)이 줄마다 걸음마다 잰다(moai-al0x). 층은 자리 판정을 요약에 싣는데
+/// `.moai` 두 파일만 재면 워크트리를 치우거나 띄워도 SPC r 전까지 옛 수를 낸다. 드는 것:
+/// - 공용 디렉터리의 `worktrees` — `git worktree add`·`remove`·`prune` 이 그 목록을 바꾼다
+/// - 딸린 워크트리마다 `HEAD` — 가지 이름이 곧 이름 후보다([`names`])
+/// - 딸린 워크트리의 `.git` — 제거 명령 없이 `rm -rf` 로 치운 것은 이것만 사라진다([`gather`] 와 같은 까닭)
+/// - 딸린 워크트리의 스냅샷 — 이름으로 안 잡히는 집은 줄이 있으면 판다
+///
+/// 스냅샷은 **안 팔 때도** 잰다 — 파는지는 줄이 정하고(`report::claimed`), 줄이 바뀌면 `.moai` 표식이
+/// 이미 다시 읽게 한다. 재는 것은 `stat` 과 작은 파일 읽기뿐이라 워크트리 수에 비례해도 싸다.
+/// 딸린 워크트리가 뿌리면 비어 있다 — 겹쳐 보지 않는 [`workplaces`] 는 그 자리를 안 잰다.
+pub fn place_marks(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
+    if is_linked(root) {
+        return Vec::new();
+    }
+    let Some((_, common)) = git_dirs(root) else { return Vec::new() };
+    let worktrees = common.join("worktrees");
+    // 목록을 읽기 **전에** 잰다 — 읽고 나서 재면 그 사이에 생긴 워크트리를 놓친다([`heads`] 와 같다).
+    let mut out = vec![(worktrees.clone(), crate::store::stamp(&worktrees))];
+    // **목록은 [`on_disk`] 하나로 읽는다** — 자리 판정이 보는 그 목록이다(리뷰 moai-3lul.kt0).
+    // 여기서 따로 훑으면 `gitdir` 를 푸는 법·거르는 법이 두 벌이 되어, 한쪽만 고쳐질 때 층이
+    // "바뀐 것 없다" 로 서고 판정만 달라진다(그 풀이는 moai-23ky 에서 한 번 고쳐진 자리다).
+    // 경로가 사라진 워크트리는 `on_disk` 가 거르므로, 치우면 이 목록이 짧아져 그 자체가 바뀜이다.
+    let Some(disk) = on_disk(root) else { return out };
+    for (tree, linked, _) in &disk.all {
+        if !linked {
+            continue;
+        }
+        // 가지 이름이 곧 이름 후보다([`names`]) — HEAD 가 움직이면 자리 판정의 답이 바뀐다.
+        if let Some(head) = disk.admin.get(&tree.path).map(|dir| dir.join("HEAD")) {
+            out.push((head.clone(), crate::store::stamp(&head)));
+        }
+        let snapshot = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
+        out.push((snapshot.clone(), crate::store::stamp(&snapshot)));
+        // **딸린 워크트리의 `.git`(`gitdir:` 한 줄)도 든다**([`gather`] 와 같은 까닭). 제거 명령
+        // 없이 디렉터리째 치우면 git 이 적어 둔 `worktrees/<이름>` 은 그대로라 위의 둘이 안
+        // 움직이고, 목록이 짧아진 것은 **목록째 견주는 쪽**(`layer::Marks`)만 본다 — 경로마다
+        // 표식을 견주는 쪽(`App::follow`)은 이 파일이 사라지는 것으로 안다.
+        let dot_git = tree.path.join(".git");
+        out.push((dot_git.clone(), crate::store::stamp(&dot_git)));
+    }
+    out
+}
+
 /// 워크트리 꼭대기와 공용 git 디렉터리 — git 이 적어 둔 파일로만 읽는다([`on_disk`]).
 ///
 /// 주 워크트리면 공용 디렉터리는 `.git` 그대로(풀지 않는다 — 끝 이름으로 주 워크트리를 알아본다),
@@ -1195,6 +1240,42 @@ mod tests {
         assert!(!is_linked(dir.path()), "울타리를 딸린 워크트리로 읽었다");
         let git_top = crate::git::run(dir.path(), &["rev-parse", "--show-toplevel"]).map(|t| PathBuf::from(t.trim_end()));
         assert_eq!(git_top.ok(), Some(canonical(dir.path())), "git 이 울타리를 지나쳐 위의 저장소를 잡았다");
+    }
+
+    /// **자리 판정을 바꾸는 것은 층의 표식도 바꾼다**(moai-al0x) — 워크트리를 띄우거나, 가지를
+    /// 옮기거나, 옆 스냅샷을 쓰거나, 제거 명령 없이 디렉터리째 치우는 것. 아무것도 안 하면 그대로다.
+    #[test]
+    fn place_marks_move_when_a_worktree_comes_goes_or_writes() {
+        let scratch = crate::scratch::Scratch::fenced("place-marks");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        let changed = |was: &[(PathBuf, crate::store::Stamp)]| place_marks(&main) != was;
+
+        let seen = place_marks(&main);
+        assert!(!changed(&seen), "아무것도 안 했는데 표식이 바뀌었다");
+        run(&main, &["worktree", "add", "-q", "../t-1", "-b", "worktree-t-1"]);
+        assert!(changed(&seen), "새로 띄운 워크트리를 못 알아챈다");
+
+        let seen = place_marks(&main);
+        std::fs::create_dir_all(base.join("t-1/.moai")).unwrap();
+        std::fs::write(base.join("t-1/.moai/issues.jsonl"), "").unwrap();
+        assert!(changed(&seen), "옆 워크트리의 스냅샷이 생긴 것을 못 알아챈다");
+
+        let seen = place_marks(&main);
+        run(&base.join("t-1"), &["checkout", "-q", "-b", "other"]);
+        assert!(changed(&seen), "옆 워크트리가 가지를 옮긴 것을 못 알아챈다 — 이름 후보가 바뀐다");
+
+        let seen = place_marks(&main);
+        std::fs::remove_dir_all(base.join("t-1")).unwrap();
+        assert!(changed(&seen), "디렉터리째 치운 워크트리를 못 알아챈다");
+
+        // 딸린 워크트리를 뿌리로 두면 재지 않는다 — 겹쳐 보지 않는 자리 판정이 그 자리를 안 본다.
+        run(&main, &["worktree", "add", "-q", "../t-2", "-b", "worktree-t-2"]);
+        assert!(place_marks(&base.join("t-2")).is_empty());
     }
 
     /// 어느 워크트리에서든 커밋·`pack-refs`·떼어 낸 checkout 이 지켜보는 표식을 바꾼다 —

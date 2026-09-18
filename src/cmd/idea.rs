@@ -94,9 +94,11 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         return Ok(out);
     }
 
-    let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root)?;
     let (made, read): (Vec<Issue>, super::Read) = repo.with_write(|issues, cfg, reserved| {
+        // 시각은 **락을 쥔 뒤에** 뜬다 — `mv` 와 같은 까닭이다. 밖에서 뜨면 이 닫기가 옆의 집기보다
+        // 늦게 써져도 이른 시각을 들어, 생각의 끝이 시작보다 앞선다(리뷰 moai-u5bk.3wq).
+        let at = model::now();
         // 펼칠 것이 정말 idea 인지 **먼저** 본다. 나중에 보면 만들어진 id 가
         // 오류 메시지에 실려 나가고, 받는 쪽은 그게 남은 줄 안다.
         //
@@ -165,10 +167,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             entries.push(JournalEntry::note(&args.id, &note, &at, &by));
         } else {
             entries.push(JournalEntry::status(&args.id, &was, &done, Some(note), &at, &by));
-            let thought = &mut issues[at_idea];
-            thought.status = done;
-            thought.status_since = at.clone();
-            thought.updated_at = at.clone();
+            // `mv` 와 **같은 길로** 옮긴다 — 시작·끝 시각까지(`Issue::move_to`, moai-38mh). 손으로
+            // 칸만 옮기던 때는 펼쳐 닫힌 생각에만 `done_at` 이 안 섰다.
+            issues[at_idea].move_to(done, &at, cfg);
         }
         // 펼치면 에픽이 선다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는 칸을 읽는다.
         let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
