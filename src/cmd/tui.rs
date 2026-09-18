@@ -54,6 +54,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let layer = crate::tui::layer::Layer::of(&reg, Some(&repo.root));
     let mut app = App::open(repo, load, index, path, stamp).overlaid(origin, trouble, watched);
     app.user = ctx.user.clone();
+    // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와
+    // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.
+    let root = app.here().unwrap_or_else(|| ".".into());
+    app.me = app.whoami(&root);
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp). 층은 **그다음에** 얹는다 — 얹는 쪽
@@ -61,6 +65,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 화면에서 갈라지면 안 된다. 한때는 `with_layer` 가 첫 화면의 커서를 `..` 너머로 밀어 차례가
     // 더 크게 걸렸는데, 뿌리의 `..` 을 걷으면서(moai-i784) 그 밀기는 없어졌다(moai-2kyl 단계 리뷰).
     app.adopt_look(&reg.look, reg.look_problems);
+    // 적어 둔 읽음도 같은 한 번의 읽기에서 온다(moai-z9pc).
+    app.adopt_read(reg.read);
     let mut app = app.attach_layer(layer);
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
@@ -102,6 +108,8 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                         counts: sum.counts.into_iter().collect(),
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),
                         warnings: sum.warnings,
+                        stranded: sum.stranded,
+                        unreadable_worktrees: sum.blind,
                         unreadable: sum.unreadable,
                     }
                 });
@@ -121,9 +129,14 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     refuse_without_terminal()?;
     let mut app = App::on_projects(crate::tui::layer::Layer::of(&reg, None));
     app.user = ctx.user.clone();
+    // 밖에서 띄워도 누군지는 같은 자로 푼다(moai-z9pc.9av). 층에는 저장소가 없으니 지금 디렉터리에서
+    // 묻는다 — 전역 git 설정이면 그것으로 선다. 층에서 프로젝트로 들어가면 그 뿌리에서 다시 푼다
+    // (`App::enter_project`) — 프로젝트에만 적힌 git 설정이어도 [NEW] 가 선다.
+    app.me = app.whoami(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
     app.user_config = config;
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp).
     app.adopt_look(&reg.look, reg.look_problems);
+    app.adopt_read(reg.read);
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     screen(app)
@@ -162,7 +175,18 @@ struct Counted {
     counts: std::collections::BTreeMap<String, usize>,
     picked: Vec<String>,
     warnings: usize,
+    /// 그중 집었는데 일하는 워크트리가 없는 줄(moai-p3bs) — 화면의 층이 낱말로 대는 그 수다.
+    /// 없으면 키를 안 단다: 늘 `0` 을 달면 옛 판과 견주는 쪽이 새 뜻을 얻은 줄 모른다.
+    #[serde(skip_serializing_if = "is_zero")]
+    stranded: usize,
+    /// 스냅샷을 못 읽은 워크트리의 수 — 있으면 위의 수는 "센 결과 0" 이 아니라 "못 셌다" 다.
+    #[serde(skip_serializing_if = "is_zero")]
+    unreadable_worktrees: usize,
     unreadable: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// **TTY 가 아니면 켜지 않는다.** 파이프에 대고 대체 화면을 켜면 그 자리에서
@@ -725,14 +749,12 @@ mod tests {
     }
 
     /// 편집기 시험의 임시 자리. 이름에 **빈칸**을 넣는다 — 경로가 셸에서 쪼개지면 여기서 드러난다.
-    struct Dir(std::path::PathBuf);
+    /// 만들고 지우는 일(터져도 치우는 것까지)은 [`Scratch`](crate::scratch::Scratch) 가 한다.
+    struct Dir(crate::scratch::Scratch);
 
     impl Dir {
         fn new(name: &str) -> Dir {
-            let d = std::env::temp_dir().join(format!("moai-editor {name}-{}-{:?}", std::process::id(), std::thread::current().id()));
-            let _ = std::fs::remove_dir_all(&d);
-            std::fs::create_dir_all(&d).unwrap();
-            Dir(d)
+            Dir(crate::scratch::Scratch::new(&format!("editor {name}")))
         }
 
         /// 가짜 편집기 — 받은 인자와 파일의 권한·글을 옆에 적고, `script` 를 돈다. **진짜 편집기는
@@ -759,17 +781,11 @@ mod tests {
 
         /// 편집기가 끝난 뒤 남은 임시 파일.
         fn leftovers(&self) -> Vec<String> {
-            std::fs::read_dir(&self.0)
+            std::fs::read_dir(self.0.path())
                 .unwrap()
                 .filter_map(|e| e.ok()?.file_name().into_string().ok())
                 .filter(|n| n.starts_with("moai-idea-"))
                 .collect()
-        }
-    }
-
-    impl Drop for Dir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 

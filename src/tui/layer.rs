@@ -94,8 +94,15 @@ pub struct Summary {
     /// config 차례로 칸마다 일의 수. 미룬 것은 뺀다 — 한눈 보기의 보드와 같다.
     pub counts: Vec<(String, usize)>,
     pub picked: Vec<Picked>,
-    /// 드러난 것의 수. 알림은 안 센다.
+    /// 드러난 것의 수. 알림은 안 센다. **자리 없는 줄도 여기 든다** — 층의 `!` 와 "드러난 것
+    /// N건" 이 `moai status` 와 같은 수를 말해야, 층에서 보고 들어간 사람이 다른 수를 안 본다.
     pub warnings: usize,
+    /// 그중 집었는데 일하는 워크트리가 없는 줄(moai-p3bs) — 층은 이것을 낱말로 따로 댄다.
+    /// 죽은 세션을 찾으러 돌아온 사람이 보는 첫 화면이 여기다.
+    pub stranded: usize,
+    /// 자리를 재다 **못 읽은** 워크트리의 수(리뷰 moai-p3bs.op2). 그런 워크트리가 있으면 위의 수가
+    /// "센 결과 0" 이 아니라 "못 셌다" 인데, 이것이 없으면 층이 그 둘을 같은 화면으로 낸다.
+    pub blind: usize,
     pub unreadable: usize,
 }
 
@@ -129,13 +136,20 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
     let cfg = &repo.config;
     let unreadable = load.unreadable();
     let st = crate::report::status(&load.issues, &unreadable, cfg, now);
+    // **자리도 여기서 잰다**(moai-p3bs) — `moai status` 와 같은 자(`worktree::stranded_at`). 한때
+    // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
+    // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.
+    let (lost, blind) = crate::worktree::stranded_at(&repo.root, cfg, &load.issues, false, now);
+    let stranded = lost.as_ref().map_or(0, |w| w.count);
     Summary {
         counts: cfg.statuses.iter().map(|s| (s.clone(), st.counts.get(s).copied().unwrap_or(0))).collect(),
         picked: crate::report::wip(&load.issues, cfg)
             .into_iter()
             .map(|i| Picked { id: i.id.clone(), title: i.title.clone(), column: i.status.as_str().to_string() })
             .collect(),
-        warnings: st.warnings.len(),
+        warnings: st.warnings.len() + usize::from(lost.is_some()),
+        stranded,
+        blind: blind.len(),
         unreadable: load.errors.len(),
     }
 }
@@ -481,6 +495,11 @@ impl App {
                 if let Some((_, handle)) = self.pending.take() {
                     self.discard(handle);
                 }
+                // 누군지도 **그 프로젝트의 뿌리에서** 다시 푼다(moai-j038.vna) — 헤더(`told_user`)가 뿌리마다
+                // 다시 푸는 것과 같은 까닭이다(moai-d3sy): 프로젝트마다 git 설정이 다를 수 있고, 안 풀면 [NEW]
+                // 가 띄운 자리의 사람으로 서서 `moai -C <그 프로젝트> read --all` 과 다른 줄을 센다. 안 읽음은
+                // 들이기(`apply_fresh`)가 세므로 그 **앞**이다.
+                self.me = self.whoami(&repo.root);
                 self.cfg = repo.config.clone();
                 self.repo = Some(repo);
                 self.path.clear();
@@ -522,6 +541,10 @@ impl App {
         self.commits = super::Commits::new();
         self.repo = None;
         self.issues = Vec::new();
+        // 안 읽은 id 도 그 프로젝트에 매인 것이다(moai-z9pc.9av) — 두고 오면 층에서 누른
+        // `SPC m a` 가 **떠난 프로젝트의** 줄을 읽음으로 적고, 그 줄은 여기 보이지도 않는다.
+        // 층에서는 읽음 키가 아예 안 선다(`keys::Browse::enabled`) — 층의 줄은 프로젝트라 읽을 줄이 없다.
+        self.unread.clear();
         self.index = Index::of(&[]);
         self.states = Default::default();
         self.keep = Vec::new();
@@ -737,6 +760,7 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use crate::model::{Issue, Kind, Status};
     use crate::nav::Path as NavPath;
@@ -744,23 +768,18 @@ mod tests {
 
     /// 진짜 디렉터리 여럿과 사용자 설정 한 벌. **돌리는 사람의 설정은 안 읽는다** — 층에
     /// 제 설정 파일을 준다(`Layer::config`).
-    struct Scratch(PathBuf);
+    ///
+    /// 이 묶음만 쓰는 손놀림. 자리를 만들고 지우는 일은 [`Scratch`] 가 한다.
+    trait Places {
+        fn project(&self, name: &str, lines: &[(&str, &str, &str)]) -> PathBuf;
+        fn dir(&self, name: &str) -> PathBuf;
+        fn register(&self, dirs: &[&Path]) -> PathBuf;
+    }
 
-    impl Scratch {
-        fn new(name: &str) -> Scratch {
-            let dir = std::env::temp_dir().join(format!(
-                "moai-layer-{name}-{}-{:?}",
-                std::process::id(),
-                std::thread::current().id()
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-
+    impl Places for Scratch {
         /// `.moai` 를 가진 프로젝트 하나. 줄은 `(id, 제목, 칸)`.
         fn project(&self, name: &str, lines: &[(&str, &str, &str)]) -> PathBuf {
-            let dir = self.0.join(name);
+            let dir = self.join(name);
             std::fs::create_dir_all(dir.join(".moai")).unwrap();
             std::fs::write(dir.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
             write_lines(&dir, lines);
@@ -768,24 +787,18 @@ mod tests {
         }
 
         fn dir(&self, name: &str) -> PathBuf {
-            let dir = self.0.join(name);
+            let dir = self.join(name);
             std::fs::create_dir_all(&dir).unwrap();
             dir
         }
 
         /// 사용자 설정에 이 차례로 등록한다.
         fn register(&self, dirs: &[&Path]) -> PathBuf {
-            let path = self.0.join("user/config.toml");
+            let path = self.join("user/config.toml");
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             let body: String = dirs.iter().map(|d| format!("[[project]]\npath = {:?}\n", d.to_str().unwrap())).collect();
             std::fs::write(&path, body).unwrap();
             path
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 
@@ -845,10 +858,10 @@ mod tests {
     /// init 전·사라진 디렉터리·깨진 설정은 그 줄에서만 말하고 CLI 한눈 보기와 같은 말을 쓴다.
     #[test]
     fn outside_the_layer_lists_each_registered_project_in_its_own_state() {
-        let s = Scratch::new("list");
+        let s = Scratch::new("layer-list");
         let (one, two) = twins(&s);
         let bare = s.dir("bare");
-        let gone = s.0.join("gone");
+        let gone = s.join("gone");
         let broken = s.dir("broken");
         std::fs::create_dir_all(broken.join(".moai")).unwrap();
         std::fs::write(broken.join(".moai/config.toml"), "statuses = \n").unwrap();
@@ -884,7 +897,7 @@ mod tests {
     /// 있어도 커서는 옛 프로젝트의 id 를 붙들고 넘어가지 않는다. 거름망은 나올 때 풀린다.
     #[test]
     fn entering_and_leaving_keeps_each_projects_lines_apart() {
-        let s = Scratch::new("enter");
+        let s = Scratch::new("layer-enter");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
@@ -937,7 +950,7 @@ mod tests {
     /// 시키지도 않은 끈 화면으로 읽힌다.
     #[test]
     fn climbing_restores_the_worktree_overlay_like_it_drops_the_filter() {
-        let s = Scratch::new("climb-w");
+        let s = Scratch::new("layer-climb-w");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
@@ -968,9 +981,9 @@ mod tests {
     /// 그 줄이 없다.
     #[test]
     fn a_broken_config_leaves_no_layer_but_says_why() {
-        let s = Scratch::new("broken-cfg");
+        let s = Scratch::new("layer-broken-cfg");
         let here = s.project("here", &[("argos-0009", "여기 줄", "todo")]);
-        let cfg = s.0.join("broken.toml");
+        let cfg = s.join("broken.toml");
         std::fs::write(&cfg, "[[project]]\npath = \"/x\"\n[[project\n").unwrap();
         let open = || {
             let repo = Repo { root: here.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
@@ -996,7 +1009,7 @@ mod tests {
     /// 맨 앞에 서서 도로 내려갈 수 있다. 남의 프로젝트는 올라갈 때 처음 읽는다.
     #[test]
     fn launched_inside_it_starts_inside_and_climbs_to_where_it_was_launched() {
-        let s = Scratch::new("inside");
+        let s = Scratch::new("layer-inside");
         let (one, two) = twins(&s);
         let here = s.project("here", &[("argos-0009", "여기 줄", "todo")]);
         let cfg = s.register(&[&one, &two]);
@@ -1032,12 +1045,12 @@ mod tests {
     /// 하나를 더할 뿐이다. 사라진 디렉터리라도 등록돼 있으면 선다.
     #[test]
     fn without_a_registration_there_is_no_layer() {
-        let s = Scratch::new("none");
+        let s = Scratch::new("layer-none");
         let here = s.project("here", &[]);
         let cfg = s.register(&[]);
         assert!(!Layer::read(Some(&cfg), Some(&here)).registered());
         assert!(!Layer::read(None, Some(&here)).registered(), "설정 자리를 몰라도 층이 섰다");
-        let cfg = s.register(&[&s.0.join("gone")]);
+        let cfg = s.register(&[&s.join("gone")]);
         assert!(Layer::read(Some(&cfg), Some(&here)).registered());
     }
 
@@ -1045,7 +1058,7 @@ mod tests {
     /// 입힌다. 띄운 자리로만 선 줄은 설정에 없으니 정한 색도 없다.
     #[test]
     fn a_colour_chosen_in_the_user_config_rides_on_the_place() {
-        let s = Scratch::new("hue");
+        let s = Scratch::new("layer-hue");
         let (one, here) = (s.dir("one"), s.dir("here"));
         let cfg = s.register(&[&one]);
         std::fs::write(&cfg, format!("{}color = \"blue\"\n", std::fs::read_to_string(&cfg).unwrap())).unwrap();
@@ -1059,9 +1072,9 @@ mod tests {
     /// 디렉터리를 연다.
     #[test]
     fn entering_a_project_that_cannot_open_only_says_why() {
-        let s = Scratch::new("shut");
+        let s = Scratch::new("layer-shut");
         let bare = s.dir("bare");
-        let gone = s.0.join("gone");
+        let gone = s.join("gone");
         let cfg = s.register(&[&bare, &gone]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
 
@@ -1085,7 +1098,7 @@ mod tests {
     /// 남의 프로젝트를 재지도 읽지도 않는다.
     #[test]
     fn only_the_project_that_changed_is_reread_and_only_on_the_layer() {
-        let s = Scratch::new("reread");
+        let s = Scratch::new("layer-reread");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
@@ -1117,7 +1130,7 @@ mod tests {
     /// 동안 둘 다 없음 그대로라, 디렉터리를 안 재면 층이 "init 전" 을 영영 댄다.
     #[test]
     fn a_bare_directory_that_disappears_is_reread() {
-        let s = Scratch::new("vanish");
+        let s = Scratch::new("layer-vanish");
         let bare = s.dir("bare");
         let cfg = s.register(&[&bare]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
@@ -1136,7 +1149,7 @@ mod tests {
     /// 한 줄로 말한다. `n` 은 여기 없다(커서의 프로젝트에 담는다 — 아래 시험들).
     #[test]
     fn keys_that_need_a_project_say_so_on_the_layer_and_touch_nothing() {
-        let s = Scratch::new("refuse");
+        let s = Scratch::new("layer-refuse");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let files = || [&one, &two].map(|d| std::fs::read(d.join(".moai/issues.jsonl")).unwrap());
@@ -1222,7 +1235,7 @@ mod tests {
     /// 층으로 올라갔으므로, 아무 말 없이 안 듣는 것은 고장으로 읽힌다.
     #[test]
     fn backspace_at_a_layered_root_names_the_key_that_replaced_it() {
-        let s = Scratch::new("bksp-says");
+        let s = Scratch::new("layer-bksp-says");
         let (_one, _two, mut a) = on_layer_with_twins(&s);
         a.hit("1");
         a.key(key(KeyCode::Backspace));
@@ -1235,7 +1248,7 @@ mod tests {
     /// 없어, 상세에 포커스를 둔 채 `0` 을 누르면 무엇을 눌러야 할지 없는 화면이 선다.
     #[test]
     fn a_digit_jump_puts_the_focus_back_on_the_list() {
-        let s = Scratch::new("digit-focus");
+        let s = Scratch::new("layer-digit-focus");
         let (_one, two, mut a) = on_layer_with_twins(&s);
         a.hit("2");
         a.hit("Tab");
@@ -1266,7 +1279,7 @@ mod tests {
     /// 까닭만 알림으로 다는데, 부르는 쪽이 포커스만 옮기면 읽던 상세가 키를 잃는다.
     #[test]
     fn a_failed_digit_jump_leaves_the_focus_where_it_was() {
-        let s = Scratch::new("digit-jump-fail");
+        let s = Scratch::new("layer-digit-jump-fail");
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.hit("1");
         assert_eq!(a.here(), Some(one.clone()), "1 이 첫 프로젝트로 안 갔다");
@@ -1285,7 +1298,7 @@ mod tests {
     /// `0` 은 층으로 돌아온다. 헤더가 그 번호를 대므로 어디서 눌러도 같은 자리로 간다.
     #[test]
     fn a_bare_digit_jumps_to_that_project_and_zero_comes_back() {
-        let s = Scratch::new("digit-jump");
+        let s = Scratch::new("layer-digit-jump");
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.hit("2");
         assert_eq!(a.here(), Some(two.clone()), "2 가 둘째 프로젝트로 안 갔다");
@@ -1305,7 +1318,7 @@ mod tests {
     /// 화면으로, 끈 화면으로 열린다.
     #[test]
     fn a_digit_jump_drops_what_is_bound_to_the_project_it_leaves() {
-        let s = Scratch::new("digit-jump-clean");
+        let s = Scratch::new("layer-digit-jump-clean");
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.hit("1");
         assert_eq!(a.here(), Some(one), "1 이 첫째 프로젝트로 안 갔다");
@@ -1328,7 +1341,7 @@ mod tests {
     /// 프로젝트의 파일만 바뀌고, 알림이 어느 프로젝트인지 댄다.
     #[test]
     fn n_inside_a_project_writes_only_that_projects_file() {
-        let s = Scratch::new("jot-inside");
+        let s = Scratch::new("layer-jot-inside");
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.key(key(KeyCode::Down));
         a.key(key(KeyCode::Enter));
@@ -1353,7 +1366,7 @@ mod tests {
     /// 데도 안 들어간다.
     #[test]
     fn n_on_the_layer_saves_into_the_project_under_the_cursor() {
-        let s = Scratch::new("jot-layer");
+        let s = Scratch::new("layer-jot-layer");
         let (one, two, mut a) = on_layer_with_twins(&s);
         let before = snapshots(&[&one, &two]);
 
@@ -1384,7 +1397,7 @@ mod tests {
     /// 커서가 옆 프로젝트로 가도, 담기는 곳은 머리에 보인 그 프로젝트다.
     #[test]
     fn the_target_is_fixed_when_the_form_opens() {
-        let s = Scratch::new("jot-fixed");
+        let s = Scratch::new("layer-jot-fixed");
         let (one, two, mut a) = on_layer_with_twins(&s);
         let before = snapshots(&[&two]);
         a.hit("SPC n");
@@ -1423,7 +1436,7 @@ mod tests {
     /// 층이 다시 읽혀 차례가 뒤집히고 커서가 옆 프로젝트에 서도, 돌아온 글은 박힌 곳에 담긴다.
     #[test]
     fn an_edit_lands_in_the_project_fixed_when_the_editor_opened() {
-        let s = Scratch::new("edit-fixed");
+        let s = Scratch::new("layer-edit-fixed");
         let (one, two, mut a) = on_layer_with_twins(&s);
         let before = snapshots(&[&two]);
         a.editor = Some("vi".into());
@@ -1447,7 +1460,7 @@ mod tests {
     /// 층에서 연 폼의 프로젝트가 그새 등록에서 빠지면 **쓰지 않고 말한다.** 폼은 적던 그대로다.
     #[test]
     fn a_target_dropped_from_the_layer_is_not_written_elsewhere() {
-        let s = Scratch::new("jot-dropped");
+        let s = Scratch::new("layer-jot-dropped");
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.hit("SPC n");
         type_in(&mut a, "갈 데 없는 것");
@@ -1469,9 +1482,9 @@ mod tests {
     /// 말(`view::unopened`)을 한 줄로 댄다. 그새 init 했으면 연다.
     #[test]
     fn n_on_a_project_that_cannot_open_opens_no_form() {
-        let s = Scratch::new("jot-shut");
+        let s = Scratch::new("layer-jot-shut");
         let bare = s.dir("bare");
-        let gone = s.0.join("gone");
+        let gone = s.join("gone");
         let cfg = s.register(&[&bare, &gone]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
 
@@ -1501,7 +1514,7 @@ mod tests {
                 None => Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험", crate::fail::code::NO_ACTOR)),
             }
         }
-        let s = Scratch::new("jot-ask");
+        let s = Scratch::new("layer-jot-ask");
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.user = None;
         a.identify = nobody;
@@ -1530,7 +1543,7 @@ mod tests {
     /// 프로젝트에서 늦게 닿은 읽기가 들어오면 화면이 남의 줄이 된다.
     #[test]
     fn a_read_in_flight_from_the_project_left_behind_never_lands() {
-        let s = Scratch::new("inflight");
+        let s = Scratch::new("layer-inflight");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
@@ -1551,7 +1564,7 @@ mod tests {
     /// 커서는 보던 프로젝트(경로)에 선다.
     #[test]
     fn spc_r_on_the_layer_rereads_the_registration_and_keeps_the_cursor_on_its_project() {
-        let s = Scratch::new("f5");
+        let s = Scratch::new("layer-f5");
         let (one, two) = twins(&s);
         let three = s.project("three", &[]);
         let cfg = s.register(&[&one, &two]);

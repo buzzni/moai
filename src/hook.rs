@@ -236,6 +236,34 @@ struct Seg {
     depth: usize,
     /// 파이프의 한 칸이거나 `&` 로 띄운 것 — 제 하위 셸에서 돌아 `cd` 가 뒤로 안 이어진다.
     sub: bool,
+    /// 몇 겹의 묶음 안인가 — `( … )` 와 `{ … }` 를 함께 센다. [`Join::depth`] 와 같은 자다.
+    /// [`Seg::depth`] 로 집기의 깊이를 재면 `{ mv; sed -i …; }` 의 `;` 가 집기보다 깊은 자리로
+    /// 읽혀, 집기가 져도 도는 쓰기가 샌다.
+    level: usize,
+    /// 앞 토막과 무엇으로 이었나 — 앞이 이겨야만 도는가(`&&`), 한 파이프라인인가(`|`), 그 이음사를
+    /// 몇 겹의 묶음 안에서 읽었나. [`shell_writes`] 가 집기 뒤의 쓰기를 넘길지를 이것으로 가른다.
+    join: Join,
+}
+
+/// 토막 사이의 이음사([`Seg::join`]).
+#[derive(Debug, Default, Clone, Copy)]
+struct Join {
+    op: Op,
+    /// 이음사를 읽은 자리의 묶음 깊이([`Seg::level`]).
+    depth: usize,
+}
+
+/// 앞 토막이 어떻게 끝나야 이 토막이 도는가.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+enum Op {
+    /// `;`·`||`·`&`·줄바꿈 — 앞이 져도 돈다. 첫 토막도 이것이다.
+    #[default]
+    Any,
+    /// `&&` — 앞이 0 으로 끝나야 돈다.
+    And,
+    /// `|`·`|&` — 앞 칸과 한 파이프라인이다. 앞 칸이 져도 함께 돌고, **그 파이프라인에 들어선
+    /// 판을 잇는다** — `&&` 보다 단단히 묶여 `mv && a | tee f` 의 `tee` 는 집기 뒤다.
+    Pipe,
 }
 
 /// 명령을 **셸이 읽는 대로 한 걸음에** 읽는다 — 따옴표·명령 치환·산술·heredoc
@@ -297,6 +325,12 @@ struct Lexer<'a> {
     heredocs: Vec<(String, bool)>,
     /// 지금 몇 겹의 `( … )` 묶음 안인가([`Seg::depth`]).
     group: usize,
+    /// 마지막으로 읽은 이음사 — 다음에 쌓이는 토막의 [`Seg::join`] 이 된다.
+    join: Join,
+    /// 몇 겹의 `{ … }` 안인가. **이음사와 집기의 깊이([`Seg::level`])에만 든다** — 하위 셸이
+    /// 아니라 그 안의 `cd` 는 뒤로 이어지므로 [`Seg::depth`] 에는 안 든다. 안 세면
+    /// `mv && { a; b; }` 의 `;` 가 묶음 밖의 끊김으로 읽혀, 집기가 이겨야만 도는 쓰기를 막는다.
+    braces: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -312,6 +346,8 @@ impl<'a> Lexer<'a> {
             test: false,
             heredocs: Vec::new(),
             group: 0,
+            join: Join::default(),
+            braces: 0,
         }
     }
 
@@ -326,7 +362,7 @@ impl<'a> Lexer<'a> {
                 Some(Ctx::Arith(depth)) => self.arith(c, depth),
             }
         }
-        self.end_segment();
+        self.end_by(None);
         self.all.into_iter().filter(|s| !s.words.is_empty() || !s.writes.is_empty()).collect()
     }
 
@@ -384,18 +420,25 @@ impl<'a> Lexer<'a> {
             }
             // **토막을 먼저 가른다.** 공백 갈래가 먼저 오면 줄바꿈이 낱말만
             // 끊고 토막은 안 끊는다 — 그 한 줄 차이로 규칙이 통째로 샜다.
+            // 빈 토막 뒤 줄바꿈은 **묶음을 막 나온 뒤에만** 이음사다. 이음사나 `(` 뒤의 줄바꿈은
+            // 셸이 건너뛴다 — `a &&\n b` 는 `&&` 로, `a; (\n b )` 는 `;` 로 이어진 것이다. 앞의
+            // `;` 를 괄호 안 깊이의 줄바꿈으로 덮던 판은 그 `b` 를 집기 뒤로 읽어 샜다. 묶음을
+            // 나온 뒤(`a && ( b )\n c`)의 이음사는 괄호 안의 것이라 여기서 바깥 것으로 선다.
             '\n' => {
-                self.end_segment();
+                self.flush();
+                let empty = self.seg.words.is_empty() && self.seg.writes.is_empty();
+                let left_group = self.join.depth > self.level();
+                self.end_by(if empty && !left_group { None } else { Some(Op::Any) });
                 self.skip_heredocs();
             }
             // `||`·`&&` 는 이어 도는 갈래다. 홀로 선 `|`·`|&` 는 양쪽을, `&` 는 앞을 하위 셸로
             // 돌린다 — 그 `cd` 는 뒤로 안 이어진다([`Seg::sub`]).
-            '|' if self.chars.next_if_eq(&'|').is_some() => self.end_segment(),
-            '&' if self.chars.next_if_eq(&'&').is_some() => self.end_segment(),
+            '|' if self.chars.next_if_eq(&'|').is_some() => self.end_by(Some(Op::Any)),
+            '&' if self.chars.next_if_eq(&'&').is_some() => self.end_by(Some(Op::And)),
             '|' => {
                 self.chars.next_if_eq(&'&');
                 self.seg.sub = true;
-                self.end_segment();
+                self.end_by(Some(Op::Pipe));
                 self.seg.sub = true;
             }
             '&' => {
@@ -403,16 +446,17 @@ impl<'a> Lexer<'a> {
                 if !self.seg.words.is_empty() {
                     self.seg.sub = true;
                 }
-                self.end_segment();
+                self.end_by(Some(Op::Any));
             }
-            ';' => self.end_segment(),
+            ';' => self.end_by(Some(Op::Any)),
+            // 괄호는 이음사가 아니다 — `a && ( b )` 의 `b` 는 `&&` 로 이어진 것이다.
             ')' => {
-                self.end_segment();
+                self.end_by(None);
                 self.group = self.group.saturating_sub(1);
             }
             // `( cd /tmp && … )` 의 괄호는 묶음이다 — 명령 자리가 그 뒤에서 다시 선다.
             '(' if self.at_word_start() => {
-                self.end_segment();
+                self.end_by(None);
                 self.group += 1;
             }
             c if c.is_whitespace() => self.flush(),
@@ -668,6 +712,17 @@ impl<'a> Lexer<'a> {
             Aim::Dup if word.chars().all(|d| d.is_ascii_digit() || d == '-') => {}
             Aim::Dup => self.seg.writes.push(word),
             Aim::Word => {
+                // 명령 자리의 `{`·`}` 만 묶음이다 — `echo {` 의 `{` 는 글자다.
+                //
+                // **닫는 `}` 는 `)` 처럼 묶음을 닫을 뿐 낱말이 아니다.** 낱말로 남으면 제 토막을
+                // 세워 안쪽 `;` 를 제 이음사로 들고 서서 — `{ mv; } && sed -i …` 의 집기를 끊고 —
+                // 다음 `}` 가 명령 자리를 못 봐 `{ { a; } }` 의 깊이가 하나 남는다.
+                if !quoted && word == "{" && command_of(&self.seg.words).is_empty() {
+                    self.braces += 1;
+                } else if !quoted && word == "}" && self.seg.words.is_empty() && self.braces > 0 {
+                    self.braces -= 1;
+                    return;
+                }
                 if !quoted && word == "[[" && command_of(&self.seg.words).is_empty() {
                     self.test = true;
                 } else if !quoted && word == "]]" {
@@ -678,17 +733,33 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn end_segment(&mut self) {
+    /// 토막을 닫고, 읽은 이음사를 다음 토막 몫으로 적는다 — `None` 은 이음사가 아닌 것(괄호).
+    ///
+    /// **빈 토막을 닫는 이음사는 앞의 것을 덮지 않을 때가 있다.** `a &&\n b` 의 줄바꿈과
+    /// `a && ( b )` 의 괄호는 `&&` 를 그대로 둔다. `( a ) ; b` 의 `;` 는 빈 토막에 오지만
+    /// 이음사다 — 덮는다.
+    fn end_by(&mut self, op: Option<Op>) {
         self.flush();
         self.aim = Aim::Word;
         self.test = false;
         // 빈 토막은 쌓지 않는다 — 어차피 걸러지고, 그 표식(`a |\n b` 의 `sub`)은 다음 토막의 것이다.
         if self.seg.words.is_empty() && self.seg.writes.is_empty() {
+            if let Some(op) = op {
+                self.join = Join { op, depth: self.level() };
+            }
             return;
         }
         let mut seg = std::mem::take(&mut self.seg);
         seg.depth = self.group;
+        seg.level = self.level();
+        seg.join = self.join;
         self.all.push(seg);
+        self.join = Join { op: op.unwrap_or_default(), depth: self.level() };
+    }
+
+    /// 지금 몇 겹의 묶음 안인가([`Seg::level`]).
+    fn level(&self) -> usize {
+        self.group + self.braces
     }
 }
 
@@ -1039,6 +1110,7 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, root:
 ///
 /// 상대 경로는 **껍데기의 자리(`cwd`)** 로 푼다. 저장소 뿌리로 풀면 하위
 /// 디렉터리에서 친 `echo > x` 가 엉뚱한 파일로 읽힌다.
+#[cfg(test)]
 pub fn guard_writes(
     issues: &[Issue],
     cfg: &Config,
@@ -1047,10 +1119,25 @@ pub fn guard_writes(
     cwd: &Path,
     cmd: &str,
 ) -> Decision {
+    guard_writes_in(issues, cfg, away, root, cwd, cmd, &|_| true)
+}
+
+/// [`guard_writes`] 를 세션 자리의 트래커로 — 집기는 `only` 가 고른 `moai` 토막의 것만 센다.
+/// `moai -C <남의 트래커> mv … in_progress` 는 여기서 아무것도 안 쥐어 주니, 그 뒤의 쓰기는
+/// 집은 채로 쓰는 것이 아니다.
+fn guard_writes_in(
+    issues: &[Issue],
+    cfg: &Config,
+    away: &BTreeSet<String>,
+    root: &Path,
+    cwd: &Path,
+    cmd: &str,
+    only: &dyn Fn(usize) -> bool,
+) -> Decision {
     if !held(issues, cfg, away).is_empty() {
         return Decision::Pass;
     }
-    for path in shell_writes(cmd, cfg) {
+    for path in shell_writes(cmd, cfg, only) {
         let at = cwd.join(&path);
         if let deny @ Decision::Deny(_) = guard_edit(issues, cfg, away, root, &at.to_string_lossy()) {
             return deny;
@@ -1084,7 +1171,8 @@ pub fn guard_shell(
 
 /// [`guard_shell`] 을 세션 자리의 트래커로 — 만들기·닫기 규칙은 `only` 가 고른 `moai` 토막만
 /// 본다. 다른 트래커를 가리키는 토막은 [`guard_moai`] 가 그 트래커의 줄로 본다(moai-23ky).
-/// 쓰기와 리뷰는 세션 자리의 규칙이라 명령 전체를 본다.
+/// 쓰기와 리뷰는 세션 자리의 규칙이라 명령 전체를 본다 — 쓰기 규칙이 `only` 로 가르는 것은
+/// 어느 집기가 이 자리의 것인가 하나다.
 pub fn guard_shell_in(
     issues: &[Issue],
     cfg: &Config,
@@ -1098,7 +1186,7 @@ pub fn guard_shell_in(
     if decision != Decision::Pass {
         return decision;
     }
-    let decision = guard_writes(issues, cfg, away, root, cwd, cmd);
+    let decision = guard_writes_in(issues, cfg, away, root, cwd, cmd, only);
     if decision != Decision::Pass || !calls_review(cmd) {
         return decision;
     }
@@ -1115,13 +1203,53 @@ pub fn guard_shell_in(
 /// 그래서 어디인지 모르는 과녁은 버린다: 변수·틸드·글롭·프로세스 치환이 든
 /// 것, 그리고 `cd` 뒤의 상대 경로.
 ///
-/// **하나를 집는 명령 뒤의 쓰기는 세지 않는다.** 훅은 명령이 돌기 전의 상태를
-/// 본다 — `moai mv <id> in_progress && …` 를 막으면, 규칙이 시킨 차례를 한 줄로
+/// **하나를 집는 명령 뒤에 `&&` 로 이은 쓰기는 세지 않는다.** 훅은 명령이 돌기 전의
+/// 상태를 본다 — `moai mv <id> in_progress && …` 를 막으면, 규칙이 시킨 차례를 한 줄로
 /// 친 명령이 "하나를 집고 다시 부른다" 는 거절을 받는다.
-fn shell_writes(cmd: &str, cfg: &Config) -> Vec<String> {
+///
+/// **`;`·`||`·`|`·`&`·줄바꿈 뒤는 센다.** 그 뒤는 집기가 져도 돈다 — `--from` 으로 겨루다 진
+/// 집기 뒤의 `; sed -i …` 는 아무것도 안 쥔 채 저장소를 고친다. 첫 토막에서 멈추던 판이 그
+/// 길을 통째로 열어 두었다(moai-gbqb). 묶음 안에서 읽은 이음사는 그 묶음 안의 것이라,
+/// `&&` 로 들어간 `( a; b )`·`{ a; b; }` 는 통째로 집기 뒤다. 파이프는 `&&` 보다 단단히 묶여
+/// `mv && a | tee f` 의 `tee` 도 집기 뒤고, 집기가 든 파이프라인(`mv | tee f`)은 집기 뒤가 아니다.
+///
+/// **집기로 안 세는 것:** 남의 트래커를 가리킨 집기(`only` 가 안 고른 토막 — 여기서 아무것도
+/// 안 쥐어 준다)와 `! moai mv …` (집기가 져야 뒤가 돈다).
+fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<String> {
     let mut out = Vec::new();
     let mut moved = false;
+    // 집기 뒤 `&&` 로만 이어 온 동안의 묶음 깊이 — 이보다 얕거나 같은 자리에서 `&&` 가 아닌
+    // 이음사를 만나면 끝난다.
+    let mut after_pick: Option<usize> = None;
+    // 깊이마다, 지금 열린 파이프라인에 들어설 때의 `after_pick` — 파이프의 칸은 그것을 잇는다.
+    let mut heads: Vec<Option<usize>> = Vec::new();
+    // [`segments`] 의 토막 번호 — `only` 가 그것으로 가른다. 낱말 없는 토막(`> f` 만)은 안 센다.
+    let mut k = 0;
     for seg in parse(cmd) {
+        let j = seg.join;
+        // 이음사가 제 깊이보다 깊으면 묶음을 막 나온 토막 — `( … ) > f` 의 `> f` 다. 그 묶음에
+        // 들어설 때의 판으로 쓰고, 묶음의 값은 그대로 뒤로 흐른다. 이음사로 읽던 판은 안쪽 `;` 로
+        // 집기를 끊어 `(mv) > /dev/null && sed -i …` 를 막았다.
+        let gate = if j.depth > seg.level {
+            heads.get(seg.level).copied().flatten()
+        } else {
+            after_pick = match j.op {
+                Op::Pipe => heads.get(j.depth).copied().flatten(),
+                _ => after_pick.and_then(|d| match j {
+                    j if j.depth > d => Some(d),
+                    j if j.op == Op::And => Some(j.depth),
+                    _ => None,
+                }),
+            };
+            // 이 토막이 여는 파이프라인들 — 이음사의 깊이부터(파이프면 그 다음부터) 제 깊이까지.
+            heads.truncate(j.depth + usize::from(j.op == Op::Pipe));
+            heads.resize(seg.level + 1, after_pick);
+            after_pick
+        };
+        let n = k;
+        if !seg.words.is_empty() {
+            k += 1;
+        }
         let words = command_of(&seg.words);
         let head = words.first().map(|w| basename(w));
         // `[[ a > b ]]`·`(( a > b ))` 의 `>` 는 비교다 — 낱말을 가를 때 이미 걸렀다.
@@ -1132,7 +1260,7 @@ fn shell_writes(cmd: &str, cfg: &Config) -> Vec<String> {
             _ => {}
         }
         for path in found {
-            if unknowable(&path) || (moved && !Path::new(&path).is_absolute()) {
+            if gate.is_some() || unknowable(&path) || (moved && !Path::new(&path).is_absolute()) {
                 continue;
             }
             out.push(path);
@@ -1140,8 +1268,9 @@ fn shell_writes(cmd: &str, cfg: &Config) -> Vec<String> {
         if matches!(head, Some("cd" | "pushd" | "popd")) {
             moved = true;
         }
-        if picks_up(&seg.words, cfg) {
-            break;
+        let negated = seg.words[..seg.words.len() - words.len()].iter().any(|w| w == "!");
+        if picks_up(&seg.words, cfg) && only(n) && !negated {
+            after_pick = Some(after_pick.map_or(seg.level, |d| d.min(seg.level)));
         }
     }
     out
@@ -1232,6 +1361,10 @@ pub fn aimed(cmd: &str, cwd: &Path) -> Vec<Option<PathBuf>> {
 /// `report::wip` 와 같은 셈이다: 설정이 아는 칸 중 첫 칸도 끝난 칸도 아닌 것.
 fn picks_up(seg: &[String], cfg: &Config) -> bool {
     let Some(args) = moai_args(seg) else { return false };
+    // 도움말은 아무것도 안 옮기고 0 으로 끝난다 — `mv … --help && sed -i …` 는 빈손으로 쓴다.
+    if args.iter().any(|t| t == "-h" || t == "--help") {
+        return false;
+    }
     let verbs = positionals(args);
     match verbs.split_first() {
         Some((&"mv", rest)) if rest.len() >= 2 => {
@@ -2761,7 +2894,7 @@ mod tests {
         let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         for cmd in [
             "moai mv t-1 in_progress && echo x > src/store.rs",
-            "moai mv t-1 review; sed -i s/a/b/ src/store.rs",
+            "moai mv t-1 review && sed -i s/a/b/ src/store.rs",
         ] {
             assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
@@ -2772,6 +2905,101 @@ mod tests {
         ] {
             assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
+    }
+
+    /// **집기가 져도 도는 쓰기는 집은 채로 쓰는 것이 아니다** (moai-gbqb). 첫 토막에서
+    /// 멈추던 판은 `--from` 으로 겨루다 진 집기 뒤의 `; sed -i …` 를 안 세어, 아무것도 안
+    /// 쥔 채 저장소가 고쳐졌다. `&&` 로만 이어 온 동안이 집기 뒤다.
+    #[test]
+    fn only_an_and_chain_carries_the_pick_up() {
+        let root = Path::new("/repo");
+        let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        for cmd in [
+            "moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs",
+            "moai mv t-1 in_progress --from todo || sed -i s/a/b/ src/store.rs",
+            "moai mv t-1 in_progress --from todo\nsed -i s/a/b/ src/store.rs",
+            "moai mv t-1 in_progress | tee src/store.rs",
+            "moai mv t-1 in_progress & echo x > src/store.rs",
+            "moai mv t-1 in_progress && echo ok || echo x > src/store.rs",
+            "moai mv t-1 in_progress && echo ok; echo x > src/store.rs",
+            "(moai mv t-1 in_progress); echo x > src/store.rs",
+            "(moai mv t-1 in_progress && echo ok) || echo x > src/store.rs",
+            "moai mv t-1 in_progress && (echo ok); (echo x > src/store.rs)",
+            "(moai mv t-1 in_progress; echo x > src/store.rs)",
+            "moai mv t-1 in_progress && (echo ok)\necho x > src/store.rs",
+            "moai mv t-1 in_progress && { echo ok; }; echo x > src/store.rs",
+            "moai mv t-1 in_progress; { echo x > src/store.rs; }",
+            // `{ … }` 안의 집기도 그 안의 `;` 로 끊긴다 — 집기의 깊이를 `( … )` 로만 재던 판이 샜다.
+            "{ moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs; }",
+            "{ moai mv t-1 in_progress\necho x > src/store.rs\n}",
+            "moai mv t-1 in_progress && { { echo ok; } }; echo x > src/store.rs",
+            // 이음사나 `(` 뒤의 줄바꿈은 앞의 `;`·`||` 를 괄호 안 깊이로 덮지 않는다.
+            "moai mv t-1 in_progress --from todo; (\nsed -i s/a/b/ src/store.rs\n)",
+            "moai mv t-1 in_progress\n(\necho x > src/store.rs\n)",
+            "moai mv t-1 in_progress || (\necho x > src/store.rs\n)",
+            // 집기가 든 파이프라인은 집기의 성패와 무관하게 돈다.
+            "(moai mv t-1 in_progress && echo ok) | tee src/store.rs",
+            "moai mv t-1 in_progress |\n tee src/store.rs",
+            "moai mv t-1 in_progress && echo ok | tee /tmp/x; echo x > src/store.rs",
+            // 집기가 져야 도는 것, 아무것도 안 옮기는 것.
+            "! moai mv t-1 in_progress && echo x > src/store.rs",
+            "moai mv t-1 in_progress --help && echo x > src/store.rs",
+            // 묶음의 리다이렉션은 묶음이 돌기 전에 연다 — 안의 집기와 무관하다.
+            "(moai mv t-1 in_progress) > src/cli.rs && echo x > /tmp/y",
+            "(moai mv t-1 in_progress; echo ok) > /dev/null && echo x > src/store.rs",
+        ] {
+            assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
+        }
+        for cmd in [
+            "moai mv t-1 in_progress --from todo && echo ok && sed -i s/a/b/ src/store.rs",
+            "moai mv t-1 in_progress &&\n  sed -i s/a/b/ src/store.rs",
+            "moai mv t-1 in_progress && (cd src; echo x > /repo/src/store.rs; echo y > /repo/src/cli.rs)",
+            "(moai mv t-1 in_progress) && echo x > src/store.rs",
+            "(moai mv t-1 in_progress && echo ok) && echo x > src/store.rs",
+            "moai mv t-1 in_progress && { echo ok; echo x > src/store.rs; }",
+            // 진 줄 뒤에 다시 집으면 그 뒤는 또 집기 뒤다.
+            "moai mv t-1 in_progress; moai mv t-1 in_progress && echo x > src/store.rs",
+            // 저장소 밖의 쓰기는 이음사와 무관하게 지난다 — 규칙 2 가 세는 것은 저장소 안뿐이다.
+            "moai mv t-1 in_progress; echo x > /tmp/notes",
+            // `{ mv; }` 의 값은 집기의 값이다 — 닫는 `}` 가 안쪽 `;` 를 들고 서면 안 된다.
+            "{ moai mv t-1 in_progress; } && echo x > src/store.rs",
+            // 파이프는 `&&` 보다 단단히 묶인다 — `&&` 뒤의 파이프라인은 통째로 집기 뒤다.
+            "moai mv t-1 in_progress && echo x | tee src/store.rs",
+            "moai mv t-1 in_progress && cargo test 2>&1 | tee out.log",
+            "moai mv t-1 in_progress && grep a b | sort > out.txt",
+            "moai mv t-1 in_progress && echo x |\n  tee src/store.rs",
+            "moai mv t-1 in_progress && (echo ok | tee src/store.rs)",
+            // 파이프라인의 값은 끝 칸의 것이다.
+            "echo ok | moai mv t-1 in_progress && echo x > src/store.rs",
+            "moai mv t-1 in_progress && {\necho x > src/store.rs\n}",
+            "moai mv t-1 in_progress && (\necho x > src/store.rs\n)",
+            // 묶음 뒤의 리다이렉션은 묶음의 것이다 — 이음사로 읽어 집기를 끊지 않는다.
+            "(moai mv t-1 in_progress) > /dev/null && echo x > src/store.rs",
+            "{ moai mv t-1 in_progress; } > /dev/null && echo x > src/store.rs",
+            "moai mv t-1 in_progress && (echo ok) > src/store.rs",
+        ] {
+            assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
+        }
+    }
+
+    /// **남의 트래커에서 집은 것은 여기서 아무것도 안 쥐어 준다.** 집기를 어디서 도는지 안
+    /// 보던 판은 `moai -C <남> mv … in_progress && sed -i …` 로 빈손의 쓰기를 넘겼다.
+    #[test]
+    fn a_pick_up_in_another_tracker_holds_nothing_here() {
+        let root = Path::new("/repo");
+        let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let judge = |cmd: &str| {
+            let dirs = aimed(cmd, root);
+            guard_shell_in(&idle, &cfg(), &here(), root, root, cmd, &|k| dirs[k].is_none())
+        };
+        for cmd in [
+            "moai -C /b mv t-1 in_progress && echo x > src/store.rs",
+            "cd /b && moai mv t-1 in_progress && echo x > /repo/src/store.rs",
+        ] {
+            assert!(matches!(judge(cmd), Decision::Deny(_)), "샜다 — {cmd}");
+        }
+        assert_eq!(judge("moai -C . mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
+        assert_eq!(judge("cat a > /tmp/x && moai mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
     }
 
     /// **`--from <칸>` 의 값은 갈 칸이 아니다** (moai-f8q1). 값 받는 플래그로 안 세던

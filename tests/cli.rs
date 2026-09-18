@@ -6,6 +6,8 @@ use std::process::{Command, Output, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_moai");
 const NOW: &str = "2026-09-11T04:12:03Z";
+/// 시험이 대는 사람. **한 자리에 둔다** — 글자를 베껴 적으면 한쪽만 고쳐도 아무도 모른다.
+const ACTOR: &str = "테스터 (tester@example.com)";
 
 struct Scratch(PathBuf);
 
@@ -91,7 +93,13 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // 걷는다 — `MOAI_CONFIG` 를 덮어쓴 시험이 그것을 지우면 그다음 자리다.
         .env("MOAI_CONFIG", home.join("moai-config-unset/config.toml"))
         .env_remove("XDG_CONFIG_HOME")
-        .env_remove("BASH_ENV");
+        .env_remove("BASH_ENV")
+        // **시험은 한국어 화면을 본다**(moai-zeyv). 기본은 영어지만(사용자 결정) 이 저장소의
+        // 시험은 글자를 그대로 견주는 것이 수백 줄이라, 여기서 언어를 못 박는다 — 안 박으면
+        // 글자를 말묶음으로 옮길 때마다 시험이 "말이 바뀐 것" 인지 "동작이 바뀐 것" 인지를
+        // 못 가른다. 영어 화면은 `english_is_the_default_when_nothing_picks_a_language` 가
+        // 이 변수를 걷고 따로 잰다.
+        .env("MOAI_LANG", "ko");
     cmd
 }
 
@@ -100,15 +108,32 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
 #[path = "../src/git_leaks.rs"]
 mod git_leaks;
 
-fn moai(dir: &Path, args: &[&str]) -> Output {
-    isolated(BIN)
-        .args(args)
-        .current_dir(dir)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
+/// 시험이 부르는 moai 한 벌. **사람·시계·색을 한 자리에서 준다**(moai-uu47).
+///
+/// 이 세 줄이 여덟 군데에 베껴져 있었다. 베낀 자리는 조용히 갈라진다 — `hook_in` 은 사람과
+/// 시계만 주고 색을 안 줘, 다른 자리들과 다른 환경에서 돌고 있었다.
+///
+/// 더 줄 것이 있으면 돌려받아 이어 붙인다(`env`·`current_dir`). 걷어야 할 것은
+/// [`isolated`] 가 이미 걷었다.
+fn staged(args: &[&str]) -> Command {
+    let mut cmd = isolated(BIN);
+    cmd.args(args)
+        .env("MOAI_ACTOR", ACTOR)
         .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
-        .output()
-        .expect("moai 를 실행하지 못했다")
+        .env("NO_COLOR", "1");
+    cmd
+}
+
+/// 시계를 **안 고정한** 한 벌. 겨루기 시험이 쓴다 — 여덟이 같은 시각을 들고 달리면
+/// 겨루는 것이 실제 시계가 아니라 그 값이 된다.
+fn staged_live(args: &[&str]) -> Command {
+    let mut cmd = isolated(BIN);
+    cmd.args(args).env("MOAI_ACTOR", ACTOR).env("NO_COLOR", "1");
+    cmd
+}
+
+fn moai(dir: &Path, args: &[&str]) -> Output {
+    staged(args).current_dir(dir).output().expect("moai 를 실행하지 못했다")
 }
 
 fn ok(dir: &Path, args: &[&str]) -> String {
@@ -130,6 +155,149 @@ fn init(name: &str) -> Scratch {
 
 fn issues(dir: &Path) -> String {
     std::fs::read_to_string(dir.join(".moai/issues.jsonl")).unwrap()
+}
+
+/// **말이 바뀌어도 표는 안 깨진다**(moai-i44x) — 한글·일본어·중국어는 한 글자가 두 칸이라,
+/// 글자 수로 재는 자리가 하나라도 있으면 그 말에서만 열이 어긋난다.
+///
+/// 다섯 말로 `ready` 를 돌려 **열이 같은 칸에서 시작하는지**를 표시 폭으로 잰다. 글자 수로
+/// 재면 영어에서는 맞고 한국어·일본어에서만 틀리므로, 한 말로만 재는 시험은 이것을 못 본다.
+#[test]
+fn every_language_keeps_the_ready_table_in_line() {
+    let s = init("wide");
+    // **글자 수와 칸 수가 크게 엇갈리는 제목을 섞는다** — 한글 제목은 글자 수보다 칸 수가
+    // 곱절이라, 글자 수로 채우는 코드는 여기서만 어긋난다.
+    ok(s.path(), &["add", "짧은 일"]);
+    ok(s.path(), &["add", "아주 긴 한글 제목이 여기에 들어간다"]);
+    ok(s.path(), &["add", "plain ascii"]);
+    for lang in ["en", "ko", "ja", "zh", "es"] {
+        let mut cmd = isolated(BIN);
+        cmd.args(["ready"]).current_dir(s.path()).env("MOAI_NOW", NOW).env("NO_COLOR", "1").env("MOAI_LANG", lang);
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "{lang}: {}", String::from_utf8_lossy(&out.stderr));
+        let screen = String::from_utf8(out.stdout).unwrap();
+        // **제목 뒤의 열이 서는 자리를 잰다** — 제목이 두 칸 글자라, 글자 수로 채우면 여기서
+        // 어긋난다. 우선순위(`p2`)는 id 뒤라 ASCII 만 앞서므로 그것만 재면 못 잡는다.
+        let starts: Vec<(usize, usize)> = screen
+            .lines()
+            .filter(|l| l.contains("argos-"))
+            .map(|l| {
+                let p = l.find("p2").expect("우선순위 칸이 없다");
+                (cells(&l[..p]), last_column(l))
+            })
+            .collect();
+        assert!(starts.len() >= 3, "{lang}: 표에 줄이 모자라다\n{screen}");
+        // **잰 자리가 0 이면 아무것도 안 잰 것이다** — 아래 두 줄은 다 0 이어도 통과한다.
+        assert!(starts.iter().all(|(p, e)| *p > 0 && *e > *p), "{lang}: 열을 못 찾았다 — {starts:?}\n{screen}");
+        assert!(starts.windows(2).all(|w| w[0].0 == w[1].0), "{lang}: 우선순위 열이 줄마다 다른 칸에서 선다 — {starts:?}\n{screen}");
+        assert!(starts.windows(2).all(|w| w[0].1 == w[1].1), "{lang}: 제목 뒤 열이 줄마다 다른 칸에서 선다 — {starts:?}\n{screen}");
+    }
+}
+
+/// 화면에서 그 글이 차지하는 **칸 수**. 한글·일본어·중국어는 한 글자가 두 칸이다.
+fn cells(s: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width(s)
+}
+
+/// 그 줄의 **마지막 열이 서는 칸.** 열 사이는 두 칸 이상 벌어지므로 마지막 틈 뒤가 그 자리다.
+///
+/// **글자로 찾지 않는다**(리뷰 moai-80qw). 전에는 `에픽 없음` 을 `rfind` 로 짚었는데, 그 낱말은
+/// 말묶음으로 옮겨 갈 차례에 있는 것이라 옮기는 날 en·ja·zh·es 에서 `expect` 가 터진다 —
+/// 번역이 처음으로 잰 칸에 들어오는 바로 그때, 어긋남을 재는 대신 시험이 죽는다.
+fn last_column(l: &str) -> usize {
+    let line = l.trim_end();
+    let Some(gap) = line.rfind("  ") else { return 0 };
+    let tail = &line[gap..];
+    cells(&line[..gap + (tail.len() - tail.trim_start().len())])
+}
+
+/// **아무도 고르지 않으면 지금은 한국어고, 영어는 낱말 하나로 온다**(사용자 결정, 리뷰
+/// moai-80qw.cb8). 옮긴 글이 열 줄뿐이라 기본을 영어로 두면 화면이 두 말로 섞인다 — 옮김이
+/// 화면을 덮을 때 `Lang` 의 `#[default]` 한 줄과 함께 이 기대값이 영어로 바뀐다.
+///
+/// **`MOAI_LANG` 으로 한국어·일본어도 함께 잰다** — 고르는 길이 도는지, 그리고 두 칸 글자가
+/// 섞여도 줄이 서는지. 어느 말이든 같은 수를 대는 것으로 그 화면이 같은 화면임을 잰다.
+#[test]
+fn nothing_picked_means_korean_for_now_and_english_is_one_word_away() {
+    let s = init("lang");
+    ok(s.path(), &["add", "첫 일"]);
+    let say = |lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(["status"]).current_dir(s.path()).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+        match lang {
+            Some(l) => cmd.env("MOAI_LANG", l),
+            None => cmd.env_remove("MOAI_LANG"),
+        };
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    // **아무것도 안 고르면 지금은 한국어다**(사용자 결정) — 옮긴 글이 열 줄뿐이라, 기본을
+    // 영어로 두면 화면이 두 말로 섞인다. 옮김이 화면을 덮으면 이 기대값이 영어로 바뀐다.
+    let fallback = say(None);
+    assert!(fallback.contains("이슈 1"), "아무도 안 골랐는데 기본 화면이 아니다\n{fallback}");
+
+    // **영어는 낱말 하나로 온다** — 기준 말이라 늘 고를 수 있다.
+    let english = say(Some("en"));
+    assert!(english.contains("Issues 1"), "MOAI_LANG=en 이 안 들었다\n{english}");
+    let head = |screen: &str| screen.lines().next().unwrap_or_default().to_string();
+    assert!(!head(&english).contains("이슈"), "영어 화면의 머리에 한국어가 남았다\n{english}");
+
+    let korean = say(Some("ko"));
+    assert!(korean.contains("이슈 1"), "MOAI_LANG=ko 가 안 들었다\n{korean}");
+    assert_eq!(korean, fallback, "고른 한국어와 기본 화면이 다르다");
+
+    // 없는 키는 영어로 떨어진다 — 화면이 비지 않는다.
+    let japanese = say(Some("ja_JP.UTF-8"));
+    assert!(japanese.contains("課題 1"), "로캘 모양의 MOAI_LANG 이 안 들었다\n{japanese}");
+
+    // 말이 달라도 같은 화면이다 — 줄 수가 같다.
+    assert_eq!(english.lines().count(), korean.lines().count(), "영어와 한국어의 줄 수가 다르다");
+    assert_eq!(english.lines().count(), japanese.lines().count(), "영어와 일본어의 줄 수가 다르다");
+}
+
+/// **설정에 적은 말도 든다**(moai-slfv), 그리고 **틀리면 저장소 안에서도 댄다**(리뷰 moai-80qw).
+///
+/// 여기까지 오는 길(`Doc::lang` → `Registry::lang` → `i18n::pick`)은 `MOAI_LANG` 만 재는
+/// 시험들이 한 줄도 안 밟던 자리다 — 그 길이 끊어져도 다 푸르고, `[i18n] lang` 을 적어 둔
+/// 사람만 조용히 영어를 본다. 틀린 값은 **stderr 로** 대고 종료 코드는 안 바꾼다: `status` 는
+/// 아무것도 막지 않는다.
+#[test]
+fn the_config_picks_the_language_and_a_bad_one_is_named() {
+    let s = init("lang-config");
+    ok(s.path(), &["add", "첫 일"]);
+    let config = s.path().join("user/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let run = |body: &str| {
+        std::fs::write(&config, body).unwrap();
+        let mut cmd = isolated(BIN);
+        cmd.args(["status"])
+            .current_dir(s.path())
+            .env("MOAI_CONFIG", &config)
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            .env_remove("MOAI_LANG");
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "설정 하나로 멈췄다\n{}", String::from_utf8_lossy(&out.stderr));
+        (String::from_utf8(out.stdout).unwrap(), String::from_utf8(out.stderr).unwrap())
+    };
+
+    let (screen, said) = run("[i18n]\nlang = \"ja\"\n");
+    assert!(screen.contains("課題 1"), "설정에 적은 말이 안 들었다\n{screen}");
+    assert!(said.is_empty(), "멀쩡한 설정에 할 말이 생겼다 — {said}");
+
+    // **환경이 설정을 이긴다** — 같은 파일을 두고 `MOAI_LANG` 을 주면 그쪽이다.
+    let mut cmd = isolated(BIN);
+    cmd.args(["status"]).current_dir(s.path()).env("MOAI_CONFIG", &config).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+    let out = cmd.output().expect("moai 를 실행하지 못했다");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("이슈 1"), "MOAI_LANG 이 설정에 졌다");
+
+    // **오타는 조용히 기본값이 되지 않는다.** 이 줄이 없으면 고친 설정이 왜 안 듣는지 알 길이 없다.
+    let (screen, said) = run("[i18n]\nlang = \"kr\"\n");
+    assert!(screen.contains("이슈 1"), "모르는 값에서 기본값(지금은 한국어)으로 안 떨어졌다\n{screen}");
+    assert!(said.contains("`i18n.lang`") && said.contains("\"kr\""), "틀린 설정을 아무도 안 댔다 — {said:?}");
+    // 보드도 그것을 안다 — 없으면 "드러난 문제 없다" 가 방금 stderr 에 한 말을 뒤집는다.
+    assert!(screen.contains("사용자 설정에서 못 읽은 것 1건"), "보드가 stderr 의 말을 모른다\n{screen}");
 }
 
 #[test]
@@ -401,11 +569,8 @@ fn concurrent_adds_all_survive() {
     let n = 8;
     let kids: Vec<_> = (0..n)
         .map(|i| {
-            isolated(BIN)
-                .args(["add", &format!("동시 {i}"), "-q"])
+            staged_live(&["add", &format!("동시 {i}"), "-q"])
                 .current_dir(s.path())
-                .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-                .env("NO_COLOR", "1")
                 .stdout(Stdio::piped())
                 .spawn()
                 .unwrap()
@@ -487,13 +652,9 @@ fn registry(s: &Scratch, dirs: &[&Path]) -> PathBuf {
 }
 
 fn moai_with(dir: &Path, config: &Path, args: &[&str]) -> Output {
-    isolated(BIN)
-        .args(args)
+    staged(args)
         .current_dir(dir)
         .env("MOAI_CONFIG", config)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
         .output()
         .expect("moai 를 실행하지 못했다")
 }
@@ -521,6 +682,143 @@ fn dir_in(s: &Scratch, rel: &str) -> PathBuf {
     let d = s.path().join(rel);
     std::fs::create_dir_all(&d).unwrap();
     d
+}
+
+/// **`.moai` 밖 한눈 보기도 자리 없는 줄을 비춘다**(moai-p3bs). 죽은 세션을 찾으러 돌아온 사람이
+/// 프로젝트 밖에서 보는 화면이 여기라, 안쪽 `moai status` 에만 그 말이 있으면 못 본다. 경고 수와
+/// `--json` 의 `warnings` 가 안쪽과 같은 수를 말한다.
+#[test]
+fn the_overview_counts_work_with_no_live_worktree() {
+    let s = Scratch::new("ovstranded");
+    let (one, out) = (dir_in(&s, "one"), dir_in(&s, "out"));
+    git(&one, &["init", "-q"]);
+    ok(&one, &["init", "argos"]);
+    let lost = add(&one, &["세션이 죽은 일"]);
+    ok(&one, &["mv", &lost, "in_progress"]);
+    git(&one, &["add", "-A"]);
+    git(&one, &["commit", "-q", "-m", "집는다"]);
+    // 이름이 그 줄을 안 가리키는 워크트리 — 워크트리를 쓰는 저장소라는 표시다.
+    git(&one, &["worktree", "add", "-q", ".claude/worktrees/agent-x", "-b", "worktree-agent-x"]);
+    let cfg = registry(&s, &[&one]);
+
+    let inside = ok_at(&one, LATER, &["status"]);
+    assert!(inside.contains("일하는 워크트리가 없는 것 1건"), "안쪽이 안 비췄다\n{inside}");
+    // 안쪽이 세는 경고 수 — 밖에서도 같은 수를 말해야 한다. **`warnings` 안만 센다**:
+    // `"kind":` 는 `notices` 에도 붙어, 통째로 세면 알림 하나가 서는 날 이 시험이 자기가
+    // 재겠다고 한 것과 아무 상관 없는 까닭으로 깨진다.
+    let json = ok_at(&one, LATER, &["status", "--json"]);
+    let want = json
+        .split("\"warnings\":[")
+        .nth(1)
+        .and_then(|r| r.split("],\"notices\":").next())
+        .unwrap_or_else(|| panic!("경고 배열을 못 찾았다\n{json}"))
+        .matches("\"kind\":")
+        .count()
+        .to_string();
+    let n = |t: &str| t.split("경고 ").nth(1).and_then(|r| r.split('건').next()).map(str::to_string);
+
+    let out_text = isolated(BIN)
+        .args(["status"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(out_text.status.success());
+    let text = String::from_utf8(out_text.stdout).unwrap();
+    let mine = block(&text, "one");
+    assert!(!mine.contains("드러난 문제 없다"), "자리 없는 줄을 안 세웠다\n{text}");
+    assert_eq!(n(mine), Some(want), "안쪽과 다른 수를 말한다\n{text}");
+
+    let machine = isolated(BIN)
+        .args(["status", "--json"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let json = String::from_utf8(machine.stdout).unwrap();
+    assert!(json.contains("\"kind\":\"stranded\"") && json.contains(&lost), "{json}");
+
+    // **탐색기의 프로젝트 층도 같은 셈을 쓴다**(`layer::summarize`) — 층은 경고를 수로만 내므로
+    // 그 수에 들었는지와, 무엇인지 대는 `stranded` 키로 본다.
+    let layer = isolated(BIN)
+        .args(["tui", "--json"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let layer = String::from_utf8(layer.stdout).unwrap();
+    assert!(layer.contains("\"stranded\":1"), "층이 자리 없는 줄을 안 셌다\n{layer}");
+    assert!(layer.contains("\"warnings\":2"), "층의 경고 수에 안 들었다\n{layer}");
+
+    // **못 읽은 워크트리가 있으면 "센 결과 0" 이 아니라 "못 셌다" 다**(리뷰 moai-p3bs.op2) —
+    // 밖에서는 옆 스냅샷을 아예 안 여므로, 세지 못했다는 사실이 여기서 사라지면 죽은 세션이
+    // 통째로 조용해진다.
+    let snap = one.join(".claude/worktrees/agent-x/.moai/issues.jsonl");
+    std::fs::remove_file(&snap).unwrap();
+    std::fs::create_dir(&snap).unwrap();
+    let blind = isolated(BIN)
+        .args(["status"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let blind = String::from_utf8(blind.stdout).unwrap();
+    let mine = block(&blind, "one");
+    assert!(!mine.contains("드러난 문제 없다"), "못 셌는데 문제 없다고 했다\n{blind}");
+    assert!(mine.contains("옆 워크트리 문제 1건"), "못 읽은 워크트리를 안 셌다\n{blind}");
+    // **센 것은 줄로도 댄다** — 수만 서면 `— 위 줄` 이 없는 줄을 가리키고 어느 워크트리인지 모른다.
+    assert!(
+        mine.contains("스냅샷을 못 읽었다 — ⎇ worktree-agent-x: .claude/worktrees/agent-x"),
+        "못 읽은 워크트리를 세기만 하고 대지 않았다\n{blind}"
+    );
+
+    // **겹쳐 보면 `gather` 가 같은 워크트리를 이미 냈다 — 두 번 세지 않는다**(`status` 의
+    // `said_already` 와 같은 자). 겹쳐 세면 깨진 워크트리 하나가 `옆 워크트리 문제 2건` 으로 서서
+    // 보는 쪽이 두 곳이 깨진 줄로 읽는다. **기계도 같은 사실을 안쪽과 같은 키로 받는다** — 없으면
+    // 밖에서 읽는 쪽은 "자리 잃은 일이 없다" 와 "못 셌다" 를 못 가른다.
+    let both = isolated(BIN)
+        .args(["status", "--worktree"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let both = String::from_utf8(both.stdout).unwrap();
+    assert!(block(&both, "one").contains("옆 워크트리 문제 1건"), "한 워크트리를 두 번 셌다\n{both}");
+    assert!(!block(&both, "one").contains("스냅샷을 못 읽었다 — ⎇"), "`gather` 가 낸 워크트리를 한 번 더 댔다\n{both}");
+    let machine = isolated(BIN)
+        .args(["status", "--worktree", "--json"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let machine = String::from_utf8(machine.stdout).unwrap();
+    assert!(
+        machine.contains("\"unreadable_worktrees\":[{\"path\":\".claude/worktrees/agent-x\""),
+        "밖 한눈 보기의 기계 출력이 못 읽은 워크트리를 안 댔다\n{machine}"
+    );
+
+    let layer = isolated(BIN)
+        .args(["tui", "--json"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let layer = String::from_utf8(layer.stdout).unwrap();
+    assert!(layer.contains("\"unreadable_worktrees\":1"), "층이 못 읽은 워크트리를 안 댔다\n{layer}");
 }
 
 /// **같은 id 가 두 프로젝트에 있어도 섞이지 않는다.** 접두어가 같은 두 저장소는 흔하고,
@@ -1981,14 +2279,7 @@ fn tree_is_refused_on_a_single_issue() {
 // ── S4 — moai status ─────────────────────────────────────────────────
 
 fn at(dir: &Path, now: &str, args: &[&str]) -> Output {
-    isolated(BIN)
-        .args(args)
-        .current_dir(dir)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-        .env("MOAI_NOW", now)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap()
+    staged(args).current_dir(dir).env("MOAI_NOW", now).output().unwrap()
 }
 
 /// **경고가 있어도 종료 코드는 0 이다.**
@@ -2089,12 +2380,8 @@ fn status_is_one_screen_with_everything() {
 
 fn from_stdin(dir: &Path, args: &[&str], input: &str) -> Output {
     use std::io::Write as _;
-    let mut child = isolated(BIN)
-        .args(args)
+    let mut child = staged(args)
         .current_dir(dir)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -2661,7 +2948,108 @@ const JSON_SWEEP: &[&str] = &[
     "issue", "epic", "milestone", "idea",
     // 사용자 설정을 고친다. `add`·`rm` 은 제 설정 파일로 따로 부른다 — 공용 집에 쓰면 안 된다.
     "project",
+    // 읽음도 사용자 설정에 적는다. 시험의 `MOAI_CONFIG` 는 그 시험만의 임시 자리다.
+    "read",
 ];
+
+/// **읽음은 내 설정에만 적힌다**(moai-u8oh, 사용자 결정) — 트래커 파일은 한 바이트도 안 바뀐다.
+/// `--all` 은 내게 온 것 가운데 안 읽은 것을, `-e` 는 그 묶음(에픽·마일스톤)의 멤버와 **그 밑까지**
+/// 적는다 — 물려받은 소속도 센다(moai-u8oh.x85). 없는 줄은 #a-partial 대로 말하고 비영으로 끝나고,
+/// id 를 준 길은 누군지 몰라도 적는다.
+#[test]
+fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
+    let s = init("readmark");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let epic = field(&mine(&["add", "에픽", "--type", "epic", "--json"]), "id");
+    let member = field(&mine(&["add", "멤버", "-e", &epic, "--json"]), "id");
+    // 멤버의 자식 — **제 `epic` 을 안 적고 부모에게서 받는다**(`moai add --parent`). `-e` 가
+    // 줄의 `epic` 필드만 보던 때 이 줄이 통째로 빠졌다(moai-u8oh.x85).
+    let child = field(&mine(&["add", "자식", "--parent", &member, "--json"]), "id");
+    let before = issues(s.path());
+
+    let out = mine(&["read", &member, "--json"]);
+    assert!(out.contains(&member), "{out}");
+    let saved = std::fs::read_to_string(&cfg).unwrap();
+    assert!(saved.contains("[read]") && saved.contains(&member), "{saved}");
+    assert_eq!(issues(s.path()), before, "읽었다고 트래커가 바뀌었다");
+
+    // 두 번째는 적을 것이 없다 — 시계가 고정(MOAI_NOW)이라 같은 때가 이미 적혀 있다.
+    assert!(mine(&["read", &member]).contains("읽음으로 적을 것이 없다"));
+
+    // `-e` 는 에픽 자신과 멤버와 **그 밑까지** 함께 적는다. 자식이 빠지면 "그 밑까지" 가 거짓이다.
+    let out = mine(&["read", "-e", &epic, "--json"]);
+    assert!(out.contains(&epic) && out.contains(&child), "에픽 자신이나 멤버의 자식이 빠졌다 — {out}");
+
+    // 마일스톤도 묶음이다 — 묶음 줄 하나만 적고 멤버를 흘리지 않는다.
+    let stone = field(&mine(&["milestone", "add", "v1", "--json"]), "id");
+    let dated = field(&mine(&["add", "마일 이슈", "--milestone", &stone, "--json"]), "id");
+    let out = mine(&["read", "-e", &stone, "--json"]);
+    assert!(out.contains(&dated), "마일스톤의 멤버가 빠졌다 — {out}");
+
+    // #a-partial — 없는 줄은 말하고 나머지는 적되, **비영으로 끝난다**. 0 으로 끝나면 고리를
+    // 짜는 쪽이 오타 친 id 를 적힌 것으로 세고 넘어간다.
+    let another = field(&mine(&["add", "또 하나", "--json"]), "id");
+    let out = moai_with(s.path(), &cfg, &["read", "없는-줄", &another, "--json"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&another), "하나가 없다고 나머지를 안 적었다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("없는-줄"));
+    assert!(!out.status.success(), "못 찾은 것이 있는데 0 으로 끝났다");
+
+    // 없는 묶음도 같은 자리다 — 조용히 빈 손으로 끝나면 오타를 친 줄 모른다.
+    let out = moai_with(s.path(), &cfg, &["read", "-e", "없는-에픽", "--json"]);
+    assert!(!out.status.success(), "없는 묶음인데 0 으로 끝났다");
+    assert!(String::from_utf8_lossy(&out.stdout).contains(r#""missing":["없는-에픽"]"#), "{out:?}");
+
+    // **누군지 몰라도 id 를 준 길은 적는다** — 저널에 안 쓰니 이름 없는 줄이 남을 자리가 없다.
+    // 담당을 재는 `--all` 만 사람을 묻는다.
+    let bare = isolated(BIN)
+        .args(["read", &member])
+        .current_dir(s.path())
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("moai 를 실행하지 못했다");
+    assert!(bare.status.success(), "{}", String::from_utf8_lossy(&bare.stderr));
+
+    // `--all` 은 내게 온 것 가운데 **안 읽은 것만** — 위에서 다 읽었으니 새로 만든 줄 하나뿐이다.
+    let late = field(&mine(&["add", "늦게 온 것", "--json"]), "id");
+    let out = mine(&["read", "--all", "--json"]);
+    assert!(out.contains(&late), "안 읽은 줄이 안 들었다 — {out}");
+    assert!(!out.contains(&member), "이미 읽은 줄을 다시 적었다 — {out}");
+}
+
+/// **`-e` 는 그 묶음 밑에 그려진 것만 적는다**(moai-j038.vna) — 트리·`show -e`·탐색기의 `SPC m r` 과 같은
+/// 자(`nav::Index::under_group`)다. id 조상을 따로 훑던 때는 `moai epic add --parent <바깥>` 으로 선 안쪽
+/// 에픽과 **그 멤버 절반**(id 로 선 것만)을, `--parent <바깥> -e <남>` 으로 남의 에픽에 든 자식까지 적었다 —
+/// 어느 표면도 그 줄들을 바깥 에픽 밑에 그리지 않는다. 묶음이 아닌 줄은 적기 전에 거절한다.
+#[test]
+fn reading_a_group_takes_what_is_drawn_under_it() {
+    let s = init("readgroup");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let outer = field(&mine(&["epic", "add", "바깥", "--json"]), "id");
+    let other = field(&mine(&["epic", "add", "남의 에픽", "--json"]), "id");
+    let member = field(&mine(&["add", "바깥 멤버", "-e", &outer, "--json"]), "id");
+    let inner = field(&mine(&["epic", "add", "안쪽", "--parent", &outer, "--json"]), "id");
+    let by_field = field(&mine(&["add", "안쪽 멤버", "-e", &inner, "--json"]), "id");
+    let by_id = field(&mine(&["add", "안쪽 자식", "--parent", &inner, "--json"]), "id");
+    let elsewhere = field(&mine(&["add", "남의 자식", "--parent", &outer, "-e", &other, "--json"]), "id");
+    // id 가 서로의 앞머리라(`바깥.xxx`) 따옴표째 찾는다.
+    let has = |out: &str, id: &str| out.contains(&format!("\"{id}\""));
+
+    let out = mine(&["read", "-e", &outer, "--json"]);
+    assert!(has(&out, &outer) && has(&out, &member), "묶음 줄이나 멤버가 빠졌다 — {out}");
+    for stray in [&inner, &by_field, &by_id, &elsewhere] {
+        assert!(!has(&out, stray), "바깥 에픽 밑에 안 그려진 {stray} 를 적었다 — {out}");
+    }
+
+    // 묶음이 아닌 줄은 적기 전에 거절한다 — 받으면 그 줄 하나만 적고 0 으로 끝나 "그 밑까지" 가 거짓이 된다.
+    let out = moai_with(s.path(), &cfg, &["read", "-e", &by_field]);
+    assert!(!out.status.success(), "묶음이 아닌 줄을 받았다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("에픽·마일스톤"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!std::fs::read_to_string(&cfg).unwrap().contains(&format!("{by_field} =")), "거절해 놓고 적었다");
+}
 
 /// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.
 #[test]
@@ -2704,7 +3092,11 @@ fn every_command_still_speaks_json() {
     // 위 시험은 초록인데 그 명령의 `--json` 은 아무도 안 본 것이 된다 —
     // 없는 안전망을 있다고 믿는 것이 제일 나쁘다.
     // `init` 과 `add` 는 위에서 바탕을 세우며 이미 `--json` 으로 부른다.
-    for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add"].contains(c)) {
+    // `read` 는 **제 설정 파일로** 여기서 따로 부른다 — 공용 집의 없는 파일에 쓰면 그 격리가 깨진다
+    // (`project add`·`rm` 과 같은 까닭). 무엇을 적는지는 위의 `read_marks_…` 시험이 본다.
+    let own = s.path().join("sweep-read.toml");
+    one_json_value(&ok_with(s.path(), &own, &["read", &id, "--json"]));
+    for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add", "read"].contains(c)) {
         assert!(
             cases.iter().any(|a| a[0] == *cmd),
             "`{cmd}` 가 JSON_SWEEP 에는 있는데 실제로 부르지 않는다"
@@ -3663,12 +4055,8 @@ fn narrow_terminals_keep_heredoc_openers_whole() {
 fn help_at(s: &Scratch, path: &str, columns: usize) -> String {
     let mut args: Vec<&str> = path.split_whitespace().collect();
     args.push("--help");
-    let out = isolated(BIN)
-        .args(&args)
+    let out = staged(&args)
         .current_dir(s.path())
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
         .env("COLUMNS", columns.to_string())
         .output()
         .expect("moai 를 실행하지 못했다");
@@ -5737,11 +6125,8 @@ fn hook_in(s: &Scratch, run_in: &Path, event: &str, input: &str) -> Output {
     use std::io::Write as _;
     let tmp = s.path().join("hooktmp");
     std::fs::create_dir_all(&tmp).unwrap();
-    let mut child = isolated(BIN)
-        .args(["hook", event])
+    let mut child = staged(&["hook", event])
         .current_dir(run_in)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-        .env("MOAI_NOW", NOW)
         .env("TMPDIR", &tmp)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -6606,6 +6991,19 @@ fn show_names_the_worktree_a_picked_row_lives_in() {
     assert!(!out.contains("자리"), "안 집은 줄에 자리를 세웠다\n{out}");
     assert!(!ok(&main, &["show", &idle, "--json"]).contains("workplaces"));
 
+    // **딸린 워크트리 안에서 펼쳐도 경로는 main 에서 잰 상대 경로다**(moai-fygk) — 제 꼭대기로
+    // 재면 옆 워크트리가 하나도 안 잘려 기계의 절대 경로가 그대로 나간다. 규약상 세션은 대개
+    // 워크트리 안에서 도므로 그쪽이 흔한 자리다.
+    let other = field(&ok(&main, &["add", "옆에서 할 일 하나 더", "--json"]), "id");
+    ok(&main, &["mv", &other, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "하나 더 집는다"]);
+    let dir2 = format!(".claude/worktrees/{other}");
+    git(&main, &["worktree", "add", "-q", &dir2, "-b", &format!("worktree-{other}")]);
+    let line = place(&ok(&inside, &["show", &other, "--worktree"]));
+    assert!(line.contains(&dir2), "main 에서 잰 상대 경로가 아니다\n{line}");
+    assert!(!line.contains(&main.display().to_string()), "옆 워크트리가 절대 경로로 샜다\n{line}");
+
     // **제 워크트리 안에서 펼쳐도 자리는 빈 칸이 아니다** — 뿌리와 같은 자리라 잘라 내면 아무것도
     // 안 남는다. 딸린 워크트리는 `--worktree` 로 겹쳐 봐야 자리를 잰다.
     let line = place(&ok(&inside, &["show", &id, "--worktree"]));
@@ -7322,12 +7720,9 @@ fn git_run(dir: &Path, at: Option<&str>, args: &[&str]) -> String {
 
 /// 시계를 달리 두고 돌린다 — 옆 워크트리의 쓰기가 **더 늦게** 떨어진 것을 흉내 낸다.
 fn ok_at(dir: &Path, now: &str, args: &[&str]) -> String {
-    let out = isolated(BIN)
-        .args(args)
+    let out = staged(args)
         .current_dir(dir)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
         .env("MOAI_NOW", now)
-        .env("NO_COLOR", "1")
         .output()
         .expect("moai 를 실행하지 못했다");
     assert!(out.status.success(), "moai {args:?} 가 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
@@ -8013,7 +8408,7 @@ fn agent_cmd(dir: &Path, work: &Path, moai: &Path) -> Command {
         .current_dir(dir)
         .env("MOAI", moai)
         .env("AGENT_WORK", work)
-        .env("MOAI_ACTOR", "테스터 (tester@example.com)")
+        .env("MOAI_ACTOR", ACTOR)
         .env("MOAI_NOW", NOW)
         .env("NO_COLOR", "1");
     cmd
@@ -8465,11 +8860,8 @@ fn only_one_racer_claims_a_row() {
     let id = add(s.path(), &["하나뿐인 일"]);
     let kids: Vec<_> = (0..8)
         .map(|_| {
-            isolated(BIN)
-                .args(["mv", &id, "in_progress", "--from", "todo"])
+            staged_live(&["mv", &id, "in_progress", "--from", "todo"])
                 .current_dir(s.path())
-                .env("MOAI_ACTOR", "테스터 (tester@example.com)")
-                .env("NO_COLOR", "1")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()

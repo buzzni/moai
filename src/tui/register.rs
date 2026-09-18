@@ -276,6 +276,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
     use crate::nav::{Index, Path as NavPath};
     use crate::store::Repo;
@@ -284,23 +285,19 @@ mod tests {
 
     /// 진짜 디렉터리와 사용자 설정 한 벌. **돌리는 사람의 홈·설정은 안 읽는다** — 창은
     /// `App::launched_at` 에서, 쓰기는 층이 읽은 임시 설정 파일에 한다.
-    struct Scratch(PathBuf);
+    ///
+    /// 이 묶음만 쓰는 손놀림. 자리를 만들고 지우는 일은 [`Scratch`] 가 한다.
+    trait Places {
+        fn dir(&self, rel: &str) -> PathBuf;
+        fn project(&self, rel: &str) -> PathBuf;
+        fn config(&self) -> PathBuf;
+        fn register(&self, dirs: &[&Path]) -> PathBuf;
+        fn registered(&self) -> Vec<PathBuf>;
+    }
 
-    impl Scratch {
-        fn new(name: &str) -> Scratch {
-            let dir = std::env::temp_dir().join(format!(
-                "moai-register-{name}-{}-{:?}",
-                std::process::id(),
-                std::thread::current().id()
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            // 임시 자리 위에 링크가 있어도(macOS 의 /tmp) 등록되는 철자와 견주게 푼다.
-            Scratch(std::fs::canonicalize(&dir).unwrap())
-        }
-
+    impl Places for Scratch {
         fn dir(&self, rel: &str) -> PathBuf {
-            let d = self.0.join(rel);
+            let d = self.join(rel);
             std::fs::create_dir_all(&d).unwrap();
             d
         }
@@ -314,7 +311,7 @@ mod tests {
         }
 
         fn config(&self) -> PathBuf {
-            self.0.join("user/config.toml")
+            self.join("user/config.toml")
         }
 
         fn register(&self, dirs: &[&Path]) -> PathBuf {
@@ -327,12 +324,6 @@ mod tests {
 
         fn registered(&self) -> Vec<PathBuf> {
             crate::user_config::read(Some(&self.config())).projects.into_iter().map(|p| p.path).collect()
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 
@@ -372,7 +363,7 @@ mod tests {
         let argos = s.project("work/argos");
         let cfg = s.register(&[&argos]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
-        a.launched_at = Some(s.0.join("work"));
+        a.launched_at = Some(s.join("work"));
         a
     }
 
@@ -384,16 +375,16 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_picker_marks_moai_and_registered_and_hides_dot_directories() {
-        let s = Scratch::new("marks");
+        let s = Scratch::real("marks");
         let mut a = on_layer(&s);
         s.dir("work/mono/apps/a");
         s.dir("work/.cache");
-        std::fs::write(s.0.join("work/README"), "").unwrap();
-        std::os::unix::fs::symlink(s.0.join("work/argos"), s.0.join("work/link")).unwrap();
+        std::fs::write(s.join("work/README"), "").unwrap();
+        std::os::unix::fs::symlink(s.join("work/argos"), s.join("work/link")).unwrap();
 
         a.hit("SPC p a");
         let p = picker(&a);
-        assert_eq!(p.at.dir, s.0.join("work"));
+        assert_eq!(p.at.dir, s.join("work"));
         let names: Vec<&str> = p.at.entries.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, ["argos", "link", "mono"], "파일이 섰거나 점 디렉터리가 안 감춰졌다");
         assert_eq!(p.at.hidden, 1);
@@ -418,10 +409,10 @@ mod tests {
     #[test]
     fn dot_in_an_unreadable_directory_keeps_the_setting_and_the_list_together() {
         use std::os::unix::fs::PermissionsExt;
-        let s = Scratch::new("dotlocked");
+        let s = Scratch::real("dotlocked");
         let mut a = on_layer(&s);
         s.dir("work/.cache");
-        let work = s.0.join("work");
+        let work = s.join("work");
 
         a.hit("SPC p a");
         let before = picker(&a).at.clone();
@@ -454,7 +445,7 @@ mod tests {
     /// 있다. `.moai` 없는 것도 받아 층에 "init 전" 으로 선다. 다시 등록하면 멱등이다.
     #[test]
     fn browsing_into_a_monorepo_registers_its_subdirectories_one_by_one() {
-        let s = Scratch::new("mono");
+        let s = Scratch::real("mono");
         let mut a = on_layer(&s);
         s.dir("work/mono/.git");
         let app_a = s.project("work/mono/apps/a");
@@ -463,14 +454,14 @@ mod tests {
         a.hit("SPC p a");
         point(&mut a, "mono");
         press(&mut a, &[KeyCode::Enter]);
-        assert_eq!(picker(&a).at.dir, s.0.join("work/mono"));
+        assert_eq!(picker(&a).at.dir, s.join("work/mono"));
         assert_eq!(picker(&a).at.hidden, 1, ".git 이 줄로 섰다");
         press(&mut a, &[KeyCode::Enter]);
-        assert_eq!(picker(&a).at.dir, s.0.join("work/mono/apps"));
+        assert_eq!(picker(&a).at.dir, s.join("work/mono/apps"));
         point(&mut a, "a");
         a.key(key(KeyCode::Char('a')));
 
-        assert_eq!(s.registered(), [s.0.join("work/argos"), app_a.clone()]);
+        assert_eq!(s.registered(), [s.join("work/argos"), app_a.clone()]);
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("✓ 등록함")), "{:?}", a.notice);
         let p = picker(&a);
         assert!(p.at.entries.iter().find(|d| d.name == "a").is_some_and(|d| d.registered && d.moai), "창의 표시가 안 고쳐졌다");
@@ -483,7 +474,7 @@ mod tests {
         assert_eq!(a.mode, Mode::Browse);
         assert_eq!(place_at_cursor(&a), app_a);
         a.hit("SPC p a");
-        assert_eq!(picker(&a).at.dir, s.0.join("work/mono/apps"), "마지막으로 본 디렉터리에서 안 열었다");
+        assert_eq!(picker(&a).at.dir, s.join("work/mono/apps"), "마지막으로 본 디렉터리에서 안 열었다");
 
         // `.moai` 없는 디렉터리 — 받고, init 전이라 말하고, 층에 그렇게 선다.
         point(&mut a, "b");
@@ -504,16 +495,16 @@ mod tests {
 
         // 지금 디렉터리(`./`)도 고를 수 있다 — 모노레포 뿌리.
         press(&mut a, &[KeyCode::Backspace, KeyCode::Home]);
-        assert_eq!(picker(&a).at.dir, s.0.join("work/mono"));
+        assert_eq!(picker(&a).at.dir, s.join("work/mono"));
         a.key(key(KeyCode::Char('a')));
-        assert_eq!(s.registered().last(), Some(&s.0.join("work/mono")));
+        assert_eq!(s.registered().last(), Some(&s.join("work/mono")));
     }
 
     /// **해제는 한 번 묻고 `y` 만 뺀다.** 목록에서만 빼고 디렉터리와 `.moai` 는 그대로다.
     /// 다른 키는 그만두고 아무것도 안 쓴다.
     #[test]
     fn unregistering_asks_once_and_only_removes_the_entry() {
-        let s = Scratch::new("unregister");
+        let s = Scratch::real("unregister");
         let one = s.project("work/one");
         let two = s.dir("work/two");
         let cfg = s.register(&[&one, &two]);
@@ -556,10 +547,10 @@ mod tests {
     /// 못 만들어, 줄은 남은 채 "이미 목록에 없다" 고 말하던 자리다.
     #[test]
     fn a_hand_written_spelling_with_dot_dot_is_removed_by_d() {
-        let s = Scratch::new("dotdot");
+        let s = Scratch::real("dotdot");
         s.dir("work/a");
         let b = s.project("work/b");
-        let odd = s.0.join("work/a/../b");
+        let odd = s.join("work/a/../b");
         let cfg = s.register(&[&odd]);
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
         assert_eq!(place_at_cursor(&a), odd);
@@ -573,7 +564,7 @@ mod tests {
     /// 띄운 자리(등록 안 됨) 줄의 `d` 는 묻지 않고 뺄 것이 없다고만 한다.
     #[test]
     fn the_launched_but_unregistered_row_has_nothing_to_unregister() {
-        let s = Scratch::new("launched");
+        let s = Scratch::real("launched");
         let one = s.project("work/one");
         let here = s.project("work/here");
         let cfg = s.register(&[&one]);
@@ -591,7 +582,7 @@ mod tests {
     /// **깨진 설정이면 한 글자도 안 쓰고 창에 선 채 까닭 한 줄.** 창도 층도 그대로 돈다.
     #[test]
     fn a_broken_config_refuses_the_write_and_says_so_in_one_line() {
-        let s = Scratch::new("broken");
+        let s = Scratch::real("broken");
         let cfg = s.config();
         std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
         let broken = "[[project]\npath = \"/a\"\n";
@@ -615,7 +606,7 @@ mod tests {
 
         // 설정 자리를 모르면 창을 안 연다.
         let mut none = App::on_projects(Layer::read(None, None));
-        none.launched_at = Some(s.0.clone());
+        none.launched_at = Some(s.path().to_path_buf());
         none.hit("SPC p a");
         assert_eq!(none.mode, Mode::Browse);
         assert!(none.notice.as_deref().is_some_and(|n| n.contains("자리를 모른다")), "{:?}", none.notice);
@@ -626,11 +617,11 @@ mod tests {
     /// 하면 그 자리에서 층에 줄이 선다.
     #[test]
     fn with_nothing_registered_the_empty_layer_says_how_and_a_registers_the_first() {
-        let s = Scratch::new("empty");
+        let s = Scratch::real("empty");
         let cfg = s.register(&[]);
         let argos = s.project("work/argos");
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
-        a.launched_at = Some(s.0.join("work"));
+        a.launched_at = Some(s.join("work"));
         assert!(a.on_layer() && a.repo.is_none());
 
         let screen = crate::tui::draw::tests::render(&mut a, 80, 12).join("\n");
@@ -653,7 +644,7 @@ mod tests {
     #[test]
     fn without_a_layer_the_first_registration_raises_one_and_stays_in_the_project() {
         use crate::model::{Issue, Kind, Status};
-        let s = Scratch::new("bootstrap");
+        let s = Scratch::real("bootstrap");
         let here = s.project("work/here");
         let lines: String = [("argos-0001", "첫 줄"), ("argos-0002", "둘째 줄")]
             .iter()
@@ -708,13 +699,13 @@ mod tests {
     /// 한 층에 너무 많으면 앞만 세우고 그 밖의 수를 댄다. 없는 디렉터리는 한 줄 까닭이다.
     #[test]
     fn a_huge_directory_is_cut_and_says_how_much() {
-        let s = Scratch::new("huge");
+        let s = Scratch::real("huge");
         for i in 0..SHOWN_MAX + 3 {
-            std::fs::create_dir(s.0.join(format!("d{i:05}"))).unwrap();
+            std::fs::create_dir(s.join(format!("d{i:05}"))).unwrap();
         }
-        let l = list_dir(&s.0, &[], false).unwrap();
+        let l = list_dir(s.path(), &[], false).unwrap();
         assert_eq!((l.entries.len(), l.cut), (SHOWN_MAX, 3));
         assert_eq!(l.entries[0].name, "d00000");
-        assert!(list_dir(&s.0.join("없음"), &[], false).is_err());
+        assert!(list_dir(&s.join("없음"), &[], false).is_err());
     }
 }

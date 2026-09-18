@@ -305,6 +305,13 @@ pub enum Browse {
     Cell(super::view::Field),
     /// 오른쪽 상세 칸을 보이고 숨긴다(moai-ymnu).
     Detail,
+    /// 이 줄을 읽음으로(moai-z9pc). 바로 누르는 `r` 이다 — 가장 자주 하는 것이라.
+    Read,
+    /// 이 프로젝트의 안 읽은 것 전부. **보이는 줄만이 아니다** — 거름망·칸 숨김·지금 디렉터리와
+    /// 무관하게 `App::unread` 가 든 것을 다 적는다(도움말도 "안 읽은 것 전부" 라 댄다).
+    ReadAll,
+    /// 커서가 선 줄이 든 묶음(에픽·마일스톤)의 멤버 전부.
+    ReadGroup,
 }
 
 /// 목록 차례. **조각이라 `query::SortKey` 를 모른다** — `App` 이 둘을 잇는다.
@@ -403,10 +410,11 @@ macro_rules! moves {
 /// SPC 메뉴를 여는 키(moai-7sjm).
 pub const LEADER: Key = Key::plain(' ');
 
-/// **바로 누르는 키는 이동·드나들기·포커스·`/`·Esc 뿐이다**(키 지도 moai-hudg). 그 밖의 동작은
-/// SPC 뒤에 선다 — 한 글자 단축키(`q`·`f`·`n`)를 실수로 누를 때마다 앱이 끝나거나 칸이 열리던
-/// 것이 까닭이다. 바로 끝내는 길은 [`ANYWHERE`] 의 Ctrl-C 하나다. F키와 숨은 별칭(`r`·`m`·F7·
-/// Delete)도 걷었다.
+/// **바로 누르는 키는 이동·드나들기·포커스·`/`·Esc 에, 헤더 번호(`0`~`9`, moai-o133)와 읽음 `r`
+/// (moai-z9pc, 사용자 결정) 뿐이다**(키 지도 moai-hudg). 그 밖의 동작은 SPC 뒤에 선다 — 한 글자
+/// 단축키(`q`·`f`·`n`)를 실수로 누를 때마다 앱이 끝나거나 칸이 열리던 것이 까닭이다. 바로 끝내는
+/// 길은 [`ANYWHERE`] 의 Ctrl-C 하나다. F키와 숨은 별칭(`m`·F7·Delete)도 걷었다 — 옛 `r`(다시 읽기)은
+/// `SPC r` 로 옮겼고, 그 글자는 뒤에 읽음이 받았다.
 ///
 /// **SPC 로 시작하는 줄의 차례가 곧 메뉴의 차례다**([`super::menu::entries`]). 메뉴는 목록을
 /// 따로 적지 않고 이 줄들을 읽는다 — 메뉴에 선 것과 실제로 도는 것이 갈릴 수 없다.
@@ -449,6 +457,9 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Project(8), None, Key::plain('8')),
         row!(Project(9), None, Key::plain('9')),
         row!(Grep, Some("/"), Key::plain('/')),
+        // 읽음은 손이 제일 자주 가는 것이라 **바로 누른다**(moai-z9pc). 옛 `r`(다시 읽기)은
+        // moai-7sjm 이 `SPC r` 로 옮겨 이 자리가 비어 있었다.
+        row!(Read, Some("r"), Key::plain('r')),
         row!(ClearFilter, Some("Esc"), Key::any(C::Esc)),
         // `/` 는 바로 누르는 키이면서 메뉴에도 선다 — 이름은 바로 누르는 쪽 하나만 댄다.
         row!(Grep, None, LEADER, Key::plain('/')),
@@ -490,6 +501,10 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Cell(super::view::Field::Names), Some("SPC c h"), LEADER, Key::plain('c'), Key::plain('h')),
         row!(Cell(super::view::Field::Branch), Some("SPC c w"), LEADER, Key::plain('c'), Key::plain('w')),
         row!(Detail, Some("SPC t d"), LEADER, Key::plain('t'), Key::plain('d')),
+        // **읽음은 `SPC m`(mark) 밑이다**(사용자 결정 2026-09-15) — `SPC r` 은 손에 익은 다시 읽기로
+        // 그대로 둔다. 바로 누르는 `r` 은 그 줄 하나라 여기 없다(아래 바로 누르는 키 줄에 있다).
+        row!(ReadAll, Some("SPC m a"), LEADER, Key::plain('m'), Key::plain('a')),
+        row!(ReadGroup, Some("SPC m r"), LEADER, Key::plain('m'), Key::plain('r')),
     ]
 };
 
@@ -573,6 +588,10 @@ impl Browse {
                 Err(Off::Why(format!("거름망은 프로젝트 안의 줄에 건다 — {} 로 들어가서 건다", label(BROWSE, Enter))))
             }
             Worktree if c.layer => Err(Off::Quiet),
+            // **층에는 읽을 줄이 없다**(moai-j038.vna) — 층의 줄은 프로젝트고 안 읽은 줄은 들어간 프로젝트의
+            // 것이라(`App::climb` 이 비운다), 여기서 서면 `SPC m a` 는 늘 "적을 것이 없다" 로 답하면서 그
+            // 프로젝트에 [NEW] 가 남는다. 눌러도 아무 일이 없는 키는 메뉴에 안 선다(아래 `Raw` 와 같은 까닭).
+            Read | ReadAll | ReadGroup if c.layer => Err(Off::Quiet),
             // 보기는 프로젝트 안의 줄에 건다 — 층에서는 그룹째 메뉴에 안 선다(`menu::live`).
             Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer => Err(Off::Quiet),
             // 상세를 숨기면 갈 칸이 하나뿐이라 Tab 은 아무 일도 안 하고, 원문↔그리기는 상세의
@@ -601,6 +620,9 @@ impl Browse {
             Raw => "원문↔그리기",
             ShowAll => "모두 보이기",
             Detail => "상세 칸",
+            Read => "이 줄을 읽음으로",
+            ReadAll => "안 읽은 것 전부",
+            ReadGroup => "이 묶음의 멤버 전부",
             Sort(o) => o.word(),
             Cell(f) => f.word(),
             _ => self.what(c),
@@ -659,6 +681,7 @@ impl Browse {
             Sort(_) => "정렬",
             Cell(_) => "열",
             Detail => "상세",
+            Read | ReadAll | ReadGroup => "읽음",
         }
     }
 }
@@ -1197,7 +1220,9 @@ mod tests {
             (press(C::Char('d')), Lookup::Unknown),
             (press(C::Delete), Lookup::Unknown),
             (press(C::F(5)), Lookup::Unknown),
-            (press(C::Char('r')), Lookup::Unknown),
+            // `r` 은 읽음이다(moai-z9pc) — 옛 `r`(다시 읽기)은 moai-7sjm 이 `SPC r` 로 옮겼고,
+            // 사용자 결정으로 그 자리는 그대로 두고 이 글자를 읽음에 줬다.
+            (press(C::Char('r')), Lookup::Run(B::Read)),
             (press(C::Char('w')), Lookup::Unknown),
             (press(C::F(3)), Lookup::Unknown),
             (press(C::Char('m')), Lookup::Unknown),
@@ -1224,6 +1249,8 @@ mod tests {
             (vec![sp, ch('f')], B::Filter),
             (vec![sp, ch('n')], B::Jot),
             (vec![sp, ch('r')], B::Reload),
+            (vec![sp, ch('m'), ch('a')], B::ReadAll),
+            (vec![sp, ch('m'), ch('r')], B::ReadGroup),
             (vec![sp, ch('p'), ch('a')], B::Pick),
             (vec![sp, ch('p'), ch('d')], B::Unregister),
             (vec![sp, ch('t'), ch('w')], B::Worktree),

@@ -12,6 +12,7 @@ pub mod init;
 pub mod link;
 pub mod mv;
 pub mod note;
+pub mod read;
 pub mod project;
 pub mod ready;
 pub mod rm;
@@ -173,6 +174,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Note(a) => note::run(&ctx, a),
         Cmd::Link(a) => link::run(&ctx, a),
         Cmd::Defer(a) => defer::run(&ctx, a),
+        Cmd::Read(a) => read::run(&ctx, a),
         Cmd::Ready(w) => ready::run(&ctx, w.worktree),
         Cmd::Status(w) => status::run(&ctx, w.worktree),
         Cmd::Tui(a) => tui::run(&ctx, a),
