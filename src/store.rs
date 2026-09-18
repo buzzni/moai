@@ -533,9 +533,19 @@ pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor
 /// 사용자 설정만 그것을 불렀고, `issues.jsonl` 은 권한 없는 쪽을 불러 풀렸다 (moai-c1s3).
 /// 지키지 않아야 할 쓰기가 없으니 잊을 자리도 없앤다.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
+    let dir = path.parent().ok_or_else(|| Fail::new("경로에 디렉터리가 없다"))?;
+    write_atomic_in(path, bytes, dir)
+}
+
+/// [`write_atomic`] 이되 **임시 파일을 `tmp_dir` 에 둔다**(moai-3akx). 쓰다 죽으면 임시 파일이
+/// 그 자리에 남으므로, 저장소 뿌리의 파일을 쓰는 `init` 은 이미 무시되는 `.moai/*.tmp.*` 자리를
+/// 준다 — 옆자리에 두면 `AGENTS.md.tmp.<pid>` 가 뿌리에 남아 `git add -A` 에 딸려 온다.
+/// `rename` 은 파일시스템을 못 건너므로 `tmp_dir` 은 `path` 와 같은 파일시스템이어야 한다 —
+/// 고르는 쪽이 잰다.
+pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
     let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
     let dir = path.parent().ok_or_else(|| Fail::new("경로에 디렉터리가 없다"))?;
-    let tmp = dir.join(format!(
+    let tmp = tmp_dir.join(format!(
         "{}.tmp.{}",
         path.file_name().and_then(|s| s.to_str()).unwrap_or("out"),
         std::process::id()

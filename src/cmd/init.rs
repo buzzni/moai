@@ -547,7 +547,35 @@ fn plant(path: &Path, text: &str) -> Result<(), String> {
     if path.exists() {
         std::fs::OpenOptions::new().write(true).open(path).map_err(|e| e.to_string())?;
     }
-    crate::store::write_atomic(path, text.as_bytes()).map_err(|e| e.message)
+    crate::store::write_atomic_in(path, text.as_bytes(), &tmp_dir(path)).map_err(|e| e.message)
+}
+
+/// 뿌리 파일을 갈아 끼울 임시 파일의 자리 — **`.moai/`** 다(moai-3akx, 2026-09-18 사용자 결정).
+///
+/// 옆자리에 두면 쓰다 죽은 `init` 이 `AGENTS.md.tmp.<pid>` 를 저장소 뿌리에 남기고, 심는
+/// `.gitignore` 블록은 `.moai/*.tmp.*` 만 덮는다. 규칙을 더하는 길은 버렸다 — 이미 심긴
+/// 저장소마다 "규칙이 빠졌다" 알림이 새로 선다. `.moai/` 는 `init` 이 이 쓰기보다 먼저 세운다.
+///
+/// **다른 파일시스템이면 옆자리로 물러선다** — `rename` 이 `EXDEV` 로 실패해 블록을 못 쓰는 것보다
+/// 찌꺼기가 남을 수 있는 쪽이 낫다. 재지 못하면(`.moai` 가 디렉터리가 아니다) 역시 옆자리다.
+fn tmp_dir(path: &Path) -> std::path::PathBuf {
+    let beside = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let moai = beside.join(".moai");
+    if same_device(&moai, &beside) { moai } else { beside }
+}
+
+#[cfg(unix)]
+fn same_device(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(x), Ok(y)) => x.is_dir() && x.dev() == y.dev(),
+        _ => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn same_device(a: &Path, _: &Path) -> bool {
+    a.is_dir()
 }
 
 /// 이미 있는 줄 `have` 가 넣으려는 줄 `want` 를 **이미 막고 있는가**(moai-mxtb).
@@ -1072,5 +1100,22 @@ mod tests {
             // 줄인 것도 설정이 받는 접두어다.
             crate::config::Config::parse(&format!("prefix = \"{got}\"\n")).unwrap_or_else(|e| panic!("{full} → {got}: {e}"));
         }
+    }
+
+    /// **뿌리 파일의 임시 파일은 `.moai/` 에 선다**(moai-3akx). 옆자리에 서면 쓰다 죽은 `init` 이
+    /// `AGENTS.md.tmp.<pid>` 를 뿌리에 남기고 심는 `.gitignore` 는 그것을 안 덮는다. 그 자리에서 실제로
+    /// 써 보고, 쓴 뒤 `.moai/` 에도 뿌리에도 찌꺼기가 없는지 본다.
+    #[test]
+    fn root_files_are_swapped_through_a_temp_file_in_dot_moai() {
+        let s = crate::scratch::Scratch::new("init-tmp");
+        let agents = s.join("AGENTS.md");
+        assert_eq!(tmp_dir(&agents), s.path(), ".moai 가 없으면 옆자리다");
+        std::fs::create_dir(s.join(".moai")).unwrap();
+        assert_eq!(tmp_dir(&agents), s.join(".moai"));
+        plant(&agents, "글\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&agents).unwrap(), "글\n");
+        let left = |d: &Path| std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name()).collect::<Vec<_>>();
+        assert_eq!(left(&s.join(".moai")), Vec::<std::ffi::OsString>::new());
+        assert_eq!(left(s.path()).len(), 2, "뿌리에는 .moai 와 AGENTS.md 뿐이다: {:?}", left(s.path()));
     }
 }
