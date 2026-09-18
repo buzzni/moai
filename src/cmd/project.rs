@@ -120,7 +120,9 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     let (before, changed) = user_config::update(&config, |doc| {
         let found = doc.projects().0.into_iter().find(|p| spellings.contains(&p.path));
         if found.is_some() {
-            doc.set_hue(&spellings, hue)?;
+            // 거절이면 "손으로 고친다" 는 말에 **어느 파일인지** 붙인다 — 설정의 자리는 환경(`MOAI_CONFIG`·XDG)
+            // 이 골라 사람이 모를 수 있다. 깨진 설정을 대는 `update` 의 거절문과 같은 모양이다.
+            doc.set_hue(&spellings, hue).map_err(|e| Fail::coded(format!("{}: {e}", config.display()), e.code))?;
         }
         // 바뀌었는지는 **문서가** 안다 — 앞뒤 색을 견주면 틀린 값(`red` → auto)을 지운 쓰기가
         // "이미 그렇다" 로 선다. 읽기는 틀린 값을 `None` 으로 접기 때문이다.
