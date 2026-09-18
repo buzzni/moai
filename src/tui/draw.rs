@@ -871,26 +871,30 @@ fn prompt_room(avail: usize, error: usize) -> (usize, usize) {
 fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 테두리 두 칸을 뺀 안쪽 폭. 좁은 창에서도 음수가 되지 않게 막는다.
     let inner = at.width.saturating_sub(2) as usize;
+    // **셈은 줄마다 한 번만 센다** — 머리를 걷는 셈(`Head::of`)과 줄(`row_line`)이 같은 값을 본다.
+    // 셈(`Index::progress`)은 이슈 전부를 훑는데 목록은 프레임마다 그려지므로, 둘이 따로 세면 좁은
+    // 창에서 묶음 줄마다 두세 번 돈다.
+    let tallies: Vec<String> = rows.iter().map(|r| tally_of(app, r, app.fields)).collect();
     // **오른쪽 열을 걷는 것은 목록 전체가 함께 정한다**(moai-g7p8 리뷰). 줄마다 정하면 머리글이
     // 긴 줄(`⎇ 브랜치`·`p10`)만 날짜를 걷어 같은 폭에서 열이 들쭉날쭉 선다 — 고정 폭의 까닭이
     // 사라진다. 제일 많이 걷힌 줄의 열에 맞춘다(걷는 차례가 하나라 그 열은 모든 줄에 들어간다).
     // **왼쪽 열의 폭은 목록이 정한다**(moai-3fnf) — 줄마다 제 길이로 서면 그 뒤가 밀려 열 이름 줄이
     // 어느 줄과도 안 맞는다.
-    let cols = Head::of(app, rows);
+    let cols = Head::of(app, rows, &tallies, inner, app.fields);
     let (mut items, kept): (Vec<ListItem>, Vec<super::view::Fields>) = rows
         .iter()
-        .map(|r| {
-            let (line, kept) = row_line(app, r, inner, app.fields, cols);
+        .zip(&tallies)
+        .map(|(r, t)| {
+            let (line, kept) = row_line(app, r, t, inner, app.fields, cols);
             (ListItem::new(line), kept)
         })
         .unzip();
     let common = kept.iter().copied().fold(app.fields, super::view::Fields::both);
     // **덜 걷힌 줄만 다시 그린다**(moai-2kyl 단계 리뷰) — 이미 그만큼 걷힌 줄은 같은 열로 다시 그려도 같은
-    // 줄이다. 대개는 모든 줄이 같은 만큼 걷히므로, 통째로 다시 그리면 좁은 창에서 줄마다 셈
-    // (`Index::progress`)이 프레임마다 두 번 돈다.
-    for ((item, r), k) in items.iter_mut().zip(rows).zip(&kept) {
+    // 줄이다. 대개는 모든 줄이 같은 만큼 걷히므로 통째로 다시 그리면 줄을 프레임마다 두 번 짓는다.
+    for (((item, r), t), k) in items.iter_mut().zip(rows).zip(&tallies).zip(&kept) {
         if *k != common {
-            *item = ListItem::new(row_line(app, r, inner, common, cols).0);
+            *item = ListItem::new(row_line(app, r, t, inner, common, cols).0);
         }
     }
 
@@ -1012,6 +1016,7 @@ fn scroll_mark(f: &mut Frame, s: &Scroll, at: Rect, hint: &str, focused: bool) {
 fn row_line<'a>(
     app: &App,
     r: &Row,
+    tally: &str,
     budget: usize,
     fields: super::view::Fields,
     cols: Head,
@@ -1039,13 +1044,15 @@ fn row_line<'a>(
     // 어긋나고, 넘친 줄은 위젯이 말없이 잘라 내 **잘렸다는 `…` 마저** 사라진다.
     // id·우선순위는 켜 둔 것만 선다(`SPC c`, moai-g7p8). 칸 글리프는 늘 선다.
     let mut head = Vec::new();
-    if fields.shows(Field::Id) {
+    // **폭 0 은 걷힌 열이다**(moai-wilg) — 좁을 때 무엇이 서는지는 목록이 한 번 정하고(`Head::of`),
+    // 줄과 이름 줄이 그 셈을 함께 본다. 줄이 제 나름대로 다시 정하면 둘이 갈라진다.
+    if fields.shows(Field::Id) && cols.id > 0 {
         // **id 는 폭을 맞춘다**(moai-3fnf) — 줄마다 길이가 다르면 그 뒤의 열이 줄마다 밀려, 맨 위의
         // 열 이름 줄이 어느 줄과도 안 맞는다. 폭은 목록이 정한다(`Head::of`).
         head.push(Span::styled(pad(&i.id, cols.id), dim()));
         head.push(Span::raw("  "));
     }
-    if fields.shows(Field::Priority) {
+    if fields.shows(Field::Priority) && cols.priority > 0 {
         // **우선순위도 폭을 맞춘다**(moai-6bc0 단계 리뷰) — `p10` 이 한 줄이라도 있으면 그 줄만 칸·제목이
         // 한 칸 밀려, id 를 맞춘 까닭이 바로 옆에서 무너진다.
         head.push(Span::styled(pad(&format!("p{}", i.priority()), cols.priority), priority(i.priority())));
@@ -1062,7 +1069,7 @@ fn row_line<'a>(
     // 줄 전체를 칠하지 않는다: 여러 줄이 안 읽은 상태로 서면 목록이 통째로 번쩍인다. 뜻은 낱말이
     // 지므로 색 없는 터미널에서도 `[NEW]` 가 읽힌다.
     if app.unread.contains(&i.id) {
-        head.push(Span::styled("[NEW]", Style::new().fg(Color::Red).bg(Color::LightYellow)));
+        head.push(Span::styled(NEW_MARK, Style::new().fg(Color::Red).bg(Color::LightYellow)));
         head.push(Span::raw(" "));
     }
     // **그 이슈를 이름에 단 옆 가지**가 있으면 제목 **앞에** `⎇ <가지>`(moai-nxt4, 사용자 결정) —
@@ -1083,24 +1090,16 @@ fn row_line<'a>(
     // 닫힌 줄의 이름도 그대로 센다. 거기서도 풀던 판은, 워크트리 안에서 줄을 닫고 그 자리에서
     // `--parent` 자식을 이어 하는 산 일을 "자리 없다" 로 세워 감독이 거두게 했다. 산 일을 잘못
     // 거두는 쪽이, 치우지 않은 워크트리가 자식을 쥐는 쪽(규약대로 치우면 풀린다)보다 비싸다.
-    if fields.shows(Field::Branch)
-        && app.column(at) != crate::config::DONE
-        && let Some(b) = app.origin.working(&i.id)
-    {
-        let name = crate::text::clip_front(b, BRANCH_CAP);
-        head.push(Span::styled(format!("{} {name}", style::BRANCH_GLYPH), branch()));
+    if let Some(mark) = branch_mark(app, at, fields) {
+        head.push(Span::styled(mark, branch()));
         head.push(Span::raw(" "));
     }
     // 커서 자리 + 머리글 폭. **`CURSOR` 에서 잰다** — 숫자를 손으로 적으면
     // 글리프를 바꾼 날 제목 몫이 한두 칸 넉넉해지고, 넘친 줄은 위젯이 말없이
     // 잘라 내 잘렸다는 `…` 마저 사라진다.
     let mut head_w = spans_width(&head);
-    // 셈은 **제목보다 먼저 자리를 얻는다** — 긴 제목에 밀려 잘리면 진척을 말하는 것이
-    // 사라진다. 자는 상세 롤업과 같다(`Index::progress`).
-    let tally = match (fields.shows(Field::Tally) && is_dir).then(|| app.index.progress(&app.issues, &deeper(app, e))) {
-        Some(p) if p.percent().is_some() => format!("{}/{}", p.done, p.work.len()),
-        _ => String::new(),
-    };
+    // 셈(`tally`, [`tally_of`])은 **제목보다 먼저 자리를 얻는다** — 긴 제목에 밀려 잘리면 진척을
+    // 말하는 것이 사라진다.
     // **오른쪽 열**(moai-g7p8) — 태그·담당·생성·수정. 줄마다 폭을 고정해 여러 줄을 한 줄로 훑어
     // 내려갈 수 있게 한다(셈을 오른쪽 정렬한 까닭과 같다). 담당·날짜가 없으면 `—` 로, 태그가 없으면
     // 빈칸으로 자리를 지킨다 — 태그 없는 줄이 흔해 `—` 가 줄마다 서면 눈이 거기 걸린다.
@@ -1155,7 +1154,12 @@ fn row_line<'a>(
     // **좁으면 스피너부터 걷는다**(moai-q59j). 목록 줄의 글리프는 두 칸(`⠋▸`·` ·`)인데, 제목
     // 한 글자와 디렉터리 `/` 가 들어갈 자리가 없으면 멈춘 글리프 한 칸만 남긴다 — 뜻은 글리프가
     // 지고 움직임은 곁들이라, 잘려도 되는 것부터 뺀다. 안 빼면 `/` 가 잘려 폴더와 파일이 안 갈린다.
-    if crate::text::width(CURSOR) + head_w + crate::text::width(&right) + 2 > budget {
+    //
+    // **걷을지는 목록이 한 번 정한다**(`Head::still`, moai-wilg 에픽 리뷰). 줄마다 정하던 때는 셈이
+    // 붙은 묶음 줄이나 `[NEW]`·`⎇ <가지>` 가 붙은 줄만 제 폭에 걸려 스피너를 걷어, 그 줄만 칸
+    // 글리프와 제목이 한 칸 당겨졌다 — 머리가 딱 들어가는 폭마다 그랬다(머리를 걷는 셈이 걷힌 글리프
+    // 한 칸을 전제하므로). 이름 줄의 `S` 도 같은 셈을 본다.
+    if cols.still {
         let still = style::glyph(app.column(at)).to_string();
         head_w = head_w - crate::text::width(&head[glyph_at].content) + crate::text::width(&still);
         head[glyph_at] = Span::styled(still, status(app.column(at)));
@@ -1175,7 +1179,7 @@ fn row_line<'a>(
     let mut spans = head;
     // id 는 칠하면 조각이 갈라진다 — 머리글의 자리(`glyph_at`)를 다 쓴 **뒤에** 편다. **첫 조각이 id 인 것은
     // id 를 켰을 때뿐이다**(moai-2kyl 단계 리뷰) — 끈 채 칠하면 우선순위 `p1` 의 글자를 찾은 것으로 칠한다.
-    if fields.shows(Field::Id) {
+    if fields.shows(Field::Id) && cols.id > 0 {
         let id = spans.remove(0);
         spans.splice(0..0, mark(vec![id], in_id));
     }
@@ -1200,6 +1204,39 @@ fn row_line<'a>(
     (Line::from(spans), kept)
 }
 
+/// 줄의 `⎇ <가지>` 표시 — 서지 않으면 `None`. 줄(`row_line`)과 좁을 때 머리를 걷는 셈(`Head::of`)이
+/// **같은 갈림**을 봐야 한다: 셈이 따로 갈리면 가지가 붙은 줄에서만 셈이 말없이 잘린다.
+fn branch_mark(app: &App, at: usize, fields: super::view::Fields) -> Option<String> {
+    use super::view::Field;
+    if !fields.shows(Field::Branch) || app.column(at) == crate::config::DONE {
+        return None;
+    }
+    let b = app.origin.working(&app.issues[at].id)?;
+    Some(format!("{} {}", style::BRANCH_GLYPH, crate::text::clip_front(b, BRANCH_CAP)))
+}
+
+/// 묶음 줄의 끝난/일 셈(`n/n`) — 셈을 껐거나, 묶음이 아니거나, 셀 일이 없으면 빈 글이다. 자는 상세
+/// 롤업과 같다(`Index::progress`).
+fn tally_of(app: &App, r: &Row, fields: super::view::Fields) -> String {
+    let Row::Item(e @ Entry::Dir { at: Some(_), .. }) = r else { return String::new() };
+    if !fields.shows(super::view::Field::Tally) {
+        return String::new();
+    }
+    let p = app.index.progress(&app.issues, &deeper(app, e));
+    if p.percent().is_some() { format!("{}/{}", p.done, p.work.len()) } else { String::new() }
+}
+
+/// 안 읽은 줄의 표시(moai-z9pc). 줄(`row_line`)이 세우는 글과 머리를 걷는 셈(`lead_extras`)이 재는 글이
+/// **한 글**이어야 한다 — 따로 적으면 한쪽만 바뀐 날 안 읽은 줄에서 셈이 다시 말없이 잘린다.
+const NEW_MARK: &str = "[NEW]";
+
+/// 제목 앞, 머리(id·우선순위)와 칸 글리프 **뒤에** 줄마다 붙는 것의 폭 — `[NEW]` 와 `⎇ <가지>`.
+/// 이것들은 좁아도 안 걷히므로(사용자 결정) 머리를 걷는 셈이 함께 재야 셈이 남는다.
+fn lead_extras(app: &App, at: usize, fields: super::view::Fields) -> usize {
+    let new = if app.unread.contains(&app.issues[at].id) { crate::text::width(NEW_MARK) + 1 } else { 0 };
+    new + branch_mark(app, at, fields).map_or(0, |m| crate::text::width(&m) + 1)
+}
+
 /// 목록 맨 위의 **열 이름 줄**(moai-3fnf, 사용자 결정 2026-09-15) — 켠 열만, 줄과 **같은 폭·같은
 /// 차례**로 선다. 이름은 짧은 영어다: 값보다 눈에 안 띄고, 설정에 적는 필드 이름(`id`·`priority`)과
 /// 이어진다. 흐리게 칠하는 것도 같은 까닭이다 — 뜻은 아래 줄의 값이 진다.
@@ -1219,7 +1256,9 @@ fn names_line<'a>(fields: super::view::Fields, cols: Head, dirs: bool, budget: u
         left.push_str(&pad("P", cols.priority));
         left.push(' ');
     }
-    left.push_str("S  ");
+    // 칸 글리프는 두 칸(`⠋▸`·` ·`)이고 좁아서 스피너를 걷으면 한 칸이다 — 걷을지는 목록이 한 번
+    // 정하므로(`Head::still`) 이름 줄도 그 셈을 따라야 `TITLE` 이 제목 위에 선다.
+    left.push_str(if cols.still { "S " } else { "S  " });
     let mut right = String::new();
     for (f, name, w) in RIGHT {
         if fields.shows(f) {
@@ -1244,13 +1283,17 @@ fn names_line<'a>(fields: super::view::Fields, cols: Head, dirs: bool, budget: u
     }
     // **`TITLE` 은 제목 몫에 들어갈 때만 적는다**(moai-csvw 에픽 리뷰). 줄은 좁으면 제목부터 줄이고
     // 셈·오른쪽 열이 먼저 자리를 얻는데, 이름 줄이 다섯 칸을 늘 세우면 그만큼 넘쳐 `Paragraph` 가
-    // 오른쪽 끝의 `n/n` 을 말없이 자르고(폭 훑기 시험의 49–57), 스피너가 걷힌 줄에서는 제목보다 한
-    // 칸 오른쪽에 선다(49–51). 그 몫이 다섯 칸이 안 되면 줄의 제목도 `…/`·`아…/` 뿐이라 이름을
-    // 걷어도 잃는 것이 없다.
-    if crate::text::width(&left) + crate::text::width("TITLE") + crate::text::width(&right) <= budget {
+    // 오른쪽 끝의 `n/n` 을 말없이 자른다(폭 훑기 시험의 49–57). 그 몫이 다섯 칸이 안 되면 줄의
+    // 제목도 `…/`·`아…/` 뿐이라 이름을 걷어도 잃는 것이 없다.
+    let titled = crate::text::width(&left) + crate::text::width("TITLE") + crate::text::width(&right) <= budget;
+    if titled {
         left.push_str("TITLE");
     }
-    let gap = budget.saturating_sub(crate::text::width(&left) + crate::text::width(&right));
+    // 묶음 줄은 제목 몫이 없어도 디렉터리 `/` 한 칸은 세운다(`row_line`) — 이름 줄도 그 칸을 비워야, 줄이
+    // 최소한도 못 담아 넘치는 폭에서 둘이 같은 자리에서 잘린다. 안 비우면 줄의 셈은 `1/` 로 잘리는데
+    // 이름만 `n/n` 으로 온전히 선다.
+    let slot = usize::from(dirs && !titled);
+    let gap = budget.saturating_sub(crate::text::width(&left) + crate::text::width(&right)).max(slot);
     Line::from(Span::styled(format!("{left}{}{right}", " ".repeat(gap)), dim()))
 }
 
@@ -1258,25 +1301,59 @@ fn names_line<'a>(fields: super::view::Fields, cols: Head, dirs: bool, budget: u
 /// 뒤의 칸 글리프·제목이 줄마다 밀려, 맨 위의 열 이름 줄이 어느 줄과도 안 맞는다.
 ///
 /// **보이는 줄이 아니라 이 디렉터리의 줄 전부로 잰다** — 굴릴 때마다 열이 들썩이지 않아야 한다.
+///
+/// 폭 0 은 좁아서 걷힌 열이고, `still` 은 좁아서 스피너를 걷은 목록이다 — 둘 다 목록이 한 번 정해
+/// 줄(`row_line`)과 이름 줄(`names_line`)이 함께 본다.
 #[derive(Clone, Copy, Default)]
 struct Head {
     id: usize,
     priority: usize,
+    still: bool,
 }
 
 impl Head {
-    fn of(app: &App, rows: &[Row]) -> Head {
+    /// `tallies` 는 `rows` 와 같은 차례의 셈([`tally_of`])이다.
+    fn of(app: &App, rows: &[Row], tallies: &[String], budget: usize, fields: super::view::Fields) -> Head {
+        use super::view::Field;
         let mut w = Head::default();
-        for at in rows.iter().filter_map(|r| match r {
-            Row::Item(e) => e.at(),
-            Row::Up | Row::Project(_) => None,
-        }) {
+        // 머리 뒤에 줄마다 붙어 안 걷히는 것(`[NEW]`·`⎇ <가지>`, 셈과 그 앞 두 칸)의 가장 긴 폭.
+        let mut tail = 0;
+        for (r, tally) in rows.iter().zip(tallies) {
+            let Row::Item(e) = r else { continue };
+            let Some(at) = e.at() else { continue };
             let i = &app.issues[at];
             w.id = w.id.max(crate::text::width(&i.id));
             // `p` 한 칸 + 숫자. 글자로 짓지 않는다 — 줄마다 한 번씩 버리는 `String` 이다.
             let p = i.priority();
             w.priority = w.priority.max(1 + if p >= 100 { 3 } else if p >= 10 { 2 } else { 1 });
+            let tally = if tally.is_empty() { 0 } else { 2 + crate::text::width(tally) };
+            tail = tail.max(lead_extras(app, at, fields) + tally);
         }
+        // **좁으면 우선순위 → id 차례로 걷는다**(moai-wilg, 사용자 결정 2026-09-18). 오른쪽 열과
+        // 스피너는 걷을 줄 알았지만 머리는 아무리 좁아도 안 걷혀, 폭 40 의 에픽 줄에서 진척 셈이
+        // 자리 없이 말없이 잘렸다. 좁은 창은 대개 목록을 훑는 자리고 id 는 옆 상세 칸에 늘 있다.
+        //
+        // **목록 전체가 한 번 정한다** — 줄마다 정하면 머리글이 긴 줄만 걷혀 열이 들쭉날쭉 서고,
+        // 맨 위의 열 이름 줄(`names_line`)은 어느 줄과도 안 맞는다. 이름 줄은 `cols` 의 0 을 보고
+        // 같이 걷힌다 — 그것이 줄과 이름 줄이 **한 셈**을 쓴다는 뜻이다(moai-dutv).
+        //
+        // 스피너는 머리보다 먼저 걷히므로 이 셈은 **멈춘 글리프 한 칸**으로 잰다.
+        let need = |w: &Head| {
+            let head = if fields.shows(Field::Id) && w.id > 0 { w.id + 2 } else { 0 }
+                + if fields.shows(Field::Priority) && w.priority > 0 { w.priority + 1 } else { 0 };
+            // 멈춘 글리프 한 칸 + 빈칸, 제목 한 글자와 디렉터리 `/`, 그리고 줄마다 붙는 것.
+            crate::text::width(CURSOR) + head + 2 + 2 + tail
+        };
+        if need(&w) > budget {
+            w.priority = 0;
+        }
+        if need(&w) > budget {
+            w.id = 0;
+        }
+        // **스피너도 목록이 한 번 걷는다** — 남은 머리로 도는 글리프 한 칸이 더 안 드는 줄이 하나라도
+        // 있으면 모든 줄이 걷는다. 줄마다 정하면 셈·`[NEW]` 가 붙은 줄만 칸 글리프와 제목이 한 칸
+        // 당겨진다(`row_line`).
+        w.still = need(&w) + 1 > budget;
         w
     }
 }
@@ -2483,6 +2560,154 @@ pub(super) mod tests {
         assert!(seen(&mut a).iter().any(|l| l.contains("TITLE")), "다시 눌러도 안 돌아왔다");
     }
 
+    /// **좁아지면 우선순위 → id 차례로 걷고, 셈은 끝까지 남는다**(moai-wilg, 사용자 결정 2026-09-18).
+    ///
+    /// 오른쪽 열과 스피너는 걷을 줄 알았지만 `id`·우선순위 머리는 아무리 좁아도 안 걷혔다. 그래서
+    /// 폭 40 의 에픽 줄은 `> argos-0001  p1 ▸ /` 로 서고 진척 셈 `1/2` 이 자리 없이 **말없이** 잘렸다 —
+    /// 줄이 무엇인지도, 얼마나 됐는지도 안 남는다. 좁은 창은 대개 목록을 훑는 자리고 id 는 옆 상세
+    /// 칸에 늘 있으니, 머리가 먼저 양보한다.
+    ///
+    /// 폭을 하나도 안 건너뛴다 — 걷는 자리는 폭 셈이 갈리는 몇 칸 사이에 산다(moai-csvw 에서 배웠다).
+    #[test]
+    fn a_narrow_list_drops_the_head_before_the_tally() {
+        let mut a = as_opened(issues());
+        let mut seen = (0usize, 0usize);
+        for width in 20u16..=200 {
+            let lines: Vec<String> = render(&mut a, width, 16)
+                .into_iter()
+                .map(|l| l.split('│').next().unwrap_or_default().to_string())
+                .collect();
+            let screen = lines.join("\n");
+            // **칸 안쪽이 최소한도 못 담는 폭은 볼 것이 없다** — 커서 두 칸, 멈춘 글리프와 빈칸, 디렉터리
+            // `/` 와 제목 한 글자, 셈 앞 두 칸과 `1/2`. 폭 20 의 목록 칸은 안쪽이 8칸이라, 머리를 다 걷어도 이것이 안 든다.
+            // 터미널 폭으로 가르지 않고 **그려진 칸을 잰다** — 상세 칸과 나누는 비율이 바뀌어도 맞다.
+            let inner = lines
+                .iter()
+                .find(|l| l.starts_with('┏'))
+                .and_then(|l| l.find('┓').map(|end| crate::text::width(&l[..end]).saturating_sub(1)))
+                .unwrap_or_else(|| panic!("@{width} 목록 칸의 테두리가 없다\n{screen}"));
+            // 제목 한 글자(`…`)도 넣는다 — 사용자 결정이 지키라고 한 것이 셈·글리프·제목 한 글자다.
+            let least = crate::text::width(CURSOR) + 2 + 1 + 1 + 2 + "1/2".len();
+            if inner < least {
+                continue;
+            }
+            let epic = lines
+                .iter()
+                .find(|l| l.contains("1/2"))
+                .unwrap_or_else(|| panic!("@{width} 에픽 줄의 셈이 사라졌다(칸 안쪽 {inner})\n{screen}"));
+            // 셈이 남았으면 그 줄이 무엇인지도 남아야 한다 — 칸 글리프와 제목 한 글자.
+            assert!(
+                epic.contains('▸') || epic.contains('⠋'),
+                "@{width} 셈은 남았는데 칸 글리프가 걷혔다\n{epic:?}"
+            );
+            assert!(epic.contains('…') || epic.contains('아'), "@{width} 제목이 한 글자도 안 남았다\n{epic:?}");
+            // 머리는 좁아지는 차례대로 걷힌다 — 우선순위가 먼저, id 가 나중.
+            let (id, prio) = (epic.contains("argos-"), epic.contains("p1"));
+            assert!(id || !prio, "@{width} id 가 우선순위보다 먼저 걷혔다\n{epic:?}");
+            seen = (seen.0 + usize::from(!prio), seen.1 + usize::from(!id));
+        }
+        assert!(seen.0 > 0 && seen.1 > 0, "좁혀도 머리가 안 걷혔다 — 우선순위 {}, id {}", seen.0, seen.1);
+    }
+
+    /// **스피너도 목록이 한 번 걷는다**(moai-wilg 에픽 리뷰). 줄마다 정하던 때는 셈 `1/2` 가 붙은
+    /// 에픽 줄이나 `[NEW]` 가 붙은 줄만 제 폭에 걸려 스피너를 걷어, 그 줄만 칸 글리프와 제목이 한 칸
+    /// 당겨졌다 — 머리를 걷는 셈(`Head::of`)이 걷힌 글리프 한 칸을 전제하므로 머리가 딱 들어가는
+    /// 폭마다 그랬다(에픽은 45·46·50·51, `[NEW]` 는 47·48·52·53).
+    ///
+    /// 폭 훑기 시험의 뿌리에는 에픽 줄 하나뿐이라 어긋날 짝이 없다 — 셈 없는 잎 둘과 안 읽은 줄을
+    /// 함께 세운다. 폭은 하나도 안 건너뛴다.
+    #[test]
+    fn every_row_keeps_one_glyph_column_at_every_width() {
+        let mut is = issues();
+        for (id, title, p) in [("argos-0002", "느슨한 일 제목이 꽤 길다", 2), ("argos-0005", "둘째 느슨한 일", 3)] {
+            let mut i = Issue::new(id.into(), title.into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+            i.priority = Some(p);
+            is.push(i);
+        }
+        // 셋째 줄에 붙는 것 — 없음, `[NEW]`, `⎇ <가지>`. 가지 표시는 길어서 그 줄만 스피너를 못 담는
+        // 폭에서도 다른 줄의 제목 몫은 넉넉해 `TITLE` 이 선다 — 이름 줄의 `S` 가 한 칸인지 두 칸인지가
+        // 거기서 갈린다.
+        let mut titled = [0; 3];
+        for (extra, seen) in titled.iter_mut().enumerate() {
+            for width in 20u16..=200 {
+                let mut a = as_opened(is.clone());
+                match extra {
+                    1 => {
+                        a.unread.insert("argos-0005".into());
+                    }
+                    2 => {
+                        let (shown, origin) = crate::worktree::overlay(
+                            a.issues.clone(),
+                            vec![crate::worktree::Side::new("worktree-argos-0005", "/wt/argos-0005", vec![])],
+                        );
+                        a.adopt(shown);
+                        a = a.overlaid(origin, Vec::new(), Vec::new());
+                    }
+                    _ => {}
+                }
+                let lines: Vec<String> = render(&mut a, width, 16)
+                    .into_iter()
+                    .map(|l| l.split('│').next().unwrap_or_default().to_string())
+                    .collect();
+                let screen = lines.join("\n");
+                let top = lines.iter().position(|l| l.starts_with('┏')).unwrap_or_else(|| panic!("@{width} 목록 칸이 없다\n{screen}"));
+                let names = &lines[top + 1];
+                let rows: Vec<&String> = lines[top + 2..]
+                    .iter()
+                    .take_while(|l| !l.starts_with('┗'))
+                    .filter(|l| l.trim_matches(|c: char| c == '┃' || c.is_whitespace()).chars().count() > 0)
+                    .collect();
+                assert_eq!(rows.len(), 3, "@{width} 줄이 셋이 아니다\n{screen}");
+                // 칸의 **멈춘 글리프**가 선 칸 — 도는 줄은 그 앞에 스피너가, 안 도는 줄은 빈칸이 한 칸 선다.
+                let glyph = |l: &str| l.find(|c: char| "·▸?✓○".contains(c)).map(|at| crate::text::width(&l[..at]));
+                let at: std::collections::BTreeSet<usize> =
+                    rows.iter().map(|r| glyph(r).unwrap_or_else(|| panic!("@{width} 칸 글리프가 없다 {r:?}\n{screen}"))).collect();
+                assert_eq!(at.len(), 1, "@{width} 칸 글리프가 줄마다 다른 칸에 섰다(붙는 것 {extra})\n{names}\n{screen}");
+                // 제목은 글리프 뒤 빈칸 다음 — `TITLE` 이 섰으면 거기 선다(붙는 것 없는 줄의 제목이다).
+                if let Some(t) = names.find("TITLE") {
+                    *seen += 1;
+                    let g = at.first().copied().unwrap();
+                    assert_eq!(crate::text::width(&names[..t]), g + 2, "@{width} TITLE 이 제목과 다른 칸에 섰다(붙는 것 {extra})\n{names:?}\n{screen}");
+                }
+            }
+        }
+        assert!(titled.iter().all(|&n| n > 0), "TITLE 을 한 번도 견주지 못한 갈래가 있다 {titled:?} — 훑기가 헛돈다");
+    }
+
+    /// **머리 뒤에 붙는 것도 머리를 걷는 셈에 든다**(moai-wilg 리뷰). `[NEW]`·`⎇ <가지>` 는 좁아도
+    /// 안 걷히는데, 머리를 걷는 셈(`Head::of`)이 그것을 모르면 안 읽은 에픽 줄에서만 머리가 남아 셈
+    /// `1/2` 가 다시 말없이 잘린다.
+    #[test]
+    fn a_narrow_unread_epic_still_keeps_its_tally() {
+        let mut a = as_opened(issues());
+        let epic = a.issues.iter().find(|i| i.kind == crate::model::Kind::Epic).map(|i| i.id.clone()).unwrap();
+        // **견준 폭을 센다** — `[NEW]` 가 안 선 폭은 건너뛰므로, 표시가 어디서도 안 서면 이 시험은 아무것도
+        // 안 보고 초록이다.
+        let mut compared = 0;
+        for width in 20u16..=200 {
+            a.unread.insert(epic.clone());
+            let lines: Vec<String> = render(&mut a, width, 16)
+                .into_iter()
+                .map(|l| l.split('│').next().unwrap_or_default().to_string())
+                .collect();
+            let Some(inner) = lines
+                .iter()
+                .find(|l| l.starts_with('┏'))
+                .and_then(|l| l.find('┓').map(|end| crate::text::width(&l[..end]).saturating_sub(1)))
+            else {
+                continue;
+            };
+            let least = crate::text::width(CURSOR) + 2 + crate::text::width("[NEW]") + 1 + 2 + 2 + "1/2".len();
+            if inner < least || !lines.iter().any(|l| l.contains("[NEW]")) {
+                continue;
+            }
+            let screen = lines.join("\n");
+            assert!(lines.iter().any(|l| l.contains("[NEW]") && l.contains("1/2")), "@{width} 안 읽은 에픽 줄의 셈이 잘렸다(칸 안쪽 {inner})\n{screen}");
+            compared += 1;
+        }
+        assert!(compared > 0, "안 읽은 에픽 줄을 한 번도 견주지 못했다 — 훑기가 헛돈다");
+    }
+
     /// **열 이름 줄을 켠 채로 폭을 훑는다**(moai-ehmj). 그림 시험의 바탕(`every`)은 이 줄을 꺼
     /// 두고 도는데 — 줄 하나를 먹어 좁은 창 시험의 자리 셈이 다 밀려서다 — 그러면 이름 줄의 폭
     /// 셈(`names_line`)은 폭 120 한 군데서만 보인다. 그 줄은 제 `clip` 없이 `Paragraph` 가
@@ -2530,16 +2755,28 @@ pub(super) mod tests {
                 .map(|l| l.split('│').next().unwrap_or_default().to_string())
                 .collect();
             let screen = lines.join("\n");
-            // 이름 줄은 **첫 목록 줄 바로 위**다. `TITLE` 로 찾지 않는다 — 좁은 폭에서 `Paragraph` 가
-            // 그 이름을 잘라 내면 이름 줄을 못 찾은 것으로 읽혀, 이 시험이 보려던 폭을 말없이 건너뛴다.
-            let first_at = lines.iter().position(|l| l.contains("argos-")).unwrap_or_else(|| panic!("@{width} 목록 줄이 없다\n{screen}"));
-            let names = &lines[first_at.checked_sub(1).unwrap_or_else(|| panic!("@{width} 목록 줄 위에 줄이 없다\n{screen}"))];
-            assert!(col(names, "id").is_some(), "@{width} 열 이름 줄이 안 섰다\n{screen}");
-            let rows: Vec<&String> = lines.iter().filter(|l| l.contains("argos-")).collect();
-            let first = rows[0];
-            let id = first.find("argos-").unwrap();
-            let id_col = crate::text::width(&first[..id]);
-            assert_eq!(col(names, "id"), Some(id_col), "@{width} id 이름이 값과 다른 칸에 섰다\n{names:?}\n{first:?}");
+            // 이름 줄은 **목록 칸 윗테두리 바로 아래**, 목록 줄은 그 밑부터 아랫테두리 전까지다. id 글자로
+            // 찾지 않는다 — 좁으면 id 도 걷힌다(moai-wilg). `TITLE` 로도 찾지 않는다 — 좁은 폭에서
+            // `Paragraph` 가 그 이름을 잘라 내면 이름 줄을 못 찾은 것으로 읽혀 그 폭을 말없이 건너뛴다.
+            let top = lines.iter().position(|l| l.starts_with('┏')).unwrap_or_else(|| panic!("@{width} 목록 칸이 없다\n{screen}"));
+            let names = &lines[top + 1];
+            // 커서(`>`)가 있으면 이름 줄이 아니라 첫 목록 줄을 잡은 것이다 — 커서는 첫 줄에 선다.
+            assert!(names.contains('S') && !names.contains(CURSOR.trim()), "@{width} 열 이름 줄이 안 섰다\n{screen}");
+            let rows: Vec<&String> = lines[top + 2..]
+                .iter()
+                .take_while(|l| !l.starts_with('┗'))
+                .filter(|l| l.trim_matches(|c: char| c == '┃' || c.is_whitespace()).chars().count() > 0)
+                .collect();
+            let first = *rows.first().unwrap_or_else(|| panic!("@{width} 목록 줄이 없다\n{screen}"));
+            // 머리 열은 **함께 서고 함께 걷힌다** — 이름만 남거나 값만 남으면 그 폭에서 둘이 다른 셈을 쓴 것이다.
+            for (name, value) in [("id", "argos-"), ("P", "p1")] {
+                match (col(names, name), col(first, value)) {
+                    (Some(n), Some(v)) => assert_eq!(n, v, "@{width} {name} 이 값과 다른 칸에 섰다\n{names:?}\n{first:?}"),
+                    (Some(_), None) => panic!("@{width} {name} 값은 걷혔는데 이름이 남았다\n{names:?}\n{first:?}"),
+                    (None, Some(_)) => panic!("@{width} {name} 값은 섰는데 이름이 없다\n{names:?}\n{first:?}"),
+                    (None, None) => {}
+                }
+            }
             // TITLE 은 제목이 시작하는 칸에 선다. 제목이 한 글자도 못 선 폭이면 이름도 없어야 한다.
             match (col(names, "TITLE"), col(first, "아주")) {
                 (Some(n), Some(v)) => {
@@ -2569,8 +2806,9 @@ pub(super) mod tests {
             }
             // **셈 이름과 값은 오른쪽 끝을 맞춘다.** 이름 줄이 한 칸 넘치면 `Paragraph` 가 말없이
             // 잘라 `n/`, 모자라면 한 칸 왼쪽에 선다. 한쪽만 선 것도 어긋남이다 — 값이 잘렸는데 이름만
-            // 남아도, 이름이 잘렸는데 값만 남아도 잡는다. 둘 다 없는 폭(48 이하)은 줄 자체가 넘쳐 셈이
-            // 잘리는 자리다 — 이름 줄의 탓이 아니라 moai-x6q5 가 들고 있다.
+            // 남아도, 이름이 잘렸는데 값만 남아도 잡는다. 둘 다 없는 폭은 머리를 다 걷어도 줄이 최소한
+            // (커서·글리프·`/`·셈)조차 못 담아 넘치는 자리뿐이다(moai-wilg 이후 폭 21 이하) — 셈이 남는지는
+            // `a_narrow_list_drops_the_head_before_the_tally` 가 본다.
             let end = |l: &str, at: usize, len: usize| crate::text::width(&l[..at]) + len;
             let tally = rows.iter().find_map(|r| {
                 let slash = r.rfind('/')?;
