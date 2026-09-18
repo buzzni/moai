@@ -1335,10 +1335,13 @@ fn guard_writes_in(
     cmd: &str,
     only: &dyn Fn(usize) -> bool,
 ) -> Decision {
-    if !held(issues, cfg, away).is_empty() {
+    // **싼 것부터 잰다**(moai-xppm) — 쓰는 파일이 없는 명령이 대부분이고, 명령줄을 읽는 것은
+    // 소속 지도를 짓는 [`held`] 보다 싸다. 거꾸로 재던 판은 Bash 마다 초점부터 지었다.
+    let writes = shell_writes(cmd, cfg, only);
+    if writes.is_empty() || !held(issues, cfg, away).is_empty() {
         return Decision::Pass;
     }
-    for path in shell_writes(cmd, cfg, only) {
+    for path in writes {
         let at = cwd.join(&path);
         if let deny @ Decision::Deny(_) = guard_edit(issues, cfg, away, root, &at.to_string_lossy()) {
             return deny;
@@ -1546,6 +1549,11 @@ fn unknowable(path: &str) -> bool {
 /// 막을 것이 없으면 담는 줄에 한 줄 비출 수 있다([`aside_in`], `Decision::Context`). **비추는
 /// 것은 막는 것을 가리지 않는다** — 차례는 [`Decision::then`] 이 정한다.
 pub fn guard_moai(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str, only: &dyn Fn(usize) -> bool) -> Decision {
+    // **`moai` 를 부르는 토막이 없으면 볼 것이 없다**(moai-xppm) — 세 규칙 모두 그 토막만 본다.
+    // 초점을 먼저 짓던 판은 `cargo test` 하나에도 소속 지도를 지었다.
+    if !segments(cmd).iter().enumerate().any(|(k, seg)| only(k) && moai_args(seg).is_some()) {
+        return Decision::Pass;
+    }
     // 초점은 한 번 잰다 — `held` 는 미룬 줄이 있으면 소속 지도를 다시 짓고, 훅은 도구 호출마다 돈다.
     let focus = held(issues, cfg, away);
     create_in(issues, &focus, cmd, only)
@@ -1786,7 +1794,9 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>) -> 
         .iter()
         .filter(|i| is_review(i, &out_of_plan) && !i.status.is_done() && !theirs(i))
         .collect();
-    let focus = held(issues, cfg, away);
+    // [`held`] 와 같은 초점이다 — 위에서 지은 `theirs` 를 그대로 쓴다(moai-xppm). `held` 를 부르던
+    // 판은 같은 소속 지도를 한 번 더 지었다.
+    let focus: Vec<&Issue> = report::wip(issues, cfg).into_iter().filter(|i| !theirs(i)).collect();
 
     if focus.is_empty() {
         // 집은 것이 없으면 굴러가는 리뷰도 없다 — `focus` 가 곧 `wip` 이라,
