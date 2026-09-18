@@ -4423,3 +4423,7 @@
 {"ts":"2026-09-18T12:09:55Z","id":"moai-kbky","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-rl5w 에서 펼쳤다 — moai --help 에 MOAI_LANG·[i18n] lang 한 줄을 댄다"}
 {"ts":"2026-09-18T12:09:55Z","id":"moai-rl5w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-5yq0 의 멤버 moai-kbky 로 펼쳤다"}
 {"ts":"2026-09-18T12:10:03Z","id":"moai-al0x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T12:12:34Z","id":"moai-wams","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — cmd/mod.rs·show.rs·status.rs 에 걸친 --json 계약, 되쓰는 왕복)"}
+{"ts":"2026-09-18T12:12:34Z","id":"moai-fqnr.ce0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=152585 (xhigh — 에픽 끝 리뷰, 서브에이전트)"}
+{"ts":"2026-09-18T12:12:34Z","id":"moai-wams","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 에 머지 (570243f) — show <id> --json 이 조건부 키를 되쓴 줄에서도 걷는다"}
+{"ts":"2026-09-18T12:12:34Z","id":"moai-fqnr.ce0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1·3·4·6 반영(d429c11, edit.rs 고침은 되돌리고 show.rs 에 이름을 적음). 2 는 멤버 moai-qn5d(결정 필요, 첫 칸), 5 는 설계가 받은 값"}
