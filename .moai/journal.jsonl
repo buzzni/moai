@@ -3981,3 +3981,5 @@
 {"ts":"2026-09-18T10:33:11Z","id":"moai-5255.9xl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰 원문: 지적 없음. 가지의 바뀐 것은 CLAUDE.md 글 하나 — 워크트리 걸음과 리뷰 범위 명령의 main 을 develop 으로 바꾸고, 2026-09-18 부터 develop 이 기본 가지라는 줄을 더했다. 코드가 없고, 바뀐 줄에 남은 main 이 없다. --fix 로 고칠 것이 없어 파일을 안 건드렸다. diff 만 읽었고 빌드·시험은 안 돌렸다."}
 {"ts":"2026-09-18T10:33:11Z","id":"moai-5255.9xl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 받을 것이 없다. 시험은 일꾼 쪽에서 892+327 을 돌렸다(리뷰는 안 돌렸다). guide.rs 를 안 고친 판단에 리뷰가 따로 말하지 않았다 — 스킬 글이 본 가지를 루트 체크아웃에서 읽고 main 을 박지 말라는 시험이 있다는 근거는 이슈 본문에 있다.\nmodel: anthropic/opus-5 tokens=48288 (low — 글 한 파일, 리뷰 서브에이전트가 쓴 것)"}
 {"ts":"2026-09-18T10:33:11Z","id":"moai-5255.9xl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 없음 — 받을 것도 넘길 것도 없다"}
+{"ts":"2026-09-18T10:33:12Z","id":"moai-5255","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — CLAUDE.md 글에서 가지 이름만 바꿈)"}
+{"ts":"2026-09-18T10:33:12Z","id":"moai-5255","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 에 병합했다"}
