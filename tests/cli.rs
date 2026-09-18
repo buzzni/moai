@@ -7035,6 +7035,41 @@ fn picked_in_a_worktree(s: &Scratch) -> (PathBuf, PathBuf, String) {
     (main, inside, id)
 }
 
+/// **자리 경로는 늘 main 에서 잰 상대 경로다**(moai-xpd7·moai-3aec, 2026-09-18 사용자 결정) — main
+/// 밖에 만든 워크트리는 `../` 로 올라가서 잰다. 절대 경로로 두던 판은 한 배열에 두 모양이 섞였고
+/// 기계의 홈 경로가 `--json` 으로 나갔다. main 이 없는 맨몸 저장소는 그 저장소 디렉터리에서 재어,
+/// 어느 워크트리에서 불러도 같은 글자가 나온다.
+#[test]
+fn a_worktree_outside_main_is_named_relative_to_main() {
+    let s = Scratch::new("outsideplace");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "밖에서 할 일", "--json"]), "id");
+    ok(&main, &["mv", &id, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", &format!("../{id}"), "-b", &format!("worktree-{id}")]);
+
+    let json = ok(&main, &["show", &id, "--json"]);
+    assert!(json.contains(&format!(r#""workplaces":[{{"path":"../{id}","#)), "main 밖 워크트리를 ../ 로 안 쟀다\n{json}");
+    let root = s.path().to_str().unwrap();
+    assert!(!json.contains(root), "기계의 절대 경로가 --json 으로 나갔다\n{json}");
+    let line = ok(&main, &["show", &id]);
+    assert!(line.contains(&format!("../{id}")) && !line.contains(root), "사람 화면의 자리가 다른 자로 쟀다\n{line}");
+
+    // 맨몸 저장소 — main 이 없다. 딸린 워크트리 둘 가운데 어디서 불러도 같은 글자다.
+    let bare = s.path().join("repo.git");
+    git(s.path(), &["clone", "-q", "--bare", main.to_str().unwrap(), bare.to_str().unwrap()]);
+    git(&bare, &["worktree", "add", "-q", "../w1", "-b", "w1"]);
+    git(&bare, &["worktree", "add", "-q", &format!("../b-{id}"), &format!("worktree-{id}")]);
+    for at in ["w1".to_string(), format!("b-{id}")] {
+        let json = ok(&s.path().join(&at), &["show", &id, "--json", "--worktree"]);
+        assert!(json.contains(&format!(r#""path":"../b-{id}""#)), "{at} 에서 부르니 다른 자로 쟀다\n{json}");
+    }
+}
+
 /// **집었는데 일하는 워크트리가 없는 줄은 `status` 가 비춘다**(moai-4370) — 세션이 죽어도 칸은
 /// `in_progress` 로 남는다. 막지 않는다: 종료 코드는 0 이고 `--json` 의 `warnings` 에 선다. 워크트리가
 /// 뜬 일은 안 세고, 방금 집은 일은 워크트리가 뜰 틈을 준다.

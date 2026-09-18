@@ -709,7 +709,9 @@ fn born_of(dir: &Path) -> Option<String> {
 /// 경로가 그 밑에 없어 하나도 안 잘리고, 기계의 절대 경로가 `--json` 으로 그대로 나간다.
 ///
 /// **자리 경로를 이것으로 재지 않는다** — 부르는 쪽이 딸린 워크트리면 옆 워크트리가 하나도 안
-/// 잘린다. 자리 경로는 [`main_top`] 이 재고, 이것은 main 을 못 찾았을 때의 물러설 곳이다(moai-fygk).
+/// 잘린다. 자리 경로는 [`main_top`] 이 잰다(moai-fygk). main 이 없을 때의 물러설 곳이던 자리도
+/// 저장소 디렉터리가 맡아(moai-3aec), 이제는 시험이 [`git_dirs`] 의 훑기를 재는 데만 쓴다.
+#[cfg(test)]
 fn top_of(root: &Path) -> Option<PathBuf> {
     git_dirs(root).map(|(top, _)| canonical(top))
 }
@@ -721,21 +723,34 @@ fn top_of(root: &Path) -> Option<PathBuf> {
 /// 워크트리는 모두 main 아래 `.claude/worktrees/` 에 서므로, main 에서 재면 어느 자리에서 부르든
 /// 같은 상대 경로가 나온다 — 그래야 그 글자를 그대로 `EnterWorktree` 에 옮길 수 있다.
 ///
-/// main 을 못 찾으면(맨몸 저장소) 제 꼭대기로 돌아간다. [`workplaces`] 가 이미 읽은 목록으로
+/// **main 을 못 찾으면(맨몸 저장소) 그 저장소 디렉터리에서 잰다**(moai-3aec, 2026-09-18 사용자 결정).
+/// 제 꼭대기로 돌아가던 판은 같은 워크트리가 부르는 자리마다 다른 글자로 나왔다 — main 이 하던
+/// "어디서 불러도 같은 자" 의 역을 저장소 그 자체가 맡는다. [`workplaces`] 가 이미 읽은 목록으로
 /// 잰다 — git 이 적어 둔 파일을 다시 안 읽는다.
 fn main_top(disk: &Disk, root: &Path) -> Option<PathBuf> {
-    disk.main().map(|t| canonical(&t.path)).or_else(|| top_of(root))
+    disk.main().map(|t| canonical(&t.path)).or_else(|| git_dirs(root).map(|(_, common)| canonical(&common)))
 }
 
-/// 워크트리 경로를 [`main_top`] 에서 잰 것으로. 그 밑이 아니면(main 밖에 만든 워크트리) 그대로다.
+/// 워크트리 경로를 [`main_top`] 에서 잰 것으로. **늘 상대 경로다**(moai-xpd7·moai-3aec, 2026-09-18
+/// 사용자 결정) — 그 밑이 아니면(main 밖에 만든 워크트리) `../` 로 올라가서 잰다. 밖을 절대 경로로
+/// 두던 판은 한 배열에 두 모양이 섞여 받는 쪽이 못 갈랐고, 기계의 홈 경로가 `--json` 으로 나갔다.
 ///
-/// **꼭대기와 같은 자리면 `.` 이다** — 맨몸 저장소에서 제 꼭대기로 돌아가 잰 제 워크트리가
-/// 그렇다. 빈 경로로 두면 사람 화면의 `자리` 칸이 통째로 비고 `--json` 의 `path` 가 `""` 로 나간다.
+/// **꼭대기와 같은 자리면 `.` 이다** — 빈 경로로 두면 사람 화면의 `자리` 칸이 통째로 비고
+/// `--json` 의 `path` 가 `""` 로 나간다. 꼭대기를 못 쟀거나 겹치는 머리가 없으면(다른 드라이브)
+/// 그대로 둔다 — 잴 자가 없다.
 fn from_top(top: Option<&Path>, path: &Path) -> PathBuf {
-    match top.and_then(|t| path.strip_prefix(t).ok()) {
-        Some(rel) if rel.as_os_str().is_empty() => PathBuf::from("."),
-        Some(rel) => rel.to_path_buf(),
-        None => path.to_path_buf(),
+    use std::path::Component;
+    let Some(top) = top else { return path.to_path_buf() };
+    let path = canonical(path);
+    let (up, down): (Vec<Component>, Vec<Component>) = (top.components().collect(), path.components().collect());
+    let same = up.iter().zip(&down).take_while(|(a, b)| a == b).count();
+    if same == 0 {
+        return path;
+    }
+    let rel: PathBuf = std::iter::repeat_n(Component::ParentDir, up.len() - same).chain(down[same..].iter().copied()).collect();
+    match rel.as_os_str().is_empty() {
+        true => PathBuf::from("."),
+        false => rel,
     }
 }
 
@@ -952,6 +967,18 @@ fn canonical(p: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **자리 경로는 늘 상대 경로다**(moai-xpd7) — 밑이면 잘라서, 밖이면 `../` 로 올라가서, 같은
+    /// 자리면 `.`. 잴 자가 없을 때만 받은 그대로다.
+    #[test]
+    fn from_top_is_always_relative() {
+        let top = Path::new("/nowhere/work/main");
+        assert_eq!(from_top(Some(top), Path::new("/nowhere/work/main/.claude/worktrees/a")), PathBuf::from(".claude/worktrees/a"));
+        assert_eq!(from_top(Some(top), Path::new("/nowhere/work/feat")), PathBuf::from("../feat"));
+        assert_eq!(from_top(Some(top), Path::new("/nowhere/other/x")), PathBuf::from("../../other/x"));
+        assert_eq!(from_top(Some(top), top), PathBuf::from("."));
+        assert_eq!(from_top(None, Path::new("/nowhere/x")), PathBuf::from("/nowhere/x"));
+    }
     use crate::model::{Kind, Status};
 
     fn issue(id: &str, status: &str, updated: &str) -> Issue {
