@@ -78,6 +78,24 @@ PLAN
 지킬 것은 다음 세션이 `moai show <id>` 로 읽는다는 것 하나다. 이 셋은 그래서 있는 권고이지
 검사하는 규칙이 아니다.
 
+## 한국어 글
+
+**한국어 글은 moai 에 넣기 전에 다듬는다.** 한글이 한 글자라도 든 글이면 한국어 글이다 —
+제목·본문(`-b`)·노트·`-m`, 리뷰 원문 노트까지. 영어로만 쓴 글은 그대로 넣는다.
+
+- 먼저 `korean-skills` 의 `grammar-checker` 로 맞춤법·띄어쓰기를 고치고 `humanizer` 로 AI 티를 걷는다
+- 20줄을 넘는 본문·노트는 그 뒤에 `im-not-ai` 의 `humanize-korean` 을 한 번 더 거친다. 이것은
+  cwd 에 `_workspace/` 를 만드니 저장소의 `.gitignore` 에 넣어 둔다
+- 뜻과 사실은 바꾸지 않는다 — id·명령·경로·수·코드 조각은 그대로 둔다
+- 꼴이 정해진 줄(`model: …`·`다음: …`·`Regression-of: …`)은 다듬지 않는다 — 읽는 쪽이 그 꼴로 센다
+
+플러그인이 없으면 사용자 전역에 설치한다. 없어도 moai 는 아무것도 막지 않는다.
+
+    claude plugin marketplace add DaleSeo/korean-skills
+    claude plugin install korean-skills@korean-skills
+    claude plugin marketplace add epoko77-ai/im-not-ai
+    claude plugin install humanize-korean@im-not-ai
+
 ## 훅이 실제로 보는 것 셋
 
 **1. 집은 것 밖에 새 이슈를 세우지 않는다.** 집은 이슈 — 첫 칸을 떠났고 아직 안 닫힌 것
