@@ -3968,3 +3968,7 @@
 {"ts":"2026-09-18T10:14:30Z","id":"moai-ghnb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 일꾼 브리프 글과 그것을 붙드는 시험, 한 파일 안)"}
 {"ts":"2026-09-18T10:14:30Z","id":"moai-a1c1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"f5d20b0 로 main 에 들어갔다"}
 {"ts":"2026-09-18T10:14:30Z","id":"moai-ghnb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"f5d20b0 로 main 에 들어갔다"}
+{"ts":"2026-09-18T10:18:53Z","id":"moai-dw63.e31","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"등급을 xhigh 에서 max 로 올린다 — main 에 들어온 새 리뷰 규약(f5d20b0, moai-bx6t)은 훅을 건드린 멤버가 있는 에픽 끝을 max 로 본다. xhigh 판은 결과 없이 멈췄다. 범위는 main...HEAD(cd0aad0 + main 받기)."}
+{"ts":"2026-09-18T10:20:11Z","id":"moai-dw63.e31","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 워크트리 .claude/worktrees/moai-dw63-hook(가지 worktree-moai-dw63-hook, ceaea1d)에서 /code-review max --fix main...HEAD 를 다시 돌린다. 재부팅으로 max 판이 결과 없이 멈췄다. 끝나면 원문·판단 두 노트, main 머지, 8ema·d4e0·e31 닫기, 감독 moa-issue-bb 에 보고"}
+{"ts":"2026-09-18T10:20:11Z","id":"moai-8ema","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 구현·시험 끝(cd0aad0, 워크트리 moai-dw63-hook). 리뷰 moai-dw63.e31 을 마치고 머지한다"}
+{"ts":"2026-09-18T10:20:12Z","id":"moai-d4e0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 구현·시험 끝(cd0aad0, 워크트리 moai-dw63-hook). 리뷰 moai-dw63.e31 을 마치고 머지한다"}
