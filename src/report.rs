@@ -341,9 +341,33 @@ pub fn is_work(i: &Issue) -> bool {
 ///
 /// `ready` 의 아래쪽 줄과 훅이 접힌 뒤에 싣는 줄이 같은 집합이다. 두 벌로
 /// 두면 한쪽만 고쳐지고, 그러면 화면이 같은 세션을 두 가지로 말한다.
+///
+/// **가려진 줄([`eclipsed`])은 집은 일이 아니다**(moai-es40, 사용자 결정 2026-09-18) — `ready`·
+/// `held` 가 그 줄을 집을 일로 안 내는 것(moai-lg2t)과 같은 자다. 그 줄은 트리에서 `(길 잃음)` 에
+/// 서고 어느 묶음에도 안 드는데, 여기만 세면 보드의 벌여 놓은 셈·`ready` 아래 줄·훅 초점이 그 줄을
+/// 집은 일로 댄다. 대가는 훅 초점이 그 줄을 못 싣는 것이다 — 그 id 는 `duplicate_id` 로 파일째 쓰기가
+/// 막혀, 고치기 전에는 그 줄로 일할 수 없다. **자리를 묻는 쪽([`places`]·[`stranded`])만 그 줄까지
+/// 본다**([`started`]).
 pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
+    let held = started(issues, cfg);
+    if held.is_empty() {
+        return held;
+    }
+    let eclipsed = eclipsed(issues);
+    held.into_iter().filter(|i| !eclipsed(i)).collect()
+}
+
+/// **시작한 칸에 선 일 줄** — 미룬 것만 빼고, 쌍둥이에게 가려진 줄([`eclipsed`])도 든다. [`wip`] 는
+/// "지금 하는 일" 을 묻고 이것은 "그 칸을 옮겨 놓은 줄이 어디서 일하나" 를 묻는다(moai-es40, 사용자
+/// 결정). 머지가 같은 id 의 에픽 뒷줄을 남기면 앞줄의 집힌 이슈는 가려지는데, 그 세션이 죽었으면 그
+/// 줄을 대는 것은 [`stranded`] 뿐이다 — 여기서 걸렀다면 `duplicate_id` 하나 때문에 버려진 칸이 영영
+/// 안 보인다(리뷰 moai-ya06). 자리 셈은 넷(`places`·`blinding`·`placeable`·`stranded`)이 **이 하나**로
+/// 되짚는다 — 하나라도 `wip` 을 쓰면 `stranded` 가 센 줄의 자리를 `show` 가 모른다. 그 넷에 스냅샷을
+/// 대는 쪽(`worktree::workplaces` 의 문과 옆 스냅샷이 쥔 줄)도 이것으로 잰다(리뷰 moai-r8gw.b4s) —
+/// 거기서 `wip` 으로 재면 문이 닫히거나 쥔 줄에서 빠져, 스냅샷으로만 찾을 수 있는 그 줄이 자리를 잃는다.
+pub fn started<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     // **값싼 것을 먼저 거른다.** 훅이 도구 호출마다 여기를 지나므로, 집은 것이
-    // 없으면 조상을 타는 셈(`put_off`)을 아예 안 돌린다.
+    // 없으면 조상을 타는 셈(`put_off`)도 종류 지도(`eclipsed`)도 아예 안 돌린다.
     let held: Vec<&Issue> = issues
         .iter()
         .filter(|i| is_work(i) && cfg.is_started(i.status.as_str()))
@@ -481,7 +505,7 @@ fn lossy_path<S: serde::Serializer>(p: &std::path::Path, s: S) -> Result<S::Ok, 
     s.serialize_str(&p.to_string_lossy())
 }
 
-/// 집은 줄(`wip`) → 그 일이 [`어디에 서 있는가`](Place). **자리가 안 보이는 줄도 키를 받는다** —
+/// 집은 줄([`started`]) → 그 일이 [`어디에 서 있는가`](Place). **자리가 안 보이는 줄도 키를 받는다** —
 /// 키가 없는 것은 안 집은 줄이다. 받는 쪽이 "안 집음" 과 "집었는데 안 보임" 을 한 지도로 가른다.
 /// 집은 멤버를 둔 묶음도 키를 받는다(멤버에서 굴려 올린다, [`settle`]).
 ///
@@ -502,14 +526,19 @@ fn lossy_path<S: serde::Serializer>(p: &std::path::Path, s: S) -> Result<S::Ok, 
 /// 그것을 세면 세션이 죽어 자리를 잃은 줄도 그 뒤에 뜬 워크트리 아무 데나 "자리" 로 잡혀,
 /// 새 워크트리가 하나 뜨는 순간 `stranded` 에서 사라진다.
 pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &str) -> BTreeMap<String, Place<'a>> {
+    // 아래 둘은 **빠른 길일 뿐 판정이 아니다** — 아래를 다 돌아도 [`settle`] 이 같은 답(빈 지도)을
+    // 낸다. 계약을 쥔 자는 거기 하나고, 여기는 헛일을 아낄 뿐이라 갈릴 것이 없다. **워크트리를 먼저
+    // 본다** — [`started`] 는 미룬 줄이 있으면 조상을 타는 셈(`put_off`)이라, 볼 워크트리가 없는 흔한 길
+    // (워크트리를 안 쓰는 저장소, 안 집은 줄을 펼치는 `show`)이 버릴 답에 그 값을 치를 까닭이 없다.
+    if trees.is_empty() {
+        return settle(&BTreeMap::new(), BTreeMap::new(), trees, now, &BTreeMap::new(), false);
+    }
     // **같은 id 의 줄이 둘이면 한 번만 센다** — 뒷줄이 선다(`Load::get` 과 같은 자). 줄마다 세면
     // 한 워크트리가 한 id 에 두 번 서서, 받는 쪽이 "두 곳에서 돌고 있다" 로 읽는다(moai-ddtg 에서
     // `Warning::new` 가 같은 까닭으로 id 를 한 번씩만 담는다).
-    let picked: BTreeMap<&str, &Issue> = wip(issues, cfg).into_iter().map(|i| (i.id.as_str(), i)).collect();
+    let picked: BTreeMap<&str, &Issue> = started(issues, cfg).into_iter().map(|i| (i.id.as_str(), i)).collect();
     let mut found: BTreeMap<&str, Vec<&Workplace>> = picked.keys().map(|id| (*id, Vec::new())).collect();
-    // 둘 다 **빠른 길일 뿐 판정이 아니다** — 아래를 다 돌아도 [`settle`] 이 같은 답(빈 지도)을
-    // 낸다. 계약을 쥔 자는 거기 하나고, 여기는 헛일을 아낄 뿐이라 갈릴 것이 없다.
-    if picked.is_empty() || trees.is_empty() {
+    if picked.is_empty() {
         return settle(&picked, found, trees, now, &BTreeMap::new(), false);
     }
     // **소속 지도는 한 번만 짓는다**(`claims`) — 워크트리마다 바뀌는 것은 이름뿐이다.
@@ -597,7 +626,7 @@ pub fn blinding<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> V
     // **같은 id 의 줄을 [`places`] 처럼 접지 않아도 답이 같다** — [`claims`] 는 줄에서 `id` 만
     // 보고 소속은 `epics`·`stones` 지도에서 읽는데, 그 지도는 이미 뒷줄이 이긴다(`groups`). 접는
     // 값을 아끼되, `claims` 가 줄의 필드를 직접 보게 되면 여기도 저쪽처럼 접어야 한다.
-    let picked = wip(issues, cfg);
+    let picked = started(issues, cfg);
     if picked.is_empty() {
         return Vec::new();
     }
@@ -724,7 +753,7 @@ fn settle<'a>(
 /// 부르는 쪽(`cmd/show`)이 워크트리를 읽기 전에 이것으로 판다. 안 집은 줄 하나를 펼치는 흔한 길이
 /// 옆 스냅샷을 다 푸는 값을 치르지 않게 하는 문인데, 그 판정은 이슈의 뜻이라 여기 둔다.
 pub fn placeable(issues: &[Issue], cfg: &Config, i: &Issue) -> bool {
-    let picked = wip(issues, cfg);
+    let picked = started(issues, cfg);
     if picked.iter().any(|w| w.id == i.id) {
         return true;
     }
@@ -743,7 +772,7 @@ const STRANDED_GRACE_SECS: i64 = 3600;
 ///
 /// - **워크트리를 하나도 안 쓰는 저장소에서는 조용하다** — 거기서는 모든 일이 main 에서 돌아,
 ///   집은 줄마다 떠든다
-/// - 미룬 것은 [`wip`] 이 이미 뺐다
+/// - 미룬 것은 [`started`] 가 이미 뺐다
 /// - **막지 않는다.** 치명이 아니라 종료 코드를 안 바꾼다. 고치는 손은 셋이고 사람이 고른다 —
 ///   이어 할 것이면 새 워크트리를 띄우고, 놓을 것이면 `todo` 로, 지금 안 할 것이면 미룬다
 /// - **`status()` 에 안 넣는다.** 훅의 기준선과 `Stop` 이 `status()` 의 경고를 세는데, 이것은 남의
@@ -751,12 +780,17 @@ const STRANDED_GRACE_SECS: i64 = 3600;
 pub fn stranded(issues: &[Issue], cfg: &Config, trees: &[Workplace], now: &str) -> Option<Warning> {
     // 워크트리가 없으면 [`places`] 가 아무 키도 안 낸다 — 가드를 여기 다시 적지 않는다(moai-tbin).
     let at = places(issues, cfg, trees, now);
+    // 자리 잃은 것이 없으면 되짚을 것도 없다 — [`started`] 를 한 벌 더 세지 않는다(`places` 가 방금 셌다).
+    if !at.values().any(|p| matches!(p, Place::Lost)) {
+        return None;
+    }
     // **집은 줄로 되짚는다.** [`places`] 는 묶음 id 에도 키를 주므로(멤버에서 굴려 올린다) 그것을
     // 걸러야 하는데, **줄 전체로 되짚으면 안 된다** — 그 지도는 뒷줄이 이기니 같은 id 의 묶음
     // 쌍둥이가 앞줄의 집힌 이슈를 가리고, 그것을 종류로 거르면 **자리를 잃은 산 줄이 조용히
-    // 빠진다**(머지가 남긴 `duplicate_id` 하나로 그 줄이 영영 안 보인다). `wip` 으로 되짚으면
-    // 묶음 id 는 애초에 없어 거를 것도 없다 — 거르는 자가 하나다.
-    let picked: BTreeMap<&str, &Issue> = wip(issues, cfg).into_iter().map(|i| (i.id.as_str(), i)).collect();
+    // 빠진다**(머지가 남긴 `duplicate_id` 하나로 그 줄이 영영 안 보인다). [`started`] 로 되짚으면
+    // 묶음 id 는 애초에 없어 거를 것도 없다 — 거르는 자가 하나다. `wip` 이 아니다: 그쪽은 가려진
+    // 줄을 뺀다(moai-es40).
+    let picked: BTreeMap<&str, &Issue> = started(issues, cfg).into_iter().map(|i| (i.id.as_str(), i)).collect();
     // **`Lost` 만 센다.** 방금 집은 것(`Fresh`)과 못 읽은 워크트리가 있어 모르는 것(`Unknown`)은
     // 자리 없음이 아니다 — 둘을 세면 산 일을 남에게 다시 주는 쪽으로 틀린다.
     let lost: Vec<&Issue> = at
@@ -1383,12 +1417,15 @@ pub fn milestone_from_above<'a>(
     if !joins(line) {
         return None;
     }
-    let milestone = milestones(all).get(id).copied();
+    // **에픽 지도는 한 번만 짓는다**(moai-oxup) — `milestones` 가 안에서 다시 지었다. `edit --milestone`
+    // 마다 락 안에서 도는 길이다.
+    let epic_of = groups(all);
+    let milestone = milestones_in(all, &epic_of).get(id).copied();
     if milestone == wrote {
         return None;
     }
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
-    if let Some(e) = groups(all).get(id) {
+    if let Some(e) = epic_of.get(id) {
         // 못 쓸 에픽의 멤버는 `(길 잃음)` 에 선다 — `milestones` 가 그 줄에 값을 안 주는 것과
         // 같은 자(없는 id·종류가 틀린 것)다. 그 id 의 마일스톤을 고치라고 대면 헛말이다.
         let usable = by_id.get(e).is_some_and(|x| x.kind == Kind::Epic);
@@ -1768,6 +1805,8 @@ pub enum Misplace {
 /// 그 순간 자가 둘이 되고, 어느 쪽이 참인지 화면만 봐서는 알 수 없다.
 /// 그래서 판정 차례도 `nav::Ctx::home` 과 같다 — 마일스톤은 뿌리라 볼 것이
 /// 없고, 에픽은 제 마일스톤만, 이슈는 에픽을 먼저 보고 없으면 마일스톤을 본다.
+// 바이너리는 지도를 든 `_in` 을 부른다([`Soil`], moai-oxup) — 이 꼴은 시험의 짧은 길이다.
+#[cfg(test)]
 pub fn misplaced(all: &[Issue]) -> BTreeMap<&str, Misplace> {
     let epic_of = groups(all);
     let mile_of = milestones_in(all, &epic_of);
@@ -1869,8 +1908,14 @@ pub fn under_lost<'a>(
 /// **묶음 줄의 `epic` 은 가리키는 것이 멀쩡해도 못 쓴다** (moai-fg0t). 묶음 줄은 에픽에
 /// 안 들므로([`epic_through`]) 그 필드는 아무 자리도 안 정한다 — 말없이 두면 적은 사람은
 /// 에픽 밑에 넣은 줄 안다.
+// 바이너리는 지도를 든 `_in` 을 부른다([`Soil`], moai-oxup) — 이 꼴은 시험의 짧은 길이다.
+#[cfg(test)]
 pub fn broken(all: &[Issue]) -> BTreeMap<&str, Misplace> {
-    let kind_of: BTreeMap<&str, Kind> = all.iter().map(|i| (i.id.as_str(), i.kind)).collect();
+    broken_in(all, &kinds(all))
+}
+
+/// [`broken`] 와 같은 것. 종류 지도를 이미 가진 쪽([`Soil`])이 그것을 다시 짓지 않게 받는다.
+pub fn broken_in<'a>(all: &'a [Issue], kind_of: &BTreeMap<&'a str, Kind>) -> BTreeMap<&'a str, Misplace> {
     let usable = |id: &Option<String>, kind: Kind| {
         id.as_deref().is_none_or(|id| kind_of.get(id) == Some(&kind))
     };
@@ -1905,6 +1950,19 @@ pub fn rollup(issues: &[Issue], cfg: &Config) -> Vec<Roll> {
 /// `kind` 가 에픽이든 마일스톤이든 같은 셈을 한다. **일은 이슈가 한다** —
 /// 에픽은 어느 쪽 집계에도 세지 않는다.
 pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
+    rollup_of_in(kind, issues, cfg, &group_for(kind, issues), &eclipsed(issues))
+}
+
+/// [`rollup_of`] 와 같은 것. **그 종류의 소속 지도와 가려짐을 받는다**(moai-oxup) — `status` 는 에픽과
+/// 마일스톤을 둘 다 굴리는데, 저마다 지으면 `groups` 가 그것만으로 세 번 돈다(`milestones` 가 안에서
+/// 또 짓는다). `group` 은 `kind` 의 지도여야 한다 — 에픽이면 [`groups`], 마일스톤이면 [`milestones`].
+pub fn rollup_of_in(
+    kind: Kind,
+    issues: &[Issue],
+    cfg: &Config,
+    group: &BTreeMap<&str, &str>,
+    eclipsed: &impl Fn(&Issue) -> bool,
+) -> Vec<Roll> {
     let tally = |members: &[&Issue]| {
         let counts: BTreeMap<String, usize> = cfg
             .statuses
@@ -1919,13 +1977,11 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
 
     // 자식이 물려받은 소속까지 센다. 트리가 그리는 것과 같은 판정이어야
     // 머리글의 건수와 그 밑의 줄 수가 어긋나지 않는다.
-    let group = group_for(kind, issues);
-    let eclipsed = eclipsed(issues);
     // **묶음도 급한 것이 위로 온다.** 파일 순(=id 순)으로 두면 이슈 목록과
     // 차례가 달라, 같은 화면에서 규칙이 둘이 된다.
     let mut groupings: Vec<&Issue> = issues.iter().filter(|i| i.kind == kind && !eclipsed(i)).collect();
     groupings.sort_by(|a, b| crate::query::display_order(a, b));
-    let members = work_under(issues, &group, &eclipsed);
+    let members = work_under(issues, group, eclipsed);
     let mut out: Vec<Roll> = groupings
         .iter()
         .map(|e| {
@@ -2501,15 +2557,28 @@ pub struct Unreadable<'a> {
 
 /// `unreadable` 은 읽다 만난 못 읽는 줄이다 — 저장소가 아니라 부르는 쪽이 준다.
 pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &str) -> StatusReport {
-    let group = groups(issues);
+    // **파일 전체를 훑어야 아는 것은 한 걸음으로 잰다**(moai-oxup, [`Soil`]). 손으로 이을 때는 `groups`
+    // 가 `milestones`·`misplaced`·두 롤업 안에서 저마다 다시 지어 `status` 한 번에 예닐곱 번 돌았다.
+    status_in(issues, unreadable, cfg, now, &Soil::of(issues))
+}
+
+/// [`status`] 와 같은 것. **이미 잰 [`Soil`] 을 받는다** — 탐색기는 적재 때 색인·묶음 칸을 지으려고
+/// 이미 쟀으므로, 경고 셈에서 다시 재면 같은 걸음을 두 벌 걷는다(moai-u5o9).
+pub fn status_in<'a>(
+    issues: &'a [Issue],
+    unreadable: &[Unreadable],
+    cfg: &Config,
+    now: &str,
+    soil: &Soil<'a>,
+) -> StatusReport {
+    let group = &soil.epic;
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     // **여기가 "지금 계획" 의 정의다.** 보드 수·모든 경고·흐름이 이 하나를
     // 지나므로, 미뤄 둔 것을 여기서 빼면 아래 전부에서 저절로 빠진다.
     // 묶음의 읽은 칸도 같은 자리에서 한 번만 받는다 — 둘 다 조상과 소속을 타는
     // 셈이라 따로 부르면 `moai status` 한 번에 같은 걸음을 두 벌 걷는다.
-    let mile_of = milestones(issues);
-    let roots = deferred_roots_in(issues, &group, &mile_of);
-    let stands = group_stands_in(issues, cfg, &group, &mile_of, &roots);
+    let roots = &soil.roots;
+    let stands = soil.stands(issues, cfg);
     // 묶음이 막을 때 그 막음이 선 때(`blocked_since`). 칸과 한 번의 셈에서 받는다.
     let group_since: BTreeMap<&str, &str> = stands.iter().map(|(id, s)| (*id, s.since)).collect();
     let (states, waits) = split_stands(stands);
@@ -2520,15 +2589,16 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 다시 부르면 같은 걸음을 `moai status` 한 번에 여러 벌 걷는다.
     // `placed` 는 자리를 못 정하는 줄(`nav` 의 `(길 잃음)` 과 같은 집합),
     // `held` 는 못 쓸 참조를 든 줄이다 — 아래 6번이 둘을 합쳐 드러낸다.
-    let placed = misplaced(issues);
-    let held = broken(issues);
+    let placed = &soil.lost;
+    let held = broken_in(issues, &soil.kinds);
     let counts: BTreeMap<String, usize> = cfg
         .statuses
         .iter()
         .map(|s| (s.clone(), work.iter().filter(|i| i.status.as_str() == s).count()))
         .collect();
 
-    let rolls = rollup(issues, cfg);
+    let eclipsed = soil.eclipsed();
+    let rolls = rollup_of_in(Kind::Epic, issues, cfg, group, &eclipsed);
     // **묶음 줄에는 읽은 칸을 곁들인다.** 막대(`3/5`)는 계획 중 얼마나 했나이고 칸은
     // 지금 할 것이 남았나라, 남은 멤버를 미뤄 접은 묶음은 `1/2` 인 채로 닫혀 있다 —
     // 세션이 여기서 시작하는데 그것을 안 말하면 접은 묶음과 굴러가는 묶음이 같아 보인다.
@@ -2538,7 +2608,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     };
     let epics: Vec<Roll> = rolls.iter().filter(|r| r.id.is_some()).cloned().map(stood).collect();
     // 마일스톤을 하나도 안 쓰는 저장소에는 줄도 경고도 내지 않는다.
-    let stones: Vec<Roll> = rollup_of(Kind::Milestone, issues, cfg)
+    let stones: Vec<Roll> = rollup_of_in(Kind::Milestone, issues, cfg, &soil.milestone, &eclipsed)
         .into_iter()
         .filter(|r| r.id.is_some())
         .map(stood)
@@ -2549,14 +2619,14 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // **가려진 줄은 소속으로 꾸짖지 않는다** (1·1-2). 소속 지도의 값은 쌍둥이의
     // 종류로 셈한 것이라 그 줄의 것이 아니고, 그 줄은 `(길 잃음)` 에 서며 힌트
     // (`moai show -e none`·`--milestone none`)의 거름망도 안 고른다 — 세면 경고가
-    // 가리킨 명령이 침묵한다(moai-b5lu). `duplicate_id` 가 그 id 를 따로 드러낸다.
-    let eclipsed = eclipsed(issues);
+    // 가리킨 명령이 침묵한다(moai-b5lu). `duplicate_id` 가 그 id 를 따로 드러낸다. 판정은 위에서
+    // 롤업에 넘긴 그것(`soil.eclipsed`)이다.
 
     // 1. 에픽에 안 붙은 것. 마일스톤이 아직 없으므로 **제일 중요한 신호**다
     //    — "물어보지 않고 만든 이슈" 의 지문이다.
     //    **길 잃은 줄 밑에 접힌 줄도 안 센다**(moai-uni2) — 트리가 그 줄을 `(길 잃음)` 안에
     //    그리고, 고칠 곳은 부모의 끊긴 참조라 6번의 `dangling_*` 가 댄다.
-    let folded = under_lost(issues, &group, |i| placed.contains_key(i.id.as_str()) || eclipsed(i));
+    let folded = &soil.folded;
     let loose: Vec<&Issue> = work
         .iter()
         .copied()
@@ -2589,7 +2659,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 1-2. 마일스톤을 쓰기 시작했는데 거기 안 붙은 일. 마일스톤이 없는
     //      저장소에는 말하지 않는다 — 안 쓰는 기능으로 잔소리하지 않는다.
     if !stones.is_empty() {
-        let mile = milestones(issues);
+        let mile = &soil.milestone;
         // 종류가 틀린 참조는 **마일스톤이 있는 것이 아니다.** 그대로 세면
         // 그 줄이 "마일스톤 있음" 으로 빠져, 정작 드러내야 할 것이 숨는다.
         let outside: Vec<&Issue> = work
@@ -2667,7 +2737,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     let waiting: Vec<&Issue> =
         work.iter().copied().filter(|i| !i.status.is_done() && by_deferred(i)).collect();
     if !waiting.is_empty() {
-        let sources = deferred_sources_in(issues, &group, &mile_of, &roots);
+        let sources = deferred_sources_in(issues, group, &soil.milestone, roots);
         // 시각은 줄과 같은 수명이라, 받는 자리(`Warning::ages`)의 서명으로 추론되게 그 자리에 둔다.
         warnings.push(
             Warning::new("blocked_by_deferred", ids_of(&waiting))
@@ -2694,10 +2764,13 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     }
 
     // 3. 한 번에 여러 개 벌인 것. AI 가 가장 잘 하는 실수다.
+    //    **가려진 줄은 벌인 일이 아니다** — [`wip`] 과 같은 자다(moai-es40, 사용자 결정). 여기만 세면
+    //    한눈 보기가 집은 것 셋을 대는 그 보드에 `4건` 이 서고, `ready` 아래 줄에 없는 id 를 잊은 것으로
+    //    꾸짖는다(4번) — 그 제목은 쌍둥이 에픽의 것이다. 그 id 는 `duplicate_id` 가 따로 드러낸다.
     let wip: Vec<&Issue> = work
         .iter()
         .copied()
-        .filter(|i| cfg.is_started(i.status.as_str()))
+        .filter(|i| cfg.is_started(i.status.as_str()) && !eclipsed(i))
         .collect();
     // 문턱은 id 로 잰다 — 위 `no_epic` 과 같은 까닭이다.
     let overload = Warning::new("wip_overload", ids_of(&wip));
@@ -3048,7 +3121,8 @@ mod tests {
     /// **같은 id 의 묶음 쌍둥이가 자리 잃은 줄을 가리지 않는다**(리뷰 moai-ya06). 머지가 한 id 에
     /// 두 줄을 남기고 뒷줄이 에픽이면, 줄 전체로 되짚는 지도(`by_id`)는 그 에픽을 내준다 — 그것을
     /// 종류로 거르던 판이 앞줄의 **집힌 이슈**를 통째로 버려, 세션이 죽은 줄이 `duplicate_id`
-    /// 하나 때문에 영영 안 보였다. 되짚는 자는 `wip` 이라 묶음 id 는 애초에 안 든다.
+    /// 하나 때문에 영영 안 보였다. 되짚는 자는 `started` 라 묶음 id 는 애초에 안 든다 — 가려진
+    /// 줄을 빼는 `wip` 이 아니다(moai-es40).
     #[test]
     fn a_group_twin_of_the_same_id_does_not_hide_stranded_work() {
         let issues = vec![
@@ -5194,6 +5268,38 @@ mod tests {
         // 같은 종류의 쌍둥이는 가려지지 않는다 — 같은 값을 같은 자로 읽는다.
         let twins = vec![make("argos-0003", Kind::Issue, "todo"), make("argos-0003", Kind::Issue, "todo")];
         assert_eq!(ready(&twins, &cfg()).len(), 2);
+    }
+
+    /// **가려진 줄은 집은 일도 아니다**(moai-es40, 사용자 결정). `ready`·`held` 가 거르는 줄을 `wip` 만
+    /// 세면 보드의 벌여 놓은 셈·`ready` 아래 줄·훅 초점이 `(길 잃음)` 에 선 줄을 집은 일로 댄다.
+    #[test]
+    fn an_eclipsed_row_is_not_counted_as_picked() {
+        let rows = vec![
+            make("argos-0001", Kind::Issue, "in_progress"),
+            make("argos-0001", Kind::Epic, "todo"),
+            make("argos-0002", Kind::Issue, "in_progress"),
+        ];
+        let ids: Vec<&str> = wip(&rows, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["argos-0002"], "가려진 줄을 집은 일로 셌다");
+
+        // 같은 종류의 쌍둥이는 가려지지 않는다 — 둘 다 집은 일이다.
+        let twins = vec![make("argos-0003", Kind::Issue, "in_progress"), make("argos-0003", Kind::Issue, "in_progress")];
+        assert_eq!(wip(&twins, &cfg()).len(), 2);
+    }
+
+    /// **`status` 의 벌여 놓은 셈도 같은 자다**(에픽 끝 리뷰 moai-r8gw.b4s) — `wip_overload`·`stale_progress`
+    /// 가 제 손으로 세면, 한눈 보기가 `wip` 으로 집은 것 셋을 대는 보드에 `4건` 이 서고 `ready` 아래 줄에
+    /// 없는 id 를 잊은 것으로 꾸짖는다.
+    #[test]
+    fn an_eclipsed_row_is_neither_overload_nor_forgotten() {
+        let mut rows: Vec<Issue> =
+            ["argos-0001", "argos-0002", "argos-0003", "argos-0004"].iter().map(|id| make(id, Kind::Issue, "in_progress")).collect();
+        rows.push(make("argos-0004", Kind::Epic, "todo"));
+        let st = status(&rows, &[], &cfg(), "2026-10-01T00:00:00Z");
+        assert!(!st.warnings.iter().any(|w| w.kind == "wip_overload"), "가려진 줄을 벌인 일로 셌다 — {:?}", st.warnings);
+        let forgotten = st.warnings.iter().find(|w| w.kind == "stale_progress").expect("잊은 것 경고가 없다");
+        let picked: Vec<String> = wip(&rows, &cfg()).iter().map(|i| i.id.clone()).collect();
+        assert_eq!(forgotten.ids, picked, "잊은 것과 집은 것이 다른 자로 셌다");
     }
 
     // ── 미룬 것이 막고 있으면 까닭을 말한다 ──────────────────────────
