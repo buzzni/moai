@@ -87,11 +87,12 @@ struct Marks {
     trees: Vec<(PathBuf, Stamp)>,
 }
 
-/// 층에 선 동안 이만큼 지난 줄은 표식이 그대로여도 다시 읽는다(moai-al0x, 사용자 결정 2026-09-18).
-/// 요약에는 시계로 재는 것이 든다 — 방금 집은 줄에 워크트리가 뜰 틈(한 시간, `report::stranded`)과
-/// 날로 재는 경고. 파일은 그대로라 표식으로는 영영 안 보이고, SPC r 전까지 옛 수가 선다. 읽기는
-/// 스레드로 가고([`Layer::launch`]) 층에 선 동안만이라, 1분에 한 번이면 그 값이 화면을 안 멈춘다.
-const REREAD_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+/// 이만큼 지난 읽기는 표식이 그대로여도 다시 읽는다(moai-al0x·moai-z4r4, 사용자 결정 2026-09-18).
+/// 셈에는 시계로 재는 것이 든다 — 방금 집은 줄에 워크트리가 뜰 틈(한 시간, `report::stranded`)과
+/// 날로 재는 경고. 파일은 그대로라 표식으로는 영영 안 보이고, SPC r 전까지 옛 수가 선다. 층과
+/// 프로젝트 안([`App::follow`])이 **같은 자**를 쓴다 — 따로 두면 한쪽만 틈을 넘겨 두 화면이 또
+/// 갈린다. 읽기는 둘 다 스레드로 가서, 1분에 한 번이면 그 값이 화면을 안 멈춘다.
+pub(super) const REREAD_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// 프로젝트 하나를 본 것.
 pub enum Look {
@@ -668,6 +669,7 @@ impl App {
         self.unfound = None;
         self.watched = Vec::new();
         self.stamp = None;
+        self.read_at = None;
         self.warnings = 0;
         self.filter_text = None;
         // **보기는 돌리지 않는다**(moai-2bzp). 보기·정렬·열은 사람의 설정이라 사용자 설정에 적혀
@@ -1368,6 +1370,16 @@ mod tests {
         a.layer.as_mut().unwrap().places[1].read_at = Some(long_ago);
         a.follow();
         assert!(!a.loading(), "안에 있는 동안 시계를 보고 남의 프로젝트를 읽으러 갔다");
+
+        // **안쪽은 제 프로젝트를 같은 자로 다시 읽는다**(moai-z4r4) — 배너의 수에도 시계로 재는 것이
+        // 들어, 안 읽으면 틈을 넘긴 순간 층의 `!` 와 갈린다.
+        a.read_at = Some(long_ago);
+        a.follow();
+        assert!(a.loading(), "읽은 지 1분이 넘었는데 제 프로젝트를 다시 안 읽었다");
+        settle(&mut a);
+        assert!(a.read_at.is_some_and(|t| t.elapsed() < REREAD_EVERY), "다시 읽고도 읽은 때를 안 올렸다");
+        a.follow();
+        assert!(!a.loading(), "방금 읽은 프로젝트를 또 읽으러 갔다");
     }
 
     /// **`.moai` 없는 디렉터리가 사라지거나 다시 생기는 것도 본다.** 두 파일의 표식은 그

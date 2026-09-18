@@ -407,6 +407,10 @@ pub struct App {
     pub raw: bool,
     /// 마지막으로 읽은 파일의 (고친 때, 길이).
     stamp: Stamp,
+    /// 마지막 읽기를 **들인** 때. 표식이 그대로여도 [`layer::REREAD_EVERY`] 가 지나면 다시 읽는다
+    /// ([`App::follow`], moai-z4r4). 들인 때로 찍는 까닭은 층과 같다(`Layer::adopt`) — 시작한 때로
+    /// 찍으면 한 번 읽는 데 그만큼 걸리는 자리에서 쉬지 않고 다시 읽는다.
+    read_at: Option<std::time::Instant>,
     /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과, 어느 때든 지켜보는 HEAD·가지
     /// 파일·`packed-refs` 의 표식(읽기 **전에** 잰 것 — `worktree::gather`·[`prepare`]).
     watched: Vec<(std::path::PathBuf, Stamp)>,
@@ -568,6 +572,8 @@ impl App {
         let ids = load.errors.iter().map(|e| e.id.clone()).collect();
         let mut app = App::build(load.issues, index, cfg, path, ids);
         app.stamp = stamp;
+        // 띄울 때 읽은 것도 들인 읽기다 — 안 찍으면 조용한 저장소에서 시계로는 영영 다시 안 읽는다.
+        app.read_at = Some(std::time::Instant::now());
         app.repo = Some(repo);
         app
     }
@@ -640,6 +646,7 @@ impl App {
             warnings: 0,
             stamp: None,
             watched: Vec::new(),
+            read_at: None,
             commits: Commits::new(),
             commit_ids: Default::default(),
             commits_job: None,
@@ -956,6 +963,7 @@ impl App {
         // 칸 옮기기·메모처럼 id 가 그대로인 쓰기는 여기서 안 걸려 걷기를 새로 사지 않는다.
         self.commits_due |= self.watched != f.watched || f.issues.iter().any(|i| !self.commit_ids.contains(&i.id));
         self.watched = f.watched;
+        self.read_at = Some(std::time::Instant::now());
         self.warnings = f.warnings;
         self.take(f.issues, f.index, f.states, f.now);
     }
@@ -1220,7 +1228,12 @@ impl App {
             return;
         }
         let Some(repo) = &self.repo else { return };
-        let moved = stamp_of(repo) != self.stamp
+        // **시계도 다시 읽을 까닭이다**(moai-z4r4) — 배너의 수에는 한 시간 틈과 날로 재는 경고가 들어
+        // 파일이 그대로여도 답이 바뀐다. 층은 같은 자로 다시 읽으므로, 안 읽으면 틈을 넘긴 순간 층의
+        // `!` 와 이 배너가 갈린다. 들인 적이 없으면(띄운 첫 읽기) 시계로는 안 잰다 — 표식이 맡는다.
+        let ticked = self.read_at.is_some_and(|t| t.elapsed() >= layer::REREAD_EVERY);
+        let moved = ticked
+            || stamp_of(repo) != self.stamp
             || self.watched.iter().any(|(path, was)| crate::store::stamp(path) != *was);
         if moved {
             let (tx, rx) = std::sync::mpsc::channel();
