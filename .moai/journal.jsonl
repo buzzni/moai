@@ -4430,3 +4430,4 @@
 {"ts":"2026-09-18T12:12:59Z","id":"moai-fqnr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: moai-qn5d 의 결정(A — Row::of 에서 한 목록으로 걷기 / B — status 알림) 뒤, edit.rs 를 z3lo 가 놓으면 줄 내는 명령 전부로 넓히고 show.rs 의 MAY 와 edit.rs 의 INHERITED 를 한 목록으로 모은다. show <id> --json 몫은 570243f 로 끝남."}
 {"ts":"2026-09-18T12:13:10Z","id":"moai-kbky","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T12:16:02Z","id":"moai-j7r3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T12:21:06Z","id":"moai-bx7g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
