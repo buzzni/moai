@@ -4537,3 +4537,14 @@
 {"ts":"2026-09-18T13:36:04Z","id":"moai-fg0t.b9g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1번(상세가 묶음 줄 epic 을 소속처럼 그림) 반영. add --type epic -e 가 쓸 때 말없는 것은 결정(경고로 드러냄) 대로 두었다"}
 {"ts":"2026-09-18T13:36:04Z","id":"moai-fg0t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T13:36:15Z","id":"moai-z3lo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 전부 닫힘(fg0t 는 사용자 결정 A 로 a971a10). 남은 것은 이 에픽에 달린 idea dmbx·9qk7·thcz — 동작 안 바꾸는 리팩터와 드문 모서리라 에픽 목적과 무관"}
+{"ts":"2026-09-18T13:36:49Z","id":"moai-fbdg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 가 묶음 칸·미룸을 따로 세고 view::Seen 이 query::Where 와 겹친다"}
+{"ts":"2026-09-18T13:36:49Z","id":"moai-fbdg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-dmbx 에서 펼쳤다 — TUI 가 묶음 칸·미룸을 따로 세고 view::Seen 이 query::Where 와 겹친다"}
+{"ts":"2026-09-18T13:36:49Z","id":"moai-dmbx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-xemz 의 멤버 moai-fbdg 로 펼쳤다"}
+{"ts":"2026-09-18T13:36:50Z","id":"moai-r8gw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"report 셈 다듬기 — wip 와 소속 지도"}
+{"ts":"2026-09-18T13:36:50Z","id":"moai-es40","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"wip 가 가려진 쌍둥이 줄을 집은 일로 센다 — 훅 초점과 ready 아래 줄"}
+{"ts":"2026-09-18T13:36:50Z","id":"moai-r8gw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-9qk7 에서 펼쳤다 — wip 가 가려진 쌍둥이 줄을 집은 일로 센다 — 훅 초점과 ready 아래 줄"}
+{"ts":"2026-09-18T13:36:50Z","id":"moai-9qk7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r8gw 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T13:36:57Z","id":"moai-fqnr.sqb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 줄 내는 명령 전부의 덧붙인 키 걷기"}
+{"ts":"2026-09-18T13:37:02Z","id":"moai-oxup","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"status 한 번에 소속 지도(groups·milestones)를 여러 번 짓는다"}
+{"ts":"2026-09-18T13:37:02Z","id":"moai-oxup","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-thcz 에서 펼쳤다 — status 한 번에 소속 지도(groups·milestones)를 여러 번 짓는다"}
+{"ts":"2026-09-18T13:37:02Z","id":"moai-thcz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r8gw 의 멤버 moai-oxup 로 펼쳤다"}
