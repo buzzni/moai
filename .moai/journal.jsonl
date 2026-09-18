@@ -4990,3 +4990,4 @@
 {"ts":"2026-09-18T17:25:24Z","id":"moai-b7o3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T17:25:24Z","id":"moai-3lul.kt0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"두 판: 첫 판은 한도로 끊겨 후보 25건을 직접 판단해 1064e77 로 반영, 다시 본 판의 고침 14건은 f70cb6c. 넘긴 것은 idea moai-tbxz·moai-capd·moai-4at0"}
 {"ts":"2026-09-18T17:25:31Z","id":"moai-3lul","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 멤버 여덟이 다 닫혔고 병합했다(c0e56d1). 넘긴 것은 idea moai-tbxz(층 읽기 스레드의 모서리), moai-capd(자리 판정을 두 번 파는 값), moai-4at0(show --worktree 판정 외)"}
+{"ts":"2026-09-18T17:26:00Z","id":"moai-gtsc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLI 시험 every_language_keeps_the_ready_table_in_line 이 부하 중 한 번 붉었다 — 흔들림"}
