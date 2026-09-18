@@ -4000,3 +4000,15 @@
 {"ts":"2026-09-18T11:09:16Z","id":"moai-dlxf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-557w 에서 펼쳤다 — 스냅샷 없는 옆 워크트리를 rm -rf 로 치우면 탐색기의 ⎇ 가 다음 다시 읽기까지 남는다"}
 {"ts":"2026-09-18T11:09:16Z","id":"moai-557w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-dlxf 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-18T11:09:22Z","id":"moai-uyu9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:09:51Z","id":"moai-zuke","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"프로젝트를 옮길 때 되돌릴 것을 한 자리로"}
+{"ts":"2026-09-18T11:09:51Z","id":"moai-800o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"climb 과 enter_project 가 한 함수로 되돌리고, 층에서 시작한 읽기·커밋 일감을 버린다"}
+{"ts":"2026-09-18T11:09:51Z","id":"moai-zuke","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xrrn 에서 펼쳤다 — 프로젝트를 옮길 때 되돌릴 것이 climb 과 enter_project 로 갈라져 있다"}
+{"ts":"2026-09-18T11:09:51Z","id":"moai-xrrn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-zuke 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:09:58Z","id":"moai-800o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:10:33Z","id":"moai-fqnr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"조건부 --json 키를 되쓴 줄에서 걷는다"}
+{"ts":"2026-09-18T11:10:33Z","id":"moai-wams","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"json_with 가 낼 수 있는 조건부 키 목록을 받아 이번에 안 실은 것을 rest 에서 걷는다"}
+{"ts":"2026-09-18T11:10:33Z","id":"moai-fqnr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2l8n 에서 펼쳤다 — 조건부 --json 키가 모르는 필드로 남아 거짓을 싣는다 — json_with 에 지울 목록이 없다"}
+{"ts":"2026-09-18T11:10:33Z","id":"moai-2l8n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-fqnr 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:10:42Z","id":"moai-wams","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:17:48Z","id":"moai-uyu9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 워크트리 worktree-moai-dlxf 에 gather 고침과 시험이 커밋 전으로 있다 — 시험 통과 보고 커밋, 에픽 moai-dlxf 끝 리뷰(high) 뒤 병합"}
+{"ts":"2026-09-18T11:20:42Z","id":"moai-lg2t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
