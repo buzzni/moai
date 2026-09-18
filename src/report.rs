@@ -1406,12 +1406,15 @@ pub fn milestone_from_above<'a>(
     if !joins(line) {
         return None;
     }
-    let milestone = milestones(all).get(id).copied();
+    // **에픽 지도는 한 번만 짓는다**(moai-oxup) — `milestones` 가 안에서 다시 지었다. `edit --milestone`
+    // 마다 락 안에서 도는 길이다.
+    let epic_of = groups(all);
+    let milestone = milestones_in(all, &epic_of).get(id).copied();
     if milestone == wrote {
         return None;
     }
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
-    if let Some(e) = groups(all).get(id) {
+    if let Some(e) = epic_of.get(id) {
         // 못 쓸 에픽의 멤버는 `(길 잃음)` 에 선다 — `milestones` 가 그 줄에 값을 안 주는 것과
         // 같은 자(없는 id·종류가 틀린 것)다. 그 id 의 마일스톤을 고치라고 대면 헛말이다.
         let usable = by_id.get(e).is_some_and(|x| x.kind == Kind::Epic);
@@ -1791,6 +1794,8 @@ pub enum Misplace {
 /// 그 순간 자가 둘이 되고, 어느 쪽이 참인지 화면만 봐서는 알 수 없다.
 /// 그래서 판정 차례도 `nav::Ctx::home` 과 같다 — 마일스톤은 뿌리라 볼 것이
 /// 없고, 에픽은 제 마일스톤만, 이슈는 에픽을 먼저 보고 없으면 마일스톤을 본다.
+// 바이너리는 지도를 든 `_in` 을 부른다([`Soil`], moai-oxup) — 이 꼴은 시험의 짧은 길이다.
+#[cfg(test)]
 pub fn misplaced(all: &[Issue]) -> BTreeMap<&str, Misplace> {
     let epic_of = groups(all);
     let mile_of = milestones_in(all, &epic_of);
@@ -1892,8 +1897,14 @@ pub fn under_lost<'a>(
 /// **묶음 줄의 `epic` 은 가리키는 것이 멀쩡해도 못 쓴다** (moai-fg0t). 묶음 줄은 에픽에
 /// 안 들므로([`epic_through`]) 그 필드는 아무 자리도 안 정한다 — 말없이 두면 적은 사람은
 /// 에픽 밑에 넣은 줄 안다.
+// 바이너리는 지도를 든 `_in` 을 부른다([`Soil`], moai-oxup) — 이 꼴은 시험의 짧은 길이다.
+#[cfg(test)]
 pub fn broken(all: &[Issue]) -> BTreeMap<&str, Misplace> {
-    let kind_of: BTreeMap<&str, Kind> = all.iter().map(|i| (i.id.as_str(), i.kind)).collect();
+    broken_in(all, &kinds(all))
+}
+
+/// [`broken`] 와 같은 것. 종류 지도를 이미 가진 쪽([`Soil`])이 그것을 다시 짓지 않게 받는다.
+pub fn broken_in<'a>(all: &'a [Issue], kind_of: &BTreeMap<&'a str, Kind>) -> BTreeMap<&'a str, Misplace> {
     let usable = |id: &Option<String>, kind: Kind| {
         id.as_deref().is_none_or(|id| kind_of.get(id) == Some(&kind))
     };
@@ -1928,6 +1939,19 @@ pub fn rollup(issues: &[Issue], cfg: &Config) -> Vec<Roll> {
 /// `kind` 가 에픽이든 마일스톤이든 같은 셈을 한다. **일은 이슈가 한다** —
 /// 에픽은 어느 쪽 집계에도 세지 않는다.
 pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
+    rollup_of_in(kind, issues, cfg, &group_for(kind, issues), &eclipsed(issues))
+}
+
+/// [`rollup_of`] 와 같은 것. **그 종류의 소속 지도와 가려짐을 받는다**(moai-oxup) — `status` 는 에픽과
+/// 마일스톤을 둘 다 굴리는데, 저마다 지으면 `groups` 가 그것만으로 세 번 돈다(`milestones` 가 안에서
+/// 또 짓는다). `group` 은 `kind` 의 지도여야 한다 — 에픽이면 [`groups`], 마일스톤이면 [`milestones`].
+pub fn rollup_of_in(
+    kind: Kind,
+    issues: &[Issue],
+    cfg: &Config,
+    group: &BTreeMap<&str, &str>,
+    eclipsed: &impl Fn(&Issue) -> bool,
+) -> Vec<Roll> {
     let tally = |members: &[&Issue]| {
         let counts: BTreeMap<String, usize> = cfg
             .statuses
@@ -1942,13 +1966,11 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
 
     // 자식이 물려받은 소속까지 센다. 트리가 그리는 것과 같은 판정이어야
     // 머리글의 건수와 그 밑의 줄 수가 어긋나지 않는다.
-    let group = group_for(kind, issues);
-    let eclipsed = eclipsed(issues);
     // **묶음도 급한 것이 위로 온다.** 파일 순(=id 순)으로 두면 이슈 목록과
     // 차례가 달라, 같은 화면에서 규칙이 둘이 된다.
     let mut groupings: Vec<&Issue> = issues.iter().filter(|i| i.kind == kind && !eclipsed(i)).collect();
     groupings.sort_by(|a, b| crate::query::display_order(a, b));
-    let members = work_under(issues, &group, &eclipsed);
+    let members = work_under(issues, group, eclipsed);
     let mut out: Vec<Roll> = groupings
         .iter()
         .map(|e| {
@@ -2513,15 +2535,28 @@ pub struct Unreadable<'a> {
 
 /// `unreadable` 은 읽다 만난 못 읽는 줄이다 — 저장소가 아니라 부르는 쪽이 준다.
 pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &str) -> StatusReport {
-    let group = groups(issues);
+    // **파일 전체를 훑어야 아는 것은 한 걸음으로 잰다**(moai-oxup, [`Soil`]). 손으로 이을 때는 `groups`
+    // 가 `milestones`·`misplaced`·두 롤업 안에서 저마다 다시 지어 `status` 한 번에 예닐곱 번 돌았다.
+    status_in(issues, unreadable, cfg, now, &Soil::of(issues))
+}
+
+/// [`status`] 와 같은 것. **이미 잰 [`Soil`] 을 받는다** — 탐색기는 적재 때 색인·묶음 칸을 지으려고
+/// 이미 쟀으므로, 경고 셈에서 다시 재면 같은 걸음을 두 벌 걷는다(moai-u5o9).
+pub fn status_in<'a>(
+    issues: &'a [Issue],
+    unreadable: &[Unreadable],
+    cfg: &Config,
+    now: &str,
+    soil: &Soil<'a>,
+) -> StatusReport {
+    let group = &soil.epic;
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     // **여기가 "지금 계획" 의 정의다.** 보드 수·모든 경고·흐름이 이 하나를
     // 지나므로, 미뤄 둔 것을 여기서 빼면 아래 전부에서 저절로 빠진다.
     // 묶음의 읽은 칸도 같은 자리에서 한 번만 받는다 — 둘 다 조상과 소속을 타는
     // 셈이라 따로 부르면 `moai status` 한 번에 같은 걸음을 두 벌 걷는다.
-    let mile_of = milestones(issues);
-    let roots = deferred_roots_in(issues, &group, &mile_of);
-    let stands = group_stands_in(issues, cfg, &group, &mile_of, &roots);
+    let roots = &soil.roots;
+    let stands = soil.stands(issues, cfg);
     // 묶음이 막을 때 그 막음이 선 때(`blocked_since`). 칸과 한 번의 셈에서 받는다.
     let group_since: BTreeMap<&str, &str> = stands.iter().map(|(id, s)| (*id, s.since)).collect();
     let (states, waits) = split_stands(stands);
@@ -2532,15 +2567,16 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 다시 부르면 같은 걸음을 `moai status` 한 번에 여러 벌 걷는다.
     // `placed` 는 자리를 못 정하는 줄(`nav` 의 `(길 잃음)` 과 같은 집합),
     // `held` 는 못 쓸 참조를 든 줄이다 — 아래 6번이 둘을 합쳐 드러낸다.
-    let placed = misplaced(issues);
-    let held = broken(issues);
+    let placed = &soil.lost;
+    let held = broken_in(issues, &soil.kinds);
     let counts: BTreeMap<String, usize> = cfg
         .statuses
         .iter()
         .map(|s| (s.clone(), work.iter().filter(|i| i.status.as_str() == s).count()))
         .collect();
 
-    let rolls = rollup(issues, cfg);
+    let eclipsed = soil.eclipsed();
+    let rolls = rollup_of_in(Kind::Epic, issues, cfg, group, &eclipsed);
     // **묶음 줄에는 읽은 칸을 곁들인다.** 막대(`3/5`)는 계획 중 얼마나 했나이고 칸은
     // 지금 할 것이 남았나라, 남은 멤버를 미뤄 접은 묶음은 `1/2` 인 채로 닫혀 있다 —
     // 세션이 여기서 시작하는데 그것을 안 말하면 접은 묶음과 굴러가는 묶음이 같아 보인다.
@@ -2550,7 +2586,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     };
     let epics: Vec<Roll> = rolls.iter().filter(|r| r.id.is_some()).cloned().map(stood).collect();
     // 마일스톤을 하나도 안 쓰는 저장소에는 줄도 경고도 내지 않는다.
-    let stones: Vec<Roll> = rollup_of(Kind::Milestone, issues, cfg)
+    let stones: Vec<Roll> = rollup_of_in(Kind::Milestone, issues, cfg, &soil.milestone, &eclipsed)
         .into_iter()
         .filter(|r| r.id.is_some())
         .map(stood)
@@ -2561,14 +2597,14 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // **가려진 줄은 소속으로 꾸짖지 않는다** (1·1-2). 소속 지도의 값은 쌍둥이의
     // 종류로 셈한 것이라 그 줄의 것이 아니고, 그 줄은 `(길 잃음)` 에 서며 힌트
     // (`moai show -e none`·`--milestone none`)의 거름망도 안 고른다 — 세면 경고가
-    // 가리킨 명령이 침묵한다(moai-b5lu). `duplicate_id` 가 그 id 를 따로 드러낸다.
-    let eclipsed = eclipsed(issues);
+    // 가리킨 명령이 침묵한다(moai-b5lu). `duplicate_id` 가 그 id 를 따로 드러낸다. 판정은 위에서
+    // 롤업에 넘긴 그것(`soil.eclipsed`)이다.
 
     // 1. 에픽에 안 붙은 것. 마일스톤이 아직 없으므로 **제일 중요한 신호**다
     //    — "물어보지 않고 만든 이슈" 의 지문이다.
     //    **길 잃은 줄 밑에 접힌 줄도 안 센다**(moai-uni2) — 트리가 그 줄을 `(길 잃음)` 안에
     //    그리고, 고칠 곳은 부모의 끊긴 참조라 6번의 `dangling_*` 가 댄다.
-    let folded = under_lost(issues, &group, |i| placed.contains_key(i.id.as_str()) || eclipsed(i));
+    let folded = &soil.folded;
     let loose: Vec<&Issue> = work
         .iter()
         .copied()
@@ -2601,7 +2637,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     // 1-2. 마일스톤을 쓰기 시작했는데 거기 안 붙은 일. 마일스톤이 없는
     //      저장소에는 말하지 않는다 — 안 쓰는 기능으로 잔소리하지 않는다.
     if !stones.is_empty() {
-        let mile = milestones(issues);
+        let mile = &soil.milestone;
         // 종류가 틀린 참조는 **마일스톤이 있는 것이 아니다.** 그대로 세면
         // 그 줄이 "마일스톤 있음" 으로 빠져, 정작 드러내야 할 것이 숨는다.
         let outside: Vec<&Issue> = work
@@ -2679,7 +2715,7 @@ pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &s
     let waiting: Vec<&Issue> =
         work.iter().copied().filter(|i| !i.status.is_done() && by_deferred(i)).collect();
     if !waiting.is_empty() {
-        let sources = deferred_sources_in(issues, &group, &mile_of, &roots);
+        let sources = deferred_sources_in(issues, group, &soil.milestone, roots);
         // 시각은 줄과 같은 수명이라, 받는 자리(`Warning::ages`)의 서명으로 추론되게 그 자리에 둔다.
         warnings.push(
             Warning::new("blocked_by_deferred", ids_of(&waiting))

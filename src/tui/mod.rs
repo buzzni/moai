@@ -347,9 +347,14 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         .map(|id| id.map(str::to_string))
         .collect();
     let issues = g.load.issues;
-    // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸·거름망이 같은 지도를 나눠 쓴다.
-    let (index, ground) = measure(&issues, &repo.config);
+    // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸·거름망, 그리고 경고 셈(moai-u5o9)이 같은 지도를
+    // 나눠 쓴다. `measure` 를 부르지 않는 것은 경고 셈에도 그 지도를 넘기려고서다.
     let now = crate::model::now();
+    let soil = crate::report::Soil::of(&issues);
+    let index = Index::in_soil(&issues, &soil);
+    let ground = Ground::in_soil(&issues, &repo.config, &soil);
+    let warnings = warnings_in(&issues, &unreadable, &repo.config, &now, &soil);
+    drop(soil);
     let mut watched = g.watched;
     watched.extend(heads);
     Ok(Fresh {
@@ -357,7 +362,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         stamp,
         index,
         ground,
-        warnings: warnings_of(&issues, &unreadable, &repo.config, &now),
+        warnings,
         issues,
         unreadable,
         origin: g.origin,
@@ -373,12 +378,23 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
 /// 것이 늘었다고 말한다 — 그러면 안 담게 된다. 무엇이 알림인지는
 /// `report` 가 `notices` 로 따로 내므로 여기서 다시 판단하지 않는다.
 fn warnings_of(issues: &[Issue], unreadable: &[Option<String>], cfg: &Config, now: &str) -> usize {
+    warnings_in(issues, unreadable, cfg, now, &crate::report::Soil::of(issues))
+}
+
+/// [`warnings_of`] 와 같은 것. 적재가 이미 잰 지도를 받는다(`report::status_in`, moai-u5o9).
+fn warnings_in<'a>(
+    issues: &'a [Issue],
+    unreadable: &[Option<String>],
+    cfg: &Config,
+    now: &str,
+    soil: &crate::report::Soil<'a>,
+) -> usize {
     // 못 읽는 줄의 id 까지 넘긴다 — 산 줄과의 중복을 `moai status` 와 같은
     // 자로 센다.
     let lines: Vec<crate::report::Unreadable> =
         unreadable.iter().map(|id| crate::report::Unreadable { id: id.as_deref() }).collect();
     // 알림은 `notices` 에 따로 있다 — `warnings` 가 곧 고칠 것이다.
-    crate::report::status(issues, &lines, cfg, now).warnings.len()
+    crate::report::status_in(issues, &lines, cfg, now, soil).warnings.len()
 }
 
 pub struct App {
