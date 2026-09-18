@@ -4344,6 +4344,35 @@ fn json_tells_no_commits_apart_from_no_git() {
     assert!(!shown.contains("커밋") && !shown.contains("commits_error"), "사람 화면이 시끄러워졌다\n{shown}");
 }
 
+/// **일한 AI 는 노트의 `model:` 줄에서 읽어 `work` 로 낸다**(moai-8f2g, 2026-09-18 사용자 결정).
+/// 저장하지 않는다 — 적는 것은 `moai note` 그대로다. 키는 **늘 선다**(빈 배열도 사실이다, moai-2l8n).
+/// 토큰을 모르면 `null` 이고 0 은 0 이다. 꼴에 안 맞는 줄은 값이 안 될 뿐 이력에 그대로 남는다.
+#[test]
+fn show_json_reads_who_did_the_work_from_model_notes() {
+    let s = init("worknotes");
+    let id = add(s.path(), &["고칠 것"]);
+    let none = ok(s.path(), &["show", &id, "--json"]);
+    assert!(none.contains(r#""work":[]"#), "줄이 없는데 빈 배열을 안 냈다\n{none}");
+
+    ok(s.path(), &["note", &id, "고쳤다\nmodel: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)"]);
+    ok(s.path(), &["note", &id, "model: opus-5 (medium — 옛 줄)"]);
+    ok(s.path(), &["note", &id, "model: opus-5 tokens 12 (오타)"]);
+    ok(s.path(), &["mv", &id, "done", "-m", "model: openai/gpt-6 tokens=0"]);
+    let some = ok(s.path(), &["show", &id, "--json"]);
+    assert!(
+        some.contains(r#"{"provider":"anthropic","model":"opus-5","tokens":182000,"grade":"high","why":"쓰기 경로","#),
+        "꼴대로 적은 줄을 못 읽었다\n{some}"
+    );
+    assert!(
+        some.contains(r#"{"provider":null,"model":"opus-5","tokens":null,"grade":"medium","why":"옛 줄","#),
+        "옛 줄을 회사·토큰 없이 읽지 못했다\n{some}"
+    );
+    assert!(some.contains(r#""model":"gpt-6","tokens":0,"#), "0 을 모름으로 읽었다\n{some}");
+    assert_eq!(some.matches(r#""provider":"#).count(), 3, "오타 줄을 값으로 읽었다\n{some}");
+    // 값이 안 된 줄도 이력에서 빠지지 않는다.
+    assert!(ok(s.path(), &["show", &id]).contains("tokens 12"), "꼴에 안 맞는 노트가 이력에서 사라졌다");
+}
+
 /// **날짜가 거꾸로 선 커밋 밑도 본다**(moai-hws2). `show` 는 이슈가 생긴 때에서 걷기를 끊었는데,
 /// `git log --since` 는 거르기가 아니라 **끊기**라 그보다 이른 커밋을 하나 만나면 그 아래를 통째로
 /// 안 본다 — `rebase`·`am --committer-date-is-author-date`·하루 넘게 늦은 시계가 그런 커밋을 만든다.
@@ -6859,6 +6888,74 @@ fn status_reads_a_side_snapshot_only_when_a_place_is_still_missing() {
     assert!(text.contains("일하는 워크트리가 없는 것 1건") && text.contains(&lost), "{text}");
     let json = ok_at(&main, LATER, &["status", "--json"]);
     assert!(!json.contains("unreadable_worktrees"), "다 읽었는데 못 읽었다고 했다\n{json}");
+}
+
+/// **판정을 안 가리는 못 읽은 워크트리는 말은 하되 "다 못 셌다" 로 세지 않는다**(moai-rgz9·moai-1i9d,
+/// 사용자 결정 2026-09-18).
+/// 규약의 워크트리 이름은 에픽 id 다(`worktree-<에픽>`). 그 워크트리의 스냅샷을 못 읽어도 이름이
+/// 집은 멤버를 가리키므로 그 멤버는 이미 제 자리에 섰고, 딴 줄의 자리도 가리지 않는다 — 그러면
+/// 자리 잃은 딴 줄이 그대로 `stranded` 에 서야 하고, 어느 표면도 "못 읽었다" 를 대지 않아야 한다.
+/// 한때 판정은 에픽 이름을 못 알아봐 딴 줄까지 "모른다" 로 덮었고, 표면은 판정과 따로 못 읽은
+/// 워크트리를 다 세어 화면마다 "자리를 다 못 셌다" 가 섰다.
+#[test]
+fn an_unreadable_epic_worktree_is_told_of_but_does_not_blind() {
+    let s = Scratch::new("epicblind");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = ok(&main, &["epic", "add", "에픽", "-q"]).trim().to_string();
+    let member = field(&ok(&main, &["add", "에픽의 일", "-e", &epic, "--json"]), "id");
+    ok(&main, &["mv", &member, "in_progress"]);
+    // 자리를 잃은 딴 줄 — 이것이 있어야 옆 스냅샷을 판다(`worktree::workplaces` 의 문).
+    let lost = field(&ok(&main, &["add", "자리 없는 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", &format!(".claude/worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+    let broken = main.join(format!(".claude/worktrees/{epic}/.moai/issues.jsonl"));
+    std::fs::remove_file(&broken).unwrap();
+    std::fs::create_dir(&broken).unwrap();
+
+    // **깨졌다는 말은 산다**(사용자 결정 2026-09-18) — 판정을 가렸는지와 별개로, 그 스냅샷을 고칠
+    // 사람이 있어야 고쳐진다. 가린 것만 세는 자리는 `--json` 의 `unreadable_worktrees` 와 층이다.
+    let out = isolated(BIN).arg("status").current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert!(said.contains("못 읽었다") && said.contains(&epic), "깨진 스냅샷을 아무 데서도 안 말했다\n{said}");
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("일하는 워크트리가 없는 것 1건") && text.contains(&lost), "에픽 워크트리가 딴 줄을 가렸다\n{text}");
+    assert!(text.contains("옆 워크트리 문제 1건"), "깨진 스냅샷을 보드가 안 셌다\n{text}");
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(!json.contains("unreadable_worktrees"), "판정을 안 가리는 워크트리를 '못 셌다' 로 댔다\n{json}");
+    assert!(json.contains("\"stranded\""), "에픽 워크트리가 딴 줄을 가렸다\n{json}");
+    assert!(ok_at(&main, LATER, &["show", &member, "--json"]).contains("\"place\":\"at\""));
+
+    // 밖 한눈 보기와 탐색기의 층도 같은 자다(`worktree::stranded_at`).
+    let home = Scratch::new("epicblind-home");
+    let config = registry(&home, &[main.as_path()]);
+    let outside = dir_in(&home, "밖");
+    let seen = isolated(BIN)
+        .arg("status")
+        .current_dir(&outside)
+        .env("MOAI_CONFIG", &config)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let seen = String::from_utf8(seen.stdout).unwrap();
+    assert!(seen.contains("못 읽었다") && seen.contains("옆 워크트리 문제 1건"), "밖에서 깨진 스냅샷을 안 댔다\n{seen}");
+    assert!(seen.contains(&lost), "밖에서 자리 잃은 줄을 안 댔다\n{seen}");
+    let layer = isolated(BIN)
+        .args(["tui", "--json"])
+        .current_dir(&outside)
+        .env("MOAI_CONFIG", &config)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let layer = String::from_utf8(layer.stdout).unwrap();
+    // 층은 0 이면 키를 안 단다 — 서 있으면 셌다는 뜻이다.
+    assert!(!layer.contains("\"unreadable_worktrees\"") && layer.contains("\"stranded\":1"), "{layer}");
 }
 
 /// **`gather` 가 실제로 셌을 때만 입을 다문다**(리뷰 moai-ya06). `--worktree` 면 그쪽이 같은

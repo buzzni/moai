@@ -179,7 +179,11 @@ struct Counted {
     /// 없으면 키를 안 단다: 늘 `0` 을 달면 옛 판과 견주는 쪽이 새 뜻을 얻은 줄 모른다.
     #[serde(skip_serializing_if = "is_zero")]
     stranded: usize,
-    /// 스냅샷을 못 읽은 워크트리의 수 — 있으면 위의 수는 "센 결과 0" 이 아니라 "못 셌다" 다.
+    /// 스냅샷을 못 읽어 **자리 판정을 가린** 워크트리의 수(`report::blinding`) — 있으면 위의 수는
+    /// "센 결과 0" 이 아니라 "못 셌다" 다. **못 읽은 것 전부가 아니다**(moai-rgz9): 이름이 집은 줄을
+    /// 가리키는 워크트리는 못 읽어도 판정을 안 가리니 안 든다. 키 이름은 이미 나간 값이라 그대로
+    /// 둔다 — 안쪽 `status --json` 의 같은 키와 같은 뜻이다. 사람 화면의 층은 깨진 스냅샷 자체를
+    /// 따로 대므로(`layer::Summary::unread`) 그 둘이 여기서 갈린다.
     #[serde(skip_serializing_if = "is_zero")]
     unreadable_worktrees: usize,
     unreadable: usize,
