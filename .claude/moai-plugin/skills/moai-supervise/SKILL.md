@@ -70,7 +70,7 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
 - 그런 일이 있으면 **새 idea 보다 먼저** 놀고 있는 세션 하나에 이어 하기를 맡긴다. 3 의
   글 대신 아래를 싣고, 그 뒤에 3 의 글의 **4-1 부터 끝까지**를 통째로 잇는다 — 4-1 을 빼면
   이어받은 일꾼이 워크트리 안에서 트래커를 고치고, 끝을 자르면 닫은 뒤의 걸음(창 비우기)이
-  빠진다
+  빠진다. 자리표시자는 3 에서 적은 대로 채운다(`<옆 일>` 도 — 4-3 이 그 줄을 가리킨다)
 
       감독 세션(<내 이름>)이 <에픽> 의 멈춘 일을 맡긴다 — 앞 세션이 끝을 못 냈다.
       먼저 읽을 것: moai show <에픽> (이력·노트) · moai show <멤버> (자리도 — 자리는 일에만 선다)
@@ -79,13 +79,22 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
          어려우면 다시 잰 난이도의 짝 모델로 같은 길로 올린다 — 한 칸씩이 아니다(haiku → sonnet → opus).
          `low` 로 받았는데 `high` 면 `opus` 이다. 에픽 끝 리뷰의 등급(7)도 이 잣대로
          멤버를 재어 고른다
-      본 가지: <본 가지> — 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다
+      옆에서 도는 일: <옆 일> — 그 파일은 건드리지 않는다(4-3)
+      본 가지: <본 가지> — 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다.
+      루트에서 커밋·병합하기 전에는 루트가 아직 그 가지에 서 있는지 **대조만** 한다 —
+      `git -C <루트> symbolic-ref -q HEAD` 가 `refs/heads/<본 가지>` 가 아니면(detached 이거나 누가
+      가지를 바꿨다) 치지 말고 감독에게 알리고 멈춘다. 엉뚱한 HEAD 에 선 병합은 `branch -d` 뒤에
+      참조가 하나도 안 남는다
       루트: <루트> — 2 의 `루트 자리`. 트래커를 고치는 것은 언제나 이 자리다(3 의 글의 4-1)
       - 워크트리가 있으면 EnterWorktree(path) 로 들어가 `git log <본 가지>..HEAD` 와
         `git status` 로 어디까지 했는지 읽고 이어 한다
       - 없으면 루트에서 다시 뜬다. 가지가 남아 있으면 그 가지로
         (`git worktree add .claude/worktrees/<에픽> worktree-<에픽>`), 없으면
         `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> <본 가지>`
+      - **루트가 저장소 꼭대기가 아니면**(모노레포의 하위 프로젝트) 워크트리에 들어간 뒤 그 안의
+        같은 하위로 옮겨 거기서 일한다 — 꼭대기에 서면 `moai` 가 루트의 `.moai` 를 찾아 쓰고, 훅은
+        `.claude/` 아래의 편집을 안 센다
+          cd "$(git -C <루트> rev-parse --show-prefix)"
       - 멤버의 칸은 이미 집혀 있다 — 다시 집지 않는다
       - 9-1 의 노트는 이 창의 몫만 적는다. 까닭 끝에 `거둔 일, 앞 세션 몫은 모른다` 를 붙인다 —
         앞 세션의 모델과 토큰은 어디에도 안 적혀, 없으면 멤버 전체를 이 창이 한 것으로 읽는다
@@ -137,7 +146,10 @@ home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 def parents(pid):
     while pid > 1:
         yield pid
-        out = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        try:
+            out = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        except OSError:
+            return
         pid = int(out) if out.isdigit() else 0
 def detached(s):
     """세션 파일이 대는 tmux 판을 이 서버에서 그 세션이 낳지 않았는가 — 떼어 낸 시험 서버의 판이다."""
@@ -235,7 +247,7 @@ PY
     옆에서 도는 일: <옆 일> — 그 파일은 건드리지 않는다(4-3)
     본 가지: <본 가지> — 아래의 가지 이름이다. 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다.
     루트에서 커밋·병합하기 전에는 루트가 아직 그 가지에 서 있는지 **대조만** 한다 —
-    `git -C <루트> symbolic-ref -q --short HEAD` 가 <본 가지> 가 아니면(detached 이거나 누가
+    `git -C <루트> symbolic-ref -q HEAD` 가 `refs/heads/<본 가지>` 가 아니면(detached 이거나 누가
     가지를 바꿨다) 치지 말고 감독에게 알리고 멈춘다. 엉뚱한 HEAD 에 선 병합은 `branch -d` 뒤에
     참조가 하나도 안 남는다
     1. 루트에서 펼친다 — idea 를 일감으로 바꾸는 길은 `moai idea promote <id> --from -`
@@ -332,7 +344,7 @@ PY
     8. ExitWorktree(keep) 로 루트로 돌아온다 — 워크트리 안에서 그것을 지우면 세션의
        자리가 사라진 디렉터리에 남아 감독이 다시는 이 세션을 루트로 못 본다.
        병합 전에 루트가 <본 가지> 에 서 있는지 대조한다 — 어긋나면 병합하지 않고 감독에게 알린다
-         git symbolic-ref -q --short HEAD
+         git symbolic-ref -q HEAD                  refs/heads/<본 가지> 여야 한다
        루트에서 **한 번에** 병합한다. 옆 일꾼과 겹치는 것은 감독이 보낼 때 갈랐고, 그래도
        부딪히면 아래처럼 되돌리고 워크트리에서 푼다 — 옆 세션을 찾아 알리지 않는다.
        `--no-commit` 을 쓰지 않는다. `--no-ff` 가 없으면 fast-forward 로 끝나 병합 커밋이 안 선다
@@ -342,7 +354,7 @@ PY
        로 되돌리고 EnterWorktree(path) 로 워크트리에 돌아가 6 부터 다시 한다
     9. 병합이 실제로 끝났으면 루트에서 `git worktree remove .claude/worktrees/<에픽>` 과
        `git branch -d worktree-<에픽>` 으로 워크트리와 가지를 지운다
-    9-1. 닫기 전에 **무엇이 이 일을 했는지** 이 창이 한 멤버마다 한 줄로 남긴다 — 7-1 에서 첫 칸에
+    9-1. 닫기 전에 **무엇이 이 일을 했는지** 이 창이 한 멤버마다 한 줄로 남긴다 — 7-1·4-3 에서 첫 칸에
        남긴 멤버는 아무도 안 했으니 빼고. 머리의 제안이 아니라
        이 창에서 **실제로 돈 모델**이다. 아래 줄은 감독이 제안으로 채워 보냈으니, 올렸거나 창이
        처음부터 다른 모델이었으면 모델·난이도를 실제 것으로 고치고 까닭에 그 까닭을 적는다 —
@@ -357,7 +369,7 @@ PY
        작은따옴표가 들면 `-b -` 로 stdin 에서 흘린다
          moai note <멤버> 'model: <회사>/<모델> tokens=<수> (<난이도> — <까닭>)'
     10. 그 뒤에 닫는다. **`moai mv <멤버> done` 은 그 병합이 실제로 끝난 뒤에만 친다** —
-       병합 전에 옮겼다가 되돌린 일꾼이 있었다. 7-1 에서 첫 칸에 남긴 멤버는 닫지 않는다 — 그
+       병합 전에 옮겼다가 되돌린 일꾼이 있었다. 7-1·4-3 에서 첫 칸에 남긴 멤버는 닫지 않는다 — 그
        멤버가 에픽을 열어 둔다. 워크트리가 남아 있으면 훅이 이 일을 옆
        워크트리의 것으로 읽어 `-m` 없는 리뷰 닫기를 못 막는다. 리뷰 이슈는 무엇이
        나왔는지를 남기며 닫는다
@@ -395,7 +407,8 @@ PY
 
 **옆이 쥐어 남긴 멤버**(브리프 4-3)는 그 옆 일의 보고를 확인한 뒤 놀고 있는 세션에 보낸다.
 3 의 글을 싣되 `<id>` 에 에픽을 채우고, 1 대신 "이미 펼친 에픽이다 — promote 하지 않고 첫 칸
-멤버를 2 부터 집는다" 를 적는다. 그 전에는 1 의 셈에서 그 파일을 쥔 일로 친다.
+멤버를 2 부터 집는다" 를 적는다. 그 전에는 1 의 셈에서 그 파일을 쥔 일로 친다. 그 멤버도 7-1 의
+것처럼 done 이 아니어도 맞다 — 에픽을 열어 두니 에픽도 done 이 아니다.
 
 보고가 브리프 7-1 에서 첫 칸에 남겼다고 댄 멤버는 done 이 아니어도 맞다 — 그 멤버가 에픽을 열어
 두니 에픽도 done 이 아니다. 그 멤버는 idea 가 아니라 1 의 목록에 안 뜨니, 남긴 까닭(사람의
@@ -542,9 +555,11 @@ def looks(fmt):
     return tmux("display-message", "-p", "-t", pane, fmt).stdout.strip()
 def shrunk(now, was):
     """지우기가 깎은 글인가. 한 번 지우면 줄 하나가 비고 다음 줄이 올라올 뿐이라, 남은 줄은 모두
-    앞 판의 줄 안에 차례대로 든다. 안 드는 줄이 있으면 그새 사람이 친 글이다."""
+    앞 판의 줄과 **같은 줄**로 차례대로 선다(빈 줄은 방금 비운 줄이다). 안 맞는 줄이 있으면 그새
+    사람이 친 글이다 — 줄 안에 드는지만 보면 새로 친 한 글자나 다시 친 앞머리가 앞 판의 어느
+    줄에든 들어 못 가른다."""
     rest = iter(was.split("\n"))
-    return all(any(line in old for old in rest) for line in now.split("\n"))
+    return all(not line or line in rest for line in now.split("\n"))
 QUIET = '#{pane_in_mode}#{pane_synchronized}'
 if not os.environ.get("TMUX"):
     skip("tmux 밖이다")
@@ -576,18 +591,27 @@ if kept is None:
 if kept:
     print("치던 글 —", name, pane)
     print(kept)
-seen = kept
+seen, ghost = kept, None
 for _ in range(20):
     left = draft(pane)
-    if left == "":
+    if left == "" and ghost is None:
         break
     if left is None or looks(QUIET) != "00":
         skip("지우던 입력 칸을 놓쳤다")
+    # 흐린 글로 보고 지워 본 글이 바뀌었으면 제안 글이 아니었다 — 제안 글은 안 지워진다. 위에 옮겼다.
+    if ghost is not None and left != ghost:
+        skip("사람이 치고 있다", "지우기를 멈췄다. 위에 옮긴 `그새 선 흐린 글` 도 그 창의 사람에게 돌려준다")
     # 지우는 사이에 사람이 친 글은 옮긴 적이 없다 — 더 지우면 사람에게 남은 복사가 없다(사용자 결정).
     if not shrunk(left, seen):
-        print("그새 친 글 —", name, pane)
+        if not dim_only(pane):
+            print("그새 친 글 —", name, pane)
+            print(left)
+            skip("사람이 치고 있다", "지우기를 멈췄다. 사람에게 비워도 된다고만 짚는다")
+        # 사람의 글을 다 지운 빈 칸에는 흐린 제안 글이 다시 선다 — 친 글이 아니니 멈추지 않는다.
+        # 색으로만 가르지도 않는다: 옮겨 두고 지워 보아, 지워지면 흐리게 그린 사람 글이다(위 `ghost`).
+        print("그새 선 흐린 글 —", name, pane)
         print(left)
-        skip("사람이 치고 있다", "지우기를 멈췄다. 사람에게 비워도 된다고만 짚는다")
+        ghost = left
     seen = left
     erased = True
     tmux("send-keys", "-t", pane, "C-e", "C-u", "DC")
@@ -598,6 +622,8 @@ else:
     # 치던 글과 같기를 바라지 않는다 — 사람의 글을 지운 빈 칸에 제안 글이 다시 서면, 치던 글은
     # 이미 옮겼고 남은 것은 제안 글뿐이다.
     rest = draft(pane)
+    if ghost is not None and rest != ghost:
+        skip("사람이 치고 있다", "지우기를 멈췄다. 위에 옮긴 `그새 선 흐린 글` 도 그 창의 사람에게 돌려준다")
     if rest and rest == left and dim_only(pane):
         if rest == kept:
             print("위의 `치던 글` 은 흐린 제안 글이었다 — 사람이 친 것이 아니다")
@@ -605,6 +631,8 @@ else:
             # 사람의 글이 아니니 상태줄에 "감독 창에 옮겼다" 고 말하지 않는다 — 그 말을 읽은 사람이
             # 감독 창에서 제가 쓴 적 없는 글을 찾는다.
             kept = ""
+        elif rest == ghost:
+            print("위의 `그새 선 흐린 글` 은 제안 글이었다 — 사람이 친 것이 아니다")
     elif rest != "":
         # 하나도 안 지워졌으면 그 글은 아직 그 칸에 있다 — "이미 지웠다" 고 하면 감독이 그 창에
         # 그대로 있는 글을 사람에게 한 벌 더 돌려준다.
@@ -614,7 +642,12 @@ if (read(f) or {}).get("status") != "idle":
     skip("그새 idle 이 아니다")
 if looks(QUIET) != "00":
     skip("그새 판이 복사 모드로 갔다")
-say = "감독 " + me + ": " + epic + " 보고를 확인했다 — 이 창을 /clear 한다" + (". 치던 글은 감독 창에 옮겼다" if kept else "")
+# 마지막으로 읽은 뒤에 사람이 쳤으면 `/clear` 가 그 글 뒤에 붙는다 — 치기 직전에 한 번 더 읽는다.
+# 비었거나 그대로거나 흐린 제안 글만 새로 섰으면 친다.
+last = draft(pane)
+if last is None or (last not in ("", left) and not dim_only(pane)):
+    skip("그새 입력 칸에 글이 섰다", "지우기를 멈췄다. 사람에게 비워도 된다고만 짚는다")
+say ="감독 " + me + ": " + epic + " 보고를 확인했다 — 이 창을 /clear 한다" + (". 치던 글은 감독 창에 옮겼다" if kept else "")
 for client in tmux("list-clients", "-t", pane, "-F", '#{client_name}').stdout.split("\n"):
     if client:
         tmux("display-message", "-c", client, "-d", "8000", "-t", pane, say)
@@ -670,7 +703,10 @@ PY
   앞 판의 줄에서 깎인 것이 아닌 글이 보이면 곧바로 멈추고 `/clear` 를 치지 않는다 — 그 글은 옮긴
   적이 없어 더 지우면 사람에게 남은 복사가 없다. 새 글은 `그새 친 글` 로 감독 창에 옮기고, 앞서
   지운 것은 `치던 글은 이미 지웠다` 가 말한다. 합쳐서 계속 지우는 길은 안 고른다 — 사람이 치는
-  중에 `/clear` 가 그 글 뒤에 붙는다
+  중에 `/clear` 가 그 글 뒤에 붙는다. 남은 줄은 앞 판의 줄과 **같아야** 깎인 것이다 — 줄 안에
+  드는지만 보면 새로 친 한 글자가 앞 판 어느 줄에든 든다. 새로 선 글이 모두 흐리면 사람의 글을
+  지운 빈 칸에 다시 선 제안 글일 수 있어 멈추지 않고 `그새 선 흐린 글` 로 옮겨 둔 채 지워 본다 —
+  지워지면 사람이 친 글로 보고 멈춘다. `/clear` 를 치기 직전에도 입력 칸을 한 번 더 읽는다
 - **비우기와 다음 배정을 한 호흡에 하지 않는다.** `/clear` 는 큐에 쌓인 글을 함께 지운다.
   스크립트가 `비웠다` 를 낸 — 세션 id 가 바뀐 — 뒤에 다음 idea 를 보내고, `비웠는지 모른다`
   면 그 창이 어떤지 보기 전에는 보내지 않는다
