@@ -37,9 +37,14 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 여러 프로젝트를 한곳에서 볼 때:
 
-  moai project add <dir>        등록하면 `.moai` 밖의 `moai`·`status`·`ready` 가
+  moai project add <dir>        등록하면 `.moai` 밖의 moai·status·ready 가
                                 등록한 프로젝트를 한눈에 낸다
   moai -C <dir> <명령>          그 밖의 명령은 어느 프로젝트인지 댄다
+
+화면의 말을 바꿀 때:
+
+  MOAI_LANG=en moai status      영어 화면으로. en·ko·zh·ja·es 가 된다
+                                늘 쓰려면 사용자 설정의 [i18n] 에 lang = \"en\"
 
 계획을 한 번에 세울 때:
 
@@ -48,8 +53,8 @@ moai add --from - <<'PLAN'
 - [p1] 첫 이슈 #bug
 PLAN
 
-승인 게이트가 없다. 무엇이든 만들고 무엇이든 옮길 수 있다. 대신
-`moai status` 가 에픽 없는 이슈·오래 멈춘 review·한 번에 벌여 놓은 것을 비춘다.
+승인 게이트가 없다. 무엇이든 만들고 무엇이든 옮길 수 있다. 대신 `moai status` 가
+에픽 없는 이슈·오래 멈춘 review·한 번에 벌여 놓은 것을 비춘다.
 
 `moai <명령> --help` 가 그 명령의 전부를 낸다. 저장소에 AGENTS.md 가 있으면
 그 저장소에서 일하는 절차가 거기 있다."
@@ -71,7 +76,7 @@ pub struct Cli {
 
     // 값과 기본값은 글로 적는다 — clap 이 붙이는 `[default: …] [possible values: …]` 가
     // 옵션 열 옆에서 130칸을 넘었다(moai-c57v). `NO_COLOR` 도 auto 가 읽는다.
-    /// auto·always·never (기본 auto, 파이프면 끈다)
+    /// auto|always|never (기본 auto, 파이프면 끈다)
     #[arg(long, global = true, value_name = "어떻게", default_value = "auto", hide_default_value = true, hide_possible_values = true)]
     pub color: ColorArg,
 
@@ -126,7 +131,11 @@ pub enum Cmd {
     Ready(WorktreeArg),
 
     /// 이슈를 만든다
-    #[command(after_help = "\
+    // `-h` 도 설명을 옵션 밑 줄에 둔다(`next_line_help`) — 옆 한 줄 모양이면 옵션 열이
+    // `--type <issue|epic|milestone|idea>` 에 맞춰 44칸으로 벌어져 설명이 112칸까지
+    // 갔다(moai-x18p). 옵션이 스물이 넘는 명령이라 열을 좁혀도 다음 옵션이 다시 넓힌다.
+    // `Typed::Add`·`IdeaCmd::Add` 도 같은 까닭으로 같다.
+    #[command(next_line_help = true, after_help = "\
 예시:
   moai add \"파서가 BOM 에서 죽는다\" -t bug -p 1
   moai add \"저장 계층\" --type epic
@@ -259,14 +268,15 @@ NOTE
     #[command(after_help = "  마일스톤과 에픽이 디렉터리처럼 동작한다. 왼쪽에서 돌아다니면 커서가 머문
   것의 정보가 오른쪽에 나온다.
 
-  j·k 나 화살표로 이동, Enter·l 로 들어가고 Backspace·h 로 나온다. gg·Home 이 맨
-  위, G·End 가 맨 아래, Ctrl-d·Ctrl-u 가 반 쪽, Ctrl-f·Ctrl-b(PageDown·PageUp)가
-  한 쪽이다. Tab·Shift-Tab 이 목록과 상세 사이로 포커스를 옮기고, 이동키는 모두
-  포커스 있는 칸을 움직인다 — 상세를 굴리려면 Tab 으로 간다. / 가 검색, Esc 가
-  걸어 둔 거름망을 푼다. r 은 커서가 선 줄을 읽음으로 적는다(아래 [NEW]).
-  검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며, 검색은 치는 대로 목록을 거르고
-  Tab·Shift-Tab 이 찾을 자리를 전체·id·제목·태그·본문으로 돌린다. 맨 위 헤더가
-  등록한 프로젝트마다 번호를 대고, 그 숫자를 SPC 없이 그대로 누르면 그
+  j·k 나 화살표로 이동, Enter·l 로 들어가고 Backspace·h 로 나온다. gg·Home
+  이 맨 위, G·End 가 맨 아래, Ctrl-d·Ctrl-u 가 반 쪽,
+  Ctrl-f·Ctrl-b(PageDown·PageUp)가 한 쪽이다. Tab·Shift-Tab 이 목록과 상세
+  사이로 포커스를 옮기고, 이동키는 모두 포커스 있는 칸을 움직인다 — 상세를
+  굴리려면 Tab 으로 간다. / 가 검색, Esc 가 걸어 둔 거름망을 푼다. r 은 커서가
+  선 줄을 읽음으로 적는다(아래 [NEW]).
+  검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며, 검색은 치는 대로 목록을
+  거르고 Tab·Shift-Tab 이 찾을 자리를 전체·id·제목·태그·본문으로 돌린다. 맨
+  위 헤더가 등록한 프로젝트마다 번호를 대고, 그 숫자를 SPC 없이 그대로 누르면 그
   프로젝트로 바로 간다 — 0 은 전체, 곧 프로젝트 층이다.
 
   그 밖의 동작은 SPC 를 누르면 곧바로 뜨는 메뉴에 있다. 메뉴는 그 자리에서 되는
@@ -295,8 +305,8 @@ NOTE
   거름망과 따로라 Esc 로 안 풀리고, 둘은 함께 걸린다.
   정렬은 급한 것·새것·앞 칸·가나다가 위고, 고른 것을 다시 누르면 거꾸로 선다.
   기본(우선순위)이 아니면 경로 줄이 그 차례를 댄다.
-  열(SPC c)은 [보임/숨김] 으로 켜고 끈다. 담당·태그·생성·수정 날짜는 줄 오른쪽에
-  서고, 좁으면 날짜 → 담당 → 태그 차례로 걷혀 제목 몫을 남긴다.
+  열(SPC c)은 [보임/숨김] 으로 켜고 끈다. 담당·태그·생성·수정 날짜는 줄
+  오른쪽에 서고, 좁으면 날짜 → 담당 → 태그 차례로 걷혀 제목 몫을 남긴다.
   보기·정렬·열은 누를 때마다 사용자 설정의 [tui] 표에 적혀 다음 실행과 다른
   프로젝트로 이어진다(`moai project add` 가 쓰는 파일과 같다).
 
@@ -362,9 +372,9 @@ NOTE
   어느 프로젝트인지 모르니 `moai -C <dir> <명령>` 으로 부른다.
 
   저장소가 아니라 **사람의** 설정이다 — `.moai` 밖 어디서 불러도 된다. 자리는
-  MOAI_CONFIG → $XDG_CONFIG_HOME/moai/config.toml → ~/.config/moai/config.toml.
-  상대경로는 지금 자리(`-C` 를 줬으면 그 디렉터리)에 붙이고 심볼릭 링크를 풀어
-  적는다.
+  MOAI_CONFIG → $XDG_CONFIG_HOME/moai/config.toml →
+  ~/.config/moai/config.toml. 상대경로는 지금 자리(`-C` 를 줬으면 그 디렉터리)에
+  붙이고 심볼릭 링크를 풀어 적는다.
 
   누가 했는지 묻지 않는다. 이력이 남는 파일이 아니다.")]
     Project(ProjectCmd),
@@ -432,10 +442,10 @@ pub enum ProjectCmd {
   moai project color ~/work/argos green   경로로 고른 색 대신 초록으로
   moai project color ~/work/argos auto    정한 것을 지우고 경로로 고른다
 
-  고를 수 있는 색은 cyan·green·blue 셋뿐이다. 빨강·노랑·자홍은 이미 오류·집은
-  일·review 를 뜻해 id 곁에서 거짓 뜻이 되고, 밝은 색과 회색은 어느 한쪽
-  바탕에서 사라진다. 색은 곁들이다 — 이름이 늘 곁에 선다. 두 프로젝트가 같은
-  색으로 겹칠 때 쓴다.
+  고를 수 있는 색은 cyan·green·blue 셋뿐이다. 빨강·노랑·자홍은 이미
+  오류·집은 일·review 를 뜻해 id 곁에서 거짓 뜻이 되고, 밝은 색과 회색은 어느
+  한쪽 바탕에서 사라진다. 색은 곁들이다 — 이름이 늘 곁에 선다. 두 프로젝트가
+  같은 색으로 겹칠 때 쓴다.
 
   사용자 설정의 `[[project]]` 에 `color = \"green\"` 로 적힌다. 손으로 적어도
   된다 — 틀린 값은 `moai project ls` 가 한 줄로 비추고 경로로 고른 색을 쓴다.")]
@@ -459,6 +469,7 @@ pub enum ProjectCmd {
 #[derive(Subcommand, Debug)]
 pub enum Typed {
     /// 만든다
+    #[command(next_line_help = true)]
     Add(AddArgs),
     // `ls` 는 같은 것의 다른 이름이다. **어휘를 둘로 만들지 않으려고 별명으로
     // 둔다** — 목록을 내는 동사가 둘이면 도움말이 둘 다 가르쳐야 한다.
@@ -472,6 +483,7 @@ pub enum Typed {
 #[derive(Subcommand, Debug)]
 pub enum IdeaCmd {
     /// 담는다. 제목 하나면 된다
+    #[command(next_line_help = true)]
     Add(AddArgs),
     /// 펼치거나 목록을 낸다 (`ls` 도 같다)
     #[command(alias = "ls")]
@@ -555,9 +567,11 @@ pub struct AddArgs {
     pub body: Option<String>,
 
     /// 담당. 안 주면 만든 사람, `이름 (메일)` 로 준다. `none` 이면 비운다
-    #[arg(short, long, value_name = "이름 (메일)|none")]
+    #[arg(short, long, value_name = "누구|none")]
     pub assignee: Option<String>,
 
+    // 설명이 없으면 `next_line_help` 가 공백만 든 줄을 그린다(리뷰 moai-5yq0).
+    /// 만들 것의 종류 (없으면 issue, `epic add` 면 epic)
     #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
     pub kind: Option<Kind>,
 
@@ -581,17 +595,17 @@ pub struct AddArgs {
     ///
     /// **`--from` 이 있어야 뜻이 있다.** 한때 없이도 받았고, 그때
     /// `moai add "제목" --dry-run` 은 연습이라고 적힌 줄을 찍은 다음 그것을
-    /// 실제로 만들었다 — 막는 줄 알고 부른 명령이 쓰는 것보다 나쁜 것은 없다.
+    /// 실제로 만들었다 — 막는 줄 알고 부른 명령이 쓰는 것이 가장 나쁘다.
     #[arg(long, verbatim_doc_comment)]
     pub dry_run: bool,
 
     // 변수가 전부 필수인 까닭은 moai-ahyz.
     /// 계획 템플릿의 `{{이름}}` 을 채운다 (`--from` 과 함께, 여러 번 준다)
     ///
-    /// **변수는 전부 필수다** — 못 채운 이름·빈 값·줄바꿈이 든 값·계획에 없는
-    /// 이름·같은 이름 두 번은 거절하고 아무것도 안 만든다. 이름은 영문·숫자·
-    /// `_`·`-` 이고, 값은 늘 제목 글자라 변수는 제목 자리에만 둔다.
-    /// `--dry-run` 과 같은 까닭으로 `--from` 없이 주면 거절한다.
+    /// **변수는 전부 필수다** — 못 채운 이름·빈 값·줄바꿈이 든 값·계획에
+    /// 없는 이름·같은 이름 두 번은 거절하고 아무것도 안 만든다. 이름은
+    /// 영문·숫자·`_`·`-` 이고, 값은 늘 제목 글자라 변수는 제목 자리에만
+    /// 둔다. `--dry-run` 과 같은 까닭으로 `--from` 없이 주면 거절한다.
     #[arg(long = "var", value_name = "이름=값", verbatim_doc_comment)]
     pub var: Vec<String>,
 
@@ -614,7 +628,7 @@ pub struct ShowArgs {
     #[arg(long)]
     pub tree: bool,
 
-    /// 에픽 하나를 `add --from` 이 받는 마크다운으로 되뽑는다
+    /// 에픽을 `add --from` 이 받는 마크다운으로 되뽑는다
     #[arg(long)]
     pub as_plan: bool,
 
@@ -630,7 +644,7 @@ pub struct ShowArgs {
 /// 제 워크트리 파일에만 간다.
 #[derive(Args, Debug, Default, Clone, Copy)]
 pub struct WorktreeArg {
-    /// 다른 git 워크트리의 이슈도 겹쳐 본다 (파일은 안 바뀐다)
+    /// 다른 워크트리의 이슈도 겹쳐 본다 (파일은 안 바뀐다)
     #[arg(long)]
     pub worktree: bool,
 }
@@ -750,7 +764,7 @@ pub struct EditArgs {
     pub priority: Option<u8>,
 
     /// `이름 (메일)` 로 준다. `none` 이면 뺀다
-    #[arg(short, long, value_name = "이름 (메일)|none")]
+    #[arg(short, long, value_name = "누구|none")]
     pub assignee: Option<String>,
 }
 
@@ -767,7 +781,7 @@ pub struct DeferArgs {
     #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
     pub msg: Option<String>,
 
-    /// 아직 이 칸에 있을 때만 미루거나 도로 집는다 (겨루는 집기)
+    /// 이 칸에 있을 때만 미루거나 도로 집는다 (겨루는 집기)
     ///
     /// `mv --from` 과 같은 자다. 옆에서 집어 일하기 시작한 줄을 뒤늦게
     /// 계획 밖으로 빼지 않는다. 안 주면 지금까지처럼 아무것도 막지 않는다.
@@ -780,9 +794,9 @@ pub struct DeferArgs {
 pub struct ReadArgs {
     /// 읽음으로 적을 이슈들
     ///
-    /// 무엇을 읽었는지는 언제나 댄다 — 인자 없이 부르면 아무 줄도 안 적으면서
-    /// 성공으로 끝나, 사람은 다 적힌 줄 알고 넘어간다. `--all`·`-e` 가 그
-    /// 자리를 채운다.
+    /// 무엇을 읽었는지는 언제나 댄다 — 인자 없이 부르면 아무 줄도 안
+    /// 적으면서 성공으로 끝나, 사람은 다 적힌 줄 알고 넘어간다.
+    /// `--all`·`-e` 가 그 자리를 채운다.
     #[arg(value_name = "id", required_unless_present_any = ["all", "epic"], verbatim_doc_comment)]
     pub ids: Vec<String>,
 
@@ -856,8 +870,10 @@ pub enum SkillCmd {
 
   이미 열려 있는 Claude 세션은 옛 판을 계속 쓴다 — 다시 열어야 든다.")]
     Install {
-        /// 어디에 등록할까
-        #[arg(long, value_name = "범위", default_value = "local")]
+        // 값과 기본값은 `--color` 처럼 글로 적는다 — clap 이 붙이는 괄호가 `-h` 에서
+        // 98칸이 됐다(moai-x18p).
+        /// 어디에 등록할까: local(기본)·project·user
+        #[arg(long, value_name = "범위", default_value = "local", hide_default_value = true, hide_possible_values = true)]
         scope: Scope,
 
         /// 심지 않고 무엇이 심길지만 낸다
