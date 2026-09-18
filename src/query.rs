@@ -35,41 +35,29 @@ pub struct Where<'a> {
     pub states: BTreeMap<&'a str, &'a str>,
     /// 묶음 → 그 칸의 셈이 마지막으로 움직인 때 (`report::Stand::since`).
     pub since: BTreeMap<&'a str, &'a str>,
-    /// 종류가 다른 쌍둥이에게 id 가 가려진 줄인가 (`report::eclipsed`). 위의 소속
+    /// 종류가 다른 쌍둥이에게 id 가 가려진 줄인가 (`report::is_eclipsed`). 위의 소속
     /// 지도는 id 로 짠 것이라 그 줄에는 쌍둥이의 값이 나온다.
     /// 비었으면(`Where::default`) 가려진 줄이 없는 것으로 친다.
-    eclipsed: Option<RowTest<'a>>,
+    pub(crate) eclipsed: Option<RowTest<'a>>,
     /// 길 잃은 줄 **밑에 접힌** 줄 (`report::under_lost`). 트리가 `(길 잃음)` 안에 그리고
     /// status 가 `no_epic`·`no_milestone` 으로 안 세는 그 집합이다 — `none` 거름이 같은 자로
     /// 고르게 한다(moai-phw9).
-    folded: BTreeSet<&'a str>,
+    pub(crate) folded: BTreeSet<&'a str>,
 }
 
 impl<'a> Where<'a> {
     /// **한 걸음으로 잰다**([`crate::report::Soil`]) — 소속·미룸·묶음 칸·가려짐·길 잃음은 서로가
-    /// 서로의 재료라, 따로 부르면 `groups` 만 서너 번 돈다.
+    /// 서로의 재료라, 따로 부르면 `groups` 만 서너 번 돈다. 이미 잰 것을 든 쪽(탐색기의 `tui::Ground`)은
+    /// 이것을 안 부르고 제 지도를 빌려 **필드 이름으로** 짓는다(moai-fbdg) — 같은 타입의 지도가 넷이라
+    /// 차례로 넘기면 `states` 와 `since` 가 바뀌어도 컴파일된다.
     pub fn of(all: &'a [Issue], cfg: &'a crate::config::Config) -> Where<'a> {
         let soil = crate::report::Soil::of(all);
         let stands = soil.stands(all, cfg);
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();
         let crate::report::Soil { epic, milestone, roots, kinds, folded, .. } = soil;
-        let eclipsed = Box::new(crate::report::eclipsed_in(kinds));
-        Where::measured(epic, milestone, roots.into_keys().collect(), states, since, eclipsed, folded)
-    }
-
-    /// **이미 잰 것으로 짓는다**(moai-fbdg). 탐색기는 적재 스레드에서 한 번 재어 소유해 두고, 거름망을
-    /// 걸 때마다 그것을 빌려 이 꼴로 짓는다 — 키 하나마다 `Where::of` 를 돌리면 이슈 1만 건에서 300ms 다.
-    pub fn measured(
-        epic: BTreeMap<&'a str, &'a str>,
-        milestone: BTreeMap<&'a str, &'a str>,
-        put_off: BTreeSet<&'a str>,
-        states: BTreeMap<&'a str, &'a str>,
-        since: BTreeMap<&'a str, &'a str>,
-        eclipsed: RowTest<'a>,
-        folded: BTreeSet<&'a str>,
-    ) -> Where<'a> {
-        Where { epic, milestone, put_off, states, since, eclipsed: Some(eclipsed), folded }
+        let eclipsed: RowTest<'a> = Box::new(move |i: &Issue| crate::report::is_eclipsed(&kinds, i));
+        Where { epic, milestone, put_off: roots.into_keys().collect(), states, since, eclipsed: Some(eclipsed), folded }
     }
 
     /// 그 줄이 서 있는 칸 (`report::column`).
@@ -159,19 +147,16 @@ impl GrepIn {
     }
 
     /// `q` 는 이미 소문자다([`Filter::build`]).
+    ///
+    /// **어느 자리를 보는지는 `sees_*` 가 정한다**(moai-xemz 리뷰) — 탐색기가 찾은 글자를 칠할 자리도 그
+    /// 넷으로 가르므로, 여기서 범위를 따로 적으면 범위 하나를 고친 날 걸린 줄에 칠이 빠지거나 안 걸린
+    /// 자리에 선다.
     pub fn hits(self, i: &Issue, q: &str) -> bool {
         let has = |s: &str| s.to_lowercase().contains(q);
-        let id = || has(&i.id);
-        let title = || has(&i.title);
-        let tag = || i.tags.iter().any(|t| has(t));
-        let body = || i.body.as_deref().is_some_and(has);
-        match self {
-            GrepIn::All => id() || title() || tag() || body(),
-            GrepIn::Id => id(),
-            GrepIn::Title => title(),
-            GrepIn::Tag => tag(),
-            GrepIn::Body => body(),
-        }
+        (self.sees_id() && has(&i.id))
+            || (self.sees_title() && has(&i.title))
+            || (self.sees_tag() && i.tags.iter().any(|t| has(t)))
+            || (self.sees_body() && i.body.as_deref().is_some_and(has))
     }
 }
 

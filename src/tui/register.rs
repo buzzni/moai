@@ -278,7 +278,7 @@ mod tests {
     use super::*;
     use crate::scratch::Scratch;
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-    use crate::nav::{Index, Path as NavPath};
+    use crate::nav::Path as NavPath;
     use crate::store::Repo;
     use crate::tui::layer::{At, Layer, Look, Shut};
     use crate::tui::stamp_of;
@@ -658,8 +658,8 @@ mod tests {
         let repo = Repo { root: here.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, NavPath::new(), stamp);
+        let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, NavPath::new(), stamp);
         a.user_config = Some(s.config());
         a.launched_at = Some(here.clone());
         assert!(a.layer.is_none());

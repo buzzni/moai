@@ -38,6 +38,12 @@ pub fn clip(s: &str, max: usize) -> String {
         out.push(c);
         used += w;
     }
+    // **글자로 잰 폭이 글로 잰 폭보다 좁을 수 있다** — `❤️`(U+2764 U+FE0F)는 글자로 1+0 칸인데 [`width`] 는 2 칸으로
+    // 센다. 글로 재어 넘으면 뒤에서 덜어 낸다: 넘친 채 두면 자른 글의 폭을 믿고 자리를 셈한 쪽(탐색기 오른쪽
+    // 열의 걷기, moai-xemz 리뷰)이 테두리 밖으로 밀려 셈이 잘린다. 흔한 글은 한 번 재고 지나간다.
+    while !out.is_empty() && width(&out) > max - 1 {
+        out.pop();
+    }
     out.push('…');
     out
 }
@@ -86,7 +92,12 @@ pub fn clip_front(s: &str, max: usize) -> String {
         used += w;
         back.push(c);
     }
-    std::iter::once('…').chain(back.into_iter().rev()).collect()
+    // [`clip`] 과 같은 까닭으로 글로 재어 넘으면 앞에서 덜어 낸다(`❤️` 는 글자로 1 칸, 글로 2 칸).
+    let mut kept: std::collections::VecDeque<char> = back.into_iter().rev().collect();
+    while !kept.is_empty() && width(&kept.iter().collect::<String>()) > max - 1 {
+        kept.pop_front();
+    }
+    std::iter::once('…').chain(kept).collect()
 }
 
 /// 한 줄에 세우는 글 — 제어문자를 걷고 여러 줄이면 사이를 두 칸으로 접는다.
@@ -278,7 +289,9 @@ mod tests {
     /// 줄이 테두리를 넘어 위젯이 말없이 잘라 낸다.
     #[test]
     fn clipping_never_exceeds_the_budget() {
-        for s in ["짧다", "아주 긴 한글 제목이 여기 들어간다", "a very long ascii title here"] {
+        // `❤️` 는 글자로 재면 1 칸, 글로 재면 2 칸이다 — 글자로만 재어 자르면 상한을 두 배 가까이 넘겼다(moai-xemz 리뷰).
+        let hearts = format!("#{}", "\u{2764}\u{FE0F}".repeat(13));
+        for s in ["짧다", "아주 긴 한글 제목이 여기 들어간다", "a very long ascii title here", hearts.as_str()] {
             for max in 0..20 {
                 assert!(width(&clip(s, max)) <= max, "{s:?} @ {max} → {:?}", clip(s, max));
             }
@@ -290,7 +303,8 @@ mod tests {
     /// 앞을 자르는 쪽도 같은 자로 잰다 — 상한을 넘지 않고 뒤를 남긴다.
     #[test]
     fn clipping_the_front_keeps_the_tail_within_the_budget() {
-        for s in ["/w/one", "/home/raven/작업/아주/깊은/경로/여기", "짧다"] {
+        let hearts = format!("{}#", "\u{2764}\u{FE0F}".repeat(13));
+        for s in ["/w/one", "/home/raven/작업/아주/깊은/경로/여기", "짧다", hearts.as_str()] {
             for max in 0..20 {
                 let got = clip_front(s, max);
                 assert!(width(&got) <= max, "{s:?} @ {max} → {got:?}");

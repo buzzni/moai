@@ -214,11 +214,15 @@ pub struct Ground {
     folded: std::collections::BTreeSet<String>,
 }
 
-impl Ground {
-    fn of(issues: &[Issue], cfg: &Config) -> Ground {
-        Ground::in_soil(issues, cfg, &crate::report::Soil::of(issues))
-    }
+/// 적재 한 걸음(moai-fbdg) — 색인과 [`Ground`] 를 **한 번 잰 지도**(`report::Soil`)에서 짓는다. 여는 길
+/// (`cmd::tui`)·다시 읽기([`prepare`])·시험의 들이기([`App::adopt`])가 모두 이것 하나를 지난다 — 한때 여는
+/// 길만 `Index::of` 와 `Ground::of` 를 따로 불러, 첫 화면 앞에서 소속 지도를 두 번 쟀다(moai-xemz 리뷰).
+pub fn measure(issues: &[Issue], cfg: &Config) -> (Index, Ground) {
+    let soil = crate::report::Soil::of(issues);
+    (Index::in_soil(issues, &soil), Ground::in_soil(issues, cfg, &soil))
+}
 
+impl Ground {
     fn in_soil(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) -> Ground {
         let stands = soil
             .stands(issues, cfg)
@@ -245,26 +249,29 @@ impl Ground {
         }
     }
 
-    /// 거름망이 볼 꼴 — 든 지도를 빌리기만 한다. 짓는 값은 묶음 수에 비례하고(재는 값은 이슈 수에
-    /// 비례한다), 여기서 다시 재는 것은 없다.
+    /// 묶음 id → 멤버에서 읽은 칸(`report::group_states` 와 같은 답). 거름망과 `tui --json` 의 줄이 쓴다.
+    pub fn columns(&self) -> std::collections::BTreeMap<&str, &str> {
+        self.stands.iter().map(|(id, s)| (id.as_str(), s.column.as_str())).collect()
+    }
+
+    /// 거름망이 볼 꼴 — 든 지도를 빌리기만 하고 다시 재는 것은 없다. 빌린 지도를 짓는 값은 **이슈 수에
+    /// 비례한다**: 소속 지도(`epic`·`milestone`)는 멤버 줄마다 한 칸이다. 그래도 재는 값(`Where::of`, 1만
+    /// 건에서 수십 ms)보다 한참 싸서 거름망이 키마다 부른다. 필드는 **이름으로** 넘긴다 — 같은 타입의
+    /// 지도가 넷이라 차례로 넘기면 서로 바뀌어도 컴파일된다.
     fn here(&self) -> crate::query::Where<'_> {
         fn borrow(m: &std::collections::BTreeMap<String, String>) -> std::collections::BTreeMap<&str, &str> {
             m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
         }
-        let states = self.stands.iter().map(|(id, s)| (id.as_str(), s.column.as_str())).collect();
-        let since = self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect();
         let kinds = &self.kinds;
-        let eclipsed: crate::query::RowTest<'_> =
-            Box::new(move |i: &Issue| kinds.get(i.id.as_str()).is_some_and(|k| *k != i.kind));
-        crate::query::Where::measured(
-            borrow(&self.epic),
-            borrow(&self.milestone),
-            self.put_off.iter().map(String::as_str).collect(),
-            states,
-            since,
-            eclipsed,
-            self.folded.iter().map(String::as_str).collect(),
-        )
+        crate::query::Where {
+            epic: borrow(&self.epic),
+            milestone: borrow(&self.milestone),
+            put_off: self.put_off.iter().map(String::as_str).collect(),
+            states: self.columns(),
+            since: self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect(),
+            eclipsed: Some(Box::new(move |i: &Issue| crate::report::is_eclipsed(kinds, i))),
+            folded: self.folded.iter().map(String::as_str).collect(),
+        }
     }
 }
 
@@ -341,10 +348,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         .collect();
     let issues = g.load.issues;
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸·거름망이 같은 지도를 나눠 쓴다.
-    let soil = crate::report::Soil::of(&issues);
-    let index = Index::in_soil(&issues, &soil);
-    let ground = Ground::in_soil(&issues, &repo.config, &soil);
-    drop(soil);
+    let (index, ground) = measure(&issues, &repo.config);
     let now = crate::model::now();
     let mut watched = g.watched;
     watched.extend(heads);
@@ -500,8 +504,8 @@ pub struct App {
     /// 다시 읽는 길. 진짜 길은 [`prepare`] 다. **시험이 갈아 끼운다** — 스레드에서
     /// 짓는 읽기가 패닉하는 때는 진짜 파일로는 못 만든다.
     read: fn(&Repo, bool) -> crate::fail::R<Fresh>,
-    /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임
-    /// `Filter::matches` 를 돌리면 `Where::of` 가 프레임마다 지도를 다시 만든다.
+    /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임 `Filter::matches` 를 돌리면
+    /// 거름망이 볼 꼴(`Ground::here`)을 프레임마다 다시 짓는다. 소속 지도 자체는 적재 때 한 번 잰다(moai-fbdg).
     keep: Vec<bool>,
     /// 무엇을 보일까(moai-fmv5) — 칸·미룸 토글. 거름망과 따로 들어 Esc 가 안 푼다.
     pub view: view::View,
@@ -602,23 +606,23 @@ pub struct Edit {
 
 impl App {
     /// 저장소 없이 세운다 — 시험과 눈으로 보는 길이 이것을 쓴다. 진짜 길은
-    /// [`App::open`] 이고, 그쪽은 색인을 부른 쪽에서 받는다.
+    /// [`App::open`] 이고, 그쪽은 색인과 [`Ground`] 를 부른 쪽에서 받는다.
     #[cfg(test)]
     pub fn new(issues: Vec<Issue>, cfg: Config, path: Path) -> App {
-        let index = Index::of(&issues);
-        App::build(issues, index, cfg, path, Vec::new())
+        let (index, ground) = measure(&issues, &cfg);
+        App::build(issues, index, ground, cfg, path, Vec::new())
     }
 
     /// 저장소에서 읽어 세운다.
     ///
-    /// **색인은 부른 쪽이 이미 만든 것을 받는다** — 여는 데서 다시 만들면
+    /// **색인과 [`Ground`] 는 부른 쪽이 이미 잰 것을 받는다**([`measure`]) — 여는 데서 다시 만들면
     /// 같은 훑기를 두 번 하고, 그 훑기는 이슈 수에 비례한다.
     /// **표식도 부른 쪽이 읽기 전에 잰 것을 받는다** — 읽고 나서 재면 그
     /// 사이에 떨어진 쓰기가 "이미 본 것" 으로 적혀 영영 안 보인다.
-    pub fn open(repo: Repo, load: Load, index: Index, path: Path, stamp: Stamp) -> App {
+    pub fn open(repo: Repo, load: Load, index: Index, ground: Ground, path: Path, stamp: Stamp) -> App {
         let cfg = repo.config.clone();
         let ids = load.errors.iter().map(|e| e.id.clone()).collect();
-        let mut app = App::build(load.issues, index, cfg, path, ids);
+        let mut app = App::build(load.issues, index, ground, cfg, path, ids);
         app.stamp = stamp;
         app.repo = Some(repo);
         app
@@ -652,6 +656,7 @@ impl App {
     fn build(
         issues: Vec<Issue>,
         index: Index,
+        ground: Ground,
         cfg: Config,
         path: Path,
         unreadable_ids: Vec<Option<String>>,
@@ -659,7 +664,6 @@ impl App {
         // 들어간 채로 시작하면(`--path`) 나올 층마다 기억 자리를 만들어 둔다.
         let remembered = vec![0; path.len()];
         let keep = vec![true; issues.len()];
-        let ground = Ground::of(&issues, &cfg);
         let mut app = App {
             issues,
             index,
@@ -1074,10 +1078,7 @@ impl App {
     /// 안으로 자른 자리에 선다.
     #[cfg(test)]
     pub fn adopt(&mut self, issues: Vec<Issue>) {
-        let soil = crate::report::Soil::of(&issues);
-        let index = Index::in_soil(&issues, &soil);
-        let ground = Ground::in_soil(&issues, &self.cfg, &soil);
-        drop(soil);
+        let (index, ground) = measure(&issues, &self.cfg);
         let now = crate::model::now();
         self.warnings = warnings_of(&issues, &self.unreadable, &self.cfg, &now);
         self.take(issues, index, ground, now);
@@ -1930,7 +1931,7 @@ impl App {
                 self.reload();
             }
             // 켜고 끄는 것은 **다시 읽는 것**이다. 겹친 줄은 적재 때 한 번 세는 것이라
-            // (`states`·거름망·경고), 들고 있는 것에 덧칠하면 셈이 옛 줄로 남는다.
+            // (`Ground`·색인·경고), 들고 있는 것에 덧칠하면 셈이 옛 줄로 남는다.
             // **켰는데 겹칠 것이 없으면 한 번 말한다**(moai-d5vn). 경로 줄은 옆이 없으면 비므로, 말이
             // 없으면 메뉴만 닫힌 똑같은 화면이 남아 누른 키가 고장 난 줄 안다. 못 찾았으면 그 까닭을,
             // 찾았는데 비었으면 없다고 댄다. 알림이라 다음 키에 걷힌다. 읽기가 실패했으면 `trouble` 이
@@ -3665,8 +3666,8 @@ mod tests {
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         assert!(stamp.is_none() && load.issues.is_empty(), "판이 다르다");
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, Path::new(), stamp);
+        let (index, ground) = measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
 
         std::fs::write(
             dir.join(".moai/issues.jsonl"),
@@ -3842,8 +3843,8 @@ mod tests {
         let repo = Repo { root: dir.clone(), config: cfg() };
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, Path::new(), stamp);
+        let (index, ground) = measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
         assert_eq!(a.issues.len(), 1);
 
         // 아직 아무도 안 건드렸다 — 읽지 않는다. 읽으면 표식이 같아도 매 걸음
@@ -3885,8 +3886,9 @@ mod tests {
         let repo = Repo { root: dir.clone(), config: cfg() };
         // 탐색기가 여는 그대로 — 겹쳐 본 채로 연다(`cmd::tui::run`).
         let g = crate::worktree::gather(&repo, true).unwrap();
-        let (stamp, index) = (stamp_of(&repo), Index::of(&g.load.issues));
-        let mut a = App::open(repo, g.load, index, Path::new(), stamp).overlaid(g.origin, g.trouble, g.watched);
+        let stamp = stamp_of(&repo);
+        let (index, ground) = measure(&g.load.issues, &repo.config);
+        let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(g.origin, g.trouble, g.watched);
         assert!(a.commits_of("argos-0001").is_empty(), "여는 읽기가 git 을 기다렸다");
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         a.follow();
@@ -4016,8 +4018,8 @@ mod tests {
         let repo = Repo { root: dir.clone(), config: cfg() };
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, Path::new(), stamp);
+        let (index, ground) = measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
 
         let other = dir.join("other.jsonl");
         std::fs::write(&other, "").unwrap();
@@ -4041,8 +4043,8 @@ mod tests {
         let repo = Repo { root: dir.clone(), config: cfg() };
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, Path::new(), stamp);
+        let (index, ground) = measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
 
         std::fs::write(dir.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&make("argos-0001", Kind::Epic)).unwrap())).unwrap();
         a.follow();
@@ -4259,8 +4261,8 @@ mod tests {
         let repo = Repo { root: dir, config: cfg() };
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, Path::new(), stamp);
+        let (index, ground) = measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
         a.user = Some("레이븐 (raven@example.com)".into());
         (scratch, a)
     }

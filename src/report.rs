@@ -1686,17 +1686,20 @@ fn fold_top<'a>(
 /// `duplicate_id` 가 그 id 를 따로 드러낸다. 같은 종류의 쌍둥이는 같은 값을 같은 자로
 /// 읽으므로 여기 안 걸린다.
 pub fn eclipsed(all: &[Issue]) -> impl Fn(&Issue) -> bool + '_ {
-    eclipsed_in(kinds(all))
+    let kind_of = kinds(all);
+    move |i| is_eclipsed(&kind_of, i)
 }
 
-/// id → 그 id 를 **마지막으로 든 줄**의 종류. 가려짐 판정([`eclipsed_in`])이 보는 지도다.
+/// id → 그 id 를 **마지막으로 든 줄**의 종류. 가려짐 판정([`is_eclipsed`])이 보는 지도다.
 pub fn kinds(all: &[Issue]) -> BTreeMap<&str, Kind> {
     all.iter().map(|i| (i.id.as_str(), i.kind)).collect()
 }
 
-/// [`eclipsed`] 와 같은 판정. 지도를 이미 가진 쪽([`Soil`])이 그것을 다시 짓지 않게 받는다.
-pub fn eclipsed_in(kind_of: BTreeMap<&str, Kind>) -> impl Fn(&Issue) -> bool + '_ {
-    move |i| kind_of.get(i.id.as_str()).is_some_and(|k| *k != i.kind)
+/// [`eclipsed`] 의 판정 — `kind_of` 는 [`kinds`] 의 지도다(빌린 id 든 소유한 id 든). **판정은 여기
+/// 하나다**(moai-xemz 리뷰): 지도를 이미 가진 쪽(`Soil`·`query::Where`·탐색기의 `tui::Ground`)이 저마다
+/// 몸을 다시 적으면, 쌍둥이를 가르는 자가 하나만 바뀐 날 CLI 와 탐색기가 같은 줄을 달리 고른다.
+pub fn is_eclipsed<K: std::borrow::Borrow<str> + Ord>(kind_of: &BTreeMap<K, Kind>, i: &Issue) -> bool {
+    kind_of.get(i.id.as_str()).is_some_and(|k| *k != i.kind)
 }
 
 /// **파일 전체를 훑어야 아는 것을 한 걸음으로 잰다**(moai-fbdg) — 소속(에픽·마일스톤), 물려받은
@@ -1730,14 +1733,13 @@ impl<'a> Soil<'a> {
         let kinds = kinds(all);
         let lost = misplaced_in(all, &kinds, &epic, &milestone);
         // 길 잃음은 `nav::Ctx::home` 과 같다 — 못 쓸 참조를 든 줄과 가려진 쌍둥이.
-        let hidden = eclipsed_in(kinds.clone());
-        let folded = under_lost(all, &epic, |i| lost.contains_key(i.id.as_str()) || hidden(i));
+        let folded = under_lost(all, &epic, |i| lost.contains_key(i.id.as_str()) || is_eclipsed(&kinds, i));
         Soil { epic, milestone, roots, kinds, lost, folded }
     }
 
-    /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가([`eclipsed`]).
+    /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가([`is_eclipsed`]).
     pub fn eclipsed(&self) -> impl Fn(&Issue) -> bool + '_ {
-        |i: &Issue| self.kinds.get(i.id.as_str()).is_some_and(|k| *k != i.kind)
+        |i: &Issue| is_eclipsed(&self.kinds, i)
     }
 
     /// 묶음이 **선 칸과 곁들이**([`group_stands`]) — 여기서만 설정을 본다.

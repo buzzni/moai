@@ -323,7 +323,7 @@ impl App {
     /// `.moai` 밖에서 띄운 탐색기 — 층에서 시작하고, **그 자리에서 다 읽는다.** 첫 화면에
     /// 수가 서야 `moai status` 의 한눈 보기와 같은 값을 한다.
     pub fn on_projects(layer: Layer) -> App {
-        let mut app = App::build(Vec::new(), Index::of(&[]), blank_config(), Vec::new(), Vec::new());
+        let mut app = App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new());
         app.layer = Some(Layer { at: At::Layer, ..layer });
         app.refresh_layer();
         app
@@ -1076,8 +1076,8 @@ mod tests {
             let repo = Repo { root: here.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
             let stamp = stamp_of(&repo);
             let load = repo.read().unwrap();
-            let index = Index::of(&load.issues);
-            App::open(repo, load, index, NavPath::new(), stamp)
+            let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
+            App::open(repo, load, index, ground, NavPath::new(), stamp)
         };
         let mut a = open().attach_layer(Layer::read(Some(&cfg), Some(&here)));
         assert!(a.layer.is_none(), "깨진 설정으로 층을 세웠다");
@@ -1104,8 +1104,8 @@ mod tests {
         let repo = Repo { root: here.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, NavPath::new(), stamp).with_layer(Layer::read(Some(&cfg), Some(&here)));
+        let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, NavPath::new(), stamp).with_layer(Layer::read(Some(&cfg), Some(&here)));
         assert!(!a.on_layer());
         assert_eq!(titles(&a), ["여기 줄"]);
         assert_eq!(a.cursor, 0, "뿌리에 `..` 이 없는데 커서가 한 칸 내려가 섰다");
