@@ -3727,3 +3727,4 @@
 {"ts":"2026-09-18T04:03:22Z","id":"moai-7x3r","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: opus (high — 감독 절차와 남의 tmux 판에 키를 치는 셸 호출, 되돌리기 어려운 쪽)"}
 {"ts":"2026-09-18T04:03:22Z","id":"moai-7x3r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"d55e229 구현, 3664b2a 리뷰 반영, main 머지 64a23ec"}
 {"ts":"2026-09-18T04:03:22Z","id":"moai-rp6v.u8k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"xhigh 13건 중 11건 반영(3664b2a), 넘김 moai-kqmj·moai-ear6"}
+{"ts":"2026-09-18T04:03:57Z","id":"moai-rp6v","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 끝났다. 남은 모서리는 idea moai-kqmj·moai-ear6"}
