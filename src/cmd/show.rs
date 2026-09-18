@@ -289,6 +289,28 @@ fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
     Ok(md.lines().map(str::to_string).collect())
 }
 
+/// 줄 하나의 `--json` 이 덧붙이는 키 전부 — 늘 붙이는 것과 **조건에 따라** 붙이는 것(moai-2l8n).
+/// 이번에 안 실은 것은 되써 넣은 줄의 모르는 필드에서도 걷는다(`json_with`). 키를 더하면 여기에도
+/// 더한다 — 빠지면 시험 빌드의 `json_with` 가 그 키를 대며 멈춘다.
+const MAY: &[&str] = &[
+    "children",
+    "journal",
+    "members",
+    "shelved_by",
+    "duplicate_lines",
+    "blockers",
+    "workplaces",
+    "place",
+    "commits",
+    "commits_error",
+    "work",
+    // `edit --json` 이 줄 곁에 다는 키(`edit::INHERITED`). 되써 넣은 줄은 어느 명령의 출력에서도
+    // 온다 — 안 걷으면 그 소속이 이제 부모에서 안 와도 옛 `inherited_epic` 이 여기 선다. 이름을
+    // 따로 적은 것은 edit.rs 를 옆 일이 쥐고 있어서다 — 한 목록으로 묶는 것은 moai-fqnr 에 넘겼다.
+    "inherited_epic",
+    "inherited_milestone",
+];
+
 fn one(
     ctx: &Ctx,
     repo: &Repo,
@@ -415,6 +437,7 @@ fn one(
         return super::json_with(
             &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),
             &extra,
+            MAY,
         );
     }
 

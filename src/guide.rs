@@ -297,6 +297,13 @@ const PROJECTS: &str = r#"    moai project add <dir>                 내 설정�
 층에서 `SPC p a` 로 디렉터리를 골라 등록하고(모노레포 하위도 따로), `SPC p d` 로 목록에서 뺀다.
 등록한 것이 없으면 밖에서 띄워도 빈 층이 서서 `SPC p a` 를 댄다."#;
 
+/// 화면의 말(moai-acy5). AGENTS.md 에만 적혀 있어 스킬만 읽는 세션은 `MOAI_LANG` 을 몰랐다 —
+/// 조각으로 빼 참고 문서도 같이 읽는다.
+const LANGUAGE: &str = r#"지금 기본은 한국어다 — 옮긴 글이 아직 적어, 옮김이 화면을 덮으면 기본이 영어로 바뀐다.
+다른 말로 보려면 `MOAI_LANG=en moai status` 처럼 주거나, 사용자 설정에 `[i18n]` 의
+`lang = "en"` 을 적는다 (환경변수가 설정을 이긴다). 되는 말은 en·ko·zh·ja·es 고,
+그 말에 아직 없는 글은 영어로 나온다. 번역을 보태는 길은 moai 저장소의 `i18n/README.md` 에 있다."#;
+
 /// 커밋과 이슈를 잇는 고리(moai-wqm7). **새 저장소는 이 저장소의 CLAUDE.md 규약을 모른다** —
 /// 여기 안 적으면 커밋 칸(`show <id>`·탐색기 상세)이 늘 빈다.
 ///
@@ -434,10 +441,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 
 ### 화면의 말
 
-지금 기본은 한국어다 — 옮긴 글이 아직 적어, 옮김이 화면을 덮으면 기본이 영어로 바뀐다.
-다른 말로 보려면 `MOAI_LANG=en moai status` 처럼 주거나, 사용자 설정에 `[i18n]` 의
-`lang = "en"` 을 적는다 (환경변수가 설정을 이긴다). 되는 말은 en·ko·zh·ja·es 고,
-그 말에 아직 없는 글은 영어로 나온다. 번역을 보태는 길은 moai 저장소의 `i18n/README.md` 에 있다.
+{LANGUAGE}
 
 ### 기능 요청을 받으면
 
@@ -637,6 +641,10 @@ PLAN
 ## 여러 프로젝트
 
 {PROJECTS}
+
+## 화면의 말
+
+{LANGUAGE}
 
 ## 담아 둔 생각을 펼치기
 
@@ -1411,7 +1419,7 @@ mod tests {
         assert!(CLOSING.contains(&handoff("<id>")), "안내의 핸드오프 줄이 훅과 갈라졌다");
         let rules = rules();
         assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
-        for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE, PROJECTS, COMMITS] {
+        for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE, PROJECTS, LANGUAGE, COMMITS] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(reference.contains(piece), "참고 문서에 없다 — {head}");

@@ -374,7 +374,8 @@ fn side(
 }
 
 /// 제 줄을 **옆 워크트리의 스냅샷과 겹친 것**과, 옆 워크트리의 이름이 가리키는 id 후보([`away`]
-/// 와 같은 자) — 훅이 막기 전에 한 번 더 비춰 보는 자리다(moai-w2iy).
+/// 와 같은 자) — 훅이 막기 전에 한 번 더 비춰 보는 자리다(moai-w2iy). `Stop` 도 집은 것이 남을 때
+/// 에픽이 닫히는지를 이것으로 잰다(moai-8ema).
 ///
 /// 트래커는 main 에서 만지는 것이 규약이라(CLAUDE.md "워크트리"), 워크트리의 스냅샷(HEAD)은
 /// main 에서 방금 세우고 집은 줄을 모른다. 그 낡은 스냅샷만 보고 막으면 시킨 대로 한 일이
@@ -517,8 +518,9 @@ impl Disk {
 /// main 에서 집은 일은 그 파일에 없어 들지 않는다.
 ///
 /// **main 워크트리는 쥔 곳으로 안 센다** — 모두의 집기가 모이는 자리라, 세면 모든 줄이 든다.
-/// **답은 짐작이다** — 받는 쪽은 이 줄로 막거나 붙들지 않기만 한다(`hook::unsure`). git 을 띄우지
-/// 않고 파일만 읽지만 옆 스냅샷을 다 풀어 싸지 않다 — 거절 길과 `Stop` 에서만 부른다.
+/// **답은 짐작이다** — 받는 쪽은 이 줄로 막거나 붙들거나 비추지 않기만 한다(`hook::unsure`). git 을
+/// 띄우지 않고 파일만 읽지만 옆 스냅샷을 다 풀어 싸지 않다 — 거절 길, 비추는 길(`idea add` 의 물음),
+/// `Stop` 에서만 부른다.
 pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> (BTreeSet<String>, BTreeSet<String>) {
     let Some(disk) = on_disk(root) else { return Default::default() };
     let own = names(disk.all.iter().filter(|(_, _, me)| *me).map(|(t, ..)| t));
