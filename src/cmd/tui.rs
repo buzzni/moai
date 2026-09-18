@@ -45,7 +45,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
 
     refuse_without_terminal()?;
 
-    // 등록한 프로젝트가 있으면 층을 얹는다 — 뿌리에서 한 칸 더 올라가면 층이다(결정 3).
+    // 등록한 프로젝트가 있으면 층을 얹는다 — 헤더의 `0` 이 그리로 간다(moai-i784·moai-o133).
     // **남의 프로젝트는 여기서 안 읽는다**: 처음 올라갈 때 읽는다. 안에서 띄운 사람의 첫
     // 화면을 등록한 저장소 수만큼 늦출 까닭이 없다.
     let config = crate::user_config::path();
@@ -58,9 +58,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.me = me_of(ctx, app.here());
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
-    // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp). 층은 **그다음에** 얹는다: 층이 첫 화면의 커서를
-    // `..` 너머 첫 줄에 세우는데(`App::with_layer`), 처음값 보기로 세운 뒤 적어 둔 보기를 입히면 줄이 바뀌어
-    // 커서가 `..` 에 남거나 목록 밖에 선다(moai-2kyl 단계 리뷰).
+    // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp). 층은 **그다음에** 얹는다 — 얹는 쪽
+    // (`App::attach_layer`)이 못 읽은 설정을 배너에 다는 자리라, 보기의 `look_problems` 와 한
+    // 화면에서 갈라지면 안 된다. 한때는 `with_layer` 가 첫 화면의 커서를 `..` 너머로 밀어 차례가
+    // 더 크게 걸렸는데, 뿌리의 `..` 을 걷으면서(moai-i784) 그 밀기는 없어졌다(moai-2kyl 단계 리뷰).
     app.adopt_look(&reg.look, reg.look_problems);
     // 적어 둔 읽음도 같은 한 번의 읽기에서 온다(moai-z9pc).
     app.adopt_read(reg.read);

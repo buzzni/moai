@@ -35,24 +35,78 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **자리 없는 집은 줄은 여기서만 싣는다**(moai-4370) — 까닭은 `report::stranded`. 치명이 아니라
     // 아래 종료 코드는 안 바뀐다. 언제 재는지는 `worktree::workplaces` 가 정한다 — 딸린 워크트리
     // 안에서 겹쳐 보지 않았으면 빈 목록이 오고, 그러면 `stranded` 가 조용하다.
-    let trees = crate::worktree::workplaces(&repo.root, &repo.config, worktree);
+    let trees = crate::worktree::workplaces(&repo.root, &repo.config, worktree, &load.issues);
     st.warnings.extend(report::stranded(&load.issues, &repo.config, &trees, &now));
+    // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정에서 그 워크트리는 "아무도
+    // 없다" 가 아니라 "모른다" 로 빠지므로(`report::Place::Unknown`), 말이 없으면 경고가 조용한
+    // 까닭을 알 길이 없다. 옆 워크트리의 문제로 세는 자리는 `gather` 와 같다 — 종료 코드는
+    // 안 바꾸고, 보드가 "문제 없다" 로 이 말을 뒤집지 않게만 한다.
+    //
+    // **가지와 경로를 함께 댄다.** 가지만 대면 떼어 낸 HEAD 의 이름은 커밋 앞 일곱 자라
+    // (`Workplace::branch`) 같은 커밋에 선 워크트리 둘이 글자까지 같아져 보는 쪽이 하나로 읽고,
+    // 경로만 대면 `gather` 의 `⎇ <가지>` 와 낱말이 갈린다. 경로는 `show` 와 같은 자로 줄인다 —
+    // 워크트리의 꼭대기에서 재, 기계의 절대 경로를 그대로 내보내지 않는다.
+    let top = crate::worktree::top_of(&repo.root).unwrap_or_else(|| repo.root.clone());
+    let unknown: Vec<report::Workplace> = trees
+        .iter()
+        .filter(|t| t.unknown)
+        .map(|t| report::Workplace {
+            path: t.path.strip_prefix(&top).unwrap_or(&t.path).to_path_buf(),
+            ..t.clone()
+        })
+        .collect();
+    // **`gather` 가 이미 낸 것은 두 번 안 낸다** — `--worktree` 면 그쪽이 옆 스냅샷을 빠짐없이
+    // 열어 같은 워크트리를 `⎇ <가지>: …` 로 냈다. 두 번 내면 stderr 에 같은 워크트리가 낱말만
+    // 바꿔 두 줄로 서고, 보드의 `옆 워크트리 문제 N건` 이 하나를 둘로 세어 보는 쪽이 두 곳이
+    // 깨진 줄로 읽는다.
+    //
+    // **`--worktree` 만으로는 못 가른다**(리뷰 moai-ya06) — `gather` 는 git 을 불러 옆을 세고
+    // (`others_of`), 여기 `trees` 는 git 이 적어 둔 파일만 읽는다(`on_disk`). git 이 없거나
+    // `worktree list` 가 실패하면 `gather` 는 `unfound` 하나만 내고 워크트리를 **한 곳도**
+    // 대지 않는데, 이쪽은 그대로 찾아 낸다 — 그때 입을 다물면 깨진 워크트리를 아무도 안 말하고
+    // `stranded` 까지 조용해진다. 그쪽이 실제로 셌을 때만 접는다.
+    let said_already = worktree && unfound.is_none();
+    if !said_already {
+        for t in &unknown {
+            eprintln!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display());
+        }
+    }
+    // 센 것은 **낸 것뿐이다** — `gather` 가 이미 낸 줄은 `trouble` 에 이미 들어 있다.
+    let trouble = trouble + if said_already { 0 } else { unknown.len() };
     // **낡은 AGENTS.md 블록은 알림이다**(moai-mj45, 2026-09-14 사용자 결정). 언제 서고 무엇을
     // 대는지는 `agents_notice` 가 정하고, 훅의 보드가 같은 것을 싣는다. 한눈 보기(`.moai` 밖)는
     // 남의 저장소라 안 본다.
     st.notices.extend(crate::cmd::init::agents_notice(&repo.root, ctx.chdir));
+    // 빠진 딸린 파일 규칙도 같은 자리다(moai-2f99) — `init` 이 한 번 말하고 마는 것을 여기가 잇는다.
+    st.notices.extend(crate::cmd::init::dotfile_notice(&repo.root, ctx.chdir));
 
     if st.broken() {
         super::note_partial();
     }
     if ctx.json {
+        // **못 읽은 워크트리는 기계에게도 댄다**(리뷰 moai-ya06). 그런 워크트리가 하나라도 있으면
+        // 자리 판정이 통째로 `모른다` 로 접혀 `stranded` 가 조용해지는데(`report::places` 의
+        // `blind`), 여기 키가 없으면 받는 쪽은 "자리 잃은 일이 없다" 와 "못 셌다" 를 못 가른다 —
+        // 감독 스킬이 이 목록의 `stranded` 로 죽은 세션의 일을 거두므로, 그 침묵이 곧 일을
+        // 영영 안 거두는 것이 된다. 사람 화면은 `옆 워크트리 문제 N건` 으로 이미 가르고, `show
+        // --json` 도 같은 사실을 `place` 로 낸다 — 가르는 것을 받는 쪽도 가를 수 있어야 한다.
+        //
+        // **없으면 키를 안 단다** — 빈 목록을 늘 달면 그것이 "다 읽었다" 인지 "안 재 봤다" 인지가
+        // 다시 두 뜻이 된다. `--worktree` 여부와 무관하게 단다: `gather` 의 `⎇` 줄은 stderr 라
+        // 기계가 읽는 자리에는 어느 쪽에서도 이 사실이 없었다.
+        let mut extra = Vec::new();
+        if !unknown.is_empty() {
+            extra.push(("unreadable_worktrees", serde_json::to_string(&unknown).map_err(|e| super::Fail::new(e.to_string()))?));
+        }
         // **겹쳐 봤을 때만 키를 단다.** 늘 달면 `--worktree` 없이 부른 쪽도 빈
         // 지도를 받아 "겹쳐 봤는데 옆에 아무것도 없다" 로 읽는다.
         if worktree {
-            let branches = serde_json::to_string(&origin.branches()).map_err(|e| super::Fail::new(e.to_string()))?;
-            return super::json_with(&st, &[("branches", branches)]);
+            extra.push(("branches", serde_json::to_string(&origin.branches()).map_err(|e| super::Fail::new(e.to_string()))?));
         }
-        return super::json_line(&st);
+        if extra.is_empty() {
+            return super::json_line(&st);
+        }
+        return super::json_with(&st, &extra);
     }
     Ok(view::status(
         &st,

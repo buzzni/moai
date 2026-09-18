@@ -387,6 +387,49 @@ pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids:
         .collect()
 }
 
+/// `--from` 이 받는 칸 — **아는 칸이거나, 어느 줄이 실제로 서 있는 칸**(moai-hym7).
+///
+/// 오타는 그대로 거절한다. 거절이 노리는 것은 오타지 낡음이 아니다 — `config` 에서 칸
+/// 이름을 하나 고치면 옛 이름에 선 줄이 남는데, 그 이름을 오타로 읽어 막으면 그 줄은
+/// **영영** `--from` 으로 못 집는다. "남의 낡은 줄 하나가 모든 쓰기를 막으면 되돌릴
+/// 방법이 도구 밖에만 남는다"(CLAUDE.md)와 같은 자리고, `store::with_write` 가 파일
+/// 전체가 아니라 **바뀐 줄만** 검사하는 것과도 같은 자다.
+///
+/// 줄을 봐야 하므로 락 안에서 잰다 — 밖에서 재면 그 사이 마지막 줄이 그 칸을 떠난다.
+pub fn check_from(from: Option<&str>, issues: &[crate::model::Issue], cfg: &crate::config::Config) -> R<()> {
+    // 아는가를 가르는 것은 `report` 다 — 읽는 쪽(`show -s`·탐색기 필터)과 **같은 술어**를
+    // 써야 옮길 수는 있는데 못 찾는 줄이 안 생긴다.
+    let Some(f) = from.filter(|f| !crate::report::knows_column(issues, cfg, f)) else { return Ok(()) };
+    Err(Fail::coded(unknown_column(f, cfg), code::BAD_STATUS))
+}
+
+/// 모르는 칸을 댈 때의 한 줄 — 쓰기도 읽기도 같은 말을 한다.
+pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> String {
+    format!("`{name}` 라는 칸이 없고 거기 선 줄도 없다. 있는 칸: {}", cfg.statuses.join(", "))
+}
+
+/// `--from` 이 견줄 **서 있는 칸** — 물은 줄마다 하나씩, 락 안에서 **한 번** 뜬다.
+///
+/// [`read_of`] 와 갈리는 곳이 둘이다.
+///
+/// - **묶음만이 아니라 물은 줄 전부**를 담는다. 묶음인지는 [`crate::report::column`] 이
+///   가른다 — 지도를 id 로만 짚던 판은 그 갈림을 혼자 안 지켰다. 머지를 잘못 푼
+///   파일에서 묶음과 id 가 같은 일 줄이 그 묶음의 칸을 입는 자리라, `report::column`
+///   과 `Row::of` 가 같은 곳에서 같은 `if` 를 쓴다(report.rs 의 "묶음을 가르는 `if`
+///   가 표면마다 있으면 하나는 반드시 빠진다").
+/// - **한 번만 뜨는 것이 곧 뜻이다.** 돌면서 그때그때 `i.status` 를 보면 같은 id 를
+///   두 번 적은 한 명령이 **제가 방금 쓴 값**과 겨룬다 — 옮겨 놓고도 "이미 …다" 로
+///   지고, `moved` 와 `stale` 에 같은 줄이 함께 서며, 종료 코드가 0 이 아니다.
+///   `--from` 이 재는 것은 *부르는 쪽이 본* 칸이지 이 명령이 만든 칸이 아니다.
+pub fn standing_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str]) -> Read {
+    let states = crate::report::group_states_of(issues, cfg, ids);
+    issues
+        .iter()
+        .filter(|i| ids.contains(&i.id.as_str()))
+        .map(|i| (i.id.clone(), crate::report::column(i, &states).to_string()))
+        .collect()
+}
+
 /// 객체 하나에 필드를 덧붙여 낸다. 선언 순서를 지키려면 직렬화된 뒤에
 /// 붙이는 수밖에 없다 — 중간에 `Value` 를 쓰면 순서가 사라진다.
 ///
@@ -431,6 +474,29 @@ pub struct Shelved<'a> {
 
 fn one_or_none(roots: &&[String]) -> bool {
     roots.len() <= 1
+}
+
+/// `--from` 에 걸려 **손대지 않은 줄**과, 락 안에서 본 그 줄의 지금 칸.
+///
+/// [`Shelved`] 와 같은 까닭으로 여기 하나다 — `mv` 와 `defer` 의 기계 출력이 같은
+/// 모양으로 낸다. 두 곳에 따로 두면 키를 하나 더할 때 한쪽만 늘어, 두 명령을 한
+/// 파서로 읽는 쪽이 한쪽에서만 깨진다.
+#[derive(serde::Serialize)]
+pub struct Stale<'a> {
+    pub id: &'a str,
+    /// 락 안에서 본 **서 있는 칸** — `--from` 이 견준 그 값이다. 함께 주지 않으면 진
+    /// 쪽이 한 번 더 물어야 한다.
+    ///
+    /// **[`Row`] 의 `status` 와 뜻이 다르다.** 저쪽은 파일에 적힌 값이고 이쪽은 묶음이면
+    /// 멤버에서 읽은 칸이다(`standing_of`) — 같은 이름이라 되쓰는 쪽이 파생값을 적힌
+    /// 값으로 믿을 수 있다. 여기 이름을 `status` 로 둔 것은 이 값이 그대로 다음 `--from`
+    /// 의 인자이기 때문이고, 묶음의 두 칸이 갈리는 곳은 `reference` 가 적어 둔다.
+    pub status: &'a str,
+}
+
+/// (줄, 락 안에서 본 지금 칸).
+pub fn stale(rows: &[(String, String)]) -> Vec<Stale<'_>> {
+    rows.iter().map(|(id, status)| Stale { id, status }).collect()
 }
 
 /// (줄, 풀어야 할 미룸 전부 — 가까운 것부터).

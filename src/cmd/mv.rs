@@ -17,6 +17,8 @@ struct Moved {
     /// 이미 그 칸에 있던 것.
     already: Vec<String>,
     missing: Vec<String>,
+    /// `--from` 을 걸었는데 그 사이 칸이 달라진 줄 — (그 줄, 지금 칸).
+    stale: Vec<(String, String)>,
     /// 옮긴 것 중 계획에서 빠진 것 — (그 줄, 실제로 미룬 줄).
     shelved: Vec<(String, Vec<String>)>,
     /// 옮기려 한 묶음 → 멤버에서 읽은 칸. 적힌 칸은 어디서도 안 읽힌다.
@@ -43,40 +45,100 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let to = Status::new(tail[0].clone());
 
     repo.config.require_known(to.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
+    let from = args.from.map(Status::new);
 
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
+    // **누구인지는 락 밖에서 묻는다.** `model::actor` 는 `git` 을 두 번 띄운다 — 그것을
+    // 락 안에 두면 같은 `.moai` 를 쓰는 옆 세션들이 그 subprocess 만큼 더 기다린다.
+    // **말하는 차례는 그대로다**: 결과를 여기서 펴지 않고 아래 칸 검사 뒤에 편다.
+    let who = model::actor(ctx.user.as_deref(), &repo.root);
     let moved: Moved = repo.with_write(|issues, cfg, _| {
+        // **칸부터 다 보고 누구인지는 그다음이다.** 신원 없는 기계에서 칸 오타가 "누가
+        // 하는지 모른다" 로 덮이면, 부르는 쪽은 둘을 글로만 가를 수 있다. 칸 검사가
+        // 줄을 봐야 하므로(`check_from`) 락 안에서 잰다. **`bad_status` 를 내는 검사는
+        // 하나도 빠짐없이 `who?` 위에 선다** — 하나라도 아래로 내려가면 그 오타만
+        // `no_actor` 로 덮여, 같은 자의 잘못이 명령마다 다른 `code` 로 나간다.
+        super::check_from(from.as_ref().map(Status::as_str), issues, cfg)?;
+        // **묶음은 화면이 보여 준 칸으로 잰다**(사람이 정했다, moai-o5ss.l07). 에픽·
+        // 마일스톤의 칸은 멤버에서 읽히고 줄에 적힌 칸은 어디서도 안 읽히므로, 적힌 칸과
+        // 견주면 보드가 `in_progress` 를 그리는 에픽에 `--from in_progress` 가 "이미
+        // todo 다" 로 떨어진다. 묶음인지를 가르는 `if` 는 `report` 것이고 여기서는 그
+        // 답을 나른다(`standing_of`).
+        //
+        // **돌기 전에 한 번 뜬다.** `--from` 이 재는 것은 부르는 쪽이 본 칸이지 이
+        // 명령이 만든 칸이 아니다 — 돌면서 그때그때 보면 같은 id 를 두 번 적은 한
+        // 명령이 제가 방금 쓴 값과 겨뤄, 옮겨 놓고도 진다.
+        let asked_all: Vec<&str> = ids.iter().map(String::as_str).collect();
+        // **묶음에는 `--from` 을 못 쓴다**(사람이 정했다, moai-8xwi.rzg). 묶음의 칸은
+        // 멤버에서 읽고 쓰기는 줄에 적힌 칸에 한다 — 두 축이 갈려 있어, 재는 것이 맞아도
+        // 쓰는 것은 아무도 안 지킨다. 겨루는 둘이 같은 에픽에 같은 `--from` 을 걸면 둘 다
+        // 이겼다고 믿는다. 먹는 척하는 가드보다 없는 가드가 정직하다.
+        if from.is_some() {
+            if let Some(g) = issues.iter().find(|i| asked_all.contains(&i.id.as_str()) && crate::report::is_group(i)) {
+                return Err(Fail::coded(
+                    format!(
+                        "묶음의 칸은 멤버에서 읽는다 — {} 에는 `--from` 을 못 쓴다\n      \
+                         멤버를 집거나, 묶음은 `moai defer` 로 접는다",
+                        g.id
+                    ),
+                    super::code::BAD_STATUS,
+                ));
+            }
+        }
+        let by = who?;
         let mut m = Moved::default();
         let mut entries = Vec::new();
         // **닫을 때만 전의 모습을 뜬다.** 풀리는 것은 끝낼 때뿐이다 — 다른 칸으로의 이동은
         // 막음을 풀지 않고, 락을 쥔 채 목록을 한 벌 더 복사하는 값은 그때만 치른다.
+        // 거절이 다 끝난 자리에서 뜬다 — 위에서 물러날 판에 한 벌 베끼지 않는다.
         let before = to.is_done().then(|| issues.clone());
+        let seen: super::Read =
+            if from.is_some() { super::standing_of(issues, cfg, &asked_all) } else { Default::default() };
         for id in ids {
             // #a-partial: 하나가 없다고 나머지를 안 옮기지 않는다.
             let Some(i) = issues.iter_mut().find(|i| &i.id == id) else {
                 m.missing.push(id.clone());
                 continue;
             };
+            // **본 칸이 그대로일 때만 옮긴다.** 락 안에서 다시 읽은 줄로 재므로,
+            // `ready` 와 이 자리 사이에 옆 에이전트가 집고 닫기까지 했어도 여기서
+            // 갈린다. 이미 갈 칸에 있는 것보다 **먼저** 본다 — 남이 옮겨 둔 것을
+            // "이미 그 칸" 으로 읽으면 진 쪽이 이겼다고 믿는다.
+            if let Some(f) = &from {
+                let stands = seen.get(&i.id).map(String::as_str).unwrap_or(i.status.as_str());
+                if stands != f.as_str() {
+                    m.stale.push((i.id.clone(), stands.to_string()));
+                    continue;
+                }
+            }
             if i.status == to {
                 // 옮길 것이 없어도 **적어 온 말은 버리지 않는다.** 되풀이해
                 // 부르는 것(재시도·다른 에이전트가 먼저 옮긴 뒤)이 흔하고,
                 // 그때 이유가 조용히 사라지면 저널을 믿을 수 없게 된다.
+                //
+                // **`--from` 에 진 줄은 이 자리에 못 온다** — 그쪽은 위에서 갈렸고
+                // 말도 함께 버린다(사람이 정했다). 여기 오는 것은 *제가* 이미
+                // 옮겨 둔 줄이고, 저기서 걸리는 것은 *남이* 옮긴 줄이다. 손대지
+                // 않기로 한 줄의 이력에 메모만 남기면 그 줄에 무슨 일이 있었는지가
+                // 거꾸로 읽힌다.
                 if let Some(msg) = &args.msg {
                     entries.push(JournalEntry::note(&i.id, msg, &at, &by));
                 }
                 m.already.push(i.id.clone());
                 continue;
             }
-            let from = i.status.clone();
-            entries.push(JournalEntry::status(&i.id, &from, &to, args.msg.clone(), &at, &by));
+            // **`from`(`--from` 의 칸)과 이름이 갈려야 한다.** 둘 다 "떠나는 칸" 이라
+            // 같은 이름을 쓰면 위의 검사와 이 줄이 한 값처럼 읽힌다 — 하나는 부르는
+            // 쪽이 본 칸이고, 이것은 방금 락 안에서 읽은 칸이다.
+            let was = i.status.clone();
+            entries.push(JournalEntry::status(&i.id, &was, &to, args.msg.clone(), &at, &by));
             i.status = to.clone();
             i.status_since = at.clone();
             i.updated_at = at.clone();
             // 저장 직전의 모습으로 맞춰 두고 뜬다 — 안 그러면 `--json` 이
             // 파일에 없는 값(기본 우선순위, 정렬 전 태그)을 말한다.
             i.normalize();
-            m.done.push((i.clone(), from));
+            m.done.push((i.clone(), was));
         }
         // **물려받은 미룸도 여기서 잰다.** 미룬 에픽의 멤버를 집으면 칸은
         // 옮겨져도 보드·`ready`·훅의 초점에서 빠진다 — 말하지 않으면 방금 집은
@@ -96,7 +158,14 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         // 다만 그 칸은 멤버에서 읽히므로(moai-j3b3), 말하지 않으면 옮긴 사람은
         // 에픽이 닫힌 줄 알고 화면은 계속 `in_progress` 를 그린다. 못 찾은 id 는
         // 저절로 빠진다 — `read_of` 가 있는 묶음만 고른다.
-        let asked: Vec<&str> = ids.iter().map(String::as_str).collect();
+        // **진 줄은 여기 안 든다.** 안 옮긴 묶음에까지 "서 있는 칸은 …" 안내를 붙이면
+        // 한 숨에 두 칸을 말한다 — stderr 는 "이미 todo 다", stdout 은 "서 있는 칸은
+        // in_progress". 그리고 그 안내의 뒷말("계획에서 빼려면 `moai defer`")은
+        // 일어나지도 않은 이동을 두고 다음 수를 댄다.
+        // **덜어 세지 않고 실제로 손댄 줄에서 센다.** 뺄셈으로 적으면 "옮기지 않은"
+        // 통이 하나 더 생기는 날 그것이 저절로 다시 끼어든다.
+        let asked: Vec<&str> =
+            m.done.iter().map(|(i, _)| i.id.as_str()).chain(m.already.iter().map(String::as_str)).collect();
         m.read = super::read_of(issues, cfg, &asked);
         // 접는 길이 갈리는 자리 — `report` 가 정하고 여기서는 그 답을 나른다.
         m.finished = issues
@@ -115,6 +184,14 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         super::note_partial();
         eprintln!("moai: {id} 를 못 찾았다");
     }
+    // **진 집기도 못 찾은 줄과 같은 자리다.** 종료 코드로 갈려야 jq 없는 껍데기가
+    // 이긴 쪽과 진 쪽을 가른다 — 여기서 실패로 끝내지는 않는다(나머지 id 는 옮겼다).
+    // 못 찾은 줄과 **같은 표면 하나**에만 적는다 — 한때 stdout 에도 같은 말을 얹어,
+    // 터미널에서 한 줄이 두 번 떴다.
+    for (id, now) in &moved.stale {
+        super::note_partial();
+        eprintln!("moai: {id} 는 이미 {now} 다 — 안 옮겼다");
+    }
 
     if ctx.json {
         // **옮긴 것만 내면 나머지를 말할 자리가 없다.** 이미 그 칸이던 것과
@@ -130,6 +207,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             moved: Vec<super::Row<'a>>,
             already: &'a [String],
             missing: &'a [String],
+            /// `--from` 에 걸려 안 옮긴 줄. 사람 쪽의 stderr 한 줄과 같은 것이다.
+            stale: Vec<super::Stale<'a>>,
             /// 옮겼어도 계획 밖인 것과 도로 집을 줄. 사람 출력의 안내와 같은 것이다.
             shelved: Vec<super::Shelved<'a>>,
             /// 옮기려 한 묶음 가운데 **서 있는 칸이 적은 칸과 다른 것.** 사람 출력의
@@ -144,6 +223,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             moved: moved.done.iter().map(|(i, _)| super::Row::from(i, &moved.read)).collect(),
             already: &moved.already,
             missing: &moved.missing,
+            stale: super::stale(&moved.stale),
             shelved: super::shelved(&moved.shelved),
             stands: moved
                 .read
@@ -158,11 +238,14 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let mut out: Vec<String> = moved
         .done
         .iter()
-        .map(|(i, from)| {
+        // **`was` 다 — `from` 이 아니다.** 바깥에 `--from` 의 칸을 쥔 `from` 이 서 있어,
+        // 같은 이름을 쓰면 여기서 그것을 가리고 둘이 한 값처럼 읽힌다. 하나는 부르는
+        // 쪽이 본 칸이고, 이것은 락 안에서 실제로 떠나온 칸이다.
+        .map(|(i, was)| {
             format!(
                 "{}  {} → {}   {}",
                 paint(style::ID, &i.id),
-                paint(style::status_style(from.as_str()), from.as_str()),
+                paint(style::status_style(was.as_str()), was.as_str()),
                 paint(style::status_style(to.as_str()), to.as_str()),
                 paint(style::DIM, &i.title),
             )

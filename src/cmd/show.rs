@@ -167,8 +167,14 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
 
     // 모르는 칸은 거부한다. 조용히 0건을 내면 `-s in-progress` 같은 오타가
     // "그 칸은 비었다" 와 구별되지 않는다 — `add`·`mv` 는 이미 거부한다.
+    //
+    // **어느 줄이 선 칸이면 받는다** — `--from` 과 같은 술어다(moai-hym7, 사람이 정했다).
+    // `config` 에서 칸 이름을 고친 뒤 옛 이름에 선 줄은 옮길 수는 있는데 못 찾으면,
+    // 읽기가 쓰기보다 엄해져 "읽기는 관대하고 쓰기는 엄하다" 가 뒤집힌다.
     for s in &filter.status {
-        repo.config.require_known(s).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
+        if !crate::report::knows_column(&load.issues, &repo.config, s) {
+            return Err(Fail::coded(super::unknown_column(s, &repo.config), super::code::BAD_STATUS));
+        }
     }
 
     let now = model::now();
@@ -312,13 +318,13 @@ fn one(
     // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 스냅샷을 다
     // 풀 까닭이 없다. 언제 재는지(딸린 워크트리에서는 겹쳐 볼 때만)는 `worktree::workplaces` 가
     // 한 곳에서 정한다 — 명령마다 두었더니 `status` 와 여기가 서로 다른 답을 냈다(moai-6opu.p65).
-    let trees: Vec<report::Workplace> = if report::wip(all, &repo.config).iter().any(|i| i.id == issue.id) {
+    let trees: Vec<report::Workplace> = if report::placeable(all, &repo.config, issue) {
         // 경로는 **워크트리의 꼭대기**에서 잰다: 규약의 자리(`.claude/worktrees/<id>`)가 그대로
         // 읽힌다. 뿌리(`.moai` 가 든 곳)로 재면 `.moai` 를 아래에 둔 저장소에서 하나도 안 잘려
         // 기계의 절대 경로가 그대로 나간다. 워크트리 경로는 이미 푼 것이라(`worktree::canonical`)
         // 꼭대기도 같은 자로 푼다 — 심볼릭 링크를 낀 자리로는 하나도 안 잘린다.
         let root = crate::worktree::top_of(&repo.root).unwrap_or_else(|| repo.root.clone());
-        crate::worktree::workplaces(&repo.root, &repo.config, worktree)
+        crate::worktree::workplaces(&repo.root, &repo.config, worktree, all)
             .into_iter()
             .map(|mut t| {
                 if let Ok(rel) = t.path.strip_prefix(&root) {
@@ -333,7 +339,7 @@ fn one(
         Vec::new()
     };
     let places = (!trees.is_empty())
-        .then(|| report::places(all, &repo.config, &trees).remove(&issue.id))
+        .then(|| report::places(all, &repo.config, &trees, &model::now()).remove(&issue.id))
         .flatten();
     let seen = view::Seen {
         roots: report::deferred_roots(all),
@@ -348,12 +354,15 @@ fn one(
     // 고장이 아니라 흔한 쓰임이라 `show` 마다 한 줄씩 탓하면 그것이 잔소리다.
     // **커밋도 줄이 온 워크트리의 `HEAD` 에서 읽는다** — 이력과 같은 까닭. `--worktree` 로
     // 옆에서 집은 일을 펼치면 그 일을 고친 커밋은 저쪽 가지에만 있다.
-    // 걷기는 이슈가 생긴 때에서 멈춘다(`git::commits_of`). 못 읽는 `created_at` 이면 다 걷는다.
+    // **탐색기와 같은 자로 읽는다**(moai-hws2) — `git::table` 하나가 이력 전부를 걷는다. 생성일에서
+    // 끊던 때는 날짜가 거꾸로 선 커밋 하나가 그 밑을 통째로 가려, 같은 물음에 두 표면이 다른 답을 냈다.
+    // **기계에게는 그 침묵을 가른다**(moai-rzsv) — `--json` 은 `commits` 를 늘 내고, git 을 못 읽었을
+    // 때만 `commits_error` 를 단다. 사람 화면은 그대로다.
     let root = origin.root(&issue.id).unwrap_or(&repo.root);
-    let commits = crate::git::commits_of(root, &[issue.id.as_str()], model::parse_rfc3339(&issue.created_at))
-        .ok()
-        .and_then(|mut by_id| by_id.remove(&issue.id))
-        .unwrap_or_default();
+    let (commits, commits_error) = match crate::git::table(root, &[issue.id.as_str()]) {
+        Ok(mut by_id) => (by_id.remove(&issue.id).unwrap_or_default(), None),
+        Err(e) => (Vec::new(), Some(crate::text::one_line(&e.to_string()))),
+    };
 
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();
@@ -361,13 +370,15 @@ fn one(
         // 생각은 거기서 빠진다 — 찾으려면 `moai show --type idea -e <에픽>`. 한때
         // 여기만 에픽에 한해 제 `epic` 을 적은 줄을 내, 마일스톤은 키가 없고
         // 물려받은 자식은 화면에만 있었다(moai-qizs).
-        let members: Vec<&str> =
-            report::group_members(all, issue).iter().map(|m| m.id.as_str()).collect();
         let mut extra = vec![
             ("children", serde_json::to_string(&ids).map_err(|e| Fail::new(e.to_string()))?),
             ("journal", serde_json::to_string(&journal).map_err(|e| Fail::new(e.to_string()))?),
         ];
+        // **묶음일 때만 멤버를 고른다** — `group_members` 는 저장소 전체로 지도를 짓는다. 일 하나를
+        // `--json` 으로 펼치는 흔한 길에서 그것을 짓고 버리던 자리다.
         if report::is_group(issue) {
+            let members: Vec<&str> =
+                report::group_members(all, issue).iter().map(|m| m.id.as_str()).collect();
             extra.push((
                 "members",
                 serde_json::to_string(&members).map_err(|e| Fail::new(e.to_string()))?,
@@ -390,12 +401,21 @@ fn one(
         }
         // 사람 화면의 `자리` 줄과 같은 답. 줄을 안 세우는 자리에서는 키도 안 단다.
         if let Some(p) = &seen.places {
-            extra.push(("workplaces", serde_json::to_string(p).map_err(|e| Fail::new(e.to_string()))?));
+            // **자리와 그 뜻을 따로 낸다** — 목록이 비어 있는 까닭이 셋이다(방금 집었다·못 읽은
+            // 워크트리가 있다·자리가 없다). 사람 화면이 가르는 것을 받는 쪽도 가를 수 있어야 한다.
+            extra.push(("workplaces", serde_json::to_string(p.at()).map_err(|e| Fail::new(e.to_string()))?));
+            extra.push(("place", serde_json::to_string(p.word()).map_err(|e| Fail::new(e.to_string()))?));
         }
         // 트래커 커밋까지 **전부** 낸다 — `tracker` 표시가 붙으니 거를지는 받는 쪽이 정한다.
-        // 사람 화면만 뺀다(`view::commits`). 커밋이 없으면 키를 안 단다.
-        if !commits.is_empty() {
-            extra.push(("commits", serde_json::to_string(&commits).map_err(|e| Fail::new(e.to_string()))?));
+        // 사람 화면만 뺀다(`view::commits`).
+        //
+        // **키는 늘 선다**(moai-rzsv, 2026-09-15 사용자 결정). 빈 배열도 사실이고, 그것과 "git 을
+        // 못 읽었다" 를 가르는 것이 `commits_error` 다 — 없으면 정말 아무도 그 id 를 안 적은 것이다.
+        // 없으면 키를 안 다는 `blockers` 와 다른 까닭: 막음은 이슈가 제 파일에 적는 값이라 없음이
+        // 곧 답이지만, 커밋은 **바깥에 물어서** 오므로 못 물은 것과 없는 것이 다르다.
+        extra.push(("commits", serde_json::to_string(&commits).map_err(|e| Fail::new(e.to_string()))?));
+        if let Some(why) = &commits_error {
+            extra.push(("commits_error", serde_json::to_string(why).map_err(|e| Fail::new(e.to_string()))?));
         }
         return super::json_with(
             &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),
