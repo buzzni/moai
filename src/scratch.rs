@@ -3,7 +3,9 @@
 //! ## 왜 한 벌인가
 //!
 //! 같은 것이 다섯 벌 있었다 — `tui/register.rs`·`tui/layer.rs`·`tui/mod.rs`·
-//! `user_config.rs` 와 통합 시험의 것. 그리고 **모으지 않은 자리**(`git.rs`·
+//! `user_config.rs` 와 통합 시험의 것. 앞의 넷과 `cmd/tui.rs` 의 편집기 시험 자리는
+//! 이것으로 모았다. **통합 시험(`tests/cli.rs`)의 것은 아직 따로다** — 따로 된
+//! 크레이트라 `use` 로는 못 가져간다. 그리고 **모으지 않은 자리**(`git.rs`·
 //! `store.rs`·`worktree.rs`)는 끝에서 `remove_dir_all` 을 부르는 식이라, 시험이
 //! 패닉하면 그 줄에 닿지 못해 `/tmp/moai-git-<pid>` 가 그대로 남는다. 이름에 pid 가
 //! 들어 다음 판이 그것을 치우지도 않는다 — 이 기계에 죽은 pid 의 것 셋이 남아 있었다.
@@ -60,15 +62,19 @@ impl Scratch {
         s
     }
 
-    /// 빈 `.git` 울타리를 세운 자리(moai-46xz). **위로 새지 않는다.**
+    /// 아무것도 없는 저장소를 울타리로 세운 자리(moai-46xz). **위로 새지 않는다.**
     ///
     /// `worktree` 의 파일로 읽는 반쪽은 `Path::ancestors()` 를 타고 올라가 `.git` 을 처음
     /// 만나는 곳을 저장소 꼭대기로 읽는다. 임시 자리가 어느 체크아웃 **안**이면
     /// (컨테이너·CI 에서 `TMPDIR` 이 그렇게 잡힌다) 그 체크아웃이 꼭대기로 잡혀, 시험이
     /// 만들지도 않은 워크트리 이름이 답에 섞인다. 울타리가 그 훑기를 여기서 멈춘다.
     ///
-    /// 울타리는 **빈 디렉터리**다. 그 안에 워크트리 목록이 없으니 이름은 하나도 안 나온다.
-    /// 밑에 진짜 저장소를 만드는 시험은 영향이 없다 — 훑기가 그 저장소를 먼저 만난다.
+    /// **빈 `.git` 디렉터리로는 반쪽만 막는다.** 파일로 읽는 훑기는 거기서 서지만, git 은
+    /// `HEAD`·`objects`·`refs` 가 없는 `.git` 을 저장소로 안 보고 **지나쳐 위로 올라간다**(재
+    /// 봤다) — `heads`·`gather`·`git::table` 처럼 git 으로 읽는 길은 그대로 위의 체크아웃을
+    /// 읽는다. 그래서 그 셋을 둔다. 커밋도 딸린 워크트리도 없으니 이름은 제 것뿐이고(`away` 는
+    /// 제 것을 뺀다), 밑에 진짜 저장소를 만드는 시험은 영향이 없다 — 두 훑기 모두 그 저장소를
+    /// 먼저 만난다.
     pub fn fenced(name: &str) -> Scratch {
         Scratch::fenced_in(&base(), name)
     }
@@ -77,7 +83,12 @@ impl Scratch {
     /// 그런 시험은 `TMPDIR` 을 못 바꾼다(한 판의 모든 스레드가 그것을 함께 본다).
     pub fn fenced_in(base: &Path, name: &str) -> Scratch {
         let s = Scratch::in_place(base, name);
-        std::fs::create_dir_all(s.0.join(".git")).unwrap_or_else(|e| panic!("{}: {e}", s.0.display()));
+        let git = s.0.join(".git");
+        let fail = |e: std::io::Error| panic!("{}: {e}", git.display());
+        for dir in ["objects", "refs"] {
+            std::fs::create_dir_all(git.join(dir)).unwrap_or_else(fail);
+        }
+        std::fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap_or_else(fail);
         s
     }
 
@@ -117,7 +128,6 @@ mod tests {
             let dir = s.path().to_path_buf();
             std::fs::write(dir.join("있다"), "x").unwrap();
             assert!(dir.is_dir());
-            let _ = &dir;
             panic!("{}", dir.display());
         });
         let dir = PathBuf::from(*seen.unwrap_err().downcast::<String>().unwrap());

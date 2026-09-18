@@ -745,6 +745,7 @@ mod tests {
 
     /// 진짜 디렉터리 여럿과 사용자 설정 한 벌. **돌리는 사람의 설정은 안 읽는다** — 층에
     /// 제 설정 파일을 준다(`Layer::config`).
+    ///
     /// 이 묶음만 쓰는 손놀림. 자리를 만들고 지우는 일은 [`Scratch`] 가 한다.
     trait Places {
         fn project(&self, name: &str, lines: &[(&str, &str, &str)]) -> PathBuf;

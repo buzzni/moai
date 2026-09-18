@@ -285,6 +285,7 @@ mod tests {
 
     /// 진짜 디렉터리와 사용자 설정 한 벌. **돌리는 사람의 홈·설정은 안 읽는다** — 창은
     /// `App::launched_at` 에서, 쓰기는 층이 읽은 임시 설정 파일에 한다.
+    ///
     /// 이 묶음만 쓰는 손놀림. 자리를 만들고 지우는 일은 [`Scratch`] 가 한다.
     trait Places {
         fn dir(&self, rel: &str) -> PathBuf;

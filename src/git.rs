@@ -453,8 +453,7 @@ pub(crate) mod tests {
     /// 실제와 다를 수 있다.
     #[test]
     fn a_real_subject_cannot_forge_a_trailer() {
-        let scratch_dir = crate::scratch::Scratch::new("git-forge");
-        let dir = scratch_dir.path().to_path_buf();
+        let dir = crate::scratch::Scratch::new("git-forge");
         let git = |args: &[&str]| run_git(&dir, None, args);
         git(&["init", "-q"]);
         git(&["commit", "-q", "--allow-empty", "-m", &format!("chore: 멀쩡한 것{FS}Refs: moai-bbbb")]);
@@ -473,8 +472,7 @@ pub(crate) mod tests {
     /// 트레일러가 둘 다 읽히는지 본다.
     #[test]
     fn a_record_that_spans_a_read_chunk_survives() {
-        let scratch_dir = crate::scratch::Scratch::new("git-chunk");
-        let dir = scratch_dir.path().to_path_buf();
+        let dir = crate::scratch::Scratch::new("git-chunk");
         let git = |args: &[&str]| run_git(&dir, None, args);
         git(&["init", "-q"]);
         // 조각(16KB) 을 넉넉히 넘기는 본문. 트레일러는 그 **뒤**에 둔다 — 경계 너머가 안 읽히면 여기서 사라진다.
@@ -496,8 +494,7 @@ pub(crate) mod tests {
     /// **저장소 밖은 그대로 실패다** — 봐주는 것은 리비전뿐이라, 그 둘이 같은 답이 되면 안 된다.
     #[test]
     fn a_repo_without_commits_is_empty_not_broken() {
-        let scratch_dir = crate::scratch::Scratch::new("git-unborn");
-        let dir = scratch_dir.path().to_path_buf();
+        let dir = crate::scratch::Scratch::new("git-unborn");
         assert!(table(&dir, &["moai-aaaa"]).is_err(), "저장소 밖인데 빈 표를 냈다");
         run_git(&dir, None, &["init", "-q"]);
         assert!(table(&dir, &["moai-aaaa"]).unwrap().is_empty(), "커밋 없는 저장소를 실패로 셌다");
@@ -505,10 +502,13 @@ pub(crate) mod tests {
 
     /// **찾을 id 가 없으면 git 을 안 부른다.** 있지도 않은 자리를 주고 잰다 — 불렀으면 git 이
     /// 그리로 못 가 `Err` 다.
+    ///
+    /// **자리는 `Scratch` 밑의 없는 이름이다** — `Scratch` 자체는 만들어진 디렉터리라, 그것을 주면
+    /// git 이 거기서 돌 수 있고 임시 자리가 체크아웃 안이면 위의 저장소를 걸어 `Ok` 로 끝난다.
     #[test]
     fn an_empty_id_list_never_walks() {
-        let scratch_nowhere = crate::scratch::Scratch::new("git-none");
-        let nowhere = scratch_nowhere.path().to_path_buf();
+        let scratch = crate::scratch::Scratch::new("git-none");
+        let nowhere = scratch.join("nowhere");
         assert!(table(&nowhere, &[]).unwrap().is_empty(), "줄이 없는데 이력을 걸었다");
     }
 
@@ -536,8 +536,7 @@ pub(crate) mod tests {
     /// **진짜 squash 로 잰다** — 손으로 지은 본문은 git 이 실제로 무엇을 옮기는지를 안 보여 준다.
     #[test]
     fn a_squashed_body_counts_only_its_trailers() {
-        let scratch_dir = crate::scratch::Scratch::new("git-squash");
-        let dir = scratch_dir.path().to_path_buf();
+        let dir = crate::scratch::Scratch::new("git-squash");
         let git = |args: &[&str]| run_git(&dir, None, args);
         git(&["init", "-q"]);
         git(&["commit", "-q", "--allow-empty", "-m", "첫 커밋"]);
@@ -598,8 +597,7 @@ pub(crate) mod tests {
     /// 곁다리로 남을 언급한 글이 그 이슈의 커밋 칸에 서면 안 된다.
     #[test]
     fn a_real_log_matches_subjects_and_trailers_not_plain_bodies() {
-        let scratch_dir = crate::scratch::Scratch::new("git-git");
-        let dir = scratch_dir.path().to_path_buf();
+        let dir = crate::scratch::Scratch::new("git-git");
         let git = |args: &[&str]| run_git(&dir, None, args);
         git(&["init", "-q"]);
         git(&["commit", "-q", "--allow-empty", "-m", "feat: 고친다 (moai-aaaa)"]);
@@ -630,8 +628,7 @@ pub(crate) mod tests {
     /// `TEST` 를 안 걷는다는 것은 여기서 안 드러난다. 그쪽은 tests/cli.rs 가 진짜 바이너리로 본다.
     #[test]
     fn git_tests_see_their_own_repos_inside_a_hook() {
-        let scratch_dir = crate::scratch::Scratch::new("git-hook");
-        let dir = scratch_dir.path().to_path_buf();
+        let dir = crate::scratch::Scratch::new("git-hook");
         let outer = dir.join("outer.git");
         let incoming = outer.join("objects/tmp_objdir-incoming");
         let out = std::process::Command::new(std::env::current_exe().unwrap())
@@ -726,8 +723,7 @@ pub(crate) mod tests {
     /// CLI 쪽은 tests/cli.rs 의 `show_sees_commits_under_a_backdated_one` 이 따로 본다.
     #[test]
     fn the_table_walks_the_whole_history() {
-        let scratch_dir = crate::scratch::Scratch::new("git-table");
-        let dir = scratch_dir.path().to_path_buf();
+        let dir = crate::scratch::Scratch::new("git-table");
         let git = |at: &str, args: &[&str]| run_git(&dir, Some(at), args);
         git("2026-01-03T09:00:00Z", &["init", "-q"]);
         git("2026-01-03T09:00:00Z", &["commit", "-q", "--allow-empty", "-m", "feat: 고친다 (moai-aaaa)"]);

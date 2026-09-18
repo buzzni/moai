@@ -1003,7 +1003,10 @@ mod tests {
     /// 파일로 읽는 반쪽은 `Path::ancestors()` 로 `.git` 을 찾아 올라간다. 컨테이너나 CI 에서
     /// `TMPDIR` 이 체크아웃 밑이면 시험의 임시 자리 위에 그 체크아웃이 서고, 만들지도 않은
     /// 워크트리 이름이 답에 섞인다 — 환경 변수를 걷어서는 못 막는 길이다. 그래서 임시 자리에
-    /// 빈 `.git` 울타리를 세운다([`Scratch::fenced`]).
+    /// 아무것도 없는 저장소를 울타리로 세운다([`Scratch::fenced`]).
+    ///
+    /// **git 으로 읽는 길도 울타리에서 선다**(`heads`·`gather`). 빈 `.git` 디렉터리만 두면 git 은 그것을
+    /// 지나쳐 위의 체크아웃을 잡는다 — 파일로 읽는 반쪽만 보면 그 틈이 안 드러난다.
     ///
     /// 여기서는 그 상황을 **이 저장소 안에 자리를 잡아** 그대로 흉내 낸다. 이 체크아웃은
     /// 진짜 저장소라, 울타리가 없으면 그 꼭대기가 그대로 잡힌다.
@@ -1026,6 +1029,8 @@ mod tests {
         assert!(away(dir.path()).is_empty(), "울타리 위의 저장소가 새어 나왔다 — {:?}", away(dir.path()));
         assert!(away(&dir.join("nowhere")).is_empty(), "없는 자리에서도 위의 저장소를 읽었다");
         assert!(!is_linked(dir.path()), "울타리를 딸린 워크트리로 읽었다");
+        let git_top = crate::git::run(dir.path(), &["rev-parse", "--show-toplevel"]).map(|t| PathBuf::from(t.trim_end()));
+        assert_eq!(git_top.ok(), Some(canonical(dir.path())), "git 이 울타리를 지나쳐 위의 저장소를 잡았다");
     }
 
     /// 어느 워크트리에서든 커밋·`pack-refs`·떼어 낸 checkout 이 지켜보는 표식을 바꾼다 —
@@ -1092,7 +1097,6 @@ mod tests {
         std::fs::create_dir_all(&sub).unwrap();
         let seen = heads(&sub);
         assert!(seen.iter().any(|(p, s)| p.ends_with("refs/heads/more") && s.is_some()), "하위에서 가지 파일을 못 찾는다 — {seen:#?}");
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.
