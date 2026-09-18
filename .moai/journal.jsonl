@@ -5003,3 +5003,11 @@
 {"ts":"2026-09-18T17:59:31Z","id":"moai-oxup","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T17:59:55Z","id":"moai-xemz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 첫 칸에 멤버 셋이 남았다 — moai-15g8(view::Seen 과 Where 겹침, a9 가 cmd/show.rs·edit.rs 를 놓은 뒤), moai-p3rw(좁은 상세의 태그 칠 — 접을지·찾은 태그를 앞에 세울지 사람이 정한다), moai-maav(설정 칸의 헛 깨움 — 그리는 쪽이 스피너를 알리는 길). 병합 45f7ba1, 리뷰 moai-xemz.p03"}
 {"ts":"2026-09-18T17:59:55Z","id":"moai-r8gw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 닫혔다. 남은 헛셈은 idea moai-hucy(다른 report 입구)·moai-u5o9(TUI 여는 길·stands 두 번·show --tree, a9 파일)·moai-xppm(훅)에 있다"}
+{"ts":"2026-09-18T18:10:09Z","id":"moai-u88a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅이 -C <main> 토막을 워크트리 스냅샷으로만 재 main 에서 세운 리뷰·집기를 못 본다"}
+{"ts":"2026-09-18T18:10:11Z","id":"moai-073a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"command_of 가 env·timeout·sudo 를 못 넘어 규칙 1–3 이 샌다"}
+{"ts":"2026-09-18T18:10:14Z","id":"moai-fjr0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"따옴표 없는 heredoc 본문의 명령 치환을 훅이 안 읽는다"}
+{"ts":"2026-09-18T18:10:16Z","id":"moai-lwwx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"|| { echo; exit 1; } 과 if ! 집기; then exit; fi 꼴의 끊기를 훅이 아직 막는다"}
+{"ts":"2026-09-18T18:10:19Z","id":"moai-pr7u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅이 Bash 한 번에 명령줄을 여덟 번 읽고 겹친 치환은 제곱으로 는다"}
+{"ts":"2026-09-18T18:10:21Z","id":"moai-l89d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"거절문이 옮겨 적은 -C 가 딸린 워크트리 자신이면 main 으로 안 겨눈다"}
+{"ts":"2026-09-18T18:10:24Z","id":"moai-4zk6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"보드의 stranded 힌트가 -m 자유 글을 큰따옴표로 가르친다"}
+{"ts":"2026-09-18T18:23:04Z","id":"moai-k8ae","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"한국어 글쓰기 플러그인 둘을 필수로 설치하고 moai 의 모든 한국어 이슈 작성에 관여시킨다"}
