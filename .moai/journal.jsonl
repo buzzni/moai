@@ -4789,3 +4789,12 @@
 {"ts":"2026-09-18T15:07:36Z","id":"moai-onkg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-18T15:07:36Z","id":"moai-ght0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-18T15:07:36Z","id":"moai-ha5d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:07:52Z","id":"moai-g326.f4d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰 원문 (/code-review medium --fix, sonnet-5)\n\n범위: 문서만 — CLAUDE.md 와 src/guide.rs 의 doc 주석 하나. 커밋 셋(moai-onkg·moai-ght0·moai-ha5d),\n워킹 트리 깨끗. 새 글의 사실 주장을 코드와 견줬다.\n\n- 명령 수: 표가 \"10개\" 대신 \"열 몇 개\" — 맞다. `src/cmd/` 에 명령 모듈 17개. CLAUDE.md·AGENTS.md·\n  src/guide.rs·tests/ 어디에도 옛 \"10\" 을 못박은 곳이 안 남았다\n- 빌드 예산: \"부하 없는 기계\" 글이 의존성 절(바이너리·빌드 상한을 넘길 때만 멈춘다)과 맞는다\n- guide.rs 의 moai read 주석: `CHEATSHEET`(브리프 둘과 1559줄 시험이 쓴다)에 붙었다. 인용한 것이\n  다 있다 — src/user_config.rs 의 MOAI_CONFIG 설정 경로, [read] 표, src/cmd/read.rs 의\n  `moai read --all`(내게 온 것만). 논리가 선다 — 사람의 신원·HOME 으로 도는 에이전트는 사람의\n  읽음을 같이 쓴다\n\n건수 0. 고친 것 없음."}
+{"ts":"2026-09-18T15:08:15Z","id":"moai-onkg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — CLAUDE.md 대조표 한 칸)"}
+{"ts":"2026-09-18T15:08:15Z","id":"moai-ght0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — CLAUDE.md 예산 표와 한 문단)"}
+{"ts":"2026-09-18T15:08:15Z","id":"moai-ha5d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — guide.rs doc 주석 하나)"}
+{"ts":"2026-09-18T15:08:15Z","id":"moai-g326.f4d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/sonnet-5 tokens=54491 (medium — 에픽 끝 리뷰, 건수 0)"}
+{"ts":"2026-09-18T15:08:15Z","id":"moai-onkg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T15:08:16Z","id":"moai-ght0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T15:08:16Z","id":"moai-ha5d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T15:08:16Z","id":"moai-g326.f4d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영할 것 없음(건수 0). 넘긴 것 없음."}
