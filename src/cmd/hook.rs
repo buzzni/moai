@@ -192,6 +192,15 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                         toward_main(said, other, &load.issues)
                     });
                 }
+                // **한국어 글에는 다듬기를 비춘다**(moai-6rrb). 막는 답이 이긴다 — 막힌 명령은 글을
+                // 안 넣었다. 깔렸는지는 비출 때만 장부를 읽는다.
+                decision = decision.then(|| {
+                    if crate::hook::writes_korean(cmd) {
+                        crate::hook::korean_notice(&crate::cmd::skill::korean_missing(&repo.root))
+                    } else {
+                        Decision::Pass
+                    }
+                });
             }
             decision
         }

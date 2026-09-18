@@ -1848,6 +1848,64 @@ fn aside_in(issues: &[Issue], focus: &[&Issue], cmd: &str, only: &dyn Fn(usize) 
     ))
 }
 
+/// 글을 적는 `moai` 동사 — 제목·본문·노트·`-m` 을 받는 것들. `show -g 한글` 같은 읽기는 안 센다.
+const WRITES_TEXT: &[&str] = &["add", "edit", "note", "mv", "defer", "idea", "issue", "epic", "milestone"];
+
+/// 값이 글이 아닌 플래그 — 자리(`-C`)와 사람(`--user`). 사람 이름은 한글일 수 있다.
+const NOT_TEXT: &[&str] = &["-C", "--dir", "--user", "-a", "--assignee"];
+
+/// 꼴이 정해진 줄의 머리 — 읽는 쪽이 그 꼴로 세니 다듬지 않는다(`guide::KOREAN`).
+const FIXED_HEADS: &[&str] = &["model:", "다음:", "Regression-of:"];
+
+/// 이 명령줄이 **한국어 글을 moai 에 넣는가**(moai-6rrb) — 글을 적는 `moai` 토막의 인자에 한글이 들었거나,
+/// 본문을 stdin(`-b -`·`--from -`)에서 받는데 명령줄(heredoc 본문)에 한글이 들었다.
+///
+/// **꼴이 정해진 줄만 있으면 아니다.** `model: …`·`다음: …`·`Regression-of: …` 는 다듬지 않는 글이라,
+/// 거기 알림을 달면 닫을 때마다 헛 알림이 선다. 파일에서 흘린 본문(`< 파일`)은 모른다 — 훅이 남의
+/// 파일을 읽지 않는다. 판정은 **글의 글자**다 — 화면 말 설정과는 무관하다(`guide::KOREAN`).
+pub fn writes_korean(cmd: &str) -> bool {
+    let hangul = |t: &str| t.chars().any(|c| matches!(c, '\u{AC00}'..='\u{D7A3}' | '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}'));
+    let unfixed = |t: &str| {
+        t.lines().any(|l| hangul(l) && !FIXED_HEADS.iter().any(|h| l.trim_start().starts_with(h)))
+    };
+    segments(cmd).iter().any(|seg| {
+        let Some(args) = moai_args(seg) else { return false };
+        if asks_help(seg) || !positionals(args).first().is_some_and(|v| WRITES_TEXT.contains(v)) {
+            return false;
+        }
+        let mut texts = Vec::new();
+        let mut it = args.iter().peekable();
+        while let Some(a) = it.next() {
+            if NOT_TEXT.contains(&a.as_str()) {
+                it.next();
+            } else if !NOT_TEXT.iter().any(|f| a.starts_with(&format!("{f}="))) {
+                texts.push(a.as_str());
+            }
+        }
+        let stdin = !flag_values(args, &["-b", "--body", "--from"]).iter().all(|v| v != "-");
+        texts.iter().any(|t| unfixed(t)) || (stdin && unfixed(cmd))
+    })
+}
+
+/// 한국어 글을 넣은 뒤 비추는 한 줄(moai-6rrb). **막지 않는다** — 글 스타일 검사를 게이트로 두지 않는다는
+/// 결정(moai-mthy)을 지킨다. `PreToolUse` 의 비춤은 명령이 돈 뒤에 읽히니([`aside_in`]) "다듬었는가" 를
+/// 묻고 고쳐 적는 길을 댄다. `missing` 은 이 저장소에 안 깔린 플러그인 — 있으면 까는 길을 **사람에게**
+/// 청하라고 한다. 에이전트가 제 손으로 깔지 않는다(사용자 결정, moai-5wk4).
+pub fn korean_notice(missing: &[&str]) -> Decision {
+    let mut said = "방금 moai 에 넣은 한국어 글을 다듬었는가 — `korean-skills:humanizer`, 20줄을 넘으면 \
+                    `humanize-korean:humanize-korean`, 마지막에 `korean-skills:grammar-checker`. 안 다듬었으면 \
+                    다듬어 `moai edit`·`moai note` 로 고쳐 적는다. id·명령·경로·수와 꼴이 정해진 줄은 그대로 둔다."
+        .to_string();
+    if !missing.is_empty() {
+        said.push_str(&format!(
+            "\n이 저장소에 {} 이 깔려 있지 않다 — 제 손으로 깔지 말고 사람에게 `moai skill install` 을 다시 \
+             불러 달라고 청한다. 그것이 moai 와 같은 범위로 함께 깐다.",
+            missing.join("·")
+        ));
+    }
+    Decision::Context(said)
+}
+
 /// 토막마다 **그 `moai` 가 도는 자리** — `-C`·`--dir` 나 앞의 `cd`·`pushd` 가 세션의 자리
 /// (`cwd`)를 옮겼으면 그 디렉터리, 아니면 `None`. 차례는 [`segments`] 와 같다 — 받는 쪽이
 /// 토막 번호로 가른다. `moai` 가 아닌 토막은 언제나 `None` 이다.
@@ -2339,7 +2397,11 @@ fn shelving_closes<'a>(latest: &'a [Issue], cfg: &Config, wip: &[&Issue]) -> std
 
 /// 세지 않는 자리. 저장소 밖, 트래커 자신, 도구 설정, 빌드 산출물.
 /// 여기를 고치는 것은 "일" 이 아니다 — 일을 하러 가는 길이다.
-const SKIP: &[&str] = &[".moai", ".claude", ".git", "target", "node_modules"];
+///
+/// **`_workspace` 도 세지 않는다**(사용자, moai-5wk4). `humanize-korean` 은 cwd 에 이 폴더를 만든다 —
+/// 안내는 저장소 밖에서 돌리라고 하지만, 저장소 안에서 돌렸다고 한국어 글을 다듬는 일이 규칙 2 에
+/// 막히면 안내가 시킨 일을 규칙이 막는다.
+const SKIP: &[&str] = &[".moai", ".claude", ".git", "target", "node_modules", "_workspace"];
 
 /// 이 파일을 고치는 것이 일에 매여야 하는가.
 fn counted(path: &str, root: &Path) -> bool {
@@ -4485,5 +4547,62 @@ mod tests {
             panic!("안 붙들었다");
         };
         assert!(held.contains(&crate::guide::close_steps("t-r2")), "세션 닫기가 갈라졌다\n{held}");
+    }
+}
+
+#[cfg(test)]
+mod korean_tests {
+    use super::*;
+
+    /// **한국어 글을 넣는 쓰기만 비춘다**(moai-6rrb). 읽기·영어 글·사람 이름·꼴이 정해진 줄은 아니다 —
+    /// 헛 알림이 잦으면 알림을 안 읽게 된다.
+    #[test]
+    fn only_korean_text_going_into_moai_is_noticed() {
+        for cmd in [
+            "moai add '빈 태그를 못 거른다' -t bug",
+            "moai note t-1 '발견한 것'",
+            "moai mv t-1 done -m '리뷰를 반영했다'",
+            "moai -C /repo idea add '떠오른 것'",
+            "moai edit t-1 -b - <<'B'\n- 무엇: 어긋났다\nB",
+            "cd /repo && moai add --from - <<'PLAN'\n# 에픽\n- [p1] 첫 이슈\nPLAN",
+        ] {
+            assert!(writes_korean(cmd), "안 비춘다 — {cmd:?}");
+        }
+        for cmd in [
+            "moai show -g 한국어",
+            "moai add 'fix the empty tag' -t bug",
+            "moai --user '레이븐 (r@x)' add 'english title'",
+            "moai note t-1 'model: anthropic/opus-5 (high — 쓰기 경로)'",
+            "moai note t-1 '다음: 훅 멤버를 이어서 한다'",
+            "moai add '제목' --help",
+            "echo '한글' | grep moai",
+            "moai note t-1 -b - < /tmp/review.md",
+        ] {
+            assert!(!writes_korean(cmd), "헛 비춘다 — {cmd:?}");
+        }
+    }
+
+    /// **막지 않고, 없는 플러그인은 사람에게 청하게 한다.** 에이전트가 제 손으로 깔면 사용자 결정
+    /// (moai-5wk4)을 뒤집는다. 비추는 스킬 이름은 안내와 같은 플러그인의 것이다.
+    #[test]
+    fn the_korean_notice_never_blocks_and_asks_a_person_to_install() {
+        let Decision::Context(said) = korean_notice(&["korean-skills@korean-skills"]) else {
+            panic!("비추는 답이 아니다");
+        };
+        assert!(said.contains("moai skill install") && said.contains("사람에게"), "{said}");
+        assert!(!said.contains("claude plugin install"), "제 손으로 깔라고 한다\n{said}");
+        for (id, _) in crate::guide::KOREAN_PLUGINS {
+            let plugin = id.split_once('@').unwrap().0;
+            assert!(said.contains(&format!("`{plugin}:")), "{plugin} 의 스킬을 안 댄다\n{said}");
+        }
+        let Decision::Context(quiet) = korean_notice(&[]) else { panic!("비추는 답이 아니다") };
+        assert!(!quiet.contains("moai skill install"), "다 깔렸는데 깔라고 한다\n{quiet}");
+    }
+
+    /// `humanize-korean` 이 cwd 에 만드는 `_workspace/` 는 규칙 2 가 세지 않는다.
+    #[test]
+    fn the_humanizer_workspace_is_not_counted() {
+        assert!(!counted("_workspace/2026-09-18-001/final.md", Path::new("/repo")));
+        assert!(counted("src/main.rs", Path::new("/repo")));
     }
 }

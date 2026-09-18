@@ -550,6 +550,20 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     real(a) == real(b)
 }
 
+/// 이 저장소에 **안 깔린** 한국어 글쓰기 플러그인 — 사용자 범위이거나 `projectPath` 가 여기인 설치가
+/// 없는 것. 훅이 알림에 붙인다(moai-6rrb). 장부를 못 읽으면 전부 안 깔린 것으로 읽는다 — 알림이 "다시
+/// 깔라" 고 한 줄 더 말할 뿐 아무것도 막지 않는다.
+pub fn korean_missing(root: &Path) -> Vec<&'static str> {
+    let ledger = ledger("installed_plugins.json");
+    crate::guide::KOREAN_PLUGINS
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| {
+            ledger.as_ref().is_none_or(|l| skill::installs_of(l, id, |p| same_dir(Path::new(p), root)).is_empty())
+        })
+        .collect()
+}
+
 /// moai 곁에 함께 까는 한국어 글쓰기 플러그인 하나(moai-lr1s, 사용자 결정 moai-5wk4) — 설치 id 와
 /// 부를 `claude` 명령. **moai 와 같은 범위다** — 사용자 전역에 깔지 않고, 에이전트가 제 손으로 깔지도
 /// 않는다. 까는 것은 사람이 부르는 이 명령 하나다.

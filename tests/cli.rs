@@ -6780,6 +6780,30 @@ fn hook(s: &Scratch, event: &str, input: &str) -> Output {
 /// 훅 프로세스를 `run_in` 에서 띄운다. 이벤트가 가리키는 저장소와 다른 자리여도
 /// 판정이 같아야 한다 — 훅 프로세스의 자리는 아무도 약속하지 않았다.
 fn hook_in(s: &Scratch, run_in: &Path, event: &str, input: &str) -> Output {
+    let mut out = hook_in_raw(s, run_in, event, input);
+    out.stdout = without_korean_notice(&String::from_utf8(out.stdout).unwrap()).into_bytes();
+    out
+}
+
+/// 한국어 글 알림(moai-6rrb)의 첫 낱말. 훅의 글과 같아야 한다 — 어긋나면 알림을 못 걷어 위의 시험들이
+/// 한꺼번에 붉어지니 저절로 드러난다.
+const KOREAN_NOTICE: &str = "방금 moai 에 넣은 한국어 글을 다듬었는가";
+
+/// **한국어 글 알림을 걷은 출력.** 훅 시험들은 한국어 제목을 표본으로 쓰면서 "막지 않았다·다른 비춤이
+/// 없다" 를 빈 출력으로 잰다 — 한국어 글에 늘 붙는 알림이 그 자리를 다 붉게 만든다. 알림은 다른 비춤 뒤에
+/// 이어 붙으므로(`Decision::then`) 그 뒤를 잘라 낸다. 알림 자체는 [`hook_in_raw`] 로 따로 잰다.
+fn without_korean_notice(out: &str) -> String {
+    let Some(at) = out.find(KOREAN_NOTICE) else { return out.to_string() };
+    let key = "\"additionalContext\":\"";
+    if out[..at].ends_with(key) {
+        return String::new();
+    }
+    let cut = out[..at].strip_suffix("\\n\\n").unwrap_or(&out[..at]);
+    format!("{cut}\"}}}}\n")
+}
+
+/// 훅을 띄워 **걷지 않은** 출력을 받는다.
+fn hook_in_raw(s: &Scratch, run_in: &Path, event: &str, input: &str) -> Output {
     use std::io::Write as _;
     let tmp = s.path().join("hooktmp");
     std::fs::create_dir_all(&tmp).unwrap();
@@ -7197,6 +7221,31 @@ fn json_str(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// **한국어 글을 넣는 셸 호출에 다듬기 알림이 계약째로 붙는다**(moai-6rrb). 막지 않고, 이 저장소에
+/// 플러그인이 없으면 사람에게 `moai skill install` 을 청하라고 한다. 영어 글과 읽기에는 아무 말도 없다.
+/// 다른 훅 시험은 이 알림을 걷고 본다([`without_korean_notice`]) — 여기가 걷지 않고 보는 자리다.
+#[test]
+fn korean_text_going_into_moai_gets_a_polishing_notice() {
+    let s = init("hookkorean");
+    let raw = |cmd: &str| {
+        let cwd = s.path().display().to_string();
+        let input = format!(
+            "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}}}",
+            json_str(&cwd),
+            json_str(cmd)
+        );
+        String::from_utf8(hook_in_raw(&s, s.path(), "pre-tool-use", &input).stdout).unwrap()
+    };
+    let out = raw("moai idea add '떠오른 것'");
+    let said = carried_text(&out);
+    assert!(said.starts_with(KOREAN_NOTICE), "{out}");
+    assert!(!out.contains("permissionDecision"), "알림이 막는다\n{out}");
+    assert!(said.contains("moai skill install"), "없는 플러그인을 안 비춘다\n{out}");
+    for quiet in ["moai idea add 'an idea'", "moai show -g 한국어", "moai note x 'model: anthropic/opus-5 (low — 글)'"] {
+        assert!(raw(quiet).trim().is_empty(), "헛 비춘다 — {quiet}\n{}", raw(quiet));
+    }
 }
 
 fn shell_call(s: &Scratch, cmd: &str) -> String {
