@@ -3732,3 +3732,8 @@
 {"ts":"2026-09-18T04:04:30Z","id":"moai-a4ur.qmr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 지적 0건, 고친 것 없음. 남은 sleep 30 은 bash 판과 같은 모양이고 결과에 안 닿아 그대로 둔다 — 30초 뒤 저절로 죽는다. 넘긴 것 없음"}
 {"ts":"2026-09-18T04:04:46Z","id":"moai-a4ur.qmr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 0건 — 고친 것도 넘긴 것도 없다. 남은 sleep 30 은 bash 판과 같은 모양이라 둔다"}
 {"ts":"2026-09-18T04:04:46Z","id":"moai-8ksq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T04:05:05Z","id":"moai-57x9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"add 의 태그 줄을 view 의 한 자리에서 짓는다"}
+{"ts":"2026-09-18T04:05:05Z","id":"moai-ocil","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"add 의 확인 줄과 미리보기가 태그를 view::tags_of 로 짓는다"}
+{"ts":"2026-09-18T04:05:05Z","id":"moai-57x9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-8ik3 에서 펼쳤다 — moai add 가 태그 줄을 손으로 짓는다 — view::tags_of 로 모으려면 &[String] 을 받아야 한다"}
+{"ts":"2026-09-18T04:05:05Z","id":"moai-8ik3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-57x9 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T04:05:10Z","id":"moai-ocil","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
