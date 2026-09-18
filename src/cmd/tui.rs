@@ -25,7 +25,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
     let crate::worktree::Gathered { load, origin, trouble, watched, .. } = crate::worktree::gather(&repo, !ctx.json)?;
-    let index = Index::of(&load.issues);
+    // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
+    // 소속 지도를 두 번 잰다(moai-xemz 리뷰).
+    let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
     let path = resolve(&index, &load.issues, args.path.as_deref())?;
 
     // `--json` 은 화면을 켜지 않는다. 기계로 읽는 쪽과 통합 시험이 이 길로 온다.
@@ -34,7 +36,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // 배너가 없다 — 여기서 안 알리면 목록이 조용히 짧아지고, 부른 쪽은
         // 그 이슈가 없다고 읽는다. 다른 읽기 명령과 같은 길로 간다.
         super::report_load_errors(&repo.issues_path(), &load.errors);
-        let states = crate::report::group_states(&load.issues, &repo.config);
+        let states = ground.columns();
         let rows: Vec<Row> = index
             .entries(&load.issues, &path)
             .iter()
@@ -52,7 +54,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 설정은 **한 번 읽어** 층과 보기가 나눠 쓴다(moai-u8cs).
     let reg = crate::user_config::read(config.as_deref());
     let layer = crate::tui::layer::Layer::of(&reg, Some(&repo.root));
-    let mut app = App::open(repo, load, index, path, stamp).overlaid(origin, trouble, watched);
+    let mut app = App::open(repo, load, index, ground, path, stamp).overlaid(origin, trouble, watched);
     app.user = ctx.user.clone();
     // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와
     // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.
@@ -60,10 +62,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.me = app.whoami(&root);
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
-    // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp). 층은 **그다음에** 얹는다 — 얹는 쪽
-    // (`App::attach_layer`)이 못 읽은 설정을 배너에 다는 자리라, 보기의 `look_problems` 와 한
-    // 화면에서 갈라지면 안 된다. 한때는 `with_layer` 가 첫 화면의 커서를 `..` 너머로 밀어 차례가
-    // 더 크게 걸렸는데, 뿌리의 `..` 을 걷으면서(moai-i784) 그 밀기는 없어졌다(moai-2kyl 단계 리뷰).
+    // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp). 못 읽은 설정의 까닭은 보기가 아니라 층이 댄다 —
+    // 얹는 쪽(`App::attach_layer`)이 배너에 달고 `look_problems` 에는 그 까닭이 없다(moai-5jsn). 그래서 둘의
+    // 차례에 걸린 것은 없다(moai-gmdu 에픽 리뷰). 한때는 `with_layer` 가 첫 화면의 커서를 `..` 너머로 밀어
+    // 차례가 걸렸는데, 뿌리의 `..` 을 걷으면서(moai-i784) 그 밀기는 없어졌다(moai-2kyl 단계 리뷰).
     app.adopt_look(&reg.look, reg.look_problems);
     // 적어 둔 읽음도 같은 한 번의 읽기에서 온다(moai-z9pc).
     app.adopt_read(reg.read);

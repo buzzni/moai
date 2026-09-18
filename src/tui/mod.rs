@@ -19,7 +19,7 @@ pub mod view;
 use crate::config::Config;
 use crate::model::{Issue, Kind, Status};
 use crate::nav::{Entry, Index, Path, Seg};
-use crate::query::{Filter, GrepIn, Raw, Where};
+use crate::query::{Filter, GrepIn, Raw};
 use crate::store::{Load, Repo};
 use form::{Act, Form};
 use input::Input;
@@ -108,6 +108,15 @@ enum Landing {
     Missing,
 }
 
+/// 줄을 가리는 것 — 거름망과 보기(`SPC s`) 각각([`App::veil`]). 둘 다 `false` 면 목록에 선다.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Veil {
+    /// 거름망(`/`·`f`)에 안 걸렸다.
+    filtered: bool,
+    /// 보기가 숨겼다.
+    viewed: bool,
+}
+
 /// 누군지 묻는 칸의 상태.
 ///
 /// **받은 것은 그 세션 동안만 든다**(`App::user`). `.moai/config.toml` 에도
@@ -180,24 +189,90 @@ impl Pane {
 /// 묶음 id → 멤버에서 읽은 것(`report::group_stands`). 이슈를 빌리지 않게 소유한다.
 type States = std::collections::BTreeMap<String, Stood>;
 
-/// 묶음 하나를 읽은 것 — 서 있는 칸과, 그 밑에 집은 일이 있는가(`report::Stand::busy`),
-/// 미뤄 뺀 멤버 덕에 `done` 으로 섰으면 그 멤버(`report::Stand::aside`).
+/// 묶음 하나를 읽은 것 — 서 있는 칸과 그 칸의 셈이 마지막으로 움직인 때(`report::Stand::since`),
+/// 그 밑에 집은 일이 있는가(`report::Stand::busy`), 미뤄 뺀 멤버 덕에 `done` 으로 섰으면 그 멤버
+/// (`report::Stand::aside`).
 struct Stood {
     column: String,
+    since: String,
     busy: bool,
     waiting: crate::report::Waiting,
     aside: Vec<String>,
 }
 
-fn states_of(issues: &[Issue], cfg: &Config) -> States {
-    crate::report::group_stands(issues, cfg)
-        .into_iter()
-        .map(|(id, s)| {
-            let aside = s.aside.iter().map(|m| m.to_string()).collect();
-            let stood = Stood { column: s.column.to_string(), busy: s.busy, waiting: s.waiting, aside };
-            (id.to_string(), stood)
-        })
-        .collect()
+/// **파일 전체를 훑어야 아는 것을 소유한 꼴**(moai-fbdg). `report::Soil` 은 이슈를 빌리므로 `App` 이
+/// 들 수 없다 — 적재 때 한 걸음으로 재어 이것으로 소유해 두고, 색인(`nav::Index`)·묶음 칸·거름망이
+/// 그 한 벌을 나눠 쓴다. 따로 셀 때는 `Index::of`·`states_of`·`Where::of` 가 저마다 소속 지도를
+/// 지어, 거름망은 **키 하나마다** 이슈 1만 건에서 300ms 를 치렀다.
+#[derive(Default)]
+pub struct Ground {
+    stands: States,
+    epic: std::collections::BTreeMap<String, String>,
+    milestone: std::collections::BTreeMap<String, String>,
+    put_off: std::collections::BTreeSet<String>,
+    kinds: std::collections::BTreeMap<String, crate::model::Kind>,
+    folded: std::collections::BTreeSet<String>,
+}
+
+/// 적재 한 걸음(moai-fbdg) — 색인과 [`Ground`] 를 **한 번 잰 지도**(`report::Soil`)에서 짓는다. 여는 길
+/// (`cmd::tui`)·다시 읽기([`prepare`])·시험의 들이기([`App::adopt`])가 모두 이것 하나를 지난다 — 한때 여는
+/// 길만 `Index::of` 와 `Ground::of` 를 따로 불러, 첫 화면 앞에서 소속 지도를 두 번 쟀다(moai-xemz 리뷰).
+pub fn measure(issues: &[Issue], cfg: &Config) -> (Index, Ground) {
+    let soil = crate::report::Soil::of(issues);
+    (Index::in_soil(issues, &soil), Ground::in_soil(issues, cfg, &soil))
+}
+
+impl Ground {
+    fn in_soil(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) -> Ground {
+        let stands = soil
+            .stands(issues, cfg)
+            .into_iter()
+            .map(|(id, s)| {
+                let aside = s.aside.iter().map(|m| m.to_string()).collect();
+                let stood = Stood {
+                    column: s.column.to_string(),
+                    since: s.since.to_string(),
+                    busy: s.busy,
+                    waiting: s.waiting,
+                    aside,
+                };
+                (id.to_string(), stood)
+            })
+            .collect();
+        Ground {
+            stands,
+            epic: soil.epic.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            milestone: soil.milestone.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            put_off: soil.roots.keys().map(|k| k.to_string()).collect(),
+            kinds: soil.kinds.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            folded: soil.folded.iter().map(|k| k.to_string()).collect(),
+        }
+    }
+
+    /// 묶음 id → 멤버에서 읽은 칸(`report::group_states` 와 같은 답). 거름망과 `tui --json` 의 줄이 쓴다.
+    pub fn columns(&self) -> std::collections::BTreeMap<&str, &str> {
+        self.stands.iter().map(|(id, s)| (id.as_str(), s.column.as_str())).collect()
+    }
+
+    /// 거름망이 볼 꼴 — 든 지도를 빌리기만 하고 다시 재는 것은 없다. 빌린 지도를 짓는 값은 **이슈 수에
+    /// 비례한다**: 소속 지도(`epic`·`milestone`)는 멤버 줄마다 한 칸이다. 그래도 재는 값(`Where::of`, 1만
+    /// 건에서 수십 ms)보다 한참 싸서 거름망이 키마다 부른다. 필드는 **이름으로** 넘긴다 — 같은 타입의
+    /// 지도가 넷이라 차례로 넘기면 서로 바뀌어도 컴파일된다.
+    fn here(&self) -> crate::query::Where<'_> {
+        fn borrow(m: &std::collections::BTreeMap<String, String>) -> std::collections::BTreeMap<&str, &str> {
+            m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
+        }
+        let kinds = &self.kinds;
+        crate::query::Where {
+            epic: borrow(&self.epic),
+            milestone: borrow(&self.milestone),
+            put_off: self.put_off.iter().map(String::as_str).collect(),
+            states: self.columns(),
+            since: self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect(),
+            eclipsed: Some(Box::new(move |i: &Issue| crate::report::is_eclipsed(kinds, i))),
+            folded: self.folded.iter().map(String::as_str).collect(),
+        }
+    }
 }
 
 /// 다시 읽은 것 — **무거운 셈을 다 마친 모양.** 읽기·색인·칸 지도·경고 셈은
@@ -213,7 +288,7 @@ pub struct Fresh {
     stamp: Stamp,
     issues: Vec<Issue>,
     index: Index,
-    states: States,
+    ground: Ground,
     warnings: usize,
     unreadable: Vec<Option<String>>,
     origin: crate::worktree::Origin,
@@ -272,14 +347,16 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         .map(|id| id.map(str::to_string))
         .collect();
     let issues = g.load.issues;
+    // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸·거름망이 같은 지도를 나눠 쓴다.
+    let (index, ground) = measure(&issues, &repo.config);
     let now = crate::model::now();
     let mut watched = g.watched;
     watched.extend(heads);
     Ok(Fresh {
         root: repo.root.clone(),
         stamp,
-        index: Index::of(&issues),
-        states: states_of(&issues, &repo.config),
+        index,
+        ground,
         warnings: warnings_of(&issues, &unreadable, &repo.config, &now),
         issues,
         unreadable,
@@ -307,9 +384,9 @@ fn warnings_of(issues: &[Issue], unreadable: &[Option<String>], cfg: &Config, no
 pub struct App {
     pub issues: Vec<Issue>,
     pub index: Index,
-    /// 묶음 id → 멤버에서 읽은 칸과 집은 멤버가 있는가 (`report::group_stands`). **적재 때 한 번 센다**
-    /// — 프레임마다 세면 줄 하나 그리는 데 저장소를 걷는다.
-    states: States,
+    /// 파일 전체를 훑어야 아는 것 — 묶음이 선 칸, 소속, 물려받은 미룸, 가려짐. **적재 때 한 번 센다**
+    /// — 프레임마다 세면 줄 하나 그리는 데 저장소를 걷고, 거름망은 키 하나마다 그랬다(moai-fbdg).
+    ground: Ground,
     pub cfg: Config,
     pub path: Path,
     pub cursor: usize,
@@ -427,8 +504,8 @@ pub struct App {
     /// 다시 읽는 길. 진짜 길은 [`prepare`] 다. **시험이 갈아 끼운다** — 스레드에서
     /// 짓는 읽기가 패닉하는 때는 진짜 파일로는 못 만든다.
     read: fn(&Repo, bool) -> crate::fail::R<Fresh>,
-    /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임
-    /// `Filter::matches` 를 돌리면 `Where::of` 가 프레임마다 지도를 다시 만든다.
+    /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임 `Filter::matches` 를 돌리면
+    /// 거름망이 볼 꼴(`Ground::here`)을 프레임마다 다시 짓는다. 소속 지도 자체는 적재 때 한 번 잰다(moai-fbdg).
     keep: Vec<bool>,
     /// 무엇을 보일까(moai-fmv5) — 칸·미룸 토글. 거름망과 따로 들어 Esc 가 안 푼다.
     pub view: view::View,
@@ -529,23 +606,23 @@ pub struct Edit {
 
 impl App {
     /// 저장소 없이 세운다 — 시험과 눈으로 보는 길이 이것을 쓴다. 진짜 길은
-    /// [`App::open`] 이고, 그쪽은 색인을 부른 쪽에서 받는다.
+    /// [`App::open`] 이고, 그쪽은 색인과 [`Ground`] 를 부른 쪽에서 받는다.
     #[cfg(test)]
     pub fn new(issues: Vec<Issue>, cfg: Config, path: Path) -> App {
-        let index = Index::of(&issues);
-        App::build(issues, index, cfg, path, Vec::new())
+        let (index, ground) = measure(&issues, &cfg);
+        App::build(issues, index, ground, cfg, path, Vec::new())
     }
 
     /// 저장소에서 읽어 세운다.
     ///
-    /// **색인은 부른 쪽이 이미 만든 것을 받는다** — 여는 데서 다시 만들면
+    /// **색인과 [`Ground`] 는 부른 쪽이 이미 잰 것을 받는다**([`measure`]) — 여는 데서 다시 만들면
     /// 같은 훑기를 두 번 하고, 그 훑기는 이슈 수에 비례한다.
     /// **표식도 부른 쪽이 읽기 전에 잰 것을 받는다** — 읽고 나서 재면 그
     /// 사이에 떨어진 쓰기가 "이미 본 것" 으로 적혀 영영 안 보인다.
-    pub fn open(repo: Repo, load: Load, index: Index, path: Path, stamp: Stamp) -> App {
+    pub fn open(repo: Repo, load: Load, index: Index, ground: Ground, path: Path, stamp: Stamp) -> App {
         let cfg = repo.config.clone();
         let ids = load.errors.iter().map(|e| e.id.clone()).collect();
-        let mut app = App::build(load.issues, index, cfg, path, ids);
+        let mut app = App::build(load.issues, index, ground, cfg, path, ids);
         app.stamp = stamp;
         app.repo = Some(repo);
         app
@@ -579,6 +656,7 @@ impl App {
     fn build(
         issues: Vec<Issue>,
         index: Index,
+        ground: Ground,
         cfg: Config,
         path: Path,
         unreadable_ids: Vec<Option<String>>,
@@ -586,11 +664,10 @@ impl App {
         // 들어간 채로 시작하면(`--path`) 나올 층마다 기억 자리를 만들어 둔다.
         let remembered = vec![0; path.len()];
         let keep = vec![true; issues.len()];
-        let states = states_of(&issues, &cfg);
         let mut app = App {
             issues,
             index,
-            states,
+            ground,
             cfg,
             path,
             cursor: 0,
@@ -799,13 +876,16 @@ impl App {
                     // Esc 는 거름망만 풀어 누른 키가 아무것도 안 한다. **둘 다 가렸으면 둘 다 댄다**
                     // (moai-2kyl 단계 리뷰) — 하나만 대면 그 키를 눌러도 다른 쪽에 여전히 가린다.
                     Landing::Hidden => {
-                        let masked = |mask: &[bool]| self.index.find(&id).is_some_and(|at| !mask.get(at).copied().unwrap_or(true));
+                        let veil = self.index.find(&id).map(|at| self.veil(at)).unwrap_or_default();
                         let clear = keys::label(keys::BROWSE, keys::Browse::ClearFilter);
                         let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
-                        match (masked(&self.keep), masked(&self.shown)) {
-                            (true, true) => format!("✓ {done} · {what} — 거름망과 보기에 가려 안 보인다 · {clear} 로 풀고 {show} 로 모두 보인다"),
-                            (false, true) => format!("✓ {done} · {what} — 보기에 가려 안 보인다 · {show} 로 모두 보인다"),
-                            _ => format!("✓ {done} · {what} — 거름망에 가려 안 보인다 · {clear} 로 푼다"),
+                        match veil {
+                            Veil { filtered: true, viewed: true } => format!("✓ {done} · {what} — 거름망과 보기에 가려 안 보인다 · {clear} 로 풀고 {show} 로 모두 보인다"),
+                            Veil { filtered: false, viewed: true } => format!("✓ {done} · {what} — 보기에 가려 안 보인다 · {show} 로 모두 보인다"),
+                            Veil { filtered: true, viewed: false } => format!("✓ {done} · {what} — 거름망에 가려 안 보인다 · {clear} 로 푼다"),
+                            // 둘 다 안 가렸는데 줄이 안 섰다 — 오늘은 닿지 않는 갈래다. 숨기는 까닭이 셋째로
+                            // 늘면 여기로 떨어지는데, 그때 거름망을 대면 누른 키가 아무것도 안 한다(moai-1jay).
+                            Veil { filtered: false, viewed: false } => format!("✓ {done} · {what} — 목록에 안 보인다"),
                         }
                     }
                     // 다시 읽기가 실패했으면 그 까닭은 `trouble` 이 따로 댄다. 담긴 것은 참이다.
@@ -931,7 +1011,7 @@ impl App {
         self.commits_due |= self.watched != f.watched || f.issues.iter().any(|i| !self.commit_ids.contains(&i.id));
         self.watched = f.watched;
         self.warnings = f.warnings;
-        self.take(f.issues, f.index, f.states, f.now);
+        self.take(f.issues, f.index, f.ground, f.now);
     }
 
     /// 그 줄이 도는가 — **지금 누가 손대고 있는 줄**이다.
@@ -960,7 +1040,7 @@ impl App {
         if self.index.deferred_root(&i.id).is_some() {
             return false;
         }
-        let busy = !crate::report::is_group(i) || self.states.get(&i.id).is_some_and(|s| s.busy);
+        let busy = !crate::report::is_group(i) || self.ground.stands.get(&i.id).is_some_and(|s| s.busy);
         // **도는 칸은 설정이 정한다**(moai-q59j) — 시작한 칸 모두(`Config::is_started`). 칸 이름
         // `"in_progress"` 를 박아 두면 칸 이름을 바꾼 설정에서 아무것도 안 돌았다. 설정이 모르는
         // 칸은 안 돈다 — 묶음의 `busy` 와 같은 자다(`report::Stand::busy`). 바쁜 묶음은 늘 시작한
@@ -974,7 +1054,7 @@ impl App {
     pub fn column(&self, at: usize) -> &str {
         let i = &self.issues[at];
         crate::report::is_group(i)
-            .then(|| self.states.get(&i.id).map(|s| s.column.as_str()))
+            .then(|| self.ground.stands.get(&i.id).map(|s| s.column.as_str()))
             .flatten()
             .unwrap_or(i.status.as_str())
     }
@@ -985,7 +1065,7 @@ impl App {
     pub fn waits(&self, at: usize) -> (crate::report::Waiting, &[String]) {
         let i = &self.issues[at];
         crate::report::is_group(i)
-            .then(|| self.states.get(&i.id))
+            .then(|| self.ground.stands.get(&i.id))
             .flatten()
             .map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
     }
@@ -998,11 +1078,10 @@ impl App {
     /// 안으로 자른 자리에 선다.
     #[cfg(test)]
     pub fn adopt(&mut self, issues: Vec<Issue>) {
-        let index = Index::of(&issues);
-        let states = states_of(&issues, &self.cfg);
+        let (index, ground) = measure(&issues, &self.cfg);
         let now = crate::model::now();
         self.warnings = warnings_of(&issues, &self.unreadable, &self.cfg, &now);
-        self.take(issues, index, states, now);
+        self.take(issues, index, ground, now);
     }
 
     /// 이미 센 자료를 들이고 커서·경로·거름망을 맞춘다 — [`App::adopt`] 와 스레드에서
@@ -1011,14 +1090,14 @@ impl App {
         &mut self,
         issues: Vec<Issue>,
         index: Index,
-        states: States,
+        ground: Ground,
         now: String,
     ) {
         // **옛 자료로 잰다** — 줄의 첨자는 옛 `issues` 를 가리킨다.
         let held = self.current().map(|r| self.anchor_of(&r));
         self.issues = issues;
         self.index = index;
-        self.states = states;
+        self.ground = ground;
         self.now = now;
         // 안 읽음은 **줄이 바뀔 때** 센다 — 보기 토글(`look`)도 지나는 `regrip` 에 두면 칸 하나 숨길
         // 때마다 저장소를 걷는다(moai-j038.vna).
@@ -1285,14 +1364,24 @@ impl App {
     /// 거름망에 걸렸는데 **보기(`SPC s`)가 숨긴** 이슈 수(moai-2kyl 단계 리뷰). 검색 칸이 `N건` 곁에 댄다 —
     /// 끝난 일을 찾는데 `0건` 만 서면 없는 줄 알고, 까닭을 대는 경로 줄의 뱃지는 좁으면 빠진다.
     pub fn veiled_count(&self) -> usize {
-        (0..self.keep.len()).filter(|&at| self.keep[at] && !self.visible(at)).count()
+        (0..self.keep.len()).filter(|&at| self.veil(at) == Veil { filtered: false, viewed: true }).count()
     }
 
-    /// 이 줄이 목록에 서는가 — 거름망에 걸리고(`keep`) 보기가 숨기지 않았다(`shown`). **판정은 여기
-    /// 하나다** — 목록·검색 셈·가린 셈이 저마다 적으면 한쪽만 고쳐져 셈이 목록과 어긋난다. `shown`
-    /// 이 빈 때(층에서 막 내려와 아직 안 센 때)는 보인다.
+    /// 이 줄이 목록에 서는가 — 거름망도 보기도 가리지 않았다([`Self::veil`]).
     fn visible(&self, at: usize) -> bool {
-        self.keep[at] && self.shown.get(at).copied().unwrap_or(true)
+        self.veil(at) == Veil::default()
+    }
+
+    /// 이 줄을 **무엇이 가리는가** — 거름망(`keep`)과 보기(`shown`) 각각. **판정은 여기 하나다**
+    /// (moai-1jay) — 목록·검색 셈·가린 셈·쓰기 알림·빈 목록의 까닭이 저마다 마스크를 읽으면, 숨기는
+    /// 까닭이 하나 늘거나 빈 `shown` 의 기본이 바뀐 날 한쪽만 고쳐져 셈이 목록과, 알림이 누른 키와
+    /// 어긋난다(moai-fmv5 가 그 알림을 만든 바로 그 실패). `shown` 이 빈 때(층에서 막 내려와 아직 안
+    /// 센 때)는 보기가 안 가린다.
+    fn veil(&self, at: usize) -> Veil {
+        Veil {
+            filtered: !self.keep.get(at).copied().unwrap_or(true),
+            viewed: !self.shown.get(at).copied().unwrap_or(true),
+        }
     }
 
     /// 목록에서 그 정체의 줄 자리. 커서를 붙드는 곳(다시 읽기·보기 토글·쓰기·층)이 같은 자로 찾는다.
@@ -1303,7 +1392,7 @@ impl App {
     /// 지금 디렉터리에 **보기만 가린 줄**이 있는가 — 거름망은 지나는데 보기가 숨긴 것(moai-2kyl 단계 리뷰).
     /// 목록이 비었을 때 까닭을 대려고 묻는다. 이슈 수에 비례한 훑기라 줄이 있을 때는 안 부른다.
     pub fn view_hides_here(&self) -> bool {
-        !self.on_layer() && !self.index.entries_where(&self.issues, &self.path, &|at| self.keep[at]).is_empty()
+        !self.on_layer() && !self.index.entries_where(&self.issues, &self.path, &|at| !self.veil(at).filtered).is_empty()
     }
 
     /// 거름망을 건다. 빈 글은 "거름망 없음" 이다.
@@ -1334,7 +1423,8 @@ impl App {
         // 시계는 **적재마다** 고정한 것을 쓴다. 여기서 다시 잡으면 `stale=`
         // 같은 물음이 화면의 나머지와 다른 시각으로 판정된다.
         let now = self.now.clone();
-        let wh = Where::of(&self.issues, &self.cfg);
+        // **적재 때 잰 것을 빌린다**(moai-fbdg) — 여기서 다시 재면 키 하나마다 소속 지도가 다시 선다.
+        let wh = self.ground.here();
         self.keep = self.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
         self.filter_text = Some(match mode {
             Mode::Grep(_, GrepIn::All) => format!("/{text}"),
@@ -1529,7 +1619,14 @@ impl App {
             return;
         }
         match crate::user_config::update(&path, |doc| doc.merge_look(&self.saved, &look)) {
-            Ok(()) => self.saved = look,
+            // 건너뛴 키도 든 것으로 옮긴다(moai-jr3z) — 안 옮기면 다음 저장마다 그 차이가 또 실려 같은 알림이
+            // 토글마다 선다. 알림은 이번 한 번이고, 파일의 손으로 적은 모양은 그대로다.
+            Ok(skipped) => {
+                self.saved = look;
+                if !skipped.is_empty() {
+                    self.notice = Some(format!("보기 일부를 설정에 안 적었다 — {}", skipped.join(" · ")));
+                }
+            }
             Err(e) => self.notice = Some(format!("보기를 설정에 못 적었다 — {}", crate::text::one_line(&e.to_string()))),
         }
     }
@@ -1841,7 +1938,7 @@ impl App {
                 self.reload();
             }
             // 켜고 끄는 것은 **다시 읽는 것**이다. 겹친 줄은 적재 때 한 번 세는 것이라
-            // (`states`·거름망·경고), 들고 있는 것에 덧칠하면 셈이 옛 줄로 남는다.
+            // (`Ground`·색인·경고), 들고 있는 것에 덧칠하면 셈이 옛 줄로 남는다.
             // **켰는데 겹칠 것이 없으면 한 번 말한다**(moai-d5vn). 경로 줄은 옆이 없으면 비므로, 말이
             // 없으면 메뉴만 닫힌 똑같은 화면이 남아 누른 키가 고장 난 줄 안다. 못 찾았으면 그 까닭을,
             // 찾았는데 비었으면 없다고 댄다. 알림이라 다음 키에 걷힌다. 읽기가 실패했으면 `trouble` 이
@@ -3576,8 +3673,8 @@ mod tests {
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         assert!(stamp.is_none() && load.issues.is_empty(), "판이 다르다");
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, Path::new(), stamp);
+        let (index, ground) = measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
 
         std::fs::write(
             dir.join(".moai/issues.jsonl"),
@@ -3753,8 +3850,8 @@ mod tests {
         let repo = Repo { root: dir.clone(), config: cfg() };
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, Path::new(), stamp);
+        let (index, ground) = measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
         assert_eq!(a.issues.len(), 1);
 
         // 아직 아무도 안 건드렸다 — 읽지 않는다. 읽으면 표식이 같아도 매 걸음
@@ -3796,8 +3893,9 @@ mod tests {
         let repo = Repo { root: dir.clone(), config: cfg() };
         // 탐색기가 여는 그대로 — 겹쳐 본 채로 연다(`cmd::tui::run`).
         let g = crate::worktree::gather(&repo, true).unwrap();
-        let (stamp, index) = (stamp_of(&repo), Index::of(&g.load.issues));
-        let mut a = App::open(repo, g.load, index, Path::new(), stamp).overlaid(g.origin, g.trouble, g.watched);
+        let stamp = stamp_of(&repo);
+        let (index, ground) = measure(&g.load.issues, &repo.config);
+        let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(g.origin, g.trouble, g.watched);
         assert!(a.commits_of("argos-0001").is_empty(), "여는 읽기가 git 을 기다렸다");
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         a.follow();
@@ -3927,8 +4025,8 @@ mod tests {
         let repo = Repo { root: dir.clone(), config: cfg() };
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, Path::new(), stamp);
+        let (index, ground) = measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
 
         let other = dir.join("other.jsonl");
         std::fs::write(&other, "").unwrap();
@@ -3952,8 +4050,8 @@ mod tests {
         let repo = Repo { root: dir.clone(), config: cfg() };
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, Path::new(), stamp);
+        let (index, ground) = measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
 
         std::fs::write(dir.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&make("argos-0001", Kind::Epic)).unwrap())).unwrap();
         a.follow();
@@ -4170,8 +4268,8 @@ mod tests {
         let repo = Repo { root: dir, config: cfg() };
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, Path::new(), stamp);
+        let (index, ground) = measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
         a.user = Some("레이븐 (raven@example.com)".into());
         (scratch, a)
     }
@@ -4353,6 +4451,49 @@ mod tests {
         c.hit("SPC o t");
         let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
         assert!(text.contains("sort = \"title\"") && text.contains("sort_reversed = false") && text.contains("\"what\""), "{text}");
+
+        // 차례가 낱말이 아닌 모양이어도 방향만 입히지 않는다(moai-ys7c) — 알림은 차례를 못 읽었다고 한 줄 댄다.
+        std::fs::write(c.user_config.as_ref().unwrap(), "[tui]\nsort = 3\nsort_reversed = true\n").unwrap();
+        let mut d = App::new(Vec::new(), cfg(), Path::new());
+        d.user_config = c.user_config.clone();
+        d.load_look();
+        assert_eq!(d.order, Default::default(), "못 읽은 차례의 방향을 우선순위에 입혔다");
+        assert!(d.notice.clone().unwrap_or_default().contains("tui.sort"), "{:?}", d.notice);
+    }
+
+    /// **표 모양 보기 키 하나가 그 세션의 다른 저장을 막지 않는다**(moai-jr3z, 사용자 결정 2026-09-18). 그 키는
+    /// 건너뛰고 한 번 알리며, 뒤의 토글은 적힌다 — 전에는 거절된 차이를 다음 저장마다 또 실어 숨김·상세가 하나도
+    /// 안 적혔다.
+    #[test]
+    fn a_hand_written_sort_table_does_not_block_the_other_toggles() {
+        let s = scratch("look-odd-sort");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\nsort.by = \"created\"\n").unwrap();
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        a.hit("SPC o t");
+        assert!(a.notice.clone().unwrap_or_default().contains("tui.sort"), "{:?}", a.notice);
+        a.notice = None;
+        a.hit("SPC s d");
+        assert_eq!(a.notice, None, "건너뛴 키를 다음 저장에 또 실었다");
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(text.contains("sort.by = \"created\"") && text.contains("hidden"), "숨김이 안 적혔다\n{text}");
+    }
+
+    /// **깨진 설정은 한 곳에서만 말한다**(moai-5jsn) — 층이 없다는 배너가 파싱 오류를 대므로 보기 알림은 같은
+    /// 말을 다시 안 한다. 띄우는 길(`cmd::tui`)과 같은 차례로 보기를 입히고 층을 얹는다.
+    #[test]
+    fn a_broken_user_config_is_told_once() {
+        let s = scratch("look-broken");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui\nsort = \"title\"\n").unwrap();
+        let reg = crate::user_config::read(Some(&user));
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&reg.look, reg.look_problems.clone());
+        let a = a.attach_layer(layer::Layer::of(&reg, None));
+        assert!(a.unlayered.as_deref().is_some_and(|u| u.contains("TOML")), "층 없음 배너가 까닭을 안 들었다 — {:?}", a.unlayered);
+        assert_eq!(a.notice, None, "같은 파싱 오류를 보기 알림이 또 댔다");
     }
 
     /// **두 탐색기가 저마다 누른 것이 둘 다 남는다**(moai-2kyl 단계 리뷰). 적는 것은 이 세션이 바꾼 만큼이다

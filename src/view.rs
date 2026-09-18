@@ -61,7 +61,13 @@ pub fn tags_of(i: &Issue) -> String {
 /// `idea promote` 미리보기가 그리는 초안 — 도 이것을 쓴다. `add` 가 손으로 짓던 판은 표기를
 /// 바꾸면 show·status·탐색기만 따라가, 방금 만든 줄의 태그가 확인 줄에서 다르게 보였다.
 pub fn tag_line(tags: &[String]) -> String {
-    tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
+    tag_parts(tags).map(|(mark, t)| format!("{mark}{t}")).collect()
+}
+
+/// [`tag_line`] 의 조각 — 태그마다 앞머리(`#`, 둘째부터 ` #`)와 태그 이름. **표기는 여기서만 정한다** —
+/// `tag_line` 은 이것을 잇고, 탐색기 상세는 찾은 글자를 태그마다 따로 칠하려고(moai-lw7i) 조각째 받는다.
+pub fn tag_parts(tags: &[String]) -> impl Iterator<Item = (&'static str, &str)> {
+    tags.iter().enumerate().map(|(n, t)| (if n == 0 { "#" } else { " #" }, t.as_str()))
 }
 
 /// "미룸 (3일)" 이나 "미룸 — <줄> 밑" — 계획에 있으면 `None`.
@@ -1718,9 +1724,11 @@ mod tests {
         Config::parse("prefix = \"argos\"\n").unwrap()
     }
 
-    /// **태그 표기는 `tag_line` 한 자리에서 정한다.** `add` 의 확인 줄과 연습이 손으로 지어,
-    /// 표기를 바꾸면 방금 만든 줄의 태그만 옛 모양으로 보였다. 표면 코드에 같은 짓기가 다시
-    /// 서면 여기서 이름을 대며 붉어진다 — 초안의 `\#` 풀기(`draft.rs`)는 표기가 아니라 글이다.
+    /// **태그 표기는 `tag_parts` 한 자리에서 정한다**(`tag_line` 은 그 조각을 잇는다). `add` 의 확인 줄과
+    /// 연습이 손으로 지어, 표기를 바꾸면 방금 만든 줄의 태그만 옛 모양으로 보였다. 표면 코드에 같은 짓기가
+    /// 다시 서면 여기서 이름을 대며 붉어진다 — 초안의 `\#` 풀기(`draft.rs`)는 표기가 아니라 글이다.
+    /// 탐색기 상세가 태그마다 칠하려고 앞머리를 손으로 적었던 적이 있다(moai-xemz 리뷰) — 그 짓기는 옛
+    /// 바늘에 안 걸려, 조각을 `view` 로 올리며 바늘도 조각의 표기로 옮기고 옛 바늘은 어디서도 안 서게 센다.
     ///
     /// **짓는 자리를 빼지 않고 센다** — `git.rs` 의 `git_is_spawned_only_through_command` 와 같은
     /// 모양이다. 이유가 둘이다. 하나, 파일 이름으로 빼면 `src/tui/view.rs` 까지 같이 빠진다
@@ -1731,7 +1739,8 @@ mod tests {
     #[test]
     fn tags_are_spelled_in_one_place() {
         // 바늘을 쪼개 둔다 — 한 조각이 통째로 적히면 이 줄이 제 바늘에 걸린다.
-        let needle = concat!("format!(\"#{t}\")", ").collect");
+        let needle = concat!("if n == 0 { \"#\" }", " else { \" #\" }");
+        let old = concat!("format!(\"#{t}\")", ").collect");
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut stack = vec![src.clone()];
         let mut built = Vec::new();
@@ -1743,7 +1752,7 @@ mod tests {
                 } else if path.extension().is_some_and(|x| x == "rs") {
                     let text = std::fs::read_to_string(&path).expect("소스를 못 읽는다");
                     for (n, line) in text.lines().enumerate() {
-                        if line.contains(needle) {
+                        if line.contains(needle) || line.contains(old) {
                             built.push(format!("{}:{}", path.display(), n + 1));
                         }
                     }
@@ -1753,9 +1762,10 @@ mod tests {
         let here = src.join("view.rs").display().to_string();
         assert!(
             built.len() == 1 && built[0].starts_with(&here),
-            "태그 줄을 짓는 자리는 view::tag_line 하나다 — {built:#?}"
+            "태그 표기를 정하는 자리는 view::tag_parts 하나다 — {built:#?}"
         );
         assert_eq!(tag_line(&["a".into(), "b".into()]), "#a #b");
+        assert_eq!(tag_line(&[]), "");
     }
 
     fn no_epics() -> crate::report::EpicLabels<'static> {
