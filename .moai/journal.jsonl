@@ -4651,3 +4651,4 @@
 {"ts":"2026-09-18T14:03:22Z","id":"moai-glnm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T14:03:22Z","id":"moai-ip9r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T14:03:22Z","id":"moai-okdx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 두 멤버 병합(8cbdf39). 남은 것: 가로 굴리기는 고르지 않았다(moai-ip9r 노트). draw.rs 의 '접지 않기로 한 코드 줄' 주석은 지난 일이라 둠."}
+{"ts":"2026-09-18T14:05:03Z","id":"moai-3aec","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 맨몸 저장소는 main 이 없으니 git 공용 디렉터리(/x/repo.git) 기준으로 잰다 — 부르는 자리와 상관없이 같은 글자"}
