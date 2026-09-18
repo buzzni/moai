@@ -4714,3 +4714,8 @@
 {"ts":"2026-09-18T14:39:04Z","id":"moai-595o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"더 나쁜 것: 그 판에서 시험이 워크트리의 .moai 에 실제로 썼다 — issues.jsonl·journal.jsonl 에 테스터 줄 둘(moai-sark·moai-zl7v, 어디에 쓸까). git checkout 으로 되돌렸다. TMPDIR 이 moai 체크아웃 안이면 시험이 그 트래커를 더럽힌다."}
 {"ts":"2026-09-18T14:39:04Z","id":"moai-8mq9.1bw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-8mq9 끝: 설정·저장·init 의 결정"}
 {"ts":"2026-09-18T14:42:30Z","id":"moai-8mq9.1bw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T14:42:34Z","id":"moai-gmdu.pwz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"1차 시도가 API 세션 한도(429, opus, 4pm UTC 리셋)로 죽었다 — 서브에이전트 셋 다 중단, 낸 지적 없음(원문 없음). 워크트리는 깨끗하고 고친 것도 없다. 한도가 풀리면 같은 등급(max)·같은 범위로 다시 돌린다."}
+{"ts":"2026-09-18T14:45:01Z","id":"moai-3akx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T14:45:04Z","id":"moai-m9a8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T14:45:07Z","id":"moai-boc6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T14:45:12Z","id":"moai-38mh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
