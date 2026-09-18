@@ -810,6 +810,7 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
     crate::git::run(root, args).map_err(|e| match e {
         Error::Spawn(e) => format!("git 을 부르지 못해 워크트리를 못 찾았다 — {e}"),
         Error::Failed(err) => format!("워크트리를 못 찾았다 — {err}"),
+        Error::Stream(e) => format!("워크트리 목록을 읽다 끊겼다 — {e}"),
         Error::NotUtf8(e) => format!("워크트리 목록을 못 읽었다 — {e}"),
     })
 }
