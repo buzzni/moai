@@ -4720,3 +4720,25 @@
 {"ts":"2026-09-18T14:45:07Z","id":"moai-boc6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-18T14:45:12Z","id":"moai-38mh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T14:45:16Z","id":"moai-8mq9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽 끝 리뷰(max, moai-8mq9.1bw)가 904115c..HEAD 로 돌고 있다. 끝나면 원문·판단 두 노트로 적고, 반영은 별도 fix: 커밋, 그 뒤 develop 에 --no-ff 병합·워크트리와 가지 삭제·9-1 모델 노트·멤버 done 이다. moai-4gy5 는 gmdu 가 develop 에 들어온 뒤에 한다 — 안 들어왔으면 첫 칸에 남긴다(일정 문제)."}
+{"ts":"2026-09-18T14:45:46Z","id":"moai-k0jn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 모델 짝과 리뷰 서브에이전트 모델, guide.rs 한 곳)"}
+{"ts":"2026-09-18T14:45:46Z","id":"moai-axhs","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 네 표면의 따옴표와 새 시험)"}
+{"ts":"2026-09-18T14:45:46Z","id":"moai-ugs0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 거둔 일 노트 한 줄과 시험)"}
+{"ts":"2026-09-18T14:45:46Z","id":"moai-gokz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 감독의 가지 읽기와 일꾼의 대조)"}
+{"ts":"2026-09-18T14:45:46Z","id":"moai-ay3b","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 감독 스크립트의 하위 줄과 브리프 3)"}
+{"ts":"2026-09-18T14:45:46Z","id":"moai-74so","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 결정 셋을 글로 옮김)"}
+{"ts":"2026-09-18T14:45:46Z","id":"moai-alsi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 브리프 자리 추가와 4-3, 감독 5)"}
+{"ts":"2026-09-18T14:45:46Z","id":"moai-sxv3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 감독 2 의 판 주인 확인, 실제 스크립트로 확인)"}
+{"ts":"2026-09-18T14:45:46Z","id":"moai-e9mp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 5-1 지우기 고리와 파이썬 시험)"}
+{"ts":"2026-09-18T14:45:46Z","id":"moai-ewwz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 여는 조건이 안 서서 글 없이 닫음)"}
+{"ts":"2026-09-18T14:45:47Z","id":"moai-k6mp.raw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=266862 (xhigh — 에픽 끝 리뷰 서브에이전트, 12건 중 7건 반영)"}
+{"ts":"2026-09-18T14:45:56Z","id":"moai-k0jn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-18T14:45:57Z","id":"moai-axhs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-18T14:45:57Z","id":"moai-ugs0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-18T14:45:57Z","id":"moai-gokz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-18T14:45:57Z","id":"moai-ay3b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-18T14:45:58Z","id":"moai-74so","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-18T14:45:58Z","id":"moai-alsi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-18T14:45:58Z","id":"moai-sxv3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-18T14:45:58Z","id":"moai-e9mp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-18T14:45:59Z","id":"moai-ewwz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열린 옛 멤버 리뷰가 남아 있지 않아 글 없이 닫는다 (사용자 결정)"}
+{"ts":"2026-09-18T14:45:59Z","id":"moai-k6mp.raw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"12건 중 9건 반영(83b0359·d66e0c1). 넘긴 것: 제목 자리 → 멤버 moai-1yya(옆이 hook.rs 를 쥐어 첫 칸), tmux 못 닿음 → idea moai-dx76, 치던 글 두 벌 → idea moai-7v3q"}
