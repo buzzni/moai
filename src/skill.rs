@@ -237,8 +237,13 @@ pub struct Install {
 /// 본다 — 같은 이름이 옛 자리에 남아 있는 줄을 제 것으로 걷으면 남의 설정을
 /// 건드린다. 자리를 견주는 법(심볼릭 링크 풀기)은 부르는 쪽이 준다.
 pub fn installs(ledger: &serde_json::Value, market: &str, is_here: impl Fn(&str) -> bool) -> Vec<Install> {
-    let key = format!("moai@{market}");
-    let Some(rows) = ledger.get("plugins").and_then(|p| p.get(&key)).and_then(|r| r.as_array()) else {
+    installs_of(ledger, &format!("moai@{market}"), is_here)
+}
+
+/// 설치 id(`<플러그인>@<마켓플레이스>`) 하나의 설치 중 **이 저장소에 드는 것** — 사용자 범위이거나
+/// `projectPath` 가 여기인 줄. moai 곁에 함께 까는 한국어 글쓰기 플러그인(moai-lr1s)도 이것으로 센다.
+pub fn installs_of(ledger: &serde_json::Value, key: &str, is_here: impl Fn(&str) -> bool) -> Vec<Install> {
+    let Some(rows) = ledger.get("plugins").and_then(|p| p.get(key)).and_then(|r| r.as_array()) else {
         return Vec::new();
     };
     let text = |row: &serde_json::Value, k: &str| row.get(k).and_then(|v| v.as_str()).map(str::to_string);
@@ -257,6 +262,13 @@ pub fn installs(ledger: &serde_json::Value, market: &str, is_here: impl Fn(&str)
             })
         })
         .collect()
+}
+
+/// `known_marketplaces.json` 에서 이 이름의 마켓플레이스가 **어느 GitHub 저장소를 가리키는가**.
+/// 모르는 이름이면 `None`, GitHub 가 아닌 출처면 빈 글 — 둘 다 "그 저장소가 아니다" 로 읽힌다.
+pub fn market_repo(known: &serde_json::Value, name: &str) -> Option<String> {
+    let source = known.get(name)?.get("source")?;
+    Some(source.get("repo").and_then(|r| r.as_str()).unwrap_or_default().to_string())
 }
 
 /// 매니페스트가 훅으로 부르는 실행 파일. `command` 가 적는 모양

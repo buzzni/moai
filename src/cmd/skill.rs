@@ -57,6 +57,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     // 저장소의 규칙이 이쪽에 걸린다 — 조용히 엉뚱해지는 쪽이라 더 나쁘다.
     // 연습도 같은 답을 낸다. 진짜 실행이 건너뛸 등록을 연습이 약속하면 안 된다.
     let clash = clash_of(&market, &dir);
+    let companions = companions(scope);
 
     if dry_run {
         if ctx.json {
@@ -68,6 +69,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
                 "dry_run": true,
                 "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
                 "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
+                "companions": companions.iter().filter(|_| clash.is_none()).map(Companion::json).collect::<Vec<_>>(),
             }));
         }
         let mut out = vec![format!("심을 것 — {}", dir.display())];
@@ -79,6 +81,12 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
             Some(other) => format!("등록: 건너뛴다 — `{market}` 이 이미 {} 를 가리킨다", other.display()),
             None => format!("등록: claude plugin install moai@{market} --scope {scope} -y"),
         });
+        for c in companions.iter().filter(|_| clash.is_none()) {
+            out.push(match &c.blocked {
+                Some(why) => format!("함께: 건너뛴다 — {why}"),
+                None => format!("함께: {}", c.steps.iter().map(|a| shown(a)).collect::<Vec<_>>().join(" && ")),
+            });
+        }
         return Ok(out);
     }
 
@@ -107,6 +115,19 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     if !registered {
         super::note_partial();
     }
+    // **함께 까는 것은 등록과 따로 센다.** 못 깔아도(오프라인, 이름이 남의 저장소를 가리킨다) moai 의
+    // 훅은 선다 — 훅이 한글이 든 쓰기마다 "없다" 를 비추니(moai-6rrb) 조용히 묻히지 않는다. 종료
+    // 코드까지 비영으로 두면 한국어를 안 쓰는 저장소의 설치가 바깥 저장소 하나 때문에 실패로 읽힌다.
+    // moai 를 등록하지 못하는 자리(이름이 남의 저장소를 가리킨다)에서는 곁의 것도 안 깐다 — 그 자리를
+    // 풀고 다시 부르면 함께 선다. 여기서만 깔면 moai 없이 곁의 것만 남는다.
+    let companions: Vec<(Companion, bool)> = companions
+        .into_iter()
+        .filter(|_| clash.is_none())
+        .map(|c| {
+            let ok = c.blocked.is_none() && c.steps.iter().all(|a| run(&root, a));
+            (c, ok)
+        })
+        .collect();
 
     if ctx.json {
         return super::json_line(&serde_json::json!({
@@ -120,6 +141,14 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
             // **못 한 까닭을 기계에도 준다.** 사람 출력에만 적어 두면 스크립트는
             // `registered: false` 만 보고 무엇을 해야 할지 모른다.
             "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
+            "companions": companions
+                .iter()
+                .map(|(c, ok)| {
+                    let mut v = c.json();
+                    v["installed"] = serde_json::json!(ok);
+                    v
+                })
+                .collect::<Vec<_>>(),
         }));
     }
 
@@ -127,6 +156,17 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     out.push(format!("  훅이 부를 것: {exe} hook <event>"));
     for (what, ok) in &steps {
         out.push(format!("  {} {what}", if *ok { "·" } else { "!" }));
+    }
+    for (c, ok) in &companions {
+        out.push(match (&c.blocked, ok) {
+            (Some(why), _) => format!("  ! {} 은 건너뛰었다 — {why}", c.id),
+            (None, true) => format!("  · {} 을 함께 깔았다 (--scope {scope})", c.id),
+            (None, false) => format!(
+                "  ! {} 을 못 깔았다 — 손으로: {}",
+                c.id,
+                c.steps.iter().map(|a| shown(a)).collect::<Vec<_>>().join(" && ")
+            ),
+        });
     }
     if registered {
         out.push(String::new());
@@ -306,12 +346,24 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
                 scopes.push(&i.scope);
             }
         }
-        for scope in scopes {
+        for scope in &scopes {
             plan.push(argv(&["plugin", "uninstall", &target, "--scope", scope]));
         }
         if known_at(&market).is_some() {
             // 범위를 안 주면 모든 범위에서 걷는다.
             plan.push(argv(&["plugin", "marketplace", "remove", &market]));
+        }
+        // **함께 깐 것도 moai 를 걷는 범위에서만 걷는다**(moai-lr1s). 마켓플레이스는 두고 간다 — 이름이
+        // 기계 하나에서 전역이라 다른 저장소의 설치가 그것을 쓰고 있을 수 있다.
+        if let Some(ledger) = ledger("installed_plugins.json") {
+            for (id, _) in crate::guide::KOREAN_PLUGINS {
+                let theirs = skill::installs_of(&ledger, id, |p| same_dir(Path::new(p), &root));
+                for scope in &scopes {
+                    if theirs.iter().any(|i| i.scope == *scope) {
+                        plan.push(argv(&["plugin", "uninstall", id, "--scope", scope]));
+                    }
+                }
+            }
         }
     }
     let claude = which("claude").is_some();
@@ -496,6 +548,55 @@ fn stale_copies(installs: &[skill::Install]) -> usize {
 fn same_dir(a: &Path, b: &Path) -> bool {
     let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     real(a) == real(b)
+}
+
+/// moai 곁에 함께 까는 한국어 글쓰기 플러그인 하나(moai-lr1s, 사용자 결정 moai-5wk4) — 설치 id 와
+/// 부를 `claude` 명령. **moai 와 같은 범위다** — 사용자 전역에 깔지 않고, 에이전트가 제 손으로 깔지도
+/// 않는다. 까는 것은 사람이 부르는 이 명령 하나다.
+struct Companion {
+    id: &'static str,
+    steps: Vec<Vec<String>>,
+    /// 같은 이름의 마켓플레이스가 **다른 저장소를** 가리키면 그 까닭. 건너뛴다 — 덮으면 남의 등록을
+    /// 이쪽으로 돌려놓는다(`clash_of` 와 같은 까닭).
+    blocked: Option<String>,
+}
+
+impl Companion {
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id,
+            "planned": self.steps.iter().map(|a| shown(a)).collect::<Vec<_>>(),
+            "blocked_by": self.blocked,
+        })
+    }
+}
+
+/// 함께 깔 것마다 부를 명령. 마켓플레이스를 이미 알면 더하지 않는다 — `marketplace add` 는 이미 있는
+/// 이름에 실패한다.
+fn companions(scope: &str) -> Vec<Companion> {
+    let known = ledger("known_marketplaces.json");
+    crate::guide::KOREAN_PLUGINS
+        .iter()
+        .map(|(id, repo)| {
+            let market = id.split_once('@').map_or(*id, |(_, m)| m);
+            let mut steps = Vec::new();
+            let blocked = match known.as_ref().and_then(|k| skill::market_repo(k, market)) {
+                Some(at) if at != *repo => Some(format!(
+                    "`{market}` 이 이미 {} 를 가리킨다",
+                    if at.is_empty() { "다른 출처" } else { at.as_str() }
+                )),
+                Some(_) => None,
+                None => {
+                    steps.push(argv(&["plugin", "marketplace", "add", repo, "--scope", scope]));
+                    None
+                }
+            };
+            if blocked.is_none() {
+                steps.push(argv(&["plugin", "install", id, "--scope", scope, "-y"]));
+            }
+            Companion { id, steps, blocked }
+        })
+        .collect()
 }
 
 /// `claude` 에 등록한다. **사람의 `settings.json` 은 우리가 안 건드린다** —

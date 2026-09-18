@@ -8638,6 +8638,82 @@ fn skill_install_without_registration_is_not_a_success() {
     assert!(!text(&out).contains("--scope user"), "헛도는 범위 바꾸기를 일러 준다\n{}", text(&out));
 }
 
+/// **한국어 글쓰기 플러그인 둘을 moai 와 같은 범위로 함께 깐다**(moai-lr1s). 사용자 전역에 깔지 않는다는
+/// 결정(moai-5wk4)이 서는 자리다 — `--scope` 를 안 따르면 `local` 로 부른 사람의 전역 설정이 바뀐다.
+/// 연습은 아무것도 부르지 않고 부를 것을 댄다.
+#[test]
+fn skill_install_brings_the_korean_plugins_at_the_same_scope() {
+    let s = init("skillkorean");
+    let c = Claude::new("skillkorean-home");
+    let before = c.calls();
+    let plan = text(&c.run(s.path(), &["skill", "install", "--scope", "project", "--dry-run"], true));
+    assert_eq!(c.calls(), before, "연습인데 claude 를 불렀다");
+    for (id, repo) in [("korean-skills@korean-skills", "DaleSeo/korean-skills"), ("humanize-korean@im-not-ai", "epoko77-ai/im-not-ai")] {
+        assert!(plan.contains(&format!("claude plugin marketplace add {repo} --scope project")), "{plan}");
+        assert!(plan.contains(&format!("claude plugin install {id} --scope project -y")), "{plan}");
+    }
+
+    let out = c.run(s.path(), &["skill", "install", "--scope", "project"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let calls = c.calls()[before.len()..].to_string();
+    for (id, repo) in [("korean-skills@korean-skills", "DaleSeo/korean-skills"), ("humanize-korean@im-not-ai", "epoko77-ai/im-not-ai")] {
+        assert!(calls.contains(&format!("plugin marketplace add {repo} --scope project")), "{calls}");
+        assert!(calls.contains(&format!("plugin install {id} --scope project -y")), "{calls}");
+    }
+    assert!(!calls.contains("--scope user"), "사용자 전역을 건드렸다\n{calls}");
+    assert!(text(&out).contains("korean-skills@korean-skills 을 함께 깔았다"), "{}", text(&out));
+}
+
+/// **같은 이름의 마켓플레이스가 다른 저장소를 가리키면 건너뛴다.** 덮으면 남의 등록이 이쪽으로 돌아선다.
+/// 이미 그 저장소를 알면 더하지 않고 설치만 부른다 — `marketplace add` 는 있는 이름에 실패한다.
+#[test]
+fn skill_install_skips_a_korean_marketplace_that_points_elsewhere() {
+    let s = init("skillkoreanclash");
+    let c = Claude::new("skillkoreanclash-home");
+    c.ledger(
+        "known_marketplaces.json",
+        r#"{"korean-skills":{"source":{"source":"github","repo":"someone/else"}},"im-not-ai":{"source":{"source":"github","repo":"epoko77-ai/im-not-ai"}}}"#,
+    );
+    let before = c.calls().len();
+    let out = c.run(s.path(), &["skill", "install", "--json"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains("이미 someone/else 를 가리킨다"), "{json}");
+    let calls = c.calls()[before..].to_string();
+    assert!(!calls.contains("korean-skills"), "남의 이름을 건드렸다\n{calls}");
+    assert!(!calls.contains("marketplace add epoko77-ai/im-not-ai"), "아는 이름을 또 더한다\n{calls}");
+    assert!(calls.contains("plugin install humanize-korean@im-not-ai --scope local -y"), "{calls}");
+}
+
+/// **걷을 때는 moai 를 걷는 범위에서만 함께 걷고, 마켓플레이스는 둔다** — 이름이 기계 하나에서 전역이라
+/// 다른 저장소의 설치가 그것을 쓰고 있을 수 있다. 다른 저장소에 깔린 줄은 안 건드린다.
+#[test]
+fn skill_uninstall_takes_the_korean_plugins_along() {
+    let s = init("skillkoreanrm");
+    let c = Claude::new("skillkoreanrm-home");
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let root = dir.parent().unwrap().parent().unwrap();
+    let moai = format!(
+        "{{\"scope\":\"local\",\"projectPath\":\"{}\",\"installPath\":\"/x\",\"version\":\"0.0.1\"}}",
+        root.display()
+    );
+    let here = format!("{{\"scope\":\"local\",\"projectPath\":\"{}\",\"installPath\":\"/y\",\"version\":\"1\"}}", root.display());
+    let there = r#"{"scope":"local","projectPath":"/elsewhere","installPath":"/z","version":"1"}"#;
+    c.ledger(
+        "installed_plugins.json",
+        &format!(
+            "{{\"version\":2,\"plugins\":{{\"moai@{market}\":[{moai}],\"korean-skills@korean-skills\":[{here}],\"humanize-korean@im-not-ai\":[{there}]}}}}"
+        ),
+    );
+    let before = c.calls().len();
+    let out = c.run(s.path(), &["skill", "uninstall"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let calls = c.calls()[before..].to_string();
+    assert!(calls.contains("plugin uninstall korean-skills@korean-skills --scope local"), "{calls}");
+    assert!(!calls.contains("humanize-korean@im-not-ai"), "다른 저장소의 설치를 걷었다\n{calls}");
+    assert!(!calls.contains("marketplace remove korean-skills"), "함께 쓰는 마켓플레이스를 지웠다\n{calls}");
+}
+
 /// `claude` 가 없으면 부를 명령을 내고 비영으로 끝난다. **절반을 해 놓고
 /// 아무 말 없이 성공하는 것이 제일 나쁘다.**
 #[test]
