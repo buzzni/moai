@@ -11,13 +11,18 @@ description: 같은 저장소에서 놀고 있는 Claude 세션들에 쌓인 ide
 
 **본 가지는 바퀴를 시작할 때 한 번 읽는다.** 일꾼이 워크트리를 뜨고 병합하는
 곳이 루트 체크아웃이라 그 체크아웃의 지금 가지가 본 가지다 — 원격의 기본 가지는 루트와
-다를 수 있고 낡았을 수 있다. 루트가 detached 면 `origin/HEAD`, 그것도 없으면 `main` 이다.
-루트 체크아웃은 `git worktree list` 의 첫 자리라, 아래 한 줄은 저장소 어디서 불러도 —
-워크트리 안에서도 — 루트의 가지를 낸다. 아무것도 안 나오면 git 이 낸 오류를 보고 멈춘다.
+다를 수 있고 낡았을 수 있다. 루트 체크아웃은 `git worktree list` 의 첫 자리라, 아래 한 줄은
+저장소 어디서 불러도 — 워크트리 안에서도 — 루트의 가지를 낸다. 아무것도 안 나오면 git 이 낸
+오류를 보고 멈춘다.
 
 ```sh
-if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/^$/s|^branch refs/heads/||p'); [ -n "$b" ] || b=$(git symbolic-ref -q refs/remotes/origin/HEAD | sed 's|^refs/remotes/origin/||'); echo "${b:-main}"; fi
+if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/^$/s|^branch refs/heads/||p'); if [ -n "$b" ]; then echo "$b"; else echo "루트가 detached 다" >&2; fi; fi
 ```
+
+**루트가 detached 면 보내지 않는다.** 일꾼의 집기 커밋과 병합이 가지 없는 HEAD 에 서고,
+확인(`merge-base <본 가지>`)과 `worktree add` 가 실패하고, `branch -d` 가 그 일의 유일한
+참조를 지운다. 원격의 기본 가지로 대신 읽지 않는다 — 루트가 그 가지에 서 있지 않으니 같은
+사고다. 사람에게 루트를 가지에 세워 달라고 하고 멈춘다.
 
 읽은 이름을 아래 명령의 `<본 가지>` 와 일꾼에게 싣는 글의 `<본 가지>` 에 채운다.
 **일꾼은 다시 읽지 않는다** — 워크트리 안에서 읽으면 제 가지가 나온다.
@@ -197,7 +202,11 @@ PY
        어려우면 다시 잰 난이도의 짝 모델로 같은 길로 올린다 — 한 칸씩이 아니다(haiku → sonnet → opus).
        `low` 로 받았는데 `high` 면 `opus` 이다. 에픽 끝 리뷰의 등급(7)도 이 잣대로
        멤버를 재어 고른다
-    본 가지: <본 가지> — 아래의 가지 이름이다. 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다
+    본 가지: <본 가지> — 아래의 가지 이름이다. 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다.
+    루트에서 커밋·병합하기 전에는 루트가 아직 그 가지에 서 있는지 **대조만** 한다 —
+    `git -C <루트> symbolic-ref -q --short HEAD` 가 <본 가지> 가 아니면(detached 이거나 누가
+    가지를 바꿨다) 치지 말고 감독에게 알리고 멈춘다. 엉뚱한 HEAD 에 선 병합은 `branch -d` 뒤에
+    참조가 하나도 안 남는다
     1. 루트에서 펼친다 — idea 를 일감으로 바꾸는 길은 `moai idea promote <id> --from -`
        하나다. 이슈 하나짜리여도 에픽 + 이슈로 펼친다. `--dry-run` 을 먼저 본다.
        그 idea 가 이미 done 이면(누가 펼쳤다) 펼치지 말고 감독에게 알린다 — 다시 펼치면
@@ -277,6 +286,8 @@ PY
        그 멤버로 에픽을 닫는 창이 에픽 끝 리뷰를 다시 부른다
     8. ExitWorktree(keep) 로 루트로 돌아온다 — 워크트리 안에서 그것을 지우면 세션의
        자리가 사라진 디렉터리에 남아 감독이 다시는 이 세션을 루트로 못 본다.
+       병합 전에 루트가 <본 가지> 에 서 있는지 대조한다 — 어긋나면 병합하지 않고 감독에게 알린다
+         git symbolic-ref -q --short HEAD
        옆 세션과 병합이 겹치면 먼저 알린 뒤 루트에서 **한 번에** 병합한다.
        `--no-commit` 을 쓰지 않는다. `--no-ff` 가 없으면 fast-forward 로 끝나 병합 커밋이 안 선다
          git merge --no-ff worktree-<에픽> -m "merge: …"
