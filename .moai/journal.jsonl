@@ -4476,3 +4476,5 @@
 {"ts":"2026-09-18T13:18:04Z","id":"moai-xe6e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"$(moai add …) 와 백틱 안의 moai 호출이 훅의 모든 규칙을 비껴간다"}
 {"ts":"2026-09-18T13:18:04Z","id":"moai-xe6e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pudk 에서 펼쳤다 — $(moai add …) 와 백틱 안의 moai 호출이 훅의 모든 규칙을 비껴간다"}
 {"ts":"2026-09-18T13:18:04Z","id":"moai-pudk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ju21 의 멤버 moai-xe6e 로 펼쳤다"}
+{"ts":"2026-09-18T13:18:17Z","id":"moai-ezwu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:19:15Z","id":"moai-1plu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
