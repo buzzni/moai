@@ -1598,6 +1598,77 @@ fn a_milestone_line_refuses_a_milestone_but_old_lines_do_not_block() {
     assert!(!line_of(s.path(), &m1).contains("\"milestone\":"), "--milestone none 이 옛 줄을 못 비웠다");
 }
 
+/// **다른 마일스톤을 적어도 에픽·조상이 이기면 그렇다고 말한다** (moai-mhxf). 필드는 X 가
+/// 되는데 줄은 에픽·조상이 선 곳에 그대로 서 `show --milestone X` 가 조용히 그 줄을 못 낸다 —
+/// `none` 이 못 끊는 것(moai-0lmn)과 같은 어긋남이라 같은 자리에서 한 줄로 댄다.
+#[test]
+fn edit_says_when_another_milestone_loses_to_the_epic_or_an_ancestor() {
+    let s = init("editlostms");
+    let m1 = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
+    let m2 = ok(s.path(), &["milestone", "add", "v2", "-q"]).trim().to_string();
+    let epic = add(s.path(), &["에픽", "--type", "epic", "--milestone", &m1]);
+    let bare = add(s.path(), &["마일스톤 없는 에픽", "--type", "epic"]);
+    let member = add(s.path(), &["멤버", "-e", &epic]);
+    let loose = add(s.path(), &["빈 에픽의 멤버", "-e", &bare]);
+    let parent = add(s.path(), &["부모", "--milestone", &m1]);
+    let child = add(s.path(), &["자식", "--parent", &parent]);
+    let top = add(s.path(), &["홀로 선 이슈", "--milestone", &m1]);
+
+    let says = |id: &str, from: &str, stood: &str| -> String {
+        let out = moai(s.path(), &["edit", id, "--milestone", &m2]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        let lines: Vec<&str> = err.lines().filter(|l| l.contains(from)).collect();
+        assert_eq!(lines.len(), 1, "{id}: {from} 에게 진 것을 한 줄로 안 댔다 — {err:?}");
+        assert!(lines[0].contains(stood) && lines[0].contains(&format!("--milestone {m2}")), "{id}: {err:?}");
+        assert!(!ok(s.path(), &["show", "--milestone", &m2]).contains(id), "{id} 가 {m2} 에 섰다");
+        err
+    };
+    says(&member, &format!("에픽 {epic}"), &m1);
+    says(&loose, &format!("에픽 {bare}"), "어느 마일스톤에도 안 든다");
+    says(&child, &format!("조상 {parent}"), &m1);
+
+    // 마일스톤 밑에 id 로 선 부모의 자식 — 비워서는 못 끊지만 다른 마일스톤은 접힌 맨 위 줄
+    // (그 부모)에 적으면 옮겨진다. "id 가 마일스톤 밑이라 못 옮긴다" 고 하면 헛말이다(리뷰 moai-z3lo.dxz).
+    let under = add(s.path(), &["마일스톤 밑", "--parent", &m1]);
+    let grand = add(s.path(), &["그 밑", "--parent", &under]);
+    let err = says(&grand, &format!("조상 {under}"), &m1);
+    assert!(err.contains(&format!("`moai edit {under} --milestone {m2}`")), "옮길 길을 안 댔다 — {err:?}");
+    let json = ok(s.path(), &["edit", &grand, "--milestone", &m2, "--json"]);
+    assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{m1}","parent":"{under}"}}"#)), "{json}");
+    // 뿌리로 올라간 생각 밑 — 어느 필드로도 못 옮기니 길은 안 대고, 조용하지도 않다.
+    let thought = ok(s.path(), &["idea", "add", "생각", "-q"]).trim().to_string();
+    let pinned = add(s.path(), &["생각 밑", "--parent", &thought]);
+    let err = says(&pinned, &format!("id 가 {thought} 밑에"), "어느 마일스톤에도 안 든다");
+    assert!(!err.contains("moai edit"), "고쳐도 안 바뀌는 길을 댔다 — {err:?}");
+    // 못 쓸 에픽의 멤버는 `(길 잃음)` 에 선다 — 없는 에픽의 마일스톤을 고치라고 대지 않는다.
+    let gone = add(s.path(), &["지울 에픽", "--type", "epic", "--milestone", &m1]);
+    let stray = add(s.path(), &["길 잃을 멤버", "-e", &gone]);
+    ok(s.path(), &["rm", &gone]);
+    let err = says(&stray, &format!("에픽 {gone}"), "어느 마일스톤에도 안 든다");
+    assert!(!err.contains(&format!("moai edit {gone}")), "없는 줄을 고치라고 댔다 — {err:?}");
+
+    let json = ok(s.path(), &["edit", &member, "--milestone", &m2, "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{m1}","epic":"{epic}"}}"#)), "{json}");
+    let json = ok(s.path(), &["edit", &loose, "--milestone", &m2, "--json"]);
+    assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":null,"epic":"{bare}"}}"#)), "{json}");
+
+    // 적은 것이 선 것과 같으면, 제 필드가 답이면, 안 적었으면 조용하다.
+    for args in [
+        vec!["edit", member.as_str(), "--milestone", m1.as_str()],
+        vec!["edit", top.as_str(), "--milestone", m2.as_str()],
+        vec!["edit", child.as_str(), "--tag", "x"],
+    ] {
+        let out = moai(s.path(), &args);
+        assert!(out.status.success());
+        assert!(out.stderr.is_empty(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let mut j = args.clone();
+        j.push("--json");
+        assert!(!ok(s.path(), &j).contains("inherited_milestone"), "{args:?}");
+    }
+}
+
 /// **`--milestone none` 도 못 끊는 소속은 끊기지 않았다고 말한다** (moai-0lmn). 에픽이
 /// 마일스톤을 이기고 부모도 이기므로, 제 필드를 비워도 에픽이나 부모가 선 마일스톤에
 /// 그대로 든다 — `-e none` 과 같은 모양이라 같은 말투로 댄다.
@@ -5917,6 +5988,23 @@ fn a_thought_does_not_hang_under_a_milestone_either() {
     assert!(!out.contains(&thought), "머리글이 안 세는 줄을 그 밑에 그렸다 — {out}");
 }
 
+/// **에픽 줄이 든 `epic` 은 소속이 아니다** (moai-fg0t, 사용자 결정 A). 트리는 에픽을 에픽
+/// 밑에 안 그리는데 `-e` 거름망만 그 줄을 골랐다. 필드는 그대로 두고 status 가 못 쓸 참조로 댄다.
+#[test]
+fn an_epic_line_does_not_join_the_epic_it_names() {
+    let s = init("epicinepic");
+    let outer = ok(s.path(), &["epic", "add", "바깥", "-q"]).trim().to_string();
+    let inner = add(s.path(), &["안쪽", "--type", "epic", "-e", &outer]);
+    assert!(line_of(s.path(), &inner).contains(&format!(r#""epic":"{outer}""#)), "필드를 지웠다");
+    assert!(!ok(s.path(), &["show", "-e", &outer]).contains(&inner), "`-e` 가 트리에 없는 에픽 줄을 골랐다");
+    let shown = ok(s.path(), &["show", &inner]);
+    assert!(shown.contains("에픽에 안 든다"), "상세가 그 필드를 소속처럼 그렸다 — {shown}");
+    let st = ok(s.path(), &["status", "--json"]);
+    let warning = |kind: &str| st.split("{\"kind\":").find(|w| w.starts_with(&format!("\"{kind}\""))).map(str::to_string);
+    assert!(warning("dangling_epic").is_some_and(|w| w.contains(&inner)), "못 쓸 참조로 안 댔다 — {st}");
+    assert!(moai(s.path(), &["status"]).status.success(), "경고로 비영 종료한다");
+}
+
 /// **부모가 묶음이면 그 묶음이 소속이다** (moai-9t3l). `--parent <에픽>` 으로 만든
 /// 자식은 id 가 에픽 밑에 붙는데, "자식은 부모의 에픽을" 이 부모가 에픽 자신일 때
 /// 물려줄 것이 없어 트리의 `에픽 없음`·status 의 `에픽 없는 이슈` 로 빠졌다 — 에픽
@@ -6750,7 +6838,6 @@ fn creation_is_judged_through_the_contract() {
     for free in [
         format!("moai add \"안의 일\" -e {epic}"),
         format!("moai add \"자식\" --parent {id}"),
-        "moai idea add \"떠오른 것\"".to_string(),
         "moai add --from - <<'MD'\n# 딴 에픽\n- 첫 이슈\nMD".to_string(),
         // 리뷰 이야기를 적는 메모는 글자로 가르지 않는다.
         format!("moai note {id} \"code-review 가 moai add 를 짚었다\""),
@@ -6758,6 +6845,12 @@ fn creation_is_judged_through_the_contract() {
         let out = shell_call(&s, &free);
         assert!(out.trim().is_empty(), "막혔다 — {free}\n{out}");
     }
+
+    // 담는 것은 막지 않고 **갈림길 1 의 둘째 물음을 싣는다**(moai-d4e0) — 계약의 `additionalContext` 로.
+    let out = shell_call(&s, "moai idea add \"떠오른 것\"");
+    one_json_value(&out);
+    assert!(!out.contains("permissionDecision"), "담는 것을 막았다\n{out}");
+    assert!(out.contains("\"additionalContext\":\"") && out.contains(&format!("{epic} 가 내건 것")), "{out}");
 }
 
 /// 규칙 2 — 저장소를 고치기 전에 하나를 집는다. **세는 것은 저장소 안의
@@ -7373,6 +7466,145 @@ fn a_worktree_session_touching_main_is_still_that_session() {
     assert!(out.trim().is_empty(), "워크트리로 들어가 제 일의 자식을 세우는 것을 막았다\n{out}");
     let why = refusal(&from_main(&format!("moai -C {ip} add \"딴 일\"")));
     assert!(why.contains(&id), "워크트리를 가리킨 단위 밖 줄을 그 워크트리의 초점으로 못 막는다 — {why}");
+}
+
+/// 규약대로 에픽 멤버를 main 에서 집고 그 이름의 워크트리를 띄운 저장소. (main, 워크트리, 에픽, 집은 id)
+fn epic_member_in_a_worktree(s: &Scratch) -> (PathBuf, PathBuf, String, String) {
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["add", "저장 계층", "--type", "epic", "--json"]), "id");
+    let id = field(&ok(&main, &["add", "워크트리에서 할 일", "-e", &epic, "--json"]), "id");
+    ok(&main, &["mv", &id, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    let dir = format!(".claude/worktrees/{id}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{id}")]);
+    let inside = main.join(&dir);
+    (main, inside, epic, id)
+}
+
+/// **겹쳐 보고 풀린 거절은 비추는 줄이 곁들어도 풀린 것이다**(moai-dw63.e31). `Pass` 만 풀린
+/// 것으로 치던 `settle` 은 `idea add` 하나를 곁들인 명령줄을 워크트리의 낡은 스냅샷으로 도로
+/// 막았다 — 그 거절은 이미 main 에서 집은 일을 집으라고 시켰다.
+#[test]
+fn a_note_does_not_bring_back_a_deny_the_fresh_view_lifted() {
+    let s = Scratch::new("hooknotewt");
+    let (main, inside, epic, _) = epic_member_in_a_worktree(&s);
+    let mp = main.display().to_string();
+    let bash = |cmd: &str| tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+
+    // main 에서 둘째 일을 세우고 집었다 — 워크트리 스냅샷은 모르지만 겹쳐 보고 푼다(moai-iaa4).
+    let next = field(&ok(&main, &["add", "둘째 일", "-e", &epic, "--json"]), "id");
+    ok(&main, &["mv", &next, "in_progress"]);
+    let lifted = format!("moai -C {mp} add \"둘째의 자식\" --parent {next}");
+    let out = bash(&lifted);
+    assert!(out.trim().is_empty(), "main 에서 방금 집은 일의 자식을 막았다\n{out}");
+
+    for cmd in [format!("{lifted} && moai -C {mp} idea add \"떠오른 것\""), format!("moai -C {mp} idea add \"떠오른 것\"; {lifted}")] {
+        let out = bash(&cmd);
+        one_json_value(&out);
+        assert!(!out.contains("permissionDecision"), "비추는 줄이 곁들자 풀린 거절이 돌아왔다 — {cmd}\n{out}");
+        assert!(out.contains(&format!("{epic} 가 내건 것")), "{out}");
+    }
+}
+
+/// **옆이 쥐었을 일로는 비추지도 않는다**(moai-ntl6 의 자, moai-dw63.e31). 이름이 id 가 아닌
+/// 워크트리가 갈라질 때 집혀 있던 일은 그 워크트리의 것일 수 있다 — 막지도 붙들지도 않기로 한 그
+/// 줄의 에픽을 제 물음으로 비추면, main 세션을 남의 에픽에 세우는 길로 보낸다.
+#[test]
+fn work_an_unnamed_worktree_may_hold_is_not_offered_as_this_sessions_aim() {
+    let s = Scratch::new("hooknoteunsure");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let theirs = field(&ok(&main, &["add", "옆의 에픽", "--type", "epic", "--json"]), "id");
+    let agent = field(&ok(&main, &["add", "에이전트가 할 일", "-e", &theirs, "--json"]), "id");
+    ok(&main, &["mv", &agent, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-a04acfb3", "-b", "worktree-agent-a04acfb3"]);
+    let bash = |cmd: &str| tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+
+    let out = bash("moai idea add \"관찰\"");
+    assert!(out.trim().is_empty(), "옆 워크트리가 쥐었을 일의 에픽을 제 물음으로 비춘다\n{out}");
+
+    // 갈라진 뒤 main 에서 집은 제 일은 비춘다 — 그것만 댄다.
+    let mine = field(&ok(&main, &["add", "제 에픽", "--type", "epic", "--json"]), "id");
+    let work = field(&ok(&main, &["add", "main 에서 집은 일", "-e", &mine, "--json"]), "id");
+    ok(&main, &["mv", &work, "in_progress"]);
+    let out = bash("moai idea add \"관찰\"");
+    assert!(out.contains(&format!("{mine} 가 내건 것")), "제 일의 물음을 안 비춘다\n{out}");
+    assert!(!out.contains(&theirs), "옆이 쥐었을 일의 에픽을 댄다\n{out}");
+}
+
+/// **`Stop` 은 에픽이 닫히는지를 main 까지 겹친 줄로 잰다**(moai-dw63.e31). 트래커는 main 에서
+/// 쓰므로 워크트리의 스냅샷은 갈라진 때에 멈춰 있다 — 그 사이 main 에서 끝낸 멤버를 아직 벌여
+/// 놓은 것으로 읽던 판은, 미루는 순간 에픽이 닫히는 마지막 멤버에 "지금 안 할 것이면" 을 그냥 댔다.
+#[test]
+fn the_stop_hook_measures_the_epic_on_what_main_has_closed() {
+    let s = Scratch::new("hookstopfresh");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["add", "저장 계층", "--type", "epic", "--json"]), "id");
+    let id = field(&ok(&main, &["add", "워크트리에서 할 일", "-e", &epic, "--json"]), "id");
+    let other = field(&ok(&main, &["add", "옆에서 끝낼 일", "-e", &epic, "--json"]), "id");
+    ok(&main, &["mv", &id, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    let dir = format!(".claude/worktrees/{id}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{id}")]);
+    let inside = main.join(&dir);
+    let stop = |session: &str| {
+        let input = format!("{{\"session_id\":\"{session}\",\"cwd\":{}}}", json_str(&inside.display().to_string()));
+        String::from_utf8(hook_in(&s, &inside, "stop", &input).stdout).unwrap()
+    };
+
+    // 남은 멤버가 첫 칸에 있으면 미뤄도 안 닫힌다 — 보통 줄이다.
+    let held = stop("s1");
+    assert!(held.contains("지금 안 할 것이면") && !held.contains("목적을 접을 때만"), "{held}");
+
+    // 옆 멤버를 main 에서 끝냈다. 워크트리 스냅샷은 모르지만 미루면 에픽이 닫힌다.
+    for to in ["in_progress", "done"] {
+        let out = staged(&["mv", other.as_str(), to]).current_dir(&main).env("MOAI_NOW", LATER).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let held = stop("s2");
+    assert!(
+        held.contains(&format!("{epic} 의 목적을 접을 때만")),
+        "main 에서 끝낸 멤버를 못 보고 마지막 멤버를 그냥 미루라고 한다\n{held}"
+    );
+}
+
+/// 다른 트래커를 가리키는 토막의 판정도 **같은 차례로 잇는다**(`Decision::then`, moai-dw63.e31) —
+/// 남이 막으면 제 비춤이 그것을 가리지 않고, 둘 다 비추면 둘 다 싣는다.
+#[test]
+fn notes_and_refusals_from_two_trackers_are_joined_in_one_order() {
+    let a = init("hooknoteA");
+    let b = init("hooknoteB");
+    let ea = field(&ok(a.path(), &["add", "A 의 에픽", "--type", "epic", "--json"]), "id");
+    let wa = field(&ok(a.path(), &["add", "A 의 일", "-e", &ea, "--json"]), "id");
+    ok(a.path(), &["mv", &wa, "in_progress"]);
+    let eb = field(&ok(b.path(), &["add", "B 의 에픽", "--type", "epic", "--json"]), "id");
+    let wb = field(&ok(b.path(), &["add", "B 의 일", "-e", &eb, "--json"]), "id");
+    ok(b.path(), &["mv", &wb, "in_progress"]);
+    let bash = |cmd: &str| tool_at(&a, a.path(), "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+    let bp = b.path().display().to_string();
+
+    // 제 자리의 물음이 남의 트래커의 규칙 1 을 가리지 않는다.
+    let why = refusal(&bash(&format!("moai idea add \"a\"; moai -C {bp} add \"딴 일\"")));
+    assert!(why.contains(&wb), "{why}");
+
+    // 둘 다 비추면 둘 다 싣는다 — 뒤의 물음을 말없이 버리지 않는다.
+    let out = bash(&format!("moai idea add \"a\"; moai -C {bp} idea add \"b\""));
+    one_json_value(&out);
+    assert!(!out.contains("permissionDecision"), "{out}");
+    assert!(out.contains(&format!("{ea} 가 내건 것")) && out.contains(&format!("{eb} 가 내건 것")), "{out}");
+    assert!(out.contains(&format!("moai -C {bp} idea promote <그 id> -e {eb}")), "남의 트래커에 되찾을 자리를 안 댄다\n{out}");
 }
 
 /// 규칙 2 의 껍데기 쪽은 **stdin 의 `cwd` 로** 상대 경로를 푼다. 훅 프로세스를

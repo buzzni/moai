@@ -339,13 +339,12 @@ mod tests {
             // 훅이 실제로 부르는 그 차례로 본다 — 손으로 다시 짠 차례는 규칙이
             // 하나 늘 때 여기서 빠진다.
             let got = guard_shell(&held, &cfg, &Default::default(), root, root, &cmd);
-            match (&got, should_deny) {
-                (Decision::Pass, false) => {}
-                (Decision::Deny(_), true) => {}
-                (Decision::Pass, true) => {
-                    panic!("막혀야 하는데 지나간다 — {cmd}")
-                }
-                (got, _) => panic!("가르치는 명령이 막힌다 — {cmd}\n{got:?}"),
+            // 막는가로 가른다 — 비추는 줄(`Context`)은 막지 않는다(`idea add` 에 갈림길 1 의 둘째
+            // 물음이 실린다). 변형마다 가르던 판은 막혀야 할 명령이 비추기만 해도 "막힌다" 로 적었다.
+            match (got.blocks(), should_deny) {
+                (false, false) | (true, true) => {}
+                (false, true) => panic!("막혀야 하는데 지나간다 — {cmd}\n{got:?}"),
+                (true, false) => panic!("가르치는 명령이 막힌다 — {cmd}\n{got:?}"),
             }
             checked += 1;
         }
