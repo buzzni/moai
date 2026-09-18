@@ -3975,3 +3975,6 @@
 {"ts":"2026-09-18T10:24:50Z","id":"moai-dw63.e31","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음(고침): 본 가지가 main 에서 develop 으로 바뀐다(감독 알림). 리뷰 범위는 develop...HEAD, 워크트리에서 받을 때는 git merge develop, 루트 병합은 develop 에서 한다"}
 {"ts":"2026-09-18T10:28:06Z","id":"moai-5255","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 가 본 가지를 main 으로 박아 적는다 — develop 으로 바꿨다"}
 {"ts":"2026-09-18T10:28:28Z","id":"moai-5255","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T10:32:40Z","id":"moai-5255.9xl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — CLAUDE.md 의 본 가지 이름 (moai-5255)"}
+{"ts":"2026-09-18T10:32:46Z","id":"moai-5255.9xl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T10:32:58Z","id":"moai-5255","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: CLAUDE.md 고침은 워크트리 moai-5255 의 497de56. 시험 892+327. low 리뷰 moai-5255.9xl 이 도는 중 — 끝나면 원문·판단 → develop 받기 → 루트에서 --no-ff 병합 → 워크트리·가지 삭제 → done. 리모트 push 는 권한 판정에 막혀 사용자가 직접 친다(1,042 커밋)"}
