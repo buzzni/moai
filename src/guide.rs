@@ -1060,6 +1060,10 @@ PY
     )
 }
 
+/// 되짚기(6-1)가 에픽 도중 담은 idea 를 멤버로 다시 세우는 줄(moai-l288). promote 가 아닌
+/// `add` 인 것은 에픽이 이미 서 있어서다 — 펼치기가 아니라 그 에픽에 한 줄 더하기다.
+const RECALL: &str = "moai add \"<제목>\" -e <에픽>";
+
 /// 감독이 일꾼에게 `SendMessage` 로 싣는 글. **일꾼이 받는 것은 이것뿐이다** — 감독
 /// 스킬의 다른 절을 가리키면 일꾼에게 없는 글을 가리키는 것이라(첫 판의 "아래 공유
 /// main" 이 그랬다), 일꾼이 지킬 것은 모두 여기 적는다.
@@ -1072,6 +1076,7 @@ PY
 /// 막는다 — 그래서 충돌과 시험은 워크트리에서 풀고, 루트 병합이 막히면 되돌리고 돌아간다.
 fn brief() -> String {
     let review = make_review("--parent <에픽>");
+    let recall = RECALL;
     let close = indent(&close_steps("<리뷰 id>"), "       ");
     let model = indent(&model_line(), "    ");
     let levels = difficulty_levels();
@@ -1118,6 +1123,15 @@ fn brief() -> String {
        같은 다른 거절은 돌아가지 않고 거절문이 내는 명령대로 고친다
     6. 멤버의 일이 다 끝나면 워크트리에서 <본 가지> 를 받아 충돌을 풀고 시험을 돌린다. 고칠
        것은 여기서 고친다 — 워크트리가 남아 있는 동안 루트에서는 규칙 2 가 편집을 막는다
+    6-1. 7 의 리뷰 전에 이 창이 에픽 도중 담은 idea 와 5 의 리뷰가 넘긴 것을 되짚는다 —
+       **에픽이 내건 것이 그것 없이도 이뤄지는가.** 아니면 idea 가 아니라 안 끝난 멤버다.
+       담을 때 "지금 할 일이 아니다" 로 가른 것 중에 이것이 섞인다 — 사람의 결정을 기다리던
+       것, 옆 일꾼이 그 파일을 쥐어 밖으로 뺀 것. 그런 것은 멤버로 다시 세우고 idea 는 그 id 를
+       적어 닫는다 (`edit` 는 종류를 못 바꾼다). 워크트리에서 치니 4-1 대로 `moai -C <루트>` 로
+         {recall}
+         moai mv <idea id> done -m "멤버 <새 id> 로 옮겼다 — 에픽이 내건 것이다"
+       지금 할 수 있으면 여기서 하고, 못 하면 첫 칸에 둔 채 병합한다 — 남은 멤버가 에픽을
+       열어 둔다. 그 멤버를 `defer` 하지 않는다. 미루면 에픽이 목적을 못 이룬 채 닫힌다
     7. 병합 전에 에픽 전체를 `/code-review <xhigh|max> --fix` 로 본다 — 멤버가 서로 거의
        안 닿고 각자 high 를 지났으면 xhigh, 표면을 가로지르거나 설계 결정이 여럿이거나
        쓰기·저장·훅을 건드렸으면 max. 이 리뷰는 머리의 모델과 상관없이 `{top}` 로 본다 — 창이
@@ -1150,7 +1164,7 @@ fn brief() -> String {
 {close}
        시험 통과를 보고 2 처럼 경로를 준 커밋으로 루트에 남긴다
     11. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 펼친 에픽 id, 한두 줄 요약,
-       넘긴 것·새 idea
+       넘긴 것·새 idea, 6-1 에서 멤버로 옮겨 아직 첫 칸에 남은 것
     12. 마지막으로 **창을 비워도 되는 때를 알린다.** 이어받을 한 줄을 남겨
        (`moai note <에픽> "다음: …"`) 2 처럼 경로를 준 커밋으로 루트에 담고 — 10 의 커밋 뒤에
        적은 줄이라 안 담으면 공유 루트에 남아 남의 커밋에 쓸려 들어간다 — 그 창을 보는 사람에게
@@ -1373,7 +1387,9 @@ mod tests {
         assert!(supervise.contains(promote), "감독이 promote 를 안 가르친다");
         let review = make_review("--parent <에픽>");
         assert!(supervise.contains(&review), "에픽 리뷰를 규칙 3 의 줄로 안 세운다");
-        assert!(!supervise.replace(&review, "").contains("moai add"), "감독이 promote 말고 다른 길을 가르친다");
+        // 되짚기(6-1)의 줄도 뺀다 — 이미 선 에픽에 멤버를 더하는 것이지 idea 를 펼치는 것이 아니다.
+        let rest = supervise.replace(&review, "").replace(RECALL, "");
+        assert!(!rest.contains("moai add"), "감독이 promote 말고 다른 길을 가르친다");
     }
 
     /// **일꾼이 받는 글(`brief`)에 첫 실행에서 넘어진 자리가 선다.** 감독 스킬의 다른
@@ -1419,6 +1435,11 @@ mod tests {
         let synced = brief.find("<본 가지> 를 받아").expect("본 가지를 받는 걸음이 없다");
         let reviewed = brief.find("/code-review <xhigh|max> --fix").expect("에픽 리뷰 걸음이 없다");
         assert!(synced < reviewed, "본 가지를 받기 전에 에픽 전체를 리뷰한다");
+        // 되짚기는 에픽 리뷰 앞이다 — 멤버로 옮겨 여기서 한 일도 그 리뷰가 본다. 없으면 에픽이
+        // 내건 것이 idea 로 빠진 채 닫힌다(moai-l288: moai-1k17·moai-ccpw).
+        let recalled = brief.find("에픽이 내건 것이 그것 없이도 이뤄지는가").expect("닫기 전에 idea 를 되짚는 걸음이 없다");
+        assert!(recalled < reviewed, "에픽 리뷰 뒤에 idea 를 되짚는다");
+        assert!(brief.contains(RECALL), "되짚은 것을 멤버로 세우는 줄이 없다");
         assert!(brief.contains("이미 done 이면"), "누가 펼친 idea 를 또 펼쳐 에픽이 둘 선다");
         for (piece, why) in [
             ("거절한 세션", "맡기기를 거절한 세션을 빼라는 말이 없다"),
