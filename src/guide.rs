@@ -1124,7 +1124,19 @@ PY
   면 그 창이 어떤지 보기 전에는 보내지 않는다
 - **비웠으면 제 창에 한 줄 남긴다** — `<세션> 판 %N 을 비웠다 (<에픽>)`. 사람이 그 창을
   보다가 화면이 사라진 까닭을 감독 창에서 찾는다
-- **시험으로 살아 있는 일꾼의 창에 치지 않는다.** 제가 띄운 판(`tmux new-session -d`)에서 본다
+- **시험으로 살아 있는 일꾼의 창에 치지 않는다.** 시험할 판은 **떼어 낸 tmux 서버**에 띄우고,
+  그 서버에 닿는 호출 **모두** — `new-session`·`send-keys`·`capture-pane`·`display-message`·
+  `kill-session` — 에 같은 이름을 준다. 스크립트를 그 판에 돌릴 때는 `-L` 을 끼워 넣는
+  `tmux` 감싸개를 `PATH` 앞에 둔다
+
+      env -u TMUX tmux -L <고유 이름> new-session -d -s <판> …
+      env -u TMUX tmux -L <고유 이름> capture-pane -p -t <판>
+      env -u TMUX tmux -L <고유 이름> kill-server          치울 때 — 그 이름의 서버만 죽는다
+
+  **`-L`/`-S` 없는 `tmux kill-server` 는 쓰지 않는다.** tmux 안에서 맨 `tmux` 는 `$TMUX` 를 따라
+  사람의 기본 서버로 가, 그 기계의 판과 세션이 모두 한꺼번에 죽는다. `TMUX_TMPDIR` 로는 안
+  갇힌다 — `$TMUX` 가 이긴다. 맨 `tmux new-session -d` 도 기본 서버에 판을 세우는 것이라 격리가
+  아니다 — 치우려면 기본 서버에 `kill-*` 를 쳐야 하고, 그 길로 서버 전체가 죽은 적이 있다
 
 ## 공유 루트
 
@@ -1194,6 +1206,11 @@ fn brief() -> String {
        **리뷰 서브에이전트에게도** 같은 말을 준다 — 넘긴 것을 담다가 그 줄을 워크트리에
        적은 적이 있다. 이미 적었으면 `git checkout -- .moai` 로 되돌리고, 그 줄이 이미
        커밋됐으면 그 커밋까지 되돌린 뒤 루트에서 다시 담는다
+    4-2. **tmux 를 시험하면 떼어 낸 서버에서만 한다** — 모든 호출에 `env -u TMUX tmux -L <고유 이름>`
+       (또는 `tmux -S <스크래치패드 안의 소켓>`). `-L`/`-S` 없는 `kill-server` 는 쓰지 않는다: tmux
+       안에서 맨 `tmux` 는 사람의 기본 서버로 가 모든 세션을 죽이고, `TMUX_TMPDIR` 로는 안 갇힌다.
+       남이 띄운 판에는 키를 보내지 않는다. **리뷰 서브에이전트에게도** 이 말을 준다 — 서버 전체를
+       죽인 것이 리뷰 서브에이전트였다
     5. 리뷰 이슈를 세워(규칙 3) `/code-review <등급> --fix`. 등급은 개발한 난이도로
        {levels} 에서 고른다 — 머리의 모델을 고른 그 잣대다.
 {rubric}
@@ -1755,6 +1772,33 @@ sys.exit(1 if bad else 0)
         let out = child.wait_with_output().expect("python3 가 안 끝났다");
         let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         assert!(out.status.success(), "입력 칸을 잘못 읽는다:\n{said}");
+    }
+
+    /// **tmux 시험은 떼어 낸 서버에서만 가르친다**(2026-09-18 사용자 규칙). 스킬이 맨
+    /// `tmux new-session -d` 를 가르치던 날, 그 길을 따른 리뷰 서브에이전트가 맨 `kill-server` 로
+    /// 사람의 tmux 서버를 통째로 죽였다 — tmux 안에서는 `$TMUX` 가 `TMUX_TMPDIR` 를 이긴다.
+    /// 감독이 읽는 글과 일꾼이 받는 글 **둘 다** 에 서야 한다: 시험을 실제로 치는 것은 일꾼과 그
+    /// 리뷰 서브에이전트다.
+    #[test]
+    fn tmux_tests_are_taught_on_a_separate_server() {
+        let (supervise, brief) = (supervise(), brief());
+        // 감독 쪽은 **브리프를 뺀 글**로 잰다 — 감독 스킬은 브리프를 품어, 통째로 재면 브리프의
+        // 같은 줄이 감독 쪽에서 빠진 자리를 메운다.
+        let own = supervise.replace(&brief, "");
+        for (name, text) in [("감독 스킬", own.as_str()), ("일꾼 글", brief.as_str())] {
+            assert!(text.contains("env -u TMUX tmux -L"), "{name}: 떼어 낸 서버로 시험하라는 말이 없다");
+            assert!(text.contains("`-L`/`-S` 없는"), "{name}: 맨 kill-server 를 막는 말이 없다");
+            assert!(text.contains("TMUX_TMPDIR"), "{name}: TMUX_TMPDIR 로 안 갇힌다는 말이 없다");
+        }
+        assert!(brief.contains("**리뷰 서브에이전트에게도** 이 말을 준다"), "리뷰 서브에이전트가 tmux 규칙을 못 받는다");
+        // 시험용 판을 세우거나 치우는 줄은 모두 떼어 낸 서버에 선다 — 셸 명령으로 적힌 줄 중
+        // `new-session`·`kill-server` 를 부르는 것은 `-L`/`-S` 를 준 줄이어야 한다.
+        for line in supervise.lines().map(str::trim).filter(|l| l.starts_with("env ") || l.starts_with("tmux ")) {
+            if line.contains("new-session") || line.contains("kill-server") {
+                assert!(line.contains(" -L ") || line.contains(" -S "), "기본 서버를 쓰는 tmux 를 가르친다 — {line}");
+            }
+        }
+        assert!(!supervise.contains("판(`tmux new-session -d`)"), "맨 new-session 을 격리라고 가르친다");
     }
 
     /// **일꾼이 마지막 자이고, 일한 모델은 닫을 때 남는다**(moai-lzfq, 2026-09-15 사용자 결정).
