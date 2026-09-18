@@ -3951,3 +3951,6 @@
 {"ts":"2026-09-18T09:28:25Z","id":"moai-dw63.gwf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"max 15건 — 12 반영, 15 의 남은 둘 직접 반영(f6388df), 13·14 는 에픽이 내건 것이라 멤버 moai-d4e0·moai-8ema 로 첫 칸에 남김, 보고만 한 것은 idea moai-m807·moai-d5cl·moai-chnl"}
 {"ts":"2026-09-18T09:28:33Z","id":"moai-dw63","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 첫 칸에 남긴 멤버 둘(moai-8ema Stop 훅의 defer 권유, moai-d4e0 idea add 에 둘째 물음 비추기)이 에픽을 열어 둔다. 둘 다 훅 동작을 바꾼다 — 마지막 것이 닫힐 때 에픽 끝 리뷰를 다시 돌린다"}
 {"ts":"2026-09-18T09:29:01Z","id":"moai-ghnb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T09:39:33Z","id":"moai-bx6t.ygo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-bx6t 전체 (xhigh)"}
+{"ts":"2026-09-18T09:39:39Z","id":"moai-bx6t.ygo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T09:39:52Z","id":"moai-ghnb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 두 멤버 커밋 끝(워크트리 moai-bx6t — 2c3eea9 CLAUDE.md, 5530f2d guide.rs+스킬). 시험 unit 892 · cli 327, init --check current. 에픽 끝 xhigh 리뷰 moai-bx6t.ygo 가 백그라운드에서 돈다(새 규약 첫 적용 — 멤버 리뷰 없음). 끝나면 원문·판단 두 노트 → 반영은 별도 fix: 커밋 → main 받기·시험 → 루트에서 --no-ff 병합 → 워크트리·가지 삭제 → a1c1·ghnb done, 일한 AI 줄"}
