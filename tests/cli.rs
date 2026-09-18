@@ -4064,6 +4064,34 @@ fn help_at(s: &Scratch, path: &str, columns: usize) -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
+/// **모든 명령의 `--help` 는 80칸 안이다**(moai-c57v). 도움말은 접지 않으므로(moai-opjn) 넘는
+/// 줄은 좁은 터미널에서 그대로 꺾인다. `tui` 의 글만 보던 시험(moai-lz2t)을 넓혔다 —
+/// after_help 글줄, clap 이 옵션 열 옆에 붙이는 짧은 help, `--help` 가 옵션 밑에 펴는
+/// long_help 문단까지 **그려진 모양 그대로** 잰다. 옵션 열의 폭은 그 명령에서 가장 긴 옵션이
+/// 정하므로, 한 명령에 옵션을 더하는 것만으로 남의 줄이 넘칠 수 있다 — 그래서 글이 아니라
+/// 그린 것을 잰다.
+///
+/// 폭은 `unicode-width` 로 센다 — `·`·`—` 같은 모호폭은 한 칸이다(moai-havc 가 따로 본다).
+#[test]
+fn every_help_fits_in_eighty_columns() {
+    let s = init("helpwidth");
+    let mut seen = 0;
+    let mut wide = Vec::new();
+    for (path, help) in every_help(&s) {
+        seen += 1;
+        // `hook` 의 이벤트 설명은 `src/hook.rs` 의 `Event` doc 주석이 그린다 — 옆 워크트리가 그
+        // 파일을 쥐어 따로 세웠다(moai-h0r2). 그것을 고치면 이 줄을 걷는다.
+        if path == "hook" {
+            continue;
+        }
+        for l in help.lines().filter(|l| cells(l) > 80) {
+            wide.push(format!("moai {path} --help  {}: {l}", cells(l)));
+        }
+    }
+    assert!(seen > 20, "명령 목록을 못 읽었다 — {seen}개");
+    assert!(wide.is_empty(), "80칸을 넘는 도움말 줄:\n{}", wide.join("\n"));
+}
+
 /// 복사해 못 도는 heredoc 마다 한 줄.
 fn copyable_heredocs(help: &str) -> Vec<String> {
     let lines: Vec<&str> = help.lines().collect();
