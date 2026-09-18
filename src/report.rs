@@ -1043,16 +1043,31 @@ fn members_in<'a>(
     epic_of: &BTreeMap<&'a str, &'a str>,
     mile_of: &BTreeMap<&'a str, &'a str>,
 ) -> BTreeMap<(Kind, &'a str), Vec<&'a Issue>> {
-    let mut members: BTreeMap<(Kind, &str), Vec<&Issue>> = BTreeMap::new();
     let eclipsed = eclipsed(all);
-    for i in all.iter().filter(|i| is_work(i) && !eclipsed(i)) {
-        for (kind, map) in [(Kind::Epic, epic_of), (Kind::Milestone, mile_of)] {
-            if let Some(g) = map.get(i.id.as_str()) {
-                members.entry((kind, g)).or_default().push(i);
-            }
+    let mut members = BTreeMap::new();
+    for (kind, map) in [(Kind::Epic, epic_of), (Kind::Milestone, mile_of)] {
+        for (g, of) in work_under(all, map, &eclipsed) {
+            members.insert((kind, g), of);
         }
     }
     members
+}
+
+/// 묶음 id → 소속 지도 `map` 이 그 묶음에 두는 **일**. [`members_in`] 과 [`rollup_of`] 가 같은
+/// 걸음을 쓴다(moai-isyy) — 롤업이 묶음마다 목록을 다시 걸으면 에픽 E 개에 줄 N 개가 E×N 이고,
+/// 1만 줄에서 `moai status` 의 대부분이 거기 들었다. 셈의 자도 하나가 된다: 일만, 가려진 줄은 빼고.
+fn work_under<'a>(
+    all: &'a [Issue],
+    map: &BTreeMap<&'a str, &'a str>,
+    eclipsed: &impl Fn(&Issue) -> bool,
+) -> BTreeMap<&'a str, Vec<&'a Issue>> {
+    let mut out: BTreeMap<&str, Vec<&Issue>> = BTreeMap::new();
+    for i in all.iter().filter(|i| is_work(i) && !eclipsed(i)) {
+        if let Some(g) = map.get(i.id.as_str()) {
+            out.entry(*g).or_default().push(i);
+        }
+    }
+    out
 }
 
 /// 묶음의 칸을 셀 멤버 — 미룬 멤버는 빼되, **묶음 제가 받은 미룸으로는 안 뺀다.**
@@ -1794,14 +1809,12 @@ pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
     // 차례가 달라, 같은 화면에서 규칙이 둘이 된다.
     let mut groupings: Vec<&Issue> = issues.iter().filter(|i| i.kind == kind && !eclipsed(i)).collect();
     groupings.sort_by(|a, b| crate::query::display_order(a, b));
+    let members = work_under(issues, &group, &eclipsed);
     let mut out: Vec<Roll> = groupings
         .iter()
         .map(|e| {
-            let members: Vec<&Issue> = issues
-                .iter()
-                .filter(|i| is_work(i) && !eclipsed(i) && group.get(i.id.as_str()) == Some(&e.id.as_str()))
-                .collect();
-            let (counts, total, done, percent) = tally(&members);
+            let of = members.get(e.id.as_str()).map(Vec::as_slice).unwrap_or_default();
+            let (counts, total, done, percent) = tally(of);
             Roll {
                 id: Some(e.id.clone()),
                 title: e.title.clone(),
