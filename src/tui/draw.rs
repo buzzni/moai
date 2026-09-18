@@ -168,8 +168,8 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     if let Some((_, grid)) = &open_menu {
         menu_panel(f, grid, panel);
     }
-    // **도는 것이 화면에 남았는지는 다 그린 버퍼에서 읽는다**(moai-5jh6). 목록은 스크롤 창
-    // 밖의 줄도 짓고, 상세는 굴린 위쪽 줄도 짓고, 폼은 둘을 통째로 덮는다 — 짓는 쪽에서 세면
+    // **도는 것이 화면에 남았는지는 다 그린 버퍼에서 읽는다**(moai-5jh6). 목록은 창 밖
+    // 줄을 빈 줄로 두고(moai-wt4n), 상세는 굴린 위쪽 줄도 짓고, 폼은 둘을 통째로 덮는다 — 짓는 쪽에서 세면
     // 그 셋을 따로 따져야 하고, 하나를 빠뜨리면 보이는 스피너가 멈추거나 안 보이는 스피너로
     // 깬다. 버퍼에 스피너 글자가 있으면 그것은 보이는 것이다. 틀리는 쪽은 제목·본문에
     // 스피너 글자를 적은 경우 하나고, 그 손해는 오늘까지의 깨움과 같다(`SPIN_BUDGET` 로 묶인다).
@@ -881,22 +881,15 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // **왼쪽 열의 폭은 목록이 정한다**(moai-3fnf) — 줄마다 제 길이로 서면 그 뒤가 밀려 열 이름 줄이
     // 어느 줄과도 안 맞는다.
     let cols = Head::of(app, rows, &tallies, inner, app.fields);
-    let (mut items, kept): (Vec<ListItem>, Vec<super::view::Fields>) = rows
-        .iter()
-        .zip(&tallies)
-        .map(|(r, t)| {
-            let (line, kept) = row_line(app, r, t, inner, app.fields, cols);
-            (ListItem::new(line), kept)
-        })
-        .unzip();
-    let common = kept.iter().copied().fold(app.fields, super::view::Fields::both);
-    // **덜 걷힌 줄만 다시 그린다**(moai-2kyl 단계 리뷰) — 이미 그만큼 걷힌 줄은 같은 열로 다시 그려도 같은
-    // 줄이다. 대개는 모든 줄이 같은 만큼 걷히므로 통째로 다시 그리면 줄을 프레임마다 두 번 짓는다.
-    for (((item, r), t), k) in items.iter_mut().zip(rows).zip(&tallies).zip(&kept) {
-        if *k != common {
-            *item = ListItem::new(row_line(app, r, t, inner, common, cols).0);
-        }
-    }
+    // 걷는 셈은 **폭만으로** 한다(`right_fit`) — 줄을 다 지어 봐야 알던 때는 스크롤 창 밖의 줄까지
+    // 매 프레임 지었다(moai-wt4n). 줄의 머리 폭과 셈 글만 있으면 걷힐 열이 정해진다.
+    let common = rows.iter().zip(&tallies).fold(app.fields, |common, (r, t)| match r {
+        Row::Item(e) => match e.at() {
+            Some(at) => common.both(right_fit(app.fields, head_width(app, at, app.fields, cols), t, inner)),
+            None => common,
+        },
+        Row::Up | Row::Project(_) => common,
+    });
 
     // 제목에 칸별 건수를 **config 차례로** 낸다. 칸 이름과 순서는 저장소가
     // 정하는 것이라(`config.statuses`) 여기서 다시 정하지 않는다.
@@ -973,6 +966,18 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     if let Some(at) = selected {
         app.list.reveal(at);
     }
+    // **보이는 창만 짓는다**(moai-wt4n) — 위젯은 `offset` 창만 그리는데, 창 밖 줄까지 지으면 에픽 500개
+    // 뿌리에서 줄 짓기가 프레임의 4~8ms 였다. 창 밖은 빈 줄로 둬 줄 수와 `offset` 은 그대로다. 자리는
+    // 위에서 이미 커서를 보이게 옮겼으므로 위젯이 다시 옮기지 않는다.
+    let window = app.list.offset()..app.list.offset() + list_at.height as usize;
+    let items: Vec<ListItem> = rows
+        .iter()
+        .zip(&tallies)
+        .enumerate()
+        .map(|(n, (r, t))| {
+            if window.contains(&n) { ListItem::new(row_line(app, r, t, inner, common, cols)) } else { ListItem::new(Line::default()) }
+        })
+        .collect();
     let mut state = ListState::default().with_offset(app.list.offset()).with_selected(selected);
     f.render_stateful_widget(
         List::new(items)
@@ -1014,7 +1019,7 @@ fn scroll_mark(f: &mut Frame, s: &Scroll, at: Rect, hint: &str, focused: bool) {
 ///
 /// **진행 바탕은 두 번 깔아 보고 걷었다**(moai-u3r2). 반전도 막대 색 초록도 줄마다 덩어리가
 /// 서서 목록이 정신없었다 — 사용자 판단. 셈 글자만으로 한눈에 읽힌다.
-/// 켠 열 가운데 이 줄에 실제로 선 것을 함께 낸다 — 걷기를 목록 전체에 맞추려고(`list`).
+/// 오른쪽 열을 걷는 셈은 목록이 폭만으로 한 번 한다(`right_fit`) — 받은 `fields` 가 이미 그 셈을 지난 것이다.
 fn row_line<'a>(
     app: &App,
     r: &Row,
@@ -1022,18 +1027,18 @@ fn row_line<'a>(
     budget: usize,
     fields: super::view::Fields,
     cols: Head,
-) -> (Line<'a>, super::view::Fields) {
+) -> Line<'a> {
     // 이 파일의 `Field` 는 폼의 칸이다(`form::Field`) — 목록 열은 여기서만 가린다.
     use super::view::Field;
     let e = match r {
         Row::Item(e) => e,
-        Row::Up => return (Line::from(Span::styled("..", dim())), fields),
-        Row::Project(at) => return (place_line(app, *at, budget), fields),
+        Row::Up => return Line::from(Span::styled("..", dim())),
+        Row::Project(at) => return place_line(app, *at, budget),
     };
     let is_dir = matches!(e, Entry::Dir { .. });
     let Some(at) = e.at() else {
         // 바구니는 제 줄이 없다 — 이름만 낸다.
-        return (Line::from(Span::styled(format!("{}/", app.index.label(&app.issues, e)), dim())), fields);
+        return Line::from(Span::styled(format!("{}/", app.index.label(&app.issues, e)), dim()));
     };
     let i = &app.issues[at];
     // 걸린 검색이 이 자리를 보면 찾은 글자를 칠한다(moai-yio7).
@@ -1100,6 +1105,9 @@ fn row_line<'a>(
     // 글리프를 바꾼 날 제목 몫이 한두 칸 넉넉해지고, 넘친 줄은 위젯이 말없이
     // 잘라 내 잘렸다는 `…` 마저 사라진다.
     let mut head_w = spans_width(&head);
+    // 걷는 셈(`right_fit`)이 줄을 안 짓고 재는 폭과 같아야 한다 — 갈리면 창 밖 줄을 안 짓는 대가로
+    // 열이 줄마다 들쭉날쭉 선다.
+    debug_assert_eq!(head_w, head_width(app, at, fields, cols), "머리 폭 셈이 줄과 갈렸다");
     // 셈(`tally`, [`tally_of`])은 **제목보다 먼저 자리를 얻는다** — 긴 제목에 밀려 잘리면 진척을
     // 말하는 것이 사라진다.
     // **오른쪽 열**(moai-g7p8) — 태그·담당·생성·수정. 줄마다 폭을 고정해 여러 줄을 한 줄로 훑어
@@ -1109,9 +1117,10 @@ fn row_line<'a>(
     // **폭은 `RIGHT` 하나가 정한다** — 줄과 이름 줄이 같은 자를 써야 맨 위의 이름이 값과 맞는다.
     // **날짜도 채운다**: `created_at` 이 짧으면(읽기는 관대하다) `+—` 두 칸으로 서서 그 줄만 오른쪽
     // 열이 네 칸 밀린다 — 고정 폭의 까닭이 그 줄에서 사라진다.
-    let mut cells: Vec<(Field, String)> = RIGHT
+    let kept = right_fit(fields, head_w, tally, budget);
+    let cells: Vec<(Field, String)> = RIGHT
         .into_iter()
-        .filter(|(f, _, _)| fields.shows(*f))
+        .filter(|(f, _, _)| kept.shows(*f))
         .map(|(f, _, w)| {
             let text = match f {
                 Field::Tags => crate::view::tags_of(i),
@@ -1128,31 +1137,8 @@ fn row_line<'a>(
             (f, pad(&clip(&text, w), w))
         })
         .collect();
-    // 셈은 오른쪽 열이 있으면 **폭을 고정한다** — 셈 없는 잎과 있는 묶음의 날짜가 한 줄에 선다.
-    let tally_cell = |cells: &[(Field, String)]| match (cells.is_empty(), fields.shows(Field::Tally)) {
-        (true, _) if tally.is_empty() => String::new(),
-        (true, _) => format!("  {tally}"),
-        (false, true) => format!("  {tally:>TALLY_W$}"),
-        (false, false) => String::new(),
-    };
-    let right_of = |cells: &[(Field, String)]| {
-        let joined: String = cells.iter().map(|(_, t)| format!("  {t}")).collect();
-        format!("{joined}{}", tally_cell(cells))
-    };
-    // **좁으면 사람이 정한 차례로 걷는다** — 날짜 → 담당 → 태그. 제목에 [`TITLE_MIN`] 칸이 남을
-    // 때까지 걷는다. 제목을 먼저 굶기면 줄이 무엇인지 모르는 채 곁들임만 남는다.
-    while !cells.is_empty()
-        && crate::text::width(CURSOR) + head_w + TITLE_MIN + crate::text::width(&right_of(&cells)) > budget
-    {
-        let least = cells.iter().filter_map(|(f, _)| f.drop_rank()).min().expect("오른쪽 열은 걷는 차례가 있다");
-        cells.retain(|(f, _)| f.drop_rank() != Some(least));
-    }
-    // 켠 오른쪽 열 가운데 걷힌 것을 끈다 — 안 켠 열은 `cells` 에도 없어 꺼진 채다.
-    let mut kept = fields;
-    for (f, _, _) in RIGHT {
-        kept.set(f, cells.iter().any(|(c, _)| *c == f));
-    }
-    let right = right_of(&cells);
+    let joined: String = cells.iter().map(|(_, t)| format!("  {t}")).collect();
+    let right = format!("{joined}{}", tally_cell(tally, cells.is_empty(), fields));
     // **좁으면 스피너부터 걷는다**(moai-q59j). 목록 줄의 글리프는 두 칸(`⠋▸`·` ·`)인데, 제목
     // 한 글자와 디렉터리 `/` 가 들어갈 자리가 없으면 멈춘 글리프 한 칸만 남긴다 — 뜻은 글리프가
     // 지고 움직임은 곁들이라, 잘려도 되는 것부터 뺀다. 안 빼면 `/` 가 잘려 폴더와 파일이 안 갈린다.
@@ -1203,7 +1189,50 @@ fn row_line<'a>(
         spans.push(Span::raw(" ".repeat(gap)));
         spans.push(Span::styled(right, dim()));
     }
-    (Line::from(spans), kept)
+    Line::from(spans)
+}
+
+/// 줄 머리의 폭 — 커서 뒤, 제목 앞. id·우선순위(목록이 정한 폭), 두 칸 글리프와 빈칸, 그리고 `[NEW]`·
+/// `⎇ <가지>`. **줄을 짓지 않고 잰다** — 오른쪽 열을 걷는 셈(`right_fit`)이 창 밖 줄까지 봐야 하는데 그
+/// 줄을 다 짓지 않으려고(moai-wt4n). 줄(`row_line`)이 지은 폭과 같은지는 거기서 늘 견준다.
+fn head_width(app: &App, at: usize, fields: super::view::Fields, cols: Head) -> usize {
+    use super::view::Field;
+    let id = if fields.shows(Field::Id) && cols.id > 0 { cols.id + 2 } else { 0 };
+    let priority = if fields.shows(Field::Priority) && cols.priority > 0 { cols.priority + 1 } else { 0 };
+    // 칸 글리프는 도는 줄이든 아니든 두 칸이다(`row_glyph`). 좁아서 스피너를 걷는 것(`Head::still`)은
+    // 걷기 셈 **뒤의** 일이라 여기에 안 든다.
+    id + priority + 2 + 1 + lead_extras(app, at, fields)
+}
+
+/// 켠 오른쪽 열 가운데 **이 머리 폭의 줄에 들어가는 것** — 좁으면 사람이 정한 차례로 걷는다(날짜 →
+/// 담당 → 태그). 제목에 [`TITLE_MIN`] 칸이 남을 때까지 걷는다: 제목을 먼저 굶기면 줄이 무엇인지 모르는
+/// 채 곁들임만 남는다. 열은 폭이 고정이라(`RIGHT`) 글을 짓지 않고 잰다.
+fn right_fit(fields: super::view::Fields, head_w: usize, tally: &str, budget: usize) -> super::view::Fields {
+    let mut on: Vec<(super::view::Field, usize)> =
+        RIGHT.into_iter().filter(|(f, _, _)| fields.shows(*f)).map(|(f, _, w)| (f, w)).collect();
+    let width = |on: &[(super::view::Field, usize)]| {
+        on.iter().map(|(_, w)| 2 + w).sum::<usize>() + crate::text::width(&tally_cell(tally, on.is_empty(), fields))
+    };
+    while !on.is_empty() && crate::text::width(CURSOR) + head_w + TITLE_MIN + width(&on) > budget {
+        let least = on.iter().filter_map(|(f, _)| f.drop_rank()).min().expect("오른쪽 열은 걷는 차례가 있다");
+        on.retain(|(f, _)| f.drop_rank() != Some(least));
+    }
+    // 켠 오른쪽 열 가운데 걷힌 것을 끈다 — 안 켠 열은 `on` 에도 없어 꺼진 채다.
+    let mut kept = fields;
+    for (f, _, _) in RIGHT {
+        kept.set(f, on.iter().any(|(c, _)| *c == f));
+    }
+    kept
+}
+
+/// 줄 끝의 셈 칸. 오른쪽 열이 있으면 **폭을 고정한다** — 셈 없는 잎과 있는 묶음의 날짜가 한 줄에 선다.
+fn tally_cell(tally: &str, alone: bool, fields: super::view::Fields) -> String {
+    match (alone, fields.shows(super::view::Field::Tally)) {
+        (true, _) if tally.is_empty() => String::new(),
+        (true, _) => format!("  {tally}"),
+        (false, true) => format!("  {tally:>TALLY_W$}"),
+        (false, false) => String::new(),
+    }
 }
 
 /// 줄의 `⎇ <가지>` 표시 — 서지 않으면 `None`. 줄(`row_line`)과 좁을 때 머리를 걷는 셈(`Head::of`)이
@@ -5855,5 +5884,13 @@ mod eyeball {
         let t = std::time::Instant::now();
         let tallies: Vec<String> = rows.iter().map(|r| super::tally_of(&app, r, app.fields)).collect();
         println!("tallies {:?} ({} 줄)", t.elapsed(), tallies.len());
+        let t = std::time::Instant::now();
+        let cols = super::Head::of(&app, &rows, &tallies, 100, app.fields);
+        println!("Head::of {:?}", t.elapsed());
+        let t = std::time::Instant::now();
+        for (r, tally) in rows.iter().zip(&tallies) {
+            let _ = super::row_line(&app, r, tally, 100, app.fields, cols);
+        }
+        println!("row_line 전부 {:?}", t.elapsed());
     }
 }
