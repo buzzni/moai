@@ -509,7 +509,7 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
     // 둘 다 **빠른 길일 뿐 판정이 아니다** — 아래를 다 돌아도 [`settle`] 이 같은 답(빈 지도)을
     // 낸다. 계약을 쥔 자는 거기 하나고, 여기는 헛일을 아낄 뿐이라 갈릴 것이 없다.
     if picked.is_empty() || trees.is_empty() {
-        return settle(&picked, found, trees, now, &BTreeMap::new());
+        return settle(&picked, found, trees, now, &BTreeMap::new(), false);
     }
     // **소속 지도는 한 번만 짓는다**(`claims`) — 워크트리마다 바뀌는 것은 이름뿐이다.
     let (epics, stones) = (groups(issues), milestones(issues));
@@ -517,12 +517,12 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
     // 멤버가 `At` 이든 `Lost` 든 키를 받는다. 한때 이 줄 위에서 일찍 돌아, 문서와 `placeable` 은
     // "집은 멤버를 둔 묶음은 키를 받는다" 라고 하는데 그 길에서만 안 받는 셋째 답이 있었다.
     let rolls = rollups(issues, &picked, &epics, &stones);
+    // 못 읽은 워크트리가 판정을 가리는가 — [`blinding`] 과 같은 자(`nameless`)로 워크트리마다 잰다.
+    let mut blind = false;
     for t in trees {
         let named = |i: &Issue| claims(&epics, &stones, &t.names, i);
-        // **이름이 집은 줄을 하나도 못 가리키면 이름 없는 워크트리다.** "이 이름을 쓰는 줄이
-        // 있는가" 로 물으면, 끝난 일의 이름으로 뜬 워크트리가 그 자리에서 다른 일을 하고 있어도
-        // 이름 있는 것으로 세어져 스냅샷으로 가르는 길이 통째로 닫힌다 — 그 일은 자리를 잃는다.
-        let nameless = !picked.values().copied().any(|i| named(i));
+        let nameless = nameless(&epics, &stones, picked.values().copied(), t);
+        blind |= t.unknown && nameless;
         let born = t.born.as_deref().and_then(crate::model::parse_rfc3339);
         // 이름 없는 워크트리가 쥔 일은 **뜨기 한 시간 전부터 그 뒤로 움직인 줄**이다(사용자 결정,
         // moai-ir8q.beq 와 moai-40ht.hom). 규약은 집고 곧바로 워크트리를 띄우므로 그보다 한참 전에
@@ -554,7 +554,44 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
             found.insert(id, by_name);
         }
     }
-    settle(&picked, found, trees, now, &rolls)
+    settle(&picked, found, trees, now, &rolls, blind)
+}
+
+/// **이름이 집은 줄을 하나도 못 가리키는 워크트리인가** — 그러면 스냅샷으로 가르고([`places`]),
+/// 못 읽었으면 판정을 가린다([`blinding`]). 가리키는지는 [`claims`] 로 잰다 — 줄 자신·조상·그
+/// 에픽·마일스톤이다. 규약의 워크트리 이름이 에픽 id 라(CLAUDE.md "워크트리") 집은 id 와 바로 같은
+/// 이름만 보면, 멤버를 쥔 에픽 워크트리 하나를 못 읽는 것만으로 저장소 전체가 "모른다" 로 접혀
+/// 자리를 잃은 딴 줄이 `stranded` 에서 빠진다(moai-1i9d).
+///
+/// "이 이름을 쓰는 줄이 있는가" 로 묻지 않는다 — 끝난 일의 이름으로 뜬 워크트리가 그 자리에서
+/// 다른 일을 하고 있어도 이름 있는 것으로 세어져 스냅샷으로 가르는 길이 통째로 닫힌다.
+fn nameless<'i>(
+    epics: &BTreeMap<&str, &str>,
+    stones: &BTreeMap<&str, &str>,
+    mut picked: impl Iterator<Item = &'i Issue>,
+    t: &Workplace,
+) -> bool {
+    !picked.any(|i| claims(epics, stones, &t.names, i))
+}
+
+/// **자리 판정을 가리는 못 읽은 워크트리들** — 못 읽었고([`Workplace::unknown`]) 이름이 집은 줄을
+/// 하나도 못 가리키는 것이다(사용자 결정, 리뷰 moai-ya06.44t). 이름이 집은 줄을 가리키는 워크트리는
+/// 못 읽어도 그 줄이 이미 `At` 이라 가릴 것이 없다.
+///
+/// "자리를 다 못 셌다" 를 대는 표면(`status` 의 stderr·`unreadable_worktrees`·한눈 보기·층)이
+/// 이것을 센다 — [`places`] 가 `Unknown` 을 세우는 자와 **같아야** 한다(moai-rgz9). 한때 못 읽은
+/// 워크트리를 다 세어, 판정을 안 가리는 제 이름 워크트리 하나로 화면마다 "다 못 셌다" 가 섰다.
+pub fn blinding<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> Vec<&'a Workplace> {
+    // 값싼 것을 먼저 — 못 읽은 워크트리가 없으면 소속 지도를 안 짓는다.
+    if !trees.iter().any(|t| t.unknown) {
+        return Vec::new();
+    }
+    let picked = wip(issues, cfg);
+    let (epics, stones) = (groups(issues), milestones(issues));
+    trees
+        .iter()
+        .filter(|t| t.unknown && nameless(&epics, &stones, picked.iter().copied(), t))
+        .collect()
 }
 
 /// 묶음 id → **그 묶음으로 자리를 굴려 올릴 집은 멤버들**([`settle`]).
@@ -605,17 +642,17 @@ fn settle<'a>(
     trees: &'a [Workplace],
     now: &str,
     rolls: &BTreeMap<&str, Vec<&str>>,
+    blind: bool,
 ) -> BTreeMap<String, Place<'a>> {
     // **볼 워크트리가 없으면 아무 답도 안 낸다**([`places`]) — "없다" 는 찾아보고 못 찾았을 때의
     // 말이다. 판정이 여기 있어야 부르는 표면마다 같은 가드를 다시 적지 않는다.
     if trees.is_empty() {
         return BTreeMap::new();
     }
-    // **못 읽은 워크트리가 가리는 것은 그 이름이 아무 줄도 안 가리킬 때뿐이다**(사용자 결정,
-    // 리뷰 moai-ya06.44t). 이름이 집은 줄을 가리키는 워크트리는 못 읽어도 그 줄이 이미 `At` 이라
-    // 가릴 것이 없고, 못 읽었다고 저장소의 다른 줄까지 "모른다" 로 덮으면 치우지 않은 깨진
-    // 워크트리 하나가 경고를 영영 잠재운다.
-    let blind = trees.iter().any(|t| t.unknown && !t.names.iter().any(|n| picked.contains_key(n.as_str())));
+    // `blind` 는 [`places`] 가 [`blinding`] 과 같은 자(`nameless`)로 잰 것이다 — 못 읽은 워크트리가
+    // 가리는 것은 그 이름이 아무 집은 줄도 안 가리킬 때뿐이다(사용자 결정, 리뷰 moai-ya06.44t).
+    // 못 읽었다고 저장소의 다른 줄까지 "모른다" 로 덮으면 치우지 않은 깨진 워크트리 하나가 경고를
+    // 영영 잠재운다.
     let now_s = crate::model::parse_rfc3339(now);
     // **틈은 한 곳에서 잰다**(moai-xn9n). 시각을 못 읽으면 틈을 줄 까닭도 못 재니 안 준다.
     let just_picked = |i: &Issue| match (now_s, crate::model::parse_rfc3339(&i.status_since)) {
@@ -2888,6 +2925,36 @@ mod tests {
         assert!(matches!(at["argos-0003"], Place::Lost), "이름이 가리키는 워크트리가 남의 줄을 덮었다");
         assert!(stranded(&issues, &cfg(), &blind, LATER).is_none(), "모르는 것을 자리 없음으로 셌다");
         assert!(stranded(&issues, &cfg(), &lost, LATER).is_some(), "자리 잃은 줄을 안 비췄다");
+    }
+
+    /// **에픽 이름 워크트리도 이름이 집은 줄을 가리킨다**(moai-1i9d). 규약의 워크트리 이름은 에픽
+    /// id 인데(`worktree-<에픽>`), 가리는 자가 이름을 집은 id 와 바로 견주기만 하면 에픽은 집히지
+    /// 않으니 그 워크트리는 "아무 줄도 안 가리키는" 것으로 읽힌다 — 그것 하나를 못 읽는 것만으로
+    /// 딴 에픽의 자리 잃은 줄이 `Unknown` 으로 덮여 `stranded` 에서 빠진다. 가리는 워크트리를
+    /// 세는 자([`blinding`])도 같은 답을 내야 한다 — 갈리면 화면이 "다 못 셌다" 라고 하는데 판정은
+    /// 다 셌다.
+    #[test]
+    fn an_unreadable_epic_worktree_does_not_blind_the_rest() {
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "todo"),
+            member("argos-0002", "argos-0001", "in_progress"),
+            make("argos-0005", Kind::Epic, "todo"),
+            member("argos-0003", "argos-0005", "in_progress"), // 9월 1일에 집혔다 — 자리를 잃었다
+        ];
+        let mut trees = vec![tree("/r/.claude/worktrees/argos-0001", "worktree-argos-0001", &[])];
+        trees[0].unknown = true;
+        let at = places(&issues, &cfg(), &trees, LATER);
+        assert!(matches!(at["argos-0002"], Place::At(_)), "{:?}", at["argos-0002"]);
+        assert!(matches!(at["argos-0003"], Place::Lost), "에픽 이름 워크트리가 남의 줄을 덮었다 — {:?}", at["argos-0003"]);
+        let w = stranded(&issues, &cfg(), &trees, LATER).expect("에픽 이름 워크트리 하나가 stranded 를 재웠다");
+        assert_eq!(w.ids, ["argos-0003"]);
+        assert!(blinding(&issues, &cfg(), &trees).is_empty(), "판정을 안 가리는 워크트리를 가린다고 셌다");
+
+        // 이름이 아무 집은 줄도 안 가리키면 그때는 가린다 — 두 자가 같은 답이다.
+        let mut stray = vec![tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &[])];
+        stray[0].unknown = true;
+        assert!(matches!(places(&issues, &cfg(), &stray, LATER)["argos-0003"], Place::Unknown));
+        assert_eq!(blinding(&issues, &cfg(), &stray).len(), 1);
     }
 
     /// **워크트리가 없으면 아무 키도 없다**(moai-tbin) — "없다" 는 찾아보고 못 찾았을 때의 말이다.
