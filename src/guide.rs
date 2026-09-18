@@ -17,12 +17,13 @@
 //!
 //! 순수 모듈이다. 파일을 쓰는 것은 `cmd/init.rs` 와 `cmd/skill.rs` 가 한다.
 
-/// 규칙 셋의 이름. **스킬이 적은 규칙과 훅이 낸 거절문이 같은 이름을 댄다** —
+/// 규칙 넷의 이름. **스킬이 적은 규칙과 훅이 낸 거절문이 같은 이름을 댄다** —
 /// 다르면 막힌 쪽이 무엇을 어겼는지 두 번 읽어야 한다.
-pub const RULES: [&str; 3] = [
+pub const RULES: [&str; 4] = [
     "집은 것 밖에 새 이슈를 세우지 않는다",
     "저장소를 고치기 전에 하나를 집는다",
     "리뷰도 이슈다",
+    "사람의 tmux 서버를 죽이지 않는다",
 ];
 
 /// 거절문의 머리. 스킬의 규칙 제목과 글자가 같다.
@@ -185,7 +186,7 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
     moai show --tree                       에픽 → 이슈 → 자식
     moai ready --worktree                  옆 워크트리에서 집은 것까지 겹쳐 본다
     moai tui                               탐색기로 돌아다닌다. SPC n 으로 생각을 담는다
-    moai add "제목" -p 1 -t bug -e <에픽>  만들기
+    moai add '제목' -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
     moai note <id> '발견한 것'             다음 사람이 읽을 메모
@@ -206,7 +207,7 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
 const NO_GATE: &str = "승인 게이트가 없다 — 무엇이든 만들고 무엇이든 옮길 수 있다. 사람을 부르지 않는다.";
 
 const FORKS: &str = r#"**1. `add` 냐 `idea` 냐** — 가르는 것은 *지금 집을 것인가* 다.
-집을 것이면 `moai add`, 나중에 볼 것이면 `moai idea add "떠오른 것"`.
+집을 것이면 `moai add`, 나중에 볼 것이면 `moai idea add '떠오른 것'`.
 idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
 **적지 않고 넘어가는 것이 제일 나쁘다.**
 
@@ -259,7 +260,7 @@ const WRITING_EXAMPLE: &str = r#"규칙은 `SKILL.md` 의 "이슈에 적는 글"
 제목은 인자로, 본문은 `-b -` 로 넘긴다.
 
 ```sh
-moai add "빈 태그를 못 걸러 필터가 전부를 낸다" -t bug -e <에픽> -b - <<'BODY'
+moai add '빈 태그를 못 걸러 필터가 전부를 낸다' -t bug -e <에픽> -b - <<'BODY'
 - 무엇: 태그를 정규화할 때 빈 낱말이 그대로 남는다
 - 무엇을 봤나: 그 태그로 거른 목록이 아무것도 안 거르고 전부를 낸다
 - 어디: 태그를 정규화하는 자리(<파일>:<줄>). 빈 낱말을 거르면 끝난다
@@ -274,8 +275,8 @@ BODY
   판단과 근거와 다음 걸음을 줄로 가르면 `moai show` 한 번으로 끝난다
 - **이모지로 급한 것을 알린다** — 급한 것은 우선순위(`-p 1`)로 적는다. `ready` 가 읽는 것은 그쪽이다"#;
 
-const IDEAS: &str = r#"    moai idea add "반짝 떠오른 것"                 담기
-    moai idea add "긴 생각" -b -                   본문은 stdin 에서
+const IDEAS: &str = r#"    moai idea add '반짝 떠오른 것'                 담기
+    moai idea add '긴 생각' -b -                   본문은 stdin 에서
     moai idea ls                                   쌓인 것 보기
     moai show -g <키워드>                          이미 적어 뒀는지 찾기
 
@@ -296,9 +297,9 @@ const DEFERRING: &str = r#"    moai defer <id> -m '다음 분기에'       계�
 보드와 경고에서 빠지고, `moai status` 가 한 줄로 그것을 비춘다. 에픽·마일스톤·
 부모를 미루면 그 밑의 일도 같이 빠진다."#;
 
-const GROUPS: &str = r#"    moai epic add "저장 계층"                      에픽
-    moai milestone add "v0.1"                      마일스톤
-    moai add "제목" -e <에픽> --milestone <마일스톤>
+const GROUPS: &str = r#"    moai epic add '저장 계층'                      에픽
+    moai milestone add 'v0.1'                      마일스톤
+    moai add '제목' -e <에픽> --milestone <마일스톤>
     moai show <에픽|마일스톤 id>                   그 밑에 무엇이 있는지
     moai show --milestone <id>                     그 마일스톤에 딸린 전부
 
@@ -396,16 +397,20 @@ pub fn handoff(id: &str) -> String {
     format!("moai note {id} '다음: <이어서 할 것>'")
 }
 
-/// 규칙 셋. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
+/// 갈림길 1 의 둘째 물음 — 규칙 1 의 글과 그 거절문(`hook::create_in`)이 함께 쓴다. 손으로 옮겨
+/// 적던 두 벌은 한쪽만 고쳐도 안 붉어졌다(moai-nxw8). 앞의 임자(`에픽이`·`<id> 가`)는 부르는 쪽이 붙인다.
+pub const PLEDGE: &str = "내건 것이 이것 없이 안 이뤄지면";
+
+/// 규칙 넷. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
 fn rules() -> String {
-    let [one, two, three] = RULES;
+    let [one, two, three, four] = RULES;
     let steps = indent(REVIEW_STEPS, "  ");
     let make = make_review("--parent <보는 이슈>");
     format!(
         r#"**1. {one}.** 집은 이슈 — 첫 칸을 떠났고 아직 안 닫힌 것
 (`in_progress`·`review`) — 가 초점이다.
 그 일을 하다 나온 것은 같은 에픽 안(`-e <에픽>`)이나 그 일의 자식
-(`--parent <id>`)으로 만든다. 에픽이 내건 것이 이것 없이 안 이뤄지면 지금 못
+(`--parent <id>`)으로 만든다. 에픽이 {PLEDGE} 지금 못
 해도 이 둘 중 하나다(갈림길 1). 지금 할 일이 아니면 `moai idea add` 로 담는다 —
 idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇다 (거기서
 만들어지는 것은 에픽과 그 자식들이라 그 자체로 한 단위다).
@@ -413,7 +418,7 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 **2. {two}.** `moai mv <id> in_progress`.
 세는 것은 저장소 안의 일감뿐이다 — `.moai/`·`.claude/`·`target/` 과 저장소
 밖(스크래치패드·임시 파일)은 안 센다. `Edit`·`Write` 뿐 아니라 껍데기로 쓰는
-것(`>`·`>>`·`sed -i`·`tee`)도 센다. 계획에 없던 것이면 `moai add "제목"` 으로
+것(`>`·`>>`·`sed -i`·`tee`)도 센다. 계획에 없던 것이면 `moai add '제목'` 으로
 세우고 그것을 집는다.
 
 **3. {three}.** `/code-review` 를 부르기 전에 지금 보는 것에 매인 리뷰
@@ -428,9 +433,19 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 
 **원문과 판단을 두 노트로 가른다** — 리뷰어가 한 말과 이쪽이 정한 것은 다른
 글이다. 넘긴 것은 **이슈 번호와 함께** 적는다. "넘겼다" 만 적힌 줄은 아무도
-다시 안 본다. 원문을 어디서 찾는지는 스킬의 `references/commands.md` 에 있다."#
+다시 안 본다. 원문을 어디서 찾는지는 스킬의 `references/commands.md` 에 있다.
+
+**4. {four}.** `-L`·`-S` 없는 `tmux kill-server`·`kill-session` 과 tmux 를
+겨눈 `pkill`·`killall` 을 막는다. 세션이 tmux 안에서 돌면 `$TMUX` 가 서 있어,
+맨 `tmux` 는 `TMUX_TMPDIR` 를 무시하고 그 서버에 붙는다 — 한 줄이 그 안의
+세션을 모두 끈다. 시험용 tmux 는 제 서버를 따로 띄운다.
+
+    {TMUX_OWN}"#
     )
 }
+
+/// 시험용 tmux 를 띄우는 줄 — 규칙 4 의 글과 거절문이 함께 쓴다.
+pub const TMUX_OWN: &str = "env -u TMUX tmux -L <고유 이름> …";
 
 /// `init` 이 AGENTS.md 의 마커 사이에 쓰는 블록. **언제나 읽히는 산문이다.**
 ///
@@ -499,7 +514,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 
 {WORK}
 
-### 훅이 실제로 보는 것 셋
+### 훅이 실제로 보는 것 넷
 
 `moai skill install` 로 Claude 에 훅을 심었을 때 선다.
 
@@ -546,7 +561,7 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
 
 {WRITING}
 
-## 훅이 실제로 보는 것 셋
+## 훅이 실제로 보는 것 넷
 
 {rules}
 
@@ -1672,11 +1687,11 @@ mod tests {
     fn the_style_example_obeys_the_style() {
         let reference = reference();
         assert!(reference.contains(WRITING_EXAMPLE), "참고 문서에 글 스타일 예시가 없다");
-        // 여는 `moai add "` 에 맨다 — 첫 따옴표로 찾으면 앞 산문에 따옴표가 하나 들면
+        // 여는 `moai add '` 에 맨다 — 첫 따옴표로 찾으면 앞 산문에 따옴표가 하나 들면
         // 조용히 엉뚱한 토막을 제목으로 재고도 초록이다.
         let title = WRITING_EXAMPLE
-            .split_once("moai add \"")
-            .and_then(|(_, rest)| rest.split_once('"'))
+            .split_once("moai add '")
+            .and_then(|(_, rest)| rest.split_once('\''))
             .map(|(t, _)| t)
             .expect("예시 명령에 제목이 없다");
         let cap = crate::view::TITLE_CAP;
@@ -1697,7 +1712,7 @@ mod tests {
     #[test]
     fn the_skill_names_each_rule_as_the_hook_does() {
         let skill = skill();
-        for n in 1..=3 {
+        for n in 1..=RULES.len() {
             let title = format!("**{n}. {}.**", RULES[n - 1]);
             assert!(skill.contains(&title), "스킬에 규칙 {n} 의 이름이 없다 — {title}");
         }
@@ -2296,7 +2311,15 @@ sys.exit(1 if bad else 0)
         let texts = [("AGENTS 블록", agents()), ("스킬", skill()), ("참고 문서", reference()), ("감독", supervise())];
         for (whose, text) in &texts {
             for line in text.lines().filter(|l| l.contains("moai ")) {
-                for bad in ["-m \"", "-b \"", "moai note <id> \"", "moai note <멤버> \"", "moai note <에픽> \""] {
+                // 제목 자리도 자유 글이다(moai-1yya) — 이 저장소 제목 1,199개 중 39개에 백틱이 든다.
+                for bad in [
+                    "-m \"",
+                    "-b \"",
+                    "moai note <id> \"",
+                    "moai note <멤버> \"",
+                    "moai note <에픽> \"",
+                    "add \"",
+                ] {
                     assert!(!line.contains(bad), "{whose} 가 자유 글을 큰따옴표로 가르친다 — {line}");
                 }
             }

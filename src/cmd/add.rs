@@ -116,7 +116,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             None | Some(Kind::Issue) | Some(Kind::Epic) => {}
             Some(Kind::Idea) => {
                 return Err(Fail::coded(
-                    "생각은 제목 하나로 담는다 — `moai idea add \"반짝 떠오른 것\"`\n      \
+                    "생각은 제목 하나로 담는다 — `moai idea add '반짝 떠오른 것'`\n      \
                      마크다운으로 에픽과 이슈를 펼치는 것은 `moai idea promote <id> --from -` 다"
                         .to_string(),
                     super::code::BAD_INPUT,
@@ -124,7 +124,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             }
             Some(Kind::Milestone) => {
                 return Err(Fail::coded(
-                    "마크다운은 에픽과 이슈만 낸다 — 마일스톤은 `moai milestone add \"v0.1\"` 로 만든다\n      \
+                    "마크다운은 에픽과 이슈만 낸다 — 마일스톤은 `moai milestone add 'v0.1'` 로 만든다\n      \
                      만든 뒤 `moai edit <에픽> --milestone <id>` 로 계획을 건다"
                         .to_string(),
                     super::code::BAD_INPUT,
@@ -162,7 +162,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     let Some(title) = args.title.clone().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
     else {
         return Err(Fail::new(
-            "제목이 없다. `moai add \"제목\"` 또는 `moai add --from -` 이다",
+            "제목이 없다. `moai add '제목'` 또는 `moai add --from -` 이다",
         ));
     };
     super::refuse_if_flag_like(&title)?;

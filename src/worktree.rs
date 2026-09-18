@@ -305,6 +305,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
         Err(why) => unfound = Some(why),
         Ok((mine, trees)) => {
             let here: std::collections::HashSet<&str> = load.issues.iter().map(|i| i.id.as_str()).collect();
+            let mut bases = Bases::new();
             for (tree, root) in trees {
                 let path = root.join(".moai").join("issues.jsonl");
                 watched.push((path.clone(), crate::store::stamp(&path)));
@@ -338,7 +339,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                                 other.errors.len()
                             ));
                         }
-                        others.push(side(&repo.root, &here, mine.as_deref(), tree, root, other.issues));
+                        others.push(side(&repo.root, &here, mine.as_deref(), tree, root, other.issues, &mut bases));
                     }
                 }
             }
@@ -355,6 +356,10 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
 ///
 /// 갈라진 자리는 옆에만 있는 줄을 가를 때만 쓴다. 다 여기에도 있으면 git 을 두 번 더 부르지
 /// 않는다 — 탐색기는 다시 읽을 때마다 여기를 지난다.
+///
+/// **HEAD 가 같은 옆끼리는 갈라진 자리를 나눠 쓴다**(moai-h498). 제 HEAD 는 하나라 옆 HEAD 가
+/// 같으면 `merge-base`·`show` 의 답도 같다 — 갓 뜬 워크트리들은 흔히 같은 커밋에 서 있어(잴 때
+/// 여덟 가운데 셋과 둘), 옆마다 git 을 두 번씩 부르던 판은 훅의 거절 길 하나에 174ms 를 썼다.
 fn side(
     repo_root: &Path,
     here: &std::collections::HashSet<&str>,
@@ -362,10 +367,11 @@ fn side(
     tree: Tree,
     root: PathBuf,
     issues: Vec<Issue>,
+    bases: &mut Bases,
 ) -> Side {
     let lonely = issues.iter().any(|i| !here.contains(i.id.as_str()));
     let base = match mine {
-        Some(m) if lonely => base_of(repo_root, m, &tree.head),
+        Some(m) if lonely => bases.entry(tree.head.clone()).or_insert_with(|| base_of(repo_root, m, &tree.head)).clone(),
         _ => BTreeMap::new(),
     };
     // 이름 후보는 훅과 같은 자로 낸다 — 디렉터리 이름까지 여기서 안다.
@@ -389,11 +395,12 @@ pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, BTreeSet<Stri
     let mut others = Vec::new();
     {
         let here: std::collections::HashSet<&str> = mine.iter().map(|i| i.id.as_str()).collect();
+        let mut bases = Bases::new();
         for (tree, root) in trees {
             let Ok(Some(other)) = crate::store::read_snapshot(&root.join(".moai").join("issues.jsonl")) else {
                 continue;
             };
-            others.push(side(&repo.root, &here, head.as_deref(), tree, root, other.issues));
+            others.push(side(&repo.root, &here, head.as_deref(), tree, root, other.issues, &mut bases));
         }
     }
     Some((overlay(mine, others).0, away))
@@ -875,6 +882,25 @@ pub fn is_linked(root: &Path) -> bool {
     root.ancestors().map(|d| d.join(".git")).find(|g| g.exists()).is_some_and(|g| g.is_file())
 }
 
+/// 딸린 워크트리의 트래커에 대응하는 **주 워크트리의 트래커 자리** — 주 워크트리이거나 git 밖이면
+/// `None`. git 을 띄우지 않는다.
+///
+/// 훅이 세션에 내미는 명령을 거기로 겨눈다(moai-gyqh). 트래커는 main 에서 쓴다 — 딸린 워크트리의
+/// `.moai` 에 맨 `moai` 로 쓰면 루트는 그대로고, 제 스냅샷에서는 풀린 것으로 보여 훅이 조용해진다.
+/// 공용 디렉터리가 `.git` 이 아니면(맨 저장소에 딸린 워크트리) 주 체크아웃이 없다 — `None`.
+pub fn main_root(root: &Path) -> Option<PathBuf> {
+    let (top, common) = git_dirs(root)?;
+    if top.join(".git").is_dir() || common.file_name()? != ".git" {
+        return None;
+    }
+    // 둘 다 풀고 견준다 — [`same_repo`]·[`on_disk`] 와 같은 자다. `main` 은 이미 푼 경로라, 푸지 않은
+    // 쪽의 조각을 붙이면 없는 자리가 선다.
+    let rel = canonical(root).strip_prefix(canonical(top)).ok()?.to_path_buf();
+    let main = common.parent()?;
+    // 빈 `rel` 을 붙이면 끝에 `/` 가 선다 — 내미는 줄이 제 자리를 두 꼴로 쓰게 된다.
+    Some(if rel.as_os_str().is_empty() { main.to_path_buf() } else { main.join(rel) })
+}
+
 /// [`workplaces`] 의 답을 바꿀 수 있는 파일과 **지금 잰** 표식 — git 을 띄우지 않는다.
 ///
 /// 프로젝트 층(`tui::layer`)이 줄마다 걸음마다 잰다(moai-al0x). 층은 자리 판정을 요약에 싣는데
@@ -982,6 +1008,10 @@ fn from_label(label: &str, out: &mut BTreeSet<String>) {
     out.insert(label.strip_prefix("worktree-").unwrap_or(label).to_string());
     out.insert(label.to_string());
 }
+
+/// 옆 HEAD → 그 HEAD 와 갈라진 자리의 스냅샷([`base_of`]). 한 번 겹치는 동안만 든다 — 그 사이에
+/// 제 HEAD 는 하나다.
+type Bases = std::collections::HashMap<String, BTreeMap<String, String>>;
 
 /// 제 HEAD 와 옆 HEAD 가 갈라진 자리의 스냅샷 — id → 그때의 `updated_at` ([`Side::base`]).
 ///
@@ -1240,6 +1270,31 @@ mod tests {
         assert!(!is_linked(dir.path()), "울타리를 딸린 워크트리로 읽었다");
         let git_top = crate::git::run(dir.path(), &["rev-parse", "--show-toplevel"]).map(|t| PathBuf::from(t.trim_end()));
         assert_eq!(git_top.ok(), Some(canonical(dir.path())), "git 이 울타리를 지나쳐 위의 저장소를 잡았다");
+    }
+
+    /// **딸린 워크트리의 트래커는 주 워크트리의 같은 자리로 겨눈다**(moai-gyqh) — 하위 디렉터리의
+    /// 트래커도 그 자리째. 주 워크트리와 git 밖은 겨눌 곳이 없다.
+    #[test]
+    fn a_linked_tracker_points_at_the_main_one() {
+        let scratch = crate::scratch::Scratch::fenced("main-root");
+        let base = canonical(scratch.path());
+        let main = base.join("main");
+        std::fs::create_dir_all(main.join("sub")).unwrap();
+        let run = |dir: &Path, args: &[&str]| {
+            let out = crate::git::isolated(dir).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../feat", "-b", "feat/x"]);
+        let feat = base.join("feat");
+        std::fs::create_dir_all(feat.join("sub")).unwrap();
+
+        assert_eq!(main_root(&feat), Some(main.clone()));
+        assert_eq!(main_root(&feat.join("sub")), Some(main.join("sub")), "하위 트래커의 자리를 잃었다");
+        assert_eq!(main_root(&main), None, "주 워크트리를 딸린 것으로 읽었다");
+        assert_eq!(main_root(&main.join("sub")), None);
+        assert_eq!(main_root(&base), None, "git 밖에서 지어냈다");
     }
 
     /// **자리 판정을 바꾸는 것은 층의 표식도 바꾼다**(moai-al0x) — 워크트리를 띄우거나, 가지를

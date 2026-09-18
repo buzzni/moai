@@ -69,6 +69,17 @@ pub fn run(_ctx: &Ctx, event: Event) -> R<Vec<String>> {
     }
     let input: Input = serde_json::from_str(&raw).unwrap_or_default();
 
+    // **규칙 4 는 자리도 트래커도 묻기 전에 본다**(moai-zis7) — 사람의 tmux 서버는 트래커와 무관하다.
+    // 트래커를 찾은 뒤에만 보던 판은 스크래치패드로 `cd` 해 둔 세션(그 자리가 이미 지워졌어도)의
+    // `tmux kill-server` 를 그대로 보냈고, 막을 때마다 옆 워크트리를 겹쳐 다시 재는 값(`settle`)을
+    // 치렀다 — 스냅샷이 바뀌어도 답이 같은 판정이다(리뷰 moai-ju21.70g).
+    if event == Event::PreToolUse
+        && let crate::hook::Call::Shell(cmd) = crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input)
+        && let refusal @ Decision::Deny(_) = crate::hook::guard_tmux(cmd)
+    {
+        return Ok(answer(event, refusal).into_iter().collect());
+    }
+
     // **자리는 stdin 이 정한다.** 훅 프로세스가 어디서 도는지는 아무도
     // 약속하지 않았다 — 시험판이 제 cwd 로 상대 경로를 풀다가 저장소 안의
     // 파일을 저장소 밖으로 보아 규칙이 통째로 샜다.
@@ -156,6 +167,8 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 Call::Review => crate::hook::guard_review(issues, &repo.config, away),
                 Call::Other => Decision::Pass,
             });
+            // 답마다 **그 답을 낸 트래커의 main** 으로 겨눈다 — 합친 뒤에 겨누면 남의 줄을 제 main 으로 보낸다.
+            let decision = toward_main(decision, &repo, &load.issues);
             // 다른 트래커를 가리키는 토막은 **그 트래커가 본다**(moai-23ky). 판정을 잇는 차례는
             // `Decision::then` 이 정한다 — 막으면 남의 트래커는 묻지 않고, 남이 막으면 제 비춤을 버린다.
             let mut decision = decision;
@@ -171,9 +184,12 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                             }
                         };
                         let only = |k: usize| routes.get(k) == Some(&Route::There(n));
-                        settle(other, &load.issues, &away, &|issues, away| {
+                        let said = settle(other, &load.issues, &away, &|issues, away| {
                             crate::hook::guard_moai(issues, &other.config, away, cmd, &only)
-                        })
+                        });
+                        // 그 트래커가 딸린 워크트리면 그 main 으로 — main 에 선 세션이 `cd <워크트리> &&`
+                        // 로 친 줄도 워크트리의 스냅샷에 쓰면 병합에서 겨룬다(리뷰 moai-ju21.70g).
+                        toward_main(said, other, &load.issues)
                     });
                 }
             }
@@ -202,17 +218,22 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 .then(|| crate::worktree::fresh(&repo, load.issues.clone()))
                 .flatten()
                 .map(|(fresh, _)| fresh);
-            crate::hook::closing(
+            let held = crate::hook::closing(
                 &load.issues,
                 latest.as_deref().unwrap_or(&load.issues),
                 &repo.config,
                 &away,
                 warnings,
                 baseline(input, &repo),
-            )
+            );
+            toward_main(held, &repo, &load.issues)
         }),
     };
+    answer(event, decision)
+}
 
+/// 판정을 계약 JSON 한 줄로 옮긴다 — `Pass` 는 아무 말도 안 한다.
+fn answer(event: Event, decision: Decision) -> Option<String> {
     match decision {
         Decision::Pass => None,
         Decision::Context(context) => serde_json::to_string(&Out {
@@ -227,6 +248,27 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             serde_json::to_string(&Hold { decision: "block", reason }).ok()
         }
     }
+}
+
+/// **딸린 워크트리에서는 내미는 명령을 주 워크트리의 트래커로 겨눈다**(moai-gyqh). 트래커는 main
+/// 에서 쓴다 — 맨 `moai` 를 그대로 치면 워크트리의 스냅샷만 바뀌어, 루트는 집은 채로 남고 훅은 제
+/// 스냅샷을 보고 조용해진다. 거절문도 같다 — 시킨 대로 친 줄이 병합에서 스냅샷을 겨루게 한다.
+/// 말할 것이 있을 때만 자리를 잰다. `issues` 는 그 글을 낸 트래커의 줄이다.
+///
+/// **겨눌 곳이 그 줄을 알 때만 겨눈다**(리뷰 moai-ju21.70g). main 에 트래커가 없으면(이 가지에서 처음
+/// `init` 했다) 아무 줄도 안 겨누고, main 이 모르는 id(워크트리에서 맨 `moai` 로 세운 줄)를 든 줄은
+/// 그대로 둔다([`crate::hook::unsynced`]) — 겨누던 판은 시킨 대로 친 명령이 "못 찾았다"·"저장소가
+/// 아니다" 로 끝났다.
+fn toward_main(decision: Decision, repo: &Repo, issues: &[model::Issue]) -> Decision {
+    if decision == Decision::Pass {
+        return decision;
+    }
+    let Some(main) = crate::worktree::main_root(&repo.root) else { return decision };
+    let Ok(Some(there)) = crate::store::read_snapshot(&main.join(".moai").join("issues.jsonl")) else {
+        return decision;
+    };
+    let local = crate::hook::unsynced(issues, &there.issues);
+    decision.map_text(|why| crate::hook::toward(why, &main, &|w| local.contains(w)))
 }
 
 /// 판정하되, **막으면 옆 워크트리와 겹쳐 한 번 더 본다**(moai-w2iy).

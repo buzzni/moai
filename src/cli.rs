@@ -27,7 +27,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 지금 할 일은 아닌 것이 떠오르면:
 
-  moai idea add \"반짝 떠오른 것\"   담는다. 제목 하나면 된다 — 일로 세지 않는다
+  moai idea add '반짝 떠오른 것'   담는다. 제목 하나면 된다 — 일로 세지 않는다
   moai idea promote <id> --from -  때가 되면 에픽과 이슈로 펼친다
 
 이미 있는 일을 지금 안 할 때:
@@ -137,12 +137,12 @@ pub enum Cmd {
     // `Typed::Add`·`IdeaCmd::Add` 도 같은 까닭으로 같다.
     #[command(next_line_help = true, after_help = "\
 예시:
-  moai add \"파서가 BOM 에서 죽는다\" -t bug -p 1
-  moai add \"저장 계층\" --type epic
-  moai add \"부모에 딸린 일\" --parent moai-4aex
-  moai add \"본문은 stdin 에서\" -b -
-  moai add \"남에게\" -a \"철수 (chulsoo@example.com)\"    안 주면 만든 이가 담당
-  moai add \"임자 없이\" -a none
+  moai add '파서가 BOM 에서 죽는다' -t bug -p 1
+  moai add '저장 계층' --type epic
+  moai add '부모에 딸린 일' --parent moai-4aex
+  moai add '본문은 stdin 에서' -b -
+  moai add '남에게' -a \"철수 (chulsoo@example.com)\"    안 주면 만든 이가 담당
+  moai add '임자 없이' -a none
 
 한 번에 여럿 (`--from`):
 
@@ -254,8 +254,8 @@ NOTE
     #[command(subcommand, after_help = "  todo 보다 한 칸 낮은 자리다. **담는 비용이 0 에 가까워야 담는다** — 제목
   하나로 끝나고 우선순위도 에픽도 묻지 않는다.
 
-  moai idea add \"반짝 떠오른 것\"      담기
-  moai idea add \"긴 생각\" -b -        본문은 stdin 에서
+  moai idea add '반짝 떠오른 것'      담기
+  moai idea add '긴 생각' -b -        본문은 stdin 에서
   moai idea ls                        쌓인 것 보기 (`idea show` 와 같다)
 
   idea 는 일이 아니다 — `moai ready` 에도 보드의 셈에도 들지 않고, 에픽 없이
@@ -346,10 +346,18 @@ NOTE
 
   자리(cwd)와 세션 id 는 stdin 이 준 것을 쓴다. 환경변수에는 없다.
 
+  이벤트:
+    session-start       기준선을 적는다. 접힌 뒤면 집은 것을 싣는다
+    user-prompt-submit  사람이 시켰다. 보드를 세션당 한 번 싣는다
+    pre-tool-use        도구를 부르기 직전. 규칙이 여기서 선다
+    stop                턴이 끝난다. 상태가 실제와 맞는지 본다
+
   echo '{\"session_id\":\"x\",\"cwd\":\"/repo\"}' | moai hook user-prompt-submit")]
     Hook {
-        /// 어느 자리에서 불렸나
-        #[arg(value_name = "이벤트")]
+        // 값은 글로 적는다 — clap 이 붙이는 `[possible values: …]` 가 `-h` 에서 105칸이 됐다
+        // (moai-h0r2). 목록의 글은 `hook::Event` 의 doc 주석과 같다 — 시험이 둘을 견준다.
+        /// 어느 자리에서 불렸나 (아래 목록)
+        #[arg(value_name = "이벤트", hide_possible_values = true)]
         event: crate::hook::Event,
     },
 
