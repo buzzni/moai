@@ -962,10 +962,12 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     let [names_at, list_at] =
         Layout::vertical([Constraint::Length(head_h), Constraint::Min(0)]).areas(inner_at);
     if head_h == 1 {
-        // 셈 이름은 **셈이 설 수 있는 줄이 있을 때만** — 바구니(`at: None`)는 제 줄이 없어 셈을
-        // 안 내므로, 바구니뿐인 디렉터리에서 `n/n` 만 서면 그 밑에 아무것도 없다.
-        let dirs = rows.iter().any(|r| matches!(r, Row::Item(Entry::Dir { at: Some(_), .. })));
-        f.render_widget(Paragraph::new(names_line(common, cols, dirs, inner)), names_at);
+        // 셈 이름은 **셈을 실제로 그린 줄이 있을 때만** — 바구니(`at: None`)는 제 줄이 없어 셈을
+        // 안 내고, 일 없는 에픽(멤버가 다 묶음이거나 없다)도 셈을 안 낸다(`tally_of`). 묶음 줄이
+        // 있는지로 가르면 그런 디렉터리에서 `n/n` 만 서고 그 밑에 아무것도 없다(moai-shoa). 줄이
+        // 그린 셈은 이미 `tallies` 에 있다 — 다시 세지 않는다.
+        let tallied = tallies.iter().any(|t| !t.is_empty());
+        f.render_widget(Paragraph::new(names_line(common, cols, tallied, inner)), names_at);
     }
     app.list.fit(list_at.height as usize, rows.len());
     if let Some(at) = selected {
@@ -1243,7 +1245,7 @@ fn lead_extras(app: &App, at: usize, fields: super::view::Fields) -> usize {
 ///
 /// 커서 자리만큼 들여 쓴다(목록 위젯이 줄마다 그만큼 민다). 오른쪽 열은 줄과 같이 테두리 끝에
 /// 붙이고, `⎇ <가지>` 가 붙은 줄은 제목이 그만큼 밀리므로 `TITLE` 은 그 표시가 없는 줄에 맞춘다.
-fn names_line<'a>(fields: super::view::Fields, cols: Head, dirs: bool, budget: usize) -> Line<'a> {
+fn names_line<'a>(fields: super::view::Fields, cols: Head, tallied: bool, budget: usize) -> Line<'a> {
     use super::view::Field;
     let mut left = " ".repeat(crate::text::width(CURSOR));
     // **잴 줄이 없으면 이름도 안 적는다** — 바구니뿐인 디렉터리는 id·우선순위 열을 아예 안 내므로,
@@ -1272,9 +1274,9 @@ fn names_line<'a>(fields: super::view::Fields, cols: Head, dirs: bool, budget: u
     // 디렉터리(에픽 안)에서 늘 그랬다. 셈이 설 줄이 없으면 **자리만 지키고 이름은 안 적는다**:
     // 바구니뿐인 디렉터리에서 `n/n` 만 서면 그 밑에 아무것도 없다.
     let alone = right.is_empty();
-    if fields.shows(Field::Tally) && (dirs || !alone) {
+    if fields.shows(Field::Tally) && (tallied || !alone) {
         right.push_str("  ");
-        let name = if dirs { "n/n" } else { "" };
+        let name = if tallied { "n/n" } else { "" };
         if alone {
             right.push_str(name);
         } else {
@@ -1292,7 +1294,7 @@ fn names_line<'a>(fields: super::view::Fields, cols: Head, dirs: bool, budget: u
     // 묶음 줄은 제목 몫이 없어도 디렉터리 `/` 한 칸은 세운다(`row_line`) — 이름 줄도 그 칸을 비워야, 줄이
     // 최소한도 못 담아 넘치는 폭에서 둘이 같은 자리에서 잘린다. 안 비우면 줄의 셈은 `1/` 로 잘리는데
     // 이름만 `n/n` 으로 온전히 선다.
-    let slot = usize::from(dirs && !titled);
+    let slot = usize::from(tallied && !titled);
     let gap = budget.saturating_sub(crate::text::width(&left) + crate::text::width(&right)).max(slot);
     Line::from(Span::styled(format!("{left}{}{right}", " ".repeat(gap)), dim()))
 }
@@ -2706,6 +2708,27 @@ pub(super) mod tests {
             compared += 1;
         }
         assert!(compared > 0, "안 읽은 에픽 줄을 한 번도 견주지 못했다 — 훑기가 헛돈다");
+    }
+
+    /// **셈을 그린 줄이 없으면 `n/n` 도 안 선다**(moai-shoa). 일 없는 에픽은 묶음 줄이지만 셈을 안
+    /// 낸다(`tally_of`) — 묶음 줄이 있는지로 이름을 세우면 그 디렉터리에서 이름만 서고 그 밑에 값이
+    /// 없다. 같은 자리에 셈이 있는 에픽을 더하면 도로 선다.
+    #[test]
+    fn an_epic_without_work_raises_no_tally_name() {
+        let names_of = |is: Vec<Issue>| {
+            let mut a = as_opened(is);
+            let lines = render(&mut a, 120, 12);
+            let top = lines.iter().position(|l| l.starts_with('┏')).expect("목록 칸이 없다");
+            lines[top + 1].split('│').next().unwrap_or_default().to_string()
+        };
+        let empty = Issue::new("argos-0009".into(), "빈 에픽".into(), Kind::Epic, Status::new("todo"), "2026-09-01T00:00:00Z");
+        let loose = Issue::new("argos-0008".into(), "느슨한 일".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        let names = names_of(vec![empty.clone(), loose.clone()]);
+        assert!(names.contains("TITLE"), "열 이름 줄이 없다 {names:?}");
+        assert!(!names.contains("n/n"), "셈을 그린 줄이 없는데 n/n 이 섰다 {names:?}");
+        let mut is = issues();
+        is.extend([empty, loose]);
+        assert!(names_of(is).contains("n/n"), "셈이 선 에픽이 있는데 n/n 이 안 섰다");
     }
 
     /// **열 이름 줄을 켠 채로 폭을 훑는다**(moai-ehmj). 그림 시험의 바탕(`every`)은 이 줄을 꺼
