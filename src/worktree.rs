@@ -316,6 +316,15 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                         // **디렉터리가 사라진 워크트리는 이름도 안 든다** — 훅의 `away` 가 읽는
                         // `on_disk` 가 그렇게 거른다. git 은 잠근 워크트리를 경로가 사라져도 목록에
                         // 남겨, 여기서 들면 훅은 제 초점으로 세는 줄에 화면만 `⎇` 를 단다.
+                        //
+                        // 그래서 **그 디렉터리가 사라지는 것도 다시 읽을 까닭이다**(moai-uyu9). 스냅샷
+                        // 경로는 없음 → 없음이라 안 바뀌고, 워크트리 제거 명령 없이 `rm -rf` 로 치우면
+                        // git 파일도 안 바뀐다 — 딸린 워크트리의 `.git`(`gitdir:` 한 줄)을 **재고 나서**
+                        // 있는지 본다. 주 워크트리의 `.git` 은 디렉터리라 커밋마다 바뀌니 안 넣는다.
+                        let dot_git = tree.path.join(".git");
+                        if !dot_git.is_dir() {
+                            watched.push((dot_git.clone(), crate::store::stamp(&dot_git)));
+                        }
                         if tree.path.exists() {
                             named.push((tree.label.clone(), names([&tree])));
                         }
@@ -1255,6 +1264,29 @@ mod tests {
         assert!(!away(&main).contains("t-3"), "훅의 자가 사라진 워크트리를 센다 — 이 시험이 견줄 것이 없다");
         assert_eq!(got.origin.working("t-3"), None, "디렉터리가 사라진 워크트리의 이름을 훅과 달리 들었다");
         assert!(!got.origin.named_only().contains(&"worktree-t-3"), "{:?}", got.origin.named_only());
+
+        // **이름만 든 워크트리를 `rm -rf` 로 치우면 표식이 움직인다**(moai-uyu9) — 안 움직이면
+        // 탐색기는 다른 까닭으로 다시 읽을 때까지 사라진 곳의 `⎇` 를 든다.
+        let moved = |seen: &[(PathBuf, crate::store::Stamp)]| seen.iter().any(|(p, s)| crate::store::stamp(p) != *s);
+        assert!(!moved(&got.watched), "아무것도 안 했는데 표식이 움직였다");
+        std::fs::remove_dir_all(base.join("t-1")).unwrap();
+        assert!(moved(&got.watched), "스냅샷 없는 워크트리를 치운 것을 못 알아챈다");
+        let got = gather(&repo, true).unwrap();
+        assert_eq!(got.origin.working("t-1"), None, "치운 워크트리의 이름을 아직 든다");
+
+        // 옆에서 본 주 워크트리의 `.git` 은 디렉터리다 — 커밋마다 바뀌니 지켜보지 않는다. 주
+        // 워크트리의 스냅샷을 못 읽게 해 이름만 드는 길로 보낸다.
+        std::fs::remove_dir_all(base.join("t-2/.moai")).unwrap();
+        std::fs::create_dir_all(base.join("t-2/.moai")).unwrap();
+        std::fs::write(base.join("t-2/.moai/issues.jsonl"), "").unwrap();
+        std::fs::write(base.join("t-2/.moai/config.toml"), "prefix = \"t\"\n").unwrap();
+        std::fs::remove_file(main.join(".moai/issues.jsonl")).unwrap();
+        std::fs::create_dir_all(main.join(".moai/issues.jsonl")).unwrap();
+        let crate::store::Opened::Repo(side) = Repo::open(&base.join("t-2")).unwrap() else { panic!("옆이 안 열렸다") };
+        let got = gather(&side, true).unwrap();
+        assert!(got.origin.named_only().iter().any(|l| !l.starts_with("worktree-")), "주 워크트리가 이름만 드는 길로 안 갔다 — {:?}", got.origin.named_only());
+        let dirs: Vec<_> = got.watched.iter().filter(|(p, _)| p.ends_with(".git") && p.is_dir()).collect();
+        assert!(dirs.is_empty(), "주 워크트리의 .git 디렉터리를 지켜본다 — {dirs:#?}");
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.
