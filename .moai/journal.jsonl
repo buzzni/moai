@@ -4490,3 +4490,9 @@
 {"ts":"2026-09-18T13:24:38Z","id":"moai-5ipy.7zn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: 명령 블록이 ready 줄을 잃던 것(fix 커밋). 넘김: skill.rs 의 bless --release 줄은 moai-waum, build ~30초 표기는 moai-8sgi"}
 {"ts":"2026-09-18T13:24:38Z","id":"moai-ecut","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-18T13:25:03Z","id":"moai-5ipy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 끝났다. 남은 것은 idea 둘 — moai-waum(skill.rs bless 줄에서 --release 빼기, dw63-hook 이 파일을 놓은 뒤), moai-8sgi(release 바이너리 빌드 시간 다시 재기)"}
+{"ts":"2026-09-18T13:25:20Z","id":"moai-z4el","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"skill.rs 의 bless 안내가 cargo test --release 를 댄다"}
+{"ts":"2026-09-18T13:25:20Z","id":"moai-z4el","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-waum 에서 펼쳤다 — skill.rs 의 bless 안내가 cargo test --release 를 댄다"}
+{"ts":"2026-09-18T13:25:20Z","id":"moai-waum","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ju21 의 멤버 moai-z4el 로 펼쳤다"}
+{"ts":"2026-09-18T13:25:21Z","id":"moai-jubf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 의 cargo build --release (~30초) 가 LTO 에서 맞는지 잰다"}
+{"ts":"2026-09-18T13:25:21Z","id":"moai-jubf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-8sgi 에서 펼쳤다 — CLAUDE.md 의 cargo build --release (~30초) 가 LTO 에서 맞는지 잰다"}
+{"ts":"2026-09-18T13:25:21Z","id":"moai-8sgi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-jl72 의 멤버 moai-jubf 로 펼쳤다"}
