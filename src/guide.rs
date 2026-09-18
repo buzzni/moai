@@ -1126,14 +1126,19 @@ PY
   보다가 화면이 사라진 까닭을 감독 창에서 찾는다
 - **시험으로 살아 있는 일꾼의 창에 치지 않는다.** 시험할 판은 **떼어 낸 tmux 서버**에 띄우고,
   그 서버에 닿는 호출 **모두** — `new-session`·`send-keys`·`capture-pane`·`display-message`·
-  `kill-session` — 에 같은 이름을 준다. 스크립트를 그 판에 돌릴 때는 `-L` 을 끼워 넣는
-  `tmux` 감싸개를 `PATH` 앞에 둔다
+  `list-clients`·`kill-session` — 에 같은 이름을 준다. 이름에는 에픽 id 를 담아 옆 일꾼·리뷰
+  서브에이전트의 시험 서버와 안 겹치게 한다. 스크립트를 그 판에 돌릴 때는 `-L` 을 끼워 넣는
+  `tmux` 감싸개를 `PATH` 앞에 둔다 — 감싸개는 진짜 `tmux` 를 **절대 경로로** 불러야 제 자신을
+  다시 부르지 않는다. 스크립트 자체는 `env -u TMUX` 없이 부른다 — `$TMUX` 가 없으면 `tmux 밖이다`
+  로 건너뛴다
 
       env -u TMUX tmux -L <고유 이름> new-session -d -s <판> …
       env -u TMUX tmux -L <고유 이름> capture-pane -p -t <판>
+      mkdir -p <스크래치패드>/bin; printf '#!/bin/sh\nexec env -u TMUX %s -L <고유 이름> "$@"\n' "$(command -v tmux)" > <스크래치패드>/bin/tmux
+      chmod +x <스크래치패드>/bin/tmux; PATH=<스크래치패드>/bin:$PATH python3 - …      스크립트를 그 판에
       env -u TMUX tmux -L <고유 이름> kill-server          치울 때 — 그 이름의 서버만 죽는다
 
-  **`-L`/`-S` 없는 `tmux kill-server` 는 쓰지 않는다.** tmux 안에서 맨 `tmux` 는 `$TMUX` 를 따라
+  **`-L`/`-S` 없는 `tmux kill-server`·`kill-session` 은 쓰지 않는다.** tmux 안에서 맨 `tmux` 는 `$TMUX` 를 따라
   사람의 기본 서버로 가, 그 기계의 판과 세션이 모두 한꺼번에 죽는다. `TMUX_TMPDIR` 로는 안
   갇힌다 — `$TMUX` 가 이긴다. 맨 `tmux new-session -d` 도 기본 서버에 판을 세우는 것이라 격리가
   아니다 — 치우려면 기본 서버에 `kill-*` 를 쳐야 하고, 그 길로 서버 전체가 죽은 적이 있다
@@ -1206,11 +1211,14 @@ fn brief() -> String {
        **리뷰 서브에이전트에게도** 같은 말을 준다 — 넘긴 것을 담다가 그 줄을 워크트리에
        적은 적이 있다. 이미 적었으면 `git checkout -- .moai` 로 되돌리고, 그 줄이 이미
        커밋됐으면 그 커밋까지 되돌린 뒤 루트에서 다시 담는다
-    4-2. **tmux 를 시험하면 떼어 낸 서버에서만 한다** — 모든 호출에 `env -u TMUX tmux -L <고유 이름>`
-       (또는 `tmux -S <스크래치패드 안의 소켓>`). `-L`/`-S` 없는 `kill-server` 는 쓰지 않는다: tmux
-       안에서 맨 `tmux` 는 사람의 기본 서버로 가 모든 세션을 죽이고, `TMUX_TMPDIR` 로는 안 갇힌다.
-       남이 띄운 판에는 키를 보내지 않는다. **리뷰 서브에이전트에게도** 이 말을 준다 — 서버 전체를
-       죽인 것이 리뷰 서브에이전트였다
+    4-2. **tmux 를 시험하면 떼어 낸 서버에서만 한다** — 모든 호출에 `env -u TMUX tmux -L <고유 이름>`.
+       이름에는 에픽 id 를 담아 옆 일꾼·리뷰 서브에이전트의 시험 서버와 안 겹치게 한다. `-S <소켓>`
+       도 되지만 소켓 경로는 유닉스 한도(100바이트 남짓)를 넘으면 안 서, 스크래치패드 안은 대개
+       너무 길다. `-L`/`-S` 없는 `kill-server`·`kill-session` 은 쓰지 않는다: tmux 안에서 맨 `tmux` 는
+       사람의 기본 서버로 가 모든 세션을 죽이고, `TMUX_TMPDIR` 로는 안 갇힌다. 속에서 `tmux` 를
+       부르는 스크립트는 손으로 `-L` 을 못 주니, 진짜 `tmux` 를 절대 경로로 부르며 `-L` 을 끼우는
+       감싸개를 `PATH` 앞에 두고 돌린다. 남이 띄운 판에는 키를 보내지 않는다.
+       **리뷰 서브에이전트에게도** 이 말을 준다 — 서버 전체를 죽인 것이 리뷰 서브에이전트였다
     5. 리뷰 이슈를 세워(규칙 3) `/code-review <등급> --fix`. 등급은 개발한 난이도로
        {levels} 에서 고른다 — 머리의 모델을 고른 그 잣대다.
 {rubric}
@@ -1783,19 +1791,40 @@ sys.exit(1 if bad else 0)
     fn tmux_tests_are_taught_on_a_separate_server() {
         let (supervise, brief) = (supervise(), brief());
         // 감독 쪽은 **브리프를 뺀 글**로 잰다 — 감독 스킬은 브리프를 품어, 통째로 재면 브리프의
-        // 같은 줄이 감독 쪽에서 빠진 자리를 메운다.
+        // 같은 줄이 감독 쪽에서 빠진 자리를 메운다. 브리프를 못 찾으면 `replace` 가 말없이 통째로
+        // 남기니 먼저 본다.
+        assert!(supervise.contains(&brief), "감독이 싣는 글이 brief 가 아니다");
         let own = supervise.replace(&brief, "");
         for (name, text) in [("감독 스킬", own.as_str()), ("일꾼 글", brief.as_str())] {
             assert!(text.contains("env -u TMUX tmux -L"), "{name}: 떼어 낸 서버로 시험하라는 말이 없다");
             assert!(text.contains("`-L`/`-S` 없는"), "{name}: 맨 kill-server 를 막는 말이 없다");
             assert!(text.contains("TMUX_TMPDIR"), "{name}: TMUX_TMPDIR 로 안 갇힌다는 말이 없다");
+            // 속에서 `tmux` 를 부르는 스크립트(5-1)에는 손으로 `-L` 을 못 준다 — 그것을 시험하는
+            // 일꾼에게도 가둘 길이 있어야 하고, 그 감싸개가 PATH 로 제 자신을 부르면 끝나지 않는다.
+            assert!(text.contains("감싸개") && text.contains("절대 경로"), "{name}: 스크립트를 떼어 낸 서버에 돌릴 길이 없다");
         }
         assert!(brief.contains("**리뷰 서브에이전트에게도** 이 말을 준다"), "리뷰 서브에이전트가 tmux 규칙을 못 받는다");
-        // 시험용 판을 세우거나 치우는 줄은 모두 떼어 낸 서버에 선다 — 셸 명령으로 적힌 줄 중
-        // `new-session`·`kill-server` 를 부르는 것은 `-L`/`-S` 를 준 줄이어야 한다.
-        for line in supervise.lines().map(str::trim).filter(|l| l.starts_with("env ") || l.starts_with("tmux ")) {
-            if line.contains("new-session") || line.contains("kill-server") {
-                assert!(line.contains(" -L ") || line.contains(" -S "), "기본 서버를 쓰는 tmux 를 가르친다 — {line}");
+        // 시험용 판에 닿는 명령은 모두 떼어 낸 서버에 선다 — 셸 줄의 낱말 `tmux` 와 `` `tmux …` ``
+        // 로 적은 글을 함께 본다. 줄 머리로 가르지 않는다: 서버를 죽인 한 줄이
+        // `TMUX_TMPDIR=… tmux kill-server` 였다. 맨 명령을 **하지 말라고** 적은 줄(`없는`·`맨 `)만
+        // 뺀다. 본 기능의 `tmux("send-keys", …)` 는 낱말이 `tmux` 가 아니라 안 걸린다 — 실제 일꾼
+        // 판을 비우는 그쪽은 기본 서버가 맞다.
+        const SERVER: [&str; 7] =
+            ["new-session", "kill-server", "kill-session", "send-keys", "capture-pane", "display-message", "list-clients"];
+        let isolated = |cmd: &str| {
+            let words: Vec<&str> = cmd.split_whitespace().collect();
+            words.iter().enumerate().filter(|(_, w)| **w == "tmux").all(|(t, _)| {
+                // `-L`/`-S` 는 하위 명령 **앞**에 서야 서버를 고른다 — 뒤에 서면 그 명령의 깃발이다.
+                words[t..].iter().position(|w| SERVER.contains(w)).is_none_or(|sub| {
+                    words[t..t + sub].iter().any(|w| w.starts_with("-L") || w.starts_with("-S"))
+                })
+            })
+        };
+        for line in supervise.lines() {
+            let spans = line.split('`').skip(1).step_by(2);
+            for cmd in std::iter::once(line).chain(spans) {
+                let warned = line.contains("없는") || line.contains("맨 ");
+                assert!(isolated(cmd) || warned, "기본 서버를 쓰는 tmux 를 가르친다 — {}", line.trim());
             }
         }
         assert!(!supervise.contains("판(`tmux new-session -d`)"), "맨 new-session 을 격리라고 가르친다");
