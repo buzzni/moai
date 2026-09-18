@@ -130,7 +130,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         if extra.is_empty() {
             return super::json_line(&st);
         }
-        return super::json_with(&st, &extra);
+        return super::json_with(&st, &extra, &["unreadable_worktrees", "branches"]);
     }
     Ok(view::status(
         &st,

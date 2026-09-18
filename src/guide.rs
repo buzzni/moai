@@ -297,6 +297,13 @@ const PROJECTS: &str = r#"    moai project add <dir>                 내 설정�
 층에서 `SPC p a` 로 디렉터리를 골라 등록하고(모노레포 하위도 따로), `SPC p d` 로 목록에서 뺀다.
 등록한 것이 없으면 밖에서 띄워도 빈 층이 서서 `SPC p a` 를 댄다."#;
 
+/// 화면의 말(moai-acy5). AGENTS.md 에만 적혀 있어 스킬만 읽는 세션은 `MOAI_LANG` 을 몰랐다 —
+/// 조각으로 빼 참고 문서도 같이 읽는다.
+const LANGUAGE: &str = r#"지금 기본은 한국어다 — 옮긴 글이 아직 적어, 옮김이 화면을 덮으면 기본이 영어로 바뀐다.
+다른 말로 보려면 `MOAI_LANG=en moai status` 처럼 주거나, 사용자 설정에 `[i18n]` 의
+`lang = "en"` 을 적는다 (환경변수가 설정을 이긴다). 되는 말은 en·ko·zh·ja·es 고,
+그 말에 아직 없는 글은 영어로 나온다. 번역을 보태는 길은 moai 저장소의 `i18n/README.md` 에 있다."#;
+
 /// 커밋과 이슈를 잇는 고리(moai-wqm7). **새 저장소는 이 저장소의 CLAUDE.md 규약을 모른다** —
 /// 여기 안 적으면 커밋 칸(`show <id>`·탐색기 상세)이 늘 빈다.
 ///
@@ -318,6 +325,19 @@ id** 로 그 이슈의 커밋을 그때그때 찾아 낸다. 해시를 노트에
 - `moai show <id> --json` 의 `commits` 는 **늘 있다.** 빈 배열은 "그 id 를 적은 커밋이 없다" 는
   뜻이고, git 을 못 읽었을 때만 `commits_error` 가 그 까닭을 한 줄로 댄다 — 기계가 "아직 아무도
   안 고쳤다" 와 "여기서는 못 물어봤다" 를 가르라고 둔 것이다"#;
+
+/// 일한 AI 한 줄(moai-8f2g). **꼴은 `model::parse_work` 가 읽는 그것이다** — 이 글과 9-1 의
+/// 노트 줄이 다른 꼴을 가르치면 감독 아래의 일이 모두 회사·토큰이 빈 줄을 적어 통계가 빈다.
+/// 저장하지 않는다: 적는 것은 `note` 이고 `work` 는 그 글을 읽은 값이다.
+const WORK: &str = r#"닫기 전에 그 일을 실제로 한 AI 를 이슈에 한 줄 남긴다. 필드가 아니라 노트다.
+
+    moai note <id> "model: <회사>/<모델> tokens=<수> (<등급> — <까닭>)"
+
+- 회사는 `anthropic`·`openai`·`google`, 모델은 실제 이름(`opus-5`·`sonnet-5`), 등급은 리뷰 등급과 같은 낱말
+- **토큰을 모르면 `tokens=` 를 뺀다.** 0 도 어림값도 적지 않는다 — 빈 칸과 0 과 거짓 값은 셋 다 다르다
+- **id 하나에 하나.** 여러 id 에 같은 글을 적으면 토큰이 id 수만큼 불어난다
+- `moai show <id> --json` 의 `work` 가 그 줄들을 읽어 낸다. **늘 서는 배열**이고, 꼴에 안 맞는 줄은
+  값이 안 될 뿐 노트로 남는다. 줄 머리에서 시작한 줄만 센다 — 들여 쓴 줄과 울타리 안의 줄은 예로 읽는다"#;
 
 const PEOPLE: &str = r#"**담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
 `-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`
@@ -421,10 +441,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 
 ### 화면의 말
 
-지금 기본은 한국어다 — 옮긴 글이 아직 적어, 옮김이 화면을 덮으면 기본이 영어로 바뀐다.
-다른 말로 보려면 `MOAI_LANG=en moai status` 처럼 주거나, 사용자 설정에 `[i18n]` 의
-`lang = "en"` 을 적는다 (환경변수가 설정을 이긴다). 되는 말은 en·ko·zh·ja·es 고,
-그 말에 아직 없는 글은 영어로 나온다. 번역을 보태는 길은 moai 저장소의 `i18n/README.md` 에 있다.
+{LANGUAGE}
 
 ### 기능 요청을 받으면
 
@@ -443,6 +460,10 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 도구가 자라 이 블록이 낡으면 `moai init` 을 다시 부른다. 이슈와 저널은
 건드리지 않고 이 블록만 다시 쓴다. 낡았는지만 보려면 `moai init --check` —
 아무것도 안 쓰고 `current`·`stale`·`missing` 으로 답한다.
+
+### 일한 AI 를 남긴다
+
+{WORK}
 
 ### 훅이 실제로 보는 것 셋
 
@@ -621,6 +642,10 @@ PLAN
 
 {PROJECTS}
 
+## 화면의 말
+
+{LANGUAGE}
+
 ## 담아 둔 생각을 펼치기
 
 {IDEAS}
@@ -640,6 +665,10 @@ PLAN
 ## 커밋에 id 를 적는다
 
 {COMMITS}
+
+## 일한 AI 를 남긴다
+
+{WORK}
 
 ## 리뷰가 낸 글을 찾는 법
 
@@ -895,6 +924,7 @@ PY
 그대로 실려, 일꾼이 닫을 때 남기는 노트가 무엇이 일했는지 대신 `<모델>` 이라고 적는다.
 `<까닭>` 은 백틱·`$` 없이 적는다 — 9-1 의 큰따옴표 안에 들어가 셸이 그것을 명령으로 푼다.
 `<등급>` 는 채우지 않는다 — 7 에서 개발해 본 일꾼이 고르는 리뷰 등급의 자리다.
+`<회사>`·`<수>` 도 채우지 않는다 — 9-1 에서 일꾼이 제 창에서 읽어 채우는 회사와 토큰이다.
 
 {brief}
 
@@ -1333,8 +1363,13 @@ fn brief() -> String {
        이 창에서 **실제로 돈 모델**이다. 아래 줄은 감독이 제안으로 채워 보냈으니, 올렸거나 창이
        처음부터 다른 모델이었으면 모델·난이도를 실제 것으로 고치고 까닭에 그 까닭을 적는다 —
        다음 사람이 "이만한 일에 무엇이 붙었나" 를 거기서 읽는다. 필드가 아니라 노트다:
-       저널은 상태 계산에 안 읽히고 파생값은 저장하지 않는다
-         moai note <멤버> "model: <모델> (<난이도> — <까닭>)"
+       저널은 상태 계산에 안 읽히고 파생값은 저장하지 않는다. `<회사>`·`<수>` 는 감독이 안 채운다 —
+       회사는 `anthropic`·`openai`·`google`, 모델은 `/model` 의 별명이 아니라 실제 이름(`opus-5`) —
+       감독이 채운 `<모델>` 은 별명(`opus`)이니 모델을 안 바꿨어도 실제 이름으로 고친다.
+       `<수>` 는 이 창이 쓴 토큰이다. **토큰을 모르면 `tokens=<수>` 를 통째로 뺀다** — 0 도 어림값도
+       적지 않는다. **id 하나에 한 줄** — 여러 id 에 같은 글을 적으면 토큰이 id 수만큼 불어난다.
+       창의 토큰은 멤버마다 가를 수 없으니 **한 멤버에만** 적고, 나머지 멤버의 줄은 `tokens=<수>` 를 뺀다
+         moai note <멤버> "model: <회사>/<모델> tokens=<수> (<난이도> — <까닭>)"
     10. 그 뒤에 닫는다. **`moai mv <멤버> done` 은 그 병합이 실제로 끝난 뒤에만 친다** —
        병합 전에 옮겼다가 되돌린 일꾼이 있었다. 7-1 에서 첫 칸에 남긴 멤버는 닫지 않는다 — 그
        멤버가 에픽을 열어 둔다. 워크트리가 남아 있으면 훅이 이 일을 옆
@@ -1384,7 +1419,7 @@ mod tests {
         assert!(CLOSING.contains(&handoff("<id>")), "안내의 핸드오프 줄이 훅과 갈라졌다");
         let rules = rules();
         assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
-        for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE, PROJECTS, COMMITS] {
+        for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE, PROJECTS, LANGUAGE, COMMITS] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(reference.contains(piece), "참고 문서에 없다 — {head}");
@@ -1997,6 +2032,37 @@ sys.exit(1 if bad else 0)
         // 뒤라 맨 `moai` 가 맞다 — 4-1 의 `-C <루트>` 는 워크트리 안에서만 드는 규칙이다.
         let line = brief[..note].lines().last().unwrap_or_default();
         assert!(line.trim().starts_with("moai note "), "노트가 아닌 것으로 남긴다 — {line}");
+    }
+
+    /// **가르치는 꼴이 `model::parse_work` 가 읽는 꼴이다**(moai-jo8d). 9-1 이 회사·토큰 없는 옛
+    /// 꼴을 가르치던 동안 감독 아래의 일은 모두 빈 칸을 적어 `work` 통계가 늘 비었다 — 글과
+    /// 파서가 따로 서면 다시 갈린다. 자리를 채워 파서에 넣어, 회사·토큰까지 값이 되는지 본다.
+    /// 토큰을 모를 때 `tokens=<수>` 를 통째로 빼도 읽혀야 한다 — 0 을 적게 두면 통계가 "공짜" 로 읽는다.
+    #[test]
+    fn the_taught_model_line_is_the_one_the_parser_reads() {
+        let texts = [("브리프 9-1", brief()), ("AGENTS 블록", agents()), ("스킬 참고 문서", reference())];
+        for (whose, text) in &texts {
+            let line = text
+                .lines()
+                .map(str::trim)
+                .find(|l| l.starts_with("moai note ") && l.contains("\"model: "))
+                .unwrap_or_else(|| panic!("{whose} 에 일한 AI 를 남기는 줄이 없다"));
+            let said = &line[line.find("\"model: ").unwrap() + 1..line.rfind('"').unwrap()];
+            let filled = said
+                .replace("<회사>", "anthropic")
+                .replace("<모델>", "opus-5")
+                .replace("<수>", "182000")
+                .replace("<난이도>", "high")
+                .replace("<등급>", "high")
+                .replace("<까닭>", "쓰기 경로");
+            let w = crate::model::parse_work(&filled).unwrap_or_else(|| panic!("{whose} 의 꼴을 파서가 못 읽는다 — {said}"));
+            assert_eq!(w.provider.as_deref(), Some("anthropic"), "{whose} 가 회사를 안 가르친다 — {said}");
+            assert_eq!(w.tokens, Some(182000), "{whose} 가 토큰을 안 가르친다 — {said}");
+            assert_eq!((w.grade.as_deref(), w.why.as_deref()), (Some("high"), Some("쓰기 경로")), "{whose} — {said}");
+            let unknown = crate::model::parse_work(&filled.replace(" tokens=182000", ""));
+            assert_eq!(unknown.map(|w| w.tokens), Some(None), "{whose} 의 꼴이 토큰을 빼면 안 읽힌다 — {said}");
+            assert!(text.contains("토큰을 모르면"), "{whose} 에 토큰을 모를 때 빼라는 말이 없다");
+        }
     }
 
     /// **감독 스킬은 모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 적으면 남의 저장소에서는

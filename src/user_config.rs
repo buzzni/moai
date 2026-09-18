@@ -243,6 +243,13 @@ fn lock_beside(path: &Path) -> PathBuf {
 pub struct Doc {
     doc: DocumentMut,
     bom: bool,
+    /// 원문이 줄바꿈 없이 끝났나. 라이브러리는 렌더할 때마다 키·값 줄 끝에 줄바꿈을 세워
+    /// 내는데(고친 것이 없어도 `a = 1` 이 `a = 1\n` 로 나온다), 그러면 손으로 적은 파일이
+    /// 더했다 빼는 것만으로 한 바이트 자란다(moai-r9qa). 쓰기는 무엇이든(등록·색·보기·읽음)
+    /// 이 렌더를 지나므로 여기서 한 번 뗀다. 끝 모양은 사람이 정한 것이라 그대로 돌려준다 —
+    /// BOM 을 들고 가는 것과 같은 까닭이다. 줄 끝 `\r\n` 은 라이브러리가 `\n` 으로 접어 이것으로
+    /// 못 지킨다.
+    no_eol: bool,
     dirty: bool,
 }
 
@@ -268,7 +275,8 @@ impl Doc {
                 ));
             }
         }
-        Ok(Doc { doc, bom, dirty: false })
+        let no_eol = !body.is_empty() && !body.ends_with('\n');
+        Ok(Doc { doc, bom, no_eol, dirty: false })
     }
 
     /// 고친 것이 있나 — [`update`] 가 쓸지 가르는 깃발 그대로다.
@@ -277,7 +285,10 @@ impl Doc {
     }
 
     pub fn render(&self) -> String {
-        let body = self.doc.to_string();
+        let mut body = self.doc.to_string();
+        if self.no_eol && body.ends_with('\n') {
+            body.pop();
+        }
         if self.bom { format!("\u{feff}{body}") } else { body }
     }
 
@@ -323,32 +334,39 @@ impl Doc {
     /// 손으로 겹쳐 적은 줄은 **모두** 바꾼다 — 읽기는 앞의 것만 보지만, 앞의 것을 지웠을 때
     /// 뒤의 것이 옛 색으로 되살아나면 안 된다([`Doc::remove`] 가 모두 빼는 것과 같다).
     /// 틀린 철자 `colour` 는 건드리지 않는다 — 무엇을 뜻했는지 모르는 남의 키다.
-    pub fn set_hue(&mut self, any_of: &[PathBuf], hue: Option<Hue>) -> usize {
+    ///
+    /// **맞은 줄의 `color` 가 표 모양이면(`color.x = 1`·`[project.color]`·`{ … }`·배열) 하나도
+    /// 안 바꾸고 거절한다**(moai-r9qa). 색이든 `auto` 든 그 자리를 덮으면 무엇을 적어 둔 것인지
+    /// 모르는 채 사라진다. 겹친 줄 중 하나만 그래도 멈추는 까닭은, 앞의 것만 바꾸면 읽기가 보는
+    /// 색과 남은 줄이 어긋나서다. 낱값(`color = 3`)은 읽기가 틀린 색이라 대는 값이라 고쳐 쓴다.
+    /// 엄함은 지금 쓰는 줄에 대한 것이라 맞지 않은 줄은 안 본다 — [`Doc::mark_read`] 와 같은 자다.
+    /// 거절문은 어느 줄인지 경로로 댄다 — 겹쳐 적은 줄 중 뒤의 것일 수 있어 준 철자만으로는 못 찾는다.
+    ///
+    /// **값만 바꾼다**([`put_value`]) — `color` 위의 주석·값 뒤의 주석·키 모양은 그대로다.
+    /// `Table::insert` 로 갈아 끼우면 키를 새로 지어 그 위의 주석이 말없이 사라진다.
+    pub fn set_hue(&mut self, any_of: &[PathBuf], hue: Option<Hue>) -> R<usize> {
         let Some(aot) = self.doc.get_mut(PROJECT).and_then(Item::as_array_of_tables_mut) else {
-            return 0;
+            return Ok(0);
         };
-        let mut hit = 0;
-        for t in aot.iter_mut().filter(|t| entry_path(t).is_ok_and(|p| any_of.contains(&p))) {
-            hit += 1;
-            match hue {
-                Some(h) if t.get(COLOR).and_then(Item::as_str) == Some(h.name()) => {}
-                Some(h) => {
-                    // 옛 값 뒤의 주석(`color = "blue"  # 회사 것`)은 들고 간다 — 값만 바꾼 것이다.
-                    let mut v = toml_edit::Value::from(h.name());
-                    if let Some(old) = t.get(COLOR).and_then(Item::as_value) {
-                        *v.decor_mut() = old.decor().clone();
-                    }
-                    t.insert(COLOR, Item::Value(v));
-                    self.dirty = true;
-                }
-                None => {
-                    if t.remove(COLOR).is_some() {
-                        self.dirty = true;
-                    }
-                }
-            }
+        let mine = |t: &Table| entry_path(t).is_ok_and(|p| any_of.contains(&p));
+        // 낱값(문자열·수·참거짓·때)만 고쳐 쓴다 — 표·점 키·인라인 표·배열은 모양째 사람의 것이다.
+        let scalar = |c: &Item| matches!(c, Item::Value(v) if !v.is_inline_table() && !v.is_array());
+        let odd = aot.iter().filter(|t| mine(t)).find_map(|t| {
+            let c = t.get(COLOR).filter(|c| !scalar(c))?;
+            Some((entry_path(t).ok()?, c.type_name()))
+        });
+        if let Some((path, shape)) = odd {
+            return Err(Fail::new(format!(
+                "{} 의 `{COLOR}` 가 색 낱말이 아니라({shape}) 덮지 않는다 — 손으로 고친다",
+                path.display()
+            )));
         }
-        hit
+        let mut hit = 0;
+        for t in aot.iter_mut().filter(|t| mine(t)) {
+            hit += 1;
+            self.dirty |= put_value(t, COLOR, hue.map(|h| toml_edit::Value::from(h.name())));
+        }
+        Ok(hit)
     }
 
     /// 등록한다. 이미 있으면 아무것도 안 하고 `false` — **멱등이다.**
@@ -691,11 +709,11 @@ fn merge_words(t: &mut dyn toml_edit::TableLike, key: &str, base: Option<&[Strin
     changed
 }
 
-/// 값 하나를 적는다(`Doc::merge_look`). 같은 값이면 안 적고, 바뀐 것이 있으면 참. `None` 이면 키를 지운다.
+/// 값 하나를 적는다(`Doc::merge_look`·`Doc::mark_read`·`Doc::set_hue`). 같은 값이면 안 적고, 바뀐 것이
+/// 있으면 참. `None` 이면 키를 지운다.
 ///
 /// **키는 안 건드리고 값만 바꾼다.** 키 위의 주석은 키의 꾸밈에 붙어 있어 `Table::insert` 로 갈아 끼우면
-/// 지워진다(키 모양을 새로 짓는다). 값 뒤의 주석은 있던 값의 꾸밈에 붙어 있어 옮겨 단다 — `set_hue` 와
-/// 같은 까닭이다.
+/// 지워진다(키 모양을 새로 짓는다). 값 뒤의 주석은 있던 값의 꾸밈에 붙어 있어 옮겨 단다.
 fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::Value>) -> bool {
     let Some(mut v) = v else {
         return t.remove(key).is_some();
@@ -1063,7 +1081,7 @@ mod tests {
         std::fs::write(&path, src).unwrap();
         let green = Hue::named("green");
 
-        assert_eq!(update(&path, |doc| Ok(doc.set_hue(&["/a".into()], green))).unwrap(), 1);
+        assert_eq!(update(&path, |doc| doc.set_hue(&["/a".into()], green)).unwrap(), 1);
         let after = std::fs::read_to_string(&path).unwrap();
         assert!(after.contains("color = \"green\"") && after.contains("alias = \"일\"") && after.contains("[ui]"), "{after}");
         assert_eq!(read(Some(&path)).projects[0].hue, green);
@@ -1071,18 +1089,82 @@ mod tests {
 
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        assert_eq!(update(&path, |doc| Ok(doc.set_hue(&["/a".into()], green))).unwrap(), 1);
+        assert_eq!(update(&path, |doc| doc.set_hue(&["/a".into()], green)).unwrap(), 1);
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before, "같은 색인데 다시 썼다");
 
-        assert_eq!(update(&path, |doc| Ok(doc.set_hue(&["/a".into()], None))).unwrap(), 1);
+        assert_eq!(update(&path, |doc| doc.set_hue(&["/a".into()], None)).unwrap(), 1);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "auto 로 되돌렸는데 바이트가 다르다");
-        assert_eq!(update(&path, |doc| Ok(doc.set_hue(&["/없음".into()], green))).unwrap(), 0);
+        assert_eq!(update(&path, |doc| doc.set_hue(&["/없음".into()], green)).unwrap(), 0);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
 
-        // 값을 바꿀 때 그 값 뒤의 주석은 들고 간다.
-        std::fs::write(&path, "[[project]]\npath = \"/a\"\ncolor = \"blue\"  # 회사 것\n").unwrap();
-        update(&path, |doc| Ok(doc.set_hue(&["/a".into()], Hue::named("cyan")))).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[[project]]\npath = \"/a\"\ncolor = \"cyan\"  # 회사 것\n");
+        // 값을 바꿀 때 그 값 뒤의 주석도, 키 위의 주석과 키 모양도 들고 간다 — 값만 바꾼 것이다.
+        std::fs::write(&path, "[[project]]\npath = \"/a\"\n# 회사 색\ncolor   = \"blue\"  # 회사 것\n").unwrap();
+        update(&path, |doc| doc.set_hue(&["/a".into()], Hue::named("cyan"))).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[[project]]\npath = \"/a\"\n# 회사 색\ncolor   = \"cyan\"  # 회사 것\n"
+        );
+    }
+
+    /// 손으로 적은 표 모양 `color`(점 키·하위 표)는 색으로도 `auto` 로도 **덮지 않는다** —
+    /// 무엇을 뜻했는지 모르는 값을 지우면 되돌릴 수 없다. 겹쳐 적은 줄 중 하나만 그래도
+    /// 하나도 안 바꾼다. 문자열이 아닌 값(`color = 3`)은 틀린 색이라 고쳐 쓴다.
+    #[test]
+    fn a_hand_written_table_colour_is_refused_not_overwritten() {
+        let d = scratch("hue-table");
+        let path = d.join("config.toml");
+        for src in [
+            "[[project]]\npath = \"/a\"\ncolor.x = 1  # 내 것\n",
+            "[[project]]\npath = \"/a\"\n\n[project.color]\nx = 1\n",
+            "[[project]]\npath = \"/a\"\ncolor = { x = 1 }\n",
+            "[[project]]\npath = \"/a\"\ncolor = [\"green\"]\n",
+            "[[project]]\npath = \"/a\"\n\n[[project.color]]\nx = 1\n",
+            "[[project]]\npath = \"/a\"\ncolor = \"red\"\n\n[[project]]\npath = \"/a\"\ncolor.x = 1\n",
+        ] {
+            std::fs::write(&path, src).unwrap();
+            for hue in [Hue::named("green"), None] {
+                let e = update(&path, |doc| doc.set_hue(&["/a".into()], hue)).unwrap_err();
+                // 어느 줄인지 경로로 댄다 — 사람이 그 줄을 찾아 고친다.
+                assert!(e.message.contains("/a 의 `color`") && e.message.contains("손으로"), "{}", e.message);
+                assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "표 모양 color 를 덮었다");
+            }
+            // 남의 줄 것은 막지 않는다 — 엄함은 지금 쓰는 줄에 대한 것이다.
+            assert_eq!(update(&path, |doc| doc.set_hue(&["/b".into()], Hue::named("green"))).unwrap(), 0);
+        }
+
+        std::fs::write(&path, "[[project]]\npath = \"/a\"\ncolor = 3\n").unwrap();
+        assert_eq!(update(&path, |doc| doc.set_hue(&["/a".into()], Hue::named("green"))).unwrap(), 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[[project]]\npath = \"/a\"\ncolor = \"green\"\n");
+    }
+
+    /// 끝 줄바꿈 없이 손으로 적은 파일도 더했다 빼거나 색을 정했다 되돌리면 처음 바이트다 —
+    /// 줄바꿈이 하나씩 붙으면 dotfiles 저장소에 헛 변경이 선다. 줄바꿈으로 끝나는 파일은 그대로다.
+    #[test]
+    fn a_file_without_a_final_newline_round_trips() {
+        let d = scratch("no-eol");
+        let path = d.join("config.toml");
+        for src in [
+            "theme = \"dark\"",
+            "[[project]]\npath = \"/a\"",
+            "[[project]]\npath = \"/a\"\n",
+            "[[project]]\npath = \"/a\"   # 끝 주석",
+            "[[project]]\npath = \"/a\"\n\n[ui]\nx = 1",
+            "\u{feff}theme = \"dark\"",
+        ] {
+            std::fs::write(&path, src).unwrap();
+            assert!(update(&path, |doc| doc.add(Path::new("/z"))).unwrap());
+            let added = std::fs::read_to_string(&path).unwrap();
+            assert_eq!(read(Some(&path)).projects.last().map(|p| p.path.clone()), Some("/z".into()), "{added}");
+            assert_eq!(added.ends_with('\n'), src.ends_with('\n'), "끝 줄바꿈 모양이 바뀌었다\n{added:?}");
+            assert_eq!(update(&path, |doc| Ok(doc.remove(&["/z".into()]))).unwrap(), 1);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "add/rm 왕복");
+
+            if src.contains("/a") {
+                assert_eq!(update(&path, |doc| doc.set_hue(&["/a".into()], Hue::named("green"))).unwrap(), 1);
+                assert_eq!(update(&path, |doc| doc.set_hue(&["/a".into()], None)).unwrap(), 1);
+                assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "color 왕복");
+            }
+        }
     }
 
     /// 명령이 받는 낱말과 읽기가 받는 낱말이 같다.
