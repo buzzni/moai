@@ -3779,3 +3779,5 @@
 {"ts":"2026-09-18T05:02:16Z","id":"moai-57x9.3s7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 2건 다 반영(c46a1be) — 둘 다 새 시험이 실제로는 안 지키던 것이었다. 넘긴 것 없음. 리뷰어가 짚은 cargo fmt 어긋남은 저장소 전체의 오래된 것이고 rustfmt.toml 이 없어 이 가지에서 손대지 않는다"}
 {"ts":"2026-09-18T05:03:18Z","id":"moai-57x9.3s7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"2건 다 반영(c46a1be) — 시험이 src/tui/view.rs 를 빼먹던 것과 needle 이 낡으면 조용히 통과하던 것. 넘긴 것 없음"}
 {"ts":"2026-09-18T05:03:18Z","id":"moai-ocil","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-18T05:09:16Z","id":"moai-ocil","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: opus (medium — 표시 리팩터 두 파일, 쓰기 경로도 동시성도 안 건드린다). 닫기는 05:03 에 다른 세션이 했다 — 이 줄은 일한 창이 뒤늦게 남긴다"}
+{"ts":"2026-09-18T05:09:17Z","id":"moai-57x9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 끝났다"}
