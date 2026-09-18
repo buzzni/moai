@@ -98,6 +98,7 @@ pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
 /// - **등록 안 된 디렉터리는 멈춘다**(`not_found`). 저절로 등록하지 않는다 — 색을 고르다
 ///   목록이 느는 것은 시킨 일이 아니다. 찾는 철자는 `rm` 과 같아 사라진 디렉터리도 된다
 /// - 같은 색이면 파일을 안 건드린다(`Doc::set_hue`)
+/// - 손으로 적은 표 모양 `color`(`color.x = 1`)는 덮지 않고 멈춘다 — 그 줄을 사람이 고친다
 pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     let hue = user_config::hue_choice(word).map_err(|e| Fail::coded(e, code::BAD_INPUT))?;
     let config = writable_config()?;
@@ -119,7 +120,7 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     let (before, changed) = user_config::update(&config, |doc| {
         let found = doc.projects().0.into_iter().find(|p| spellings.contains(&p.path));
         if found.is_some() {
-            doc.set_hue(&spellings, hue);
+            doc.set_hue(&spellings, hue)?;
         }
         // 바뀌었는지는 **문서가** 안다 — 앞뒤 색을 견주면 틀린 값(`red` → auto)을 지운 쓰기가
         // "이미 그렇다" 로 선다. 읽기는 틀린 값을 `None` 으로 접기 때문이다.
