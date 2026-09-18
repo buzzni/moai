@@ -1178,7 +1178,14 @@ pub fn detail(
 
     if let Some(e) = &i.epic {
         let title = epic.map(|e| e.title.as_str()).unwrap_or("(없는 에픽)");
-        out.push(format!("  에픽   {}  {title}", paint(style::ID, e)));
+        // **묶음 줄의 `epic` 은 소속이 아니다**(moai-fg0t) — 트리도 `-e` 도 그 줄을 에픽 밑에 안
+        // 둔다. 멤버와 같은 모양으로 그리면 적은 사람은 에픽 밑에 넣은 줄 안다.
+        let stray = if crate::report::is_group(i) {
+            format!("  {}", paint(style::DIM, "(묶음은 에픽에 안 든다 — status 가 못 쓸 참조로 댄다)"))
+        } else {
+            String::new()
+        };
+        out.push(format!("  에픽   {}  {title}{stray}", paint(style::ID, e)));
     }
     // **어디서 하던 일인지 댄다**(moai-6opu) — 세션이 죽은 뒤 이어받는 쪽이 들어갈 자리다. 없으면
     // 없다고 한다: 같은 자(`report::places`)로 잰 지금의 자리다.

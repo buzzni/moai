@@ -100,10 +100,8 @@ enum Way {
     Pinned,
 }
 
-/// 남은 소속의 키. 모르는 필드로 같은 이름을 든 줄을 가려내는 데도 쓴다.
-const INHERITED: [&str; 2] = ["inherited_epic", "inherited_milestone"];
-
 /// 기계 출력 — 줄 하나에 남은 소속을 곁들인다. 기존 키는 그대로 두고 더하기만 한다.
+/// 필드를 더하면 그 이름을 `cmd::OURS` 에도 더한다 — 되써 넣은 줄의 같은 이름은 거기서 걷힌다.
 #[derive(serde::Serialize)]
 struct Out<'a> {
     #[serde(flatten)]
@@ -269,14 +267,9 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let Edited { issue: edited, epic, children, shelved, read, changed, kept, kept_milestone, blocked } = done;
     if ctx.json {
         // **이 키는 우리 것이다** — `--json` 을 되써 넣어 모르는 필드로 든 줄이면 한 객체에 같은
-        // 키가 둘 서거나, 끊긴 줄이 안 끊긴 것처럼 읽힌다. 파일의 값은 그대로 둔다. 걷는 길은
-        // `json_with` 와 같은 `Shown::without` 이다(moai-kgu2) — 목록만 여기 있다. `Out` 에
-        // 덧붙이는 필드를 더하면 `INHERITED` 에도 더한다.
-        use super::Shown;
-        let row = super::Row::from(&edited, &read);
-        let row = row.without(&INHERITED).unwrap_or(row);
+        // 키가 둘 서거나, 끊긴 줄이 안 끊긴 것처럼 읽힌다. `Row::of` 가 `cmd::OURS` 로 걷는다.
         return super::json_line(&Out {
-            row,
+            row: super::Row::from(&edited, &read),
             inherited_epic: kept.as_ref(),
             inherited_milestone: kept_milestone.as_ref(),
         });
@@ -354,4 +347,41 @@ fn fail_if_nothing(args: &EditArgs) -> R<()> {
     touched.then_some(()).ok_or_else(|| {
         Fail::new("무엇을 고칠지 적지 않았다. `moai edit --help` 가 고칠 수 있는 것을 낸다")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **`Out` 이 줄 곁에 다는 키는 `cmd::OURS` 에 있다**(moai-qn5d) — 없으면 옛 `edit --json` 을
+    /// 되써 넣은 줄의 같은 이름이 안 걷혀, 그 소속이 이제 안 남아도 옛 값이 선다. `Out` 에 필드를
+    /// 더하면 여기서 붉어진다(목록은 주석으로만 매여 있어 잡을 곳이 여기뿐이다).
+    #[test]
+    fn every_key_out_adds_is_in_ours() {
+        let i = Issue::new(
+            "argos-0001".into(),
+            "제목".into(),
+            model::Kind::Issue,
+            model::Status::new("todo"),
+            "2026-09-11T04:12:03Z",
+        );
+        let read = super::super::Read::new();
+        let epic = Inherited { epic: "argos-0002".into(), parent: "argos-0003".into() };
+        let milestone = InheritedMilestone {
+            milestone: Some("argos-0004".into()),
+            epic: Some("argos-0002".into()),
+            parent: None,
+            way: Way::Epic,
+        };
+        let out = Out {
+            row: super::super::Row::from(&i, &read),
+            inherited_epic: Some(&epic),
+            inherited_milestone: Some(&milestone),
+        };
+        let added = super::super::keys_beyond(&i, &out);
+        assert!(!added.is_empty(), "곁들인 키를 못 셌다");
+        for k in &added {
+            assert!(super::super::OURS.contains(&k.as_str()), "`edit --json` 이 곁들이는 {k} 가 `OURS` 에 없다");
+        }
+    }
 }
