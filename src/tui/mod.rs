@@ -1464,13 +1464,25 @@ impl App {
             // 여기 기본값으로 선다: 옛 설정을 가진 사람에게도 새 열이 뜨고, 끈 열은 끈 채로 남는다.
             let mut fields = view::Fields::default();
             for f in view::Field::ALL {
-                let knew = match &look.fields_known {
-                    Some(known) => known.iter().any(|w| w == f.name()),
-                    // 이 키가 없던 때의 어휘 — 그때 있던 열이면 안 적힌 것이 곧 "껐다" 다.
-                    None => view::Field::BEFORE_KNOWN.contains(&f),
-                };
+                let on = words.iter().any(|w| w == f.name());
+                // **`fields` 에 적힌 열은 적은 쪽이 알던 열이다**(moai-svvk 에픽 리뷰). `fields_known` 은
+                // *안 적힌* 열을 가르는 자이지 적힌 열을 거르는 자가 아니다 — 거르면 `fields = ["tags"]`,
+                // `fields_known = ["id"]` 같은 손 설정에서 tags 가 기본값(꺼짐)으로 서 말없이 버려지고,
+                // 손으로 적은 빈 목록을 옛 바이너리가 제 이름 목록으로 한 번 바꿔 적는 순간 새 바이너리의
+                // 열이 켜진 채 적혀 있어도 꺼진다.
+                let knew = on
+                    || match &look.fields_known {
+                        // **빈 목록은 "모든 열을 알았다" 다**(moai-4qkj, 사용자 결정 2026-09-18). 이 바이너리는
+                        // 늘 열 이름을 다 적으니(`look_now`) 빈 목록은 손으로 적은 것이고, 그 사람이 적은
+                        // `fields` 가 곧 켠 열이다. "아무 열도 몰랐다" 로 읽으면 안 적힌 열이 모두 기본값으로
+                        // 서 적힌 `fields` 가 곧 켠 열이라는 뜻이 한마디 없이 버려진다.
+                        Some(known) if known.is_empty() => true,
+                        Some(known) => known.iter().any(|w| w == f.name()),
+                        // 이 키가 없던 때의 어휘 — 그때 있던 열이면 안 적힌 것이 곧 "껐다" 다.
+                        None => view::Field::BEFORE_KNOWN.contains(&f),
+                    };
                 if knew {
-                    fields.set(f, words.iter().any(|w| w == f.name()));
+                    fields.set(f, on);
                 }
             }
             for w in words {
@@ -2485,6 +2497,74 @@ mod tests {
         let mut c = App::new(Vec::new(), cfg(), Path::new());
         c.adopt_look(&off, Vec::new());
         assert!(!c.fields.shows(view::Field::Names), "끈 열이 다음 실행에 되살아났다");
+    }
+
+    /// **빈 `fields_known` 은 "모든 열을 알았다" 다**(moai-4qkj, 사용자 결정 2026-09-18). 이 바이너리는
+    /// 그런 설정을 안 쓰니 손으로 적은 것이고, 그 사람이 적은 `fields` 가 곧 켠 열이다. 한때 모든 열이
+    /// "몰랐던 열" 이 되어 기본값이 서고 적힌 `fields` 는 한마디 없이 버려졌다. 경고는 안 낸다: 읽기는
+    /// 관대하다.
+    #[test]
+    fn an_empty_fields_known_takes_the_written_fields_as_they_are() {
+        let hand = crate::user_config::Look {
+            fields: Some(vec!["id".into()]),
+            fields_known: Some(Vec::new()),
+            ..crate::user_config::Look::default()
+        };
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&hand, Vec::new());
+        for f in view::Field::ALL {
+            assert_eq!(a.fields.shows(f), f == view::Field::Id, "{} 이 적힌 fields 를 안 따랐다", f.name());
+        }
+        assert_eq!(a.notice, None, "관대히 읽을 자리에서 잔소리를 했다");
+    }
+
+    /// **`fields` 에 적힌 열은 `fields_known` 에 없어도 켜진다**(moai-svvk 에픽 리뷰) — 적은 쪽이 그
+    /// 열을 알았다는 뜻이다. `fields_known` 은 안 적힌 열만 가른다: 목록에 없고 `fields` 에도 없는 열은
+    /// 기본값으로 선다. 한때는 적힌 tags 가 "몰랐던 열" 의 기본값(꺼짐)으로 서 말없이 버려졌다.
+    #[test]
+    fn a_column_written_in_fields_is_on_even_when_fields_known_misses_it() {
+        let hand = crate::user_config::Look {
+            fields: Some(vec!["id".into(), "tags".into()]),
+            fields_known: Some(vec!["id".into(), "assignee".into()]),
+            ..crate::user_config::Look::default()
+        };
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&hand, Vec::new());
+        assert!(a.fields.shows(view::Field::Tags), "fields 에 적힌 열이 fields_known 에 없다고 버려졌다");
+        assert!(a.fields.shows(view::Field::Id));
+        assert!(!a.fields.shows(view::Field::Assignee), "알던 열인데 안 적힌 것이 켜졌다");
+        assert!(a.fields.shows(view::Field::Priority), "몰랐던 열이 기본값으로 안 섰다");
+        assert_eq!(a.notice, None);
+    }
+
+    /// **손으로 적은 빈 `fields_known` 은 파일을 한 바퀴 돌고도 적힌 열 그대로다**(moai-svvk 에픽 리뷰).
+    /// 첫 토글이 빈 목록에 이 바이너리가 아는 이름을 다 더해 적는다 — 그 뒤의 실행도 켠 열·끈 열이
+    /// 그대로여야 한다. 기억 속 `Look` 만 견주는 시험은 `look_words` 가 `[]` 를 어떻게 읽는지도,
+    /// `merge_words` 가 그것을 어떻게 다시 적는지도 안 지난다.
+    #[test]
+    fn a_hand_written_empty_fields_known_survives_a_trip_through_the_file() {
+        let s = scratch("fields-known-empty");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\nfields = [\"id\"]\nfields_known = []\n").unwrap();
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        for f in view::Field::ALL {
+            assert_eq!(a.fields.shows(f), f == view::Field::Id, "{} 이 적힌 fields 를 안 따랐다", f.name());
+        }
+        a.hit("SPC c g");
+
+        let text = std::fs::read_to_string(&user).unwrap();
+        let (back, _) = crate::user_config::read_look(Some(&user));
+        assert_eq!(back.fields_known.map(|k| k.len()), Some(view::Field::ALL.len()), "빈 목록을 이름으로 안 채웠다\n{text}");
+        let mut b = App::new(Vec::new(), cfg(), Path::new());
+        b.user_config = Some(user);
+        b.load_look();
+        for f in view::Field::ALL {
+            let want = f == view::Field::Id || f == view::Field::Tags;
+            assert_eq!(b.fields.shows(f), want, "{} 이 다음 실행에 달라졌다\n{text}", f.name());
+        }
+        assert_eq!(b.notice, None, "제가 적은 설정을 읽으며 말이 섰다\n{text}");
     }
 
     /// **끈 새 열은 파일을 한 바퀴 돌고도 꺼진 채다**(moai-6bc0 단계 리뷰). `look_now()` 끼리 견주는
