@@ -19,7 +19,7 @@ use super::keys::{BROWSE, Browse, JOT, Jot, label};
 use super::{App, Row, Stamp};
 use crate::nav::Index;
 use crate::projects::{self, State};
-use crate::store::{Opened, Repo};
+use crate::store::Repo;
 use crate::user_config;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -64,7 +64,9 @@ pub struct Place {
     pub look: Look,
     /// 읽기 **전에** 잰 표식 — `.moai/issues.jsonl` 과 `.moai/config.toml`, 옆 워크트리.
     marks: Marks,
-    /// 읽기를 **시작한** 때. [`REREAD_EVERY`] 가 이것으로 잰다 — 안 읽었으면 `None`.
+    /// 읽은 것을 **들인** 때([`Layer::adopt`]) — 시작한 때가 아니다(까닭은 거기). [`due`] 가 이것으로
+    /// 잰다. `None` 이면 곧바로 다시 읽을 줄이다 — 아직 안 읽었거나, 방금 열어 본 줄(`App::open_place`)
+    /// 이나 올라오며 떠난 줄([`App::climb`]).
     read_at: Option<std::time::Instant>,
 }
 
@@ -93,6 +95,13 @@ struct Marks {
 /// 프로젝트 안([`App::follow`])이 **같은 자**를 쓴다 — 따로 두면 한쪽만 틈을 넘겨 두 화면이 또
 /// 갈린다. 읽기는 둘 다 스레드로 가서, 1분에 한 번이면 그 값이 화면을 안 멈춘다.
 pub(super) const REREAD_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// 들인 지 [`REREAD_EVERY`] 가 지났는가 — **이 자 하나를** 층의 줄과 프로젝트 안이 함께 쓴다. 상수만
+/// 나눠 갖고 견주는 법을 저마다 적으면(`>=` 냐 `>` 냐, 안 들인 것을 어떻게 치느냐) 한쪽만 고쳐져 두
+/// 화면이 또 갈린다. 들인 적이 없으면 시계로는 안 낡는다 — 그런 줄은 부르는 쪽이 따로 고른다.
+pub(super) fn due(read_at: Option<std::time::Instant>) -> bool {
+    read_at.is_some_and(|t| t.elapsed() >= REREAD_EVERY)
+}
 
 /// 프로젝트 하나를 본 것.
 pub enum Look {
@@ -218,32 +227,25 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
 ///
 /// **한 벌로 묶어 보내지 않는다**(리뷰 moai-3lul.kt0) — 묶으면 빠른 줄까지 가장 느린 줄을
 /// 기다려 첫 화면이 통째로 `읽는 중` 으로 서고, 한 줄이 멈춘 마운트에 걸리면 나머지가 영영 안
-/// 찬다. 받는 쪽([`App::follow_layer`])은 걸음마다 닿은 만큼 들인다.
+/// 찬다. 받는 쪽([`App::follow_layer`])은 걸음마다 닿은 만큼 들인다. **다만 읽기는 여전히 한 벌씩
+/// 띄운다**([`Layer::launch`]) — 벌의 가장 느린 줄이 끝나야 다음 벌이 서므로, 느린 줄 하나가 다른
+/// 줄의 다음 읽기(표식·시계)와 새로 등록한 줄의 첫 읽기를 그만큼 붙든다(리뷰 moai-3lul.kt0 다시 본 판,
+/// 줄마다 따로 띄우는 것은 넘겼다).
 ///
 /// 보내기가 실패하면(받는 쪽이 이 읽기를 버렸다) 그 줄은 버려진다 — 버린 읽기는 받을 것이 아니다.
+///
+/// 나란히 부르는 것은 한눈 보기와 같은 [`projects::each`] 다 — 한 줄의 패닉이 **그 까닭 그대로**
+/// 되던져지고(`scope` 에 맡기면 std 가 까닭을 지운다), 스레드를 못 띄우면 그 자리에서 읽는다.
+/// 보내기는 줄마다 제 스레드 안에서 하므로 닿는 대로 흐른다.
 fn look_into(paths: &[PathBuf], now: &str, tx: &std::sync::mpsc::Sender<Looked>) {
-    if let [one] = paths {
-        let _ = tx.send(look_one(one, now));
-        return;
-    }
-    std::thread::scope(|s| {
-        for path in paths {
-            let tx = tx.clone();
-            s.spawn(move || {
-                let _ = tx.send(look_one(path, now));
-            });
-        }
+    projects::each(paths, |path| {
+        let _ = tx.send(look_one(path, now));
     });
 }
 
-/// 그 자리에서 다 읽는다 — 사람이 "다시" 를 누른 길(SPC r·등록 바꾸기)이 쓴다. 차례는 받은 그대로다.
+/// 그 자리에서 다 읽는다 — 사람이 "다시" 를 누른 길(SPC r, [`App::reread_layer`])만 쓴다.
 fn look_at(paths: &[PathBuf], now: &str) -> Vec<Looked> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    look_into(paths, now, &tx);
-    drop(tx);
-    let mut got: Vec<Looked> = rx.into_iter().collect();
-    got.sort_by_key(|l| paths.iter().position(|p| *p == l.path).unwrap_or(usize::MAX));
-    got
+    projects::each(paths, |path| look_one(path, now))
 }
 
 /// 한 경로를 연다. **표식을 먼저 잰다** — 읽고 나서 재면 그 사이의 쓰기가 "이미 본 것"
@@ -314,18 +316,29 @@ impl Layer {
         self.places.iter().any(|p| p.registered)
     }
 
-    /// 다시 읽어야 할 줄 — 아직 안 읽었거나, 표식이 바뀌었거나, 읽은 지 [`REREAD_EVERY`] 가 지난 것.
+    /// 다시 읽어야 할 줄 — 아직 안 읽었거나(읽은 때가 없거나), 표식이 바뀌었거나, 시계로 낡은 것([`due`]).
+    ///
+    /// **시계로 낡는 것은 연 줄과 못 읽는 줄이다.** 연 줄의 셈에는 때가 들고(한 시간 틈·날로 재는 경고),
+    /// 못 읽는 줄은 표식이 그대로여도 풀린다 — 권한을 고친 것(`chmod` 은 고친 때를 안 바꾼다)이나 한 번
+    /// 끊겼던 원격 디스크는 (고친 때, 길이)로 안 보여, 안 재면 SPC r 전까지 "못 읽는다" 가 선다(리뷰
+    /// moai-3lul.kt0 다시 본 판). init 전과 사라진 디렉터리는 표식이 다 본다(디렉터리·설정 표식) — 그
+    /// 줄의 말(`view::unopened`)에는 때도 안 들어 1분마다 다시 읽어도 같은 글이다.
     fn stale(&self) -> Vec<PathBuf> {
         self.places
             .iter()
             .filter(|p| {
-                // **연 줄만 시계로 낡는다** — 못 연 줄이 내는 말(`view::unopened`)에는 때가 안 들어,
-                // 1분마다 다시 읽어도 같은 글이다(리뷰 moai-3lul.kt0).
-                let ticked = matches!(p.look, Look::Open { .. }) && p.read_at.is_some_and(|t| t.elapsed() >= REREAD_EVERY);
-                matches!(p.look, Look::Unread) || ticked || marks_of(&p.path) != p.marks
+                let clocked = matches!(p.look, Look::Open { .. } | Look::Shut { state: Shut::Unreadable, .. });
+                matches!(p.look, Look::Unread) || p.read_at.is_none() || (clocked && due(p.read_at)) || marks_of(&p.path) != p.marks
             })
             .map(|p| p.path.clone())
             .collect()
+    }
+
+    /// 그 줄을 **곧바로 다시 읽을 줄로** 둔다 — 셈은 새것이 닿을 때까지 그대로 선다([`App::climb`]).
+    fn forget(&mut self, path: &Path) {
+        if let Some(p) = self.places.iter_mut().find(|p| p.path == path) {
+            p.read_at = None;
+        }
     }
 
     /// 읽어 온 줄 하나를 경로로 맞춰 들인다. 그새 목록에서 빠진 경로는 버린다.
@@ -334,7 +347,7 @@ impl Layer {
     /// 넘게 걸리는 자리(느린 마운트)에서 들이는 순간 이미 낡아, 층이 같은 줄을 쉬지 않고 다시
     /// 읽는다(리뷰 moai-3lul.kt0). 표식은 반대로 읽기 **전**의 것이다 — 그 사이의 쓰기를 놓치면
     /// 영영 안 보인다.
-    fn adopt(&mut self, looked: Vec<Looked>) {
+    fn adopt(&mut self, looked: impl IntoIterator<Item = Looked>) {
         for l in looked {
             if let Some(p) = self.places.iter_mut().find(|p| p.path == l.path) {
                 p.marks = l.marks;
@@ -454,25 +467,27 @@ impl App {
             self.discard(handle);
         }
         let place = self.layer.as_mut()?.places.get_mut(at)?;
-        let read_at = std::time::Instant::now();
         let marks = marks_of(&place.path);
-        let state = match Repo::open(&place.path) {
-            // **스냅샷까지 읽어 본다.** 층의 줄이 "못 읽는다" 로 서는 자는 `projects::open`
-            // 의 `repo.read()` 인데 `Repo::open` 은 `.moai/config.toml` 까지만 본다 — 여기서
-            // 안 재면 Enter 는 막히는 그 줄에 `n` 은 폼을 열고, 사람은 다 적고 Ctrl-S 를
-            // 눌러서야 못 담는다고 듣는다(적은 것이 갈 데가 없다). 한 번 더 읽는 값은
-            // 사람이 키를 누른 한 번뿐이라 싸다.
-            Ok(Opened::Repo(repo)) => match repo.read() {
-                Ok(_) => return Some(repo),
-                Err(e) => State::Unreadable(e.message),
-            },
-            Ok(Opened::Uninit) => State::Uninit,
-            Ok(Opened::Missing) => State::Missing,
-            Err(e) => State::Unreadable(e.message),
+        // **여는 길은 층의 줄과 같다**([`look_one`] 의 `projects::open_one`) — 스냅샷까지 읽어 본다.
+        // `Repo::open` 만으로는 `.moai/config.toml` 까지만 보여, 층의 줄은 "못 읽는다" 로 서는데 `n` 은
+        // 폼을 열고 사람은 다 적고 Ctrl-S 를 눌러서야 못 담는다고 듣는다(적은 것이 갈 데가 없다). 여는
+        // 법을 두 벌로 적으면 한쪽만 고쳐져 Enter 와 층의 줄이 같은 디렉터리를 달리 가른다. 한 번 더
+        // 읽는 값은 사람이 키를 누른 한 번뿐이라 싸다.
+        let state = match projects::open_one(&place.path, String::new(), None, false).state {
+            // **열린 줄은 곧바로 다시 읽을 줄로 둔다**(리뷰 moai-3lul.kt0 다시 본 판) — 층의 셈이
+            // "못 읽는다" 나 옛 수로 서 있어도 방금 연 것이 지금이다. 층에 남았으면(`n`) 다음 걸음에,
+            // 들어갔으면 어느 길로 떠나든(올라오기·옆 번호) 올라온 뒤에 다시 읽는다. 셈은 새것이 닿을
+            // 때까지 그대로 선다.
+            State::Open { repo, .. } => {
+                place.read_at = None;
+                return Some(repo);
+            }
+            state => state,
         };
         place.look = shut(&place.path, &place.name, state);
         place.marks = marks;
-        place.read_at = Some(read_at);
+        // 들인 때로 찍는다 — [`Layer::adopt`] 와 같은 자다.
+        place.read_at = Some(std::time::Instant::now());
         if let Look::Shut { said, .. } = &place.look {
             self.notice = Some(said.clone());
         }
@@ -622,6 +637,11 @@ impl App {
     ///
     /// 안에 있는 동안 낡은 줄은 **스레드로** 다시 읽는다([`Layer::launch`], moai-ezwu) — 올라오는
     /// 키가 그 값을 기다리지 않는다. 그동안 그 줄은 옛 셈을 낸다.
+    ///
+    /// **떠난 프로젝트의 줄은 표식이 그대로여도 다시 읽는다**([`Layer::forget`]). 방금 안에서 본 배너와
+    /// 올라와 보는 그 줄이 같은 수를 대야 한다 — 층의 줄은 1분 시계가 따로 돌아, 안에 있는 동안 한 시간
+    /// 틈을 넘긴 줄이 안쪽 배너에는 서고 층에는 최대 1분 안 섰다. 못 읽던 줄에 방금 들어갔다 나왔는데
+    /// "못 읽는다" 가 남는 것도 같은 자리다(리뷰 moai-3lul.kt0 다시 본 판). 한 줄 읽기라 싸다.
     pub(super) fn climb(&mut self) {
         let Some(layer) = &mut self.layer else { return };
         let At::Project(from) = std::mem::replace(&mut layer.at, At::Layer) else { return };
@@ -629,6 +649,7 @@ impl App {
         // **시각은 안 올린다** — 머리의 `↻` 가 그것으로 "방금 갱신했다" 를 말하는데, 읽기는 이제
         // 스레드로 가서 아직 안 왔다(리뷰 moai-3lul.kt0). 들일 때 [`App::follow_layer`] 가 올린다.
         let Some(layer) = &mut self.layer else { return };
+        layer.forget(&from);
         layer.launch();
         self.cursor = layer.position(&from).unwrap_or(0);
     }
@@ -687,33 +708,24 @@ impl App {
         self.detail.rewind();
     }
 
-    /// 층의 낡은 줄을 **그 자리에서** 읽는다 — 사람이 "다시" 를 누른 것(SPC r)과 등록을 바꾼 것
-    /// (`a`·`d`)이 부른다. 올라오기는 스레드로 간다([`App::climb`]). 도는 읽기는 버린다: 누르기
-    /// 전에 띄운 것이라 늦게 닿으면 방금 읽은 것을 옛 것으로 덮는다.
-    fn refresh_layer(&mut self) {
-        let now = crate::model::now();
-        let Some(layer) = &mut self.layer else { return };
-        let pending = layer.pending.take();
-        let stale = layer.stale();
-        if !stale.is_empty() {
-            layer.adopt(look_at(&stale, &now));
-        }
-        self.now = now;
-        if let Some((_, handle)) = pending {
-            self.discard(handle);
-        }
-    }
-
-    /// 층에서 누른 SPC r — 사용자 설정부터 다시 읽고 전부 다시 연다. 커서는 보던 프로젝트에 선다.
+    /// 층에서 누른 SPC r — 사용자 설정부터 다시 읽고 **그 자리에서** 전부 다시 연다(누른 사람은 결과를
+    /// 기다리고 있다). 커서는 보던 프로젝트에 선다. 층의 다른 읽기(올라오기·등록 바꾸기·시계)는 모두
+    /// 스레드로 간다([`Layer::launch`]).
+    ///
+    /// 도는 읽기는 버린다 — 누르기 전에 띄운 것이라 늦게 닿으면 방금 읽은 것을 옛 것으로 덮는다.
     pub(super) fn reread_layer(&mut self) {
         let held = self.current().map(|r| self.anchor_of(&r));
+        let now = crate::model::now();
         let Some(layer) = &mut self.layer else { return };
         let fresh = Layer::read(layer.config.as_deref(), layer.launch.as_deref());
         let old = std::mem::replace(layer, Layer { at: At::Layer, ..fresh });
+        // 새로 선 층의 줄은 모두 안 읽은 것이다 — 낡은 것을 고를 것 없이 다 읽는다.
+        let paths: Vec<PathBuf> = layer.places.iter().map(|p| p.path.clone()).collect();
+        layer.adopt(look_at(&paths, &now));
+        self.now = now;
         if let Some((_, handle)) = old.pending {
             self.discard(handle);
         }
-        self.refresh_layer();
         // **보던 줄에 그대로 섰으면 되감지 않는다** — 상세를 굴려 놓고 SPC r 을 누르면 굴린
         // 자리를 잃는다. 층이 다시 서며 차례가 바뀌어도 같은 프로젝트면 그대로다. 다시 읽은
         // 뒤 커서를 붙드는 자는 목록 어디서나 하나다([`App::regrip`]).
@@ -724,11 +736,11 @@ impl App {
     ///
     /// SPC r([`App::reread_layer`])와 가르는 것 셋:
     /// - **선 자리를 둔다.** 프로젝트 안에서 `a` 로 등록해도 층으로 끌어올리지 않는다
-    /// - **이미 본 프로젝트는 다시 안 읽는다.** 경로가 같은 줄의 셈과 표식을 옮겨 들고, 새로 선
-    ///   줄만 읽는다(층에 섰을 때, [`Layer::launch`] 로 스레드에서). SPC r 은 사람이 "전부 다시" 를
-    ///   누른 것이지만 이것은 한 줄을 더하거나 뺀 것이라, 등록 수만큼 저장소를 다시 읽을 까닭이 없다.
-    ///   그 자리에서 읽으면 시계로 낡은 줄까지 함께 걸려(`REREAD_EVERY`) 등록 하나 바꾸는 키가 등록
-    ///   수만큼 멈춘다(리뷰 moai-3lul.kt0)
+    /// - **이미 본 프로젝트를 일부러 다시 읽지 않는다.** 경로가 같은 줄의 셈·표식·읽은 때를 옮겨 들고,
+    ///   층에 섰으면 [`Layer::launch`] 로 스레드에서 낡은 줄만 읽는다 — 새로 선 줄과, 원래 낡았던
+    ///   줄(표식이 바뀌었거나 시계로 낡은 것)이다. SPC r 은 사람이 "전부 다시" 를 누른 것이지만 이것은
+    ///   한 줄을 더하거나 뺀 것이라, 등록 수만큼 저장소를 다시 읽을 까닭이 없다. 그 자리에서 읽으면
+    ///   시계로 낡은 줄까지 함께 걸려 등록 하나 바꾸는 키가 등록 수만큼 멈춘다(리뷰 moai-3lul.kt0)
     /// - **층이 없었으면 세운다.** `.moai` 안에서 띄웠고 등록이 0 이었던 경우다. 띄운 자리가
     ///   `At::Project` 로 서므로 지금 프로젝트는 그대로이고, 층이 새로 서도 뿌리의 줄은 그대로라
     ///   (`..` 은 디렉터리에만 선다, moai-i784) 커서는 보던 줄(정체)에 선다
@@ -788,12 +800,13 @@ impl App {
     /// 읽을 까닭이 없고, 올라갈 때 낡은 줄을 읽으러 띄운다(`climb`).
     pub(super) fn follow_layer(&mut self) {
         let Some(layer) = &mut self.layer else { return };
-        let mut got = false;
         while let Some((rx, _)) = &layer.pending {
             match rx.try_recv() {
                 Ok(looked) => {
-                    layer.adopt(vec![looked]);
-                    got = true;
+                    layer.adopt([looked]);
+                    if layer.at == At::Layer {
+                        self.now = crate::model::now();
+                    }
                 }
                 // 아직 읽는 중이다 — 다음 걸음에 마저 받는다.
                 Err(TryRecvError::Empty) => break,
@@ -807,10 +820,6 @@ impl App {
                 }
             }
         }
-        if got && layer.at == At::Layer {
-            self.now = crate::model::now();
-        }
-        let Some(layer) = &mut self.layer else { return };
         layer.launch();
     }
 
@@ -826,8 +835,9 @@ fn blank_config() -> crate::config::Config {
     crate::config::Config::parse("prefix = \"moai\"\n").expect("고정된 설정 글이다")
 }
 
-/// 그림 시험이 디스크 없이 층을 세운다. 읽을 것이 없게 모든 줄을 이미 본 것으로 둔다 —
-/// 없는 경로의 표식은 [`Marks::default`] 와 같아 [`Layer::stale`] 이 다시 읽으러 가지 않는다.
+/// 그림 시험이 디스크 없이 층을 세운다. 읽을 것이 없게 모든 줄을 방금 본 것으로 둔다 —
+/// 없는 경로의 표식은 [`Marks::default`] 와 같고 읽은 때가 방금이라 [`Layer::stale`] 이 다시
+/// 읽으러 가지 않는다.
 #[cfg(test)]
 pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
     Layer {
@@ -842,7 +852,7 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
                 launched: false,
                 look,
                 marks: Marks::default(),
-                read_at: None,
+                read_at: Some(std::time::Instant::now()),
             })
             .collect(),
         problems: Vec::new(),
@@ -856,6 +866,7 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
 mod tests {
     use super::*;
     use crate::scratch::Scratch;
+    use crate::store::Opened;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use crate::model::{Issue, Kind, Status};
     use crate::nav::Path as NavPath;
@@ -1843,5 +1854,170 @@ mod tests {
         a.hit("SPC r");
         assert_eq!(a.current(), Some(Row::Project(1)), "뺀 줄의 번호를 목록 안으로 안 잘랐다");
         assert_eq!(a.detail.offset(), 0, "다른 프로젝트에 섰는데 굴린 자리가 남았다");
+    }
+
+    /// **못 읽는 줄도 시계로 다시 본다**(리뷰 moai-3lul.kt0 다시 본 판). 권한을 고치는 `chmod` 는 고친
+    /// 때도 길이도 안 바꿔, 표식만 보면 층이 SPC r 전까지 "못 읽는다" 를 댄다. init 전 줄은 표식이 다
+    /// 보므로 시계에 안 건다.
+    #[test]
+    fn a_row_that_could_not_be_read_is_retried_by_the_clock() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::fenced("layer-unreadable-clock");
+        let (one, two) = twins(&s);
+        let bare = s.dir("bare");
+        let cfg = s.register(&[&one, &two, &bare]);
+        let mut a = layered(&cfg);
+        let file = one.join(".moai/issues.jsonl");
+        let mode = |m: u32| std::fs::set_permissions(&file, std::fs::Permissions::from_mode(m)).unwrap();
+        mode(0o000);
+        if std::fs::read(&file).is_ok() {
+            // 권한이 안 먹는 자리(root)에서는 흉내 낼 수 없다.
+            mode(0o644);
+            return;
+        }
+        let long_ago = std::time::Instant::now().checked_sub(REREAD_EVERY).expect("시계가 1분도 안 돌았다");
+        a.layer.as_mut().unwrap().places[0].read_at = Some(long_ago);
+        settle(&mut a);
+        assert!(matches!(look(&a, "one"), Look::Shut { state: Shut::Unreadable, .. }), "못 읽게 된 것을 못 봤다");
+
+        mode(0o644);
+        let layer = a.layer.as_mut().unwrap();
+        for p in &mut layer.places {
+            p.read_at = Some(long_ago);
+        }
+        assert_eq!(layer.stale(), [one.clone(), two.clone()], "못 읽는 줄은 시계로 낡고, init 전 줄은 안 낡는다");
+        settle(&mut a);
+        assert!(matches!(look(&a, "one"), Look::Open { .. }), "권한을 고쳤는데 층이 옛 까닭을 댄다");
+    }
+
+    /// **올라오면 떠난 프로젝트의 줄은 표식이 그대로여도 다시 읽는다**(리뷰 moai-3lul.kt0 다시 본 판).
+    /// 안의 배너와 그 줄은 시계가 따로 돌아, 안에 있는 동안 한 시간 틈을 넘긴 줄이 안쪽에는 서고 층에는
+    /// 최대 1분 안 섰다. 남의 줄은 표식과 시계대로다. 옆 번호로 건너가며 떠난 줄도 같다 — 올라오기만
+    /// 떠나는 길이 아니다(연 줄을 잊는 자리는 `App::open_place` 다).
+    #[test]
+    fn climbing_rereads_the_project_it_left() {
+        let s = Scratch::fenced("layer-climb-forget");
+        let (_one, two, mut a) = on_layer_with_twins(&s);
+        let read = |a: &App| a.layer.as_ref().unwrap().places.iter().map(|p| p.read_at).collect::<Vec<_>>();
+        let before = read(&a);
+        a.key(key(KeyCode::Enter));
+        assert!(!a.on_layer());
+        a.hit("0");
+        assert!(a.loading(), "떠난 프로젝트를 다시 읽으러 안 갔다");
+        settle(&mut a);
+        let after = read(&a);
+        assert!(after[0] > before[0], "떠난 프로젝트의 줄을 다시 안 읽었다");
+        assert_eq!(after[1], before[1], "안 바뀐 남의 줄까지 다시 읽었다");
+
+        a.hit("1");
+        a.hit("2");
+        assert_eq!(a.here(), Some(two), "2 가 둘째 프로젝트로 안 갔다");
+        a.hit("0");
+        settle(&mut a);
+        let last = read(&a);
+        assert!(last[0] > after[0], "옆 번호로 건너가며 떠난 프로젝트의 줄을 다시 안 읽었다");
+        assert!(last[1] > after[1], "올라오며 떠난 프로젝트의 줄을 다시 안 읽었다");
+    }
+
+    /// **겹쳐 보기를 꺼도 스냅샷을 못 읽은 옆 워크트리를 댄다**(리뷰 moai-3lul.kt0 다시 본 판, 사용자 결정
+    /// moai-rgz9.7vt). 자리 판정은 끈 채로도 옆 스냅샷을 파는데, 못 읽은 것을 안 대면 판정이 가려진 0 이
+    /// "없다" 로 읽힌다 — 층은 같은 저장소에 `!` 를 세운다. 켰을 때는 겹치는 읽기가 이미 대므로 두 번 안 댄다.
+    #[test]
+    fn turning_the_overlay_off_still_names_a_sibling_snapshot_it_could_not_read() {
+        let s = Scratch::fenced("layer-unread-sibling");
+        let main = s.project("main", &[("argos-0002", "집은 줄", "in_progress")]);
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../wt-x", "-b", "wt-x"]);
+        // 파일 자리에 디렉터리가 섰다 — 누가 돌려도(root 여도) 못 읽는다.
+        std::fs::create_dir_all(s.join("wt-x/.moai/issues.jsonl")).unwrap();
+        let cfg = s.register(&[&main]);
+        let mut a = layered(&cfg);
+        let Look::Open { sum } = look(&a, "main") else { panic!("main 이 안 열렸다") };
+        assert_eq!((sum.unread, sum.blind), (1, 1), "층이 못 읽은 옆 스냅샷을 안 댄다");
+
+        let named = |a: &App| a.elsewhere.iter().filter(|l| l.contains("wt-x")).count();
+        a.key(key(KeyCode::Enter));
+        assert_eq!(named(&a), 1, "겹쳐 볼 때 못 읽은 옆 스냅샷을 안 대거나 두 번 댄다 — {:?}", a.elsewhere);
+        a.hit("SPC t w");
+        assert!(!a.worktree, "w 가 겹쳐 보기를 안 껐다");
+        settle(&mut a);
+        assert_eq!(named(&a), 1, "겹쳐 보기를 끄자 못 읽은 옆 스냅샷이 배너에서 사라졌다 — {:?}", a.elsewhere);
+    }
+
+    /// **자리 판정은 옆을 실제로 겹쳤는가로 잰다**(리뷰 moai-3lul.kt0 다시 본 판). 딸린 워크트리에서 git 이
+    /// 저장소를 거절하면(깨진 설정, `safe.directory`, git 이 없다) 겹쳐 보기를 켜도 줄은 그 워크트리의
+    /// 스냅샷뿐이다 — 갈라질 때의 main 이라, 그 뒤 main 에서 끝낸 일이 아직 집혀 있다. 그것을 겹친 것으로
+    /// 재면 끝난 일을 "자리 없다" 로 댄다. 켠 깃발이 아니라 `Gathered::swept` 를 넘기는 두 길 — 다시
+    /// 읽기(`prepare`)와 여는 읽기(`App::overlaid`) — 을 모두 지난다.
+    #[test]
+    fn a_linked_worktree_that_git_refuses_is_judged_like_plain_status() {
+        let s = Scratch::fenced("layer-linked-unswept");
+        let main = s.project("main", &[("argos-0002", "집은 줄", "in_progress")]);
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["add", ".moai"]);
+        run(&main, &["commit", "-q", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../wt-self", "-b", "wt-self"]);
+        // main 에서 그 일이 끝났다 — 딸린 워크트리의 스냅샷에는 아직 집힌 채다.
+        write_lines(&main, &[("argos-0002", "집은 줄", "done")]);
+        let repo = Repo { root: s.join("wt-self"), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
+        let own = repo.read().unwrap().issues;
+        // 전제: 겹친 것으로 재면 끝난 일이 자리 없다로 선다. 시계는 줄의 때(2026-09-01)에서 한참 지난
+        // 것으로 준다 — 방금 집은 줄의 틈에 걸리면 전제가 안 선다.
+        assert_eq!(super::super::placed(&repo, &own, true, "2026-09-10T00:00:00Z").0, 1, "전제가 안 섰다");
+
+        // git 이 저장소를 거절한다 — 파일로 읽는 자리 판정(`worktree::on_disk`)은 그래도 옆을 찾는다.
+        std::fs::write(main.join(".git/config"), "[core\n").unwrap();
+        let plain = super::super::warnings_of(&own, &[], &repo.config, &crate::model::now());
+        let f = super::super::prepare(&repo, true).unwrap();
+        assert!(f.unfound.is_some(), "전제: git 이 저장소를 거절하지 않았다");
+        assert_eq!(f.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (다시 읽기)");
+
+        let g = crate::worktree::gather(&repo, true).unwrap();
+        let (stamp, index) = (stamp_of(&repo), Index::of(&g.load.issues));
+        let a = App::open(repo, g.load, index, NavPath::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept);
+        assert_eq!(a.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (여는 읽기)");
+    }
+
+    /// **띄울 때와 다시 읽을 때 지켜보는 목록이 같다**(리뷰 moai-3lul.kt0 다시 본 판). 다르면 조용한
+    /// 저장소에서도 첫 다시 읽기(늦어도 1분 시계)가 그것을 "커밋이 섰다" 로 읽어 커밋 표를 통째로 다시
+    /// 짓는다. 여는 길(`cmd::tui`)의 차례 그대로 세운다 — 자리 판정의 표식을 먼저 재고 겹쳐 읽는다.
+    #[test]
+    fn the_first_quiet_reread_after_launch_keeps_the_commit_table() {
+        let s = Scratch::fenced("layer-launch-watched");
+        let main = s.project("main", &[("argos-0002", "집은 줄", "in_progress")]);
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../w1", "-b", "w1"]);
+        // 옆에 스냅샷이 있으면 겹치는 읽기는 그 `.git` 을 안 재고, 자리 판정의 표식만 잰다.
+        std::fs::create_dir_all(s.join("w1/.moai")).unwrap();
+        std::fs::write(s.join("w1/.moai/issues.jsonl"), "").unwrap();
+        let repo = Repo { root: main.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
+        let stamp = stamp_of(&repo);
+        let places = crate::worktree::place_marks(&repo.root);
+        let mut g = crate::worktree::gather(&repo, true).unwrap();
+        super::super::watch(&mut g.watched, places);
+        let index = Index::of(&g.load.issues);
+        let mut a = App::open(repo, g.load, index, NavPath::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept);
+        let paths: std::collections::BTreeSet<PathBuf> = a.watched.iter().map(|(p, _)| p.clone()).collect();
+        assert_eq!(paths.len(), a.watched.len(), "같은 파일을 두 번 지켜본다");
+        // 여는 커밋 표는 다 짓게 둔다.
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while a.gathering_commits() {
+            assert!(std::time::Instant::now() < until, "커밋 표를 다 못 지었다");
+            a.follow();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let launched = a.watched.clone();
+
+        a.read_at = Some(std::time::Instant::now().checked_sub(REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
+        a.follow();
+        assert!(a.loading(), "1분이 지났는데 다시 안 읽었다");
+        settle(&mut a);
+        assert_eq!(a.watched, launched, "띄울 때와 다시 읽을 때 지켜보는 목록이 갈렸다");
+        assert!(!a.gathering_commits(), "아무것도 안 바뀌었는데 커밋 표를 다시 짓는다");
     }
 }

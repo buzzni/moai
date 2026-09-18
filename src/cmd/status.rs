@@ -41,7 +41,12 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **자리 없는 집은 줄은 여기서만 싣는다**(moai-4370) — 까닭은 `report::stranded`. 치명이 아니라
     // 아래 종료 코드는 안 바뀐다. 언제 재는지는 `worktree::workplaces` 가 정한다 — 딸린 워크트리
     // 안에서 겹쳐 보지 않았으면 빈 목록이 오고, 그러면 `stranded` 가 조용하다.
-    let (lost, unread) = crate::worktree::stranded_at(&repo.root, &repo.config, &load.issues, worktree, &now);
+    //
+    // **넘기는 것은 옆을 실제로 겹쳤는가다**(`swept`), 시킨 깃발이 아니다(리뷰 moai-3lul.kt0 다시 본 판).
+    // `--worktree` 를 줬어도 git 을 못 불러 못 겹쳤으면 줄은 딸린 워크트리의 스냅샷(갈라질 때의 main)
+    // 뿐이라, 겹친 것으로 재면 main 에서 이미 끝낸 일을 "자리 없다" 로 댄다. 탐색기(`tui::placed`)와
+    // 밖 한눈 보기가 같은 자로 잰다.
+    let (lost, unread) = crate::worktree::stranded_at(&repo.root, &repo.config, &load.issues, swept, &now);
     st.warnings.extend(lost);
     // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정에서 그 워크트리는 "아무도
     // 없다" 가 아니라 "모른다" 로 빠지므로(`report::Place::Unknown`), 말이 없으면 경고가 조용한
@@ -182,50 +187,43 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let projects = crate::projects::open_with(&reg, worktree);
     let now = model::now();
     // **셈은 프로젝트마다 나란히 한다**(moai-b7o3) — 자리 판정이 옆 스냅샷을 파면 그 값이 프로젝트
-    // 마다 더해진다. 보드는 셈을 빌려 쓰므로 셈만 먼저 모으고, 짓는 것은 차례대로 한다.
-    let judged = crate::projects::each(&projects, |p| {
-        let crate::projects::State::Open { repo, load } = &p.state else { return None };
-        // 옆에서만 온 줄과 겹친 id 는 중복이 아니다 (`Origin::unreadable`, `run` 과 같다).
-        let unreadable: Vec<report::Unreadable> = p
-            .origin
-            .unreadable(load.errors.iter().map(|e| e.id.as_deref()))
-            .into_iter()
-            .map(|id| report::Unreadable { id })
-            .collect();
-        // **자리도 여기서 잰다**(moai-p3bs) — 안쪽 `moai status` 와 같은 자
-        // (`worktree::stranded_at`). 한때 이 화면에만 없어, 프로젝트 밖에서 보드를 보는
-        // 사람은 죽은 세션의 일을 영영 못 봤다. 옆 워크트리를 겹치는지는 부른 쪽을 따른다.
-        let mut status = report::status(&load.issues, &unreadable, &repo.config, &now);
-        let (lost, unread) = crate::worktree::stranded_at(&repo.root, &repo.config, &load.issues, worktree, &now);
-        status.warnings.extend(lost);
-        Some((status, unread))
-    });
-    let seen: Vec<Seen<view::Board>> = projects
-        .iter()
-        .zip(judged)
-        .map(|(p, judged)| {
-            p.seen(|repo, load| {
-                let (status, unread) = judged.expect("연 프로젝트는 셈이 있다 — 같은 상태로 갈랐다");
-                view::Board {
-                    cfg: &repo.config,
-                    status,
-                    picked: report::wip(&load.issues, &repo.config),
-                    origin: &p.origin,
-                    trouble: &p.trouble,
-                    // **못 읽은 워크트리는 여기서도 센다**(리뷰 moai-p3bs.op2) — 밖에서는 `gather`
-                    // 가 겹쳐 보지 않으면 옆 스냅샷을 아예 안 열어 `trouble` 이 비고, 그러면 죽은
-                    // 세션과 못 읽는 워크트리가 함께 있는 저장소가 "드러난 문제 없다" 로 선다.
-                    // 목록 둘을 넘긴다 — 사람 화면은 못 읽은 것 전부를 한 줄씩 대고(`unread`),
-                    // `--json` 은 둘을 따로 낸다(`unreadable_worktrees` 는 판정을 가린 것 `blind`,
-                    // `broken_worktrees` 는 전부 `unread`). 안쪽 `status` 와 같은 가름이다.
-                    // `trouble` 이 이미 낸 것인지는 `swept` 가 가른다 — 이것도 안쪽과 같은 자다.
-                    unread: unread.all,
-                    blind: unread.blinding,
-                    swept: p.swept,
-                }
-            })
+    // 마다 더해진다. 보드는 연 프로젝트를 빌리므로 그 스레드에서 곧바로 짓는다 — 연 것만 가르는 자는
+    // `Project::seen` 하나다(셈을 따로 모았다가 다시 맞추면 두 가름이 어긋날 자리가 생긴다).
+    let seen: Vec<Seen<view::Board>> = crate::projects::each(&projects, |p| {
+        p.seen(|repo, load| {
+            // 옆에서만 온 줄과 겹친 id 는 중복이 아니다 (`Origin::unreadable`, `run` 과 같다).
+            let unreadable: Vec<report::Unreadable> = p
+                .origin
+                .unreadable(load.errors.iter().map(|e| e.id.as_deref()))
+                .into_iter()
+                .map(|id| report::Unreadable { id })
+                .collect();
+            // **자리도 여기서 잰다**(moai-p3bs) — 안쪽 `moai status` 와 같은 자
+            // (`worktree::stranded_at`). 한때 이 화면에만 없어, 프로젝트 밖에서 보드를 보는
+            // 사람은 죽은 세션의 일을 영영 못 봤다. 옆 워크트리를 겹치는지는 부른 쪽을 따르되, 재는
+            // 자는 **실제로 겹쳤는가**다(`Project::swept`) — 안쪽 `run` 과 같다.
+            let mut status = report::status(&load.issues, &unreadable, &repo.config, &now);
+            let (lost, unread) = crate::worktree::stranded_at(&repo.root, &repo.config, &load.issues, p.swept, &now);
+            status.warnings.extend(lost);
+            view::Board {
+                cfg: &repo.config,
+                status,
+                picked: report::wip(&load.issues, &repo.config),
+                origin: &p.origin,
+                trouble: &p.trouble,
+                // **못 읽은 워크트리는 여기서도 센다**(리뷰 moai-p3bs.op2) — 밖에서는 `gather`
+                // 가 겹쳐 보지 않으면 옆 스냅샷을 아예 안 열어 `trouble` 이 비고, 그러면 죽은
+                // 세션과 못 읽는 워크트리가 함께 있는 저장소가 "드러난 문제 없다" 로 선다.
+                // 목록 둘을 넘긴다 — 사람 화면은 못 읽은 것 전부를 한 줄씩 대고(`unread`),
+                // `--json` 은 둘을 따로 낸다(`unreadable_worktrees` 는 판정을 가린 것 `blind`,
+                // `broken_worktrees` 는 전부 `unread`). 안쪽 `status` 와 같은 가름이다.
+                // `trouble` 이 이미 낸 것인지는 `swept` 가 가른다 — 이것도 안쪽과 같은 자다.
+                unread: unread.all,
+                blind: unread.blinding,
+                swept: p.swept,
+            }
         })
-        .collect();
+    });
 
     if ctx.json {
         #[derive(serde::Serialize)]

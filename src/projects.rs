@@ -71,15 +71,31 @@ pub fn open_with(reg: &Registry, worktree: bool) -> Vec<Project> {
 /// 프로젝트끼리 서로 기다릴 까닭이 없어, 차례대로 부르면 값이 등록 수만큼 더해지고 나란히
 /// 부르면 가장 느린 하나만큼이다(이 저장소 하나에 ~170ms). 하나뿐이면 스레드를 안 띄운다.
 ///
-/// 한 스레드의 패닉은 부른 쪽으로 되던진다 — 차례대로 부르던 때와 같다.
-pub fn each<T: Sync, U: Send>(items: &[T], f: impl Fn(&T) -> U + Sync) -> Vec<U> {
+/// 한 스레드의 패닉은 부른 쪽으로 **그 까닭 그대로** 되던진다 — 차례대로 부르던 때와 같다.
+/// 손잡이를 거두지 않고 `scope` 에 맡기면 std 가 까닭을 `a scoped thread panicked` 한 줄로 갈아
+/// 끼워, 탐색기가 죽으며 남기는 말(`cmd::tui::screen`)에 까닭이 없다(리뷰 moai-3lul.kt0 다시 본 판).
+///
+/// **스레드를 못 띄우면 그 자리에서 부른다.** `Scope::spawn` 은 못 띄우면 패닉하는데, 한눈 보기는
+/// 데이터가 깨졌을 때만 실패한다(CLAUDE.md) — 스레드 한도에 걸린 기계에서 `moai status` 가 101 로
+/// 끝나면 안 된다. 늦어질 뿐 답은 같다.
+///
+/// 받는 값은 항목을 빌려도 된다(`'a`) — 한눈 보기가 연 프로젝트를 빌린 보드를 스레드마다 짓는다.
+pub fn each<'a, T: Sync, U: Send>(items: &'a [T], f: impl Fn(&'a T) -> U + Sync) -> Vec<U> {
     if items.len() < 2 {
         return items.iter().map(&f).collect();
     }
     let f = &f;
     std::thread::scope(|s| {
-        let runs: Vec<_> = items.iter().map(|item| s.spawn(move || f(item))).collect();
-        runs.into_iter().map(|r| r.join().unwrap_or_else(|e| std::panic::resume_unwind(e))).collect()
+        let runs: Vec<_> = items
+            .iter()
+            .map(|item| std::thread::Builder::new().spawn_scoped(s, move || f(item)).map_err(|_| item))
+            .collect();
+        runs.into_iter()
+            .map(|run| match run {
+                Ok(handle) => handle.join().unwrap_or_else(|e| std::panic::resume_unwind(e)),
+                Err(item) => f(item),
+            })
+            .collect()
     })
 }
 
