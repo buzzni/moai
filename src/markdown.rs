@@ -679,9 +679,18 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize, overflow: Overflow
             // 소프트랩이 없어 안 끊으면 꼬리가 `…` 로 잘려 사라진다. 이음표는 접은
             // 자리를 코드의 진짜 줄바꿈과 가른다 — 코드에서는 줄바꿈도 뜻이다.
             let bar = bars(*quote);
-            let lead = format!("{bar}    ");
-            let cont = format!("{bar}  {CONTINUED} ");
-            let budget = width.saturating_sub(crate::text::width(&lead)).max(2);
+            let mut lead = format!("{bar}    ");
+            let mut cont = format!("{bar}  {CONTINUED} ");
+            // 끊는 표면에서는 `flow` 처럼 **앞머리를 먼저 잘라** 글 자리 두 칸을 남긴다.
+            // 겹친 인용 속 코드는 앞머리가 좁은 패널보다 넓을 수 있고, 그대로 두면
+            // 줄이 폭을 넘어 위젯이 꼬리를 `…` 로 잘라 코드 글자를 잃는다.
+            if overflow == Overflow::Break {
+                let room = width.saturating_sub(2);
+                lead = crate::text::clip(&lead, room);
+                cont = crate::text::clip(&cont, room);
+            }
+            let lead_w = crate::text::width(&lead).max(crate::text::width(&cont));
+            let budget = width.saturating_sub(lead_w).max(2);
             for l in lines {
                 let pieces = match overflow {
                     Overflow::Break => chunks(l, budget),
@@ -819,7 +828,7 @@ fn lay_table(out: &mut Vec<Vec<Span>>, head: &[Cell], rows: &[Row], width: usize
         return;
     }
 
-    let row =|r: &[Cell], is_head: bool| -> Vec<Span> {
+    let row = |r: &[Cell], is_head: bool| -> Vec<Span> {
         let mut line = Vec::new();
         for n in 0..cols {
             if n > 0 {
@@ -1473,9 +1482,8 @@ mod tests {
             let lines = layout(&parse(src), w, Overflow::Break);
             assert_eq!(code_text(&lines), whole, "@ {w}");
             for l in &lines {
-                let lead = l.first().filter(|s| s.role == Role::Mark).map_or(0, |s| crate::text::width(&s.text));
                 let got = span_width(l);
-                assert!(got <= w.max(lead + 2), "@ {w} → {l:?} ({got}칸)");
+                assert!(got <= w.max(2), "@ {w} → {l:?} ({got}칸)");
             }
         }
         let lines = layout(&parse(src), 30, Overflow::Break);
