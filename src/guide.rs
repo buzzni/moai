@@ -247,34 +247,48 @@ const WRITING: &str = r#"**제목과 본문은 따로 넘긴다.** 제목은 인
 지킬 것은 다음 세션이 `moai show <id>` 로 읽는다는 것 하나다. 이 셋은 그래서 있는 권고이지
 검사하는 규칙이 아니다."#;
 
-/// 한국어 글을 다듬는 두 플러그인 — `(설치 id, 마켓플레이스 저장소)`. 훅이 설치됐는지 볼 때도
-/// 이 id 를 읽는다(moai-6rrb). 안내 글과 훅이 다른 이름을 대면 설치한 사람이 알림을 끝내 못 끈다.
+/// 한국어 글을 다듬는 두 플러그인 — `(설치 id, 마켓플레이스 저장소)`. **안내의 설치 명령은
+/// 여기서 뽑는다**(`korean`) — 손으로 두 벌 적으면 한쪽만 고쳐도 아무도 안 붉어진다. 훅이
+/// 설치됐는지 볼 때도 이 id 를 읽을 자리다(moai-6rrb). 안내 글과 훅이 다른 이름을 대면 설치한
+/// 사람이 알림을 끝내 못 끈다. 설치 id 의 `@` 앞이 플러그인 이름이고, 스킬은 `<플러그인>:<스킬>`
+/// 로 불린다 — 안내 글이 스킬을 그 이름으로 대는 까닭이다.
 pub const KOREAN_PLUGINS: [(&str, &str); 2] =
     [("korean-skills@korean-skills", "DaleSeo/korean-skills"), ("humanize-korean@im-not-ai", "epoko77-ai/im-not-ai")];
 
 /// 한국어 글을 넣기 전에 다듬는다(사용자, moai-5wk4). **권고다** — `WRITING` 과 같은 까닭으로
-/// 막지 않는다. 훅은 한글이 든 쓰기에 알림만 덧붙인다.
+/// 막지 않는다. 훅이 알림을 덧붙이는 것(moai-6rrb)도 알림일 뿐이다.
 ///
 /// 판정이 **글의 글자**인 것은 결정이다: 화면 말(`MOAI_LANG`)은 사람이 읽는 말이지 에이전트가
 /// 적는 말이 아니다 — 영어 화면에서 한국어 이슈를 적는 사람도 있다.
 ///
 /// 둘을 나눠 쓰는 까닭은 값이다. `humanize-korean` 은 한 번에 서브에이전트를 1~3번 넘게 부르고
 /// cwd 에 `_workspace/` 를 만든다 — 노트 한 줄마다 부를 것이 아니다.
+///
+/// **리뷰 원문도 다듬는다**(사용자 결정). 규칙 3 의 `리뷰가 낸 글을 그대로` 와 어긋나 보이니
+/// 그 말이 무엇을 막는지를 여기 적는다 — 줄이거나 제 판단을 섞는 것이지 문장을 다듬는 것이 아니다.
+///
+/// 설치 명령은 여기 없다 — `korean` 이 `KOREAN_PLUGINS` 에서 붙인다.
 const KOREAN: &str = r#"**한국어 글은 moai 에 넣기 전에 다듬는다.** 한글이 한 글자라도 든 글이면 한국어 글이다 —
 제목·본문(`-b`)·노트·`-m`, 리뷰 원문 노트까지. 영어로만 쓴 글은 그대로 넣는다.
 
-- 먼저 `korean-skills` 의 `grammar-checker` 로 맞춤법·띄어쓰기를 고치고 `humanizer` 로 AI 티를 걷는다
-- 20줄을 넘는 본문·노트는 그 뒤에 `im-not-ai` 의 `humanize-korean` 을 한 번 더 거친다. 이것은
-  cwd 에 `_workspace/` 를 만드니 저장소의 `.gitignore` 에 넣어 둔다
+- 먼저 `korean-skills:grammar-checker` 로 맞춤법·띄어쓰기를 고치고 `korean-skills:humanizer` 로 AI 티를 걷는다
+- 20줄을 넘는 본문·노트는 그 뒤에 `humanize-korean:humanize-korean`(마켓플레이스 `im-not-ai`) 을 한 번 더
+  거친다. 이것은 cwd 에 `_workspace/` 를 만드니 저장소의 `.gitignore` 에 넣어 둔다
 - 뜻과 사실은 바꾸지 않는다 — id·명령·경로·수·코드 조각은 그대로 둔다
+- 리뷰 원문은 줄이거나 판단을 섞지 않고 문장만 다듬는다 — `그대로` 옮기라는 것은 그 뜻이다
 - 꼴이 정해진 줄(`model: …`·`다음: …`·`Regression-of: …`)은 다듬지 않는다 — 읽는 쪽이 그 꼴로 센다
 
-플러그인이 없으면 사용자 전역에 설치한다. 없어도 moai 는 아무것도 막지 않는다.
+플러그인이 없으면 사용자 전역에 설치한다. 없어도 moai 는 아무것도 막지 않는다."#;
 
-    claude plugin marketplace add DaleSeo/korean-skills
-    claude plugin install korean-skills@korean-skills
-    claude plugin marketplace add epoko77-ai/im-not-ai
-    claude plugin install humanize-korean@im-not-ai"#;
+/// 한국어 글 절 — `KOREAN` 에 설치 명령을 붙인다. 명령은 `KOREAN_PLUGINS` 한 곳에서 온다.
+fn korean() -> String {
+    let install = KOREAN_PLUGINS
+        .iter()
+        .map(|(id, repo)| format!("    claude plugin marketplace add {repo}\n    claude plugin install {id}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{KOREAN}\n\n{install}")
+}
 
 /// 글 스타일의 예시(moai-1xf2). **참고 문서에만 둔다** — AGENTS 블록과 SKILL.md 는 언제나
 /// 읽히는 자리라 예시 한 벌이 모든 세션의 값이 된다. 규칙은 짧게 늘 보이고, 예시는 부를 때 온다.
@@ -488,7 +502,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 
 ### 한국어 글
 
-{KOREAN}
+{korean}
 
 ### 지금 범위가 아닌 것은 담는다
 
@@ -548,6 +562,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 
 {CLOSING}
 "#,
+        korean = korean(),
         rules = rules()
     )
 }
@@ -581,7 +596,7 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
 
 ## 한국어 글
 
-{KOREAN}
+{korean}
 
 ## 훅이 실제로 보는 것 셋
 
@@ -593,6 +608,7 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
 
 전체 명령과 `--from` 문법은 `references/commands.md` 에 있다.
 "#,
+        korean = korean(),
         rules = rules()
     )
 }
@@ -1489,16 +1505,17 @@ fn brief() -> String {
        `claude` 를 띄우면 cwd 를 루트 밖(스크래치패드)으로 둔다 — 루트에서 띄운 세션은 감독의
        세션 목록에 놀고 있는 일꾼으로 낀다.
        **리뷰 서브에이전트에게도** 이 말을 준다 — 서버 전체를 죽인 것이 리뷰 서브에이전트였다
-    4-4. **moai 에 넣는 한국어 글은 한국어 글쓰기 플러그인으로 다듬는다** — 한글이 든 제목·본문·
-       노트·`-m`·리뷰 원문 노트 전부. 기본은 `korean-skills` 의 `grammar-checker` 와 `humanizer`,
-       20줄을 넘으면 `im-not-ai` 의 `humanize-korean` 을 한 번 더. id·명령·경로·수는 그대로 두고,
-       9-1 의 모델 줄과 12 의 `다음:` 줄은 다듬지 않는다. **리뷰 서브에이전트에게도** 이 말을 준다
     4-3. **옆에서 도는 일이 쥔 파일을 건드려야 하면 고치지 않는다** — 머리의 `옆에서 도는 일`
        이 대는 파일, 또는 `git worktree list` 의 옆 가지가 이미 고친 파일
        (`git diff --name-only <본 가지>...<옆 가지>`). 둘이 같은 곳을 고치면 병합에서 한쪽이
        다른 쪽을 기다린다. 이 에픽이 내건 것이 그것 없이 안 이뤄지면 idea 가 아니라 멤버다 —
        `moai -C <루트> add '<무엇을>' -e <에픽>` 로 세워 첫 칸에 두고, 11 에서 **옆이 쥐어 남긴
        멤버**로 그 옆 일과 함께 댄다. 감독이 그 일이 끝난 뒤 보낸다. 미루지 않는다
+    4-4. **moai 에 넣는 한국어 글은 한국어 글쓰기 플러그인으로 다듬는다** — 한글이 든 제목·본문·
+       노트·`-m`·리뷰 원문 노트 전부. 기본은 `korean-skills:grammar-checker` 와 `korean-skills:humanizer`,
+       20줄을 넘으면 `humanize-korean:humanize-korean` 을 한 번 더. id·명령·경로·수는 그대로 두고,
+       9-1 의 모델 줄과 12 의 `다음:` 줄, `Regression-of:` 줄은 다듬지 않는다. **리뷰 서브에이전트에게도**
+       이 말을 준다
     5. **멤버마다 리뷰하지 않는다.** 멤버 하나가 끝나면 시험을 돌리고 커밋해 다음 멤버로
        간다 — 리뷰는 멤버가 다 끝난 뒤 7 에서 에픽 전체를 한 번 본다. 리뷰 한 판이 비싸
        멤버 수만큼 부르지 않는다. 멤버 1 의 버그 위에 멤버 2 가 쌓이는 값은 그 한 번에서
@@ -1603,8 +1620,8 @@ mod tests {
     /// 조각을 거치지 않고 표면에 글을 직접 적는 순간 두 벌이 다시 생긴다.
     #[test]
     fn both_surfaces_carry_the_same_pieces() {
-        let (agents, skill, reference) = (agents(), skill(), reference());
-        for piece in [CHEATSHEET, FORKS, NO_GATE, WRITING, KOREAN, CLOSING] {
+        let (agents, skill, reference, korean) = (agents(), skill(), reference(), korean());
+        for piece in [CHEATSHEET, FORKS, NO_GATE, WRITING, korean.as_str(), CLOSING] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(skill.contains(piece), "스킬에 없다 — {head}");
@@ -1619,15 +1636,18 @@ mod tests {
         }
     }
 
-    /// **안내가 시키는 설치 명령이 훅이 찾는 id 를 설치한다**(moai-5wk4). 한쪽 이름만 바꾸면
-    /// 시킨 대로 설치해도 알림이 "없다" 고 계속 말한다. 워커 브리프도 같은 말을 싣는다.
+    /// **안내가 부르라는 스킬이 설치한 플러그인의 것이다**(moai-5wk4). 설치 명령은 `korean` 이
+    /// `KOREAN_PLUGINS` 에서 뽑으니 따로 안 잰다 — 손으로 적는 것은 스킬 이름뿐이다. 플러그인
+    /// 스킬은 `<플러그인>:<스킬>` 로 불려, 설치 id 의 `@` 앞과 스킬 이름의 `:` 앞이 갈라지면 시킨
+    /// 대로 설치해도 부를 스킬이 없다. 첫 판은 `im-not-ai 의 humanize-korean` 처럼 마켓플레이스
+    /// 이름을 댔다. 워커 브리프도 같은 이름을 싣는다.
     #[test]
-    fn the_korean_piece_installs_what_the_hook_looks_for() {
-        for (id, repo) in KOREAN_PLUGINS {
-            assert!(KOREAN.contains(&format!("claude plugin marketplace add {repo}\n")), "마켓플레이스를 안 더한다 — {repo}");
-            assert!(KOREAN.contains(&format!("claude plugin install {id}")), "설치 명령이 없다 — {id}");
-            let (plugin, market) = id.split_once('@').unwrap();
-            assert!(brief().contains(&format!("`{market}` 의 `")), "브리프가 {plugin} 을 안 댄다");
+    fn the_korean_piece_names_skills_of_the_plugins_it_installs() {
+        let brief = brief();
+        for (id, _) in KOREAN_PLUGINS {
+            let (plugin, _) = id.split_once('@').unwrap();
+            assert!(KOREAN.contains(&format!("`{plugin}:")), "안내가 {plugin} 의 스킬을 안 댄다");
+            assert!(brief.contains(&format!("`{plugin}:")), "브리프가 {plugin} 의 스킬을 안 댄다");
         }
     }
 
