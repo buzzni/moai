@@ -312,6 +312,10 @@ struct Lexer<'a> {
     group: usize,
     /// 마지막으로 읽은 이음사 — 다음에 쌓이는 토막의 [`Seg::join`] 이 된다.
     join: Join,
+    /// 몇 겹의 `{ … }` 안인가. **이음사의 깊이에만 든다** — 하위 셸이 아니라 그 안의 `cd` 는
+    /// 뒤로 이어지므로 [`Seg::depth`] 에는 안 든다. 안 세면 `mv && { a; b; }` 의 `;` 가 묶음
+    /// 밖의 끊김으로 읽혀, 집기가 이겨야만 도는 쓰기를 막는다.
+    braces: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -328,6 +332,7 @@ impl<'a> Lexer<'a> {
             heredocs: Vec::new(),
             group: 0,
             join: Join::default(),
+            braces: 0,
         }
     }
 
@@ -401,10 +406,12 @@ impl<'a> Lexer<'a> {
             // **토막을 먼저 가른다.** 공백 갈래가 먼저 오면 줄바꿈이 낱말만
             // 끊고 토막은 안 끊는다 — 그 한 줄 차이로 규칙이 통째로 샜다.
             // `a &&` 뒤의 줄바꿈은 이음사가 아니다 — 셸은 다음 줄을 `&&` 의 뒤로 읽는다.
+            // 그 밖의 빈 토막 뒤 줄바꿈은 이음사다 — `a && ( b )` 의 `)` 뒤 줄바꿈이 괄호 안
+            // 깊이를 그대로 남기면, 다음 줄이 `&&` 묶음 안으로 읽혀 집기 뒤로 샜다.
             '\n' => {
                 self.flush();
                 let empty = self.seg.words.is_empty() && self.seg.writes.is_empty();
-                self.end_by(if empty { None } else { Some(false) });
+                self.end_by(if empty && self.join.and { None } else { Some(false) });
                 self.skip_heredocs();
             }
             // `||`·`&&` 는 이어 도는 갈래다. 홀로 선 `|`·`|&` 는 양쪽을, `&` 는 앞을 하위 셸로
@@ -688,6 +695,12 @@ impl<'a> Lexer<'a> {
             Aim::Dup if word.chars().all(|d| d.is_ascii_digit() || d == '-') => {}
             Aim::Dup => self.seg.writes.push(word),
             Aim::Word => {
+                // 명령 자리의 `{`·`}` 만 묶음이다 — `echo {` 의 `{` 는 글자다.
+                if !quoted && word == "{" && command_of(&self.seg.words).is_empty() {
+                    self.braces += 1;
+                } else if !quoted && word == "}" && self.seg.words.is_empty() {
+                    self.braces = self.braces.saturating_sub(1);
+                }
                 if !quoted && word == "[[" && command_of(&self.seg.words).is_empty() {
                     self.test = true;
                 } else if !quoted && word == "]]" {
@@ -711,7 +724,7 @@ impl<'a> Lexer<'a> {
         // 빈 토막은 쌓지 않는다 — 어차피 걸러지고, 그 표식(`a |\n b` 의 `sub`)은 다음 토막의 것이다.
         if self.seg.words.is_empty() && self.seg.writes.is_empty() {
             if let Some(and) = op {
-                self.join = Join { and, depth: self.group };
+                self.join = Join { and, depth: self.group + self.braces };
             }
             return;
         }
@@ -719,7 +732,7 @@ impl<'a> Lexer<'a> {
         seg.depth = self.group;
         seg.join = self.join;
         self.all.push(seg);
-        self.join = Join { and: op == Some(true), depth: self.group };
+        self.join = Join { and: op == Some(true), depth: self.group + self.braces };
     }
 }
 
@@ -2839,6 +2852,9 @@ mod tests {
             "(moai mv t-1 in_progress && echo ok) || echo x > src/store.rs",
             "moai mv t-1 in_progress && (echo ok); (echo x > src/store.rs)",
             "(moai mv t-1 in_progress; echo x > src/store.rs)",
+            "moai mv t-1 in_progress && (echo ok)\necho x > src/store.rs",
+            "moai mv t-1 in_progress && { echo ok; }; echo x > src/store.rs",
+            "moai mv t-1 in_progress; { echo x > src/store.rs; }",
         ] {
             assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
@@ -2848,6 +2864,7 @@ mod tests {
             "moai mv t-1 in_progress && (cd src; echo x > /repo/src/store.rs; echo y > /repo/src/cli.rs)",
             "(moai mv t-1 in_progress) && echo x > src/store.rs",
             "(moai mv t-1 in_progress && echo ok) && echo x > src/store.rs",
+            "moai mv t-1 in_progress && { echo ok; echo x > src/store.rs; }",
             // 진 줄 뒤에 다시 집으면 그 뒤는 또 집기 뒤다.
             "moai mv t-1 in_progress; moai mv t-1 in_progress && echo x > src/store.rs",
             // 저장소 밖의 쓰기는 이음사와 무관하게 지난다 — 규칙 2 가 세는 것은 저장소 안뿐이다.
