@@ -1387,10 +1387,57 @@ pub fn guard_shell_in(
     only: &dyn Fn(usize) -> bool,
 ) -> Decision {
     // 차례는 [`Decision::then`] 이 정한다 — 먼저 막는 규칙이 이기고, 비추는 줄(`Context`)은 뒤의
-    // 규칙이 막을 것을 가리지 않는다.
-    guard_moai(issues, cfg, away, cmd, only)
+    // 규칙이 막을 것을 가리지 않는다. 되돌릴 수 없는 것을 먼저 본다.
+    guard_tmux(cmd)
+        .then(|| guard_moai(issues, cfg, away, cmd, only))
         .then(|| guard_writes_in(issues, cfg, away, root, cwd, cmd, only))
         .then(|| if calls_review(cmd) { guard_review(issues, cfg, away) } else { Decision::Pass })
+}
+
+/// 규칙 4 — **사람의 tmux 서버를 죽이지 않는다**(moai-zis7, 사용자 결정).
+///
+/// 세션이 tmux 안에서 돌면 `$TMUX` 가 서 있고, `-L`·`-S` 없는 tmux 는 `TMUX_TMPDIR` 를 무시하고
+/// 그 서버에 붙는다. 2026-09-18 리뷰 서브에이전트의 `TMUX_TMPDIR=… tmux kill-server` 한 줄이
+/// 사람의 서버를 죽여 감독과 일꾼 다섯이 한꺼번에 꺼졌다. 그때 막은 것은 사람 한 명의 개인
+/// 훅뿐이라, 다른 기계에서는 글만이 그 사이에 선다 — 그래서 심는 훅에 싣는다.
+///
+/// **다른 규칙보다 먼저다** — 집은 것이 있든 없든, 어느 트래커를 가리키든 같다.
+/// 토막 안의 **어느 낱말이든** `tmux` 면 본다: `env -u TMUX tmux …`·`sudo tmux …` 의 tmux 는
+/// 명령 자리에 있지 않다. 따옴표로 묶인 글(`moai note … "tmux kill-server"`)은 낱말 하나라
+/// `tmux` 가 아니다. 창·칸을 닫는 `kill-window`·`kill-pane` 은 서버를 안 끝내 안 본다.
+fn guard_tmux(cmd: &str) -> Decision {
+    for seg in segments(cmd) {
+        for (i, word) in seg.iter().enumerate() {
+            let rest = &seg[i + 1..];
+            match basename(word) {
+                "tmux" => {
+                    let Some(at) = rest.iter().position(|w| w == "kill-server" || w == "kill-session") else { continue };
+                    if rest[..at].iter().any(|f| f.starts_with("-L") || f.starts_with("-S")) {
+                        continue;
+                    }
+                    return refuse(4, format!(
+                        "`tmux {}` 가 -L·-S 없이 사람의 tmux 서버를 겨눈다.\n\
+                         세션이 tmux 안에서 돌면 맨 tmux 는 TMUX_TMPDIR 를 무시하고 그 서버에 붙어, 이 한 줄이\n\
+                         그 안의 세션을 모두 끈다. 시험용 서버를 따로 띄워 거기에 친다.\n\
+                         \x20 {}",
+                        rest[at],
+                        crate::guide::TMUX_OWN.replace('…', &rest[at..].join(" "))
+                    ));
+                }
+                "pkill" | "killall" if rest.iter().any(|w| w.split(|c: char| !c.is_alphanumeric()).any(|p| p == "tmux")) => {
+                    return refuse(4, format!(
+                        "`{}` 가 tmux 를 겨눈다 — 사람의 tmux 서버까지 끈다.\n\
+                         시험용 서버를 따로 띄웠으면 그 서버에 kill-server 를 친다.\n\
+                         \x20 {}",
+                        basename(word),
+                        crate::guide::TMUX_OWN.replace('…', "kill-server")
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    Decision::Pass
 }
 
 /// 이 명령이 **쓰는 파일들.** 흔한 모양만 본다 — `>`·`>>` 리다이렉션,
@@ -2467,6 +2514,51 @@ mod tests {
     fn with_nothing_held_creation_is_free() {
         let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add \"딴 일\""), Decision::Pass);
+    }
+
+    /// **규칙 4 — 사람의 tmux 서버를 죽이지 않는다**(moai-zis7). 집은 것과 무관하게 막고, 제
+    /// 서버를 가리킨 것은 지난다. 거절문이 댄 줄은 그대로 치면 지나간다.
+    #[test]
+    fn a_bare_tmux_kill_is_refused() {
+        let root = Path::new("/repo");
+        let held = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        for cmd in [
+            "tmux kill-server",
+            "TMUX_TMPDIR=/tmp/x tmux kill-server",
+            "tmux kill-session -t moai",
+            "env -u FOO tmux kill-server",
+            "sudo tmux -f /dev/null kill-server",
+            "/usr/bin/tmux kill-server",
+            "cargo test; tmux kill-server",
+            "echo \"$(tmux kill-server)\"",
+            "pkill tmux",
+            "pkill -f 'tmux: server'",
+            "killall tmux",
+        ] {
+            for all in [&held, &idle] {
+                let why = denied(&guard_shell(all, &cfg(), &here(), root, root, cmd)).to_string();
+                assert!(why.starts_with(&crate::guide::rule_head(4)), "규칙 4 가 안 섰다 — {cmd}\n{why}");
+            }
+        }
+        for cmd in [
+            "tmux -L moai-ju21 kill-server",
+            "env -u TMUX tmux -L t kill-session -t x",
+            "tmux -S /tmp/scratch/sock kill-server",
+            "tmux -Lfoo kill-server",
+            "tmux kill-pane -t 1",
+            "tmux ls",
+            "moai note t-1 \"tmux kill-server 를 막는다\"",
+            "echo 'tmux kill-server'",
+            "pkill cargo",
+        ] {
+            assert_eq!(guard_shell(&held, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
+        }
+        // 거절문이 댄 줄은 자리표시자만 채우면 지나간다.
+        let why = denied(&guard_shell(&idle, &cfg(), &here(), root, root, "tmux kill-server")).to_string();
+        let line = why.lines().last().unwrap().trim().replace("<고유 이름>", "moai-t");
+        assert!(line.ends_with("kill-server"), "{why}");
+        assert_eq!(guard_shell(&idle, &cfg(), &here(), root, root, &line), Decision::Pass, "{line}");
     }
 
     /// **`hook --help` 의 이벤트 목록은 `Event` 의 글과 같다**(moai-h0r2) — clap 의 값 목록을 숨기고

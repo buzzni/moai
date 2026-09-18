@@ -17,12 +17,13 @@
 //!
 //! 순수 모듈이다. 파일을 쓰는 것은 `cmd/init.rs` 와 `cmd/skill.rs` 가 한다.
 
-/// 규칙 셋의 이름. **스킬이 적은 규칙과 훅이 낸 거절문이 같은 이름을 댄다** —
+/// 규칙 넷의 이름. **스킬이 적은 규칙과 훅이 낸 거절문이 같은 이름을 댄다** —
 /// 다르면 막힌 쪽이 무엇을 어겼는지 두 번 읽어야 한다.
-pub const RULES: [&str; 3] = [
+pub const RULES: [&str; 4] = [
     "집은 것 밖에 새 이슈를 세우지 않는다",
     "저장소를 고치기 전에 하나를 집는다",
     "리뷰도 이슈다",
+    "사람의 tmux 서버를 죽이지 않는다",
 ];
 
 /// 거절문의 머리. 스킬의 규칙 제목과 글자가 같다.
@@ -396,9 +397,9 @@ pub fn handoff(id: &str) -> String {
 /// 적던 두 벌은 한쪽만 고쳐도 안 붉어졌다(moai-nxw8). 앞의 임자(`에픽이`·`<id> 가`)는 부르는 쪽이 붙인다.
 pub const PLEDGE: &str = "내건 것이 이것 없이 안 이뤄지면";
 
-/// 규칙 셋. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
+/// 규칙 넷. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
 fn rules() -> String {
-    let [one, two, three] = RULES;
+    let [one, two, three, four] = RULES;
     let steps = indent(REVIEW_STEPS, "  ");
     let make = make_review("--parent <보는 이슈>");
     format!(
@@ -428,9 +429,19 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 
 **원문과 판단을 두 노트로 가른다** — 리뷰어가 한 말과 이쪽이 정한 것은 다른
 글이다. 넘긴 것은 **이슈 번호와 함께** 적는다. "넘겼다" 만 적힌 줄은 아무도
-다시 안 본다. 원문을 어디서 찾는지는 스킬의 `references/commands.md` 에 있다."#
+다시 안 본다. 원문을 어디서 찾는지는 스킬의 `references/commands.md` 에 있다.
+
+**4. {four}.** `-L`·`-S` 없는 `tmux kill-server`·`kill-session` 과 tmux 를
+겨눈 `pkill`·`killall` 을 막는다. 세션이 tmux 안에서 돌면 `$TMUX` 가 서 있어,
+맨 `tmux` 는 `TMUX_TMPDIR` 를 무시하고 그 서버에 붙는다 — 한 줄이 그 안의
+세션을 모두 끈다. 시험용 tmux 는 제 서버를 따로 띄운다.
+
+    {TMUX_OWN}"#
     )
 }
+
+/// 시험용 tmux 를 띄우는 줄 — 규칙 4 의 글과 거절문이 함께 쓴다.
+pub const TMUX_OWN: &str = "env -u TMUX tmux -L <고유 이름> …";
 
 /// `init` 이 AGENTS.md 의 마커 사이에 쓰는 블록. **언제나 읽히는 산문이다.**
 ///
@@ -499,7 +510,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 
 {WORK}
 
-### 훅이 실제로 보는 것 셋
+### 훅이 실제로 보는 것 넷
 
 `moai skill install` 로 Claude 에 훅을 심었을 때 선다.
 
@@ -546,7 +557,7 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
 
 {WRITING}
 
-## 훅이 실제로 보는 것 셋
+## 훅이 실제로 보는 것 넷
 
 {rules}
 
@@ -1694,7 +1705,7 @@ mod tests {
     #[test]
     fn the_skill_names_each_rule_as_the_hook_does() {
         let skill = skill();
-        for n in 1..=3 {
+        for n in 1..=RULES.len() {
             let title = format!("**{n}. {}.**", RULES[n - 1]);
             assert!(skill.contains(&title), "스킬에 규칙 {n} 의 이름이 없다 — {title}");
         }
