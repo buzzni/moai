@@ -1614,7 +1614,7 @@ fn edit_says_when_another_milestone_loses_to_the_epic_or_an_ancestor() {
     let child = add(s.path(), &["자식", "--parent", &parent]);
     let top = add(s.path(), &["홀로 선 이슈", "--milestone", &m1]);
 
-    let says = |id: &str, from: &str, stood: &str| {
+    let says = |id: &str, from: &str, stood: &str| -> String {
         let out = moai(s.path(), &["edit", id, "--milestone", &m2]);
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         let err = String::from_utf8_lossy(&out.stderr).to_string();
@@ -1622,10 +1622,31 @@ fn edit_says_when_another_milestone_loses_to_the_epic_or_an_ancestor() {
         assert_eq!(lines.len(), 1, "{id}: {from} 에게 진 것을 한 줄로 안 댔다 — {err:?}");
         assert!(lines[0].contains(stood) && lines[0].contains(&format!("--milestone {m2}")), "{id}: {err:?}");
         assert!(!ok(s.path(), &["show", "--milestone", &m2]).contains(id), "{id} 가 {m2} 에 섰다");
+        err
     };
     says(&member, &format!("에픽 {epic}"), &m1);
     says(&loose, &format!("에픽 {bare}"), "어느 마일스톤에도 안 든다");
     says(&child, &format!("조상 {parent}"), &m1);
+
+    // 마일스톤 밑에 id 로 선 부모의 자식 — 비워서는 못 끊지만 다른 마일스톤은 접힌 맨 위 줄
+    // (그 부모)에 적으면 옮겨진다. "id 가 마일스톤 밑이라 못 옮긴다" 고 하면 헛말이다(리뷰 moai-z3lo.dxz).
+    let under = add(s.path(), &["마일스톤 밑", "--parent", &m1]);
+    let grand = add(s.path(), &["그 밑", "--parent", &under]);
+    let err = says(&grand, &format!("조상 {under}"), &m1);
+    assert!(err.contains(&format!("`moai edit {under} --milestone {m2}`")), "옮길 길을 안 댔다 — {err:?}");
+    let json = ok(s.path(), &["edit", &grand, "--milestone", &m2, "--json"]);
+    assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{m1}","parent":"{under}"}}"#)), "{json}");
+    // 뿌리로 올라간 생각 밑 — 어느 필드로도 못 옮기니 길은 안 대고, 조용하지도 않다.
+    let thought = ok(s.path(), &["idea", "add", "생각", "-q"]).trim().to_string();
+    let pinned = add(s.path(), &["생각 밑", "--parent", &thought]);
+    let err = says(&pinned, &format!("id 가 {thought} 밑에"), "어느 마일스톤에도 안 든다");
+    assert!(!err.contains("moai edit"), "고쳐도 안 바뀌는 길을 댔다 — {err:?}");
+    // 못 쓸 에픽의 멤버는 `(길 잃음)` 에 선다 — 없는 에픽의 마일스톤을 고치라고 대지 않는다.
+    let gone = add(s.path(), &["지울 에픽", "--type", "epic", "--milestone", &m1]);
+    let stray = add(s.path(), &["길 잃을 멤버", "-e", &gone]);
+    ok(s.path(), &["rm", &gone]);
+    let err = says(&stray, &format!("에픽 {gone}"), "어느 마일스톤에도 안 든다");
+    assert!(!err.contains(&format!("moai edit {gone}")), "없는 줄을 고치라고 댔다 — {err:?}");
 
     let json = ok(s.path(), &["edit", &member, "--milestone", &m2, "--json"]);
     one_json_value(&json);

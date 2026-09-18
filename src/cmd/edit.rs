@@ -77,7 +77,7 @@ struct Inherited {
 
 /// `--milestone` 이 적은 대로 안 선 마일스톤. `--json` 에는 `inherited_milestone` 으로
 /// 선다. `none` 이 못 끊은 것(moai-0lmn)과, 다른 마일스톤을 적었는데 에픽·조상이 이긴
-/// 것(moai-mhxf)이다. 넘긴 자리는 `epic` 이나 `parent` 둘 중 하나만 선다 — 옮기는 길이
+/// 것(moai-mhxf)이다. 정한 자리는 `epic` 이나 `parent` 둘 중 하나만 선다 — 옮기는 길이
 /// 달라서다. `milestone` 은 실제로 선 마일스톤이고, 마일스톤 없는 에픽이 이겼으면 `null` 이다.
 #[derive(serde::Serialize)]
 struct InheritedMilestone {
@@ -86,6 +86,18 @@ struct InheritedMilestone {
     epic: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent: Option<String>,
+    /// 옮기는 길 — 사람 화면의 안내만 쓴다. `report::Above` 를 락 밖으로 들고 나온 모양이다.
+    #[serde(skip)]
+    way: Way,
+}
+
+/// [`crate::report::Above`] 의 갈래. 자리 id 는 `InheritedMilestone` 의 `epic`·`parent` 가 든다.
+#[derive(Clone, Copy)]
+enum Way {
+    Epic,
+    Lost,
+    Parent,
+    Pinned,
 }
 
 /// 남은 소속의 키. 모르는 필드로 같은 이름을 든 줄을 가려내는 데도 쓴다.
@@ -175,21 +187,25 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         };
         // `--milestone none` 도 같다(moai-0lmn) — 에픽과 부모가 마일스톤을 이긴다. 다른
         // 마일스톤을 적어도 진다(moai-mhxf): 필드는 X 가 되는데 줄은 에픽·조상이 선 곳에
-        // 그대로 서, `show --milestone X` 가 조용히 그 줄을 못 낸다. 적은 것과 선 것이
-        // 같으면 말할 것이 없다 — 이긴 쪽이 마침 같은 곳에 서 있다.
+        // 그대로 서, `show --milestone X` 가 조용히 그 줄을 못 낸다. 졌는지와 옮길 길은
+        // `report` 가 가른다 — 여기서는 무엇을 적었는지만 넘긴다.
         let wrote_milestone = args.milestone.as_deref().map(super::clearable);
         let kept_milestone = |issues: &[Issue]| {
             use crate::report::Above;
             let wrote = wrote_milestone.as_ref()?;
-            let (m, above) = crate::report::milestone_from_above(issues, &args.id)?;
-            if m == wrote.as_deref() || (wrote.is_none() && m.is_none()) {
-                return None;
-            }
-            let (epic, parent) = match above {
-                Above::Epic(e) => (Some(e.to_string()), None),
-                Above::Parent(p) => (None, Some(p.to_string())),
+            let (m, above) = crate::report::milestone_from_above(issues, &args.id, wrote.as_deref())?;
+            let (epic, parent, way) = match above {
+                Above::Epic(e) => (Some(e), None, Way::Epic),
+                Above::Lost(e) => (Some(e), None, Way::Lost),
+                Above::Parent(p) => (None, Some(p), Way::Parent),
+                Above::Pinned(p) => (None, Some(p), Way::Pinned),
             };
-            Some(InheritedMilestone { milestone: m.map(str::to_string), epic, parent })
+            Some(InheritedMilestone {
+                milestone: m.map(str::to_string),
+                epic: epic.map(str::to_string),
+                parent: parent.map(str::to_string),
+                way,
+            })
         };
         if !changed {
             // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
@@ -294,10 +310,10 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
 
 /// `--milestone` 이 적은 대로 안 선 것을 한 줄로 말한다.
 ///
-/// 넘긴 자리마다 옮기는 길이 다르다 — 에픽 멤버는 에픽을 옮기거나 에픽의 마일스톤을
-/// 고치고, 부모 밑 자식은 id 를 못 옮기니 부모의 마일스톤을 고친다.
-/// 조상이 마일스톤 줄 자신이면(`--parent <마일스톤>`) 소속은 id 자리에서 온다 —
-/// 그 마일스톤의 필드를 고치라고 대면 아무것도 안 바뀐다.
+/// 정한 자리마다 옮기는 길이 다르다(`report::Above`) — 에픽 멤버는 에픽을 옮기거나 에픽의
+/// 마일스톤을 고치고, 못 쓸 에픽의 멤버는 에픽을 옮기는 길만 있고, 부모 밑 자식은 id 를 못
+/// 옮기니 조상의 마일스톤을 고친다. id 가 마일스톤 줄이나 뿌리로 올라간 생각 밑에 서 있으면
+/// 필드로는 못 옮긴다 — 그 줄의 필드를 고치라고 대면 아무것도 안 바뀐다.
 ///
 /// `none` 은 "안 끊긴다" 로, 다른 마일스톤은 "필드에만 적혔다" 로 말한다(moai-mhxf) —
 /// 앞의 것은 필드가 비워졌는데 소속이 남았고, 뒤의 것은 필드가 바뀌었는데 소속이 안 따라왔다.
@@ -312,23 +328,18 @@ fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str) {
     } else {
         format!("--milestone {wrote} 는 필드에만 적혔다")
     };
-    match (&k.epic, &k.parent) {
-        (None, Some(p)) if Some(p) == k.milestone.as_ref() => {
-            eprintln!("moai: {id} 는 {stood} — id 가 그 마일스톤 밑에 서 있어 {lost}")
-        }
-        (epic, parent) => {
-            let (from, way) = match (epic, parent) {
-                (Some(e), _) => (
-                    format!("에픽 {e}"),
-                    format!("`moai edit {id} -e <다른 에픽>` 이나 `moai edit {e} --milestone {wrote}`"),
-                ),
-                (None, Some(p)) => (format!("조상 {p}"), format!("`moai edit {p} --milestone {wrote}`")),
-                (None, None) => unreachable!("넘긴 자리는 에픽이나 조상이다"),
-            };
-            let verb = if cut { "빼려면" } else { "옮기려면" };
-            eprintln!("moai: {id} 는 {stood} — {from} 에서 오는 자리라 {lost}. {verb} {way}");
-        }
-    }
+    let at = k.epic.as_deref().or(k.parent.as_deref()).unwrap_or_default();
+    let (from, way) = match k.way {
+        Way::Pinned => return eprintln!("moai: {id} 는 {stood} — id 가 {at} 밑에 서 있어 {lost}"),
+        Way::Epic => (
+            format!("에픽 {at} 에서 오는 자리라"),
+            format!("`moai edit {id} -e <다른 에픽>` 이나 `moai edit {at} --milestone {wrote}`"),
+        ),
+        Way::Lost => (format!("못 쓸 에픽 {at} 을 따라 (길 잃음) 에 서 있어"), format!("`moai edit {id} -e <다른 에픽>`")),
+        Way::Parent => (format!("조상 {at} 에서 오는 자리라"), format!("`moai edit {at} --milestone {wrote}`")),
+    };
+    let verb = if cut { "빼려면" } else { "옮기려면" };
+    eprintln!("moai: {id} 는 {stood} — {from} {lost}. {verb} {way}");
 }
 
 fn fail_if_nothing(args: &EditArgs) -> R<()> {

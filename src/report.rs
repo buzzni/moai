@@ -1036,7 +1036,7 @@ fn split_stands<'a, 'c>(stands: BTreeMap<&'a str, Stand<'a, 'c>>) -> (BTreeMap<&
 }
 
 /// (종류, 묶음 id) → 그 묶음의 일. **롤업과 같은 자다** — 물려받은 소속까지, 일만.
-/// 목록을 한 번만 걷는다 — 묶음마다 걸으면 제곱이다. **종류로 가른다** — 에픽 지도가
+/// 목록을 종류마다 한 번 걷는다 — 묶음마다 걸으면 제곱이다. **종류로 가른다** — 에픽 지도가
 /// 마일스톤 id 를 가리키는 틀린 참조를 마일스톤의 멤버로 세면 `rollup_of` 와 어긋난다.
 fn members_in<'a>(
     all: &'a [Issue],
@@ -1340,43 +1340,80 @@ pub fn epic_from_parent<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, &'a 
     Some((epic, crate::id::parent_of(&line.id)?))
 }
 
-/// 마일스톤을 넘긴 자리 — 제 에픽이거나, 그 마일스톤을 실제로 든 id 조상이다.
+/// 마일스톤을 정한 자리 — 적은 대로 안 선 줄을 **옮기려면 어디를 고치는가**.
 ///
-/// `Parent` 는 **바로 위 부모가 아니라 값을 든 조상**이다. 손자가 조부의 마일스톤을
-/// 받을 때 바로 위 부모를 대면, 그 부모를 고치라는 안내는 아무것도 안 바꾼다.
-/// 조상이 마일스톤 줄 자신이면(`--parent <마일스톤>`) 그 id 가 마일스톤과 같다.
+/// 자리마다 옮기는 길이 달라 넷으로 가른다. 길을 `cmd` 가 다시 재면 안내가 셈과 어긋난다.
 #[derive(Debug, PartialEq)]
 pub enum Above<'a> {
+    /// 제 에픽 — 에픽을 옮기거나 그 에픽의 마일스톤을 고치면 따라간다.
     Epic(&'a str),
+    /// 에픽으로 **못 쓸** 소속 — 없는 id 거나 에픽이 아닌 줄이다. 줄은 `(길 잃음)` 에 서므로
+    /// ([`misplaced`]) 그 id 의 마일스톤을 고쳐도 안 따라온다. 에픽을 옮기는 길만 있다.
+    Lost(&'a str),
+    /// 그 줄의 `milestone` 이 이 줄 대신 읽히는 id 조상 — 값을 든 조상이거나, 아무도 값을
+    /// 안 들었으면 접힌 맨 위 줄([`fold_top`])이다. **바로 위 부모가 아니다** — 손자가 조부의
+    /// 마일스톤을 받을 때 바로 위 부모를 대면, 그 부모를 고치라는 안내는 아무것도 안 바꾼다.
     Parent(&'a str),
+    /// id 가 그 줄 밑에 서 있어 **필드로는 못 옮긴다** — 마일스톤 줄(`--parent <마일스톤>`)이거나
+    /// 뿌리로 올라간 생각([`rooted_thoughts`]). 그 줄의 필드를 고치라고 대면 아무것도 안 바뀐다.
+    Pinned(&'a str),
 }
 
-/// 제 `milestone` 필드가 아니라 위에서 정해지는 마일스톤 — `(선 마일스톤, 정한 자리)`.
-/// 제 필드가 답이면 `None` 이다. **선 마일스톤이 없어도 자리는 댄다** — 마일스톤 없는
-/// 에픽의 멤버가 `--milestone X` 를 적으면 X 는 필드에만 남고 줄은 `(마일스톤 없음)` 에
-/// 선다(moai-mhxf). 그것도 에픽에게 진 것이다.
+/// `--milestone <wrote>` 를 적은 줄이 **적은 대로 안 서면** — `(선 마일스톤, 정한 자리)`.
+/// 적은 대로 섰으면 `None` 이다(`wrote` 가 `None` 이면 비우라고 적은 것이다). 적은 것과 선 것이
+/// 같으면 말할 것이 없다 — 이긴 쪽이 마침 같은 곳에 서 있다.
 ///
-/// `edit --milestone none` 이 필드를 비워도 이 소속은 남는다(moai-0lmn) — [`milestones`]
-/// 는 에픽이 이기고 부모도 이긴다. [`epic_from_parent`] 와 같은 모양이다. 답은
-/// `milestones` 에서 읽고, 정한 자리만 같은 차례(에픽 → 접힌 맨 위 줄)로 가린다.
-/// 에픽 줄과 마일스톤 줄은 제 필드에만 서거나 어디에도 안 서므로 언제나 `None` 이다.
-pub fn milestone_from_above<'a>(all: &'a [Issue], id: &str) -> Option<(Option<&'a str>, Above<'a>)> {
+/// **선 마일스톤이 없어도 자리는 댄다** — 마일스톤 없는 에픽의 멤버가 `--milestone X` 를 적으면
+/// X 는 필드에만 남고 줄은 `(마일스톤 없음)` 에 선다(moai-mhxf). 그것도 에픽에게 진 것이다.
+/// `edit --milestone none` 이 필드를 비워도 소속이 남는 것(moai-0lmn)과 같은 어긋남이다 —
+/// [`milestones`] 는 에픽이 이기고 부모도 이긴다. [`epic_from_parent`] 와 같은 모양이다.
+///
+/// 답은 `milestones` 에서 읽고, 정한 자리만 같은 차례(에픽 → 접힌 맨 위 줄)로 가린다.
+/// **옮기는 길은 적은 것에 따라 갈린다** — 마일스톤 줄 밑에 id 로 선 줄은 비워서는 못 끊지만,
+/// 그 사이에 접힌 맨 위 줄이 따로 있으면 그 줄의 필드가 마일스톤 조상을 이겨 다른 마일스톤으로는
+/// 옮겨진다. 에픽 줄과 마일스톤 줄은 제 필드에만 서거나 어디에도 안 서므로 언제나 `None` 이다.
+pub fn milestone_from_above<'a>(
+    all: &'a [Issue],
+    id: &str,
+    wrote: Option<&str>,
+) -> Option<(Option<&'a str>, Above<'a>)> {
     let line = all.iter().rev().find(|i| i.id == id)?;
     if !joins(line) {
         return None;
     }
     let milestone = milestones(all).get(id).copied();
-    if let Some(e) = groups(all).get(id) {
-        return Some((milestone, Above::Epic(e)));
+    if milestone == wrote {
+        return None;
     }
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
+    if let Some(e) = groups(all).get(id) {
+        // 못 쓸 에픽의 멤버는 `(길 잃음)` 에 선다 — `milestones` 가 그 줄에 값을 안 주는 것과
+        // 같은 자(없는 id·종류가 틀린 것)다. 그 id 의 마일스톤을 고치라고 대면 헛말이다.
+        let usable = by_id.get(e).is_some_and(|x| x.kind == Kind::Epic);
+        return Some((milestone, if usable { Above::Epic(e) } else { Above::Lost(e) }));
+    }
     let rooted = rooted_thoughts(&by_id);
-    let top = fold_top(line, &by_id, &rooted)?;
+    let Some(top) = fold_top(line, &by_id, &rooted) else {
+        // 뿌리로 올라간 생각 밑에 접혔다 — 그 밑은 `(마일스톤 없음)` 에 서고(`fold_top`), 어느
+        // 필드를 고쳐도 안 옮겨진다. 조용하면 `show --milestone X` 가 그 줄을 말없이 못 낸다.
+        let thought = std::iter::successors(crate::id::parent_of(&line.id), |p| crate::id::parent_of(p))
+            .find(|p| rooted.contains(p))?;
+        return Some((milestone, Above::Pinned(thought)));
+    };
     // 값을 든 줄은 `climb` 이 읽는 그 줄이다 — 자를 따로 두면 안내가 셈과 어긋난다.
     // 그 줄이 제 줄이면 제 필드가 답이다(접히지 않은 줄의 제 `milestone`).
     // 아무도 값을 안 들었으면 정한 것은 접힌 맨 위 줄이다 — 제 필드는 거기서 안 읽힌다.
     match stood_at(top, &by_id, &rooted) {
         Some(source) if source.id == line.id => None,
+        // id 가 마일스톤 밑이다. 비우는 것은 못 끊는다. 다른 마일스톤은 접힌 맨 위 줄이 제 줄이
+        // 아니면 그 줄에 적어 옮긴다 — `stood_at` 이 마일스톤 조상보다 그 줄의 필드를 먼저 읽는다.
+        Some(source) if source.kind == Kind::Milestone => Some((
+            milestone,
+            match wrote {
+                Some(_) if top.id != line.id => Above::Parent(top.id.as_str()),
+                _ => Above::Pinned(source.id.as_str()),
+            },
+        )),
         Some(source) => Some((milestone, Above::Parent(source.id.as_str()))),
         None if top.id != line.id => Some((milestone, Above::Parent(top.id.as_str()))),
         None => None,
