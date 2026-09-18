@@ -3989,3 +3989,8 @@
 {"ts":"2026-09-18T11:05:59Z","id":"moai-sprn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-1k17 에서 펼쳤다 — 브리프 9-1 과 AGENTS 블록이 옛 model 줄 꼴을 가르친다"}
 {"ts":"2026-09-18T11:05:59Z","id":"moai-1k17","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-sprn 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-18T11:06:07Z","id":"moai-jo8d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:06:26Z","id":"moai-wxkm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"모든 명령의 --help 를 80칸 안으로"}
+{"ts":"2026-09-18T11:06:26Z","id":"moai-ezdp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옵션 열·after_help·long_help 를 80칸 안으로 접고 폭 시험을 모든 명령으로 넓힌다"}
+{"ts":"2026-09-18T11:06:26Z","id":"moai-wxkm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-c57v 에서 펼쳤다 — 다른 명령의 --help 도 80칸을 넘는다 — after_help 글줄과 clap 옵션 열"}
+{"ts":"2026-09-18T11:06:26Z","id":"moai-c57v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wxkm 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:06:33Z","id":"moai-ezdp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
