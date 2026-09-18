@@ -3708,3 +3708,8 @@
 {"ts":"2026-09-18T03:43:49Z","id":"moai-7x3r","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽 끝 xhigh 리뷰(moai-rp6v.u8k)가 백그라운드에서 돈다 — 반영 뒤 main 병합, 워크트리 지우고 닫는다"}
 {"ts":"2026-09-18T03:47:01Z","id":"moai-9a8m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"e51b5c5 로 main 에 병합 — ⎇ 만 닫힌 줄에서 가린다(사람 결정)"}
 {"ts":"2026-09-18T03:47:02Z","id":"moai-ncsf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"e51b5c5 로 main 에 병합"}
+{"ts":"2026-09-18T03:51:26Z","id":"moai-a4ur","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"python 에이전트 예제 시험을 bash 판만큼 넓힌다"}
+{"ts":"2026-09-18T03:51:26Z","id":"moai-8ksq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"python 예제 시험에 already 설정·노트 실패·자식을 남긴 일을 더한다"}
+{"ts":"2026-09-18T03:51:26Z","id":"moai-a4ur","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-9dyi 에서 펼쳤다 — python 에이전트 예제 시험을 bash 판만큼 넓힌다 — already 설정·노트 실패·자식을 남긴 일"}
+{"ts":"2026-09-18T03:51:26Z","id":"moai-9dyi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-a4ur 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T03:51:31Z","id":"moai-8ksq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
