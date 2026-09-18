@@ -635,7 +635,7 @@ pub fn workplaces(
     // 변형이 하나 늘 때마다 **디스크를 언제 만지는가**가 조용히 따라 바뀐다. 그래서 그 하나를
     // 재는 자(`report::claimed` — `hook::held` 와 `places` 가 이미 같이 쓴다)를 바로 쓴다.
     let all_names = names(linked.iter().copied());
-    let named = crate::report::claimed(asked, cfg, &all_names);
+    let named = crate::report::claimed(asked, &all_names);
     if crate::report::wip(asked, cfg).iter().all(|i| named(i)) {
         return out;
     }

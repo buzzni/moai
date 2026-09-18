@@ -887,24 +887,22 @@ pub fn unit_of<'a>(issues: &'a [Issue], focus: &[&'a Issue]) -> BTreeSet<&'a str
 ///
 /// `away` 는 옆 워크트리의 이름이 가리키는 id 들이다(`worktree::away`) — 여기는 읽지
 /// 않는다. 그 줄 자신, 그 밑의 자식, 그 에픽·마일스톤에 든 줄을 뺀다. 옆에서 그 일을
-/// 펼쳐 집은 것도 옆의 것이다. **닫힌 줄을 가리키는 이름은 아무것도 안 뺀다** — 머지하고 안
-/// 치운 워크트리의 이름이다(`report::claimed`, moai-9a8m).
+/// 펼쳐 집은 것도 옆의 것이다.
 pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &BTreeSet<String>) -> Vec<&'a Issue> {
     let wip = report::wip(issues, cfg);
     if away.is_empty() || wip.is_empty() {
         return wip;
     }
-    let theirs = theirs(issues, cfg, away);
+    let theirs = theirs(issues, away);
     wip.into_iter().filter(|i| !theirs(i)).collect()
 }
 
 /// 이 줄이 **옆 워크트리의 일**인가 — 그 줄 자신이나 조상이 `away` 에 들었거나, 그 에픽·
-/// 마일스톤이 들었다. 닫힌 줄을 가리키는 이름은 빼고 잰다(`report::claimed`).
-/// [`held`] 와 그 초점을 쓰는 규칙이 같은 자로 재야 한다 — 초점에서는
+/// 마일스톤이 들었다. [`held`] 와 그 초점을 쓰는 규칙이 같은 자로 재야 한다 — 초점에서는
 /// 뺀 옆의 리뷰 줄을 규칙 3 이 "집으라" 고 대면, 이미 옆에서 집은 줄이라 시킨 대로 해도
 /// 안 풀린다.
-fn theirs<'a>(issues: &'a [Issue], cfg: &Config, away: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
-    report::claimed(issues, cfg, away)
+fn theirs<'a>(issues: &'a [Issue], away: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
+    report::claimed(issues, away)
 }
 
 /// **누구의 것인지 모르는** 집은 줄 — 옆 딸린 워크트리의 스냅샷에도 벌여 놓인(또는 거기서 늦게
@@ -919,10 +917,7 @@ pub fn unsure(issues: &[Issue], cfg: &Config, elsewhere: &BTreeSet<String>, own:
     if elsewhere.is_empty() {
         return BTreeSet::new();
     }
-    // **제 이름은 닫힌 줄을 가리켜도 쥔다**(`report::owns`) — 닫힌 줄의 이름을 푸는 것은 머지하고
-    // 안 치운 **옆** 워크트리를 거르려는 것이다. 여기에 걸면 main 을 받아 제 줄이 닫힌 세션의 일이
-    // 모르는 줄로 빠져, 좁힌 초점이 제 일에 대한 규칙 1·3 과 `Stop` 을 말없이 푼다.
-    let named_mine = report::owns(issues, own);
+    let named_mine = theirs(issues, own);
     report::wip(issues, cfg)
         .into_iter()
         .filter(|i| elsewhere.contains(&i.id) && !named_mine(i))
@@ -1471,7 +1466,7 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>) -> 
     let out_of_plan = report::put_off(issues);
     // **옆 워크트리의 리뷰는 여기서 안 센다** — 초점에서 뺀 것과 같은 자다([`theirs`]).
     // 세면 main 에서 아무것도 안 집은 세션에 옆이 이미 집은 리뷰를 "집으라" 고 막는다.
-    let theirs = theirs(issues, cfg, away);
+    let theirs = theirs(issues, away);
     let open: Vec<&Issue> = issues
         .iter()
         .filter(|i| is_review(i, &out_of_plan) && !i.status.is_done() && !theirs(i))
@@ -1821,17 +1816,6 @@ mod tests {
         let got: Vec<String> = unsure(&all, &cfg(), &elsewhere, &away(&["t-e"])).into_iter().collect();
         assert_eq!(got, ["t-2"], "제 에픽의 일이나 안 집은 줄을 모른다고 했다");
         assert!(unsure(&all, &cfg(), &here(), &here()).is_empty());
-    }
-
-    /// **제 이름은 닫힌 줄을 가리켜도 쥔다**(`report::owns`) — main 을 받아 제 줄이 `done` 으로 선
-    /// 워크트리의 세션도 그 밑에서 집은 일은 확실히 제 것이다. 닫힌 이름을 푸는 것(moai-9a8m)은
-    /// 머지하고 안 치운 **옆** 워크트리를 거르는 것이라, 여기에 걸면 제 리뷰가 모르는 줄로 빠져
-    /// 좁힌 초점이 규칙 1·3 과 `Stop` 을 말없이 푼다.
-    #[test]
-    fn my_own_name_keeps_its_work_even_when_its_row_is_closed() {
-        let all = vec![epic("t-e"), under("t-1", "done", "t-e"), under("t-1.r", "in_progress", "t-e")];
-        let got = unsure(&all, &cfg(), &away(&["t-1.r"]), &away(&["t-1", "worktree-t-1"]));
-        assert!(got.is_empty(), "닫힌 제 이름 밑의 일을 모른다고 했다 — {got:?}");
     }
 
     // ── 명령이 가리키는 트래커 ────────────────────────────────────────
@@ -3018,28 +3002,24 @@ mod tests {
         assert_eq!(judge("cat a > /tmp/x && moai mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
     }
 
-    /// **머지하고 안 치운 워크트리의 이름은 끝난 일을 가리킬 뿐이다**(moai-9a8m) — 그 이름이
-    /// 닫힌 줄의 자식을 옆의 일로 끌어가면, main 에서 그 자식을 집어도 초점이 비어 규칙 2 가
-    /// "집은 것 없이" 로 막는다. 닫힌 줄 자신은 애초에 초점에 없으니 이름이 남아도 바뀔 것이 없다.
+    /// **머지하고 안 치운 워크트리의 이름이 닫힌 줄을 가리켜도 훅은 할 말이 없다**(moai-9a8m) —
+    /// 닫힌 줄은 애초에 초점에 없어, 목록이 그 줄에 `⎇` 를 달던 문제를 훅은 안 안는다.
+    ///
+    /// **그 이름은 닫힌 줄의 자식을 여전히 쥔다**(사용자 결정, 리뷰 moai-dfv2.c9t). 풀던 판은
+    /// 워크트리 안에서 줄을 닫고 그 자리에서 `--parent` 자식을 이어 하는 산 일을 "자리 없다" 로
+    /// 세웠다. 치우지 않은 워크트리가 쥐는 쪽은 규약대로 치우면 풀린다 — 되돌리려면 그 결정부터.
     #[test]
-    fn a_leftover_worktree_of_a_closed_row_takes_nothing_from_the_focus() {
+    fn a_leftover_worktree_of_a_closed_row_leaves_the_focus_alone_but_keeps_its_children() {
         let root = Path::new("/repo");
-        let names = away;
-        let all = vec![
-            epic("t-e"),
-            under("t-1", "done", "t-e"),
-            under("t-1.x", "in_progress", "t-e"),
-            under("t-2", "in_progress", "t-e"),
-        ];
-        let focus = |away: &BTreeSet<String>| held(&all, &cfg(), away).iter().map(|i| i.id.clone()).collect::<Vec<_>>();
-        assert_eq!(focus(&names(&["t-1", "worktree-t-1"])), focus(&here()), "닫힌 줄의 이름이 초점을 바꿨다");
-        assert_eq!(focus(&names(&["t-1"])), ["t-1.x", "t-2"]);
-        // 규칙 2 는 **그 자식만 집혀 있을 때** 본다 — `t-2` 가 남아 있으면 초점이 안 비어 옛 판정도
-        // 지나간다.
-        let lone: Vec<Issue> = all.iter().filter(|i| i.id != "t-2").cloned().collect();
-        assert_eq!(guard_edit(&lone, &cfg(), &names(&["t-1"]), root, "/repo/src/x.rs"), Decision::Pass);
-        // 산 이름은 여전히 쥔다 — 옆이 쥔 일은 초점에서 빠진다.
-        assert_eq!(focus(&names(&["t-2"])), ["t-1.x"]);
+        let all = vec![epic("t-e"), under("t-1", "done", "t-e"), under("t-2", "in_progress", "t-e")];
+        let focus = |all: &[Issue], names: &BTreeSet<String>| {
+            held(all, &cfg(), names).iter().map(|i| i.id.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(focus(&all, &away(&["t-1", "worktree-t-1"])), focus(&all, &here()), "닫힌 줄의 이름이 초점을 바꿨다");
+        assert_eq!(guard_edit(&all, &cfg(), &away(&["t-1"]), root, "/repo/src/x.rs"), Decision::Pass);
+
+        let child = vec![epic("t-e"), under("t-1", "done", "t-e"), under("t-1.x", "in_progress", "t-e")];
+        assert!(focus(&child, &away(&["t-1"])).is_empty(), "닫힌 줄의 이름이 자식을 놓았다 — 사용자 결정과 다르다");
     }
 
     /// **`--from <칸>` 의 값은 갈 칸이 아니다** (moai-f8q1). 값 받는 플래그로 안 세던
