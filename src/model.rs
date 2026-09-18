@@ -475,7 +475,7 @@ pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
 /// 같은 까닭으로 **제자리를 벗어난 `tokens=<수>`**(괄호 안·괄호 뒤)도 안 받는다.
 ///
 /// **줄 머리에서 시작한 줄만 받는다.** 들여 쓴 줄은 마크다운의 코드 덩이 — 꼴을 옮겨 적은 예다.
-fn parse_work(line: &str) -> Option<Work> {
+pub(crate) fn parse_work(line: &str) -> Option<Work> {
     let rest = line.strip_prefix("model:")?;
     // `model::actor` 로 시작하는 글줄을 거른다.
     if !rest.starts_with(char::is_whitespace) {

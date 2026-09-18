@@ -17,12 +17,13 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     after_help = "\
 세션은 이렇게 시작한다:
 
-  moai status                   보드 · 경고 · 흐름. 인자 없이 불러도 이것이 나온다
+  moai status                   보드 · 경고 · 흐름. 인자 없이도 이것이 나온다
   moai ready                    지금 집을 수 있는 일
-  moai show <id>                그 일의 본문과 이력 — 왜 그렇게 정했는지가 여기 있다
+  moai show <id>                본문과 이력 — 왜 그렇게 정했는지가 여기 있다
   moai mv <id> in_progress      집는다.  끝나면 done
   moai note <id> \"발견한 것\"    다음 사람이 읽을 메모
-  moai tui                      탐색기 — 에픽이 디렉터리처럼 열린다. SPC n 으로 생각을 담는다
+  moai tui                      탐색기 — 에픽이 디렉터리처럼 열린다.
+                                SPC n 으로 생각을 담는다
 
 지금 할 일은 아닌 것이 떠오르면:
 
@@ -36,7 +37,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 여러 프로젝트를 한곳에서 볼 때:
 
-  moai project add <dir>        등록하면 `.moai` 밖에서 부른 `moai`·`status`·`ready` 가
+  moai project add <dir>        등록하면 `.moai` 밖의 `moai`·`status`·`ready` 가
                                 등록한 프로젝트를 한눈에 낸다
   moai -C <dir> <명령>          그 밖의 명령은 어느 프로젝트인지 댄다
 
@@ -68,15 +69,17 @@ pub struct Cli {
     #[arg(long, global = true, conflicts_with = "color")]
     pub no_color: bool,
 
-    /// 언제 색을 쓸까 (NO_COLOR·파이프는 자동으로 꺼진다)
-    #[arg(long, global = true, value_name = "어떻게", default_value = "auto")]
+    // 값과 기본값은 글로 적는다 — clap 이 붙이는 `[default: …] [possible values: …]` 가
+    // 옵션 열 옆에서 130칸을 넘었다(moai-c57v). `NO_COLOR` 도 auto 가 읽는다.
+    /// auto·always·never (기본 auto, 파이프면 끈다)
+    #[arg(long, global = true, value_name = "어떻게", default_value = "auto", hide_default_value = true, hide_possible_values = true)]
     pub color: ColorArg,
 
     /// 이 디렉터리에서 실행한다 (`git -C` 와 같다)
     #[arg(short = 'C', long = "dir", global = true, value_name = "경로")]
     pub dir: Option<std::path::PathBuf>,
 
-    /// 누가 하는가. 없으면 `git config` 에서 가져온다
+    /// 누가 하는가 (없으면 `git config`)
     #[arg(long, global = true, value_name = "이름 (메일)")]
     pub user: Option<String>,
 }
@@ -103,10 +106,11 @@ pub enum Cmd {
   종료 코드는 데이터가 깨졌을 때만 0 이 아니다.
 
   --worktree 는 다른 git 워크트리의 이슈도 겹쳐 본다. 같은 id 는 칸을 옮기거나
-  미루고 도로 집은 때가 늦은 줄이 서고(같으면 updated_at 이 늦은 줄), 지금 브랜치가
-  아닌 줄은 제목 앞에 ⎇ <브랜치> 가 붙는다.
+  미루고 도로 집은 때가 늦은 줄이 서고(같으면 updated_at 이 늦은 줄), 지금
+  브랜치가 아닌 줄은 제목 앞에 ⎇ <브랜치> 가 붙는다.
   여기서 rm 한 줄은 갈라진 뒤 옆에서 만지지 않았으면 되살아나지 않는다.
-  옆 워크트리를 못 읽으면 보드가 \"옆 워크트리 문제 N건\" 으로 말한다 — 종료 코드는 그대로다.
+  옆 워크트리를 못 읽으면 보드가 \"옆 워크트리 문제 N건\" 으로 말한다 —
+  종료 코드는 그대로다.
   보여줄 때만 겹친다 — 어느 파일도 바뀌지 않는다.")]
     Status(WorktreeArg),
 
@@ -115,9 +119,10 @@ pub enum Cmd {
   급한 것 → 끝나가는 에픽 → 오래된 것 차례로 낸다.
 
   --worktree 면 다른 워크트리에서 이미 집은 일은 여기서 빠지고, 잡고 있는
-  것에 ⎇ <브랜치> 와 함께 선다. 같은 id 는 칸을 옮기거나 미루고 도로 집은 때가 늦은
-  줄로 읽으므로, 옆에서 집은 뒤 여기서 제목·우선순위만 고쳐도 옆에서 집은 것이
-  풀리지 않고, 옆에서 늦게 미룬 일을 여기서 집으라고 내지 않는다.")]
+  것에 ⎇ <브랜치> 와 함께 선다. 같은 id 는 칸을 옮기거나 미루고 도로 집은
+  때가 늦은 줄로 읽으므로, 옆에서 집은 뒤 여기서 제목·우선순위만 고쳐도
+  옆에서 집은 것이 풀리지 않고, 옆에서 늦게 미룬 일을 여기서 집으라고 내지
+  않는다.")]
     Ready(WorktreeArg),
 
     /// 이슈를 만든다
@@ -127,7 +132,7 @@ pub enum Cmd {
   moai add \"저장 계층\" --type epic
   moai add \"부모에 딸린 일\" --parent moai-4aex
   moai add \"본문은 stdin 에서\" -b -
-  moai add \"남에게\" -a \"철수 (chulsoo@example.com)\"    안 주면 만든 사람이 담당이다
+  moai add \"남에게\" -a \"철수 (chulsoo@example.com)\"    안 주면 만든 이가 담당
   moai add \"임자 없이\" -a none
 
 한 번에 여럿 (`--from`):
@@ -169,6 +174,8 @@ PLAN
   moai mv moai-4aex in_progress --from todo")]
     Mv(MvArgs),
     /// 제목·본문·태그·에픽·우선순위를 고친다
+    #[command(after_help = "  `--epic none`·`--milestone none` 은 그 줄에 적힌 필드만 뺀다. 부모나
+  에픽에게서 물려받는 소속은 남는다.")]
     Edit(EditArgs),
     /// 지운다
     Rm(RmArgs),
@@ -340,7 +347,7 @@ NOTE
     #[command(subcommand)]
     Skill(SkillCmd),
 
-    /// 여러 프로젝트를 한 moai 에서 보려고 디렉터리를 등록한다 (사용자 설정)
+    /// 여러 프로젝트를 한 moai 에서 보려고 디렉터리를 등록한다
     #[command(subcommand, after_help = "\
 예시:
   moai project add ~/work/argos         등록한다. .moai 가 아직 없어도 받는다
@@ -350,13 +357,14 @@ NOTE
   moai project color ~/work/argos green 색을 정한다 (auto 면 경로로 고른다)
 
   등록하면 `.moai` 밖에서 부른 `moai`·`moai status`·`moai ready` 가 등록한
-  프로젝트를 프로젝트마다 한눈에 낸다 (`--json` 은 `projects` 배열). `--worktree` 를
-  붙이면 프로젝트마다 옆 워크트리도 겹친다. 그 밖의 명령은 어느 프로젝트인지 모르니
-  `moai -C <dir> <명령>` 으로 부른다.
+  프로젝트를 프로젝트마다 한눈에 낸다 (`--json` 은 `projects` 배열).
+  `--worktree` 를 붙이면 프로젝트마다 옆 워크트리도 겹친다. 그 밖의 명령은
+  어느 프로젝트인지 모르니 `moai -C <dir> <명령>` 으로 부른다.
 
   저장소가 아니라 **사람의** 설정이다 — `.moai` 밖 어디서 불러도 된다. 자리는
   MOAI_CONFIG → $XDG_CONFIG_HOME/moai/config.toml → ~/.config/moai/config.toml.
-  상대경로는 지금 자리(`-C` 를 줬으면 그 디렉터리)에 붙이고 심볼릭 링크를 풀어 적는다.
+  상대경로는 지금 자리(`-C` 를 줬으면 그 디렉터리)에 붙이고 심볼릭 링크를 풀어
+  적는다.
 
   누가 했는지 묻지 않는다. 이력이 남는 파일이 아니다.")]
     Project(ProjectCmd),
@@ -367,18 +375,21 @@ NOTE
 
   접두어는 처음 한 번만 정한다 — 이미 발급된 id 가 전부 그것을 달고 있다.
 
-  새 접두어는 8자까지다 — id 를 칠 때마다 붙는다. 긴 것을 주면 거절하고 짧은 후보를
-  댄다. 안 주면 디렉터리 이름에서 만들고, 8자를 넘으면 하이픈을 빼서 들어가면 그것
-  (moa-issue → moaissue), 아니면 하이픈 낱말 머리글자(my-company-backend → mcb),
-  낱말이 하나면 앞 8자로 줄인다. 이미 긴 접두어로 심긴
-  저장소는 그대로 읽고 쓴다.")]
+  새 접두어는 8자까지다 — id 를 칠 때마다 붙는다. 긴 것을 주면 거절하고
+  짧은 후보를 댄다. 안 주면 디렉터리 이름에서 만들고, 8자를 넘으면 하이픈을
+  빼서 들어가면 그것(moa-issue → moaissue), 아니면 하이픈 낱말
+  머리글자(my-company-backend → mcb), 낱말이 하나면 앞 8자로 줄인다. 이미 긴
+  접두어로 심긴 저장소는 그대로 읽고 쓴다.
+
+  --check 는 아무것도 안 쓰고 AGENTS.md 블록이 current·stale·missing 인지만
+  답한다. 파일을 못 읽을 때만 0 이 아니다.")]
     Init {
         /// id 접두어(8자까지). 없으면 디렉터리 이름에서 만든다
         prefix: Option<String>,
         /// AGENTS.md 를 건드리지 않는다
         #[arg(long)]
         no_agents: bool,
-        /// 아무것도 안 쓰고 AGENTS.md 블록이 current·stale·missing 인지만 본다. 파일을 못 읽을 때만 0 이 아니다
+        /// 아무것도 안 쓰고 AGENTS.md 블록이 낡았는지만 본다
         #[arg(long, conflicts_with_all = ["prefix", "no_agents"])]
         check: bool,
     },
@@ -396,7 +407,7 @@ pub enum ProjectCmd {
     #[command(after_help = "\
 예시:
   moai project add .                    지금 디렉터리
-  moai project add ~/work/argos         .moai 가 없으면 \"init 전\" 을 알리고 등록한다
+  moai project add ~/work/argos         .moai 가 없어도 등록한다 (\"init 전\")
 
   다시 불러도 된다 — 이미 있으면 \"이미 등록돼 있다\" 로 0 종료한다.")]
     Add {
@@ -415,18 +426,19 @@ pub enum ProjectCmd {
         #[arg(value_name = "디렉터리")]
         path: std::path::PathBuf,
     },
-    /// 한눈 보기와 탐색기에서 그 프로젝트가 입을 색을 정한다 (auto 면 경로로 고른다)
+    /// 한눈 보기와 탐색기에서 그 프로젝트가 입을 색을 정한다
     #[command(alias = "colour", after_help = "\
 예시:
   moai project color ~/work/argos green   경로로 고른 색 대신 초록으로
   moai project color ~/work/argos auto    정한 것을 지우고 경로로 고른다
 
-  고를 수 있는 색은 cyan·green·blue 셋뿐이다. 빨강·노랑·자홍은 이미 오류·집은 일·
-  review 를 뜻해 id 곁에서 거짓 뜻이 되고, 밝은 색과 회색은 어느 한쪽 바탕에서 사라진다.
-  색은 곁들이다 — 이름이 늘 곁에 선다. 두 프로젝트가 같은 색으로 겹칠 때 쓴다.
+  고를 수 있는 색은 cyan·green·blue 셋뿐이다. 빨강·노랑·자홍은 이미 오류·집은
+  일·review 를 뜻해 id 곁에서 거짓 뜻이 되고, 밝은 색과 회색은 어느 한쪽
+  바탕에서 사라진다. 색은 곁들이다 — 이름이 늘 곁에 선다. 두 프로젝트가 같은
+  색으로 겹칠 때 쓴다.
 
-  사용자 설정의 `[[project]]` 에 `color = \"green\"` 로 적힌다. 손으로 적어도 된다 —
-  틀린 값은 `moai project ls` 가 한 줄로 비추고 경로로 고른 색을 쓴다.")]
+  사용자 설정의 `[[project]]` 에 `color = \"green\"` 로 적힌다. 손으로 적어도
+  된다 — 틀린 값은 `moai project ls` 가 한 줄로 비추고 경로로 고른 색을 쓴다.")]
     Color {
         /// 등록한 디렉터리. 이미 사라졌어도 적힌 경로로 찾는다
         #[arg(value_name = "디렉터리")]
@@ -448,10 +460,9 @@ pub enum ProjectCmd {
 pub enum Typed {
     /// 만든다
     Add(AddArgs),
-    /// 펼치거나 목록을 낸다
-    ///
-    /// `ls` 는 같은 것의 다른 이름이다. **어휘를 둘로 만들지 않으려고 별명으로
-    /// 둔다** — 목록을 내는 동사가 둘이면 도움말이 둘 다 가르쳐야 한다.
+    // `ls` 는 같은 것의 다른 이름이다. **어휘를 둘로 만들지 않으려고 별명으로
+    // 둔다** — 목록을 내는 동사가 둘이면 도움말이 둘 다 가르쳐야 한다.
+    /// 펼치거나 목록을 낸다 (`ls` 도 같다)
     #[command(alias = "ls")]
     Show(ShowArgs),
 }
@@ -479,7 +490,8 @@ PLAN
   저널에 남는다 (`moai show <id>` 의 이력).
 
   에픽이 이미 서 있으면 `-e <에픽>` 으로 그 에픽의 멤버로 펼친다. 에픽이
-  내건 것이 idea 로 밖에 나가 있던 것을 되찾는 자리다 — 계획에는 `- 이슈` 만 적는다.
+  내건 것이 idea 로 밖에 나가 있던 것을 되찾는 자리다 — 계획에는
+  `- 이슈` 만 적는다.
 
 moai idea promote <id> -e <에픽> --from - <<'PLAN'
 - [p1] 에픽이 내건 것
@@ -499,11 +511,11 @@ pub struct PromoteArgs {
     #[arg(long, value_name = "파일|-")]
     pub from: String,
 
-    /// 새 에픽을 세우지 않고 이미 선 이 에픽에 멤버로 펼친다. 계획에는 `- 이슈` 만 적는다
+    /// 새 에픽 대신 이미 선 이 에픽에 멤버로 펼친다
     #[arg(short, long, value_name = "에픽")]
     pub epic: Option<String>,
 
-    /// 계획 템플릿의 `{{이름}}` 을 채운다 (여러 번 준다) — `add --from` 과 같은 규칙
+    /// 템플릿의 `{{이름}}` 을 채운다 (여러 번 준다)
     #[arg(long = "var", value_name = "이름=값")]
     pub var: Vec<String>,
 
@@ -542,7 +554,7 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "글")]
     pub body: Option<String>,
 
-    /// 담당. 안 주면 만든 사람이다. `이름 (메일)` 로 주면 갈라 넣고, `none` 이면 비운다
+    /// 담당. 안 주면 만든 사람, `이름 (메일)` 로 준다. `none` 이면 비운다
     #[arg(short, long, value_name = "이름 (메일)|none")]
     pub assignee: Option<String>,
 
@@ -557,24 +569,30 @@ pub struct AddArgs {
     #[arg(long, value_name = "파일|-", conflicts_with_all = ["title", "epic", "tag", "priority", "parent"])]
     pub from: Option<String>,
 
+    // 거절은 `clap` 이 아니라 `add::run` 이 한다. `requires = "from"` 은
+    // 제목이 없을 때만 걸린다 — `from` 이 제목과 `conflicts` 라서, 제목이
+    // 있으면 못 채울 요구로 보고 조용히 건너뛴다. **바로 그 자리가 구멍이다.**
+    //
+    // 아래 `///` 둘째 문단부터는 `--help` 가 옵션 밑에 펴는 긴 글이다. 줄을 70칸
+    // 안에서 손으로 끊고 `verbatim_doc_comment` 로 그 끊음을 지킨다 — clap 은
+    // 문단을 한 줄로 이어 붙이고 접지 않아(moai-opjn) 200칸을 넘었다(moai-c57v).
+    // 이 파일의 다른 긴 글도 같다.
     /// 만들지 않고 무엇이 만들어질지만 낸다 (`--from` 과 함께)
     ///
-    /// **`--from` 이 있어야 뜻이 있다.** 한때 없이도 받았고, 그때 `moai add
-    /// "제목" --dry-run` 은 연습이라고 적힌 줄을 찍은 다음 그것을 실제로
-    /// 만들었다 — 막는 줄 알고 부른 명령이 쓰는 것보다 나쁜 것은 없다.
-    ///
-    /// 거절은 `clap` 이 아니라 `add::run` 이 한다. `requires = "from"` 은
-    /// 제목이 없을 때만 걸린다 — `from` 이 제목과 `conflicts` 라서, 제목이
-    /// 있으면 못 채울 요구로 보고 조용히 건너뛴다. **바로 그 자리가 구멍이다.**
-    #[arg(long)]
+    /// **`--from` 이 있어야 뜻이 있다.** 한때 없이도 받았고, 그때
+    /// `moai add "제목" --dry-run` 은 연습이라고 적힌 줄을 찍은 다음 그것을
+    /// 실제로 만들었다 — 막는 줄 알고 부른 명령이 쓰는 것보다 나쁜 것은 없다.
+    #[arg(long, verbatim_doc_comment)]
     pub dry_run: bool,
 
+    // 변수가 전부 필수인 까닭은 moai-ahyz.
     /// 계획 템플릿의 `{{이름}}` 을 채운다 (`--from` 과 함께, 여러 번 준다)
     ///
-    /// **변수는 전부 필수다**(moai-ahyz) — 못 채운 이름·빈 값·줄바꿈이 든 값·계획에 없는 이름·같은
-    /// 이름 두 번은 거절하고 아무것도 안 만든다. 이름은 영문·숫자·`_`·`-` 이고, 값은 늘 제목 글자라
-    /// 변수는 제목 자리에만 둔다. `--dry-run` 과 같은 까닭으로 `--from` 없이 주면 거절한다.
-    #[arg(long = "var", value_name = "이름=값")]
+    /// **변수는 전부 필수다** — 못 채운 이름·빈 값·줄바꿈이 든 값·계획에 없는
+    /// 이름·같은 이름 두 번은 거절하고 아무것도 안 만든다. 이름은 영문·숫자·
+    /// `_`·`-` 이고, 값은 늘 제목 글자라 변수는 제목 자리에만 둔다.
+    /// `--dry-run` 과 같은 까닭으로 `--from` 없이 주면 거절한다.
+    #[arg(long = "var", value_name = "이름=값", verbatim_doc_comment)]
     pub var: Vec<String>,
 
     /// id 만 낸다 (스크립트용)
@@ -596,7 +614,7 @@ pub struct ShowArgs {
     #[arg(long)]
     pub tree: bool,
 
-    /// 에픽 하나를 `add --from` 이 받는 마크다운으로 되뽑는다 — 되풀이할 계획의 틀
+    /// 에픽 하나를 `add --from` 이 받는 마크다운으로 되뽑는다
     #[arg(long)]
     pub as_plan: bool,
 
@@ -612,7 +630,7 @@ pub struct ShowArgs {
 /// 제 워크트리 파일에만 간다.
 #[derive(Args, Debug, Default, Clone, Copy)]
 pub struct WorktreeArg {
-    /// 다른 git 워크트리의 이슈도 겹쳐 본다 (보여줄 때만 — 파일은 안 바뀐다)
+    /// 다른 git 워크트리의 이슈도 겹쳐 본다 (파일은 안 바뀐다)
     #[arg(long)]
     pub worktree: bool,
 }
@@ -640,7 +658,7 @@ pub struct FilterArgs {
     #[arg(short, long, value_name = "id|none")]
     pub epic: Vec<String>,
 
-    /// 그 마일스톤 소속 (`none` = 마일스톤 없는 것)
+    /// 그 마일스톤 소속 (`none` = 없는 것)
     #[arg(long, value_name = "id|none")]
     pub milestone: Vec<String>,
 
@@ -651,7 +669,7 @@ pub struct FilterArgs {
     #[arg(short, long, value_name = "0-3")]
     pub priority: Vec<String>,
 
-    /// 그 담당인 것 (`none` = 담당 없는 것, `me` = 현재 사용자)
+    /// 그 담당 (`none`·`me` = 없음·나)
     #[arg(short, long, value_name = "이름|메일|none|me")]
     pub assignee: Vec<String>,
 
@@ -674,17 +692,16 @@ pub struct FilterArgs {
     #[arg(long)]
     pub all: bool,
 
-    /// 위 필터를 한 문자열로. `--filter status=todo,review`
+    /// 필터를 한 문자열로 (`status=todo`)
     #[arg(long, value_name = "항목=값")]
     pub filter: Vec<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct MvArgs {
+    // 개수는 clap 이 아니라 `mv` 가 본다 — `2 values required by '<id> <id>...'`
+    // 는 무엇을 빠뜨렸는지 말해 주지 않는다.
     /// 옮길 이슈들, 그리고 맨 끝에 갈 칸
-    ///
-    /// 개수는 clap 이 아니라 `mv` 가 본다 — `2 values required by '<id> <id>...'`
-    /// 는 무엇을 빠뜨렸는지 말해 주지 않는다.
     #[arg(required = true, num_args = 1.., value_name = "id")]
     pub args: Vec<String>,
 
@@ -694,9 +711,9 @@ pub struct MvArgs {
 
     /// 아직 이 칸에 있을 때만 옮긴다 (겨루는 집기)
     ///
-    /// 안 주면 지금까지처럼 무엇도 막지 않는다. 주면 락 안에서 다시 보고, 그
-    /// 사이에 칸이 달라진 줄은 건드리지 않은 채 부분 실패로 선다.
-    #[arg(long, value_name = "칸")]
+    /// 안 주면 지금까지처럼 무엇도 막지 않는다. 주면 락 안에서 다시 보고,
+    /// 그 사이에 칸이 달라진 줄은 건드리지 않은 채 부분 실패로 선다.
+    #[arg(long, value_name = "칸", verbatim_doc_comment)]
     pub from: Option<String>,
 }
 
@@ -721,18 +738,18 @@ pub struct EditArgs {
     #[arg(long, value_name = "태그", value_delimiter = ',')]
     pub untag: Vec<String>,
 
-    /// 에픽을 옮긴다 (`none` 이면 제 필드를 뺀다 — 부모에게서 오는 소속은 남는다)
+    /// 에픽을 옮긴다 (`none` 이면 제 필드만 뺀다)
     #[arg(short, long, value_name = "id|none")]
     pub epic: Option<String>,
 
-    /// 마일스톤을 옮긴다 (`none` 이면 제 필드를 뺀다 — 에픽·부모에게서 오는 마일스톤은 남는다)
+    /// 마일스톤을 옮긴다 (`none` 이면 제 필드만 뺀다)
     #[arg(long, value_name = "id|none")]
     pub milestone: Option<String>,
 
     #[arg(short, long, value_name = "0-3")]
     pub priority: Option<u8>,
 
-    /// 담당. `이름 (메일)` 로 주면 갈라 넣고, `none` 이면 뺀다
+    /// `이름 (메일)` 로 준다. `none` 이면 뺀다
     #[arg(short, long, value_name = "이름 (메일)|none")]
     pub assignee: Option<String>,
 }
@@ -752,9 +769,9 @@ pub struct DeferArgs {
 
     /// 아직 이 칸에 있을 때만 미루거나 도로 집는다 (겨루는 집기)
     ///
-    /// `mv --from` 과 같은 자다. 옆에서 집어 일하기 시작한 줄을 뒤늦게 계획
-    /// 밖으로 빼지 않는다. 안 주면 지금까지처럼 아무것도 막지 않는다.
-    #[arg(long, value_name = "칸")]
+    /// `mv --from` 과 같은 자다. 옆에서 집어 일하기 시작한 줄을 뒤늦게
+    /// 계획 밖으로 빼지 않는다. 안 주면 지금까지처럼 아무것도 막지 않는다.
+    #[arg(long, value_name = "칸", verbatim_doc_comment)]
     pub from: Option<String>,
 }
 
@@ -763,9 +780,10 @@ pub struct DeferArgs {
 pub struct ReadArgs {
     /// 읽음으로 적을 이슈들
     ///
-    /// 무엇을 읽었는지는 언제나 댄다 — 인자 없이 부르면 아무 줄도 안 적으면서 성공으로 끝나,
-    /// 사람은 다 적힌 줄 알고 넘어간다. `--all`·`-e` 가 그 자리를 채운다.
-    #[arg(value_name = "id", required_unless_present_any = ["all", "epic"])]
+    /// 무엇을 읽었는지는 언제나 댄다 — 인자 없이 부르면 아무 줄도 안 적으면서
+    /// 성공으로 끝나, 사람은 다 적힌 줄 알고 넘어간다. `--all`·`-e` 가 그
+    /// 자리를 채운다.
+    #[arg(value_name = "id", required_unless_present_any = ["all", "epic"], verbatim_doc_comment)]
     pub ids: Vec<String>,
 
     /// 내게 온 것 가운데 안 읽은 것 전부
@@ -785,7 +803,7 @@ pub struct RmArgs {
 
 #[derive(Args, Debug)]
 pub struct TuiArgs {
-    /// 여기서 시작한다. 디렉터리면 그 안을, 아니면 그것이 든 디렉터리를 연다
+    /// 여기서 연다 — 디렉터리면 그 안, 아니면 든 곳
     #[arg(long, value_name = "id|없음|길잃음")]
     pub path: Option<String>,
 }
@@ -816,7 +834,7 @@ pub struct NoteArgs {
     ///
     /// **자리 인자와 서로 밀어낸다.** 둘 다 받으면 어느 쪽이 이기는지 아무도
     /// 못 외우고, 외우지 못하는 규칙은 언젠가 남의 글을 지운다.
-    #[arg(short = 'b', long, value_name = "글", conflicts_with = "text")]
+    #[arg(short = 'b', long, value_name = "글", conflicts_with = "text", verbatim_doc_comment)]
     pub body: Option<String>,
 }
 

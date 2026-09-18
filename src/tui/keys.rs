@@ -1345,21 +1345,6 @@ mod tests {
         }
     }
 
-    /// **`moai tui --help` 의 글(after_help)은 80칸 안이다**(moai-lz2t). 옵션 열은 clap 이 그려
-    /// 여기서 안 본다 — moai-c57v. 도움말은 접지 않으므로(moai-opjn)
-    /// 넘는 줄은 좁은 터미널에서 그대로 꺾인다 — SPC 줄에 토글을 둘씩 적다 113칸까지 자랐었다.
-    #[test]
-    fn the_tui_help_fits_in_eighty_columns() {
-        let wide: Vec<String> = tui_help()
-            .lines()
-            .filter_map(|l| {
-                let w = crate::text::width(l);
-                (w > 80).then(|| format!("{w}: {l}"))
-            })
-            .collect();
-        assert!(wide.is_empty(), "`moai tui --help` 의 글(after_help)에 80칸을 넘는 줄:\n{}", wide.join("\n"));
-    }
-
     /// **표에 이름 붙은 키는 `moai tui --help` 가 댄다**(moai-3l4l) — 위 시험의 거꾸로다. 위만 있으면
     /// 표에 키를 더하고 도움말을 안 고쳐도 지나가, 도움말이 표의 절반만 대는 채로 낡는다(F5·F3·`/`·
     /// `f`·`w` 가 그렇게 빠져 있었다). 숨은 별칭(`label: None`)은 안 본다 — 바에도 메뉴에도 안
