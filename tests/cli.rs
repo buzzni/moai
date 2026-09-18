@@ -5972,6 +5972,21 @@ fn a_thought_does_not_hang_under_a_milestone_either() {
     assert!(!out.contains(&thought), "머리글이 안 세는 줄을 그 밑에 그렸다 — {out}");
 }
 
+/// **에픽 줄이 든 `epic` 은 소속이 아니다** (moai-fg0t, 사용자 결정 A). 트리는 에픽을 에픽
+/// 밑에 안 그리는데 `-e` 거름망만 그 줄을 골랐다. 필드는 그대로 두고 status 가 못 쓸 참조로 댄다.
+#[test]
+fn an_epic_line_does_not_join_the_epic_it_names() {
+    let s = init("epicinepic");
+    let outer = ok(s.path(), &["epic", "add", "바깥", "-q"]).trim().to_string();
+    let inner = add(s.path(), &["안쪽", "--type", "epic", "-e", &outer]);
+    assert!(line_of(s.path(), &inner).contains(&format!(r#""epic":"{outer}""#)), "필드를 지웠다");
+    assert!(!ok(s.path(), &["show", "-e", &outer]).contains(&inner), "`-e` 가 트리에 없는 에픽 줄을 골랐다");
+    let st = ok(s.path(), &["status", "--json"]);
+    let warning = |kind: &str| st.split("{\"kind\":").find(|w| w.starts_with(&format!("\"{kind}\""))).map(str::to_string);
+    assert!(warning("dangling_epic").is_some_and(|w| w.contains(&inner)), "못 쓸 참조로 안 댔다 — {st}");
+    assert!(moai(s.path(), &["status"]).status.success(), "경고로 비영 종료한다");
+}
+
 /// **부모가 묶음이면 그 묶음이 소속이다** (moai-9t3l). `--parent <에픽>` 으로 만든
 /// 자식은 id 가 에픽 밑에 붙는데, "자식은 부모의 에픽을" 이 부모가 에픽 자신일 때
 /// 물려줄 것이 없어 트리의 `에픽 없음`·status 의 `에픽 없는 이슈` 로 빠졌다 — 에픽

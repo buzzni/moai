@@ -1452,17 +1452,19 @@ fn rooted_thoughts<'a>(by_id: &BTreeMap<&'a str, &'a Issue>) -> BTreeSet<&'a str
 /// **없는 부모는 넘지 않는다** — 지운 에픽의 자식은 `에픽 없음` 이고, 끊긴 id 는
 /// `orphan_child` 가 드러낸다. 가리키는 필드가 없으니 `(길 잃음)` 이 아니다.
 ///
-/// **묶음 줄은 제 필드에서 멈춘다** (moai-k9yb). [`joins`] 가 안 받는 줄이 조상을
+/// **묶음 줄에는 에픽이 없다** (moai-k9yb, moai-fg0t). [`joins`] 가 안 받는 줄이 조상을
 /// 타고 오르면, 에픽인 부모는 거르지만 부모 이슈가 든 `epic` 은 그대로 받아
 /// `epic add --parent <에픽 E 안의 이슈>` 가 `show -e E` 에만 서고 트리에서는
-/// 뿌리에 섰다. 묶음 줄이 무엇을 받는지는 조상의 종류가 아니라 제 종류가 정한다.
+/// 뿌리에 섰다. 제 `epic` 필드도 같다 — `nav` 는 에픽을 에픽 밑에 두지 않으므로 그 필드로
+/// 소속을 주면 `-e` 거름망만 트리에 없는 줄을 고른다. 필드는 지우지 않고, 못 쓸 참조로
+/// [`broken`] 이 드러낸다(사용자 결정, 2026-09-18: 에픽 중첩 대신 경고).
 fn epic_through<'a>(
     i: &'a Issue,
     by_id: &BTreeMap<&'a str, &'a Issue>,
     rooted: &BTreeSet<&str>,
 ) -> Option<&'a str> {
     if !joins(i) {
-        return i.epic.as_deref();
+        return None;
     }
     let mut cur = i;
     loop {
@@ -1790,6 +1792,10 @@ pub fn under_lost<'a>(
 /// "이 줄이 못 쓸 것을 가리키나" 다. 그래서 **물려받은 것이 아니라 제가 적은
 /// 것**을 본다 — 부모의 망가진 참조를 물려받은 자식은 고칠 데가 없다 — 대신
 /// 종류를 가리지 않는다: 에픽 줄이 든 엉뚱한 `epic` 도 누군가 고쳐야 한다.
+///
+/// **묶음 줄의 `epic` 은 가리키는 것이 멀쩡해도 못 쓴다** (moai-fg0t). 묶음 줄은 에픽에
+/// 안 들므로([`epic_through`]) 그 필드는 아무 자리도 안 정한다 — 말없이 두면 적은 사람은
+/// 에픽 밑에 넣은 줄 안다.
 pub fn broken(all: &[Issue]) -> BTreeMap<&str, Misplace> {
     let kind_of: BTreeMap<&str, Kind> = all.iter().map(|i| (i.id.as_str(), i.kind)).collect();
     let usable = |id: &Option<String>, kind: Kind| {
@@ -1797,7 +1803,7 @@ pub fn broken(all: &[Issue]) -> BTreeMap<&str, Misplace> {
     };
     let mut out = BTreeMap::new();
     for i in all {
-        if !usable(&i.epic, Kind::Epic) {
+        if !usable(&i.epic, Kind::Epic) || (is_group(i) && i.epic.is_some()) {
             out.insert(i.id.as_str(), Misplace::Epic);
         } else if !usable(&i.milestone, Kind::Milestone) {
             out.insert(i.id.as_str(), Misplace::Milestone);
@@ -4107,6 +4113,7 @@ mod tests {
             ("argos-0001.aa1.bb1", Some("argos-0001"), Some("argos-m001")), // 사슬을 탄다
             ("argos-0001.aa2", Some("argos-0002"), None),                   // 제 에픽이 이긴다
             ("argos-0001.aa3", Some("argos-0001"), Some("argos-m001")),     // 생각도 받는다
+            ("argos-0001", None, Some("argos-m001")), // 에픽 줄은 제 `epic` 으로도 안 든다(moai-fg0t)
             ("argos-0001.ee1", None, None), // 에픽 줄은 부모 에픽도, 그 에픽이 든 `epic` 도 안 받는다
             ("argos-0001.aa1.ee2", None, None), // 부모 이슈의 에픽도 안 받는다(moai-k9yb)
             ("argos-0001.aa2.ee3", None, None), // 부모 이슈가 적은 `epic` 도
@@ -4117,6 +4124,8 @@ mod tests {
         ] {
             assert_eq!((e.get(id).copied(), m.get(id).copied()), (epic, stone), "{id}");
         }
+        // 못 쓸 참조로 드러난다 — 가리키는 에픽은 멀쩡해도 그 필드는 아무 자리도 안 정한다.
+        assert_eq!(broken(&issues).get("argos-0001"), Some(&Misplace::Epic));
         assert!(!status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z")
             .warnings
             .iter()
