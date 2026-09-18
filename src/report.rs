@@ -1336,19 +1336,21 @@ pub enum Above<'a> {
     Parent(&'a str),
 }
 
-/// 제 `milestone` 필드가 아니라 위에서 오는 마일스톤 — `(마일스톤, 넘긴 자리)`.
-/// 제 필드가 답이거나 마일스톤이 없으면 `None` 이다.
+/// 제 `milestone` 필드가 아니라 위에서 정해지는 마일스톤 — `(선 마일스톤, 정한 자리)`.
+/// 제 필드가 답이면 `None` 이다. **선 마일스톤이 없어도 자리는 댄다** — 마일스톤 없는
+/// 에픽의 멤버가 `--milestone X` 를 적으면 X 는 필드에만 남고 줄은 `(마일스톤 없음)` 에
+/// 선다(moai-mhxf). 그것도 에픽에게 진 것이다.
 ///
 /// `edit --milestone none` 이 필드를 비워도 이 소속은 남는다(moai-0lmn) — [`milestones`]
 /// 는 에픽이 이기고 부모도 이긴다. [`epic_from_parent`] 와 같은 모양이다. 답은
-/// `milestones` 에서 읽고, 넘긴 자리만 같은 차례(에픽 → 접힌 맨 위 줄)로 가린다.
-/// 에픽 줄은 제 필드에만 서므로 언제나 `None` 이다.
-pub fn milestone_from_above<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, Above<'a>)> {
+/// `milestones` 에서 읽고, 정한 자리만 같은 차례(에픽 → 접힌 맨 위 줄)로 가린다.
+/// 에픽 줄과 마일스톤 줄은 제 필드에만 서거나 어디에도 안 서므로 언제나 `None` 이다.
+pub fn milestone_from_above<'a>(all: &'a [Issue], id: &str) -> Option<(Option<&'a str>, Above<'a>)> {
     let line = all.iter().rev().find(|i| i.id == id)?;
-    if line.kind == Kind::Epic {
+    if !joins(line) {
         return None;
     }
-    let milestone = *milestones(all).get(id)?;
+    let milestone = milestones(all).get(id).copied();
     if let Some(e) = groups(all).get(id) {
         return Some((milestone, Above::Epic(e)));
     }
@@ -1357,11 +1359,13 @@ pub fn milestone_from_above<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, 
     let top = fold_top(line, &by_id, &rooted)?;
     // 값을 든 줄은 `climb` 이 읽는 그 줄이다 — 자를 따로 두면 안내가 셈과 어긋난다.
     // 그 줄이 제 줄이면 제 필드가 답이다(접히지 않은 줄의 제 `milestone`).
-    let source = stood_at(top, &by_id, &rooted)?;
-    if source.id == line.id {
-        return None;
+    // 아무도 값을 안 들었으면 정한 것은 접힌 맨 위 줄이다 — 제 필드는 거기서 안 읽힌다.
+    match stood_at(top, &by_id, &rooted) {
+        Some(source) if source.id == line.id => None,
+        Some(source) => Some((milestone, Above::Parent(source.id.as_str()))),
+        None if top.id != line.id => Some((milestone, Above::Parent(top.id.as_str()))),
+        None => None,
     }
-    Some((milestone, Above::Parent(source.id.as_str())))
 }
 
 /// **뿌리로 올라간 생각** — 제 부모 밑에 접히지 않는 idea 의 id.
