@@ -885,7 +885,9 @@ pub fn main_root(root: &Path) -> Option<PathBuf> {
     if top.join(".git").is_dir() || common.file_name()? != ".git" {
         return None;
     }
-    let rel = root.strip_prefix(top).ok()?;
+    // 둘 다 풀고 견준다 — [`same_repo`]·[`on_disk`] 와 같은 자다. `main` 은 이미 푼 경로라, 푸지 않은
+    // 쪽의 조각을 붙이면 없는 자리가 선다.
+    let rel = canonical(root).strip_prefix(canonical(top)).ok()?.to_path_buf();
     let main = common.parent()?;
     // 빈 `rel` 을 붙이면 끝에 `/` 가 선다 — 내미는 줄이 제 자리를 두 꼴로 쓰게 된다.
     Some(if rel.as_os_str().is_empty() { main.to_path_buf() } else { main.join(rel) })
