@@ -40,7 +40,7 @@ pub fn rule_head(n: usize) -> String {
 pub const REVIEW_STEPS: &str = concat!(
     "  moai mv <id> in_progress      리뷰를 시작할 때\n",
     "  moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로\n",
-    "  moai mv <id> done -m \"<무엇을 반영하고 무엇을 넘겼나>\"",
+    "  moai mv <id> done -m '<무엇을 반영하고 무엇을 넘겼나>'",
 );
 
 /// 리뷰 이슈에 붙는 태그. 훅은 리뷰 줄을 이 글자로 가르고, 가르치는 글은 같은
@@ -50,7 +50,7 @@ pub const REVIEW_TAG: &str = "review";
 /// 리뷰 이슈를 세우는 줄. `anchor` 는 `--parent <id>` 나 `-e <에픽>` 이다 — 규칙
 /// 셋의 글과 두 거절문이 이 한 줄에서 나온다.
 pub fn make_review(anchor: &str) -> String {
-    format!("moai add \"리뷰 — <무엇을 보는가>\" -t {REVIEW_TAG} {anchor} -b \"<무엇을 왜 보는가>\"")
+    format!("moai add '리뷰 — <무엇을 보는가>' -t {REVIEW_TAG} {anchor} -b '<무엇을 왜 보는가>'")
 }
 
 /// 리뷰를 닫는 두 걸음 — `REVIEW_STEPS` 에서 시작 걸음을 빼고 **실제 id** 를 넣은
@@ -166,8 +166,8 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
     moai add "제목" -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
-    moai note <id> "발견한 것"             다음 사람이 읽을 메모
-    moai defer <id> -m "왜"                지금 안 할 일을 계획에서 뺀다
+    moai note <id> '발견한 것'             다음 사람이 읽을 메모
+    moai defer <id> -m '왜'                지금 안 할 일을 계획에서 뺀다
 
 모든 명령에 `--json` 이 붙는다. `ready --json` 은 `{"ready":[…],"held":[…]}` —
 `held` 는 미뤄 둔 것·빈 묶음에 막혀 못 집는 일과 도로 집을 곳이다.
@@ -196,7 +196,7 @@ idea 로 내보내면 에픽이 제 목적을 못 이룬 채 `done` 으로 선�
 `defer` 하는 것은 그 목적을 접는다는 결정이다.
 
 **2. `defer` 냐 `done` 이냐** — 안 하기로 한 것을 `done` 으로 옮기지 않는다.
-`moai defer <id> -m "왜"` 는 칸도 종류도 안 바꾸고, `--undo` 로 같은 줄이
+`moai defer <id> -m '왜'` 는 칸도 종류도 안 바꾸고, `--undo` 로 같은 줄이
 그대로 돌아온다. idea 는 "아직 일이 아닌 것", defer 는 "일이지만 지금은 아닌 것".
 
 **3. 에픽으로 쪼갤 만한가** — 파일 하나로 안 끝나는 요청이면 코드를 쓰기 전에
@@ -266,7 +266,7 @@ moai idea promote <id> --from - <<'PLAN'
 PLAN
 ```"#;
 
-const DEFERRING: &str = r#"    moai defer <id> -m "다음 분기에"       계획에서 잠시 뺀다
+const DEFERRING: &str = r#"    moai defer <id> -m '다음 분기에'       계획에서 잠시 뺀다
     moai defer <id> --undo                 도로 집는다
     moai show --deferred                   미뤄 둔 것만 본다
 
@@ -337,11 +337,13 @@ id** 로 그 이슈의 커밋을 그때그때 찾아 낸다. 해시를 노트에
 /// 저장하지 않는다: 적는 것은 `note` 이고 `work` 는 그 글을 읽은 값이다.
 const WORK: &str = r#"닫기 전에 그 일을 실제로 한 AI 를 이슈에 한 줄 남긴다. 필드가 아니라 노트다.
 
-    moai note <id> "model: <회사>/<모델> tokens=<수> (<등급> — <까닭>)"
+    moai note <id> 'model: <회사>/<모델> tokens=<수> (<등급> — <까닭>)'
 
 - 회사는 `anthropic`·`openai`·`google`, 모델은 실제 이름(`opus-5`·`sonnet-5`), 등급은 리뷰 등급과 같은 낱말
 - **토큰을 모르면 `tokens=` 를 뺀다.** 0 도 어림값도 적지 않는다 — 빈 칸과 0 과 거짓 값은 셋 다 다르다
 - **id 하나에 하나.** 여러 id 에 같은 글을 적으면 토큰이 id 수만큼 불어난다
+- **자유 글은 작은따옴표로 싼다** — 큰따옴표 안의 백틱·`$(…)` 은 셸이 명령으로 풀어 글이 잘린
+  채 0 으로 끝난다. 글에 작은따옴표가 들면 `-b -` 로 stdin 에서 흘린다
 - `moai show <id> --json` 의 `work` 가 그 줄들을 읽어 낸다. **늘 서는 배열**이고, 꼴에 안 맞는 줄은
   값이 안 될 뿐 노트로 남는다. 줄 머리에서 시작한 줄만 센다 — 들여 쓴 줄과 울타리 안의 줄은 예로 읽는다"#;
 
@@ -356,7 +358,7 @@ const CLOSING: &str = r#"`moai status` 를 한 번 더 돌려 경고가 늘지 �
 집은 채 닫으면 다음 세션이 이어받을 한 줄을 그 이슈에 남긴다. 다음 세션은
 `moai show <id>` 의 이력에서 그것을 읽는다.
 
-    moai note <id> "다음: <이어서 할 것>""#;
+    moai note <id> '다음: <이어서 할 것>'"#;
 
 /// 집은 채 닫을 때 남기는 한 줄. `CLOSING` 과 세션을 닫을 때의 붙듦이 같은
 /// 글을 내야 한다 — 안내가 가르친 줄과 훅이 내민 줄이 다르면 둘 다 안 믿는다.
@@ -365,7 +367,7 @@ const CLOSING: &str = r#"`moai status` 를 한 번 더 돌려 경고가 늘지 �
 /// 값이라, 비추는 순간 저널이 `status` 에 읽힌다. `show` 를 한 번 더 치는 것이
 /// 실제로 불편해지면 그때 스냅샷 필드를 논의한다 (moai-0rui).
 pub fn handoff(id: &str) -> String {
-    format!("moai note {id} \"다음: <이어서 할 것>\"")
+    format!("moai note {id} '다음: <이어서 할 것>'")
 }
 
 /// 규칙 셋. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
@@ -835,7 +837,7 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
         git 이 거절하니 그 병합이 끝나기를 기다렸다 다시 친다
 
 - **이어 할지 놓을지는 감독이 정하지 않는다.** 놓을 일로 보이면(`moai mv <id> todo`·
-  `moai defer <id> -m "왜"`) 사람에게 묻는다
+  `moai defer <id> -m '왜'`) 사람에게 묻는다
 - 이어 하기를 맡긴 일은 idea 와 같이 그 보고를 확인할 때까지 다시 안 보낸다
 
 **1. 고른다.** 쌓인 idea 에서 지금 벌여 놓은 일과 부딪히지 않는 것만 남긴다.
@@ -928,7 +930,7 @@ PY
 `<루트>` 는 2 의 `루트 자리` 다. **안 채우면** 일꾼이 워크트리 안에서 제 자리를 루트로 읽는다.
 `<모델>`·`<난이도>`·`<까닭>` 은 2-1 에서 고른 짝과 그 까닭이다. **안 채우면** 그 자리표시자가
 그대로 실려, 일꾼이 닫을 때 남기는 노트가 무엇이 일했는지 대신 `<모델>` 이라고 적는다.
-`<까닭>` 은 백틱·`$` 없이 적는다 — 9-1 의 큰따옴표 안에 들어가 셸이 그것을 명령으로 푼다.
+`<까닭>` 에는 작은따옴표를 쓰지 않는다 — 9-1 의 작은따옴표를 닫아 뒤의 글이 셸로 샌다.
 `<등급>` 는 채우지 않는다 — 7 에서 개발해 본 일꾼이 고르는 리뷰 등급의 자리다.
 `<회사>`·`<수>` 도 채우지 않는다 — 9-1 에서 일꾼이 제 창에서 읽어 채우는 회사와 토큰이다.
 
@@ -1375,8 +1377,10 @@ fn brief() -> String {
        감독이 채운 `<모델>` 은 별명(`opus`)이니 모델을 안 바꿨어도 실제 이름으로 고친다.
        `<수>` 는 이 창이 쓴 토큰이다. **토큰을 모르면 `tokens=<수>` 를 통째로 뺀다** — 0 도 어림값도
        적지 않는다. **id 하나에 한 줄** — 여러 id 에 같은 글을 적으면 토큰이 id 수만큼 불어난다.
-       창의 토큰은 멤버마다 가를 수 없으니 **한 멤버에만** 적고, 나머지 멤버의 줄은 `tokens=<수>` 를 뺀다
-         moai note <멤버> "model: <회사>/<모델> tokens=<수> (<난이도> — <까닭>)"
+       창의 토큰은 멤버마다 가를 수 없으니 **한 멤버에만** 적고, 나머지 멤버의 줄은 `tokens=<수>` 를 뺀다.
+       자유 글은 작은따옴표로 싼다 — 큰따옴표 안의 백틱·`$(…)` 은 셸이 명령으로 푼다. 글에
+       작은따옴표가 들면 `-b -` 로 stdin 에서 흘린다
+         moai note <멤버> 'model: <회사>/<모델> tokens=<수> (<난이도> — <까닭>)'
     10. 그 뒤에 닫는다. **`moai mv <멤버> done` 은 그 병합이 실제로 끝난 뒤에만 친다** —
        병합 전에 옮겼다가 되돌린 일꾼이 있었다. 7-1 에서 첫 칸에 남긴 멤버는 닫지 않는다 — 그
        멤버가 에픽을 열어 둔다. 워크트리가 남아 있으면 훅이 이 일을 옆
@@ -1387,7 +1391,7 @@ fn brief() -> String {
     11. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 펼친 에픽 id, 한두 줄 요약,
        넘긴 것·새 idea, 7-1 에서 되찾아 첫 칸에 남긴 멤버
     12. 마지막으로 **창을 비워도 되는 때를 알린다.** 이어받을 한 줄을 남겨
-       (`moai note <에픽> "다음: …"`) 2 처럼 경로를 준 커밋으로 루트에 담고 — 10 의 커밋 뒤에
+       (`moai note <에픽> '다음: …'`) 2 처럼 경로를 준 커밋으로 루트에 담고 — 10 의 커밋 뒤에
        적은 줄이라 안 담으면 공유 루트에 남아 남의 커밋에 쓸려 들어간다 — 그 창을 보는 사람에게
        한 줄로, 지금 `/clear` 해도 된다고. 맥락은 대화가 아니라 트래커에 산다: 이슈 본문·노트·
        리뷰 원문·커밋 메시지. 제 맥락 사용량을 볼 수 있으면 그 수도 그 줄에 담는다.
@@ -2057,9 +2061,9 @@ sys.exit(1 if bad else 0)
             let line = text
                 .lines()
                 .map(str::trim)
-                .find(|l| l.starts_with("moai note ") && l.contains("\"model: "))
+                .find(|l| l.starts_with("moai note ") && l.contains("'model: "))
                 .unwrap_or_else(|| panic!("{whose} 에 일한 AI 를 남기는 줄이 없다"));
-            let said = &line[line.find("\"model: ").unwrap() + 1..line.rfind('"').unwrap()];
+            let said = &line[line.find("'model: ").unwrap() + 1..line.rfind('\'').unwrap()];
             let filled = said
                 .replace("<회사>", "anthropic")
                 .replace("<모델>", "opus-5")
@@ -2075,6 +2079,23 @@ sys.exit(1 if bad else 0)
             assert_eq!(unknown.map(|w| w.tokens), Some(None), "{whose} 의 꼴이 토큰을 빼면 안 읽힌다 — {said}");
             assert!(text.contains("토큰을 모르면"), "{whose} 에 토큰을 모를 때 빼라는 말이 없다");
         }
+    }
+
+    /// **가르치는 자유 글은 작은따옴표로 싼다**(2026-09-18 사용자 결정). 큰따옴표로 가르친 `-m`·`-b`·
+    /// 노트는 채운 글에 백틱이나 `$(…)` 가 들면 bash 가 명령 치환을 해 글이 잘린 채 0 으로 끝난다 —
+    /// 이 저장소의 노트는 백틱을 자주 쓴다. 한 표면이라도 큰따옴표로 돌아가면 여기서 붉어진다.
+    #[test]
+    fn free_text_is_taught_in_single_quotes() {
+        let texts = [("AGENTS 블록", agents()), ("스킬", skill()), ("참고 문서", reference()), ("감독", supervise())];
+        for (whose, text) in &texts {
+            for line in text.lines().filter(|l| l.contains("moai ")) {
+                for bad in ["-m \"", "-b \"", "moai note <id> \"", "moai note <멤버> \"", "moai note <에픽> \""] {
+                    assert!(!line.contains(bad), "{whose} 가 자유 글을 큰따옴표로 가르친다 — {line}");
+                }
+            }
+        }
+        assert!(make_review("-e <에픽>").contains("-b '<무엇을 왜 보는가>'"), "리뷰 줄의 관점이 작은따옴표가 아니다");
+        assert!(handoff("t-1").ends_with("'다음: <이어서 할 것>'"), "이어받을 줄이 작은따옴표가 아니다");
     }
 
     /// **감독 스킬은 모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 적으면 남의 저장소에서는
