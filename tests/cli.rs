@@ -1962,6 +1962,58 @@ fn show_json_drops_stale_conditional_keys_carried_by_a_rewritten_line() {
     assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
 }
 
+/// **줄을 내는 명령 전부가 같은 목록으로 걷는다**(moai-qn5d). 걷기가 `show <id> --json` 에만 있으면
+/// 되쓴 줄을 `ready`·`show` 목록·`edit`·`mv` 가 그대로 펴서, 막음 없는 일에 옛 `blockers` 가,
+/// 멀쩡한 git 옆에 옛 `commits_error` 가 선다. 걷는 자리는 `Row::of` 하나다.
+///
+/// 사용자가 같은 이름으로 둔 제 필드도 줄 출력에서 숨는다 — 받은 값이다(2026-09-18 사용자 결정 A).
+/// 파일은 그대로다.
+#[test]
+fn every_line_printing_command_drops_keys_moai_appends() {
+    let s = init("stalerows");
+    let id = add(s.path(), &["되쓴 줄"]);
+    let stale = [
+        ("derived_status", r#""가짜""#),
+        ("branch", r#""가짜""#),
+        ("children", r#"["가짜"]"#),
+        ("journal", r#"["가짜"]"#),
+        ("members", r#"["가짜"]"#),
+        ("shelved_by", r#""가짜""#),
+        ("duplicate_lines", "2"),
+        ("blockers", r#"[{"id":"가짜"}]"#),
+        ("workplaces", r#"["가짜"]"#),
+        ("place", r#""lost""#),
+        ("commits", r#"["가짜"]"#),
+        ("commits_error", r#""가짜""#),
+        ("work", r#"["가짜"]"#),
+        ("inherited_epic", r#"{"epic":"가짜","parent":"가짜"}"#),
+        ("inherited_milestone", r#"{"milestone":"가짜"}"#),
+    ];
+    let fields: Vec<String> = stale.iter().map(|(k, v)| format!("\"{k}\":{v}")).collect();
+    let doctored = issues(s.path()).replace(
+        &format!("\"id\":\"{id}\","),
+        &format!("\"id\":\"{id}\",{},\"due\":\"2026-10-01\",", fields.join(",")),
+    );
+    std::fs::write(s.path().join(".moai/issues.jsonl"), &doctored).unwrap();
+
+    let seen = |args: &[&str]| {
+        let json = ok(s.path(), args);
+        assert!(json.contains(&id), "{args:?} 가 그 줄을 안 냈다\n{json}");
+        for (k, _) in &stale {
+            assert!(!json.contains(&format!("\"{k}\"")), "{args:?} 가 되쓴 줄의 {k} 를 냈다\n{json}");
+        }
+        assert!(json.contains(r#""due":"2026-10-01""#), "{args:?} 가 겹치지 않는 모르는 필드까지 걷었다\n{json}");
+    };
+    seen(&["ready", "--json"]);
+    seen(&["show", "--json"]);
+    seen(&["show", "-s", "todo", "--json"]);
+    assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
+    // 쓰는 명령도 같다 — 파일에는 모르는 필드가 그대로 남는다.
+    seen(&["edit", &id, "-p", "1", "--json"]);
+    seen(&["mv", &id, "in_progress", "--json"]);
+    assert!(line_of(s.path(), &id).contains(r#""place":"lost""#), "모르는 필드를 잃었다");
+}
+
 /// **끊긴 에픽을 든 생각 밑에 접힌 줄은 트리와 status 가 같게 읽는다**(moai-uni2) — 길 잃은
 /// 부모의 묶음이다. 트리는 그 줄을 `(길 잃음)` 안의 생각 밑에 그리므로, status 가 그 줄을
 /// "에픽 없는 이슈" 로 세면 `moai show -e none` 을 가리키며 고칠 수 없는 줄을 고치라 한다.

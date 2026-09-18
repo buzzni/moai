@@ -100,10 +100,8 @@ enum Way {
     Pinned,
 }
 
-/// 남은 소속의 키. 모르는 필드로 같은 이름을 든 줄을 가려내는 데도 쓴다.
-const INHERITED: [&str; 2] = ["inherited_epic", "inherited_milestone"];
-
 /// 기계 출력 — 줄 하나에 남은 소속을 곁들인다. 기존 키는 그대로 두고 더하기만 한다.
+/// 필드를 더하면 그 이름을 `cmd::OURS` 에도 더한다 — 되써 넣은 줄의 같은 이름은 거기서 걷힌다.
 #[derive(serde::Serialize)]
 struct Out<'a> {
     #[serde(flatten)]
@@ -269,14 +267,9 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let Edited { issue: edited, epic, children, shelved, read, changed, kept, kept_milestone, blocked } = done;
     if ctx.json {
         // **이 키는 우리 것이다** — `--json` 을 되써 넣어 모르는 필드로 든 줄이면 한 객체에 같은
-        // 키가 둘 서거나, 끊긴 줄이 안 끊긴 것처럼 읽힌다. 파일의 값은 그대로 둔다. 걷는 길은
-        // `json_with` 와 같은 `Shown::without` 이다(moai-kgu2) — 목록만 여기 있다. `Out` 에
-        // 덧붙이는 필드를 더하면 `INHERITED` 에도 더한다.
-        use super::Shown;
-        let row = super::Row::from(&edited, &read);
-        let row = row.without(&INHERITED).unwrap_or(row);
+        // 키가 둘 서거나, 끊긴 줄이 안 끊긴 것처럼 읽힌다. `Row::of` 가 `cmd::OURS` 로 걷는다.
         return super::json_line(&Out {
-            row,
+            row: super::Row::from(&edited, &read),
             inherited_epic: kept.as_ref(),
             inherited_milestone: kept_milestone.as_ref(),
         });
