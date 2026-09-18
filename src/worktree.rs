@@ -116,6 +116,13 @@ impl Origin {
         self.trees.iter().map(|(l, ..)| l.as_str()).collect()
     }
 
+    /// 스냅샷을 **못 겹친** 옆 워크트리의 이름들 — [`Origin::working`] 은 이것도 본다(moai-ncsf).
+    /// [`Origin::labels`] 가 비었는데 이것이 있으면 옆 워크트리는 있되 겹칠 스냅샷이 없는 것이다 —
+    /// 둘을 "옆 워크트리 없음" 한 말로 대면 같은 화면의 줄이 그 워크트리의 이름으로 `⎇` 를 단다.
+    pub fn named_only(&self) -> Vec<&str> {
+        self.named.iter().map(|(l, _)| l.as_str()).collect()
+    }
+
     /// 다른 브랜치에서 온 줄 전부 — id → 브랜치. `--json` 이 이 모양으로 낸다.
     pub fn branches(&self) -> BTreeMap<&str, &str> {
         self.from.iter().map(|(id, &k)| (id.as_str(), self.trees[k].0.as_str())).collect()
@@ -293,11 +300,17 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                 let path = root.join(".moai").join("issues.jsonl");
                 watched.push((path.clone(), crate::store::stamp(&path)));
                 match crate::store::read_snapshot(&path) {
-                    Err(e) => {
-                        trouble.push(format!("⎇ {}: {e}", tree.label));
-                        named.push((tree.label.clone(), names([&tree])));
+                    unread @ (Err(_) | Ok(None)) => {
+                        if let Err(e) = unread {
+                            trouble.push(format!("⎇ {}: {e}", tree.label));
+                        }
+                        // **디렉터리가 사라진 워크트리는 이름도 안 든다** — 훅의 `away` 가 읽는
+                        // `on_disk` 가 그렇게 거른다. git 은 잠근 워크트리를 경로가 사라져도 목록에
+                        // 남겨, 여기서 들면 훅은 제 초점으로 세는 줄에 화면만 `⎇` 를 단다.
+                        if tree.path.exists() {
+                            named.push((tree.label.clone(), names([&tree])));
+                        }
                     }
-                    Ok(None) => named.push((tree.label.clone(), names([&tree]))),
                     Ok(Some(other)) => {
                         if !other.errors.is_empty() {
                             trouble.push(format!(
@@ -1170,17 +1183,15 @@ mod tests {
     /// **스냅샷을 못 겹친 옆 워크트리도 이름으로는 쥔다**(moai-ncsf) — 훅의 [`away`] 는 디스크의
     /// 옆 워크트리 전부에서 이름을 내므로, 겹친 곳만 보면 훅은 "옆이 쥐었다" 로 아는 줄에 화면만
     /// `⎇` 를 안 단다. moai 를 들이기 전에 갈라진 워크트리(스냅샷이 없다)와 스냅샷이 깨진 워크트리
-    /// 둘 다다. 겹쳐 본 곳(`labels`)에는 안 든다.
+    /// 둘 다다. 겹쳐 본 곳(`labels`)에는 안 든다. **디렉터리가 사라진 잠근 워크트리는 안 든다** —
+    /// git 은 목록에 남기지만 훅의 자(`on_disk`)는 거기서 거른다.
     #[test]
     fn a_sibling_without_a_readable_snapshot_still_names_what_it_holds() {
         let scratch = crate::scratch::Scratch::fenced("unread-names");
         let base = scratch.path().to_path_buf();
         let main = base.join("main");
         std::fs::create_dir_all(&main).unwrap();
-        let run = |dir: &Path, args: &[&str]| {
-            let out = crate::git::isolated(dir).args(args).output().unwrap();
-            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
-        };
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
         run(&main, &["init", "-q"]);
         run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
         // moai 를 들이기 전에 갈라진 워크트리 — 스냅샷이 없다.
@@ -1191,6 +1202,10 @@ mod tests {
         // 스냅샷이 못 읽히는 워크트리 — 파일 자리에 디렉터리가 섰다.
         run(&main, &["worktree", "add", "-q", "../t-2", "-b", "worktree-t-2"]);
         std::fs::create_dir_all(base.join("t-2/.moai/issues.jsonl")).unwrap();
+        // 잠그고 디렉터리를 치운 워크트리 — git 은 잠근 것을 `prunable` 로 안 적어 목록에 남긴다.
+        run(&main, &["worktree", "add", "-q", "../t-3", "-b", "worktree-t-3"]);
+        run(&main, &["worktree", "lock", "../t-3"]);
+        std::fs::remove_dir_all(base.join("t-3")).unwrap();
 
         let crate::store::Opened::Repo(repo) = Repo::open(&main).unwrap() else { panic!("저장소가 안 열렸다") };
         let got = gather(&repo, true).unwrap();
@@ -1201,6 +1216,9 @@ mod tests {
         for id in ["t-1", "t-2"] {
             assert!(away(&main).contains(id), "훅의 자가 {id} 를 안 센다 — 이 시험이 견줄 것이 없다");
         }
+        assert!(!away(&main).contains("t-3"), "훅의 자가 사라진 워크트리를 센다 — 이 시험이 견줄 것이 없다");
+        assert_eq!(got.origin.working("t-3"), None, "디렉터리가 사라진 워크트리의 이름을 훅과 달리 들었다");
+        assert!(!got.origin.named_only().contains(&"worktree-t-3"), "{:?}", got.origin.named_only());
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.

@@ -360,12 +360,29 @@ pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
 /// 초점(`hook::held`)과 집은 줄의 자리([`places`])가 같은 자로 재야, 초점에서 뺀 줄을 자리 없다고
 /// 하거나 그 반대가 되지 않는다.
 ///
-/// **닫힌 줄을 가리키는 이름은 아무것도 쥐지 않는다**([`shut`], moai-9a8m).
+/// **닫힌 줄을 가리키는 이름은 아무것도 쥐지 않는다**([`shut`], moai-9a8m). 제 워크트리의 이름은
+/// 이 예외를 안 받는다 — [`owns`].
 pub fn claimed<'a>(issues: &'a [Issue], cfg: &Config, names: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
+    named_by(issues, names, Some(cfg))
+}
+
+/// **제 워크트리의 이름**이 가리키는 일 — [`claimed`] 와 같은 자이되 닫힌 줄의 이름도 쥔다.
+///
+/// [`shut`] 은 머지하고 안 치운 **옆** 워크트리를 거르는 것이다. 제 워크트리는 지금 이 세션이 도는
+/// 자리라 남은 것일 수 없다 — 거기에 걸면 main 을 받아 제 줄이 `done` 으로 선 세션의 일이
+/// "누구의 것인지 모르는" 줄(`hook::unsure`)로 빠져, 규칙 1 과 `Stop` 이 제 일에 대해 말없이 풀린다.
+pub fn owns<'a>(issues: &'a [Issue], names: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
+    named_by(issues, names, None)
+}
+
+/// [`claimed`]·[`owns`] 의 몸통. `closed` 를 주면 닫힌 줄의 이름을 거른다([`shut`]).
+fn named_by<'a>(issues: &'a [Issue], names: &'a BTreeSet<String>, closed: Option<&Config>) -> impl Fn(&Issue) -> bool + 'a {
     let (epics, stones, shut) = if names.is_empty() {
         Default::default()
     } else {
-        (groups(issues), milestones(issues), shut(issues, cfg, names))
+        let (epics, stones) = (groups(issues), milestones(issues));
+        let shut = closed.map(|cfg| shut(issues, cfg, &epics, &stones, names)).unwrap_or_default();
+        (epics, stones, shut)
     };
     move |i: &Issue| claims(&epics, &stones, names, &shut, i)
 }
@@ -375,25 +392,40 @@ pub fn claimed<'a>(issues: &'a [Issue], cfg: &Config, names: &'a BTreeSet<String
 /// 머지하고 안 치운 워크트리(`worktree-<id>`)의 이름은 그 일이 끝난 뒤에도 남는다(moai-boej).
 /// 그 이름을 그대로 세면 셋이 어긋난다 — 목록이 닫힌 줄에 `⎇` 를 달고, 그 뒤 main 에서 그
 /// 줄의 자식(`--parent`)을 집으면 훅이 그것을 옆의 일로 읽어 초점에서 빼(규칙 2 가 "집은 것 없이"
-/// 로 막는다), 자리([`places`])는 그 자식이 옛 워크트리에 있다고 댄다. 이름이 **지금 벌여 놓은**
-/// 일을 가리킬 때만 쥔 것이다 — 끝난 일의 이름은 끝난 뒤에 무엇을 쥐었다고 말할 근거가 없다.
+/// 로 막는다), 자리([`places`])는 그 자식이 옛 워크트리에 있다고 댄다. 끝난 일의 이름은 끝난 뒤에
+/// 무엇을 쥐었다고 말할 근거가 없다.
 ///
-/// 이름이 가리키는 줄이 묶음일 때만 묶음 칸을 센다 — 훅이 도구 호출마다 지나는 길이다.
-fn shut<'a>(issues: &[Issue], cfg: &Config, names: impl IntoIterator<Item = &'a String>) -> BTreeSet<String> {
+/// **푸는 것은 닫힌 줄의 이름뿐이다.** 첫 칸(`todo`)이나 미룬 줄의 이름은 그대로 쥔다 — 첫 칸으로
+/// 돌린 우산 부모의 워크트리는 그 밑에서 집은 자식을 여전히 쥐고(`hook` 의
+/// `what_hangs_under_the_named_work_goes_with_it`), 미룬 줄의 밑은 미룸을 물려받아 어차피 [`wip`]
+/// 에서 빠진다.
+///
+/// **같은 id 의 줄이 둘이면 모두 닫혀야 닫힌 것이다.** [`wip`] 은 줄마다 세므로(`held`·[`places`] 의
+/// 집은 줄), 한 줄이라도 벌여 놓여 있으면 그 id 는 집힌 것이다 — 뒷줄 하나로 닫혔다고 하면 같은
+/// id 가 집혀 있으면서 이름에서는 풀려, 제 워크트리가 멀쩡한 줄이 `stranded` 로 서고 main 의
+/// 초점에 든다. 앞의 낡은 `done` 줄 하나가 산 이름을 푸는 것(리뷰 moai-9a8m.7y6)도 같은 자로 막힌다.
+///
+/// **소속 지도는 부르는 쪽이 지은 것을 받는다**([`blocking`] 과 같은 길) — 훅이 도구 호출마다
+/// 지나는 길이고, 워크트리를 에픽 이름으로 띄우는 규약에서는 묶음 칸을 세는 쪽이 흔한 길이다.
+/// 묶음 칸은 이름이 묶음을 가리킬 때만 센다.
+fn shut<'a, 'n>(
+    issues: &'a [Issue],
+    cfg: &Config,
+    epics: &BTreeMap<&'a str, &'a str>,
+    stones: &BTreeMap<&'a str, &'a str>,
+    names: impl IntoIterator<Item = &'n String>,
+) -> BTreeSet<String> {
     let names: BTreeSet<&str> = names.into_iter().map(String::as_str).collect();
-    // **같은 id 의 줄이 둘이면 뒷줄이 선다**(`Load::get`·[`places`] 와 같은 자) — 아무 줄이나
-    // 닫혔다고 세면, 앞의 낡은 `done` 줄 하나가 지금 벌여 놓인 일의 이름을 풀어 버린다.
-    let named: BTreeMap<&str, &Issue> =
-        issues.iter().filter(|i| names.contains(i.id.as_str())).map(|i| (i.id.as_str(), i)).collect();
-    if named.is_empty() {
-        return BTreeSet::new();
-    }
-    let states = if named.values().any(|i| is_group(i)) { group_states(issues, cfg) } else { BTreeMap::new() };
-    named
-        .into_values()
-        .filter(|i| column(i, &states) == crate::config::DONE)
-        .map(|i| i.id.clone())
-        .collect()
+    let named: Vec<&Issue> = issues.iter().filter(|i| names.contains(i.id.as_str())).collect();
+    let states = if named.iter().any(|i| is_group(i)) {
+        let roots = deferred_roots_in(issues, epics, stones);
+        group_stands_in(issues, cfg, epics, stones, &roots).into_iter().map(|(id, s)| (id, s.column)).collect()
+    } else {
+        BTreeMap::new()
+    };
+    let open: BTreeSet<&str> =
+        named.iter().filter(|i| column(i, &states) != crate::config::DONE).map(|i| i.id.as_str()).collect();
+    named.into_iter().filter(|i| !open.contains(i.id.as_str())).map(|i| i.id.clone()).collect()
 }
 
 /// [`claimed`] 의 몸통 — **이미 푼 소속 지도**로 잰다. 워크트리가 여럿이면 지도는 하나고 이름만
@@ -544,7 +576,7 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
     }
     // **소속 지도는 한 번만 짓는다**(`claims`) — 워크트리마다 바뀌는 것은 이름뿐이다.
     let (epics, stones) = (groups(issues), milestones(issues));
-    let shut = shut(issues, cfg, trees.iter().flat_map(|t| &t.names));
+    let shut = shut(issues, cfg, &epics, &stones, trees.iter().flat_map(|t| &t.names));
     // **굴릴 곳은 어느 워크트리가 있느냐와 무관하다**(moai-oepz) — 집은 멤버를 둔 묶음은 그
     // 멤버가 `At` 이든 `Lost` 든 키를 받는다. 한때 이 줄 위에서 일찍 돌아, 문서와 `placeable` 은
     // "집은 멤버를 둔 묶음은 키를 받는다" 라고 하는데 그 길에서만 안 받는 셋째 답이 있었다.
@@ -2828,17 +2860,31 @@ mod tests {
         assert_eq!(at["argos-0006"].at().iter().map(|w| w.branch.as_str()).collect::<Vec<_>>(), ["worktree-argos-0004"]);
     }
 
-    /// 같은 id 의 줄이 둘이면 **뒷줄이 선다** — 앞의 낡은 `done` 줄이 지금 벌여 놓인 일의 이름을
-    /// 풀면, 그 일의 자식이 옆 워크트리의 것에서 빠진다.
+    /// 같은 id 의 줄이 둘이면 **모두 닫혀야 닫힌 것이다** — 어느 차례든. [`wip`] 은 줄마다 세므로
+    /// 벌여 놓인 줄이 하나라도 있으면 그 id 는 집힌 것이다. 앞의 낡은 `done` 줄이 산 이름을 풀면
+    /// 그 일의 자식이 옆 워크트리의 것에서 빠지고(리뷰 moai-9a8m.7y6), 뒤에 붙은 `done` 줄이 풀면
+    /// 집힌 그 줄이 제 워크트리를 두고 자리를 잃는다(`stranded`).
     #[test]
-    fn a_stale_closed_twin_does_not_release_a_live_name() {
+    fn a_twin_line_does_not_release_a_live_name_in_either_order() {
+        let names: BTreeSet<String> = ["argos-0001"].iter().map(|s| s.to_string()).collect();
+        let trees = vec![tree("/r/.claude/worktrees/argos-0001", "worktree-argos-0001", &[])];
+        for (first, last) in [("done", "in_progress"), ("in_progress", "done")] {
+            let issues = vec![
+                make("argos-0001", Kind::Issue, first),
+                make("argos-0001.a", Kind::Issue, "in_progress"),
+                make("argos-0001", Kind::Issue, last),
+            ];
+            assert!(claimed(&issues, &cfg(), &names)(&issues[1]), "{first} → {last}: 쌍둥이 한 줄이 산 이름을 풀었다");
+            let at = places(&issues, &cfg(), &trees, LATER);
+            assert_eq!(at["argos-0001"].at().len(), 1, "{first} → {last}: 집힌 줄이 제 워크트리를 잃었다 — {:?}", at["argos-0001"]);
+        }
+        // 둘 다 닫혔으면 닫힌 것이다.
         let issues = vec![
             make("argos-0001", Kind::Issue, "done"),
             make("argos-0001.a", Kind::Issue, "in_progress"),
-            make("argos-0001", Kind::Issue, "in_progress"),
+            make("argos-0001", Kind::Issue, "done"),
         ];
-        let names: BTreeSet<String> = ["argos-0001"].iter().map(|s| s.to_string()).collect();
-        assert!(claimed(&issues, &cfg(), &names)(&issues[1]), "앞의 낡은 줄이 산 이름을 풀었다");
+        assert!(!claimed(&issues, &cfg(), &names)(&issues[1]), "다 닫힌 줄의 이름이 쥐었다");
     }
 
     /// **굴려 올린 자리에 같은 워크트리가 두 번 서지 않는다.** 마일스톤은 멤버를 두 길로 받는다
