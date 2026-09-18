@@ -832,6 +832,8 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
         (`git worktree add .claude/worktrees/<에픽> worktree-<에픽>`), 없으면
         `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> <본 가지>`
       - 멤버의 칸은 이미 집혀 있다 — 다시 집지 않는다
+      - 9-1 의 노트는 이 창의 몫만 적는다. 까닭 끝에 `거둔 일, 앞 세션 몫은 모른다` 를 붙인다 —
+        앞 세션의 모델과 토큰은 어디에도 안 적혀, 없으면 멤버 전체를 이 창이 한 것으로 읽는다
       - 아래 걸음들이 가리키는 `2` 는 **경로를 준 트래커 커밋**이다 — 루트는 모든 세션이
         같이 쓰니 `git commit -m "…" -- .moai/` 로 친다. 병합이 열려 있으면(MERGE_HEAD)
         git 이 거절하니 그 병합이 끝나기를 기다렸다 다시 친다
@@ -2009,6 +2011,17 @@ sys.exit(1 if bad else 0)
             }
         }
         assert!(!supervise.contains("판(`tmux new-session -d`)"), "맨 new-session 을 격리라고 가르친다");
+    }
+
+    #[test]
+    fn reclaimed_work_says_it_lost_the_earlier_share() {
+        // **거둔 일의 노트는 앞 세션 몫을 모른다고 말한다**(2026-09-18 사용자 결정). 일한 모델은
+        // 닫을 때만 적어(결정 4), 앞 세션이 하다 죽은 멤버를 거둔 창이 닫으면 통째로 제 몫이 된다.
+        // 집을 때도 적게 넓히지 않고, 통계가 그 줄을 가를 수 있게 까닭에 표시만 한다.
+        let supervise = supervise();
+        let at = supervise.find("의 멈춘 일을 맡긴다").expect("거둔 일을 맡기는 글이 없다");
+        let end = supervise[at..].find("**1. 고른다.**").map_or(supervise.len(), |n| at + n);
+        assert!(supervise[at..end].contains("앞 세션 몫은 모른다"), "거둔 일의 노트가 앞 세션 몫을 삼킨다");
     }
 
     /// **일꾼이 마지막 자이고, 일한 모델은 닫을 때 남는다**(moai-lzfq, 2026-09-15 사용자 결정).

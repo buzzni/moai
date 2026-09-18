@@ -78,6 +78,8 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
         (`git worktree add .claude/worktrees/<에픽> worktree-<에픽>`), 없으면
         `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> <본 가지>`
       - 멤버의 칸은 이미 집혀 있다 — 다시 집지 않는다
+      - 9-1 의 노트는 이 창의 몫만 적는다. 까닭 끝에 `거둔 일, 앞 세션 몫은 모른다` 를 붙인다 —
+        앞 세션의 모델과 토큰은 어디에도 안 적혀, 없으면 멤버 전체를 이 창이 한 것으로 읽는다
       - 아래 걸음들이 가리키는 `2` 는 **경로를 준 트래커 커밋**이다 — 루트는 모든 세션이
         같이 쓰니 `git commit -m "…" -- .moai/` 로 친다. 병합이 열려 있으면(MERGE_HEAD)
         git 이 거절하니 그 병합이 끝나기를 기다렸다 다시 친다
