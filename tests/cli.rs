@@ -4310,10 +4310,14 @@ fn every_short_help_aligns_its_descriptions() {
     assert!(bad.is_empty(), "설명 열이 줄마다 다른 칸에 선 도움말:\n{}", bad.join("\n"));
 }
 
-/// 옵션·인자 줄에서 **설명이 서는 칸.** 두 칸 들여 `-`·`<`·`[` 로 시작하고, 이름 뒤 두 칸 넘는
-/// 틈 다음이 설명이다. 설명이 다음 줄로 내려간 옵션과 옵션이 아닌 줄은 `None`.
+/// 옵션·인자 줄에서 **설명이 서는 칸.** 두 칸 넘게 들여 `-`·`<`·`[` 로 시작하고, 이름 뒤 두 칸
+/// 넘는 틈 다음이 설명이다. 설명이 다음 줄로 내려간 옵션과 옵션이 아닌 줄은 `None`.
+///
+/// **들여쓰기를 먼저 걷는다** — 짧은 이름 없는 옵션(`      --user <이름 (메일)>`)은 clap 이 여섯
+/// 칸을 들이므로, 두 칸만 걷고 `-` 를 보면 그 줄이 통째로 빠진다. 이 시험이 잡으려던 바로 그
+/// 줄이 거기 있다.
 fn description_column(line: &str) -> Option<usize> {
-    let body = line.strip_prefix("  ")?;
+    let body = line.strip_prefix("  ")?.trim_start();
     if !body.starts_with(['-', '<', '[']) {
         return None;
     }
