@@ -351,7 +351,7 @@ fn one(
     let root = origin.root(&issue.id).unwrap_or(&repo.root);
     let (commits, commits_error) = match crate::git::table(root, &[issue.id.as_str()]) {
         Ok(mut by_id) => (by_id.remove(&issue.id).unwrap_or_default(), None),
-        Err(e) => (Vec::new(), Some(crate::text::one_line(&e.to_string()))),
+        Err(e) => (Vec::new(), Some(e.told(root))),
     };
 
     if ctx.json {
