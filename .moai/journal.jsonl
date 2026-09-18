@@ -4005,3 +4005,8 @@
 {"ts":"2026-09-18T11:09:51Z","id":"moai-zuke","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xrrn 에서 펼쳤다 — 프로젝트를 옮길 때 되돌릴 것이 climb 과 enter_project 로 갈라져 있다"}
 {"ts":"2026-09-18T11:09:51Z","id":"moai-xrrn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-zuke 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-18T11:09:58Z","id":"moai-800o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:10:33Z","id":"moai-fqnr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"조건부 --json 키를 되쓴 줄에서 걷는다"}
+{"ts":"2026-09-18T11:10:33Z","id":"moai-wams","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"json_with 가 낼 수 있는 조건부 키 목록을 받아 이번에 안 실은 것을 rest 에서 걷는다"}
+{"ts":"2026-09-18T11:10:33Z","id":"moai-fqnr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2l8n 에서 펼쳤다 — 조건부 --json 키가 모르는 필드로 남아 거짓을 싣는다 — json_with 에 지울 목록이 없다"}
+{"ts":"2026-09-18T11:10:33Z","id":"moai-2l8n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-fqnr 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:10:42Z","id":"moai-wams","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
