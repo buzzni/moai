@@ -1352,10 +1352,12 @@ mod tests {
     fn the_tui_help_fits_in_eighty_columns() {
         let wide: Vec<String> = tui_help()
             .lines()
-            .filter(|l| crate::text::width(l) > 80)
-            .map(|l| format!("{}: {l}", crate::text::width(l)))
+            .filter_map(|l| {
+                let w = crate::text::width(l);
+                (w > 80).then(|| format!("{w}: {l}"))
+            })
             .collect();
-        assert!(wide.is_empty(), "`moai tui --help` 에 80칸을 넘는 줄:\n{}", wide.join("\n"));
+        assert!(wide.is_empty(), "`moai tui --help` 의 글(after_help)에 80칸을 넘는 줄:\n{}", wide.join("\n"));
     }
 
     /// **표에 이름 붙은 키는 `moai tui --help` 가 댄다**(moai-3l4l) — 위 시험의 거꾸로다. 위만 있으면
