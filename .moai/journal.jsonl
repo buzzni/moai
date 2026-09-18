@@ -4431,3 +4431,7 @@
 {"ts":"2026-09-18T12:13:10Z","id":"moai-kbky","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T12:16:02Z","id":"moai-j7r3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T12:21:06Z","id":"moai-bx7g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T12:30:01Z","id":"moai-fg0t","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽 줄이 제 epic 필드로 show -e 에는 서고 트리에서는 뿌리에 선다"}
+{"ts":"2026-09-18T12:30:18Z","id":"moai-fg0t","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정 필요: 상황 — 에픽 줄의 제 epic 필드를 소속으로 칠지가 노트에 없다(k9yb 는 제 필드에서 멈춘다고만 적었다). / 선택지 A: epic_through 가 묶음 줄에 늘 None 을 내고, 에픽 줄이 든 epic 은 status 경고(broken 이나 새 kind)로 드러낸다 — moai-0prl 의 '에픽 줄은 제 milestone 에만 선다' 와 같은 차례. B: nav 가 에픽을 에픽 밑에 그린다(에픽 중첩) — 트리·롤업·칸 셈을 다 넓힌다. / 권장: A. 중첩은 새 개념이고, A 는 필드를 지우지 않아 되돌릴 수 있다"}
+{"ts":"2026-09-18T12:30:18Z","id":"moai-9qk7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"wip 가 가려진 쌍둥이 줄을 집은 일로 센다 — 훅 초점과 ready 아래 줄"}
+{"ts":"2026-09-18T12:30:18Z","id":"moai-thcz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"status 한 번에 소속 지도(groups·milestones)를 여러 번 짓는다"}
