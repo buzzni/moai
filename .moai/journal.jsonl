@@ -4680,3 +4680,10 @@
 {"ts":"2026-09-18T14:15:11Z","id":"moai-zah3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 커밋 끝, 에픽 끝 리뷰 moai-3uc6.h27 뒤 병합하고 닫는다"}
 {"ts":"2026-09-18T14:15:17Z","id":"moai-xpd7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 커밋 끝, 에픽 끝 리뷰 moai-3uc6.h27 뒤 병합하고 닫는다"}
 {"ts":"2026-09-18T14:15:21Z","id":"moai-o46r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T14:15:24Z","id":"moai-3aec","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 커밋 끝, 에픽 끝 리뷰 moai-3uc6.h27 뒤 병합하고 닫는다"}
+{"ts":"2026-09-18T14:15:28Z","id":"moai-3uc6.h27","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: code-review xhigh --fix 가 워크트리 moai-3uc6 에서 도는 중. 끝나면 원문·판단 두 노트, fix 커밋, 닫기"}
+{"ts":"2026-09-18T14:15:46Z","id":"moai-6p1n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T14:15:49Z","id":"moai-zah3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T14:15:54Z","id":"moai-xpd7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T14:16:02Z","id":"moai-3aec","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T14:19:08Z","id":"moai-boc6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
