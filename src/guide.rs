@@ -1134,6 +1134,11 @@ def dim_only(pane):
     return False
 def looks(fmt):
     return tmux("display-message", "-p", "-t", pane, fmt).stdout.strip()
+def shrunk(now, was):
+    """지우기가 깎은 글인가. 한 번 지우면 줄 하나가 비고 다음 줄이 올라올 뿐이라, 남은 줄은 모두
+    앞 판의 줄 안에 차례대로 든다. 안 드는 줄이 있으면 그새 사람이 친 글이다."""
+    rest = iter(was.split("\n"))
+    return all(any(line in old for old in rest) for line in now.split("\n"))
 QUIET = '#{{pane_in_mode}}#{{pane_synchronized}}'
 if not os.environ.get("TMUX"):
     skip("tmux 밖이다")
@@ -1165,12 +1170,19 @@ if kept is None:
 if kept:
     print("치던 글 —", name, pane)
     print(kept)
+seen = kept
 for _ in range(20):
     left = draft(pane)
     if left == "":
         break
     if left is None or looks(QUIET) != "00":
         skip("지우던 입력 칸을 놓쳤다")
+    # 지우는 사이에 사람이 친 글은 옮긴 적이 없다 — 더 지우면 사람에게 남은 복사가 없다(사용자 결정).
+    if not shrunk(left, seen):
+        print("그새 친 글 —", name, pane)
+        print(left)
+        skip("사람이 치고 있다", "지우기를 멈췄다. 사람에게 비워도 된다고만 짚는다")
+    seen = left
     erased = True
     tmux("send-keys", "-t", pane, "C-e", "C-u", "DC")
     time.sleep(0.2)
@@ -1248,6 +1260,11 @@ PY
   붙기 때문이다. 지워지는 글은 언제나 사람의 것으로 본다. Claude Code 는 빈 칸의 커서를 제안 글
   첫 글자에 뒤집어 그리니 그 한 칸은 글로 안 센다. 사람의 글을 지운 빈 칸에 제안 글이 다시
   서도 같다 — 치던 글은 이미 옮겼으니 그대로 친다
+- **지우는 사이에 사람이 치면 멈춘다**(사용자 결정). 한 번 지울 때마다 입력 칸을 다시 읽어,
+  앞 판의 줄에서 깎인 것이 아닌 글이 보이면 곧바로 멈추고 `/clear` 를 치지 않는다 — 그 글은 옮긴
+  적이 없어 더 지우면 사람에게 남은 복사가 없다. 새 글은 `그새 친 글` 로 감독 창에 옮기고, 앞서
+  지운 것은 `치던 글은 이미 지웠다` 가 말한다. 합쳐서 계속 지우는 길은 안 고른다 — 사람이 치는
+  중에 `/clear` 가 그 글 뒤에 붙는다
 - **비우기와 다음 배정을 한 호흡에 하지 않는다.** `/clear` 는 큐에 쌓인 글을 함께 지운다.
   스크립트가 `비웠다` 를 낸 — 세션 id 가 바뀐 — 뒤에 다음 idea 를 보내고, `비웠는지 모른다`
   면 그 창이 어떤지 보기 전에는 보내지 않는다
@@ -1957,6 +1974,48 @@ mod tests {
         let brief = brief();
         let twelve = brief.rfind("\n    12.").expect("창을 비우는 걸음이 없다");
         assert!(brief[twelve..].contains("감독이 보고를 확인하고 이 창에"), "일꾼이 감독이 비울 수 있다는 것을 모른다");
+    }
+
+    #[test]
+    fn erasing_stops_when_the_person_types_between_the_strokes() {
+        // **지우는 사이에 사람이 친 글은 옮긴 적이 없다**(2026-09-18 사용자 결정). 한 번 읽고 스무
+        // 번 지우던 판은 그 4초 남짓에 친 글자를 옮기지 않고 지웠다. 지우기가 깎은 글과 새 글을
+        // `shrunk` 가 가르는지 실제 파이썬으로 돌려 본다.
+        const CASES: &str = r##"
+import sys
+CASES = [
+    ("첫 줄이 비고 다음 줄이 올라왔다", "b\nc", "a\nb\nc", True),
+    ("다 지웠다", "", "a\nb", True),
+    ("안 지워지는 제안 글", "Try it", "Try it", True),
+    ("줄 끝에 더 쳤다", "b!\nc", "a\nb\nc", False),
+    ("새 줄을 쳤다", "b\nc\nd", "a\nb\nc", False),
+    ("한 줄뿐인 칸에 더 쳤다", "hello there", "hello", False),
+]
+bad = [why for why, now, was, want in CASES if shrunk(now, was) != want]
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+"##;
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let supervise = supervise();
+        let open = supervise.find("python3 - '<세션>'").expect("비우는 스크립트가 없다");
+        let script = &supervise[open..open + supervise[open..].find("\nPY\n").expect("스크립트가 안 닫힌다")];
+        let from = script.find("def shrunk(").expect("지우기가 깎은 글을 가르는 함수가 없다");
+        let to = from + script[from..].find("\nQUIET = ").expect("shrunk 뒤의 줄이 없다");
+        let loop_at = script.find("for _ in range(20):").expect("지우는 고리가 없다");
+        assert!(script[loop_at..].contains("if not shrunk(left, seen):"), "지우는 고리가 사람이 친 글을 안 본다");
+        let program = format!("{}{CASES}", &script[from..to]);
+        let mut child = Command::new("python3")
+            .arg("-")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("python3 를 실행하지 못했다 — 이 시험에는 python3 가 있어야 한다");
+        child.stdin.take().expect("stdin").write_all(program.as_bytes()).expect("스크립트를 못 넘겼다");
+        let out = child.wait_with_output().expect("python3 가 안 끝났다");
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success(), "지우기가 깎은 글과 사람이 친 글을 못 가른다:\n{said}");
     }
 
     /// **흐린 제안 글은 tmux 가 실제로 내보내는 모양으로 가른다.** 위의 울타리는 함수가 있는지만
