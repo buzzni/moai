@@ -4470,3 +4470,5 @@
 {"ts":"2026-09-18T13:17:35Z","id":"moai-qt3k","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"이미 고쳐져 있다 — 66fa725(리뷰 moai-lur8.met)가 B::Project 갈래에서 간 자리의 번호를 보고서야 포커스를 옮기고, a_failed_digit_jump_leaves_the_focus_where_it_was 가 지킨다. 다른 부르는 곳: 층의 Enter 는 이미 목록 포커스, stand_at 은 here() 로 성공을 가른다. enter_project 가 bool 을 돌려주게 바꿀 까닭이 남지 않았다"}
 {"ts":"2026-09-18T13:17:37Z","id":"moai-fg0t","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정: A (사용자, 2026-09-18) — 묶음 줄의 epic 은 소속이 아니고 status 경고로 드러낸다"}
 {"ts":"2026-09-18T13:17:37Z","id":"moai-fg0t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:17:40Z","id":"moai-fg0t","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): A — 묶음 줄의 epic 필드는 소속이 아니다. show -e 에서도 빼고 status 경고로 드러낸다"}
+{"ts":"2026-09-18T13:17:41Z","id":"moai-1plu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): A — Stop 훅의 closing 이 moai mv <id> todo 를 함께 댄다(결정을 기다리면 첫 칸에)"}
