@@ -859,9 +859,10 @@ pub fn group_states<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a s
 }
 
 /// [`group_states`] 와 같은 셈에서 **칸과 곁들이([`Stand`])를 함께** 낸다. 소속 지도를
-/// 따로 안 든 쪽(탐색기의 적재)이 부른다.
+/// 따로 안 든 쪽이 부른다 — 든 쪽(탐색기의 적재)은 [`Soil::stands`] 다.
 pub fn group_stands<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, Stand<'a, 'c>> {
-    let (epic_of, mile_of) = (groups(all), milestones(all));
+    let epic_of = groups(all);
+    let mile_of = milestones_in(all, &epic_of);
     let roots = deferred_roots_in(all, &epic_of, &mile_of);
     group_stands_in(all, cfg, &epic_of, &mile_of, &roots)
 }
@@ -1524,8 +1525,12 @@ fn passed_down<'a>(
 /// 줄이 받은 값**을 받는다. 다시 읽던 때에는 에픽 줄이 끊긴 `epic` 때문에
 /// `(마일스톤 없음)` 에 서는데 멤버만 그 필드로 세어졌다(moai-0prl).
 pub fn milestones(all: &[Issue]) -> BTreeMap<&str, &str> {
+    milestones_in(all, &groups(all))
+}
+
+/// [`milestones`] 와 같은 것. 에픽 지도를 이미 가진 쪽([`Soil`])이 그것을 두 번 짓지 않게 받는다.
+pub fn milestones_in<'a>(all: &'a [Issue], epic_of: &BTreeMap<&'a str, &'a str>) -> BTreeMap<&'a str, &'a str> {
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
-    let epic_of = groups(all);
     let rooted = rooted_thoughts(&by_id);
     let mut out = BTreeMap::new();
     for i in all {
@@ -1681,8 +1686,66 @@ fn fold_top<'a>(
 /// `duplicate_id` 가 그 id 를 따로 드러낸다. 같은 종류의 쌍둥이는 같은 값을 같은 자로
 /// 읽으므로 여기 안 걸린다.
 pub fn eclipsed(all: &[Issue]) -> impl Fn(&Issue) -> bool + '_ {
-    let kind_of: BTreeMap<&str, Kind> = all.iter().map(|i| (i.id.as_str(), i.kind)).collect();
-    move |i| kind_of.get(i.id.as_str()).is_some_and(|k| *k != i.kind)
+    let kind_of = kinds(all);
+    move |i| is_eclipsed(&kind_of, i)
+}
+
+/// id → 그 id 를 **마지막으로 든 줄**의 종류. 가려짐 판정([`is_eclipsed`])이 보는 지도다.
+pub fn kinds(all: &[Issue]) -> BTreeMap<&str, Kind> {
+    all.iter().map(|i| (i.id.as_str(), i.kind)).collect()
+}
+
+/// [`eclipsed`] 의 판정 — `kind_of` 는 [`kinds`] 의 지도다(빌린 id 든 소유한 id 든). **판정은 여기
+/// 하나다**(moai-xemz 리뷰): 지도를 이미 가진 쪽(`Soil`·`query::Where`·탐색기의 `tui::Ground`)이 저마다
+/// 몸을 다시 적으면, 쌍둥이를 가르는 자가 하나만 바뀐 날 CLI 와 탐색기가 같은 줄을 달리 고른다.
+pub fn is_eclipsed<K: std::borrow::Borrow<str> + Ord>(kind_of: &BTreeMap<K, Kind>, i: &Issue) -> bool {
+    kind_of.get(i.id.as_str()).is_some_and(|k| *k != i.kind)
+}
+
+/// **파일 전체를 훑어야 아는 것을 한 걸음으로 잰다**(moai-fbdg) — 소속(에픽·마일스톤), 물려받은
+/// 미룸, 가려진 쌍둥이, 못 쓸 참조, 길 잃음 밑에 접힌 줄. 지도 하나가 다음 지도의 재료라 따로 부르면
+/// `groups` 만 서너 번 돈다: `milestones`·`misplaced` 가 저마다 다시 짓고, 탐색기는 그 위에 색인
+/// (`nav::Index`)·묶음 칸(`group_stands`)·거름망(`query::Where`)이 또 한 벌씩 지었다 — 이슈 1만 건에서
+/// 거름망 한 번이 300ms 였다.
+///
+/// **칸(`Config`)은 안 든다.** 여기까지는 설정을 모르고 재는 것이고, 묶음이 선 칸만 설정을 보므로
+/// [`Soil::stands`] 로 따로 낸다 — 설정 없이 자리만 정하는 쪽(`nav::Index::of`)이 그 값을 안 치른다.
+pub struct Soil<'a> {
+    /// 줄 id → 그 줄이 든 에픽([`groups`]).
+    pub epic: BTreeMap<&'a str, &'a str>,
+    /// 줄 id → 그 줄이 선 마일스톤([`milestones`]).
+    pub milestone: BTreeMap<&'a str, &'a str>,
+    /// 계획에서 빠진 줄 → 그것을 뺀 줄([`deferred_roots`]).
+    pub roots: BTreeMap<&'a str, &'a str>,
+    /// id → 그 id 를 마지막으로 든 줄의 종류([`kinds`]).
+    pub kinds: BTreeMap<&'a str, Kind>,
+    /// 못 쓸 소속 참조를 든 줄([`misplaced`]).
+    pub lost: BTreeMap<&'a str, Misplace>,
+    /// 길 잃은 줄 **밑에 접힌** 줄([`under_lost`]).
+    pub folded: BTreeSet<&'a str>,
+}
+
+impl<'a> Soil<'a> {
+    pub fn of(all: &'a [Issue]) -> Soil<'a> {
+        let epic = groups(all);
+        let milestone = milestones_in(all, &epic);
+        let roots = deferred_roots_in(all, &epic, &milestone);
+        let kinds = kinds(all);
+        let lost = misplaced_in(all, &kinds, &epic, &milestone);
+        // 길 잃음은 `nav::Ctx::home` 과 같다 — 못 쓸 참조를 든 줄과 가려진 쌍둥이.
+        let folded = under_lost(all, &epic, |i| lost.contains_key(i.id.as_str()) || is_eclipsed(&kinds, i));
+        Soil { epic, milestone, roots, kinds, lost, folded }
+    }
+
+    /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가([`is_eclipsed`]).
+    pub fn eclipsed(&self) -> impl Fn(&Issue) -> bool + '_ {
+        |i: &Issue| is_eclipsed(&self.kinds, i)
+    }
+
+    /// 묶음이 **선 칸과 곁들이**([`group_stands`]) — 여기서만 설정을 본다.
+    pub fn stands<'c>(&self, all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, Stand<'a, 'c>> {
+        group_stands_in(all, cfg, &self.epic, &self.milestone, &self.roots)
+    }
 }
 
 /// 소속 참조가 못 쓸 것인 까닭.
@@ -1706,9 +1769,18 @@ pub enum Misplace {
 /// 그래서 판정 차례도 `nav::Ctx::home` 과 같다 — 마일스톤은 뿌리라 볼 것이
 /// 없고, 에픽은 제 마일스톤만, 이슈는 에픽을 먼저 보고 없으면 마일스톤을 본다.
 pub fn misplaced(all: &[Issue]) -> BTreeMap<&str, Misplace> {
-    let kind_of: BTreeMap<&str, Kind> = all.iter().map(|i| (i.id.as_str(), i.kind)).collect();
     let epic_of = groups(all);
-    let mile_of = milestones(all);
+    let mile_of = milestones_in(all, &epic_of);
+    misplaced_in(all, &kinds(all), &epic_of, &mile_of)
+}
+
+/// [`misplaced`] 와 같은 것. 지도를 이미 가진 쪽([`Soil`])이 그것을 다시 짓지 않게 받는다.
+pub fn misplaced_in<'a>(
+    all: &'a [Issue],
+    kind_of: &BTreeMap<&'a str, Kind>,
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    mile_of: &BTreeMap<&'a str, &'a str>,
+) -> BTreeMap<&'a str, Misplace> {
     let usable = |id: Option<&&str>, kind: Kind| id.is_none_or(|id| kind_of.get(*id) == Some(&kind));
 
     let mut out = BTreeMap::new();
@@ -2175,14 +2247,25 @@ const FLOW_DAYS: i64 = 7;
 /// 기계의 몇 초~몇 분 앞선 시계나 시간대 실수는 안 걸리고, 손으로 고친 2099 는 걸린다.
 const FUTURE_SLACK_SECS: i64 = 86_400;
 
-/// 줄이 든 시각 다섯 가운데 하나라도 지금보다 [`FUTURE_SLACK_SECS`] 넘게 뒤인가.
+/// 줄이 든 시각 일곱 가운데 하나라도 지금보다 [`FUTURE_SLACK_SECS`] 넘게 뒤인가.
 ///
 /// 도구는 제 시계로만 적으므로 그런 시각은 손으로 고친 줄이나 크게 틀린 시계에서 온다.
 /// 나이는 0 아래로 안 내려가서(`days_since`, moai-fix6) 목록에서는 "오늘" 로 숨는다.
 /// 못 읽는 시각은 여기서 따지지 않는다 — 읽기는 관대하다.
+///
+/// **시작·끝 시각도 본다**(moai-38mh). 시작은 한 번 적고 안 덮으므로, 틀린 시계로 집은 줄은
+/// 다음 이동이 `status_since`·`updated_at` 을 바로잡은 뒤에도 그 값만 남아 소요를 음수로 만든다.
 fn far_ahead(i: &Issue, now: &str) -> bool {
     let Some(now) = crate::model::parse_rfc3339(now) else { return false };
-    [Some(i.created_at.as_str()), Some(i.updated_at.as_str()), Some(i.status_since.as_str()), i.deferred_at.as_deref(), i.planned_at.as_deref()]
+    [
+        Some(i.created_at.as_str()),
+        Some(i.updated_at.as_str()),
+        Some(i.status_since.as_str()),
+        i.deferred_at.as_deref(),
+        i.planned_at.as_deref(),
+        i.started_at.as_deref(),
+        i.done_at.as_deref(),
+    ]
         .into_iter()
         .flatten()
         .filter_map(crate::model::parse_rfc3339)
@@ -4977,7 +5060,8 @@ mod tests {
     /// **먼 미래 시각을 든 줄을 드러낸다**(moai-ugjp). 나이는 0 아래로 안 내려가서(moai-fix6)
     /// 2099 같은 오타가 목록에서 "오늘" 로 숨고 흐름 셈에도 들었다. 도구는 제 시계로만 적으니
     /// 그런 시각은 손으로 고친 줄이나 크게 틀린 시계에서 온다. 사람이 정한 대로 — 경고지
-    /// 깨진 데이터가 아니고(종료 코드 0), 문턱은 하루, 시각 다섯을 다 보고, 흐름에서 뺀다.
+    /// 깨진 데이터가 아니고(종료 코드 0), 문턱은 하루, 시각을 다 보고, 흐름에서 뺀다.
+    /// **시작·끝 시각도 든다**(moai-38mh) — 시작은 안 덮여, 틀린 시계의 값이 다음 이동 뒤에도 남는다.
     #[test]
     fn a_row_stamped_far_in_the_future_is_named_and_left_out_of_the_flow() {
         let now = "2026-09-11T00:00:00Z";
@@ -4993,13 +5077,17 @@ mod tests {
         let skewed = at("argos-0002", "2026-09-11T12:00:00Z"); // 옆 기계 시계가 반나절 빠르다 — 문턱 안
         let plain = at("argos-0003", "");
         let mut late_deferral = at("argos-0004", "");
-        late_deferral.deferred_at = Some("2026-09-13T00:00:00Z".into()); // 이틀 뒤 — 시각 다섯을 다 본다
+        late_deferral.deferred_at = Some("2026-09-13T00:00:00Z".into()); // 이틀 뒤 — 시각을 다 본다
         let mut late_plan = at("argos-0005", "");
         late_plan.planned_at = Some("2027-01-01T00:00:00Z".into());
-        let st = status(&[typo, skewed, plain, late_deferral, late_plan], &[], &cfg(), now);
+        let mut late_start = at("argos-0006", "");
+        late_start.started_at = Some("2099-01-01T00:00:00Z".into());
+        let mut late_finish = at("argos-0007", "");
+        late_finish.done_at = Some("2099-01-01T00:00:00Z".into());
+        let st = status(&[typo, skewed, plain, late_deferral, late_plan, late_start, late_finish], &[], &cfg(), now);
 
         let w = st.warnings.iter().find(|w| w.kind == "future_timestamp").expect("먼 미래 시각을 안 말한다");
-        assert_eq!(w.ids, ["argos-0001", "argos-0004", "argos-0005"], "{w:?}");
+        assert_eq!(w.ids, ["argos-0001", "argos-0004", "argos-0005", "argos-0006", "argos-0007"], "{w:?}");
         assert!(!w.fatal && !w.notice && !st.broken(), "경고로 비영 종료한다 — {w:?}");
         // 흐름은 먼 미래 시각을 "최근" 으로 세지 않는다 — 걸린 줄은 통째로 빠진다.
         assert_eq!(st.flow.created, 2, "{:?}", st.flow);

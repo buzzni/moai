@@ -119,11 +119,11 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     }
     let (before, changed) = user_config::update(&config, |doc| {
         let found = doc.projects().0.into_iter().find(|p| spellings.contains(&p.path));
-        if found.is_some() {
-            // 거절이면 "손으로 고친다" 는 말에 **어느 파일인지** 붙인다 — 설정의 자리는 환경(`MOAI_CONFIG`·XDG)
-            // 이 골라 사람이 모를 수 있다. 깨진 설정을 대는 `update` 의 거절문과 같은 모양이다.
-            doc.set_hue(&spellings, hue).map_err(|e| Fail::coded(format!("{}: {e}", config.display()), e.code))?;
-        }
+        // **맞은 줄이 없어도 부른다**(moai-gmdu 에픽 리뷰) — 목록의 모양이 틀렸으면(`project = [{ … }]`)
+        // `projects()` 가 비어 "등록돼 있지 않다" 로 새고, 그 말이 시키는 `add` 는 모양 때문에 거절된다.
+        // 목록을 고치는 쓰기가 모두 거절하는 자리(`Doc::set_hue`)까지 가야 까닭이 선다. 맞은 줄이 없으면
+        // 아무것도 안 바꾼다. 거절문의 파일 자리는 `update` 가 붙인다.
+        doc.set_hue(&spellings, hue)?;
         // 바뀌었는지는 **문서가** 안다 — 앞뒤 색을 견주면 틀린 값(`red` → auto)을 지운 쓰기가
         // "이미 그렇다" 로 선다. 읽기는 틀린 값을 `None` 으로 접기 때문이다.
         Ok(found.map(|p| (p, doc.changed())))

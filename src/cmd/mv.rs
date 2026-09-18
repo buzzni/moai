@@ -47,12 +47,15 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     repo.config.require_known(to.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
     let from = args.from.map(Status::new);
 
-    let at = model::now();
     // **누구인지는 락 밖에서 묻는다.** `model::actor` 는 `git` 을 두 번 띄운다 — 그것을
     // 락 안에 두면 같은 `.moai` 를 쓰는 옆 세션들이 그 subprocess 만큼 더 기다린다.
     // **말하는 차례는 그대로다**: 결과를 여기서 펴지 않고 아래 칸 검사 뒤에 편다.
     let who = model::actor(ctx.user.as_deref(), &repo.root);
     let moved: Moved = repo.with_write(|issues, cfg, _| {
+        // **시각은 락을 쥔 뒤에 뜬다**(리뷰 moai-u5bk.3wq). 밖에서 뜨면 먼저 뜨고 늦게 락을 잡은
+        // 쪽이 뒤에 써서, 칸 시각이 거꾸로 가고 안 덮이는 시작이 끝보다 늦게 선다 — 집기가 닫기를
+        // 앞질러 `done_at − started_at` 이 음수가 된다. 락 안에서 뜨면 쓰는 차례가 곧 시각의 차례다.
+        let at = model::now();
         // **칸부터 다 보고 누구인지는 그다음이다.** 신원 없는 기계에서 칸 오타가 "누가
         // 하는지 모른다" 로 덮이면, 부르는 쪽은 둘을 글로만 가를 수 있다. 칸 검사가
         // 줄을 봐야 하므로(`check_from`) 락 안에서 잰다. **`bad_status` 를 내는 검사는
@@ -130,11 +133,12 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // **`from`(`--from` 의 칸)과 이름이 갈려야 한다.** 둘 다 "떠나는 칸" 이라
             // 같은 이름을 쓰면 위의 검사와 이 줄이 한 값처럼 읽힌다 — 하나는 부르는
             // 쪽이 본 칸이고, 이것은 방금 락 안에서 읽은 칸이다.
-            let was = i.status.clone();
+            //
+            // 칸과 그 시각들 — **시작·끝 시각**(moai-38mh)까지 — 은 `Issue::move_to` 가 한 번에
+            // 옮긴다. 저널을 접어 세면 저널만 못 적힌 쓰기에서 조용히 틀리므로 이 쓰기에 싣고,
+            // `idea promote` 도 같은 길이라 어느 동사로 닫든 같은 줄이 선다.
+            let was = i.move_to(to.clone(), &at, cfg);
             entries.push(JournalEntry::status(&i.id, &was, &to, args.msg.clone(), &at, &by));
-            i.status = to.clone();
-            i.status_since = at.clone();
-            i.updated_at = at.clone();
             // 저장 직전의 모습으로 맞춰 두고 뜬다 — 안 그러면 `--json` 이
             // 파일에 없는 값(기본 우선순위, 정렬 전 태그)을 말한다.
             i.normalize();

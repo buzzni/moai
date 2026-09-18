@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::fail::{Fail, R, code};
 use crate::model::{Actor, Issue, JournalEntry};
 use fs2::FileExt;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -227,10 +227,37 @@ impl Repo {
         let mut issues = load.issues;
         let (entries, out) = f(&mut issues, &self.config, &reserved)?;
 
+        // **글의 크기는 한 자리에서 잰다**(moai-m9a8). 노트·`mv -m`·`defer -m`·제목·본문이 모두
+        // 여기를 지나므로 명령마다 따로 걸면 한 곳은 반드시 잊는다. 저널에 적힐 글은 여기서, 제목과
+        // 본문은 아래 바뀐 줄에서 — 둘 다 스냅샷을 쓰기 전이라 거절하면 아무것도 안 남는다.
+        for e in &entries {
+            for (what, t) in [("노트", &e.text), ("메모", &e.note)] {
+                if let Some(t) = t {
+                    crate::model::check_text_size(&e.id, what, t)?;
+                }
+            }
+        }
+
         for i in issues.iter_mut() {
             i.normalize();
             let was = original.iter().find(|o| o.id == i.id);
             if was != Some(&*i) {
+                // 제목과 본문은 **이번에 바뀌었을 때만** 잰다 — 이미 큰 것을 든 줄도 옮기고 고칠 수 있다.
+                //
+                // **제목도 여기서 막아야 저널이 막힌다.** `create`·`rm` 이 제목을 저널의 `title` 로
+                // 옮겨 적는데, 제목을 안 재면 `moai add "<대화록 한 줄>"` 이 노트와 똑같이 저널에 영영
+                // 남는다. 저널의 `title` 을 위에서 재지 않는 것은 그것이 스냅샷 제목의 사본이라서다 —
+                // 거기서 재면 옛 큰 제목을 든 줄을 `rm` 으로도 못 치운다.
+                for (what, now, before) in [
+                    ("제목", Some(&i.title), was.map(|o| &o.title)),
+                    ("본문", i.body.as_ref(), was.and_then(|o| o.body.as_ref())),
+                ] {
+                    if let Some(text) = now
+                        && now != before
+                    {
+                        crate::model::check_text_size(&i.id, what, text)?;
+                    }
+                }
                 // **칸을 안 건드린 쓰기는 칸 이름을 다시 안 묻는다**(moai-hym7, 사람이
                 // 정했다). 바뀐 줄만 재는 것과 같은 까닭이 한 겹 더 든 것이다 — `config`
                 // 에서 칸 이름을 고치면 옛 이름에 선 줄이 남는데, 그 줄을 미루거나 제목만
@@ -323,22 +350,55 @@ impl Repo {
     /// 이 함수가 `Vec<Issue>` 를 돌려주게 되는 날이 저널을 상태의 원천으로
     /// 삼기 시작한 날이고, 이전 시도가 거기서 복잡해졌다.
     pub fn journal_of(&self, id: &str) -> R<Vec<JournalEntry>> {
+        Ok(self.journal_by_id(&BTreeSet::from([id]), |_| true)?.remove(id).unwrap_or_default())
+    }
+
+    /// 여러 id 의 이력을 **파일 한 번 읽기로** 가른다(moai-p8qj). 없는 id 는 키가 안 선다.
+    ///
+    /// [`Repo::journal_of`] 를 id 마다 부르면 파일 전체를 id 수만큼 읽는다 — 목록이 500줄이면
+    /// 3MB 를 500번이다. 그 함수는 이것의 한 id 짜리라, 읽는 관대함도 차례(`ts`, 같으면 파일
+    /// 차례)도 **한 벌이다** — 둘로 두었던 때는 한쪽 차례만 바꿔도 아무 시험도 안 붉어졌다.
+    ///
+    /// `line` 은 **풀기 전의 줄**을 고른다 — 고른 줄만 JSON 으로 푼다. `journal_of` 는 다 고른다.
+    /// 목록의 `work` 는 `model:` 줄을 들 수 있는 줄만 푼다(`model::may_hold_work`) — 줄 하나 없는
+    /// 목록도 3MB 저널을 통째로 풀던 자리다(리뷰 moai-u5bk.3wq).
+    ///
+    /// **줄마다 따로 읽는다.** 파일을 통째로 UTF-8 로 읽으면 글자 가운데서 끊긴 덧붙이기 한 줄
+    /// (디스크가 찼거나 죽었다 — `with_write` 가 흔한 일로 치는 것)이 파일 전체를 못 읽게 해, 이
+    /// 저널을 읽는 표면이 다 넘어진다. 모르는/깨진 줄은 건너뛴다 — 저널은 상태를 만들지 않으므로
+    /// 여기서 관대해도 답이 틀리지 않는다. 깨진 글자를 `�` 로 바꿔 읽지는 않는다: 그 줄의 `model:`
+    /// 이 망가진 값으로 통계에 선다. `\n` 바이트는 UTF-8 글자 안에 안 나오므로 바이트로 갈라도
+    /// 글자를 자르지 않는다. 파일이 없으면 빈 손이다 — 저널만 없는 저장소는 고장이 아니다.
+    ///
+    /// **여전히 접지 않는다** — 돌려주는 것은 줄 그대로지 상태가 아니다.
+    pub fn journal_by_id(
+        &self,
+        want: &BTreeSet<&str>,
+        line: impl Fn(&str) -> bool,
+    ) -> R<BTreeMap<String, Vec<JournalEntry>>> {
         let path = self.journal_path();
-        let src = match std::fs::read_to_string(&path) {
-            Ok(s) => s,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
             Err(e) => return Err(Fail::new(format!("{}: {e}", path.display()))),
         };
-        let src = src.strip_prefix('\u{feff}').unwrap_or(&src);
-        let mut out: Vec<JournalEntry> = src
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            // 모르는/깨진 줄은 건너뛴다. 저널은 상태를 만들지 않으므로
-            // 여기서 관대해도 답이 틀리지 않는다.
-            .filter_map(|l| serde_json::from_str::<JournalEntry>(l).ok())
-            .filter(|e| e.id == id)
-            .collect();
-        out.sort_by(|a, b| a.ts.cmp(&b.ts));
+        let bytes = bytes.strip_prefix("\u{feff}".as_bytes()).unwrap_or(&bytes);
+        let mut out: BTreeMap<String, Vec<JournalEntry>> = BTreeMap::new();
+        for raw in bytes.split(|b| *b == b'\n') {
+            // `str::lines` 와 같은 줄이다 — `\n` 에서 가르고 끝의 `\r` 을 뗀다.
+            let Ok(l) = std::str::from_utf8(raw) else { continue };
+            let l = l.strip_suffix('\r').unwrap_or(l);
+            if l.trim().is_empty() || !line(l) {
+                continue;
+            }
+            let Ok(e) = serde_json::from_str::<JournalEntry>(l) else { continue };
+            if want.contains(e.id.as_str()) {
+                out.entry(e.id.clone()).or_default().push(e);
+            }
+        }
+        for v in out.values_mut() {
+            v.sort_by(|a, b| a.ts.cmp(&b.ts));
+        }
         Ok(out)
     }
 }
@@ -515,6 +575,9 @@ pub fn new_id(
 /// 저널의 시각은 그 줄의 `created_at` 이다 — 둘을 따로 받으면 어긋날 수 있다.
 /// 돌려주는 줄은 밀어 넣은 것의 사본이다(출력을 짓는 쪽이 쓴다).
 pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor) -> R<(JournalEntry, Issue)> {
+    // 첫 칸 밖에서 나는 줄(`add -s`)은 만든 때가 곧 시작이다 — 칸을 옮기는 쓰기와 같은 뜻으로
+    // 적는다(`Issue::arrive`, moai-38mh).
+    issue.arrive(cfg);
     issue.normalize();
     issue.validate(cfg)?;
     let entry = JournalEntry::create(&issue.id, &issue.title, &issue.created_at, by);
@@ -529,34 +592,53 @@ pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor
 /// 파일로 바뀐다. 바꾼 뒤에 입히면 그 사이 잠깐 열려 있으므로 앞에서 한다. 파일이 없던
 /// 처음 쓰기만 umask 를 따른다.
 ///
-/// **고르는 인자를 두지 않는다.** 한때 권한을 넘기는 `write_atomic_as` 가 곁에 따로 있어
+/// **권한을 고르는 인자는 두지 않는다.** 한때 권한을 넘기는 `write_atomic_as` 가 곁에 따로 있어
 /// 사용자 설정만 그것을 불렀고, `issues.jsonl` 은 권한 없는 쪽을 불러 풀렸다 (moai-c1s3).
-/// 지키지 않아야 할 쓰기가 없으니 잊을 자리도 없앤다.
+/// 지키지 않아야 할 쓰기가 없으니 잊을 자리도 없앤다. [`write_atomic_in`] 이 고르는 것은 **임시
+/// 자리뿐**이고 권한은 둘이 한 몸통에서 지킨다 — 임시 자리를 잘못 고르면 찌꺼기가 남지만, 권한을
+/// 잘못 고르면 남이 읽는다. 둘을 같은 무게로 읽고 `write_atomic_as` 를 되살리지 않는다.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
+    let dir = path.parent().ok_or_else(|| Fail::new("경로에 디렉터리가 없다"))?;
+    write_atomic_in(path, bytes, dir)
+}
+
+/// [`write_atomic`] 이되 **임시 파일을 `tmp_dir` 에 둔다**(moai-3akx). 쓰다 죽으면 임시 파일이
+/// 그 자리에 남으므로, 저장소 뿌리의 파일을 쓰는 `init` 은 이미 무시되는 `.moai/*.tmp.*` 자리를
+/// 준다 — 옆자리에 두면 `AGENTS.md.tmp.<pid>` 가 뿌리에 남아 `git add -A` 에 딸려 온다.
+/// `rename` 은 파일시스템을 못 건너므로 `tmp_dir` 이 다른 파일시스템이면 `Err` 다 — 그때 옆자리로
+/// 물러서는 것은 고르는 쪽이 한다(`cmd::init::plant`). 실패하면 **임시 파일을 남기지 않고** 대상은
+/// 한 글자도 안 바뀐다.
+pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
     let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
     let dir = path.parent().ok_or_else(|| Fail::new("경로에 디렉터리가 없다"))?;
-    let tmp = dir.join(format!(
+    let tmp = tmp_dir.join(format!(
         "{}.tmp.{}",
         path.file_name().and_then(|s| s.to_str()).unwrap_or("out"),
         std::process::id()
     ));
-    let err = |e: std::io::Error| Fail::new(format!("{}: {e}", tmp.display()));
-    {
-        let mut f = std::fs::File::create(&tmp).map_err(err)?;
-        if let Some(p) = perms {
-            f.set_permissions(p).map_err(err)?;
-        }
-        f.write_all(bytes).map_err(err)?;
-        f.sync_all().map_err(err)?;
-    }
-    std::fs::rename(&tmp, path).map_err(|e| {
+    // **어디서 실패하든 임시 파일을 치운다.** `rename` 에서만 치우던 때는 디스크가 찬(ENOSPC)
+    // 쓰기가 죽지 않고도 `<파일>.tmp.<pid>` 를 남겼다 — moai-3akx 가 막으려던 찌꺼기다.
+    let fail = |at: &Path, e: std::io::Error| {
         let _ = std::fs::remove_file(&tmp);
-        Fail::new(format!("{}: {e}", path.display()))
-    })?;
-    // rename 자체는 원자적이지만 디렉터리 엔트리는 아직 디스크에 없을 수 있다.
+        Fail::new(format!("{}: {e}", at.display()))
+    };
+    let filled = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        if let Some(p) = perms {
+            f.set_permissions(p)?;
+        }
+        f.write_all(bytes)?;
+        f.sync_all()
+    })();
+    filled.map_err(|e| fail(&tmp, e))?;
+    std::fs::rename(&tmp, path).map_err(|e| fail(path, e))?;
+    // rename 자체는 원자적이지만 디렉터리 엔트리는 아직 디스크에 없을 수 있다. 임시 자리가 다른
+    // 디렉터리면 그쪽에서 빠진 엔트리도 적는다 — 안 적으면 전원이 나간 뒤 임시 파일이 되살아난다.
     #[cfg(unix)]
-    if let Ok(d) = std::fs::File::open(dir) {
-        let _ = d.sync_all();
+    for d in std::iter::once(dir).chain((tmp_dir != dir).then_some(tmp_dir)) {
+        if let Ok(d) = std::fs::File::open(d) {
+            let _ = d.sync_all();
+        }
     }
     Ok(())
 }

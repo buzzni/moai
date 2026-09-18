@@ -422,7 +422,7 @@ impl App {
     /// 첫 화면은 줄마다 `읽는 중` 으로 서고 읽는 대로 수가 찬다 — 그 자리에서 다 읽으면 등록한
     /// 프로젝트의 값을 다 더한 만큼 첫 화면이 안 선다(moai-ezwu).
     pub fn on_projects(layer: Layer) -> App {
-        let mut app = App::build(Vec::new(), Index::of(&[]), blank_config(), Vec::new(), Vec::new());
+        let mut app = App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new());
         let mut layer = Layer { at: At::Layer, ..layer };
         layer.launch();
         app.layer = Some(layer);
@@ -681,7 +681,7 @@ impl App {
         // 층에서는 읽음 키가 아예 안 선다(`keys::Browse::enabled`) — 층의 줄은 프로젝트라 읽을 줄이 없다.
         self.unread.clear();
         self.index = Index::of(&[]);
-        self.states = Default::default();
+        self.ground = Default::default();
         self.keep = Vec::new();
         self.shown = Vec::new();
         self.unreadable = Vec::new();
@@ -1167,8 +1167,8 @@ mod tests {
             let repo = Repo { root: here.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
             let stamp = stamp_of(&repo);
             let load = repo.read().unwrap();
-            let index = Index::of(&load.issues);
-            App::open(repo, load, index, NavPath::new(), stamp)
+            let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
+            App::open(repo, load, index, ground, NavPath::new(), stamp)
         };
         let mut a = open().attach_layer(Layer::read(Some(&cfg), Some(&here)));
         assert!(a.layer.is_none(), "깨진 설정으로 층을 세웠다");
@@ -1195,8 +1195,8 @@ mod tests {
         let repo = Repo { root: here.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
-        let index = Index::of(&load.issues);
-        let mut a = App::open(repo, load, index, NavPath::new(), stamp).with_layer(Layer::read(Some(&cfg), Some(&here)));
+        let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
+        let mut a = App::open(repo, load, index, ground, NavPath::new(), stamp).with_layer(Layer::read(Some(&cfg), Some(&here)));
         assert!(!a.on_layer());
         assert_eq!(titles(&a), ["여기 줄"]);
         assert_eq!(a.cursor, 0, "뿌리에 `..` 이 없는데 커서가 한 칸 내려가 섰다");
@@ -1976,8 +1976,9 @@ mod tests {
         assert_eq!(f.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (다시 읽기)");
 
         let g = crate::worktree::gather(&repo, true).unwrap();
-        let (stamp, index) = (stamp_of(&repo), Index::of(&g.load.issues));
-        let a = App::open(repo, g.load, index, NavPath::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept);
+        let stamp = stamp_of(&repo);
+        let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
+        let a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept);
         assert_eq!(a.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (여는 읽기)");
     }
 
@@ -2000,8 +2001,8 @@ mod tests {
         let places = crate::worktree::place_marks(&repo.root);
         let mut g = crate::worktree::gather(&repo, true).unwrap();
         super::super::watch(&mut g.watched, places);
-        let index = Index::of(&g.load.issues);
-        let mut a = App::open(repo, g.load, index, NavPath::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept);
+        let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
+        let mut a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept);
         let paths: std::collections::BTreeSet<PathBuf> = a.watched.iter().map(|(p, _)| p.clone()).collect();
         assert_eq!(paths.len(), a.watched.len(), "같은 파일을 두 번 지켜본다");
         // 여는 커밋 표는 다 짓게 둔다.
