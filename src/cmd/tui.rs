@@ -110,6 +110,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                         warnings: sum.warnings,
                         stranded: sum.stranded,
                         unreadable_worktrees: sum.blind,
+                        broken_worktrees: sum.unread,
                         unreadable: sum.unreadable,
                     }
                 });
@@ -186,6 +187,10 @@ struct Counted {
     /// 따로 대므로(`layer::Summary::unread`) 그 둘이 여기서 갈린다.
     #[serde(skip_serializing_if = "is_zero")]
     unreadable_worktrees: usize,
+    /// 스냅샷을 못 읽은 워크트리 **전부**의 수(moai-zah3) — 화면의 층이 `layer::Summary::unread` 로
+    /// 대는 그 수다. `status --json` 의 `broken_worktrees` 와 같은 뜻이고, 없으면 키를 안 단다.
+    #[serde(skip_serializing_if = "is_zero")]
+    broken_worktrees: usize,
     unreadable: usize,
 }
 
