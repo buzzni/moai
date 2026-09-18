@@ -4613,3 +4613,7 @@
 {"ts":"2026-09-18T13:54:44Z","id":"moai-fqnr.sqb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 1·3·5·6 반영(리뷰어 --fix, 44b69a1). 2 는 넘긴다 — 릴리스 재걷기는 이 가지가 일부러 걷은 장치고 타입에 맨 APPENDED 확인이 그 자리를 맡는다. 4 는 반영하지 않고 예외로 적었다 — rm --json 의 removed 는 지운 줄의 마지막 기록이라 걷으면 사용자 필드가 어디에도 안 남는다(Row 문서에 적음)"}
 {"ts":"2026-09-18T13:54:44Z","id":"moai-fqnr.sqb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1·3·5·6 반영, 2 넘김(의도한 제거), 4 는 rm 예외로 문서화"}
 {"ts":"2026-09-18T13:54:44Z","id":"moai-qn5d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-18T13:55:14Z","id":"moai-6p1n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:55:14Z","id":"moai-zah3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:55:14Z","id":"moai-xpd7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:55:15Z","id":"moai-3aec","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
