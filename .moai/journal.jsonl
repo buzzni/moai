@@ -4801,3 +4801,10 @@
 {"ts":"2026-09-18T15:08:31Z","id":"moai-g326","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 멤버 셋 사람 결정대로 병합(826b2ae)해 닫았다. moai read 를 가르치는 길을 다시 열려면 에이전트용 신원(MOAI_CONFIG 를 가르는 길)을 먼저 세운다."}
 {"ts":"2026-09-18T15:08:52Z","id":"moai-z4r4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 층과 같은 자로 — 표식이 안 움직여도 마지막 읽기가 1분 넘었으면 프로젝트를 스레드로 다시 읽는다"}
 {"ts":"2026-09-18T15:08:53Z","id":"moai-z4r4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T15:12:11Z","id":"moai-3uc6.hdi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 3uc6 남은 멤버 k7wl: guide 의 commits_error·broken_worktrees 안내"}
+{"ts":"2026-09-18T15:12:22Z","id":"moai-3uc6.hdi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T15:12:50Z","id":"moai-k7wl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"구현·커밋 끝(b769f07, 워크트리 worktree-moai-3uc6). 리뷰 moai-3uc6.hdi(medium) 도는 중 — 끝나면 반영 뒤 develop 병합하고 닫는다"}
+{"ts":"2026-09-18T15:12:53Z","id":"moai-z4r4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:12:53Z","id":"moai-3lul","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 16:00 UTC 뒤 에픽 끝 리뷰(max, d61eadf..HEAD, 리뷰 moai-3lul.kt0)를 다시 돌리고 반영한 뒤 병합한다. 반영한 fix 는 1064e77·3cb2b43 이고, 멤버 al0x·ezwu·go4o·z4r4 는 review 칸에서 병합을 기다린다. b7o3 는 첫 칸에 남는다(status.rs 는 fqnr 몫)"}
+{"ts":"2026-09-18T15:13:07Z","id":"moai-b7o3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T15:14:01Z","id":"moai-nxw8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
