@@ -3660,3 +3660,8 @@
 {"ts":"2026-09-18T02:57:30Z","id":"moai-lzfq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"main 머지 3425942"}
 {"ts":"2026-09-18T02:57:30Z","id":"moai-gu5g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"3f40ede 로 구현, 리뷰 gw7, main 머지 3425942"}
 {"ts":"2026-09-18T02:57:30Z","id":"moai-olaj.263","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열하나 반영(02d0425), 넘긴 넷은 idea moai-ccpw·7xoe·bt28·d34j — 판단 노트에"}
+{"ts":"2026-09-18T02:58:27Z","id":"moai-ehmj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"4357e0e — 켠 채 폭 훑기, 변이 둘로 무는 것을 확인"}
+{"ts":"2026-09-18T02:58:27Z","id":"moai-ehmj.nlh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 열 이름 줄 폭 훑기 시험 (medium)"}
+{"ts":"2026-09-18T02:58:38Z","id":"moai-ehmj.nlh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T02:59:45Z","id":"moai-g9cv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"d05128a 로 main 에 들어갔다. 872+320 통과, 워크트리·가지 삭제"}
+{"ts":"2026-09-18T02:59:45Z","id":"moai-1d8f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"멤버 하나짜리 에픽의 리뷰를 한 번으로 줄인 것이 옳았는지 다시 잰다"}
