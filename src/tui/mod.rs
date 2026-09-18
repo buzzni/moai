@@ -439,6 +439,18 @@ pub struct App {
     pub order: keys::Sorting,
     /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)에 열 이름 줄이 얹힌다.
     pub fields: view::Fields,
+    /// **안 읽은 줄의 id**(moai-z9pc) — 내게 온 것 가운데 내가 마지막으로 본 뒤에 바뀐 것
+    /// (`query::unread`). 줄·읽음·사람이 바뀔 때만 센다(`take`·`adopt_read`·`mark_read`) — 줄마다
+    /// 프레임마다, 보기 토글마다 담당·조상을 다시 풀지 않는다.
+    pub unread: std::collections::BTreeSet<String>,
+    /// 내 설정에 적힌 읽음 — 이슈 id → 마지막으로 본 때. 띄울 때 읽고, 읽음을 적을 때 락 안에서 읽은
+    /// 파일의 것으로, `SPC r` 에 다시 읽는다 — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다.
+    seen: std::collections::BTreeMap<String, String>,
+    /// 내가 누구인가 — `이름 (메일)`. **띄울 때, 프로젝트를 옮길 때, 묻는 칸에서 사람을 받을 때만**
+    /// 푼다(moai-z9pc, moai-j038.vna) — 헤더(`told_user`)가 뿌리와 `user` 가 바뀔 때 다시 푸는 것과 같은
+    /// 자다. 다시 읽기마다 부르지는 않는다 — 그 길이 열리면 "읽기는 사람을 묻지 않는다" 가 무너진다
+    /// (`reading_never_asks_who`). 모르면 `None` 이고 그러면 [NEW] 가 한 줄도 안 선다.
+    pub me: Option<String>,
     /// 오른쪽 상세 칸이 보이나(moai-ymnu). 숨기면 목록이 폭을 다 쓴다. 설정에 남는다.
     pub detail_open: bool,
     /// 설정에 적혀 있다고 이 세션이 아는 보기 — 읽은 뒤와 적은 뒤의 [`App::look_now`](moai-2kyl 단계 리뷰).
@@ -619,6 +631,9 @@ impl App {
             order: Default::default(),
             fields: Default::default(),
             detail_open: true,
+            unread: Default::default(),
+            seen: Default::default(),
+            me: None,
             saved: Default::default(),
             remembered,
             list: Scroll::default(),
@@ -1005,6 +1020,9 @@ impl App {
         self.index = index;
         self.states = states;
         self.now = now;
+        // 안 읽음은 **줄이 바뀔 때** 센다 — 보기 토글(`look`)도 지나는 `regrip` 에 두면 칸 하나 숨길
+        // 때마다 저장소를 걷는다(moai-j038.vna).
+        self.recount_unread();
         self.repair_path();
         // 거름망은 이슈 첨자에 매인 것이라 반드시 다시 센다.
         self.reapply();
@@ -1446,13 +1464,25 @@ impl App {
             // 여기 기본값으로 선다: 옛 설정을 가진 사람에게도 새 열이 뜨고, 끈 열은 끈 채로 남는다.
             let mut fields = view::Fields::default();
             for f in view::Field::ALL {
-                let knew = match &look.fields_known {
-                    Some(known) => known.iter().any(|w| w == f.name()),
-                    // 이 키가 없던 때의 어휘 — 그때 있던 열이면 안 적힌 것이 곧 "껐다" 다.
-                    None => view::Field::BEFORE_KNOWN.contains(&f),
-                };
+                let on = words.iter().any(|w| w == f.name());
+                // **`fields` 에 적힌 열은 적은 쪽이 알던 열이다**(moai-svvk 에픽 리뷰). `fields_known` 은
+                // *안 적힌* 열을 가르는 자이지 적힌 열을 거르는 자가 아니다 — 거르면 `fields = ["tags"]`,
+                // `fields_known = ["id"]` 같은 손 설정에서 tags 가 기본값(꺼짐)으로 서 말없이 버려지고,
+                // 손으로 적은 빈 목록을 옛 바이너리가 제 이름 목록으로 한 번 바꿔 적는 순간 새 바이너리의
+                // 열이 켜진 채 적혀 있어도 꺼진다.
+                let knew = on
+                    || match &look.fields_known {
+                        // **빈 목록은 "모든 열을 알았다" 다**(moai-4qkj, 사용자 결정 2026-09-18). 이 바이너리는
+                        // 늘 열 이름을 다 적으니(`look_now`) 빈 목록은 손으로 적은 것이고, 그 사람이 적은
+                        // `fields` 가 곧 켠 열이다. "아무 열도 몰랐다" 로 읽으면 안 적힌 열이 모두 기본값으로
+                        // 서 적힌 `fields` 가 곧 켠 열이라는 뜻이 한마디 없이 버려진다.
+                        Some(known) if known.is_empty() => true,
+                        Some(known) => known.iter().any(|w| w == f.name()),
+                        // 이 키가 없던 때의 어휘 — 그때 있던 열이면 안 적힌 것이 곧 "껐다" 다.
+                        None => view::Field::BEFORE_KNOWN.contains(&f),
+                    };
                 if knew {
-                    fields.set(f, words.iter().any(|w| w == f.name()));
+                    fields.set(f, on);
                 }
             }
             for w in words {
@@ -1502,6 +1532,147 @@ impl App {
             Ok(()) => self.saved = look,
             Err(e) => self.notice = Some(format!("보기를 설정에 못 적었다 — {}", crate::text::one_line(&e.to_string()))),
         }
+    }
+
+    /// 적어 둔 읽음을 든다(moai-z9pc) — 보기와 같은 한 번의 읽기에서 온다(`user_config::read`).
+    pub fn adopt_read(&mut self, seen: std::collections::BTreeMap<String, String>) {
+        self.seen = seen;
+        self.recount_unread();
+    }
+
+    /// 적어 둔 읽음을 파일에서 다시 든다 — `SPC r` 이 부른다(moai-j038.vna). 띄울 때 한 번만 읽으면 옆
+    /// 터미널의 `moai read` 나 다른 탐색기가 적은 읽음이 이 화면에 영영 안 닿는다. 못 읽으면 들고 있던
+    /// 것을 둔다(`user_config::read_marks_at`).
+    fn reread_seen(&mut self) {
+        let Some(path) = self.user_config.as_deref() else { return };
+        if let Some(marks) = crate::user_config::read_marks_at(path) {
+            self.seen = marks;
+            self.recount_unread();
+        }
+    }
+
+    /// 안 읽은 줄을 다시 센다. **누군지 모르면 아무것도 안 센다** — 읽기는 사람을 묻지 않는다
+    /// (CLAUDE.md). 그러면 [NEW] 가 한 줄도 안 서고, 그것이 설정 없는 기계의 옳은 화면이다.
+    fn recount_unread(&mut self) {
+        let Some(me) = &self.me else {
+            self.unread.clear();
+            return;
+        };
+        self.unread = crate::query::unread(&self.issues, me, &self.seen).into_iter().map(str::to_string).collect();
+    }
+
+    /// 이 뿌리에서 나는 누구인가 — `이름 (메일)`(moai-j038.vna). 헤더([`App::told_user`])와 같은 자
+    /// (`identify`·`user`)로 푼다. **묻지 않는다** — 못 풀면 `None` 이고 [NEW] 가 안 설 뿐이다.
+    pub fn whoami(&self, root: &std::path::Path) -> Option<String> {
+        (self.identify)(self.user.as_deref(), root)
+            .ok()
+            .map(|a| crate::model::label(&a.name, Some(&a.email), crate::config::Naming::Full))
+    }
+
+    /// 읽었다고 적는다(moai-z9pc) — `r`(이 줄)·`SPC m a`(안 읽은 것 전부)·`SPC m r`(이 묶음과 그 밑).
+    ///
+    /// **CLI 의 `moai read` 와 같은 자다**(moai-j038.vna) — `r` 은 `moai read <id>` 처럼 그 줄을 적고(내게
+    /// 온 줄이 아니어도, 누군지 몰라도), `SPC m a` 는 `--all` 처럼 내게 온 안 읽은 것을, `SPC m r` 은
+    /// `-e` 처럼 [`crate::nav::Index::under_group`] 을 적는다. 한때 `r` 은 안 읽은 줄만 적어, 같은 "이
+    /// 줄을 읽었다" 가 두 표면에서 다른 상태를 남겼다.
+    ///
+    /// **이미 읽은 줄은 다시 안 적는다** — 가르는 것은 **락 안에서 읽은 파일의 표**다. 화면이 든 표는
+    /// 옆 터미널의 `moai read` 를 모르므로 그것으로 가르면, 옆에서 방금 적은 새 때를 이 화면의 옛 때
+    /// (`App::now` 는 마지막으로 읽은 때다)로 덮는다. 적고 나면 그 파일의 표를 든다.
+    ///
+    /// **내 설정에만 쓴다**(`user_config::update`) — 트래커 파일은 안 건드린다. 락을 잡는 쓰기라
+    /// 실패할 수 있고, 그때는 화면도 안 바꾼다: 다음에 다시 누르면 된다. 설정 자리를 모르면
+    /// (시험·설정 없는 기계) 화면에서만 걷는다 — 읽기는 사람을 묻지 않는다.
+    fn mark_read(&mut self, act: keys::Browse, rows: &[Row]) {
+        use keys::Browse as B;
+        let cur = self.current_of(rows);
+        let mut targets: Vec<usize> = match act {
+            B::Read => match &cur {
+                Some(Row::Item(e)) => e.at().into_iter().collect(),
+                _ => Vec::new(),
+            },
+            B::ReadAll => self.unread.iter().filter_map(|id| self.index.find(id)).collect(),
+            B::ReadGroup => {
+                let Some(Row::Item(e)) = &cur else {
+                    self.notice = Some("묶음에 든 줄에서 누른다".into());
+                    return;
+                };
+                let Some(group) = self.group_of(e) else {
+                    self.notice = Some("이 줄은 묶음에 안 든다 — 에픽·마일스톤 안에서 누른다".into());
+                    return;
+                };
+                self.index.under_group(&self.issues, &group)
+            }
+            _ => return,
+        };
+        targets.sort_unstable();
+        targets.dedup();
+        // 같은 id 는 한 번 — 뒷줄이 이긴다(`nav::Index::find` 와 같은 자).
+        let lines: std::collections::BTreeMap<&str, &Issue> =
+            targets.iter().map(|&at| (self.issues[at].id.as_str(), &self.issues[at])).collect();
+        if lines.is_empty() {
+            self.notice = Some("읽음으로 적을 것이 없다".into());
+            return;
+        }
+        let now = self.now.clone();
+        let pick = |seen: &std::collections::BTreeMap<String, String>| -> std::collections::BTreeMap<String, String> {
+            lines
+                .values()
+                .filter(|i| crate::query::changed_since_seen(i, seen))
+                .map(|i| (i.id.clone(), now.clone()))
+                .collect()
+        };
+        let written: Vec<String> = match self.user_config.clone() {
+            Some(path) => {
+                let wrote = crate::user_config::update(&path, |doc| {
+                    let marks = pick(&doc.read_marks().0);
+                    let written = doc.mark_read(&marks)?;
+                    Ok((written, doc.read_marks().0))
+                });
+                match wrote {
+                    Ok((written, on_file)) => {
+                        self.seen = on_file;
+                        written
+                    }
+                    Err(e) => {
+                        self.notice = Some(format!("읽음을 설정에 못 적었다 — {}", crate::text::one_line(&e.to_string())));
+                        return;
+                    }
+                }
+            }
+            None => {
+                let marks = pick(&self.seen);
+                let written = marks.keys().cloned().collect();
+                self.seen.extend(marks);
+                written
+            }
+        };
+        self.recount_unread();
+        self.notice = Some(match written.as_slice() {
+            [] => "읽음으로 적을 것이 없다".into(),
+            [one] => format!("✓ 읽음 · {one}"),
+            many => format!("✓ 읽음 · {}줄", many.len()),
+        });
+    }
+
+    /// `SPC m r` 이 읽을 묶음(에픽·마일스톤)의 id(moai-j038.vna) — 커서가 묶음 줄에 섰으면 그 묶음, 아니면
+    /// 지금 경로에서 **가장 안쪽의 에픽·마일스톤**이다. 에픽 줄에서 누르면 그 에픽이 든 마일스톤이 아니라
+    /// 그 에픽이다 — 누른 사람이 시키지 않은 줄을 읽지 않는다.
+    ///
+    /// **뿌리도 바구니도 이슈 폴더도 묶음이 아니다.** 경로를 그대로 묶음으로 쓰던 때는 빈 경로(뿌리)만
+    /// 막아, 마일스톤이 하나라도 있는 저장소에서 `(마일스톤 없음)` 안의 줄에 서서 누르면 마일스톤 밖의 안
+    /// 읽은 것이 통째로 적혔다(`(길 잃음)` 도 같다) — `SPC m r` 이 `SPC m a` 가 되고, 되돌리는 길은 도구 밖에만
+    /// 있다. 자식 있는 이슈 폴더 안에서 누르면 그 폴더만 읽고 에픽의 나머지와 묶음 줄 자신을 빠뜨렸다.
+    fn group_of(&self, e: &Entry) -> Option<String> {
+        if let Entry::Dir { at: Some(at), .. } = e
+            && crate::report::is_group(&self.issues[*at])
+        {
+            return Some(self.issues[*at].id.clone());
+        }
+        self.path.iter().rev().find_map(|seg| match seg {
+            Seg::Epic(id) | Seg::Milestone(Some(id)) => Some(id.clone()),
+            Seg::Issue(_) | Seg::Milestone(None) | Seg::Lost => None,
+        })
     }
 
     /// 보기 토글 하나(`SPC s`). **커서는 줄의 정체로 붙든다** — 숨긴 줄에 서 있었으면 그 자리
@@ -1664,7 +1835,11 @@ impl App {
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             B::ClearFilter => self.clear_filter(),
-            B::Reload => self.reload(),
+            // 적어 둔 읽음도 다시 든다(moai-j038.vna) — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다.
+            B::Reload => {
+                self.reread_seen();
+                self.reload();
+            }
             // 켜고 끄는 것은 **다시 읽는 것**이다. 겹친 줄은 적재 때 한 번 세는 것이라
             // (`states`·거름망·경고), 들고 있는 것에 덧칠하면 셈이 옛 줄로 남는다.
             // **켰는데 겹칠 것이 없으면 한 번 말한다**(moai-d5vn). 경로 줄은 옆이 없으면 비므로, 말이
@@ -1694,6 +1869,8 @@ impl App {
             }
             // 상세를 숨기면 **포커스를 목록으로 되돌린다** — 안 보이는 칸에 포커스가 남으면
             // 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다(moai-ymnu).
+            // **읽음은 시킬 때만 선다**(사용자 결정) — 커서가 지나갔다고, 상세를 봤다고 서지 않는다.
+            B::Read | B::ReadAll | B::ReadGroup => self.mark_read(act, &rows),
             B::Detail => {
                 self.detail_open = !self.detail_open;
                 if !self.detail_open {
@@ -1930,6 +2107,10 @@ impl App {
         self.mode = *ask.back;
         if let Some(who) = who {
             self.user = Some(crate::model::label(&who.name, Some(&who.email), crate::config::Naming::Full));
+            // 받은 사람이 [NEW] 를 가를 사람이기도 하다(moai-j038.vna) — 헤더는 이 사람을 대는데 안 읽음이
+            // 띄울 때의 "모름" 에 머물면 한 화면이 두 사람을 말하고, `SPC m a` 는 늘 "적을 것이 없다" 다.
+            self.me = self.user.clone();
+            self.recount_unread();
             (ask.then)(self);
         }
     }
@@ -2319,6 +2500,74 @@ mod tests {
         let mut c = App::new(Vec::new(), cfg(), Path::new());
         c.adopt_look(&off, Vec::new());
         assert!(!c.fields.shows(view::Field::Names), "끈 열이 다음 실행에 되살아났다");
+    }
+
+    /// **빈 `fields_known` 은 "모든 열을 알았다" 다**(moai-4qkj, 사용자 결정 2026-09-18). 이 바이너리는
+    /// 그런 설정을 안 쓰니 손으로 적은 것이고, 그 사람이 적은 `fields` 가 곧 켠 열이다. 한때 모든 열이
+    /// "몰랐던 열" 이 되어 기본값이 서고 적힌 `fields` 는 한마디 없이 버려졌다. 경고는 안 낸다: 읽기는
+    /// 관대하다.
+    #[test]
+    fn an_empty_fields_known_takes_the_written_fields_as_they_are() {
+        let hand = crate::user_config::Look {
+            fields: Some(vec!["id".into()]),
+            fields_known: Some(Vec::new()),
+            ..crate::user_config::Look::default()
+        };
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&hand, Vec::new());
+        for f in view::Field::ALL {
+            assert_eq!(a.fields.shows(f), f == view::Field::Id, "{} 이 적힌 fields 를 안 따랐다", f.name());
+        }
+        assert_eq!(a.notice, None, "관대히 읽을 자리에서 잔소리를 했다");
+    }
+
+    /// **`fields` 에 적힌 열은 `fields_known` 에 없어도 켜진다**(moai-svvk 에픽 리뷰) — 적은 쪽이 그
+    /// 열을 알았다는 뜻이다. `fields_known` 은 안 적힌 열만 가른다: 목록에 없고 `fields` 에도 없는 열은
+    /// 기본값으로 선다. 한때는 적힌 tags 가 "몰랐던 열" 의 기본값(꺼짐)으로 서 말없이 버려졌다.
+    #[test]
+    fn a_column_written_in_fields_is_on_even_when_fields_known_misses_it() {
+        let hand = crate::user_config::Look {
+            fields: Some(vec!["id".into(), "tags".into()]),
+            fields_known: Some(vec!["id".into(), "assignee".into()]),
+            ..crate::user_config::Look::default()
+        };
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&hand, Vec::new());
+        assert!(a.fields.shows(view::Field::Tags), "fields 에 적힌 열이 fields_known 에 없다고 버려졌다");
+        assert!(a.fields.shows(view::Field::Id));
+        assert!(!a.fields.shows(view::Field::Assignee), "알던 열인데 안 적힌 것이 켜졌다");
+        assert!(a.fields.shows(view::Field::Priority), "몰랐던 열이 기본값으로 안 섰다");
+        assert_eq!(a.notice, None);
+    }
+
+    /// **손으로 적은 빈 `fields_known` 은 파일을 한 바퀴 돌고도 적힌 열 그대로다**(moai-svvk 에픽 리뷰).
+    /// 첫 토글이 빈 목록에 이 바이너리가 아는 이름을 다 더해 적는다 — 그 뒤의 실행도 켠 열·끈 열이
+    /// 그대로여야 한다. 기억 속 `Look` 만 견주는 시험은 `look_words` 가 `[]` 를 어떻게 읽는지도,
+    /// `merge_words` 가 그것을 어떻게 다시 적는지도 안 지난다.
+    #[test]
+    fn a_hand_written_empty_fields_known_survives_a_trip_through_the_file() {
+        let s = scratch("fields-known-empty");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\nfields = [\"id\"]\nfields_known = []\n").unwrap();
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        for f in view::Field::ALL {
+            assert_eq!(a.fields.shows(f), f == view::Field::Id, "{} 이 적힌 fields 를 안 따랐다", f.name());
+        }
+        a.hit("SPC c g");
+
+        let text = std::fs::read_to_string(&user).unwrap();
+        let (back, _) = crate::user_config::read_look(Some(&user));
+        assert_eq!(back.fields_known.map(|k| k.len()), Some(view::Field::ALL.len()), "빈 목록을 이름으로 안 채웠다\n{text}");
+        let mut b = App::new(Vec::new(), cfg(), Path::new());
+        b.user_config = Some(user);
+        b.load_look();
+        for f in view::Field::ALL {
+            let want = f == view::Field::Id || f == view::Field::Tags;
+            assert_eq!(b.fields.shows(f), want, "{} 이 다음 실행에 달라졌다\n{text}", f.name());
+        }
+        assert_eq!(b.notice, None, "제가 적은 설정을 읽으며 말이 섰다\n{text}");
     }
 
     /// **끈 새 열은 파일을 한 바퀴 돌고도 꺼진 채다**(moai-6bc0 단계 리뷰). `look_now()` 끼리 견주는
@@ -2965,8 +3214,132 @@ mod tests {
         assert_eq!(a.worktree, !was);
     }
 
-    /// **바로 누르던 키는 더는 뜻이 없다**(moai-7sjm) — `f`·`n`·`w`·`a`·`d`·`r`·`m`·Delete·F키. 목록·
+    /// **`SPC m r` 은 커서가 든 묶음까지만 읽는다**(moai-z9pc.9av). 에픽 밖의 줄에서 누르면
+    /// 그 줄의 자리가 뿌리(빈 경로)라, 빈 경로로 `starts_with` 를 걸던 옛 식은 저장소의 안 읽은
+    /// 줄을 통째로 읽음으로 적었다 — 한 번 적히면 도구 안에 되돌릴 길이 없다.
+    #[test]
+    fn reading_a_group_never_swallows_the_whole_repo() {
+        let mut a = app();
+        for i in &mut a.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        // 시계를 고정한다 — 읽음은 `App::now` 로 적힌다(`an_unread_line_wears_new_until_it_is_read` 와 같은 까닭).
+        a.now = "2026-09-13T13:42:07Z".into();
+        a.me = Some("레이븐 (raven@example.com)".into());
+        a.recount_unread();
+        let all = a.unread.len();
+        assert_eq!(all, a.issues.len(), "내 줄인데 안 읽음이 빠졌다");
+
+        // 에픽 밖의 줄에서 누른다 — 아무것도 안 읽고 까닭을 댄다.
+        let rows = row_ids(&a);
+        a.cursor = rows.iter().position(|id| id == "argos-0009").expect("에픽 없는 줄이 없다");
+        a.hit("SPC m r");
+        assert_eq!(a.unread.len(), all, "묶음 밖에서 누른 것이 저장소를 통째로 읽었다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("묶음")), "{:?}", a.notice);
+
+        // 에픽 줄에서 누르면 **그 에픽과 그 멤버만** 선다 — 옆 에픽은 그대로다.
+        a.cursor = rows.iter().position(|id| id == "argos-0001").expect("에픽 줄이 없다");
+        a.hit("SPC m r");
+        let left: Vec<&str> = a.unread.iter().map(String::as_str).collect();
+        assert_eq!(left, ["argos-0002", "argos-0009"], "에픽 하나를 읽었는데 남은 것이 다르다");
+    }
+
+    /// **바구니도 이슈 폴더도 묶음이 아니다**(moai-j038.vna). 마일스톤이 하나라도 있으면 에픽 없는 줄과
+    /// 마일스톤 없는 에픽은 `(마일스톤 없음)` 에 서는데, 경로를 그대로 묶음으로 읽던 때는 거기 선 줄에서
+    /// 누른 `SPC m r` 이 마일스톤 밖의 안 읽은 것을 통째로 적었다 — 뿌리에서 막은 것과 같은 일이다. 멤버
+    /// 줄에서 누르면 **묶음 줄 자신도** 읽고(`moai read -e` 와 같은 자 — `nav::Index::under_group`), 자식
+    /// 있는 멤버의 폴더 안에서 눌러도 그 폴더가 아니라 그것이 든 에픽이다.
+    #[test]
+    fn reading_a_group_skips_the_buckets_and_takes_the_group_row() {
+        let parent = member("argos-0003", "argos-0001");
+        let issues = vec![
+            make("argos-0100", Kind::Milestone),
+            make("argos-0001", Kind::Epic),
+            parent,
+            make("argos-0003.aa1", Kind::Issue),
+            member("argos-0004", "argos-0001"),
+            make("argos-0009", Kind::Issue),
+            make("argos-0010", Kind::Issue),
+        ];
+        let mut a = App::new(issues, cfg(), Path::new());
+        for i in &mut a.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.now = "2026-09-13T13:42:07Z".into();
+        a.me = Some("레이븐 (raven@example.com)".into());
+        a.recount_unread();
+        let all = a.unread.len();
+        let stand = |a: &mut App, path: Path, id: &str| {
+            a.path = path;
+            a.cursor = a
+                .rows()
+                .iter()
+                .position(|r| matches!(r, Row::Item(e) if e.at().is_some_and(|at| a.issues[at].id == id)))
+                .unwrap_or_else(|| panic!("{id} 줄이 없다"));
+        };
+
+        // `(마일스톤 없음)` 안의 에픽 없는 줄 — 아무것도 안 읽고 까닭을 댄다.
+        stand(&mut a, vec![Seg::Milestone(None)], "argos-0009");
+        a.hit("SPC m r");
+        assert_eq!(a.unread.len(), all, "바구니를 묶음으로 읽었다 — {:?}", a.unread);
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("묶음")), "{:?}", a.notice);
+
+        // 자식 있는 멤버의 폴더 안에서 누르면 그것이 든 **에픽과 그 밑 전부, 에픽 줄까지**다.
+        stand(&mut a, vec![Seg::Milestone(None), Seg::Epic("argos-0001".into()), Seg::Issue("argos-0003".into())], "argos-0003.aa1");
+        a.hit("SPC m r");
+        let left: Vec<&str> = a.unread.iter().map(String::as_str).collect();
+        assert_eq!(left, ["argos-0009", "argos-0010", "argos-0100"], "에픽을 다 못 읽었거나 밖을 읽었다");
+    }
+
+    /// **`r` 은 `moai read <id>` 와 같은 자다**(moai-j038.vna) — 내게 온 줄이 아니어도, 누군지 몰라도 그
+    /// 줄을 적는다. 이미 읽은 줄은 **락 안에서 읽은 파일의 표**로 가려 다시 안 적는다 — 옆 터미널의
+    /// `moai read` 가 적은 새 때를 이 화면의 옛 때로 덮지 않고, 적고 나면 그 표를 들어 [NEW] 가 따라 걷힌다.
+    #[test]
+    fn r_marks_like_the_cli_and_never_rewinds_a_mark_written_elsewhere() {
+        let s = Scratch::new("read-marks-tui");
+        let config = s.path().join("user.toml");
+        let mut a = app();
+        for i in &mut a.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.user_config = Some(config.clone());
+        a.now = "2026-09-13T13:42:07Z".into();
+        a.me = None;
+        a.recount_unread();
+        assert!(a.unread.is_empty(), "누군지 모르는데 [NEW] 가 섰다");
+
+        // 누군지 몰라도 `r` 은 그 줄을 적는다 — CLI 의 `moai read <id>` 가 그러듯.
+        a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
+        a.hit("r");
+        assert_eq!(a.notice.as_deref(), Some("✓ 읽음 · argos-0009"));
+        assert!(std::fs::read_to_string(&config).unwrap().contains("argos-0009 = \"2026-09-13T13:42:07Z\""));
+
+        // 옆 터미널이 더 늦은 때로 적어 두었다 — 이 화면은 그것을 모른다.
+        let later = "[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\nargos-0009 = \"2026-09-13T13:42:07Z\"\n";
+        std::fs::write(&config, later).unwrap();
+        a.me = Some("레이븐 (raven@example.com)".into());
+        a.recount_unread();
+        assert!(a.unread.contains("argos-0001"), "화면의 표가 옆에서 적은 것을 벌써 안다 — 시험의 전제가 틀렸다");
+        a.cursor = row_ids(&a).iter().position(|id| id == "argos-0001").expect("줄이 없다");
+        a.hit("r");
+        assert_eq!(a.notice.as_deref(), Some("읽음으로 적을 것이 없다"), "이미 읽은 줄을 다시 적었다");
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), later, "옆에서 적은 새 때를 옛 때로 덮었다");
+        assert!(!a.unread.contains("argos-0001"), "적은 뒤 파일의 표를 안 들었다");
+
+        // `SPC r` 도 파일의 표를 다시 든다.
+        std::fs::write(&config, format!("{later}argos-0002 = \"2026-09-14T00:00:00Z\"\n")).unwrap();
+        assert!(a.unread.contains("argos-0002"));
+        a.hit("SPC r");
+        assert!(!a.unread.contains("argos-0002"), "SPC r 이 옆에서 적은 읽음을 안 들었다");
+    }
+
+    /// **바로 누르던 키는 더는 뜻이 없다**(moai-7sjm) — `f`·`n`·`w`·`a`·`d`·`m`·Delete·F키. 목록·
     /// 상세 포커스 모두, 모드도 토글도 알림도 그대로다.
+    ///
+    /// `r` 은 빠졌다 — 사용자 결정으로 **읽음**이 그 자리를 받았다(moai-z9pc). 그 키는 제 시험이 본다.
     #[test]
     fn the_old_direct_keys_no_longer_act() {
         let codes = [
@@ -2975,7 +3348,6 @@ mod tests {
             KeyCode::Char('w'),
             KeyCode::Char('a'),
             KeyCode::Char('d'),
-            KeyCode::Char('r'),
             KeyCode::Char('m'),
             KeyCode::Char('q'),
             KeyCode::Delete,
@@ -4410,6 +4782,10 @@ mod tests {
         let journal = repo.journal_of(&made[0].id).unwrap();
         assert_eq!((journal[0].by.as_str(), journal[0].by_email.as_deref()), ("레이븐", Some("raven@example.com")));
         assert_eq!(a.user.as_deref(), Some("레이븐 (raven@example.com)"));
+        // 받은 사람이 [NEW] 를 가를 사람이기도 하다(moai-j038.vna) — 헤더만 그 사람을 대고 안 읽음은
+        // 띄울 때의 "모름" 에 머물면 방금 담은 제 줄에도 [NEW] 가 안 선다.
+        assert_eq!(a.me.as_deref(), Some("레이븐 (raven@example.com)"));
+        assert!(a.unread.contains(&made[0].id), "받은 사람의 새 줄에 [NEW] 가 안 섰다 — {:?}", a.unread);
         assert_eq!(std::fs::read_to_string(&config).unwrap(), config_before, "받은 것을 설정에 적었다");
 
         // 두 번째 쓰기는 묻지 않는다.
