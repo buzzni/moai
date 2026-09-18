@@ -5001,3 +5001,5 @@
 {"ts":"2026-09-18T17:59:31Z","id":"moai-oxup","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — report::status 를 Soil 한 걸음으로, tui 적재도)"}
 {"ts":"2026-09-18T17:59:31Z","id":"moai-es40","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T17:59:31Z","id":"moai-oxup","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T17:59:55Z","id":"moai-xemz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 첫 칸에 멤버 셋이 남았다 — moai-15g8(view::Seen 과 Where 겹침, a9 가 cmd/show.rs·edit.rs 를 놓은 뒤), moai-p3rw(좁은 상세의 태그 칠 — 접을지·찾은 태그를 앞에 세울지 사람이 정한다), moai-maav(설정 칸의 헛 깨움 — 그리는 쪽이 스피너를 알리는 길). 병합 45f7ba1, 리뷰 moai-xemz.p03"}
+{"ts":"2026-09-18T17:59:55Z","id":"moai-r8gw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 닫혔다. 남은 헛셈은 idea moai-hucy(다른 report 입구)·moai-u5o9(TUI 여는 길·stands 두 번·show --tree, a9 파일)·moai-xppm(훅)에 있다"}
