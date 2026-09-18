@@ -4583,3 +4583,6 @@
 {"ts":"2026-09-18T13:42:35Z","id":"moai-cq53","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 디스크와 target 을 재어 전제가 사라졌음을 확인, 사용자 결정으로 미룸)"}
 {"ts":"2026-09-18T13:42:43Z","id":"moai-go4o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T13:42:53Z","id":"moai-jl72","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 머지 4ed4200. cq53 은 미룸(디스크 90% 또는 워크트리 다섯 위에서 다시 연다), 예산 초과는 idea moai-bt5c"}
+{"ts":"2026-09-18T13:42:59Z","id":"moai-ght0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"release clean build 가 부하 때 예산 5분을 넘는다 (ecut 402초)"}
+{"ts":"2026-09-18T13:42:59Z","id":"moai-ght0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-bt5c 에서 펼쳤다 — release clean build 가 부하 때 예산 5분을 넘는다 (ecut 402초)"}
+{"ts":"2026-09-18T13:42:59Z","id":"moai-bt5c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-g326 의 멤버 moai-ght0 로 펼쳤다"}
