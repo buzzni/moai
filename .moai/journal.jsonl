@@ -4692,3 +4692,4 @@
 {"ts":"2026-09-18T14:32:27Z","id":"moai-giz3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰 moai-3uc6.h27 지적 4: 이제 status --json 에 broken_worktrees(moai-zah3)가 있으나 빠른 길에서는 여기도 빠진다. 좁은 몫 — --worktree 면 gather 가 이미 깨진 스냅샷을 알고 stderr 에만 내니, 그것을 broken_worktrees 로 넘길 수 있다"}
 {"ts":"2026-09-18T14:32:35Z","id":"moai-rg5q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"조건이 섰다 — moai-9qnl 과 이 이슈의 제목에 ⠋ 가 있어, 닫힌 뒤 목록·상세에 보이면 집은 일 없이 깬다. 본문대로 칸 색까지 맞춰 보는 것으로 좁혔다. 목록 머리의 건수 글리프에 칸 색을 입힌 것은 그 좁히기의 대가다(안 칠하면 창 밖에 도는 줄이 있을 때 건수만 돌다 멈춘다)."}
 {"ts":"2026-09-18T14:32:59Z","id":"moai-jr9r","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"separate-git-dir 저장소를 맨몸으로 읽어 자리 경로를 공용 디렉터리에서 잰다"}
+{"ts":"2026-09-18T14:33:26Z","id":"moai-595o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TMPDIR 이 moai 체크아웃 안이면 통합 시험 아홉이 위의 .moai 를 잡는다 — git 울타리는 .moai 찾기를 못 막는다"}
