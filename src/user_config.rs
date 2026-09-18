@@ -607,14 +607,15 @@ impl Doc {
     /// - **낱말 배열(`hidden`·`fields`)은 뺀 낱말만 빼고 더한 낱말만 끝에 더한다** — 남이 더한 낱말은 남는다
     /// - **차례와 방향(`sort`·`sort_reversed`)은 한 벌이다** — 하나를 고르면 둘을 함께 적는다
     /// - **값만 바꾼다** — 키 위의 주석·값 뒤의 주석·여러 줄로 벌인 배열은 그대로다(`put_value`)
-    /// - **바꿀 키가 표 모양이면 하나도 안 적는다**(moai-j7r3) — 낱값으로 덮으면 무엇을 적어 둔 것인지 사라진다
+    /// - **바꿀 키가 표 모양이면 그 키만 안 적는다**(moai-j7r3, moai-jr3z) — 낱값으로 덮으면 무엇을 적어 둔 것인지
+    ///   사라진다. 나머지 키는 적고, 건너뛴 키의 까닭을 낸다
     ///
     /// `None` 으로 바꾼 키는 지운다. 파일이 이미 그렇게 적혀 있으면(옆에서 같게 적었으면) 아무것도 안
     /// 한다 — 헛 쓰기가 없다. **`tui` 가 표가 아니면 적지 않는다** — 무엇인지 모르는 값을 덮으면 되돌릴
     /// 수 없다.
-    pub fn merge_look(&mut self, base: &Look, new: &Look) -> R<()> {
+    pub fn merge_look(&mut self, base: &Look, new: &Look) -> R<Vec<String>> {
         if base == new {
-            return Ok(());
+            return Ok(Vec::new());
         }
         match self.doc.get(TUI) {
             None => {
@@ -632,37 +633,45 @@ impl Doc {
         }
         // 이 세션이 바꾼 키. **거절을 재는 자리와 적는 자리가 같은 깃발을 본다**(moai-gmdu 에픽 리뷰) — 조건을
         // 두 번 적으면 적는 쪽에만 키를 더하는 날 거절이 그 키를 못 보고, 손으로 적은 표 모양을 낱값으로 덮는다.
-        let hidden = base.hidden != new.hidden;
-        let hide_deferred = base.hide_deferred != new.hide_deferred;
-        let sort = (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed);
-        let fields = base.fields != new.fields;
+        let mut hidden = base.hidden != new.hidden;
+        let mut hide_deferred = base.hide_deferred != new.hide_deferred;
+        let mut sort = (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed);
+        let mut fields = base.fields != new.fields;
         // `fields_known` 은 늘 더하기로 적으니(아래) 적을 것이 있으면 늘 본다.
-        let known = new.fields_known.is_some();
-        let detail = base.detail != new.detail;
-        // **이 세션이 적을 키가 손으로 적은 표 모양이면 하나도 안 적고 거절한다**(moai-j7r3) — `set_hue` 와 같은
-        // 자다([`plain`]). `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을 적어 둔 것인지 모르는 채
-        // 낱값으로 덮이면 사라진다(`put_value` 는 값이 아닌 자리를 그대로 갈아 끼운다). 낱값의 틀린 값(`sort = 3`·
-        // `hidden = "done"`)은 읽기가 까닭을 대는 값이라 고쳐 쓴다. 안 바꿀 키는 안 본다 — 엄함은 지금 쓰는 줄에
-        // 대한 것이다.
+        let mut known = new.fields_known.is_some();
+        let mut detail = base.detail != new.detail;
+        // **이 세션이 적을 키가 손으로 적은 표 모양이면 그 키만 안 적는다**(moai-j7r3, moai-jr3z) — 무엇을 덮지
+        // 않는가는 `set_hue` 와 같은 자다([`plain`]). `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을
+        // 적어 둔 것인지 모르는 채 낱값으로 덮이면 사라진다(`put_value` 는 값이 아닌 자리를 그대로 갈아 끼운다).
+        // 낱값의 틀린 값(`sort = 3`·`hidden = "done"`)은 읽기가 까닭을 대는 값이라 고쳐 쓴다. 안 바꿀 키는 안 본다.
+        //
+        // **나머지 키는 적는다**(사용자 결정 2026-09-18). 처음에는 `set_hue`·`mark_read` 처럼 하나도 안 적었는데,
+        // 탐색기는 거절된 차이를 다음 저장에 또 실어 그 세션의 숨김·상세·열이 하나도 안 적혔다 — 화면에는 선 채
+        // 다음 실행에서 사라졌다. 보기는 키마다 따로 사는 값이라 한 키가 다른 키의 저장을 막을 까닭이 없다.
+        // 차례와 방향은 한 벌이라 하나가 표 모양이면 둘 다 건너뛴다. 건너뛴 키의 까닭을 낸다.
         let t = self.doc.get(TUI).and_then(Item::as_table_like).expect("방금 표로 섰다");
-        let touched = [
-            (HIDDEN, true, hidden),
-            (HIDE_DEFERRED, false, hide_deferred),
-            (SORT, false, sort),
-            (SORT_REVERSED, false, sort),
-            (FIELDS, true, fields),
-            (FIELDS_KNOWN, true, known),
-            (DETAIL, false, detail),
-        ];
-        let odd = touched.into_iter().filter(|(_, _, go)| *go).find_map(|(key, words, _)| {
-            let item = t.get(key)?;
-            (!plain(item, words)).then(|| (key, item.type_name()))
-        });
-        if let Some((key, shape)) = odd {
-            return Err(refuse(format!(
-                "`{TUI}.{key}` 가 손으로 적은 모양이라({shape}) 보기를 적지 않는다 — 손으로 고친다"
-            )));
-        }
+        let mut skipped = Vec::new();
+        let mut odd = |keys: &[&str], words: bool, go: &mut bool| {
+            if !*go {
+                return;
+            }
+            for key in keys {
+                if let Some(item) = t.get(key).filter(|i| !plain(i, words)) {
+                    skipped.push(format!(
+                        "`{TUI}.{key}` 가 손으로 적은 모양이라({}) 그 키는 적지 않았다 — 손으로 고친다",
+                        item.type_name()
+                    ));
+                    *go = false;
+                    return;
+                }
+            }
+        };
+        odd(&[HIDDEN], true, &mut hidden);
+        odd(&[HIDE_DEFERRED], false, &mut hide_deferred);
+        odd(&[SORT, SORT_REVERSED], false, &mut sort);
+        odd(&[FIELDS], true, &mut fields);
+        odd(&[FIELDS_KNOWN], true, &mut known);
+        odd(&[DETAIL], false, &mut detail);
         let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let mut changed = false;
         if hidden {
@@ -690,7 +699,7 @@ impl Doc {
             changed |= put_value(t, DETAIL, new.detail.map(toml_edit::Value::from));
         }
         self.dirty |= changed;
-        Ok(())
+        Ok(skipped)
     }
 
     /// 적어 둔 읽음 — 이슈 id → 마지막으로 본 때(moai-50mn). **관대하게 읽는다**: 낱말이 아닌 값은
@@ -1824,8 +1833,9 @@ mod tests {
         assert!(inline.render().contains("sort = \"title\""), "{}", inline.render());
     }
 
-    /// **바꿀 보기 키가 손으로 적은 표 모양이면 하나도 안 적는다**(moai-j7r3) — `set_hue` 와 같은 자다(`plain`).
-    /// 낱값의 틀린 값은 고쳐 쓰고, 이 세션이 안 바꾸는 키는 모양이 어떻든 막지 않는다.
+    /// **바꿀 보기 키가 손으로 적은 표 모양이면 그 키만 안 적는다**(moai-j7r3, moai-jr3z) — 무엇을 덮지 않는가는
+    /// `set_hue` 와 같은 자다(`plain`). 나머지 바뀐 키는 적고, 건너뛴 키는 까닭 한 줄로 낸다. 낱값의 틀린 값은
+    /// 고쳐 쓰고, 이 세션이 안 바꾸는 키는 모양이 어떻든 막지 않는다.
     #[test]
     fn a_hand_written_table_look_key_is_refused_not_overwritten() {
         let title = Look { sort: Some("title".into()), ..Look::default() };
@@ -1850,12 +1860,23 @@ mod tests {
             ("[tui]\nfields_known = { id = true }\n", &toggle, "fields_known"),
         ] {
             let mut doc = Doc::parse(src).unwrap();
-            let e = doc.merge_look(&Look::default(), new).expect_err(src);
-            assert_eq!(e.code, code::BROKEN, "{src}");
-            assert!(e.to_string().contains(&format!("`tui.{key}`")), "{src}: {e}");
-            assert!(!doc.changed(), "{src}");
-            assert_eq!(doc.render(), src);
+            let skipped = doc.merge_look(&Look::default(), new).unwrap();
+            assert!(skipped.len() == 1 && skipped[0].contains(&format!("`tui.{key}`")), "{src}: {skipped:?}");
+            if std::ptr::eq(new, &toggle) {
+                // 다른 키는 적힌다 — 한 키가 다른 키의 저장을 막지 않는다.
+                let text = doc.render();
+                assert!(text.contains("detail = true") && text.contains("fields_known = { id = true }"), "{text}");
+            } else {
+                assert!(!doc.changed(), "{src}");
+                assert_eq!(doc.render(), src);
+            }
         }
+        // 차례가 표 모양이어도 숨김은 적힌다 — 차례와 방향은 한 벌로 건너뛴다.
+        let mut doc = Doc::parse("[tui]\nsort.by = \"created\"\nsort_reversed = false\n").unwrap();
+        let both = Look { sort_reversed: Some(true), hidden: hide.hidden.clone(), ..title.clone() };
+        let skipped = doc.merge_look(&Look::default(), &both).unwrap();
+        assert_eq!(skipped.len(), 1, "{skipped:?}");
+        assert_eq!(doc.render(), "[tui]\nsort.by = \"created\"\nsort_reversed = false\nhidden = [\"done\"]\n");
         // 낱값의 틀린 값은 읽기가 까닭을 대는 값이다 — 고쳐 쓴다.
         let mut doc = Doc::parse("[tui]\nsort = 3\nhidden = \"done\"\n").unwrap();
         doc.merge_look(&Look::default(), &Look { hidden: hide.hidden.clone(), ..title.clone() }).unwrap();
