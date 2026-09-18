@@ -4461,3 +4461,4 @@
 {"ts":"2026-09-18T13:00:15Z","id":"moai-8ema","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-18T13:00:15Z","id":"moai-d4e0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-18T13:00:16Z","id":"moai-dw63.e31","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"15건 중 10건 반영(96d564f): 1·2·3·4·5·6·8·9·10·12·13·14·15. 넘김: 7 은 결정 필요 멤버 moai-1plu(첫 칸), 11 은 moai-9zl3, 이미 있던 것 moai-ntbj·moai-pudk, 글 셋 moai-yinx, defer 침묵은 moai-d5cl(moai-zsu8 로 펼쳐짐). cd0aad0 두 이슈 한 커밋은 되돌리지 않는다 — 이미 병합한 역사"}
+{"ts":"2026-09-18T13:00:37Z","id":"moai-dw63","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 남은 멤버 moai-1plu 하나가 에픽을 열어 둔다 — 결정 필요(A: closing 이 결정 기다리는 마지막 멤버에 mv todo 를 함께 댄다, 권장 / B: stranded 힌트만 바꾼다). 결정이 서면 구현하고 에픽 끝 리뷰를 다시 돈다. 8ema·d4e0 은 52821a1 로 develop 에 들어갔다"}
