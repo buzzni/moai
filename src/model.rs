@@ -439,6 +439,9 @@ pub struct Work {
 /// **읽기는 관대하다.** 꼴에 안 맞는 줄은 값이 안 될 뿐 노트로 그대로 남는다 — 이력에서
 /// 빠지는 것은 없다. 옛 줄 `model: opus-5 (medium — …)` 은 회사 없이 읽힌다. 모델 이름에서
 /// 회사를 짐작해 채우지 않는다 — 짐작한 값은 통계에서 적힌 값과 갈리지 않는다.
+///
+/// **울타리(```` ``` ````·`~~~`) 안의 줄은 예다.** 리뷰 원문과 결정 노트가 꼴을 그대로 옮겨
+/// 적으니, 그것을 세면 아무도 안 한 일이 토큰째 통계에 선다.
 pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
     let mut out = Vec::new();
     for e in journal {
@@ -447,7 +450,16 @@ pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
             "status" => e.note.as_deref(),
             _ => None,
         };
+        let mut fenced = false;
         for line in text.unwrap_or_default().lines() {
+            let bare = line.trim_start();
+            if bare.starts_with("```") || bare.starts_with("~~~") {
+                fenced = !fenced;
+                continue;
+            }
+            if fenced {
+                continue;
+            }
             if let Some(w) = parse_work(line) {
                 out.push(Work { at: e.ts.clone(), by: e.by.clone(), by_email: e.by_email.clone(), ..w });
             }
@@ -460,8 +472,11 @@ pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
 ///
 /// 괄호 뒤는 무엇이 와도 받는다 — 옛 줄이 거기에 사연을 붙였다. 괄호 **앞**에 모르는 것이
 /// 끼면 안 받는다: `tokens 182000` 같은 오타를 모델만 읽고 넘기면 토큰이 조용히 "모름" 이 된다.
+/// 같은 까닭으로 **제자리를 벗어난 `tokens=<수>`**(괄호 안·괄호 뒤)도 안 받는다.
+///
+/// **줄 머리에서 시작한 줄만 받는다.** 들여 쓴 줄은 마크다운의 코드 덩이 — 꼴을 옮겨 적은 예다.
 fn parse_work(line: &str) -> Option<Work> {
-    let rest = line.trim_start().strip_prefix("model:")?;
+    let rest = line.strip_prefix("model:")?;
     // `model::actor` 로 시작하는 글줄을 거른다.
     if !rest.starts_with(char::is_whitespace) {
         return None;
@@ -474,6 +489,8 @@ fn parse_work(line: &str) -> Option<Work> {
         Some((p, m)) if !p.is_empty() && !m.is_empty() && !m.contains('/') => (Some(p.to_string()), m),
         Some(_) => return None,
     };
+    // 글줄 끝의 문장 부호는 이름이 아니다 — `opus-5.` 과 `opus-5` 가 통계에서 갈린다.
+    let model = model.trim_end_matches(['.', ',', ';', ':']);
     // `model: tokens=3` 은 모델을 빠뜨린 줄이지 모델 이름이 `tokens=3` 인 줄이 아니다.
     if model.is_empty() || head.contains('=') {
         return None;
@@ -482,8 +499,19 @@ fn parse_work(line: &str) -> Option<Work> {
     let mut tokens = None;
     if let Some(t) = rest.strip_prefix("tokens=") {
         let end = word_end(t);
-        tokens = Some(t[..end].parse::<u64>().ok()?);
+        // 숫자만 받는다 — `u64::from_str` 은 `+5` 도 받는다.
+        let n = &t[..end];
+        if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        tokens = Some(n.parse::<u64>().ok()?);
         rest = t[end..].trim_start();
+    } else if rest
+        .split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | ','))
+        .any(|w| w.strip_prefix("tokens=").is_some_and(|n| n.starts_with(|c: char| c.is_ascii_digit())))
+    {
+        // `(high) tokens=5` 처럼 제자리를 벗어난 토큰을 모델만 읽고 넘기면 토큰이 조용히 "모름" 이 된다.
+        return None;
     }
     let (mut grade, mut why) = (None, None);
     if let Some(inner) = rest.strip_prefix('(') {
@@ -497,7 +525,8 @@ fn parse_work(line: &str) -> Option<Work> {
             (depth == 0).then_some(i)
         })?;
         let inner = inner[..close].trim();
-        let (g, w) = match inner.split_once('—').or_else(|| inner.split_once(" - ")) {
+        // 긴 줄표가 꼴이고, 반각 줄표(`–`, 자동 고침이 바꿔 놓는다)와 손으로 친 붙임표도 받는다.
+        let (g, w) = match inner.split_once(['—', '–']).or_else(|| inner.split_once(" - ")) {
             Some((g, w)) => (g.trim(), w.trim()),
             None => (inner, ""),
         };
@@ -1186,6 +1215,8 @@ mod tests {
         assert_eq!(said("model: openai/gpt-6 tokens=0").unwrap().2, Some(0), "0 은 모름이 아니다");
         assert_eq!(said("model: opus-5(high)"), Some((None, "opus-5".into(), None, s("high"), None)));
         assert_eq!(said("model: opus-5 (high - 손으로 친 붙임표)").unwrap().4, s("손으로 친 붙임표"));
+        assert_eq!(said("model: opus-5 (high – 자동 고침의 반각 줄표)").unwrap().3, s("high"), "반각 줄표에 등급을 잃었다");
+        assert_eq!(said("model: anthropic/opus-5.").unwrap().1, "opus-5", "문장 부호를 이름에 붙였다");
     }
 
     /// 이미 쌓인 옛 줄은 회사 없이 값이 된다 — 모델 이름에서 회사를 짐작하지 않는다.
@@ -1214,6 +1245,11 @@ mod tests {
             "model: opus-5 tokens 182000",
             "model: opus-5 (high — 닫히지 않은 괄호",
             "앞에 글이 있는 model: opus-5",
+            "model: opus-5 tokens=+5",
+            "model: opus-5 (high — 쓰기 경로) tokens=182000",
+            "model: opus-5 (high — 쓰기 경로, tokens=182000)",
+            "    model: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)",
+            " model: opus-5",
         ] {
             assert_eq!(said(line), None, "{line:?} 를 값으로 읽었다");
         }
@@ -1224,8 +1260,11 @@ mod tests {
     fn work_is_gathered_from_notes_and_moves() {
         let who = someone("claude");
         let journal = vec![
-            JournalEntry::create("x-1", "model: opus-5 제목은 안 읽는다", "2026-09-18T01:00:00Z", &who),
+            // 제목은 읽지 않는다 — 꼴에 맞는 제목이라야 이 줄이 그것을 잰다.
+            JournalEntry::create("x-1", "model: sonnet-5", "2026-09-18T01:00:00Z", &who),
             JournalEntry::note("x-1", "고쳤다\nmodel: anthropic/opus-5 tokens=10 (high — a)\nmodel: anthropic/haiku-4.5", "2026-09-18T02:00:00Z", &who),
+            // 울타리 안의 줄은 꼴을 옮겨 적은 예다.
+            JournalEntry::note("x-1", "꼴은 이렇다\n```\nmodel: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)\n```", "2026-09-18T02:30:00Z", &who),
             JournalEntry::status(
                 "x-1",
                 &Status::new("review"),
