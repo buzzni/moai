@@ -13,6 +13,7 @@ mod git;
 mod git_leaks;
 mod guide;
 mod hook;
+mod i18n;
 mod id;
 mod markdown;
 mod model;

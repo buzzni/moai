@@ -93,7 +93,13 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // 걷는다 — `MOAI_CONFIG` 를 덮어쓴 시험이 그것을 지우면 그다음 자리다.
         .env("MOAI_CONFIG", home.join("moai-config-unset/config.toml"))
         .env_remove("XDG_CONFIG_HOME")
-        .env_remove("BASH_ENV");
+        .env_remove("BASH_ENV")
+        // **시험은 한국어 화면을 본다**(moai-zeyv). 기본은 영어지만(사용자 결정) 이 저장소의
+        // 시험은 글자를 그대로 견주는 것이 수백 줄이라, 여기서 언어를 못 박는다 — 안 박으면
+        // 글자를 말묶음으로 옮길 때마다 시험이 "말이 바뀐 것" 인지 "동작이 바뀐 것" 인지를
+        // 못 가른다. 영어 화면은 `english_is_the_default_when_nothing_picks_a_language` 가
+        // 이 변수를 걷고 따로 잰다.
+        .env("MOAI_LANG", "ko");
     cmd
 }
 
@@ -149,6 +155,149 @@ fn init(name: &str) -> Scratch {
 
 fn issues(dir: &Path) -> String {
     std::fs::read_to_string(dir.join(".moai/issues.jsonl")).unwrap()
+}
+
+/// **말이 바뀌어도 표는 안 깨진다**(moai-i44x) — 한글·일본어·중국어는 한 글자가 두 칸이라,
+/// 글자 수로 재는 자리가 하나라도 있으면 그 말에서만 열이 어긋난다.
+///
+/// 다섯 말로 `ready` 를 돌려 **열이 같은 칸에서 시작하는지**를 표시 폭으로 잰다. 글자 수로
+/// 재면 영어에서는 맞고 한국어·일본어에서만 틀리므로, 한 말로만 재는 시험은 이것을 못 본다.
+#[test]
+fn every_language_keeps_the_ready_table_in_line() {
+    let s = init("wide");
+    // **글자 수와 칸 수가 크게 엇갈리는 제목을 섞는다** — 한글 제목은 글자 수보다 칸 수가
+    // 곱절이라, 글자 수로 채우는 코드는 여기서만 어긋난다.
+    ok(s.path(), &["add", "짧은 일"]);
+    ok(s.path(), &["add", "아주 긴 한글 제목이 여기에 들어간다"]);
+    ok(s.path(), &["add", "plain ascii"]);
+    for lang in ["en", "ko", "ja", "zh", "es"] {
+        let mut cmd = isolated(BIN);
+        cmd.args(["ready"]).current_dir(s.path()).env("MOAI_NOW", NOW).env("NO_COLOR", "1").env("MOAI_LANG", lang);
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "{lang}: {}", String::from_utf8_lossy(&out.stderr));
+        let screen = String::from_utf8(out.stdout).unwrap();
+        // **제목 뒤의 열이 서는 자리를 잰다** — 제목이 두 칸 글자라, 글자 수로 채우면 여기서
+        // 어긋난다. 우선순위(`p2`)는 id 뒤라 ASCII 만 앞서므로 그것만 재면 못 잡는다.
+        let starts: Vec<(usize, usize)> = screen
+            .lines()
+            .filter(|l| l.contains("argos-"))
+            .map(|l| {
+                let p = l.find("p2").expect("우선순위 칸이 없다");
+                (cells(&l[..p]), last_column(l))
+            })
+            .collect();
+        assert!(starts.len() >= 3, "{lang}: 표에 줄이 모자라다\n{screen}");
+        // **잰 자리가 0 이면 아무것도 안 잰 것이다** — 아래 두 줄은 다 0 이어도 통과한다.
+        assert!(starts.iter().all(|(p, e)| *p > 0 && *e > *p), "{lang}: 열을 못 찾았다 — {starts:?}\n{screen}");
+        assert!(starts.windows(2).all(|w| w[0].0 == w[1].0), "{lang}: 우선순위 열이 줄마다 다른 칸에서 선다 — {starts:?}\n{screen}");
+        assert!(starts.windows(2).all(|w| w[0].1 == w[1].1), "{lang}: 제목 뒤 열이 줄마다 다른 칸에서 선다 — {starts:?}\n{screen}");
+    }
+}
+
+/// 화면에서 그 글이 차지하는 **칸 수**. 한글·일본어·중국어는 한 글자가 두 칸이다.
+fn cells(s: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width(s)
+}
+
+/// 그 줄의 **마지막 열이 서는 칸.** 열 사이는 두 칸 이상 벌어지므로 마지막 틈 뒤가 그 자리다.
+///
+/// **글자로 찾지 않는다**(리뷰 moai-80qw). 전에는 `에픽 없음` 을 `rfind` 로 짚었는데, 그 낱말은
+/// 말묶음으로 옮겨 갈 차례에 있는 것이라 옮기는 날 en·ja·zh·es 에서 `expect` 가 터진다 —
+/// 번역이 처음으로 잰 칸에 들어오는 바로 그때, 어긋남을 재는 대신 시험이 죽는다.
+fn last_column(l: &str) -> usize {
+    let line = l.trim_end();
+    let Some(gap) = line.rfind("  ") else { return 0 };
+    let tail = &line[gap..];
+    cells(&line[..gap + (tail.len() - tail.trim_start().len())])
+}
+
+/// **아무도 고르지 않으면 지금은 한국어고, 영어는 낱말 하나로 온다**(사용자 결정, 리뷰
+/// moai-80qw.cb8). 옮긴 글이 열 줄뿐이라 기본을 영어로 두면 화면이 두 말로 섞인다 — 옮김이
+/// 화면을 덮을 때 `Lang` 의 `#[default]` 한 줄과 함께 이 기대값이 영어로 바뀐다.
+///
+/// **`MOAI_LANG` 으로 한국어·일본어도 함께 잰다** — 고르는 길이 도는지, 그리고 두 칸 글자가
+/// 섞여도 줄이 서는지. 어느 말이든 같은 수를 대는 것으로 그 화면이 같은 화면임을 잰다.
+#[test]
+fn nothing_picked_means_korean_for_now_and_english_is_one_word_away() {
+    let s = init("lang");
+    ok(s.path(), &["add", "첫 일"]);
+    let say = |lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(["status"]).current_dir(s.path()).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+        match lang {
+            Some(l) => cmd.env("MOAI_LANG", l),
+            None => cmd.env_remove("MOAI_LANG"),
+        };
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    // **아무것도 안 고르면 지금은 한국어다**(사용자 결정) — 옮긴 글이 열 줄뿐이라, 기본을
+    // 영어로 두면 화면이 두 말로 섞인다. 옮김이 화면을 덮으면 이 기대값이 영어로 바뀐다.
+    let fallback = say(None);
+    assert!(fallback.contains("이슈 1"), "아무도 안 골랐는데 기본 화면이 아니다\n{fallback}");
+
+    // **영어는 낱말 하나로 온다** — 기준 말이라 늘 고를 수 있다.
+    let english = say(Some("en"));
+    assert!(english.contains("Issues 1"), "MOAI_LANG=en 이 안 들었다\n{english}");
+    let head = |screen: &str| screen.lines().next().unwrap_or_default().to_string();
+    assert!(!head(&english).contains("이슈"), "영어 화면의 머리에 한국어가 남았다\n{english}");
+
+    let korean = say(Some("ko"));
+    assert!(korean.contains("이슈 1"), "MOAI_LANG=ko 가 안 들었다\n{korean}");
+    assert_eq!(korean, fallback, "고른 한국어와 기본 화면이 다르다");
+
+    // 없는 키는 영어로 떨어진다 — 화면이 비지 않는다.
+    let japanese = say(Some("ja_JP.UTF-8"));
+    assert!(japanese.contains("課題 1"), "로캘 모양의 MOAI_LANG 이 안 들었다\n{japanese}");
+
+    // 말이 달라도 같은 화면이다 — 줄 수가 같다.
+    assert_eq!(english.lines().count(), korean.lines().count(), "영어와 한국어의 줄 수가 다르다");
+    assert_eq!(english.lines().count(), japanese.lines().count(), "영어와 일본어의 줄 수가 다르다");
+}
+
+/// **설정에 적은 말도 든다**(moai-slfv), 그리고 **틀리면 저장소 안에서도 댄다**(리뷰 moai-80qw).
+///
+/// 여기까지 오는 길(`Doc::lang` → `Registry::lang` → `i18n::pick`)은 `MOAI_LANG` 만 재는
+/// 시험들이 한 줄도 안 밟던 자리다 — 그 길이 끊어져도 다 푸르고, `[i18n] lang` 을 적어 둔
+/// 사람만 조용히 영어를 본다. 틀린 값은 **stderr 로** 대고 종료 코드는 안 바꾼다: `status` 는
+/// 아무것도 막지 않는다.
+#[test]
+fn the_config_picks_the_language_and_a_bad_one_is_named() {
+    let s = init("lang-config");
+    ok(s.path(), &["add", "첫 일"]);
+    let config = s.path().join("user/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let run = |body: &str| {
+        std::fs::write(&config, body).unwrap();
+        let mut cmd = isolated(BIN);
+        cmd.args(["status"])
+            .current_dir(s.path())
+            .env("MOAI_CONFIG", &config)
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            .env_remove("MOAI_LANG");
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "설정 하나로 멈췄다\n{}", String::from_utf8_lossy(&out.stderr));
+        (String::from_utf8(out.stdout).unwrap(), String::from_utf8(out.stderr).unwrap())
+    };
+
+    let (screen, said) = run("[i18n]\nlang = \"ja\"\n");
+    assert!(screen.contains("課題 1"), "설정에 적은 말이 안 들었다\n{screen}");
+    assert!(said.is_empty(), "멀쩡한 설정에 할 말이 생겼다 — {said}");
+
+    // **환경이 설정을 이긴다** — 같은 파일을 두고 `MOAI_LANG` 을 주면 그쪽이다.
+    let mut cmd = isolated(BIN);
+    cmd.args(["status"]).current_dir(s.path()).env("MOAI_CONFIG", &config).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+    let out = cmd.output().expect("moai 를 실행하지 못했다");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("이슈 1"), "MOAI_LANG 이 설정에 졌다");
+
+    // **오타는 조용히 기본값이 되지 않는다.** 이 줄이 없으면 고친 설정이 왜 안 듣는지 알 길이 없다.
+    let (screen, said) = run("[i18n]\nlang = \"kr\"\n");
+    assert!(screen.contains("이슈 1"), "모르는 값에서 기본값(지금은 한국어)으로 안 떨어졌다\n{screen}");
+    assert!(said.contains("`i18n.lang`") && said.contains("\"kr\""), "틀린 설정을 아무도 안 댔다 — {said:?}");
+    // 보드도 그것을 안다 — 없으면 "드러난 문제 없다" 가 방금 stderr 에 한 말을 뒤집는다.
+    assert!(screen.contains("사용자 설정에서 못 읽은 것 1건"), "보드가 stderr 의 말을 모른다\n{screen}");
 }
 
 #[test]
