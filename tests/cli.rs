@@ -4344,6 +4344,35 @@ fn json_tells_no_commits_apart_from_no_git() {
     assert!(!shown.contains("커밋") && !shown.contains("commits_error"), "사람 화면이 시끄러워졌다\n{shown}");
 }
 
+/// **일한 AI 는 노트의 `model:` 줄에서 읽어 `work` 로 낸다**(moai-8f2g, 2026-09-18 사용자 결정).
+/// 저장하지 않는다 — 적는 것은 `moai note` 그대로다. 키는 **늘 선다**(빈 배열도 사실이다, moai-2l8n).
+/// 토큰을 모르면 `null` 이고 0 은 0 이다. 꼴에 안 맞는 줄은 값이 안 될 뿐 이력에 그대로 남는다.
+#[test]
+fn show_json_reads_who_did_the_work_from_model_notes() {
+    let s = init("worknotes");
+    let id = add(s.path(), &["고칠 것"]);
+    let none = ok(s.path(), &["show", &id, "--json"]);
+    assert!(none.contains(r#""work":[]"#), "줄이 없는데 빈 배열을 안 냈다\n{none}");
+
+    ok(s.path(), &["note", &id, "고쳤다\nmodel: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)"]);
+    ok(s.path(), &["note", &id, "model: opus-5 (medium — 옛 줄)"]);
+    ok(s.path(), &["note", &id, "model: opus-5 tokens 12 (오타)"]);
+    ok(s.path(), &["mv", &id, "done", "-m", "model: openai/gpt-6 tokens=0"]);
+    let some = ok(s.path(), &["show", &id, "--json"]);
+    assert!(
+        some.contains(r#"{"provider":"anthropic","model":"opus-5","tokens":182000,"grade":"high","why":"쓰기 경로","#),
+        "꼴대로 적은 줄을 못 읽었다\n{some}"
+    );
+    assert!(
+        some.contains(r#"{"provider":null,"model":"opus-5","tokens":null,"grade":"medium","why":"옛 줄","#),
+        "옛 줄을 회사·토큰 없이 읽지 못했다\n{some}"
+    );
+    assert!(some.contains(r#""model":"gpt-6","tokens":0,"#), "0 을 모름으로 읽었다\n{some}");
+    assert_eq!(some.matches(r#""provider":"#).count(), 3, "오타 줄을 값으로 읽었다\n{some}");
+    // 값이 안 된 줄도 이력에서 빠지지 않는다.
+    assert!(ok(s.path(), &["show", &id]).contains("tokens 12"), "꼴에 안 맞는 노트가 이력에서 사라졌다");
+}
+
 /// **날짜가 거꾸로 선 커밋 밑도 본다**(moai-hws2). `show` 는 이슈가 생긴 때에서 걷기를 끊었는데,
 /// `git log --since` 는 거르기가 아니라 **끊기**라 그보다 이른 커밋을 하나 만나면 그 아래를 통째로
 /// 안 본다 — `rebase`·`am --committer-date-is-author-date`·하루 넘게 늦은 시계가 그런 커밋을 만든다.
