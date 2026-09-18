@@ -4671,3 +4671,10 @@
 {"ts":"2026-09-18T14:09:42Z","id":"moai-boc6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 체크아웃 안일 때만 울타리. base() 가 temp_dir 이 git 체크아웃 안인지 한 번 재고, 그럴 때만 울타리 친 공용 뿌리 밑에 자리를 세운다. 보통 /tmp 에선 지금과 같다. src/scratch.rs 와 tests/cli.rs 의 Scratch 둘 다."}
 {"ts":"2026-09-18T14:09:42Z","id":"moai-4gy5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): [] 의 뜻을 오늘 열로 얼린다 — [] = 오늘 있는 아홉 열(얼린 상수). 미래 열은 기본값으로 뜨고 다시 써도 뜻이 안 바뀐다. 구현은 user_config.rs(a1, moai-gmdu)·tui/mod.rs(b5)가 develop 에 든 뒤 맨 끝에."}
 {"ts":"2026-09-18T14:09:42Z","id":"moai-3akx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T14:11:43Z","id":"moai-k7wl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"guide 의 commits_error·broken_worktrees 안내가 새 계약과 어긋난다"}
+{"ts":"2026-09-18T14:14:12Z","id":"moai-3uc6.h27","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — --json 계약과 경로 모양"}
+{"ts":"2026-09-18T14:14:24Z","id":"moai-3uc6.h27","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T14:14:43Z","id":"moai-3uc6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 넷 커밋 끝(7201735·abc3f93·89b38b6), develop 받음(d38fb4a). 리뷰 moai-3uc6.h27(xhigh) 도는 중 — 반영 뒤 병합. moai-k7wl(guide 문서)은 k6mp 가 guide.rs 를 쥐어 첫 칸에 남긴다"}
+{"ts":"2026-09-18T14:15:00Z","id":"moai-m9a8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T14:15:03Z","id":"moai-6p1n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 커밋 끝, 에픽 끝 리뷰 moai-3uc6.h27 뒤 병합하고 닫는다"}
+{"ts":"2026-09-18T14:15:11Z","id":"moai-zah3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 커밋 끝, 에픽 끝 리뷰 moai-3uc6.h27 뒤 병합하고 닫는다"}
