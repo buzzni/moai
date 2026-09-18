@@ -25,9 +25,8 @@ pub enum Error {
     NotUtf8(std::string::FromUtf8Error),
 }
 
-/// 받는 쪽에 낼 한 줄. `show --json` 의 `commits_error` 가 이것을 싣는다(moai-rzsv) — 사람
-/// 화면은 여전히 말이 없다. **무엇을 못 했는지까지 적는다**: "git 이 없다" 와 "저장소가 아니다" 는
-/// 받는 쪽이 할 일이 다르다.
+/// 사람이 읽을 한 줄. **무엇을 못 했는지까지 적는다**: "git 이 없다" 와 "저장소가 아니다" 는
+/// 받는 쪽이 할 일이 다르다. 기계에는 이것을 그대로 내지 않는다 — [`Error::told`].
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -37,6 +36,65 @@ impl std::fmt::Display for Error {
             Error::NotUtf8(e) => write!(f, "git 이 낸 글을 못 읽었다 — {e}"),
         }
     }
+}
+
+/// 기계에 낼 까닭 — `show --json` 의 `commits_error` 가 이것이다(moai-6p1n, 2026-09-18 사용자 결정).
+///
+/// **가르는 것은 `kind` 다.** 한 줄 산문만 내던 판은 받는 쪽이 "git 이 없다" 와 "저장소가 아니다" 를
+/// 부분 문자열로 맞춰야 했다 — 앞은 우리 한국어, 뒤는 git 의 stderr 라 둘 다 언제든 바뀐다.
+/// `said` 는 사람이 까닭을 볼 한 줄이고 **경로를 자른다** — git 의 stderr 에는 기계의 절대 경로가
+/// 실리는데, 같은 JSON 의 `workplaces` 는 그 경로를 일부러 자른다.
+#[derive(Debug, serde::Serialize)]
+pub struct Told {
+    /// `no_git`·`not_a_repo`·`stream`·`encoding`·`failed`. 앞의 넷에 안 드는 git 의 실패가
+    /// `failed` 다 — 띄우다 권한에 막혔거나, 저장소 안인데 git 이 죽었다.
+    pub kind: &'static str,
+    pub said: String,
+}
+
+impl Error {
+    /// `root` 는 git 을 부른 자리다 — "저장소가 아니다" 를 git 의 말이 아니라 디스크로 가른다.
+    /// git 의 말은 `LANG` 에 따라 옮겨져 나온다.
+    pub fn told(&self, root: &Path) -> Told {
+        let kind = match self {
+            Error::Spawn(e) if e.kind() == std::io::ErrorKind::NotFound => "no_git",
+            Error::Spawn(_) => "failed",
+            Error::Failed(_) if !in_repo(root) => "not_a_repo",
+            Error::Failed(_) => "failed",
+            Error::Stream(_) => "stream",
+            Error::NotUtf8(_) => "encoding",
+        };
+        Told { kind, said: crate::text::one_line(&cut_paths(&self.to_string())) }
+    }
+}
+
+/// `root` 나 그 위 어디에 `.git` 이 있는가 — 딸린 워크트리는 `.git` 이 파일이라 `exists` 로 잰다.
+fn in_repo(root: &Path) -> bool {
+    root.ancestors().any(|d| d.join(".git").exists())
+}
+
+/// 글 속의 절대 경로를 `…` 로 바꾼다. 따옴표·괄호·끝 문장부호는 남긴다.
+fn cut_paths(s: &str) -> String {
+    // 앞에서는 `.` 을 안 뗀다 — 떼면 `./foo`·`../foo` 가 절대 경로로 읽힌다.
+    let lead = |c: char| matches!(c, '\'' | '"' | '(' | '`');
+    let trail = |c: char| matches!(c, '\'' | '"' | ')' | ',' | ';' | ':' | '.' | '`');
+    s.split(' ')
+        .map(|word| {
+            let core = word.trim_start_matches(lead);
+            let head = &word[..word.len() - core.len()];
+            let core = core.trim_end_matches(trail);
+            let tail = &word[head.len() + core.len()..];
+            let bytes = core.as_bytes();
+            let absolute = core.starts_with('/')
+                || core.starts_with("~/")
+                || (bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'));
+            match absolute {
+                true => format!("{head}…{tail}"),
+                false => word.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 바이트로 받는다.
@@ -398,6 +456,32 @@ fn records_of(record: &str) -> Option<(&str, &str, &str)> {
 pub(crate) mod tests {
     use super::*;
     use crate::git_leaks::{REPO, TEST};
+
+    /// **기계에 내는 까닭은 경로를 자른다**(moai-6p1n) — git 의 stderr 에 실린 절대 경로가 `--json`
+    /// 으로 나가지 않는다. 상대 경로와 경로 아닌 낱말은 그대로다.
+    #[test]
+    fn told_cuts_absolute_paths_and_keeps_the_rest() {
+        let e = Error::Failed("fatal: not a git repository (or any of the parent directories): /home/me/x".into());
+        let told = e.told(Path::new("/"));
+        assert_eq!(told.kind, "not_a_repo");
+        assert!(!told.said.contains("/home"), "{}", told.said);
+        assert!(told.said.contains("fatal: not a git repository") && told.said.ends_with(": …"), "{}", told.said);
+        assert_eq!(cut_paths("'/a/b', ./c ../d (C:\\e) ~/f"), "'…', ./c ../d (…) …");
+    }
+
+    /// **`kind` 가 가른다** — git 이 없는 것, 저장소가 아닌 것, 읽다 끊긴 것, 글이 깨진 것.
+    #[test]
+    fn told_names_each_failure() {
+        let io = |k| std::io::Error::new(k, "x");
+        let dir = std::env::temp_dir();
+        assert_eq!(Error::Spawn(io(std::io::ErrorKind::NotFound)).told(&dir).kind, "no_git");
+        assert_eq!(Error::Spawn(io(std::io::ErrorKind::PermissionDenied)).told(&dir).kind, "failed");
+        assert_eq!(Error::Stream(io(std::io::ErrorKind::BrokenPipe)).told(&dir).kind, "stream");
+        let bad = String::from_utf8(vec![0xff]).unwrap_err();
+        assert_eq!(Error::NotUtf8(bad).told(&dir).kind, "encoding");
+        // 저장소 안에서 git 이 죽은 것은 "저장소가 아니다" 가 아니다.
+        assert_eq!(Error::Failed("boom".into()).told(Path::new(env!("CARGO_MANIFEST_DIR"))).kind, "failed");
+    }
 
     /// 시험이 쓰는 git. **바깥 저장소와 바깥 설정을 함께 끊는다** — `tests/cli.rs` 의
     /// `isolated` 와 같은 자다. 물려받은 `GIT_DIR` 이 남으면 여기서의 git 이 바깥 저장소를

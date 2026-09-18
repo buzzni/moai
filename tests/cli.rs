@@ -4517,7 +4517,10 @@ fn json_tells_no_commits_apart_from_no_git() {
     // git 저장소가 아닌 자리 — 빈 배열에 까닭이 붙는다.
     let outside = ok(s.path(), &["show", &id, "--json"]);
     assert!(outside.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{outside}");
-    assert!(outside.contains(r#""commits_error":"#), "git 을 못 읽은 까닭이 없다\n{outside}");
+    // **까닭은 가를 수 있는 값이다**(moai-6p1n) — 산문을 부분 문자열로 맞추지 않는다.
+    assert!(outside.contains(r#""commits_error":{"kind":"not_a_repo","said":"#), "git 을 못 읽은 까닭이 없다\n{outside}");
+    let root = s.path().to_str().unwrap();
+    assert!(!outside.contains(root), "기계의 절대 경로가 --json 으로 나갔다\n{outside}");
 
     // 갓 만든 저장소 — **커밋이 하나도 없는 것은 실패가 아니다.** `git log HEAD` 가 죽는 자리라
     // 그대로 두면 `commits_error` 가 "여기서는 못 물어봤다" 로 서서 받는 쪽이 정반대로 읽는다.
