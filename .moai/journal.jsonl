@@ -4372,3 +4372,6 @@
 {"ts":"2026-09-18T12:01:42Z","id":"moai-8kom","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽 템플릿의 단계 사이 의존 — 계획 마크다운에 막음 문법(needs → blocked_by)을 두고 draft::render 도 되뽑는다"}
 {"ts":"2026-09-18T12:01:42Z","id":"moai-8kom","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-r1pk 에서 펼쳤다 — 에픽 템플릿의 단계 사이 의존 — 계획 마크다운에 막음 문법(needs → blocked_by)을 두고 draft::render 도 되뽑는다"}
 {"ts":"2026-09-18T12:01:42Z","id":"moai-r1pk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-rhxy 의 멤버 moai-8kom 로 펼쳤다"}
+{"ts":"2026-09-18T12:02:10Z","id":"moai-rg5q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 깨움이 제목·본문의 스피너 글자(⠋ 따위)로 헛 깬다 — 버퍼에서 읽는 자의 남은 틈"}
+{"ts":"2026-09-18T12:02:10Z","id":"moai-rg5q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-9qnl 에서 펼쳤다 — TUI 깨움이 제목·본문의 스피너 글자(⠋ 따위)로 헛 깬다 — 버퍼에서 읽는 자의 남은 틈"}
+{"ts":"2026-09-18T12:02:10Z","id":"moai-9qnl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-xemz 의 멤버 moai-rg5q 로 펼쳤다"}
