@@ -4342,6 +4342,56 @@ fn every_help_fits_in_eighty_columns() {
     assert!(wide.is_empty(), "80칸을 넘는 도움말 줄:\n{}", wide.join("\n"));
 }
 
+/// **`-h` 의 설명 열은 한 칸에 선다**(moai-o46r). clap 은 `unicode` 기능 없이는 value_name 을
+/// 글자 수로 세어, `<이름 (메일)>`·`<어떻게>` 가 든 옵션만 설명이 두어 칸 왼쪽에 섰다. 폭 시험은
+/// 넘친 줄만 잡으니 이 어긋남은 못 본다 — 그래서 열이 서는 칸을 따로 잰다. 칸은 clap 과 같은
+/// `cells` 로 센다(모호폭 한 칸) — 넓게 세면 `·` 가 든 옵션 이름이 어긋난 것으로 읽힌다.
+#[test]
+fn every_short_help_aligns_its_descriptions() {
+    let s = init("helpalign");
+    let mut seen = 0;
+    let mut bad = Vec::new();
+    for (path, _) in every_help(&s) {
+        let mut args: Vec<&str> = path.split_whitespace().collect();
+        args.push("-h");
+        let short = ok(s.path(), &args);
+        // clap 은 절(`Arguments:`·`Options:`)마다 따로 맞춘다 — 들이지 않은 줄에서 끊는다.
+        let mut sections: Vec<Vec<(usize, &str)>> = vec![vec![]];
+        for l in short.lines() {
+            if !l.is_empty() && !l.starts_with(' ') {
+                sections.push(vec![]);
+            } else if let Some(c) = description_column(l) {
+                sections.last_mut().unwrap().push((c, l));
+            }
+        }
+        for cols in sections {
+            seen += cols.len();
+            if cols.windows(2).any(|w| w[0].0 != w[1].0) {
+                let rows: Vec<String> = cols.iter().map(|(c, l)| format!("  {c:>3}: {l}")).collect();
+                bad.push(format!("moai {path} -h\n{}", rows.join("\n")));
+            }
+        }
+    }
+    assert!(seen > 100, "설명 열을 못 읽었다 — {seen}줄");
+    assert!(bad.is_empty(), "설명 열이 줄마다 다른 칸에 선 도움말:\n{}", bad.join("\n"));
+}
+
+/// 옵션·인자 줄에서 **설명이 서는 칸.** 두 칸 넘게 들여 `-`·`<`·`[` 로 시작하고, 이름 뒤 두 칸
+/// 넘는 틈 다음이 설명이다. 설명이 다음 줄로 내려간 옵션과 옵션이 아닌 줄은 `None`.
+///
+/// **들여쓰기를 먼저 걷는다** — 짧은 이름 없는 옵션(`      --user <이름 (메일)>`)은 clap 이 여섯
+/// 칸을 들이므로, 두 칸만 걷고 `-` 를 보면 그 줄이 통째로 빠진다. 이 시험이 잡으려던 바로 그
+/// 줄이 거기 있다.
+fn description_column(line: &str) -> Option<usize> {
+    let body = line.strip_prefix("  ")?.trim_start();
+    if !body.starts_with(['-', '<', '[']) {
+        return None;
+    }
+    let gap = body.find("  ")?;
+    let desc = body[gap..].trim_start();
+    (!desc.is_empty()).then(|| cells(&line[..line.len() - desc.len()]))
+}
+
 /// 모호폭을 두 칸으로 센 폭 — 도움말 폭 시험만 쓴다(moai-ygki).
 fn cjk_cells(s: &str) -> usize {
     unicode_width::UnicodeWidthStr::width_cjk(s)

@@ -567,7 +567,7 @@ pub struct AddArgs {
     pub body: Option<String>,
 
     /// 담당. 안 주면 만든 사람, `이름 (메일)` 로 준다. `none` 이면 비운다
-    #[arg(short, long, value_name = "이름 (메일)|none")]
+    #[arg(short, long, value_name = "누구|none")]
     pub assignee: Option<String>,
 
     // 설명이 없으면 `next_line_help` 가 공백만 든 줄을 그린다(리뷰 moai-5yq0).
@@ -628,7 +628,7 @@ pub struct ShowArgs {
     #[arg(long)]
     pub tree: bool,
 
-    /// 에픽 하나를 `add --from` 이 받는 마크다운으로 되뽑는다
+    /// 에픽을 `add --from` 이 받는 마크다운으로 되뽑는다
     #[arg(long)]
     pub as_plan: bool,
 
@@ -644,7 +644,7 @@ pub struct ShowArgs {
 /// 제 워크트리 파일에만 간다.
 #[derive(Args, Debug, Default, Clone, Copy)]
 pub struct WorktreeArg {
-    /// 다른 git 워크트리의 이슈도 겹쳐 본다 (파일은 안 바뀐다)
+    /// 다른 워크트리의 이슈도 겹쳐 본다 (파일은 안 바뀐다)
     #[arg(long)]
     pub worktree: bool,
 }
@@ -764,7 +764,7 @@ pub struct EditArgs {
     pub priority: Option<u8>,
 
     /// `이름 (메일)` 로 준다. `none` 이면 뺀다
-    #[arg(short, long, value_name = "이름 (메일)|none")]
+    #[arg(short, long, value_name = "누구|none")]
     pub assignee: Option<String>,
 }
 
