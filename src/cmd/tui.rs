@@ -25,7 +25,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
     let crate::worktree::Gathered { load, origin, trouble, watched, .. } = crate::worktree::gather(&repo, !ctx.json)?;
-    let index = Index::of(&load.issues);
+    // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
+    // 소속 지도를 두 번 잰다(moai-xemz 리뷰).
+    let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
     let path = resolve(&index, &load.issues, args.path.as_deref())?;
 
     // `--json` 은 화면을 켜지 않는다. 기계로 읽는 쪽과 통합 시험이 이 길로 온다.
@@ -34,7 +36,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // 배너가 없다 — 여기서 안 알리면 목록이 조용히 짧아지고, 부른 쪽은
         // 그 이슈가 없다고 읽는다. 다른 읽기 명령과 같은 길로 간다.
         super::report_load_errors(&repo.issues_path(), &load.errors);
-        let states = crate::report::group_states(&load.issues, &repo.config);
+        let states = ground.columns();
         let rows: Vec<Row> = index
             .entries(&load.issues, &path)
             .iter()
@@ -52,7 +54,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 설정은 **한 번 읽어** 층과 보기가 나눠 쓴다(moai-u8cs).
     let reg = crate::user_config::read(config.as_deref());
     let layer = crate::tui::layer::Layer::of(&reg, Some(&repo.root));
-    let mut app = App::open(repo, load, index, path, stamp).overlaid(origin, trouble, watched);
+    let mut app = App::open(repo, load, index, ground, path, stamp).overlaid(origin, trouble, watched);
     app.user = ctx.user.clone();
     // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와
     // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.
