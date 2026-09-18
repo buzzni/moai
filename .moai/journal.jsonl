@@ -4010,3 +4010,5 @@
 {"ts":"2026-09-18T11:10:33Z","id":"moai-fqnr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2l8n 에서 펼쳤다 — 조건부 --json 키가 모르는 필드로 남아 거짓을 싣는다 — json_with 에 지울 목록이 없다"}
 {"ts":"2026-09-18T11:10:33Z","id":"moai-2l8n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-fqnr 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-18T11:10:42Z","id":"moai-wams","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:17:48Z","id":"moai-uyu9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 워크트리 worktree-moai-dlxf 에 gather 고침과 시험이 커밋 전으로 있다 — 시험 통과 보고 커밋, 에픽 moai-dlxf 끝 리뷰(high) 뒤 병합"}
+{"ts":"2026-09-18T11:20:42Z","id":"moai-lg2t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
