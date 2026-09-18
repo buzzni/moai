@@ -184,28 +184,39 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
     Look::Shut { state: kind, said }
 }
 
-/// 경로들을 연다. **표식을 먼저 잰다** — 읽고 나서 재면 그 사이의 쓰기가 "이미 본 것"
-/// 으로 적혀 영영 안 보인다(`App::open` 과 같은 까닭). 어느 스레드에서 불러도 같다.
+/// 경로들을 연다. **프로젝트마다 제 스레드에서** 읽는다(moai-ezwu) — 한 줄의 값은 거의 자리
+/// 판정(`worktree::stranded_at`)이 옆 워크트리의 스냅샷을 파는 데 들고(이슈 745·워크트리 일곱에
+/// ~170ms, 판정을 빼면 ~40ms), 줄마다 디스크를 따로 만지므로 서로 기다릴 까닭이 없다. 차례대로
+/// 읽으면 층이 멈추는 값이 프로젝트 수만큼 더해지고, 나란히 읽으면 가장 느린 하나만큼이다.
+/// 차례는 받은 그대로다. 어느 스레드에서 불러도 같다.
 fn look_at(paths: &[PathBuf], now: &str) -> Vec<Looked> {
-    let marks: Vec<Marks> = paths.iter().map(|p| marks_of(p)).collect();
+    if let [one] = paths {
+        return vec![look_one(one, now)];
+    }
+    std::thread::scope(|s| {
+        let reads: Vec<_> = paths.iter().map(|p| s.spawn(move || look_one(p, now))).collect();
+        // 읽던 스레드의 패닉은 부른 쪽으로 되던진다 — 층의 스레드가 죽은 것과 같게 받는다(`follow_layer`).
+        reads.into_iter().map(|r| r.join().unwrap_or_else(|e| std::panic::resume_unwind(e))).collect()
+    })
+}
+
+/// 한 경로를 연다. **표식을 먼저 잰다** — 읽고 나서 재면 그 사이의 쓰기가 "이미 본 것"
+/// 으로 적혀 영영 안 보인다(`App::open` 과 같은 까닭).
+fn look_one(path: &Path, now: &str) -> Looked {
+    let marks = marks_of(path);
     // 여는 길은 한눈 보기와 같은 `projects::open` 이다 — 상태를 가르는 셈을 두 벌 두지 않는다.
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
     let reg = user_config::Registry {
         path: None,
-        projects: paths.iter().map(|p| user_config::Project { path: p.clone(), hue: None }).collect(),
+        projects: vec![user_config::Project { path: path.to_path_buf(), hue: None }],
         ..user_config::Registry::default()
     };
-    projects::open(&reg)
-        .into_iter()
-        .zip(marks)
-        .map(|(p, marks)| {
-            let look = match p.state {
-                State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now) },
-                state => shut(&p.path, &p.name, state),
-            };
-            Looked { path: p.path, marks, look }
-        })
-        .collect()
+    let p = projects::open(&reg).into_iter().next().expect("한 줄을 주면 한 줄이 온다");
+    let look = match p.state {
+        State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now) },
+        state => shut(&p.path, &p.name, state),
+    };
+    Looked { path: p.path, marks, look }
 }
 
 impl Layer {
@@ -284,6 +295,29 @@ impl Layer {
         self.places.iter().position(|p| p.path == path)
     }
 
+    /// 낡은 줄을 **스레드로** 읽으러 간다 — 층에 섰고 도는 읽기가 없을 때만. 기다리는 동안 층은
+    /// 옛 셈(처음이면 `읽는 중`)을 낸다. 받는 것은 [`App::follow_layer`] 다.
+    ///
+    /// 올라올 때와 밖에서 띄울 때도 이 길이다(moai-ezwu, 사용자 결정 2026-09-18). 한때 둘은 그
+    /// 자리에서 읽었다 — 첫 화면에 수가 서야 한다는 것이었는데, 그 값이 프로젝트마다 더해져
+    /// 워크트리가 많은 저장소 몇 개면 키 한 번에 화면이 수백 ms 멈췄다. 커서는 경로로 서므로
+    /// 수가 늦게 와도 설 자리는 안 바뀐다.
+    fn launch(&mut self) {
+        if self.at != At::Layer || self.pending.is_some() {
+            return;
+        }
+        let stale = self.stale();
+        if stale.is_empty() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let now = crate::model::now();
+        let handle = std::thread::spawn(move || {
+            let _ = tx.send(look_at(&stale, &now));
+        });
+        self.pending = Some((rx, handle));
+    }
+
     /// 지금 선 자리의 **헤더 번호** — `0` 이 층(`<0> 전체`)이고 그다음이 등록 차례다. 목록에서
     /// 빠진 경로에 서 있으면 번호가 없다.
     ///
@@ -320,12 +354,14 @@ impl App {
         self.layer.as_ref()?.places.get(at).map(|p| p.path.as_path())
     }
 
-    /// `.moai` 밖에서 띄운 탐색기 — 층에서 시작하고, **그 자리에서 다 읽는다.** 첫 화면에
-    /// 수가 서야 `moai status` 의 한눈 보기와 같은 값을 한다.
+    /// `.moai` 밖에서 띄운 탐색기 — 층에서 시작하고, **읽기는 스레드에 맡긴다**([`Layer::launch`]).
+    /// 첫 화면은 줄마다 `읽는 중` 으로 서고 읽는 대로 수가 찬다 — 그 자리에서 다 읽으면 등록한
+    /// 프로젝트의 값을 다 더한 만큼 첫 화면이 안 선다(moai-ezwu).
     pub fn on_projects(layer: Layer) -> App {
         let mut app = App::build(Vec::new(), Index::of(&[]), blank_config(), Vec::new(), Vec::new());
-        app.layer = Some(Layer { at: At::Layer, ..layer });
-        app.refresh_layer();
+        let mut layer = Layer { at: At::Layer, ..layer };
+        layer.launch();
+        app.layer = Some(layer);
         app
     }
 
@@ -529,12 +565,17 @@ impl App {
     /// 그 프로젝트의 줄을 비운다 — 층에서는 어느 프로젝트에도 쓸 수 없어야 하고(`App::write`
     /// 는 `repo` 가 없으면 멈춘다), 옛 id 가 다음 프로젝트의 커서 정체로 새면 안 된다. 도는
     /// 읽기도 버린다. 거름망은 푼다 — 한 프로젝트의 줄과 칸 이름에 매인 것이다.
+    ///
+    /// 안에 있는 동안 낡은 줄은 **스레드로** 다시 읽는다([`Layer::launch`], moai-ezwu) — 올라오는
+    /// 키가 그 값을 기다리지 않는다. 그동안 그 줄은 옛 셈을 낸다.
     pub(super) fn climb(&mut self) {
         let Some(layer) = &mut self.layer else { return };
         let At::Project(from) = std::mem::replace(&mut layer.at, At::Layer) else { return };
         self.leave_project();
-        self.refresh_layer();
-        self.cursor = self.layer.as_ref().and_then(|l| l.position(&from)).unwrap_or(0);
+        self.now = crate::model::now();
+        let Some(layer) = &mut self.layer else { return };
+        layer.launch();
+        self.cursor = layer.position(&from).unwrap_or(0);
     }
 
     /// **한 프로젝트에 매인 것을 모두 푼다** — 떠나는 두 길(올라가기 [`App::climb`], 옆으로
@@ -590,8 +631,9 @@ impl App {
         self.detail.rewind();
     }
 
-    /// 층의 낡은 줄을 **그 자리에서** 읽는다 — 사람의 손(올라가기·SPC r)이 부른다. 도는 읽기는
-    /// 버린다: 누르기 전에 띄운 것이라 늦게 닿으면 방금 읽은 것을 옛 것으로 덮는다.
+    /// 층의 낡은 줄을 **그 자리에서** 읽는다 — 사람이 "다시" 를 누른 것(SPC r)과 등록을 바꾼 것
+    /// (`a`·`d`)이 부른다. 올라오기는 스레드로 간다([`App::climb`]). 도는 읽기는 버린다: 누르기
+    /// 전에 띄운 것이라 늦게 닿으면 방금 읽은 것을 옛 것으로 덮는다.
     fn refresh_layer(&mut self) {
         let now = crate::model::now();
         let Some(layer) = &mut self.layer else { return };
@@ -696,8 +738,8 @@ impl App {
 
     /// 걸음마다 층을 본다. 스레드가 읽어 온 것은 **어디 서 있든** 받는다 — 경로로 맞춰
     /// 들이므로 안에 들어간 뒤에 닿아도 섞일 데가 없다. 새로 읽으러 가는 것은 **층에 선
-    /// 동안만**이다: 안에 있는 동안 남의 프로젝트를 걸음마다 재고 읽을 까닭이 없고, 올라갈
-    /// 때 표식이 바뀐 것만 읽는다(`climb`).
+    /// 동안만**이다([`Layer::launch`]): 안에 있는 동안 남의 프로젝트를 걸음마다 재고 읽을 까닭이
+    /// 없고, 올라갈 때 표식이 바뀐 것만 읽는다(`climb`).
     pub(super) fn follow_layer(&mut self) {
         let Some(layer) = &mut self.layer else { return };
         if let Some((rx, _)) = &layer.pending {
@@ -721,19 +763,7 @@ impl App {
                 }
             }
         }
-        if layer.at != At::Layer {
-            return;
-        }
-        let stale = layer.stale();
-        if stale.is_empty() {
-            return;
-        }
-        let (tx, rx) = std::sync::mpsc::channel();
-        let now = crate::model::now();
-        let handle = std::thread::spawn(move || {
-            let _ = tx.send(look_at(&stale, &now));
-        });
-        layer.pending = Some((rx, handle));
+        layer.launch();
     }
 
     /// 층을 읽는 스레드가 도는가.
@@ -844,6 +874,13 @@ mod tests {
         }
     }
 
+    /// 밖에서 띄운 탐색기 — 첫 읽기가 **끝난 뒤**의 것. 읽기는 스레드로 간다([`Layer::launch`]).
+    fn layered(cfg: &Path) -> App {
+        let mut a = App::on_projects(Layer::read(Some(cfg), None));
+        settle(&mut a);
+        a
+    }
+
     fn names(a: &App) -> Vec<String> {
         a.layer.as_ref().unwrap().places.iter().map(|p| p.name.clone()).collect()
     }
@@ -883,11 +920,14 @@ mod tests {
         std::fs::write(broken.join(".moai/config.toml"), "statuses = \n").unwrap();
         let cfg = s.register(&[&one, &two, &bare, &gone, &broken]);
 
-        let a = App::on_projects(Layer::read(Some(&cfg), None));
+        // **첫 화면은 기다리지 않는다**(moai-ezwu) — 줄은 곧바로 서고 셈은 스레드가 채운다.
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        assert!(a.loading(), "밖에서 띄운 첫 화면이 그 자리에서 다 읽었다 — 등록한 수만큼 멈춘다");
+        assert!(a.layer.as_ref().unwrap().places.iter().all(|p| matches!(p.look, Look::Unread)));
+        assert_eq!(a.rows(), (0..5).map(Row::Project).collect::<Vec<_>>(), "읽기를 기다리느라 줄이 안 섰다");
+        settle(&mut a);
         assert!(a.on_layer() && a.repo.is_none() && a.issues.is_empty());
         assert_eq!(names(&a), ["one", "two", "bare", "gone", "broken"]);
-        assert_eq!(a.rows(), (0..5).map(Row::Project).collect::<Vec<_>>());
-        assert!(!a.loading(), "밖에서 띄운 첫 화면을 스레드에 맡겼다 — 수가 비어 선다");
 
         let Look::Open { sum } = look(&a, "one") else { panic!("one 이 안 열렸다") };
         assert_eq!(sum.counts.iter().find(|(c, _)| c == "todo").unwrap().1, 1);
@@ -916,7 +956,7 @@ mod tests {
         let s = Scratch::new("layer-enter");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
 
         a.key(key(KeyCode::Enter));
         assert!(!a.on_layer());
@@ -969,7 +1009,7 @@ mod tests {
         let s = Scratch::new("layer-climb-w");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
 
         a.key(key(KeyCode::Enter));
         assert!(a.worktree, "프로젝트에 들어갔는데 겹쳐 보기가 꺼져 있다");
@@ -1000,7 +1040,7 @@ mod tests {
         let s = Scratch::new("layer-late-shut");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
         assert!(matches!(look(&a, "two"), Look::Open { .. }));
 
         // 층이 two 를 읽어 둔 채 아직 들이지 않았다. 그새 two 가 사라진다.
@@ -1027,7 +1067,7 @@ mod tests {
         let s = Scratch::new("layer-enter-pending");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
 
         let (hold, wait) = std::sync::mpsc::channel::<()>();
         let (_tx, rx) = std::sync::mpsc::channel();
@@ -1049,7 +1089,7 @@ mod tests {
         let s = Scratch::new("layer-jump-commits");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
         a.key(key(KeyCode::Enter));
         assert_eq!(a.here(), Some(one.clone()));
 
@@ -1117,6 +1157,8 @@ mod tests {
         let at = a.layer.as_ref().unwrap();
         assert!(at.places[0].launched && !at.places[0].registered);
         assert_eq!(a.current(), Some(Row::Project(0)), "띄운 자리에 안 섰다");
+        assert!(a.loading(), "올라갔는데 남의 프로젝트를 읽으러 안 갔다");
+        settle(&mut a);
         assert!(matches!(look(&a, "two"), Look::Open { .. }), "올라갔는데 남의 프로젝트를 안 읽었다");
 
         a.key(key(KeyCode::Enter));
@@ -1163,7 +1205,7 @@ mod tests {
         let bare = s.dir("bare");
         let gone = s.join("gone");
         let cfg = s.register(&[&bare, &gone]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
 
         a.key(key(KeyCode::Enter));
         assert!(a.on_layer() && a.repo.is_none());
@@ -1188,7 +1230,7 @@ mod tests {
         let s = Scratch::new("layer-reread");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
         let before = a.layer.as_ref().unwrap().places[0].marks;
 
         a.follow();
@@ -1209,6 +1251,11 @@ mod tests {
         a.follow();
         assert!(!a.loading(), "안에 있는 동안 남의 프로젝트를 읽으러 갔다");
         a.hit("0");
+        // 올라오는 키는 읽기를 기다리지 않는다(moai-ezwu) — 그동안 옛 셈이 선다.
+        assert!(a.loading(), "올라갈 때 바뀐 것을 읽으러 안 갔다");
+        let Look::Open { sum } = look(&a, "two") else { panic!() };
+        assert!(sum.picked.is_empty(), "올라오는 키가 읽기를 기다렸다");
+        settle(&mut a);
         let Look::Open { sum } = look(&a, "two") else { panic!() };
         assert_eq!(sum.picked.len(), 1, "올라갈 때 바뀐 것을 안 읽었다");
     }
@@ -1220,7 +1267,7 @@ mod tests {
         let s = Scratch::new("layer-vanish");
         let bare = s.dir("bare");
         let cfg = s.register(&[&bare]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
         assert!(matches!(look(&a, "bare"), Look::Shut { state: Shut::Uninit, .. }));
 
         std::fs::remove_dir_all(&bare).unwrap();
@@ -1241,7 +1288,7 @@ mod tests {
         let cfg = s.register(&[&one, &two]);
         let files = || [&one, &two].map(|d| std::fs::read(d.join(".moai/issues.jsonl")).unwrap());
         let was = files();
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
         a.user = Some("레이븐 (raven@example.com)".into());
 
         // 바로 누르는 `/` 는 까닭을 댄다.
@@ -1313,7 +1360,7 @@ mod tests {
     fn on_layer_with_twins(s: &Scratch) -> (PathBuf, PathBuf, App) {
         let (one, two) = twins(s);
         let cfg = s.register(&[&one, &two]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
         a.user = Some("레이븐 (raven@example.com)".into());
         (one, two, a)
     }
@@ -1573,7 +1620,7 @@ mod tests {
         let bare = s.dir("bare");
         let gone = s.join("gone");
         let cfg = s.register(&[&bare, &gone]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
 
         a.hit("SPC n");
         assert_eq!(a.mode, Mode::Browse, "init 전 프로젝트에 폼을 열었다");
@@ -1633,7 +1680,7 @@ mod tests {
         let s = Scratch::new("layer-inflight");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
 
         a.key(key(KeyCode::Enter));
         write_lines(&one, &[("argos-0001", "one 의 새 줄", "todo")]);
@@ -1655,7 +1702,7 @@ mod tests {
         let (one, two) = twins(&s);
         let three = s.project("three", &[]);
         let cfg = s.register(&[&one, &two]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = layered(&cfg);
         a.key(key(KeyCode::Down));
         assert_eq!(a.current(), Some(Row::Project(1)));
 

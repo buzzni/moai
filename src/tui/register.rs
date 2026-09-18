@@ -690,6 +690,13 @@ mod tests {
         press(&mut a, &[KeyCode::Home]);
         a.hit("0");
         assert!(a.on_layer());
+        // 올라오면 남의 줄은 스레드가 읽는다(moai-ezwu) — 끝날 때까지 받는다.
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while a.loading() {
+            assert!(std::time::Instant::now() < until, "층 읽기가 끝나지 않는다");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            a.follow();
+        }
         let places: Vec<(PathBuf, bool)> =
             a.layer.as_ref().unwrap().places.iter().map(|p| (p.path.clone(), p.registered)).collect();
         assert_eq!(places, [(here, false), (other, true)]);
