@@ -4410,3 +4410,5 @@
 {"ts":"2026-09-18T12:07:02Z","id":"moai-wxkm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: moai-h0r2(hook.rs 의 Event doc 을 줄이고 tests/cli.rs every_help_fits_in_eighty_columns 의 hook 예외를 걷는다) — moai-dw63-hook 워크트리가 hook.rs 를 놓은 뒤. -h 폭은 idea moai-1ovx"}
 {"ts":"2026-09-18T12:07:11Z","id":"moai-zuke","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — leave_project 로 모았고 병합했다(6d19f3d). 프로젝트에 매인 것을 새로 들이면 leave_project 에 적는다"}
 {"ts":"2026-09-18T12:08:31Z","id":"moai-ys7c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T12:08:55Z","id":"moai-x18p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T12:08:55Z","id":"moai-ygki","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
