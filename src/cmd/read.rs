@@ -17,45 +17,71 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     let load = repo.read()?;
     let now = crate::model::now();
-    let Some(path) = crate::user_config::path() else {
-        return Err(Fail::new(
-            "읽음을 적을 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 이 다 없다".to_string(),
-        ));
-    };
+    let path = super::project::writable_config()?;
 
-    let seen = crate::user_config::read(Some(&path)).read;
+    // 있는 줄은 **한 번 모아 견준다**(moai-j038.vna) — `Load::get` 은 줄 전부를 뒤에서부터 훑으므로
+    // 받은 id 마다 부르면 `--all`·`-e` 가 줄 수의 제곱으로 느려진다(1만 줄에 안 읽은 5천이면 1초 가까이).
+    // 같은 id 가 둘이면 뒷줄이다 — `Load::get` 과 같은 자.
+    let lines: BTreeMap<&str, &crate::model::Issue> = load.issues.iter().map(|i| (i.id.as_str(), i)).collect();
     let mut want: Vec<String> = args.ids.clone();
     let mut missing: BTreeSet<String> = BTreeSet::new();
-    // `--all` 은 **안 읽은 것만** 센다 — 이미 읽은 줄까지 다시 적으면 헛 쓰기가 되고, 그 줄의
-    // "언제 봤나" 가 오늘로 밀려 그 뒤에 바뀐 것을 못 가른다.
+    // `--all` 은 **내게 온 것 가운데** 안 읽은 것이다.
     //
-    // **누군지는 여기서만 묻는다**(moai-u8cs 리뷰). 담당을 재는 것은 `--all` 뿐이고, id 를 받은
+    // **누군지는 여기서만 묻는다**(moai-u8oh.x85). 담당을 재는 것은 `--all` 뿐이고, id 를 받은
     // 길은 사람을 몰라도 제 설정에 적을 수 있다 — 저널에 안 쓰니 이름 없는 줄이 남을 자리도
-    // 없다. 위에서 먼저 풀면 git 설정 없는 기계에서 `moai read <id>` 가 통째로 넘어졌고,
-    // 같은 일을 하는 탐색기의 `r` 은(`App::me` 가 `Option`) 그대로 돌아 둘이 어긋났다.
+    // 없다. 위에서 먼저 풀면 git 설정 없는 기계에서 `moai read <id>` 가 통째로 넘어졌다. 탐색기의
+    // `r` 도 같은 자다 — 누군지 몰라도, 내게 온 줄이 아니어도 그 줄을 적는다.
     if args.all {
         let me = crate::model::actor(ctx.user.as_deref(), &repo.root)?;
-        let me = format!("{} ({})", me.name, me.email);
+        let me = crate::model::label(&me.name, Some(&me.email), crate::config::Naming::Full);
+        // 적어 둔 읽음은 **여기서만** 든다 — 안 읽은 줄을 가르는 것은 `--all` 뿐이다.
+        let seen = crate::user_config::read(Some(&path)).read;
         want.extend(crate::query::unread(&load.issues, &me, &seen).into_iter().map(str::to_string));
     }
-    // `-e <에픽>` 은 그 에픽의 멤버와 그 밑까지 — 목록에서 `SPC m r` 이 하는 것과 같은 자다.
-    // **없는 묶음은 말한다** — 조용히 빈 손으로 끝나면 사람은 오타를 친 줄 모르고 다 적힌 줄 안다.
+    // `-e <묶음>` 은 그 묶음 줄과 **그 밑에 그려진 것 전부** — 목록에서 `SPC m r` 이 부르는 것과 같은
+    // 자(`nav::Index::under_group`)다. **없는 묶음은 말한다** — 조용히 빈 손으로 끝나면 사람은 오타를
+    // 친 줄 모르고 다 적힌 줄 안다. **묶음이 아닌 줄은 적기 전에 거절한다** — 이슈를 주면 그 줄 하나만
+    // 적고 0 으로 끝나, "그 밑까지" 를 시킨 사람은 다 적힌 줄 안다.
     if let Some(group) = &args.epic {
-        if load.get(group).is_none() {
-            missing.insert(group.clone());
+        match load.get(group) {
+            None => {
+                missing.insert(group.clone());
+            }
+            Some(g) if !crate::report::is_group(g) => {
+                return Err(Fail::coded(
+                    format!("`-e` 는 에픽·마일스톤을 받는다 — {group} 는 {} 다", g.kind.as_str()),
+                    super::code::BAD_INPUT,
+                ));
+            }
+            Some(_) => {
+                let index = crate::nav::Index::of(&load.issues);
+                want.extend(index.under_group(&load.issues, group).into_iter().map(|at| load.issues[at].id.clone()));
+            }
         }
-        want.extend(under(&load.issues, group));
     }
-    missing.extend(want.iter().filter(|id| load.get(id).is_none()).cloned());
-    let marks: BTreeMap<String, String> =
-        want.iter().filter(|id| load.get(id).is_some()).map(|id| (id.clone(), now.clone())).collect();
-    let fresh: Vec<String> = marks.keys().filter(|id| seen.get(*id) != Some(&now)).cloned().collect();
+    missing.extend(want.iter().filter(|id| !lines.contains_key(id.as_str())).cloned());
+    let targets: BTreeMap<&str, &crate::model::Issue> =
+        want.iter().filter_map(|id| lines.get_key_value(id.as_str())).map(|(id, i)| (*id, *i)).collect();
 
     // 적을 것이 없으면 설정 파일에 손을 안 댄다 — 빈 쓰기 하나 때문에 설정 디렉터리와 락 파일이
     // 아직 아무것도 등록하지 않은 사람의 집에 생긴다.
-    if !marks.is_empty() {
-        crate::user_config::update(&path, |doc| doc.mark_read(&marks))?;
-    }
+    //
+    // **이미 읽은 줄은 다시 안 적는다**(moai-j038.vna) — 본 뒤로 안 바뀐 줄의 때를 오늘로 밀면 헛 쓰기고,
+    // 옆 탐색기가 방금 적은 새 때를 이 명령이 덮을 수도 있다. 가르는 것은 **락 안에서 읽은 표**다 —
+    // 락 밖에서 읽어 두면 그사이 옆에서 적은 것과 어긋난다. 탐색기의 `r`·`SPC m` 도 같은 자로 가른다.
+    let fresh: Vec<String> = if targets.is_empty() {
+        Vec::new()
+    } else {
+        crate::user_config::update(&path, |doc| {
+            let on_file = doc.read_marks().0;
+            let marks: BTreeMap<String, String> = targets
+                .values()
+                .filter(|i| crate::query::changed_since_seen(i, &on_file))
+                .map(|i| (i.id.clone(), now.clone()))
+                .collect();
+            doc.mark_read(&marks)
+        })?
+    };
 
     // **없는 줄은 `--json` 에서도 말한다** — 기계로 읽는 쪽은 `missing` 으로, 사람은 stderr 로.
     // 하나가 없다고 나머지를 안 적지 않되, **비영으로 끝난다**(#a-partial) — `mv`·`defer`·`rm` 과
@@ -75,33 +101,6 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         .iter()
         .map(|id| format!("{}  {}", paint(style::ID, id), paint(style::DIM, "읽음")))
         .collect())
-}
-
-/// 그 묶음에 딸린 것 전부 — 멤버와 그 밑. 묶음 자신도 읽은 것으로 친다.
-///
-/// **소속은 `report::groups`·`report::milestones` 에 묻는다**(moai-u8cs 리뷰) — 줄의 `epic` 필드를
-/// 손으로 보면 *물려받은* 소속이 통째로 빠진다. `moai add --parent <멤버>` 로 선 자식은 제
-/// `epic` 을 안 적고 부모에게서 받으므로(`epic_through`), 필드만 보던 때는 `-e <에픽>` 이
-/// "그 밑까지" 를 못 지켜 멤버의 자식·리뷰가 안 읽은 채 남았다. 마일스톤도 같은 자리였다 —
-/// `-e <마일스톤>` 이 묶음 줄 하나만 적고 멤버를 다 흘렸다. `epic_from_parent` 가 적어 둔
-/// 그대로다: *소속을 따로 재면 둘은 언젠가 어긋난다.*
-///
-/// id 조상은 그래도 따로 훑는다 — `--parent <묶음>` 으로 선 줄 가운데 소속을 안 받는 것
-/// (에픽 밑의 에픽 등, `report::joins`)이 있고, 그것도 이 묶음 밑에 그려진다.
-fn under(issues: &[crate::model::Issue], group: &str) -> Vec<String> {
-    let epics = crate::report::groups(issues);
-    let milestones = crate::report::milestones(issues);
-    issues
-        .iter()
-        .filter(|i| {
-            let id = i.id.as_str();
-            id == group
-                || epics.get(id) == Some(&group)
-                || milestones.get(id) == Some(&group)
-                || std::iter::successors(crate::id::parent_of(id), |id| crate::id::parent_of(id)).any(|p| p == group)
-        })
-        .map(|i| i.id.clone())
-        .collect()
 }
 
 #[derive(serde::Serialize)]

@@ -481,6 +481,11 @@ impl App {
                 if let Some((_, handle)) = self.pending.take() {
                     self.discard(handle);
                 }
+                // 누군지도 **그 프로젝트의 뿌리에서** 다시 푼다(moai-j038.vna) — 헤더(`told_user`)가 뿌리마다
+                // 다시 푸는 것과 같은 까닭이다(moai-d3sy): 프로젝트마다 git 설정이 다를 수 있고, 안 풀면 [NEW]
+                // 가 띄운 자리의 사람으로 서서 `moai -C <그 프로젝트> read --all` 과 다른 줄을 센다. 안 읽음은
+                // 들이기(`apply_fresh`)가 세므로 그 **앞**이다.
+                self.me = self.whoami(&repo.root);
                 self.cfg = repo.config.clone();
                 self.repo = Some(repo);
                 self.path.clear();
@@ -522,8 +527,9 @@ impl App {
         self.commits = super::Commits::new();
         self.repo = None;
         self.issues = Vec::new();
-        // 안 읽은 id 도 그 프로젝트에 매인 것이다(moai-j038 리뷰) — 두고 오면 층에서 누른
+        // 안 읽은 id 도 그 프로젝트에 매인 것이다(moai-z9pc.9av) — 두고 오면 층에서 누른
         // `SPC m a` 가 **떠난 프로젝트의** 줄을 읽음으로 적고, 그 줄은 여기 보이지도 않는다.
+        // 층에서는 읽음 키가 아예 안 선다(`keys::Browse::enabled`) — 층의 줄은 프로젝트라 읽을 줄이 없다.
         self.unread.clear();
         self.index = Index::of(&[]);
         self.states = Default::default();

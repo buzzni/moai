@@ -410,10 +410,11 @@ macro_rules! moves {
 /// SPC 메뉴를 여는 키(moai-7sjm).
 pub const LEADER: Key = Key::plain(' ');
 
-/// **바로 누르는 키는 이동·드나들기·포커스·`/`·Esc 뿐이다**(키 지도 moai-hudg). 그 밖의 동작은
-/// SPC 뒤에 선다 — 한 글자 단축키(`q`·`f`·`n`)를 실수로 누를 때마다 앱이 끝나거나 칸이 열리던
-/// 것이 까닭이다. 바로 끝내는 길은 [`ANYWHERE`] 의 Ctrl-C 하나다. F키와 숨은 별칭(`r`·`m`·F7·
-/// Delete)도 걷었다.
+/// **바로 누르는 키는 이동·드나들기·포커스·`/`·Esc 에, 헤더 번호(`0`~`9`, moai-o133)와 읽음 `r`
+/// (moai-z9pc, 사용자 결정) 뿐이다**(키 지도 moai-hudg). 그 밖의 동작은 SPC 뒤에 선다 — 한 글자
+/// 단축키(`q`·`f`·`n`)를 실수로 누를 때마다 앱이 끝나거나 칸이 열리던 것이 까닭이다. 바로 끝내는
+/// 길은 [`ANYWHERE`] 의 Ctrl-C 하나다. F키와 숨은 별칭(`m`·F7·Delete)도 걷었다 — 옛 `r`(다시 읽기)은
+/// `SPC r` 로 옮겼고, 그 글자는 뒤에 읽음이 받았다.
 ///
 /// **SPC 로 시작하는 줄의 차례가 곧 메뉴의 차례다**([`super::menu::entries`]). 메뉴는 목록을
 /// 따로 적지 않고 이 줄들을 읽는다 — 메뉴에 선 것과 실제로 도는 것이 갈릴 수 없다.
@@ -587,6 +588,10 @@ impl Browse {
                 Err(Off::Why(format!("거름망은 프로젝트 안의 줄에 건다 — {} 로 들어가서 건다", label(BROWSE, Enter))))
             }
             Worktree if c.layer => Err(Off::Quiet),
+            // **층에는 읽을 줄이 없다**(moai-j038.vna) — 층의 줄은 프로젝트고 안 읽은 줄은 들어간 프로젝트의
+            // 것이라(`App::climb` 이 비운다), 여기서 서면 `SPC m a` 는 늘 "적을 것이 없다" 로 답하면서 그
+            // 프로젝트에 [NEW] 가 남는다. 눌러도 아무 일이 없는 키는 메뉴에 안 선다(아래 `Raw` 와 같은 까닭).
+            Read | ReadAll | ReadGroup if c.layer => Err(Off::Quiet),
             // 보기는 프로젝트 안의 줄에 건다 — 층에서는 그룹째 메뉴에 안 선다(`menu::live`).
             Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer => Err(Off::Quiet),
             // 상세를 숨기면 갈 칸이 하나뿐이라 Tab 은 아무 일도 안 하고, 원문↔그리기는 상세의

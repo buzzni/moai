@@ -256,7 +256,7 @@ NOTE
   위, G·End 가 맨 아래, Ctrl-d·Ctrl-u 가 반 쪽, Ctrl-f·Ctrl-b(PageDown·PageUp)가 한
   쪽이다. Tab·Shift-Tab 이 목록과 상세 사이로 포커스를 옮기고, 이동키는 모두 포커스
   있는 칸을 움직인다 — 상세를 굴리려면 Tab 으로 간다. / 가 검색, Esc 가 걸어 둔
-  거름망을 푼다. 검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며, 검색은 치는 대로
+  거름망을 푼다. r 은 커서가 선 줄을 읽음으로 적는다(아래 [NEW]). 검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며, 검색은 치는 대로
   목록을 거르고 Tab·Shift-Tab 이 찾을 자리를 전체·id·제목·태그·본문으로 돌린다.
   맨 위 헤더가 등록한 프로젝트마다 번호를 대고, 그 숫자를 SPC 없이 그대로 누르면 그
   프로젝트로 바로 간다 — 0 은 전체, 곧 프로젝트 층이다.
@@ -271,8 +271,8 @@ NOTE
     SPC s 1  설정의 첫 칸 [보임/숨김] — 둘째 칸부터 번호가 차례로 는다
     SPC o p  우선순위   SPC o c  생성   SPC o u  수정   SPC o s  칸   SPC o a  담당   SPC o t  제목
     SPC c i  id   SPC c p  우선순위   SPC c a  담당   SPC c c  생성   SPC c u  수정   SPC c n  셈   SPC c g  태그
-    r  이 줄을 읽음으로      SPC m a  안 읽은 것 전부      SPC m r  이 묶음의 멤버 전부
     SPC c h  열 이름 줄 [보임/숨김]    SPC c w  ⎇ 옆 가지 표시 [보임/숨김] — SPC t w 로 겹쳐 봐야 선다
+    SPC m a  안 읽은 것 전부      SPC m r  이 묶음의 멤버 전부
   바로 끝내는 키는 Ctrl-C 하나다 — 어디서든, 글을 적는 중에도 끝낸다.
 
   내게 온 것(담당이 나이거나 그 밑) 가운데 마지막으로 본 뒤에 바뀐 줄은 제목 앞에 [NEW] 가
@@ -741,8 +741,10 @@ pub struct DeferArgs {
 /// `moai read` — 읽었다고 표시한다.
 #[derive(Args, Debug)]
 pub struct ReadArgs {
-    /// 무엇을 읽었는지는 **언제나 대야 한다** — 인자 없이 부르면 아무 줄도 안 적으면서
-    /// 성공으로 끝나, 사람은 다 적힌 줄 알고 넘어간다. `--all`·`-e` 가 그 자리를 채운다.
+    /// 읽음으로 적을 이슈들
+    ///
+    /// 무엇을 읽었는지는 언제나 댄다 — 인자 없이 부르면 아무 줄도 안 적으면서 성공으로 끝나,
+    /// 사람은 다 적힌 줄 알고 넘어간다. `--all`·`-e` 가 그 자리를 채운다.
     #[arg(value_name = "id", required_unless_present_any = ["all", "epic"])]
     pub ids: Vec<String>,
 

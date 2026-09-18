@@ -331,6 +331,27 @@ impl Index {
             .collect()
     }
 
+    /// **묶음 하나를 읽을 때 적는 줄** — 묶음(에픽·마일스톤) 줄 자신과 **그 밑에 그려진 것 전부**
+    /// (moai-j038.vna). `moai read -e` 와 탐색기의 `SPC m r` 이 이 하나를 부른다 — 둘이 따로 재면 같은
+    /// 물음에 두 답이 선다.
+    ///
+    /// 자는 [`Index::descendants`] 다 — 자리를 정한 그대로(`home_of`)고, 소속은 그 자리가 이미
+    /// `report::groups`·`report::milestones` 에서 읽었다. 한때 셋이 따로 쟀다: CLI 는 소속 지도에 id 조상
+    /// 걸음을 더해 `moai epic add --parent <에픽>` 으로 선 안쪽 에픽과 **남의 에픽에 든** 자식까지 읽었고,
+    /// 탐색기는 목록의 경로로 재어 `(마일스톤 없음)` 바구니를 통째로 읽거나, 멤버 줄에서 누르면 묶음 줄
+    /// 자신을 빠뜨렸다. `report::epic_from_parent` 가 적어 둔 그대로다: *소속을 따로 재면 둘은 언젠가
+    /// 어긋난다.*
+    ///
+    /// 묶음이 아니거나 없는 id 면 빈 목록이다 — 바구니·이슈 폴더는 묶음이 아니다.
+    pub fn under_group(&self, issues: &[Issue], group: &str) -> Vec<usize> {
+        let Some(at) = self.find(group).filter(|&at| crate::report::is_group(&issues[at])) else {
+            return Vec::new();
+        };
+        let mut path = self.home_of(at).clone();
+        path.push(self.seg_of(issues, at));
+        std::iter::once(at).chain(self.descendants(&path)).collect()
+    }
+
     /// 그 자리 밑의 진척 — **상세의 롤업과 목록 줄의 끝난/일 셈이 같은 자로 잰다.**
     /// 둘이 따로 세면 한 화면에서 같은 에픽이 두 진척으로 선다.
     ///
@@ -536,6 +557,39 @@ mod tests {
             child_elsewhere,                           // 제 에픽이 부모와 다른 자식
         ];
         assert_exactly_once(&issues);
+    }
+
+    /// **묶음을 읽는 줄은 묶음 줄 자신과 그 밑에 그려진 것이다**(moai-j038.vna) — `moai read -e` 와
+    /// `SPC m r` 이 함께 부르는 자. id 로 에픽 밑에 선 안쪽 에픽과 남의 에픽에 든 자식은 안 들고, 멤버 밑에
+    /// 접힌 생각과 자식은 든다. 이슈 폴더와 없는 id 는 묶음이 아니다.
+    #[test]
+    fn a_group_reads_what_is_drawn_under_it() {
+        let mut epic = make("argos-0002", Kind::Epic);
+        epic.milestone = Some("argos-0001".into());
+        let mut elsewhere = make("argos-0002.xx", Kind::Issue); // `--parent argos-0002 -e argos-0003`
+        elsewhere.epic = Some("argos-0003".into());
+        let issues = vec![
+            make("argos-0001", Kind::Milestone),
+            epic,
+            make("argos-0003", Kind::Epic),
+            epic_of("argos-0004", "argos-0002"),
+            make("argos-0004.aa1", Kind::Idea),   // 멤버 밑에 접힌 생각
+            make("argos-0004.bb2", Kind::Issue),  // 멤버의 자식 — 에픽을 물려받는다
+            make("argos-0002.in", Kind::Epic),    // `moai epic add --parent argos-0002`
+            elsewhere,
+            make("argos-0009", Kind::Issue),      // 마일스톤이 있으니 `(마일스톤 없음)` 에 선다
+        ];
+        let index = Index::of(&issues);
+        let ids = |group: &str| {
+            let mut v: Vec<&str> = index.under_group(&issues, group).into_iter().map(|at| issues[at].id.as_str()).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(ids("argos-0002"), ["argos-0002", "argos-0004", "argos-0004.aa1", "argos-0004.bb2"]);
+        // 마일스톤이면 그 밑의 에픽과 그 멤버까지.
+        assert_eq!(ids("argos-0001"), ["argos-0001", "argos-0002", "argos-0004", "argos-0004.aa1", "argos-0004.bb2"]);
+        assert!(ids("argos-0004").is_empty(), "이슈 폴더를 묶음으로 읽었다");
+        assert!(ids("argos-zzzz").is_empty());
     }
 
     /// **자리를 잃은 에픽의 멤버도 어딘가에 있다.**

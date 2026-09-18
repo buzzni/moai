@@ -1970,9 +1970,9 @@ fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) 
         order.iter().filter(|acts| acts[0].enabled(c).is_ok()).map(|acts| hint(acts)).collect()
     };
     // **덜 급한 것부터 떨어뜨린다.** 폭이 모자라면 앞쪽부터 버리고, 뒤 묶음(`keep`)은 늘 남는다.
-    // 바로 누르는 키는 이동·포커스·`/`·드나들기뿐이고(moai-7sjm) 나머지는 `SPC 메뉴` 한 칸이
-    // 댄다 — 메뉴는 그 자리에서 켜진 것만 세우므로 바와 같은 판정을 읽는다. 끝내기(`SPC q`)도
-    // 메뉴에 있고 Ctrl-C 는 어디서든 끝낸다.
+    // 바에 서는 바로 누르는 키는 이동·포커스·`/`·드나들기뿐이고(moai-7sjm, 읽음 `r` 은 `moai tui
+    // --help` 가 댄다) 나머지는 `SPC 메뉴` 한 칸이 댄다 — 메뉴는 그 자리에서 켜진 것만 세우므로 바와
+    // 같은 판정을 읽는다. 끝내기(`SPC q`)도 메뉴에 있고 Ctrl-C 는 어디서든 끝낸다.
     // **층에서는 층에서 듣는 키만 적는다** — `/` 는 층에서 까닭만 말하고(`Browse::enabled` 가
     // 걸러 여기 안 선다) 나가기는 위가 없다.
     // **차례는 커서를 따라 안 바뀐다**(moai-k3yi). 커서가 잎이면 Enter, 뿌리면 Bksp 가 `enabled`
@@ -2524,6 +2524,9 @@ pub(super) mod tests {
             i.assignee_email = Some("tester@example.com".into());
         }
         let mut a = every(is);
+        // 시계를 고정한다 — 읽음은 `App::now` 로 적히고 줄은 2026-09-01 에 고쳐졌다. 환경의 `MOAI_NOW`
+        // 나 늦은 시계가 그보다 앞이면 적은 읽음이 줄을 못 덮어 시험이 기계를 탄다(moai-j038.vna).
+        a.now = "2026-09-13T13:42:07Z".into();
         a.me = Some("테스터 (tester@example.com)".into());
         a.recount_unread();
         assert!(!a.unread.is_empty(), "내 줄인데 안 읽음이 하나도 없다");

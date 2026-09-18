@@ -447,8 +447,10 @@ mod tests {
     fn entries_hide_what_is_not_enabled_here() {
         let root_in = entries(&[k(' ')], &inside(), &[]);
         let root_layer = entries(&[k(' ')], &layer(), &[]);
-        // 층에서도 읽음은 선다 — 층의 줄은 프로젝트지만 `SPC m a` 는 그 프로젝트의 안 읽은 줄을 센다.
-        assert_eq!(keys_of(&root_layer), ["n", "r", "q", "p", "t", "m"], "층에서 검색·거름망이 섰다");
+        // 층에서는 읽음(`SPC m`)도 안 선다(moai-j038.vna) — 층의 줄은 프로젝트라 읽을 줄이 없고, 서면
+        // `SPC m a` 가 늘 "적을 것이 없다" 로 답하면서 그 프로젝트의 [NEW] 는 그대로 남는다.
+        assert_eq!(keys_of(&root_layer), ["n", "r", "q", "p", "t"], "층에서 검색·거름망·읽음이 섰다");
+        assert!(keys_of(&root_in).contains(&"m"), "프로젝트 안에서 읽음이 안 섰다");
         assert!(keys_of(&root_in).contains(&"f"));
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &inside(), &[])), ["a"], "프로젝트 안에서 해제가 섰다");
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &layer(), &[])), ["a", "d"]);

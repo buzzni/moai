@@ -2667,7 +2667,7 @@ const JSON_SWEEP: &[&str] = &[
 
 /// **읽음은 내 설정에만 적힌다**(moai-u8oh, 사용자 결정) — 트래커 파일은 한 바이트도 안 바뀐다.
 /// `--all` 은 내게 온 것 가운데 안 읽은 것을, `-e` 는 그 묶음(에픽·마일스톤)의 멤버와 **그 밑까지**
-/// 적는다 — 물려받은 소속도 센다(moai-u8cs 리뷰). 없는 줄은 #a-partial 대로 말하고 비영으로 끝나고,
+/// 적는다 — 물려받은 소속도 센다(moai-u8oh.x85). 없는 줄은 #a-partial 대로 말하고 비영으로 끝나고,
 /// id 를 준 길은 누군지 몰라도 적는다.
 #[test]
 fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
@@ -2677,7 +2677,7 @@ fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
     let epic = field(&mine(&["add", "에픽", "--type", "epic", "--json"]), "id");
     let member = field(&mine(&["add", "멤버", "-e", &epic, "--json"]), "id");
     // 멤버의 자식 — **제 `epic` 을 안 적고 부모에게서 받는다**(`moai add --parent`). `-e` 가
-    // 줄의 `epic` 필드만 보던 때 이 줄이 통째로 빠졌다(moai-u8cs 리뷰).
+    // 줄의 `epic` 필드만 보던 때 이 줄이 통째로 빠졌다(moai-u8oh.x85).
     let child = field(&mine(&["add", "자식", "--parent", &member, "--json"]), "id");
     let before = issues(s.path());
 
@@ -2732,6 +2732,38 @@ fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
     assert!(!out.contains(&member), "이미 읽은 줄을 다시 적었다 — {out}");
 }
 
+/// **`-e` 는 그 묶음 밑에 그려진 것만 적는다**(moai-j038.vna) — 트리·`show -e`·탐색기의 `SPC m r` 과 같은
+/// 자(`nav::Index::under_group`)다. id 조상을 따로 훑던 때는 `moai epic add --parent <바깥>` 으로 선 안쪽
+/// 에픽과 **그 멤버 절반**(id 로 선 것만)을, `--parent <바깥> -e <남>` 으로 남의 에픽에 든 자식까지 적었다 —
+/// 어느 표면도 그 줄들을 바깥 에픽 밑에 그리지 않는다. 묶음이 아닌 줄은 적기 전에 거절한다.
+#[test]
+fn reading_a_group_takes_what_is_drawn_under_it() {
+    let s = init("readgroup");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let outer = field(&mine(&["epic", "add", "바깥", "--json"]), "id");
+    let other = field(&mine(&["epic", "add", "남의 에픽", "--json"]), "id");
+    let member = field(&mine(&["add", "바깥 멤버", "-e", &outer, "--json"]), "id");
+    let inner = field(&mine(&["epic", "add", "안쪽", "--parent", &outer, "--json"]), "id");
+    let by_field = field(&mine(&["add", "안쪽 멤버", "-e", &inner, "--json"]), "id");
+    let by_id = field(&mine(&["add", "안쪽 자식", "--parent", &inner, "--json"]), "id");
+    let elsewhere = field(&mine(&["add", "남의 자식", "--parent", &outer, "-e", &other, "--json"]), "id");
+    // id 가 서로의 앞머리라(`바깥.xxx`) 따옴표째 찾는다.
+    let has = |out: &str, id: &str| out.contains(&format!("\"{id}\""));
+
+    let out = mine(&["read", "-e", &outer, "--json"]);
+    assert!(has(&out, &outer) && has(&out, &member), "묶음 줄이나 멤버가 빠졌다 — {out}");
+    for stray in [&inner, &by_field, &by_id, &elsewhere] {
+        assert!(!has(&out, stray), "바깥 에픽 밑에 안 그려진 {stray} 를 적었다 — {out}");
+    }
+
+    // 묶음이 아닌 줄은 적기 전에 거절한다 — 받으면 그 줄 하나만 적고 0 으로 끝나 "그 밑까지" 가 거짓이 된다.
+    let out = moai_with(s.path(), &cfg, &["read", "-e", &by_field]);
+    assert!(!out.status.success(), "묶음이 아닌 줄을 받았다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("에픽·마일스톤"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!std::fs::read_to_string(&cfg).unwrap().contains(&format!("{by_field} =")), "거절해 놓고 적었다");
+}
+
 /// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.
 #[test]
 fn every_command_still_speaks_json() {
@@ -2773,8 +2805,8 @@ fn every_command_still_speaks_json() {
     // 위 시험은 초록인데 그 명령의 `--json` 은 아무도 안 본 것이 된다 —
     // 없는 안전망을 있다고 믿는 것이 제일 나쁘다.
     // `init` 과 `add` 는 위에서 바탕을 세우며 이미 `--json` 으로 부른다.
-    // `read` 는 **제 설정 파일로** 따로 부른다 — 공용 집의 없는 파일에 쓰면 그 격리가 깨진다
-    // (`project add`·`rm` 과 같은 까닭). 부르는 것은 위의 `read_marks_…` 시험이다.
+    // `read` 는 **제 설정 파일로** 여기서 따로 부른다 — 공용 집의 없는 파일에 쓰면 그 격리가 깨진다
+    // (`project add`·`rm` 과 같은 까닭). 무엇을 적는지는 위의 `read_marks_…` 시험이 본다.
     let own = s.path().join("sweep-read.toml");
     one_json_value(&ok_with(s.path(), &own, &["read", &id, "--json"]));
     for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add", "read"].contains(c)) {
