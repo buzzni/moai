@@ -357,7 +357,15 @@ impl App {
     /// 층의 줄을 **지금의 디렉터리로** 연다. 못 열면 그 줄을 고쳐 세우고 CLI 한눈 보기와 같은
     /// 말(`view::unopened`)을 알림으로 댄 뒤 `None` — 들어가기(Enter)와 담기(`n`)가 같은 길이라
     /// 같은 상태를 두 키가 달리 부르지 않는다.
+    ///
+    /// **도는 층 읽기는 버린다**(moai-800o). 그것은 이 줄을 재기 **전에** 띄운 것이라, 늦게 닿으면
+    /// 여기서 고쳐 세운 줄(`Look::Shut`)을 옛 디렉터리의 값으로 덮는다. 버린 줄은 층에 선 다음
+    /// 걸음에 [`Layer::stale`] 이 다시 고른다 — 못 들어갔거나 `n` 으로 층에 남았으면 곧바로,
+    /// 들어갔으면 올라올 때다.
     fn open_place(&mut self, at: usize) -> Option<Repo> {
+        if let Some((_, handle)) = self.layer.as_mut()?.pending.take() {
+            self.discard(handle);
+        }
         let place = self.layer.as_mut()?.places.get_mut(at)?;
         let marks = marks_of(&place.path);
         let state = match Repo::open(&place.path) {
@@ -479,32 +487,25 @@ impl App {
     ///
     /// 읽기는 그 자리에서 한다. 누른 사람은 결과를 기다리고 있다(`App::reload` 와 같다).
     ///
-    /// **한 프로젝트에 매인 것은 여기서 푼다.** 한때 이 길은 층을 거쳐서만 닿았고, 푸는 일은
-    /// [`App::climb`] 하나가 맡았다 — 헤더의 번호(moai-o133)가 옆 프로젝트로 바로 건너뛰는
-    /// 길을 내면서 그 길이 안 도는 드나들기가 생겼다. 안 풀면 떠난 프로젝트의 거름망(그 줄과
-    /// 칸 이름에 매인 것이다)과 끈 겹쳐 보기와 쓰기 실패가 다음 프로젝트의 화면으로 그대로
-    /// 넘어온다. **겹쳐 보기는 읽기 전에 되돌린다** — 읽는 값이 그 깃발을 탄다.
+    /// **한 프로젝트에 매인 것은 여기서도 푼다**([`App::leave_project`]). 한때 이 길은 층을
+    /// 거쳐서만 닿았고, 푸는 일은 [`App::climb`] 하나가 맡았다 — 헤더의 번호(moai-o133)가 옆
+    /// 프로젝트로 바로 건너뛰는 길을 내면서 그 길이 안 도는 드나들기가 생겼다. **겹쳐 보기는
+    /// 읽기 전에 정한다** — 읽는 값이 그 깃발을 탄다.
     pub(super) fn enter_project(&mut self, at: usize) {
         let Some(repo) = self.open_place(at) else { return };
-        let Some(layer) = &mut self.layer else { return };
-        let path = layer.places[at].path.clone();
+        let Some(path) = self.place_path(at).map(Path::to_path_buf) else { return };
         // **겹쳐 보기를 켠다는 말은 한 번만 적는다.** 읽는 값이 이 깃발을 타므로 읽기에 건네는
         // 것과 App 에 남기는 것이 갈리면 목록은 겹친 줄인데 뱃지는 꺼진 화면이 난다. 세우는
         // 것은 **읽은 뒤**다 — 못 읽으면 선 자리도 깃발도 그대로여야 한다.
         let overlay = true;
         match (self.read)(&repo, overlay) {
             Ok(fresh) => {
-                layer.at = At::Project(path);
-                self.worktree = overlay;
-                self.filter_text = None;
-                // 쓰기 실패의 까닭도 떠난 프로젝트의 것이다 — 걷어야 `apply_fresh` 가 `trouble`
-                // 을 비운다.
-                self.write_failed = false;
-                // 스레드에서 짓던 읽기는 떠난 프로젝트의 것이다. 늦게 닿아도 `App::receive` 가
-                // 뿌리를 견줘 버리지만, 그때까지 `App::follow` 는 이 프로젝트의 읽기를 안 띄운다.
-                if let Some((_, handle)) = self.pending.take() {
-                    self.discard(handle);
+                // 떠난 프로젝트에 매인 것을 푼다 — 층에서 왔으면 이미 풀린 것을 한 번 더 풀 뿐이다.
+                self.leave_project();
+                if let Some(layer) = &mut self.layer {
+                    layer.at = At::Project(path);
                 }
+                self.worktree = overlay;
                 // 누군지도 **그 프로젝트의 뿌리에서** 다시 푼다(moai-j038.vna) — 헤더(`told_user`)가 뿌리마다
                 // 다시 푸는 것과 같은 까닭이다(moai-d3sy): 프로젝트마다 git 설정이 다를 수 있고, 안 풀면 [NEW]
                 // 가 띄운 자리의 사람으로 서서 `moai -C <그 프로젝트> read --all` 과 다른 줄을 센다. 안 읽음은
@@ -512,19 +513,11 @@ impl App {
                 self.me = self.whoami(&repo.root);
                 self.cfg = repo.config.clone();
                 self.repo = Some(repo);
-                self.path.clear();
-                self.remembered.clear();
                 self.cursor = 0;
-                self.detail.rewind();
-                // 층을 거쳐 왔으면 들이기 전 목록이 비어 붙들 것이 없지만, 헤더의 번호
-                // (moai-o133)로 옆 프로젝트에 바로 건너뛰면 떠난 프로젝트의 줄이 그대로 남아
-                // 있다 — 두 프로젝트가 같은 prefix 를 쓰면(`argos-0001`) 들이기가 그 id 로
-                // 커서를 붙들어 남의 줄 번호에 선다.
+                // 떠난 프로젝트의 줄은 `leave_project` 가 이미 비웠다 — 두 프로젝트가 같은 prefix 를
+                // 쓰면(`argos-0001`) 남은 줄의 id 로 들이기가 커서를 붙들어 남의 줄 번호에 섰다.
                 self.apply_fresh(fresh);
-                // **들이기가 붙든 정체는 이 한 줄이 버린다 — 지우지 말 것**(리뷰). 위의
-                // `cursor = 0` 은 붙들 줄을 옛 목록의 **첫 줄**로 바꿀 뿐 정체 자체를 없애지
-                // 못한다(`App::take` 가 옛 자료로 `current()` 를 잰다). 디렉터리에 들어갈 때와
-                // 같은 자다(`App::first_row`, moai-cm13).
+                // 들어가면 첫 줄에 선다. 디렉터리에 들어갈 때와 같은 자다(`App::first_row`, moai-cm13).
                 self.cursor = self.first_row();
             }
             Err(e) => self.notice = Some(format!("들어가지 못했다 — {e}")),
@@ -539,6 +532,18 @@ impl App {
     pub(super) fn climb(&mut self) {
         let Some(layer) = &mut self.layer else { return };
         let At::Project(from) = std::mem::replace(&mut layer.at, At::Layer) else { return };
+        self.leave_project();
+        self.refresh_layer();
+        self.cursor = self.layer.as_ref().and_then(|l| l.position(&from)).unwrap_or(0);
+    }
+
+    /// **한 프로젝트에 매인 것을 모두 푼다** — 떠나는 두 길(올라가기 [`App::climb`], 옆으로
+    /// 건너가기 [`App::enter_project`])이 이것 하나를 부른다(moai-800o). 한때 두 길이 목록을
+    /// 따로 들었다 — 한쪽은 여기서 비우고 다른 쪽은 `apply_fresh` 의 갈래에 기대어, 같은 답을
+    /// 다른 길로 냈다. 그래서 들이기를 고치면 한쪽만 깨졌고, 건너가는 길은 짓던 커밋 표를 안
+    /// 버려 떠난 뿌리의 표가 새 프로젝트의 표에 섞였다. **프로젝트에 매인 것을 새로 들이면
+    /// 여기에 적는다.** 선 자리(`Layer::at`)와 커서는 부르는 쪽이 정한다 — 어디로 가느냐가 다르다.
+    fn leave_project(&mut self) {
         if let Some((_, handle)) = self.pending.take() {
             self.discard(handle);
         }
@@ -549,6 +554,9 @@ impl App {
             self.discard(handle);
         }
         self.commits = super::Commits::new();
+        // 표가 무엇을 알고 지었는지도 같이 버린다 — 남기면 같은 prefix 를 쓰는 다음 프로젝트의 id 가
+        // 표에 있는 것으로 읽혀(`apply_fresh`) 빈 표를 다시 안 짓는다.
+        self.commit_ids = Default::default();
         self.repo = None;
         self.issues = Vec::new();
         // 안 읽은 id 도 그 프로젝트에 매인 것이다(moai-z9pc.9av) — 두고 오면 층에서 누른
@@ -580,8 +588,6 @@ impl App {
         self.path.clear();
         self.remembered.clear();
         self.detail.rewind();
-        self.refresh_layer();
-        self.cursor = self.layer.as_ref().and_then(|l| l.position(&from)).unwrap_or(0);
     }
 
     /// 층의 낡은 줄을 **그 자리에서** 읽는다 — 사람의 손(올라가기·SPC r)이 부른다. 도는 읽기는
@@ -984,6 +990,77 @@ mod tests {
         a.key(key(KeyCode::Enter));
         assert!(a.worktree, "다음 프로젝트가 시키지 않은 끈 화면으로 읽혔다");
         assert_eq!((a.view.clone(), a.order), (view, order), "보기·정렬이 층을 오가며 처음으로 돌아갔다");
+    }
+
+    /// **층에서 띄운 읽기는 방금 잰 줄을 덮지 않는다**(moai-800o). 들어가려다 못 열면 그 줄을
+    /// 지금의 디렉터리로 고쳐 세우는데(`Look::Shut`), 그 앞에 띄운 층 읽기는 옛 디렉터리를 잰
+    /// 것이다 — 늦게 닿으면 열린 줄로 되돌려, 사람이 방금 들은 "디렉터리가 없다" 와 화면이 어긋난다.
+    #[test]
+    fn a_layer_read_started_before_entering_does_not_undo_the_shut_it_wrote() {
+        let s = Scratch::new("layer-late-shut");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        assert!(matches!(look(&a, "two"), Look::Open { .. }));
+
+        // 층이 two 를 읽어 둔 채 아직 들이지 않았다. 그새 two 가 사라진다.
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(look_at(std::slice::from_ref(&two), &crate::model::now())).unwrap();
+        a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {})));
+        std::fs::remove_dir_all(&two).unwrap();
+
+        a.key(key(KeyCode::Down));
+        a.key(key(KeyCode::Enter));
+        assert!(a.on_layer(), "사라진 프로젝트에 들어갔다");
+        assert!(matches!(look(&a, "two"), Look::Shut { state: Shut::Missing, .. }));
+        a.follow();
+        assert!(
+            matches!(look(&a, "two"), Look::Shut { state: Shut::Missing, .. }),
+            "들어가기 전에 띄운 층 읽기가 방금 쓴 '없다' 를 열린 줄로 덮었다"
+        );
+    }
+
+    /// **들어가면 층의 읽기를 놓는다**(moai-800o). 안 놓으면 프로젝트 안에서도 `App::loading`
+    /// 이 참이라 루프가 빠른 걸음으로 깨어, 이 프로젝트와 상관없는 층 읽기를 기다린다.
+    #[test]
+    fn entering_a_project_lets_go_of_the_layer_read() {
+        let s = Scratch::new("layer-enter-pending");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+
+        let (hold, wait) = std::sync::mpsc::channel::<()>();
+        let (_tx, rx) = std::sync::mpsc::channel();
+        a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(move || {
+            let _ = wait.recv();
+        })));
+
+        a.key(key(KeyCode::Enter));
+        assert!(!a.on_layer());
+        assert!(!a.layer_loading(), "층에서 띄운 읽기가 프로젝트 안까지 따라왔다");
+        drop(hold);
+    }
+
+    /// **헤더 번호로 옆 프로젝트에 건너가면 떠난 프로젝트의 커밋 표를 버린다**(moai-800o) — 층을
+    /// 거쳐 가는 길(`App::climb`)과 같은 것을 되돌린다. 짓던 표가 늦게 닿으면 떠난 뿌리의 표가
+    /// 새 프로젝트의 표에 섞인다.
+    #[test]
+    fn jumping_to_a_sibling_project_drops_the_commit_table_of_the_one_it_left() {
+        let s = Scratch::new("layer-jump-commits");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.here(), Some(one.clone()));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(super::super::Commits::from([(one.clone(), Default::default())])).unwrap();
+        a.commits_job = Some((rx, std::thread::spawn(|| {})));
+
+        a.hit("2");
+        assert_eq!(a.here(), Some(two.clone()));
+        a.follow();
+        assert!(!a.commits.contains_key(&one), "떠난 프로젝트의 커밋 표가 새 프로젝트로 넘어왔다");
     }
 
     /// **설정이 깨져 층이 안 서도 까닭은 댄다.** 등록한 것이 하나도 안 읽히면 층은 없고

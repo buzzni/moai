@@ -979,6 +979,17 @@ fn a_colour_chosen_in_the_user_config_beats_the_hash_and_only_colour_changes() {
     let again = stdout(&["project", "color", one_arg, "auto", "--json"], false);
     assert!(again.contains("\"changed\":false"), "{again}");
 
+    // 손으로 적은 표 모양 color 는 색으로도 auto 로도 덮지 않는다(moai-r9qa) — 0 아닌 코드로 멈추고,
+    // 어느 파일의 어느 줄인지 대고, 한 바이트도 안 바꾼다.
+    let table = format!("{original}color.x = 1\n");
+    std::fs::write(&cfg, &table).unwrap();
+    for word in [target, "auto"] {
+        let o = run(&["project", "color", one_arg, word, "--json"], false);
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(!o.status.success() && err.contains("손으로") && err.contains("config.toml") && err.contains(one_arg), "{word} → {}", text(&o));
+        assert_eq!(std::fs::read_to_string(&cfg).unwrap(), table, "{word} 가 표 모양 color 를 덮었다");
+    }
+
     // 손으로 적은 틀린 값은 한 줄로 비추고 해시 색으로 서며 0 으로 끝난다.
     std::fs::write(&cfg, format!("{original}color = \"red\"\n")).unwrap();
     let o = run(&["ready"], false);
@@ -4112,6 +4123,34 @@ fn help_at(s: &Scratch, path: &str, columns: usize) -> String {
         .expect("moai 를 실행하지 못했다");
     assert!(out.status.success(), "COLUMNS={columns} moai {args:?} 가 실패했다\n{}", text(&out));
     String::from_utf8(out.stdout).unwrap()
+}
+
+/// **모든 명령의 `--help` 는 80칸 안이다**(moai-c57v). 도움말은 접지 않으므로(moai-opjn) 넘는
+/// 줄은 좁은 터미널에서 그대로 꺾인다. `tui` 의 글만 보던 시험(moai-lz2t)을 넓혔다 —
+/// after_help 글줄, clap 이 옵션 열 옆에 붙이는 짧은 help, `--help` 가 옵션 밑에 펴는
+/// long_help 문단까지 **그려진 모양 그대로** 잰다. 옵션 열의 폭은 그 명령에서 가장 긴 옵션이
+/// 정하므로, 한 명령에 옵션을 더하는 것만으로 남의 줄이 넘칠 수 있다 — 그래서 글이 아니라
+/// 그린 것을 잰다.
+///
+/// 폭은 `unicode-width` 로 센다 — `·`·`—` 같은 모호폭은 한 칸이다(moai-havc 가 따로 본다).
+#[test]
+fn every_help_fits_in_eighty_columns() {
+    let s = init("helpwidth");
+    let mut seen = 0;
+    let mut wide = Vec::new();
+    for (path, help) in every_help(&s) {
+        seen += 1;
+        // `hook` 의 이벤트 설명은 `src/hook.rs` 의 `Event` doc 주석이 그린다 — 옆 워크트리가 그
+        // 파일을 쥐어 따로 세웠다(moai-h0r2). 그것을 고치면 이 줄을 걷는다.
+        if path == "hook" {
+            continue;
+        }
+        for l in help.lines().filter(|l| cells(l) > 80) {
+            wide.push(format!("moai {path} --help  {}: {l}", cells(l)));
+        }
+    }
+    assert!(seen > 20, "명령 목록을 못 읽었다 — {seen}개");
+    assert!(wide.is_empty(), "80칸을 넘는 도움말 줄:\n{}", wide.join("\n"));
 }
 
 /// 복사해 못 도는 heredoc 마다 한 줄.
