@@ -473,9 +473,8 @@ pub(crate) mod tests {
     /// 트레일러가 둘 다 읽히는지 본다.
     #[test]
     fn a_record_that_spans_a_read_chunk_survives() {
-        let dir = std::env::temp_dir().join(format!("moai-git-chunk-{}-{:?}", std::process::id(), std::thread::current().id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let scratch_dir = crate::scratch::Scratch::new("git-chunk");
+        let dir = scratch_dir.path().to_path_buf();
         let git = |args: &[&str]| run_git(&dir, None, args);
         git(&["init", "-q"]);
         // 조각(16KB) 을 넉넉히 넘기는 본문. 트레일러는 그 **뒤**에 둔다 — 경계 너머가 안 읽히면 여기서 사라진다.
@@ -488,7 +487,6 @@ pub(crate) mod tests {
         assert_eq!(got["moai-aaaa"][0].hash.len(), 40, "조각 경계에서 해시가 잘렸다");
         assert_eq!(got["moai-bbbb"].len(), 1, "조각 너머의 트레일러를 잃었다");
         assert_eq!(got["moai-cccc"].len(), 1, "큰 레코드 다음의 커밋을 잃었다");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// **커밋이 하나도 없는 저장소는 실패가 아니다**(moai-rzsv 리뷰). `git log HEAD` 는 갓 만든
@@ -498,13 +496,11 @@ pub(crate) mod tests {
     /// **저장소 밖은 그대로 실패다** — 봐주는 것은 리비전뿐이라, 그 둘이 같은 답이 되면 안 된다.
     #[test]
     fn a_repo_without_commits_is_empty_not_broken() {
-        let dir = std::env::temp_dir().join(format!("moai-git-unborn-{}-{:?}", std::process::id(), std::thread::current().id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let scratch_dir = crate::scratch::Scratch::new("git-unborn");
+        let dir = scratch_dir.path().to_path_buf();
         assert!(table(&dir, &["moai-aaaa"]).is_err(), "저장소 밖인데 빈 표를 냈다");
         run_git(&dir, None, &["init", "-q"]);
         assert!(table(&dir, &["moai-aaaa"]).unwrap().is_empty(), "커밋 없는 저장소를 실패로 셌다");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// **찾을 id 가 없으면 git 을 안 부른다.** 있지도 않은 자리를 주고 잰다 — 불렀으면 git 이
