@@ -4562,3 +4562,11 @@
 {"ts":"2026-09-18T13:38:31Z","id":"moai-lw7i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T13:38:31Z","id":"moai-rg5q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T13:38:31Z","id":"moai-fbdg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:38:34Z","id":"moai-jl72.d8y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:39:22Z","id":"moai-6p1n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): commits_error 를 객체 {kind, said} 로 낸다. kind 는 no_git·not_a_repo·stream·encoding, said 는 한 줄이고 경로는 자른다"}
+{"ts":"2026-09-18T13:39:32Z","id":"moai-zah3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 새 키 broken_worktrees — status --json 에 못 읽은 워크트리 전부(Workplace 목록, 없으면 키 없음), tui --json 의 Counted 에 같은 수. unreadable_worktrees 의 뜻은 그대로"}
+{"ts":"2026-09-18T13:39:41Z","id":"moai-xpd7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18, 3aec 와 한 물음): 자리 경로는 늘 main 꼭대기 기준 상대 경로 — 밖이면 ../ 로 올라가서 잰다"}
+{"ts":"2026-09-18T13:39:50Z","id":"moai-3aec","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18, xpd7 과 한 물음): 자리 경로는 늘 main 꼭대기 기준 상대 경로 — 밖이면 ../ 로 올라가서 잰다"}
+{"ts":"2026-09-18T13:40:08Z","id":"moai-3owm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 손으로 고칠 거절 셋(set_hue·merge_look·mark_read)은 broken 코드를 낸다 — 깨진 설정에 안 쓰는 update 와 같은 갈래. 새 코드를 만들지 않는다."}
+{"ts":"2026-09-18T13:40:08Z","id":"moai-lb0u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:40:19Z","id":"moai-bt5c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"release clean build 가 부하 때 예산 5분을 넘는다 (ecut 402초)"}
