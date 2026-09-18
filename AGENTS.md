@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:7e178518 -->
+<!-- moai:begin v:0.1.0 hash:d2373e92 -->
 ## 이슈 트래커 — moai
 
 이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
@@ -169,8 +169,10 @@ id** 로 그 이슈의 커밋을 그때그때 찾아 낸다. 해시를 노트에
 - 집기·닫기만 담는 커밋은 `chore(tracker):` 로 시작한다. 상세는 그것을 빼고 그린다
   (`--json` 의 `commits` 에는 `tracker` 표시와 함께 남는다)
 - `moai show <id> --json` 의 `commits` 는 **늘 있다.** 빈 배열은 "그 id 를 적은 커밋이 없다" 는
-  뜻이고, git 을 못 읽었을 때만 `commits_error` 가 그 까닭을 한 줄로 댄다 — 기계가 "아직 아무도
-  안 고쳤다" 와 "여기서는 못 물어봤다" 를 가르라고 둔 것이다
+  뜻이고, git 을 못 읽었을 때만 `commits_error` 가 선다 — 기계가 "아직 아무도 안 고쳤다" 와
+  "여기서는 못 물어봤다" 를 가르라고 둔 것이다. 그 값은 `kind`·`said` 를 든 객체다. 가르는 것은
+  `kind`(`no_git`·`not_a_repo`·`stream`·`encoding`·`failed`)고, `said` 는 사람이 읽을 한 줄이라
+  낱말로 맞추지 않는다
 
 도구가 자라 이 블록이 낡으면 `moai init` 을 다시 부른다. 이슈와 저널은
 건드리지 않고 이 블록만 다시 쓴다. 낡았는지만 보려면 `moai init --check` —
