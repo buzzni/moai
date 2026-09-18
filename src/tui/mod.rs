@@ -1635,7 +1635,14 @@ impl App {
             return;
         }
         match crate::user_config::update(&path, |doc| doc.merge_look(&self.saved, &look)) {
-            Ok(()) => self.saved = look,
+            // 건너뛴 키도 든 것으로 옮긴다(moai-jr3z) — 안 옮기면 다음 저장마다 그 차이가 또 실려 같은 알림이
+            // 토글마다 선다. 알림은 이번 한 번이고, 파일의 손으로 적은 모양은 그대로다.
+            Ok(skipped) => {
+                self.saved = look;
+                if !skipped.is_empty() {
+                    self.notice = Some(format!("보기 일부를 설정에 안 적었다 — {}", skipped.join(" · ")));
+                }
+            }
             Err(e) => self.notice = Some(format!("보기를 설정에 못 적었다 — {}", crate::text::one_line(&e.to_string()))),
         }
     }
@@ -4460,6 +4467,49 @@ mod tests {
         c.hit("SPC o t");
         let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
         assert!(text.contains("sort = \"title\"") && text.contains("sort_reversed = false") && text.contains("\"what\""), "{text}");
+
+        // 차례가 낱말이 아닌 모양이어도 방향만 입히지 않는다(moai-ys7c) — 알림은 차례를 못 읽었다고 한 줄 댄다.
+        std::fs::write(c.user_config.as_ref().unwrap(), "[tui]\nsort = 3\nsort_reversed = true\n").unwrap();
+        let mut d = App::new(Vec::new(), cfg(), Path::new());
+        d.user_config = c.user_config.clone();
+        d.load_look();
+        assert_eq!(d.order, Default::default(), "못 읽은 차례의 방향을 우선순위에 입혔다");
+        assert!(d.notice.clone().unwrap_or_default().contains("tui.sort"), "{:?}", d.notice);
+    }
+
+    /// **표 모양 보기 키 하나가 그 세션의 다른 저장을 막지 않는다**(moai-jr3z, 사용자 결정 2026-09-18). 그 키는
+    /// 건너뛰고 한 번 알리며, 뒤의 토글은 적힌다 — 전에는 거절된 차이를 다음 저장마다 또 실어 숨김·상세가 하나도
+    /// 안 적혔다.
+    #[test]
+    fn a_hand_written_sort_table_does_not_block_the_other_toggles() {
+        let s = scratch("look-odd-sort");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\nsort.by = \"created\"\n").unwrap();
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        a.hit("SPC o t");
+        assert!(a.notice.clone().unwrap_or_default().contains("tui.sort"), "{:?}", a.notice);
+        a.notice = None;
+        a.hit("SPC s d");
+        assert_eq!(a.notice, None, "건너뛴 키를 다음 저장에 또 실었다");
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(text.contains("sort.by = \"created\"") && text.contains("hidden"), "숨김이 안 적혔다\n{text}");
+    }
+
+    /// **깨진 설정은 한 곳에서만 말한다**(moai-5jsn) — 층이 없다는 배너가 파싱 오류를 대므로 보기 알림은 같은
+    /// 말을 다시 안 한다. 띄우는 길(`cmd::tui`)과 같은 차례로 보기를 입히고 층을 얹는다.
+    #[test]
+    fn a_broken_user_config_is_told_once() {
+        let s = scratch("look-broken");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui\nsort = \"title\"\n").unwrap();
+        let reg = crate::user_config::read(Some(&user));
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&reg.look, reg.look_problems.clone());
+        let a = a.attach_layer(layer::Layer::of(&reg, None));
+        assert!(a.unlayered.as_deref().is_some_and(|u| u.contains("TOML")), "층 없음 배너가 까닭을 안 들었다 — {:?}", a.unlayered);
+        assert_eq!(a.notice, None, "같은 파싱 오류를 보기 알림이 또 댔다");
     }
 
     /// **두 탐색기가 저마다 누른 것이 둘 다 남는다**(moai-2kyl 단계 리뷰). 적는 것은 이 세션이 바꾼 만큼이다

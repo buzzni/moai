@@ -225,7 +225,7 @@ pub fn remove(config: &Path, input: &Path, cwd: &Path) -> R<Removed> {
         crate::user_config::update(config, |doc| {
             let hit: Vec<PathBuf> =
                 doc.projects().0.into_iter().map(|p| p.path).filter(|p| spellings.contains(p)).collect();
-            doc.remove(&spellings);
+            doc.remove(&spellings)?;
             Ok(hit)
         })?
     } else {

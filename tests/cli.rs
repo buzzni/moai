@@ -997,6 +997,8 @@ fn a_colour_chosen_in_the_user_config_beats_the_hash_and_only_colour_changes() {
         let o = run(&["project", "color", one_arg, word, "--json"], false);
         let err = String::from_utf8_lossy(&o.stderr);
         assert!(!o.status.success() && err.contains("손으로") && err.contains("config.toml") && err.contains(one_arg), "{word} → {}", text(&o));
+        // 깨진 설정과 같은 코드다(moai-3owm) — 기계가 I/O 실패와 갈라 사람에게 넘긴다.
+        assert!(err.contains(r#""code":"broken""#), "{word} → {err}");
         assert_eq!(std::fs::read_to_string(&cfg).unwrap(), table, "{word} 가 표 모양 color 를 덮었다");
     }
 
@@ -9018,10 +9020,19 @@ fn a_broken_user_config_refuses_writes_but_ls_is_lenient() {
     let json = project_ok(home.path(), &config, &["project", "ls", "--json"]);
     assert!(json.contains("\"projects\":[]") && json.contains("\"problems\":[\""), "{json}");
 
-    for args in [["project", "add", "a", "--json"], ["project", "rm", "a", "--json"]] {
-        let out = project(home.path(), &config, &args);
+    for args in [
+        &["project", "add", "a", "--json"][..],
+        &["project", "rm", "a", "--json"],
+        // 목록의 모양이 틀렸는데 "등록돼 있지 않다"(not_found) 로 새면 그 말이 시키는 `add` 가 거절된다
+        // (moai-gmdu 에픽 리뷰) — 색도 목록을 고치는 쓰기라 같은 거절이다.
+        &["project", "color", "a", "green", "--json"],
+    ] {
+        let out = project(home.path(), &config, args);
         assert!(!out.status.success(), "{args:?} 가 깨진 설정에 썼다");
-        assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"broken""#), "{args:?}\n{}", text(&out));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(r#""code":"broken""#), "{args:?}\n{}", text(&out));
+        // 손으로 고치라는 말에는 **어느 파일인지** 붙는다 — 설정의 자리는 환경이 골라 사람이 모를 수 있다.
+        assert!(err.contains("config.toml"), "{args:?}\n{}", text(&out));
     }
     assert_eq!(std::fs::read_to_string(&config).unwrap(), src);
 }
