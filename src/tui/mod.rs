@@ -108,6 +108,15 @@ enum Landing {
     Missing,
 }
 
+/// 줄을 가리는 것 — 거름망과 보기(`SPC s`) 각각([`App::veil`]). 둘 다 `false` 면 목록에 선다.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Veil {
+    /// 거름망(`/`·`f`)에 안 걸렸다.
+    filtered: bool,
+    /// 보기가 숨겼다.
+    viewed: bool,
+}
+
 /// 누군지 묻는 칸의 상태.
 ///
 /// **받은 것은 그 세션 동안만 든다**(`App::user`). `.moai/config.toml` 에도
@@ -799,13 +808,16 @@ impl App {
                     // Esc 는 거름망만 풀어 누른 키가 아무것도 안 한다. **둘 다 가렸으면 둘 다 댄다**
                     // (moai-2kyl 단계 리뷰) — 하나만 대면 그 키를 눌러도 다른 쪽에 여전히 가린다.
                     Landing::Hidden => {
-                        let masked = |mask: &[bool]| self.index.find(&id).is_some_and(|at| !mask.get(at).copied().unwrap_or(true));
+                        let veil = self.index.find(&id).map(|at| self.veil(at)).unwrap_or_default();
                         let clear = keys::label(keys::BROWSE, keys::Browse::ClearFilter);
                         let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
-                        match (masked(&self.keep), masked(&self.shown)) {
-                            (true, true) => format!("✓ {done} · {what} — 거름망과 보기에 가려 안 보인다 · {clear} 로 풀고 {show} 로 모두 보인다"),
-                            (false, true) => format!("✓ {done} · {what} — 보기에 가려 안 보인다 · {show} 로 모두 보인다"),
-                            _ => format!("✓ {done} · {what} — 거름망에 가려 안 보인다 · {clear} 로 푼다"),
+                        match veil {
+                            Veil { filtered: true, viewed: true } => format!("✓ {done} · {what} — 거름망과 보기에 가려 안 보인다 · {clear} 로 풀고 {show} 로 모두 보인다"),
+                            Veil { filtered: false, viewed: true } => format!("✓ {done} · {what} — 보기에 가려 안 보인다 · {show} 로 모두 보인다"),
+                            Veil { filtered: true, viewed: false } => format!("✓ {done} · {what} — 거름망에 가려 안 보인다 · {clear} 로 푼다"),
+                            // 둘 다 안 가렸는데 줄이 안 섰다 — 오늘은 닿지 않는 갈래다. 숨기는 까닭이 셋째로
+                            // 늘면 여기로 떨어지는데, 그때 거름망을 대면 누른 키가 아무것도 안 한다(moai-1jay).
+                            Veil { filtered: false, viewed: false } => format!("✓ {done} · {what} — 목록에 안 보인다"),
                         }
                     }
                     // 다시 읽기가 실패했으면 그 까닭은 `trouble` 이 따로 댄다. 담긴 것은 참이다.
@@ -1285,14 +1297,24 @@ impl App {
     /// 거름망에 걸렸는데 **보기(`SPC s`)가 숨긴** 이슈 수(moai-2kyl 단계 리뷰). 검색 칸이 `N건` 곁에 댄다 —
     /// 끝난 일을 찾는데 `0건` 만 서면 없는 줄 알고, 까닭을 대는 경로 줄의 뱃지는 좁으면 빠진다.
     pub fn veiled_count(&self) -> usize {
-        (0..self.keep.len()).filter(|&at| self.keep[at] && !self.visible(at)).count()
+        (0..self.keep.len()).filter(|&at| self.veil(at) == Veil { filtered: false, viewed: true }).count()
     }
 
-    /// 이 줄이 목록에 서는가 — 거름망에 걸리고(`keep`) 보기가 숨기지 않았다(`shown`). **판정은 여기
-    /// 하나다** — 목록·검색 셈·가린 셈이 저마다 적으면 한쪽만 고쳐져 셈이 목록과 어긋난다. `shown`
-    /// 이 빈 때(층에서 막 내려와 아직 안 센 때)는 보인다.
+    /// 이 줄이 목록에 서는가 — 거름망도 보기도 가리지 않았다([`Self::veil`]).
     fn visible(&self, at: usize) -> bool {
-        self.keep[at] && self.shown.get(at).copied().unwrap_or(true)
+        self.veil(at) == Veil::default()
+    }
+
+    /// 이 줄을 **무엇이 가리는가** — 거름망(`keep`)과 보기(`shown`) 각각. **판정은 여기 하나다**
+    /// (moai-1jay) — 목록·검색 셈·가린 셈·쓰기 알림·빈 목록의 까닭이 저마다 마스크를 읽으면, 숨기는
+    /// 까닭이 하나 늘거나 빈 `shown` 의 기본이 바뀐 날 한쪽만 고쳐져 셈이 목록과, 알림이 누른 키와
+    /// 어긋난다(moai-fmv5 가 그 알림을 만든 바로 그 실패). `shown` 이 빈 때(층에서 막 내려와 아직 안
+    /// 센 때)는 보기가 안 가린다.
+    fn veil(&self, at: usize) -> Veil {
+        Veil {
+            filtered: !self.keep.get(at).copied().unwrap_or(true),
+            viewed: !self.shown.get(at).copied().unwrap_or(true),
+        }
     }
 
     /// 목록에서 그 정체의 줄 자리. 커서를 붙드는 곳(다시 읽기·보기 토글·쓰기·층)이 같은 자로 찾는다.
@@ -1303,7 +1325,7 @@ impl App {
     /// 지금 디렉터리에 **보기만 가린 줄**이 있는가 — 거름망은 지나는데 보기가 숨긴 것(moai-2kyl 단계 리뷰).
     /// 목록이 비었을 때 까닭을 대려고 묻는다. 이슈 수에 비례한 훑기라 줄이 있을 때는 안 부른다.
     pub fn view_hides_here(&self) -> bool {
-        !self.on_layer() && !self.index.entries_where(&self.issues, &self.path, &|at| self.keep[at]).is_empty()
+        !self.on_layer() && !self.index.entries_where(&self.issues, &self.path, &|at| !self.veil(at).filtered).is_empty()
     }
 
     /// 거름망을 건다. 빈 글은 "거름망 없음" 이다.
