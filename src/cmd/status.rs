@@ -13,6 +13,12 @@ use crate::store::Repo;
 use crate::projects::{Entry, Overview, Seen};
 use crate::view;
 
+/// `status --json` 이 보고서에 덧붙이는 키(`run`). 보고서는 필드가 선언된 것뿐이라 걷을 것이
+/// 없다 — 덧붙이는 자리 곁에 목록을 둔다.
+impl super::Appendable for report::StatusReport {
+    const APPENDED: &'static [&'static str] = &["unreadable_worktrees", "broken_worktrees", "branches"];
+}
+
 pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // `.moai` 밖이면 등록한 프로젝트를 한눈에. **안이면 아래 그대로다** — 등록 목록을
     // 읽지도 않는다(결정 3: `.moai` 안의 CLI 는 그 프로젝트만 본다).
@@ -110,7 +116,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         // **여기 드는 것은 판정을 가린 워크트리뿐이다**(`Unread::blinding`, moai-rgz9) — 못 읽어도
         // 이름이 집은 줄을 가리키는 워크트리는 판정을 안 가리니 안 든다. 키 이름은 이미 나간
         // 값이라 그대로 두지만 "못 읽은 워크트리 전부" 가 아니다 — 그쪽은 위에서 stderr 에 한
-        // 줄씩 내고, `guide` 가 그 둘이 다른 수라고 말한다.
+        // 줄씩 내고 기계에는 아래 `broken_worktrees` 가 댄다.
         //
         // **없으면 키를 안 단다** — 빈 목록을 늘 달면 그것이 "다 읽었다" 인지 "안 재 봤다" 인지가
         // 다시 두 뜻이 된다. `--worktree` 여부와 무관하게 단다: `gather` 의 `⎇` 줄은 stderr 라
@@ -122,6 +128,16 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 serde_json::to_string(&unread.blinding).map_err(|e| super::Fail::new(e.to_string()))?,
             ));
         }
+        // **깨진 스냅샷 전부는 곁의 키로 댄다**(moai-zah3, 2026-09-18 사용자 결정). 위의 키는 판정을
+        // 가린 것만 담아, 이름이 집은 줄을 가리키는 워크트리의 깨진 스냅샷은 어느 JSON 에도 안
+        // 섰다 — 고칠 사람이 있어야 고쳐지는데 감독 스킬과 `examples/bash-agent` 는 `--json` 으로
+        // 돈다. 위 키의 뜻은 이미 나간 값이라 안 바꾼다. 없으면 키를 안 다는 것도 같은 까닭이다.
+        if !unread.all.is_empty() {
+            extra.push((
+                "broken_worktrees",
+                serde_json::to_string(&unread.all).map_err(|e| super::Fail::new(e.to_string()))?,
+            ));
+        }
         // **겹쳐 봤을 때만 키를 단다.** 늘 달면 `--worktree` 없이 부른 쪽도 빈
         // 지도를 받아 "겹쳐 봤는데 옆에 아무것도 없다" 로 읽는다.
         if worktree {
@@ -130,7 +146,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         if extra.is_empty() {
             return super::json_line(&st);
         }
-        return super::json_with(&st, &extra, &["unreadable_worktrees", "branches"]);
+        return super::json_with(&st, &extra);
     }
     Ok(view::status(
         &st,
@@ -193,7 +209,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     // 가 겹쳐 보지 않으면 옆 스냅샷을 아예 안 열어 `trouble` 이 비고, 그러면 죽은
                     // 세션과 못 읽는 워크트리가 함께 있는 저장소가 "드러난 문제 없다" 로 선다.
                     // 목록 둘을 넘긴다 — 사람 화면은 못 읽은 것 전부를 한 줄씩 대고(`unread`),
-                    // `--json` 은 판정을 가린 것만 낸다(`blind`). 안쪽 `status` 와 같은 가름이다.
+                    // `--json` 은 둘을 따로 낸다(`unreadable_worktrees` 는 판정을 가린 것 `blind`,
+                    // `broken_worktrees` 는 전부 `unread`). 안쪽 `status` 와 같은 가름이다.
                     // `trouble` 이 이미 낸 것인지는 `swept` 가 가른다 — 이것도 안쪽과 같은 자다.
                     unread: unread.all,
                     blind: unread.blinding,
@@ -217,6 +234,9 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             /// 그 침묵이 곧 일을 영영 안 거두는 것이 된다. 없으면 키를 안 단다.
             #[serde(skip_serializing_if = "<[report::Workplace]>::is_empty")]
             unreadable_worktrees: &'a [report::Workplace],
+            /// 깨진 스냅샷 **전부** — 안쪽 `status --json` 의 같은 키와 같다(moai-zah3). 없으면 안 단다.
+            #[serde(skip_serializing_if = "<[report::Workplace]>::is_empty")]
+            broken_worktrees: &'a [report::Workplace],
         }
         let entries = projects
             .iter()
@@ -229,6 +249,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     picked: b.picked.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
                     trouble: &p.trouble,
                     unreadable_worktrees: &b.blind,
+                    broken_worktrees: &b.unread,
                 }),
             })
             .collect();

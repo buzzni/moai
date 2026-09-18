@@ -593,6 +593,9 @@ fn regroup(chars: Vec<(char, Role)>) -> Vec<Span> {
 /// 글머리. 겹친 목록도 같은 것을 쓴다 — 깊이는 들여쓰기가 말한다.
 const BULLET: &str = "•";
 
+/// 끊는 표면에서 접은 코드 줄의 이음표. 들여쓰기 네 칸 안에 앉아 폭이 같다.
+const CONTINUED: &str = "↪";
+
 /// 인용 막대. **겹친 만큼 겹쳐 놓는다** — 한 겹만 놓으면 인용 속 인용이
 /// 제 겹을 잃고, 어디까지가 누구 말인지 화면만 봐서는 못 가린다.
 const BAR: &str = "│ ";
@@ -669,10 +672,34 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize, overflow: Overflow
             }
         }
         Block::Code { quote, lines, .. } => {
-            // 코드는 접지 않는다. 접으면 그 줄이 더는 그 코드가 아니다.
-            let lead = format!("{}    ", bars(*quote));
+            // 셸에서는 코드를 접지 않는다. 접으면 그 줄이 더는 그 코드가 아니고,
+            // 셸은 화면에서만 접어 복사하면 온전하다.
+            //
+            // **끊는 표면에서는 글자에서 끊고 이음표를 단다**(사용자 결정, moai-ip9r).
+            // 소프트랩이 없어 안 끊으면 꼬리가 `…` 로 잘려 사라진다. 이음표는 접은
+            // 자리를 코드의 진짜 줄바꿈과 가른다 — 코드에서는 줄바꿈도 뜻이다.
+            let bar = bars(*quote);
+            let mut lead = format!("{bar}    ");
+            let mut cont = format!("{bar}  {CONTINUED} ");
+            // 끊는 표면에서는 `flow` 처럼 **앞머리를 먼저 잘라** 글 자리 두 칸을 남긴다.
+            // 겹친 인용 속 코드는 앞머리가 좁은 패널보다 넓을 수 있고, 그대로 두면
+            // 줄이 폭을 넘어 위젯이 꼬리를 `…` 로 잘라 코드 글자를 잃는다.
+            if overflow == Overflow::Break {
+                let room = width.saturating_sub(2);
+                lead = crate::text::clip(&lead, room);
+                cont = crate::text::clip(&cont, room);
+            }
+            let lead_w = crate::text::width(&lead).max(crate::text::width(&cont));
+            let budget = width.saturating_sub(lead_w).max(2);
             for l in lines {
-                out.push(vec![mark(lead.clone()), Span { text: l.clone(), role: Role::Code }]);
+                let pieces = match overflow {
+                    Overflow::Break => chunks(l, budget),
+                    Overflow::Keep => vec![l.clone()],
+                };
+                for (n, piece) in pieces.into_iter().enumerate() {
+                    let lead = if n == 0 { &lead } else { &cont };
+                    out.push(vec![mark(lead.clone()), Span { text: piece, role: Role::Code }]);
+                }
             }
         }
         Block::Rule => out.push(vec![mark("─".repeat(width.min(40)))]),
@@ -696,6 +723,42 @@ fn lay_table_as_lines(out: &mut Vec<Vec<Span>>, head: &Row, rows: &[Row], width:
             flow(out, cell, "", "", width, overflow);
         }
     }
+}
+
+/// 표를 줄마다 한 덩이로. 첫 칸이 제목이 되고, 나머지 칸은 머리 칸의 이름을
+/// 앞에 달고 물려 쓴다 — 칸 맞춤은 잃어도 어느 값이 어느 칸의 것인지는 남는다.
+/// 칸 안의 글은 `flow` 를 타서 코드는 표면의 `overflow` 대로 온전하다.
+fn lay_table_as_records(out: &mut Vec<Vec<Span>>, head: &Row, rows: &[Row], width: usize, overflow: Overflow) {
+    let label = |cell: &Cell| -> String { cell.iter().map(|s| s.text.as_str()).collect() };
+    let labels: Vec<String> = head.iter().map(label).collect();
+    // 이름 폭을 맞춰 값이 한 줄에서 시작하게 한다. 첫 칸은 제목이라 안 센다.
+    let name_w = labels.iter().skip(1).map(|l| crate::text::width(l)).max().unwrap_or(0);
+    for r in rows {
+        if let Some(title) = r.first().filter(|c| !c.is_empty()) {
+            flow(out, title, "", "", width, overflow);
+        }
+        for (n, cell) in r.iter().enumerate().skip(1).filter(|(_, c)| !c.is_empty()) {
+            let name = &labels[n];
+            let pad = name_w - crate::text::width(name);
+            let first = format!("  {name}{}  ", " ".repeat(pad));
+            let hang = " ".repeat(crate::text::width(&first));
+            flow(out, cell, &first, &hang, width, overflow);
+        }
+    }
+}
+
+/// 칸을 `max` 폭에 맞추면(`fit`) 코드 글자를 잃는가.
+fn loses_code(cell: &[Span], max: usize) -> bool {
+    if span_width(cell) <= max {
+        return false;
+    }
+    // `fit` 은 `…` 한 칸을 남기고 자른다. 그 몫을 넘어 끝나는 코드가 있으면 잃는다.
+    let room = max.saturating_sub(1);
+    let mut used = 0;
+    cell.iter().any(|s| {
+        used += crate::text::width(&s.text);
+        s.role == Role::Code && used > room
+    })
 }
 
 /// 표를 칸 맞춰 편다.
@@ -753,6 +816,16 @@ fn lay_table(out: &mut Vec<Vec<Span>>, head: &[Cell], rows: &[Row], width: usize
             break;
         }
         w[widest] -= 1;
+    }
+    // **줄인 칸이 코드를 자르면 그 표는 칸 맞춤을 버린다**(사용자 결정, moai-glnm).
+    // 잘린 명령은 복사해 돌리면 다른 명령이다 — 표의 줄맞춤보다 명령의 온전함이
+    // 이긴다. 잘리는 것이 산문뿐이면 여전히 `…` 로 줄이고 칸을 맞춘다.
+    let cuts_code = std::iter::once(&head)
+        .chain(&rows)
+        .any(|r| r.iter().zip(&w).any(|(cell, &max)| loses_code(cell, max)));
+    if cuts_code {
+        lay_table_as_records(out, &head, &rows, width, overflow);
+        return;
     }
 
     let row = |r: &[Cell], is_head: bool| -> Vec<Span> {
@@ -824,6 +897,26 @@ fn fit(cell: &[Span], max: usize, head: bool) -> Vec<Span> {
         out.push(Span { text: piece, role: as_head(s.role) });
     }
     out.push(mark("…"));
+    out
+}
+
+/// 글을 표시 폭 `max` 씩 글자에서 나눈다. **글자는 하나도 버리지 않는다** —
+/// `max` 보다 넓은 글자 하나는 제 줄에 혼자 선다.
+fn chunks(text: &str, max: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        let mut piece = cut(rest, max);
+        if piece.is_empty() {
+            piece = rest.chars().take(1).collect();
+        }
+        rest = &rest[piece.len()..];
+        out.push(piece);
+    }
+    // 빈 코드 줄도 줄이다 — 빈 줄을 지우면 코드의 모양이 바뀐다.
+    if out.is_empty() {
+        out.push(String::new());
+    }
     out
 }
 
@@ -1316,6 +1409,98 @@ mod tests {
                 assert!(w <= max, "폭 {max} 에서 {w}칸 — {line:?}");
             }
         }
+    }
+
+    /// 줄들의 글에서 코드 조각만 이어 붙인다 — 끊긴 명령이 도로 한 줄이 되는가를 본다.
+    fn code_text(lines: &[Vec<Span>]) -> String {
+        lines.iter().flatten().filter(|s| s.role == Role::Code).map(|s| s.text.as_str()).collect()
+    }
+
+    const CMD_TABLE: &str = "| 무엇 | 명령 | 까닭 |\n|---|---|---|\n\
+        | 집기 | `moai mv moai-abcd in_progress --from todo --json` | 본 칸이 그대로일 때만 옮긴다 |\n\
+        | 닫기 | `moai mv moai-abcd done` | 머지 뒤에만 |\n";
+
+    /// **표 칸 속 명령은 잘리지 않는다**(사용자 결정, moai-glnm). 칸을 줄이다 코드를
+    /// 자를 처지면 그 표는 줄마다 한 덩이(기록 꼴)로 풀린다 — 셸에서는 명령이
+    /// 한 줄 그대로다.
+    #[test]
+    fn a_table_that_would_cut_code_turns_into_records() {
+        let lines = layout(&parse(CMD_TABLE), 60, Overflow::Keep);
+        let text: Vec<String> = lines.iter().map(|l| l.iter().map(|s| s.text.as_str()).collect()).collect();
+        assert!(!text.iter().any(|l| l.contains('…')), "명령이 잘렸다 — {text:?}");
+        assert!(!text.iter().any(|l| l.contains('│')), "칸 맞춤이 남았다 — {text:?}");
+        // 줄마다 첫 칸이 제목이고 나머지 칸은 머리 칸의 이름을 달고 선다.
+        assert_eq!(
+            text,
+            [
+                "집기",
+                "  명령  `moai mv moai-abcd in_progress --from todo --json`",
+                "  까닭  본 칸이 그대로일 때만 옮긴다",
+                "닫기",
+                "  명령  `moai mv moai-abcd done`",
+                "  까닭  머지 뒤에만",
+            ]
+        );
+    }
+
+    /// 끊는 표면에서도 기록 꼴로 풀린다 — 거기서는 명령이 글자에서 끊기되 글자를
+    /// 하나도 잃지 않고, 어느 줄도 폭을 넘지 않는다.
+    #[test]
+    fn a_record_table_keeps_every_code_char_on_a_breaking_surface() {
+        let whole = code_text(&layout(&parse(CMD_TABLE), 200, Overflow::Keep));
+        for w in 20..60 {
+            let lines = layout(&parse(CMD_TABLE), w, Overflow::Break);
+            assert_eq!(code_text(&lines), whole, "@ {w}");
+            for l in &lines {
+                let got = span_width(l);
+                assert!(got <= w, "@ {w} → {l:?} ({got}칸)");
+            }
+        }
+    }
+
+    /// **잘리는 것이 산문뿐이면 칸 맞춤이 이긴다.** 코드가 폭 안이면 표는 표다.
+    #[test]
+    fn a_table_that_cuts_only_prose_stays_a_grid() {
+        let src = "| 명령 | 까닭 |\n|---|---|\n| `moai ready` | 지금 집을 수 있는 일을 아주 길게 풀어 적은 설명 |\n";
+        let text: Vec<String> = layout(&parse(src), 30, Overflow::Keep)
+            .iter()
+            .map(|l| l.iter().map(|s| s.text.as_str()).collect())
+            .collect();
+        assert!(text.iter().all(|l| l.contains('│') || l.contains('┼')), "{text:?}");
+        assert!(text.iter().any(|l| l.contains('…')), "{text:?}");
+        assert!(text.iter().any(|l| l.contains("`moai ready`")), "{text:?}");
+    }
+
+    /// **끊는 표면에서는 코드 블록 줄도 폭을 넘지 않는다**(사용자 결정, moai-ip9r).
+    /// 접은 자리에는 이음표가 서서 코드의 진짜 줄바꿈과 갈린다. 글자는 하나도
+    /// 잃지 않는다.
+    #[test]
+    fn a_code_block_breaks_with_a_continuation_mark_on_a_breaking_surface() {
+        let src = "```sh\ngit worktree add -b worktree-moai-abcd .claude/worktrees/moai-abcd develop\n\nls\n```\n\n> ```\n> 인용 속 코드가 한글로 길게 이어진다\n> ```\n";
+        let whole = code_text(&layout(&parse(src), 200, Overflow::Keep));
+        for w in 0..60 {
+            let lines = layout(&parse(src), w, Overflow::Break);
+            assert_eq!(code_text(&lines), whole, "@ {w}");
+            for l in &lines {
+                let got = span_width(l);
+                assert!(got <= w.max(2), "@ {w} → {l:?} ({got}칸)");
+            }
+        }
+        let lines = layout(&parse(src), 30, Overflow::Break);
+        let text: Vec<String> = lines.iter().map(|l| l.iter().map(|s| s.text.as_str()).collect()).collect();
+        assert_eq!(text[0], "    git worktree add -b worktr");
+        assert_eq!(text[1], format!("  {CONTINUED} ee-moai-abcd .claude/workt"));
+        // 빈 코드 줄은 이음 없이 빈 줄로 남고, 짧은 줄은 안 접힌다.
+        assert!(text.contains(&"    ".to_string()), "{text:?}");
+        assert!(text.contains(&"    ls".to_string()), "{text:?}");
+    }
+
+    /// 셸에서는 코드 블록을 접지 않는다 — 셸이 화면에서만 접어 복사하면 온전하다.
+    #[test]
+    fn a_code_block_stays_whole_on_a_keeping_surface() {
+        let src = "```\ngit worktree add -b worktree-moai-abcd .claude/worktrees/moai-abcd develop\n```\n";
+        let lines = layout(&parse(src), 30, Overflow::Keep);
+        assert_eq!(lines.len(), 1, "{lines:?}");
     }
 
     /// 어느 블록도 준 폭을 넘지 않는다. 들여쓴 목록·깊은 제목이 걸리던 자리다.
