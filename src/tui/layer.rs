@@ -100,8 +100,16 @@ pub struct Summary {
     /// 그중 집었는데 일하는 워크트리가 없는 줄(moai-p3bs) — 층은 이것을 낱말로 따로 댄다.
     /// 죽은 세션을 찾으러 돌아온 사람이 보는 첫 화면이 여기다.
     pub stranded: usize,
-    /// 자리를 재다 **못 읽은** 워크트리의 수(리뷰 moai-p3bs.op2). 그런 워크트리가 있으면 위의 수가
+    /// 스냅샷을 **못 읽은** 워크트리의 수(`worktree::Unread::all`) — 층의 `!` 와 "스냅샷을 못 읽은
+    /// 워크트리 N곳" 이 이것으로 선다(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt). **판 것 가운데
+    /// 센다** — 이름만으로 자리가 다 잡히면 옆 스냅샷을 아예 안 연다(`worktree::Unread`). 판정을 안 가려도
+    /// 깨진 파일은 고칠 사람이 알아야 하고, 한눈 보기가 같은 것을 `옆 워크트리 문제 N건` 으로 센다 —
+    /// 여기만 조용하면 두 화면이 같은 저장소를 달리 말한다.
+    pub unread: usize,
+    /// 그중 자리 판정을 **가린** 것(`report::blinding`). 그런 워크트리가 있으면 위의 `stranded` 가
     /// "센 결과 0" 이 아니라 "못 셌다" 인데, 이것이 없으면 층이 그 둘을 같은 화면으로 낸다.
+    /// 못 읽어도 이름이 집은 줄을 가리키는 워크트리는 판정을 안 가리므로 여기 안 든다(moai-rgz9) —
+    /// 들면 다 세고도 "자리를 다 못 셌다" 가 선다.
     pub blind: usize,
     pub unreadable: usize,
 }
@@ -139,7 +147,7 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
     // **자리도 여기서 잰다**(moai-p3bs) — `moai status` 와 같은 자(`worktree::stranded_at`). 한때
     // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
     // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.
-    let (lost, blind) = crate::worktree::stranded_at(&repo.root, cfg, &load.issues, false, now);
+    let (lost, unread) = crate::worktree::stranded_at(&repo.root, cfg, &load.issues, false, now);
     let stranded = lost.as_ref().map_or(0, |w| w.count);
     Summary {
         counts: cfg.statuses.iter().map(|s| (s.clone(), st.counts.get(s).copied().unwrap_or(0))).collect(),
@@ -149,7 +157,8 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
             .collect(),
         warnings: st.warnings.len() + usize::from(lost.is_some()),
         stranded,
-        blind: blind.len(),
+        unread: unread.all.len(),
+        blind: unread.blinding.len(),
         unreadable: load.errors.len(),
     }
 }
@@ -169,6 +178,7 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
         state,
         origin: Default::default(),
         trouble: Vec::new(),
+        swept: false,
     };
     let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()))).trim().to_string();
     Look::Shut { state: kind, said }

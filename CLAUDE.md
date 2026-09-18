@@ -116,6 +116,13 @@
   **명령 목록을 바이너리의 도움말에서 읽어** 훑기 목록과 견주기 때문이다.
   `--json` 을 실제로 부르는 것은 `every_command_still_speaks_json` 이고, 그쪽
   목록은 손으로 적는다 (인자가 필요한 명령을 어떻게 부를지는 사람이 정한다)
+- **시험용 tmux 는 제 서버를 따로 띄운다 — `tmux -L <고유이름>` 이나
+  `tmux -S <스크래치패드>/sock`.** 세션은 사용자의 tmux 안에서 돌아 `$TMUX` 가
+  서 있고, `-L`/`-S` 없는 tmux 는 `TMUX_TMPDIR` 를 무시하고 그 서버에 붙는다.
+  2026-09-18 리뷰 에이전트의 `TMUX_TMPDIR=… tmux kill-server` 한 줄이 사용자
+  서버를 죽여 감독과 일꾼 다섯이 한꺼번에 꺼졌다. `-L`/`-S` 없는
+  `kill-server`·`kill-session` 과 tmux 를 겨눈 `pkill`·`killall` 은 사용자
+  훅(`~/.claude/hooks/tmux-kill-guard.py`)이 막는다
 
 ## 워크트리
 
