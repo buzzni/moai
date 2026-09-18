@@ -2080,6 +2080,48 @@ fn note_only_touches_the_journal() {
     assert!(ok(s.path(), &["show", &id]).contains("Trino 0.9"));
 }
 
+/// **한 번에 적는 글은 64KB 까지다**(moai-m9a8). 리뷰 원문 자리에 대화록 JSONL 이 두 번
+/// 들어가 노트 한 줄이 36만 자가 됐다 — 저널은 덧붙이기만 해 영영 남는다. 넘으면 잘라 적지
+/// 않고 거절하며, 거절문이 무엇을 넣어야 했는지 댄다. 노트·`-m`·본문이 한 자리를 지난다.
+/// **재는 것은 지금 쓰는 글뿐이다** — 이미 큰 본문을 든 줄도 옮길 수 있다.
+#[test]
+fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
+    let s = init("big-note");
+    let id = add(s.path(), &["제목", "-b", "작다"]);
+    let limit = 64 * 1024;
+    let big = "가".repeat(limit / 3 + 1);
+    assert!(big.len() > limit);
+    let (before, notes) = (issues(s.path()), journal(s.path()));
+
+    let refused = from_stdin(s.path(), &["note", &id, "-b", "-"], &big);
+    assert!(!refused.status.success());
+    let err = String::from_utf8_lossy(&refused.stderr);
+    assert!(err.contains("64KB") && err.contains("대화록"), "무엇을 넣어야 했는지 안 댄다\n{err}");
+    for (args, what) in [
+        (vec!["mv", id.as_str(), "in_progress", "-m", big.as_str()], "mv -m"),
+        (vec!["defer", id.as_str(), "-m", big.as_str()], "defer -m"),
+        (vec!["edit", id.as_str(), "-b", big.as_str()], "edit -b"),
+        (vec!["add", "새것", "-b", big.as_str()], "add -b"),
+    ] {
+        let out = moai(s.path(), &args);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success() && err.contains("64KB"), "{what} 가 상한을 넘는 글을 받았다\n{err}");
+    }
+    assert_eq!(issues(s.path()), before, "거절한 쓰기가 스냅샷을 바꿨다");
+    assert_eq!(journal(s.path()), notes, "거절한 쓰기가 저널에 남았다");
+
+    // 딱 상한은 받는다.
+    ok(s.path(), &["note", &id, &"a".repeat(limit)]);
+
+    // 손으로 넣은 큰 본문은 막지 않는다 — 그 줄을 옮기고 제목을 고칠 수 있어야 한다.
+    let path = s.path().join(".moai/issues.jsonl");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains(r#""body":"작다""#), "{text}");
+    std::fs::write(&path, text.replace(r#""body":"작다""#, &format!(r#""body":"{big}""#))).unwrap();
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    ok(s.path(), &["edit", &id, "--title", "새 제목"]);
+}
+
 /// CLI 를 관리할 트래커라 `--json 이 tags 를 빠뜨린다` 같은 제목이 흔하다.
 #[test]
 fn a_title_may_start_with_hyphens() {

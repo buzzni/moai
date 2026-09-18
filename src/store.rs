@@ -227,10 +227,27 @@ impl Repo {
         let mut issues = load.issues;
         let (entries, out) = f(&mut issues, &self.config, &reserved)?;
 
+        // **글의 크기는 한 자리에서 잰다**(moai-m9a8). 노트·`mv -m`·`defer -m`·본문이 모두 여기를
+        // 지나므로 명령마다 따로 걸면 한 곳은 반드시 잊는다. 저널에 적힐 글은 여기서, 본문은 아래
+        // 바뀐 줄에서 — 둘 다 스냅샷을 쓰기 전이라 거절하면 아무것도 안 남는다.
+        for e in &entries {
+            for (what, t) in [("노트", &e.text), ("메모", &e.note)] {
+                if let Some(t) = t {
+                    crate::model::check_text_size(&e.id, what, t)?;
+                }
+            }
+        }
+
         for i in issues.iter_mut() {
             i.normalize();
             let was = original.iter().find(|o| o.id == i.id);
             if was != Some(&*i) {
+                // 본문은 **이번에 바뀌었을 때만** 잰다 — 이미 큰 본문을 든 줄도 옮기고 고칠 수 있다.
+                if let Some(body) = &i.body
+                    && was.map(|o| &o.body) != Some(&i.body)
+                {
+                    crate::model::check_text_size(&i.id, "본문", body)?;
+                }
                 // **칸을 안 건드린 쓰기는 칸 이름을 다시 안 묻는다**(moai-hym7, 사람이
                 // 정했다). 바뀐 줄만 재는 것과 같은 까닭이 한 겹 더 든 것이다 — `config`
                 // 에서 칸 이름을 고치면 옛 이름에 선 줄이 남는데, 그 줄을 미루거나 제목만
