@@ -2288,20 +2288,30 @@ fn found() -> Style {
 
 /// `spans` 의 글에서 `q` 가 든 자리를 [`found`] 로 덧칠한다. 대소문자를 가리지 않는다.
 ///
-/// **글자 단위로 견준다** — 통째로 `to_lowercase` 한 글은 바이트 길이가 달라질 수 있어
-/// (`İ`) 찾은 자리를 원문에 되짚을 수 없다. 이미 칠한 조각(빛줄기·흐림)은 제 스타일 위에 덧댄다.
+/// **거름망과 같은 자로 접는다**(moai-4tgv) — 거름망(`GrepIn::hits`)은 글을 통째로 `to_lowercase` 해
+/// 견주는데, 글자 하나씩 접어 첫 글자만 취하면 두 글자로 접히는 글자(`İ` → `i̇`)와 낱말 끝 `Σ`(→ `ς`)
+/// 에서 걸린 줄의 칠이 빠지거나 엉뚱한 자리에 선다. 그래서 통째로 접은 글에서 찾고, 찾은 자리를
+/// 원문 글자로 되짚는다 — 통째 접기가 글자마다 내는 글자 수는 글자 하나씩 접을 때와 같다(`Σ` 는
+/// 앞뒤를 봐도 한 글자다). 이미 칠한 조각(빛줄기·흐림)은 제 스타일 위에 덧댄다.
 fn mark(spans: Vec<Span<'static>>, q: Option<&str>) -> Vec<Span<'static>> {
-    let fold = |c: char| c.to_lowercase().next().unwrap_or(c);
     let needle: Vec<char> = match q {
-        Some(q) if !q.trim().is_empty() => q.chars().map(fold).collect(),
+        Some(q) if !q.trim().is_empty() => q.to_lowercase().chars().collect(),
         _ => return spans,
     };
-    let hay: Vec<char> = spans.iter().flat_map(|s| s.content.chars()).map(fold).collect();
-    let mut hit = vec![false; hay.len()];
+    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    let hay: Vec<char> = text.to_lowercase().chars().collect();
+    // 접은 글자마다 그것이 나온 원문 글자의 차례.
+    let owner: Vec<usize> =
+        text.chars().enumerate().flat_map(|(n, c)| std::iter::repeat_n(n, c.to_lowercase().count())).collect();
+    if owner.len() != hay.len() {
+        // 표준 라이브러리의 접기가 글자 하나씩과 갈린 날 — 되짚을 수 없으니 칠하지 않는다.
+        return spans;
+    }
+    let mut hit = vec![false; text.chars().count()];
     let mut at = 0;
     while at + needle.len() <= hay.len() {
         if hay[at..at + needle.len()] == needle[..] {
-            hit[at..at + needle.len()].iter_mut().for_each(|h| *h = true);
+            owner[at..at + needle.len()].iter().for_each(|&n| hit[n] = true);
             at += needle.len();
         } else {
             at += 1;
@@ -5437,6 +5447,30 @@ pub(super) mod tests {
         let prompt = render(&mut a, 100, 20).join("\n");
         assert!(prompt.contains(" 검색·태그 "), "{prompt}");
         assert!(found_text(&mut a).trim().is_empty(), "보지 않는 자리를 칠했다");
+    }
+
+    /// **칠은 거름망과 같은 자로 접는다**(moai-4tgv). 거름망은 글을 통째로 `to_lowercase` 해 견준다 —
+    /// 두 글자로 접히는 `İ`(→ `i̇`)와 낱말 끝 `Σ`(→ `ς`)에서 글자 하나씩 접어 첫 글자만 취하면, 걸린
+    /// 줄인데 칠이 없거나 다른 글자를 칠한다. 칠한 글자는 원문 글자째다.
+    #[test]
+    fn the_found_paint_folds_case_like_the_filter() {
+        let painted = |text: &str, q: &str| -> String {
+            assert!(
+                text.to_lowercase().contains(&q.to_lowercase()),
+                "시험의 전제 — 거름망은 {text:?} 를 {q:?} 로 건다"
+            );
+            mark(vec![Span::raw(text.to_string())], Some(q))
+                .into_iter()
+                .filter(|s| s.style == found())
+                .map(|s| s.content.into_owned())
+                .collect()
+        };
+        assert_eq!(painted("İstanbul", "i̇s"), "İs");
+        assert_eq!(painted("İstanbul", "İ"), "İ");
+        assert_eq!(painted("İstanbul", "i"), "İ");
+        assert_eq!(painted("ΟΔΟΣ", "ς"), "Σ");
+        assert_eq!(painted("ΟΔΟΣ ΣΑ", "σα"), "ΣΑ");
+        assert_eq!(painted("Moai Tui", "TUI"), "Tui");
     }
 
     /// 찾은 글자로 칠한 칸만 모은다 — 밝은 파랑에 굵게. 이름표의 바탕색 칸은 뺀다.
