@@ -37,6 +37,9 @@ pub struct Project {
     /// 흘리면 어느 프로젝트의 말인지 모르고, 비영 종료하면 남의 워크트리 하나로 한눈 보기
     /// 전체가 실패로 읽힌다.
     pub trouble: Vec<String>,
+    /// 옆 워크트리를 빠짐없이 열어 봤는가 (`worktree::Gathered::swept`) — 그러면 못 읽은 옆
+    /// 스냅샷은 `trouble` 에 이미 섰다.
+    pub swept: bool,
 }
 
 pub enum State {
@@ -61,8 +64,8 @@ pub fn open_with(reg: &Registry, worktree: bool) -> Vec<Project> {
         .iter()
         .zip(crate::user_config::names(&reg.projects))
         .map(|(p, name)| {
-            let (state, origin, trouble) = State::at_with(&p.path, worktree);
-            Project { path: p.path.clone(), name, hue: p.hue, state, origin, trouble }
+            let (state, origin, trouble, swept) = State::at_with(&p.path, worktree);
+            Project { path: p.path.clone(), name, hue: p.hue, state, origin, trouble, swept }
         })
         .collect()
 }
@@ -78,13 +81,13 @@ impl State {
 
     /// 여는 것은 [`State::at`] 과 같고, 연 저장소는 `worktree` 면 옆을 겹쳐 읽는다.
     /// 옆 워크트리를 못 찾은 것(git 밖)도 문제로 든다 — 겹쳐 보라고 시킨 것이다.
-    fn at_with(dir: &Path, worktree: bool) -> (State, crate::worktree::Origin, Vec<String>) {
-        let lone = |s: State| (s, crate::worktree::Origin::default(), Vec::new());
+    fn at_with(dir: &Path, worktree: bool) -> (State, crate::worktree::Origin, Vec<String>, bool) {
+        let lone = |s: State| (s, crate::worktree::Origin::default(), Vec::new(), false);
         match Repo::open(dir) {
             Ok(Opened::Repo(repo)) => match crate::worktree::gather(&repo, worktree) {
                 Ok(g) => {
                     let trouble = g.unfound.into_iter().chain(g.trouble).collect();
-                    (State::Open { repo, load: g.load }, g.origin, trouble)
+                    (State::Open { repo, load: g.load }, g.origin, trouble, g.swept)
                 }
                 Err(e) => lone(State::Unreadable(e.message)),
             },

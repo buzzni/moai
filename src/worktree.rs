@@ -258,6 +258,14 @@ pub struct Gathered {
     /// 프로젝트를 열 때마다 시키지 않은 배너를 세우게 된다(moai-zcuh). 탐색기는 사람이
     /// `SPC t w` 로 켰을 때만 알림으로 댄다(`tui::App::unfound`, moai-d5vn).
     pub unfound: Option<String>,
+    /// **옆 워크트리를 빠짐없이 열어 봤다** — 겹쳐 보라고 시켰고 목록도 찾았다. 그러면 못 읽은 옆
+    /// 스냅샷은 `trouble` 에 `⎇ <가지>: …` 로 이미 섰으니, 자리를 재다 못 읽은 워크트리
+    /// (`stranded_at`)를 받는 쪽은 그것을 다시 말하지 않는다.
+    ///
+    /// **가지 이름으로 견주지 않는다**(moai-rgz9) — 떼어 낸 HEAD 의 이름은 커밋 앞 일곱 자라, 같은
+    /// 커밋에 선 워크트리 둘이 글자까지 같아 하나를 말한 것이 둘을 다 말한 것으로 읽힌다. 한때
+    /// 안쪽 `status` 는 이 자로, 밖 한눈 보기는 가지 이름 앞머리로 걸러 같은 상태에 답이 갈렸다.
+    pub swept: bool,
     /// 읽으러 간 옆 스냅샷마다 **읽기 전에** 잰 표식. 탐색기가 바뀐 것을 알아채는 데
     /// 쓴다. 파일이 없던 곳도 든다 — 거기 스냅샷이 생기는 것도 바뀐 것이다.
     ///
@@ -282,6 +290,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
             origin: Origin::default(),
             trouble: Vec::new(),
             unfound: None,
+            swept: false,
             watched: Vec::new(),
         });
     }
@@ -329,7 +338,8 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let Load { issues, errors } = load;
     let (issues, mut origin) = overlay(issues, others);
     origin.named = named;
-    Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, watched })
+    let swept = unfound.is_none();
+    Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, swept, watched })
 }
 
 /// 옆 워크트리 하나의 줄을 겹칠 모양으로 — 옆에만 있는 줄이 있으면 갈라진 자리([`Side::base`])를 댄다.
@@ -718,6 +728,29 @@ fn from_top(top: Option<&Path>, path: &Path) -> PathBuf {
     }
 }
 
+/// 자리를 재다 못 읽은 워크트리들 — **두 사실을 두 채널로 가른다**(사용자 결정 2026-09-18, 리뷰
+/// moai-rgz9.7vt).
+///
+/// `all` 은 "이 스냅샷이 깨졌다" 고, `blinding` 은 "그래서 자리를 다 못 셌다" 다. 이름이 집은 줄을
+/// 가리키는 워크트리는 못 읽어도 판정을 안 가리므로 `blinding` 에 안 드는데, 그렇다고 깨진 파일을
+/// 아무 데서도 안 말하면 그 워크트리를 고칠 사람이 그것을 영영 모른다 — 고치는 것과 못 센 것은
+/// 다른 말이라 세는 자리를 가른다.
+///
+/// **둘 다 "판 것 가운데" 다**(리뷰 moai-6ozi.pia 지적 1). [`workplaces`] 는 이름만으로 자리가 다
+/// 잡히면 옆 스냅샷을 한 벌도 안 연다(moai-7igy, 잰 뒤 사람이 정한 문) — 안 연 워크트리는 깨졌어도
+/// `unknown` 이 아니라 여기 안 든다. 그래서 같은 저장소를 `moai status` 는 조용히 지나고
+/// `moai status --worktree` 는 그 워크트리를 댄다. 문을 여는 것은 이 에픽 밖이라 idea `moai-7p48`
+/// 로 담았다.
+pub struct Unread {
+    /// 스냅샷을 못 읽은 워크트리 전부 — 사람 화면이 `⎇ <가지>: <경로>` 로 한 줄씩 대고
+    /// `옆 워크트리 문제 N건` 이 센다.
+    pub all: Vec<crate::report::Workplace>,
+    /// 그중 **자리 판정을 가린** 것([`crate::report::blinding`]) — `status --json` 의
+    /// `unreadable_worktrees` 와 탐색기 층의 셈이 이것이다. `stranded` 의 침묵이 "없다" 인지
+    /// "못 셌다" 인지를 가르는 자라, 안 가린 것까지 들면 다 세고도 "못 셌다" 가 된다.
+    pub blinding: Vec<crate::report::Workplace>,
+}
+
 /// 자리 없는 줄 경고와, 못 읽은 워크트리들 — **표면 셋이 같은 자를 쓴다**(moai-p3bs).
 ///
 /// `moai status`·`.moai` 밖 한눈 보기·탐색기의 프로젝트 층이 이것을 부른다. 한때 첫째만 자리를
@@ -729,10 +762,13 @@ pub fn stranded_at(
     issues: &[Issue],
     worktree: bool,
     now: &str,
-) -> (Option<crate::report::Warning>, Vec<crate::report::Workplace>) {
+) -> (Option<crate::report::Warning>, Unread) {
     let trees = workplaces(root, cfg, worktree, issues);
     let warning = crate::report::stranded(issues, cfg, &trees, now);
-    (warning, trees.into_iter().filter(|t| t.unknown).collect())
+    let blinding: Vec<crate::report::Workplace> =
+        crate::report::blinding(issues, cfg, &trees).into_iter().cloned().collect();
+    let all = trees.into_iter().filter(|t| t.unknown).collect();
+    (warning, Unread { all, blinding })
 }
 
 /// 제 워크트리가 아닌 워크트리들을 **git 을 띄우지 않고** 읽는다 — 이름 후보([`away`])만 쓴다.
