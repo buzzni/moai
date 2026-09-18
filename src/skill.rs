@@ -716,7 +716,7 @@ mod tests {
     /// 심은 체크아웃의 자리에서 나오는 값이라, 이 시험을 부른 자리(워크트리)로
     /// 다시 셈하면 글이 같아도 늘 어긋난다. 여기서 보는 것은 글과 판뿐이다.
     ///
-    /// 다시 쓰는 길: `MOAI_BLESS=1 cargo test --release checked_in` — 같은
+    /// 다시 쓰는 길: `MOAI_BLESS=1 cargo test checked_in` — 같은
     /// `tree_named` 로 트리 전부를 적힌 자리 그대로 다시 쓴다. `skill install` 은
     /// `claude` 등록까지 건드리고 부른 자리의 경로를 적어, 워크트리에서는 못 쓴다.
     #[test]
@@ -759,7 +759,7 @@ mod tests {
         assert!(
             stale.is_empty(),
             "{DIR} 이 guide.rs 의 글에서 낡았다: {stale:?}\n  \
-             MOAI_BLESS=1 cargo test --release checked_in 으로 다시 쓴다"
+             MOAI_BLESS=1 cargo test checked_in 으로 다시 쓴다"
         );
     }
 
