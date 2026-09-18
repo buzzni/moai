@@ -215,11 +215,18 @@ pub struct Ground {
 }
 
 /// 적재 한 걸음(moai-fbdg) — 색인과 [`Ground`] 를 **한 번 잰 지도**(`report::Soil`)에서 짓는다. 여는 길
-/// (`cmd::tui`)·다시 읽기([`prepare`])·시험의 들이기([`App::adopt`])가 모두 이것 하나를 지난다 — 한때 여는
-/// 길만 `Index::of` 와 `Ground::of` 를 따로 불러, 첫 화면 앞에서 소속 지도를 두 번 쟀다(moai-xemz 리뷰).
+/// (`cmd::tui`)·다시 읽기([`prepare`])·시험의 들이기([`App::adopt`])가 모두 이 몸([`measure_in`])을
+/// 지난다 — 한때 여는 길만 `Index::of` 와 `Ground::of` 를 따로 불러, 첫 화면 앞에서 소속 지도를 두 번
+/// 쟀다(moai-xemz 리뷰).
 pub fn measure(issues: &[Issue], cfg: &Config) -> (Index, Ground) {
-    let soil = crate::report::Soil::of(issues);
-    (Index::in_soil(issues, &soil), Ground::in_soil(issues, cfg, &soil))
+    measure_in(issues, cfg, &crate::report::Soil::of(issues))
+}
+
+/// [`measure`] 와 같은 것. **이미 잰 지도를 받는다** — 다시 읽기([`prepare`])가 같은 지도를 경고 셈
+/// (`warnings_in`, moai-u5o9)에도 넘긴다. 그 길이 이 몸을 제 자리에 한 벌 더 펴면, 색인·칸 지도에 무엇이
+/// 들고 나는지가 여는 길과 다시 읽는 길에서 갈린다.
+fn measure_in(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) -> (Index, Ground) {
+    (Index::in_soil(issues, soil), Ground::in_soil(issues, cfg, soil))
 }
 
 impl Ground {
@@ -348,13 +355,11 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         .collect();
     let issues = g.load.issues;
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸·거름망, 그리고 경고 셈(moai-u5o9)이 같은 지도를
-    // 나눠 쓴다. `measure` 를 부르지 않는 것은 경고 셈에도 그 지도를 넘기려고서다.
+    // 나눠 쓴다([`measure_in`]).
     let now = crate::model::now();
     let soil = crate::report::Soil::of(&issues);
-    let index = Index::in_soil(&issues, &soil);
-    let ground = Ground::in_soil(&issues, &repo.config, &soil);
+    let (index, ground) = measure_in(&issues, &repo.config, &soil);
     let warnings = warnings_in(&issues, &unreadable, &repo.config, &now, &soil);
-    drop(soil);
     let mut watched = g.watched;
     watched.extend(heads);
     Ok(Fresh {

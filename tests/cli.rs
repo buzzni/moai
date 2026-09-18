@@ -7341,6 +7341,42 @@ fn status_reads_a_side_snapshot_only_when_a_place_is_still_missing() {
     assert!(!json.contains("unreadable_worktrees"), "다 읽었는데 못 읽었다고 했다\n{json}");
 }
 
+/// **가려진 줄도 옆 스냅샷을 판다**(moai-es40, 에픽 끝 리뷰 moai-r8gw.b4s). `report::wip` 은 종류가 다른
+/// 쌍둥이에게 가려진 줄을 빼지만 자리 셈은 그 줄까지 본다(`report::started`, 사용자 결정) — 팔지 가르는
+/// 문(`worktree::workplaces`)이 `wip` 으로 재면 옆에서 도는 그 줄이 스냅샷을 안 판 채 `stranded` 와
+/// `show` 의 `자리 없다` 로 서고, 감독이 그 말대로 산 일에 둘째 워크트리를 띄운다.
+#[test]
+fn an_eclipsed_picked_row_is_not_stranded_while_a_side_works_it() {
+    let s = Scratch::new("eclipsedplace");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "옆에서 할 일", "--json"]), "id");
+    ok(&main, &["mv", &id, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    // 이름이 id 가 아닌 워크트리(에이전트 격리)가 그 줄을 main 보다 늦게 고쳤다(`touched`).
+    let dir = ".claude/worktrees/agent-x";
+    git(&main, &["worktree", "add", "-q", dir, "-b", "worktree-agent-x"]);
+    ok_at(&main.join(dir), "2026-09-11T06:00:00Z", &["edit", &id, "--tag", "side"]);
+    // 머지가 main 에 같은 id 의 에픽 뒷줄을 남겼다 — 앞줄의 집힌 이슈가 가려진다.
+    let path = main.join(".moai/issues.jsonl");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str(&format!(
+        "{{\"id\":\"{id}\",\"kind\":\"epic\",\"title\":\"쌍둥이 에픽\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+    ));
+    std::fs::write(&path, text).unwrap();
+
+    // `duplicate_id` 는 치명이라 비영으로 끝난다 — 종료 코드가 아니라 경고를 본다.
+    let out = isolated(BIN).args(["status", "--json"]).current_dir(&main).env("MOAI_NOW", LATER).output().unwrap();
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains("\"duplicate_id\""), "쌍둥이를 못 세웠다 — 이 시험이 견줄 것이 없다\n{json}");
+    assert!(!json.contains("\"stranded\""), "옆에서 도는 가려진 줄을 자리 없다고 했다\n{json}");
+    let shown = ok_at(&main, LATER, &["show", &id, "--json"]);
+    assert!(shown.contains("\"place\":\"at\"") && shown.contains(dir), "{shown}");
+}
+
 /// **판정을 안 가리는 못 읽은 워크트리는 말은 하되 "다 못 셌다" 로 세지 않는다**(moai-rgz9·moai-1i9d,
 /// 사용자 결정 2026-09-18).
 /// 규약의 워크트리 이름은 에픽 id 다(`worktree-<에픽>`). 그 워크트리의 스냅샷을 못 읽어도 이름이

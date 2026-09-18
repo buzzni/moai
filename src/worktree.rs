@@ -565,7 +565,11 @@ fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) 
         Err(_) => return None,
     };
     let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
-    let open = crate::report::wip(&side.issues, cfg).into_iter().map(|i| i.id.clone()).collect();
+    // **벌여 놓인 줄은 자리 셈의 자로 잰다**([`crate::report::started`]) — 가려진 쌍둥이 줄도 든다
+    // (moai-es40, 사용자 결정). `report::wip` 은 그 줄을 빼므로, 그것으로 재면 머지가 남긴 id 충돌
+    // 하나로 이 워크트리에서 도는 줄이 `places` 에서 자리를 잃는다. 훅의 짐작(`hook::unsure`)은
+    // 제 초점(`wip`)과 겹치는 id 만 쓰므로 더 든 id 로 답이 안 바뀐다.
+    let open = crate::report::started(&side.issues, cfg).into_iter().map(|i| i.id.clone()).collect();
     let later = side
         .issues
         .iter()
@@ -657,9 +661,13 @@ pub fn workplaces(
     // 낱말만 건지면 (1) 시계를 한 번 더 읽고 (2) 소속 지도와 굴림까지 지어 버리고 (3) 판정에
     // 변형이 하나 늘 때마다 **디스크를 언제 만지는가**가 조용히 따라 바뀐다. 그래서 그 하나를
     // 재는 자(`report::claimed` — `hook::held` 와 `places` 가 이미 같이 쓴다)를 바로 쓴다.
+    // 집은 줄도 `places` 가 되짚는 그 집합([`crate::report::started`])이다 — `wip` 은 가려진 쌍둥이
+    // 줄을 빼므로(moai-es40), 그것으로 재면 그 줄 하나 때문에 열어야 할 문이 닫혀 스냅샷으로만 찾을
+    // 수 있는 그 줄이 `stranded` 로 선다. 이름으로는 거의 못 찾는다 — 쌍둥이(뒷줄)가 그 id 의 에픽을
+    // `groups` 에서 지워, 규약대로 에픽 이름으로 뜬 워크트리도 그 줄을 못 가리킨다.
     let all_names = names(linked.iter().copied());
     let named = crate::report::claimed(asked, &all_names);
-    if crate::report::wip(asked, cfg).iter().all(|i| named(i)) {
+    if crate::report::started(asked, cfg).iter().all(|i| named(i)) {
         return out;
     }
     // 여기서부터가 파는 길이다 — **뜬 때도 여기서 읽는다.** `born` 은 이름 없는 워크트리의
@@ -1317,6 +1325,40 @@ mod tests {
         assert!(got.origin.named_only().iter().any(|l| !l.starts_with("worktree-")), "주 워크트리가 이름만 드는 길로 안 갔다 — {:?}", got.origin.named_only());
         let dirs: Vec<_> = got.watched.iter().filter(|(p, _)| p.ends_with(".git") && p.is_dir()).collect();
         assert!(dirs.is_empty(), "주 워크트리의 .git 디렉터리를 지켜본다 — {dirs:#?}");
+    }
+
+    /// **옆 스냅샷을 팔지와 거기 벌여 놓인 줄은 자리 셈의 자로 잰다**(moai-es40, 에픽 끝 리뷰
+    /// moai-r8gw.b4s) — 종류가 다른 쌍둥이에게 가려진 줄도 든다(`report::started`, 사용자 결정).
+    /// `report::wip` 으로 재면 머지가 남긴 id 충돌 하나로 문이 닫히고 `holds` 에서도 빠져, 스냅샷으로만
+    /// 찾을 수 있는 그 줄이 `stranded` 와 `show` 의 `자리 없다` 로 선다.
+    #[test]
+    fn an_eclipsed_picked_row_opens_and_fills_the_side_snapshot() {
+        let scratch = crate::scratch::Scratch::fenced("eclipsed-holds");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        // 이름이 id 가 아닌 워크트리(에이전트 격리) — 자리는 스냅샷으로만 갈린다.
+        run(&main, &["worktree", "add", "-q", "../agent-x", "-b", "worktree-agent-x"]);
+        // 두 스냅샷 모두 쌍둥이를 든다 — 옆이 develop 을 받았다.
+        let rows = concat!(
+            "{\"id\":\"t-0001\",\"title\":\"집힌 일\",\"status\":\"in_progress\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n",
+            "{\"id\":\"t-0001\",\"kind\":\"epic\",\"title\":\"쌍둥이 에픽\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n",
+        );
+        for dir in [main.clone(), base.join("agent-x")] {
+            std::fs::create_dir_all(dir.join(".moai")).unwrap();
+            std::fs::write(dir.join(".moai/issues.jsonl"), rows).unwrap();
+            std::fs::write(dir.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+        }
+        let cfg = crate::config::Config::parse("prefix = \"t\"\n").unwrap();
+        let mine = crate::store::read_snapshot(&main.join(".moai/issues.jsonl")).unwrap().unwrap().issues;
+        assert!(crate::report::wip(&mine, &cfg).is_empty(), "가려진 줄이 집은 일로 섰다 — 이 시험이 견줄 것이 없다");
+
+        let trees = workplaces(&main, &cfg, false, &mine);
+        let side = trees.iter().find(|t| t.branch == "worktree-agent-x").expect("옆 워크트리가 없다");
+        assert!(side.holds.contains("t-0001"), "가려진 집힌 줄을 옆 스냅샷에서 안 셌다 — {:?}", side.holds);
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.

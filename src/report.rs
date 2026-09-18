@@ -362,8 +362,10 @@ pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
 /// 결정). 머지가 같은 id 의 에픽 뒷줄을 남기면 앞줄의 집힌 이슈는 가려지는데, 그 세션이 죽었으면 그
 /// 줄을 대는 것은 [`stranded`] 뿐이다 — 여기서 걸렀다면 `duplicate_id` 하나 때문에 버려진 칸이 영영
 /// 안 보인다(리뷰 moai-ya06). 자리 셈은 넷(`places`·`blinding`·`placeable`·`stranded`)이 **이 하나**로
-/// 되짚는다 — 하나라도 `wip` 을 쓰면 `stranded` 가 센 줄의 자리를 `show` 가 모른다.
-fn started<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
+/// 되짚는다 — 하나라도 `wip` 을 쓰면 `stranded` 가 센 줄의 자리를 `show` 가 모른다. 그 넷에 스냅샷을
+/// 대는 쪽(`worktree::workplaces` 의 문과 옆 스냅샷이 쥔 줄)도 이것으로 잰다(리뷰 moai-r8gw.b4s) —
+/// 거기서 `wip` 으로 재면 문이 닫히거나 쥔 줄에서 빠져, 스냅샷으로만 찾을 수 있는 그 줄이 자리를 잃는다.
+pub fn started<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     // **값싼 것을 먼저 거른다.** 훅이 도구 호출마다 여기를 지나므로, 집은 것이
     // 없으면 조상을 타는 셈(`put_off`)도 종류 지도(`eclipsed`)도 아예 안 돌린다.
     let held: Vec<&Issue> = issues
@@ -524,14 +526,19 @@ fn lossy_path<S: serde::Serializer>(p: &std::path::Path, s: S) -> Result<S::Ok, 
 /// 그것을 세면 세션이 죽어 자리를 잃은 줄도 그 뒤에 뜬 워크트리 아무 데나 "자리" 로 잡혀,
 /// 새 워크트리가 하나 뜨는 순간 `stranded` 에서 사라진다.
 pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &str) -> BTreeMap<String, Place<'a>> {
+    // 아래 둘은 **빠른 길일 뿐 판정이 아니다** — 아래를 다 돌아도 [`settle`] 이 같은 답(빈 지도)을
+    // 낸다. 계약을 쥔 자는 거기 하나고, 여기는 헛일을 아낄 뿐이라 갈릴 것이 없다. **워크트리를 먼저
+    // 본다** — [`started`] 는 미룬 줄이 있으면 조상을 타는 셈(`put_off`)이라, 볼 워크트리가 없는 흔한 길
+    // (워크트리를 안 쓰는 저장소, 안 집은 줄을 펼치는 `show`)이 버릴 답에 그 값을 치를 까닭이 없다.
+    if trees.is_empty() {
+        return settle(&BTreeMap::new(), BTreeMap::new(), trees, now, &BTreeMap::new(), false);
+    }
     // **같은 id 의 줄이 둘이면 한 번만 센다** — 뒷줄이 선다(`Load::get` 과 같은 자). 줄마다 세면
     // 한 워크트리가 한 id 에 두 번 서서, 받는 쪽이 "두 곳에서 돌고 있다" 로 읽는다(moai-ddtg 에서
     // `Warning::new` 가 같은 까닭으로 id 를 한 번씩만 담는다).
     let picked: BTreeMap<&str, &Issue> = started(issues, cfg).into_iter().map(|i| (i.id.as_str(), i)).collect();
     let mut found: BTreeMap<&str, Vec<&Workplace>> = picked.keys().map(|id| (*id, Vec::new())).collect();
-    // 둘 다 **빠른 길일 뿐 판정이 아니다** — 아래를 다 돌아도 [`settle`] 이 같은 답(빈 지도)을
-    // 낸다. 계약을 쥔 자는 거기 하나고, 여기는 헛일을 아낄 뿐이라 갈릴 것이 없다.
-    if picked.is_empty() || trees.is_empty() {
+    if picked.is_empty() {
         return settle(&picked, found, trees, now, &BTreeMap::new(), false);
     }
     // **소속 지도는 한 번만 짓는다**(`claims`) — 워크트리마다 바뀌는 것은 이름뿐이다.
@@ -773,6 +780,10 @@ const STRANDED_GRACE_SECS: i64 = 3600;
 pub fn stranded(issues: &[Issue], cfg: &Config, trees: &[Workplace], now: &str) -> Option<Warning> {
     // 워크트리가 없으면 [`places`] 가 아무 키도 안 낸다 — 가드를 여기 다시 적지 않는다(moai-tbin).
     let at = places(issues, cfg, trees, now);
+    // 자리 잃은 것이 없으면 되짚을 것도 없다 — [`started`] 를 한 벌 더 세지 않는다(`places` 가 방금 셌다).
+    if !at.values().any(|p| matches!(p, Place::Lost)) {
+        return None;
+    }
     // **집은 줄로 되짚는다.** [`places`] 는 묶음 id 에도 키를 주므로(멤버에서 굴려 올린다) 그것을
     // 걸러야 하는데, **줄 전체로 되짚으면 안 된다** — 그 지도는 뒷줄이 이기니 같은 id 의 묶음
     // 쌍둥이가 앞줄의 집힌 이슈를 가리고, 그것을 종류로 거르면 **자리를 잃은 산 줄이 조용히
@@ -2742,10 +2753,13 @@ pub fn status_in<'a>(
     }
 
     // 3. 한 번에 여러 개 벌인 것. AI 가 가장 잘 하는 실수다.
+    //    **가려진 줄은 벌인 일이 아니다** — [`wip`] 과 같은 자다(moai-es40, 사용자 결정). 여기만 세면
+    //    한눈 보기가 집은 것 셋을 대는 그 보드에 `4건` 이 서고, `ready` 아래 줄에 없는 id 를 잊은 것으로
+    //    꾸짖는다(4번) — 그 제목은 쌍둥이 에픽의 것이다. 그 id 는 `duplicate_id` 가 따로 드러낸다.
     let wip: Vec<&Issue> = work
         .iter()
         .copied()
-        .filter(|i| cfg.is_started(i.status.as_str()))
+        .filter(|i| cfg.is_started(i.status.as_str()) && !eclipsed(i))
         .collect();
     // 문턱은 id 로 잰다 — 위 `no_epic` 과 같은 까닭이다.
     let overload = Warning::new("wip_overload", ids_of(&wip));
@@ -5255,6 +5269,21 @@ mod tests {
         // 같은 종류의 쌍둥이는 가려지지 않는다 — 둘 다 집은 일이다.
         let twins = vec![make("argos-0003", Kind::Issue, "in_progress"), make("argos-0003", Kind::Issue, "in_progress")];
         assert_eq!(wip(&twins, &cfg()).len(), 2);
+    }
+
+    /// **`status` 의 벌여 놓은 셈도 같은 자다**(에픽 끝 리뷰 moai-r8gw.b4s) — `wip_overload`·`stale_progress`
+    /// 가 제 손으로 세면, 한눈 보기가 `wip` 으로 집은 것 셋을 대는 보드에 `4건` 이 서고 `ready` 아래 줄에
+    /// 없는 id 를 잊은 것으로 꾸짖는다.
+    #[test]
+    fn an_eclipsed_row_is_neither_overload_nor_forgotten() {
+        let mut rows: Vec<Issue> =
+            ["argos-0001", "argos-0002", "argos-0003", "argos-0004"].iter().map(|id| make(id, Kind::Issue, "in_progress")).collect();
+        rows.push(make("argos-0004", Kind::Epic, "todo"));
+        let st = status(&rows, &[], &cfg(), "2026-10-01T00:00:00Z");
+        assert!(!st.warnings.iter().any(|w| w.kind == "wip_overload"), "가려진 줄을 벌인 일로 셌다 — {:?}", st.warnings);
+        let forgotten = st.warnings.iter().find(|w| w.kind == "stale_progress").expect("잊은 것 경고가 없다");
+        let picked: Vec<String> = wip(&rows, &cfg()).iter().map(|i| i.id.clone()).collect();
+        assert_eq!(forgotten.ids, picked, "잊은 것과 집은 것이 다른 자로 셌다");
     }
 
     // ── 미룬 것이 막고 있으면 까닭을 말한다 ──────────────────────────
