@@ -1852,8 +1852,11 @@ impl App {
                 self.reload();
                 if self.worktree && self.trouble.is_none() && self.origin.labels().is_empty() {
                     let g = crate::style::BRANCH_GLYPH;
+                    // 스냅샷만 없는 옆은 "없음" 이 아니다 — 그 이름으로 줄에 `⎇` 가 선다(`Origin::named_only`).
+                    let named = self.origin.named_only();
                     self.notice = Some(match &self.unfound {
                         Some(why) => format!("{g} 옆 워크트리를 못 찾았다 — {}", crate::text::one_line(why)),
+                        None if !named.is_empty() => format!("{g} {} — 겹칠 스냅샷이 없다", named.join(", ")),
                         None => format!("{g} 옆 워크트리 없음 — 겹칠 줄이 없다"),
                     });
                 }

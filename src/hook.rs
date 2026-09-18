@@ -3002,6 +3002,26 @@ mod tests {
         assert_eq!(judge("cat a > /tmp/x && moai mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
     }
 
+    /// **머지하고 안 치운 워크트리의 이름이 닫힌 줄을 가리켜도 훅은 할 말이 없다**(moai-9a8m) —
+    /// 닫힌 줄은 애초에 초점에 없어, 목록이 그 줄에 `⎇` 를 달던 문제를 훅은 안 안는다.
+    ///
+    /// **그 이름은 닫힌 줄의 자식을 여전히 쥔다**(사용자 결정, 리뷰 moai-dfv2.c9t). 풀던 판은
+    /// 워크트리 안에서 줄을 닫고 그 자리에서 `--parent` 자식을 이어 하는 산 일을 "자리 없다" 로
+    /// 세웠다. 치우지 않은 워크트리가 쥐는 쪽은 규약대로 치우면 풀린다 — 되돌리려면 그 결정부터.
+    #[test]
+    fn a_leftover_worktree_of_a_closed_row_leaves_the_focus_alone_but_keeps_its_children() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "done", "t-e"), under("t-2", "in_progress", "t-e")];
+        let focus = |all: &[Issue], names: &BTreeSet<String>| {
+            held(all, &cfg(), names).iter().map(|i| i.id.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(focus(&all, &away(&["t-1", "worktree-t-1"])), focus(&all, &here()), "닫힌 줄의 이름이 초점을 바꿨다");
+        assert_eq!(guard_edit(&all, &cfg(), &away(&["t-1"]), root, "/repo/src/x.rs"), Decision::Pass);
+
+        let child = vec![epic("t-e"), under("t-1", "done", "t-e"), under("t-1.x", "in_progress", "t-e")];
+        assert!(focus(&child, &away(&["t-1"])).is_empty(), "닫힌 줄의 이름이 자식을 놓았다 — 사용자 결정과 다르다");
+    }
+
     /// **`--from <칸>` 의 값은 갈 칸이 아니다** (moai-f8q1). 값 받는 플래그로 안 세던
     /// 판은 `moai mv t-1 in_progress --from todo` 를 `todo` 로 옮기는 것으로 읽어,
     /// 겨루지 않고 집으라고 만든 그 플래그를 쓴 순간 규칙 2 가 집기를 못 봤다.
