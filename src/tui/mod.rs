@@ -1063,11 +1063,26 @@ impl App {
     fn regrip(&mut self, held: Option<Anchor>) {
         self.see();
         let rows = self.rows();
-        let found = held.and_then(|a| self.row_of(&rows, &a));
-        if found.is_none() {
+        let at = held.as_ref().and_then(|a| self.row_of(&rows, a)).unwrap_or(self.cursor);
+        self.stand(&rows, at, held.as_ref());
+    }
+
+    /// 이미 센 목록의 `at` 에 **목록 안으로 잘라** 선다. 그 자리의 줄이 `held` 가 아니면 상세를
+    /// 첫 줄로 되감는다(moai-go4o).
+    ///
+    /// **정체로 가른다, 번호로 가르지 않는다.** 뺀 줄의 번호에 다음 프로젝트가 올라서면 번호는
+    /// 같아도 다른 것을 보고, 거꾸로 차례가 바뀌어 번호가 밀려도 정체가 같으면 같은 것을 본다 —
+    /// 굴린 자리가 남으면 다른 줄을 첫 줄부터 못 본다(`move_to` 와 같은 까닭).
+    ///
+    /// 커서를 다시 세우는 자리 — 다시 읽기([`App::regrip`]), 거름망([`App::settle`]), 층 다시 세우기
+    /// (`relayer`·`reread_layer`) — 가 **어디에 서느냐**만 저마다 고르고 서는 법은 이것 하나를 탄다.
+    /// 한때 넷이 저마다 적어, 한쪽은 정체로 한쪽은 경로로 가르고 되감는 갈래 하나는 죽은 코드였고,
+    /// 목록을 두세 번 셌다(`rows()` 뒤 `current()`). 목록은 부르는 쪽이 한 번 세어 넘긴다.
+    fn stand(&mut self, rows: &[Row], at: usize, held: Option<&Anchor>) {
+        self.cursor = at.min(rows.len().saturating_sub(1));
+        if rows.get(self.cursor).map(|r| self.anchor_of(r)).as_ref() != held {
             self.detail.rewind();
         }
-        self.cursor = found.unwrap_or(self.cursor.min(rows.len().saturating_sub(1)));
     }
 
     /// 방금 쓴 줄에 선다. **다시 읽은 뒤에 부른다** — 첨자도 자리도 새 `issues` 에 대해 잰다.
@@ -2062,10 +2077,8 @@ impl App {
     /// 바뀌었으면 상세를 첫 줄로 되돌린다** — 치는 대로 거르면 같은 번호에 다른 이슈가
     /// 서는데, 굴린 자리가 남으면 그 이슈를 첫 줄부터 못 본다(`move_to` 와 같은 까닭).
     fn settle(&mut self, held: Option<Anchor>, at: usize) {
-        self.cursor = at.min(self.rows().len().saturating_sub(1));
-        if self.current().map(|r| self.anchor_of(&r)) != held {
-            self.detail.rewind();
-        }
+        let rows = self.rows();
+        self.stand(&rows, at, held.as_ref());
     }
 
     /// 붙여 넣은 글(moai-od9q) — 루프가 bracketed paste 로 받은 `Event::Paste`. **키로
@@ -2193,8 +2206,8 @@ impl App {
     /// 길을 보이는 값이었지만, 이제 `h`·Bksp 가 어느 줄에서든 나간다.
     ///
     /// **프로젝트 뿌리에서는 늘 0 이다** — `..` 은 디렉터리에만 서므로(moai-i784) 넘을 줄이
-    /// 없다. 그래도 `enter_project` 가 이것을 부르는 것은 들이기(`apply_fresh`)가 떠난
-    /// 프로젝트의 id 로 커서를 붙들 수 있어서고, 그 한 줄이 그것을 지운다.
+    /// 없다. 그래서 `enter_project` 는 이것을 안 부른다 — 줄을 비운 뒤 들이므로 붙들 정체가 없어
+    /// 들이기(`apply_fresh`)가 이미 첫 줄에 세운다(moai-go4o).
     fn first_row(&self) -> usize {
         let rows = self.rows();
         usize::from(rows.len() > 1 && rows.first() == Some(&Row::Up))
