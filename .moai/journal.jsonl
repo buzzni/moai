@@ -4548,3 +4548,17 @@
 {"ts":"2026-09-18T13:37:02Z","id":"moai-oxup","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"status 한 번에 소속 지도(groups·milestones)를 여러 번 짓는다"}
 {"ts":"2026-09-18T13:37:02Z","id":"moai-oxup","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-thcz 에서 펼쳤다 — status 한 번에 소속 지도(groups·milestones)를 여러 번 짓는다"}
 {"ts":"2026-09-18T13:37:02Z","id":"moai-thcz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r8gw 의 멤버 moai-oxup 로 펼쳤다"}
+{"ts":"2026-09-18T13:37:09Z","id":"moai-fqnr.sqb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:37:58Z","id":"moai-mr1n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(사용자, AskUserQuestion): 지울 것 없음으로 닫는다. 아무것도 지우지 않았다. moai-hook-* 도 그대로(훅이 쓰는 자리, 살아 있는 세션 것이 섞였다)"}
+{"ts":"2026-09-18T13:38:05Z","id":"moai-jubf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"잰 것(2026-09-18, 워크트리 moai-jl72, 새 target): cargo build --release 첫 빌드 4분 05초, touch src/main.rs 뒤 3분 10초. 부하 20~27, cgroup 8코어. 바이너리 4,958,912바이트. 결정(사용자, AskUserQuestion): CLAUDE.md 5줄을 (LTO 라 3~5분, 고친 뒤에도 3분대) 로, 워크트리 절 끝 줄에 (3~5분) 을 붙인다"}
+{"ts":"2026-09-18T13:38:16Z","id":"moai-cq53","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(AskUserQuestion): 디스크 7%라 지금은 안 한다. 다시 여는 때는 tozu 의 조건 — 디스크 90% 넘음, 또는 동시 워크트리를 다섯 위로 올릴 때. 고른다면 sccache 가 CARGO_TARGET_DIR 공유보다 낫다(락 기다림 없음)"}
+{"ts":"2026-09-18T13:38:25Z","id":"moai-jl72.d8y","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — jl72 의 CLAUDE.md 빌드 시간 두 줄"}
+{"ts":"2026-09-18T13:38:29Z","id":"moai-shoa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:38:29Z","id":"moai-d699","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:38:30Z","id":"moai-wt4n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:38:30Z","id":"moai-m7iy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:38:30Z","id":"moai-1jay","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:38:30Z","id":"moai-4tgv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:38:31Z","id":"moai-lw7i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:38:31Z","id":"moai-rg5q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:38:31Z","id":"moai-fbdg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
