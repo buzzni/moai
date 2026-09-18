@@ -112,7 +112,11 @@ def work(item, path):
     그것을 쥐고 있는 동안 끝낸 일이 노트도 없이 멈춘다.
     """
     with tempfile.TemporaryFile() as log:
-        code = subprocess.run([WORK, item["id"], item["title"]], cwd=path, stdout=log, stderr=subprocess.STDOUT).returncode
+        try:
+            code = subprocess.run([WORK, item["id"], item["title"]], cwd=path, stdout=log, stderr=subprocess.STDOUT).returncode
+        except OSError as e:
+            # 못 띄운 것도 실패다 — 던지게 두면 스레드만 죽고 일은 in_progress 에 박힌 채 0 으로 끝난다.
+            return 126, f"{WORK} 를 못 띄웠다: {e}"
         log.seek(0)
         # `note` 는 UTF-8 이 아닌 입력을 통째로 거절한다 — 깨진 바이트는 U+FFFD 로 바꾼다.
         out = log.read().decode("utf-8", errors="replace")
@@ -157,9 +161,13 @@ def worker(name, failed):
         # 진 일꾼은 곧장 다음 줄로 간다.
         mine = None
         for item in fresh:
+            # **겨루기 전에 적는다.** 이긴 것만 적으면 `already`(첫 칸이 곧 집는 칸)나 뿌리에 없는
+            # 줄(옆 워크트리에서만 온 것)처럼 매번 "진" 줄이 다음 판에 또 fresh 로 나와 끝없이 돈다.
+            # 옆 일꾼에게 진 줄은 이미 in_progress 라 `ready` 에 다시 안 나온다.
+            seen.add(item["id"])
             try:
                 won = claim(item)
-            except RuntimeError as e:
+            except (RuntimeError, ValueError) as e:
                 say(name, str(e), err=True)
                 failed.set()
                 return
@@ -169,7 +177,6 @@ def worker(name, failed):
             say(name, f"{item['id']}  졌다 — 옆에서 먼저 집었다")
         if mine is None:
             continue
-        seen.add(mine["id"])
         try:
             path = worktree(mine["id"])
         except RuntimeError as e:
@@ -185,11 +192,17 @@ def worker(name, failed):
             say(name, f"{mine['id']}  실패({code}) — in_progress 로 두고 이 일꾼은 멈춘다", err=True)
             failed.set()
             return
-        moai("note", mine["id"], "-b", "-", stdin=out)
+        code, _, err = moai("note", mine["id"], "-b", "-", stdin=out)
+        if code != 0:
+            # 노트를 못 남겼으면 닫지 않는다 — 닫으면 일의 출력이 사라진 채 done 이 된다.
+            say(name, f"{mine['id']}  노트를 못 남겼다 — in_progress 로 두고 멈춘다: {err.strip()}", err=True)
+            failed.set()
+            return
         close(mine["id"])
 
 
 def main():
+    global WORK
     parser = argparse.ArgumentParser(description="moai 큐를 일꾼 여럿이 겨뤄 푼다")
     parser.add_argument("--agents", type=int, default=2, help="일꾼 수 (기본 2)")
     args = parser.parse_args()
@@ -205,6 +218,9 @@ def main():
         if shutil.which(need) is None:
             print(f"실행할 수 없다: {need}", file=sys.stderr)
             return 2
+    # 일은 워크트리를 cwd 로 돈다 — `./do-one.sh` 같은 상대 경로를 그대로 넘기면 워크트리 안에서
+    # 찾아, 뿌리에만 있는 스크립트는 못 찾고 커밋된 것이면 BASE 의 옛 판을 돌린다. 뿌리 기준으로 박는다.
+    WORK = os.path.abspath(shutil.which(WORK))
     if subprocess.run(["git", "-C", ROOT, "rev-parse", "--verify", "-q", f"{BASE}^{{commit}}"], capture_output=True).returncode != 0:
         print(f"워크트리를 띄울 가지가 없다: {BASE} (AGENT_BASE 로 준다)", file=sys.stderr)
         return 2
