@@ -260,7 +260,8 @@ PY
        아직 트래커에 안 옮긴 것이나 받은 글이 사라진다.
        tmux 면 감독이 보고를 확인하고 이 창에 `/clear` 를 직접 칠 수 있다 — 감독은 `다음:` 노트가
        선 것을 보고 친다. 그래서 그 노트가 마지막 걸음이다: 남은 일(백그라운드 리뷰 따위)이 있으면
-       노트 전에 끝내고, 못 끝내면 보고에 그렇다고 적는다 — 감독은 그런 창을 비우지 않는다
+       노트 전에 끝내고, 못 끝내면 노트 전에 감독에게 그렇다고 한 줄 더 보낸다(보고는 11 에서
+       이미 갔다) — 감독은 그런 창을 비우지 않는다
 
 **4. 기다린다.** 일하는 세션에는 메시지 없이 `notify_when_idle: true` 로
 걸어 둔다. **`ListAgents` 를 되풀이해 훑지 않는다** — 알림이 온다. 알림은 한 번뿐이라,
@@ -286,36 +287,43 @@ PY
 `moai show <id>` 로는 일이 끝났는지 모른다 — 보고에 없으면 그 idea 의 이력 "… 로
 펼쳤다" 에서 읽는다.
 
-셋이 맞으면 그 세션에 다음 idea 를 보낸다. 어긋나면 그 세션에 무엇이 남았는지
-묻고, 대신 끝내지 않는다.
+셋이 맞으면 — tmux 면 5-1 로 그 창을 먼저 비우고 — 그 세션에 다음 idea 를 보낸다.
+어긋나면 그 세션에 무엇이 남았는지 묻고, 대신 끝내지 않는다.
 
 **5-1. tmux 면 감독이 그 창을 비운다.** 사람에게 짚고 기다리는 대신 감독이 그 판에
 `/clear` 를 친다. 셋이 맞은 뒤에만, 그리고 `moai show <에픽>` 의 이력에 일꾼이 12 에서
 남긴 `다음:` 노트가 선 뒤에만 부른다 — 그 노트가 12 의 마지막 걸음이라, 없으면 일꾼이
-아직 트래커에 옮기는 중이다. 비우면 그 일꾼이 쥔 대화가 통째로 사라지니 확인보다 먼저
-부르지 않는다. `<세션>` 은 보고를 보낸 세션의 이름, `<루트>` 는 2 의 `루트 자리` 다.
+아직 트래커에 옮기는 중이다. 노트는 **보고 뒤에** 선 것만 센다 — `다음:` 은 끝을 못 낸
+세션이 남기는 이어받기 줄이기도 해서, 0 에서 거둔 에픽에는 앞 세션의 것이 이미 있다.
+보고(11)는 12 보다 먼저 오니 보고를 받은 때는 대개 노트가 아직 없고 일꾼은 `busy` 다 —
+사람에게 짚지 말고 4 의 알림을 걸어 두고, 그 알림이 온 뒤에 본다. 비우면 그 일꾼이 쥔
+대화가 통째로 사라지니 확인보다 먼저 부르지 않는다. `<세션>` 은 보고를 보낸 세션의 이름,
+`<루트>` 는 2 의 `루트 자리` 다.
 
 ```sh
 python3 - '<세션>' '<에픽>' '<내 이름>' '<루트>' <<'PY'
 import glob, json, os, subprocess, sys, time
 name, epic, me, root = sys.argv[1:5]
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-def skip(why):
-    print("안 비운다 —", why, "— 사람에게 비워도 된다고만 짚는다")
+erased = False
+def skip(why, then="사람에게 비워도 된다고만 짚는다"):
+    print("안 비운다 —", why, "—", then)
+    if erased:
+        print("치던 글은 이미 지웠다 — 위에 옮긴 `치던 글` 을 그 창의 사람에게 돌려준다")
     sys.exit(0)
 def tmux(*args):
     return subprocess.run(["tmux", *args], capture_output=True, text=True)
+def read(f):
+    try:
+        with open(f) as fh:
+            s = json.load(fh)
+        os.kill(s["pid"], 0)
+        return s
+    except (OSError, ValueError, KeyError, TypeError, OverflowError):
+        return None
 def session():
-    found = []
-    for f in glob.glob(os.path.join(home, "sessions", "*.json")):
-        try:
-            s = json.load(open(f))
-            if s.get("name") == name:
-                os.kill(s["pid"], 0)
-                found.append(s)
-        except (OSError, ValueError, KeyError, TypeError, OverflowError):
-            continue
-    return found[0] if len(found) == 1 else None
+    found = [(f, s) for f in glob.glob(os.path.join(home, "sessions", "*.json")) for s in [read(f)] if s and s.get("name") == name]
+    return found[0] if len(found) == 1 else (None, None)
 def parents(pid):
     while pid > 1:
         yield pid
@@ -333,13 +341,16 @@ def draft(pane):
         if line.startswith("─"):
             return "\n".join(l.strip() for l in [box[0][1:]] + box[1:]).strip()
         box.append(line)
+def looks(fmt):
+    return tmux("display-message", "-p", "-t", pane, fmt).stdout.strip()
+QUIET = '#{pane_in_mode}#{pane_synchronized}'
 if not os.environ.get("TMUX"):
     skip("tmux 밖이다")
 try:
     tmux("-V")
 except OSError:
     skip("tmux 가 없다")
-s = session()
+f, s = session()
 if not s:
     skip("산 세션 " + name + " 을 하나로 못 찾았다")
 pane = str(s.get("tmux") or "").rpartition(".")[2]
@@ -348,12 +359,15 @@ if not pane.startswith("%"):
 if pane == os.environ.get("TMUX_PANE"):
     skip("감독 제 창이다")
 if s.get("status") != "idle":
-    skip("idle 이 아니다 — " + str(s.get("status")))
-if os.path.realpath(s.get("cwd") or "") != os.path.realpath(root):
+    skip("idle 이 아니다 — " + str(s.get("status")), "4 의 알림을 걸어 두고 그 알림이 온 뒤에 다시 부른다")
+cwd = str(s.get("cwd") or "")
+if not cwd or os.path.realpath(cwd) != os.path.realpath(root):
     skip("루트에 없다 — 아직 워크트리 안이다")
-owner = tmux("display-message", "-p", "-t", pane, '#{pane_pid}').stdout.strip()
+owner = looks('#{pane_pid}')
 if not owner.isdigit() or int(owner) not in parents(int(s["pid"])):
     skip("판 " + pane + " 이 그 세션의 것이 아니다")
+if looks(QUIET) != "00":
+    skip("판이 복사 모드이거나(사람이 스크롤해 읽는 중) 다른 판과 묶여 있다")
 kept = draft(pane)
 if kept is None:
     skip("입력 칸을 못 읽었다")
@@ -361,21 +375,30 @@ if kept:
     print("치던 글 —", name, pane)
     print(kept)
 for _ in range(20):
-    if draft(pane) == "":
+    left = draft(pane)
+    if left == "":
         break
+    if left is None or looks(QUIET) != "00":
+        skip("지우던 입력 칸을 놓쳤다")
+    erased = True
     tmux("send-keys", "-t", pane, "C-e", "C-u", "DC")
     time.sleep(0.2)
 else:
     skip("입력 칸을 못 비웠다")
-if (session() or {}).get("status") != "idle":
+if (read(f) or {}).get("status") != "idle":
     skip("그새 idle 이 아니다")
-tmux("display-message", "-d", "8000", "-t", pane, "감독 " + me + ": " + epic + " 보고를 확인했다 — 이 창을 /clear 한다" + (". 치던 글은 감독 창에 옮겼다" if kept else ""))
+if looks(QUIET) != "00":
+    skip("그새 판이 복사 모드로 갔다")
+say = "감독 " + me + ": " + epic + " 보고를 확인했다 — 이 창을 /clear 한다" + (". 치던 글은 감독 창에 옮겼다" if kept else "")
+for client in tmux("list-clients", "-t", pane, "-F", '#{client_name}').stdout.split("\n"):
+    if client:
+        tmux("display-message", "-c", client, "-d", "8000", "-t", pane, say)
 tmux("send-keys", "-t", pane, "-l", "/clear")
 time.sleep(0.5)
 tmux("send-keys", "-t", pane, "Enter")
 for _ in range(30):
     time.sleep(0.5)
-    now = session()
+    now = read(f)
     if now and now.get("sessionId") != s.get("sessionId"):
         print("비웠다 —", name, pane, epic)
         sys.exit(0)
@@ -387,20 +410,25 @@ PY
   이름에서 이미 빠진다. 스크립트도 제 판(`$TMUX_PANE`)은 한 번 더 거른다
 - **tmux 가 없으면 조용히 건너뛴다.** `$TMUX` 가 없거나 `tmux` 가 없으면 `안 비운다` 한 줄을
   내고 0 으로 끝난다 — 그때는 위처럼 사람에게 짚고 기다린다. 스크립트가 `안 비운다` 를 내면
-  무엇에서 멈췄든 같다
+  그 줄의 끝이 말하는 대로 한다 — `idle 이 아니다` 만 알림을 기다려 다시 부르고, 나머지는
+  사람에게 짚는다
 - **`idle` 인 판에만 친다.** `busy`·`waiting`·`shell` 에 치면 도는 턴이나 사람의 답 사이에
   글자가 끼어든다. 보내기 직전에 한 번 더 읽는다. 일꾼이 12 에서 "지우지 말라" 고 한
   때 — 리뷰가 백그라운드에서 도는 중, 머지 충돌을 푸는 중, 사람의 답을 기다리는 중 — 도
-  그대로 산다. 보고에 그런 것이 남았다고 적혀 있으면 부르지 않는다
+  그대로 산다. 보고나 그 뒤에 온 글에 그런 것이 남았다고 적혀 있으면 부르지 않는다
+- **복사 모드인 판, `synchronize-panes` 로 묶인 판에도 치지 않는다.** 복사 모드면 사람이
+  스크롤해 읽는 중이고, 친 글자가 복사 모드의 키로 가 `/` 가 검색을 연다. 묶인 판이면
+  친 글자가 그 창의 판 모두로 가 옆 일꾼의 대화까지 지운다
 - **판은 세션 파일의 `tmux` 필드(`세션:@창.%판`)에서 읽고, 그 판의 프로세스가 그 세션을
   낳았는지 본다.** 세션 파일은 세션이 끝나도 남고 판 번호는 다시 쓰여, 낡은 파일이 가리키는
   판에는 남의 세션이 산다
 - **치던 글은 지우고 친다**(사용자 결정). 그대로 치면 `치던 글/clear` 가 일꾼에게 프롬프트로
-  간다. 지우기 전에 화면에서 그 글을 읽어 `치던 글` 로 감독 창에 옮기고, 상태줄의 한 줄이
-  그렇다고 말한다 — 사람은 그 글을 감독 창에서 찾는다. Claude Code 의 `Ctrl+Y` 는
-  여러 줄 글의 마지막 줄만 되살려 기댈 수 없다. 입력 칸은 Claude Code 화면에서 프롬프트 표시(U+276F)가
-  선 마지막 줄로 읽는다. 그 화면도 세션 파일처럼 문서에 없는 것이라, 못 읽으면 치지 않는
-  쪽으로 넘어진다
+  간다. 지우기 전에 화면에서 그 글을 읽어 `치던 글` 로 감독 창에 옮기고, 그 판을 보는
+  클라이언트의 상태줄에 한 줄이 그렇다고 말한다 — 사람은 그 글을 감독 창에서 찾는다. Claude
+  Code 의 `Ctrl+Y` 는 여러 줄 글의 마지막 줄만 되살려 기댈 수 없다. 입력 칸은 Claude Code
+  화면에서 프롬프트 표시(U+276F)가 선 마지막 줄로 읽는다. 그 화면도 세션 파일처럼 문서에 없는
+  것이라, 못 읽으면 치지 않는 쪽으로 넘어진다. 지우다가 멈추면 `치던 글은 이미 지웠다` 가
+  따라 나온다 — 그때는 옮긴 글을 그 창의 사람에게 돌려준다
 - **비우기와 다음 배정을 한 호흡에 하지 않는다.** `/clear` 는 큐에 쌓인 글을 함께 지운다.
   스크립트가 `비웠다` 를 낸 — 세션 id 가 바뀐 — 뒤에 다음 idea 를 보내고, `비웠는지 모른다`
   면 그 창이 어떤지 보기 전에는 보내지 않는다
