@@ -4419,3 +4419,6 @@
 {"ts":"2026-09-18T12:09:29Z","id":"moai-acy5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T12:09:29Z","id":"moai-4hda.gt8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 0건, 반영할 것 없음. 넘긴 것 없음(moai-rl5w 는 에픽 도중 담은 idea)"}
 {"ts":"2026-09-18T12:09:49Z","id":"moai-4hda","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음. 남은 것은 idea moai-rl5w(--help 의 MOAI_LANG 한 줄) — src/cli.rs 가 풀리면 집는다"}
+{"ts":"2026-09-18T12:09:55Z","id":"moai-kbky","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai --help 에 MOAI_LANG·[i18n] lang 한 줄을 댄다"}
+{"ts":"2026-09-18T12:09:55Z","id":"moai-kbky","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-rl5w 에서 펼쳤다 — moai --help 에 MOAI_LANG·[i18n] lang 한 줄을 댄다"}
+{"ts":"2026-09-18T12:09:55Z","id":"moai-rl5w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-5yq0 의 멤버 moai-kbky 로 펼쳤다"}
