@@ -108,9 +108,25 @@ fn difficulty_levels() -> String {
     DIFFICULTY.iter().map(|(level, _, _)| format!("`{level}`")).collect::<Vec<_>>().join("·")
 }
 
-/// 제일 비싼 모델. 에픽 끝의 리뷰는 멤버의 난이도와 상관없이 이것으로 본다.
+/// 제일 비싼 모델. 에픽 끝 리뷰가 `high` 부터 이것으로 본다.
 fn top_model() -> &'static str {
     DIFFICULTY[DIFFICULTY.len() - 1].1
+}
+
+/// 에픽 끝 리뷰의 등급 — **가장 무거운 멤버의 난이도에서 한 칸 위**(moai-bx6t, 2026-09-18
+/// 사용자 결정). 첫 판은 모든 에픽을 `xhigh` 이상 opus 로 봐, 글 한 줄 고친 멤버 하나짜리
+/// 에픽까지 가장 비싼 리뷰를 받았다 — 그날 에픽 6개 중 4개가 멤버 하나짜리라 멤버 리뷰를
+/// 걷은 까닭(값)을 거꾸로 거슬렀다. 모델은 그 등급을 따른다. `medium` 이면 가운데 모델이다.
+fn epic_review_rule() -> String {
+    let mid = DIFFICULTY[1].1;
+    let top = top_model();
+    format!(
+        "**등급은 가장 무거운 멤버의 난이도에서 한 칸 위다** — `low` 뿐이면 `medium`, `medium` 이\n\
+         있으면 `high`, `high` 가 있으면 `xhigh`.\n\
+         **{EPIC_MAX} 있으면** `max` 다.\n\
+         표면을 가로지르거나 설계 결정이 여럿이면 한 칸 더 올린다. 망설여지면 한 칸 올린다.\n\
+         에픽 끝 리뷰의 모델은 등급을 따른다 — `medium` 이면 `{mid}`, `high` 부터는 `{top}`."
+    )
 }
 
 /// 일꾼이 받는 글의 머리에 서는 `모델:` 줄. 새 일(`brief`)과 거둔 일(감독 0)이 **같은 줄**을
@@ -121,7 +137,7 @@ fn top_model() -> &'static str {
 /// 제 손으로 치라고 하면 일꾼은 올렸다고 믿고 9-1 에 안 돈 모델을 적는다. 결정은 "맞추거나
 /// 올린다" 였다 — 제안과 다른 모델로 뜬 창은 먼저 맞춘다.
 ///
-/// 자리 이름은 `<난이도>` 다. `<xhigh|max>` 는 7 에서 개발해 본 일꾼이 고르는 리뷰 등급의
+/// 자리 이름은 `<난이도>` 다. `<등급>` 는 7 에서 개발해 본 일꾼이 고르는 리뷰 등급의
 /// 자리라, 감독이 채우는 목록에 같은 이름을 넣으면 읽기 전의 제안이 그 명령에 박힌다.
 fn model_line() -> String {
     let ladder = DIFFICULTY.iter().map(|(_, model, _)| *model).collect::<Vec<_>>().join(" → ");
@@ -700,7 +716,7 @@ print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
 pub fn supervise() -> String {
     let brief = brief();
     let table = difficulty_table();
-    let top = top_model();
+    let epic_rule = epic_review_rule();
     let reclaim_model = indent(&model_line(), "      ");
     format!(
         r#"---
@@ -863,9 +879,11 @@ PY
 
 {table}
 
-에픽 끝의 리뷰(`xhigh`·`max`)는 언제나 `{top}` 다 — 멤버는 따로 안 보니 이 한 번이 그 에픽의
-유일한 리뷰라 비싼 눈으로 전체를 본다(브리프 5·7 이 일꾼에게 싣는다). **망설여지면 한 단계
-올린다.** 감독은 코드를 읽기 전에 고르므로 이것은 제안이고, 마지막 자는 이슈를 읽은 일꾼이다.
+에픽 끝의 리뷰는 멤버를 따로 안 보니 그 에픽의 유일한 리뷰다(브리프 5·7 이 일꾼에게 싣는다).
+
+{epic_rule}
+
+감독은 코드를 읽기 전에 고르므로 이것은 제안이고, 마지막 자는 이슈를 읽은 일꾼이다.
 도는 세션의 모델은 `SendMessage` 로도 설정으로도 못 바꾼다 — 그 창의 사람이 `/model` 로 바꾼다.
 
 **3. 보낸다.** 놀고 있는 세션 하나에 idea **하나**를 `SendMessage` 로 보낸다.
@@ -876,7 +894,7 @@ PY
 `<모델>`·`<난이도>`·`<까닭>` 은 2-1 에서 고른 짝과 그 까닭이다. **안 채우면** 그 자리표시자가
 그대로 실려, 일꾼이 닫을 때 남기는 노트가 무엇이 일했는지 대신 `<모델>` 이라고 적는다.
 `<까닭>` 은 백틱·`$` 없이 적는다 — 9-1 의 큰따옴표 안에 들어가 셸이 그것을 명령으로 푼다.
-`<xhigh|max>` 는 채우지 않는다 — 7 에서 개발해 본 일꾼이 고르는 리뷰 등급의 자리다.
+`<등급>` 는 채우지 않는다 — 7 에서 개발해 본 일꾼이 고르는 리뷰 등급의 자리다.
 
 {brief}
 
@@ -1204,7 +1222,7 @@ PY
 /// 맨 `moai` 로 두면 그대로 옮겨 친 줄이 워크트리의 `.moai` 에 멤버를 세운다 — 병합에서 스냅샷이
 /// 부딪히거나, 4-1 이 시키는 `git checkout -- .moai` 로 그 멤버가 사라진 채 에픽이 닫힌다.
 /// `<루트>` 는 감독이 채우는 자리라 받은 줄에 실제 자리가 박혀 온다. 다른 자리 이름은 그 목록과
-/// 겹치지 않는다 — 겹치면 맡긴 idea 의 값이 이 줄에 미리 박힌다(`<xhigh|max>` 와 같은 덫).
+/// 겹치지 않는다 — 겹치면 맡긴 idea 의 값이 이 줄에 미리 박힌다(`<등급>` 와 같은 덫).
 const RECALL: &str = "moai -C <루트> idea promote <idea id> -e <에픽> --from -";
 
 /// 감독이 일꾼에게 `SendMessage` 로 싣는 글. **일꾼이 받는 것은 이것뿐이다** — 감독
@@ -1224,6 +1242,7 @@ fn brief() -> String {
     let levels = difficulty_levels();
     let rubric = indent(&difficulty_rubric(), "       ");
     let top = top_model();
+    let epic_rule = indent(&epic_review_rule(), "       ");
     format!(
         r#"    감독 세션(<내 이름>)이 idea <id> 를 맡긴다 — <제목>.
     먼저 읽을 것: moai show <id>
@@ -1271,12 +1290,11 @@ fn brief() -> String {
 {rubric}
     6. 멤버의 일이 다 끝나면 워크트리에서 <본 가지> 를 받아 충돌을 풀고 시험을 돌린다. 고칠
        것은 여기서 고친다 — 워크트리가 남아 있는 동안 루트에서는 규칙 2 가 편집을 막는다
-    7. 병합 전에 에픽 전체를 `/code-review <xhigh|max> --fix` 로 본다 — 멤버를 따로 안 봤으니
-       이 한 번이 유일한 리뷰다. 멤버가 서로 거의 안 닿고 쓰기·동시성·저장·훅을 안 건드렸으면
-       xhigh, 표면을 가로지르거나 설계 결정이 여럿이거나
-       **{EPIC_MAX} 있으면** max. 망설여지면 max 다.
-       이 리뷰는 머리의 모델과 상관없이 `{top}` 로 본다 — 창이 `{top}` 가 아니면 부르기 전에
-       창을 보는 사람에게 `/model {top}` 를 청한다(리뷰 에이전트는 창의 모델을 물려받는다).
+    7. 병합 전에 에픽 전체를 `/code-review <등급> --fix` 로 본다 — 멤버를 따로 안 봤으니
+       이 한 번이 유일한 리뷰다.
+{epic_rule}
+       창이 그 모델이 아니면 부르기 전에 창을 보는 사람에게 `/model <그 모델>` 을 청한다 —
+       `/model {top}` 처럼(리뷰 에이전트는 창의 모델을 물려받는다).
        고른 등급과 까닭은 관점(`-b`)에 한 줄로 적는다. 가지가 <본 가지> 를 떠난 자리
        (`git merge-base <본 가지> HEAD`)부터의 diff 다. 6 에서 <본 가지> 를 받았으니 충돌을 푼
        자리도 든다. 리뷰 이슈를 세운다(규칙 3)
@@ -1583,7 +1601,7 @@ mod tests {
             ("병합이 실제로 끝난 뒤에만", "병합 전에 done 으로 옮기지 말라는 말이 없다"),
             ("멤버마다 리뷰하지 않는다", "멤버 리뷰를 걷었다는 말이 없어 일꾼이 멤버마다 리뷰한다"),
             ("`low`·`medium`·`high`", "멤버를 잴 난이도의 폭이 없다"),
-            ("/code-review <xhigh|max> --fix", "에픽 끝의 xhigh·max 리뷰가 없다"),
+            ("/code-review <등급> --fix", "에픽 끝의 xhigh·max 리뷰가 없다"),
             ("관점(`-b`)에 한 줄로 적는다", "고른 등급의 까닭을 남기라는 말이 없다"),
             (review.as_str(), "에픽 리뷰 이슈를 관점과 함께 에픽에 매는 줄이 없다"),
             ("moai -C <루트>", "워크트리 안에서 트래커를 고쳐 병합에서 스냅샷이 충돌한다"),
@@ -1608,7 +1626,7 @@ mod tests {
         assert!(removed < closed, "워크트리를 지우기 전에 리뷰를 닫는다");
         // 에픽 리뷰는 본 가지를 받은 뒤다 — 먼저 보면 충돌을 푼 자리가 리뷰 없이 본 가지에 선다.
         let synced = brief.find("<본 가지> 를 받아").expect("본 가지를 받는 걸음이 없다");
-        let reviewed = brief.find("/code-review <xhigh|max> --fix").expect("에픽 리뷰 걸음이 없다");
+        let reviewed = brief.find("/code-review <등급> --fix").expect("에픽 리뷰 걸음이 없다");
         assert!(synced < reviewed, "본 가지를 받기 전에 에픽 전체를 리뷰한다");
         // 되짚기는 에픽 리뷰 뒤·병합 앞이다 — 앞에 두면 그 리뷰가 넘긴 것을 못 보고, 뒤에 두면
         // 에픽이 이미 닫혔다. 없으면 에픽이 내건 것이 idea 로 빠진 채 닫힌다(moai-l288).
@@ -1686,14 +1704,18 @@ mod tests {
                 .unwrap_or_else(|| panic!("난이도 {level} 의 줄이 표에 없다"));
             assert_eq!(row.get(model_col), Some(&format!("`{model}`")), "{level} 의 짝이 {model} 이 아니다 — {row:?}");
         }
-        // 에픽 끝은 그 에픽의 유일한 리뷰라 비싼 눈으로 본다 — 감독의 표 둘레에 서고,
-        // **그 리뷰를 부르는 일꾼에게도 선다.** 감독의 2-1 에만 적혀 있던 판은 그 리뷰가 도는
-        // 창에 한 번도 안 닿았다(리뷰 에이전트는 창의 모델을 물려받는다).
-        let end = head.find("xhigh").expect("에픽 끝 등급이 표 둘레에 없다");
-        assert!(head[end..].lines().next().unwrap_or_default().contains("opus"), "에픽 끝 리뷰가 opus 가 아니다");
-        let epic = brief.find("/code-review <xhigh|max> --fix").expect("에픽 리뷰 걸음이 없다");
+        // 에픽 끝은 그 에픽의 유일한 리뷰다. 등급은 가장 무거운 멤버의 한 칸 위, 모델은 그 등급을
+        // 따른다(moai-bx6t) — 감독의 2-1 에 서고 **그 리뷰를 부르는 일꾼에게도 같은 글로 선다.**
+        // 감독의 2-1 에만 적혀 있던 판은 그 리뷰가 도는 창에 한 번도 안 닿았다(리뷰 에이전트는
+        // 창의 모델을 물려받는다). 첫 판은 "늘 opus" 를 붙들어, 글 한 줄 고친 에픽도 가장 비싼
+        // 리뷰를 받았다 — 이제 가운데 모델로 보는 자리(`medium`)가 두 글 모두에 서는지 본다.
+        let rule = epic_review_rule();
+        assert!(rule.contains("`medium` 이면 `sonnet`") && rule.contains("`high` 부터는 `opus`"), "에픽 끝 리뷰의 모델이 등급을 안 따른다 — {rule}");
+        assert!(head.contains(&rule), "감독의 2-1 에 에픽 끝 등급·모델 규칙이 없다");
+        let epic = brief.find("/code-review <등급> --fix").expect("에픽 리뷰 걸음이 없다");
         let step = &brief[epic..brief[epic..].find("\n    8.").map_or(brief.len(), |n| epic + n)];
-        assert!(step.contains("`/model opus`"), "에픽 끝 리뷰를 opus 로 보라는 말이 일꾼에게 없다");
+        assert!(step.contains(&indent(&rule, "       ")), "브리프 7 에 에픽 끝 등급·모델 규칙이 없다");
+        assert!(step.contains("`/model opus`"), "에픽 끝 리뷰의 모델을 맞추라는 말이 일꾼에게 없다");
         // 일꾼이 받는 글에 그 자리가 있어야 감독이 채운다. **목록 줄에서 찾는다** — 바로 아래
         // 풀이 글도 세 자리를 적어, 감독 쪽 전체에서 찾으면 목록에서 빠져도 초록이었다.
         assert!(brief.contains("모델:"), "브리프에 모델 자리가 없다 — 감독이 골라도 일꾼은 모른다");
@@ -1704,11 +1726,11 @@ mod tests {
                 "감독이 채울 자리 목록에 {slot} 가 없다 — 그대로 실려 노트에 자리표시자가 남는다"
             );
         }
-        // **감독이 채우는 자리와 일꾼이 고르는 자리는 이름이 다르다.** 7 의 `/code-review <xhigh|max>`
+        // **감독이 채우는 자리와 일꾼이 고르는 자리는 이름이 다르다.** 7 의 `/code-review <등급>`
         // 는 개발해 본 일꾼이 고르는 자리다 — 목록에 같은 이름이 들면 읽기 전의 제안이 그 명령에
         // 미리 박힌다.
-        assert!(brief.contains("/code-review <xhigh|max> --fix"), "일꾼이 고르는 리뷰 등급 자리가 없다");
-        assert!(!list.contains("`<xhigh|max>`"), "감독이 일꾼의 리뷰 등급 자리를 채운다 — {list}");
+        assert!(brief.contains("/code-review <등급> --fix"), "일꾼이 고르는 리뷰 등급 자리가 없다");
+        assert!(!list.contains("`<등급>`"), "감독이 일꾼의 리뷰 등급 자리를 채운다 — {list}");
         // **멤버는 따로 리뷰하지 않는다**(moai-bx6t, 2026-09-18 사용자 결정). 멤버마다
         // `/code-review` 를 부르던 판으로 돌아가면 리뷰가 두 벌 돌아 시간과 토큰이 곱으로 든다 —
         // 브리프에 에픽 끝 말고 다른 `/code-review` 가 서면 붉어진다.
