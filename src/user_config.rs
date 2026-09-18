@@ -452,7 +452,7 @@ impl Doc {
             return (Look::default(), problems);
         };
         let word = |i: &Item| i.as_str().map(String::from);
-        let look = Look {
+        let mut look = Look {
             hidden: look_words(t, HIDDEN, &mut problems),
             hide_deferred: look_one(t, HIDE_DEFERRED, "true·false 여야", Item::as_bool, &mut problems),
             sort: look_one(t, SORT, "낱말이어야", word, &mut problems),
@@ -461,6 +461,13 @@ impl Doc {
             fields_known: look_words(t, FIELDS_KNOWN, &mut problems),
             detail: look_one(t, DETAIL, "true·false 여야", Item::as_bool, &mut problems),
         };
+        // **차례를 못 읽었으면 방향도 버린다**(moai-ys7c) — 둘은 한 벌이다. `sort = 3` 을 없는 키로 넘기고
+        // 방향만 내면, 탐색기가 처음 차례(우선순위)에 그 방향을 입혀 아무도 안 고른 거꾸로가 선다. 모르는
+        // 낱말(`sort = "nope"`)은 탐색기가 같은 까닭으로 방향을 두고(`App::apply_look`), 모양이 틀린 것은
+        // 여기서 막는다. 파일의 둘은 그대로 남는다 — 이 세션이 차례를 고르기 전까지는 안 건드린다.
+        if t.contains_key(SORT) && look.sort.is_none() {
+            look.sort_reversed = None;
+        }
         (look, problems)
     }
 
@@ -1282,6 +1289,17 @@ mod tests {
                 "`tui.fields` 의 `7` 는 낱말이 아니다 — 건너뛴다",
             ]
         );
+
+        // 차례를 못 읽으면 방향도 안 낸다(moai-ys7c) — 낱값이든 표 모양이든 같다. 까닭은 차례 하나만 선다.
+        for sort in ["sort = 3", "sort = { by = \"title\" }", "sort.by = \"title\""] {
+            let doc = Doc::parse(&format!("[tui]\n{sort}\nsort_reversed = true\n")).unwrap();
+            let (look, problems) = doc.look();
+            assert_eq!((look.sort, look.sort_reversed), (None, None), "{sort}");
+            assert_eq!(problems.len(), 1, "{sort}: {problems:?}");
+        }
+        // 차례가 없으면 방향은 그대로 읽힌다 — 처음 차례에 입힐 방향이다.
+        let doc = Doc::parse("[tui]\nsort_reversed = true\n").unwrap();
+        assert_eq!(doc.look().0.sort_reversed, Some(true));
 
         let title = Look { sort: Some("title".into()), ..Look::default() };
         let mut odd = Doc::parse("tui = 3\n").unwrap();
