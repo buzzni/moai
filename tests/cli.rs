@@ -4030,6 +4030,8 @@ fn help_says_what_to_type_next() {
     }
     // 명령 목록도 그대로 있다
     assert!(out.contains("milestone") && out.contains("note"), "{out}");
+    // 화면의 말을 바꾸는 길도 선다 — AGENTS.md 에만 있으면 처음 만난 쪽이 못 찾는다(moai-kbky)
+    assert!(out.contains("MOAI_LANG=en") && out.contains("[i18n]"), "{out}");
 }
 
 /// 도움말에서 들여쓰기를 잃은 줄.
@@ -4237,14 +4239,18 @@ fn help_at(s: &Scratch, path: &str, columns: usize) -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
-/// **모든 명령의 `--help` 는 80칸 안이다**(moai-c57v). 도움말은 접지 않으므로(moai-opjn) 넘는
-/// 줄은 좁은 터미널에서 그대로 꺾인다. `tui` 의 글만 보던 시험(moai-lz2t)을 넓혔다 —
+/// **모든 명령의 `--help` 와 `-h` 는 80칸 안이다**(moai-c57v). 도움말은 접지 않으므로(moai-opjn)
+/// 넘는 줄은 좁은 터미널에서 그대로 꺾인다. `tui` 의 글만 보던 시험(moai-lz2t)을 넓혔다 —
 /// after_help 글줄, clap 이 옵션 열 옆에 붙이는 짧은 help, `--help` 가 옵션 밑에 펴는
 /// long_help 문단까지 **그려진 모양 그대로** 잰다. 옵션 열의 폭은 그 명령에서 가장 긴 옵션이
 /// 정하므로, 한 명령에 옵션을 더하는 것만으로 남의 줄이 넘칠 수 있다 — 그래서 글이 아니라
-/// 그린 것을 잰다.
+/// 그린 것을 잰다. `-h` 는 long_help 가 있는 명령에서 모양이 달라(설명이 옵션 열 옆 한 줄)
+/// 따로 불러 잰다(moai-x18p).
 ///
-/// 폭은 `unicode-width` 로 센다 — `·`·`—` 같은 모호폭은 한 칸이다(moai-havc 가 따로 본다).
+/// **모호폭(`·`·`—`·`→`)은 두 칸으로 센다**(사용자 결정, moai-ygki). 한국어 설정의 터미널은
+/// 흔히 그것을 두 칸으로 그려, 한 칸으로 재어 80칸인 줄이 84칸이 되어 꺾였다. 넓게 그리는
+/// 쪽에 맞추면 두 터미널 모두에서 선다. 화면 코드의 `text::width` 는 그대로 한 칸이다 —
+/// 그쪽은 칸을 채워 그리는 셈이라 넓게 세면 한 칸 터미널에서 줄 끝이 빈다.
 #[test]
 fn every_help_fits_in_eighty_columns() {
     let s = init("helpwidth");
@@ -4257,12 +4263,22 @@ fn every_help_fits_in_eighty_columns() {
         if path == "hook" {
             continue;
         }
-        for l in help.lines().filter(|l| cells(l) > 80) {
-            wide.push(format!("moai {path} --help  {}: {l}", cells(l)));
+        let mut args: Vec<&str> = path.split_whitespace().collect();
+        args.push("-h");
+        let short = ok(s.path(), &args);
+        for (flag, text) in [("--help", help.as_str()), ("-h", short.as_str())] {
+            for l in text.lines().filter(|l| cjk_cells(l) > 80) {
+                wide.push(format!("moai {path} {flag}  {}: {l}", cjk_cells(l)));
+            }
         }
     }
     assert!(seen > 20, "명령 목록을 못 읽었다 — {seen}개");
     assert!(wide.is_empty(), "80칸을 넘는 도움말 줄:\n{}", wide.join("\n"));
+}
+
+/// 모호폭을 두 칸으로 센 폭 — 도움말 폭 시험만 쓴다(moai-ygki).
+fn cjk_cells(s: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width_cjk(s)
 }
 
 /// 복사해 못 도는 heredoc 마다 한 줄.
