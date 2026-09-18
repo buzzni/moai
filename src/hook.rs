@@ -286,9 +286,13 @@ struct Join {
 /// 앞 토막이 어떻게 끝나야 이 토막이 도는가.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 enum Op {
-    /// `;`·`||`·`&`·줄바꿈 — 앞이 져도 돈다. 첫 토막도 이것이다.
+    /// `;`·`&`·줄바꿈 — 앞이 져도 돈다. 첫 토막도 이것이다.
     #[default]
     Any,
+    /// `||` — 앞이 **져야** 돈다. [`Any`](Op::Any) 와 한 낱말로 읽던 판은 `mv … || exit 1;
+    /// sed -i …` 를 막았다 — 겨루다 진 쪽을 끊으려고 흔히 쓰는 모양인데, 그 `exit` 가 돌면
+    /// 뒤는 아예 안 돈다(moai-gtkn).
+    Or,
     /// `&&` — 앞이 0 으로 끝나야 돈다.
     And,
     /// `|`·`|&` — 앞 칸과 한 파이프라인이다. 앞 칸이 져도 함께 돌고, **그 파이프라인에 들어선
@@ -464,7 +468,7 @@ impl<'a> Lexer<'a> {
             }
             // `||`·`&&` 는 이어 도는 갈래다. 홀로 선 `|`·`|&` 는 양쪽을, `&` 는 앞을 하위 셸로
             // 돌린다 — 그 `cd` 는 뒤로 안 이어진다([`Seg::sub`]).
-            '|' if self.chars.next_if_eq(&'|').is_some() => self.end_by(Some(Op::Any)),
+            '|' if self.chars.next_if_eq(&'|').is_some() => self.end_by(Some(Op::Or)),
             '&' if self.chars.next_if_eq(&'&').is_some() => self.end_by(Some(Op::And)),
             '|' => {
                 self.chars.next_if_eq(&'&');
@@ -795,8 +799,16 @@ impl<'a> Lexer<'a> {
         seg.depth = self.group;
         seg.level = self.level();
         seg.join = self.join;
+        // **접두어만 선 토막은 이음사를 덮지 않는다**(moai-gtkn). `a && time ( b )` 의 `(` 는
+        // `time` 토막을 닫는데, 그때 `&&` 를 `Any` 로 덮던 판은 괄호 안의 `b` 를 앞이 져도 도는
+        // 것으로 읽어 `mv && time (sed -i …)` 를 막았다. `! (`·`if (` 도 같은 자리다.
+        let bare = command_of(&seg.words).is_empty();
         self.all.push(seg);
-        self.join = Join { op: op.unwrap_or_default(), depth: self.level() };
+        if let Some(op) = op {
+            self.join = Join { op, depth: self.level() };
+        } else if !bare {
+            self.join = Join { op: Op::default(), depth: self.level() };
+        }
     }
 
     /// 지금 몇 겹의 묶음 안인가([`Seg::level`]).
@@ -1310,8 +1322,11 @@ pub fn guard_shell_in(
 /// `&&` 로 들어간 `( a; b )`·`{ a; b; }` 는 통째로 집기 뒤다. 파이프는 `&&` 보다 단단히 묶여
 /// `mv && a | tee f` 의 `tee` 도 집기 뒤고, 집기가 든 파이프라인(`mv | tee f`)은 집기 뒤가 아니다.
 ///
+/// 다만 **`|| exit` 뒤와 `set -e` 아래의 `;` 는 `&&` 다** — 집기가 지면 뒤가 안 돈다. 둘 다 제
+/// 하위 셸 안에서만 그렇다.
+///
 /// **집기로 안 세는 것:** 남의 트래커를 가리킨 집기(`only` 가 안 고른 토막 — 여기서 아무것도
-/// 안 쥐어 준다)와 `! moai mv …` (집기가 져야 뒤가 돈다).
+/// 안 쥐어 준다)와 `! moai mv …`·`! ( moai mv … )` (집기가 져야 뒤가 돈다).
 fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<String> {
     let mut out = Vec::new();
     let mut moved = false;
@@ -1322,8 +1337,31 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
     let mut heads: Vec<Option<usize>> = Vec::new();
     // [`segments`] 의 토막 번호 — `only` 가 그것으로 가른다. 낱말 없는 토막(`> f` 만)은 안 센다.
     let mut k = 0;
+    // `set -e` 를 켠 하위 셸의 깊이 — 그 안에서는 `;` 도 `&&` 처럼 돈다(moai-gtkn).
+    let mut strict: Option<usize> = None;
+    // `|| exit …` 를 지난 하위 셸의 깊이 — 그 뒤의 `;` 는 앞이 이겼을 때만 닿는다.
+    let mut bailed: Option<usize> = None;
+    // `! ( … )` 의 `!` 가 여는 묶음 — 그 안의 집기는 져야 뒤가 도니 아무것도 안 쥔다.
+    let mut negated_at: Option<usize> = None;
     for seg in parse(cmd) {
-        let j = seg.join;
+        let mut j = seg.join;
+        // **`|| exit` 와 `set -e` 는 `;` 를 `&&` 로 만든다.** 둘 다 겨루다 진 쪽을 끊는 흔한
+        // 모양인데, `;` 하나로 집기를 끊던 판은 규칙이 시킨 차례를 그대로 친 명령을 막았다.
+        // **둘 다 제 하위 셸 안의 것이다** — `( mv || exit 1 ); sed -i …` 의 `exit` 는 괄호만
+        // 끝내고, `( set -e; … )` 는 괄호 밖에 안 샌다. 나오면 걷는다.
+        for scope in [&mut strict, &mut bailed] {
+            if scope.is_some_and(|d| seg.depth < d) {
+                *scope = None;
+            }
+        }
+        if j.op == Op::Any && (strict.is_some() || bailed.is_some()) {
+            j.op = Op::And;
+        }
+        // `|| exit 1` 자신은 집기를 안 끊는다 — 집기가 이겼으면 안 돌고, 졌으면 껍데기가 끝난다.
+        let bail = j.op == Op::Or && matches!(command_of(&seg.words).first().map(String::as_str), Some("exit" | "return"));
+        if bail {
+            j.op = Op::And;
+        }
         // 이음사가 제 깊이보다 깊으면 묶음을 막 나온 토막 — `( … ) > f` 의 `> f` 다. 그 묶음에
         // 들어설 때의 판으로 쓰고, 묶음의 값은 그대로 뒤로 흐른다. 이음사로 읽던 판은 안쪽 `;` 로
         // 집기를 끊어 `(mv) > /dev/null && sed -i …` 를 막았다.
@@ -1365,9 +1403,36 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
         if matches!(head, Some("cd" | "pushd" | "popd")) {
             moved = true;
         }
-        let negated = seg.words[..seg.words.len() - words.len()].iter().any(|w| w == "!");
+        let prefix = &seg.words[..seg.words.len() - words.len()];
+        // **`! ( moai mv … )` 의 `!` 는 괄호 밖에 선다**(moai-gtkn). 제 토막의 접두어만 보던 판은
+        // 그 부정을 못 봐, 집기가 져야 도는 쓰기를 집기 뒤로 읽었다 — 새는 쪽이다.
+        if let Some(d) = negated_at
+            && seg.level < d
+        {
+            negated_at = None;
+        }
+        let negated = prefix.iter().any(|w| w == "!") || negated_at.is_some();
+        if words.is_empty() && prefix.iter().any(|w| w == "!") {
+            negated_at = Some(seg.level + 1);
+        }
         if picks_up(&seg.words, cfg) && only(n) && !negated {
             after_pick = Some(after_pick.map_or(seg.level, |d| d.min(seg.level)));
+        }
+        // `set -e`·`set -o errexit` 아래서는 `;` 가 `&&` 처럼 돈다. `set +e`·`set -o` 한 짝이
+        // 그것을 되돈다 — 껍데기가 그렇게 읽는다.
+        if let Some(("set", args)) = words.split_first().map(|(h, r)| (basename(h), r)) {
+            for (i, a) in args.iter().enumerate() {
+                match a.as_str() {
+                    "-o" if args.get(i + 1).is_some_and(|v| v == "errexit") => strict = Some(seg.depth),
+                    "+o" if args.get(i + 1).is_some_and(|v| v == "errexit") => strict = None,
+                    a if a.starts_with('-') && !a.starts_with("--") && a.contains('e') => strict = Some(seg.depth),
+                    a if a.starts_with('+') && a.contains('e') => strict = None,
+                    _ => {}
+                }
+            }
+        }
+        if bail {
+            bailed = Some(bailed.map_or(seg.depth, |d| d.min(seg.depth)));
         }
     }
     out
@@ -3512,6 +3577,18 @@ mod tests {
             // 낱말로 선 `if`·`fi` 는 묶음이 아니다 — 깊이를 늘리면 뒤의 `;` 가 집기 뒤로 읽힌다.
             "moai mv t-1 in_progress && echo if; echo x > src/store.rs",
             "moai mv t-1 in_progress && echo done; echo x > src/store.rs",
+            // **괄호 밖의 `!` 도 집기의 부정이다**(moai-gtkn) — 집기가 져야 뒤가 도니 빈손이다.
+            "! (moai mv t-1 in_progress) && echo x > src/store.rs",
+            "! (moai mv t-1 in_progress && echo ok) && sed -i s/a/b/ src/store.rs",
+            // `set +e` 는 `set -e` 를 되돈다 — 그 뒤의 `;` 는 다시 집기를 끊는다.
+            "set -e; set +e; moai mv t-1 in_progress; echo x > src/store.rs",
+            "set -e; moai mv t-1 in_progress; set +o errexit; echo x > src/store.rs",
+            // `|| exit` 가 끊는 것은 바로 그 줄뿐이다 — 그 뒤의 진 집기는 여전히 빈손이다.
+            "echo hi || exit 1; echo x > src/store.rs",
+            // 하위 셸의 `exit`·`set -e` 는 괄호만 끝낸다 — 괄호 밖의 `;` 는 집기가 져도 돈다.
+            "(moai mv t-1 in_progress --from todo || exit 1); sed -i s/a/b/ src/store.rs",
+            "(set -e; moai mv t-1 in_progress); echo x > src/store.rs",
+            "moai mv t-1 in_progress --from todo || echo lost; sed -i s/a/b/ src/store.rs",
         ] {
             assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
@@ -3553,6 +3630,19 @@ mod tests {
             "moai mv t-1 in_progress && if true; then\nsed -i s/a/b/ src/store.rs\nfi",
             // 묶음을 닫은 뒤의 `&&` 는 다시 바깥 깊이다 — 닫는 낱말이 깊이를 안 돌려주면 여기가 샌다.
             "moai mv t-1 in_progress && if true; then echo ok; fi && echo x > src/store.rs",
+            // **`|| exit` 와 `set -e` 는 `;` 를 `&&` 로 만든다**(moai-gtkn).
+            "moai mv t-1 in_progress --from todo || exit 1; sed -i s/a/b/ src/store.rs",
+            "moai mv t-1 in_progress --from todo || exit; echo x > src/store.rs",
+            "moai mv t-1 in_progress --from todo || return 1; echo x > src/store.rs",
+            "moai mv t-1 in_progress --from todo || exit 1; echo ok; sed -i s/a/b/ src/store.rs",
+            "moai mv t-1 in_progress --from todo || exit 1\nsed -i s/a/b/ src/store.rs",
+            "set -e; moai mv t-1 in_progress; sed -i s/a/b/ src/store.rs",
+            "set -euo pipefail; moai mv t-1 in_progress; echo x > src/store.rs",
+            "set -o errexit; moai mv t-1 in_progress; echo x > src/store.rs",
+            // 접두어 뒤의 괄호는 이음사를 안 덮는다 — 괄호 안은 여전히 집기 뒤다.
+            "moai mv t-1 in_progress && time (sed -i s/a/b/ src/store.rs)",
+            "moai mv t-1 in_progress && ! (echo x > src/store.rs)",
+            "moai mv t-1 in_progress && if (echo x > src/store.rs); then echo ok; fi",
         ] {
             assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
