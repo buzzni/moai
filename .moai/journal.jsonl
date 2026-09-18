@@ -4798,3 +4798,4 @@
 {"ts":"2026-09-18T15:08:16Z","id":"moai-ght0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T15:08:16Z","id":"moai-ha5d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T15:08:16Z","id":"moai-g326.f4d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영할 것 없음(건수 0). 넘긴 것 없음."}
+{"ts":"2026-09-18T15:08:31Z","id":"moai-g326","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 멤버 셋 사람 결정대로 병합(826b2ae)해 닫았다. moai read 를 가르치는 길을 다시 열려면 에이전트용 신원(MOAI_CONFIG 를 가르는 길)을 먼저 세운다."}
