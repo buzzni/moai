@@ -3984,3 +3984,8 @@
 {"ts":"2026-09-18T10:33:12Z","id":"moai-5255","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — CLAUDE.md 글에서 가지 이름만 바꿈)"}
 {"ts":"2026-09-18T10:33:12Z","id":"moai-5255","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 에 병합했다"}
 {"ts":"2026-09-18T11:05:04Z","id":"moai-r9qa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:05:59Z","id":"moai-sprn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"브리프 9-1 과 AGENTS 블록이 못박은 model 줄 꼴을 가르친다"}
+{"ts":"2026-09-18T11:05:59Z","id":"moai-jo8d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"브리프 9-1 과 가이드 블록을 회사·토큰 꼴로 고친다"}
+{"ts":"2026-09-18T11:05:59Z","id":"moai-sprn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-1k17 에서 펼쳤다 — 브리프 9-1 과 AGENTS 블록이 옛 model 줄 꼴을 가르친다"}
+{"ts":"2026-09-18T11:05:59Z","id":"moai-1k17","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-sprn 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:06:07Z","id":"moai-jo8d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
