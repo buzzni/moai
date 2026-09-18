@@ -929,7 +929,9 @@ pub fn unsure(issues: &[Issue], cfg: &Config, elsewhere: &BTreeSet<String>, own:
 ///
 /// 초점 밖에 세우면 그 줄이 어느 일에서 나왔는지를 잃고, 에픽을 닫아도 남은
 /// 것이 어디 있는지 아무도 모른다. 지금 할 일이 아니면 `idea` 로 담는다 —
-/// 그쪽은 이 규칙에서 언제나 자유롭다.
+/// 그쪽은 이 규칙에서 언제나 자유롭다. 단 **그 일이 내건 것이 이것 없이 안
+/// 이뤄지면 idea 가 아니다**(moai-l288) — 거절문이 그 자를 함께 댄다. 훅이 그것을
+/// 가를 수는 없으니 막지는 않고 말만 한다.
 ///
 /// 훅은 토막을 고르는 [`guard_shell_in`] 으로 부른다. 토막 전부를 보는 이 모양은 시험이 쓴다.
 #[cfg(test)]
@@ -992,7 +994,9 @@ fn create_in(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str,
          그 단위 안에서 만들거나, 밖의 것이면 담아 둔다. 초점 밖에 이슈를 세우면\n\
          그 줄이 어느 일에서 나왔는지를 잃는다.\n\
          {into_epic}\x20 moai add \"제목\" --parent {}   그 일의 자식으로\n\
-         \x20 moai idea add \"제목\"                 지금 할 일이 아니면 담아 둔다",
+         \x20 moai idea add \"제목\"                 지금 할 일이 아니면 담아 둔다\n\
+         그 일이 내건 것이 이것 없이 안 이뤄지면 idea 가 아니다 — 지금 못 해도\n\
+         위의 줄로 세워 첫 칸에 둔다. 밖으로 내보내면 그 일이 목적을 못 이룬 채 닫힌다",
         head.id
     ))
 }
@@ -1916,6 +1920,9 @@ mod tests {
         assert!(why.contains("-e t-e"), "에픽을 안 가리킨다\n{why}");
         assert!(why.contains("--parent t-1"), "자식으로 다는 길이 없다\n{why}");
         assert!(why.contains("idea add"), "담아 두는 길이 없다\n{why}");
+        // idea 로 가는 문만 열어 두면 에픽이 내건 것 자체도 그리로 나가 에픽이
+        // 목적을 못 이룬 채 닫힌다 (moai-l288).
+        assert!(why.contains("내건 것"), "idea 가 아닌 경우를 안 가른다\n{why}");
 
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add \"안의 일\" -e t-e"), Decision::Pass);
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add \"자식\" --parent t-1"), Decision::Pass);
