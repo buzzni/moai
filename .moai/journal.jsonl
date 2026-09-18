@@ -4000,3 +4000,8 @@
 {"ts":"2026-09-18T11:09:16Z","id":"moai-dlxf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-557w 에서 펼쳤다 — 스냅샷 없는 옆 워크트리를 rm -rf 로 치우면 탐색기의 ⎇ 가 다음 다시 읽기까지 남는다"}
 {"ts":"2026-09-18T11:09:16Z","id":"moai-557w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-dlxf 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-18T11:09:22Z","id":"moai-uyu9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:09:51Z","id":"moai-zuke","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"프로젝트를 옮길 때 되돌릴 것을 한 자리로"}
+{"ts":"2026-09-18T11:09:51Z","id":"moai-800o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"climb 과 enter_project 가 한 함수로 되돌리고, 층에서 시작한 읽기·커밋 일감을 버린다"}
+{"ts":"2026-09-18T11:09:51Z","id":"moai-zuke","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xrrn 에서 펼쳤다 — 프로젝트를 옮길 때 되돌릴 것이 climb 과 enter_project 로 갈라져 있다"}
+{"ts":"2026-09-18T11:09:51Z","id":"moai-xrrn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-zuke 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:09:58Z","id":"moai-800o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
