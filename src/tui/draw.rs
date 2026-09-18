@@ -179,7 +179,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 버퍼에 아무 자취도 안 남는다. 그래서 그린 쪽이 들고 온 것을 여기서 함께 센다.
     // **아는 쪽을 먼저 본다** — 훑기는 화면의 모든 칸을 도는 일이고 `spinner_on` 은 아무것도
     // 안 바꾸므로, 헤더가 이미 답을 들고 왔으면 그 값을 치를 까닭이 없다.
-    app.spun = header_glint || spinner_on(f.buffer_mut());
+    app.spun = header_glint || spinner_on(f.buffer_mut(), &app.cfg);
 
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
@@ -224,8 +224,16 @@ pub fn screen(f: &mut Frame, app: &mut App) {
 
 /// 그린 화면에 도는 글리프가 한 칸이라도 있는가. 글자는 `style::SPIN` 에서 읽는다 —
 /// 도는 칸이 쓰는 글자와 찾는 글자가 따로 적히면 한쪽만 바뀐다.
-fn spinner_on(buf: &ratatui::buffer::Buffer) -> bool {
-    buf.content.iter().any(|c| style::SPIN.contains(&c.symbol()))
+///
+/// **글자에 더해 칸 색까지 맞춰 본다**(moai-rg5q). 스피너는 늘 제 칸의 색을 입고 선다 — 도는 것은
+/// 시작한 칸뿐이므로(`App::spins`) 그 칸들의 글자색만 본다. 글자만 보던 때는 제목·본문에 적은 `⠋`
+/// (이 저장소의 moai-9qnl·moai-rg5q 제목)가 보이기만 해도 집은 일 없이 빠른 걸음으로 깼다. 남는
+/// 틈은 그 글자를 시작한 칸의 색으로 그리는 자리뿐이다 — 설정으로 더한 칸은 `OTHER`(하늘)라 상세
+/// 칸의 태그 색과 겹친다.
+fn spinner_on(buf: &ratatui::buffer::Buffer, cfg: &crate::config::Config) -> bool {
+    let colours: Vec<Color> =
+        cfg.statuses.iter().filter(|s| cfg.is_started(s)).map(|s| status(s).fg.unwrap_or(Color::Reset)).collect();
+    buf.content.iter().any(|c| style::SPIN.contains(&c.symbol()) && colours.contains(&c.fg))
 }
 
 /// 디렉터리 고르기 창(moai-plvy). 목록·상세 자리를 **폼처럼 통째로** 덮는다 — 뒤 칸의
@@ -910,14 +918,16 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         })
         .filter(|&at| crate::report::is_work(&app.issues[at]))
         .collect();
-    let counts: Vec<String> = app
+    // 글리프는 **칸 색으로** 칠한다 — 롤업의 건수와 같은 모양이고, 루프는 칸 색을 입은 스피너만 도는
+    // 것으로 센다(`spinner_on`, moai-rg5q). 안 칠하면 도는 줄이 창 밖에 있을 때 이 글리프만 돌다 멈춘다.
+    let counts: Vec<Vec<Span>> = app
         .cfg
         .statuses
         .iter()
         .filter_map(|st| {
             let n = work.iter().filter(|&&at| app.issues[at].status.as_str() == st).count();
             // 글리프만으로는 뜻이 약하다. 칸 이름을 같이 적는다.
-            (n > 0).then(|| format!("{} {st} {n}", count_glyph(app, &work, st)))
+            (n > 0).then(|| vec![Span::styled(count_glyph(app, &work, st), status(st)), Span::raw(format!(" {st} {n}"))])
         })
         .collect();
     // **줄이 있으면 "비었다" 라고 하지 않는다.** 셈은 config 에 있는 칸의 일만
@@ -926,15 +936,25 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // `..` 은 줄로 안 센다 — 층이 있으면 프로젝트 뿌리에도 서므로, 세면 빈 프로젝트가
     // " 1줄 " 로 서고 "비었다" 에 영영 못 닿는다.
     let lines = rows.iter().filter(|r| !matches!(r, Row::Up)).count();
-    let title = match (counts.is_empty(), lines == 0) {
+    let title: Line = match (counts.is_empty(), lines == 0) {
         // 층의 줄은 일이 아니라 프로젝트다 — 칸 셈은 줄마다 곁에 선다.
-        _ if app.on_layer() => format!(" 프로젝트 {}곳 ", rows.len()),
+        _ if app.on_layer() => format!(" 프로젝트 {}곳 ", rows.len()).into(),
         // **보기가 다 가렸으면 그렇다고 댄다**(moai-2kyl 단계 리뷰). 까닭을 대는 경로 줄의 `[done 숨김]` 은
         // 자리가 모자라면 빠지는데, 그때 " 비었다 " 만 서면 끝난 일이 사라진 줄 안다.
-        (_, true) if app.view_hides_here() => " 보기에 가려 비었다 ".to_string(),
-        (_, true) => " 비었다 ".to_string(),
-        (true, false) => format!(" {lines}줄 "),
-        (false, _) => format!(" {} ", counts.join("  ")),
+        (_, true) if app.view_hides_here() => " 보기에 가려 비었다 ".into(),
+        (_, true) => " 비었다 ".into(),
+        (true, false) => format!(" {lines}줄 ").into(),
+        (false, _) => {
+            let mut spans = vec![Span::raw(" ")];
+            for (n, c) in counts.into_iter().enumerate() {
+                if n > 0 {
+                    spans.push(Span::raw("  "));
+                }
+                spans.extend(c);
+            }
+            spans.push(Span::raw(" "));
+            Line::from(spans)
+        }
     };
     // **자리는 프레임을 넘어 산다**(`App::list`). 매번 새로 세면 훑는 자리가 0 으로
     // 돌아가, 커서를 보이게 하려고 커서를 늘 맨 아랫줄에 붙인다 — 커서 아래를 한
@@ -3876,6 +3896,34 @@ pub(super) mod tests {
         assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
         let form = render(&mut a, 160, 24).join("\n");
         assert!(!a.spun, "폼이 덮은 도는 줄로 깬다\n{form}");
+    }
+
+    /// **글에 적힌 스피너 글자로는 안 깬다**(moai-rg5q). 루프는 버퍼에서 스피너 글자를 찾는데, 제목·
+    /// 본문에 `⠋` 를 적은 줄(이 저장소의 moai-9qnl 이 그렇다)이 보이기만 해도 집은 일 없이 빠른 걸음으로
+    /// 깼다. 스피너는 늘 시작한 칸의 색을 입으므로 그 색까지 본다. 목록 머리의 건수 글리프도 칸 색을
+    /// 입어, 도는 줄이 창 밖에 있어도 건수가 돌면 깬다.
+    #[test]
+    fn a_spinner_letter_in_the_text_does_not_wake_the_loop() {
+        let make = |id: &str, title: &str, st: &str, p: u8| {
+            let mut i = Issue::new(id.into(), title.into(), Kind::Issue, Status::new(st), "2026-09-01T00:00:00Z");
+            i.priority = Some(p);
+            i
+        };
+        let mut quiet = make("argos-0001", "깨움이 스피너 글자(⠋ 따위)로 헛 깬다", "todo", 1);
+        quiet.body = Some("본문에도 ⠙⠹ 가 있다".into());
+        let mut a = every(vec![quiet.clone()]);
+        let lines = render(&mut a, 120, 16).join("\n");
+        assert!(lines.contains('⠋') && lines.contains('⠙'), "시험의 전제 — 글의 스피너 글자가 화면에 섰다\n{lines}");
+        assert!(!a.spun, "글에 적힌 스피너 글자로 빠른 걸음으로 깬다\n{lines}");
+
+        // 도는 줄은 창 밖, 건수만 머리에서 돈다 — 그래도 깬다.
+        let mut issues: Vec<Issue> = (2..20).map(|n| make(&format!("argos-{n:04}"), "안 한 일", "todo", 1)).collect();
+        issues.push(make("argos-0099", "집은 일", "in_progress", 3));
+        let mut a = every(issues);
+        let lines = render(&mut a, 100, 10).join("\n");
+        assert!(!lines.contains("argos-0099"), "시험의 전제 — 도는 줄이 창 밖이어야 한다\n{lines}");
+        assert!(style::SPIN.iter().any(|g| lines.contains(&format!("{g} in_progress 1"))), "시험의 전제 — 건수가 돈다\n{lines}");
+        assert!(a.spun, "머리의 도는 건수로 안 깬다\n{lines}");
     }
 
     /// **상세에만 선 스피너도 깨운다.** `(마일스톤 없음)` 바구니는 제 줄에 글리프가 없어 목록은
