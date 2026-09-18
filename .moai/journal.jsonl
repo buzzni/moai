@@ -4753,3 +4753,5 @@
 {"ts":"2026-09-18T14:48:03Z","id":"moai-dw63.nzw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: 겹친 줄 되짚기·첫 칸에 -m·리뷰 줄은 close_steps·옆 워크트리 리뷰 제외·간결성 여섯. 넘김: closing 의 명령에 -C 가 없는 것 → moai-ju21 에 이슈로 세운다"}
 {"ts":"2026-09-18T14:48:03Z","id":"moai-1plu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-18T14:48:09Z","id":"moai-erm1.asx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T14:49:18Z","id":"moai-gyqh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"closing 이 대는 명령 줄에 -C <루트> 가 없다 — 워크트리에서 그대로 치면 워크트리의 .moai 를 고친다"}
+{"ts":"2026-09-18T14:49:26Z","id":"moai-1jvy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
