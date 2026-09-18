@@ -3747,3 +3747,5 @@
 {"ts":"2026-09-18T04:06:50Z","id":"moai-bu7a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-6ozi 의 멤버 moai-1i9d 로 옮겨 감"}
 {"ts":"2026-09-18T04:06:50Z","id":"moai-1i9d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T04:06:51Z","id":"moai-rgz9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T04:19:03Z","id":"moai-csvw.nly","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"아홉 중 일곱 반영(0b530ed) — 폭 49~57 의 이름 줄 넘침을 고치고 20~200 을 다 훑는다. 셈 잘림은 moai-x6q5, 짜임 셈의 중복은 idea moai-ohg5"}
+{"ts":"2026-09-18T04:19:03Z","id":"moai-ehmj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"fb376d4 로 main 병합"}
