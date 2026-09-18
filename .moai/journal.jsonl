@@ -4916,3 +4916,20 @@
 {"ts":"2026-09-18T17:06:33Z","id":"moai-fbdg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T17:06:54Z","id":"moai-oxup","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T17:07:02Z","id":"moai-v8qg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 의 떠오른 것 절이 제목을 큰따옴표로 가르친다"}
+{"ts":"2026-09-18T17:07:26Z","id":"moai-ys7c","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 한 파일 안의 보기 읽기 동작)"}
+{"ts":"2026-09-18T17:07:26Z","id":"moai-j7r3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 설정 쓰기 경로의 거절)"}
+{"ts":"2026-09-18T17:07:26Z","id":"moai-bx7g","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 설정 쓰기 경로, 주석 자리와 rm 규칙)"}
+{"ts":"2026-09-18T17:07:26Z","id":"moai-3owm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 거절 코드 계약)"}
+{"ts":"2026-09-18T17:07:26Z","id":"moai-lb0u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 설정 파일 저장 형식의 줄 끝)"}
+{"ts":"2026-09-18T17:07:26Z","id":"moai-aguj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 설정 쓰기 경로의 모양 검사 자리)"}
+{"ts":"2026-09-18T17:07:26Z","id":"moai-5jsn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 설정 읽기 까닭의 대는 자리)"}
+{"ts":"2026-09-18T17:07:26Z","id":"moai-jr3z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 설정 쓰기 경로와 탐색기 저장)"}
+{"ts":"2026-09-18T17:07:33Z","id":"moai-ys7c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T17:07:33Z","id":"moai-j7r3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T17:07:33Z","id":"moai-bx7g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T17:07:33Z","id":"moai-3owm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T17:07:33Z","id":"moai-lb0u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T17:07:34Z","id":"moai-aguj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T17:07:34Z","id":"moai-5jsn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T17:07:34Z","id":"moai-jr3z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-18T17:07:34Z","id":"moai-gmdu.pwz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1~6·9~13 은 b9635f8 로 반영, 7번은 사용자 결정으로 멤버 moai-jr3z 로 펼쳐 8512de9 로 고침. 넘김: 8번 idea moai-liij(에픽 전부터), 14번 idea moai-dru4(화면 배치), 15번 이력 안 고침(Refs 로 남김)"}
