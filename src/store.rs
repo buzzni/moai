@@ -227,10 +227,37 @@ impl Repo {
         let mut issues = load.issues;
         let (entries, out) = f(&mut issues, &self.config, &reserved)?;
 
+        // **글의 크기는 한 자리에서 잰다**(moai-m9a8). 노트·`mv -m`·`defer -m`·제목·본문이 모두
+        // 여기를 지나므로 명령마다 따로 걸면 한 곳은 반드시 잊는다. 저널에 적힐 글은 여기서, 제목과
+        // 본문은 아래 바뀐 줄에서 — 둘 다 스냅샷을 쓰기 전이라 거절하면 아무것도 안 남는다.
+        for e in &entries {
+            for (what, t) in [("노트", &e.text), ("메모", &e.note)] {
+                if let Some(t) = t {
+                    crate::model::check_text_size(&e.id, what, t)?;
+                }
+            }
+        }
+
         for i in issues.iter_mut() {
             i.normalize();
             let was = original.iter().find(|o| o.id == i.id);
             if was != Some(&*i) {
+                // 제목과 본문은 **이번에 바뀌었을 때만** 잰다 — 이미 큰 것을 든 줄도 옮기고 고칠 수 있다.
+                //
+                // **제목도 여기서 막아야 저널이 막힌다.** `create`·`rm` 이 제목을 저널의 `title` 로
+                // 옮겨 적는데, 제목을 안 재면 `moai add "<대화록 한 줄>"` 이 노트와 똑같이 저널에 영영
+                // 남는다. 저널의 `title` 을 위에서 재지 않는 것은 그것이 스냅샷 제목의 사본이라서다 —
+                // 거기서 재면 옛 큰 제목을 든 줄을 `rm` 으로도 못 치운다.
+                for (what, now, before) in [
+                    ("제목", Some(&i.title), was.map(|o| &o.title)),
+                    ("본문", i.body.as_ref(), was.and_then(|o| o.body.as_ref())),
+                ] {
+                    if let Some(text) = now
+                        && now != before
+                    {
+                        crate::model::check_text_size(&i.id, what, text)?;
+                    }
+                }
                 // **칸을 안 건드린 쓰기는 칸 이름을 다시 안 묻는다**(moai-hym7, 사람이
                 // 정했다). 바뀐 줄만 재는 것과 같은 까닭이 한 겹 더 든 것이다 — `config`
                 // 에서 칸 이름을 고치면 옛 이름에 선 줄이 남는데, 그 줄을 미루거나 제목만
@@ -529,34 +556,53 @@ pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor
 /// 파일로 바뀐다. 바꾼 뒤에 입히면 그 사이 잠깐 열려 있으므로 앞에서 한다. 파일이 없던
 /// 처음 쓰기만 umask 를 따른다.
 ///
-/// **고르는 인자를 두지 않는다.** 한때 권한을 넘기는 `write_atomic_as` 가 곁에 따로 있어
+/// **권한을 고르는 인자는 두지 않는다.** 한때 권한을 넘기는 `write_atomic_as` 가 곁에 따로 있어
 /// 사용자 설정만 그것을 불렀고, `issues.jsonl` 은 권한 없는 쪽을 불러 풀렸다 (moai-c1s3).
-/// 지키지 않아야 할 쓰기가 없으니 잊을 자리도 없앤다.
+/// 지키지 않아야 할 쓰기가 없으니 잊을 자리도 없앤다. [`write_atomic_in`] 이 고르는 것은 **임시
+/// 자리뿐**이고 권한은 둘이 한 몸통에서 지킨다 — 임시 자리를 잘못 고르면 찌꺼기가 남지만, 권한을
+/// 잘못 고르면 남이 읽는다. 둘을 같은 무게로 읽고 `write_atomic_as` 를 되살리지 않는다.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
+    let dir = path.parent().ok_or_else(|| Fail::new("경로에 디렉터리가 없다"))?;
+    write_atomic_in(path, bytes, dir)
+}
+
+/// [`write_atomic`] 이되 **임시 파일을 `tmp_dir` 에 둔다**(moai-3akx). 쓰다 죽으면 임시 파일이
+/// 그 자리에 남으므로, 저장소 뿌리의 파일을 쓰는 `init` 은 이미 무시되는 `.moai/*.tmp.*` 자리를
+/// 준다 — 옆자리에 두면 `AGENTS.md.tmp.<pid>` 가 뿌리에 남아 `git add -A` 에 딸려 온다.
+/// `rename` 은 파일시스템을 못 건너므로 `tmp_dir` 이 다른 파일시스템이면 `Err` 다 — 그때 옆자리로
+/// 물러서는 것은 고르는 쪽이 한다(`cmd::init::plant`). 실패하면 **임시 파일을 남기지 않고** 대상은
+/// 한 글자도 안 바뀐다.
+pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
     let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
     let dir = path.parent().ok_or_else(|| Fail::new("경로에 디렉터리가 없다"))?;
-    let tmp = dir.join(format!(
+    let tmp = tmp_dir.join(format!(
         "{}.tmp.{}",
         path.file_name().and_then(|s| s.to_str()).unwrap_or("out"),
         std::process::id()
     ));
-    let err = |e: std::io::Error| Fail::new(format!("{}: {e}", tmp.display()));
-    {
-        let mut f = std::fs::File::create(&tmp).map_err(err)?;
-        if let Some(p) = perms {
-            f.set_permissions(p).map_err(err)?;
-        }
-        f.write_all(bytes).map_err(err)?;
-        f.sync_all().map_err(err)?;
-    }
-    std::fs::rename(&tmp, path).map_err(|e| {
+    // **어디서 실패하든 임시 파일을 치운다.** `rename` 에서만 치우던 때는 디스크가 찬(ENOSPC)
+    // 쓰기가 죽지 않고도 `<파일>.tmp.<pid>` 를 남겼다 — moai-3akx 가 막으려던 찌꺼기다.
+    let fail = |at: &Path, e: std::io::Error| {
         let _ = std::fs::remove_file(&tmp);
-        Fail::new(format!("{}: {e}", path.display()))
-    })?;
-    // rename 자체는 원자적이지만 디렉터리 엔트리는 아직 디스크에 없을 수 있다.
+        Fail::new(format!("{}: {e}", at.display()))
+    };
+    let filled = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        if let Some(p) = perms {
+            f.set_permissions(p)?;
+        }
+        f.write_all(bytes)?;
+        f.sync_all()
+    })();
+    filled.map_err(|e| fail(&tmp, e))?;
+    std::fs::rename(&tmp, path).map_err(|e| fail(path, e))?;
+    // rename 자체는 원자적이지만 디렉터리 엔트리는 아직 디스크에 없을 수 있다. 임시 자리가 다른
+    // 디렉터리면 그쪽에서 빠진 엔트리도 적는다 — 안 적으면 전원이 나간 뒤 임시 파일이 되살아난다.
     #[cfg(unix)]
-    if let Ok(d) = std::fs::File::open(dir) {
-        let _ = d.sync_all();
+    for d in std::iter::once(dir).chain((tmp_dir != dir).then_some(tmp_dir)) {
+        if let Ok(d) = std::fs::File::open(d) {
+            let _ = d.sync_all();
+        }
     }
     Ok(())
 }
