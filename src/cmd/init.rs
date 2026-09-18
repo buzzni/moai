@@ -822,7 +822,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     }
     if !again {
         out.push(String::new());
-        out.push("다음:  moai add \"첫 이슈\"".into());
+        out.push("다음:  moai add '첫 이슈'".into());
     }
     Ok(out)
 }

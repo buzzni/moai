@@ -186,7 +186,7 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
     moai show --tree                       에픽 → 이슈 → 자식
     moai ready --worktree                  옆 워크트리에서 집은 것까지 겹쳐 본다
     moai tui                               탐색기로 돌아다닌다. SPC n 으로 생각을 담는다
-    moai add "제목" -p 1 -t bug -e <에픽>  만들기
+    moai add '제목' -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기
     moai note <id> '발견한 것'             다음 사람이 읽을 메모
@@ -207,7 +207,7 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
 const NO_GATE: &str = "승인 게이트가 없다 — 무엇이든 만들고 무엇이든 옮길 수 있다. 사람을 부르지 않는다.";
 
 const FORKS: &str = r#"**1. `add` 냐 `idea` 냐** — 가르는 것은 *지금 집을 것인가* 다.
-집을 것이면 `moai add`, 나중에 볼 것이면 `moai idea add "떠오른 것"`.
+집을 것이면 `moai add`, 나중에 볼 것이면 `moai idea add '떠오른 것'`.
 idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
 **적지 않고 넘어가는 것이 제일 나쁘다.**
 
@@ -260,7 +260,7 @@ const WRITING_EXAMPLE: &str = r#"규칙은 `SKILL.md` 의 "이슈에 적는 글"
 제목은 인자로, 본문은 `-b -` 로 넘긴다.
 
 ```sh
-moai add "빈 태그를 못 걸러 필터가 전부를 낸다" -t bug -e <에픽> -b - <<'BODY'
+moai add '빈 태그를 못 걸러 필터가 전부를 낸다' -t bug -e <에픽> -b - <<'BODY'
 - 무엇: 태그를 정규화할 때 빈 낱말이 그대로 남는다
 - 무엇을 봤나: 그 태그로 거른 목록이 아무것도 안 거르고 전부를 낸다
 - 어디: 태그를 정규화하는 자리(<파일>:<줄>). 빈 낱말을 거르면 끝난다
@@ -275,8 +275,8 @@ BODY
   판단과 근거와 다음 걸음을 줄로 가르면 `moai show` 한 번으로 끝난다
 - **이모지로 급한 것을 알린다** — 급한 것은 우선순위(`-p 1`)로 적는다. `ready` 가 읽는 것은 그쪽이다"#;
 
-const IDEAS: &str = r#"    moai idea add "반짝 떠오른 것"                 담기
-    moai idea add "긴 생각" -b -                   본문은 stdin 에서
+const IDEAS: &str = r#"    moai idea add '반짝 떠오른 것'                 담기
+    moai idea add '긴 생각' -b -                   본문은 stdin 에서
     moai idea ls                                   쌓인 것 보기
     moai show -g <키워드>                          이미 적어 뒀는지 찾기
 
@@ -297,9 +297,9 @@ const DEFERRING: &str = r#"    moai defer <id> -m '다음 분기에'       계�
 보드와 경고에서 빠지고, `moai status` 가 한 줄로 그것을 비춘다. 에픽·마일스톤·
 부모를 미루면 그 밑의 일도 같이 빠진다."#;
 
-const GROUPS: &str = r#"    moai epic add "저장 계층"                      에픽
-    moai milestone add "v0.1"                      마일스톤
-    moai add "제목" -e <에픽> --milestone <마일스톤>
+const GROUPS: &str = r#"    moai epic add '저장 계층'                      에픽
+    moai milestone add 'v0.1'                      마일스톤
+    moai add '제목' -e <에픽> --milestone <마일스톤>
     moai show <에픽|마일스톤 id>                   그 밑에 무엇이 있는지
     moai show --milestone <id>                     그 마일스톤에 딸린 전부
 
@@ -414,7 +414,7 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 **2. {two}.** `moai mv <id> in_progress`.
 세는 것은 저장소 안의 일감뿐이다 — `.moai/`·`.claude/`·`target/` 과 저장소
 밖(스크래치패드·임시 파일)은 안 센다. `Edit`·`Write` 뿐 아니라 껍데기로 쓰는
-것(`>`·`>>`·`sed -i`·`tee`)도 센다. 계획에 없던 것이면 `moai add "제목"` 으로
+것(`>`·`>>`·`sed -i`·`tee`)도 센다. 계획에 없던 것이면 `moai add '제목'` 으로
 세우고 그것을 집는다.
 
 **3. {three}.** `/code-review` 를 부르기 전에 지금 보는 것에 매인 리뷰
@@ -1680,11 +1680,11 @@ mod tests {
     fn the_style_example_obeys_the_style() {
         let reference = reference();
         assert!(reference.contains(WRITING_EXAMPLE), "참고 문서에 글 스타일 예시가 없다");
-        // 여는 `moai add "` 에 맨다 — 첫 따옴표로 찾으면 앞 산문에 따옴표가 하나 들면
+        // 여는 `moai add '` 에 맨다 — 첫 따옴표로 찾으면 앞 산문에 따옴표가 하나 들면
         // 조용히 엉뚱한 토막을 제목으로 재고도 초록이다.
         let title = WRITING_EXAMPLE
-            .split_once("moai add \"")
-            .and_then(|(_, rest)| rest.split_once('"'))
+            .split_once("moai add '")
+            .and_then(|(_, rest)| rest.split_once('\''))
             .map(|(t, _)| t)
             .expect("예시 명령에 제목이 없다");
         let cap = crate::view::TITLE_CAP;
@@ -2304,7 +2304,15 @@ sys.exit(1 if bad else 0)
         let texts = [("AGENTS 블록", agents()), ("스킬", skill()), ("참고 문서", reference()), ("감독", supervise())];
         for (whose, text) in &texts {
             for line in text.lines().filter(|l| l.contains("moai ")) {
-                for bad in ["-m \"", "-b \"", "moai note <id> \"", "moai note <멤버> \"", "moai note <에픽> \""] {
+                // 제목 자리도 자유 글이다(moai-1yya) — 이 저장소 제목 1,199개 중 39개에 백틱이 든다.
+                for bad in [
+                    "-m \"",
+                    "-b \"",
+                    "moai note <id> \"",
+                    "moai note <멤버> \"",
+                    "moai note <에픽> \"",
+                    "add \"",
+                ] {
                     assert!(!line.contains(bad), "{whose} 가 자유 글을 큰따옴표로 가르친다 — {line}");
                 }
             }

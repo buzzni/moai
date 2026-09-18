@@ -5,9 +5,9 @@
 
 ## 묶음은 둘이다
 
-    moai epic add "저장 계층"                      에픽
-    moai milestone add "v0.1"                      마일스톤
-    moai add "제목" -e <에픽> --milestone <마일스톤>
+    moai epic add '저장 계층'                      에픽
+    moai milestone add 'v0.1'                      마일스톤
+    moai add '제목' -e <에픽> --milestone <마일스톤>
     moai show <에픽|마일스톤 id>                   그 밑에 무엇이 있는지
     moai show --milestone <id>                     그 마일스톤에 딸린 전부
 
@@ -143,8 +143,8 @@ PLAN
 
 ## 담아 둔 생각을 펼치기
 
-    moai idea add "반짝 떠오른 것"                 담기
-    moai idea add "긴 생각" -b -                   본문은 stdin 에서
+    moai idea add '반짝 떠오른 것'                 담기
+    moai idea add '긴 생각' -b -                   본문은 stdin 에서
     moai idea ls                                   쌓인 것 보기
     moai show -g <키워드>                          이미 적어 뒀는지 찾기
 
@@ -179,7 +179,7 @@ PLAN
 제목은 인자로, 본문은 `-b -` 로 넘긴다.
 
 ```sh
-moai add "빈 태그를 못 걸러 필터가 전부를 낸다" -t bug -e <에픽> -b - <<'BODY'
+moai add '빈 태그를 못 걸러 필터가 전부를 낸다' -t bug -e <에픽> -b - <<'BODY'
 - 무엇: 태그를 정규화할 때 빈 낱말이 그대로 남는다
 - 무엇을 봤나: 그 태그로 거른 목록이 아무것도 안 거르고 전부를 낸다
 - 어디: 태그를 정규화하는 자리(<파일>:<줄>). 빈 낱말을 거르면 끝난다

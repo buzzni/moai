@@ -27,7 +27,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 지금 할 일은 아닌 것이 떠오르면:
 
-  moai idea add \"반짝 떠오른 것\"   담는다. 제목 하나면 된다 — 일로 세지 않는다
+  moai idea add '반짝 떠오른 것'   담는다. 제목 하나면 된다 — 일로 세지 않는다
   moai idea promote <id> --from -  때가 되면 에픽과 이슈로 펼친다
 
 이미 있는 일을 지금 안 할 때:
@@ -137,12 +137,12 @@ pub enum Cmd {
     // `Typed::Add`·`IdeaCmd::Add` 도 같은 까닭으로 같다.
     #[command(next_line_help = true, after_help = "\
 예시:
-  moai add \"파서가 BOM 에서 죽는다\" -t bug -p 1
-  moai add \"저장 계층\" --type epic
-  moai add \"부모에 딸린 일\" --parent moai-4aex
-  moai add \"본문은 stdin 에서\" -b -
-  moai add \"남에게\" -a \"철수 (chulsoo@example.com)\"    안 주면 만든 이가 담당
-  moai add \"임자 없이\" -a none
+  moai add '파서가 BOM 에서 죽는다' -t bug -p 1
+  moai add '저장 계층' --type epic
+  moai add '부모에 딸린 일' --parent moai-4aex
+  moai add '본문은 stdin 에서' -b -
+  moai add '남에게' -a \"철수 (chulsoo@example.com)\"    안 주면 만든 이가 담당
+  moai add '임자 없이' -a none
 
 한 번에 여럿 (`--from`):
 
@@ -254,8 +254,8 @@ NOTE
     #[command(subcommand, after_help = "  todo 보다 한 칸 낮은 자리다. **담는 비용이 0 에 가까워야 담는다** — 제목
   하나로 끝나고 우선순위도 에픽도 묻지 않는다.
 
-  moai idea add \"반짝 떠오른 것\"      담기
-  moai idea add \"긴 생각\" -b -        본문은 stdin 에서
+  moai idea add '반짝 떠오른 것'      담기
+  moai idea add '긴 생각' -b -        본문은 stdin 에서
   moai idea ls                        쌓인 것 보기 (`idea show` 와 같다)
 
   idea 는 일이 아니다 — `moai ready` 에도 보드의 셈에도 들지 않고, 에픽 없이
