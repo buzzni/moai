@@ -4,6 +4,7 @@
 //! `len()` 으로 맞추면 한글 제목이 섞인 표가 전부 어긋난다.
 
 use crate::config::Config;
+use crate::i18n::{fill, t};
 use crate::model::{Issue, JournalEntry, Kind};
 use crate::report::{Roll, StatusReport, Warning, is_group};
 use crate::style::{self, paint};
@@ -664,6 +665,10 @@ fn says(w: &Warning) -> String {
         },
         // **낡음의 두 얼굴을 다른 낱말로 낸다**(moai-mj45). 앞의 것은 "다시 빌드부터" 고, 뒤의
         // 것은 "손질이 사라진다" 다 — 한 낱말로 뭉치면 그 중 한쪽이 반드시 거짓말이 된다.
+        // **어느 값인지는 여기서 안 댄다**(리뷰 moai-80qw) — 파일 자리까지 든 줄은 길어 표를
+        // 밀어내므로 부르는 쪽이 stderr 로 이미 한 줄씩 냈다. 여기 서는 뜻은 "그 말을 놓쳤으면
+        // 위를 봐라" 다: 이 줄이 없으면 보드가 "드러난 문제 없다" 로 방금 한 말을 뒤집는다.
+        "user_config" => format!("사용자 설정에서 못 읽은 것 {n}건 — 한 줄씩은 stderr 에 냈다"),
         "agents_stale" => "AGENTS.md 블록이 다르다 — 다른 바이너리가 쓴 것이라 이쪽이 더 낡았을 수 있다 (다시 빌드해 보고)".to_string(),
         "agents_hand_edited" => "AGENTS.md 블록을 손으로 고쳤다 — 다시 심으면 그 손질은 사라진다".to_string(),
         // **파일마다 결과를 따로 말한다**(moai-2f99) — `.gitignore` 에 `/.claude/worktrees/` 가
@@ -705,8 +710,8 @@ pub fn status(
     let mut out = vec![
         format!(
             "{}  {}       {}{overlaid}",
-            paint(style::HEAD, &format!("이슈 {}", st.total)),
-            paint(style::DIM, &format!("· 에픽 {}", st.epics.len())),
+            paint(style::HEAD, &fill(t("status.issues"), &[("n", &st.total.to_string())])),
+            paint(style::DIM, &fill(t("status.epics"), &[("n", &st.epics.len().to_string())])),
             paint(style::DIM, at),
         ),
         String::new(),
@@ -715,7 +720,7 @@ pub fn status(
     out.push(board(cfg, &st.counts));
 
     let shelved = crate::report::put_off(issues);
-    for (label, rolls) in [("마일스톤", &st.milestones), ("에픽", &st.epics)] {
+    for (label, rolls) in [(t("status.milestone_label"), &st.milestones), (t("status.epic_label"), &st.epics)] {
         if rolls.is_empty() {
             continue;
         }
@@ -911,10 +916,10 @@ pub fn ready(
     held: &[crate::report::Held],
     origin: &Origin,
 ) -> Vec<String> {
-    let mut out = vec![format!("집을 수 있는 일  {}건", picks.len())];
+    let mut out = vec![fill(t("ready.count"), &[("n", &picks.len().to_string())])];
     if picks.is_empty() {
         out.push(String::new());
-        out.push(paint(style::DIM, "없다. `moai show` 로 무엇이 밀려 있는지 본다"));
+        out.push(paint(style::DIM, t("ready.none")));
     } else {
         out.push(String::new());
         let heads: Vec<(String, usize)> = picks
@@ -1452,7 +1457,11 @@ pub fn projects_status(
     seen: &[crate::projects::Seen<Board>],
     reg: &crate::user_config::Registry,
 ) -> Vec<String> {
-    let mut out = vec![overview_head("등록한 프로젝트", &format!("{}곳", projects.len()), reg)];
+    let mut out = vec![overview_head(
+        t("overview.projects"),
+        &fill(t("overview.places"), &[("places", &projects.len().to_string())]),
+        reg,
+    )];
     let w_name = projects.iter().map(|p| width(&one_line(&p.name))).max().unwrap_or(0);
     for (p, s) in projects.iter().zip(seen) {
         out.push(String::new());
@@ -1542,9 +1551,12 @@ pub fn projects_ready(
             _ => 0,
         })
         .sum();
+    // **한 명령이 두 말로 말하지 않는다**(리뷰 moai-80qw.cb8) — 저장소 안의 `ready` 는
+    // 말묶음에서 머리를 읽는데 여기만 한국어로 박혀 있으면, 같은 명령이 선 자리에 따라
+    // 다른 말로 답한다. 덜 옮긴 것과 서로 어긋나는 것은 다른 일이다.
     let mut out = vec![overview_head(
-        "집을 수 있는 일",
-        &format!("프로젝트 {}곳 · {total}건", projects.len()),
+        t("overview.ready"),
+        &fill(t("overview.tally"), &[("places", &projects.len().to_string()), ("n", &total.to_string())]),
         reg,
     )];
     let w_name = projects.iter().map(|p| width(&one_line(&p.name))).max().unwrap_or(0);
@@ -2124,13 +2136,19 @@ mod tests {
 
         let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[], &Origin::default()));
         let joined = out.join("\n");
-        assert!(joined.contains("2건"), "{joined}");
+        // **글자는 말묶음에서 온다**(moai-zeyv) — 여기에 한국어를 박으면 기본 언어(영어)에서 깨진다.
+        // **셈이 화면에 닿는지는 따로 잰다**(리뷰 moai-80qw) — 기댓값도 같은 `t()` 를 지나므로,
+        // 머리 글이 `{n}` 을 잃으면 양쪽이 나란히 잃어 이 줄만으로는 아무것도 안 잡힌다.
+        assert!(joined.contains(&fill(t("ready.count"), &[("n", "2")])), "{joined}");
+        assert!(out[0].contains('2'), "머리 줄에 셈이 없다 — {:?}", out[0]);
         assert!(joined.contains("저장 계층") && joined.contains("에픽 없음"), "{joined}");
         assert!(joined.contains("이미 잡고 있는 것 1건"), "{joined}");
         assert!(joined.contains("argos-0004"), "{joined}");
 
-        let empty = plain(&ready(&[], &labels, &[], &[], &Origin::default())).join("\n");
-        assert!(empty.contains("0건") && empty.contains("무엇이 밀려 있는지"), "{empty}");
+        let empty = plain(&ready(&[], &labels, &[], &[], &Origin::default()));
+        let joined = empty.join("\n");
+        assert!(joined.contains(&fill(t("ready.count"), &[("n", "0")])) && joined.contains(t("ready.none")), "{joined}");
+        assert!(empty[0].contains('0'), "빈 머리 줄에 셈이 없다 — {:?}", empty[0]);
     }
 
     /// 없는 에픽을 가리켜도 상세가 죽지 않는다 — 드러내되 막지 않는다.
