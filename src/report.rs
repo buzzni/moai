@@ -381,13 +381,16 @@ pub fn claimed<'a>(issues: &'a [Issue], cfg: &Config, names: &'a BTreeSet<String
 /// 이름이 가리키는 줄이 묶음일 때만 묶음 칸을 센다 — 훅이 도구 호출마다 지나는 길이다.
 fn shut<'a>(issues: &[Issue], cfg: &Config, names: impl IntoIterator<Item = &'a String>) -> BTreeSet<String> {
     let names: BTreeSet<&str> = names.into_iter().map(String::as_str).collect();
-    let named: Vec<&Issue> = issues.iter().filter(|i| names.contains(i.id.as_str())).collect();
+    // **같은 id 의 줄이 둘이면 뒷줄이 선다**(`Load::get`·[`places`] 와 같은 자) — 아무 줄이나
+    // 닫혔다고 세면, 앞의 낡은 `done` 줄 하나가 지금 벌여 놓인 일의 이름을 풀어 버린다.
+    let named: BTreeMap<&str, &Issue> =
+        issues.iter().filter(|i| names.contains(i.id.as_str())).map(|i| (i.id.as_str(), i)).collect();
     if named.is_empty() {
         return BTreeSet::new();
     }
-    let states = if named.iter().any(|i| is_group(i)) { group_states(issues, cfg) } else { BTreeMap::new() };
+    let states = if named.values().any(|i| is_group(i)) { group_states(issues, cfg) } else { BTreeMap::new() };
     named
-        .into_iter()
+        .into_values()
         .filter(|i| column(i, &states) == crate::config::DONE)
         .map(|i| i.id.clone())
         .collect()
@@ -2823,6 +2826,19 @@ mod tests {
         let at = places(&issues, &cfg(), &trees, LATER);
         assert!(matches!(at["argos-0001.a"], Place::Lost), "닫힌 줄의 옛 워크트리에 자리를 댔다 — {:?}", at["argos-0001.a"]);
         assert_eq!(at["argos-0006"].at().iter().map(|w| w.branch.as_str()).collect::<Vec<_>>(), ["worktree-argos-0004"]);
+    }
+
+    /// 같은 id 의 줄이 둘이면 **뒷줄이 선다** — 앞의 낡은 `done` 줄이 지금 벌여 놓인 일의 이름을
+    /// 풀면, 그 일의 자식이 옆 워크트리의 것에서 빠진다.
+    #[test]
+    fn a_stale_closed_twin_does_not_release_a_live_name() {
+        let issues = vec![
+            make("argos-0001", Kind::Issue, "done"),
+            make("argos-0001.a", Kind::Issue, "in_progress"),
+            make("argos-0001", Kind::Issue, "in_progress"),
+        ];
+        let names: BTreeSet<String> = ["argos-0001"].iter().map(|s| s.to_string()).collect();
+        assert!(claimed(&issues, &cfg(), &names)(&issues[1]), "앞의 낡은 줄이 산 이름을 풀었다");
     }
 
     /// **굴려 올린 자리에 같은 워크트리가 두 번 서지 않는다.** 마일스톤은 멤버를 두 길로 받는다
