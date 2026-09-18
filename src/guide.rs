@@ -149,10 +149,17 @@ const CHEATSHEET: &str = r#"    moai status                            보드 ·
 
 const NO_GATE: &str = "승인 게이트가 없다 — 무엇이든 만들고 무엇이든 옮길 수 있다. 사람을 부르지 않는다.";
 
-const FORKS: &str = r#"**1. `add` 냐 `idea` 냐** — 가르는 것은 하나다. *지금 집을 것인가.*
+const FORKS: &str = r#"**1. `add` 냐 `idea` 냐** — 가르는 것은 *지금 집을 것인가* 다.
 집을 것이면 `moai add`, 나중에 볼 것이면 `moai idea add "떠오른 것"`.
 idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
 **적지 않고 넘어가는 것이 제일 나쁘다.**
+
+에픽 안에서 나온 것이면 그 앞에 하나를 더 묻는다 — *이 에픽이 내건 것이 이것
+없이도 이뤄지는가.* 아니면 그것은 나중에 볼 것이 아니라 안 끝난 이 일이다.
+지금 못 하더라도(사람의 결정을 기다린다, 옆이 그 파일을 쥐었다) `-e <에픽>`
+멤버로 세워 첫 칸에 둔다 — 남은 멤버가 있으면 에픽이 저절로 안 닫힌다.
+idea 로 내보내면 에픽이 제 목적을 못 이룬 채 `done` 으로 선다. 그 멤버를
+`defer` 하는 것은 그 목적을 접는다는 결정이다.
 
 **2. `defer` 냐 `done` 이냐** — 안 하기로 한 것을 `done` 으로 옮기지 않는다.
 `moai defer <id> -m "왜"` 는 칸도 종류도 안 바꾸고, `--undo` 로 같은 줄이
@@ -316,7 +323,8 @@ fn rules() -> String {
         r#"**1. {one}.** 집은 이슈 — 첫 칸을 떠났고 아직 안 닫힌 것
 (`in_progress`·`review`) — 가 초점이다.
 그 일을 하다 나온 것은 같은 에픽 안(`-e <에픽>`)이나 그 일의 자식
-(`--parent <id>`)으로 만든다. 지금 할 일이 아니면 `moai idea add` 로 담는다 —
+(`--parent <id>`)으로 만든다. 에픽이 내건 것이 이것 없이 안 이뤄지면 지금 못
+해도 이 둘 중 하나다(갈림길 1). 지금 할 일이 아니면 `moai idea add` 로 담는다 —
 idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇다 (거기서
 만들어지는 것은 에픽과 그 자식들이라 그 자체로 한 단위다).
 
@@ -395,7 +403,8 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 1. `moai status` 로 이미 있는 에픽을 본다. 겹칠 것 같으면 `moai show -g <키워드>`.
 2. 갈림길 3 대로 쪼갠 안을 한 번 보여주고, "좋다" 를 받으면 한 번에 만든다.
 3. `moai mv <id> in_progress` 로 집고, 끝나면 `done` 으로 옮긴다.
-4. 작업 중 발견한 것 중 지금 범위가 아닌 것은 `moai idea add` 로 담아 둔다.
+4. 작업 중 발견한 것 중 지금 범위가 아닌 것은 `moai idea add` 로 담아 둔다 — 에픽이 내건
+   것이면 지금 못 해도 idea 가 아니다(갈림길 1).
 5. 왜 그렇게 정했는지는 `moai note <id>` 로 이슈에 붙인다. 다음 세션이
    `moai show <id>` 로 그것을 읽는다.
 
@@ -776,7 +785,8 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
 영역**을 건드리는 idea 는 이번 바퀴에서 뺀다 — 둘이 같은 곳을 고치면 병합에서
 한쪽이 다른 쪽을 기다린다. **이번 바퀴에 함께 보내는 idea 끼리도 견준다** — 일꾼은
 받은 뒤에야 워크트리를 세우니, 방금 보낸 것은 아직 위 목록에 안 뜬다. 다음 idea 를
-보낼 때도 이 셈을 다시 한다.
+보낼 때도 이 셈을 다시 한다. 첫 칸 멤버만 남아 열린 에픽(브리프 7-1 이 남긴 것)은 `in_progress`
+로 떠도 집힌 것이 아니다 — 워크트리도 집은 멤버도 없으니 그것으로 idea 를 빼지 않는다.
 
 **보낸 idea 는 그 보고를 확인할 때까지 후보에서 뺀다.** 일꾼이 펼치기 전까지는
 `moai idea ls` 에 그대로 남아, 둘째 일꾼에게 같은 idea 가 또 간다.
@@ -872,6 +882,10 @@ PY
     moai show <에픽>                       펼친 에픽과 멤버가 done 인가
     git worktree list                      그 워크트리가 사라졌는가
 
+보고가 브리프 7-1 에서 첫 칸에 남겼다고 댄 멤버는 done 이 아니어도 맞다 — 그 멤버가 에픽을 열어
+두니 에픽도 done 이 아니다. 그 멤버는 idea 가 아니라 1 의 목록에 안 뜨니, 남긴 까닭(사람의
+결정·옆이 쥔 파일)과 함께 사람에게 전한다.
+
 보고가 맞고 **그 세션이 턴을 마쳤으면**(보고는 11 이고 일꾼은 12 를 마저 한다) 그 창이
 비우기 좋은 자리라고 짚어 줄 수 있다 — 일꾼도 제 창에서 그렇게 말한다(브리프 12). 셋이
 보는 것은 머지·닫기·워크트리뿐이라 노트까지 읽지는 않는다. **짚었으면 다음 idea 는 사람이
@@ -897,7 +911,7 @@ PY
 
 ```sh
 python3 - '<세션>' '<에픽>' '<내 이름>' '<루트>' <<'PY'
-import glob, json, os, subprocess, sys, time
+import glob, json, os, re, subprocess, sys, time
 name, epic, me, root = sys.argv[1:5]
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 erased = False
@@ -928,14 +942,87 @@ def parents(pid):
             return
         pid = int(out) if out.isdigit() else 0
 PROMPT = "\u276f"
+SGR = "\x1b\\[([0-9;:]*)m"
+def screen(pane, colour=False):
+    args = ["capture-pane", "-p"] + (["-e"] if colour else []) + ["-t", pane]
+    return tmux(*args).stdout.split("\n")
 def draft(pane):
-    lines = tmux("capture-pane", "-p", "-t", pane).stdout.split("\n")
+    lines = screen(pane)
     at = [i for i, l in enumerate(lines) if l.startswith(PROMPT)]
     box = []
     for line in lines[at[-1] :] if at else []:
         if line.startswith("─"):
-            return "\n".join(l.strip() for l in [box[0][1:]] + box[1:]).strip()
+            # 첫 줄은 프롬프트와 빈칸 하나, 이어지는 줄은 두 칸 — 그만큼만 벗겨 들여쓰기를 지킨다.
+            # 그 앞머리가 아닌 줄은 안 자른다 — 화면이 달리 그리는 날 두 글자가 말없이 깎이고,
+            # 옮긴 글이 사람에게 남은 단 하나의 복사라 줄어든 것을 아무도 못 본다.
+            head = (PROMPT + " ", "  ")
+            return "\n".join((l[2:] if l[:2] in head else l[1:] if l[:1] == PROMPT else l).rstrip() for l in box).strip("\n")
         box.append(line)
+def grey(code):
+    """이 글자색이 흐린 회색인가. 256색 회색 계단과 참색(r=g=b) 을 함께 본다 — Claude Code 의
+    색은 테마의 16진값이라, 판이 참색을 받으면 `38;5;244` 가 아니라 `38;2;136;136;136` 으로 온다.
+    검정 쪽은 회색이 아니다 — 밝은 테마는 사람이 친 글을 `rgb(0,0,0)` 으로 그린다."""
+    n = code.split(";")
+    if code == "90":
+        return True
+    if n[:2] == ["38", "5"] and len(n) == 3 and n[2].isdigit():
+        return int(n[2]) == 8 or 238 <= int(n[2]) <= 247
+    if n[:2] == ["38", "2"] and len(n) == 5 and all(p.isdigit() for p in n[2:]):
+        return len(set(n[2:])) == 1 and 64 <= int(n[2]) < 160
+    return False
+def sgr(code, was):
+    """SGR 한 조각을 (흐림 속성, 흐린 글자색, 뒤집힘) 으로 접는다. tmux 는 글자색을 따로 내보내고
+    (`\x1b[2m\x1b[37m`) 속성은 한 조각에 모은다 — 속성이 하나 빠지면 리셋을 앞에 붙여 `0;2`,
+    둘이 한꺼번에 서면 `2;3` 이다. 그래서 속성 조각은 낱낱이 읽는다."""
+    attr, fg, rev = was
+    n = code.split(";")
+    if n[0] in ("38", "39") or (len(n) == 1 and n[0].isdigit() and (30 <= int(n[0]) <= 37 or 90 <= int(n[0]) <= 97)):
+        return attr, grey(code), rev
+    if n[0] in ("48", "58"):
+        return was
+    for p in n:
+        if p in ("", "0"):
+            attr, fg, rev = False, False, False
+        elif p in ("2", "22"):
+            attr = p == "2"
+        elif p in ("7", "27"):
+            rev = p == "7"
+    return attr, fg, rev
+def dim_only(pane):
+    """입력 칸에 보이는 글이 모두 흐린 색인가 — 사람이 친 글이 아니라 Claude Code 의 제안 글이다."""
+    lines = screen(pane, True)
+    bare = lambda l: re.sub(SGR, "", l)
+    # 입력 칸은 `draft` 와 **같은 줄**에서 연다. `in` 으로 찾으면 사람이 친 글에 든 프롬프트
+    # 표시가 그 아래로 끌고 가 위의 사람 글을 못 본다. 상자 끝도 `startswith` 로 본다 — 사람이
+    # 붙여 넣은 줄 속의 붙임표 하나에 그 자리에서 참을 내면 사람의 글 뒤에 `/clear` 가 붙는다.
+    at = [i for i, l in enumerate(lines) if bare(l).startswith(PROMPT)]
+    if not at:
+        return False
+    # 색은 화면 맨 위부터 접는다 — tmux 는 줄이 바뀌어도 같은 색을 다시 내보내지 않아, 접힌
+    # 제안 글의 둘째 줄은 색 조각 없이 온다. 흐린 글자를 하나도 못 봤으면 참이 아니다.
+    was, prompt, cursor, seen = (False, False, False), True, True, False
+    for n, line in enumerate(lines):
+        if n > at[-1] and bare(line).startswith("─"):
+            return seen
+        for i, piece in enumerate(re.split(SGR, line)):
+            if i % 2:
+                was = sgr(piece, was)
+                continue
+            if n < at[-1]:
+                continue
+            if n == at[-1] and prompt and piece:
+                piece, prompt = piece[1:], False
+            # Claude Code 는 빈 칸의 커서를 제안 글 첫 글자에 뒤집어 그린다(흐림 없이). 프롬프트
+            # 줄의 첫 글자가 뒤집혀 있으면 그 한 칸만 커서로 빼고, 나머지는 그대로 센다.
+            if n == at[-1] and cursor and piece.strip():
+                cursor = False
+                if was[2] and not (was[0] or was[1]):
+                    piece = piece.lstrip()[1:]
+            if piece.strip():
+                if not (was[0] or was[1]):
+                    return False
+                seen = True
+    return False
 def looks(fmt):
     return tmux("display-message", "-p", "-t", pane, fmt).stdout.strip()
 QUIET = '#{{pane_in_mode}}#{{pane_synchronized}}'
@@ -979,7 +1066,23 @@ for _ in range(20):
     tmux("send-keys", "-t", pane, "C-e", "C-u", "DC")
     time.sleep(0.2)
 else:
-    skip("입력 칸을 못 비웠다")
+    # 지워 보고 가른다(사용자 결정): 마지막 한 번에도 안 지워진 글이 모두 흐린 색이면 사람이 친
+    # 것이 아니라 Claude Code 의 제안 글이다 — 그것은 `/clear` 앞에 붙지 않으니 그대로 친다.
+    # 치던 글과 같기를 바라지 않는다 — 사람의 글을 지운 빈 칸에 제안 글이 다시 서면, 치던 글은
+    # 이미 옮겼고 남은 것은 제안 글뿐이다.
+    rest = draft(pane)
+    if rest and rest == left and dim_only(pane):
+        if rest == kept:
+            print("위의 `치던 글` 은 흐린 제안 글이었다 — 사람이 친 것이 아니다")
+            erased = False
+            # 사람의 글이 아니니 상태줄에 "감독 창에 옮겼다" 고 말하지 않는다 — 그 말을 읽은 사람이
+            # 감독 창에서 제가 쓴 적 없는 글을 찾는다.
+            kept = ""
+    elif rest != "":
+        # 하나도 안 지워졌으면 그 글은 아직 그 칸에 있다 — "이미 지웠다" 고 하면 감독이 그 창에
+        # 그대로 있는 글을 사람에게 한 벌 더 돌려준다.
+        erased = rest != kept
+        skip("입력 칸을 못 비웠다")
 if (read(f) or {{}}).get("status") != "idle":
     skip("그새 idle 이 아니다")
 if looks(QUIET) != "00":
@@ -1024,12 +1127,41 @@ PY
   화면에서 프롬프트 표시(U+276F)가 선 마지막 줄로 읽는다. 그 화면도 세션 파일처럼 문서에 없는
   것이라, 못 읽으면 치지 않는 쪽으로 넘어진다. 지우다가 멈추면 `치던 글은 이미 지웠다` 가
   따라 나온다 — 그때는 옮긴 글을 그 창의 사람에게 돌려준다
+- **옮길 때 앞머리 두 칸만 벗긴다**(사용자 결정). 첫 줄은 프롬프트와 빈칸 하나, 이어지는 줄은
+  두 칸이고 나머지는 화면 그대로다 — 줄마다 다듬으면 들여쓴 코드가 납작해져 돌아간다.
+  그 앞머리가 아닌 줄은 **안 자른다** — 화면이 달리 그리는 날 두 글자가 말없이 깎이는데, 옮긴
+  글은 사람에게 남은 단 하나의 복사라 줄어든 것을 아무도 못 본다.
+  화면이 접은 줄과 사람이 친 줄바꿈은 가를 수 없으니, 옮긴 글에 줄바꿈이 하나 더 보일 수 있다
+- **안 지워지는 글은 지워 보고 가른다**(사용자 결정). Claude Code 가 빈 칸에 띄우는 흐린 제안
+  글은 사람이 친 것이 아니라 지워지지도 않는다. 스무 번 쳐도 그대로이고 그 글이 모두 흐린
+  색이면(`capture-pane -e`) 제안 글로 보고 `/clear` 를 친다 — 제안 글은 `/clear` 앞에 안 붙는다.
+  색으로만 가르지 않는 까닭은, 사람이 친 글을 흐리게 그리는 판이 있으면 그 글 뒤에 `/clear` 가
+  붙기 때문이다. 지워지는 글은 언제나 사람의 것으로 본다. Claude Code 는 빈 칸의 커서를 제안 글
+  첫 글자에 뒤집어 그리니 그 한 칸은 글로 안 센다. 사람의 글을 지운 빈 칸에 제안 글이 다시
+  서도 같다 — 치던 글은 이미 옮겼으니 그대로 친다
 - **비우기와 다음 배정을 한 호흡에 하지 않는다.** `/clear` 는 큐에 쌓인 글을 함께 지운다.
   스크립트가 `비웠다` 를 낸 — 세션 id 가 바뀐 — 뒤에 다음 idea 를 보내고, `비웠는지 모른다`
   면 그 창이 어떤지 보기 전에는 보내지 않는다
 - **비웠으면 제 창에 한 줄 남긴다** — `<세션> 판 %N 을 비웠다 (<에픽>)`. 사람이 그 창을
   보다가 화면이 사라진 까닭을 감독 창에서 찾는다
-- **시험으로 살아 있는 일꾼의 창에 치지 않는다.** 제가 띄운 판(`tmux new-session -d`)에서 본다
+- **시험으로 살아 있는 일꾼의 창에 치지 않는다.** 시험할 판은 **떼어 낸 tmux 서버**에 띄우고,
+  그 서버에 닿는 호출 **모두** — `new-session`·`send-keys`·`capture-pane`·`display-message`·
+  `list-clients`·`kill-session` — 에 같은 이름을 준다. 이름에는 에픽 id 를 담아 옆 일꾼·리뷰
+  서브에이전트의 시험 서버와 안 겹치게 한다. 스크립트를 그 판에 돌릴 때는 `-L` 을 끼워 넣는
+  `tmux` 감싸개를 `PATH` 앞에 둔다 — 감싸개는 진짜 `tmux` 를 **절대 경로로** 불러야 제 자신을
+  다시 부르지 않는다. 스크립트 자체는 `env -u TMUX` 없이 부른다 — `$TMUX` 가 없으면 `tmux 밖이다`
+  로 건너뛴다
+
+      env -u TMUX tmux -L <고유 이름> new-session -d -s <판> …
+      env -u TMUX tmux -L <고유 이름> capture-pane -p -t <판>
+      mkdir -p <스크래치패드>/bin; printf '#!/bin/sh\nexec env -u TMUX %s -L <고유 이름> "$@"\n' "$(command -v tmux)" > <스크래치패드>/bin/tmux
+      chmod +x <스크래치패드>/bin/tmux; PATH=<스크래치패드>/bin:$PATH python3 - …      스크립트를 그 판에
+      env -u TMUX tmux -L <고유 이름> kill-server          치울 때 — 그 이름의 서버만 죽는다
+
+  **`-L`/`-S` 없는 `tmux kill-server`·`kill-session` 은 쓰지 않는다.** tmux 안에서 맨 `tmux` 는 `$TMUX` 를 따라
+  사람의 기본 서버로 가, 그 기계의 판과 세션이 모두 한꺼번에 죽는다. `TMUX_TMPDIR` 로는 안
+  갇힌다 — `$TMUX` 가 이긴다. 맨 `tmux new-session -d` 도 기본 서버에 판을 세우는 것이라 격리가
+  아니다 — 치우려면 기본 서버에 `kill-*` 를 쳐야 하고, 그 길로 서버 전체가 죽은 적이 있다
 
 ## 공유 루트
 
@@ -1051,6 +1183,17 @@ PY
 "#
     )
 }
+
+/// 되짚기(7-1)가 에픽 목적에 걸리는 idea 를 선 에픽의 멤버로 되찾는 줄(moai-l288).
+/// **이것도 promote 다**(moai-f3ml) — `add` 와 손 닫기로 적었던 판은 "idea 를 일감으로 바꾸는
+/// 길은 promote 하나" 를 어겼고, 그것을 지키던 시험에서 이 줄을 빼야 했다.
+///
+/// **`-C <루트>` 를 줄에 박는다.** 7-1 은 워크트리에서 치는데, 글로만 "4-1 대로" 라고 적고 줄을
+/// 맨 `moai` 로 두면 그대로 옮겨 친 줄이 워크트리의 `.moai` 에 멤버를 세운다 — 병합에서 스냅샷이
+/// 부딪히거나, 4-1 이 시키는 `git checkout -- .moai` 로 그 멤버가 사라진 채 에픽이 닫힌다.
+/// `<루트>` 는 감독이 채우는 자리라 받은 줄에 실제 자리가 박혀 온다. 다른 자리 이름은 그 목록과
+/// 겹치지 않는다 — 겹치면 맡긴 idea 의 값이 이 줄에 미리 박힌다(`<등급>` 과 같은 덫).
+const RECALL: &str = "moai -C <루트> idea promote <idea id> -e <에픽> --from -";
 
 /// 감독이 일꾼에게 `SendMessage` 로 싣는 글. **일꾼이 받는 것은 이것뿐이다** — 감독
 /// 스킬의 다른 절을 가리키면 일꾼에게 없는 글을 가리키는 것이라(첫 판의 "아래 공유
@@ -1095,10 +1238,19 @@ fn brief() -> String {
        자리다 — 워크트리 안에서 짐작하지 않는다. 스냅샷을 고치는 명령 전부(`add`·`idea add`·
        `note`·`mv`·`edit`·`defer`·`rm`·`idea promote` …)를 워크트리 안에서 맨 `moai` 로
        부르면 그 워크트리의 `.moai` 가 바뀌어, 병합할 때 스냅샷이 충돌한다
-       (합쳐도 남의 줄을 덮는다). 워크트리에서는 `moai -C <루트> <명령>` 으로 부르고,
-       **리뷰 서브에이전트에게도** 같은 말을 준다 — 넘긴 것을 담다가 그 줄을 워크트리에
-       적은 적이 있다. 이미 적었으면 `git checkout -- .moai` 로 되돌리고, 그 줄이 이미
-       커밋됐으면 그 커밋까지 되돌린 뒤 루트에서 다시 담는다
+       (합쳐도 남의 줄을 덮는다). 워크트리에서는 `moai -C <루트> <명령>` 으로 부르고, 에픽
+       도중 담는 idea 에는 `-e <에픽>` 을 붙인다 — 에픽을 열어 두지는 않고, 창을 비우거나 일을
+       이어받아도 7-1 이 그것으로 되찾는다. **리뷰 서브에이전트에게도** 같은 말을 준다 — 넘긴
+       것을 담다가 그 줄을 워크트리에 적은 적이 있다. 이미 적었으면 `git checkout -- .moai` 로
+       되돌리고, 그 줄이 이미 커밋됐으면 그 커밋까지 되돌린 뒤 루트에서 다시 담는다
+    4-2. **tmux 를 시험하면 떼어 낸 서버에서만 한다** — 모든 호출에 `env -u TMUX tmux -L <고유 이름>`.
+       이름에는 에픽 id 를 담아 옆 일꾼·리뷰 서브에이전트의 시험 서버와 안 겹치게 한다. `-S <소켓>`
+       도 되지만 소켓 경로는 유닉스 한도(100바이트 남짓)를 넘으면 안 서, 스크래치패드 안은 대개
+       너무 길다. `-L`/`-S` 없는 `kill-server`·`kill-session` 은 쓰지 않는다: tmux 안에서 맨 `tmux` 는
+       사람의 기본 서버로 가 모든 세션을 죽이고, `TMUX_TMPDIR` 로는 안 갇힌다. 속에서 `tmux` 를
+       부르는 스크립트는 손으로 `-L` 을 못 주니, 진짜 `tmux` 를 절대 경로로 부르며 `-L` 을 끼우는
+       감싸개를 `PATH` 앞에 두고 돌린다. 남이 띄운 판에는 키를 보내지 않는다.
+       **리뷰 서브에이전트에게도** 이 말을 준다 — 서버 전체를 죽인 것이 리뷰 서브에이전트였다
     5. 리뷰 이슈를 세워(규칙 3) `/code-review <등급> --fix`. 등급은 개발한 난이도로
        {levels} 에서 고른다 — 머리의 모델을 고른 그 잣대다.
 {rubric}
@@ -1119,6 +1271,19 @@ fn brief() -> String {
        자리도 든다. 리뷰 이슈를 따로 세운다. 막히면 5 의 길로 간다
          {review}
        이 줄도 워크트리에서 부르니 4-1 대로 `moai -C <루트>` 로 친다 — 5 의 리뷰 이슈도 같다
+    7-1. 병합 전에 에픽 도중 담은 idea(`moai -C <루트> show --type idea -e <에픽>` 과 이 창이
+       기억하는 것)와 리뷰가 넘긴 것을 되짚는다 — **에픽이 내건
+       것이 그것 없이도 이뤄지는가.** 아니면 idea 가 아니라 안 끝난 멤버다. 담을 때 "지금 할
+       일이 아니다" 로 가른 것에 이것이 섞인다 — 사람의 결정을 기다리던 것, 옆 일꾼이 그 파일을
+       쥐어 밖으로 뺀 것. 7 의 리뷰가 넘긴 것까지 보려고 7 뒤에 둔다. 그런 idea 는 선 에픽의
+       멤버로 펼친다 — 계획에는 `- 이슈` 줄만 적고, idea 는 저절로 닫히며 출처가 남는다. 워크트리에서
+       치니 줄에 루트를 박아 둔다(4-1). **그 idea 가 이미 done 이면 펼치지 않는다** — 누가 펼쳤거나
+       8 에서 돌아와 다시 도는 길이다. promote 는 닫힌 idea 도 또 펼쳐 같은 멤버가 둘 선다
+         {RECALL}
+       되찾은 멤버는 여기서 하지 않고 첫 칸에 둔 채 병합한다 — 7 의 리뷰를 안 지난 일이 병합에
+       섞이지 않고, 남은 멤버가 에픽을 열어 둔다. 그 멤버를 `defer` 하지 않는다. 미루면 에픽이
+       목적을 못 이룬 채 닫힌다. 7 의 리뷰는 그 멤버를 못 봤으니 12 의 `다음:` 노트에 적는다 —
+       그 멤버로 에픽을 닫는 창이 에픽 끝 리뷰를 다시 부른다
     8. ExitWorktree(keep) 로 루트로 돌아온다 — 워크트리 안에서 그것을 지우면 세션의
        자리가 사라진 디렉터리에 남아 감독이 다시는 이 세션을 루트로 못 본다.
        옆 세션과 병합이 겹치면 먼저 알린 뒤 루트에서 **한 번에** 병합한다.
@@ -1129,20 +1294,22 @@ fn brief() -> String {
        로 되돌리고 EnterWorktree(path) 로 워크트리에 돌아가 6 부터 다시 한다
     9. 병합이 실제로 끝났으면 루트에서 `git worktree remove .claude/worktrees/<에픽>` 과
        `git branch -d worktree-<에픽>` 으로 워크트리와 가지를 지운다
-    9-1. 닫기 전에 **무엇이 이 일을 했는지** 멤버마다 한 줄로 남긴다 — 머리의 제안이 아니라
+    9-1. 닫기 전에 **무엇이 이 일을 했는지** 이 창이 한 멤버마다 한 줄로 남긴다 — 7-1 에서 첫 칸에
+       남긴 멤버는 아무도 안 했으니 빼고. 머리의 제안이 아니라
        이 창에서 **실제로 돈 모델**이다. 아래 줄은 감독이 제안으로 채워 보냈으니, 올렸거나 창이
        처음부터 다른 모델이었으면 모델·난이도를 실제 것으로 고치고 까닭에 그 까닭을 적는다 —
        다음 사람이 "이만한 일에 무엇이 붙었나" 를 거기서 읽는다. 필드가 아니라 노트다:
        저널은 상태 계산에 안 읽히고 파생값은 저장하지 않는다
          moai note <멤버> "model: <모델> (<난이도> — <까닭>)"
     10. 그 뒤에 닫는다. **`moai mv <멤버> done` 은 그 병합이 실제로 끝난 뒤에만 친다** —
-       병합 전에 옮겼다가 되돌린 일꾼이 있었다. 워크트리가 남아 있으면 훅이 이 일을 옆
+       병합 전에 옮겼다가 되돌린 일꾼이 있었다. 7-1 에서 첫 칸에 남긴 멤버는 닫지 않는다 — 그
+       멤버가 에픽을 열어 둔다. 워크트리가 남아 있으면 훅이 이 일을 옆
        워크트리의 것으로 읽어 `-m` 없는 리뷰 닫기를 못 막는다. 리뷰 이슈는 무엇이
        나왔는지를 남기며 닫는다
 {close}
        시험 통과를 보고 2 처럼 경로를 준 커밋으로 루트에 남긴다
     11. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 펼친 에픽 id, 한두 줄 요약,
-       넘긴 것·새 idea
+       넘긴 것·새 idea, 7-1 에서 되찾아 첫 칸에 남긴 멤버
     12. 마지막으로 **창을 비워도 되는 때를 알린다.** 이어받을 한 줄을 남겨
        (`moai note <에픽> "다음: …"`) 2 처럼 경로를 준 커밋으로 루트에 담고 — 10 의 커밋 뒤에
        적은 줄이라 안 담으면 공유 루트에 남아 남의 커밋에 쓸려 들어간다 — 그 창을 보는 사람에게
@@ -1366,6 +1533,22 @@ mod tests {
         let review = make_review("--parent <에픽>");
         assert!(supervise.contains(&review), "에픽 리뷰를 규칙 3 의 줄로 안 세운다");
         assert!(!supervise.replace(&review, "").contains("moai add"), "감독이 promote 말고 다른 길을 가르친다");
+        // 되짚기(7-1)의 줄도 promote 이고, 루트의 그 에픽을 가리킨다. `brief.contains(RECALL)` 는
+        // 글이 그 상수를 끼워 넣는 한 늘 참이라, 줄의 모양은 여기서 따로 맨다 — `moai idea add` 로
+        // 바꿔 7-1 이 거꾸로 idea 로 내보내라고 가르쳐도 다른 시험은 다 초록이었다.
+        assert!(
+            RECALL.starts_with("moai -C <루트> idea promote ") && RECALL.contains(" -e <에픽> "),
+            "되짚기가 루트의 그 에픽에 promote 로 멤버를 세우지 않는다 — {RECALL}"
+        );
+        // 되짚기의 자리는 일꾼이 채운다 — 감독이 채우는 목록(3)에 같은 이름이 들면 맡긴 idea 의 값이
+        // 그 줄에 미리 박혀 온다(첫 판의 `<제목>` 이 그랬다). `<루트>` 만 감독이 채우라고 둔 자리다.
+        let list = supervise.lines().find(|l| l.ends_with("를 채워")).expect("감독이 채울 자리 목록이 없다");
+        let seven = supervise.find("\n    7-1.").expect("되짚기 걸음이 없다");
+        let eight = seven + supervise[seven..].find("\n    8.").expect("병합 걸음이 없다");
+        let slots = supervise[seven..eight].split('<').skip(1).filter_map(|s| s.split_once('>')).map(|(s, _)| format!("`<{s}>`"));
+        for slot in slots.filter(|s| s != "`<루트>`") {
+            assert!(!list.contains(&slot), "감독이 되짚기의 자리 {slot} 를 채운다 — {list}");
+        }
     }
 
     /// **일꾼이 받는 글(`brief`)에 첫 실행에서 넘어진 자리가 선다.** 감독 스킬의 다른
@@ -1411,7 +1594,26 @@ mod tests {
         let synced = brief.find("<본 가지> 를 받아").expect("본 가지를 받는 걸음이 없다");
         let reviewed = brief.find("/code-review <xhigh|max> --fix").expect("에픽 리뷰 걸음이 없다");
         assert!(synced < reviewed, "본 가지를 받기 전에 에픽 전체를 리뷰한다");
+        // 되짚기는 에픽 리뷰 뒤·병합 앞이다 — 앞에 두면 그 리뷰가 넘긴 것을 못 보고, 뒤에 두면
+        // 에픽이 이미 닫혔다. 없으면 에픽이 내건 것이 idea 로 빠진 채 닫힌다(moai-l288).
+        let recalled = brief.find("7-1. 병합 전에").expect("병합 전에 idea 를 되짚는 걸음이 없다");
+        let merged = brief.find("merge --no-ff").expect("병합 걸음이 없다");
+        assert!(reviewed < recalled && recalled < merged, "되짚기가 에픽 리뷰 뒤·병합 앞이 아니다");
+        assert!(brief.contains(RECALL), "되짚은 것을 멤버로 세우는 줄이 없다");
         assert!(brief.contains("이미 done 이면"), "누가 펼친 idea 를 또 펼쳐 에픽이 둘 선다");
+        for (piece, why) in [
+            // promote 는 닫힌 idea 도 또 펼친다 — 8 에서 돌아와 다시 도는 7-1 이 같은 멤버를 둘 세운다.
+            ("그 idea 가 이미 done 이면 펼치지 않는다", "다시 도는 되짚기가 닫힌 idea 를 또 펼친다"),
+            // 되짚을 것을 창의 기억에만 두면 창을 비우거나 일을 이어받은 창이 아무것도 못 찾는다.
+            ("`-e <에픽>` 을 붙인다", "도중 담는 idea 에 에픽을 안 달아 7-1 이 되찾지 못한다"),
+            ("show --type idea -e <에픽>", "도중 담은 idea 를 트래커에서 찾는 길이 없다"),
+            // 7-1 이 첫 칸에 남긴 멤버는 아무도 안 했다 — 9-1 이 그 멤버에 모델 줄을 적거나 10 이
+            // 그 멤버를 닫으면 통계가 거짓이 되거나 에픽이 목적을 못 이룬 채 닫힌다.
+            ("남긴 멤버는 아무도 안 했으니 빼고", "아무도 안 한 멤버에 일한 모델을 남긴다"),
+            ("첫 칸에 남긴 멤버는 닫지 않는다", "남긴 멤버를 10 에서 닫아 에픽이 목적을 못 이룬 채 닫힌다"),
+        ] {
+            assert!(brief.contains(piece), "{why} — {piece}");
+        }
         for (piece, why) in [
             ("거절한 세션", "맡기기를 거절한 세션을 빼라는 말이 없다"),
             ("함께 보내는 idea 끼리도", "같은 바퀴에 보낸 둘이 같은 곳을 고친다"),
@@ -1425,6 +1627,9 @@ mod tests {
             // 이어받은 일꾼만 워크트리의 `.moai` 를 고친다. **끝은 번호로 적지 않는다**:
             // `11 까지` 로 적어 둔 뒤 12 가 붙자 이어받은 일꾼만 12 를 못 받았다.
             ("3 의 글의 **4-1 부터 끝까지**", "거둔 일을 맡기는 글이 4-1 을 빼거나 끝을 자른다"),
+            // 7-1 이 첫 칸에 남긴 멤버는 에픽을 연 채 둔다 — 감독의 확인(5)이 그것을 어긋남으로 읽으면
+            // 시킨 대로 한 보고마다 그 창이 안 비워지고 다음 idea 도 못 받는다.
+            ("7-1 에서 첫 칸에 남겼다고 댄 멤버", "감독이 일부러 남긴 멤버를 어긋난 보고로 읽는다"),
         ] {
             assert!(supervise.contains(piece), "{why} — {piece}");
         }
@@ -1559,6 +1764,13 @@ mod tests {
             ("pane_in_mode", "사람이 복사 모드로 스크롤해 읽는 판에 친다 — `/` 가 검색을 연다"),
             ("pane_synchronized", "묶인 판에 쳐 옆 일꾼의 대화까지 지운다"),
             ("입력 칸을 못 비웠다", "치던 글 뒤에 /clear 가 붙어 프롬프트로 간다"),
+            // 부르는 자리로 찾는다 — `dim_only(pane)` 만 찾으면 `def` 줄이 먼저 걸려, 부르는 줄을
+            // 지워도 초록이다.
+            ("and dim_only(pane)", "흐린 제안 글에 막혀 창이 영영 안 비워진다"),
+            ("erased = rest != kept", "하나도 안 지운 글을 이미 지웠다고 해 사람에게 한 벌 더 돌려준다"),
+            ("def grey(code)", "참색(`38;2;…`)으로 그린 흐린 글을 못 알아봐 창이 안 비워진다"),
+            ("bare(l).startswith(PROMPT)", "사람이 친 글 속의 프롬프트 표시나 붙임표를 제안 글로 읽어 그 글 뒤에 /clear 가 붙는다"),
+            ("l[:2] in head", "옮긴 치던 글이 들여쓰기를 잃거나 앞머리 아닌 줄까지 두 글자 깎인다"),
             ("left is None", "입력 칸을 놓친 화면에 지우는 키를 계속 친다"),
             ("치던 글은 이미 지웠다", "지우다 멈추면 사람의 글이 말없이 사라진다"),
             ("list-clients", "상태줄의 한 줄이 일꾼의 판이 아니라 감독의 클라이언트에 뜬다"),
@@ -1586,6 +1798,121 @@ mod tests {
         let brief = brief();
         let twelve = brief.rfind("\n    12.").expect("창을 비우는 걸음이 없다");
         assert!(brief[twelve..].contains("감독이 보고를 확인하고 이 창에"), "일꾼이 감독이 비울 수 있다는 것을 모른다");
+    }
+
+    /// **흐린 제안 글은 tmux 가 실제로 내보내는 모양으로 가른다.** 위의 울타리는 함수가 있는지만
+    /// 보고 무엇을 읽는지는 못 본다. Claude Code(2.1.276)는 빈 칸의 커서를 제안 글 첫 글자에
+    /// `\x1b[7m` 으로 그리고 tmux 는 그 다음을 `0;2` 한 조각으로 내보내, 제안 글을 한 번도 못
+    /// 알아봤다. 거꾸로 밝은 테마의 사람 글(`38;2;0;0;0`)과 흐린 글 뒤의 `0;1` 은 흐린 글로 읽혔다.
+    /// 화면은 `capture-pane -e` 가 내는 모양 그대로 적고, 맨 캡처는 거기서 색만 뺀 것이다.
+    #[test]
+    fn the_supervisor_reads_the_dim_suggestion_as_tmux_captures_it() {
+        const HEAD: &str = r##"import re, sys
+SCREEN = [""]
+class Captured:
+    def __init__(self, stdout):
+        self.stdout = stdout
+def tmux(*args):
+    shown = SCREEN[0]
+    return Captured(shown if "-e" in args else re.sub("\x1b\\[[0-9;:]*m", "", shown))
+"##;
+        const CASES: &str = r##"
+E = "\x1b"
+RULE = E + "[38;5;244m" + "─" * 8 + E + "[39m"
+def box(*rows):
+    return "\n".join(["지난 대화", RULE] + list(rows) + [RULE, "  ? for shortcuts", ""])
+CASES = [
+    ("제안 글 — 첫 글자에 뒤집힌 커서, 이어서 0;2", box("❯ " + E + "[7mT" + E + "[0;2mry it" + E + "[0m"), True, "Try it"),
+    ("흐림 뒤에 글자색", box("❯ " + E + "[2m" + E + "[37mTry it" + E + "[0m"), True, "Try it"),
+    ("흐림과 기울임이 한 조각", box("❯ " + E + "[2;3mTry it" + E + "[0m"), True, "Try it"),
+    ("참색 회색", box("❯ " + E + "[38;2;136;136;136mTry it" + E + "[39m"), True, "Try it"),
+    ("접힌 제안 글의 둘째 줄은 색 조각 없이 온다", box("❯ " + E + "[2mTry this", "  and that" + E + "[0m"), True, "Try this\nand that"),
+    ("사람의 글", box("❯ hello"), False, "hello"),
+    ("밝은 테마의 사람 글", box("❯ " + E + "[38;2;0;0;0mhello" + E + "[39m"), False, "hello"),
+    ("흐린 글 뒤의 굵은 사람 글", box("❯ " + E + "[2mx" + E + "[0;1mBOLD" + E + "[0m"), False, "xBOLD"),
+    ("첫 줄에 프롬프트 표시만 친 사람 글", box("❯ ❯❯"), False, "❯❯"),
+    ("커서가 맨 앞에 선 사람 글", box("❯ " + E + "[7mh" + E + "[0mello"), False, "hello"),
+    ("커서 한 칸뿐인 사람 글", box("❯ " + E + "[7mx" + E + "[0m"), False, "x"),
+    ("흐린 첫 줄 아래의 사람 글", box("❯ " + E + "[2mTry" + E + "[0m", "  human"), False, "Try\nhuman"),
+    ("빈 칸", box("❯"), False, ""),
+    ("들여쓴 사람 글", box("❯ def f():", "      return 1"), False, "def f():\n    return 1"),
+]
+bad = []
+for why, shown, dim, text in CASES:
+    SCREEN[0] = shown
+    got = (dim_only("%1"), draft("%1"))
+    if got != (dim, text):
+        bad.append(why + " — " + repr(got) + ", 바란 것 " + repr((dim, text)))
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+"##;
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let supervise = supervise();
+        let open = supervise.find("python3 - '<세션>'").expect("비우는 스크립트가 없다");
+        let script = &supervise[open..open + supervise[open..].find("\nPY\n").expect("스크립트가 안 닫힌다")];
+        let from = script.find("PROMPT = ").expect("프롬프트 표시가 없다");
+        let to = script.find("def looks(").expect("판을 읽는 함수가 없다");
+        let program = format!("{HEAD}{}{CASES}", &script[from..to]);
+        let mut child = Command::new("python3")
+            .arg("-")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("python3 를 실행하지 못했다 — 이 시험에는 python3 가 있어야 한다");
+        child.stdin.take().expect("stdin").write_all(program.as_bytes()).expect("스크립트를 못 넘겼다");
+        let out = child.wait_with_output().expect("python3 가 안 끝났다");
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success(), "입력 칸을 잘못 읽는다:\n{said}");
+    }
+
+    /// **tmux 시험은 떼어 낸 서버에서만 가르친다**(2026-09-18 사용자 규칙). 스킬이 맨
+    /// `tmux new-session -d` 를 가르치던 날, 그 길을 따른 리뷰 서브에이전트가 맨 `kill-server` 로
+    /// 사람의 tmux 서버를 통째로 죽였다 — tmux 안에서는 `$TMUX` 가 `TMUX_TMPDIR` 를 이긴다.
+    /// 감독이 읽는 글과 일꾼이 받는 글 **둘 다** 에 서야 한다: 시험을 실제로 치는 것은 일꾼과 그
+    /// 리뷰 서브에이전트다.
+    #[test]
+    fn tmux_tests_are_taught_on_a_separate_server() {
+        let (supervise, brief) = (supervise(), brief());
+        // 감독 쪽은 **브리프를 뺀 글**로 잰다 — 감독 스킬은 브리프를 품어, 통째로 재면 브리프의
+        // 같은 줄이 감독 쪽에서 빠진 자리를 메운다. 브리프를 못 찾으면 `replace` 가 말없이 통째로
+        // 남기니 먼저 본다.
+        assert!(supervise.contains(&brief), "감독이 싣는 글이 brief 가 아니다");
+        let own = supervise.replace(&brief, "");
+        for (name, text) in [("감독 스킬", own.as_str()), ("일꾼 글", brief.as_str())] {
+            assert!(text.contains("env -u TMUX tmux -L"), "{name}: 떼어 낸 서버로 시험하라는 말이 없다");
+            assert!(text.contains("`-L`/`-S` 없는"), "{name}: 맨 kill-server 를 막는 말이 없다");
+            assert!(text.contains("TMUX_TMPDIR"), "{name}: TMUX_TMPDIR 로 안 갇힌다는 말이 없다");
+            // 속에서 `tmux` 를 부르는 스크립트(5-1)에는 손으로 `-L` 을 못 준다 — 그것을 시험하는
+            // 일꾼에게도 가둘 길이 있어야 하고, 그 감싸개가 PATH 로 제 자신을 부르면 끝나지 않는다.
+            assert!(text.contains("감싸개") && text.contains("절대 경로"), "{name}: 스크립트를 떼어 낸 서버에 돌릴 길이 없다");
+        }
+        assert!(brief.contains("**리뷰 서브에이전트에게도** 이 말을 준다"), "리뷰 서브에이전트가 tmux 규칙을 못 받는다");
+        // 시험용 판에 닿는 명령은 모두 떼어 낸 서버에 선다 — 셸 줄의 낱말 `tmux` 와 `` `tmux …` ``
+        // 로 적은 글을 함께 본다. 줄 머리로 가르지 않는다: 서버를 죽인 한 줄이
+        // `TMUX_TMPDIR=… tmux kill-server` 였다. 맨 명령을 **하지 말라고** 적은 줄(`없는`·`맨 `)만
+        // 뺀다. 본 기능의 `tmux("send-keys", …)` 는 낱말이 `tmux` 가 아니라 안 걸린다 — 실제 일꾼
+        // 판을 비우는 그쪽은 기본 서버가 맞다.
+        const SERVER: [&str; 7] =
+            ["new-session", "kill-server", "kill-session", "send-keys", "capture-pane", "display-message", "list-clients"];
+        let isolated = |cmd: &str| {
+            let words: Vec<&str> = cmd.split_whitespace().collect();
+            words.iter().enumerate().filter(|(_, w)| **w == "tmux").all(|(t, _)| {
+                // `-L`/`-S` 는 하위 명령 **앞**에 서야 서버를 고른다 — 뒤에 서면 그 명령의 깃발이다.
+                words[t..].iter().position(|w| SERVER.contains(w)).is_none_or(|sub| {
+                    words[t..t + sub].iter().any(|w| w.starts_with("-L") || w.starts_with("-S"))
+                })
+            })
+        };
+        for line in supervise.lines() {
+            let spans = line.split('`').skip(1).step_by(2);
+            for cmd in std::iter::once(line).chain(spans) {
+                let warned = line.contains("없는") || line.contains("맨 ");
+                assert!(isolated(cmd) || warned, "기본 서버를 쓰는 tmux 를 가르친다 — {}", line.trim());
+            }
+        }
+        assert!(!supervise.contains("판(`tmux new-session -d`)"), "맨 new-session 을 격리라고 가르친다");
     }
 
     /// **일꾼이 마지막 자이고, 일한 모델은 닫을 때 남는다**(moai-lzfq, 2026-09-15 사용자 결정).

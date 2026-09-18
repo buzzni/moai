@@ -4821,6 +4821,58 @@ fn a_rehearsed_promote_still_speaks_json() {
     assert_eq!(issues(s.path()), before, "연습인데 썼다");
 }
 
+/// **선 에픽에 멤버로 펼친다**(`-e`, moai-f3ml). 에픽이 내건 것이 idea 로 밖에 나가
+/// 있던 것을 되찾는 자리라, 새 에픽이 서면 그 에픽이 목적을 못 이룬 채 닫힌다.
+/// 길이 `promote` 하나로 남아야 idea 가 저절로 닫히고 출처가 저널에 선다.
+#[test]
+fn promote_can_pour_into_a_standing_epic() {
+    let s = init("ideainto");
+    let epic = ok(s.path(), &["epic", "add", "선 에픽", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["idea", "add", "밖에 나간 것", "-q"]).trim().to_string();
+    let before = issues(s.path()).lines().filter(|l| l.contains(r#""kind":"epic""#)).count();
+
+    let out = from_stdin(s.path(), &["idea", "promote", &id, "-e", &epic, "--from", "-"], "- [p1] 되찾은 일\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let after = issues(s.path());
+    assert_eq!(after.lines().filter(|l| l.contains(r#""kind":"epic""#)).count(), before, "새 에픽이 섰다");
+    let member = after.lines().find(|l| l.contains("되찾은 일")).expect("멤버가 안 섰다");
+    assert!(member.contains(&format!(r#""epic":"{epic}""#)), "에픽에 안 들었다 — {member}");
+    assert!(line_of(s.path(), &id).contains(r#""status":"done""#), "idea 가 안 닫혔다");
+    // 출처는 멤버에 적힌다 — 에픽은 이 idea 에서 나온 것이 아니다.
+    let from_here = format!("{id} 에서 펼쳤다");
+    let log = journal(s.path());
+    let noted: Vec<&str> = log.lines().filter(|l| l.contains(&from_here)).collect();
+    assert_eq!(noted.len(), 1, "{noted:?}");
+    assert!(!noted[0].contains(&format!(r#""id":"{epic}""#)), "선 에픽에 출처를 적었다 — {}", noted[0]);
+}
+
+/// 선 에픽에 펼치는 계획에 `#` 줄은 설 자리가 없다. 받아 주면 에픽이 하나 더 서거나
+/// 조용히 버려지는데, 어느 쪽이든 사람이 적은 것과 다르다. 없는 것·에픽 아닌 것도
+/// 거절한다 — idea 가 닫히므로 틀린 자리에 펼친 것을 되돌릴 길이 도구 밖에만 남는다.
+#[test]
+fn promote_into_refuses_what_it_cannot_honour() {
+    let s = init("ideaintobad");
+    let epic = ok(s.path(), &["epic", "add", "선 에픽", "-q"]).trim().to_string();
+    let work = add(s.path(), &["그냥 일"]);
+    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let before = issues(s.path());
+    for (target, plan, why) in [
+        (epic.as_str(), "# 또 에픽\n- 가\n", "`#` 줄"),
+        ("t-none", "- 가\n", "없는 에픽"),
+        (work.as_str(), "- 가\n", "에픽 아닌 것"),
+    ] {
+        for dry in [false, true] {
+            let mut args = vec!["idea", "promote", &id, "-e", target, "--from", "-"];
+            if dry {
+                args.push("--dry-run");
+            }
+            let out = from_stdin(s.path(), &args, plan);
+            assert!(!out.status.success(), "{why} 을 받았다 (dry={dry})");
+        }
+    }
+    assert_eq!(issues(s.path()), before, "거절했는데 썼다");
+}
+
 /// idea 가 아닌 것은 펼치지 않는다. 조용히 받아 주면 이슈 하나가 까닭 없이
 /// 닫히고, 그 까닭은 저널에만 남는다.
 #[test]

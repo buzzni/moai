@@ -94,7 +94,8 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
 영역**을 건드리는 idea 는 이번 바퀴에서 뺀다 — 둘이 같은 곳을 고치면 병합에서
 한쪽이 다른 쪽을 기다린다. **이번 바퀴에 함께 보내는 idea 끼리도 견준다** — 일꾼은
 받은 뒤에야 워크트리를 세우니, 방금 보낸 것은 아직 위 목록에 안 뜬다. 다음 idea 를
-보낼 때도 이 셈을 다시 한다.
+보낼 때도 이 셈을 다시 한다. 첫 칸 멤버만 남아 열린 에픽(브리프 7-1 이 남긴 것)은 `in_progress`
+로 떠도 집힌 것이 아니다 — 워크트리도 집은 멤버도 없으니 그것으로 idea 를 빼지 않는다.
 
 **보낸 idea 는 그 보고를 확인할 때까지 후보에서 뺀다.** 일꾼이 펼치기 전까지는
 `moai idea ls` 에 그대로 남아, 둘째 일꾼에게 같은 idea 가 또 간다.
@@ -205,10 +206,19 @@ PY
        자리다 — 워크트리 안에서 짐작하지 않는다. 스냅샷을 고치는 명령 전부(`add`·`idea add`·
        `note`·`mv`·`edit`·`defer`·`rm`·`idea promote` …)를 워크트리 안에서 맨 `moai` 로
        부르면 그 워크트리의 `.moai` 가 바뀌어, 병합할 때 스냅샷이 충돌한다
-       (합쳐도 남의 줄을 덮는다). 워크트리에서는 `moai -C <루트> <명령>` 으로 부르고,
-       **리뷰 서브에이전트에게도** 같은 말을 준다 — 넘긴 것을 담다가 그 줄을 워크트리에
-       적은 적이 있다. 이미 적었으면 `git checkout -- .moai` 로 되돌리고, 그 줄이 이미
-       커밋됐으면 그 커밋까지 되돌린 뒤 루트에서 다시 담는다
+       (합쳐도 남의 줄을 덮는다). 워크트리에서는 `moai -C <루트> <명령>` 으로 부르고, 에픽
+       도중 담는 idea 에는 `-e <에픽>` 을 붙인다 — 에픽을 열어 두지는 않고, 창을 비우거나 일을
+       이어받아도 7-1 이 그것으로 되찾는다. **리뷰 서브에이전트에게도** 같은 말을 준다 — 넘긴
+       것을 담다가 그 줄을 워크트리에 적은 적이 있다. 이미 적었으면 `git checkout -- .moai` 로
+       되돌리고, 그 줄이 이미 커밋됐으면 그 커밋까지 되돌린 뒤 루트에서 다시 담는다
+    4-2. **tmux 를 시험하면 떼어 낸 서버에서만 한다** — 모든 호출에 `env -u TMUX tmux -L <고유 이름>`.
+       이름에는 에픽 id 를 담아 옆 일꾼·리뷰 서브에이전트의 시험 서버와 안 겹치게 한다. `-S <소켓>`
+       도 되지만 소켓 경로는 유닉스 한도(100바이트 남짓)를 넘으면 안 서, 스크래치패드 안은 대개
+       너무 길다. `-L`/`-S` 없는 `kill-server`·`kill-session` 은 쓰지 않는다: tmux 안에서 맨 `tmux` 는
+       사람의 기본 서버로 가 모든 세션을 죽이고, `TMUX_TMPDIR` 로는 안 갇힌다. 속에서 `tmux` 를
+       부르는 스크립트는 손으로 `-L` 을 못 주니, 진짜 `tmux` 를 절대 경로로 부르며 `-L` 을 끼우는
+       감싸개를 `PATH` 앞에 두고 돌린다. 남이 띄운 판에는 키를 보내지 않는다.
+       **리뷰 서브에이전트에게도** 이 말을 준다 — 서버 전체를 죽인 것이 리뷰 서브에이전트였다
     5. 리뷰 이슈를 세워(규칙 3) `/code-review <등급> --fix`. 등급은 개발한 난이도로
        `low`·`medium`·`high` 에서 고른다 — 머리의 모델을 고른 그 잣대다.
        `low` — 글·주석·한 줄 고침, 동작이 안 바뀐다
@@ -231,6 +241,19 @@ PY
        자리도 든다. 리뷰 이슈를 따로 세운다. 막히면 5 의 길로 간다
          moai add "리뷰 — <무엇을 보는가>" -t review --parent <에픽> -b "<무엇을 왜 보는가>"
        이 줄도 워크트리에서 부르니 4-1 대로 `moai -C <루트>` 로 친다 — 5 의 리뷰 이슈도 같다
+    7-1. 병합 전에 에픽 도중 담은 idea(`moai -C <루트> show --type idea -e <에픽>` 과 이 창이
+       기억하는 것)와 리뷰가 넘긴 것을 되짚는다 — **에픽이 내건
+       것이 그것 없이도 이뤄지는가.** 아니면 idea 가 아니라 안 끝난 멤버다. 담을 때 "지금 할
+       일이 아니다" 로 가른 것에 이것이 섞인다 — 사람의 결정을 기다리던 것, 옆 일꾼이 그 파일을
+       쥐어 밖으로 뺀 것. 7 의 리뷰가 넘긴 것까지 보려고 7 뒤에 둔다. 그런 idea 는 선 에픽의
+       멤버로 펼친다 — 계획에는 `- 이슈` 줄만 적고, idea 는 저절로 닫히며 출처가 남는다. 워크트리에서
+       치니 줄에 루트를 박아 둔다(4-1). **그 idea 가 이미 done 이면 펼치지 않는다** — 누가 펼쳤거나
+       8 에서 돌아와 다시 도는 길이다. promote 는 닫힌 idea 도 또 펼쳐 같은 멤버가 둘 선다
+         moai -C <루트> idea promote <idea id> -e <에픽> --from -
+       되찾은 멤버는 여기서 하지 않고 첫 칸에 둔 채 병합한다 — 7 의 리뷰를 안 지난 일이 병합에
+       섞이지 않고, 남은 멤버가 에픽을 열어 둔다. 그 멤버를 `defer` 하지 않는다. 미루면 에픽이
+       목적을 못 이룬 채 닫힌다. 7 의 리뷰는 그 멤버를 못 봤으니 12 의 `다음:` 노트에 적는다 —
+       그 멤버로 에픽을 닫는 창이 에픽 끝 리뷰를 다시 부른다
     8. ExitWorktree(keep) 로 루트로 돌아온다 — 워크트리 안에서 그것을 지우면 세션의
        자리가 사라진 디렉터리에 남아 감독이 다시는 이 세션을 루트로 못 본다.
        옆 세션과 병합이 겹치면 먼저 알린 뒤 루트에서 **한 번에** 병합한다.
@@ -241,21 +264,23 @@ PY
        로 되돌리고 EnterWorktree(path) 로 워크트리에 돌아가 6 부터 다시 한다
     9. 병합이 실제로 끝났으면 루트에서 `git worktree remove .claude/worktrees/<에픽>` 과
        `git branch -d worktree-<에픽>` 으로 워크트리와 가지를 지운다
-    9-1. 닫기 전에 **무엇이 이 일을 했는지** 멤버마다 한 줄로 남긴다 — 머리의 제안이 아니라
+    9-1. 닫기 전에 **무엇이 이 일을 했는지** 이 창이 한 멤버마다 한 줄로 남긴다 — 7-1 에서 첫 칸에
+       남긴 멤버는 아무도 안 했으니 빼고. 머리의 제안이 아니라
        이 창에서 **실제로 돈 모델**이다. 아래 줄은 감독이 제안으로 채워 보냈으니, 올렸거나 창이
        처음부터 다른 모델이었으면 모델·난이도를 실제 것으로 고치고 까닭에 그 까닭을 적는다 —
        다음 사람이 "이만한 일에 무엇이 붙었나" 를 거기서 읽는다. 필드가 아니라 노트다:
        저널은 상태 계산에 안 읽히고 파생값은 저장하지 않는다
          moai note <멤버> "model: <모델> (<난이도> — <까닭>)"
     10. 그 뒤에 닫는다. **`moai mv <멤버> done` 은 그 병합이 실제로 끝난 뒤에만 친다** —
-       병합 전에 옮겼다가 되돌린 일꾼이 있었다. 워크트리가 남아 있으면 훅이 이 일을 옆
+       병합 전에 옮겼다가 되돌린 일꾼이 있었다. 7-1 에서 첫 칸에 남긴 멤버는 닫지 않는다 — 그
+       멤버가 에픽을 열어 둔다. 워크트리가 남아 있으면 훅이 이 일을 옆
        워크트리의 것으로 읽어 `-m` 없는 리뷰 닫기를 못 막는다. 리뷰 이슈는 무엇이
        나왔는지를 남기며 닫는다
          moai note <리뷰 id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로
          moai mv <리뷰 id> done -m "<무엇을 반영하고 무엇을 넘겼나>"
        시험 통과를 보고 2 처럼 경로를 준 커밋으로 루트에 남긴다
     11. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 펼친 에픽 id, 한두 줄 요약,
-       넘긴 것·새 idea
+       넘긴 것·새 idea, 7-1 에서 되찾아 첫 칸에 남긴 멤버
     12. 마지막으로 **창을 비워도 되는 때를 알린다.** 이어받을 한 줄을 남겨
        (`moai note <에픽> "다음: …"`) 2 처럼 경로를 준 커밋으로 루트에 담고 — 10 의 커밋 뒤에
        적은 줄이라 안 담으면 공유 루트에 남아 남의 커밋에 쓸려 들어간다 — 그 창을 보는 사람에게
@@ -283,6 +308,10 @@ PY
     moai show <에픽>                       펼친 에픽과 멤버가 done 인가
     git worktree list                      그 워크트리가 사라졌는가
 
+보고가 브리프 7-1 에서 첫 칸에 남겼다고 댄 멤버는 done 이 아니어도 맞다 — 그 멤버가 에픽을 열어
+두니 에픽도 done 이 아니다. 그 멤버는 idea 가 아니라 1 의 목록에 안 뜨니, 남긴 까닭(사람의
+결정·옆이 쥔 파일)과 함께 사람에게 전한다.
+
 보고가 맞고 **그 세션이 턴을 마쳤으면**(보고는 11 이고 일꾼은 12 를 마저 한다) 그 창이
 비우기 좋은 자리라고 짚어 줄 수 있다 — 일꾼도 제 창에서 그렇게 말한다(브리프 12). 셋이
 보는 것은 머지·닫기·워크트리뿐이라 노트까지 읽지는 않는다. **짚었으면 다음 idea 는 사람이
@@ -308,7 +337,7 @@ PY
 
 ```sh
 python3 - '<세션>' '<에픽>' '<내 이름>' '<루트>' <<'PY'
-import glob, json, os, subprocess, sys, time
+import glob, json, os, re, subprocess, sys, time
 name, epic, me, root = sys.argv[1:5]
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 erased = False
@@ -339,14 +368,87 @@ def parents(pid):
             return
         pid = int(out) if out.isdigit() else 0
 PROMPT = "\u276f"
+SGR = "\x1b\\[([0-9;:]*)m"
+def screen(pane, colour=False):
+    args = ["capture-pane", "-p"] + (["-e"] if colour else []) + ["-t", pane]
+    return tmux(*args).stdout.split("\n")
 def draft(pane):
-    lines = tmux("capture-pane", "-p", "-t", pane).stdout.split("\n")
+    lines = screen(pane)
     at = [i for i, l in enumerate(lines) if l.startswith(PROMPT)]
     box = []
     for line in lines[at[-1] :] if at else []:
         if line.startswith("─"):
-            return "\n".join(l.strip() for l in [box[0][1:]] + box[1:]).strip()
+            # 첫 줄은 프롬프트와 빈칸 하나, 이어지는 줄은 두 칸 — 그만큼만 벗겨 들여쓰기를 지킨다.
+            # 그 앞머리가 아닌 줄은 안 자른다 — 화면이 달리 그리는 날 두 글자가 말없이 깎이고,
+            # 옮긴 글이 사람에게 남은 단 하나의 복사라 줄어든 것을 아무도 못 본다.
+            head = (PROMPT + " ", "  ")
+            return "\n".join((l[2:] if l[:2] in head else l[1:] if l[:1] == PROMPT else l).rstrip() for l in box).strip("\n")
         box.append(line)
+def grey(code):
+    """이 글자색이 흐린 회색인가. 256색 회색 계단과 참색(r=g=b) 을 함께 본다 — Claude Code 의
+    색은 테마의 16진값이라, 판이 참색을 받으면 `38;5;244` 가 아니라 `38;2;136;136;136` 으로 온다.
+    검정 쪽은 회색이 아니다 — 밝은 테마는 사람이 친 글을 `rgb(0,0,0)` 으로 그린다."""
+    n = code.split(";")
+    if code == "90":
+        return True
+    if n[:2] == ["38", "5"] and len(n) == 3 and n[2].isdigit():
+        return int(n[2]) == 8 or 238 <= int(n[2]) <= 247
+    if n[:2] == ["38", "2"] and len(n) == 5 and all(p.isdigit() for p in n[2:]):
+        return len(set(n[2:])) == 1 and 64 <= int(n[2]) < 160
+    return False
+def sgr(code, was):
+    """SGR 한 조각을 (흐림 속성, 흐린 글자색, 뒤집힘) 으로 접는다. tmux 는 글자색을 따로 내보내고
+    (`\x1b[2m\x1b[37m`) 속성은 한 조각에 모은다 — 속성이 하나 빠지면 리셋을 앞에 붙여 `0;2`,
+    둘이 한꺼번에 서면 `2;3` 이다. 그래서 속성 조각은 낱낱이 읽는다."""
+    attr, fg, rev = was
+    n = code.split(";")
+    if n[0] in ("38", "39") or (len(n) == 1 and n[0].isdigit() and (30 <= int(n[0]) <= 37 or 90 <= int(n[0]) <= 97)):
+        return attr, grey(code), rev
+    if n[0] in ("48", "58"):
+        return was
+    for p in n:
+        if p in ("", "0"):
+            attr, fg, rev = False, False, False
+        elif p in ("2", "22"):
+            attr = p == "2"
+        elif p in ("7", "27"):
+            rev = p == "7"
+    return attr, fg, rev
+def dim_only(pane):
+    """입력 칸에 보이는 글이 모두 흐린 색인가 — 사람이 친 글이 아니라 Claude Code 의 제안 글이다."""
+    lines = screen(pane, True)
+    bare = lambda l: re.sub(SGR, "", l)
+    # 입력 칸은 `draft` 와 **같은 줄**에서 연다. `in` 으로 찾으면 사람이 친 글에 든 프롬프트
+    # 표시가 그 아래로 끌고 가 위의 사람 글을 못 본다. 상자 끝도 `startswith` 로 본다 — 사람이
+    # 붙여 넣은 줄 속의 붙임표 하나에 그 자리에서 참을 내면 사람의 글 뒤에 `/clear` 가 붙는다.
+    at = [i for i, l in enumerate(lines) if bare(l).startswith(PROMPT)]
+    if not at:
+        return False
+    # 색은 화면 맨 위부터 접는다 — tmux 는 줄이 바뀌어도 같은 색을 다시 내보내지 않아, 접힌
+    # 제안 글의 둘째 줄은 색 조각 없이 온다. 흐린 글자를 하나도 못 봤으면 참이 아니다.
+    was, prompt, cursor, seen = (False, False, False), True, True, False
+    for n, line in enumerate(lines):
+        if n > at[-1] and bare(line).startswith("─"):
+            return seen
+        for i, piece in enumerate(re.split(SGR, line)):
+            if i % 2:
+                was = sgr(piece, was)
+                continue
+            if n < at[-1]:
+                continue
+            if n == at[-1] and prompt and piece:
+                piece, prompt = piece[1:], False
+            # Claude Code 는 빈 칸의 커서를 제안 글 첫 글자에 뒤집어 그린다(흐림 없이). 프롬프트
+            # 줄의 첫 글자가 뒤집혀 있으면 그 한 칸만 커서로 빼고, 나머지는 그대로 센다.
+            if n == at[-1] and cursor and piece.strip():
+                cursor = False
+                if was[2] and not (was[0] or was[1]):
+                    piece = piece.lstrip()[1:]
+            if piece.strip():
+                if not (was[0] or was[1]):
+                    return False
+                seen = True
+    return False
 def looks(fmt):
     return tmux("display-message", "-p", "-t", pane, fmt).stdout.strip()
 QUIET = '#{pane_in_mode}#{pane_synchronized}'
@@ -390,7 +492,23 @@ for _ in range(20):
     tmux("send-keys", "-t", pane, "C-e", "C-u", "DC")
     time.sleep(0.2)
 else:
-    skip("입력 칸을 못 비웠다")
+    # 지워 보고 가른다(사용자 결정): 마지막 한 번에도 안 지워진 글이 모두 흐린 색이면 사람이 친
+    # 것이 아니라 Claude Code 의 제안 글이다 — 그것은 `/clear` 앞에 붙지 않으니 그대로 친다.
+    # 치던 글과 같기를 바라지 않는다 — 사람의 글을 지운 빈 칸에 제안 글이 다시 서면, 치던 글은
+    # 이미 옮겼고 남은 것은 제안 글뿐이다.
+    rest = draft(pane)
+    if rest and rest == left and dim_only(pane):
+        if rest == kept:
+            print("위의 `치던 글` 은 흐린 제안 글이었다 — 사람이 친 것이 아니다")
+            erased = False
+            # 사람의 글이 아니니 상태줄에 "감독 창에 옮겼다" 고 말하지 않는다 — 그 말을 읽은 사람이
+            # 감독 창에서 제가 쓴 적 없는 글을 찾는다.
+            kept = ""
+    elif rest != "":
+        # 하나도 안 지워졌으면 그 글은 아직 그 칸에 있다 — "이미 지웠다" 고 하면 감독이 그 창에
+        # 그대로 있는 글을 사람에게 한 벌 더 돌려준다.
+        erased = rest != kept
+        skip("입력 칸을 못 비웠다")
 if (read(f) or {}).get("status") != "idle":
     skip("그새 idle 이 아니다")
 if looks(QUIET) != "00":
@@ -435,12 +553,41 @@ PY
   화면에서 프롬프트 표시(U+276F)가 선 마지막 줄로 읽는다. 그 화면도 세션 파일처럼 문서에 없는
   것이라, 못 읽으면 치지 않는 쪽으로 넘어진다. 지우다가 멈추면 `치던 글은 이미 지웠다` 가
   따라 나온다 — 그때는 옮긴 글을 그 창의 사람에게 돌려준다
+- **옮길 때 앞머리 두 칸만 벗긴다**(사용자 결정). 첫 줄은 프롬프트와 빈칸 하나, 이어지는 줄은
+  두 칸이고 나머지는 화면 그대로다 — 줄마다 다듬으면 들여쓴 코드가 납작해져 돌아간다.
+  그 앞머리가 아닌 줄은 **안 자른다** — 화면이 달리 그리는 날 두 글자가 말없이 깎이는데, 옮긴
+  글은 사람에게 남은 단 하나의 복사라 줄어든 것을 아무도 못 본다.
+  화면이 접은 줄과 사람이 친 줄바꿈은 가를 수 없으니, 옮긴 글에 줄바꿈이 하나 더 보일 수 있다
+- **안 지워지는 글은 지워 보고 가른다**(사용자 결정). Claude Code 가 빈 칸에 띄우는 흐린 제안
+  글은 사람이 친 것이 아니라 지워지지도 않는다. 스무 번 쳐도 그대로이고 그 글이 모두 흐린
+  색이면(`capture-pane -e`) 제안 글로 보고 `/clear` 를 친다 — 제안 글은 `/clear` 앞에 안 붙는다.
+  색으로만 가르지 않는 까닭은, 사람이 친 글을 흐리게 그리는 판이 있으면 그 글 뒤에 `/clear` 가
+  붙기 때문이다. 지워지는 글은 언제나 사람의 것으로 본다. Claude Code 는 빈 칸의 커서를 제안 글
+  첫 글자에 뒤집어 그리니 그 한 칸은 글로 안 센다. 사람의 글을 지운 빈 칸에 제안 글이 다시
+  서도 같다 — 치던 글은 이미 옮겼으니 그대로 친다
 - **비우기와 다음 배정을 한 호흡에 하지 않는다.** `/clear` 는 큐에 쌓인 글을 함께 지운다.
   스크립트가 `비웠다` 를 낸 — 세션 id 가 바뀐 — 뒤에 다음 idea 를 보내고, `비웠는지 모른다`
   면 그 창이 어떤지 보기 전에는 보내지 않는다
 - **비웠으면 제 창에 한 줄 남긴다** — `<세션> 판 %N 을 비웠다 (<에픽>)`. 사람이 그 창을
   보다가 화면이 사라진 까닭을 감독 창에서 찾는다
-- **시험으로 살아 있는 일꾼의 창에 치지 않는다.** 제가 띄운 판(`tmux new-session -d`)에서 본다
+- **시험으로 살아 있는 일꾼의 창에 치지 않는다.** 시험할 판은 **떼어 낸 tmux 서버**에 띄우고,
+  그 서버에 닿는 호출 **모두** — `new-session`·`send-keys`·`capture-pane`·`display-message`·
+  `list-clients`·`kill-session` — 에 같은 이름을 준다. 이름에는 에픽 id 를 담아 옆 일꾼·리뷰
+  서브에이전트의 시험 서버와 안 겹치게 한다. 스크립트를 그 판에 돌릴 때는 `-L` 을 끼워 넣는
+  `tmux` 감싸개를 `PATH` 앞에 둔다 — 감싸개는 진짜 `tmux` 를 **절대 경로로** 불러야 제 자신을
+  다시 부르지 않는다. 스크립트 자체는 `env -u TMUX` 없이 부른다 — `$TMUX` 가 없으면 `tmux 밖이다`
+  로 건너뛴다
+
+      env -u TMUX tmux -L <고유 이름> new-session -d -s <판> …
+      env -u TMUX tmux -L <고유 이름> capture-pane -p -t <판>
+      mkdir -p <스크래치패드>/bin; printf '#!/bin/sh\nexec env -u TMUX %s -L <고유 이름> "$@"\n' "$(command -v tmux)" > <스크래치패드>/bin/tmux
+      chmod +x <스크래치패드>/bin/tmux; PATH=<스크래치패드>/bin:$PATH python3 - …      스크립트를 그 판에
+      env -u TMUX tmux -L <고유 이름> kill-server          치울 때 — 그 이름의 서버만 죽는다
+
+  **`-L`/`-S` 없는 `tmux kill-server`·`kill-session` 은 쓰지 않는다.** tmux 안에서 맨 `tmux` 는 `$TMUX` 를 따라
+  사람의 기본 서버로 가, 그 기계의 판과 세션이 모두 한꺼번에 죽는다. `TMUX_TMPDIR` 로는 안
+  갇힌다 — `$TMUX` 가 이긴다. 맨 `tmux new-session -d` 도 기본 서버에 판을 세우는 것이라 격리가
+  아니다 — 치우려면 기본 서버에 `kill-*` 를 쳐야 하고, 그 길로 서버 전체가 죽은 적이 있다
 
 ## 공유 루트
 
