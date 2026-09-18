@@ -4742,3 +4742,4 @@
 {"ts":"2026-09-18T14:45:58Z","id":"moai-e9mp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-18T14:45:59Z","id":"moai-ewwz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열린 옛 멤버 리뷰가 남아 있지 않아 글 없이 닫는다 (사용자 결정)"}
 {"ts":"2026-09-18T14:45:59Z","id":"moai-k6mp.raw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"12건 중 9건 반영(83b0359·d66e0c1). 넘긴 것: 제목 자리 → 멤버 moai-1yya(옆이 hook.rs 를 쥐어 첫 칸), tmux 못 닿음 → idea moai-dx76, 치던 글 두 벌 → idea moai-7v3q"}
+{"ts":"2026-09-18T14:46:44Z","id":"moai-k6mp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 10건은 닫혔고 7a74ce3 으로 develop 에 들었다. 남은 멤버는 moai-1yya(제목 자리도 작은따옴표) 하나 — hook.rs·cmd/add.rs·init.rs 를 옆 워크트리가 쥐어 4-3 로 첫 칸에 두었다. 그 일이 끝나면 이 멤버를 보내고, 닫을 때 에픽 끝 리뷰를 다시 부른다(이번 리뷰는 그 멤버를 못 봤다)"}
