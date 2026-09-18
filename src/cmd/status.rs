@@ -16,7 +16,7 @@ use crate::view;
 /// `status --json` 이 보고서에 덧붙이는 키(`run`). 보고서는 필드가 선언된 것뿐이라 걷을 것이
 /// 없다 — 덧붙이는 자리 곁에 목록을 둔다.
 impl super::Appendable for report::StatusReport {
-    const APPENDED: &'static [&'static str] = &["unreadable_worktrees", "branches"];
+    const APPENDED: &'static [&'static str] = &["unreadable_worktrees", "broken_worktrees", "branches"];
 }
 
 pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
@@ -128,6 +128,16 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 serde_json::to_string(&unread.blinding).map_err(|e| super::Fail::new(e.to_string()))?,
             ));
         }
+        // **깨진 스냅샷 전부는 곁의 키로 댄다**(moai-zah3, 2026-09-18 사용자 결정). 위의 키는 판정을
+        // 가린 것만 담아, 이름이 집은 줄을 가리키는 워크트리의 깨진 스냅샷은 어느 JSON 에도 안
+        // 섰다 — 고칠 사람이 있어야 고쳐지는데 감독 스킬과 `examples/bash-agent` 는 `--json` 으로
+        // 돈다. 위 키의 뜻은 이미 나간 값이라 안 바꾼다. 없으면 키를 안 다는 것도 같은 까닭이다.
+        if !unread.all.is_empty() {
+            extra.push((
+                "broken_worktrees",
+                serde_json::to_string(&unread.all).map_err(|e| super::Fail::new(e.to_string()))?,
+            ));
+        }
         // **겹쳐 봤을 때만 키를 단다.** 늘 달면 `--worktree` 없이 부른 쪽도 빈
         // 지도를 받아 "겹쳐 봤는데 옆에 아무것도 없다" 로 읽는다.
         if worktree {
@@ -223,6 +233,9 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             /// 그 침묵이 곧 일을 영영 안 거두는 것이 된다. 없으면 키를 안 단다.
             #[serde(skip_serializing_if = "<[report::Workplace]>::is_empty")]
             unreadable_worktrees: &'a [report::Workplace],
+            /// 깨진 스냅샷 **전부** — 안쪽 `status --json` 의 같은 키와 같다(moai-zah3). 없으면 안 단다.
+            #[serde(skip_serializing_if = "<[report::Workplace]>::is_empty")]
+            broken_worktrees: &'a [report::Workplace],
         }
         let entries = projects
             .iter()
@@ -235,6 +248,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     picked: b.picked.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
                     trouble: &p.trouble,
                     unreadable_worktrees: &b.blind,
+                    broken_worktrees: &b.unread,
                 }),
             })
             .collect();

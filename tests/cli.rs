@@ -7205,6 +7205,11 @@ fn an_unreadable_epic_worktree_is_told_of_but_does_not_blind() {
     assert!(text.contains("옆 워크트리 문제 1건"), "깨진 스냅샷을 보드가 안 셌다\n{text}");
     let json = ok_at(&main, LATER, &["status", "--json"]);
     assert!(!json.contains("unreadable_worktrees"), "판정을 안 가리는 워크트리를 '못 셌다' 로 댔다\n{json}");
+    // **기계도 깨진 스냅샷을 듣는다**(moai-zah3) — 판정을 안 가려도 곁의 키가 댄다.
+    assert!(
+        json.contains(&format!(r#""broken_worktrees":[{{"path":".claude/worktrees/{epic}","branch":"worktree-{epic}"}}]"#)),
+        "깨진 스냅샷이 기계가 읽는 자리에 없다\n{json}"
+    );
     assert!(json.contains("\"stranded\""), "에픽 워크트리가 딴 줄을 가렸다\n{json}");
     assert!(ok_at(&main, LATER, &["show", &member, "--json"]).contains("\"place\":\"at\""));
 
@@ -7234,6 +7239,20 @@ fn an_unreadable_epic_worktree_is_told_of_but_does_not_blind() {
     let layer = String::from_utf8(layer.stdout).unwrap();
     // 층은 0 이면 키를 안 단다 — 서 있으면 셌다는 뜻이다.
     assert!(!layer.contains("\"unreadable_worktrees\"") && layer.contains("\"stranded\":1"), "{layer}");
+    assert!(layer.contains("\"broken_worktrees\":1"), "층의 기계 출력이 깨진 스냅샷을 안 셌다\n{layer}");
+    let machine = isolated(BIN)
+        .args(["status", "--json"])
+        .current_dir(&outside)
+        .env("MOAI_CONFIG", &config)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let machine = String::from_utf8(machine.stdout).unwrap();
+    assert!(
+        machine.contains("\"broken_worktrees\":[") && !machine.contains("\"unreadable_worktrees\""),
+        "밖 한눈 보기의 기계 출력이 안쪽과 다르게 댔다\n{machine}"
+    );
 }
 
 /// **`gather` 가 실제로 셌을 때만 입을 다문다**(리뷰 moai-ya06). `--worktree` 면 그쪽이 같은
