@@ -1598,6 +1598,77 @@ fn a_milestone_line_refuses_a_milestone_but_old_lines_do_not_block() {
     assert!(!line_of(s.path(), &m1).contains("\"milestone\":"), "--milestone none 이 옛 줄을 못 비웠다");
 }
 
+/// **다른 마일스톤을 적어도 에픽·조상이 이기면 그렇다고 말한다** (moai-mhxf). 필드는 X 가
+/// 되는데 줄은 에픽·조상이 선 곳에 그대로 서 `show --milestone X` 가 조용히 그 줄을 못 낸다 —
+/// `none` 이 못 끊는 것(moai-0lmn)과 같은 어긋남이라 같은 자리에서 한 줄로 댄다.
+#[test]
+fn edit_says_when_another_milestone_loses_to_the_epic_or_an_ancestor() {
+    let s = init("editlostms");
+    let m1 = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
+    let m2 = ok(s.path(), &["milestone", "add", "v2", "-q"]).trim().to_string();
+    let epic = add(s.path(), &["에픽", "--type", "epic", "--milestone", &m1]);
+    let bare = add(s.path(), &["마일스톤 없는 에픽", "--type", "epic"]);
+    let member = add(s.path(), &["멤버", "-e", &epic]);
+    let loose = add(s.path(), &["빈 에픽의 멤버", "-e", &bare]);
+    let parent = add(s.path(), &["부모", "--milestone", &m1]);
+    let child = add(s.path(), &["자식", "--parent", &parent]);
+    let top = add(s.path(), &["홀로 선 이슈", "--milestone", &m1]);
+
+    let says = |id: &str, from: &str, stood: &str| -> String {
+        let out = moai(s.path(), &["edit", id, "--milestone", &m2]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        let lines: Vec<&str> = err.lines().filter(|l| l.contains(from)).collect();
+        assert_eq!(lines.len(), 1, "{id}: {from} 에게 진 것을 한 줄로 안 댔다 — {err:?}");
+        assert!(lines[0].contains(stood) && lines[0].contains(&format!("--milestone {m2}")), "{id}: {err:?}");
+        assert!(!ok(s.path(), &["show", "--milestone", &m2]).contains(id), "{id} 가 {m2} 에 섰다");
+        err
+    };
+    says(&member, &format!("에픽 {epic}"), &m1);
+    says(&loose, &format!("에픽 {bare}"), "어느 마일스톤에도 안 든다");
+    says(&child, &format!("조상 {parent}"), &m1);
+
+    // 마일스톤 밑에 id 로 선 부모의 자식 — 비워서는 못 끊지만 다른 마일스톤은 접힌 맨 위 줄
+    // (그 부모)에 적으면 옮겨진다. "id 가 마일스톤 밑이라 못 옮긴다" 고 하면 헛말이다(리뷰 moai-z3lo.dxz).
+    let under = add(s.path(), &["마일스톤 밑", "--parent", &m1]);
+    let grand = add(s.path(), &["그 밑", "--parent", &under]);
+    let err = says(&grand, &format!("조상 {under}"), &m1);
+    assert!(err.contains(&format!("`moai edit {under} --milestone {m2}`")), "옮길 길을 안 댔다 — {err:?}");
+    let json = ok(s.path(), &["edit", &grand, "--milestone", &m2, "--json"]);
+    assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{m1}","parent":"{under}"}}"#)), "{json}");
+    // 뿌리로 올라간 생각 밑 — 어느 필드로도 못 옮기니 길은 안 대고, 조용하지도 않다.
+    let thought = ok(s.path(), &["idea", "add", "생각", "-q"]).trim().to_string();
+    let pinned = add(s.path(), &["생각 밑", "--parent", &thought]);
+    let err = says(&pinned, &format!("id 가 {thought} 밑에"), "어느 마일스톤에도 안 든다");
+    assert!(!err.contains("moai edit"), "고쳐도 안 바뀌는 길을 댔다 — {err:?}");
+    // 못 쓸 에픽의 멤버는 `(길 잃음)` 에 선다 — 없는 에픽의 마일스톤을 고치라고 대지 않는다.
+    let gone = add(s.path(), &["지울 에픽", "--type", "epic", "--milestone", &m1]);
+    let stray = add(s.path(), &["길 잃을 멤버", "-e", &gone]);
+    ok(s.path(), &["rm", &gone]);
+    let err = says(&stray, &format!("에픽 {gone}"), "어느 마일스톤에도 안 든다");
+    assert!(!err.contains(&format!("moai edit {gone}")), "없는 줄을 고치라고 댔다 — {err:?}");
+
+    let json = ok(s.path(), &["edit", &member, "--milestone", &m2, "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{m1}","epic":"{epic}"}}"#)), "{json}");
+    let json = ok(s.path(), &["edit", &loose, "--milestone", &m2, "--json"]);
+    assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":null,"epic":"{bare}"}}"#)), "{json}");
+
+    // 적은 것이 선 것과 같으면, 제 필드가 답이면, 안 적었으면 조용하다.
+    for args in [
+        vec!["edit", member.as_str(), "--milestone", m1.as_str()],
+        vec!["edit", top.as_str(), "--milestone", m2.as_str()],
+        vec!["edit", child.as_str(), "--tag", "x"],
+    ] {
+        let out = moai(s.path(), &args);
+        assert!(out.status.success());
+        assert!(out.stderr.is_empty(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let mut j = args.clone();
+        j.push("--json");
+        assert!(!ok(s.path(), &j).contains("inherited_milestone"), "{args:?}");
+    }
+}
+
 /// **`--milestone none` 도 못 끊는 소속은 끊기지 않았다고 말한다** (moai-0lmn). 에픽이
 /// 마일스톤을 이기고 부모도 이기므로, 제 필드를 비워도 에픽이나 부모가 선 마일스톤에
 /// 그대로 든다 — `-e none` 과 같은 모양이라 같은 말투로 댄다.
