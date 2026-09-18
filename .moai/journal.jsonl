@@ -4782,3 +4782,10 @@
 {"ts":"2026-09-18T15:05:06Z","id":"moai-fbdg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(AskUserQuestion): TUI 셈 하나로 — 적재 한 걸음(report::Soil)으로 Index·묶음 칸·거름망 지도를 짓는다. view::Seen 과 Where 의 겹침은 a9 가 쥔 cmd/show.rs·edit.rs 에 닿아 에픽 멤버로 따로 세워 첫 칸에 둔다. 잰 값: 거름망 한 번 75ms → 1.2ms."}
 {"ts":"2026-09-18T15:06:34Z","id":"moai-xe6e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T15:06:37Z","id":"moai-k7wl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T15:06:55Z","id":"moai-g326.f4d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 말과 규약 문서의 결정 셋"}
+{"ts":"2026-09-18T15:07:01Z","id":"moai-g326.f4d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T15:07:18Z","id":"moai-g326","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 셋 커밋 끝. 에픽 끝 리뷰(moai-g326.f4d, medium) 결과를 fix: 커밋으로 반영하고 루트에서 --no-ff 병합한 뒤 멤버를 닫는다."}
+{"ts":"2026-09-18T15:07:26Z","id":"moai-es40","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T15:07:36Z","id":"moai-onkg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:07:36Z","id":"moai-ght0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-18T15:07:36Z","id":"moai-ha5d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
