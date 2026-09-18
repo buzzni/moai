@@ -3894,3 +3894,13 @@
 {"ts":"2026-09-18T07:36:08Z","id":"moai-nwup.o40","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 13건 중 10건 반영(b9baaa0). 값이 큰 것: 스크래치패드 -S 소켓은 경로 상한을 넘어 실패해 사람을 맨 tmux 로 되밀고, 속에서 tmux 를 부르는 스크립트를 격리할 길(감싸개)이 일꾼 글에 없었다. 넘긴 셋: 11 한 조각으로 모으기 — 감독 글과 일꾼 글의 독자가 달라 두 벌로 두고, 시험이 둘 다 감싸개와 절대 경로를 요구한다. 12 moai 훅이 맨 죽이기 명령을 막기 — idea moai-iz3m. 13 시험 세션이 세션 목록에 끼는 것 — idea moai-y5re. 저장소 CLAUDE.md 의 테스트 절도 같은 -S 권고를 담고 있다 — 사용자가 쓴 글이라 고치지 않고 사람에게 알린다. 이 리뷰는 tmux 서버를 띄우지도 닿지도 않았다(-V 만 쳤다)"}
 {"ts":"2026-09-18T07:36:10Z","id":"moai-nwup.o40","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (xhigh — tmux 시험 격리 글과 시험)"}
 {"ts":"2026-09-18T07:36:13Z","id":"moai-nwup.o40","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"xhigh 13건 중 10건 반영(b9baaa0), 넘김 셋 — 11 두 벌 유지, 12 idea moai-iz3m, 13 idea moai-y5re"}
+{"ts":"2026-09-18T07:51:07Z","id":"moai-nuhd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 사람이 친 글을 옮기는 자리, 잘못 벗기면 유일한 복사가 줄어든다)"}
+{"ts":"2026-09-18T07:51:10Z","id":"moai-vuly","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 잘못 가르면 사람 글 뒤에 /clear 가 붙어 되돌릴 수 없다)"}
+{"ts":"2026-09-18T07:51:14Z","id":"moai-nwup","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (xhigh — 글 고침이지만 사용자 tmux 서버를 죽인 사고의 방벽)"}
+{"ts":"2026-09-18T07:51:19Z","id":"moai-nuhd.6v7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 멤버 리뷰)"}
+{"ts":"2026-09-18T07:51:22Z","id":"moai-vuly.sqi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 멤버 리뷰)"}
+{"ts":"2026-09-18T07:51:24Z","id":"moai-vr2v.5zw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (xhigh — 에픽 끝 리뷰, 다시 돌린 판 a1640d)"}
+{"ts":"2026-09-18T07:51:30Z","id":"moai-nuhd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"804a603 구현, ce96553 멤버 리뷰, d19df56 에픽 리뷰, main 머지 8de1e38"}
+{"ts":"2026-09-18T07:51:32Z","id":"moai-vuly","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"4d80596 구현, cbefdd2 멤버 리뷰, d19df56 에픽 리뷰, main 머지 8de1e38"}
+{"ts":"2026-09-18T07:51:35Z","id":"moai-nwup","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"0a98b48 구현, b9baaa0 xhigh 리뷰, main 머지 8de1e38"}
+{"ts":"2026-09-18T07:51:41Z","id":"moai-vr2v","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 끝났다. 남은 모서리는 idea moai-p3wn(지우는 사이 친 글)·moai-iz3m(moai 훅이 맨 죽이기 명령을 막기)·moai-y5re(시험 세션이 세션 목록에 끼는 것)"}
