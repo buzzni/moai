@@ -1139,43 +1139,57 @@ fn create_in<'a>(issues: &'a [Issue], focus: &[&'a Issue], cmd: &str, only: &dyn
     }
 
     let head = focus[0];
-    let held = focus
-        .iter()
-        .take(3)
-        .map(|i| format!("{} {}", i.id, i.title))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let shown = &focus[..focus.len().min(3)];
+    let held = shown.iter().map(|i| format!("{} {}", i.id, i.title)).collect::<Vec<_>>().join(", ");
+    // **막힌 토막이 가리킨 트래커를 그대로 댄다**(moai-nxw8). `-C` 를 버리고 줄을 내던 판은,
+    // 워크트리에서 `moai -C <루트> add …` 로 막힌 사람이 거절문을 옮겨 치는 순간 워크트리의
+    // 스냅샷에 줄을 세웠다 — 루트에는 안 서고, 병합에서 스냅샷이 겨룬다.
+    let moai = flag_values(&seg, &["-C", "--dir"])
+        .first()
+        .map_or_else(|| "moai".to_string(), |d| format!("moai -C {d}"));
     // **에픽이 없으면 에픽을 대라고 말하지 않는다.** 없는 에픽 자리에 이슈 id 를
     // 넣어 일러 주던 자리다 — 시키는 대로 치면 `moai add "제목" -e <이슈>` 가
     // 만들어지고, `moai status` 에 "에픽으로 쓸 수 없는 것을 가리키는 줄" 이
     // 하나 는다. 그리고 경고가 늘면 `closing` 이 세션을 붙든다. 훅이 시킨 대로
     // 한 것이 훅에 걸리는 자리는 규칙이 아니라 덫이다.
-    let epic = report::groups(issues).get(head.id.as_str()).cloned();
-    let into_epic = epic
-        .as_ref()
-        .map(|e| format!("\x20 moai add \"제목\" -e {e}        같은 에픽 안에\n"))
-        .unwrap_or_default();
+    //
+    // **여럿 집었으면 집은 것마다 댄다**(moai-nxw8) — 첫 것만 대던 판은 둘째 일에서 나온 것을
+    // 첫 일의 에픽에 세우게 했다. 에픽은 겹치면 한 번이다.
+    let groups = report::groups(issues);
+    let mut epics: Vec<&str> = Vec::new();
+    for e in shown.iter().filter_map(|i| groups.get(i.id.as_str()).copied()) {
+        if !epics.contains(&e) {
+            epics.push(e);
+        }
+    }
+    let into_epic: String =
+        epics.iter().map(|e| format!("\x20 {moai} add \"제목\" -e {e}        같은 에픽 안에\n")).collect();
+    let under: String =
+        shown.iter().map(|i| format!("\x20 {moai} add \"제목\" --parent {}   그 일의 자식으로\n", i.id)).collect();
     // **무엇이 내건 것인지는 갈림길 1 과 같은 자로 댄다 — 에픽이다.** "그 일" 로 적던 판은 집은
     // 이슈가 아니라 에픽이 필요로 하는 것(moai-1k17 이 그 모양)에서 갈림길 1 과 다른 답을 냈다.
     // 에픽이 없을 때만 집은 일 자신이다.
-    let aim = epic.as_deref().unwrap_or(head.id.as_str());
+    // 여럿 집어 에픽이 여럿이면 그 모두다 — idea add 에 비추는 줄([`aside_in`])과 같은 꼴이다.
+    let aim = if epics.is_empty() { head.id.clone() } else { epics.join("·") };
     // **첫 칸에 둔 줄이 일을 열어 두는 것은 에픽뿐이다** — 에픽의 칸은 멤버에서 읽지만, 에픽 없는
     // 일은 자식이 첫 칸에 있어도 그대로 닫힌다. 그때 "첫 칸에 두면 안 닫힌다" 를 비치면 거짓이다.
     // 가리키는 줄도 이름으로 댄다 — "위의 줄" 바로 위가 `idea add` 줄이고, idea 도 첫 칸에 선다.
-    let keep = if epic.is_some() {
+    let keep = if !epics.is_empty() {
         format!("위의 `moai add` 줄로 세워 첫 칸에 둔다. 밖으로 내보내면 {aim} 가 목적을 못 이룬 채 닫힌다")
     } else {
         format!("위의 `--parent` 줄로 세운다. 에픽 없는 일은 자식이 남아도 닫히니 {aim} 를 닫기 전에 끝낸다")
     };
+    // 둘째 물음의 글은 규칙 글과 한 출처다(moai-nxw8) — 손으로 옮겨 적던 판은 한쪽만 고쳐도
+    // 안 붉어졌다.
+    let pledge = crate::guide::PLEDGE;
     refuse(1, format!(
         "지금 집고 있는 것이 있다 — {held}.\n\
          그 단위 안에서 만들거나, 밖의 것이면 담아 둔다. 초점 밖에 이슈를 세우면\n\
          그 줄이 어느 일에서 나왔는지를 잃는다.\n\
-         {into_epic}\x20 moai add \"제목\" --parent {}   그 일의 자식으로\n\
-         \x20 moai idea add \"제목\"                 지금 할 일이 아니면 담아 둔다\n\
-         {aim} 가 내건 것이 이것 없이 안 이뤄지면 idea 가 아니다 — 지금 못 해도\n\
-         {keep}",
-        head.id
+         {into_epic}{under}\
+         \x20 {moai} idea add \"제목\"                 지금 할 일이 아니면 담아 둔다\n\
+         {aim} 가 {pledge} idea 가 아니다 — 지금 못 해도\n\
+         {keep}"
     ))
 }
 
@@ -2416,6 +2430,38 @@ mod tests {
     fn with_nothing_held_creation_is_free() {
         let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add \"딴 일\""), Decision::Pass);
+    }
+
+    /// **거절문의 모서리 셋**(moai-nxw8) — 막힌 토막의 `-C` 를 그대로 대고, 여럿 집었으면 집은
+    /// 것마다 대고, 둘째 물음의 글은 규칙 글과 한 출처다.
+    #[test]
+    fn the_rule_one_refusal_keeps_the_tracker_and_every_held_unit() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        // 워크트리에서 루트를 가리켜 막힌 줄 — 옮겨 치면 루트에 서야 한다.
+        for cmd in ["moai -C /repo add \"딴 일\"", "moai add \"딴 일\" -C /repo", "moai --dir=/repo add \"딴 일\""] {
+            let why = denied(&guard_create(&all, &cfg(), &here(), cmd)).to_string();
+            for line in ["moai -C /repo add \"제목\" -e t-e", "moai -C /repo add \"제목\" --parent t-1", "moai -C /repo idea add"] {
+                assert!(why.contains(line), "{cmd} 의 -C 를 버렸다 — {line}\n{why}");
+            }
+        }
+        let why = denied(&guard_create(&all, &cfg(), &here(), "moai add \"딴 일\"")).to_string();
+        assert!(!why.contains("-C"), "{why}");
+
+        // 둘을 집었으면 둘 다 댄다 — 에픽이 같으면 에픽 줄은 한 번이다.
+        let two = vec![epic("t-z"), epic("t-a"), under("t-1", "in_progress", "t-z"), under("t-2", "in_progress", "t-a")];
+        let why = denied(&guard_create(&two, &cfg(), &here(), "moai add \"딴 일\"")).to_string();
+        for line in ["-e t-z ", "-e t-a ", "--parent t-1 ", "--parent t-2 "] {
+            assert!(why.contains(line), "집은 것 하나를 빠뜨렸다 — {line}\n{why}");
+        }
+        assert!(why.contains("t-z·t-a 가 내건 것"), "{why}");
+        let same = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), under("t-2", "in_progress", "t-e")];
+        let why = denied(&guard_create(&same, &cfg(), &here(), "moai add \"딴 일\"")).to_string();
+        assert_eq!(why.matches("-e t-e ").count(), 1, "같은 에픽을 두 번 댄다\n{why}");
+
+        // 둘째 물음은 규칙 글과 같은 글이다.
+        let pledge = crate::guide::PLEDGE;
+        assert!(why.contains(&format!("t-e 가 {pledge}")), "{why}");
+        assert!(crate::guide::agents().contains(&format!("에픽이 {pledge}")), "규칙 글이 갈라졌다");
     }
 
     /// 집은 것이 있으면 그 단위 안이어야 한다. 밖이면 고칠 명령이 함께 온다.

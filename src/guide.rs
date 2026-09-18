@@ -392,6 +392,10 @@ pub fn handoff(id: &str) -> String {
     format!("moai note {id} '다음: <이어서 할 것>'")
 }
 
+/// 갈림길 1 의 둘째 물음 — 규칙 1 의 글과 그 거절문(`hook::create_in`)이 함께 쓴다. 손으로 옮겨
+/// 적던 두 벌은 한쪽만 고쳐도 안 붉어졌다(moai-nxw8). 앞의 임자(`에픽이`·`<id> 가`)는 부르는 쪽이 붙인다.
+pub const PLEDGE: &str = "내건 것이 이것 없이 안 이뤄지면";
+
 /// 규칙 셋. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
 fn rules() -> String {
     let [one, two, three] = RULES;
@@ -401,7 +405,7 @@ fn rules() -> String {
         r#"**1. {one}.** 집은 이슈 — 첫 칸을 떠났고 아직 안 닫힌 것
 (`in_progress`·`review`) — 가 초점이다.
 그 일을 하다 나온 것은 같은 에픽 안(`-e <에픽>`)이나 그 일의 자식
-(`--parent <id>`)으로 만든다. 에픽이 내건 것이 이것 없이 안 이뤄지면 지금 못
+(`--parent <id>`)으로 만든다. 에픽이 {PLEDGE} 지금 못
 해도 이 둘 중 하나다(갈림길 1). 지금 할 일이 아니면 `moai idea add` 로 담는다 —
 idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇다 (거기서
 만들어지는 것은 에픽과 그 자식들이라 그 자체로 한 단위다).
