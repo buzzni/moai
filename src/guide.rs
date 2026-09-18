@@ -876,7 +876,7 @@ Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽�
 
 ```sh
 python3 - "$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)" "$(git rev-parse --show-toplevel)" <<'PY'
-import glob, json, os, sys
+import glob, json, os, subprocess, sys
 if not sys.argv[1]:
     sys.exit("git 저장소 안에서 부른다")
 top, here = os.path.realpath(sys.argv[2]), os.path.realpath(os.getcwd())
@@ -888,6 +888,21 @@ print("루트 자리", root)
 if os.path.relpath(here, top) != ".":
     print("하위    ", os.path.relpath(here, top))
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+def parents(pid):
+    while pid > 1:
+        yield pid
+        out = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        pid = int(out) if out.isdigit() else 0
+def detached(s):
+    """세션 파일이 대는 tmux 판을 이 서버에서 그 세션이 낳지 않았는가 — 떼어 낸 시험 서버의 판이다."""
+    pane = str(s.get("tmux") or "").rpartition(".")[2]
+    if not pane.startswith("%"):
+        return False
+    try:
+        owner = subprocess.run(["tmux", "display-message", "-p", "-t", pane, '#{{pane_pid}}'], capture_output=True, text=True).stdout.strip()
+    except OSError:
+        return False
+    return not owner.isdigit() or int(owner) not in parents(int(s["pid"]))
 unread = 0
 for f in glob.glob(os.path.join(home, "sessions", "*.json")):
     try:
@@ -901,6 +916,8 @@ for f in glob.glob(os.path.join(home, "sessions", "*.json")):
         continue
     if cwd is None:
         unread += 1
+    elif cwd == root and detached(s):
+        print("떼어 낸 판", s.get("status"), s.get("name"))
     elif cwd == root:
         print("루트    ", s.get("status"), s.get("name"))
     elif cwd.startswith(trees):
@@ -914,6 +931,8 @@ PY
   일하는 중이고, 그 밖의 값(`shell` 따위)은 뜻을 모르니 맡기지 않는다
 - **보낸 idea 의 보고를 아직 확인하지 않은 세션은 뺀다.** 일꾼은 펼치고 집고 병합하는
   동안 루트에 있다 — 사람의 답이나 권한을 기다리면 `waiting`, 턴을 마치면 `idle` 로 뜬다
+- **`떼어 낸 판` 은 맡기지 않는다.** 세션 파일이 대는 tmux 판을 이 서버에서 그 세션이 낳지
+  않았다 — 떼어 낸 tmux 서버(`-L`)에서 띄운 시험용 `claude` 다. 자리가 루트라도 일꾼이 아니다
 - 자리가 `<루트>/.claude/worktrees/*` 인 세션은 이 저장소에서 **일하는 중**이다.
   지켜보되 맡기지 않는다
 - **다른 디렉터리의 세션은 건드리지 않는다**
@@ -1351,7 +1370,9 @@ fn brief() -> String {
        너무 길다. `-L`/`-S` 없는 `kill-server`·`kill-session` 은 쓰지 않는다: tmux 안에서 맨 `tmux` 는
        사람의 기본 서버로 가 모든 세션을 죽이고, `TMUX_TMPDIR` 로는 안 갇힌다. 속에서 `tmux` 를
        부르는 스크립트는 손으로 `-L` 을 못 주니, 진짜 `tmux` 를 절대 경로로 부르며 `-L` 을 끼우는
-       감싸개를 `PATH` 앞에 두고 돌린다. 남이 띄운 판에는 키를 보내지 않는다.
+       감싸개를 `PATH` 앞에 두고 돌린다. 남이 띄운 판에는 키를 보내지 않는다. 그 서버에서 시험용
+       `claude` 를 띄우면 cwd 를 루트 밖(스크래치패드)으로 둔다 — 루트에서 띄운 세션은 감독의
+       세션 목록에 놀고 있는 일꾼으로 낀다.
        **리뷰 서브에이전트에게도** 이 말을 준다 — 서버 전체를 죽인 것이 리뷰 서브에이전트였다
     4-3. **옆에서 도는 일이 쥔 파일을 건드려야 하면 고치지 않는다** — 머리의 `옆에서 도는 일`
        이 대는 파일, 또는 `git worktree list` 의 옆 가지가 이미 고친 파일
@@ -2195,6 +2216,21 @@ sys.exit(1 if bad else 0)
         let report = brief.find("\n    11. ").expect("11 이 없다");
         assert!(brief[report..].contains("옆이 쥐어 남긴 멤버"), "보고가 옆이 쥐어 남긴 멤버를 안 댄다");
         assert!(supervise.contains("**옆이 쥐어 남긴 멤버**"), "감독이 그 멤버를 언제 보낼지 모른다");
+    }
+
+    #[test]
+    fn a_test_claude_on_a_detached_server_is_no_worker() {
+        // **떼어 낸 tmux 서버의 시험용 claude 는 일꾼이 아니다**(2026-09-18 사용자 결정). 그 세션도
+        // 세션 파일을 쓰고 cwd 가 루트면 2 의 훑기가 놀고 있는 세션으로 읽어 일을 맡긴다. 판 주인을
+        // 5-1 처럼 보고, 시험하는 쪽에도 루트 밖에서 띄우라고 한다 — 둘 중 하나만 서면 다른 쪽이 샌다.
+        let (supervise, brief) = (supervise(), brief());
+        let two = supervise.find("**2. 일꾼을 찾는다.**").expect("2 가 없다");
+        let three = supervise.find("**2-1. ").expect("2-1 이 없다");
+        let step = &supervise[two..three];
+        assert!(step.contains("elif cwd == root and detached(s):"), "떼어 낸 판을 루트 세션으로 읽는다");
+        assert!(step.contains("'#{pane_pid}'"), "판 주인을 포맷이 깨뜨렸다");
+        assert!(step.contains("**`떼어 낸 판` 은 맡기지 않는다.**"), "떼어 낸 판을 어떻게 할지 없다");
+        assert!(brief.contains("cwd 를 루트 밖"), "시험용 claude 를 루트에서 띄운다");
     }
 
     #[test]
