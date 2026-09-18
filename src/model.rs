@@ -163,6 +163,30 @@ pub struct Issue {
     pub updated_at: String,
     /// `status` 가 마지막으로 바뀐 때. 방치 검사와 "review 에 6일" 이 여기서 나온다.
     pub status_since: String,
+    /// **처음으로 첫 칸을 떠난 때** — 일을 시작한 때(moai-38mh). 한 번 적고 **덮지 않는다**.
+    ///
+    /// **저널이 아니라 필드인 까닭.** 이 답은 저널의 칸 옮김을 접어야 나오는데, 접는 쪽은
+    /// 저널이 빠진 쓰기에서 조용히 틀린다 — "스냅샷 먼저, 저널 나중" 이라 저널만 못 적힌
+    /// 쓰기가 있을 수 있고, 통계는 그것을 "안 한 일" 로 읽는다. 여기 두면 칸을 옮기는 그
+    /// 쓰기에 같이 실려 갈리지 않는다(2026-09-18 사용자 결정).
+    ///
+    /// **파생값이 아니다** — 이슈 A 를 옮길 때 A 의 줄에만 쓴다. `status_since` 와 다른 것은
+    /// 덮지 않는다는 것 하나고, 그래서 review·done 으로 가도 안 사라진다.
+    ///
+    /// **묶음 줄에도 적힌다** — 묶음의 칸은 멤버에서 읽히므로(moai-j3b3) 그 줄의 이 값은
+    /// `status`·`status_since` 와 똑같이 "누가 이 줄에 `mv` 를 쳤나" 일 뿐이다. 묶음의 기간은
+    /// 멤버의 것으로 잰다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    /// **마지막으로 `DONE` 에 든 때**(moai-38mh). 들 때마다 덮고, done 을 떠나도 **지우지 않는다**.
+    ///
+    /// 되돌렸다 다시 닫으면 마지막 것이다 — 소요(`done_at` − `started_at`)가 되돌린 판까지
+    /// 품는다. 지우면 done 을 떠난 줄에서 앞의 판이 통째로 사라지는데, 빈 칸과 0 이 다르듯
+    /// "아직 안 끝났다" 와 "그때 끝났었다" 도 다르다(2026-09-18 사용자 결정).
+    ///
+    /// **지금 끝났는가는 `status` 가 말한다.** 이 값이 섰다고 닫힌 줄이 아니다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub done_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
 
@@ -208,6 +232,8 @@ impl Issue {
             created_at: at.to_string(),
             updated_at: at.to_string(),
             status_since: at.to_string(),
+            started_at: None,
+            done_at: None,
             body: None,
             rest: BTreeMap::new(),
         }
@@ -842,10 +868,12 @@ mod tests {
         i.epic = Some("argos-9k2p".into());
         i.milestone = Some("argos-m001".into());
         i.body = Some("본문".into());
+        i.started_at = Some("2026-09-11T05:00:00Z".into());
+        i.done_at = Some("2026-09-11T06:00:00Z".into());
         let line = serde_json::to_string(&i).unwrap();
         let want = [
             "id", "title", "kind", "status", "priority", "tags", "assignee", "epic",
-            "milestone", "created_at", "updated_at", "status_since", "body",
+            "milestone", "created_at", "updated_at", "status_since", "started_at", "done_at", "body",
         ];
         let at: Vec<usize> = want
             .iter()

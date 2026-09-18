@@ -1418,6 +1418,76 @@ fn mv_backwards_is_allowed() {
     assert!(ok(s.path(), &["mv", &id, "todo"]).contains("이미 todo"), "");
 }
 
+/// **시작·끝 시각은 칸을 옮기는 그 쓰기에 실린다**(moai-38mh).
+///
+/// 시작은 **처음** 첫 칸을 떠난 때 하나고 되집어도 안 덮는다 — `status_since` 는 칸을
+/// 옮길 때마다 새로 서므로 집은 때가 review·done 에서 사라진다. 끝은 done 에 들 때마다
+/// 덮고 done 을 떠나도 **안 지운다**: 소요가 되돌린 판까지 품는다.
+#[test]
+fn mv_stamps_the_first_start_and_the_last_finish() {
+    let s = init("mvtimes");
+    let id = add(s.path(), &["제목"]);
+    assert!(!line_of(s.path(), &id).contains("started_at"), "첫 칸에 선 줄에 시작이 섰다");
+
+    let t1 = "2026-09-11T05:00:00Z";
+    assert!(at(s.path(), t1, &["mv", &id, "in_progress"]).status.success());
+    let line = line_of(s.path(), &id);
+    assert!(line.contains(&format!(r#""started_at":"{t1}""#)), "{line}");
+    assert!(!line.contains("done_at"), "안 끝난 줄에 끝난 때가 섰다 — {line}");
+
+    // 다음 칸으로 가도 시작은 그대로다. 새로 서는 것은 `status_since` 뿐이다.
+    let t2 = "2026-09-11T06:00:00Z";
+    assert!(at(s.path(), t2, &["mv", &id, "review"]).status.success());
+    let line = line_of(s.path(), &id);
+    assert!(line.contains(&format!(r#""started_at":"{t1}""#)), "{line}");
+    assert!(line.contains(&format!(r#""status_since":"{t2}""#)), "{line}");
+
+    let t3 = "2026-09-11T07:00:00Z";
+    assert!(at(s.path(), t3, &["mv", &id, "done"]).status.success());
+    assert!(line_of(s.path(), &id).contains(&format!(r#""done_at":"{t3}""#)));
+
+    // 되돌려도 끝난 때는 안 지워진다 — "아직 안 끝났다" 는 `status` 가 말한다.
+    let t4 = "2026-09-11T08:00:00Z";
+    assert!(at(s.path(), t4, &["mv", &id, "todo"]).status.success());
+    let line = line_of(s.path(), &id);
+    assert!(line.contains(&format!(r#""done_at":"{t3}""#)), "되집었다고 끝난 때를 지웠다 — {line}");
+
+    // 다시 집어도 시작은 처음 것이고, 다시 닫으면 끝은 마지막 것이다.
+    let t5 = "2026-09-11T09:00:00Z";
+    assert!(at(s.path(), t5, &["mv", &id, "in_progress"]).status.success());
+    assert!(line_of(s.path(), &id).contains(&format!(r#""started_at":"{t1}""#)));
+    let t6 = "2026-09-11T10:00:00Z";
+    assert!(at(s.path(), t6, &["mv", &id, "done"]).status.success());
+    let line = line_of(s.path(), &id);
+    assert!(line.contains(&format!(r#""started_at":"{t1}""#)), "{line}");
+    assert!(line.contains(&format!(r#""done_at":"{t6}""#)), "{line}");
+
+    // 첫 칸에서 곧바로 닫은 줄도 시작한 줄이다 — 떠난 때가 시작이다.
+    let quick = add(s.path(), &["곧바로 닫는다"]);
+    assert!(at(s.path(), t2, &["mv", &quick, "done"]).status.success());
+    let line = line_of(s.path(), &quick);
+    assert!(line.contains(&format!(r#""started_at":"{t2}""#)), "{line}");
+    assert!(line.contains(&format!(r#""done_at":"{t2}""#)), "{line}");
+}
+
+/// 적히기만 하고 어느 화면에도 안 서는 필드는 틀려도 아무도 모른다 — 상세와 `--json` 둘 다
+/// 같은 값을 낸다. 아직 첫 칸인 줄에는 그 줄을 안 세운다.
+#[test]
+fn the_start_and_finish_stamps_reach_both_surfaces() {
+    let s = init("mvtimeshow");
+    let id = add(s.path(), &["제목"]);
+    assert!(!ok(s.path(), &["show", &id]).contains("시작"), "안 집은 줄이 시작을 말한다");
+
+    assert!(at(s.path(), "2026-09-11T05:00:00Z", &["mv", &id, "in_progress"]).status.success());
+    let text = ok(s.path(), &["show", &id]);
+    assert!(text.contains("시작   2026-09-11 05:00"), "{text}");
+    // 아직 안 끝났다 — 자리는 서되 값이 없다.
+    assert!(text.contains("끝    —"), "{text}");
+    let json = ok(s.path(), &["show", &id, "--json"]);
+    assert!(json.contains(r#""started_at":"2026-09-11T05:00:00Z""#), "{json}");
+    assert!(!json.contains("done_at"), "{json}");
+}
+
 /// #a-partial — 하나가 없다고 나머지를 안 옮기지 않는다. 대신 비영으로 끝난다.
 #[test]
 fn mv_does_everything_it_can_then_fails() {

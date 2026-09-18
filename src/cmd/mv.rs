@@ -135,6 +135,19 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             i.status = to.clone();
             i.status_since = at.clone();
             i.updated_at = at.clone();
+            // **시작·끝 시각**(moai-38mh) — 칸을 옮기는 이 쓰기에 같이 싣는다. 저널을 접어
+            // 세면 저널만 못 적힌 쓰기에서 조용히 틀리고, `status_since` 는 칸을 옮길 때마다
+            // 새로 적혀 집은 때가 review·done 에서 사라진다.
+            //
+            // 시작은 **처음** 첫 칸을 떠난 때 하나뿐이다 — 되돌렸다 다시 집어도 안 덮는다.
+            // 끝은 `done` 에 들 때마다 덮고, done 을 떠나도 **안 지운다**(마지막으로 끝난 때).
+            // 소요(`done_at` − `started_at`)가 되돌린 판까지 품는다(2026-09-18 사용자 결정).
+            if i.started_at.is_none() && to.as_str() != cfg.first_status() {
+                i.started_at = Some(at.clone());
+            }
+            if to.is_done() {
+                i.done_at = Some(at.clone());
+            }
             // 저장 직전의 모습으로 맞춰 두고 뜬다 — 안 그러면 `--json` 이
             // 파일에 없는 값(기본 우선순위, 정렬 전 태그)을 말한다.
             i.normalize();

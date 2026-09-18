@@ -1251,6 +1251,18 @@ pub fn detail(
         paint(style::DIM, &stamp(&i.updated_at)),
         paint(style::DIM, &age),
     ));
+    // **시작·끝도 사람에게 보인다**(moai-38mh). 적히기만 하고 어느 화면에도 안 서는 필드는
+    // 틀려도 아무도 모른다 — `--json` 만 보는 것은 기계뿐이다. 없으면 줄을 안 세운다: 아직
+    // 첫 칸인 줄에 빈 자리를 그리면 생성·수정 줄이 두 배로 길어진다.
+    // **끝은 `done_at` 이 섰다고 닫힌 것이 아니다** — 되돌린 줄에도 남는다. 그래서 칸은 위의
+    // 머리 줄이 말하고 여기는 시각만 말한다.
+    if i.started_at.is_some() || i.done_at.is_some() {
+        let at = |t: &Option<String>| match t {
+            Some(t) => paint(style::DIM, &stamp(t)),
+            None => paint(style::DIM, "—"),
+        };
+        out.push(format!("  시작   {}      끝    {}", at(&i.started_at), at(&i.done_at)));
+    }
 
     if let Some(body) = &i.body {
         out.push(String::new());
