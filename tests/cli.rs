@@ -8837,9 +8837,14 @@ fn a_group_cannot_be_claimed_with_from() {
 fn agents_cmd(dir: &Path, work: &Path, n: usize) -> Command {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/python-agents/agents.py");
     let mut cmd = isolated("python3");
+    // **예제가 읽는 나머지 둘도 걷는다.** 돌리는 사람의 셸에 예제를 쓰다 남은 `AGENT_BASE`·
+    // `AGENT_WORKTREES` 가 새면 가지가 없다며 2 로 끝나거나 워크트리가 `.worktrees/` 밖에 선다.
+    // 제 값을 줄 시험은 이 뒤에 `.env` 로 덮는다.
     cmd.arg(script)
         .args(["--agents", &n.to_string()])
         .current_dir(dir)
+        .env_remove("AGENT_BASE")
+        .env_remove("AGENT_WORKTREES")
         .env("MOAI", BIN)
         .env("AGENT_WORK", work)
         .env("MOAI_ACTOR", ACTOR)
@@ -8880,7 +8885,11 @@ fn the_python_agents_share_the_queue_and_each_job_runs_once_in_its_own_worktree(
     let work = s.path().join("work.sh");
     write_exe(&work, &format!("#!/bin/sh\necho \"$1 $(pwd)\" >> '{}'\necho \"$1 을 끝냈다\"\n", log.display()));
 
-    let out = agents_cmd(s.path(), &work, 3).output().expect("python3 를 실행하지 못했다 — 예제 시험에는 python3 가 있어야 한다");
+    // **일 명령은 상대 경로로 준다** — 문서의 모양(`AGENT_WORK=./do-one.sh`)이다. 그 스크립트는 뿌리에만
+    // 있고(커밋 안 됐다) 일은 워크트리를 cwd 로 돌므로, 예제가 뿌리 기준으로 박지 않으면 못 띄운다.
+    let out = agents_cmd(s.path(), Path::new("./work.sh"), 3)
+        .output()
+        .expect("python3 를 실행하지 못했다 — 예제 시험에는 python3 가 있어야 한다");
     assert!(out.status.success(), "예제가 실패했다\n{}", text(&out));
 
     let worked: Vec<(String, String)> = std::fs::read_to_string(&log)
@@ -8943,10 +8952,81 @@ fn the_python_agents_check_their_kit_before_picking_anything() {
     let missing = s.path().join("없는-일.sh");
     let out = agents_cmd(s.path(), &missing, 2).output().expect("python3 를 실행하지 못했다");
     assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+    // 까닭까지 본다 — 다른 채비(가지·moai)에 걸려 2 가 나도 이 단언은 지나가면 안 된다.
+    assert!(String::from_utf8_lossy(&out.stderr).contains("없는-일.sh"), "{}", text(&out));
     let work = s.path().join("work.sh");
     write_exe(&work, "#!/bin/sh\necho 됐다\n");
     let out = agents_cmd(s.path(), &work, 2).env("AGENT_BASE", "없는-가지").output().expect("python3 를 실행하지 못했다");
     assert_eq!(out.status.code(), Some(2), "{}", text(&out));
     assert!(String::from_utf8_lossy(&out.stderr).contains("없는-가지"), "{}", text(&out));
     assert!(line_of(s.path(), &id).contains("\"status\":\"todo\""), "채비가 안 됐는데 집었다");
+}
+
+/// **일이 정한 것을 덮지 않고, 되돌린 일은 한 번만 한다.** 일은 워크트리를 cwd 로 도므로 트래커는
+/// `"$MOAI" -C "$AGENT_ROOT"` 로 만진다 — 예제가 그 둘을 넘겨야 일의 `review`·`defer` 가 뿌리에
+/// 떨어지고 닫기가 그것을 본다. 일이 첫 칸으로 되돌린 줄은 **옆 일꾼도** 다시 집지 않는다 —
+/// 일꾼마다의 `seen` 만으로는 그 줄을 처음 보는 옆 일꾼이 같은 일을 또 했다.
+#[cfg(unix)]
+#[test]
+fn the_python_agents_keep_what_the_work_decided_and_do_a_returned_job_only_once() {
+    let s = agents_repo("agents-decide");
+    // 맨 위 일이 오래 걸려야, 그것을 쥔 일꾼이 옆이 되돌린 줄을 **처음 보는 채로** 다음 판에 온다.
+    let slow = add(s.path(), &["오래 걸리는 일", "-p", "0"]);
+    let returned = add(s.path(), &["되돌릴 일", "-p", "1"]);
+    let reviewed = add(s.path(), &["리뷰로 갈 일", "-p", "2"]);
+    let shelved = add(s.path(), &["미룰 일", "-p", "3"]);
+    // 워크트리의 트래커에도 그 줄이 있어야, 일이 맨 `moai` 로 거기에 쓰는 날 그 쓰기가 먹는다 —
+    // 그러면 뿌리는 in_progress 로 남아 닫기가 done 으로 덮고, 아래 단언이 그것을 잡는다.
+    git(s.path(), &["add", "-A"]);
+    git(s.path(), &["commit", "-q", "-m", "일감"]);
+    let log = s.path().join("worked");
+    let work = s.path().join("work.sh");
+    write_exe(
+        &work,
+        &format!(
+            "#!/bin/sh\necho \"$1\" >> '{}'\ncase \"$2\" in\n  \
+             오래*) sleep 1 ;;\n  \
+             되돌릴*) \"$MOAI\" -C \"$AGENT_ROOT\" mv \"$1\" todo >/dev/null ;;\n  \
+             리뷰*) \"$MOAI\" -C \"$AGENT_ROOT\" mv \"$1\" review >/dev/null ;;\n  \
+             미룰*) \"$MOAI\" -C \"$AGENT_ROOT\" defer \"$1\" -m 지금-아님 >/dev/null ;;\nesac\necho 했다\n",
+            log.display()
+        ),
+    );
+
+    let out = agents_cmd(s.path(), &work, 2).output().expect("python3 를 실행하지 못했다");
+    assert_eq!(out.status.code(), Some(1), "되돌린 줄이 또 나왔는데 1 로 안 끝났다\n{}", text(&out));
+    let mut worked: Vec<String> = std::fs::read_to_string(&log).unwrap_or_default().lines().map(str::to_string).collect();
+    worked.sort_unstable();
+    let mut want = vec![slow.clone(), returned.clone(), reviewed.clone(), shelved.clone()];
+    want.sort_unstable();
+    assert_eq!(worked, want, "일마다 한 번씩 돌지 않았다 — 되돌린 일을 옆 일꾼이 또 했다\n{}", text(&out));
+    assert!(line_of(s.path(), &slow).contains("\"status\":\"done\""), "{}", text(&out));
+    assert!(line_of(s.path(), &returned).contains("\"status\":\"todo\""), "되돌린 일을 닫았다\n{}", text(&out));
+    assert!(line_of(s.path(), &reviewed).contains("\"status\":\"review\""), "리뷰로 보낸 일을 닫았다\n{}", text(&out));
+    let line = line_of(s.path(), &shelved);
+    assert!(line.contains("\"status\":\"in_progress\"") && line.contains("\"deferred_at\""), "미룬 일을 닫았다 — {line}");
+}
+
+/// **옆 워크트리에만 있는 줄은 건너뛴다.** `ready --worktree` 는 그 줄도 내지만 뿌리에는 없어 집기가
+/// `missing` 으로 돌아온다 — 그것을 "졌다" 로 읽으면 다음 판에 또 나와 "사람이 볼 차례다" 로 1 을
+/// 낸다. 뿌리의 일은 다 하고 0 으로 끝나야 한다.
+#[cfg(unix)]
+#[test]
+fn the_python_agents_skip_a_row_only_a_side_worktree_has() {
+    let s = agents_repo("agents-side");
+    let mine = add(s.path(), &["뿌리의 일", "-p", "1"]);
+    git(s.path(), &["add", "-A"]);
+    git(s.path(), &["commit", "-q", "-m", "일감"]);
+    let side = s.path().join("side");
+    git(s.path(), &["worktree", "add", "-q", "-b", "side", side.to_str().unwrap(), "main"]);
+    // 맨 위에 선다 — 뿌리의 일보다 먼저 겨루고 먼저 `missing` 을 받는다.
+    let theirs = add(&side, &["옆에만 있는 일", "-p", "0"]);
+    let work = s.path().join("work.sh");
+    write_exe(&work, "#!/bin/sh\necho 됐다\n");
+
+    let out = agents_cmd(s.path(), &work, 2).output().expect("python3 를 실행하지 못했다");
+    assert!(out.status.success(), "옆에만 있는 줄 때문에 실패로 끝났다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&format!("{theirs}  건너뛴다")), "{}", text(&out));
+    assert!(line_of(s.path(), &mine).contains("\"status\":\"done\""), "{}", text(&out));
+    assert!(line_of(&side, &theirs).contains("\"status\":\"todo\""), "옆의 줄을 건드렸다");
 }
