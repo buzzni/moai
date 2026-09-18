@@ -371,7 +371,9 @@ pub fn claimed<'a>(issues: &'a [Issue], names: &'a BTreeSet<String>) -> impl Fn(
 /// [`claimed`] 의 몸통 — **이미 푼 소속 지도**로 잰다. 워크트리가 여럿이면 지도는 하나고 이름만
 /// 바뀌므로([`places`]), 워크트리마다 `groups`·`milestones` 를 다시 지으면 `moai status` 한 번이
 /// 같은 걸음을 워크트리 수만큼 걷는다 — [`status`] 가 "한 번만 잰다" 고 적어 둔 것과 같은 까닭이다.
-fn claims(epics: &BTreeMap<&str, &str>, stones: &BTreeMap<&str, &str>, names: &BTreeSet<String>, i: &Issue) -> bool {
+///
+/// 안 읽은 줄의 "내게 온 것"(`query::unread`)도 이 걸음을 쓴다 — 마일스톤 지도를 비워 넘겨서(moai-j038.vna).
+pub(crate) fn claims(epics: &BTreeMap<&str, &str>, stones: &BTreeMap<&str, &str>, names: &BTreeSet<String>, i: &Issue) -> bool {
     !names.is_empty()
         && std::iter::successors(Some(i.id.as_str()), |id| crate::id::parent_of(id)).any(|id| {
             names.contains(id)
