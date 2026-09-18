@@ -5070,3 +5070,25 @@
 {"ts":"2026-09-18T23:44:51Z","id":"moai-zsu8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 내부 정리·모서리, 동작 불변이거나 겪은 보고 없음"}
 {"ts":"2026-09-18T23:44:51Z","id":"moai-bx2q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 써 본 뒤 필요하면"}
 {"ts":"2026-09-18T23:44:51Z","id":"moai-xlpc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): 꼭 안 해도 될 것으로 추려 미룬다 — 써 본 뒤 필요하면"}
+{"ts":"2026-09-18T23:54:41Z","id":"moai-4jsy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"감독: 사용자가 반드시 할 것으로 골랐다(2026-09-18). m62u·cle9 와 뿌리가 같은 훅 초점 판정이라 3k2d 로 옮겨 한 리뷰로 본다"}
+{"ts":"2026-09-18T23:54:41Z","id":"moai-p836","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅이 읽는 셸의 남은 틈"}
+{"ts":"2026-09-18T23:54:41Z","id":"moai-ncay","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"|| { echo; exit 1; } 과 if ! 집기; then exit; fi 꼴의 끊기를 훅이 아직 막는다"}
+{"ts":"2026-09-18T23:54:41Z","id":"moai-p836","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-lwwx 에서 펼쳤다 — || { echo; exit 1; } 과 if ! 집기; then exit; fi 꼴의 끊기를 훅이 아직 막는다"}
+{"ts":"2026-09-18T23:54:41Z","id":"moai-lwwx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-p836 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T23:54:49Z","id":"moai-455j","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"command_of 가 env·timeout·sudo 를 못 넘어 규칙 1–3 이 샌다"}
+{"ts":"2026-09-18T23:54:49Z","id":"moai-455j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-073a 에서 펼쳤다 — command_of 가 env·timeout·sudo 를 못 넘어 규칙 1–3 이 샌다"}
+{"ts":"2026-09-18T23:54:49Z","id":"moai-073a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-p836 의 멤버 moai-455j 로 펼쳤다"}
+{"ts":"2026-09-18T23:54:49Z","id":"moai-t863","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"따옴표 없는 heredoc 본문의 명령 치환을 훅이 안 읽는다"}
+{"ts":"2026-09-18T23:54:49Z","id":"moai-t863","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-fjr0 에서 펼쳤다 — 따옴표 없는 heredoc 본문의 명령 치환을 훅이 안 읽는다"}
+{"ts":"2026-09-18T23:54:49Z","id":"moai-fjr0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-p836 의 멤버 moai-t863 로 펼쳤다"}
+{"ts":"2026-09-18T23:54:49Z","id":"moai-1upp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"설정 주석 손실과 링크 TMPDIR 시험"}
+{"ts":"2026-09-18T23:54:49Z","id":"moai-v5rh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"키·배열 원소를 지울 때 빈 줄로 떨어진 위 주석도 함께 사라진다"}
+{"ts":"2026-09-18T23:54:49Z","id":"moai-1upp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-liij 에서 펼쳤다 — 키·배열 원소를 지울 때 빈 줄로 떨어진 위 주석도 함께 사라진다"}
+{"ts":"2026-09-18T23:54:49Z","id":"moai-liij","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-1upp 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T23:54:57Z","id":"moai-2l74","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TMPDIR 이 링크이면 경로를 견주는 시험 31건이 깨진다"}
+{"ts":"2026-09-18T23:54:57Z","id":"moai-2l74","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-50dd 에서 펼쳤다 — TMPDIR 이 링크이면 경로를 견주는 시험 31건이 깨진다"}
+{"ts":"2026-09-18T23:54:57Z","id":"moai-50dd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-1upp 의 멤버 moai-2l74 로 펼쳤다"}
+{"ts":"2026-09-18T23:54:58Z","id":"moai-4u6b","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 원문 노트와 64KB 상한"}
+{"ts":"2026-09-18T23:54:58Z","id":"moai-b8aj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 원문을 note -b - 로 그대로 붙이라는 안내가 64KB 거절문과 맞서는 자리가 있다"}
+{"ts":"2026-09-18T23:54:58Z","id":"moai-4u6b","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-18q4 에서 펼쳤다 — 리뷰 원문을 note -b - 로 그대로 붙이라는 안내가 64KB 거절문과 맞서는 자리가 있다"}
+{"ts":"2026-09-18T23:54:58Z","id":"moai-18q4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-4u6b 로 펼쳤다 (이슈 1건)"}
