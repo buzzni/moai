@@ -1841,6 +1841,41 @@ fn show_json_keys_win_over_unknown_fields_of_the_same_name() {
     assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
 }
 
+/// **조건부 키는 이번에 안 실었으면 되쓴 줄에서도 안 나간다**(moai-2l8n). `--json` 을 파일에
+/// 되써 넣은 줄은 그때의 조건부 키(`commits_error`·`blockers`·…)를 모르는 필드로 들고 있다.
+/// 덧붙인 키만 걷으면, 그 조건이 아닌 지금 옛 값이 그대로 딸려 나가 거짓을 말한다 — git 이
+/// 멀쩡한데 `commits` 옆에 "못 읽었다" 가 선다. 파일은 한 바이트도 안 바뀐다.
+#[test]
+fn show_json_drops_stale_conditional_keys_carried_by_a_rewritten_line() {
+    let s = init("stalekeys");
+    let id = add(s.path(), &["되쓴 줄"]);
+    git(s.path(), &["init", "-q"]);
+    git_at(s.path(), NOW, &["commit", "-q", "--allow-empty", "-m", "chore: 첫 커밋"]);
+    let stale = [
+        r#""commits_error":"가짜""#,
+        r#""blockers":[{"id":"가짜"}]"#,
+        r#""shelved_by":"가짜""#,
+        r#""workplaces":["가짜"]"#,
+        r#""place":"가짜""#,
+        r#""duplicate_lines":2"#,
+        r#""members":["가짜"]"#,
+    ];
+    let doctored = issues(s.path()).replace(
+        &format!("\"id\":\"{id}\","),
+        &format!("\"id\":\"{id}\",{},\"due\":\"2026-10-01\",", stale.join(",")),
+    );
+    std::fs::write(s.path().join(".moai/issues.jsonl"), &doctored).unwrap();
+
+    let json = ok(s.path(), &["show", &id, "--json"]);
+    for kv in &stale {
+        let key = &kv[..=kv[1..].find('"').unwrap() + 1];
+        assert!(!json.contains(key), "이번에 안 실은 {key} 가 되쓴 줄에서 딸려 나왔다\n{json}");
+    }
+    assert!(json.contains(r#""commits":[]"#), "{json}");
+    assert!(json.contains(r#""due":"2026-10-01""#), "조건부 키가 아닌 모르는 필드까지 걷었다\n{json}");
+    assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
+}
+
 /// **끊긴 에픽을 든 생각 밑에 접힌 줄은 트리와 status 가 같게 읽는다**(moai-uni2) — 길 잃은
 /// 부모의 묶음이다. 트리는 그 줄을 `(길 잃음)` 안의 생각 밑에 그리므로, status 가 그 줄을
 /// "에픽 없는 이슈" 로 세면 `moai show -e none` 을 가리키며 고칠 수 없는 줄을 고치라 한다.

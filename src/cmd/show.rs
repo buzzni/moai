@@ -289,6 +289,11 @@ fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
     Ok(md.lines().map(str::to_string).collect())
 }
 
+/// 줄 하나의 `--json` 이 **조건에 따라** 덧붙이는 키 전부(moai-2l8n). 이번에 안 실은 것은
+/// 되써 넣은 줄의 모르는 필드에서도 걷는다(`json_with`). 조건부 키를 더하면 여기에도 더한다 —
+/// 빠지면 그 키만 옛 값이 딸려 나간다.
+const MAY: &[&str] = &["members", "shelved_by", "duplicate_lines", "blockers", "workplaces", "place", "commits_error"];
+
 fn one(
     ctx: &Ctx,
     repo: &Repo,
@@ -415,6 +420,7 @@ fn one(
         return super::json_with(
             &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),
             &extra,
+            MAY,
         );
     }
 

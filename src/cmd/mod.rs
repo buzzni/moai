@@ -437,8 +437,14 @@ pub fn standing_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, 
 /// (`--json` 을 파일에 되써 넣은 줄) 한 객체에 같은 키가 둘 서서 깐깐한 파서가 거절하거나 앞의
 /// 값을 읽는다. 그 이름은 **여기서** 걷는다 — 덧붙이는 자리마다 목록을 두면 새 키를 더할 때 빠진다.
 /// 걷는 것은 출력뿐이고 파일의 값은 그대로다(모르는 필드 보존, `moai status` 가 비춘다).
-pub fn json_with<T: Shown>(base: &T, extra: &[(&str, String)]) -> R<Vec<String>> {
-    let keys: Vec<&str> = extra.iter().map(|(k, _)| *k).collect();
+///
+/// **`may` 는 이 명령이 조건에 따라 덧붙일 수 있는 키 전부다**(moai-2l8n). 이번에 안 실은 것도
+/// 걷는다 — 되써 넣은 줄은 그때의 조건부 키를 모르는 필드로 들고 있어, 덧붙인 키만 걷으면 그
+/// 조건이 아닌 지금 옛 값이 딸려 나간다. git 이 멀쩡한데 `commits` 옆에 옛 `commits_error` 가
+/// 서서 "못 읽었다" 고 말하던 자리다. 늘 덧붙이는 키는 `extra` 에 늘 있으니 여기 적지 않아도 된다.
+pub fn json_with<T: Shown>(base: &T, extra: &[(&str, String)], may: &[&str]) -> R<Vec<String>> {
+    let mut keys: Vec<&str> = extra.iter().map(|(k, _)| *k).collect();
+    keys.extend_from_slice(may);
     let stripped = base.without(&keys);
     let mut s = serde_json::to_string(stripped.as_ref().unwrap_or(base)).map_err(|e| Fail::new(e.to_string()))?;
     if !s.ends_with('}') {
@@ -531,7 +537,7 @@ mod tests {
             ("shelved_by", "\"argos-0002\"".to_string()),
             ("duplicate_lines", "2".to_string()),
         ];
-        let out = json_with(&row, &extra).unwrap().join("");
+        let out = json_with(&row, &extra, &[]).unwrap().join("");
         for (k, v) in &extra {
             assert_eq!(out.matches(&format!("\"{k}\":")).count(), 1, "{k} 가 둘 섰다\n{out}");
             assert!(out.contains(&format!("\"{k}\":{v}")), "{k} 에 우리 값이 안 섰다\n{out}");
@@ -539,6 +545,17 @@ mod tests {
         assert!(!out.contains("가짜"), "{out}");
         assert!(out.contains("\"due\":\"2026-10-01\""), "겹치지 않는 모르는 필드까지 걷었다\n{out}");
         assert!(out.contains("\"derived_status\":\"in_progress\""), "{out}");
+    }
+
+    /// **이번에 안 실은 조건부 키도 걷는다**(moai-2l8n) — `may` 에 든 이름이면 `extra` 에 없어도
+    /// 되써 넣은 옛 값이 안 나간다. `may` 에 없는 모르는 필드는 그대로다.
+    #[test]
+    fn a_conditional_key_left_out_this_time_is_stripped_too() {
+        let i = row_with(&[("commits_error", "가짜"), ("due", "2026-10-01")]);
+        let row = Row::of(&i, None);
+        let out = json_with(&row, &[("commits", "[]".to_string())], &["commits_error"]).unwrap().join("");
+        assert!(!out.contains("commits_error"), "{out}");
+        assert!(out.contains("\"due\":\"2026-10-01\"") && out.contains("\"commits\":[]"), "{out}");
     }
 
     /// 겹치는 것이 없으면 걷은 모습을 짓지 않는다 — 흔한 길에서 줄을 복제하지 않는다.
