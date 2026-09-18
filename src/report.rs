@@ -586,7 +586,12 @@ pub fn blinding<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> V
     if !trees.iter().any(|t| t.unknown) {
         return Vec::new();
     }
+    // 집은 줄이 없으면 가릴 판정도 없다 — [`places`] 의 빠른 길(`blind = false`)과 같은 답이다.
+    // 안 거르면 `nameless` 가 빈 목록에 참을 내, 못 읽은 워크트리를 다 "가린다" 로 센다.
     let picked = wip(issues, cfg);
+    if picked.is_empty() {
+        return Vec::new();
+    }
     let (epics, stones) = (groups(issues), milestones(issues));
     trees
         .iter()
@@ -2955,6 +2960,11 @@ mod tests {
         stray[0].unknown = true;
         assert!(matches!(places(&issues, &cfg(), &stray, LATER)["argos-0003"], Place::Unknown));
         assert_eq!(blinding(&issues, &cfg(), &stray).len(), 1);
+
+        // 집은 줄이 없으면 가릴 판정도 없다 — `places` 는 빈 지도를 내고, 세는 자도 비어야 한다.
+        let idle = vec![make("argos-0001", Kind::Epic, "todo")];
+        assert!(places(&idle, &cfg(), &stray, LATER).is_empty());
+        assert!(blinding(&idle, &cfg(), &stray).is_empty(), "집은 줄이 없는데 가린다고 셌다");
     }
 
     /// **워크트리가 없으면 아무 키도 없다**(moai-tbin) — "없다" 는 찾아보고 못 찾았을 때의 말이다.
