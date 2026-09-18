@@ -43,7 +43,7 @@ fn read_source(from: &str) -> R<String> {
 /// `--var` 는 `이름=값` 이다. `=` 이 없거나 이름이 비거나 변수 이름의 모양(`draft::is_var_name`)이
 /// 아니면 그 인자를 대며 거절하고, **같은 이름을 두 번 주면 거절한다** — 어느 값이 이길지 조용히
 /// 고르면 템플릿이 사람이 안 적은 계획을 찍는다. 이 거절과 `fill` 의 거절은 모두 `bad_input` 이다.
-pub fn read_plan(from: &str, vars: &[String]) -> R<Vec<draft::Draft>> {
+pub fn read_plan(from: &str, vars: &[String], shape: draft::Shape) -> R<Vec<draft::Draft>> {
     let bad = |msg: String| Fail::coded(msg, super::code::BAD_INPUT);
     let mut pairs: Vec<(&str, &str)> = Vec::new();
     // 틀린 `--var` 는 **전부** 모아 한 번에 말한다 — `fill`·`parse` 가 줄을 그렇게 말하는 것과 같다.
@@ -76,7 +76,7 @@ pub fn read_plan(from: &str, vars: &[String]) -> R<Vec<draft::Draft>> {
         return Err(bad(errors.join("\n      ")));
     }
     let src = read_source(from)?;
-    draft::fill(&src, &pairs).map_err(bad)
+    draft::fill_as(&src, &pairs, shape).map_err(bad)
 }
 
 /// `-` 이면 stdin. `add` 와 `edit` 이 같은 규칙을 쓴다.
@@ -251,11 +251,11 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
 /// 하나씩 만들면 에이전트가 중간에 흘리고, 중간에 죽으면 반만 남은 계획이
 /// 남는다. 한 번의 쓰기라 다 되거나 하나도 안 된다.
 fn bulk(ctx: &Ctx, repo: &Repo, from: &str, vars: &[String], dry_run: bool, assignee: Option<String>) -> R<Vec<String>> {
-    let drafts = read_plan(from, vars)?;
+    let drafts = read_plan(from, vars, draft::Shape::Plan)?;
 
     if dry_run {
         if ctx.json {
-            return json_rehearsal(&drafts, None);
+            return json_rehearsal(&drafts, None, None);
         }
         // 만들지 않으므로 id 가 없다. 무엇이 어디에 붙는지만 보여 준다.
         let mut out = vec![paint(style::HEAD, "만들 것")];
@@ -269,7 +269,7 @@ fn bulk(ctx: &Ctx, repo: &Repo, from: &str, vars: &[String], dry_run: bool, assi
     let by = model::actor(ctx.user.as_deref(), &repo.root)?;
     let who = assignee_of(assignee.as_deref(), &by);
     let (made, read): (Vec<Issue>, super::Read) = repo.with_write(|issues, cfg, reserved| {
-        let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, &who, &by, &at)?;
+        let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, None, &who, &by, &at)?;
         let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
         let read = super::read_of(issues, cfg, &ids);
         Ok((entries, (made, read)))
@@ -301,6 +301,7 @@ pub fn create_drafts(
     cfg: &crate::config::Config,
     reserved: &std::collections::BTreeSet<String>,
     drafts: &[Draft],
+    into: Option<&str>,
     who: &(Option<String>, Option<String>),
     by: &Actor,
     at: &str,
@@ -321,7 +322,8 @@ pub fn create_drafts(
         // 초안이 든 것은 **차례 번호**다 — 방금 만든 id 로 바꿔 넣는다.
         // 닫힌 이름을 `at` 으로 두면 시각을 담은 인자 `at` 을 가려, 같은
         // 줄에서 같은 이름이 두 가지를 뜻한다.
-        issue.epic = d.epic.map(|nth| ids[nth].clone());
+        // `into` 는 이미 선 에픽이다 — 초안에 제 에픽이 없을 때만 선다(`Shape::Members`).
+        issue.epic = d.epic.map(|nth| ids[nth].clone()).or_else(|| into.map(str::to_string));
         (issue.assignee, issue.assignee_email) = who.clone();
         let (entry, issue) = store::admit(issues, cfg, issue, by)?;
         entries.push(entry);
@@ -361,7 +363,7 @@ pub fn line_of(d: &Draft, id: Option<&str>) -> String {
 ///
 /// `dry_run` 을 적어 두는 것은 **id 가 없는 까닭**이 거기서 나오기 때문이다.
 /// 진짜 출력은 만든 줄을 그대로 내므로, 이 깃발이 두 모양을 가른다.
-pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>) -> R<Vec<String>> {
+pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>, into: Option<&str>) -> R<Vec<String>> {
     /// 기본 우선순위는 **여기서 풀어 낸다.** `null` 을 내면 받는 쪽이 기본값을
     /// 다시 알아야 하고, 그러면 그 값이 두 곳에 적힌다. 우선순위가 없는 종류
     /// (에픽·마일스톤)에는 아예 내지 않는다 — 없는 것에 기본값을 씌우면
@@ -385,6 +387,9 @@ pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>) -> R<Vec<String>
         drafts: Vec<DraftOut<'a>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         promoted: Option<&'a str>,
+        /// 이슈가 들 이미 선 에픽 (`idea promote -e`). 초안의 `epic` 은 첨자라 거기에 못 적는다
+        #[serde(skip_serializing_if = "Option::is_none")]
+        into: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         status: Option<&'a str>,
     }
@@ -409,6 +414,7 @@ pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>) -> R<Vec<String>
             })
             .collect(),
         promoted,
+        into,
         // 펼치면 그 생각이 닫힌다는 말은 진짜 출력과 **같은 낱말**로 한다.
         status: promoted.map(|_| crate::config::DONE),
     })

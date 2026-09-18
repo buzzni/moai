@@ -843,14 +843,27 @@ fn positionals(args: &[String]) -> Vec<&str> {
 /// 판은 뒤의 것을 생성으로 읽어 막았다 — 위와 같은 까닭의 반대쪽이다. 종류를
 /// 고정한 네임스페이스(`issue add --type idea`)는 고정한 쪽이 이기므로
 /// (`add::run` 의 `kind_override.or(args.kind)`) 그대로 생성이다.
+///
+/// **`idea promote -e <에픽>` 도 생성이다**(moai-f3ml.lm7). 새 에픽을 세우는 promote 는
+/// 그 자체로 한 단위라 자유롭지만, `-e` 는 이미 선 에픽에 멤버를 넣는다 — 안 보면
+/// `idea add` 뒤에 `promote -e <남의 에픽>` 으로 `add -e <남의 에픽>` 이 막히는 자리를 지나간다.
 fn creates(seg: &[String]) -> bool {
     let Some(args) = moai_args(seg) else { return false };
     let verbs = positionals(args);
     match verbs.first().copied() {
         Some("add") => flag_values(args, &["--type"]).last().map(String::as_str) != Some("idea"),
         Some("issue" | "epic" | "milestone") => verbs.get(1).copied() == Some("add"),
+        Some("idea") => promotes_into(seg),
         _ => false,
     }
+}
+
+/// 선 에픽에 멤버로 펼치는 `idea promote -e` 인가. `--from` 을 늘 들고 오므로 `--from` 을
+/// 한 단위로 읽어 풀어 주는 자리에서 이것만은 빼야 한다.
+fn promotes_into(seg: &[String]) -> bool {
+    let Some(args) = moai_args(seg) else { return false };
+    positionals(args).get(..2) == Some(&["idea", "promote"][..])
+        && !flag_values(args, &["-e", "--epic"]).is_empty()
 }
 
 /// 지금 집고 있는 것에 매인 단위들 — 그 이슈 자신, 그 에픽, 그 마일스톤, 그 부모.
@@ -929,7 +942,10 @@ pub fn unsure(issues: &[Issue], cfg: &Config, elsewhere: &BTreeSet<String>, own:
 ///
 /// 초점 밖에 세우면 그 줄이 어느 일에서 나왔는지를 잃고, 에픽을 닫아도 남은
 /// 것이 어디 있는지 아무도 모른다. 지금 할 일이 아니면 `idea` 로 담는다 —
-/// 그쪽은 이 규칙에서 언제나 자유롭다.
+/// 그쪽은 이 규칙에서 언제나 자유롭다. 단 **그 에픽(없으면 그 일)이 내건 것이 이것 없이
+/// 안 이뤄지면 idea 가 아니다**(moai-l288) — 거절문이 그 자를 함께 댄다. 훅이 그것을
+/// 가를 수는 없으니 막지는 않고 말만 한다. "첫 칸에 두면 안 닫힌다" 는 에픽이 있을 때만
+/// 비친다 — 에픽 없는 일의 자식은 부모를 붙들지 않는다.
 ///
 /// 훅은 토막을 고르는 [`guard_shell_in`] 으로 부른다. 토막 전부를 보는 이 모양은 시험이 쓴다.
 #[cfg(test)]
@@ -955,7 +971,7 @@ fn create_in(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str,
         // `moai add "--from 을 나중에"` 가 규칙을 통째로 지나간다 — 동사를
         // 자리로 읽기로 한 것과 같은 까닭이다.
         creates(seg)
-            && !seg.iter().any(|t| t == "--from" || t.starts_with("--from="))
+            && (promotes_into(seg) || !seg.iter().any(|t| t == "--from" || t.starts_with("--from=")))
             // **도움말은 만들지 않는다.** 우리가 심는 스킬이 "모르면
             // `moai <명령> --help` 를 보라" 고 적어 두는데, 그 길을 막으면
             // 규칙이 제가 시킨 것을 막는다.
@@ -983,16 +999,31 @@ fn create_in(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str,
     // 만들어지고, `moai status` 에 "에픽으로 쓸 수 없는 것을 가리키는 줄" 이
     // 하나 는다. 그리고 경고가 늘면 `closing` 이 세션을 붙든다. 훅이 시킨 대로
     // 한 것이 훅에 걸리는 자리는 규칙이 아니라 덫이다.
-    let into_epic = report::groups(issues)
-        .get(head.id.as_str())
+    let epic = report::groups(issues).get(head.id.as_str()).cloned();
+    let into_epic = epic
+        .as_ref()
         .map(|e| format!("\x20 moai add \"제목\" -e {e}        같은 에픽 안에\n"))
         .unwrap_or_default();
+    // **무엇이 내건 것인지는 갈림길 1 과 같은 자로 댄다 — 에픽이다.** "그 일" 로 적던 판은 집은
+    // 이슈가 아니라 에픽이 필요로 하는 것(moai-1k17 이 그 모양)에서 갈림길 1 과 다른 답을 냈다.
+    // 에픽이 없을 때만 집은 일 자신이다.
+    let aim = epic.as_deref().unwrap_or(head.id.as_str());
+    // **첫 칸에 둔 줄이 일을 열어 두는 것은 에픽뿐이다** — 에픽의 칸은 멤버에서 읽지만, 에픽 없는
+    // 일은 자식이 첫 칸에 있어도 그대로 닫힌다. 그때 "첫 칸에 두면 안 닫힌다" 를 비치면 거짓이다.
+    // 가리키는 줄도 이름으로 댄다 — "위의 줄" 바로 위가 `idea add` 줄이고, idea 도 첫 칸에 선다.
+    let keep = if epic.is_some() {
+        format!("위의 `moai add` 줄로 세워 첫 칸에 둔다. 밖으로 내보내면 {aim} 가 목적을 못 이룬 채 닫힌다")
+    } else {
+        format!("위의 `--parent` 줄로 세운다. 에픽 없는 일은 자식이 남아도 닫히니 {aim} 를 닫기 전에 끝낸다")
+    };
     refuse(1, format!(
         "지금 집고 있는 것이 있다 — {held}.\n\
          그 단위 안에서 만들거나, 밖의 것이면 담아 둔다. 초점 밖에 이슈를 세우면\n\
          그 줄이 어느 일에서 나왔는지를 잃는다.\n\
          {into_epic}\x20 moai add \"제목\" --parent {}   그 일의 자식으로\n\
-         \x20 moai idea add \"제목\"                 지금 할 일이 아니면 담아 둔다",
+         \x20 moai idea add \"제목\"                 지금 할 일이 아니면 담아 둔다\n\
+         {aim} 가 내건 것이 이것 없이 안 이뤄지면 idea 가 아니다 — 지금 못 해도\n\
+         {keep}",
         head.id
     ))
 }
@@ -1916,9 +1947,24 @@ mod tests {
         assert!(why.contains("-e t-e"), "에픽을 안 가리킨다\n{why}");
         assert!(why.contains("--parent t-1"), "자식으로 다는 길이 없다\n{why}");
         assert!(why.contains("idea add"), "담아 두는 길이 없다\n{why}");
+        // idea 로 가는 문만 열어 두면 에픽이 내건 것 자체도 그리로 나가 에픽이
+        // 목적을 못 이룬 채 닫힌다 (moai-l288).
+        // 무엇이 내건 것인지는 갈림길 1 처럼 에픽으로 댄다 — 집은 이슈로 대면 에픽만 필요로
+        // 하는 것에서 두 글이 다른 답을 낸다 (moai-dw63.gwf 4번).
+        assert!(why.contains("t-e 가 내건 것"), "idea 가 아닌 경우를 에픽으로 안 가른다\n{why}");
+        // 세울 줄은 이름으로 가리킨다 — "위의 줄" 바로 위가 `idea add` 줄이고 idea 도 첫 칸에 선다.
+        assert!(why.contains("위의 `moai add` 줄로 세워 첫 칸에 둔다"), "에픽이 내건 것을 세울 줄을 안 가리킨다\n{why}");
 
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add \"안의 일\" -e t-e"), Decision::Pass);
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add \"자식\" --parent t-1"), Decision::Pass);
+
+        // 선 에픽에 펼치는 promote 도 같은 자로 본다 — 안 보면 `idea add` 뒤 `promote -e` 가
+        // `add -e` 가 막히는 자리를 지나간다 (moai-f3ml.lm7). 새 에픽을 세우는 promote 는 그대로다.
+        let into = |e: &str| format!("moai idea promote t-i -e {e} --from -");
+        assert!(matches!(guard_create(&all, &cfg(), &here(), &into("t-x")), Decision::Deny(_)), "남의 에픽에 promote 로 멤버를 세웠다");
+        assert_eq!(guard_create(&all, &cfg(), &here(), &into("t-e")), Decision::Pass);
+        assert_eq!(guard_create(&all, &cfg(), &here(), "moai idea promote t-i --epic=t-e --from -"), Decision::Pass);
+        assert_eq!(guard_create(&all, &cfg(), &here(), "moai idea promote t-i --from -"), Decision::Pass);
     }
 
     /// **소속은 물려받는다.** 자식 이슈를 집었을 때 그 줄의 `epic` 은 비어
@@ -2310,6 +2356,9 @@ mod tests {
         assert!(!why.contains("-e "), "없는 에픽을 대라고 한다\n{why}");
         assert!(why.contains("--parent t-1"), "자식으로 다는 길이 없다\n{why}");
         assert!(why.contains("idea add"), "담아 두는 길이 없다\n{why}");
+        // 에픽 없는 일의 자식은 부모를 안 붙든다 — 첫 칸에 두면 그 일이 안 닫힌다고 비치지 않는다.
+        assert!(why.contains("idea 가 아니다"), "일이 이것 없이 안 끝나는 경우를 안 가른다\n{why}");
+        assert!(!why.contains("첫 칸에 둔다"), "에픽 없는 일에 자식이 그 일을 열어 둔다고 비친다\n{why}");
 
         // 에픽이 있으면 그때는 에픽을 가리킨다.
         let held = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];

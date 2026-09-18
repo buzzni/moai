@@ -478,6 +478,13 @@ PLAN
   펼치면 닫힌다 — 그 idea 는 `done` 으로 간다. 무엇이 무엇에서 나왔는지는
   저널에 남는다 (`moai show <id>` 의 이력).
 
+  에픽이 이미 서 있으면 `-e <에픽>` 으로 그 에픽의 멤버로 펼친다. 에픽이
+  내건 것이 idea 로 밖에 나가 있던 것을 되찾는 자리다 — 계획에는 `- 이슈` 만 적는다.
+
+moai idea promote <id> -e <에픽> --from - <<'PLAN'
+- [p1] 에픽이 내건 것
+PLAN
+
   `--dry-run` 이 펼친 안을 사람이 한 번 보고 \"좋다\" 하는 자리다.")]
     Promote(PromoteArgs),
 }
@@ -491,6 +498,10 @@ pub struct PromoteArgs {
     /// 마크다운에서 에픽과 이슈를. `-` 이면 stdin
     #[arg(long, value_name = "파일|-")]
     pub from: String,
+
+    /// 새 에픽을 세우지 않고 이미 선 이 에픽에 멤버로 펼친다. 계획에는 `- 이슈` 만 적는다
+    #[arg(short, long, value_name = "에픽")]
+    pub epic: Option<String>,
 
     /// 계획 템플릿의 `{{이름}}` 을 채운다 (여러 번 준다) — `add --from` 과 같은 규칙
     #[arg(long = "var", value_name = "이름=값")]
