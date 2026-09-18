@@ -54,7 +54,14 @@ pub fn short_stamp(at: &str) -> String {
 
 /// `#a #b` — 태그를 사람에게 댈 때의 모양. CLI 표·상세와 탐색기의 목록 열·상세가 같이 쓴다.
 pub fn tags_of(i: &Issue) -> String {
-    i.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
+    tag_line(&i.tags)
+}
+
+/// 태그 표기가 정해지는 **한 자리**. 아직 `Issue` 가 아닌 것 — `add --from` 의 연습과
+/// `idea promote` 미리보기가 그리는 초안 — 도 이것을 쓴다. `add` 가 손으로 짓던 판은 표기를
+/// 바꾸면 show·status·탐색기만 따라가, 방금 만든 줄의 태그가 확인 줄에서 다르게 보였다.
+pub fn tag_line(tags: &[String]) -> String {
+    tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
 }
 
 /// "미룸 (3일)" 이나 "미룸 — <줄> 밑" — 계획에 있으면 `None`.
@@ -1669,6 +1676,46 @@ mod tests {
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    /// **태그 표기는 `tag_line` 한 자리에서 정한다.** `add` 의 확인 줄과 연습이 손으로 지어,
+    /// 표기를 바꾸면 방금 만든 줄의 태그만 옛 모양으로 보였다. 표면 코드에 같은 짓기가 다시
+    /// 서면 여기서 이름을 대며 붉어진다 — 초안의 `\#` 풀기(`draft.rs`)는 표기가 아니라 글이다.
+    ///
+    /// **짓는 자리를 빼지 않고 센다** — `git.rs` 의 `git_is_spawned_only_through_command` 와 같은
+    /// 모양이다. 이유가 둘이다. 하나, 파일 이름으로 빼면 `src/tui/view.rs` 까지 같이 빠진다
+    /// (`Path::ends_with` 는 글자가 아니라 마디로 견준다) — 태그를 실제로 그리는 탐색기가 바로
+    /// 거기라, 빼 두면 하필 제일 샐 만한 자리가 안 보인다. 둘, `tag_line` 이 다시 쓰여 바늘이
+    /// 아무 데도 안 걸리는 날 "한 자리도 없음" 은 통과로 읽힌다 — **하나여야 한다**로 세면 그날
+    /// 여기가 먼저 터져, 아무것도 안 지키는 시험이 초록으로 남지 않는다.
+    #[test]
+    fn tags_are_spelled_in_one_place() {
+        // 바늘을 쪼개 둔다 — 한 조각이 통째로 적히면 이 줄이 제 바늘에 걸린다.
+        let needle = concat!("format!(\"#{t}\")", ").collect");
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![src.clone()];
+        let mut built = Vec::new();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
+                let path = entry.expect("디렉터리 항목").path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|x| x == "rs") {
+                    let text = std::fs::read_to_string(&path).expect("소스를 못 읽는다");
+                    for (n, line) in text.lines().enumerate() {
+                        if line.contains(needle) {
+                            built.push(format!("{}:{}", path.display(), n + 1));
+                        }
+                    }
+                }
+            }
+        }
+        let here = src.join("view.rs").display().to_string();
+        assert!(
+            built.len() == 1 && built[0].starts_with(&here),
+            "태그 줄을 짓는 자리는 view::tag_line 하나다 — {built:#?}"
+        );
+        assert_eq!(tag_line(&["a".into(), "b".into()]), "#a #b");
     }
 
     fn no_epics() -> crate::report::EpicLabels<'static> {
