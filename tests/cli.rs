@@ -2948,7 +2948,108 @@ const JSON_SWEEP: &[&str] = &[
     "issue", "epic", "milestone", "idea",
     // 사용자 설정을 고친다. `add`·`rm` 은 제 설정 파일로 따로 부른다 — 공용 집에 쓰면 안 된다.
     "project",
+    // 읽음도 사용자 설정에 적는다. 시험의 `MOAI_CONFIG` 는 그 시험만의 임시 자리다.
+    "read",
 ];
+
+/// **읽음은 내 설정에만 적힌다**(moai-u8oh, 사용자 결정) — 트래커 파일은 한 바이트도 안 바뀐다.
+/// `--all` 은 내게 온 것 가운데 안 읽은 것을, `-e` 는 그 묶음(에픽·마일스톤)의 멤버와 **그 밑까지**
+/// 적는다 — 물려받은 소속도 센다(moai-u8oh.x85). 없는 줄은 #a-partial 대로 말하고 비영으로 끝나고,
+/// id 를 준 길은 누군지 몰라도 적는다.
+#[test]
+fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
+    let s = init("readmark");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let epic = field(&mine(&["add", "에픽", "--type", "epic", "--json"]), "id");
+    let member = field(&mine(&["add", "멤버", "-e", &epic, "--json"]), "id");
+    // 멤버의 자식 — **제 `epic` 을 안 적고 부모에게서 받는다**(`moai add --parent`). `-e` 가
+    // 줄의 `epic` 필드만 보던 때 이 줄이 통째로 빠졌다(moai-u8oh.x85).
+    let child = field(&mine(&["add", "자식", "--parent", &member, "--json"]), "id");
+    let before = issues(s.path());
+
+    let out = mine(&["read", &member, "--json"]);
+    assert!(out.contains(&member), "{out}");
+    let saved = std::fs::read_to_string(&cfg).unwrap();
+    assert!(saved.contains("[read]") && saved.contains(&member), "{saved}");
+    assert_eq!(issues(s.path()), before, "읽었다고 트래커가 바뀌었다");
+
+    // 두 번째는 적을 것이 없다 — 시계가 고정(MOAI_NOW)이라 같은 때가 이미 적혀 있다.
+    assert!(mine(&["read", &member]).contains("읽음으로 적을 것이 없다"));
+
+    // `-e` 는 에픽 자신과 멤버와 **그 밑까지** 함께 적는다. 자식이 빠지면 "그 밑까지" 가 거짓이다.
+    let out = mine(&["read", "-e", &epic, "--json"]);
+    assert!(out.contains(&epic) && out.contains(&child), "에픽 자신이나 멤버의 자식이 빠졌다 — {out}");
+
+    // 마일스톤도 묶음이다 — 묶음 줄 하나만 적고 멤버를 흘리지 않는다.
+    let stone = field(&mine(&["milestone", "add", "v1", "--json"]), "id");
+    let dated = field(&mine(&["add", "마일 이슈", "--milestone", &stone, "--json"]), "id");
+    let out = mine(&["read", "-e", &stone, "--json"]);
+    assert!(out.contains(&dated), "마일스톤의 멤버가 빠졌다 — {out}");
+
+    // #a-partial — 없는 줄은 말하고 나머지는 적되, **비영으로 끝난다**. 0 으로 끝나면 고리를
+    // 짜는 쪽이 오타 친 id 를 적힌 것으로 세고 넘어간다.
+    let another = field(&mine(&["add", "또 하나", "--json"]), "id");
+    let out = moai_with(s.path(), &cfg, &["read", "없는-줄", &another, "--json"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&another), "하나가 없다고 나머지를 안 적었다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("없는-줄"));
+    assert!(!out.status.success(), "못 찾은 것이 있는데 0 으로 끝났다");
+
+    // 없는 묶음도 같은 자리다 — 조용히 빈 손으로 끝나면 오타를 친 줄 모른다.
+    let out = moai_with(s.path(), &cfg, &["read", "-e", "없는-에픽", "--json"]);
+    assert!(!out.status.success(), "없는 묶음인데 0 으로 끝났다");
+    assert!(String::from_utf8_lossy(&out.stdout).contains(r#""missing":["없는-에픽"]"#), "{out:?}");
+
+    // **누군지 몰라도 id 를 준 길은 적는다** — 저널에 안 쓰니 이름 없는 줄이 남을 자리가 없다.
+    // 담당을 재는 `--all` 만 사람을 묻는다.
+    let bare = isolated(BIN)
+        .args(["read", &member])
+        .current_dir(s.path())
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("moai 를 실행하지 못했다");
+    assert!(bare.status.success(), "{}", String::from_utf8_lossy(&bare.stderr));
+
+    // `--all` 은 내게 온 것 가운데 **안 읽은 것만** — 위에서 다 읽었으니 새로 만든 줄 하나뿐이다.
+    let late = field(&mine(&["add", "늦게 온 것", "--json"]), "id");
+    let out = mine(&["read", "--all", "--json"]);
+    assert!(out.contains(&late), "안 읽은 줄이 안 들었다 — {out}");
+    assert!(!out.contains(&member), "이미 읽은 줄을 다시 적었다 — {out}");
+}
+
+/// **`-e` 는 그 묶음 밑에 그려진 것만 적는다**(moai-j038.vna) — 트리·`show -e`·탐색기의 `SPC m r` 과 같은
+/// 자(`nav::Index::under_group`)다. id 조상을 따로 훑던 때는 `moai epic add --parent <바깥>` 으로 선 안쪽
+/// 에픽과 **그 멤버 절반**(id 로 선 것만)을, `--parent <바깥> -e <남>` 으로 남의 에픽에 든 자식까지 적었다 —
+/// 어느 표면도 그 줄들을 바깥 에픽 밑에 그리지 않는다. 묶음이 아닌 줄은 적기 전에 거절한다.
+#[test]
+fn reading_a_group_takes_what_is_drawn_under_it() {
+    let s = init("readgroup");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let outer = field(&mine(&["epic", "add", "바깥", "--json"]), "id");
+    let other = field(&mine(&["epic", "add", "남의 에픽", "--json"]), "id");
+    let member = field(&mine(&["add", "바깥 멤버", "-e", &outer, "--json"]), "id");
+    let inner = field(&mine(&["epic", "add", "안쪽", "--parent", &outer, "--json"]), "id");
+    let by_field = field(&mine(&["add", "안쪽 멤버", "-e", &inner, "--json"]), "id");
+    let by_id = field(&mine(&["add", "안쪽 자식", "--parent", &inner, "--json"]), "id");
+    let elsewhere = field(&mine(&["add", "남의 자식", "--parent", &outer, "-e", &other, "--json"]), "id");
+    // id 가 서로의 앞머리라(`바깥.xxx`) 따옴표째 찾는다.
+    let has = |out: &str, id: &str| out.contains(&format!("\"{id}\""));
+
+    let out = mine(&["read", "-e", &outer, "--json"]);
+    assert!(has(&out, &outer) && has(&out, &member), "묶음 줄이나 멤버가 빠졌다 — {out}");
+    for stray in [&inner, &by_field, &by_id, &elsewhere] {
+        assert!(!has(&out, stray), "바깥 에픽 밑에 안 그려진 {stray} 를 적었다 — {out}");
+    }
+
+    // 묶음이 아닌 줄은 적기 전에 거절한다 — 받으면 그 줄 하나만 적고 0 으로 끝나 "그 밑까지" 가 거짓이 된다.
+    let out = moai_with(s.path(), &cfg, &["read", "-e", &by_field]);
+    assert!(!out.status.success(), "묶음이 아닌 줄을 받았다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("에픽·마일스톤"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!std::fs::read_to_string(&cfg).unwrap().contains(&format!("{by_field} =")), "거절해 놓고 적었다");
+}
 
 /// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.
 #[test]
@@ -2991,7 +3092,11 @@ fn every_command_still_speaks_json() {
     // 위 시험은 초록인데 그 명령의 `--json` 은 아무도 안 본 것이 된다 —
     // 없는 안전망을 있다고 믿는 것이 제일 나쁘다.
     // `init` 과 `add` 는 위에서 바탕을 세우며 이미 `--json` 으로 부른다.
-    for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add"].contains(c)) {
+    // `read` 는 **제 설정 파일로** 여기서 따로 부른다 — 공용 집의 없는 파일에 쓰면 그 격리가 깨진다
+    // (`project add`·`rm` 과 같은 까닭). 무엇을 적는지는 위의 `read_marks_…` 시험이 본다.
+    let own = s.path().join("sweep-read.toml");
+    one_json_value(&ok_with(s.path(), &own, &["read", &id, "--json"]));
+    for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add", "read"].contains(c)) {
         assert!(
             cases.iter().any(|a| a[0] == *cmd),
             "`{cmd}` 가 JSON_SWEEP 에는 있는데 실제로 부르지 않는다"
@@ -8828,4 +8933,205 @@ fn a_group_cannot_be_claimed_with_from() {
     // `--from` 없이는 그대로 된다 — 묶음을 접는 길(AGENTS.md)이 막히지 않는다.
     ok(s.path(), &["defer", &epic, "-m", "접는다"]);
     assert!(line_of(s.path(), &epic).contains("\"deferred_at\""));
+}
+
+/// `examples/python-agents/agents.py` 를 **실제로 돌린다** (moai-pz8m). bash 판과 같이 예제가
+/// 계약 시험을 겸한다 — `ready --json --worktree`·`mv --from`·`note -b -`·`show --json` 의 모양이
+/// 바뀌면 예제가 조용히 썩는 대신 여기서 떨어진다. python3·git 이 없으면 건너뛰지 않고 실패한다.
+#[cfg(unix)]
+fn agents_cmd(dir: &Path, work: &Path, n: usize) -> Command {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/python-agents/agents.py");
+    let mut cmd = isolated("python3");
+    // **예제가 읽는 나머지 둘도 걷는다.** 돌리는 사람의 셸에 예제를 쓰다 남은 `AGENT_BASE`·
+    // `AGENT_WORKTREES` 가 새면 가지가 없다며 2 로 끝나거나 워크트리가 `.worktrees/` 밖에 선다.
+    // 제 값을 줄 시험은 이 뒤에 `.env` 로 덮는다.
+    cmd.arg(script)
+        .args(["--agents", &n.to_string()])
+        .current_dir(dir)
+        .env_remove("AGENT_BASE")
+        .env_remove("AGENT_WORKTREES")
+        .env("MOAI", BIN)
+        .env("AGENT_WORK", work)
+        .env("MOAI_ACTOR", ACTOR)
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1");
+    cmd
+}
+
+/// 예제를 돌릴 저장소 — git 저장소여야 워크트리를 띄운다.
+///
+/// **`.moai` 를 첫 커밋에 싣는다.** 실제 저장소가 그렇고, 그래야 워크트리에도 트래커가 선다 —
+/// 안 실으면 워크트리에 `.moai` 가 아예 없어 "워크트리의 트래커는 안 바뀐다" 는 단언이 헛돈다
+/// (리뷰 moai-pz8m.4zl 이 짚고, 단언을 조이자 실제로 빨개졌다).
+#[cfg(unix)]
+fn agents_repo(name: &str) -> Scratch {
+    let s = Scratch::new(name);
+    git(s.path(), &["init", "-q"]);
+    ok(s.path(), &["init", "argos"]);
+    git(s.path(), &["add", "-A"]);
+    git(s.path(), &["commit", "-q", "-m", "처음"]);
+    s
+}
+
+/// **일꾼 셋이 겨뤄도 한 일은 한 번만 한다** — 모든 일이 done 으로 끝나고, 일 명령은 id 마다
+/// 한 번씩 불리며, 저마다 제 워크트리(`agent/<id>` 가지) 안에서 돈다. 트래커는 뿌리에만 쓰인다.
+#[cfg(unix)]
+#[test]
+fn the_python_agents_share_the_queue_and_each_job_runs_once_in_its_own_worktree() {
+    let s = agents_repo("agents-crew");
+    let ids: Vec<String> = (1..=5).map(|n| add(s.path(), &[&format!("일 {n}"), "-p", "2"])).collect();
+    // **일감을 main 에 싣는다** — 워크트리의 트래커에도 그 줄이 있어야, 예제가 거기에 잘못
+    // 쓰는 날 그 쓰기가 실제로 먹고 아래 단언이 그것을 본다. 안 실으면 그 줄이 없어 쓰기가
+    // 먼저 거절당해, 단언은 늘 지나간다.
+    git(s.path(), &["add", "-A"]);
+    git(s.path(), &["commit", "-q", "-m", "일감"]);
+    // 일 명령 대역: 받은 id 와 **돈 자리**를 적는다 — 워크트리 안에서 돌았는지를 거기서 잰다.
+    let log = s.path().join("worked");
+    let work = s.path().join("work.sh");
+    write_exe(&work, &format!("#!/bin/sh\necho \"$1 $(pwd)\" >> '{}'\necho \"$1 을 끝냈다\"\n", log.display()));
+
+    // **일 명령은 상대 경로로 준다** — 문서의 모양(`AGENT_WORK=./do-one.sh`)이다. 그 스크립트는 뿌리에만
+    // 있고(커밋 안 됐다) 일은 워크트리를 cwd 로 돌므로, 예제가 뿌리 기준으로 박지 않으면 못 띄운다.
+    let out = agents_cmd(s.path(), Path::new("./work.sh"), 3)
+        .output()
+        .expect("python3 를 실행하지 못했다 — 예제 시험에는 python3 가 있어야 한다");
+    assert!(out.status.success(), "예제가 실패했다\n{}", text(&out));
+
+    let worked: Vec<(String, String)> = std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .lines()
+        .map(|l| {
+            let (id, at) = l.split_once(' ').unwrap();
+            (id.to_string(), at.to_string())
+        })
+        .collect();
+    let mut seen: Vec<&str> = worked.iter().map(|(id, _)| id.as_str()).collect();
+    seen.sort_unstable();
+    let mut want: Vec<&str> = ids.iter().map(String::as_str).collect();
+    want.sort_unstable();
+    assert_eq!(seen, want, "일마다 한 번씩 돌지 않았다 — 둘이 같은 일을 했거나 빠뜨렸다\n{}", text(&out));
+
+    for (id, at) in &worked {
+        assert!(at.ends_with(&format!(".worktrees/{id}")), "{id} 가 제 워크트리 밖에서 돌았다 — {at}");
+        assert!(line_of(s.path(), id).contains("\"status\":\"done\""), "{id} 가 done 이 아니다");
+        assert!(ok(s.path(), &["show", id]).contains(&format!("{id} 을 끝냈다")), "{id} 의 출력이 노트로 안 남았다");
+    }
+    let branches = git(s.path(), &["branch", "--list", "agent/*"]);
+    for id in &ids {
+        assert!(branches.contains(&format!("agent/{id}")), "{id} 의 가지가 없다\n{branches}");
+        // **트래커는 뿌리에만 쓴다** — 워크트리의 `.moai` 는 main 에서 뜬 그대로다.
+        let theirs = std::fs::read_to_string(s.path().join(".worktrees").join(id).join(".moai/issues.jsonl")).unwrap_or_else(|e| panic!("{id} 의 워크트리 트래커가 없다 — 없으면 이 단언은 아무것도 안 잰다: {e}"));
+        assert!(!theirs.contains("in_progress") && !theirs.contains("\"done\""), "{id} 의 워크트리 트래커가 바뀌었다");
+    }
+    // 병합은 안 한다 — main 은 처음 그대로다.
+    assert_eq!(git(s.path(), &["rev-list", "--count", "main"]).trim(), "2", "예제가 main 에 무언가를 합쳤다");
+}
+
+/// **일이 실패하면 그 일꾼만 멈추고 끝에 1 이다.** 실패한 일은 in_progress 로 남고 노트에 까닭이
+/// 선다. 옆 일꾼은 남은 일을 마저 한다 — 한 일의 실패가 큐 전체를 세우지 않는다.
+#[cfg(unix)]
+#[test]
+fn a_failed_python_agent_job_stays_picked_and_the_others_carry_on() {
+    let s = agents_repo("agents-fail");
+    let broken = add(s.path(), &["깨지는 일", "-p", "0"]);
+    let rest: Vec<String> = (1..=3).map(|n| add(s.path(), &[&format!("멀쩡한 일 {n}"), "-p", "2"])).collect();
+    let work = s.path().join("work.sh");
+    write_exe(&work, &format!("#!/bin/sh\nif [ \"$1\" = '{broken}' ]; then echo 컴파일이 깨졌다; exit 3; fi\necho 됐다\n"));
+
+    let out = agents_cmd(s.path(), &work, 2).output().expect("python3 를 실행하지 못했다");
+    assert_eq!(out.status.code(), Some(1), "일이 실패하면 1 로 끝난다\n{}", text(&out));
+    assert!(line_of(s.path(), &broken).contains("\"status\":\"in_progress\""), "실패한 일을 내려놓았다");
+    assert!(ok(s.path(), &["show", &broken]).contains("실패(3): 컴파일이 깨졌다"), "실패 코드와 출력이 노트로 안 남았다");
+    for id in &rest {
+        assert!(line_of(s.path(), id).contains("\"status\":\"done\""), "{id} 를 옆 일꾼이 마저 안 했다\n{}", text(&out));
+    }
+}
+
+/// **채비가 안 되면 아무것도 안 집는다**(종료 코드 2) — 일 명령이 없거나, 워크트리를 띄울 가지가
+/// 없으면 저장소를 건드리기 전에 멈춘다. 집은 뒤에 드러나면 맨 위 일이 in_progress 에 박힌다.
+#[cfg(unix)]
+#[test]
+fn the_python_agents_check_their_kit_before_picking_anything() {
+    let s = agents_repo("agents-kit");
+    let id = add(s.path(), &["일", "-p", "1"]);
+    let missing = s.path().join("없는-일.sh");
+    let out = agents_cmd(s.path(), &missing, 2).output().expect("python3 를 실행하지 못했다");
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+    // 까닭까지 본다 — 다른 채비(가지·moai)에 걸려 2 가 나도 이 단언은 지나가면 안 된다.
+    assert!(String::from_utf8_lossy(&out.stderr).contains("없는-일.sh"), "{}", text(&out));
+    let work = s.path().join("work.sh");
+    write_exe(&work, "#!/bin/sh\necho 됐다\n");
+    let out = agents_cmd(s.path(), &work, 2).env("AGENT_BASE", "없는-가지").output().expect("python3 를 실행하지 못했다");
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("없는-가지"), "{}", text(&out));
+    assert!(line_of(s.path(), &id).contains("\"status\":\"todo\""), "채비가 안 됐는데 집었다");
+}
+
+/// **일이 정한 것을 덮지 않고, 되돌린 일은 한 번만 한다.** 일은 워크트리를 cwd 로 도므로 트래커는
+/// `"$MOAI" -C "$AGENT_ROOT"` 로 만진다 — 예제가 그 둘을 넘겨야 일의 `review`·`defer` 가 뿌리에
+/// 떨어지고 닫기가 그것을 본다. 일이 첫 칸으로 되돌린 줄은 **옆 일꾼도** 다시 집지 않는다 —
+/// 일꾼마다의 `seen` 만으로는 그 줄을 처음 보는 옆 일꾼이 같은 일을 또 했다.
+#[cfg(unix)]
+#[test]
+fn the_python_agents_keep_what_the_work_decided_and_do_a_returned_job_only_once() {
+    let s = agents_repo("agents-decide");
+    // 맨 위 일이 오래 걸려야, 그것을 쥔 일꾼이 옆이 되돌린 줄을 **처음 보는 채로** 다음 판에 온다.
+    let slow = add(s.path(), &["오래 걸리는 일", "-p", "0"]);
+    let returned = add(s.path(), &["되돌릴 일", "-p", "1"]);
+    let reviewed = add(s.path(), &["리뷰로 갈 일", "-p", "2"]);
+    let shelved = add(s.path(), &["미룰 일", "-p", "3"]);
+    // 워크트리의 트래커에도 그 줄이 있어야, 일이 맨 `moai` 로 거기에 쓰는 날 그 쓰기가 먹는다 —
+    // 그러면 뿌리는 in_progress 로 남아 닫기가 done 으로 덮고, 아래 단언이 그것을 잡는다.
+    git(s.path(), &["add", "-A"]);
+    git(s.path(), &["commit", "-q", "-m", "일감"]);
+    let log = s.path().join("worked");
+    let work = s.path().join("work.sh");
+    write_exe(
+        &work,
+        &format!(
+            "#!/bin/sh\necho \"$1\" >> '{}'\ncase \"$2\" in\n  \
+             오래*) sleep 1 ;;\n  \
+             되돌릴*) \"$MOAI\" -C \"$AGENT_ROOT\" mv \"$1\" todo >/dev/null ;;\n  \
+             리뷰*) \"$MOAI\" -C \"$AGENT_ROOT\" mv \"$1\" review >/dev/null ;;\n  \
+             미룰*) \"$MOAI\" -C \"$AGENT_ROOT\" defer \"$1\" -m 지금-아님 >/dev/null ;;\nesac\necho 했다\n",
+            log.display()
+        ),
+    );
+
+    let out = agents_cmd(s.path(), &work, 2).output().expect("python3 를 실행하지 못했다");
+    assert_eq!(out.status.code(), Some(1), "되돌린 줄이 또 나왔는데 1 로 안 끝났다\n{}", text(&out));
+    let mut worked: Vec<String> = std::fs::read_to_string(&log).unwrap_or_default().lines().map(str::to_string).collect();
+    worked.sort_unstable();
+    let mut want = vec![slow.clone(), returned.clone(), reviewed.clone(), shelved.clone()];
+    want.sort_unstable();
+    assert_eq!(worked, want, "일마다 한 번씩 돌지 않았다 — 되돌린 일을 옆 일꾼이 또 했다\n{}", text(&out));
+    assert!(line_of(s.path(), &slow).contains("\"status\":\"done\""), "{}", text(&out));
+    assert!(line_of(s.path(), &returned).contains("\"status\":\"todo\""), "되돌린 일을 닫았다\n{}", text(&out));
+    assert!(line_of(s.path(), &reviewed).contains("\"status\":\"review\""), "리뷰로 보낸 일을 닫았다\n{}", text(&out));
+    let line = line_of(s.path(), &shelved);
+    assert!(line.contains("\"status\":\"in_progress\"") && line.contains("\"deferred_at\""), "미룬 일을 닫았다 — {line}");
+}
+
+/// **옆 워크트리에만 있는 줄은 건너뛴다.** `ready --worktree` 는 그 줄도 내지만 뿌리에는 없어 집기가
+/// `missing` 으로 돌아온다 — 그것을 "졌다" 로 읽으면 다음 판에 또 나와 "사람이 볼 차례다" 로 1 을
+/// 낸다. 뿌리의 일은 다 하고 0 으로 끝나야 한다.
+#[cfg(unix)]
+#[test]
+fn the_python_agents_skip_a_row_only_a_side_worktree_has() {
+    let s = agents_repo("agents-side");
+    let mine = add(s.path(), &["뿌리의 일", "-p", "1"]);
+    git(s.path(), &["add", "-A"]);
+    git(s.path(), &["commit", "-q", "-m", "일감"]);
+    let side = s.path().join("side");
+    git(s.path(), &["worktree", "add", "-q", "-b", "side", side.to_str().unwrap(), "main"]);
+    // 맨 위에 선다 — 뿌리의 일보다 먼저 겨루고 먼저 `missing` 을 받는다.
+    let theirs = add(&side, &["옆에만 있는 일", "-p", "0"]);
+    let work = s.path().join("work.sh");
+    write_exe(&work, "#!/bin/sh\necho 됐다\n");
+
+    let out = agents_cmd(s.path(), &work, 2).output().expect("python3 를 실행하지 못했다");
+    assert!(out.status.success(), "옆에만 있는 줄 때문에 실패로 끝났다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&format!("{theirs}  건너뛴다")), "{}", text(&out));
+    assert!(line_of(s.path(), &mine).contains("\"status\":\"done\""), "{}", text(&out));
+    assert!(line_of(&side, &theirs).contains("\"status\":\"todo\""), "옆의 줄을 건드렸다");
 }
