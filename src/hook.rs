@@ -1856,6 +1856,31 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>) -> 
     ))
 }
 
+/// 내미는 명령 줄을 **`root` 의 트래커로 겨눈다**(moai-gyqh) — 줄 머리의 맨 `moai` 에 `-C <root>`
+/// 를 붙인다. 이미 `-C`·`--dir` 를 단 줄과 글 속의 `moai` 는 그대로 둔다.
+///
+/// 딸린 워크트리의 세션이 받는 글에 건다. 거기서 맨 `moai` 는 워크트리의 `.moai` 를 고치는데, 그
+/// 뒤로는 제 스냅샷에서 풀린 것으로 보여 훅이 조용해진다 — 루트는 그대로 `in_progress` 인 채로.
+pub fn toward(text: &str, root: &Path) -> String {
+    let dir = root.display().to_string();
+    let dir = if dir.chars().all(|c| c.is_alphanumeric() || "/._-+,:@".contains(c)) {
+        dir
+    } else {
+        format!("'{}'", dir.replace('\'', r"'\''"))
+    };
+    text.lines()
+        .map(|line| {
+            let body = line.trim_start();
+            let lead = &line[..line.len() - body.len()];
+            match body.strip_prefix("moai ") {
+                Some(rest) if !rest.starts_with("-C") && !rest.starts_with("--dir") => format!("{lead}moai -C {dir} {rest}"),
+                _ => line.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// 거절한다. **어긴 규칙의 이름이 첫 줄이다** — 스킬이 적은 규칙 제목과 글자가
 /// 같아야 막힌 쪽이 무엇을 어겼는지 한 번에 찾는다.
 fn refuse(rule: usize, why: String) -> Decision {
@@ -2430,6 +2455,19 @@ mod tests {
     fn with_nothing_held_creation_is_free() {
         let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add \"딴 일\""), Decision::Pass);
+    }
+
+    /// **줄 머리의 맨 `moai` 만 겨눈다**(moai-gyqh) — 이미 겨눈 줄과 글 속의 `moai` 는 그대로다.
+    #[test]
+    fn toward_aims_only_bare_command_lines() {
+        let text = "아직 집고 있는 것이 있다.\n  moai mv t-1 done     제목\n  moai -C /else note t-1 'x'\n`moai status` 로 본다.\nmoai defer t-1 -m '왜'";
+        let aimed = toward(text, Path::new("/repo"));
+        assert_eq!(
+            aimed,
+            "아직 집고 있는 것이 있다.\n  moai -C /repo mv t-1 done     제목\n  moai -C /else note t-1 'x'\n`moai status` 로 본다.\nmoai -C /repo defer t-1 -m '왜'"
+        );
+        // 셸이 가르는 글자가 든 자리는 감싼다.
+        assert!(toward("moai mv t-1 done", Path::new("/a b/it's")).starts_with(r"moai -C '/a b/it'\''s' mv"));
     }
 
     /// **거절문의 모서리 셋**(moai-nxw8) — 막힌 토막의 `-C` 를 그대로 대고, 여럿 집었으면 집은

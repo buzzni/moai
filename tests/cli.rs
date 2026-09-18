@@ -7036,7 +7036,9 @@ fn the_hook_leaves_what_a_named_worktree_holds_to_that_worktree() {
     let inside = main.join(&dir);
     let input = format!("{{\"session_id\":\"s3\",\"cwd\":{}}}", json_str(&inside.display().to_string()));
     let own = String::from_utf8(hook_in(&s, &inside, "stop", &input).stdout).unwrap();
-    assert!(own.contains(&format!("moai mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
+    // 내미는 줄은 main 의 트래커를 겨눈다(moai-gyqh).
+    let root = std::fs::canonicalize(&main).unwrap().display().to_string();
+    assert!(own.contains(&format!("moai -C {root} mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
 }
 
 /// **이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다**
@@ -7737,6 +7739,18 @@ fn the_stop_hook_measures_the_epic_on_what_main_has_closed() {
         held.contains(&format!("{epic} 의 목적을 접을 때만")),
         "main 에서 끝낸 멤버를 못 보고 마지막 멤버를 그냥 미루라고 한다\n{held}"
     );
+
+    // **내미는 명령은 main 의 트래커를 겨눈다**(moai-gyqh) — 워크트리에서 맨 `moai` 로 치면 워크트리의
+    // 스냅샷만 바뀌어 main 은 집은 채로 남고, 이 훅은 제 스냅샷을 보고 조용해진다.
+    let root = std::fs::canonicalize(&main).unwrap().display().to_string();
+    for line in [format!("moai -C {root} mv {id} todo -m"), format!("moai -C {root} defer {id}"), format!("moai -C {root} note {id}")] {
+        assert!(held.contains(&line), "main 을 안 겨눈다 — {line}\n{held}");
+    }
+    assert!(!held.contains("  moai mv") && !held.contains("  moai defer"), "맨 moai 가 남았다\n{held}");
+    // 시킨 대로 치면 main 이 놓는다.
+    let out = staged(&["-C", &root, "mv", id.as_str(), "todo", "-m", "결정을 기다린다"]).current_dir(&inside).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(ok(&main, &["show", &id]).contains("todo"), "main 이 안 놓았다");
 }
 
 /// 다른 트래커를 가리키는 토막의 판정도 **같은 차례로 잇는다**(`Decision::then`, moai-dw63.e31) —

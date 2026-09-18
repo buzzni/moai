@@ -867,6 +867,23 @@ pub fn is_linked(root: &Path) -> bool {
     root.ancestors().map(|d| d.join(".git")).find(|g| g.exists()).is_some_and(|g| g.is_file())
 }
 
+/// 딸린 워크트리의 트래커에 대응하는 **주 워크트리의 트래커 자리** — 주 워크트리이거나 git 밖이면
+/// `None`. git 을 띄우지 않는다.
+///
+/// 훅이 세션에 내미는 명령을 거기로 겨눈다(moai-gyqh). 트래커는 main 에서 쓴다 — 딸린 워크트리의
+/// `.moai` 에 맨 `moai` 로 쓰면 루트는 그대로고, 제 스냅샷에서는 풀린 것으로 보여 훅이 조용해진다.
+/// 공용 디렉터리가 `.git` 이 아니면(맨 저장소에 딸린 워크트리) 주 체크아웃이 없다 — `None`.
+pub fn main_root(root: &Path) -> Option<PathBuf> {
+    let (top, common) = git_dirs(root)?;
+    if top.join(".git").is_dir() || common.file_name()? != ".git" {
+        return None;
+    }
+    let rel = root.strip_prefix(top).ok()?;
+    let main = common.parent()?;
+    // 빈 `rel` 을 붙이면 끝에 `/` 가 선다 — 내미는 줄이 제 자리를 두 꼴로 쓰게 된다.
+    Some(if rel.as_os_str().is_empty() { main.to_path_buf() } else { main.join(rel) })
+}
+
 /// 워크트리 꼭대기와 공용 git 디렉터리 — git 이 적어 둔 파일로만 읽는다([`on_disk`]).
 ///
 /// 주 워크트리면 공용 디렉터리는 `.git` 그대로(풀지 않는다 — 끝 이름으로 주 워크트리를 알아본다),
@@ -1187,6 +1204,31 @@ mod tests {
         assert!(!is_linked(dir.path()), "울타리를 딸린 워크트리로 읽었다");
         let git_top = crate::git::run(dir.path(), &["rev-parse", "--show-toplevel"]).map(|t| PathBuf::from(t.trim_end()));
         assert_eq!(git_top.ok(), Some(canonical(dir.path())), "git 이 울타리를 지나쳐 위의 저장소를 잡았다");
+    }
+
+    /// **딸린 워크트리의 트래커는 주 워크트리의 같은 자리로 겨눈다**(moai-gyqh) — 하위 디렉터리의
+    /// 트래커도 그 자리째. 주 워크트리와 git 밖은 겨눌 곳이 없다.
+    #[test]
+    fn a_linked_tracker_points_at_the_main_one() {
+        let scratch = crate::scratch::Scratch::fenced("main-root");
+        let base = canonical(scratch.path());
+        let main = base.join("main");
+        std::fs::create_dir_all(main.join("sub")).unwrap();
+        let run = |dir: &Path, args: &[&str]| {
+            let out = crate::git::isolated(dir).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../feat", "-b", "feat/x"]);
+        let feat = base.join("feat");
+        std::fs::create_dir_all(feat.join("sub")).unwrap();
+
+        assert_eq!(main_root(&feat), Some(main.clone()));
+        assert_eq!(main_root(&feat.join("sub")), Some(main.join("sub")), "하위 트래커의 자리를 잃었다");
+        assert_eq!(main_root(&main), None, "주 워크트리를 딸린 것으로 읽었다");
+        assert_eq!(main_root(&main.join("sub")), None);
+        assert_eq!(main_root(&base), None, "git 밖에서 지어냈다");
     }
 
     /// 어느 워크트리에서든 커밋·`pack-refs`·떼어 낸 checkout 이 지켜보는 표식을 바꾼다 —

@@ -156,6 +156,8 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 Call::Review => crate::hook::guard_review(issues, &repo.config, away),
                 Call::Other => Decision::Pass,
             });
+            // 제 트래커의 답만 겨눈다 — 다른 트래커가 낸 줄은 그 트래커의 것이다.
+            let decision = toward_main(decision, &repo);
             // 다른 트래커를 가리키는 토막은 **그 트래커가 본다**(moai-23ky). 판정을 잇는 차례는
             // `Decision::then` 이 정한다 — 막으면 남의 트래커는 묻지 않고, 남이 막으면 제 비춤을 버린다.
             let mut decision = decision;
@@ -202,14 +204,15 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 .then(|| crate::worktree::fresh(&repo, load.issues.clone()))
                 .flatten()
                 .map(|(fresh, _)| fresh);
-            crate::hook::closing(
+            let held = crate::hook::closing(
                 &load.issues,
                 latest.as_deref().unwrap_or(&load.issues),
                 &repo.config,
                 &away,
                 warnings,
                 baseline(input, &repo),
-            )
+            );
+            toward_main(held, &repo)
         }),
     };
 
@@ -226,6 +229,23 @@ fn decide(event: Event, input: &Input) -> Option<String> {
         Decision::Block(reason) => {
             serde_json::to_string(&Hold { decision: "block", reason }).ok()
         }
+    }
+}
+
+/// **딸린 워크트리에서는 내미는 명령을 주 워크트리의 트래커로 겨눈다**(moai-gyqh). 트래커는 main
+/// 에서 쓴다 — 맨 `moai` 를 그대로 치면 워크트리의 스냅샷만 바뀌어, 루트는 집은 채로 남고 훅은 제
+/// 스냅샷을 보고 조용해진다. 거절문도 같다 — 시킨 대로 친 줄이 병합에서 스냅샷을 겨루게 한다.
+/// 말할 것이 있을 때만 자리를 잰다.
+fn toward_main(decision: Decision, repo: &Repo) -> Decision {
+    if decision == Decision::Pass {
+        return decision;
+    }
+    let Some(main) = crate::worktree::main_root(&repo.root) else { return decision };
+    match decision {
+        Decision::Context(why) => Decision::Context(crate::hook::toward(&why, &main)),
+        Decision::Deny(why) => Decision::Deny(crate::hook::toward(&why, &main)),
+        Decision::Block(why) => Decision::Block(crate::hook::toward(&why, &main)),
+        Decision::Pass => Decision::Pass,
     }
 }
 
