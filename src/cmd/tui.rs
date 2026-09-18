@@ -60,10 +60,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.me = app.whoami(&root);
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
-    // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp). 층은 **그다음에** 얹는다 — 얹는 쪽
-    // (`App::attach_layer`)이 못 읽은 설정을 배너에 다는 자리라, 보기의 `look_problems` 와 한
-    // 화면에서 갈라지면 안 된다. 한때는 `with_layer` 가 첫 화면의 커서를 `..` 너머로 밀어 차례가
-    // 더 크게 걸렸는데, 뿌리의 `..` 을 걷으면서(moai-i784) 그 밀기는 없어졌다(moai-2kyl 단계 리뷰).
+    // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp). 못 읽은 설정의 까닭은 보기가 아니라 층이 댄다 —
+    // 얹는 쪽(`App::attach_layer`)이 배너에 달고 `look_problems` 에는 그 까닭이 없다(moai-5jsn). 그래서 둘의
+    // 차례에 걸린 것은 없다(moai-gmdu 에픽 리뷰). 한때는 `with_layer` 가 첫 화면의 커서를 `..` 너머로 밀어
+    // 차례가 걸렸는데, 뿌리의 `..` 을 걷으면서(moai-i784) 그 밀기는 없어졌다(moai-2kyl 단계 리뷰).
     app.adopt_look(&reg.look, reg.look_problems);
     // 적어 둔 읽음도 같은 한 번의 읽기에서 온다(moai-z9pc).
     app.adopt_read(reg.read);

@@ -218,7 +218,14 @@ pub fn update<T>(path: &Path, f: impl FnOnce(&mut Doc) -> R<T>) -> R<T> {
     let mut doc = Doc::parse(&src).map_err(|e| {
         Fail::coded(format!("{}: {e} — 고치기 전까지 쓰지 않는다", path.display()), code::BROKEN)
     })?;
-    let out = f(&mut doc)?;
+    // **손으로 고칠 거절에는 어느 파일인지 붙인다**(moai-gmdu 에픽 리뷰) — 설정의 자리는 환경(`MOAI_CONFIG`·
+    // XDG)이 골라 사람이 모를 수 있다. 문서(`Doc`)는 제 자리를 모르고 여기는 안다: 깨진 설정을 대는 위의
+    // 거절문과 같은 모양으로 한 곳에서 붙인다. 부르는 쪽마다 붙이게 두면 붙인 곳(`project color`)과 잊은
+    // 곳(`project add`·`rm`·`read`·탐색기)이 갈린다.
+    let out = f(&mut doc).map_err(|e| match e.code {
+        code::BROKEN => Fail::coded(format!("{}: {}", path.display(), e.message), e.code),
+        _ => e,
+    })?;
     // **바꾼 것이 없으면 건드리지 않는다.** 렌더 결과를 원문과 견주지 않고 깃발을
     // 보는 까닭은, 라이브러리가 어느 날 공백 하나를 달리 내더라도 헛 쓰기가 안
     // 생기게 하려는 것이다.
@@ -231,9 +238,10 @@ pub fn update<T>(path: &Path, f: impl FnOnce(&mut Doc) -> R<T>) -> R<T> {
     Ok(out)
 }
 
-/// 손으로 적은 모양을 덮지 않는 거절(`set_hue`·`merge_look`·`mark_read`). **코드는 `broken` 이다**(moai-3owm,
-/// 사용자 결정 2026-09-18) — 깨진 설정에 안 쓰는 것([`update`])과 같은 갈래다. 둘 다 사람이 설정 파일을 손으로
-/// 고쳐야 쓴다는 뜻이라, 받는 쪽이 I/O 실패(`error`)와 가를 수 있어야 한다. 셋이 한 코드를 내야 해서 한 곳에 둔다.
+/// 손으로 적은 모양을 덮지 않는 거절(목록의 모양·`set_hue`·`merge_look`·`mark_read`). **코드는 `broken` 이다**
+/// (moai-3owm, 사용자 결정 2026-09-18) — 깨진 설정에 안 쓰는 것([`update`])과 같은 갈래다. 둘 다 사람이 설정 파일을
+/// 손으로 고쳐야 쓴다는 뜻이라, 받는 쪽이 I/O 실패(`error`)와 가를 수 있어야 한다. 거절마다 한 코드를 내야 해서 한
+/// 곳에 둔다. 어느 파일인지는 [`update`] 가 붙인다 — 문서는 제 자리를 모른다.
 fn refuse(message: String) -> Fail {
     Fail::coded(message, code::BROKEN)
 }
@@ -260,6 +268,10 @@ pub struct Doc {
     /// 안만 빼고), CRLF 로 적은 설정이 등록·색·보기·읽음 한 번에 모든 줄이 바뀌었다. **많은 쪽을 따른다**
     /// (사용자 결정 2026-09-18) — 모두 CRLF 인 파일은 바이트가 지켜지고, 섞인 파일은 한 가지로 선다. 줄마다
     /// 지키는 것은 라이브러리가 접어 못 한다. 같으면 LF 다.
+    ///
+    /// **여러 줄 문자열 안의 줄바꿈은 줄 끝이 아니라 값이다**(moai-gmdu 에픽 리뷰) — 세지도 고치지도 않는다
+    /// ([`multiline_strings`]). 세면 LF 파일에 붙여 넣은 CRLF 문자열 하나가 파일 전체를 CRLF 로 뒤집고, 고치면
+    /// 모르는 키의 값이 바뀌고 이 도구가 적은 경로(줄바꿈이 든 디렉터리 이름)가 다른 디렉터리가 된다.
     crlf: bool,
     dirty: bool,
 }
@@ -276,14 +288,18 @@ impl Doc {
             Some(rest) => (true, rest),
             None => (false, src),
         };
-        let doc: DocumentMut = body.parse().map_err(|e: toml_edit::TomlError| {
+        let parsed = toml_edit::Document::parse(body).map_err(|e| {
             // 라이브러리의 오류는 여러 줄 그림이다. 한 줄로 접어야 목록 속 한 줄로 선다.
             e.to_string().split_whitespace().collect::<Vec<_>>().join(" ")
         })?;
         let no_eol = !body.is_empty() && !body.ends_with('\n');
-        let crlf_lines = body.matches("\r\n").count();
-        let crlf = crlf_lines > body.matches('\n').count() - crlf_lines;
-        Ok(Doc { doc, bom, no_eol, crlf, dirty: false })
+        let (mut crlf_lines, mut lines) = (0, 0);
+        for (outside, _) in split_strings(body, &multiline_strings(&parsed)) {
+            crlf_lines += outside.matches("\r\n").count();
+            lines += outside.matches('\n').count();
+        }
+        let crlf = crlf_lines > lines - crlf_lines;
+        Ok(Doc { doc: parsed.into_mut(), bom, no_eol, crlf, dirty: false })
     }
 
     /// 고친 것이 있나 — [`update`] 가 쓸지 가르는 깃발 그대로다.
@@ -293,14 +309,12 @@ impl Doc {
 
     pub fn render(&self) -> String {
         let mut body = self.doc.to_string();
-        if self.crlf {
-            body = body.replace("\r\n", "\n").replace('\n', "\r\n");
+        // 끝 줄바꿈은 줄 끝을 고르기 **전에** 뗀다 — 라이브러리는 꾸밈의 `\r` 을 걷어 그리므로 끝은 늘 `\n` 하나다.
+        if self.no_eol && body.ends_with('\n') {
+            body.pop();
         }
-        if self.no_eol {
-            let eol = if self.crlf { "\r\n" } else { "\n" };
-            if body.ends_with(eol) {
-                body.truncate(body.len() - eol.len());
-            }
+        if self.crlf {
+            body = crlf_outside_strings(&body);
         }
         if self.bom { format!("\u{feff}{body}") } else { body }
     }
@@ -377,10 +391,8 @@ impl Doc {
             return Ok(0);
         };
         let mine = |t: &Table| entry_path(t).is_ok_and(|p| any_of.contains(&p));
-        // 낱값(문자열·수·참거짓·때)만 고쳐 쓴다 — 표·점 키·인라인 표·배열은 모양째 사람의 것이다.
-        let scalar = |c: &Item| matches!(c, Item::Value(v) if !v.is_inline_table() && !v.is_array());
         let odd = aot.iter().filter(|t| mine(t)).find_map(|t| {
-            let c = t.get(COLOR).filter(|c| !scalar(c))?;
+            let c = t.get(COLOR).filter(|c| !plain(c, false))?;
             Some((entry_path(t).ok()?, c.type_name()))
         });
         if let Some((path, shape)) = odd {
@@ -407,20 +419,14 @@ impl Doc {
     /// 나중에 `moai init` 하면 보이는 것이 요구다.
     pub fn add(&mut self, dir: &Path) -> R<bool> {
         let text = writable(dir)?;
-        self.tables_mut()?;
-        if self.projects().0.iter().any(|p| p.path == dir) {
+        // 목록은 **모양을 재는 길로만** 연다([`Doc::tables_mut`]) — 있는지 볼 때도 더할 때도. 모양만 재고 값을 버리는
+        // 줄을 따로 두면 안 쓰는 줄로 읽혀 걷히기 쉽고, 걷히면 아래의 새 목록이 모양이 틀린 `project` 를 덮는다.
+        if self.tables_mut()?.is_some_and(|aot| aot.iter().any(|t| entry_path(t).is_ok_and(|p| p == dir))) {
             return Ok(false);
         }
-        let mut t = Table::new();
+        let mut t = self.new_table();
         t.insert(PATH, toml_edit::value(text));
-        // 머리 주석과 새 표 사이에 빈 줄 하나 — 주석이 새 표의 것으로 읽히지 않게. 빈 줄은 **새 표의 머리에**
-        // 붙인다. 다시 읽으면 주석과 빈 줄이 새 표의 머리로 붙지만, 빈 줄로 떨어진 주석은 `remove` 가 남긴다
-        // — 도로 빼면 처음 바이트로 돌아온다. 주석이 이미 빈 줄로 끝나도 하나 더 둔다: `remove` 는 빈 줄
-        // 하나를 표의 것으로 보고 함께 빼므로, 안 두면 도로 뺄 때 사람이 둔 빈 줄이 빠진다.
-        if self.head_comment_stays_on_top() {
-            t.decor_mut().set_prefix("\n");
-        }
-        match self.doc.get_mut(PROJECT).and_then(Item::as_array_of_tables_mut) {
+        match self.tables_mut()? {
             Some(aot) => aot.push(t),
             None => {
                 let mut aot = ArrayOfTables::new();
@@ -430,6 +436,22 @@ impl Doc {
         }
         self.dirty = true;
         Ok(true)
+    }
+
+    /// 문서에 더할 새 표. **주석만 있는 설정이면 그 주석을 머리에 두고 그 뒤에 선다**([`Doc::lift_head_comment`])
+    /// — 표를 세우는 쓰기는 모두 여기를 지난다(등록·보기·읽음). 한 곳만 옮기면 주석만 있던 설정에 처음 적는 것이
+    /// 무엇이냐에 따라 머리 주석이 새 표 밑으로 밀린다(moai-gmdu 에픽 리뷰).
+    ///
+    /// 머리 주석과 새 표 사이에 빈 줄 하나 — 주석이 새 표의 것으로 읽히지 않게. 빈 줄은 **새 표의 머리에**
+    /// 붙인다. 다시 읽으면 주석과 빈 줄이 새 표의 머리로 붙지만, 빈 줄로 떨어진 주석은 `remove` 가 남긴다
+    /// — 도로 빼면 처음 바이트로 돌아온다. 주석이 이미 빈 줄로 끝나도 하나 더 둔다: `remove` 는 빈 줄
+    /// 하나를 표의 것으로 보고 함께 빼므로, 안 두면 도로 뺄 때 사람이 둔 빈 줄이 빠진다.
+    fn new_table(&mut self) -> Table {
+        let mut t = Table::new();
+        if self.lift_head_comment() {
+            t.decor_mut().set_prefix("\n");
+        }
+        t
     }
 
     /// 키도 표도 없이 주석만 있는 설정이면 그 주석을 **문서 머리로** 옮긴다(moai-bx7g).
@@ -442,8 +464,9 @@ impl Doc {
     /// 키나 표가 있는 파일의 끝 글은 옮기지 않는다 — 앞의 것에 붙은 꼬리인지 뒤에 올 것의 머리인지 모르고,
     /// 옮기면 도로 뺄 때 처음 바이트로 못 돌아온다. 끝에 남는 것은 전과 같다.
     ///
-    /// 옮겼으면 참 — 부르는 쪽이 새 표 앞에 빈 줄을 둔다.
-    fn head_comment_stays_on_top(&mut self) -> bool {
+    /// 옮겼으면 참 — 부르는 쪽이 새 표 앞에 빈 줄을 둔다. **문서를 고치는 부름이다** — 묻는 이름으로 두면 조건에
+    /// 끼워 읽다가 옮김을 놓친다.
+    fn lift_head_comment(&mut self) -> bool {
         let tail = self.doc.trailing().as_str().unwrap_or_default();
         if !self.doc.is_empty() || tail.trim().is_empty() {
             return false;
@@ -505,7 +528,11 @@ impl Doc {
         match next.and_then(|p| header_at(self.doc.as_table_mut(), p)) {
             Some(t) => {
                 let was = t.decor().prefix().and_then(|r| r.as_str()).unwrap_or_default().to_string();
-                t.decor_mut().set_prefix(text + &was);
+                // **남긴 글과 그 표 사이에 빈 줄을 지킨다**(moai-gmdu 에픽 리뷰). 빈 줄 하나는 뺀 표와 함께
+                // 빠졌다 — 그 표가 뺀 표에 빈 줄 없이 붙어 있었으면 남긴 글이 그 표의 머리에 붙고, 그 표를
+                // 뺄 때 함께 지워진다. 남긴 까닭이 그것을 안 지우려는 것이었다.
+                let gap = if blank_lines(&was).next() == Some(0) { "" } else { "\n" };
+                t.decor_mut().set_prefix(format!("{text}{gap}{was}"));
             }
             None => {
                 let was = self.doc.trailing().as_str().unwrap_or_default().to_string();
@@ -591,7 +618,8 @@ impl Doc {
         }
         match self.doc.get(TUI) {
             None => {
-                self.doc.insert(TUI, Item::Table(Table::new()));
+                let t = self.new_table();
+                self.doc.insert(TUI, Item::Table(t));
             }
             // 읽기(`look`)가 받는 모양은 쓰기도 받는다 — `tui = { … }` 인라인 표도 표다.
             Some(item) if item.is_table_like() => {}
@@ -602,29 +630,33 @@ impl Doc {
                 )));
             }
         }
-        // **이 세션이 적을 키가 손으로 적은 표 모양이면 하나도 안 적고 거절한다**(moai-j7r3) — `set_hue`·
-        // `mark_read` 와 같은 자다. `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을 적어 둔 것인지
-        // 모르는 채 낱값으로 덮이면 사라진다(`put_value` 는 값이 아닌 자리를 그대로 갈아 끼운다). 낱값의
-        // 틀린 값(`sort = 3`·`hidden = "done"`)은 읽기가 까닭을 대는 값이라 고쳐 쓴다. 안 바꿀 키는 안 본다 —
-        // 엄함은 지금 쓰는 줄에 대한 것이다. `fields_known` 은 늘 더하기로 적으니 늘 본다.
-        let t = self.doc.get(TUI).and_then(Item::as_table_like).expect("방금 표로 섰다");
+        // 이 세션이 바꾼 키. **거절을 재는 자리와 적는 자리가 같은 깃발을 본다**(moai-gmdu 에픽 리뷰) — 조건을
+        // 두 번 적으면 적는 쪽에만 키를 더하는 날 거절이 그 키를 못 보고, 손으로 적은 표 모양을 낱값으로 덮는다.
+        let hidden = base.hidden != new.hidden;
+        let hide_deferred = base.hide_deferred != new.hide_deferred;
         let sort = (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed);
+        let fields = base.fields != new.fields;
+        // `fields_known` 은 늘 더하기로 적으니(아래) 적을 것이 있으면 늘 본다.
+        let known = new.fields_known.is_some();
+        let detail = base.detail != new.detail;
+        // **이 세션이 적을 키가 손으로 적은 표 모양이면 하나도 안 적고 거절한다**(moai-j7r3) — `set_hue` 와 같은
+        // 자다([`plain`]). `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을 적어 둔 것인지 모르는 채
+        // 낱값으로 덮이면 사라진다(`put_value` 는 값이 아닌 자리를 그대로 갈아 끼운다). 낱값의 틀린 값(`sort = 3`·
+        // `hidden = "done"`)은 읽기가 까닭을 대는 값이라 고쳐 쓴다. 안 바꿀 키는 안 본다 — 엄함은 지금 쓰는 줄에
+        // 대한 것이다.
+        let t = self.doc.get(TUI).and_then(Item::as_table_like).expect("방금 표로 섰다");
         let touched = [
-            (HIDDEN, true, base.hidden != new.hidden),
-            (HIDE_DEFERRED, false, base.hide_deferred != new.hide_deferred),
+            (HIDDEN, true, hidden),
+            (HIDE_DEFERRED, false, hide_deferred),
             (SORT, false, sort),
             (SORT_REVERSED, false, sort),
-            (FIELDS, true, base.fields != new.fields),
-            (FIELDS_KNOWN, true, new.fields_known.is_some()),
-            (DETAIL, false, base.detail != new.detail),
+            (FIELDS, true, fields),
+            (FIELDS_KNOWN, true, known),
+            (DETAIL, false, detail),
         ];
         let odd = touched.into_iter().filter(|(_, _, go)| *go).find_map(|(key, words, _)| {
             let item = t.get(key)?;
-            let plain = match item {
-                Item::Value(v) => !v.is_inline_table() && (words || !v.is_array()),
-                _ => false,
-            };
-            (!plain).then(|| (key, item.type_name()))
+            (!plain(item, words)).then(|| (key, item.type_name()))
         });
         if let Some((key, shape)) = odd {
             return Err(refuse(format!(
@@ -632,22 +664,29 @@ impl Doc {
             )));
         }
         let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
-        let mut changed = merge_words(t, HIDDEN, base.hidden.as_deref(), new.hidden.as_deref());
-        if base.hide_deferred != new.hide_deferred {
+        let mut changed = false;
+        if hidden {
+            changed |= merge_words(t, HIDDEN, base.hidden.as_deref(), new.hidden.as_deref());
+        }
+        if hide_deferred {
             changed |= put_value(t, HIDE_DEFERRED, new.hide_deferred.map(toml_edit::Value::from));
         }
-        if (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed) {
+        if sort {
             changed |= put_value(t, SORT, new.sort.as_deref().map(toml_edit::Value::from));
             changed |= put_value(t, SORT_REVERSED, new.sort_reversed.map(toml_edit::Value::from));
         }
-        changed |= merge_words(t, FIELDS, base.fields.as_deref(), new.fields.as_deref());
+        if fields {
+            changed |= merge_words(t, FIELDS, base.fields.as_deref(), new.fields.as_deref());
+        }
         // **`fields_known` 은 빼지 않고 더하기만 한다**(moai-6bc0 단계 리뷰) — `base` 를 비워 두는 까닭이다.
         // 이 키는 사람이 고른 것이 아니라 *적는 쪽이 아는 열 전부*라, 여기 있는데 이 바이너리가 모르는
         // 이름은 **새 바이너리가 적어 둔 것**이다. 그것을 빼면 그쪽의 다음 실행이 제가 적어 둔 열을
         // "몰랐던 열" 로 읽어 사람이 끈 것을 도로 켠다 — 낱말 배열을 합치는 까닭(`남이 더한 낱말은
         // 남는다`)이 여기서는 더 세게 걸린다.
-        changed |= merge_words(t, FIELDS_KNOWN, None, new.fields_known.as_deref());
-        if base.detail != new.detail {
+        if known {
+            changed |= merge_words(t, FIELDS_KNOWN, None, new.fields_known.as_deref());
+        }
+        if detail {
             changed |= put_value(t, DETAIL, new.detail.map(toml_edit::Value::from));
         }
         self.dirty |= changed;
@@ -712,7 +751,8 @@ impl Doc {
             }
         }
         if self.doc.get(READ).is_none() {
-            self.doc.insert(READ, Item::Table(Table::new()));
+            let t = self.new_table();
+            self.doc.insert(READ, Item::Table(t));
         }
         let t = self.doc.get_mut(READ).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let mut written = Vec::new();
@@ -847,6 +887,14 @@ fn merge_words(t: &mut dyn toml_edit::TableLike, key: &str, base: Option<&[Strin
     changed
 }
 
+/// 고쳐 써도 되는 자리인가 — **낱값**(문자열·수·참거짓·때)이면 참이다(`Doc::set_hue` moai-r9qa, `Doc::merge_look`
+/// moai-j7r3 — 한 자를 둘이 쓴다). 표·점 키·인라인 표는 모양째 사람의 것이라 덮지 않는다. 배열은 `arrays` 일 때만
+/// 받는다 — 낱말 배열 키(`hidden`·`fields`)는 배열이 제 모양이다. 틀린 낱값(`color = 3`·`sort = 3`)은 읽기가 까닭을
+/// 대는 값이라 고쳐 쓴다. `Doc::mark_read` 는 이보다 엄하다 — 때를 적은 낱말이 아니면 모두 거절한다(moai-j038.vna).
+fn plain(item: &Item, arrays: bool) -> bool {
+    matches!(item, Item::Value(v) if !v.is_inline_table() && (arrays || !v.is_array()))
+}
+
 /// 값 하나를 적는다(`Doc::merge_look`·`Doc::mark_read`·`Doc::set_hue`). 같은 값이면 안 적고, 바뀐 것이
 /// 있으면 참. `None` 이면 키를 지운다.
 ///
@@ -877,12 +925,66 @@ fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::V
 }
 
 /// 표 머리 앞의 글 중 **마지막 빈 줄 앞까지**(moai-bx7g) — 그 표에 붙지 않은 주석이다. 빈 줄 하나는 표와 함께
-/// 빠진다. 빈 줄이 없거나 그 앞에 주석이 없으면 `None`. 빈 줄은 CRLF 로도 적힌다(moai-lb0u).
+/// 빠진다. 빈 줄이 없거나 그 앞에 주석이 없으면 `None`. 빈 줄이 무엇인지는 [`blank_lines`] 가 잰다.
 fn detached_head(t: &Table) -> Option<String> {
     let prefix = t.decor().prefix()?.as_str()?;
-    let cut = [prefix.rfind("\n\n"), prefix.rfind("\n\r\n")].into_iter().flatten().max()? + 1;
-    let head = &prefix[..cut];
+    let head = &prefix[..blank_lines(prefix).last()?];
     (!head.trim().is_empty()).then(|| head.to_string())
+}
+
+/// 글 속 빈 줄이 시작하는 자리들. 빈 줄은 줄바꿈으로 끝나고 **빈칸·탭뿐인 줄**이다 — 눈에는 `\n` 하나와 같은
+/// 빈 줄이라, 그것을 못 알아보면 빈 줄로 떨어진 주석이 표와 함께 사라진다(moai-gmdu 에픽 리뷰). CRLF 의 `\r`
+/// 도 여기서 걷힌다(moai-lb0u).
+fn blank_lines(text: &str) -> impl Iterator<Item = usize> + '_ {
+    let mut at = 0;
+    text.split_inclusive('\n').filter_map(move |line| {
+        let start = at;
+        at += line.len();
+        (line.ends_with('\n') && line.trim().is_empty()).then_some(start)
+    })
+}
+
+/// 줄바꿈이 든 문자열 값(여러 줄 문자열)이 글에서 차지한 자리들, 앞에서부터(moai-gmdu 에픽 리뷰). 그 안의 줄바꿈은
+/// 값이라 줄 끝으로 세거나 고치지 않는다([`Doc`] 의 `crlf`). 키는 여러 줄로 못 적으니 값만 본다.
+fn multiline_strings(doc: &toml_edit::Document<&str>) -> Vec<std::ops::Range<usize>> {
+    struct Found<'a> {
+        raw: &'a str,
+        at: Vec<std::ops::Range<usize>>,
+    }
+    impl<'doc> toml_edit::visit::Visit<'doc> for Found<'_> {
+        fn visit_string(&mut self, node: &'doc toml_edit::Formatted<String>) {
+            if let Some(span) = node.span().filter(|s| self.raw.get(s.clone()).is_some_and(|t| t.contains('\n'))) {
+                self.at.push(span);
+            }
+        }
+    }
+    let mut found = Found { raw: doc.raw(), at: Vec::new() };
+    toml_edit::visit::Visit::visit_table(&mut found, doc.as_table());
+    found.at.sort_by_key(|s| s.start);
+    found.at
+}
+
+/// 글을 여러 줄 문자열 밖과 안으로 가른다 — 차례대로 `(밖, 그 뒤의 문자열)` 이고 마지막 문자열은 빈다.
+fn split_strings<'a>(text: &'a str, strings: &[std::ops::Range<usize>]) -> Vec<(&'a str, &'a str)> {
+    let mut out = Vec::with_capacity(strings.len() + 1);
+    let mut at = 0;
+    for s in strings {
+        out.push((&text[at..s.start], &text[s.clone()]));
+        at = s.end;
+    }
+    out.push((&text[at..], ""));
+    out
+}
+
+/// 여러 줄 문자열 **밖의** 줄바꿈을 모두 CRLF 로 그린다(moai-lb0u). 문자열 자리는 그린 글을 다시 읽어 잰다 —
+/// 라이브러리가 그린 글이라 읽힌다(못 읽으면 통째로 고친다). 여러 줄 문자열이 없으면 다시 읽지 않는다.
+fn crlf_outside_strings(text: &str) -> String {
+    let crlf = |s: &str| s.replace("\r\n", "\n").replace('\n', "\r\n");
+    if !text.contains("\"\"\"") && !text.contains("'''") {
+        return crlf(text);
+    }
+    let strings = toml_edit::Document::parse(text).map(|d| multiline_strings(&d)).unwrap_or_default();
+    split_strings(text, &strings).into_iter().map(|(outside, string)| crlf(outside) + string).collect()
 }
 
 /// 머리를 그리는 표들의 위치 — 점 키·암묵 표는 머리가 없어 뺀다.
@@ -1176,13 +1278,16 @@ mod tests {
             assert_eq!(reg.problems.len(), 1, "{src:?} → {reg:?}");
             assert!(!reg.problems[0].contains('\n'), "문제는 한 줄이어야 한다 — {:?}", reg.problems[0]);
 
-            let e = update(&path, |doc| doc.add(Path::new("/b"))).unwrap_err();
-            assert_eq!(e.code, code::BROKEN, "{src:?} → {e}");
+            let file = std::fs::canonicalize(&path).unwrap().display().to_string();
             for e in [
+                update(&path, |doc| doc.add(Path::new("/b"))).unwrap_err(),
                 update(&path, |doc| doc.remove(&["/a".into()])).unwrap_err(),
                 update(&path, |doc| doc.set_hue(&["/a".into()], Hue::named("green"))).unwrap_err(),
             ] {
                 assert_eq!(e.code, code::BROKEN, "{src:?} → {e}");
+                // 손으로 고치라는 거절은 **어느 파일인지** 댄다(moai-gmdu 에픽 리뷰) — 설정의 자리는 환경이 골라
+                // 사람이 모를 수 있다. 목록의 모양 거절(문서가 내는 것)도 깨진 파일 거절(`update` 가 내는 것)과 같다.
+                assert!(e.message.starts_with(&format!("{file}: ")), "{src:?} → {e}");
             }
             assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "깨진 파일을 덮어썼다");
         }
@@ -1420,6 +1525,39 @@ mod tests {
         }
     }
 
+    /// **여러 줄 문자열 안의 줄바꿈은 줄 끝이 아니라 값이다**(moai-gmdu 에픽 리뷰) — 세지도 고치지도 않는다. 고치면
+    /// 모르는 키의 값이 바뀌고, 세면 LF 파일에 붙여 넣은 CRLF 문자열 하나가 파일 전체를 CRLF 로 뒤집는다.
+    #[test]
+    fn newlines_inside_multiline_strings_are_values_not_line_endings() {
+        let memo = |doc: &Doc| doc.doc.get("memo").and_then(Item::as_str).map(String::from);
+        // CRLF 파일의 LF 문자열 — 줄은 CRLF 로 서고 값은 그대로다.
+        let src = "a = 1\r\nb = 2\r\nmemo = \"\"\"\nx\ny\"\"\"\r\nc = '''\nz'''\r\n";
+        let mut doc = Doc::parse(src).unwrap();
+        doc.add(Path::new("/z")).unwrap();
+        let out = doc.render();
+        let again = Doc::parse(&out).unwrap();
+        assert_eq!(memo(&again).as_deref(), Some("x\ny"), "{out:?}");
+        assert_eq!(again.doc.get("c").and_then(Item::as_str), Some("z"), "{out:?}");
+        assert!(!out.replace("\r\n", "").replace("\"\"\"\nx\ny", "").replace("'''\nz", "").contains('\n'), "LF 로 선 줄이 있다 {out:?}");
+
+        // LF 파일에 붙여 넣은 CRLF 문자열 — 파일은 LF 그대로고, 더했다 빼면 처음 바이트다.
+        let src = "a = 1\nmemo = \"\"\"\r\n1\r\n2\r\n3\r\n4\r\n\"\"\"\n";
+        let mut doc = Doc::parse(src).unwrap();
+        assert!(!doc.crlf, "문자열 안의 CRLF 를 줄 끝으로 셌다");
+        doc.add(Path::new("/z")).unwrap();
+        let mut doc = Doc::parse(&doc.render()).unwrap();
+        doc.remove(&["/z".into()]).unwrap();
+        assert_eq!(doc.render(), src);
+
+        // 이 도구가 적은 경로도 — 줄바꿈이 든 디렉터리 이름은 CRLF 파일에서도 그 이름으로 남아 도로 뺄 수 있다.
+        let mut doc = Doc::parse("a = 1\r\nb = 2\r\n").unwrap();
+        doc.add(Path::new("/tmp/a\nb")).unwrap();
+        let mut doc = Doc::parse(&doc.render()).unwrap();
+        assert_eq!(doc.projects().0, [Project { path: "/tmp/a\nb".into(), hue: None }]);
+        assert_eq!(doc.remove(&["/tmp/a\nb".into()]).unwrap(), 1);
+        assert_eq!(doc.render(), "a = 1\r\nb = 2\r\n");
+    }
+
     /// **주석만 있는 설정의 머리 주석은 머리에 남는다**(moai-bx7g) — 라이브러리가 그 글을 끝 글로 들어
     /// 새 `[[project]]` 가 그 앞에 섰다. 도로 빼면 처음 바이트로 돌아온다.
     #[test]
@@ -1462,11 +1600,88 @@ mod tests {
                 "[tui]\nsort = \"title\"\n\n# 여기부터 목록\n",
             ),
             ("# 붙은 주석\n[[project]]\npath = \"/a\"\n", "/a", ""),
+            // 빈칸·탭뿐인 줄도 빈 줄이다(moai-gmdu 에픽 리뷰) — 눈에는 같은 빈 줄이다.
+            ("# 목록\n  \n[[project]]\npath = \"/a\"\n", "/a", "# 목록\n"),
+            ("# 목록\n\t\r\n# a 는 일\n[[project]]\npath = \"/a\"\n", "/a", "# 목록\n"),
+            // 뒤의 표가 뺀 표에 빈 줄 없이 붙어 있었으면 남긴 글과 그 표 사이에 빈 줄을 둔다(moai-gmdu 에픽
+            // 리뷰) — 안 두면 남긴 글이 그 표의 머리에 붙어, 그 표를 뺄 때 함께 지워진다.
+            (
+                "# 목록\n\n[[project]]\npath = \"/a\"\n# b 는 일\n[[project]]\npath = \"/b\"\n",
+                "/a",
+                "# 목록\n\n# b 는 일\n[[project]]\npath = \"/b\"\n",
+            ),
+            (
+                "# 목록\n\n[[project]]\npath = \"/a\"\n[[project]]\npath = \"/b\"\n",
+                "/a",
+                "# 목록\n\n[[project]]\npath = \"/b\"\n",
+            ),
         ] {
             std::fs::write(&path, src).unwrap();
             assert_eq!(update(&path, |doc| doc.remove(&[gone.into()])).unwrap(), 1, "{src:?}");
-            assert_eq!(std::fs::read_to_string(&path).unwrap(), want, "{src:?}");
+            let left = std::fs::read_to_string(&path).unwrap();
+            assert_eq!(left, want, "{src:?}");
+            // 남긴 주석은 남은 표를 마저 빼도 남는다 — 한 번 남긴 것이 다음 `remove` 에 지워지면 남긴 뜻이 없다.
+            if left.contains("/b") {
+                assert_eq!(update(&path, |doc| doc.remove(&["/b".into()])).unwrap(), 1, "{src:?}");
+                assert!(std::fs::read_to_string(&path).unwrap().starts_with("# 목록\n"), "{src:?} → 둘째 rm 이 남긴 주석을 지웠다");
+            }
         }
+    }
+
+    /// **표를 세우는 쓰기는 모두 머리 주석을 머리에 둔다**(moai-gmdu 에픽 리뷰) — 등록만 옮기면 주석만 있던 설정에
+    /// 처음 적는 것이 보기(`[tui]`)나 읽음(`[read]`)일 때 머리 주석이 새 표 밑으로 밀린다.
+    #[test]
+    fn a_head_comment_stays_above_the_first_look_and_read_tables() {
+        let look = Look { detail: Some(true), ..Look::default() };
+        let mut doc = Doc::parse("# 내 설정\n").unwrap();
+        doc.merge_look(&Look::default(), &look).unwrap();
+        assert_eq!(doc.render(), "# 내 설정\n\n[tui]\ndetail = true\n");
+        let mut doc = Doc::parse("# 내 설정\n").unwrap();
+        doc.mark_read(&[("m-0001".to_string(), "T".to_string())].into()).unwrap();
+        assert_eq!(doc.render(), "# 내 설정\n\n[read]\nm-0001 = \"T\"\n");
+        // 보기를 먼저 적고 등록했다 빼도 머리 주석은 머리에 있다.
+        let mut doc = Doc::parse(&doc.render()).unwrap();
+        doc.add(Path::new("/z")).unwrap();
+        let mut doc = Doc::parse(&doc.render()).unwrap();
+        doc.remove(&["/z".into()]).unwrap();
+        assert_eq!(doc.render(), "# 내 설정\n\n[read]\nm-0001 = \"T\"\n");
+    }
+
+    /// 머리로 옮기는 것은 **키도 표도 없는** 설정의 주석뿐이다 — 키나 표가 있는 파일의 끝 글은 앞의 것의 꼬리일
+    /// 수 있어 그 자리에 둔다. 빈칸뿐인 설정은 옮길 주석이 없어 더했다 빼면 처음 바이트다(moai-gmdu 에픽 리뷰 —
+    /// 두 조건을 지키는 시험이 없었다).
+    #[test]
+    fn only_a_comment_only_config_lifts_its_comment() {
+        let mut doc = Doc::parse("[[project]]\npath = \"/a\"\n# 꼬리\n").unwrap();
+        doc.add(Path::new("/z")).unwrap();
+        let added = doc.render();
+        assert!(added.starts_with("[[project]]\npath = \"/a\"\n") && added.ends_with("# 꼬리\n"), "{added:?}");
+        for src in ["\n\n", "  \n"] {
+            let mut doc = Doc::parse(src).unwrap();
+            doc.add(Path::new("/z")).unwrap();
+            let mut doc = Doc::parse(&doc.render()).unwrap();
+            doc.remove(&["/z".into()]).unwrap();
+            assert_eq!(doc.render(), src, "{src:?}");
+        }
+    }
+
+    /// **남긴 글은 글의 차례를 안 바꾼다**(moai-bx7g) — 뺀 표 **바로 다음에** 그려지던 것 앞에, 여럿이면 파일에
+    /// 있던 차례로, 파일 끝이면 끝 글 **앞에** 선다(moai-gmdu 에픽 리뷰 — 차례를 지키는 시험이 없었다).
+    #[test]
+    fn kept_heads_keep_the_order_of_the_text() {
+        let src = "# 일\n\n[[project]]\npath = \"/w\"\n\n# 집\n\n[[project]]\npath = \"/h\"\n\n[tui]\nsort = \"title\"\n";
+        let mut doc = Doc::parse(src).unwrap();
+        assert_eq!(doc.remove(&["/w".into()]).unwrap(), 1);
+        assert_eq!(doc.render(), "# 일\n\n# 집\n\n[[project]]\npath = \"/h\"\n\n[tui]\nsort = \"title\"\n");
+
+        // 한 번에 둘을 빼면(링크 철자와 푼 철자) 남긴 글은 파일에 있던 차례대로 선다.
+        let mut doc = Doc::parse(src).unwrap();
+        assert_eq!(doc.remove(&["/w".into(), "/h".into()]).unwrap(), 2);
+        assert_eq!(doc.render(), "# 일\n\n# 집\n\n[tui]\nsort = \"title\"\n");
+
+        let mut doc = Doc::parse("[tui]\nsort = \"title\"\n\n# 목록\n\n[[project]]\npath = \"/a\"\n# 파일 끝\n").unwrap();
+        assert_eq!(doc.remove(&["/a".into()]).unwrap(), 1);
+        assert_eq!(doc.render(), "[tui]\nsort = \"title\"\n\n# 목록\n# 파일 끝\n");
     }
 
     /// 명령이 받는 낱말과 읽기가 받는 낱말이 같다.
@@ -1609,12 +1824,17 @@ mod tests {
         assert!(inline.render().contains("sort = \"title\""), "{}", inline.render());
     }
 
-    /// **바꿀 보기 키가 손으로 적은 표 모양이면 하나도 안 적는다**(moai-j7r3) — `set_hue`·`mark_read` 와
-    /// 같은 자다. 낱값의 틀린 값은 고쳐 쓰고, 이 세션이 안 바꾸는 키는 모양이 어떻든 막지 않는다.
+    /// **바꿀 보기 키가 손으로 적은 표 모양이면 하나도 안 적는다**(moai-j7r3) — `set_hue` 와 같은 자다(`plain`).
+    /// 낱값의 틀린 값은 고쳐 쓰고, 이 세션이 안 바꾸는 키는 모양이 어떻든 막지 않는다.
     #[test]
     fn a_hand_written_table_look_key_is_refused_not_overwritten() {
         let title = Look { sort: Some("title".into()), ..Look::default() };
         let hide = Look { hidden: Some(vec!["done".into()]), ..Look::default() };
+        let fields = Look { fields: Some(vec!["id".into()]), ..Look::default() };
+        let deferred = Look { hide_deferred: Some(true), ..Look::default() };
+        let detail = Look { detail: Some(true), ..Look::default() };
+        // 탐색기는 저장마다 `fields_known` 을 싣는다 — 다른 키 하나만 바꿔도 이 키를 본다.
+        let toggle = Look { fields_known: Some(vec!["id".into()]), ..detail.clone() };
         for (src, new, key) in [
             ("[tui]\nsort.by = \"created\"\n", &title, "sort"),
             ("[tui]\nsort = { by = \"created\" }\n", &title, "sort"),
@@ -1623,6 +1843,11 @@ mod tests {
             ("[tui.sort]\nby = \"created\"\n", &title, "sort"),
             ("[tui]\nhidden = { done = true }\n", &hide, "hidden"),
             ("[tui]\nhidden.done = true\n", &hide, "hidden"),
+            // 거절을 재는 키마다 하나씩 — 한 줄이 빠져도 여기서 드러난다(moai-gmdu 에픽 리뷰).
+            ("[tui.fields]\nid = true\n", &fields, "fields"),
+            ("[tui]\nhide_deferred.x = true\n", &deferred, "hide_deferred"),
+            ("[tui]\ndetail = { open = true }\n", &detail, "detail"),
+            ("[tui]\nfields_known = { id = true }\n", &toggle, "fields_known"),
         ] {
             let mut doc = Doc::parse(src).unwrap();
             let e = doc.merge_look(&Look::default(), new).expect_err(src);
