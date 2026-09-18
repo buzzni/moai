@@ -866,7 +866,9 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
 **2. 일꾼을 찾는다.** `ListAgents` 는 세션의 자리(cwd)를 안 보여 준다.
 Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽는다
 (`CLAUDE_CONFIG_DIR` 를 옮겼으면 그 아래다). 모노레포의 하위 프로젝트면 `.moai` 가
-있는 그 하위가 루트다. 스크립트는 첫 줄 `루트 자리` 에 그 `<루트>` 를 낸다.
+있는 그 하위가 루트다. 스크립트는 첫 줄 `루트 자리` 에 그 `<루트>` 를 내고, 루트가 저장소
+꼭대기가 아니면 `하위` 줄에 꼭대기에서 루트까지의 경로를 낸다 — 워크트리는 저장소 전체로 서니
+일꾼이 그 안의 같은 하위로 들어가야 한다(브리프 3).
 
 ```sh
 python3 - "$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)" "$(git rev-parse --show-toplevel)" <<'PY'
@@ -879,6 +881,8 @@ while here not in (top, os.path.dirname(here)) and not os.path.isdir(os.path.joi
 root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
 trees = os.path.join(root, ".claude", "worktrees") + os.sep
 print("루트 자리", root)
+if os.path.relpath(here, top) != ".":
+    print("하위    ", os.path.relpath(here, top))
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 unread = 0
 for f in glob.glob(os.path.join(home, "sessions", "*.json")):
@@ -1311,7 +1315,11 @@ fn brief() -> String {
          git commit -m "chore(tracker): <에픽> 를 워크트리에서 집는다" -- .moai/
     3. 2 의 커밋 뒤 곧바로 `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> <본 가지>`
        로 로컬 <본 가지> 에서 뜨고 EnterWorktree(path) 로 들어간다. 이름은 idea id 가 아니라
-       펼친 에픽 id 다. 워크트리가 서기 전에는 루트의 다른 세션들이 이 멤버를 제 초점으로 읽는다
+       펼친 에픽 id 다. 워크트리가 서기 전에는 루트의 다른 세션들이 이 멤버를 제 초점으로 읽는다.
+       **루트가 저장소 꼭대기가 아니면**(모노레포의 하위 프로젝트) 워크트리는 저장소 전체로
+       서니, 들어간 뒤 그 안의 같은 하위로 옮겨 거기서 일한다 — 워크트리 꼭대기에 서면 `moai` 가
+       위로 올라가 루트의 `.moai` 를 찾아 쓰고, 훅은 `.claude/` 아래의 편집을 안 센다
+         cd "$(git -C <루트> rev-parse --show-prefix)"
     4. 노트에 없는 설계 결정은 추측하지 말고 AskUserQuestion 으로 묻는다 —
        사람이 일꾼 창을 보고 있다
     4-1. **트래커는 언제나 루트의 것을 고친다.** `<루트>` 는 감독이 채운 루트 체크아웃의
@@ -2137,6 +2145,18 @@ sys.exit(1 if bad else 0)
             .collect();
         assert!(ids.is_empty(), "이 저장소의 이슈 id 가 섰다 — {ids:?}");
     }
+    #[test]
+    fn the_worker_steps_into_the_subproject_of_a_monorepo() {
+        // **모노레포의 하위가 루트면 워크트리 안의 같은 하위에서 일한다**(2026-09-18 사용자 결정).
+        // 워크트리 꼭대기에 선 일꾼은 `moai` 가 공유 루트의 `.moai` 를 찾아 쓰고, 훅 규칙 2 는
+        // `.claude/` 아래라 편집을 안 센다.
+        let (supervise, brief) = (supervise(), brief());
+        assert!(supervise.contains("print(\"하위    \", os.path.relpath(here, top))"), "감독이 하위 경로를 안 낸다");
+        let three = brief.find("\n    3. ").expect("3 이 없다");
+        let four = brief.find("\n    4. ").expect("4 가 없다");
+        assert!(brief[three..four].contains("rev-parse --show-prefix"), "일꾼이 워크트리 안의 하위로 안 들어간다");
+    }
+
     /// **일꾼에게 싣는 글은 가지 이름을 박지 않는다.** `main` 을 박으면 `develop`·`trunk`
     /// 저장소에서 워크트리 뜨기부터 실패한다. 감독이 읽어 채울 자리와 읽는 한 줄이 선다.
     ///
