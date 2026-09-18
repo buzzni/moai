@@ -2777,7 +2777,7 @@ pub(super) mod tests {
                             vec![crate::worktree::Side::new("worktree-argos-0005", "/wt/argos-0005", vec![])],
                         );
                         a.adopt(shown);
-                        a = a.overlaid(origin, Vec::new(), Vec::new());
+                        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
                     }
                     _ => {}
                 }
@@ -3037,7 +3037,7 @@ pub(super) mod tests {
             vec![],
         )]);
         a.adopt(shown);
-        a = a.overlaid(origin, Vec::new(), Vec::new());
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
         let seen = |a: &mut App| render(a, 120, 12).join("\n");
         // 가지 없는 줄에는 안 붙는다 — 뿌리의 에픽 줄로 본다.
         let root = seen(&mut a);
@@ -3073,7 +3073,7 @@ pub(super) mod tests {
             vec![],
         )]);
         a.adopt(shown);
-        a = a.overlaid(origin, Vec::new(), Vec::new());
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
         a.hit("Enter");
         let text = render(&mut a, 120, 12).join("\n");
         let row = text.lines().find(|l| l.contains("집은 멤버")).unwrap_or_else(|| panic!("줄이 없다\n{text}"));

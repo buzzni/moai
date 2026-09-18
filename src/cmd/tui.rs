@@ -21,10 +21,16 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // "이미 본 것" 으로 적혀 그 뒤로 영영 바뀐 줄 모른다. 먼저 재면 최악이
     // 헛 알림 하나고, 빠진 알림보다 헛 알림이 싸다.
     let stamp = crate::tui::stamp_of(&repo);
+    // 자리 판정이 보는 옆 워크트리도 **읽기 전에** 잰다 — 다시 읽기(`tui::prepare`)가 지켜보는 목록과
+    // 같은 모양이어야 첫 다시 읽기가 안 바뀐 커밋 표를 다시 짓지 않고, git 을 못 불러도 옆 워크트리를
+    // 치운 것을 안다. 화면을 안 켜는 `--json` 은 지켜볼 것이 없다.
+    let places = if ctx.json { Vec::new() } else { crate::worktree::place_marks(&repo.root) };
     // 탐색기는 옆 워크트리를 겹친 채로 연다(`App::worktree`). `--json` 은 겹치지 않는다 —
     // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
-    let crate::worktree::Gathered { load, origin, trouble, watched, .. } = crate::worktree::gather(&repo, !ctx.json)?;
+    let crate::worktree::Gathered { load, origin, trouble, mut watched, swept, .. } =
+        crate::worktree::gather(&repo, !ctx.json)?;
+    crate::tui::watch(&mut watched, places);
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
     // 소속 지도를 두 번 잰다(moai-xemz 리뷰).
     let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
@@ -54,7 +60,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 설정은 **한 번 읽어** 층과 보기가 나눠 쓴다(moai-u8cs).
     let reg = crate::user_config::read(config.as_deref());
     let layer = crate::tui::layer::Layer::of(&reg, Some(&repo.root));
-    let mut app = App::open(repo, load, index, ground, path, stamp).overlaid(origin, trouble, watched);
+    let mut app = App::open(repo, load, index, ground, path, stamp).overlaid(origin, trouble, watched, swept);
     app.user = ctx.user.clone();
     // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와
     // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.
