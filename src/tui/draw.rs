@@ -1218,14 +1218,17 @@ fn branch_mark(app: &App, at: usize, fields: super::view::Fields) -> Option<Stri
 }
 
 /// 묶음 줄의 끝난/일 셈(`n/n`) — 셈을 껐거나, 묶음이 아니거나, 셀 일이 없으면 빈 글이다. 자는 상세
-/// 롤업과 같다(`Index::progress`).
+/// 롤업과 같다(`Index::tally` 가 `Index::progress` 와 같은 값을 미리 센다).
 fn tally_of(app: &App, r: &Row, fields: super::view::Fields) -> String {
     let Row::Item(e @ Entry::Dir { at: Some(_), .. }) = r else { return String::new() };
     if !fields.shows(super::view::Field::Tally) {
         return String::new();
     }
-    let p = app.index.progress(&app.issues, &deeper(app, e));
-    if p.percent().is_some() { format!("{}/{}", p.done, p.work.len()) } else { String::new() }
+    // 적재 때 센 셈이다(`Index::tally`, moai-m7iy) — 줄마다 `progress` 로 세면 이슈 전부를 훑는다.
+    match app.index.tally(&deeper(app, e)) {
+        (_, 0) => String::new(),
+        (done, work) => format!("{done}/{work}"),
+    }
 }
 
 /// 안 읽은 줄의 표시(moai-z9pc). 줄(`row_line`)이 세우는 글과 머리를 걷는 셈(`lead_extras`)이 재는 글이
@@ -5809,5 +5812,48 @@ mod eyeball {
         for l in super::tests::render(&mut app, 96, h) {
             println!("{l}");
         }
+    }
+
+    /// **한 프레임에 드는 값을 잰다**(moai-wt4n·moai-m7iy). 에픽 `BENCH_EPICS`(기본 500)개에 멤버를
+    /// 열아홉씩, 느슨한 일을 에픽 수만큼 세워 뿌리 목록을 그린다 — 뿌리는 에픽 줄마다 진척 셈을 낸다.
+    /// `CARGO_PROFILE_RELEASE_LTO=false cargo test --release -- --ignored --nocapture a_frame_costs` 로
+    /// 부른다(dev 는 열 배 넘게 느려 값이 아무 말도 안 한다).
+    #[test]
+    #[ignore]
+    fn a_frame_costs() {
+        use crate::model::{Issue, Kind, Status};
+        let epics: usize = std::env::var("BENCH_EPICS").ok().and_then(|v| v.parse().ok()).unwrap_or(500);
+        let mut issues = Vec::new();
+        for e in 0..epics {
+            let eid = format!("argos-e{e:04}");
+            issues.push(Issue::new(eid.clone(), format!("에픽 {e} 의 제목"), Kind::Epic, Status::new("todo"), "2026-09-01T00:00:00Z"));
+            for m in 0..19 {
+                let st = if m % 3 == 0 { "done" } else { "todo" };
+                let mut i = Issue::new(format!("argos-m{e:04}{m:02}"), format!("멤버 {m} 제목"), Kind::Issue, Status::new(st), "2026-09-01T00:00:00Z");
+                i.epic = Some(eid.clone());
+                issues.push(i);
+            }
+            issues.push(Issue::new(format!("argos-l{e:04}"), format!("느슨한 일 {e}"), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z"));
+        }
+        let n = issues.len();
+        let t = std::time::Instant::now();
+        let _ = crate::nav::Index::of(&issues);
+        println!("Index::of {:?}", t.elapsed());
+        let cfg = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
+        let mut app = super::App::new(issues, cfg, crate::nav::Path::new());
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 50)).unwrap();
+        term.draw(|f| super::screen(f, &mut app)).unwrap();
+        let frames = 20;
+        let t = std::time::Instant::now();
+        for _ in 0..frames {
+            term.draw(|f| super::screen(f, &mut app)).unwrap();
+        }
+        println!("이슈 {n} · 에픽 {epics} · 프레임 {:?}", t.elapsed() / frames);
+        let t = std::time::Instant::now();
+        let rows = app.rows();
+        println!("rows {:?}", t.elapsed());
+        let t = std::time::Instant::now();
+        let tallies: Vec<String> = rows.iter().map(|r| super::tally_of(&app, r, app.fields)).collect();
+        println!("tallies {:?} ({} 줄)", t.elapsed(), tallies.len());
     }
 }

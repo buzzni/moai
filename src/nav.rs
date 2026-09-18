@@ -23,7 +23,7 @@
 //! 보이는 줄 수가 어긋났다(moai-lhbh).
 
 use crate::model::{Issue, Kind};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// 경로 한 마디.
 ///
@@ -98,6 +98,11 @@ pub struct Index {
     /// id → 그 줄을 계획에서 뺀 줄(`report::deferred_roots`). 상세가 물려받은
     /// 미룸을 말하는 데 쓴다 — 프레임마다 조상을 다시 타지 않게.
     deferred_root: BTreeMap<String, String>,
+    /// 자리 → 그 밑의 (끝난 일, 일) 수. **미리 센다**(moai-m7iy) — 목록은 묶음 줄마다 셈을 내는데
+    /// 그때 [`Index::progress`] 로 세면 줄마다 `homes` 전부를 훑어, 에픽 500개·이슈 1만 건에서 한
+    /// 프레임의 셈이 150ms 였다. 자는 `progress` 와 같다 — 둘이 갈리면 목록 줄과 상세 롤업이 같은
+    /// 에픽을 두 진척으로 댄다(`tallies_agree_with_progress_at_every_place`).
+    tallies: HashMap<Path, (usize, usize)>,
 }
 
 impl Index {
@@ -155,7 +160,25 @@ impl Index {
             .into_iter()
             .map(|(id, root)| (id.to_string(), root.to_string()))
             .collect();
-        Index { homes, has_kids, by_id, deferred_root }
+        // 줄마다 제 자리의 **모든 앞머리**에 센다 — 자리 `p` 밑이란 `homes` 가 `p` 로 시작하는 것이다
+        // (`descendants`). 깊이만큼만 돌므로 이슈 수에 비례한다.
+        let mut tallies: HashMap<Path, (usize, usize)> = HashMap::new();
+        for (at, h) in homes.iter().enumerate() {
+            if !crate::report::is_work(&issues[at]) {
+                continue;
+            }
+            let done = usize::from(issues[at].status.is_done());
+            for n in 0..=h.len() {
+                // 이미 선 자리는 빌린 채 찾는다 — `entry` 는 찾기 전에 경로를 복사한다.
+                match tallies.get_mut(&h[..n]) {
+                    Some(t) => *t = (t.0 + done, t.1 + 1),
+                    None => {
+                        tallies.insert(h[..n].to_vec(), (done, 1));
+                    }
+                }
+            }
+        }
+        Index { homes, has_kids, by_id, deferred_root, tallies }
     }
 
     /// 그 줄이 **실제로 선** 마일스톤. 제 줄의 `milestone` 이 아니다 — 에픽이
@@ -358,10 +381,17 @@ impl Index {
     /// 셈은 [`Index::descendants`] 위에 선다(자리를 정한 그대로). 일만 센다 —
     /// 묶음과 담아 둔 생각은 `report::is_work` 가 뺀다.
     pub fn progress(&self, issues: &[Issue], path: &Path) -> Progress {
+        // 목록 줄은 첨자가 필요 없어 미리 센 [`Index::tally`] 를 쓴다 — 여기는 상세 하나만 부른다.
         let kids = self.descendants(path);
         let work: Vec<usize> = kids.iter().copied().filter(|&at| crate::report::is_work(&issues[at])).collect();
         let done = work.iter().filter(|&&at| issues[at].status.is_done()).count();
         Progress { kids: kids.len(), work, done }
+    }
+
+    /// 그 자리 밑의 (끝난 일, 일) 수 — [`Index::progress`] 의 `done`·`work.len()` 과 같은 값을 적재 때
+    /// 센 것에서 읽는다. 셀 일이 없으면 `(0, 0)` 이다.
+    pub fn tally(&self, path: &Path) -> (usize, usize) {
+        self.tallies.get(path).copied().unwrap_or_default()
     }
 
     /// 화면에 낼 이름. 바구니는 제 줄이 없으므로 여기서 이름을 얻는다.
@@ -557,6 +587,48 @@ mod tests {
             child_elsewhere,                           // 제 에픽이 부모와 다른 자식
         ];
         assert_exactly_once(&issues);
+    }
+
+    /// **미리 센 셈은 `progress` 와 같다**(moai-m7iy) — 목록 줄은 `tally`, 상세 롤업은 `progress` 를 부르므로
+    /// 둘이 갈리면 한 화면에서 같은 에픽이 두 진척으로 선다. 병적인 더미의 모든 자리에서 견준다.
+    #[test]
+    fn tallies_agree_with_progress_at_every_place() {
+        let mut own_milestone = epic_of("argos-0007", "argos-0002");
+        own_milestone.milestone = Some("argos-0009".into());
+        let mut epic_in_milestone = make("argos-0002", Kind::Epic);
+        epic_in_milestone.milestone = Some("argos-0001".into());
+        let mut done = epic_of("argos-0004", "argos-0002");
+        done.status = Status::new("done");
+        let mut done_child = make("argos-0005.aa1", Kind::Issue);
+        done_child.status = Status::new("done");
+        let issues = vec![
+            make("argos-0001", Kind::Milestone),
+            epic_in_milestone,
+            make("argos-0003", Kind::Epic),
+            done,
+            epic_of("argos-0005", "argos-0002"),
+            done_child,
+            make("argos-0005.bb2", Kind::Idea),
+            own_milestone,
+            epic_of("argos-0008", "argos-zzzz"),
+            make("argos-0010", Kind::Issue),
+            make("argos-0011.bb2", Kind::Issue),
+        ];
+        let index = Index::of(&issues);
+        let mut places: Vec<Path> = vec![Vec::new()];
+        for at in 0..issues.len() {
+            let mut p = index.home_of(at).clone();
+            places.push(p.clone());
+            p.push(index.seg_of(&issues, at));
+            places.push(p);
+        }
+        let mut counted = 0;
+        for p in &places {
+            let want = index.progress(&issues, p);
+            assert_eq!(index.tally(p), (want.done, want.work.len()), "{p:?}");
+            counted += usize::from(want.done > 0 && want.work.len() > want.done);
+        }
+        assert!(counted > 0, "끝난 일과 안 끝난 일이 섞인 자리가 없다 — 견줄 것이 없다");
     }
 
     /// **묶음을 읽는 줄은 묶음 줄 자신과 그 밑에 그려진 것이다**(moai-j038.vna) — `moai read -e` 와
