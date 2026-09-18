@@ -9135,3 +9135,60 @@ fn the_python_agents_skip_a_row_only_a_side_worktree_has() {
     assert!(line_of(s.path(), &mine).contains("\"status\":\"done\""), "{}", text(&out));
     assert!(line_of(&side, &theirs).contains("\"status\":\"todo\""), "옆의 줄을 건드렸다");
 }
+
+/// **`--from` 이 맞았다고 집은 것은 아니다** — bash 판의 같은 시험을 옮긴 것이다(moai-8ksq). 첫 칸이
+/// 곧 집는 칸인 설정에서는 `mv` 가 아무것도 안 옮기고 `already` 로 0 을 낸다. 종료 코드만 믿거나
+/// `already` 를 못 가르면 일꾼 둘이 같은 일을 하거나 엉뚱한 까닭으로 멈춘다 — 그래서 까닭까지 본다.
+#[cfg(unix)]
+#[test]
+fn the_python_agents_do_not_mistake_already_for_a_claim() {
+    let s = agents_repo("agents-already");
+    std::fs::write(s.path().join(".moai/config.toml"), "prefix = \"argos\"\nstatuses = \"in_progress,review,done\"\n").unwrap();
+    let id = add(s.path(), &["첫 칸이 곧 집는 칸인 일"]);
+    let work = work_script(&s, "echo 했다");
+
+    let out = agents_cmd(s.path(), &work, 2).output().expect("python3 를 실행하지 못했다");
+    assert!(worked(&s).is_empty(), "집지도 않은 일을 했다\n{}", text(&out));
+    assert_eq!(out.status.code(), Some(1), "집은 것이 없는데 조용히 끝났다\n{}", text(&out));
+    assert!(text(&out).contains(&format!("{id}  이미 in_progress 다")), "already 를 가르지 못했다\n{}", text(&out));
+}
+
+/// **노트를 못 남긴 일은 닫지 않는다.** 닫으면 일의 출력이 아무 데도 없이 done 이 된다 — 일꾼은
+/// 그 일을 in_progress 로 두고 1 로 멈춘다. 노트만 실패하게 moai 를 감싼다(락·신원의 모양이다).
+#[cfg(unix)]
+#[test]
+fn a_python_agent_job_whose_note_fails_stays_picked() {
+    let s = agents_repo("agents-nonote");
+    let id = add(s.path(), &["노트 못 남길 일", "-p", "1"]);
+    // 예제는 늘 `moai -C <뿌리> …` 로 부르므로 명령 이름은 셋째 자리다.
+    let wrapper = s.path().join("moai-nonote.sh");
+    write_exe(
+        &wrapper,
+        &format!("#!/bin/sh\nif [ \"$3\" = note ]; then echo '잠겨 있다' >&2; exit 1; fi\nexec '{BIN}' \"$@\"\n"),
+    );
+    let work = work_script(&s, "echo 했다");
+
+    let out = agents_cmd(s.path(), &work, 2).env("MOAI", &wrapper).output().expect("python3 를 실행하지 못했다");
+    assert_eq!(out.status.code(), Some(1), "노트를 못 남겼는데 1 로 안 끝났다\n{}", text(&out));
+    assert_eq!(worked(&s), [id.as_str()], "일이 한 번 돌지 않았다\n{}", text(&out));
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""), "노트 없이 닫았다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("노트를 못 남겼다: 잠겨 있다"), "까닭을 안 댔다\n{}", text(&out));
+}
+
+/// **일이 띄워 두고 간 자식이 일꾼을 잡지 않는다** — 출력을 파이프가 아니라 파일로 받는 까닭이다.
+/// 파이프로 받으면 그것을 물려받은 자식이 죽을 때까지 기다려, dev 서버를 띄우고 0 으로 끝난 일이
+/// 노트도 없이 멈춘다. bash 판의 같은 시험을 옮긴 것이다.
+#[cfg(unix)]
+#[test]
+fn the_python_agents_do_not_wait_for_a_child_the_job_left_running() {
+    let s = agents_repo("agents-daemon");
+    let id = add(s.path(), &["서버 띄우는 일", "-p", "1"]);
+    let work = work_script(&s, "sleep 30 &\necho \"띄웠다: $1\"");
+
+    let started = std::time::Instant::now();
+    let out = agents_cmd(s.path(), &work, 2).output().expect("python3 를 실행하지 못했다");
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(started.elapsed() < std::time::Duration::from_secs(20), "띄워 둔 자식을 기다렸다");
+    assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "닫지 않았다\n{}", text(&out));
+    assert!(ok(s.path(), &["show", &id]).contains(&format!("띄웠다: {id}")), "노트가 안 남았다");
+}
