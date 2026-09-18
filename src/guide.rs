@@ -60,6 +60,67 @@ pub fn close_steps(id: &str) -> String {
     REVIEW_STEPS.lines().skip(1).map(|l| l.replace("<id>", id)).collect::<Vec<_>>().join("\n")
 }
 
+/// 난이도 한 낱말 — **모델과 리뷰 등급을 함께 정하는 그 축**이다. 낱말·모델·잣대 셋.
+///
+/// 감독이 읽는 표와 일꾼이 받는 글이 같은 잣대를 두 벌 적으면 한쪽만 고쳐도 아무도
+/// 안 붉어진다 — 실제로 두 벌이 서 있었고 이미 낱말이 갈라져 있었다. 두 표면 모두
+/// 여기서 글을 받고, 모델 사다리(`haiku → …`)와 에픽 끝의 모델도 여기서 읽는다.
+///
+/// **잣대의 글은 이 저장소 CLAUDE.md 의 리뷰 표와 같다** — 같은 축이라고 적어 두고 high 에서
+/// `동시성` 이 빠져 있었다. 한 파일 안의 동시성 고침이 medium 으로 읽혀 싼 모델과 싼 리뷰를
+/// 받는다. `the_rubric_is_the_review_table` 이 둘을 견준다.
+const DIFFICULTY: [(&str, &str, &str); 3] = [
+    ("low", "haiku", "글·주석·한 줄 고침, 동작이 안 바뀐다"),
+    ("medium", "sonnet", "한 파일 안의 동작 변경, 시험으로 둘러싸인 것"),
+    ("high", "opus", "여러 파일·쓰기 경로·동시성·저장 형식·훅, 되돌리기 어려운 것"),
+];
+
+/// 감독이 읽는 표 — 머리까지 여기서 낸다. 머리는 표면에, 칸의 차례는 여기에 두던 판은
+/// 칸을 바꿔 끼워도 머리가 엉뚱한 칸을 이름 짓는 채로 아무도 안 붉어졌다.
+fn difficulty_table() -> String {
+    let rows = DIFFICULTY.iter().map(|(level, model, how)| format!("| `{level}` | {how} | `{model}` | `{level}` |"));
+    ["| 난이도 | 무엇으로 재나 | 모델 | 리뷰 |".to_string(), "|---|---|---|---|".to_string()]
+        .into_iter()
+        .chain(rows)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 일꾼이 받는 글의 잣대. 모델 칸은 뺀다 — 일꾼의 모델은 머리의 `모델:` 줄이 준다.
+/// 들여쓰기는 부르는 쪽이 `indent` 로 한다.
+fn difficulty_rubric() -> String {
+    DIFFICULTY.iter().map(|(level, _, how)| format!("`{level}` — {how}")).collect::<Vec<_>>().join("\n")
+}
+
+/// 난이도 낱말들 — `` `low`·`medium`·`high` ``.
+fn difficulty_levels() -> String {
+    DIFFICULTY.iter().map(|(level, _, _)| format!("`{level}`")).collect::<Vec<_>>().join("·")
+}
+
+/// 제일 비싼 모델. 에픽 끝의 리뷰는 멤버의 난이도와 상관없이 이것으로 본다.
+fn top_model() -> &'static str {
+    DIFFICULTY[DIFFICULTY.len() - 1].1
+}
+
+/// 일꾼이 받는 글의 머리에 서는 `모델:` 줄. 새 일(`brief`)과 거둔 일(감독 0)이 **같은 줄**을
+/// 받는다 — 손으로 두 벌 적던 판은 거둔 쪽이 일꾼에게 없는 감독의 절(2-1)을 가리켰다.
+///
+/// **`/model` 은 사람만 친다.** 에이전트는 붙박이 명령을 못 부르고, 설정 파일의 모델은 새
+/// 세션에만 든다 — 그래서 바꾸기는 창을 보는 사람에게 청한다(12 의 `/clear` 와 같은 길).
+/// 제 손으로 치라고 하면 일꾼은 올렸다고 믿고 9-1 에 안 돈 모델을 적는다. 결정은 "맞추거나
+/// 올린다" 였다 — 제안과 다른 모델로 뜬 창은 먼저 맞춘다.
+///
+/// 자리 이름은 `<난이도>` 다. `<등급>` 은 5 에서 개발해 본 일꾼이 고르는 리뷰 등급의
+/// 자리라, 감독이 채우는 목록에 같은 이름을 넣으면 읽기 전의 제안이 그 명령에 박힌다.
+fn model_line() -> String {
+    let ladder = DIFFICULTY.iter().map(|(_, model, _)| *model).collect::<Vec<_>>().join(" → ");
+    format!(
+        r#"모델: <모델> (<난이도> — <까닭>) — 난이도로 고른 제안이다. 모델은 `/model` 로 바꾸는데 그것은
+   사람만 친다 — 이 창이 그 모델이 아니면 창을 보는 사람에게 청해 맞추고, 읽어 보니 더
+   어려우면 같은 길로 한 단계 올린다({ladder}). 리뷰 등급도 같은 축이다"#
+    )
+}
+
 const CHEATSHEET: &str = r#"    moai status                            보드 · 경고 · 흐름 (세션은 여기서 시작)
     moai ready                             지금 집을 수 있는 일
     moai show <id>                         본문·자식·이력. 왜 그렇게 정했는지가 여기 있다
@@ -617,6 +678,9 @@ print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
 /// 남의 저장소에서 그 id 는 아무것도 안 가리키고 고친 뒤에는 거짓이 된다.
 pub fn supervise() -> String {
     let brief = brief();
+    let table = difficulty_table();
+    let top = top_model();
+    let reclaim_model = indent(&model_line(), "      ");
     format!(
         r#"---
 name: moai-supervise
@@ -673,11 +737,13 @@ if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/
 워크트리 중 2 의 스크립트에 `워크트리` 줄로 안 나오는 것이 그것이다.
 
 - 그런 일이 있으면 **새 idea 보다 먼저** 놀고 있는 세션 하나에 이어 하기를 맡긴다. 3 의
-  글 대신 아래를 싣고, 그 뒤에 3 의 글의 **4-1 부터 11 까지**를 통째로 잇는다 — 4-1 을 빼면
-  이어받은 일꾼이 워크트리 안에서 트래커를 고친다
+  글 대신 아래를 싣고, 그 뒤에 3 의 글의 **4-1 부터 끝까지**를 통째로 잇는다 — 4-1 을 빼면
+  이어받은 일꾼이 워크트리 안에서 트래커를 고치고, 끝을 자르면 닫은 뒤의 걸음(창 비우기)이
+  빠진다
 
       감독 세션(<내 이름>)이 <에픽> 의 멈춘 일을 맡긴다 — 앞 세션이 끝을 못 냈다.
       먼저 읽을 것: moai show <에픽> (이력·노트) · moai show <멤버> (자리도 — 자리는 일에만 선다)
+{reclaim_model}
       본 가지: <본 가지> — 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다
       루트: <루트> — 2 의 `루트 자리`. 트래커를 고치는 것은 언제나 이 자리다(3 의 글의 4-1)
       - 워크트리가 있으면 EnterWorktree(path) 로 들어가 `git log <본 가지>..HEAD` 와
@@ -764,10 +830,25 @@ PY
   `pwd` 와 지금 하는 일을 물어 가린다 — 원격·클라우드 세션은 같은 경로를 대도 다른
   체크아웃이다
 
+**2-1. 모델을 고른다 — 난이도 한 낱말로.** 리뷰 등급을 고르는 그 축이다. 축을 둘로 두면
+브리프가 판단을 두 벌 들고, 어긋나는 날 싼 모델이 쓰기 경로를 맡는다.
+
+{table}
+
+에픽 끝의 리뷰(`xhigh`·`max`)는 언제나 `{top}` 다 — 멤버마다 싸게 지나갔어도 한 번은 비싼
+눈으로 전체를 본다(브리프 7 이 일꾼에게 싣는다). **망설여지면 한 단계 올린다.** 감독은 코드를
+읽기 전에 고르므로 이것은 제안이고, 마지막 자는 이슈를 읽은 일꾼이다. 도는 세션의 모델은
+`SendMessage` 로도 설정으로도 못 바꾼다 — 그 창의 사람이 `/model` 로 바꾼다.
+
 **3. 보낸다.** 놀고 있는 세션 하나에 idea **하나**를 `SendMessage` 로 보낸다.
-일꾼은 이 대화를 모르니 아래 글을 `<내 이름>`·`<id>`·`<제목>`·`<본 가지>`·`<루트>` 를 채워
+일꾼은 이 대화를 모르니 아래 글을
+`<내 이름>`·`<id>`·`<제목>`·`<본 가지>`·`<모델>`·`<난이도>`·`<까닭>`·`<루트>` 를 채워
 **통째로** 싣는다 — 일꾼이 받는 것은 이 글뿐이라, 일꾼이 지킬 것은 모두 이 안에 있다.
 `<루트>` 는 2 의 `루트 자리` 다. **안 채우면** 일꾼이 워크트리 안에서 제 자리를 루트로 읽는다.
+`<모델>`·`<난이도>`·`<까닭>` 은 2-1 에서 고른 짝과 그 까닭이다. **안 채우면** 그 자리표시자가
+그대로 실려, 일꾼이 닫을 때 남기는 노트가 무엇이 일했는지 대신 `<모델>` 이라고 적는다.
+`<까닭>` 은 백틱·`$` 없이 적는다 — 9-1 의 큰따옴표 안에 들어가 셸이 그것을 명령으로 푼다.
+`<등급>` 은 채우지 않는다 — 5 에서 개발해 본 일꾼이 고르는 리뷰 등급의 자리다.
 
 {brief}
 
@@ -784,6 +865,12 @@ PY
     git merge-base --is-ancestor <머지 해시> <본 가지> && echo 있다   머지가 본 가지에 있는가
     moai show <에픽>                       펼친 에픽과 멤버가 done 인가
     git worktree list                      그 워크트리가 사라졌는가
+
+보고가 맞고 **그 세션이 턴을 마쳤으면**(보고는 11 이고 일꾼은 12 를 마저 한다) 그 창이
+비우기 좋은 자리라고 짚어 줄 수 있다 — 일꾼도 제 창에서 그렇게 말한다(브리프 12). 셋이
+보는 것은 머지·닫기·워크트리뿐이라 노트까지 읽지는 않는다. **짚었으면 다음 idea 는 사람이
+그 창을 비웠거나 안 비운다고 한 뒤에 보낸다** — 먼저 보낸 글은 뒤늦은 `/clear` 에 같이
+사라지고, 그 idea 와 세션은 오지 않을 보고를 기다리며 후보에서 빠져 있다.
 
 `<에픽>` 은 보고에 실린 에픽 id 다. idea 는 펼칠 때 이미 done 이 되고 멤버를 안 보여 줘,
 `moai show <id>` 로는 일이 끝났는지 모른다 — 보고에 없으면 그 idea 의 이력 "… 로
@@ -826,9 +913,14 @@ PY
 fn brief() -> String {
     let review = make_review("--parent <에픽>");
     let close = indent(&close_steps("<리뷰 id>"), "       ");
+    let model = indent(&model_line(), "    ");
+    let levels = difficulty_levels();
+    let rubric = indent(&difficulty_rubric(), "       ");
+    let top = top_model();
     format!(
         r#"    감독 세션(<내 이름>)이 idea <id> 를 맡긴다 — <제목>.
     먼저 읽을 것: moai show <id>
+{model}
     본 가지: <본 가지> — 아래의 가지 이름이다. 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다
     1. 루트에서 펼친다 — idea 를 일감으로 바꾸는 길은 `moai idea promote <id> --from -`
        하나다. 이슈 하나짜리여도 에픽 + 이슈로 펼친다. `--dry-run` 을 먼저 본다.
@@ -856,10 +948,10 @@ fn brief() -> String {
        적은 적이 있다. 이미 적었으면 `git checkout -- .moai` 로 되돌리고, 그 줄이 이미
        커밋됐으면 그 커밋까지 되돌린 뒤 루트에서 다시 담는다
     5. 리뷰 이슈를 세워(규칙 3) `/code-review <등급> --fix`. 등급은 개발한 난이도로
-       `low`·`medium`·`high` 에서 고른다 — 글·한 줄은 low, 한 파일 안의 동작은 medium,
-       여러 파일·쓰기 경로·저장 형식·훅은 high. 망설여지면 한 단계 올리고, 고른 등급과
-       까닭은 관점(`-b`)에 한 줄로 적는다. 반영은 별도 fix: 커밋,
-       넘긴 것은 이슈 번호와 함께 노트.
+       {levels} 에서 고른다 — 머리의 모델을 고른 그 잣대다.
+{rubric}
+       망설여지면 한 단계 올리고, 고른 등급과 까닭은 관점(`-b`)에 한 줄로 적는다.
+       반영은 별도 fix: 커밋, 넘긴 것은 이슈 번호와 함께 노트.
        루트에서 세우거나 집은 리뷰 이슈를 워크트리의 훅이 못 봐서 막힐 때만 — 훅은 그
        워크트리의 스냅샷만 읽는다 — 같은 관점·단계·`--fix` 범위로 리뷰 서브에이전트를
        돌린다. 리뷰 이슈·관점(`-b`)·원문 노트·닫는 `-m` 은 그대로 남긴다. 관점이 없다
@@ -868,7 +960,9 @@ fn brief() -> String {
        것은 여기서 고친다 — 워크트리가 남아 있는 동안 루트에서는 규칙 2 가 편집을 막는다
     7. 병합 전에 에픽 전체를 `/code-review <xhigh|max> --fix` 로 본다 — 멤버가 서로 거의
        안 닿고 각자 high 를 지났으면 xhigh, 표면을 가로지르거나 설계 결정이 여럿이거나
-       쓰기·저장·훅을 건드렸으면 max. 고른 등급과 까닭은 관점(`-b`)에 적는다. 가지가 <본 가지> 를 떠난
+       쓰기·저장·훅을 건드렸으면 max. 이 리뷰는 머리의 모델과 상관없이 `{top}` 로 본다 — 창이
+       `{top}` 가 아니면 부르기 전에 창을 보는 사람에게 `/model {top}` 를 청한다(리뷰 에이전트는
+       창의 모델을 물려받는다). 고른 등급과 까닭은 관점(`-b`)에 적는다. 가지가 <본 가지> 를 떠난
        자리(`git merge-base <본 가지> HEAD`)부터의 diff 다. 6 에서 <본 가지> 를 받았으니 충돌을 푼
        자리도 든다. 리뷰 이슈를 따로 세운다. 막히면 5 의 길로 간다
          {review}
@@ -883,6 +977,12 @@ fn brief() -> String {
        로 되돌리고 EnterWorktree(path) 로 워크트리에 돌아가 6 부터 다시 한다
     9. 병합이 실제로 끝났으면 루트에서 `git worktree remove .claude/worktrees/<에픽>` 과
        `git branch -d worktree-<에픽>` 으로 워크트리와 가지를 지운다
+    9-1. 닫기 전에 **무엇이 이 일을 했는지** 멤버마다 한 줄로 남긴다 — 머리의 제안이 아니라
+       이 창에서 **실제로 돈 모델**이다. 아래 줄은 감독이 제안으로 채워 보냈으니, 올렸거나 창이
+       처음부터 다른 모델이었으면 모델·난이도를 실제 것으로 고치고 까닭에 그 까닭을 적는다 —
+       다음 사람이 "이만한 일에 무엇이 붙었나" 를 거기서 읽는다. 필드가 아니라 노트다:
+       저널은 상태 계산에 안 읽히고 파생값은 저장하지 않는다
+         moai note <멤버> "model: <모델> (<난이도> — <까닭>)"
     10. 그 뒤에 닫는다. **`moai mv <멤버> done` 은 그 병합이 실제로 끝난 뒤에만 친다** —
        병합 전에 옮겼다가 되돌린 일꾼이 있었다. 워크트리가 남아 있으면 훅이 이 일을 옆
        워크트리의 것으로 읽어 `-m` 없는 리뷰 닫기를 못 막는다. 리뷰 이슈는 무엇이
@@ -890,7 +990,15 @@ fn brief() -> String {
 {close}
        시험 통과를 보고 2 처럼 경로를 준 커밋으로 루트에 남긴다
     11. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 펼친 에픽 id, 한두 줄 요약,
-       넘긴 것·새 idea"#
+       넘긴 것·새 idea
+    12. 마지막으로 **창을 비워도 되는 때를 알린다.** 이어받을 한 줄을 남겨
+       (`moai note <에픽> "다음: …"`) 2 처럼 경로를 준 커밋으로 루트에 담고 — 10 의 커밋 뒤에
+       적은 줄이라 안 담으면 공유 루트에 남아 남의 커밋에 쓸려 들어간다 — 그 창을 보는 사람에게
+       한 줄로, 지금 `/clear` 해도 된다고. 맥락은 대화가 아니라 트래커에 산다: 이슈 본문·노트·
+       리뷰 원문·커밋 메시지. 제 맥락 사용량을 볼 수 있으면 그 수도 그 줄에 담는다.
+       **반대도 같은 줄에서 말한다** — 리뷰가 백그라운드에서 도는 중, 머지 충돌을 푸는 중,
+       사람의 답을 기다리는 중, 감독의 다음 글이 이 창에 온 뒤에는 지우지 말라고. 그때 지우면
+       아직 트래커에 안 옮긴 것이나 받은 글이 사라진다"#
     )
 }
 
@@ -1158,11 +1266,153 @@ mod tests {
             ("moai show <에픽>", "idea 로 확인하면 멤버가 안 보인다"),
             ("·`<루트>` 를 채워", "감독이 루트 자리를 안 채워 일꾼이 제 워크트리를 루트로 읽는다"),
             // 거둔 일을 맡기는 글은 brief 의 일부만 잇는다 — 그 범위가 4-1 위에서 끊기면
-            // 이어받은 일꾼만 워크트리의 `.moai` 를 고친다.
-            ("3 의 글의 **4-1 부터 11 까지**", "거둔 일을 맡기는 글이 4-1 을 빼고 잇는다"),
+            // 이어받은 일꾼만 워크트리의 `.moai` 를 고친다. **끝은 번호로 적지 않는다**:
+            // `11 까지` 로 적어 둔 뒤 12 가 붙자 이어받은 일꾼만 12 를 못 받았다.
+            ("3 의 글의 **4-1 부터 끝까지**", "거둔 일을 맡기는 글이 4-1 을 빼거나 끝을 자른다"),
         ] {
             assert!(supervise.contains(piece), "{why} — {piece}");
         }
+        // 거둔 일을 맡기는 글의 모델 줄은 새 일의 그 줄과 같은 조각이다 — 손으로 두 벌 적던
+        // 판은 거둔 쪽만 일꾼에게 없는 감독의 절(2-1)을 가리켰고, 지워도 초록이었다.
+        let head = &supervise[..supervise.find(&brief).expect("감독이 싣는 글이 brief 가 아니다")];
+        assert!(head.contains(&indent(&model_line(), "      ")), "거둔 일을 맡기는 글에 모델 줄이 없다");
+    }
+
+    /// **난이도 한 낱말이 모델과 리뷰 등급을 함께 정한다**(moai-84kd, 2026-09-15 사용자 결정).
+    ///
+    /// 축을 따로 두면 브리프가 판단을 두 벌 들고, 둘이 어긋나는 날 싼 모델이 쓰기 경로를 맡는다.
+    /// 그래서 짝은 리뷰 등급과 같은 낱말 위에 선다 — low·medium·high 가 그대로 haiku·sonnet·opus 다.
+    /// **브리프에 실려야 뜻이 있다**: 감독 스킬에만 적힌 규칙은 일꾼이 받는 글에 없다(`brief`).
+    #[test]
+    fn the_supervisor_picks_a_model_by_difficulty() {
+        let (supervise, brief) = (supervise(), brief());
+        // 감독 쪽은 **브리프 앞에서만** 잰다 — 감독 스킬은 브리프를 품고 있어, 통째로 재면
+        // 브리프에 든 같은 글이 감독 쪽에서 빠진 자리를 메운다(표의 잣대가 실제로 그랬다).
+        let head = &supervise[..supervise.find(&brief).expect("감독이 싣는 글이 brief 가 아니다")];
+        // **잣대는 한 벌이다.** 표도 일꾼의 잣대도 `DIFFICULTY` 에서 나온다 — 한쪽을 손으로
+        // 다시 적으면 여기서 붉어진다.
+        let table = difficulty_table();
+        assert!(head.contains(&table), "2-1 의 표가 DIFFICULTY 에서 안 나온다");
+        assert!(brief.contains(&indent(&difficulty_rubric(), "       ")), "일꾼이 받는 잣대가 DIFFICULTY 에서 안 나온다");
+        // **칸째로 맨다** — 머리의 `모델` 칸 자리에 짝이 서는지 본다. 줄 어디에 `` `haiku` ``
+        // 가 들기만 하면 되던 판은 모델 칸과 리뷰 칸을 바꿔 끼워도 초록이었다.
+        let cells = |l: &str| l.trim().trim_matches('|').split('|').map(|c| c.trim().to_string()).collect::<Vec<_>>();
+        let mut lines = table.lines();
+        let header = cells(lines.next().expect("표에 머리가 없다"));
+        let col = |name: &str| header.iter().position(|c| c == name).unwrap_or_else(|| panic!("표 머리에 {name} 칸이 없다"));
+        let (level_col, model_col) = (col("난이도"), col("모델"));
+        let rows: Vec<Vec<String>> = lines.skip(1).map(cells).collect();
+        for (level, model) in [("low", "haiku"), ("medium", "sonnet"), ("high", "opus")] {
+            let row = rows
+                .iter()
+                .find(|r| r.get(level_col) == Some(&format!("`{level}`")))
+                .unwrap_or_else(|| panic!("난이도 {level} 의 줄이 표에 없다"));
+            assert_eq!(row.get(model_col), Some(&format!("`{model}`")), "{level} 의 짝이 {model} 이 아니다 — {row:?}");
+        }
+        // 에픽 끝은 멤버마다 싸게 지나갔어도 한 번은 비싼 눈으로 본다 — 감독의 표 둘레에 서고,
+        // **그 리뷰를 부르는 일꾼에게도 선다.** 감독의 2-1 에만 적혀 있던 판은 그 리뷰가 도는
+        // 창에 한 번도 안 닿았다(리뷰 에이전트는 창의 모델을 물려받는다).
+        let end = head.find("xhigh").expect("에픽 끝 등급이 표 둘레에 없다");
+        assert!(head[end..].lines().next().unwrap_or_default().contains("opus"), "에픽 끝 리뷰가 opus 가 아니다");
+        let epic = brief.find("/code-review <xhigh|max> --fix").expect("에픽 리뷰 걸음이 없다");
+        let step = &brief[epic..brief[epic..].find("\n    8.").map_or(brief.len(), |n| epic + n)];
+        assert!(step.contains("`/model opus`"), "에픽 끝 리뷰를 opus 로 보라는 말이 일꾼에게 없다");
+        // 일꾼이 받는 글에 그 자리가 있어야 감독이 채운다. **목록 줄에서 찾는다** — 바로 아래
+        // 풀이 글도 세 자리를 적어, 감독 쪽 전체에서 찾으면 목록에서 빠져도 초록이었다.
+        assert!(brief.contains("모델:"), "브리프에 모델 자리가 없다 — 감독이 골라도 일꾼은 모른다");
+        let list = head.lines().find(|l| l.ends_with("를 채워")).expect("감독이 채울 자리 목록이 없다");
+        for slot in ["<모델>", "<난이도>", "<까닭>"] {
+            assert!(
+                list.contains(&format!("`{slot}`")),
+                "감독이 채울 자리 목록에 {slot} 가 없다 — 그대로 실려 노트에 자리표시자가 남는다"
+            );
+        }
+        // **감독이 채우는 자리와 일꾼이 고르는 자리는 이름이 다르다.** 5 의 `/code-review <등급>`
+        // 은 개발해 본 일꾼이 고르는 자리다 — 목록에 같은 이름이 들면 읽기 전의 제안이 그 명령에
+        // 미리 박힌다.
+        assert!(brief.contains("/code-review <등급> --fix"), "일꾼이 고르는 리뷰 등급 자리가 없다");
+        assert!(!list.contains("`<등급>`"), "감독이 일꾼의 리뷰 등급 자리를 채운다 — {list}");
+    }
+
+    /// **잣대의 글은 이 저장소 CLAUDE.md 의 리뷰 표와 같다.** 같은 축이라고 적어 두고 high 에서
+    /// `동시성` 이 빠져 있었다 — 한 파일 안의 동시성 고침이 medium 으로 읽혀, 이 도구가 못 견디는
+    /// 조용한 손실 쪽에 싼 모델과 싼 리뷰가 붙는다. 표를 옮겨 적은 두 자리는 여기서 견준다.
+    #[test]
+    fn the_rubric_is_the_review_table() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("CLAUDE.md");
+        let claude = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        for (level, _, how) in DIFFICULTY {
+            let row = format!("| `{level}` | {how} |");
+            assert!(claude.contains(&row), "CLAUDE.md 의 리뷰 표와 {level} 의 잣대가 갈라졌다 — {row}");
+        }
+    }
+
+    /// **일꾼이 창을 비워도 되는 때를 알린다**(moai-gu5g, 2026-09-15 사용자 결정).
+    ///
+    /// 맥락은 대화가 아니라 트래커에 산다 — 이슈 본문·노트·리뷰 원문·커밋 메시지. 머지가 들고
+    /// 보고가 나간 자리에서는 지워도 잃을 것이 없다. **반대도 함께 말한다**: 리뷰가 도는 중·
+    /// 충돌을 푸는 중·사람의 답을 기다리는 중에 지우면 아직 트래커에 안 옮긴 것이 사라진다.
+    #[test]
+    fn the_brief_says_when_the_pane_can_be_cleared() {
+        let brief = brief();
+        let at = brief.find("/clear").expect("창을 비워도 되는 때를 안 알린다");
+        // **보고 뒤다** — 보고 전에 지우면 보고에 담을 것이 대화에만 있던 채로 사라진다.
+        let report = brief.find("SendMessage to").expect("보고 걸음이 없다");
+        assert!(at > report, "보고보다 먼저 비우라고 한다");
+        // **남긴 줄은 담은 뒤에 비운다.** 이어받을 줄은 10 의 트래커 커밋 뒤에 적으므로, 담지
+        // 않으면 공유 루트의 `.moai` 가 더러운 채로 남아 남의 커밋에 쓸려 들어간다.
+        let step = brief.rfind("\n    12.").expect("창을 비우는 걸음이 없다");
+        assert!(brief[step..at].contains("경로를 준 커밋"), "비우라고 하기 전에 남긴 줄을 안 담는다");
+        // **까닭과 반대를 갈라 찾는다** — 둘이 서로의 낱말(`트래커`·`리뷰`)을 품어, 한 덩어리로
+        // 찾던 판은 어느 한쪽을 지워도 초록이었다.
+        let (reason, against) = brief[at..].split_once("반대도").expect("지우지 말 때를 같은 줄에서 안 말한다");
+        assert!(reason.contains("트래커에 산다"), "왜 지워도 되는지가 없다");
+        for (piece, missing) in [
+            ("리뷰가", "리뷰가 도는 중에는 지우지 말라는 말이 없다"),
+            ("충돌", "머지 충돌을 푸는 중을 안 가린다"),
+            ("기다리", "답을 기다리는 중을 안 가린다"),
+            // 감독은 보고를 확인하면 같은 창에 다음 글을 보낸다 — 그 뒤의 `/clear` 는 그 글을 지운다.
+            ("다음 글", "감독의 다음 글이 온 뒤에는 지우지 말라는 말이 없다"),
+        ] {
+            assert!(against.contains(piece), "{missing}");
+        }
+    }
+
+    /// **일꾼이 마지막 자이고, 일한 모델은 닫을 때 남는다**(moai-lzfq, 2026-09-15 사용자 결정).
+    ///
+    /// 감독은 코드를 읽기 전에 고르므로 제안일 뿐이다 — 읽어 보니 쓰기 경로면 일꾼이 올린다.
+    /// 남기는 자리는 **노트 하나**다: 저널은 상태 계산에 안 읽히고 파생값은 저장하지 않으니
+    /// 필드가 아니라 이력으로 남는다(CLAUDE.md 의 되돌리지 않을 결정 둘).
+    #[test]
+    fn the_worker_may_raise_the_model_and_records_it_when_closing() {
+        let brief = brief();
+        // **올리는 길이 명령으로 서고, 그 명령을 칠 수 있는 자에게 간다.** "올린다" 만 적으면
+        // 일꾼이 무엇을 쳐야 하는지 모른다. 그런데 `/model` 은 사람만 친다 — 에이전트는 붙박이
+        // 명령을 못 불러, 제 손으로 치라고 하면 올렸다고 믿고 9-1 에 안 돈 모델을 적는다.
+        let raise = brief.find("한 단계 올린다").expect("일꾼이 모델을 올릴 길이 없다");
+        // 알리는 글은 **글자로 자른다** — 바이트로 자르면 한글 한가운데서 끊겨, 실패를
+        // 알리려던 자리가 제가 먼저 죽는다.
+        let shown = brief[raise..].chars().take(40).collect::<String>();
+        assert!(brief[..raise].contains("`/model`"), "무엇으로 올리는지가 없다 — {shown}");
+        assert!(brief[..raise].contains("창을 보는 사람에게"), "`/model` 을 사람에게 청하라는 말이 없다 — {shown}");
+        assert!(brief.contains(&indent(&model_line(), "    ")), "새 일의 모델 줄이 조각에서 안 나온다");
+        // **닫는 자리에 선다** — 워크트리를 지운 뒤(맨 `moai` 가 루트를 읽는다), 멤버를 닫기
+        // 전. 자리를 바이트 거리로 재던 판은 9-1 이 9 위로 올라가도 초록이었다.
+        let removed = brief.find("git worktree remove").expect("워크트리를 지우는 걸음이 없다");
+        let note = brief.find("model:").expect("일한 모델을 남기는 걸음이 없다");
+        let done = brief.find("moai mv <멤버> done").expect("멤버를 닫는 걸음이 없다");
+        assert!(removed < note && note < done, "모델 노트가 워크트리를 지운 뒤·멤버를 닫기 전이 아니다");
+        // **남기는 것은 실제로 돈 모델이다.** 머리의 제안은 감독이 채워 보내 이 줄에도 박혀
+        // 오므로, 다르면 고쳐 적으라는 말이 같은 걸음에 서야 한다 — 없으면 제안이 일한 것으로
+        // 남는다. 그 까닭이 남을 자리가 이 노트다.
+        let step = brief.find("\n    9-1.").expect("모델을 남기는 걸음이 없다");
+        assert!(brief[step..note].contains("실제로 돈 모델"), "제안이 아니라 실제로 돈 모델을 남기라는 말이 없다");
+        let line = brief[note..].lines().next().unwrap_or_default();
+        assert!(line.contains("<까닭>"), "노트에 까닭 자리가 없다 — {line}");
+        // `moai note` 로 남긴다. 9-1 은 8 에서 루트로 돌아오고 9 에서 워크트리를 지운
+        // 뒤라 맨 `moai` 가 맞다 — 4-1 의 `-C <루트>` 는 워크트리 안에서만 드는 규칙이다.
+        let line = brief[..note].lines().last().unwrap_or_default();
+        assert!(line.trim().starts_with("moai note "), "노트가 아닌 것으로 남긴다 — {line}");
     }
 
     /// **감독 스킬은 모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 적으면 남의 저장소에서는
