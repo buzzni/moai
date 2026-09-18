@@ -4422,3 +4422,4 @@
 {"ts":"2026-09-18T12:09:55Z","id":"moai-kbky","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai --help 에 MOAI_LANG·[i18n] lang 한 줄을 댄다"}
 {"ts":"2026-09-18T12:09:55Z","id":"moai-kbky","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-rl5w 에서 펼쳤다 — moai --help 에 MOAI_LANG·[i18n] lang 한 줄을 댄다"}
 {"ts":"2026-09-18T12:09:55Z","id":"moai-rl5w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-5yq0 의 멤버 moai-kbky 로 펼쳤다"}
+{"ts":"2026-09-18T12:10:03Z","id":"moai-al0x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
