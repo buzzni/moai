@@ -295,6 +295,9 @@ fn init_creates_exactly_three_files() {
     assert!(attrs.contains("journal.jsonl  text eol=lf merge=union"), "{attrs}");
     // 스냅샷에 union 을 걸면 같은 id 를 가진 줄이 둘 생긴다 — 데이터 손상이다.
     assert!(!attrs.contains("issues.jsonl   text eol=lf merge"), "{attrs}");
+    // **까닭도 같이 심는다.** 이 주석이 왜 `issues.jsonl` 에 union 을 걸면 안 되는지 적은 유일한
+    // 자리다 — 빼면 새 저장소가 그 까닭 없이 서고, 다음 사람이 union 을 다시 건다.
+    assert!(attrs.contains("# 스냅샷에는 merge=union 을 쓰지 않는다"), "규칙만 심고 까닭을 뺐다\n{attrs}");
 }
 
 /// 도구가 자라면 AGENTS.md 블록은 반드시 낡는다. 다시 쓸 길이 없으면 새
@@ -1576,17 +1579,20 @@ fn show_draws_each_blocker_with_the_words_ready_uses() {
 
 /// **상세가 이 이슈에 닿은 커밋을 그린다**(moai-emcv) — 커밋 제목에 id 를 적은 것을 git 에서
 /// 읽는다. 트래커 커밋은 사람 화면에서 빼고 `--json` 에는 표시와 함께 낸다. 자식의 커밋은
-/// 부모의 것이 아니다. 이슈가 생기기 전의 커밋은 안 걷는다(moai-mauw). git 저장소가 아니면
-/// 칸도 키도 없이 상세가 그대로 열린다.
+/// 부모의 것이 아니다. git 저장소가 아니면 칸도 키도 없이 상세가 그대로 열린다.
 ///
-/// **커밋 시각을 고정한다.** 걷기 상한이 `created_at`(= `MOAI_NOW`) 에서 나오므로, 커밋을
-/// 기계 시계로 찍으면 시계가 그보다 이른 기계에서 이 시험이 까닭도 없이 빨개진다.
+/// **이슈보다 먼저 찍힌 커밋도 낸다**(moai-hws2) — 그 id 를 적었으면 그 이슈의 커밋이다. 한때는
+/// 생성일에서 걷기를 끊어 그런 커밋을 뺐는데, `--since` 는 거르기가 아니라 끊기라 날짜가 거꾸로 선
+/// 커밋 하나가 그 밑을 통째로 가렸다(`show_sees_commits_under_a_backdated_one`).
+///
+/// **커밋 시각은 그래도 고정한다** — 차례는 커밋 시각이 정하고, 기계 시계로 찍으면 `LATER` 로 찍은
+/// 커밋들과의 앞뒤가 돌리는 기계마다 달라진다.
 #[test]
 fn show_draws_the_commits_that_name_the_issue() {
     let s = init("showcommits");
     let a = add(s.path(), &["고칠 것"]);
     git(s.path(), &["init", "-q"]);
-    // 이슈보다 이틀 먼저 찍힌 커밋 — 그 id 는 아직 없었으니 걷기가 여기서 멈춘다.
+    // 이슈보다 이틀 먼저 찍힌 커밋 — rebase 가 옛 시각을 옮긴 꼴이다. 그 id 를 적었으니 센다.
     git_at(s.path(), "2026-09-09T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", &format!("feat: 옛것 ({a})")]);
     git_at(s.path(), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("chore(tracker): {a} 를 워크트리에서 집는다")]);
     git_at(s.path(), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({a})")]);
@@ -1597,7 +1603,7 @@ fn show_draws_the_commits_that_name_the_issue() {
     assert!(shown.contains(&format!("{}   feat: 고친다 ({a})", &hash[..7])), "고친 커밋이 없다\n{shown}");
     assert!(!shown.contains("chore(tracker)"), "트래커 커밋을 사람 화면에 그렸다\n{shown}");
     assert!(!shown.contains("fix: 리뷰"), "자식의 커밋을 부모에 그렸다\n{shown}");
-    assert!(!shown.contains("옛것"), "이슈가 생기기 전의 커밋까지 걸었다\n{shown}");
+    assert!(shown.contains("옛것"), "이슈보다 먼저 찍힌 커밋을 뺐다 — 그 id 를 적은 커밋이다\n{shown}");
     let (commits_at, history_at) = (shown.find("\n커밋\n"), shown.find("\n이력\n"));
     assert!(commits_at.is_some() && commits_at < history_at, "커밋이 이력 앞에 안 섰다\n{shown}");
 
@@ -1612,7 +1618,8 @@ fn show_draws_the_commits_that_name_the_issue() {
     let b = add(bare.path(), &["git 밖"]);
     let shown = ok(bare.path(), &["show", &b]);
     assert!(!shown.contains("\n커밋\n"), "{shown}");
-    assert!(!ok(bare.path(), &["show", &b, "--json"]).contains("\"commits\""), "커밋이 없는데 commits 키가 섰다");
+    // `--json` 은 빈 배열과 까닭을 낸다(moai-rzsv) — 그 가름은 `json_tells_no_commits_apart_from_no_git` 이 본다.
+    assert!(ok(bare.path(), &["show", &b, "--json"]).contains(r#""commits":[]"#), "빈 배열을 안 냈다");
 }
 
 /// **git 을 못 쓰는 자리에서 상세는 말없이 열린다**(moai-mauw) — git 이 PATH 에 없을 때도, 커밋이
@@ -2483,6 +2490,91 @@ fn init_never_overwrites_an_agents_md_it_cannot_read() {
 
     ok(s.path(), &["init", "argos", "--no-agents"]);
     assert_eq!(std::fs::read(&md).unwrap(), mine);
+}
+
+/// **못 쓰는 AGENTS.md 도 건너뛰고 나머지를 심는다**(moai-780n, 2026-09-15 사용자 결정). 읽기
+/// 전용 파일 하나로 `?` 에 끊기던 때는 `.moai/` 와 `.gitattributes` 는 이미 선 채 접두어도 딸린
+/// 파일 안내도 못 찍고 exit 1 이었다 — 같은 실행이 만든 안내가 통째로 삼켜졌다. **못 읽는 것과
+/// 다르다**: 그쪽은 아무것도 심기 전에 멈춰 남의 산문을 지키지만, 여기는 못 쓰는 것뿐이라 잃을
+/// 산문이 없다. 쓸 수 있게 고치고 다시 부르면 그때 블록이 선다.
+#[cfg(unix)]
+#[test]
+fn init_finishes_even_when_agents_md_cannot_be_written() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("agentsro");
+    let md = s.path().join("AGENTS.md");
+    let mine = "# 우리 규약\n\n손으로 쓴 것.\n";
+    std::fs::write(&md, mine).unwrap();
+    std::fs::set_permissions(&md, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().append(true).open(&md).is_ok() {
+        return; // root 는 권한을 안 본다
+    }
+
+    let out = moai(s.path(), &["init", "argos"]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), mine, "못 쓰는 AGENTS.md 가 바뀌었다");
+    assert!(said.contains("AGENTS.md") && said.contains("못 썼다"), "{said}");
+    // **같은 실행이 만든 나머지 말이 삼켜지지 않는다** — 접두어도, 딸린 파일도 그대로 선다.
+    assert!(said.contains("argos"), "접두어를 안 찍었다 — {said}");
+    assert!(s.path().join(".moai/issues.jsonl").exists() && s.path().join(".gitattributes").exists(), "{said}");
+    let js = ok(s.path(), &["init", "--json"]);
+    assert!(js.contains("\"AGENTS.md\":{\"kind\":\"unwritable\"") && js.contains("\"agents\":false"), "{js}");
+
+    // 쓸 수 있게 고치면 그때 블록이 선다 — 산문은 그대로 위에 남는다.
+    std::fs::set_permissions(&md, std::fs::Permissions::from_mode(0o644)).unwrap();
+    ok(s.path(), &["init"]);
+    let now = std::fs::read_to_string(&md).unwrap();
+    assert!(now.starts_with(mine) && now.contains("moai:begin"), "{now}");
+}
+
+/// **빠진 딸린 파일 규칙을 `status` 알림과 `init --check` 가 비춘다**(moai-2f99, 2026-09-15 사용자
+/// 결정). `init` 이 한 번 말하고 마는 자리라, 못 써서 건너뛴 저장소는 `/.claude/worktrees/` 없이
+/// 얼마든지 오래 간다 — 그러면 `git add -A` 가 옆 워크트리를 통째로 담는다(moai-mxtb 가 그 줄을
+/// 넣은 까닭). **경고가 아니라 알림이다**: 종료 코드도 "드러난 문제 없다" 도 그대로다.
+#[test]
+fn a_missing_dotfile_rule_shows_in_status_and_check() {
+    let s = init("dotgap");
+    let ignore = s.path().join(".gitignore");
+    // moai 가 넣은 줄 중 하나만 지운다 — 사람이 손으로 지웠거나, 못 써서 건너뛴 자리다.
+    let kept: String = std::fs::read_to_string(&ignore).unwrap().lines().filter(|l| !l.contains("worktrees")).map(|l| format!("{l}\n")).collect();
+    std::fs::write(&ignore, &kept).unwrap();
+
+    let out = moai(s.path(), &["status"]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(said.contains("+ .gitignore") && said.contains("worktrees"), "{said}");
+    // **고칠 명령까지 낸다** — 다른 알림과 같은 자리에 같은 모양으로. 없으면 무엇이 잘못됐다는
+    // 말만 남고 어떻게 고치는지는 아무 데도 없다.
+    assert!(said.contains("→ `moai init`"), "고칠 명령을 안 냈다 — {said}");
+    assert!(said.contains("드러난 문제 없다"), "알림이 문제로 섰다 — {said}");
+    let js = ok(s.path(), &["status", "--json"]);
+    let notices = &js[js.find("\"notices\"").expect("notices 가 없다")..];
+    assert!(notices.contains("\"kind\":\"gitignore_rules\""), "알림 자리에 없다 — {js}");
+
+    let check = ok(s.path(), &["init", "--check"]);
+    assert!(check.contains(".gitignore") && check.contains("worktrees"), "{check}");
+    let cjs = ok(s.path(), &["init", "--check", "--json"]);
+    assert!(cjs.contains("\"missing\":{\".gitignore\":[\"/.claude/worktrees/\"]}"), "{cjs}");
+
+    // **없는 파일은 통째로 빠진 것이다** — `git add -A` 가 옆 워크트리를 담는 위험이 가장 큰
+    // 자리라 입을 다물면 안 된다. 못 읽는 파일과 갈린다: 그쪽은 무엇이 들었는지 모른다.
+    std::fs::remove_file(&ignore).unwrap();
+    let gone = ok(s.path(), &["status"]);
+    assert!(gone.contains(".gitignore") && gone.contains("worktrees"), "없는 .gitignore 를 안 비췄다 — {gone}");
+    // 못 읽는 파일은 말하지 않는다 — `init` 이 안 건드리니 여기서 말하면 그 알림이 영영 안 걷힌다.
+    std::fs::write(&ignore, [0xb0, 0xa1, b'\n']).unwrap();
+    let bad = ok(s.path(), &["status"]);
+    assert!(!bad.contains(".gitignore"), "못 읽는 파일을 빠졌다고 했다 — {bad}");
+    assert!(!ok(s.path(), &["init", "--check", "--json"]).contains("\"missing\":"), "못 읽는 파일을 빠졌다고 했다");
+
+    // 다시 심으면 사라진다.
+    std::fs::write(&ignore, &kept).unwrap();
+    ok(s.path(), &["init"]);
+    let after = ok(s.path(), &["status"]);
+    assert!(!after.contains(".gitignore"), "{after}");
+    // `"missing"` 만 찾으면 `{"agents":"missing"}` 이 걸린다 — 키로 찾는다.
+    assert!(!ok(s.path(), &["init", "--check", "--json"]).contains("\"missing\":"), "채웠는데 아직 빠졌다고 한다");
 }
 
 /// **`status` 는 낡은 AGENTS.md 블록을 알림(`notices`)으로 비춘다**(moai-mj45). 경고가 아니다 —
@@ -3969,6 +4061,68 @@ fn an_inherited_git_dir_does_not_beat_the_project_we_were_given() {
     let shown = String::from_utf8_lossy(&shown.stdout);
     assert!(shown.contains("이 저장소의 커밋"), "이 프로젝트의 커밋이 커밋 칸에 안 섰다 — 빈 칸은 아무것도 못 잰다\n{shown}");
     assert!(!shown.contains("남의 이력이 샜다"), "훅 저장소의 커밋을 이 이슈에 붙였다\n{shown}");
+}
+
+/// **`--json` 은 "커밋 없음" 의 까닭을 가른다**(moai-rzsv, 2026-09-15 사용자 결정). 사람 화면은
+/// 그대로 말없이 빈 칸이지만(moai-mauw), 기계는 셋을 갈라야 한다 — 진짜로 아무도 안 고친 이슈,
+/// git 이 없는 기계, git 저장소가 아닌 자리. 못 가르면 에이전트가 끝난 일을 다시 하거나 손댄
+/// 이슈를 안 손댄 것으로 보고한다.
+///
+/// `commits` 는 **늘 선다**(빈 배열도 사실이다). git 을 못 읽었을 때만 `commits_error` 가 붙는다.
+#[test]
+fn json_tells_no_commits_apart_from_no_git() {
+    let s = init("jsonnocommits");
+    let id = add(s.path(), &["고칠 것"]);
+
+    // git 저장소가 아닌 자리 — 빈 배열에 까닭이 붙는다.
+    let outside = ok(s.path(), &["show", &id, "--json"]);
+    assert!(outside.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{outside}");
+    assert!(outside.contains(r#""commits_error":"#), "git 을 못 읽은 까닭이 없다\n{outside}");
+
+    // 갓 만든 저장소 — **커밋이 하나도 없는 것은 실패가 아니다.** `git log HEAD` 가 죽는 자리라
+    // 그대로 두면 `commits_error` 가 "여기서는 못 물어봤다" 로 서서 받는 쪽이 정반대로 읽는다.
+    git(s.path(), &["init", "-q"]);
+    let unborn = ok(s.path(), &["show", &id, "--json"]);
+    assert!(unborn.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{unborn}");
+    assert!(!unborn.contains("commits_error"), "커밋 없는 저장소를 못 읽은 것으로 냈다\n{unborn}");
+
+    // 저장소이고 이력도 있지만 이 이슈를 댄 커밋은 없다 — 빈 배열만, 까닭은 없다.
+    git_at(s.path(), NOW, &["commit", "-q", "--allow-empty", "-m", "chore: 아무 id 도 안 대는 커밋"]);
+    let none = ok(s.path(), &["show", &id, "--json"]);
+    assert!(none.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{none}");
+    assert!(!none.contains("commits_error"), "멀쩡히 읽었는데 까닭을 달았다\n{none}");
+
+    // 커밋이 있으면 그대로 선다.
+    git_at(s.path(), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({id})")]);
+    let some = ok(s.path(), &["show", &id, "--json"]);
+    assert!(some.contains(r#""subject":"feat: 고친다"#), "커밋을 안 냈다\n{some}");
+    assert!(!some.contains("commits_error"), "멀쩡히 읽었는데 까닭을 달았다\n{some}");
+
+    // 사람 화면은 그대로다 — 까닭을 화면에 늘어놓지 않는다(moai-mauw).
+    let bare = init("jsonnocommits-bare");
+    let b = add(bare.path(), &["git 밖"]);
+    let shown = ok(bare.path(), &["show", &b]);
+    assert!(!shown.contains("커밋") && !shown.contains("commits_error"), "사람 화면이 시끄러워졌다\n{shown}");
+}
+
+/// **날짜가 거꾸로 선 커밋 밑도 본다**(moai-hws2). `show` 는 이슈가 생긴 때에서 걷기를 끊었는데,
+/// `git log --since` 는 거르기가 아니라 **끊기**라 그보다 이른 커밋을 하나 만나면 그 아래를 통째로
+/// 안 본다 — `rebase`·`am --committer-date-is-author-date`·하루 넘게 늦은 시계가 그런 커밋을 만든다.
+/// 탐색기는 이력을 다 걸어 이미 보이던 것이라, 같은 물음에 두 표면이 다른 답을 냈다.
+#[test]
+fn show_sees_commits_under_a_backdated_one() {
+    let s = init("backdated");
+    let id = add(s.path(), &["고칠 것"]);
+    git(s.path(), &["init", "-q"]);
+    git_at(s.path(), NOW, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({id})")]);
+    // rebase 가 옛 작성 시각을 커밋 시각으로 옮긴 커밋 — 이 이슈가 생기기 한참 전이다.
+    git_at(s.path(), "2020-01-01T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", "chore: 옛 날짜로 얹힌 커밋"]);
+
+    let shown = ok(s.path(), &["show", &id]);
+    assert!(shown.contains("feat: 고친다"), "날짜가 거꾸로 선 커밋 밑을 못 봤다\n{shown}");
+    let json = ok(s.path(), &["show", &id, "--json"]);
+    assert!(json.contains("feat: 고친다"), "--json 도 같은 답이어야 한다\n{json}");
+    assert!(!json.contains("옛 날짜로 얹힌"), "id 를 안 적은 커밋이 붙었다\n{json}");
 }
 
 /// **사람은 부른 자리가 아니라 그 프로젝트에서 온다**(moai-d3sy). 환경을 다 걷어도(moai-ztdf) 어느
@@ -6395,6 +6549,173 @@ fn status_names_picked_work_with_no_live_worktree_and_still_exits_zero() {
     assert!(!json.contains("\"stranded\""), "워크트리를 안 쓰는 저장소에서 떠들었다\n{json}");
 }
 
+/// **자리를 셀 일이 없으면 옆 스냅샷을 안 판다**(moai-7igy, 사용자 결정). `moai status` 는 세션마다·
+/// 훅마다 도는데, 워크트리 일곱이면 스냅샷 여덟 벌을 다시 파 40→95ms(따뜻)·138→458ms(참)이었다.
+///
+/// **판 것을 어떻게 아는가** — 깨진 스냅샷을 둔 워크트리를 판 순간 `status` 가 "못 읽었다" 를 낸다
+/// (moai-lt7h). 안 판 경우에는 그 말이 없다. 집은 줄이 없을 때와, 이름으로 자리가 다 잡힐 때가 그렇다.
+#[test]
+fn status_reads_a_side_snapshot_only_when_a_place_is_still_missing() {
+    let s = Scratch::new("placecost");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let named = field(&ok(&main, &["add", "이름이 붙은 일", "--json"]), "id");
+    ok(&main, &["mv", &named, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", &format!(".claude/worktrees/{named}"), "-b", &format!("worktree-{named}")]);
+    // 이름이 id 가 아닌 워크트리 하나 — 판정이 스냅샷으로 넘어가는 유일한 길이다.
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-x", "-b", "worktree-agent-x"]);
+    // 못 읽는 스냅샷 — 깨진 줄은 `store` 가 견디므로(그것이 규약이다) 아예 못 여는 것으로 만든다.
+    let broken = main.join(".claude/worktrees/agent-x/.moai/issues.jsonl");
+    std::fs::remove_file(&broken).unwrap();
+    std::fs::create_dir(&broken).unwrap();
+
+    // 집은 줄이 이름으로 다 자리를 잡았다 — 깨진 스냅샷을 안 판다.
+    let out = isolated(BIN).arg("status").current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert!(said.is_empty(), "이름으로 답이 나왔는데 옆 스냅샷을 팠다\n{said}");
+
+    // 자리를 못 찾은 줄이 생기면 그때 판다 — 그리고 못 읽었다고 말한다.
+    let lost = field(&ok(&main, &["add", "자리 없는 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+    let out = isolated(BIN).arg("status").current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert!(said.contains("못 읽었다") && said.contains("agent-x"), "못 읽은 워크트리를 말하지 않았다\n{said}");
+    // **떠들어도 0 으로 끝난다** — 이것은 남의 워크트리의 문제고, `moai status` 는 아무것도 막지
+    // 않는다(CLAUDE.md). 비영으로 끝나는 순간 에이전트가 이것을 고장으로 읽는다.
+    assert!(out.status.success(), "못 읽은 워크트리로 비영 종료했다");
+    // **못 읽은 워크트리가 있으면 자리 없다고 단정하지 않는다**(moai-lt7h) — 거기일 수 있다.
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(!text.contains("일하는 워크트리가 없는"), "모르는 것을 자리 없음으로 셌다\n{text}");
+    let out = ok_at(&main, LATER, &["show", &lost]);
+    assert!(out.contains("자리   모른다"), "{out}");
+    assert!(ok_at(&main, LATER, &["show", &lost, "--json"]).contains("\"place\":\"unknown\""));
+    // **기계도 같은 것을 가른다**(리뷰 moai-ya06) — `stranded` 가 조용한 것이 "자리 잃은 일이
+    // 없다" 인지 "못 셌다" 인지를 `--json` 만 읽는 쪽도 알아야 한다. 감독 스킬이 이 목록으로 죽은
+    // 세션의 일을 거두므로, 그 침묵이 곧 일을 영영 안 거두는 것이 된다.
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(!json.contains("\"stranded\""), "모르는 것을 자리 없음으로 셌다\n{json}");
+    // 가지와 **경로를 함께** 낸다 — 떼어 낸 HEAD 는 이름이 커밋 앞 일곱 자라 가지만으로는 두
+    // 워크트리가 글자까지 같아진다. 경로는 `show` 와 같이 꼭대기에서 줄여 절대 경로를 안 낸다.
+    assert!(
+        json.contains(r#""unreadable_worktrees":[{"path":".claude/worktrees/agent-x","branch":"worktree-agent-x"}]"#),
+        "기계에게는 안 댔다\n{json}"
+    );
+    assert!(!json.contains(&main.display().to_string()), "기계의 절대 경로가 그대로 나갔다\n{json}");
+
+    // **겹쳐 볼 때는 같은 워크트리를 두 번 말하지 않는다** — `--worktree` 면 `gather` 가 옆 스냅샷을
+    // 빠짐없이 열어 `⎇ <가지>: …` 로 이미 냈다. 두 줄로 내면 보드의 `옆 워크트리 문제 N건` 이
+    // 깨진 워크트리 하나를 둘로 세어, 보는 쪽이 두 곳이 깨진 줄로 읽는다.
+    let out =
+        isolated(BIN).args(["status", "--worktree"]).current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert_eq!(said.lines().count(), 1, "깨진 워크트리 하나를 두 줄로 말했다\n{said}");
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("옆 워크트리 문제 1건"), "깨진 워크트리 하나를 둘로 셌다\n{text}");
+
+    // 스냅샷이 멀쩡해지면 자리 없음이 제대로 선다.
+    std::fs::remove_dir(&broken).unwrap();
+    std::fs::copy(main.join(".moai/issues.jsonl"), &broken).unwrap();
+    let text = ok_at(&main, LATER, &["status"]);
+    assert!(text.contains("일하는 워크트리가 없는 것 1건") && text.contains(&lost), "{text}");
+    let json = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(!json.contains("unreadable_worktrees"), "다 읽었는데 못 읽었다고 했다\n{json}");
+}
+
+/// **`gather` 가 실제로 셌을 때만 입을 다문다**(리뷰 moai-ya06). `--worktree` 면 그쪽이 같은
+/// 워크트리를 `⎇ <가지>: …` 로 이미 내므로 여기서는 안 내는데, 그 전제는 **`gather` 가 옆을
+/// 셀 수 있었을 때만** 선다 — 저쪽은 git 을 불러 세고(`others_of`) 이쪽은 git 이 적어 둔 파일만
+/// 읽으므로(`on_disk`), git 이 없으면 저쪽은 "못 찾았다" 한 줄만 내고 워크트리를 한 곳도 안
+/// 대는데 이쪽은 그대로 찾아 낸다. 그때까지 입을 다물면 깨진 워크트리를 아무도 말하지 않고
+/// `stranded` 까지 조용해진다.
+#[test]
+fn overlaying_without_git_still_names_an_unreadable_worktree() {
+    let s = Scratch::new("placenogit");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "처음"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-x", "-b", "worktree-agent-x"]);
+    // 워크트리가 갈라진 **뒤에** 집는다 — 옆 스냅샷에는 없으니 이름으로도 스냅샷으로도 안 잡힌다.
+    let lost = field(&ok(&main, &["add", "자리 없는 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+    let broken = main.join(".claude/worktrees/agent-x/.moai/issues.jsonl");
+    std::fs::remove_file(&broken).unwrap();
+    std::fs::create_dir(&broken).unwrap();
+
+    // git 을 못 부르게 한다 — `gather` 는 옆을 못 세고, `workplaces` 는 파일로 그대로 센다.
+    let empty = s.path().join("nogit");
+    std::fs::create_dir_all(&empty).unwrap();
+    let out = isolated(BIN)
+        .args(["status", "--worktree"])
+        .current_dir(&main)
+        .env("PATH", &empty)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert!(out.status.success(), "git 이 없다고 비영 종료했다\n{said}");
+    assert!(said.contains("못 읽었다") && said.contains("agent-x"), "아무도 깨진 워크트리를 안 댔다\n{said}");
+}
+
+/// **팔지 말지는 부르는 쪽이 거는 줄로 잰다**(moai-7igy). 겹쳐 보는 쪽(`--worktree`)은 옆에서
+/// 만들고 집은 줄까지 `stranded` 와 `자리` 에 거는데, 팔 까닭을 main 의 스냅샷으로만 재면 그 줄은
+/// 거기 없어 "이름으로 다 잡혔다" 에 조용히 들어간다 — 그러면 `holds` 가 빈 채로 나가 살아 있는
+/// 세션의 일이 통째로 자리를 잃는다.
+#[test]
+fn overlaying_places_work_that_only_a_side_worktree_knows_about() {
+    let s = Scratch::new("placeside");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    // main 의 집은 줄은 이름으로 잡힌다 — 이것만 보면 더 팔 까닭이 없어 보인다.
+    let named = field(&ok(&main, &["add", "이름이 붙은 일", "--json"]), "id");
+    ok(&main, &["mv", &named, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", &format!(".claude/worktrees/{named}"), "-b", &format!("worktree-{named}")]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-x", "-b", "worktree-agent-x"]);
+
+    // 이름이 id 가 아닌 워크트리가 제 줄을 만들고 집는다 — main 의 스냅샷에는 없다.
+    let side = main.join(".claude/worktrees/agent-x");
+    let mine = field(&ok(&side, &["add", "옆에서 만든 일", "--json"]), "id");
+    ok(&side, &["mv", &mine, "in_progress"]);
+
+    let text = ok_at(&main, LATER, &["status", "--worktree"]);
+    assert!(!text.contains("일하는 워크트리가 없는"), "옆에서 집은 산 일을 자리 없음으로 셌다\n{text}");
+    let out = ok_at(&main, LATER, &["show", &mine, "--worktree"]);
+    assert!(out.contains("자리   .claude/worktrees/agent-x"), "{out}");
+}
+
+/// **`show <에픽>` 도 자리를 낸다**(moai-0h8m) — 워크트리 이름은 규약상 에픽 id 라, 이어받는 세션이
+/// 에픽부터 읽는다. 묶음은 집히지 않으므로 멤버의 자리를 굴려 올린다.
+#[test]
+fn show_rolls_a_groups_place_up_from_its_members() {
+    let s = Scratch::new("placeepic");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "저장 계층", "--json"]), "id");
+    let one = field(&ok(&main, &["add", "첫 일", "-e", &epic, "--json"]), "id");
+    ok(&main, &["mv", &one, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", &format!(".claude/worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+
+    let out = ok_at(&main, LATER, &["show", &epic]);
+    let line = out.lines().find(|l| l.trim_start().starts_with("자리")).unwrap_or_else(|| panic!("에픽에 자리가 없다\n{out}"));
+    assert!(line.contains(&format!(".claude/worktrees/{epic}")), "{line}");
+    assert!(ok_at(&main, LATER, &["show", &epic, "--json"]).contains(&format!("\"branch\":\"worktree-{epic}\"")));
+}
+
 /// **`show <id>` 는 집은 줄이 어느 워크트리에서 돌고 있는지 댄다**(moai-6opu) — 이어받는 세션이
 /// 그 자리로 들어가면 된다. 자리 없는 집은 줄은 그렇다고 말한다. 안 집은 줄과 워크트리를 안 쓰는
 /// 저장소에는 줄을 안 세운다. `--json` 도 같은 것을 `workplaces` 로 낸다.
@@ -6420,9 +6741,15 @@ fn show_names_the_worktree_a_picked_row_lives_in() {
     let json = ok(&main, &["show", &id, "--json"]);
     assert!(json.contains("\"workplaces\":[{") && json.contains(&format!("\"branch\":\"worktree-{id}\"")), "{json}");
 
+    // **방금 집은 줄에는 `status` 와 같은 한 시간 틈을 준다**(moai-xn9n) — 규약은 집고 커밋한 뒤
+    // 워크트리를 띄우므로, 그 사이를 "없다" 로 대면 멀쩡한 줄이 버려진 것처럼 읽힌다.
     let out = ok(&main, &["show", &lost]);
+    assert!(out.contains("자리   아직"), "방금 집은 줄을 버려진 것처럼 냈다\n{out}");
+    assert!(ok(&main, &["show", &lost, "--json"]).contains("\"place\":\"fresh\""));
+    let out = ok_at(&main, LATER, &["show", &lost]);
     assert!(out.contains("자리   없다"), "자리 없는 줄을 말하지 않았다\n{out}");
-    assert!(ok(&main, &["show", &lost, "--json"]).contains("\"workplaces\":[]"));
+    let json = ok_at(&main, LATER, &["show", &lost, "--json"]);
+    assert!(json.contains("\"workplaces\":[]") && json.contains("\"place\":\"lost\""), "{json}");
 
     let out = ok(&main, &["show", &idle]);
     assert!(!out.contains("자리"), "안 집은 줄에 자리를 세웠다\n{out}");
@@ -7120,9 +7447,9 @@ fn git(dir: &Path, args: &[&str]) -> String {
     git_run(dir, None, args)
 }
 
-/// 커밋 시각까지 고정해 돌린다. **시각이 답을 가르는 시험은 기계 시계에 매이면 안 된다** —
-/// `show` 의 커밋 칸은 걷기를 `created_at`(= `MOAI_NOW`) 에서 끊으므로(`git::commits_of`),
-/// 커밋을 기계 시계로 찍으면 시계가 그보다 이른 기계에서 답이 달라진다.
+/// 커밋 시각까지 고정해 돌린다. **차례가 답을 가르는 시험은 기계 시계에 매이면 안 된다** —
+/// 커밋 칸은 `git log` 의 차례(커밋 시각) 그대로 서므로(`git::table`), 일부만 기계 시계로
+/// 찍으면 고정한 커밋들과의 앞뒤가 돌리는 기계마다 달라진다.
 fn git_at(dir: &Path, at: &str, args: &[&str]) -> String {
     git_run(dir, Some(at), args)
 }
@@ -8176,6 +8503,90 @@ fn a_from_column_that_does_not_exist_is_refused() {
     }
     assert!(line_of(s.path(), &id).contains("\"status\":\"todo\""), "거절하면서 옮겼다");
     assert!(!line_of(s.path(), &id).contains("\"deferred_at\""), "거절하면서 미뤘다");
+}
+
+/// **config 가 더는 모르는 칸도 줄이 거기 있으면 받는다** (moai-hym7). 칸 이름을 바꾸면
+/// 옛 이름에 선 줄이 남는데, 그 이름을 오타로 보고 거절하면 그 줄은 **영영** `--from`
+/// 으로 못 집는다 — 남의 낡은 줄 하나가 쓰기를 막는 자리다(CLAUDE.md). 검사가 노리는
+/// 것은 오타지 낡음이 아니므로, 아무 줄도 서 있지 않은 이름만 거절한다.
+#[test]
+fn a_from_column_the_config_forgot_still_works_while_a_row_sits_there() {
+    let s = init("mv-from-renamed");
+    let id = add(s.path(), &["옛 칸에 선 일"]);
+    let other = add(s.path(), &["옛 칸에 선 둘째"]);
+    ok(s.path(), &["mv", &id, &other, "in_progress"]);
+    let cfg = s.path().join(".moai/config.toml");
+    let renamed = std::fs::read_to_string(&cfg).unwrap().replace("in_progress", "doing");
+    std::fs::write(&cfg, renamed).unwrap();
+
+    // 줄은 아직 `in_progress` 에 서 있다 — 설정만 그 이름을 잊었다.
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""));
+    ok(s.path(), &["mv", &id, "done", "--from", "in_progress"]);
+    assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "옛 칸에 선 줄을 못 집었다");
+
+    // **미루기도 같은 자다.** 미룬 줄은 옛 칸에 그대로 서 있으므로, 쓰기 검사가 칸
+    // 이름을 다시 물으면 `--from` 이 통과시킨 줄을 쓰기가 거절한다 — 검사 둘이 서로
+    // 반대를 말하면 부르는 쪽은 어디를 고칠지 못 고른다(moai-hym7.xvc 가 짚었다).
+    ok(s.path(), &["defer", &other, "-m", "다음에", "--from", "in_progress"]);
+    assert!(line_of(s.path(), &other).contains("\"deferred_at\""), "옛 칸에 선 줄을 못 미뤘다");
+    ok(s.path(), &["defer", &other, "--undo", "--from", "in_progress"]);
+    assert!(!line_of(s.path(), &other).contains("\"deferred_at\""), "옛 칸에 선 줄을 못 도로 집었다");
+
+    // **제목 고치기와 막기도 같은 자다.** `store::with_write` 만 풀고 `edit`·`link` 가
+    // 제 손으로 칸 이름을 다시 물으면 옛 칸에 선 줄은 제목 하나 못 고치고 막음도 못
+    // 푼다 — 도구 안에서 영영 못 만지는 줄이 되어, 푼 것이 헛일이 된다. 탐색기는
+    // `with_write` 만 지나므로 여기서 갈리면 두 표면이 서로 다른 말을 한다.
+    ok(s.path(), &["edit", &other, "--title", "고친 제목"]);
+    assert!(line_of(s.path(), &other).contains("고친 제목"), "옛 칸에 선 줄의 제목을 못 고쳤다");
+    assert!(line_of(s.path(), &other).contains("\"status\":\"in_progress\""), "제목만 고쳤는데 칸이 움직였다");
+    ok(s.path(), &["link", &id, "--blocks", &other]);
+    assert!(line_of(s.path(), &other).contains("\"blocked_by\""), "옛 칸에 선 줄을 못 막았다");
+    ok(s.path(), &["link", &id, "--unblocks", &other]);
+
+    // **읽기가 쓰기보다 엄하면 안 된다** (moai-lvf9.t10). 옮길 수는 있는데 못 찾는 줄이
+    // 생기면, 칸 이름을 바꾼 뒤 정리하려는 사람이 그 줄에 닿을 길이 없다.
+    let listed = ok(s.path(), &["show", "-s", "in_progress"]);
+    assert!(listed.contains(&other), "옛 칸에 선 줄을 못 찾는다\n{listed}");
+
+    // 칸을 **옮기는** 쓰기는 그대로 엄하다 — 갈 칸이 아는 칸이어야 한다.
+    let out = moai(s.path(), &["mv", &other, "doing"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!moai(s.path(), &["mv", &other, "in_progress"]).status.success(), "모르는 칸으로 옮겼다");
+
+    // 아무 줄도 안 선 이름은 그대로 거절한다 — 오타 검사는 살아 있다.
+    let out = moai(s.path(), &["mv", &id, "todo", "--from", "in_progress"]);
+    assert!(!out.status.success(), "이제 아무도 안 선 옛 칸이 통과했다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("in_progress"), "{}", text(&out));
+    assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "거절하면서 옮겼다");
+}
+
+/// **칸 오타는 사람을 못 찾는 것보다 먼저 선다** — `mv` 와 `defer` 가 한 자다.
+/// 뒤로 밀리면 신원 없는 기계(CI·훅)에서 오타가 "누가 하는지 모른다" 로 덮여, 부르는
+/// 쪽이 받는 `code` 가 `bad_status` 가 아니라 `no_actor` 가 된다 — 고칠 곳이 설정인지
+/// 명령인지가 갈리는 자리다. 한쪽만 시험하면 두 벌로 적힌 차례가 갈릴 때 한쪽만 잡힌다.
+///
+/// **`bad_status` 를 내는 검사는 하나도 빠짐없이 먼저 선다.** 오타만 앞세우고 묶음
+/// 가드를 사람 뒤에 두면, 같은 자의 잘못이 `--from` 의 값에 따라 두 `code` 로 갈린다 —
+/// 오타는 `bad_status`, 묶음은 `no_actor`. 부르는 쪽은 그것을 가를 방법이 없다.
+#[test]
+fn a_bad_from_column_is_named_before_the_missing_person() {
+    let s = init("from-before-who");
+    let id = add(s.path(), &["일"]);
+    let epic = add(s.path(), &["묶음", "--type", "epic"]);
+    add(s.path(), &["멤버", "-e", &epic]);
+    let cases = [
+        vec!["mv", &id, "done", "--from", "없는칸"],
+        vec!["defer", &id, "--from", "없는칸"],
+        vec!["mv", &epic, "done", "--from", "todo"],
+        vec!["defer", &epic, "--from", "todo"],
+    ];
+    for args in cases {
+        let out = without_user(s.path(), &args);
+        assert!(!out.status.success(), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("칸"), "{args:?} 가 칸 대신 사람을 말했다\n{err}");
+        assert!(!err.contains("--user"), "{args:?} 가 사람을 먼저 물었다\n{err}");
+    }
 }
 
 /// **같은 id 를 두 번 적어도 제가 방금 쓴 값과 겨루지 않는다.** `--from` 이 재는 것은

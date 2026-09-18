@@ -240,8 +240,12 @@ fn commit_roots(repo: &Repo, origin: &crate::worktree::Origin) -> Vec<std::path:
 }
 
 /// 뿌리마다 [`crate::git::table`] 을 짓는다. **어느 스레드에서 불러도 같다.**
-fn commit_tables(roots: &[std::path::PathBuf]) -> Commits {
-    roots.iter().filter_map(|root| crate::git::table(root).ok().map(|t| (root.clone(), t))).collect()
+///
+/// `ids` 는 지금 들고 있는 줄의 id 다 — 표는 그것들과 낱말을 견줘 서므로, 형식이 어긋난 줄도
+/// 제 커밋을 찾고 id 아닌 낱말은 표에 안 선다(moai-ynhj).
+fn commit_tables(roots: &[std::path::PathBuf], ids: &std::collections::BTreeSet<String>) -> Commits {
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    roots.iter().filter_map(|root| crate::git::table(root, &ids).ok().map(|t| (root.clone(), t))).collect()
 }
 
 /// 버린 다시 읽기 손잡이를 이만큼까지 든다(`App::discarded`). 버리는 것은 사람의
@@ -385,11 +389,17 @@ pub struct App {
     /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과, 어느 때든 지켜보는 HEAD·가지
     /// 파일·`packed-refs` 의 표식(읽기 **전에** 잰 것 — `worktree::gather`·[`prepare`]).
     watched: Vec<(std::path::PathBuf, Stamp)>,
-    /// 이슈에 닿은 커밋 표([`Commits`]). **표식(`watched`)이 움직였을 때만 새로 짓는다** —
+    /// 이슈에 닿은 커밋 표([`Commits`]). **표식(`watched`)이 움직였을 때 새로 짓는다** —
     /// 거기 HEAD·가지 파일이 들어 있어 그것이 곧 "커밋이 섰는가" 다. 다시 읽을 때마다
     /// 지으면 스냅샷 쓰기 하나(`mv` 한 번, 옆 세션의 쓰기 하나)마다 뿌리마다 이력을 통째로
     /// 걷는다 — 커밋이 안 선 것을 알면서 걷는 일이다. 새 표가 올 때까지는 옛 표를 든다.
     commits: Commits,
+    /// 지금 든 표를 지을 때 준 id 들. **표의 내용이 이 목록에 매인다**(moai-ynhj) — 표는
+    /// 낱말을 이 id 들과 견줘 서므로, 여기 없던 id 가 줄에 서면 그 줄의 커밋 칸은 표식이
+    /// 다시 움직일 때까지 영영 빈다(들여온 줄·되살린 파일처럼 커밋이 먼저 있고 줄이 나중에
+    /// 오는 자리가 그렇다). 그래서 **새 id 가 들면 표식이 그대로여도 한 번 더 짓는다.**
+    /// 사라진 id 는 안 센다 — 남은 칸은 아무도 찾지 않으므로 걷기를 새로 살 값이 없다.
+    commit_ids: std::collections::BTreeSet<String>,
     /// 표만 짓는 스레드([`App::follow_commits`]). **한 번에 하나만 돈다** — 도는 동안 다시 읽기가
     /// 또 들어오면 `commits_due` 만 세우고, 이것이 끝나면 곧바로 하나를 더 띄운다.
     commits_job: Option<(std::sync::mpsc::Receiver<Commits>, std::thread::JoinHandle<()>)>,
@@ -593,6 +603,7 @@ impl App {
             stamp: None,
             watched: Vec::new(),
             commits: Commits::new(),
+            commit_ids: Default::default(),
             commits_job: None,
             commits_due: true,
             pending: None,
@@ -896,10 +907,13 @@ impl App {
         self.origin = f.origin;
         self.elsewhere = f.elsewhere;
         self.unfound = f.unfound;
-        // 표는 **표식이 움직였을 때만** 다음 걸음에 스레드가 짓는다(`App::commits`·
+        // 표는 **표식이 움직였을 때** 다음 걸음에 스레드가 짓는다(`App::commits`·
         // `follow_commits`). 도는 것이 있으면 그 답은 받되 이 읽기보다 낡았을 수 있어
         // 끝나는 대로 하나를 더 띄운다.
-        self.commits_due |= self.watched != f.watched;
+        // **표가 모르는 id 가 들어왔을 때도 짓는다**(`App::commit_ids`) — 표는 낱말을 준 id 와
+        // 견줘 서므로, 커밋이 먼저 있고 줄이 나중에 온 자리는 이것 없이는 영영 빈 칸이다.
+        // 칸 옮기기·메모처럼 id 가 그대로인 쓰기는 여기서 안 걸려 걷기를 새로 사지 않는다.
+        self.commits_due |= self.watched != f.watched || f.issues.iter().any(|i| !self.commit_ids.contains(&i.id));
         self.watched = f.watched;
         self.warnings = f.warnings;
         self.take(f.issues, f.index, f.states, f.now);
@@ -1200,9 +1214,14 @@ impl App {
         let Some(repo) = &self.repo else { return };
         self.commits_due = false;
         let roots = commit_roots(repo, &self.origin);
+        // **스레드로 넘길 것은 값이다** — 빌린 `issues` 를 넘기면 그 스레드가 도는 동안 다시 읽기가
+        // 목록을 갈아 끼울 수 없다. 넘긴 것을 그대로 들어 둔다(`commit_ids`): 다음 읽기가 그것과
+        // 견줘 표가 모르는 id 를 붙잡는다.
+        self.commit_ids = self.issues.iter().map(|i| i.id.clone()).collect();
+        let ids = self.commit_ids.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
-            let _ = tx.send(commit_tables(&roots));
+            let _ = tx.send(commit_tables(&roots, &ids));
         });
         self.commits_job = Some((rx, handle));
     }
@@ -1288,8 +1307,11 @@ impl App {
         // 칸 이름은 `Filter::build` 가 모른다 — 저장소가 정하는 것이라
         // `config` 에 있다. `cmd/show.rs` 와 같은 자로 잰다: 조용히 0건을 내면
         // `status=in-progress` 같은 오타가 "그 칸은 비었다" 와 구별되지 않는다.
+        // 어느 줄이 선 칸이면 받는다 — `show -s`·`--from` 과 같은 술어다(moai-hym7).
         for s in &filter.status {
-            self.cfg.require_known(s)?;
+            if !crate::report::knows_column(&self.issues, &self.cfg, s) {
+                return Err(crate::cmd::unknown_column(s, &self.cfg));
+            }
         }
         // 시계는 **적재마다** 고정한 것을 쓴다. 여기서 다시 잡으면 `stale=`
         // 같은 물음이 화면의 나머지와 다른 시각으로 판정된다.
@@ -1945,7 +1967,11 @@ impl App {
         match &self.mode {
             Mode::Filter(q) if !q.text().trim().is_empty() => match self.build_filter(&self.mode) {
                 Err(e) => Some(e),
-                Ok(f) => f.status.iter().find_map(|s| self.cfg.require_known(s).err()),
+                Ok(f) => f
+                    .status
+                    .iter()
+                    .find(|s| !crate::report::knows_column(&self.issues, &self.cfg, s))
+                    .map(|s| crate::cmd::unknown_column(s, &self.cfg)),
             },
             _ => None,
         }
@@ -3450,6 +3476,26 @@ mod tests {
         git("fix: 끈 뒤 (argos-0001)");
         gathered(&mut a);
         assert_eq!(subjects(&a).first().map(String::as_str), Some("fix: 끈 뒤 (argos-0001)"), "겹쳐 보기를 끄자 HEAD 를 안 지켜본다");
+
+        // **표가 모르던 id 가 줄에 서면 표식이 그대로여도 한 번 더 짓는다**(`App::commit_ids`).
+        // 표는 낱말을 준 id 와 견줘 서므로(moai-ynhj), 커밋이 먼저 있고 줄이 나중에 오는 자리
+        // (들여온 줄·되살린 파일)는 이것 없이는 다음 커밋이 설 때까지 칸이 빈다.
+        git("feat: 줄보다 먼저 (argos-0009)");
+        gathered(&mut a);
+        assert!(a.commits_of("argos-0009").is_empty(), "줄이 없는 id 가 표에 섰다");
+        let mut src = std::fs::read_to_string(dir.join(".moai/issues.jsonl")).unwrap();
+        src.push_str(&line(&make("argos-0009", Kind::Issue)));
+        std::fs::write(dir.join(".moai/issues.jsonl"), src).unwrap();
+        gathered(&mut a);
+        assert_eq!(
+            a.commits_of("argos-0009").iter().map(|c| c.subject.clone()).collect::<Vec<_>>(),
+            ["feat: 줄보다 먼저 (argos-0009)"],
+            "표가 모르던 id 의 커밋 칸이 비었다"
+        );
+        // 그 뒤로는 id 가 그대로라 쓰기 하나마다 이력을 다시 걷지 않는다.
+        a.reload();
+        settle(&mut a);
+        assert!(!a.gathering_commits(), "id 도 표식도 그대로인데 표를 다시 지으러 갔다");
     }
 
     /// **다시 읽어도 커서는 보던 줄에 선다.** 위에 줄이 생기거나 사라져도, 칸이

@@ -122,7 +122,7 @@
 **moai 에서 집은 일은 모두 워크트리에서 한다.** main(이나 develop)에서 직접
 하면 여러 세션이 같은 가지에 쌓아, 병합할 때 서로 끝나기를 기다려야 한다.
 
-    moai mv <id> in_progress                      main 에서 집는다
+    moai mv <id> in_progress --from todo          main 에서 집는다
     git commit -m "chore(tracker): <id> 를 워크트리에서 집는다"
     git worktree add -b worktree-moai-<id> .claude/worktrees/moai-<id> main
     (작업 · 커밋 · 필요하면 main 을 받는다)
@@ -131,6 +131,13 @@
 
 - **집기는 main 에서 커밋한다.** 옆 세션의 `moai ready --worktree` 와 보드가
   누가 무엇을 쥐었는지 보려면 그 줄이 main 에 있어야 한다
+- **집을 때 본 칸을 함께 준다** (`--from todo`). 여기는 세션 예닐곱이 같은
+  `.moai` 를 쓰는 저장소라 `ready` 와 `mv` 사이가 실제로 겨뤄진다 — 본 칸이
+  달라졌으면 옮기지 않고 0 아닌 코드로 말하니, 남이 집은 일을 뒤늦게 덮지
+  않는다. 진 쪽은 다음 일로 간다
+- **트래커는 워크트리 안에서 쓰지 않는다.** 워크트리의 `.moai` 를 고치면 병합에서
+  스냅샷이 충돌한다 — 노트도 칸 옮김도 `moai -C <루트>` 로 루트에 쓰고, 루트에서
+  `git commit -- .moai/` 한다
 - **가지는 로컬 `main` 에서 뜬다.** `EnterWorktree` 에 `name` 만 주면
   `origin/main` 에서 뜨는데, 그쪽은 로컬보다 한참 낡았을 수 있다 (2026-09-14
   에 91커밋 뒤였다).

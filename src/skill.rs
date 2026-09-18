@@ -85,8 +85,8 @@ fn command(exe: &str, event: &str) -> String {
 /// 때만 새로 뜬다. 손으로 세는 판은 반드시 어긋난다 — 내용이 같으면 판도
 /// 같아 헛 업데이트가 없고, 한 글자라도 다르면 반드시 달라진다.
 ///
-/// 판이 **내려가도** `claude plugin update` 는 받는다 (`1.0.1 → 0.0.5` 로
-/// 실제로 재 봤다). 그래서 해시를 그대로 판으로 쓸 수 있다.
+/// 판이 **내려가도** 괜찮은 까닭은 [`version_of`] 에 있다. 두 자리에 나눠 적으면
+/// 한쪽만 고쳐져 갈라진다 — 실제로 여기 적혀 있던 까닭이 틀린 채로 남아 있었다.
 pub fn tree(
     prefix: &str,
     root: &Path,
@@ -123,6 +123,17 @@ fn tree_named(market: &str, exe: &str, skill: &str, reference: &str, supervise: 
     files
 }
 
+/// 트리의 내용 해시를 판으로 낸다. **오르내린다** — 해시라 다음 판이 더 낮을 수 있다
+/// (실제로 `968.33.712` 다음이 `59.172.404` 이었다).
+///
+/// 괜찮은 까닭을 확인했다(moai-70ip, 2026-09-15). `claude` 의 플러그인 갱신은 판을 semver
+/// 로 견주지 않고 **달라졌는가**만 본다 — 판 글자를 안 바꾸면 갱신이 안 가고, 바꾸면 간다
+/// (plugin-marketplaces·plugins-reference 문서). moai 쪽 신선도(`cmd/skill.rs`)도 같은지만
+/// 본다. 그래서 내려가는 판이 갱신을 건너뛰게 하지 않는다 — `1.0.1 → 0.0.5` 로 실제로 재 봤다.
+///
+/// 판이 semver 여야 한다거나 올라야 한다는 요구는 문서에 없다. 그래도 **모양은 semver 로
+/// 맞춰 둔다** — 판을 그렇게 읽는 자리가 나중에 생겨도 값이 형식에서 먼저 걸리지는 않는다.
+/// 갱신 판정이 semver 비교로 바뀌는 날에는 해시를 버리지 말고 앞자리에 오르는 셈을 붙인다.
 fn version_of(files: &[(PathBuf, String)], template: &str) -> String {
     let mut all = String::new();
     for (path, body) in files {
@@ -132,7 +143,7 @@ fn version_of(files: &[(PathBuf, String)], template: &str) -> String {
         all.push('\u{2}');
     }
     all.push_str(template);
-    // semver 세 자리에 나눠 담는다. `claude` 가 판을 semver 로 읽는다.
+    // semver 세 자리에 나눠 담는다 — 위 주석의 까닭이다.
     let n = stable(all.as_bytes());
     format!("{}.{}.{}", n % 1000, (n / 1000) % 1000, (n / 1_000_000) % 1000)
 }

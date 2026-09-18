@@ -671,6 +671,16 @@ fn says(w: &Warning) -> String {
         "user_config" => format!("사용자 설정에서 못 읽은 것 {n}건 — 한 줄씩은 stderr 에 냈다"),
         "agents_stale" => "AGENTS.md 블록이 다르다 — 다른 바이너리가 쓴 것이라 이쪽이 더 낡았을 수 있다 (다시 빌드해 보고)".to_string(),
         "agents_hand_edited" => "AGENTS.md 블록을 손으로 고쳤다 — 다시 심으면 그 손질은 사라진다".to_string(),
+        // **파일마다 결과를 따로 말한다**(moai-2f99) — `.gitignore` 에 `/.claude/worktrees/` 가
+        // 없는 것과 `.gitattributes` 에 `merge=union` 이 없는 것은 결과가 아주 다르다. 한 낱말로
+        // 뭉치면 그 중 한쪽이 반드시 거짓말이 된다(바로 위 `agents_stale` 을 가른 것과 같은 까닭).
+        // **무엇이 빠졌는지는 `preview` 가 한 줄씩 낸다** — 규칙 줄은 제 안에 띄어쓰기를 여럿 들어
+        // (`.moai/journal.jsonl  text eol=lf merge=union`) 한 줄에 이어 붙이면 어디서 한 줄이
+        // 끝나는지 안 보인다.
+        "gitignore_rules" => format!(".gitignore 에 moai 가 쓰는 자리 {n}줄이 빠졌다 — 옆 워크트리가 `git add -A` 에 딸려간다"),
+        "gitattributes_rules" => {
+            format!(".gitattributes 에 moai 가 쓰는 자리 {n}줄이 빠졌다 — 저널이 머지에서 충돌하고 줄 끝이 흔들린다")
+        }
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
@@ -1042,11 +1052,12 @@ pub struct Seen<'a> {
     pub origin: Option<&'a Origin>,
     /// 펼친 줄의 막음을 하나씩 가른 것 (`report::blocks_of`). 막음이 없으면 비었다.
     pub blocks: Vec<crate::report::Block<'a>>,
-    /// 펼친 줄이 서 있는 워크트리들 (`report::places`, moai-6opu). `None` 이면 줄을 안 세운다 — 안
+    /// 펼친 줄이 **어디에 서 있는가** (`report::places`, moai-6opu). `None` 이면 줄을 안 세운다 — 안
     /// 집은 줄, 워크트리를 안 쓰는 저장소, **안 재 본 자리**(쓰는 길인 `edit`, 겹쳐 보지 않은
-    /// 딸린 워크트리). `Some` 인데 비었으면 집었는데 자리가 없다. 셋을 가르는 것은 `None` 이
-    /// 아무 말도 안 한다는 것뿐이라, 안 잰 것을 "자리 없다" 로 말하는 일은 없다.
-    pub places: Option<Vec<&'a crate::report::Workplace>>,
+    /// 딸린 워크트리). 자리가 안 보이는 까닭(`Fresh`·`Unknown`·`Lost`)은 `Place` 가 이미 갈랐으니
+    /// 여기서 다시 판단하지 않는다 — 안 잰 것(`None`)만이 아무 말도 안 하는 자리라, 그것을
+    /// "자리 없다" 로 말하는 일은 없다.
+    pub places: Option<crate::report::Place<'a>>,
 }
 
 /// **손으로 옮긴 칸이 서 있는 칸과 다르면** 그렇다고 말하는 낱말. CLI 상세와
@@ -1165,16 +1176,24 @@ pub fn detail(
     // **어디서 하던 일인지 댄다**(moai-6opu) — 세션이 죽은 뒤 이어받는 쪽이 들어갈 자리다. 없으면
     // 없다고 한다: 같은 자(`report::places`)로 잰 지금의 자리다.
     //
-    // **`status` 의 `stranded` 와 같은 줄이 아니다.** 저쪽은 방금 집은 줄에 워크트리가 뜰 틈
-    // (`report::STRANDED_GRACE_SECS`, 한 시간)을 주는데 여기는 안 준다 — 규약대로 집고 커밋한 뒤
-    // 워크트리를 띄우는 사이에 펼치면 여기만 "없다" 로 선다. 이 줄은 "지금 보이는가" 를,
-    // `stranded` 는 "이만큼 지났는데도 안 보이는가" 를 말한다.
-    match seen.places.as_deref() {
-        Some([]) => out.push(format!("  자리   {}", paint(style::WARN, "없다 — 일하는 워크트리가 안 보인다"))),
-        Some(trees) => {
+    // **`status` 의 `stranded` 와 같은 답이다**(moai-xn9n) — 한 시간 틈도, 못 읽은 워크트리도
+    // `report::places` 가 한 곳에서 가른다. 한때 여기만 틈이 없어, 규약대로 집고 커밋한 뒤
+    // 워크트리를 띄우는 사이에 펼치면 멀쩡한 줄이 버려진 것처럼 섰다.
+    match &seen.places {
+        Some(crate::report::Place::At(trees)) => {
             for t in trees {
                 out.push(format!("  자리   {}  {}", t.path.display(), paint(style::BRANCH, &format!("({})", t.branch))));
             }
+        }
+        Some(crate::report::Place::Fresh) => {
+            out.push(format!("  자리   {}", paint(style::DIM, "아직 안 보인다 — 방금 집었다")))
+        }
+        Some(crate::report::Place::Unknown) => out.push(format!(
+            "  자리   {}",
+            paint(style::DIM, "모른다 — 못 읽은 워크트리가 있다")
+        )),
+        Some(crate::report::Place::Lost) => {
+            out.push(format!("  자리   {}", paint(style::WARN, "없다 — 일하는 워크트리가 안 보인다")))
         }
         None => {}
     }
