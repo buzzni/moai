@@ -4062,3 +4062,4 @@
 {"ts":"2026-09-18T11:53:56Z","id":"moai-acy5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"'### 화면의 말' 문단을 이름 붙은 조각으로 빼고 AGENTS.md·스킬·reference 가 같이 읽는다"}
 {"ts":"2026-09-18T11:53:56Z","id":"moai-4hda","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-7fad 에서 펼쳤다 — 화면의 말 안내가 AGENTS.md 에만 있고 스킬에는 없다 — guide 조각으로 옮긴다"}
 {"ts":"2026-09-18T11:53:56Z","id":"moai-7fad","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-4hda 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:54:01Z","id":"moai-acy5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
