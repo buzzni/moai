@@ -4063,3 +4063,312 @@
 {"ts":"2026-09-18T11:53:56Z","id":"moai-4hda","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-7fad 에서 펼쳤다 — 화면의 말 안내가 AGENTS.md 에만 있고 스킬에는 없다 — guide 조각으로 옮긴다"}
 {"ts":"2026-09-18T11:53:56Z","id":"moai-7fad","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-4hda 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-18T11:54:01Z","id":"moai-acy5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T12:00:02Z","id":"moai-dmbx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 가 묶음 칸·미룸을 따로 세고 view::Seen 이 query::Where 와 겹친다"}
+{"ts":"2026-09-18T12:00:25Z","id":"moai-gmdu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"사용자 설정 쓰기의 남은 모서리"}
+{"ts":"2026-09-18T12:00:25Z","id":"moai-ys7c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"[tui] sort 가 낱말이 아니면 sort_reversed 만 입혀 아무도 안 고른 '우선순위 거꾸로' 가 선다"}
+{"ts":"2026-09-18T12:00:25Z","id":"moai-gmdu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-4kgt 에서 펼쳤다 — [tui] sort 가 낱말이 아니면 sort_reversed 만 입혀 아무도 안 고른 '우선순위 거꾸로' 가 선다"}
+{"ts":"2026-09-18T12:00:25Z","id":"moai-4kgt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-gmdu 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:00:38Z","id":"moai-j7r3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"merge_look 의 put_value 도 손으로 적은 표 모양 보기 키를 낱값으로 덮는다"}
+{"ts":"2026-09-18T12:00:38Z","id":"moai-j7r3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-35zk 에서 펼쳤다 — merge_look 의 put_value 도 손으로 적은 표 모양 보기 키를 낱값으로 덮는다"}
+{"ts":"2026-09-18T12:00:38Z","id":"moai-35zk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-gmdu 의 멤버 moai-j7r3 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:39Z","id":"moai-bx7g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"주석만 있는 설정에 project add 하면 머리 주석이 새 표 뒤로 밀린다"}
+{"ts":"2026-09-18T12:00:39Z","id":"moai-bx7g","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-3vnk 에서 펼쳤다 — 주석만 있는 설정에 project add 하면 머리 주석이 새 표 뒤로 밀린다"}
+{"ts":"2026-09-18T12:00:39Z","id":"moai-3vnk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-gmdu 의 멤버 moai-bx7g 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:39Z","id":"moai-3owm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"user_config 의 손으로 고칠 거절 셋이 코드 error 로 뭉친다"}
+{"ts":"2026-09-18T12:00:39Z","id":"moai-3owm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-7ype 에서 펼쳤다 — user_config 의 손으로 고칠 거절 셋이 코드 error 로 뭉친다"}
+{"ts":"2026-09-18T12:00:39Z","id":"moai-7ype","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-gmdu 의 멤버 moai-3owm 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:40Z","id":"moai-lb0u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"사용자 설정의 CRLF 줄 끝이 쓰기 한 번에 LF 로 접힌다"}
+{"ts":"2026-09-18T12:00:40Z","id":"moai-lb0u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-luon 에서 펼쳤다 — 사용자 설정의 CRLF 줄 끝이 쓰기 한 번에 LF 로 접힌다"}
+{"ts":"2026-09-18T12:00:40Z","id":"moai-luon","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-gmdu 의 멤버 moai-lb0u 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:40Z","id":"moai-aguj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"사용자 설정의 project 모양 검사가 [tui] 보기 읽기·저장까지 막는다 — 검사를 add/projects() 로 옮긴다"}
+{"ts":"2026-09-18T12:00:40Z","id":"moai-aguj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-4tav 에서 펼쳤다 — 사용자 설정의 project 모양 검사가 [tui] 보기 읽기·저장까지 막는다 — 검사를 add/projects() 로 옮긴다"}
+{"ts":"2026-09-18T12:00:40Z","id":"moai-4tav","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-gmdu 의 멤버 moai-aguj 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:41Z","id":"moai-5jsn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI: 사용자 설정이 깨지면 같은 파싱 오류를 층 없음 배너와 보기 설정 알림이 두 번 댄다 — 한 곳에서만 대게"}
+{"ts":"2026-09-18T12:00:41Z","id":"moai-5jsn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-z0q6 에서 펼쳤다 — TUI: 사용자 설정이 깨지면 같은 파싱 오류를 층 없음 배너와 보기 설정 알림이 두 번 댄다 — 한 곳에서만 대게"}
+{"ts":"2026-09-18T12:00:41Z","id":"moai-z0q6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-gmdu 의 멤버 moai-5jsn 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:41Z","id":"moai-ju21","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅 셸 파서와 거절문 다듬기"}
+{"ts":"2026-09-18T12:00:41Z","id":"moai-1jvy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅의 렉서가 if…fi·while…done 을 묶음으로 안 센다 — 집기 && if …; then sed -i …; fi 가 막힌다(잘못 막음, 새지는 않음)"}
+{"ts":"2026-09-18T12:00:41Z","id":"moai-ju21","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-c61b 에서 펼쳤다 — 훅의 렉서가 if…fi·while…done 을 묶음으로 안 센다 — 집기 && if …; then sed -i …; fi 가 막힌다(잘못 막음, 새지는 않음)"}
+{"ts":"2026-09-18T12:00:41Z","id":"moai-c61b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ju21 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:00:42Z","id":"moai-gtkn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"shell_writes 가 집기 뒤를 어림하는 자리 넷 — || exit·set -e·접두어 뒤 괄호·! ( )"}
+{"ts":"2026-09-18T12:00:42Z","id":"moai-gtkn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-h1vy 에서 펼쳤다 — shell_writes 가 집기 뒤를 어림하는 자리 넷 — || exit·set -e·접두어 뒤 괄호·! ( )"}
+{"ts":"2026-09-18T12:00:42Z","id":"moai-h1vy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ju21 의 멤버 moai-gtkn 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:42Z","id":"moai-nxw8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"규칙 1 거절문의 모서리 셋 — -C 를 떨군다, 여럿 집으면 첫 것만 댄다, rules() 글을 손으로 두 벌 적었다"}
+{"ts":"2026-09-18T12:00:42Z","id":"moai-nxw8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-m807 에서 펼쳤다 — 규칙 1 거절문의 모서리 셋 — -C 를 떨군다, 여럿 집으면 첫 것만 댄다, rules() 글을 손으로 두 벌 적었다"}
+{"ts":"2026-09-18T12:00:42Z","id":"moai-m807","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ju21 의 멤버 moai-nxw8 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:43Z","id":"moai-8na5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"taught() 가 걸음 글 안의 moai 명령을 안 뽑는다 — 멤버를 옮기는 줄이 훅 시험 밖이다"}
+{"ts":"2026-09-18T12:00:43Z","id":"moai-8na5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-bt28 에서 펼쳤다 — taught() 가 걸음 글 안의 moai 명령을 안 뽑는다 — 멤버를 옮기는 줄이 훅 시험 밖이다"}
+{"ts":"2026-09-18T12:00:43Z","id":"moai-bt28","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ju21 의 멤버 moai-8na5 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:43Z","id":"moai-xppm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅이 싼 검사보다 held 를 먼저 잰다 — Bash 한 번에 claimed 를 두세 번 짓는다"}
+{"ts":"2026-09-18T12:00:43Z","id":"moai-xppm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-flx2 에서 펼쳤다 — 훅이 싼 검사보다 held 를 먼저 잰다 — Bash 한 번에 claimed 를 두세 번 짓는다"}
+{"ts":"2026-09-18T12:00:43Z","id":"moai-flx2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ju21 의 멤버 moai-xppm 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:43Z","id":"moai-h498","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅의 거절 길 겹쳐 보기가 174ms — HEAD 가 같은 옆 워크트리끼리 갈라진 자리(merge-base·show)를 나눠 쓰면 준다"}
+{"ts":"2026-09-18T12:00:43Z","id":"moai-h498","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-zpyo 에서 펼쳤다 — 훅의 거절 길 겹쳐 보기가 174ms — HEAD 가 같은 옆 워크트리끼리 갈라진 자리(merge-base·show)를 나눠 쓰면 준다"}
+{"ts":"2026-09-18T12:00:43Z","id":"moai-zpyo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ju21 의 멤버 moai-h498 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:44Z","id":"moai-zis7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai 훅이 -L/-S 없는 tmux 죽이기 명령을 막는다"}
+{"ts":"2026-09-18T12:00:44Z","id":"moai-zis7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-iz3m 에서 펼쳤다 — moai 훅이 -L/-S 없는 tmux 죽이기 명령을 막는다"}
+{"ts":"2026-09-18T12:00:44Z","id":"moai-iz3m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ju21 의 멤버 moai-zis7 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:45Z","id":"moai-xemz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 목록 그리기와 검색 칠함 정리"}
+{"ts":"2026-09-18T12:00:45Z","id":"moai-shoa","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"목록 열 자리 어긋남 나머지 — p10 폭·좁을 때 스피너 한 칸·일 없는 에픽의 n/n 이름·id_w<2"}
+{"ts":"2026-09-18T12:00:45Z","id":"moai-xemz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-7aar 에서 펼쳤다 — 목록 열 자리 어긋남 나머지 — p10 폭·좁을 때 스피너 한 칸·일 없는 에픽의 n/n 이름·id_w<2"}
+{"ts":"2026-09-18T12:00:45Z","id":"moai-7aar","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-xemz 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:00:45Z","id":"moai-d699","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이름 줄의 n/n·S 가 줄과 어긋나는 나머지 — 일 없는 에픽, 좁을 때 한 칸 글리프"}
+{"ts":"2026-09-18T12:00:45Z","id":"moai-d699","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-aq6w 에서 펼쳤다 — 이름 줄의 n/n·S 가 줄과 어긋나는 나머지 — 일 없는 에픽, 좁을 때 한 칸 글리프"}
+{"ts":"2026-09-18T12:00:45Z","id":"moai-aq6w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-xemz 의 멤버 moai-d699 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:45Z","id":"moai-wt4n","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 목록이 스크롤 창 밖 줄까지 매 프레임 짓는다 — 보이는 창만 지으면 1만 이슈 22ms 프레임이 준다"}
+{"ts":"2026-09-18T12:00:45Z","id":"moai-wt4n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-4l1e 에서 펼쳤다 — TUI 목록이 스크롤 창 밖 줄까지 매 프레임 짓는다 — 보이는 창만 지으면 1만 이슈 22ms 프레임이 준다"}
+{"ts":"2026-09-18T12:00:45Z","id":"moai-4l1e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-xemz 의 멤버 moai-wt4n 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:46Z","id":"moai-m7iy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"목록 줄 진행 바탕이 줄마다 Index::progress 로 homes 전체를 훑는다 — 에픽이 아주 많으면 경로별 셈을 적재 때 한 번 세 둔다"}
+{"ts":"2026-09-18T12:00:46Z","id":"moai-m7iy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-5lc8 에서 펼쳤다 — 목록 줄 진행 바탕이 줄마다 Index::progress 로 homes 전체를 훑는다 — 에픽이 아주 많으면 경로별 셈을 적재 때 한 번 세 둔다"}
+{"ts":"2026-09-18T12:00:46Z","id":"moai-5lc8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-xemz 의 멤버 moai-m7iy 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:46Z","id":"moai-1jay","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쓰기 알림과 view_hides_here 가 App::visible 을 안 지나고 keep·shown 마스크를 직접 읽는다"}
+{"ts":"2026-09-18T12:00:46Z","id":"moai-1jay","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-yovr 에서 펼쳤다 — 쓰기 알림과 view_hides_here 가 App::visible 을 안 지나고 keep·shown 마스크를 직접 읽는다"}
+{"ts":"2026-09-18T12:00:46Z","id":"moai-yovr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-xemz 의 멤버 moai-1jay 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:46Z","id":"moai-4tgv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI / 검색의 찾은 글자 칠(mark)이 글자 하나씩 소문자로 접어, 두 글자로 접히는 글자(İ 등)에서 거름망(to_lowercase 통째)과 칠한 자리가 어긋날 수 있다 — 리뷰 moai-kojj.txo 에서 넘김"}
+{"ts":"2026-09-18T12:00:46Z","id":"moai-4tgv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-4k4y 에서 펼쳤다 — TUI / 검색의 찾은 글자 칠(mark)이 글자 하나씩 소문자로 접어, 두 글자로 접히는 글자(İ 등)에서 거름망(to_lowercase 통째)과 칠한 자리가 어긋날 수 있다 — 리뷰 moai-kojj.txo 에서 넘김"}
+{"ts":"2026-09-18T12:00:46Z","id":"moai-4k4y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-xemz 의 멤버 moai-4tgv 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:47Z","id":"moai-lw7i","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 상세창 본문·태그에서도 / 검색이 찾은 글자를 칠한다 — 목록 줄은 id·제목만 칠해, 본문·태그 범위로 찾으면 왜 걸렸는지 안 보인다 (moai-yio7 에서)"}
+{"ts":"2026-09-18T12:00:47Z","id":"moai-lw7i","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-3r5h 에서 펼쳤다 — TUI 상세창 본문·태그에서도 / 검색이 찾은 글자를 칠한다 — 목록 줄은 id·제목만 칠해, 본문·태그 범위로 찾으면 왜 걸렸는지 안 보인다 (moai-yio7 에서)"}
+{"ts":"2026-09-18T12:00:47Z","id":"moai-3r5h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-xemz 의 멤버 moai-lw7i 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:47Z","id":"moai-3lul","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 층과 프로젝트 옮기기 다듬기"}
+{"ts":"2026-09-18T12:00:47Z","id":"moai-qt3k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"프로젝트에 못 들어가도 포커스는 이미 목록으로 끌려간 뒤다"}
+{"ts":"2026-09-18T12:00:47Z","id":"moai-3lul","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-0k7h 에서 펼쳤다 — 프로젝트에 못 들어가도 포커스는 이미 목록으로 끌려간 뒤다"}
+{"ts":"2026-09-18T12:00:47Z","id":"moai-0k7h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3lul 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:00:48Z","id":"moai-go4o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"층의 커서 되붙들기가 네 모양으로 흩어져 있고 목록을 여러 번 센다 — relayer·reread_layer·settle·enter"}
+{"ts":"2026-09-18T12:00:48Z","id":"moai-go4o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-z4uz 에서 펼쳤다 — 층의 커서 되붙들기가 네 모양으로 흩어져 있고 목록을 여러 번 센다 — relayer·reread_layer·settle·enter"}
+{"ts":"2026-09-18T12:00:48Z","id":"moai-z4uz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3lul 의 멤버 moai-go4o 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:48Z","id":"moai-al0x","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 층의 프로젝트 요약이 워크트리 변화와 시계를 못 따라간다 — 층은 .moai 파일이 바뀔 때만 다시 읽어, 워크트리를 치우거나 한 시간 틈이 지나도 SPC r 전까지 옛 수를 낸다. 층과 프로젝트 안 배너(warnings_of)의 수도 갈린다 — 층은 자리 없는 줄을 세고 안쪽은 안 센다 (리뷰 moai-xdli.2b7 에서 넘김)"}
+{"ts":"2026-09-18T12:00:48Z","id":"moai-al0x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-o90m 에서 펼쳤다 — 탐색기 층의 프로젝트 요약이 워크트리 변화와 시계를 못 따라간다 — 층은 .moai 파일이 바뀔 때만 다시 읽어, 워크트리를 치우거나 한 시간 틈이 지나도 SPC r 전까지 옛 수를 낸다. 층과 프로젝트 안 배너(warnings_of)의 수도 갈린다 — 층은 자리 없는 줄을 세고 안쪽은 안 센다 (리뷰 moai-xdli.2b7 에서 넘김)"}
+{"ts":"2026-09-18T12:00:48Z","id":"moai-o90m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3lul 의 멤버 moai-al0x 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:49Z","id":"moai-n6ze","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 층에서 담을 때 두 번 읽는다 — enter_project 의 읽기와 write 뒤 reload 가 겹친다. 큰 저장소에서 느리면 들어가며 읽기를 쓰기 뒤로 미루는 길(묻는 칸·실패 때만 읽기)을 본다"}
+{"ts":"2026-09-18T12:00:49Z","id":"moai-n6ze","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-76lq 에서 펼쳤다 — TUI 층에서 담을 때 두 번 읽는다 — enter_project 의 읽기와 write 뒤 reload 가 겹친다. 큰 저장소에서 느리면 들어가며 읽기를 쓰기 뒤로 미루는 길(묻는 칸·실패 때만 읽기)을 본다"}
+{"ts":"2026-09-18T12:00:49Z","id":"moai-76lq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3lul 의 멤버 moai-n6ze 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:49Z","id":"moai-ezwu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"층과 밖 한눈 보기가 프로젝트마다 워크트리를 읽는 값 — 이름으로 안 잡히는 집은 줄이 하나라도 있으면 프로젝트마다 옆 스냅샷을 다 판다(워크트리 일곱에 찬 읽기 138→458ms). 층을 띄우거나 올라올 때 그만큼 멈춘다. 스레드로 뺄지·캐시할지 본다 (리뷰 moai-xdli.2b7 에서 넘김)"}
+{"ts":"2026-09-18T12:00:49Z","id":"moai-ezwu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-uxrn 에서 펼쳤다 — 층과 밖 한눈 보기가 프로젝트마다 워크트리를 읽는 값 — 이름으로 안 잡히는 집은 줄이 하나라도 있으면 프로젝트마다 옆 스냅샷을 다 판다(워크트리 일곱에 찬 읽기 138→458ms). 층을 띄우거나 올라올 때 그만큼 멈춘다. 스레드로 뺄지·캐시할지 본다 (리뷰 moai-xdli.2b7 에서 넘김)"}
+{"ts":"2026-09-18T12:00:49Z","id":"moai-uxrn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3lul 의 멤버 moai-ezwu 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:50Z","id":"moai-5yq0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"도움말 폭 나머지"}
+{"ts":"2026-09-18T12:00:50Z","id":"moai-x18p","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"짧은 도움말(-h)은 add·defer 에서 아직 80칸을 넘는다"}
+{"ts":"2026-09-18T12:00:50Z","id":"moai-5yq0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-1ovx 에서 펼쳤다 — 짧은 도움말(-h)은 add·defer 에서 아직 80칸을 넘는다"}
+{"ts":"2026-09-18T12:00:50Z","id":"moai-1ovx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-5yq0 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:00:50Z","id":"moai-ygki","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"도움말 폭 셈이 모호폭 글자(·, —)를 한 칸으로 센다 — 두 칸 터미널에서 80칸 줄이 넘친다"}
+{"ts":"2026-09-18T12:00:50Z","id":"moai-ygki","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-havc 에서 펼쳤다 — 도움말 폭 셈이 모호폭 글자(·, —)를 한 칸으로 센다 — 두 칸 터미널에서 80칸 줄이 넘친다"}
+{"ts":"2026-09-18T12:00:50Z","id":"moai-havc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-5yq0 의 멤버 moai-ygki 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:51Z","id":"moai-kv3q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"i18n 남은 글과 언어를 한 번 풀기"}
+{"ts":"2026-09-18T12:00:51Z","id":"moai-7cyf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ready 의 에픽 없음·wip 머리 같은 남은 글자도 말묶음으로"}
+{"ts":"2026-09-18T12:00:51Z","id":"moai-kv3q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-t6dd 에서 펼쳤다 — ready 의 에픽 없음·wip 머리 같은 남은 글자도 말묶음으로"}
+{"ts":"2026-09-18T12:00:51Z","id":"moai-t6dd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kv3q 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:00:51Z","id":"moai-cigu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"언어를 명령 층에서 한 번 풀어 아래로 준다 — 지금은 그리는 쪽이 설정을 다시 읽는다"}
+{"ts":"2026-09-18T12:00:51Z","id":"moai-cigu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-nr7o 에서 펼쳤다 — 언어를 명령 층에서 한 번 풀어 아래로 준다 — 지금은 그리는 쪽이 설정을 다시 읽는다"}
+{"ts":"2026-09-18T12:00:51Z","id":"moai-nr7o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kv3q 의 멤버 moai-cigu 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:52Z","id":"moai-qrnl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"말묶음 키가 있는지를 줄 단위 grep 대신 컴파일이 잡게 한다"}
+{"ts":"2026-09-18T12:00:52Z","id":"moai-qrnl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-vjar 에서 펼쳤다 — 말묶음 키가 있는지를 줄 단위 grep 대신 컴파일이 잡게 한다"}
+{"ts":"2026-09-18T12:00:52Z","id":"moai-vjar","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kv3q 의 멤버 moai-qrnl 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:52Z","id":"moai-gv9n","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시스템 로캘(LANG·LC_ALL)을 화면 언어로 읽을 것인가"}
+{"ts":"2026-09-18T12:00:52Z","id":"moai-gv9n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-b3xm 에서 펼쳤다 — 시스템 로캘(LANG·LC_ALL)을 화면 언어로 읽을 것인가"}
+{"ts":"2026-09-18T12:00:52Z","id":"moai-b3xm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kv3q 의 멤버 moai-gv9n 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:52Z","id":"moai-3k2d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"워크트리 자리 판정의 모서리"}
+{"ts":"2026-09-18T12:00:52Z","id":"moai-m62u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽 이름으로 남은 워크트리는 새 멤버를 도로 쥔다 — 덜 구체적인 이름이 제 워크트리를 이긴다"}
+{"ts":"2026-09-18T12:00:52Z","id":"moai-3k2d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-tbaw 에서 펼쳤다 — 에픽 이름으로 남은 워크트리는 새 멤버를 도로 쥔다 — 덜 구체적인 이름이 제 워크트리를 이긴다"}
+{"ts":"2026-09-18T12:00:52Z","id":"moai-tbaw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3k2d 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:00:53Z","id":"moai-cle9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"워크트리가 살아 있는 에픽에 남긴 멤버를 ready 가 내지만 집은 쪽은 규칙 2 에 막힌다"}
+{"ts":"2026-09-18T12:00:53Z","id":"moai-cle9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-chnl 에서 펼쳤다 — 워크트리가 살아 있는 에픽에 남긴 멤버를 ready 가 내지만 집은 쪽은 규칙 2 에 막힌다"}
+{"ts":"2026-09-18T12:00:53Z","id":"moai-chnl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3k2d 의 멤버 moai-cle9 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:54Z","id":"moai-s63n","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"⎇ 의 닫힌 줄 규칙이 그리는 자리(draw.rs)에 산다 — Origin::working 을 새로 부르는 표면은 그 if 를 다시 적어야 한다"}
+{"ts":"2026-09-18T12:00:54Z","id":"moai-s63n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-zlvg 에서 펼쳤다 — ⎇ 의 닫힌 줄 규칙이 그리는 자리(draw.rs)에 산다 — Origin::working 을 새로 부르는 표면은 그 if 를 다시 적어야 한다"}
+{"ts":"2026-09-18T12:00:54Z","id":"moai-zlvg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3k2d 의 멤버 moai-s63n 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:55Z","id":"moai-k6mp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 절차의 남은 결정"}
+{"ts":"2026-09-18T12:00:55Z","id":"moai-sxv3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시험용 claude 세션이 감독의 세션 목록에 놀고 있는 일꾼으로 낀다"}
+{"ts":"2026-09-18T12:00:55Z","id":"moai-k6mp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-y5re 에서 펼쳤다 — 시험용 claude 세션이 감독의 세션 목록에 놀고 있는 일꾼으로 낀다"}
+{"ts":"2026-09-18T12:00:55Z","id":"moai-y5re","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-k6mp 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:00:55Z","id":"moai-ewwz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옛 규칙으로 시작해 넘겨받은 에픽에 열린 멤버 리뷰 이슈를 어떻게 닫을지 브리프가 말하지 않는다"}
+{"ts":"2026-09-18T12:00:55Z","id":"moai-ewwz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-lcq1 에서 펼쳤다 — 옛 규칙으로 시작해 넘겨받은 에픽에 열린 멤버 리뷰 이슈를 어떻게 닫을지 브리프가 말하지 않는다"}
+{"ts":"2026-09-18T12:00:55Z","id":"moai-lcq1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-k6mp 의 멤버 moai-ewwz 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:56Z","id":"moai-k0jn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일꾼이 난이도→모델 짝을 못 받는다 — 한 단계 올리기와 멤버 리뷰의 모델"}
+{"ts":"2026-09-18T12:00:56Z","id":"moai-k0jn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ccpw 에서 펼쳤다 — 일꾼이 난이도→모델 짝을 못 받는다 — 한 단계 올리기와 멤버 리뷰의 모델"}
+{"ts":"2026-09-18T12:00:56Z","id":"moai-ccpw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-k6mp 의 멤버 moai-k0jn 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:57Z","id":"moai-axhs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"가르치는 명령의 큰따옴표 자유 글이 백틱·$() 를 셸 명령으로 푼다"}
+{"ts":"2026-09-18T12:00:57Z","id":"moai-axhs","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-d34j 에서 펼쳤다 — 가르치는 명령의 큰따옴표 자유 글이 백틱·$() 를 셸 명령으로 푼다"}
+{"ts":"2026-09-18T12:00:57Z","id":"moai-d34j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-k6mp 의 멤버 moai-axhs 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:57Z","id":"moai-ugs0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"9-1 모델 노트가 거둔 일에서 앞 세션의 몫을 잃는다"}
+{"ts":"2026-09-18T12:00:57Z","id":"moai-ugs0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-7xoe 에서 펼쳤다 — 9-1 모델 노트가 거둔 일에서 앞 세션의 몫을 잃는다"}
+{"ts":"2026-09-18T12:00:57Z","id":"moai-7xoe","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-k6mp 의 멤버 moai-ugs0 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:58Z","id":"moai-e9mp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"창 비우기가 지우는 사이에 사람이 친 글을 옮기지 않고 지운다"}
+{"ts":"2026-09-18T12:00:58Z","id":"moai-e9mp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-p3wn 에서 펼쳤다 — 창 비우기가 지우는 사이에 사람이 친 글을 옮기지 않고 지운다"}
+{"ts":"2026-09-18T12:00:58Z","id":"moai-p3wn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-k6mp 의 멤버 moai-e9mp 로 펼쳤다"}
+{"ts":"2026-09-18T12:00:59Z","id":"moai-74so","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 일꾼 절차의 설계 질문 셋 — 워크트리 규약이 없는 저장소에서 EnterWorktree 를 쓸지, 병합 전에 알릴 옆 세션을 일꾼이 찾을 길, promote --dry-run 을 사람에게 보일지(FORKS 와의 긴장) (moai-hxma.grs max 리뷰가 넘김)"}
+{"ts":"2026-09-18T12:00:59Z","id":"moai-74so","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ce0v 에서 펼쳤다 — 감독 일꾼 절차의 설계 질문 셋 — 워크트리 규약이 없는 저장소에서 EnterWorktree 를 쓸지, 병합 전에 알릴 옆 세션을 일꾼이 찾을 길, promote --dry-run 을 사람에게 보일지(FORKS 와의 긴장) (moai-hxma.grs max 리뷰가 넘김)"}
+{"ts":"2026-09-18T12:00:59Z","id":"moai-ce0v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-k6mp 의 멤버 moai-74so 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:00Z","id":"moai-gokz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 스킬: 루트가 detached 면 본 가지를 origin/HEAD 로 읽지만 일꾼의 루트 병합은 detached HEAD 에 서고, 확인(merge-base <본 가지>)과 worktree add 가 실패한다 — detached 면 보내지 않을지 사용자 결정 필요 (moai-hy2h.b14 리뷰가 넘김)"}
+{"ts":"2026-09-18T12:01:00Z","id":"moai-gokz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-dubz 에서 펼쳤다 — 감독 스킬: 루트가 detached 면 본 가지를 origin/HEAD 로 읽지만 일꾼의 루트 병합은 detached HEAD 에 서고, 확인(merge-base <본 가지>)과 worktree add 가 실패한다 — detached 면 보내지 않을지 사용자 결정 필요 (moai-hy2h.b14 리뷰가 넘김)"}
+{"ts":"2026-09-18T12:01:00Z","id":"moai-dubz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-k6mp 의 멤버 moai-gokz 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:01Z","id":"moai-ay3b","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"모노레포 하위 프로젝트에서 일꾼이 새 워크트리 꼭대기에 서면 moai 가 공유 루트의 .moai 를 찾아 쓰고, 훅 규칙 2 는 .claude/ 아래라 편집을 안 센다 — 일꾼 절차가 하위 경로로 들어가게 할지 (moai-7ljm.ba8 max 리뷰, main 에 이미 있던 틈)"}
+{"ts":"2026-09-18T12:01:01Z","id":"moai-ay3b","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-zaml 에서 펼쳤다 — 모노레포 하위 프로젝트에서 일꾼이 새 워크트리 꼭대기에 서면 moai 가 공유 루트의 .moai 를 찾아 쓰고, 훅 규칙 2 는 .claude/ 아래라 편집을 안 센다 — 일꾼 절차가 하위 경로로 들어가게 할지 (moai-7ljm.ba8 max 리뷰, main 에 이미 있던 틈)"}
+{"ts":"2026-09-18T12:01:01Z","id":"moai-zaml","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-k6mp 의 멤버 moai-ay3b 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:02Z","id":"moai-alsi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독이 한 에픽 안에서 새로 필요해진 파일까지 겹치지 않게 나눠 줄 길"}
+{"ts":"2026-09-18T12:01:02Z","id":"moai-alsi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-06nz 에서 펼쳤다 — 감독이 한 에픽 안에서 새로 필요해진 파일까지 겹치지 않게 나눠 줄 길"}
+{"ts":"2026-09-18T12:01:02Z","id":"moai-06nz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-k6mp 의 멤버 moai-alsi 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:02Z","id":"moai-7c50","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"안 읽음 [NEW] 의 자"}
+{"ts":"2026-09-18T12:01:02Z","id":"moai-lyc1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"읽음의 자를 '본 때' 에서 '본 줄의 updated_at' 으로"}
+{"ts":"2026-09-18T12:01:02Z","id":"moai-7c50","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-0oqu 에서 펼쳤다 — 읽음의 자를 '본 때' 에서 '본 줄의 updated_at' 으로"}
+{"ts":"2026-09-18T12:01:02Z","id":"moai-0oqu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-7c50 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:01:03Z","id":"moai-q4ef","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"[NEW] 를 폴더 줄과 경로 줄에 굴려 올린다"}
+{"ts":"2026-09-18T12:01:03Z","id":"moai-q4ef","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-rewm 에서 펼쳤다 — [NEW] 를 폴더 줄과 경로 줄에 굴려 올린다"}
+{"ts":"2026-09-18T12:01:03Z","id":"moai-rewm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-7c50 의 멤버 moai-q4ef 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:04Z","id":"moai-ju54","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai note 로 붙인 메모는 [NEW] 를 못 세운다 — 스냅샷에 '마지막으로 말한 때' 필드"}
+{"ts":"2026-09-18T12:01:04Z","id":"moai-ju54","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-x3yn 에서 펼쳤다 — moai note 로 붙인 메모는 [NEW] 를 못 세운다 — 스냅샷에 '마지막으로 말한 때' 필드"}
+{"ts":"2026-09-18T12:01:04Z","id":"moai-x3yn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-7c50 의 멤버 moai-ju54 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:05Z","id":"moai-rfnv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"안 읽음의 작은 모서리 여럿"}
+{"ts":"2026-09-18T12:01:05Z","id":"moai-rfnv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pl0e 에서 펼쳤다 — 안 읽음의 작은 모서리 여럿"}
+{"ts":"2026-09-18T12:01:05Z","id":"moai-pl0e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-7c50 의 멤버 moai-rfnv 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:06Z","id":"moai-dt5q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"[read] 표가 끝없이 자라 설정 쓰기마다 느려진다"}
+{"ts":"2026-09-18T12:01:06Z","id":"moai-dt5q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-7gkc 에서 펼쳤다 — [read] 표가 끝없이 자라 설정 쓰기마다 느려진다"}
+{"ts":"2026-09-18T12:01:06Z","id":"moai-7gkc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-7c50 의 멤버 moai-dt5q 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:07Z","id":"moai-omx7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"[read] 가 전역 설정에 이슈 id 로만 키를 든다 — 접두어가 같은 두 저장소가 서로의 읽음을 민다"}
+{"ts":"2026-09-18T12:01:07Z","id":"moai-omx7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-alt9 에서 펼쳤다 — [read] 가 전역 설정에 이슈 id 로만 키를 든다 — 접두어가 같은 두 저장소가 서로의 읽음을 민다"}
+{"ts":"2026-09-18T12:01:07Z","id":"moai-alt9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-7c50 의 멤버 moai-omx7 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:08Z","id":"moai-3uc6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"--json 계약과 경로 모양"}
+{"ts":"2026-09-18T12:01:08Z","id":"moai-6p1n","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"commits_error 가 기계가 가를 수 있는 값이 아니다 — 산문 한 줄에 절대 경로까지 실린다"}
+{"ts":"2026-09-18T12:01:08Z","id":"moai-3uc6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-9ceq 에서 펼쳤다 — commits_error 가 기계가 가를 수 있는 값이 아니다 — 산문 한 줄에 절대 경로까지 실린다"}
+{"ts":"2026-09-18T12:01:08Z","id":"moai-9ceq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3uc6 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:01:08Z","id":"moai-zah3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"깨진 스냅샷이 기계가 읽는 자리에서 사라졌다 — JSON 에 키가 없다"}
+{"ts":"2026-09-18T12:01:08Z","id":"moai-zah3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-f4iv 에서 펼쳤다 — 깨진 스냅샷이 기계가 읽는 자리에서 사라졌다 — JSON 에 키가 없다"}
+{"ts":"2026-09-18T12:01:08Z","id":"moai-f4iv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3uc6 의 멤버 moai-zah3 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:09Z","id":"moai-xpd7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show --json 의 workplaces 경로가 상대·절대로 섞일 수 있다 — 모노레포 하위 뿌리나 저장소 밖에 만든 워크트리(git worktree add /other/path)는 안 잘린다. 한 배열에 두 모양이 섞이면 받는 쪽이 못 가른다 (리뷰 moai-6opu.p65 에서 넘김)"}
+{"ts":"2026-09-18T12:01:09Z","id":"moai-xpd7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-mlyn 에서 펼쳤다 — show --json 의 workplaces 경로가 상대·절대로 섞일 수 있다 — 모노레포 하위 뿌리나 저장소 밖에 만든 워크트리(git worktree add /other/path)는 안 잘린다. 한 배열에 두 모양이 섞이면 받는 쪽이 못 가른다 (리뷰 moai-6opu.p65 에서 넘김)"}
+{"ts":"2026-09-18T12:01:09Z","id":"moai-mlyn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3uc6 의 멤버 moai-xpd7 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:11Z","id":"moai-3aec","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"자리 경로가 맨몸 저장소와 main 밖에 만든 워크트리(git worktree add ../foo)에서 안 잘려 절대 경로로 나간다 — 그 자리에 무엇을 낼지(절대 경로 그대로·~ 줄임·main 기준 ../)를 정해야 한다 (리뷰 moai-tbin.7rw 에서 넘김)"}
+{"ts":"2026-09-18T12:01:11Z","id":"moai-3aec","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-vzzd 에서 펼쳤다 — 자리 경로가 맨몸 저장소와 main 밖에 만든 워크트리(git worktree add ../foo)에서 안 잘려 절대 경로로 나간다 — 그 자리에 무엇을 낼지(절대 경로 그대로·~ 줄임·main 기준 ../)를 정해야 한다 (리뷰 moai-tbin.7rw 에서 넘김)"}
+{"ts":"2026-09-18T12:01:11Z","id":"moai-vzzd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3uc6 의 멤버 moai-3aec 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:12Z","id":"moai-d3ya","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 화면 폭과 배치 결정"}
+{"ts":"2026-09-18T12:01:12Z","id":"moai-y7lv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"로고 글리프가 ambiguous 폭이라 두 칸으로 그리는 터미널에서 헤더가 어긋난다"}
+{"ts":"2026-09-18T12:01:12Z","id":"moai-d3ya","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-fbpa 에서 펼쳤다 — 로고 글리프가 ambiguous 폭이라 두 칸으로 그리는 터미널에서 헤더가 어긋난다"}
+{"ts":"2026-09-18T12:01:12Z","id":"moai-fbpa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-d3ya 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:01:13Z","id":"moai-jooo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"헤더의 빛이 멈춘 화면에서도 루프를 계속 깨운다 — 놀고 있는 보드가 초당 여덟 번 다시 그려진다"}
+{"ts":"2026-09-18T12:01:13Z","id":"moai-jooo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-k8t0 에서 펼쳤다 — 헤더의 빛이 멈춘 화면에서도 루프를 계속 깨운다 — 놀고 있는 보드가 초당 여덟 번 다시 그려진다"}
+{"ts":"2026-09-18T12:01:13Z","id":"moai-k8t0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-d3ya 의 멤버 moai-jooo 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:14Z","id":"moai-pcyf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"헤더 번호 칸의 폭 셈이 재는 쪽과 그리는 쪽으로 갈린다"}
+{"ts":"2026-09-18T12:01:14Z","id":"moai-pcyf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-l6wm 에서 펼쳤다 — 헤더 번호 칸의 폭 셈이 재는 쪽과 그리는 쪽으로 갈린다"}
+{"ts":"2026-09-18T12:01:14Z","id":"moai-l6wm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-d3ya 의 멤버 moai-pcyf 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:15Z","id":"moai-l5s8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"좁아서 id 열이 걷히면 id 로 찾은 줄이 왜 걸렸는지 안 보인다"}
+{"ts":"2026-09-18T12:01:15Z","id":"moai-l5s8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-a421 에서 펼쳤다 — 좁아서 id 열이 걷히면 id 로 찾은 줄이 왜 걸렸는지 안 보인다"}
+{"ts":"2026-09-18T12:01:15Z","id":"moai-a421","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-d3ya 의 멤버 moai-l5s8 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:15Z","id":"moai-mbbn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC 메뉴 격자 줄 상한을 낮출까 — 뿌리 7칸이 넓은 창에서 왼쪽 한 열로만 서 허전하면 MAX_ROWS 를 4 안팎으로(열이 늘어 doom 화면처럼 퍼진다). 사용자의 '하단 8~10칸' 과 맞바꾸는 일이라 말이 나올 때 (moai-apsa)"}
+{"ts":"2026-09-18T12:01:15Z","id":"moai-mbbn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ik31 에서 펼쳤다 — SPC 메뉴 격자 줄 상한을 낮출까 — 뿌리 7칸이 넓은 창에서 왼쪽 한 열로만 서 허전하면 MAX_ROWS 를 4 안팎으로(열이 늘어 doom 화면처럼 퍼진다). 사용자의 '하단 8~10칸' 과 맞바꾸는 일이라 말이 나올 때 (moai-apsa)"}
+{"ts":"2026-09-18T12:01:15Z","id":"moai-ik31","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-d3ya 의 멤버 moai-mbbn 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:16Z","id":"moai-hmci","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 키와 본문 편집"}
+{"ts":"2026-09-18T12:01:16Z","id":"moai-en4u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"단축키 변경"}
+{"ts":"2026-09-18T12:01:16Z","id":"moai-hmci","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-8nrq 에서 펼쳤다 — 단축키 변경"}
+{"ts":"2026-09-18T12:01:16Z","id":"moai-8nrq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-hmci 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:01:17Z","id":"moai-bx2q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"? 로 여는 전체 키 팝업 — 모드마다 되는 키를 lazygit·yazi 처럼 한 창에, 치는 대로 거르기"}
+{"ts":"2026-09-18T12:01:17Z","id":"moai-bx2q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-3u19 에서 펼쳤다 — ? 로 여는 전체 키 팝업 — 모드마다 되는 키를 lazygit·yazi 처럼 한 창에, 치는 대로 거르기"}
+{"ts":"2026-09-18T12:01:17Z","id":"moai-3u19","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-hmci 의 멤버 moai-bx2q 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:18Z","id":"moai-xlpc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"본문 칸(tui::edit::Editor)에 되돌리기(Ctrl-Z)와 글 처음·끝(Ctrl-Home/End)"}
+{"ts":"2026-09-18T12:01:18Z","id":"moai-xlpc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-zk14 에서 펼쳤다 — 본문 칸(tui::edit::Editor)에 되돌리기(Ctrl-Z)와 글 처음·끝(Ctrl-Home/End)"}
+{"ts":"2026-09-18T12:01:18Z","id":"moai-zk14","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-hmci 의 멤버 moai-xlpc 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:19Z","id":"moai-okdx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마크다운 접기 — 표 칸과 코드 블록"}
+{"ts":"2026-09-18T12:01:19Z","id":"moai-glnm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"표 칸 속 긴 명령은 moai show 에서도 … 로 잘린다 — Keep 이 표에 안 닿는다"}
+{"ts":"2026-09-18T12:01:19Z","id":"moai-okdx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-u5wa 에서 펼쳤다 — 표 칸 속 긴 명령은 moai show 에서도 … 로 잘린다 — Keep 이 표에 안 닿는다"}
+{"ts":"2026-09-18T12:01:19Z","id":"moai-u5wa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-okdx 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:01:19Z","id":"moai-ip9r","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기의 코드 블록 줄은 아직 꼬리를 잃는다 — Overflow 가 Block::Code 에 안 닿는다"}
+{"ts":"2026-09-18T12:01:19Z","id":"moai-ip9r","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-6w2o 에서 펼쳤다 — 탐색기의 코드 블록 줄은 아직 꼬리를 잃는다 — Overflow 가 Block::Code 에 안 닿는다"}
+{"ts":"2026-09-18T12:01:19Z","id":"moai-6w2o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-okdx 의 멤버 moai-ip9r 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:20Z","id":"moai-71ht","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅 초점과 워크트리·묶음 칸의 결정"}
+{"ts":"2026-09-18T12:01:20Z","id":"moai-hwrm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"워크트리 안의 -C 없는 트래커 쓰기를 도구가 안다 — 훅이 막을까 경고만 할까"}
+{"ts":"2026-09-18T12:01:20Z","id":"moai-71ht","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-fcyf 에서 펼쳤다 — 워크트리 안의 -C 없는 트래커 쓰기를 도구가 안다 — 훅이 막을까 경고만 할까"}
+{"ts":"2026-09-18T12:01:20Z","id":"moai-fcyf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-71ht 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:01:21Z","id":"moai-4jsy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"남의 워크트리에 잠깐 들어간 세션이 그 워크트리의 집은 줄을 제 초점으로 떠안는다"}
+{"ts":"2026-09-18T12:01:21Z","id":"moai-4jsy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-s9hx 에서 펼쳤다 — 남의 워크트리에 잠깐 들어간 세션이 그 워크트리의 집은 줄을 제 초점으로 떠안는다"}
+{"ts":"2026-09-18T12:01:21Z","id":"moai-s9hx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-71ht 의 멤버 moai-4jsy 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:22Z","id":"moai-hav1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이름 없는 워크트리의 한 시간 규칙이 status_since 로 재 — 뜬 뒤 main 에서 칸을 옮기면(in_progress→review) 산 에이전트의 줄이 stranded 로 뜨고, 시각을 안 지키는 복사가 commondir 고친 때를 새로 한다. 처음 집은 때를 스냅샷 필드로 둘지 본다 (리뷰 moai-4370.v8o 에서 넘김)"}
+{"ts":"2026-09-18T12:01:22Z","id":"moai-hav1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pn8t 에서 펼쳤다 — 이름 없는 워크트리의 한 시간 규칙이 status_since 로 재 — 뜬 뒤 main 에서 칸을 옮기면(in_progress→review) 산 에이전트의 줄이 stranded 로 뜨고, 시각을 안 지키는 복사가 commondir 고친 때를 새로 한다. 처음 집은 때를 스냅샷 필드로 둘지 본다 (리뷰 moai-4370.v8o 에서 넘김)"}
+{"ts":"2026-09-18T12:01:22Z","id":"moai-pn8t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-71ht 의 멤버 moai-hav1 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:23Z","id":"moai-giz3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"깨진 옆 스냅샷은 빠른 길에서 아무 화면에도 안 선다"}
+{"ts":"2026-09-18T12:01:23Z","id":"moai-giz3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-7p48 에서 펼쳤다 — 깨진 옆 스냅샷은 빠른 길에서 아무 화면에도 안 선다"}
+{"ts":"2026-09-18T12:01:23Z","id":"moai-7p48","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-71ht 의 멤버 moai-giz3 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:23Z","id":"moai-0b7s","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"--worktree: 이미 미룬 줄에 defer 를 다시 쳐도 아무것도 안 적어, 옆의 늦은 mv 에 진 미룸을 다시 세울 길이 --undo 뒤 defer 뿐이다"}
+{"ts":"2026-09-18T12:01:23Z","id":"moai-0b7s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-s4tb 에서 펼쳤다 — --worktree: 이미 미룬 줄에 defer 를 다시 쳐도 아무것도 안 적어, 옆의 늦은 mv 에 진 미룸을 다시 세울 길이 --undo 뒤 defer 뿐이다"}
+{"ts":"2026-09-18T12:01:23Z","id":"moai-s4tb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-71ht 의 멤버 moai-0b7s 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:24Z","id":"moai-uvm9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"묶음의 겨루는 집기 — 칸이 아니라 updated_at 같은 토큰으로 재는 CAS 가 있어야 에픽·마일스톤에도 --from 을 줄 수 있다. 지금은 거절한다 (moai-8xwi.rzg 가 넘김)"}
+{"ts":"2026-09-18T12:01:24Z","id":"moai-uvm9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-w64e 에서 펼쳤다 — 묶음의 겨루는 집기 — 칸이 아니라 updated_at 같은 토큰으로 재는 CAS 가 있어야 에픽·마일스톤에도 --from 을 줄 수 있다. 지금은 거절한다 (moai-8xwi.rzg 가 넘김)"}
+{"ts":"2026-09-18T12:01:24Z","id":"moai-w64e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-71ht 의 멤버 moai-uvm9 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:25Z","id":"moai-zsu8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽이 done 으로 뒤집히는 순간 mv 가 한 줄 비춘다"}
+{"ts":"2026-09-18T12:01:25Z","id":"moai-zsu8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-d5cl 에서 펼쳤다 — 에픽이 done 으로 뒤집히는 순간 mv 가 한 줄 비춘다"}
+{"ts":"2026-09-18T12:01:25Z","id":"moai-d5cl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-71ht 의 멤버 moai-zsu8 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:25Z","id":"moai-8mq9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"설정·저장·init 의 결정"}
+{"ts":"2026-09-18T12:01:25Z","id":"moai-4gy5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"손으로 적은 fields_known = [] 의 뜻이 바이너리를 따라 움직인다 — 읽는 쪽은 '제가 아는 모든 열', 한 번 다시 쓰면 '쓴 바이너리가 알던 열'. 나중에 생긴 기본-켠 열이 [] 설정에서 영영 안 뜨거나 먼저 만진 바이너리에 따라 갈린다(moai-3fnf 가 막으려던 것). 길 둘: [] 의 뜻을 오늘 열 목록으로 얼리거나, [] 는 다시 쓰지 않는다 (리뷰 moai-svvk.y63 에서 넘김, 사용자와 정함)"}
+{"ts":"2026-09-18T12:01:25Z","id":"moai-8mq9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-sxir 에서 펼쳤다 — 손으로 적은 fields_known = [] 의 뜻이 바이너리를 따라 움직인다 — 읽는 쪽은 '제가 아는 모든 열', 한 번 다시 쓰면 '쓴 바이너리가 알던 열'. 나중에 생긴 기본-켠 열이 [] 설정에서 영영 안 뜨거나 먼저 만진 바이너리에 따라 갈린다(moai-3fnf 가 막으려던 것). 길 둘: [] 의 뜻을 오늘 열 목록으로 얼리거나, [] 는 다시 쓰지 않는다 (리뷰 moai-svvk.y63 에서 넘김, 사용자와 정함)"}
+{"ts":"2026-09-18T12:01:25Z","id":"moai-sxir","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-8mq9 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:01:26Z","id":"moai-3akx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai init 이 쓰다 죽으면 AGENTS.md.tmp.<pid> 가 저장소 뿌리에 남는다 — 심는 .gitignore 블록은 .moai/*.tmp.* 만 덮는다. 규칙을 더하면 이미 심긴 저장소마다 '규칙이 빠졌다' 알림이 새로 서니 그 값과 함께 정할 것 (리뷰 moai-3d5u.nql)"}
+{"ts":"2026-09-18T12:01:26Z","id":"moai-3akx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-dc0o 에서 펼쳤다 — moai init 이 쓰다 죽으면 AGENTS.md.tmp.<pid> 가 저장소 뿌리에 남는다 — 심는 .gitignore 블록은 .moai/*.tmp.* 만 덮는다. 규칙을 더하면 이미 심긴 저장소마다 '규칙이 빠졌다' 알림이 새로 서니 그 값과 함께 정할 것 (리뷰 moai-3d5u.nql)"}
+{"ts":"2026-09-18T12:01:26Z","id":"moai-dc0o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-8mq9 의 멤버 moai-3akx 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:27Z","id":"moai-m9a8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"note 본문 크기 상한 — 에이전트가 대량 출력을 그대로 노트로 넘기면 스냅샷 한 줄이 부푼다 (moai-nqdc.obf 가 넘김)"}
+{"ts":"2026-09-18T12:01:27Z","id":"moai-m9a8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-hrzd 에서 펼쳤다 — note 본문 크기 상한 — 에이전트가 대량 출력을 그대로 노트로 넘기면 스냅샷 한 줄이 부푼다 (moai-nqdc.obf 가 넘김)"}
+{"ts":"2026-09-18T12:01:27Z","id":"moai-hrzd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-8mq9 의 멤버 moai-m9a8 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:27Z","id":"moai-boc6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"임시 자리의 울타리를 기본으로 둘까 — 지금은 두 시험만 골라 쓴다"}
+{"ts":"2026-09-18T12:01:27Z","id":"moai-boc6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-9beh 에서 펼쳤다 — 임시 자리의 울타리를 기본으로 둘까 — 지금은 두 시험만 골라 쓴다"}
+{"ts":"2026-09-18T12:01:27Z","id":"moai-9beh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-8mq9 의 멤버 moai-boc6 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:28Z","id":"moai-g326","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"말과 규약 문서의 결정"}
+{"ts":"2026-09-18T12:01:28Z","id":"moai-onkg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 의 '명령 10개' 를 세지 않는 글로 바꾼다"}
+{"ts":"2026-09-18T12:01:28Z","id":"moai-g326","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-tcoq 에서 펼쳤다 — CLAUDE.md 의 '명령 10개' 를 세지 않는 글로 바꾼다"}
+{"ts":"2026-09-18T12:01:28Z","id":"moai-tcoq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-g326 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:01:29Z","id":"moai-ha5d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에이전트에게 moai read 를 가르칠 것인가"}
+{"ts":"2026-09-18T12:01:29Z","id":"moai-ha5d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-9edm 에서 펼쳤다 — 에이전트에게 moai read 를 가르칠 것인가"}
+{"ts":"2026-09-18T12:01:29Z","id":"moai-9edm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-g326 의 멤버 moai-ha5d 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:30Z","id":"moai-u5bk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일의 통계 — 시간·모델·리뷰 값"}
+{"ts":"2026-09-18T12:01:30Z","id":"moai-38mh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이슈에 작업 시작·끝 시각을 남긴다 — 나중에 통계에 쓴다"}
+{"ts":"2026-09-18T12:01:30Z","id":"moai-u5bk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xam0 에서 펼쳤다 — 이슈에 작업 시작·끝 시각을 남긴다 — 나중에 통계에 쓴다"}
+{"ts":"2026-09-18T12:01:30Z","id":"moai-xam0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-u5bk 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:01:31Z","id":"moai-p8qj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"work 를 목록 show --json 에도 낸다"}
+{"ts":"2026-09-18T12:01:31Z","id":"moai-p8qj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-mg81 에서 펼쳤다 — work 를 목록 show --json 에도 낸다"}
+{"ts":"2026-09-18T12:01:31Z","id":"moai-mg81","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-u5bk 의 멤버 moai-p8qj 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:31Z","id":"moai-21zt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"멤버 하나짜리 에픽의 리뷰를 한 번으로 줄인 것이 옳았는지 다시 잰다"}
+{"ts":"2026-09-18T12:01:31Z","id":"moai-21zt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-1d8f 에서 펼쳤다 — 멤버 하나짜리 에픽의 리뷰를 한 번으로 줄인 것이 옳았는지 다시 잰다"}
+{"ts":"2026-09-18T12:01:31Z","id":"moai-1d8f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-u5bk 의 멤버 moai-21zt 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:32Z","id":"moai-jl72","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"개발 기계 위생 — 디스크·임시 디렉터리"}
+{"ts":"2026-09-18T12:01:32Z","id":"moai-cq53","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"워크트리마다 target/ 이 따로라 디스크가 87% 다 — 같은 의존성을 다섯 번 빌드한다"}
+{"ts":"2026-09-18T12:01:32Z","id":"moai-jl72","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-tozu 에서 펼쳤다 — 워크트리마다 target/ 이 따로라 디스크가 87% 다 — 같은 의존성을 다섯 번 빌드한다"}
+{"ts":"2026-09-18T12:01:32Z","id":"moai-tozu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-jl72 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:01:33Z","id":"moai-mr1n","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"/tmp 에 쌓인 옛 시험 디렉터리 4,887개를 지울지"}
+{"ts":"2026-09-18T12:01:33Z","id":"moai-mr1n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ljsf 에서 펼쳤다 — /tmp 에 쌓인 옛 시험 디렉터리 4,887개를 지울지"}
+{"ts":"2026-09-18T12:01:33Z","id":"moai-ljsf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-jl72 의 멤버 moai-mr1n 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:34Z","id":"moai-wc2h","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"출시 준비 — 릴리스·설치·CI·문서"}
+{"ts":"2026-09-18T12:01:34Z","id":"moai-4gn9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"릴리스 파이프라인 1차안 — cargo-dist 로 빌드 매트릭스·checksums·install.sh·Homebrew tap 을 한 번에"}
+{"ts":"2026-09-18T12:01:34Z","id":"moai-wc2h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-tkl8 에서 펼쳤다 — 릴리스 파이프라인 1차안 — cargo-dist 로 빌드 매트릭스·checksums·install.sh·Homebrew tap 을 한 번에"}
+{"ts":"2026-09-18T12:01:34Z","id":"moai-tkl8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wc2h 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:01:34Z","id":"moai-j54h","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"설치 스크립트는 checksums 로 검증하지 못하면 설치를 거부한다 — 다음 단계는 SBOM·attest"}
+{"ts":"2026-09-18T12:01:34Z","id":"moai-j54h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-oktj 에서 펼쳤다 — 설치 스크립트는 checksums 로 검증하지 못하면 설치를 거부한다 — 다음 단계는 SBOM·attest"}
+{"ts":"2026-09-18T12:01:34Z","id":"moai-oktj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wc2h 의 멤버 moai-j54h 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:35Z","id":"moai-pu19","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"출시용 문서 묶음 — README·CHANGELOG·LICENSE·CONTRIBUTING·SECURITY·복구 런북"}
+{"ts":"2026-09-18T12:01:35Z","id":"moai-pu19","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-oybp 에서 펼쳤다 — 출시용 문서 묶음 — README·CHANGELOG·LICENSE·CONTRIBUTING·SECURITY·복구 런북"}
+{"ts":"2026-09-18T12:01:35Z","id":"moai-oybp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wc2h 의 멤버 moai-pu19 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:36Z","id":"moai-q32f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"의존성·CI 위생 — dependabot(cargo) 그룹화, renovate 로 actions SHA 고정, PR 템플릿 What/Why/Verification"}
+{"ts":"2026-09-18T12:01:36Z","id":"moai-q32f","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-miwk 에서 펼쳤다 — 의존성·CI 위생 — dependabot(cargo) 그룹화, renovate 로 actions SHA 고정, PR 템플릿 What/Why/Verification"}
+{"ts":"2026-09-18T12:01:36Z","id":"moai-miwk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wc2h 의 멤버 moai-q32f 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:37Z","id":"moai-ayhh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"외부 PR 이 `.moai/issues.jsonl` 을 바꾸면 CI 가 거부하고 되돌리는 명령을 댄다"}
+{"ts":"2026-09-18T12:01:37Z","id":"moai-ayhh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-bvce 에서 펼쳤다 — 외부 PR 이 `.moai/issues.jsonl` 을 바꾸면 CI 가 거부하고 되돌리는 명령을 댄다"}
+{"ts":"2026-09-18T12:01:37Z","id":"moai-bvce","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wc2h 의 멤버 moai-ayhh 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:37Z","id":"moai-rli6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"cross-version smoke — 옛 릴리스 바이너리가 쓴 스냅샷을 새 바이너리가 읽고 되써도 바이트가 같은지 CI 가 본다"}
+{"ts":"2026-09-18T12:01:37Z","id":"moai-rli6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-7bg7 에서 펼쳤다 — cross-version smoke — 옛 릴리스 바이너리가 쓴 스냅샷을 새 바이너리가 읽고 되써도 바이트가 같은지 CI 가 본다"}
+{"ts":"2026-09-18T12:01:37Z","id":"moai-7bg7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wc2h 의 멤버 moai-rli6 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:38Z","id":"moai-cf21","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`moai onboard` 스니펫과 README 의 `--json` 계약 선언 — 외부 UI·다른 에이전트가 붙을 자리"}
+{"ts":"2026-09-18T12:01:38Z","id":"moai-cf21","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-kns6 에서 펼쳤다 — `moai onboard` 스니펫과 README 의 `--json` 계약 선언 — 외부 UI·다른 에이전트가 붙을 자리"}
+{"ts":"2026-09-18T12:01:38Z","id":"moai-kns6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wc2h 의 멤버 moai-cf21 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:39Z","id":"moai-i3s8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLI 레퍼런스를 `--help` 에서 생성하고 문서와 도움말의 어긋남을 시험이 잡는다"}
+{"ts":"2026-09-18T12:01:39Z","id":"moai-i3s8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ksi8 에서 펼쳤다 — CLI 레퍼런스를 `--help` 에서 생성하고 문서와 도움말의 어긋남을 시험이 잡는다"}
+{"ts":"2026-09-18T12:01:39Z","id":"moai-ksi8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wc2h 의 멤버 moai-i3s8 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:39Z","id":"moai-rhxy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"beads 에서 빌려 올 표면"}
+{"ts":"2026-09-18T12:01:39Z","id":"moai-5t70","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"git 훅 shim 의 안전 규약 — 도구가 없거나 느리거나 초기화 전이면 git 을 막지 않는다"}
+{"ts":"2026-09-18T12:01:39Z","id":"moai-rhxy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-5i6i 에서 펼쳤다 — git 훅 shim 의 안전 규약 — 도구가 없거나 느리거나 초기화 전이면 git 을 막지 않는다"}
+{"ts":"2026-09-18T12:01:39Z","id":"moai-5i6i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-rhxy 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T12:01:40Z","id":"moai-fv1y","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`prepare-commit-msg` 훅으로 `MOAI_ACTOR` 가 있으면 커밋에 `Executed-By:` 트레일러를 남긴다"}
+{"ts":"2026-09-18T12:01:40Z","id":"moai-fv1y","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-taho 에서 펼쳤다 — `prepare-commit-msg` 훅으로 `MOAI_ACTOR` 가 있으면 커밋에 `Executed-By:` 트레일러를 남긴다"}
+{"ts":"2026-09-18T12:01:40Z","id":"moai-taho","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-rhxy 의 멤버 moai-fv1y 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:41Z","id":"moai-uafe","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`moai import --from beads-jsonl` — beads·옛 moai 스냅샷을 옮겨 오는 단방향 가져오기"}
+{"ts":"2026-09-18T12:01:41Z","id":"moai-uafe","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-hjrx 에서 펼쳤다 — `moai import --from beads-jsonl` — beads·옛 moai 스냅샷을 옮겨 오는 단방향 가져오기"}
+{"ts":"2026-09-18T12:01:41Z","id":"moai-hjrx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-rhxy 의 멤버 moai-uafe 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:42Z","id":"moai-hc9g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`moai prime` — 세션 시작·컴팩션 뒤 다시 넣는 1k 토큰 요약 표면"}
+{"ts":"2026-09-18T12:01:42Z","id":"moai-hc9g","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-yuid 에서 펼쳤다 — `moai prime` — 세션 시작·컴팩션 뒤 다시 넣는 1k 토큰 요약 표면"}
+{"ts":"2026-09-18T12:01:42Z","id":"moai-yuid","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-rhxy 의 멤버 moai-hc9g 로 펼쳤다"}
+{"ts":"2026-09-18T12:01:42Z","id":"moai-8kom","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽 템플릿의 단계 사이 의존 — 계획 마크다운에 막음 문법(needs → blocked_by)을 두고 draft::render 도 되뽑는다"}
+{"ts":"2026-09-18T12:01:42Z","id":"moai-8kom","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-r1pk 에서 펼쳤다 — 에픽 템플릿의 단계 사이 의존 — 계획 마크다운에 막음 문법(needs → blocked_by)을 두고 draft::render 도 되뽑는다"}
+{"ts":"2026-09-18T12:01:42Z","id":"moai-r1pk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-rhxy 의 멤버 moai-8kom 로 펼쳤다"}
