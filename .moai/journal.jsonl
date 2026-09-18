@@ -4032,3 +4032,12 @@
 {"ts":"2026-09-18T11:38:13Z","id":"moai-sprn.gzs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 브리프 9-1 과 가이드 블록의 model 줄 꼴"}
 {"ts":"2026-09-18T11:38:20Z","id":"moai-sprn.gzs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T11:38:35Z","id":"moai-xam0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이슈에 작업 시작·끝 시각을 남긴다 — 나중에 통계에 쓴다"}
+{"ts":"2026-09-18T11:38:40Z","id":"moai-jo8d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽 끝 리뷰 moai-sprn.gzs(high, 백그라운드 code-review) 결과 반영 뒤 develop 병합, 9-1 노트, 닫기, 감독 moa-issue-27 보고"}
+{"ts":"2026-09-18T11:39:31Z","id":"moai-wxkm.95w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 모든 명령의 --help 80칸 접기"}
+{"ts":"2026-09-18T11:39:37Z","id":"moai-wxkm.95w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T11:40:14Z","id":"moai-ezdp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽 끝 리뷰 moai-wxkm.95w(high) 가 백그라운드에서 돈다. 끝나면 반영 fix 커밋, 그다음 ExitWorktree 하고 루트 .moai 커밋, merge --no-ff worktree-moai-wxkm, 워크트리 지움, ezdp done, 감독 moa-issue-27 에 보고. moai-h0r2 는 hook.rs 때문에 첫 칸에 둔다"}
+{"ts":"2026-09-18T11:41:10Z","id":"moai-5ipy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시험 빌드의 LTO 와 -j 를 16GB 상한에서 다시 잰다"}
+{"ts":"2026-09-18T11:41:10Z","id":"moai-ecut","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시험 빌드를 네 벌로 재고 빠른 쪽을 쓰게 한다"}
+{"ts":"2026-09-18T11:41:10Z","id":"moai-5ipy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-bdvv 에서 펼쳤다 — 시험 빌드의 LTO 와 -j 1 을 메모리 상한이 바뀐 뒤 다시 잰다"}
+{"ts":"2026-09-18T11:41:10Z","id":"moai-bdvv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-5ipy 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-18T11:41:21Z","id":"moai-ecut","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
