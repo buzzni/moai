@@ -570,6 +570,8 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "이름 (메일)|none")]
     pub assignee: Option<String>,
 
+    // 설명이 없으면 `next_line_help` 가 공백만 든 줄을 그린다(리뷰 moai-5yq0).
+    /// 만들 것의 종류 (없으면 issue, `epic add` 면 epic)
     #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
     pub kind: Option<Kind>,
 
