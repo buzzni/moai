@@ -64,31 +64,81 @@ impl Error {
             Error::Stream(_) => "stream",
             Error::NotUtf8(_) => "encoding",
         };
-        Told { kind, said: crate::text::one_line(&cut_paths(&self.to_string())) }
+        // **한 줄로 접은 뒤에 자른다** — 자르기는 공백으로 낱말을 가르므로, 접기 전에 자르면 줄바꿈·탭
+        // 바로 뒤의 경로가 앞 낱말에 붙어 통째로 나가고, 경로 뒤 줄의 첫 낱말은 경로와 함께 먹힌다.
+        Told { kind, said: cut_paths(&crate::text::one_line(&self.to_string())) }
     }
 }
 
-/// `root` 나 그 위 어디에 `.git` 이 있는가 — 딸린 워크트리는 `.git` 이 파일이라 `exists` 로 잰다.
+/// `root` 가 git 이 여는 저장소 안인가 — **git 이 찾는 대로 찾는다.**
+///
+/// - `.git` 디렉터리는 `HEAD` 가 있어야 저장소다. 없으면 git 은 그것을 지나쳐 위를 보므로 여기도 위를 본다.
+/// - `.git` 파일(딸린 워크트리·서브모듈)은 `gitdir:` 가 가리키는 곳이 살아 있어야 저장소다. main 을
+///   옮겼거나 지워 끊긴 워크트리에서 git 은 위를 안 보고 "저장소가 아니다" 로 죽는다 — `exists` 만
+///   재면 그것을 `failed` 로 댄다.
 fn in_repo(root: &Path) -> bool {
-    root.ancestors().any(|d| d.join(".git").exists())
+    for dir in root.ancestors() {
+        let dotgit = dir.join(".git");
+        if dotgit.is_dir() {
+            if dotgit.join("HEAD").is_file() {
+                return true;
+            }
+            continue;
+        }
+        if dotgit.exists() {
+            return std::fs::read_to_string(&dotgit)
+                .ok()
+                .and_then(|t| t.trim_end().strip_prefix("gitdir:").map(|g| dir.join(g.trim())))
+                .is_some_and(|g| g.join("HEAD").is_file());
+        }
+    }
+    false
 }
 
-/// 글 속의 절대 경로를 `…` 로 바꾼다. 따옴표·괄호·끝 문장부호는 남긴다.
+/// 절대 경로의 머리인가 — `/…`·`~/…`·`C:\…`.
+fn absolute(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    s.starts_with('/')
+        || s.starts_with("~/")
+        || (bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'))
+}
+
+/// 글 속의 절대 경로를 `…` 로 바꾼다. 따옴표·괄호·끝 문장부호는 남긴다. **한 줄 글을 받는다**
+/// ([`Error::told`] 가 먼저 접는다).
+///
+/// **따옴표로 싼 경로는 닫는 따옴표까지 자른다.** git 은 경로를 대개 `'…'` 로 싸고 그 안에는 공백이
+/// 들 수 있다 — 낱말로만 자르면 `'/Users/John Smith/x'` 의 공백 뒤(`Smith/x`)가 그대로 나간다.
+/// 싸지 않은 경로는 낱말째 자른다.
 fn cut_paths(s: &str) -> String {
+    let mut quoted = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(at) = rest.find(['\'', '"', '`']) {
+        // 따옴표는 한 바이트다 — 앞뒤를 바이트로 갈라도 글자 경계다.
+        let q = rest.as_bytes()[at] as char;
+        let after = &rest[at + 1..];
+        quoted.push_str(&rest[..=at]);
+        rest = match after.find(q) {
+            // 여는 따옴표 **바로 뒤가** 경로의 머리일 때만 — `can't … '/x'` 의 홑따옴표 둘은 안 짝짓는다.
+            Some(end) if absolute(&after[..end]) => {
+                quoted.push('…');
+                quoted.push(q);
+                &after[end + 1..]
+            }
+            _ => after,
+        };
+    }
+    quoted.push_str(rest);
     // 앞에서는 `.` 을 안 뗀다 — 떼면 `./foo`·`../foo` 가 절대 경로로 읽힌다.
     let lead = |c: char| matches!(c, '\'' | '"' | '(' | '`');
     let trail = |c: char| matches!(c, '\'' | '"' | ')' | ',' | ';' | ':' | '.' | '`');
-    s.split(' ')
+    quoted
+        .split(' ')
         .map(|word| {
             let core = word.trim_start_matches(lead);
             let head = &word[..word.len() - core.len()];
             let core = core.trim_end_matches(trail);
             let tail = &word[head.len() + core.len()..];
-            let bytes = core.as_bytes();
-            let absolute = core.starts_with('/')
-                || core.starts_with("~/")
-                || (bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'));
-            match absolute {
+            match absolute(core) {
                 true => format!("{head}…{tail}"),
                 false => word.to_string(),
             }
@@ -467,6 +517,27 @@ pub(crate) mod tests {
         assert!(!told.said.contains("/home"), "{}", told.said);
         assert!(told.said.contains("fatal: not a git repository") && told.said.ends_with(": …"), "{}", told.said);
         assert_eq!(cut_paths("'/a/b', ./c ../d (C:\\e) ~/f"), "'…', ./c ../d (…) …");
+        // 싼 경로는 공백 뒤까지, 홑따옴표가 낀 낱말은 그대로.
+        assert_eq!(cut_paths("can't change to '/Users/John Smith/x': gone"), "can't change to '…': gone");
+        // 여러 줄 — 줄바꿈·탭 바로 뒤의 경로도 잘리고, 경로 다음 줄의 낱말은 안 먹힌다.
+        let e = Error::Failed("at '/home/me/x'\nTo add, call:\n\n\t/home/me/secret".into());
+        let said = e.told(Path::new("/")).said;
+        assert!(!said.contains("/home") && said.contains("To add"), "{said}");
+    }
+
+    /// **끊긴 워크트리는 저장소가 아니다**(git 이 그렇게 죽는다) — `.git` 파일이 가리키는 곳이
+    /// 사라졌으면 `not_a_repo`, 속이 빈 `.git` 디렉터리는 지나쳐 위를 본다.
+    #[test]
+    fn a_dangling_gitfile_is_not_a_repo() {
+        let s = crate::scratch::Scratch::fenced("dangling");
+        let wt = s.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), "gitdir: /nowhere/.git/worktrees/wt\n").unwrap();
+        assert_eq!(Error::Failed("x".into()).told(&wt).kind, "not_a_repo");
+        // 울타리는 빈 저장소라 그 밑의 속 빈 `.git` 을 지나쳐 울타리에서 선다.
+        let hollow = s.path().join("hollow");
+        std::fs::create_dir_all(hollow.join(".git")).unwrap();
+        assert_eq!(Error::Failed("x".into()).told(&hollow).kind, "failed");
     }
 
     /// **`kind` 가 가른다** — git 이 없는 것, 저장소가 아닌 것, 읽다 끊긴 것, 글이 깨진 것.

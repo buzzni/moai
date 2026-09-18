@@ -1425,7 +1425,7 @@ pub struct Board<'a> {
     /// 사람이 알아야 하고, `blind` 는 "그래서 자리를 다 못 셌다" 라는 다른 말이다.
     pub unread: Vec<crate::report::Workplace>,
     /// 옆 워크트리를 빠짐없이 열어 봤는가 (`Project::swept`) — 그러면 `unread` 는 `trouble` 이 이미
-    /// 말했다. 사람 화면은 두 번 안 세고, `--json` 은 `blind` 를 그대로 낸다(안쪽 `status` 와 같다).
+    /// 말했다. 사람 화면은 두 번 안 세고, `--json` 은 `blind`·`unread` 를 그대로 낸다(안쪽 `status` 와 같다).
     pub swept: bool,
 }
 

@@ -116,7 +116,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         // **여기 드는 것은 판정을 가린 워크트리뿐이다**(`Unread::blinding`, moai-rgz9) — 못 읽어도
         // 이름이 집은 줄을 가리키는 워크트리는 판정을 안 가리니 안 든다. 키 이름은 이미 나간
         // 값이라 그대로 두지만 "못 읽은 워크트리 전부" 가 아니다 — 그쪽은 위에서 stderr 에 한
-        // 줄씩 내고, `guide` 가 그 둘이 다른 수라고 말한다.
+        // 줄씩 내고 기계에는 아래 `broken_worktrees` 가 댄다.
         //
         // **없으면 키를 안 단다** — 빈 목록을 늘 달면 그것이 "다 읽었다" 인지 "안 재 봤다" 인지가
         // 다시 두 뜻이 된다. `--worktree` 여부와 무관하게 단다: `gather` 의 `⎇` 줄은 stderr 라
@@ -209,7 +209,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     // 가 겹쳐 보지 않으면 옆 스냅샷을 아예 안 열어 `trouble` 이 비고, 그러면 죽은
                     // 세션과 못 읽는 워크트리가 함께 있는 저장소가 "드러난 문제 없다" 로 선다.
                     // 목록 둘을 넘긴다 — 사람 화면은 못 읽은 것 전부를 한 줄씩 대고(`unread`),
-                    // `--json` 은 판정을 가린 것만 낸다(`blind`). 안쪽 `status` 와 같은 가름이다.
+                    // `--json` 은 둘을 따로 낸다(`unreadable_worktrees` 는 판정을 가린 것 `blind`,
+                    // `broken_worktrees` 는 전부 `unread`). 안쪽 `status` 와 같은 가름이다.
                     // `trouble` 이 이미 낸 것인지는 `swept` 가 가른다 — 이것도 안쪽과 같은 자다.
                     unread: unread.all,
                     blind: unread.blinding,

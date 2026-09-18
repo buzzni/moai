@@ -391,7 +391,8 @@ pub(crate) fn claims(epics: &BTreeMap<&str, &str>, stones: &BTreeMap<&str, &str>
 #[derive(Debug, Clone, Serialize)]
 pub struct Workplace {
     /// 워크트리의 꼭대기 — **main 워크트리의 꼭대기에서 잰 상대 경로**다(`worktree::workplaces`).
-    /// main 밖에 만든 워크트리는 절대 경로 그대로다. 여기서는 워크트리를 가르는 이름으로만 쓴다.
+    /// main 밖에 만든 워크트리는 `../` 로 올라가서 재고, main 이 없는 맨몸 저장소는 그 저장소
+    /// 디렉터리에서 잰다(moai-xpd7·moai-3aec). 여기서는 워크트리를 가르는 이름으로만 쓴다.
     ///
     /// **글자로 낸다** — `PathBuf` 를 그대로 직렬화하면 UTF-8 이 아닌 경로에서 serde 가 통째로
     /// 실패해, 그 워크트리와 아무 상관 없는 줄의 `moai show --json` 까지 안 열린다. 사람 화면은
