@@ -3573,3 +3573,12 @@
 {"ts":"2026-09-18T01:35:25Z","id":"moai-b73t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-gxed 로 펼쳤다 (이슈 2건)"}
 {"ts":"2026-09-18T01:35:34Z","id":"moai-gxed","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(2026-09-18, 사람): 한 python 프로세스가 --agents N 으로 일꾼 N 을 띄워 같은 큐를 두고 겨룬다. 예제가 맡는 것은 집기(루트에서 --from)·워크트리 띄우기(로컬 main 에서, worktree-<id>)·그 안에서 AGENT_WORK 돌리기·note·done 까지다. 병합은 안 한다 — 그것은 일의 판단이라 예제가 대신 정하면 위험하다. 트래커는 늘 루트에 쓴다(-C <루트>). python 표준 라이브러리만 쓴다. bash 판(moai-nqdc)의 채비 재기·stale 가르기·seen·일이 정한 칸 안 덮기를 그대로 따른다"}
 {"ts":"2026-09-18T01:35:34Z","id":"moai-ob13","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T01:36:31Z","id":"moai-dfv2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옆 가지 표시(⎇)의 자 — 닫힌 줄과 못 읽은 워크트리"}
+{"ts":"2026-09-18T01:36:31Z","id":"moai-9a8m","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"⎇ 가 머지하고 안 지운 워크트리의 닫힌 줄에 선다"}
+{"ts":"2026-09-18T01:36:31Z","id":"moai-ncsf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"⎇ 의 이름 후보가 훅의 away 와 갈린다 — 스냅샷을 못 읽은 옆 워크트리"}
+{"ts":"2026-09-18T01:36:31Z","id":"moai-dfv2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-boej 에서 펼쳤다 — 머지하고 안 지운 가지가 그 이슈를 계속 쥔 것처럼 ⎇ 를 단다"}
+{"ts":"2026-09-18T01:36:31Z","id":"moai-boej","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-dfv2 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-09-18T01:36:49Z","id":"moai-6s0w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"에픽 moai-dfv2 의 멤버 moai-ncsf 로 펼쳤다 — moai-boej 와 같은 함수(Origin::working)를 고치므로 한 단위로 묶었다"}
+{"ts":"2026-09-18T01:36:49Z","id":"moai-6s0w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-dfv2 의 멤버 moai-ncsf 로 펼쳤다(moai-boej 와 함께)"}
+{"ts":"2026-09-18T01:36:49Z","id":"moai-9a8m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T01:36:50Z","id":"moai-ncsf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
