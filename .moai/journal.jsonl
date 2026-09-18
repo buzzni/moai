@@ -4766,3 +4766,6 @@
 {"ts":"2026-09-18T14:58:35Z","id":"moai-erm1.asx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/sonnet-5 tokens=78217 (medium — 에픽 끝 리뷰, 건수 1)"}
 {"ts":"2026-09-18T14:58:35Z","id":"moai-o46r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-18T14:58:36Z","id":"moai-erm1.asx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: 지적 1(짧은 이름 없는 옵션이 정렬 시험에서 통째로 빠지던 것)을 fe52f8c 로 반영. 넘긴 것 없음."}
+{"ts":"2026-09-18T14:58:45Z","id":"moai-onkg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T14:58:45Z","id":"moai-ght0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T14:58:45Z","id":"moai-ha5d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
