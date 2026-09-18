@@ -11,11 +11,16 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// 화면에 쓸 수 있는 언어. **영어가 기본이다** — 다른 언어는 영어 위에 얹는다.
+/// 화면에 쓸 수 있는 언어. **영어가 기준이다** — 없는 키는 영어로 떨어지고, 새 키는 영어부터다.
+///
+/// **다만 지금 기본값은 한국어다**(사용자 결정, 리뷰 moai-80qw.cb8). 말묶음에 든 글이 아직
+/// 열 줄이라, 기본을 영어로 두면 아무것도 안 고른 사람의 화면이 영어 두어 줄과 한국어 열
+/// 몇 줄로 **섞인다** — 덜 옮긴 것보다 나쁘다. 옮김이 화면을 덮을 때 이 `#[default]` 한 줄을
+/// `En` 으로 옮기는 것이 예정된 끝이고, 그때까지 영어는 `MOAI_LANG=en`·설정으로 본다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Lang {
-    #[default]
     En,
+    #[default]
     Ko,
     Zh,
     Ja,
@@ -53,10 +58,10 @@ impl Lang {
     }
 }
 
-/// 이 판이 쓸 언어 — `MOAI_LANG` 이 먼저고, 그다음이 설정, 없으면 영어다.
+/// 이 판이 쓸 언어 — `MOAI_LANG` 이 먼저고, 그다음이 설정, 없으면 기본값([`Lang::default`])이다.
 ///
 /// **환경이 설정을 이긴다**: 설정은 그 사람의 평소 값이고 환경은 이번 한 번이다. 둘 다
-/// 모르는 값이면 영어로 떨어진다 — 여기서 멈추면 글자 하나 때문에 도구가 안 도는 셈이다.
+/// 모르는 값이면 기본값으로 떨어진다 — 여기서 멈추면 글자 하나 때문에 도구가 안 도는 셈이다.
 pub fn pick(env: Option<&str>, setting: Option<&str>) -> Lang {
     env.filter(|s| !s.trim().is_empty())
         .and_then(Lang::parse)
@@ -182,15 +187,19 @@ mod tests {
         assert_eq!(Lang::parse("kr"), None, "없는 코드를 받아 주면 오타가 조용히 산다");
     }
 
-    /// **환경이 먼저, 그다음이 설정, 없으면 영어다.** 모르는 값에서 멈추지 않는다 —
-    /// 글자 하나 때문에 도구가 안 도는 셈이 된다.
+    /// **환경이 먼저, 그다음이 설정, 없으면 기본값이다.** 모르는 값에서 멈추지 않는다 —
+    /// 글자 하나 때문에 도구가 안 도는 셈이 된다. 기본값이 무엇인지는 여기서 안 박는다:
+    /// 그것은 옮김이 얼마나 찼는지에 따라 바뀌는 값이고([`Lang::default`]), 이 시험이 재는
+    /// 것은 **고르는 차례**다.
     #[test]
-    fn the_environment_wins_then_the_setting_then_english() {
+    fn the_environment_wins_then_the_setting_then_the_default() {
         assert_eq!(pick(Some("ko"), Some("ja")), Lang::Ko, "환경이 설정에 졌다");
         assert_eq!(pick(None, Some("ja")), Lang::Ja);
         assert_eq!(pick(Some(""), Some("ja")), Lang::Ja, "빈 환경변수는 안 준 것이다");
-        assert_eq!(pick(None, None), Lang::En);
-        assert_eq!(pick(Some("kr"), None), Lang::En, "모르는 값에서 멈췄다");
+        assert_eq!(pick(None, None), Lang::default());
+        assert_eq!(pick(Some("kr"), None), Lang::default(), "모르는 값에서 멈췄다");
+        // 영어는 **기준**이라 고르면 늘 잡힌다 — 기본값이 무엇이든.
+        assert_eq!(pick(Some("en"), Some("ko")), Lang::En);
         assert_eq!(pick(Some("kr"), Some("ko")), Lang::Ko, "모르는 환경값이 설정까지 버렸다");
     }
 

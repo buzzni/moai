@@ -192,13 +192,14 @@ fn last_column(l: &str) -> usize {
     cells(&line[..gap + (tail.len() - tail.trim_start().len())])
 }
 
-/// **아무도 고르지 않으면 화면은 영어다**(moai-zeyv, 사용자 결정). 나머지 시험이 `MOAI_LANG=ko`
-/// 를 박고 도는 것과 짝이다 — 그 줄이 빠지면 여기서만 통과하고 화면은 통째로 영어가 된다.
+/// **아무도 고르지 않으면 지금은 한국어고, 영어는 낱말 하나로 온다**(사용자 결정, 리뷰
+/// moai-80qw.cb8). 옮긴 글이 열 줄뿐이라 기본을 영어로 두면 화면이 두 말로 섞인다 — 옮김이
+/// 화면을 덮을 때 `Lang` 의 `#[default]` 한 줄과 함께 이 기대값이 영어로 바뀐다.
 ///
 /// **`MOAI_LANG` 으로 한국어·일본어도 함께 잰다** — 고르는 길이 도는지, 그리고 두 칸 글자가
 /// 섞여도 줄이 서는지. 어느 말이든 같은 수를 대는 것으로 그 화면이 같은 화면임을 잰다.
 #[test]
-fn english_is_the_default_when_nothing_picks_a_language() {
+fn nothing_picked_means_korean_for_now_and_english_is_one_word_away() {
     let s = init("lang");
     ok(s.path(), &["add", "첫 일"]);
     let say = |lang: Option<&str>| {
@@ -212,14 +213,20 @@ fn english_is_the_default_when_nothing_picks_a_language() {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8(out.stdout).unwrap()
     };
-    let english = say(None);
-    assert!(english.contains("Issues 1"), "아무도 안 골랐는데 영어가 아니다\n{english}");
-    // **옮긴 줄만 잰다** — 경고·흐름은 아직 한국어다(표면 하나씩 옮긴다, moai-80qw).
+    // **아무것도 안 고르면 지금은 한국어다**(사용자 결정) — 옮긴 글이 열 줄뿐이라, 기본을
+    // 영어로 두면 화면이 두 말로 섞인다. 옮김이 화면을 덮으면 이 기대값이 영어로 바뀐다.
+    let fallback = say(None);
+    assert!(fallback.contains("이슈 1"), "아무도 안 골랐는데 기본 화면이 아니다\n{fallback}");
+
+    // **영어는 낱말 하나로 온다** — 기준 말이라 늘 고를 수 있다.
+    let english = say(Some("en"));
+    assert!(english.contains("Issues 1"), "MOAI_LANG=en 이 안 들었다\n{english}");
     let head = |screen: &str| screen.lines().next().unwrap_or_default().to_string();
     assert!(!head(&english).contains("이슈"), "영어 화면의 머리에 한국어가 남았다\n{english}");
 
     let korean = say(Some("ko"));
     assert!(korean.contains("이슈 1"), "MOAI_LANG=ko 가 안 들었다\n{korean}");
+    assert_eq!(korean, fallback, "고른 한국어와 기본 화면이 다르다");
 
     // 없는 키는 영어로 떨어진다 — 화면이 비지 않는다.
     let japanese = say(Some("ja_JP.UTF-8"));
@@ -266,9 +273,9 @@ fn the_config_picks_the_language_and_a_bad_one_is_named() {
     let out = cmd.output().expect("moai 를 실행하지 못했다");
     assert!(String::from_utf8_lossy(&out.stdout).contains("이슈 1"), "MOAI_LANG 이 설정에 졌다");
 
-    // **오타는 조용히 영어가 되지 않는다.** 이 줄이 없으면 고친 설정이 왜 안 듣는지 알 길이 없다.
+    // **오타는 조용히 기본값이 되지 않는다.** 이 줄이 없으면 고친 설정이 왜 안 듣는지 알 길이 없다.
     let (screen, said) = run("[i18n]\nlang = \"kr\"\n");
-    assert!(screen.contains("Issues 1"), "모르는 값에서 영어로 안 떨어졌다\n{screen}");
+    assert!(screen.contains("이슈 1"), "모르는 값에서 기본값(지금은 한국어)으로 안 떨어졌다\n{screen}");
     assert!(said.contains("`i18n.lang`") && said.contains("\"kr\""), "틀린 설정을 아무도 안 댔다 — {said:?}");
     // 보드도 그것을 안다 — 없으면 "드러난 문제 없다" 가 방금 stderr 에 한 말을 뒤집는다.
     assert!(screen.contains("사용자 설정에서 못 읽은 것 1건"), "보드가 stderr 의 말을 모른다\n{screen}");
