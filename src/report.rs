@@ -341,9 +341,31 @@ pub fn is_work(i: &Issue) -> bool {
 ///
 /// `ready` 의 아래쪽 줄과 훅이 접힌 뒤에 싣는 줄이 같은 집합이다. 두 벌로
 /// 두면 한쪽만 고쳐지고, 그러면 화면이 같은 세션을 두 가지로 말한다.
+///
+/// **가려진 줄([`eclipsed`])은 집은 일이 아니다**(moai-es40, 사용자 결정 2026-09-18) — `ready`·
+/// `held` 가 그 줄을 집을 일로 안 내는 것(moai-lg2t)과 같은 자다. 그 줄은 트리에서 `(길 잃음)` 에
+/// 서고 어느 묶음에도 안 드는데, 여기만 세면 보드의 벌여 놓은 셈·`ready` 아래 줄·훅 초점이 그 줄을
+/// 집은 일로 댄다. 대가는 훅 초점이 그 줄을 못 싣는 것이다 — 그 id 는 `duplicate_id` 로 파일째 쓰기가
+/// 막혀, 고치기 전에는 그 줄로 일할 수 없다. **자리를 묻는 쪽([`places`]·[`stranded`])만 그 줄까지
+/// 본다**([`started`]).
 pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
+    let held = started(issues, cfg);
+    if held.is_empty() {
+        return held;
+    }
+    let eclipsed = eclipsed(issues);
+    held.into_iter().filter(|i| !eclipsed(i)).collect()
+}
+
+/// **시작한 칸에 선 일 줄** — 미룬 것만 빼고, 쌍둥이에게 가려진 줄([`eclipsed`])도 든다. [`wip`] 는
+/// "지금 하는 일" 을 묻고 이것은 "그 칸을 옮겨 놓은 줄이 어디서 일하나" 를 묻는다(moai-es40, 사용자
+/// 결정). 머지가 같은 id 의 에픽 뒷줄을 남기면 앞줄의 집힌 이슈는 가려지는데, 그 세션이 죽었으면 그
+/// 줄을 대는 것은 [`stranded`] 뿐이다 — 여기서 걸렀다면 `duplicate_id` 하나 때문에 버려진 칸이 영영
+/// 안 보인다(리뷰 moai-ya06). 자리 셈은 넷(`places`·`blinding`·`placeable`·`stranded`)이 **이 하나**로
+/// 되짚는다 — 하나라도 `wip` 을 쓰면 `stranded` 가 센 줄의 자리를 `show` 가 모른다.
+fn started<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     // **값싼 것을 먼저 거른다.** 훅이 도구 호출마다 여기를 지나므로, 집은 것이
-    // 없으면 조상을 타는 셈(`put_off`)을 아예 안 돌린다.
+    // 없으면 조상을 타는 셈(`put_off`)도 종류 지도(`eclipsed`)도 아예 안 돌린다.
     let held: Vec<&Issue> = issues
         .iter()
         .filter(|i| is_work(i) && cfg.is_started(i.status.as_str()))
@@ -481,7 +503,7 @@ fn lossy_path<S: serde::Serializer>(p: &std::path::Path, s: S) -> Result<S::Ok, 
     s.serialize_str(&p.to_string_lossy())
 }
 
-/// 집은 줄(`wip`) → 그 일이 [`어디에 서 있는가`](Place). **자리가 안 보이는 줄도 키를 받는다** —
+/// 집은 줄([`started`]) → 그 일이 [`어디에 서 있는가`](Place). **자리가 안 보이는 줄도 키를 받는다** —
 /// 키가 없는 것은 안 집은 줄이다. 받는 쪽이 "안 집음" 과 "집었는데 안 보임" 을 한 지도로 가른다.
 /// 집은 멤버를 둔 묶음도 키를 받는다(멤버에서 굴려 올린다, [`settle`]).
 ///
@@ -505,7 +527,7 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
     // **같은 id 의 줄이 둘이면 한 번만 센다** — 뒷줄이 선다(`Load::get` 과 같은 자). 줄마다 세면
     // 한 워크트리가 한 id 에 두 번 서서, 받는 쪽이 "두 곳에서 돌고 있다" 로 읽는다(moai-ddtg 에서
     // `Warning::new` 가 같은 까닭으로 id 를 한 번씩만 담는다).
-    let picked: BTreeMap<&str, &Issue> = wip(issues, cfg).into_iter().map(|i| (i.id.as_str(), i)).collect();
+    let picked: BTreeMap<&str, &Issue> = started(issues, cfg).into_iter().map(|i| (i.id.as_str(), i)).collect();
     let mut found: BTreeMap<&str, Vec<&Workplace>> = picked.keys().map(|id| (*id, Vec::new())).collect();
     // 둘 다 **빠른 길일 뿐 판정이 아니다** — 아래를 다 돌아도 [`settle`] 이 같은 답(빈 지도)을
     // 낸다. 계약을 쥔 자는 거기 하나고, 여기는 헛일을 아낄 뿐이라 갈릴 것이 없다.
@@ -597,7 +619,7 @@ pub fn blinding<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> V
     // **같은 id 의 줄을 [`places`] 처럼 접지 않아도 답이 같다** — [`claims`] 는 줄에서 `id` 만
     // 보고 소속은 `epics`·`stones` 지도에서 읽는데, 그 지도는 이미 뒷줄이 이긴다(`groups`). 접는
     // 값을 아끼되, `claims` 가 줄의 필드를 직접 보게 되면 여기도 저쪽처럼 접어야 한다.
-    let picked = wip(issues, cfg);
+    let picked = started(issues, cfg);
     if picked.is_empty() {
         return Vec::new();
     }
@@ -724,7 +746,7 @@ fn settle<'a>(
 /// 부르는 쪽(`cmd/show`)이 워크트리를 읽기 전에 이것으로 판다. 안 집은 줄 하나를 펼치는 흔한 길이
 /// 옆 스냅샷을 다 푸는 값을 치르지 않게 하는 문인데, 그 판정은 이슈의 뜻이라 여기 둔다.
 pub fn placeable(issues: &[Issue], cfg: &Config, i: &Issue) -> bool {
-    let picked = wip(issues, cfg);
+    let picked = started(issues, cfg);
     if picked.iter().any(|w| w.id == i.id) {
         return true;
     }
@@ -743,7 +765,7 @@ const STRANDED_GRACE_SECS: i64 = 3600;
 ///
 /// - **워크트리를 하나도 안 쓰는 저장소에서는 조용하다** — 거기서는 모든 일이 main 에서 돌아,
 ///   집은 줄마다 떠든다
-/// - 미룬 것은 [`wip`] 이 이미 뺐다
+/// - 미룬 것은 [`started`] 가 이미 뺐다
 /// - **막지 않는다.** 치명이 아니라 종료 코드를 안 바꾼다. 고치는 손은 셋이고 사람이 고른다 —
 ///   이어 할 것이면 새 워크트리를 띄우고, 놓을 것이면 `todo` 로, 지금 안 할 것이면 미룬다
 /// - **`status()` 에 안 넣는다.** 훅의 기준선과 `Stop` 이 `status()` 의 경고를 세는데, 이것은 남의
@@ -754,9 +776,10 @@ pub fn stranded(issues: &[Issue], cfg: &Config, trees: &[Workplace], now: &str) 
     // **집은 줄로 되짚는다.** [`places`] 는 묶음 id 에도 키를 주므로(멤버에서 굴려 올린다) 그것을
     // 걸러야 하는데, **줄 전체로 되짚으면 안 된다** — 그 지도는 뒷줄이 이기니 같은 id 의 묶음
     // 쌍둥이가 앞줄의 집힌 이슈를 가리고, 그것을 종류로 거르면 **자리를 잃은 산 줄이 조용히
-    // 빠진다**(머지가 남긴 `duplicate_id` 하나로 그 줄이 영영 안 보인다). `wip` 으로 되짚으면
-    // 묶음 id 는 애초에 없어 거를 것도 없다 — 거르는 자가 하나다.
-    let picked: BTreeMap<&str, &Issue> = wip(issues, cfg).into_iter().map(|i| (i.id.as_str(), i)).collect();
+    // 빠진다**(머지가 남긴 `duplicate_id` 하나로 그 줄이 영영 안 보인다). [`started`] 로 되짚으면
+    // 묶음 id 는 애초에 없어 거를 것도 없다 — 거르는 자가 하나다. `wip` 이 아니다: 그쪽은 가려진
+    // 줄을 뺀다(moai-es40).
+    let picked: BTreeMap<&str, &Issue> = started(issues, cfg).into_iter().map(|i| (i.id.as_str(), i)).collect();
     // **`Lost` 만 센다.** 방금 집은 것(`Fresh`)과 못 읽은 워크트리가 있어 모르는 것(`Unknown`)은
     // 자리 없음이 아니다 — 둘을 세면 산 일을 남에게 다시 주는 쪽으로 틀린다.
     let lost: Vec<&Issue> = at
@@ -2965,7 +2988,8 @@ mod tests {
     /// **같은 id 의 묶음 쌍둥이가 자리 잃은 줄을 가리지 않는다**(리뷰 moai-ya06). 머지가 한 id 에
     /// 두 줄을 남기고 뒷줄이 에픽이면, 줄 전체로 되짚는 지도(`by_id`)는 그 에픽을 내준다 — 그것을
     /// 종류로 거르던 판이 앞줄의 **집힌 이슈**를 통째로 버려, 세션이 죽은 줄이 `duplicate_id`
-    /// 하나 때문에 영영 안 보였다. 되짚는 자는 `wip` 이라 묶음 id 는 애초에 안 든다.
+    /// 하나 때문에 영영 안 보였다. 되짚는 자는 `started` 라 묶음 id 는 애초에 안 든다 — 가려진
+    /// 줄을 빼는 `wip` 이 아니다(moai-es40).
     #[test]
     fn a_group_twin_of_the_same_id_does_not_hide_stranded_work() {
         let issues = vec![
@@ -5106,6 +5130,23 @@ mod tests {
         // 같은 종류의 쌍둥이는 가려지지 않는다 — 같은 값을 같은 자로 읽는다.
         let twins = vec![make("argos-0003", Kind::Issue, "todo"), make("argos-0003", Kind::Issue, "todo")];
         assert_eq!(ready(&twins, &cfg()).len(), 2);
+    }
+
+    /// **가려진 줄은 집은 일도 아니다**(moai-es40, 사용자 결정). `ready`·`held` 가 거르는 줄을 `wip` 만
+    /// 세면 보드의 벌여 놓은 셈·`ready` 아래 줄·훅 초점이 `(길 잃음)` 에 선 줄을 집은 일로 댄다.
+    #[test]
+    fn an_eclipsed_row_is_not_counted_as_picked() {
+        let rows = vec![
+            make("argos-0001", Kind::Issue, "in_progress"),
+            make("argos-0001", Kind::Epic, "todo"),
+            make("argos-0002", Kind::Issue, "in_progress"),
+        ];
+        let ids: Vec<&str> = wip(&rows, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["argos-0002"], "가려진 줄을 집은 일로 셌다");
+
+        // 같은 종류의 쌍둥이는 가려지지 않는다 — 둘 다 집은 일이다.
+        let twins = vec![make("argos-0003", Kind::Issue, "in_progress"), make("argos-0003", Kind::Issue, "in_progress")];
+        assert_eq!(wip(&twins, &cfg()).len(), 2);
     }
 
     // ── 미룬 것이 막고 있으면 까닭을 말한다 ──────────────────────────
