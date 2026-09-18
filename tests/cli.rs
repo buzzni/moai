@@ -5981,6 +5981,8 @@ fn an_epic_line_does_not_join_the_epic_it_names() {
     let inner = add(s.path(), &["안쪽", "--type", "epic", "-e", &outer]);
     assert!(line_of(s.path(), &inner).contains(&format!(r#""epic":"{outer}""#)), "필드를 지웠다");
     assert!(!ok(s.path(), &["show", "-e", &outer]).contains(&inner), "`-e` 가 트리에 없는 에픽 줄을 골랐다");
+    let shown = ok(s.path(), &["show", &inner]);
+    assert!(shown.contains("에픽에 안 든다"), "상세가 그 필드를 소속처럼 그렸다 — {shown}");
     let st = ok(s.path(), &["status", "--json"]);
     let warning = |kind: &str| st.split("{\"kind\":").find(|w| w.starts_with(&format!("\"{kind}\""))).map(str::to_string);
     assert!(warning("dangling_epic").is_some_and(|w| w.contains(&inner)), "못 쓸 참조로 안 댔다 — {st}");
