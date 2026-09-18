@@ -54,7 +54,14 @@ pub fn short_stamp(at: &str) -> String {
 
 /// `#a #b` — 태그를 사람에게 댈 때의 모양. CLI 표·상세와 탐색기의 목록 열·상세가 같이 쓴다.
 pub fn tags_of(i: &Issue) -> String {
-    i.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
+    tag_line(&i.tags)
+}
+
+/// 태그 표기가 정해지는 **한 자리**. 아직 `Issue` 가 아닌 것 — `add --from` 의 연습과
+/// `idea promote` 미리보기가 그리는 초안 — 도 이것을 쓴다. `add` 가 손으로 짓던 판은 표기를
+/// 바꾸면 show·status·탐색기만 따라가, 방금 만든 줄의 태그가 확인 줄에서 다르게 보였다.
+pub fn tag_line(tags: &[String]) -> String {
+    tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
 }
 
 /// "미룸 (3일)" 이나 "미룸 — <줄> 밑" — 계획에 있으면 `None`.
@@ -1663,6 +1670,31 @@ mod tests {
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    /// **태그 표기는 `tag_line` 한 자리에서 정한다.** `add` 의 확인 줄과 연습이 손으로 지어,
+    /// 표기를 바꾸면 방금 만든 줄의 태그만 옛 모양으로 보였다. 표면 코드에 같은 짓기가 다시
+    /// 서면 여기서 이름을 대며 붉어진다 — 초안의 `\#` 풀기(`draft.rs`)는 표기가 아니라 글이다.
+    #[test]
+    fn tags_are_spelled_in_one_place() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![src];
+        let mut built = Vec::new();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
+                let path = entry.expect("디렉터리 항목").path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|x| x == "rs") && !path.ends_with("view.rs") {
+                    let text = std::fs::read_to_string(&path).expect("소스를 못 읽는다");
+                    if text.contains("format!(\"#{t}\")).collect") {
+                        built.push(path.display().to_string());
+                    }
+                }
+            }
+        }
+        assert!(built.is_empty(), "태그 줄을 손으로 짓는다 — view::tag_line 을 쓴다: {built:?}");
+        assert_eq!(tag_line(&["a".into(), "b".into()]), "#a #b");
     }
 
     fn no_epics() -> crate::report::EpicLabels<'static> {
