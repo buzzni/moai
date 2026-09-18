@@ -4428,3 +4428,4 @@
 {"ts":"2026-09-18T12:12:34Z","id":"moai-wams","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 에 머지 (570243f) — show <id> --json 이 조건부 키를 되쓴 줄에서도 걷는다"}
 {"ts":"2026-09-18T12:12:34Z","id":"moai-fqnr.ce0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1·3·4·6 반영(d429c11, edit.rs 고침은 되돌리고 show.rs 에 이름을 적음). 2 는 멤버 moai-qn5d(결정 필요, 첫 칸), 5 는 설계가 받은 값"}
 {"ts":"2026-09-18T12:12:59Z","id":"moai-fqnr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: moai-qn5d 의 결정(A — Row::of 에서 한 목록으로 걷기 / B — status 알림) 뒤, edit.rs 를 z3lo 가 놓으면 줄 내는 명령 전부로 넓히고 show.rs 의 MAY 와 edit.rs 의 INHERITED 를 한 목록으로 모은다. show <id> --json 몫은 570243f 로 끝남."}
+{"ts":"2026-09-18T12:13:10Z","id":"moai-kbky","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
