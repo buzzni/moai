@@ -4418,3 +4418,4 @@
 {"ts":"2026-09-18T12:09:29Z","id":"moai-4hda.gt8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 지적 0건이라 반영할 것이 없다. 에픽 도중 담은 moai-rl5w(--help 의 MOAI_LANG 한 줄)는 src/cli.rs 를 wxkm 이 쥐어 idea 로 둔다 — 에픽이 내건 조각 옮기기는 그것 없이 이뤄진다"}
 {"ts":"2026-09-18T12:09:29Z","id":"moai-acy5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T12:09:29Z","id":"moai-4hda.gt8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 0건, 반영할 것 없음. 넘긴 것 없음(moai-rl5w 는 에픽 도중 담은 idea)"}
+{"ts":"2026-09-18T12:09:49Z","id":"moai-4hda","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음. 남은 것은 idea moai-rl5w(--help 의 MOAI_LANG 한 줄) — src/cli.rs 가 풀리면 집는다"}
