@@ -359,8 +359,9 @@ impl App {
     /// 같은 상태를 두 키가 달리 부르지 않는다.
     ///
     /// **도는 층 읽기는 버린다**(moai-800o). 그것은 이 줄을 재기 **전에** 띄운 것이라, 늦게 닿으면
-    /// 여기서 고쳐 세운 줄(`Look::Shut`)을 옛 디렉터리의 값으로 덮는다. 들어가면 층의 수는 볼 일도
-    /// 없다 — 버린 줄은 다음에 층에 섰을 때 [`Layer::stale`] 이 다시 고른다.
+    /// 여기서 고쳐 세운 줄(`Look::Shut`)을 옛 디렉터리의 값으로 덮는다. 버린 줄은 층에 선 다음
+    /// 걸음에 [`Layer::stale`] 이 다시 고른다 — 못 들어갔거나 `n` 으로 층에 남았으면 곧바로,
+    /// 들어갔으면 올라올 때다.
     fn open_place(&mut self, at: usize) -> Option<Repo> {
         if let Some((_, handle)) = self.layer.as_mut()?.pending.take() {
             self.discard(handle);
