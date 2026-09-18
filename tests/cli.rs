@@ -672,6 +672,143 @@ fn dir_in(s: &Scratch, rel: &str) -> PathBuf {
     d
 }
 
+/// **`.moai` 밖 한눈 보기도 자리 없는 줄을 비춘다**(moai-p3bs). 죽은 세션을 찾으러 돌아온 사람이
+/// 프로젝트 밖에서 보는 화면이 여기라, 안쪽 `moai status` 에만 그 말이 있으면 못 본다. 경고 수와
+/// `--json` 의 `warnings` 가 안쪽과 같은 수를 말한다.
+#[test]
+fn the_overview_counts_work_with_no_live_worktree() {
+    let s = Scratch::new("ovstranded");
+    let (one, out) = (dir_in(&s, "one"), dir_in(&s, "out"));
+    git(&one, &["init", "-q"]);
+    ok(&one, &["init", "argos"]);
+    let lost = add(&one, &["세션이 죽은 일"]);
+    ok(&one, &["mv", &lost, "in_progress"]);
+    git(&one, &["add", "-A"]);
+    git(&one, &["commit", "-q", "-m", "집는다"]);
+    // 이름이 그 줄을 안 가리키는 워크트리 — 워크트리를 쓰는 저장소라는 표시다.
+    git(&one, &["worktree", "add", "-q", ".claude/worktrees/agent-x", "-b", "worktree-agent-x"]);
+    let cfg = registry(&s, &[&one]);
+
+    let inside = ok_at(&one, LATER, &["status"]);
+    assert!(inside.contains("일하는 워크트리가 없는 것 1건"), "안쪽이 안 비췄다\n{inside}");
+    // 안쪽이 세는 경고 수 — 밖에서도 같은 수를 말해야 한다. **`warnings` 안만 센다**:
+    // `"kind":` 는 `notices` 에도 붙어, 통째로 세면 알림 하나가 서는 날 이 시험이 자기가
+    // 재겠다고 한 것과 아무 상관 없는 까닭으로 깨진다.
+    let json = ok_at(&one, LATER, &["status", "--json"]);
+    let want = json
+        .split("\"warnings\":[")
+        .nth(1)
+        .and_then(|r| r.split("],\"notices\":").next())
+        .unwrap_or_else(|| panic!("경고 배열을 못 찾았다\n{json}"))
+        .matches("\"kind\":")
+        .count()
+        .to_string();
+    let n = |t: &str| t.split("경고 ").nth(1).and_then(|r| r.split('건').next()).map(str::to_string);
+
+    let out_text = isolated(BIN)
+        .args(["status"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(out_text.status.success());
+    let text = String::from_utf8(out_text.stdout).unwrap();
+    let mine = block(&text, "one");
+    assert!(!mine.contains("드러난 문제 없다"), "자리 없는 줄을 안 세웠다\n{text}");
+    assert_eq!(n(mine), Some(want), "안쪽과 다른 수를 말한다\n{text}");
+
+    let machine = isolated(BIN)
+        .args(["status", "--json"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let json = String::from_utf8(machine.stdout).unwrap();
+    assert!(json.contains("\"kind\":\"stranded\"") && json.contains(&lost), "{json}");
+
+    // **탐색기의 프로젝트 층도 같은 셈을 쓴다**(`layer::summarize`) — 층은 경고를 수로만 내므로
+    // 그 수에 들었는지와, 무엇인지 대는 `stranded` 키로 본다.
+    let layer = isolated(BIN)
+        .args(["tui", "--json"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let layer = String::from_utf8(layer.stdout).unwrap();
+    assert!(layer.contains("\"stranded\":1"), "층이 자리 없는 줄을 안 셌다\n{layer}");
+    assert!(layer.contains("\"warnings\":2"), "층의 경고 수에 안 들었다\n{layer}");
+
+    // **못 읽은 워크트리가 있으면 "센 결과 0" 이 아니라 "못 셌다" 다**(리뷰 moai-p3bs.op2) —
+    // 밖에서는 옆 스냅샷을 아예 안 여므로, 세지 못했다는 사실이 여기서 사라지면 죽은 세션이
+    // 통째로 조용해진다.
+    let snap = one.join(".claude/worktrees/agent-x/.moai/issues.jsonl");
+    std::fs::remove_file(&snap).unwrap();
+    std::fs::create_dir(&snap).unwrap();
+    let blind = isolated(BIN)
+        .args(["status"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let blind = String::from_utf8(blind.stdout).unwrap();
+    let mine = block(&blind, "one");
+    assert!(!mine.contains("드러난 문제 없다"), "못 셌는데 문제 없다고 했다\n{blind}");
+    assert!(mine.contains("옆 워크트리 문제 1건"), "못 읽은 워크트리를 안 셌다\n{blind}");
+    // **센 것은 줄로도 댄다** — 수만 서면 `— 위 줄` 이 없는 줄을 가리키고 어느 워크트리인지 모른다.
+    assert!(
+        mine.contains("스냅샷을 못 읽었다 — ⎇ worktree-agent-x: .claude/worktrees/agent-x"),
+        "못 읽은 워크트리를 세기만 하고 대지 않았다\n{blind}"
+    );
+
+    // **겹쳐 보면 `gather` 가 같은 워크트리를 이미 냈다 — 두 번 세지 않는다**(`status` 의
+    // `said_already` 와 같은 자). 겹쳐 세면 깨진 워크트리 하나가 `옆 워크트리 문제 2건` 으로 서서
+    // 보는 쪽이 두 곳이 깨진 줄로 읽는다. **기계도 같은 사실을 안쪽과 같은 키로 받는다** — 없으면
+    // 밖에서 읽는 쪽은 "자리 잃은 일이 없다" 와 "못 셌다" 를 못 가른다.
+    let both = isolated(BIN)
+        .args(["status", "--worktree"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let both = String::from_utf8(both.stdout).unwrap();
+    assert!(block(&both, "one").contains("옆 워크트리 문제 1건"), "한 워크트리를 두 번 셌다\n{both}");
+    assert!(!block(&both, "one").contains("스냅샷을 못 읽었다 — ⎇"), "`gather` 가 낸 워크트리를 한 번 더 댔다\n{both}");
+    let machine = isolated(BIN)
+        .args(["status", "--worktree", "--json"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let machine = String::from_utf8(machine.stdout).unwrap();
+    assert!(
+        machine.contains("\"unreadable_worktrees\":[{\"path\":\".claude/worktrees/agent-x\""),
+        "밖 한눈 보기의 기계 출력이 못 읽은 워크트리를 안 댔다\n{machine}"
+    );
+
+    let layer = isolated(BIN)
+        .args(["tui", "--json"])
+        .current_dir(&out)
+        .env("MOAI_CONFIG", &cfg)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let layer = String::from_utf8(layer.stdout).unwrap();
+    assert!(layer.contains("\"unreadable_worktrees\":1"), "층이 못 읽은 워크트리를 안 댔다\n{layer}");
+}
+
 /// **같은 id 가 두 프로젝트에 있어도 섞이지 않는다.** 접두어가 같은 두 저장소는 흔하고,
 /// 줄을 한데 모아 세면 한쪽에서 집은 일이 다른 쪽 보드에 서거나 `ready` 에서 빠진다.
 /// 디렉터리 이름이 겹치면 위 디렉터리를 붙여 가른다.
@@ -6754,6 +6891,19 @@ fn show_names_the_worktree_a_picked_row_lives_in() {
     let out = ok(&main, &["show", &idle]);
     assert!(!out.contains("자리"), "안 집은 줄에 자리를 세웠다\n{out}");
     assert!(!ok(&main, &["show", &idle, "--json"]).contains("workplaces"));
+
+    // **딸린 워크트리 안에서 펼쳐도 경로는 main 에서 잰 상대 경로다**(moai-fygk) — 제 꼭대기로
+    // 재면 옆 워크트리가 하나도 안 잘려 기계의 절대 경로가 그대로 나간다. 규약상 세션은 대개
+    // 워크트리 안에서 도므로 그쪽이 흔한 자리다.
+    let other = field(&ok(&main, &["add", "옆에서 할 일 하나 더", "--json"]), "id");
+    ok(&main, &["mv", &other, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "하나 더 집는다"]);
+    let dir2 = format!(".claude/worktrees/{other}");
+    git(&main, &["worktree", "add", "-q", &dir2, "-b", &format!("worktree-{other}")]);
+    let line = place(&ok(&inside, &["show", &other, "--worktree"]));
+    assert!(line.contains(&dir2), "main 에서 잰 상대 경로가 아니다\n{line}");
+    assert!(!line.contains(&main.display().to_string()), "옆 워크트리가 절대 경로로 샜다\n{line}");
 
     // **제 워크트리 안에서 펼쳐도 자리는 빈 칸이 아니다** — 뿌리와 같은 자리라 잘라 내면 아무것도
     // 안 남는다. 딸린 워크트리는 `--worktree` 로 겹쳐 봐야 자리를 잰다.

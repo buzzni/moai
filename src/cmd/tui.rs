@@ -102,6 +102,8 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                         counts: sum.counts.into_iter().collect(),
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),
                         warnings: sum.warnings,
+                        stranded: sum.stranded,
+                        unreadable_worktrees: sum.blind,
                         unreadable: sum.unreadable,
                     }
                 });
@@ -162,7 +164,18 @@ struct Counted {
     counts: std::collections::BTreeMap<String, usize>,
     picked: Vec<String>,
     warnings: usize,
+    /// 그중 집었는데 일하는 워크트리가 없는 줄(moai-p3bs) — 화면의 층이 낱말로 대는 그 수다.
+    /// 없으면 키를 안 단다: 늘 `0` 을 달면 옛 판과 견주는 쪽이 새 뜻을 얻은 줄 모른다.
+    #[serde(skip_serializing_if = "is_zero")]
+    stranded: usize,
+    /// 스냅샷을 못 읽은 워크트리의 수 — 있으면 위의 수는 "센 결과 0" 이 아니라 "못 셌다" 다.
+    #[serde(skip_serializing_if = "is_zero")]
+    unreadable_worktrees: usize,
     unreadable: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// **TTY 가 아니면 켜지 않는다.** 파이프에 대고 대체 화면을 켜면 그 자리에서

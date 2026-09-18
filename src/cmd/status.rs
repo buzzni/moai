@@ -35,8 +35,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **자리 없는 집은 줄은 여기서만 싣는다**(moai-4370) — 까닭은 `report::stranded`. 치명이 아니라
     // 아래 종료 코드는 안 바뀐다. 언제 재는지는 `worktree::workplaces` 가 정한다 — 딸린 워크트리
     // 안에서 겹쳐 보지 않았으면 빈 목록이 오고, 그러면 `stranded` 가 조용하다.
-    let trees = crate::worktree::workplaces(&repo.root, &repo.config, worktree, &load.issues);
-    st.warnings.extend(report::stranded(&load.issues, &repo.config, &trees, &now));
+    let (lost, unknown) = crate::worktree::stranded_at(&repo.root, &repo.config, &load.issues, worktree, &now);
+    st.warnings.extend(lost);
     // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정에서 그 워크트리는 "아무도
     // 없다" 가 아니라 "모른다" 로 빠지므로(`report::Place::Unknown`), 말이 없으면 경고가 조용한
     // 까닭을 알 길이 없다. 옆 워크트리의 문제로 세는 자리는 `gather` 와 같다 — 종료 코드는
@@ -44,17 +44,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     //
     // **가지와 경로를 함께 댄다.** 가지만 대면 떼어 낸 HEAD 의 이름은 커밋 앞 일곱 자라
     // (`Workplace::branch`) 같은 커밋에 선 워크트리 둘이 글자까지 같아져 보는 쪽이 하나로 읽고,
-    // 경로만 대면 `gather` 의 `⎇ <가지>` 와 낱말이 갈린다. 경로는 `show` 와 같은 자로 줄인다 —
-    // 워크트리의 꼭대기에서 재, 기계의 절대 경로를 그대로 내보내지 않는다.
-    let top = crate::worktree::top_of(&repo.root).unwrap_or_else(|| repo.root.clone());
-    let unknown: Vec<report::Workplace> = trees
-        .iter()
-        .filter(|t| t.unknown)
-        .map(|t| report::Workplace {
-            path: t.path.strip_prefix(&top).unwrap_or(&t.path).to_path_buf(),
-            ..t.clone()
-        })
-        .collect();
+    // 경로만 대면 `gather` 의 `⎇ <가지>` 와 낱말이 갈린다. 경로를 어디서 재는지는
+    // `worktree::workplaces` 가 정한다 — `show` 와 같은 자다.
     // **`gather` 가 이미 낸 것은 두 번 안 낸다** — `--worktree` 면 그쪽이 옆 스냅샷을 빠짐없이
     // 열어 같은 워크트리를 `⎇ <가지>: …` 로 냈다. 두 번 내면 stderr 에 같은 워크트리가 낱말만
     // 바꿔 두 줄로 서고, 보드의 `옆 워크트리 문제 N건` 이 하나를 둘로 세어 보는 쪽이 두 곳이
@@ -170,12 +161,25 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     .into_iter()
                     .map(|id| report::Unreadable { id })
                     .collect();
+                // **자리도 여기서 잰다**(moai-p3bs) — 안쪽 `moai status` 와 같은 자
+                // (`worktree::stranded_at`). 한때 이 화면에만 없어, 프로젝트 밖에서 보드를 보는
+                // 사람은 죽은 세션의 일을 영영 못 봤다. 옆 워크트리를 겹치는지는 부른 쪽을 따른다.
+                let mut status = report::status(&load.issues, &unreadable, &repo.config, &now);
+                let (lost, blind) =
+                    crate::worktree::stranded_at(&repo.root, &repo.config, &load.issues, worktree, &now);
+                status.warnings.extend(lost);
                 view::Board {
                     cfg: &repo.config,
-                    status: report::status(&load.issues, &unreadable, &repo.config, &now),
+                    status,
                     picked: report::wip(&load.issues, &repo.config),
                     origin: &p.origin,
                     trouble: &p.trouble,
+                    // **못 읽은 워크트리는 여기서도 센다**(리뷰 moai-p3bs.op2) — 밖에서는 `gather`
+                    // 가 겹쳐 보지 않으면 옆 스냅샷을 아예 안 열어 `trouble` 이 비고, 그러면 죽은
+                    // 세션과 못 읽는 워크트리가 함께 있는 저장소가 "드러난 문제 없다" 로 선다.
+                    // 목록으로 넘긴다 — `trouble` 이 이미 낸 것을 두 번 세지 않는 자와 `--json` 이
+                    // 그 둘을 다 여기서 읽는다(`view::projects_status`, 아래 `Said`).
+                    blind,
                 }
             })
         })
@@ -188,6 +192,13 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             picked: Vec<super::Row<'a>>,
             #[serde(skip_serializing_if = "<[String]>::is_empty")]
             trouble: &'a [String],
+            /// **못 읽은 워크트리는 기계에게도 댄다** — 안쪽 `status --json` 과 같은 키·같은 모양
+            /// (리뷰 moai-ya06). 그런 워크트리가 있으면 자리 판정이 통째로 `모른다` 로 접혀
+            /// `stranded` 가 조용해지는데, 여기 키가 없으면 밖에서 읽는 쪽은 "자리 잃은 일이
+            /// 없다" 와 "못 셌다" 를 못 가른다 — 감독 스킬이 이 목록으로 죽은 세션의 일을 거두므로
+            /// 그 침묵이 곧 일을 영영 안 거두는 것이 된다. 없으면 키를 안 단다.
+            #[serde(skip_serializing_if = "<[report::Workplace]>::is_empty")]
+            unreadable_worktrees: &'a [report::Workplace],
         }
         let entries = projects
             .iter()
@@ -199,6 +210,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     status: &b.status,
                     picked: b.picked.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
                     trouble: &p.trouble,
+                    unreadable_worktrees: &b.blind,
                 }),
             })
             .collect();
