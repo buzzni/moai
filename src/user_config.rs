@@ -265,8 +265,12 @@ pub struct Doc {
 }
 
 impl Doc {
-    /// 파싱한다. **`project` 가 표 배열이 아니면 거절한다** — 그 키가 무엇인지
-    /// 모르는 채로 항목을 더하면 남의 값을 덮는다.
+    /// 파싱한다. TOML 로 못 읽는 것만 거절한다.
+    ///
+    /// **`project` 의 모양은 여기서 안 본다**(moai-aguj). 여기서 거절하면 `project = [{ … }]` 하나로 파일
+    /// 전체가 깨진 것이 되어, 그 키와 상관없는 보기·읽음·언어까지 못 읽고 못 적는다 — 토글마다 '보기를
+    /// 설정에 못 적었다' 가 섰다. 엄함은 지금 쓰는 줄에 대한 것이라, 모양은 그 키를 읽고 쓰는 자리
+    /// ([`Doc::projects`]·[`Doc::add`]·[`Doc::remove`]·[`Doc::set_hue`])가 잰다.
     pub fn parse(src: &str) -> Result<Doc, String> {
         let (bom, body) = match src.strip_prefix('\u{feff}') {
             Some(rest) => (true, rest),
@@ -276,16 +280,6 @@ impl Doc {
             // 라이브러리의 오류는 여러 줄 그림이다. 한 줄로 접어야 목록 속 한 줄로 선다.
             e.to_string().split_whitespace().collect::<Vec<_>>().join(" ")
         })?;
-        match doc.get(PROJECT) {
-            None => {}
-            Some(item) if item.is_array_of_tables() => {}
-            Some(item) => {
-                return Err(format!(
-                    "`{PROJECT}` 는 `[[{PROJECT}]]` 표 배열이어야 한다 — 지금은 {}",
-                    item.type_name()
-                ));
-            }
-        }
         let no_eol = !body.is_empty() && !body.ends_with('\n');
         let crlf_lines = body.matches("\r\n").count();
         let crlf = crlf_lines > body.matches('\n').count() - crlf_lines;
@@ -311,6 +305,21 @@ impl Doc {
         if self.bom { format!("\u{feff}{body}") } else { body }
     }
 
+    /// `project` 가 표 배열이 아니면 그 까닭 — 읽기는 알리고 쓰기는 멈춘다. 그 키가 무엇인지 모르는 채로
+    /// 항목을 더하거나 빼면 남의 값을 덮는다.
+    fn odd_projects(&self) -> Option<String> {
+        let item = self.doc.get(PROJECT).filter(|i| !i.is_array_of_tables())?;
+        Some(format!("`{PROJECT}` 는 `[[{PROJECT}]]` 표 배열이어야 한다 — 지금은 {}", item.type_name()))
+    }
+
+    /// 목록을 고치는 자리. 없으면 `None`, 모양이 틀리면 거절(`broken`) — [`Doc::odd_projects`].
+    fn tables_mut(&mut self) -> R<Option<&mut ArrayOfTables>> {
+        if let Some(why) = self.odd_projects() {
+            return Err(refuse(format!("{why} — 목록을 고치지 않는다. 손으로 고친다")));
+        }
+        Ok(self.doc.get_mut(PROJECT).and_then(Item::as_array_of_tables_mut))
+    }
+
     fn tables(&self) -> Option<&ArrayOfTables> {
         self.doc.get(PROJECT).and_then(Item::as_array_of_tables)
     }
@@ -323,7 +332,7 @@ impl Doc {
     /// 빼면 색 오타 하나로 한눈 보기에서 저장소가 통째로 사라진다.
     pub fn projects(&self) -> (Vec<Project>, Vec<String>) {
         let mut out: Vec<Project> = Vec::new();
-        let mut problems = Vec::new();
+        let mut problems: Vec<String> = self.odd_projects().into_iter().collect();
         for (i, t) in self.tables().into_iter().flat_map(ArrayOfTables::iter).enumerate() {
             let at = |e: String| format!("{}번째 [[{PROJECT}]]: {e}", i + 1);
             match entry_path(t) {
@@ -364,7 +373,7 @@ impl Doc {
     /// **값만 바꾼다**([`put_value`]) — `color` 위의 주석·값 뒤의 주석·키 모양은 그대로다.
     /// `Table::insert` 로 갈아 끼우면 키를 새로 지어 그 위의 주석이 말없이 사라진다.
     pub fn set_hue(&mut self, any_of: &[PathBuf], hue: Option<Hue>) -> R<usize> {
-        let Some(aot) = self.doc.get_mut(PROJECT).and_then(Item::as_array_of_tables_mut) else {
+        let Some(aot) = self.tables_mut()? else {
             return Ok(0);
         };
         let mine = |t: &Table| entry_path(t).is_ok_and(|p| any_of.contains(&p));
@@ -380,11 +389,12 @@ impl Doc {
                 path.display()
             )));
         }
-        let mut hit = 0;
+        let (mut hit, mut changed) = (0, false);
         for t in aot.iter_mut().filter(|t| mine(t)) {
             hit += 1;
-            self.dirty |= put_value(t, COLOR, hue.map(|h| toml_edit::Value::from(h.name())));
+            changed |= put_value(t, COLOR, hue.map(|h| toml_edit::Value::from(h.name())));
         }
+        self.dirty |= changed;
         Ok(hit)
     }
 
@@ -397,6 +407,7 @@ impl Doc {
     /// 나중에 `moai init` 하면 보이는 것이 요구다.
     pub fn add(&mut self, dir: &Path) -> R<bool> {
         let text = writable(dir)?;
+        self.tables_mut()?;
         if self.projects().0.iter().any(|p| p.path == dir) {
             return Ok(false);
         }
@@ -458,9 +469,9 @@ impl Doc {
     /// 표 앞의 주석·빈 줄을 통째로 그 표의 머리로 들어, 표를 빼면 함께 사라진다. 바로 위에 붙은 주석은 그 표의
     /// 것이지만, 빈 줄 너머의 것은 파일 머리나 앞 것의 꼬리다 — 주석만 있던 설정에 `add` 한 뒤 도로 빼면 머리
     /// 주석이 사라지던 자리다. 남긴 글은 그 표 뒤에 그려지던 것의 앞에 선다 — 글의 차례가 안 바뀐다.
-    pub fn remove(&mut self, any_of: &[PathBuf]) -> usize {
-        let Some(aot) = self.doc.get_mut(PROJECT).and_then(Item::as_array_of_tables_mut) else {
-            return 0;
+    pub fn remove(&mut self, any_of: &[PathBuf]) -> R<usize> {
+        let Some(aot) = self.tables_mut()? else {
+            return Ok(0);
         };
         let before = aot.len();
         let mut kept: Vec<(isize, String)> = Vec::new();
@@ -480,7 +491,7 @@ impl Doc {
         for (at, head) in kept {
             self.put_before_next(at, head);
         }
-        removed
+        Ok(removed)
     }
 
     /// 파일 차례로 `at` 다음에 그려지는 표의 머리 앞에 `text` 를 붙인다. 뒤에 표가 없으면 끝 글 앞이다.
@@ -1152,7 +1163,8 @@ mod tests {
         assert!(!read(None).problems.is_empty(), "자리를 모르면 그렇다고 말해야 한다");
     }
 
-    /// 깨진 파일은 읽기에서 알리고 계속, 쓰기에서 멈춘다. 파일은 한 글자도 안 바뀐다.
+    /// 깨진 파일은 읽기에서 알리고 계속, 쓰기에서 멈춘다. 파일은 한 글자도 안 바뀐다. `project` 가 표 배열이
+    /// 아닌 것도 목록을 고치는 쓰기는 멈춘다 — 그 키가 무엇인지 모르는 채로 더하면 남의 값을 덮는다.
     #[test]
     fn a_broken_file_is_reported_on_read_and_refused_on_write() {
         let d = scratch("broken");
@@ -1166,8 +1178,39 @@ mod tests {
 
             let e = update(&path, |doc| doc.add(Path::new("/b"))).unwrap_err();
             assert_eq!(e.code, code::BROKEN, "{src:?} → {e}");
+            for e in [
+                update(&path, |doc| doc.remove(&["/a".into()])).unwrap_err(),
+                update(&path, |doc| doc.set_hue(&["/a".into()], Hue::named("green"))).unwrap_err(),
+            ] {
+                assert_eq!(e.code, code::BROKEN, "{src:?} → {e}");
+            }
             assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "깨진 파일을 덮어썼다");
         }
+    }
+
+    /// **`project` 의 모양은 그 키를 쓰는 자리만 막는다**(moai-aguj). `project = [{ … }]` 하나로 보기·읽음·
+    /// 언어까지 못 읽고 못 적던 것 — 엄함은 지금 쓰는 줄에 대한 것이다.
+    #[test]
+    fn an_odd_project_key_blocks_only_the_project_list() {
+        let d = scratch("odd-project");
+        let path = d.join("config.toml");
+        let src = "project = [{ path = \"/a\" }]\n\n[i18n]\nlang = \"en\"\n\n[tui]\nsort = \"title\"\n\n[read]\n\"m-0001\" = \"T\"\n";
+        std::fs::write(&path, src).unwrap();
+        let reg = read(Some(&path));
+        assert!(reg.projects.is_empty(), "{reg:?}");
+        assert!(reg.problems.len() == 1 && reg.problems[0].contains("[[project]]"), "{reg:?}");
+        assert!(reg.look_problems.is_empty(), "보기가 목록의 모양 때문에 못 읽혔다 — {reg:?}");
+        assert_eq!((reg.look.sort.as_deref(), reg.lang.as_deref()), (Some("title"), Some("en")));
+        assert_eq!(reg.read.get("m-0001").map(String::as_str), Some("T"));
+        assert!(read_marks_at(&path).is_some_and(|m| m.contains_key("m-0001")));
+
+        // 보기와 읽음은 적힌다. 목록은 그대로다.
+        update(&path, |doc| doc.merge_look(&reg.look, &Look { sort: Some("created".into()), ..reg.look.clone() })).unwrap();
+        update(&path, |doc| doc.mark_read(&[("m-0002".to_string(), "U".to_string())].into())).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("project = [{ path = \"/a\" }]\n"), "{text}");
+        assert_eq!(read(Some(&path)).look.sort.as_deref(), Some("created"), "{text}");
+        assert!(read(Some(&path)).read.contains_key("m-0002"), "{text}");
     }
 
     /// 못 읽는 항목 하나는 그 줄만 말하고, 나머지는 보이고, 쓰기를 막지 않는다.
@@ -1210,7 +1253,7 @@ mod tests {
         assert!(reg.problems.is_empty(), "{reg:?}");
 
         // 더했다 빼면 처음 바이트로 돌아온다.
-        update(&path, |doc| Ok(doc.remove(&["/b".into()]))).unwrap();
+        update(&path, |doc| doc.remove(&["/b".into()])).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
     }
 
@@ -1333,7 +1376,7 @@ mod tests {
             let added = std::fs::read_to_string(&path).unwrap();
             assert_eq!(read(Some(&path)).projects.last().map(|p| p.path.clone()), Some("/z".into()), "{added}");
             assert_eq!(added.ends_with('\n'), src.ends_with('\n'), "끝 줄바꿈 모양이 바뀌었다\n{added:?}");
-            assert_eq!(update(&path, |doc| Ok(doc.remove(&["/z".into()]))).unwrap(), 1);
+            assert_eq!(update(&path, |doc| doc.remove(&["/z".into()])).unwrap(), 1);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "add/rm 왕복");
 
             if src.contains("/a") {
@@ -1356,7 +1399,7 @@ mod tests {
             assert!(update(&path, |doc| doc.add(Path::new("/z"))).unwrap());
             let added = std::fs::read_to_string(&path).unwrap();
             assert!(!added.replace("\r\n", "").contains('\n'), "LF 로 접힌 줄이 있다\n{added:?}");
-            assert_eq!(update(&path, |doc| Ok(doc.remove(&["/z".into()]))).unwrap(), 1);
+            assert_eq!(update(&path, |doc| doc.remove(&["/z".into()])).unwrap(), 1);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "add/rm 왕복");
         }
         // 보기·읽음·색도 같은 렌더를 지난다.
@@ -1395,7 +1438,7 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&path).unwrap(), want, "{src:?}");
             assert!(update(&path, |doc| doc.add(Path::new("/y"))).unwrap());
             assert_eq!(read(Some(&path)).projects.len(), 2);
-            assert_eq!(update(&path, |doc| Ok(doc.remove(&["/y".into(), "/z".into()]))).unwrap(), 2);
+            assert_eq!(update(&path, |doc| doc.remove(&["/y".into(), "/z".into()])).unwrap(), 2);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "add/rm 왕복");
         }
 
@@ -1421,7 +1464,7 @@ mod tests {
             ("# 붙은 주석\n[[project]]\npath = \"/a\"\n", "/a", ""),
         ] {
             std::fs::write(&path, src).unwrap();
-            assert_eq!(update(&path, |doc| Ok(doc.remove(&[gone.into()]))).unwrap(), 1, "{src:?}");
+            assert_eq!(update(&path, |doc| doc.remove(&[gone.into()])).unwrap(), 1, "{src:?}");
             assert_eq!(std::fs::read_to_string(&path).unwrap(), want, "{src:?}");
         }
     }
@@ -1726,7 +1769,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
 
         assert!(!update(&path, |doc| doc.add(Path::new("/a"))).unwrap());
-        assert_eq!(update(&path, |doc| Ok(doc.remove(&["/없음".into()]))).unwrap(), 0);
+        assert_eq!(update(&path, |doc| doc.remove(&["/없음".into()])).unwrap(), 0);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
 
@@ -1749,7 +1792,7 @@ mod tests {
         let src = std::fs::read_to_string(&path).unwrap();
         std::fs::write(&path, format!("{src}\n[[project]]\npath = \"/a\"\n")).unwrap();
         assert_eq!(read(Some(&path)).projects.len(), 2);
-        assert_eq!(update(&path, |doc| Ok(doc.remove(&["/x".into(), "/a".into()]))).unwrap(), 2);
+        assert_eq!(update(&path, |doc| doc.remove(&["/x".into(), "/a".into()])).unwrap(), 2);
         assert_eq!(read(Some(&path)).projects, [Project { path: "/b".into(), hue: None }]);
     }
 
