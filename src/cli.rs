@@ -126,7 +126,11 @@ pub enum Cmd {
     Ready(WorktreeArg),
 
     /// 이슈를 만든다
-    #[command(after_help = "\
+    // `-h` 도 설명을 옵션 밑 줄에 둔다(`next_line_help`) — 옆 한 줄 모양이면 옵션 열이
+    // `--type <issue|epic|milestone|idea>` 에 맞춰 44칸으로 벌어져 설명이 112칸까지
+    // 갔다(moai-x18p). 옵션이 스물이 넘는 명령이라 열을 좁혀도 다음 옵션이 다시 넓힌다.
+    // `Typed::Add`·`IdeaCmd::Add` 도 같은 까닭으로 같다.
+    #[command(next_line_help = true, after_help = "\
 예시:
   moai add \"파서가 BOM 에서 죽는다\" -t bug -p 1
   moai add \"저장 계층\" --type epic
@@ -459,6 +463,7 @@ pub enum ProjectCmd {
 #[derive(Subcommand, Debug)]
 pub enum Typed {
     /// 만든다
+    #[command(next_line_help = true)]
     Add(AddArgs),
     // `ls` 는 같은 것의 다른 이름이다. **어휘를 둘로 만들지 않으려고 별명으로
     // 둔다** — 목록을 내는 동사가 둘이면 도움말이 둘 다 가르쳐야 한다.
@@ -472,6 +477,7 @@ pub enum Typed {
 #[derive(Subcommand, Debug)]
 pub enum IdeaCmd {
     /// 담는다. 제목 하나면 된다
+    #[command(next_line_help = true)]
     Add(AddArgs),
     /// 펼치거나 목록을 낸다 (`ls` 도 같다)
     #[command(alias = "ls")]
@@ -767,7 +773,7 @@ pub struct DeferArgs {
     #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
     pub msg: Option<String>,
 
-    /// 아직 이 칸에 있을 때만 미루거나 도로 집는다 (겨루는 집기)
+    /// 이 칸에 있을 때만 미루거나 도로 집는다 (겨루는 집기)
     ///
     /// `mv --from` 과 같은 자다. 옆에서 집어 일하기 시작한 줄을 뒤늦게
     /// 계획 밖으로 빼지 않는다. 안 주면 지금까지처럼 아무것도 막지 않는다.
@@ -856,8 +862,10 @@ pub enum SkillCmd {
 
   이미 열려 있는 Claude 세션은 옛 판을 계속 쓴다 — 다시 열어야 든다.")]
     Install {
-        /// 어디에 등록할까
-        #[arg(long, value_name = "범위", default_value = "local")]
+        // 값과 기본값은 `--color` 처럼 글로 적는다 — clap 이 붙이는 괄호가 `-h` 에서
+        // 98칸이 됐다(moai-x18p).
+        /// 어디에 등록할까: local(기본)·project·user
+        #[arg(long, value_name = "범위", default_value = "local", hide_default_value = true, hide_possible_values = true)]
         scope: Scope,
 
         /// 심지 않고 무엇이 심길지만 낸다
