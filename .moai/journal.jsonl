@@ -4719,3 +4719,4 @@
 {"ts":"2026-09-18T14:45:04Z","id":"moai-m9a8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-18T14:45:07Z","id":"moai-boc6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-18T14:45:12Z","id":"moai-38mh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T14:45:16Z","id":"moai-8mq9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽 끝 리뷰(max, moai-8mq9.1bw)가 904115c..HEAD 로 돌고 있다. 끝나면 원문·판단 두 노트로 적고, 반영은 별도 fix: 커밋, 그 뒤 develop 에 --no-ff 병합·워크트리와 가지 삭제·9-1 모델 노트·멤버 done 이다. moai-4gy5 는 gmdu 가 develop 에 들어온 뒤에 한다 — 안 들어왔으면 첫 칸에 남긴다(일정 문제)."}
