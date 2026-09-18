@@ -8829,3 +8829,114 @@ fn a_group_cannot_be_claimed_with_from() {
     ok(s.path(), &["defer", &epic, "-m", "접는다"]);
     assert!(line_of(s.path(), &epic).contains("\"deferred_at\""));
 }
+
+/// `examples/python-agents/agents.py` 를 **실제로 돌린다** (moai-pz8m). bash 판과 같이 예제가
+/// 계약 시험을 겸한다 — `ready --json --worktree`·`mv --from`·`note -b -`·`show --json` 의 모양이
+/// 바뀌면 예제가 조용히 썩는 대신 여기서 떨어진다. python3·git 이 없으면 건너뛰지 않고 실패한다.
+#[cfg(unix)]
+fn agents_cmd(dir: &Path, work: &Path, n: usize) -> Command {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/python-agents/agents.py");
+    let mut cmd = isolated("python3");
+    cmd.arg(script)
+        .args(["--agents", &n.to_string()])
+        .current_dir(dir)
+        .env("MOAI", BIN)
+        .env("AGENT_WORK", work)
+        .env("MOAI_ACTOR", ACTOR)
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1");
+    cmd
+}
+
+/// 예제를 돌릴 저장소 — git 저장소여야 워크트리를 띄운다. 첫 커밋이 있어야 `main` 이 선다.
+#[cfg(unix)]
+fn agents_repo(name: &str) -> Scratch {
+    let s = Scratch::new(name);
+    git(s.path(), &["init", "-q"]);
+    git(s.path(), &["commit", "-q", "--allow-empty", "-m", "처음"]);
+    ok(s.path(), &["init", "argos"]);
+    s
+}
+
+/// **일꾼 셋이 겨뤄도 한 일은 한 번만 한다** — 모든 일이 done 으로 끝나고, 일 명령은 id 마다
+/// 한 번씩 불리며, 저마다 제 워크트리(`agent/<id>` 가지) 안에서 돈다. 트래커는 뿌리에만 쓰인다.
+#[cfg(unix)]
+#[test]
+fn the_python_agents_share_the_queue_and_each_job_runs_once_in_its_own_worktree() {
+    let s = agents_repo("agents-crew");
+    let ids: Vec<String> = (1..=5).map(|n| add(s.path(), &[&format!("일 {n}"), "-p", "2"])).collect();
+    // 일 명령 대역: 받은 id 와 **돈 자리**를 적는다 — 워크트리 안에서 돌았는지를 거기서 잰다.
+    let log = s.path().join("worked");
+    let work = s.path().join("work.sh");
+    write_exe(&work, &format!("#!/bin/sh\necho \"$1 $(pwd)\" >> '{}'\necho \"$1 을 끝냈다\"\n", log.display()));
+
+    let out = agents_cmd(s.path(), &work, 3).output().expect("python3 를 실행하지 못했다 — 예제 시험에는 python3 가 있어야 한다");
+    assert!(out.status.success(), "예제가 실패했다\n{}", text(&out));
+
+    let worked: Vec<(String, String)> = std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .lines()
+        .map(|l| {
+            let (id, at) = l.split_once(' ').unwrap();
+            (id.to_string(), at.to_string())
+        })
+        .collect();
+    let mut seen: Vec<&str> = worked.iter().map(|(id, _)| id.as_str()).collect();
+    seen.sort_unstable();
+    let mut want: Vec<&str> = ids.iter().map(String::as_str).collect();
+    want.sort_unstable();
+    assert_eq!(seen, want, "일마다 한 번씩 돌지 않았다 — 둘이 같은 일을 했거나 빠뜨렸다\n{}", text(&out));
+
+    for (id, at) in &worked {
+        assert!(at.ends_with(&format!(".worktrees/{id}")), "{id} 가 제 워크트리 밖에서 돌았다 — {at}");
+        assert!(line_of(s.path(), id).contains("\"status\":\"done\""), "{id} 가 done 이 아니다");
+        assert!(ok(s.path(), &["show", id]).contains(&format!("{id} 을 끝냈다")), "{id} 의 출력이 노트로 안 남았다");
+    }
+    let branches = git(s.path(), &["branch", "--list", "agent/*"]);
+    for id in &ids {
+        assert!(branches.contains(&format!("agent/{id}")), "{id} 의 가지가 없다\n{branches}");
+        // **트래커는 뿌리에만 쓴다** — 워크트리의 `.moai` 는 main 에서 뜬 그대로다.
+        let theirs = std::fs::read_to_string(s.path().join(".worktrees").join(id).join(".moai/issues.jsonl")).unwrap_or_default();
+        assert!(!theirs.contains("in_progress") && !theirs.contains("\"done\""), "{id} 의 워크트리 트래커가 바뀌었다");
+    }
+    // 병합은 안 한다 — main 은 처음 그대로다.
+    assert_eq!(git(s.path(), &["rev-list", "--count", "main"]).trim(), "1", "예제가 main 에 무언가를 합쳤다");
+}
+
+/// **일이 실패하면 그 일꾼만 멈추고 끝에 1 이다.** 실패한 일은 in_progress 로 남고 노트에 까닭이
+/// 선다. 옆 일꾼은 남은 일을 마저 한다 — 한 일의 실패가 큐 전체를 세우지 않는다.
+#[cfg(unix)]
+#[test]
+fn a_failed_python_agent_job_stays_picked_and_the_others_carry_on() {
+    let s = agents_repo("agents-fail");
+    let broken = add(s.path(), &["깨지는 일", "-p", "0"]);
+    let rest: Vec<String> = (1..=3).map(|n| add(s.path(), &[&format!("멀쩡한 일 {n}"), "-p", "2"])).collect();
+    let work = s.path().join("work.sh");
+    write_exe(&work, &format!("#!/bin/sh\nif [ \"$1\" = '{broken}' ]; then echo 컴파일이 깨졌다; exit 3; fi\necho 됐다\n"));
+
+    let out = agents_cmd(s.path(), &work, 2).output().expect("python3 를 실행하지 못했다");
+    assert_eq!(out.status.code(), Some(1), "일이 실패하면 1 로 끝난다\n{}", text(&out));
+    assert!(line_of(s.path(), &broken).contains("\"status\":\"in_progress\""), "실패한 일을 내려놓았다");
+    assert!(ok(s.path(), &["show", &broken]).contains("실패(3): 컴파일이 깨졌다"), "실패 코드와 출력이 노트로 안 남았다");
+    for id in &rest {
+        assert!(line_of(s.path(), id).contains("\"status\":\"done\""), "{id} 를 옆 일꾼이 마저 안 했다\n{}", text(&out));
+    }
+}
+
+/// **채비가 안 되면 아무것도 안 집는다**(종료 코드 2) — 일 명령이 없거나, 워크트리를 띄울 가지가
+/// 없으면 저장소를 건드리기 전에 멈춘다. 집은 뒤에 드러나면 맨 위 일이 in_progress 에 박힌다.
+#[cfg(unix)]
+#[test]
+fn the_python_agents_check_their_kit_before_picking_anything() {
+    let s = agents_repo("agents-kit");
+    let id = add(s.path(), &["일", "-p", "1"]);
+    let missing = s.path().join("없는-일.sh");
+    let out = agents_cmd(s.path(), &missing, 2).output().expect("python3 를 실행하지 못했다");
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+    let work = s.path().join("work.sh");
+    write_exe(&work, "#!/bin/sh\necho 됐다\n");
+    let out = agents_cmd(s.path(), &work, 2).env("AGENT_BASE", "없는-가지").output().expect("python3 를 실행하지 못했다");
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("없는-가지"), "{}", text(&out));
+    assert!(line_of(s.path(), &id).contains("\"status\":\"todo\""), "채비가 안 됐는데 집었다");
+}
