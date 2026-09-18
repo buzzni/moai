@@ -4581,3 +4581,5 @@
 {"ts":"2026-09-18T13:42:26Z","id":"moai-jl72.d8y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 하나(3~5분이 3~7분과 어긋남)를 사용자 확인 뒤 반영(f42b673). 예산 5분 초과는 idea moai-bt5c 로 넘겼다"}
 {"ts":"2026-09-18T13:42:35Z","id":"moai-cq53","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"todo"}
 {"ts":"2026-09-18T13:42:35Z","id":"moai-cq53","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 디스크와 target 을 재어 전제가 사라졌음을 확인, 사용자 결정으로 미룸)"}
+{"ts":"2026-09-18T13:42:43Z","id":"moai-go4o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:42:53Z","id":"moai-jl72","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 머지 4ed4200. cq53 은 미룸(디스크 90% 또는 워크트리 다섯 위에서 다시 연다), 예산 초과는 idea moai-bt5c"}
