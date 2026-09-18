@@ -1318,7 +1318,8 @@ mod tests {
         }
     }
 
-    /// **`moai tui --help` 의 글은 80칸 안이다**(moai-lz2t). 도움말은 접지 않으므로(moai-opjn)
+    /// **`moai tui --help` 의 글(after_help)은 80칸 안이다**(moai-lz2t). 옵션 열은 clap 이 그려
+    /// 여기서 안 본다 — moai-c57v. 도움말은 접지 않으므로(moai-opjn)
     /// 넘는 줄은 좁은 터미널에서 그대로 꺾인다 — SPC 줄에 토글을 둘씩 적다 113칸까지 자랐었다.
     #[test]
     fn the_tui_help_fits_in_eighty_columns() {
