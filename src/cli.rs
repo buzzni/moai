@@ -346,10 +346,18 @@ NOTE
 
   자리(cwd)와 세션 id 는 stdin 이 준 것을 쓴다. 환경변수에는 없다.
 
+  이벤트:
+    session-start       기준선을 적는다. 접힌 뒤면 집은 것을 싣는다
+    user-prompt-submit  사람이 시켰다. 보드를 세션당 한 번 싣는다
+    pre-tool-use        도구를 부르기 직전. 규칙이 여기서 선다
+    stop                턴이 끝난다. 상태가 실제와 맞는지 본다
+
   echo '{\"session_id\":\"x\",\"cwd\":\"/repo\"}' | moai hook user-prompt-submit")]
     Hook {
-        /// 어느 자리에서 불렸나
-        #[arg(value_name = "이벤트")]
+        // 값은 글로 적는다 — clap 이 붙이는 `[possible values: …]` 가 `-h` 에서 105칸이 됐다
+        // (moai-h0r2). 목록의 글은 `hook::Event` 의 doc 주석과 같다 — 시험이 둘을 견준다.
+        /// 어느 자리에서 불렸나 (아래 목록)
+        #[arg(value_name = "이벤트", hide_possible_values = true)]
         event: crate::hook::Event,
     },
 

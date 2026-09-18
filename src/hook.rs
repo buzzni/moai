@@ -41,9 +41,11 @@ use std::path::{Path, PathBuf};
 /// stdout 만 보던 시험은 초록이었다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Event {
-    /// 세션이 열렸다. 기준선을 적고, 접힌 뒤면 집고 있던 것을 싣는다
+    // **`hook --help` 의 이벤트 목록이 이 글을 옮겨 적는다**(moai-h0r2) — clap 이 붙이는 값 목록은
+    // `-h` 에서 80칸을 넘어 숨겼다. `the_hook_help_lists_every_event` 가 둘을 견준다.
+    /// 기준선을 적는다. 접힌 뒤면 집은 것을 싣는다
     SessionStart,
-    /// 사람이 무언가 시켰다. 보드를 세션당 한 번 싣는다
+    /// 사람이 시켰다. 보드를 세션당 한 번 싣는다
     UserPromptSubmit,
     /// 도구를 부르기 직전. 규칙이 여기서 선다
     PreToolUse,
@@ -2455,6 +2457,21 @@ mod tests {
     fn with_nothing_held_creation_is_free() {
         let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add \"딴 일\""), Decision::Pass);
+    }
+
+    /// **`hook --help` 의 이벤트 목록은 `Event` 의 글과 같다**(moai-h0r2) — clap 의 값 목록을 숨기고
+    /// 손으로 옮겨 적었으니, 이벤트를 더하거나 글을 고치면 여기서 붉어진다.
+    #[test]
+    fn the_hook_help_lists_every_event() {
+        use clap::{CommandFactory, ValueEnum};
+        let cmd = crate::cli::Cli::command();
+        let hook = cmd.find_subcommand("hook").expect("hook 명령이 없다");
+        let after = hook.get_after_help().expect("hook 의 after_help 가 없다").to_string();
+        for event in Event::value_variants() {
+            let value = event.to_possible_value().unwrap();
+            let line = format!("{:<20}{}", value.get_name(), value.get_help().unwrap());
+            assert!(after.contains(&line), "목록이 `Event` 와 갈라졌다 — {line}\n{after}");
+        }
     }
 
     /// **줄 머리의 맨 `moai` 만 겨눈다**(moai-gyqh) — 이미 겨눈 줄과 글 속의 `moai` 는 그대로다.

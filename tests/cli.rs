@@ -4258,11 +4258,6 @@ fn every_help_fits_in_eighty_columns() {
     let mut wide = Vec::new();
     for (path, help) in every_help(&s) {
         seen += 1;
-        // `hook` 의 이벤트 설명은 `src/hook.rs` 의 `Event` doc 주석이 그린다 — 옆 워크트리가 그
-        // 파일을 쥐어 따로 세웠다(moai-h0r2). 그것을 고치면 이 줄을 걷는다.
-        if path == "hook" {
-            continue;
-        }
         let mut args: Vec<&str> = path.split_whitespace().collect();
         args.push("-h");
         let short = ok(s.path(), &args);
