@@ -211,11 +211,17 @@ moai 는 커밋을 이슈에 저장하지 않는다. `moai show <id>` 와 탐색
 id** 로 그 이슈의 커밋을 그때그때 찾아 낸다. 해시를 노트에 옮겨 적지 않는다 — squash·rebase
 한 번에 낡고, 이슈를 닫는 커밋은 제 해시를 미리 모른다.
 
-- **제목에** 적는다. 본문에만 적은 id 는 안 센다
+- **제목에** 적는다. 본문은 `Refs:`·`Closes:`·`Fixes:` 로 시작하는 줄만 센다 — 그 밖의 본문에
+  적힌 id 는 안 센다(트래커 커밋이 줄줄이 대는 id 가 죄다 그 이슈의 커밋으로 서면 안 된다)
+- **squash 로 합치는 저장소는 트레일러를 단다.** squash 는 합친 커밋들의 제목을 본문으로 옮겨
+  버려, 제목만으로는 그 커밋들이 통째로 사라진다 — `Refs: <id>` 한 줄이 그것을 지킨다
 - id 는 낱말째 맞춘다. 자식(`<id>.x1y`)의 커밋은 부모의 것이 아니다 — 리뷰를 반영한 커밋은
   리뷰 이슈 id 로 그 리뷰에 붙고, 워크트리를 합치는 `merge: … (<id>)` 가 그 일에 붙는다
 - 집기·닫기만 담는 커밋은 `chore(tracker):` 로 시작한다. 상세는 그것을 빼고 그린다
-  (`--json` 의 `commits` 에는 `tracker` 표시와 함께 남는다)"#;
+  (`--json` 의 `commits` 에는 `tracker` 표시와 함께 남는다)
+- `moai show <id> --json` 의 `commits` 는 **늘 있다.** 빈 배열은 "그 id 를 적은 커밋이 없다" 는
+  뜻이고, git 을 못 읽었을 때만 `commits_error` 가 그 까닭을 한 줄로 댄다 — 기계가 "아직 아무도
+  안 고쳤다" 와 "여기서는 못 물어봤다" 를 가르라고 둔 것이다"#;
 
 const PEOPLE: &str = r#"**담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
 `-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`
@@ -476,8 +482,10 @@ claim=$(moai mv "$id" in_progress --json --from "$col") || {{
   멤버를 집거나, 묶음은 `--from` 없이 `moai defer` 로 접는다
 - `defer` 의 `--from` 도 **칸**을 본다. 미루기는 칸을 안 바꾸므로, 옆에서 집어 칸이
   움직인 줄은 걸러 내지만 **둘 다 미루는** 겨루기는 이것으로 안 갈린다
-- 모르는 칸은 옮길 칸과 같은 자로 거절한다(`bad_status`). 오타를 "안 맞았다" 로
-  읽으면 아무것도 안 하면서 코드만 내, 부르는 쪽이 까닭을 못 읽는다
+- `--from` 은 **아는 칸이거나 어느 줄이 실제로 선 칸**을 받는다. 아무도 안 선 이름은
+  거절한다(`bad_status`) — 오타를 "안 맞았다" 로 읽으면 아무것도 안 하면서 코드만
+  내, 부르는 쪽이 까닭을 못 읽는다. 거절이 노리는 것은 오타지 낡음이 아니라서,
+  `config` 에서 칸 이름을 고친 뒤에도 옛 이름에 선 줄은 그 이름으로 집을 수 있다
 
 ## 한 번에 만들기
 
@@ -914,6 +922,11 @@ mod tests {
     /// **가르친 커밋 제목을 커밋 칸이 실제로 읽는다**(moai-wqm7). 예시 제목에서 id 를 못 뽑거나
     /// 트래커 커밋의 머리가 `git` 이 거르는 머리와 다르면, 시킨 대로 커밋해도 칸이 비거나 트래커
     /// 커밋이 상세에 선다.
+    ///
+    /// **가르친 트레일러 낱말도 함께 잰다**(moai-dig5). 이 글은 squash 로 합치는 저장소에
+    /// `Refs: <id>` 를 달라고 시킨다 — 그 낱말을 `git::trailed` 가 안 읽으면 시킨 대로 단
+    /// 저장소의 커밋 칸이 통째로 빈다. 낱말은 글에서 뽑아 견준다: 손으로 두 벌 적으면
+    /// 한쪽만 고쳐도 여기가 안 붉어진다.
     #[test]
     fn the_commit_guide_teaches_what_the_commit_column_reads() {
         let example = COMMITS.split('`').nth(1).expect("예시 제목이 없다");
@@ -922,6 +935,22 @@ mod tests {
         let subject = example.replace("<id>", "web-a1b2");
         assert_eq!(crate::git::ids_in(&subject).collect::<Vec<_>>(), ["web-a1b2"], "예시 제목 {subject:?}");
         assert!(COMMITS.contains(&format!("`{}:`", crate::git::TRACKER)), "트래커 커밋의 머리가 git 이 거르는 것과 다르다");
+
+        let rule = COMMITS.lines().find(|l| l.contains("본문은")).expect("본문 규칙이 없다");
+        let heads: Vec<&str> = rule.split('`').skip(1).step_by(2).collect();
+        assert!(heads.len() >= 3, "가르친 트레일러 낱말이 셋이 안 된다 — {rule:?}");
+        for head in heads {
+            let line = format!("{head} web-a1b2");
+            assert!(
+                crate::git::trailed(&line).any(|w| w == "web-a1b2"),
+                "가르친 트레일러를 커밋 칸이 안 읽는다 — {line:?}"
+            );
+            // squash 가 담는 모양(네 칸 들여쓴 줄)도 같게 읽는다.
+            assert!(
+                crate::git::trailed(&format!("    {line}")).any(|w| w == "web-a1b2"),
+                "squash 가 들여쓴 트레일러를 못 읽는다 — {line:?}"
+            );
+        }
     }
 
     /// **이모지를 쓰지 말라는 글이 제 손으로 이모지를 쓰지 않는다**(moai-j8aq). 가르치는 글이

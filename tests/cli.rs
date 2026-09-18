@@ -1561,17 +1561,20 @@ fn show_draws_each_blocker_with_the_words_ready_uses() {
 
 /// **상세가 이 이슈에 닿은 커밋을 그린다**(moai-emcv) — 커밋 제목에 id 를 적은 것을 git 에서
 /// 읽는다. 트래커 커밋은 사람 화면에서 빼고 `--json` 에는 표시와 함께 낸다. 자식의 커밋은
-/// 부모의 것이 아니다. 이슈가 생기기 전의 커밋은 안 걷는다(moai-mauw). git 저장소가 아니면
-/// 칸도 키도 없이 상세가 그대로 열린다.
+/// 부모의 것이 아니다. git 저장소가 아니면 칸도 키도 없이 상세가 그대로 열린다.
 ///
-/// **커밋 시각을 고정한다.** 걷기 상한이 `created_at`(= `MOAI_NOW`) 에서 나오므로, 커밋을
-/// 기계 시계로 찍으면 시계가 그보다 이른 기계에서 이 시험이 까닭도 없이 빨개진다.
+/// **이슈보다 먼저 찍힌 커밋도 낸다**(moai-hws2) — 그 id 를 적었으면 그 이슈의 커밋이다. 한때는
+/// 생성일에서 걷기를 끊어 그런 커밋을 뺐는데, `--since` 는 거르기가 아니라 끊기라 날짜가 거꾸로 선
+/// 커밋 하나가 그 밑을 통째로 가렸다(`show_sees_commits_under_a_backdated_one`).
+///
+/// **커밋 시각은 그래도 고정한다** — 차례는 커밋 시각이 정하고, 기계 시계로 찍으면 `LATER` 로 찍은
+/// 커밋들과의 앞뒤가 돌리는 기계마다 달라진다.
 #[test]
 fn show_draws_the_commits_that_name_the_issue() {
     let s = init("showcommits");
     let a = add(s.path(), &["고칠 것"]);
     git(s.path(), &["init", "-q"]);
-    // 이슈보다 이틀 먼저 찍힌 커밋 — 그 id 는 아직 없었으니 걷기가 여기서 멈춘다.
+    // 이슈보다 이틀 먼저 찍힌 커밋 — rebase 가 옛 시각을 옮긴 꼴이다. 그 id 를 적었으니 센다.
     git_at(s.path(), "2026-09-09T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", &format!("feat: 옛것 ({a})")]);
     git_at(s.path(), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("chore(tracker): {a} 를 워크트리에서 집는다")]);
     git_at(s.path(), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({a})")]);
@@ -1582,7 +1585,7 @@ fn show_draws_the_commits_that_name_the_issue() {
     assert!(shown.contains(&format!("{}   feat: 고친다 ({a})", &hash[..7])), "고친 커밋이 없다\n{shown}");
     assert!(!shown.contains("chore(tracker)"), "트래커 커밋을 사람 화면에 그렸다\n{shown}");
     assert!(!shown.contains("fix: 리뷰"), "자식의 커밋을 부모에 그렸다\n{shown}");
-    assert!(!shown.contains("옛것"), "이슈가 생기기 전의 커밋까지 걸었다\n{shown}");
+    assert!(shown.contains("옛것"), "이슈보다 먼저 찍힌 커밋을 뺐다 — 그 id 를 적은 커밋이다\n{shown}");
     let (commits_at, history_at) = (shown.find("\n커밋\n"), shown.find("\n이력\n"));
     assert!(commits_at.is_some() && commits_at < history_at, "커밋이 이력 앞에 안 섰다\n{shown}");
 
@@ -1597,7 +1600,8 @@ fn show_draws_the_commits_that_name_the_issue() {
     let b = add(bare.path(), &["git 밖"]);
     let shown = ok(bare.path(), &["show", &b]);
     assert!(!shown.contains("\n커밋\n"), "{shown}");
-    assert!(!ok(bare.path(), &["show", &b, "--json"]).contains("\"commits\""), "커밋이 없는데 commits 키가 섰다");
+    // `--json` 은 빈 배열과 까닭을 낸다(moai-rzsv) — 그 가름은 `json_tells_no_commits_apart_from_no_git` 이 본다.
+    assert!(ok(bare.path(), &["show", &b, "--json"]).contains(r#""commits":[]"#), "빈 배열을 안 냈다");
 }
 
 /// **git 을 못 쓰는 자리에서 상세는 말없이 열린다**(moai-mauw) — git 이 PATH 에 없을 때도, 커밋이
@@ -4039,6 +4043,68 @@ fn an_inherited_git_dir_does_not_beat_the_project_we_were_given() {
     let shown = String::from_utf8_lossy(&shown.stdout);
     assert!(shown.contains("이 저장소의 커밋"), "이 프로젝트의 커밋이 커밋 칸에 안 섰다 — 빈 칸은 아무것도 못 잰다\n{shown}");
     assert!(!shown.contains("남의 이력이 샜다"), "훅 저장소의 커밋을 이 이슈에 붙였다\n{shown}");
+}
+
+/// **`--json` 은 "커밋 없음" 의 까닭을 가른다**(moai-rzsv, 2026-09-15 사용자 결정). 사람 화면은
+/// 그대로 말없이 빈 칸이지만(moai-mauw), 기계는 셋을 갈라야 한다 — 진짜로 아무도 안 고친 이슈,
+/// git 이 없는 기계, git 저장소가 아닌 자리. 못 가르면 에이전트가 끝난 일을 다시 하거나 손댄
+/// 이슈를 안 손댄 것으로 보고한다.
+///
+/// `commits` 는 **늘 선다**(빈 배열도 사실이다). git 을 못 읽었을 때만 `commits_error` 가 붙는다.
+#[test]
+fn json_tells_no_commits_apart_from_no_git() {
+    let s = init("jsonnocommits");
+    let id = add(s.path(), &["고칠 것"]);
+
+    // git 저장소가 아닌 자리 — 빈 배열에 까닭이 붙는다.
+    let outside = ok(s.path(), &["show", &id, "--json"]);
+    assert!(outside.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{outside}");
+    assert!(outside.contains(r#""commits_error":"#), "git 을 못 읽은 까닭이 없다\n{outside}");
+
+    // 갓 만든 저장소 — **커밋이 하나도 없는 것은 실패가 아니다.** `git log HEAD` 가 죽는 자리라
+    // 그대로 두면 `commits_error` 가 "여기서는 못 물어봤다" 로 서서 받는 쪽이 정반대로 읽는다.
+    git(s.path(), &["init", "-q"]);
+    let unborn = ok(s.path(), &["show", &id, "--json"]);
+    assert!(unborn.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{unborn}");
+    assert!(!unborn.contains("commits_error"), "커밋 없는 저장소를 못 읽은 것으로 냈다\n{unborn}");
+
+    // 저장소이고 이력도 있지만 이 이슈를 댄 커밋은 없다 — 빈 배열만, 까닭은 없다.
+    git_at(s.path(), NOW, &["commit", "-q", "--allow-empty", "-m", "chore: 아무 id 도 안 대는 커밋"]);
+    let none = ok(s.path(), &["show", &id, "--json"]);
+    assert!(none.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{none}");
+    assert!(!none.contains("commits_error"), "멀쩡히 읽었는데 까닭을 달았다\n{none}");
+
+    // 커밋이 있으면 그대로 선다.
+    git_at(s.path(), LATER, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({id})")]);
+    let some = ok(s.path(), &["show", &id, "--json"]);
+    assert!(some.contains(r#""subject":"feat: 고친다"#), "커밋을 안 냈다\n{some}");
+    assert!(!some.contains("commits_error"), "멀쩡히 읽었는데 까닭을 달았다\n{some}");
+
+    // 사람 화면은 그대로다 — 까닭을 화면에 늘어놓지 않는다(moai-mauw).
+    let bare = init("jsonnocommits-bare");
+    let b = add(bare.path(), &["git 밖"]);
+    let shown = ok(bare.path(), &["show", &b]);
+    assert!(!shown.contains("커밋") && !shown.contains("commits_error"), "사람 화면이 시끄러워졌다\n{shown}");
+}
+
+/// **날짜가 거꾸로 선 커밋 밑도 본다**(moai-hws2). `show` 는 이슈가 생긴 때에서 걷기를 끊었는데,
+/// `git log --since` 는 거르기가 아니라 **끊기**라 그보다 이른 커밋을 하나 만나면 그 아래를 통째로
+/// 안 본다 — `rebase`·`am --committer-date-is-author-date`·하루 넘게 늦은 시계가 그런 커밋을 만든다.
+/// 탐색기는 이력을 다 걸어 이미 보이던 것이라, 같은 물음에 두 표면이 다른 답을 냈다.
+#[test]
+fn show_sees_commits_under_a_backdated_one() {
+    let s = init("backdated");
+    let id = add(s.path(), &["고칠 것"]);
+    git(s.path(), &["init", "-q"]);
+    git_at(s.path(), NOW, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({id})")]);
+    // rebase 가 옛 작성 시각을 커밋 시각으로 옮긴 커밋 — 이 이슈가 생기기 한참 전이다.
+    git_at(s.path(), "2020-01-01T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", "chore: 옛 날짜로 얹힌 커밋"]);
+
+    let shown = ok(s.path(), &["show", &id]);
+    assert!(shown.contains("feat: 고친다"), "날짜가 거꾸로 선 커밋 밑을 못 봤다\n{shown}");
+    let json = ok(s.path(), &["show", &id, "--json"]);
+    assert!(json.contains("feat: 고친다"), "--json 도 같은 답이어야 한다\n{json}");
+    assert!(!json.contains("옛 날짜로 얹힌"), "id 를 안 적은 커밋이 붙었다\n{json}");
 }
 
 /// **사람은 부른 자리가 아니라 그 프로젝트에서 온다**(moai-d3sy). 환경을 다 걷어도(moai-ztdf) 어느
@@ -7376,9 +7442,9 @@ fn git(dir: &Path, args: &[&str]) -> String {
     git_run(dir, None, args)
 }
 
-/// 커밋 시각까지 고정해 돌린다. **시각이 답을 가르는 시험은 기계 시계에 매이면 안 된다** —
-/// `show` 의 커밋 칸은 걷기를 `created_at`(= `MOAI_NOW`) 에서 끊으므로(`git::commits_of`),
-/// 커밋을 기계 시계로 찍으면 시계가 그보다 이른 기계에서 답이 달라진다.
+/// 커밋 시각까지 고정해 돌린다. **차례가 답을 가르는 시험은 기계 시계에 매이면 안 된다** —
+/// 커밋 칸은 `git log` 의 차례(커밋 시각) 그대로 서므로(`git::table`), 일부만 기계 시계로
+/// 찍으면 고정한 커밋들과의 앞뒤가 돌리는 기계마다 달라진다.
 fn git_at(dir: &Path, at: &str, args: &[&str]) -> String {
     git_run(dir, Some(at), args)
 }
@@ -8432,6 +8498,90 @@ fn a_from_column_that_does_not_exist_is_refused() {
     }
     assert!(line_of(s.path(), &id).contains("\"status\":\"todo\""), "거절하면서 옮겼다");
     assert!(!line_of(s.path(), &id).contains("\"deferred_at\""), "거절하면서 미뤘다");
+}
+
+/// **config 가 더는 모르는 칸도 줄이 거기 있으면 받는다** (moai-hym7). 칸 이름을 바꾸면
+/// 옛 이름에 선 줄이 남는데, 그 이름을 오타로 보고 거절하면 그 줄은 **영영** `--from`
+/// 으로 못 집는다 — 남의 낡은 줄 하나가 쓰기를 막는 자리다(CLAUDE.md). 검사가 노리는
+/// 것은 오타지 낡음이 아니므로, 아무 줄도 서 있지 않은 이름만 거절한다.
+#[test]
+fn a_from_column_the_config_forgot_still_works_while_a_row_sits_there() {
+    let s = init("mv-from-renamed");
+    let id = add(s.path(), &["옛 칸에 선 일"]);
+    let other = add(s.path(), &["옛 칸에 선 둘째"]);
+    ok(s.path(), &["mv", &id, &other, "in_progress"]);
+    let cfg = s.path().join(".moai/config.toml");
+    let renamed = std::fs::read_to_string(&cfg).unwrap().replace("in_progress", "doing");
+    std::fs::write(&cfg, renamed).unwrap();
+
+    // 줄은 아직 `in_progress` 에 서 있다 — 설정만 그 이름을 잊었다.
+    assert!(line_of(s.path(), &id).contains("\"status\":\"in_progress\""));
+    ok(s.path(), &["mv", &id, "done", "--from", "in_progress"]);
+    assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "옛 칸에 선 줄을 못 집었다");
+
+    // **미루기도 같은 자다.** 미룬 줄은 옛 칸에 그대로 서 있으므로, 쓰기 검사가 칸
+    // 이름을 다시 물으면 `--from` 이 통과시킨 줄을 쓰기가 거절한다 — 검사 둘이 서로
+    // 반대를 말하면 부르는 쪽은 어디를 고칠지 못 고른다(moai-hym7.xvc 가 짚었다).
+    ok(s.path(), &["defer", &other, "-m", "다음에", "--from", "in_progress"]);
+    assert!(line_of(s.path(), &other).contains("\"deferred_at\""), "옛 칸에 선 줄을 못 미뤘다");
+    ok(s.path(), &["defer", &other, "--undo", "--from", "in_progress"]);
+    assert!(!line_of(s.path(), &other).contains("\"deferred_at\""), "옛 칸에 선 줄을 못 도로 집었다");
+
+    // **제목 고치기와 막기도 같은 자다.** `store::with_write` 만 풀고 `edit`·`link` 가
+    // 제 손으로 칸 이름을 다시 물으면 옛 칸에 선 줄은 제목 하나 못 고치고 막음도 못
+    // 푼다 — 도구 안에서 영영 못 만지는 줄이 되어, 푼 것이 헛일이 된다. 탐색기는
+    // `with_write` 만 지나므로 여기서 갈리면 두 표면이 서로 다른 말을 한다.
+    ok(s.path(), &["edit", &other, "--title", "고친 제목"]);
+    assert!(line_of(s.path(), &other).contains("고친 제목"), "옛 칸에 선 줄의 제목을 못 고쳤다");
+    assert!(line_of(s.path(), &other).contains("\"status\":\"in_progress\""), "제목만 고쳤는데 칸이 움직였다");
+    ok(s.path(), &["link", &id, "--blocks", &other]);
+    assert!(line_of(s.path(), &other).contains("\"blocked_by\""), "옛 칸에 선 줄을 못 막았다");
+    ok(s.path(), &["link", &id, "--unblocks", &other]);
+
+    // **읽기가 쓰기보다 엄하면 안 된다** (moai-lvf9.t10). 옮길 수는 있는데 못 찾는 줄이
+    // 생기면, 칸 이름을 바꾼 뒤 정리하려는 사람이 그 줄에 닿을 길이 없다.
+    let listed = ok(s.path(), &["show", "-s", "in_progress"]);
+    assert!(listed.contains(&other), "옛 칸에 선 줄을 못 찾는다\n{listed}");
+
+    // 칸을 **옮기는** 쓰기는 그대로 엄하다 — 갈 칸이 아는 칸이어야 한다.
+    let out = moai(s.path(), &["mv", &other, "doing"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!moai(s.path(), &["mv", &other, "in_progress"]).status.success(), "모르는 칸으로 옮겼다");
+
+    // 아무 줄도 안 선 이름은 그대로 거절한다 — 오타 검사는 살아 있다.
+    let out = moai(s.path(), &["mv", &id, "todo", "--from", "in_progress"]);
+    assert!(!out.status.success(), "이제 아무도 안 선 옛 칸이 통과했다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("in_progress"), "{}", text(&out));
+    assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "거절하면서 옮겼다");
+}
+
+/// **칸 오타는 사람을 못 찾는 것보다 먼저 선다** — `mv` 와 `defer` 가 한 자다.
+/// 뒤로 밀리면 신원 없는 기계(CI·훅)에서 오타가 "누가 하는지 모른다" 로 덮여, 부르는
+/// 쪽이 받는 `code` 가 `bad_status` 가 아니라 `no_actor` 가 된다 — 고칠 곳이 설정인지
+/// 명령인지가 갈리는 자리다. 한쪽만 시험하면 두 벌로 적힌 차례가 갈릴 때 한쪽만 잡힌다.
+///
+/// **`bad_status` 를 내는 검사는 하나도 빠짐없이 먼저 선다.** 오타만 앞세우고 묶음
+/// 가드를 사람 뒤에 두면, 같은 자의 잘못이 `--from` 의 값에 따라 두 `code` 로 갈린다 —
+/// 오타는 `bad_status`, 묶음은 `no_actor`. 부르는 쪽은 그것을 가를 방법이 없다.
+#[test]
+fn a_bad_from_column_is_named_before_the_missing_person() {
+    let s = init("from-before-who");
+    let id = add(s.path(), &["일"]);
+    let epic = add(s.path(), &["묶음", "--type", "epic"]);
+    add(s.path(), &["멤버", "-e", &epic]);
+    let cases = [
+        vec!["mv", &id, "done", "--from", "없는칸"],
+        vec!["defer", &id, "--from", "없는칸"],
+        vec!["mv", &epic, "done", "--from", "todo"],
+        vec!["defer", &epic, "--from", "todo"],
+    ];
+    for args in cases {
+        let out = without_user(s.path(), &args);
+        assert!(!out.status.success(), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("칸"), "{args:?} 가 칸 대신 사람을 말했다\n{err}");
+        assert!(!err.contains("--user"), "{args:?} 가 사람을 먼저 물었다\n{err}");
+    }
 }
 
 /// **같은 id 를 두 번 적어도 제가 방금 쓴 값과 겨루지 않는다.** `--from` 이 재는 것은
