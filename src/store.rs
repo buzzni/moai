@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::fail::{Fail, R, code};
 use crate::model::{Actor, Issue, JournalEntry};
 use fs2::FileExt;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -323,6 +323,34 @@ impl Repo {
     /// 이 함수가 `Vec<Issue>` 를 돌려주게 되는 날이 저널을 상태의 원천으로
     /// 삼기 시작한 날이고, 이전 시도가 거기서 복잡해졌다.
     pub fn journal_of(&self, id: &str) -> R<Vec<JournalEntry>> {
+        let mut out = self.journal_where(|e| e.id == id)?;
+        out.sort_by(|a, b| a.ts.cmp(&b.ts));
+        Ok(out)
+    }
+
+    /// 여러 id 의 이력을 **파일 한 번 읽기로** 가른다(moai-p8qj). 없는 id 는 키가 안 선다.
+    ///
+    /// [`Repo::journal_of`] 를 id 마다 부르면 파일 전체를 id 수만큼 읽는다 — 목록이 500줄이면
+    /// 3MB 를 500번이다. 답은 그 함수가 내는 것과 **같아야 한다**: 같은 관대함으로 읽고 같은
+    /// 차례로 세운다.
+    ///
+    /// **여전히 접지 않는다** — 돌려주는 것은 줄 그대로지 상태가 아니다.
+    pub fn journal_by_id(&self, want: &BTreeSet<&str>) -> R<BTreeMap<String, Vec<JournalEntry>>> {
+        let mut out: BTreeMap<String, Vec<JournalEntry>> = BTreeMap::new();
+        for e in self.journal_where(|e| want.contains(e.id.as_str()))? {
+            out.entry(e.id.clone()).or_default().push(e);
+        }
+        for v in out.values_mut() {
+            v.sort_by(|a, b| a.ts.cmp(&b.ts));
+        }
+        Ok(out)
+    }
+
+    /// 저널 파일을 한 번 읽어 고른다. **차례는 세우지 않는다** — 부르는 쪽이 세운다.
+    ///
+    /// 파일이 없으면 빈 손이다: 저널만 없는 저장소는 고장이 아니라 아직 아무것도 안 적은
+    /// 저장소고, 상태는 스냅샷에 있다.
+    fn journal_where(&self, keep: impl Fn(&JournalEntry) -> bool) -> R<Vec<JournalEntry>> {
         let path = self.journal_path();
         let src = match std::fs::read_to_string(&path) {
             Ok(s) => s,
@@ -330,16 +358,14 @@ impl Repo {
             Err(e) => return Err(Fail::new(format!("{}: {e}", path.display()))),
         };
         let src = src.strip_prefix('\u{feff}').unwrap_or(&src);
-        let mut out: Vec<JournalEntry> = src
+        Ok(src
             .lines()
             .filter(|l| !l.trim().is_empty())
             // 모르는/깨진 줄은 건너뛴다. 저널은 상태를 만들지 않으므로
             // 여기서 관대해도 답이 틀리지 않는다.
             .filter_map(|l| serde_json::from_str::<JournalEntry>(l).ok())
-            .filter(|e| e.id == id)
-            .collect();
-        out.sort_by(|a, b| a.ts.cmp(&b.ts));
-        Ok(out)
+            .filter(|e| keep(e))
+            .collect())
     }
 }
 

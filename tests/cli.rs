@@ -2066,21 +2066,27 @@ fn every_line_printing_command_drops_keys_moai_appends() {
     );
     std::fs::write(s.path().join(".moai/issues.jsonl"), &doctored).unwrap();
 
-    let seen = |args: &[&str]| {
+    // `stands` 는 **그 표면이 언제나 세우는** 키다 — 걷은 뒤 제 값으로 다시 서므로 키가 있는
+    // 것이 옳고, 거짓을 싣지 않았는지는 되쓴 값(`가짜`)이 사라졌는지로 잰다(moai-p8qj 의 `work`).
+    let seen = |args: &[&str], stands: &[&str]| {
         let json = ok(s.path(), args);
         assert!(json.contains(&id), "{args:?} 가 그 줄을 안 냈다\n{json}");
+        assert!(!json.contains("가짜"), "{args:?} 가 되쓴 줄의 옛 값을 냈다\n{json}");
         for (k, _) in &stale {
+            if stands.contains(k) {
+                continue;
+            }
             assert!(!json.contains(&format!("\"{k}\"")), "{args:?} 가 되쓴 줄의 {k} 를 냈다\n{json}");
         }
         assert!(json.contains(r#""due":"2026-10-01""#), "{args:?} 가 겹치지 않는 모르는 필드까지 걷었다\n{json}");
     };
-    seen(&["ready", "--json"]);
-    seen(&["show", "--json"]);
-    seen(&["show", "-s", "todo", "--json"]);
+    seen(&["ready", "--json"], &[]);
+    seen(&["show", "--json"], &["work"]);
+    seen(&["show", "-s", "todo", "--json"], &["work"]);
     assert_eq!(issues(s.path()), doctored, "출력에서 걷으려다 파일을 바꿨다");
     // 쓰는 명령도 같다 — 파일에는 모르는 필드가 그대로 남는다.
-    seen(&["edit", &id, "-p", "1", "--json"]);
-    seen(&["mv", &id, "in_progress", "--json"]);
+    seen(&["edit", &id, "-p", "1", "--json"], &[]);
+    seen(&["mv", &id, "in_progress", "--json"], &[]);
     assert!(line_of(s.path(), &id).contains(r#""place":"lost""#), "모르는 필드를 잃었다");
 }
 
@@ -4661,6 +4667,36 @@ fn show_json_reads_who_did_the_work_from_model_notes() {
     assert_eq!(some.matches(r#""provider":"#).count(), 3, "오타 줄을 값으로 읽었다\n{some}");
     // 값이 안 된 줄도 이력에서 빠지지 않는다.
     assert!(ok(s.path(), &["show", &id]).contains("tokens 12"), "꼴에 안 맞는 노트가 이력에서 사라졌다");
+}
+
+/// **목록도 `work` 를 낸다**(moai-p8qj). 닫힌 500건의 토큰을 더하려고 `show <id> --json` 을
+/// 500번 부르면 저널 전체를 500번 읽는다 — 목록이 한 번 읽어 id 로 가른다.
+///
+/// 두 표면의 답은 **같아야 한다**. 키는 목록에서도 늘 선다(moai-2l8n).
+#[test]
+fn the_list_json_carries_the_same_work_as_one_expanded_issue() {
+    let s = init("worklist");
+    let mine = add(s.path(), &["내가 한 것"]);
+    let bare = add(s.path(), &["아무도 안 적은 것"]);
+    ok(s.path(), &["note", &mine, "model: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)"]);
+    // 꼴을 옮겨 적은 예는 값이 아니다 — 목록도 하나를 펼칠 때와 같은 자로 읽는다.
+    ok(s.path(), &["note", &bare, "이렇게 적는다\n\n    model: anthropic/opus-5 (low — 예)"]);
+
+    let one = ok(s.path(), &["show", &mine, "--json"]);
+    let list = ok(s.path(), &["show", "--json"]);
+    let row = |id: &str| {
+        list.split("{\"id\":")
+            .find(|r| r.starts_with(&format!("\"{id}\"")))
+            .unwrap_or_else(|| panic!("{id} 줄이 목록에 없다\n{list}"))
+            .to_string()
+    };
+    let did = r#""work":[{"provider":"anthropic","model":"opus-5","tokens":182000,"grade":"high","why":"쓰기 경로","#;
+    assert!(one.contains(did), "하나를 펼친 쪽이 안 냈다\n{one}");
+    assert!(row(&mine).contains(did), "목록이 하나를 펼친 쪽과 다른 답을 냈다\n{list}");
+    assert!(row(&bare).contains(r#""work":[]"#), "적은 줄이 없는데 키가 안 섰거나 예를 값으로 읽었다\n{list}");
+    // 걸러진 목록도 같다.
+    let picked = ok(s.path(), &["show", "-s", "todo", "--json"]);
+    assert!(picked.contains(did), "필터를 준 목록이 work 를 잃었다\n{picked}");
 }
 
 /// **날짜가 거꾸로 선 커밋 밑도 본다**(moai-hws2). `show` 는 이슈가 생긴 때에서 걷기를 끊었는데,

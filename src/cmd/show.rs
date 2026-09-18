@@ -209,8 +209,20 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     crate::query::sort_for_display(&mut shown);
 
     if ctx.json {
-        let rows: Vec<super::Row> =
-            shown.iter().map(|i| super::Row::of(i, wh.states.get(i.id.as_str()).copied()).on(&origin)).collect();
+        // **일한 AI 는 목록에서도 나온다**(moai-p8qj). 닫힌 500건의 토큰을 더하려고
+        // `show <id> --json` 을 500번 부르면 저널 전체를 500번 읽는다 — 여기서는 뿌리마다
+        // 한 번 읽어 id 로 가른다.
+        let work = work_of(&repo, &origin, &shown)?;
+        let rows: Vec<Listed> = shown
+            .iter()
+            .map(|i| Listed {
+                row: super::Row::of(i, wh.states.get(i.id.as_str()).copied()).on(&origin),
+                // **키는 늘 선다**(moai-2l8n) — 하나를 펼칠 때와 같은 약속이다. 빈 배열은
+                // "이 일을 한 AI 를 아무도 안 적었다" 는 사실이고, 키가 없으면 되쓴 줄의
+                // 옛 `work` 가 그 자리에서 거짓을 싣는다.
+                work: work.get(i.id.as_str()).cloned().unwrap_or_default(),
+            })
+            .collect();
         return super::json_line(&rows);
     }
     if args.tree {
@@ -248,6 +260,41 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         &wh,
         &origin,
     ))
+}
+
+/// 목록의 줄 하나 — 줄에 `work` 를 곁들인다(moai-p8qj).
+///
+/// [`super::Row`] 가 이미 [`super::OURS`] 를 걷었으므로(되써 넣은 줄의 옛 `work`) 한 객체에
+/// 같은 키가 둘 서지 않는다. 하나를 펼치는 쪽은 [`super::json_with`] 로 같은 키를 붙인다 —
+/// 거기는 `journal`·`commits` 까지 붙이는 자리라 모양이 다를 뿐, 이름과 뜻은 하나다.
+#[derive(serde::Serialize)]
+struct Listed<'a> {
+    #[serde(flatten)]
+    row: super::Row<'a>,
+    work: Vec<model::Work>,
+}
+
+/// 낼 줄들의 `work` — **저널을 뿌리마다 한 번** 읽는다.
+///
+/// 줄이 온 워크트리의 저널에서 읽는 것은 하나를 펼칠 때와 같다([`one`]) — 스냅샷은 옆에서
+/// 온 줄을 내는데 이력만 이쪽에서 읽으면 저쪽에서 적은 `model:` 줄이 통째로 빈다.
+fn work_of(
+    repo: &Repo,
+    origin: &crate::worktree::Origin,
+    shown: &[Issue],
+) -> R<std::collections::BTreeMap<String, Vec<model::Work>>> {
+    let mut by_root: std::collections::BTreeMap<&std::path::Path, BTreeSet<&str>> = Default::default();
+    for i in shown {
+        by_root.entry(origin.root(&i.id).unwrap_or(&repo.root)).or_default().insert(i.id.as_str());
+    }
+    let mut out = std::collections::BTreeMap::new();
+    for (root, ids) in by_root {
+        let there = Repo { root: root.to_path_buf(), config: repo.config.clone() };
+        for (id, journal) in there.journal_by_id(&ids)? {
+            out.insert(id, model::work_of(&journal));
+        }
+    }
+    Ok(out)
 }
 
 /// `--as-plan` — 에픽 하나를 `add --from` 이 받는 마크다운으로 되뽑는다.
