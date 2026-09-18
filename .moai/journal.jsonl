@@ -3543,3 +3543,7 @@
 {"ts":"2026-09-18T01:04:50Z","id":"moai-oepz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T01:04:50Z","id":"moai-fygk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-18T01:05:18Z","id":"moai-xdli","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"보고: 머지 df4e4f3(트래커 25d4140, 닫기 0948ecc). 서버 다운 뒤 같은 워크트리에서 이어받아 main 을 받고 에픽 끝 리뷰(xhigh)를 처음부터 다시 돌렸다. 넘긴 것은 moai-vzzd·moai-o90m·moai-uxrn·moai-y7is. 감독 moa-issue-14 가 서버 재시작 뒤 사라져 보고를 메시지로 못 보냈다 — 이 노트가 보고다."}
+{"ts":"2026-09-18T01:10:59Z","id":"moai-lk8a.ats","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열하나 중 여덟 반영(162f3b7) — 울타리가 git 까지 막게. 울타리 기본값은 idea moai-9beh, 나머지 둘은 까닭 적고 그대로"}
+{"ts":"2026-09-18T01:11:00Z","id":"moai-shgx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"9a846d4 로 main 병합"}
+{"ts":"2026-09-18T01:11:00Z","id":"moai-46xz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"9a846d4 로 main 병합"}
+{"ts":"2026-09-18T01:11:00Z","id":"moai-uu47","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"9a846d4 로 main 병합"}
