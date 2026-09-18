@@ -4407,3 +4407,4 @@
 {"ts":"2026-09-18T12:06:57Z","id":"moai-zuke.ud6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=74229 (high — 에픽 끝 리뷰, 범위를 잘못 읽은 첫 판 59767 은 따로 셈)"}
 {"ts":"2026-09-18T12:06:57Z","id":"moai-zuke.ud6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"버그 없음. 짚은 open_place 주석 한 줄(n 으로 층에 남는 길)은 32035fc 로 고쳤다. 넘긴 것 없음"}
 {"ts":"2026-09-18T12:06:57Z","id":"moai-800o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-18T12:07:02Z","id":"moai-wxkm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: moai-h0r2(hook.rs 의 Event doc 을 줄이고 tests/cli.rs every_help_fits_in_eighty_columns 의 hook 예외를 걷는다) — moai-dw63-hook 워크트리가 hook.rs 를 놓은 뒤. -h 폭은 idea moai-1ovx"}
