@@ -13,7 +13,7 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Scratch {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = scratch::base().join(format!(
             "moai-cli-{}-{}-{name}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -107,6 +107,12 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
 // 읽는다. 따로 된 크레이트라 `use` 로는 못 가져가고, 두 벌로 두면 한쪽에만 더한 변수가 말없이 갈라진다.
 #[path = "../src/git_leaks.rs"]
 mod git_leaks;
+
+// 임시 자리의 뿌리 — 단위 시험의 `Scratch` 와 **한 파일**을 읽는다(moai-boc6). 임시 자리가 체크아웃 안이면
+// 울타리 친 뿌리를 쓰는데, 두 벌로 두면 한쪽만 그 울타리를 친다. 쓰는 것은 `base` 뿐이다.
+#[path = "../src/scratch.rs"]
+#[allow(dead_code)]
+mod scratch;
 
 /// 시험이 부르는 moai 한 벌. **사람·시계·색을 한 자리에서 준다**(moai-uu47).
 ///

@@ -83,12 +83,7 @@ impl Scratch {
     /// 그런 시험은 `TMPDIR` 을 못 바꾼다(한 판의 모든 스레드가 그것을 함께 본다).
     pub fn fenced_in(base: &Path, name: &str) -> Scratch {
         let s = Scratch::in_place(base, name);
-        let git = s.0.join(".git");
-        let fail = |e: std::io::Error| panic!("{}: {e}", git.display());
-        for dir in ["objects", "refs"] {
-            std::fs::create_dir_all(git.join(dir)).unwrap_or_else(fail);
-        }
-        std::fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap_or_else(fail);
+        fence(&s.0);
         s
     }
 
@@ -111,8 +106,58 @@ impl Drop for Scratch {
 }
 
 /// 임시 자리의 뿌리. 모듈 머리의 "자리" 가 왜 이것뿐인지를 적어 둔다.
-fn base() -> PathBuf {
-    std::env::temp_dir()
+///
+/// **임시 자리가 체크아웃 안이면 울타리 친 공용 뿌리다**(moai-boc6, 2026-09-18 사용자 결정).
+/// 울타리를 골라 쓰던 때는 두 시험만 막혀 있었고, 나머지 자리는 `TMPDIR` 이 체크아웃 밑인
+/// 기계(컨테이너·CI)에서 그 체크아웃의 HEAD·refs 를 읽었다. 환경 변수로는 못 막는다 — 시험
+/// 빌드는 `GIT_CEILING_DIRECTORIES` 를 걷는다(`git_leaks`).
+///
+/// **체크아웃 밖에서는 지금과 같다.** 울타리를 늘 치면 "저장소가 아닌 자리" 가 필요한 시험
+/// (`a_repo_without_commits_is_empty_not_broken` 같은)이 빈 저장소 안에 서 전제가 바뀐다.
+/// 체크아웃 안에서는 그 시험들이 어차피 바깥 저장소를 보고 있었으니, 빈 울타리가 그보다 낫다.
+///
+/// 한 판에 한 번 잰다. 통합 시험(`tests/cli.rs`)도 이 파일을 읽어 같은 뿌리를 쓴다.
+pub fn base() -> PathBuf {
+    static BASE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BASE.get_or_init(|| base_for(&std::env::temp_dir())).clone()
+}
+
+/// 이 판의 뿌리가 울타리 밑인가 — 곧 **"저장소가 아닌 자리" 가 이 기계에 없는가.** 그 전제가
+/// 필요한 시험은 이것이 서면 그 단언만 건너뛴다. 바깥 저장소를 읽고 헛 실패하던 자리다.
+pub fn fenced_base() -> bool {
+    base() != std::env::temp_dir()
+}
+
+/// [`base`] 의 몸통 — 임시 자리 `tmp` 를 받아 뿌리를 낸다. 시험이 체크아웃 안을 흉내 내려고 따로 둔다.
+///
+/// 울타리 뿌리는 **이름에 pid 를 안 넣는다**(`moai-fence`). 판마다 새로 세우면 치울 자리가 없어
+/// `/tmp` 에 판 수만큼 쌓인다 — 빈 저장소 하나를 판들이 나눠 쓴다.
+pub fn base_for(tmp: &Path) -> PathBuf {
+    if !tmp.ancestors().any(|d| d.join(".git").exists()) {
+        return tmp.to_path_buf();
+    }
+    let root = tmp.join("moai-fence");
+    fence(&root);
+    root
+}
+
+/// `dir` 에 아무것도 없는 저장소를 세운다([`Scratch::fenced`] 가 왜 세 개인지 적는다).
+///
+/// **여러 판이 한꺼번에 세워도 된다.** 디렉터리는 `create_dir_all` 이 겨뤄도 되고, `HEAD` 는 없을
+/// 때만 제 이름의 임시 파일에 써서 `rename` 한다 — 제자리에 쓰면 옆 판의 git 이 잘린 `HEAD` 를
+/// 읽고 저장소가 아닌 것으로 보아 위로 새어 나간다.
+fn fence(dir: &Path) {
+    let git = dir.join(".git");
+    let fail = |e: std::io::Error| panic!("{}: {e}", git.display());
+    for sub in ["objects", "refs"] {
+        std::fs::create_dir_all(git.join(sub)).unwrap_or_else(fail);
+    }
+    let head = git.join("HEAD");
+    if !head.exists() {
+        let tmp = git.join(format!("HEAD.{}.{:?}", std::process::id(), std::thread::current().id()));
+        std::fs::write(&tmp, "ref: refs/heads/main\n").unwrap_or_else(fail);
+        std::fs::rename(&tmp, &head).unwrap_or_else(fail);
+    }
 }
 
 #[cfg(test)]
@@ -142,5 +187,25 @@ mod tests {
         std::fs::write(a.join("a"), "a").unwrap();
         drop(b);
         assert!(a.join("a").exists(), "옆의 Drop 이 이쪽 자리를 지웠다");
+    }
+
+    /// **체크아웃 안의 임시 자리는 울타리 밑에 선다**(moai-boc6). 체크아웃을 흉내 낸 자리에서
+    /// 뿌리를 잰다. git 이 그 울타리에서 서는지는 `git::tests` 가 본다 — git 은 `git::command`
+    /// 로만 띄우고, 이 파일은 통합 시험도 읽어 거기에는 `git` 모듈이 없다. 체크아웃 밖은 그대로다.
+    #[test]
+    fn a_temp_dir_inside_a_checkout_gets_a_fenced_root() {
+        let outer = Scratch::fenced("outer");
+        let tmp = outer.join("tmp");
+        std::fs::create_dir(&tmp).unwrap();
+        let root = base_for(&tmp);
+        assert_eq!(root, tmp.join("moai-fence"));
+        assert!(root.join(".git/HEAD").is_file() && root.join(".git/refs").is_dir());
+        // 두 번 세워도 된다 — 판마다 부른다.
+        assert_eq!(base_for(&tmp), root);
+
+        let plain = Scratch::new("plain");
+        if !plain.ancestors().skip(1).any(|d| d.join(".git").exists()) {
+            assert_eq!(base_for(plain.path()), plain.path(), "체크아웃 밖에 울타리를 쳤다");
+        }
     }
 }
