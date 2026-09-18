@@ -4586,3 +4586,8 @@
 {"ts":"2026-09-18T13:42:59Z","id":"moai-ght0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"release clean build 가 부하 때 예산 5분을 넘는다 (ecut 402초)"}
 {"ts":"2026-09-18T13:42:59Z","id":"moai-ght0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-bt5c 에서 펼쳤다 — release clean build 가 부하 때 예산 5분을 넘는다 (ecut 402초)"}
 {"ts":"2026-09-18T13:42:59Z","id":"moai-bt5c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-g326 의 멤버 moai-ght0 로 펼쳤다"}
+{"ts":"2026-09-18T13:43:40Z","id":"moai-xa84","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"clap 이 한글 value_name 을 글자 수로 세어 -h 설명 열이 어긋난다"}
+{"ts":"2026-09-18T13:44:32Z","id":"moai-shoa","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"7(p10 폭)은 moai-6bc0 의 cols.priority, 8(좁을 때 스피너 한 칸)은 moai-wilg 의 Head::still, 6(id_w<2)은 names_line 의 cols.id>0 갈래로 이미 고쳐져 있었다. 남은 4 만 고쳤다 — 이름 줄의 n/n 을 줄이 실제로 그린 셈(tallies)으로 가른다."}
+{"ts":"2026-09-18T13:44:32Z","id":"moai-d699","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"11 은 moai-shoa 와 같은 고침(tallies 로 가른다), 12 는 moai-wilg 의 Head::still 로 이미 고쳐져 있었다."}
+{"ts":"2026-09-18T13:44:35Z","id":"moai-glnm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:44:36Z","id":"moai-ip9r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
