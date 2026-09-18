@@ -891,7 +891,7 @@ PY
 
 ```sh
 python3 - '<세션>' '<에픽>' '<내 이름>' '<루트>' <<'PY'
-import glob, json, os, subprocess, sys, time
+import glob, json, os, re, subprocess, sys, time
 name, epic, me, root = sys.argv[1:5]
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 erased = False
@@ -922,8 +922,12 @@ def parents(pid):
             return
         pid = int(out) if out.isdigit() else 0
 PROMPT = "\u276f"
+DIM = ("38;5;244", "38;5;245", "38;5;246", "38;5;8", "90", "2")
+def screen(pane, colour=False):
+    args = ["capture-pane", "-p"] + (["-e"] if colour else []) + ["-t", pane]
+    return tmux(*args).stdout.split("\n")
 def draft(pane):
-    lines = tmux("capture-pane", "-p", "-t", pane).stdout.split("\n")
+    lines = screen(pane)
     at = [i for i, l in enumerate(lines) if l.startswith(PROMPT)]
     box = []
     for line in lines[at[-1] :] if at else []:
@@ -931,6 +935,20 @@ def draft(pane):
             # 첫 줄은 프롬프트 + 붙임표, 이어지는 줄은 두 칸 — 그만큼만 벗겨 들여쓰기를 지킨다.
             return "\n".join(l[2:].rstrip() for l in box).strip("\n")
         box.append(line)
+def dim_only(pane):
+    """입력 칸에 보이는 글이 모두 흐린 색인가 — 사람이 친 글이 아니라 Claude Code 의 제안 글이다."""
+    lines = screen(pane, True)
+    at = [i for i, l in enumerate(lines) if PROMPT in l]
+    for n, line in enumerate(lines[at[-1] :] if at else []):
+        if "─" in line:
+            return True
+        colour = ""
+        for i, piece in enumerate(re.split("\x1b\\[([0-9;]*)m", line)):
+            if i % 2:
+                colour = piece
+            elif (piece.replace(PROMPT, " ") if n == 0 else piece).strip() and colour not in DIM:
+                return False
+    return False
 def looks(fmt):
     return tmux("display-message", "-p", "-t", pane, fmt).stdout.strip()
 QUIET = '#{{pane_in_mode}}#{{pane_synchronized}}'
@@ -974,7 +992,13 @@ for _ in range(20):
     tmux("send-keys", "-t", pane, "C-e", "C-u", "DC")
     time.sleep(0.2)
 else:
-    skip("입력 칸을 못 비웠다")
+    # 지워 보고 가른다(사용자 결정): 안 지워지고 그 글이 모두 흐린 색이면 사람이 친 것이 아니라
+    # Claude Code 의 제안 글이다 — 그것은 `/clear` 앞에 붙지 않으니 그대로 친다.
+    if kept and draft(pane) == kept and dim_only(pane):
+        print("위의 `치던 글` 은 흐린 제안 글이었다 — 사람이 친 것이 아니다")
+        erased = False
+    else:
+        skip("입력 칸을 못 비웠다")
 if (read(f) or {{}}).get("status") != "idle":
     skip("그새 idle 이 아니다")
 if looks(QUIET) != "00":
@@ -1022,6 +1046,11 @@ PY
 - **옮길 때 앞머리 두 칸만 벗긴다**(사용자 결정). 첫 줄은 프롬프트와 붙임표, 이어지는 줄은
   두 칸이고 나머지는 화면 그대로다 — 줄마다 다듬으면 들여쓴 코드가 납작해져 돌아간다.
   화면이 접은 줄과 사람이 친 줄바꿈은 가를 수 없으니, 옮긴 글에 줄바꿈이 하나 더 보일 수 있다
+- **안 지워지는 글은 지워 보고 가른다**(사용자 결정). Claude Code 가 빈 칸에 띄우는 흐린 제안
+  글은 사람이 친 것이 아니라 지워지지도 않는다. 스무 번 쳐도 그대로이고 그 글이 모두 흐린
+  색이면(`capture-pane -e`) 제안 글로 보고 `/clear` 를 친다 — 제안 글은 `/clear` 앞에 안 붙는다.
+  색으로만 가르지 않는 까닭은, 사람이 친 글을 흐리게 그리는 판이 있으면 그 글 뒤에 `/clear` 가
+  붙기 때문이다. 지워지는 글은 언제나 사람의 것으로 본다
 - **비우기와 다음 배정을 한 호흡에 하지 않는다.** `/clear` 는 큐에 쌓인 글을 함께 지운다.
   스크립트가 `비웠다` 를 낸 — 세션 id 가 바뀐 — 뒤에 다음 idea 를 보내고, `비웠는지 모른다`
   면 그 창이 어떤지 보기 전에는 보내지 않는다
@@ -1557,6 +1586,7 @@ mod tests {
             ("pane_in_mode", "사람이 복사 모드로 스크롤해 읽는 판에 친다 — `/` 가 검색을 연다"),
             ("pane_synchronized", "묶인 판에 쳐 옆 일꾼의 대화까지 지운다"),
             ("입력 칸을 못 비웠다", "치던 글 뒤에 /clear 가 붙어 프롬프트로 간다"),
+            ("dim_only(pane)", "흐린 제안 글에 막혀 창이 영영 안 비워진다"),
             ("l[2:].rstrip()", "옮긴 치던 글이 들여쓰기를 잃는다"),
             ("left is None", "입력 칸을 놓친 화면에 지우는 키를 계속 친다"),
             ("치던 글은 이미 지웠다", "지우다 멈추면 사람의 글이 말없이 사라진다"),
