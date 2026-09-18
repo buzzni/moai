@@ -587,9 +587,10 @@ impl App {
                 self.cursor = 0;
                 // 떠난 프로젝트의 줄은 `leave_project` 가 이미 비웠다 — 두 프로젝트가 같은 prefix 를
                 // 쓰면(`argos-0001`) 남은 줄의 id 로 들이기가 커서를 붙들어 남의 줄 번호에 섰다.
+                // 들이기가 커서를 **첫 줄에** 세우고 상세를 되감는다 — 줄을 비운 뒤라 붙들 정체가 없고
+                // (`leave_project`), 뿌리에는 `..` 이 없어(moai-i784) 첫 줄이 곧 첫 이슈다. 디렉터리에
+                // 들어갈 때와 같은 자리다(`App::first_row`, moai-cm13). 여기서 목록을 또 세지 않는다(moai-go4o).
                 self.apply_fresh(fresh);
-                // 들어가면 첫 줄에 선다. 디렉터리에 들어갈 때와 같은 자다(`App::first_row`, moai-cm13).
-                self.cursor = self.first_row();
             }
             Err(e) => self.notice = Some(format!("들어가지 못했다 — {e}")),
         }
@@ -685,10 +686,7 @@ impl App {
 
     /// 층에서 누른 SPC r — 사용자 설정부터 다시 읽고 전부 다시 연다. 커서는 보던 프로젝트에 선다.
     pub(super) fn reread_layer(&mut self) {
-        let held = self.current().and_then(|r| match r {
-            Row::Project(at) => self.place_path(at).map(Path::to_path_buf),
-            _ => None,
-        });
+        let held = self.current().map(|r| self.anchor_of(&r));
         let Some(layer) = &mut self.layer else { return };
         let fresh = Layer::read(layer.config.as_deref(), layer.launch.as_deref());
         let old = std::mem::replace(layer, Layer { at: At::Layer, ..fresh });
@@ -696,15 +694,11 @@ impl App {
             self.discard(handle);
         }
         self.refresh_layer();
-        let rows = self.rows().len();
-        let found = held.as_ref().and_then(|h| self.layer.as_ref().and_then(|l| l.position(h)));
-        self.cursor = found.unwrap_or(self.cursor.min(rows.saturating_sub(1)));
         // **보던 줄에 그대로 섰으면 되감지 않는다** — 상세를 굴려 놓고 SPC r 을 누르면 굴린
-        // 자리를 잃는다. 정체로 가른다([`App::relayer`] 와 같은 자): 층이 다시 서며 차례가
-        // 바뀌어도 같은 프로젝트면 그대로다.
-        if found.is_none() || self.place_path(self.cursor) != held.as_deref() {
-            self.detail.rewind();
-        }
+        // 자리를 잃는다. 층이 다시 서며 차례가 바뀌어도 같은 프로젝트면 그대로다.
+        let rows = self.rows();
+        let at = held.as_ref().and_then(|a| self.row_of(&rows, a)).unwrap_or(self.cursor);
+        self.stand(&rows, at, held.as_ref());
     }
 
     /// **등록 목록을 이 탐색기가 바꾼 뒤**(층의 `a`·`d`, moai-plvy) 층을 다시 세운다.
@@ -762,14 +756,25 @@ impl App {
             let l = self.layer.as_ref()?;
             l.position(want).or_else(|| l.places.iter().position(|p| same_dir(&p.path, want)))
         });
-        let found = landed.or_else(|| held.as_ref().and_then(|a| self.row_of(&rows, a)));
-        let cursor = found.unwrap_or(self.cursor.min(rows.len().saturating_sub(1)));
-        // **정체로 가른다, 번호로 가르지 않는다.** 뺀 줄의 번호에 다음 프로젝트가 올라서면 번호는
-        // 같아도 다른 것을 보고, 거꾸로 차례가 바뀌어 번호가 밀려도 정체가 같으면 같은 것을 본다.
-        if rows.get(cursor).map(|r| self.anchor_of(r)) != held {
+        let at = landed.or_else(|| held.as_ref().and_then(|a| self.row_of(&rows, a))).unwrap_or(self.cursor);
+        self.stand(&rows, at, held.as_ref());
+    }
+
+    /// 이미 센 목록의 `at` 에 **목록 안으로 잘라** 선다. 그 자리의 줄이 `held` 가 아니면 상세를
+    /// 첫 줄로 되감는다(moai-go4o).
+    ///
+    /// **정체로 가른다, 번호로 가르지 않는다.** 뺀 줄의 번호에 다음 프로젝트가 올라서면 번호는
+    /// 같아도 다른 것을 보고, 거꾸로 차례가 바뀌어 번호가 밀려도 정체가 같으면 같은 것을 본다 —
+    /// 굴린 자리가 남으면 다른 줄을 첫 줄부터 못 본다(`move_to` 와 같은 까닭).
+    ///
+    /// 커서를 다시 세우는 자리(층 다시 세우기·다시 읽기)가 **어디에 서느냐**만 저마다 고르고 서는
+    /// 법은 이것 하나를 탄다. 한때 저마다 적어, 한쪽은 정체로 한쪽은 경로로 가르고 목록을 두세 번
+    /// 셌다. 목록은 부르는 쪽이 한 번 세어 넘긴다.
+    pub(super) fn stand(&mut self, rows: &[Row], at: usize, held: Option<&super::Anchor>) {
+        self.cursor = at.min(rows.len().saturating_sub(1));
+        if rows.get(self.cursor).map(|r| self.anchor_of(r)).as_ref() != held {
             self.detail.rewind();
         }
-        self.cursor = cursor;
     }
 
     /// 걸음마다 층을 본다. 스레드가 읽어 온 것은 **어디 서 있든** 받는다 — 경로로 맞춰
@@ -1793,10 +1798,20 @@ mod tests {
         a.key(key(KeyCode::Down));
         assert_eq!(a.current(), Some(Row::Project(1)));
 
+        // 상세를 굴려 둔다 — 보던 프로젝트에 그대로 서면 굴린 자리도 둔다(차례는 밀려도).
+        a.detail.fit(5, 50);
+        a.detail.by(3);
         s.register(&[&three, &one, &two]);
         a.hit("SPC r");
         assert_eq!(names(&a), ["three", "one", "two"]);
         assert_eq!(a.current(), Some(Row::Project(2)), "보던 프로젝트를 놓쳤다");
+        assert_eq!(a.detail.offset(), 3, "같은 프로젝트에 섰는데 상세를 되감았다");
         assert!(matches!(look(&a, "three"), Look::Open { .. }));
+
+        // 보던 것을 빼면 그 번호를 자른 자리의 **다른** 프로젝트에 서고, 상세는 첫 줄부터다.
+        s.register(&[&three, &one]);
+        a.hit("SPC r");
+        assert_eq!(a.current(), Some(Row::Project(1)), "뺀 줄의 번호를 목록 안으로 안 잘랐다");
+        assert_eq!(a.detail.offset(), 0, "다른 프로젝트에 섰는데 굴린 자리가 남았다");
     }
 }
