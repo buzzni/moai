@@ -467,6 +467,8 @@ mod tests {
         assert!(p.at.entries.iter().find(|d| d.name == "a").is_some_and(|d| d.registered && d.moai), "창의 표시가 안 고쳐졌다");
         assert_eq!(p.error, None);
         assert_eq!(place_at_cursor(&a), app_a, "층의 커서가 새 프로젝트에 안 섰다");
+        // 새 줄은 스레드가 읽는다(moai-ezwu) — 등록하는 키가 저장소 읽기를 기다리지 않는다.
+        crate::tui::settle_reads(&mut a);
         assert!(matches!(a.layer.as_ref().unwrap().places[1].look, Look::Open { .. }), "새 줄을 안 읽었다");
 
         // 창을 닫으면 그 줄에 서 있다. 다시 열면 마지막 디렉터리에서 연다.
@@ -482,6 +484,7 @@ mod tests {
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("init 전")), "{:?}", a.notice);
         press(&mut a, &[KeyCode::Esc]);
         assert_eq!(place_at_cursor(&a), app_b);
+        crate::tui::settle_reads(&mut a);
         let lines = crate::tui::draw::tests::render(&mut a, 100, 16);
         assert!(lines.iter().any(|l| l.contains("> b ") && l.contains("init 전")), "{}", lines.join("\n"));
 
@@ -691,12 +694,7 @@ mod tests {
         a.hit("0");
         assert!(a.on_layer());
         // 올라오면 남의 줄은 스레드가 읽는다(moai-ezwu) — 끝날 때까지 받는다.
-        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while a.loading() {
-            assert!(std::time::Instant::now() < until, "층 읽기가 끝나지 않는다");
-            std::thread::sleep(std::time::Duration::from_millis(2));
-            a.follow();
-        }
+        crate::tui::settle_reads(&mut a);
         let places: Vec<(PathBuf, bool)> =
             a.layer.as_ref().unwrap().places.iter().map(|p| (p.path.clone(), p.registered)).collect();
         assert_eq!(places, [(here, false), (other, true)]);

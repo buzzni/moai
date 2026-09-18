@@ -46,7 +46,7 @@ pub struct Layer {
     /// `.moai` 안에서 띄웠으면 그 뿌리. 등록돼 있지 않아도 층에 선다.
     launch: Option<PathBuf>,
     /// 스레드에서 읽고 있는 프로젝트들. 끝나면 [`App::follow`] 가 받는다.
-    pending: Option<(Receiver<Vec<Looked>>, std::thread::JoinHandle<()>)>,
+    pending: Option<(Receiver<Looked>, std::thread::JoinHandle<()>)>,
 }
 
 /// 층의 한 줄 — 프로젝트 하나.
@@ -145,7 +145,6 @@ pub struct Picked {
 struct Looked {
     path: PathBuf,
     marks: Marks,
-    read_at: std::time::Instant,
     look: Look,
 }
 
@@ -210,40 +209,54 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
     Look::Shut { state: kind, said }
 }
 
-/// 경로들을 연다. **프로젝트마다 제 스레드에서** 읽는다(moai-ezwu) — 한 줄의 값은 거의 자리
-/// 판정(`worktree::stranded_at`)이 옆 워크트리의 스냅샷을 파는 데 들고(이슈 745·워크트리 일곱에
-/// ~170ms, 판정을 빼면 ~40ms), 줄마다 디스크를 따로 만지므로 서로 기다릴 까닭이 없다. 차례대로
-/// 읽으면 층이 멈추는 값이 프로젝트 수만큼 더해지고, 나란히 읽으면 가장 느린 하나만큼이다.
-/// 차례는 받은 그대로다. 어느 스레드에서 불러도 같다.
-fn look_at(paths: &[PathBuf], now: &str) -> Vec<Looked> {
+/// 경로들을 연다. **프로젝트마다 제 스레드에서** 읽고, **닿는 대로 하나씩 보낸다**(moai-ezwu).
+///
+/// 한 줄의 값은 거의 자리 판정(`worktree::stranded_at`)이 옆 워크트리의 스냅샷을 파는 데 들고
+/// (이슈 745·워크트리 일곱에 ~170ms, 판정을 빼면 ~40ms), 줄마다 디스크를 따로 만지므로 서로
+/// 기다릴 까닭이 없다. 차례대로 읽으면 층이 멈추는 값이 프로젝트 수만큼 더해진다.
+///
+/// **한 벌로 묶어 보내지 않는다**(리뷰 moai-3lul.kt0) — 묶으면 빠른 줄까지 가장 느린 줄을
+/// 기다려 첫 화면이 통째로 `읽는 중` 으로 서고, 한 줄이 멈춘 마운트에 걸리면 나머지가 영영 안
+/// 찬다. 받는 쪽([`App::follow_layer`])은 걸음마다 닿은 만큼 들인다.
+///
+/// 보내기가 실패하면(받는 쪽이 이 읽기를 버렸다) 그 줄은 버려진다 — 버린 읽기는 받을 것이 아니다.
+fn look_into(paths: &[PathBuf], now: &str, tx: &std::sync::mpsc::Sender<Looked>) {
     if let [one] = paths {
-        return vec![look_one(one, now)];
+        let _ = tx.send(look_one(one, now));
+        return;
     }
     std::thread::scope(|s| {
-        let reads: Vec<_> = paths.iter().map(|p| s.spawn(move || look_one(p, now))).collect();
-        // 읽던 스레드의 패닉은 부른 쪽으로 되던진다 — 층의 스레드가 죽은 것과 같게 받는다(`follow_layer`).
-        reads.into_iter().map(|r| r.join().unwrap_or_else(|e| std::panic::resume_unwind(e))).collect()
-    })
+        for path in paths {
+            let tx = tx.clone();
+            s.spawn(move || {
+                let _ = tx.send(look_one(path, now));
+            });
+        }
+    });
+}
+
+/// 그 자리에서 다 읽는다 — 사람이 "다시" 를 누른 길(SPC r·등록 바꾸기)이 쓴다. 차례는 받은 그대로다.
+fn look_at(paths: &[PathBuf], now: &str) -> Vec<Looked> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    look_into(paths, now, &tx);
+    drop(tx);
+    let mut got: Vec<Looked> = rx.into_iter().collect();
+    got.sort_by_key(|l| paths.iter().position(|p| *p == l.path).unwrap_or(usize::MAX));
+    got
 }
 
 /// 한 경로를 연다. **표식을 먼저 잰다** — 읽고 나서 재면 그 사이의 쓰기가 "이미 본 것"
 /// 으로 적혀 영영 안 보인다(`App::open` 과 같은 까닭).
 fn look_one(path: &Path, now: &str) -> Looked {
-    let read_at = std::time::Instant::now();
     let marks = marks_of(path);
-    // 여는 길은 한눈 보기와 같은 `projects::open` 이다 — 상태를 가르는 셈을 두 벌 두지 않는다.
+    // 여는 길은 한눈 보기와 같다(`projects::open_one`) — 상태를 가르는 셈을 두 벌 두지 않는다.
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
-    let reg = user_config::Registry {
-        path: None,
-        projects: vec![user_config::Project { path: path.to_path_buf(), hue: None }],
-        ..user_config::Registry::default()
-    };
-    let p = projects::open(&reg).into_iter().next().expect("한 줄을 주면 한 줄이 온다");
+    let p = projects::open_one(path, String::new(), None, false);
     let look = match p.state {
         State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now) },
         state => shut(&p.path, &p.name, state),
     };
-    Looked { path: p.path, marks, read_at, look }
+    Looked { path: p.path, marks, look }
 }
 
 impl Layer {
@@ -305,20 +318,26 @@ impl Layer {
         self.places
             .iter()
             .filter(|p| {
-                matches!(p.look, Look::Unread)
-                    || p.read_at.is_some_and(|t| t.elapsed() >= REREAD_EVERY)
-                    || marks_of(&p.path) != p.marks
+                // **연 줄만 시계로 낡는다** — 못 연 줄이 내는 말(`view::unopened`)에는 때가 안 들어,
+                // 1분마다 다시 읽어도 같은 글이다(리뷰 moai-3lul.kt0).
+                let ticked = matches!(p.look, Look::Open { .. }) && p.read_at.is_some_and(|t| t.elapsed() >= REREAD_EVERY);
+                matches!(p.look, Look::Unread) || ticked || marks_of(&p.path) != p.marks
             })
             .map(|p| p.path.clone())
             .collect()
     }
 
-    /// 읽어 온 것을 경로로 맞춰 들인다. 그새 목록에서 빠진 경로는 버린다.
+    /// 읽어 온 줄 하나를 경로로 맞춰 들인다. 그새 목록에서 빠진 경로는 버린다.
+    ///
+    /// **읽은 때는 여기서 찍는다** — 읽기가 시작한 때로 찍으면 한 줄 읽는 데 [`REREAD_EVERY`] 가
+    /// 넘게 걸리는 자리(느린 마운트)에서 들이는 순간 이미 낡아, 층이 같은 줄을 쉬지 않고 다시
+    /// 읽는다(리뷰 moai-3lul.kt0). 표식은 반대로 읽기 **전**의 것이다 — 그 사이의 쓰기를 놓치면
+    /// 영영 안 보인다.
     fn adopt(&mut self, looked: Vec<Looked>) {
         for l in looked {
             if let Some(p) = self.places.iter_mut().find(|p| p.path == l.path) {
                 p.marks = l.marks;
-                p.read_at = Some(l.read_at);
+                p.read_at = Some(std::time::Instant::now());
                 p.look = l.look;
             }
         }
@@ -345,9 +364,7 @@ impl Layer {
         }
         let (tx, rx) = std::sync::mpsc::channel();
         let now = crate::model::now();
-        let handle = std::thread::spawn(move || {
-            let _ = tx.send(look_at(&stale, &now));
-        });
+        let handle = std::thread::spawn(move || look_into(&stale, &now, &tx));
         self.pending = Some((rx, handle));
     }
 
@@ -608,7 +625,8 @@ impl App {
         let Some(layer) = &mut self.layer else { return };
         let At::Project(from) = std::mem::replace(&mut layer.at, At::Layer) else { return };
         self.leave_project();
-        self.now = crate::model::now();
+        // **시각은 안 올린다** — 머리의 `↻` 가 그것으로 "방금 갱신했다" 를 말하는데, 읽기는 이제
+        // 스레드로 가서 아직 안 왔다(리뷰 moai-3lul.kt0). 들일 때 [`App::follow_layer`] 가 올린다.
         let Some(layer) = &mut self.layer else { return };
         layer.launch();
         self.cursor = layer.position(&from).unwrap_or(0);
@@ -651,7 +669,6 @@ impl App {
         self.watched = Vec::new();
         self.stamp = None;
         self.warnings = 0;
-        self.lost = 0;
         self.filter_text = None;
         // **보기는 돌리지 않는다**(moai-2bzp). 보기·정렬·열은 사람의 설정이라 사용자 설정에 적혀
         // 프로젝트를 옮겨도 이어진다 — 한때(moai-fmv5) 여기서 처음값으로 돌렸는데, 그러면 저장한
@@ -696,19 +713,20 @@ impl App {
         }
         self.refresh_layer();
         // **보던 줄에 그대로 섰으면 되감지 않는다** — 상세를 굴려 놓고 SPC r 을 누르면 굴린
-        // 자리를 잃는다. 층이 다시 서며 차례가 바뀌어도 같은 프로젝트면 그대로다.
-        let rows = self.rows();
-        let at = held.as_ref().and_then(|a| self.row_of(&rows, a)).unwrap_or(self.cursor);
-        self.stand(&rows, at, held.as_ref());
+        // 자리를 잃는다. 층이 다시 서며 차례가 바뀌어도 같은 프로젝트면 그대로다. 다시 읽은
+        // 뒤 커서를 붙드는 자는 목록 어디서나 하나다([`App::regrip`]).
+        self.regrip(held);
     }
 
     /// **등록 목록을 이 탐색기가 바꾼 뒤**(층의 `a`·`d`, moai-plvy) 층을 다시 세운다.
     ///
     /// SPC r([`App::reread_layer`])와 가르는 것 셋:
     /// - **선 자리를 둔다.** 프로젝트 안에서 `a` 로 등록해도 층으로 끌어올리지 않는다
-    /// - **이미 본 프로젝트는 다시 안 읽는다.** 경로가 같은 줄의 셈과 표식을 옮겨 들고, 새로
-    ///   선 줄만 읽는다(층에 섰을 때, 그 자리에서). SPC r 은 사람이 "전부 다시" 를 누른 것이지만
-    ///   이것은 한 줄을 더하거나 뺀 것이라, 등록 수만큼 저장소를 다시 읽을 까닭이 없다
+    /// - **이미 본 프로젝트는 다시 안 읽는다.** 경로가 같은 줄의 셈과 표식을 옮겨 들고, 새로 선
+    ///   줄만 읽는다(층에 섰을 때, [`Layer::launch`] 로 스레드에서). SPC r 은 사람이 "전부 다시" 를
+    ///   누른 것이지만 이것은 한 줄을 더하거나 뺀 것이라, 등록 수만큼 저장소를 다시 읽을 까닭이 없다.
+    ///   그 자리에서 읽으면 시계로 낡은 줄까지 함께 걸려(`REREAD_EVERY`) 등록 하나 바꾸는 키가 등록
+    ///   수만큼 멈춘다(리뷰 moai-3lul.kt0)
     /// - **층이 없었으면 세운다.** `.moai` 안에서 띄웠고 등록이 0 이었던 경우다. 띄운 자리가
     ///   `At::Project` 로 서므로 지금 프로젝트는 그대로이고, 층이 새로 서도 뿌리의 줄은 그대로라
     ///   (`..` 은 디렉터리에만 선다, moai-i784) 커서는 보던 줄(정체)에 선다
@@ -749,8 +767,8 @@ impl App {
                 self.layer = Some(fresh);
             }
         }
-        if self.on_layer() {
-            self.refresh_layer();
+        if let Some(layer) = &mut self.layer {
+            layer.launch();
         }
         let rows = self.rows();
         let landed = land.filter(|_| self.on_layer()).and_then(|want| {
@@ -761,24 +779,23 @@ impl App {
         self.stand(&rows, at, held.as_ref());
     }
 
-    /// 걸음마다 층을 본다. 스레드가 읽어 온 것은 **어디 서 있든** 받는다 — 경로로 맞춰
-    /// 들이므로 안에 들어간 뒤에 닿아도 섞일 데가 없다. 새로 읽으러 가는 것은 **층에 선
-    /// 동안만**이다([`Layer::launch`]): 안에 있는 동안 남의 프로젝트를 걸음마다 재고 읽을 까닭이
-    /// 없고, 올라갈 때 표식이 바뀐 것만 읽는다(`climb`).
+    /// 걸음마다 층을 본다. 스레드가 읽어 온 줄은 **어디 서 있든** 받는다 — 경로로 맞춰
+    /// 들이므로 안에 들어간 뒤에 닿아도 섞일 데가 없다. **닿은 만큼 들인다**(리뷰 moai-3lul.kt0):
+    /// 읽기는 줄마다 따로 오므로(`look_into`) 빠른 줄이 느린 줄을 안 기다린다. 새로 읽으러 가는
+    /// 것은 **층에 선 동안만**이다([`Layer::launch`]): 안에 있는 동안 남의 프로젝트를 걸음마다 재고
+    /// 읽을 까닭이 없고, 올라갈 때 낡은 줄을 읽으러 띄운다(`climb`).
     pub(super) fn follow_layer(&mut self) {
         let Some(layer) = &mut self.layer else { return };
-        if let Some((rx, _)) = &layer.pending {
+        let mut got = false;
+        while let Some((rx, _)) = &layer.pending {
             match rx.try_recv() {
-                Err(TryRecvError::Empty) => return,
                 Ok(looked) => {
-                    layer.pending = None;
-                    layer.adopt(looked);
-                    if layer.at == At::Layer {
-                        self.now = crate::model::now();
-                    }
-                    return;
+                    layer.adopt(vec![looked]);
+                    got = true;
                 }
-                // 읽던 스레드가 죽었다 — 받은 읽기와 같게 되던진다(`App::follow`).
+                // 아직 읽는 중이다 — 다음 걸음에 마저 받는다.
+                Err(TryRecvError::Empty) => break,
+                // 다 보냈거나 읽던 스레드가 죽었다 — 죽었으면 받은 읽기와 같게 되던진다(`App::follow`).
                 Err(TryRecvError::Disconnected) => {
                     if let Some((_, handle)) = layer.pending.take()
                         && let Err(payload) = handle.join()
@@ -788,6 +805,10 @@ impl App {
                 }
             }
         }
+        if got && layer.at == At::Layer {
+            self.now = crate::model::now();
+        }
+        let Some(layer) = &mut self.layer else { return };
         layer.launch();
     }
 
@@ -804,7 +825,7 @@ fn blank_config() -> crate::config::Config {
 }
 
 /// 그림 시험이 디스크 없이 층을 세운다. 읽을 것이 없게 모든 줄을 이미 본 것으로 둔다 —
-/// 없는 경로의 표식은 `(false, None, None)` 이라 [`Layer::stale`] 이 다시 읽으러 가지 않는다.
+/// 없는 경로의 표식은 [`Marks::default`] 와 같아 [`Layer::stale`] 이 다시 읽으러 가지 않는다.
 #[cfg(test)]
 pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
     Layer {
@@ -889,16 +910,7 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
-    /// 스레드에서 읽는 것을 **끝날 때까지** 받는다. 루프가 하는 것을 흉내 낸다.
-    fn settle(a: &mut App) {
-        a.follow();
-        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while a.loading() {
-            assert!(std::time::Instant::now() < until, "읽기가 끝나지 않는다");
-            std::thread::sleep(std::time::Duration::from_millis(2));
-            a.follow();
-        }
-    }
+    use super::super::settle_reads as settle;
 
     /// 밖에서 띄운 탐색기 — 첫 읽기가 **끝난 뒤**의 것. 읽기는 스레드로 간다([`Layer::launch`]).
     fn layered(cfg: &Path) -> App {
@@ -937,7 +949,7 @@ mod tests {
     /// init 전·사라진 디렉터리·깨진 설정은 그 줄에서만 말하고 CLI 한눈 보기와 같은 말을 쓴다.
     #[test]
     fn outside_the_layer_lists_each_registered_project_in_its_own_state() {
-        let s = Scratch::new("layer-list");
+        let s = Scratch::fenced("layer-list");
         let (one, two) = twins(&s);
         let bare = s.dir("bare");
         let gone = s.join("gone");
@@ -979,7 +991,7 @@ mod tests {
     /// 있어도 커서는 옛 프로젝트의 id 를 붙들고 넘어가지 않는다. 거름망은 나올 때 풀린다.
     #[test]
     fn entering_and_leaving_keeps_each_projects_lines_apart() {
-        let s = Scratch::new("layer-enter");
+        let s = Scratch::fenced("layer-enter");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
@@ -1032,7 +1044,7 @@ mod tests {
     /// 시키지도 않은 끈 화면으로 읽힌다.
     #[test]
     fn climbing_restores_the_worktree_overlay_like_it_drops_the_filter() {
-        let s = Scratch::new("layer-climb-w");
+        let s = Scratch::fenced("layer-climb-w");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
@@ -1063,7 +1075,7 @@ mod tests {
     /// 것이다 — 늦게 닿으면 열린 줄로 되돌려, 사람이 방금 들은 "디렉터리가 없다" 와 화면이 어긋난다.
     #[test]
     fn a_layer_read_started_before_entering_does_not_undo_the_shut_it_wrote() {
-        let s = Scratch::new("layer-late-shut");
+        let s = Scratch::fenced("layer-late-shut");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
@@ -1071,7 +1083,7 @@ mod tests {
 
         // 층이 two 를 읽어 둔 채 아직 들이지 않았다. 그새 two 가 사라진다.
         let (tx, rx) = std::sync::mpsc::channel();
-        tx.send(look_at(std::slice::from_ref(&two), &crate::model::now())).unwrap();
+        look_into(std::slice::from_ref(&two), &crate::model::now(), &tx);
         a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {})));
         std::fs::remove_dir_all(&two).unwrap();
 
@@ -1090,7 +1102,7 @@ mod tests {
     /// 이 참이라 루프가 빠른 걸음으로 깨어, 이 프로젝트와 상관없는 층 읽기를 기다린다.
     #[test]
     fn entering_a_project_lets_go_of_the_layer_read() {
-        let s = Scratch::new("layer-enter-pending");
+        let s = Scratch::fenced("layer-enter-pending");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
@@ -1112,7 +1124,7 @@ mod tests {
     /// 새 프로젝트의 표에 섞인다.
     #[test]
     fn jumping_to_a_sibling_project_drops_the_commit_table_of_the_one_it_left() {
-        let s = Scratch::new("layer-jump-commits");
+        let s = Scratch::fenced("layer-jump-commits");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
@@ -1134,7 +1146,7 @@ mod tests {
     /// 그 줄이 없다.
     #[test]
     fn a_broken_config_leaves_no_layer_but_says_why() {
-        let s = Scratch::new("layer-broken-cfg");
+        let s = Scratch::fenced("layer-broken-cfg");
         let here = s.project("here", &[("argos-0009", "여기 줄", "todo")]);
         let cfg = s.join("broken.toml");
         std::fs::write(&cfg, "[[project]]\npath = \"/x\"\n[[project\n").unwrap();
@@ -1162,7 +1174,7 @@ mod tests {
     /// 맨 앞에 서서 도로 내려갈 수 있다. 남의 프로젝트는 올라갈 때 처음 읽는다.
     #[test]
     fn launched_inside_it_starts_inside_and_climbs_to_where_it_was_launched() {
-        let s = Scratch::new("layer-inside");
+        let s = Scratch::fenced("layer-inside");
         let (one, two) = twins(&s);
         let here = s.project("here", &[("argos-0009", "여기 줄", "todo")]);
         let cfg = s.register(&[&one, &two]);
@@ -1200,7 +1212,7 @@ mod tests {
     /// 하나를 더할 뿐이다. 사라진 디렉터리라도 등록돼 있으면 선다.
     #[test]
     fn without_a_registration_there_is_no_layer() {
-        let s = Scratch::new("layer-none");
+        let s = Scratch::fenced("layer-none");
         let here = s.project("here", &[]);
         let cfg = s.register(&[]);
         assert!(!Layer::read(Some(&cfg), Some(&here)).registered());
@@ -1213,7 +1225,7 @@ mod tests {
     /// 입힌다. 띄운 자리로만 선 줄은 설정에 없으니 정한 색도 없다.
     #[test]
     fn a_colour_chosen_in_the_user_config_rides_on_the_place() {
-        let s = Scratch::new("layer-hue");
+        let s = Scratch::fenced("layer-hue");
         let (one, here) = (s.dir("one"), s.dir("here"));
         let cfg = s.register(&[&one]);
         std::fs::write(&cfg, format!("{}color = \"blue\"\n", std::fs::read_to_string(&cfg).unwrap())).unwrap();
@@ -1227,7 +1239,7 @@ mod tests {
     /// 디렉터리를 연다.
     #[test]
     fn entering_a_project_that_cannot_open_only_says_why() {
-        let s = Scratch::new("layer-shut");
+        let s = Scratch::fenced("layer-shut");
         let bare = s.dir("bare");
         let gone = s.join("gone");
         let cfg = s.register(&[&bare, &gone]);
@@ -1253,11 +1265,12 @@ mod tests {
     /// 남의 프로젝트를 재지도 읽지도 않는다.
     #[test]
     fn only_the_project_that_changed_is_reread_and_only_on_the_layer() {
-        let s = Scratch::new("layer-reread");
+        let s = Scratch::fenced("layer-reread");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
-        let before = a.layer.as_ref().unwrap().places[0].marks.clone();
+        // **읽은 때로 잰다** — 표식은 다시 읽어도 같은 값이라 "다시 읽었나" 를 못 가른다(리뷰 moai-3lul.kt0).
+        let before = a.layer.as_ref().unwrap().places[0].read_at;
 
         a.follow();
         assert!(!a.loading(), "아무것도 안 바뀌었는데 읽으러 갔다");
@@ -1269,7 +1282,7 @@ mod tests {
         settle(&mut a);
         let Look::Open { sum } = look(&a, "two") else { panic!() };
         assert!(sum.picked.is_empty(), "다시 읽은 셈이 안 들어왔다");
-        assert_eq!(a.layer.as_ref().unwrap().places[0].marks, before, "안 바뀐 프로젝트까지 다시 읽었다");
+        assert_eq!(a.layer.as_ref().unwrap().places[0].read_at, before, "안 바뀐 프로젝트까지 다시 읽었다");
 
         // 안에 들어가면 층의 표식은 안 본다.
         a.key(key(KeyCode::Enter));
@@ -1306,25 +1319,37 @@ mod tests {
         };
         assert_eq!(stranded(&a), 0, "이름이 쥔 워크트리가 있는데 자리 없다고 댄다");
 
-        std::fs::remove_dir_all(s.join("argos-0002")).unwrap();
-        settle(&mut a);
-        assert_eq!(stranded(&a), 1, "워크트리를 치웠는데 층이 옛 수를 낸다");
-
-        // **들어가도 같은 수다** — 안쪽 배너도 자리 없는 줄을 센다(사용자 결정 2026-09-18). 한때
-        // 층은 `! 1` 인데 들어가면 0 이었다.
+        // **들어가면 층과 같은 수다** — 안쪽 배너도 자리 없는 줄을 센다(사용자 결정 2026-09-18).
         let Look::Open { sum } = look(&a, "main") else { panic!() };
         let on_layer = sum.warnings;
         a.key(key(KeyCode::Enter));
         assert!(!a.on_layer());
         assert_eq!(a.warnings, on_layer, "층과 안쪽 배너가 같은 저장소를 달리 센다");
-        assert!(a.warnings >= 1, "안쪽 배너가 자리 없는 줄을 안 셌다");
+
+        // **겹쳐 보기를 꺼도 워크트리가 사라지는 것을 본다**(리뷰 moai-3lul.kt0). 끄면 옆 스냅샷을
+        // 아예 안 열어, 한때는 자리 판정이 보는 것이 지켜보는 표식에 하나도 안 들었다 — 치운 뒤
+        // 배너가 옛 수로 굳었다.
+        a.hit("SPC t w");
+        assert!(!a.worktree, "w 가 겹쳐 보기를 안 껐다");
+        settle(&mut a);
+        let was = a.warnings;
+        std::fs::remove_dir_all(s.join("argos-0002")).unwrap();
+        settle(&mut a);
+        assert_eq!(a.warnings, was + 1, "겹쳐 보기를 끈 채로는 치운 워크트리를 못 본다");
+
+        // 올라오면 층도 같은 것을 센다.
+        a.hit("0");
+        settle(&mut a);
+        assert_eq!(stranded(&a), 1, "워크트리를 치웠는데 층이 옛 수를 낸다");
+        let Look::Open { sum } = look(&a, "main") else { panic!() };
+        assert_eq!(sum.warnings, was + 1, "층과 안쪽 배너가 갈렸다");
     }
 
     /// **파일이 그대로여도 시계가 가면 다시 읽는다**(moai-al0x). 요약에는 시계로 재는 것(워크트리가
     /// 뜰 한 시간 틈, 날로 재는 경고)이 들어, 표식만 보면 SPC r 전까지 옛 수가 선다. 층에 선 동안만이다.
     #[test]
     fn a_layer_line_read_long_ago_is_reread_even_if_nothing_changed() {
-        let s = Scratch::new("layer-clock");
+        let s = Scratch::fenced("layer-clock");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
@@ -1349,7 +1374,7 @@ mod tests {
     /// 동안 둘 다 없음 그대로라, 디렉터리를 안 재면 층이 "init 전" 을 영영 댄다.
     #[test]
     fn a_bare_directory_that_disappears_is_reread() {
-        let s = Scratch::new("layer-vanish");
+        let s = Scratch::fenced("layer-vanish");
         let bare = s.dir("bare");
         let cfg = s.register(&[&bare]);
         let mut a = layered(&cfg);
@@ -1368,7 +1393,7 @@ mod tests {
     /// 한 줄로 말한다. `n` 은 여기 없다(커서의 프로젝트에 담는다 — 아래 시험들).
     #[test]
     fn keys_that_need_a_project_say_so_on_the_layer_and_touch_nothing() {
-        let s = Scratch::new("layer-refuse");
+        let s = Scratch::fenced("layer-refuse");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let files = || [&one, &two].map(|d| std::fs::read(d.join(".moai/issues.jsonl")).unwrap());
@@ -1454,7 +1479,7 @@ mod tests {
     /// 층으로 올라갔으므로, 아무 말 없이 안 듣는 것은 고장으로 읽힌다.
     #[test]
     fn backspace_at_a_layered_root_names_the_key_that_replaced_it() {
-        let s = Scratch::new("layer-bksp-says");
+        let s = Scratch::fenced("layer-bksp-says");
         let (_one, _two, mut a) = on_layer_with_twins(&s);
         a.hit("1");
         a.key(key(KeyCode::Backspace));
@@ -1467,7 +1492,7 @@ mod tests {
     /// 없어, 상세에 포커스를 둔 채 `0` 을 누르면 무엇을 눌러야 할지 없는 화면이 선다.
     #[test]
     fn a_digit_jump_puts_the_focus_back_on_the_list() {
-        let s = Scratch::new("layer-digit-focus");
+        let s = Scratch::fenced("layer-digit-focus");
         let (_one, two, mut a) = on_layer_with_twins(&s);
         a.hit("2");
         a.hit("Tab");
@@ -1498,7 +1523,7 @@ mod tests {
     /// 까닭만 알림으로 다는데, 부르는 쪽이 포커스만 옮기면 읽던 상세가 키를 잃는다.
     #[test]
     fn a_failed_digit_jump_leaves_the_focus_where_it_was() {
-        let s = Scratch::new("layer-digit-jump-fail");
+        let s = Scratch::fenced("layer-digit-jump-fail");
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.hit("1");
         assert_eq!(a.here(), Some(one.clone()), "1 이 첫 프로젝트로 안 갔다");
@@ -1517,7 +1542,7 @@ mod tests {
     /// `0` 은 층으로 돌아온다. 헤더가 그 번호를 대므로 어디서 눌러도 같은 자리로 간다.
     #[test]
     fn a_bare_digit_jumps_to_that_project_and_zero_comes_back() {
-        let s = Scratch::new("layer-digit-jump");
+        let s = Scratch::fenced("layer-digit-jump");
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.hit("2");
         assert_eq!(a.here(), Some(two.clone()), "2 가 둘째 프로젝트로 안 갔다");
@@ -1537,7 +1562,7 @@ mod tests {
     /// 화면으로, 끈 화면으로 열린다.
     #[test]
     fn a_digit_jump_drops_what_is_bound_to_the_project_it_leaves() {
-        let s = Scratch::new("layer-digit-jump-clean");
+        let s = Scratch::fenced("layer-digit-jump-clean");
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.hit("1");
         assert_eq!(a.here(), Some(one), "1 이 첫째 프로젝트로 안 갔다");
@@ -1560,7 +1585,7 @@ mod tests {
     /// 프로젝트의 파일만 바뀌고, 알림이 어느 프로젝트인지 댄다.
     #[test]
     fn n_inside_a_project_writes_only_that_projects_file() {
-        let s = Scratch::new("layer-jot-inside");
+        let s = Scratch::fenced("layer-jot-inside");
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.key(key(KeyCode::Down));
         a.key(key(KeyCode::Enter));
@@ -1585,7 +1610,7 @@ mod tests {
     /// 데도 안 들어간다.
     #[test]
     fn n_on_the_layer_saves_into_the_project_under_the_cursor() {
-        let s = Scratch::new("layer-jot-layer");
+        let s = Scratch::fenced("layer-jot-layer");
         let (one, two, mut a) = on_layer_with_twins(&s);
         let before = snapshots(&[&one, &two]);
 
@@ -1616,7 +1641,7 @@ mod tests {
     /// 커서가 옆 프로젝트로 가도, 담기는 곳은 머리에 보인 그 프로젝트다.
     #[test]
     fn the_target_is_fixed_when_the_form_opens() {
-        let s = Scratch::new("layer-jot-fixed");
+        let s = Scratch::fenced("layer-jot-fixed");
         let (one, two, mut a) = on_layer_with_twins(&s);
         let before = snapshots(&[&two]);
         a.hit("SPC n");
@@ -1655,7 +1680,7 @@ mod tests {
     /// 층이 다시 읽혀 차례가 뒤집히고 커서가 옆 프로젝트에 서도, 돌아온 글은 박힌 곳에 담긴다.
     #[test]
     fn an_edit_lands_in_the_project_fixed_when_the_editor_opened() {
-        let s = Scratch::new("layer-edit-fixed");
+        let s = Scratch::fenced("layer-edit-fixed");
         let (one, two, mut a) = on_layer_with_twins(&s);
         let before = snapshots(&[&two]);
         a.editor = Some("vi".into());
@@ -1679,7 +1704,7 @@ mod tests {
     /// 층에서 연 폼의 프로젝트가 그새 등록에서 빠지면 **쓰지 않고 말한다.** 폼은 적던 그대로다.
     #[test]
     fn a_target_dropped_from_the_layer_is_not_written_elsewhere() {
-        let s = Scratch::new("layer-jot-dropped");
+        let s = Scratch::fenced("layer-jot-dropped");
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.hit("SPC n");
         type_in(&mut a, "갈 데 없는 것");
@@ -1701,7 +1726,7 @@ mod tests {
     /// 말(`view::unopened`)을 한 줄로 댄다. 그새 init 했으면 연다.
     #[test]
     fn n_on_a_project_that_cannot_open_opens_no_form() {
-        let s = Scratch::new("layer-jot-shut");
+        let s = Scratch::fenced("layer-jot-shut");
         let bare = s.dir("bare");
         let gone = s.join("gone");
         let cfg = s.register(&[&bare, &gone]);
@@ -1733,7 +1758,7 @@ mod tests {
                 None => Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험", crate::fail::code::NO_ACTOR)),
             }
         }
-        let s = Scratch::new("layer-jot-ask");
+        let s = Scratch::fenced("layer-jot-ask");
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.user = None;
         a.identify = nobody;
@@ -1762,7 +1787,7 @@ mod tests {
     /// 프로젝트에서 늦게 닿은 읽기가 들어오면 화면이 남의 줄이 된다.
     #[test]
     fn a_read_in_flight_from_the_project_left_behind_never_lands() {
-        let s = Scratch::new("layer-inflight");
+        let s = Scratch::fenced("layer-inflight");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
@@ -1783,7 +1808,7 @@ mod tests {
     /// 커서는 보던 프로젝트(경로)에 선다.
     #[test]
     fn spc_r_on_the_layer_rereads_the_registration_and_keeps_the_cursor_on_its_project() {
-        let s = Scratch::new("layer-f5");
+        let s = Scratch::fenced("layer-f5");
         let (one, two) = twins(&s);
         let three = s.project("three", &[]);
         let cfg = s.register(&[&one, &two]);

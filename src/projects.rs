@@ -63,11 +63,15 @@ pub fn open_with(reg: &Registry, worktree: bool) -> Vec<Project> {
     reg.projects
         .iter()
         .zip(crate::user_config::names(&reg.projects))
-        .map(|(p, name)| {
-            let (state, origin, trouble, swept) = State::at_with(&p.path, worktree);
-            Project { path: p.path.clone(), name, hue: p.hue, state, origin, trouble, swept }
-        })
+        .map(|(p, name)| open_one(&p.path, name, p.hue, worktree))
         .collect()
+}
+
+/// 한 자리만 연다 — 이름은 부르는 쪽이 정한다(등록 목록 전체에서 갈리는 파생값이라, 한 줄만
+/// 보고는 못 정한다). 탐색기의 프로젝트 층이 줄마다 제 스레드에서 이것을 부른다(`tui::layer`).
+pub fn open_one(path: &Path, name: String, hue: Option<crate::style::Hue>, worktree: bool) -> Project {
+    let (state, origin, trouble, swept) = State::at_with(path, worktree);
+    Project { path: path.to_path_buf(), name, hue, state, origin, trouble, swept }
 }
 
 impl State {

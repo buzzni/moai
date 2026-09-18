@@ -867,22 +867,31 @@ pub fn place_marks(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
     if is_linked(root) {
         return Vec::new();
     }
-    let Some((top, common)) = git_dirs(root) else { return Vec::new() };
-    let rel = canonical(root).strip_prefix(canonical(top)).map(Path::to_path_buf).unwrap_or_default();
+    let Some((_, common)) = git_dirs(root) else { return Vec::new() };
     let worktrees = common.join("worktrees");
     // 목록을 읽기 **전에** 잰다 — 읽고 나서 재면 그 사이에 생긴 워크트리를 놓친다([`heads`] 와 같다).
     let mut out = vec![(worktrees.clone(), crate::store::stamp(&worktrees))];
-    let Ok(linked) = std::fs::read_dir(&worktrees) else { return out };
-    let mut dirs: Vec<PathBuf> = linked.filter_map(Result::ok).map(|e| e.path()).collect();
-    dirs.sort();
-    for dir in dirs {
-        let head = dir.join("HEAD");
-        out.push((head.clone(), crate::store::stamp(&head)));
-        let Ok(gitdir) = std::fs::read_to_string(dir.join("gitdir")) else { continue };
-        let Some(tree) = canonical(&dir.join(gitdir.trim_end())).parent().map(Path::to_path_buf) else { continue };
-        let (dot_git, snapshot) = (tree.join(".git"), tree.join(&rel).join(".moai").join("issues.jsonl"));
-        out.push((dot_git.clone(), crate::store::stamp(&dot_git)));
+    // **목록은 [`on_disk`] 하나로 읽는다** — 자리 판정이 보는 그 목록이다(리뷰 moai-3lul.kt0).
+    // 여기서 따로 훑으면 `gitdir` 를 푸는 법·거르는 법이 두 벌이 되어, 한쪽만 고쳐질 때 층이
+    // "바뀐 것 없다" 로 서고 판정만 달라진다(그 풀이는 moai-23ky 에서 한 번 고쳐진 자리다).
+    // 경로가 사라진 워크트리는 `on_disk` 가 거르므로, 치우면 이 목록이 짧아져 그 자체가 바뀜이다.
+    let Some(disk) = on_disk(root) else { return out };
+    for (tree, linked, _) in &disk.all {
+        if !linked {
+            continue;
+        }
+        // 가지 이름이 곧 이름 후보다([`names`]) — HEAD 가 움직이면 자리 판정의 답이 바뀐다.
+        if let Some(head) = disk.admin.get(&tree.path).map(|dir| dir.join("HEAD")) {
+            out.push((head.clone(), crate::store::stamp(&head)));
+        }
+        let snapshot = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
         out.push((snapshot.clone(), crate::store::stamp(&snapshot)));
+        // **딸린 워크트리의 `.git`(`gitdir:` 한 줄)도 든다**([`gather`] 와 같은 까닭). 제거 명령
+        // 없이 디렉터리째 치우면 git 이 적어 둔 `worktrees/<이름>` 은 그대로라 위의 둘이 안
+        // 움직이고, 목록이 짧아진 것은 **목록째 견주는 쪽**(`layer::Marks`)만 본다 — 경로마다
+        // 표식을 견주는 쪽(`App::follow`)은 이 파일이 사라지는 것으로 안다.
+        let dot_git = tree.path.join(".git");
+        out.push((dot_git.clone(), crate::store::stamp(&dot_git)));
     }
     out
 }

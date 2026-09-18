@@ -215,8 +215,6 @@ pub struct Fresh {
     index: Index,
     states: States,
     warnings: usize,
-    /// 그중 자리 없는 집은 줄의 경고([`lost_of`]) — 0 이나 1.
-    lost: usize,
     unreadable: Vec<Option<String>>,
     origin: crate::worktree::Origin,
     elsewhere: Vec<String>,
@@ -265,6 +263,11 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     // 두지 않는 것은 CLI 명령마다 git 을 한 번 더 띄우게 되어서다 — 지켜보는 것은 탐색기뿐이다.
     // **이것도 읽기 전에 잰다** — 읽는 동안 떨어진 커밋을 뒤에 재면 놓친다(위와 같은 까닭).
     let heads = if worktree { Vec::new() } else { crate::worktree::heads(&repo.root) };
+    // **자리 판정이 보는 것도 지켜본다**(리뷰 moai-3lul.kt0, moai-al0x). `lost_of` 가 밑에서 옆
+    // 워크트리의 있고 없음과 스냅샷을 읽는데, 겹쳐 보지 않을 때의 `watched` 에는 그것이 하나도
+    // 안 들어 — 워크트리를 `rm -rf` 로 치워도 `App::follow` 가 다시 안 읽고 배너만 옛 수로 선다.
+    // 층이 제 줄을 재는 자와 같다(`layer::marks_of`). **읽기 전에** 잰다(위와 같은 까닭).
+    let places = crate::worktree::place_marks(&repo.root);
     let g = crate::worktree::gather(repo, worktree)?;
     // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
     let unreadable: Vec<Option<String>> = g
@@ -277,6 +280,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     let now = crate::model::now();
     let mut watched = g.watched;
     watched.extend(heads);
+    watched.extend(places);
     let lost = lost_of(repo, &issues, worktree, &now);
     Ok(Fresh {
         root: repo.root.clone(),
@@ -284,7 +288,6 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         index: Index::of(&issues),
         states: states_of(&issues, &repo.config),
         warnings: warnings_of(&issues, &unreadable, &repo.config, &now) + lost,
-        lost,
         issues,
         unreadable,
         origin: g.origin,
@@ -302,6 +305,9 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
 /// [`warnings_of`] 에 안 넣고 따로 둔 까닭: 그것은 `&[Issue]` 에 대한 순수한 셈이라 못 읽는 줄의
 /// 자가 바뀔 때마다 다시 부르는데, 이것은 디스크의 워크트리를 읽는다(이름으로 안 잡히는 집은 줄이
 /// 있으면 옆 스냅샷을 판다). 읽을 때 한 번 재어 들고, 수를 다시 셀 때는 든 값을 더한다.
+/// **겹쳐 보기를 따른다** — 탐색기의 기본값(켬)에서는 `moai status --worktree` 와 같은 수고, `w` 로
+/// 끄면 `moai status` 와 같은 수다. 딸린 워크트리에서 띄우면 그 둘이 갈리는데(겹쳐 보지 않는
+/// `workplaces` 는 딸린 워크트리의 자리를 안 잰다), 화면이 "지금 겹쳐 보는 것" 을 말하는 쪽이 맞다.
 fn lost_of(repo: &Repo, issues: &[Issue], worktree: bool, now: &str) -> usize {
     usize::from(crate::worktree::stranded_at(&repo.root, &repo.config, issues, worktree, now).0.is_some())
 }
@@ -393,8 +399,6 @@ pub struct App {
     header_user: Option<(Option<String>, crate::config::Naming, std::path::PathBuf, String)>,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     pub warnings: usize,
-    /// 그중 자리 없는 집은 줄의 경고([`lost_of`]). 읽을 때 재어 들고, `warnings` 를 다시 셀 때 더한다.
-    lost: usize,
     /// 상세의 굴린 자리. **왼쪽 커서를 옮기면 첫 줄로 돌아간다** — 다른
     /// 이슈를 보는데 굴린 자리가 남아 있으면 첫 줄부터 못 본다.
     pub detail: Scroll,
@@ -587,10 +591,10 @@ impl App {
             self.unreadable = unreadable;
             self.warnings = warnings_of(&self.issues, &self.unreadable, &self.cfg, &self.now);
         }
-        // 자리 판정은 저장소가 있어야 잰다 — `build` 는 줄만 받아 못 쟀다.
+        // 자리 판정은 저장소가 있어야 잰다 — `build` 는 줄만 받아 못 쟀다. 다시 읽기는
+        // `prepare` 가 같은 자로 세어 [`Fresh::warnings`] 에 실어 온다.
         if let Some(repo) = &self.repo {
-            self.lost = lost_of(repo, &self.issues, self.worktree, &self.now);
-            self.warnings += self.lost;
+            self.warnings += lost_of(repo, &self.issues, self.worktree, &self.now);
         }
         self.origin = origin;
         self.elsewhere = elsewhere;
@@ -634,7 +638,6 @@ impl App {
             identify: crate::model::actor,
             header_user: None,
             warnings: 0,
-            lost: 0,
             stamp: None,
             watched: Vec::new(),
             commits: Commits::new(),
@@ -954,7 +957,6 @@ impl App {
         self.commits_due |= self.watched != f.watched || f.issues.iter().any(|i| !self.commit_ids.contains(&i.id));
         self.watched = f.watched;
         self.warnings = f.warnings;
-        self.lost = f.lost;
         self.take(f.issues, f.index, f.states, f.now);
     }
 
@@ -1025,7 +1027,7 @@ impl App {
         let index = Index::of(&issues);
         let states = states_of(&issues, &self.cfg);
         let now = crate::model::now();
-        self.warnings = warnings_of(&issues, &self.unreadable, &self.cfg, &now) + self.lost;
+        self.warnings = warnings_of(&issues, &self.unreadable, &self.cfg, &now);
         self.take(issues, index, states, now);
     }
 
@@ -2035,10 +2037,14 @@ impl App {
                 let mode = self.mode.clone();
                 // 잘못 적은 것은 버리지 않고 그 자리에 둔다 — 지우고 다시 치게
                 // 하면 긴 거름망일수록 고치기가 벌이 된다.
+                // 붙든 줄은 **거르기 전**에 잰다 — 첨자가 옛 `keep` 을 가리킨다.
+                let held = self.current().map(|r| self.anchor_of(&r));
                 if self.apply(&mode).is_ok() {
                     self.mode = Mode::Browse;
                     self.grep_was = None;
-                    self.cursor = self.cursor.min(self.rows().len().saturating_sub(1));
+                    // 자른 자리의 줄이 다른 것이면 상세도 첫 줄로(리뷰 moai-3lul.kt0) — 치는 대로 거르는
+                    // 길(`live`)이 이미 그렇게 서고, 여기만 커서를 자르고 굴린 자리를 남겼다.
+                    self.settle(held, self.cursor);
                 }
             }
             keys::Prompt::Cancel => {
@@ -2410,6 +2416,19 @@ pub fn stamp_of(repo: &Repo) -> Stamp {
     crate::store::stamp(&repo.issues_path())
 }
 
+/// 스레드에서 짓는 읽기(다시 읽기·층)를 **끝날 때까지** 받는다. 루프가 하는 것을 흉내 낸다 —
+/// 시험 셋(여기·층·등록)이 같은 것을 저마다 적던 자리다(리뷰 moai-3lul.kt0).
+#[cfg(test)]
+fn settle_reads(a: &mut App) {
+    a.follow();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while a.loading() {
+        assert!(std::time::Instant::now() < until, "읽기가 끝나지 않는다");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        a.follow();
+    }
+}
+
 /// 한 줄을 `--filter` 토큰들로 쪼갠다.
 ///
 /// **`항목=` 이 시작하는 데서만 쪼갠다.** 그냥 띄어쓰기로 쪼개면 값에 빈칸이
@@ -2771,16 +2790,7 @@ mod tests {
 
     }
 
-    /// 스레드에서 짓는 다시 읽기를 **끝날 때까지** 받는다. 루프가 하는 것을 흉내 낸다.
-    fn settle(a: &mut App) {
-        a.follow();
-        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while a.loading() {
-            assert!(std::time::Instant::now() < until, "다시 읽기가 끝나지 않는다");
-            std::thread::sleep(std::time::Duration::from_millis(2));
-            a.follow();
-        }
-    }
+    use super::settle_reads as settle;
 
     /// `.moai` 한 벌을 얹은 임시 저장소. 자리를 만들고 지우는 일(터져도 치우는 것까지)은
     /// [`Scratch`] 가 한다.
