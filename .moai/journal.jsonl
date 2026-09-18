@@ -3706,3 +3706,5 @@
 {"ts":"2026-09-18T03:43:12Z","id":"moai-rp6v.u8k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 감독의 tmux 창 비우기 (moai-rp6v)"}
 {"ts":"2026-09-18T03:43:27Z","id":"moai-rp6v.u8k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T03:43:49Z","id":"moai-7x3r","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽 끝 xhigh 리뷰(moai-rp6v.u8k)가 백그라운드에서 돈다 — 반영 뒤 main 병합, 워크트리 지우고 닫는다"}
+{"ts":"2026-09-18T03:47:01Z","id":"moai-9a8m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"e51b5c5 로 main 에 병합 — ⎇ 만 닫힌 줄에서 가린다(사람 결정)"}
+{"ts":"2026-09-18T03:47:02Z","id":"moai-ncsf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"e51b5c5 로 main 에 병합"}
