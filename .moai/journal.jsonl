@@ -4498,3 +4498,6 @@
 {"ts":"2026-09-18T13:25:21Z","id":"moai-8sgi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-jl72 의 멤버 moai-jubf 로 펼쳤다"}
 {"ts":"2026-09-18T13:26:15Z","id":"moai-bx7g","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-18): rm 은 뺀 표 머리 중 빈 줄로 떨어진 주석을 남긴다. add 가 머리 주석을 올린 뒤 다시 읽으면 그 주석이 [[project]] 머리로 붙어 rm 이 함께 지우던 것 — 바로 위에 붙은 주석만 그 표의 것으로 본다. 대가: 주석이 이미 빈 줄로 끝나면 add 가 빈 줄을 둘 둔다(add/rm 왕복을 바이트로 지키려고)."}
 {"ts":"2026-09-18T13:26:15Z","id":"moai-3owm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:26:56Z","id":"moai-cq53","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:26:57Z","id":"moai-mr1n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-18T13:26:57Z","id":"moai-jubf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
