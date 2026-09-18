@@ -5011,3 +5011,10 @@
 {"ts":"2026-09-18T18:10:21Z","id":"moai-l89d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"거절문이 옮겨 적은 -C 가 딸린 워크트리 자신이면 main 으로 안 겨눈다"}
 {"ts":"2026-09-18T18:10:24Z","id":"moai-4zk6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"보드의 stranded 힌트가 -m 자유 글을 큰따옴표로 가르친다"}
 {"ts":"2026-09-18T18:23:04Z","id":"moai-k8ae","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"한국어 글쓰기 플러그인 둘을 필수로 설치하고 moai 의 모든 한국어 이슈 작성에 관여시킨다"}
+{"ts":"2026-09-18T18:33:56Z","id":"moai-5wk4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"한국어 이슈 글을 두 글쓰기 플러그인으로 다듬는다"}
+{"ts":"2026-09-18T18:33:56Z","id":"moai-y2fr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"두 한국어 글쓰기 플러그인을 사용자 전역에 설치한다"}
+{"ts":"2026-09-18T18:33:56Z","id":"moai-edgj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"스킬·AGENTS·브리프에 한국어 글 다듬기 절을 둔다"}
+{"ts":"2026-09-18T18:33:56Z","id":"moai-6rrb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"한글이 든 쓰기 명령에 훅이 다듬기 알림을 덧붙인다"}
+{"ts":"2026-09-18T18:33:56Z","id":"moai-5wk4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-k8ae 에서 펼쳤다 — 한국어 글쓰기 플러그인 둘을 필수로 설치하고 moai 의 모든 한국어 이슈 작성에 관여시킨다"}
+{"ts":"2026-09-18T18:33:56Z","id":"moai-k8ae","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-5wk4 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-18T18:34:02Z","id":"moai-y2fr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
