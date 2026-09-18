@@ -4018,3 +4018,4 @@
 {"ts":"2026-09-18T11:25:50Z","id":"moai-uyu9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — worktree.rs gather 한 곳과 시험, 브리프는 sonnet 이었으나 이 창의 모델로 돌았다)"}
 {"ts":"2026-09-18T11:25:50Z","id":"moai-uyu9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"3ab0315 로 develop 에 병합"}
 {"ts":"2026-09-18T11:25:50Z","id":"moai-dlxf.ost","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"건 없음 — 반영한 것도 넘긴 것도 없다"}
+{"ts":"2026-09-18T11:26:06Z","id":"moai-dlxf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 3ab0315 로 develop 에 병합하고 닫았다. 스냅샷 없는 옆 워크트리를 rm -rf 로 치우면 이제 탐색기가 .git 표식으로 알아챈다"}
