@@ -3973,3 +3973,4 @@
 {"ts":"2026-09-18T10:20:11Z","id":"moai-8ema","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 구현·시험 끝(cd0aad0, 워크트리 moai-dw63-hook). 리뷰 moai-dw63.e31 을 마치고 머지한다"}
 {"ts":"2026-09-18T10:20:12Z","id":"moai-d4e0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 구현·시험 끝(cd0aad0, 워크트리 moai-dw63-hook). 리뷰 moai-dw63.e31 을 마치고 머지한다"}
 {"ts":"2026-09-18T10:24:50Z","id":"moai-dw63.e31","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음(고침): 본 가지가 main 에서 develop 으로 바뀐다(감독 알림). 리뷰 범위는 develop...HEAD, 워크트리에서 받을 때는 git merge develop, 루트 병합은 develop 에서 한다"}
+{"ts":"2026-09-18T10:28:06Z","id":"moai-5255","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 가 본 가지를 main 으로 박아 적는다 — develop 으로 바꿨다"}
