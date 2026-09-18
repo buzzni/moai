@@ -254,9 +254,13 @@ pub struct Doc {
     /// 내는데(고친 것이 없어도 `a = 1` 이 `a = 1\n` 로 나온다), 그러면 손으로 적은 파일이
     /// 더했다 빼는 것만으로 한 바이트 자란다(moai-r9qa). 쓰기는 무엇이든(등록·색·보기·읽음)
     /// 이 렌더를 지나므로 여기서 한 번 뗀다. 끝 모양은 사람이 정한 것이라 그대로 돌려준다 —
-    /// BOM 을 들고 가는 것과 같은 까닭이다. 줄 끝 `\r\n` 은 라이브러리가 `\n` 으로 접어 이것으로
-    /// 못 지킨다.
+    /// BOM 을 들고 가는 것과 같은 까닭이다.
     no_eol: bool,
+    /// 원문의 줄 끝이 `\r\n` 쪽인가(moai-lb0u). 라이브러리는 렌더할 때 줄 끝을 `\n` 으로 접어(여러 줄 문자열
+    /// 안만 빼고), CRLF 로 적은 설정이 등록·색·보기·읽음 한 번에 모든 줄이 바뀌었다. **많은 쪽을 따른다**
+    /// (사용자 결정 2026-09-18) — 모두 CRLF 인 파일은 바이트가 지켜지고, 섞인 파일은 한 가지로 선다. 줄마다
+    /// 지키는 것은 라이브러리가 접어 못 한다. 같으면 LF 다.
+    crlf: bool,
     dirty: bool,
 }
 
@@ -283,7 +287,9 @@ impl Doc {
             }
         }
         let no_eol = !body.is_empty() && !body.ends_with('\n');
-        Ok(Doc { doc, bom, no_eol, dirty: false })
+        let crlf_lines = body.matches("\r\n").count();
+        let crlf = crlf_lines > body.matches('\n').count() - crlf_lines;
+        Ok(Doc { doc, bom, no_eol, crlf, dirty: false })
     }
 
     /// 고친 것이 있나 — [`update`] 가 쓸지 가르는 깃발 그대로다.
@@ -293,8 +299,14 @@ impl Doc {
 
     pub fn render(&self) -> String {
         let mut body = self.doc.to_string();
-        if self.no_eol && body.ends_with('\n') {
-            body.pop();
+        if self.crlf {
+            body = body.replace("\r\n", "\n").replace('\n', "\r\n");
+        }
+        if self.no_eol {
+            let eol = if self.crlf { "\r\n" } else { "\n" };
+            if body.ends_with(eol) {
+                body.truncate(body.len() - eol.len());
+            }
         }
         if self.bom { format!("\u{feff}{body}") } else { body }
     }
@@ -854,10 +866,10 @@ fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::V
 }
 
 /// 표 머리 앞의 글 중 **마지막 빈 줄 앞까지**(moai-bx7g) — 그 표에 붙지 않은 주석이다. 빈 줄 하나는 표와 함께
-/// 빠진다. 빈 줄이 없거나 그 앞에 주석이 없으면 `None`.
+/// 빠진다. 빈 줄이 없거나 그 앞에 주석이 없으면 `None`. 빈 줄은 CRLF 로도 적힌다(moai-lb0u).
 fn detached_head(t: &Table) -> Option<String> {
     let prefix = t.decor().prefix()?.as_str()?;
-    let cut = prefix.rfind("\n\n")? + 1;
+    let cut = [prefix.rfind("\n\n"), prefix.rfind("\n\r\n")].into_iter().flatten().max()? + 1;
     let head = &prefix[..cut];
     (!head.trim().is_empty()).then(|| head.to_string())
 }
@@ -1329,6 +1341,39 @@ mod tests {
                 assert_eq!(update(&path, |doc| doc.set_hue(&["/a".into()], None)).unwrap(), 1);
                 assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "color 왕복");
             }
+        }
+    }
+
+    /// **줄 끝은 원문의 많은 쪽을 따른다**(moai-lb0u, 사용자 결정 2026-09-18). 모두 CRLF 인 파일은 쓰기를
+    /// 지나도 CRLF 이고 더했다 빼면 처음 바이트다. 섞인 파일은 많은 쪽 하나로 선다.
+    #[test]
+    fn line_endings_follow_the_most_lines() {
+        let d = scratch("crlf");
+        let path = d.join("config.toml");
+        let all = "# 머리\r\n[tui]\r\nsort = \"title\"\r\n\r\n[[project]]\r\npath = \"/a\"\r\n";
+        for src in [all, all.trim_end(), "\u{feff}# 머리\r\n\r\n"] {
+            std::fs::write(&path, src).unwrap();
+            assert!(update(&path, |doc| doc.add(Path::new("/z"))).unwrap());
+            let added = std::fs::read_to_string(&path).unwrap();
+            assert!(!added.replace("\r\n", "").contains('\n'), "LF 로 접힌 줄이 있다\n{added:?}");
+            assert_eq!(update(&path, |doc| Ok(doc.remove(&["/z".into()]))).unwrap(), 1);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "add/rm 왕복");
+        }
+        // 보기·읽음·색도 같은 렌더를 지난다.
+        std::fs::write(&path, all).unwrap();
+        update(&path, |doc| doc.merge_look(&Look::default(), &Look { detail: Some(true), ..Look::default() })).unwrap();
+        update(&path, |doc| doc.mark_read(&[("m-0001".to_string(), "T".to_string())].into())).unwrap();
+        update(&path, |doc| doc.set_hue(&["/a".into()], Hue::named("green"))).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.replace("\r\n", "").contains('\n'), "{text:?}");
+
+        // 섞였으면 많은 쪽이다 — 같으면 LF.
+        for (src, crlf) in [("a = 1\r\nb = 2\r\nc = 3\n", true), ("a = 1\r\nb = 2\nc = 3\n", false), ("a = 1\r\nb = 2\n", false)] {
+            std::fs::write(&path, src).unwrap();
+            assert!(update(&path, |doc| doc.add(Path::new("/z"))).unwrap());
+            let text = std::fs::read_to_string(&path).unwrap();
+            let lf = text.matches('\n').count() - text.matches("\r\n").count();
+            assert_eq!(if crlf { lf == 0 } else { !text.contains('\r') }, true, "{src:?} → {text:?}");
         }
     }
 
