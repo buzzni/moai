@@ -91,12 +91,14 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 그 상한이 올라가는 날 헤더 몫만큼 몸통을 덜 남기고도 격자가 선다.
     let header_h = if area.height >= HEADER_MIN_H { HEADER_H } else { 0 };
     let open_menu = (matches!(app.mode, Mode::Browse) && menu::open(&app.chord)).then(|| {
-        let items = menu::entries(app.chord.held(), &app.key_ctx(&rows), &app.cfg.statuses);
+        let ctx = app.key_ctx(&rows);
+        let items = menu::entries(app.chord.held(), &ctx, &app.cfg.statuses);
         let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
         let grid = menu::grid(&items, (area.width as usize).saturating_sub(2), menu::rows_for(left));
-        (items, grid)
+        // 이 층이 ESC 를 기다리는가는 켜진 항목에서 읽는다 — 접두어 줄이 그것으로 안내를 세운다.
+        (items, grid, menu::waits(app.chord.held(), &ctx))
     });
-    let panel_h = open_menu.as_ref().map_or(0, |(_, g)| if g.rows == 0 { 0 } else { g.rows as u16 + 1 });
+    let panel_h = open_menu.as_ref().map_or(0, |(_, g, _)| if g.rows == 0 { 0 } else { g.rows as u16 + 1 });
     let [head, top, note, body, panel, keys] = Layout::vertical([
         Constraint::Length(header_h),
         Constraint::Length(1),
@@ -165,7 +167,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         }
         _ => {}
     }
-    if let Some((_, grid)) = &open_menu {
+    if let Some((_, grid, _)) = &open_menu {
         menu_panel(f, grid, panel);
     }
     // **도는 것이 화면에 남았는지는 다 그린 버퍼에서 읽는다**(moai-5jh6). 목록은 창 밖
@@ -185,7 +187,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
         Mode::Browse => match &open_menu {
-            Some((items, grid)) => menu_line(f, app, items, grid, keys),
+            Some((items, grid, waits)) => menu_line(f, app, items, grid, *waits, keys),
             None => fkeys(f, app, &rows, keys, !header_numbered),
         },
         // 안내 속 키 이름은 표에서 읽는다 — 키를 옮기면 안내도 따라온다.
@@ -2382,13 +2384,13 @@ fn menu_word(group: bool) -> Style {
 }
 
 /// 메뉴가 열린 동안의 맨 아랫줄 — 접두어 줄(doom 의 `SPC- <leader>`). 왼쪽에 지금 접두어와 층의
-/// 이름(`SPC v- 보기`), 오른쪽 끝에 나가는 법(`Esc 닫기`·하위 층이면 `Bksp 위로`). 탐색의 키는
-/// 메뉴 안에서 안 들으므로 바의 자리를 이 줄이 통째로 쓴다. 폭이 모자라 못 세운 항목이 있으면
-/// 그 수를 댄다 — 말없이 빠지면 없는 줄 안다.
+/// 이름(`SPC v- 보기`), 오른쪽 끝에 나가는 법(기다리는 층이면 `Esc 닫기`, 하위 층이면 `Bksp 위로`).
+/// 탐색의 키는 메뉴 안에서 안 들으므로 바의 자리를 이 줄이 통째로 쓴다. 폭이 모자라 못 세운 항목이
+/// 있으면 그 수를 댄다 — 말없이 빠지면 없는 줄 안다.
 ///
 /// **격자 설 높이가 없으면 여기로 접는다** — `SPC-  / 검색  f 거름망 …`. 항목이 먼저고 나가는
-/// 법은 자리가 남을 때만 붙는다: Esc 는 어디서든 닫고, 못 누르는 항목은 댈 수 없다.
-fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid, at: Rect) {
+/// 법은 자리가 남을 때만 붙는다 — 못 누르는 항목은 댈 수 없다.
+fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid, waits: bool, at: Rect) {
     let held = app.chord.held();
     let room = at.width as usize;
     let mut spans = vec![Span::styled(format!("{}-", menu::title(held)), bold())];
@@ -2404,7 +2406,12 @@ fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid,
             spans.push(Span::styled(format!("  그 밖 {}개 — 창을 넓히면 선다", grid.hidden), dim()));
         }
     }
-    let mut exits = vec![key(&label(MENU, Menu::Close), Menu::Close.what())];
+    // **`Esc 닫기` 는 기다리는 층에만 선다**(사용자 결정 2026-09-19) — 그 줄이 곧 규칙이다:
+    // 서 있으면 눌러 보며 맞추는 층이고, 없으면 고른 항목 하나에 닫힌다. Esc 는 어느 층에서나
+    // 닫지만(연 키 SPC 도, 하위 층이면 Bksp 도), 안 기다리는 층에서 그것을 대면 고르면 닫힌다는
+    // 뜻이 흐려진다. **모르는 키는 그래도 무시한다**(`menu::feed`) — 아무것도 안 고르고 나가는 길은
+    // `moai tui --help` 가 댄다.
+    let mut exits = if waits { vec![key(&label(MENU, Menu::Close), Menu::Close.what())] } else { Vec::new() };
     if held.len() > 1 {
         exits.push(key(&label(MENU, Menu::Up), Menu::Up.what()));
     }
@@ -2828,9 +2835,9 @@ pub(super) mod tests {
             i.tags = vec!["tui".into()];
         }
         let mut a = every(is);
-        a.hit("SPC c a");
-        a.hit("SPC c c");
-        a.hit("SPC c t");
+        a.hit("SPC c a Esc");
+        a.hit("SPC c c Esc");
+        a.hit("SPC c t Esc");
         // **목록 칸만 본다** — 상세 칸도 에픽 제목과 id 를 대므로 줄 전체에서 찾으면 상세의 줄을 잡는다.
         // 포커스 칸은 굵은 테두리(`┃`), 상세는 가는 테두리(`│`)라 첫 `│` 앞이 목록이다.
         let row_by = |a: &mut App, w: u16, needle: &str| {
@@ -2852,7 +2859,7 @@ pub(super) mod tests {
                 assert!(crate::text::width(&l) <= w as usize, "{w}: {l:?}");
             }
         }
-        a.hit("SPC c i");
+        a.hit("SPC c i Esc");
         assert!(!row_by(&mut a, 240, "레이븐").contains("argos-0001"), "끈 id 가 목록 줄에 남았다");
     }
 
@@ -2865,8 +2872,8 @@ pub(super) mod tests {
             i.assignee = Some("레이븐".into());
         }
         let mut a = every(is);
-        a.hit("SPC c a");
-        a.hit("SPC c h");
+        a.hit("SPC c a Esc");
+        a.hit("SPC c h Esc");
         let seen = |a: &mut App| render(a, 120, 12).into_iter().map(|l| l.split('│').next().unwrap_or_default().to_string()).collect::<Vec<_>>();
         // 글자 수가 아니라 **화면 칸**으로 잰다 — 한글은 한 글자가 두 칸이고 바이트로는 셋이다.
         let col = |l: &str, at: usize| crate::text::width(&l[..at]);
@@ -2885,9 +2892,9 @@ pub(super) mod tests {
         let first = lines.iter().position(|l| l.contains("argos-")).expect("줄이 없다");
         assert_eq!(lines.iter().position(|l| l.contains("TITLE")), Some(first - 1));
 
-        a.hit("SPC c h");
+        a.hit("SPC c h Esc");
         assert!(!seen(&mut a).iter().any(|l| l.contains("TITLE")), "SPC c h 가 열 이름 줄을 안 걷었다");
-        a.hit("SPC c h");
+        a.hit("SPC c h Esc");
         assert!(seen(&mut a).iter().any(|l| l.contains("TITLE")), "다시 눌러도 안 돌아왔다");
     }
 
@@ -3197,8 +3204,8 @@ pub(super) mod tests {
         // 에픽 안의 잎 하나만 우선순위가 자리를 더 먹는다.
         is[1].priority = Some(10);
         let mut a = every(is);
-        a.hit("SPC c a");
-        a.hit("SPC c h");
+        a.hit("SPC c a Esc");
+        a.hit("SPC c h Esc");
         // 에픽 안으로 — 묶음이 없어 어느 줄도 셈을 안 낸다.
         a.hit("Enter");
         let lines: Vec<String> =
@@ -3249,9 +3256,9 @@ pub(super) mod tests {
 
         // **줄의 표시만 본다** — 경로 줄의 `⎇ <옆 워크트리>`(겹쳐 보기가 켜졌다는 말)는 `SPC v w` 의 몫이다.
         let row = |a: &mut App| seen(a).lines().find(|l| l.contains("집은 멤버")).unwrap_or_default().to_string();
-        a.hit("SPC c w");
+        a.hit("SPC c w Esc");
         assert!(!row(&mut a).contains(style::BRANCH_GLYPH), "SPC c w 가 줄의 표시를 안 걷었다");
-        a.hit("SPC c w");
+        a.hit("SPC c w Esc");
         assert!(row(&mut a).contains(style::BRANCH_GLYPH), "다시 눌러도 안 돌아왔다");
     }
 
@@ -3285,7 +3292,7 @@ pub(super) mod tests {
         a.hit("Ctrl-w w");
         assert_eq!(a.focus, Pane::Detail);
 
-        a.hit("SPC v p");
+        a.hit("SPC v p Esc");
         let lines = render(&mut a, 100, 12);
         assert!(!lines.iter().any(|l| l.contains("상세")), "SPC v p 가 상세를 안 숨겼다\n{}", lines.join("\n"));
         assert_eq!(a.focus, Pane::Explorer, "안 보이는 칸에 포커스가 남았다");
@@ -3295,7 +3302,7 @@ pub(super) mod tests {
         a.hit("Ctrl-w w");
         assert_eq!(a.focus, Pane::Explorer);
 
-        a.hit("SPC v p");
+        a.hit("SPC v p Esc");
         assert!(render(&mut a, 100, 12).iter().any(|l| l.contains("상세")), "다시 눌러도 안 돌아왔다");
     }
 
@@ -3351,7 +3358,7 @@ pub(super) mod tests {
         is.iter_mut().find(|i| i.id == "argos-0004").unwrap().priority = Some(10);
         let mut a = every(is);
         a.hit("Enter");
-        a.hit("SPC c c");
+        a.hit("SPC c c Esc");
         for w in 40..160u16 {
             let rows: Vec<String> = render(&mut a, w, 12)
                 .into_iter()
@@ -3556,7 +3563,7 @@ pub(super) mod tests {
         let mut a = app();
         assert!(a.worktree, "겹쳐 보기가 꺼진 채로 시작했다");
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.hit("SPC v w");
+        a.hit("SPC v w Esc");
         assert!(!a.worktree, "SPC v w 가 안 껐다");
         let plain_screen = render(&mut a, 120, 12).join("\n");
         assert!(!plain_screen.contains('⎇'), "안 겹쳤는데 머리표가 섰다\n{plain_screen}");
@@ -3567,7 +3574,7 @@ pub(super) mod tests {
         a.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
         // 저장소 없이 세운 App 이라 `w` 는 켜기만 하고 읽지 않는다 — 겹친 결과는 손으로 넣는다.
-        a.hit("SPC v w");
+        a.hit("SPC v w Esc");
         assert!(a.worktree, "SPC v w 가 안 켰다");
         let mut theirs = issues()[2].clone();
         theirs.status = crate::model::Status::new("review");
@@ -3590,7 +3597,7 @@ pub(super) mod tests {
         assert!(lines[0].contains("⎇ feat/x") && lines[0].contains("SPC v w 로 끈다"), "켜졌다고 안 말한다\n{screen}");
         assert!(screen.matches("⎇ feat/x").count() >= 2, "상세에 머리표가 없다\n{screen}");
 
-        a.hit("SPC v w");
+        a.hit("SPC v w Esc");
         assert!(!a.worktree, "SPC v w 가 안 껐다");
     }
 
@@ -4335,7 +4342,7 @@ pub(super) mod tests {
         assert!(drawn.contains('•'), "목록 글머리가 없다\n{drawn}");
 
         // SPC v r 로 원문을 본다 — 그린 글은 기호가 지워져 되돌릴 수 없다
-        a.hit("SPC v r");
+        a.hit("SPC v r Esc");
         let raw = render(&mut a, 100, 22).join("\n");
         assert!(raw.contains("**굵게**"), "원문이 아니다\n{raw}");
         assert!(raw.contains("- 하나"), "원문이 아니다\n{raw}");
@@ -4967,7 +4974,7 @@ pub(super) mod tests {
 
         for raw in [false, true] {
             if raw {
-                a.hit("SPC v r");
+                a.hit("SPC v r Esc");
             }
             let lines = render(&mut a, 60, 24);
             let cut = lines.iter().any(|l| l.contains("#parser") && l.contains('…'));
@@ -5714,7 +5721,9 @@ pub(super) mod tests {
         assert!(lines[n - 9].starts_with(['└', '┗']), "몸통이 창 위로 밀려 올라가지 않았다\n{screen}");
         assert!(lines[n - 7].contains("/ : 검색") && lines[n - 2].contains("v : +보기"), "한 열이 여섯 칸으로 안 섰다\n{screen}");
         let bar = &lines[n - 1];
-        assert!(bar.starts_with("SPC- 메뉴") && bar.ends_with("Esc 닫기"), "{bar:?}");
+        // **뿌리는 안 기다린다** — 상태를 대는 항목이 없어 한 번 받고 닫힌다. 나가는 법을 안 대는
+        // 것이 그 뜻이다(사용자 결정 2026-09-19).
+        assert!(bar.starts_with("SPC- 메뉴") && !bar.contains("Esc 닫기"), "{bar:?}");
         assert!(!bar.contains("Bksp") && !bar.contains("SPC 메뉴"), "{bar:?}");
         for l in &lines {
             assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
@@ -5729,10 +5738,16 @@ pub(super) mod tests {
         assert!(screen.contains("p : 상세 칸 [보임]") && screen.contains("d : done [보임]"), "{screen}");
         assert!(!screen.contains("q : 끝내기"), "하위 층에 뿌리가 남았다\n{screen}");
 
+        // **토글은 창을 안 걷는다** — 눌러 보며 맞추라고 열린 채로 남고, 상태 낱말이 그 자리에서
+        // 바뀐다. 나가는 것은 Esc 다.
         a.hit("r");
         assert!(a.raw);
         let lines = render(&mut a, 80, 20);
-        assert!(!lines.iter().any(|l| *l == "─".repeat(80)), "실행했는데 창이 남았다");
+        assert!(lines.iter().any(|l| *l == "─".repeat(80)), "토글에 창이 걷혔다");
+        assert!(lines.join("\n").contains("r : 원문↔그리기 [원문]"), "상태가 그 자리에서 안 바뀌었다");
+        a.hit("Esc");
+        let lines = render(&mut a, 80, 20);
+        assert!(!lines.iter().any(|l| *l == "─".repeat(80)), "Esc 뒤에도 창이 남았다");
         assert_eq!(lines.last(), before.last(), "실행한 뒤 바가 돌아오지 않았다");
 
         // **하위 층의 창은 제 높이로 준다** — 읽음은 두 칸이라 두 줄 + 가름줄 하나다. 보기는 여섯 칸을
@@ -5741,6 +5756,9 @@ pub(super) mod tests {
         let lines = render(&mut a, 80, 20);
         let screen = lines.join("\n");
         assert!(screen.contains("a : 안 읽은 것 전부") && screen.contains("g : 이 묶음의 멤버 전부"), "{screen}");
+        // 읽음은 상태를 대는 항목이 없다 — 한 번 받고 닫히므로 `Esc 닫기` 를 안 댄다.
+        let bar = lines.last().unwrap();
+        assert!(bar.starts_with("SPC m- 읽음") && !bar.contains("Esc 닫기") && bar.ends_with("Bksp 위로"), "{bar:?}");
         assert_eq!(lines[lines.len() - 4], "─".repeat(80), "하위 층의 창이 제 높이로 줄지 않았다\n{screen}");
     }
 
@@ -5941,7 +5959,7 @@ pub(super) mod tests {
             let mut a = app();
             a.detail_open = false;
             if hide_id {
-                a.hit("SPC c i");
+                a.hit("SPC c i Esc");
             }
             for c in "/1".chars() {
                 a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
@@ -5957,8 +5975,8 @@ pub(super) mod tests {
     #[test]
     fn a_chosen_sort_gives_way_before_the_hidden_badge() {
         let mut a = App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
-        a.hit("SPC s u");
-        a.hit("SPC s u");
+        a.hit("SPC s u Esc");
+        a.hit("SPC s u Esc");
         let badge = |a: &mut App, w: u16| render(a, w, 12).into_iter().find(|l| l.contains("숨김") || l.contains("정렬")).unwrap_or_default();
         let wide = badge(&mut a, 120);
         assert!(wide.contains("[done 숨김 · 정렬 수정 거꾸로]"), "{wide:?}");

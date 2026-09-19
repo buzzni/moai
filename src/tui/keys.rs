@@ -730,6 +730,20 @@ impl Browse {
         }
     }
 
+    /// **상태를 대는 동작인가** — 켜고 끄는 것(done·미룸·칸·열·상세·워크트리·원문)과 고르는
+    /// 것(정렬). 메뉴가 이것에 열린 채로 기다린다(사용자 결정 2026-09-19, moai-tf3n) — 눌러
+    /// 보며 원하는 상태를 맞추는 동작이라, 한 번 받고 닫으면 맞출 때마다 메뉴를 다시 열어야
+    /// 한다.
+    ///
+    /// **[`Browse::state`] 와 종류가 같고 판정은 다르다.** 그쪽은 *지금* 붙일 낱말이라 정렬은
+    /// 고른 차례에만 값을 낸다 — 그것으로 기다림을 가르면 "다른 차례로 고르기" 만 메뉴를 닫아,
+    /// 같은 층의 같은 종류가 누른 것에 따라 갈린다. 그래서 여기는 Ctx 를 안 본다.
+    /// 둘이 갈리는 것은 시험(`stateful_covers_everything_that_shows_a_state`)이 막는다.
+    pub fn stateful(self) -> bool {
+        use Browse::*;
+        matches!(self, Worktree | Raw | Column(_) | Done | Deferred | Sort(_) | Cell(_) | Detail)
+    }
+
     /// 사람에게 대는 낱말. **켜고 끄는 것은 지금 상태로 가는 곳을 댄다** — 색이 혼자 뜻을
     /// 지지 않는다.
     pub fn what(self, c: &Ctx) -> &'static str {
@@ -1137,6 +1151,29 @@ mod tests {
         assert_eq!(Browse::Collapse.enabled(&Ctx { expanded: false, root: true, ..list }), Err(Off::Quiet));
     }
 
+    /// **상태를 대는 동작은 모두 [`Browse::stateful`] 이다.** 둘이 갈리면 메뉴가 `[보임]` 을 단
+    /// 항목에서 한 번 받고 닫히거나, 아무 상태도 없는 항목에서 ESC 를 기다린다 — 어느 쪽이든
+    /// 화면의 낱말과 손가락이 어긋난다.
+    #[test]
+    fn stateful_covers_everything_that_shows_a_state() {
+        let base = Ctx::default();
+        // 차례는 [`Order::ALL`] 에서 읽는다 — 손으로 적으면 새 차례를 더한 날 이 시험만 옛 여섯 개를 돈다.
+        for o in Order::ALL {
+            let c = Ctx { sorting: Sorting { by: o, reversed: false }, ..base };
+            for b in BROWSE.iter().filter(|b| b.act.state(&c).is_some()) {
+                assert!(b.act.stateful(), "{:?} 가 상태를 대는데 stateful 이 아니다", b.act);
+            }
+        }
+        // 거꾸로 — stateful 이면 어느 자리에선가 상태를 댄다. 정렬은 고른 차례에서만 댄다.
+        for b in BROWSE.iter().filter(|b| b.act.stateful()) {
+            let c = match b.act {
+                Browse::Sort(o) => Ctx { sorting: Sorting { by: o, reversed: false }, ..base },
+                _ => base,
+            };
+            assert!(b.act.state(&c).is_some(), "{:?} 가 stateful 인데 상태를 안 댄다", b.act);
+        }
+    }
+
     /// **기다리는 접두어의 이름은 수식키를 함께 댄다**(리뷰) — `Ctrl-w` 를 맨 `w` 로 적으면 바가
     /// 아무 일도 안 하는 키를 대고, 읽은 사람은 그것을 누른다.
     #[test]
@@ -1527,6 +1564,9 @@ mod tests {
             ("Enter 로 들어가고 Backspace 로 나온다", "들어가고 나온다", &["Enter", "Backspace"][..], &["BROWSE: Enter", "BROWSE: Bksp"][..]),
             // 거꾸로 — 고르기 창이 경로 칸 문장의 Esc 로 지나가면 안 된다.
             ("창은 Esc 로 닫는다", "창은 닫는다", &["Esc"][..], &["PICK: Esc"][..]),
+            // 거꾸로 — 목록의 Esc(거름망 풀기)가 같은 문단의 메뉴 문장(`Esc 로 나간다`·`Esc 닫기`)으로
+            // 지나가면 안 된다. 그 문장들을 MENU 의 것으로 안 적으면 여기서 붉어진다.
+            ("Esc 가 걸어 둔 거름망을 푼다", "걸어 둔 거름망을 푼다", &["Esc"][..], &["BROWSE: Esc"][..]),
         ] {
             assert!(help.contains(phrase), "시험이 지울 말 `{phrase}` 이 도움말에 없다 — 문장이 바뀌었으면 여기도 고친다");
             let broken = help.replace(phrase, instead);
@@ -1556,11 +1596,19 @@ mod tests {
     ///
     /// 여기 든 표는 제 문장만 보고, **같은 문단의 다른 표는 이 문장을 걷어 낸 글을 본다** — 둘 중
     /// 한쪽만 좁히면 남은 쪽이 좁힌 표의 Enter·Esc·Bksp 로 지나간다(리뷰 moai-psqc.172).
+    ///
+    /// **한 표가 문장 여럿을 가질 수 있다** — 그 표를 말하는 문장이 늘면 여기에 줄을 더한다.
+    /// 안 더하면 새 문장의 Esc·Bksp 가 그 문단을 함께 쓰는 목록(BROWSE)의 몫으로 읽혀, 목록
+    /// 문단에서 `Esc 가 걸어 둔 거름망을 푼다` 를 지워도 안 잡힌다(리뷰 moai-osgw.mez).
     const SENTENCES: &[(&str, &str, &str)] = &[
         // 목록(BROWSE)과 Enter·Esc 를 나눠 쓴다.
         ("PROMPT", LIST, "검색·거름망 칸은"),
         // 목록(BROWSE)과 Esc·Bksp 를 나눠 쓴다.
         ("MENU", SPC, "메뉴는 그 자리에서"),
+        // 메뉴가 언제 열린 채로 기다리는지를 말하는 두 문장도 메뉴의 것이다(moai-68j8) — 여기 적힌
+        // Esc 는 메뉴를 닫는 Esc 지 거름망을 푸는 Esc 가 아니다.
+        ("MENU", SPC, "켜고 끄는 것과 정렬"),
+        ("MENU", SPC, "그 층은 아랫줄 오른쪽에"),
         // 고르기 창(PICK)과 Enter·Esc 를 나눠 쓴다. `g p` 는 창의 것이라 괄호부터 잡는다.
         ("PATH", PICKER, "적는 칸을 연다("),
     ];
@@ -1630,12 +1678,14 @@ mod tests {
         };
         let mut missing = Vec::new();
         for (table, rows) in tables {
-            let own = match SENTENCES.iter().find(|(t, ..)| *t == table) {
-                Some((_, par, head)) => sentence(help, par, head).to_string(),
-                None => {
-                    let heads = SECTIONS.iter().find(|(t, _)| *t == table).map(|(_, h)| *h).unwrap_or_else(|| panic!("{table} 의 범위가 SECTIONS·SENTENCES 에 없다"));
-                    scope(help, heads)
-                }
+            // 좁힌 표는 제 문장을 **모두** 잇는다 — 한 표가 문장 여럿을 가질 수 있다.
+            let mine: Vec<&str> =
+                SENTENCES.iter().filter(|(t, ..)| *t == table).map(|(_, par, head)| sentence(help, par, head)).collect();
+            let own = if mine.is_empty() {
+                let heads = SECTIONS.iter().find(|(t, _)| *t == table).map(|(_, h)| *h).unwrap_or_else(|| panic!("{table} 의 범위가 SECTIONS·SENTENCES 에 없다"));
+                scope(help, heads)
+            } else {
+                mine.join("\n")
             };
             let borrowed = format!("{own}\n\n{}", scope(help, &[LIST]));
             for (name, seq) in rows {
