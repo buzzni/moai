@@ -20,6 +20,11 @@ mod model;
 mod nav;
 mod projects;
 mod query;
+// **아직 아무도 안 부른다**(moai-f31d) — 읽음을 쓰는 자가 둘이고(`cmd::read`·탐색기의 `r`) 그 둘을 한
+// 커밋에서 함께 옮겨야 한다. 하나만 옮기면 터미널에서 적은 읽음이 떠 있는 탐색기의 [NEW] 를 못 내린다.
+// 탐색기 쪽 파일은 지금 옆 일이 쥐고 있어(4-3), 그것이 병합된 뒤에 배선한다.
+#[allow(dead_code)]
+mod read_marks;
 mod report;
 #[cfg(test)]
 mod scratch;
