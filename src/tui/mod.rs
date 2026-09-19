@@ -69,7 +69,11 @@ enum Anchor {
     /// 한눈 보기에서 **남의 프로젝트의** 줄(moai-1xo5) — 그 프로젝트의 경로와 id 다. id 만으로는
     /// 못 가른다: 두 프로젝트가 같은 prefix 를 쓰면 같은 id 가 둘 있고, 커서가 남의 줄로 튄다.
     Foreign(std::path::PathBuf, String),
-    Bucket(Seg),
+    /// 바구니는 제 줄이 없어 `Seg` 로. **그 프로젝트도 함께 든다**(리뷰) — `Milestone(None)`·
+    /// `Lost` 는 id 조차 없어, 경로 없이 들면 한눈 보기에서 두 프로젝트의 `(마일스톤 없음)` 이
+    /// 글자 그대로 같은 정체가 된다: 다시 읽을 때마다 커서가 첫 프로젝트의 그 줄로 튄다.
+    /// 프로젝트 안에서는 늘 `None` 이다 — 한 프로젝트만 서므로 가릴 것이 없다.
+    Bucket(Option<std::path::PathBuf>, Seg),
     /// 이름이 아니라 경로 — 이름은 등록 목록이 바뀌면 달라진다.
     Project(std::path::PathBuf),
 }
@@ -875,6 +879,37 @@ impl Site {
             .unwrap_or(i.status.as_str())
     }
 
+    /// 그 줄이 묶음이면 막을 때 무엇을 기다리는가와 미뤄 뺀 멤버(`report::Stand::waiting`·
+    /// `aside`). 묶음이 아니면 제 칸대로다. 막음을 가를 때 [`Site::column`] 과 함께
+    /// `report::blocker` 에 댄다.
+    ///
+    /// **첨자를 받으므로 그 첨자가 사는 프로젝트에 묻는다**(리뷰) — `App` 에 두었던 때는 한눈
+    /// 보기의 남의 줄이 제 색인에서 푼 첨자를 여기로 들고 와, 줄이 비어 있는 지금 선 프로젝트의
+    /// 목록을 그 첨자로 짚어 그 자리에서 죽었다.
+    pub fn waits(&self, at: usize) -> (crate::report::Waiting, &[String]) {
+        let i = &self.issues[at];
+        crate::report::is_group(i)
+            .then(|| self.ground.stands.get(&i.id))
+            .flatten()
+            .map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
+    }
+
+    /// id 를 제목으로 푼다. 없으면 **끊겼다고 적는다** — id 만 내면 그것이 그저 제목 없는 줄인지
+    /// 없는 것을 가리키는 참조인지 알 길이 없다. 훑지 않는다: 막는 것마다·소속마다·프레임마다 불린다.
+    pub fn title_of(&self, id: &str) -> String {
+        match self.index.find(id) {
+            Some(at) => self.issues[at].title.clone(),
+            None => format!("{id}  {MISSING}"),
+        }
+    }
+
+    /// 그 줄에 닿은 커밋. **줄이 온 워크트리의 가지에서 읽는다** — `show` 와 같은 까닭이다:
+    /// `--worktree` 로 옆에서 집은 일을 고친 커밋은 저쪽 가지에만 있다. 표가 없으면 빈 것이다.
+    pub fn commits_of(&self, id: &str) -> &[crate::git::Commit] {
+        let root = self.origin.root(id).or(self.repo.as_ref().map(|r| r.here()));
+        root.and_then(|r| self.commits.get(r)).and_then(|t| t.get(id)).map_or(&[], Vec::as_slice)
+    }
+
     /// 보기(`SPC v`)가 이 줄을 보이는가 — 검색과 상관없이. `shown` 이 빈 때는 보인다.
     fn view_shows(&self, at: usize) -> bool {
         self.shown.get(at).copied().unwrap_or(true)
@@ -1314,17 +1349,6 @@ impl App {
 
 
 
-    /// 그 줄이 묶음이면 막을 때 무엇을 기다리는가와 미뤄 뺀 멤버(`report::Stand::waiting`·
-    /// `aside`). 묶음이 아니면 제 칸대로다. 막음을 가를 때 [`App::column`] 과 함께
-    /// `report::blocker` 에 댄다.
-    pub fn waits(&self, at: usize) -> (crate::report::Waiting, &[String]) {
-        let i = &self.site.issues[at];
-        crate::report::is_group(i)
-            .then(|| self.site.ground.stands.get(&i.id))
-            .flatten()
-            .map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
-    }
-
     /// 새 자료를 받아들이고 어긋난 것을 손본다. **시험이 저장소 없이 부른다** — 진짜
     /// 길은 스레드에서 셈을 마친 [`Fresh`] 를 [`App::apply_fresh`] 로 들인다.
     ///
@@ -1429,7 +1453,13 @@ impl App {
     fn anchor_of(&self, row: &Row) -> Anchor {
         match row {
             Row::Up => Anchor::Up,
-            Row::Item(_, Entry::Dir { seg, at: None }, _) => Anchor::Bucket(seg.clone()),
+            Row::Item(seat, Entry::Dir { seg, at: None }, _) => {
+                let at = match seat {
+                    Seat::Here => None,
+                    Seat::Place(n) => Some(self.place_path(*n).map(Into::into).unwrap_or_default()),
+                };
+                Anchor::Bucket(at, seg.clone())
+            }
             // **그 줄의 프로젝트로 읽는다**(moai-1xo5) — 한눈 보기에서는 지금 선 프로젝트의 줄이
             // 비어 있어, 남의 첨자를 여기서 읽으면 그 자리에서 죽는다.
             Row::Item(seat, Entry::Dir { at: Some(at), .. } | Entry::Leaf { at }, _) => {
@@ -1998,7 +2028,16 @@ impl App {
     /// [`App::recount_unread`] 와 같되 **그 프로젝트의** 안 읽은 줄을 다시 센다(moai-5v3q) —
     /// 한눈 보기에서 남의 줄에 읽음을 적으면 그 줄의 `[NEW]` 가 내려야 한다.
     fn recount_unread_in(&mut self, seat: Seat) {
-        let me = self.me.clone();
+        // **누구인가는 그 프로젝트의 뿌리에서 푼다** — 프로젝트마다 git 설정이 다를 수 있고,
+        // 안 풀면 남의 프로젝트의 `[NEW]` 가 띄운 자리의 사람으로 서서 `moai -C <그 프로젝트>
+        // read --all` 과 다른 줄을 센다(`App::enter_project` 가 들어갈 때 하는 것과 같은 자다).
+        let me = match seat {
+            Seat::Here => self.me.clone(),
+            Seat::Place(n) => match self.layer.as_ref().and_then(|l| l.places.get(n)).and_then(|p| p.site.as_ref()) {
+                Some(site) => site.repo.as_ref().map(|r| r.root.clone()).and_then(|root| self.whoami(&root)),
+                None => return,
+            },
+        };
         let seen = self.seen.clone();
         let Some(site) = self.site_mut(seat) else { return };
         let Some(me) = me else {
@@ -2146,7 +2185,9 @@ impl App {
         let held = self.current_of(rows).map(|r| self.anchor_of(&r));
         match act {
             B::Column(n) => {
-                if let Some(s) = self.site.cfg.statuses.get(usize::from(n)).cloned() {
+                // 번호는 **이 화면의 칸**을 센다([`App::screen_statuses`]) — 한눈 보기에서는 줄을
+                // 낸 프로젝트들의 칸이고, 키 바·메뉴가 대는 번호와 같은 자여야 한다.
+                if let Some(s) = self.screen_statuses().get(usize::from(n)).cloned() {
                     self.view.toggle(&s);
                 }
             }
@@ -2154,7 +2195,7 @@ impl App {
             B::Deferred => self.view.hide_deferred = !self.view.hide_deferred,
             // 이 프로젝트의 칸만 걷는다 — 다른 프로젝트에만 있는 칸 이름은 여기서 아무것도 안 숨겼으니
             // 들고 있는다(`View::show_all`).
-            B::ShowAll => self.view.show_all(&self.site.cfg.statuses),
+            B::ShowAll => self.view.show_all(&self.screen_statuses()),
             B::Sort(o) => self.order = self.order.press(o),
             _ => return,
         }
@@ -2188,17 +2229,6 @@ impl App {
         self.rows_where(&|at| self.visible(at))
     }
 
-    /// `seat` 이 든 프로젝트 — 한눈 보기의 줄은 제 층 줄의 것을, 프로젝트 안의 줄은 지금 선 것을 쓴다.
-    /// **없는 자리는 지금 선 것으로 답한다**: 층 줄이 그새 빠졌다면 그 줄은 다음 프레임에 사라지고,
-    /// 여기서 멈추면 그 한 프레임에 탐색기가 죽는다.
-    /// 한눈 보기의 머리줄 밑에 세울 줄을 **그 프로젝트를 읽어** 들인다(moai-eyre). 이미 들었으면
-    /// 아무것도 안 한다 — 다시 읽는 자는 표식과 시계가 따로 정한다(`Layer::stale`).
-    ///
-    /// **여기서는 곧바로 읽는다.** 스레드로 옮기고 읽는 동안 머리줄에 스피너를 돌리는 것은
-    /// moai-12yx 다 — 그 전까지는 펼치는 키 하나가 그 프로젝트를 읽는 만큼 멈춘다.
-    ///
-    /// 못 열면 `false` 고, 머리줄은 제 요약(`Look::Shut`)이 대던 말을 그대로 댄다 — 여는 길은
-    /// 층의 줄과 같다([`App::open_place`]).
     /// 펼친 프로젝트의 줄을 **스레드에 읽으러 보낸다**(moai-12yx). 이미 들었거나 이미 줄 서
     /// 있으면 아무 일도 안 한다. 읽는 동안 그 머리줄은 도는 글리프를 세운다(`draw::place_line`).
     ///
@@ -2274,9 +2304,23 @@ impl App {
                 if let Some(place) = self.layer.as_mut().and_then(|l| l.places.iter_mut().find(|p| p.path == path)) {
                     place.site = Some(site);
                 }
+                let landed = self.layer.as_ref().and_then(|l| l.position(&path));
+                if let Some(at) = landed {
+                    // **든 줄에 화면의 것을 곧바로 건다**(리뷰). [`Site::of`] 는 `shown` 과 `unread` 를
+                    // 비워 두고, 그 둘을 채우는 자([`App::see`]·[`App::recount_unread_in`])는 보기
+                    // 토글과 쓰기에만 붙어 있다 — 안 걸면 방금 펼친 프로젝트만 보기를 안 따르고
+                    // (`view_shows` 가 빈 `shown` 을 "다 보인다" 로 읽는다) `[NEW]` 도 한 줄도 안
+                    // 선다. 같은 화면의 두 프로젝트가 한 토글에 다르게 서는 것이 moai-1xo5 가
+                    // 없애려던 바로 그것이다.
+                    let view = self.view.clone();
+                    if let Some(site) = self.site_mut(Seat::Place(at)) {
+                        Self::see_in(site, &view);
+                    }
+                    self.recount_unread_in(Seat::Place(at));
+                }
                 // `Tab` 으로 "다 펴 달라" 며 기다린 프로젝트면 이제 편다.
                 if self.deep.remove(&path)
-                    && let Some(at) = self.layer.as_ref().and_then(|l| l.position(&path))
+                    && let Some(at) = landed
                 {
                     self.open_all(Seat::Place(at));
                 }
@@ -2314,6 +2358,44 @@ impl App {
         }
     }
 
+    /// 이 화면에 **줄을 낸 프로젝트들** — 프로젝트 안에서는 선 것 하나, 한눈 보기에서는 펼쳐
+    /// 줄을 낸 것 전부다(moai-1xo5 가 보기·정렬·열을 거는 바로 그 범위다).
+    ///
+    /// 한눈 보기의 `App::site` 는 **줄이 빈 자리 채우개**라(`App::leave_project`) 거기 섞지
+    /// 않는다 — 그 설정은 마지막으로 떠난 프로젝트의 것이거나 `layer::blank_config` 다.
+    pub(super) fn sites(&self) -> Vec<&Site> {
+        let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) else { return vec![&self.site] };
+        l.places
+            .iter()
+            .filter(|p| !self.folded.contains(&p.path))
+            .filter_map(|p| p.site.as_ref())
+            .collect()
+    }
+
+    /// 이 화면이 번호를 매기고 뱃지에 대고 셈에 쓰는 **칸 이름** — 프로젝트 안에서는 그 설정
+    /// 그대로, 한눈 보기에서는 줄을 낸 프로젝트의 칸을 차례대로 모은 것이다(리뷰).
+    ///
+    /// **한눈 보기에는 "지금 선 프로젝트" 가 없다.** 거기서 `App::site` 의 설정을 읽던 때는,
+    /// 칸 이름을 따로 적은 프로젝트를 펼쳐 놓고 `SPC v 1` 을 누르면 그 프로젝트에 없는 이름이
+    /// 숨겨져 아무것도 안 숨기고, 그 프로젝트에서 숨긴 칸은 뱃지에 못 서 `SPC v a` 로도 못 풀었다.
+    pub fn screen_statuses(&self) -> Vec<String> {
+        if !self.on_layer() {
+            return self.site.cfg.statuses.clone();
+        }
+        let mut out: Vec<String> = Vec::new();
+        for site in self.sites() {
+            for s in &site.cfg.statuses {
+                if !out.contains(s) {
+                    out.push(s.clone());
+                }
+            }
+        }
+        out
+    }
+
+    /// `seat` 이 든 프로젝트 — 한눈 보기의 줄은 제 층 줄의 것을, 프로젝트 안의 줄은 지금 선 것을 쓴다.
+    /// **없는 자리는 지금 선 것으로 답한다**: 층 줄이 그새 빠졌다면 그 줄은 다음 프레임에 사라지고,
+    /// 여기서 멈추면 그 한 프레임에 탐색기가 죽는다. 고치는 판([`App::site_mut`])은 갈음하지 않는다.
     pub fn site_at(&self, seat: Seat) -> &Site {
         match seat {
             Seat::Here => &self.site,
@@ -2453,10 +2535,13 @@ impl App {
 
     /// 커서가 **펼친 묶음의 멤버 줄**이면 그 부모 줄의 번호. 목록은 트리 차례라, 위로 올라가며
     /// 처음 만나는 한 층 얕은 줄이 곧 부모다.
+    /// **부모는 같은 프로젝트에서 찾는다**(리뷰) — `Seat::Here` 로 못 박던 때는 한눈 보기의
+    /// 멤버 줄에서 늘 `None` 이라, 거기서 `h` 가 부모를 접는 대신 "0 으로 층에 간다" 는 (이미
+    /// 층인데) 엉뚱한 말을 냈다. 깊이만으로 가르면 머리줄을 넘어 앞 프로젝트의 줄이 부모가 된다.
     fn parent_row(&self, rows: &[Row]) -> Option<usize> {
-        let Some(Row::Item(Seat::Here, _, twig)) = rows.get(self.cursor) else { return None };
-        let depth = twig.depth().checked_sub(1)?;
-        rows[..self.cursor].iter().rposition(|r| matches!(r, Row::Item(Seat::Here, _, t) if t.depth() == depth))
+        let Some(Row::Item(seat, _, twig)) = rows.get(self.cursor) else { return None };
+        let (seat, depth) = (*seat, twig.depth().checked_sub(1)?);
+        rows[..self.cursor].iter().rposition(|r| matches!(r, Row::Item(s, _, t) if *s == seat && t.depth() == depth))
     }
 
     /// 멤버 줄의 `h` — **부모 묶음을 접고 그 줄에 선다**(사용자 결정 2026-09-19). nvim-tree·ranger·
@@ -2587,12 +2672,19 @@ impl App {
         }
         // 그 자리와 그 밑의 **묶음 줄 전부**. 자리는 `home_of` 가 정한 그대로라 목록이 세우는
         // 줄과 같은 것만 펼친다.
-        self.site.expanded.insert(path.clone());
-        for at in self.site.index.descendants(&path) {
-            if self.site.index.is_dir(&self.site.issues, at) {
-                self.site.expanded.insert(self.site.index.dir_path(&self.site.issues, at));
-            }
-        }
+        // **접는 갈래와 같은 프로젝트에 적는다**(리뷰) — 여기만 지금 선 것에 적던 때는, 한눈
+        // 보기의 남의 묶음 줄에서 `Tab` 이 아무 일도 안 하면서(빈 색인이라 밑이 안 나온다)
+        // 남의 자리를 이 프로젝트의 펼침 목록에 흘렸다. `l`·`h` 는 이미 그 줄의 것에 적는다.
+        let Some(site) = self.site_mut(seat) else { return };
+        site.expanded.insert(path.clone());
+        let under: Vec<Path> = site
+            .index
+            .descendants(&path)
+            .into_iter()
+            .filter(|&at| site.index.is_dir(&site.issues, at))
+            .map(|at| site.index.dir_path(&site.issues, at))
+            .collect();
+        site.expanded.extend(under);
     }
 
     /// 커서가 가리키는 줄.
@@ -2660,8 +2752,6 @@ impl App {
             B::Leave => self.leave(),
             // **목록은 위에서 한 번 센 것을 받는다**(moai-zrzo 와 같은 자리) — 저마다 `rows()` 를
             // 다시 부르던 때는 `l`·`h`·`Tab` 한 번이 이슈 전부를 훑고 정렬하는 일을 두 번 했다.
-            // **층은 트리가 아니다** — 거기서 `l`·`→` 는 그 프로젝트로 들어간다(사용자 결정 2026-09-19).
-            // 펼침으로만 두면 옛 손가락이 층에서 아무 일도 안 하는 키를 누른다.
             // **머리줄에서 `l`·`→` 는 그 프로젝트를 펼친다**(moai-i0wd, 사용자 결정 2026-09-19).
             // 들어가는 것은 Enter 다 — 한눈 보기는 고르는 화면이고 파고드는 곳은 프로젝트 안이다.
             // 한때 층에서 `l` 은 들어가기였다(moai-9m2d) — 그때 층은 트리가 아니었다.
@@ -2778,6 +2868,9 @@ impl App {
     /// 나오는데, 세는 데 이슈 전부를 훑고 정렬한다 — 그림은 프레임마다 이미 한 번 센 것을
     /// 넘기고, 키 처리는 키 하나에 한 번 센다. 여기서 따로 세면 바·메뉴·뱃지가 각자 센다.
     pub fn key_ctx(&self, rows: &[Row]) -> keys::Ctx {
+        // 칸 이름은 **한 번만** 모은다 — 번호 수와 숨김 비트가 같은 목록을 봐야 하고, 한눈 보기의
+        // 이것은 줄을 낸 프로젝트를 도는 셈이다([`App::screen_statuses`]).
+        let statuses = self.screen_statuses();
         keys::Ctx {
             layer: self.on_layer(),
             on_row: matches!(self.current_of(rows), Some(Row::Item(..))),
@@ -2797,11 +2890,9 @@ impl App {
             nested: self.parent_row(rows).is_some(),
             worktree: self.worktree,
             raw: self.raw,
-            columns: self.site.cfg.statuses.len().min(keys::NUMBERED),
+            columns: statuses.len().min(keys::NUMBERED),
             projects: self.layer.as_ref().map_or(0, |l| l.places.len().min(keys::NUMBERED)),
-            hidden: self
-                .site.cfg
-                .statuses
+            hidden: statuses
                 .iter()
                 .take(keys::NUMBERED)
                 .enumerate()
@@ -2965,7 +3056,8 @@ impl App {
         (1..=home.len()).rev().find_map(|depth| {
             let anchor = match &home[depth - 1] {
                 Seg::Epic(id) | Seg::Milestone(Some(id)) | Seg::Issue(id) => Anchor::Issue(id.clone()),
-                seg @ (Seg::Milestone(None) | Seg::Lost) => Anchor::Bucket(seg.clone()),
+                // 여기 오는 것은 지금 선 프로젝트의 줄뿐이다(위에서 `Anchor::Issue` 로 걸렀다).
+                seg @ (Seg::Milestone(None) | Seg::Lost) => Anchor::Bucket(None, seg.clone()),
             };
             self.row_of(rows, &anchor)
         })
@@ -3166,8 +3258,23 @@ impl App {
             // **자리는 그 줄의 것을 그대로 쓴다**([`App::dir_at`]) — 지금 자리에 제 마디만 이으면,
             // 펼쳐 든 줄(깊이 1 이상)에서 가운데 마디가 빠진 있지도 않은 자리가 서서 들어간 곳이
             // 텅 빈다(리뷰). 그러면 한 키 전에 보였던 멤버가 사라지고 빵조각도 거짓을 말한다.
-            Some(Row::Item(_, Entry::Dir { .. }, _)) => {
-                let Some(path) = self.dir_at(&rows) else { return };
+            Some(Row::Item(..)) => {
+                let Some((seat, path)) = self.dir_seat_at(&rows) else { return };
+                // **남의 줄이면 그 프로젝트로 먼저 들어간다**(리뷰). 자리는 그 프로젝트의 색인이
+                // 푼 것이라, 지금 선 프로젝트(한눈 보기에서는 줄이 빈 것)에 그대로 적으면 화면은
+                // 그대로인데 `key_ctx` 의 `root` 만 뒤집혀 Bksp 가 없는 자리를 벗긴다.
+                if let Seat::Place(n) = seat {
+                    self.enter_project(n);
+                    // 못 들어갔으면(못 읽는 프로젝트) 한눈 보기에 그대로 선다 — 자리를 적지 않는다.
+                    if self.on_layer() {
+                        return;
+                    }
+                    self.site.remembered = vec![0; path.len()];
+                    self.site.path = path;
+                    self.cursor = self.first_row();
+                    self.detail.rewind();
+                    return;
+                }
                 // 기억한 번호는 **층마다 하나**다(`remembered.len() == path.len()`). 펼쳐 든 줄로
                 // 들어가면 층이 한 번에 여럿 깊어지므로, 지나친 층은 0 으로 메운다 — 그 층은
                 // 들어간 적이 없어 기억할 자리가 없다(`land` 가 하는 것과 같다).
@@ -3223,33 +3330,13 @@ impl App {
         out
     }
 
-    /// 그 줄에 닿은 커밋. **줄이 온 워크트리의 가지에서 읽는다** — `show` 와 같은 까닭이다:
-    /// `--worktree` 로 옆에서 집은 일을 고친 커밋은 저쪽 가지에만 있다. 표가 없으면 빈 것이다.
-    pub fn commits_of(&self, id: &str) -> &[crate::git::Commit] {
-        let root = self.site.origin.root(id).or(self.site.repo.as_ref().map(|r| r.here()));
-        root.and_then(|r| self.site.commits.get(r)).and_then(|t| t.get(id)).map_or(&[], Vec::as_slice)
-    }
-
-    /// id 를 제목으로 푼다. 없으면 **끊겼다고 적는다** — id 만 내면 그것이
-    /// 그저 제목 없는 줄인지 없는 것을 가리키는 참조인지 알 길이 없다.
-    /// 훑지 않는다. 이 함수는 막는 것마다·소속마다·프레임마다 불린다.
-    pub fn title_of(&self, id: &str) -> String {
-        match self.site.index.find(id) {
-            Some(at) => self.site.issues[at].title.clone(),
-            None => format!("{id}  {MISSING}"),
-        }
-    }
-
     fn seg_label(&self, seg: &Seg) -> String {
         let id = match seg {
             Seg::Milestone(None) => return "(마일스톤 없음)".into(),
             Seg::Lost => return "(길 잃음)".into(),
             Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => id,
         };
-        match self.site.index.find(id) {
-            Some(at) => self.site.issues[at].title.clone(),
-            None => format!("{id}  {MISSING}"),
-        }
+        self.site.title_of(id)
     }
 }
 
@@ -5285,7 +5372,7 @@ mod tests {
         let stamp = stamp_of(&repo);
         let (index, ground) = measure(&g.load.issues, &repo.config);
         let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept);
-        assert!(a.commits_of("argos-0001").is_empty(), "여는 읽기가 git 을 기다렸다");
+        assert!(a.site.commits_of("argos-0001").is_empty(), "여는 읽기가 git 을 기다렸다");
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         a.follow();
         assert!(!a.loading(), "표를 짓느라 파일을 다시 읽으러 갔다");
@@ -5294,7 +5381,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(2));
             a.follow();
         }
-        let subjects = |a: &App| a.commits_of("argos-0001").iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
+        let subjects = |a: &App| a.site.commits_of("argos-0001").iter().map(|c| c.subject.clone()).collect::<Vec<_>>();
         assert_eq!(subjects(&a), ["feat: 처음 (argos-0001)"]);
 
         // 다시 읽기가 끝난 뒤 표까지 받는다.
@@ -5329,13 +5416,13 @@ mod tests {
         // (들여온 줄·되살린 파일)는 이것 없이는 다음 커밋이 설 때까지 칸이 빈다.
         git("feat: 줄보다 먼저 (argos-0009)");
         gathered(&mut a);
-        assert!(a.commits_of("argos-0009").is_empty(), "줄이 없는 id 가 표에 섰다");
+        assert!(a.site.commits_of("argos-0009").is_empty(), "줄이 없는 id 가 표에 섰다");
         let mut src = std::fs::read_to_string(dir.join(".moai/issues.jsonl")).unwrap();
         src.push_str(&line(&make("argos-0009", Kind::Issue)));
         std::fs::write(dir.join(".moai/issues.jsonl"), src).unwrap();
         gathered(&mut a);
         assert_eq!(
-            a.commits_of("argos-0009").iter().map(|c| c.subject.clone()).collect::<Vec<_>>(),
+            a.site.commits_of("argos-0009").iter().map(|c| c.subject.clone()).collect::<Vec<_>>(),
             ["feat: 줄보다 먼저 (argos-0009)"],
             "표가 모르던 id 의 커밋 칸이 비었다"
         );

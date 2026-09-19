@@ -92,7 +92,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     let header_h = if area.height >= HEADER_MIN_H { HEADER_H } else { 0 };
     let open_menu = (matches!(app.mode, Mode::Browse) && menu::open(&app.chord)).then(|| {
         let ctx = app.key_ctx(&rows);
-        let items = menu::entries(app.chord.held(), &ctx, &app.site.cfg.statuses);
+        let items = menu::entries(app.chord.held(), &ctx, &app.screen_statuses());
         let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
         let grid = menu::grid(&items, (area.width as usize).saturating_sub(2), menu::rows_for(left));
         // 이 층이 ESC 를 기다리는가는 켜진 항목에서 읽는다 — 접두어 줄이 그것으로 안내를 세운다.
@@ -182,7 +182,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 버퍼에 아무 자취도 안 남는다. 그래서 그린 쪽이 들고 온 것을 여기서 함께 센다.
     // **아는 쪽을 먼저 본다** — 훑기는 화면의 모든 칸을 도는 일이고 `spinner_on` 은 아무것도
     // 안 바꾸므로, 헤더가 이미 답을 들고 왔으면 그 값을 치를 까닭이 없다.
-    app.spun = header_glint || spinner_on(f.buffer_mut(), &app.site.cfg);
+    // **색은 줄을 낸 프로젝트 전부에서 모은다**(리뷰) — 한눈 보기의 줄은 제 프로젝트의 설정으로
+    // 칠해지므로(`row_line` 의 `glyph_style(site.column(at))`), 지금 선 프로젝트의 설정만 보면 칸
+    // 이름을 따로 적은 프로젝트의 스피너가 이 자에 안 걸려 루프가 안 깨고 글리프가 한 칸에 멈춘다.
+    app.spun = header_glint || spinner_on(f.buffer_mut(), &spin_colours(app));
 
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
@@ -238,10 +241,25 @@ pub fn screen(f: &mut Frame, app: &mut App) {
 /// 태그와 본문의 코드(`role_style`)와 겹치고, 칸 색이 없는 칸이 시작한 칸이면(`backlog, todo, …` 의
 /// `todo` 는 `PLAIN`) 그 스피너는 맨 글자와 같은 `Reset` 이라 그 설정에서는 글에 적은 스피너 글자로도
 /// 깬다 — 칸 색만으로는 둘을 못 가른다. 그 손해는 이 좁히기 전과 같다(`SPIN_BUDGET` 로 묶인다).
-fn spinner_on(buf: &ratatui::buffer::Buffer, cfg: &crate::config::Config) -> bool {
-    let colours: Vec<Color> =
-        cfg.statuses.iter().filter(|s| cfg.is_started(s)).filter_map(|s| glyph_style(s).fg).collect();
+fn spinner_on(buf: &ratatui::buffer::Buffer, colours: &[Color]) -> bool {
     buf.content.iter().any(|c| style::SPIN.contains(&c.symbol()) && colours.contains(&c.fg))
+}
+
+/// 도는 글리프가 입을 수 있는 색 — 이 화면에 줄을 낸 프로젝트들([`App::sites`])의 **시작한 칸**이다.
+/// 칸이 어느 설정의 것인지는 색에 안 남으므로 색만 모은다.
+fn spin_colours(app: &App) -> Vec<Color> {
+    let mut out: Vec<Color> = Vec::new();
+    // 지금 선 것도 든다 — 한눈 보기에서 아직 아무것도 안 펼쳤을 때 머리줄의 "줄 읽는 중" 이 그
+    // 설정의 색으로 서고([`place_line`]), 프로젝트 안에서는 `sites()` 가 그것 하나를 낸다.
+    let sites = app.sites();
+    for cfg in std::iter::once(&app.site.cfg).chain(sites.iter().map(|s| &s.cfg)) {
+        for c in cfg.statuses.iter().filter(|s| cfg.is_started(s)).filter_map(|s| glyph_style(s).fg) {
+            if !out.contains(&c) {
+                out.push(c);
+            }
+        }
+    }
+    out
 }
 
 /// 칸 글리프(도는 것이든 멈춘 것이든)의 모양 — [`status`] 에 **글자색을 늘 적는다.** 칸 색이 없는 칸
@@ -770,7 +788,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     });
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
-    let hidden = app.view.badge(&app.site.cfg.statuses);
+    let hidden = app.view.badge(&app.screen_statuses());
     // **한눈 보기에도 보기 뱃지를 세운다**(moai-1xo5) — 거기서도 보기가 줄을 가리므로, 안 세우면
     // 줄이 왜 적은지 말할 자리가 없다. 칸 이름은 지금 선 프로젝트의 것으로 댄다.
     let look = {
@@ -954,8 +972,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 글리프는 **칸 색으로** 칠한다 — 롤업의 건수와 같은 모양이고, 루프는 칸 색을 입은 스피너만 도는
     // 것으로 센다(`spinner_on`, moai-rg5q). 안 칠하면 도는 줄이 창 밖에 있을 때 이 글리프만 돌다 멈춘다.
     let counts: Vec<Vec<Span>> = app
-        .site.cfg
-        .statuses
+        .screen_statuses()
         .iter()
         .filter_map(|st| {
             let n = work.iter().filter(|&&(seat, at)| app.site_at(seat).issues[at].status.as_str() == st).count();
@@ -1011,9 +1028,13 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     let block = frame(app, Pane::Explorer).title(title);
     let inner_at = block.inner(at);
     f.render_widget(block, at);
-    // **층에서는 안 세운다** — 층의 줄은 이슈가 아니라 프로젝트라 id·P·TITLE 이 뜻이 없다.
+    // **이슈 줄이 있을 때만 세운다** — 머리줄뿐인 한눈 보기에서는 id·P·TITLE 이 뜻이 없다.
+    // `on_layer()` 로 가르던 때는(리뷰) 펼친 프로젝트의 줄이 목록의 줄과 같은 열로 그려지는데
+    // 이름 줄만 빠져, 제목은 "프로젝트 3곳 · 40줄" 인데 그 40줄에 열 이름이 없었다.
     let head_h = u16::from(
-        common.shows(super::view::Field::Names) && !app.on_layer() && !rows.is_empty() && inner_at.height > 1,
+        common.shows(super::view::Field::Names)
+            && rows.iter().any(|r| matches!(r, Row::Item(..)))
+            && inner_at.height > 1,
     );
     let [names_at, list_at] =
         Layout::vertical([Constraint::Length(head_h), Constraint::Min(0)]).areas(inner_at);
@@ -1884,7 +1905,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         ));
     }
     if let Some(id) = &i.epic {
-        fields.push(("에픽".into(), app.title_of(id)));
+        fields.push(("에픽".into(), site.title_of(id)));
     }
     // **그 줄이 선 마일스톤을 그린다.** 에픽이 마일스톤을 이기므로(3301f6e) 제 줄에
     // 적은 값은 그 줄이 선 자리와 다를 수 있다 — 그것을 그대로 그리면 패널은 m002 라
@@ -1895,7 +1916,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     // 말없이 사라지면 그게 더 헷갈린다.
     let placed = site.index.milestone_of(idx);
     if let Some(id) = placed {
-        fields.push(("마일스톤".into(), app.title_of(id)));
+        fields.push(("마일스톤".into(), site.title_of(id)));
     }
     // 까닭은 **선 자리로** 댄다. "에픽의 것을 따른다" 고 적으면, 에픽 없이 부모 밑에
     // 접힌 줄이나 에픽 참조가 끊겨 `(길 잃음)` 에 선 줄에서 거짓이 된다.
@@ -1911,11 +1932,11 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     for b in &i.blocked_by {
         let at = site.index.find(b);
         let root = site.index.deferred_root(b);
-        let (waiting, aside) = at.map_or((crate::report::Waiting::Live, &[][..]), |at| app.waits(at));
+        let (waiting, aside) = at.map_or((crate::report::Waiting::Live, &[][..]), |at| site.waits(at));
         let (label, text) = match crate::report::blocker(at.map(|at| site.column(at)), root.is_some(), waiting) {
             Blocker::Missing => ("끊김", format!("! {b}  없는 이슈라 막지 않는다")),
-            Blocker::Done => ("풀림", format!("✓ {b}  {}", app.title_of(b))),
-            Blocker::Open => ("막힘", format!("· {b}  {}", app.title_of(b))),
+            Blocker::Done => ("풀림", format!("✓ {b}  {}", site.title_of(b))),
+            Blocker::Open => ("막힘", format!("· {b}  {}", site.title_of(b))),
             // **미룬 막음도 막는다** — 미룬 일은 끝난 일이 아니다. 다만 그 줄은 보드에도
             // `ready` 에도 없으므로 미뤘다는 말을 붙인다. 낱말은 상세 머리가 쓰는 자리다.
             // **제목 앞에 둔다** — 값은 오른쪽부터 잘리므로, 뒤에 붙이면 흔한 길이의
@@ -1925,15 +1946,15 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
             // 미뤘을 때 제목이 통째로 사라진다(리뷰 moai-2sea.tns).
             Blocker::Deferred if !aside.is_empty() && root.is_none() => {
                 let more = if aside.len() > 1 { format!(" 외 {}", aside.len() - 1) } else { String::new() };
-                ("막힘", format!("· {b}  미룬 멤버 {}{more}  {}", aside[0], app.title_of(b)))
+                ("막힘", format!("· {b}  미룬 멤버 {}{more}  {}", aside[0], site.title_of(b)))
             }
             // 멤버가 없는 묶음 — 기다릴 일이 없어도 막는다(moai-1c2l). 채울 자리라고 댄다.
-            Blocker::Empty => ("막힘", format!("· {b}  멤버 없음  {}", app.title_of(b))),
+            Blocker::Empty => ("막힘", format!("· {b}  멤버 없음  {}", site.title_of(b))),
             Blocker::Deferred => {
                 let shelf = at
                     .and_then(|at| crate::view::deferred_for(&site.issues[at], root, &site.now))
                     .unwrap_or_else(|| "미룸".into());
-                ("막힘", format!("· {b}  {shelf}  {}", app.title_of(b)))
+                ("막힘", format!("· {b}  {shelf}  {}", site.title_of(b)))
             }
         };
         fields.push((label.into(), text));
@@ -1966,7 +1987,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     }
     // **커밋은 CLI 상세와 같은 자리, 본문 뒤다**(moai-a4i0). 무엇을 그릴지는 `view::commit_lines`
     // 가 정한다. 표는 다시 읽기 스레드가 지어 온 것이라 여기서 git 을 부르지 않는다.
-    let drawn = crate::view::commit_lines(app.commits_of(&i.id));
+    let drawn = crate::view::commit_lines(site.commits_of(&i.id));
     if !drawn.is_empty() {
         out.push(Line::from(""));
         out.push(Line::from(Span::styled("커밋", bold())));
@@ -2054,8 +2075,10 @@ fn rollup<'a>(app: &App, site: &Site, path: &crate::nav::Path, w: usize) -> Vec<
 
     // 칸별 건수는 `config` 차례로. **0인 칸은 빼서** 좁은 패널에서 줄이 접히지
     // 않게 한다 — CLI 요약이 쓰는 규칙과 같다.
-    let counts: Vec<Span> = app
-        .site.cfg
+    // **칸 이름은 이 줄이 사는 프로젝트의 것이다**(리뷰) — 세는 줄은 `site` 의 것인데 이름만
+    // 지금 선 프로젝트에서 읽으면, 칸 이름을 따로 적은 프로젝트의 줄이 어느 칸에도 안 세인다.
+    let counts: Vec<Span> = site
+        .cfg
         .statuses
         .iter()
         .filter_map(|st| {
@@ -2157,7 +2180,14 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
     // **줄을 읽어 오는 동안 돈다**(moai-12yx) — 펼치는 키 하나가 값을 스레드에 맡겼으니, 화면은
     // 그 사이를 말해야 한다. 칸 색을 입혀 루프가 이것을 "도는 것" 으로 센다(`spinner_on`).
     if app.reading_place(&p.path) {
-        spans.push(Span::styled(format!("  {} 줄 읽는 중", style::spin_frame(app.spin)), glyph_style(app.site.cfg.statuses.first().map_or("", String::as_str))));
+        // 색은 **시작한 칸**의 것이어야 한다(리뷰) — 첫 칸(`todo`)은 `Config::is_started` 가 빼는
+        // 이름이라, 그 색으로 칠하면 [`spinner_on`] 이 이 스피너를 못 알아보고 헤더의 빛이 없는
+        // 화면(짧은 터미널)에서는 "읽는 중" 이라 적힌 채 한 칸에 멈춘다.
+        let cfg = app.layer.as_ref().and_then(|l| l.places.get(at)).and_then(|p| p.site.as_ref()).map_or(&app.site.cfg, |s| &s.cfg);
+        spans.push(Span::styled(
+            format!("  {} 줄 읽는 중", style::spin_frame(app.spin)),
+            glyph_style(cfg.started_status()),
+        ));
     }
     if p.launched {
         spans.push(Span::styled(if p.registered { "  여기" } else { "  여기 · 등록 안 됨" }, dim()));

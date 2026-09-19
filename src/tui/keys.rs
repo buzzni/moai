@@ -655,9 +655,14 @@ impl Browse {
             // 묶음 줄에만 펼칠 것이 있다 — `Enter` 가 잎에서 조용한 것과 같은 자리다. `leaf` 로
             // 가르지 않는다: `leaf` 는 `Enter` 의 물음이라 `..` 과 층의 프로젝트 줄에도 거짓이고,
             // 거기서는 펼침이 아무 일도 안 한다.
-            // 층은 트리가 아니다 — `l`·`→` 는 거기서 `Enter` 와 같다(사용자 결정 2026-09-19).
+            // 한눈 보기에서 `l`·`→` 는 머리줄을 펼치고 묶음 줄을 펼친다(moai-i0wd) — 켜지는 자리는
+            // `Enter` 와 같다(`leaf` 가 아닌 줄). 한때는 `l` 이 거기서 들어가기였다(moai-9m2d).
             Expand if c.layer => Browse::Enter.enabled(c),
             Expand | ExpandAll if !c.group => Err(Off::Quiet),
+            // **한눈 보기에는 나갈 데가 없다**(리뷰) — 접을 것이 없으면 조용하다. 아래 `Leave` 로
+            // 흘리면 거기서 `root`(자리 채우개의 빈 경로)와 등록 수가 맞아떨어져, 이미 그 화면에
+            // 선 사람에게 "프로젝트 층으로는 `0` 으로 간다" 는 말이 선다.
+            Collapse if c.layer && !c.expanded && !c.nested => Err(Off::Quiet),
             // **접을 것도 접을 부모도 없으면 나가기와 같다** — 아래 `Leave` 의 갈래를 그대로 탄다.
             Collapse if !c.expanded && !c.nested => Browse::Leave.enabled(c),
             // 커서에서 되는 키만(moai-k3yi): 잎의 Enter·뿌리의 Bksp 는 아무 일도 없다. 까닭을 대지
@@ -674,7 +679,10 @@ impl Browse {
                 label(BROWSE, Project(0))
             ))),
             Leave if c.root => Err(Off::Quiet),
-            Unregister if !(c.layer && c.list_focus) => Err(Off::Quiet),
+            // **머리줄에서만 선다**(리뷰) — 뺄 것은 프로젝트고, 한눈 보기의 이슈 줄에서 누르면
+            // [`super::App::ask_unregister`] 가 말없이 돌아선다. 눌러도 아무 일이 없는 키는
+            // 메뉴에 안 세운다(아래 `Raw` 와 같은 까닭).
+            Unregister if !(c.layer && c.list_focus && !c.on_row) => Err(Off::Quiet),
             Grep | Filter if c.layer => {
                 Err(Off::Why(format!("거름망은 프로젝트 안의 줄에 건다 — {} 로 들어가서 건다", label(BROWSE, Enter))))
             }

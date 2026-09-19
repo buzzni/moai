@@ -370,11 +370,24 @@ impl Layer {
     /// 읽는다(리뷰 moai-3lul.kt0). 표식은 반대로 읽기 **전**의 것이다 — 그 사이의 쓰기를 놓치면
     /// 영영 안 보인다.
     fn adopt(&mut self, looked: impl IntoIterator<Item = Looked>) {
+        // **줄을 든 프로젝트는 표식이 움직이면 줄도 다시 읽는다**(리뷰). 요약만 새것으로 갈던
+        // 때는 머리줄의 셈과 그 밑의 줄이 한 화면에서 다른 말을 했다 — 옆 세션이 닫은 일이 셈
+        // 에서는 `✓` 로 올라가는데 줄은 세션 내내 `todo` 였다. 읽으러 가는 자는 [`App::want_site`]
+        // 뿐인데 그쪽은 펼칠 때만 불리고, 든 줄이 있으면 아무것도 안 한다.
+        let mut again: Vec<PathBuf> = Vec::new();
         for l in looked {
             if let Some(p) = self.places.iter_mut().find(|p| p.path == l.path) {
+                if p.marks != l.marks && p.site.is_some() {
+                    again.push(p.path.clone());
+                }
                 p.marks = l.marks;
                 p.read_at = Some(std::time::Instant::now());
                 p.look = l.look;
+            }
+        }
+        for path in again {
+            if !self.wanted.contains(&path) && self.reading.as_ref().is_none_or(|(p, ..)| *p != path) {
+                self.wanted.push(path);
             }
         }
     }
@@ -721,6 +734,10 @@ impl App {
         parked.path.clear();
         parked.remembered.clear();
         parked.expanded.clear();
+        // **거름망 마스크도 푼다**(리뷰). 아래에서 `filter_text` 를 비우므로 걸린 글은 사라지는데,
+        // 마스크를 두고 가면 그 프로젝트의 줄은 한눈 보기에서 걸러진 채 서고 — 경로 줄에 뱃지도
+        // 없고 Esc 로 풀 것도 없어 — 왜 줄이 적은지 말할 자리가 도구 안에 안 남는다.
+        parked.keep = vec![true; parked.issues.len()];
         if let (Some(at), Some(layer)) = (park_at, self.layer.as_mut())
             && let Some(place) = layer.places.iter_mut().find(|p| p.path == at)
         {
@@ -785,6 +802,12 @@ impl App {
                         p.look = std::mem::replace(&mut o.look, Look::Unread);
                         p.marks = std::mem::take(&mut o.marks);
                         p.read_at = o.read_at;
+                        // **읽어 든 줄도 옮겨 든다**(리뷰). 두고 가면 한눈 보기가 펼쳐 둔 프로젝트가
+                        // 통째로 접힌 머리줄만 남는다 — 이 길은 사용자 설정이 바뀔 때마다 도는데
+                        // (`App::follow_config`) 보기 토글과 읽음이 **그 파일을 스스로 쓴다.**
+                        // 곧 `SPC v` 한 번이 그 토글을 걸 줄을 다 없앤다. 다시 읽으러 가는 자도
+                        // 없다(`App::want_site` 는 펼칠 때만 부른다).
+                        p.site = o.site.take();
                     }
                 }
                 fresh.at = match old.at {
@@ -796,8 +819,13 @@ impl App {
                     }
                     At::Project(p) => At::Project(p),
                 };
-                // 도는 읽기는 경로로 맞춰 들이므로 넘겨도 섞이지 않는다.
+                // 도는 읽기는 경로로 맞춰 들이므로 넘겨도 섞이지 않는다. **줄을 읽는 쪽도 같이
+                // 넘긴다**(리뷰) — 버리면 그 손잡이가 join 도 discard 도 없이 떨어져, 그 스레드가
+                // 터져도 되던질 데가 없다(`App::discarded` 가 막으려는 바로 그 자리). 기다리던
+                // 줄(`wanted`)도 넘긴다: 버리면 펼쳐 놓고 못 읽은 프로젝트가 영영 안 읽힌다.
                 fresh.pending = old.pending.take();
+                fresh.reading = old.reading.take();
+                fresh.wanted = std::mem::take(&mut old.wanted);
                 self.layer = Some(fresh);
             }
         }
@@ -1587,6 +1615,76 @@ mod tests {
         assert_eq!(a.rows().len(), 2, "접었는데 줄이 남았다");
     }
 
+    /// **한눈 보기의 상세도 그 줄의 프로젝트에 묻는다**(리뷰). 막는 것은 그 프로젝트의 색인에서
+    /// 푸는데 기다림(`Site::waits`)만 지금 선 프로젝트에 묻던 때는, 한눈 보기의 `App::site` 가
+    /// 줄이 빈 자리 채우개라([`App::leave_project`]) 그 첨자가 넘쳐 **커서를 옮기는 것만으로**
+    /// 탐색기가 죽었다. 제목(`title_of`)과 커밋(`commits_of`)도 같은 자리다.
+    #[test]
+    fn the_detail_of_a_foreign_row_reads_its_own_project() {
+        let s = Scratch::fenced("layer-foreign-detail");
+        let one = s.project("one", &[("argos-0001", "막는 줄", "todo")]);
+        // 막음은 `write_lines` 가 안 적는다 — 이 프로젝트만 손으로 적는다.
+        let open = Issue::new("argos-0001".into(), "막는 줄".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        let mut blocked =
+            Issue::new("argos-0002".into(), "막힌 줄".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        blocked.blocked_by = vec!["argos-0001".into()];
+        let body = format!("{}\n{}\n", serde_json::to_string(&open).unwrap(), serde_json::to_string(&blocked).unwrap());
+        std::fs::write(one.join(".moai/issues.jsonl"), body).unwrap();
+        let cfg = s.register(&[&one]);
+        let mut a = layered(&cfg);
+        a.want_site(0);
+        settle(&mut a);
+
+        let rows = a.rows();
+        let at = rows
+            .iter()
+            .position(|r| matches!(r, Row::Item(seat, e, _) if e.at().is_some_and(|at| a.site_at(*seat).issues[at].id == "argos-0002")))
+            .expect("막힌 줄이 한눈 보기에 안 섰다");
+        a.cursor = at;
+        // 그리는 것이 곧 시험이다 — 넘치면 여기서 죽는다.
+        let shot = crate::tui::draw::tests::render(&mut a, 110, 20).join("\n");
+        assert!(shot.contains("막는 줄"), "남의 줄의 막음을 제 프로젝트에서 못 읽었다:\n{shot}");
+    }
+
+    /// **층을 다시 세워도 읽어 둔 줄은 남는다**(리뷰). 이 길은 사용자 설정이 바뀔 때마다 도는데
+    /// ([`App::follow_config`]) 보기 토글과 읽음이 그 파일을 **스스로 쓴다** — 두고 가면 `SPC v`
+    /// 한 번이 그 토글을 걸 줄을 통째로 없애고, 다시 읽으러 가는 자도 없다([`App::want_site`] 는
+    /// 펼칠 때만 부른다).
+    #[test]
+    fn rebuilding_the_layer_keeps_the_rows_it_already_read() {
+        let s = Scratch::fenced("layer-relayer-rows");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.want_site(0);
+        settle(&mut a);
+        let was = a.rows().len();
+        assert!(was > 2, "시험의 전제 — 첫 프로젝트를 펼쳐 읽었다");
+        a.relayer(None);
+        assert_eq!(a.rows().len(), was, "층을 다시 세우자 펼쳐 둔 프로젝트의 줄이 사라졌다");
+    }
+
+    /// **펼치며 읽은 줄에도 화면의 보기를 곧바로 건다**(리뷰, moai-1xo5 의 약속). `Site::of` 는
+    /// `shown` 을 비워 두고 그것을 채우는 자는 보기 토글뿐이라([`App::see`]), 안 걸면 방금 펼친
+    /// 프로젝트만 보기를 안 따라 같은 화면의 두 프로젝트가 한 토글에 다르게 선다.
+    #[test]
+    fn a_freshly_read_project_follows_the_view_that_is_already_on() {
+        let s = Scratch::fenced("layer-view-on-read");
+        let one = s.project("one", &[("argos-0001", "열린 줄", "todo"), ("argos-0002", "끝난 줄", "done")]);
+        let cfg = s.register(&[&one]);
+        let mut a = layered(&cfg);
+        assert!(a.view.hides(crate::config::DONE), "시험의 전제 — 탐색기는 done 을 숨긴 채로 뜬다");
+        a.want_site(0);
+        settle(&mut a);
+        let shown: Vec<String> = a
+            .rows()
+            .iter()
+            .filter_map(|r| match r {
+                Row::Item(seat, e, _) => e.at().map(|at| a.site_at(*seat).issues[at].title.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(shown, ["열린 줄"], "펼치며 읽은 프로젝트가 걸려 있던 보기를 안 따랐다");
+    }
+
     /// **펼쳐 둔 자리는 프로젝트를 건너지 않는다**(리뷰) — 마디가 그 프로젝트의 이슈 id 이고,
     /// 바구니 마디(`(마일스톤 없음)`·`(길 잃음)`)는 id 조차 없어 prefix 가 달라도 그대로 샌다.
     /// 두고 오면 다음 프로젝트가 아무도 안 펼친 묶음을 펼친 채 세운다. `leave_project` 가 커서
@@ -1657,24 +1755,28 @@ mod tests {
         a.key(key(KeyCode::End));
         a.hit("l");
         settle(&mut a);
-        let all = a.rows().len();
-        assert!(all > 4, "두 프로젝트를 다 못 폈다: {all}");
+        // **프로젝트마다 줄 수를 센다**(리뷰). 남은 프로젝트 *수* 로만 재던 때는 한쪽에만 걸려도
+        // 둘 다 줄이 남아 통과했다 — 그때 이 시험은 제 이름의 것을 못 잡는다.
+        let per_place = |a: &App| -> std::collections::BTreeMap<usize, usize> {
+            let mut out = std::collections::BTreeMap::new();
+            for r in a.rows() {
+                if let Row::Item(crate::tui::Seat::Place(n), ..) = r {
+                    *out.entry(n).or_insert(0usize) += 1;
+                }
+            }
+            out
+        };
+        let before = per_place(&a);
+        assert_eq!(before.len(), 2, "두 프로젝트를 다 못 폈다: {before:?}");
 
-        // 미룬 것도 done 도 없는 fixture 라, 칸 하나를 숨겨 둘 다 줄어드는지 본다.
+        // 미룬 것도 done 도 없는 fixture 라, 칸 하나를 숨겨 둘 다 한 줄씩 주는지 본다.
         a.hit("SPC v 1 Esc");
-        let hidden = a.rows().len();
-        assert!(hidden < all, "보기가 한 줄도 안 가렸다");
-        let by_place: std::collections::BTreeSet<usize> = a
-            .rows()
-            .iter()
-            .filter_map(|r| match r {
-                Row::Item(crate::tui::Seat::Place(n), ..) => Some(*n),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(by_place.len(), 2, "보기가 한 프로젝트에만 걸렸다 — 남은 줄: {by_place:?}");
+        let after = per_place(&a);
+        for (n, was) in &before {
+            assert_eq!(after.get(n), Some(&(was - 1)), "프로젝트 {n} 에 보기가 안 걸렸다 — {before:?} → {after:?}");
+        }
         a.hit("SPC v 1 Esc");
-        assert_eq!(a.rows().len(), all, "도로 켜니 줄이 안 돌아왔다");
+        assert_eq!(per_place(&a), before, "도로 켜니 줄이 안 돌아왔다");
 
         // 검색·거름망은 그대로 프로젝트 안의 일이다. 바로 누르는 `/` 는 까닭과 갈 키를 대고,
         // 메뉴의 `SPC f` 는 아예 안 선다 — 메뉴는 켜진 것만 세운다(`menu::entries`).
