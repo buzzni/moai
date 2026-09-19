@@ -6888,17 +6888,28 @@ fn without_korean_notice(out: &str) -> String {
 
 /// 훅을 띄워 **걷지 않은** 출력을 받는다.
 fn hook_in_raw(s: &Scratch, run_in: &Path, event: &str, input: &str) -> Output {
-    hook_at_home(s, run_in, None, event, input)
+    hook_at_home(s, run_in, None, &[], event, input)
+}
+
+/// [`hook_in`] 을 **그 체크아웃의 트래커로**(`MOAI_HERE`) — 딸린 워크트리의 갈라진 스냅샷을 훅이 읽게
+/// 한다. 맨 훅은 루트의 트래커를 읽어(moai-y7go) 그 스냅샷에 main 을 겹치는 셈을 못 잰다(moai-ts32).
+fn hook_here(s: &Scratch, run_in: &Path, event: &str, input: &str) -> Output {
+    let mut out = hook_at_home(s, run_in, None, &[("MOAI_HERE", "1")], event, input);
+    out.stdout = without_korean_notice(&String::from_utf8(out.stdout).unwrap()).into_bytes();
+    out
 }
 
 /// [`hook_in_raw`] 를 제 집(`claude` 의 장부가 놓이는 자리)에서 — 플러그인 장부를 흉내 내는 시험이 쓴다.
-fn hook_at_home(s: &Scratch, run_in: &Path, home: Option<&Path>, event: &str, input: &str) -> Output {
+fn hook_at_home(s: &Scratch, run_in: &Path, home: Option<&Path>, env: &[(&str, &str)], event: &str, input: &str) -> Output {
     use std::io::Write as _;
     let tmp = s.path().join("hooktmp");
     std::fs::create_dir_all(&tmp).unwrap();
     let mut cmd = staged(&["hook", event]);
     if let Some(home) = home {
         cmd.env("HOME", home);
+    }
+    for (k, v) in env {
+        cmd.env(k, v);
     }
     let mut child = cmd
         .current_dir(run_in)
@@ -7375,7 +7386,7 @@ fn a_linked_worktree_sees_the_korean_plugins_of_its_main_checkout() {
             json_str(&cwd.display().to_string()),
             json_str(&format!("moai -C {} idea add '떠오른 것'", main.display()))
         );
-        carried_text(&String::from_utf8(hook_at_home(&s, cwd, Some(&home), "pre-tool-use", &input).stdout).unwrap())
+        carried_text(&String::from_utf8(hook_at_home(&s, cwd, Some(&home), &[], "pre-tool-use", &input).stdout).unwrap())
     };
     ledger(&main);
     for cwd in [&main, &inside] {
@@ -7605,6 +7616,11 @@ fn a_member_worktree_forked_before_its_pick_still_outranks_its_epic_worktree() {
     );
     let out = String::from_utf8(hook_in(&s, &inside, "pre-tool-use", &input).stdout).unwrap();
     assert!(out.trim().is_empty(), "겹쳐 다시 볼 때 제 이름을 잃어 에픽 워크트리가 멤버를 쥐었다\n{out}");
+    // **겹쳐 다시 보는 판정은 워크트리의 스냅샷을 읽혀야 선다**(moai-ts32) — 맨 훅은 루트를 읽어(moai-y7go)
+    // 제 스냅샷에 집은 줄이 있는 셈이 되어 겹칠 까닭이 없다. 그 스냅샷이 집기를 정말 모르는지부터 못박는다.
+    assert!(!issues(&inside).contains("in_progress"), "워크트리의 스냅샷이 갈라지지 않았다 — 겹침을 못 잰다");
+    let out = String::from_utf8(hook_here(&s, &inside, "pre-tool-use", &input).stdout).unwrap();
+    assert!(out.trim().is_empty(), "워크트리의 스냅샷으로 겹쳐 다시 볼 때 에픽 워크트리가 멤버를 쥐었다\n{out}");
 }
 
 /// **다른 세션이 집은 줄은 떠안지 않는다**(moai-4jsy, 사용자 결정). 남의 워크트리에 잠깐 들어간
@@ -8242,9 +8258,21 @@ fn status_names_picked_work_with_no_live_worktree_and_still_exits_zero() {
 
     // **딸린 워크트리의 스냅샷은 갈라질 때의 main 이다** — 그 뒤 main 에서 놓은 줄이 거기서는 아직
     // 집혀 있다. 겹쳐 보지 않고 그것으로 재면 끝난 일을 남에게 다시 준다.
-    ok(&main, &["mv", &lost, "todo"]);
-    let json = ok_at(&side, LATER, &["status", "--json"]);
+    //
+    // **그 스냅샷은 `MOAI_HERE` 로만 읽힌다**(moai-ts32). 트래커를 루트로 옮긴 뒤(moai-y7go) 맨
+    // `status` 는 루트를 읽어, 이 자리를 무엇이 지키든 그냥 지나갔다. 먼저 그 스냅샷이 정말 낡았는지
+    // 못박는다 — 아니면 아래 두 단언이 다시 아무것도 안 잰다. 겹쳐 보지 않으면 재지 않고, 겹쳐 보면
+    // main 이 놓은 것이 들어온다. 놓기는 늦은 시계로 친다 — 겹침은 `updated_at` 이 더 늦은 줄을 받으므로,
+    // 집기와 같은 시각이면 워크트리의 낡은 줄이 이긴다.
+    ok_at(&main, LATER, &["mv", &lost, "todo"]);
+    assert!(
+        ok_here_at(&side, LATER, &["show", &lost, "--json"]).contains("\"status\":\"in_progress\""),
+        "워크트리의 스냅샷이 갈라지지 않았다 — 낡은 스냅샷을 못 잰다"
+    );
+    let json = ok_here_at(&side, LATER, &["status", "--json"]);
     assert!(!json.contains("\"stranded\""), "낡은 스냅샷으로 자리 없는 줄을 댔다\n{json}");
+    let json = ok_here_at(&side, LATER, &["status", "--worktree", "--json"]);
+    assert!(!stranded_ids(&json).contains(&lost), "겹쳐 보고도 main 이 놓은 줄을 자리 없다고 했다\n{json}");
 
     // 워크트리를 치우면 그 일도 자리를 잃는다. 워크트리가 하나도 없으면 조용하다 — 그때는 main 에서 일한다.
     git(&main, &["worktree", "remove", "--force", &inside.display().to_string()]);
@@ -8609,12 +8637,20 @@ fn show_names_the_worktree_a_picked_row_lives_in() {
     let dir = format!(".claude/worktrees/{there}");
     git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{there}")]);
     let side = main.join(&dir);
+    //
+    // **그 스냅샷은 `MOAI_HERE` 로만 읽힌다**(moai-ts32) — 맨 `show` 는 루트를 읽어(moai-y7go) 이
+    // 자리를 그냥 지나갔다. 먼저 그 스냅샷이 정말 낡았는지 못박는다.
     ok_at(&main, LATER, &["mv", &lost, "todo"]);
-    let out = ok(&side, &["show", &lost]);
+    assert!(
+        ok_here(&side, &["show", &lost, "--json"]).contains("\"status\":\"in_progress\""),
+        "워크트리의 스냅샷이 갈라지지 않았다 — 낡은 스냅샷을 못 잰다"
+    );
+    let out = ok_here(&side, &["show", &lost]);
     assert!(!out.contains("자리"), "낡은 스냅샷으로 자리를 댔다\n{out}");
-    assert!(!ok(&side, &["show", &lost, "--json"]).contains("workplaces"));
+    assert!(!ok_here(&side, &["show", &lost, "--json"]).contains("workplaces"));
     // 겹쳐 보면 main 의 칸이 들어와 아예 집은 줄이 아니다 — 그때도 "자리 없다" 는 안 선다.
-    let out = ok(&side, &["show", &lost, "--worktree"]);
+    let out = ok_here(&side, &["show", &lost, "--worktree"]);
+    assert!(out.contains("todo"), "겹쳐 보고도 main 의 칸이 안 들어왔다\n{out}");
     assert!(!out.contains("자리"), "겹쳐 보고도 자리를 댔다\n{out}");
 }
 
@@ -8625,6 +8661,16 @@ fn tool_at(s: &Scratch, cwd: &Path, tool: &str, body: &str) -> String {
         json_str(&cwd.display().to_string())
     );
     String::from_utf8(hook_in(s, cwd, "pre-tool-use", &input).stdout).unwrap()
+}
+
+/// [`tool_at`] 을 **그 체크아웃의 트래커로**(`MOAI_HERE`, [`hook_here`]) — 워크트리의 갈라진 스냅샷에
+/// main 을 겹쳐 푸는 판정을 잰다. 맨 훅은 루트를 읽어 그 판정에 닿지 않는다(moai-ts32).
+fn tool_here(s: &Scratch, cwd: &Path, tool: &str, body: &str) -> String {
+    let input = format!(
+        "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"{tool}\",\"tool_input\":{body}}}",
+        json_str(&cwd.display().to_string())
+    );
+    String::from_utf8(hook_here(s, cwd, "pre-tool-use", &input).stdout).unwrap()
 }
 
 /// **워크트리 안의 리뷰 규칙은 main 에서 집은 리뷰를 본다** (moai-w2iy). 트래커는 main 에서
@@ -8647,6 +8693,11 @@ fn a_review_picked_in_main_opens_the_review_inside_the_worktree() {
     ok(&main, &["mv", &r, "in_progress"]);
     let out = tool_at(&s, &inside, "Skill", review);
     assert!(out.trim().is_empty(), "main 에서 집은 리뷰를 못 보고 막는다\n{out}");
+    // **워크트리의 스냅샷으로 읽혀도 main 을 겹쳐 본다**(moai-ts32) — 맨 훅은 루트를 읽어(moai-y7go) 위
+    // 단언이 겹침 없이 지나간다. 그 스냅샷이 리뷰를 정말 모르는지부터 못박는다.
+    assert!(!issues(&inside).contains(&r), "워크트리의 스냅샷이 갈라지지 않았다 — 겹침을 못 잰다");
+    let out = tool_here(&s, &inside, "Skill", review);
+    assert!(out.trim().is_empty(), "워크트리의 스냅샷에 main 을 안 겹쳐 집은 리뷰를 막는다\n{out}");
 }
 
 /// **`moai` 는 그 명령이 가리키는 저장소의 트래커로 판정한다** (moai-23ky) — `-C`·`--dir`
@@ -8710,6 +8761,10 @@ fn a_worktree_session_touching_main_is_still_that_session() {
     ok(&main, &["mv", &next, "in_progress"]);
     let out = bash(&format!("moai -C {mp} add \"둘째의 자식\" --parent {next}"));
     assert!(out.trim().is_empty(), "main 에서 방금 집은 일의 자식을 막았다\n{out}");
+    // 워크트리의 스냅샷으로 읽혀도 겹쳐 보고 안다(moai-ts32) — 맨 훅은 루트를 읽어(moai-y7go) 겹침 없이 지나간다.
+    assert!(!issues(&inside).contains(&next), "워크트리의 스냅샷이 갈라지지 않았다 — 겹침을 못 잰다");
+    let out = tool_here(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&format!("moai -C {mp} add \"둘째의 자식\" --parent {next}"))));
+    assert!(out.trim().is_empty(), "워크트리의 스냅샷에 main 을 안 겹쳐 방금 집은 일의 자식을 막았다\n{out}");
 
     // 거꾸로 — 세션은 main 에 서 있고 명령이 워크트리로 들어간다(에이전트 스레드는 자리가 main
     // 으로 돌아온다). **가리킨 곳이 워크트리여도 트래커는 루트의 것이다**(moai-y7go) — 그 토막을
@@ -8764,11 +8819,18 @@ fn a_note_does_not_bring_back_a_deny_the_fresh_view_lifted() {
     let out = bash(&lifted);
     assert!(out.trim().is_empty(), "main 에서 방금 집은 일의 자식을 막았다\n{out}");
 
+    // **거절이 서려면 워크트리의 스냅샷을 읽혀야 한다**(moai-ts32) — 맨 훅은 루트를 읽어(moai-y7go) 처음부터
+    // 막지 않으니, 겹쳐 보고 풀린 거절이 돌아오는지를 못 잰다. 그 스냅샷이 둘째 일을 정말 모르는지부터 못박는다.
+    assert!(!issues(&inside).contains(&next), "워크트리의 스냅샷이 갈라지지 않았다 — 겹침을 못 잰다");
+    let here = |cmd: &str| tool_here(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+    let out = here(&lifted);
+    assert!(out.trim().is_empty(), "워크트리의 스냅샷에 main 을 안 겹쳐 방금 집은 일의 자식을 막았다\n{out}");
     for cmd in [format!("{lifted} && moai -C {mp} idea add \"떠오른 것\""), format!("moai -C {mp} idea add \"떠오른 것\"; {lifted}")] {
-        let out = bash(&cmd);
-        one_json_value(&out);
-        assert!(!out.contains("permissionDecision"), "비추는 줄이 곁들자 풀린 거절이 돌아왔다 — {cmd}\n{out}");
-        assert!(out.contains(&format!("{epic} 가 내건 것")), "{out}");
+        for (how, out) in [("루트", bash(&cmd)), ("MOAI_HERE", here(&cmd))] {
+            one_json_value(&out);
+            assert!(!out.contains("permissionDecision"), "{how}: 비추는 줄이 곁들자 풀린 거절이 돌아왔다 — {cmd}\n{out}");
+            assert!(out.contains(&format!("{epic} 가 내건 것")), "{how}: {out}");
+        }
     }
 }
 
@@ -8839,6 +8901,19 @@ fn the_stop_hook_measures_the_epic_on_what_main_has_closed() {
     assert!(
         held.contains(&format!("{epic} 의 목적을 접을 때만")),
         "main 에서 끝낸 멤버를 못 보고 마지막 멤버를 그냥 미루라고 한다\n{held}"
+    );
+    // **겹침은 워크트리의 스냅샷을 읽혀야 잰다**(moai-ts32). 맨 훅은 루트를 읽어(moai-y7go) 위 단언을
+    // 겹침 없이도 지나간다 — `MOAI_HERE` 로 갈라진 스냅샷을 읽히고, 그 스냅샷이 옆 멤버의 끝남을
+    // 정말 모르는지부터 못박는다.
+    assert!(
+        ok_here(&inside, &["show", &other, "--json"]).contains("\"status\":\"todo\""),
+        "워크트리의 스냅샷이 갈라지지 않았다 — 겹침을 못 잰다"
+    );
+    let input = format!("{{\"session_id\":\"s3\",\"cwd\":{}}}", json_str(&inside.display().to_string()));
+    let stale = String::from_utf8(hook_here(&s, &inside, "stop", &input).stdout).unwrap();
+    assert!(
+        stale.contains(&format!("{epic} 의 목적을 접을 때만")),
+        "낡은 스냅샷에 main 을 안 겹쳐 마지막 멤버를 그냥 미루라고 한다\n{stale}"
     );
 
     // **내미는 명령은 맨 `moai` 다**(moai-y7go) — 워크트리에서 친 트래커 쓰기를 도구가 루트로
