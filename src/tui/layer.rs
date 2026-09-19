@@ -648,7 +648,12 @@ impl App {
     /// 프로젝트로 바로 건너뛰는 길을 내면서 그 길이 안 도는 드나들기가 생겼다. **겹쳐 보기는
     /// 읽기 전에 정한다** — 읽는 값이 그 깃발을 탄다.
     pub(super) fn enter_project(&mut self, at: usize) {
-        let Some(repo) = self.open_place(at, Depth::Whole) else { return };
+        // **여는 데까지만 본다**(moai-lmot) — 줄은 바로 아래에서 읽는다. 스냅샷까지 열어 보던
+        // 때는 그 판의 `load` 를 버리고 두 줄 뒤에서 같은 파일을 또 팠다. 갈리는 것은 하나다:
+        // 열리지만 스냅샷을 못 읽는 저장소를 여태는 여기서 `Look::Shut` 으로 고쳐 세웠고, 이제는
+        // 아래의 읽기가 제 까닭을 알림으로 댄다("들어가지 못했다 — …"). 그 줄은 `read_at` 이
+        // 비어 다음 걸음의 쓸기가 다시 읽어 제 상태로 선다 — 말은 남고 줄은 저절로 낫는다.
+        let Some(repo) = self.open_place(at, Depth::Lean) else { return };
         let Some(path) = self.place_path(at).map(Path::to_path_buf) else { return };
         // **겹쳐 보기를 켠다는 말은 한 번만 적는다.** 읽는 값이 이 깃발을 타므로 읽기에 건네는
         // 것과 App 에 남기는 것이 갈리면 목록은 겹친 줄인데 뱃지는 꺼진 화면이 난다. 세우는
@@ -943,10 +948,15 @@ impl App {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Depth {
     /// 스냅샷까지 읽어 본다 — 못 읽는 줄을 그 자리에서 [`Look::Shut`] 으로 세운다.
+    ///
+    /// **읽는 사람이 한참 뒤에 있는 자리만 이것을 쓴다**(moai-lmot) — 지금은 `n`(담기) 하나다.
+    /// 거기서는 못 읽는 저장소가 폼을 열고, 사람이 다 적고 Ctrl-S 를 눌러서야 못 담는다고
+    /// 듣는다(적은 것이 갈 데가 없다). 뒤이어 곧 읽는 자리는 그 읽기가 제 까닭을 대므로
+    /// [`Depth::Lean`] 이다.
     Whole,
-    /// 여는 데까지만([`projects::open_shallow`]) — 줄은 곧 스레드가 읽는다. 여기서 스냅샷을
-    /// 읽으면 "스레드로 펼친다"(moai-12yx)가 스냅샷 한 판을 UI 실에서 치르고, 일꾼이 곧 같은
-    /// 파일을 또 판다.
+    /// 여는 데까지만([`projects::open_shallow`]) — 줄은 곧 **누군가 읽는다**. 스레드가 읽든
+    /// (`read_wanted`) 그 자리에서 읽든(`enter_project`) 여기서 스냅샷을 또 파면 같은 파일을
+    /// 두 번 파는 것이고, 첫 판의 `load` 는 그대로 버려진다.
     ///
     /// **moai-uxrn 의 138→458ms 를 여기에 대지 않는다**(리뷰) — 그것은 옆 워크트리를 겹쳐 읽는
     /// 값인데, 여기서 걷어낸 `open_one` 은 `worktree: false` 로 불러 `worktree::gather` 가
@@ -2065,6 +2075,32 @@ mod tests {
         a.hit("0");
         assert!(a.on_layer());
         assert_eq!(a.focus, super::super::Pane::Explorer, "층에서 누른 `0` 이 포커스를 안 돌렸다");
+    }
+
+    /// **들어가기도 여는 데까지만 그 자리에서 한다**(moai-lmot) — 줄은 바로 아래에서 읽으므로,
+    /// 여기서 스냅샷을 또 파면 같은 파일을 두 번 판다. 열리지만 스냅샷을 못 읽는 프로젝트가 그
+    /// 둘을 가른다: 스냅샷까지 그 자리에서 읽던 때(`Depth::Whole`)는 여는 쪽이 CLI 한눈 보기의
+    /// 말로 줄을 고쳐 세웠고, 지금은 읽기가 제 까닭을 댄다. 어느 쪽이든 **안 들어간다.**
+    #[test]
+    fn entering_opens_without_reading_the_snapshot_twice() {
+        let s = Scratch::fenced("layer-enter-lean");
+        let here = s.project("here", &[("argos-0001", "여기 줄", "todo")]);
+        let bad = s.project("bad", &[("argos-0002", "못 읽을 줄", "todo")]);
+        // 파일 자리에 디렉터리를 둔다 — `Repo::open` 은 설정까지만 보므로 열리고, 읽기가 터진다.
+        let file = bad.join(".moai/issues.jsonl");
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        let cfg = s.register(&[&here, &bad]);
+        let mut a = layered(&cfg);
+        a.hit("1");
+        assert_eq!(a.here(), Some(here.clone()), "시험의 전제 — 첫 프로젝트에 들어갔다");
+
+        a.hit("2");
+        assert_eq!(a.here(), Some(here), "못 읽는 프로젝트로 들어가 버렸다");
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(said.contains("들어가지 못했다"), "읽기가 만난 까닭을 안 댔다 — {said:?}");
+        // 그 줄은 다음 쓸기가 다시 읽어 제 상태로 선다 — 여는 쪽이 고쳐 세우지 않는다.
+        assert!(a.layer.as_ref().unwrap().places[1].read_at.is_none(), "다시 읽을 줄로 안 뒀다");
     }
 
     /// **못 들어가면 포커스도 그대로다**(리뷰). `enter_project` 는 실패하면 선 자리를 안 바꾸고
