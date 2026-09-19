@@ -153,13 +153,26 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 _ => (Vec::new(), Vec::new()),
             };
             let mine = |k: usize| !matches!(routes.get(k), Some(r) if *r != Route::Here);
-            let decision = settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
+            // **규칙 5 가 먼저다**(moai-hwrm) — 겨눈 트래커가 딸린 워크트리면 그 줄은 어느 규칙을
+            // 지나든 병합에서 충돌할 스냅샷을 고친다. 자리를 묻는 것은 그 토막이 쓰기일 때뿐이다
+            // (`hook::guard_tracker` 가 먼저 가른다) — 대부분의 호출은 디스크를 안 짚는다.
+            let dirs = std::cell::OnceCell::new();
+            let linked = |k: usize| -> bool {
+                let aimed: &Vec<Option<std::path::PathBuf>> = dirs.get_or_init(|| crate::hook::aimed(cmd_of(call), &cwd));
+                let at = aimed.get(k).cloned().flatten().unwrap_or_else(|| cwd.clone());
+                matches!(Repo::find_from(&at), Ok(Some(found)) if crate::worktree::is_linked(&found.root))
+            };
+            let rule_five = match call {
+                Call::Shell(cmd) => crate::hook::guard_tracker(cmd, &|_| true, &linked),
+                _ => Decision::Pass,
+            };
+            let decision = rule_five.then(|| settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
                 // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
                 Call::Shell(cmd) => crate::hook::guard_shell_in(issues, &repo.config, away, &repo.root, &cwd, cmd, &mine),
                 Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, &repo.root, path),
                 Call::Review => crate::hook::guard_review(issues, &repo.config, away),
                 Call::Other => Decision::Pass,
-            });
+            }));
             // 답마다 **그 답을 낸 트래커의 main** 으로 겨눈다 — 합친 뒤에 겨누면 남의 줄을 제 main 으로 보낸다.
             let decision = toward_main(decision, &repo, &load.issues);
             // 다른 트래커를 가리키는 토막은 **그 트래커가 본다**(moai-23ky). 판정을 잇는 차례는
@@ -465,6 +478,14 @@ fn safe_sid(input: &Input) -> Option<String> {
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
         .collect();
     (!safe.is_empty()).then_some(safe)
+}
+
+/// 이 호출이 친 명령줄 — 껍데기가 아니면 빈 글자다(`hook::aimed` 이 아무 토막도 안 낸다).
+fn cmd_of(call: crate::hook::Call<'_>) -> &str {
+    match call {
+        crate::hook::Call::Shell(cmd) => cmd,
+        _ => "",
+    }
 }
 
 /// 껍데기 토막 하나를 판정할 트래커.

@@ -1400,6 +1400,80 @@ pub fn picked_in(
     out
 }
 
+/// 이 토막이 **스냅샷을 고치는가** — 규칙 5 가 가르는 것이다. 쓰는 명령은 `store::with_write` 를
+/// 지나는 것들이다(`add`·`mv`·`edit`·`rm`·`note`·`defer`·`link` 와 `issue`·`epic`·`milestone`·`idea`
+/// 네임스페이스의 같은 동사, 그리고 `idea promote`).
+///
+/// **탐색기(`tui`)는 안 센다.** 그쪽도 생각 하나를 담을 수 있지만, 사람이 돌아다니는 화면을 자리
+/// 하나로 막으면 워크트리에서 보드를 볼 길이 없어진다 — 규칙은 에이전트의 도구 호출에만 걸린다는
+/// 것과 같은 결이다. `read` 는 내 설정에만 쓴다.
+fn writes_tracker(seg: &[String]) -> bool {
+    const VERBS: &[&str] = &["add", "mv", "edit", "rm", "note", "defer", "link", "promote"];
+    let Some(args) = moai_args(seg) else { return false };
+    if asks_help(args) {
+        return false;
+    }
+    let verbs = positionals(args);
+    match verbs.split_first() {
+        Some((&"issue" | &"epic" | &"milestone" | &"idea", rest)) => rest.first().is_some_and(|v| VERBS.contains(v)),
+        Some((v, _)) => VERBS.contains(v),
+        None => false,
+    }
+}
+
+/// 규칙 5 — **트래커는 루트에서 쓴다**(moai-hwrm, 2026-09-19 사용자 결정).
+///
+/// 딸린 워크트리의 `.moai` 를 고치면 병합에서 스냅샷이 충돌하고, 그것을 푸는 길은 도구 밖에만
+/// 남는다(CLAUDE.md "워크트리"). 그래서 규약이 "트래커는 워크트리 안에서 쓰지 않는다" 인데, 그
+/// 글은 읽은 사람만 지켰다 — 도구는 이미 딸린 체크아웃인지 알면서 아무 말도 안 했다.
+///
+/// **막되 사람을 안 부른다** — 거절문이 그 줄을 `-C` 없이 그대로 내고, 딸린 워크트리에서는
+/// [`toward`] 가 그것을 루트로 겨눈다(`cmd/hook.rs` 의 `toward_main`). 루트에 선 세션이
+/// `-C <옆 워크트리>` 로 친 줄도 같은 자로 막히고, 그때는 겨눌 것이 없어 맨 `moai` 가 곧 루트다.
+///
+/// `linked(k)` 는 그 토막이 겨눈 트래커가 딸린 워크트리인가를 묻는다 — 디스크는 부르는 쪽이 본다.
+pub fn guard_tracker(cmd: &str, only: &dyn Fn(usize) -> bool, linked: &dyn Fn(usize) -> bool) -> Decision {
+    for (k, seg) in segments(cmd).into_iter().enumerate() {
+        if !only(k) || !writes_tracker(&seg) || !linked(k) {
+            continue;
+        }
+        return refuse(5, format!(
+            "여기는 딸린 워크트리다 — 이 줄은 워크트리의 `.moai` 를 고쳐 병합에서 스냅샷이 충돌한다.\n\
+             트래커는 루트에 쓴다. 이대로 치면 지나간다:\n\n  {}",
+            as_typed(&seg),
+        ));
+    }
+    Decision::Pass
+}
+
+/// 토막을 **다시 칠 수 있는 한 줄로** — `-C`·`--dir` 과 그 값은 뗀다(그 자리가 막힌 자리다).
+/// 셸이 가르는 글자가 든 낱말만 감싼다 — 플래그는 그대로 둔다(`text::shell_word` 는 `-` 로 시작하는
+/// 낱말을 경로로 보아 `./` 를 붙인다).
+fn as_typed(seg: &[String]) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut skip = false;
+    for w in command_of(seg) {
+        if std::mem::take(&mut skip) {
+            continue;
+        }
+        if w == "-C" || w == "--dir" {
+            skip = true;
+            continue;
+        }
+        let plain = !w.is_empty()
+            && w.chars().all(|c| c.is_alphanumeric() || "_@%+=:,./-".contains(c) || !c.is_ascii());
+        out.push(if plain { w.clone() } else { quoted(w) });
+    }
+    out.join(" ")
+}
+
+/// 낱말 하나를 셸이 처음처럼 읽게 감싼다 — 작은따옴표 안의 작은따옴표는 `'\''` 로 잇는다.
+/// [`crate::text::shell_word`] 를 안 쓴다: 그쪽은 경로를 감싸는 자라 `-` 로 시작하는 낱말에 `./` 를
+/// 붙인다 — 명령줄을 다시 짜는 여기서는 그 낱말이 플래그다.
+fn quoted(w: &str) -> String {
+    format!("'{}'", w.replace('\'', "'\\''"))
+}
+
 /// 규칙 1 — **집은 것 밖에 새 이슈를 세우지 않는다.**
 ///
 /// 초점 밖에 세우면 그 줄이 어느 일에서 나왔는지를 잃고, 에픽을 닫아도 남은

@@ -17,13 +17,14 @@
 //!
 //! 순수 모듈이다. 파일을 쓰는 것은 `cmd/init.rs` 와 `cmd/skill.rs` 가 한다.
 
-/// 규칙 넷의 이름. **스킬이 적은 규칙과 훅이 낸 거절문이 같은 이름을 댄다** —
+/// 규칙 다섯의 이름. **스킬이 적은 규칙과 훅이 낸 거절문이 같은 이름을 댄다** —
 /// 다르면 막힌 쪽이 무엇을 어겼는지 두 번 읽어야 한다.
-pub const RULES: [&str; 4] = [
+pub const RULES: [&str; 5] = [
     "집은 것 밖에 새 이슈를 세우지 않는다",
     "저장소를 고치기 전에 하나를 집는다",
     "리뷰도 이슈다",
     "사람의 tmux 서버를 죽이지 않는다",
+    "트래커는 루트에서 쓴다",
 ];
 
 /// 거절문의 머리. 스킬의 규칙 제목과 글자가 같다.
@@ -463,9 +464,9 @@ pub fn handoff(id: &str) -> String {
 /// 적던 두 벌은 한쪽만 고쳐도 안 붉어졌다(moai-nxw8). 앞의 임자(`에픽이`·`<id> 가`)는 부르는 쪽이 붙인다.
 pub const PLEDGE: &str = "내건 것이 이것 없이 안 이뤄지면";
 
-/// 규칙 넷. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
+/// 규칙 다섯. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
 fn rules() -> String {
-    let [one, two, three, four] = RULES;
+    let [one, two, three, four, five] = RULES;
     let steps = indent(REVIEW_STEPS, "  ");
     let make = make_review("--parent <보는 이슈>");
     format!(
@@ -502,7 +503,13 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 맨 `tmux` 는 `TMUX_TMPDIR` 를 무시하고 그 서버에 붙는다 — 한 줄이 그 안의
 세션을 모두 끈다. 시험용 tmux 는 제 서버를 따로 띄운다.
 
-    {TMUX_OWN}"#
+    {TMUX_OWN}
+
+**5. {five}.** 딸린 워크트리 안에서 `-C` 없이 스냅샷을 고치는 `moai`
+(`add`·`mv`·`edit`·`rm`·`note`·`defer`·`link` 와 그 네임스페이스)를 막는다. 그 워크트리의
+`.moai` 를 고치면 병합에서 스냅샷이 충돌해, 푸는 길이 도구 밖에만 남는다. 거절문이
+`moai -C <루트> …` 를 그대로 낸다 — 사람을 부르지 않는다. 읽기(`status`·`ready`·`show`)와
+탐색기는 어디서든 자유롭다."#
     )
 }
 
@@ -580,7 +587,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 
 {WORK}
 
-### 훅이 실제로 보는 것 넷
+### 훅이 실제로 보는 것 다섯
 
 `moai skill install` 로 Claude 에 훅을 심었을 때 선다.
 
@@ -631,7 +638,7 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
 
 {KOREAN}
 
-## 훅이 실제로 보는 것 넷
+## 훅이 실제로 보는 것 다섯
 
 {rules}
 

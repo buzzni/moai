@@ -7797,6 +7797,51 @@ fn picked_in_a_worktree(s: &Scratch) -> (PathBuf, PathBuf, String) {
     (main, inside, id)
 }
 
+/// **규칙 5 — 트래커는 루트에서 쓴다**(moai-hwrm, 2026-09-19 사용자 결정). 딸린 워크트리의
+/// `.moai` 를 고치면 병합에서 스냅샷이 충돌하고, 푸는 길이 도구 밖에만 남는다. 지금까지 그 글은
+/// 읽은 사람만 지켰다. 거절문은 사람을 안 부른다 — `-C <루트>` 로 겨눈 같은 줄을 그대로 낸다.
+/// 읽기와 탐색기는 어디서든 자유롭고, 루트를 가리킨 쓰기도 그대로 지나간다.
+#[test]
+fn the_tracker_is_written_at_the_root() {
+    let s = Scratch::new("hookrootwrite");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let root = std::fs::canonicalize(&main).unwrap().display().to_string();
+    let bash = |cmd: &str| tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+
+    let why = refusal(&bash(&format!("moai note {id} '찾은 것'")));
+    assert!(why.contains("규칙 5"), "{why}");
+    assert!(why.contains(&format!("moai -C {root} note {id} '찾은 것'")), "고칠 줄을 루트로 안 겨눈다\n{why}");
+
+    // 쓰는 명령마다 — 네임스페이스와 `idea` 도 같다.
+    for cmd in [
+        format!("moai mv {id} review"),
+        format!("moai edit {id} --tag parser"),
+        format!("moai defer {id} -m '왜'"),
+        "moai add '딴 일'".to_string(),
+        "moai idea add '떠오른 것'".to_string(),
+        "moai epic add '묶음'".to_string(),
+    ] {
+        let out = bash(&cmd);
+        assert!(refusal(&out).contains("규칙 5"), "워크트리 안의 쓰기를 안 막았다 — {cmd}\n{out}");
+    }
+
+    // 읽기·탐색기·도움말은 자유롭고, 루트를 가리킨 쓰기도 그대로 지나간다.
+    for cmd in [
+        "moai status".to_string(),
+        format!("moai show {id}"),
+        "moai tui".to_string(),
+        format!("moai mv {id} review --help"),
+        format!("moai -C {root} note {id} '루트에 쓴다'"),
+    ] {
+        let out = bash(&cmd);
+        assert!(out.trim().is_empty(), "막지 말아야 할 줄을 막았다 — {cmd}\n{out}");
+    }
+
+    // 루트에 선 세션은 전과 같다 — 맨 `moai` 가 곧 루트다.
+    let at_main = tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(&format!("moai note {id} 'x'"))));
+    assert!(at_main.trim().is_empty(), "루트의 쓰기를 막았다\n{at_main}");
+}
+
 /// **자리 경로는 늘 main 에서 잰 상대 경로다**(moai-xpd7·moai-3aec, 2026-09-18 사용자 결정) — main
 /// 밖에 만든 워크트리는 `../` 로 올라가서 잰다. 절대 경로로 두던 판은 한 배열에 두 모양이 섞였고
 /// 기계의 홈 경로가 `--json` 으로 나갔다. main 이 없는 맨몸 저장소는 그 저장소 디렉터리에서 재어,
@@ -8348,15 +8393,16 @@ fn a_worktree_session_touching_main_is_still_that_session() {
     assert!(out.trim().is_empty(), "main 에서 방금 집은 일의 자식을 막았다\n{out}");
 
     // 거꾸로 — 세션은 main 에 서 있고 명령이 워크트리로 들어간다(에이전트 스레드는 자리가 main
-    // 으로 돌아온다). **딸린 워크트리를 가리키면 그 워크트리의 일로 본다** — main 의 눈으로는
-    // 그 워크트리의 일이 "옆의 것" 이라 제 단위 안의 줄이 막히고, 단위 밖의 줄은 샌다.
+    // 으로 돌아온다). **그것은 규칙 5 가 막는다**(moai-hwrm) — 어느 눈으로 보든 그 줄은 워크트리의
+    // `.moai` 를 고쳐 병합에서 충돌한다. 거절문은 `-C` 를 뗀 같은 줄이고, main 에 선 세션에게는
+    // 맨 `moai` 가 곧 루트라 그대로 쳐서 지나간다.
     ok(&main, &["mv", &next, "done"]);
     let ip = inside.display().to_string();
     let from_main = |cmd: &str| tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
-    let out = from_main(&format!("cd {ip} && moai add \"자식\" --parent {id}"));
-    assert!(out.trim().is_empty(), "워크트리로 들어가 제 일의 자식을 세우는 것을 막았다\n{out}");
+    let why = refusal(&from_main(&format!("cd {ip} && moai add \"자식\" --parent {id}")));
+    assert!(why.contains("규칙 5") && why.contains(&format!("moai add 자식 --parent {id}")), "{why}");
     let why = refusal(&from_main(&format!("moai -C {ip} add \"딴 일\"")));
-    assert!(why.contains(&id), "워크트리를 가리킨 단위 밖 줄을 그 워크트리의 초점으로 못 막는다 — {why}");
+    assert!(why.contains("규칙 5") && why.contains("moai add '딴 일'"), "워크트리를 가리킨 쓰기를 규칙 5 가 안 막는다 — {why}");
 }
 
 /// 규약대로 에픽 멤버를 main 에서 집고 그 이름의 워크트리를 띄운 저장소. (main, 워크트리, 에픽, 집은 id)
