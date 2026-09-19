@@ -1112,6 +1112,12 @@ fn row_line<'a>(
     let glyph_at = head.len();
     head.push(Span::styled(row_glyph(app, at), glyph_style(app.column(at))));
     head.push(Span::raw(" "));
+    // **가지가 [NEW]·`⎇ <가지>` 보다 앞이다**(moai-r6rm, 사용자가 그린 그림) — 가지는 이 줄이
+    // 어디에 달렸는지를 말하므로 줄마다 같은 칸에 서야 눈이 그 선을 따라간다. 뒤에 두면 안 읽은
+    // 줄에서만 가지가 다섯 칸 밀려 선이 끊긴다. 흐리게 칠한다: 뜻은 제목이 진다.
+    if twig.depth() > 0 {
+        head.push(Span::styled(twig_lead(twig), dim()));
+    }
     // **안 읽은 줄은 제목 앞에 `[NEW]`**(moai-z9pc, 사용자 결정) — 글자에만 노랑 바탕·빨강 글자다.
     // 줄 전체를 칠하지 않는다: 여러 줄이 안 읽은 상태로 서면 목록이 통째로 번쩍인다. 뜻은 낱말이
     // 지므로 색 없는 터미널에서도 `[NEW]` 가 읽힌다.
@@ -1140,12 +1146,6 @@ fn row_line<'a>(
     if let Some(mark) = branch_mark(app, at, fields) {
         head.push(Span::styled(mark, branch()));
         head.push(Span::raw(" "));
-    }
-    // **가지는 제목 바로 앞이다**(moai-r6rm, 사용자 결정) — id·우선순위·글리프 칸은 자리가
-    // 고정이고, 깊이는 제목 칸 안에서만 자란다. 흐리게 칠한다: 뜻은 제목이 지고 가지는 모양만
-    // 말한다.
-    if twig.depth() > 0 {
-        head.push(Span::styled(twig_lead(twig), dim()));
     }
     // 커서 자리 + 머리글 폭. **`CURSOR` 에서 잰다** — 숫자를 손으로 적으면
     // 글리프를 바꾼 날 제목 몫이 한두 칸 넉넉해지고, 넘친 줄은 위젯이 말없이
@@ -2703,6 +2703,25 @@ pub(super) mod tests {
         assert_eq!(id_at(&held), id_at(&epic), "막내 줄의 id 가 밀렸다\n{rows:?}");
         // 굵은 선은 창 테두리의 무게다 — 가지에는 안 쓴다.
         assert!(!member.contains('┣') && !member.contains('┗') && !member.contains('┖'), "{member:?}");
+    }
+
+    /// **가지는 `[NEW]` 보다 앞이다**(moai-r6rm, 사용자가 그린 그림) — 가지가 줄마다 같은 칸에
+    /// 서야 눈이 그 선을 따라간다. 뒤에 두면 안 읽은 줄에서만 가지가 다섯 칸 밀려 선이 끊긴다.
+    #[test]
+    fn the_twig_stands_before_the_new_mark() {
+        let is = issues();
+        let mut a = every(is);
+        a.unread = a.issues.iter().map(|i| i.id.clone()).collect();
+        a.key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
+        let member = render(&mut a, 100, 12)
+            .into_iter()
+            .filter(|l| l.contains("argos-0003"))
+            .filter_map(|l| l.split('┃').nth(1).map(str::to_string))
+            .next()
+            .unwrap_or_default();
+        let twig = member.find("├─").expect("가지가 없다");
+        let new = member.find("[NEW]").expect("[NEW] 가 없다");
+        assert!(twig < new, "가지가 [NEW] 뒤에 섰다: {member:?}");
     }
 
     /// **깊이 2 는 이음줄(`│`)을 잇는다** — 뒤에 형제가 더 있는 조상 밑에서만. 막내 밑은 빈칸이다.
