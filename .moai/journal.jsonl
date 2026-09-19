@@ -5718,3 +5718,5 @@
 {"ts":"2026-09-19T23:11:37Z","id":"moai-lmot","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-tc5r 에서 펼쳤다 — 프로젝트에 들어갈 때도 스냅샷을 두 번 판다"}
 {"ts":"2026-09-19T23:11:37Z","id":"moai-tc5r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-mz0x 의 멤버 moai-lmot 로 펼쳤다"}
 {"ts":"2026-09-19T23:11:38Z","id":"moai-mz0x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-19: moai-0g5h 가 병합돼 src/tui/ 가 풀린 뒤 세웠다. 둘 다 탐색기가 같은 것을 두 번 파는 자리다 — moai-fauw 는 상세가 프레임마다 본문을 다시 펴는 것(옛 에픽 moai-qf5s 가 미뤄 둔 것), moai-tc5r 는 프로젝트에 들어갈 때 스냅샷을 두 번 파는 것(리뷰 moai-0g5h.bi3 가 넘긴 것). moai-b910(rows 를 프레임마다 다시 짓는 값)은 98 이 재 보고 캐시를 안 두기로 한 것이라 여기 안 든다 — 무효화 자리가 열 곳 가까워 하나만 빠져도 화면이 옛 줄로 선다."}
+{"ts":"2026-09-19T23:12:21Z","id":"moai-fauw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T23:12:22Z","id":"moai-lmot","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
