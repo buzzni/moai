@@ -562,7 +562,8 @@ pub fn order_by(
 
 /// **안 읽은 줄** — 내게 온 것 가운데 내가 마지막으로 본 뒤에 바뀐 것(moai-50mn).
 ///
-/// `seen` 은 이슈 id → 마지막으로 본 때(내 설정의 `[read]`). 없는 id 는 **한 번도 안 본 것**이라
+/// `seen` 은 이슈 id → 마지막으로 본 줄의 `updated_at`(내 설정의 `[read]` — 옛 바이너리는 본 때를 적었다,
+/// moai-lyc1). 없는 id 는 **한 번도 안 본 것**이라
 /// 안 읽음이다. 바뀐 때는 스냅샷의 `updated_at` 으로 잰다(사용자 결정 2026-09-15) — 저널의 노트는
 /// 안 센다: 그것을 세려면 저널을 상태 계산에 읽어야 하고, `note` 는 스냅샷을 안 바꾼다.
 ///
@@ -593,11 +594,44 @@ pub fn unread<'a>(issues: &'a [Issue], me: &str, seen: &BTreeMap<String, String>
         .collect()
 }
 
-/// 그 줄이 **내가 마지막으로 본 뒤에 바뀌었나** — 한 번도 안 봤거나(`seen` 에 없다) 본 때보다 늦게
+/// 그 줄이 **내가 마지막으로 본 뒤에 바뀌었나** — 한 번도 안 봤거나(`seen` 에 없다) 적힌 값보다 늦게
 /// 고쳐졌다. 때는 스냅샷의 `updated_at` 이다(사용자 결정 2026-09-15). 안 읽음([`unread`])도, 읽음을 적을
 /// 때 이미 읽은 줄을 거르는 것(`moai read`·탐색기의 `r`)도 이 하나로 잰다(moai-j038.vna).
+///
+/// **견주는 식은 `>` 그대로다**(사용자 결정 2026-09-19, moai-lyc1). 적힌 값은 이제 본 줄의 `updated_at`
+/// 이지만([`read_marks_of`]) 옛 바이너리가 적은 값(본 때)은 모양으로 못 가른다 — `!=` 로 견주면 옛 값이
+/// 도장과 거의 다 달라 업그레이드 뒤 읽은 줄 전부가 한 번에 [NEW] 로 선다. `>` 는 옛 값을 옛 뜻대로
+/// 읽고, 다시 읽는 줄부터 새 값으로 바뀐다. 대가로 적힌 것보다 **이른** 도장으로 바뀐 줄(시계가 뒤진
+/// 기계, 옛 도장을 들고 온 머지)과 같은 초 안의 고침은 놓친다.
 pub fn changed_since_seen(i: &Issue, seen: &BTreeMap<String, String>) -> bool {
     seen.get(&i.id).is_none_or(|when| i.updated_at.as_str() > when.as_str())
+}
+
+/// 읽음으로 적을 값 — 이 가운데 **본 뒤로 바뀐 줄**([`changed_since_seen`])마다 id → **그 줄의
+/// `updated_at`**(사용자 결정 2026-09-19, moai-lyc1). `moai read` 와 탐색기의 `r`·`SPC m` 이 이 하나로 적는다.
+///
+/// 옛 값은 이 기계의 시계로 잰 "본 때" 였다. 줄의 도장은 그 줄을 쓴 기계·가지가 찍은 것이라, 워크트리
+/// 가지에서 01:30 에 고치고 03:00 에 develop 에 머지한 줄을 02:00 에 읽었으면 [NEW] 가 영영 안 섰고
+/// (이 저장소의 평소 흐름이다), 시계가 앞선 기계가 쓴 줄은 읽어도 안 내렸다. 본 줄의 도장을 적으면
+/// 둘 다 풀린다 — 무엇과 견주는지가 같은 시계에서 온다. 적는 것은 **본 그 줄**의 도장이다 — 탐색기는
+/// 제 화면의 줄을 준다. 화면이 낡았으면 새 도장이 적힌 것보다 늦어 다시 [NEW] 가 선다.
+///
+/// **같은 id 의 줄은 다 받아 가장 늦은 도장을 적는다**(moai-7c50.exy). [`unread`] 는 쌍둥이 가운데
+/// 하나만 바뀌어도 그 id 를 세우는데, 뒷줄 하나의 도장만 적으면 앞줄이 늘 더 늦어 [NEW] 가 영영 안
+/// 내리고 `moai read --all` 은 "적을 것이 없다" 만 되뇐다. 본 때를 적던 때는 그 때가 둘 다를 덮었다.
+/// 부르는 쪽은 id 로 거르지 말고 그 id 의 줄을 전부 넘긴다.
+pub fn read_marks_of<'a>(lines: impl IntoIterator<Item = &'a Issue>, seen: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let mut marks: BTreeMap<String, String> = BTreeMap::new();
+    for i in lines.into_iter().filter(|i| changed_since_seen(i, seen)) {
+        match marks.get_mut(&i.id) {
+            Some(at) if *at >= i.updated_at => {}
+            Some(at) => at.clone_from(&i.updated_at),
+            None => {
+                marks.insert(i.id.clone(), i.updated_at.clone());
+            }
+        }
+    }
+    marks
 }
 
 /// 대소문자를 접어 견준다 — **견줄 때마다 소문자 문자열을 짓지 않는다**(moai-zrzo). 정렬은 줄 수 × log

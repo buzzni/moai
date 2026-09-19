@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:d71252ed -->
+<!-- moai:begin v:0.1.0 hash:663db51e -->
 ## 이슈 트래커 — moai
 
 이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
@@ -78,6 +78,16 @@ PLAN
 
 지킬 것은 다음 세션이 `moai show <id>` 로 읽는다는 것 하나다. 이 셋은 그래서 있는 권고이지
 검사하는 규칙이 아니다.
+
+### 한국어 글
+
+**한국어 글은 moai 에 넣기 전에 다듬는다** — 한글이 한 글자라도 든 제목·본문·노트·`-m`,
+리뷰 원문 노트까지. 영어로만 쓴 글은 그대로 넣는다.
+
+- `korean-skills:humanizer` 로 AI 티를 걷고, 20줄을 넘으면 `humanize-korean:humanize-korean` 을 더
+  거친 뒤, 마지막에 `korean-skills:grammar-checker` 로 맞춤법·띄어쓰기를 본다
+- id·명령·경로·수·코드 조각과 꼴이 정해진 줄(`model: …`·`다음: …`·`Regression-of: …`)은 그대로 둔다
+- 두 플러그인은 `moai skill install` 이 함께 깐다. 자세한 것은 `references/commands.md` 의 "한국어 글" 에 있다
 
 ### 지금 범위가 아닌 것은 담는다
 
