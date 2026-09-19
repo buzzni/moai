@@ -672,7 +672,17 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn run(mut self) -> Vec<Seg> {
+    fn run(self) -> Vec<Seg> {
+        self.run_over().0
+    }
+
+    /// [`Lexer::run`] 에 **마지막 토막 뒤로 닫힌 예약어 묶음**([`Seg::shut`])을 곁들여 낸다.
+    ///
+    /// 글이 `fi`·`esac`·`done` 으로 끝나면 그 표식을 받을 토막이 그 글 안에 없어 버려진다. 셸에
+    /// 넘긴 글에서는 **그 글을 낸 토막이 바로 그 자리**라([`Lexer::relex`]), 버리면 몸통이 안 돈
+    /// 묶음 안의 집기가 바깥 `&&` 로 이어진다 — `bash -c 'if false; then 집기; fi' && 쓰기` 가
+    /// 아무것도 안 집은 채 지나갔다(새는 쪽).
+    fn run_over(mut self) -> (Vec<Seg>, Option<usize>) {
         while let Some(c) = self.chars.next() {
             match self.stack.last().copied() {
                 None => self.plain(c),
@@ -687,7 +697,9 @@ impl<'a> Lexer<'a> {
         self.end_by(None);
         self.relex();
         let docs = std::mem::take(&mut self.docs);
-        self.all
+        let over = self.shut;
+        let segs = self
+            .all
             .into_iter()
             .filter(|s| !s.words.is_empty() || !s.writes.is_empty())
             .map(|mut s| {
@@ -697,7 +709,8 @@ impl<'a> Lexer<'a> {
                 s.fed.extend(own.into_iter().filter_map(|n| docs.get(n).cloned()));
                 s
             })
-            .collect()
+            .collect();
+        (segs, over)
     }
 
     /// **셸이 글을 명령으로 돌리는 자리를 다시 읽는다** — 따옴표 없는 heredoc 본문의 치환
@@ -743,16 +756,33 @@ impl<'a> Lexer<'a> {
                 .collect();
             let own = shell_text(&seg.words);
             texts.extend(own.iter().map(|(t, fork)| (t.as_str(), fork.then_some(Layer::Shell(0)))));
-            let (depth, level, join) = (seg.depth, seg.level, seg.join);
+            let (depth, level, join, apart) = (seg.depth, seg.level, seg.join, seg.sub);
             // 앞 토막 뒤로 지나온 자리는 처음 심는 토막이 든다. 글을 낸 토막은 그 글을 막 나온 자리다.
             let (low, floor) = (seg.low, seg.floor);
             let mut first = true;
             // 셸에 넘긴 글이 토막을 냈다 — 글을 낸 토막이 그 묶음을 닫는다.
             let mut handed = false;
+            // 그 글 끝에서 닫힌 예약어 묶음([`Seg::shut`]) — 받을 토막이 글 안에 없어 이 토막이 든다.
+            let mut over: Option<usize> = None;
             for (text, layer) in texts {
-                // 하위 셸이면 한 겹 깊다 — 그 안의 `cd` 가 바깥 자리를 안 흔든다.
-                let sub = usize::from(layer.is_some());
-                for (m, mut s) in Lexer::at(text, deep + 1).run().into_iter().enumerate() {
+                // 하위 셸이면 한 겹 깊다 — 그 안의 `cd` 가 바깥 자리를 안 흔든다. **`eval` 도 제 토막이
+                // 파이프의 칸이거나 `&` 로 띄운 것이면 하위 셸이다**([`Seg::sub`]) — `eval 'cd /b' | cat`
+                // 의 `cd` 는 뒤로 안 이어지고 `집기 || eval 'exit 1' | cat` 의 `exit` 는 그 칸만 끝낸다.
+                // 지금 셸에서 돈다고만 세던 판은 그 둘을 바깥 셸의 것으로 읽어, 아무것도 안 집은 채
+                // 쓰는 줄이 샜다.
+                let (segs, left) = Lexer::at(text, deep + 1).run_over();
+                // **뒤로 띄운 것으로 끝나는 글의 값은 0 이다** — `bash -c '집기 &'` 는 집기가 돌기도
+                // 전에 0 으로 끝난다. 그 값은 이 토막의 값이 아니니 치환으로 심는다: 나올 때 집기를
+                // 도로 세운다. 파이프의 마지막 칸은 아니다 — `cat f | 집기` 의 값은 집기의 값이다.
+                let apace = segs.last().is_some_and(|s| s.sub && s.join.op != Op::Pipe);
+                let layer = if apace { Some(Layer::Subst(0)) } else { layer };
+                let sub = usize::from(layer.is_some() || apart);
+                // 치환의 묶음은 바깥 토막의 것이 아니다 — 그 값도 바깥 명령의 값이 아니다.
+                let feeds = !matches!(layer, Some(Layer::Subst(_)));
+                if feeds {
+                    over = over.into_iter().chain(left.map(|l| l + level + 1)).min();
+                }
+                for (m, mut s) in segs.into_iter().enumerate() {
                     if m == 0 {
                         // 바깥에서 내려온 토막 — 지나온 자리는 바깥 자리다. 맨 처음 것은 이음사도,
                         // 앞 토막 뒤로 지나온 자리도 바깥의 것을 받는다(`집기 && bash -c '쓰기'`).
@@ -770,12 +800,15 @@ impl<'a> Lexer<'a> {
                     s.depth += depth + sub;
                     s.level += level + 1;
                     s.shut = s.shut.map(|l| l + level + 1);
-                    s.nested = layer
-                        .map(|l| l.shift(level + 1))
-                        .into_iter()
-                        .chain(s.nested.iter().map(|l| l.shift(level + 1)))
-                        .collect();
-                    handed |= !matches!(layer, Some(Layer::Subst(_)));
+                    // 제자리에서 민다 — 새 목록을 지으면 토막마다 겹마다 힙을 한 번씩 잡아,
+                    // `$( … )` 예순네 겹 202바이트 한 줄이 1,104번에서 3,184번으로 뛴다.
+                    for l in &mut s.nested {
+                        *l = l.shift(level + 1);
+                    }
+                    if let Some(l) = layer {
+                        s.nested.insert(0, l.shift(level + 1));
+                    }
+                    handed |= feeds;
                     all.push(s);
                 }
             }
@@ -786,6 +819,9 @@ impl<'a> Lexer<'a> {
             if handed {
                 seg.join.depth = level + 1;
             }
+            // **글 끝에서 닫힌 묶음은 이 토막이 지나온 것이다** — 몸통이 안 돌았으면 그 값은 0 이라,
+            // 그 안의 집기가 이 토막의 `&&` 로 이어지지 않는다([`shell_writes`]).
+            seg.shut = seg.shut.into_iter().chain(over).min();
             all.push(seg);
         }
         self.all = all;
@@ -1260,9 +1296,10 @@ impl<'a> Lexer<'a> {
                 } else {
                     Join { op: s.join.op, depth: s.join.depth + level + 1 }
                 };
-                s.nested = std::iter::once(Layer::Subst(level + 1))
-                    .chain(s.nested.iter().map(|l| l.shift(level + 1)))
-                    .collect();
+                for l in &mut s.nested {
+                    *l = l.shift(level + 1);
+                }
+                s.nested.insert(0, Layer::Subst(level + 1));
                 self.push(s);
             }
         }
@@ -2392,9 +2429,11 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
             }
             orelse = None;
         }
-        // 나온 겹을 걷고 든 겹을 연다. 같은 깊이라도 종류가 다르면 딴 겹이다(heredoc 치환 뒤의 `bash -c` 글).
-        while frames.len() > seg.nested.len() || frames.iter().zip(&seg.nested).any(|(f, l)| f.layer != *l) {
-            let Some(f) = frames.pop() else { break };
+        // 나온 겹을 걷고 든 겹을 연다. 같은 깊이라도 종류가 다르면 딴 겹이다(heredoc 치환 뒤의 `bash -c`
+        // 글) — 그래서 겹치는 앞머리를 한 번 세고 그 뒤를 걷는다. 걷을 때마다 앞머리를 다시 훑던 판은
+        // 깊이의 제곱을 썼고([`Lexer::DEEP`] 이 예순넷이다), 빈 스택을 막는 줄이 닿지 않는 자리에 섰다.
+        let kept = frames.iter().zip(&seg.nested).take_while(|(f, l)| f.layer == **l).count();
+        for f in frames.drain(kept..).rev() {
             if matches!(f.layer, Layer::Subst(_)) {
                 after_pick = f.held;
             }
@@ -2435,16 +2474,21 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
             }
         }
         // 이 토막의 이음사는 **든 겹 바깥**의 것이다 — 첫 토막이 바깥 이음사를 받는다([`Lexer::relex`]).
-        // 그래서 `set -e` 의 셈은 겹을 열기 전의 판과 그 판의 맨 윗자리로 한다.
-        let outer = (strict, lone, errexit_top(&frames));
-        let entered = seg.nested.len() > frames.len();
-        for layer in &seg.nested[frames.len()..] {
+        // 그래서 아래 `set -e` 의 셈은 **겹을 열기 전의** 판과 그 판의 맨 윗자리로 한다. 겹을 열었을
+        // 때만 이 값을 쓰고 아니면 그 자리에서 다시 재던 판은 같은 값을 두 갈래로 적어, 사이에
+        // `strict` 를 건드리는 줄이 하나 들면 한쪽만 조용히 달라졌다.
+        let (was_strict, was_lone, top) = (strict, lone, errexit_top(&frames));
+        // 여기서 여는 겹들 가운데 가장 바깥 것 — 바깥 셸에 대해 선 것은 그 겹에 적어야 나올 때 선다.
+        let base = frames.len();
+        for layer in &seg.nested[base..] {
             frames.push(Frame { layer: *layer, held: after_pick, strict, lone, sure_e });
             (strict, lone) = (None, None);
         }
         let words = command_of(&seg.words);
         let head = words.first().map(|w| basename(w));
         let prefix = &seg.words[..seg.words.len() - words.len()];
+        // 제 접두어가 이 토막을 뒤집는가 — 아래 세 자리가 같은 것을 묻는다.
+        let bang = prefix.iter().any(|w| w == "!");
         // **이 토막이 제 셸을 끝내는가** — `exit` 은 붙박이라 경로로 오지 않는다(`basename` 을 안 쓴다).
         // `&` 로 띄우거나 파이프의 칸이면 그 하위 셸만 끝난다. 셋이 따로 세던 것을 여기 하나로 모았다 —
         // 한쪽만 `basename` 을 써서 `/bin/exit` 를 끝내는 줄로 읽던 자리다.
@@ -2473,11 +2517,16 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
         // **맨 바깥은 그 셸의 맨 윗자리다**(moai-tmi0) — `bash -c` 의 글은 제 셸의 맨 윗자리에서 센다.
         // 치환 안은 세지 않는다: 바깥 목록이 그 안의 errexit 를 끌 수 있는데(`x=$( … ) || true`), 바깥
         // 토막은 치환 뒤에 온다.
-        let (was_strict, was_lone, top) = if entered { outer } else { (strict, lone, errexit_top(&frames)) };
         if j.op == Op::Any && was_strict.is_some() && top.is_some_and(|t| j.depth == t && was_lone == Some(t)) {
             j.op = Op::And;
             if after_pick.is_some() {
                 sure_e = top;
+                // **이 셈은 바깥 셸의 것이다** — 겹을 열며 섰으면 그 겹을 나올 때도 서 있어야 한다.
+                // 지금 값만 세우던 판은 겹을 나오며 들어설 때의 것으로 되돌려, `set -e; 집기;
+                // bash -c '…' | cat; 쓰기` 의 이긴 집기를 잃고 시킨 대로 친 줄을 막았다.
+                if let Some(f) = frames.get_mut(base) {
+                    f.sure_e = top;
+                }
             }
         }
         // 이음사가 제 깊이보다 깊으면 묶음을 막 나온 토막 — `( … ) > f` 의 `> f` 다. 그 묶음에
@@ -2488,7 +2537,7 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
         // 토막이 부정이면(`! bash -c '집기' && …`) 집기가 져야 뒤가 도니, 들어설 때의 판으로 돌린다.
         let gate = if j.depth > seg.level {
             let entry = heads.get(seg.level).copied().flatten();
-            if prefix.iter().any(|w| w == "!") {
+            if bang {
                 after_pick = entry;
             }
             entry
@@ -2530,7 +2579,7 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
         // **`! ( moai mv … )` 의 `!` 는 괄호 밖에 선다**(moai-gtkn). 제 토막의 접두어만 보던 판은
         // 그 부정을 못 봐, 집기가 져야 도는 쓰기를 집기 뒤로 읽었다 — 새는 쪽이다. 그 묶음을 나오면
         // 위에서 걷었다.
-        let negated = prefix.iter().any(|w| w == "!") || negated_at.is_some();
+        let negated = bang || negated_at.is_some();
         // `!` 가 뒤에 여는 괄호, 또는 `! { …`·`! if …` 처럼 제 토막에서 연 묶음 — 그 묶음 전체가 부정이다.
         if let Some(at) = prefix.iter().position(|w| w == "!") {
             if words.is_empty() {
@@ -5660,6 +5709,14 @@ mod tests {
             "bash -c \"bash -c 'moai mv t-1 in_progress --from todo'\" && sed -i s/a/b/ src/store.rs",
             "bash -c 'set -e; bash -c \"moai mv t-1 in_progress --from todo\"; sed -i s/a/b/ src/store.rs'",
             "bash -c 'moai mv t-1 in_progress --from todo' && bash -c 'sed -i s/a/b/ src/store.rs'",
+            // 바깥 `set -e` 아래 이긴 집기는 그 뒤의 겹을 지나도 이긴 채다 — 겹을 열며 선 셈을 나올 때
+            // 되돌리던 판은 이 줄을 막았다.
+            "set -e; moai mv t-1 in_progress --from todo; bash -c 'echo ok' | cat; sed -i s/a/b/ src/store.rs",
+            "set -e; moai mv t-1 in_progress --from todo; bash -c 'echo ok' & sed -i s/a/b/ src/store.rs",
+            // 파이프의 마지막 칸은 그 파이프의 값이다 — 뒤로 띄운 것과 가른다.
+            "bash -c 'cat /dev/null | moai mv t-1 in_progress --from todo' && sed -i s/a/b/ src/store.rs",
+            // 뒤로 띄운 것으로 끝나는 글은 제 집기를 안 넘길 뿐, 바깥에서 이긴 집기는 그대로 잇는다.
+            "moai mv t-1 in_progress --from todo && bash -c 'echo ok &' && sed -i s/a/b/ src/store.rs",
         ] {
             assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
@@ -5688,11 +5745,28 @@ mod tests {
             "echo \"$(set -e; moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs)\"",
             "set -e; echo \"$(moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs)\"",
             "bash -c \"echo \\\"\\$(moai mv t-1 in_progress --from todo)\\\"\" && sed -i s/a/b/ src/store.rs",
+            // **몸통이 안 돌았을 수 있는 묶음이 글 끝에서 닫힌다** — 그 표식을 받을 토막이 글 안에 없어
+            // 버리던 판은, 안 돈 몸통의 집기를 바깥 `&&` 로 이어 아무것도 안 집은 쓰기를 넘겼다.
+            "bash -c 'if false; then moai mv t-1 in_progress --from todo; fi' && sed -i s/a/b/ src/store.rs",
+            "sh -c 'case y in x) moai mv t-1 in_progress --from todo;; esac' && sed -i s/a/b/ src/store.rs",
+            "eval 'while false; do moai mv t-1 in_progress --from todo; done' && sed -i s/a/b/ src/store.rs",
+            "bash -c \"bash -c 'if false; then moai mv t-1 in_progress --from todo; fi'\" && sed -i s/a/b/ src/store.rs",
+            // **파이프의 칸이거나 `&` 로 띄운 `eval` 은 하위 셸이다** — 그 `exit` 는 그 칸만 끝낸다.
+            "moai mv t-1 in_progress --from todo || eval 'exit 1' | cat; sed -i s/a/b/ src/store.rs",
+            "moai mv t-1 in_progress --from todo || eval 'exit 1' & sed -i s/a/b/ src/store.rs",
+            // 그 `cd` 도 뒤로 안 이어진다 — 뒤의 상대 경로는 저장소 안이다.
+            "eval 'cd /tmp' | cat; echo x > src/store.rs",
+            // **뒤로 띄운 것으로 끝나는 글의 값은 0 이다** — 집기가 돌기도 전에 `&&` 가 넘어간다.
+            "bash -c 'moai mv t-1 in_progress --from todo &' && sed -i s/a/b/ src/store.rs",
+            "eval 'echo a; moai mv t-1 in_progress --from todo &' && sed -i s/a/b/ src/store.rs",
+            "true && sh -c '( moai mv t-1 in_progress --from todo & )' && sed -i s/a/b/ src/store.rs",
         ] {
             assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
-        // `eval` 은 지금 셸에서 돈다 — 그 `cd` 는 뒤 토막이 가리키는 트래커를 옮긴다.
+        // `eval` 은 지금 셸에서 돈다 — 그 `cd` 는 뒤 토막이 가리키는 트래커를 옮긴다. 파이프의 칸이면
+        // 제 하위 셸이라 안 옮긴다.
         assert_eq!(aimed("eval 'cd /b'; moai add x", root), [None, None, Some(PathBuf::from("/b"))]);
+        assert_eq!(aimed("eval 'cd /b' | cat; moai add x", root), [None, None, None, None]);
     }
 
     /// **머지하고 안 치운 워크트리의 이름이 닫힌 줄을 가리켜도 훅은 할 말이 없다**(moai-9a8m) —
