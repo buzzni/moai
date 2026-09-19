@@ -5278,6 +5278,49 @@ fn naming_changes_the_screen_not_the_file() {
     assert_eq!(issues(s.path()), before, "표기를 바꿨는데 파일이 달라졌다");
 }
 
+/// `moai status` 의 문턱은 `.moai/config.toml` 에서 온다(moai-pz7h).
+///
+/// **끝까지 한 번 지나가는 길로 본다** — `Config` 가 값을 읽는 것은 단위 시험이 보지만,
+/// 그 값이 `report` 까지 실제로 닿는지는 여기서만 드러난다. 한때 이름 붙인 상수였어서,
+/// 어느 한 자리가 상수로 남아 있어도 단위 시험은 파랗다.
+///
+/// **그리고 여전히 아무것도 막지 않는다** — 문턱을 낮춰 잔소리를 늘려도 종료 코드는 0 이다.
+/// 여기가 무너지면 이건 린트고, 린트는 곧 게이트다.
+#[test]
+fn the_status_thresholds_come_from_the_config() {
+    let s = init("thresholds");
+    let path = s.path().join(".moai/config.toml");
+    let set = |line: &str| {
+        let src = std::fs::read_to_string(&path).unwrap();
+        let kept: Vec<&str> =
+            src.lines().filter(|l| !l.trim_start().starts_with("status_")).collect();
+        std::fs::write(&path, format!("{}\n{line}\n", kept.join("\n"))).unwrap();
+    };
+    let piled = |dir: &Path| -> bool {
+        let json = ok(dir, &["status", "--json"]);
+        json.contains("\"idea_pile\"")
+    };
+
+    for n in 1..=2 {
+        ok(s.path(), &["idea", "add", &format!("떠오른 것 {n}"), "-q"]);
+    }
+    assert!(!piled(s.path()), "기본 문턱은 다섯인데 둘에 벌써 말한다");
+
+    set("status_idea_pile = 2");
+    assert!(piled(s.path()), "설정한 문턱이 report 까지 안 닿았다");
+    // **낮춘 문턱으로도 안 막는다.** `ok` 가 종료 코드 0 을 이미 요구한다.
+    ok(s.path(), &["status"]);
+
+    // 흐름 창도 같은 길로 온다 — 쓰는 쪽이 `Flow.days` 로 그대로 낸다.
+    set("status_flow_days = 3");
+    assert!(ok(s.path(), &["status", "--json"]).contains("\"days\":3"), "흐름 창이 설정을 안 따른다");
+
+    // 오타는 조용히 통과하지 않는다 — 통과하면 왜 문턱이 안 바뀌는지 못 찾는다.
+    set("status_idea_pyle = 2");
+    let err = String::from_utf8_lossy(&moai(s.path(), &["status"]).stderr).into_owned();
+    assert!(err.contains("status_idea_pile"), "오타를 조용히 넘긴다 — {err}");
+}
+
 // ── idea — 반짝 생각을 담는 칸 ──────────────────────────────────────
 
 /// **담는 비용이 0 에 가까워야 담는다.** 제목 하나로 끝나야 하고, 우선순위도

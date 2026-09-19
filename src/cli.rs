@@ -116,7 +116,18 @@ pub enum Cmd {
   여기서 rm 한 줄은 갈라진 뒤 옆에서 만지지 않았으면 되살아나지 않는다.
   옆 워크트리를 못 읽으면 보드가 \"옆 워크트리 문제 N건\" 으로 말한다 —
   종료 코드는 그대로다.
-  보여줄 때만 겹친다 — 어느 파일도 바뀌지 않는다.")]
+  보여줄 때만 겹친다 — 어느 파일도 바뀌지 않는다.
+
+  무엇부터 잔소리할지는 .moai/config.toml 이 정한다. 안 적으면 아래 값이고,
+  수는 따옴표 없이 적는다. 어느 값으로도 막지 않는다 — 낮추면 더 비출 뿐이다.
+    status_review_days   = 3      review 에 이만큼 머물면 썩는 것으로
+    status_wip_days      = 2      집어 놓고 이만큼 안 건드리면 잊은 것으로
+    status_blocked_days  = 3      막힌 채 이만큼 서 있으면 멈춘 자리로
+    status_wip_limit     = 3      한 번에 이보다 많이 벌이면
+    status_no_epic_ratio = 0.15   에픽 없는 이슈가 이 비율을 넘으면
+    status_no_epic_min   = 5      비율이 낮아도 이 수를 넘으면
+    status_flow_days     = 7      흐름을 재는 창
+    status_idea_pile     = 5      담아 둔 생각이 이만큼 쌓이면")]
     Status(WorktreeArg),
 
     /// 지금 집을 수 있는 일

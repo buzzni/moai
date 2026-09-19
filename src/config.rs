@@ -46,8 +46,10 @@ fn value(raw: &str) -> Option<&str> {
     (!inner.contains('"')).then_some(inner)
 }
 
-/// 최상위 `키 = "값"` 하나를 읽는다.
-pub fn scalar(src: &str, key: &str) -> Result<Option<String>, String> {
+/// 최상위 `키 = 값` 하나의 **쓰인 그대로**와 몇째 줄인지. 따옴표는 안 벗긴다 —
+/// 글([`scalar`])과 수([`count`]·[`days`]·[`ratio`])가 따옴표를 서로 반대로 요구하므로,
+/// 벗기는 일은 읽는 쪽이 한다.
+fn raw<'s>(src: &'s str, key: &str) -> Result<Option<(&'s str, usize)>, String> {
     let src = src.strip_prefix('\u{feff}').unwrap_or(src); // BOM
     for (i, line) in src.lines().enumerate() {
         let n = i + 1;
@@ -61,11 +63,51 @@ pub fn scalar(src: &str, key: &str) -> Result<Option<String>, String> {
         if k.trim() != key {
             continue;
         }
-        let v = value(v)
-            .ok_or_else(|| format!("{n}줄: `{key}` 의 값은 큰따옴표로 감싸야 한다 — {v:?}"))?;
-        return Ok(Some(v.to_string()));
+        return Ok(Some((v.trim(), n)));
     }
     Ok(None)
+}
+
+/// 최상위 `키 = "값"` 하나를 읽는다.
+pub fn scalar(src: &str, key: &str) -> Result<Option<String>, String> {
+    let Some((v, n)) = raw(src, key)? else { return Ok(None) };
+    let v = value(v)
+        .ok_or_else(|| format!("{n}줄: `{key}` 의 값은 큰따옴표로 감싸야 한다 — {v:?}"))?;
+    Ok(Some(v.to_string()))
+}
+
+/// 수는 **따옴표 없이** 적는다 — TOML 이 수를 적는 꼴이다. 언젠가 `toml` 크레이트로
+/// 갈아 끼울 때 이미 쓴 설정 파일이 그대로 읽혀야 하는데, 따옴표를 두르면 그때 글이
+/// 되어 그 파일만 조용히 안 읽힌다.
+///
+/// **못 읽은 수를 기본값으로 덮지 않는다.** 덮으면 고쳐 적은 값이 안 먹는 까닭을
+/// 설정 파일만 보고는 못 찾는다 — 임계값을 파일로 뺀 뜻이 거기서 사라진다.
+fn number<T: std::str::FromStr>(src: &str, key: &str, what: &str) -> Result<Option<T>, String> {
+    let Some((v, n)) = raw(src, key)? else { return Ok(None) };
+    if v.starts_with('"') {
+        return Err(format!("{n}줄: `{key}` 는 수다 — 따옴표를 뺀다 ({v})"));
+    }
+    v.parse::<T>().map(Some).map_err(|_| format!("{n}줄: `{key}` 는 {what} — {v:?}"))
+}
+
+/// 날수. 음수를 막으려고 `u32` 로 읽고 넓힌다 — `-1` 이 통과하면 그 경고가 모든 줄에 선다.
+fn days(src: &str, key: &str, default: i64) -> Result<i64, String> {
+    Ok(number::<u32>(src, key, "0 이상의 정수다")?.map_or(default, i64::from))
+}
+
+/// 건수.
+fn count(src: &str, key: &str, default: usize) -> Result<usize, String> {
+    Ok(number::<usize>(src, key, "0 이상의 정수다")?.unwrap_or(default))
+}
+
+/// 비율. `0.15` 가 15% 다 — 백분율로 적지 않는다. 1 을 넘기면 그 경고가 영영 안 서는데,
+/// 끄려는 뜻이었다면 그것은 임계값이 아니라 없는 손잡이다. 조용히 끄느니 거절한다.
+fn ratio(src: &str, key: &str, default: f64) -> Result<f64, String> {
+    let Some(v) = number::<f64>(src, key, "0 과 1 사이의 소수다")? else { return Ok(default) };
+    if !(0.0..=1.0).contains(&v) {
+        return Err(format!("`{key}` 는 0 과 1 사이의 소수다 — {v}"));
+    }
+    Ok(v)
 }
 
 /// 사람을 어떻게 낼까. `레이븐 (raven@buzzni.com)` 은 22칸이라 좁은 화면에서
@@ -113,6 +155,127 @@ pub fn check_prefix(prefix: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `moai status` 가 무엇부터 잔소리할지 정하는 수들.
+///
+/// **막는 것이 아니라 비추는 것이라 설정으로 둔다.** 종료 코드는 여기 어느 값으로도
+/// 안 바뀐다 — 값을 낮춰 잔소리를 늘려도 게이트는 안 생긴다(CLAUDE.md, `moai status`).
+///
+/// 한때 `report.rs` 의 이름 붙인 상수였다. 그때 안 뺀 까닭은 "지금 설정 시스템을
+/// 만들면 아무도 안 고치는 파일이 하나 늘 뿐" 이었고, 실제로 상수 일곱이 도입된 커밋
+/// 뒤로 한 번도 안 바뀌었다(moai-pz7h 의 2026-09-11·09-12 실측). 저장소마다 벌여 놓는
+/// 폭이 다르다는 것이 드러나 사람이 빼기로 정했다(2026-09-19).
+///
+/// **평평한 키로 둔다** — `[status]` 테이블로 적으면 [`raw`] 가 `[` 줄을 건너뛰어
+/// `review_days` 가 최상위 키와 한 이름이 되고, 그것을 가르려면 이 파서가 테이블을
+/// 알아야 한다. 테이블이 정말 필요해지는 날이 `toml` 크레이트를 넣는 날이다.
+///
+/// ```toml
+/// status_review_days   = 3
+/// status_wip_days      = 2
+/// status_blocked_days  = 3
+/// status_wip_limit     = 3
+/// status_no_epic_ratio = 0.15
+/// status_no_epic_min   = 5
+/// status_flow_days     = 7
+/// status_idea_pile     = 5
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Thresholds {
+    /// review 에 이만큼 머물면 썩는 것으로 본다.
+    pub review_days: i64,
+    /// 집어 놓고 이만큼 안 건드리면 잊은 것으로 본다.
+    pub wip_days: i64,
+    /// 막힌 채로 이만큼 서 있으면 "계획이 멈춘 자리" 로 본다.
+    pub blocked_days: i64,
+    /// 한 번에 이보다 많이 벌이면 알린다.
+    pub wip_limit: usize,
+    /// 에픽 없는 이슈가 이 비율을 넘으면 알린다.
+    pub no_epic_ratio: f64,
+    /// 비율이 낮아도 이 수를 넘으면 알린다.
+    pub no_epic_min: usize,
+    /// 흐름을 재는 창(일).
+    pub flow_days: i64,
+    /// 담아 둔 생각이 이만큼 쌓이면 알린다.
+    pub idea_pile: usize,
+}
+
+impl Default for Thresholds {
+    fn default() -> Thresholds {
+        Thresholds::DEFAULT
+    }
+}
+
+impl Thresholds {
+    /// 한 줄도 안 적은 저장소가 받는 값. **옛 상수 그대로다** — 설정으로 뺐다고
+    /// 이미 도는 저장소의 경고가 달라지면 그건 설정이 아니라 마이그레이션이다.
+    ///
+    /// `const` 로 두어 시험이 상수 자리에서 그대로 쓴다 — 기본값을 시험마다 다시
+    /// 적으면 기본값을 고칠 때 시험이 안 따라온다.
+    pub const DEFAULT: Thresholds = Thresholds {
+        review_days: 3,
+        wip_days: 2,
+        blocked_days: 3,
+        wip_limit: 3,
+        no_epic_ratio: 0.15,
+        no_epic_min: 5,
+        flow_days: 7,
+        idea_pile: 5,
+    };
+
+    /// 아는 키. **오타를 조용히 넘기지 않으려고 목록으로 든다** — `status_` 로 시작하는
+    /// 모르는 키는 거절한다. 여느 모르는 키와 달리 여기서 엄한 까닭은, 이 값들이 고치고
+    /// 나서 화면이 안 바뀌는 것으로만 확인되는 자리라서다: `status_reveiw_days = 1` 은
+    /// 조용히 통과하면 영영 안 먹고, 왜 안 먹는지 설정 파일에는 아무 자취가 없다.
+    const KEYS: [&'static str; 8] = [
+        "status_review_days",
+        "status_wip_days",
+        "status_blocked_days",
+        "status_wip_limit",
+        "status_no_epic_ratio",
+        "status_no_epic_min",
+        "status_flow_days",
+        "status_idea_pile",
+    ];
+
+    fn parse(src: &str) -> Result<Thresholds, String> {
+        let d = Thresholds::default();
+        let t = Thresholds {
+            review_days: days(src, "status_review_days", d.review_days)?,
+            wip_days: days(src, "status_wip_days", d.wip_days)?,
+            blocked_days: days(src, "status_blocked_days", d.blocked_days)?,
+            wip_limit: count(src, "status_wip_limit", d.wip_limit)?,
+            no_epic_ratio: ratio(src, "status_no_epic_ratio", d.no_epic_ratio)?,
+            no_epic_min: count(src, "status_no_epic_min", d.no_epic_min)?,
+            flow_days: days(src, "status_flow_days", d.flow_days)?,
+            idea_pile: count(src, "status_idea_pile", d.idea_pile)?,
+        };
+        // 흐름 창이 0 이면 `생성 0 · 완료 0` 이 서서 "아무 일도 없었다" 로 읽힌다.
+        // 그것은 비추는 수를 끈 것이지 낮춘 것이 아니다.
+        if t.flow_days == 0 {
+            return Err("`status_flow_days` 는 1 이상이다 — 0 이면 흐름이 늘 0 으로 선다".into());
+        }
+        Ok(t)
+    }
+
+    /// `status_` 로 시작하는데 아는 키가 아닌 줄을 댄다.
+    fn check_keys(src: &str) -> Result<(), String> {
+        let src = src.strip_prefix('\u{feff}').unwrap_or(src);
+        for (i, line) in src.lines().enumerate() {
+            let n = i + 1;
+            let l = strip_comment(line, n)?.trim();
+            let Some((k, _)) = l.split_once('=') else { continue };
+            let k = k.trim();
+            if k.starts_with("status_") && !Thresholds::KEYS.contains(&k) {
+                return Err(format!(
+                    "{n}줄: `{k}` 라는 설정이 없다. 있는 것: {}",
+                    Thresholds::KEYS.join(", ")
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     /// id 접두어. 그 저장소의 프로젝트명이다.
@@ -121,6 +284,8 @@ pub struct Config {
     pub statuses: Vec<String>,
     /// 화면이 사람을 내는 모양. 파일에 쓰는 모양이 아니다.
     pub naming: Naming,
+    /// `moai status` 의 잔소리 문턱. 아무것도 막지 않는다.
+    pub status: Thresholds,
 }
 
 impl Config {
@@ -163,7 +328,10 @@ impl Config {
             })?,
         };
 
-        Ok(Config { prefix, statuses, naming })
+        Thresholds::check_keys(src)?;
+        let status = Thresholds::parse(src)?;
+
+        Ok(Config { prefix, statuses, naming, status })
     }
 
     /// 새 이슈가 놓이는 칸. 목록의 첫 칸이다.
@@ -299,6 +467,87 @@ mod tests {
         assert_eq!(started, ["blocked", "in_progress", "review"]);
         let two = Config::parse("prefix = \"a\"\nstatuses = \"todo, done\"\n").unwrap();
         assert!(!two.is_started("todo") && !two.is_started("done"));
+    }
+
+    /// 한 줄도 안 적은 저장소는 옛 상수를 그대로 받는다. 설정으로 뺀 것이
+    /// 이미 도는 저장소의 경고를 바꾸면 그건 설정이 아니라 마이그레이션이다.
+    #[test]
+    fn thresholds_default_to_the_old_constants() {
+        let c = Config::parse("prefix = \"argos\"\n").unwrap();
+        assert_eq!(c.status, Thresholds::DEFAULT);
+        assert_eq!(
+            (c.status.review_days, c.status.wip_days, c.status.blocked_days),
+            (3, 2, 3)
+        );
+        assert_eq!((c.status.wip_limit, c.status.no_epic_min, c.status.idea_pile), (3, 5, 5));
+        assert_eq!((c.status.no_epic_ratio, c.status.flow_days), (0.15, 7));
+    }
+
+    /// 적은 값이 그대로 선다 — 여덟 키를 한 번에 본다. 하나를 빼먹고 기본값으로
+    /// 두면 그 키만 고쳐도 안 먹는데, 화면에는 아무 자취가 없다.
+    #[test]
+    fn every_threshold_can_be_set() {
+        let src = "prefix = \"argos\"
+status_review_days   = 10
+status_wip_days      = 11
+status_blocked_days  = 12
+status_wip_limit     = 13
+status_no_epic_ratio = 0.5
+status_no_epic_min   = 14
+status_flow_days     = 15
+status_idea_pile     = 16
+";
+        let t = Config::parse(src).unwrap().status;
+        assert_eq!(
+            (t.review_days, t.wip_days, t.blocked_days, t.flow_days),
+            (10, 11, 12, 15)
+        );
+        assert_eq!((t.wip_limit, t.no_epic_min, t.idea_pile), (13, 14, 16));
+        assert_eq!(t.no_epic_ratio, 0.5);
+    }
+
+    /// 수는 따옴표 없이 적는다. 두르면 `toml` 크레이트로 갈아 끼우는 날 글이 되므로,
+    /// 그때 조용히 안 읽히느니 지금 거절한다.
+    #[test]
+    fn a_quoted_number_is_refused() {
+        let e = Config::parse("prefix = \"a\"\nstatus_wip_limit = \"3\"\n").unwrap_err();
+        assert!(e.contains("따옴표를 뺀다"), "{e}");
+    }
+
+    /// **오타가 조용히 통과하면 안 먹는 까닭을 설정 파일만 보고는 못 찾는다.**
+    /// 임계값은 고친 뒤에 화면이 안 바뀌는 것으로만 확인되는 자리다.
+    #[test]
+    fn a_misspelled_threshold_key_is_refused() {
+        let e = Config::parse("prefix = \"a\"\nstatus_reveiw_days = 1\n").unwrap_err();
+        assert!(e.contains("status_reveiw_days") && e.contains("status_review_days"), "{e}");
+        // 주석 안의 오타는 오타가 아니다.
+        Config::parse("prefix = \"a\"\n# status_reveiw_days = 1\n").unwrap();
+        // `statuses` 는 `status_` 로 시작하지 않는다 — 칸 목록을 오타로 읽으면 안 된다.
+        Config::parse("prefix = \"a\"\nstatuses = \"todo,done\"\n").unwrap();
+    }
+
+    /// 못 읽는 수를 기본값으로 덮지 않는다 — 덮으면 고친 값이 안 먹는다.
+    #[test]
+    fn refuses_a_threshold_that_is_not_a_number() {
+        for (src, want) in [
+            ("status_wip_limit = 셋\n", "0 이상의 정수"),
+            ("status_review_days = -1\n", "0 이상의 정수"),
+            ("status_review_days = 1.5\n", "0 이상의 정수"),
+            ("status_no_epic_ratio = 15\n", "0 과 1 사이"),
+            ("status_no_epic_ratio = -0.1\n", "0 과 1 사이"),
+            // 흐름 창이 0 이면 `생성 0 · 완료 0` 이 서서 "아무 일도 없었다" 로 읽힌다.
+            ("status_flow_days = 0\n", "1 이상"),
+        ] {
+            let e = Config::parse(&format!("prefix = \"a\"\n{src}")).unwrap_err();
+            assert!(e.contains(want), "{src:?} → {e:?}");
+        }
+    }
+
+    /// 0 은 끄는 것이 아니라 낮추는 것이다 — 날수 0 이면 그날로 선다.
+    #[test]
+    fn zero_is_a_lower_threshold_not_a_switch() {
+        let c = Config::parse("prefix = \"a\"\nstatus_review_days = 0\nstatus_wip_limit = 0\n").unwrap();
+        assert_eq!((c.status.review_days, c.status.wip_limit), (0, 0));
     }
 
     #[test]
