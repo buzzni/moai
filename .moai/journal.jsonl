@@ -5218,3 +5218,5 @@
 {"ts":"2026-09-19T01:55:35Z","id":"moai-t3yj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정대로 반영했다(2026-09-19) — 묶음의 자리에 그 묶음 이름의 워크트리도 낸다. src/report.rs places·settle, 머지 1ad2fb5"}
 {"ts":"2026-09-19T01:55:35Z","id":"moai-t3yj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
 {"ts":"2026-09-19T01:55:44Z","id":"moai-3k2d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 셋과 리뷰를 닫고 1ad2fb5 로 병합했다. 남은 idea 셋(moai-ydtm 조건부 집기 토막, moai-hf4y settle 의 좁힌 판정, moai-fwod 기록의 남은 모서리)은 이 에픽 밑에 첫 칸으로 서 있다 — 훅을 다시 열 때 함께 본다. 미룬 멤버 moai-s63n(⎇ 의 닫힌 줄 규칙)은 그대로다."}
+{"ts":"2026-09-19T01:57:02Z","id":"moai-hwrm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T01:57:02Z","id":"moai-hav1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
