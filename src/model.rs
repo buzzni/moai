@@ -29,9 +29,11 @@ pub fn check_text_size(id: &str, what: &str, text: &str) -> R<()> {
     Err(Fail::coded(
         format!(
             "{id}: {what} 크기가 {}KB 다 — 한 번에 {}KB 까지 적는다. 잘라 적지 않는다\n      \
-             요약을 적고 원문은 파일로 둔다. 리뷰 원문이면 리뷰가 낸 글이지 그 대화록(JSONL)이 아니다",
+             요약을 적고 원문은 파일로 둔다. 리뷰 원문이면 리뷰가 낸 글이지 그 대화록(JSONL)이 아니다\n      \
+             리뷰 원문이 정말 크면: {}",
             text.len().div_ceil(1024),
-            MAX_TEXT_BYTES / 1024
+            MAX_TEXT_BYTES / 1024,
+            crate::guide::REVIEW_OVER_LIMIT
         ),
         code::BAD_INPUT,
     ))

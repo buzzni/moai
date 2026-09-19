@@ -40,9 +40,17 @@ pub fn rule_head(n: usize) -> String {
 // 먹어, 첫 명령만 왼쪽 끝에 붙는다.
 pub const REVIEW_STEPS: &str = concat!(
     "  moai mv <id> in_progress      리뷰를 시작할 때\n",
-    "  moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로\n",
+    "  moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로(64KB 를 넘으면 요약)\n",
     "  moai mv <id> done -m '<무엇을 반영하고 무엇을 넘겼나>'",
 );
+
+/// 리뷰 원문이 한 번에 적는 상한([`crate::model::MAX_TEXT_BYTES`])을 넘을 때의 길
+/// (moai-b8aj, 2026-09-19 사용자 결정). **요약하되 요약이라고 밝힌다.** 원문 노트와 판단 노트를
+/// 가르는 까닭이 리뷰어가 한 말과 이쪽이 정한 것을 가르는 데 있으니, 줄인 글은 줄였다고 적혀
+/// 있어야 읽는 쪽이 둘을 안 섞는다. 건의 번호와 자리를 두는 것은 판단 노트가 "3번" 으로 가리키기
+/// 때문이다. 규칙 3 의 글·참고 문서·`note` 의 거절문이 이 한 줄을 쓴다.
+pub const REVIEW_OVER_LIMIT: &str =
+    "원문이 64KB 를 넘으면 요약한다 — 첫 줄에 `요약: 원문 <크기>KB` 를 적고, 건마다 번호와 자리는 둔 채 문장만 줄인다";
 
 /// 리뷰 이슈에 붙는 태그. 훅은 리뷰 줄을 이 글자로 가르고, 가르치는 글은 같은
 /// 글자로 세우게 한다 — 둘이 다르면 시킨 대로 세운 리뷰를 규칙이 못 알아본다.
@@ -292,7 +300,8 @@ const KOREAN: &str = r#"**한국어 글은 moai 에 넣기 전에 다듬는다**
 /// 남으면 그 세션의 모든 규칙과 알림이 말없이 꺼진다(`cmd::hook::decide`).
 const KOREAN_DETAIL: &str = r#"늘 보이는 규칙은 `SKILL.md` 의 "한국어 글" 에 있다. 여기는 그 절차다.
 
-- 리뷰 원문은 줄이거나 판단을 섞지 않고 문장만 다듬는다 — 규칙 3 이 `그대로` 옮기라는 것은 그 뜻이다
+- 리뷰 원문은 줄이거나 판단을 섞지 않고 문장만 다듬는다 — 규칙 3 이 `그대로` 옮기라는 것은 그 뜻이다.
+  줄이는 것은 64KB 를 넘을 때뿐이고, 그때는 `요약:` 으로 밝힌다
 - 20줄을 넘는 글은 저장소 밖(스크래치패드나 임시 디렉터리)으로 옮겨 그 자리를 cwd 로 두고
   `humanize-korean:humanize-korean` 을 부른다. 이 스킬은 cwd 에 `_workspace/` 를 만든다 — 다 쓰면 지운다
 - 다 쓰면 저장소로 돌아온다 — 훅은 세션이 선 자리로 트래커를 찾아, 밖에 선 채로는 규칙이 하나도 안 선다
@@ -496,6 +505,7 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 **원문과 판단을 두 노트로 가른다** — 리뷰어가 한 말과 이쪽이 정한 것은 다른
 글이다. 넘긴 것은 **이슈 번호와 함께** 적는다. "넘겼다" 만 적힌 줄은 아무도
 다시 안 본다. 원문을 어디서 찾는지는 스킬의 `references/commands.md` 에 있다.
+한 번에 적는 글은 64KB 까지다. {REVIEW_OVER_LIMIT}.
 
 **4. {four}.** `-L`·`-S` 없는 `tmux kill-server`·`kill-session` 과 tmux 를
 겨눈 `pkill`·`killall` 을 막는다. 세션이 tmux 안에서 돌면 `$TMUX` 가 서 있어,
@@ -818,6 +828,10 @@ print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
 
 **요약만 적고 원문을 버리지 않는다.** 요약은 이쪽의 판단이고 원문은 리뷰어가
 한 말이다. 판단은 다시 할 수 있지만 버린 원문은 못 되돌린다.
+
+**넘칠 때만 줄인다.** 한 번에 적는 글은 64KB 까지라, 그보다 큰 원문은 `moai note` 가
+거절한다. {REVIEW_OVER_LIMIT}. 요약이라고 밝혀 두어야 다음 사람이 그 글을 리뷰어의 말로
+잘못 읽지 않는다.
 
 ## 훅
 
@@ -1818,6 +1832,19 @@ mod tests {
         for step in REVIEW_STEPS.lines() {
             assert!(skill.contains(step.trim()), "리뷰 걸음이 갈라졌다 — {step}");
         }
+    }
+
+    /// **리뷰 원문을 그대로 붙이라는 글과 64KB 거절문이 한 길을 댄다**(moai-b8aj). 안내는
+    /// `note -b -` 로 그대로, 거절문은 "요약하고 원문은 파일로" 라 서로 어긋나 있었다 — 큰 리뷰를
+    /// 닫는 일꾼마다 밟는다. 글에 적힌 상한이 실제 상한과 갈라져도 여기서 붉어진다.
+    #[test]
+    fn the_review_note_and_the_size_limit_say_one_thing() {
+        let kb = format!("{}KB", crate::model::MAX_TEXT_BYTES / 1024);
+        assert!(REVIEW_OVER_LIMIT.contains(&kb) && REVIEW_STEPS.contains(&kb), "글의 상한이 실제와 다르다");
+        assert!(rules().contains(REVIEW_OVER_LIMIT), "규칙 3 이 넘칠 때의 길을 안 댄다");
+        assert!(reference().contains(REVIEW_OVER_LIMIT), "참고 문서가 넘칠 때의 길을 안 댄다");
+        let refused = crate::model::check_text_size("t-r", "노트", &"가".repeat(30_000)).unwrap_err().to_string();
+        assert!(refused.contains(REVIEW_OVER_LIMIT), "거절문이 다른 길을 댄다\n{refused}");
     }
 
     /// 포맷 문자열 안의 `{{`·`}}` 가 제대로 풀렸는가. 참고 문서의 파이썬 한 줄이
