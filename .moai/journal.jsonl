@@ -5299,3 +5299,7 @@
 {"ts":"2026-09-19T05:17:30Z","id":"moai-ql7x.5df","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=65134 (high — 헤더 배치 한 자리)"}
 {"ts":"2026-09-19T05:17:33Z","id":"moai-ql7x.5df","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 버그 지적은 없었다. 리뷰가 손대지 않은 HEADER_GAP 주석은 이쪽에서 고쳤다(fix 커밋, moai-ql7x.5df). 넘긴 것은 없다."}
 {"ts":"2026-09-19T05:17:36Z","id":"moai-ql7x.5df","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"HEADER_GAP 주석 한 줄을 반영했다. 버그 지적은 없었고 넘긴 것도 없다"}
+{"ts":"2026-09-19T05:17:58Z","id":"moai-ehr7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — draw.rs 헤더 배치 한 자리)"}
+{"ts":"2026-09-19T05:17:58Z","id":"moai-ehr7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"후(merge d44d31c):\n    120·200칸: 그림 다섯 줄은 `  • ▌ ▄ ·.        ▄▄▄· ▪    │ User …`처럼 두 칸, 문구 줄은 ` Issue tracker for AI agent │`처럼 한 칸 들어간다. 파이프 기둥은 곧게 선다\n    80칸: 로고 없이 `│ User …` — 지금과 같다\n문턱: 여백을 셈에 넣었으니 로고가 빠지는 폭도 한 칸 올라간다. 셈에서 빼면 64칸에서 `…`로 잘리고, 시험(the_logo_keeps_equal_margins_on_both_sides)이 그것을 잡는다"}
+{"ts":"2026-09-19T05:17:58Z","id":"moai-ehr7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-19T05:18:06Z","id":"moai-ql7x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — d44d31c 로 병합했고 멤버와 리뷰를 닫았다. 곁의 moai-fbpa(모호폭 글리프)는 moai-d3ya 로 미뤄 둔 채다"}
