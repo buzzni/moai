@@ -57,6 +57,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // **남의 프로젝트는 여기서 안 읽는다**: 처음 올라갈 때 읽는다. 안에서 띄운 사람의 첫
     // 화면을 등록한 저장소 수만큼 늦출 까닭이 없다.
     let config = crate::user_config::path();
+    // 표식은 **읽기 전에** 잰다 — 뒤에 재면 읽고 첫 걸음 사이에 옆이 쓴 것을 놓친다(`App::config_stamp`).
+    let config_stamp = config.as_deref().map(crate::store::stamp);
     // 설정은 **한 번 읽어** 층과 보기가 나눠 쓴다(moai-u8cs).
     let reg = crate::user_config::read(config.as_deref());
     let layer = crate::tui::layer::Layer::of(&reg, Some(&repo.root));
@@ -68,6 +70,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.me = app.whoami(&root);
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
+    app.config_stamp = config_stamp;
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp). 못 읽은 설정의 까닭은 보기가 아니라 층이 댄다 —
     // 얹는 쪽(`App::attach_layer`)이 배너에 달고 `look_problems` 에는 그 까닭이 없다(moai-5jsn). 그래서 둘의
     // 차례에 걸린 것은 없다(moai-gmdu 에픽 리뷰). 한때는 `with_layer` 가 첫 화면의 커서를 `..` 너머로 밀어
@@ -94,6 +97,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
 /// 않는 것은 곁의 `problems` 가 까닭을 대기 때문이다(`status` 와 같은 자리, moai-ynsb).
 fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let config = crate::user_config::path();
+    // 표식은 **읽기 전에** 잰다(`App::config_stamp`) — `--json` 에는 안 쓰지만 stat 하나라 가른다.
+    let config_stamp = config.as_deref().map(crate::store::stamp);
     // 설정은 **한 번 읽어** `--json`·층·보기가 나눠 쓴다(moai-u8cs).
     let reg = crate::user_config::read(config.as_deref());
     // `--path` 는 한 프로젝트 안의 id 다. 어느 프로젝트인지 모르는 채로 받으면 id 가 겹치는
@@ -143,6 +148,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // (`App::enter_project`) — 프로젝트에만 적힌 git 설정이어도 [NEW] 가 선다.
     app.me = app.whoami(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
     app.user_config = config;
+    app.config_stamp = config_stamp;
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp).
     app.adopt_look(&reg.look, reg.look_problems);
     app.adopt_read(reg.read);

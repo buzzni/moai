@@ -3502,7 +3502,7 @@ fn reading_a_duplicate_id_takes_the_later_stamp_of_the_twins() {
     assert!(saved.contains("argos-0001 = \"2026-09-18T07:00:00Z\""), "늦은 도장을 안 적었다 — {saved}");
 }
 
-/// **`-e` 는 그 묶음 밑에 그려진 것만 적는다**(moai-j038.vna) — 트리·`show -e`·탐색기의 `SPC m r` 과 같은
+/// **`-e` 는 그 묶음 밑에 그려진 것만 적는다**(moai-j038.vna) — 트리·`show -e`·탐색기의 `SPC m g` 과 같은
 /// 자(`nav::Index::under_group`)다. id 조상을 따로 훑던 때는 `moai epic add --parent <바깥>` 으로 선 안쪽
 /// 에픽과 **그 멤버 절반**(id 로 선 것만)을, `--parent <바깥> -e <남>` 으로 남의 에픽에 든 자식까지 적었다 —
 /// 어느 표면도 그 줄들을 바깥 에픽 밑에 그리지 않는다. 묶음이 아닌 줄은 적기 전에 거절한다.

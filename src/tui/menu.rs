@@ -2,7 +2,7 @@
 //! 적지 않는다. [`BROWSE`] 에서 SPC 로 시작하는 줄이 곧 메뉴의 트리다.
 //!
 //! **메뉴가 열렸다는 것과 어느 층인가는 [`Chord`] 의 대기 열 하나다.** 열이 SPC 로 시작하면
-//! 열렸고, 그 열이 곧 접두어(`SPC t`)다. `Mode` 로 두지 않는다 — 탐색이 아닌 모드는 전부
+//! 열렸고, 그 열이 곧 접두어(`SPC v`)다. `Mode` 로 두지 않는다 — 탐색이 아닌 모드는 전부
 //! 글칸이라, 메뉴가 모드면 메뉴 안의 키가 글자로 샌다. 붙여넣기·글칸으로 넘어가는 길이 열을
 //! 버리므로 메뉴도 그 길에서 닫힌다.
 //!
@@ -23,7 +23,7 @@ use ratatui::crossterm::event::KeyEvent;
 
 /// 하위 접두어의 이름. 표에는 동작만 있고 묶음의 이름은 없어 여기 둔다 — 이름 없는 접두어는
 /// 시험(`every_prefix_in_the_menu_has_a_name`)이 막는다.
-const GROUPS: &[(&str, &str)] = &[("SPC p", "프로젝트"), ("SPC t", "토글"), ("SPC s", "보기"), ("SPC o", "정렬"), ("SPC c", "열"), ("SPC m", "읽음")];
+const GROUPS: &[(&str, &str)] = &[("SPC p", "프로젝트"), ("SPC v", "보기"), ("SPC s", "정렬"), ("SPC c", "열"), ("SPC m", "읽음")];
 
 /// 메뉴가 열렸나.
 pub fn open(chord: &Chord) -> bool {
@@ -89,7 +89,7 @@ impl Entry {
 }
 
 /// 지금 층(`held`)에 선 항목. 차례는 표의 차례다. `columns` 는 설정의 칸 이름이다 — 칸 토글
-/// (`SPC s 1`)의 낱말이 거기서 온다. 표는 칸 이름을 모른다.
+/// (`SPC v 1`)의 낱말이 거기서 온다. 표는 칸 이름을 모른다.
 pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
     let mut seen = Vec::new();
     let mut out = Vec::new();
@@ -119,7 +119,7 @@ pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
     out
 }
 
-/// 테두리에 적을 지금 접두어 — `SPC`, `SPC t`.
+/// 테두리에 적을 지금 접두어 — `SPC`, `SPC v`.
 pub fn title(held: &[KeyEvent]) -> String {
     held.iter().map(|k| name_of(k.code)).collect::<Vec<_>>().join(" ")
 }
@@ -127,7 +127,7 @@ pub fn title(held: &[KeyEvent]) -> String {
 /// 뿌리의 이름 — 접두어 줄의 `SPC- 메뉴`, 키 바의 `SPC 메뉴`.
 pub const ROOT: &str = "메뉴";
 
-/// 접두어 줄에 적을 지금 층의 이름 — 뿌리는 [`ROOT`], 하위 층은 묶음의 이름(`토글`).
+/// 접두어 줄에 적을 지금 층의 이름 — 뿌리는 [`ROOT`], 하위 층은 묶음의 이름(`보기`).
 pub fn name(held: &[KeyEvent]) -> &'static str {
     if held.len() <= 1 { ROOT } else { group(held) }
 }
@@ -273,7 +273,7 @@ mod tests {
         e.iter().map(|e| e.key.as_str()).collect()
     }
 
-    /// **SPC 가 곧바로 뿌리를 연다** — 확정한 트리(moai-hudg)가 표의 차례대로 선다.
+    /// **SPC 가 곧바로 뿌리를 연다** — 확정한 트리(moai-hudg, 묶음은 moai-en4u)가 표의 차례대로 선다.
     #[test]
     fn spc_opens_the_root_in_the_confirmed_order() {
         let mut ch = Chord::default();
@@ -281,16 +281,14 @@ mod tests {
         assert!(open(&ch));
         assert_eq!(title(ch.held()), "SPC");
         let root = entries(ch.held(), &inside(), &[]);
-        assert_eq!(keys_of(&root), ["/", "f", "n", "r", "q", "p", "t", "s", "o", "c", "m"]);
+        assert_eq!(keys_of(&root), ["/", "f", "n", "q", "p", "v", "s", "c", "m"]);
         let what: Vec<&str> = root.iter().map(|e| e.what.as_str()).collect();
         assert_eq!(what, [
             "검색",
             "거름망",
             "생각 담기",
-            "다시 읽기",
             "끝내기",
             "+프로젝트",
-            "+토글",
             "+보기",
             "+정렬",
             "+열",
@@ -304,15 +302,17 @@ mod tests {
     fn the_view_menu_numbers_the_configured_columns() {
         let columns: Vec<String> = ["todo", "in_progress", "done"].map(String::from).to_vec();
         let c = Ctx { columns: 3, hidden: 0b100, done_hidden: true, ..inside() };
-        let items = entries(&[k(' '), k('s')], &c, &columns);
-        assert_eq!(keys_of(&items), ["d", "z", "a", "1", "2", "3"]);
+        let items = entries(&[k(' '), k('v')], &c, &columns);
+        assert_eq!(keys_of(&items), ["d", "l", "a", "1", "2", "3", "p", "w", "r"]);
         let text: Vec<String> = items.iter().map(Entry::text).collect();
-        assert_eq!(text, ["done [숨김]", "미룸 [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]);
+        assert_eq!(text[..6], ["done [숨김]", "미룸 [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]);
         let mut ch = Chord::default();
-        for x in [' ', 's', '4'] {
+        for x in [' ', 'v', '4'] {
             assert_eq!(feed(&mut ch, &c, k(x)), None, "없는 칸의 번호가 돌았다");
         }
-        assert!(keys_of(&entries(&[k(' ')], &layer(), &columns)).iter().all(|k| *k != "s"), "층에서 보기가 섰다");
+        let on_layer = entries(&[k(' '), k('v')], &layer(), &columns);
+        assert!(keys_of(&on_layer).iter().all(|k| !["d", "l", "a", "1"].contains(k)), "층에서 줄 보기가 섰다");
+        assert!(keys_of(&entries(&[k(' ')], &layer(), &columns)).iter().all(|k| *k != "s"), "층에서 정렬이 섰다");
     }
 
     fn e(key: &str, what: &str) -> Entry {
@@ -393,16 +393,20 @@ mod tests {
     /// **메뉴의 모든 길이 같은 동작을 낸다** — 바로 누르던 키가 하던 그 동작이고, 실행하면 닫힌다.
     #[test]
     fn each_menu_path_runs_its_action_and_closes() {
-        let cases: [(&str, Browse, Ctx); 9] = [
+        let cases: [(&str, Browse, Ctx); 13] = [
             ("/", Browse::Grep, inside()),
             ("f", Browse::Filter, inside()),
             ("n", Browse::Jot, inside()),
-            ("r", Browse::Reload, inside()),
             ("q", Browse::Quit, inside()),
             ("pa", Browse::Pick, inside()),
             ("pd", Browse::Unregister, layer()),
-            ("tw", Browse::Worktree, inside()),
-            ("tr", Browse::Raw, inside()),
+            ("vw", Browse::Worktree, inside()),
+            ("vr", Browse::Raw, inside()),
+            ("vp", Browse::Detail, inside()),
+            ("vd", Browse::Done, inside()),
+            ("vl", Browse::Deferred, inside()),
+            ("sa", Browse::Sort(super::super::keys::Order::Assignee), inside()),
+            ("mg", Browse::ReadGroup, inside()),
         ];
         for (path, act, c) in cases {
             let mut ch = Chord::default();
@@ -426,11 +430,12 @@ mod tests {
             assert_eq!(feed(&mut ch, &c, x), None, "{x:?}");
             assert_eq!(title(ch.held()), "SPC", "{x:?} 가 메뉴를 옮기거나 닫았다");
         }
-        feed(&mut ch, &c, k('t'));
-        assert_eq!(title(ch.held()), "SPC t");
-        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["w", "r", "d"]);
+        feed(&mut ch, &c, k('v'));
+        assert_eq!(title(ch.held()), "SPC v");
+        // 어느 줄을 보나가 먼저, 화면의 꼴이 뒤다. 번호 칸은 설정의 칸 수만큼 선다 — 여기는 0.
+        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["d", "l", "a", "p", "w", "r"]);
         feed(&mut ch, &c, k('x'));
-        assert_eq!(title(ch.held()), "SPC t", "하위 층의 모르는 키가 메뉴를 옮겼다");
+        assert_eq!(title(ch.held()), "SPC v", "하위 층의 모르는 키가 메뉴를 옮겼다");
         feed(&mut ch, &c, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
         assert_eq!(title(ch.held()), "SPC");
         feed(&mut ch, &c, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
@@ -449,21 +454,22 @@ mod tests {
         let root_layer = entries(&[k(' ')], &layer(), &[]);
         // 층에서는 읽음(`SPC m`)도 안 선다(moai-j038.vna) — 층의 줄은 프로젝트라 읽을 줄이 없고, 서면
         // `SPC m a` 가 늘 "적을 것이 없다" 로 답하면서 그 프로젝트의 [NEW] 는 그대로 남는다.
-        assert_eq!(keys_of(&root_layer), ["n", "r", "q", "p", "t"], "층에서 검색·거름망·읽음이 섰다");
+        assert_eq!(keys_of(&root_layer), ["n", "q", "p", "v"], "층에서 검색·거름망·정렬·열·읽음이 섰다");
         assert!(keys_of(&root_in).contains(&"m"), "프로젝트 안에서 읽음이 안 섰다");
         assert!(keys_of(&root_in).contains(&"f"));
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &inside(), &[])), ["a"], "프로젝트 안에서 해제가 섰다");
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &layer(), &[])), ["a", "d"]);
         let detail = Ctx { list_focus: false, ..layer() };
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &detail, &[])), ["a"], "상세 포커스에서 해제가 섰다");
-        // 층에서도 상세 칸은 있다 — 숨기기(`d`)는 서고 워크트리 겹쳐 보기(`w`)만 빠진다.
-        assert_eq!(keys_of(&entries(&[k(' '), k('t')], &layer(), &[])), ["r", "d"], "층에서 워크트리가 섰다");
+        // 층에서도 상세 칸은 있다 — 숨기기(`p`)와 원문(`r`)은 서고, 줄을 가리는 것과 워크트리 겹쳐
+        // 보기(`w`)는 빠진다.
+        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &layer(), &[])), ["p", "r"], "층에서 워크트리나 줄 보기가 섰다");
 
         let mut ch = Chord::default();
-        for x in [' ', 't', 'w'] {
-            assert_eq!(feed(&mut ch, &layer(), k(x)), None, "층에서 SPC t w 가 돌았다");
+        for x in [' ', 'v', 'w'] {
+            assert_eq!(feed(&mut ch, &layer(), k(x)), None, "층에서 SPC v w 가 돌았다");
         }
-        assert_eq!(title(ch.held()), "SPC t", "안 선 키가 메뉴를 닫았다");
+        assert_eq!(title(ch.held()), "SPC v", "안 선 키가 메뉴를 닫았다");
         let mut ch = Chord::default();
         for x in [' ', 'f'] {
             assert_eq!(feed(&mut ch, &layer(), k(x)), None);
@@ -474,13 +480,16 @@ mod tests {
     /// **토글은 지금 상태를 낱말로 댄다** — 색이 혼자 뜻을 지지 않는다.
     #[test]
     fn toggles_show_their_state_in_words() {
-        let states = |c: Ctx| -> Vec<Option<&'static str>> { entries(&[k(' '), k('t')], &c, &[]).iter().map(|e| e.state).collect() };
-        assert_eq!(states(inside()), [Some("[꺼짐]"), Some("[그리기]"), Some("[보임]")]);
-        assert_eq!(states(Ctx { worktree: true, raw: true, ..inside() }), [Some("[켜짐]"), Some("[원문]"), Some("[보임]")]);
+        // 화면의 꼴 셋(상세 칸·워크트리·원문)만 본다 — 줄 보기(done·미룸)는 위 시험이 본다.
+        let states = |c: Ctx| -> Vec<Option<&'static str>> {
+            entries(&[k(' '), k('v')], &c, &[]).iter().filter(|e| ["p", "w", "r"].contains(&e.key.as_str())).map(|e| e.state).collect()
+        };
+        assert_eq!(states(inside()), [Some("[보임]"), Some("[꺼짐]"), Some("[그리기]")]);
+        assert_eq!(states(Ctx { worktree: true, raw: true, ..inside() }), [Some("[보임]"), Some("[켜짐]"), Some("[원문]")]);
         // **상세를 숨기면 원문↔그리기가 빠진다** — 그 키는 상세의 글에만 걸려, 서 있어 봐야
         // 눌러도 화면이 그대로다(moai-ymnu 리뷰).
-        assert_eq!(states(Ctx { detail: false, ..inside() }), [Some("[꺼짐]"), Some("[숨김]")]);
-        assert_eq!(keys_of(&entries(&[k(' '), k('t')], &Ctx { detail: false, ..inside() }, &[])), ["w", "d"]);
+        assert_eq!(states(Ctx { detail: false, ..inside() }), [Some("[숨김]"), Some("[꺼짐]")]);
+        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])), ["d", "l", "a", "p", "w"]);
     }
 
     /// **이름 없는 하위 접두어가 없다.** 표에 SPC 줄을 더하며 새 접두어를 만들면 여기서 멈춘다.
