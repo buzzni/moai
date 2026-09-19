@@ -44,7 +44,7 @@ impl View {
         !hidden && !(deferred && self.hide_deferred)
     }
 
-    /// 모두 보인다(`SPC s a`). **이 프로젝트의 칸만 걷는다**(moai-2kyl 단계 리뷰) — 다른 프로젝트에만 있는
+    /// 모두 보인다(`SPC v a`). **이 프로젝트의 칸만 걷는다**(moai-2kyl 단계 리뷰) — 다른 프로젝트에만 있는
     /// 칸 이름은 여기서 아무것도 안 숨겼으니 들고 있는다. 통째로 비우면 그 프로젝트로 돌아갔을 때 숨겨 둔
     /// 칸이 쏟아진다.
     pub fn show_all(&mut self, known: &[String]) {
@@ -96,7 +96,7 @@ impl Field {
             Field::Tally => "셈",
             Field::Tags => "태그",
             Field::Names => "열 이름",
-            // `SPC t w`(`keys::Toggle::Worktree`)가 이미 "워크트리" 다 — 같은 낱말을 두 줄에
+            // `SPC v w`(`keys::Toggle::Worktree`)가 이미 "워크트리" 다 — 같은 낱말을 두 줄에
             // 세우면 메뉴에서 어느 쪽이 겹쳐 보기고 어느 쪽이 줄의 표시인지 못 가른다.
             Field::Branch => "옆 가지",
         }

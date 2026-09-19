@@ -282,20 +282,26 @@ NOTE
   그 밖의 동작은 SPC 를 누르면 곧바로 뜨는 메뉴에 있다. 메뉴는 그 자리에서 되는
   것만 세우고, 모르는 키는 무시하며, Esc 로 닫고 Backspace 로 한 층 올라간다.
     SPC /    검색               SPC f    거름망             SPC n    생각 담기
-    SPC r    다시 읽기          SPC q    끝내기
+    SPC q    끝내기
     SPC p a  등록               SPC p d  목록에서 빼기
-    SPC t w  워크트리 겹쳐 보기 [켜짐/꺼짐]
-    SPC t r  원문↔그리기        SPC t d  상세 칸 [보임/숨김]
-    SPC s d  done [보임/숨김]   SPC s z  미룸               SPC s a  모두 보이기
-    SPC s 1  설정의 첫 칸 [보임/숨김] — 둘째 칸부터 번호가 차례로 는다
-    SPC o p  우선순위           SPC o c  생성               SPC o u  수정
-    SPC o s  칸                 SPC o a  담당               SPC o t  제목
+  보기 — 켜고 끄는 것은 모두 여기 있다:
+    SPC v d  done [보임/숨김]   SPC v l  미룸               SPC v a  모두 보이기
+    SPC v 1  설정의 첫 칸 [보임/숨김] — 둘째 칸부터 번호가 차례로 는다
+    SPC v p  상세 칸 [보임/숨김]
+    SPC v w  워크트리 겹쳐 보기 [켜짐/꺼짐]
+    SPC v r  원문↔그리기
+  정렬과 열은 같은 글자가 같은 것을 가리킨다:
+    SPC s p  우선순위           SPC s c  생성               SPC s u  수정
+    SPC s s  칸                 SPC s a  담당               SPC s t  제목
     SPC c i  id                 SPC c p  우선순위           SPC c a  담당
     SPC c c  생성               SPC c u  수정               SPC c n  셈
-    SPC c g  태그               SPC c h  열 이름 줄 [보임/숨김]
-    SPC c w  ⎇ 옆 가지 표시 [보임/숨김] — SPC t w 로 겹쳐 봐야 선다
-    SPC m a  안 읽은 것 전부    SPC m r  이 묶음의 멤버 전부
+    SPC c t  태그               SPC c h  열 이름 줄 [보임/숨김]
+    SPC c w  ⎇ 옆 가지 표시 [보임/숨김] — SPC v w 로 겹쳐 봐야 선다
+  읽음:
+    SPC m a  안 읽은 것 전부    SPC m g  이 묶음의 멤버 전부
   바로 끝내는 키는 Ctrl-C 하나다 — 어디서든, 글을 적는 중에도 끝낸다.
+  화면은 저절로 다시 읽는다 — 옆에서 쓴 이슈도, 옆 터미널의 `moai read` 와
+  `moai project add` 도 누르지 않고 선다.
 
   내게 온 것(담당이 나이거나 그 밑) 가운데 마지막으로 본 뒤에 바뀐 줄은
   제목 앞에 [NEW] 가 선다. 읽음은 내 설정에만 남고 트래커는 안 바뀐다 —

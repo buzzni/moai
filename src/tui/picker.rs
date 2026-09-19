@@ -495,16 +495,16 @@ mod tests {
     }
 
     /// `.` 은 숨은 것 보이기를 **반대 값으로** 다시 읽으라고만 한다 — 창은 설정을 스스로 안
-    /// 뒤집는다. 읽기가 된 뒤 든 쪽이 넣는다(moai-v2jf). Esc·q 는 닫는다.
+    /// 뒤집는다. 읽기가 된 뒤 든 쪽이 넣는다(moai-v2jf). Esc 가 닫는다 — 옛 숨은 `q` 는 걷었다(moai-en4u).
     #[test]
-    fn dot_asks_for_the_other_hidden_setting_and_esc_or_q_closes() {
+    fn dot_asks_for_the_other_hidden_setting_and_esc_closes() {
         let mut p = Picker::new(listing("/w", &[]));
         assert_eq!(press(&mut p, KeyCode::Char('.')), Act::Hidden(true));
         assert!(!p.show_hidden, "읽기 전에 창이 설정을 뒤집었다");
         p.show_hidden = true;
         assert_eq!(press(&mut p, KeyCode::Char('.')), Act::Hidden(false));
         assert!(p.show_hidden);
-        assert_eq!(press(&mut p, KeyCode::Char('q')), Act::Close);
+        assert_eq!(press(&mut p, KeyCode::Char('q')), Act::Stay, "걷은 q 가 닫았다");
         assert_eq!(press(&mut p, KeyCode::Esc), Act::Close);
     }
 }

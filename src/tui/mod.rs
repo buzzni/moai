@@ -108,7 +108,7 @@ enum Landing {
     Missing,
 }
 
-/// 줄을 가리는 것 — 거름망과 보기(`SPC s`) 각각([`App::veil`]). 둘 다 `false` 면 목록에 선다.
+/// 줄을 가리는 것 — 거름망과 보기(`SPC v`) 각각([`App::veil`]). 둘 다 `false` 면 목록에 선다.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Veil {
     /// 거름망(`/`·`f`)에 안 걸렸다.
@@ -300,7 +300,7 @@ pub struct Fresh {
     unreadable: Vec<Option<String>>,
     origin: crate::worktree::Origin,
     elsewhere: Vec<String>,
-    /// 옆 워크트리를 못 찾은 까닭(`Gathered::unfound`). 사람이 SPC t w 로 켰을 때만 댄다.
+    /// 옆 워크트리를 못 찾은 까닭(`Gathered::unfound`). 사람이 SPC v w 로 켰을 때만 댄다.
     unfound: Option<String>,
     watched: Vec<(std::path::PathBuf, Stamp)>,
     now: String,
@@ -308,7 +308,7 @@ pub struct Fresh {
 
 /// 뿌리(이 프로젝트, 줄을 보탠 옆 워크트리) → 그 가지의 id → 커밋 표(`git::table`, moai-a4i0).
 /// **표만 짓는 스레드에서 짓는다**([`App::follow_commits`]) — 커서를 옮길 때마다 git 을 부르면
-/// 걸음마다 루프가 멈칫한다. 다시 읽기([`prepare`])에도 태우지 않는다: 쓰기·SPC r·SPC t w 는 그
+/// 걸음마다 루프가 멈칫한다. 다시 읽기([`prepare`])에도 태우지 않는다: 쓰기·SPC v w 는 그
 /// 읽기를 **루프에서** 부르므로, 거기서 이력을 뿌리마다 끝까지 걸으면 쓸 때마다 화면이 멈춘다.
 /// git 을 못 쓰는 뿌리는 빠진다 — 상세의 커밋 칸이 말없이 빈다(`show` 와 같은 자리, moai-mauw).
 pub type Commits = std::collections::BTreeMap<
@@ -331,7 +331,7 @@ fn commit_tables(roots: &[std::path::PathBuf], ids: &std::collections::BTreeSet<
 }
 
 /// 버린 다시 읽기 손잡이를 이만큼까지 든다(`App::discarded`). 버리는 것은 사람의
-/// 손(SPC r·SPC t w·쓰기)이 읽기가 도는 동안 닿을 때뿐이고, 한 읽기는 1만 개에서도 수백 ms
+/// 손(SPC v w·쓰기)이 읽기가 도는 동안 닿을 때뿐이고, 한 읽기는 1만 개에서도 수백 ms
 /// 라 보통은 하나도 안 쌓인다. 이것이 차는 것은 읽기가 멈춘 때뿐이다.
 const DISCARDED_KEPT: usize = 8;
 
@@ -341,7 +341,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     // 것은 영영 안 돌아온다. 먼저 재면 최악이 헛 갱신 하나다.
     let stamp = stamp_of(repo);
     // **겹쳐 보지 않아도 HEAD 는 지켜본다**(moai-a4i0). 겹쳐 보면 `gather` 가 이미 잰다. 안 재면
-    // `SPC t w` 로 끈 동안 커밋을 해도 스냅샷이 안 바뀌어 커밋 칸이 낡은 채 선다. `gather` 에
+    // `SPC v w` 로 끈 동안 커밋을 해도 스냅샷이 안 바뀌어 커밋 칸이 낡은 채 선다. `gather` 에
     // 두지 않는 것은 CLI 명령마다 git 을 한 번 더 띄우게 되어서다 — 지켜보는 것은 탐색기뿐이다.
     // **이것도 읽기 전에 잰다** — 읽는 동안 떨어진 커밋을 뒤에 재면 놓친다(위와 같은 까닭).
     let heads = if worktree { Vec::new() } else { crate::worktree::heads(&repo.root) };
@@ -489,8 +489,8 @@ pub struct App {
     /// 세려면 수만으로는 모자란다(moai-4dk4).
     pub unreadable: Vec<Option<String>>,
     /// 마지막 갱신이나 쓰기가 **실패한** 까닭 — 무엇을 못 했는지까지 단 쪽이 적는다.
-    /// 조용히 삼키면 SPC r 이 아무 일도 안 하는데 "바뀌었다" 배너는 붙어 있어, 사람은
-    /// 누르고 또 누르며 까닭을 못 얻는다.
+    /// 조용히 삼키면 갱신이 아무 일도 안 하는데 "바뀌었다" 배너는 붙어 있어, 사람은
+    /// 기다리고 또 기다리며 까닭을 못 얻는다.
     pub trouble: Option<String>,
     /// `trouble` 이 **쓰기의 실패**인가. 그렇다면 다시 읽기가 성공해도 걷지 않는다 —
     /// 락을 못 잡은 때가 곧 남이 쓰고 있던 때라 바로 다음 걸음이 다시 읽고, 그 읽기가
@@ -506,7 +506,7 @@ pub struct App {
     pub notice: Option<String>,
     /// 사용자 설정을 못 읽어 **층을 안 세운** 까닭. 층이 서면 층이 제 `problems` 를 대므로
     /// 층이 없을 때만 든다. 붙박이다 — 다시 읽기가 걷는 `trouble` 에 두면 700ms 뒤에
-    /// 사라져 사람은 층이 왜 없는지 끝내 모른다. SPC r 로 설정을 다시 읽어 층이 서면 걷힌다.
+    /// 사라져 사람은 층이 왜 없는지 끝내 모른다. 설정을 고치면 걸음이 다시 읽어([`App::follow_config`]) 층이 서면 걷힌다.
     pub unlayered: Option<String>,
     /// `--user` 로 **준 값 그대로**(`Ctx::user` 와 같다), 또는 누군지 묻는 칸에서
     /// 받은 것([`Mode::Ask`]). 쓸 때마다 `model::actor` 로 푼다 — 미리 풀어 두면
@@ -571,14 +571,14 @@ pub struct App {
     /// 탐색에서 접두어(`gg` 의 첫 `g`) 뒤를 기다리는 키 열. **`Mode` 가 아니다** — 탐색이 아닌
     /// 모드는 전부 글칸으로 가므로(`App::key`), 모드로 두면 기다리는 `g` 뒤의 `g` 가 글자로 샌다.
     chord: keys::Chord,
-    /// 버린 다시 읽기(SPC r·SPC t w·쓰기가 `pending` 을 버렸을 때)의 손잡이. 결과는 안 받지만
+    /// 버린 다시 읽기(SPC v w·쓰기가 `pending` 을 버렸을 때)의 손잡이. 결과는 안 받지만
     /// **패닉은 받는다** — ratatui 의 패닉 훅은 어느 스레드에서 나든 터미널을 걷으므로,
     /// 손잡이를 같이 버리면 루프가 걷힌 화면에 모른 채 그린다. [`App::follow`] 가
     /// 걸음마다 끝난 것을 join 해 패닉이면 되던진다. [`DISCARDED_KEPT`] 개까지 든다.
     discarded: Vec<std::thread::JoinHandle<()>>,
     /// [`DISCARDED_KEPT`] 를 넘겨 **아직 도는 채로 놓은** 손잡이 수. 그 스레드가 터지면
     /// 터미널이 걷히는데 되던질 길이 없다 — 화면이 그것을 말한다(`draw::banner`).
-    /// **붙박이다.** `trouble` 은 다음에 성공한 다시 읽기가 걷는데, 놓는 때가 곧 SPC r·SPC t w·
+    /// **붙박이다.** `trouble` 은 다음에 성공한 다시 읽기가 걷는데, 놓는 때가 곧 SPC v w·
     /// 쓰기가 새 읽기를 띄운 때라 몇백 ms 뒤에 사라진다. 놓은 스레드는 다시 볼 길이
     /// 없으므로 세션 내내 남긴다.
     let_go: usize,
@@ -602,7 +602,7 @@ pub struct App {
     /// 프레임마다, 보기 토글마다 담당·조상을 다시 풀지 않는다.
     pub unread: std::collections::BTreeSet<String>,
     /// 내 설정에 적힌 읽음 — 이슈 id → 마지막으로 본 때. 띄울 때 읽고, 읽음을 적을 때 락 안에서 읽은
-    /// 파일의 것으로, `SPC r` 에 다시 읽는다 — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다.
+    /// 파일의 것으로, 그 파일이 바뀌면 걸음이 다시 읽는다([`App::follow_config`]) — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다.
     seen: std::collections::BTreeMap<String, String>,
     /// 내가 누구인가 — `이름 (메일)`. **띄울 때, 프로젝트를 옮길 때, 묻는 칸에서 사람을 받을 때만**
     /// 푼다(moai-z9pc, moai-j038.vna) — 헤더(`told_user`)가 뿌리와 `user` 가 바뀔 때 다시 푸는 것과 같은
@@ -646,7 +646,7 @@ pub struct App {
     pub elsewhere: Vec<String>,
     /// 옆 워크트리를 **못 찾은** 까닭(`Gathered::unfound`) — git 밖 프로젝트다. 경로 줄에도 배너에도
     /// 안 세운다: 겹쳐 보기는 켜진 채로 시작해 git 밖 프로젝트를 볼 때마다 시키지 않은 말이 선다.
-    /// 사람이 `SPC t w` 로 **켰을 때만** 알림으로 한 번 댄다(moai-d5vn).
+    /// 사람이 `SPC v w` 로 **켰을 때만** 알림으로 한 번 댄다(moai-d5vn).
     pub unfound: Option<String>,
     /// 프로젝트 층([`layer`]). **`None` 이면 등록한 것이 없고 오늘 탐색기 그대로다.** 층이
     /// 있으면 지금 선 곳(`layer.at`)이 층이거나 한 프로젝트 안이고, 층에 선 동안에는 위의
@@ -656,6 +656,11 @@ pub struct App {
     /// 파일(`Layer::config`)을 쓴다. `cmd::tui` 가 `user_config::path()` 로 넣고, 시험은 임시
     /// 파일을 준다 — 여기서 환경을 읽으면 시험이 돌리는 사람의 설정을 고친다.
     pub user_config: Option<std::path::PathBuf>,
+    /// 사용자 설정 파일의 표식 — **걸음마다 잰다**(moai-en4u). 손으로 누르던 다시 읽기(`SPC r`)를 걷으며
+    /// 그 키만 보던 둘을 자동 갱신에 태웠다: 옆 터미널의 `moai read` 가 적은 읽음과, 밖에서
+    /// `moai project add|rm` 한 층의 줄. 둘 다 이 한 파일에 산다. `None` 은 아직 안 쟀다 — 첫 걸음이
+    /// 재기만 한다(띄울 때 이미 읽었다).
+    config_stamp: Option<crate::store::Stamp>,
     /// **띄운 자리**(cwd). 고르기 창이 처음 여기서 연다. 시험은 임시 디렉터리를 준다.
     ///
     /// 이름이 [`App::here`] 와 겹치지 않게 둔다 — 그쪽은 *지금 선 프로젝트*, 곧 **쓰기가
@@ -818,6 +823,7 @@ impl App {
             unfound: None,
             layer: None,
             user_config: None,
+            config_stamp: None,
             launched_at: None,
             pick_from: None,
             editor: None,
@@ -831,14 +837,14 @@ impl App {
     }
 
     /// 다시 읽는다. **거름망과 있던 자리는 지키려 애쓴다** — 갱신 한 번에
-    /// 하던 일이 흩어지면 SPC r 을 안 누르게 되고, 그러면 낡은 화면을 본다.
+    /// 하던 일이 흩어지면 갱신을 꺼리게 되고, 그러면 낡은 화면을 본다.
     ///
-    /// **사람이 누른 갱신(SPC r·SPC t w)은 그 자리에서 읽는다.** 누른 사람은 결과를 기다리고
+    /// **사람이 누른 갱신(SPC v w·쓰기 뒤)은 그 자리에서 읽는다.** 누른 사람은 결과를 기다리고
     /// 있고, `w` 는 켠 뜻대로 읽힌 화면이 곧바로 서야 한다. 스레드에서 짓던 것이
     /// 있으면 버린다 — 누르기 **전에** 시작한 읽기라 늦게 도착하면 방금 읽은 것을
     /// 옛 것으로 덮는다(`w` 를 끄기 전 설정으로 읽은 것이면 더더욱).
     pub fn reload(&mut self) {
-        // 층에서 누른 SPC r 은 사용자 설정부터 다시 읽고 프로젝트를 다시 연다.
+        // 층에서 부른 갱신은 사용자 설정부터 다시 읽고 프로젝트를 다시 연다.
         if self.on_layer() {
             self.reread_layer();
             return;
@@ -1321,7 +1327,7 @@ impl App {
 
     /// 파일이 우리가 읽은 뒤로 바뀌었으면 **저절로 다시 읽는다.**
     ///
-    /// 한때 말만 하고 F5(지금의 SPC r)를 기다렸다(moai-6qdx) — 읽으면 커서가 튀었기 때문이다.
+    /// 한때 말만 하고 F5(뒤의 SPC r, 지금은 걷었다 — moai-en4u)를 기다렸다(moai-6qdx) — 읽으면 커서가 튀었기 때문이다.
     /// 커서·기억 자리·굴린 자리가 줄의 정체를 따라가게 된 뒤로(moai-cera) 그 까닭이
     /// 없어졌고, 남은 것은 사람이 배너를 보고 키를 눌러야 하는 수고뿐이었다.
     ///
@@ -1343,6 +1349,7 @@ impl App {
     /// 뒤에도 파일이 또 바뀌었으면(표식은 읽기 전에 쟀다) 다음 걸음이 다시 띄운다.
     pub fn follow(&mut self) {
         self.reap();
+        self.follow_config();
         // 층은 제 표식을 따로 본다 — 층에 선 동안에는 아래(한 프로젝트)가 비어 할 일이 없다.
         self.follow_layer();
         self.follow_commits();
@@ -1381,7 +1388,7 @@ impl App {
             let repo = repo.clone();
             let worktree = self.worktree;
             let read = self.read;
-            // 받는 쪽이 사라졌으면(SPC r 로 버렸으면) 보내기가 실패한다 — 버린 것이라 그대로 둔다.
+            // 받는 쪽이 사라졌으면(사람이 누른 갱신이 버렸으면) 보내기가 실패한다 — 버린 것이라 그대로 둔다.
             let handle = std::thread::spawn(move || {
                 let _ = tx.send(read(&repo, worktree));
             });
@@ -1472,12 +1479,12 @@ impl App {
     }
 
     /// 걸린 거름망에 **제 줄이 걸린** 이슈 수. 걸린 것을 품어 남은 디렉터리는 안 센다.
-    /// 보기(`SPC s`)가 숨긴 줄도 안 센다 — 세어 놓고 목록에 없으면 셈이 거짓말이 된다.
+    /// 보기(`SPC v`)가 숨긴 줄도 안 센다 — 세어 놓고 목록에 없으면 셈이 거짓말이 된다.
     pub fn hit_count(&self) -> usize {
         (0..self.keep.len()).filter(|&at| self.visible(at)).count()
     }
 
-    /// 거름망에 걸렸는데 **보기(`SPC s`)가 숨긴** 이슈 수(moai-2kyl 단계 리뷰). 검색 칸이 `N건` 곁에 댄다 —
+    /// 거름망에 걸렸는데 **보기(`SPC v`)가 숨긴** 이슈 수(moai-2kyl 단계 리뷰). 검색 칸이 `N건` 곁에 댄다 —
     /// 끝난 일을 찾는데 `0건` 만 서면 없는 줄 알고, 까닭을 대는 경로 줄의 뱃지는 좁으면 빠진다.
     pub fn veiled_count(&self) -> usize {
         (0..self.keep.len()).filter(|&at| self.veil(at) == Veil { filtered: false, viewed: true }).count()
@@ -1753,7 +1760,26 @@ impl App {
         self.recount_unread();
     }
 
-    /// 적어 둔 읽음을 파일에서 다시 든다 — `SPC r` 이 부른다(moai-j038.vna). 띄울 때 한 번만 읽으면 옆
+    /// 사용자 설정 파일이 바뀌었으면 거기 사는 둘을 다시 든다 — 적어 둔 읽음과 층의 줄(moai-en4u).
+    /// 한때 손으로 누르는 다시 읽기(`SPC r`)만 이 둘을 읽었다. 키를 걷으며 걸음마다 재는 표식에 태웠다
+    /// — 누르는 것을 잊으면 옆 터미널의 `moai read` 가 적은 줄에 [NEW] 가 남고, 밖에서 등록한
+    /// 프로젝트가 층에 안 선다.
+    ///
+    /// **이 탐색기가 쓴 것에도 한 번 돈다**(보기 토글·읽음). 막지 않는다 — 제 쓰기만 골라 건너뛰려면
+    /// 쓰기마다 표식을 다시 재야 하고, 그 틈에 옆이 쓴 것을 제 것으로 삼킨다. 도는 값은 파일 하나
+    /// 읽기와, 층이 있으면 낡은 줄만 스레드로 다시 읽는 것이다(`relayer` — 본 줄의 셈은 옮겨 든다).
+    fn follow_config(&mut self) {
+        let Some(path) = self.user_config.as_deref() else { return };
+        let now = crate::store::stamp(path);
+        let Some(was) = self.config_stamp.replace(now) else { return };
+        if was == now {
+            return;
+        }
+        self.reread_seen();
+        self.relayer(None);
+    }
+
+    /// 적어 둔 읽음을 파일에서 다시 든다 — 설정 파일이 바뀌면 부른다([`App::follow_config`], moai-j038.vna). 띄울 때 한 번만 읽으면 옆
     /// 터미널의 `moai read` 나 다른 탐색기가 적은 읽음이 이 화면에 영영 안 닿는다. 못 읽으면 들고 있던
     /// 것을 둔다(`user_config::read_marks_at`).
     fn reread_seen(&mut self) {
@@ -1782,10 +1808,10 @@ impl App {
             .map(|a| crate::model::label(&a.name, Some(&a.email), crate::config::Naming::Full))
     }
 
-    /// 읽었다고 적는다(moai-z9pc) — `r`(이 줄)·`SPC m a`(안 읽은 것 전부)·`SPC m r`(이 묶음과 그 밑).
+    /// 읽었다고 적는다(moai-z9pc) — `r`(이 줄)·`SPC m a`(안 읽은 것 전부)·`SPC m g`(이 묶음과 그 밑).
     ///
     /// **CLI 의 `moai read` 와 같은 자다**(moai-j038.vna) — `r` 은 `moai read <id>` 처럼 그 줄을 적고(내게
-    /// 온 줄이 아니어도, 누군지 몰라도), `SPC m a` 는 `--all` 처럼 내게 온 안 읽은 것을, `SPC m r` 은
+    /// 온 줄이 아니어도, 누군지 몰라도), `SPC m a` 는 `--all` 처럼 내게 온 안 읽은 것을, `SPC m g` 은
     /// `-e` 처럼 [`crate::nav::Index::under_group`] 을 적는다. 한때 `r` 은 안 읽은 줄만 적어, 같은 "이
     /// 줄을 읽었다" 가 두 표면에서 다른 상태를 남겼다.
     ///
@@ -1868,13 +1894,13 @@ impl App {
         });
     }
 
-    /// `SPC m r` 이 읽을 묶음(에픽·마일스톤)의 id(moai-j038.vna) — 커서가 묶음 줄에 섰으면 그 묶음, 아니면
+    /// `SPC m g` 이 읽을 묶음(에픽·마일스톤)의 id(moai-j038.vna) — 커서가 묶음 줄에 섰으면 그 묶음, 아니면
     /// 지금 경로에서 **가장 안쪽의 에픽·마일스톤**이다. 에픽 줄에서 누르면 그 에픽이 든 마일스톤이 아니라
     /// 그 에픽이다 — 누른 사람이 시키지 않은 줄을 읽지 않는다.
     ///
     /// **뿌리도 바구니도 이슈 폴더도 묶음이 아니다.** 경로를 그대로 묶음으로 쓰던 때는 빈 경로(뿌리)만
     /// 막아, 마일스톤이 하나라도 있는 저장소에서 `(마일스톤 없음)` 안의 줄에 서서 누르면 마일스톤 밖의 안
-    /// 읽은 것이 통째로 적혔다(`(길 잃음)` 도 같다) — `SPC m r` 이 `SPC m a` 가 되고, 되돌리는 길은 도구 밖에만
+    /// 읽은 것이 통째로 적혔다(`(길 잃음)` 도 같다) — `SPC m g` 이 `SPC m a` 가 되고, 되돌리는 길은 도구 밖에만
     /// 있다. 자식 있는 이슈 폴더 안에서 누르면 그 폴더만 읽고 에픽의 나머지와 묶음 줄 자신을 빠뜨렸다.
     fn group_of(&self, e: &Entry) -> Option<String> {
         if let Entry::Dir { at: Some(at), .. } = e
@@ -1888,7 +1914,7 @@ impl App {
         })
     }
 
-    /// 보기 토글 하나(`SPC s`). **커서는 줄의 정체로 붙든다** — 숨긴 줄에 서 있었으면 그 자리
+    /// 보기 토글 하나(`SPC v`). **커서는 줄의 정체로 붙든다** — 숨긴 줄에 서 있었으면 그 자리
     /// 가까이 남는다. 첨자로 두면 위에서 줄이 빠질 때마다 커서가 딴 이슈로 미끄러진다.
     ///
     /// `rows` 는 키 처리가 **이미 센 목록**이다(moai-zrzo) — 여기서 `current()` 로 다시 세면 토글 한 번에
@@ -1914,7 +1940,7 @@ impl App {
         self.save_look();
     }
 
-    /// 지금 디렉터리의 줄들. 차례는 고른 것(`SPC o`)이다.
+    /// 지금 디렉터리의 줄들. 차례는 고른 것(`SPC s`)이다.
     pub fn rows(&self) -> Vec<Row> {
         if let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) {
             return (0..l.places.len()).map(Row::Project).collect();
@@ -2048,11 +2074,6 @@ impl App {
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             B::ClearFilter => self.clear_filter(),
-            // 적어 둔 읽음도 다시 든다(moai-j038.vna) — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다.
-            B::Reload => {
-                self.reread_seen();
-                self.reload();
-            }
             // 켜고 끄는 것은 **다시 읽는 것**이다. 겹친 줄은 적재 때 한 번 세는 것이라
             // (`Ground`·색인·경고), 들고 있는 것에 덧칠하면 셈이 옛 줄로 남는다.
             // **켰는데 겹칠 것이 없으면 한 번 말한다**(moai-d5vn). 경로 줄은 옆이 없으면 비므로, 말이
@@ -2654,7 +2675,7 @@ mod tests {
     }
 
     impl App {
-        /// 사람이 적는 키 이름의 열을 누른다 — `"SPC t w"`. 표의 이름과 같은 글로 시험을 적는다.
+        /// 사람이 적는 키 이름의 열을 누른다 — `"SPC v w"`. 표의 이름과 같은 글로 시험을 적는다.
         pub fn hit(&mut self, names: &str) {
             for k in keys::parse_seq(names).unwrap_or_else(|| panic!("`{names}` 를 키로 못 푼다")) {
                 self.key(k);
@@ -2670,7 +2691,7 @@ mod tests {
         a.rows().iter().filter_map(|r| if let Row::Item(e) = r { e.at() } else { None }).map(|at| a.issues[at].id.clone()).collect()
     }
 
-    /// **처음에는 done 을 숨기고 `SPC s` 가 칸·미룸을 켜고 끈다**(moai-fmv5). 보기는 거름망이
+    /// **처음에는 done 을 숨기고 `SPC v` 가 칸·미룸을 켜고 끈다**(moai-fmv5). 보기는 거름망이
     /// 아니라 Esc 가 안 푼다. 끝난 멤버가 있어도 안 끝난 멤버가 있는 에픽은 선다. 토글 뒤에도
     /// 커서는 보던 줄에 붙는다.
     #[test]
@@ -2690,18 +2711,18 @@ mod tests {
         a.hit("Bksp");
 
         a.cursor = 1;
-        a.hit("SPC s d");
+        a.hit("SPC v d");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0009", "argos-0010"]);
         assert_eq!(row_ids(&a)[a.cursor], "argos-0010", "토글이 커서를 딴 줄로 옮겼다");
         a.hit("Esc");
         assert_eq!(row_ids(&a).len(), 3, "Esc 가 보기를 풀었다");
 
-        a.hit("SPC s z");
+        a.hit("SPC v l");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0009"], "미룸이 안 숨었다");
         // 설정의 넷째 칸이 done 이다 — 번호로 누른 것과 `d` 가 같은 칸을 만진다.
-        a.hit("SPC s 4");
+        a.hit("SPC v 4");
         assert_eq!(row_ids(&a), ["argos-0001"]);
-        a.hit("SPC s a");
+        a.hit("SPC v a");
         assert_eq!(row_ids(&a).len(), 3, "모두 보이기가 다 안 보인다");
     }
 
@@ -2783,7 +2804,7 @@ mod tests {
         for f in view::Field::ALL {
             assert_eq!(a.fields.shows(f), f == view::Field::Id, "{} 이 적힌 fields 를 안 따랐다", f.name());
         }
-        a.hit("SPC c g");
+        a.hit("SPC c t");
 
         let text = std::fs::read_to_string(&user).unwrap();
         let (back, _) = crate::user_config::read_look(Some(&user));
@@ -2825,7 +2846,7 @@ mod tests {
         assert_eq!(b.notice, None, "제가 적은 설정을 읽으며 말이 섰다");
     }
 
-    /// **`SPC o` 가 차례를 고르고, 같은 키를 다시 누르면 거꾸로 선다**(moai-55cp). 다른 키로 가면
+    /// **`SPC s` 가 차례를 고르고, 같은 키를 다시 누르면 거꾸로 선다**(moai-55cp). 다른 키로 가면
     /// 그 키의 제 방향부터다. 커서는 보던 줄에 붙는다.
     #[test]
     fn the_sort_menu_orders_rows_and_the_same_key_reverses() {
@@ -2841,18 +2862,18 @@ mod tests {
         ];
         let mut a = App::new(issues, cfg(), Path::new());
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0003"]);
-        a.hit("SPC o c");
+        a.hit("SPC s c");
         assert_eq!(row_ids(&a), ["argos-0002", "argos-0001", "argos-0003"], "새것이 위가 아니다");
         assert_eq!(a.cursor, 1, "커서가 보던 줄(argos-0001)을 놓쳤다");
-        a.hit("SPC o c");
+        a.hit("SPC s c");
         assert_eq!(row_ids(&a), ["argos-0003", "argos-0001", "argos-0002"], "다시 눌렀는데 안 뒤집혔다");
         // 메뉴의 표시도 같은 한 벌(`Ctx::sorting`)을 읽는다 — 고른 차례에만 붙고 방향은 낱말로 댄다(moai-y61p 단계 리뷰).
         let ctx = a.key_ctx(&a.rows());
         assert_eq!(keys::Browse::Sort(keys::Order::Created).state(&ctx), Some("[● 거꾸로]"), "메뉴가 고른 차례·방향을 모른다");
         assert_eq!(keys::Browse::Sort(keys::Order::Priority).state(&ctx), None, "고르지 않은 차례에 표시가 붙었다");
-        a.hit("SPC o t");
+        a.hit("SPC s t");
         assert_eq!(a.order, keys::Sorting { by: keys::Order::Title, reversed: false }, "다른 키가 거꾸로를 물려받았다");
-        a.hit("SPC o p");
+        a.hit("SPC s p");
         assert_eq!(a.order, Default::default());
     }
 
@@ -3352,7 +3373,7 @@ mod tests {
         a.hit("SPC q");
         assert!(a.quit, "SPC q 로 못 나갔다");
         // 메뉴가 열린 채로도, 하위 층에서도 Ctrl-C 는 끝낸다.
-        for open in ["SPC", "SPC t"] {
+        for open in ["SPC", "SPC v"] {
             let mut a = app();
             a.hit(open);
             a.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
@@ -3408,7 +3429,7 @@ mod tests {
         // Bksp 는 한 층 위 — 뒤의 목록을 나가지 않는다.
         a.key(key(KeyCode::Enter));
         let inside = a.path.clone();
-        a.hit("SPC t");
+        a.hit("SPC v");
         a.key(key(KeyCode::Backspace));
         assert_eq!(menu::title(a.chord.held()), "SPC");
         a.key(key(KeyCode::Backspace));
@@ -3426,14 +3447,14 @@ mod tests {
         a.hit("SPC n");
         assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
         let mut a = app();
-        a.hit("SPC t r");
+        a.hit("SPC v r");
         assert!(a.raw && !menu::open(&a.chord));
         let was = a.worktree;
-        a.hit("SPC t w");
+        a.hit("SPC v w");
         assert_eq!(a.worktree, !was);
     }
 
-    /// **`SPC m r` 은 커서가 든 묶음까지만 읽는다**(moai-z9pc.9av). 에픽 밖의 줄에서 누르면
+    /// **`SPC m g` 은 커서가 든 묶음까지만 읽는다**(moai-z9pc.9av). 에픽 밖의 줄에서 누르면
     /// 그 줄의 자리가 뿌리(빈 경로)라, 빈 경로로 `starts_with` 를 걸던 옛 식은 저장소의 안 읽은
     /// 줄을 통째로 읽음으로 적었다 — 한 번 적히면 도구 안에 되돌릴 길이 없다.
     #[test]
@@ -3453,20 +3474,20 @@ mod tests {
         // 에픽 밖의 줄에서 누른다 — 아무것도 안 읽고 까닭을 댄다.
         let rows = row_ids(&a);
         a.cursor = rows.iter().position(|id| id == "argos-0009").expect("에픽 없는 줄이 없다");
-        a.hit("SPC m r");
+        a.hit("SPC m g");
         assert_eq!(a.unread.len(), all, "묶음 밖에서 누른 것이 저장소를 통째로 읽었다");
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("묶음")), "{:?}", a.notice);
 
         // 에픽 줄에서 누르면 **그 에픽과 그 멤버만** 선다 — 옆 에픽은 그대로다.
         a.cursor = rows.iter().position(|id| id == "argos-0001").expect("에픽 줄이 없다");
-        a.hit("SPC m r");
+        a.hit("SPC m g");
         let left: Vec<&str> = a.unread.iter().map(String::as_str).collect();
         assert_eq!(left, ["argos-0002", "argos-0009"], "에픽 하나를 읽었는데 남은 것이 다르다");
     }
 
     /// **바구니도 이슈 폴더도 묶음이 아니다**(moai-j038.vna). 마일스톤이 하나라도 있으면 에픽 없는 줄과
     /// 마일스톤 없는 에픽은 `(마일스톤 없음)` 에 서는데, 경로를 그대로 묶음으로 읽던 때는 거기 선 줄에서
-    /// 누른 `SPC m r` 이 마일스톤 밖의 안 읽은 것을 통째로 적었다 — 뿌리에서 막은 것과 같은 일이다. 멤버
+    /// 누른 `SPC m g` 이 마일스톤 밖의 안 읽은 것을 통째로 적었다 — 뿌리에서 막은 것과 같은 일이다. 멤버
     /// 줄에서 누르면 **묶음 줄 자신도** 읽고(`moai read -e` 와 같은 자 — `nav::Index::under_group`), 자식
     /// 있는 멤버의 폴더 안에서 눌러도 그 폴더가 아니라 그것이 든 에픽이다.
     #[test]
@@ -3501,13 +3522,13 @@ mod tests {
 
         // `(마일스톤 없음)` 안의 에픽 없는 줄 — 아무것도 안 읽고 까닭을 댄다.
         stand(&mut a, vec![Seg::Milestone(None)], "argos-0009");
-        a.hit("SPC m r");
+        a.hit("SPC m g");
         assert_eq!(a.unread.len(), all, "바구니를 묶음으로 읽었다 — {:?}", a.unread);
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("묶음")), "{:?}", a.notice);
 
         // 자식 있는 멤버의 폴더 안에서 누르면 그것이 든 **에픽과 그 밑 전부, 에픽 줄까지**다.
         stand(&mut a, vec![Seg::Milestone(None), Seg::Epic("argos-0001".into()), Seg::Issue("argos-0003".into())], "argos-0003.aa1");
-        a.hit("SPC m r");
+        a.hit("SPC m g");
         let left: Vec<&str> = a.unread.iter().map(String::as_str).collect();
         assert_eq!(left, ["argos-0009", "argos-0010", "argos-0100"], "에픽을 다 못 읽었거나 밖을 읽었다");
     }
@@ -3548,11 +3569,14 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&config).unwrap(), later, "옆에서 적은 새 때를 옛 때로 덮었다");
         assert!(!a.unread.contains("argos-0001"), "적은 뒤 파일의 표를 안 들었다");
 
-        // `SPC r` 도 파일의 표를 다시 든다.
-        std::fs::write(&config, format!("{later}argos-0002 = \"2026-09-14T00:00:00Z\"\n")).unwrap();
+        // 옆에서 적은 읽음은 **누르지 않아도** 든다 — 걸음이 설정 파일의 표식을 잰다(moai-en4u).
+        // 첫 걸음은 재기만 한다: 띄울 때 이미 읽었다.
+        a.follow();
         assert!(a.unread.contains("argos-0002"));
-        a.hit("SPC r");
-        assert!(!a.unread.contains("argos-0002"), "SPC r 이 옆에서 적은 읽음을 안 들었다");
+        std::fs::write(&config, format!("{later}argos-0002 = \"2026-09-14T00:00:00Z\"\n")).unwrap();
+        assert!(a.unread.contains("argos-0002"), "걸음 전에 들었다 — 시험의 전제가 틀렸다");
+        a.follow();
+        assert!(!a.unread.contains("argos-0002"), "옆에서 적은 읽음을 걸음이 안 들었다");
     }
 
     /// **바로 누르던 키는 더는 뜻이 없다**(moai-7sjm) — `f`·`n`·`w`·`a`·`d`·`m`·Delete·F키. 목록·
@@ -3613,7 +3637,7 @@ mod tests {
     #[test]
     fn a_paste_closes_an_open_menu() {
         let mut a = app();
-        a.hit("SPC t");
+        a.hit("SPC v");
         a.paste("q");
         assert!(!menu::open(&a.chord), "붙여넣기가 메뉴를 안 닫았다");
         a.key(key(KeyCode::Char('q')));
@@ -3944,7 +3968,7 @@ mod tests {
     }
 
     /// 갱신해도 걸어 둔 거름망은 살아 있다. 갱신 한 번에 하던 일이 흩어지면
-    /// SPC r 을 안 누르게 되고, 그러면 낡은 화면을 본다.
+    /// 갱신을 꺼리게 되고, 그러면 낡은 화면을 본다.
     #[test]
     fn reloading_keeps_the_filter() {
         let mut a = app();
@@ -4000,7 +4024,7 @@ mod tests {
 
     /// **연 뒤 커밋 표를 스레드에서 짓고, 커밋이 새로 서면 다시 읽은 뒤 새 표를 짓는다**
     /// (moai-a4i0). 연 순간에는 표가 없다 — 여는 읽기가 git 을 기다리지 않는다. 표를 짓는 것은
-    /// 파일을 다시 읽는 일이 아니라 `loading` 이 아니다. 루프에서 도는 다시 읽기(쓰기·SPC r)도
+    /// 파일을 다시 읽는 일이 아니라 `loading` 이 아니다. 루프에서 도는 다시 읽기(쓰기·SPC v w)도
     /// 표를 짓지 않는다 — 그 자리에서 이력을 걸으면 쓸 때마다 화면이 멈춘다.
     #[test]
     fn it_gathers_commits_after_opening_and_again_when_head_moves() {
@@ -4044,7 +4068,7 @@ mod tests {
         gathered(&mut a);
         assert_eq!(subjects(&a), ["fix: 다음 (argos-0001)", "feat: 처음 (argos-0001)"], "커밋이 섰는데 표를 새로 안 가져왔다");
 
-        // 겹쳐 보기를 꺼도(`SPC t w`) HEAD 를 지켜본다 — 끈 읽기도 HEAD 표식을 들고 온다.
+        // 겹쳐 보기를 꺼도(`SPC v w`) HEAD 를 지켜본다 — 끈 읽기도 HEAD 표식을 들고 온다.
         a.worktree = false;
         a.reload();
         assert!(a.commits_job.is_none(), "루프에서 도는 다시 읽기가 표를 그 자리에서 지었다");
@@ -4162,7 +4186,7 @@ mod tests {
         assert_ne!(a.now, "읽기 전", "옆 스냅샷이 바뀐 것을 못 알아챘다");
     }
 
-    /// **사람이 누른 갱신이 스레드의 늦은 결과에 덮이지 않는다.** SPC r 을 누르기 전에
+    /// **사람이 누른 갱신이 스레드의 늦은 결과에 덮이지 않는다.** 갱신을 부르기 전에
     /// 띄운 읽기는 누른 뒤의 파일보다 옛것일 수 있다.
     #[test]
     fn a_manual_reload_drops_the_read_in_flight() {
@@ -4178,8 +4202,8 @@ mod tests {
         std::fs::write(dir.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&make("argos-0001", Kind::Epic)).unwrap())).unwrap();
         a.follow();
         assert!(a.loading());
-        a.hit("SPC r");
-        assert!(!a.loading(), "SPC r 이 짓던 것을 안 버렸다");
+        a.reload();
+        assert!(!a.loading(), "사람이 부른 갱신이 짓던 것을 안 버렸다");
         assert_eq!(a.issues.len(), 1);
     }
 
@@ -4226,7 +4250,7 @@ mod tests {
         Ok(f)
     }
 
-    /// **사람이 SPC t w 로 켰는데 옆을 못 찾으면 까닭을 한 번 댄다**(moai-d5vn). 시작할 때의
+    /// **사람이 SPC v w 로 켰는데 옆을 못 찾으면 까닭을 한 번 댄다**(moai-d5vn). 시작할 때의
     /// 겹쳐 보기는 시키지 않은 것이라 말하지 않지만, 누른 사람은 아무것도 안 바뀐 화면만 보면
     /// 키가 고장 난 줄 안다. 알림이라 다음 키에 걷힌다 — 경로 줄에 박아 두면 git 밖 프로젝트를
     /// 볼 때마다 줄을 먹는다.
@@ -4235,19 +4259,21 @@ mod tests {
         let (_scratch, mut a) = writable("overlay-lost");
         a.read = lost;
         assert!(a.worktree);
-        a.hit("SPC t w");
+        a.hit("SPC v w");
         assert!(!a.worktree);
         assert_eq!(a.notice, None, "끌 때 까닭을 댔다");
-        a.hit("SPC t w");
+        a.hit("SPC v w");
         assert!(a.worktree);
         let said = a.notice.clone().expect("켰는데 못 찾은 까닭을 안 댄다");
         assert!(said.contains("git 저장소가 아니다") && said.contains("옆 워크트리"), "{said}");
-        a.hit("SPC r");
+        // 알림은 다음 키에 걷힌다 — 키 없이 부르는 다시 읽기가 새로 대지 않는지만 본다.
+        a.notice = None;
+        a.reload();
         assert_eq!(a.notice, None, "시키지 않은 다시 읽기가 까닭을 또 댔다");
         // 찾았는데 옆이 비었으면 까닭 없이 없다고만 한다 — 경로 줄이 비어 달리 알 길이 없다.
         a.read = prepare_found;
-        a.hit("SPC t w");
-        a.hit("SPC t w");
+        a.hit("SPC v w");
+        a.hit("SPC v w");
         let said = a.notice.clone().expect("켰는데 겹칠 것이 없다고 안 한다");
         assert!(said.contains("옆 워크트리 없음") && !said.contains("못 찾았다"), "{said}");
     }
@@ -4262,7 +4288,7 @@ mod tests {
         panic!("버린 읽기가 터졌다")
     }
 
-    /// **SPC r 이 버린 읽기가 패닉하면 다음 걸음이 되던진다.** 패닉 훅은 이미 터미널을
+    /// **사람이 누른 갱신이 버린 읽기가 패닉하면 다음 걸음이 되던진다.** 패닉 훅은 이미 터미널을
     /// 걷었다 — 손잡이를 같이 버리면 루프는 걷힌 화면에 모른 채 그린다(1b63abe 가
     /// 받은 스레드에만 막은 구멍).
     #[test]
@@ -4274,10 +4300,10 @@ mod tests {
         assert!(a.loading());
         // 사람이 누른 갱신은 진짜 길로 읽는다 — 터지는 것은 버린 스레드뿐이다.
         a.read = prepare;
-        a.hit("SPC r");
-        assert!(!a.loading(), "SPC r 이 짓던 것을 안 버렸다");
+        a.reload();
+        assert!(!a.loading(), "사람이 부른 갱신이 짓던 것을 안 버렸다");
         assert!(a.reaping(), "버린 손잡이를 안 들었다 — 루프가 빠른 걸음으로 안 깬다");
-        assert_eq!(a.issues.len(), 2, "SPC r 이 제 자리에서 안 읽었다");
+        assert_eq!(a.issues.len(), 2, "사람이 부른 갱신이 제 자리에서 안 읽었다");
 
         discarded_settle(&a);
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.follow()));
@@ -4286,14 +4312,14 @@ mod tests {
     }
 
     /// **버린 읽기가 제대로 끝나면 join 만 하고 결과는 안 들인다.** 다시 읽으러 가지도
-    /// 않는다 — SPC r 이 표식을 이미 올렸다.
+    /// 않는다 — 누른 갱신이 표식을 이미 올렸다.
     #[test]
     fn a_discarded_read_that_finishes_is_joined_and_ignored() {
         let (scratch, mut a) = writable("discard-ok");
         touch_outside(&scratch);
         a.follow();
         assert!(a.loading());
-        a.hit("SPC r");
+        a.reload();
         assert!(a.reaping());
         let stamp = a.stamp;
 
@@ -4326,11 +4352,11 @@ mod tests {
         touch_outside(&scratch);
         a.follow();
         assert!(a.loading());
-        a.hit("SPC r");
+        a.reload();
         assert_eq!(a.discarded.len(), DISCARDED_KEPT, "든 손잡이가 상한을 넘었다");
         // **도는 것을 놓았으면 화면이 말한다**(moai-j9on) — 그 스레드가 터지면 터미널이
         // 걷히는데 되던질 손잡이가 없다. 다시 읽기가 걷는 `trouble` 이 아니라 붙박이다:
-        // SPC r 이 짓는 읽기가 끝나는 순간 걷히면 몇백 ms 뒤에 사라진다.
+        // 누른 갱신이 짓는 읽기가 끝나는 순간 걷히면 몇백 ms 뒤에 사라진다.
         assert_eq!(a.let_go, 1);
         let said = super::draw::tests_banner(&mut a);
         assert!(said.contains("다시 읽기 1개를 놓았다"), "도는 스레드를 말없이 놓았다 — {said:?}");
@@ -4370,7 +4396,7 @@ mod tests {
         let (ptx, prx) = std::sync::mpsc::channel();
         a.pending = Some((prx, std::thread::spawn(move || drop(ptx))));
 
-        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.hit("SPC r")));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.reload()));
         drop(tx);
         let payload = caught.expect_err("꽉 찼을 때 끝난 패닉을 거두지 않고 놓았다");
         assert_eq!(payload.downcast_ref::<&str>(), Some(&"가장 오래된 것이 터졌다"));
@@ -4503,24 +4529,24 @@ mod tests {
     #[test]
     fn the_view_hiding_the_new_line_names_the_view_not_the_filter() {
         let (_scratch, mut a) = writable("land-view");
-        a.hit("SPC s 1");
+        a.hit("SPC v 1");
         assert!(add_idea(&mut a, "argos-0002").is_some());
         assert_eq!(a.issues.len(), 2, "쓰기가 안 닿았다");
-        assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002 — 보기에 가려 안 보인다 · SPC s a 로 모두 보인다"));
+        assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002 — 보기에 가려 안 보인다 · SPC v a 로 모두 보인다"));
     }
 
-    /// **거름망과 보기가 함께 가리면 둘 다 댄다**(moai-2kyl 단계 리뷰) — 보기만 대면 `SPC s a` 를 눌러도
+    /// **거름망과 보기가 함께 가리면 둘 다 댄다**(moai-2kyl 단계 리뷰) — 보기만 대면 `SPC v a` 를 눌러도
     /// 거름망에 여전히 가려 누른 키가 아무것도 안 한다.
     #[test]
     fn the_filter_and_the_view_hiding_the_new_line_are_both_named() {
         let (_scratch, mut a) = writable("land-both");
         a.hit("SPC f");
         typed(&mut a, "type=epic");
-        a.hit("SPC s 1");
+        a.hit("SPC v 1");
         assert!(add_idea(&mut a, "argos-0002").is_some());
         assert_eq!(
             a.notice.as_deref(),
-            Some("✓ 담김 · argos-0002 — 거름망과 보기에 가려 안 보인다 · Esc 로 풀고 SPC s a 로 모두 보인다")
+            Some("✓ 담김 · argos-0002 — 거름망과 보기에 가려 안 보인다 · Esc 로 풀고 SPC v a 로 모두 보인다")
         );
     }
 
@@ -4531,13 +4557,13 @@ mod tests {
         let user = s.join("user.toml");
         let mut a = App::new(Vec::new(), cfg(), Path::new());
         a.user_config = Some(user.clone());
-        a.hit("SPC s d");
-        a.hit("SPC s z");
-        a.hit("SPC o u");
-        a.hit("SPC o u");
+        a.hit("SPC v d");
+        a.hit("SPC v l");
+        a.hit("SPC s u");
+        a.hit("SPC s u");
         a.hit("SPC c a");
         a.hit("SPC c i");
-        a.hit("SPC t d");
+        a.hit("SPC v p");
         let text = std::fs::read_to_string(&user).expect("보기가 설정에 안 적혔다");
         assert!(text.contains("[tui]") && text.contains("sort = \"updated\""), "{text}");
 
@@ -4566,11 +4592,11 @@ mod tests {
 
         // 모르는 낱말은 토글 한 번에 지워지지 않는다 — 새 바이너리가 적은 것일 수 있다. 겹쳐 적힌 done 은
         // 한 번에 보인다.
-        c.hit("SPC s d");
+        c.hit("SPC v d");
         assert!(!c.view.hides(crate::config::DONE), "겹쳐 적힌 done 이 한 번 눌러서는 안 보였다");
         let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
         assert!(text.contains("sort = \"nope\"") && text.contains("sort_reversed = true") && text.contains("\"what\""), "{text}");
-        c.hit("SPC o t");
+        c.hit("SPC s t");
         let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
         assert!(text.contains("sort = \"title\"") && text.contains("sort_reversed = false") && text.contains("\"what\""), "{text}");
 
@@ -4594,10 +4620,10 @@ mod tests {
         let mut a = App::new(Vec::new(), cfg(), Path::new());
         a.user_config = Some(user.clone());
         a.load_look();
-        a.hit("SPC o t");
+        a.hit("SPC s t");
         assert!(a.notice.clone().unwrap_or_default().contains("tui.sort"), "{:?}", a.notice);
         a.notice = None;
-        a.hit("SPC s d");
+        a.hit("SPC v d");
         assert_eq!(a.notice, None, "건너뛴 키를 다음 저장에 또 실었다");
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(text.contains("sort.by = \"created\"") && text.contains("hidden"), "숨김이 안 적혔다\n{text}");
@@ -4632,8 +4658,8 @@ mod tests {
         };
         let (mut a, mut b) = (open(), open());
         a.hit("SPC c a");
-        b.hit("SPC s d");
-        b.hit("SPC o u");
+        b.hit("SPC v d");
+        b.hit("SPC s u");
         let c = open();
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(c.fields.shows(view::Field::Assignee), "옆 탐색기가 켠 열을 지웠다\n{text}");
@@ -4641,7 +4667,7 @@ mod tests {
     }
 
     /// **숨김은 이 프로젝트의 칸에만 건다**(moai-2kyl 단계 리뷰). 다른 프로젝트에서 숨긴 칸 이름이 이 프로젝트의
-    /// 줄(설정에서 이름이 바뀐 옛 칸에 남은 줄)을 말없이 숨기지 않고 — 뱃지도 번호 토글도 없다 — `SPC s a` 도
+    /// 줄(설정에서 이름이 바뀐 옛 칸에 남은 줄)을 말없이 숨기지 않고 — 뱃지도 번호 토글도 없다 — `SPC v a` 도
     /// 그 이름을 걷지 않는다. 그 칸이 있는 프로젝트로 돌아가면 다시 숨는다.
     #[test]
     fn a_hidden_name_this_project_lacks_neither_hides_rows_nor_is_wiped() {
@@ -4651,7 +4677,7 @@ mod tests {
         a.view.hidden.push("blocked".into());
         a.see();
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0002"], "설정에 없는 칸 이름이 줄을 말없이 숨겼다");
-        a.hit("SPC s a");
+        a.hit("SPC v a");
         assert!(a.view.hides("blocked"), "모두 보이기가 다른 프로젝트의 칸 이름을 걷었다");
         assert!(!a.view.hides(crate::config::DONE));
     }
@@ -5093,8 +5119,7 @@ mod tests {
         for k in [KeyCode::Down, KeyCode::Enter, KeyCode::Backspace, KeyCode::Tab] {
             a.key(key(k));
         }
-        a.hit("SPC r");
-        a.hit("SPC t r");
+        a.hit("SPC v r");
         a.key(key(KeyCode::Char('/')));
         type_in(&mut a, "제목");
         a.key(key(KeyCode::Enter));

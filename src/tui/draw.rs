@@ -733,10 +733,10 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // **옆이 없으면 안 세운다**(moai-d5vn). 겹쳐 보기는 켜진 채로 시작하므로(moai-zcuh) "옆
     // 워크트리 없음" 을 세우면 모든 프로젝트의 경로 줄 절반을 늘 먹는다 — 옆이 없으면 켜진 화면과
     // 꺼진 화면이 정말로 같아 가를 것이 없다. 켜짐은 메뉴의 `[켜짐]` 이 댄다. 못 찾은 까닭은
-    // `SPC t w` 로 켰을 때 알림이 댄다(`App::unfound`).
-    // **끄는 법은 끌 수 있는 자리에서만 댄다** — 층에서는 `SPC t w` 가 메뉴에 안 서고 말없이
+    // `SPC v w` 로 켰을 때 알림이 댄다(`App::unfound`).
+    // **끄는 법은 끌 수 있는 자리에서만 댄다** — 층에서는 `SPC v w` 가 메뉴에 안 서고 말없이
     // 꺼져 있으므로(`Browse::enabled`), 적어 두면 눌러도 아무 일이 없는 키가 된다. 키 이름은
-    // 표에서 읽는다 — `w` 가 `SPC t w` 로 옮겨 간 뒤에도 옛 이름을 대던 자리다.
+    // 표에서 읽는다 — `w` 가 `SPC v w` 로 옮겨 간 뒤에도 옛 이름을 대던 자리다.
     let trees = app.origin.labels();
     let overlay = (app.worktree && !trees.is_empty()).then(|| {
         let names = trees.join(", ");
@@ -752,7 +752,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     };
     // **보기가 숨긴 것을 댄다**(moai-fmv5) — done 을 숨긴 채 시작하므로, 안 대면 끝난 일이 사라진
     // 줄 안다. 거름망 뱃지와 달리 **늘 서 있는 것**이라 경로의 몫을 굶기지 않는다: 경로에 여덟 칸이
-    // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC s` 가 댄다. 층에서는 보기가 뜻이 없다.
+    // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v` 가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
     let sorted = (app.order != Default::default()).then(|| {
         format!("정렬 {}{}", app.order.by.word(), if app.order.reversed { " 거꾸로" } else { "" })
@@ -1510,7 +1510,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     let hint = format!(" ({hint})");
     scroll_mark(f, &app.detail, at, &hint, app.focus == Pane::Detail);
     // **넘친 줄은 잘렸다고 말한다.** `Wrap` 을 끈 뒤로 폭을 넘는 줄은 위젯이
-    // 표시도 없이 잘라 낸다 — 태그 줄, 롤업의 칸별 건수, `SPC t r` 원문, 접지
+    // 표시도 없이 잘라 낸다 — 태그 줄, 롤업의 칸별 건수, `SPC v r` 원문, 접지
     // 않기로 한 코드 줄이 그 길로 조용히 꼬리를 잃었다. 만드는 쪽마다 따로
     // 자르면 또 하나를 빠뜨리므로 **나가는 마지막 자리에서 한 번** 자른다.
     let lines: Vec<Line> = lines.into_iter().map(|l| fit(l, inner.width as usize)).collect();
@@ -1845,7 +1845,7 @@ fn about<'a>(app: &App, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
         out.push(Line::from(""));
         out.push(Line::from(Span::styled("─".repeat(w.min(40)), dim())));
         // 칠은 **그린 줄마다** 찾는다 — 접힌 줄에 걸친 글과 마크다운이 걷은 기호(`**`)에 걸친 글은 안
-        // 칠해진다. 원문(`SPC t r`)에서는 기호째 칠한다.
+        // 칠해진다. 원문(`SPC v r`)에서는 기호째 칠한다.
         out.extend(body_lines(body, w, app.raw).into_iter().map(|l| mark_line(l, in_body)));
     }
     // **커밋은 CLI 상세와 같은 자리, 본문 뒤다**(moai-a4i0). 무엇을 그릴지는 `view::commit_lines`
@@ -1883,7 +1883,7 @@ fn body_lines<'a>(body: &str, w: usize, raw: bool) -> Vec<Line<'a>> {
     // 글머리 밑으로 물리지 않고 표의 칸도 맞지 않는다. `markdown` 은 0 도 받는다.
     // **여기는 끊는다.** 탐색기에는 소프트랩이 없어, 폭을 넘긴 줄은 아래
     // `fit` 이 `…` 로 잘라 꼬리가 화면에서 사라진다 — 셸과 달리 안 끊는 것이
-    // 더 많이 잃는다(사용자 결정, moai-krh7). 원문은 `SPC t r` 에 있다.
+    // 더 많이 잃는다(사용자 결정, moai-krh7). 원문은 `SPC v r` 에 있다.
     crate::markdown::layout(&blocks, w, crate::markdown::Overflow::Break)
         .into_iter()
         .map(|line| {
@@ -1982,7 +1982,7 @@ fn field<'a>(k: &str, v: &str, w: usize, room: usize) -> Line<'a> {
 /// 옆 프로젝트의 색이 바뀌고 두 표면이 같은 프로젝트를 다른 색으로 칠한다. 무게는 CLI
 /// 머리와 같은 `HEAD` 다. 칠하는 곳에는 늘 이름이 곁에 선다 — 색이 혼자 뜻을 지지 않는다.
 /// 사용자 설정에 색을 정했으면(`Place::hue`, moai-o04b) 그것이 경로 해시를 이긴다 — 그 판단도
-/// `style::project_colour` 안에 있어 CLI 와 갈라지지 않는다. `SPC r` 이 설정을 다시 읽으면 따라온다.
+/// `style::project_colour` 안에 있어 CLI 와 갈라지지 않는다. 설정 파일이 바뀌면 걸음이 다시 읽어 따라온다(`App::follow_config`).
 fn project_style(place: &Place) -> Style {
     paint_project(&place.path, place.hue)
 }
@@ -2301,7 +2301,7 @@ fn menu_word(group: bool) -> Style {
 }
 
 /// 메뉴가 열린 동안의 맨 아랫줄 — 접두어 줄(doom 의 `SPC- <leader>`). 왼쪽에 지금 접두어와 층의
-/// 이름(`SPC t- 토글`), 오른쪽 끝에 나가는 법(`Esc 닫기`·하위 층이면 `Bksp 위로`). 탐색의 키는
+/// 이름(`SPC v- 보기`), 오른쪽 끝에 나가는 법(`Esc 닫기`·하위 층이면 `Bksp 위로`). 탐색의 키는
 /// 메뉴 안에서 안 들으므로 바의 자리를 이 줄이 통째로 쓴다. 폭이 모자라 못 세운 항목이 있으면
 /// 그 수를 댄다 — 말없이 빠지면 없는 줄 안다.
 ///
@@ -2635,7 +2635,7 @@ pub(super) mod tests {
         let mut a = every(is);
         a.hit("SPC c a");
         a.hit("SPC c c");
-        a.hit("SPC c g");
+        a.hit("SPC c t");
         // **목록 칸만 본다** — 상세 칸도 에픽 제목과 id 를 대므로 줄 전체에서 찾으면 상세의 줄을 잡는다.
         // 포커스 칸은 굵은 테두리(`┃`), 상세는 가는 테두리(`│`)라 첫 `│` 앞이 목록이다.
         let row_by = |a: &mut App, w: u16, needle: &str| {
@@ -3052,7 +3052,7 @@ pub(super) mod tests {
         // **`argos-0004` 로 찾지 않는다** — id 열이 같은 줄에 그 id 를 이미 대므로 표시를 꺼도 걸린다.
         assert!(held.contains(&format!("{} …tree-argos-0004", style::BRANCH_GLYPH)), "{held:?}");
 
-        // **줄의 표시만 본다** — 경로 줄의 `⎇ <옆 워크트리>`(겹쳐 보기가 켜졌다는 말)는 `SPC t w` 의 몫이다.
+        // **줄의 표시만 본다** — 경로 줄의 `⎇ <옆 워크트리>`(겹쳐 보기가 켜졌다는 말)는 `SPC v w` 의 몫이다.
         let row = |a: &mut App| seen(a).lines().find(|l| l.contains("집은 멤버")).unwrap_or_default().to_string();
         a.hit("SPC c w");
         assert!(!row(&mut a).contains(style::BRANCH_GLYPH), "SPC c w 가 줄의 표시를 안 걷었다");
@@ -3080,7 +3080,7 @@ pub(super) mod tests {
         assert!(!row.contains(style::BRANCH_GLYPH), "닫힌 줄에 옛 가지 표시가 섰다 — {row:?}");
     }
 
-    /// **`SPC t d` 가 상세 칸을 숨기고 목록이 폭을 다 쓴다**(moai-ymnu, 사용자 결정) — 숨긴 채
+    /// **`SPC v p` 가 상세 칸을 숨기고 목록이 폭을 다 쓴다**(moai-ymnu, 사용자 결정) — 숨긴 채
     /// 포커스가 상세에 남으면 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다.
     #[test]
     fn the_detail_pane_hides_and_the_list_takes_the_width() {
@@ -3090,9 +3090,9 @@ pub(super) mod tests {
         a.hit("Tab");
         assert_eq!(a.focus, Pane::Detail);
 
-        a.hit("SPC t d");
+        a.hit("SPC v p");
         let lines = render(&mut a, 100, 12);
-        assert!(!lines.iter().any(|l| l.contains("상세")), "SPC t d 가 상세를 안 숨겼다\n{}", lines.join("\n"));
+        assert!(!lines.iter().any(|l| l.contains("상세")), "SPC v p 가 상세를 안 숨겼다\n{}", lines.join("\n"));
         assert_eq!(a.focus, Pane::Explorer, "안 보이는 칸에 포커스가 남았다");
         let border = lines.iter().find(|l| l.contains('┓')).expect("목록 테두리가 없다");
         assert_eq!(crate::text::width(border), 100, "목록이 폭을 다 안 썼다 — {border:?}");
@@ -3100,7 +3100,7 @@ pub(super) mod tests {
         a.hit("Tab");
         assert_eq!(a.focus, Pane::Explorer);
 
-        a.hit("SPC t d");
+        a.hit("SPC v p");
         assert!(render(&mut a, 100, 12).iter().any(|l| l.contains("상세")), "다시 눌러도 안 돌아왔다");
     }
 
@@ -3361,19 +3361,19 @@ pub(super) mod tests {
         let mut a = app();
         assert!(a.worktree, "겹쳐 보기가 꺼진 채로 시작했다");
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        a.hit("SPC t w");
-        assert!(!a.worktree, "SPC t w 가 안 껐다");
+        a.hit("SPC v w");
+        assert!(!a.worktree, "SPC v w 가 안 껐다");
         let plain_screen = render(&mut a, 120, 12).join("\n");
         assert!(!plain_screen.contains('⎇'), "안 겹쳤는데 머리표가 섰다\n{plain_screen}");
         // 켜는 키는 메뉴가 상태 낱말과 함께 댄다.
-        a.hit("SPC t");
+        a.hit("SPC v");
         let menu_screen = render(&mut a, 120, 12).join("\n");
         assert!(menu_screen.contains("w : 워크트리 겹쳐 보기 [꺼짐]"), "켜는 키를 안 알린다\n{menu_screen}");
         a.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
         // 저장소 없이 세운 App 이라 `w` 는 켜기만 하고 읽지 않는다 — 겹친 결과는 손으로 넣는다.
-        a.hit("SPC t w");
-        assert!(a.worktree, "SPC t w 가 안 켰다");
+        a.hit("SPC v w");
+        assert!(a.worktree, "SPC v w 가 안 켰다");
         let mut theirs = issues()[2].clone();
         theirs.status = crate::model::Status::new("review");
         theirs.updated_at = "2026-09-02T00:00:00Z".into();
@@ -3392,11 +3392,11 @@ pub(super) mod tests {
         // **목록 줄의 ⎇ 는 출처가 아니라 그 이슈를 이름에 단 옆 가지에 붙는다**(moai-nxt4, 사용자 결정) —
         // `feat/x` 는 그 이슈의 가지가 아니므로 줄에는 안 선다. 어디서 온 줄인지는 상세가 댄다.
         assert!(!row.contains(style::BRANCH_GLYPH), "출처만으로 목록에 머리표가 섰다\n{screen}");
-        assert!(lines[0].contains("⎇ feat/x") && lines[0].contains("SPC t w 로 끈다"), "켜졌다고 안 말한다\n{screen}");
+        assert!(lines[0].contains("⎇ feat/x") && lines[0].contains("SPC v w 로 끈다"), "켜졌다고 안 말한다\n{screen}");
         assert!(screen.matches("⎇ feat/x").count() >= 2, "상세에 머리표가 없다\n{screen}");
 
-        a.hit("SPC t w");
-        assert!(!a.worktree, "SPC t w 가 안 껐다");
+        a.hit("SPC v w");
+        assert!(!a.worktree, "SPC v w 가 안 껐다");
     }
 
     /// **옆 워크트리가 없으면 경로 줄은 겹쳐 보기를 말하지 않는다**(moai-d5vn). 겹쳐 보기는 켜진
@@ -3409,7 +3409,7 @@ pub(super) mod tests {
         assert!(a.origin.labels().is_empty());
         let lines = render(&mut a, 120, 12);
         assert!(!lines[0].contains('⎇') && !lines[0].contains("워크트리"), "옆이 없는데 경로 줄이 겹쳐 보기를 댄다\n{}", lines[0]);
-        a.hit("SPC t");
+        a.hit("SPC v");
         let menu = render(&mut a, 120, 12).join("\n");
         assert!(menu.contains("워크트리 겹쳐 보기 [켜짐]"), "켜진 것을 댈 자리가 없다\n{menu}");
     }
@@ -4139,8 +4139,8 @@ pub(super) mod tests {
         assert!(!drawn.contains("**"), "굵게 기호가 남았다\n{drawn}");
         assert!(drawn.contains('•'), "목록 글머리가 없다\n{drawn}");
 
-        // SPC t r 로 원문을 본다 — 그린 글은 기호가 지워져 되돌릴 수 없다
-        a.hit("SPC t r");
+        // SPC v r 로 원문을 본다 — 그린 글은 기호가 지워져 되돌릴 수 없다
+        a.hit("SPC v r");
         let raw = render(&mut a, 100, 22).join("\n");
         assert!(raw.contains("**굵게**"), "원문이 아니다\n{raw}");
         assert!(raw.contains("- 하나"), "원문이 아니다\n{raw}");
@@ -4448,7 +4448,7 @@ pub(super) mod tests {
         }
         // 옆 워크트리가 없으면 겹쳐 보기가 켜져 있어도 뱃지가 안 선다(moai-d5vn).
         assert!(a.worktree && !lines[0].contains('⎇'), "{:?}", lines[0]);
-        // 옆이 있으면 층에서도 뱃지가 서지만, `SPC t w` 는 층의 메뉴에 안 서므로 끄는 법을 대지 않는다.
+        // 옆이 있으면 층에서도 뱃지가 서지만, `SPC v w` 는 층의 메뉴에 안 서므로 끄는 법을 대지 않는다.
         let (_, origin) =
             crate::worktree::overlay(Vec::new(), vec![crate::worktree::Side::new("feat/x", "/wt", vec![issues()[2].clone()])]);
         let plain = std::mem::replace(&mut a.origin, origin);
@@ -4730,7 +4730,7 @@ pub(super) mod tests {
     }
 
     /// **넘친 줄은 잘렸다고 말한다.** `Wrap` 을 끈 뒤로 폭을 넘는 줄은 위젯이
-    /// 표시도 없이 잘라 낸다 — 태그 줄·롤업의 칸별 건수·`SPC t r` 원문·접지 않기로
+    /// 표시도 없이 잘라 낸다 — 태그 줄·롤업의 칸별 건수·`SPC v r` 원문·접지 않기로
     /// 한 코드 줄이 그 길로 조용히 꼬리를 잃었다. 이 시험은 버퍼 폭이 아니라
     /// **잘린 자리에 표시가 있는지**를 본다.
     #[test]
@@ -4744,7 +4744,7 @@ pub(super) mod tests {
 
         for raw in [false, true] {
             if raw {
-                a.hit("SPC t r");
+                a.hit("SPC v r");
             }
             let lines = render(&mut a, 60, 24);
             let cut = lines.iter().any(|l| l.contains("#parser") && l.contains('…'));
@@ -5473,7 +5473,7 @@ pub(super) mod tests {
 
     /// **SPC 메뉴는 색 없이 80칸에서 읽힌다**(moai-7sjm, 모양은 moai-apsa). 아래 전체 폭에 가름줄과
     /// `키 : 낱말` 격자가 서고, 맨 아랫줄은 접두어 줄(`SPC- 메뉴`)이 되어 나가는 법을 오른쪽 끝에
-    /// 댄다. 묶음은 `+`, 토글은 상태를 낱말로 단다. 하위 층이면 `SPC t- 토글` 과 Bksp 가 선다.
+    /// 댄다. 묶음은 `+`, 토글은 상태를 낱말로 단다. 하위 층이면 `SPC v- 보기` 과 Bksp 가 선다.
     /// 동작을 실행하면 창이 걷히고 바가 돌아온다.
     #[test]
     fn the_menu_reads_without_colour_at_eighty_columns() {
@@ -5482,14 +5482,14 @@ pub(super) mod tests {
         a.hit("SPC");
         let lines = render(&mut a, 80, 20);
         let screen = lines.join("\n");
-        for row in ["/ : 검색", "f : 거름망", "n : 생각 담기", "r : 다시 읽기", "q : 끝내기", "p : +프로젝트", "t : +토글"] {
+        for row in ["/ : 검색", "f : 거름망", "n : 생각 담기", "q : 끝내기", "p : +프로젝트", "v : +보기"] {
             assert!(screen.contains(row), "{row:?} 가 없다\n{screen}");
         }
-        // 뿌리 일곱 칸은 6칸 한 열과 옆 열 1칸으로 선다(moai-r2dt) — 가름줄 · 격자 6줄 · 접두어 줄.
+        // 뿌리는 6칸 한 열에서 넘치면 옆 열로 간다(moai-r2dt) — 가름줄 · 격자 6줄 · 접두어 줄.
         let n = lines.len();
         assert_eq!(lines[n - 8], "─".repeat(80), "전체 폭 가름줄이 아니다\n{screen}");
         assert!(lines[n - 9].starts_with(['└', '┗']), "몸통이 창 위로 밀려 올라가지 않았다\n{screen}");
-        assert!(lines[n - 7].contains("/ : 검색") && lines[n - 7].contains("t : +토글"), "일곱째 칸이 옆 열로 안 넘어갔다\n{screen}");
+        assert!(lines[n - 7].contains("/ : 검색") && lines[n - 2].contains("v : +보기"), "한 열이 여섯 칸으로 안 섰다\n{screen}");
         let bar = &lines[n - 1];
         assert!(bar.starts_with("SPC- 메뉴") && bar.ends_with("Esc 닫기"), "{bar:?}");
         assert!(!bar.contains("Bksp") && !bar.contains("SPC 메뉴"), "{bar:?}");
@@ -5497,16 +5497,14 @@ pub(super) mod tests {
             assert!(crate::text::width(l) <= 80, "넘쳤다: {l:?}");
         }
 
-        a.hit("t");
+        a.hit("v");
         let lines = render(&mut a, 80, 20);
         let screen = lines.join("\n");
         let bar = lines.last().unwrap();
-        assert!(bar.starts_with("SPC t- 토글") && bar.ends_with("Esc 닫기 Bksp 위로"), "{bar:?}");
+        assert!(bar.starts_with("SPC v- 보기") && bar.ends_with("Esc 닫기 Bksp 위로"), "{bar:?}");
         assert!(screen.contains("w : 워크트리 겹쳐 보기 [켜짐]") && screen.contains("r : 원문↔그리기 [그리기]"), "{screen}");
-        assert!(screen.contains("d : 상세 칸 [보임]"), "{screen}");
+        assert!(screen.contains("p : 상세 칸 [보임]") && screen.contains("d : done [보임]"), "{screen}");
         assert!(!screen.contains("q : 끝내기"), "하위 층에 뿌리가 남았다\n{screen}");
-        // 토글 셋이라 창이 세 줄 + 가름줄 하나다.
-        assert_eq!(lines[lines.len() - 5], "─".repeat(80), "하위 층의 창이 제 높이로 줄지 않았다\n{screen}");
 
         a.hit("r");
         assert!(a.raw);
@@ -5526,14 +5524,16 @@ pub(super) mod tests {
         term.draw(|f| screen(f, &mut a)).unwrap();
         let buf = term.backend().buffer().clone();
         let text = render(&mut a, w, h);
-        let y = text.iter().rposition(|l| l.contains("/ : 검색")).expect("메뉴 칸이 없다") as u16;
-        let at = |s: &str| (0..w).find(|&x| buf[(x, y)].symbol() == s).unwrap_or_else(|| panic!("{s:?} 가 없다"));
-        assert_eq!(buf[(at("/"), y)].fg, MENU_KEY);
-        assert!(buf[(at("/"), y)].modifier.contains(Modifier::BOLD), "키가 굵지 않다");
-        assert_eq!(buf[(at(":"), y)].fg, MENU_SEP);
-        assert_eq!(buf[(at("검"), y)].fg, MENU_RUN);
-        assert_eq!(buf[(at("+"), y)].fg, MENU_GROUP);
-        assert_eq!(buf[(at("토"), y)].fg, MENU_GROUP);
+        let row = |s: &str| text.iter().rposition(|l| l.contains(s)).expect("메뉴 칸이 없다") as u16;
+        let at = |s: &str, y: u16| (0..w).find(|&x| buf[(x, y)].symbol() == s).unwrap_or_else(|| panic!("{s:?} 가 없다"));
+        let y = row("/ : 검색");
+        assert_eq!(buf[(at("/", y), y)].fg, MENU_KEY);
+        assert!(buf[(at("/", y), y)].modifier.contains(Modifier::BOLD), "키가 굵지 않다");
+        assert_eq!(buf[(at(":", y), y)].fg, MENU_SEP);
+        assert_eq!(buf[(at("검", y), y)].fg, MENU_RUN);
+        let y = row("v : +보기");
+        assert_eq!(buf[(at("+", y), y)].fg, MENU_GROUP);
+        assert_eq!(buf[(at("보", y), y)].fg, MENU_GROUP);
     }
 
     /// **메뉴 창은 어느 폭에서도 `:` 가 줄 서고, 몸통을 밀어 올려도 커서를 잃지 않는다**(moai-apsa).
@@ -5576,7 +5576,7 @@ pub(super) mod tests {
                 assert!(crate::text::width(l) <= w as usize, "{w}x{h} 넘쳤다: {l:?}");
             }
             if w >= 80 {
-                for key in ["/ ", "f ", "n ", "q ", "t "] {
+                for key in ["/ ", "f ", "n ", "q ", "v "] {
                     assert!(screen.contains(key), "{w}x{h}: {key:?} 가 안 보인다\n{screen}");
                 }
             }
@@ -5726,8 +5726,8 @@ pub(super) mod tests {
     #[test]
     fn a_chosen_sort_gives_way_before_the_hidden_badge() {
         let mut a = App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
-        a.hit("SPC o u");
-        a.hit("SPC o u");
+        a.hit("SPC s u");
+        a.hit("SPC s u");
         let badge = |a: &mut App, w: u16| render(a, w, 12).into_iter().find(|l| l.contains("숨김") || l.contains("정렬")).unwrap_or_default();
         let wide = badge(&mut a, 120);
         assert!(wide.contains("[done 숨김 · 정렬 수정 거꾸로]"), "{wide:?}");
@@ -5979,7 +5979,7 @@ pub(super) mod tests {
         let tags = vec![Span::raw("#"), Span::raw("데이터베이스마이그레이션"), Span::raw(" #"), Span::raw("db")];
         assert_eq!(text(tags.clone(), 12), "#데이터베…", "잘린 태그 뒤에 다음 태그가 붙었다");
         assert_eq!(text(tags, 40), "#데이터베이스마이그레이션 #db");
-        // `/f` 로 찾아 `f` 마다 갈라진 원문(`SPC t r`) 줄.
+        // `/f` 로 찾아 `f` 마다 갈라진 원문(`SPC v r`) 줄.
         let found = ["see the con", "f", "iguration ", "f", "lags"].map(|s| Span::raw(s)).to_vec();
         assert_eq!(text(found, 20), "see the configurat…", "딴 낱말의 글자가 잘린 낱말에 붙었다");
     }

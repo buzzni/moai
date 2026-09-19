@@ -40,7 +40,7 @@ pub struct Layer {
     pub places: Vec<Place>,
     /// 사용자 설정을 읽다 만난 것. 층에 선 동안 배너가 비춘다.
     pub problems: Vec<String>,
-    /// 읽은 사용자 설정 파일. SPC r 이 여기를 다시 읽는다 — **시험은 제 임시 파일을 준다.**
+    /// 읽은 사용자 설정 파일. 그 파일이 바뀌면 걸음이 여기를 다시 읽는다(`App::follow_config`) — **시험은 제 임시 파일을 준다.**
     /// 환경을 다시 보면 돌리는 사람의 설정을 읽는다.
     pub config: Option<PathBuf>,
     /// `.moai` 안에서 띄웠으면 그 뿌리. 등록돼 있지 않아도 층에 선다.
@@ -79,7 +79,7 @@ pub struct Place {
 ///
 /// **옆 워크트리도 잰다**(moai-al0x, `worktree::place_marks`). 요약에 자리 판정이 실리는데,
 /// 그 답은 워크트리를 띄우거나 치우는 것만으로 바뀐다 — `.moai` 두 파일은 그대로다. 안 재면
-/// 워크트리를 치운 뒤에도 층이 SPC r 전까지 "자리 없는 것 0건" 을 댄다. 모두 `stat` 과 작은
+/// 워크트리를 치운 뒤에도 층이 영영 "자리 없는 것 0건" 을 댄다. 모두 `stat` 과 작은
 /// 파일 읽기라 걸음마다 재도 싸다(git 을 안 띄운다).
 #[derive(Debug, Clone, PartialEq, Default)]
 struct Marks {
@@ -91,7 +91,7 @@ struct Marks {
 
 /// 이만큼 지난 읽기는 표식이 그대로여도 다시 읽는다(moai-al0x·moai-z4r4, 사용자 결정 2026-09-18).
 /// 셈에는 시계로 재는 것이 든다 — 방금 집은 줄에 워크트리가 뜰 틈(한 시간, `report::stranded`)과
-/// 날로 재는 경고. 파일은 그대로라 표식으로는 영영 안 보이고, SPC r 전까지 옛 수가 선다. 층과
+/// 날로 재는 경고. 파일은 그대로라 표식으로는 영영 안 보이고, 옛 수가 선 채 남는다. 층과
 /// 프로젝트 안([`App::follow`])이 **같은 자**를 쓴다 — 따로 두면 한쪽만 틈을 넘겨 두 화면이 또
 /// 갈린다. 읽기는 둘 다 스레드로 가서, 1분에 한 번이면 그 값이 화면을 안 멈춘다.
 pub(super) const REREAD_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
@@ -243,7 +243,7 @@ fn look_into(paths: &[PathBuf], now: &str, tx: &std::sync::mpsc::Sender<Looked>)
     });
 }
 
-/// 그 자리에서 다 읽는다 — 사람이 "다시" 를 누른 길(SPC r, [`App::reread_layer`])만 쓴다.
+/// 그 자리에서 다 읽는다 — 층에서 부른 갱신([`App::reread_layer`] — 층에서 담은 뒤)만 쓴다.
 fn look_at(paths: &[PathBuf], now: &str) -> Vec<Looked> {
     projects::each(paths, |path| look_one(path, now))
 }
@@ -276,7 +276,7 @@ impl Layer {
     /// 이미 읽은 설정으로 층을 세운다(moai-u8cs) — 띄울 때 보기와 같은 한 번의 읽기를 나눠 쓴다.
     ///
     /// **설정 자리는 읽은 것(`Registry::path`)에서 든다**(moai-y61p 단계 리뷰). 자리를 따로 받으면 줄은 한 파일에서
-    /// 세우고 다시 읽기(SPC r)·등록·해제는 다른 파일에 하는 층이 설 수 있다.
+    /// 세우고 다시 읽기·등록·해제는 다른 파일에 하는 층이 설 수 있다.
     pub fn of(reg: &user_config::Registry, launch: Option<&Path>) -> Layer {
         let found = launch.and_then(|l| reg.projects.iter().position(|p| same_dir(&p.path, l)));
         let mut entries = reg.projects.clone();
@@ -320,7 +320,7 @@ impl Layer {
     ///
     /// **시계로 낡는 것은 연 줄과 못 읽는 줄이다.** 연 줄의 셈에는 때가 들고(한 시간 틈·날로 재는 경고),
     /// 못 읽는 줄은 표식이 그대로여도 풀린다 — 권한을 고친 것(`chmod` 은 고친 때를 안 바꾼다)이나 한 번
-    /// 끊겼던 원격 디스크는 (고친 때, 길이)로 안 보여, 안 재면 SPC r 전까지 "못 읽는다" 가 선다(리뷰
+    /// 끊겼던 원격 디스크는 (고친 때, 길이)로 안 보여, 안 재면 "못 읽는다" 가 영영 선다(리뷰
     /// moai-3lul.kt0 다시 본 판). init 전과 사라진 디렉터리는 표식이 다 본다(디렉터리·설정 표식) — 그
     /// 줄의 말(`view::unopened`)에는 때도 안 들어 1분마다 다시 읽어도 같은 글이다.
     fn stale(&self) -> Vec<PathBuf> {
@@ -708,8 +708,8 @@ impl App {
         self.detail.rewind();
     }
 
-    /// 층에서 누른 SPC r — 사용자 설정부터 다시 읽고 **그 자리에서** 전부 다시 연다(누른 사람은 결과를
-    /// 기다리고 있다). 커서는 보던 프로젝트에 선다. 층의 다른 읽기(올라오기·등록 바꾸기·시계)는 모두
+    /// 층에서 부른 갱신(층에서 담은 뒤의 [`App::reload`]) — 사용자 설정부터 다시 읽고 **그 자리에서**
+    /// 전부 다시 연다(쓴 사람은 결과를 기다리고 있다). 커서는 보던 프로젝트에 선다. 층의 다른 읽기(올라오기·등록 바꾸기·시계)는 모두
     /// 스레드로 간다([`Layer::launch`]).
     ///
     /// 도는 읽기는 버린다 — 누르기 전에 띄운 것이라 늦게 닿으면 방금 읽은 것을 옛 것으로 덮는다.
@@ -726,7 +726,7 @@ impl App {
         if let Some((_, handle)) = old.pending {
             self.discard(handle);
         }
-        // **보던 줄에 그대로 섰으면 되감지 않는다** — 상세를 굴려 놓고 SPC r 을 누르면 굴린
+        // **보던 줄에 그대로 섰으면 되감지 않는다** — 상세를 굴려 놓고 다시 읽으면 굴린
         // 자리를 잃는다. 층이 다시 서며 차례가 바뀌어도 같은 프로젝트면 그대로다. 다시 읽은
         // 뒤 커서를 붙드는 자는 목록 어디서나 하나다([`App::regrip`]).
         self.regrip(held);
@@ -734,11 +734,11 @@ impl App {
 
     /// **등록 목록을 이 탐색기가 바꾼 뒤**(층의 `a`·`d`, moai-plvy) 층을 다시 세운다.
     ///
-    /// SPC r([`App::reread_layer`])와 가르는 것 셋:
+    /// [`App::reread_layer`] 와 가르는 것 셋:
     /// - **선 자리를 둔다.** 프로젝트 안에서 `a` 로 등록해도 층으로 끌어올리지 않는다
     /// - **이미 본 프로젝트를 일부러 다시 읽지 않는다.** 경로가 같은 줄의 셈·표식·읽은 때를 옮겨 들고,
     ///   층에 섰으면 [`Layer::launch`] 로 스레드에서 낡은 줄만 읽는다 — 새로 선 줄과, 원래 낡았던
-    ///   줄(표식이 바뀌었거나 시계로 낡은 것)이다. SPC r 은 사람이 "전부 다시" 를 누른 것이지만 이것은
+    ///   줄(표식이 바뀌었거나 시계로 낡은 것)이다. 그쪽은 "전부 다시" 지만 이것은
     ///   한 줄을 더하거나 뺀 것이라, 등록 수만큼 저장소를 다시 읽을 까닭이 없다. 그 자리에서 읽으면
     ///   시계로 낡은 줄까지 함께 걸려 등록 하나 바꾸는 키가 등록 수만큼 멈춘다(리뷰 moai-3lul.kt0)
     /// - **층이 없었으면 세운다.** `.moai` 안에서 띄웠고 등록이 0 이었던 경우다. 띄운 자리가
@@ -1064,13 +1064,13 @@ mod tests {
 
         a.key(key(KeyCode::Enter));
         assert!(a.worktree, "프로젝트에 들어갔는데 겹쳐 보기가 꺼져 있다");
-        a.hit("SPC t w");
+        a.hit("SPC v w");
         assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
         // 보기는 사람의 설정이라 **따라간다**(moai-2bzp) — 겹쳐 보기와 반대다.
-        a.hit("SPC s d");
-        a.hit("SPC o t");
+        a.hit("SPC v d");
+        a.hit("SPC s t");
         let (view, order) = (a.view.clone(), a.order);
-        assert!(!view.hides(crate::config::DONE), "프로젝트 안에서 SPC s d 가 done 을 안 보였다");
+        assert!(!view.hides(crate::config::DONE), "프로젝트 안에서 SPC v d 가 done 을 안 보였다");
 
         a.key(key(KeyCode::Home));
         a.hit("0");
@@ -1313,7 +1313,7 @@ mod tests {
     }
 
     /// **워크트리를 치우면 층이 따라간다**(moai-al0x). 자리 판정은 `.moai` 가 그대로여도 워크트리
-    /// 하나로 답이 바뀐다 — 한때 층은 두 파일만 재어 SPC r 전까지 "자리 없는 것" 을 안 댔다.
+    /// 하나로 답이 바뀐다 — 한때 층은 두 파일만 재어 손으로 다시 읽기 전까지 "자리 없는 것" 을 안 댔다.
     #[test]
     fn removing_the_worktree_that_held_a_picked_line_shows_on_the_layer() {
         let s = Scratch::fenced("layer-worktree-gone");
@@ -1342,7 +1342,7 @@ mod tests {
         // **겹쳐 보기를 꺼도 워크트리가 사라지는 것을 본다**(리뷰 moai-3lul.kt0). 끄면 옆 스냅샷을
         // 아예 안 열어, 한때는 자리 판정이 보는 것이 지켜보는 표식에 하나도 안 들었다 — 치운 뒤
         // 배너가 옛 수로 굳었다.
-        a.hit("SPC t w");
+        a.hit("SPC v w");
         assert!(!a.worktree, "w 가 겹쳐 보기를 안 껐다");
         settle(&mut a);
         let was = a.warnings;
@@ -1359,7 +1359,7 @@ mod tests {
     }
 
     /// **파일이 그대로여도 시계가 가면 다시 읽는다**(moai-al0x). 요약에는 시계로 재는 것(워크트리가
-    /// 뜰 한 시간 틈, 날로 재는 경고)이 들어, 표식만 보면 SPC r 전까지 옛 수가 선다. 층에 선 동안만이다.
+    /// 뜰 한 시간 틈, 날로 재는 경고)이 들어, 표식만 보면 옛 수가 선 채 남는다. 층에 선 동안만이다.
     #[test]
     fn a_layer_line_read_long_ago_is_reread_even_if_nothing_changed() {
         let s = Scratch::fenced("layer-clock");
@@ -1429,14 +1429,14 @@ mod tests {
         assert_eq!(a.mode, Mode::Browse, "/ 가 층에서 칸을 열었다");
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("거름망")), "{:?}", a.notice);
         // 메뉴의 거름망·워크트리는 층의 메뉴에 안 선다 — 눌러도 모르는 키라 메뉴만 떠 있다(moai-7sjm).
-        for path in ["SPC f", "SPC t w"] {
+        for path in ["SPC f", "SPC v w"] {
             a.hit(path);
             assert_eq!(a.mode, Mode::Browse, "{path} 가 층에서 칸을 열었다");
             assert!(super::super::menu::open(&a.chord), "{path}: 안 선 키가 메뉴를 닫았다");
             a.key(key(KeyCode::Esc));
             assert!(!super::super::menu::open(&a.chord));
         }
-        assert!(a.worktree, "층에서 SPC t w 가 겹쳐 보기를 건드렸다");
+        assert!(a.worktree, "층에서 SPC v w 가 겹쳐 보기를 건드렸다");
 
         // **거들쇠가 붙어도 새지 않는다.** `refused` 는 Ctrl·Alt 를 그냥 넘기므로, 키를
         // 나누는 쪽이 안 거르면 Ctrl-A 가 등록 창을, Ctrl-D 가 "목록에서 뺄까" 를 띄운다 —
@@ -1595,7 +1595,7 @@ mod tests {
         }
         a.key(key(KeyCode::Enter));
         assert_eq!(a.filter_text.as_deref(), Some("status=in_progress"));
-        a.hit("SPC t w");
+        a.hit("SPC v w");
         assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
 
         a.hit("2");
@@ -1827,15 +1827,18 @@ mod tests {
         assert_eq!(a.repo.as_ref().map(|r| r.root.clone()), Some(two));
     }
 
-    /// **층의 SPC r 은 사용자 설정부터 다시 읽는다** — 밖에서 `moai project add` 한 것이 선다.
-    /// 커서는 보던 프로젝트(경로)에 선다.
+    /// **밖에서 `moai project add` 한 것이 누르지 않아도 층에 선다**(moai-en4u) — 걸음이 사용자 설정의
+    /// 표식을 잰다. 한때 `SPC r` 을 눌러야 섰다. 커서는 보던 프로젝트(경로)에 선다.
     #[test]
-    fn spc_r_on_the_layer_rereads_the_registration_and_keeps_the_cursor_on_its_project() {
-        let s = Scratch::fenced("layer-f5");
+    fn a_registration_made_outside_shows_on_the_layer_by_itself() {
+        let s = Scratch::fenced("layer-follow-config");
         let (one, two) = twins(&s);
         let three = s.project("three", &[]);
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
+        a.user_config = Some(cfg.clone());
+        // 첫 걸음은 재기만 한다 — 띄울 때 이미 읽었다.
+        a.follow();
         a.key(key(KeyCode::Down));
         assert_eq!(a.current(), Some(Row::Project(1)));
 
@@ -1843,7 +1846,7 @@ mod tests {
         a.detail.fit(5, 50);
         a.detail.by(3);
         s.register(&[&three, &one, &two]);
-        a.hit("SPC r");
+        settle(&mut a);
         assert_eq!(names(&a), ["three", "one", "two"]);
         assert_eq!(a.current(), Some(Row::Project(2)), "보던 프로젝트를 놓쳤다");
         assert_eq!(a.detail.offset(), 3, "같은 프로젝트에 섰는데 상세를 되감았다");
@@ -1851,13 +1854,13 @@ mod tests {
 
         // 보던 것을 빼면 그 번호를 자른 자리의 **다른** 프로젝트에 서고, 상세는 첫 줄부터다.
         s.register(&[&three, &one]);
-        a.hit("SPC r");
+        settle(&mut a);
         assert_eq!(a.current(), Some(Row::Project(1)), "뺀 줄의 번호를 목록 안으로 안 잘랐다");
         assert_eq!(a.detail.offset(), 0, "다른 프로젝트에 섰는데 굴린 자리가 남았다");
     }
 
     /// **못 읽는 줄도 시계로 다시 본다**(리뷰 moai-3lul.kt0 다시 본 판). 권한을 고치는 `chmod` 는 고친
-    /// 때도 길이도 안 바꿔, 표식만 보면 층이 SPC r 전까지 "못 읽는다" 를 댄다. init 전 줄은 표식이 다
+    /// 때도 길이도 안 바꿔, 표식만 보면 층이 "못 읽는다" 를 영영 댄다. init 전 줄은 표식이 다
     /// 보므로 시계에 안 건다.
     #[test]
     fn a_row_that_could_not_be_read_is_retried_by_the_clock() {
@@ -1940,7 +1943,7 @@ mod tests {
         let named = |a: &App| a.elsewhere.iter().filter(|l| l.contains("wt-x")).count();
         a.key(key(KeyCode::Enter));
         assert_eq!(named(&a), 1, "겹쳐 볼 때 못 읽은 옆 스냅샷을 안 대거나 두 번 댄다 — {:?}", a.elsewhere);
-        a.hit("SPC t w");
+        a.hit("SPC v w");
         assert!(!a.worktree, "w 가 겹쳐 보기를 안 껐다");
         settle(&mut a);
         assert_eq!(named(&a), 1, "겹쳐 보기를 끄자 못 읽은 옆 스냅샷이 배너에서 사라졌다 — {:?}", a.elsewhere);

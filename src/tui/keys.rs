@@ -8,7 +8,7 @@
 //! **조각이다.** `KeyEvent` 와 표만 안다 — `App`·터미널·저장소를 모른다. 켜짐을 가르는 값
 //! ([`Ctx`])은 든 쪽이 재서 넘긴다. 그래서 시험이 터미널 없이 표를 훑는다.
 //!
-//! **한 줄은 키의 열이다**([`Bind::seq`]). `gg`·`g p`·`SPC t w` 같은 접두어를 줄 하나로 적고
+//! **한 줄은 키의 열이다**([`Bind::seq`]). `gg`·`g p`·`SPC v w` 같은 접두어를 줄 하나로 적고
 //! [`lookup`] 이 [`Lookup::Pending`] 으로 "더 기다린다" 를 낸다. 기다리는 동안의 열은 든 쪽이
 //! [`Chord`] 로 들고 다음 키를 붙여 다시 부른다.
 
@@ -87,7 +87,7 @@ impl Key {
         KeyEvent::new(self.code, self.want)
     }
 
-    /// 사람에게 대는 한 키의 이름 — 메뉴의 줄과 테두리(`SPC t`).
+    /// 사람에게 대는 한 키의 이름 — 메뉴의 줄과 테두리(`SPC v`).
     pub fn name(self) -> String {
         name_of(self.code)
     }
@@ -283,7 +283,6 @@ pub enum Browse {
     Pick,
     Unregister,
     ClearFilter,
-    Reload,
     Worktree,
     Raw,
     /// 설정의 n 번째 칸(0부터)을 보이고 숨긴다(moai-fmv5). **칸 이름이 설정에서 오므로 글자가
@@ -292,7 +291,7 @@ pub enum Browse {
     /// 그 번호의 프로젝트로 바로 간다(moai-o133). `0` 은 전체 — 프로젝트 층이다.
     ///
     /// **SPC 없이 바로 누른다**(사용자 결정). 헤더가 `<0>`~`<9>` 로 그 번호를 대고, 그것이
-    /// 이 키를 설명하는 유일한 자리다. `SPC s 1`(칸 토글)과는 SPC 하나로 갈라진다.
+    /// 이 키를 설명하는 유일한 자리다. `SPC v 1`(칸 토글)과는 SPC 하나로 갈라진다.
     Project(u8),
     /// done 을 보이고 숨긴다 — 가장 자주 누를 것이라 번호와 따로 선다.
     Done,
@@ -373,8 +372,8 @@ impl Sorting {
     }
 }
 
-/// 번호를 줄 수 있는 수 — `1`~`9`. 칸 토글(`SPC s <n>`)과 프로젝트 건너뛰기([`Browse::Project`])
-/// 가 같은 상한을 쓴다. 넘는 칸은 번호가 없고 `SPC s a` 로만 돌아오며, 넘는 프로젝트는 층에서
+/// 번호를 줄 수 있는 수 — `1`~`9`. 칸 토글(`SPC v <n>`)과 프로젝트 건너뛰기([`Browse::Project`])
+/// 가 같은 상한을 쓴다. 넘는 칸은 번호가 없고 `SPC v a` 로만 돌아오며, 넘는 프로젝트는 층에서
 /// 골라 들어간다.
 pub const NUMBERED: usize = 9;
 
@@ -414,7 +413,12 @@ pub const LEADER: Key = Key::plain(' ');
 /// (moai-z9pc, 사용자 결정) 뿐이다**(키 지도 moai-hudg). 그 밖의 동작은 SPC 뒤에 선다 — 한 글자
 /// 단축키(`q`·`f`·`n`)를 실수로 누를 때마다 앱이 끝나거나 칸이 열리던 것이 까닭이다. 바로 끝내는
 /// 길은 [`ANYWHERE`] 의 Ctrl-C 하나다. F키와 숨은 별칭(`m`·F7·Delete)도 걷었다 — 옛 `r`(다시 읽기)은
-/// `SPC r` 로 옮겼고, 그 글자는 뒤에 읽음이 받았다.
+/// `SPC r` 로 옮겼다가 걷었고(moai-en4u — 손으로 다시 읽을 까닭을 자동 갱신이 다 받았다,
+/// `App::follow`), 그 글자는 읽음이 받았다.
+///
+/// **SPC 밑 묶음은 넷이다**(moai-en4u): `v` 보기 · `s` 정렬 · `c` 열 · `m` 읽음, 그리고 `p` 프로젝트.
+/// 글자는 묶음을 건너 같은 것을 가리킨다 — `SPC s a`·`SPC c a` 가 둘 다 담당이다. 옛 키는
+/// 별칭으로 남기지 않았다(사용자 결정: 혼자 쓰는 지금이 끊을 때다).
 ///
 /// **SPC 로 시작하는 줄의 차례가 곧 메뉴의 차례다**([`super::menu::entries`]). 메뉴는 목록을
 /// 따로 적지 않고 이 줄들을 읽는다 — 메뉴에 선 것과 실제로 도는 것이 갈릴 수 없다.
@@ -458,53 +462,62 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Project(9), None, Key::plain('9')),
         row!(Grep, Some("/"), Key::plain('/')),
         // 읽음은 손이 제일 자주 가는 것이라 **바로 누른다**(moai-z9pc). 옛 `r`(다시 읽기)은
-        // moai-7sjm 이 `SPC r` 로 옮겨 이 자리가 비어 있었다.
+        // moai-7sjm 이 `SPC r` 로 옮겨 이 자리가 비어 있었고, 그 `SPC r` 도 뒤에 걷었다(moai-en4u).
         row!(Read, Some("r"), Key::plain('r')),
         row!(ClearFilter, Some("Esc"), Key::any(C::Esc)),
         // `/` 는 바로 누르는 키이면서 메뉴에도 선다 — 이름은 바로 누르는 쪽 하나만 댄다.
         row!(Grep, None, LEADER, Key::plain('/')),
         row!(Filter, Some("SPC f"), LEADER, Key::plain('f')),
         row!(Jot, Some("SPC n"), LEADER, Key::plain('n')),
-        row!(Reload, Some("SPC r"), LEADER, Key::plain('r')),
         row!(Quit, Some("SPC q"), LEADER, Key::plain('q')),
         row!(Pick, Some("SPC p a"), LEADER, Key::plain('p'), Key::plain('a')),
         row!(Unregister, Some("SPC p d"), LEADER, Key::plain('p'), Key::plain('d')),
-        row!(Worktree, Some("SPC t w"), LEADER, Key::plain('t'), Key::plain('w')),
-        row!(Raw, Some("SPC t r"), LEADER, Key::plain('t'), Key::plain('r')),
-        row!(Done, Some("SPC s d"), LEADER, Key::plain('s'), Key::plain('d')),
-        row!(Deferred, Some("SPC s z"), LEADER, Key::plain('s'), Key::plain('z')),
-        row!(ShowAll, Some("SPC s a"), LEADER, Key::plain('s'), Key::plain('a')),
-        // 번호 줄은 첫 줄만 이름을 단다 — 도움말이 `SPC s 1` 과 "번호가 차례로 는다" 로 한 번에
+        // **보는 것을 켜고 끄는 것은 모두 `SPC v`(view) 밑이다**(moai-en4u). 한때 `SPC s`(보기)와
+        // `SPC t`(토글)로 갈라 done 은 s·상세 칸은 t 에 있었다 — 둘 다 켜고 끄는 것이라 어느 쪽인지를
+        // 외워야 했고, `d` 가 한쪽에서는 done 다른 쪽에서는 상세였다. 어느 줄을 보나(d·l·a·번호)가
+        // 먼저, 화면의 꼴(p·w·r)이 뒤다.
+        row!(Done, Some("SPC v d"), LEADER, Key::plain('v'), Key::plain('d')),
+        // 미룸은 `l`(later) — 옛 `z` 는 뜻을 읽을 길이 없었다(사용자 결정).
+        row!(Deferred, Some("SPC v l"), LEADER, Key::plain('v'), Key::plain('l')),
+        row!(ShowAll, Some("SPC v a"), LEADER, Key::plain('v'), Key::plain('a')),
+        // 번호 줄은 첫 줄만 이름을 단다 — 도움말이 `SPC v 1` 과 "번호가 차례로 는다" 로 한 번에
         // 대고, 메뉴는 이름이 아니라 키(`next.name()`)와 설정의 칸 이름을 세운다.
-        row!(Column(0), Some("SPC s 1"), LEADER, Key::plain('s'), Key::plain('1')),
-        row!(Column(1), None, LEADER, Key::plain('s'), Key::plain('2')),
-        row!(Column(2), None, LEADER, Key::plain('s'), Key::plain('3')),
-        row!(Column(3), None, LEADER, Key::plain('s'), Key::plain('4')),
-        row!(Column(4), None, LEADER, Key::plain('s'), Key::plain('5')),
-        row!(Column(5), None, LEADER, Key::plain('s'), Key::plain('6')),
-        row!(Column(6), None, LEADER, Key::plain('s'), Key::plain('7')),
-        row!(Column(7), None, LEADER, Key::plain('s'), Key::plain('8')),
-        row!(Column(8), None, LEADER, Key::plain('s'), Key::plain('9')),
-        row!(Sort(Order::Priority), Some("SPC o p"), LEADER, Key::plain('o'), Key::plain('p')),
-        row!(Sort(Order::Created), Some("SPC o c"), LEADER, Key::plain('o'), Key::plain('c')),
-        row!(Sort(Order::Updated), Some("SPC o u"), LEADER, Key::plain('o'), Key::plain('u')),
-        row!(Sort(Order::Column), Some("SPC o s"), LEADER, Key::plain('o'), Key::plain('s')),
-        row!(Sort(Order::Assignee), Some("SPC o a"), LEADER, Key::plain('o'), Key::plain('a')),
-        row!(Sort(Order::Title), Some("SPC o t"), LEADER, Key::plain('o'), Key::plain('t')),
+        row!(Column(0), Some("SPC v 1"), LEADER, Key::plain('v'), Key::plain('1')),
+        row!(Column(1), None, LEADER, Key::plain('v'), Key::plain('2')),
+        row!(Column(2), None, LEADER, Key::plain('v'), Key::plain('3')),
+        row!(Column(3), None, LEADER, Key::plain('v'), Key::plain('4')),
+        row!(Column(4), None, LEADER, Key::plain('v'), Key::plain('5')),
+        row!(Column(5), None, LEADER, Key::plain('v'), Key::plain('6')),
+        row!(Column(6), None, LEADER, Key::plain('v'), Key::plain('7')),
+        row!(Column(7), None, LEADER, Key::plain('v'), Key::plain('8')),
+        row!(Column(8), None, LEADER, Key::plain('v'), Key::plain('9')),
+        // 상세 칸은 `p`(pane) — `d` 는 done 이 쥔다.
+        row!(Detail, Some("SPC v p"), LEADER, Key::plain('v'), Key::plain('p')),
+        row!(Worktree, Some("SPC v w"), LEADER, Key::plain('v'), Key::plain('w')),
+        row!(Raw, Some("SPC v r"), LEADER, Key::plain('v'), Key::plain('r')),
+        // **정렬은 `SPC s`(sort)다**(moai-en4u) — 옛 `SPC o`(ranger 의 order)는 `s` 를 보기가 쥐고
+        // 있어 밀려난 자리였다. 글자는 열(`SPC c`)과 같다: p·c·u·a 가 두 묶음에서 같은 것을 가리킨다.
+        row!(Sort(Order::Priority), Some("SPC s p"), LEADER, Key::plain('s'), Key::plain('p')),
+        row!(Sort(Order::Created), Some("SPC s c"), LEADER, Key::plain('s'), Key::plain('c')),
+        row!(Sort(Order::Updated), Some("SPC s u"), LEADER, Key::plain('s'), Key::plain('u')),
+        row!(Sort(Order::Column), Some("SPC s s"), LEADER, Key::plain('s'), Key::plain('s')),
+        row!(Sort(Order::Assignee), Some("SPC s a"), LEADER, Key::plain('s'), Key::plain('a')),
+        row!(Sort(Order::Title), Some("SPC s t"), LEADER, Key::plain('s'), Key::plain('t')),
         row!(Cell(super::view::Field::Id), Some("SPC c i"), LEADER, Key::plain('c'), Key::plain('i')),
         row!(Cell(super::view::Field::Priority), Some("SPC c p"), LEADER, Key::plain('c'), Key::plain('p')),
         row!(Cell(super::view::Field::Assignee), Some("SPC c a"), LEADER, Key::plain('c'), Key::plain('a')),
         row!(Cell(super::view::Field::Created), Some("SPC c c"), LEADER, Key::plain('c'), Key::plain('c')),
         row!(Cell(super::view::Field::Updated), Some("SPC c u"), LEADER, Key::plain('c'), Key::plain('u')),
         row!(Cell(super::view::Field::Tally), Some("SPC c n"), LEADER, Key::plain('c'), Key::plain('n')),
-        row!(Cell(super::view::Field::Tags), Some("SPC c g"), LEADER, Key::plain('c'), Key::plain('g')),
+        // 태그는 `t` — 옛 `g` 는 정렬(`SPC s t` 는 제목)과 글자가 어긋났다. 열에는 제목이 없어 `t` 가 빈다.
+        row!(Cell(super::view::Field::Tags), Some("SPC c t"), LEADER, Key::plain('c'), Key::plain('t')),
         row!(Cell(super::view::Field::Names), Some("SPC c h"), LEADER, Key::plain('c'), Key::plain('h')),
         row!(Cell(super::view::Field::Branch), Some("SPC c w"), LEADER, Key::plain('c'), Key::plain('w')),
-        row!(Detail, Some("SPC t d"), LEADER, Key::plain('t'), Key::plain('d')),
-        // **읽음은 `SPC m`(mark) 밑이다**(사용자 결정 2026-09-15) — `SPC r` 은 손에 익은 다시 읽기로
-        // 그대로 둔다. 바로 누르는 `r` 은 그 줄 하나라 여기 없다(아래 바로 누르는 키 줄에 있다).
+        // **읽음은 `SPC m`(mark) 밑이다**(사용자 결정 2026-09-15). 바로 누르는 `r` 은 그 줄 하나라
+        // 여기 없다(위의 바로 누르는 키 줄에 있다). 묶음은 `g`(group) — 옛 `r` 은 바로 누르는 `r`·
+        // 옛 `SPC r`·`SPC t r` 과 한 글자에 뜻 넷을 얹었다(moai-en4u).
         row!(ReadAll, Some("SPC m a"), LEADER, Key::plain('m'), Key::plain('a')),
-        row!(ReadGroup, Some("SPC m r"), LEADER, Key::plain('m'), Key::plain('r')),
+        row!(ReadGroup, Some("SPC m g"), LEADER, Key::plain('m'), Key::plain('g')),
     ]
 };
 
@@ -562,7 +575,7 @@ impl Browse {
     ///   보던 이슈가 바뀐다
     /// - 해제는 층의 줄에서만, 목록 포커스로 — 지금 선 프로젝트를 빼는 일이 안 생긴다
     /// - 층에서 프로젝트 안의 줄에 매인 키(거름망·검색·워크트리)는 켜지지 않는다. 바로 누르는
-    ///   `/` 는 까닭을 댄다. 메뉴의 `SPC f`·`SPC t w` 는 층에서 메뉴에 안 서므로 까닭을 댈
+    ///   `/` 는 까닭을 댄다. 메뉴의 `SPC f`·`SPC v w` 는 층에서 메뉴에 안 서므로 까닭을 댈
     ///   자리가 없다 — 워크트리는 말없이 꺼 두고, 거름망은 검색과 한 문장을 쓴다. `n` 은 층에서도
     ///   듣는다 — 커서의 프로젝트에 담는다(moai-fccv)
     pub fn enabled(self, c: &Ctx) -> Result<(), Off> {
@@ -613,7 +626,6 @@ impl Browse {
         use Browse::*;
         match self {
             Jot => "생각 담기",
-            Reload => "다시 읽기",
             Pick => "등록",
             Unregister => "목록에서 빼기",
             Worktree => "워크트리 겹쳐 보기",
@@ -666,7 +678,6 @@ impl Browse {
             Pick => "프로젝트 등록",
             Unregister => "해제",
             ClearFilter => "풀기",
-            Reload => "갱신",
             Worktree if c.worktree => "워크트리 끄기",
             Worktree => "워크트리",
             Raw if c.raw => "그리기",
@@ -777,8 +788,9 @@ pub const PICK: &[Bind<Pick>] = {
         row!(Register, Some("a"), Key::plain('a')),
         row!(Hidden, Some("."), Key::plain('.')),
         row!(Path, Some("g p"), Key::plain('g'), Key::plain('p')),
+        // 옛 숨은 `q` 는 걷었다(moai-en4u) — 탐색에서 `q` 가 아무것도 안 하는데 창에서만 닫으면
+        // 같은 글자가 자리마다 뜻이 갈린다.
         row!(Close, Some("Esc"), Key::bare(C::Esc)),
-        row!(Close, None, Key::plain('q')),
     ]
 };
 
@@ -954,7 +966,7 @@ mod tests {
     }
 
     /// **맨 숫자는 프로젝트로 간다**(moai-o133) — `0` 은 전체(층), `1`~`9` 는 그 번호의 프로젝트다.
-    /// `SPC s 1`(칸 토글)과는 갈라져 있다: 그쪽은 SPC 를 먼저 누른다.
+    /// `SPC v 1`(칸 토글)과는 갈라져 있다: 그쪽은 SPC 를 먼저 누른다.
     #[test]
     fn a_bare_digit_goes_to_that_project() {
         assert_eq!(one(BROWSE, press(KeyCode::Char('0'))), Lookup::Run(Browse::Project(0)));
@@ -970,7 +982,7 @@ mod tests {
             assert_eq!(one(BROWSE, press(KeyCode::Char(c))), Lookup::Unknown, "상한 너머 {c} 가 표에 있다");
         }
         // SPC 뒤의 숫자는 그대로 칸 토글이다 — 두 길이 안 겹친다.
-        assert_eq!(lookup(BROWSE, &[pressed(&LEADER), press(KeyCode::Char('s')), press(KeyCode::Char('1'))]), Lookup::Run(Browse::Column(0)));
+        assert_eq!(lookup(BROWSE, &[pressed(&LEADER), press(KeyCode::Char('v')), press(KeyCode::Char('1'))]), Lookup::Run(Browse::Column(0)));
     }
 
     /// **맨 숫자는 등록한 수만큼만 듣는다**(moai-o133). 층이 없으면 `0` 까지 조용하고, 등록한
@@ -1220,8 +1232,8 @@ mod tests {
             (press(C::Char('d')), Lookup::Unknown),
             (press(C::Delete), Lookup::Unknown),
             (press(C::F(5)), Lookup::Unknown),
-            // `r` 은 읽음이다(moai-z9pc) — 옛 `r`(다시 읽기)은 moai-7sjm 이 `SPC r` 로 옮겼고,
-            // 사용자 결정으로 그 자리는 그대로 두고 이 글자를 읽음에 줬다.
+            // `r` 은 읽음이다(moai-z9pc) — 옛 `r`(다시 읽기)은 moai-7sjm 이 `SPC r` 로 옮겼다가
+            // 걷었고(moai-en4u), 이 글자는 읽음이 받았다.
             (press(C::Char('r')), Lookup::Run(B::Read)),
             (press(C::Char('w')), Lookup::Unknown),
             (press(C::F(3)), Lookup::Unknown),
@@ -1248,23 +1260,23 @@ mod tests {
             (vec![sp, ch('/')], B::Grep),
             (vec![sp, ch('f')], B::Filter),
             (vec![sp, ch('n')], B::Jot),
-            (vec![sp, ch('r')], B::Reload),
             (vec![sp, ch('m'), ch('a')], B::ReadAll),
-            (vec![sp, ch('m'), ch('r')], B::ReadGroup),
+            (vec![sp, ch('m'), ch('g')], B::ReadGroup),
             (vec![sp, ch('p'), ch('a')], B::Pick),
             (vec![sp, ch('p'), ch('d')], B::Unregister),
-            (vec![sp, ch('t'), ch('w')], B::Worktree),
-            (vec![sp, ch('t'), ch('r')], B::Raw),
-            (vec![sp, ch('s'), ch('d')], B::Done),
-            (vec![sp, ch('s'), ch('z')], B::Deferred),
-            (vec![sp, ch('s'), ch('a')], B::ShowAll),
-            (vec![sp, ch('s'), ch('1')], B::Column(0)),
-            (vec![sp, ch('s'), ch('9')], B::Column(8)),
-            (vec![sp, ch('o'), ch('p')], B::Sort(Order::Priority)),
-            (vec![sp, ch('o'), ch('u')], B::Sort(Order::Updated)),
-            (vec![sp, ch('o'), ch('t')], B::Sort(Order::Title)),
+            (vec![sp, ch('v'), ch('w')], B::Worktree),
+            (vec![sp, ch('v'), ch('r')], B::Raw),
+            (vec![sp, ch('v'), ch('p')], B::Detail),
+            (vec![sp, ch('v'), ch('d')], B::Done),
+            (vec![sp, ch('v'), ch('l')], B::Deferred),
+            (vec![sp, ch('v'), ch('a')], B::ShowAll),
+            (vec![sp, ch('v'), ch('1')], B::Column(0)),
+            (vec![sp, ch('v'), ch('9')], B::Column(8)),
+            (vec![sp, ch('s'), ch('p')], B::Sort(Order::Priority)),
+            (vec![sp, ch('s'), ch('u')], B::Sort(Order::Updated)),
+            (vec![sp, ch('s'), ch('t')], B::Sort(Order::Title)),
+            (vec![sp, ch('c'), ch('t')], B::Cell(super::super::view::Field::Tags)),
             (vec![sp, ch('c'), ch('a')], B::Cell(super::super::view::Field::Assignee)),
-            (vec![sp, ch('c'), ch('g')], B::Cell(super::super::view::Field::Tags)),
         ];
         for (seq, act) in menu {
             assert_eq!(lookup(BROWSE, &seq), Lookup::Run(act), "메뉴 {seq:?}");
@@ -1283,7 +1295,8 @@ mod tests {
             // 뜻을 바꿨다(moai-ob4c) — 경로 적기는 `g p`, `g` 하나는 기다린다.
             (press(C::Char('g')), Lookup::Pending),
             (press(C::Esc), Lookup::Run(Pick::Close)),
-            (press(C::Char('q')), Lookup::Run(Pick::Close)),
+            // 숨은 `q` 는 걷었다(moai-en4u).
+            (press(C::Char('q')), Lookup::Unknown),
             (with(C::Esc, ctrl), Lookup::Unknown),
         ];
         for (k, want) in pick {
@@ -1337,7 +1350,7 @@ mod tests {
         let words: Vec<&str> = named.iter().map(|(w, _)| w.as_str()).collect();
         assert!(!words.iter().any(|w| w.starts_with('F') && parse(w).is_some()), "도움말이 걷은 F키를 댄다: {words:?}");
         for must in [
-            "Ctrl-C", "SPC q", "SPC f", "SPC n", "SPC r", "SPC /", "SPC p a", "SPC p d", "SPC t w", "SPC t r", "SPC", "Enter",
+            "Ctrl-C", "SPC q", "SPC f", "SPC n", "SPC /", "SPC p a", "SPC p d", "SPC v w", "SPC v r", "SPC s p", "SPC", "Enter",
             "Backspace", "Shift-Tab", "j", "k", "h", "l", "gg", "G", "Ctrl-d", "Ctrl-u", "Ctrl-f", "Ctrl-b", "Ctrl-S", "Esc", "/", "g p",
             ".",
         ] {
@@ -1651,8 +1664,22 @@ mod tests {
         assert_eq!(Browse::Enter.enabled(&root), Ok(()), "뿌리가 들어가기를 껐다");
         // 커서의 사실은 드나드는 키만 끈다 — 다른 동작은 그대로다.
         let both = Ctx { leaf: true, root: true, ..base };
-        for act in [Browse::Grep, Browse::Filter, Browse::Jot, Browse::Reload, Browse::Quit, Browse::Step(Move::Top)] {
+        for act in [Browse::Grep, Browse::Filter, Browse::Jot, Browse::Quit, Browse::Step(Move::Top)] {
             assert_eq!(act.enabled(&both), Ok(()), "{act:?}");
+        }
+    }
+
+    /// **옛 키는 별칭으로 남지 않았다**(moai-en4u, 사용자 결정). 묶음을 다시 짜며 옛 열을 이름 없는
+    /// 줄로 남기면 메뉴에는 안 서도 손에 익은 대로 누르면 돌아, 두 지도가 함께 산다 — 끊기로 한 것은
+    /// 그 둘째 지도다. `SPC t`·`SPC o` 는 접두어조차 아니고, `SPC r`(다시 읽기)은 자동 갱신이 받았다.
+    #[test]
+    fn the_old_menu_keys_are_gone() {
+        let sp = pressed(&LEADER);
+        let ch = |c| press(KeyCode::Char(c));
+        for old in [vec![sp, ch('r')], vec![sp, ch('t')], vec![sp, ch('o')], vec![sp, ch('s'), ch('d')], vec![sp, ch('s'), ch('z')],
+            vec![sp, ch('s'), ch('1')], vec![sp, ch('c'), ch('g')], vec![sp, ch('m'), ch('r')]]
+        {
+            assert_eq!(lookup(BROWSE, &old), Lookup::Unknown, "옛 키 {} 가 산다", super::super::menu::title(&old));
         }
     }
 
