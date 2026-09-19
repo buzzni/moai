@@ -932,6 +932,16 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
     }
 }
 
+/// 가짜 층의 한 줄에 **그 프로젝트의 줄까지** 올린다(moai-m59y). [`fake`] 만으로는 머리줄뿐이라
+/// (`site: None`) 한눈 보기의 목록에 남의 프로젝트의 줄이 한 번도 안 서고, 그 줄을 그리는 길
+/// (`draw::row_line` 의 `Seat::Place`)을 그림 시험이 통째로 안 지난다 — 남의 줄이 제 프로젝트의
+/// 칸과 색으로 서는지를 아무도 안 보는 자리가 거기 있었다.
+#[cfg(test)]
+pub(super) fn fill(layer: &mut Layer, at: usize, issues: Vec<crate::model::Issue>, cfg: crate::config::Config) {
+    let (index, ground) = crate::tui::measure(&issues, &cfg);
+    layer.places[at].site = Some(super::Site::of(issues, index, ground, cfg, crate::nav::Path::new(), Vec::new()));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1010,12 +1020,13 @@ mod tests {
         &a.layer.as_ref().unwrap().places.iter().find(|p| p.name == name).unwrap().look
     }
 
-    /// 보이는 줄의 제목 (`..` 은 뺀다).
+    /// 보이는 줄의 제목 (`..` 은 뺀다). **줄마다 제 프로젝트에서 읽는다**([`App::issue_at`]) —
+    /// 한눈 보기의 줄은 남의 목록의 첨자라, 지금 선 것으로 읽으면 엉뚱한 제목이 나온다.
     fn titles(a: &App) -> Vec<String> {
         a.rows()
             .iter()
             .filter_map(|r| match r {
-                Row::Item(_, e, _) => e.at().map(|at| a.site.issues[at].title.clone()),
+                Row::Item(seat, e, _) => e.at().and_then(|at| a.issue_at(*seat, at)).map(|i| i.title.clone()),
                 _ => None,
             })
             .collect()
@@ -1837,16 +1848,49 @@ mod tests {
 
     /// **머리줄의 `Tab` 은 그 프로젝트를 묶음까지 다 편다**(moai-i0wd) — 펼쳐져 있으면 통째로
     /// 접는다. 묶음 줄의 `Tab` 과 같은 자다([`App::expand_all`]).
+    ///
+    /// **fixture 에 묶음을 둔다**(moai-m59y) — 줄만 있는 프로젝트로 재던 때는 `l` 과 `Tab` 이
+    /// 같은 줄 수를 내, [`App::open_all`] 을 통째로 지워도 이 시험이 지나갔다. 에픽 하나와 그
+    /// 멤버가 있어야 "묶음까지" 가 실제로 걸린다.
     #[test]
     fn tab_opens_a_whole_project_and_folds_it_again() {
         let s = Scratch::fenced("layer-tab-all");
-        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        let deep = s.project("deep", &[("argos-0001", "묶음 밖의 줄", "todo")]);
+        write_group(&deep);
+        let cfg = s.register(&[&deep]);
+        let mut a = layered(&cfg);
         let heads = a.rows().len();
+        assert_eq!(heads, 1, "시험의 전제 — 안 읽은 프로젝트는 머리줄만 선다");
+
+        // `l` 은 머리줄만 편다 — 에픽은 접힌 채라 멤버가 안 선다.
+        a.hit("l");
+        settle(&mut a);
+        let shallow = a.rows().len();
+        assert!(shallow > heads, "l 이 프로젝트를 안 폈다");
+        assert!(!titles(&a).contains(&"에픽의 멤버".to_string()), "l 이 묶음까지 폈다 — {:?}", titles(&a));
+        a.hit("h");
+
         a.hit("Tab");
         settle(&mut a);
-        assert!(a.rows().len() > heads, "Tab 이 안 폈다");
+        assert!(a.rows().len() > shallow, "Tab 이 묶음까지 안 폈다 — {:?}", titles(&a));
+        assert!(titles(&a).contains(&"에픽의 멤버".to_string()), "멤버가 안 섰다 — {:?}", titles(&a));
         a.hit("Tab");
         assert_eq!(a.rows().len(), heads, "다시 누른 Tab 이 안 접었다");
+    }
+
+    /// 에픽 하나와 그 멤버를 그 프로젝트에 더한다 — 이미 쓴 줄 뒤에 잇는다.
+    fn write_group(dir: &Path) {
+        let mut epic = Issue::new("argos-0100".into(), "에픽".into(), Kind::Epic, Status::new("todo"), "2026-09-01T00:00:00Z");
+        epic.priority = Some(2);
+        let mut member =
+            Issue::new("argos-0101".into(), "에픽의 멤버".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        member.epic = Some(epic.id.clone());
+        let file = dir.join(".moai/issues.jsonl");
+        let mut body = std::fs::read_to_string(&file).unwrap();
+        for i in [epic, member] {
+            body.push_str(&format!("{}\n", serde_json::to_string(&i).unwrap()));
+        }
+        std::fs::write(&file, body).unwrap();
     }
 
     /// **건너뛰면 포커스가 목록으로 돌아온다**(리뷰 moai-i784.pzh) — 층의 상세에는 듣는 키가

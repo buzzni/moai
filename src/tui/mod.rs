@@ -2074,13 +2074,17 @@ impl App {
         use keys::Browse as B;
         let cur = self.current_of(rows);
         // **읽음도 그 줄의 프로젝트에 적는다**(moai-5v3q) — 한눈 보기의 줄은 남의 목록의 첨자라,
-        // 지금 선 프로젝트로 읽으면 엉뚱한 줄에 도장을 찍는다.
+        // 지금 선 프로젝트로 읽으면 엉뚱한 줄에 도장을 찍는다. **머리줄은 여기 안 온다**: 층의
+        // 머리줄에서 읽음 셋은 아예 안 듣는다(`keys::Browse::enabled` 의 `on_row`) — 층의 줄은
+        // 프로젝트고 안 읽은 줄은 들어간 프로젝트의 것이라는 결정(moai-j038.vna)이다. 그 결정을
+        // 넓히려면 키 쪽을 먼저 연다.
         let seat = match &cur {
             Some(Row::Item(seat, ..)) => *seat,
-            Some(Row::Project(n)) => Seat::Place(*n),
             _ => Seat::Here,
         };
-        let site = self.site_at(seat);
+        // 빠진 프로젝트의 줄에는 안 적는다(moai-m59y) — 갈음한 프로젝트에 남의 첨자로 도장을
+        // 찍으면 되돌리는 길이 도구 밖에만 남는다.
+        let Some(site) = self.site_of_seat(seat) else { return };
         let targets: Vec<usize> = match act {
             B::Read => match &cur {
                 Some(Row::Item(_, e, _)) => e.at().into_iter().collect(),
@@ -2096,14 +2100,15 @@ impl App {
                     self.notice = Some("이 줄은 묶음에 안 든다 — 에픽·마일스톤 안에서 누른다".into());
                     return;
                 };
-                let site = self.site_at(seat);
+                let Some(site) = self.site_of_seat(seat) else { return };
                 site.index.under_group(&site.issues, &group)
             }
             _ => return,
         };
-        let site = self.site_at(seat);
-
-        let ids: std::collections::BTreeSet<&str> = targets.iter().map(|&at| site.issues[at].id.as_str()).collect();
+        let Some(site) = self.site_of_seat(seat) else { return };
+        // 넘친 첨자는 건너뛴다 — 그 줄은 이미 없다.
+        let ids: std::collections::BTreeSet<&str> =
+            targets.iter().filter_map(|&at| site.issues.get(at)).map(|i| i.id.as_str()).collect();
         if ids.is_empty() {
             self.notice = Some("읽음으로 적을 것이 없다".into());
             return;
@@ -2154,11 +2159,13 @@ impl App {
     /// 읽은 것이 통째로 적혔다(`(길 잃음)` 도 같다) — `SPC m g` 이 `SPC m a` 가 되고, 되돌리는 길은 도구 밖에만
     /// 있다. 자식 있는 이슈 폴더 안에서 누르면 그 폴더만 읽고 에픽의 나머지와 묶음 줄 자신을 빠뜨렸다.
     fn group_of(&self, seat: Seat, e: &Entry) -> Option<String> {
-        let site = self.site_at(seat);
+        // 빠진 프로젝트의 줄은 묶음이 없다(moai-m59y) — 갈음한 목록에서 읽으면 남의 에픽이 나온다.
+        let site = self.site_of_seat(seat)?;
         if let Entry::Dir { at: Some(at), .. } = e
-            && crate::report::is_group(&site.issues[*at])
+            && let Some(i) = site.issues.get(*at)
+            && crate::report::is_group(i)
         {
-            return Some(site.issues[*at].id.clone());
+            return Some(i.id.clone());
         }
         // **줄이 사는 자리에서 읽는다**(`home_of`), 지금 디렉터리에서 읽지 않는다. 지금 디렉터리로
         // 재던 때는, 펼쳐 든 멤버 줄에 서서 누르면 그 줄의 에픽이 아니라 **그 위 마일스톤**이 나와
@@ -2396,13 +2403,29 @@ impl App {
     /// `seat` 이 든 프로젝트 — 한눈 보기의 줄은 제 층 줄의 것을, 프로젝트 안의 줄은 지금 선 것을 쓴다.
     /// **없는 자리는 지금 선 것으로 답한다**: 층 줄이 그새 빠졌다면 그 줄은 다음 프레임에 사라지고,
     /// 여기서 멈추면 그 한 프레임에 탐색기가 죽는다. 고치는 판([`App::site_mut`])은 갈음하지 않는다.
+    ///
+    /// **줄의 이슈를 이것으로 집지 않는다**([`App::issue_at`], moai-m59y) — 갈음한 프로젝트의 목록에
+    /// 남의 첨자를 대면 그 자리에 선 **엉뚱한 이슈**가 그 줄로 서거나 첨자가 넘쳐 터진다. 갈음이
+    /// 답이 되는 물음은 칸 이름·색인처럼 **프로젝트의 것을 묻는 것**뿐이고, 그것도 한 프레임짜리다.
     pub fn site_at(&self, seat: Seat) -> &Site {
+        self.site_of_seat(seat).unwrap_or(&self.site)
+    }
+
+    /// `seat` 이 든 프로젝트 — **없으면 없다고 답한다.** 갈음하는 [`App::site_at`] 과 갈리는 자리다.
+    pub fn site_of_seat(&self, seat: Seat) -> Option<&Site> {
         match seat {
-            Seat::Here => &self.site,
-            Seat::Place(n) => {
-                self.layer.as_ref().and_then(|l| l.places.get(n)).and_then(|p| p.site.as_ref()).unwrap_or(&self.site)
-            }
+            Seat::Here => Some(&self.site),
+            Seat::Place(n) => self.layer.as_ref().and_then(|l| l.places.get(n)).and_then(|p| p.site.as_ref()),
         }
+    }
+
+    /// 그 줄의 이슈 — **없는 자리도 넘친 첨자도 `None`** 이다(moai-m59y). 줄에 실린 첨자는 제
+    /// 프로젝트의 목록의 것이라([`Seat`]), 그 프로젝트가 없을 때 [`App::site_at`] 의 갈음을 타면
+    /// 첨자 넘침이 조용한 오답이 된다 — 남의 목록에서 그 첨자에 선 이슈가 이 줄로 선다.
+    /// 부르는 쪽은 **그 줄을 건너뛴다**: 빠진 줄은 다음 프레임에 사라지고, 그때까지 남의 이슈를
+    /// 그 줄로 세우지 않는다.
+    pub fn issue_at(&self, seat: Seat, at: usize) -> Option<&Issue> {
+        self.site_of_seat(seat)?.issues.get(at)
     }
 
     /// 지금 디렉터리의 목록 — `keep` 을 지나는 줄로. [`Self::rows`] 는 이것에 거름망과 보기를 건 것이다.
