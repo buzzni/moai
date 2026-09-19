@@ -2053,6 +2053,10 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
     // 치환 겹마다, 그 치환에 들어설 때의 `after_pick` — **나오면 되돌린다.** 바깥 명령의 값은 치환의
     // 값이 아니라, 치환 안의 집기는 바깥의 `&&` 로 안 이어진다(리뷰 moai-ju21.70g).
     let mut outside: Vec<Option<usize>> = Vec::new();
+    // **집기가 지면 끝내는 묶음**(moai-ncay) — `집기 || { …; exit 1; }` 와 `if ! 집기; then exit; fi` 다.
+    // (묶음의 깊이, 들어설 때의 `after_pick`, 지금까지 본 것이 그 꼴인가). 나올 때 그 꼴이면 집기가
+    // 이긴 채로 잇는다 — 그 묶음이 돌았으면 뒤는 아예 안 돈다.
+    let mut bailout: Option<(usize, Option<usize>, bool)> = None;
     for seg in parse(cmd) {
         // **몸통이 안 돌았을 수 있는 묶음을 나오면 그 안의 집기는 끝난다**(리뷰 moai-ju21.70g) —
         // `fi`·`esac`·`done` 의 묶음은 몸통이 안 돌아도 0 이고, `a || { mv; }` 는 `a` 가 이기면 안 돈다.
@@ -2076,6 +2080,19 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
         }
         while outside.len() > seg.nested {
             after_pick = outside.pop().flatten();
+        }
+        // **집기가 지면 끝내는 묶음을 나왔다**(moai-ncay) — 그 안의 모든 길이 `exit` 면 여기 온 것은
+        // 집기가 이겼다는 뜻이다. 들어설 때의 집기를 도로 세운다.
+        if let Some((floor, held, ends)) = bailout
+            && seg.level < floor
+        {
+            if ends {
+                // 여기 온 것은 집기가 이겼다는 뜻이다 — 이 묶음에서는 이제 이긴 채다(`sure`).
+                // `after_pick` 만 세우면 바로 뒤의 `;` 가 그것을 도로 끊는다.
+                after_pick = held.or(Some(seg.level));
+                sure = Some(sure.map_or(seg.level, |l| l.min(seg.level)));
+            }
+            bailout = None;
         }
         // **나온 묶음의 것은 걷는다** — 깊이가 같아도 형제 괄호와 다시 든 `if` 는 딴 묶음이다
         // ([`Seg::low`]·[`Seg::floor`]).
@@ -2170,6 +2187,30 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
         }
         if picks_up(&seg.words, cfg) && only(n) && !negated && (!or || picked_before) {
             after_pick = Some(after_pick.map_or(seg.level, |d| d.min(seg.level)));
+        }
+        // **`집기 || { …; exit 1; }`**(moai-ncay) — 집기 뒤에 `||` 로 연 묶음이다. `|| exit` 한 꼴만
+        // 알던 판은 겨루다 진 쪽을 끊는 이 흔한 꼴에서 집기를 잃어, 시킨 대로 쓴 줄을 막았다.
+        if j.op == Op::Or && j.depth < seg.level && picked_before && bailout.is_none() {
+            bailout = Some((seg.level, after_pick, false));
+        }
+        // **`if ! 집기; then exit 1; fi`** — 조건이 부정된 집기고 몸통이 `exit` 뿐이다. 조건은 집기로
+        // 안 세지만(`negated`), 그 묶음을 지나온 것은 집기가 이겼다는 뜻이다.
+        if bailout.is_none()
+            && prefix.iter().any(|w| w == "if")
+            && negated
+            && picks_up(&seg.words, cfg)
+            && only(n)
+        {
+            bailout = Some((seg.level, after_pick, true));
+        }
+        // 묶음 안에서 본 것 — 마지막이 `exit` 여야(그리고 `if` 꼴은 몸통이 모두 `exit` 여야) 끝내는
+        // 묶음이다. 제 셸을 끝낼 때만이다: `&` 로 띄우거나 파이프의 칸이면 그 하위 셸만 끝난다.
+        if let Some((floor, _, ends)) = &mut bailout
+            && seg.level >= *floor
+            && !(seg.level == *floor && prefix.iter().any(|w| w == "if"))
+        {
+            let exits = !seg.sub && command_of(&seg.words).first().map(|w| basename(w)) == Some("exit");
+            *ends = if prefix.iter().any(|w| w == "then" || w == "else" || w == "elif") { *ends && exits } else { exits };
         }
         // **홀로 선 명령인가** — 제 목록의 첫 칸이고(이음사가 `;`·줄바꿈이거나 묶음 밖에서 읽혔다) 파이프의
         // 칸도 `&` 로 띄운 것도 부정도 조건도 아니다. 뒤에 `&&`·`||` 가 붙으면 다음 토막이 그 이음사를
@@ -3155,6 +3196,40 @@ mod tests {
         let mine = Away { picked: set(&["t-1.aa"]), ..unsure };
         let focus: Vec<&str> = held(&all, &cfg(), &mine).iter().map(|i| i.id.as_str()).collect();
         assert_eq!(focus, ["t-1.aa"], "제가 집은 자식을 부모의 모름에 딸려 보냈다");
+    }
+
+    /// **집기가 지면 끝내는 묶음을 지나면 집기가 이긴 채다**(moai-ncay) — `집기 || { …; exit 1; }` 와
+    /// `if ! 집기; then exit 1; fi` 다. `|| exit` 한 꼴만 알던 판은 겨루다 진 쪽을 끊는 흔한 두 꼴에서
+    /// 집기를 잃어, 시킨 대로 쓴 줄을 규칙 2 로 막았다(잘못 막음).
+    ///
+    /// **끝내지 않는 묶음은 그대로 막는다** — 그 묶음이 돌고도 뒤가 돌면 집기 없이 쓰는 것이다.
+    /// 집기 없이 `||` 로 연 묶음도 마찬가지다.
+    #[test]
+    fn a_group_that_ends_the_shell_keeps_the_pick() {
+        let root = Path::new("/repo");
+        let wrote = |cmd: &str| guard_writes(&[], &cfg(), &here(), root, root, cmd);
+        for cmd in [
+            "moai mv t-1 in_progress --from todo || { echo lost >&2; exit 1; }; sed -i s/a/b/ src/x.rs",
+            "moai mv t-1 in_progress --from todo || { echo lost; exit 1; }\nsed -i s/a/b/ src/x.rs",
+            "if ! moai mv t-1 in_progress --from todo; then exit 1; fi; sed -i s/a/b/ src/x.rs",
+            "if ! moai mv t-1 in_progress --from todo; then echo lost; exit 1; fi; sed -i s/a/b/ src/x.rs",
+        ] {
+            assert_eq!(wrote(cmd), Decision::Pass, "집기가 이긴 채인데 막았다 — {cmd}");
+        }
+        for cmd in [
+            // 묶음이 안 끝낸다 — 집기가 져도 뒤가 돈다.
+            "moai mv t-1 in_progress --from todo || { echo lost >&2; }; sed -i s/a/b/ src/x.rs",
+            "if ! moai mv t-1 in_progress --from todo; then echo lost; fi; sed -i s/a/b/ src/x.rs",
+            // 몸통에 `exit` 아닌 길이 있다 — 그 길로 오면 집기는 졌다.
+            "if ! moai mv t-1 in_progress --from todo; then exit 1; else echo ok; fi; sed -i s/a/b/ src/x.rs",
+            // 집기가 아니라 딴 명령이 앞에 섰다.
+            "grep x f || { echo lost; exit 1; }; sed -i s/a/b/ src/x.rs",
+        ] {
+            assert!(matches!(wrote(cmd), Decision::Deny(_)), "집기 없이 쓰는 줄이 샜다 — {cmd}");
+        }
+        // **`&` 로 띄운 묶음은 아직 못 가른다** — 렉서가 `&` 와 `;` 를 한 이음사(`Op::Any`)로 읽어,
+        // `집기 || { …; exit 1; } & 쓰기` 의 `exit` 가 제 하위 셸만 끝내는 것을 여기서 모른다.
+        // 그 줄은 지금 지나간다(샌다). 흔한 꼴이 아니라 적어 두고 idea 로 넘긴다(moai-ncay 의 노트).
     }
 
     /// **감싸는 명령은 명령 자리를 안 가린다**(moai-455j) — `env`·`timeout`·`nice`·`stdbuf`·`sudo` 뒤의
@@ -5296,3 +5371,5 @@ mod korean_tests {
         assert!(counted("src/_workspace_notes.rs", Path::new("/repo")));
     }
 }
+
+
