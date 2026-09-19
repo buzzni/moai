@@ -131,7 +131,7 @@ impl App {
             self.notice = Some("! 사용자 설정의 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 중 하나를 준다".into());
             return;
         };
-        let starts: Vec<PathBuf> = [self.pick_from.clone(), self.launched_at.clone(), self.repo.as_ref().map(|r| r.root.clone())]
+        let starts: Vec<PathBuf> = [self.pick_from.clone(), self.launched_at.clone(), self.site.repo.as_ref().map(|r| r.root.clone())]
             .into_iter()
             .flatten()
             .collect();
@@ -625,7 +625,7 @@ mod tests {
         let argos = s.project("work/argos");
         let mut a = App::on_projects(Layer::read(Some(&cfg), None));
         a.launched_at = Some(s.join("work"));
-        assert!(a.on_layer() && a.repo.is_none());
+        assert!(a.on_layer() && a.site.repo.is_none());
 
         let screen = crate::tui::draw::tests::render(&mut a, 80, 12).join("\n");
         assert!(screen.contains("등록한 프로젝트가 없다") && screen.contains("SPC p a"), "{screen}");
@@ -685,7 +685,7 @@ mod tests {
         assert_eq!(s.registered(), [other.clone()]);
         let layer = a.layer.as_ref().expect("등록했는데 층이 안 섰다");
         assert_eq!(layer.at, At::Project(here.clone()), "등록하다 프로젝트에서 튕겨 나왔다");
-        assert_eq!(a.repo.as_ref().map(|r| r.root.clone()), Some(here.clone()));
+        assert_eq!(a.site.repo.as_ref().map(|r| r.root.clone()), Some(here.clone()));
         // 층이 서도 뿌리에 `..` 은 없다 — 층으로는 `0` 이 간다(moai-i784).
         assert!(!a.rows().contains(&Row::Up), "뿌리에 `..` 이 섰다");
         assert_eq!(a.current(), held, "층이 서면서 커서가 옆 줄로 밀렸다");

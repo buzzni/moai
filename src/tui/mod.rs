@@ -494,7 +494,15 @@ fn warnings_in<'a>(
     crate::report::status_in(issues, &lines, cfg, now, soil).warnings.len()
 }
 
-pub struct App {
+/// 프로젝트 하나에 딸린 것 — 그 프로젝트의 줄과, 그 줄을 재고 그리는 데 드는 모든 것(moai-pqmg).
+///
+/// **한 덩이로 묶은 까닭은 여럿을 들려고다.** 한눈 보기가 프로젝트마다 커밋 칸·안 읽음 `[NEW]`·
+/// `⎇` 워크트리 마크까지 제 것으로 세우기로 했고(사용자 결정 2026-09-19, moai-ucx8), 그러려면 이
+/// 스물몇이 프로젝트마다 한 벌씩 있어야 한다. 흩어 두면 그 한 벌을 고르는 자리가 필드 수만큼 는다.
+///
+/// **보는 사람의 것은 안 든다** — 커서·굴린 자리·정렬·열·보기 토글·누구인가는 화면에 하나뿐이라
+/// [`App`] 에 남는다. 여기 드는 것은 *그 프로젝트가 무엇인가* 와 *그 안에서 어디를 보나* 다.
+pub struct Site {
     pub issues: Vec<Issue>,
     pub index: Index,
     /// 파일 전체를 훑어야 아는 것 — 묶음이 선 칸, 소속, 물려받은 미룸, 가려짐. **적재 때 한 번 센다**
@@ -502,6 +510,77 @@ pub struct App {
     ground: Ground,
     pub cfg: Config,
     pub path: Path,
+    /// 어디서 읽어 왔나. 시험은 저장소 없이 App 을 세우므로 없을 수 있다.
+    pub repo: Option<Repo>,
+    /// 읽은 그 순간의 시각. **프레임마다가 아니라 적재마다 잡는다** — 매번
+    /// 다시 잡으면 "3일 넘게" 같은 판정이 초 단위로 깜빡인다.
+    pub now: String,
+    /// 읽다 만난 못 읽는 줄 — 줄마다 **그 줄이 쓰는 id** (읽어 낼 수 있었던
+    /// 것만). 대체 화면 안에서는 stderr 로 못 알린다. 수를 따로 들지 않는다 —
+    /// 둘로 들면 어긋날 수 있고, 산 줄과의 중복을 `moai status` 와 같은 자로
+    /// 세려면 수만으로는 모자란다(moai-4dk4).
+    pub unreadable: Vec<Option<String>>,
+    /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
+    pub warnings: usize,
+    /// 마지막으로 읽은 파일의 (고친 때, 길이).
+    stamp: Stamp,
+    /// 마지막 읽기를 **들인** 때. 표식이 그대로여도 [`layer::REREAD_EVERY`] 가 지나면 다시 읽는다
+    /// ([`App::follow`], moai-z4r4). 들인 때로 찍는 까닭은 층과 같다(`Layer::adopt`) — 시작한 때로
+    /// 찍으면 한 번 읽는 데 그만큼 걸리는 자리에서 쉬지 않고 다시 읽는다.
+    read_at: Option<std::time::Instant>,
+    /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과, 어느 때든 지켜보는 HEAD·가지
+    /// 파일·`packed-refs`, 자리 판정이 보는 옆 워크트리(`worktree::place_marks`)의 표식(읽기 **전에**
+    /// 잰 것 — `worktree::gather`·[`prepare`]). 같은 파일은 한 번만 든다([`watch`]).
+    watched: Vec<(std::path::PathBuf, Stamp)>,
+    /// 이슈에 닿은 커밋 표([`Commits`]). **표식(`watched`)이 움직였을 때 새로 짓는다** —
+    /// 거기 HEAD·가지 파일이 들어 있어 그것이 곧 "커밋이 섰는가" 다. 다시 읽을 때마다
+    /// 지으면 스냅샷 쓰기 하나(`mv` 한 번, 옆 세션의 쓰기 하나)마다 뿌리마다 이력을 통째로
+    /// 걷는다 — 커밋이 안 선 것을 알면서 걷는 일이다. 새 표가 올 때까지는 옛 표를 든다.
+    commits: Commits,
+    /// 지금 든 표를 지을 때 준 id 들. **표의 내용이 이 목록에 매인다**(moai-ynhj) — 표는
+    /// 낱말을 이 id 들과 견줘 서므로, 여기 없던 id 가 줄에 서면 그 줄의 커밋 칸은 표식이
+    /// 다시 움직일 때까지 영영 빈다(들여온 줄·되살린 파일처럼 커밋이 먼저 있고 줄이 나중에
+    /// 오는 자리가 그렇다). 그래서 **새 id 가 들면 표식이 그대로여도 한 번 더 짓는다.**
+    /// 사라진 id 는 안 센다 — 남은 칸은 아무도 찾지 않으므로 걷기를 새로 살 값이 없다.
+    commit_ids: std::collections::BTreeSet<String>,
+    /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임 `Filter::matches` 를 돌리면
+    /// 거름망이 볼 꼴(`Ground::here`)을 프레임마다 다시 짓는다. 소속 지도 자체는 적재 때 한 번 잰다(moai-fbdg).
+    keep: Vec<bool>,
+    /// 이슈 첨자 → 보기에 보이는가. `keep` 과 같은 까닭으로 **보기나 자료가 바뀔 때만** 센다
+    /// ([`App::see`]) — 묶음의 칸과 물려받은 미룸을 줄마다 프레임마다 다시 풀지 않는다.
+    shown: Vec<bool>,
+    /// 보기에 보이는 줄이 사는 자리의 **모든 앞머리**([`App::see`]가 `shown` 과 함께 센다). 폴더가 검색 없이도
+    /// 설지를 이 하나로 묻는다([`App::stands_in_view`]) — 폴더마다 이슈 전부를 훑으면 목록 한 번에 폴더 수 ×
+    /// 이슈 수가 들고, 목록·머리 셈·열 셈이 프레임마다 그것을 묻는다(`Index::entries_sorted` 의 `lit` 과 같은 까닭).
+    lit: std::collections::HashSet<Path>,
+    /// **안 읽은 줄의 id**(moai-z9pc) — 내게 온 것 가운데 내가 마지막으로 본 뒤에 바뀐 것
+    /// (`query::unread`). 줄·읽음·사람이 바뀔 때만 센다(`take`·`adopt_read`·`mark_read`) — 줄마다
+    /// 프레임마다, 보기 토글마다 담당·조상을 다시 풀지 않는다.
+    pub unread: std::collections::BTreeSet<String>,
+    /// 층마다 커서를 기억한다. 들어갔다 나오면 **있던 자리로 돌아온다** —
+    /// 매번 맨 위로 튕기면 형제 여럿을 훑는 일이 못 할 짓이 된다.
+    remembered: Vec<usize>,
+    /// 목록에서 펼쳐 둔 묶음의 자리(moai-7qot). **화면에만 산다**(사용자 결정) — 설정에 안
+    /// 남는다. 보기(`Look`)는 *무엇을 숨기나* 고 펼침은 *지금 어디를 보나* 라 축이 다르고,
+    /// 설정에 이슈 id 를 쌓으면 지운 줄의 id 가 설정에 남는다.
+    ///
+    /// 접어도 **밑의 펼침은 기억한다** — 접었다 다시 펼치면 안이 그대로 선다. `Tab`
+    /// (다 펼침)의 두 번째 누름만 밑까지 걷는다([`App::expand_all`]).
+    expanded: std::collections::HashSet<Path>,
+    /// 겹쳐 본 줄의 출처. 꺼져 있으면 비었다.
+    pub origin: crate::worktree::Origin,
+    /// 옆 워크트리에서 만난 문제. **배너로 말만 한다** — CLI 가 stderr 로 흘리는
+    /// 말인데, 대체 화면 안에서는 그 길을 못 쓴다.
+    pub elsewhere: Vec<String>,
+    /// 옆 워크트리를 **못 찾은** 까닭(`Gathered::unfound`) — git 밖 프로젝트다. 경로 줄에도 배너에도
+    /// 안 세운다: 겹쳐 보기는 켜진 채로 시작해 git 밖 프로젝트를 볼 때마다 시키지 않은 말이 선다.
+    /// 사람이 `SPC v w` 로 **켰을 때만** 알림으로 한 번 댄다(moai-d5vn).
+    pub unfound: Option<String>,
+}
+
+pub struct App {
+    /// 지금 선 프로젝트에 딸린 것 — 줄·색인·설정과 그 안에서 선 자리([`Site`]).
+    pub site: Site,
     pub cursor: usize,
     pub mode: Mode,
     /// 이동키(`↑↓`·PageUp/Down·Home/End)를 먹는 칸. `Tab`·`Shift-Tab` 이 돌린다.
@@ -515,16 +594,6 @@ pub struct App {
     /// 검색 칸을 열기 전의 거름망·범위·커서. **칸은 치는 대로 거르므로**(moai-00le) Esc 가
     /// 그만두려면 되돌아갈 자리를 들고 있어야 한다. Enter 로 걸면 버린다.
     grep_was: Option<(Option<String>, GrepIn, usize)>,
-    /// 어디서 읽어 왔나. 시험은 저장소 없이 App 을 세우므로 없을 수 있다.
-    pub repo: Option<Repo>,
-    /// 읽은 그 순간의 시각. **프레임마다가 아니라 적재마다 잡는다** — 매번
-    /// 다시 잡으면 "3일 넘게" 같은 판정이 초 단위로 깜빡인다.
-    pub now: String,
-    /// 읽다 만난 못 읽는 줄 — 줄마다 **그 줄이 쓰는 id** (읽어 낼 수 있었던
-    /// 것만). 대체 화면 안에서는 stderr 로 못 알린다. 수를 따로 들지 않는다 —
-    /// 둘로 들면 어긋날 수 있고, 산 줄과의 중복을 `moai status` 와 같은 자로
-    /// 세려면 수만으로는 모자란다(moai-4dk4).
-    pub unreadable: Vec<Option<String>>,
     /// 마지막 갱신이나 쓰기가 **실패한** 까닭 — 무엇을 못 했는지까지 단 쪽이 적는다.
     /// 조용히 삼키면 갱신이 아무 일도 안 하는데 "바뀌었다" 배너는 붙어 있어, 사람은
     /// 기다리고 또 기다리며 까닭을 못 얻는다.
@@ -567,35 +636,12 @@ pub struct App {
     /// 헤더가 떠난 프로젝트의 `이름 (메일)` 을 그대로 이고 있다. 설정은 화면만 바꾸는 것이라,
     /// 화면이 안 바뀌면 그 설정은 없는 것과 같다.
     header_user: Option<(Option<String>, crate::config::Naming, std::path::PathBuf, String)>,
-    /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
-    pub warnings: usize,
     /// 상세의 굴린 자리. **왼쪽 커서를 옮기면 첫 줄로 돌아간다** — 다른
     /// 이슈를 보는데 굴린 자리가 남아 있으면 첫 줄부터 못 본다.
     pub detail: Scroll,
     /// 본문을 그리지 않고 원문 그대로 보는가. 그린 글은 기호가 지워져
     /// 되돌릴 수 없다 — 긁어 붙이거나 마크다운을 고칠 때 이 길이 필요하다.
     pub raw: bool,
-    /// 마지막으로 읽은 파일의 (고친 때, 길이).
-    stamp: Stamp,
-    /// 마지막 읽기를 **들인** 때. 표식이 그대로여도 [`layer::REREAD_EVERY`] 가 지나면 다시 읽는다
-    /// ([`App::follow`], moai-z4r4). 들인 때로 찍는 까닭은 층과 같다(`Layer::adopt`) — 시작한 때로
-    /// 찍으면 한 번 읽는 데 그만큼 걸리는 자리에서 쉬지 않고 다시 읽는다.
-    read_at: Option<std::time::Instant>,
-    /// 겹쳐 보는 동안 함께 지켜보는 옆 워크트리 스냅샷과, 어느 때든 지켜보는 HEAD·가지
-    /// 파일·`packed-refs`, 자리 판정이 보는 옆 워크트리(`worktree::place_marks`)의 표식(읽기 **전에**
-    /// 잰 것 — `worktree::gather`·[`prepare`]). 같은 파일은 한 번만 든다([`watch`]).
-    watched: Vec<(std::path::PathBuf, Stamp)>,
-    /// 이슈에 닿은 커밋 표([`Commits`]). **표식(`watched`)이 움직였을 때 새로 짓는다** —
-    /// 거기 HEAD·가지 파일이 들어 있어 그것이 곧 "커밋이 섰는가" 다. 다시 읽을 때마다
-    /// 지으면 스냅샷 쓰기 하나(`mv` 한 번, 옆 세션의 쓰기 하나)마다 뿌리마다 이력을 통째로
-    /// 걷는다 — 커밋이 안 선 것을 알면서 걷는 일이다. 새 표가 올 때까지는 옛 표를 든다.
-    commits: Commits,
-    /// 지금 든 표를 지을 때 준 id 들. **표의 내용이 이 목록에 매인다**(moai-ynhj) — 표는
-    /// 낱말을 이 id 들과 견줘 서므로, 여기 없던 id 가 줄에 서면 그 줄의 커밋 칸은 표식이
-    /// 다시 움직일 때까지 영영 빈다(들여온 줄·되살린 파일처럼 커밋이 먼저 있고 줄이 나중에
-    /// 오는 자리가 그렇다). 그래서 **새 id 가 들면 표식이 그대로여도 한 번 더 짓는다.**
-    /// 사라진 id 는 안 센다 — 남은 칸은 아무도 찾지 않으므로 걷기를 새로 살 값이 없다.
-    commit_ids: std::collections::BTreeSet<String>,
     /// 표만 짓는 스레드([`App::follow_commits`]). **한 번에 하나만 돈다** — 도는 동안 다시 읽기가
     /// 또 들어오면 `commits_due` 만 세우고, 이것이 끝나면 곧바로 하나를 더 띄운다.
     commits_job: Option<(std::sync::mpsc::Receiver<Commits>, std::thread::JoinHandle<()>)>,
@@ -623,26 +669,12 @@ pub struct App {
     /// 다시 읽는 길. 진짜 길은 [`prepare`] 다. **시험이 갈아 끼운다** — 스레드에서
     /// 짓는 읽기가 패닉하는 때는 진짜 파일로는 못 만든다.
     read: fn(&Repo, bool) -> crate::fail::R<Fresh>,
-    /// 이슈 첨자 → 걸렸는가. **거름망이 바뀔 때만 다시 센다** — 매 프레임 `Filter::matches` 를 돌리면
-    /// 거름망이 볼 꼴(`Ground::here`)을 프레임마다 다시 짓는다. 소속 지도 자체는 적재 때 한 번 잰다(moai-fbdg).
-    keep: Vec<bool>,
     /// 무엇을 보일까(moai-fmv5) — 칸·미룸 토글. 거름망과 따로 들어 Esc 가 안 푼다.
     pub view: view::View,
-    /// 이슈 첨자 → 보기에 보이는가. `keep` 과 같은 까닭으로 **보기나 자료가 바뀔 때만** 센다
-    /// ([`App::see`]) — 묶음의 칸과 물려받은 미룸을 줄마다 프레임마다 다시 풀지 않는다.
-    shown: Vec<bool>,
-    /// 보기에 보이는 줄이 사는 자리의 **모든 앞머리**([`App::see`]가 `shown` 과 함께 센다). 폴더가 검색 없이도
-    /// 설지를 이 하나로 묻는다([`App::stands_in_view`]) — 폴더마다 이슈 전부를 훑으면 목록 한 번에 폴더 수 ×
-    /// 이슈 수가 들고, 목록·머리 셈·열 셈이 프레임마다 그것을 묻는다(`Index::entries_sorted` 의 `lit` 과 같은 까닭).
-    lit: std::collections::HashSet<Path>,
     /// 목록 차례와 그 방향(moai-55cp). 기본은 우선순위 차례다.
     pub order: keys::Sorting,
     /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)에 열 이름 줄이 얹힌다.
     pub fields: view::Fields,
-    /// **안 읽은 줄의 id**(moai-z9pc) — 내게 온 것 가운데 내가 마지막으로 본 뒤에 바뀐 것
-    /// (`query::unread`). 줄·읽음·사람이 바뀔 때만 센다(`take`·`adopt_read`·`mark_read`) — 줄마다
-    /// 프레임마다, 보기 토글마다 담당·조상을 다시 풀지 않는다.
-    pub unread: std::collections::BTreeSet<String>,
     /// 내 설정에 적힌 읽음 — 이슈 id → 마지막으로 본 줄의 도장(moai-lyc1). 띄울 때 읽고, 읽음을 적을 때 락 안에서 읽은
     /// 파일의 것으로, 그 파일이 바뀌면 걸음이 다시 읽는다([`App::follow_config`]) — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다.
     seen: std::collections::BTreeMap<String, String>,
@@ -658,16 +690,6 @@ pub struct App {
     /// 옆 탐색기·손·새 바이너리가 적은 것을 토글 한 번이 되돌린다. 새 바이너리가 적은 모르는 낱말을 들고
     /// 있다가 도로 싣던 것(moai-2bzp 리뷰)도 이것으로 선다 — 이 세션이 안 바꾼 것은 안 적는다.
     saved: crate::user_config::Look,
-    /// 층마다 커서를 기억한다. 들어갔다 나오면 **있던 자리로 돌아온다** —
-    /// 매번 맨 위로 튕기면 형제 여럿을 훑는 일이 못 할 짓이 된다.
-    remembered: Vec<usize>,
-    /// 목록에서 펼쳐 둔 묶음의 자리(moai-7qot). **화면에만 산다**(사용자 결정) — 설정에 안
-    /// 남는다. 보기(`Look`)는 *무엇을 숨기나* 고 펼침은 *지금 어디를 보나* 라 축이 다르고,
-    /// 설정에 이슈 id 를 쌓으면 지운 줄의 id 가 설정에 남는다.
-    ///
-    /// 접어도 **밑의 펼침은 기억한다** — 접었다 다시 펼치면 안이 그대로 선다. `Tab`
-    /// (다 펼침)의 두 번째 누름만 밑까지 걷는다([`App::expand_all`]).
-    expanded: std::collections::HashSet<Path>,
     /// 목록이 훑고 있는 자리. **프레임을 넘어 산다** — 매 프레임 새로 만들면
     /// 0 번 줄부터 다시 세어 커서를 늘 맨 아랫줄에 붙이고, 그러면 커서 아래를
     /// 한 줄도 못 본다. 상세와 **같은 조각**이다([`Scroll`]).
@@ -688,15 +710,6 @@ pub struct App {
     /// 한다. 값은 여는 순간 `git` 한 번과 옆 스냅샷 읽기다. CLI 의 `--worktree` 는
     /// 그대로 끈 채로 둔다 — 기계가 읽는 출력의 모양을 안 바꾼다.
     pub worktree: bool,
-    /// 겹쳐 본 줄의 출처. 꺼져 있으면 비었다.
-    pub origin: crate::worktree::Origin,
-    /// 옆 워크트리에서 만난 문제. **배너로 말만 한다** — CLI 가 stderr 로 흘리는
-    /// 말인데, 대체 화면 안에서는 그 길을 못 쓴다.
-    pub elsewhere: Vec<String>,
-    /// 옆 워크트리를 **못 찾은** 까닭(`Gathered::unfound`) — git 밖 프로젝트다. 경로 줄에도 배너에도
-    /// 안 세운다: 겹쳐 보기는 켜진 채로 시작해 git 밖 프로젝트를 볼 때마다 시키지 않은 말이 선다.
-    /// 사람이 `SPC v w` 로 **켰을 때만** 알림으로 한 번 댄다(moai-d5vn).
-    pub unfound: Option<String>,
     /// 프로젝트 층([`layer`]). **`None` 이면 등록한 것이 없고 오늘 탐색기 그대로다.** 층이
     /// 있으면 지금 선 곳(`layer.at`)이 층이거나 한 프로젝트 안이고, 층에 선 동안에는 위의
     /// 한 프로젝트 자리(`repo`·`issues`·`index`…)가 비었다.
@@ -761,10 +774,10 @@ impl App {
         let cfg = repo.config.clone();
         let ids = load.errors.iter().map(|e| e.id.clone()).collect();
         let mut app = App::build(load.issues, index, ground, cfg, path, ids);
-        app.stamp = stamp;
+        app.site.stamp = stamp;
         // 띄울 때 읽은 것도 들인 읽기다 — 안 찍으면 조용한 저장소에서 시계로는 영영 다시 안 읽는다.
-        app.read_at = Some(std::time::Instant::now());
-        app.repo = Some(repo);
+        app.site.read_at = Some(std::time::Instant::now());
+        app.site.repo = Some(repo);
         app
     }
 
@@ -781,26 +794,26 @@ impl App {
         swept: bool,
     ) -> App {
         let unreadable: Vec<Option<String>> = origin
-            .unreadable(self.unreadable.iter().map(Option::as_deref))
+            .unreadable(self.site.unreadable.iter().map(Option::as_deref))
             .into_iter()
             .map(|id| id.map(str::to_string))
             .collect();
         // `build` 가 이미 한 번 셌다. 못 읽는 줄의 자가 안 바뀌었으면 같은 훑기를 다시 하지 않는다.
-        if unreadable != self.unreadable {
-            self.unreadable = unreadable;
-            self.warnings = warnings_of(&self.issues, &self.unreadable, &self.cfg, &self.now);
+        if unreadable != self.site.unreadable {
+            self.site.unreadable = unreadable;
+            self.site.warnings = warnings_of(&self.site.issues, &self.site.unreadable, &self.site.cfg, &self.site.now);
         }
         // 자리 판정은 저장소가 있어야 잰다 — `build` 는 줄만 받아 못 쟀다. 다시 읽기는
         // `prepare` 가 같은 자로 세어 [`Fresh::warnings`] 에 실어 온다. 위의 셈에 **한 번만** 더한다 —
         // 이 길은 여는 읽기 하나가 한 번 지난다.
-        if let Some(repo) = &self.repo {
-            let (lost, said) = placed(repo, &self.issues, self.worktree && swept, &self.now);
-            self.warnings += lost;
+        if let Some(repo) = &self.site.repo {
+            let (lost, said) = placed(repo, &self.site.issues, self.worktree && swept, &self.site.now);
+            self.site.warnings += lost;
             elsewhere.extend(said);
         }
-        self.origin = origin;
-        self.elsewhere = elsewhere;
-        self.watched = watched;
+        self.site.origin = origin;
+        self.site.elsewhere = elsewhere;
+        self.site.watched = watched;
         self
     }
 
@@ -816,11 +829,31 @@ impl App {
         let remembered = vec![0; path.len()];
         let keep = vec![true; issues.len()];
         let mut app = App {
-            issues,
-            index,
-            ground,
-            cfg,
-            path,
+            site: Site {
+                issues,
+                index,
+                ground,
+                cfg,
+                path,
+                repo: None,
+                now: crate::model::now(),
+                unreadable: unreadable_ids,
+                warnings: 0,
+                stamp: None,
+                read_at: None,
+                watched: Vec::new(),
+                commits: Commits::new(),
+                commit_ids: Default::default(),
+                keep,
+                shown: Vec::new(),
+                lit: Default::default(),
+                unread: Default::default(),
+                remembered,
+                expanded: Default::default(),
+                origin: crate::worktree::Origin::default(),
+                elsewhere: Vec::new(),
+                unfound: None,
+            },
             cursor: 0,
             mode: Mode::Browse,
             focus: Pane::default(),
@@ -829,9 +862,6 @@ impl App {
             filter_text: None,
             grep_in: GrepIn::All,
             grep_was: None,
-            repo: None,
-            now: crate::model::now(),
-            unreadable: unreadable_ids,
             trouble: None,
             unlayered: None,
             write_failed: false,
@@ -839,12 +869,6 @@ impl App {
             user: None,
             identify: crate::model::actor,
             header_user: None,
-            warnings: 0,
-            stamp: None,
-            watched: Vec::new(),
-            read_at: None,
-            commits: Commits::new(),
-            commit_ids: Default::default(),
             commits_job: None,
             commits_due: true,
             pending: None,
@@ -852,29 +876,20 @@ impl App {
             discarded: Vec::new(),
             let_go: 0,
             read: prepare,
-            keep,
             // **처음에는 done 을 숨긴다**(사람의 결정, 2026-09-14). 끝난 것이 목록을 채워 지금 볼
             // 것을 덮었고, 걷으려면 `status=todo,in_progress,review` 를 손으로 적어야 했다.
             view: view::View::hiding(crate::config::DONE),
-            shown: Vec::new(),
-            lit: Default::default(),
             order: Default::default(),
             fields: Default::default(),
             detail_open: true,
-            unread: Default::default(),
             seen: Default::default(),
             me: None,
             saved: Default::default(),
-            remembered,
-            expanded: Default::default(),
             list: Scroll::default(),
             quit: false,
             spin: 0,
             spun: false,
             worktree: true,
-            origin: crate::worktree::Origin::default(),
-            elsewhere: Vec::new(),
-            unfound: None,
             layer: None,
             user_config: None,
             config_stamp: None,
@@ -885,7 +900,7 @@ impl App {
         };
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
         // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
-        app.warnings = warnings_of(&app.issues, &app.unreadable, &app.cfg, &app.now);
+        app.site.warnings = warnings_of(&app.site.issues, &app.site.unreadable, &app.site.cfg, &app.site.now);
         app.see();
         app
     }
@@ -900,13 +915,13 @@ impl App {
     pub fn reload(&mut self) {
         // 층에는 다시 읽을 저장소가 없다 — 층에 서면 `repo` 가 빈다(`leave_project`). 층의 줄은 제 표식과
         // 시계([`App::follow_layer`])가, 등록 목록은 설정 파일의 표식([`App::follow_config`])이 따라간다.
-        if self.repo.is_none() {
+        if self.site.repo.is_none() {
             return;
         }
         if let Some((_, handle)) = self.pending.take() {
             self.discard(handle);
         }
-        let Some(repo) = &self.repo else { return };
+        let Some(repo) = &self.site.repo else { return };
         let fresh = (self.read)(repo, self.worktree);
         self.receive(fresh);
     }
@@ -921,7 +936,7 @@ impl App {
     /// 가리키고, 그 위에서 쓰면 쓰는 곳은 맞는데 보고 쓴 것이 틀린다.
     fn receive(&mut self, fresh: crate::fail::R<Fresh>) {
         match fresh {
-            Ok(f) if self.repo.as_ref().is_none_or(|r| r.root != f.root) => {}
+            Ok(f) if self.site.repo.as_ref().is_none_or(|r| r.root != f.root) => {}
             Ok(f) => self.apply_fresh(f),
             Err(e) => {
                 self.trouble = Some(format!("다시 읽지 못했다 — {e}"));
@@ -935,9 +950,9 @@ impl App {
     /// CLI 와 같은 [`Repo::with_write`] 를 부른다 — 쓰기 경로가 화면 쪽에 따로
     /// 서면 락·재읽기·검증·원자적 교체를 또 반쯤 구현하게 되고, 옛 `write.rs` 가
     /// 그렇게 부풀었다. 닫는 함수가 받는 목록은 **락 안에서 다시 읽은 것**이다.
-    /// 화면이 들고 있는 `self.issues` 는 낡았을 수 있으니 그것을 보고 판단하지 않는다.
+    /// 화면이 들고 있는 `self.site.issues` 는 낡았을 수 있으니 그것을 보고 판단하지 않는다.
     ///
-    /// **쓰고 나면 [`App::reload`] 로 다시 읽는다.** 만든 줄을 `self.issues` 에 손으로
+    /// **쓰고 나면 [`App::reload`] 로 다시 읽는다.** 만든 줄을 `self.site.issues` 에 손으로
     /// 넣으면 그 순간 화면과 파일이 갈라진다 — 정규화·정렬·묶음의 칸·경고 셈이
     /// 파일 쪽에만 걸린다. 다시 읽기가 표식도 함께 잡으므로(`prepare` 는 읽기 전에
     /// 잰다) 제가 쓴 것을 "밖에서 바뀌었다" 로 읽어 한 번 더 읽는 일이 없다. 스레드에서
@@ -985,7 +1000,7 @@ impl App {
         // 앞 쓰기의 알림은 이 쓰기가 무엇이 되든 낡았다 — 실패한 뒤에 옛 `✓` 가 남으면
         // 이번 것이 담긴 것으로 읽힌다.
         self.notice = None;
-        let Some(repo) = &self.repo else {
+        let Some(repo) = &self.site.repo else {
             self.trouble = Some("쓰지 못했다 — 저장소 없이 연 화면이다".into());
             self.write_failed = true;
             return None;
@@ -1028,7 +1043,7 @@ impl App {
                     // Esc 는 거름망만 풀어 누른 키가 아무것도 안 한다. **둘 다 가렸으면 둘 다 댄다**
                     // (moai-2kyl 단계 리뷰) — 하나만 대면 그 키를 눌러도 다른 쪽에 여전히 가린다.
                     Landing::Hidden => {
-                        let veil = self.index.find(&id).map(|at| self.veil(at)).unwrap_or_default();
+                        let veil = self.site.index.find(&id).map(|at| self.veil(at)).unwrap_or_default();
                         let clear = keys::label(keys::BROWSE, keys::Browse::ClearFilter);
                         let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
                         match veil {
@@ -1068,9 +1083,9 @@ impl App {
         let fresh = self
             .header_user
             .as_ref()
-            .is_none_or(|(u, n, r, _)| *u != self.user || *n != self.cfg.naming || r.as_path() != at);
+            .is_none_or(|(u, n, r, _)| *u != self.user || *n != self.site.cfg.naming || r.as_path() != at);
         if fresh {
-            let (at, naming) = (at.to_path_buf(), self.cfg.naming);
+            let (at, naming) = (at.to_path_buf(), self.site.cfg.naming);
             let said = (self.identify)(self.user.as_deref(), &at)
                 .map(|a| crate::model::label(&a.name, Some(&a.email), naming))
                 .unwrap_or_else(|_| "—".into());
@@ -1083,7 +1098,7 @@ impl App {
     /// 없으니 띄운 자리에서 읽고, 그것도 없으면 지금 자리다. **뿌리가 바뀌면 사람도 다시
     /// 푼다** — 프로젝트마다 git 설정이 다를 수 있고, 헤더는 지금 선 프로젝트를 말해야 한다.
     fn user_root(&self) -> &std::path::Path {
-        self.repo
+        self.site.repo
             .as_ref()
             .map(|r| r.root.as_path())
             .or(self.launched_at.as_deref())
@@ -1149,21 +1164,21 @@ impl App {
         if !self.write_failed {
             self.trouble = None;
         }
-        self.stamp = f.stamp;
-        self.unreadable = f.unreadable;
-        self.origin = f.origin;
-        self.elsewhere = f.elsewhere;
-        self.unfound = f.unfound;
+        self.site.stamp = f.stamp;
+        self.site.unreadable = f.unreadable;
+        self.site.origin = f.origin;
+        self.site.elsewhere = f.elsewhere;
+        self.site.unfound = f.unfound;
         // 표는 **표식이 움직였을 때** 다음 걸음에 스레드가 짓는다(`App::commits`·
         // `follow_commits`). 도는 것이 있으면 그 답은 받되 이 읽기보다 낡았을 수 있어
         // 끝나는 대로 하나를 더 띄운다.
         // **표가 모르는 id 가 들어왔을 때도 짓는다**(`App::commit_ids`) — 표는 낱말을 준 id 와
         // 견줘 서므로, 커밋이 먼저 있고 줄이 나중에 온 자리는 이것 없이는 영영 빈 칸이다.
         // 칸 옮기기·메모처럼 id 가 그대로인 쓰기는 여기서 안 걸려 걷기를 새로 사지 않는다.
-        self.commits_due |= self.watched != f.watched || f.issues.iter().any(|i| !self.commit_ids.contains(&i.id));
-        self.watched = f.watched;
-        self.read_at = Some(std::time::Instant::now());
-        self.warnings = f.warnings;
+        self.commits_due |= self.site.watched != f.watched || f.issues.iter().any(|i| !self.site.commit_ids.contains(&i.id));
+        self.site.watched = f.watched;
+        self.site.read_at = Some(std::time::Instant::now());
+        self.site.warnings = f.warnings;
         self.take(f.issues, f.index, f.ground, f.now);
     }
 
@@ -1189,25 +1204,25 @@ impl App {
     /// 그래서 이 자로는 **줄이 돌면 그 위 묶음도 돌고, 묶음이 돌면 그 밑에 도는 줄이
     /// 있다.**
     pub fn spins(&self, at: usize) -> bool {
-        let i = &self.issues[at];
-        if self.index.deferred_root(&i.id).is_some() {
+        let i = &self.site.issues[at];
+        if self.site.index.deferred_root(&i.id).is_some() {
             return false;
         }
-        let busy = !crate::report::is_group(i) || self.ground.stands.get(&i.id).is_some_and(|s| s.busy);
+        let busy = !crate::report::is_group(i) || self.site.ground.stands.get(&i.id).is_some_and(|s| s.busy);
         // **도는 칸은 설정이 정한다**(moai-q59j) — 시작한 칸 모두(`Config::is_started`). 칸 이름
         // `"in_progress"` 를 박아 두면 칸 이름을 바꾼 설정에서 아무것도 안 돌았다. 설정이 모르는
         // 칸은 안 돈다 — 묶음의 `busy` 와 같은 자다(`report::Stand::busy`). 바쁜 묶음은 늘 시작한
         // 칸으로 읽히므로 묶음에는 이 검사가 답을 안 바꾼다 — 줄(일)을 위한 것이다.
         let col = self.column(at);
-        busy && self.cfg.knows(col) && self.cfg.is_started(col)
+        busy && self.site.cfg.knows(col) && self.site.cfg.is_started(col)
     }
 
     /// 그 줄이 **서 있는** 칸 — 묶음이면 멤버에서 읽은 칸, 아니면 제 칸. CLI 가
     /// 묻는 `report::column` 과 같은 답이다 — 묶음만 읽은 칸을 받는 것까지 같다.
     pub fn column(&self, at: usize) -> &str {
-        let i = &self.issues[at];
+        let i = &self.site.issues[at];
         crate::report::is_group(i)
-            .then(|| self.ground.stands.get(&i.id).map(|s| s.column.as_str()))
+            .then(|| self.site.ground.stands.get(&i.id).map(|s| s.column.as_str()))
             .flatten()
             .unwrap_or(i.status.as_str())
     }
@@ -1216,9 +1231,9 @@ impl App {
     /// `aside`). 묶음이 아니면 제 칸대로다. 막음을 가를 때 [`App::column`] 과 함께
     /// `report::blocker` 에 댄다.
     pub fn waits(&self, at: usize) -> (crate::report::Waiting, &[String]) {
-        let i = &self.issues[at];
+        let i = &self.site.issues[at];
         crate::report::is_group(i)
-            .then(|| self.ground.stands.get(&i.id))
+            .then(|| self.site.ground.stands.get(&i.id))
             .flatten()
             .map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
     }
@@ -1231,9 +1246,9 @@ impl App {
     /// 안으로 자른 자리에 선다.
     #[cfg(test)]
     pub fn adopt(&mut self, issues: Vec<Issue>) {
-        let (index, ground) = measure(&issues, &self.cfg);
+        let (index, ground) = measure(&issues, &self.site.cfg);
         let now = crate::model::now();
-        self.warnings = warnings_of(&issues, &self.unreadable, &self.cfg, &now);
+        self.site.warnings = warnings_of(&issues, &self.site.unreadable, &self.site.cfg, &now);
         self.take(issues, index, ground, now);
     }
 
@@ -1248,10 +1263,10 @@ impl App {
     ) {
         // **옛 자료로 잰다** — 줄의 첨자는 옛 `issues` 를 가리킨다.
         let held = self.current().map(|r| self.anchor_of(&r));
-        self.issues = issues;
-        self.index = index;
-        self.ground = ground;
-        self.now = now;
+        self.site.issues = issues;
+        self.site.index = index;
+        self.site.ground = ground;
+        self.site.now = now;
         // 안 읽음은 **줄이 바뀔 때** 센다 — 보기 토글(`look`)도 지나는 `regrip` 에 두면 칸 하나 숨길
         // 때마다 저장소를 걷는다(moai-j038.vna).
         self.recount_unread();
@@ -1302,23 +1317,23 @@ impl App {
     /// 거름망에 가리면 **길도 커서도 그대로 둔다.** 가려진 디렉터리로 옮겨 놓으면 사람은
     /// 왜 여기로 왔는지도 모르는 목록을 본다. 중복 id 면 그 디렉터리의 첫 줄이다([`Anchor`]).
     fn land(&mut self, id: &str) -> Landing {
-        let Some(at) = self.index.find(id) else { return Landing::Missing };
-        let home = self.index.home_of(at).clone();
-        let was = std::mem::replace(&mut self.path, home);
+        let Some(at) = self.site.index.find(id) else { return Landing::Missing };
+        let home = self.site.index.home_of(at).clone();
+        let was = std::mem::replace(&mut self.site.path, home);
         let want = Anchor::Issue(id.to_string());
         let rows = self.rows();
         let Some(row) = self.row_of(&rows, &want) else {
-            self.path = was;
+            self.site.path = was;
             return Landing::Hidden;
         };
-        if self.path != was || row != self.cursor {
+        if self.site.path != was || row != self.cursor {
             self.detail.rewind();
         }
         // 기억 자리는 **갈라지기 전까지만** 참이다. 그 밑은 들어간 적이 없는 층이라 0 —
         // `leave` 는 나온 디렉터리를 먼저 찾으므로 이 수는 못 찾을 때만 쓰인다.
-        let same = was.iter().zip(&self.path).take_while(|(a, b)| a == b).count();
-        self.remembered.truncate(same);
-        self.remembered.resize(self.path.len(), 0);
+        let same = was.iter().zip(&self.site.path).take_while(|(a, b)| a == b).count();
+        self.site.remembered.truncate(same);
+        self.site.remembered.resize(self.site.path.len(), 0);
         self.cursor = row;
         Landing::Shown
     }
@@ -1329,7 +1344,7 @@ impl App {
             Row::Up => Anchor::Up,
             Row::Item(Entry::Dir { seg, at: None }, _) => Anchor::Bucket(seg.clone()),
             Row::Item(Entry::Dir { at: Some(at), .. } | Entry::Leaf { at }, _) => {
-                Anchor::Issue(self.issues[*at].id.clone())
+                Anchor::Issue(self.site.issues[*at].id.clone())
             }
             Row::Project(at) => Anchor::Project(self.place_path(*at).map(Into::into).unwrap_or_default()),
         }
@@ -1342,16 +1357,16 @@ impl App {
     /// 없는 자리에 서 있으면 빈 목록이 나오고, 사람은 자료가 사라진 줄 안다.
     fn repair_path(&mut self) {
         let mut good = Path::new();
-        for seg in self.path.clone() {
-            let here = self.index.entries(&self.issues, &good);
+        for seg in self.site.path.clone() {
+            let here = self.site.index.entries(&self.site.issues, &good);
             let ok = here.iter().any(|e| matches!(e, Entry::Dir { seg: s, .. } if *s == seg));
             if !ok {
                 break;
             }
             good.push(seg);
         }
-        if good.len() == self.path.len() {
-            self.path = good;
+        if good.len() == self.site.path.len() {
+            self.site.path = good;
             return;
         }
         // **옮겨진 것과 지워진 것은 다르다.** 서 있던 마디가 아직 살아 있으면
@@ -1359,21 +1374,21 @@ impl App {
         // 에픽이 한 층 깊어지는데, 거기서 뿌리로 내려놓으면 가장 흔한 갱신이
         // 하필 자리를 가장 크게 잃는 갱신이 된다. `home_of` 가 그 새 자리를
         // 이미 알고, `cmd/tui.rs::resolve` 도 같은 셈을 쓴다.
-        if let Some(at) = self.path.last().and_then(|s| self.index.find(seg_id(s)?))
-            && self.index.is_dir(&self.issues, at)
+        if let Some(at) = self.site.path.last().and_then(|s| self.site.index.find(seg_id(s)?))
+            && self.site.index.is_dir(&self.site.issues, at)
         {
-            let mut moved = self.index.home_of(at).clone();
-            moved.push(self.index.seg_of(&self.issues, at));
-            if moved != self.path {
-                self.remembered = vec![0; moved.len()];
+            let mut moved = self.site.index.home_of(at).clone();
+            moved.push(self.site.index.seg_of(&self.site.issues, at));
+            if moved != self.site.path {
+                self.site.remembered = vec![0; moved.len()];
                 self.cursor = 0;
-                self.path = moved;
+                self.site.path = moved;
                 return;
             }
         }
-        self.remembered.truncate(good.len());
+        self.site.remembered.truncate(good.len());
         self.cursor = 0;
-        self.path = good;
+        self.site.path = good;
     }
 
     /// 파일이 우리가 읽은 뒤로 바뀌었으면 **저절로 다시 읽는다.**
@@ -1426,14 +1441,14 @@ impl App {
             }
             return;
         }
-        let Some(repo) = &self.repo else { return };
+        let Some(repo) = &self.site.repo else { return };
         // **시계도 다시 읽을 까닭이다**(moai-z4r4) — 배너의 수에는 한 시간 틈과 날로 재는 경고가 들어
         // 파일이 그대로여도 답이 바뀐다. 층과 **같은 자**(`layer::due`)로 재므로, 안 읽으면 틈을 넘긴
         // 순간 층의 `!` 와 이 배너가 갈린다. 저장소가 서 있으면 읽은 때도 늘 서 있다 — 띄울 때의 첫
         // 읽기도 들인 읽기로 찍는다(`App::open`).
-        let moved = layer::due(self.read_at)
-            || stamp_of(repo) != self.stamp
-            || self.watched.iter().any(|(path, was)| crate::store::stamp(path) != *was);
+        let moved = layer::due(self.site.read_at)
+            || stamp_of(repo) != self.site.stamp
+            || self.site.watched.iter().any(|(path, was)| crate::store::stamp(path) != *was);
         if moved {
             let (tx, rx) = std::sync::mpsc::channel();
             let repo = repo.clone();
@@ -1465,7 +1480,7 @@ impl App {
                     // **뿌리마다 덮는다.** `commit_tables` 는 이번에 git 이 답을 안 준 뿌리를
                     // 통째로 빼고 오므로(`.ok()`), 받은 것을 그대로 넣으면 한 번 어긋난 걸음에
                     // 옛 표가 사라져 커밋 칸이 말없이 빈다 — 다음 표는 표식이 움직여야 온다.
-                    self.commits.extend(table);
+                    self.site.commits.extend(table);
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     if let Some((_, handle)) = self.commits_job.take()
@@ -1482,14 +1497,14 @@ impl App {
         if !self.commits_due {
             return;
         }
-        let Some(repo) = &self.repo else { return };
+        let Some(repo) = &self.site.repo else { return };
         self.commits_due = false;
-        let roots = commit_roots(repo, &self.origin);
+        let roots = commit_roots(repo, &self.site.origin);
         // **스레드로 넘길 것은 값이다** — 빌린 `issues` 를 넘기면 그 스레드가 도는 동안 다시 읽기가
         // 목록을 갈아 끼울 수 없다. 넘긴 것을 그대로 들어 둔다(`commit_ids`): 다음 읽기가 그것과
         // 견줘 표가 모르는 id 를 붙잡는다.
-        self.commit_ids = self.issues.iter().map(|i| i.id.clone()).collect();
-        let ids = self.commit_ids.clone();
+        self.site.commit_ids = self.site.issues.iter().map(|i| i.id.clone()).collect();
+        let ids = self.site.commit_ids.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
             let _ = tx.send(commit_tables(&roots, &ids));
@@ -1501,7 +1516,7 @@ impl App {
     /// 느린 걸음이면 연 뒤·다시 읽은 뒤 한동안 커밋 칸이 빈다(낡는다). [`App::loading`] 과 가르는
     /// 까닭은 [`App::follow_commits`].
     pub fn gathering_commits(&self) -> bool {
-        self.commits_job.is_some() || (self.commits_due && self.repo.is_some())
+        self.commits_job.is_some() || (self.commits_due && self.site.repo.is_some())
     }
 
     /// 들고 있는 `filter_text` 를 지금 `issues` 에 다시 건다. 못 걸면 푼다.
@@ -1533,7 +1548,7 @@ impl App {
     /// 보기(`SPC v`)가 숨긴 줄도 안 센다 — 세어 놓고 목록에 없으면 셈이 거짓말이 된다. 검색이 걸린 동안은
     /// 보기가 안 가리므로 목록에 선 숨은 줄도 센다([`Self::unveiled_count`] 가 그 가운데 몇인지 댄다).
     pub fn hit_count(&self) -> usize {
-        (0..self.keep.len()).filter(|&at| self.visible(at)).count()
+        (0..self.site.keep.len()).filter(|&at| self.visible(at)).count()
     }
 
     /// 검색에 걸렸는데 **검색을 풀면 보기(`SPC v`)가 도로 가릴** 이슈 수(moai-qnkn). 검색 칸이 `N건` 곁에
@@ -1544,7 +1559,7 @@ impl App {
         if !self.searching() {
             return 0;
         }
-        (0..self.keep.len()).filter(|&at| !self.veil(at).filtered && !self.stands_in_view(at)).count()
+        (0..self.site.keep.len()).filter(|&at| !self.veil(at).filtered && !self.stands_in_view(at)).count()
     }
 
     /// 이 줄이 목록에 서는가 — 거름망이 안 가렸고, 보기가 안 가렸거나 검색이 보기를 걷었다([`Self::veil`]).
@@ -1563,7 +1578,7 @@ impl App {
 
     /// 보기(`SPC v`)가 이 줄을 보이는가 — 검색과 상관없이. `shown` 이 빈 때는 보인다.
     fn view_shows(&self, at: usize) -> bool {
-        self.shown.get(at).copied().unwrap_or(true)
+        self.site.shown.get(at).copied().unwrap_or(true)
     }
 
     /// 이 줄을 **무엇이 가리는가** — 거름망(`keep`)과 보기(`shown`) 각각. **판정은 여기 하나다**
@@ -1576,7 +1591,7 @@ impl App {
     /// ([`Self::visible`])의 일이다. 여기서 검색을 보고 `viewed` 를 끄면, 검색 중에 쓴 줄이 검색에도 보기에도
     /// 가렸을 때 쓰기 알림이 "Esc 로 푼다" 만 대고, Esc 가 검색을 풀자마자 보기가 그 줄을 도로 가린다.
     fn veil(&self, at: usize) -> Veil {
-        Veil { filtered: !self.keep.get(at).copied().unwrap_or(true), viewed: !self.view_shows(at) }
+        Veil { filtered: !self.site.keep.get(at).copied().unwrap_or(true), viewed: !self.view_shows(at) }
     }
 
     /// 보기만으로도 이 줄이 목록에 서는가 — 제 줄이 보이거나, 폴더면 밑에 보기가 보이는 줄이 있다. 목록이
@@ -1586,12 +1601,12 @@ impl App {
         if self.view_shows(at) {
             return true;
         }
-        if !self.index.is_dir(&self.issues, at) {
+        if !self.site.index.is_dir(&self.site.issues, at) {
             return false;
         }
-        let mut below = self.index.home_of(at).clone();
-        below.push(self.index.seg_of(&self.issues, at));
-        self.lit.contains(&below)
+        let mut below = self.site.index.home_of(at).clone();
+        below.push(self.site.index.seg_of(&self.site.issues, at));
+        self.site.lit.contains(&below)
     }
 
     /// 이 줄이 **검색 덕에 선 숨은 줄**인가(moai-4x87) — 검색을 풀면 보기가 도로 가릴 줄. 목록이
@@ -1610,7 +1625,7 @@ impl App {
     /// 지금 디렉터리에 **보기만 가린 줄**이 있는가 — 거름망은 지나는데 보기가 숨긴 것(moai-2kyl 단계 리뷰).
     /// 목록이 비었을 때 까닭을 대려고 묻는다. 이슈 수에 비례한 훑기라 줄이 있을 때는 안 부른다.
     pub fn view_hides_here(&self) -> bool {
-        !self.on_layer() && !self.index.entries_where(&self.issues, &self.path, &|at| !self.veil(at).filtered).is_empty()
+        !self.on_layer() && !self.site.index.entries_where(&self.site.issues, &self.site.path, &|at| !self.veil(at).filtered).is_empty()
     }
 
     /// 거름망을 건다. 빈 글은 "거름망 없음" 이다.
@@ -1625,7 +1640,7 @@ impl App {
         };
         if text.trim().is_empty() {
             self.filter_text = None;
-            self.keep = vec![true; self.issues.len()];
+            self.site.keep = vec![true; self.site.issues.len()];
             return Ok(());
         }
         let filter = self.build_filter(mode)?;
@@ -1634,16 +1649,16 @@ impl App {
         // `status=in-progress` 같은 오타가 "그 칸은 비었다" 와 구별되지 않는다.
         // 어느 줄이 선 칸이면 받는다 — `show -s`·`--from` 과 같은 술어다(moai-hym7).
         for s in &filter.status {
-            if !crate::report::knows_column(&self.issues, &self.cfg, s) {
-                return Err(crate::cmd::unknown_column(s, &self.cfg));
+            if !crate::report::knows_column(&self.site.issues, &self.site.cfg, s) {
+                return Err(crate::cmd::unknown_column(s, &self.site.cfg));
             }
         }
         // 시계는 **적재마다** 고정한 것을 쓴다. 여기서 다시 잡으면 `stale=`
         // 같은 물음이 화면의 나머지와 다른 시각으로 판정된다.
-        let now = self.now.clone();
+        let now = self.site.now.clone();
         // **적재 때 잰 것을 빌린다**(moai-fbdg) — 여기서 다시 재면 키 하나마다 소속 지도가 다시 선다.
-        let wh = self.ground.here();
-        self.keep = self.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
+        let wh = self.site.ground.here();
+        self.site.keep = self.site.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
         self.filter_text = Some(match mode {
             Mode::Grep(_, GrepIn::All) => format!("/{text}"),
             Mode::Grep(_, g) => format!("/{}:{text}", g.name()),
@@ -1670,7 +1685,7 @@ impl App {
 
     pub fn clear_filter(&mut self) {
         self.filter_text = None;
-        self.keep = vec![true; self.issues.len()];
+        self.site.keep = vec![true; self.site.issues.len()];
     }
 
     /// 키 표의 차례(조각)를 `query` 의 차례로 잇는다. 둘을 한 타입으로 두지 않는 까닭은 키 표가
@@ -1691,19 +1706,19 @@ impl App {
     /// 미룸은 물려받은 것까지(`Index::deferred_root`) 읽는다 — 미룬 에픽 밑의 일도 같이 빠진다.
     /// 칸 숨김은 **이 프로젝트의 칸에만** 건다(`View::shows`).
     fn see(&mut self) {
-        self.shown = (0..self.issues.len())
-            .map(|at| self.view.shows(self.column(at), self.index.deferred_root(&self.issues[at].id).is_some(), &self.cfg.statuses))
+        self.site.shown = (0..self.site.issues.len())
+            .map(|at| self.view.shows(self.column(at), self.site.index.deferred_root(&self.site.issues[at].id).is_some(), &self.site.cfg.statuses))
             .collect();
         let mut lit = std::collections::HashSet::new();
-        for (at, _) in self.shown.iter().enumerate().filter(|(_, on)| **on) {
-            let home = self.index.home_of(at);
+        for (at, _) in self.site.shown.iter().enumerate().filter(|(_, on)| **on) {
+            let home = self.site.index.home_of(at);
             for n in 1..=home.len() {
                 if !lit.contains(&home[..n]) {
                     lit.insert(home[..n].to_vec());
                 }
             }
         }
-        self.lit = lit;
+        self.site.lit = lit;
     }
 
     /// 설정 자리(`App::user_config`)에서 보기를 읽어 [`App::adopt_look`] 에 넘긴다. **시험만 부른다**(moai-u8cs) —
@@ -1899,10 +1914,10 @@ impl App {
     /// (CLAUDE.md). 그러면 [NEW] 가 한 줄도 안 서고, 그것이 설정 없는 기계의 옳은 화면이다.
     fn recount_unread(&mut self) {
         let Some(me) = &self.me else {
-            self.unread.clear();
+            self.site.unread.clear();
             return;
         };
-        self.unread = crate::query::unread(&self.issues, me, &self.seen).into_iter().map(str::to_string).collect();
+        self.site.unread = crate::query::unread(&self.site.issues, me, &self.seen).into_iter().map(str::to_string).collect();
     }
 
     /// 이 뿌리에서 나는 누구인가 — `이름 (메일)`(moai-j038.vna). 헤더([`App::told_user`])와 같은 자
@@ -1936,7 +1951,7 @@ impl App {
                 Some(Row::Item(e, _)) => e.at().into_iter().collect(),
                 _ => Vec::new(),
             },
-            B::ReadAll => self.unread.iter().filter_map(|id| self.index.find(id)).collect(),
+            B::ReadAll => self.site.unread.iter().filter_map(|id| self.site.index.find(id)).collect(),
             B::ReadGroup => {
                 let Some(Row::Item(e, _)) = &cur else {
                     self.notice = Some("묶음에 든 줄에서 누른다".into());
@@ -1946,18 +1961,18 @@ impl App {
                     self.notice = Some("이 줄은 묶음에 안 든다 — 에픽·마일스톤 안에서 누른다".into());
                     return;
                 };
-                self.index.under_group(&self.issues, &group)
+                self.site.index.under_group(&self.site.issues, &group)
             }
             _ => return,
         };
         // 고른 줄의 **id** 로 적는다 — 같은 id 의 쌍둥이 줄까지 넘겨야 늦은 도장이 적혀 [NEW] 가 내린다
         // (`query::read_marks_of`). 가리킨 줄 하나만 넘기면 `unread` 가 앞줄로 세운 [NEW] 가 영영 남는다.
-        let ids: std::collections::BTreeSet<&str> = targets.iter().map(|&at| self.issues[at].id.as_str()).collect();
+        let ids: std::collections::BTreeSet<&str> = targets.iter().map(|&at| self.site.issues[at].id.as_str()).collect();
         if ids.is_empty() {
             self.notice = Some("읽음으로 적을 것이 없다".into());
             return;
         }
-        let issues = &self.issues;
+        let issues = &self.site.issues;
         let pick = |seen: &std::collections::BTreeMap<String, String>| {
             crate::query::read_marks_of(issues.iter().filter(|i| ids.contains(i.id.as_str())), seen)
         };
@@ -2004,9 +2019,9 @@ impl App {
     /// 있다. 자식 있는 이슈 폴더 안에서 누르면 그 폴더만 읽고 에픽의 나머지와 묶음 줄 자신을 빠뜨렸다.
     fn group_of(&self, e: &Entry) -> Option<String> {
         if let Entry::Dir { at: Some(at), .. } = e
-            && crate::report::is_group(&self.issues[*at])
+            && crate::report::is_group(&self.site.issues[*at])
         {
-            return Some(self.issues[*at].id.clone());
+            return Some(self.site.issues[*at].id.clone());
         }
         // **줄이 사는 자리에서 읽는다**(`home_of`), 지금 디렉터리에서 읽지 않는다. 지금 디렉터리로
         // 재던 때는, 펼쳐 든 멤버 줄에 서서 누르면 그 줄의 에픽이 아니라 **그 위 마일스톤**이 나와
@@ -2014,8 +2029,8 @@ impl App {
         // 되돌리는 길은 도구 밖에만 있다. 바구니는 첨자가 없어 지금 자리로 읽고, 그 자리에 묶음이
         // 없으면 그대로 `None` 이다.
         let home: &[Seg] = match e.at() {
-            Some(at) => self.index.home_of(at),
-            None => &self.path,
+            Some(at) => self.site.index.home_of(at),
+            None => &self.site.path,
         };
         home.iter().rev().find_map(|seg| match seg {
             Seg::Epic(id) | Seg::Milestone(Some(id)) => Some(id.clone()),
@@ -2033,7 +2048,7 @@ impl App {
         let held = self.current_of(rows).map(|r| self.anchor_of(&r));
         match act {
             B::Column(n) => {
-                if let Some(s) = self.cfg.statuses.get(usize::from(n)).cloned() {
+                if let Some(s) = self.site.cfg.statuses.get(usize::from(n)).cloned() {
                     self.view.toggle(&s);
                 }
             }
@@ -2041,7 +2056,7 @@ impl App {
             B::Deferred => self.view.hide_deferred = !self.view.hide_deferred,
             // 이 프로젝트의 칸만 걷는다 — 다른 프로젝트에만 있는 칸 이름은 여기서 아무것도 안 숨겼으니
             // 들고 있는다(`View::show_all`).
-            B::ShowAll => self.view.show_all(&self.cfg.statuses),
+            B::ShowAll => self.view.show_all(&self.site.cfg.statuses),
             B::Sort(o) => self.order = self.order.press(o),
             _ => return,
         }
@@ -2065,24 +2080,24 @@ impl App {
         // **`..` 은 디렉터리에만 선다**(moai-i784). 프로젝트 뿌리에 한 줄 더 세워 층으로
         // 올려 보내던 길은 걷었다 — 층으로 가는 길은 헤더의 `0` 하나다(사용자 결정).
         // 길이 둘이면 뿌리의 `..` 이 디렉터리의 `..` 과 다른 데로 가, 같은 글자가 두 뜻을 진다.
-        if !self.path.is_empty() {
+        if !self.site.path.is_empty() {
             rows.push(Row::Up);
         }
         // **보기는 줄마다 건다** — 숨긴 칸의 묶음이라도 보이는 멤버가 있으면 디렉터리는 선다
         // (`Index::entries_where`). done 에픽 밑에 남은 todo 가 폴더째 사라지면 안 된다.
         rows.extend(
-            self.index
-                .entries_tree(&self.issues, &self.path, keep, &|a, b| {
+            self.site.index
+                .entries_tree(&self.site.issues, &self.site.path, keep, &|a, b| {
                     // 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다. 담당은 화면에 선 이름으로.
                     crate::query::order_by(
                         Self::sort_key(self.order.by),
                         self.order.reversed,
-                        (&self.issues[a], self.column(a)),
-                        (&self.issues[b], self.column(b)),
-                        &self.cfg.statuses,
-                        self.cfg.naming,
+                        (&self.site.issues[a], self.column(a)),
+                        (&self.site.issues[b], self.column(b)),
+                        &self.site.cfg.statuses,
+                        self.site.cfg.naming,
                     )
-                }, &|under| self.expanded.contains(under) || found_under.contains(under))
+                }, &|under| self.site.expanded.contains(under) || found_under.contains(under))
                 .into_iter()
                 .map(|(e, twig)| Row::Item(e, twig)),
         );
@@ -2103,11 +2118,11 @@ impl App {
         }
         // 맞은 줄의 **조상 자리 전부**. 맞은 줄만 세면 두 층 밑의 줄은 가운데 폴더가 닫힌 채라
         // 여전히 안 보인다.
-        for at in 0..self.issues.len() {
+        for at in 0..self.site.issues.len() {
             if !keep(at) {
                 continue;
             }
-            let home = self.index.home_of(at);
+            let home = self.site.index.home_of(at);
             // **깊은 자리부터 넣는다.** 제 자리가 이미 들었으면 그 위도 들었으니 거기서 끊는다 —
             // 형제가 많은 에픽에서 첫 줄만 값을 치른다. 앞에서부터 넣던 때는 멤버마다 조상 전부를
             // 다시 만들어, 검색 한 글자에 (이슈 수 × 깊이)만큼 `Vec<Seg>` 를 지었다.
@@ -2133,11 +2148,11 @@ impl App {
     /// 그 줄이 묶음이면 그것이 여는 자리. [`App::dir_at`] 을 커서 밖의 줄(펼친 멤버의 부모)에도 쓴다.
     fn dir_of(&self, row: Option<Row>) -> Option<Path> {
         match row {
-            Some(Row::Item(Entry::Dir { at: Some(at), .. }, _)) => Some(self.index.dir_path(&self.issues, at)),
+            Some(Row::Item(Entry::Dir { at: Some(at), .. }, _)) => Some(self.site.index.dir_path(&self.site.issues, at)),
             // 바구니는 제 줄이 없어 첨자가 없다. 바구니 마디(`Milestone(None)`·`Lost`)는 집의 첫
             // 마디로만 서므로(`Index::home_of_work`) 늘 뿌리의 줄이고, 그때 지금 자리가 곧 제 부모다.
             Some(Row::Item(Entry::Dir { seg, at: None }, _)) => {
-                let mut path = self.path.clone();
+                let mut path = self.site.path.clone();
                 path.push(seg);
                 Some(path)
             }
@@ -2150,7 +2165,7 @@ impl App {
     /// 없는 줄로 읽혀 디렉터리를 통째로 나갔다(리뷰).
     fn open_at(&self, rows: &[Row]) -> Option<Path> {
         let path = self.dir_at(rows)?;
-        (self.expanded.contains(&path) || self.searched_into(&path)).then_some(path)
+        (self.site.expanded.contains(&path) || self.searched_into(&path)).then_some(path)
     }
 
     /// 검색이 **이 자리를** 저절로 열었는가 — [`App::searched_open`] 의 한 자리 판이다. 집합을
@@ -2158,7 +2173,7 @@ impl App {
     /// 전부의 조상 자리를 프레임마다 다시 모은다(`lit` 을 미리 세는 까닭과 같다).
     fn searched_into(&self, path: &Path) -> bool {
         // 그 집합에 든 자리는 맞은 줄의 조상 자리 전부다 — 곧 "맞은 줄의 집이 이 자리로 시작하는가" 다.
-        self.searching() && (0..self.issues.len()).any(|at| self.visible(at) && self.index.home_of(at).starts_with(path))
+        self.searching() && (0..self.site.issues.len()).any(|at| self.visible(at) && self.site.index.home_of(at).starts_with(path))
     }
 
     /// 커서가 **펼친 묶음의 멤버 줄**이면 그 부모 줄의 번호. 목록은 트리 차례라, 위로 올라가며
@@ -2175,7 +2190,7 @@ impl App {
     fn fold_parent(&mut self, rows: &[Row]) -> bool {
         let Some(up) = self.parent_row(rows) else { return false };
         if let Some(path) = self.dir_of(rows.get(up).cloned()) {
-            self.expanded.remove(&path);
+            self.site.expanded.remove(&path);
         }
         // 부모 줄 위의 줄은 안 바뀐다 — 번호가 그대로 그 줄이다.
         let rows = self.rows();
@@ -2186,7 +2201,7 @@ impl App {
     /// 한 단계 펼친다(`l`·`→`). 이미 펼쳐져 있으면 아무 일도 없다 — 들어가는 것은 `Enter` 다.
     fn expand(&mut self, rows: &[Row]) {
         if let Some(path) = self.dir_at(rows) {
-            self.expanded.insert(path);
+            self.site.expanded.insert(path);
         }
     }
 
@@ -2197,7 +2212,7 @@ impl App {
     /// 아무 일도 안 하는 것보다 나쁘다. 그 펼침은 검색을 풀 때 함께 걷힌다.
     fn collapse(&mut self, rows: &[Row]) -> bool {
         let Some(path) = self.open_at(rows) else { return false };
-        self.expanded.remove(&path);
+        self.site.expanded.remove(&path);
         true
     }
 
@@ -2213,18 +2228,18 @@ impl App {
     fn expand_all(&mut self, rows: &[Row]) {
         let Some(path) = self.dir_at(rows) else { return };
         if self.open_at(rows).is_some() {
-            let under: Vec<Path> = self.expanded.iter().filter(|p| p.starts_with(&path)).cloned().collect();
+            let under: Vec<Path> = self.site.expanded.iter().filter(|p| p.starts_with(&path)).cloned().collect();
             for p in under {
-                self.expanded.remove(&p);
+                self.site.expanded.remove(&p);
             }
             return;
         }
         // 그 자리와 그 밑의 **묶음 줄 전부**. 자리는 `home_of` 가 정한 그대로라 목록이 세우는
         // 줄과 같은 것만 펼친다.
-        self.expanded.insert(path.clone());
-        for at in self.index.descendants(&path) {
-            if self.index.is_dir(&self.issues, at) {
-                self.expanded.insert(self.index.dir_path(&self.issues, at));
+        self.site.expanded.insert(path.clone());
+        for at in self.site.index.descendants(&path) {
+            if self.site.index.is_dir(&self.site.issues, at) {
+                self.site.expanded.insert(self.site.index.dir_path(&self.site.issues, at));
             }
         }
     }
@@ -2359,13 +2374,13 @@ impl App {
             // 이미 그 까닭을 대므로 겹쳐 말하지 않는다 — 그래서 옛 `unfound` 를 먼저 비운다.
             B::Worktree => {
                 self.worktree = !self.worktree;
-                self.unfound = None;
+                self.site.unfound = None;
                 self.reload();
-                if self.worktree && self.trouble.is_none() && self.origin.labels().is_empty() {
+                if self.worktree && self.trouble.is_none() && self.site.origin.labels().is_empty() {
                     let g = crate::style::BRANCH_GLYPH;
                     // 스냅샷만 없는 옆은 "없음" 이 아니다 — 그 이름으로 줄에 `⎇` 가 선다(`Origin::named_only`).
-                    let named = self.origin.named_only();
-                    self.notice = Some(match &self.unfound {
+                    let named = self.site.origin.named_only();
+                    self.notice = Some(match &self.site.unfound {
                         Some(why) => format!("{g} 옆 워크트리를 못 찾았다 — {}", crate::text::one_line(why)),
                         None if !named.is_empty() => format!("{g} {} — 겹칠 스냅샷이 없다", named.join(", ")),
                         None => format!("{g} 옆 워크트리 없음 — 겹칠 줄이 없다"),
@@ -2410,7 +2425,7 @@ impl App {
             // [`App::enter`] 가 무언가 하는 줄 — `..`(나가기)·디렉터리·층의 프로젝트.
             leaf: !matches!(self.current_of(rows), Some(Row::Up | Row::Item(Entry::Dir { .. }, _) | Row::Project(_))),
             // [`App::leave`] 가 무언가 하는 자리 — 디렉터리 안뿐이다. 층으로는 `0` 이 간다(moai-i784).
-            root: self.path.is_empty(),
+            root: self.site.path.is_empty(),
             // [`App::expand`] 가 무언가 하는 줄 — 펼칠 수 있는 폴더뿐이다. `leaf` 로 가르던 때는
             // `..` 과 층의 프로젝트 줄에서 `l`·`Tab` 이 켜진 채 아무 일도 안 했다(리뷰).
             group: self.dir_at(rows).is_some(),
@@ -2420,10 +2435,10 @@ impl App {
             nested: self.parent_row(rows).is_some(),
             worktree: self.worktree,
             raw: self.raw,
-            columns: self.cfg.statuses.len().min(keys::NUMBERED),
+            columns: self.site.cfg.statuses.len().min(keys::NUMBERED),
             projects: self.layer.as_ref().map_or(0, |l| l.places.len().min(keys::NUMBERED)),
             hidden: self
-                .cfg
+                .site.cfg
                 .statuses
                 .iter()
                 .take(keys::NUMBERED)
@@ -2584,7 +2599,7 @@ impl App {
     /// 자리는 [`crate::nav::Index::home_of`] 가 정한 그대로 안쪽부터 훑는다.
     fn folded_into(&self, rows: &[Row], want: &Anchor) -> Option<usize> {
         let Anchor::Issue(id) = want else { return None };
-        let home = self.index.home_of(self.index.find(id)?);
+        let home = self.site.index.home_of(self.site.index.find(id)?);
         (1..=home.len()).rev().find_map(|depth| {
             let anchor = match &home[depth - 1] {
                 Seg::Epic(id) | Seg::Milestone(Some(id)) | Seg::Issue(id) => Anchor::Issue(id.clone()),
@@ -2599,15 +2614,15 @@ impl App {
             return false;
         }
         let mut want = held.clone();
-        while let Some(seg) = self.path.last().cloned() {
-            let parent: Path = self.path[..self.path.len() - 1].to_vec();
+        while let Some(seg) = self.site.path.last().cloned() {
+            let parent: Path = self.site.path[..self.site.path.len() - 1].to_vec();
             let is_it = |e: &Entry| matches!(e, Entry::Dir { seg: s, .. } if *s == seg);
-            if self.index.entries_where(&self.issues, &parent, &|at| self.visible(at)).iter().any(is_it) {
+            if self.site.index.entries_where(&self.site.issues, &parent, &|at| self.visible(at)).iter().any(is_it) {
                 break;
             }
-            let dir = self.index.entries(&self.issues, &parent).into_iter().find(is_it);
-            self.path.pop();
-            self.remembered.pop();
+            let dir = self.site.index.entries(&self.site.issues, &parent).into_iter().find(is_it);
+            self.site.path.pop();
+            self.site.remembered.pop();
             // 정체만 읽으므로 가지 모양은 뜻이 없다 — 이 줄은 화면에 안 선다.
             want = dir.map(|e| self.anchor_of(&Row::Item(e, Twig::default())));
         }
@@ -2634,7 +2649,7 @@ impl App {
         let folded = near.is_none().then(|| self.folded_into(&rows, &want)).flatten();
         self.stand(&rows, near.or(folded).unwrap_or(self.cursor), None);
         if let Anchor::Issue(id) = &want
-            && self.index.find(id).map(|at| self.veil(at)).is_some_and(|v| v.viewed && !v.filtered)
+            && self.site.index.find(id).map(|at| self.veil(at)).is_some_and(|v| v.viewed && !v.filtered)
         {
             let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
             self.notice = Some(format!("{id} 는 보기에 가려졌다 · {show} 로 모두 보인다"));
@@ -2760,8 +2775,8 @@ impl App {
                 Ok(f) => f
                     .status
                     .iter()
-                    .find(|s| !crate::report::knows_column(&self.issues, &self.cfg, s))
-                    .map(|s| crate::cmd::unknown_column(s, &self.cfg)),
+                    .find(|s| !crate::report::knows_column(&self.site.issues, &self.site.cfg, s))
+                    .map(|s| crate::cmd::unknown_column(s, &self.site.cfg)),
             },
             _ => None,
         }
@@ -2794,9 +2809,9 @@ impl App {
                 // 기억한 번호는 **층마다 하나**다(`remembered.len() == path.len()`). 펼쳐 든 줄로
                 // 들어가면 층이 한 번에 여럿 깊어지므로, 지나친 층은 0 으로 메운다 — 그 층은
                 // 들어간 적이 없어 기억할 자리가 없다(`land` 가 하는 것과 같다).
-                self.remembered.push(self.cursor);
-                self.remembered.resize(path.len(), 0);
-                self.path = path;
+                self.site.remembered.push(self.cursor);
+                self.site.remembered.resize(path.len(), 0);
+                self.site.path = path;
                 self.cursor = self.first_row();
                 self.detail.rewind();
             }
@@ -2814,12 +2829,12 @@ impl App {
     fn leave(&mut self) {
         // **뿌리에서는 아무 일도 없다**(moai-i784). 층으로는 헤더의 `0` 으로 간다 — Bksp 가
         // 디렉터리와 프로젝트 층 두 군데로 가면 같은 키가 어디로 갈지 자리마다 달라진다.
-        if self.path.is_empty() {
+        if self.site.path.is_empty() {
             return;
         }
-        if let Some(from) = self.path.pop() {
+        if let Some(from) = self.site.path.pop() {
             self.detail.rewind();
-            let fallback = self.remembered.pop().unwrap_or(0);
+            let fallback = self.site.remembered.pop().unwrap_or(0);
             let rows = self.rows();
             self.cursor = rows
                 .iter()
@@ -2833,11 +2848,11 @@ impl App {
         if self.on_layer() {
             return "프로젝트 층".into();
         }
-        if self.path.is_empty() {
+        if self.site.path.is_empty() {
             return "/".into();
         }
         let mut out = String::new();
-        for seg in &self.path {
+        for seg in &self.site.path {
             out.push('/');
             out.push_str(&self.seg_label(seg));
         }
@@ -2847,16 +2862,16 @@ impl App {
     /// 그 줄에 닿은 커밋. **줄이 온 워크트리의 가지에서 읽는다** — `show` 와 같은 까닭이다:
     /// `--worktree` 로 옆에서 집은 일을 고친 커밋은 저쪽 가지에만 있다. 표가 없으면 빈 것이다.
     pub fn commits_of(&self, id: &str) -> &[crate::git::Commit] {
-        let root = self.origin.root(id).or(self.repo.as_ref().map(|r| r.here()));
-        root.and_then(|r| self.commits.get(r)).and_then(|t| t.get(id)).map_or(&[], Vec::as_slice)
+        let root = self.site.origin.root(id).or(self.site.repo.as_ref().map(|r| r.here()));
+        root.and_then(|r| self.site.commits.get(r)).and_then(|t| t.get(id)).map_or(&[], Vec::as_slice)
     }
 
     /// id 를 제목으로 푼다. 없으면 **끊겼다고 적는다** — id 만 내면 그것이
     /// 그저 제목 없는 줄인지 없는 것을 가리키는 참조인지 알 길이 없다.
     /// 훑지 않는다. 이 함수는 막는 것마다·소속마다·프레임마다 불린다.
     pub fn title_of(&self, id: &str) -> String {
-        match self.index.find(id) {
-            Some(at) => self.issues[at].title.clone(),
+        match self.site.index.find(id) {
+            Some(at) => self.site.issues[at].title.clone(),
             None => format!("{id}  {MISSING}"),
         }
     }
@@ -2867,8 +2882,8 @@ impl App {
             Seg::Lost => return "(길 잃음)".into(),
             Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => id,
         };
-        match self.index.find(id) {
-            Some(at) => self.issues[at].title.clone(),
+        match self.site.index.find(id) {
+            Some(at) => self.site.issues[at].title.clone(),
             None => format!("{id}  {MISSING}"),
         }
     }
@@ -2948,7 +2963,7 @@ fn save_idea(app: &mut App) {
         return;
     }
     // **폼이 박은 곳에 서야 쓴다**(moai-fccv). 층에서 연 폼이면 여기서 그 프로젝트로 들어가고,
-    // 선 곳이 다르면 쓰지 않는다. `write` 는 `self.repo` 에 쓰므로 여기를 지나면 머리에 보인
+    // 선 곳이 다르면 쓰지 않는다. `write` 는 `self.site.repo` 에 쓰므로 여기를 지나면 머리에 보인
     // 곳이 곧 쓰는 곳이다 — 묻고 이어진 쓰기도 이 함수를 다시 지난다.
     if !app.stand_at(into.as_ref()) {
         return;
@@ -3067,7 +3082,7 @@ mod tests {
     }
 
     fn row_ids(a: &App) -> Vec<String> {
-        a.rows().iter().filter_map(|r| if let Row::Item(e, _) = r { e.at() } else { None }).map(|at| a.issues[at].id.clone()).collect()
+        a.rows().iter().filter_map(|r| if let Row::Item(e, _) = r { e.at() } else { None }).map(|at| a.site.issues[at].id.clone()).collect()
     }
 
     /// **처음에는 done 을 숨기고 `SPC v` 가 칸·미룸을 켜고 끈다**(moai-fmv5). 보기는 거름망이
@@ -3203,7 +3218,7 @@ mod tests {
         a.hit("Enter");
         assert_eq!(row_ids(&a), ["argos-0005"]);
         a.hit("Esc");
-        assert!(a.path.is_empty(), "숨은 폴더 안에 남았다: {:?}", a.path);
+        assert!(a.site.path.is_empty(), "숨은 폴더 안에 남았다: {:?}", a.site.path);
         assert!(a.notice.clone().unwrap_or_default().contains("argos-0002"), "{:?}", a.notice);
         assert!(a.cursor < a.rows().len(), "커서가 목록 밖에 섰다");
     }
@@ -3445,7 +3460,7 @@ mod tests {
     /// 도는 줄이 있는지 — 줄마다의 답([`App::spins`])을 모은 것. 루프가 깨는 것은 이것이
     /// 아니라 **그려진 화면**이다(`App::spun`, draw 시험) — 여기는 줄의 자만 본다.
     fn any_spins(a: &App) -> bool {
-        (0..a.issues.len()).any(|at| a.spins(at))
+        (0..a.site.issues.len()).any(|at| a.spins(at))
     }
 
     /// 돌 줄이 있는가를 적힌 칸·읽은 칸이 속이지 않는다.
@@ -3453,7 +3468,7 @@ mod tests {
     fn a_line_spins_only_while_someone_holds_it() {
         let mut a = app();
         assert!(!any_spins(&a), "todo 뿐인데 돈다고 한다");
-        let mut issues = a.issues.clone();
+        let mut issues = a.site.issues.clone();
         // 에픽의 적힌 칸으로는 안 돈다 — 묶음의 칸은 멤버에서 읽는다.
         issues[0].status = Status::new("in_progress");
         a.adopt(issues.clone());
@@ -3492,7 +3507,7 @@ mod tests {
     #[test]
     fn a_group_spins_only_while_a_member_is_held() {
         fn spun(a: &App) -> Vec<&str> {
-            (0..a.issues.len()).filter(|&at| a.spins(at)).map(|at| a.issues[at].id.as_str()).collect()
+            (0..a.site.issues.len()).filter(|&at| a.spins(at)).map(|at| a.site.issues[at].id.as_str()).collect()
         }
         let mut mile = make("argos-0005", Kind::Milestone);
         mile.status = Status::new("todo");
@@ -3564,7 +3579,7 @@ mod tests {
         a.rows()
             .iter()
             .filter_map(|r| match r {
-                Row::Item(e, _) => e.at().map(|at| a.issues[at].id.clone()),
+                Row::Item(e, _) => e.at().map(|at| a.site.issues[at].id.clone()),
                 Row::Up | Row::Project(_) => None,
             })
             .collect()
@@ -3586,18 +3601,18 @@ mod tests {
     fn entering_lands_past_the_up_row() {
         let mut a = app();
         a.key(key(KeyCode::Enter));
-        assert_eq!((a.path.len(), a.cursor), (1, 1), "들어가서 `..` 에 섰다");
+        assert_eq!((a.site.path.len(), a.cursor), (1, 1), "들어가서 `..` 에 섰다");
         assert!(matches!(a.current(), Some(Row::Item(..))), "{:?}", a.current());
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.path.len(), 1, "들어가자마자 누른 Enter 가 도로 나왔다");
+        assert_eq!(a.site.path.len(), 1, "들어가자마자 누른 Enter 가 도로 나왔다");
         a.key(key(KeyCode::Char('k')));
         assert_eq!(a.current(), Some(Row::Up), "`..` 이 `k` 한 번 거리에 없다");
         a.key(key(KeyCode::Enter));
-        assert!(a.path.is_empty());
+        assert!(a.site.path.is_empty());
 
         a.key(key(KeyCode::Char('j')));
         a.key(key(KeyCode::Enter));
-        assert_eq!((a.path.len(), a.current()), (1, Some(Row::Up)), "빈 디렉터리에서 `..` 말고 설 데가 없다");
+        assert_eq!((a.site.path.len(), a.current()), (1, Some(Row::Up)), "빈 디렉터리에서 `..` 말고 설 데가 없다");
     }
 
     /// 들어갔다 나오면 **있던 자리로 돌아온다**. 매번 맨 위로 튕기면 못 쓴다.
@@ -3607,9 +3622,9 @@ mod tests {
         a.key(key(KeyCode::Down)); // 두 번째 에픽
         assert_eq!(a.cursor, 1);
         a.key(key(KeyCode::Enter));
-        assert_eq!((a.cursor, a.path.len()), (0, 1));
+        assert_eq!((a.cursor, a.site.path.len()), (0, 1));
         a.key(key(KeyCode::Backspace));
-        assert_eq!((a.cursor, a.path.len()), (1, 0), "있던 자리로 안 돌아왔다");
+        assert_eq!((a.cursor, a.site.path.len()), (1, 0), "있던 자리로 안 돌아왔다");
     }
 
     /// 들어가 있는 동안 **위에 줄이 생겨도** 나오면 방금 나온 디렉터리에 선다.
@@ -3619,9 +3634,9 @@ mod tests {
         let mut a = app();
         a.key(key(KeyCode::Down));
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.path, [Seg::Epic("argos-0002".into())]);
+        assert_eq!(a.site.path, [Seg::Epic("argos-0002".into())]);
 
-        let mut more = a.issues.clone();
+        let mut more = a.site.issues.clone();
         more.push(make("argos-0000", Kind::Epic));
         a.adopt(more);
         a.key(key(KeyCode::Backspace));
@@ -3630,7 +3645,7 @@ mod tests {
                 Row::Item(e, _) => e,
                 other => panic!("{other:?}"),
             }),
-            Some(Entry::Dir { seg: Seg::Epic("argos-0002".into()), at: a.index.find("argos-0002") }),
+            Some(Entry::Dir { seg: Seg::Epic("argos-0002".into()), at: a.site.index.find("argos-0002") }),
             "나온 디렉터리가 아니라 기억한 번호에 섰다"
         );
     }
@@ -3742,13 +3757,13 @@ mod tests {
         let mut a = app();
         a.hit("Ctrl-w w");
         a.key(key(KeyCode::Enter));
-        assert!(a.path.is_empty(), "상세에 포커스가 있는데 Enter 가 목록을 들어갔다");
+        assert!(a.site.path.is_empty(), "상세에 포커스가 있는데 Enter 가 목록을 들어갔다");
         // 펼침도 목록 포커스를 탄다 — 상세를 읽다 누른 `→` 가 목록의 줄을 늘리면 안 된다.
         a.key(key(KeyCode::Right));
         assert_eq!(row_ids(&a).len(), 3, "상세에 포커스가 있는데 `→` 가 목록을 펼쳤다");
         a.hit("Ctrl-w w");
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.path.len(), 1, "목록에 포커스가 있는데 Enter 가 안 들어갔다");
+        assert_eq!(a.site.path.len(), 1, "목록에 포커스가 있는데 Enter 가 안 들어갔다");
         for k in [KeyCode::Backspace, KeyCode::Left] {
             let mut a = app();
             a.key(key(KeyCode::Enter));
@@ -3756,10 +3771,10 @@ mod tests {
             a.hit("Ctrl-w w");
             a.key(key(KeyCode::Down));
             a.key(key(k));
-            assert_eq!((a.path.len(), a.detail.offset()), (1, 1), "상세에 포커스가 있는데 {k:?} 가 목록을 나갔다");
+            assert_eq!((a.site.path.len(), a.detail.offset()), (1, 1), "상세에 포커스가 있는데 {k:?} 가 목록을 나갔다");
             a.hit("Ctrl-w w");
             a.key(key(k));
-            assert!(a.path.is_empty(), "목록에 포커스가 있는데 {k:?} 가 안 나갔다");
+            assert!(a.site.path.is_empty(), "목록에 포커스가 있는데 {k:?} 가 안 나갔다");
         }
     }
 
@@ -3813,7 +3828,7 @@ mod tests {
             drawn(&mut a, 10, 40);
             a.key(key(KeyCode::Char(' ')));
             a.key(key(KeyCode::Char('b')));
-            assert_eq!((a.cursor, a.detail.offset(), a.path.len()), (0, 0, 0), "{start:?}");
+            assert_eq!((a.cursor, a.detail.offset(), a.site.path.len()), (0, 0, 0), "{start:?}");
             assert_eq!(a.mode, Mode::Browse);
         }
     }
@@ -3843,7 +3858,7 @@ mod tests {
         a.key(key(KeyCode::Char('g')));
         assert_eq!((a.cursor, a.chord.waiting()), (0, false), "`gg` 가 맨 위로 안 갔다");
         a.key(key(KeyCode::Char('l')));
-        assert_eq!(a.path.len(), 0, "잎에서 `l` 이 무언가 했다");
+        assert_eq!(a.site.path.len(), 0, "잎에서 `l` 이 무언가 했다");
 
         a.hit("Ctrl-w w");
         drawn(&mut a, 10, 40);
@@ -3868,7 +3883,7 @@ mod tests {
         let mut a = app();
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0009"], "시험의 전제");
         a.key(key(KeyCode::Char('l')));
-        assert_eq!(a.path, Path::new(), "펼치기가 디렉터리에 들어갔다");
+        assert_eq!(a.site.path, Path::new(), "펼치기가 디렉터리에 들어갔다");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0003", "argos-0004", "argos-0002", "argos-0009"]);
         let depths: Vec<usize> = a.rows().iter().filter_map(|r| if let Row::Item(_, t) = r { Some(t.depth()) } else { None }).collect();
         assert_eq!(depths, [0, 1, 1, 0, 0], "펼친 멤버의 깊이가 1 이 아니다");
@@ -3885,15 +3900,15 @@ mod tests {
     fn h_folds_the_row_before_it_leaves() {
         let mut a = app();
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.path.len(), 1, "시험의 전제 — 에픽 안에 섰다");
+        assert_eq!(a.site.path.len(), 1, "시험의 전제 — 에픽 안에 섰다");
         a.key(key(KeyCode::Backspace));
         a.key(key(KeyCode::Char('l')));
         assert_eq!(row_ids(&a).len(), 5, "안 펼쳐졌다");
         a.key(key(KeyCode::Char('h')));
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0009"], "`h` 가 안 접었다");
-        assert_eq!(a.path, Path::new(), "접으면서 한 층 나갔다");
+        assert_eq!(a.site.path, Path::new(), "접으면서 한 층 나갔다");
         a.key(key(KeyCode::Char('h')));
-        assert_eq!(a.path, Path::new(), "뿌리에서 더 나갈 데가 없다");
+        assert_eq!(a.site.path, Path::new(), "뿌리에서 더 나갈 데가 없다");
     }
 
     /// **`Tab` 은 재귀로 다 펼치고, 다시 누르면 밑까지 접는다**(moai-7qot, 사용자 결정).
@@ -3951,7 +3966,7 @@ mod tests {
         a.hit("h");
         assert_eq!(row_ids(&a), ["argos-0001"], "한 층 더 올라가며 안 접었다");
         assert_eq!(row_ids(&a)[a.cursor], "argos-0001");
-        assert_eq!(a.path, Path::new(), "접는 동안 디렉터리를 나갔다");
+        assert_eq!(a.site.path, Path::new(), "접는 동안 디렉터리를 나갔다");
     }
 
     /// **펼쳐 든 줄에서 `Enter` 는 그 줄의 제 자리로 들어간다**(리뷰). 지금 자리에 제 마디만
@@ -3964,16 +3979,16 @@ mod tests {
         a.cursor = 1;
         a.key(key(KeyCode::Enter));
         assert_eq!(
-            a.path,
+            a.site.path,
             vec![Seg::Milestone(Some("argos-0001".into())), Seg::Epic("argos-0002".into())],
             "가운데 마디를 빠뜨린 자리로 들어갔다"
         );
         assert_eq!(row_ids(&a), ["argos-0003"], "들어간 디렉터리가 비었다");
         // 기억한 번호는 층마다 하나다 — 지나친 층은 0 으로 메운다.
-        assert_eq!(a.remembered.len(), a.path.len(), "기억 자리가 층 수와 어긋났다");
+        assert_eq!(a.site.remembered.len(), a.site.path.len(), "기억 자리가 층 수와 어긋났다");
         // 나오는 길도 한 층씩이다.
         a.key(key(KeyCode::Backspace));
-        assert_eq!(a.path, vec![Seg::Milestone(Some("argos-0001".into()))]);
+        assert_eq!(a.site.path, vec![Seg::Milestone(Some("argos-0001".into()))]);
     }
 
     /// **한 단계 접은 뒤의 `Tab` 은 곧바로 펼친다**(리뷰). 밑에 남은 펼침으로 접을지를 가르던
@@ -3995,13 +4010,13 @@ mod tests {
     fn h_on_a_group_the_search_opened_keeps_the_place() {
         let mut a = App::new(nested(), cfg(), Path::new());
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.path.len(), 1, "시험의 전제 — 마일스톤 안에 섰다");
+        assert_eq!(a.site.path.len(), 1, "시험의 전제 — 마일스톤 안에 섰다");
         search(&mut a, "argos-0003");
         assert_eq!(row_ids(&a), ["argos-0002", "argos-0003"], "검색이 맞힌 자리를 안 열었다");
         a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(Entry::Dir { .. }, _))).expect("에픽 줄");
         assert!(a.key_ctx(&a.rows()).expanded, "눈에 열린 줄을 안 펼쳐진 것으로 읽는다");
         a.key(key(KeyCode::Char('h')));
-        assert_eq!(a.path.len(), 1, "`h` 가 마일스톤을 통째로 나갔다");
+        assert_eq!(a.site.path.len(), 1, "`h` 가 마일스톤을 통째로 나갔다");
     }
 
     /// **검색을 풀면 커서는 그 줄을 품은 폴더에 선다**(리뷰). 검색이 연 폴더가 접히면서 그 줄이
@@ -4084,13 +4099,13 @@ mod tests {
     fn h_collapses_or_leaves_from_the_list_only() {
         let mut a = app();
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.path.len(), 1, "Enter 가 안 들어갔다");
+        assert_eq!(a.site.path.len(), 1, "Enter 가 안 들어갔다");
         a.hit("Ctrl-w w");
         a.key(key(KeyCode::Char('h')));
-        assert_eq!(a.path.len(), 1, "상세 포커스에서 `h` 가 나갔다");
+        assert_eq!(a.site.path.len(), 1, "상세 포커스에서 `h` 가 나갔다");
         a.hit("Ctrl-w w");
         a.key(key(KeyCode::Char('h')));
-        assert!(a.path.is_empty(), "접을 것이 없는데 `h` 가 안 나갔다");
+        assert!(a.site.path.is_empty(), "접을 것이 없는데 `h` 가 안 나갔다");
     }
 
     /// **기다리는 `g` 뒤에 뜻 없는 키가 오면 둘 다 버린다** — 그 키도 제 뜻을 안 한다(모르는 키
@@ -4103,7 +4118,7 @@ mod tests {
             a.key(key(KeyCode::Char('g')));
             a.key(k);
             assert!(!a.chord.waiting(), "`g` 뒤의 {k:?} 가 열을 안 버렸다");
-            assert_eq!((a.cursor, a.focus, a.path.len()), (1, Pane::Explorer, 0), "`g` 뒤의 {k:?} 가 제 뜻을 했다");
+            assert_eq!((a.cursor, a.focus, a.site.path.len()), (1, Pane::Explorer, 0), "`g` 뒤의 {k:?} 가 제 뜻을 했다");
             assert_eq!(a.mode, Mode::Browse, "`g` 뒤의 {k:?} 가 칸을 열었다");
         }
         a.key(key(KeyCode::Char('g')));
@@ -4150,9 +4165,9 @@ mod tests {
     fn entering_a_leaf_does_nothing() {
         let mut a = app();
         a.key(key(KeyCode::End)); // 소속 없는 이슈 (잎)
-        let before = a.path.clone();
+        let before = a.site.path.clone();
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.path, before);
+        assert_eq!(a.site.path, before);
     }
 
     /// `..` 에서 Enter 는 나가기다.
@@ -4160,10 +4175,10 @@ mod tests {
     fn entering_the_up_row_leaves() {
         let mut a = app();
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.path.len(), 1);
+        assert_eq!(a.site.path.len(), 1);
         a.cursor = 0; // `..`
         a.key(key(KeyCode::Enter));
-        assert!(a.path.is_empty());
+        assert!(a.site.path.is_empty());
     }
 
     #[test]
@@ -4212,12 +4227,12 @@ mod tests {
         let mut a = app();
         a.hit("SPC");
         assert!(menu::open(&a.chord), "SPC 가 메뉴를 곧바로 안 열었다");
-        let before = (a.cursor, a.focus, a.path.clone());
+        let before = (a.cursor, a.focus, a.site.path.clone());
         for k in [key(KeyCode::Char('x')), key(KeyCode::Char('j')), key(KeyCode::Enter), key(KeyCode::Tab), key(KeyCode::Char('G'))] {
             a.key(k);
             assert!(menu::open(&a.chord), "{k:?} 가 메뉴를 닫았다");
             assert_eq!(a.notice, None, "{k:?} 가 알림을 달았다");
-            assert_eq!((a.cursor, a.focus, a.path.clone()), before, "{k:?} 가 메뉴 뒤의 목록을 움직였다");
+            assert_eq!((a.cursor, a.focus, a.site.path.clone()), before, "{k:?} 가 메뉴 뒤의 목록을 움직였다");
             assert_eq!(a.mode, Mode::Browse);
         }
 
@@ -4230,13 +4245,13 @@ mod tests {
 
         // Bksp 는 한 층 위 — 뒤의 목록을 나가지 않는다.
         a.key(key(KeyCode::Enter));
-        let inside = a.path.clone();
+        let inside = a.site.path.clone();
         a.hit("SPC v");
         a.key(key(KeyCode::Backspace));
         assert_eq!(menu::title(a.chord.held()), "SPC");
         a.key(key(KeyCode::Backspace));
         assert!(!menu::open(&a.chord));
-        assert_eq!(a.path, inside, "메뉴의 Bksp 가 목록을 나갔다");
+        assert_eq!(a.site.path, inside, "메뉴의 Bksp 가 목록을 나갔다");
 
         // 같은 동작 — 거름망 칸, 검색 칸, 폼, 원문, 워크트리, 끝내기.
         let mut a = app();
@@ -4262,32 +4277,32 @@ mod tests {
     #[test]
     fn reading_a_group_never_swallows_the_whole_repo() {
         let mut a = app();
-        for i in &mut a.issues {
+        for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());
             i.assignee_email = Some("raven@example.com".into());
         }
         // 시계를 고정한다(`an_unread_line_wears_new_until_it_is_read` 와 같은 까닭).
-        a.now = "2026-09-13T13:42:07Z".into();
+        a.site.now = "2026-09-13T13:42:07Z".into();
         a.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
-        let all = a.unread.len();
-        assert_eq!(all, a.issues.len(), "내 줄인데 안 읽음이 빠졌다");
+        let all = a.site.unread.len();
+        assert_eq!(all, a.site.issues.len(), "내 줄인데 안 읽음이 빠졌다");
 
         // 에픽 밖의 줄에서 누른다 — 아무것도 안 읽고 까닭을 댄다.
         let rows = row_ids(&a);
         a.cursor = rows.iter().position(|id| id == "argos-0009").expect("에픽 없는 줄이 없다");
         a.hit("SPC m g");
-        assert_eq!(a.unread.len(), all, "묶음 밖에서 누른 것이 저장소를 통째로 읽었다");
+        assert_eq!(a.site.unread.len(), all, "묶음 밖에서 누른 것이 저장소를 통째로 읽었다");
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("묶음")), "{:?}", a.notice);
 
         // 에픽 줄에서 누르면 **그 에픽과 그 멤버만** 선다 — 옆 에픽은 그대로다.
         a.cursor = rows.iter().position(|id| id == "argos-0001").expect("에픽 줄이 없다");
         a.hit("SPC m g");
-        let left: Vec<&str> = a.unread.iter().map(String::as_str).collect();
+        let left: Vec<&str> = a.site.unread.iter().map(String::as_str).collect();
         assert_eq!(left, ["argos-0002", "argos-0009"], "에픽 하나를 읽었는데 남은 것이 다르다");
         // 적히는 것은 **본 줄의 도장**이다 — 누른 때(`App::now`)가 아니다(moai-lyc1).
-        let line = a.issues.iter().find(|i| i.id == "argos-0001").unwrap().updated_at.clone();
-        assert_ne!(line, a.now, "시험이 두 값을 못 가른다");
+        let line = a.site.issues.iter().find(|i| i.id == "argos-0001").unwrap().updated_at.clone();
+        assert_ne!(line, a.site.now, "시험이 두 값을 못 가른다");
         assert_eq!(a.seen.get("argos-0001"), Some(&line), "본 줄의 updated_at 이 아니라 다른 값을 적었다");
     }
 
@@ -4302,24 +4317,24 @@ mod tests {
         loose.milestone = Some("argos-0001".into());
         is.push(loose);
         let mut a = App::new(is, cfg(), Path::new());
-        for i in &mut a.issues {
+        for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());
             i.assignee_email = Some("raven@example.com".into());
         }
-        a.now = "2026-09-13T13:42:07Z".into();
+        a.site.now = "2026-09-13T13:42:07Z".into();
         a.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
         // 마일스톤 안에 서서 에픽을 펼치고, 그 멤버 줄에 선다.
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.path.len(), 1, "시험의 전제 — 마일스톤 안이다");
+        assert_eq!(a.site.path.len(), 1, "시험의 전제 — 마일스톤 안이다");
         a.key(key(KeyCode::Char('l')));
         a.cursor = a
             .rows()
             .iter()
-            .position(|r| matches!(r, Row::Item(e, t) if t.depth() == 1 && e.at().is_some_and(|at| a.issues[at].id == "argos-0003")))
+            .position(|r| matches!(r, Row::Item(e, t) if t.depth() == 1 && e.at().is_some_and(|at| a.site.issues[at].id == "argos-0003")))
             .expect("펼친 멤버 줄이 없다");
         a.hit("SPC m g");
-        let left: Vec<&str> = a.unread.iter().map(String::as_str).collect();
+        let left: Vec<&str> = a.site.unread.iter().map(String::as_str).collect();
         assert_eq!(left, ["argos-0001", "argos-0009"], "멤버 줄에서 누른 것이 마일스톤을 통째로 읽었다");
     }
 
@@ -4341,33 +4356,33 @@ mod tests {
             make("argos-0010", Kind::Issue),
         ];
         let mut a = App::new(issues, cfg(), Path::new());
-        for i in &mut a.issues {
+        for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());
             i.assignee_email = Some("raven@example.com".into());
         }
-        a.now = "2026-09-13T13:42:07Z".into();
+        a.site.now = "2026-09-13T13:42:07Z".into();
         a.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
-        let all = a.unread.len();
+        let all = a.site.unread.len();
         let stand = |a: &mut App, path: Path, id: &str| {
-            a.path = path;
+            a.site.path = path;
             a.cursor = a
                 .rows()
                 .iter()
-                .position(|r| matches!(r, Row::Item(e, _) if e.at().is_some_and(|at| a.issues[at].id == id)))
+                .position(|r| matches!(r, Row::Item(e, _) if e.at().is_some_and(|at| a.site.issues[at].id == id)))
                 .unwrap_or_else(|| panic!("{id} 줄이 없다"));
         };
 
         // `(마일스톤 없음)` 안의 에픽 없는 줄 — 아무것도 안 읽고 까닭을 댄다.
         stand(&mut a, vec![Seg::Milestone(None)], "argos-0009");
         a.hit("SPC m g");
-        assert_eq!(a.unread.len(), all, "바구니를 묶음으로 읽었다 — {:?}", a.unread);
+        assert_eq!(a.site.unread.len(), all, "바구니를 묶음으로 읽었다 — {:?}", a.site.unread);
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("묶음")), "{:?}", a.notice);
 
         // 자식 있는 멤버의 폴더 안에서 누르면 그것이 든 **에픽과 그 밑 전부, 에픽 줄까지**다.
         stand(&mut a, vec![Seg::Milestone(None), Seg::Epic("argos-0001".into()), Seg::Issue("argos-0003".into())], "argos-0003.aa1");
         a.hit("SPC m g");
-        let left: Vec<&str> = a.unread.iter().map(String::as_str).collect();
+        let left: Vec<&str> = a.site.unread.iter().map(String::as_str).collect();
         assert_eq!(left, ["argos-0009", "argos-0010", "argos-0100"], "에픽을 다 못 읽었거나 밖을 읽었다");
     }
 
@@ -4379,22 +4394,22 @@ mod tests {
         let s = Scratch::new("read-marks-tui");
         let config = s.path().join("user.toml");
         let mut a = app();
-        for i in &mut a.issues {
+        for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());
             i.assignee_email = Some("raven@example.com".into());
         }
         a.user_config = Some(config.clone());
-        a.now = "2026-09-13T13:42:07Z".into();
+        a.site.now = "2026-09-13T13:42:07Z".into();
         a.me = None;
         a.recount_unread();
-        assert!(a.unread.is_empty(), "누군지 모르는데 [NEW] 가 섰다");
+        assert!(a.site.unread.is_empty(), "누군지 모르는데 [NEW] 가 섰다");
 
         // 누군지 몰라도 `r` 은 그 줄을 적는다 — CLI 의 `moai read <id>` 가 그러듯.
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
         a.hit("r");
         assert_eq!(a.notice.as_deref(), Some("✓ 읽음 · argos-0009"));
         // 적히는 것은 누른 때가 아니라 **본 줄의 도장**이다(moai-lyc1).
-        let stamp = a.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
+        let stamp = a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
         assert!(std::fs::read_to_string(&config).unwrap().contains(&format!("argos-0009 = \"{stamp}\"")));
 
         // 옆 터미널이 더 늦은 도장으로 적어 두었다 — 이 화면은 그것을 모른다.
@@ -4402,21 +4417,21 @@ mod tests {
         std::fs::write(&config, &later).unwrap();
         a.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
-        assert!(a.unread.contains("argos-0001"), "화면의 표가 옆에서 적은 것을 벌써 안다 — 시험의 전제가 틀렸다");
+        assert!(a.site.unread.contains("argos-0001"), "화면의 표가 옆에서 적은 것을 벌써 안다 — 시험의 전제가 틀렸다");
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0001").expect("줄이 없다");
         a.hit("r");
         assert_eq!(a.notice.as_deref(), Some("읽음으로 적을 것이 없다"), "이미 읽은 줄을 다시 적었다");
         assert_eq!(std::fs::read_to_string(&config).unwrap(), later, "옆에서 적은 새 도장을 낡은 도장으로 덮었다");
-        assert!(!a.unread.contains("argos-0001"), "적은 뒤 파일의 표를 안 들었다");
+        assert!(!a.site.unread.contains("argos-0001"), "적은 뒤 파일의 표를 안 들었다");
 
         // 옆에서 적은 읽음은 **누르지 않아도** 든다 — 걸음이 설정 파일의 표식을 잰다(moai-en4u).
         // 첫 걸음은 재기만 한다: 띄울 때 이미 읽었다.
         a.follow();
-        assert!(a.unread.contains("argos-0002"));
+        assert!(a.site.unread.contains("argos-0002"));
         std::fs::write(&config, format!("{later}argos-0002 = \"2026-09-14T00:00:00Z\"\n")).unwrap();
-        assert!(a.unread.contains("argos-0002"), "걸음 전에 들었다 — 시험의 전제가 틀렸다");
+        assert!(a.site.unread.contains("argos-0002"), "걸음 전에 들었다 — 시험의 전제가 틀렸다");
         a.follow();
-        assert!(!a.unread.contains("argos-0002"), "옆에서 적은 읽음을 걸음이 안 들었다");
+        assert!(!a.site.unread.contains("argos-0002"), "옆에서 적은 읽음을 걸음이 안 들었다");
     }
 
     /// **같은 id 의 쌍둥이 줄은 늦은 도장으로 읽는다**(moai-7c50.exy) — `r`·`SPC m a` 가 가리킨 뒷줄의
@@ -4428,16 +4443,16 @@ mod tests {
         let issues = vec![make("argos-0001", Kind::Epic), early, make("argos-0009", Kind::Issue)];
         for act in ["r", "SPC m a"] {
             let mut a = App::new(issues.clone(), cfg(), Path::new());
-            for i in &mut a.issues {
+            for i in &mut a.site.issues {
                 i.assignee = Some("레이븐".into());
                 i.assignee_email = Some("raven@example.com".into());
             }
             a.me = Some("레이븐 (raven@example.com)".into());
             a.recount_unread();
-            assert!(a.unread.contains("argos-0009"), "{act}: 시험의 전제가 틀렸다 — {:?}", a.unread);
+            assert!(a.site.unread.contains("argos-0009"), "{act}: 시험의 전제가 틀렸다 — {:?}", a.site.unread);
             a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
             a.hit(act);
-            assert!(!a.unread.contains("argos-0009"), "{act}: 쌍둥이의 [NEW] 가 안 내렸다 — {:?}", a.seen);
+            assert!(!a.site.unread.contains("argos-0009"), "{act}: 쌍둥이의 [NEW] 가 안 내렸다 — {:?}", a.seen);
             assert_eq!(a.seen.get("argos-0009").map(String::as_str), Some("2026-09-05T00:00:00Z"), "{act}");
         }
     }
@@ -4575,7 +4590,7 @@ mod tests {
     #[test]
     fn tab_turns_what_slash_searches_and_a_reread_keeps_it() {
         let mut a = app();
-        a.issues[4].tags = vec!["parser".into()];
+        a.site.issues[4].tags = vec!["parser".into()];
         a.key(key(KeyCode::Char('/')));
         for c in "pars".chars() {
             a.key(key(KeyCode::Char(c)));
@@ -4692,7 +4707,7 @@ mod tests {
         )
         .unwrap();
         settle(&mut a);
-        assert_eq!(a.issues.len(), 1, "없던 파일이 생긴 것을 못 알아챘다");
+        assert_eq!(a.site.issues.len(), 1, "없던 파일이 생긴 것을 못 알아챘다");
         assert!(a.trouble.is_none());
     }
 
@@ -4740,13 +4755,13 @@ mod tests {
     fn keys_the_box_eats_never_reach_the_browser() {
         let mut a = app();
         a.key(key(KeyCode::Enter));
-        let inside = a.path.clone();
+        let inside = a.site.path.clone();
         a.key(key(KeyCode::Char('/')));
         for code in [KeyCode::Backspace, KeyCode::Left, KeyCode::Char('a'), KeyCode::Char('c'), KeyCode::Left] {
             a.key(key(code));
         }
         a.key(key(KeyCode::Char('b')));
-        assert_eq!(a.path, inside, "칸의 키가 탐색기로 샜다");
+        assert_eq!(a.site.path, inside, "칸의 키가 탐색기로 샜다");
         assert!(matches!(&a.mode, Mode::Grep(b, _) if b.text() == "abc"), "{:?}", a.mode);
     }
 
@@ -4803,11 +4818,11 @@ mod tests {
     fn reload_repairs_a_path_that_no_longer_exists() {
         let mut a = app();
         a.key(key(KeyCode::Enter)); // 에픽 안으로
-        assert_eq!(a.path.len(), 1);
+        assert_eq!(a.site.path.len(), 1);
 
         // 그 에픽이 사라진 자료로 갈아탄다
         a.adopt(vec![make("argos-0002", Kind::Epic), make("argos-0009", Kind::Issue)]);
-        assert!(a.path.is_empty(), "없는 자리에 그대로 서 있다");
+        assert!(a.site.path.is_empty(), "없는 자리에 그대로 서 있다");
         assert_eq!(a.cursor, 0);
         assert!(!a.rows().is_empty());
     }
@@ -4819,16 +4834,16 @@ mod tests {
     fn a_first_milestone_deepens_the_tree_and_the_cursor_follows_the_epic() {
         let mut a = app();
         a.key(key(KeyCode::Enter));
-        let was = a.path.clone();
+        let was = a.site.path.clone();
 
-        let mut with = a.issues.clone();
+        let mut with = a.site.issues.clone();
         with.push(make("argos-9999", Kind::Milestone));
         a.adopt(with);
         // 길은 낡았지만 뿌리로 내려놓지는 않는다 — 에픽이 간 자리로 따라간다
-        assert_ne!(a.path, was, "트리가 깊어졌는데 길이 그대로다");
-        assert_eq!(a.path.last(), was.last(), "서 있던 에픽을 놓쳤다");
-        assert_eq!(a.path.len(), 2, "{:?}", a.path);
-        assert_eq!(a.remembered.len(), a.path.len());
+        assert_ne!(a.site.path, was, "트리가 깊어졌는데 길이 그대로다");
+        assert_eq!(a.site.path.last(), was.last(), "서 있던 에픽을 놓쳤다");
+        assert_eq!(a.site.path.len(), 2, "{:?}", a.site.path);
+        assert_eq!(a.site.remembered.len(), a.site.path.len());
     }
 
     /// 갱신해도 걸어 둔 거름망은 살아 있다. 갱신 한 번에 하던 일이 흩어지면
@@ -4840,7 +4855,7 @@ mod tests {
         typed(&mut a, "type=epic");
         assert_eq!(shown(&a).len(), 2);
 
-        let mut more = a.issues.clone();
+        let mut more = a.site.issues.clone();
         more.push(make("argos-0007", Kind::Epic));
         a.adopt(more);
         assert_eq!(a.filter_text.as_deref(), Some("type=epic"));
@@ -4862,14 +4877,14 @@ mod tests {
         let load = repo.read().unwrap();
         let (index, ground) = measure(&load.issues, &repo.config);
         let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
-        assert_eq!(a.issues.len(), 1);
+        assert_eq!(a.site.issues.len(), 1);
 
         // 아직 아무도 안 건드렸다 — 읽지 않는다. 읽으면 표식이 같아도 매 걸음
         // 저장소를 통째로 다시 세는 것이다.
-        let stamp_before = a.stamp;
+        let stamp_before = a.site.stamp;
         a.follow();
         assert!(!a.loading(), "안 바뀌었는데 다시 읽으러 갔다");
-        assert_eq!(a.stamp, stamp_before);
+        assert_eq!(a.site.stamp, stamp_before);
 
         // 에픽 안에 들어가 있는 동안 밖에서 한 줄 더한다
         a.key(key(KeyCode::Enter));
@@ -4879,10 +4894,10 @@ mod tests {
 
         a.follow();
         assert!(a.loading(), "바뀐 것을 보고도 읽으러 가지 않았다");
-        assert_eq!(a.issues.len(), 1, "스레드가 지을 것을 루프에서 읽었다");
+        assert_eq!(a.site.issues.len(), 1, "스레드가 지을 것을 루프에서 읽었다");
         settle(&mut a);
-        assert_eq!(a.issues.len(), 2, "바뀐 것을 저절로 안 읽었다");
-        assert_eq!(a.path, [Seg::Epic("argos-0001".into())], "읽고 나서 자리를 잃었다");
+        assert_eq!(a.site.issues.len(), 2, "바뀐 것을 저절로 안 읽었다");
+        assert_eq!(a.site.path, [Seg::Epic("argos-0001".into())], "읽고 나서 자리를 잃었다");
         assert!(a.trouble.is_none());
     }
 
@@ -4936,7 +4951,7 @@ mod tests {
         a.worktree = false;
         a.reload();
         assert!(a.commits_job.is_none(), "루프에서 도는 다시 읽기가 표를 그 자리에서 지었다");
-        assert!(a.watched.iter().any(|(p, _)| p.ends_with("HEAD")), "겹쳐 보기를 끄자 HEAD 를 안 지켜본다");
+        assert!(a.site.watched.iter().any(|(p, _)| p.ends_with("HEAD")), "겹쳐 보기를 끄자 HEAD 를 안 지켜본다");
         // 커밋이 안 섰으니 표도 다시 안 짓는다 — 쓰기 하나마다 이력을 통째로 걷지 않는다.
         assert!(!a.gathering_commits(), "표식이 그대로인데 표를 다시 지으러 갔다");
         gathered(&mut a);
@@ -4975,24 +4990,24 @@ mod tests {
         a.key(key(KeyCode::Enter)); // argos-0001 안 — `..`, 0003, 0004
         a.key(key(KeyCode::End));
         let at = |a: &App| match a.current() {
-            Some(Row::Item(e, _)) => a.issues[e.at().unwrap()].id.clone(),
+            Some(Row::Item(e, _)) => a.site.issues[e.at().unwrap()].id.clone(),
             other => format!("{other:?}"),
         };
         assert_eq!(at(&a), "argos-0004");
 
         // 위에 줄이 하나 생긴다 — 같은 번호는 이제 0003 이다.
-        let mut more = a.issues.clone();
+        let mut more = a.site.issues.clone();
         more.push(member("argos-0000", "argos-0001"));
         a.adopt(more);
         assert_eq!(at(&a), "argos-0004", "위에 줄이 생기자 커서가 옆 줄로 튀었다");
 
         // 위의 줄이 사라진다.
-        let fewer: Vec<Issue> = a.issues.iter().filter(|i| i.id != "argos-0000" && i.id != "argos-0003").cloned().collect();
+        let fewer: Vec<Issue> = a.site.issues.iter().filter(|i| i.id != "argos-0000" && i.id != "argos-0003").cloned().collect();
         a.adopt(fewer);
         assert_eq!(at(&a), "argos-0004", "위의 줄이 사라지자 커서가 튀었다");
 
         // 보던 줄이 사라지면 목록 안의 이웃 자리로.
-        let gone: Vec<Issue> = a.issues.iter().filter(|i| i.id != "argos-0004").cloned().collect();
+        let gone: Vec<Issue> = a.site.issues.iter().filter(|i| i.id != "argos-0004").cloned().collect();
         a.adopt(gone);
         assert!(a.cursor < a.rows().len(), "목록 밖에 섰다");
 
@@ -5000,7 +5015,7 @@ mod tests {
         let mut b = app();
         b.key(key(KeyCode::Enter));
         b.key(key(KeyCode::Home));
-        let mut more = b.issues.clone();
+        let mut more = b.site.issues.clone();
         more.push(member("argos-0000", "argos-0001"));
         b.adopt(more);
         assert_eq!(b.current(), Some(Row::Up));
@@ -5015,12 +5030,12 @@ mod tests {
         a.key(key(KeyCode::End)); // argos-0004
         drawn(&mut a, 10, 40);
         a.detail.by(7);
-        let mut more = a.issues.clone();
+        let mut more = a.site.issues.clone();
         more.push(member("argos-0000", "argos-0001"));
         a.adopt(more);
         assert_eq!(a.detail.offset(), 7, "같은 줄인데 굴린 자리를 잃었다");
 
-        let gone: Vec<Issue> = a.issues.iter().filter(|i| i.id != "argos-0004").cloned().collect();
+        let gone: Vec<Issue> = a.site.issues.iter().filter(|i| i.id != "argos-0004").cloned().collect();
         a.adopt(gone);
         assert_eq!(a.detail.offset(), 0, "다른 줄에 섰는데 굴린 자리가 남았다");
     }
@@ -5040,14 +5055,14 @@ mod tests {
 
         let other = dir.join("other.jsonl");
         std::fs::write(&other, "").unwrap();
-        a.watched = vec![(other.clone(), crate::store::stamp(&other))];
-        a.now = "읽기 전".into();
+        a.site.watched = vec![(other.clone(), crate::store::stamp(&other))];
+        a.site.now = "읽기 전".into();
         settle(&mut a);
-        assert_eq!(a.now, "읽기 전", "아무것도 안 바뀌었는데 다시 읽었다");
+        assert_eq!(a.site.now, "읽기 전", "아무것도 안 바뀌었는데 다시 읽었다");
 
         std::fs::write(&other, "{}\n").unwrap();
         settle(&mut a);
-        assert_ne!(a.now, "읽기 전", "옆 스냅샷이 바뀐 것을 못 알아챘다");
+        assert_ne!(a.site.now, "읽기 전", "옆 스냅샷이 바뀐 것을 못 알아챘다");
     }
 
     /// **사람이 누른 갱신이 스레드의 늦은 결과에 덮이지 않는다.** 갱신을 부르기 전에
@@ -5068,7 +5083,7 @@ mod tests {
         assert!(a.loading());
         a.reload();
         assert!(!a.loading(), "사람이 부른 갱신이 짓던 것을 안 버렸다");
-        assert_eq!(a.issues.len(), 1);
+        assert_eq!(a.site.issues.len(), 1);
     }
 
     /// **다른 프로젝트에서 지은 읽기는 안 들인다.** 같은 id 를 쓰는 두 프로젝트에서
@@ -5084,10 +5099,10 @@ mod tests {
         assert!(a.trouble.is_none());
 
         // 제 것은 들인다 — 막은 것이 뿌리 견주기이지 받기 자체가 아니다.
-        let mine = a.repo.clone().unwrap();
+        let mine = a.site.repo.clone().unwrap();
         touch_outside(&mine_dir);
         a.receive(prepare(&mine, false));
-        assert_eq!(a.issues.len(), 2);
+        assert_eq!(a.site.issues.len(), 2);
     }
 
     /// 판 밖에서 한 줄을 더해 다음 `follow` 가 스레드 읽기를 띄우게 한다.
@@ -5168,7 +5183,7 @@ mod tests {
         a.reload();
         assert!(!a.loading(), "사람이 부른 갱신이 짓던 것을 안 버렸다");
         assert!(a.reaping(), "버린 손잡이를 안 들었다 — 루프가 빠른 걸음으로 안 깬다");
-        assert_eq!(a.issues.len(), 2, "사람이 부른 갱신이 제 자리에서 안 읽었다");
+        assert_eq!(a.site.issues.len(), 2, "사람이 부른 갱신이 제 자리에서 안 읽었다");
 
         discarded_settle(&a);
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.follow()));
@@ -5186,14 +5201,14 @@ mod tests {
         assert!(a.loading());
         a.reload();
         assert!(a.reaping());
-        let stamp = a.stamp;
+        let stamp = a.site.stamp;
 
         discarded_settle(&a);
         a.follow();
         assert!(!a.reaping(), "끝난 스레드를 join 안 했다");
         assert!(!a.loading(), "버린 읽기가 끝난 것을 보고 또 읽으러 갔다");
-        assert_eq!(a.stamp, stamp);
-        assert_eq!(a.issues.len(), 2);
+        assert_eq!(a.site.stamp, stamp);
+        assert_eq!(a.site.issues.len(), 2);
         assert!(a.trouble.is_none());
     }
 
@@ -5306,13 +5321,13 @@ mod tests {
 
         assert_eq!(add_idea(&mut a, "argos-0002").as_deref(), Some("argos-0002"));
         assert!(std::fs::read_to_string(&file).unwrap().contains("argos-0002"), "파일에 안 닿았다");
-        assert_eq!(a.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["argos-0001", "argos-0002"]);
-        assert_eq!(a.index.find("argos-0002"), Some(1), "색인이 다시 안 섰다 — 손으로 넣은 것이다");
-        let repo = a.repo.clone().unwrap();
+        assert_eq!(a.site.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["argos-0001", "argos-0002"]);
+        assert_eq!(a.site.index.find("argos-0002"), Some(1), "색인이 다시 안 섰다 — 손으로 넣은 것이다");
+        let repo = a.site.repo.clone().unwrap();
         assert_eq!(repo.journal_of("argos-0002").unwrap()[0].by, "레이븐");
         assert!(a.trouble.is_none(), "다시 읽었는데 옛 까닭이 남았다");
 
-        assert_eq!(a.stamp, stamp_of(&repo), "표식을 다시 안 잡았다");
+        assert_eq!(a.site.stamp, stamp_of(&repo), "표식을 다시 안 잡았다");
         a.follow();
         assert!(!a.loading(), "제가 쓴 것을 밖에서 바뀐 것으로 읽었다");
     }
@@ -5320,7 +5335,7 @@ mod tests {
     /// 커서가 선 줄의 id. `..` 이나 바구니면 없다.
     fn on(a: &App) -> Option<String> {
         a.current().and_then(|r| match r {
-            Row::Item(e, _) => e.at().map(|at| a.issues[at].id.clone()),
+            Row::Item(e, _) => e.at().map(|at| a.site.issues[at].id.clone()),
             Row::Up | Row::Project(_) => None,
         })
     }
@@ -5350,12 +5365,12 @@ mod tests {
     fn a_line_written_into_another_directory_takes_the_cursor_there() {
         let (_scratch, mut a) = writable("land-elsewhere");
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.path, [Seg::Epic("argos-0001".into())]);
+        assert_eq!(a.site.path, [Seg::Epic("argos-0001".into())]);
 
         assert!(add_idea(&mut a, "argos-0002").is_some());
-        assert!(a.path.is_empty(), "생각은 에픽 밖에 서는데 에픽 안에 남았다 — {:?}", a.path);
+        assert!(a.site.path.is_empty(), "생각은 에픽 밖에 서는데 에픽 안에 남았다 — {:?}", a.site.path);
         assert_eq!(on(&a).as_deref(), Some("argos-0002"));
-        assert!(a.remembered.is_empty());
+        assert!(a.site.remembered.is_empty());
 
         let wrote = a.write(|_| {}, |issues, _, _, by| {
             let at = "2026-09-13T00:00:00Z";
@@ -5363,9 +5378,9 @@ mod tests {
             Ok((vec![crate::model::JournalEntry::create("argos-0003", "멤버", at, by)], Touched { id: "argos-0003".into(), done: "만듦" }))
         });
         assert_eq!(wrote.as_deref(), Some("argos-0003"));
-        assert_eq!(a.path, [Seg::Epic("argos-0001".into())], "에픽 안의 줄인데 그리로 안 갔다");
+        assert_eq!(a.site.path, [Seg::Epic("argos-0001".into())], "에픽 안의 줄인데 그리로 안 갔다");
         assert_eq!(on(&a).as_deref(), Some("argos-0003"));
-        assert_eq!(a.remembered.len(), a.path.len());
+        assert_eq!(a.site.remembered.len(), a.site.path.len());
         assert_eq!(a.notice.as_deref(), Some("✓ 만듦 · argos-0003"));
 
         a.key(key(KeyCode::Backspace));
@@ -5379,11 +5394,11 @@ mod tests {
         let (_scratch, mut a) = writable("land-hidden");
         a.hit("SPC f");
         typed(&mut a, "type=epic");
-        let (path, cursor) = (a.path.clone(), a.cursor);
+        let (path, cursor) = (a.site.path.clone(), a.cursor);
 
         assert!(add_idea(&mut a, "argos-0002").is_some());
-        assert_eq!(a.issues.len(), 2, "쓰기가 안 닿았다");
-        assert_eq!((a.path.clone(), a.cursor), (path, cursor), "가려진 줄을 찾아 자리를 옮겼다");
+        assert_eq!(a.site.issues.len(), 2, "쓰기가 안 닿았다");
+        assert_eq!((a.site.path.clone(), a.cursor), (path, cursor), "가려진 줄을 찾아 자리를 옮겼다");
         assert_eq!(on(&a).as_deref(), Some("argos-0001"));
         assert_eq!(a.filter_text.as_deref(), Some("type=epic"), "거름망을 대신 풀었다");
         assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다"));
@@ -5396,7 +5411,7 @@ mod tests {
         let (_scratch, mut a) = writable("land-view");
         a.hit("SPC v 1 Esc");
         assert!(add_idea(&mut a, "argos-0002").is_some());
-        assert_eq!(a.issues.len(), 2, "쓰기가 안 닿았다");
+        assert_eq!(a.site.issues.len(), 2, "쓰기가 안 닿았다");
         assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002 — 보기에 가려 안 보인다 · SPC v a 로 모두 보인다"));
     }
 
@@ -5594,9 +5609,9 @@ mod tests {
 
         assert!(add_idea(&mut a, "argos-0002").is_some());
         assert!(!a.loading(), "쓰기 전에 띄운 읽기가 남았다");
-        assert_eq!(a.issues.len(), 3, "밖에서 떨어진 줄이나 제가 쓴 줄을 잃었다");
+        assert_eq!(a.site.issues.len(), 3, "밖에서 떨어진 줄이나 제가 쓴 줄을 잃었다");
         settle(&mut a);
-        assert_eq!(a.issues.len(), 3);
+        assert_eq!(a.site.issues.len(), 3);
     }
 
     /// **실패는 화면에 선다.** 검증에 걸리면 파일도 화면도 그대로고, 까닭이 남는다 —
@@ -5606,7 +5621,7 @@ mod tests {
         let (scratch, mut a) = writable("write-refused");
         let file = scratch.join(".moai/issues.jsonl");
         let before = std::fs::read_to_string(&file).unwrap();
-        let stamp = a.stamp;
+        let stamp = a.site.stamp;
         // 앞 쓰기의 알림이 남아 있으면 실패한 이번 쓰기가 담긴 것으로 읽힌다.
         a.notice = Some("✓ 담김 · argos-0000".into());
 
@@ -5616,8 +5631,8 @@ mod tests {
         });
         assert!(out.is_none(), "거절됐는데 썼다고 한다");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
-        assert_eq!(a.issues.len(), 1);
-        assert_eq!(a.stamp, stamp);
+        assert_eq!(a.site.issues.len(), 1);
+        assert_eq!(a.site.stamp, stamp);
         let t = a.trouble.clone().unwrap_or_default();
         assert!(t.starts_with("쓰지 못했다") && t.contains("칸"), "{t}");
         assert_eq!(a.notice, None, "실패했는데 앞 쓰기의 알림이 남았다");
@@ -5646,7 +5661,7 @@ mod tests {
         src.push_str(&format!("{}\n", serde_json::to_string(&make("argos-0003", Kind::Issue)).unwrap()));
         std::fs::write(&file, src).unwrap();
         settle(&mut a);
-        assert_eq!(a.issues.len(), 2, "밖의 쓰기를 못 읽었다");
+        assert_eq!(a.site.issues.len(), 2, "밖의 쓰기를 못 읽었다");
         assert_eq!(a.trouble.as_deref(), Some("쓰지 못했다 — 락"), "저절로 다시 읽기가 쓰기의 까닭을 지웠다");
 
         assert!(add_idea(&mut a, "argos-0002").is_some());
@@ -5736,7 +5751,7 @@ mod tests {
     fn ctrl_s_saves_an_idea_without_an_epic_wherever_the_cursor_is() {
         let (_scratch, mut a) = writable("jot");
         a.key(key(KeyCode::Enter)); // 에픽 안
-        assert_eq!(a.path.len(), 1, "판이 다르다 — 에픽 안에 못 들어갔다");
+        assert_eq!(a.site.path.len(), 1, "판이 다르다 — 에픽 안에 못 들어갔다");
         jotting(&mut a, "  반짝 떠오른 것 ");
         a.key(key(KeyCode::Tab));
         type_in(&mut a, "첫 줄");
@@ -5746,7 +5761,7 @@ mod tests {
         a.key(ctrl('s'));
         assert_eq!(a.mode, Mode::Browse, "담았는데 폼이 안 닫혔다 — {:?}", a.trouble);
 
-        let repo = a.repo.clone().unwrap();
+        let repo = a.site.repo.clone().unwrap();
         let made = ideas_in(&repo);
         assert_eq!(made.len(), 1, "{made:?}");
         let idea = &made[0];
@@ -5761,8 +5776,8 @@ mod tests {
         assert_eq!((journal[0].kind.as_str(), journal[0].title.as_deref(), journal[0].by.as_str()), ("create", Some("반짝 떠오른 것"), "레이븐"));
         // 화면은 파일을 다시 읽은 것이고, 커서는 만든 줄에 서며 알림은 하나다 — 폼은 닫기만
         // 하고 뒤처리는 `write` 가 한다(moai-064q). idea 는 에픽에 안 드니 뿌리로 나온다.
-        assert!(a.index.find(&idea.id).is_some(), "쓰고 다시 안 읽었다");
-        assert_eq!((on(&a), a.path.len()), (Some(idea.id.clone()), 0), "만든 줄에 안 섰다");
+        assert!(a.site.index.find(&idea.id).is_some(), "쓰고 다시 안 읽었다");
+        assert_eq!((on(&a), a.site.path.len()), (Some(idea.id.clone()), 0), "만든 줄에 안 섰다");
         assert_eq!(a.notice, Some(format!("✓ 담김 · {}", idea.id)));
 
         // 제목만으로도 담긴다. F2 는 걷었다(moai-7sjm) — 눌러도 폼은 그대로다.
@@ -5831,7 +5846,7 @@ mod tests {
         assert_eq!(a.mode, Mode::Browse, "담겼는데 폼이 열린 채다 — {:?}", a.trouble);
         assert!(a.trouble.is_none(), "{:?}", a.trouble);
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("이력은 못 남겼다")), "{:?}", a.notice);
-        assert_eq!(ideas_in(a.repo.as_ref().unwrap()).len(), 1);
+        assert_eq!(ideas_in(a.site.repo.as_ref().unwrap()).len(), 1);
     }
 
     /// **Esc 는 빈 폼을 곧바로 닫고, 적던 것이 있으면 한 번 묻는다.** `y` 만 버린다 —
@@ -5868,14 +5883,14 @@ mod tests {
         a.key(ctrl('s'));
         assert!(matches!(&a.mode, Mode::Idea(f) if f.title.text() == "못 담길 것"), "실패했는데 폼이 닫혔다 — {:?}", a.mode);
         assert!(a.trouble.as_deref().is_some_and(|t| t.starts_with("쓰지 못했다")), "{:?}", a.trouble);
-        assert!(ideas_in(a.repo.as_ref().unwrap()).is_empty());
+        assert!(ideas_in(a.site.repo.as_ref().unwrap()).is_empty());
 
         // 고치고 다시 누르면 담기고 까닭이 걷힌다
         std::fs::remove_dir(&lock).unwrap();
         a.key(ctrl('s'));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
         assert!(a.trouble.is_none());
-        assert_eq!(ideas_in(a.repo.as_ref().unwrap()).len(), 1);
+        assert_eq!(ideas_in(a.site.repo.as_ref().unwrap()).len(), 1);
 
         // 실패한 채로 버리고 닫으면 까닭도 걷힌다. 성공한 쓰기가 락 파일을 남겼다.
         std::fs::remove_file(&lock).unwrap();
@@ -5929,7 +5944,7 @@ mod tests {
         type_in(&mut a, "레이븐 (raven@example.com)");
         a.key(key(KeyCode::Enter));
         assert_eq!(a.mode, Mode::Browse, "받았는데 멈췄던 쓰기가 안 이어졌다");
-        let repo = a.repo.clone().unwrap();
+        let repo = a.site.repo.clone().unwrap();
         let made = ideas_in(&repo);
         assert_eq!(made.len(), 1, "받은 뒤에도 파일에 안 닿았다");
         assert_eq!((made[0].title.as_str(), made[0].body.as_deref()), ("떠오른 것", Some("본문")), "되돌린 폼에서 안 읽었다");
@@ -5942,7 +5957,7 @@ mod tests {
         // 받은 사람이 [NEW] 를 가를 사람이기도 하다(moai-j038.vna) — 헤더만 그 사람을 대고 안 읽음은
         // 띄울 때의 "모름" 에 머물면 방금 담은 제 줄에도 [NEW] 가 안 선다.
         assert_eq!(a.me.as_deref(), Some("레이븐 (raven@example.com)"));
-        assert!(a.unread.contains(&made[0].id), "받은 사람의 새 줄에 [NEW] 가 안 섰다 — {:?}", a.unread);
+        assert!(a.site.unread.contains(&made[0].id), "받은 사람의 새 줄에 [NEW] 가 안 섰다 — {:?}", a.site.unread);
         assert_eq!(std::fs::read_to_string(&config).unwrap(), config_before, "받은 것을 설정에 적었다");
 
         // 두 번째 쓰기는 묻지 않는다.
@@ -6028,7 +6043,7 @@ mod tests {
         let text = format!("  편집기에서 온 것 \n\n## 설계\n둘째 줄\n{}", edit.text);
         a.edited(edit.into, Ok(text));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
-        let repo = a.repo.clone().unwrap();
+        let repo = a.site.repo.clone().unwrap();
         let made = ideas_in(&repo);
         assert_eq!(made.len(), 1, "{made:?}");
         assert_eq!((made[0].title.as_str(), made[0].body.as_deref()), ("편집기에서 온 것", Some("## 설계\n둘째 줄")));
@@ -6081,7 +6096,7 @@ mod tests {
         type_in(&mut a, "레이븐 (raven@example.com)");
         a.key(key(KeyCode::Enter));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
-        let made = ideas_in(a.repo.as_ref().unwrap());
+        let made = ideas_in(a.site.repo.as_ref().unwrap());
         assert_eq!((made.len(), made[0].title.as_str(), made[0].body.as_deref()), (1, "물어볼 것", Some("본문")));
     }
 
@@ -6099,7 +6114,7 @@ mod tests {
         std::fs::remove_dir(&lock).unwrap();
         a.key(ctrl('s'));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
-        assert_eq!(ideas_in(a.repo.as_ref().unwrap()).len(), 1);
+        assert_eq!(ideas_in(a.site.repo.as_ref().unwrap()).len(), 1);
     }
 
     /// **아직 안 담긴 글을 찾는다**(moai-y3r7). 루프가 오류로 끝날 때 남길 글이다 — 폼에
