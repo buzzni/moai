@@ -5156,3 +5156,15 @@
 {"ts":"2026-09-19T00:43:37Z","id":"moai-en4u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — TUI 키 체계 전체의 설계, 여러 파일)"}
 {"ts":"2026-09-19T00:43:37Z","id":"moai-en4u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-19T00:43:38Z","id":"moai-hmci","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 moai-8c35(guide.rs·worktree.rs·user_config.rs·cmd/read.rs 의 옛 키 이름 SPC t w·SPC r·SPC m r 을 새 키로)가 첫 칸에 남아 에픽을 연다 — 그 파일들을 쥔 옆 에픽(moai-5wk4 등)이 develop 에 들어간 뒤 집는다. 리뷰가 넘긴 idea moai-cq4o·moai-5j45 는 user_config.rs API 가 들어 그때 본다"}
+{"ts":"2026-09-19T00:50:07Z","id":"moai-b8aj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-19): 리뷰 원문이 64KB 를 넘으면 요약한다. 요약이라고 밝히고 문장만 줄인다(첫 줄 `요약: 원문 <크기>KB`, 건 번호와 자리는 둔다). 64KB 아래는 지금처럼 그대로 붙인다. 여러 판으로 쪼개 적는 길과 moai 가 저절로 쪼개는 길은 고르지 않았다. 글은 guide::REVIEW_OVER_LIMIT 한 줄에 두고 규칙 3·참고 문서·note 거절문이 함께 쓴다"}
+{"ts":"2026-09-19T00:51:22Z","id":"moai-4u6b.5hl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-4u6b 끝: 64KB 넘는 리뷰 원문의 길"}
+{"ts":"2026-09-19T00:51:27Z","id":"moai-4u6b.5hl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T00:51:44Z","id":"moai-b8aj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽 끝 리뷰 moai-4u6b.5hl(max, f20515a..HEAD)이 돌고 있다. 끝나면 원문 노트와 판단 노트를 따로 적고 fix: 커밋을 남긴 뒤, 루트 트래커를 커밋하고 develop 에 --no-ff 로 병합한다"}
+{"ts":"2026-09-19T00:53:04Z","id":"moai-qnkn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI / 검색이 보기에 숨은 줄까지 찾는다"}
+{"ts":"2026-09-19T00:53:04Z","id":"moai-wkb8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"검색이 걸린 동안 보기(SPC v)가 숨긴 칸과 미룬 줄까지 목록에 세운다"}
+{"ts":"2026-09-19T00:53:04Z","id":"moai-4x87","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"검색으로 드러난 숨은 줄을 흐리게 그리고 제목 뒤에 '숨김' 낱말을 단다"}
+{"ts":"2026-09-19T00:53:04Z","id":"moai-gwmc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"검색을 풀면 설정된 보기로 돌아가고, 가려진 줄에 있던 커서는 가까운 줄로 옮기며 알린다"}
+{"ts":"2026-09-19T00:53:04Z","id":"moai-qnkn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-b3o5 에서 펼쳤다 — TUI / 검색은 숨겨진 이슈까지 찾아 보이고, 검색을 나가면 설정된 보기로 돌아간다"}
+{"ts":"2026-09-19T00:53:04Z","id":"moai-b3o5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-qnkn 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-19T00:53:11Z","id":"moai-qnkn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"## 사용자 결정 (2026-09-19)\n\n- 드러낼 범위: 보기(SPC v)가 숨긴 것 전부. 숨긴 칸(done 등)과 미룬 것 모두. idea 는 지금도 `/` 에 걸린다\n- 줄 표시: 흐리게 그리고 제목 뒤에 `숨김` 낱말을 단다. 색만으로 뜻을 지지 않는다\n- 검색 기간: 검색 결과가 걸린 동안이다. Enter 로 칸을 닫아도 `/` 결과가 목록에 있으면 계속 보인다. 검색을 풀면(Esc·ClearFilter) 설정된 보기로 돌아간다\n- 커서: 검색을 풀었을 때 커서 줄이 보기에 다시 가려지면 가장 가까운 보이는 줄로 옮기고 `<id> 는 보기에 가려졌다 · SPC v a` 알림을 한 줄 낸다\n- 검색은 보기 설정을 바꾸지도 저장하지도 않는다"}
+{"ts":"2026-09-19T00:53:12Z","id":"moai-wkb8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
