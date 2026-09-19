@@ -182,6 +182,12 @@ fn every_language_keeps_the_ready_table_in_line() {
     ok(s.path(), &["add", "짧은 일"]);
     ok(s.path(), &["add", "아주 긴 한글 제목이 여기에 들어간다"]);
     ok(s.path(), &["add", "plain ascii"]);
+    // **id 가 우선순위를 품은 줄을 하나 박는다**(moai-xj7t). `add` 가 뽑는 id 는 무작위라, 이 줄이
+    // 없으면 아래 찾기가 id 를 짚는 경우를 한 판에 0.7% 남짓으로만 겨눈다.
+    let mut lines = issues(s.path());
+    lines.push_str(r#"{"id":"argos-p2p2","title":"id 가 우선순위를 닮은 줄","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#);
+    lines.push('\n');
+    std::fs::write(s.path().join(".moai/issues.jsonl"), lines).unwrap();
     for lang in ["en", "ko", "ja", "zh", "es"] {
         let mut cmd = isolated(BIN);
         cmd.args(["ready"]).current_dir(s.path()).env("MOAI_NOW", NOW).env("NO_COLOR", "1").env("MOAI_LANG", lang);
@@ -190,15 +196,20 @@ fn every_language_keeps_the_ready_table_in_line() {
         let screen = String::from_utf8(out.stdout).unwrap();
         // **제목 뒤의 열이 서는 자리를 잰다** — 제목이 두 칸 글자라, 글자 수로 채우면 여기서
         // 어긋난다. 우선순위(`p2`)는 id 뒤라 ASCII 만 앞서므로 그것만 재면 못 잡는다.
+        //
+        // **`p2` 는 앞뒤 빈칸과 함께 찾는다**(moai-xj7t). id 본체는 시각으로 씨앗을 뽑는 무작위
+        // 네 글자라 `argos-p2sq` 처럼 `p2` 를 품을 수 있고, 맨 `find("p2")` 는 그때 id 를 짚어
+        // 그 줄만 다른 칸을 댄다 — 세 줄 중 하나가 그럴 확률이 한 판에 0.7% 남짓이라 이따금 붉었다.
+        // 부하 탓으로 읽혔지만 시계도 폭도 아니고 id 였다.
         let starts: Vec<(usize, usize)> = screen
             .lines()
             .filter(|l| l.contains("argos-"))
             .map(|l| {
-                let p = l.find("p2").expect("우선순위 칸이 없다");
+                let p = l.find(" p2 ").expect("우선순위 칸이 없다") + 1;
                 (cells(&l[..p]), last_column(l))
             })
             .collect();
-        assert!(starts.len() >= 3, "{lang}: 표에 줄이 모자라다\n{screen}");
+        assert!(starts.len() >= 4 && screen.contains("argos-p2p2"), "{lang}: 표에 줄이 모자라다\n{screen}");
         // **잰 자리가 0 이면 아무것도 안 잰 것이다** — 아래 두 줄은 다 0 이어도 통과한다.
         assert!(starts.iter().all(|(p, e)| *p > 0 && *e > *p), "{lang}: 열을 못 찾았다 — {starts:?}\n{screen}");
         assert!(starts.windows(2).all(|w| w[0].0 == w[1].0), "{lang}: 우선순위 열이 줄마다 다른 칸에서 선다 — {starts:?}\n{screen}");
