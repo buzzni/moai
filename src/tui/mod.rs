@@ -1800,7 +1800,7 @@ impl App {
     fn mark_read(&mut self, act: keys::Browse, rows: &[Row]) {
         use keys::Browse as B;
         let cur = self.current_of(rows);
-        let mut targets: Vec<usize> = match act {
+        let targets: Vec<usize> = match act {
             B::Read => match &cur {
                 Some(Row::Item(e)) => e.at().into_iter().collect(),
                 _ => Vec::new(),
@@ -1819,16 +1819,17 @@ impl App {
             }
             _ => return,
         };
-        targets.sort_unstable();
-        targets.dedup();
-        // 같은 id 는 한 번 — 뒷줄이 이긴다(`nav::Index::find` 와 같은 자).
-        let lines: std::collections::BTreeMap<&str, &Issue> =
-            targets.iter().map(|&at| (self.issues[at].id.as_str(), &self.issues[at])).collect();
-        if lines.is_empty() {
+        // 고른 줄의 **id** 로 적는다 — 같은 id 의 쌍둥이 줄까지 넘겨야 늦은 도장이 적혀 [NEW] 가 내린다
+        // (`query::read_marks_of`). 가리킨 줄 하나만 넘기면 `unread` 가 앞줄로 세운 [NEW] 가 영영 남는다.
+        let ids: std::collections::BTreeSet<&str> = targets.iter().map(|&at| self.issues[at].id.as_str()).collect();
+        if ids.is_empty() {
             self.notice = Some("읽음으로 적을 것이 없다".into());
             return;
         }
-        let pick = |seen: &std::collections::BTreeMap<String, String>| crate::query::read_marks_of(lines.values().copied(), seen);
+        let issues = &self.issues;
+        let pick = |seen: &std::collections::BTreeMap<String, String>| {
+            crate::query::read_marks_of(issues.iter().filter(|i| ids.contains(i.id.as_str())), seen)
+        };
         let written: Vec<String> = match self.user_config.clone() {
             Some(path) => {
                 let wrote = crate::user_config::update(&path, |doc| {
@@ -3545,7 +3546,7 @@ mod tests {
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0001").expect("줄이 없다");
         a.hit("r");
         assert_eq!(a.notice.as_deref(), Some("읽음으로 적을 것이 없다"), "이미 읽은 줄을 다시 적었다");
-        assert_eq!(std::fs::read_to_string(&config).unwrap(), later, "옆에서 적은 새 때를 옛 때로 덮었다");
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), later, "옆에서 적은 새 도장을 낡은 도장으로 덮었다");
         assert!(!a.unread.contains("argos-0001"), "적은 뒤 파일의 표를 안 들었다");
 
         // `SPC r` 도 파일의 표를 다시 든다.
@@ -3553,6 +3554,29 @@ mod tests {
         assert!(a.unread.contains("argos-0002"));
         a.hit("SPC r");
         assert!(!a.unread.contains("argos-0002"), "SPC r 이 옆에서 적은 읽음을 안 들었다");
+    }
+
+    /// **같은 id 의 쌍둥이 줄은 늦은 도장으로 읽는다**(moai-7c50.exy) — `r`·`SPC m a` 가 가리킨 뒷줄의
+    /// 도장만 적으면 [NEW] 를 세운 앞줄이 늘 더 늦어, 몇 번을 눌러도 "읽음으로 적을 것이 없다" 만 나온다.
+    #[test]
+    fn r_on_a_duplicate_id_clears_new_for_both_twins() {
+        let mut early = make("argos-0009", Kind::Issue);
+        early.updated_at = "2026-09-05T00:00:00Z".into();
+        let issues = vec![make("argos-0001", Kind::Epic), early, make("argos-0009", Kind::Issue)];
+        for act in ["r", "SPC m a"] {
+            let mut a = App::new(issues.clone(), cfg(), Path::new());
+            for i in &mut a.issues {
+                i.assignee = Some("레이븐".into());
+                i.assignee_email = Some("raven@example.com".into());
+            }
+            a.me = Some("레이븐 (raven@example.com)".into());
+            a.recount_unread();
+            assert!(a.unread.contains("argos-0009"), "{act}: 시험의 전제가 틀렸다 — {:?}", a.unread);
+            a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
+            a.hit(act);
+            assert!(!a.unread.contains("argos-0009"), "{act}: 쌍둥이의 [NEW] 가 안 내렸다 — {:?}", a.seen);
+            assert_eq!(a.seen.get("argos-0009").map(String::as_str), Some("2026-09-05T00:00:00Z"), "{act}");
+        }
     }
 
     /// **바로 누르던 키는 더는 뜻이 없다**(moai-7sjm) — `f`·`n`·`w`·`a`·`d`·`m`·Delete·F키. 목록·

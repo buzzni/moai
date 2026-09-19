@@ -3394,7 +3394,7 @@ fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
     assert!(saved.contains("[read]") && saved.contains(&member), "{saved}");
     assert_eq!(issues(s.path()), before, "읽었다고 트래커가 바뀌었다");
 
-    // 두 번째는 적을 것이 없다 — 시계가 고정(MOAI_NOW)이라 같은 때가 이미 적혀 있다.
+    // 두 번째는 적을 것이 없다 — 그 뒤로 줄이 안 바뀌어 같은 도장이 이미 적혀 있다(moai-lyc1).
     assert!(mine(&["read", &member]).contains("읽음으로 적을 것이 없다"));
 
     // `-e` 는 에픽 자신과 멤버와 **그 밑까지** 함께 적는다. 자식이 빠지면 "그 밑까지" 가 거짓이다.
@@ -3470,6 +3470,36 @@ fn reading_writes_the_stamp_of_the_line_i_saw() {
     std::fs::write(&cfg, format!("{text}\"{old}\" = \"2026-09-18T05:00:00Z\"\n")).unwrap();
     let out = at("2026-09-18T06:00:00Z", &["read", "--all", "--json"]);
     assert!(!out.contains(&old), "옛 값으로 읽은 줄이 다시 [NEW] 로 섰다 — {out}");
+}
+
+/// **같은 id 의 줄이 둘이면 늦은 도장을 적는다**(moai-7c50.exy). 안 읽음은 쌍둥이 가운데 하나만 바뀌어도
+/// 그 id 를 세우는데, 뒷줄 하나의 도장만 적던 때는 앞줄이 늘 더 늦어 `read --all` 이 그 id 를 세우고도
+/// "적을 것이 없다" 만 되뇌었다 — [NEW] 가 영영 안 내린다. 본 때를 적던 때는 그 때가 둘 다를 덮었다.
+#[test]
+fn reading_a_duplicate_id_takes_the_later_stamp_of_the_twins() {
+    let s = init("readtwins");
+    let cfg = s.path().join("user.toml");
+    // 담당은 시험의 사람(`ACTOR`)이다 — `--all` 은 내게 온 것만 센다.
+    let line = |at: &str| {
+        format!(
+            "{{\"id\":\"argos-0001\",\"title\":\"쌍둥이\",\"status\":\"todo\",\"assignee\":\"테스터\",\"assignee_email\":\"tester@example.com\",\"created_at\":\"2026-09-18T00:00:00Z\",\"updated_at\":\"{at}\",\"status_since\":\"2026-09-18T00:00:00Z\"}}\n"
+        )
+    };
+    // 앞줄이 늦다 — 뒷줄(`Load::get`·탐색기가 여는 줄)만 적으면 앞줄이 남는다.
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{}{}", line("2026-09-18T05:00:00Z"), line("2026-09-18T01:00:00Z"))).unwrap();
+
+    let out = ok_with(s.path(), &cfg, &["read", "--all", "--json"]);
+    assert!(out.contains("argos-0001"), "안 읽은 쌍둥이를 안 적었다 — {out}");
+    let saved = std::fs::read_to_string(&cfg).unwrap();
+    assert!(saved.contains("argos-0001 = \"2026-09-18T05:00:00Z\""), "늦은 도장을 안 적었다 — {saved}");
+    let out = ok_with(s.path(), &cfg, &["read", "--all", "--json"]);
+    assert!(!out.contains("argos-0001"), "읽은 쌍둥이가 여전히 안 읽음이다 — {out}");
+
+    // id 를 준 길도 같다 — 뒷줄이 늦으면 뒷줄 것이다.
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{}{}", line("2026-09-18T06:00:00Z"), line("2026-09-18T07:00:00Z"))).unwrap();
+    ok_with(s.path(), &cfg, &["read", "argos-0001"]);
+    let saved = std::fs::read_to_string(&cfg).unwrap();
+    assert!(saved.contains("argos-0001 = \"2026-09-18T07:00:00Z\""), "늦은 도장을 안 적었다 — {saved}");
 }
 
 /// **`-e` 는 그 묶음 밑에 그려진 것만 적는다**(moai-j038.vna) — 트리·`show -e`·탐색기의 `SPC m r` 과 같은
