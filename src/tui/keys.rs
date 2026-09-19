@@ -578,6 +578,13 @@ pub const BROWSE: &[Bind<Browse>] = {
 pub struct Ctx {
     /// 프로젝트 층에 섰나.
     pub layer: bool,
+    /// 한눈 보기에 **이슈 줄이 하나라도 섰나**(moai-1xo5) — 펼친 프로젝트가 있는가다. 보기·정렬·
+    /// 열은 그 줄들에 걸리므로, 하나도 없으면 눌러도 아무 일이 없다.
+    pub rows_here: bool,
+    /// 한눈 보기에서 커서가 **이슈 줄**에 섰나(moai-5v3q) — 머리줄이 아니라 그 밑의 줄이다.
+    /// 층에서 뜻이 없던 키(읽음·담기)가 그 줄에서는 **그 프로젝트의 것으로** 선다. 프로젝트
+    /// 안에서는 늘 참이나 마나다 — `layer` 가 거짓이라 아래 갈래에 안 걸린다.
+    pub on_row: bool,
     /// 포커스가 목록에 있나.
     pub list_focus: bool,
     /// 커서가 선 줄이 **들어갈 데가 없다** — 잎(일 한 줄)이거나 줄이 없다. `..`·디렉터리·층의
@@ -648,9 +655,14 @@ impl Browse {
             // 묶음 줄에만 펼칠 것이 있다 — `Enter` 가 잎에서 조용한 것과 같은 자리다. `leaf` 로
             // 가르지 않는다: `leaf` 는 `Enter` 의 물음이라 `..` 과 층의 프로젝트 줄에도 거짓이고,
             // 거기서는 펼침이 아무 일도 안 한다.
-            // 층은 트리가 아니다 — `l`·`→` 는 거기서 `Enter` 와 같다(사용자 결정 2026-09-19).
+            // 한눈 보기에서 `l`·`→` 는 머리줄을 펼치고 묶음 줄을 펼친다(moai-i0wd) — 켜지는 자리는
+            // `Enter` 와 같다(`leaf` 가 아닌 줄). 한때는 `l` 이 거기서 들어가기였다(moai-9m2d).
             Expand if c.layer => Browse::Enter.enabled(c),
             Expand | ExpandAll if !c.group => Err(Off::Quiet),
+            // **한눈 보기에는 나갈 데가 없다**(리뷰) — 접을 것이 없으면 조용하다. 아래 `Leave` 로
+            // 흘리면 거기서 `root`(자리 채우개의 빈 경로)와 등록 수가 맞아떨어져, 이미 그 화면에
+            // 선 사람에게 "프로젝트 층으로는 `0` 으로 간다" 는 말이 선다.
+            Collapse if c.layer && !c.expanded && !c.nested => Err(Off::Quiet),
             // **접을 것도 접을 부모도 없으면 나가기와 같다** — 아래 `Leave` 의 갈래를 그대로 탄다.
             Collapse if !c.expanded && !c.nested => Browse::Leave.enabled(c),
             // 커서에서 되는 키만(moai-k3yi): 잎의 Enter·뿌리의 Bksp 는 아무 일도 없다. 까닭을 대지
@@ -667,7 +679,10 @@ impl Browse {
                 label(BROWSE, Project(0))
             ))),
             Leave if c.root => Err(Off::Quiet),
-            Unregister if !(c.layer && c.list_focus) => Err(Off::Quiet),
+            // **머리줄에서만 선다**(리뷰) — 뺄 것은 프로젝트고, 한눈 보기의 이슈 줄에서 누르면
+            // [`super::App::ask_unregister`] 가 말없이 돌아선다. 눌러도 아무 일이 없는 키는
+            // 메뉴에 안 세운다(아래 `Raw` 와 같은 까닭).
+            Unregister if !(c.layer && c.list_focus && !c.on_row) => Err(Off::Quiet),
             Grep | Filter if c.layer => {
                 Err(Off::Why(format!("거름망은 프로젝트 안의 줄에 건다 — {} 로 들어가서 건다", label(BROWSE, Enter))))
             }
@@ -675,10 +690,13 @@ impl Browse {
             // **층에는 읽을 줄이 없다**(moai-j038.vna) — 층의 줄은 프로젝트고 안 읽은 줄은 들어간 프로젝트의
             // 것이라(`App::climb` 이 비운다), 여기서 서면 `SPC m a` 는 늘 "적을 것이 없다" 로 답하면서 그
             // 프로젝트에 [NEW] 가 남는다. 눌러도 아무 일이 없는 키는 메뉴에 안 선다(아래 `Raw` 와 같은 까닭).
-            Read | ReadAll | ReadGroup if c.layer => Err(Off::Quiet),
-            // 줄 보기·정렬·열은 프로젝트 안의 줄에 건다 — 층에서는 그 항목이 안 서고, 켜진 것이 하나도
-            // 없는 `SPC s`·`SPC c` 는 묶음째 안 선다(`menu::live`). `SPC v` 는 상세 칸·원문이 남아 선다.
-            Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer => Err(Off::Quiet),
+            // 한눈 보기의 이슈 줄은 읽을 줄이다(moai-5v3q) — 그 줄의 프로젝트에 적는다.
+            Read | ReadAll | ReadGroup if c.layer && !c.on_row => Err(Off::Quiet),
+            // **보기·정렬·열은 줄이 선 곳에 건다.** 한눈 보기에도 줄이 서면(펼친 프로젝트가 있으면)
+            // 그 줄 전부에 걸린다 — 보는 사람의 것이라 화면에 하나뿐이다(moai-1xo5, 사용자 결정
+            // 2026-09-19). 줄이 하나도 없으면 눌러도 아무 일이 없어 안 선다: 켜진 것이 하나도 없는
+            // `SPC s`·`SPC c` 는 묶음째 안 선다(`menu::live`).
+            Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer && !c.rows_here => Err(Off::Quiet),
             // 상세를 숨기면 갈 칸이 하나뿐이라 Tab 은 아무 일도 안 하고, 원문↔그리기는 상세의
             // 글에만 걸리므로(`draw::about` 의 `app.raw`) 눌러도 화면이 그대로다. **눌러도 아무
             // 일이 없는 키는 바에도 메뉴에도 안 선다** — 그런 키가 하나 서면 거기부터 도구를 못

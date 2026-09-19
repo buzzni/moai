@@ -47,6 +47,13 @@ pub struct Layer {
     launch: Option<PathBuf>,
     /// 스레드에서 읽고 있는 프로젝트들. 끝나면 [`App::follow`] 가 받는다.
     pending: Option<(Receiver<Looked>, std::thread::JoinHandle<()>)>,
+    /// **펼친 프로젝트의 줄**을 읽고 있는 스레드(moai-12yx) — 어느 프로젝트인지와 받을 곳. 요약을
+    /// 읽는 [`Layer::pending`] 과 따로 두는 것은 값이 다르기 때문이다: 요약은 줄마다 작은 셈이고
+    /// 이것은 그 프로젝트를 통째로 읽어 색인까지 짓는 일이라, 한 번에 **하나만** 돈다.
+    pub(super) reading: Option<(PathBuf, Receiver<crate::fail::R<super::Fresh>>, std::thread::JoinHandle<()>)>,
+    /// 펼쳐 놓고 아직 못 읽은 프로젝트 — 차례로 하나씩 읽는다. 사람이 여럿을 잇따라 펼쳐도
+    /// 스레드가 그 수만큼 서지 않는다.
+    pub(super) wanted: Vec<PathBuf>,
 }
 
 /// 층의 한 줄 — 프로젝트 하나.
@@ -62,6 +69,11 @@ pub struct Place {
     /// 이 탐색기를 띄운 자리인가.
     pub launched: bool,
     pub look: Look,
+    /// 읽어 든 그 프로젝트의 줄(moai-eyre). **한눈 보기가 머리줄 밑에 세울 것이고**, 없으면 머리줄만
+    /// 선다 — 읽는 것은 펼칠 때다(moai-12yx). 요약([`Look::Open`])과 따로 드는 까닭은 값이 다르기
+    /// 때문이다: 요약은 걸음마다 다시 재는 작은 셈이고, 이것은 그 프로젝트를 통째로 읽어 색인까지 지은
+    /// 것이다.
+    pub site: Option<super::Site>,
     /// 읽기 **전에** 잰 표식 — `.moai/issues.jsonl` 과 `.moai/config.toml`, 옆 워크트리.
     marks: Marks,
     /// 읽은 것을 **들인** 때([`Layer::adopt`]) — 시작한 때가 아니다(까닭은 거기). [`due`] 가 이것으로
@@ -301,13 +313,23 @@ impl Layer {
                 look: Look::Unread,
                 marks: Marks::default(),
                 read_at: None,
+                site: None,
             })
             .collect();
         let at = match places.iter().find(|p| p.launched) {
             Some(p) => At::Project(p.path.clone()),
             None => At::Layer,
         };
-        Layer { at, places, problems: reg.problems.clone(), config: reg.path.clone(), launch: launch.map(Path::to_path_buf), pending: None }
+        Layer {
+            at,
+            places,
+            problems: reg.problems.clone(),
+            config: reg.path.clone(),
+            launch: launch.map(Path::to_path_buf),
+            pending: None,
+            reading: None,
+            wanted: Vec::new(),
+        }
     }
 
     /// 등록한 프로젝트가 하나라도 있는가. **없으면 층을 세우지 않는다** — 띄운 자리 하나뿐인
@@ -348,16 +370,29 @@ impl Layer {
     /// 읽는다(리뷰 moai-3lul.kt0). 표식은 반대로 읽기 **전**의 것이다 — 그 사이의 쓰기를 놓치면
     /// 영영 안 보인다.
     fn adopt(&mut self, looked: impl IntoIterator<Item = Looked>) {
+        // **줄을 든 프로젝트는 표식이 움직이면 줄도 다시 읽는다**(리뷰). 요약만 새것으로 갈던
+        // 때는 머리줄의 셈과 그 밑의 줄이 한 화면에서 다른 말을 했다 — 옆 세션이 닫은 일이 셈
+        // 에서는 `✓` 로 올라가는데 줄은 세션 내내 `todo` 였다. 읽으러 가는 자는 [`App::want_site`]
+        // 뿐인데 그쪽은 펼칠 때만 불리고, 든 줄이 있으면 아무것도 안 한다.
+        let mut again: Vec<PathBuf> = Vec::new();
         for l in looked {
             if let Some(p) = self.places.iter_mut().find(|p| p.path == l.path) {
+                if p.marks != l.marks && p.site.is_some() {
+                    again.push(p.path.clone());
+                }
                 p.marks = l.marks;
                 p.read_at = Some(std::time::Instant::now());
                 p.look = l.look;
             }
         }
+        for path in again {
+            if !self.wanted.contains(&path) && self.reading.as_ref().is_none_or(|(p, ..)| *p != path) {
+                self.wanted.push(path);
+            }
+        }
     }
 
-    fn position(&self, path: &Path) -> Option<usize> {
+    pub(super) fn position(&self, path: &Path) -> Option<usize> {
         self.places.iter().position(|p| p.path == path)
     }
 
@@ -459,7 +494,7 @@ impl App {
     /// 여기서 고쳐 세운 줄(`Look::Shut`)을 옛 디렉터리의 값으로 덮는다. 버린 줄은 층에 선 다음
     /// 걸음에 [`Layer::stale`] 이 다시 고른다 — 못 들어갔거나 `n` 으로 층에 남았으면 곧바로,
     /// 들어갔으면 올라올 때다.
-    fn open_place(&mut self, at: usize) -> Option<Repo> {
+    pub(super) fn open_place(&mut self, at: usize) -> Option<Repo> {
         if let Some((_, handle)) = self.layer.as_mut()?.pending.take() {
             self.discard(handle);
         }
@@ -500,7 +535,7 @@ impl App {
                 At::Layer => None,
             },
             // 층이 없으면 선 체크아웃이다(`Repo::here`) — 층의 줄과 같은 자로 적힌다(`cmd::tui`).
-            None => self.repo.as_ref().map(|r| r.here().to_path_buf()),
+            None => self.site.repo.as_ref().map(|r| r.here().to_path_buf()),
         }
     }
 
@@ -512,9 +547,16 @@ impl App {
     /// 적은 것이 갈 데가 없다. 담는 순간 그 프로젝트로 들어간다([`App::stand_at`]).
     pub(super) fn open_form(&mut self) {
         let into = if self.on_layer() {
-            let Some(Row::Project(at)) = self.current() else {
-                self.notice = Some("담을 프로젝트가 없다 — `moai project add <dir>` 로 등록하면 여기 선다".into());
-                return;
+            // **커서가 선 줄의 프로젝트에 담는다**(moai-5v3q) — 머리줄이면 그 프로젝트고, 그 밑의
+            // 이슈 줄이면 그 줄이 사는 프로젝트다. 한눈 보기는 프로젝트를 가로지르므로 "지금 선
+            // 프로젝트" 라는 것이 없다 — 커서가 그것을 댄다.
+            let at = match self.current() {
+                Some(Row::Project(at)) => at,
+                Some(Row::Item(super::Seat::Place(at), ..)) => at,
+                _ => {
+                    self.notice = Some("담을 프로젝트가 없다 — `moai project add <dir>` 로 등록하면 여기 선다".into());
+                    return;
+                }
             };
             if self.open_place(at).is_none() {
                 return;
@@ -603,7 +645,11 @@ impl App {
         match (self.read)(&repo, overlay) {
             Ok(fresh) => {
                 // 떠난 프로젝트에 매인 것을 푼다 — 층에서 왔으면 이미 풀린 것을 한 번 더 풀 뿐이다.
-                self.leave_project();
+                let leaving = match &self.layer.as_ref().map(|l| &l.at) {
+                    Some(At::Project(p)) => Some(p.clone()),
+                    _ => None,
+                };
+                self.leave_project(leaving);
                 if let Some(layer) = &mut self.layer {
                     layer.at = At::Project(path);
                 }
@@ -613,8 +659,8 @@ impl App {
                 // 가 띄운 자리의 사람으로 서서 `moai -C <그 프로젝트> read --all` 과 다른 줄을 센다. 안 읽음은
                 // 들이기(`apply_fresh`)가 세므로 그 **앞**이다.
                 self.me = self.whoami(&repo.root);
-                self.cfg = repo.config.clone();
-                self.repo = Some(repo);
+                self.site.cfg = repo.config.clone();
+                self.site.repo = Some(repo);
                 self.cursor = 0;
                 // 떠난 프로젝트의 줄은 `leave_project` 가 이미 비웠다 — 두 프로젝트가 같은 prefix 를
                 // 쓰면(`argos-0001`) 남은 줄의 id 로 들이기가 커서를 붙들어 남의 줄 번호에 섰다.
@@ -643,13 +689,21 @@ impl App {
     pub(super) fn climb(&mut self) {
         let Some(layer) = &mut self.layer else { return };
         let At::Project(from) = std::mem::replace(&mut layer.at, At::Layer) else { return };
-        self.leave_project();
+        self.leave_project(Some(from.clone()));
         // **시각은 안 올린다** — 머리의 `↻` 가 그것으로 "방금 갱신했다" 를 말하는데, 읽기는 이제
         // 스레드로 가서 아직 안 왔다(리뷰 moai-3lul.kt0). 들일 때 [`App::follow_layer`] 가 올린다.
         let Some(layer) = &mut self.layer else { return };
         layer.forget(&from);
         layer.launch();
-        self.cursor = layer.position(&from).unwrap_or(0);
+        let at = layer.position(&from).unwrap_or(0);
+        self.stand_on_place(at);
+    }
+
+    /// 한눈 보기에서 커서를 그 프로젝트의 **머리줄**에 세운다(moai-i0wd). **층 줄의 첨자는 이제 줄
+    /// 번호가 아니다** — 펼친 프로젝트가 제 줄을 이고 서므로, 첨자를 커서에 그대로 넣으면 남의
+    /// 프로젝트의 이슈 줄에 선다.
+    pub(super) fn stand_on_place(&mut self, at: usize) {
+        self.cursor = self.rows().iter().position(|r| matches!(r, Row::Project(n) if *n == at)).unwrap_or(0);
     }
 
     /// **한 프로젝트에 매인 것을 모두 푼다** — 떠나는 두 길(올라가기 [`App::climb`], 옆으로
@@ -658,7 +712,7 @@ impl App {
     /// 다른 길로 냈다. 그래서 들이기를 고치면 한쪽만 깨졌고, 건너가는 길은 짓던 커밋 표를 안
     /// 버려 떠난 뿌리의 표가 새 프로젝트의 표에 섞였다. **프로젝트에 매인 것을 새로 들이면
     /// 여기에 적는다.** 선 자리(`Layer::at`)와 커서는 부르는 쪽이 정한다 — 어디로 가느냐가 다르다.
-    fn leave_project(&mut self) {
+    fn leave_project(&mut self, park_at: Option<PathBuf>) {
         if let Some((_, handle)) = self.pending.take() {
             self.discard(handle);
         }
@@ -668,29 +722,27 @@ impl App {
         if let Some((_, handle)) = self.commits_job.take() {
             self.discard(handle);
         }
-        self.commits = super::Commits::new();
-        // 표가 무엇을 알고 지었는지도 같이 버린다 — 남기면 같은 prefix 를 쓰는 다음 프로젝트의 id 가
-        // 표에 있는 것으로 읽혀(`apply_fresh`) 빈 표를 다시 안 짓는다.
-        self.commit_ids = Default::default();
-        self.repo = None;
-        self.issues = Vec::new();
-        // 안 읽은 id 도 그 프로젝트에 매인 것이다(moai-z9pc.9av) — 두고 오면 층에서 누른
-        // `SPC m a` 가 **떠난 프로젝트의** 줄을 읽음으로 적고, 그 줄은 여기 보이지도 않는다.
-        // 층에서는 읽음 키가 아예 안 선다(`keys::Browse::enabled`) — 층의 줄은 프로젝트라 읽을 줄이 없다.
-        self.unread.clear();
-        self.index = Index::of(&[]);
-        self.ground = Default::default();
-        self.keep = Vec::new();
-        self.shown = Vec::new();
-        self.lit = Default::default();
-        self.unreadable = Vec::new();
-        self.origin = Default::default();
-        self.elsewhere = Vec::new();
-        self.unfound = None;
-        self.watched = Vec::new();
-        self.stamp = None;
-        self.read_at = None;
-        self.warnings = 0;
+        // **떠난 프로젝트의 줄은 통째로 그 층 줄에 둔다**(moai-i0wd) — 한눈 보기가 그 밑에 세울
+        // 것이고, 방금 떠난 프로젝트가 접힌 채로 서면 `0` 을 누른 화면이 늘 비어 보인다(사용자
+        // 결정 2026-09-19: "있던 프로젝트만 펼쳐 둔다"). 커밋 표·안 읽음·못 읽는 줄이 함께 가므로
+        // 다음 프로젝트에 섞이지 않는다 — 한때 필드마다 비우던 것이 그 섞임을 막으려는 일이었다.
+        //
+        // **그 프로젝트 안에서 어디를 보고 있었나는 안 든다.** 경로·커서 기억·펼친 자리는 도로
+        // 들어갈 때 처음부터다 — 마디가 그 프로젝트의 이슈 id 라 남겨 두면 지운 줄의 id 가 쌓인다.
+        let blank = super::Site::of(Vec::new(), Index::of(&[]), Default::default(), self.site.cfg.clone(), Vec::new(), Vec::new());
+        let mut parked = std::mem::replace(&mut self.site, blank);
+        parked.path.clear();
+        parked.remembered.clear();
+        parked.expanded.clear();
+        // **거름망 마스크도 푼다**(리뷰). 아래에서 `filter_text` 를 비우므로 걸린 글은 사라지는데,
+        // 마스크를 두고 가면 그 프로젝트의 줄은 한눈 보기에서 걸러진 채 서고 — 경로 줄에 뱃지도
+        // 없고 Esc 로 풀 것도 없어 — 왜 줄이 적은지 말할 자리가 도구 안에 안 남는다.
+        parked.keep = vec![true; parked.issues.len()];
+        if let (Some(at), Some(layer)) = (park_at, self.layer.as_mut())
+            && let Some(place) = layer.places.iter_mut().find(|p| p.path == at)
+        {
+            place.site = Some(parked);
+        }
         self.filter_text = None;
         // **보기는 돌리지 않는다**(moai-2bzp). 보기·정렬·열은 사람의 설정이라 사용자 설정에 적혀
         // 프로젝트를 옮겨도 이어진다 — 한때(moai-fmv5) 여기서 처음값으로 돌렸는데, 그러면 저장한
@@ -702,13 +754,13 @@ impl App {
         self.worktree = true;
         self.trouble = None;
         self.write_failed = false;
-        self.path.clear();
-        self.remembered.clear();
+        self.site.path.clear();
+        self.site.remembered.clear();
         // 펼쳐 둔 자리도 그 프로젝트에 매인 것이다 — 마디가 그 프로젝트의 이슈 id 다. 두고 오면
         // 같은 prefix 를 쓰는 다음 프로젝트에서 아무도 안 펼친 묶음이 펼쳐진 채 서고(위의 커서
         // 정체와 같은 자리), 바구니 마디(`Milestone(None)`·`Lost`)는 id 조차 없어 prefix 가 달라도
         // 그대로 샌다. 세션 내내 쌓이기도 한다.
-        self.expanded.clear();
+        self.site.expanded.clear();
         self.detail.rewind();
     }
 
@@ -734,7 +786,7 @@ impl App {
         let held = self.current().map(|r| self.anchor_of(&r));
         match self.layer.take() {
             None => {
-                let Some(repo) = &self.repo else { return };
+                let Some(repo) = &self.site.repo else { return };
                 let fresh = Layer::read(self.user_config.as_deref(), Some(repo.here()));
                 if !fresh.registered() {
                     self.unlayered = unlayered_of(&fresh);
@@ -750,6 +802,12 @@ impl App {
                         p.look = std::mem::replace(&mut o.look, Look::Unread);
                         p.marks = std::mem::take(&mut o.marks);
                         p.read_at = o.read_at;
+                        // **읽어 든 줄도 옮겨 든다**(리뷰). 두고 가면 한눈 보기가 펼쳐 둔 프로젝트가
+                        // 통째로 접힌 머리줄만 남는다 — 이 길은 사용자 설정이 바뀔 때마다 도는데
+                        // (`App::follow_config`) 보기 토글과 읽음이 **그 파일을 스스로 쓴다.**
+                        // 곧 `SPC v` 한 번이 그 토글을 걸 줄을 다 없앤다. 다시 읽으러 가는 자도
+                        // 없다(`App::want_site` 는 펼칠 때만 부른다).
+                        p.site = o.site.take();
                     }
                 }
                 fresh.at = match old.at {
@@ -761,8 +819,13 @@ impl App {
                     }
                     At::Project(p) => At::Project(p),
                 };
-                // 도는 읽기는 경로로 맞춰 들이므로 넘겨도 섞이지 않는다.
+                // 도는 읽기는 경로로 맞춰 들이므로 넘겨도 섞이지 않는다. **줄을 읽는 쪽도 같이
+                // 넘긴다**(리뷰) — 버리면 그 손잡이가 join 도 discard 도 없이 떨어져, 그 스레드가
+                // 터져도 되던질 데가 없다(`App::discarded` 가 막으려는 바로 그 자리). 기다리던
+                // 줄(`wanted`)도 넘긴다: 버리면 펼쳐 놓고 못 읽은 프로젝트가 영영 안 읽힌다.
                 fresh.pending = old.pending.take();
+                fresh.reading = old.reading.take();
+                fresh.wanted = std::mem::take(&mut old.wanted);
                 self.layer = Some(fresh);
             }
         }
@@ -790,7 +853,7 @@ impl App {
                 Ok(looked) => {
                     layer.adopt([looked]);
                     if layer.at == At::Layer {
-                        self.now = crate::model::now();
+                        self.site.now = crate::model::now();
                     }
                 }
                 // 아직 읽는 중이다 — 다음 걸음에 마저 받는다.
@@ -809,8 +872,17 @@ impl App {
     }
 
     /// 층을 읽는 스레드가 도는가.
+    /// 이 프로젝트의 줄을 지금 읽고 있거나 줄 서 있는가 — 머리줄이 그동안 도는 글리프를 세운다.
+    pub(super) fn reading_place(&self, path: &Path) -> bool {
+        self.layer.as_ref().is_some_and(|l| {
+            l.reading.as_ref().is_some_and(|(p, ..)| p == path) || l.wanted.iter().any(|p| p == path)
+        })
+    }
+
     pub(super) fn layer_loading(&self) -> bool {
-        self.layer.as_ref().is_some_and(|l| l.pending.is_some())
+        // 펼친 프로젝트의 줄을 읽는 것도 읽는 중이다(moai-12yx) — 루프가 그동안 빠른 걸음으로
+        // 깨어 머리줄의 도는 글리프를 돌리고, 시험의 `settle_reads` 도 이것으로 기다린다.
+        self.layer.as_ref().is_some_and(|l| l.pending.is_some() || l.reading.is_some() || !l.wanted.is_empty())
     }
 }
 
@@ -848,12 +920,15 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
                 look,
                 marks: Marks::default(),
                 read_at: Some(std::time::Instant::now()),
+                site: None,
             })
             .collect(),
         problems: Vec::new(),
         config: None,
         launch: None,
         pending: None,
+        reading: None,
+        wanted: Vec::new(),
     }
 }
 
@@ -940,7 +1015,7 @@ mod tests {
         a.rows()
             .iter()
             .filter_map(|r| match r {
-                Row::Item(e, _) => e.at().map(|at| a.issues[at].title.clone()),
+                Row::Item(_, e, _) => e.at().map(|at| a.site.issues[at].title.clone()),
                 _ => None,
             })
             .collect()
@@ -972,7 +1047,7 @@ mod tests {
         assert!(a.layer.as_ref().unwrap().places.iter().all(|p| matches!(p.look, Look::Unread)));
         assert_eq!(a.rows(), (0..5).map(Row::Project).collect::<Vec<_>>(), "읽기를 기다리느라 줄이 안 섰다");
         settle(&mut a);
-        assert!(a.on_layer() && a.repo.is_none() && a.issues.is_empty());
+        assert!(a.on_layer() && a.site.repo.is_none() && a.site.issues.is_empty());
         assert_eq!(names(&a), ["one", "two", "bare", "gone", "broken"]);
 
         let Look::Open { sum } = look(&a, "one") else { panic!("one 이 안 열렸다") };
@@ -1007,14 +1082,14 @@ mod tests {
         a.key(key(KeyCode::Enter));
         assert!(!a.on_layer());
         assert_eq!(a.project().map(|p| p.path.clone()), Some(one.clone()));
-        assert_eq!(a.repo.as_ref().map(|r| r.root.clone()), Some(one.clone()), "선 프로젝트와 쓸 저장소가 어긋났다");
+        assert_eq!(a.site.repo.as_ref().map(|r| r.root.clone()), Some(one.clone()), "선 프로젝트와 쓸 저장소가 어긋났다");
         // 뿌리에 `..` 은 없다 — 층으로는 `0` 이 간다(moai-i784).
         assert!(!a.rows().contains(&Row::Up), "프로젝트 뿌리에 `..` 이 섰다");
         assert_eq!(titles(&a), ["one 의 첫 줄", "one 의 둘째 줄"]);
 
         // one 의 argos-0002 에 서고 거름망을 건다 — two 에서 argos-0002 는 다른 자리의 다른 줄이다.
         a.key(key(KeyCode::End));
-        assert!(matches!(a.current(), Some(Row::Item(crate::nav::Entry::Leaf { at: 1 }, _))), "{:?}", a.current());
+        assert!(matches!(a.current(), Some(Row::Item(_, crate::nav::Entry::Leaf { at: 1 }, _))), "{:?}", a.current());
         a.hit("SPC f");
         for c in "status=in_progress".chars() {
             a.key(key(KeyCode::Char(c)));
@@ -1024,13 +1099,15 @@ mod tests {
 
         a.key(key(KeyCode::Home));
         a.hit("0");
-        assert!(a.on_layer() && a.repo.is_none() && a.issues.is_empty(), "층에 올라왔는데 프로젝트의 줄이 남았다");
+        assert!(a.on_layer() && a.site.repo.is_none() && a.site.issues.is_empty(), "층에 올라왔는데 프로젝트의 줄이 남았다");
         assert_eq!(a.current(), Some(Row::Project(0)), "떠난 프로젝트에 안 섰다");
         assert_eq!(a.filter_text, None, "한 프로젝트에 건 거름망이 층까지 따라왔다");
 
-        a.key(key(KeyCode::Down));
+        // **떠난 프로젝트는 펼쳐진 채로 선다**(moai-i0wd) — 그 밑에 그 줄이 서므로 다음 머리줄은
+        // 한 칸 아래가 아니다. 아직 안 읽은 둘째 프로젝트는 머리줄만이라 맨 아랫줄이 그것이다.
+        a.key(key(KeyCode::End));
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.repo.as_ref().map(|r| r.root.clone()), Some(two.clone()));
+        assert_eq!(a.site.repo.as_ref().map(|r| r.root.clone()), Some(two.clone()));
         assert_eq!(titles(&a), ["two 의 집은 줄", "two 의 줄"], "옛 프로젝트의 줄이 섞였다");
         // **들어가면 첫 줄에 선다.** 뿌리에 `..` 이 없어진 뒤로는(moai-i784) 그것이 곧 첫 이슈다 —
         // 한때 `..` 에 세웠다가 들어가자마자 누른 Enter 가 층으로 되올라가 Enter 두 번이 제자리인
@@ -1146,7 +1223,7 @@ mod tests {
         a.hit("2");
         assert_eq!(a.here(), Some(two.clone()));
         a.follow();
-        assert!(!a.commits.contains_key(&one), "떠난 프로젝트의 커밋 표가 새 프로젝트로 넘어왔다");
+        assert!(!a.site.commits.contains_key(&one), "떠난 프로젝트의 커밋 표가 새 프로젝트로 넘어왔다");
     }
 
     /// **설정이 깨져 층이 안 서도 까닭은 댄다.** 등록한 것이 하나도 안 읽히면 층은 없고
@@ -1265,7 +1342,7 @@ mod tests {
         let mut a = layered(&cfg);
 
         a.key(key(KeyCode::Enter));
-        assert!(a.on_layer() && a.repo.is_none());
+        assert!(a.on_layer() && a.site.repo.is_none());
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("init 전")), "{:?}", a.notice);
         a.key(key(KeyCode::Down));
         a.key(key(KeyCode::Enter));
@@ -1277,7 +1354,7 @@ mod tests {
         a.key(key(KeyCode::Up));
         a.key(key(KeyCode::Enter));
         assert!(!a.on_layer(), "init 한 뒤에도 층의 옛 셈을 보고 안 들어갔다");
-        assert_eq!(a.repo.as_ref().map(|r| r.root.clone()), Some(bare));
+        assert_eq!(a.site.repo.as_ref().map(|r| r.root.clone()), Some(bare));
     }
 
     /// **층에 선 동안 바뀐 프로젝트만 스레드에서 다시 읽는다.** 안에 들어가 있는 동안에는
@@ -1343,7 +1420,7 @@ mod tests {
         let on_layer = sum.warnings;
         a.key(key(KeyCode::Enter));
         assert!(!a.on_layer());
-        assert_eq!(a.warnings, on_layer, "층과 안쪽 배너가 같은 저장소를 달리 센다");
+        assert_eq!(a.site.warnings, on_layer, "층과 안쪽 배너가 같은 저장소를 달리 센다");
 
         // **겹쳐 보기를 꺼도 워크트리가 사라지는 것을 본다**(리뷰 moai-3lul.kt0). 끄면 옆 스냅샷을
         // 아예 안 열어, 한때는 자리 판정이 보는 것이 지켜보는 표식에 하나도 안 들었다 — 치운 뒤
@@ -1351,10 +1428,10 @@ mod tests {
         a.hit("SPC v w Esc");
         assert!(!a.worktree, "w 가 겹쳐 보기를 안 껐다");
         settle(&mut a);
-        let was = a.warnings;
+        let was = a.site.warnings;
         std::fs::remove_dir_all(s.join("argos-0002")).unwrap();
         settle(&mut a);
-        assert_eq!(a.warnings, was + 1, "겹쳐 보기를 끈 채로는 치운 워크트리를 못 본다");
+        assert_eq!(a.site.warnings, was + 1, "겹쳐 보기를 끈 채로는 치운 워크트리를 못 본다");
 
         // 올라오면 층도 같은 것을 센다.
         a.hit("0");
@@ -1390,11 +1467,11 @@ mod tests {
 
         // **안쪽은 제 프로젝트를 같은 자로 다시 읽는다**(moai-z4r4) — 배너의 수에도 시계로 재는 것이
         // 들어, 안 읽으면 틈을 넘긴 순간 층의 `!` 와 갈린다.
-        a.read_at = Some(long_ago);
+        a.site.read_at = Some(long_ago);
         a.follow();
         assert!(a.loading(), "읽은 지 1분이 넘었는데 제 프로젝트를 다시 안 읽었다");
         settle(&mut a);
-        assert!(a.read_at.is_some_and(|t| t.elapsed() < REREAD_EVERY), "다시 읽고도 읽은 때를 안 올렸다");
+        assert!(a.site.read_at.is_some_and(|t| t.elapsed() < REREAD_EVERY), "다시 읽고도 읽은 때를 안 올렸다");
         a.follow();
         assert!(!a.loading(), "방금 읽은 프로젝트를 또 읽으러 갔다");
     }
@@ -1504,6 +1581,110 @@ mod tests {
         (one, two, a)
     }
 
+    /// **한눈 보기는 프로젝트마다 머리줄 하나와 그 밑의 줄을 한 목록으로 세운다**(moai-eyre, 사용자
+    /// 결정 2026-09-19). 줄은 제 프로젝트를 [`super::Seat`] 으로 들고 다녀, 같은 id 를 쓰는 두
+    /// 프로젝트가 한 트리에서 안 섞인다. 아직 안 읽은 프로젝트는 머리줄만 서고(읽는 것은 펼칠
+    /// 때다 — moai-12yx), 접은 프로젝트는 그 밑이 빠진다 — 다 접으면 옛 프로젝트 층과 같은 화면이다.
+    #[test]
+    fn the_one_list_stacks_each_project_under_its_head() {
+        let s = Scratch::fenced("layer-one-list");
+        let (one, _two, mut a) = on_layer_with_twins(&s);
+        assert!(a.on_layer(), "시험의 전제 — 층에서 시작한다");
+        assert_eq!(a.rows().len(), 2, "안 읽은 프로젝트가 줄을 세웠다");
+
+        // 읽기는 스레드로 간다(moai-12yx) — `settle` 이 다 받을 때까지 걸음을 돌린다.
+        a.want_site(0);
+        settle(&mut a);
+        assert!(a.rows().len() > 2, "첫 프로젝트를 못 읽었다");
+        let rows = a.rows();
+        assert!(matches!(rows[0], Row::Project(0)), "{:?}", rows[0]);
+        assert!(matches!(rows[1], Row::Item(crate::tui::Seat::Place(0), ..)), "{:?}", rows[1]);
+        assert!(matches!(rows.last(), Some(Row::Project(1))), "둘째 머리줄이 안 섰다: {rows:?}");
+        let mut titles: Vec<String> = rows
+            .iter()
+            .filter_map(|r| match r {
+                Row::Item(seat, e, _) => e.at().map(|at| a.site_at(*seat).issues[at].title.clone()),
+                _ => None,
+            })
+            .collect();
+        titles.sort();
+        assert_eq!(titles, ["one 의 둘째 줄", "one 의 첫 줄"], "남의 프로젝트의 줄이 섞였다");
+
+        // 접으면 그 밑이 빠진다 — 머리줄은 남는다.
+        a.folded.insert(one);
+        assert_eq!(a.rows().len(), 2, "접었는데 줄이 남았다");
+    }
+
+    /// **한눈 보기의 상세도 그 줄의 프로젝트에 묻는다**(리뷰). 막는 것은 그 프로젝트의 색인에서
+    /// 푸는데 기다림(`Site::waits`)만 지금 선 프로젝트에 묻던 때는, 한눈 보기의 `App::site` 가
+    /// 줄이 빈 자리 채우개라([`App::leave_project`]) 그 첨자가 넘쳐 **커서를 옮기는 것만으로**
+    /// 탐색기가 죽었다. 제목(`title_of`)과 커밋(`commits_of`)도 같은 자리다.
+    #[test]
+    fn the_detail_of_a_foreign_row_reads_its_own_project() {
+        let s = Scratch::fenced("layer-foreign-detail");
+        let one = s.project("one", &[("argos-0001", "막는 줄", "todo")]);
+        // 막음은 `write_lines` 가 안 적는다 — 이 프로젝트만 손으로 적는다.
+        let open = Issue::new("argos-0001".into(), "막는 줄".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        let mut blocked =
+            Issue::new("argos-0002".into(), "막힌 줄".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        blocked.blocked_by = vec!["argos-0001".into()];
+        let body = format!("{}\n{}\n", serde_json::to_string(&open).unwrap(), serde_json::to_string(&blocked).unwrap());
+        std::fs::write(one.join(".moai/issues.jsonl"), body).unwrap();
+        let cfg = s.register(&[&one]);
+        let mut a = layered(&cfg);
+        a.want_site(0);
+        settle(&mut a);
+
+        let rows = a.rows();
+        let at = rows
+            .iter()
+            .position(|r| matches!(r, Row::Item(seat, e, _) if e.at().is_some_and(|at| a.site_at(*seat).issues[at].id == "argos-0002")))
+            .expect("막힌 줄이 한눈 보기에 안 섰다");
+        a.cursor = at;
+        // 그리는 것이 곧 시험이다 — 넘치면 여기서 죽는다.
+        let shot = crate::tui::draw::tests::render(&mut a, 110, 20).join("\n");
+        assert!(shot.contains("막는 줄"), "남의 줄의 막음을 제 프로젝트에서 못 읽었다:\n{shot}");
+    }
+
+    /// **층을 다시 세워도 읽어 둔 줄은 남는다**(리뷰). 이 길은 사용자 설정이 바뀔 때마다 도는데
+    /// ([`App::follow_config`]) 보기 토글과 읽음이 그 파일을 **스스로 쓴다** — 두고 가면 `SPC v`
+    /// 한 번이 그 토글을 걸 줄을 통째로 없애고, 다시 읽으러 가는 자도 없다([`App::want_site`] 는
+    /// 펼칠 때만 부른다).
+    #[test]
+    fn rebuilding_the_layer_keeps_the_rows_it_already_read() {
+        let s = Scratch::fenced("layer-relayer-rows");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.want_site(0);
+        settle(&mut a);
+        let was = a.rows().len();
+        assert!(was > 2, "시험의 전제 — 첫 프로젝트를 펼쳐 읽었다");
+        a.relayer(None);
+        assert_eq!(a.rows().len(), was, "층을 다시 세우자 펼쳐 둔 프로젝트의 줄이 사라졌다");
+    }
+
+    /// **펼치며 읽은 줄에도 화면의 보기를 곧바로 건다**(리뷰, moai-1xo5 의 약속). `Site::of` 는
+    /// `shown` 을 비워 두고 그것을 채우는 자는 보기 토글뿐이라([`App::see`]), 안 걸면 방금 펼친
+    /// 프로젝트만 보기를 안 따라 같은 화면의 두 프로젝트가 한 토글에 다르게 선다.
+    #[test]
+    fn a_freshly_read_project_follows_the_view_that_is_already_on() {
+        let s = Scratch::fenced("layer-view-on-read");
+        let one = s.project("one", &[("argos-0001", "열린 줄", "todo"), ("argos-0002", "끝난 줄", "done")]);
+        let cfg = s.register(&[&one]);
+        let mut a = layered(&cfg);
+        assert!(a.view.hides(crate::config::DONE), "시험의 전제 — 탐색기는 done 을 숨긴 채로 뜬다");
+        a.want_site(0);
+        settle(&mut a);
+        let shown: Vec<String> = a
+            .rows()
+            .iter()
+            .filter_map(|r| match r {
+                Row::Item(seat, e, _) => e.at().map(|at| a.site_at(*seat).issues[at].title.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(shown, ["열린 줄"], "펼치며 읽은 프로젝트가 걸려 있던 보기를 안 따랐다");
+    }
+
     /// **펼쳐 둔 자리는 프로젝트를 건너지 않는다**(리뷰) — 마디가 그 프로젝트의 이슈 id 이고,
     /// 바구니 마디(`(마일스톤 없음)`·`(길 잃음)`)는 id 조차 없어 prefix 가 달라도 그대로 샌다.
     /// 두고 오면 다음 프로젝트가 아무도 안 펼친 묶음을 펼친 채 세운다. `leave_project` 가 커서
@@ -1515,13 +1696,13 @@ mod tests {
         a.hit("1");
         // 이 fixture 에는 묶음이 없어 키로 펼칠 것이 없다 — 펼쳐 둔 자리를 손으로 심는다.
         // 바구니 마디는 id 를 안 들어, 두 프로젝트의 prefix 가 달라도 그대로 겹치는 자리다.
-        a.expanded.insert(vec![crate::nav::Seg::Milestone(None)]);
+        a.site.expanded.insert(vec![crate::nav::Seg::Milestone(None)]);
         a.hit("2");
-        assert!(a.expanded.is_empty(), "옆 프로젝트로 건너갔는데 펼침이 남았다: {:?}", a.expanded);
+        assert!(a.site.expanded.is_empty(), "옆 프로젝트로 건너갔는데 펼침이 남았다: {:?}", a.site.expanded);
 
-        a.expanded.insert(vec![crate::nav::Seg::Lost]);
+        a.site.expanded.insert(vec![crate::nav::Seg::Lost]);
         a.hit("0");
-        assert!(a.expanded.is_empty(), "층으로 올라왔는데 펼침이 남았다: {:?}", a.expanded);
+        assert!(a.site.expanded.is_empty(), "층으로 올라왔는데 펼침이 남았다: {:?}", a.site.expanded);
     }
 
     /// **뿌리의 Bksp 는 조용히 먹히지 않고 갈 키를 댄다**(리뷰 moai-lur8.met) — 여태 그 키가
@@ -1537,17 +1718,135 @@ mod tests {
         assert!(!a.on_layer(), "말만 하고 올라가 버렸다");
     }
 
-    /// **층에서 `l`·`→` 는 그 프로젝트로 들어간다**(사용자 결정 2026-09-19) — 층은 트리가 아니라
-    /// 펼칠 것이 없고, 펼침으로만 두면 옛 손가락이 아무 일도 안 하는 키를 누른다.
+    /// **머리줄에서 `l`·`→` 는 그 프로젝트를 펼치고, `h`·`←` 가 접고, Enter 가 들어간다**
+    /// (moai-i0wd, 사용자 결정 2026-09-19). 묶음 줄과 같은 손가락이다 — 한때 층에서 `l` 은
+    /// 들어가기였는데(moai-9m2d), 그때 층은 트리가 아니었다.
     #[test]
-    fn l_and_right_enter_a_project_from_the_layer() {
+    fn a_head_opens_with_l_and_enters_with_enter() {
         for k in ["l", "Right"] {
-            let s = Scratch::fenced("layer-l-enters");
+            let s = Scratch::fenced("layer-l-opens");
             let (_one, _two, mut a) = on_layer_with_twins(&s);
             assert!(a.on_layer(), "시험의 전제 — 층에 섰다");
+            let heads = a.rows().len();
             a.hit(k);
-            assert!(!a.on_layer(), "층에서 `{k}` 가 프로젝트로 안 들어갔다");
+            // 읽기는 스레드로 간다(moai-12yx) — 다 받은 뒤에 줄이 선다.
+            settle(&mut a);
+            assert!(a.on_layer(), "`{k}` 가 프로젝트로 들어가 버렸다");
+            assert!(a.rows().len() > heads, "`{k}` 가 머리줄을 안 폈다");
+            // 접으면 도로 머리줄만 — 읽은 것은 버리지 않는다.
+            a.hit("h");
+            assert_eq!(a.rows().len(), heads, "`h` 가 머리줄을 안 접었다");
         }
+        let s = Scratch::fenced("layer-enter-enters");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.hit("Enter");
+        assert!(!a.on_layer(), "머리줄의 Enter 가 프로젝트로 안 들어갔다");
+    }
+
+    /// **보기는 펼친 프로젝트 전부에 걸리고, 검색과 거름망은 프로젝트 안에서만 건다**(moai-1xo5,
+    /// 사용자 결정 2026-09-19). 보기·정렬·열은 보는 사람의 것이라 화면에 하나뿐이다 — 안 걸면 같은
+    /// 화면의 두 프로젝트가 한 토글에 다르게 선다. 찾는 일은 반대로 한 프로젝트의 물음이다.
+    #[test]
+    fn the_view_crosses_projects_but_the_search_does_not() {
+        let s = Scratch::fenced("layer-view-cross");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.hit("l");
+        settle(&mut a);
+        a.key(key(KeyCode::End));
+        a.hit("l");
+        settle(&mut a);
+        // **프로젝트마다 줄 수를 센다**(리뷰). 남은 프로젝트 *수* 로만 재던 때는 한쪽에만 걸려도
+        // 둘 다 줄이 남아 통과했다 — 그때 이 시험은 제 이름의 것을 못 잡는다.
+        let per_place = |a: &App| -> std::collections::BTreeMap<usize, usize> {
+            let mut out = std::collections::BTreeMap::new();
+            for r in a.rows() {
+                if let Row::Item(crate::tui::Seat::Place(n), ..) = r {
+                    *out.entry(n).or_insert(0usize) += 1;
+                }
+            }
+            out
+        };
+        let before = per_place(&a);
+        assert_eq!(before.len(), 2, "두 프로젝트를 다 못 폈다: {before:?}");
+
+        // 미룬 것도 done 도 없는 fixture 라, 칸 하나를 숨겨 둘 다 한 줄씩 주는지 본다.
+        a.hit("SPC v 1 Esc");
+        let after = per_place(&a);
+        for (n, was) in &before {
+            assert_eq!(after.get(n), Some(&(was - 1)), "프로젝트 {n} 에 보기가 안 걸렸다 — {before:?} → {after:?}");
+        }
+        a.hit("SPC v 1 Esc");
+        assert_eq!(per_place(&a), before, "도로 켜니 줄이 안 돌아왔다");
+
+        // 검색·거름망은 그대로 프로젝트 안의 일이다. 바로 누르는 `/` 는 까닭과 갈 키를 대고,
+        // 메뉴의 `SPC f` 는 아예 안 선다 — 메뉴는 켜진 것만 세운다(`menu::entries`).
+        a.hit("/");
+        assert!(matches!(a.mode, Mode::Browse), "`/` 가 한눈 보기에서 칸을 열었다");
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(said.contains("프로젝트 안"), "`/` 가 까닭을 안 댄다 — {said}");
+        a.hit("SPC f");
+        assert!(matches!(a.mode, Mode::Browse), "`SPC f` 가 한눈 보기에서 칸을 열었다");
+    }
+
+    /// **한눈 보기의 줄에 누른 키는 그 줄의 프로젝트로 간다**(moai-5v3q, 사용자 결정 2026-09-19) —
+    /// 담기(`n`)는 그 프로젝트에 담고, 읽음(`r`)은 그 프로젝트의 줄에 도장을 찍는다. 지금 선
+    /// 프로젝트로 읽으면 남의 목록의 첨자를 이 프로젝트의 줄로 읽어 엉뚱한 데 적힌다.
+    #[test]
+    fn a_key_on_a_foreign_row_writes_to_that_project() {
+        let s = Scratch::fenced("layer-row-writes");
+        let (one, _two, mut a) = on_layer_with_twins(&s);
+        a.hit("l");
+        settle(&mut a);
+        // 머리줄 바로 밑 — one 의 줄이다.
+        a.key(key(KeyCode::Down));
+        let Some(Row::Item(crate::tui::Seat::Place(n), ..)) = a.current() else { panic!("{:?}", a.current()) };
+        assert_eq!(a.place_path(n).map(std::path::Path::to_path_buf), Some(one.clone()), "커서가 one 의 줄에 안 섰다");
+
+        // 담기 — 폼의 담을 곳이 그 줄의 프로젝트다.
+        a.hit("SPC n");
+        assert_eq!(target(&a), Some(one.clone()), "담을 곳이 그 줄의 프로젝트가 아니다");
+        a.key(key(KeyCode::Esc));
+
+        // 읽음 — 그 프로젝트의 줄에 적힌다. 적을 것이 없으면 그렇다고만 하고 조용하다.
+        a.hit("r");
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(!said.contains("못"), "읽음이 남의 프로젝트로 갔다 — {said}");
+    }
+
+    /// **펼치는 키는 그 자리에서 안 읽는다**(moai-12yx, 사용자 결정 2026-09-19) — 스레드에 맡기고
+    /// 머리줄이 도는 동안 화면은 그대로 돈다. 워크트리 일곱에 138→458ms 를 잰 값(moai-uxrn)이
+    /// 펼치는 키 하나에 통째로 실리지 않게 하는 것이 까닭이다.
+    #[test]
+    fn opening_a_head_reads_in_a_thread() {
+        let s = Scratch::fenced("layer-read-thread");
+        let (one, _two, mut a) = on_layer_with_twins(&s);
+        let heads = a.rows().len();
+        a.hit("l");
+        assert!(a.loading(), "펼쳤는데 읽으러 안 갔다");
+        assert!(a.reading_place(&one), "읽는 중인 프로젝트를 머리줄이 모른다");
+        assert_eq!(a.rows().len(), heads, "읽기를 기다리지 않고 그 자리에서 읽었다");
+        settle(&mut a);
+        assert!(!a.reading_place(&one), "다 읽고도 도는 중이라 한다");
+        assert!(a.rows().len() > heads, "읽어 온 줄이 안 섰다");
+        // 두 번 펴도 다시 안 읽는다 — 든 줄이 그대로 선다.
+        a.hit("h");
+        a.hit("l");
+        assert!(!a.loading(), "이미 읽은 프로젝트를 다시 읽으러 갔다");
+        assert!(a.rows().len() > heads);
+    }
+
+    /// **머리줄의 `Tab` 은 그 프로젝트를 묶음까지 다 편다**(moai-i0wd) — 펼쳐져 있으면 통째로
+    /// 접는다. 묶음 줄의 `Tab` 과 같은 자다([`App::expand_all`]).
+    #[test]
+    fn tab_opens_a_whole_project_and_folds_it_again() {
+        let s = Scratch::fenced("layer-tab-all");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        let heads = a.rows().len();
+        a.hit("Tab");
+        settle(&mut a);
+        assert!(a.rows().len() > heads, "Tab 이 안 폈다");
+        a.hit("Tab");
+        assert_eq!(a.rows().len(), heads, "다시 누른 Tab 이 안 접었다");
     }
 
     /// **건너뛰면 포커스가 목록으로 돌아온다**(리뷰 moai-i784.pzh) — 층의 상세에는 듣는 키가
@@ -1692,7 +1991,7 @@ mod tests {
         assert_eq!(snapshots(&[&two])[0], before[1], "커서의 프로젝트 말고 다른 파일이 바뀌었다");
         assert_eq!(titles(&a).iter().filter(|t| *t == "one 에 담을 것").count(), 1);
         let on = a.current().and_then(|r| match r {
-            Row::Item(e, _) => e.at().map(|at| a.issues[at].title.clone()),
+            Row::Item(_, e, _) => e.at().map(|at| a.site.issues[at].title.clone()),
             _ => None,
         });
         assert_eq!(on.as_deref(), Some("one 에 담을 것"), "만든 줄에 안 섰다");
@@ -1859,11 +2158,12 @@ mod tests {
         a.follow();
         assert!(a.loading(), "바뀐 것을 보고도 안 읽었다");
         a.hit("0");
-        a.key(key(KeyCode::Down));
+        // 떠난 프로젝트가 제 줄을 이고 서므로 둘째 머리줄은 맨 아래다(moai-i0wd).
+        a.key(key(KeyCode::End));
         a.key(key(KeyCode::Enter));
         settle(&mut a);
         assert_eq!(titles(&a), ["two 의 집은 줄", "two 의 줄"], "떠난 프로젝트의 읽기가 들어왔다");
-        assert_eq!(a.repo.as_ref().map(|r| r.root.clone()), Some(two));
+        assert_eq!(a.site.repo.as_ref().map(|r| r.root.clone()), Some(two));
     }
 
     /// **밖에서 `moai project add` 한 것이 누르지 않아도 층에 선다**(moai-en4u) — 걸음이 사용자 설정의
@@ -1979,13 +2279,13 @@ mod tests {
         let Look::Open { sum } = look(&a, "main") else { panic!("main 이 안 열렸다") };
         assert_eq!((sum.unread, sum.blind), (1, 1), "층이 못 읽은 옆 스냅샷을 안 댄다");
 
-        let named = |a: &App| a.elsewhere.iter().filter(|l| l.contains("wt-x")).count();
+        let named = |a: &App| a.site.elsewhere.iter().filter(|l| l.contains("wt-x")).count();
         a.key(key(KeyCode::Enter));
-        assert_eq!(named(&a), 1, "겹쳐 볼 때 못 읽은 옆 스냅샷을 안 대거나 두 번 댄다 — {:?}", a.elsewhere);
+        assert_eq!(named(&a), 1, "겹쳐 볼 때 못 읽은 옆 스냅샷을 안 대거나 두 번 댄다 — {:?}", a.site.elsewhere);
         a.hit("SPC v w Esc");
         assert!(!a.worktree, "w 가 겹쳐 보기를 안 껐다");
         settle(&mut a);
-        assert_eq!(named(&a), 1, "겹쳐 보기를 끄자 못 읽은 옆 스냅샷이 배너에서 사라졌다 — {:?}", a.elsewhere);
+        assert_eq!(named(&a), 1, "겹쳐 보기를 끄자 못 읽은 옆 스냅샷이 배너에서 사라졌다 — {:?}", a.site.elsewhere);
     }
 
     /// **자리 판정은 옆을 실제로 겹쳤는가로 잰다**(리뷰 moai-3lul.kt0 다시 본 판). 딸린 워크트리에서 git 이
@@ -2021,7 +2321,7 @@ mod tests {
         let stamp = stamp_of(&repo);
         let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
         let a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept);
-        assert_eq!(a.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (여는 읽기)");
+        assert_eq!(a.site.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (여는 읽기)");
     }
 
     /// **띄울 때와 다시 읽을 때 지켜보는 목록이 같다**(리뷰 moai-3lul.kt0 다시 본 판). 다르면 조용한
@@ -2045,8 +2345,8 @@ mod tests {
         super::super::watch(&mut g.watched, places);
         let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
         let mut a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept);
-        let paths: std::collections::BTreeSet<PathBuf> = a.watched.iter().map(|(p, _)| p.clone()).collect();
-        assert_eq!(paths.len(), a.watched.len(), "같은 파일을 두 번 지켜본다");
+        let paths: std::collections::BTreeSet<PathBuf> = a.site.watched.iter().map(|(p, _)| p.clone()).collect();
+        assert_eq!(paths.len(), a.site.watched.len(), "같은 파일을 두 번 지켜본다");
         // 여는 커밋 표는 다 짓게 둔다.
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while a.gathering_commits() {
@@ -2054,13 +2354,13 @@ mod tests {
             a.follow();
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
-        let launched = a.watched.clone();
+        let launched = a.site.watched.clone();
 
-        a.read_at = Some(std::time::Instant::now().checked_sub(REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
+        a.site.read_at = Some(std::time::Instant::now().checked_sub(REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
         a.follow();
         assert!(a.loading(), "1분이 지났는데 다시 안 읽었다");
         settle(&mut a);
-        assert_eq!(a.watched, launched, "띄울 때와 다시 읽을 때 지켜보는 목록이 갈렸다");
+        assert_eq!(a.site.watched, launched, "띄울 때와 다시 읽을 때 지켜보는 목록이 갈렸다");
         assert!(!a.gathering_commits(), "아무것도 안 바뀌었는데 커밋 표를 다시 짓는다");
     }
 }
