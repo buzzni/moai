@@ -5565,3 +5565,8 @@
 {"ts":"2026-09-19T14:42:58Z","id":"moai-xj7t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-19T14:42:58Z","id":"moai-ts32","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-19T14:52:35Z","id":"moai-tmi0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T14:54:11Z","id":"moai-k8j1.v2k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 셸에 넘긴 글의 겹과 set -e 셈 (에픽 moai-k8j1)"}
+{"ts":"2026-09-19T14:54:16Z","id":"moai-k8j1.v2k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T14:54:35Z","id":"moai-k8j1.v2k","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review max --fix 가 백그라운드에서 돈다. 끝나면 원문을 노트로 남기고 fix 커밋 뒤 브리프 7-1 부터 이어 간다. 워크트리는 .claude/worktrees/moai-k8j1"}
+{"ts":"2026-09-19T14:55:29Z","id":"moai-2h77.5wn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 흔들리거나 헛도는 시험 (에픽 끝)"}
+{"ts":"2026-09-19T14:55:36Z","id":"moai-2h77.5wn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
