@@ -1645,6 +1645,47 @@ mod tests {
         assert!(!a.on_layer(), "머리줄의 Enter 가 프로젝트로 안 들어갔다");
     }
 
+    /// **보기는 펼친 프로젝트 전부에 걸리고, 검색과 거름망은 프로젝트 안에서만 건다**(moai-1xo5,
+    /// 사용자 결정 2026-09-19). 보기·정렬·열은 보는 사람의 것이라 화면에 하나뿐이다 — 안 걸면 같은
+    /// 화면의 두 프로젝트가 한 토글에 다르게 선다. 찾는 일은 반대로 한 프로젝트의 물음이다.
+    #[test]
+    fn the_view_crosses_projects_but_the_search_does_not() {
+        let s = Scratch::fenced("layer-view-cross");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.hit("l");
+        settle(&mut a);
+        a.key(key(KeyCode::End));
+        a.hit("l");
+        settle(&mut a);
+        let all = a.rows().len();
+        assert!(all > 4, "두 프로젝트를 다 못 폈다: {all}");
+
+        // 미룬 것도 done 도 없는 fixture 라, 칸 하나를 숨겨 둘 다 줄어드는지 본다.
+        a.hit("SPC v 1 Esc");
+        let hidden = a.rows().len();
+        assert!(hidden < all, "보기가 한 줄도 안 가렸다");
+        let by_place: std::collections::BTreeSet<usize> = a
+            .rows()
+            .iter()
+            .filter_map(|r| match r {
+                Row::Item(crate::tui::Seat::Place(n), ..) => Some(*n),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(by_place.len(), 2, "보기가 한 프로젝트에만 걸렸다 — 남은 줄: {by_place:?}");
+        a.hit("SPC v 1 Esc");
+        assert_eq!(a.rows().len(), all, "도로 켜니 줄이 안 돌아왔다");
+
+        // 검색·거름망은 그대로 프로젝트 안의 일이다. 바로 누르는 `/` 는 까닭과 갈 키를 대고,
+        // 메뉴의 `SPC f` 는 아예 안 선다 — 메뉴는 켜진 것만 세운다(`menu::entries`).
+        a.hit("/");
+        assert!(matches!(a.mode, Mode::Browse), "`/` 가 한눈 보기에서 칸을 열었다");
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(said.contains("프로젝트 안"), "`/` 가 까닭을 안 댄다 — {said}");
+        a.hit("SPC f");
+        assert!(matches!(a.mode, Mode::Browse), "`SPC f` 가 한눈 보기에서 칸을 열었다");
+    }
+
     /// **한눈 보기의 줄에 누른 키는 그 줄의 프로젝트로 간다**(moai-5v3q, 사용자 결정 2026-09-19) —
     /// 담기(`n`)는 그 프로젝트에 담고, 읽음(`r`)은 그 프로젝트의 줄에 도장을 찍는다. 지금 선
     /// 프로젝트로 읽으면 남의 목록의 첨자를 이 프로젝트의 줄로 읽어 엉뚱한 데 적힌다.

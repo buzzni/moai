@@ -578,6 +578,9 @@ pub const BROWSE: &[Bind<Browse>] = {
 pub struct Ctx {
     /// 프로젝트 층에 섰나.
     pub layer: bool,
+    /// 한눈 보기에 **이슈 줄이 하나라도 섰나**(moai-1xo5) — 펼친 프로젝트가 있는가다. 보기·정렬·
+    /// 열은 그 줄들에 걸리므로, 하나도 없으면 눌러도 아무 일이 없다.
+    pub rows_here: bool,
     /// 한눈 보기에서 커서가 **이슈 줄**에 섰나(moai-5v3q) — 머리줄이 아니라 그 밑의 줄이다.
     /// 층에서 뜻이 없던 키(읽음·담기)가 그 줄에서는 **그 프로젝트의 것으로** 선다. 프로젝트
     /// 안에서는 늘 참이나 마나다 — `layer` 가 거짓이라 아래 갈래에 안 걸린다.
@@ -681,9 +684,11 @@ impl Browse {
             // 프로젝트에 [NEW] 가 남는다. 눌러도 아무 일이 없는 키는 메뉴에 안 선다(아래 `Raw` 와 같은 까닭).
             // 한눈 보기의 이슈 줄은 읽을 줄이다(moai-5v3q) — 그 줄의 프로젝트에 적는다.
             Read | ReadAll | ReadGroup if c.layer && !c.on_row => Err(Off::Quiet),
-            // 줄 보기·정렬·열은 프로젝트 안의 줄에 건다 — 층에서는 그 항목이 안 서고, 켜진 것이 하나도
-            // 없는 `SPC s`·`SPC c` 는 묶음째 안 선다(`menu::live`). `SPC v` 는 상세 칸·원문이 남아 선다.
-            Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer => Err(Off::Quiet),
+            // **보기·정렬·열은 줄이 선 곳에 건다.** 한눈 보기에도 줄이 서면(펼친 프로젝트가 있으면)
+            // 그 줄 전부에 걸린다 — 보는 사람의 것이라 화면에 하나뿐이다(moai-1xo5, 사용자 결정
+            // 2026-09-19). 줄이 하나도 없으면 눌러도 아무 일이 없어 안 선다: 켜진 것이 하나도 없는
+            // `SPC s`·`SPC c` 는 묶음째 안 선다(`menu::live`).
+            Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer && !c.rows_here => Err(Off::Quiet),
             // 상세를 숨기면 갈 칸이 하나뿐이라 Tab 은 아무 일도 안 하고, 원문↔그리기는 상세의
             // 글에만 걸리므로(`draw::about` 의 `app.raw`) 눌러도 화면이 그대로다. **눌러도 아무
             // 일이 없는 키는 바에도 메뉴에도 안 선다** — 그런 키가 하나 서면 거기부터 도구를 못

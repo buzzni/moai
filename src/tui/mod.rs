@@ -66,6 +66,9 @@ pub enum Seat {
 enum Anchor {
     Up,
     Issue(String),
+    /// 한눈 보기에서 **남의 프로젝트의** 줄(moai-1xo5) — 그 프로젝트의 경로와 id 다. id 만으로는
+    /// 못 가른다: 두 프로젝트가 같은 prefix 를 쓰면 같은 id 가 둘 있고, 커서가 남의 줄로 튄다.
+    Foreign(std::path::PathBuf, String),
     Bucket(Seg),
     /// 이름이 아니라 경로 — 이름은 등록 목록이 바뀌면 달라진다.
     Project(std::path::PathBuf),
@@ -1427,8 +1430,14 @@ impl App {
         match row {
             Row::Up => Anchor::Up,
             Row::Item(_, Entry::Dir { seg, at: None }, _) => Anchor::Bucket(seg.clone()),
-            Row::Item(_, Entry::Dir { at: Some(at), .. } | Entry::Leaf { at }, _) => {
-                Anchor::Issue(self.site.issues[*at].id.clone())
+            // **그 줄의 프로젝트로 읽는다**(moai-1xo5) — 한눈 보기에서는 지금 선 프로젝트의 줄이
+            // 비어 있어, 남의 첨자를 여기서 읽으면 그 자리에서 죽는다.
+            Row::Item(seat, Entry::Dir { at: Some(at), .. } | Entry::Leaf { at }, _) => {
+                let id = self.site_at(*seat).issues.get(*at).map(|i| i.id.clone()).unwrap_or_default();
+                match seat {
+                    Seat::Here => Anchor::Issue(id),
+                    Seat::Place(n) => Anchor::Foreign(self.place_path(*n).map(Into::into).unwrap_or_default(), id),
+                }
             }
             Row::Project(at) => Anchor::Project(self.place_path(*at).map(Into::into).unwrap_or_default()),
         }
@@ -1761,19 +1770,34 @@ impl App {
     /// 미룸은 물려받은 것까지(`Index::deferred_root`) 읽는다 — 미룬 에픽 밑의 일도 같이 빠진다.
     /// 칸 숨김은 **이 프로젝트의 칸에만** 건다(`View::shows`).
     fn see(&mut self) {
-        self.site.shown = (0..self.site.issues.len())
-            .map(|at| self.view.shows(self.site.column(at), self.site.index.deferred_root(&self.site.issues[at].id).is_some(), &self.site.cfg.statuses))
+        let view = self.view.clone();
+        Self::see_in(&mut self.site, &view);
+        // **한눈 보기의 남의 줄에도 같은 보기를 건다**(moai-1xo5, 사용자 결정 2026-09-19) — 보기는
+        // 보는 사람의 것이라 화면에 하나뿐이다. 안 걸면 `SPC v d` 가 지금 선 프로젝트에만 들어,
+        // 같은 화면의 두 프로젝트가 한 토글에 다르게 선다.
+        let places = self.layer.as_mut().map_or(0, |l| l.places.len());
+        for n in 0..places {
+            if let Some(site) = self.layer.as_mut().and_then(|l| l.places.get_mut(n)).and_then(|p| p.site.as_mut()) {
+                Self::see_in(site, &view);
+            }
+        }
+    }
+
+    /// 한 프로젝트에 보기를 건다 — `shown` 과 그 줄들이 사는 자리 전부(`lit`).
+    fn see_in(site: &mut Site, view: &view::View) {
+        site.shown = (0..site.issues.len())
+            .map(|at| view.shows(site.column(at), site.index.deferred_root(&site.issues[at].id).is_some(), &site.cfg.statuses))
             .collect();
         let mut lit = std::collections::HashSet::new();
-        for (at, _) in self.site.shown.iter().enumerate().filter(|(_, on)| **on) {
-            let home = self.site.index.home_of(at);
+        for (at, _) in site.shown.iter().enumerate().filter(|(_, on)| **on) {
+            let home = site.index.home_of(at);
             for n in 1..=home.len() {
                 if !lit.contains(&home[..n]) {
                     lit.insert(home[..n].to_vec());
                 }
             }
         }
-        self.site.lit = lit;
+        site.lit = lit;
     }
 
     /// 설정 자리(`App::user_config`)에서 보기를 읽어 [`App::adopt_look`] 에 넘긴다. **시험만 부른다**(moai-u8cs) —
@@ -2757,6 +2781,7 @@ impl App {
         keys::Ctx {
             layer: self.on_layer(),
             on_row: matches!(self.current_of(rows), Some(Row::Item(..))),
+            rows_here: rows.iter().any(|r| matches!(r, Row::Item(..))),
             list_focus: self.focus == Pane::Explorer,
             // [`App::enter`] 가 무언가 하는 줄 — `..`(나가기)·디렉터리·층의 프로젝트.
             leaf: !matches!(self.current_of(rows), Some(Row::Up | Row::Item(_, Entry::Dir { .. }, _) | Row::Project(_))),
