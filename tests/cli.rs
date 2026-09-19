@@ -8837,6 +8837,35 @@ fn a_note_does_not_bring_back_a_deny_the_fresh_view_lifted() {
     }
 }
 
+/// **거절문은 늘 루트 트래커로 겨눈다**(moai-v9sa, 사용자 결정). 막힌 토막의 `-C` 를 옮겨 적던 판은
+/// 딸린 워크트리에서 `moai -C . add …` 로 막힌 사람에게 그 워크트리를 도로 내밀어, 옮겨 친 줄이
+/// 워크트리의 스냅샷에 섰다 — 루트에는 안 서고 병합에서 스냅샷이 겨룬다. 상대 경로도 푼 자리로 댄다.
+#[test]
+fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
+    let s = Scratch::new("hookaimroot");
+    let (main, inside, _, id) = epic_member_in_a_worktree(&s);
+    let wt = inside.display().to_string();
+    for typed in ["moai -C . add '딴 일'", &format!("moai -C {wt} add '딴 일'"), "cd src && moai -C .. add '딴 일'"] {
+        std::fs::create_dir_all(inside.join("src")).unwrap();
+        let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(typed))));
+        assert!(why.contains(&id), "집은 일을 안 댄다 — {typed}\n{why}");
+        assert!(!why.contains(&wt), "워크트리의 스냅샷을 겨누라고 한다 — {typed}\n{why}");
+        assert!(!why.contains("-C ."), "친 글자를 그대로 옮겨 적었다 — {typed}\n{why}");
+        // 루트의 트래커가 이 자리에서 맨 `moai` 로 닿는다(moai-y7go) — 그래서 `-C` 가 아예 없다.
+        assert!(why.contains("moai add '제목'"), "맨 moai 로 안 댄다 — {typed}\n{why}");
+    }
+    // 남의 트래커를 가리킨 줄은 그 트래커를 댄다 — 거기서 막혔으니 거기로 겨눈다.
+    let other = s.path().join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    git(&other, &["init", "-q"]);
+    ok(&other, &["init", "argos"]);
+    let theirs = field(&ok(&other, &["add", "남의 일", "--json"]), "id");
+    ok(&other, &["mv", &theirs, "in_progress"]);
+    let op = other.display().to_string();
+    let why = refusal(&tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(&format!("moai -C {op} add '딴 일'")))));
+    assert!(why.contains(&format!("moai -C {op} add '제목'")), "남의 트래커를 안 댄다\n{why}");
+}
+
 /// **겹침과 모름을 한 판에서 본다**(moai-15c2, 사용자 결정). 따로 보던 판은 둘이 함께면 풀릴 것을
 /// 못 풀었다 — 겹친 줄의 판정은 모름을 안 뺐고, 모름을 뺀 판정은 낡은 제 스냅샷으로 쟀다. 여기서
 /// 이 세션은 main 에서 집은 일(제 기록)을 워크트리의 낡은 스냅샷 밖에 두고, 그 일은 같은 이름의
