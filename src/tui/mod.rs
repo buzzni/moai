@@ -3207,8 +3207,10 @@ impl App {
 
     /// 지금 어디인가. 뿌리는 `/`.
     pub fn crumbs(&self) -> String {
+        // 층이 걷힌 뒤로 이 자리는 **모든 프로젝트를 한 목록으로 보는 화면**이다(moai-3f1b) —
+        // 옛 이름(`프로젝트 층`)은 그 밑에 줄이 서지 않던 때의 것이다.
         if self.on_layer() {
-            return "프로젝트 층".into();
+            return "모든 프로젝트".into();
         }
         if self.site.path.is_empty() {
             return "/".into();

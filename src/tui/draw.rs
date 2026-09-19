@@ -771,9 +771,9 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
     let hidden = app.view.badge(&app.site.cfg.statuses);
-    let look = if app.on_layer() {
-        None
-    } else {
+    // **한눈 보기에도 보기 뱃지를 세운다**(moai-1xo5) — 거기서도 보기가 줄을 가리므로, 안 세우면
+    // 줄이 왜 적은지 말할 자리가 없다. 칸 이름은 지금 선 프로젝트의 것으로 댄다.
+    let look = {
         [[hidden.as_deref(), sorted.as_deref()], [hidden.as_deref(), None], [None, sorted.as_deref()]].into_iter().find_map(|parts| {
             let parts: Vec<&str> = parts.into_iter().flatten().collect();
             let l = format!("[{}]", parts.join(" · "));
@@ -972,7 +972,16 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     let lines = rows.iter().filter(|r| !matches!(r, Row::Up)).count();
     let title: Line = match (counts.is_empty(), lines == 0) {
         // 층의 줄은 일이 아니라 프로젝트다 — 칸 셈은 줄마다 곁에 선다.
-        _ if app.on_layer() => format!(" 프로젝트 {}곳 ", rows.len()).into(),
+        // 한눈 보기의 제목은 **프로젝트 수**다 — 줄 수로 세면 펼친 프로젝트의 이슈까지 프로젝트로
+        // 읽혀 "프로젝트 40곳" 이 선다(moai-3f1b).
+        _ if app.on_layer() => {
+            let heads = rows.iter().filter(|r| matches!(r, Row::Project(_))).count();
+            let lines = rows.iter().filter(|r| matches!(r, Row::Item(..))).count();
+            match lines {
+                0 => format!(" 프로젝트 {heads}곳 ").into(),
+                n => format!(" 프로젝트 {heads}곳 · {n}줄 ").into(),
+            }
+        }
         // **보기가 다 가렸으면 그렇다고 댄다**(moai-2kyl 단계 리뷰). 까닭을 대는 경로 줄의 `[done 숨김]` 은
         // 자리가 모자라면 빠지는데, 그때 " 비었다 " 만 서면 끝난 일이 사라진 줄 안다.
         (_, true) if app.view_hides_here() => " 보기에 가려 비었다 ".into(),
@@ -1098,9 +1107,9 @@ fn row_line<'a>(
     let is_dir = matches!(e, Entry::Dir { .. });
     let Some(at) = e.at() else {
         // 바구니는 제 줄이 없다 — 이름만 낸다.
-        return Line::from(Span::styled(format!("{}/", app.site.index.label(&app.site.issues, e)), dim()));
+        return Line::from(Span::styled(format!("{}/", site.index.label(&site.issues, e)), dim()));
     };
-    let i = &app.site.issues[at];
+    let i = &site.issues[at];
     // 걸린 검색이 이 자리를 보면 찾은 글자를 칠한다(moai-yio7).
     let grep = app.grep_query();
     let in_id = grep.filter(|(g, _)| g.sees_id()).map(|(_, q)| q);
@@ -1141,7 +1150,7 @@ fn row_line<'a>(
     // **안 읽은 줄은 제목 앞에 `[NEW]`**(moai-z9pc, 사용자 결정) — 글자에만 노랑 바탕·빨강 글자다.
     // 줄 전체를 칠하지 않는다: 여러 줄이 안 읽은 상태로 서면 목록이 통째로 번쩍인다. 뜻은 낱말이
     // 지므로 색 없는 터미널에서도 `[NEW]` 가 읽힌다.
-    if app.site.unread.contains(&i.id) {
+    if site.unread.contains(&i.id) {
         head.push(Span::styled(NEW_MARK, Style::new().fg(Color::Red).bg(Color::LightYellow)));
         head.push(Span::raw(" "));
     }
@@ -1199,7 +1208,7 @@ fn row_line<'a>(
                 Field::Assignee => i
                     .assignee
                     .as_deref()
-                    .map_or("—".into(), |a| crate::model::label(a, i.assignee_email.as_deref(), app.site.cfg.naming)),
+                    .map_or("—".into(), |a| crate::model::label(a, i.assignee_email.as_deref(), site.cfg.naming)),
                 Field::Created => format!("+{}", i.created_at.get(5..10).unwrap_or("—")),
                 Field::Updated => format!("✎{}", i.updated_at.get(5..10).unwrap_or("—")),
                 Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => {
@@ -1220,12 +1229,12 @@ fn row_line<'a>(
     // 글리프와 제목이 한 칸 당겨졌다 — 머리가 딱 들어가는 폭마다 그랬다(머리를 걷는 셈이 걷힌 글리프
     // 한 칸을 전제하므로). 이름 줄의 `S` 도 같은 셈을 본다.
     if cols.still {
-        let still = style::glyph(app.site.column(at)).to_string();
+        let still = style::glyph(site.column(at)).to_string();
         head_w = head_w - crate::text::width(&head[glyph_at].content) + crate::text::width(&still);
-        head[glyph_at] = Span::styled(still, glyph_style(app.site.column(at)));
+        head[glyph_at] = Span::styled(still, glyph_style(site.column(at)));
     }
     let used = crate::text::width(CURSOR) + head_w + crate::text::width(&right) + crate::text::width(tail);
-    let mut title = clip(&app.site.index.label(&app.site.issues, e), budget.saturating_sub(used));
+    let mut title = clip(&site.index.label(&site.issues, e), budget.saturating_sub(used));
     // **디렉터리 표시는 자른 뒤에 붙인다.** 먼저 붙이면 긴 제목에서 `/` 가
     // 제일 먼저 잘려 나가고, 목록에는 디렉터리라고 말하는 것이 달리 없다.
     if is_dir {
@@ -1247,7 +1256,7 @@ fn row_line<'a>(
     // 일은 집었을 때, 에픽·마일스톤은 그 밑에 집은 일이 실제로 있을 때(moai-x5eg), 미룬 것은 안
     // 돈다(moai-tawj). 묶음을 따로 빼 두면 목록 뿌리에서 무엇이 움직이는지 글리프 한 칸으로만
     // 읽혀, 여러 에픽을 훑어 내릴 때 눈에 안 걸린다(moai-eomg). 뜻은 여전히 글리프가 진다.
-    if app.site.spins(at) {
+    if site.spins(at) {
         spans.extend(mark(shimmer(title, app.spin), in_title));
     } else {
         spans.extend(mark(vec![Span::raw(title)], in_title));
@@ -4692,7 +4701,7 @@ pub(super) mod tests {
         a.site.warnings = 0;
         let lines = render(&mut a, 80, 22);
         let screen = lines.join("\n");
-        assert!(lines[0].starts_with("프로젝트 층"), "{:?}", lines[0]);
+        assert!(lines[0].starts_with("모든 프로젝트"), "{:?}", lines[0]);
         assert!(screen.contains("프로젝트 3곳"), "{screen}");
         let row = lines.iter().find(|l| l.contains("one/")).unwrap_or_else(|| panic!("{screen}"));
         assert!(row.contains("·3") && row.contains("▸1") && row.contains("✓12") && !row.contains("?0"), "{row:?}");
