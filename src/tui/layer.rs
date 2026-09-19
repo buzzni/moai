@@ -704,6 +704,11 @@ impl App {
         self.write_failed = false;
         self.path.clear();
         self.remembered.clear();
+        // 펼쳐 둔 자리도 그 프로젝트에 매인 것이다 — 마디가 그 프로젝트의 이슈 id 다. 두고 오면
+        // 같은 prefix 를 쓰는 다음 프로젝트에서 아무도 안 펼친 묶음이 펼쳐진 채 서고(위의 커서
+        // 정체와 같은 자리), 바구니 마디(`Milestone(None)`·`Lost`)는 id 조차 없어 prefix 가 달라도
+        // 그대로 샌다. 세션 내내 쌓이기도 한다.
+        self.expanded.clear();
         self.detail.rewind();
     }
 
@@ -935,7 +940,7 @@ mod tests {
         a.rows()
             .iter()
             .filter_map(|r| match r {
-                Row::Item(e) => e.at().map(|at| a.issues[at].title.clone()),
+                Row::Item(e, _) => e.at().map(|at| a.issues[at].title.clone()),
                 _ => None,
             })
             .collect()
@@ -1009,7 +1014,7 @@ mod tests {
 
         // one 의 argos-0002 에 서고 거름망을 건다 — two 에서 argos-0002 는 다른 자리의 다른 줄이다.
         a.key(key(KeyCode::End));
-        assert_eq!(a.current(), Some(Row::Item(crate::nav::Entry::Leaf { at: 1 })));
+        assert!(matches!(a.current(), Some(Row::Item(crate::nav::Entry::Leaf { at: 1 }, _))), "{:?}", a.current());
         a.hit("SPC f");
         for c in "status=in_progress".chars() {
             a.key(key(KeyCode::Char(c)));
@@ -1499,6 +1504,26 @@ mod tests {
         (one, two, a)
     }
 
+    /// **펼쳐 둔 자리는 프로젝트를 건너지 않는다**(리뷰) — 마디가 그 프로젝트의 이슈 id 이고,
+    /// 바구니 마디(`(마일스톤 없음)`·`(길 잃음)`)는 id 조차 없어 prefix 가 달라도 그대로 샌다.
+    /// 두고 오면 다음 프로젝트가 아무도 안 펼친 묶음을 펼친 채 세운다. `leave_project` 가 커서
+    /// 정체·거름망·안 읽음을 푸는 것과 같은 자리다.
+    #[test]
+    fn folding_does_not_cross_projects() {
+        let s = Scratch::fenced("layer-fold-leak");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.hit("1");
+        // 이 fixture 에는 묶음이 없어 키로 펼칠 것이 없다 — 펼쳐 둔 자리를 손으로 심는다.
+        // 바구니 마디는 id 를 안 들어, 두 프로젝트의 prefix 가 달라도 그대로 겹치는 자리다.
+        a.expanded.insert(vec![crate::nav::Seg::Milestone(None)]);
+        a.hit("2");
+        assert!(a.expanded.is_empty(), "옆 프로젝트로 건너갔는데 펼침이 남았다: {:?}", a.expanded);
+
+        a.expanded.insert(vec![crate::nav::Seg::Lost]);
+        a.hit("0");
+        assert!(a.expanded.is_empty(), "층으로 올라왔는데 펼침이 남았다: {:?}", a.expanded);
+    }
+
     /// **뿌리의 Bksp 는 조용히 먹히지 않고 갈 키를 댄다**(리뷰 moai-lur8.met) — 여태 그 키가
     /// 층으로 올라갔으므로, 아무 말 없이 안 듣는 것은 고장으로 읽힌다.
     #[test]
@@ -1512,6 +1537,19 @@ mod tests {
         assert!(!a.on_layer(), "말만 하고 올라가 버렸다");
     }
 
+    /// **층에서 `l`·`→` 는 그 프로젝트로 들어간다**(사용자 결정 2026-09-19) — 층은 트리가 아니라
+    /// 펼칠 것이 없고, 펼침으로만 두면 옛 손가락이 아무 일도 안 하는 키를 누른다.
+    #[test]
+    fn l_and_right_enter_a_project_from_the_layer() {
+        for k in ["l", "Right"] {
+            let s = Scratch::fenced("layer-l-enters");
+            let (_one, _two, mut a) = on_layer_with_twins(&s);
+            assert!(a.on_layer(), "시험의 전제 — 층에 섰다");
+            a.hit(k);
+            assert!(!a.on_layer(), "층에서 `{k}` 가 프로젝트로 안 들어갔다");
+        }
+    }
+
     /// **건너뛰면 포커스가 목록으로 돌아온다**(리뷰 moai-i784.pzh) — 층의 상세에는 듣는 키가
     /// 없어, 상세에 포커스를 둔 채 `0` 을 누르면 무엇을 눌러야 할지 없는 화면이 선다.
     #[test]
@@ -1519,24 +1557,24 @@ mod tests {
         let s = Scratch::fenced("layer-digit-focus");
         let (_one, two, mut a) = on_layer_with_twins(&s);
         a.hit("2");
-        a.hit("Tab");
+        a.hit("Ctrl-w w");
         assert_eq!(a.focus, super::super::Pane::Detail, "시험의 전제 — 상세에 포커스가 갔다");
         a.hit("0");
         assert!(a.on_layer());
         assert_eq!(a.focus, super::super::Pane::Explorer, "층에 섰는데 포커스가 상세에 남았다");
 
-        a.hit("Tab");
+        a.hit("Ctrl-w w");
         a.hit("1");
         assert_eq!(a.focus, super::super::Pane::Explorer, "프로젝트로 건너뛰었는데 포커스가 상세에 남았다");
         assert_ne!(a.here(), Some(two), "1 이 첫 프로젝트로 안 갔다");
 
         // **이미 그 자리여도 돌아온다**(리뷰). 안 옮기는 갈래로 떨어지면 포커스를 안 건드려,
         // 고치려던 그 막힌 화면(층의 상세)에 그대로 남는 길이 남는다.
-        a.hit("Tab");
+        a.hit("Ctrl-w w");
         a.hit("1");
         assert_eq!(a.focus, super::super::Pane::Explorer, "이미 선 프로젝트의 번호를 누르니 포커스가 상세에 남았다");
         a.hit("0");
-        a.hit("Tab");
+        a.hit("Ctrl-w w");
         assert_eq!(a.focus, super::super::Pane::Detail, "시험의 전제 — 층에서도 상세로 간다");
         a.hit("0");
         assert!(a.on_layer());
@@ -1551,7 +1589,7 @@ mod tests {
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.hit("1");
         assert_eq!(a.here(), Some(one.clone()), "1 이 첫 프로젝트로 안 갔다");
-        a.hit("Tab");
+        a.hit("Ctrl-w w");
         assert_eq!(a.focus, super::super::Pane::Detail, "시험의 전제 — 상세에 포커스가 갔다");
 
         // 둘째 프로젝트를 통째로 치운다 — `open_place` 가 못 열고 `enter_project` 는 알림만 단다.
@@ -1654,7 +1692,7 @@ mod tests {
         assert_eq!(snapshots(&[&two])[0], before[1], "커서의 프로젝트 말고 다른 파일이 바뀌었다");
         assert_eq!(titles(&a).iter().filter(|t| *t == "one 에 담을 것").count(), 1);
         let on = a.current().and_then(|r| match r {
-            Row::Item(e) => e.at().map(|at| a.issues[at].title.clone()),
+            Row::Item(e, _) => e.at().map(|at| a.issues[at].title.clone()),
             _ => None,
         });
         assert_eq!(on.as_deref(), Some("one 에 담을 것"), "만든 줄에 안 섰다");

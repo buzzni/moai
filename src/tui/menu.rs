@@ -17,7 +17,7 @@
 //! **조각이다.** `App`·터미널을 모른다. 켜짐([`Ctx`])은 든 쪽이 재서 넘긴다. 격자를 어떻게
 //! 놓는가([`grid`])도 여기서 폭과 높이만 받아 정하고, `draw.rs` 는 그 격자를 칠하기만 한다.
 
-use super::keys::{BROWSE, Bind, Browse, Chord, Ctx, LEADER, Lookup, MENU, Menu, lookup, name_of};
+use super::keys::{BROWSE, Bind, Browse, Chord, Ctx, LEADER, Lookup, MENU, Menu, lookup, name_of_key};
 use crate::text::{clip, width};
 use ratatui::crossterm::event::KeyEvent;
 
@@ -121,7 +121,7 @@ pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
 
 /// 테두리에 적을 지금 접두어 — `SPC`, `SPC v`.
 pub fn title(held: &[KeyEvent]) -> String {
-    held.iter().map(|k| name_of(k.code)).collect::<Vec<_>>().join(" ")
+    held.iter().copied().map(name_of_key).collect::<Vec<_>>().join(" ")
 }
 
 /// 뿌리의 이름 — 접두어 줄의 `SPC- 메뉴`, 키 바의 `SPC 메뉴`.
