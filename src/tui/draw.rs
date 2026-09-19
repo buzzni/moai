@@ -2081,25 +2081,22 @@ impl Body {
 /// 한다. 커서가 선 줄이 본문 있는 이슈가 아니면 든 것을 **버린다**: 상세에 안 서는 본문을
 /// 쥐고 있을 까닭이 없고, 버려도 다음에 그 줄로 돌아가면 한 프레임에 다시 편다.
 fn fill_body(app: &mut App, rows: &[Row], w: usize) {
-    let held = app.current_of(rows).and_then(|r| match r {
-        Row::Item(seat, e, _) => {
-            let at = e.at()?;
-            let i = app.issue_at(seat, at)?;
-            let body = i.body.as_ref()?;
-            Some((i.id.clone(), body.clone()))
-        }
-        Row::Up | Row::Project(_) => None,
-    });
-    let Some((id, text)) = held else {
-        app.body = None;
-        return;
+    let seat_at = match app.current_of(rows) {
+        Some(Row::Item(seat, e, _)) => e.at().map(|at| (seat, at)),
+        // `..` 과 프로젝트 머리줄에는 본문이 없다.
+        Some(Row::Up | Row::Project(_)) | None => None,
     };
     let raw = app.raw;
-    if app.body.as_ref().is_some_and(|b| b.fits(&id, &text, w, raw)) {
-        return;
-    }
-    let lines = body_lines(&text, w, raw);
-    app.body = Some(Body { id, text, w, raw, lines });
+    // **견줄 때는 빌려만 쓴다**(리뷰) — 든 것이 그대로 맞으면 베낄 것이 하나도 없다. 프레임마다
+    // 글을 통째로 베껴 놓고 견주면, 걷으려던 프레임당 일이 큰 본문에서 memcpy 로 도로 선다.
+    let standing = seat_at.and_then(|(seat, at)| app.issue_at(seat, at)).and_then(|i| i.body.as_ref().map(|b| (i, b)));
+    let fresh = match standing {
+        // 든 것이 그 줄·그 글·그 폭의 것이면 그대로 둔다.
+        Some((i, body)) if app.body.as_ref().is_some_and(|held| held.fits(&i.id, body, w, raw)) => return,
+        Some((i, body)) => Some(Body { id: i.id.clone(), text: body.clone(), w, raw, lines: body_lines(body, w, raw) }),
+        None => None,
+    };
+    app.body = fresh;
 }
 
 /// 본문. **줄로 펴는 일은 `markdown` 이 한다** — 글머리·들여쓰기 같은 결정이
