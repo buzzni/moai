@@ -7331,6 +7331,101 @@ fn the_hook_leaves_what_a_named_worktree_holds_to_that_worktree() {
     assert!(own.contains(&format!("moai -C {root} mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
 }
 
+/// **제 이름 워크트리가 옆 에픽 워크트리를 이긴다**(moai-m62u·moai-cle9, 사용자 결정). 에픽
+/// 워크트리가 살아 있거나 머지하고 안 치운 채 그 에픽에 새 멤버를 집으면, 그 멤버를 제 이름
+/// 워크트리에서 하는 세션이 에픽 이름에 초점을 뺏겨 규칙 2 에 막혔다. 워크트리 목록을 읽는 배선
+/// (제 이름을 어디서 읽는가)은 단위 시험이 못 밟아 여기서 본다.
+#[test]
+fn a_member_worktree_outranks_its_epic_worktree_in_the_hook() {
+    let s = Scratch::new("hooknearest");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "에픽", "--json"]), "id");
+    let member = field(&ok(&main, &["add", "뒤이어 세운 멤버", "-e", &epic, "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", &format!(".claude/worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+    ok(&main, &["mv", &member, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    let dir = format!(".claude/worktrees/{member}");
+    git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{member}")]);
+
+    let inside = main.join(&dir);
+    std::fs::create_dir_all(inside.join("src")).unwrap();
+    let edit = |at: &Path, session: &str| {
+        let input = format!(
+            "{{\"session_id\":\"{session}\",\"cwd\":{},\"tool_name\":\"Edit\",\"tool_input\":{{\"file_path\":{}}}}}",
+            json_str(&at.display().to_string()),
+            json_str(&at.join("src/x.rs").display().to_string())
+        );
+        String::from_utf8(hook_in(&s, at, "pre-tool-use", &input).stdout).unwrap()
+    };
+    let out = edit(&inside, "s1");
+    assert!(out.trim().is_empty(), "에픽 워크트리가 제 이름 워크트리의 멤버를 쥐어 규칙 2 가 막았다\n{out}");
+    let input = format!("{{\"session_id\":\"s1\",\"cwd\":{}}}", json_str(&inside.display().to_string()));
+    let held = String::from_utf8(hook_in(&s, &inside, "stop", &input).stdout).unwrap();
+    assert!(held.contains(&member), "제 이름 워크트리에서 제 멤버를 안 붙든다\n{held}");
+
+    // 에픽 워크트리 안에서는 그 멤버가 옆(제 이름 워크트리)의 것이다.
+    let there = main.join(format!(".claude/worktrees/{epic}"));
+    let input = format!("{{\"session_id\":\"s2\",\"cwd\":{}}}", json_str(&there.display().to_string()));
+    let held = String::from_utf8(hook_in(&s, &there, "stop", &input).stdout).unwrap();
+    assert!(held.trim().is_empty(), "에픽 워크트리가 옆 멤버 워크트리의 일로 붙든다\n{held}");
+}
+
+/// **다른 세션이 집은 줄은 떠안지 않는다**(moai-4jsy, 사용자 결정). 남의 워크트리에 잠깐 들어간
+/// 세션도, 남이 머지 직후 워크트리를 치운 줄을 보는 루트 세션도 턴 끝에 "옮기거나 미뤄라" 를
+/// 들었다 — 사람 없는 일꾼은 그대로 쳐 남의 일을 닫는다. 훅이 집기를 세션마다 적고, 다른 세션이
+/// 마지막으로 집은 줄로는 붙들지 않는다. 막는 쪽으로는 안 바뀐다 — 모름은 풀기만 한다.
+#[test]
+fn the_hook_leaves_a_row_another_session_picked_to_that_session() {
+    let s = Scratch::new("hookpicks");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let theirs = field(&ok(&main, &["add", "남이 할 일", "--json"]), "id");
+    let mine = field(&ok(&main, &["add", "내가 할 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    let at = |session: &str, event: &str, cmd: Option<&str>| {
+        let body = cmd.map_or(String::new(), |c| format!(",\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}", json_str(c)));
+        let input = format!("{{\"session_id\":\"{session}\",\"cwd\":{}{body}}}", json_str(&main.display().to_string()));
+        String::from_utf8(hook_in(&s, &main, event, &input).stdout).unwrap()
+    };
+    // 남(b)이 집는다 — 훅이 보고 적은 뒤 명령이 돈다.
+    let pick = format!("moai mv {theirs} in_progress --from todo");
+    assert!(at("b", "pre-tool-use", Some(&pick)).trim().is_empty());
+    ok(&main, &["mv", &theirs, "in_progress", "--from", "todo"]);
+
+    // 기록이 없는 세션도, 집은 세션도 전과 같다 — 집은 줄로 붙든다.
+    assert!(at("b", "stop", None).contains(&format!("moai mv {theirs}")), "집은 세션을 안 붙든다");
+    // 다른 세션(a)은 그 줄로 붙들리지도, 생성을 막히지도 않는다.
+    let held = at("a", "stop", None);
+    assert!(held.trim().is_empty(), "남이 집은 줄로 붙든다\n{held}");
+    let made = at("a", "pre-tool-use", Some("moai add '딴 일'"));
+    assert!(made.trim().is_empty(), "남이 집은 줄로 생성을 막는다\n{made}");
+
+    // a 가 제 일을 집으면 그것만 댄다.
+    let pick = format!("moai mv {mine} in_progress");
+    assert!(at("a", "pre-tool-use", Some(&pick)).trim().is_empty());
+    ok(&main, &["mv", &mine, "in_progress"]);
+    let held = at("a", "stop", None);
+    assert!(held.contains(&format!("moai mv {mine}")) && !held.contains(&theirs), "남의 줄을 옮기라고 한다\n{held}");
+
+    // 넘겨받은 쪽이 다시 집으면 마지막 집기가 이긴다 — 이제 a 의 것이다.
+    let pick = format!("moai mv {theirs} in_progress");
+    assert!(at("a", "pre-tool-use", Some(&pick)).trim().is_empty());
+    let held = at("b2", "stop", None);
+    assert!(held.trim().is_empty(), "다른 세션들의 줄로 붙든다\n{held}");
+    // `Stop` 은 세션당 한 번 붙든다 — a 는 이미 붙들렸으니 거절문으로 본다.
+    let why = refusal(&at("a", "pre-tool-use", Some("moai add '딴 일'")));
+    assert!(why.contains(&theirs) && why.contains(&mine), "다시 집은 줄을 제 초점으로 안 본다\n{why}");
+}
+
 /// **이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다**
 /// (moai-ntl6, 사용자 결정 B). 에이전트 격리 워크트리(`worktree-agent-<해시>`)와 옛 id 로 뜬
 /// 워크트리가 실제로 그랬다(moai-apsa·nt0h). 누구의 것인지 모르는 줄로는 막지도 붙들지도

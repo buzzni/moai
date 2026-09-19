@@ -166,7 +166,7 @@ pub fn board(lines: &[String]) -> Decision {
 ///
 /// 집은 것이 없으면 아무 말도 하지 않는다. **빈 목록을 싣지 않는다** — 막
 /// 접어 비운 자리에 "없다" 를 적는 것은 그 값을 치를 일이 아니다.
-pub fn carried(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>) -> Decision {
+pub fn carried(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
     let wip = held(issues, cfg, away);
     if wip.is_empty() {
         return Decision::Pass;
@@ -1135,6 +1135,30 @@ pub fn unit_of<'a>(issues: &'a [Issue], focus: &[&'a Issue]) -> BTreeSet<&'a str
     out
 }
 
+/// 이 자리에서 **누구의 것인지** 가르는 이름들 — [`held`] 가 초점에서 뺄 것을 잰다.
+///
+/// 한때 옆 워크트리의 이름 한 벌(`BTreeSet`)만 받아, 그 이름이 가리키는 줄을 거리와 상관없이 뺐다.
+/// 그러면 머지하고 안 치운 `worktree-<에픽>` 이 그 에픽에 뒤이어 집은 멤버를, 그 멤버를 제
+/// 이름으로 띄운 워크트리에서도 쥐었다(moai-m62u) — 그 세션의 초점이 비어 규칙 2 에 막혔다.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Away {
+    /// 옆 워크트리들의 이름 후보(`worktree::away`) — 그 줄 자신, 그 밑의 자식, 그 에픽·마일스톤에
+    /// 든 줄을 가리킨다.
+    pub names: BTreeSet<String>,
+    /// 이 자리 워크트리의 이름 후보. 옆 이름과 **거리를 겨룬다** — 옆 이름이 더 가까이 가리킬 때만
+    /// 옆의 것이다([`report::claimed_over`]). 같으면 제 것이다.
+    pub own: BTreeSet<String>,
+    /// 누구의 것인지 모르는 줄([`unsure`]) — 거리와 상관없이 뺀다. **풀기만 하는 판정**에만 싣는다
+    /// (`cmd/hook.rs` 의 `settle`·`Stop`) — 막지도 붙들지도 않기로 한 줄이다.
+    pub unsure: BTreeSet<String>,
+}
+
+impl Away {
+    fn is_empty(&self) -> bool {
+        self.names.is_empty() && self.unsure.is_empty()
+    }
+}
+
 /// 이 자리에서 집고 있는 것 — [`report::wip`] 에서 **옆 워크트리가 쥔 일**을 뺀 것.
 ///
 /// 집기 커밋은 main 에 들어가므로(CLAUDE.md "워크트리"), main 과 거기서 뜬 워크트리의
@@ -1142,10 +1166,8 @@ pub fn unit_of<'a>(issues: &'a [Issue], focus: &[&'a Issue]) -> BTreeSet<&'a str
 /// 세던 판은 main 의 `moai add` 를 규칙 1 로 막고, 세션을 닫을 때 남의 워크트리 일을
 /// 옮기거나 미루라고 붙들었다(moai-0yrv). 워크트리가 원칙이 되면 그 거절은 상시다.
 ///
-/// `away` 는 옆 워크트리의 이름이 가리키는 id 들이다(`worktree::away`) — 여기는 읽지
-/// 않는다. 그 줄 자신, 그 밑의 자식, 그 에픽·마일스톤에 든 줄을 뺀다. 옆에서 그 일을
-/// 펼쳐 집은 것도 옆의 것이다.
-pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &BTreeSet<String>) -> Vec<&'a Issue> {
+/// 무엇을 빼는지는 [`Away`] 가 정한다 — 여기는 디스크를 읽지 않는다.
+pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &Away) -> Vec<&'a Issue> {
     let wip = report::wip(issues, cfg);
     if away.is_empty() || wip.is_empty() {
         return wip;
@@ -1154,32 +1176,78 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &BTreeSet<String>) -> V
     wip.into_iter().filter(|i| !theirs(i)).collect()
 }
 
-/// 이 줄이 **옆 워크트리의 일**인가 — 그 줄 자신이나 조상이 `away` 에 들었거나, 그 에픽·
-/// 마일스톤이 들었다. [`held`] 와 그 초점을 쓰는 규칙이 같은 자로 재야 한다 — 초점에서는
+/// 이 줄이 **옆의 일**인가 — 옆 이름이 제 이름보다 가까이 가리키거나, 누구의 것인지 모른다.
+/// [`held`] 와 그 초점을 쓰는 규칙이 같은 자로 재야 한다 — 초점에서는
 /// 뺀 옆의 리뷰 줄을 규칙 3 이 "집으라" 고 대면, 이미 옆에서 집은 줄이라 시킨 대로 해도
 /// 안 풀린다.
-fn theirs<'a>(issues: &'a [Issue], away: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
-    report::claimed(issues, away)
+fn theirs<'a>(issues: &'a [Issue], away: &'a Away) -> impl Fn(&Issue) -> bool + 'a {
+    let over = report::claimed_over(issues, &away.names, &away.own);
+    let unsure = report::claimed(issues, &away.unsure);
+    move |i: &Issue| over(i) || unsure(i)
+}
+
+/// 세션마다 적어 둔 집기를 이 세션의 눈으로 가른 것(moai-4jsy, 사용자 결정) — 줄마다 **마지막으로
+/// 집은** 세션이 이 세션이면 `mine`, 다른 세션이면 `theirs` 다. 적는 것과 읽는 것은 `cmd/hook.rs`
+/// 가 하고, 여기는 그 답만 받는다.
+///
+/// **트래커에 적지 않는다.** 세션은 이슈의 뜻이 아니라 이 기계의 사정이다 — 훅이 제 표(`board`·
+/// `warn`)를 두는 임시 디렉터리에 둔다. 훅 밖(사람의 터미널)에서 집은 줄은 아무 데도 안 적혀 전과
+/// 같이 판정한다.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Picks {
+    pub mine: BTreeSet<String>,
+    pub theirs: BTreeSet<String>,
 }
 
 /// **누구의 것인지 모르는** 집은 줄 — 옆 딸린 워크트리의 스냅샷에도 벌여 놓인(또는 거기서 늦게
-/// 옮긴) 줄(`elsewhere`, `worktree::held_elsewhere`)이다 (moai-ntl6, 사용자 결정 B).
+/// 옮긴) 줄(`elsewhere`, `worktree::held_elsewhere`)과 **다른 세션이 마지막으로 집은** 줄(`picks`)이다
+/// (moai-ntl6 사용자 결정 B, moai-4jsy).
 ///
 /// 이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다.
 /// **이 줄로는 막지도 붙들지도 않는다** — 받는 쪽은 이것을 `away` 에 더한 좁은 초점으로 한 번
 /// 더 판정해, 풀릴 때만 푼다. 새로 막는 일은 없다. **제 워크트리 이름이 가리키는 일은 확실히
 /// 제 것이라 빼지 않는다**(`own`) — 이름으로 가르던 판정은 그대로다. 대가: main 이 제 몫으로
 /// 집은 뒤 갈라진 워크트리가 생기면 그 집기는 `Stop` 이 더는 안 붙든다(사용자가 받아들였다).
-pub fn unsure(issues: &[Issue], cfg: &Config, elsewhere: &BTreeSet<String>, own: &BTreeSet<String>) -> BTreeSet<String> {
-    if elsewhere.is_empty() {
+///
+/// **세션의 기록은 이름보다 앞이다**(moai-4jsy). 남의 워크트리에 잠깐 들어간 세션은 그 워크트리의
+/// 이름을 제 이름으로 달아, 거기서 집힌 줄이 "확실히 제 것" 이 됐다 — `Stop` 이 그 세션에 남의 일을
+/// 닫거나 미루라고 댔다. 남이 머지 직후 워크트리를 치운 줄도 루트의 아무 세션에게 그렇게 섰다.
+/// 다른 세션이 마지막으로 집었으면 이름과 상관없이 모르는 것이고, 이 세션이 마지막으로 집었으면
+/// 옆 스냅샷에 있어도 제 것이다.
+pub fn unsure(
+    issues: &[Issue],
+    cfg: &Config,
+    elsewhere: &BTreeSet<String>,
+    own: &BTreeSet<String>,
+    picks: &Picks,
+) -> BTreeSet<String> {
+    if elsewhere.is_empty() && picks.theirs.is_empty() {
         return BTreeSet::new();
     }
-    let named_mine = theirs(issues, own);
+    let named_mine = report::claimed(issues, own);
     report::wip(issues, cfg)
         .into_iter()
-        .filter(|i| elsewhere.contains(&i.id) && !named_mine(i))
+        .filter(|i| !picks.mine.contains(&i.id))
+        .filter(|i| picks.theirs.contains(&i.id) || (elsewhere.contains(&i.id) && !named_mine(i)))
         .map(|i| i.id.clone())
         .collect()
+}
+
+/// 이 명령줄이 **집는 id 들** — `only` 가 고른 토막의 `moai mv <id>… <벌여 놓는 칸>` 이다([`picks_up`]).
+/// 훅이 세션의 집기를 적는 데 쓴다([`Picks`]).
+pub fn picked_in(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<String> {
+    let mut out = Vec::new();
+    for (k, seg) in segments(cmd).into_iter().enumerate() {
+        if !only(k) || !picks_up(&seg, cfg) {
+            continue;
+        }
+        let Some(args) = moai_args(&seg) else { continue };
+        let verbs = positionals(args);
+        if let Some((_, ids)) = verbs[1..].split_last() {
+            out.extend(ids.iter().map(|s| s.to_string()));
+        }
+    }
+    out
 }
 
 /// 규칙 1 — **집은 것 밖에 새 이슈를 세우지 않는다.**
@@ -1193,7 +1261,7 @@ pub fn unsure(issues: &[Issue], cfg: &Config, elsewhere: &BTreeSet<String>, own:
 ///
 /// 훅은 토막을 고르는 [`guard_shell_in`] 으로 부른다. 토막 전부를 보는 이 모양은 시험이 쓴다.
 #[cfg(test)]
-pub fn guard_create(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str) -> Decision {
+pub fn guard_create(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str) -> Decision {
     create_in(issues, &held(issues, cfg, away), cmd, &|_| true)
 }
 
@@ -1296,12 +1364,12 @@ fn create_in<'a>(issues: &'a [Issue], focus: &[&'a Issue], cmd: &str, only: &dyn
 ///
 /// 훅은 토막을 고르는 [`guard_shell_in`] 으로 부른다. 토막 전부를 보는 이 모양은 시험이 쓴다.
 #[cfg(test)]
-pub fn guard_close(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str) -> Decision {
+pub fn guard_close(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str) -> Decision {
     close_in(issues, cfg, away, cmd, &|_| true)
 }
 
 /// [`guard_close`] 를 `only` 가 고른 토막에만 — [`create_in`] 과 같은 까닭.
-fn close_in(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str, only: &dyn Fn(usize) -> bool) -> Decision {
+fn close_in(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str, only: &dyn Fn(usize) -> bool) -> Decision {
     for (k, seg) in segments(cmd).into_iter().enumerate() {
         if !only(k) {
             continue;
@@ -1368,7 +1436,7 @@ fn is_review(i: &Issue, out_of_plan: &BTreeSet<&str>) -> bool {
 /// **도구가 아니라 고치는 파일로 가른다.** 도구로 가르면 스크래치패드 메모와
 /// `src/` 의 한 줄이 같은 값으로 막히고, 그래서 세션당 한 번으로 풀어야 했다 —
 /// 느슨해진 규칙은 정작 막아야 할 것을 놓친다.
-pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, root: &Path, target: &str) -> Decision {
+pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, target: &str) -> Decision {
     if !counted(target, root) || !held(issues, cfg, away).is_empty() {
         return Decision::Pass;
     }
@@ -1404,7 +1472,7 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, root:
 pub fn guard_writes(
     issues: &[Issue],
     cfg: &Config,
-    away: &BTreeSet<String>,
+    away: &Away,
     root: &Path,
     cwd: &Path,
     cmd: &str,
@@ -1418,7 +1486,7 @@ pub fn guard_writes(
 fn guard_writes_in(
     issues: &[Issue],
     cfg: &Config,
-    away: &BTreeSet<String>,
+    away: &Away,
     root: &Path,
     cwd: &Path,
     cmd: &str,
@@ -1454,7 +1522,7 @@ fn guard_writes_in(
 pub fn guard_shell(
     issues: &[Issue],
     cfg: &Config,
-    away: &BTreeSet<String>,
+    away: &Away,
     root: &Path,
     cwd: &Path,
     cmd: &str,
@@ -1469,7 +1537,7 @@ pub fn guard_shell(
 pub fn guard_shell_in(
     issues: &[Issue],
     cfg: &Config,
-    away: &BTreeSet<String>,
+    away: &Away,
     root: &Path,
     cwd: &Path,
     cmd: &str,
@@ -1770,7 +1838,7 @@ fn unknowable(path: &str) -> bool {
 ///
 /// 막을 것이 없으면 담는 줄에 한 줄 비출 수 있다([`aside_in`], `Decision::Context`). **비추는
 /// 것은 막는 것을 가리지 않는다** — 차례는 [`Decision::then`] 이 정한다.
-pub fn guard_moai(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>, cmd: &str, only: &dyn Fn(usize) -> bool) -> Decision {
+pub fn guard_moai(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str, only: &dyn Fn(usize) -> bool) -> Decision {
     // **`moai` 를 부르는 토막이 없으면 볼 것이 없다**(moai-xppm) — 세 규칙 모두 그 토막만 본다.
     // 초점을 먼저 짓던 판은 `cargo test` 하나에도 소속 지도를 지었다.
     if !segments(cmd).iter().enumerate().any(|(k, seg)| only(k) && moai_args(seg).is_some()) {
@@ -2014,7 +2082,7 @@ fn has_angle(i: &Issue) -> bool {
 /// 저장소 어딘가에 열린 리뷰 줄이 하나 있다는 것으로는 안 된다. 옛 리뷰 한
 /// 줄이 뒤따르는 모든 리뷰의 면죄부가 되면, 거기 적히는 결과가 무엇의
 /// 결과인지를 잃는다.
-pub fn guard_review(issues: &[Issue], cfg: &Config, away: &BTreeSet<String>) -> Decision {
+pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
     let out_of_plan = report::put_off(issues);
     // **옆 워크트리의 리뷰는 여기서 안 센다** — 초점에서 뺀 것과 같은 자다([`theirs`]).
     // 세면 main 에서 아무것도 안 집은 세션에 옆이 이미 집은 리뷰를 "집으라" 고 막는다.
@@ -2182,7 +2250,7 @@ pub fn closing(
     issues: &[Issue],
     latest: &[Issue],
     cfg: &Config,
-    away: &BTreeSet<String>,
+    away: &Away,
     warnings: usize,
     before: Option<usize>,
 ) -> Decision {
@@ -2457,11 +2525,15 @@ mod tests {
     }
 
     /// 옆 워크트리가 쥔 것이 없다 — 대부분의 시험이 선 자리.
-    fn here() -> BTreeSet<String> {
-        BTreeSet::new()
+    fn here() -> Away {
+        Away::default()
     }
 
-    fn away(ids: &[&str]) -> BTreeSet<String> {
+    fn away(ids: &[&str]) -> Away {
+        Away { names: set(ids), ..Away::default() }
+    }
+
+    fn set(ids: &[&str]) -> BTreeSet<String> {
         ids.iter().map(|s| s.to_string()).collect()
     }
 
@@ -2532,10 +2604,49 @@ mod tests {
             issue("t-3", "in_progress"),
             issue("t-4", "todo"),
         ];
-        let elsewhere = away(&["t-1", "t-2", "t-4"]);
-        let got: Vec<String> = unsure(&all, &cfg(), &elsewhere, &away(&["t-e"])).into_iter().collect();
+        let elsewhere = set(&["t-1", "t-2", "t-4"]);
+        let got: Vec<String> = unsure(&all, &cfg(), &elsewhere, &set(&["t-e"]), &Picks::default()).into_iter().collect();
         assert_eq!(got, ["t-2"], "제 에픽의 일이나 안 집은 줄을 모른다고 했다");
-        assert!(unsure(&all, &cfg(), &here(), &here()).is_empty());
+        assert!(unsure(&all, &cfg(), &set(&[]), &set(&[]), &Picks::default()).is_empty());
+    }
+
+    /// **제 이름이 에픽 이름을 이긴다**(moai-m62u·moai-cle9). 머지하고 안 치운(또는 아직 도는) 에픽
+    /// 워크트리가 옆에 있어도, 그 에픽에 뒤이어 집은 멤버를 제 이름 워크트리에서 하는 세션의 초점은
+    /// 그 멤버다 — 한때 에픽 이름에 뺏겨 규칙 2 가 저장소를 막았다. 제 이름이 없는 자리(루트)에서는
+    /// 여전히 옆 에픽 워크트리의 일이다.
+    #[test]
+    fn my_own_name_outranks_an_epic_worktree_beside_me() {
+        let all = vec![epic("t-e"), under("t-1", "done", "t-e"), under("t-2", "in_progress", "t-e")];
+        let beside = Away { names: set(&["t-e"]), own: set(&["t-2"]), ..Away::default() };
+        let mine: Vec<&str> = held(&all, &cfg(), &beside).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(mine, ["t-2"], "에픽 워크트리가 제 이름 워크트리의 멤버를 쥐었다");
+        assert_eq!(guard_edit(&all, &cfg(), &beside, Path::new("/repo"), "/repo/src/x.rs"), Decision::Pass);
+
+        let root = Away { names: set(&["t-e", "t-2"]), own: set(&["develop"]), ..Away::default() };
+        assert!(held(&all, &cfg(), &root).is_empty(), "루트가 옆 워크트리의 일을 제 초점으로 셌다");
+
+        // 모르는 줄은 제 이름이 가리켜도 뺀다 — 좁힌 초점은 풀기만 하는 판정에만 실린다.
+        let narrowed = Away { unsure: set(&["t-2"]), ..beside };
+        assert!(held(&all, &cfg(), &narrowed).is_empty());
+    }
+
+    /// **세션의 기록이 이름보다 앞이다**(moai-4jsy). 남의 워크트리에 들어간 세션은 그 이름을 제
+    /// 이름으로 달지만, 다른 세션이 마지막으로 집은 줄은 모른다고 한다. 이 세션이 마지막으로 집은
+    /// 줄은 옆 스냅샷에 있어도 제 것이다. 기록이 없는 줄은 전과 같다.
+    #[test]
+    fn a_pick_another_session_recorded_is_not_mine() {
+        let all = vec![issue("t-1", "in_progress"), issue("t-2", "in_progress"), issue("t-3", "in_progress")];
+        let picks = Picks { mine: set(&["t-2"]), theirs: set(&["t-1"]) };
+        let got: Vec<String> = unsure(&all, &cfg(), &set(&["t-2", "t-3"]), &set(&["t-1"]), &picks).into_iter().collect();
+        assert_eq!(got, ["t-1", "t-3"], "남이 집은 줄을 제 이름 때문에 떠안거나, 제가 집은 줄을 모른다고 했다");
+        let nothing = Picks::default();
+        assert!(unsure(&all, &cfg(), &set(&[]), &set(&[]), &nothing).is_empty());
+
+        // 집는 id 는 `only` 가 고른 `mv … <벌여 놓는 칸>` 에서만 읽는다.
+        let cmd = "moai mv t-1 in_progress --from todo && moai mv t-2 done && moai -C /x mv t-3 review";
+        assert_eq!(picked_in(cmd, &cfg(), &|_| true), ["t-1", "t-3"]);
+        assert_eq!(picked_in(cmd, &cfg(), &|k| k == 0), ["t-1"]);
+        assert!(picked_in("moai mv t-1 in_progress --help", &cfg(), &|_| true).is_empty());
     }
 
     // ── 명령이 가리키는 트래커 ────────────────────────────────────────
@@ -4399,7 +4510,7 @@ mod tests {
     fn a_leftover_worktree_of_a_closed_row_leaves_the_focus_alone_but_keeps_its_children() {
         let root = Path::new("/repo");
         let all = vec![epic("t-e"), under("t-1", "done", "t-e"), under("t-2", "in_progress", "t-e")];
-        let focus = |all: &[Issue], names: &BTreeSet<String>| {
+        let focus = |all: &[Issue], names: &Away| {
             held(all, &cfg(), names).iter().map(|i| i.id.clone()).collect::<Vec<_>>()
         };
         assert_eq!(focus(&all, &away(&["t-1", "worktree-t-1"])), focus(&all, &here()), "닫힌 줄의 이름이 초점을 바꿨다");

@@ -398,12 +398,55 @@ pub fn claimed<'a>(issues: &'a [Issue], names: &'a BTreeSet<String>) -> impl Fn(
 ///
 /// 안 읽은 줄의 "내게 온 것"(`query::unread`)도 이 걸음을 쓴다 — 마일스톤 지도를 비워 넘겨서(moai-j038.vna).
 pub(crate) fn claims(epics: &BTreeMap<&str, &str>, stones: &BTreeMap<&str, &str>, names: &BTreeSet<String>, i: &Issue) -> bool {
-    !names.is_empty()
-        && std::iter::successors(Some(i.id.as_str()), |id| crate::id::parent_of(id)).any(|id| {
-            names.contains(id)
-                || epics.get(id).is_some_and(|e| names.contains(*e))
-                || stones.get(id).is_some_and(|m| names.contains(*m))
+    nearness(epics, stones, names, i).is_some()
+}
+
+/// `names` 가 이 줄을 **얼마나 가까이** 가리키는가 — 작을수록 구체적이다. 못 가리키면 `None`.
+///
+/// 차례는 제 id(0) → 가까운 조상(1, 2, …) → 에픽 → 마일스톤이다(moai-m62u, 사용자 결정). 한 줄을
+/// 여러 워크트리의 이름이 가리키면 **가장 가까운 이름이 이긴다** — 머지하고 안 치운 `worktree-<에픽>`
+/// 이 뒤이어 집은 멤버를, 그 멤버를 제 이름으로 띄운 워크트리보다 먼저 쥐던 판은 그 워크트리의
+/// 세션을 규칙 2 로 막았다. 겨루는 곳이 둘이다 — 훅의 초점([`crate::hook::Away`])과 줄의 자리([`places`]).
+pub(crate) fn nearness(epics: &BTreeMap<&str, &str>, stones: &BTreeMap<&str, &str>, names: &BTreeSet<String>, i: &Issue) -> Option<usize> {
+    // 조상은 깊어 봐야 몇 칸이다 — 에픽·마일스톤은 그 뒤에 선다.
+    const EPIC: usize = 1 << 16;
+    const STONE: usize = 1 << 17;
+    if names.is_empty() {
+        return None;
+    }
+    std::iter::successors(Some(i.id.as_str()), |id| crate::id::parent_of(id))
+        .enumerate()
+        .filter_map(|(depth, id)| {
+            if names.contains(id) {
+                Some(depth)
+            } else if epics.get(id).is_some_and(|e| names.contains(*e)) {
+                Some(EPIC)
+            } else if stones.get(id).is_some_and(|m| names.contains(*m)) {
+                Some(STONE)
+            } else {
+                None
+            }
         })
+        .min()
+}
+
+/// 옆 이름(`away`)이 이 줄을 **제 이름(`own`)보다 가까이** 가리키는가 — 그러면 옆의 일이다.
+/// 같은 거리면 제 것이다(moai-m62u, 사용자 결정): 그 줄을 제 이름으로 띄운 워크트리가 둘이면
+/// 어느 쪽 세션도 그 일을 못 집는 것보다, 둘 다 제 것으로 보는 편이 덜 틀린다.
+pub fn claimed_over<'a>(
+    issues: &'a [Issue],
+    away: &'a BTreeSet<String>,
+    own: &'a BTreeSet<String>,
+) -> impl Fn(&Issue) -> bool + 'a {
+    let (epics, stones) = if away.is_empty() {
+        (Default::default(), Default::default())
+    } else {
+        (groups(issues), milestones(issues))
+    };
+    move |i: &Issue| match nearness(&epics, &stones, away, i) {
+        None => false,
+        Some(there) => nearness(&epics, &stones, own, i).is_none_or(|here| there < here),
+    }
 }
 
 /// 살아 있는 딸린 워크트리 하나 — 집은 일이 서 있을 수 있는 자리(moai-ir8q).
@@ -577,9 +620,13 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
     // 스냅샷은 자리를 못 찾은 줄이 있을 때만 파므로(`worktree::workplaces` 의 문), 안 좁히면 한
     // 저장소의 같은 상태에 두 답이 난다 — 상관없는 딴 줄 하나가 자리를 잃으면 그때부터 이 줄에
     // 둘째 자리가 붙는다. 답이 남의 줄에 따라 흔들리느니, 이름이 답한 줄은 이름만으로 답한다.
+    // **가장 가까운 이름만 낸다**(moai-m62u) — 안 치운 에픽 워크트리와 그 멤버를 제 이름으로 띄운
+    // 워크트리가 같이 서면 일하는 곳은 뒤의 것이다. 훅의 초점([`claimed_over`])과 같은 자다.
     for (&id, &i) in &picked {
-        let by_name: Vec<&Workplace> =
-            trees.iter().filter(|t| claims(&epics, &stones, &t.names, i)).collect();
+        let near: Vec<(&Workplace, usize)> =
+            trees.iter().filter_map(|t| nearness(&epics, &stones, &t.names, i).map(|n| (t, n))).collect();
+        let best = near.iter().map(|(_, n)| *n).min();
+        let by_name: Vec<&Workplace> = near.iter().filter(|(_, n)| Some(*n) == best).map(|(t, _)| *t).collect();
         if !by_name.is_empty() {
             found.insert(id, by_name);
         }
@@ -3055,6 +3102,9 @@ mod tests {
     /// (이슈의 마일스톤, 그리고 그 이슈가 든 에픽의 마일스톤) — 같은 것이라 한 번만 걸어야 하고,
     /// 여러 자리에 선 멤버를 합칠 때 잇닿지 않은 중복까지 걷어내야 한다. 안 그러면 `moai show
     /// <마일스톤>` 이 같은 `자리` 줄을 두 번 낸다.
+    ///
+    /// 한 멤버가 두 자리에 서려면 **같은 거리의 이름** 둘이어야 한다 — 에픽 이름과 제 이름이면 제
+    /// 이름만 선다([`the_closest_name_wins_the_place`]).
     #[test]
     fn a_rolled_up_place_names_each_worktree_once() {
         let mut epic = make("argos-0001", Kind::Epic, "todo");
@@ -3063,18 +3113,58 @@ mod tests {
             make("argos-0009", Kind::Milestone, "todo"),
             epic,
             member("argos-0002", "argos-0001", "in_progress"),
+            member("argos-0003", "argos-0001", "in_progress"),
         ];
-        // 이름이 그 줄을 가리키는 워크트리와 그 에픽을 가리키는 워크트리 — 멤버 하나가 둘에 선다.
+        // 둘 다 디렉터리 이름이 0002 를 가리키고, 뒤의 것은 가지 이름으로 0003 도 가리킨다 — 0002 는
+        // 둘에, 0003 은 뒤의 것에 서서 에픽이 뒤의 것을 두 번 받는다.
         let trees = vec![
-            tree("/r/.claude/worktrees/argos-0001", "worktree-argos-0001", &[]),
-            tree("/r/.claude/worktrees/argos-0002", "worktree-argos-0002", &[]),
+            tree("/r/a/argos-0002", "worktree-argos-0002", &[]),
+            tree("/r/b/argos-0002", "worktree-argos-0003", &[]),
         ];
         let at = places(&issues, &cfg(), &trees, LATER);
         let branches = |id: &str| at.get(id).map(|p| p.at().iter().map(|w| w.branch.as_str()).collect::<Vec<_>>());
-        let both = Some(vec!["worktree-argos-0001", "worktree-argos-0002"]);
+        let both = Some(vec!["worktree-argos-0002", "worktree-argos-0003"]);
         assert_eq!(branches("argos-0002"), both);
+        assert_eq!(branches("argos-0003"), Some(vec!["worktree-argos-0003"]));
         assert_eq!(branches("argos-0001"), both, "에픽이 자리를 겹쳐 냈다");
         assert_eq!(branches("argos-0009"), both, "마일스톤이 같은 자리를 두 번 냈다");
+    }
+
+    /// **가장 가까운 이름이 자리를 쥔다**(moai-m62u, 사용자 결정) — 머지하고 안 치운 에픽 워크트리가
+    /// 그 에픽에 뒤이어 집은 멤버를, 그 멤버를 제 이름으로 띄운 워크트리보다 먼저 쥐지 않는다. 조상도
+    /// 같다 — 제 이름으로 뜬 자식의 자리는 부모 이름의 워크트리가 아니다. 가리키는 이름이 에픽 하나뿐이면
+    /// 여전히 거기다(에픽 이름으로 뜬 워크트리에서 멤버를 하는 것이 규약이다).
+    #[test]
+    fn the_closest_name_wins_the_place() {
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "todo"),
+            member("argos-0002", "argos-0001", "in_progress"),
+            member("argos-0003", "argos-0001", "in_progress"),
+            member("argos-0003.aaa", "argos-0001", "in_progress"),
+        ];
+        let trees = vec![
+            tree("/r/.claude/worktrees/argos-0001", "worktree-argos-0001", &[]),
+            tree("/r/.claude/worktrees/argos-0002", "worktree-argos-0002", &[]),
+            tree("/r/.claude/worktrees/argos-0003", "worktree-argos-0003", &[]),
+            tree("/r/.claude/worktrees/argos-0003.aaa", "worktree-argos-0003.aaa", &[]),
+        ];
+        let at = places(&issues, &cfg(), &trees, LATER);
+        let branches = |id: &str| at.get(id).map(|p| p.at().iter().map(|w| w.branch.as_str()).collect::<Vec<_>>());
+        assert_eq!(branches("argos-0002"), Some(vec!["worktree-argos-0002"]), "에픽 이름이 제 이름과 겨뤄 이겼다");
+        assert_eq!(branches("argos-0003.aaa"), Some(vec!["worktree-argos-0003.aaa"]), "부모 이름이 제 이름과 겨뤄 이겼다");
+        let only_epic = &trees[..1];
+        let at = places(&issues, &cfg(), only_epic, LATER);
+        assert_eq!(at["argos-0002"].at().len(), 1, "에픽 이름만 있을 때 자리를 잃었다");
+
+        // 훅의 자도 같다 — 옆 이름이 더 가까울 때만 옆의 것이다. 같은 거리면 제 것이다.
+        let set = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect::<BTreeSet<String>>();
+        let (epic, own, none) = (set(&["argos-0001"]), set(&["argos-0002"]), set(&[]));
+        let theirs = claimed_over(&issues, &epic, &own);
+        assert!(!theirs(&issues[1]), "제 이름 워크트리의 줄을 에픽 워크트리에 넘겼다");
+        assert!(theirs(&issues[2]), "제 이름이 안 가리키는 멤버를 제 것으로 셌다");
+        assert!(claimed_over(&issues, &epic, &none)(&issues[1]));
+        assert!(!claimed_over(&issues, &own, &own)(&issues[1]), "같은 거리를 옆에 넘겼다");
+        assert!(claimed_over(&issues, &set(&["argos-0003.aaa"]), &set(&["argos-0003"]))(&issues[3]), "자식 이름이 부모 이름에 졌다");
     }
 
     /// **묶음이 아닌 id 로는 굴려 올리지 않는다.** 소속 지도(`groups`)는 `epic` 에 적힌 글자를

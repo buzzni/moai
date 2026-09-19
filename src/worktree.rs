@@ -483,12 +483,19 @@ fn others_of(root: &Path) -> Result<(Option<String>, Vec<(Tree, PathBuf)>), Stri
     ))
 }
 
-/// 옆 워크트리들의 **이름이 가리키는 id 후보** — 훅이 초점에서 뺄 것(`hook::held`).
+/// 옆 워크트리들의 **이름이 가리키는 id 후보**와 제 워크트리의 이름 후보 — 훅이 초점에서 뺄 것을
+/// 잰다(`hook::Away`). 옆 이름은 제 이름보다 가까이 가리킬 때만 이긴다(moai-m62u).
 ///
 /// **못 찾으면 비어 있다.** git 이 없거나 저장소가 아니면 옆도 없는 것이고, 그러면
 /// 전처럼 스냅샷의 집은 줄이 다 제 초점이다. 훅은 무엇이 어긋나도 조용해야 한다.
-pub fn away(root: &Path) -> BTreeSet<String> {
-    on_disk(root).map(|d| names(d.others())).unwrap_or_default()
+pub fn away(root: &Path) -> crate::hook::Away {
+    on_disk(root)
+        .map(|d| crate::hook::Away {
+            names: names(d.others()),
+            own: names(d.all.iter().filter(|(_, _, me)| *me).map(|(t, ..)| t)),
+            unsure: BTreeSet::new(),
+        })
+        .unwrap_or_default()
 }
 
 /// git 이 적어 둔 파일에서 읽은 워크트리 목록([`on_disk`]).
@@ -1265,8 +1272,8 @@ mod tests {
 
         let dir = crate::scratch::Scratch::fenced_in(&inside, "fence");
         assert_eq!(top_of(dir.path()).as_deref(), Some(canonical(dir.path()).as_path()), "훑기가 울타리를 넘어갔다");
-        assert!(away(dir.path()).is_empty(), "울타리 위의 저장소가 새어 나왔다 — {:?}", away(dir.path()));
-        assert!(away(&dir.join("nowhere")).is_empty(), "없는 자리에서도 위의 저장소를 읽었다");
+        assert!(away(dir.path()).names.is_empty(), "울타리 위의 저장소가 새어 나왔다 — {:?}", away(dir.path()));
+        assert!(away(&dir.join("nowhere")).names.is_empty(), "없는 자리에서도 위의 저장소를 읽었다");
         assert!(!is_linked(dir.path()), "울타리를 딸린 워크트리로 읽었다");
         let git_top = crate::git::run(dir.path(), &["rev-parse", "--show-toplevel"]).map(|t| PathBuf::from(t.trim_end()));
         assert_eq!(git_top.ok(), Some(canonical(dir.path())), "git 이 울타리를 지나쳐 위의 저장소를 잡았다");
@@ -1376,10 +1383,10 @@ mod tests {
         std::fs::remove_dir_all(&gone).unwrap();
         let by_git = |at: &Path| others_of(at).map(|(_, t)| names(t.iter().map(|(t, _)| t))).unwrap();
         for at in [&main, &feat, &base.join("more")] {
-            assert_eq!(away(at), by_git(at), "{} 에서 파일로 읽은 목록이 git 과 다르다", at.display());
+            assert_eq!(away(at).names, by_git(at), "{} 에서 파일로 읽은 목록이 git 과 다르다", at.display());
         }
-        assert!(!away(&main).contains("gone"), "사라진 워크트리를 이름으로 댄다");
-        assert!(away(&base.join("nowhere")).is_empty());
+        assert!(!away(&main).names.contains("gone"), "사라진 워크트리를 이름으로 댄다");
+        assert!(away(&base.join("nowhere")).names.is_empty());
 
         // **같은 저장소의 같은 자리 트래커만 같다**(moai-23ky) — 옆 워크트리의 main 은 같고, 한
         // 저장소에 트래커를 둘 둔 모노레포의 `a`·`b` 는 다르다.
@@ -1433,9 +1440,9 @@ mod tests {
         assert!(got.origin.labels().is_empty(), "겹치지 않은 곳을 겹쳐 봤다고 댄다 — {:?}", got.origin.labels());
         assert!(got.trouble.iter().any(|t| t.contains("worktree-t-2")), "깨진 스냅샷을 말하지 않는다 — {:?}", got.trouble);
         for id in ["t-1", "t-2"] {
-            assert!(away(&main).contains(id), "훅의 자가 {id} 를 안 센다 — 이 시험이 견줄 것이 없다");
+            assert!(away(&main).names.contains(id), "훅의 자가 {id} 를 안 센다 — 이 시험이 견줄 것이 없다");
         }
-        assert!(!away(&main).contains("t-3"), "훅의 자가 사라진 워크트리를 센다 — 이 시험이 견줄 것이 없다");
+        assert!(!away(&main).names.contains("t-3"), "훅의 자가 사라진 워크트리를 센다 — 이 시험이 견줄 것이 없다");
         assert_eq!(got.origin.working("t-3"), None, "디렉터리가 사라진 워크트리의 이름을 훅과 달리 들었다");
         assert!(!got.origin.named_only().contains(&"worktree-t-3"), "{:?}", got.origin.named_only());
 
