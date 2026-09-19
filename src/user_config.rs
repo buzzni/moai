@@ -818,54 +818,6 @@ impl Doc {
         (marks, problems)
     }
 
-    /// 읽음을 적는다 — **준 id 만 손댄다**(moai-50mn). 남이 적은 줄도, 이 바이너리가 모르는 id 도
-    /// 그대로 둔다: 읽음은 사람마다 쌓이는 것이라 지울 까닭이 없고, 락 안에서 다시 읽은 파일을
-    /// 통째로 덮으면 옆 탐색기가 방금 읽은 줄이 사라진다(`Doc::merge_look` 과 같은 까닭).
-    ///
-    /// 같은 때가 이미 적혀 있으면 아무것도 안 한다 — 헛 쓰기가 없다. 돌려주는 것은 **실제로 바뀐
-    /// id** 다 — 부르는 쪽이 "무엇을 적었나" 를 락 안에서 잰 그대로 댄다(moai-j038.vna).
-    ///
-    /// **`read` 가 표가 아니면 적지 않는다** — 무엇인지 모르는 값을 덮으면 되돌릴 수 없다. **준 id 의
-    /// 자리에 때가 아닌 것이 있어도 하나도 안 적는다**(moai-j038.vna) — 손으로 적은 맨 점 키(`a-0002.rv
-    /// = …`)는 `a-0002` 표 밑의 `rv` 로 읽히는데, 그 위에 `a-0002` 의 때를 덮으면 자식의 읽음과 그 위
-    /// 주석이 말없이 사라진다. 엄함은 지금 쓰는 줄에 대한 것이라, 준 id 가 아닌 자리의 이상한 키는
-    /// 그대로 둔다(읽기가 까닭을 댄다 — [`Doc::read_marks`]).
-    pub fn mark_read(&mut self, marks: &BTreeMap<String, String>) -> R<Vec<String>> {
-        if marks.is_empty() {
-            return Ok(Vec::new());
-        }
-        match self.doc.get(READ) {
-            None => {}
-            Some(item) if item.is_table_like() => {
-                let t = item.as_table_like().expect("표인 것을 봤다");
-                if let Some((id, odd)) = marks.keys().find_map(|id| t.get(id).filter(|v| v.as_str().is_none()).map(|v| (id, v))) {
-                    return Err(refuse(format!(
-                        "`{READ}` 의 `{id}` 가 때가 아니라({}) 읽음을 적지 않는다 — 손으로 고친다",
-                        odd.type_name()
-                    )));
-                }
-            }
-            Some(item) => {
-                return Err(refuse(format!(
-                    "`{READ}` 가 `[{READ}]` 표가 아니라({}) 읽음을 적지 않는다 — 손으로 고친다",
-                    item.type_name()
-                )));
-            }
-        }
-        if self.doc.get(READ).is_none() {
-            let t = self.new_table();
-            self.doc.insert(READ, Item::Table(t));
-        }
-        let t = self.doc.get_mut(READ).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
-        let mut written = Vec::new();
-        for (id, when) in marks {
-            if write_value(t, id, toml_edit::Value::from(when.as_str())) {
-                written.push(id.clone());
-            }
-        }
-        self.dirty |= !written.is_empty();
-        Ok(written)
-    }
 }
 
 /// 화면 언어가 사는 표(moai-slfv).
@@ -1631,13 +1583,11 @@ mod tests {
         assert_eq!((reg.look.sort.as_deref(), reg.lang.as_deref()), (Some("title"), Some("en")));
         assert_eq!(reg.read.get("m-0001").map(String::as_str), Some("T"));
 
-        // 보기와 읽음은 적힌다. 목록은 그대로다.
+        // 보기는 적힌다. 목록은 그대로다.
         update(&path, |doc| doc.merge_look(&reg.look, &Look { sort: Some("created".into()), ..reg.look.clone() })).unwrap();
-        update(&path, |doc| doc.mark_read(&[("m-0002".to_string(), "U".to_string())].into())).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.starts_with("project = [{ path = \"/a\" }]\n"), "{text}");
         assert_eq!(read(Some(&path)).look.sort.as_deref(), Some("created"), "{text}");
-        assert!(read(Some(&path)).read.contains_key("m-0002"), "{text}");
     }
 
     /// 못 읽는 항목 하나는 그 줄만 말하고, 나머지는 보이고, 쓰기를 막지 않는다.
@@ -1829,10 +1779,9 @@ mod tests {
             assert_eq!(update(&path, |doc| doc.remove(&["/z".into()])).unwrap(), 1);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "add/rm 왕복");
         }
-        // 보기·읽음·색도 같은 렌더를 지난다.
+        // 보기·색도 같은 렌더를 지난다.
         std::fs::write(&path, all).unwrap();
         update(&path, |doc| doc.merge_look(&Look::default(), &Look { detail: Some(true), ..Look::default() })).unwrap();
-        update(&path, |doc| doc.mark_read(&[("m-0001".to_string(), "T".to_string())].into())).unwrap();
         update(&path, |doc| doc.set_hue(&["/a".into()], Hue::named("green"))).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.replace("\r\n", "").contains('\n'), "{text:?}");
@@ -1953,20 +1902,17 @@ mod tests {
     /// **표를 세우는 쓰기는 모두 머리 주석을 머리에 둔다**(moai-gmdu 에픽 리뷰) — 등록만 옮기면 주석만 있던 설정에
     /// 처음 적는 것이 보기(`[tui]`)나 읽음(`[read]`)일 때 머리 주석이 새 표 밑으로 밀린다.
     #[test]
-    fn a_head_comment_stays_above_the_first_look_and_read_tables() {
+    fn a_head_comment_stays_above_the_first_table() {
         let look = Look { detail: Some(true), ..Look::default() };
         let mut doc = Doc::parse("# 내 설정\n").unwrap();
         doc.merge_look(&Look::default(), &look).unwrap();
         assert_eq!(doc.render(), "# 내 설정\n\n[tui]\ndetail = true\n");
-        let mut doc = Doc::parse("# 내 설정\n").unwrap();
-        doc.mark_read(&[("m-0001".to_string(), "T".to_string())].into()).unwrap();
-        assert_eq!(doc.render(), "# 내 설정\n\n[read]\nm-0001 = \"T\"\n");
         // 보기를 먼저 적고 등록했다 빼도 머리 주석은 머리에 있다.
         let mut doc = Doc::parse(&doc.render()).unwrap();
         doc.add(Path::new("/z")).unwrap();
         let mut doc = Doc::parse(&doc.render()).unwrap();
         doc.remove(&["/z".into()]).unwrap();
-        assert_eq!(doc.render(), "# 내 설정\n\n[read]\nm-0001 = \"T\"\n");
+        assert_eq!(doc.render(), "# 내 설정\n\n[tui]\ndetail = true\n");
     }
 
     /// 머리로 옮기는 것은 **키도 표도 없는** 설정의 주석뿐이다 — 키나 표가 있는 파일의 끝 글은 앞의 것의 꼬리일
@@ -2437,66 +2383,34 @@ mod tests {
     }
 
     /// **읽음도 준 키만 손댄다**(moai-50mn) — `merge_look` 과 같은 약속이라 같은 자로 시험한다.
-    /// 남이 적은 줄도 이 바이너리가 모르는 id 도 남고, 주석은 그대로고, 같은 때면 안 쓴다.
-    /// `.` 이 든 자식 id(`a-0002.rv`)는 **낱말 키로 따옴표에 싸여야** 한다 — 맨 키로 적히면
-    /// 다음 읽기가 그것을 점 찍은 키로 보아 `a-0002` 표 밑의 `rv` 로 읽고, 그 줄의 읽음이
-    /// 통째로 사라진다.
+    /// **옛 `[read]` 는 읽기만 한다**(moai-bwce, 사용자 결정 3) — 이 바이너리가 다시 안 적으므로 쓰는
+    /// 자는 [`crate::read_marks`] 로 옮겼다. 여기 남는 것은 겹쳐 볼 때의 읽기다: 관대하게 읽고, 표가
+    /// 아니면 까닭 한 줄로 댄다. 인라인 표(`read = { … }`)도 읽는다.
     #[test]
-    fn a_read_mark_keeps_what_others_wrote_and_the_comments() {
+    fn the_old_read_table_is_still_read_leniently() {
         let d = scratch("read-marks");
         let path = d.join("config.toml");
         let src = "[read]\n# 남이 적어 둔 것\n\"m-0001\" = \"2026-09-01T00:00:00Z\"  # 뒤 주석\nm-0002 = \"2026-09-02T00:00:00Z\"\n";
         std::fs::write(&path, src).unwrap();
-        let mark = |ids: &[(&str, &str)]| {
-            let marks: BTreeMap<String, String> = ids.iter().map(|(i, w)| (i.to_string(), w.to_string())).collect();
-            update(&path, |doc| doc.mark_read(&marks)).unwrap();
-        };
-
-        mark(&[("m-0002", "2026-09-10T00:00:00Z"), ("m-0003.rv", "2026-09-10T00:00:00Z")]);
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("# 남이 적어 둔 것"), "안 바꾼 키 위 주석이 달라졌다\n{text}");
-        assert!(text.contains("\"m-0001\" = \"2026-09-01T00:00:00Z\"  # 뒤 주석"), "안 준 id 를 건드렸다\n{text}");
-        assert!(text.contains("\"m-0003.rv\""), "`.` 이 든 자식 id 를 맨 키로 적었다 — 다음 읽기가 못 찾는다\n{text}");
         assert_eq!(
             read(Some(&path)).read,
             [
                 ("m-0001".to_string(), "2026-09-01T00:00:00Z".to_string()),
-                ("m-0002".to_string(), "2026-09-10T00:00:00Z".to_string()),
-                ("m-0003.rv".to_string(), "2026-09-10T00:00:00Z".to_string()),
+                ("m-0002".to_string(), "2026-09-02T00:00:00Z".to_string()),
             ]
-            .into(),
-            "{text}"
+            .into()
         );
 
-        // 같은 때를 다시 적으면 파일을 안 건드린다 — 헛 쓰기도 헛 diff 도 없다. 새로 적은 것으로 세지도
-        // 않는다 — `moai read` 가 "적을 것이 없다" 를 이 답으로 가른다.
-        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        let again: BTreeMap<String, String> = [("m-0002".to_string(), "2026-09-10T00:00:00Z".to_string())].into();
-        assert!(update(&path, |doc| doc.mark_read(&again)).unwrap().is_empty(), "같은 때를 새로 적은 것으로 셌다");
-        update(&path, |doc| doc.mark_read(&BTreeMap::new())).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "같은 값에 헛 쓰기를 했다");
-        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
-
-        // **준 id 자리에 때가 아닌 것이 있으면 하나도 안 적는다**(moai-j038.vna) — 손으로 적은 맨 점 키는
-        // `m-0002` 표 밑의 `rv` 로 읽히고, 그 위에 `m-0002` 의 때를 덮으면 자식의 읽음과 주석이 사라진다.
-        let dotted_src = "[read]\n# 손으로 적은 자식\nm-0002.rv = \"T\"\n";
-        let mut dotted = Doc::parse(dotted_src).unwrap();
-        let both: BTreeMap<String, String> = [("m-0002".to_string(), "U".to_string()), ("m-0003".to_string(), "U".to_string())].into();
-        assert_eq!(dotted.mark_read(&both).map_err(|e| e.code).unwrap_err(), code::BROKEN, "때가 아닌 자리를 덮었다");
-        assert!(!dotted.changed(), "거절해 놓고 옆 id 를 적었다");
-        assert_eq!(dotted.render(), dotted_src, "거절해 놓고 문서를 바꿨다");
-
-        // **`read` 가 표가 아니면 적지 않는다** — 무엇인지 모르는 값을 덮으면 되돌릴 수 없다.
-        let mut odd = Doc::parse("read = 3\n").unwrap();
+        let odd = Doc::parse("read = 3\n").unwrap();
         assert_eq!(odd.read_marks().1.len(), 1, "표가 아닌 것을 까닭 없이 지나쳤다");
-        assert_eq!(odd.mark_read(&[("m-0001".to_string(), "T".to_string())].into()).map_err(|e| e.code).unwrap_err(), code::BROKEN);
-        assert!(!odd.changed(), "안 적기로 해 놓고 파일을 더럽혔다");
+        assert!(odd.read_marks().0.is_empty());
 
-        // 읽히는 인라인 표는 쓰기도 받는다 — `merge_look` 과 같은 자리다.
-        let mut inline = Doc::parse("read = { \"m-0001\" = \"T\" }\n").unwrap();
-        inline.mark_read(&[("m-0002".to_string(), "U".to_string())].into()).unwrap();
-        assert_eq!(inline.read_marks().0.len(), 2, "{}", inline.render());
+        let inline = Doc::parse("read = { \"m-0001\" = \"T\" }\n").unwrap();
+        assert_eq!(inline.read_marks().0.len(), 1);
+
+        // 때가 아닌 값은 그 줄만 건너뛰고 까닭을 댄다.
+        let bad = Doc::parse("[read]\nm-0001 = 3\n").unwrap();
+        assert!(bad.read_marks().0.is_empty() && bad.read_marks().1.len() == 1);
     }
 
     /// 바꾼 것이 없으면 파일을 건드리지 않는다 — 헛 쓰기도 헛 diff 도 없다.

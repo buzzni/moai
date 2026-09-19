@@ -3385,6 +3385,17 @@ const JSON_SWEEP: &[&str] = &[
     "read",
 ];
 
+/// 그 설정 곁의 읽음 파일들을 이어 읽는다(moai-omx7) — 읽음은 이제 설정이 아니라
+/// `<설정 디렉터리>/read/<뿌리 해시>.toml` 에 프로젝트마다 하나씩 산다. 아직 아무것도 안 적었으면 빈 글이다.
+fn read_sheet(cfg: &std::path::Path) -> String {
+    let dir = cfg.parent().expect("설정에 디렉터리가 있다").join("read");
+    let Ok(entries) = std::fs::read_dir(&dir) else { return String::new() };
+    let mut files: Vec<std::path::PathBuf> =
+        entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "toml")).collect();
+    files.sort();
+    files.iter().map(|p| std::fs::read_to_string(p).expect("방금 본 파일이다")).collect::<Vec<_>>().join("\n")
+}
+
 /// **읽음은 내 설정에만 적힌다**(moai-u8oh, 사용자 결정) — 트래커 파일은 한 바이트도 안 바뀐다.
 /// `--all` 은 내게 온 것 가운데 안 읽은 것을, `-e` 는 그 묶음(에픽·마일스톤)의 멤버와 **그 밑까지**
 /// 적는다 — 물려받은 소속도 센다(moai-u8oh.x85). 없는 줄은 #a-partial 대로 말하고 비영으로 끝나고,
@@ -3403,8 +3414,9 @@ fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
 
     let out = mine(&["read", &member, "--json"]);
     assert!(out.contains(&member), "{out}");
-    let saved = std::fs::read_to_string(&cfg).unwrap();
+    let saved = read_sheet(&cfg);
     assert!(saved.contains("[read]") && saved.contains(&member), "{saved}");
+    assert!(!std::fs::read_to_string(&cfg).unwrap_or_default().contains("[read]"), "읽음을 설정 파일에 적었다");
     assert_eq!(issues(s.path()), before, "읽었다고 트래커가 바뀌었다");
 
     // 두 번째는 적을 것이 없다 — 그 뒤로 줄이 안 바뀌어 같은 도장이 이미 적혀 있다(moai-lyc1).
@@ -3469,7 +3481,7 @@ fn reading_writes_the_stamp_of_the_line_i_saw() {
 
     // 02:00 에 읽는다 — 적히는 것은 그 줄의 도장(00:00)이다.
     at("2026-09-18T02:00:00Z", &["read", &id]);
-    let saved = std::fs::read_to_string(&cfg).unwrap();
+    let saved = read_sheet(&cfg);
     assert!(saved.contains(&format!("\"{id}\" = \"2026-09-18T00:00:00Z\"")) || saved.contains(&format!("{id} = \"2026-09-18T00:00:00Z\"")), "{saved}");
 
     // 가지에서 01:30 에 찍힌 고침이 머지로 들어온다 — 읽은 때(02:00)보다 이르지만 본 줄과 다르다.
@@ -3479,8 +3491,10 @@ fn reading_writes_the_stamp_of_the_line_i_saw() {
 
     // 옛 값(본 때, 도장보다 늦다)은 옛 뜻대로 읽는다 — 그 뒤로 안 바뀐 줄은 안 읽음이 아니다.
     let old = field(&at("2026-09-18T04:00:00Z", &["add", "옛 바이너리로 읽은 줄", "--json"]), "id");
-    let text = std::fs::read_to_string(&cfg).unwrap();
-    std::fs::write(&cfg, format!("{text}\"{old}\" = \"2026-09-18T05:00:00Z\"\n")).unwrap();
+    // **옛 자리에 적는다** — 옛 바이너리가 적던 곳이 설정의 `[read]` 다. 새 자리의 파일에 없는 id 라
+    // 겹쳐 읽기가 그것을 든다(moai-omx7, 사용자 결정 3).
+    let text = std::fs::read_to_string(&cfg).unwrap_or_default();
+    std::fs::write(&cfg, format!("{text}\n[read]\n\"{old}\" = \"2026-09-18T05:00:00Z\"\n")).unwrap();
     let out = at("2026-09-18T06:00:00Z", &["read", "--all", "--json"]);
     assert!(!out.contains(&old), "옛 값으로 읽은 줄이 다시 [NEW] 로 섰다 — {out}");
 }
@@ -3503,7 +3517,7 @@ fn reading_a_duplicate_id_takes_the_later_stamp_of_the_twins() {
 
     let out = ok_with(s.path(), &cfg, &["read", "--all", "--json"]);
     assert!(out.contains("argos-0001"), "안 읽은 쌍둥이를 안 적었다 — {out}");
-    let saved = std::fs::read_to_string(&cfg).unwrap();
+    let saved = read_sheet(&cfg);
     assert!(saved.contains("argos-0001 = \"2026-09-18T05:00:00Z\""), "늦은 도장을 안 적었다 — {saved}");
     let out = ok_with(s.path(), &cfg, &["read", "--all", "--json"]);
     assert!(!out.contains("argos-0001"), "읽은 쌍둥이가 여전히 안 읽음이다 — {out}");
@@ -3511,7 +3525,7 @@ fn reading_a_duplicate_id_takes_the_later_stamp_of_the_twins() {
     // id 를 준 길도 같다 — 뒷줄이 늦으면 뒷줄 것이다.
     std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{}{}", line("2026-09-18T06:00:00Z"), line("2026-09-18T07:00:00Z"))).unwrap();
     ok_with(s.path(), &cfg, &["read", "argos-0001"]);
-    let saved = std::fs::read_to_string(&cfg).unwrap();
+    let saved = read_sheet(&cfg);
     assert!(saved.contains("argos-0001 = \"2026-09-18T07:00:00Z\""), "늦은 도장을 안 적었다 — {saved}");
 }
 
@@ -3544,7 +3558,7 @@ fn reading_a_group_takes_what_is_drawn_under_it() {
     let out = moai_with(s.path(), &cfg, &["read", "-e", &by_field]);
     assert!(!out.status.success(), "묶음이 아닌 줄을 받았다");
     assert!(String::from_utf8_lossy(&out.stderr).contains("에픽·마일스톤"), "{}", String::from_utf8_lossy(&out.stderr));
-    assert!(!std::fs::read_to_string(&cfg).unwrap().contains(&format!("{by_field} =")), "거절해 놓고 적었다");
+    assert!(!read_sheet(&cfg).contains(&format!("{by_field} =")), "거절해 놓고 적었다");
 }
 
 /// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.

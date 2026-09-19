@@ -34,8 +34,10 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     if args.all {
         let me = crate::model::actor(ctx.user.as_deref(), &repo.root)?;
         let me = crate::model::label(&me.name, Some(&me.email), crate::config::Naming::Full);
-        // 적어 둔 읽음은 **여기서만** 든다 — 안 읽은 줄을 가르는 것은 `--all` 뿐이다.
-        let seen = crate::user_config::read(Some(&path)).read;
+        // 적어 둔 읽음은 **여기서만** 든다 — 안 읽은 줄을 가르는 것은 `--all` 뿐이다. 읽음은 이 저장소의
+        // 제 파일에 살고, 옛 `[read]` 는 겹쳐 본다(moai-omx7, 사용자 결정 2026-09-19).
+        let legacy = crate::user_config::read(Some(&path)).read;
+        let (seen, _) = crate::read_marks::read(&path, &repo.root, &legacy);
         want.extend(crate::query::unread(&load.issues, &me, &seen).into_iter().map(str::to_string));
     }
     // `-e <묶음>` 은 그 묶음 줄과 **그 밑에 그려진 것 전부** — 목록에서 `SPC m r` 이 부르는 것과 같은
@@ -73,10 +75,15 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     let fresh: Vec<String> = if targets.is_empty() {
         Vec::new()
     } else {
-        crate::user_config::update(&path, |doc| {
+        crate::read_marks::update(&path, &repo.root, |sheet| {
             let lines = load.issues.iter().filter(|i| targets.contains(i.id.as_str()));
-            let marks = crate::query::read_marks_of(lines, &doc.read_marks().0);
-            doc.mark_read(&marks)
+            let marks = crate::query::read_marks_of(lines, &sheet.marks().0);
+            let wrote = sheet.mark(&marks)?;
+            // **트래커에 없는 id 를 여기서 걷는다**(moai-dt5q, 사용자 결정 2) — 이 자리는 트래커를 이미
+            // 들고 있다. 닫힌 줄은 안 걷는다: 걷으면 그 줄이 다시 설 때 [NEW] 가 되살아나, 읽음의 뜻이
+            // "본 적 있다" 에서 "최근에 본 적 있다" 로 바뀐다.
+            sheet.prune(&known);
+            Ok(wrote)
         })?
     };
 

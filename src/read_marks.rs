@@ -145,7 +145,7 @@ impl Sheet {
     }
 
     /// 적어 둔 읽음. **관대하게 읽는다** — 낱말이 아닌 값은 까닭 한 줄로 대고 건너뛴다.
-    fn marks(&self) -> (BTreeMap<String, String>, Vec<String>) {
+    pub fn marks(&self) -> (BTreeMap<String, String>, Vec<String>) {
         let mut problems = Vec::new();
         let Some(item) = self.doc.get(READ) else {
             return (BTreeMap::new(), problems);
@@ -323,6 +323,20 @@ mod tests {
         assert!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().is_empty());
         assert_eq!(std::fs::read_to_string(path_for(&cfg, &root)).unwrap(), was, "같은 때를 다시 적어 파일이 바뀌었다");
         assert_eq!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "B")]))).unwrap(), ["argos-0001"]);
+    }
+
+    /// **`.` 이 든 자식 id 는 따옴표에 싼 낱말 키로 적는다**(moai-j038.vna) — 맨 키로 적히면 다음 읽기가
+    /// 점 찍은 키로 보아 `argos-0003` 표 밑의 `rv` 로 읽고, 그 줄의 읽음이 통째로 사라진다. 리뷰 이슈의
+    /// id 가 늘 이 꼴이라 흔한 자리다.
+    #[test]
+    fn a_child_id_with_a_dot_is_written_as_one_quoted_key() {
+        let s = Scratch::new("read-marks-dotted");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0003.rv", "A")]))).unwrap();
+        let text = std::fs::read_to_string(path_for(&cfg, &root)).unwrap();
+        assert!(text.contains("\"argos-0003.rv\""), "맨 키로 적었다 — 다음 읽기가 못 찾는다\n{text}");
+        assert_eq!(read(&cfg, &root, &BTreeMap::new()).0, marks(&[("argos-0003.rv", "A")]));
     }
 
     /// **모르는 키와 주석은 그대로 간다** — 새 바이너리가 적은 것을 옛 바이너리가 한 번 만져 지우면 안 된다.

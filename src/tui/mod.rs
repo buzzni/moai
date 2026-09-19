@@ -547,6 +547,19 @@ pub struct Site {
     pub warnings: usize,
     /// 마지막으로 읽은 파일의 (고친 때, 길이).
     stamp: Stamp,
+    /// **이 프로젝트의** 적어 둔 읽음 — 이슈 id → 마지막으로 본 줄의 도장(moai-lyc1). 한때 `App` 에 맵
+    /// 하나로 있었는데, 그것이 곧 저장 자리의 섞임이 화면에 비친 모습이었다(moai-bwce·moai-omx7) —
+    /// 한눈 보기의 모든 프로젝트가 그 한 맵을 같이 봐, 이름이 같은 두 저장소의 같은 id 가 서로의
+    /// [NEW] 를 내렸다. 읽음 파일이 프로젝트마다 갈렸으니([`crate::read_marks`]) 화면의 표도 여기 산다.
+    pub seen: std::collections::BTreeMap<String, String>,
+    /// 그 읽음 파일의 표식. 걸음이 이것을 재, 옆 터미널의 `moai read` 가 적은 줄이 이 화면에 닿는다
+    /// ([`App::follow_config`], moai-j038.vna). 한때 설정 파일의 표식이 그 길이었는데, 읽음이 설정 밖으로
+    /// 나가면서 설정은 더 안 바뀐다 — 그 길을 여기로 옮겼다.
+    ///
+    /// **없는 것과 못 찾은 것을 가른다**(`Option<Stamp>`, [`App::config_stamp`] 와 같은 자) — 아직 안 든
+    /// 프로젝트는 `None` 이고, 읽음 파일이 없는 것은 `Some(None)` 이다. 하나로 들면 옛 `[read]` 만 있는
+    /// 사람의 프로젝트가 영영 안 들린다(새 파일이 없어 표식이 늘 `None` 이라 "그대로" 로 읽힌다).
+    read_stamp: Option<Stamp>,
     /// 마지막 읽기를 **들인** 때. 표식이 그대로여도 [`layer::REREAD_EVERY`] 가 지나면 다시 읽는다
     /// ([`App::follow`], moai-z4r4). 들인 때로 찍는 까닭은 층과 같다(`Layer::adopt`) — 시작한 때로
     /// 찍으면 한 번 읽는 데 그만큼 걸리는 자리에서 쉬지 않고 다시 읽는다.
@@ -703,9 +716,11 @@ pub struct App {
     pub order: keys::Sorting,
     /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)에 열 이름 줄이 얹힌다.
     pub fields: view::Fields,
-    /// 내 설정에 적힌 읽음 — 이슈 id → 마지막으로 본 줄의 도장(moai-lyc1). 띄울 때 읽고, 읽음을 적을 때 락 안에서 읽은
-    /// 파일의 것으로, 그 파일이 바뀌면 걸음이 다시 읽는다([`App::follow_config`]) — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다.
-    seen: std::collections::BTreeMap<String, String>,
+    /// **옛 `[read]`** — 설정 한 파일에 모여 있던 읽음(moai-bwce, 사용자 결정 3). 이 바이너리는 여기
+    /// 다시 안 적고 **읽기만 한다**: 옛 줄을 건드리면 그것은 설정이 아니라 마이그레이션이고, 그 사이 도는
+    /// 옛 바이너리나 옆 세션이 읽음을 잃는다. 프로젝트의 읽음 파일에 없는 id 만 여기서 든다
+    /// ([`crate::read_marks::read`]). 설정이 바뀌면 [`App::follow_config`] 가 다시 든다.
+    pub legacy_read: std::collections::BTreeMap<String, String>,
     /// 내가 누구인가 — `이름 (메일)`. **띄울 때, 프로젝트를 옮길 때, 묻는 칸에서 사람을 받을 때만**
     /// 푼다(moai-z9pc, moai-j038.vna) — 헤더(`told_user`)가 뿌리와 `user` 가 바뀔 때 다시 푸는 것과 같은
     /// 자다. 다시 읽기마다 부르지는 않는다 — 그 길이 열리면 "읽기는 사람을 묻지 않는다" 가 무너진다
@@ -817,6 +832,8 @@ impl Site {
             unreadable,
             warnings: 0,
             stamp: None,
+            seen: Default::default(),
+            read_stamp: None,
             read_at: None,
             watched: Vec::new(),
             commits: Commits::new(),
@@ -1046,11 +1063,11 @@ impl App {
             read: prepare,
             // **처음에는 done 을 숨긴다**(사람의 결정, 2026-09-14). 끝난 것이 목록을 채워 지금 볼
             // 것을 덮었고, 걷으려면 `status=todo,in_progress,review` 를 손으로 적어야 했다.
+            legacy_read: Default::default(),
             view: view::View::hiding(crate::config::DONE),
             order: Default::default(),
             fields: Default::default(),
             detail_open: true,
-            seen: Default::default(),
             me: None,
             saved: Default::default(),
             list: Scroll::default(),
@@ -1547,6 +1564,7 @@ impl App {
     pub fn follow(&mut self) {
         self.reap();
         self.follow_config();
+        self.follow_read();
         // 층은 제 표식을 따로 본다 — 층에 선 동안에는 아래(한 프로젝트)가 비어 할 일이 없다.
         self.follow_layer();
         // 펼친 프로젝트의 줄도 스레드에서 온다(moai-12yx) — 요약과 따로 돈다.
@@ -1999,10 +2017,48 @@ impl App {
         }
     }
 
-    /// 적어 둔 읽음을 든다(moai-z9pc) — 보기와 같은 한 번의 읽기에서 온다(`user_config::read`).
+    /// 적어 둔 읽음을 든다(moai-z9pc) — **지금 선 프로젝트의 것**이다(moai-bwce). 층의 줄은 그 프로젝트를
+    /// 읽을 때 제 것을 든다([`Site::seen`]).
     pub fn adopt_read(&mut self, seen: std::collections::BTreeMap<String, String>) {
-        self.seen = seen;
+        self.site.seen = seen;
         self.recount_unread();
+    }
+
+    /// 그 프로젝트의 읽음을 **제 파일에서** 든다(moai-bwce) — 옛 `[read]` 를 겹쳐 보고, 표식을 읽기
+    /// **전에** 잰다(뒤에 재면 읽고 다음 걸음 사이에 옆이 쓴 것을 놓친다). 설정 자리를 모르면(시험·설정
+    /// 없는 기계) `None` 이고 부르는 쪽은 들고 있던 것을 둔다.
+    fn read_marks_of(&self, root: &std::path::Path) -> Option<(std::collections::BTreeMap<String, String>, Stamp, Vec<String>)> {
+        let config = self.user_config.as_deref()?;
+        let stamp = crate::store::stamp(&crate::read_marks::path_for(config, root));
+        let (seen, problems) = crate::read_marks::read(config, root, &self.legacy_read);
+        Some((seen, stamp, problems))
+    }
+
+    /// 지금 선 프로젝트의 읽음을 파일에서 들어 [NEW] 를 다시 센다. 띄울 때(`cmd::tui`)와 그 파일이 바뀐
+    /// 걸음([`App::follow_read`])이 부른다.
+    pub fn load_read(&mut self) {
+        let Some(root) = self.here() else { return };
+        let Some((seen, stamp, problems)) = self.read_marks_of(&root) else { return };
+        self.site.read_stamp = Some(stamp);
+        self.adopt_read(seen);
+        // 못 읽거나 남의 것이면 한 줄로 댄다 — 조용히 빈 표로 서면 [NEW] 가 통째로 서는 까닭을 모른다.
+        if let Some(why) = problems.first() {
+            self.notice = Some(format!("읽음을 못 들었다 — {}", crate::text::one_line(why)));
+        }
+    }
+
+    /// **읽음 파일이 바뀌었으면 다시 든다** — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다
+    /// (moai-j038.vna). 한때 그 길은 설정 파일의 표식이었는데, 읽음이 설정 밖으로 나가며 설정은 더 안
+    /// 바뀐다(moai-bwce) — 그래서 그 파일의 표식을 따로 잰다.
+    ///
+    /// 처음 보는 프로젝트(표식이 없다)면 그때 든다 — 프로젝트를 옮기면 그 자리의 읽음이 그 걸음에 선다.
+    fn follow_read(&mut self) {
+        let (Some(config), Some(root)) = (self.user_config.clone(), self.here()) else { return };
+        let now = crate::store::stamp(&crate::read_marks::path_for(&config, &root));
+        if self.site.read_stamp == Some(now) {
+            return;
+        }
+        self.load_read();
     }
 
     /// 사용자 설정 파일이 바뀌었으면 거기 사는 둘을 다시 든다 — 적어 둔 읽음과 층의 줄(moai-en4u).
@@ -2031,18 +2087,19 @@ impl App {
             self.config_stamp = Some(was);
             return;
         }
-        // 적어 둔 읽음을 다시 든다(moai-j038.vna) — 띄울 때 한 번만 읽으면 옆 터미널의 `moai read` 나
-        // 다른 탐색기가 적은 읽음이 이 화면에 영영 안 닿는다.
+        // **옛 `[read]` 를 다시 든다**(moai-bwce, 사용자 결정 3) — 읽음은 이제 제 파일에 살고 여기는
+        // 겹쳐 보는 옛 표다. 이 바이너리는 여기 안 적지만 옛 바이너리나 사람 손은 적을 수 있다.
         //
         // **탈이 있으면 들고 있던 것을 둔다**(리뷰) — 못 읽은 것뿐 아니라 깨진 것도 그렇다. 파싱이 지면
         // `user_config::read` 는 `read` 를 빈 표로 둔 채 까닭만 대는데, 그 빈 표를 들이면 내 줄이 통째로
         // [NEW] 로 선다. 걷어 낸 `read_marks_at` 이 **못 읽거나 깨졌으면** `None` 을 내 막던 자리다.
         // 층은 그대로 다시 세운다 — 깨진 설정의 빈 층과 그 까닭이 사람이 고쳐야 할 것을 비춘다.
         //
-        // 같으면 안 센다 — 보기 토글이 `[tui]` 만 고쳐도 이 길은 돌고(스스로 쓴다), `query::unread` 는
-        // 줄 수만큼 걷는다. 옮겨 든다(`take`): 읽음 표는 읽은 줄마다 쌓여 베끼면 걸음마다 그만큼 든다.
-        if reg.trouble.is_none() && self.seen != reg.read {
-            self.adopt_read(std::mem::take(&mut reg.read));
+        // 같으면 안 든다 — 보기 토글이 `[tui]` 만 고쳐도 이 길은 돌고(스스로 쓴다), 다시 드는 일은
+        // 읽음 파일 읽기와 `query::unread` 의 줄 수만큼 걷기다.
+        if reg.trouble.is_none() && self.legacy_read != reg.read {
+            self.legacy_read = std::mem::take(&mut reg.read);
+            self.load_read();
         }
         self.relayer_with(Some(&reg), None);
     }
@@ -2066,13 +2123,15 @@ impl App {
                 None => return,
             },
         };
-        let seen = self.seen.clone();
         let Some(site) = self.site_mut(seat) else { return };
         let Some(me) = me else {
             site.unread.clear();
             return;
         };
-        site.unread = crate::query::unread(&site.issues, &me, &seen).into_iter().map(str::to_string).collect();
+        // **그 프로젝트의 표로 센다**(moai-bwce) — `App` 의 맵 하나로 세던 판은 한눈 보기의 모든
+        // 프로젝트를 남의 읽음으로 셌다.
+        let Site { issues, seen, unread, .. } = site;
+        *unread = crate::query::unread(issues, &me, seen).into_iter().map(str::to_string).collect();
     }
 
     /// 이 뿌리에서 나는 누구인가 — `이름 (메일)`(moai-j038.vna). 헤더([`App::told_user`])와 같은 자
@@ -2145,28 +2204,50 @@ impl App {
         let pick = |seen: &std::collections::BTreeMap<String, String>| {
             crate::query::read_marks_of(issues.iter().filter(|i| ids.contains(i.id.as_str())), seen)
         };
-        let written: Vec<String> = match self.user_config.clone() {
-            Some(path) => {
-                let wrote = crate::user_config::update(&path, |doc| {
-                    let marks = pick(&doc.read_marks().0);
-                    let written = doc.mark_read(&marks)?;
-                    Ok((written, doc.read_marks().0))
+        // **그 줄이 사는 프로젝트의 읽음 파일에 적는다**(moai-bwce) — 한눈 보기의 줄이면 남의 프로젝트다.
+        // 뿌리를 모르면(시험의 저장소 없는 App) 화면에서만 걷는다.
+        let root = site.repo.as_ref().map(|r| r.root.clone());
+        // **트래커에 없는 id 를 이 자리에서 걷는다**(moai-dt5q, 사용자 결정 2) — 여기는 그 프로젝트의
+        // 줄을 이미 들고 있어, 설정 쓰기가 트래커를 읽어야 하는 일이 안 생긴다. 닫힌 줄은 안 걷는다.
+        let known: std::collections::BTreeSet<&str> = site.issues.iter().map(|i| i.id.as_str()).collect();
+        let written: Vec<String> = match (self.user_config.clone(), root) {
+            (Some(config), Some(root)) => {
+                let wrote = crate::read_marks::update(&config, &root, |sheet| {
+                    let marks = pick(&sheet.marks().0);
+                    let written = sheet.mark(&marks)?;
+                    sheet.prune(&known);
+                    Ok((written, sheet.marks().0))
                 });
                 match wrote {
                     Ok((written, on_file)) => {
-                        self.seen = on_file;
+                        // 파일의 표를 그대로 든다 — 옆 터미널이 그사이 적은 줄까지 함께 온다. 옛
+                        // `[read]` 는 겹쳐 본 값이라 여기 다시 얹는다(사용자 결정 3).
+                        let legacy = &self.legacy_read;
+                        let mut seen = on_file;
+                        for (id, when) in legacy {
+                            seen.entry(id.clone()).or_insert_with(|| when.clone());
+                        }
+                        if let Some(site) = self.site_mut(seat) {
+                            site.seen = seen;
+                        }
+                        // 방금 우리가 쓴 파일이다 — 표식을 함께 올려야 다음 걸음이 헛 읽기를 안 한다.
+                        if seat == Seat::Here {
+                            self.site.read_stamp = Some(crate::store::stamp(&crate::read_marks::path_for(&config, &root)));
+                        }
                         written
                     }
                     Err(e) => {
-                        self.notice = Some(format!("읽음을 설정에 못 적었다 — {}", crate::text::one_line(&e.to_string())));
+                        self.notice = Some(format!("읽음을 못 적었다 — {}", crate::text::one_line(&e.to_string())));
                         return;
                     }
                 }
             }
-            None => {
-                let marks = pick(&self.seen);
+            _ => {
+                let marks = pick(&site.seen);
                 let written = marks.keys().cloned().collect();
-                self.seen.extend(marks);
+                if let Some(site) = self.site_mut(seat) {
+                    site.seen.extend(marks);
+                }
                 written
             }
         };
@@ -2344,6 +2425,13 @@ impl App {
                 site.unfound = fresh.unfound;
                 site.watched = fresh.watched;
                 site.read_at = Some(std::time::Instant::now());
+                // **그 프로젝트의 읽음을 제 파일에서 든다**(moai-bwce) — 한눈 보기의 줄도 제 [NEW] 를
+                // 제 표로 센다. `App` 의 맵 하나를 같이 보던 판은 이름이 같은 두 저장소의 같은 id 가
+                // 서로의 [NEW] 를 내렸다(moai-omx7 의 화면 쪽 모습이다).
+                if let Some((seen, stamp, _)) = site.repo.as_ref().map(|r| r.root.clone()).and_then(|root| self.read_marks_of(&root)) {
+                    site.seen = seen;
+                    site.read_stamp = Some(stamp);
+                }
                 if let Some(place) = self.layer.as_mut().and_then(|l| l.places.iter_mut().find(|p| p.path == path)) {
                     place.site = Some(site);
                 }
@@ -4835,7 +4923,7 @@ mod tests {
         // 적히는 것은 **본 줄의 도장**이다 — 누른 때(`App::now`)가 아니다(moai-lyc1).
         let line = a.site.issues.iter().find(|i| i.id == "argos-0001").unwrap().updated_at.clone();
         assert_ne!(line, a.site.now, "시험이 두 값을 못 가른다");
-        assert_eq!(a.seen.get("argos-0001"), Some(&line), "본 줄의 updated_at 이 아니라 다른 값을 적었다");
+        assert_eq!(a.site.seen.get("argos-0001"), Some(&line), "본 줄의 updated_at 이 아니라 다른 값을 적었다");
     }
 
     /// **`SPC m g` 은 그 줄이 사는 묶음을 읽는다 — 지금 디렉터리의 묶음이 아니다**(리뷰). 지금
@@ -4925,11 +5013,15 @@ mod tests {
     fn r_marks_like_the_cli_and_never_rewinds_a_mark_written_elsewhere() {
         let s = Scratch::new("read-marks-tui");
         let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        // **읽음은 그 프로젝트의 제 파일에 산다**(moai-bwce) — 뿌리를 알아야 그 파일을 고른다.
+        let sheet = crate::read_marks::path_for(&config, &root);
         let mut a = app();
         for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());
             i.assignee_email = Some("raven@example.com".into());
         }
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
         a.site.now = "2026-09-13T13:42:07Z".into();
         a.me = None;
@@ -4942,28 +5034,98 @@ mod tests {
         assert_eq!(a.notice.as_deref(), Some("✓ 읽음 · argos-0009"));
         // 적히는 것은 누른 때가 아니라 **본 줄의 도장**이다(moai-lyc1).
         let stamp = a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
-        assert!(std::fs::read_to_string(&config).unwrap().contains(&format!("argos-0009 = \"{stamp}\"")));
+        assert!(std::fs::read_to_string(&sheet).unwrap().contains(&format!("argos-0009 = \"{stamp}\"")));
+        assert!(!config.exists(), "읽음을 설정 파일에 적었다 — 그 자리는 옛 `[read]` 뿐이다(moai-omx7)");
 
         // 옆 터미널이 더 늦은 도장으로 적어 두었다 — 이 화면은 그것을 모른다.
-        let later = format!("[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\nargos-0009 = \"{stamp}\"\n");
-        std::fs::write(&config, &later).unwrap();
+        let later =
+            format!("path = {:?}\n\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\nargos-0009 = \"{stamp}\"\n", root.display().to_string());
+        std::fs::write(&sheet, &later).unwrap();
         a.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
         assert!(a.site.unread.contains("argos-0001"), "화면의 표가 옆에서 적은 것을 벌써 안다 — 시험의 전제가 틀렸다");
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0001").expect("줄이 없다");
         a.hit("r");
         assert_eq!(a.notice.as_deref(), Some("읽음으로 적을 것이 없다"), "이미 읽은 줄을 다시 적었다");
-        assert_eq!(std::fs::read_to_string(&config).unwrap(), later, "옆에서 적은 새 도장을 낡은 도장으로 덮었다");
+        assert_eq!(std::fs::read_to_string(&sheet).unwrap(), later, "옆에서 적은 새 도장을 낡은 도장으로 덮었다");
         assert!(!a.site.unread.contains("argos-0001"), "적은 뒤 파일의 표를 안 들었다");
 
-        // 옆에서 적은 읽음은 **누르지 않아도** 든다 — 걸음이 설정 파일의 표식을 잰다(moai-en4u).
+        // 옆에서 적은 읽음은 **누르지 않아도** 든다 — 걸음이 **읽음 파일의** 표식을 잰다(moai-en4u 가
+        // 설정 표식으로 열어 둔 길을, 읽음이 설정 밖으로 나가며 옮겼다 — moai-bwce).
         // 첫 걸음은 재기만 한다: 띄울 때 이미 읽었다.
         a.follow();
         assert!(a.site.unread.contains("argos-0002"));
-        std::fs::write(&config, format!("{later}argos-0002 = \"2026-09-14T00:00:00Z\"\n")).unwrap();
+        std::fs::write(&sheet, format!("{later}argos-0002 = \"2026-09-14T00:00:00Z\"\n")).unwrap();
         assert!(a.site.unread.contains("argos-0002"), "걸음 전에 들었다 — 시험의 전제가 틀렸다");
         a.follow();
         assert!(!a.site.unread.contains("argos-0002"), "옆에서 적은 읽음을 걸음이 안 들었다");
+    }
+
+    /// **CLI 와 탐색기가 한 자리에 적는다**(moai-bwce) — `r` 이 적은 것을 `moai read` 가 읽는 그 길
+    /// ([`crate::read_marks::read`])이 그대로 든다. 쓰는 자 둘 가운데 **하나만** 새 자리로 옮기면 여기가
+    /// 붉어진다: 터미널에서 적은 읽음이 떠 있는 탐색기의 [NEW] 를 못 내리고, 그 반대도 그렇다. 이 에픽이
+    /// 반으로 갈리는 것을 막는 줄이다.
+    ///
+    /// 함께 보는 것 둘. **설정 파일에는 안 적는다** — 그 자리는 겹쳐 보는 옛 `[read]` 뿐이다(moai-omx7).
+    /// **트래커에 없는 id 는 이 쓰기에서 걷힌다**(moai-dt5q, 사용자 결정 2) — 이 자리는 그 프로젝트의
+    /// 줄을 이미 들고 있다. 닫힌 줄은 안 걷는다.
+    #[test]
+    fn the_key_and_the_cli_write_to_one_place() {
+        let s = Scratch::new("read-marks-one-place");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        let mut a = app();
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.me = None;
+
+        // 트래커에 없는 줄이 읽음 파일에 남아 있다 — 지운 이슈의 읽음은 아무도 다시 안 본다.
+        crate::read_marks::update(&config, &root, |sheet| {
+            sheet.mark(&[("argos-9999".to_string(), "옛것".to_string())].into_iter().collect())
+        })
+        .unwrap();
+
+        a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
+        a.hit("r");
+        assert_eq!(a.notice.as_deref(), Some("✓ 읽음 · argos-0009"));
+
+        // `moai read` 가 읽는 그 길로 든다 — 같은 파일이라는 말이 곧 이것이다.
+        let (seen, problems) = crate::read_marks::read(&config, &root, &std::collections::BTreeMap::new());
+        assert!(problems.is_empty(), "{problems:?}");
+        let stamp = a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
+        assert_eq!(seen.get("argos-0009"), Some(&stamp), "`r` 이 적은 것을 CLI 의 길이 못 든다");
+        assert!(!seen.contains_key("argos-9999"), "트래커에 없는 id 를 안 걷었다 — {seen:?}");
+        assert!(!config.exists(), "읽음을 설정 파일에 적었다 — 그 자리는 옛 `[read]` 뿐이다");
+    }
+
+    /// **한눈 보기의 줄은 그 프로젝트의 파일에 적는다**(moai-bwce) — `App` 의 맵 하나를 같이 보던 판은
+    /// 이름이 같은 두 저장소의 같은 id 가 서로의 [NEW] 를 내렸다(moai-omx7 의 화면 쪽 모습이다).
+    #[test]
+    fn a_row_from_another_project_marks_that_projects_sheet() {
+        let s = Scratch::new("read-marks-seat");
+        let config = s.path().join("user.toml");
+        let (here, other) = (s.path().join("a/api"), s.path().join("b/api"));
+        let mut a = app();
+        a.site.repo = Some(crate::store::Repo::at(here.clone(), cfg()));
+        a.user_config = Some(config.clone());
+
+        // 남의 프로젝트에 같은 id 로 읽음이 적혀 있다 — 이쪽 쓰기가 그것을 밀면 안 된다.
+        crate::read_marks::update(&config, &other, |sheet| {
+            sheet.mark(&[("argos-0009".to_string(), "남의 것".to_string())].into_iter().collect())
+        })
+        .unwrap();
+
+        a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
+        a.hit("r");
+
+        let empty = std::collections::BTreeMap::new();
+        let stamp = a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
+        assert_eq!(crate::read_marks::read(&config, &here, &empty).0.get("argos-0009"), Some(&stamp));
+        assert_eq!(
+            crate::read_marks::read(&config, &other, &empty).0.get("argos-0009").map(String::as_str),
+            Some("남의 것"),
+            "남의 프로젝트의 읽음을 밀었다"
+        );
     }
 
     /// **같은 id 의 쌍둥이 줄은 늦은 도장으로 읽는다**(moai-7c50.exy) — `r`·`SPC m a` 가 가리킨 뒷줄의
@@ -4984,8 +5146,8 @@ mod tests {
             assert!(a.site.unread.contains("argos-0009"), "{act}: 시험의 전제가 틀렸다 — {:?}", a.site.unread);
             a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
             a.hit(act);
-            assert!(!a.site.unread.contains("argos-0009"), "{act}: 쌍둥이의 [NEW] 가 안 내렸다 — {:?}", a.seen);
-            assert_eq!(a.seen.get("argos-0009").map(String::as_str), Some("2026-09-05T00:00:00Z"), "{act}");
+            assert!(!a.site.unread.contains("argos-0009"), "{act}: 쌍둥이의 [NEW] 가 안 내렸다 — {:?}", a.site.seen);
+            assert_eq!(a.site.seen.get("argos-0009").map(String::as_str), Some("2026-09-05T00:00:00Z"), "{act}");
         }
     }
 
