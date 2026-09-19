@@ -929,7 +929,7 @@ mod tests {
         a.rows()
             .iter()
             .filter_map(|r| match r {
-                Row::Item(e) => e.at().map(|at| a.issues[at].title.clone()),
+                Row::Item(e, _) => e.at().map(|at| a.issues[at].title.clone()),
                 _ => None,
             })
             .collect()
@@ -1003,7 +1003,7 @@ mod tests {
 
         // one 의 argos-0002 에 서고 거름망을 건다 — two 에서 argos-0002 는 다른 자리의 다른 줄이다.
         a.key(key(KeyCode::End));
-        assert_eq!(a.current(), Some(Row::Item(crate::nav::Entry::Leaf { at: 1 })));
+        assert!(matches!(a.current(), Some(Row::Item(crate::nav::Entry::Leaf { at: 1 }, _))), "{:?}", a.current());
         a.hit("SPC f");
         for c in "status=in_progress".chars() {
             a.key(key(KeyCode::Char(c)));
@@ -1648,7 +1648,7 @@ mod tests {
         assert_eq!(snapshots(&[&two])[0], before[1], "커서의 프로젝트 말고 다른 파일이 바뀌었다");
         assert_eq!(titles(&a).iter().filter(|t| *t == "one 에 담을 것").count(), 1);
         let on = a.current().and_then(|r| match r {
-            Row::Item(e) => e.at().map(|at| a.issues[at].title.clone()),
+            Row::Item(e, _) => e.at().map(|at| a.issues[at].title.clone()),
             _ => None,
         });
         assert_eq!(on.as_deref(), Some("one 에 담을 것"), "만든 줄에 안 섰다");

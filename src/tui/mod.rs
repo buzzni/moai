@@ -18,7 +18,7 @@ pub mod view;
 
 use crate::config::Config;
 use crate::model::{Issue, Kind, Status};
-use crate::nav::{Entry, Index, Path, Seg};
+use crate::nav::{Entry, Index, Path, Seg, Twig};
 use crate::query::{Filter, GrepIn, Raw};
 use crate::store::{Load, Repo};
 use form::{Act, Form};
@@ -34,7 +34,8 @@ pub enum Row {
     /// (moai-i784): 층이 있어도 프로젝트 뿌리에는 안 서고, 층으로는 헤더의 `0`
     /// ([`keys::Browse::Project`])이 간다 — 같은 글자가 두 데로 가지 않게.
     Up,
-    Item(Entry),
+    /// 목록의 한 줄과 **그 줄의 가지 모양**([`Twig`]) — 펼쳐 든 멤버는 깊이가 1 이상이다.
+    Item(Entry, Twig),
     /// 프로젝트 층의 한 줄 — `layer.places` 의 첨자다. 정체는 경로다([`Anchor::Project`]).
     Project(usize),
 }
@@ -643,6 +644,13 @@ pub struct App {
     /// 층마다 커서를 기억한다. 들어갔다 나오면 **있던 자리로 돌아온다** —
     /// 매번 맨 위로 튕기면 형제 여럿을 훑는 일이 못 할 짓이 된다.
     remembered: Vec<usize>,
+    /// 목록에서 펼쳐 둔 묶음의 자리(moai-7qot). **화면에만 산다**(사용자 결정) — 설정에 안
+    /// 남는다. 보기(`Look`)는 *무엇을 숨기나* 고 펼침은 *지금 어디를 보나* 라 축이 다르고,
+    /// 설정에 이슈 id 를 쌓으면 지운 줄의 id 가 설정에 남는다.
+    ///
+    /// 접어도 **밑의 펼침은 기억한다** — 접었다 다시 펼치면 안이 그대로 선다. `Tab`
+    /// (다 펼침)의 두 번째 누름만 밑까지 걷는다([`App::expand_all`]).
+    expanded: std::collections::HashSet<Path>,
     /// 목록이 훑고 있는 자리. **프레임을 넘어 산다** — 매 프레임 새로 만들면
     /// 0 번 줄부터 다시 세어 커서를 늘 맨 아랫줄에 붙이고, 그러면 커서 아래를
     /// 한 줄도 못 본다. 상세와 **같은 조각**이다([`Scroll`]).
@@ -841,6 +849,7 @@ impl App {
             me: None,
             saved: Default::default(),
             remembered,
+            expanded: Default::default(),
             list: Scroll::default(),
             quit: false,
             spin: 0,
@@ -1301,8 +1310,8 @@ impl App {
     fn anchor_of(&self, row: &Row) -> Anchor {
         match row {
             Row::Up => Anchor::Up,
-            Row::Item(Entry::Dir { seg, at: None }) => Anchor::Bucket(seg.clone()),
-            Row::Item(Entry::Dir { at: Some(at), .. } | Entry::Leaf { at }) => {
+            Row::Item(Entry::Dir { seg, at: None }, _) => Anchor::Bucket(seg.clone()),
+            Row::Item(Entry::Dir { at: Some(at), .. } | Entry::Leaf { at }, _) => {
                 Anchor::Issue(self.issues[*at].id.clone())
             }
             Row::Project(at) => Anchor::Project(self.place_path(*at).map(Into::into).unwrap_or_default()),
@@ -1907,12 +1916,12 @@ impl App {
         let cur = self.current_of(rows);
         let targets: Vec<usize> = match act {
             B::Read => match &cur {
-                Some(Row::Item(e)) => e.at().into_iter().collect(),
+                Some(Row::Item(e, _)) => e.at().into_iter().collect(),
                 _ => Vec::new(),
             },
             B::ReadAll => self.unread.iter().filter_map(|id| self.index.find(id)).collect(),
             B::ReadGroup => {
-                let Some(Row::Item(e)) = &cur else {
+                let Some(Row::Item(e, _)) = &cur else {
                     self.notice = Some("묶음에 든 줄에서 누른다".into());
                     return;
                 };
@@ -2036,7 +2045,7 @@ impl App {
         // (`Index::entries_where`). done 에픽 밑에 남은 todo 가 폴더째 사라지면 안 된다.
         rows.extend(
             self.index
-                .entries_sorted(&self.issues, &self.path, keep, &|a, b| {
+                .entries_tree(&self.issues, &self.path, keep, &|a, b| {
                     // 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다. 담당은 화면에 선 이름으로.
                     crate::query::order_by(
                         Self::sort_key(self.order.by),
@@ -2046,11 +2055,69 @@ impl App {
                         &self.cfg.statuses,
                         self.cfg.naming,
                     )
-                })
+                }, &|under| self.expanded.contains(under))
                 .into_iter()
-                .map(Row::Item),
+                .map(|(e, twig)| Row::Item(e, twig)),
         );
         rows
+    }
+
+    /// 커서가 선 묶음의 자리 — 그 줄을 펼치면 멤버가 이 자리에서 온다. 묶음이 아니면 없다.
+    fn dir_at(&self, rows: &[Row]) -> Option<Path> {
+        let Some(Row::Item(Entry::Dir { seg, .. }, twig)) = self.current_of(rows) else { return None };
+        // **펼쳐 든 줄의 자리는 지금 디렉터리가 아니다** — 깊이만큼 조상을 이어 붙인다. 그 조상은
+        // 그 줄 위에 선 줄들에서 읽는다: 제 층의 마지막으로 선 묶음이 곧 제 부모다.
+        let mut path = self.path.clone();
+        for level in 0..twig.depth() {
+            let parent = rows[..self.cursor].iter().rev().find_map(|r| match r {
+                Row::Item(Entry::Dir { seg, .. }, t) if t.depth() == level => Some(seg.clone()),
+                _ => None,
+            });
+            path.push(parent?);
+        }
+        path.push(seg);
+        Some(path)
+    }
+
+    /// 한 단계 펼친다(`l`·`→`). 이미 펼쳐져 있으면 아무 일도 없다 — 들어가는 것은 `Enter` 다.
+    fn expand(&mut self) {
+        let rows = self.rows();
+        if let Some(path) = self.dir_at(&rows) {
+            self.expanded.insert(path);
+        }
+    }
+
+    /// 접는다(`h`·`←`). 접을 것이 없었으면 거짓 — 그때는 한 층 나간다([`App::leave`]).
+    fn collapse(&mut self) -> bool {
+        let rows = self.rows();
+        self.dir_at(&rows).is_some_and(|path| self.expanded.remove(&path))
+    }
+
+    /// 재귀로 다 펼치고, 이미 펼쳐진 것이 있으면 밑까지 접는다(`Tab`).
+    ///
+    /// **접을 때는 밑의 펼침까지 걷는다** — `h` 와 다른 자리다. `h` 는 한 단계라 안의 모양을
+    /// 기억해 두는 것이 이롭지만, "다 접기" 가 안을 기억하면 다시 누를 때 접기 전 모양이 아니라
+    /// 그 이전 모양이 서서 두 번 눌러야 같은 자리로 온다.
+    fn expand_all(&mut self) {
+        let rows = self.rows();
+        let Some(path) = self.dir_at(&rows) else { return };
+        let under: Vec<Path> = self.expanded.iter().filter(|p| p.starts_with(&path)).cloned().collect();
+        if !under.is_empty() {
+            for p in under {
+                self.expanded.remove(&p);
+            }
+            return;
+        }
+        // 그 자리와 그 밑의 **묶음 줄 전부**. 자리는 `home_of` 가 정한 그대로라 목록이 세우는
+        // 줄과 같은 것만 펼친다.
+        self.expanded.insert(path.clone());
+        for at in self.index.descendants(&path) {
+            if self.index.is_dir(&self.issues, at) {
+                let mut under = self.index.home_of(at).clone();
+                under.push(self.index.seg_of(&self.issues, at));
+                self.expanded.insert(under);
+            }
+        }
     }
 
     /// 커서가 가리키는 줄.
@@ -2116,6 +2183,15 @@ impl App {
             // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
             B::Enter => self.enter(),
             B::Leave => self.leave(),
+            B::Expand => self.expand(),
+            // **접을 것이 없으면 나간다** — 키 표도 그렇게 켠다(`Browse::enabled`). 손에 익은
+            // `h` 가 뿌리에서만 말하고 멤버 줄에서 입을 다물면 어느 쪽이 고장인지 모른다.
+            B::Collapse => {
+                if !self.collapse() {
+                    self.leave();
+                }
+            }
+            B::ExpandAll => self.expand_all(),
             // **헤더의 번호로 바로 간다**(moai-o133). `0` 은 전체 — 층이다. 이미 그 자리면
             // 아무 일도 안 한다: 같은 프로젝트를 다시 열면 커서와 굴린 자리가 첫 줄로 튄다.
             // **건너뛰면 포커스는 목록으로 돌아온다**(리뷰 moai-i784.pzh). 상세에 포커스를 둔 채
@@ -2217,9 +2293,11 @@ impl App {
             layer: self.on_layer(),
             list_focus: self.focus == Pane::Explorer,
             // [`App::enter`] 가 무언가 하는 줄 — `..`(나가기)·디렉터리·층의 프로젝트.
-            leaf: !matches!(self.current_of(rows), Some(Row::Up | Row::Item(Entry::Dir { .. }) | Row::Project(_))),
+            leaf: !matches!(self.current_of(rows), Some(Row::Up | Row::Item(Entry::Dir { .. }, _) | Row::Project(_))),
             // [`App::leave`] 가 무언가 하는 자리 — 디렉터리 안뿐이다. 층으로는 `0` 이 간다(moai-i784).
             root: self.path.is_empty(),
+            // 커서의 줄이 펼쳐져 있는가 — 접기가 접을 것과 나갈 것을 여기서 가른다.
+            expanded: self.dir_at(rows).is_some_and(|p| self.expanded.contains(&p)),
             worktree: self.worktree,
             raw: self.raw,
             columns: self.cfg.statuses.len().min(keys::NUMBERED),
@@ -2396,7 +2474,8 @@ impl App {
             let dir = self.index.entries(&self.issues, &parent).into_iter().find(is_it);
             self.path.pop();
             self.remembered.pop();
-            want = dir.map(|e| self.anchor_of(&Row::Item(e)));
+            // 정체만 읽으므로 가지 모양은 뜻이 없다 — 이 줄은 화면에 안 선다.
+            want = dir.map(|e| self.anchor_of(&Row::Item(e, Twig::default())));
         }
         let Some(want) = want else { return false };
         let rows = self.rows();
@@ -2568,7 +2647,7 @@ impl App {
     fn enter(&mut self) {
         match self.current() {
             Some(Row::Up) => self.leave(),
-            Some(Row::Item(Entry::Dir { seg, .. })) => {
+            Some(Row::Item(Entry::Dir { seg, .. }, _)) => {
                 self.remembered.push(self.cursor);
                 self.path.push(seg);
                 self.cursor = self.first_row();
@@ -2597,7 +2676,7 @@ impl App {
             let rows = self.rows();
             self.cursor = rows
                 .iter()
-                .position(|r| matches!(r, Row::Item(Entry::Dir { seg, .. }) if *seg == from))
+                .position(|r| matches!(r, Row::Item(Entry::Dir { seg, .. }, _) if *seg == from))
                 .unwrap_or(fallback.min(rows.len().saturating_sub(1)));
         }
     }
@@ -2841,7 +2920,7 @@ mod tests {
     }
 
     fn row_ids(a: &App) -> Vec<String> {
-        a.rows().iter().filter_map(|r| if let Row::Item(e) = r { e.at() } else { None }).map(|at| a.issues[at].id.clone()).collect()
+        a.rows().iter().filter_map(|r| if let Row::Item(e, _) = r { e.at() } else { None }).map(|at| a.issues[at].id.clone()).collect()
     }
 
     /// **처음에는 done 을 숨기고 `SPC v` 가 칸·미룸을 켜고 끈다**(moai-fmv5). 보기는 거름망이
@@ -2973,7 +3052,7 @@ mod tests {
         search(&mut a, "argos-0005");
         a.hit("Enter");
         assert_eq!(row_ids(&a), ["argos-0002"], "시험의 전제 — 숨은 에픽이 폴더로 선다");
-        a.hit("l");
+        a.hit("Enter");
         assert_eq!(row_ids(&a), ["argos-0005"]);
         a.hit("Esc");
         assert!(a.path.is_empty(), "숨은 폴더 안에 남았다: {:?}", a.path);
@@ -3044,7 +3123,7 @@ mod tests {
         let mut a = App::new(issues, cfg(), Path::new());
         search(&mut a, "argos-0020");
         assert_eq!(row_ids(&a), ["argos-0020"], "시험의 전제 — 끝난 부모가 폴더로 선다");
-        let marked = a.rows().iter().filter(|r| matches!(r, Row::Item(e) if a.unveiled(e))).count();
+        let marked = a.rows().iter().filter(|r| matches!(r, Row::Item(e, _) if a.unveiled(e))).count();
         assert_eq!((marked, a.unveiled_count()), (0, 0));
     }
 
@@ -3336,7 +3415,7 @@ mod tests {
         a.rows()
             .iter()
             .filter_map(|r| match r {
-                Row::Item(e) => e.at().map(|at| a.issues[at].id.clone()),
+                Row::Item(e, _) => e.at().map(|at| a.issues[at].id.clone()),
                 Row::Up | Row::Project(_) => None,
             })
             .collect()
@@ -3359,16 +3438,16 @@ mod tests {
         let mut a = app();
         a.key(key(KeyCode::Enter));
         assert_eq!((a.path.len(), a.cursor), (1, 1), "들어가서 `..` 에 섰다");
-        assert!(matches!(a.current(), Some(Row::Item(_))), "{:?}", a.current());
+        assert!(matches!(a.current(), Some(Row::Item(..))), "{:?}", a.current());
         a.key(key(KeyCode::Enter));
         assert_eq!(a.path.len(), 1, "들어가자마자 누른 Enter 가 도로 나왔다");
         a.key(key(KeyCode::Char('k')));
         assert_eq!(a.current(), Some(Row::Up), "`..` 이 `k` 한 번 거리에 없다");
-        a.key(key(KeyCode::Char('l')));
+        a.key(key(KeyCode::Enter));
         assert!(a.path.is_empty());
 
         a.key(key(KeyCode::Char('j')));
-        a.key(key(KeyCode::Char('l')));
+        a.key(key(KeyCode::Enter));
         assert_eq!((a.path.len(), a.current()), (1, Some(Row::Up)), "빈 디렉터리에서 `..` 말고 설 데가 없다");
     }
 
@@ -3398,8 +3477,11 @@ mod tests {
         a.adopt(more);
         a.key(key(KeyCode::Backspace));
         assert_eq!(
-            a.current(),
-            Some(Row::Item(Entry::Dir { seg: Seg::Epic("argos-0002".into()), at: a.index.find("argos-0002") })),
+            a.current().map(|r| match r {
+                Row::Item(e, _) => e,
+                other => panic!("{other:?}"),
+            }),
+            Some(Entry::Dir { seg: Seg::Epic("argos-0002".into()), at: a.index.find("argos-0002") }),
             "나온 디렉터리가 아니라 기억한 번호에 섰다"
         );
     }
@@ -3503,11 +3585,12 @@ mod tests {
         assert_eq!(a.cursor, a.rows().len() - 1, "PageDown 이 목록 밖으로 나갔다");
     }
 
-    /// **드나드는 키(Enter·→·Backspace·←)도 포커스를 탄다.** 상세를 읽다 누른 키가
-    /// 목록을 옮기면 보던 이슈가 바뀌고 굴린 자리도 잃는다.
+    /// **드나드는 키(Enter·Backspace)도 포커스를 탄다.** 상세를 읽다 누른 키가
+    /// 목록을 옮기면 보던 이슈가 바뀌고 굴린 자리도 잃는다. `→`·`←`(펼침·접기)도 같은 자다 —
+    /// 접기는 접을 것이 없으면 나가기와 같은 일을 하므로 여기서 함께 잰다(moai-7qot).
     #[test]
     fn entering_and_leaving_keys_go_to_the_focused_pane() {
-        for k in [KeyCode::Enter, KeyCode::Right] {
+        for k in [KeyCode::Enter] {
             let mut a = app();
             a.hit("Ctrl-w w");
             a.key(key(k));
@@ -3628,18 +3711,92 @@ mod tests {
         assert_eq!((a.cursor, a.detail.offset()), (0, 0), "상세에서 `gg` 가 목록을 움직였거나 첫 줄로 안 갔다");
     }
 
-    /// **`h`·`l` 은 나가기·들어가기** — Bksp·Enter 와 같고, 같은 까닭으로 목록 포커스를 탄다.
+    /// **`l` 은 그 자리에서 한 단계 펼친다**(moai-7qot, 사용자 결정) — 들어가는 것이 아니라
+    /// 멤버가 그 줄 **바로 밑에** 선다. 깊이는 가지 모양([`Twig`])에 실려 그리는 쪽으로 간다.
     #[test]
-    fn h_and_l_leave_and_enter_from_the_list_only() {
+    fn l_expands_one_level_in_place() {
         let mut a = app();
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0009"], "시험의 전제");
         a.key(key(KeyCode::Char('l')));
-        assert_eq!(a.path.len(), 1, "`l` 이 안 들어갔다");
+        assert_eq!(a.path, Path::new(), "펼치기가 디렉터리에 들어갔다");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0003", "argos-0004", "argos-0002", "argos-0009"]);
+        let depths: Vec<usize> = a.rows().iter().filter_map(|r| if let Row::Item(_, t) = r { Some(t.depth()) } else { None }).collect();
+        assert_eq!(depths, [0, 1, 1, 0, 0], "펼친 멤버의 깊이가 1 이 아니다");
+        // 막내만 `└─` 다 — 그리는 쪽이 이 값으로 글자를 고른다.
+        let last: Vec<bool> = a.rows().iter().filter_map(|r| if let Row::Item(_, t) = r { Some(t.last()) } else { None }).collect();
+        assert_eq!(last, [false, false, true, false, false]);
+        // 다시 눌러도 한 단계뿐 — 더 펼칠 것이 없다.
+        a.key(key(KeyCode::Char('l')));
+        assert_eq!(row_ids(&a).len(), 5);
+    }
+
+    /// **펼친 줄에서 `h` 는 접는다** — 한 층 나가지 않는다. 접을 것이 없을 때만 나간다.
+    #[test]
+    fn h_folds_the_row_before_it_leaves() {
+        let mut a = app();
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.path.len(), 1, "시험의 전제 — 에픽 안에 섰다");
+        a.key(key(KeyCode::Backspace));
+        a.key(key(KeyCode::Char('l')));
+        assert_eq!(row_ids(&a).len(), 5, "안 펼쳐졌다");
+        a.key(key(KeyCode::Char('h')));
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0009"], "`h` 가 안 접었다");
+        assert_eq!(a.path, Path::new(), "접으면서 한 층 나갔다");
+        a.key(key(KeyCode::Char('h')));
+        assert_eq!(a.path, Path::new(), "뿌리에서 더 나갈 데가 없다");
+    }
+
+    /// **`Tab` 은 재귀로 다 펼치고, 다시 누르면 밑까지 접는다**(moai-7qot, 사용자 결정).
+    ///
+    /// 다 접을 때 **밑의 펼침까지 걷는다** — 한 단계 접기(`h`)와 다른 자리다. 안을 기억해 두면
+    /// 다시 눌렀을 때 접기 전 모양이 아니라 그 이전 모양이 서서 두 번 눌러야 같은 자리로 온다.
+    #[test]
+    fn tab_expands_the_whole_group_and_folds_it_back() {
+        let issues = vec![
+            make("argos-0001", Kind::Milestone),
+            {
+                let mut e = make("argos-0002", Kind::Epic);
+                e.milestone = Some("argos-0001".into());
+                e
+            },
+            member("argos-0003", "argos-0002"),
+        ];
+        let mut a = App::new(issues, cfg(), Path::new());
+        assert_eq!(row_ids(&a), ["argos-0001"], "시험의 전제 — 마일스톤 하나만 선다");
+        a.hit("Tab");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0003"], "재귀로 안 펼쳤다");
+        let depths: Vec<usize> = a.rows().iter().filter_map(|r| if let Row::Item(_, t) = r { Some(t.depth()) } else { None }).collect();
+        assert_eq!(depths, [0, 1, 2]);
+        a.hit("Tab");
+        assert_eq!(row_ids(&a), ["argos-0001"], "다시 누른 `Tab` 이 안 접었다");
+        a.hit("Tab");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0003"], "접은 뒤의 `Tab` 이 한 단계만 펼쳤다");
+    }
+
+    /// **펼침은 설정에 안 남는다**(moai-7qot, 사용자 결정) — 보기(`Look`)는 *무엇을 숨기나* 고
+    /// 펼침은 *지금 어디를 보나* 다. 설정에 이슈 id 를 쌓으면 지운 줄의 id 가 거기 남는다.
+    #[test]
+    fn folding_never_reaches_the_config() {
+        let mut a = app();
+        let before = a.look_now();
+        a.key(key(KeyCode::Char('l')));
+        a.hit("Tab");
+        assert_eq!(a.look_now(), before, "펼침이 설정에 실렸다");
+    }
+
+    /// **`h` 는 접기고, 접을 것이 없으면 나간다**(moai-7qot) — 그래서 목록 포커스를 탄다.
+    /// 펼침(`l`)은 [`App::expanded`] 를 건드리므로 자리를 안 옮긴다.
+    #[test]
+    fn h_collapses_or_leaves_from_the_list_only() {
+        let mut a = app();
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.path.len(), 1, "Enter 가 안 들어갔다");
         a.hit("Ctrl-w w");
         a.key(key(KeyCode::Char('h')));
         assert_eq!(a.path.len(), 1, "상세 포커스에서 `h` 가 나갔다");
         a.hit("Ctrl-w w");
         a.key(key(KeyCode::Char('h')));
-        assert!(a.path.is_empty(), "`h` 가 안 나갔다");
+        assert!(a.path.is_empty(), "접을 것이 없는데 `h` 가 안 나갔다");
     }
 
     /// **기다리는 `g` 뒤에 뜻 없는 키가 오면 둘 다 버린다** — 그 키도 제 뜻을 안 한다(모르는 키
@@ -3871,7 +4028,7 @@ mod tests {
             a.cursor = a
                 .rows()
                 .iter()
-                .position(|r| matches!(r, Row::Item(e) if e.at().is_some_and(|at| a.issues[at].id == id)))
+                .position(|r| matches!(r, Row::Item(e, _) if e.at().is_some_and(|at| a.issues[at].id == id)))
                 .unwrap_or_else(|| panic!("{id} 줄이 없다"));
         };
 
@@ -4491,7 +4648,7 @@ mod tests {
         a.key(key(KeyCode::Enter)); // argos-0001 안 — `..`, 0003, 0004
         a.key(key(KeyCode::End));
         let at = |a: &App| match a.current() {
-            Some(Row::Item(e)) => a.issues[e.at().unwrap()].id.clone(),
+            Some(Row::Item(e, _)) => a.issues[e.at().unwrap()].id.clone(),
             other => format!("{other:?}"),
         };
         assert_eq!(at(&a), "argos-0004");
@@ -4835,7 +4992,7 @@ mod tests {
     /// 커서가 선 줄의 id. `..` 이나 바구니면 없다.
     fn on(a: &App) -> Option<String> {
         a.current().and_then(|r| match r {
-            Row::Item(e) => e.at().map(|at| a.issues[at].id.clone()),
+            Row::Item(e, _) => e.at().map(|at| a.issues[at].id.clone()),
             Row::Up | Row::Project(_) => None,
         })
     }

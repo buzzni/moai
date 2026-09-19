@@ -280,6 +280,14 @@ pub enum Browse {
     Step(Move),
     Enter,
     Leave,
+    /// 커서의 묶음을 **한 단계** 펼친다 — `l`·`→`(moai-7qot, 사용자 결정). 들어가는 것은
+    /// `Enter` 고, 이것은 그 자리에서 멤버를 그 줄 밑에 세운다.
+    Expand,
+    /// 접는다 — `h`·`←`. **접을 것이 없으면 한 층 나간다**([`Browse::Leave`] 와 같은 일):
+    /// 손에 익은 `h` 가 뿌리에서 갑자기 말을 안 하면 고장으로 읽힌다.
+    Collapse,
+    /// 그 묶음 밑을 **재귀로 다** 펼친다. 이미 펼쳐진 것이 있으면 밑까지 접는다 — `Tab`.
+    ExpandAll,
     Grep,
     Filter,
     Jot,
@@ -462,11 +470,15 @@ pub const BROWSE: &[Bind<Browse>] = {
         MOVES[12],
         MOVES[13],
         row!(Enter, Some("Enter"), Key::any(C::Enter)),
-        row!(Enter, None, Key::any(C::Right)),
-        row!(Enter, None, Key::plain('l')),
         row!(Leave, Some("Bksp"), Key::any(C::Backspace)),
-        row!(Leave, None, Key::any(C::Left)),
-        row!(Leave, None, Key::plain('h')),
+        // **`l`·`h` 는 펼침·접기다**(moai-7qot, 사용자 결정) — 들어가기·나오기는 `Enter`·`Bksp`
+        // 가 잡는다. 이름을 안 단다: 바는 80칸에서 이미 꽉 차 있고(`the_key_bar_fits_whole_at_eighty_columns`)
+        // 드나들기의 이름이 `Enter`·`Bksp` 하나인 것과 같은 까닭이다 — `moai tui --help` 가 댄다.
+        row!(Expand, None, Key::plain('l')),
+        row!(Expand, None, Key::any(C::Right)),
+        row!(Collapse, None, Key::plain('h')),
+        row!(Collapse, None, Key::any(C::Left)),
+        row!(ExpandAll, None, Key::unshift(C::Tab)),
         // 맨 숫자 — 헤더의 `<0>`~`<9>` 다. 첫 줄만 이름을 단다(번호 칸 줄과 같은 규칙).
         row!(Project(0), Some("0"), Key::plain('0')),
         row!(Project(1), None, Key::plain('1')),
@@ -561,6 +573,8 @@ pub struct Ctx {
     /// 번호를 받은 프로젝트 수 — 등록한 수와 [`NUMBERED`] 중 작은 것. `0`(전체)은 층이 있으면
     /// 늘 듣는다. 층이 없으면 0 이고, 그러면 숫자 키가 통째로 조용하다.
     pub projects: usize,
+    /// 커서의 줄이 지금 펼쳐져 있는가(moai-7qot). 접기(`h`)가 접을 것과 나갈 것을 여기서 가른다.
+    pub expanded: bool,
     /// 숨긴 칸 — n 번째 비트가 설정의 n 번째 칸. 이름을 들지 않는다: 이 값은 복사로 다닌다.
     pub hidden: u16,
     pub done_hidden: bool,
@@ -603,7 +617,11 @@ impl Browse {
     pub fn enabled(self, c: &Ctx) -> Result<(), Off> {
         use Browse::*;
         match self {
-            Enter | Leave if !c.list_focus => Err(Off::Quiet),
+            Enter | Leave | Expand | Collapse | ExpandAll if !c.list_focus => Err(Off::Quiet),
+            // 잎에는 펼칠 것이 없다 — `Enter` 가 잎에서 조용한 것과 같은 자리다.
+            Expand | ExpandAll if c.leaf => Err(Off::Quiet),
+            // **접을 것이 없으면 나가기와 같다** — 아래 `Leave` 의 갈래를 그대로 탄다.
+            Collapse if !c.expanded => Browse::Leave.enabled(c),
             // 커서에서 되는 키만(moai-k3yi): 잎의 Enter·뿌리의 Bksp 는 아무 일도 없다. 까닭을 대지
             // 않는다 — 들어갈 데 없는 줄에서 Enter 가 조용한 것은 파일 관리자와 같고, 바가 그 키를
             // 안 적으므로 "적힌 키가 안 듣는다" 가 안 생긴다.
@@ -696,6 +714,9 @@ impl Browse {
             Step(_) => "이동",
             Enter => "들어가기",
             Leave => "나가기",
+            Expand => "펼침",
+            Collapse => "접기",
+            ExpandAll => "다 펼침",
             Grep => "검색",
             Filter => "거름망",
             Jot => "담기",
@@ -1166,8 +1187,11 @@ mod tests {
             assert_eq!(lookup(BROWSE, &seq), Lookup::Run(Browse::Step(m)), "탐색 {seq:?}");
             assert_eq!(lookup(PICK, &seq), Lookup::Run(Pick::Step(m)), "창 {seq:?}");
         }
-        assert_eq!(one(BROWSE, press(C::Char('h'))), Lookup::Run(Browse::Leave));
-        assert_eq!(one(BROWSE, press(C::Char('l'))), Lookup::Run(Browse::Enter));
+        // 목록의 `h`·`l` 은 접기·펼침이다(moai-7qot) — 접을 것이 없으면 접기가 나가기와 같은
+        // 일을 하므로(`Browse::enabled`) 손에 익은 걸음은 그대로다. 고르기 창은 트리가 아니라
+        // 디렉터리 하나씩이라 드나들기 그대로다.
+        assert_eq!(one(BROWSE, press(C::Char('h'))), Lookup::Run(Browse::Collapse));
+        assert_eq!(one(BROWSE, press(C::Char('l'))), Lookup::Run(Browse::Expand));
         assert_eq!(one(PICK, press(C::Char('h'))), Lookup::Run(Pick::Up));
         assert_eq!(one(PICK, press(C::Char('l'))), Lookup::Run(Pick::Enter));
         // 소문자 `g` 하나는 맨 아래가 아니다 — SHIFT 를 떼고 견주어도 글자는 다르다.
@@ -1236,11 +1260,14 @@ mod tests {
         let ctrl = KeyModifiers::CONTROL;
         let alt = KeyModifiers::ALT;
         let browse = [
-            // 칸 옮기기는 `Ctrl-w` 로 갔다(moai-oudf) — `Tab`·Shift-Tab 자리는 비었다.
-            (press(C::Tab), Lookup::Unknown),
+            // 칸 옮기기는 `Ctrl-w` 로 갔고(moai-oudf) 그 자리는 목록의 재귀 펼침이 받았다(moai-7qot).
+            (press(C::Tab), Lookup::Run(B::ExpandAll)),
             (press(C::BackTab), Lookup::Unknown),
             (with(C::Tab, KeyModifiers::SHIFT), Lookup::Unknown),
             (with(C::Char('w'), ctrl), Lookup::Pending),
+            // `l`·`h` 는 펼침·접기로 뜻이 바뀌었다(moai-7qot) — 접기는 접을 것이 없으면 나간다.
+            (press(C::Char('l')), Lookup::Run(B::Expand)),
+            (press(C::Char('h')), Lookup::Run(B::Collapse)),
             (press(C::Up), Lookup::Run(B::Step(Move::LineUp))),
             (with(C::Down, ctrl), Lookup::Run(B::Step(Move::LineDown))),
             (press(C::Home), Lookup::Run(B::Step(Move::Top))),
@@ -1248,9 +1275,9 @@ mod tests {
             (press(C::PageUp), Lookup::Run(B::Step(Move::PageUp))),
             (with(C::PageDown, KeyModifiers::SHIFT), Lookup::Run(B::Step(Move::PageDown))),
             (press(C::Enter), Lookup::Run(B::Enter)),
-            (press(C::Right), Lookup::Run(B::Enter)),
+            (press(C::Right), Lookup::Run(B::Expand)),
             (press(C::Backspace), Lookup::Run(B::Leave)),
-            (press(C::Left), Lookup::Run(B::Leave)),
+            (press(C::Left), Lookup::Run(B::Collapse)),
             (press(C::Char('/')), Lookup::Run(B::Grep)),
             (press(C::Esc), Lookup::Run(B::ClearFilter)),
             // 옮겼다(moai-7sjm) — 바로 누르던 키는 뜻이 없다. **`q` 는 더는 안 끝낸다.**

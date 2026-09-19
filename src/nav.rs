@@ -81,6 +81,35 @@ impl Entry {
     }
 }
 
+/// 트리로 펼친 줄의 **가지 모양**(moai-7qot). 지금 디렉터리부터 이 줄까지 층마다 "그 층의 줄
+/// 뒤에 형제가 더 있는가" 를 담는다 — 그래서 길이는 깊이보다 하나 크고, 지금 디렉터리에 바로
+/// 사는 줄은 깊이 0 이라 가지를 안 그린다.
+///
+/// **글자를 들지 않는다.** `├─`·`└─`·`│` 중 무엇을 찍을지는 그리는 쪽이 정한다 — 여기에 글자를
+/// 두면 폭이 다른 터미널을 위해 ASCII 로 갈 때 모델이 화면 사정을 알아야 한다.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Twig(Vec<bool>);
+
+impl Twig {
+    /// 몇 층 밑인가. 0 이면 지금 디렉터리의 줄이다.
+    pub fn depth(&self) -> usize {
+        self.0.len().saturating_sub(1)
+    }
+
+    /// 그 층의 줄 뒤에 형제가 더 있는가 — 이음줄(`│`)을 그을 자리다. 깊이 `d` 인 줄은 `1..d`
+    /// 층을 읽는다: 0 층(지금 디렉터리의 줄)은 가지가 없어 그릴 칸이 없고, `d` 층은 저 자신이라
+    /// [`Twig::last`] 가 읽는다.
+    pub fn kin(&self, level: usize) -> bool {
+        self.0.get(level).copied().unwrap_or(false)
+    }
+
+    /// 제 층의 막내인가 — `└─` 를 그릴 줄이다. **깊이가 0 이면 늘 거짓이다**: 지금 디렉터리의
+    /// 마지막 줄에는 그릴 가지가 없다.
+    pub fn last(&self) -> bool {
+        self.depth() >= 1 && self.0.last().is_some_and(|more| !more)
+    }
+}
+
 /// 한 번 만들어 두고 쓰는 색인.
 ///
 /// **`String` 을 소유한다.** `report::groups` 는 `&[Issue]` 를 빌린
@@ -330,6 +359,61 @@ impl Index {
         out
     }
 
+    /// 펼친 묶음의 멤버까지 한 목록으로 — 목록에서 트리로 보는 길(moai-7qot).
+    ///
+    /// `open` 이 참인 자리의 멤버가 그 줄 **바로 밑에** 이어 서고, 그 멤버가 또 열렸으면 다시
+    /// 이어진다. 거름망(`keep`)과 차례(`order`)는 층마다 같은 것을 쓴다 —
+    /// [`Index::entries_sorted`] 를 층마다 다시 부르므로, 펼쳐 보는 목록과 들어가서 보는 목록이
+    /// 같은 줄을 같은 차례로 낸다. 자를 하나로 두는 것이 이 함수가 있는 까닭이다.
+    ///
+    /// 함께 내는 [`Twig`] 는 **가지의 모양만** 말한다 — 어떤 글자로 그릴지는 그리는 쪽이 정한다.
+    pub fn entries_tree(
+        &self,
+        issues: &[Issue],
+        path: &Path,
+        keep: &dyn Fn(usize) -> bool,
+        order: &dyn Fn(usize, usize) -> std::cmp::Ordering,
+        open: &dyn Fn(&Path) -> bool,
+    ) -> Vec<(Entry, Twig)> {
+        let mut out: Vec<(Entry, Twig)> = Vec::new();
+        self.walk(issues, path, keep, order, open, &mut Vec::new(), &mut out);
+        out
+    }
+
+    /// [`Index::entries_tree`] 의 몸통. `kin` 은 여기까지 내려온 층마다 "그 줄 뒤에 형제가 더
+    /// 있는가" 다 — 그것이 곧 [`Twig`] 다.
+    fn walk(
+        &self,
+        issues: &[Issue],
+        path: &Path,
+        keep: &dyn Fn(usize) -> bool,
+        order: &dyn Fn(usize, usize) -> std::cmp::Ordering,
+        open: &dyn Fn(&Path) -> bool,
+        kin: &mut Vec<bool>,
+        out: &mut Vec<(Entry, Twig)>,
+    ) {
+        let here = self.entries_sorted(issues, path, keep, order);
+        let last = here.len().saturating_sub(1);
+        for (n, e) in here.into_iter().enumerate() {
+            let seg = match &e {
+                Entry::Dir { seg, .. } => Some(seg.clone()),
+                Entry::Leaf { .. } => None,
+            };
+            kin.push(n < last);
+            out.push((e, Twig(kin.clone())));
+            // **제 자리가 곧 제 경로다** — 들어가서 보는 목록(`App::enter`)이 미는 마디와 같은
+            // 것을 밀어야, 펼쳐 본 멤버와 들어가서 본 멤버가 갈리지 않는다.
+            if let Some(seg) = seg {
+                let mut under = path.clone();
+                under.push(seg);
+                if open(&under) {
+                    self.walk(issues, &under, keep, order, open, kin, out);
+                }
+            }
+            kin.pop();
+        }
+    }
+
     /// 그 자리 **밑에 걸린 모든 것**. 바로 밑뿐 아니라 더 깊은 것까지.
     ///
     /// 디렉터리의 요약은 이것으로 센다. 규칙은 `report` 와 하나다 — 한때
@@ -525,6 +609,60 @@ mod tests {
         let mut i = make(id, Kind::Issue);
         i.epic = Some(epic.into());
         i
+    }
+
+    /// **펼친 목록은 들어가서 본 목록을 층마다 이어 붙인 것이다**(moai-7qot). 자를 하나로 두는
+    /// 것이 [`Index::entries_tree`] 가 있는 까닭이라, 층마다 같은 거름망과 차례를 쓰는지 잰다.
+    ///
+    /// 가지 모양은 **형제가 더 있는가**만 말한다 — 글자는 그리는 쪽이 고른다.
+    #[test]
+    fn the_tree_hangs_each_open_group_under_its_row() {
+        let mut epic = make("m-epic", Kind::Epic);
+        epic.milestone = Some("m-stone".into());
+        let issues = vec![
+            make("m-stone", Kind::Milestone),
+            epic,
+            epic_of("m-a", "m-epic"),
+            epic_of("m-b", "m-epic"),
+        ];
+        let index = Index::of(&issues);
+        let order = |a: usize, b: usize| crate::query::display_order(&issues[a], &issues[b]);
+        let ids = |rows: &[(Entry, Twig)]| -> Vec<(String, usize, bool)> {
+            rows.iter()
+                .map(|(e, t)| (e.at().map_or_else(String::new, |at| issues[at].id.clone()), t.depth(), t.last()))
+                .collect()
+        };
+
+        // 아무것도 안 열었으면 마일스톤 한 줄이다 — 들어가서 보는 목록과 같다.
+        let shut = index.entries_tree(&issues, &Path::new(), &|_| true, &order, &|_| false);
+        assert_eq!(ids(&shut), [("m-stone".to_string(), 0, false)]);
+
+        // 다 열면 마일스톤 → 에픽 → 멤버 둘. 멤버의 막내만 `last` 다.
+        let all = index.entries_tree(&issues, &Path::new(), &|_| true, &order, &|_| true);
+        assert_eq!(
+            ids(&all),
+            [
+                ("m-stone".to_string(), 0, false),
+                ("m-epic".to_string(), 1, true),
+                ("m-a".to_string(), 2, false),
+                ("m-b".to_string(), 2, true),
+            ]
+        );
+        // 마일스톤 밑의 에픽은 그 층의 막내라, 멤버의 이음줄 자리는 비어 있다(`│` 를 안 긋는다).
+        assert!(!all[2].1.kin(1) && !all[3].1.kin(1), "막내 밑인데 이음줄을 그으라고 한다");
+
+        // 거름망은 층마다 같은 것을 쓴다 — 걸러진 멤버는 펼쳐도 안 선다.
+        let b = index.find("m-b").expect("m-b");
+        let some = index.entries_tree(&issues, &Path::new(), &|at| at != b, &order, &|_| true);
+        assert_eq!(
+            ids(&some),
+            [
+                ("m-stone".to_string(), 0, false),
+                ("m-epic".to_string(), 1, true),
+                ("m-a".to_string(), 2, true),
+            ],
+            "거름망이 층마다 걸리지 않았거나 막내가 안 옮겨졌다"
+        );
     }
 
     /// 모든 줄이 어딘가에 **정확히 한 번** 나타난다. 이 모듈의 존재 이유다.

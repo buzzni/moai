@@ -907,7 +907,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 걷는 셈은 **폭만으로** 한다(`right_fit`) — 줄을 다 지어 봐야 알던 때는 스크롤 창 밖의 줄까지
     // 매 프레임 지었다(moai-wt4n). 줄의 머리 폭과 셈 글만 있으면 걷힐 열이 정해진다.
     let common = rows.iter().zip(&tallies).fold(app.fields, |common, (r, t)| match r {
-        Row::Item(e) => match e.at() {
+        Row::Item(e, _) => match e.at() {
             Some(at) => common.both(right_fit(app.fields, head_width(app, at, app.fields, cols) + trail_width(app, e), t, inner)),
             None => common,
         },
@@ -928,7 +928,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     let work: Vec<usize> = rows
         .iter()
         .filter_map(|r| match r {
-            Row::Item(e) => e.at(),
+            Row::Item(e, _) => e.at(),
             Row::Up | Row::Project(_) => None,
         })
         .filter(|&at| crate::report::is_work(&app.issues[at]))
@@ -1069,7 +1069,7 @@ fn row_line<'a>(
     // 이 파일의 `Field` 는 폼의 칸이다(`form::Field`) — 목록 열은 여기서만 가린다.
     use super::view::Field;
     let e = match r {
-        Row::Item(e) => e,
+        Row::Item(e, _) => e,
         Row::Up => return Line::from(Span::styled("..", dim())),
         Row::Project(at) => return place_line(app, *at, budget),
     };
@@ -1312,7 +1312,7 @@ fn branch_mark(app: &App, at: usize, fields: super::view::Fields) -> Option<Stri
 /// 묶음 줄의 끝난/일 셈(`n/n`) — 셈을 껐거나, 묶음이 아니거나, 셀 일이 없으면 빈 글이다. 자는 상세
 /// 롤업과 같다(`Index::tally` 가 `Index::progress` 와 같은 값을 미리 센다).
 fn tally_of(app: &App, r: &Row, fields: super::view::Fields) -> String {
-    let Row::Item(e @ Entry::Dir { at: Some(_), .. }) = r else { return String::new() };
+    let Row::Item(e @ Entry::Dir { at: Some(_), .. }, _) = r else { return String::new() };
     if !fields.shows(super::view::Field::Tally) {
         return String::new();
     }
@@ -1416,7 +1416,7 @@ impl Head {
         // 머리 뒤에 줄마다 붙어 안 걷히는 것(`[NEW]`·`⎇ <가지>`, 제목 뒤의 `숨김`, 셈과 그 앞 두 칸)의 가장 긴 폭.
         let mut tail = 0;
         for (r, tally) in rows.iter().zip(tallies) {
-            let Row::Item(e) = r else { continue };
+            let Row::Item(e, _) = r else { continue };
             let Some(at) = e.at() else { continue };
             let i = &app.issues[at];
             w.id = w.id.max(crate::text::width(&i.id));
@@ -1502,7 +1502,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         // 이 줄이 가는 데는 한 곳뿐이다.
         Some(Row::Up) => vec![Line::from(Span::styled("한 층 위로", dim()))],
         Some(Row::Project(at)) => place_about(app, at, inner.width as usize),
-        Some(Row::Item(e)) => match e.at() {
+        Some(Row::Item(e, _)) => match e.at() {
             Some(idx) => about(app, idx, &e, inner.width as usize),
             // 바구니는 제 줄이 없다. 밑에 무엇이 있는지만 센다.
             None => {
@@ -3405,7 +3405,7 @@ pub(super) mod tests {
         a.adopt(all);
         a.origin = origin;
         // 커서를 옆에서 온 줄에 둔다.
-        let at = a.rows().iter().position(|r| matches!(r, Row::Item(e) if e.at().is_some_and(|i| a.issues[i].id == "argos-0004"))).unwrap();
+        let at = a.rows().iter().position(|r| matches!(r, Row::Item(e, _) if e.at().is_some_and(|i| a.issues[i].id == "argos-0004"))).unwrap();
         a.cursor = at;
         let lines = render(&mut a, 120, 12);
         let screen = lines.join("\n");
@@ -3618,7 +3618,7 @@ pub(super) mod tests {
         let mut a = every(issues());
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let id = a.current().and_then(|r| match r {
-            Row::Item(e) => e.at().map(|at| a.issues[at].id.clone()),
+            Row::Item(e, _) => e.at().map(|at| a.issues[at].id.clone()),
             _ => None,
         });
         let id = id.expect("에픽 안의 첫 줄이 이슈가 아니다");
@@ -3832,7 +3832,7 @@ pub(super) mod tests {
             a.cursor = a
                 .rows()
                 .iter()
-                .position(|r| matches!(r, Row::Item(e) if e.at().is_some_and(|i| a.issues[i].id == "argos-0005")))
+                .position(|r| matches!(r, Row::Item(e, _) if e.at().is_some_and(|i| a.issues[i].id == "argos-0005")))
                 .unwrap_or_else(|| panic!("{name}: 막힌 일이 목록에 없다"));
             let lines = render(&mut a, 120, 24).join("\n");
             for w in want {
@@ -4980,7 +4980,7 @@ pub(super) mod tests {
             all.push(Issue::new("argos-0009".into(), "홀로 선 일".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z"));
             a.adopt(all);
             let find = |a: &App, want: &dyn Fn(&Row) -> bool| a.rows().iter().position(want).expect("그런 줄이 없다");
-            let dir = |r: &Row| matches!(r, Row::Item(Entry::Dir { .. }));
+            let dir = |r: &Row| matches!(r, Row::Item(Entry::Dir { .. }, _));
             a.focus = Pane::Explorer;
             if matches!(self, Place::InsideLeaf | Place::InsideUp | Place::LayeredInsideUp) {
                 a.cursor = find(&a, &dir);
@@ -4990,7 +4990,7 @@ pub(super) mod tests {
             a.cursor = match self {
                 Place::RootDir => find(&a, &dir),
                 Place::InsideUp | Place::LayeredInsideUp => find(&a, &|r| *r == Row::Up),
-                _ => find(&a, &|r| matches!(r, Row::Item(Entry::Leaf { .. }))),
+                _ => find(&a, &|r| matches!(r, Row::Item(Entry::Leaf { .. }, _))),
             };
             a
         }
