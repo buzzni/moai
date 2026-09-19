@@ -5323,3 +5323,6 @@
 {"ts":"2026-09-19T06:02:07Z","id":"moai-hav1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-19T06:02:07Z","id":"moai-y7go","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-19T06:02:07Z","id":"moai-71ht","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 셋(hwrm·hav1·y7go)과 리뷰 세 판을 닫고 3a54756 으로 병합했다. moai-giz3 는 사용자가 \"없어도 되는 것\" 으로 둔 멤버라 첫 칸에 그대로 있다 — 에픽은 그래서 열려 있다. 남은 idea 넷(moai-3wec 헛도는 시험, moai-jydm 워크트리의 init, moai-ynzc gather 의 두 자, 그리고 미룬 멤버들)은 이 에픽 밑에 있다."}
+{"ts":"2026-09-19T06:02:54Z","id":"moai-ncay","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T06:02:54Z","id":"moai-455j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T06:02:54Z","id":"moai-t863","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
