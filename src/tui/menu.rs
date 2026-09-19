@@ -6,6 +6,11 @@
 //! 글칸이라, 메뉴가 모드면 메뉴 안의 키가 글자로 샌다. 붙여넣기·글칸으로 넘어가는 길이 열을
 //! 버리므로 메뉴도 그 길에서 닫힌다.
 //!
+//! **상태를 대는 항목은 메뉴를 안 닫는다**(사용자 결정 2026-09-19, moai-osgw). done·미룸·칸·열·
+//! 상세·워크트리·원문·정렬은 눌러 보며 맞추는 것이라 실행하고도 열린 채로 남고, ESC(또는 연 키
+//! SPC)가 나간다. 판정은 **항목마다**다([`Browse::stateful`]) — 같은 층의 `SPC v a`(모두 보이기)
+//! 처럼 한 번에 끝나는 것은 그대로 닫는다. 층이 기다리는가([`waits`])는 화면의 안내에만 쓴다.
+//!
 //! **`gg` 와 다른 규칙 하나**(키 지도 moai-hudg): 메뉴 안에서 모르는 키는 **무시한다** — 닫지도
 //! 알리지도 않는다. `gg` 는 뜻 없는 둘째 키가 열을 버리지만([`Chord::feed`]), 메뉴는 떠 있는
 //! 창이라 틀린 키 하나에 사라지면 무엇을 누르려 했는지 다시 봐야 한다. Esc 가 닫고 Bksp 가 한
@@ -31,11 +36,21 @@ pub fn open(chord: &Chord) -> bool {
 }
 
 /// 탐색의 키 하나. 메뉴가 닫혀 있으면 표를 그대로 찾고(SPC 는 기다림이라 메뉴가 열린다),
-/// 열려 있으면 메뉴의 규칙을 따른다 — Esc 닫기, Bksp 한 층 위, 켜진 동작은 실행하고 닫기,
-/// 켜진 하위 접두어는 한 층 내려가기, **그 밖은 아무 일도 없다.**
+/// 열려 있으면 메뉴의 규칙을 따른다 — Esc·SPC 닫기, Bksp 한 층 위, 켜진 동작은 실행하고 닫기
+/// (상태를 대는 것은 열린 채로 남기고), 켜진 하위 접두어는 한 층 내려가기, **그 밖은 아무 일도
+/// 없다.**
 pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
     if !open(chord) {
         return chord.feed(BROWSE, k);
+    }
+    // **연 키가 닫는다**(사용자 결정 2026-09-19) — doom·helix 의 버릇이고, 토글 층이 ESC 까지
+    // 기다리면서 실제로 필요해졌다. 전에는 메뉴 안의 SPC 가 모르는 키라 아무 일도 없어, 눌러 본
+    // 사람에게는 메뉴가 먹통으로 보였다. **[`MENU`] 표에 안 싣는다** — 그러면 `SPC` 열이 어느
+    // 표에서 "다 된 열" 로 읽혀(`keys::tests::known`) 도움말의 `SPC v w` 가 한 낱말로 안 묶이고,
+    // 그 시험이 SPC 밑 키를 통째로 못 찾은 것으로 잡는다.
+    if LEADER.matches(k) {
+        chord.clear();
+        return None;
     }
     match lookup(MENU, &[k]) {
         Lookup::Run(Menu::Close) => {
@@ -52,7 +67,13 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
     seq.push(k);
     match lookup(BROWSE, &seq) {
         Lookup::Run(act) if act.enabled(c).is_ok() => {
-            chord.clear();
+            // **상태를 대는 동작은 메뉴를 안 닫는다**(사용자 결정 2026-09-19) — 눌러 보며
+            // 맞추는 것이라, 한 번 받고 닫으면 `SPC v d`·`SPC v w` 를 맞출 때마다 메뉴를 다시
+            // 연다. 판정은 **항목마다**다: 같은 층의 `SPC v a`(모두 보이기)처럼 상태가 없는
+            // 것은 한 번에 끝나는 일이라 그대로 닫는다.
+            if !act.stateful() {
+                chord.clear();
+            }
             Some(act)
         }
         Lookup::Pending if live(&seq, c) => {
@@ -245,6 +266,21 @@ fn under(b: &Bind<Browse>, seq: &[KeyEvent]) -> bool {
     b.seq.len() >= seq.len() && b.seq.iter().zip(seq).all(|(key, k)| key.matches(*k))
 }
 
+/// **이 층이 ESC 까지 기다리나** — 상태를 대는 항목([`Browse::stateful`])이 이 층에 하나라도 서면
+/// 기다린다(사용자 결정 2026-09-19). 접두어 줄의 `Esc 닫기` 가 이것으로 서고, 안 선 층은 한 번
+/// 받고 닫힌다는 뜻이라 있고 없음이 그대로 규칙을 댄다.
+///
+/// 오늘 이것이 참인 층은 `SPC v`·`SPC c`·`SPC s` 고, 뿌리·`SPC p`·`SPC m` 은 거짓이다. **켜진
+/// 것만 센다**([`entries`] 와 같은 판정) — 안 선 항목은 눌러도 모르는 키라, 그것으로 기다리면
+/// 아무 토글도 없는 층이 ESC 를 기다린다. 하위 층의 토글은 안 센다: 그 층은 제 차례에 스스로
+/// 답한다.
+pub fn waits(held: &[KeyEvent], c: &Ctx) -> bool {
+    BROWSE
+        .iter()
+        .filter(|b| b.seq.len() == held.len() + 1 && under(b, held))
+        .any(|b| b.act.stateful() && b.act.enabled(c).is_ok())
+}
+
 /// 이 접두어 밑에 켜진 동작이 하나라도 있나 — 없으면 하위 접두어도 안 선다.
 fn live(seq: &[KeyEvent], c: &Ctx) -> bool {
     BROWSE.iter().any(|b| b.seq.len() > seq.len() && under(b, seq) && b.act.enabled(c).is_ok())
@@ -390,7 +426,9 @@ mod tests {
         }
     }
 
-    /// **메뉴의 모든 길이 같은 동작을 낸다** — 바로 누르던 키가 하던 그 동작이고, 실행하면 닫힌다.
+    /// **메뉴의 모든 길이 같은 동작을 낸다** — 바로 누르던 키가 하던 그 동작이다. 닫히는가는
+    /// 그 동작이 상태를 대는가가 가른다([`Browse::stateful`]) — 상태를 대는 것은 눌러 보며
+    /// 맞추라고 열린 채로 남는다(사용자 결정 2026-09-19).
     #[test]
     fn each_menu_path_runs_its_action_and_closes() {
         let cases: [(&str, Browse, Ctx); 13] = [
@@ -416,8 +454,39 @@ mod tests {
                 got = feed(&mut ch, &c, k(p));
             }
             assert_eq!(got, Some(act), "SPC {path}");
-            assert!(!open(&ch), "SPC {path} 를 실행하고도 메뉴가 열려 있다");
+            if act.stateful() {
+                assert!(open(&ch), "SPC {path} 가 상태를 대는데 메뉴가 닫혔다");
+                assert_eq!(title(ch.held()), format!("SPC {}", &path[..1]), "SPC {path} 가 층을 옮겼다");
+            } else {
+                assert!(!open(&ch), "SPC {path} 를 실행하고도 메뉴가 열려 있다");
+            }
         }
+    }
+
+    /// **토글은 되풀이해 누를 수 있다**(사용자 결정 2026-09-19) — 메뉴가 열린 채로 남아 done·
+    /// 미룸·워크트리를 눌러 보며 원하는 상태를 만들고 ESC 로 나간다. **같은 층의 상태 없는
+    /// 항목(`SPC v a` 모두 보이기)은 한 번에 끝나는 일이라 그대로 닫는다** — 판정은 층이 아니라
+    /// 항목마다다.
+    #[test]
+    fn toggles_stay_open_until_esc_but_a_plain_item_closes() {
+        let c = inside();
+        let mut ch = Chord::default();
+        feed(&mut ch, &c, k(' '));
+        feed(&mut ch, &c, k('v'));
+        for _ in 0..3 {
+            assert_eq!(feed(&mut ch, &c, k('d')), Some(Browse::Done));
+            assert_eq!(title(ch.held()), "SPC v", "토글을 되풀이하는데 메뉴가 닫혔다");
+        }
+        assert_eq!(feed(&mut ch, &c, k('w')), Some(Browse::Worktree), "다른 토글로 이어 못 갔다");
+        assert!(open(&ch));
+        // 연 키가 닫는다 — Esc 와 같은 자리다.
+        assert_eq!(feed(&mut ch, &c, k(' ')), None);
+        assert!(!open(&ch), "SPC 가 메뉴를 안 닫았다");
+        // 같은 층의 상태 없는 항목은 닫는다.
+        feed(&mut ch, &c, k(' '));
+        feed(&mut ch, &c, k('v'));
+        assert_eq!(feed(&mut ch, &c, k('a')), Some(Browse::ShowAll));
+        assert!(!open(&ch), "모두 보이기가 메뉴를 열어 뒀다");
     }
 
     /// **모르는 키는 무시한다** — 닫지도 않는다. Esc 가 닫고 Bksp 가 한 층 올라간다.
@@ -426,7 +495,8 @@ mod tests {
         let c = inside();
         let mut ch = Chord::default();
         feed(&mut ch, &c, k(' '));
-        for x in [k('x'), k('j'), k('g'), KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), k(' ')] {
+        // SPC 는 여기 없다 — 연 키가 닫는다(`toggles_stay_open_until_esc_but_a_plain_item_closes`).
+        for x in [k('x'), k('j'), k('g'), KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)] {
             assert_eq!(feed(&mut ch, &c, x), None, "{x:?}");
             assert_eq!(title(ch.held()), "SPC", "{x:?} 가 메뉴를 옮기거나 닫았다");
         }

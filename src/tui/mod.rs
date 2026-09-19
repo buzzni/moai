@@ -3090,16 +3090,16 @@ mod tests {
         a.hit("Bksp");
 
         a.cursor = 1;
-        a.hit("SPC v d");
+        a.hit("SPC v d Esc");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0009", "argos-0010"]);
         assert_eq!(row_ids(&a)[a.cursor], "argos-0010", "토글이 커서를 딴 줄로 옮겼다");
         a.hit("Esc");
         assert_eq!(row_ids(&a).len(), 3, "Esc 가 보기를 풀었다");
 
-        a.hit("SPC v l");
+        a.hit("SPC v l Esc");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0009"], "미룸이 안 숨었다");
         // 설정의 넷째 칸이 done 이다 — 번호로 누른 것과 `d` 가 같은 칸을 만진다.
-        a.hit("SPC v 4");
+        a.hit("SPC v 4 Esc");
         assert_eq!(row_ids(&a), ["argos-0001"]);
         a.hit("SPC v a");
         assert_eq!(row_ids(&a).len(), 3, "모두 보이기가 다 안 보인다");
@@ -3126,7 +3126,7 @@ mod tests {
             make("argos-0011", Kind::Issue),
         ];
         let mut a = App::new(issues, cfg(), Path::new());
-        a.hit("SPC v l");
+        a.hit("SPC v l Esc");
         a
     }
 
@@ -3281,7 +3281,7 @@ mod tests {
     #[test]
     fn a_write_hidden_by_a_search_and_the_view_names_both() {
         let (_scratch, mut a) = writable("land-search-view");
-        a.hit("SPC v 1");
+        a.hit("SPC v 1 Esc");
         a.hit("/");
         typed(&mut a, "argos-0001");
         assert!(add_idea(&mut a, "argos-0002").is_some());
@@ -3309,7 +3309,7 @@ mod tests {
         let now = a.look_now();
         assert_eq!(now.fields_known.as_ref().map(Vec::len), Some(view::Field::ALL.len()));
         let mut b = App::new(Vec::new(), cfg(), Path::new());
-        b.hit("SPC c h");
+        b.hit("SPC c h Esc");
         let off = b.look_now();
         let mut c = App::new(Vec::new(), cfg(), Path::new());
         c.adopt_look(&off, Vec::new());
@@ -3369,7 +3369,7 @@ mod tests {
         for f in view::Field::ALL {
             assert_eq!(a.fields.shows(f), f == view::Field::Id, "{} 이 적힌 fields 를 안 따랐다", f.name());
         }
-        a.hit("SPC c t");
+        a.hit("SPC c t Esc");
 
         let text = std::fs::read_to_string(&user).unwrap();
         let (back, _) = crate::user_config::read_look(Some(&user));
@@ -3398,7 +3398,7 @@ mod tests {
         a.user_config = Some(user.clone());
         a.load_look();
         assert!(a.fields.shows(view::Field::Names), "옛 설정에 새 열이 안 떴다");
-        a.hit("SPC c h");
+        a.hit("SPC c h Esc");
         assert!(!a.fields.shows(view::Field::Names));
 
         let text = std::fs::read_to_string(&user).unwrap();
@@ -3427,18 +3427,18 @@ mod tests {
         ];
         let mut a = App::new(issues, cfg(), Path::new());
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0003"]);
-        a.hit("SPC s c");
+        a.hit("SPC s c Esc");
         assert_eq!(row_ids(&a), ["argos-0002", "argos-0001", "argos-0003"], "새것이 위가 아니다");
         assert_eq!(a.cursor, 1, "커서가 보던 줄(argos-0001)을 놓쳤다");
-        a.hit("SPC s c");
+        a.hit("SPC s c Esc");
         assert_eq!(row_ids(&a), ["argos-0003", "argos-0001", "argos-0002"], "다시 눌렀는데 안 뒤집혔다");
         // 메뉴의 표시도 같은 한 벌(`Ctx::sorting`)을 읽는다 — 고른 차례에만 붙고 방향은 낱말로 댄다(moai-y61p 단계 리뷰).
         let ctx = a.key_ctx(&a.rows());
         assert_eq!(keys::Browse::Sort(keys::Order::Created).state(&ctx), Some("[● 거꾸로]"), "메뉴가 고른 차례·방향을 모른다");
         assert_eq!(keys::Browse::Sort(keys::Order::Priority).state(&ctx), None, "고르지 않은 차례에 표시가 붙었다");
-        a.hit("SPC s t");
+        a.hit("SPC s t Esc");
         assert_eq!(a.order, keys::Sorting { by: keys::Order::Title, reversed: false }, "다른 키가 거꾸로를 물려받았다");
-        a.hit("SPC s p");
+        a.hit("SPC s p Esc");
         assert_eq!(a.order, Default::default());
     }
 
@@ -4070,10 +4070,10 @@ mod tests {
         a.key(key(KeyCode::Char('l')));
         // 처음에는 done 을 숨긴다(moai-fmv5) — 펼친 멤버에도 그 보기가 그대로 걸린다.
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0004"], "done 숨김이 펼친 멤버에 안 걸렸다");
-        a.hit("SPC v d");
+        a.hit("SPC v d Esc");
         // 형제끼리의 차례는 고른 정렬이 매긴다 — p0 인 0004 가 0003 앞이다.
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0004", "argos-0003"], "done 을 켰는데 멤버가 안 선다");
-        a.hit("SPC s p");
+        a.hit("SPC s p Esc");
         let ids = row_ids(&a);
         assert_eq!(ids[0], "argos-0001", "멤버가 부모를 넘어 올라갔다: {ids:?}");
     }
@@ -4249,10 +4249,10 @@ mod tests {
         a.hit("SPC n");
         assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
         let mut a = app();
-        a.hit("SPC v r");
+        a.hit("SPC v r Esc");
         assert!(a.raw && !menu::open(&a.chord));
         let was = a.worktree;
-        a.hit("SPC v w");
+        a.hit("SPC v w Esc");
         assert_eq!(a.worktree, !was);
     }
 
@@ -5123,20 +5123,21 @@ mod tests {
         let (_scratch, mut a) = writable("overlay-lost");
         a.read = lost;
         assert!(a.worktree);
-        a.hit("SPC v w");
+        a.hit("SPC v w Esc");
         assert!(!a.worktree);
         assert_eq!(a.notice, None, "끌 때 까닭을 댔다");
         a.hit("SPC v w");
         assert!(a.worktree);
         let said = a.notice.clone().expect("켰는데 못 찾은 까닭을 안 댄다");
         assert!(said.contains("git 저장소가 아니다") && said.contains("옆 워크트리"), "{said}");
+        a.hit("Esc");
         // 알림은 다음 키에 걷힌다 — 키 없이 부르는 다시 읽기가 새로 대지 않는지만 본다.
         a.notice = None;
         a.reload();
         assert_eq!(a.notice, None, "시키지 않은 다시 읽기가 까닭을 또 댔다");
         // 찾았는데 옆이 비었으면 까닭 없이 없다고만 한다 — 경로 줄이 비어 달리 알 길이 없다.
         a.read = prepare_found;
-        a.hit("SPC v w");
+        a.hit("SPC v w Esc");
         a.hit("SPC v w");
         let said = a.notice.clone().expect("켰는데 겹칠 것이 없다고 안 한다");
         assert!(said.contains("옆 워크트리 없음") && !said.contains("못 찾았다"), "{said}");
@@ -5393,7 +5394,7 @@ mod tests {
     #[test]
     fn the_view_hiding_the_new_line_names_the_view_not_the_filter() {
         let (_scratch, mut a) = writable("land-view");
-        a.hit("SPC v 1");
+        a.hit("SPC v 1 Esc");
         assert!(add_idea(&mut a, "argos-0002").is_some());
         assert_eq!(a.issues.len(), 2, "쓰기가 안 닿았다");
         assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002 — 보기에 가려 안 보인다 · SPC v a 로 모두 보인다"));
@@ -5406,7 +5407,7 @@ mod tests {
         let (_scratch, mut a) = writable("land-both");
         a.hit("SPC f");
         typed(&mut a, "type=epic");
-        a.hit("SPC v 1");
+        a.hit("SPC v 1 Esc");
         assert!(add_idea(&mut a, "argos-0002").is_some());
         assert_eq!(
             a.notice.as_deref(),
@@ -5421,13 +5422,13 @@ mod tests {
         let user = s.join("user.toml");
         let mut a = App::new(Vec::new(), cfg(), Path::new());
         a.user_config = Some(user.clone());
-        a.hit("SPC v d");
-        a.hit("SPC v l");
-        a.hit("SPC s u");
-        a.hit("SPC s u");
-        a.hit("SPC c a");
-        a.hit("SPC c i");
-        a.hit("SPC v p");
+        a.hit("SPC v d Esc");
+        a.hit("SPC v l Esc");
+        a.hit("SPC s u Esc");
+        a.hit("SPC s u Esc");
+        a.hit("SPC c a Esc");
+        a.hit("SPC c i Esc");
+        a.hit("SPC v p Esc");
         let text = std::fs::read_to_string(&user).expect("보기가 설정에 안 적혔다");
         assert!(text.contains("[tui]") && text.contains("sort = \"updated\""), "{text}");
 
@@ -5456,11 +5457,11 @@ mod tests {
 
         // 모르는 낱말은 토글 한 번에 지워지지 않는다 — 새 바이너리가 적은 것일 수 있다. 겹쳐 적힌 done 은
         // 한 번에 보인다.
-        c.hit("SPC v d");
+        c.hit("SPC v d Esc");
         assert!(!c.view.hides(crate::config::DONE), "겹쳐 적힌 done 이 한 번 눌러서는 안 보였다");
         let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
         assert!(text.contains("sort = \"nope\"") && text.contains("sort_reversed = true") && text.contains("\"what\""), "{text}");
-        c.hit("SPC s t");
+        c.hit("SPC s t Esc");
         let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
         assert!(text.contains("sort = \"title\"") && text.contains("sort_reversed = false") && text.contains("\"what\""), "{text}");
 
@@ -5484,11 +5485,14 @@ mod tests {
         let mut a = App::new(Vec::new(), cfg(), Path::new());
         a.user_config = Some(user.clone());
         a.load_look();
+        // 알림은 다음 키 하나에 걷힌다 — 메뉴를 닫는 Esc 도 키다. 보고 나서 닫는다.
         a.hit("SPC s t");
         assert!(a.notice.clone().unwrap_or_default().contains("tui.sort"), "{:?}", a.notice);
+        a.hit("Esc");
         a.notice = None;
         a.hit("SPC v d");
         assert_eq!(a.notice, None, "건너뛴 키를 다음 저장에 또 실었다");
+        a.hit("Esc");
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(text.contains("sort.by = \"created\"") && text.contains("hidden"), "숨김이 안 적혔다\n{text}");
     }
@@ -5521,9 +5525,9 @@ mod tests {
             x
         };
         let (mut a, mut b) = (open(), open());
-        a.hit("SPC c a");
-        b.hit("SPC v d");
-        b.hit("SPC s u");
+        a.hit("SPC c a Esc");
+        b.hit("SPC v d Esc");
+        b.hit("SPC s u Esc");
         let c = open();
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(c.fields.shows(view::Field::Assignee), "옆 탐색기가 켠 열을 지웠다\n{text}");
@@ -5983,7 +5987,7 @@ mod tests {
         for k in [KeyCode::Down, KeyCode::Enter, KeyCode::Backspace, KeyCode::Tab] {
             a.key(key(k));
         }
-        a.hit("SPC v r");
+        a.hit("SPC v r Esc");
         a.key(key(KeyCode::Char('/')));
         type_in(&mut a, "제목");
         a.key(key(KeyCode::Enter));

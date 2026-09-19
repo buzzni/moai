@@ -1059,11 +1059,11 @@ mod tests {
 
         a.key(key(KeyCode::Enter));
         assert!(a.worktree, "프로젝트에 들어갔는데 겹쳐 보기가 꺼져 있다");
-        a.hit("SPC v w");
+        a.hit("SPC v w Esc");
         assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
         // 보기는 사람의 설정이라 **따라간다**(moai-2bzp) — 겹쳐 보기와 반대다.
-        a.hit("SPC v d");
-        a.hit("SPC s t");
+        a.hit("SPC v d Esc");
+        a.hit("SPC s t Esc");
         let (view, order) = (a.view.clone(), a.order);
         assert!(!view.hides(crate::config::DONE), "프로젝트 안에서 SPC v d 가 done 을 안 보였다");
 
@@ -1348,7 +1348,7 @@ mod tests {
         // **겹쳐 보기를 꺼도 워크트리가 사라지는 것을 본다**(리뷰 moai-3lul.kt0). 끄면 옆 스냅샷을
         // 아예 안 열어, 한때는 자리 판정이 보는 것이 지켜보는 표식에 하나도 안 들었다 — 치운 뒤
         // 배너가 옛 수로 굳었다.
-        a.hit("SPC v w");
+        a.hit("SPC v w Esc");
         assert!(!a.worktree, "w 가 겹쳐 보기를 안 껐다");
         settle(&mut a);
         let was = a.warnings;
@@ -1634,7 +1634,7 @@ mod tests {
         }
         a.key(key(KeyCode::Enter));
         assert_eq!(a.filter_text.as_deref(), Some("status=in_progress"));
-        a.hit("SPC v w");
+        a.hit("SPC v w Esc");
         assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
 
         a.hit("2");
@@ -1982,7 +1982,7 @@ mod tests {
         let named = |a: &App| a.elsewhere.iter().filter(|l| l.contains("wt-x")).count();
         a.key(key(KeyCode::Enter));
         assert_eq!(named(&a), 1, "겹쳐 볼 때 못 읽은 옆 스냅샷을 안 대거나 두 번 댄다 — {:?}", a.elsewhere);
-        a.hit("SPC v w");
+        a.hit("SPC v w Esc");
         assert!(!a.worktree, "w 가 겹쳐 보기를 안 껐다");
         settle(&mut a);
         assert_eq!(named(&a), 1, "겹쳐 보기를 끄자 못 읽은 옆 스냅샷이 배너에서 사라졌다 — {:?}", a.elsewhere);
