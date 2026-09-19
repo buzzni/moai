@@ -5352,3 +5352,10 @@
 {"ts":"2026-09-19T08:37:41Z","id":"moai-p836","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 셋(455j·t863·ncay)과 리뷰를 닫고 develop 에 병합했다. 리뷰가 세운 멤버 다섯(moai-9zfv·moai-dae0·moai-253x·moai-yxvj·moai-6g4i)이 첫 칸에 서 있어 에픽은 열려 있다 — 9zfv 가 이 에픽이 낸 잘못 막음이라 먼저 본다(사용자 결정: 열어 둔다). idea 는 moai-ix1b(& 로 띄운 묶음)·moai-p9eb(shell_writes 의 제어 변수 열둘)."}
 {"ts":"2026-09-19T09:01:19Z","id":"moai-8p83","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"0 을 누르면 프로젝트 고르기 대신 모든 프로젝트의 이슈를 한 탐색기에 보인다"}
 {"ts":"2026-09-19T09:07:04Z","id":"moai-gia2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC 메뉴에 토글이 있으면 ESC 까지 기다린다 — 토글이 없으면 한 번 받고 닫는다"}
+{"ts":"2026-09-19T09:09:55Z","id":"moai-osgw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC 메뉴의 토글은 ESC 까지 기다린다"}
+{"ts":"2026-09-19T09:09:55Z","id":"moai-tf3n","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"토글인가를 동작 표에서 읽는다"}
+{"ts":"2026-09-19T09:09:55Z","id":"moai-04ix","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"토글이 선 층은 실행 뒤에도 열린 채로 기다린다"}
+{"ts":"2026-09-19T09:09:55Z","id":"moai-68j8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"접두어 줄과 도움말이 기다림을 댄다"}
+{"ts":"2026-09-19T09:09:55Z","id":"moai-osgw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-gia2 에서 펼쳤다 — SPC 메뉴에 토글이 있으면 ESC 까지 기다린다 — 토글이 없으면 한 번 받고 닫는다"}
+{"ts":"2026-09-19T09:09:55Z","id":"moai-gia2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-osgw 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-19T09:10:06Z","id":"moai-tf3n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
