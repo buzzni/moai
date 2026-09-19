@@ -456,7 +456,9 @@ mod tests {
             assert_eq!(got, Some(act), "SPC {path}");
             if act.stateful() {
                 assert!(open(&ch), "SPC {path} 가 상태를 대는데 메뉴가 닫혔다");
-                assert_eq!(title(ch.held()), format!("SPC {}", &path[..1]), "SPC {path} 가 층을 옮겼다");
+                // 글자로 자른다 — 바이트로 자르면 한글 한 글자짜리 길이 생긴 날 여기서 패닉한다.
+                let head = path.chars().next().expect("빈 길");
+                assert_eq!(title(ch.held()), format!("SPC {head}"), "SPC {path} 가 층을 옮겼다");
             } else {
                 assert!(!open(&ch), "SPC {path} 를 실행하고도 메뉴가 열려 있다");
             }
@@ -487,6 +489,27 @@ mod tests {
         feed(&mut ch, &c, k('v'));
         assert_eq!(feed(&mut ch, &c, k('a')), Some(Browse::ShowAll));
         assert!(!open(&ch), "모두 보이기가 메뉴를 열어 뒀다");
+    }
+
+    /// **어느 층이 ESC 를 기다리는가**([`waits`])는 그 층에 선 토글에서 읽는다 — 접두어 줄의
+    /// `Esc 닫기` 가 이것으로 선다. 손으로 적은 표가 아니라 [`Browse::stateful`] 과 [`Browse::enabled`]
+    /// 에서 나오므로, 표에 토글을 더하거나 층을 옮기면 답이 저절로 따라온다. 그 답이 바뀌는 것을
+    /// 말없이 지나치지 않게 오늘의 값을 여기 박아 둔다(moai-osgw.mez 리뷰).
+    #[test]
+    fn a_layer_waits_only_when_a_toggle_stands_on_it() {
+        let c = inside();
+        let path = |s: &str| -> Vec<KeyEvent> { std::iter::once(' ').chain(s.chars()).map(k).collect() };
+        for p in ["v", "c", "s"] {
+            assert!(waits(&path(p), &c), "SPC {p} 에 토글이 섰는데 안 기다린다");
+        }
+        for p in ["", "p", "m"] {
+            assert!(!waits(&path(p), &c), "SPC {p} 에 토글이 없는데 기다린다");
+        }
+        // **켜진 것만 센다** — 층에서는 줄 보기·정렬·열이 다 꺼져, 상세 칸(`p`)이 남은 `SPC v` 만 기다린다.
+        assert!(waits(&path("v"), &layer()), "층의 상세 칸 토글을 안 센다");
+        for p in ["", "c", "s", "p", "m"] {
+            assert!(!waits(&path(p), &layer()), "층에서 안 선 항목으로 SPC {p} 가 기다린다");
+        }
     }
 
     /// **모르는 키는 무시한다** — 닫지도 않는다. Esc 가 닫고 Bksp 가 한 층 올라간다.
@@ -564,6 +587,10 @@ mod tests {
 
     /// **이름 없는 하위 접두어가 없다.** 표에 SPC 줄을 더하며 새 접두어를 만들면 여기서 멈춘다.
     /// 메뉴가 받는 Esc·Bksp 는 메뉴 줄의 키로 쓰이지 않는다 — 쓰이면 그 줄은 영영 못 누른다.
+    ///
+    /// **연 키(SPC)도 같다**(moai-osgw.mez 리뷰). [`feed`] 가 그것을 [`MENU`] 표 밖에서 가로채
+    /// 닫으므로 위의 `lookup(MENU, …)` 로는 안 걸린다 — 따로 잰다. `SPC SPC …` 를 더하면 그 줄은
+    /// 눌러도 메뉴만 닫히고 영영 안 돈다.
     #[test]
     fn every_prefix_in_the_menu_has_a_name() {
         for b in BROWSE.iter().filter(|b| b.seq.first() == Some(&LEADER)) {
@@ -573,6 +600,7 @@ mod tests {
             }
             for key in &b.seq[1..] {
                 assert_eq!(lookup(MENU, &[key.event()]), Lookup::Unknown, "{:?}", b.seq);
+                assert!(!LEADER.matches(key.event()), "{:?} 가 연 키를 줄의 키로 쓴다 — 그 줄은 못 누른다", b.seq);
             }
         }
     }

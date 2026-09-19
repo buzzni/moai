@@ -2384,12 +2384,12 @@ fn menu_word(group: bool) -> Style {
 }
 
 /// 메뉴가 열린 동안의 맨 아랫줄 — 접두어 줄(doom 의 `SPC- <leader>`). 왼쪽에 지금 접두어와 층의
-/// 이름(`SPC v- 보기`), 오른쪽 끝에 나가는 법(`Esc 닫기`·하위 층이면 `Bksp 위로`). 탐색의 키는
-/// 메뉴 안에서 안 들으므로 바의 자리를 이 줄이 통째로 쓴다. 폭이 모자라 못 세운 항목이 있으면
-/// 그 수를 댄다 — 말없이 빠지면 없는 줄 안다.
+/// 이름(`SPC v- 보기`), 오른쪽 끝에 나가는 법(기다리는 층이면 `Esc 닫기`, 하위 층이면 `Bksp 위로`).
+/// 탐색의 키는 메뉴 안에서 안 들으므로 바의 자리를 이 줄이 통째로 쓴다. 폭이 모자라 못 세운 항목이
+/// 있으면 그 수를 댄다 — 말없이 빠지면 없는 줄 안다.
 ///
 /// **격자 설 높이가 없으면 여기로 접는다** — `SPC-  / 검색  f 거름망 …`. 항목이 먼저고 나가는
-/// 법은 자리가 남을 때만 붙는다: Esc 는 어디서든 닫고, 못 누르는 항목은 댈 수 없다.
+/// 법은 자리가 남을 때만 붙는다 — 못 누르는 항목은 댈 수 없다.
 fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid, waits: bool, at: Rect) {
     let held = app.chord.held();
     let room = at.width as usize;
@@ -2407,8 +2407,10 @@ fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid,
         }
     }
     // **`Esc 닫기` 는 기다리는 층에만 선다**(사용자 결정 2026-09-19) — 그 줄이 곧 규칙이다:
-    // 서 있으면 눌러 보며 맞추는 층이고, 없으면 한 번 받고 닫힌다. Esc 는 어느 층에서나 닫지만
-    // 안 기다리는 층에서는 댈 것이 없다 — 키 하나에 메뉴가 사라지므로 나갈 길을 찾을 새가 없다.
+    // 서 있으면 눌러 보며 맞추는 층이고, 없으면 고른 항목 하나에 닫힌다. Esc 는 어느 층에서나
+    // 닫지만(연 키 SPC 도, 하위 층이면 Bksp 도), 안 기다리는 층에서 그것을 대면 고르면 닫힌다는
+    // 뜻이 흐려진다. **모르는 키는 그래도 무시한다**(`menu::feed`) — 아무것도 안 고르고 나가는 길은
+    // `moai tui --help` 가 댄다.
     let mut exits = if waits { vec![key(&label(MENU, Menu::Close), Menu::Close.what())] } else { Vec::new() };
     if held.len() > 1 {
         exits.push(key(&label(MENU, Menu::Up), Menu::Up.what()));
