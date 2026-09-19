@@ -8649,28 +8649,31 @@ fn show_names_the_worktree_a_picked_row_lives_in() {
     assert!(!out.contains("자리"), "낡은 스냅샷으로 자리를 댔다\n{out}");
     assert!(!ok_here(&side, &["show", &lost, "--json"]).contains("workplaces"));
     // 겹쳐 보면 main 의 칸이 들어와 아예 집은 줄이 아니다 — 그때도 "자리 없다" 는 안 선다.
+    // 칸은 `--json` 의 `status` 로 잰다 — 사람 화면에는 겹치지 않아도 이력의 `todo → in_progress` 가 서서
+    // `todo` 한 낱말로는 아무것도 안 잰다.
+    let json = ok_here(&side, &["show", &lost, "--worktree", "--json"]);
+    assert!(json.contains("\"status\":\"todo\""), "겹쳐 보고도 main 의 칸이 안 들어왔다\n{json}");
     let out = ok_here(&side, &["show", &lost, "--worktree"]);
-    assert!(out.contains("todo"), "겹쳐 보고도 main 의 칸이 안 들어왔다\n{out}");
     assert!(!out.contains("자리"), "겹쳐 보고도 자리를 댔다\n{out}");
 }
 
 /// 도구 호출 하나를 `cwd` 자리의 세션으로 부른다.
 fn tool_at(s: &Scratch, cwd: &Path, tool: &str, body: &str) -> String {
-    let input = format!(
+    String::from_utf8(hook_in(s, cwd, "pre-tool-use", &tool_input(cwd, tool, body)).stdout).unwrap()
+}
+
+/// [`tool_at`]·[`tool_here`] 가 훅에 흘리는 입력. **한 자리에 둔다** — 베껴 두면 한쪽만 고쳐도 모른다.
+fn tool_input(cwd: &Path, tool: &str, body: &str) -> String {
+    format!(
         "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"{tool}\",\"tool_input\":{body}}}",
         json_str(&cwd.display().to_string())
-    );
-    String::from_utf8(hook_in(s, cwd, "pre-tool-use", &input).stdout).unwrap()
+    )
 }
 
 /// [`tool_at`] 을 **그 체크아웃의 트래커로**(`MOAI_HERE`, [`hook_here`]) — 워크트리의 갈라진 스냅샷에
 /// main 을 겹쳐 푸는 판정을 잰다. 맨 훅은 루트를 읽어 그 판정에 닿지 않는다(moai-ts32).
 fn tool_here(s: &Scratch, cwd: &Path, tool: &str, body: &str) -> String {
-    let input = format!(
-        "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"{tool}\",\"tool_input\":{body}}}",
-        json_str(&cwd.display().to_string())
-    );
-    String::from_utf8(hook_here(s, cwd, "pre-tool-use", &input).stdout).unwrap()
+    String::from_utf8(hook_here(s, cwd, "pre-tool-use", &tool_input(cwd, tool, body)).stdout).unwrap()
 }
 
 /// **워크트리 안의 리뷰 규칙은 main 에서 집은 리뷰를 본다** (moai-w2iy). 트래커는 main 에서
