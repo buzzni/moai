@@ -238,6 +238,16 @@ impl Index {
         &self.homes[at]
     }
 
+    /// `path` 에 선 폴더 `seg` 밑에 사는 줄 — 얼마나 깊든. 목록이 폴더를 남길지 가르는 자
+    /// ([`Index::entries_sorted`] 의 "밑에 걸린 것") 와 같은 자다.
+    pub fn under<'a>(&'a self, path: &'a Path, seg: &'a Seg) -> impl Iterator<Item = usize> + 'a {
+        self.homes
+            .iter()
+            .enumerate()
+            .filter(move |(_, h)| h.len() > path.len() && h.starts_with(path) && h[path.len()] == *seg)
+            .map(|(d, _)| d)
+    }
+
     /// 그 자리를 home 으로 갖는 것들. **`home_of` 의 역상이다** — 목록 규칙을
     /// 따로 쓰지 않는 것이 빠짐도 겹침도 없음을 보장하는 유일한 이유다.
     pub fn entries(&self, issues: &[Issue], path: &Path) -> Vec<Entry> {

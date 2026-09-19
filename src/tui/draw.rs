@@ -1190,7 +1190,12 @@ fn row_line<'a>(
         head_w = head_w - crate::text::width(&head[glyph_at].content) + crate::text::width(&still);
         head[glyph_at] = Span::styled(still, glyph_style(app.column(at)));
     }
-    let used = crate::text::width(CURSOR) + head_w + crate::text::width(&right);
+    // **검색이 드러낸 숨은 줄**(moai-4x87, 사용자 결정) — 제목 뒤에 `숨김` 을 달고 줄을 흐린다. 뜻은
+    // 낱말이 진다: 흐림이 안 서는 터미널에서도 검색을 풀면 이 줄이 도로 숨는다는 것이 읽힌다. 자리는
+    // 제목보다 먼저 얻는다 — 긴 제목에 밀려 잘리면 까닭 없이 흐린 줄만 남는다.
+    let unveiled = app.unveiled(e);
+    let tail = if unveiled { UNVEILED_MARK } else { "" };
+    let used = crate::text::width(CURSOR) + head_w + crate::text::width(&right) + crate::text::width(tail);
     let mut title = clip(&app.index.label(&app.issues, e), budget.saturating_sub(used));
     // **디렉터리 표시는 자른 뒤에 붙인다.** 먼저 붙이면 긴 제목에서 `/` 가
     // 제일 먼저 잘려 나가고, 목록에는 디렉터리라고 말하는 것이 달리 없다.
@@ -1201,7 +1206,7 @@ fn row_line<'a>(
         title.push('/');
     }
 
-    let title_w = crate::text::width(&title);
+    let title_w = crate::text::width(&title) + crate::text::width(tail);
     let mut spans = head;
     // id 는 칠하면 조각이 갈라진다 — 머리글의 자리(`glyph_at`)를 다 쓴 **뒤에** 편다. **첫 조각이 id 인 것은
     // id 를 켰을 때뿐이다**(moai-2kyl 단계 리뷰) — 끈 채 칠하면 우선순위 `p1` 의 글자를 찾은 것으로 칠한다.
@@ -1218,6 +1223,9 @@ fn row_line<'a>(
     } else {
         spans.extend(mark(vec![Span::raw(title)], in_title));
     }
+    if unveiled {
+        spans.push(Span::raw(tail));
+    }
     if !right.is_empty() {
         // 셈은 **테두리 끝에 오른쪽 정렬**한다(moai-1krv) — 줄마다 제목 길이를 따라 들쭉날쭉하면
         // 여러 에픽의 셈을 한 줄로 훑어 내려갈 수 없다. 제목과의 틈은 채움 칸이 진다. 오른쪽 열도
@@ -1227,8 +1235,19 @@ fn row_line<'a>(
         spans.push(Span::raw(" ".repeat(gap)));
         spans.push(Span::styled(right, dim()));
     }
+    if unveiled {
+        // 찾은 글자(`found`)는 흐림을 일부러 걷은 조각이라 그대로 둔다 — 흐린 줄에서도 무엇이 걸렸는지 선다.
+        for s in &mut spans {
+            if !s.style.sub_modifier.contains(Modifier::DIM) {
+                s.style = s.style.add_modifier(Modifier::DIM);
+            }
+        }
+    }
     Line::from(spans)
 }
+
+/// 검색이 드러낸 숨은 줄의 꼬리(moai-4x87). 앞 빈칸까지 한 몸이다 — 제목 몫을 셀 때 함께 뺀다.
+const UNVEILED_MARK: &str = "  숨김";
 
 /// 줄 머리의 폭 — 커서 뒤, 제목 앞. id·우선순위(목록이 정한 폭), 두 칸 글리프와 빈칸, 그리고 `[NEW]`·
 /// `⎇ <가지>`. **줄을 짓지 않고 잰다** — 오른쪽 열을 걷는 셈(`right_fit`)이 창 밖 줄까지 봐야 하는데 그
@@ -2376,10 +2395,11 @@ fn grep_help(app: &App, q: &Input) -> String {
     if q.text().trim().is_empty() {
         return scope;
     }
-    // **보기가 가린 것도 댄다**(moai-2kyl 단계 리뷰) — 끝난 일을 찾는데 `0건` 만 서면 없는 줄 안다.
-    match app.veiled_count() {
+    // **보기가 숨겼을 것도 댄다**(moai-qnkn) — 검색은 보기가 숨긴 줄까지 세우므로, 흐린 줄이 왜 섰는지와
+    // 검색을 풀면 몇 줄이 도로 숨는지를 글로 말한다.
+    match app.unveiled_count() {
         0 => format!("{}건  {scope}", app.hit_count()),
-        n => format!("{}건 · 보기에 가린 {n}건  {scope}", app.hit_count()),
+        n => format!("{}건 · 숨김 {n}건 포함  {scope}", app.hit_count()),
     }
 }
 
@@ -5744,7 +5764,7 @@ pub(super) mod tests {
     }
 
     /// **보기가 다 가린 목록은 그렇다고 댄다**(moai-2kyl 단계 리뷰). 경로 줄의 `[done 숨김]` 은 좁으면 빠지고,
-    /// 그때 " 비었다 " 만 서면 끝난 일이 사라진 줄 안다. 검색 칸도 보기가 가린 수를 댄다.
+    /// 그때 " 비었다 " 만 서면 끝난 일이 사라진 줄 안다.
     #[test]
     fn a_list_the_view_emptied_says_why() {
         let mut finished = issues();
@@ -5754,11 +5774,46 @@ pub(super) mod tests {
         let mut a = App::new(finished, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         let lines = render(&mut a, 100, 12).join("\n");
         assert!(lines.contains(" 보기에 가려 비었다 "), "{lines}");
+    }
+
+    /// **검색은 보기가 숨긴 줄까지 세우고, 그 줄을 흐리게 `숨김` 을 달아 가른다**(moai-qnkn, 사용자 결정).
+    /// 검색 칸은 몇 줄이 숨은 줄인지 댄다 — 검색을 풀면 그만큼 도로 숨는다. 뜻은 낱말이 진다.
+    #[test]
+    fn a_search_brings_up_what_the_view_hid_and_marks_it() {
+        let mut finished = issues();
+        for i in &mut finished {
+            i.status = Status::new("done");
+        }
+        let mut a = App::new(finished, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.detail_open = false;
         for c in "/멤".chars() {
             a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
         }
         let lines = render(&mut a, 100, 12).join("\n");
-        assert!(lines.contains("0건 · 보기에 가린 2건"), "{lines}");
+        assert!(lines.contains("2건 · 숨김 2건 포함"), "{lines}");
+        assert!(!lines.contains("비었다"), "검색이 보기가 숨긴 줄을 못 찾았다: {lines}");
+        let marked: Vec<&str> = lines.lines().filter(|l| l.contains("멤") && l.contains("숨김")).collect();
+        assert!(!marked.is_empty(), "드러난 줄에 `숨김` 이 안 붙었다: {lines}");
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let lines = render(&mut a, 100, 12).join("\n");
+        assert!(!lines.contains("비었다"), "Enter 로 칸을 닫자 검색이 걸렸는데도 보기가 도로 가렸다: {lines}");
+        a.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        let lines = render(&mut a, 100, 12).join("\n");
+        assert!(lines.contains(" 보기에 가려 비었다 "), "검색을 풀었는데 설정된 보기로 안 돌아갔다: {lines}");
+    }
+
+    /// **평소 보이는 줄에는 `숨김` 을 안 단다** — 검색 중에도.
+    #[test]
+    fn a_search_leaves_plain_rows_unmarked() {
+        let mut a = App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.detail_open = false;
+        for c in "/멤".chars() {
+            a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        let lines = render(&mut a, 100, 12).join("\n");
+        let rows: Vec<&str> = lines.lines().filter(|l| l.starts_with('┃')).collect();
+        assert!(rows.iter().any(|l| l.contains("argos-0001")), "시험의 전제 — 보이는 에픽이 검색에 걸린다: {lines}");
+        assert!(!rows.iter().any(|l| l.contains("숨김")), "보이던 줄에 `숨김` 을 달았다: {lines}");
     }
 
     /// 빈 저장소도 그려진다.
