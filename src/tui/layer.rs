@@ -609,7 +609,11 @@ impl App {
         match (self.read)(&repo, overlay) {
             Ok(fresh) => {
                 // 떠난 프로젝트에 매인 것을 푼다 — 층에서 왔으면 이미 풀린 것을 한 번 더 풀 뿐이다.
-                self.leave_project();
+                let leaving = match &self.layer.as_ref().map(|l| &l.at) {
+                    Some(At::Project(p)) => Some(p.clone()),
+                    _ => None,
+                };
+                self.leave_project(leaving);
                 if let Some(layer) = &mut self.layer {
                     layer.at = At::Project(path);
                 }
@@ -649,13 +653,21 @@ impl App {
     pub(super) fn climb(&mut self) {
         let Some(layer) = &mut self.layer else { return };
         let At::Project(from) = std::mem::replace(&mut layer.at, At::Layer) else { return };
-        self.leave_project();
+        self.leave_project(Some(from.clone()));
         // **시각은 안 올린다** — 머리의 `↻` 가 그것으로 "방금 갱신했다" 를 말하는데, 읽기는 이제
         // 스레드로 가서 아직 안 왔다(리뷰 moai-3lul.kt0). 들일 때 [`App::follow_layer`] 가 올린다.
         let Some(layer) = &mut self.layer else { return };
         layer.forget(&from);
         layer.launch();
-        self.cursor = layer.position(&from).unwrap_or(0);
+        let at = layer.position(&from).unwrap_or(0);
+        self.stand_on_place(at);
+    }
+
+    /// 한눈 보기에서 커서를 그 프로젝트의 **머리줄**에 세운다(moai-i0wd). **층 줄의 첨자는 이제 줄
+    /// 번호가 아니다** — 펼친 프로젝트가 제 줄을 이고 서므로, 첨자를 커서에 그대로 넣으면 남의
+    /// 프로젝트의 이슈 줄에 선다.
+    pub(super) fn stand_on_place(&mut self, at: usize) {
+        self.cursor = self.rows().iter().position(|r| matches!(r, Row::Project(n) if *n == at)).unwrap_or(0);
     }
 
     /// **한 프로젝트에 매인 것을 모두 푼다** — 떠나는 두 길(올라가기 [`App::climb`], 옆으로
@@ -664,7 +676,7 @@ impl App {
     /// 다른 길로 냈다. 그래서 들이기를 고치면 한쪽만 깨졌고, 건너가는 길은 짓던 커밋 표를 안
     /// 버려 떠난 뿌리의 표가 새 프로젝트의 표에 섞였다. **프로젝트에 매인 것을 새로 들이면
     /// 여기에 적는다.** 선 자리(`Layer::at`)와 커서는 부르는 쪽이 정한다 — 어디로 가느냐가 다르다.
-    fn leave_project(&mut self) {
+    fn leave_project(&mut self, park_at: Option<PathBuf>) {
         if let Some((_, handle)) = self.pending.take() {
             self.discard(handle);
         }
@@ -674,29 +686,23 @@ impl App {
         if let Some((_, handle)) = self.commits_job.take() {
             self.discard(handle);
         }
-        self.site.commits = super::Commits::new();
-        // 표가 무엇을 알고 지었는지도 같이 버린다 — 남기면 같은 prefix 를 쓰는 다음 프로젝트의 id 가
-        // 표에 있는 것으로 읽혀(`apply_fresh`) 빈 표를 다시 안 짓는다.
-        self.site.commit_ids = Default::default();
-        self.site.repo = None;
-        self.site.issues = Vec::new();
-        // 안 읽은 id 도 그 프로젝트에 매인 것이다(moai-z9pc.9av) — 두고 오면 층에서 누른
-        // `SPC m a` 가 **떠난 프로젝트의** 줄을 읽음으로 적고, 그 줄은 여기 보이지도 않는다.
-        // 층에서는 읽음 키가 아예 안 선다(`keys::Browse::enabled`) — 층의 줄은 프로젝트라 읽을 줄이 없다.
-        self.site.unread.clear();
-        self.site.index = Index::of(&[]);
-        self.site.ground = Default::default();
-        self.site.keep = Vec::new();
-        self.site.shown = Vec::new();
-        self.site.lit = Default::default();
-        self.site.unreadable = Vec::new();
-        self.site.origin = Default::default();
-        self.site.elsewhere = Vec::new();
-        self.site.unfound = None;
-        self.site.watched = Vec::new();
-        self.site.stamp = None;
-        self.site.read_at = None;
-        self.site.warnings = 0;
+        // **떠난 프로젝트의 줄은 통째로 그 층 줄에 둔다**(moai-i0wd) — 한눈 보기가 그 밑에 세울
+        // 것이고, 방금 떠난 프로젝트가 접힌 채로 서면 `0` 을 누른 화면이 늘 비어 보인다(사용자
+        // 결정 2026-09-19: "있던 프로젝트만 펼쳐 둔다"). 커밋 표·안 읽음·못 읽는 줄이 함께 가므로
+        // 다음 프로젝트에 섞이지 않는다 — 한때 필드마다 비우던 것이 그 섞임을 막으려는 일이었다.
+        //
+        // **그 프로젝트 안에서 어디를 보고 있었나는 안 든다.** 경로·커서 기억·펼친 자리는 도로
+        // 들어갈 때 처음부터다 — 마디가 그 프로젝트의 이슈 id 라 남겨 두면 지운 줄의 id 가 쌓인다.
+        let blank = super::Site::of(Vec::new(), Index::of(&[]), Default::default(), self.site.cfg.clone(), Vec::new(), Vec::new());
+        let mut parked = std::mem::replace(&mut self.site, blank);
+        parked.path.clear();
+        parked.remembered.clear();
+        parked.expanded.clear();
+        if let (Some(at), Some(layer)) = (park_at, self.layer.as_mut())
+            && let Some(place) = layer.places.iter_mut().find(|p| p.path == at)
+        {
+            place.site = Some(parked);
+        }
         self.filter_text = None;
         // **보기는 돌리지 않는다**(moai-2bzp). 보기·정렬·열은 사람의 설정이라 사용자 설정에 적혀
         // 프로젝트를 옮겨도 이어진다 — 한때(moai-fmv5) 여기서 처음값으로 돌렸는데, 그러면 저장한
@@ -1035,7 +1041,9 @@ mod tests {
         assert_eq!(a.current(), Some(Row::Project(0)), "떠난 프로젝트에 안 섰다");
         assert_eq!(a.filter_text, None, "한 프로젝트에 건 거름망이 층까지 따라왔다");
 
-        a.key(key(KeyCode::Down));
+        // **떠난 프로젝트는 펼쳐진 채로 선다**(moai-i0wd) — 그 밑에 그 줄이 서므로 다음 머리줄은
+        // 한 칸 아래가 아니다. 아직 안 읽은 둘째 프로젝트는 머리줄만이라 맨 아랫줄이 그것이다.
+        a.key(key(KeyCode::End));
         a.key(key(KeyCode::Enter));
         assert_eq!(a.site.repo.as_ref().map(|r| r.root.clone()), Some(two.clone()));
         assert_eq!(titles(&a), ["two 의 집은 줄", "two 의 줄"], "옛 프로젝트의 줄이 섞였다");
@@ -1575,17 +1583,40 @@ mod tests {
         assert!(!a.on_layer(), "말만 하고 올라가 버렸다");
     }
 
-    /// **층에서 `l`·`→` 는 그 프로젝트로 들어간다**(사용자 결정 2026-09-19) — 층은 트리가 아니라
-    /// 펼칠 것이 없고, 펼침으로만 두면 옛 손가락이 아무 일도 안 하는 키를 누른다.
+    /// **머리줄에서 `l`·`→` 는 그 프로젝트를 펼치고, `h`·`←` 가 접고, Enter 가 들어간다**
+    /// (moai-i0wd, 사용자 결정 2026-09-19). 묶음 줄과 같은 손가락이다 — 한때 층에서 `l` 은
+    /// 들어가기였는데(moai-9m2d), 그때 층은 트리가 아니었다.
     #[test]
-    fn l_and_right_enter_a_project_from_the_layer() {
+    fn a_head_opens_with_l_and_enters_with_enter() {
         for k in ["l", "Right"] {
-            let s = Scratch::fenced("layer-l-enters");
+            let s = Scratch::fenced("layer-l-opens");
             let (_one, _two, mut a) = on_layer_with_twins(&s);
             assert!(a.on_layer(), "시험의 전제 — 층에 섰다");
+            let heads = a.rows().len();
             a.hit(k);
-            assert!(!a.on_layer(), "층에서 `{k}` 가 프로젝트로 안 들어갔다");
+            assert!(a.on_layer(), "`{k}` 가 프로젝트로 들어가 버렸다");
+            assert!(a.rows().len() > heads, "`{k}` 가 머리줄을 안 폈다");
+            // 접으면 도로 머리줄만 — 읽은 것은 버리지 않는다.
+            a.hit("h");
+            assert_eq!(a.rows().len(), heads, "`h` 가 머리줄을 안 접었다");
         }
+        let s = Scratch::fenced("layer-enter-enters");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.hit("Enter");
+        assert!(!a.on_layer(), "머리줄의 Enter 가 프로젝트로 안 들어갔다");
+    }
+
+    /// **머리줄의 `Tab` 은 그 프로젝트를 묶음까지 다 편다**(moai-i0wd) — 펼쳐져 있으면 통째로
+    /// 접는다. 묶음 줄의 `Tab` 과 같은 자다([`App::expand_all`]).
+    #[test]
+    fn tab_opens_a_whole_project_and_folds_it_again() {
+        let s = Scratch::fenced("layer-tab-all");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        let heads = a.rows().len();
+        a.hit("Tab");
+        assert!(a.rows().len() > heads, "Tab 이 안 폈다");
+        a.hit("Tab");
+        assert_eq!(a.rows().len(), heads, "다시 누른 Tab 이 안 접었다");
     }
 
     /// **건너뛰면 포커스가 목록으로 돌아온다**(리뷰 moai-i784.pzh) — 층의 상세에는 듣는 키가
@@ -1897,7 +1928,8 @@ mod tests {
         a.follow();
         assert!(a.loading(), "바뀐 것을 보고도 안 읽었다");
         a.hit("0");
-        a.key(key(KeyCode::Down));
+        // 떠난 프로젝트가 제 줄을 이고 서므로 둘째 머리줄은 맨 아래다(moai-i0wd).
+        a.key(key(KeyCode::End));
         a.key(key(KeyCode::Enter));
         settle(&mut a);
         assert_eq!(titles(&a), ["two 의 집은 줄", "two 의 줄"], "떠난 프로젝트의 읽기가 들어왔다");

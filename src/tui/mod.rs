@@ -2171,6 +2171,19 @@ impl App {
         false
     }
 
+    /// [`App::site_at`] 의 고칠 수 있는 판 — 펼침처럼 **그 프로젝트에 매인 것**을 고칠 때 쓴다.
+    /// 없는 자리면 지금 선 것을 낸다(까닭은 [`App::site_at`]).
+    pub(super) fn site_mut(&mut self, seat: Seat) -> &mut Site {
+        let place = match seat {
+            Seat::Here => None,
+            Seat::Place(n) => self.layer.as_mut().and_then(|l| l.places.get_mut(n)).and_then(|p| p.site.as_mut()),
+        };
+        match place {
+            Some(site) => site,
+            None => &mut self.site,
+        }
+    }
+
     /// 그 줄이 사는 프로젝트 — 줄에 실린 [`Seat`] 을 푼다. `..` 과 머리줄은 지금 선 것으로 답한다.
     pub fn site_of(&self, r: &Row) -> &Site {
         match r {
@@ -2264,19 +2277,28 @@ impl App {
     /// 펼침 규칙이 바뀌는 날 한쪽만 바뀌어도 `l`·`h`·`Tab` 이 엉뚱한 자리를 열고 닫는다 — `nav`
     /// 머리글의 "자리를 정하는 법은 하나다" 가 그것을 막으려고 있는 규칙이다.
     fn dir_at(&self, rows: &[Row]) -> Option<Path> {
+        self.dir_of(self.current_of(rows)).map(|(_, path)| path)
+    }
+
+    /// [`App::dir_at`] 과 같되 **그 줄이 사는 프로젝트까지** 낸다(moai-i0wd) — 한눈 보기에서는
+    /// 펼침이 그 프로젝트의 것이라, 자리만으로는 어느 `Site` 의 `expanded` 를 고칠지 모른다.
+    fn dir_seat_at(&self, rows: &[Row]) -> Option<(Seat, Path)> {
         self.dir_of(self.current_of(rows))
     }
 
     /// 그 줄이 묶음이면 그것이 여는 자리. [`App::dir_at`] 을 커서 밖의 줄(펼친 멤버의 부모)에도 쓴다.
-    fn dir_of(&self, row: Option<Row>) -> Option<Path> {
+    fn dir_of(&self, row: Option<Row>) -> Option<(Seat, Path)> {
         match row {
-            Some(Row::Item(_, Entry::Dir { at: Some(at), .. }, _)) => Some(self.site.index.dir_path(&self.site.issues, at)),
+            Some(Row::Item(seat, Entry::Dir { at: Some(at), .. }, _)) => {
+                let site = self.site_at(seat);
+                Some((seat, site.index.dir_path(&site.issues, at)))
+            }
             // 바구니는 제 줄이 없어 첨자가 없다. 바구니 마디(`Milestone(None)`·`Lost`)는 집의 첫
             // 마디로만 서므로(`Index::home_of_work`) 늘 뿌리의 줄이고, 그때 지금 자리가 곧 제 부모다.
-            Some(Row::Item(_, Entry::Dir { seg, at: None }, _)) => {
-                let mut path = self.site.path.clone();
+            Some(Row::Item(seat, Entry::Dir { seg, at: None }, _)) => {
+                let mut path = self.site_at(seat).path.clone();
                 path.push(seg);
-                Some(path)
+                Some((seat, path))
             }
             _ => None,
         }
@@ -2286,16 +2308,25 @@ impl App {
     /// ([`App::searched_open`]) 둘 다 센다. 하나만 보던 때는 검색이 연 줄에서 `h` 가 접을 것이
     /// 없는 줄로 읽혀 디렉터리를 통째로 나갔다(리뷰).
     fn open_at(&self, rows: &[Row]) -> Option<Path> {
-        let path = self.dir_at(rows)?;
-        (self.site.expanded.contains(&path) || self.searched_into(&path)).then_some(path)
+        self.open_seat_at(rows).map(|(_, path)| path)
+    }
+
+    /// [`App::open_at`] 과 같되 그 줄의 프로젝트까지 낸다.
+    fn open_seat_at(&self, rows: &[Row]) -> Option<(Seat, Path)> {
+        let (seat, path) = self.dir_seat_at(rows)?;
+        let site = self.site_at(seat);
+        (site.expanded.contains(&path) || self.searched_into(seat, &path)).then_some((seat, path))
     }
 
     /// 검색이 **이 자리를** 저절로 열었는가 — [`App::searched_open`] 의 한 자리 판이다. 집합을
     /// 짓지 않고 묻는다: 키 바와 메뉴가 키 하나마다 이것을 묻는데, 거기서 집합을 지으면 이슈
     /// 전부의 조상 자리를 프레임마다 다시 모은다(`lit` 을 미리 세는 까닭과 같다).
-    fn searched_into(&self, path: &Path) -> bool {
+    fn searched_into(&self, seat: Seat, path: &Path) -> bool {
         // 그 집합에 든 자리는 맞은 줄의 조상 자리 전부다 — 곧 "맞은 줄의 집이 이 자리로 시작하는가" 다.
-        self.searching() && (0..self.site.issues.len()).any(|at| self.visible(at) && self.site.index.home_of(at).starts_with(path))
+        let site = self.site_at(seat);
+        self.searching()
+            && (0..site.issues.len())
+                .any(|at| site.visible(at, self.searching()) && site.index.home_of(at).starts_with(path))
     }
 
     /// 커서가 **펼친 묶음의 멤버 줄**이면 그 부모 줄의 번호. 목록은 트리 차례라, 위로 올라가며
@@ -2311,8 +2342,8 @@ impl App {
     /// 자리를 잃는다. 멤버 줄이 아니면 거짓 — 그때는 한 층 나간다.
     fn fold_parent(&mut self, rows: &[Row]) -> bool {
         let Some(up) = self.parent_row(rows) else { return false };
-        if let Some(path) = self.dir_of(rows.get(up).cloned()) {
-            self.site.expanded.remove(&path);
+        if let Some((seat, path)) = self.dir_of(rows.get(up).cloned()) {
+            self.site_mut(seat).expanded.remove(&path);
         }
         // 부모 줄 위의 줄은 안 바뀐다 — 번호가 그대로 그 줄이다.
         let rows = self.rows();
@@ -2320,10 +2351,66 @@ impl App {
         true
     }
 
+    /// 커서가 선 프로젝트 머리줄 — 한눈 보기가 아니거나 이슈 줄이면 없다(moai-i0wd).
+    fn head_at(&self, rows: &[Row]) -> Option<usize> {
+        match rows.get(self.cursor) {
+            Some(Row::Project(at)) => Some(*at),
+            _ => None,
+        }
+    }
+
+    /// 커서의 머리줄이 **펼쳐져 있는가** — 접힘 목록에 없고 그 프로젝트의 줄을 이미 들었다.
+    /// 머리줄이 아니면 거짓이다.
+    fn head_open(&self, rows: &[Row]) -> bool {
+        let Some(at) = self.head_at(rows) else { return false };
+        let folded = self.place_path(at).is_some_and(|p| self.folded.contains(p));
+        !folded && self.site_of_place(at).is_some()
+    }
+
+    /// 머리줄을 편다 — **그 프로젝트를 아직 안 읽었으면 여기서 읽는다**(moai-eyre 의 `fill_site`).
+    /// `deep` 이면 그 밑의 묶음까지 다 편다(`Tab`). 이미 펼쳐져 있으면 `Tab` 은 통째로 접고
+    /// `l` 은 아무 일도 안 한다 — 묶음 줄의 두 키와 같은 자다([`App::expand_all`]).
+    fn unfold(&mut self, rows: &[Row], deep: bool) {
+        let Some(at) = self.head_at(rows) else { return };
+        let Some(path) = self.place_path(at).map(std::path::Path::to_path_buf) else { return };
+        let was = !self.folded.contains(&path) && self.site_of_place(at).is_some();
+        if was && deep {
+            self.fold(rows);
+            return;
+        }
+        self.folded.remove(&path);
+        self.fill_site(at);
+        if deep {
+            let site = self.site_mut(Seat::Place(at));
+            let dirs: Vec<Path> = (0..site.issues.len())
+                .filter(|&n| site.index.is_dir(&site.issues, n))
+                .map(|n| site.index.dir_path(&site.issues, n))
+                .collect();
+            site.expanded.extend(dirs);
+        }
+    }
+
+    /// 머리줄을 접는다 — 그 프로젝트의 줄이 목록에서 빠진다. **읽은 것은 안 버린다**: 다시 펴면
+    /// 그대로 서고, 낡았으면 표식과 시계가 다시 읽는다.
+    fn fold(&mut self, rows: &[Row]) {
+        let Some(at) = self.head_at(rows) else { return };
+        if let Some(path) = self.place_path(at).map(std::path::Path::to_path_buf) {
+            // 밑의 펼침까지 걷는다 — 다 접기(`Tab`)와 같은 자다: 접힌 것을 다시 펼 때 접기 전
+            // 모양이 아니라 그 이전 모양이 서면, 같은 자리로 오는 데 두 번을 눌러야 한다.
+            self.site_mut(Seat::Place(at)).expanded.clear();
+            self.folded.insert(path);
+        }
+    }
+
+    /// 그 층 줄이 제 프로젝트의 줄을 이미 들었는가.
+    fn site_of_place(&self, at: usize) -> Option<&Site> {
+        self.layer.as_ref()?.places.get(at)?.site.as_ref()
+    }
+
     /// 한 단계 펼친다(`l`·`→`). 이미 펼쳐져 있으면 아무 일도 없다 — 들어가는 것은 `Enter` 다.
     fn expand(&mut self, rows: &[Row]) {
-        if let Some(path) = self.dir_at(rows) {
-            self.site.expanded.insert(path);
+        if let Some((seat, path)) = self.dir_seat_at(rows) {
+            self.site_mut(seat).expanded.insert(path);
         }
     }
 
@@ -2333,8 +2420,8 @@ impl App {
     /// 거짓을 내면 눈에 열려 보이는 줄에서 `h` 가 디렉터리를 통째로 나간다 — 보던 자리를 잃는 것이
     /// 아무 일도 안 하는 것보다 나쁘다. 그 펼침은 검색을 풀 때 함께 걷힌다.
     fn collapse(&mut self, rows: &[Row]) -> bool {
-        let Some(path) = self.open_at(rows) else { return false };
-        self.site.expanded.remove(&path);
+        let Some((seat, path)) = self.open_seat_at(rows) else { return false };
+        self.site_mut(seat).expanded.remove(&path);
         true
     }
 
@@ -2348,11 +2435,12 @@ impl App {
     /// 단계 접어 밑의 펼침만 남은 뒤의 `Tab` 이 그 기억만 걷고 화면은 그대로여서 아무 일도 안 한
     /// 누름이 하나 생겼다 — 펼치려면 두 번을 눌러야 했고, 그것이 이 함수가 막으려던 바로 그것이다.
     fn expand_all(&mut self, rows: &[Row]) {
-        let Some(path) = self.dir_at(rows) else { return };
+        let Some((seat, path)) = self.dir_seat_at(rows) else { return };
         if self.open_at(rows).is_some() {
-            let under: Vec<Path> = self.site.expanded.iter().filter(|p| p.starts_with(&path)).cloned().collect();
+            let site = self.site_mut(seat);
+            let under: Vec<Path> = site.expanded.iter().filter(|p| p.starts_with(&path)).cloned().collect();
             for p in under {
-                self.site.expanded.remove(&p);
+                site.expanded.remove(&p);
             }
             return;
         }
@@ -2433,16 +2521,24 @@ impl App {
             // 다시 부르던 때는 `l`·`h`·`Tab` 한 번이 이슈 전부를 훑고 정렬하는 일을 두 번 했다.
             // **층은 트리가 아니다** — 거기서 `l`·`→` 는 그 프로젝트로 들어간다(사용자 결정 2026-09-19).
             // 펼침으로만 두면 옛 손가락이 층에서 아무 일도 안 하는 키를 누른다.
-            B::Expand if self.on_layer() => self.enter(),
+            // **머리줄에서 `l`·`→` 는 그 프로젝트를 펼친다**(moai-i0wd, 사용자 결정 2026-09-19).
+            // 들어가는 것은 Enter 다 — 한눈 보기는 고르는 화면이고 파고드는 곳은 프로젝트 안이다.
+            // 한때 층에서 `l` 은 들어가기였다(moai-9m2d) — 그때 층은 트리가 아니었다.
+            B::Expand if self.head_at(&rows).is_some() => self.unfold(&rows, false),
             B::Expand => self.expand(&rows),
             // **접을 것이 없으면 부모를 접고, 부모도 없으면 나간다** — 키 표도 그렇게 켠다
             // (`Browse::enabled`). 손에 익은 `h` 가 뿌리에서만 말하고 멤버 줄에서 입을 다물면
             // 어느 쪽이 고장인지 모른다.
+            // 머리줄의 `h`·`←` 는 그 프로젝트를 접는다 — 접힌 머리줄에서는 아무 일도 없다(층은
+            // 맨 위라 나갈 데가 없다).
+            B::Collapse if self.head_at(&rows).is_some() => self.fold(&rows),
             B::Collapse => {
                 if !self.collapse(&rows) && !self.fold_parent(&rows) {
                     self.leave();
                 }
             }
+            // 머리줄의 `Tab` 은 그 프로젝트를 묶음까지 다 펼친다 — 펼쳐져 있으면 통째로 접는다.
+            B::ExpandAll if self.head_at(&rows).is_some() => self.unfold(&rows, true),
             B::ExpandAll => self.expand_all(&rows),
             // **헤더의 번호로 바로 간다**(moai-o133). `0` 은 전체 — 층이다. 이미 그 자리면
             // 아무 일도 안 한다: 같은 프로젝트를 다시 열면 커서와 굴린 자리가 첫 줄로 튄다.
@@ -2550,10 +2646,11 @@ impl App {
             root: self.site.path.is_empty(),
             // [`App::expand`] 가 무언가 하는 줄 — 펼칠 수 있는 폴더뿐이다. `leaf` 로 가르던 때는
             // `..` 과 층의 프로젝트 줄에서 `l`·`Tab` 이 켜진 채 아무 일도 안 했다(리뷰).
-            group: self.dir_at(rows).is_some(),
+            // **머리줄도 펼칠 수 있는 줄이다**(moai-i0wd) — 그 밑에 그 프로젝트의 줄이 선다.
+            group: self.dir_at(rows).is_some() || self.head_at(rows).is_some(),
             // 커서의 줄이 **화면에** 펼쳐져 있는가 — 접기가 접을 것과 나갈 것을 여기서 가른다.
             // 검색이 저절로 연 것까지 센다([`App::open_at`]).
-            expanded: self.open_at(rows).is_some(),
+            expanded: self.open_at(rows).is_some() || self.head_open(rows),
             nested: self.parent_row(rows).is_some(),
             worktree: self.worktree,
             raw: self.raw,
