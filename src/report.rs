@@ -610,6 +610,12 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
         // 때마다 새로 선다 — 윗금을 두면 워크트리가 뜬 뒤 main 에서 `in_progress → review` 로
         // 옮긴 산 일이 그 자리를 잃고, 세션을 시작할 때 떠 놓고 일을 나중에 받는 에이전트
         // 격리 워크트리는 아예 아무것도 못 쥔다.
+        //
+        // **`started_at` 으로 재지 않는다**(moai-hav1, 2026-09-19에 재고 그대로 두기로 했다).
+        // 그 필드(moai-u5bk)는 줄이 **처음** 첫 칸을 떠난 때라 되돌렸다 다시 집어도 안 바뀐다 —
+        // 여기서 묻는 것은 "이 워크트리가 뜰 무렵 이 줄이 움직였나" 이므로, 옛 줄을 오늘 다시 집어
+        // 에이전트 워크트리에서 하는 흔한 길이 통째로 자리를 잃는다. 되돌리기 어려운 쪽은 그쪽이다.
+        // 이 필드 전에 집힌 줄이 `None` 인 것도 그대로다 — 모르는 값으로 자리를 가를 수는 없다.
         let fresh = |i: &Issue| match (born, crate::model::parse_rfc3339(&i.status_since)) {
             (Some(b), Some(s)) => b - s <= STRANDED_GRACE_SECS,
             _ => true,
@@ -3434,6 +3440,13 @@ mod tests {
         let at = places(&issues, &cfg(), &trees, LATER);
         let counts: Vec<usize> = ["argos-0001", "argos-0002", "argos-0003"].iter().map(|id| at[*id].at().len()).collect();
         assert_eq!(counts, [0, 1, 1]);
+
+        // **되돌렸다 다시 집은 줄은 지금 집은 줄이다**(moai-hav1) — `started_at` 은 처음 뗀 때라
+        // 옛날인데, 이 워크트리가 뜰 무렵 움직인 것은 `status_since` 가 안다.
+        let mut repicked = issues.clone();
+        repicked[1].started_at = Some("2026-08-01T00:00:00Z".into());
+        let at = places(&repicked, &cfg(), &trees, LATER);
+        assert_eq!(at["argos-0002"].at().len(), 1, "다시 집은 줄을 처음 뗀 때로 재 자리를 잃었다");
 
         agent.born = None;
         let trees = vec![agent];

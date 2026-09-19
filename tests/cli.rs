@@ -7842,6 +7842,48 @@ fn the_tracker_is_written_at_the_root() {
     assert!(at_main.trim().is_empty(), "루트의 쓰기를 막았다\n{at_main}");
 }
 
+/// **이름 없는 워크트리가 뜬 때는 git 이 파일 안에 적어 둔 시각이다**(moai-hav1, 리뷰 moai-40ht.hom의
+/// 결정) — 파일의 고친 때로 재면 시각을 안 지키는 복사(`cp -r`·Docker `COPY`·백업 복원)가 그것을
+/// 통째로 새로 해, `.moai` 는 하나도 안 바뀌었는데 저장소의 집은 줄이 전부 "자리 없다" 로 뒤집힌다.
+/// 여기서 그 자리의 파일 시각을 앞뒤로 흔들어도 자리가 그대로인지 본다.
+#[test]
+fn a_nameless_worktrees_birth_is_read_from_git_not_the_clock() {
+    let s = Scratch::new("hookborn");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "에이전트가 할 일", "--json"]), "id");
+    // **집은 때와 뜬 때가 같은 시계여야 한다** — git 의 reflog 은 벽시계로 적히므로 이 줄만 벽시계로
+    // 집는다(다른 시험처럼 `MOAI_NOW` 를 고정하면 뜬 때와 여드레가 벌어져 한 시간 규칙이 먼저 걸린다).
+    let clock = std::process::Command::new("date").args(["-u", "+%Y-%m-%dT%H:%M:%SZ"]).output().unwrap();
+    let now = String::from_utf8(clock.stdout).unwrap().trim().to_string();
+    let run = |args: &[&str]| {
+        let out = staged(args).current_dir(&main).env("MOAI_NOW", &now).output().unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    run(&["mv", &id, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    // 이름이 id 를 안 가리키는 워크트리 — 자리는 스냅샷이 쥔 줄로만 잡힌다.
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-a04acfb3", "-b", "worktree-agent-a04acfb3"]);
+    let place = |what: &str| {
+        let out = run(&["show", &id, "--json"]);
+        assert!(out.contains(r#""place":"at""#), "{what}: 자리를 잃었다\n{out}");
+    };
+    place("갓 뜬 워크트리");
+
+    // git 이 적어 둔 시각은 그대로 두고 파일의 고친 때만 앞뒤로 흔든다.
+    let admin = main.join(".git").join("worktrees").join("agent-a04acfb3");
+    assert!(admin.join("logs").join("HEAD").exists(), "reflog 이 없다 — 이 시험이 견줄 것이 없다");
+    for when in ["203001010000", "200001010000"] {
+        let done = std::process::Command::new("touch").args(["-t", when]).arg(&admin).arg(admin.join("HEAD")).status();
+        assert!(done.is_ok_and(|c| c.success()), "파일 시각을 못 바꿨다");
+        place(&format!("고친 때가 {when}"));
+    }
+}
+
 /// **자리 경로는 늘 main 에서 잰 상대 경로다**(moai-xpd7·moai-3aec, 2026-09-18 사용자 결정) — main
 /// 밖에 만든 워크트리는 `../` 로 올라가서 잰다. 절대 경로로 두던 판은 한 배열에 두 모양이 섞였고
 /// 기계의 홈 경로가 `--json` 으로 나갔다. main 이 없는 맨몸 저장소는 그 저장소 디렉터리에서 재어,
