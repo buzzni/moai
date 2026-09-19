@@ -2110,7 +2110,12 @@ impl App {
     /// 펼침 규칙이 바뀌는 날 한쪽만 바뀌어도 `l`·`h`·`Tab` 이 엉뚱한 자리를 열고 닫는다 — `nav`
     /// 머리글의 "자리를 정하는 법은 하나다" 가 그것을 막으려고 있는 규칙이다.
     fn dir_at(&self, rows: &[Row]) -> Option<Path> {
-        match self.current_of(rows) {
+        self.dir_of(self.current_of(rows))
+    }
+
+    /// 그 줄이 묶음이면 그것이 여는 자리. [`App::dir_at`] 을 커서 밖의 줄(펼친 멤버의 부모)에도 쓴다.
+    fn dir_of(&self, row: Option<Row>) -> Option<Path> {
+        match row {
             Some(Row::Item(Entry::Dir { at: Some(at), .. }, _)) => Some(self.index.dir_path(&self.issues, at)),
             // 바구니는 제 줄이 없어 첨자가 없다. 바구니 마디(`Milestone(None)`·`Lost`)는 집의 첫
             // 마디로만 서므로(`Index::home_of_work`) 늘 뿌리의 줄이고, 그때 지금 자리가 곧 제 부모다.
@@ -2137,6 +2142,28 @@ impl App {
     fn searched_into(&self, path: &Path) -> bool {
         // 그 집합에 든 자리는 맞은 줄의 조상 자리 전부다 — 곧 "맞은 줄의 집이 이 자리로 시작하는가" 다.
         self.searching() && (0..self.issues.len()).any(|at| self.visible(at) && self.index.home_of(at).starts_with(path))
+    }
+
+    /// 커서가 **펼친 묶음의 멤버 줄**이면 그 부모 줄의 번호. 목록은 트리 차례라, 위로 올라가며
+    /// 처음 만나는 한 층 얕은 줄이 곧 부모다.
+    fn parent_row(&self, rows: &[Row]) -> Option<usize> {
+        let Some(Row::Item(_, twig)) = rows.get(self.cursor) else { return None };
+        let depth = twig.depth().checked_sub(1)?;
+        rows[..self.cursor].iter().rposition(|r| matches!(r, Row::Item(_, t) if t.depth() == depth))
+    }
+
+    /// 멤버 줄의 `h` — **부모 묶음을 접고 그 줄에 선다**(사용자 결정 2026-09-19). nvim-tree·ranger·
+    /// netrw 가 그렇게 한다. 한 층 나가면 펼쳐 보던 트리가 통째로 사라지고 한 층 밖에 서서 보던
+    /// 자리를 잃는다. 멤버 줄이 아니면 거짓 — 그때는 한 층 나간다.
+    fn fold_parent(&mut self, rows: &[Row]) -> bool {
+        let Some(up) = self.parent_row(rows) else { return false };
+        if let Some(path) = self.dir_of(rows.get(up).cloned()) {
+            self.expanded.remove(&path);
+        }
+        // 부모 줄 위의 줄은 안 바뀐다 — 번호가 그대로 그 줄이다.
+        let rows = self.rows();
+        self.stand(&rows, up, None);
+        true
     }
 
     /// 한 단계 펼친다(`l`·`→`). 이미 펼쳐져 있으면 아무 일도 없다 — 들어가는 것은 `Enter` 다.
@@ -2250,11 +2277,15 @@ impl App {
             B::Leave => self.leave(),
             // **목록은 위에서 한 번 센 것을 받는다**(moai-zrzo 와 같은 자리) — 저마다 `rows()` 를
             // 다시 부르던 때는 `l`·`h`·`Tab` 한 번이 이슈 전부를 훑고 정렬하는 일을 두 번 했다.
+            // **층은 트리가 아니다** — 거기서 `l`·`→` 는 그 프로젝트로 들어간다(사용자 결정 2026-09-19).
+            // 펼침으로만 두면 옛 손가락이 층에서 아무 일도 안 하는 키를 누른다.
+            B::Expand if self.on_layer() => self.enter(),
             B::Expand => self.expand(&rows),
-            // **접을 것이 없으면 나간다** — 키 표도 그렇게 켠다(`Browse::enabled`). 손에 익은
-            // `h` 가 뿌리에서만 말하고 멤버 줄에서 입을 다물면 어느 쪽이 고장인지 모른다.
+            // **접을 것이 없으면 부모를 접고, 부모도 없으면 나간다** — 키 표도 그렇게 켠다
+            // (`Browse::enabled`). 손에 익은 `h` 가 뿌리에서만 말하고 멤버 줄에서 입을 다물면
+            // 어느 쪽이 고장인지 모른다.
             B::Collapse => {
-                if !self.collapse(&rows) {
+                if !self.collapse(&rows) && !self.fold_parent(&rows) {
                     self.leave();
                 }
             }
@@ -2369,6 +2400,7 @@ impl App {
             // 커서의 줄이 **화면에** 펼쳐져 있는가 — 접기가 접을 것과 나갈 것을 여기서 가른다.
             // 검색이 저절로 연 것까지 센다([`App::open_at`]).
             expanded: self.open_at(rows).is_some(),
+            nested: self.parent_row(rows).is_some(),
             worktree: self.worktree,
             raw: self.raw,
             columns: self.cfg.statuses.len().min(keys::NUMBERED),
@@ -3885,6 +3917,24 @@ mod tests {
             },
             member("argos-0003", "argos-0002"),
         ]
+    }
+
+    /// **멤버 줄의 `h` 는 부모 묶음을 접고 그 줄에 선다**(사용자 결정 2026-09-19) — 한 층 나가면
+    /// 펼쳐 보던 트리가 통째로 사라진다. 두 층 밑에서는 한 층씩 올라가며 접는다.
+    #[test]
+    fn h_on_a_member_folds_its_parent_and_stands_there() {
+        let mut a = App::new(nested(), cfg(), Path::new());
+        a.hit("Tab");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0003"], "시험의 전제");
+        a.hit("G");
+        assert_eq!(row_ids(&a)[a.cursor], "argos-0003");
+        a.hit("h");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002"], "부모 에픽이 안 접혔다");
+        assert_eq!(row_ids(&a)[a.cursor], "argos-0002", "부모 줄에 안 섰다");
+        a.hit("h");
+        assert_eq!(row_ids(&a), ["argos-0001"], "한 층 더 올라가며 안 접었다");
+        assert_eq!(row_ids(&a)[a.cursor], "argos-0001");
+        assert_eq!(a.path, Path::new(), "접는 동안 디렉터리를 나갔다");
     }
 
     /// **펼쳐 든 줄에서 `Enter` 는 그 줄의 제 자리로 들어간다**(리뷰). 지금 자리에 제 마디만

@@ -600,6 +600,8 @@ pub struct Ctx {
     /// 무언가 하는가" 라서 `..` 과 층의 프로젝트 줄에도 거짓이기 때문이다 — 그것으로 가르면
     /// 펼침이 그 줄들에서 켜진 채 아무 일도 안 한다.
     pub group: bool,
+    /// 커서의 줄이 펼친 묶음의 멤버인가 — 접기(`h`)가 그 부모를 접는다.
+    pub nested: bool,
     /// 숨긴 칸 — n 번째 비트가 설정의 n 번째 칸. 이름을 들지 않는다: 이 값은 복사로 다닌다.
     pub hidden: u16,
     pub done_hidden: bool,
@@ -646,9 +648,11 @@ impl Browse {
             // 묶음 줄에만 펼칠 것이 있다 — `Enter` 가 잎에서 조용한 것과 같은 자리다. `leaf` 로
             // 가르지 않는다: `leaf` 는 `Enter` 의 물음이라 `..` 과 층의 프로젝트 줄에도 거짓이고,
             // 거기서는 펼침이 아무 일도 안 한다.
+            // 층은 트리가 아니다 — `l`·`→` 는 거기서 `Enter` 와 같다(사용자 결정 2026-09-19).
+            Expand if c.layer => Browse::Enter.enabled(c),
             Expand | ExpandAll if !c.group => Err(Off::Quiet),
-            // **접을 것이 없으면 나가기와 같다** — 아래 `Leave` 의 갈래를 그대로 탄다.
-            Collapse if !c.expanded => Browse::Leave.enabled(c),
+            // **접을 것도 접을 부모도 없으면 나가기와 같다** — 아래 `Leave` 의 갈래를 그대로 탄다.
+            Collapse if !c.expanded && !c.nested => Browse::Leave.enabled(c),
             // 커서에서 되는 키만(moai-k3yi): 잎의 Enter·뿌리의 Bksp 는 아무 일도 없다. 까닭을 대지
             // 않는다 — 들어갈 데 없는 줄에서 Enter 가 조용한 것은 파일 관리자와 같고, 바가 그 키를
             // 안 적으므로 "적힌 키가 안 듣는다" 가 안 생긴다.

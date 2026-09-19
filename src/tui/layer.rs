@@ -1531,6 +1531,19 @@ mod tests {
         assert!(!a.on_layer(), "말만 하고 올라가 버렸다");
     }
 
+    /// **층에서 `l`·`→` 는 그 프로젝트로 들어간다**(사용자 결정 2026-09-19) — 층은 트리가 아니라
+    /// 펼칠 것이 없고, 펼침으로만 두면 옛 손가락이 아무 일도 안 하는 키를 누른다.
+    #[test]
+    fn l_and_right_enter_a_project_from_the_layer() {
+        for k in ["l", "Right"] {
+            let s = Scratch::fenced("layer-l-enters");
+            let (_one, _two, mut a) = on_layer_with_twins(&s);
+            assert!(a.on_layer(), "시험의 전제 — 층에 섰다");
+            a.hit(k);
+            assert!(!a.on_layer(), "층에서 `{k}` 가 프로젝트로 안 들어갔다");
+        }
+    }
+
     /// **건너뛰면 포커스가 목록으로 돌아온다**(리뷰 moai-i784.pzh) — 층의 상세에는 듣는 키가
     /// 없어, 상세에 포커스를 둔 채 `0` 을 누르면 무엇을 눌러야 할지 없는 화면이 선다.
     #[test]
