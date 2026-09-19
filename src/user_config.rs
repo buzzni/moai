@@ -983,7 +983,7 @@ fn merge_words(
         if base.contains(w) || words.iter().any(|v| v.as_str() == Some(w.as_str())) {
             continue;
         }
-        words.push(w.as_str());
+        push_word(words, w);
         changed = true;
     }
     changed
@@ -1083,6 +1083,44 @@ fn draws_line(item: &Item) -> bool {
         Some(d) if d.is_dotted() => d.iter().any(|(_, v)| draws_line(v)),
         _ => item.is_value(),
     }
+}
+
+/// 배열 끝에 낱말 하나를 더한다(`merge_words`) — **여러 줄로 벌린 모양을 지킨다**(moai-n3ku).
+///
+/// 끝 원소와 `]` 사이의 글은 둘로 갈린다. 첫 줄(줄 끝 주석과 그 줄바꿈)은 **끝 원소의 줄 끝**이고, 그
+/// 뒤는 `]` 앞 글이다. 더하면 끝 원소 뒤에 쉼표가 서므로 그 줄 끝을 새 원소의 머리로 옮긴다 — 그래야
+/// 쉼표가 주석 앞에 서고, 새 원소가 앞 원소와 같은 들여쓰기로 제 줄에 선다. 안 옮기던 판은 `toml_edit`
+/// 이 그 글을 끝 원소의 꼬리로 들어, 쉼표가 줄 머리에 서고(`"done"\n, "review"]`) `]` 가 끌려 올라왔다.
+/// 줄 끝 주석이 있으면 쉼표가 그 주석 뒤로 가 파일이 통째로 안 읽혔다.
+///
+/// 들여쓰기는 **줄을 여는 원소 가운데 마지막 것**의 것이다 — 한 줄에 여럿이 선 배열(`[\n "a", "b"\n]`)의
+/// 끝 원소는 제 줄을 안 열어 들여쓰기를 모른다.
+///
+/// 한 줄 배열(과 빈 배열)은 옮길 줄 끝이 없다 — `toml_edit` 의 기본 모양(`, "새것"`)이 곧 제 모양이다.
+fn push_word(words: &mut toml_edit::Array, word: &str) {
+    let last = words.len().checked_sub(1);
+    let after = last.map_or_else(String::new, |i| {
+        let tail = words.get(i).expect("차례 안이다").decor().suffix().and_then(|r| r.as_str()).unwrap_or_default();
+        format!("{tail}{}", words.trailing().as_str().unwrap_or_default())
+    });
+    let (line_end, rest) = first_line(&after);
+    if line_end.is_empty() {
+        words.push(word);
+        return;
+    }
+    let indent = (0..words.len())
+        .rev()
+        .find_map(|i| {
+            let p = prefix_of(words.get(i).expect("차례 안이다").decor());
+            p.rfind('\n').map(|at| p[at + 1..].to_string())
+        })
+        .unwrap_or_default();
+    let (head, trailing) = (format!("{line_end}{indent}"), format!("\n{rest}"));
+    if let Some(i) = last {
+        words.get_mut(i).expect("차례 안이다").decor_mut().set_suffix("");
+    }
+    words.push_formatted(toml_edit::Value::from(word).decorated(&head, ""));
+    words.set_trailing(trailing);
 }
 
 /// 배열에서 `gone` 인 원소를 뺀다(`merge_words`). 뺀 수를 낸다.
@@ -2009,6 +2047,68 @@ mod tests {
         assert_eq!(hide(src, &three, &["todo"]), "[tui]\nhidden = [\n  # 남길 것\n\n  \"done\", \"review\"\n]\n");
         let src = "[tui]\nhidden = [\n  \"todo\", \"done\", # 둘\n  \"review\",\n]\n";
         assert_eq!(hide(src, &three, &["done"]), "[tui]\nhidden = [\n  \"todo\", # 둘\n  \"review\",\n]\n");
+    }
+
+    /// **낱말을 더해도 여러 줄로 벌린 모양은 그대로다**(moai-n3ku, [`push_word`]). 끝 원소와 `]` 사이 글의 첫
+    /// 줄은 그 원소의 줄 끝이라 쉼표 앞에 남고, 더한 낱말은 앞 원소와 같은 들여쓰기로 제 줄에 선다.
+    /// 옮기지 않던 판은 쉼표가 줄 머리에 서고 `]` 가 끌려 올라왔으며(`"done"\n, "review"]`), 줄 끝 주석이
+    /// 있으면 쉼표가 그 주석 뒤로 가 파일이 통째로 안 읽혔다.
+    #[test]
+    fn adding_a_word_keeps_the_multiline_shape() {
+        let show = |src: &str, base: &[&str], new: &[&str]| {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let b = Look { hidden: words(base), ..Look::default() };
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&b, &Look { hidden: words(new), ..b.clone() }).unwrap();
+            doc.render()
+        };
+        let (two, three) = (["todo", "done"], ["todo", "done", "review"]);
+        // 끝 쉼표가 없는 배열 — `]` 앞 글이 끝 원소의 꼬리에 있다.
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  \"done\"\n]\n";
+        assert_eq!(show(src, &two, &three), "[tui]\nhidden = [\n  \"todo\",\n  \"done\",\n  \"review\"\n]\n");
+        // 끝 쉼표가 있으면 그대로 두고 그 아래에 선다.
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  \"done\",\n]\n";
+        assert_eq!(show(src, &two, &three), "[tui]\nhidden = [\n  \"todo\",\n  \"done\",\n  \"review\",\n]\n");
+        // 끝 원소의 줄 끝 주석은 그 줄에 남고 쉼표가 그 앞에 선다 — 뒤로 가면 쉼표가 주석에 먹힌다.
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  \"done\"  # 끝\n]\n";
+        assert_eq!(show(src, &two, &three), "[tui]\nhidden = [\n  \"todo\",\n  \"done\",  # 끝\n  \"review\"\n]\n");
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  \"done\", # 끝\n]\n";
+        assert_eq!(show(src, &two, &three), "[tui]\nhidden = [\n  \"todo\",\n  \"done\", # 끝\n  \"review\",\n]\n");
+        // `]` 앞 제 줄에 선 주석은 `]` 앞에 그대로 남는다.
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  \"done\"\n  # 끝에\n]\n";
+        assert_eq!(show(src, &two, &three), "[tui]\nhidden = [\n  \"todo\",\n  \"done\",\n  \"review\"\n  # 끝에\n]\n");
+        // 여럿을 한 번에 더해도 줄마다 선다. 들여쓰기는 줄을 연 마지막 원소의 것이다.
+        let src = "[tui]\nhidden = [\n    \"todo\"\n]\n";
+        assert_eq!(show(src, &["todo"], &three), "[tui]\nhidden = [\n    \"todo\",\n    \"done\",\n    \"review\"\n]\n");
+        let src = "[tui]\nhidden = [\n  \"todo\", \"done\"\n]\n";
+        assert_eq!(show(src, &two, &three), "[tui]\nhidden = [\n  \"todo\", \"done\",\n  \"review\"\n]\n");
+        // 한 줄 배열과 빈 배열은 한 줄 그대로다.
+        assert_eq!(show("[tui]\nhidden = [\"todo\", \"done\"]\n", &two, &three), "[tui]\nhidden = [\"todo\", \"done\", \"review\"]\n");
+        assert_eq!(show("[tui]\nhidden = []\n", &[], &["todo"]), "[tui]\nhidden = [\"todo\"]\n");
+    }
+
+    /// **켰다 끄면 옛 바이트로 돌아온다**(moai-n3ku). 더할 때 모양이 뒤집히면 뺄 때 그 모양을 되돌리지
+    /// 못해, 토글마다 설정 파일이 헛 diff 를 냈다.
+    #[test]
+    fn adding_a_word_and_dropping_it_again_restores_the_bytes() {
+        for src in [
+            "[tui]\nhidden = [\n  \"todo\",\n  \"done\"\n]\n",
+            "[tui]\nhidden = [\n  \"todo\",\n  \"done\",\n]\n",
+            "[tui]\nhidden = [\n  \"todo\",\n  \"done\"  # 끝\n]\n",
+            "[tui]\nhidden = [\n  \"todo\",\n  \"done\", # 끝\n]\n",
+            "[tui]\nhidden = [\n  \"todo\",\n  \"done\"\n  # 끝에\n]\n",
+            "[tui]\nhidden = [\"todo\", \"done\"]\n",
+        ] {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let (two, three) = (words(&["todo", "done"]), words(&["todo", "done", "review"]));
+            let (base, more) = (Look { hidden: two, ..Look::default() }, Look { hidden: three, ..Look::default() });
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&base, &more).unwrap();
+            let added = doc.render();
+            let mut doc = Doc::parse(&added).unwrap();
+            doc.merge_look(&more, &base).unwrap();
+            assert_eq!(doc.render(), src, "켰다 끈 뒤 — 켠 모양은 {added:?}");
+        }
     }
 
     /// **남긴 글은 점 키 줄 앞에도 선다**(moai-1upp 에픽 리뷰). 점 키(`meta.x = 1`)는 표 몸 안 제자리에 그려지고 그 줄의
