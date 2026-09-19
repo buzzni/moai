@@ -676,6 +676,7 @@ impl App {
         self.ground = Default::default();
         self.keep = Vec::new();
         self.shown = Vec::new();
+        self.lit = Default::default();
         self.unreadable = Vec::new();
         self.origin = Default::default();
         self.elsewhere = Vec::new();

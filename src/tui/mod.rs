@@ -108,7 +108,8 @@ enum Landing {
     Missing,
 }
 
-/// 줄을 가리는 것 — 거름망과 보기(`SPC v`) 각각([`App::veil`]). 둘 다 `false` 면 목록에 선다.
+/// 줄을 가리는 것 — 거름망과 보기(`SPC v`) 각각([`App::veil`]). 둘 다 `false` 면 목록에 선다 — 검색이 걸린
+/// 동안은 `viewed` 가 서도 선다([`App::visible`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Veil {
     /// 거름망(`/`·`f`)에 안 걸렸다.
@@ -594,6 +595,10 @@ pub struct App {
     /// 이슈 첨자 → 보기에 보이는가. `keep` 과 같은 까닭으로 **보기나 자료가 바뀔 때만** 센다
     /// ([`App::see`]) — 묶음의 칸과 물려받은 미룸을 줄마다 프레임마다 다시 풀지 않는다.
     shown: Vec<bool>,
+    /// 보기에 보이는 줄이 사는 자리의 **모든 앞머리**([`App::see`]가 `shown` 과 함께 센다). 폴더가 검색 없이도
+    /// 설지를 이 하나로 묻는다([`App::stands_in_view`]) — 폴더마다 이슈 전부를 훑으면 목록 한 번에 폴더 수 ×
+    /// 이슈 수가 들고, 목록·머리 셈·열 셈이 프레임마다 그것을 묻는다(`Index::entries_sorted` 의 `lit` 과 같은 까닭).
+    lit: std::collections::HashSet<Path>,
     /// 목록 차례와 그 방향(moai-55cp). 기본은 우선순위 차례다.
     pub order: keys::Sorting,
     /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)에 열 이름 줄이 얹힌다.
@@ -809,6 +814,7 @@ impl App {
             // 것을 덮었고, 걷으려면 `status=todo,in_progress,review` 를 손으로 적어야 했다.
             view: view::View::hiding(crate::config::DONE),
             shown: Vec::new(),
+            lit: Default::default(),
             order: Default::default(),
             fields: Default::default(),
             detail_open: true,
@@ -1480,20 +1486,40 @@ impl App {
     }
 
     /// 걸린 거름망에 **제 줄이 걸린** 이슈 수. 걸린 것을 품어 남은 디렉터리는 안 센다.
-    /// 보기(`SPC v`)가 숨긴 줄도 안 센다 — 세어 놓고 목록에 없으면 셈이 거짓말이 된다.
+    /// 보기(`SPC v`)가 숨긴 줄도 안 센다 — 세어 놓고 목록에 없으면 셈이 거짓말이 된다. 검색이 걸린 동안은
+    /// 보기가 안 가리므로 목록에 선 숨은 줄도 센다([`Self::unveiled_count`] 가 그 가운데 몇인지 댄다).
     pub fn hit_count(&self) -> usize {
         (0..self.keep.len()).filter(|&at| self.visible(at)).count()
     }
 
-    /// 거름망에 걸렸는데 **보기(`SPC v`)가 숨긴** 이슈 수(moai-2kyl 단계 리뷰). 검색 칸이 `N건` 곁에 댄다 —
-    /// 끝난 일을 찾는데 `0건` 만 서면 없는 줄 알고, 까닭을 대는 경로 줄의 뱃지는 좁으면 빠진다.
-    pub fn veiled_count(&self) -> usize {
-        (0..self.keep.len()).filter(|&at| self.veil(at) == Veil { filtered: false, viewed: true }).count()
+    /// 검색에 걸렸는데 **검색을 풀면 보기(`SPC v`)가 도로 가릴** 이슈 수(moai-qnkn). 검색 칸이 `N건` 곁에
+    /// 댄다 — 흐린 줄이 왜 섰는지, 검색을 풀면 몇 줄이 도로 숨는지를 글로 말한다. **목록이 `숨김` 을 다는
+    /// 자([`Self::unveiled`])와 같다** — 제 줄은 숨었어도 밑에 보기가 보이는 줄이 있는 폴더는 풀어도 서므로
+    /// 안 센다. 제 줄로만 세면 셈은 `숨김 1건` 인데 목록 어디에도 `숨김` 이 없다.
+    pub fn unveiled_count(&self) -> usize {
+        if !self.searching() {
+            return 0;
+        }
+        (0..self.keep.len()).filter(|&at| !self.veil(at).filtered && !self.stands_in_view(at)).count()
     }
 
-    /// 이 줄이 목록에 서는가 — 거름망도 보기도 가리지 않았다([`Self::veil`]).
+    /// 이 줄이 목록에 서는가 — 거름망이 안 가렸고, 보기가 안 가렸거나 검색이 보기를 걷었다([`Self::veil`]).
     fn visible(&self, at: usize) -> bool {
-        self.veil(at) == Veil::default()
+        let v = self.veil(at);
+        !v.filtered && (!v.viewed || self.searching())
+    }
+
+    /// 걸린 것이 검색(`/`)인가. **검색이 걸린 동안은 보기가 줄을 안 가린다**(moai-qnkn, 사용자 결정) —
+    /// 끝난 일·미룬 일을 찾으려고 보기를 풀었다 되돌리는 것은 검색의 일이 아니다. 거름망(`f`)은 보기를
+    /// 따른다: 그것은 "무엇을 볼지" 를 좁히는 물음이지 찾는 물음이 아니다. 칸을 Enter 로 닫아도 검색이
+    /// 걸려 있는 한 그대로고, 풀면(Esc) 설정된 보기로 돌아간다 — **보기는 건드리지도 적지도 않는다.**
+    pub fn searching(&self) -> bool {
+        self.grep_query().is_some()
+    }
+
+    /// 보기(`SPC v`)가 이 줄을 보이는가 — 검색과 상관없이. `shown` 이 빈 때는 보인다.
+    fn view_shows(&self, at: usize) -> bool {
+        self.shown.get(at).copied().unwrap_or(true)
     }
 
     /// 이 줄을 **무엇이 가리는가** — 거름망(`keep`)과 보기(`shown`) 각각. **판정은 여기 하나다**
@@ -1501,11 +1527,35 @@ impl App {
     /// 까닭이 하나 늘거나 빈 `shown` 의 기본이 바뀐 날 한쪽만 고쳐져 셈이 목록과, 알림이 누른 키와
     /// 어긋난다(moai-fmv5 가 그 알림을 만든 바로 그 실패). `shown` 이 빈 때(층에서 막 내려와 아직 안
     /// 센 때)는 보기가 안 가린다.
+    ///
+    /// **`viewed` 는 검색 중에도 보기가 숨기는가 그대로다** — 검색이 보기를 걷는 것은 목록에 서는가
+    /// ([`Self::visible`])의 일이다. 여기서 검색을 보고 `viewed` 를 끄면, 검색 중에 쓴 줄이 검색에도 보기에도
+    /// 가렸을 때 쓰기 알림이 "Esc 로 푼다" 만 대고, Esc 가 검색을 풀자마자 보기가 그 줄을 도로 가린다.
     fn veil(&self, at: usize) -> Veil {
-        Veil {
-            filtered: !self.keep.get(at).copied().unwrap_or(true),
-            viewed: !self.shown.get(at).copied().unwrap_or(true),
+        Veil { filtered: !self.keep.get(at).copied().unwrap_or(true), viewed: !self.view_shows(at) }
+    }
+
+    /// 보기만으로도 이 줄이 목록에 서는가 — 제 줄이 보이거나, 폴더면 밑에 보기가 보이는 줄이 있다. 목록이
+    /// 폴더를 남기는 자(`Index::entries_sorted` 의 "밑에 걸린 것")와 같다. 밑은 [`App::see`] 가 센 `lit` 에서
+    /// 읽는다 — 폴더마다 이슈 전부를 훑지 않는다.
+    fn stands_in_view(&self, at: usize) -> bool {
+        if self.view_shows(at) {
+            return true;
         }
+        if !self.index.is_dir(&self.issues, at) {
+            return false;
+        }
+        let mut below = self.index.home_of(at).clone();
+        below.push(self.index.seg_of(&self.issues, at));
+        self.lit.contains(&below)
+    }
+
+    /// 이 줄이 **검색 덕에 선 숨은 줄**인가(moai-4x87) — 검색을 풀면 보기가 도로 가릴 줄. 목록이
+    /// 흐리게 그리고 `숨김` 을 단다. 폴더는 목록이 남기는 자와 같다: 제 줄이 숨었어도 밑에 보기가
+    /// 보이는 줄이 있으면 평소에도 서므로 숨은 줄이 아니다([`Self::stands_in_view`]). 바구니는 제 줄이 없어
+    /// 안 단다.
+    pub fn unveiled(&self, e: &Entry) -> bool {
+        self.searching() && e.at().is_some_and(|at| !self.stands_in_view(at))
     }
 
     /// 목록에서 그 정체의 줄 자리. 커서를 붙드는 곳(다시 읽기·보기 토글·쓰기·층)이 같은 자로 찾는다.
@@ -1600,6 +1650,16 @@ impl App {
         self.shown = (0..self.issues.len())
             .map(|at| self.view.shows(self.column(at), self.index.deferred_root(&self.issues[at].id).is_some(), &self.cfg.statuses))
             .collect();
+        let mut lit = std::collections::HashSet::new();
+        for (at, _) in self.shown.iter().enumerate().filter(|(_, on)| **on) {
+            let home = self.index.home_of(at);
+            for n in 1..=home.len() {
+                if !lit.contains(&home[..n]) {
+                    lit.insert(home[..n].to_vec());
+                }
+            }
+        }
+        self.lit = lit;
     }
 
     /// 설정 자리(`App::user_config`)에서 보기를 읽어 [`App::adopt_look`] 에 넘긴다. **시험만 부른다**(moai-u8cs) —
@@ -1941,6 +2001,12 @@ impl App {
         if let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) {
             return (0..l.places.len()).map(Row::Project).collect();
         }
+        self.rows_where(&|at| self.visible(at))
+    }
+
+    /// 지금 디렉터리의 목록 — `keep` 을 지나는 줄로. [`Self::rows`] 는 이것에 거름망과 보기를 건 것이다.
+    /// 검색을 풀 때 커서가 설 이웃을 **보기를 안 건 차례**에서 찾으려고 따로 둔다([`Self::after_search`]).
+    fn rows_where(&self, keep: &dyn Fn(usize) -> bool) -> Vec<Row> {
         let mut rows: Vec<Row> = Vec::new();
         // **`..` 은 디렉터리에만 선다**(moai-i784). 프로젝트 뿌리에 한 줄 더 세워 층으로
         // 올려 보내던 길은 걷었다 — 층으로 가는 길은 헤더의 `0` 하나다(사용자 결정).
@@ -1952,7 +2018,7 @@ impl App {
         // (`Index::entries_where`). done 에픽 밑에 남은 todo 가 폴더째 사라지면 안 된다.
         rows.extend(
             self.index
-                .entries_sorted(&self.issues, &self.path, &|at| self.visible(at), &|a, b| {
+                .entries_sorted(&self.issues, &self.path, keep, &|a, b| {
                     // 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다. 담당은 화면에 선 이름으로.
                     crate::query::order_by(
                         Self::sort_key(self.order.by),
@@ -2069,7 +2135,11 @@ impl App {
             B::Unregister => self.ask_unregister(),
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
-            B::ClearFilter => self.clear_filter(),
+            B::ClearFilter => {
+                let (was, held) = (self.searching(), self.current_of(&rows).map(|r| self.anchor_of(&r)));
+                self.clear_filter();
+                self.after_search(was, held);
+            }
             // 켜고 끄는 것은 **다시 읽는 것**이다. 겹친 줄은 적재 때 한 번 세는 것이라
             // (`Ground`·색인·경고), 들고 있는 것에 덧칠하면 셈이 옛 줄로 남는다.
             // **켰는데 겹칠 것이 없으면 한 번 말한다**(moai-d5vn). 경로 줄은 옆이 없으면 비므로, 말이
@@ -2228,16 +2298,25 @@ impl App {
                 // 하면 긴 거름망일수록 고치기가 벌이 된다.
                 // 붙든 줄은 **거르기 전**에 잰다 — 첨자가 옛 `keep` 을 가리킨다.
                 let held = self.current().map(|r| self.anchor_of(&r));
+                // 검색이었는지는 **칸을 열기 전**의 것까지 본다 — 검색 칸은 치는 대로 걸어(`live`) 지금
+                // `filter_text` 가 이미 검색이다. 빈 글로 Enter 를 치면 그 검색이 풀린다.
+                let was = self.searching() || self.grep_was.as_ref().is_some_and(|(t, ..)| t.as_deref().is_some_and(|t| t.starts_with('/')));
                 if self.apply(&mode).is_ok() {
                     self.mode = Mode::Browse;
                     self.grep_was = None;
                     // 자른 자리의 줄이 다른 것이면 상세도 첫 줄로(리뷰 moai-3lul.kt0) — 치는 대로 거르는
-                    // 길(`live`)이 이미 그렇게 서고, 여기만 커서를 자르고 굴린 자리를 남겼다.
-                    self.settle(held, self.cursor);
+                    // 길(`live`)이 이미 그렇게 서고, 여기만 커서를 자르고 굴린 자리를 남겼다. **검색이 풀렸으면
+                    // 커서는 `after_search` 가 세운다** — 번호로 먼저 자르면 붙든 줄이 그대로 서도 상세가 되감긴다.
+                    if !self.after_search(was, held.clone()) {
+                        self.settle(held, self.cursor);
+                    }
                 }
             }
             keys::Prompt::Cancel => {
                 // 치는 대로 걸었던 것을 **열기 전으로** 되돌린다 — Esc 는 "안 한 것으로" 다.
+                // **커서도 열기 전 자리로 간다** — 검색 칸에서는 커서를 못 옮기니 되돌린 목록은 열기 전 그 목록이고,
+                // 그 번호가 열기 전 그 줄이다. 검색을 푸는 길(`after_search`)을 타면 치는 동안 커서 밑에 섰던
+                // 줄로 가 "안 한 것" 이 아니게 되고, 되돌린 거름망(`f`)이 가린 줄을 두고 보기에 가렸다고 댄다.
                 if let (Mode::Grep(..), Some((text, g, cursor))) = (&self.mode, self.grep_was.take()) {
                     let held = self.current().map(|r| self.anchor_of(&r));
                     self.filter_text = text;
@@ -2266,6 +2345,62 @@ impl App {
         if self.apply(&mode).is_ok() {
             self.settle(held, self.cursor);
         }
+    }
+
+    /// 검색이 풀렸으면 커서를 **보기로 돌아간 목록**에 다시 세운다(moai-gwmc, 사용자 결정). `was` 는 풀기 전에
+    /// 검색이 걸려 있었는가, `held` 는 그때 커서가 붙든 줄이다. 커서를 세웠으면 `true` — 아니면 부르는 쪽이
+    /// 제 자로 세운다.
+    ///
+    /// - 붙든 줄이 그대로 서면 거기 선다 — 검색이 풀려 줄이 늘어도 보던 줄을 안 잃는다. 같은 줄이니 상세의
+    ///   굴린 자리도 둔다(`stand` 는 정체로 가른다).
+    /// - 보기가 도로 가렸으면 **보기를 안 건 차례에서 가장 가까운** 보이는 줄에 서고(아래 먼저), 가려졌다고
+    ///   한 줄 댄다. 번호로 자르면 검색 때와 전혀 다른 자리의 줄에 선다. **보기가 가렸을 때만 댄다** — 검색
+    ///   대신 건 거름망(`f`)이 가린 줄에 `SPC v a` 를 대면 누른 키가 아무것도 안 한다.
+    /// - 검색 중 들어간 폴더가 보기에 가렸으면 보이는 폴더까지 나온다 — 가린 폴더 안에 남으면 "보기에 가려
+    ///   비었다" 만 선 화면에서 왜 여기 있는지 모른다. 그때 붙들 줄은 나온 폴더다.
+    ///
+    /// **보기는 안 건드린다** — 드러내던 것은 검색이었지 보기가 아니다.
+    fn after_search(&mut self, was: bool, held: Option<Anchor>) -> bool {
+        if !was || self.searching() || self.on_layer() {
+            return false;
+        }
+        let mut want = held.clone();
+        while let Some(seg) = self.path.last().cloned() {
+            let parent: Path = self.path[..self.path.len() - 1].to_vec();
+            let is_it = |e: &Entry| matches!(e, Entry::Dir { seg: s, .. } if *s == seg);
+            if self.index.entries_where(&self.issues, &parent, &|at| self.visible(at)).iter().any(is_it) {
+                break;
+            }
+            let dir = self.index.entries(&self.issues, &parent).into_iter().find(is_it);
+            self.path.pop();
+            self.remembered.pop();
+            want = dir.map(|e| self.anchor_of(&Row::Item(e)));
+        }
+        let Some(want) = want else { return false };
+        let rows = self.rows();
+        if let Some(row) = self.row_of(&rows, &want) {
+            self.stand(&rows, row, held.as_ref());
+            return true;
+        }
+        // 보기를 안 건 차례 — 거름망(`f`)은 그대로 건다. 검색이 풀린 뒤라 걸린 것은 거름망뿐이다.
+        let all = self.rows_where(&|at| !self.veil(at).filtered);
+        let near = self.row_of(&all, &want).and_then(|pos| {
+            (1..all.len()).find_map(|d| {
+                [pos.checked_add(d), pos.checked_sub(d)]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|p| all.get(p))
+                    .find_map(|r| self.row_of(&rows, &self.anchor_of(r)))
+            })
+        });
+        self.stand(&rows, near.unwrap_or(self.cursor), None);
+        if let Anchor::Issue(id) = &want
+            && self.index.find(id).map(|at| self.veil(at)).is_some_and(|v| v.viewed && !v.filtered)
+        {
+            let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
+            self.notice = Some(format!("{id} 는 보기에 가려졌다 · {show} 로 모두 보인다"));
+        }
+        true
     }
 
     /// 거름망이 바뀐 뒤 커서를 `at` 을 줄 수 안으로 자른 자리에 세운다. **그 자리의 줄이
@@ -2720,6 +2855,190 @@ mod tests {
         assert_eq!(row_ids(&a), ["argos-0001"]);
         a.hit("SPC v a");
         assert_eq!(row_ids(&a).len(), 3, "모두 보이기가 다 안 보인다");
+    }
+
+    /// 보기가 done 과 미룬 줄을 숨긴 목록 — 검색 시험의 바닥. 뿌리에 보이는 것은 0001(에픽)·0011 뿐이고,
+    /// 0002(끝난 에픽, 멤버 0005)·0009(done)·0010(미룸)이 숨는다.
+    fn veiled_app() -> App {
+        let mut done_loose = make("argos-0009", Kind::Issue);
+        done_loose.status = Status::new("done");
+        let mut put_off = make("argos-0010", Kind::Issue);
+        put_off.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let mut done_epic = make("argos-0002", Kind::Epic);
+        done_epic.status = Status::new("done");
+        let mut done_member = member("argos-0005", "argos-0002");
+        done_member.status = Status::new("done");
+        let issues = vec![
+            make("argos-0001", Kind::Epic),
+            member("argos-0003", "argos-0001"),
+            done_epic,
+            done_member,
+            done_loose,
+            put_off,
+            make("argos-0011", Kind::Issue),
+        ];
+        let mut a = App::new(issues, cfg(), Path::new());
+        a.hit("SPC v l");
+        a
+    }
+
+    fn search(a: &mut App, q: &str) {
+        a.hit("/");
+        for c in q.chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+    }
+
+    /// **검색은 보기가 숨긴 칸과 미룬 줄까지 세운다**(moai-wkb8, 사용자 결정). Enter 로 칸을 닫아도 검색이
+    /// 걸린 동안은 그대로고, 풀면 설정된 보기로 돌아간다 — **보기는 바뀌지도 적히지도 않는다.**
+    #[test]
+    fn a_search_sees_past_the_view_and_leaves_it_as_it_was() {
+        let mut a = veiled_app();
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0011"], "시험의 전제 — done·미룸이 숨었다");
+        let (view, look) = (a.view.clone(), a.look_now());
+
+        search(&mut a, "argos-00");
+        let ids = row_ids(&a);
+        for want in ["argos-0002", "argos-0009", "argos-0010"] {
+            assert!(ids.iter().any(|i| i == want), "검색이 보기가 숨긴 {want} 를 못 찾았다: {ids:?}");
+        }
+        a.hit("Enter");
+        assert_eq!(row_ids(&a), ids, "Enter 로 칸을 닫자 보기가 도로 가렸다");
+        assert_eq!((&a.view, a.look_now()), (&view, look.clone()), "검색이 보기를 바꿨다");
+
+        a.hit("Esc");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0011"], "검색을 풀었는데 보기로 안 돌아갔다");
+        assert_eq!((&a.view, a.look_now()), (&view, look), "검색을 푼 뒤 보기가 달라졌다");
+
+        // 거름망(`f`)은 찾는 물음이 아니라 보기를 따른다.
+        a.hit("SPC f");
+        for c in "status=done".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        a.hit("Enter");
+        assert!(row_ids(&a).is_empty(), "거름망이 보기가 숨긴 줄까지 세웠다: {:?}", row_ids(&a));
+    }
+
+    /// **검색을 풀 때 커서가 선 줄이 보기에 도로 가리면 가장 가까운 보이는 줄로 가고 한 줄 댄다**(moai-gwmc,
+    /// 사용자 결정). 가리지 않으면 그 줄을 붙든다 — 번호로 자르면 검색 때와 다른 줄에 선다.
+    #[test]
+    fn leaving_a_search_puts_the_cursor_next_to_the_row_the_view_hides_again() {
+        let mut a = veiled_app();
+        search(&mut a, "argos-0011");
+        a.hit("Enter");
+        a.hit("Esc");
+        assert_eq!(row_ids(&a)[a.cursor], "argos-0011", "보이는 줄을 붙들지 못했다");
+        assert_eq!(a.notice, None);
+
+        search(&mut a, "argos-0009");
+        a.hit("Enter");
+        assert_eq!(row_ids(&a)[a.cursor], "argos-0009");
+        a.hit("Esc");
+        let ids = row_ids(&a);
+        assert!(!ids.contains(&"argos-0009".to_string()));
+        // 보기를 안 건 차례에서 0009 의 이웃 — 0010(미룸)은 숨었으니 그 너머 0011.
+        assert_eq!(ids[a.cursor], "argos-0011", "{ids:?}");
+        let told = a.notice.clone().unwrap_or_default();
+        assert!(told.contains("argos-0009") && told.contains("SPC v a"), "{told:?}");
+        assert_eq!(a.view.hidden, vec!["done".to_string()], "커서를 옮기려고 보기를 풀었다");
+    }
+
+    /// **검색 중 들어간 숨은 폴더는 검색을 풀면 나온다**(moai-gwmc) — 가린 폴더 안에 남으면 "보기에 가려
+    /// 비었다" 만 선 화면에서 왜 거기 있는지 모른다.
+    #[test]
+    fn leaving_a_search_climbs_out_of_a_folder_the_view_hides() {
+        let mut a = veiled_app();
+        search(&mut a, "argos-0005");
+        a.hit("Enter");
+        assert_eq!(row_ids(&a), ["argos-0002"], "시험의 전제 — 숨은 에픽이 폴더로 선다");
+        a.hit("l");
+        assert_eq!(row_ids(&a), ["argos-0005"]);
+        a.hit("Esc");
+        assert!(a.path.is_empty(), "숨은 폴더 안에 남았다: {:?}", a.path);
+        assert!(a.notice.clone().unwrap_or_default().contains("argos-0002"), "{:?}", a.notice);
+        assert!(a.cursor < a.rows().len(), "커서가 목록 밖에 섰다");
+    }
+
+    /// **검색 칸의 Esc 는 커서도 열기 전 자리로 돌린다**(moai-qnkn 에픽 리뷰) — 칸에서는 커서를 못 옮기니 되돌린
+    /// 목록의 그 번호가 열기 전 그 줄이다. 검색을 푸는 길을 타면 치는 동안 커서 밑에 섰던 줄로 간다.
+    #[test]
+    fn cancelling_a_search_puts_the_cursor_back_where_it_was() {
+        let mut a = veiled_app();
+        a.hit("j");
+        assert_eq!(row_ids(&a)[a.cursor], "argos-0011", "시험의 전제");
+        search(&mut a, "argos-0001");
+        assert_eq!(row_ids(&a)[a.cursor], "argos-0001", "시험의 전제 — 치는 동안 커서가 다른 줄에 섰다");
+        a.key(key(KeyCode::Esc));
+        assert_eq!(row_ids(&a)[a.cursor], "argos-0011", "Esc 가 커서를 열기 전으로 못 돌렸다");
+        assert_eq!(a.notice, None);
+    }
+
+    /// **검색을 풀어도 붙든 줄이 그대로 서면 상세의 굴린 자리도 둔다**(moai-qnkn 에픽 리뷰) — 같은 줄인데 번호가
+    /// 달라졌다고 되감으면 읽던 자리를 잃는다. 커서를 다시 세우는 법은 정체로 가른다(`stand`). Esc 로 풀든
+    /// 빈 검색 칸의 Enter 로 풀든 같다.
+    #[test]
+    fn leaving_a_search_keeps_the_detail_where_it_was_on_the_same_row() {
+        for leave in ["Esc", "/ Enter"] {
+            let mut a = veiled_app();
+            search(&mut a, "argos-0011");
+            a.hit("Enter");
+            drawn(&mut a, 10, 40);
+            a.hit("Tab");
+            for _ in 0..3 {
+                a.key(key(KeyCode::Down));
+            }
+            a.hit("Tab");
+            assert_eq!(a.detail.offset(), 3, "시험의 전제");
+            a.hit(leave);
+            assert!(!a.searching(), "{leave}: 검색이 안 풀렸다");
+            assert_eq!(row_ids(&a)[a.cursor], "argos-0011", "{leave}");
+            assert_eq!(a.detail.offset(), 3, "{leave}: 같은 줄인데 상세를 되감았다");
+        }
+    }
+
+    /// **검색 대신 건 거름망이 가린 줄을 보기에 가렸다고 대지 않는다**(moai-qnkn 에픽 리뷰) — `SPC v a` 를 눌러도
+    /// 거름망에 여전히 가려 누른 키가 아무것도 안 한다.
+    #[test]
+    fn a_filter_replacing_a_search_does_not_blame_the_view() {
+        let mut a = veiled_app();
+        search(&mut a, "argos-0011");
+        a.hit("Enter");
+        a.hit("SPC f");
+        for c in "type=epic".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        a.hit("Enter");
+        assert_eq!(row_ids(&a), ["argos-0001"]);
+        assert_eq!(a.notice, None, "거름망이 가린 줄을 보기 탓으로 댔다");
+    }
+
+    /// **검색 칸의 `숨김` 셈은 목록의 `숨김` 과 같은 자로 센다**(moai-qnkn 에픽 리뷰). 끝난 부모의 제 줄은 보기가
+    /// 숨기지만 안 끝난 자식이 있어 검색을 풀어도 폴더로 선다 — 셈에 넣으면 `숨김 1건` 인데 줄에는 없다.
+    #[test]
+    fn the_unveiled_count_agrees_with_the_marked_rows() {
+        let mut parent = make("argos-0020", Kind::Issue);
+        parent.status = Status::new("done");
+        let issues = vec![make("argos-0001", Kind::Epic), parent, make("argos-0020.a1b", Kind::Issue)];
+        let mut a = App::new(issues, cfg(), Path::new());
+        search(&mut a, "argos-0020");
+        assert_eq!(row_ids(&a), ["argos-0020"], "시험의 전제 — 끝난 부모가 폴더로 선다");
+        let marked = a.rows().iter().filter(|r| matches!(r, Row::Item(e) if a.unveiled(e))).count();
+        assert_eq!((marked, a.unveiled_count()), (0, 0));
+    }
+
+    /// **검색 중에 쓴 줄이 검색에도 보기에도 가리면 둘 다 댄다**(moai-qnkn 에픽 리뷰). 검색이 보기를 걷는 동안에도
+    /// Esc 는 검색만 풀고, 풀자마자 보기가 그 줄을 도로 가린다 — "Esc 로 푼다" 만 대면 누른 키가 아무것도 안 한다.
+    #[test]
+    fn a_write_hidden_by_a_search_and_the_view_names_both() {
+        let (_scratch, mut a) = writable("land-search-view");
+        a.hit("SPC v 1");
+        a.hit("/");
+        typed(&mut a, "argos-0001");
+        assert!(add_idea(&mut a, "argos-0002").is_some());
+        assert_eq!(
+            a.notice.as_deref(),
+            Some("✓ 담김 · argos-0002 — 거름망과 보기에 가려 안 보인다 · Esc 로 풀고 SPC v a 로 모두 보인다")
+        );
     }
 
     /// **옛 설정에도 새 열이 뜬다**(moai-3fnf 리뷰, 사용자 결정) — `fields` 에 안 적힌 것이 "껐다" 인지

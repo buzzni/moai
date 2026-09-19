@@ -303,7 +303,8 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let mut watched = heads(&repo.root);
     match others_of(&repo.root) {
         Err(why) => unfound = Some(why),
-        Ok((mine, trees)) => {
+        Ok((me, trees)) => {
+            let mine = head_of(me.as_ref());
             let here: std::collections::HashSet<&str> = load.issues.iter().map(|i| i.id.as_str()).collect();
             let mut bases = Bases::new();
             for (tree, root) in trees {
@@ -339,7 +340,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                                 other.errors.len()
                             ));
                         }
-                        others.push(side(&repo.root, &here, mine.as_deref(), tree, root, other.issues, &mut bases));
+                        others.push(side(&repo.root, &here, mine, tree, root, other.issues, &mut bases));
                     }
                 }
             }
@@ -379,9 +380,13 @@ fn side(
     Side { base, holds, ..Side::new(tree.label, root, issues) }
 }
 
-/// 제 줄을 **옆 워크트리의 스냅샷과 겹친 것**과, 옆 워크트리의 이름이 가리키는 id 후보([`away`]
-/// 와 같은 자) — 훅이 막기 전에 한 번 더 비춰 보는 자리다(moai-w2iy). `Stop` 도 집은 것이 남을 때
-/// 에픽이 닫히는지를 이것으로 잰다(moai-8ema).
+/// 제 줄을 **옆 워크트리의 스냅샷과 겹친 것**과, 그 목록이 낸 이름 후보 — 옆 이름과 **제 이름**
+/// ([`away`] 와 같은 자) — 훅이 막기 전에 한 번 더 비춰 보는 자리다(moai-w2iy). `Stop` 도 집은 것이
+/// 남을 때 에픽이 닫히는지를 이것으로 잰다(moai-8ema).
+///
+/// **제 이름도 여기서 낸다**(리뷰 moai-3k2d.1df). 옆 이름은 제 이름과 거리를 겨루는데(moai-m62u), 훅은 제
+/// 스냅샷에 집은 줄이 없으면 워크트리 목록을 안 읽어 제 이름이 빈다 — 겹쳐 보는 까닭이 바로 그 스냅샷이
+/// main 의 집기를 모를 때라, 빈 이름으로 재면 제 이름 워크트리의 멤버를 옆 에픽 워크트리에 넘겨 막았다.
 ///
 /// 트래커는 main 에서 만지는 것이 규약이라(CLAUDE.md "워크트리"), 워크트리의 스냅샷(HEAD)은
 /// main 에서 방금 세우고 집은 줄을 모른다. 그 낡은 스냅샷만 보고 막으면 시킨 대로 한 일이
@@ -389,9 +394,14 @@ fn side(
 ///
 /// **git 목록은 한 번만 읽는다** — 겹칠 줄과 이름 후보가 한 목록에서 나온다. 못 찾으면 `None`
 /// 이고, 남의 못 읽는 줄은 말없이 빼고 겹친다 — 훅은 무엇이 어긋나도 조용해야 한다.
-pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, BTreeSet<String>)> {
-    let (head, trees) = others_of(&repo.root).ok()?;
-    let away = names(trees.iter().map(|(t, _)| t));
+pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, crate::hook::Away)> {
+    let (me, trees) = others_of(&repo.root).ok()?;
+    let away = crate::hook::Away {
+        names: names(trees.iter().map(|(t, _)| t)),
+        own: names(me.as_ref()),
+        ..Default::default()
+    };
+    let head = head_of(me.as_ref());
     let mut others = Vec::new();
     {
         let here: std::collections::HashSet<&str> = mine.iter().map(|i| i.id.as_str()).collect();
@@ -400,7 +410,7 @@ pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, BTreeSet<Stri
             let Ok(Some(other)) = crate::store::read_snapshot(&root.join(".moai").join("issues.jsonl")) else {
                 continue;
             };
-            others.push(side(&repo.root, &here, head.as_deref(), tree, root, other.issues, &mut bases));
+            others.push(side(&repo.root, &here, head, tree, root, other.issues, &mut bases));
         }
     }
     Some((overlay(mine, others).0, away))
@@ -456,12 +466,12 @@ pub fn heads(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
     watched
 }
 
-/// 제 워크트리의 HEAD 와, 다른 워크트리마다 (워크트리, 그 안의 moai 뿌리).
+/// 제 워크트리와, 다른 워크트리마다 (워크트리, 그 안의 moai 뿌리).
 ///
 /// moai 뿌리가 워크트리 꼭대기가 아닐 수 있다(`.moai/` 를 하위 디렉터리에 둔
 /// 저장소). **제 뿌리가 꼭대기에서 떨어진 만큼 남의 꼭대기에서도 떨어뜨린다** —
 /// 같은 저장소의 워크트리는 같은 나무 모양이다.
-fn others_of(root: &Path) -> Result<(Option<String>, Vec<(Tree, PathBuf)>), String> {
+fn others_of(root: &Path) -> Result<(Option<Tree>, Vec<(Tree, PathBuf)>), String> {
     let top = git(root, &["rev-parse", "--show-toplevel"])?;
     let top = canonical(Path::new(top.trim_end_matches('\n')));
     let rel = canonical(root).strip_prefix(&top).map(Path::to_path_buf).unwrap_or_default();
@@ -470,9 +480,8 @@ fn others_of(root: &Path) -> Result<(Option<String>, Vec<(Tree, PathBuf)>), Stri
     let listed = git(root, &["worktree", "list", "--porcelain", "-z"])
         .or_else(|_| git(root, &["worktree", "list", "--porcelain"]).map(|s| s.replace('\n', "\0")))?;
     let (mine, others): (Vec<Tree>, Vec<Tree>) = parse(&listed).into_iter().partition(|t| canonical(&t.path) == top);
-    let mine = mine.into_iter().next().map(|t| t.head).filter(|h| !h.is_empty());
     Ok((
-        mine,
+        mine.into_iter().next(),
         others
             .into_iter()
             .map(|t| {
@@ -483,12 +492,20 @@ fn others_of(root: &Path) -> Result<(Option<String>, Vec<(Tree, PathBuf)>), Stri
     ))
 }
 
-/// 옆 워크트리들의 **이름이 가리키는 id 후보** — 훅이 초점에서 뺄 것(`hook::held`).
+/// 제 워크트리의 HEAD 커밋 — 갈라진 자리를 찾는 데 쓴다([`side`]). 아직 커밋이 없으면 없다.
+fn head_of(me: Option<&Tree>) -> Option<&str> {
+    me.map(|t| t.head.as_str()).filter(|h| !h.is_empty())
+}
+
+/// 옆 워크트리들의 **이름이 가리키는 id 후보**와 제 워크트리의 이름 후보 — 훅이 초점에서 뺄 것을
+/// 잰다(`hook::Away`). 옆 이름은 제 이름보다 가까이 가리킬 때만 이긴다(moai-m62u).
 ///
 /// **못 찾으면 비어 있다.** git 이 없거나 저장소가 아니면 옆도 없는 것이고, 그러면
 /// 전처럼 스냅샷의 집은 줄이 다 제 초점이다. 훅은 무엇이 어긋나도 조용해야 한다.
-pub fn away(root: &Path) -> BTreeSet<String> {
-    on_disk(root).map(|d| names(d.others())).unwrap_or_default()
+pub fn away(root: &Path) -> crate::hook::Away {
+    on_disk(root)
+        .map(|d| crate::hook::Away { names: names(d.others()), own: names(d.mine()), ..Default::default() })
+        .unwrap_or_default()
 }
 
 /// git 이 적어 둔 파일에서 읽은 워크트리 목록([`on_disk`]).
@@ -512,13 +529,19 @@ impl Disk {
         self.all.iter().filter(|(_, _, me)| !me).map(|(t, ..)| t)
     }
 
+    /// 제 워크트리 — 그 이름 후보가 훅의 제 이름([`crate::hook::Away::own`])이다.
+    fn mine(&self) -> impl Iterator<Item = &Tree> {
+        self.all.iter().filter(|(_, _, me)| *me).map(|(t, ..)| t)
+    }
+
     /// main 워크트리. 맨몸 저장소면 없다.
     fn main(&self) -> Option<&Tree> {
         self.all.iter().find(|(_, linked, _)| !*linked).map(|(t, ..)| t)
     }
 }
 
-/// 옆 **딸린** 워크트리가 쥐었을 수 있는 줄 id 와, 제 워크트리의 이름 후보 (moai-ntl6, 사용자 결정 B).
+/// 옆 **딸린** 워크트리가 쥐었을 수 있는 줄 id (moai-ntl6, 사용자 결정 B). 제 이름은 훅이 이미 든
+/// [`away`] 의 것을 쓴다(`hook::unsure`) — 여기서 한 벌 더 재던 판은 한 판정의 두 쪽이 제 이름을 따로 읽었다.
 ///
 /// 이름이 id 가 아닌 워크트리(에이전트 격리 `worktree-agent-<해시>`, 옛 id 로 뜬 워크트리)가
 /// 쥔 일은 이름으로 못 가른다. 대신 **갈라진 자리**로 짐작한다 — 규약상 집기는 main 에서 커밋한
@@ -530,9 +553,8 @@ impl Disk {
 /// **답은 짐작이다** — 받는 쪽은 이 줄로 막거나 붙들거나 비추지 않기만 한다(`hook::unsure`). git 을
 /// 띄우지 않고 파일만 읽지만 옆 스냅샷을 다 풀어 싸지 않다 — 거절 길, 비추는 길(`idea add` 의 물음),
 /// `Stop` 에서만 부른다.
-pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> (BTreeSet<String>, BTreeSet<String>) {
-    let Some(disk) = on_disk(root) else { return Default::default() };
-    let own = names(disk.all.iter().filter(|(_, _, me)| *me).map(|(t, ..)| t));
+pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> BTreeSet<String> {
+    let Some(disk) = on_disk(root) else { return BTreeSet::new() };
     let mut out = BTreeSet::new();
     for (tree, linked, me) in &disk.all {
         if *me || !*linked {
@@ -542,7 +564,7 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
         out.extend(open);
         out.extend(later);
     }
-    (out, own)
+    out
 }
 
 /// 딸린 워크트리 하나의 스냅샷이 쥔 줄 — [`held_elsewhere`] 의 한 워크트리 몫. (벌여 놓인 줄,
@@ -667,7 +689,8 @@ pub fn workplaces(
     // `report::places` 의 판정도 여기서는 그 하나로 접히는데, 그렇다고 판정을 통째로 돌려 한
     // 낱말만 건지면 (1) 시계를 한 번 더 읽고 (2) 소속 지도와 굴림까지 지어 버리고 (3) 판정에
     // 변형이 하나 늘 때마다 **디스크를 언제 만지는가**가 조용히 따라 바뀐다. 그래서 그 하나를
-    // 재는 자(`report::claimed` — `hook::held` 와 `places` 가 이미 같이 쓴다)를 바로 쓴다.
+    // 재는 자(`report::claimed` — 훅의 초점과 `places` 가 거리를 겨루는 `report::nearness` 의 "가리키는가"
+    // 쪽이다)를 바로 쓴다.
     // 집은 줄도 `places` 가 되짚는 그 집합([`crate::report::started`])이다 — `wip` 은 가려진 쌍둥이
     // 줄을 빼므로(moai-es40), 그것으로 재면 그 줄 하나 때문에 열어야 할 문이 닫혀 스냅샷으로만 찾을
     // 수 있는 그 줄이 `stranded` 로 선다. 이름으로는 거의 못 찾는다 — 쌍둥이(뒷줄)가 그 id 의 에픽을
@@ -976,12 +999,21 @@ fn git_dirs(root: &Path) -> Option<(&Path, PathBuf)> {
 /// 모노레포(`a/.moai`·`b/.moai`)에서 `moai -C ../b add` 를 `a` 의 초점으로 막고 `b` 의 초점은
 /// 안 봤다. git 을 띄우지 않는다 — 두 번의 `rev-parse` 가 이 길의 값 대부분이었다.
 pub fn same_repo(a: &Path, b: &Path) -> bool {
-    let place = |root: &Path| {
-        let (top, common) = git_dirs(root)?;
-        let rel = canonical(root).strip_prefix(canonical(top)).map(Path::to_path_buf).ok()?;
-        Some((canonical(&common), rel))
-    };
-    matches!((place(a), place(b)), (Some(x), Some(y)) if x == y)
+    matches!((tracker_place(a), tracker_place(b)), (Some(x), Some(y)) if x == y)
+}
+
+/// 이 트래커가 선 **저장소 안의 자리** — (공용 git 디렉터리, 워크트리 꼭대기에서 moai 뿌리까지). 같은
+/// 저장소의 어느 워크트리에서 재도 같은 자리의 트래커면 같은 값이다([`same_repo`]). git 밖이면 없다.
+/// git 을 띄우지 않는다.
+///
+/// 훅이 세션의 집기를 적는 자리도 이것으로 잡는다(`cmd::hook`) — main 워크트리의 뿌리로 잡던 판은 main
+/// 이 없는 맨몸 저장소에서 워크트리마다 딴 자리에 적어 서로의 집기를 못 봤다(리뷰 moai-3k2d.1df).
+/// `--separate-git-dir` 로 뜬 main 은 공용 디렉터리를 못 찾아 여전히 없다([`git_dirs`]) — 그 자리는
+/// 제 뿌리로 적고, 기록이 갈리면 전처럼 판정한다.
+pub fn tracker_place(root: &Path) -> Option<(PathBuf, PathBuf)> {
+    let (top, common) = git_dirs(root)?;
+    let rel = canonical(root).strip_prefix(canonical(top)).map(Path::to_path_buf).ok()?;
+    Some((canonical(&common), rel))
 }
 
 /// 워크트리 이름에서 id 후보를 읽는다 — 경로의 끝 이름, 가지 이름, `worktree-` 를 뗀 가지 이름.
@@ -1265,8 +1297,8 @@ mod tests {
 
         let dir = crate::scratch::Scratch::fenced_in(&inside, "fence");
         assert_eq!(top_of(dir.path()).as_deref(), Some(canonical(dir.path()).as_path()), "훑기가 울타리를 넘어갔다");
-        assert!(away(dir.path()).is_empty(), "울타리 위의 저장소가 새어 나왔다 — {:?}", away(dir.path()));
-        assert!(away(&dir.join("nowhere")).is_empty(), "없는 자리에서도 위의 저장소를 읽었다");
+        assert!(away(dir.path()).names.is_empty(), "울타리 위의 저장소가 새어 나왔다 — {:?}", away(dir.path()));
+        assert!(away(&dir.join("nowhere")).names.is_empty(), "없는 자리에서도 위의 저장소를 읽었다");
         assert!(!is_linked(dir.path()), "울타리를 딸린 워크트리로 읽었다");
         let git_top = crate::git::run(dir.path(), &["rev-parse", "--show-toplevel"]).map(|t| PathBuf::from(t.trim_end()));
         assert_eq!(git_top.ok(), Some(canonical(dir.path())), "git 이 울타리를 지나쳐 위의 저장소를 잡았다");
@@ -1376,10 +1408,10 @@ mod tests {
         std::fs::remove_dir_all(&gone).unwrap();
         let by_git = |at: &Path| others_of(at).map(|(_, t)| names(t.iter().map(|(t, _)| t))).unwrap();
         for at in [&main, &feat, &base.join("more")] {
-            assert_eq!(away(at), by_git(at), "{} 에서 파일로 읽은 목록이 git 과 다르다", at.display());
+            assert_eq!(away(at).names, by_git(at), "{} 에서 파일로 읽은 목록이 git 과 다르다", at.display());
         }
-        assert!(!away(&main).contains("gone"), "사라진 워크트리를 이름으로 댄다");
-        assert!(away(&base.join("nowhere")).is_empty());
+        assert!(!away(&main).names.contains("gone"), "사라진 워크트리를 이름으로 댄다");
+        assert!(away(&base.join("nowhere")).names.is_empty());
 
         // **같은 저장소의 같은 자리 트래커만 같다**(moai-23ky) — 옆 워크트리의 main 은 같고, 한
         // 저장소에 트래커를 둘 둔 모노레포의 `a`·`b` 는 다르다.
@@ -1433,9 +1465,9 @@ mod tests {
         assert!(got.origin.labels().is_empty(), "겹치지 않은 곳을 겹쳐 봤다고 댄다 — {:?}", got.origin.labels());
         assert!(got.trouble.iter().any(|t| t.contains("worktree-t-2")), "깨진 스냅샷을 말하지 않는다 — {:?}", got.trouble);
         for id in ["t-1", "t-2"] {
-            assert!(away(&main).contains(id), "훅의 자가 {id} 를 안 센다 — 이 시험이 견줄 것이 없다");
+            assert!(away(&main).names.contains(id), "훅의 자가 {id} 를 안 센다 — 이 시험이 견줄 것이 없다");
         }
-        assert!(!away(&main).contains("t-3"), "훅의 자가 사라진 워크트리를 센다 — 이 시험이 견줄 것이 없다");
+        assert!(!away(&main).names.contains("t-3"), "훅의 자가 사라진 워크트리를 센다 — 이 시험이 견줄 것이 없다");
         assert_eq!(got.origin.working("t-3"), None, "디렉터리가 사라진 워크트리의 이름을 훅과 달리 들었다");
         assert!(!got.origin.named_only().contains(&"worktree-t-3"), "{:?}", got.origin.named_only());
 
