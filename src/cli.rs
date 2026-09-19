@@ -872,6 +872,10 @@ pub enum SkillCmd {
 
   판은 심는 내용의 해시다. 내용이 같으면 판도 같아 헛 업데이트가 없다.
 
+  한국어 글을 다듬는 플러그인 둘도 **같은 범위로** 함께 깐다
+  (korean-skills·humanize-korean). 못 깔아도 moai 의 등록은 그대로 서고,
+  걷을 때 함께 걷는다.
+
   moai skill install                  나만 (기본. settings.local.json)
   moai skill install --scope user     이 기계의 모든 저장소에
   moai skill install --scope project  팀과 함께 (커밋되는 settings.json)

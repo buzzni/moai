@@ -230,15 +230,17 @@ pub struct Install {
     pub project: Option<String>,
 }
 
-/// `installed_plugins.json` 에서 **이 저장소의** moai 설치를 고른다.
+/// `installed_plugins.json` 에서 설치 id(`<플러그인>@<마켓플레이스>`) 하나의 설치 중 **이 저장소에 드는 것**
+/// 을 고른다 — 사용자 범위이거나 `projectPath` 가 여기인 줄. moai 곁에 함께 까는 한국어 글쓰기
+/// 플러그인(moai-lr1s)도 이것으로 센다.
 ///
-/// 마켓플레이스 이름이 저장소마다 달라(`market`) `moai@<이름>` 이면 이미 이
+/// moai 는 마켓플레이스 이름이 저장소마다 달라(`market`) `moai@<이름>` 이면 이미 이
 /// 저장소의 것이다. 그래도 `local`·`project` 는 `projectPath` 를 한 번 더
 /// 본다 — 같은 이름이 옛 자리에 남아 있는 줄을 제 것으로 걷으면 남의 설정을
-/// 건드린다. 자리를 견주는 법(심볼릭 링크 풀기)은 부르는 쪽이 준다.
-pub fn installs(ledger: &serde_json::Value, market: &str, is_here: impl Fn(&str) -> bool) -> Vec<Install> {
-    let key = format!("moai@{market}");
-    let Some(rows) = ledger.get("plugins").and_then(|p| p.get(&key)).and_then(|r| r.as_array()) else {
+/// 건드린다. 자리를 견주는 법(심볼릭 링크 풀기)은 부르는 쪽이 준다. **함께 까는 것의 id 는 기계에 하나라**
+/// 사용자 범위의 줄은 어느 저장소의 것인지 모른다 — 걷는 쪽이 그것을 가른다(`cmd::skill::uninstall`).
+pub fn installs_of(ledger: &serde_json::Value, key: &str, is_here: impl Fn(&str) -> bool) -> Vec<Install> {
+    let Some(rows) = ledger.get("plugins").and_then(|p| p.get(key)).and_then(|r| r.as_array()) else {
         return Vec::new();
     };
     let text = |row: &serde_json::Value, k: &str| row.get(k).and_then(|v| v.as_str()).map(str::to_string);
@@ -257,6 +259,24 @@ pub fn installs(ledger: &serde_json::Value, market: &str, is_here: impl Fn(&str)
             })
         })
         .collect()
+}
+
+/// `known_marketplaces.json` 에서 이 이름의 마켓플레이스가 **어느 GitHub 저장소를 가리키는가**(`<owner>/<repo>`).
+/// 모르는 이름이면 `None`, GitHub 가 아닌 출처면 빈 글 — 빈 글은 "그 저장소가 아니다" 로 읽힌다.
+///
+/// **주소로 더한 GitHub 도 GitHub 다.** `claude plugin marketplace add https://github.com/<o>/<r>` 는
+/// `{"source":"git","url":"….git"}` 로 적힌다 — `repo` 만 읽던 판은 그것을 남의 출처로 보아 함께 깔 것을
+/// 영영 건너뛰었다(`claude` 는 둘을 같은 마켓플레이스로 본다).
+pub fn market_repo(known: &serde_json::Value, name: &str) -> Option<String> {
+    let source = known.get(name)?.get("source")?;
+    let text = |k: &str| source.get(k).and_then(|v| v.as_str());
+    let from_url = || {
+        let url = text("url")?;
+        let rest = url.strip_prefix("https://github.com/").or_else(|| url.strip_prefix("git@github.com:"))?;
+        let rest = rest.trim_end_matches('/');
+        Some(rest.strip_suffix(".git").unwrap_or(rest).to_string())
+    };
+    Some(text("repo").map(str::to_string).or_else(from_url).unwrap_or_default())
 }
 
 /// 매니페스트가 훅으로 부르는 실행 파일. `command` 가 적는 모양
@@ -673,10 +693,29 @@ mod tests {
             ],
             "moai@other": [{"scope": "user", "version": "9.9.9", "installPath": "/c/9"}],
         }});
-        let got = installs(&ledger, "m", |p| p == "/repo");
+        let got = installs_of(&ledger, "moai@m", |p| p == "/repo");
         let versions: Vec<&str> = got.iter().map(|i| i.version.as_str()).collect();
         assert_eq!(versions, ["1.2.3", "4.5.6"]);
-        assert!(installs(&serde_json::json!({}), "m", |_| true).is_empty(), "빈 장부에서 무언가 골랐다");
+        assert!(installs_of(&serde_json::json!({}), "moai@m", |_| true).is_empty(), "빈 장부에서 무언가 골랐다");
+    }
+
+    /// **주소로 더한 GitHub 도 그 저장소다**(리뷰 moai-5wk4.76z). `repo` 만 읽던 판은 `git` 출처를 빈 글로
+    /// 읽어 함께 깔 것을 남의 출처로 건너뛰었다. GitHub 가 아닌 주소는 여전히 빈 글이다.
+    #[test]
+    fn a_github_url_marketplace_names_its_repo() {
+        let known = serde_json::json!({
+            "a": {"source": {"source": "github", "repo": "daleseo/korean-skills"}},
+            "b": {"source": {"source": "git", "url": "https://github.com/DaleSeo/korean-skills.git"}},
+            "c": {"source": {"source": "git", "url": "git@github.com:DaleSeo/korean-skills"}},
+            "d": {"source": {"source": "git", "url": "https://gitlab.com/DaleSeo/korean-skills.git"}},
+            "e": {"source": {"source": "directory", "path": "/x"}},
+        });
+        assert_eq!(market_repo(&known, "a").as_deref(), Some("daleseo/korean-skills"));
+        assert_eq!(market_repo(&known, "b").as_deref(), Some("DaleSeo/korean-skills"));
+        assert_eq!(market_repo(&known, "c").as_deref(), Some("DaleSeo/korean-skills"));
+        assert_eq!(market_repo(&known, "d").as_deref(), Some(""));
+        assert_eq!(market_repo(&known, "e").as_deref(), Some(""));
+        assert_eq!(market_repo(&known, "z"), None);
     }
 
     /// 매니페스트에서 훅이 부르는 실행 파일을 **심은 그대로** 꺼낸다 — 이름이든
