@@ -5286,3 +5286,8 @@
 {"ts":"2026-09-19T05:04:37Z","id":"moai-j3o3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-19T05:04:37Z","id":"moai-9m2d.qpt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: 11건(eb1f519 — 자리를 dir_path 하나로, open_at, leave_project 가 expanded 비우기, 수식키 이름, Ctrl-w Ctrl-w 등)과 사람이 정한 2건(8e656ad — 층의 l 은 들어가고 멤버 줄의 h 는 부모를 접는다). 넘김: #4 성능 회귀는 멤버 moai-teka(첫 칸), #5 남은 것은 idea moai-sl2d, #14 중복 id 붙들기는 idea moai-rmna, #15 id 없는 merge 커밋(9d2cd46)은 이미 쌓인 기록이라 고치지 않았다 — 끝 병합(a09ab9f)은 id 를 단다"}
 {"ts":"2026-09-19T05:04:46Z","id":"moai-9m2d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 남은 멤버 moai-teka(펼친 목록의 제곱 비용 — Index::of 에서 자리→자식 색인을 짓고 bench 에 펼친 화면을 더한다)가 에픽을 열어 둔다. idea moai-sl2d(검색이 연 묶음 접기)·moai-rmna(중복 id 붙들기)는 에픽 안에 담아 두었다. 새 바이너리는 cargo build --release 뒤에 탐색기에서 l·h·Tab·Ctrl-w 로 확인한다"}
+{"ts":"2026-09-19T05:06:34Z","id":"moai-ql7x","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 헤더 로고의 좌우 여백"}
+{"ts":"2026-09-19T05:06:34Z","id":"moai-ehr7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"로고 왼쪽에 오른쪽과 같은 여백을 둔다"}
+{"ts":"2026-09-19T05:06:34Z","id":"moai-ql7x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xsh4 에서 펼쳤다 — TUI 헤더의 moai 로고가 왼쪽에 붙어 있다 — 좌우 여백을 같게 한다"}
+{"ts":"2026-09-19T05:06:34Z","id":"moai-xsh4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ql7x 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-19T05:06:42Z","id":"moai-ehr7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
