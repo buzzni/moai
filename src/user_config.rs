@@ -402,11 +402,21 @@ impl Doc {
             )));
         }
         let (mut hit, mut changed) = (0, false);
+        let mut kept: Vec<(isize, String)> = Vec::new();
         for t in aot.iter_mut().filter(|t| mine(t)) {
             hit += 1;
-            changed |= put_value(t, COLOR, hue.map(|h| toml_edit::Value::from(h.name())));
+            let mut left = String::new();
+            changed |= put_value(t, COLOR, hue.map(|h| toml_edit::Value::from(h.name())), &mut left);
+            if let (Some(at), false) = (t.position(), left.is_empty()) {
+                kept.push((at, left));
+            }
         }
         self.dirty |= changed;
+        // `color` 가 끝 키였으면 빈 줄로 떨어진 그 위 주석은 표 뒤로 나간다(moai-liij) — `remove` 와 같은 차례로.
+        kept.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+        for (at, text) in kept {
+            self.put_before_next(at, text);
+        }
         Ok(hit)
     }
 
@@ -527,12 +537,9 @@ impl Doc {
         let next = all.into_iter().filter(|p| *p > at).min();
         match next.and_then(|p| header_at(self.doc.as_table_mut(), p)) {
             Some(t) => {
-                let was = t.decor().prefix().and_then(|r| r.as_str()).unwrap_or_default().to_string();
-                // **남긴 글과 그 표 사이에 빈 줄을 지킨다**(moai-gmdu 에픽 리뷰). 빈 줄 하나는 뺀 표와 함께
-                // 빠졌다 — 그 표가 뺀 표에 빈 줄 없이 붙어 있었으면 남긴 글이 그 표의 머리에 붙고, 그 표를
-                // 뺄 때 함께 지워진다. 남긴 까닭이 그것을 안 지우려는 것이었다.
-                let gap = if blank_lines(&was).next() == Some(0) { "" } else { "\n" };
-                t.decor_mut().set_prefix(format!("{text}{gap}{was}"));
+                let was = t.decor().prefix().and_then(|r| r.as_str()).unwrap_or_default();
+                let head = keep_before(&text, was);
+                t.decor_mut().set_prefix(head);
             }
             None => {
                 let was = self.doc.trailing().as_str().unwrap_or_default().to_string();
@@ -674,18 +681,19 @@ impl Doc {
         odd(&[DETAIL], false, &mut detail);
         let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let mut changed = false;
+        let mut left = String::new();
         if hidden {
-            changed |= merge_words(t, HIDDEN, base.hidden.as_deref(), new.hidden.as_deref());
+            changed |= merge_words(t, HIDDEN, base.hidden.as_deref(), new.hidden.as_deref(), &mut left);
         }
         if hide_deferred {
-            changed |= put_value(t, HIDE_DEFERRED, new.hide_deferred.map(toml_edit::Value::from));
+            changed |= put_value(t, HIDE_DEFERRED, new.hide_deferred.map(toml_edit::Value::from), &mut left);
         }
         if sort {
-            changed |= put_value(t, SORT, new.sort.as_deref().map(toml_edit::Value::from));
-            changed |= put_value(t, SORT_REVERSED, new.sort_reversed.map(toml_edit::Value::from));
+            changed |= put_value(t, SORT, new.sort.as_deref().map(toml_edit::Value::from), &mut left);
+            changed |= put_value(t, SORT_REVERSED, new.sort_reversed.map(toml_edit::Value::from), &mut left);
         }
         if fields {
-            changed |= merge_words(t, FIELDS, base.fields.as_deref(), new.fields.as_deref());
+            changed |= merge_words(t, FIELDS, base.fields.as_deref(), new.fields.as_deref(), &mut left);
         }
         // **`fields_known` 은 빼지 않고 더하기만 한다**(moai-6bc0 단계 리뷰) — `base` 를 비워 두는 까닭이다.
         // 이 키는 사람이 고른 것이 아니라 *적는 쪽이 아는 열 전부*라, 여기 있는데 이 바이너리가 모르는
@@ -693,12 +701,17 @@ impl Doc {
         // "몰랐던 열" 로 읽어 사람이 끈 것을 도로 켠다 — 낱말 배열을 합치는 까닭(`남이 더한 낱말은
         // 남는다`)이 여기서는 더 세게 걸린다.
         if known {
-            changed |= merge_words(t, FIELDS_KNOWN, None, new.fields_known.as_deref());
+            changed |= merge_words(t, FIELDS_KNOWN, None, new.fields_known.as_deref(), &mut left);
         }
         if detail {
-            changed |= put_value(t, DETAIL, new.detail.map(toml_edit::Value::from));
+            changed |= put_value(t, DETAIL, new.detail.map(toml_edit::Value::from), &mut left);
         }
         self.dirty |= changed;
+        // 끝 키를 지워 표 밖으로 나갈 주석(moai-liij). 인라인 표(`tui = { … }`)는 그려질 자리를 따로 안 들어
+        // 붙일 곳이 없다 — 그 안의 주석은 TOML 1.1 에서야 서는 모양이라 전처럼 키와 함께 빠진다.
+        if let (false, Some(at)) = (left.is_empty(), self.doc.get(TUI).and_then(Item::as_table).and_then(Table::position)) {
+            self.put_before_next(at, left);
+        }
         Ok(skipped)
     }
 
@@ -766,7 +779,8 @@ impl Doc {
         let t = self.doc.get_mut(READ).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let mut written = Vec::new();
         for (id, when) in marks {
-            if put_value(t, id, Some(toml_edit::Value::from(when.as_str()))) {
+            // 적기만 하고 지우지 않으니 표 밖으로 나갈 글이 없다.
+            if put_value(t, id, Some(toml_edit::Value::from(when.as_str())), &mut String::new()) {
                 written.push(id.clone());
             }
         }
@@ -871,21 +885,26 @@ fn look_one<'a, T>(
 /// 배열이면 **제자리에서** 고친다 — 뺀 낱말(겹쳐 적힌 것까지)을 빼고 더한 낱말을 끝에 더한다. 낱말이
 /// 아닌 원소(새 바이너리의 모양)와 여러 줄로 벌인 모양은 그대로다. 배열이 아니거나 없으면 이 세션이 그
 /// 키를 바꿨으니 `new` 를 새로 적는다.
-fn merge_words(t: &mut dyn toml_edit::TableLike, key: &str, base: Option<&[String]>, new: Option<&[String]>) -> bool {
+fn merge_words(
+    t: &mut dyn toml_edit::TableLike,
+    key: &str,
+    base: Option<&[String]>,
+    new: Option<&[String]>,
+    left: &mut String,
+) -> bool {
     if base == new {
         return false;
     }
     let Some(new) = new else {
-        return t.remove(key).is_some();
+        return drop_key(t, key, left);
     };
     if t.get(key).and_then(Item::as_array).is_none() {
-        return put_value(t, key, Some(new.iter().map(String::as_str).collect::<toml_edit::Array>().into()));
+        return put_value(t, key, Some(new.iter().map(String::as_str).collect::<toml_edit::Array>().into()), left);
     }
     let base = base.unwrap_or_default();
     let words = t.get_mut(key).and_then(Item::as_array_mut).expect("방금 배열인 것을 봤다");
-    let before = words.len();
-    words.retain(|v| !v.as_str().is_some_and(|w| base.iter().any(|b| b == w) && !new.iter().any(|n| n == w)));
-    let mut changed = words.len() != before;
+    let mut changed =
+        drop_elements(words, |v| v.as_str().is_some_and(|w| base.iter().any(|b| b == w) && !new.iter().any(|n| n == w))) > 0;
     for w in new {
         if base.contains(w) || words.iter().any(|v| v.as_str() == Some(w.as_str())) {
             continue;
@@ -905,13 +924,13 @@ fn plain(item: &Item, arrays: bool) -> bool {
 }
 
 /// 값 하나를 적는다(`Doc::merge_look`·`Doc::mark_read`·`Doc::set_hue`). 같은 값이면 안 적고, 바뀐 것이
-/// 있으면 참. `None` 이면 키를 지운다.
+/// 있으면 참. `None` 이면 키를 지운다 — 표 밖으로 내보낼 주석은 `left` 에 쌓는다([`drop_key`]).
 ///
 /// **키는 안 건드리고 값만 바꾼다.** 키 위의 주석은 키의 꾸밈에 붙어 있어 `Table::insert` 로 갈아 끼우면
 /// 지워진다(키 모양을 새로 짓는다). 값 뒤의 주석은 있던 값의 꾸밈에 붙어 있어 옮겨 단다.
-fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::Value>) -> bool {
+fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::Value>, left: &mut String) -> bool {
     let Some(mut v) = v else {
-        return t.remove(key).is_some();
+        return drop_key(t, key, left);
     };
     if !t.contains_key(key) {
         t.insert(key, Item::Value(v));
@@ -933,10 +952,89 @@ fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::V
     true
 }
 
-/// 표 머리 앞의 글 중 **마지막 빈 줄 앞까지**(moai-bx7g) — 그 표에 붙지 않은 주석이다. 빈 줄 하나는 표와 함께
-/// 빠진다. 빈 줄이 없거나 그 앞에 주석이 없으면 `None`. 빈 줄이 무엇인지는 [`blank_lines`] 가 잰다.
+/// 표 머리 앞의 글 중 그 표에 붙지 않은 주석([`detached`], moai-bx7g).
 fn detached_head(t: &Table) -> Option<String> {
-    let prefix = t.decor().prefix()?.as_str()?;
+    detached(t.decor().prefix()?.as_str()?)
+}
+
+/// 남긴 글 `text` 를 다음 것의 머리 `was` 앞에 붙인 새 머리.
+///
+/// **남긴 글과 그 다음 것 사이에 빈 줄을 지킨다**(moai-gmdu 에픽 리뷰). 빈 줄 하나는 뺀 것과 함께
+/// 빠졌다 — 다음 것이 뺀 것에 빈 줄 없이 붙어 있었으면 남긴 글이 그것의 머리에 붙고, 그것을 뺄 때 함께
+/// 지워진다. 남긴 까닭이 그것을 안 지우려는 것이었다.
+fn keep_before(text: &str, was: &str) -> String {
+    let gap = if blank_lines(was).next() == Some(0) { "" } else { "\n" };
+    format!("{text}{gap}{was}")
+}
+
+/// 키 하나를 지운다(`put_value`·`merge_words` 의 `None`). 지웠으면 참.
+///
+/// **키 위의 주석 중 빈 줄로 떨어진 윗부분은 남긴다**(moai-liij) — 표를 뺄 때의 자([`Doc::remove`], moai-bx7g)를
+/// 키에도 댄다. 바로 위에 붙은 주석은 그 키의 것이라 함께 빠지고, 빈 줄 너머의 것은 앞 것의 꼬리나 밑의 것들의
+/// 머리다. 남긴 글은 같은 표의 다음 키 머리 앞에 선다. 다음 키가 없으면 그 글은 표 밖으로 나가야 하는데 표는 제
+/// 끝 글을 안 들어, `left` 에 쌓아 부르는 쪽이 표 다음에 그려지는 것 앞에 붙인다(`Doc::put_before_next`).
+/// 나중에 쌓이는 것일수록 파일에서 앞이라 앞에 붙인다 — 끝 키를 빼면 그 앞 키가 끝 키가 된다.
+///
+/// 다음 키는 낱값 키만 센다 — 하위 표·점 키는 제 머리를 따로 그려 붙일 자리가 아니다.
+fn drop_key(t: &mut dyn toml_edit::TableLike, key: &str, left: &mut String) -> bool {
+    let Some((k, _)) = t.get_key_value(key) else {
+        return false;
+    };
+    let head = k.leaf_decor().prefix().and_then(|r| r.as_str()).and_then(detached);
+    let next = t.iter().skip_while(|(k, _)| *k != key).skip(1).find(|(_, v)| v.is_value()).map(|(k, _)| k.to_string());
+    t.remove(key);
+    let Some(head) = head else { return true };
+    match next.and_then(|n| t.key_mut(&n)) {
+        Some(mut n) => {
+            let was = n.leaf_decor().prefix().and_then(|r| r.as_str()).unwrap_or_default();
+            let head = keep_before(&head, was);
+            n.leaf_decor_mut().set_prefix(head);
+        }
+        None if left.is_empty() => *left = head,
+        None => *left = keep_before(&head, left),
+    }
+    true
+}
+
+/// 배열에서 `gone` 인 원소를 뺀다(`merge_words`). 뺀 수를 낸다.
+///
+/// **원소 위의 주석 중 빈 줄로 떨어진 윗부분은 남긴다**(moai-liij) — [`drop_key`] 와 같은 자다. 원소의 머리는
+/// 앞 원소의 쉼표 바로 뒤에서 시작해, 첫 줄바꿈까지는 앞 줄의 끝이지 빈 줄이 아니다 — 그 뒤만 잰다. 남긴 글은
+/// 다음 원소의 머리에, 끝 원소면 닫는 `]` 앞 글에 선다. 뒤에서부터 빼 여럿이면 파일에 있던 차례대로 선다.
+fn drop_elements(words: &mut toml_edit::Array, gone: impl Fn(&toml_edit::Value) -> bool) -> usize {
+    let split = |p: &str| -> (String, String) {
+        let at = p.find('\n').map_or(0, |i| i + 1);
+        (p[..at].to_string(), p[at..].to_string())
+    };
+    let mut n = 0;
+    for i in (0..words.len()).rev() {
+        let v = words.get(i).expect("차례 안이다");
+        if !gone(v) {
+            continue;
+        }
+        let head = v.decor().prefix().and_then(|r| r.as_str()).and_then(|p| detached(&split(p).1));
+        words.remove(i);
+        n += 1;
+        let Some(head) = head else { continue };
+        match words.get_mut(i) {
+            Some(next) => {
+                let (end, rest) = split(next.decor().prefix().and_then(|r| r.as_str()).unwrap_or_default());
+                next.decor_mut().set_prefix(format!("{end}{}", keep_before(&head, &rest)));
+            }
+            None => {
+                // `]` 바로 앞에는 빈 줄을 안 둔다 — 파일 끝 글에 붙일 때(`Doc::put_before_next`)와 같다.
+                let (end, rest) = split(words.trailing().as_str().unwrap_or_default());
+                let rest = if rest.trim().is_empty() { format!("{head}{rest}") } else { keep_before(&head, &rest) };
+                words.set_trailing(format!("{end}{rest}"));
+            }
+        }
+    }
+    n
+}
+
+/// 머리 글 중 **마지막 빈 줄 앞까지**(moai-bx7g) — 그 다음 것에 붙지 않은 주석이다. 빈 줄 하나는 다음 것과
+/// 함께 빠진다. 빈 줄이 없거나 그 앞에 주석이 없으면 `None`. 빈 줄이 무엇인지는 [`blank_lines`] 가 잰다.
+fn detached(prefix: &str) -> Option<String> {
     let head = &prefix[..blank_lines(prefix).last()?];
     (!head.trim().is_empty()).then(|| head.to_string())
 }
@@ -1691,6 +1789,58 @@ mod tests {
         let mut doc = Doc::parse("[tui]\nsort = \"title\"\n\n# 목록\n\n[[project]]\npath = \"/a\"\n# 파일 끝\n").unwrap();
         assert_eq!(doc.remove(&["/a".into()]).unwrap(), 1);
         assert_eq!(doc.render(), "[tui]\nsort = \"title\"\n\n# 목록\n# 파일 끝\n");
+    }
+
+    /// **키를 지울 때도 빈 줄로 떨어진 위 주석은 남는다**(moai-liij) — 표를 뺄 때의 자(moai-bx7g)와 같다. 바로
+    /// 위에 붙은 주석은 그 키의 것이라 함께 빠진다. 남은 글은 다음 키 앞에, 끝 키였으면 표 다음 것 앞에 선다.
+    #[test]
+    fn dropping_a_key_keeps_the_comment_a_blank_line_away() {
+        let hue = |src: &str| {
+            let mut doc = Doc::parse(src).unwrap();
+            assert_eq!(doc.set_hue(&["/a".into()], None).unwrap(), 1);
+            doc.render()
+        };
+        // gmdu 에픽 리뷰가 본 자리 — 그 주석은 밑의 `name` 의 머리이기도 했다.
+        assert_eq!(
+            hue("[[project]]\npath = \"/a\"\n\n# --- hand tweaks below ---\n\ncolor = \"cyan\"\nname = \"일\"\n"),
+            "[[project]]\npath = \"/a\"\n\n# --- hand tweaks below ---\n\nname = \"일\"\n"
+        );
+        // 끝 키면 표 다음 것 앞에, 파일 끝이면 끝 글 앞에 선다.
+        assert_eq!(
+            hue("[[project]]\npath = \"/a\"\n# 색\n\ncolor = \"cyan\"\n\n[tui]\nsort = \"title\"\n"),
+            "[[project]]\npath = \"/a\"\n# 색\n\n[tui]\nsort = \"title\"\n"
+        );
+        assert_eq!(hue("[[project]]\npath = \"/a\"\n# 색\n\ncolor = \"cyan\"\n# 끝\n"), "[[project]]\npath = \"/a\"\n# 색\n# 끝\n");
+        // 바로 위에 붙은 주석은 그 키의 것이다.
+        assert_eq!(hue("[[project]]\npath = \"/a\"\n\n# 색\ncolor = \"cyan\"\n"), "[[project]]\npath = \"/a\"\n");
+
+        // 보기 키도 같다. 끝 키 둘을 한 번에 지우면 남은 글은 파일에 있던 차례로 선다.
+        let src = "[tui]\n# 위\n\nsort = \"title\"\n# 차례\n\nsort_reversed = true\n# 방향\n\ndetail = false\n\n[x]\n";
+        let base = Look { sort: Some("title".into()), sort_reversed: Some(true), detail: Some(false), ..Look::default() };
+        let mut doc = Doc::parse(src).unwrap();
+        doc.merge_look(&base, &Look { sort: None, sort_reversed: None, detail: None, ..base.clone() }).unwrap();
+        assert_eq!(doc.render(), "[tui]\n# 위\n\n# 차례\n\n# 방향\n\n[x]\n");
+    }
+
+    /// **배열 원소를 뺄 때도 빈 줄로 떨어진 위 주석은 남는다**(moai-liij). 원소의 머리는 앞 쉼표 바로 뒤에서
+    /// 시작해 첫 줄바꿈은 앞 줄의 끝이다 — 빈 줄로 세면 붙은 주석까지 남긴다.
+    #[test]
+    fn dropping_an_element_keeps_the_comment_a_blank_line_away() {
+        let hide = |src: &str, gone: &[&str]| {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let all = ["todo", "done", "review"];
+            let base = Look { hidden: words(&all), ..Look::default() };
+            let kept: Vec<&str> = all.iter().copied().filter(|w| !gone.contains(w)).collect();
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&base, &Look { hidden: words(&kept), ..base.clone() }).unwrap();
+            doc.render()
+        };
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  # 끝난 것\n\n  # 끝\n  \"done\",\n  # 리뷰\n\n  \"review\",\n]\n";
+        assert_eq!(hide(src, &["done"]), "[tui]\nhidden = [\n  \"todo\",\n  # 끝난 것\n\n  # 리뷰\n\n  \"review\",\n]\n");
+        assert_eq!(hide(src, &["review"]), "[tui]\nhidden = [\n  \"todo\",\n  # 끝난 것\n\n  # 끝\n  \"done\",\n  # 리뷰\n]\n");
+        assert_eq!(hide(src, &["done", "review"]), "[tui]\nhidden = [\n  \"todo\",\n  # 끝난 것\n\n  # 리뷰\n]\n");
+        // 한 줄 배열은 그대로 한 줄이다.
+        assert_eq!(hide("[tui]\nhidden = [\"todo\", \"done\", \"review\"]\n", &["done"]), "[tui]\nhidden = [\"todo\", \"review\"]\n");
     }
 
     /// 명령이 받는 낱말과 읽기가 받는 낱말이 같다.
