@@ -1607,6 +1607,12 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         .padding(Padding::horizontal(left_gutter() as u16));
     let inner = block.inner(at);
 
+    // **본문은 그리기 전에 편다**(moai-fauw) — 아래의 [`about`] 은 `&App` 만 빌려 제자리에
+    // 들 수가 없고, 안 펴 두면 프레임마다 같은 본문을 다시 판다(`markdown::parse` + `layout`).
+    // 아픈 쪽은 유휴가 아니라 `j` 를 누르고 있을 때다: 키 반복마다 다시 그리고, 그때마다 다시
+    // 편다. 재 본 값은 release·100x40 에서 본문 4KB 한 프레임 1.5ms, 50KB 11ms 다.
+    fill_body(app, rows, inner.width as usize);
+
     let lines = match app.current_of(rows) {
         // **빈 층은 할 일을 댄다**(moai-r8kl). 등록이 0 인 채 `.moai` 밖에서 띄운 자리다 — "없다"
         // 만 서면 밖에서 부른 실수가 멀쩡한 빈 목록으로 읽힌다.
@@ -2019,7 +2025,13 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         out.push(Line::from(Span::styled("─".repeat(w.min(40)), dim())));
         // 칠은 **그린 줄마다** 찾는다 — 접힌 줄에 걸친 글과 마크다운이 걷은 기호(`**`)에 걸친 글은 안
         // 칠해진다. 원문(`SPC v r`)에서는 기호째 칠한다.
-        out.extend(body_lines(body, w, app.raw).into_iter().map(|l| mark_line(l, in_body)));
+        // 편 줄은 [`fill_body`] 가 그리기 전에 들여 둔 것이다 — 안 맞으면(든 것이 없거나 폭이
+        // 달라졌으면) 여기서 편다. 캐시는 **값일 뿐이라** 없어도 그림이 같다.
+        let laid = match app.body.as_ref().filter(|b| b.fits(&i.id, body, w, app.raw)) {
+            Some(held) => held.lines.clone(),
+            None => body_lines(body, w, app.raw),
+        };
+        out.extend(laid.into_iter().map(|l| mark_line(l, in_body)));
     }
     // **커밋은 CLI 상세와 같은 자리, 본문 뒤다**(moai-a4i0). 무엇을 그릴지는 `view::commit_lines`
     // 가 정한다. 표는 다시 읽기 스레드가 지어 온 것이라 여기서 git 을 부르지 않는다.
@@ -2039,6 +2051,52 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
 fn mark_line(mut line: Line<'static>, q: Option<&str>) -> Line<'static> {
     line.spans = mark(std::mem::take(&mut line.spans), q);
     line
+}
+
+/// 펼쳐 둔 본문 한 벌(moai-fauw). **커서가 선 줄의 것 하나만 든다** — 상세에 서는 본문이
+/// 한 번에 하나라, 목록만큼 들면 큰 본문을 훑은 세션이 그 전부를 쥔 채 남는다.
+///
+/// **정체는 글 그 자체다.** id 와 `updated_at` 으로 가르던 길도 있으나, 같은 줄의 본문이 옆
+/// 세션의 쓰기로 바뀌는 자리가 이 도구의 일상이라 글을 그대로 들고 견준다 — 50KB 를 견주는
+/// 값은 펴는 값의 2000분의 1이다. 폭과 원문 토글(`SPC v r`)도 펴는 값을 바꾸므로 함께 든다.
+pub(super) struct Body {
+    id: String,
+    text: String,
+    w: usize,
+    raw: bool,
+    lines: Vec<Line<'static>>,
+}
+
+impl Body {
+    /// 이 한 벌이 그 줄·그 폭의 것인가.
+    fn fits(&self, id: &str, body: &str, w: usize, raw: bool) -> bool {
+        self.w == w && self.raw == raw && self.id == id && self.text == body
+    }
+}
+
+/// 상세에 설 본문을 **그리기 전에** 펴 둔다([`Body`], moai-fauw). 그리는 쪽([`about`])은 `&App`
+/// 만 빌려 여기서 넣지 않으면 프레임마다 다시 편다.
+///
+/// **`RefCell` 로 숨기지 않는다**(moai-fauw 가 정한 자리) — 다시 펴는 때가 코드에서 보여야
+/// 한다. 커서가 선 줄이 본문 있는 이슈가 아니면 든 것을 **버린다**: 상세에 안 서는 본문을
+/// 쥐고 있을 까닭이 없고, 버려도 다음에 그 줄로 돌아가면 한 프레임에 다시 편다.
+fn fill_body(app: &mut App, rows: &[Row], w: usize) {
+    let seat_at = match app.current_of(rows) {
+        Some(Row::Item(seat, e, _)) => e.at().map(|at| (seat, at)),
+        // `..` 과 프로젝트 머리줄에는 본문이 없다.
+        Some(Row::Up | Row::Project(_)) | None => None,
+    };
+    let raw = app.raw;
+    // **견줄 때는 빌려만 쓴다**(리뷰) — 든 것이 그대로 맞으면 베낄 것이 하나도 없다. 프레임마다
+    // 글을 통째로 베껴 놓고 견주면, 걷으려던 프레임당 일이 큰 본문에서 memcpy 로 도로 선다.
+    let standing = seat_at.and_then(|(seat, at)| app.issue_at(seat, at)).and_then(|i| i.body.as_ref().map(|b| (i, b)));
+    let fresh = match standing {
+        // 든 것이 그 줄·그 글·그 폭의 것이면 그대로 둔다.
+        Some((i, body)) if app.body.as_ref().is_some_and(|held| held.fits(&i.id, body, w, raw)) => return,
+        Some((i, body)) => Some(Body { id: i.id.clone(), text: body.clone(), w, raw, lines: body_lines(body, w, raw) }),
+        None => None,
+    };
+    app.body = fresh;
 }
 
 /// 본문. **줄로 펴는 일은 `markdown` 이 한다** — 글머리·들여쓰기 같은 결정이
@@ -4018,6 +4076,50 @@ pub(super) mod tests {
         let lines = render(&mut a, 80, 12);
         assert!(lines[1].contains("3번째 줄이 깨졌다"), "80칸에서 까닭이 잘렸다 — {:?}", lines[1]);
         assert!(lines.iter().all(|l| crate::text::width(l) <= 80));
+    }
+
+    /// **본문은 한 번 펴서 든다**(moai-fauw) — 프레임마다 다시 파던 자리다(`markdown::parse` +
+    /// `layout`). 든 것은 커서가 선 줄의 것 하나뿐이고, **글·폭·원문 토글 가운데 하나라도**
+    /// 달라지면 다시 편다. 캐시가 값일 뿐이라는 것은 그림이 같다는 것으로 못 박는다.
+    #[test]
+    fn the_detail_body_is_laid_out_once_and_kept() {
+        let mut issues = issues();
+        issues[1].body = Some("**굵게** 한 줄\n\n- 하나\n- 둘\n".into());
+        let mut a = every(issues.clone());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        let first = render(&mut a, 100, 16).join("\n");
+        let held = a.body.as_ref().expect("본문을 안 들었다");
+        assert_eq!((held.id.as_str(), held.raw), (issues[1].id.as_str(), false), "든 것이 그 줄의 것이 아니다");
+        assert!(held.w > 0 && !held.lines.is_empty(), "펴 둔 줄이 없다");
+        let wide = held.w;
+        // 두 번째 프레임은 든 것을 쓴다 — 그림이 같아야 캐시가 값일 뿐이다.
+        assert_eq!(render(&mut a, 100, 16).join("\n"), first, "든 본문으로 그린 화면이 달라졌다");
+
+        // **폭이 달라지면 다시 편다** — 같은 줄을 든 채 좁은 창에 옛 폭의 줄을 그리면 접힘이 어긋난다.
+        let narrow = render(&mut a, 60, 16).join("\n");
+        assert!(a.body.as_ref().expect("좁혀도 본문은 든다").w < wide, "좁혔는데 옛 폭으로 든 채다");
+        assert_ne!(narrow, first, "폭을 바꿨는데 그림이 그대로다");
+        assert_eq!(render(&mut a, 100, 16).join("\n"), first, "폭을 되돌렸는데 그림이 안 돌아왔다");
+
+        // **글이 바뀌면 다시 편다** — 옆 세션의 쓰기가 같은 줄의 본문을 갈아 끼우는 자리다.
+        let mut edited = issues.clone();
+        edited[1].body = Some("고친 본문 한 줄\n".into());
+        a.adopt(edited);
+        let after = render(&mut a, 100, 16).join("\n");
+        assert!(after.contains("고친 본문 한 줄") && !after.contains("굵게"), "옛 본문이 그대로 섰다\n{after}");
+
+        // **원문 토글도 편 값을 바꾼다.**
+        a.hit("SPC v r");
+        let raw = render(&mut a, 100, 16).join("\n");
+        assert!(a.body.as_ref().is_some_and(|b| b.raw), "원문으로 안 들었다");
+        assert_ne!(raw, after, "원문 토글이 그림을 안 바꿨다");
+
+        // **본문 없는 줄로 옮기면 버린다** — 상세에 안 서는 글을 쥐고 있을 까닭이 없다.
+        a.hit("SPC v r");
+        a.hit("k");
+        render(&mut a, 100, 16);
+        assert!(a.body.is_none(), "본문 없는 줄에 섰는데 옛 본문을 들고 있다");
     }
 
     /// 경로 줄이 **언제 읽은 화면인지** 댄다. 저절로 다시 읽으므로 배너는 없고,
