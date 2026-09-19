@@ -336,9 +336,22 @@ pub type Commits = std::collections::BTreeMap<
     std::collections::BTreeMap<String, Vec<crate::git::Commit>>,
 >;
 
-/// 커밋 표를 지을 뿌리 — 이 프로젝트와, 줄을 보태 온 옆 워크트리.
+/// 커밋 표를 지을 뿌리 — 이 세션이 **선 체크아웃**과, 줄을 보태 온 옆 워크트리.
+///
+/// **트래커의 자리가 아니라 `Repo::here` 다**(moai-y7go, 리뷰 moai-71ht.jlh) — 트래커는 루트로
+/// 옮겨 가지만 `git log` 가 묻는 `HEAD` 는 이 체크아웃의 것이다. 루트로 물으면 이 가지에서 방금
+/// 한 일이 루트의 `HEAD` 에서 안 보여, 표가 "아무도 안 고쳤다" 로 빈다.
 fn commit_roots(repo: &Repo, origin: &crate::worktree::Origin) -> Vec<std::path::PathBuf> {
-    std::iter::once(repo.root.as_path()).chain(origin.roots()).map(std::path::Path::to_path_buf).collect()
+    // **같은 뿌리를 두 번 담지 않는다** — 선 체크아웃이 옆에서 줄을 보태 온 자리이기도 하면(제
+    // 스냅샷에만 있는 줄) `git log` 를 두 번 띄우고 표는 하나만 남는다. `repo.root` 로 담던 때는
+    // `others_of` 의 가름이 그것을 막아 줬다.
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    for root in std::iter::once(repo.here()).chain(origin.roots()) {
+        if !out.iter().any(|p| p == root) {
+            out.push(root.to_path_buf());
+        }
+    }
+    out
 }
 
 /// 뿌리마다 [`crate::git::table`] 을 짓는다. **어느 스레드에서 불러도 같다.**
@@ -369,7 +382,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     // 워크트리의 있고 없음과 스냅샷을 읽는데, 겹쳐 보지 않을 때의 `watched` 에는 그것이 하나도
     // 안 들어 — 워크트리를 `rm -rf` 로 치워도 `App::follow` 가 다시 안 읽고 배너만 옛 수로 선다.
     // 층이 제 줄을 재는 자와 같다(`layer::marks_of`). **읽기 전에** 잰다(위와 같은 까닭).
-    let places = crate::worktree::place_marks(&repo.root);
+    let places = crate::worktree::place_marks(repo.here());
     let g = crate::worktree::gather(repo, worktree)?;
     // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
     let unreadable: Vec<Option<String>> = g
@@ -441,7 +454,11 @@ pub fn watch(watched: &mut Vec<(std::path::PathBuf, Stamp)>, more: Vec<(std::pat
 /// 에 이미 댔다(`moai status` 의 `swept` 와 같은 자). 안 대면 판정이 가려진 0 이 "없다" 로 읽히고,
 /// 층은 같은 저장소에 `!` 를 세운다(리뷰 moai-3lul.kt0 다시 본 판, 사용자 결정 moai-rgz9.7vt).
 fn placed(repo: &Repo, issues: &[Issue], overlaid: bool, now: &str) -> (usize, Vec<String>) {
-    let (lost, unread) = crate::worktree::stranded_at(&repo.root, &repo.config, issues, overlaid, now);
+    // **자리는 세션이 선 체크아웃에서 잰다**(`repo.here()`, 리뷰 moai-71ht 셋째 판) — 지켜볼 것을
+    // 재는 자(`place_marks(repo.here())`)와 같은 뿌리여야 한다. 트래커의 자리로 재던 판은 딸린
+    // 워크트리 안에서 자리를 파면서 그 자리들을 하나도 안 지켜봐, 옆 워크트리를 치워도 배너가
+    // 옛 수로 섰다(moai-al0x 가 고친 자리다).
+    let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, issues, overlaid, now);
     let said = match overlaid {
         true => Vec::new(),
         false => unread
@@ -2830,7 +2847,7 @@ impl App {
     /// 그 줄에 닿은 커밋. **줄이 온 워크트리의 가지에서 읽는다** — `show` 와 같은 까닭이다:
     /// `--worktree` 로 옆에서 집은 일을 고친 커밋은 저쪽 가지에만 있다. 표가 없으면 빈 것이다.
     pub fn commits_of(&self, id: &str) -> &[crate::git::Commit] {
-        let root = self.origin.root(id).or(self.repo.as_ref().map(|r| r.root.as_path()));
+        let root = self.origin.root(id).or(self.repo.as_ref().map(|r| r.here()));
         root.and_then(|r| self.commits.get(r)).and_then(|t| t.get(id)).map_or(&[], Vec::as_slice)
     }
 
@@ -4662,7 +4679,7 @@ mod tests {
     fn a_file_that_appears_later_is_still_noticed() {
         let scratch = scratch("appear");
         let dir = scratch.path().to_path_buf();
-        let repo = Repo { root: dir.clone(), config: cfg() };
+        let repo = Repo::at(dir.clone(), cfg());
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         assert!(stamp.is_none() && load.issues.is_empty(), "판이 다르다");
@@ -4840,7 +4857,7 @@ mod tests {
         let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
         std::fs::write(dir.join(".moai/issues.jsonl"), line(&make("argos-0001", Kind::Epic))).unwrap();
 
-        let repo = Repo { root: dir.clone(), config: cfg() };
+        let repo = Repo::at(dir.clone(), cfg());
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         let (index, ground) = measure(&load.issues, &repo.config);
@@ -4883,7 +4900,7 @@ mod tests {
         crate::git::tests::run_git(&dir, None, &["init", "-q"]);
         git("feat: 처음 (argos-0001)");
 
-        let repo = Repo { root: dir.clone(), config: cfg() };
+        let repo = Repo::at(dir.clone(), cfg());
         // 탐색기가 여는 그대로 — 겹쳐 본 채로 연다(`cmd::tui::run`).
         let g = crate::worktree::gather(&repo, true).unwrap();
         let stamp = stamp_of(&repo);
@@ -5015,7 +5032,7 @@ mod tests {
         let scratch = scratch("watched");
         let dir = scratch.path().to_path_buf();
         std::fs::write(dir.join(".moai/issues.jsonl"), "").unwrap();
-        let repo = Repo { root: dir.clone(), config: cfg() };
+        let repo = Repo::at(dir.clone(), cfg());
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         let (index, ground) = measure(&load.issues, &repo.config);
@@ -5040,7 +5057,7 @@ mod tests {
         let scratch = scratch("inflight");
         let dir = scratch.path().to_path_buf();
         std::fs::write(dir.join(".moai/issues.jsonl"), "").unwrap();
-        let repo = Repo { root: dir.clone(), config: cfg() };
+        let repo = Repo::at(dir.clone(), cfg());
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         let (index, ground) = measure(&load.issues, &repo.config);
@@ -5061,7 +5078,7 @@ mod tests {
         let (mine_dir, mut a) = writable("receive-mine");
         let (theirs, _) = writable("receive-theirs");
         touch_outside(&theirs);
-        let other = Repo { root: theirs.path().to_path_buf(), config: cfg() };
+        let other = Repo::at(theirs.path().to_path_buf(), cfg());
         a.receive(prepare(&other, false));
         assert_eq!(shown(&a), ["argos-0001"], "남의 프로젝트에서 지은 줄을 들였다");
         assert!(a.trouble.is_none());
@@ -5260,7 +5277,7 @@ mod tests {
             format!("{}\n", serde_json::to_string(&make("argos-0001", Kind::Epic)).unwrap()),
         )
         .unwrap();
-        let repo = Repo { root: dir, config: cfg() };
+        let repo = Repo::at(dir, cfg());
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         let (index, ground) = measure(&load.issues, &repo.config);

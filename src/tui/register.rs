@@ -658,7 +658,7 @@ mod tests {
             .collect();
         std::fs::write(here.join(".moai/issues.jsonl"), lines).unwrap();
         let other = s.dir("work/other");
-        let repo = Repo { root: here.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
+        let repo = Repo::at(here.clone(), crate::config::Config::parse("prefix = \"argos\"\n").unwrap());
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         let (index, ground) = crate::tui::measure(&load.issues, &repo.config);

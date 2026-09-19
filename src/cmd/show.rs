@@ -277,8 +277,9 @@ struct Listed<'a> {
     work: &'a [model::Work],
 }
 
-/// 줄이 온 워크트리의 moai 뿌리 — **이력(저널)도 커밋도 거기서 읽는다**(`Origin::root`). 스냅샷은
+/// 줄이 온 워크트리의 moai 뿌리 — **이력(저널)을 거기서 읽는다**(`Origin::root`). 스냅샷은
 /// 옆에서 온 줄을 내는데 이력만 이쪽에서 읽으면 저쪽에서 옮긴 칸·적은 `model:` 줄이 빈다.
+/// 커밋은 [`commit_home`] 이 따로 고른다 — 저널은 트래커 곁에 살고 `HEAD` 는 체크아웃의 것이다.
 ///
 /// 하나를 펼칠 때([`one`])와 목록([`work_by_id`])이 **이 한 자로** 고른다 — 따로 적던 때는 한쪽만
 /// 이쪽 뿌리로 돌려도 아무 시험도 안 붉어졌다(리뷰 moai-u5bk.3wq).
@@ -286,9 +287,22 @@ fn home<'a>(repo: &'a Repo, origin: &'a crate::worktree::Origin, id: &str) -> &'
     origin.root(id).unwrap_or(&repo.root)
 }
 
+/// 그 줄의 **커밋**을 물을 체크아웃. 저널과 갈린다(moai-y7go, 리뷰 moai-71ht.jlh) — 겹쳐 온 줄은
+/// 저쪽 워크트리의 것이지만, 이 트래커의 줄은 저널이 루트에 있어도 `git log` 가 물을 `HEAD` 는
+/// **이 세션이 선 체크아웃**의 것이다. `repo.root` 로 묻던 판은 워크트리 안에서 방금 한 커밋이
+/// 루트의 `HEAD` 에 없어 `commits` 를 빈 배열로 냈다 — `commits_error` 없이 비는 것은 AGENTS.md
+/// 가 "그 id 를 적은 커밋이 없다" 로 못박은 값이라, 있는 일을 없다고 말한 셈이다.
+///
+/// **반대쪽 눈가림은 [`crate::git::table`] 이 막는다**(리뷰 moai-71ht 셋째 판) — 그쪽이 `HEAD` 와
+/// 주 체크아웃의 `HEAD` 를 함께 걸어, 갈라진 뒤 본 가지에 합쳐진 커밋도 이 자리에서 보인다. 여기서
+/// 고르는 것은 **어느 체크아웃에게 묻는가** 하나다.
+fn commit_home<'a>(repo: &'a Repo, origin: &'a crate::worktree::Origin, id: &str) -> &'a std::path::Path {
+    origin.root(id).unwrap_or_else(|| repo.here())
+}
+
 /// 그 뿌리의 저널을 읽을 저장소. 설정은 이쪽 것을 빌린다 — 저널을 읽는 데는 안 쓴다.
 fn at_home(repo: &Repo, root: &std::path::Path) -> Repo {
-    Repo { root: root.to_path_buf(), config: repo.config.clone() }
+    Repo::at(root.to_path_buf(), repo.config.clone())
 }
 
 /// 낼 줄들의 `work` — **저널을 뿌리마다 한 번** 읽고, 그 가운데 `model:` 줄을 들 수 있는 줄만
@@ -383,7 +397,11 @@ fn one(
     // `EnterWorktree` 에 옮길 수 있다. `status` 의 못 읽은 워크트리와 같은 자다 — 부르는 쪽마다
     // 따로 재던 때는 빈 경로를 다루는 법이 갈렸다.
     let trees: Vec<report::Workplace> = if report::placeable(all, &repo.config, issue) {
-        crate::worktree::workplaces(&repo.root, &repo.config, worktree, all)
+        // **자리는 세션이 선 체크아웃에서 잰다**(리뷰 moai-71ht.jlh 사용자 결정) — 트래커는 루트로
+        // 옮겨 가지만(`Repo::find_from`) "여기가 어디냐" 는 여전히 이 체크아웃이다. 루트로 재던 판은
+        // 워크트리 안에서도 자리를 파고 제 워크트리를 옆으로 세어, 겹쳐 보지 않을 때는 안 판다는
+        // 결정(moai-6opu)이 조용히 꺼졌다.
+        crate::worktree::workplaces(repo.here(), &repo.config, worktree, all)
     } else {
         Vec::new()
     };
@@ -407,7 +425,7 @@ fn one(
     // 끊던 때는 날짜가 거꾸로 선 커밋 하나가 그 밑을 통째로 가려, 같은 물음에 두 표면이 다른 답을 냈다.
     // **기계에게는 그 침묵을 가른다**(moai-rzsv) — `--json` 은 `commits` 를 늘 내고, git 을 못 읽었을
     // 때만 `commits_error` 를 단다. 사람 화면은 그대로다.
-    let root = home(repo, origin, &issue.id);
+    let root = commit_home(repo, origin, &issue.id);
     let (commits, commits_error) = match crate::git::table(root, &[issue.id.as_str()]) {
         Ok(mut by_id) => (by_id.remove(&issue.id).unwrap_or_default(), None),
         Err(e) => (Vec::new(), Some(e.told(root))),

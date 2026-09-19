@@ -427,7 +427,12 @@ pub fn table(root: &Path, ids: &[&str]) -> Result<BTreeMap<String, Vec<Commit>>,
     // 맞고 답이 빈 것이다. 저장소 밖은 그대로 실패다(`--ignore-missing` 은 리비전만 봐준다).
     stream_log(
         root,
-        &["log", "--ignore-missing", "-z", "--no-show-signature", format.as_str(), "HEAD", "--"],
+        // **주 체크아웃의 `HEAD` 도 함께 걷는다**(moai-y7go, 리뷰 moai-71ht 셋째 판). 딸린 워크트리
+        // 세션은 루트의 트래커를 읽으므로 화면에 선 줄은 대개 본 가지의 것인데, 제 `HEAD` 만 물으면
+        // 갈라진 뒤 본 가지에 합쳐진 커밋이 통째로 안 보인다 — `commits` 가 빈 배열로 나가고,
+        // AGENTS.md 는 그것을 "그 id 를 적은 커밋이 없다" 로 못박았다. 주 워크트리에서 물으면 같은
+        // 커밋이라 걷기가 안 늘고, 맨 저장소·옛 git 에서 못 푸는 이름은 `--ignore-missing` 이 넘긴다.
+        &["log", "--ignore-missing", "-z", "--no-show-signature", format.as_str(), "HEAD", "main-worktree/HEAD", "--"],
         |hash, subject, body| {
             for id in named_in(subject, body, &known) {
                 out.entry(id.to_string()).or_default().push(commit_of(hash, subject));

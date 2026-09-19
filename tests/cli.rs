@@ -90,6 +90,8 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env_remove("MOAI_ACTOR")
         .env_remove("MOAI_NOW")
+        // 일부러 갈라 놓는 시험만 이것을 켠다([`ok_here`]) — 새면 워크트리의 쓰기가 루트로 안 간다.
+        .env_remove("MOAI_HERE")
         .env_remove("COLUMNS")
         // 사용자 설정은 **없는 파일**을 가리킨다. 등록한 프로젝트가 새면 `.moai`
         // 밖에서 부르는 시험이 돌리는 사람의 프로젝트를 본다. `XDG_CONFIG_HOME` 도
@@ -7502,9 +7504,10 @@ fn the_hook_leaves_what_a_named_worktree_holds_to_that_worktree() {
     let inside = main.join(&dir);
     let input = format!("{{\"session_id\":\"s3\",\"cwd\":{}}}", json_str(&inside.display().to_string()));
     let own = String::from_utf8(hook_in(&s, &inside, "stop", &input).stdout).unwrap();
-    // 내미는 줄은 main 의 트래커를 겨눈다(moai-gyqh).
-    let root = std::fs::canonicalize(&main).unwrap().display().to_string();
-    assert!(own.contains(&format!("moai -C {root} mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
+    // **맨 `moai` 로 낸다**(moai-y7go) — 워크트리에서 친 트래커 쓰기는 도구가 루트로 옮기므로
+    // 겨눌 것이 없다. `-C <루트>` 를 붙이던 것은 그 옮김이 없던 때의 일이다(moai-gyqh).
+    assert!(own.contains(&format!("moai mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
+    assert!(!own.contains("-C "), "이제 겨눌 것이 없는데 -C 를 붙인다\n{own}");
 }
 
 /// **제 이름 워크트리가 옆 에픽 워크트리를 이긴다**(moai-m62u·moai-cle9, 사용자 결정). 에픽
@@ -7797,6 +7800,356 @@ fn picked_in_a_worktree(s: &Scratch) -> (PathBuf, PathBuf, String) {
     (main, inside, id)
 }
 
+/// **딸린 워크트리 안에서 쓴 것은 루트의 트래커로 간다**(moai-y7go, 2026-09-19 사용자 결정).
+/// 워크트리의 `.moai` 를 고치면 병합에서 스냅샷이 충돌하고, 푸는 길이 도구 밖에만 남는다. 규약으로만
+/// 서 있던 그 줄을 도구가 스스로 지킨다 — 막지 않고 옮긴다. 읽기도 같이 옮겨 간다: 쓰기만 옮기면
+/// 명령이 갈라질 때의 낡은 줄로 id 를 풀고 지금 줄에 쓴다.
+#[test]
+fn a_write_inside_a_worktree_lands_at_the_root() {
+    let s = Scratch::new("wtredirect");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "루트의 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/feat", "-b", "feat"]);
+    let inside = main.join(".claude/worktrees/feat");
+    // 갈라진 **뒤** 루트에 선 줄 — 워크트리의 스냅샷은 이것을 모른다.
+    let later = field(&ok(&main, &["add", "갈라진 뒤의 일", "--json"]), "id");
+    assert!(!issues(&inside).contains(&format!("\"id\":\"{later}\"")), "워크트리가 벌써 안다 — 이 시험이 견줄 것이 없다");
+
+    // 쓰기는 루트로 간다. 어디에 썼는지 stderr 한 줄로 알린다.
+    let out = staged(&["mv", id.as_str(), "in_progress"]).current_dir(&inside).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains("루트의 트래커에 썼다"), "어디에 썼는지 안 알린다 — {said}");
+    assert!(issues(&main).contains(&format!("\"id\":\"{id}\",\"title\":\"루트의 일\",\"status\":\"in_progress\"")), "루트가 안 바뀌었다");
+    assert!(issues(&inside).contains("\"status\":\"todo\""), "워크트리의 스냅샷을 고쳤다");
+
+    // **안 쓴 명령은 썼다고 하지 않는다**(리뷰 moai-71ht.jlh) — 쓰기 **전에** 알리던 판은 `--from`
+    // 에 진 집기도 "루트의 트래커에 썼다" 를 먼저 내고 그 다음 줄에서 졌다고 했다.
+    let lost = staged(&["mv", id.as_str(), "review", "--from", "todo"]).current_dir(&inside).output().unwrap();
+    assert!(!lost.status.success(), "낡은 칸으로 옮겼다");
+    let said = String::from_utf8_lossy(&lost.stderr).to_string();
+    assert!(!said.contains("트래커에 썼다"), "아무것도 안 썼는데 썼다고 한다 — {said}");
+
+    // 읽기도 루트의 것이다 — 갈라진 뒤에 선 줄을 워크트리 안에서 본다.
+    assert!(ok(&inside, &["show", &later]).contains("갈라진 뒤의 일"), "워크트리가 낡은 스냅샷을 읽는다");
+    // 그래서 갈라진 뒤에 선 줄도 그 자리에서 고칠 수 있다.
+    ok(&inside, &["note", &later, "워크트리에서 남긴 메모"]);
+    assert!(ok(&main, &["show", &later]).contains("워크트리에서 남긴 메모"), "루트의 저널에 안 남았다");
+
+    // `MOAI_HERE` 는 그 자리에 쓴다 — 옆 스냅샷을 일부러 갈라 놓는 손잡이다.
+    let mine = field(&ok_here(&inside, &["add", "이 워크트리의 일", "--json"]), "id");
+    assert!(issues(&inside).contains(&format!("\"id\":\"{mine}\"")), "손잡이를 줬는데 옮겼다");
+    assert!(!issues(&main).contains(&format!("\"id\":\"{mine}\"")), "손잡이를 줬는데 루트에 썼다");
+    // **끄는 값은 끈다**(리뷰 moai-71ht.jlh) — 글이 `=1` 이라 사람은 이것을 참·거짓으로 읽는다.
+    // 있기만 하면 켜던 판은 `MOAI_HERE=0` 을 켬으로 읽어, 끄려던 쪽에 갈라진 스냅샷을 줬다.
+    let off = ok_env(&inside, NOW, &[("MOAI_HERE", "0")], &["add", "꺼진 손잡이", "--json"]);
+    let off = field(&off, "id");
+    assert!(issues(&main).contains(&format!("\"id\":\"{off}\"")), "MOAI_HERE=0 을 켬으로 읽었다");
+
+    // 옮길 곳이 없으면 그 자리다 — 주 체크아웃에 트래커가 없는 워크트리.
+    let _ = worktree_whose_main_has_no_tracker(&s);
+}
+
+/// **주 체크아웃에 트래커가 없는 워크트리** — 그 가지에서 처음 `init` 한 자리다. 옮길 곳이
+/// 없으므로 트래커 쓰기가 그 자리에 남는 유일한 갈래고, 두 시험이 그것을 본다. `(main, 워크트리)`.
+///
+/// **한 자로 짓는다** — 베껴 두면 `tracker_root` 의 이 갈래가 바뀔 때 한쪽만 고쳐지고, 남은 쪽은
+/// 낡은 약속을 초록으로 지킨다(리뷰 moai-71ht.jlh). `git` 넷과 `moai` 둘을 아끼는 값도 있다.
+fn worktree_whose_main_has_no_tracker(s: &Scratch) -> (PathBuf, PathBuf) {
+    let bare = s.path().join("bare");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q"]);
+    git(&bare, &["commit", "-q", "--allow-empty", "-m", "처음"]);
+    git(&bare, &["worktree", "add", "-q", "../bare-feat", "-b", "feat"]);
+    let branch = s.path().join("bare-feat");
+    ok(&branch, &["init", "argos"]);
+    let here = add(&branch, &["이 가지의 일"]);
+    assert!(issues(&branch).contains(&format!("\"id\":\"{here}\"")), "옮길 곳이 없는데 옮겼다");
+    assert!(!bare.join(".moai").exists(), "트래커 없는 main 에 .moai 를 만들었다");
+    (bare, branch)
+}
+
+/// **커밋은 세션이 선 체크아웃의 `HEAD` 에서 읽는다**(리뷰 moai-71ht.jlh). 트래커는 루트로 옮겨
+/// 가지만(moai-y7go) `git log` 가 물을 가지는 이 워크트리의 것이다 — 트래커의 자리로 묻던 판은
+/// 워크트리 안에서 방금 한 커밋이 루트의 `HEAD` 에 없어 `commits` 를 빈 배열로 냈다. AGENTS.md 가
+/// 빈 배열을 "그 id 를 적은 커밋이 없다" 로 못박았으니, 그것은 있는 일을 없다고 말한 것이다.
+#[test]
+fn a_worktree_session_sees_the_commits_on_its_own_branch() {
+    let s = Scratch::new("wtcommits");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "고칠 것", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git_at(&main, LATER, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/feat", "-b", "feat"]);
+    let inside = main.join(".claude/worktrees/feat");
+    // 그 가지에만 있는 커밋 — 루트의 HEAD 는 이것을 모른다.
+    git_at(&inside, LATER, &["commit", "-q", "--allow-empty", "-m", &format!("feat: 고친다 ({id})")]);
+
+    let json = ok(&inside, &["show", &id, "--json"]);
+    assert!(json.contains(&format!("feat: 고친다 ({id})")), "이 가지의 커밋을 못 봤다\n{json}");
+    assert!(!json.contains("commits_error"), "못 읽은 것이 아니라 안 본 것이다\n{json}");
+    // 루트에서 물으면 여전히 없다 — 그 가지를 안 받았다. 빈 것이 사실인 자리다.
+    assert!(ok(&main, &["show", &id, "--json"]).contains(r#""commits":[]"#), "루트가 옆 가지의 커밋을 봤다");
+
+    // **갈라진 뒤 본 가지에 떨어진 커밋도 본다**(리뷰 moai-71ht 셋째 판) — 줄은 루트의 트래커에서
+    // 오는데 제 `HEAD` 하나만 묻던 판은 그것을 못 봐 `commits` 를 빈 배열로 냈다. 빈 배열은
+    // AGENTS.md 가 "그 id 를 적은 커밋이 없다" 로 못박은 값이라, 두 가지 중 어느 쪽을 잃든 거짓말이다.
+    git_at(&main, LATER, &["commit", "-q", "--allow-empty", "-m", &format!("fix: 루트에서 고친다 ({id})")]);
+    let json = ok(&inside, &["show", &id, "--json"]);
+    assert!(json.contains(&format!("fix: 루트에서 고친다 ({id})")), "본 가지의 커밋을 못 봤다\n{json}");
+    assert!(json.contains(&format!("feat: 고친다 ({id})")), "제 가지의 커밋을 잃었다\n{json}");
+}
+
+/// **루트의 설정이 깨진 것은 조용히 워크트리로 돌아가지 않는다**(리뷰 moai-71ht.jlh). 삼키고
+/// 물러나던 판은 루트의 `config.toml` 에 충돌 표시 하나가 박히는 순간 저장소의 모든 워크트리가
+/// 말없이 제 스냅샷에 쓰기 시작해, 이 기능이 막으려던 갈라짐을 아무 말 없이 지었다.
+#[test]
+fn a_broken_root_config_is_told_not_swallowed() {
+    let s = Scratch::new("wtbadcfg");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/feat", "-b", "feat"]);
+    let inside = main.join(".claude/worktrees/feat");
+    std::fs::write(main.join(".moai/config.toml"), "<<<<<<< HEAD\nprefix = \"argos\"\n").unwrap();
+
+    let before = issues(&inside);
+    let out = staged(&["add", "이 줄은 어디로 가나"]).current_dir(&inside).output().unwrap();
+    assert!(!out.status.success(), "깨진 루트 설정을 지나쳤다\n{}", text(&out));
+    assert_eq!(issues(&inside), before, "말없이 워크트리의 스냅샷에 썼다");
+}
+
+/// **루트의 설정이 깨져도 훅은 선다**(리뷰 moai-71ht.i1u). 트래커가 루트로 옮겨 가면서(moai-y7go)
+/// 루트의 `config.toml` 한 줄이 저장소의 모든 워크트리에서 규칙을 통째로 껐다 — `moai` 자신은
+/// 그 자리에서 크게 실패하는 것이 맞지만(사람이 본다), 훅은 이 자리의 트래커로 서서 말을 잇는다.
+#[test]
+fn a_broken_root_config_does_not_switch_the_rules_off() {
+    let s = Scratch::new("hookbrokenroot");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "여기 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/feat", "-b", "feat"]);
+    let inside = main.join(".claude/worktrees/feat");
+    std::fs::create_dir_all(inside.join("src")).unwrap();
+
+    let edit = || {
+        let body = format!("{{\"file_path\":{}}}", json_str(&inside.join("src/x.rs").display().to_string()));
+        tool_at(&s, &inside, "Edit", &body)
+    };
+    assert!(refusal(&edit()).contains(&id), "멀쩡할 때도 안 막는다");
+
+    // 루트의 설정을 깨뜨린다 — 병합 자국 한 줄이면 된다.
+    let cfg = main.join(".moai/config.toml");
+    let was = std::fs::read_to_string(&cfg).unwrap();
+    std::fs::write(&cfg, format!("<<<<<<< HEAD\n{was}")).unwrap();
+    // `moai` 는 그 자리에서 크게 실패한다 — 그것이 맞다.
+    let out = staged(&["status"]).current_dir(&inside).output().unwrap();
+    assert!(!out.status.success(), "깨진 설정을 조용히 지나갔다\n{}", text(&out));
+    // 훅은 여전히 선다 — 이 자리의 스냅샷으로.
+    assert!(refusal(&edit()).contains(&id), "루트의 설정 하나로 워크트리의 규칙이 꺼졌다");
+    std::fs::write(&cfg, &was).unwrap();
+}
+
+/// **이름이 id 가 아닌 워크트리도 제가 집은 일을 쥔다**(moai-y7go, 2026-09-19 사용자 결정).
+/// 쓰기가 루트로 옮겨 가면서 그 워크트리의 스냅샷이 안 움직이니, 집은 줄을 git 관리 디렉터리에
+/// 적어 자리 셈이 그것을 읽는다. 안 적던 판은 에이전트 격리 워크트리가 방금 집어 도는 일을
+/// `자리 없다`(stranded)로 댔다. 놓으면 표식도 같이 지운다.
+#[test]
+fn a_nameless_worktree_still_holds_what_it_picked() {
+    let s = Scratch::new("wtheld");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "에이전트가 할 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-a04acfb3", "-b", "worktree-agent-a04acfb3"]);
+    let inside = main.join(".claude/worktrees/agent-a04acfb3");
+
+    // 한 시간 규칙에 걸리지 않게 **한참 지난 시계로** 집는다 — 표식은 뜬 때와 안 견준다.
+    ok_at(&inside, LATER, &["mv", &id, "in_progress"]);
+    let admin = main.join(".git/worktrees/agent-a04acfb3/moai-held");
+    assert_eq!(std::fs::read_to_string(&admin).unwrap(), format!("{id}\n"), "집은 표식을 안 적었다");
+
+    let shown = ok_at(&main, LATER, &["show", &id, "--json"]);
+    assert!(shown.contains(r#""place":"at""#), "제가 집은 일을 자리 없다고 한다\n{shown}");
+    assert!(shown.contains("agent-a04acfb3"), "어느 워크트리인지 안 댄다\n{shown}");
+    let board = ok_at(&main, LATER, &["status", "--json"]);
+    assert!(!board.contains("\"stranded\""), "산 일을 자리 없음 경고로 센다\n{board}");
+
+    // **워크트리 안에서는 겹쳐 볼 때만 잰다**(moai-6opu) — 트래커가 루트로 옮겨 가도 그대로다.
+    let here = ok_at(&inside, LATER, &["show", &id, "--json"]);
+    assert!(!here.contains("\"place\""), "겹쳐 보지도 않는데 자리를 팠다\n{here}");
+    let both = ok_at(&inside, LATER, &["show", &id, "--json", "--worktree"]);
+    assert!(both.contains(r#""place":"at""#), "겹쳐 봐도 자리를 못 댄다\n{both}");
+
+    // 놓으면 표식이 빈다 — 없는 자리를 영영 대지 않는다.
+    ok_at(&inside, LATER, &["mv", &id, "todo"]);
+    assert_eq!(std::fs::read_to_string(&admin).unwrap(), "", "놓은 줄이 표식에 남았다");
+    let shown = ok_at(&main, LATER, &["show", &id, "--json"]);
+    assert!(!shown.contains("\"place\""), "안 집은 줄에 자리를 댄다\n{shown}");
+}
+
+/// **표식은 친 자리가 집은 것이고, 어디서 놓든 지운다**(리뷰 moai-71ht 셋째 판). 트래커를 **찾은**
+/// 길로 적던 판은 셋을 어겼다.
+///
+/// 1. 규약이 권하는 `moai -C <루트> mv <id> in_progress` 를 워크트리에서 치면 옮긴 것이 없어
+///    집기가 통째로 빠졌다 — 산 일이 `자리 없다`(stranded)로 섰다
+/// 2. 루트에서 닫거나 놓은 줄이 옛 워크트리의 표식에 남아, 그 줄을 다시 집는 순간 아무도 일하지
+///    않는 자리가 "여기서 돈다" 로 서고 `stranded` 는 영영 안 섰다
+/// 3. 옆 워크트리가 넘겨받아 옮긴 줄은 새 자리에 안 서고 옛 자리에 남았다
+#[test]
+fn a_held_mark_follows_where_the_pick_was_typed_and_every_release() {
+    let s = Scratch::new("wtheld2");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let x = field(&ok(&main, &["add", "넘겨받을 일", "--json"]), "id");
+    let y = field(&ok(&main, &["add", "-C 로 집을 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    for name in ["agent-a", "agent-b"] {
+        git(&main, &["worktree", "add", "-q", &format!(".claude/worktrees/{name}"), "-b", &format!("worktree-{name}")]);
+    }
+    let (a, b) = (main.join(".claude/worktrees/agent-a"), main.join(".claude/worktrees/agent-b"));
+    // **차례로 견주지 않는다** — 표식은 id 차례로 서고 id 는 뽑을 때마다 달라, 둘을 손으로 이어
+    // 적으면 뽑기에 따라 붉어진다.
+    let mark = |name: &str| -> Vec<String> {
+        let text = std::fs::read_to_string(main.join(format!(".git/worktrees/{name}/moai-held"))).unwrap_or_default();
+        let mut ids: Vec<String> = text.lines().map(str::to_string).collect();
+        ids.sort();
+        ids
+    };
+    let want = |ids: &[&str]| {
+        let mut ids: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+        ids.sort();
+        ids
+    };
+
+    // 1. 워크트리에서 `-C <루트>` 로 친 집기도 그 워크트리의 것이다. 루트에서 `-C <워크트리>` 로 친
+    //    것은 아니다 — 거기서 일하는 사람이 없다.
+    ok_at(&a, LATER, &["-C", &main.display().to_string(), "mv", &y, "in_progress"]);
+    assert_eq!(mark("agent-a"), want(&[&y]), "`-C <루트>` 로 친 집기를 안 적었다");
+    ok_at(&main, LATER, &["-C", &b.display().to_string(), "mv", &x, "in_progress"]);
+    assert_eq!(mark("agent-b"), want(&[]), "루트에서 친 집기를 워크트리에 적었다");
+
+    // 3. 넘겨받아 옮기면 새 자리에 서고 옛 자리에서 빠진다.
+    ok_at(&a, LATER, &["mv", &x, "review"]);
+    assert_eq!(mark("agent-a"), want(&[&x, &y]), "넘겨받은 줄을 안 적었다");
+    ok_at(&b, LATER, &["mv", &x, "in_progress"]);
+    assert_eq!(mark("agent-b"), want(&[&x]), "옮긴 자리가 안 적혔다");
+    assert_eq!(mark("agent-a"), want(&[&y]), "넘겨준 줄이 옛 자리에 남았다");
+
+    // 2. 루트에서 놓으면 어느 표식에서도 빠진다 — 다시 집어도 그 워크트리가 자리로 서지 않는다.
+    ok_at(&main, LATER, &["mv", &x, "todo"]);
+    assert_eq!(mark("agent-b"), want(&[]), "루트에서 놓은 줄이 표식에 남았다");
+    let re = "2026-09-12T01:00:00Z";
+    ok_at(&main, re, &["mv", &x, "in_progress"]);
+    let later = "2026-09-12T06:00:00Z";
+    let shown = ok_at(&main, later, &["show", &x, "--json"]);
+    assert!(shown.contains(r#""place":"lost""#), "낡은 표식이 자리를 지어냈다\n{shown}");
+    assert!(ok_at(&main, later, &["status", "--json"]).contains("\"stranded\""), "자리 잃은 줄을 안 비췄다");
+    // 제 자리에서 집은 줄은 그대로 선다.
+    let shown = ok_at(&main, later, &["show", &y, "--json"]);
+    assert!(shown.contains(r#""place":"at""#) && shown.contains("agent-a"), "산 일의 자리를 잃었다\n{shown}");
+}
+
+/// **워크트리 안에서는 `status` 도 `show` 와 같은 자로 잰다**(moai-6opu.p65, 리뷰 moai-71ht 셋째 판).
+/// 자리 셈은 세션이 선 체크아웃에서 한다 — 트래커만 루트로 옮겨 간다(moai-y7go). `show` 만 그렇게
+/// 옮기고 `status` 는 트래커의 자리로 재던 판은, 같은 워크트리에서 보드는 `자리 없다` 를 대는데
+/// `show` 는 그 줄에 자리 칸을 아예 안 세워 감독 안내의 두 줄이 또 갈렸다.
+#[test]
+fn a_worktree_session_places_the_same_on_status_and_show() {
+    let s = Scratch::new("wtplace");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let lost = field(&ok(&main, &["add", "세션이 죽은 일", "--json"]), "id");
+    ok(&main, &["mv", &lost, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/feat", "-b", "feat"]);
+    let inside = main.join(".claude/worktrees/feat");
+
+    // 루트에서는 둘 다 자리 없다고 한다.
+    assert!(ok_at(&main, LATER, &["status", "--json"]).contains("\"stranded\""), "루트가 자리 잃은 줄을 안 댄다");
+    assert!(ok_at(&main, LATER, &["show", &lost, "--json"]).contains(r#""place":"lost""#));
+    // 워크트리 안에서 겹쳐 보지 않으면 둘 다 조용하다.
+    let board = ok_at(&inside, LATER, &["status", "--json"]);
+    assert!(!board.contains("\"stranded\""), "겹쳐 보지도 않는데 status 만 자리를 팠다\n{board}");
+    let shown = ok_at(&inside, LATER, &["show", &lost, "--json"]);
+    assert!(!shown.contains("\"place\""), "show 가 자리를 팠다\n{shown}");
+    // 겹쳐 보면 둘 다 잰다.
+    assert!(ok_at(&inside, LATER, &["status", "--worktree", "--json"]).contains("\"stranded\""), "겹쳐 봐도 안 잰다");
+    assert!(ok_at(&inside, LATER, &["show", &lost, "--worktree", "--json"]).contains(r#""place":"lost""#));
+}
+
+/// **이름 없는 워크트리가 뜬 때는 git 이 파일 안에 적어 둔 시각이다**(moai-hav1, 리뷰 moai-40ht.hom의
+/// 결정) — 파일의 고친 때로 재면 시각을 안 지키는 복사(`cp -r`·Docker `COPY`·백업 복원)가 그것을
+/// 통째로 새로 해, `.moai` 는 하나도 안 바뀌었는데 저장소의 집은 줄이 전부 "자리 없다" 로 뒤집힌다.
+/// 여기서 그 자리의 파일 시각을 앞뒤로 흔들어도 자리가 그대로인지 본다.
+#[test]
+fn a_nameless_worktrees_birth_is_read_from_git_not_the_clock() {
+    let s = Scratch::new("hookborn");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "에이전트가 할 일", "--json"]), "id");
+    // **집은 때와 뜬 때가 같은 시계여야 한다** — git 의 reflog 은 벽시계로 적히므로 이 줄만 벽시계로
+    // 집는다(다른 시험처럼 `MOAI_NOW` 를 고정하면 뜬 때와 여드레가 벌어져 한 시간 규칙이 먼저 걸린다).
+    let clock = std::process::Command::new("date").args(["-u", "+%Y-%m-%dT%H:%M:%SZ"]).output().unwrap();
+    let now = String::from_utf8(clock.stdout).unwrap().trim().to_string();
+    let run = |args: &[&str]| {
+        let out = staged(args).current_dir(&main).env("MOAI_NOW", &now).output().unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    run(&["mv", &id, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    // 이름이 id 를 안 가리키는 워크트리 — 자리는 스냅샷이 쥔 줄로만 잡힌다.
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-a04acfb3", "-b", "worktree-agent-a04acfb3"]);
+    let place = |what: &str| {
+        let out = run(&["show", &id, "--json"]);
+        assert!(out.contains(r#""place":"at""#), "{what}: 자리를 잃었다\n{out}");
+    };
+    place("갓 뜬 워크트리");
+
+    // git 이 적어 둔 시각은 그대로 두고 파일의 고친 때만 앞뒤로 흔든다. **reflog 자신도 흔든다**
+    // — `born_of` 가 여는 파일이 바로 그것이라, 빼 두면 "그 파일의 고친 때로 재자" 는 가장 그럴듯한
+    // 되돌림이 이 시험을 초록으로 지난다(리뷰 moai-71ht.rv0).
+    let admin = main.join(".git").join("worktrees").join("agent-a04acfb3");
+    let log = admin.join("logs").join("HEAD");
+    assert!(log.exists(), "reflog 이 없다 — 이 시험이 견줄 것이 없다");
+    let day = std::time::Duration::from_secs(24 * 60 * 60);
+    for (what, when) in [("뒤로", std::time::SystemTime::now() + day * 3650), ("앞으로", std::time::SystemTime::now() - day * 3650)] {
+        for p in [&admin, &admin.join("HEAD"), &log] {
+            // 디렉터리는 쓰기로 못 연다 — 읽기로 연 손잡이에도 `futimens` 가 듣는다.
+            std::fs::File::open(p).unwrap().set_modified(when).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+        }
+        place(&format!("고친 때를 {what} 옮겼다"));
+    }
+}
+
 /// **자리 경로는 늘 main 에서 잰 상대 경로다**(moai-xpd7·moai-3aec, 2026-09-18 사용자 결정) — main
 /// 밖에 만든 워크트리는 `../` 로 올라가서 잰다. 절대 경로로 두던 판은 한 배열에 두 모양이 섞였고
 /// 기계의 홈 경로가 `--json` 으로 나갔다. main 이 없는 맨몸 저장소는 그 저장소 디렉터리에서 재어,
@@ -7865,7 +8218,7 @@ fn status_names_picked_work_with_no_live_worktree_and_still_exits_zero() {
     let dir = format!(".claude/worktrees/{there}");
     git(&main, &["worktree", "add", "-q", &dir, "-b", &format!("worktree-{there}")]);
     let side = main.join(&dir);
-    ok_at(&side, "2026-09-11T06:00:00Z", &["mv", &moved, "in_progress"]);
+    ok_here_at(&side, "2026-09-11T06:00:00Z", &["mv", &moved, "in_progress"]);
     let stranded_ids = |json: &str| -> String {
         json.split("\"kind\":\"stranded\"").nth(1).map(|t| t.split('}').next().unwrap().to_string()).unwrap_or_default()
     };
@@ -8148,8 +8501,8 @@ fn overlaying_places_work_that_only_a_side_worktree_knows_about() {
 
     // 이름이 id 가 아닌 워크트리가 제 줄을 만들고 집는다 — main 의 스냅샷에는 없다.
     let side = main.join(".claude/worktrees/agent-x");
-    let mine = field(&ok(&side, &["add", "옆에서 만든 일", "--json"]), "id");
-    ok(&side, &["mv", &mine, "in_progress"]);
+    let mine = field(&ok_here(&side, &["add", "옆에서 만든 일", "--json"]), "id");
+    ok_here(&side, &["mv", &mine, "in_progress"]);
 
     let text = ok_at(&main, LATER, &["status", "--worktree"]);
     assert!(!text.contains("일하는 워크트리가 없는"), "옆에서 집은 산 일을 자리 없음으로 셌다\n{text}");
@@ -8348,15 +8701,22 @@ fn a_worktree_session_touching_main_is_still_that_session() {
     assert!(out.trim().is_empty(), "main 에서 방금 집은 일의 자식을 막았다\n{out}");
 
     // 거꾸로 — 세션은 main 에 서 있고 명령이 워크트리로 들어간다(에이전트 스레드는 자리가 main
-    // 으로 돌아온다). **딸린 워크트리를 가리키면 그 워크트리의 일로 본다** — main 의 눈으로는
-    // 그 워크트리의 일이 "옆의 것" 이라 제 단위 안의 줄이 막히고, 단위 밖의 줄은 샌다.
+    // 으로 돌아온다). **가리킨 곳이 워크트리여도 트래커는 루트의 것이다**(moai-y7go) — 그 토막을
+    // 판정하는 눈도, 그 줄이 실제로 쓰는 파일도 루트다. 막지 않는다: 옮겨 갈 뿐이다.
     ok(&main, &["mv", &next, "done"]);
     let ip = inside.display().to_string();
     let from_main = |cmd: &str| tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
     let out = from_main(&format!("cd {ip} && moai add \"자식\" --parent {id}"));
     assert!(out.trim().is_empty(), "워크트리로 들어가 제 일의 자식을 세우는 것을 막았다\n{out}");
-    let why = refusal(&from_main(&format!("moai -C {ip} add \"딴 일\"")));
-    assert!(why.contains(&id), "워크트리를 가리킨 단위 밖 줄을 그 워크트리의 초점으로 못 막는다 — {why}");
+    // 루트에 선 세션에게 그 워크트리가 쥔 일은 여전히 "옆의 것" 이다 — 가리킨 곳이 워크트리여도
+    // 트래커가 같아졌을 뿐, 누구의 초점인가는 이름이 가른다(moai-0yrv).
+    let out = from_main(&format!("moai -C {ip} add \"딴 일\""));
+    assert!(out.trim().is_empty(), "옆 워크트리가 쥔 일로 루트의 생성을 막는다\n{out}");
+
+    // 그 줄을 실제로 치면 루트의 스냅샷이 바뀐다 — 워크트리의 것은 그대로다.
+    let made = field(&ok(&inside, &["add", "워크트리에서 친 줄", "--parent", &id, "--json"]), "id");
+    assert!(issues(&main).contains(&format!("\"id\":\"{made}\"")), "루트에 안 썼다");
+    assert!(!issues(&inside).contains(&format!("\"id\":\"{made}\"")), "워크트리의 스냅샷을 고쳤다");
 }
 
 /// 규약대로 에픽 멤버를 main 에서 집고 그 이름의 워크트리를 띄운 저장소. (main, 워크트리, 에픽, 집은 id)
@@ -8470,24 +8830,24 @@ fn the_stop_hook_measures_the_epic_on_what_main_has_closed() {
         "main 에서 끝낸 멤버를 못 보고 마지막 멤버를 그냥 미루라고 한다\n{held}"
     );
 
-    // **내미는 명령은 main 의 트래커를 겨눈다**(moai-gyqh) — 워크트리에서 맨 `moai` 로 치면 워크트리의
-    // 스냅샷만 바뀌어 main 은 집은 채로 남고, 이 훅은 제 스냅샷을 보고 조용해진다.
-    let root = std::fs::canonicalize(&main).unwrap().display().to_string();
-    for line in [format!("moai -C {root} mv {id} todo -m"), format!("moai -C {root} defer {id}"), format!("moai -C {root} note {id}")] {
-        assert!(held.contains(&line), "main 을 안 겨눈다 — {line}\n{held}");
+    // **내미는 명령은 맨 `moai` 다**(moai-y7go) — 워크트리에서 친 트래커 쓰기를 도구가 루트로
+    // 옮기므로, 시킨 대로 치면 루트의 스냅샷이 바뀐다. 겨누던 것은 그 옮김이 없던 때의 일이다.
+    for line in [format!("moai mv {id} todo -m"), format!("moai defer {id}"), format!("moai note {id}")] {
+        assert!(held.contains(&line), "옮길 줄을 안 댄다 — {line}\n{held}");
     }
-    assert!(!held.contains("  moai mv") && !held.contains("  moai defer"), "맨 moai 가 남았다\n{held}");
-    // 시킨 대로 치면 main 이 놓는다.
-    let out = staged(&["-C", &root, "mv", id.as_str(), "todo", "-m", "결정을 기다린다"]).current_dir(&inside).output().unwrap();
+    assert!(!held.contains("-C "), "이제 겨눌 것이 없는데 -C 를 붙인다\n{held}");
+    // 시킨 대로 워크트리 안에서 맨 `moai` 로 치면 루트가 놓는다.
+    let out = staged(&["mv", id.as_str(), "todo", "-m", "결정을 기다린다"]).current_dir(&inside).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(ok(&main, &["show", &id]).contains("todo"), "main 이 안 놓았다");
 }
 
-/// **main 이 모르는 줄은 main 으로 겨누지 않고, 낡은 칸으로 집으라는 줄은 main 에서 멈춘다**(리뷰
-/// moai-ju21.70g). 워크트리에서 맨 `moai` 로 세운 줄을 겨누면 시킨 대로 친 줄이 "못 찾았다" 로 끝나고,
-/// main 이 이미 닫은 줄을 낡은 스냅샷의 "집으라" 대로 겨누면 main 에서 도로 연다 — `--from` 이 막는다.
+/// **워크트리 세션의 훅은 루트의 트래커를 본다**(moai-y7go) — 트래커를 찾는 길이 딸린 워크트리를
+/// 루트로 옮기므로, 내미는 줄에 `-C` 를 붙일 까닭이 없어졌고 그 줄을 그대로 치면 루트가 바뀐다.
+/// 그 워크트리의 스냅샷에만 있는 줄(`MOAI_HERE` 로 일부러 세운 것)은 훅이 아예 안 본다.
+/// **주 체크아웃에 트래커가 없으면 옮기지 않는다** — 그 가지에서 처음 `init` 한 워크트리다.
 #[test]
-fn the_hook_aims_at_main_only_what_main_knows_alike() {
+fn a_worktree_session_reads_the_roots_tracker() {
     let s = Scratch::new("hookaimknown");
     let main = s.path().join("main");
     std::fs::create_dir_all(&main).unwrap();
@@ -8502,37 +8862,70 @@ fn the_hook_aims_at_main_only_what_main_knows_alike() {
     for to in ["in_progress", "done"] {
         ok(&main, &["mv", &closed, to]);
     }
-    let local = field(&ok(&inside, &["add", "워크트리에서 세운 일", "--json"]), "id");
+    let local = field(&ok_here(&inside, &["add", "워크트리에서 세운 일", "--json"]), "id");
 
     let body = format!("{{\"file_path\":{}}}", json_str(&inside.join("src/x.rs").display().to_string()));
     let why = refusal(&tool_at(&s, &inside, "Edit", &body));
-    let root = std::fs::canonicalize(&main).unwrap().display().to_string();
-    for id in [&shared, &closed] {
-        assert!(why.contains(&format!("moai -C {root} mv {id} in_progress --from todo")), "main 이 아는 {id} 를 안 겨눈다\n{why}");
-    }
-    assert!(why.contains(&format!("\\n  moai mv {local} in_progress --from todo")), "main 이 모르는 줄을 겨눴다\n{why}");
-    // 그 id 를 모르는 줄은 여전히 겨눈다 — 한 줄에 명령 하나다.
-    assert!(why.contains(&format!("moai -C {root} add '제목'")), "{why}");
-    // 낡은 칸으로 집으라는 줄은 main 에서 멈춘다 — main 이 닫은 일을 도로 열지 않는다.
-    let out = staged(&["-C", &root, "mv", closed.as_str(), "in_progress", "--from", "todo"]).current_dir(&inside).output().unwrap();
-    assert!(!out.status.success(), "낡은 칸으로 main 의 닫힌 일을 옮겼다");
-    assert!(ok(&main, &["show", &closed]).contains("done"), "main 이 닫은 일을 도로 열었다");
+    assert!(why.contains(&format!("moai mv {shared} in_progress --from todo")), "루트가 아는 줄을 안 댄다\n{why}");
+    assert!(!why.contains("-C "), "옮겨 가는데 겨눴다\n{why}");
+    assert!(!why.contains(&closed), "루트가 닫은 줄을 집으라고 한다\n{why}");
+    assert!(!why.contains(&local), "옆 스냅샷에만 있는 줄을 제 것으로 읽었다\n{why}");
 
-    // main 에 트래커가 없으면 아무것도 안 겨눈다 — 그 가지에서 처음 `init` 한 트래커다.
-    let bare = s.path().join("bare");
-    std::fs::create_dir_all(&bare).unwrap();
-    git(&bare, &["init", "-q"]);
-    git(&bare, &["commit", "-q", "--allow-empty", "-m", "처음"]);
-    git(&bare, &["worktree", "add", "-q", "../bare-feat", "-b", "feat"]);
-    let branch = s.path().join("bare-feat");
-    ok(&branch, &["init", "argos"]);
+    // 시킨 대로 워크트리 안에서 치면 루트가 바뀐다 — 그 줄은 루트에 쓴다.
+    let out = staged(&["mv", shared.as_str(), "in_progress", "--from", "todo"]).current_dir(&inside).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(ok(&main, &["show", &shared]).contains("in_progress"), "루트가 안 바뀌었다");
+    assert!(issues(&inside).contains(&format!("\"id\":\"{local}\"")), "옆 스냅샷을 건드렸다");
+
+    // **주 체크아웃에 트래커가 없으면 그 자리에 쓴다** — 옮길 곳이 없다. 그 가지의 트래커로 판정한다.
+    let (_, branch) = worktree_whose_main_has_no_tracker(&s);
     let body = format!("{{\"file_path\":{}}}", json_str(&branch.join("src/x.rs").display().to_string()));
     let why = refusal(&tool_at(&s, &branch, "Edit", &body));
-    assert!(!why.contains("moai -C"), "트래커 없는 main 을 겨눈다\n{why}");
+    assert!(why.contains("이 가지의 일"), "옮길 곳 없는 가지의 트래커로 판정하지 않았다\n{why}");
+    // 겨누는 자(`toward`)는 걷혔다 — 되살아나면 여기서 붉어진다.
+    assert!(!why.contains("moai -C"), "내미는 줄에 `-C` 를 붙인다\n{why}");
+}
+
+/// **옆 워크트리가 적어 둔 집기는 훅도 본다**(moai-y7go, 리뷰 moai-71ht 셋째 판). 쓰기가 루트로
+/// 옮겨 가면서 옆 워크트리의 스냅샷은 더는 안 움직인다 — 스냅샷만 읽던 훅은 옆이 방금 집은 줄을
+/// 제 것으로 읽어, `Stop` 이 남의 산 일을 닫으라고 붙들고 규칙 1 이 그 단위로 생성을 좁혔다.
+/// 자리 셈(`moai show`)은 같은 표식으로 이미 "저기서 돈다" 고 말하던 자리다.
+#[test]
+fn the_hook_leaves_what_a_nameless_worktree_marked_as_held() {
+    let s = Scratch::new("hookheldmark");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let there = field(&ok(&main, &["add", "옆에서 할 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-x", "-b", "worktree-agent-x"]);
+    let inside = main.join(".claude/worktrees/agent-x");
+
+    let stop = |session: &str| {
+        let input = format!("{{\"session_id\":\"{session}\",\"cwd\":{}}}", json_str(&main.display().to_string()));
+        String::from_utf8(hook_in(&s, &main, "stop", &input).stdout).unwrap()
+    };
+    // 루트에서 집으면 루트 세션의 일이다 — 이름도 표식도 옆을 안 가리킨다.
+    ok(&main, &["mv", &there, "in_progress"]);
+    assert!(stop("s1").contains(&format!("moai mv {there}")), "제 자리에서 집은 일을 안 붙든다");
+
+    // 그 워크트리에서 다시 집으면(사람의 창·스크립트처럼 훅 없는 길로) 표식이 그것을 말한다.
+    ok(&main, &["mv", &there, "todo"]);
+    ok(&inside, &["mv", &there, "in_progress"]);
+    let held = stop("s2");
+    assert!(held.trim().is_empty(), "옆 워크트리가 적어 둔 집기로 붙든다\n{held}");
+    let shown = ok_at(&main, LATER, &["show", &there, "--json"]);
+    assert!(shown.contains("agent-x"), "자리 셈과 훅이 다른 답을 낸다\n{shown}");
 }
 
 /// **규칙 4 는 트래커 밖에서도 선다**(리뷰 moai-ju21.70g) — 사람의 tmux 서버는 트래커와 무관하다.
-/// 트래커를 찾은 뒤에만 보던 판은 스크래치패드로 `cd` 해 둔 세션의 `tmux kill-server` 를 보냈다.
+/// 트래커를 찾은 뒤에만 보던 판은 스크래치패드로 `cd` 해 둔 세션의 서버 죽이는 줄을 보냈다.
+///
+/// **`#[test]` 를 지우지 않는다**(리뷰 moai-71ht.jlh) — 규칙 5 의 되돌림이 이 줄을 같이 걷어 가,
+/// 사람의 tmux 서버를 지키는 하나뿐인 시험이 `cargo test` 에서 조용히 빠졌다. 컴파일은 그대로
+/// 지나가고(쓰이지 않는 함수 경고 하나뿐이다) 초록이라, 되돌아온 버그를 아무도 못 본다.
 #[test]
 fn the_tmux_rule_stands_outside_a_tracker() {
     let s = Scratch::new("hooktmuxbare");
@@ -9340,14 +9733,45 @@ fn git_run(dir: &Path, at: Option<&str>, args: &[&str]) -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
+/// **이 체크아웃의 트래커에 쓴다**(`MOAI_HERE`) — 딸린 워크트리의 스냅샷을 일부러 갈라 놓는
+/// 시험이 쓴다. 보통 쓰기는 루트로 가므로(moai-y7go), 갈라진 옆 스냅샷을 짓는 길이 이것뿐이다.
+fn ok_here(dir: &Path, args: &[&str]) -> String {
+    ok_here_at(dir, NOW, args)
+}
+
+fn ok_here_at(dir: &Path, now: &str, args: &[&str]) -> String {
+    ok_env(dir, now, &[("MOAI_HERE", "1")], args)
+}
+
+/// [`ok_here`] 의 `add` — [`add`] 와 한 자다(`-q` 와 `trim`). 손으로 베끼면 조용히 갈라진다.
+fn add_here(dir: &Path, args: &[&str]) -> String {
+    let mut v = vec!["add"];
+    v.extend_from_slice(args);
+    v.push("-q");
+    ok_here(dir, &v).trim().to_string()
+}
+
 /// 시계를 달리 두고 돌린다 — 옆 워크트리의 쓰기가 **더 늦게** 떨어진 것을 흉내 낸다.
 fn ok_at(dir: &Path, now: &str, args: &[&str]) -> String {
-    let out = staged(args)
-        .current_dir(dir)
-        .env("MOAI_NOW", now)
-        .output()
-        .expect("moai 를 실행하지 못했다");
-    assert!(out.status.success(), "moai {args:?} 가 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
+    ok_env(dir, now, &[], args)
+}
+
+/// [`ok_at`]·[`ok_here_at`] 의 한 자. **베껴 두지 않는다** — [`staged`] 의 주석이 이름 붙인
+/// 자리다(베낀 runner 는 조용히 갈라진다). 실패하면 stdout 도 함께 낸다: `--json` 과 `-q` 의
+/// 답은 그리로 나오므로, stderr 만 내던 판은 빈 실패문을 냈다.
+fn ok_env(dir: &Path, now: &str, env: &[(&str, &str)], args: &[&str]) -> String {
+    let mut cmd = staged(args);
+    cmd.current_dir(dir).env("MOAI_NOW", now);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd.output().expect("moai 를 실행하지 못했다");
+    assert!(
+        out.status.success(),
+        "moai {args:?} 가 실패했다\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8(out.stdout).unwrap()
 }
 
@@ -9392,9 +9816,11 @@ fn trees(name: &str) -> Trees {
     git(&main, &["worktree", "add", "-q", "../old", "-b", "old", "HEAD~1"]);
 
     let feat = s.path().join("feat");
-    ok_at(&feat, LATER, &["mv", &picked, "in_progress"]);
-    ok(&feat, &["edit", &tied, "--title", "옆 제목"]);
-    let made = field(&ok_at(&feat, LATER, &["add", "옆에서 만든 일", "-e", &epic, "--json"]), "id");
+    // **일부러 갈라 놓는다**(`MOAI_HERE`) — 보통 쓰기는 루트로 가므로(moai-y7go) 옆 스냅샷이
+    // 갈라진 상태는 이 손잡이로만 짓는다. 겹쳐 보기가 읽는 것이 그 상태다.
+    ok_here_at(&feat, LATER, &["mv", &picked, "in_progress"]);
+    ok_here(&feat, &["edit", &tied, "--title", "옆 제목"]);
+    let made = field(&ok_here_at(&feat, LATER, &["add", "옆에서 만든 일", "-e", &epic, "--json"]), "id");
     Trees { s, epic, picked, tied, made }
 }
 
@@ -9547,14 +9973,14 @@ fn worktree_a_later_defer_or_undo_there_is_not_hidden_by_an_earlier_move_here() 
     let t = trees("wtdefer");
     let (main, feat) = (t.main(), t.feat());
     ok_at(&main, LATER, &["mv", &t.tied, "in_progress"]);
-    ok_at(&feat, "2026-09-13T00:00:00Z", &["defer", &t.tied]);
+    ok_here_at(&feat, "2026-09-13T00:00:00Z", &["defer", &t.tied]);
     assert!(issues(&feat).contains("\"planned_at\":\"2026-09-13T00:00:00Z\""), "{}", issues(&feat));
     let deferred = ok(&main, &["show", "--deferred", "--worktree"]);
     let line = deferred.lines().find(|l| l.starts_with(t.tied.as_str())).unwrap_or_default();
     assert!(line.contains("⎇ feat/x"), "옆의 늦은 defer 가 가려졌다\n{deferred}");
 
     ok_at(&main, "2026-09-14T00:00:00Z", &["defer", &t.tied]);
-    ok_at(&feat, "2026-09-15T00:00:00Z", &["defer", &t.tied, "--undo"]);
+    ok_here_at(&feat, "2026-09-15T00:00:00Z", &["defer", &t.tied, "--undo"]);
     let deferred = ok(&main, &["show", "--deferred", "--worktree"]);
     assert!(!deferred.lines().any(|l| l.starts_with(t.tied.as_str())), "옆의 늦은 --undo 가 가려졌다\n{deferred}");
     // 도로 집은 줄도 그 때를 든다 — 이것이 없으면 위의 셈이 저널을 접어야 한다.
@@ -10760,8 +11186,9 @@ fn the_python_agents_skip_a_row_only_a_side_worktree_has() {
     git(s.path(), &["commit", "-q", "-m", "일감"]);
     let side = s.path().join("side");
     git(s.path(), &["worktree", "add", "-q", "-b", "side", side.to_str().unwrap(), "main"]);
-    // 맨 위에 선다 — 뿌리의 일보다 먼저 겨루고 먼저 `missing` 을 받는다.
-    let theirs = add(&side, &["옆에만 있는 일", "-p", "0"]);
+    // 맨 위에 선다 — 뿌리의 일보다 먼저 겨루고 먼저 `missing` 을 받는다. **일부러 옆에만 세운다**
+    // (`MOAI_HERE`) — 보통 쓰기는 루트로 가므로(moai-y7go) 옆에만 있는 줄은 이 손잡이로만 짓는다.
+    let theirs = add_here(&side, &["옆에만 있는 일", "-p", "0"]);
     let work = s.path().join("work.sh");
     write_exe(&work, "#!/bin/sh\necho 됐다\n");
 

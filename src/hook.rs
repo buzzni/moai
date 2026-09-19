@@ -134,16 +134,6 @@ impl Decision {
             (earlier, _) => earlier,
         }
     }
-
-    /// 답의 글만 고친다 — 막는가·비추는가는 그대로다.
-    pub fn map_text(self, f: impl FnOnce(&str) -> String) -> Decision {
-        match self {
-            Decision::Pass => Decision::Pass,
-            Decision::Context(why) => Decision::Context(f(&why)),
-            Decision::Deny(why) => Decision::Deny(f(&why)),
-            Decision::Block(why) => Decision::Block(f(&why)),
-        }
-    }
 }
 
 /// 세션에 싣는 머리말. 보드만 실으면 그것이 무엇을 하라는 뜻인지가 안 붙는다.
@@ -1590,17 +1580,16 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, targ
     if !counted(target, root) || !held(issues, cfg, away).is_empty() {
         return Decision::Pass;
     }
-    // **본 칸을 함께 준다**(`--from`) — 이 줄은 이 자리의 스냅샷으로 짓는데 딸린 워크트리에서는 main 으로
-    // 겨눈다([`toward`]). 그 사이 main 이 닫은 일이면 옮기지 않고 말한다 — 안 주던 판은 낡은 스냅샷의
-    // "집으라" 대로 main 에서 닫힌 일을 도로 열었다(리뷰 moai-ju21.70g).
+    // **본 칸을 함께 준다**(`--from`). 이 줄은 여럿이 같은 트래커를 쓰는 저장소에서 지어지므로, 짓고
+    // 치는 사이에 옆이 그 일을 집거나 닫을 수 있다 — 그러면 옮기지 않고 말한다. 안 주던 판은 낡은
+    // 스냅샷의 "집으라" 대로 이미 닫힌 일을 도로 열었다(리뷰 moai-ju21.70g).
     let picks: String = report::ready(issues, cfg)
         .into_iter()
         .take(3)
         .map(|i| format!("  moai mv {} in_progress --from {}   {}\n", i.id, i.status.as_str(), i.title))
         .collect();
-    // **내미는 명령은 한 줄에 하나다** — 딸린 워크트리에서는 줄 머리의 `moai` 만 main 의 트래커로
-    // 겨눈다([`toward`]). 두 명령을 한 줄에 싣던 판은 `add` 만 main 에 세우고, 그 id 를 집는 `mv` 는
-    // 워크트리의 트래커로 보내 "못 찾았다" 로 끝났다(리뷰 moai-ju21.70g).
+    // **내미는 명령은 한 줄에 하나다** — 붙여 넣는 쪽이 줄째 옮겨 치기 때문이다. 두 명령을 한 줄에
+    // 싣던 판은 그 줄이 갈리는 자리마다 한쪽만 옮겨져 "못 찾았다" 로 끝났다(리뷰 moai-ju21.70g).
     refuse(2, format!(
         "집은 것 없이 {} 를 고치고 있다. 어느 일에서 나온 변경인지가 남지 않는다.\n\
          하나를 집고 다시 부른다.\n{picks}\
@@ -2452,55 +2441,6 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
     ))
 }
 
-/// 이 자리의 줄 가운데 **`main` 이 모르는 id** — [`toward`] 가 main 으로 안 겨눌 줄을 고른다. 워크트리에서
-/// 맨 `moai` 로 세운 줄은 거기에만 있다(훅은 단위 안의 생성을 막지 않는다) — 그 줄로 main 을 겨누면 시킨
-/// 대로 친 명령이 "못 찾았다" 로 끝난다(리뷰 moai-ju21.70g).
-///
-/// **칸이 달라도 겨눈다** — 규약대로 `moai -C <main> mv <집은 것> review` 로 옮긴 일꾼은 제 스냅샷과 main 의
-/// 칸이 늘 다르다. 그 줄을 맨 `moai` 로 두면 워크트리의 스냅샷에 쓴다. 낡은 칸으로 집으라는 줄은
-/// `--from` 이 main 에서 멈춘다([`guard_edit`]).
-pub fn unsynced<'a>(here: &'a [Issue], main: &[Issue]) -> BTreeSet<&'a str> {
-    let known: BTreeSet<&str> = main.iter().map(|i| i.id.as_str()).collect();
-    here.iter().map(|i| i.id.as_str()).filter(|id| !known.contains(id)).collect()
-}
-
-/// 내미는 명령 줄을 **`root` 의 트래커로 겨눈다**(moai-gyqh) — 줄 머리의 맨 `moai` 에 `-C <root>`
-/// 를 붙인다. 이미 `-C`·`--dir` 를 단 줄과 글 속의 `moai` 는 그대로 둔다.
-///
-/// 딸린 워크트리의 세션이 받는 글에 건다. 거기서 맨 `moai` 는 워크트리의 `.moai` 를 고치는데, 그
-/// 뒤로는 제 스냅샷에서 풀린 것으로 보여 훅이 조용해진다 — 루트는 그대로 `in_progress` 인 채로.
-///
-/// **`local` 이 고른 낱말([`unsynced`] 의 id)을 든 줄도 그대로다** — `root` 가 모르거나 달리 아는 줄이다.
-pub fn toward(text: &str, root: &Path, local: &dyn Fn(&str) -> bool) -> String {
-    // 실제 경로라 안내에 경로를 넣는 다른 자리와 같은 자로 감싼다 — `$`·`~` 도 글자다([`echo_dir`] 와
-    // 다른 까닭).
-    let dir = crate::text::shell_word(&root.display().to_string());
-    text.lines()
-        .map(|line| {
-            let body = line.trim_start();
-            let lead = &line[..line.len() - body.len()];
-            match body.strip_prefix("moai ") {
-                // 명령 몫만 본다 — 두 칸 넘게 띄운 뒤는 제목·설명이라, 거기 든 id 로 줄을 가르면 멀쩡한
-                // 명령이 맨 `moai` 로 남는다(`moai mv X done     <Y> 의 후속`).
-                Some(rest)
-                    if !rest.starts_with("-C")
-                        && !rest.starts_with("--dir")
-                        && !rest
-                            .split("  ")
-                            .next()
-                            .unwrap_or(rest)
-                            .split(|c: char| c.is_whitespace() || c == '\'' || c == '"')
-                            .any(local) =>
-                {
-                    format!("{lead}moai -C {dir} {rest}")
-                }
-                _ => line.to_string(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// 막힌 토막에 적힌 `-C` 값을 내미는 줄에 옮겨 적는다 — 셸이 한 낱말로 읽게. **[`create_in`] 과
 /// [`aside_in`] 이 함께 쓴다** — 한쪽만 감싸던 판은 `-C '/a b'` 로 막힌 줄을 `moai -C /a b add …` 로
 /// 일러 줬다(리뷰 moai-ju21.70g).
@@ -3286,25 +3226,6 @@ mod tests {
         }
     }
 
-    /// **줄 머리의 맨 `moai` 만 겨눈다**(moai-gyqh) — 이미 겨눈 줄과 글 속의 `moai` 는 그대로다.
-    #[test]
-    fn toward_aims_only_bare_command_lines() {
-        let text = "아직 집고 있는 것이 있다.\n  moai mv t-1 done     제목\n  moai -C /else note t-1 'x'\n`moai status` 로 본다.\nmoai defer t-1 -m '왜'";
-        let aimed = toward(text, Path::new("/repo"), &|_| false);
-        assert_eq!(
-            aimed,
-            "아직 집고 있는 것이 있다.\n  moai -C /repo mv t-1 done     제목\n  moai -C /else note t-1 'x'\n`moai status` 로 본다.\nmoai -C /repo defer t-1 -m '왜'"
-        );
-        // 셸이 가르는 글자가 든 자리는 감싼다.
-        assert!(toward("moai mv t-1 done", Path::new("/a b/it's"), &|_| false).starts_with(r"moai -C '/a b/it'\''s' mv"));
-        // **겨눌 곳이 모르는 id 를 든 줄은 그대로다**(리뷰 moai-ju21.70g) — 워크트리에서 세운 줄이다.
-        let only_here = |w: &str| w == "t-9";
-        assert_eq!(
-            toward("  moai mv t-9 done     제목\n  moai note t-1 'x'\n  moai add '제목' --parent t-9", Path::new("/repo"), &only_here),
-            "  moai mv t-9 done     제목\n  moai -C /repo note t-1 'x'\n  moai add '제목' --parent t-9"
-        );
-    }
-
     /// **거절문의 모서리 셋**(moai-nxw8) — 막힌 토막의 `-C` 를 그대로 대고, 여럿 집었으면 집은
     /// 것마다 대고, 둘째 물음의 글은 규칙 글과 한 출처다.
     #[test]
@@ -3346,7 +3267,7 @@ mod tests {
 
     /// **거절문의 모서리 넷**(리뷰 moai-ju21.70g) — 옮겨 친 `-C` 는 한 낱말로 감싸고, 에픽 아닌 줄은
     /// `-e` 로 안 대고, 에픽 있는 일과 없는 일을 함께 쥐었으면 둘 다 대고, 규칙 2 의 줄은 한 줄에 명령
-    /// 하나다(딸린 워크트리에서 줄 머리의 `moai` 만 main 으로 겨눈다).
+    /// 하나다(붙여 넣는 쪽이 줄째 옮겨 친다).
     #[test]
     fn the_refusals_stay_runnable_as_written() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
@@ -3376,25 +3297,10 @@ mod tests {
             assert!(line.trim_start().starts_with("moai ") && line.matches("moai ").count() == 1, "한 줄에 명령이 둘이다 — {line}\n{wrote}");
         }
         assert!(wrote.contains("\n  moai add '제목'\n  moai mv <id> in_progress"), "{wrote}");
-        // 집으라는 줄은 본 칸을 함께 준다 — main 으로 겨눈 줄이 낡았으면 main 에서 멈춘다.
+        // 집으라는 줄은 본 칸을 함께 준다 — 짓고 치는 사이에 옆이 그 일을 집거나 닫았으면 멈춘다.
         let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         let wrote = denied(&guard_edit(&idle, &cfg(), &here(), Path::new("/repo"), "/repo/src/x.rs")).to_string();
         assert!(wrote.contains("moai mv t-1 in_progress --from todo"), "{wrote}");
-    }
-
-    /// **main 이 모르는 id 만 안 겨눈다**(리뷰 moai-ju21.70g) — 칸이 다른 것은 겨눈다. 규약대로
-    /// `moai -C <main>` 으로 옮긴 제 일은 스냅샷과 main 의 칸이 늘 다르다. 줄의 설명에 든 id 로는 안 가른다.
-    #[test]
-    fn only_ids_main_lacks_stay_unaimed() {
-        let here = vec![issue("t-1", "in_progress"), issue("t-9", "todo")];
-        let main = vec![issue("t-1", "review")];
-        let local = unsynced(&here, &main);
-        assert_eq!(local.into_iter().collect::<Vec<_>>(), ["t-9"]);
-        let text = "  moai mv t-1 done     t-9 의 후속\n  moai mv t-9 in_progress --from todo   새 일";
-        assert_eq!(
-            toward(text, Path::new("/repo"), &|w| w == "t-9"),
-            "  moai -C /repo mv t-1 done     t-9 의 후속\n  moai mv t-9 in_progress --from todo   새 일"
-        );
     }
 
     /// 집은 것이 있으면 그 단위 안이어야 한다. 밖이면 고칠 명령이 함께 온다.

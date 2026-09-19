@@ -93,7 +93,16 @@ pub fn run(_ctx: &Ctx, event: Event) -> R<Vec<String>> {
 
 /// 답을 내되, 못 내면 아무 말도 하지 않는다.
 fn decide(event: Event, input: &Input) -> Option<String> {
-    let repo = Repo::discover().ok()?;
+    // **옮겨 갈 루트를 못 읽어도 규칙은 선다**(리뷰 moai-71ht.i1u). 트래커가 루트로 옮겨 가면서
+    // (moai-y7go) 루트의 깨진 `config.toml` 하나가 저장소의 **모든** 워크트리에서 훅을 조용히
+    // 껐다 — 고장의 크기가 규칙의 크기가 되면 안 된다. `moai` 자신은 그 자리에서 크게 실패하고
+    // (사람이 그것을 본다), 훅은 이 자리의 트래커로 선다. 읽는 것은 갈라진 스냅샷이지만 아무
+    // 말도 안 하는 것보다 낫다.
+    let cwd = std::env::current_dir().ok()?;
+    let repo = match Repo::discover() {
+        Ok(repo) => repo,
+        Err(_) => Repo::find_here(&cwd).ok()??,
+    };
     let load = repo.read().ok()?;
     // **못 읽은 줄을 그대로 넘긴다.** 빈 슬라이스를 넘기면 보드에서
     // `unreadable_line` 경고만 조용히 빠지는데, 그것은 실린 보드 말고는
@@ -130,15 +139,18 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             // `moai status` 와 같은 알림을 싣는다(`agents_notice`) — 낡은 AGENTS.md 를 모르고
             // 시작하는 것이 바로 이 보드를 받는 새 세션이다. 세션의 셸 자리는 stdin 의 `cwd` 라
             // 이미 여기로 옮겨 왔다(`-C` 가 아니다).
-            st.notices.extend(crate::cmd::init::agents_notice(&repo.root, false));
-            st.notices.extend(crate::cmd::init::dotfile_notice(&repo.root, false));
+            st.notices.extend(crate::cmd::init::agents_notice(repo.here(), false));
+            st.notices.extend(crate::cmd::init::dotfile_notice(repo.here(), false));
+            // 보드가 **정말 읽은 파일**을 댄다(`cmd::status::source_of` 와 같은 자) — 워크트리
+            // 세션의 보드는 루트의 트래커에서 온다(moai-y7go).
+            let source = crate::cmd::status::source_of(&repo);
             let lines =
                 view::status(
                     &st,
                     &load.issues,
                     &repo.config,
                     &now,
-                    ".moai/issues.jsonl",
+                    &source,
                     &crate::worktree::Origin::default(),
                     0,
                 );
@@ -147,7 +159,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
         Event::PreToolUse => {
             use crate::hook::Call;
             let call = Call::read(input.tool_name.as_deref(), &input.tool_input);
-            let cwd = std::env::current_dir().unwrap_or_else(|_| repo.root.clone());
+            let cwd = cwd.clone();
             let (routes, there) = match call {
                 Call::Shell(cmd) => route(&repo, cmd, &cwd),
                 _ => (Vec::new(), Vec::new()),
@@ -155,13 +167,14 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             let mine = |k: usize| !matches!(routes.get(k), Some(r) if *r != Route::Here);
             let decision = settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
                 // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
-                Call::Shell(cmd) => crate::hook::guard_shell_in(issues, &repo.config, away, &repo.root, &cwd, cmd, &mine),
-                Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, &repo.root, path),
+                // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
+                // (`Repo::find_from`) 고치는 파일은 이 워크트리의 것이다. `repo.root` 로 세던 판은
+                // 워크트리의 파일이 죄다 루트의 `.claude/worktrees/…` 밑으로 보여 규칙 2 가 통째로 꺼졌다.
+                Call::Shell(cmd) => crate::hook::guard_shell_in(issues, &repo.config, away, repo.here(), &cwd, cmd, &mine),
+                Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, repo.here(), path),
                 Call::Review => crate::hook::guard_review(issues, &repo.config, away),
                 Call::Other => Decision::Pass,
             });
-            // 답마다 **그 답을 낸 트래커의 main** 으로 겨눈다 — 합친 뒤에 겨누면 남의 줄을 제 main 으로 보낸다.
-            let decision = toward_main(decision, &repo, &load.issues);
             // 다른 트래커를 가리키는 토막은 **그 트래커가 본다**(moai-23ky). 판정을 잇는 차례는
             // `Decision::then` 이 정한다 — 막으면 남의 트래커는 묻지 않고, 남이 막으면 제 비춤을 버린다.
             let mut decision = decision;
@@ -170,12 +183,9 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                     decision = decision.then(|| {
                         let Ok(load) = other.read() else { return Decision::Pass };
                         let only = |k: usize| routes.get(k) == Some(&Route::There(n));
-                        let said = settle(input, other, &load.issues, away_of(other, &load.issues), &|issues, away| {
+                        settle(input, other, &load.issues, away_of(other, &load.issues), &|issues, away| {
                             crate::hook::guard_moai(issues, &other.config, away, cmd, &only)
-                        });
-                        // 그 트래커가 딸린 워크트리면 그 main 으로 — main 에 선 세션이 `cd <워크트리> &&`
-                        // 로 친 줄도 워크트리의 스냅샷에 쓰면 병합에서 겨룬다(리뷰 moai-ju21.70g).
-                        toward_main(said, other, &load.issues)
+                        })
                     });
                 }
                 // **한국어 글에는 다듬기를 비춘다**(moai-6rrb). 막는 답이 이긴다 — 막힌 명령은 글을
@@ -223,15 +233,14 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             // **누구의 것인지 모르는 줄로는 붙들지 않는다**(moai-ntl6). 에픽이 닫히는지와 집은 줄이 아직
             // 집혀 있는지는 옆까지 겹친 줄로 잰다(moai-8ema). 둘 다 [`releasing`] 이 잰다.
             let (away, latest) = releasing(input, &repo, &load.issues);
-            let held = crate::hook::closing(
+            crate::hook::closing(
                 &load.issues,
                 latest.as_deref().unwrap_or(&load.issues),
                 &repo.config,
                 &away,
                 warnings,
                 baseline(input, &repo),
-            );
-            toward_main(held, &repo, &load.issues)
+            )
         }),
     };
     answer(event, decision)
@@ -253,27 +262,6 @@ fn answer(event: Event, decision: Decision) -> Option<String> {
             serde_json::to_string(&Hold { decision: "block", reason }).ok()
         }
     }
-}
-
-/// **딸린 워크트리에서는 내미는 명령을 주 워크트리의 트래커로 겨눈다**(moai-gyqh). 트래커는 main
-/// 에서 쓴다 — 맨 `moai` 를 그대로 치면 워크트리의 스냅샷만 바뀌어, 루트는 집은 채로 남고 훅은 제
-/// 스냅샷을 보고 조용해진다. 거절문도 같다 — 시킨 대로 친 줄이 병합에서 스냅샷을 겨루게 한다.
-/// 말할 것이 있을 때만 자리를 잰다. `issues` 는 그 글을 낸 트래커의 줄이다.
-///
-/// **겨눌 곳이 그 줄을 알 때만 겨눈다**(리뷰 moai-ju21.70g). main 에 트래커가 없으면(이 가지에서 처음
-/// `init` 했다) 아무 줄도 안 겨누고, main 이 모르는 id(워크트리에서 맨 `moai` 로 세운 줄)를 든 줄은
-/// 그대로 둔다([`crate::hook::unsynced`]) — 겨누던 판은 시킨 대로 친 명령이 "못 찾았다"·"저장소가
-/// 아니다" 로 끝났다.
-fn toward_main(decision: Decision, repo: &Repo, issues: &[model::Issue]) -> Decision {
-    if decision == Decision::Pass {
-        return decision;
-    }
-    let Some(main) = crate::worktree::main_root(&repo.root) else { return decision };
-    let Ok(Some(there)) = crate::store::read_snapshot(&main.join(".moai").join("issues.jsonl")) else {
-        return decision;
-    };
-    let local = crate::hook::unsynced(issues, &there.issues);
-    decision.map_text(|why| crate::hook::toward(why, &main, &|w| local.contains(w)))
 }
 
 /// 판정하되, **막으면 옆 워크트리와 겹쳐 한 번 더 본다**(moai-w2iy).
@@ -337,17 +325,20 @@ fn settle(
 /// 읽는다 — 훅은 도구 호출마다 돌고, 집은 것이 없으면 뺄 것도 없다.
 fn away_of(repo: &Repo, issues: &[model::Issue]) -> crate::hook::Away {
     if report::wip(issues, &repo.config).is_empty() {
-        crate::hook::Away::default()
-    } else {
-        crate::worktree::away(&repo.root)
+        return crate::hook::Away::default();
     }
+    // **제 이름은 세션이 선 체크아웃에서 읽는다 — 트래커의 자리가 아니다**(moai-y7go). 트래커를
+    // 찾는 길이 딸린 워크트리를 루트로 옮기므로(`Repo::find_from`) `repo.root` 는 늘 루트다. 거기서
+    // 이름을 읽으면 워크트리 안에서 도는 세션이 제 이름을 잃고, 제 워크트리가 쥔 일이 통째로 "옆의
+    // 것" 이 되어 규칙 2 가 그 자리의 쓰기를 막는다.
+    crate::worktree::away(repo.here())
 }
 
 /// `away` 에 **누구의 것인지 모르는** 집은 줄(`hook::unsure`)을 더한다 — 옆 딸린 워크트리가 쥐었을 수
 /// 있거나 다른 세션이 마지막으로 집은 줄이다. 이 세션이 마지막으로 집은 줄도 함께 싣는다(`Away::picked`) —
 /// 모르는 줄 밑에 있어도 제 것이다. 제 이름은 `away` 의 것을 쓴다. 더한 것이 없으면 거짓이다.
 fn add_unsure(input: &Input, repo: &Repo, issues: &[model::Issue], away: &mut crate::hook::Away) -> bool {
-    let elsewhere = crate::worktree::held_elsewhere(&repo.root, issues, &repo.config);
+    let elsewhere = crate::worktree::held_elsewhere(repo.here(), issues, &repo.config);
     let picks = read_picks(input, repo, issues);
     let unsure = crate::hook::unsure(issues, &repo.config, &elsewhere, &away.own, &picks);
     if unsure.is_empty() {
@@ -469,15 +460,17 @@ fn safe_sid(input: &Input) -> Option<String> {
 
 /// 껍데기 토막 하나를 판정할 트래커.
 ///
-/// **누구의 눈으로 보는가는 딸린 워크트리가 정한다.** 세션과 가리킨 곳 중 딸린 워크트리가 있으면
-/// 그 워크트리의 일이다 — 이름이 곧 거기서 하는 일이다. main 은 모두의 집기가 모이는 자리라 그
-/// 눈으로는 워크트리의 일이 "옆의 것" 이 된다. 그래서 워크트리 세션이 `-C <main>` 으로 가리키면
-/// 세션의 눈(`Here`)으로 보고 — 안 그러면 `-C <main>` 한 번으로 규칙 1 을 넘는다 — main 에 선
-/// 세션이 `cd <워크트리>` 로 들어가면 그 워크트리의 눈(`There`)으로 본다. 에이전트 스레드는 자리가
-/// main 으로 돌아와 늘 이 모양으로 친다.
+/// **같은 저장소 안은 모두 세션의 눈이다**(moai-y7go). 트래커를 찾는 길이 딸린 워크트리를 루트로
+/// 옮기므로([`crate::store::Repo::find_from`]) `-C <워크트리>`·`cd <워크트리>` 는 세션이 이미 보는
+/// 그 트래커를 가리킨다 — 판정도 쓰기도 한 파일이다. 워크트리 세션이 `-C <루트>` 로 가리켜도 같다:
+/// 안 그러면 `-C <루트>` 한 번으로 규칙 1 을 넘는다. 누구의 초점인가는 여전히 **이름**이 가른다
+/// (`away_of` 가 `Repo::here` 로 읽는다), 가리킨 디렉터리가 아니다.
+///
+/// [`Route::There`] 는 그래서 **다른 저장소**의 트래커만 받는다 — 등록한 옆 프로젝트다(moai-23ky).
+/// 한때 같은 저장소의 옆 워크트리도 여기로 갔는데, 그때는 그 워크트리의 `.moai` 가 따로 있었다.
 #[derive(Debug, PartialEq)]
 enum Route {
-    /// 세션 자리의 트래커 — 같은 저장소의 main 워크트리를 가리켜도 여기다(`worktree::same_repo`).
+    /// 세션 자리의 트래커 — 같은 저장소 안이면 어디를 가리켜도 여기다(`worktree::same_repo`).
     Here,
     /// 가리킨 자리에 트래커가 없다. `moai` 가 스스로 실패하니 아무도 판정하지 않는다.
     Nowhere,

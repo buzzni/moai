@@ -28,7 +28,10 @@ struct Place {
 
 fn place() -> R<Place> {
     let repo = crate::store::Repo::discover()?;
-    let root = repo.root.clone();
+    // **선 체크아웃에 심는다**(리뷰 moai-71ht.jlh) — 트래커만 루트로 옮겨 간다(`Repo::here`).
+    // `repo.root` 로 심던 판은 워크트리에서 친 `skill install` 이 루트의 `.claude/` 를 고쳐,
+    // 이 가지에서 고친 훅은 이 가지에서 한 번도 안 돌고 남의 체크아웃만 더럽혔다.
+    let root = repo.here().to_path_buf();
     let exe = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
     let on_path = which("moai");
     let exe = skill::exe_name(&exe, on_path.as_deref());

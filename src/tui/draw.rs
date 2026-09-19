@@ -3797,7 +3797,7 @@ pub(super) mod tests {
         });
         let id = id.expect("에픽 안의 첫 줄이 이슈가 아니다");
         let root = std::path::PathBuf::from("/moai-a4i0-없는-뿌리");
-        a.repo = Some(crate::store::Repo { root: root.clone(), config: a.cfg.clone() });
+        a.repo = Some(crate::store::Repo::at(root.clone(), a.cfg.clone()));
         let commit = |hash: &str, subject: &str, tracker| crate::git::Commit { hash: hash.into(), subject: subject.into(), tracker };
         let lines = render(&mut a, 100, 30).join("\n");
         assert!(!lines.contains("커밋"), "표가 없는데 커밋 칸이 섰다\n{lines}");

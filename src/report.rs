@@ -485,6 +485,16 @@ pub struct Workplace {
     /// 실제로 만진 흔적이라 이름과 상관없이 쓴다.
     #[serde(skip)]
     pub touched: BTreeSet<String>,
+    /// 그 워크트리가 **제 손으로 적어 둔 집기**(`worktree::note_held` 의 `moai-held`). 짐작이 아니라
+    /// 기록이라 [`places`] 에서 **이름에게 지지 않는다** — 이름은 "이 일은 저 워크트리 것이겠다" 는
+    /// 짐작이고, 이것은 "여기서 집었다" 는 그 자리의 말이다. 안 치운 에픽 워크트리가 있다는 까닭으로
+    /// 이것을 버리던 판은, 그 에픽의 멤버를 집은 에이전트 격리 워크트리를 화면에서 통째로 지웠다
+    /// (리뷰 moai-71ht 셋째 판의 훑기).
+    ///
+    /// **언제나 읽는다** — 옆 스냅샷과 달리 작은 파일 하나라(`crate::worktree::workplaces` 의 문)
+    /// 이름으로 자리가 다 잡히는 빠른 길에서도 읽는다. 그래야 답이 남의 줄에 따라 흔들리지 않는다.
+    #[serde(skip)]
+    pub marked: BTreeSet<String>,
     /// 워크트리가 뜬 시각(RFC3339). 이름이 id 가 아닌 워크트리의 `holds` 에서 **뜨기 직전에 집은
     /// 줄만** 고르는 데 쓴다([`places`]). 못 읽었으면 `None` 이고, 그러면 `holds` 를 다 믿는다.
     #[serde(skip)]
@@ -610,12 +620,19 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
         // 때마다 새로 선다 — 윗금을 두면 워크트리가 뜬 뒤 main 에서 `in_progress → review` 로
         // 옮긴 산 일이 그 자리를 잃고, 세션을 시작할 때 떠 놓고 일을 나중에 받는 에이전트
         // 격리 워크트리는 아예 아무것도 못 쥔다.
+        //
+        // **`started_at` 으로 재지 않는다**(moai-hav1, 2026-09-19에 재고 그대로 두기로 했다).
+        // 그 필드(moai-u5bk)는 줄이 **처음** 첫 칸을 떠난 때라 되돌렸다 다시 집어도 안 바뀐다 —
+        // 여기서 묻는 것은 "이 워크트리가 뜰 무렵 이 줄이 움직였나" 이므로, 옛 줄을 오늘 다시 집어
+        // 에이전트 워크트리에서 하는 흔한 길이 통째로 자리를 잃는다. 되돌리기 어려운 쪽은 그쪽이다.
+        // 이 필드 전에 집힌 줄이 `None` 인 것도 그대로다 — 모르는 값으로 자리를 가를 수는 없다.
         let fresh = |i: &Issue| match (born, crate::model::parse_rfc3339(&i.status_since)) {
             (Some(b), Some(s)) => b - s <= STRANDED_GRACE_SECS,
             _ => true,
         };
         for (&id, &i) in &picked {
-            let here = named(i) || t.touched.contains(id) || (nameless && t.holds.contains(id) && fresh(i));
+            let here =
+                named(i) || t.marked.contains(id) || t.touched.contains(id) || (nameless && t.holds.contains(id) && fresh(i));
             if here && let Some(at) = found.get_mut(id) {
                 at.push(t);
             }
@@ -631,10 +648,21 @@ pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &
         let near: Vec<(&Workplace, usize)> =
             trees.iter().filter_map(|t| nearness(&epics, &stones, &t.names, i).map(|n| (t, n))).collect();
         let best = near.iter().map(|(_, n)| *n).min();
-        let by_name: Vec<&Workplace> = near.iter().filter(|(_, n)| Some(*n) == best).map(|(t, _)| *t).collect();
-        if !by_name.is_empty() {
-            found.insert(id, by_name);
+        let mut by_name: Vec<&Workplace> = near.iter().filter(|(_, n)| Some(*n) == best).map(|(t, _)| *t).collect();
+        if by_name.is_empty() {
+            continue;
         }
+        // **제 손으로 적어 둔 집기는 이름에게 안 밀린다**([`Workplace::marked`], 리뷰 moai-71ht 셋째
+        // 판의 훑기). 좁히는 까닭은 스냅샷으로 **짐작한** 둘째 자리가 남의 줄에 따라 흔들리는 것이었다
+        // — 표식은 짐작이 아니고 늘 읽으므로 흔들릴 것이 없다. 버리던 판은 안 치운 에픽 워크트리
+        // 하나가 그 에픽의 멤버를 집은 에이전트 격리 워크트리를 화면에서 지워, 이어받는 세션을 아무도
+        // 없는 자리로 보냈다.
+        for t in trees.iter().filter(|t| t.marked.contains(id)) {
+            if !by_name.iter().any(|w| std::ptr::eq(*w, t)) {
+                by_name.push(t);
+            }
+        }
+        found.insert(id, by_name);
     }
     // **묶음의 자리에는 그 묶음 이름의 워크트리도 선다**(사용자 결정 2026-09-19, moai-t3yj). 멤버마다
     // 제 이름 워크트리가 있으면 굴림은 그것만 내는데(moai-m62u), 가지와 커밋 안 한 일이 사는 곳은
@@ -3082,6 +3110,7 @@ mod tests {
             branch: t.label,
             holds: holds.iter().map(|s| s.to_string()).collect(),
             touched: BTreeSet::new(),
+            marked: BTreeSet::new(),
             born: None,
             unknown: false,
         }
@@ -3267,6 +3296,24 @@ mod tests {
         assert_eq!(at["argos-0003"].at().len(), 1, "늦게 만진 줄을 자리로 안 셌다");
     }
 
+    /// **제 손으로 적어 둔 집기는 이름에게 안 밀린다**(리뷰 moai-71ht 셋째 판의 훑기). 규약은 에픽
+    /// 이름으로 워크트리를 띄우고 머지 뒤에도 한동안 두는데, 그 멤버를 실제로 집은 것은 이름이 id 가
+    /// 아닌 에이전트 격리 워크트리다 — 이름으로만 좁히던 판은 그 자리를 화면에서 통째로 지워,
+    /// 이어받는 세션을 아무도 없는 워크트리로 보냈다. 이름이 답한 자리도 함께 선다.
+    #[test]
+    fn a_marked_worktree_stands_beside_the_named_one() {
+        let mut issues = vec![make("argos-0009", Kind::Epic, "in_progress"), make("argos-0001", Kind::Issue, "in_progress")];
+        issues[1].epic = Some("argos-0009".into());
+        let epic = tree("/r/.claude/worktrees/argos-0009", "worktree-argos-0009", &[]);
+        let mut agent = tree("/r/.claude/worktrees/agent-7f", "worktree-agent-7f", &[]);
+        agent.marked.insert("argos-0001".into());
+        let trees = vec![epic, agent];
+        let at = places(&issues, &cfg(), &trees, LATER);
+        let paths: Vec<&str> = at["argos-0001"].at().iter().filter_map(|w| w.path.to_str()).collect();
+        assert!(paths.iter().any(|p| p.ends_with("agent-7f")), "집었다고 적어 둔 자리를 이름이 지웠다 — {paths:?}");
+        assert!(paths.iter().any(|p| p.ends_with("argos-0009")), "이름이 답한 자리가 빠졌다 — {paths:?}");
+    }
+
     /// **같은 id 의 묶음 쌍둥이가 자리 잃은 줄을 가리지 않는다**(리뷰 moai-ya06). 머지가 한 id 에
     /// 두 줄을 남기고 뒷줄이 에픽이면, 줄 전체로 되짚는 지도(`by_id`)는 그 에픽을 내준다 — 그것을
     /// 종류로 거르던 판이 앞줄의 **집힌 이슈**를 통째로 버려, 세션이 죽은 줄이 `duplicate_id`
@@ -3434,6 +3481,19 @@ mod tests {
         let at = places(&issues, &cfg(), &trees, LATER);
         let counts: Vec<usize> = ["argos-0001", "argos-0002", "argos-0003"].iter().map(|id| at[*id].at().len()).collect();
         assert_eq!(counts, [0, 1, 1]);
+
+        // **되돌렸다 다시 집은 줄은 지금 집은 줄이다**(moai-hav1) — `started_at` 은 처음 뗀 때라
+        // 옛날인데, 이 워크트리가 뜰 무렵 움직인 것은 `status_since` 가 안다.
+        //
+        // **양쪽을 다 잰다.** 빠지는 쪽만 재던 판은 `started_at.or(status_since)` 로 바꾸는
+        // 되돌림을 초록으로 지났다(리뷰 moai-71ht.rv0) — 물려받은 줄이 최근 `started_at` 하나로
+        // 이 워크트리의 것이 되어, 격리 워크트리 하나가 자리 잃은 줄을 도로 다 가린다.
+        let mut repicked = issues.clone();
+        repicked[0].started_at = Some("2026-09-15T10:50:00Z".into());
+        repicked[1].started_at = Some("2026-08-01T00:00:00Z".into());
+        let at = places(&repicked, &cfg(), &trees, LATER);
+        assert_eq!(at["argos-0002"].at().len(), 1, "다시 집은 줄을 처음 뗀 때로 재 자리를 잃었다");
+        assert_eq!(at["argos-0001"].at().len(), 0, "물려받은 줄을 처음 뗀 때로 재 이 워크트리에 붙였다");
 
         agent.born = None;
         let trees = vec![agent];
