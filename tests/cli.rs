@@ -3370,6 +3370,36 @@ fn the_json_sweep_covers_every_command() {
     }
 }
 
+/// `moai idea` 의 공통 동사는 `moai issue` 의 것과 **같은 목록**이다(moai-g33x).
+///
+/// 손으로 베껴 두었을 때는 `Typed` 에 동사를 더해도 idea 만 조용히 안 따라왔고 컴파일
+/// 오류도 안 났다. 도움말에서 두 목록을 읽어 견주므로, 다시 베끼면 여기부터 붉어진다.
+/// idea 에만 있는 `promote` 는 그 차이 하나로 못박는다 — 그것 하나 때문에 `Typed` 를
+/// 그대로 못 쓰는 것이 이 이슈의 시작이었다.
+#[test]
+fn idea_and_issue_share_one_list_of_verbs() {
+    let s = init("ideaverbs");
+    let verbs = |ns: &str| -> Vec<String> {
+        ok(s.path(), &[ns, "--help"])
+            .lines()
+            .skip_while(|l| !l.starts_with("Commands:"))
+            .skip(1)
+            .take_while(|l| l.starts_with("  "))
+            .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+            .filter(|c| c != "help")
+            .collect()
+    };
+    let issue = verbs("issue");
+    let idea = verbs("idea");
+    assert!(issue.contains(&"add".to_string()), "종류 네임스페이스의 동사를 못 읽었다 — {issue:?}");
+    let only_idea: Vec<&String> = idea.iter().filter(|v| !issue.contains(v)).collect();
+    assert_eq!(only_idea, [&"promote".to_string()], "idea 에만 있어야 할 동사는 promote 하나다 — {idea:?}");
+    let missing: Vec<&String> = issue.iter().filter(|v| !idea.contains(v)).collect();
+    assert!(missing.is_empty(), "`moai idea` 가 {missing:?} 를 안 따라왔다 — `Typed` 를 접어 넣는 대신 베꼈나");
+    // 별명도 한 자리에서 온다 — 베낀 판에는 `alias = "ls"` 가 두 곳에 섰다.
+    ok(s.path(), &["idea", "ls", "--json"]);
+}
+
 /// `--json` 훑기가 실제로 부르는 명령들. **위 시험이 이 목록을 도움말과 견준다** —
 /// 목록을 여기 한 자리에 두어야 그 견줌이 뜻을 갖는다.
 const JSON_SWEEP: &[&str] = &[

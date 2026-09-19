@@ -512,14 +512,16 @@ pub enum Typed {
 
 /// idea 만 갖는 동사가 하나 있다 — 펼치기. 그래서 `Typed` 를 그대로 쓰지
 /// 못하고, `Typed` 에 넣으면 `moai epic promote` 가 생긴다.
+///
+/// **공통 동사는 베끼지 않고 [`Typed`] 를 접어 넣는다**(moai-g33x). 손으로 옮겨 적었을
+/// 때 `#[command(alias = "ls")]` 가 두 곳에 서고, `cmd/mod.rs` 가 `typed()` 를 안 지나고
+/// 같은 두 줄을 다시 적었다 — `Typed` 에 동사를 더하는 날 `moai idea` 만 조용히 안 따라오고
+/// 컴파일 오류도 안 났다. 접어 넣으면 `moai idea <동사>` 의 목록이 `Typed` 하나에서 나온다.
 #[derive(Subcommand, Debug)]
 pub enum IdeaCmd {
-    /// 담는다. 제목 하나면 된다
-    #[command(next_line_help = true)]
-    Add(AddArgs),
-    /// 펼치거나 목록을 낸다 (`ls` 도 같다)
-    #[command(alias = "ls")]
-    Show(ShowArgs),
+    /// `moai idea add`·`moai idea show`(`ls`) — 종류만 idea 로 고정한 같은 동사다.
+    #[command(flatten)]
+    Common(Typed),
     /// 에픽 하나 + 이슈 여럿으로 펼치고, 그 생각을 닫는다
     #[command(after_help = "  받는 마크다운은 `add --from` 과 같은 형식이다. 형식이 둘이 되면 어느 쪽
   문법인지 매번 틀린다.

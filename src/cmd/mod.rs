@@ -181,8 +181,9 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),
         Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
         Cmd::Milestone(t) => typed(&ctx, t, Kind::Milestone),
-        Cmd::Idea(IdeaCmd::Add(a)) => add::run(&ctx, a, Some(Kind::Idea)),
-        Cmd::Idea(IdeaCmd::Show(a)) => show::run(&ctx, a, Some(Kind::Idea)),
+        // **공통 동사는 `typed()` 를 지난다**(moai-g33x) — 여기서 `add`·`show` 를 다시 적으면
+        // `Typed` 에 동사를 더하는 날 idea 만 조용히 안 따라온다.
+        Cmd::Idea(IdeaCmd::Common(t)) => typed(&ctx, t, Kind::Idea),
         Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(&ctx, a),
     }
 }
