@@ -4159,7 +4159,7 @@ mod tests {
     fn a_file_that_appears_later_is_still_noticed() {
         let scratch = scratch("appear");
         let dir = scratch.path().to_path_buf();
-        let repo = Repo { root: dir.clone(), config: cfg() };
+        let repo = Repo::at(dir.clone(), cfg());
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         assert!(stamp.is_none() && load.issues.is_empty(), "판이 다르다");
@@ -4337,7 +4337,7 @@ mod tests {
         let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
         std::fs::write(dir.join(".moai/issues.jsonl"), line(&make("argos-0001", Kind::Epic))).unwrap();
 
-        let repo = Repo { root: dir.clone(), config: cfg() };
+        let repo = Repo::at(dir.clone(), cfg());
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         let (index, ground) = measure(&load.issues, &repo.config);
@@ -4380,7 +4380,7 @@ mod tests {
         crate::git::tests::run_git(&dir, None, &["init", "-q"]);
         git("feat: 처음 (argos-0001)");
 
-        let repo = Repo { root: dir.clone(), config: cfg() };
+        let repo = Repo::at(dir.clone(), cfg());
         // 탐색기가 여는 그대로 — 겹쳐 본 채로 연다(`cmd::tui::run`).
         let g = crate::worktree::gather(&repo, true).unwrap();
         let stamp = stamp_of(&repo);
@@ -4512,7 +4512,7 @@ mod tests {
         let scratch = scratch("watched");
         let dir = scratch.path().to_path_buf();
         std::fs::write(dir.join(".moai/issues.jsonl"), "").unwrap();
-        let repo = Repo { root: dir.clone(), config: cfg() };
+        let repo = Repo::at(dir.clone(), cfg());
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         let (index, ground) = measure(&load.issues, &repo.config);
@@ -4537,7 +4537,7 @@ mod tests {
         let scratch = scratch("inflight");
         let dir = scratch.path().to_path_buf();
         std::fs::write(dir.join(".moai/issues.jsonl"), "").unwrap();
-        let repo = Repo { root: dir.clone(), config: cfg() };
+        let repo = Repo::at(dir.clone(), cfg());
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         let (index, ground) = measure(&load.issues, &repo.config);
@@ -4558,7 +4558,7 @@ mod tests {
         let (mine_dir, mut a) = writable("receive-mine");
         let (theirs, _) = writable("receive-theirs");
         touch_outside(&theirs);
-        let other = Repo { root: theirs.path().to_path_buf(), config: cfg() };
+        let other = Repo::at(theirs.path().to_path_buf(), cfg());
         a.receive(prepare(&other, false));
         assert_eq!(shown(&a), ["argos-0001"], "남의 프로젝트에서 지은 줄을 들였다");
         assert!(a.trouble.is_none());
@@ -4757,7 +4757,7 @@ mod tests {
             format!("{}\n", serde_json::to_string(&make("argos-0001", Kind::Epic)).unwrap()),
         )
         .unwrap();
-        let repo = Repo { root: dir, config: cfg() };
+        let repo = Repo::at(dir, cfg());
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         let (index, ground) = measure(&load.issues, &repo.config);

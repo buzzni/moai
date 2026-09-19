@@ -288,7 +288,7 @@ fn home<'a>(repo: &'a Repo, origin: &'a crate::worktree::Origin, id: &str) -> &'
 
 /// 그 뿌리의 저널을 읽을 저장소. 설정은 이쪽 것을 빌린다 — 저널을 읽는 데는 안 쓴다.
 fn at_home(repo: &Repo, root: &std::path::Path) -> Repo {
-    Repo { root: root.to_path_buf(), config: repo.config.clone() }
+    Repo::at(root.to_path_buf(), repo.config.clone())
 }
 
 /// 낼 줄들의 `work` — **저널을 뿌리마다 한 번** 읽고, 그 가운데 `model:` 줄을 들 수 있는 줄만

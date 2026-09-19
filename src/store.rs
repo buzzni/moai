@@ -19,6 +19,17 @@ const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct Repo {
     pub root: PathBuf,
     pub config: Config,
+    /// 찾은 자리가 딸린 워크트리라 **루트로 옮겨 온 것인가** — 그 워크트리의 자리다(moai-y7go).
+    /// [`Repo::with_write`] 가 이것으로 "어디에 썼는지" 한 줄을 낸다. 조용히 딴 파일을 고치면
+    /// 시킨 쪽은 제가 친 자리에 썼다고 믿는다.
+    pub moved_from: Option<PathBuf>,
+}
+
+impl Repo {
+    /// 시험과 딴 자리를 여는 쪽이 쓰는 생성자 — 옮겨 온 것이 아니다.
+    pub fn at(root: PathBuf, config: Config) -> Repo {
+        Repo { root, config, moved_from: None }
+    }
 }
 
 /// 읽다가 만난 잘못된 줄. **한 줄이 깨졌다고 파일을 통째로 거부하지 않는다** —
@@ -114,7 +125,38 @@ impl Repo {
     }
 
     /// [`Repo::find`] 를 준 디렉터리에서 — 훅이 명령이 가리키는 트래커(`-C`·`cd`)를 찾을 때 쓴다.
+    ///
+    /// **딸린 워크트리에서 찾으면 루트의 트래커를 낸다**(moai-y7go, 2026-09-19 사용자 결정).
+    /// 워크트리의 `.moai` 를 고치면 병합에서 스냅샷이 충돌하고, 푸는 길이 도구 밖에만 남는다 —
+    /// 규약이 "트래커는 워크트리 안에서 쓰지 않는다" 인 까닭이다. 그 글을 훅으로 지키게 하던 판은
+    /// **명령 이름**을 보고 막아, `Edit`·`sed -i`·`echo >>`·사람의 터미널·예제 스크립트가 다
+    /// 비켜갔다(리뷰 moai-71ht.rv0). 고칠 자리는 트래커를 찾는 이 한 곳이다.
+    ///
+    /// **막지 않는다** — 옮겨 갈 뿐이라 게이트가 아니다. 읽기도 함께 옮겨 간다: 쓰기만 옮기면
+    /// 명령이 **갈라질 때의 낡은 줄**로 id 를 풀고 지금 줄에 쓴다.
+    ///
+    /// 옮겨 가지 않는 자리 둘 — 루트에 `.moai` 가 없거나([`Repo::find_from`] 이 위로 찾다 만난
+    /// 워크트리가 그 저장소의 것이 아니다) 주 체크아웃을 못 찾는 것(서브모듈·맨 저장소)이다.
+    /// 그때는 찾은 그대로다.
     pub fn find_from(dir: &Path) -> R<Option<Repo>> {
+        // **`MOAI_HERE` 는 이 체크아웃에 쓴다.** 일부러 갈라 놓는 자리다 — 옆 스냅샷이 갈라진 상태를
+        // 짓는 시험과, 그 워크트리에서만 쓰는 트래커를 든 사람이다. 옮기는 것은 막는 것이 아니라
+        // 옮기는 것이므로, 되돌릴 손잡이 하나를 두는 값이 싸다.
+        if std::env::var_os("MOAI_HERE").is_some_and(|v| !v.is_empty()) {
+            return Repo::found_at(dir);
+        }
+        Ok(Repo::found_at(dir)?.map(|found| match crate::worktree::tracker_root(&found.root) {
+            Some(root) if root != found.root => match Repo::rooted(root) {
+                Ok(there) => Repo { moved_from: Some(found.root), ..there },
+                Err(_) => found,
+            },
+            _ => found,
+        }))
+    }
+
+    /// [`Repo::find_from`] 의 **찾기만** — 딸린 워크트리를 루트로 옮기지 않는다. 옮기는 자가
+    /// 스스로를 부르지 않게 가른다.
+    fn found_at(dir: &Path) -> R<Option<Repo>> {
         let mut dir = dir.to_path_buf();
         loop {
             // **못 들여다보는 조상은 건너뛴다** (`is_dir` 이 `false` 로 접는다). 위로 찾는
@@ -131,7 +173,7 @@ impl Repo {
 
     fn rooted(root: PathBuf) -> R<Repo> {
         let config = Config::load(&root)?;
-        Ok(Repo { root, config })
+        Ok(Repo::at(root, config))
     }
 
     /// **준 디렉터리 그 자리의** `.moai/` 를 연다. 위로 찾지 않는다.
@@ -195,6 +237,13 @@ impl Repo {
     where
         F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
     {
+        // **어디에 썼는지 한 줄로 알린다**(moai-y7go) — 딸린 워크트리에서 친 `moai` 는 루트의
+        // 트래커를 고친다([`Repo::find_from`]). 조용히 옮기면 시킨 쪽은 제가 선 자리에 썼다고
+        // 믿고, 그 워크트리의 `.moai` 가 왜 안 바뀌는지를 딴 데서 찾는다. stderr 로 낸다 —
+        // `--json` 의 stdout 은 기계가 읽는 자리다.
+        if let Some(from) = &self.moved_from {
+            eprintln!("moai: {} 는 딸린 워크트리라 루트의 트래커에 쓴다 — {}", from.display(), self.dir().display());
+        }
         let _lock = Lock::acquire(&self.dir().join("lock"))?;
 
         // 락을 잡은 **뒤에** 읽는다. 밖에서 읽으면 두 프로세스가 같은 옛 상태를
@@ -736,7 +785,7 @@ mod tests {
     fn repo(name: &str) -> (Repo, Scratch) {
         let root = scratch(name);
         let config = Config::load(&root).unwrap();
-        (Repo { root: root.to_path_buf(), config }, root)
+        (Repo::at(root.to_path_buf(), config), root)
     }
 
     #[test]

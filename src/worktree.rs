@@ -394,8 +394,11 @@ fn side(
 ///
 /// **git 목록은 한 번만 읽는다** — 겹칠 줄과 이름 후보가 한 목록에서 나온다. 못 찾으면 `None`
 /// 이고, 남의 못 읽는 줄은 말없이 빼고 겹친다 — 훅은 무엇이 어긋나도 조용해야 한다.
-pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, crate::hook::Away)> {
-    let (me, trees) = others_of(&repo.root).ok()?;
+pub fn fresh(repo: &Repo, here: &Path, mine: Vec<Issue>) -> Option<(Vec<Issue>, crate::hook::Away)> {
+    // **이름은 세션이 선 체크아웃에서 읽는다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
+    // (`store::Repo::find_from`) 제 이름은 그 워크트리의 것이다. 트래커의 자리로 읽던 판은 워크트리
+    // 세션의 제 일이 겹쳐 본 판정에서 "옆의 것" 이 되어, 규칙 1 이 막아야 할 생성을 풀어 줬다.
+    let (me, trees) = others_of(here).ok()?;
     let away = crate::hook::Away {
         names: names(trees.iter().map(|(t, _)| t)),
         own: names(me.as_ref()),
@@ -741,6 +744,22 @@ fn born_of(dir: &Path) -> Option<String> {
     let at = head.split_once('>')?.1;
     let secs: i64 = at.split_whitespace().next()?.parse().ok()?;
     Some(crate::model::format_rfc3339(secs))
+}
+
+/// 이 트래커를 **쓸 자리** — 딸린 워크트리면 주 체크아웃의 같은 자리다(moai-y7go).
+///
+/// 워크트리의 `.moai` 를 고치면 병합에서 스냅샷이 충돌한다. [`crate::store::Repo::find_from`] 이
+/// 이것으로 옮겨 가, 워크트리 안에서 친 `moai` 도 루트의 트래커를 읽고 쓴다.
+///
+/// **옮길 곳에 트래커가 있어야 옮긴다** — 이 가지에서 처음 `init` 한 워크트리는 루트에 `.moai` 가
+/// 없다. 주 체크아웃이 없는 것(서브모듈·맨 저장소에 딸린 워크트리)도 그대로 둔다. 둘 다 `None` 이
+/// 아니라 **찾은 자리 그대로**를 내 부르는 쪽이 갈래를 하나만 들고 있게 한다.
+pub fn tracker_root(root: &Path) -> Option<PathBuf> {
+    if !is_linked(root) {
+        return Some(root.to_path_buf());
+    }
+    let main = main_root(root)?;
+    main.join(".moai").is_dir().then_some(main)
 }
 
 /// 이 트래커가 든 **제** 워크트리의 꼭대기. git 을 띄우지 않는다. 저장소가 아니면 없다.

@@ -1148,7 +1148,7 @@ mod tests {
         let cfg = s.join("broken.toml");
         std::fs::write(&cfg, "[[project]]\npath = \"/x\"\n[[project\n").unwrap();
         let open = || {
-            let repo = Repo { root: here.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
+            let repo = Repo::at(here.clone(), crate::config::Config::parse("prefix = \"argos\"\n").unwrap());
             let stamp = stamp_of(&repo);
             let load = repo.read().unwrap();
             let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
@@ -1187,7 +1187,7 @@ mod tests {
         let here = s.project("here", &[("argos-0009", "여기 줄", "todo")]);
         let cfg = s.register(&[&one, &two]);
 
-        let repo = Repo { root: here.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
+        let repo = Repo::at(here.clone(), crate::config::Config::parse("prefix = \"argos\"\n").unwrap());
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
@@ -1960,7 +1960,7 @@ mod tests {
         run(&main, &["worktree", "add", "-q", "../wt-self", "-b", "wt-self"]);
         // main 에서 그 일이 끝났다 — 딸린 워크트리의 스냅샷에는 아직 집힌 채다.
         write_lines(&main, &[("argos-0002", "집은 줄", "done")]);
-        let repo = Repo { root: s.join("wt-self"), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
+        let repo = Repo::at(s.join("wt-self"), crate::config::Config::parse("prefix = \"argos\"\n").unwrap());
         let own = repo.read().unwrap().issues;
         // 전제: 겹친 것으로 재면 끝난 일이 자리 없다로 선다. 시계는 줄의 때(2026-09-01)에서 한참 지난
         // 것으로 준다 — 방금 집은 줄의 틈에 걸리면 전제가 안 선다.
@@ -1994,7 +1994,7 @@ mod tests {
         // 옆에 스냅샷이 있으면 겹치는 읽기는 그 `.git` 을 안 재고, 자리 판정의 표식만 잰다.
         std::fs::create_dir_all(s.join("w1/.moai")).unwrap();
         std::fs::write(s.join("w1/.moai/issues.jsonl"), "").unwrap();
-        let repo = Repo { root: main.clone(), config: crate::config::Config::parse("prefix = \"argos\"\n").unwrap() };
+        let repo = Repo::at(main.clone(), crate::config::Config::parse("prefix = \"argos\"\n").unwrap());
         let stamp = stamp_of(&repo);
         let places = crate::worktree::place_marks(&repo.root);
         let mut g = crate::worktree::gather(&repo, true).unwrap();

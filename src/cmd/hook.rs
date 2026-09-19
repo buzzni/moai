@@ -88,47 +88,7 @@ pub fn run(_ctx: &Ctx, event: Event) -> R<Vec<String>> {
         return Ok(Vec::new());
     }
 
-    // **규칙 5 도 트래커를 찾기 전에 본다** — 규칙 4 와 같은 까닭이다. 묻는 것은 겨눈 곳의 git
-    // 배치뿐이고 스냅샷은 한 줄도 안 읽는다. 자리를 옮기고 나서 보는 것은 `-C` 와 `cd` 를 세션의
-    // 자리에 대고 풀어야 하기 때문이다.
-    if event == Event::PreToolUse
-        && let refusal @ Decision::Deny(_) = rule_five(&input)
-    {
-        return Ok(answer(event, refusal).into_iter().collect());
-    }
-
     Ok(decide(event, &input).map(|line| vec![line]).unwrap_or_default())
-}
-
-/// 규칙 5 — **트래커는 루트에서 쓴다**(moai-hwrm). 판단은 `hook::guard_tracker` 가 하고 여기는
-/// 겨눈 곳의 git 배치만 디스크에서 읽어 준다.
-///
-/// **`decide` 안에 두지 않는다**(리뷰 moai-71ht.yid). 거기는 `Repo::discover()` 아래라, 세션의
-/// 자리가 어느 트래커 밖이면 — 등록한 프로젝트를 밖에서 보는 세션, 스크래치패드로 옮겨 둔 자리 —
-/// 규칙이 통째로 꺼졌다. 그 자리에서 친 `moai -C <워크트리> add …` 는 그대로 워크트리의 스냅샷을
-/// 고쳤다. 이 규칙은 제 트래커의 줄을 한 줄도 안 보므로 트래커가 없어도 설 수 있다.
-fn rule_five(input: &Input) -> Decision {
-    let crate::hook::Call::Shell(cmd) = crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input) else {
-        return Decision::Pass;
-    };
-    let Ok(cwd) = std::env::current_dir() else { return Decision::Pass };
-    let (dirs, mine) = (std::cell::OnceCell::new(), std::cell::OnceCell::new());
-    // **겨눌 곳은 그 토막이 가리킨 트래커의 main 이다** — 세션의 것으로 겨누면 남의 프로젝트의
-    // 워크트리에 쓰려던 줄이 이쪽 트래커를 가리켜 돌아온다.
-    let home = |k: usize| -> Option<std::path::PathBuf> {
-        let aimed = dirs.get_or_init(|| crate::hook::aimed(cmd, &cwd));
-        let here = match aimed.get(k).and_then(Option::as_deref) {
-            // 가리킨 곳이 없으면 세션의 자리다 — 토막마다 다시 찾지 않는다(`Repo::find_from` 은
-            // `.moai/config.toml` 까지 읽는다).
-            None => mine.get_or_init(|| Repo::find_from(&cwd).ok().flatten().map(|r| r.root)).clone()?,
-            Some(dir) => Repo::find_from(dir).ok().flatten()?.root,
-        };
-        let main = crate::worktree::is_linked(&here).then(|| crate::worktree::main_root(&here))??;
-        // **거기에 트래커가 있어야 겨눈다** — 이 가지에서 처음 `init` 한 워크트리는 main 에
-        // `.moai` 가 없어, 내민 줄이 "저장소가 아니다" 로 끝난다.
-        main.join(".moai").is_dir().then_some(main)
-    };
-    crate::hook::guard_tracker(cmd, &home)
 }
 
 /// 답을 내되, 못 내면 아무 말도 하지 않는다.
@@ -193,11 +153,13 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 _ => (Vec::new(), Vec::new()),
             };
             let mine = |k: usize| !matches!(routes.get(k), Some(r) if *r != Route::Here);
-            // **규칙 5 는 여기 없다** — `run` 이 트래커를 찾기 전에 본다([`rule_five`]).
             let decision = settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
                 // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
-                Call::Shell(cmd) => crate::hook::guard_shell_in(issues, &repo.config, away, &repo.root, &cwd, cmd, &mine),
-                Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, &repo.root, path),
+                // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
+                // (`Repo::find_from`) 고치는 파일은 이 워크트리의 것이다. `repo.root` 로 세던 판은
+                // 워크트리의 파일이 죄다 루트의 `.claude/worktrees/…` 밑으로 보여 규칙 2 가 통째로 꺼졌다.
+                Call::Shell(cmd) => crate::hook::guard_shell_in(issues, &repo.config, away, here(&repo), &cwd, cmd, &mine),
+                Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, here(&repo), path),
                 Call::Review => crate::hook::guard_review(issues, &repo.config, away),
                 Call::Other => Decision::Pass,
             });
@@ -338,7 +300,7 @@ fn settle(
         return first;
     }
     if first.blocks()
-        && let Some((fresh, beside)) = crate::worktree::fresh(repo, issues.to_vec())
+        && let Some((fresh, beside)) = crate::worktree::fresh(repo, here(repo), issues.to_vec())
     {
         // **겹친 줄은 겹친 목록의 이름으로 잰다** — 옆 이름도 제 이름도 그 목록에서 읽는다(moai-m62u).
         // `base` 는 제 스냅샷에 집은 줄이 없으면 워크트리를 안 읽어([`away_of`]) 제 이름이 비는데, 겹쳐
@@ -378,10 +340,19 @@ fn settle(
 /// 읽는다 — 훅은 도구 호출마다 돌고, 집은 것이 없으면 뺄 것도 없다.
 fn away_of(repo: &Repo, issues: &[model::Issue]) -> crate::hook::Away {
     if report::wip(issues, &repo.config).is_empty() {
-        crate::hook::Away::default()
-    } else {
-        crate::worktree::away(&repo.root)
+        return crate::hook::Away::default();
     }
+    // **제 이름은 세션이 선 체크아웃에서 읽는다 — 트래커의 자리가 아니다**(moai-y7go). 트래커를
+    // 찾는 길이 딸린 워크트리를 루트로 옮기므로(`Repo::find_from`) `repo.root` 는 늘 루트다. 거기서
+    // 이름을 읽으면 워크트리 안에서 도는 세션이 제 이름을 잃고, 제 워크트리가 쥔 일이 통째로 "옆의
+    // 것" 이 되어 규칙 2 가 그 자리의 쓰기를 막는다.
+    crate::worktree::away(here(repo))
+}
+
+/// 이 세션이 **선 체크아웃** — 트래커를 루트로 옮겨 왔으면 옮겨 오기 전의 자리다(`Repo::moved_from`).
+/// 규칙 2 가 세는 파일과 워크트리 이름이 이것으로 잰다. 옮겨 온 것이 아니면 트래커의 자리 그대로다.
+fn here(repo: &Repo) -> &Path {
+    repo.moved_from.as_deref().unwrap_or(&repo.root)
 }
 
 /// `away` 에 **누구의 것인지 모르는** 집은 줄(`hook::unsure`)을 더한다 — 옆 딸린 워크트리가 쥐었을 수
@@ -411,7 +382,7 @@ fn releasing(input: &Input, repo: &Repo, issues: &[model::Issue]) -> (crate::hoo
         return (away, None);
     }
     let still = !add_unsure(input, repo, issues, &mut away) || !crate::hook::held(issues, &repo.config, &away).is_empty();
-    let latest = still.then(|| crate::worktree::fresh(repo, issues.to_vec())).flatten().map(|(fresh, _)| fresh);
+    let latest = still.then(|| crate::worktree::fresh(repo, here(repo), issues.to_vec())).flatten().map(|(fresh, _)| fresh);
     (away, latest)
 }
 
