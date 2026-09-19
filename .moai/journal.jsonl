@@ -5196,3 +5196,10 @@
 {"ts":"2026-09-19T01:41:06Z","id":"moai-49x7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"남긴 주석을 닫는 글에 잇는 자가 셋이라 지우는 차례에 따라 바이트가 갈린다 (리뷰 12·14)"}
 {"ts":"2026-09-19T01:41:12Z","id":"moai-t3yj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"가장 가까운 이름만 자리를 내면서 에픽의 자리에서 에픽 워크트리가 빠진다"}
 {"ts":"2026-09-19T01:41:15Z","id":"moai-bz9m","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"낱말을 더할 때 끝 쉼표 없는 여러 줄 배열의 모양이 뒤집힌다 (리뷰 13)"}
+{"ts":"2026-09-19T01:44:39Z","id":"moai-v5rh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=125000 (medium — put_value/merge_words 의 주석 남기기와 시험)"}
+{"ts":"2026-09-19T01:44:42Z","id":"moai-2l74","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=95000 (high — 락 경로와 링크 TMPDIR 재현)"}
+{"ts":"2026-09-19T01:44:46Z","id":"moai-1upp.4wg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=548809 (max — 에픽 끝 리뷰. 서브에이전트 4,595,211 토큰은 따로)"}
+{"ts":"2026-09-19T01:44:48Z","id":"moai-1upp.4wg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: 1~7·9·11 을 64c7323 으로. 넘김: 8·9·10 인라인 표는 idea moai-sz91, 12·14 닫는 글 잇는 자는 idea moai-49x7, 13 낱말 더하기 모양은 idea moai-bz9m, 15 는 이 셋을 담은 것으로 갈음한다"}
+{"ts":"2026-09-19T01:44:53Z","id":"moai-v5rh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-19T01:44:55Z","id":"moai-2l74","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-19T01:45:04Z","id":"moai-1upp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 둘(v5rh·2l74)과 리뷰(1upp.4wg)를 156e4f3 으로 develop 에 병합하고 닫았다. 남은 멤버는 moai-889l 하나 — 훅이 링크 철자의 file_path 를 저장소 밖으로 본다. 고치는 자는 사용자가 정해 본문에 있다(있는 가장 긴 윗자리를 canonicalize 해 root 와 견준다). src/hook.rs 를 5a 가 쥐어 첫 칸에 둔다, 일정 문제라 미루지 않는다. 그 멤버가 끝나야 링크 TMPDIR 에서 cargo test 가 초록이다(지금 그 둘만 붉다). 담은 idea: moai-sz91(인라인 표), moai-49x7(닫는 글 잇는 자·끝 줄바꿈), moai-bz9m(낱말 더하기 모양)."}
