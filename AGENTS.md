@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:5d298d8e -->
+<!-- moai:begin v:0.1.0 hash:c7983718 -->
 ## 이슈 트래커 — moai
 
 이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
@@ -86,7 +86,7 @@ PLAN
 
 - `korean-skills:humanizer` 로 AI 티를 걷고, 20줄을 넘으면 `humanize-korean:humanize-korean` 을 더
   거친 뒤, 마지막에 `korean-skills:grammar-checker` 로 맞춤법·띄어쓰기를 본다
-- id·명령·경로·수·코드 조각과 꼴이 정해진 줄(`model: …`·`다음: …`·`Regression-of: …`)은 그대로 둔다
+- id·명령·경로·수·코드 조각과 꼴이 정해진 줄(`model: …`·`다음: …`·`Regression-of: …`·`요약: 원문 …`)은 그대로 둔다
 - 두 플러그인은 `moai skill install` 이 함께 깐다. 자세한 것은 `references/commands.md` 의 "한국어 글" 에 있다
 
 ### 지금 범위가 아닌 것은 담는다
@@ -227,7 +227,7 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 
     moai add '리뷰 — <무엇을 보는가>' -t review --parent <보는 이슈> -b '<무엇을 왜 보는가>'
     moai mv <id> in_progress      리뷰를 시작할 때
-    moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로
+    moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로(64KB 를 넘으면 요약)
     moai mv <id> done -m '<무엇을 반영하고 무엇을 넘겼나>'
 
 관점(`-b`)과 닫는 한 줄(`-m`)은 규칙이 **실제로 요구한다.** 없이 부르면
@@ -237,6 +237,8 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 **원문과 판단을 두 노트로 가른다** — 리뷰어가 한 말과 이쪽이 정한 것은 다른
 글이다. 넘긴 것은 **이슈 번호와 함께** 적는다. "넘겼다" 만 적힌 줄은 아무도
 다시 안 본다. 원문을 어디서 찾는지는 스킬의 `references/commands.md` 에 있다.
+원문이 64KB 를 넘으면 요약한다 — 첫 줄에 `요약: 원문 <크기>KB agent-<task-id>` 를 적고,
+건마다 번호와 자리는 둔 채 문장만 줄인다. 울타리와 들여쓰기는 그대로 둔다.
 
 **4. 사람의 tmux 서버를 죽이지 않는다.** `-L`·`-S` 없는 `tmux kill-server`·`kill-session` 과 tmux 를
 겨눈 `pkill`·`killall` 을 막는다. 세션이 tmux 안에서 돌면 `$TMUX` 가 서 있어,
