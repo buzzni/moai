@@ -2702,7 +2702,14 @@ impl App {
     pub fn key(&mut self, k: KeyEvent) {
         // 쓰기의 알림은 **다음 키 하나에 걷힌다.** 읽었으면 할 일을 다 했고, 이 키가 또
         // 쓰기라면 그 쓰기가 제 알림을 새로 단다.
-        self.notice = None;
+        //
+        // **메뉴만 만지는 키는 그 하나로 안 센다**(moai-g56h) — 상태를 대는 항목은 메뉴를 열린
+        // 채로 두므로([`menu::feed`]), `SPC v w` 가 단 알림을 읽고 메뉴를 닫는 Esc 가 곧 "다음 키"
+        // 다. 거기서 걷으면 그 알림은 메뉴 창이 떠 있는 동안만 살고, 메뉴를 닫자마자 사라진다 —
+        // 알림을 남긴 키와 그것을 지우는 키가 한 누름이다. 메뉴가 열린 채 아무 동작도 안 돈 키
+        // (Esc·SPC 닫기, Bksp 한 층 위, 모르는 키, 한 층 내려가기)에는 도로 세운다.
+        let carried = self.notice.take();
+        let in_menu = menu::open(&self.chord);
         // raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. **어느 모드에서든 먼저 받는다** — 글을
         // 받는 중에 글자로 먹으면 검색칸에 `c` 가 찍히고, 폼·창·물음에서 막히면 멈춘 화면에서
         // 나갈 길이 없다. 적던 것은 그 길로 날아간다.
@@ -2725,7 +2732,12 @@ impl App {
         // 목록은 여기서 **한 번** 센다 — 커서의 사실(`Ctx::leaf`)과 이동의 끝(`step`)이 같은 줄을 읽는다.
         let rows = self.rows();
         let ctx = self.key_ctx(&rows);
-        let Some(act) = menu::feed(&mut self.chord, &ctx, k) else { return };
+        let Some(act) = menu::feed(&mut self.chord, &ctx, k) else {
+            if in_menu {
+                self.notice = carried;
+            }
+            return;
+        };
         // **되는지는 한 판정이 가른다**([`keys::Browse::enabled`]) — 키 바가 같은 판정으로
         // 적을 키를 고르므로 둘이 안 갈린다. 층에서 뜻이 없는 키는 왜 안 되는지를 한 줄로
         // 말한다. `n` 은 층에서도 듣는다 — 커서의 프로젝트를 담을 곳으로 박는다([`App::open_form`]).
@@ -5607,6 +5619,28 @@ mod tests {
         a.hit("SPC v w");
         let said = a.notice.clone().expect("켰는데 겹칠 것이 없다고 안 한다");
         assert!(said.contains("옆 워크트리 없음") && !said.contains("못 찾았다"), "{said}");
+    }
+
+    /// **메뉴를 닫는 Esc 는 토글이 낸 알림을 함께 지우지 않는다**(moai-g56h). 상태를 대는 항목은
+    /// 메뉴를 열린 채로 두므로(사용자 결정 2026-09-19, moai-osgw), 알림을 읽고 메뉴를 닫는 Esc 가
+    /// 곧 "다음 키" 다 — 거기서 걷으면 알림을 낸 키와 지우는 키가 한 누름이 되고, 알림은 메뉴
+    /// 창이 떠 있는 동안만 산다. 걷는 것은 메뉴 밖의 다음 키다.
+    #[test]
+    fn closing_the_menu_keeps_the_notice_the_toggle_left() {
+        let (_scratch, mut a) = writable("menu-notice");
+        a.read = lost;
+        assert!(a.worktree, "시험의 전제 — 겹쳐 보기가 켜진 채로 시작한다");
+        a.hit("SPC v w Esc");
+        a.hit("SPC v w");
+        let said = a.notice.clone().expect("켰는데 못 찾은 까닭을 안 댄다");
+        assert!(super::menu::open(&a.chord), "시험의 전제 — 토글을 누르고도 메뉴가 떠 있다");
+
+        a.hit("Esc");
+        assert!(!super::menu::open(&a.chord), "Esc 가 메뉴를 안 닫았다");
+        assert_eq!(a.notice.as_deref(), Some(said.as_str()), "메뉴를 닫는 Esc 가 알림을 함께 지웠다");
+
+        a.hit("j");
+        assert_eq!(a.notice, None, "메뉴 밖의 다음 키가 알림을 안 걷었다");
     }
 
     fn prepare_found(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
