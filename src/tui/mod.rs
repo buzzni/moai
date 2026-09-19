@@ -602,7 +602,7 @@ pub struct App {
     /// (`query::unread`). 줄·읽음·사람이 바뀔 때만 센다(`take`·`adopt_read`·`mark_read`) — 줄마다
     /// 프레임마다, 보기 토글마다 담당·조상을 다시 풀지 않는다.
     pub unread: std::collections::BTreeSet<String>,
-    /// 내 설정에 적힌 읽음 — 이슈 id → 마지막으로 본 때. 띄울 때 읽고, 읽음을 적을 때 락 안에서 읽은
+    /// 내 설정에 적힌 읽음 — 이슈 id → 마지막으로 본 줄의 도장(moai-lyc1). 띄울 때 읽고, 읽음을 적을 때 락 안에서 읽은
     /// 파일의 것으로, 그 파일이 바뀌면 걸음이 다시 읽는다([`App::follow_config`]) — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다.
     seen: std::collections::BTreeMap<String, String>,
     /// 내가 누구인가 — `이름 (메일)`. **띄울 때, 프로젝트를 옮길 때, 묻는 칸에서 사람을 받을 때만**
@@ -1817,8 +1817,9 @@ impl App {
     /// 줄을 읽었다" 가 두 표면에서 다른 상태를 남겼다.
     ///
     /// **이미 읽은 줄은 다시 안 적는다** — 가르는 것은 **락 안에서 읽은 파일의 표**다. 화면이 든 표는
-    /// 옆 터미널의 `moai read` 를 모르므로 그것으로 가르면, 옆에서 방금 적은 새 때를 이 화면의 옛 때
-    /// (`App::now` 는 마지막으로 읽은 때다)로 덮는다. 적고 나면 그 파일의 표를 든다.
+    /// 옆 터미널의 `moai read` 를 모르므로 그것으로 가르면, 옆에서 방금 적은 새 도장을 이 화면이 든
+    /// 낡은 줄의 도장으로 덮는다. 적는 값은 **이 화면이 그린 줄의 `updated_at`** 이다(moai-lyc1) — 본 것이
+    /// 그 줄이다. 적고 나면 그 파일의 표를 든다.
     ///
     /// **내 설정에만 쓴다**(`user_config::update`) — 트래커 파일은 안 건드린다. 락을 잡는 쓰기라
     /// 실패할 수 있고, 그때는 화면도 안 바꾼다: 다음에 다시 누르면 된다. 설정 자리를 모르면
@@ -1826,7 +1827,7 @@ impl App {
     fn mark_read(&mut self, act: keys::Browse, rows: &[Row]) {
         use keys::Browse as B;
         let cur = self.current_of(rows);
-        let mut targets: Vec<usize> = match act {
+        let targets: Vec<usize> = match act {
             B::Read => match &cur {
                 Some(Row::Item(e)) => e.at().into_iter().collect(),
                 _ => Vec::new(),
@@ -1845,22 +1846,16 @@ impl App {
             }
             _ => return,
         };
-        targets.sort_unstable();
-        targets.dedup();
-        // 같은 id 는 한 번 — 뒷줄이 이긴다(`nav::Index::find` 와 같은 자).
-        let lines: std::collections::BTreeMap<&str, &Issue> =
-            targets.iter().map(|&at| (self.issues[at].id.as_str(), &self.issues[at])).collect();
-        if lines.is_empty() {
+        // 고른 줄의 **id** 로 적는다 — 같은 id 의 쌍둥이 줄까지 넘겨야 늦은 도장이 적혀 [NEW] 가 내린다
+        // (`query::read_marks_of`). 가리킨 줄 하나만 넘기면 `unread` 가 앞줄로 세운 [NEW] 가 영영 남는다.
+        let ids: std::collections::BTreeSet<&str> = targets.iter().map(|&at| self.issues[at].id.as_str()).collect();
+        if ids.is_empty() {
             self.notice = Some("읽음으로 적을 것이 없다".into());
             return;
         }
-        let now = self.now.clone();
-        let pick = |seen: &std::collections::BTreeMap<String, String>| -> std::collections::BTreeMap<String, String> {
-            lines
-                .values()
-                .filter(|i| crate::query::changed_since_seen(i, seen))
-                .map(|i| (i.id.clone(), now.clone()))
-                .collect()
+        let issues = &self.issues;
+        let pick = |seen: &std::collections::BTreeMap<String, String>| {
+            crate::query::read_marks_of(issues.iter().filter(|i| ids.contains(i.id.as_str())), seen)
         };
         let written: Vec<String> = match self.user_config.clone() {
             Some(path) => {
@@ -3465,7 +3460,7 @@ mod tests {
             i.assignee = Some("레이븐".into());
             i.assignee_email = Some("raven@example.com".into());
         }
-        // 시계를 고정한다 — 읽음은 `App::now` 로 적힌다(`an_unread_line_wears_new_until_it_is_read` 와 같은 까닭).
+        // 시계를 고정한다(`an_unread_line_wears_new_until_it_is_read` 와 같은 까닭).
         a.now = "2026-09-13T13:42:07Z".into();
         a.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
@@ -3484,6 +3479,10 @@ mod tests {
         a.hit("SPC m g");
         let left: Vec<&str> = a.unread.iter().map(String::as_str).collect();
         assert_eq!(left, ["argos-0002", "argos-0009"], "에픽 하나를 읽었는데 남은 것이 다르다");
+        // 적히는 것은 **본 줄의 도장**이다 — 누른 때(`App::now`)가 아니다(moai-lyc1).
+        let line = a.issues.iter().find(|i| i.id == "argos-0001").unwrap().updated_at.clone();
+        assert_ne!(line, a.now, "시험이 두 값을 못 가른다");
+        assert_eq!(a.seen.get("argos-0001"), Some(&line), "본 줄의 updated_at 이 아니라 다른 값을 적었다");
     }
 
     /// **바구니도 이슈 폴더도 묶음이 아니다**(moai-j038.vna). 마일스톤이 하나라도 있으면 에픽 없는 줄과
@@ -3536,7 +3535,7 @@ mod tests {
 
     /// **`r` 은 `moai read <id>` 와 같은 자다**(moai-j038.vna) — 내게 온 줄이 아니어도, 누군지 몰라도 그
     /// 줄을 적는다. 이미 읽은 줄은 **락 안에서 읽은 파일의 표**로 가려 다시 안 적는다 — 옆 터미널의
-    /// `moai read` 가 적은 새 때를 이 화면의 옛 때로 덮지 않고, 적고 나면 그 표를 들어 [NEW] 가 따라 걷힌다.
+    /// `moai read` 가 적은 새 도장을 이 화면이 든 낡은 줄의 도장으로 덮지 않고, 적고 나면 그 표를 들어 [NEW] 가 따라 걷힌다.
     #[test]
     fn r_marks_like_the_cli_and_never_rewinds_a_mark_written_elsewhere() {
         let s = Scratch::new("read-marks-tui");
@@ -3556,18 +3555,20 @@ mod tests {
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
         a.hit("r");
         assert_eq!(a.notice.as_deref(), Some("✓ 읽음 · argos-0009"));
-        assert!(std::fs::read_to_string(&config).unwrap().contains("argos-0009 = \"2026-09-13T13:42:07Z\""));
+        // 적히는 것은 누른 때가 아니라 **본 줄의 도장**이다(moai-lyc1).
+        let stamp = a.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
+        assert!(std::fs::read_to_string(&config).unwrap().contains(&format!("argos-0009 = \"{stamp}\"")));
 
-        // 옆 터미널이 더 늦은 때로 적어 두었다 — 이 화면은 그것을 모른다.
-        let later = "[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\nargos-0009 = \"2026-09-13T13:42:07Z\"\n";
-        std::fs::write(&config, later).unwrap();
+        // 옆 터미널이 더 늦은 도장으로 적어 두었다 — 이 화면은 그것을 모른다.
+        let later = format!("[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\nargos-0009 = \"{stamp}\"\n");
+        std::fs::write(&config, &later).unwrap();
         a.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
         assert!(a.unread.contains("argos-0001"), "화면의 표가 옆에서 적은 것을 벌써 안다 — 시험의 전제가 틀렸다");
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0001").expect("줄이 없다");
         a.hit("r");
         assert_eq!(a.notice.as_deref(), Some("읽음으로 적을 것이 없다"), "이미 읽은 줄을 다시 적었다");
-        assert_eq!(std::fs::read_to_string(&config).unwrap(), later, "옆에서 적은 새 때를 옛 때로 덮었다");
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), later, "옆에서 적은 새 도장을 낡은 도장으로 덮었다");
         assert!(!a.unread.contains("argos-0001"), "적은 뒤 파일의 표를 안 들었다");
 
         // 옆에서 적은 읽음은 **누르지 않아도** 든다 — 걸음이 설정 파일의 표식을 잰다(moai-en4u).
@@ -3578,6 +3579,29 @@ mod tests {
         assert!(a.unread.contains("argos-0002"), "걸음 전에 들었다 — 시험의 전제가 틀렸다");
         a.follow();
         assert!(!a.unread.contains("argos-0002"), "옆에서 적은 읽음을 걸음이 안 들었다");
+    }
+
+    /// **같은 id 의 쌍둥이 줄은 늦은 도장으로 읽는다**(moai-7c50.exy) — `r`·`SPC m a` 가 가리킨 뒷줄의
+    /// 도장만 적으면 [NEW] 를 세운 앞줄이 늘 더 늦어, 몇 번을 눌러도 "읽음으로 적을 것이 없다" 만 나온다.
+    #[test]
+    fn r_on_a_duplicate_id_clears_new_for_both_twins() {
+        let mut early = make("argos-0009", Kind::Issue);
+        early.updated_at = "2026-09-05T00:00:00Z".into();
+        let issues = vec![make("argos-0001", Kind::Epic), early, make("argos-0009", Kind::Issue)];
+        for act in ["r", "SPC m a"] {
+            let mut a = App::new(issues.clone(), cfg(), Path::new());
+            for i in &mut a.issues {
+                i.assignee = Some("레이븐".into());
+                i.assignee_email = Some("raven@example.com".into());
+            }
+            a.me = Some("레이븐 (raven@example.com)".into());
+            a.recount_unread();
+            assert!(a.unread.contains("argos-0009"), "{act}: 시험의 전제가 틀렸다 — {:?}", a.unread);
+            a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
+            a.hit(act);
+            assert!(!a.unread.contains("argos-0009"), "{act}: 쌍둥이의 [NEW] 가 안 내렸다 — {:?}", a.seen);
+            assert_eq!(a.seen.get("argos-0009").map(String::as_str), Some("2026-09-05T00:00:00Z"), "{act}");
+        }
     }
 
     /// **바로 누르던 키는 더는 뜻이 없다**(moai-7sjm) — `f`·`n`·`w`·`a`·`d`·`m`·Delete·F키. 목록·

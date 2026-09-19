@@ -192,6 +192,15 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                         toward_main(said, other, &load.issues)
                     });
                 }
+                // **한국어 글에는 다듬기를 비춘다**(moai-6rrb). 막는 답이 이긴다 — 막힌 명령은 글을
+                // 안 넣었다. 트래커가 없는 자리를 가리킨 토막도 안 넣는다 — 그 `moai` 는 스스로 실패한다.
+                // 깔렸는지는 비출 때만 장부를 읽는다.
+                decision = decision.then(|| {
+                    match crate::hook::korean_write(cmd, &|k| routes.get(k) != Some(&Route::Nowhere)) {
+                        Some(at) => crate::hook::korean_notice(&at, &crate::cmd::skill::korean_missing(&repo.root)),
+                        None => Decision::Pass,
+                    }
+                });
             }
             decision
         }

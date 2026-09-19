@@ -23,3 +23,6 @@
 
 # auto-added by aplus-dev-studio (block env secrets)
 .env.*
+
+# im-not-ai 의 humanize-korean 이 cwd 에 만드는 윤문 작업 폴더. 저장소 밖에서 돌리는 것이 먼저이고 이 줄은 안전망이다 (moai-5wk4)
+_workspace/
