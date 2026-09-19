@@ -88,7 +88,47 @@ pub fn run(_ctx: &Ctx, event: Event) -> R<Vec<String>> {
         return Ok(Vec::new());
     }
 
+    // **규칙 5 도 트래커를 찾기 전에 본다** — 규칙 4 와 같은 까닭이다. 묻는 것은 겨눈 곳의 git
+    // 배치뿐이고 스냅샷은 한 줄도 안 읽는다. 자리를 옮기고 나서 보는 것은 `-C` 와 `cd` 를 세션의
+    // 자리에 대고 풀어야 하기 때문이다.
+    if event == Event::PreToolUse
+        && let refusal @ Decision::Deny(_) = rule_five(&input)
+    {
+        return Ok(answer(event, refusal).into_iter().collect());
+    }
+
     Ok(decide(event, &input).map(|line| vec![line]).unwrap_or_default())
+}
+
+/// 규칙 5 — **트래커는 루트에서 쓴다**(moai-hwrm). 판단은 `hook::guard_tracker` 가 하고 여기는
+/// 겨눈 곳의 git 배치만 디스크에서 읽어 준다.
+///
+/// **`decide` 안에 두지 않는다**(리뷰 moai-71ht.yid). 거기는 `Repo::discover()` 아래라, 세션의
+/// 자리가 어느 트래커 밖이면 — 등록한 프로젝트를 밖에서 보는 세션, 스크래치패드로 옮겨 둔 자리 —
+/// 규칙이 통째로 꺼졌다. 그 자리에서 친 `moai -C <워크트리> add …` 는 그대로 워크트리의 스냅샷을
+/// 고쳤다. 이 규칙은 제 트래커의 줄을 한 줄도 안 보므로 트래커가 없어도 설 수 있다.
+fn rule_five(input: &Input) -> Decision {
+    let crate::hook::Call::Shell(cmd) = crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input) else {
+        return Decision::Pass;
+    };
+    let Ok(cwd) = std::env::current_dir() else { return Decision::Pass };
+    let (dirs, mine) = (std::cell::OnceCell::new(), std::cell::OnceCell::new());
+    // **겨눌 곳은 그 토막이 가리킨 트래커의 main 이다** — 세션의 것으로 겨누면 남의 프로젝트의
+    // 워크트리에 쓰려던 줄이 이쪽 트래커를 가리켜 돌아온다.
+    let home = |k: usize| -> Option<std::path::PathBuf> {
+        let aimed = dirs.get_or_init(|| crate::hook::aimed(cmd, &cwd));
+        let here = match aimed.get(k).and_then(Option::as_deref) {
+            // 가리킨 곳이 없으면 세션의 자리다 — 토막마다 다시 찾지 않는다(`Repo::find_from` 은
+            // `.moai/config.toml` 까지 읽는다).
+            None => mine.get_or_init(|| Repo::find_from(&cwd).ok().flatten().map(|r| r.root)).clone()?,
+            Some(dir) => Repo::find_from(dir).ok().flatten()?.root,
+        };
+        let main = crate::worktree::is_linked(&here).then(|| crate::worktree::main_root(&here))??;
+        // **거기에 트래커가 있어야 겨눈다** — 이 가지에서 처음 `init` 한 워크트리는 main 에
+        // `.moai` 가 없어, 내민 줄이 "저장소가 아니다" 로 끝난다.
+        main.join(".moai").is_dir().then_some(main)
+    };
+    crate::hook::guard_tracker(cmd, &home)
 }
 
 /// 답을 내되, 못 내면 아무 말도 하지 않는다.
@@ -153,26 +193,14 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 _ => (Vec::new(), Vec::new()),
             };
             let mine = |k: usize| !matches!(routes.get(k), Some(r) if *r != Route::Here);
-            // **규칙 5 가 먼저다**(moai-hwrm) — 겨눈 트래커가 딸린 워크트리면 그 줄은 어느 규칙을
-            // 지나든 병합에서 충돌할 스냅샷을 고친다. 자리를 묻는 것은 그 토막이 쓰기일 때뿐이다
-            // (`hook::guard_tracker` 가 먼저 가른다) — 대부분의 호출은 디스크를 안 짚는다.
-            let dirs = std::cell::OnceCell::new();
-            let linked = |k: usize| -> bool {
-                let aimed: &Vec<Option<std::path::PathBuf>> = dirs.get_or_init(|| crate::hook::aimed(cmd_of(call), &cwd));
-                let at = aimed.get(k).cloned().flatten().unwrap_or_else(|| cwd.clone());
-                matches!(Repo::find_from(&at), Ok(Some(found)) if crate::worktree::is_linked(&found.root))
-            };
-            let rule_five = match call {
-                Call::Shell(cmd) => crate::hook::guard_tracker(cmd, &|_| true, &linked),
-                _ => Decision::Pass,
-            };
-            let decision = rule_five.then(|| settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
+            // **규칙 5 는 여기 없다** — `run` 이 트래커를 찾기 전에 본다([`rule_five`]).
+            let decision = settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
                 // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
                 Call::Shell(cmd) => crate::hook::guard_shell_in(issues, &repo.config, away, &repo.root, &cwd, cmd, &mine),
                 Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, &repo.root, path),
                 Call::Review => crate::hook::guard_review(issues, &repo.config, away),
                 Call::Other => Decision::Pass,
-            }));
+            });
             // 답마다 **그 답을 낸 트래커의 main** 으로 겨눈다 — 합친 뒤에 겨누면 남의 줄을 제 main 으로 보낸다.
             let decision = toward_main(decision, &repo, &load.issues);
             // 다른 트래커를 가리키는 토막은 **그 트래커가 본다**(moai-23ky). 판정을 잇는 차례는
@@ -478,14 +506,6 @@ fn safe_sid(input: &Input) -> Option<String> {
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
         .collect();
     (!safe.is_empty()).then_some(safe)
-}
-
-/// 이 호출이 친 명령줄 — 껍데기가 아니면 빈 글자다(`hook::aimed` 이 아무 토막도 안 낸다).
-fn cmd_of(call: crate::hook::Call<'_>) -> &str {
-    match call {
-        crate::hook::Call::Shell(cmd) => cmd,
-        _ => "",
-    }
 }
 
 /// 껍데기 토막 하나를 판정할 트래커.

@@ -7812,29 +7812,47 @@ fn the_tracker_is_written_at_the_root() {
     assert!(why.contains("규칙 5"), "{why}");
     assert!(why.contains(&format!("moai -C {root} note {id} '찾은 것'")), "고칠 줄을 루트로 안 겨눈다\n{why}");
 
-    // 쓰는 명령마다 — 네임스페이스와 `idea` 도 같다.
-    for cmd in [
-        format!("moai mv {id} review"),
-        format!("moai edit {id} --tag parser"),
-        format!("moai defer {id} -m '왜'"),
-        "moai add '딴 일'".to_string(),
-        "moai idea add '떠오른 것'".to_string(),
-        "moai epic add '묶음'".to_string(),
+    // 쓰는 명령마다 — 네임스페이스와 `idea` 도 같다. **규칙 이름만 보지 않는다**: 고리를 여는
+    // 실패는 거절문이 막힌 줄을 그대로 도로 내는 것이라, 이름만 재면 그 고리가 통째로 안 잡힌다
+    // (리뷰 moai-71ht.yid — 이 목록이 이름만 재던 동안 `-C=`·`-C값`·`--dir=` 셋이 새로 들어왔다).
+    for (cmd, want) in [
+        (format!("moai mv {id} review"), format!("moai -C {root} mv {id} review")),
+        (format!("moai edit {id} --tag parser"), format!("moai -C {root} edit {id} --tag parser")),
+        (format!("moai defer {id} -m '왜'"), format!("moai -C {root} defer {id} -m 왜")),
+        ("moai add '딴 일'".to_string(), format!("moai -C {root} add '딴 일'")),
+        ("moai idea add '떠오른 것'".to_string(), format!("moai -C {root} idea add '떠오른 것'")),
+        ("moai epic add '묶음'".to_string(), format!("moai -C {root} epic add 묶음")),
+        // clap 이 받는 `-C` 의 네 꼴을 다 떼고 제자리에 루트를 넣는다.
+        (format!("moai --dir={} note {id} x", inside.display()), format!("moai -C {root} note {id} x")),
+        (format!("moai -C{} note {id} x", inside.display()), format!("moai -C {root} note {id} x")),
+        // 경로로 부른 바이너리도 겨눈다 — 이 저장소의 규약이 `./target/release/moai` 다.
+        (format!("./target/release/moai note {id} x"), format!("./target/release/moai -C {root} note {id} x")),
     ] {
-        let out = bash(&cmd);
-        assert!(refusal(&out).contains("규칙 5"), "워크트리 안의 쓰기를 안 막았다 — {cmd}\n{out}");
+        let why = refusal(&bash(&cmd));
+        assert!(why.contains("규칙 5"), "워크트리 안의 쓰기를 안 막았다 — {cmd}\n{why}");
+        assert!(why.contains(&want), "고칠 줄이 루트를 안 겨눈다 — {cmd}\n원한 것: {want}\n{why}");
     }
 
-    // 읽기·탐색기·도움말은 자유롭고, 루트를 가리킨 쓰기도 그대로 지나간다.
+    // 읽기·탐색기·도움말은 자유롭고, 루트를 가리킨 쓰기와 아무것도 안 넣는 연습도 지나간다.
     for cmd in [
         "moai status".to_string(),
         format!("moai show {id}"),
         "moai tui".to_string(),
         format!("moai mv {id} review --help"),
         format!("moai -C {root} note {id} '루트에 쓴다'"),
+        "moai add --from - --dry-run".to_string(),
     ] {
         let out = bash(&cmd);
         assert!(out.trim().is_empty(), "막지 말아야 할 줄을 막았다 — {cmd}\n{out}");
+    }
+
+    // **세션 자리가 트래커 밖이어도 선다**(리뷰 moai-71ht.yid) — 규칙 4 와 같은 자리에서 본다.
+    // `decide` 안에 두던 판은 `Repo::discover` 아래라, 등록한 프로젝트를 밖에서 보는 세션이 친
+    // `moai -C <워크트리> …` 가 그대로 워크트리의 스냅샷을 고쳤다.
+    let ip = inside.display().to_string();
+    for cmd in [format!("moai -C {ip} add '딴 일'"), format!("cd {ip} && moai add '딴 일'")] {
+        let why = refusal(&tool_at(&s, s.path(), "Bash", &format!("{{\"command\":{}}}", json_str(&cmd))));
+        assert!(why.contains("규칙 5") && why.contains(&format!("moai -C {root} add '딴 일'")), "{cmd}\n{why}");
     }
 
     // 루트에 선 세션은 전과 같다 — 맨 `moai` 가 곧 루트다.
@@ -7874,13 +7892,19 @@ fn a_nameless_worktrees_birth_is_read_from_git_not_the_clock() {
     };
     place("갓 뜬 워크트리");
 
-    // git 이 적어 둔 시각은 그대로 두고 파일의 고친 때만 앞뒤로 흔든다.
+    // git 이 적어 둔 시각은 그대로 두고 파일의 고친 때만 앞뒤로 흔든다. **reflog 자신도 흔든다**
+    // — `born_of` 가 여는 파일이 바로 그것이라, 빼 두면 "그 파일의 고친 때로 재자" 는 가장 그럴듯한
+    // 되돌림이 이 시험을 초록으로 지난다(리뷰 moai-71ht.yid).
     let admin = main.join(".git").join("worktrees").join("agent-a04acfb3");
-    assert!(admin.join("logs").join("HEAD").exists(), "reflog 이 없다 — 이 시험이 견줄 것이 없다");
-    for when in ["203001010000", "200001010000"] {
-        let done = std::process::Command::new("touch").args(["-t", when]).arg(&admin).arg(admin.join("HEAD")).status();
-        assert!(done.is_ok_and(|c| c.success()), "파일 시각을 못 바꿨다");
-        place(&format!("고친 때가 {when}"));
+    let log = admin.join("logs").join("HEAD");
+    assert!(log.exists(), "reflog 이 없다 — 이 시험이 견줄 것이 없다");
+    let day = std::time::Duration::from_secs(24 * 60 * 60);
+    for (what, when) in [("뒤로", std::time::SystemTime::now() + day * 3650), ("앞으로", std::time::SystemTime::now() - day * 3650)] {
+        for p in [&admin, &admin.join("HEAD"), &log] {
+            // 디렉터리는 쓰기로 못 연다 — 읽기로 연 손잡이에도 `futimens` 가 듣는다.
+            std::fs::File::open(p).unwrap().set_modified(when).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+        }
+        place(&format!("고친 때를 {what} 옮겼다"));
     }
 }
 
@@ -8436,15 +8460,15 @@ fn a_worktree_session_touching_main_is_still_that_session() {
 
     // 거꾸로 — 세션은 main 에 서 있고 명령이 워크트리로 들어간다(에이전트 스레드는 자리가 main
     // 으로 돌아온다). **그것은 규칙 5 가 막는다**(moai-hwrm) — 어느 눈으로 보든 그 줄은 워크트리의
-    // `.moai` 를 고쳐 병합에서 충돌한다. 거절문은 `-C` 를 뗀 같은 줄이고, main 에 선 세션에게는
-    // 맨 `moai` 가 곧 루트라 그대로 쳐서 지나간다.
+    // `.moai` 를 고쳐 병합에서 충돌한다. 거절문은 **그 워크트리의 루트**를 `-C` 로 겨눈 같은 줄이다
+    // — 세션이 어디 서 있든 겨눌 곳은 그 토막이 가리킨 트래커의 main 이다(리뷰 moai-71ht.yid).
     ok(&main, &["mv", &next, "done"]);
     let ip = inside.display().to_string();
     let from_main = |cmd: &str| tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
     let why = refusal(&from_main(&format!("cd {ip} && moai add \"자식\" --parent {id}")));
-    assert!(why.contains("규칙 5") && why.contains(&format!("moai add 자식 --parent {id}")), "{why}");
+    assert!(why.contains("규칙 5") && why.contains(&format!("moai -C {mp} add 자식 --parent {id}")), "{why}");
     let why = refusal(&from_main(&format!("moai -C {ip} add \"딴 일\"")));
-    assert!(why.contains("규칙 5") && why.contains("moai add '딴 일'"), "워크트리를 가리킨 쓰기를 규칙 5 가 안 막는다 — {why}");
+    assert!(why.contains("규칙 5") && why.contains(&format!("moai -C {mp} add '딴 일'")), "워크트리를 가리킨 쓰기를 규칙 5 가 안 막는다 — {why}");
 }
 
 /// 규약대로 에픽 멤버를 main 에서 집고 그 이름의 워크트리를 띄운 저장소. (main, 워크트리, 에픽, 집은 id)
