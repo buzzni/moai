@@ -1932,9 +1932,13 @@ pub fn picked_in(
     if !cmd.contains("mv") {
         return Vec::new();
     }
+    // **쓰기 규칙이 집기로 센 토막만 적는다**(moai-m5mg, 사용자 결정) — `! moai mv …`·`a || moai mv …`
+    // 는 안 돌 수 있거나 져야 뒤가 돈다. 이음사를 안 보던 판은 그 id 도 이 세션의 집기로 적어, 남이 쥔
+    // 줄을 제 것으로 붙들었다.
+    let counted = shell_scan(cmd, cfg, only).1;
     let mut out = Vec::new();
     for (k, seg) in segments(cmd).into_iter().enumerate() {
-        if !only(k) || !picks_up(&seg, cfg) {
+        if !counted.contains(&k) {
             continue;
         }
         let Some(args) = moai_args(&seg) else { continue };
@@ -2344,6 +2348,13 @@ pub fn guard_tmux(cmd: &str) -> Decision {
 /// 안 쥐어 준다)와 `! moai mv …`·`! ( moai mv … )` (집기가 져야 뒤가 돈다), `a || moai mv …` (앞이
 /// 이기면 집기가 안 돈다 — 앞도 집기면 어느 쪽이든 하나를 쥔다).
 fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<String> {
+    shell_scan(cmd, cfg, only).0
+}
+
+/// [`shell_writes`] 의 한 걸음 — 쓰는 파일들과 함께 **집기로 센 토막의 번호**([`segments`] 의 번호)를 낸다.
+/// [`picked_in`] 이 그 번호로 세션의 집기를 적는다(moai-m5mg) — 집기를 두 자리에서 따로 가르면 한쪽만
+/// 고쳐지는 날 `! moai mv …` 가 쓰기에는 빈손인데 기록에는 제 집기로 선다.
+fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<String>, Vec<usize>) {
     /// **집기가 지면 끝내는 묶음** 하나([`shell_writes`], moai-ncay).
     ///
     /// 이름 없는 네 자리 튜플로 두면 `floor`·`depth`·`held` 가 자리로만 갈려, 하나를 바꿔 적어도
@@ -2411,6 +2422,9 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
     // **집기가 지면 끝내는 묶음**(moai-ncay) — `집기 || { …; exit 1; }` 와 `if ! 집기; then exit; fi` 다.
     // 나올 때 그 꼴이면 집기가 이긴 채로 잇는다 — 그 묶음이 돌았으면 뒤는 아예 안 돈다.
     let mut bailout: Option<Bailout> = None;
+    // 집기로 센 토막의 번호와 그 묶음 깊이([`shell_scan`]) — 몸통이 안 돌았을 수 있는 묶음을 나오면
+    // 그 안의 집기는 쥔 것이 없으니 함께 걷는다.
+    let mut picked: Vec<(usize, usize)> = Vec::new();
     for mut seg in parse(cmd) {
         // **몸통이 안 돌았을 수 있는 묶음을 나오면 그 안의 집기는 끝난다**(리뷰 moai-ju21.70g) —
         // `fi`·`esac`·`done` 의 묶음은 몸통이 안 돌아도 0 이고, `a || { mv; }` 는 `a` 가 이기면 안 돈다.
@@ -2420,6 +2434,7 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
             && after_pick.is_some_and(|d| d > l)
         {
             after_pick = None;
+            picked.retain(|(_, at)| *at <= l);
         }
         if let Some(c) = orelse
             && seg.floor < c
@@ -2427,6 +2442,7 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
             if after_pick.is_some_and(|d| d >= c) {
                 after_pick = None;
             }
+            picked.retain(|(_, at)| *at < c);
             orelse = None;
         }
         // 나온 겹을 걷고 든 겹을 연다. 같은 깊이라도 종류가 다르면 딴 겹이다(heredoc 치환 뒤의 `bash -c`
@@ -2590,6 +2606,7 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
         }
         if picks_up(&seg.words, cfg) && only(n) && !negated && (!or || picked_before) {
             after_pick = Some(after_pick.map_or(seg.level, |d| d.min(seg.level)));
+            picked.push((n, seg.level));
         }
         // **집기가 지면 끝내는 묶음이 여기서 열리는가**(moai-ncay) — 두 꼴이고, 먼저 열린 하나만
         // 든다. `|| exit` 한 꼴만 알던 판은 겨루다 진 쪽을 끊는 이 흔한 두 꼴에서 집기를 잃어,
@@ -2649,7 +2666,12 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
             sure = Some(sure.map_or(seg.level, |l| l.min(seg.level)));
         }
     }
-    out
+    // 줄이 끝나도록 안 닫힌 묶음도 나온 것으로 친다 — `a || (moai mv …)` 처럼 뒤 토막이 없으면 위의
+    // 걷기가 안 돈다. 쓰기는 그 뒤가 없어 셈이 같지만, 기록은 여기서 걷어야 남의 줄을 안 떠안는다.
+    if let Some(c) = orelse {
+        picked.retain(|(_, at)| *at < c);
+    }
+    (out, picked.into_iter().map(|(n, _)| n).collect())
 }
 
 /// 글자만으로는 **어디인지 모르는 경로** — 변수·틸드·글롭·프로세스 치환·`-`. 모르는 자리는
@@ -3590,6 +3612,32 @@ mod tests {
         assert_eq!(picked_in(cmd, &cfg(), &|_| true, &stands), ["t-1", "t-3"]);
         assert_eq!(picked_in(cmd, &cfg(), &|k| k == 0, &stands), ["t-1"]);
         assert!(picked_in("moai mv t-1 in_progress --help", &cfg(), &|_| true, &stands).is_empty());
+    }
+
+    /// **기록하는 집기는 쓰기 규칙이 집기로 센 것과 같다**(moai-m5mg, 사용자 결정) — 이음사를 안 보던
+    /// 판은 `! moai mv Y …`·`a || moai mv Y …` 처럼 **안 돌 수도 있는** 토막의 id 까지 이 세션의 집기로
+    /// 적었다. 그 기록 하나가 남이 쥔 줄을 제 것으로 붙들어, 규칙 1 이 그 줄로 막고 `Stop` 이 남의 일을
+    /// 닫으라고 댔다.
+    #[test]
+    fn a_pick_that_may_not_run_is_not_recorded_as_mine() {
+        let stands = |_: usize, _: &str| None;
+        let mine = |cmd: &str| picked_in(cmd, &cfg(), &|_| true, &stands);
+        for cmd in [
+            "! moai mv t-1 in_progress",
+            "! (moai mv t-1 in_progress)",
+            "make build || moai mv t-1 in_progress",
+            "cargo test || (moai mv t-1 in_progress)",
+        ] {
+            assert!(mine(cmd).is_empty(), "안 돌 수도 있는 집기를 적었다 — {cmd}");
+        }
+        // 앞도 집기면 어느 쪽이든 하나를 쥔다 — 쓰기 규칙과 같은 자다.
+        assert_eq!(mine("moai mv t-1 in_progress --from todo || moai mv t-2 in_progress"), ["t-1", "t-2"]);
+        // 남의 트래커를 가리킨 토막은 그 트래커에 적힌다 — 여기서는 `only` 가 뺀다.
+        assert_eq!(picked_in("moai -C /x mv t-9 in_progress && moai mv t-1 in_progress", &cfg(), &|k| k == 1, &stands), ["t-1"]);
+        // 첫 칸으로 되돌리는 것과 닫는 것은 벌여 놓는 칸이 아니다.
+        assert!(mine("moai mv t-1 todo && moai mv t-2 done").is_empty());
+        // 셸에 넘긴 글 안의 집기도 센다(moai-k8j1) — 그 글은 명령이다.
+        assert_eq!(mine("bash -c 'moai mv t-1 in_progress'"), ["t-1"]);
     }
 
     /// **모르는 줄 밑에서 제가 집은 자식은 제 것이다**(리뷰 moai-3k2d.1df). 모름은 그 줄과 **그 밑을**
