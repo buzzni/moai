@@ -551,19 +551,24 @@ fn banner(app: &App) -> Option<(String, bool)> {
     {
         parts.push(u.clone());
     }
+    // 사용자 설정의 문제는 **층에서만** 말한다 — 등록 목록의 일이라 프로젝트 안의 화면과는
+    // 상관이 없고, 급하지도 않다(읽을 수 있는 항목은 그대로 섰다).
+    //
+    // **층이 안 선 까닭과 나란히 선다**(리뷰) — 둘은 같은 파일을 읽다 만난 것이고, 까닭이 그 글의
+    // 꼬리라는 것도 같다. 위의 `if` 와 갈라져 있을 뿐 한 물음이라, 한쪽만 앞으로 올리면 층이
+    // **선** 날의 같은 실패가 그대로 남는다. 틀린 `[[project]]` 한 줄은 제 줄조차 못 세우니
+    // (층에 안 선다) 이 배너가 그것을 말하는 유일한 자리다.
+    if app.on_layer()
+        && let Some(l) = &app.layer
+    {
+        parts.extend(l.problems.iter().map(|p| crate::text::one_line(p)));
+    }
     if app.site.warnings > 0 {
         parts.push(format!("드러난 것 {}건 — `moai status` 가 자세히 낸다", app.site.warnings));
     }
     // 옆 워크트리의 문제는 **급하지 않다** — 제 파일은 멀쩡하고, 그 줄만 빠진 채로
     // 겹쳐 보고 있다.
     parts.extend(app.site.elsewhere.iter().cloned());
-    // 사용자 설정의 문제는 **층에서만** 말한다 — 등록 목록의 일이라 프로젝트 안의 화면과는
-    // 상관이 없고, 급하지도 않다(읽을 수 있는 항목은 그대로 섰다).
-    if app.on_layer()
-        && let Some(l) = &app.layer
-    {
-        parts.extend(l.problems.iter().map(|p| crate::text::one_line(p)));
-    }
     // 알림 하나뿐이면 `!` 를 안 붙인다 — 담긴 것을 경보처럼 말하면 담을 때마다 무언가
     // 잘못된 줄 안다.
     let lead = if parts.len() == 1 && app.notice.is_some() { "" } else { "! " };
@@ -933,7 +938,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // **셈은 줄마다 한 번만 센다** — 머리를 걷는 셈(`Head::of`)·오른쪽 열 걷기·이름 줄·줄(`row_line`)이
     // 같은 글을 본다. 셈 자체는 적재 때 센 것을 읽지만(`Index::tally`, moai-m7iy) 줄마다 경로를 짓고 글을
     // 지으므로, 자리마다 다시 부르면 그 값을 프레임마다 여러 번 치른다.
-    let tallies: Vec<String> = rows.iter().map(|r| tally_of(app.site_of(r), r, app.fields)).collect();
+    let tallies: Vec<String> = rows.iter().map(|r| tally_of(app.site_of_row(r), r, app.fields)).collect();
     // **오른쪽 열을 걷는 것은 목록 전체가 함께 정한다**(moai-g7p8 리뷰). 줄마다 정하면 머리글이
     // 긴 줄(`⎇ 브랜치`·`p10`)만 날짜를 걷어 같은 폭에서 열이 들쭉날쭉 선다 — 고정 폭의 까닭이
     // 사라진다. 제일 많이 걷힌 줄의 열에 맞춘다(걷는 차례가 하나라 그 열은 모든 줄에 들어간다).
@@ -1416,11 +1421,15 @@ fn branch_mark(site: &Site, at: usize, fields: super::view::Fields) -> Option<St
 
 /// 묶음 줄의 끝난/일 셈(`n/n`) — 셈을 껐거나, 묶음이 아니거나, 셀 일이 없으면 빈 글이다. 자는 상세
 /// 롤업과 같다(`Index::tally` 가 `Index::progress` 와 같은 값을 미리 센다).
-fn tally_of(site: &Site, r: &Row, fields: super::view::Fields) -> String {
-    let Row::Item(_, e @ Entry::Dir { at: Some(_), .. }, _) = r else { return String::new() };
+fn tally_of(site: Option<&Site>, r: &Row, fields: super::view::Fields) -> String {
+    let Row::Item(_, e @ Entry::Dir { at: Some(at), .. }, _) = r else { return String::new() };
     if !fields.shows(super::view::Field::Tally) {
         return String::new();
     }
+    // **빠진 프로젝트의 줄은 안 센다**(moai-m59y) — 그 줄은 그려지지도 않는다(`row_line`). 갈음한
+    // 목록에 남의 첨자를 대면 남의 셈이 서고, 넘치면 `deeper` 가 부르는 `Index::dir_path` 가
+    // 첨자를 그대로 짚어 **그 자리에서 죽는다** — 목록의 첫 줄에서 세므로 뒤의 어느 막음도 못 막는다.
+    let Some(site) = site.filter(|s| *at < s.issues.len()) else { return String::new() };
     // 적재 때 센 셈이다(`Index::tally`, moai-m7iy) — 줄마다 `progress` 로 세면 이슈 전부를 훑는다.
     match site.index.tally(&deeper(site, e)) {
         (_, 0) => String::new(),
@@ -1620,7 +1629,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
             match app.site_of_seat(seat) {
                 None => Vec::new(),
                 Some(site) => match e.at() {
-                    Some(idx) if idx >= site.issues.len() => Vec::new(),
+                    // 넘친 첨자는 [`about`] 이 제 자리에서 비운다 — 막음을 두 벌로 적지 않는다.
                     Some(idx) => about(app, site, idx, &e, inner.width as usize),
                     // 바구니는 제 줄이 없다. 밑에 무엇이 있는지만 센다.
                     None => {
@@ -1821,8 +1830,10 @@ fn count_glyph(app: &App, site: &Site, work: &[usize], st: &str) -> &'static str
 fn count_glyph_across(app: &App, work: &[(Seat, usize)], st: &str) -> &'static str {
     let turning = work.iter().any(|&(seat, at)| {
         // 빠진 프로젝트의 줄은 안 센다 — 갈음한 목록에서 세면 남의 줄이 이 칸을 돌린다.
+        // **막음은 `spins` 까지 덮는다** — 그쪽도 첨자를 그대로 짚어(`Site::spins`), 읽기 좋으라고
+        // 두 조건을 맞바꾸기만 해도 막음이 사라진다. `&&` 의 차례에 목숨을 걸지 않는다.
         let Some(site) = app.site_of_seat(seat) else { return false };
-        site.issues.get(at).is_some_and(|i| i.status.as_str() == st) && site.spins(at)
+        site.issues.get(at).is_some_and(|i| i.status.as_str() == st && site.spins(at))
     });
     if turning { style::spin_frame(app.spin) } else { style::glyph(st) }
 }
@@ -1847,7 +1858,9 @@ fn deeper(site: &Site, e: &Entry) -> crate::nav::Path {
 
 /// 이슈 하나의 낱낱.
 fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Line<'a>> {
-    let i = &site.issues[idx];
+    // 넘친 첨자에는 댈 것이 없다(moai-m59y) — 막음은 짚는 자리에 둔다. 부르는 쪽에 두면 그 줄과
+    // 이 줄이 230줄 떨어져, 다음 부르는 쪽은 적히지 않은 약속을 물려받는다.
+    let Some(i) = site.issues.get(idx) else { return Vec::new() };
     // 걸린 검색이 보는 자리마다 **왜 걸렸는지** 여기서 칠한다(moai-lw7i). 목록 줄은 id·제목만 칠하는데
     // 태그·본문은 목록에 없고, **id·제목도 목록에서 잘린다** — 좁으면 id 열이 걷히고(`Head::of`) 긴 제목은
     // 찾은 글자 앞에서 `…` 로 끊겨, 걸린 줄에 칠한 글자가 하나도 없었다(moai-xemz 리뷰).
@@ -3985,6 +3998,28 @@ pub(super) mod tests {
         assert!(lines.iter().all(|l| crate::text::width(l) <= 80));
     }
 
+    /// **층이 선 날의 같은 까닭도 앞에 선다**(리뷰) — 설정을 읽다 만난 것은 층이 안 섰으면
+    /// [`App::unlayered`] 로, 섰으면 `Layer::problems` 로 오는데 둘은 한 물음이다. 한쪽만 올리면
+    /// 층이 선 날에는 경고 한 줄에 밀려 까닭이 잘린 채 선다. 틀린 줄은 층에 서지도 않으니,
+    /// 이 배너가 그것을 말하는 유일한 자리다.
+    #[test]
+    fn a_problem_in_the_registry_survives_eighty_columns_too() {
+        use super::super::layer::At;
+        let mut a = layered(At::Layer);
+        a.notice = None;
+        a.site.warnings = 4;
+        a.site.elsewhere = vec!["옆 워크트리 하나를 못 읽었다 — 스냅샷이 없다".into()];
+        let said = "등록 줄 하나를 건너뛰었다 — /w/bent/.moai/config.toml 3번째 줄이 깨졌다";
+        a.layer.as_mut().expect("층이 있다").problems = vec![said.into()];
+
+        let (text, _) = banner(&a).unwrap();
+        assert!(text.find("등록 줄 하나를").unwrap() < text.find("드러난 것").unwrap(), "{text}");
+
+        let lines = render(&mut a, 80, 12);
+        assert!(lines[1].contains("3번째 줄이 깨졌다"), "80칸에서 까닭이 잘렸다 — {:?}", lines[1]);
+        assert!(lines.iter().all(|l| crate::text::width(l) <= 80));
+    }
+
     /// 경로 줄이 **언제 읽은 화면인지** 댄다. 저절로 다시 읽으므로 배너는 없고,
     /// 대신 시각이 바뀌는 것으로 갱신된 줄 안다.
     #[test]
@@ -4792,8 +4827,8 @@ pub(super) mod tests {
         assert!(!list.contains("argos-000"), "지금 선 프로젝트의 줄이 한눈 보기에 섞였다 — {list}");
     }
 
-    /// **줄이 든 프로젝트가 빠졌으면 그 줄은 비운다**(moai-m59y). [`App::site_at`] 의 갈음을 타면
-    /// 남의 목록에서 같은 첨자에 선 이슈가 그 줄로 서서, 첨자 넘침이 조용한 오답이 된다.
+    /// **줄이 든 프로젝트가 빠졌으면 그 줄은 비운다**(moai-m59y). 지금 선 것으로 갈음하면 남의
+    /// 목록에서 같은 첨자에 선 이슈가 그 줄로 서서, 첨자 넘침이 조용한 오답이 된다.
     #[test]
     fn a_row_whose_project_is_gone_draws_nothing() {
         use super::super::Seat;
@@ -4813,6 +4848,40 @@ pub(super) mod tests {
         assert!(a.site_of_seat(Seat::Place(9)).is_none() && a.issue_at(Seat::Place(9), 0).is_none());
         let stale = row_line(&a, &Row::Item(Seat::Place(9), e, twig), "", 80, a.fields, Head::default());
         assert!(stale.spans.is_empty(), "빠진 프로젝트의 줄에 남의 이슈가 섰다 — {stale:?}");
+    }
+
+    /// **셈도 그 줄을 건너뛴다**(리뷰) — 목록이 맨 처음 세는 것이 줄마다의 셈(`tally_of`)이라,
+    /// 여기서 갈음하면 뒤의 어느 막음도 못 막는다. 갈음한 목록이 넉넉하면 **남의 진척**이 그 줄에
+    /// 서고, 층의 `App::site` 처럼 비어 있으면 `Index::dir_path` 가 첨자를 그대로 짚어 죽는다.
+    ///
+    /// **줄이 없는 자리는 층을 세워 짓는다**(리뷰) — 층이 아예 없는 App 으로 재면 `site_of_seat`
+    /// 이 `self.layer` 에서 곧바로 돌아서, 정작 실제로 나는 꼴(층은 섰는데 그 줄의 프로젝트가 아직
+    /// 안 읽혔거나 등록에서 빠진 것)을 한 번도 안 지난다. 여기 `Place(1)` 이 그 꼴이다.
+    #[test]
+    fn the_tally_of_a_row_whose_project_is_gone_is_blank() {
+        use super::super::layer::At;
+        use super::super::Seat;
+        // 층에 선 `rows()` 는 머리줄만 내므로 묶음 줄은 같은 자료의 프로젝트 안 목록에서 든다 —
+        // [`layered`] 도 [`app`] 에서 나오므로 둘의 `App::site` 가 같다.
+        let a = layered(At::Layer);
+        let (e, twig) = app()
+            .rows()
+            .iter()
+            .find_map(|r| match r {
+                Row::Item(_, e @ Entry::Dir { at: Some(_), .. }, twig) => Some((e.clone(), twig.clone())),
+                _ => None,
+            })
+            .expect("묶음 줄이 없다");
+        let here = Row::Item(Seat::Here, e.clone(), twig.clone());
+        assert!(!tally_of(a.site_of_row(&here), &here, a.fields).is_empty(), "시험의 전제 — 제자리의 묶음은 셈이 선다");
+
+        // 층은 섰고 `Place(1)` 도 있지만 그 프로젝트는 아직 안 읽혔다(`site: None`).
+        assert!(a.layer.is_some() && a.site_of_row(&here).is_some(), "시험의 전제 — 층이 섰다");
+        let stale = Row::Item(Seat::Place(1), e, twig);
+        assert!(a.site_of_row(&stale).is_none(), "시험의 전제 — 줄을 아직 안 읽은 자리다");
+        assert_eq!(tally_of(a.site_of_row(&stale), &stale, a.fields), "", "줄이 없는 프로젝트의 줄이 남의 셈을 냈다");
+        let line = row_line(&a, &stale, "", 80, a.fields, Head::default());
+        assert!(line.spans.is_empty(), "줄이 없는 프로젝트의 줄에 남의 이슈가 섰다 — {line:?}");
     }
 
     /// **층도 색 없이 80칸에서 읽힌다** — 어디인지(경로 줄), 프로젝트마다 이름·들어갈 수 있는지
@@ -6610,7 +6679,7 @@ mod bench {
         let rows = app.rows();
         println!("rows {:?}", t.elapsed());
         let t = std::time::Instant::now();
-        let tallies: Vec<String> = rows.iter().map(|r| super::tally_of(app.site_of(r), r, app.fields)).collect();
+        let tallies: Vec<String> = rows.iter().map(|r| super::tally_of(app.site_of_row(r), r, app.fields)).collect();
         println!("tallies {:?} ({} 줄)", t.elapsed(), tallies.len());
         let t = std::time::Instant::now();
         let cols = super::Head::of(&app, &rows, &tallies, 100, app.fields);

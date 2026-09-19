@@ -1471,7 +1471,7 @@ impl App {
             // **그 줄의 프로젝트로 읽는다**(moai-1xo5) — 한눈 보기에서는 지금 선 프로젝트의 줄이
             // 비어 있어, 남의 첨자를 여기서 읽으면 그 자리에서 죽는다.
             Row::Item(seat, Entry::Dir { at: Some(at), .. } | Entry::Leaf { at }, _) => {
-                let id = self.site_at(*seat).issues.get(*at).map(|i| i.id.clone()).unwrap_or_default();
+                let id = self.issue_at(*seat, *at).map(|i| i.id.clone()).unwrap_or_default();
                 match seat {
                     Seat::Here => Anchor::Issue(id),
                     Seat::Place(n) => Anchor::Foreign(self.place_path(*n).map(Into::into).unwrap_or_default(), id),
@@ -2188,7 +2188,9 @@ impl App {
         // `SPC m g` 이 마일스톤 전체를 읽음으로 적었다(리뷰) — 이 함수가 막으려던 바로 그것이고,
         // 되돌리는 길은 도구 밖에만 있다. 바구니는 첨자가 없어 지금 자리로 읽고, 그 자리에 묶음이
         // 없으면 그대로 `None` 이다.
+        // 넘친 첨자에는 집이 없다 — `Index::home_of` 도 첨자를 그대로 짚는다(위의 `get` 과 한 자다).
         let home: &[Seg] = match e.at() {
+            Some(at) if at >= site.issues.len() => return None,
             Some(at) => site.index.home_of(at),
             None => &site.path,
         };
@@ -2313,6 +2315,10 @@ impl App {
         };
         let (_, _, handle) = layer.reading.take().expect("바로 위에서 보았다");
         let repo = self.reading_repo.take();
+        // **`Tab` 의 뜻은 이 읽기 하나로 끝난다** — 못 읽었을 때 그 뜻을 남겨 두면, 다음에 `l` 로
+        // 한 층만 펴려던 사람이 통째로 펼쳐진 프로젝트를 본다. `Depth::Lean` 이 "열리지만 스냅샷을
+        // 못 읽는" 저장소를 이 갈래로 보내면서 그 자리가 실제로 닿는다(moai-m59y).
+        let deep = self.deep.remove(&path);
         match got {
             Some(Ok(fresh)) => {
                 let cfg = repo.as_ref().map_or_else(|| self.site.cfg.clone(), |r| r.config.clone());
@@ -2344,9 +2350,7 @@ impl App {
                     self.recount_unread_in(Seat::Place(at));
                 }
                 // `Tab` 으로 "다 펴 달라" 며 기다린 프로젝트면 이제 편다.
-                if self.deep.remove(&path)
-                    && let Some(at) = landed
-                {
+                if deep && let Some(at) = landed {
                     self.open_all(Seat::Place(at));
                 }
             }
@@ -2363,11 +2367,11 @@ impl App {
     }
 
 
-    /// [`App::site_at`] 의 고칠 수 있는 판 — 펼침처럼 **그 프로젝트에 매인 것**을 고칠 때 쓴다.
+    /// [`App::site_of_seat`] 의 고칠 수 있는 판 — 펼침처럼 **그 프로젝트에 매인 것**을 고칠 때 쓴다.
     ///
-    /// **읽을 때와 달리 지금 선 것으로 갈음하지 않는다.** 아직 줄을 안 읽은 프로젝트(읽는 중이거나
-    /// 접힌 것)에 무언가 적으려다 갈음하면, 그 글이 **엉뚱한 프로젝트**에 조용히 적힌다 — 읽기는
-    /// 한 프레임 어긋날 뿐이지만 쓰기는 남는다.
+    /// **지금 선 것으로 갈음하지 않는다.** 아직 줄을 안 읽은 프로젝트(읽는 중이거나 접힌 것)에
+    /// 무언가 적으려다 갈음하면, 그 글이 **엉뚱한 프로젝트**에 조용히 적힌다 — 읽기는 한 프레임
+    /// 어긋날 뿐이지만 쓰기는 남는다. 읽는 판도 이제 같은 자다(리뷰).
     pub(super) fn site_mut(&mut self, seat: Seat) -> Option<&mut Site> {
         match seat {
             Seat::Here => Some(&mut self.site),
@@ -2375,11 +2379,14 @@ impl App {
         }
     }
 
-    /// 그 줄이 사는 프로젝트 — 줄에 실린 [`Seat`] 을 푼다. `..` 과 머리줄은 지금 선 것으로 답한다.
-    pub fn site_of(&self, r: &Row) -> &Site {
+    /// 그 줄이 사는 프로젝트 — 줄에 실린 [`Seat`] 을 푼다. `..` 과 머리줄은 제 줄이 없어 지금 선
+    /// 것으로 답한다. **빠진 프로젝트의 줄은 `None`** 이다([`App::site_of_seat`]) — 갈음해 주면
+    /// 받는 쪽이 남의 첨자를 이 목록에 대고, `Index::dir_path` 처럼 첨자를 그대로 짚는 자리에서
+    /// 그것이 조용한 오답이 되거나 터진다(moai-m59y).
+    pub fn site_of_row(&self, r: &Row) -> Option<&Site> {
         match r {
-            Row::Item(seat, ..) => self.site_at(*seat),
-            Row::Up | Row::Project(_) => &self.site,
+            Row::Item(seat, ..) => self.site_of_seat(*seat),
+            Row::Up | Row::Project(_) => Some(&self.site),
         }
     }
 
@@ -2418,28 +2425,26 @@ impl App {
         out
     }
 
-    /// `seat` 이 든 프로젝트 — 한눈 보기의 줄은 제 층 줄의 것을, 프로젝트 안의 줄은 지금 선 것을 쓴다.
-    /// **없는 자리는 지금 선 것으로 답한다**: 층 줄이 그새 빠졌다면 그 줄은 다음 프레임에 사라지고,
-    /// 여기서 멈추면 그 한 프레임에 탐색기가 죽는다. 고치는 판([`App::site_mut`])은 갈음하지 않는다.
+    /// `seat` 이 든 프로젝트 — 한눈 보기의 줄은 제 층 줄의 것을, 프로젝트 안의 줄은 지금 선 것을
+    /// 쓴다. **없으면 없다고 답한다.**
     ///
-    /// **줄의 이슈를 이것으로 집지 않는다**([`App::issue_at`], moai-m59y) — 갈음한 프로젝트의 목록에
-    /// 남의 첨자를 대면 그 자리에 선 **엉뚱한 이슈**가 그 줄로 서거나 첨자가 넘쳐 터진다. 갈음이
-    /// 답이 되는 물음은 칸 이름·색인처럼 **프로젝트의 것을 묻는 것**뿐이고, 그것도 한 프레임짜리다.
-    pub fn site_at(&self, seat: Seat) -> &Site {
-        self.site_of_seat(seat).unwrap_or(&self.site)
-    }
-
-    /// `seat` 이 든 프로젝트 — **없으면 없다고 답한다.** 갈음하는 [`App::site_at`] 과 갈리는 자리다.
+    /// 한때 여기 곁에 지금 선 것으로 갈음해 주는 판(`App::site_at`)이 있었다 — 층 줄이 그새 빠져도
+    /// 그 한 프레임에 탐색기가 안 죽게 하려는 것이었다. **걷었다**(리뷰, moai-m59y): 줄에 실린
+    /// 첨자는 제 프로젝트의 목록의 것이라(`Seat`) 남의 목록에 대면 엉뚱한 이슈가 그 줄로 서고,
+    /// 넘치면 `Index::dir_path`·`home_of`·`Site::spins` 처럼 첨자를 그대로 짚는 자리에서 어차피
+    /// 죽는다. 갈음이 지켜 주던 것을 이제는 **부르는 쪽이 그 줄을 건너뛰어** 지킨다 — 빠진 줄은
+    /// 다음 프레임에 사라지고, 그때까지 남의 이슈를 그 줄로 세우지 않는다. 그 규칙을 쓰는 판이
+    /// [`App::issue_at`]·[`App::site_of_row`]·[`App::site_mut`] 다.
     pub fn site_of_seat(&self, seat: Seat) -> Option<&Site> {
         match seat {
             Seat::Here => Some(&self.site),
-            Seat::Place(n) => self.layer.as_ref().and_then(|l| l.places.get(n)).and_then(|p| p.site.as_ref()),
+            Seat::Place(n) => self.site_of_place(n),
         }
     }
 
     /// 그 줄의 이슈 — **없는 자리도 넘친 첨자도 `None`** 이다(moai-m59y). 줄에 실린 첨자는 제
-    /// 프로젝트의 목록의 것이라([`Seat`]), 그 프로젝트가 없을 때 [`App::site_at`] 의 갈음을 타면
-    /// 첨자 넘침이 조용한 오답이 된다 — 남의 목록에서 그 첨자에 선 이슈가 이 줄로 선다.
+    /// 프로젝트의 목록의 것이라([`Seat`]), 그 프로젝트가 없을 때 지금 선 것으로 갈음하면 첨자
+    /// 넘침이 조용한 오답이 된다 — 남의 목록에서 그 첨자에 선 이슈가 이 줄로 선다.
     /// 부르는 쪽은 **그 줄을 건너뛴다**: 빠진 줄은 다음 프레임에 사라지고, 그때까지 남의 이슈를
     /// 그 줄로 세우지 않는다.
     pub fn issue_at(&self, seat: Seat, at: usize) -> Option<&Issue> {
@@ -2532,16 +2537,21 @@ impl App {
     }
 
     /// 그 줄이 묶음이면 그것이 여는 자리. [`App::dir_at`] 을 커서 밖의 줄(펼친 멤버의 부모)에도 쓴다.
+    ///
+    /// **빠진 프로젝트의 줄에는 자리가 없다**(moai-m59y) — 갈음한 목록에 남의 첨자를 대면
+    /// `Index::dir_path` 가 첨자를 그대로 짚어 터진다. 여기는 `key_ctx` 가 키 하나마다 묻는
+    /// 자리라, 그 죽음은 커서가 그 줄에 선 채 아무 키나 누르는 것으로 난다. 고치는 판
+    /// ([`App::site_mut`])도 같은 자리에서 `None` 이니, 읽은 자리와 쓴 자리가 안 갈린다.
     fn dir_of(&self, row: Option<Row>) -> Option<(Seat, Path)> {
         match row {
             Some(Row::Item(seat, Entry::Dir { at: Some(at), .. }, _)) => {
-                let site = self.site_at(seat);
-                Some((seat, site.index.dir_path(&site.issues, at)))
+                let site = self.site_of_seat(seat)?;
+                (at < site.issues.len()).then(|| (seat, site.index.dir_path(&site.issues, at)))
             }
             // 바구니는 제 줄이 없어 첨자가 없다. 바구니 마디(`Milestone(None)`·`Lost`)는 집의 첫
             // 마디로만 서므로(`Index::home_of_work`) 늘 뿌리의 줄이고, 그때 지금 자리가 곧 제 부모다.
             Some(Row::Item(seat, Entry::Dir { seg, at: None }, _)) => {
-                let mut path = self.site_at(seat).path.clone();
+                let mut path = self.site_of_seat(seat)?.path.clone();
                 path.push(seg);
                 Some((seat, path))
             }
@@ -2559,7 +2569,7 @@ impl App {
     /// [`App::open_at`] 과 같되 그 줄의 프로젝트까지 낸다.
     fn open_seat_at(&self, rows: &[Row]) -> Option<(Seat, Path)> {
         let (seat, path) = self.dir_seat_at(rows)?;
-        let site = self.site_at(seat);
+        let site = self.site_of_seat(seat)?;
         (site.expanded.contains(&path) || self.searched_into(seat, &path)).then_some((seat, path))
     }
 
@@ -2568,7 +2578,9 @@ impl App {
     /// 전부의 조상 자리를 프레임마다 다시 모은다(`lit` 을 미리 세는 까닭과 같다).
     fn searched_into(&self, seat: Seat, path: &Path) -> bool {
         // 그 집합에 든 자리는 맞은 줄의 조상 자리 전부다 — 곧 "맞은 줄의 집이 이 자리로 시작하는가" 다.
-        let site = self.site_at(seat);
+        // **빠진 프로젝트는 아무것도 안 열었다**(moai-m59y) — 갈음한 목록에서 찾으면 남의 줄이
+        // 이 자리를 열어 놓은 것으로 읽혀, 접을 것이 없는 줄에서 `h` 가 디렉터리를 통째로 나간다.
+        let Some(site) = self.site_of_seat(seat) else { return false };
         self.searching()
             && (0..site.issues.len())
                 .any(|at| site.visible(at, self.searching()) && site.index.home_of(at).starts_with(path))
@@ -2774,7 +2786,11 @@ impl App {
         let rows = self.rows();
         let ctx = self.key_ctx(&rows);
         let Some(act) = menu::feed(&mut self.chord, &ctx, k) else {
-            if in_menu {
+            // **기다리는 열도 아무 동작을 안 돈 키다**(리뷰) — `gg` 의 첫 `g`·`Ctrl-w`·메뉴를 여는
+            // SPC 가 그것이고, 거기서 걷으면 메뉴의 Esc 를 고친 까닭이 메뉴 밖에 그대로 남는다.
+            // 가르는 것은 [`keys::Chord::feed`] 가 남긴 열이다 — 뜻 없는 키만 열을 버리므로,
+            // **모르는 키는 여태처럼 걷는다.** 메뉴를 닫는 Esc·SPC 도 열을 버려 `in_menu` 가 쥔다.
+            if in_menu || !self.chord.held().is_empty() {
                 self.notice = carried;
             }
             return;
@@ -5682,6 +5698,40 @@ mod tests {
 
         a.hit("j");
         assert_eq!(a.notice, None, "메뉴 밖의 다음 키가 알림을 안 걷었다");
+    }
+
+    /// **다음 키를 기다리는 접두어도 알림을 안 걷는다**(리뷰) — `gg` 의 첫 `g` 와 메뉴를 여는 SPC 가
+    /// 그것이다. 메뉴 안에서만 도로 세우던 때는, 고친 Esc 바로 옆에서 같은 실패가 그대로 섰다:
+    /// 알림을 남긴 키와 지우는 키가 한 누름이다. **모르는 키는 여태처럼 걷는다** — `Chord::feed`
+    /// 가 뜻 없는 키에만 기다리는 열을 버리므로, 그 하나로 둘을 가른다.
+    #[test]
+    fn a_prefix_waiting_for_its_next_key_keeps_the_notice() {
+        let (_scratch, mut a) = writable("chord-notice");
+        a.read = lost;
+        // 겹쳐 보기를 껐다 켠다 — 켜는 쪽이 못 찾은 까닭을 알림으로 단다.
+        let toggled = |a: &mut App| {
+            a.hit("SPC v w Esc");
+            a.hit("SPC v w Esc");
+            a.notice.clone().expect("켰는데 못 찾은 까닭을 안 댄다")
+        };
+
+        let said = toggled(&mut a);
+        a.hit("g");
+        assert!(a.chord.waiting(), "시험의 전제 — `g` 는 다음 키를 기다린다");
+        assert_eq!(a.notice.as_deref(), Some(said.as_str()), "기다리는 접두어가 알림을 걷었다");
+        a.hit("g");
+        assert_eq!(a.notice, None, "열을 끝내 동작이 돈 키가 알림을 안 걷었다");
+
+        // 메뉴를 여는 SPC 도 아무 동작을 안 돈 키다.
+        let said = toggled(&mut a);
+        a.hit("SPC");
+        assert!(super::menu::open(&a.chord), "시험의 전제 — SPC 가 메뉴를 열었다");
+        assert_eq!(a.notice.as_deref(), Some(said.as_str()), "메뉴를 여는 SPC 가 알림을 걷었다");
+
+        // **모르는 키는 여태처럼 걷는다** — 기다리는 열을 버리는 것이 그 하나다.
+        a.hit("Esc");
+        a.hit("z");
+        assert_eq!(a.notice, None, "뜻 없는 키가 알림을 안 걷었다");
     }
 
     fn prepare_found(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {

@@ -904,8 +904,12 @@ pub(super) enum Depth {
     /// 스냅샷까지 읽어 본다 — 못 읽는 줄을 그 자리에서 [`Look::Shut`] 으로 세운다.
     Whole,
     /// 여는 데까지만([`projects::open_shallow`]) — 줄은 곧 스레드가 읽는다. 여기서 스냅샷을
-    /// 읽으면 "스레드로 펼친다"(moai-12yx)가 그 한 판을 UI 실에서 치러, 펼치는 키 하나에
-    /// 화면이 그만큼 멈춘다 — 옮긴 값이 워크트리 일곱에 138→458ms 였다(moai-uxrn).
+    /// 읽으면 "스레드로 펼친다"(moai-12yx)가 스냅샷 한 판을 UI 실에서 치르고, 일꾼이 곧 같은
+    /// 파일을 또 판다.
+    ///
+    /// **moai-uxrn 의 138→458ms 를 여기에 대지 않는다**(리뷰) — 그것은 옆 워크트리를 겹쳐 읽는
+    /// 값인데, 여기서 걷어낸 `open_one` 은 `worktree: false` 로 불러 `worktree::gather` 가
+    /// `repo.read()` 뒤에 바로 돌아섰다. 옮긴 것은 파싱 한 판이고, 그 값은 안 쟀다.
     Lean,
 }
 
@@ -1634,13 +1638,7 @@ mod tests {
         assert!(matches!(rows[0], Row::Project(0)), "{:?}", rows[0]);
         assert!(matches!(rows[1], Row::Item(crate::tui::Seat::Place(0), ..)), "{:?}", rows[1]);
         assert!(matches!(rows.last(), Some(Row::Project(1))), "둘째 머리줄이 안 섰다: {rows:?}");
-        let mut titles: Vec<String> = rows
-            .iter()
-            .filter_map(|r| match r {
-                Row::Item(seat, e, _) => e.at().map(|at| a.site_at(*seat).issues[at].title.clone()),
-                _ => None,
-            })
-            .collect();
+        let mut titles: Vec<String> = titles(&a);
         titles.sort();
         assert_eq!(titles, ["one 의 둘째 줄", "one 의 첫 줄"], "남의 프로젝트의 줄이 섞였다");
 
@@ -1672,7 +1670,9 @@ mod tests {
         let rows = a.rows();
         let at = rows
             .iter()
-            .position(|r| matches!(r, Row::Item(seat, e, _) if e.at().is_some_and(|at| a.site_at(*seat).issues[at].id == "argos-0002")))
+            .position(|r| {
+                matches!(r, Row::Item(seat, e, _) if e.at().and_then(|at| a.issue_at(*seat, at)).is_some_and(|i| i.id == "argos-0002"))
+            })
             .expect("막힌 줄이 한눈 보기에 안 섰다");
         a.cursor = at;
         // 그리는 것이 곧 시험이다 — 넘치면 여기서 죽는다.
@@ -1708,15 +1708,7 @@ mod tests {
         assert!(a.view.hides(crate::config::DONE), "시험의 전제 — 탐색기는 done 을 숨긴 채로 뜬다");
         a.want_site(0);
         settle(&mut a);
-        let shown: Vec<String> = a
-            .rows()
-            .iter()
-            .filter_map(|r| match r {
-                Row::Item(seat, e, _) => e.at().map(|at| a.site_at(*seat).issues[at].title.clone()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(shown, ["열린 줄"], "펼치며 읽은 프로젝트가 걸려 있던 보기를 안 따랐다");
+        assert_eq!(titles(&a), ["열린 줄"], "펼치며 읽은 프로젝트가 걸려 있던 보기를 안 따랐다");
     }
 
     /// **펼쳐 둔 자리는 프로젝트를 건너지 않는다**(리뷰) — 마디가 그 프로젝트의 이슈 id 이고,
@@ -1925,6 +1917,10 @@ mod tests {
     /// **fixture 에 묶음을 둔다**(moai-m59y) — 줄만 있는 프로젝트로 재던 때는 `l` 과 `Tab` 이
     /// 같은 줄 수를 내, [`App::open_all`] 을 통째로 지워도 이 시험이 지나갔다. 에픽 하나와 그
     /// 멤버가 있어야 "묶음까지" 가 실제로 걸린다.
+    ///
+    /// **`Tab` 은 안 읽은 머리줄에서 먼저 누른다**(리뷰) — 그래야 [`App::deep`] 에 뜻을 담고
+    /// 읽어 온 뒤에 펴는 길([`App::follow_site`])을 지난다. 읽어 둔 프로젝트에서 누르면 `open_all`
+    /// 이 그 자리에서 돌아, 그 길을 통째로 지워도 이 시험이 지나갔다.
     #[test]
     fn tab_opens_a_whole_project_and_folds_it_again() {
         let s = Scratch::fenced("layer-tab-all");
@@ -1935,20 +1931,52 @@ mod tests {
         let heads = a.rows().len();
         assert_eq!(heads, 1, "시험의 전제 — 안 읽은 프로젝트는 머리줄만 선다");
 
-        // `l` 은 머리줄만 편다 — 에픽은 접힌 채라 멤버가 안 선다.
+        // 안 읽은 채로 누른 `Tab` — 읽으러 가고, 줄이 닿은 뒤에 묶음까지 편다.
+        a.hit("Tab");
+        assert!(a.loading(), "Tab 이 읽으러 안 갔다 — 그 자리에서 읽고 말았다");
+        settle(&mut a);
+        let all = a.rows().len();
+        assert!(titles(&a).contains(&"에픽의 멤버".to_string()), "읽어 온 뒤에 묶음을 안 폈다 — {:?}", titles(&a));
+        a.hit("Tab");
+        assert_eq!(a.rows().len(), heads, "다시 누른 Tab 이 안 접었다");
+
+        // `l` 은 머리줄만 편다 — 에픽은 접힌 채라 멤버가 안 선다. 담아 둔 `Tab` 의 뜻이 남아
+        // 있으면 여기서 통째로 펼쳐진다.
         a.hit("l");
         settle(&mut a);
         let shallow = a.rows().len();
-        assert!(shallow > heads, "l 이 프로젝트를 안 폈다");
+        assert!(shallow > heads && shallow < all, "l 이 한 층만 안 폈다 — {:?}", titles(&a));
         assert!(!titles(&a).contains(&"에픽의 멤버".to_string()), "l 이 묶음까지 폈다 — {:?}", titles(&a));
-        a.hit("h");
+    }
+
+    /// **못 읽은 읽기도 `Tab` 의 뜻을 걷는다**(리뷰) — 안 걷으면 그 뜻이 남아, 다음에 `l` 로 한
+    /// 층만 펴려던 사람이 통째로 펼쳐진 프로젝트를 본다. [`Depth::Lean`] 이 "열리지만 스냅샷을 못
+    /// 읽는" 저장소를 일꾼에게 보내면서 그 갈래가 실제로 닿는다.
+    #[test]
+    fn a_failed_read_does_not_leave_the_tab_intent_behind() {
+        let s = Scratch::fenced("layer-tab-failed");
+        let deep = s.project("deep", &[("argos-0001", "묶음 밖의 줄", "todo")]);
+        write_group(&deep);
+        let file = deep.join(".moai/issues.jsonl");
+        let body = std::fs::read_to_string(&file).unwrap();
+        // 파일 자리에 디렉터리를 둔다 — `Repo::open` 은 설정까지만 보므로 열리고, 읽기가 터진다.
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        let cfg = s.register(&[&deep]);
+        let mut a = layered(&cfg);
+        let heads = a.rows().len();
 
         a.hit("Tab");
         settle(&mut a);
-        assert!(a.rows().len() > shallow, "Tab 이 묶음까지 안 폈다 — {:?}", titles(&a));
-        assert!(titles(&a).contains(&"에픽의 멤버".to_string()), "멤버가 안 섰다 — {:?}", titles(&a));
-        a.hit("Tab");
-        assert_eq!(a.rows().len(), heads, "다시 누른 Tab 이 안 접었다");
+        assert_eq!(a.rows().len(), heads, "시험의 전제 — 못 읽었으니 머리줄만 선다");
+
+        // 파일을 고치고 이번에는 `l` 로 한 층만 편다.
+        std::fs::remove_dir(&file).unwrap();
+        std::fs::write(&file, body).unwrap();
+        a.hit("l");
+        settle(&mut a);
+        assert!(a.rows().len() > heads, "고친 뒤의 l 이 프로젝트를 안 폈다");
+        assert!(!titles(&a).contains(&"에픽의 멤버".to_string()), "걷지 않은 Tab 의 뜻이 l 을 통째로 폈다 — {:?}", titles(&a));
     }
 
     /// 에픽 하나와 그 멤버를 그 프로젝트에 더한다 — 이미 쓴 줄 뒤에 잇는다.

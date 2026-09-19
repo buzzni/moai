@@ -133,18 +133,20 @@ impl State {
 
     /// 여는 것은 [`State::at`] 과 같고, 연 저장소는 `worktree` 면 옆을 겹쳐 읽는다.
     /// 옆 워크트리를 못 찾은 것(git 밖)도 문제로 든다 — 겹쳐 보라고 시킨 것이다.
+    ///
+    /// **못 여는 갈래는 [`open_shallow`] 하나가 가른다** — 두 벌로 적으면 한쪽만 고쳐져, 설정이
+    /// 깨진 저장소를 층의 줄과 `project ls` 가 달리 부른다(moai-9omq 가 고친 바로 그것이다).
     fn at_with(dir: &Path, worktree: bool) -> (State, crate::worktree::Origin, Vec<String>, bool) {
         let lone = |s: State| (s, crate::worktree::Origin::default(), Vec::new(), false);
-        match Repo::open(dir) {
-            Ok(Opened::Repo(repo)) => match crate::worktree::gather(&repo, worktree) {
-                Ok(g) => {
-                    let trouble = g.unfound.into_iter().chain(g.trouble).collect();
-                    (State::Open { repo, load: g.load }, g.origin, trouble, g.swept)
-                }
-                Err(e) => lone(State::Unreadable(e.message)),
-            },
-            Ok(Opened::Uninit) => lone(State::Uninit),
-            Ok(Opened::Missing) => lone(State::Missing),
+        let repo = match open_shallow(dir) {
+            Ok(repo) => repo,
+            Err(state) => return lone(state),
+        };
+        match crate::worktree::gather(&repo, worktree) {
+            Ok(g) => {
+                let trouble = g.unfound.into_iter().chain(g.trouble).collect();
+                (State::Open { repo, load: g.load }, g.origin, trouble, g.swept)
+            }
             Err(e) => lone(State::Unreadable(e.message)),
         }
     }
