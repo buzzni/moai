@@ -174,19 +174,6 @@ pub fn read(path: Option<&Path>) -> Registry {
     reg
 }
 
-/// 적어 둔 읽음만 다시 읽는다(moai-j038.vna) — 탐색기의 `SPC r` 이 부른다. 띄울 때 한 번만 읽으면 옆
-/// 터미널의 `moai read` 나 다른 탐색기가 적은 읽음이 떠 있는 화면에 영영 안 닿는다.
-///
-/// 파일이 없으면 빈 표다. **못 읽거나 깨졌으면 `None`** — 부르는 쪽이 들고 있던 것을 두게 한다. 깨진
-/// 설정을 빈 표로 읽으면 내 줄이 통째로 [NEW] 로 선다.
-pub fn read_marks_at(path: &Path) -> Option<BTreeMap<String, String>> {
-    match std::fs::read_to_string(path) {
-        Ok(src) => Doc::parse(&src).ok().map(|doc| doc.read_marks().0),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(BTreeMap::new()),
-        Err(_) => None,
-    }
-}
-
 /// 설정을 고치는 **유일한 길**. 락 → 락 안에서 읽기 → 고치기 → 바뀌었으면
 /// temp+rename. `store::Repo::with_write` 와 같은 모양이고 같은 까닭이다:
 ///
@@ -1636,7 +1623,6 @@ mod tests {
         assert!(reg.look_problems.is_empty(), "보기가 목록의 모양 때문에 못 읽혔다 — {reg:?}");
         assert_eq!((reg.look.sort.as_deref(), reg.lang.as_deref()), (Some("title"), Some("en")));
         assert_eq!(reg.read.get("m-0001").map(String::as_str), Some("T"));
-        assert!(read_marks_at(&path).is_some_and(|m| m.contains_key("m-0001")));
 
         // 보기와 읽음은 적힌다. 목록은 그대로다.
         update(&path, |doc| doc.merge_look(&reg.look, &Look { sort: Some("created".into()), ..reg.look.clone() })).unwrap();

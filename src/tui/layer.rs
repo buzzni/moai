@@ -786,26 +786,40 @@ impl App {
     /// `land` 가 있으면 층에 섰을 때 커서를 그 프로젝트(경로)에 둔다 — 방금 등록한 것이 눈앞에
     /// 있어야 등록된 줄 안다. 없거나 못 찾으면 보던 줄, 그것도 사라졌으면(뺐으면) 그 번호를 자른 자리.
     ///
-    /// **설정을 읽었으면 참**(moai-9p7v). 거짓은 파일을 못 읽어 아무것도 안 했다는 뜻이라, 표식으로
-    /// 부르는 쪽([`App::follow_config`])이 그 표식을 물려 다음 걸음에 다시 읽는다. 깨진 설정은 참이다 —
-    /// 읽기는 됐고 다시 읽어도 같다.
-    pub(super) fn relayer(&mut self, land: Option<&Path>) -> bool {
+    /// **파일을 못 읽었으면 아무것도 안 한다**(moai-9p7v) — 들고 있던 층이 그대로 남는다. 깨진 설정은
+    /// 그렇지 않다: 읽기는 됐고 다시 읽어도 같아, 빈 층과 그 까닭이 사람이 고쳐야 할 것을 비춘다.
+    pub(super) fn relayer(&mut self, land: Option<&Path>) {
+        self.relayer_with(None, land);
+    }
+
+    /// [`App::relayer`] 와 같되 **이미 읽은 설정**을 쓴다(moai-7yil) — 같은 걸음에 읽음도 그 설정에서
+    /// 드는 [`App::follow_config`] 가 한 번의 읽기를 나눠 쓴다. `None` 이면 제가 읽는다: 그때 읽는 파일은
+    /// 세우던 층의 것(`Layer::config`)이라, 설정 자리를 모르는 채 세운 층도 제 파일로 다시 선다.
+    pub(super) fn relayer_with(&mut self, reg: Option<&user_config::Registry>, land: Option<&Path>) {
         let held = self.current().map(|r| self.anchor_of(&r));
-        let mut read = true;
         match self.layer.take() {
             None => {
-                let Some(repo) = &self.site.repo else { return true };
-                let fresh = Layer::read(self.user_config.as_deref(), Some(repo.here()));
-                read = fresh.trouble != Some(user_config::Trouble::Reading);
+                let Some(repo) = &self.site.repo else { return };
+                let here = Some(repo.here().to_path_buf());
+                let fresh = match reg {
+                    Some(reg) => Layer::of(reg, here.as_deref()),
+                    None => Layer::read(self.user_config.as_deref(), here.as_deref()),
+                };
+                if fresh.trouble == Some(user_config::Trouble::Reading) {
+                    return;
+                }
                 if !fresh.registered() {
                     self.unlayered = unlayered_of(&fresh);
-                    return read;
+                    return;
                 }
                 self.unlayered = None;
                 self.layer = Some(fresh);
             }
             Some(mut old) => {
-                let mut fresh = Layer::read(old.config.as_deref(), old.launch.as_deref());
+                let mut fresh = match reg {
+                    Some(reg) => Layer::of(reg, old.launch.as_deref()),
+                    None => Layer::read(old.config.as_deref(), old.launch.as_deref()),
+                };
                 // **못 읽었으면 들고 있던 층을 둔다**(moai-9p7v) — 잠깐의 `ESTALE`·`EIO` 다. 빈 층으로
                 // 갈아 끼우면 줄이 통째로 사라지고, 표식은 이미 올라가 설정이 **다시 바뀔 때까지**
                 // 아무도 다시 읽지 않아 그대로 남았다. 손으로 누르던 비상구(`SPC r`)는 걷었다(moai-en4u).
@@ -813,7 +827,7 @@ impl App {
                 // 그 까닭이 사람이 고쳐야 할 것을 비춘다.
                 if fresh.trouble == Some(user_config::Trouble::Reading) {
                     self.layer = Some(old);
-                    return false;
+                    return;
                 }
                 for p in &mut fresh.places {
                     if let Some(o) = old.places.iter_mut().find(|o| o.path == p.path) {
@@ -857,7 +871,6 @@ impl App {
         });
         let at = landed.or_else(|| held.as_ref().and_then(|a| self.row_of(&rows, a))).unwrap_or(self.cursor);
         self.stand(&rows, at, held.as_ref());
-        read
     }
 
     /// 걸음마다 층을 본다. 스레드가 읽어 온 줄은 **어디 서 있든** 받는다 — 경로로 맞춰
@@ -2235,8 +2248,14 @@ mod tests {
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
         a.user_config = Some(cfg.clone());
+        // 첫 걸음은 재기만 한다 — 띄울 때 이미 읽었다.
         a.follow();
         assert_eq!(names(&a), ["one", "two"], "시험의 전제 — 층이 섰다");
+        // 옆 터미널이 읽음을 적었다 — 걸음이 등록 목록과 **같은 읽기로** 그것을 든다(moai-7yil).
+        let marks = format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
+        std::fs::write(&cfg, &marks).unwrap();
+        settle(&mut a);
+        assert_eq!(a.seen.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "시험의 전제 — 읽음을 들었다");
 
         // 설정이 바뀌었는데 그 읽기가 진다. 층도 읽어 둔 줄도 그대로여야 한다.
         s.register(&[&one, &two, &three]);
@@ -2245,11 +2264,36 @@ mod tests {
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two"], "잠깐 못 읽은 것으로 층이 사라졌다");
         assert_eq!(a.config_stamp, blind, "못 읽었는데 표식을 올렸다 — 설정이 다시 바뀔 때까지 다시 안 읽는다");
+        assert_eq!(a.seen.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "못 읽은 설정의 빈 표를 들여 읽음이 사라졌다");
 
         // 권한만 되돌린다 — 파일은 그대로라 표식도 그대로다.
         chmod(&cfg, 0o644);
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two", "three"], "읽을 수 있게 됐는데 다시 안 읽었다");
+    }
+
+    /// **한 걸음이 등록과 읽음을 한 번의 읽기로 든다**(moai-7yil). 둘은 한 파일에 산다 — 저마다 읽던
+    /// 판은 설정이 바뀐 걸음마다 같은 글을 두 번 파싱하고 층을 다시 세웠다. 보기 토글과 읽음이 그
+    /// 파일을 **스스로 써서** 이 길은 자주 돈다(`r` 을 누르고 있으면 누를 때마다).
+    #[test]
+    fn one_step_takes_the_registration_and_the_read_marks_together() {
+        let s = Scratch::fenced("layer-config-one-read");
+        let (one, two) = twins(&s);
+        let three = s.project("three", &[]);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.user_config = Some(cfg.clone());
+        a.follow();
+        assert_eq!(names(&a), ["one", "two"]);
+        assert!(a.seen.is_empty(), "시험의 전제 — 아직 적어 둔 읽음이 없다");
+
+        // 한 번의 쓰기가 둘을 함께 바꾼다 — 한 걸음 뒤 둘 다 들어 있어야 한다.
+        s.register(&[&one, &two, &three]);
+        let both = format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
+        std::fs::write(&cfg, both).unwrap();
+        settle(&mut a);
+        assert_eq!(names(&a), ["one", "two", "three"], "등록을 안 들었다");
+        assert_eq!(a.seen.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "읽음을 안 들었다");
     }
 
     /// **깨진 설정은 다시 읽어도 같다** — 못 읽은 것과 달리 표식을 올리고 그 까닭을 댄다(moai-9p7v).
