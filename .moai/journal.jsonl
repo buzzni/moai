@@ -5666,3 +5666,4 @@
 {"ts":"2026-09-19T22:40:41Z","id":"moai-15c2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-19T22:40:41Z","id":"moai-v9sa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-19T22:40:41Z","id":"moai-51h9.n0z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: 집기 기록의 걷기 1~5, 겨눌 트래커의 꼴 6·7·12, 겹쳐 본 판정 8, 이슈 벌 복사 14, 시험 15. 멤버로 남김: moai-hze6(9)·moai-j2vp(10·11·13). idea: moai-bbeo(두 번 가르기). 리뷰가 안 잰 release 빌드는 5,412,512바이트로 여기서 쟀다"}
+{"ts":"2026-09-19T22:41:21Z","id":"moai-51h9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 첫 칸의 멤버 moai-hze6·moai-j2vp 를 새 워크트리에서 집는다. 둘 다 src/hook.rs·src/cmd/hook.rs 라 moai-k8j1 의 moai-9xbq·moai-j9tx, moai-jlon 과 겹친다 — 차례는 감독이 고른다. 그 멤버로 에픽을 닫는 창은 에픽 끝 리뷰(max)를 다시 부른다"}
