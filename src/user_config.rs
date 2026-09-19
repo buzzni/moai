@@ -206,7 +206,20 @@ pub fn update<T>(path: &Path, f: impl FnOnce(&mut Doc) -> R<T>) -> R<T> {
     //
     // **차례가 있어 엉키지 않는다**: 푼 경로는 `canonicalize` 의 고정점이라 모든
     // 프로세스가 같은 자리를 둘째로 잡고, 준 철자가 곧 푼 경로인 쪽은 하나만 잡는다.
-    let _real_lock = (real != path).then(|| Lock::acquire(&lock_beside(real))).transpose()?;
+    //
+    // **링크가 파일이 아니라 위 디렉터리에 걸렸으면 둘째는 없다**(moai-2l74). 그때 준 철자 곁의 락은 철자만
+    // 다를 뿐 푼 자리 곁의 락과 같은 파일이라, 다시 잡으면 제가 쥔 락을 제가 기다리다 `locked` 로 물러난다 —
+    // `~/.config` 가 dotfiles 로 걸렸거나 macOS 의 `/var`(→ `/private/var`) 밑이면 파일이 선 뒤의 모든 쓰기가
+    // 그렇게 멈췄다. 견주는 것은 경로 글자가 아니라 락 파일이 선 자리다.
+    // 파일이 아직 없으면 `real` 이 준 철자 그대로라 둘 다 디렉터리를 풀어 잰다.
+    let lock_at = |p: &Path| {
+        let dir = p.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        std::fs::canonicalize(dir)
+            .ok()
+            .zip(p.file_name())
+            .map_or_else(|| lock_beside(p), |(d, name)| lock_beside(&d.join(name)))
+    };
+    let _real_lock = (lock_at(real) != lock_at(path)).then(|| Lock::acquire(&lock_beside(real))).transpose()?;
     let path = real;
 
     // 락을 잡은 **뒤에** 읽는다. 밖에서 읽으면 두 프로세스가 같은 옛 목록을 고친다.
@@ -2266,6 +2279,24 @@ mod tests {
         // 막지 않았다(아래 시험이 그것을 잰다). 추적 안 된 파일 하나가 조용한 손실보다 싸다.
         assert!(d.join("config.toml.lock").exists(), "준 철자 곁의 락이 없다");
         assert!(d.join("dots/config.toml.lock").exists(), "푼 자리의 락이 없다 — 두 철자가 서로를 안 막는다");
+    }
+
+    /// **링크가 위 디렉터리에 걸렸으면 락은 하나다**(moai-2l74). 그때 두 철자의 락은 같은 파일이라, 둘 다
+    /// 잡으면 제가 쥔 락을 제가 기다리다 `locked` 로 물러난다 — `~/.config` 가 dotfiles 로 걸렸거나 macOS 의
+    /// `/var` 밑이면 쓰기마다 그랬다. 파일이 없던 첫 쓰기와 파일이 선 뒤의 쓰기가 다른 길이라 둘 다 잰다.
+    #[cfg(unix)]
+    #[test]
+    fn a_config_under_a_linked_directory_locks_once() {
+        let s = scratch("linked-dir");
+        let d = s.canonicalize().unwrap();
+        std::fs::create_dir_all(d.join("dots")).unwrap();
+        std::os::unix::fs::symlink(d.join("dots"), d.join("cfg")).unwrap();
+        let path = d.join("cfg/config.toml");
+        let started = std::time::Instant::now();
+        assert!(update(&path, |doc| doc.add(Path::new("/a"))).unwrap(), "첫 쓰기");
+        assert!(update(&path, |doc| doc.add(Path::new("/b"))).unwrap(), "파일이 선 뒤의 쓰기");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "락을 기다렸다 — {:?}", started.elapsed());
+        assert_eq!(read(Some(&path)).projects.len(), 2);
     }
 
     /// **한 파일을 두 철자로 불러도 서로를 막는다.** 설정이 링크면(dotfiles 저장소가 흔히
