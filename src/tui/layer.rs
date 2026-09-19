@@ -159,7 +159,11 @@ struct Looked {
 }
 
 fn marks_of(dir: &Path) -> Marks {
-    let moai = dir.join(".moai");
+    // **읽는 트래커를 잰다**(moai-y7go, 리뷰 moai-71ht 셋째 판) — 등록한 자리가 딸린 워크트리면
+    // `Repo::open` 이 루트의 트래커를 연다(`Repo::opened_root`). 그 자리의 `.moai` 를 재던 판은 루트에
+    // 떨어진 쓰기를 하나도 못 보고 1분 시계가 돌 때까지 낡은 셈을 세웠다 — 표식이 있는 까닭이 그
+    // 시계를 안 기다리는 것이다.
+    let moai = crate::store::Repo::opened_root(dir).join(".moai");
     Marks {
         dir: dir.is_dir(),
         issues: crate::store::stamp(&moai.join("issues.jsonl")),
@@ -182,7 +186,8 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
     // **자리도 여기서 잰다**(moai-p3bs) — `moai status` 와 같은 자(`worktree::stranded_at`). 한때
     // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
     // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.
-    let (lost, unread) = crate::worktree::stranded_at(&repo.root, cfg, &load.issues, false, now);
+    // 자리를 재는 뿌리는 **등록한 그 체크아웃**이다(`repo.here()`) — `moai status` 와 같은 자.
+    let (lost, unread) = crate::worktree::stranded_at(repo.here(), cfg, &load.issues, false, now);
     let stranded = lost.as_ref().map_or(0, |w| w.count);
     Summary {
         counts: cfg.statuses.iter().map(|s| (s.clone(), st.counts.get(s).copied().unwrap_or(0))).collect(),
@@ -494,7 +499,8 @@ impl App {
                 At::Project(p) => Some(p.clone()),
                 At::Layer => None,
             },
-            None => self.repo.as_ref().map(|r| r.root.clone()),
+            // 층이 없으면 선 체크아웃이다(`Repo::here`) — 층의 줄과 같은 자로 적힌다(`cmd::tui`).
+            None => self.repo.as_ref().map(|r| r.here().to_path_buf()),
         }
     }
 
@@ -724,7 +730,7 @@ impl App {
         match self.layer.take() {
             None => {
                 let Some(repo) = &self.repo else { return };
-                let fresh = Layer::read(self.user_config.as_deref(), Some(&repo.root));
+                let fresh = Layer::read(self.user_config.as_deref(), Some(repo.here()));
                 if !fresh.registered() {
                     self.unlayered = unlayered_of(&fresh);
                     return;

@@ -61,7 +61,11 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let config_stamp = config.as_deref().map(crate::store::stamp);
     // 설정은 **한 번 읽어** 층과 보기가 나눠 쓴다(moai-u8cs).
     let reg = crate::user_config::read(config.as_deref());
-    let layer = crate::tui::layer::Layer::of(&reg, Some(&repo.root));
+    // **띄운 자리는 세션이 선 체크아웃이다**(`repo.here()`, 리뷰 moai-71ht 셋째 판) — 트래커는 루트로
+    // 옮겨 가지만 띄운 곳은 이 워크트리다. 트래커의 자리로 적던 판은 층으로 올라갔다 그 줄로 다시
+    // 들어오는 걸음에서 `Repo::open(<루트>)` 을 열어 `here()` 가 루트로 뒤집혔고, 그때부터 커밋 표가
+    // 이 가지의 커밋을 잃고 집기 표식도 안 적혔다.
+    let layer = crate::tui::layer::Layer::of(&reg, Some(repo.here()));
     let mut app = App::open(repo, load, index, ground, path, stamp).overlaid(origin, trouble, watched, swept);
     app.user = ctx.user.clone();
     // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와

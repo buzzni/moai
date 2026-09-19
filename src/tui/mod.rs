@@ -323,7 +323,16 @@ pub type Commits = std::collections::BTreeMap<
 /// 옮겨 가지만 `git log` 가 묻는 `HEAD` 는 이 체크아웃의 것이다. 루트로 물으면 이 가지에서 방금
 /// 한 일이 루트의 `HEAD` 에서 안 보여, 표가 "아무도 안 고쳤다" 로 빈다.
 fn commit_roots(repo: &Repo, origin: &crate::worktree::Origin) -> Vec<std::path::PathBuf> {
-    std::iter::once(repo.here()).chain(origin.roots()).map(std::path::Path::to_path_buf).collect()
+    // **같은 뿌리를 두 번 담지 않는다** — 선 체크아웃이 옆에서 줄을 보태 온 자리이기도 하면(제
+    // 스냅샷에만 있는 줄) `git log` 를 두 번 띄우고 표는 하나만 남는다. `repo.root` 로 담던 때는
+    // `others_of` 의 가름이 그것을 막아 줬다.
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    for root in std::iter::once(repo.here()).chain(origin.roots()) {
+        if !out.iter().any(|p| p == root) {
+            out.push(root.to_path_buf());
+        }
+    }
+    out
 }
 
 /// 뿌리마다 [`crate::git::table`] 을 짓는다. **어느 스레드에서 불러도 같다.**
@@ -426,7 +435,11 @@ pub fn watch(watched: &mut Vec<(std::path::PathBuf, Stamp)>, more: Vec<(std::pat
 /// 에 이미 댔다(`moai status` 의 `swept` 와 같은 자). 안 대면 판정이 가려진 0 이 "없다" 로 읽히고,
 /// 층은 같은 저장소에 `!` 를 세운다(리뷰 moai-3lul.kt0 다시 본 판, 사용자 결정 moai-rgz9.7vt).
 fn placed(repo: &Repo, issues: &[Issue], overlaid: bool, now: &str) -> (usize, Vec<String>) {
-    let (lost, unread) = crate::worktree::stranded_at(&repo.root, &repo.config, issues, overlaid, now);
+    // **자리는 세션이 선 체크아웃에서 잰다**(`repo.here()`, 리뷰 moai-71ht 셋째 판) — 지켜볼 것을
+    // 재는 자(`place_marks(repo.here())`)와 같은 뿌리여야 한다. 트래커의 자리로 재던 판은 딸린
+    // 워크트리 안에서 자리를 파면서 그 자리들을 하나도 안 지켜봐, 옆 워크트리를 치워도 배너가
+    // 옛 수로 섰다(moai-al0x 가 고친 자리다).
+    let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, issues, overlaid, now);
     let said = match overlaid {
         true => Vec::new(),
         false => unread

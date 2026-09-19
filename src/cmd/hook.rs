@@ -93,7 +93,16 @@ pub fn run(_ctx: &Ctx, event: Event) -> R<Vec<String>> {
 
 /// 답을 내되, 못 내면 아무 말도 하지 않는다.
 fn decide(event: Event, input: &Input) -> Option<String> {
-    let repo = Repo::discover().ok()?;
+    // **옮겨 갈 루트를 못 읽어도 규칙은 선다**(리뷰 moai-71ht.i1u). 트래커가 루트로 옮겨 가면서
+    // (moai-y7go) 루트의 깨진 `config.toml` 하나가 저장소의 **모든** 워크트리에서 훅을 조용히
+    // 껐다 — 고장의 크기가 규칙의 크기가 되면 안 된다. `moai` 자신은 그 자리에서 크게 실패하고
+    // (사람이 그것을 본다), 훅은 이 자리의 트래커로 선다. 읽는 것은 갈라진 스냅샷이지만 아무
+    // 말도 안 하는 것보다 낫다.
+    let cwd = std::env::current_dir().ok()?;
+    let repo = match Repo::discover() {
+        Ok(repo) => repo,
+        Err(_) => Repo::find_here(&cwd).ok()??,
+    };
     let load = repo.read().ok()?;
     // **못 읽은 줄을 그대로 넘긴다.** 빈 슬라이스를 넘기면 보드에서
     // `unreadable_line` 경고만 조용히 빠지는데, 그것은 실린 보드 말고는
@@ -132,13 +141,16 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             // 이미 여기로 옮겨 왔다(`-C` 가 아니다).
             st.notices.extend(crate::cmd::init::agents_notice(repo.here(), false));
             st.notices.extend(crate::cmd::init::dotfile_notice(repo.here(), false));
+            // 보드가 **정말 읽은 파일**을 댄다(`cmd::status::source_of` 와 같은 자) — 워크트리
+            // 세션의 보드는 루트의 트래커에서 온다(moai-y7go).
+            let source = crate::cmd::status::source_of(&repo);
             let lines =
                 view::status(
                     &st,
                     &load.issues,
                     &repo.config,
                     &now,
-                    ".moai/issues.jsonl",
+                    &source,
                     &crate::worktree::Origin::default(),
                     0,
                 );
@@ -147,7 +159,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
         Event::PreToolUse => {
             use crate::hook::Call;
             let call = Call::read(input.tool_name.as_deref(), &input.tool_input);
-            let cwd = std::env::current_dir().unwrap_or_else(|_| repo.root.clone());
+            let cwd = cwd.clone();
             let (routes, there) = match call {
                 Call::Shell(cmd) => route(&repo, cmd, &cwd),
                 _ => (Vec::new(), Vec::new()),

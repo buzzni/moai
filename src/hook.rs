@@ -3267,7 +3267,7 @@ mod tests {
 
     /// **거절문의 모서리 넷**(리뷰 moai-ju21.70g) — 옮겨 친 `-C` 는 한 낱말로 감싸고, 에픽 아닌 줄은
     /// `-e` 로 안 대고, 에픽 있는 일과 없는 일을 함께 쥐었으면 둘 다 대고, 규칙 2 의 줄은 한 줄에 명령
-    /// 하나다(딸린 워크트리에서 줄 머리의 `moai` 만 main 으로 겨눈다).
+    /// 하나다(붙여 넣는 쪽이 줄째 옮겨 친다).
     #[test]
     fn the_refusals_stay_runnable_as_written() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
@@ -3297,7 +3297,7 @@ mod tests {
             assert!(line.trim_start().starts_with("moai ") && line.matches("moai ").count() == 1, "한 줄에 명령이 둘이다 — {line}\n{wrote}");
         }
         assert!(wrote.contains("\n  moai add '제목'\n  moai mv <id> in_progress"), "{wrote}");
-        // 집으라는 줄은 본 칸을 함께 준다 — main 으로 겨눈 줄이 낡았으면 main 에서 멈춘다.
+        // 집으라는 줄은 본 칸을 함께 준다 — 짓고 치는 사이에 옆이 그 일을 집거나 닫았으면 멈춘다.
         let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         let wrote = denied(&guard_edit(&idle, &cfg(), &here(), Path::new("/repo"), "/repo/src/x.rs")).to_string();
         assert!(wrote.contains("moai mv t-1 in_progress --from todo"), "{wrote}");

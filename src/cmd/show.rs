@@ -292,6 +292,10 @@ fn home<'a>(repo: &'a Repo, origin: &'a crate::worktree::Origin, id: &str) -> &'
 /// **이 세션이 선 체크아웃**의 것이다. `repo.root` 로 묻던 판은 워크트리 안에서 방금 한 커밋이
 /// 루트의 `HEAD` 에 없어 `commits` 를 빈 배열로 냈다 — `commits_error` 없이 비는 것은 AGENTS.md
 /// 가 "그 id 를 적은 커밋이 없다" 로 못박은 값이라, 있는 일을 없다고 말한 셈이다.
+///
+/// **반대쪽 눈가림은 [`crate::git::table`] 이 막는다**(리뷰 moai-71ht 셋째 판) — 그쪽이 `HEAD` 와
+/// 주 체크아웃의 `HEAD` 를 함께 걸어, 갈라진 뒤 본 가지에 합쳐진 커밋도 이 자리에서 보인다. 여기서
+/// 고르는 것은 **어느 체크아웃에게 묻는가** 하나다.
 fn commit_home<'a>(repo: &'a Repo, origin: &'a crate::worktree::Origin, id: &str) -> &'a std::path::Path {
     origin.root(id).unwrap_or_else(|| repo.here())
 }
