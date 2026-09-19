@@ -793,8 +793,13 @@ impl App {
     }
 
     /// [`App::relayer`] 와 같되 **이미 읽은 설정**을 쓴다(moai-7yil) — 같은 걸음에 읽음도 그 설정에서
-    /// 드는 [`App::follow_config`] 가 한 번의 읽기를 나눠 쓴다. `None` 이면 제가 읽는다: 그때 읽는 파일은
-    /// 세우던 층의 것(`Layer::config`)이라, 설정 자리를 모르는 채 세운 층도 제 파일로 다시 선다.
+    /// 드는 [`App::follow_config`] 가 한 번의 읽기를 나눠 쓴다.
+    ///
+    /// `None` 이면 제가 읽는다 — **층을 다시 세우는 길은 세우던 층의 파일(`Layer::config`)에서, 처음
+    /// 세우는 길은 `App::user_config` 에서.** 둘은 같은 자리를 가리키도록 `cmd::tui` 가 한 번에 준다
+    /// (`user_config::path`). `Some` 을 받으면 그 설정의 자리가 곧 새 층의 자리다(`Layer::of` 가
+    /// `Registry::path` 를 든다, moai-y61p) — 부르는 쪽이 같은 파일을 읽어 넘길 때만 맞는 말이라,
+    /// 다른 파일의 설정을 넘기면 층은 한 파일에서 서고 등록·해제는 다른 파일에 간다.
     pub(super) fn relayer_with(&mut self, reg: Option<&user_config::Registry>, land: Option<&Path>) {
         let held = self.current().map(|r| self.anchor_of(&r));
         match self.layer.take() {
@@ -805,7 +810,11 @@ impl App {
                     Some(reg) => Layer::of(reg, here.as_deref()),
                     None => Layer::read(self.user_config.as_deref(), here.as_deref()),
                 };
+                // 못 읽었으면 세우지 않는다 — 다만 **까닭은 댄다**(리뷰). 층이 없는 화면에서는 이 배너가
+                // 유일한 말이라, 조용히 돌아서면 쭉 못 읽는 설정이 아무 말 없이 빈 화면으로 선다. 다음
+                // 읽기가 되면 그때 걷힌다([`unlayered_of`] 는 탈이 없으면 `None` 이다).
                 if fresh.trouble == Some(user_config::Trouble::Reading) {
+                    self.unlayered = unlayered_of(&fresh);
                     return;
                 }
                 if !fresh.registered() {
@@ -2298,6 +2307,9 @@ mod tests {
 
     /// **깨진 설정은 다시 읽어도 같다** — 못 읽은 것과 달리 표식을 올리고 그 까닭을 댄다(moai-9p7v).
     /// 물리면 걸음마다 같은 파일을 다시 파싱하고 같은 까닭을 다시 세운다.
+    ///
+    /// **읽음은 그래도 지킨다**(리뷰) — 깨진 파일의 `read` 는 파싱이 진 자리라 빈 표다. 그것을 들이면
+    /// 내 줄이 통째로 [NEW] 로 선다. 층은 비우고 읽음은 두는 것이 걷어 낸 `read_marks_at` 의 계약이었다.
     #[test]
     fn a_broken_config_is_not_retried_every_step() {
         let s = Scratch::fenced("layer-config-broken");
@@ -2306,11 +2318,20 @@ mod tests {
         let mut a = layered(&cfg);
         a.user_config = Some(cfg.clone());
         a.follow();
+        let marks = format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
+        std::fs::write(&cfg, &marks).unwrap();
+        settle(&mut a);
+        assert_eq!(a.seen.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "시험의 전제 — 읽음을 들었다");
 
         std::fs::write(&cfg, "[[project]\npath = ").unwrap();
         settle(&mut a);
         assert_eq!(a.config_stamp, Some(crate::store::stamp(&cfg)), "깨진 설정의 표식은 올라간다");
         assert!(a.layer.as_ref().is_none_or(|l| l.places.is_empty()), "깨진 설정으로 층이 남았다");
+        assert_eq!(
+            a.seen.get("argos-0001").map(String::as_str),
+            Some("2026-09-14T00:00:00Z"),
+            "깨진 설정의 빈 표를 들여 읽음이 사라졌다"
+        );
     }
 
     /// **못 읽는 줄도 시계로 다시 본다**(리뷰 moai-3lul.kt0 다시 본 판). 권한을 고치는 `chmod` 는 고친

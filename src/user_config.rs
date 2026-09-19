@@ -1099,15 +1099,21 @@ fn draws_line(item: &Item) -> bool {
 /// 줄 끝 주석이 있으면 쉼표가 그 주석 뒤로 가 파일이 통째로 안 읽혔다.
 ///
 /// 들여쓰기는 **줄을 여는 원소 가운데 마지막 것**의 것이다 — 한 줄에 여럿이 선 배열(`[\n "a", "b"\n]`)의
-/// 끝 원소는 제 줄을 안 열어 들여쓰기를 모른다.
+/// 끝 원소는 제 줄을 안 열어 들여쓰기를 모른다. 그런 배열에 더한 낱말은 제 줄에 서되 들여쓰기가 없다 —
+/// 본뜰 원소가 없으니 지어내지 않는다.
 ///
-/// 한 줄 배열(과 빈 배열)은 옮길 줄 끝이 없다 — `toml_edit` 의 기본 모양(`, "새것"`)이 곧 제 모양이다.
+/// **빈 배열도 여러 줄일 수 있다**(리뷰) — 마지막 낱말을 뺀 자리가 `[\n]` 이라, 원소가 없다고 한 줄로
+/// 보면 `SPC v` 를 껐다 켜는 것만으로 `[` 줄에 원소가 붙는다(`["done"\n]`). 원소가 없을 때 `]` 앞 글은
+/// 배열의 꼬리(`Array::trailing`)에 통째로 있으므로 그것을 줄 끝으로 읽고, 들여쓰기는 거기 선 주석에서
+/// 든다. 진짜 한 줄 배열(`[]`·`["a"]`)은 옮길 줄 끝이 없어 `toml_edit` 의 기본 모양(`, "새것"`)이 곧
+/// 제 모양이다.
 fn push_word(words: &mut toml_edit::Array, word: &str) {
     let last = words.len().checked_sub(1);
-    let after = last.map_or_else(String::new, |i| {
-        let tail = words.get(i).expect("차례 안이다").decor().suffix().and_then(|r| r.as_str()).unwrap_or_default();
-        format!("{tail}{}", words.trailing().as_str().unwrap_or_default())
-    });
+    let tail = last
+        .and_then(|i| words.get(i).expect("차례 안이다").decor().suffix())
+        .and_then(|r| r.as_str())
+        .unwrap_or_default();
+    let after = format!("{tail}{}", words.trailing().as_str().unwrap_or_default());
     let (line_end, rest) = first_line(&after);
     if line_end.is_empty() {
         words.push(word);
@@ -1119,7 +1125,8 @@ fn push_word(words: &mut toml_edit::Array, word: &str) {
             let p = prefix_of(words.get(i).expect("차례 안이다").decor());
             p.rfind('\n').map(|at| p[at + 1..].to_string())
         })
-        .unwrap_or_default();
+        // 본뜰 원소가 없다 — 빈 여러 줄 배열이면 `]` 앞 글의 들여쓰기가 그 배열의 것이다.
+        .unwrap_or_else(|| rest.chars().take_while(|c| *c == ' ' || *c == '\t').collect());
     let (head, trailing) = (format!("{line_end}{indent}"), format!("\n{rest}"));
     if let Some(i) = last {
         words.get_mut(i).expect("차례 안이다").decor_mut().set_suffix("");
@@ -2119,23 +2126,33 @@ mod tests {
         // 한 줄 배열과 빈 배열은 한 줄 그대로다.
         assert_eq!(show("[tui]\nhidden = [\"todo\", \"done\"]\n", &two, &three), "[tui]\nhidden = [\"todo\", \"done\", \"review\"]\n");
         assert_eq!(show("[tui]\nhidden = []\n", &[], &["todo"]), "[tui]\nhidden = [\"todo\"]\n");
+        // **빈 여러 줄 배열도 여러 줄이다**(리뷰) — 마지막 낱말을 뺀 자리가 이 모양이라, 껐다 켜는 것만으로
+        // 여기를 지난다. 본뜰 원소가 없어 들여쓰기는 `]` 앞 글의 주석에서 들고, 그것도 없으면 안 짓는다.
+        assert_eq!(show("[tui]\nhidden = [\n]\n", &[], &["todo", "done"]), "[tui]\nhidden = [\n\"todo\",\n\"done\"\n]\n");
+        let src = "[tui]\nhidden = [\n  # 아직 없다\n]\n";
+        assert_eq!(show(src, &[], &["todo"]), "[tui]\nhidden = [\n  \"todo\"\n  # 아직 없다\n]\n");
     }
 
     /// **켰다 끄면 옛 바이트로 돌아온다**(moai-n3ku). 더할 때 모양이 뒤집히면 뺄 때 그 모양을 되돌리지
     /// 못해, 토글마다 설정 파일이 헛 diff 를 냈다.
+    ///
+    /// 마지막 줄의 빈 배열 둘은 **뺀 자리에서 나는 모양**이다(리뷰) — 낱말이 하나뿐인 배열을 끄면 `[\n]`
+    /// 이 되고, 다시 켜는 것이 곧 이 왕복이다.
     #[test]
     fn adding_a_word_and_dropping_it_again_restores_the_bytes() {
-        for src in [
-            "[tui]\nhidden = [\n  \"todo\",\n  \"done\"\n]\n",
-            "[tui]\nhidden = [\n  \"todo\",\n  \"done\",\n]\n",
-            "[tui]\nhidden = [\n  \"todo\",\n  \"done\"  # 끝\n]\n",
-            "[tui]\nhidden = [\n  \"todo\",\n  \"done\", # 끝\n]\n",
-            "[tui]\nhidden = [\n  \"todo\",\n  \"done\"\n  # 끝에\n]\n",
-            "[tui]\nhidden = [\"todo\", \"done\"]\n",
+        for (src, base, more) in [
+            ("[tui]\nhidden = [\n  \"todo\",\n  \"done\"\n]\n", &["todo", "done"][..], &["todo", "done", "review"][..]),
+            ("[tui]\nhidden = [\n  \"todo\",\n  \"done\",\n]\n", &["todo", "done"], &["todo", "done", "review"]),
+            ("[tui]\nhidden = [\n  \"todo\",\n  \"done\"  # 끝\n]\n", &["todo", "done"], &["todo", "done", "review"]),
+            ("[tui]\nhidden = [\n  \"todo\",\n  \"done\", # 끝\n]\n", &["todo", "done"], &["todo", "done", "review"]),
+            ("[tui]\nhidden = [\n  \"todo\",\n  \"done\"\n  # 끝에\n]\n", &["todo", "done"], &["todo", "done", "review"]),
+            ("[tui]\nhidden = [\"todo\", \"done\"]\n", &["todo", "done"], &["todo", "done", "review"]),
+            ("[tui]\nhidden = [\n]\n", &[], &["todo"]),
+            ("[tui]\nhidden = [\n  # 아직 없다\n]\n", &[], &["todo"]),
         ] {
             let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
-            let (two, three) = (words(&["todo", "done"]), words(&["todo", "done", "review"]));
-            let (base, more) = (Look { hidden: two, ..Look::default() }, Look { hidden: three, ..Look::default() });
+            let (base, more) =
+                (Look { hidden: words(base), ..Look::default() }, Look { hidden: words(more), ..Look::default() });
             let mut doc = Doc::parse(src).unwrap();
             doc.merge_look(&base, &more).unwrap();
             let added = doc.render();
