@@ -540,7 +540,7 @@ mod tests {
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("✓ 뺌") && n.contains("그대로")), "{:?}", a.notice);
 
         // 상세에 포커스가 있으면 `SPC p d` 는 메뉴에 안 서고 아무것도 안 뺀다.
-        a.key(key(KeyCode::Tab));
+        a.hit("Ctrl-w w");
         a.hit("SPC p d");
         assert_eq!(a.mode, Mode::Browse);
         assert!(super::super::menu::open(&a.chord), "안 선 `d` 가 메뉴를 닫았다");

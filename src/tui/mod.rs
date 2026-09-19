@@ -185,6 +185,24 @@ impl Pane {
     pub fn prev(self) -> Pane {
         Pane::ALL[(self.at() + Pane::ALL.len() - 1) % Pane::ALL.len()]
     }
+
+    /// 한 칸 왼쪽·오른쪽. **끝에서는 제자리다** — vi 의 `Ctrl-w h`·`Ctrl-w l` 이 그렇다.
+    pub fn step(self, side: keys::Side) -> Pane {
+        let at = self.at();
+        let to = match side {
+            keys::Side::Left => at.saturating_sub(1),
+            keys::Side::Right => (at + 1).min(Pane::ALL.len() - 1),
+        };
+        Pane::ALL[to]
+    }
+
+    /// 칸의 이름. 키 바가 칸 옮기는 키가 **어디로 가는지** 댄다.
+    pub fn word(self) -> &'static str {
+        match self {
+            Pane::Explorer => "목록",
+            Pane::Detail => "상세",
+        }
+    }
 }
 
 /// 묶음 id → 멤버에서 읽은 것(`report::group_stands`). 이슈를 빌리지 않게 소유한다.
@@ -2090,6 +2108,8 @@ impl App {
             B::Quit => self.quit = true,
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
+            // **끝에서는 제자리다** — 목록에서 `Ctrl-w h` 를 눌러도 상세로 돌지 않는다.
+            B::Focus(side) => self.focus = self.focus.step(side),
             B::Step(m) => self.step(m, rows.len()),
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
@@ -2217,8 +2237,10 @@ impl App {
             sorting: self.order,
             fields: self.fields,
             detail: self.detail_open,
-            next_pane: draw::pane_name(self.focus.next()),
-            prev_pane: draw::pane_name(self.focus.prev()),
+            next_pane: self.focus.next().word(),
+            prev_pane: self.focus.prev().word(),
+            left_pane: self.focus.step(keys::Side::Left).word(),
+            right_pane: self.focus.step(keys::Side::Right).word(),
         }
     }
 
@@ -2983,11 +3005,11 @@ mod tests {
             search(&mut a, "argos-0011");
             a.hit("Enter");
             drawn(&mut a, 10, 40);
-            a.hit("Tab");
+            a.hit("Ctrl-w w");
             for _ in 0..3 {
                 a.key(key(KeyCode::Down));
             }
-            a.hit("Tab");
+            a.hit("Ctrl-w w");
             assert_eq!(a.detail.offset(), 3, "시험의 전제");
             a.hit(leave);
             assert!(!a.searching(), "{leave}: 검색이 안 풀렸다");
@@ -3400,20 +3422,34 @@ mod tests {
         assert_eq!(a.cursor, a.rows().len() - 1);
     }
 
-    /// `Tab` 은 앞으로, `Shift-Tab` 은 뒤로 돈다. 끝에서 처음으로 넘어간다.
-    /// `Shift-Tab` 은 터미널에 따라 `BackTab` 으로도 Shift 붙은 `Tab` 으로도 온다.
+    /// `Ctrl-w w` 는 앞으로, `Ctrl-w W` 는 뒤로 돈다. 끝에서 처음으로 넘어간다.
+    /// `Ctrl-w h`·`Ctrl-w l` 은 순환이 아니라 **한 칸 옆**이라 끝에서 제자리다(moai-oudf).
+    /// **`Tab` 은 여기서 아무 일도 안 한다** — 목록의 재귀 펼침이 받을 자리다.
     #[test]
-    fn tab_cycles_the_focus_both_ways() {
+    fn ctrl_w_moves_between_the_panes() {
         let mut a = app();
         assert_eq!(a.focus, Pane::Explorer, "목록에서 시작하지 않는다");
-        a.key(key(KeyCode::Tab));
+        a.hit("Ctrl-w w");
         assert_eq!(a.focus, Pane::Detail);
-        a.key(key(KeyCode::Tab));
+        a.hit("Ctrl-w w");
         assert_eq!(a.focus, Pane::Explorer, "끝에서 처음으로 안 돌았다");
+        a.hit("Ctrl-w W");
+        assert_eq!(a.focus, Pane::Detail, "Ctrl-w W 가 뒤로 안 돌았다");
+        a.hit("Ctrl-w W");
+        assert_eq!(a.focus, Pane::Explorer, "Ctrl-w W 가 뒤로 안 돌았다");
+        // 쪽으로 가는 키는 끝에서 제자리다 — 목록에서 `Ctrl-w h` 는 상세로 돌지 않는다.
+        a.hit("Ctrl-w h");
+        assert_eq!(a.focus, Pane::Explorer, "왼쪽 끝에서 되돌아 돌았다");
+        a.hit("Ctrl-w l");
+        assert_eq!(a.focus, Pane::Detail);
+        a.hit("Ctrl-w l");
+        assert_eq!(a.focus, Pane::Detail, "오른쪽 끝에서 되돌아 돌았다");
+        a.hit("Ctrl-w h");
+        assert_eq!(a.focus, Pane::Explorer);
+        // 옛 키는 남기지 않았다 — `Tab` 은 이제 목록의 것이다.
+        a.key(key(KeyCode::Tab));
         a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
-        assert_eq!(a.focus, Pane::Detail, "BackTab 이 뒤로 안 돌았다");
-        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
-        assert_eq!(a.focus, Pane::Explorer, "Shift 붙은 Tab 이 뒤로 안 돌았다");
+        assert_eq!(a.focus, Pane::Explorer, "Tab 이 아직 칸을 옮긴다");
         // 순환은 칸이 몇이든 제자리로 돌아온다
         for p in Pane::ALL {
             assert_eq!(p.next().prev(), p);
@@ -3440,7 +3476,7 @@ mod tests {
         assert_eq!((a.cursor, a.detail.offset()), (1, 0));
         drawn(&mut a, 10, 40);
 
-        a.key(key(KeyCode::Tab));
+        a.hit("Ctrl-w w");
         a.key(key(KeyCode::Down));
         assert_eq!((a.cursor, a.detail.offset()), (1, 1), "상세에 포커스가 있는데 목록이 움직였다");
         a.key(key(KeyCode::PageDown));
@@ -3458,7 +3494,7 @@ mod tests {
         assert_eq!((a.cursor, a.detail.offset()), (1, 0));
 
         // 목록으로 돌아오면 이동키가 다시 커서를 옮긴다
-        a.key(key(KeyCode::Tab));
+        a.hit("Ctrl-w w");
         a.key(key(KeyCode::End));
         assert_eq!(a.cursor, a.rows().len() - 1);
         a.key(key(KeyCode::Home));
@@ -3473,10 +3509,10 @@ mod tests {
     fn entering_and_leaving_keys_go_to_the_focused_pane() {
         for k in [KeyCode::Enter, KeyCode::Right] {
             let mut a = app();
-            a.key(key(KeyCode::Tab));
+            a.hit("Ctrl-w w");
             a.key(key(k));
             assert!(a.path.is_empty(), "상세에 포커스가 있는데 {k:?} 가 목록을 들어갔다");
-            a.key(key(KeyCode::Tab));
+            a.hit("Ctrl-w w");
             a.key(key(k));
             assert_eq!(a.path.len(), 1, "목록에 포커스가 있는데 {k:?} 가 안 들어갔다");
         }
@@ -3484,11 +3520,11 @@ mod tests {
             let mut a = app();
             a.key(key(KeyCode::Enter));
             drawn(&mut a, 10, 40);
-            a.key(key(KeyCode::Tab));
+            a.hit("Ctrl-w w");
             a.key(key(KeyCode::Down));
             a.key(key(k));
             assert_eq!((a.path.len(), a.detail.offset()), (1, 1), "상세에 포커스가 있는데 {k:?} 가 목록을 나갔다");
-            a.key(key(KeyCode::Tab));
+            a.hit("Ctrl-w w");
             a.key(key(k));
             assert!(a.path.is_empty(), "목록에 포커스가 있는데 {k:?} 가 안 나갔다");
         }
@@ -3526,7 +3562,7 @@ mod tests {
         a.key(key(KeyCode::Char('k')));
         assert_eq!((a.cursor, a.detail.offset(), a.focus), (1, 0, Pane::Explorer), "목록 포커스에서 `j` 가 상세를 굴렸다");
 
-        a.key(key(KeyCode::Tab));
+        a.hit("Ctrl-w w");
         drawn(&mut a, 10, 40);
         a.key(key(KeyCode::Char('j')));
         a.key(key(KeyCode::Char('j')));
@@ -3576,7 +3612,7 @@ mod tests {
         a.key(key(KeyCode::Char('l')));
         assert_eq!(a.path.len(), 0, "잎에서 `l` 이 무언가 했다");
 
-        a.key(key(KeyCode::Tab));
+        a.hit("Ctrl-w w");
         drawn(&mut a, 10, 40);
         a.key(ctrl('d'));
         assert_eq!(a.detail.offset(), half);
@@ -3598,10 +3634,10 @@ mod tests {
         let mut a = app();
         a.key(key(KeyCode::Char('l')));
         assert_eq!(a.path.len(), 1, "`l` 이 안 들어갔다");
-        a.key(key(KeyCode::Tab));
+        a.hit("Ctrl-w w");
         a.key(key(KeyCode::Char('h')));
         assert_eq!(a.path.len(), 1, "상세 포커스에서 `h` 가 나갔다");
-        a.key(key(KeyCode::Tab));
+        a.hit("Ctrl-w w");
         a.key(key(KeyCode::Char('h')));
         assert!(a.path.is_empty(), "`h` 가 안 나갔다");
     }

@@ -271,10 +271,11 @@ NOTE
 
   j·k 나 화살표로 이동, Enter·l 로 들어가고 Backspace·h 로 나온다. gg·Home
   이 맨 위, G·End 가 맨 아래, Ctrl-d·Ctrl-u 가 반 쪽,
-  Ctrl-f·Ctrl-b(PageDown·PageUp)가 한 쪽이다. Tab·Shift-Tab 이 목록과 상세
-  사이로 포커스를 옮기고, 이동키는 모두 포커스 있는 칸을 움직인다 — 상세를
-  굴리려면 Tab 으로 간다. / 가 검색, Esc 가 걸어 둔 거름망을 푼다. r 은 커서가
-  선 줄을 읽음으로 적는다(아래 [NEW]).
+  Ctrl-f·Ctrl-b(PageDown·PageUp)가 한 쪽이다. Ctrl-w w 가 목록과 상세 사이로
+  포커스를 옮기고(Ctrl-w W 가 거꾸로, Ctrl-w h·Ctrl-w l 이 왼쪽·오른쪽 칸),
+  이동키는 모두 포커스 있는 칸을 움직인다 — 상세를 굴리려면 Ctrl-w w 로 간다.
+  / 가 검색, Esc 가 걸어 둔 거름망을 푼다. r 은 커서가 선 줄을 읽음으로
+  적는다(아래 [NEW]).
   검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며, 검색은 치는 대로 목록을
   거르고 Tab·Shift-Tab 이 찾을 자리를 전체·id·제목·태그·본문으로 돌린다. 맨
   위 헤더가 등록한 프로젝트마다 번호를 대고, 그 숫자를 SPC 없이 그대로 누르면 그

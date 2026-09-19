@@ -1619,14 +1619,6 @@ fn frame(app: &App, pane: Pane) -> Block<'static> {
     }
 }
 
-/// 칸의 이름. 키 바가 `Tab` 이 **어디로 가는지** 댄다.
-pub(super) fn pane_name(p: Pane) -> &'static str {
-    match p {
-        Pane::Explorer => "목록",
-        Pane::Detail => "상세",
-    }
-}
-
 /// 한 줄을 패널 폭에 맞춘다. 넘치면 `…` 를 남긴다.
 fn fit(line: Line<'_>, room: usize) -> Line<'_> {
     if spans_width(&line.spans) <= room {
@@ -3116,7 +3108,7 @@ pub(super) mod tests {
         let mut a = app();
         let wide = render(&mut a, 100, 12);
         assert!(wide.iter().any(|l| l.contains("상세")), "상세 칸이 원래 없다");
-        a.hit("Tab");
+        a.hit("Ctrl-w w");
         assert_eq!(a.focus, Pane::Detail);
 
         a.hit("SPC v p");
@@ -3126,7 +3118,7 @@ pub(super) mod tests {
         let border = lines.iter().find(|l| l.contains('┓')).expect("목록 테두리가 없다");
         assert_eq!(crate::text::width(border), 100, "목록이 폭을 다 안 썼다 — {border:?}");
         // 갈 칸이 하나뿐이니 Tab 은 아무 일도 안 한다.
-        a.hit("Tab");
+        a.hit("Ctrl-w w");
         assert_eq!(a.focus, Pane::Explorer);
 
         a.hit("SPC v p");
@@ -4498,7 +4490,7 @@ pub(super) mod tests {
         assert!(screen.contains("a : 등록") && screen.contains("d : 목록에서 빼기"), "{screen}");
         a.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         // `SPC p d` 는 목록 포커스에서만 듣는다 — 상세 포커스의 메뉴에는 없다. `a` 는 남는다.
-        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        a.hit("Ctrl-w w");
         let bar = render(&mut a, 80, 22).last().cloned().unwrap_or_default();
         assert!(!bar.contains("Enter"), "{bar:?}");
         a.hit("SPC p");
@@ -4736,8 +4728,8 @@ pub(super) mod tests {
         assert!(first.contains("1번째"), "{first}");
         assert!(!first.contains("40번째"), "다 보이면 굴릴 것이 없다\n{first}");
         // 목록에 섰으니 상세로 가는 키를 댄다 — `j·k` 는 여기서 커서를 옮긴다(moai-ob4c).
-        assert!(first.contains("↓ ") && first.contains("줄 (Tab)"), "남은 줄을 안 알린다\n{first}");
-        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(first.contains("↓ ") && first.contains("줄 (Ctrl-w w)"), "남은 줄을 안 알린다\n{first}");
+        a.hit("Ctrl-w w");
         let focused = render(&mut a, 100, 16).join("\n");
         assert!(focused.contains("줄 (j·k)"), "상세 포커스에서 굴리는 키를 안 댄다\n{focused}");
 
@@ -4799,7 +4791,7 @@ pub(super) mod tests {
         let mut a = every(issues);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        a.hit("Ctrl-w w");
         for _ in 0..80 {
             a.key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
         }
@@ -4833,10 +4825,10 @@ pub(super) mod tests {
         let mut a = every(issues);
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let _ = render(&mut a, 100, 16);
-        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        a.hit("Ctrl-w w");
         a.key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
         assert!(a.detail.offset() > 0);
-        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        a.hit("Ctrl-w w");
         a.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
         assert_eq!(a.detail.offset(), 0, "굴린 자리를 들고 다른 줄로 갔다");
     }
@@ -4852,7 +4844,7 @@ pub(super) mod tests {
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let cursor = a.cursor;
 
-        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        a.hit("Ctrl-w w");
         a.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
         let end = render(&mut a, 100, 16).join("\n");
         assert!(end.contains("40번째"), "End 가 본문 끝에 안 닿았다\n{end}");
@@ -4878,7 +4870,7 @@ pub(super) mod tests {
         assert!(t.starts_with('┏') && t.ends_with('┐'), "목록에 포커스가 있는데 모양이 안 갈린다 — {t:?}\n{screen}");
         assert_eq!(screen.matches('┏').count(), 1, "굵은 칸이 둘이다\n{screen}");
 
-        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        a.hit("Ctrl-w w");
         let (t, screen) = top(&mut a);
         assert!(t.starts_with('┌') && t.ends_with('┓'), "Tab 뒤에 굵은 선이 상세로 안 옮겼다 — {t:?}\n{screen}");
         assert_eq!(screen.matches('┏').count(), 1, "굵은 칸이 둘이다\n{screen}");
@@ -4887,7 +4879,7 @@ pub(super) mod tests {
 
         // 글을 받는 중에도 테두리는 제자리다 — 포커스가 안 옮겼으니 그림도 안 옮긴다.
         a.key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
-        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        a.hit("Ctrl-w w");
         let (t, _) = top(&mut a);
         assert!(t.ends_with('┓'), "글 받는 중에 포커스 표시가 옮겼다 — {t:?}");
     }
@@ -4898,7 +4890,7 @@ pub(super) mod tests {
     #[test]
     fn the_focused_border_is_green_and_the_other_is_not() {
         let mut a = app();
-        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        a.hit("Ctrl-w w");
         let mut term = Terminal::new(TestBackend::new(100, 12)).unwrap();
         term.draw(|f| screen(f, &mut a)).unwrap();
         let buf = term.backend().buffer().clone();
@@ -4912,14 +4904,14 @@ pub(super) mod tests {
     /// **키 바가 `Tab` 을 말한다. 80칸에서도.** 모르는 키는 없는 키다 — 그리고
     /// 가는 곳을 대므로 지금 어디 있는지를 글자로도 말한다.
     #[test]
-    fn the_key_bar_names_tab_at_eighty_columns() {
+    fn the_key_bar_names_the_pane_key_at_eighty_columns() {
         for w in [80u16, 100, 120] {
             let mut a = app();
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
-            assert!(bar.contains("Tab 상세") && bar.contains("SPC 메뉴"), "{w}칸 — {bar:?}");
-            a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            assert!(bar.contains("Ctrl-w w 상세") && bar.contains("SPC 메뉴"), "{w}칸 — {bar:?}");
+            a.hit("Ctrl-w w");
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
-            assert!(bar.contains("Tab 목록") && bar.contains("SPC 메뉴"), "{w}칸 — {bar:?}");
+            assert!(bar.contains("Ctrl-w w 목록") && bar.contains("SPC 메뉴"), "{w}칸 — {bar:?}");
         }
     }
 
@@ -5049,7 +5041,7 @@ pub(super) mod tests {
                     (!c.leaf).then_some("Enter 들어가기"),
                     (!c.root).then_some("Bksp 나가기"),
                     Some("/ 검색"),
-                    Some("Tab 상세"),
+                    Some("Ctrl-w w 상세"),
                     Some("j·k 이동"),
                     // 14줄이라 헤더가 안 선다 — 층으로 가는 `0` 을 바가 대신 댄다(moai-c2s3).
                     // 맨 앞에 두므로 폭이 모자라면 이것이 먼저 떨어진다: 80칸에서는 `Bksp 나가기`
@@ -5100,12 +5092,12 @@ pub(super) mod tests {
             let mut a = Place::LayeredInsideUp.app();
             a.filter_text = Some("tag=x".into());
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
-            for shown in ["j·k 이동", "Tab 상세", "/ 검색", "Bksp 나가기", "Enter 들어가기", "Esc 풀기", "SPC 메뉴"] {
+            for shown in ["j·k 이동", "Ctrl-w w 상세", "/ 검색", "Bksp 나가기", "Enter 들어가기", "Esc 풀기", "SPC 메뉴"] {
                 assert!(bar.contains(shown), "{w}칸 목록 포커스에 {shown:?} 가 없다 — {bar:?}");
             }
-            a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            a.hit("Ctrl-w w");
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
-            for shown in ["j·k 굴리기", "Tab 목록", "/ 검색", "SPC 메뉴"] {
+            for shown in ["j·k 굴리기", "Ctrl-w w 목록", "/ 검색", "SPC 메뉴"] {
                 assert!(bar.contains(shown), "{w}칸 상세 포커스에 {shown:?} 가 없다 — {bar:?}");
             }
             assert!(!bar.contains("Enter") && !bar.contains("Bksp"), "{w}칸 — {bar:?}");
@@ -5139,8 +5131,8 @@ pub(super) mod tests {
                     assert_eq!(lookup(BROWSE, &[parse("SPC").unwrap()]), Lookup::Pending, "SPC 가 메뉴를 안 연다");
                     for (names, what) in optional.iter().chain(&keep[..keep.len() - 1]) {
                         for name in names.split('·') {
-                            let k = parse(name).unwrap_or_else(|| panic!("{c:?}: 바의 `{name}` 를 키로 못 푼다"));
-                            let Lookup::Run(act) = lookup(BROWSE, &[k]) else { panic!("{c:?}: 바의 `{name}` 가 표에 없다") };
+                            let seq = keys::parse_seq(name).unwrap_or_else(|| panic!("{c:?}: 바의 `{name}` 를 키로 못 푼다"));
+                            let Lookup::Run(act) = lookup(BROWSE, &seq) else { panic!("{c:?}: 바의 `{name}` 가 표에 없다") };
                             assert_eq!(act.enabled(&c), Ok(()), "{c:?}: 켜지지 않은 `{name}` 가 바에 섰다");
                             assert_eq!(act.what(&c), *what, "{c:?}: `{name}`");
                         }
@@ -5230,7 +5222,7 @@ pub(super) mod tests {
         assert_eq!(buf[(x, y)].fg, Color::Green, "포커스 칸의 표시가 테두리 색을 덮었다");
 
         // 포커스를 옮기면 목록 표시는 여느 회색으로 돌아간다
-        a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        a.hit("Ctrl-w w");
         term.draw(|f| screen(f, &mut a)).unwrap();
         let buf = term.backend().buffer().clone();
         let x = (0..buf.area.width).find(|&x| buf[(x, y)].symbol() == "↓").expect("목록에 스크롤 표시가 없다");
@@ -5673,7 +5665,7 @@ pub(super) mod tests {
                 a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
             }
             for _ in 0..tabs {
-                a.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+                a.hit("Tab");
             }
             found_text(&mut a)
         };

@@ -1513,24 +1513,24 @@ mod tests {
         let s = Scratch::fenced("layer-digit-focus");
         let (_one, two, mut a) = on_layer_with_twins(&s);
         a.hit("2");
-        a.hit("Tab");
+        a.hit("Ctrl-w w");
         assert_eq!(a.focus, super::super::Pane::Detail, "시험의 전제 — 상세에 포커스가 갔다");
         a.hit("0");
         assert!(a.on_layer());
         assert_eq!(a.focus, super::super::Pane::Explorer, "층에 섰는데 포커스가 상세에 남았다");
 
-        a.hit("Tab");
+        a.hit("Ctrl-w w");
         a.hit("1");
         assert_eq!(a.focus, super::super::Pane::Explorer, "프로젝트로 건너뛰었는데 포커스가 상세에 남았다");
         assert_ne!(a.here(), Some(two), "1 이 첫 프로젝트로 안 갔다");
 
         // **이미 그 자리여도 돌아온다**(리뷰). 안 옮기는 갈래로 떨어지면 포커스를 안 건드려,
         // 고치려던 그 막힌 화면(층의 상세)에 그대로 남는 길이 남는다.
-        a.hit("Tab");
+        a.hit("Ctrl-w w");
         a.hit("1");
         assert_eq!(a.focus, super::super::Pane::Explorer, "이미 선 프로젝트의 번호를 누르니 포커스가 상세에 남았다");
         a.hit("0");
-        a.hit("Tab");
+        a.hit("Ctrl-w w");
         assert_eq!(a.focus, super::super::Pane::Detail, "시험의 전제 — 층에서도 상세로 간다");
         a.hit("0");
         assert!(a.on_layer());
@@ -1545,7 +1545,7 @@ mod tests {
         let (one, two, mut a) = on_layer_with_twins(&s);
         a.hit("1");
         assert_eq!(a.here(), Some(one.clone()), "1 이 첫 프로젝트로 안 갔다");
-        a.hit("Tab");
+        a.hit("Ctrl-w w");
         assert_eq!(a.focus, super::super::Pane::Detail, "시험의 전제 — 상세에 포커스가 갔다");
 
         // 둘째 프로젝트를 통째로 치운다 — `open_place` 가 못 열고 `enter_project` 는 알림만 단다.
