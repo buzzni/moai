@@ -259,6 +259,88 @@ fn segments(cmd: &str) -> Vec<Vec<String>> {
     parse(cmd).into_iter().map(|s| s.words).filter(|w| !w.is_empty()).collect()
 }
 
+/// 글 안의 **명령 치환들**(`$( … )`·`` ` … ` ``) — 따옴표 없는 heredoc 본문에서 셸이 돌릴 것을
+/// 고른다(moai-t863). 여는 글자 뒤부터 짝이 맞는 닫는 글자까지를 낸다.
+///
+/// **작은따옴표 안은 안 본다** — 셸도 heredoc 본문에서는 따옴표를 안 보지만, 치환 **안**의 따옴표는
+/// 본다. 겹친 치환은 바깥 것 하나로 낸다 — 다시 읽는 렉서가 그 안을 또 가른다.
+fn substitutions(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '\\' => {
+                chars.next();
+            }
+            '$' if chars.peek().map(|(_, d)| *d) == Some('(') => {
+                chars.next();
+                let mut depth = 1;
+                let mut end = text.len();
+                for (j, d) in chars.by_ref() {
+                    match d {
+                        '(' => depth += 1,
+                        ')' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                end = j;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                // `$((…))` 는 셈이지 명령이 아니다 — 여는 자리에서 가른다.
+                let body = &text[i + 2..end];
+                if !body.starts_with('(') {
+                    out.push(body.to_string());
+                }
+            }
+            '`' => {
+                let mut end = text.len();
+                while let Some((j, d)) = chars.next() {
+                    if d == '\\' {
+                        chars.next();
+                        continue;
+                    }
+                    if d == '`' {
+                        end = j;
+                        break;
+                    }
+                }
+                out.push(text[i + 1..end].to_string());
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// 이 토막이 **셸에 넘기는 글** — `bash -c '…'`·`sh -c`·`eval …` 이다(moai-455j). 그 글은 낱말이
+/// 아니라 명령줄이라, 렉서가 다시 읽어야 규칙이 본다.
+///
+/// `-c` 뒤의 한 낱말만 글이다(그 뒤는 `$0`·`$1`). `eval` 은 인자를 공백으로 이어 붙인 것이 글이다 —
+/// 셸이 그렇게 한다.
+fn shell_text(words: &[String]) -> Vec<String> {
+    let cmd = command_of(words);
+    let Some((head, rest)) = cmd.split_first() else { return Vec::new() };
+    match basename(head) {
+        "bash" | "sh" | "zsh" | "dash" | "ksh" => {
+            let mut it = rest.iter();
+            while let Some(w) = it.next() {
+                if w == "-c" {
+                    return it.next().map(|t| vec![t.clone()]).unwrap_or_default();
+                }
+                if let Some(text) = w.strip_prefix("-").filter(|f| f.contains('c') && !f.starts_with('-')).and(it.clone().next()) {
+                    return vec![text.clone()];
+                }
+            }
+            Vec::new()
+        }
+        "eval" => (!rest.is_empty()).then(|| vec![rest.join(" ")]).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
 /// 명령줄의 한 토막 — 낱말들과, 리다이렉션이 쓰는 자리.
 #[derive(Debug, Default)]
 struct Seg {
@@ -387,7 +469,7 @@ struct Lexer<'a> {
     /// `[[ … ]]` 안 — `>`·`<`·`&&`·`||`·괄호가 비교와 묶음이다.
     test: bool,
     /// 이 줄이 끝나면 건너뛸 heredoc 본문들 — 종료어와, 앞 탭을 걷는가(`<<-`), 본문을 적을 [`Lexer::docs`] 의 번호.
-    heredocs: Vec<(String, bool, usize)>,
+    heredocs: Vec<(String, bool, usize, bool)>,
     /// 건너뛴 heredoc 본문들 — 연 토막이 [`Seg::docs`] 로 번호를 든다.
     docs: Vec<String>,
     /// 지금 몇 겹의 `( … )` 묶음 안인가([`Seg::depth`]).
@@ -411,10 +493,21 @@ struct Lexer<'a> {
     floor: usize,
     /// 마지막으로 쌓은 토막 뒤로 닫힌 예약어 묶음의 가장 얕은 깊이([`Seg::shut`]).
     shut: Option<usize>,
+    /// **명령으로 다시 읽을 글들**([`Lexer::relex`]) — 따옴표 없는 heredoc 본문의 명령 치환(moai-t863)과
+    /// `bash -c '…'`·`eval '…'` 의 글(moai-455j)이다. 낱말로만 두던 판은 셸이 실제로 돌리는 그 명령을
+    /// 아무 규칙에도 안 보였다.
+    later: Vec<String>,
+    /// 다시 읽기를 몇 겹까지 왔나 — `bash -c "bash -c '…'"` 가 끝없이 파고들지 않게 막는다.
+    deep: usize,
 }
 
 impl<'a> Lexer<'a> {
     fn new(cmd: &'a str) -> Self {
+        Lexer::at(cmd, 0)
+    }
+
+    /// 다시 읽기의 겹을 이어받는 렉서 — [`Lexer::relex`] 와 치환이 쓴다.
+    fn at(cmd: &'a str, deep: usize) -> Self {
         Lexer {
             chars: cmd.chars().peekable(),
             all: Vec::new(),
@@ -434,8 +527,14 @@ impl<'a> Lexer<'a> {
             low: usize::MAX,
             floor: usize::MAX,
             shut: None,
+            later: Vec::new(),
+            deep,
         }
     }
+
+    /// 다시 읽기의 상한 — 이보다 깊으면 글을 글로 둔다. 실제 명령줄이 이만큼 겹칠 일은 없고,
+    /// 겹치는 것은 렉서를 끝없이 돌리려는 입력뿐이다.
+    const DEEP: usize = 8;
 
     /// 묶음을 나왔다 — 다음에 쌓는 토막이 그 사이의 가장 얕은 자리를 안다([`Seg::low`]).
     fn sank(&mut self) {
@@ -503,6 +602,23 @@ impl<'a> Lexer<'a> {
             }
         }
         self.end_by(None);
+        // **셸이 글을 명령으로 돌리는 자리를 다시 읽는다**([`Lexer::later`]) — 따옴표 없는 heredoc 의
+        // 치환(moai-t863)과 `bash -c '…'`·`eval '…'` 의 글(moai-455j)이다. 뒤에 쌓는다: 이것들은 제
+        // 셸에서 돌아 바깥 토막의 `&&` 사슬을 잇지 않으므로(`nested`), 차례가 규칙의 답을 안 바꾼다.
+        let mut later = std::mem::take(&mut self.later);
+        for seg in &self.all {
+            later.extend(shell_text(&seg.words));
+        }
+        if self.deep < Lexer::DEEP {
+            for text in later {
+                for mut inner in Lexer::at(&text, self.deep + 1).run() {
+                    inner.nested += 1;
+                    inner.depth += self.group + 1;
+                    inner.level += self.braces + 1;
+                    self.all.push(inner);
+                }
+            }
+        }
         let docs = std::mem::take(&mut self.docs);
         self.all
             .into_iter()
@@ -822,9 +938,12 @@ impl<'a> Lexer<'a> {
         let strip = self.chars.next_if_eq(&'-').is_some();
         while self.chars.next_if(|d| *d == ' ' || *d == '\t').is_some() {}
         let mut tag = String::new();
+        // **종료어에 따옴표가 있었나** — 없으면 셸이 본문의 `$(…)`·백틱을 푼다(moai-t863).
+        let mut quoted = false;
         while let Some(&d) = self.chars.peek() {
             match d {
                 '\'' | '"' => {
+                    quoted = true;
                     self.chars.next();
                     for e in self.chars.by_ref() {
                         if e == d {
@@ -834,6 +953,7 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 '\\' => {
+                    quoted = true;
                     self.chars.next();
                     if let Some(e) = self.chars.next() {
                         tag.push(e);
@@ -850,7 +970,7 @@ impl<'a> Lexer<'a> {
             let n = self.docs.len();
             self.docs.push(String::new());
             self.seg.docs.push(n);
-            self.heredocs.push((tag, strip, n));
+            self.heredocs.push((tag, strip, n, quoted));
         }
     }
 
@@ -860,7 +980,7 @@ impl<'a> Lexer<'a> {
     /// 읽는다. 앞뒤를 다듬어 견주던 판은 본문에 인용된 `    MD` 에서 본문을
     /// 끝내, 남은 본문을 명령으로 읽었다.
     fn skip_heredocs(&mut self) {
-        for (tag, strip, n) in std::mem::take(&mut self.heredocs) {
+        for (tag, strip, n, quoted) in std::mem::take(&mut self.heredocs) {
             loop {
                 let mut line = String::new();
                 let mut more = false;
@@ -879,6 +999,12 @@ impl<'a> Lexer<'a> {
                 let doc = &mut self.docs[n];
                 doc.push_str(body);
                 doc.push('\n');
+                // **따옴표 없는 종료어면 본문의 치환은 명령이다**(moai-t863) — 셸이 그것을 돌려 값을
+                // 본문에 끼운다. `cat <<EOF` 안의 `$(moai add x)` 가 규칙 1 을 그냥 지나가던 자리다.
+                if !quoted {
+                    let found = substitutions(body);
+                    self.later.extend(found);
+                }
                 if !more {
                     break;
                 }
@@ -1031,12 +1157,129 @@ const PREFIXES: &[&str] = &[
 /// 토막에서 **명령 자리**부터의 낱말들. 앞에 붙은 환경변수 대입(`FOO=1 cmd`)과
 /// 예약어·접두 명령을 지나친다. 셋이 따로 세던 것을 여기 하나로 모았다 —
 /// 서로 다른 셈이 이미 서로 다른 답을 내고 있었다.
+///
+/// **감싸는 명령도 넘는다**(moai-455j) — `env`·`timeout`·`nice`·`stdbuf`·`sudo`·`doas` 는 뒤에 오는
+/// 명령을 그대로 돌린다. 못 넘던 판은 `env moai add x`·`timeout 5 moai add x`·`sudo tee src/x.rs`
+/// 를 아무 규칙에도 안 보였다 — 규칙 1~3 이 낱말 하나로 샜다.
+///
+/// **옵션이 값을 먹는지 알아야 한다** — `env -u NAME moai add` 의 `NAME` 을 명령으로 읽으면 그 줄은
+/// 다시 아무것도 아니게 된다. 모르는 옵션을 만나면 **거기서 멈춘다**: 넘겨짚어 명령 자리를 옮기면
+/// 그 줄이 엉뚱한 명령으로 읽혀, 새는 것보다 나쁜 잘못 막음이 난다.
+///
+/// **셸을 여는 것은 안 넘는다** — `sudo -s`·`sudo -i`·`bash -c '…'` 의 뒤는 명령이 아니라 글이다.
+/// 그 글을 읽는 것은 렉서의 일이다([`Lexer::relex`]).
 fn command_of(words: &[String]) -> &[String] {
-    let skip = words
-        .iter()
-        .take_while(|w| PREFIXES.contains(&w.as_str()) || (w.contains('=') && !w.starts_with(['-', '='])))
-        .count();
-    &words[skip..]
+    let mut at = 0;
+    loop {
+        let rest = &words[at..];
+        let lead = rest
+            .iter()
+            .take_while(|w| PREFIXES.contains(&w.as_str()) || (w.contains('=') && !w.starts_with(['-', '='])))
+            .count();
+        at += lead;
+        let Some(head) = words.get(at).map(|w| basename(w)) else { return &words[at..] };
+        let Some(skip) = wrapper_args(head, &words[at + 1..]) else { return &words[at..] };
+        at += 1 + skip;
+    }
+}
+
+/// 감싸는 명령 하나를 넘는 데 드는 **뒤 낱말 수** — 감싸는 명령이 아니거나 그 뒤가 명령이 아니면
+/// `None`([`command_of`]).
+///
+/// 옵션 꼴은 GNU coreutils 와 sudo 의 것이다. `--long=값` 은 한 낱말이고, 값을 따로 받는 짧은 옵션만
+/// 하나를 더 먹는다. `--` 뒤는 곧 명령이다.
+fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
+    // (감싸는 명령, 값을 따로 받는 짧은 옵션, 값을 받는 긴 옵션, 옵션 뒤에 오는 제 자리 인자 수,
+    //  **셸을 여는 스위치** — 그 뒤는 명령이 아니라 글이라 안 넘는다)
+    const WRAPPERS: &[(&str, &[&str], &[&str], usize, &[&str])] = &[
+        ("env", &["-u", "-C"], &["--unset", "--chdir", "--block-signal", "--default-signal", "--ignore-signal"], 0, &["-S", "--split-string"]),
+        ("timeout", &["-k", "-s"], &["--kill-after", "--signal"], 1, &[]),
+        ("nice", &["-n"], &["--adjustment"], 0, &[]),
+        ("stdbuf", &["-i", "-o", "-e"], &["--input", "--output", "--error"], 0, &[]),
+        (
+            "sudo",
+            &["-u", "-g", "-p", "-C", "-D", "-h", "-U", "-r", "-t"],
+            &["--user", "--group", "--prompt", "--chdir", "--host", "--other-user", "--role", "--type"],
+            0,
+            &["-s", "-i", "--shell", "--login", "-e", "--edit"],
+        ),
+        ("doas", &["-u", "-C", "-a"], &[], 0, &["-s"]),
+    ];
+    // 값을 안 받는 것으로 **아는** 긴 스위치 — 모르는 것은 아래에서 멈춘다.
+    const VALUELESS: &[&str] = &[
+        "--ignore-environment", "--null", "--debug", "--verbose", "--version", "--help",
+        "--preserve-status", "--foreground", "--non-interactive", "--preserve-env", "--set-home",
+        "--stdin", "--background", "--remove-timestamp", "--reset-timestamp", "--askpass",
+    ];
+    let (_, takes, long, args, opens) = WRAPPERS.iter().find(|(name, ..)| *name == head)?;
+    let mut n = 0;
+    let mut seen = 0;
+    while let Some(w) = rest.get(n) {
+        if w == "--" {
+            n += 1;
+            break;
+        }
+        if !w.starts_with('-') || w == "-" {
+            // 제 자리 인자(`timeout 5 …`)를 다 먹었으면 여기가 명령 자리다.
+            if seen == *args {
+                break;
+            }
+            seen += 1;
+            n += 1;
+            continue;
+        }
+        if opens.contains(&w.as_str()) {
+            return None;
+        }
+        if takes.contains(&w.as_str()) {
+            // 값이 없으면(`env -u`) 그 줄은 셸이 거절한다 — 넘겨짚지 않는다.
+            rest.get(n + 1)?;
+            n += 2;
+            continue;
+        }
+        // `--이름=값` 은 값을 달고 있어 한 낱말이다 — 모르는 이름이어도 명령 자리를 안 흔든다.
+        if w.starts_with("--") && w.contains('=') {
+            n += 1;
+            continue;
+        }
+        if long.contains(&w.as_str()) {
+            rest.get(n + 1)?;
+            n += 2;
+            continue;
+        }
+        // **모르는 긴 옵션에서는 멈춘다** — 값을 따로 받는 것이면 그 값을 명령으로 읽는다.
+        if w.starts_with("--") {
+            if !VALUELESS.contains(&w.as_str()) {
+                return None;
+            }
+            n += 1;
+            continue;
+        }
+        // 짧은 스위치 — 값을 받는 글자가 **맨 앞**이면 그 값은 붙었거나(`-o0`) 다음 낱말이다(`-u NAME`).
+        let mut letters = w.chars().skip(1);
+        let first = letters.next();
+        let attached: String = letters.collect();
+        if first.is_some_and(|c| takes.contains(&format!("-{c}").as_str())) {
+            if attached.is_empty() {
+                rest.get(n + 1)?;
+                n += 2;
+            } else {
+                n += 1;
+            }
+            continue;
+        }
+        // 값을 안 받는 글자만 묶였으면 넘긴다 — `nice -5` 도 여기다.
+        if w.chars().skip(1).all(|c| c.is_ascii_alphanumeric() || c == '.')
+            && !w.chars().skip(1).any(|c| takes.contains(&format!("-{c}").as_str()))
+        {
+            n += 1;
+            continue;
+        }
+        return None;
+    }
+    // 뒤에 명령이 없으면 감싸는 것이 아니다(`env` 혼자는 환경을 찍는다).
+    rest.get(n)?;
+    Some(n)
 }
 
 fn basename(word: &str) -> &str {
@@ -2912,6 +3155,86 @@ mod tests {
         let mine = Away { picked: set(&["t-1.aa"]), ..unsure };
         let focus: Vec<&str> = held(&all, &cfg(), &mine).iter().map(|i| i.id.as_str()).collect();
         assert_eq!(focus, ["t-1.aa"], "제가 집은 자식을 부모의 모름에 딸려 보냈다");
+    }
+
+    /// **감싸는 명령은 명령 자리를 안 가린다**(moai-455j) — `env`·`timeout`·`nice`·`stdbuf`·`sudo` 뒤의
+    /// 명령을 규칙이 본다. 값을 먹는 옵션도 안다. 모르는 꼴이면 **거기서 멈춘다** — 넘겨짚어 엉뚱한
+    /// 낱말을 명령으로 읽으면 새는 것보다 나쁜 잘못 막음이 난다.
+    #[test]
+    fn a_wrapping_command_does_not_hide_what_it_runs() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let root = Path::new("/repo");
+        for cmd in [
+            "env moai add '딴 일'",
+            "env -u MOAI_NOW moai add '딴 일'",
+            "env -i FOO=1 moai add '딴 일'",
+            "timeout 5 moai add '딴 일'",
+            "timeout -k 1 5s moai add '딴 일'",
+            "nice -n 5 moai add '딴 일'",
+            "nice -5 moai add '딴 일'",
+            "stdbuf -o0 moai add '딴 일'",
+            "sudo moai add '딴 일'",
+            "sudo -u 남 -- moai add '딴 일'",
+            "env timeout 5 sudo moai add '딴 일'",
+        ] {
+            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "감싸는 명령이 규칙 1 을 가렸다 — {cmd}");
+        }
+        // 빈손의 쓰기도 같다.
+        for cmd in ["env sed -i s/a/b/ src/x.rs", "sudo tee src/x.rs", "timeout 5 tee -a src/x.rs"] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "감싸는 명령이 규칙 2 를 가렸다 — {cmd}\n{got:?}");
+        }
+        // 셸을 여는 스위치와 **모르는 긴 옵션**에서는 멈춘다 — 값을 따로 받는 것이면 그 값을
+        // 명령으로 읽어, 새는 것보다 나쁜 잘못 막음이 난다.
+        for cmd in ["sudo -s moai add '딴 일'", "env --weird moai add '딴 일'", "env -S \"moai add x\""] {
+            assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "모르는 꼴을 명령으로 읽었다 — {cmd}");
+        }
+        // 감싸는 명령 혼자는 그 자체로 명령이다(`env` 는 환경을 찍는다).
+        assert_eq!(command_of(&["env".to_string()]).first().map(String::as_str), Some("env"));
+    }
+
+    /// **셸에 넘긴 글은 명령이다**(moai-455j) — `bash -c '…'`·`eval '…'` 의 글을 렉서가 다시 읽는다.
+    /// 안 읽던 판은 그 한 낱말 뒤에서 규칙 1~2 가 통째로 샜다. 끝없이 파고들지는 않는다.
+    #[test]
+    fn a_string_handed_to_a_shell_is_read_as_commands() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let root = Path::new("/repo");
+        for cmd in ["bash -c \"moai add '딴 일'\"", "sh -c \"moai add '딴 일'\"", "eval \"moai add '딴 일'\"", "bash -lc \"moai add '딴 일'\""] {
+            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "셸에 넘긴 글을 안 읽었다 — {cmd}");
+        }
+        let wrote = guard_writes(&[], &cfg(), &here(), root, root, "bash -c \"echo x > src/store.rs\"");
+        assert!(matches!(wrote, Decision::Deny(_)), "셸에 넘긴 쓰기를 안 봤다 — {wrote:?}");
+        // 겹쳐도 판정은 같고, 상한을 넘으면 글로 둔다(끝없이 안 돈다).
+        let deep = "bash -c \"bash -c \\\"moai add '딴 일'\\\"\"";
+        assert!(matches!(guard_create(&all, &cfg(), &here(), deep), Decision::Deny(_)), "두 겹을 안 읽었다");
+        let mut nest = "moai add '딴 일'".to_string();
+        for _ in 0..12 {
+            nest = format!("bash -c {}", crate::text::shell_word(&nest));
+        }
+        assert_eq!(guard_create(&all, &cfg(), &here(), &nest), Decision::Pass, "상한 없이 파고든다");
+    }
+
+    /// **따옴표 없는 heredoc 본문의 치환은 명령이다**(moai-t863) — 셸이 그것을 돌려 값을 본문에 끼운다.
+    /// 종료어에 따옴표가 있으면 본문은 글 그대로라 아무 명령도 아니다(리뷰 원문을 그대로 붙이는 길이다).
+    #[test]
+    fn an_unquoted_heredoc_body_runs_its_substitutions() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let root = Path::new("/repo");
+        let open = "cat <<EOF\n$(moai add '딴 일')\nEOF";
+        assert!(matches!(guard_create(&all, &cfg(), &here(), open), Decision::Deny(_)), "따옴표 없는 본문의 치환을 안 읽었다");
+        let tick = "cat <<EOF\n`moai add '딴 일'`\nEOF";
+        assert!(matches!(guard_create(&all, &cfg(), &here(), tick), Decision::Deny(_)), "백틱을 안 읽었다");
+        let wrote = guard_writes(&[], &cfg(), &here(), root, root, "cat <<EOF\n$(echo x > src/store.rs)\nEOF");
+        assert!(matches!(wrote, Decision::Deny(_)), "본문 안의 쓰기를 안 봤다 — {wrote:?}");
+
+        for quoted in ["cat <<'EOF'\n$(moai add '딴 일')\nEOF", "cat <<\"EOF\"\n$(moai add '딴 일')\nEOF", "cat <<\\EOF\n$(moai add '딴 일')\nEOF"] {
+            assert_eq!(guard_create(&all, &cfg(), &here(), quoted), Decision::Pass, "따옴표 친 본문을 명령으로 읽었다 — {quoted}");
+        }
+        // 셈(`$((…))`)은 명령이 아니다.
+        assert_eq!(guard_create(&all, &cfg(), &here(), "cat <<EOF\n$((1 + 2))\nEOF"), Decision::Pass);
+        // 본문은 여전히 그 토막에 흘러드는 글이다 — 리뷰 원문을 넣는 길이 안 막힌다.
+        let note = "moai note t-1 -b - <<EOF\n무엇을 봤나\nEOF";
+        assert_eq!(guard_create(&all, &cfg(), &here(), note), Decision::Pass);
     }
 
     // ── 명령이 가리키는 트래커 ────────────────────────────────────────
