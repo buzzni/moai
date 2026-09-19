@@ -336,7 +336,11 @@ fn init_creates_exactly_three_files() {
     let attrs = std::fs::read_to_string(s.path().join(".gitattributes")).unwrap();
     assert!(attrs.contains("journal.jsonl  text eol=lf merge=union"), "{attrs}");
     // 스냅샷에 union 을 걸면 같은 id 를 가진 줄이 둘 생긴다 — 데이터 손상이다.
-    assert!(!attrs.contains("issues.jsonl   text eol=lf merge"), "{attrs}");
+    // **막는 것은 union 이지 드라이버가 아니다**(moai-x2vs) — `merge=moai` 는 줄을 id 로
+    // 짝지어 같은 필드가 맞선 것만 사람에게 준다. 안 심은 클론에서는 이 낱말이 무시되고
+    // git 의 기본 머지가 돈다.
+    assert!(attrs.contains("issues.jsonl   text eol=lf merge=moai"), "{attrs}");
+    assert!(!attrs.contains("issues.jsonl   text eol=lf merge=union"), "{attrs}");
     // **까닭도 같이 심는다.** 이 주석이 왜 `issues.jsonl` 에 union 을 걸면 안 되는지 적은 유일한
     // 자리다 — 빼면 새 저장소가 그 까닭 없이 서고, 다음 사람이 union 을 다시 건다.
     assert!(attrs.contains("# 스냅샷에는 merge=union 을 쓰지 않는다"), "규칙만 심고 까닭을 뺐다\n{attrs}");
@@ -3413,6 +3417,9 @@ const JSON_SWEEP: &[&str] = &[
     "project",
     // 읽음도 사용자 설정에 적는다. 시험의 `MOAI_CONFIG` 는 그 시험만의 임시 자리다.
     "read",
+    // git 이 주는 임시 파일 셋을 받는다. 훑기는 깨끗이 합쳐지는 판으로만 부른다 —
+    // 충돌은 종료 코드가 0 이 아닌 것이 계약이라 `ok` 로는 못 부른다.
+    "merge-driver",
 ];
 
 /// **읽음은 내 설정에만 적힌다**(moai-u8oh, 사용자 결정) — 트래커 파일은 한 바이트도 안 바뀐다.
@@ -3622,7 +3629,20 @@ fn every_command_still_speaks_json() {
     // (`project add`·`rm` 과 같은 까닭). 무엇을 적는지는 위의 `read_marks_…` 시험이 본다.
     let own = s.path().join("sweep-read.toml");
     one_json_value(&ok_with(s.path(), &own, &["read", &id, "--json"]));
-    for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add", "read"].contains(c)) {
+    // 머지 드라이버는 git 이 주는 임시 파일 셋을 받는다 — 여기서는 셋을 손으로 놓는다.
+    // 깨끗이 합쳐지는 판으로 부른다: 충돌은 종료 코드가 0 이 아니고, 그 갈래는
+    // `the_merge_driver_*` 가 따로 본다.
+    let three: Vec<PathBuf> = ["base", "ours", "theirs"]
+        .iter()
+        .map(|n| {
+            let p = s.path().join(format!("sweep-{n}.jsonl"));
+            std::fs::write(&p, "").unwrap();
+            p
+        })
+        .collect();
+    let three: Vec<&str> = three.iter().map(|p| p.to_str().unwrap()).collect();
+    one_json_value(&ok(s.path(), &["merge-driver", three[0], three[1], three[2], "--json"]));
+    for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add", "read", "merge-driver"].contains(c)) {
         assert!(
             cases.iter().any(|a| a[0] == *cmd),
             "`{cmd}` 가 JSON_SWEEP 에는 있는데 실제로 부르지 않는다"
@@ -11481,4 +11501,99 @@ fn the_python_agents_do_not_wait_for_a_child_the_job_left_running() {
     assert!(started.elapsed() < std::time::Duration::from_secs(20), "띄워 둔 자식을 기다렸다");
     assert!(line_of(s.path(), &id).contains("\"status\":\"done\""), "닫지 않았다\n{}", text(&out));
     assert!(ok(s.path(), &["show", &id]).contains(&format!("띄웠다: {id}")), "노트가 안 남았다");
+}
+
+// ── 머지 드라이버 ────────────────────────────────────────────────────
+
+/// 두 가지가 **서로 다른 이슈**를 고친 것은 충돌이 아니다.
+///
+/// git 의 기본 텍스트 머지는 줄 자리로만 재므로, id 로 정렬된 스냅샷에서 이웃한 두 줄을
+/// 각각 고치면 그대로 부딪친다. 이 시험은 진짜 git 으로 그 판을 만들어, 드라이버를 심은
+/// 저장소에서 머지가 깨끗이 끝나고 **두 고침이 다 남는지**를 본다.
+///
+/// **심는 것은 클론마다 한 번이다** — git 은 드라이버 명령을 설정에서만 읽고 설정은
+/// 커밋되지 않는다. 그래서 `--as` 로 이 시험 바이너리를 가리켜 심는다.
+#[test]
+fn the_merge_driver_settles_edits_to_different_issues() {
+    let s = init("mergedriver");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    let one = add(root, &["첫째"]);
+    let two = add(root, &["둘째"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &two, "--tag", "parser"]);
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &one, "--tag", "bug"]);
+    git(root, &["commit", "-qam", "main"]);
+
+    git(root, &["merge", "--no-edit", "side"]);
+    let merged = issues(root);
+    assert!(!merged.contains("<<<<<<<"), "충돌 표식이 남았다\n{merged}");
+    assert!(line_of(root, &one).contains("\"bug\""), "이쪽 고침이 사라졌다\n{merged}");
+    assert!(line_of(root, &two).contains("\"parser\""), "저쪽 고침이 사라졌다\n{merged}");
+    // 병합한 파일을 moai 가 그대로 읽는다 — 읽고 그대로 쓰면 바이트가 같아야 한다.
+    ok(root, &["status"]);
+    let before = merged.clone();
+    ok(root, &["note", &one, "한 번 더 쓴다"]);
+    assert_eq!(issues(root), before, "병합 결과가 표준형이 아니라 다음 쓰기가 헛 diff 를 냈다");
+}
+
+/// **같은 이슈의 같은 필드를 둘이 다르게 고친 것은 사람에게 온다.** 한쪽을 말없이
+/// 고르면 다른 쪽의 고침이 아무 자취 없이 사라진다 — 조용한 손실이 이 도구가 못 견디는
+/// 유일한 실패 모드다.
+#[test]
+fn the_merge_driver_hands_a_real_clash_to_a_person() {
+    let s = init("mergeclash");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    let id = add(root, &["하나"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &id, "--title", "저쪽 제목"]);
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &id, "--title", "이쪽 제목"]);
+    git(root, &["commit", "-qam", "main"]);
+
+    let out = isolated("git")
+        .args(["-c", "user.name=테스터", "-c", "user.email=tester@example.com"])
+        .args(["merge", "--no-edit", "side"])
+        .current_dir(root)
+        .output()
+        .expect("git 을 실행하지 못했다");
+    assert!(!out.status.success(), "진짜 충돌을 말없이 골랐다\n{}", text(&out));
+    let merged = issues(root);
+    assert!(merged.contains("<<<<<<<") && merged.contains(">>>>>>>"), "{merged}");
+    assert!(merged.contains("이쪽 제목") && merged.contains("저쪽 제목"), "두 쪽을 다 안 보여 준다\n{merged}");
+}
+
+/// **안 심은 클론에서는 지금까지와 똑같다.** `.gitattributes` 의 `merge=moai` 는 드라이버가
+/// 설정에 없으면 그냥 무시되고 git 의 기본 머지가 돈다 — 이 낱말을 심는 것이 안전한 까닭이다.
+#[test]
+fn an_uninstalled_clone_falls_back_to_gits_own_merge() {
+    let s = init("mergenodriver");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    let id = add(root, &["하나"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &id, "--tag", "parser"]);
+    git(root, &["commit", "-qam", "side"]);
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["note", &id, "메모"]);
+    git(root, &["commit", "-qam", "main"]);
+    // 드라이버가 없어도 git 이 제 머지를 돌린다 — 없는 드라이버로 멈추지 않는다.
+    git(root, &["merge", "--no-edit", "side"]);
+    assert!(line_of(root, &id).contains("\"parser\""), "{}", issues(root));
 }

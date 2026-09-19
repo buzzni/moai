@@ -396,6 +396,26 @@ NOTE
         event: crate::hook::Event,
     },
 
+    /// git 이 부른다. issues.jsonl 을 이슈마다 3-way 로 합친다
+    #[command(after_help = "  사람이 손으로 부를 일은 `--install` 하나다. 나머지 자리는 git 이 준다.
+
+  moai merge-driver --install        이 저장소의 .git/config 에 심는다
+  moai merge-driver --install --as moai   PATH 의 moai 로 심는다
+
+  한 줄이 이슈 하나고 id 로 정렬돼 있어서, 서로 다른 이슈를 고친 두 가지가 그
+  줄들이 이웃이라는 이유로 부딪친다. 여기서는 id 로 짝지어 이슈마다 3-way 로
+  푼다. 같은 이슈의 다른 필드를 고친 것도 합친다 — 태그와 막음은 더한 것을
+  더하고 뺀 것을 뺀다.
+
+  **같은 필드를 다르게 고쳤으면 사람이 푼다.** 한쪽을 말없이 고르면 다른 쪽의
+  고침이 아무 자취 없이 사라진다. 못 읽는 줄이나 겹친 id 가 있으면 파일을
+  통째로 충돌 표식에 넣어 넘긴다 — 읽은 것만 골라 쓰면 못 읽은 줄이 사라진다.
+
+  심는 것은 클론마다 한 번이다. git 은 드라이버 명령을 설정에서만 읽고 설정은
+  커밋되지 않는다. 안 심은 클론에서는 `.gitattributes` 의 merge=moai 가 그냥
+  무시되고 git 의 기본 머지가 돈다 — 즉 안 심으면 지금까지와 똑같다.")]
+    MergeDriver(MergeDriverArgs),
+
     /// Claude 에 스킬과 훅을 심는다 (다시 불러도 된다)
     #[command(subcommand)]
     Skill(SkillCmd),
@@ -858,6 +878,37 @@ pub struct ReadArgs {
 pub struct RmArgs {
     #[arg(required = true, value_name = "id")]
     pub ids: Vec<String>,
+}
+
+/// git 이 주는 자리 셋과, 사람이 치는 `--install`.
+///
+/// **자리 인자를 `Option` 으로 둔다** — `--install` 은 그것들 없이 부르고, 세 자리를
+/// `required` 로 걸면 clap 이 `--install` 만 친 사람을 먼저 거절한다. 빠진 자리는
+/// 명령 쪽이 제 말로 거절한다: 거기서는 무엇이 빠졌는지와 심는 길을 한 줄에 댈 수 있다.
+#[derive(Args, Debug)]
+pub struct MergeDriverArgs {
+    /// `%O` — 갈라진 자리의 파일
+    #[arg(value_name = "기준")]
+    pub base: Option<std::path::PathBuf>,
+    /// `%A` — 이쪽 파일. **답도 여기 쓴다**
+    #[arg(value_name = "이쪽")]
+    pub ours: Option<std::path::PathBuf>,
+    /// `%B` — 저쪽 파일
+    #[arg(value_name = "저쪽")]
+    pub theirs: Option<std::path::PathBuf>,
+    /// `%L` — 충돌 표식의 길이 (기본 7)
+    #[arg(value_name = "표식")]
+    pub marker_size: Option<usize>,
+    /// `%P` — 합치는 파일의 이름. 말할 때만 쓴다
+    #[arg(value_name = "경로")]
+    pub path: Option<String>,
+
+    /// 이 저장소의 `.git/config` 에 드라이버를 심는다
+    #[arg(long)]
+    pub install: bool,
+    /// 심을 때 적을 명령 (기본: 이 바이너리의 절대 경로)
+    #[arg(long = "as", value_name = "명령", requires = "install")]
+    pub as_command: Option<String>,
 }
 
 #[derive(Args, Debug)]
