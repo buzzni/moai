@@ -5673,3 +5673,12 @@
 {"ts":"2026-09-19T22:41:48Z","id":"moai-giw4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Trouble 판정을 한 이름으로 모으고 Layer.trouble 을 걷는다"}
 {"ts":"2026-09-19T22:41:51Z","id":"moai-owvp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"설정을 한 번만 읽는 것을 세는 시험"}
 {"ts":"2026-09-19T22:41:54Z","id":"moai-y0v8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"배열에 더한 낱말이 옆 원소의 따옴표를 따른다"}
+{"ts":"2026-09-19T22:44:09Z","id":"moai-n3ku","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=390000 (high — 설정 쓰기 경로의 배열 모양. 이 창이 에픽 셋과 리뷰 반영까지 한 몫이다)"}
+{"ts":"2026-09-19T22:44:14Z","id":"moai-bzq7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"조건이 찬 옛 단계의 남은 일 — 임계값 설정·머지 드라이버·idea 동사"}
+{"ts":"2026-09-19T22:44:15Z","id":"moai-9p7v","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 설정 읽기 실패와 층 다시 세우기. 토큰은 moai-n3ku 에 한 줄로 적었다)"}
+{"ts":"2026-09-19T22:44:15Z","id":"moai-bzq7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정 2026-09-19: 옛 단계 에픽 moai-in4m·moai-oidr 이 미뤄 둔 멤버 가운데 지금 도는 창과 파일이 안 겹치는 셋을 되살려 한 에픽으로 묶었다. 남은 미룸 셋(moai-fauw·moai-uiyf 는 src/tui 를 98 이 쥐었고, moai-7j4j 는 TUI 쓰기가 선 뒤다)은 그대로 둔다. 각 멤버 본문의 \"언제 여는가\" 조건은 아직 안 찼지만, 조건을 기다리는 대신 지금 한다고 사용자가 정했다."}
+{"ts":"2026-09-19T22:44:17Z","id":"moai-7yil","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 한 번 읽어 읽음과 등록을 함께 든다. 토큰은 moai-n3ku 에 한 줄로 적었다)"}
+{"ts":"2026-09-19T22:44:19Z","id":"moai-4qbv.zea","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=282926 (max — 리뷰 서브에이전트가 쓴 몫)"}
+{"ts":"2026-09-19T22:44:25Z","id":"moai-n3ku","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-19T22:44:25Z","id":"moai-9p7v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-19T22:44:25Z","id":"moai-7yil","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
