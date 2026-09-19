@@ -1968,11 +1968,20 @@ impl App {
     /// 안 읽은 줄을 다시 센다. **누군지 모르면 아무것도 안 센다** — 읽기는 사람을 묻지 않는다
     /// (CLAUDE.md). 그러면 [NEW] 가 한 줄도 안 서고, 그것이 설정 없는 기계의 옳은 화면이다.
     fn recount_unread(&mut self) {
-        let Some(me) = &self.me else {
-            self.site.unread.clear();
+        self.recount_unread_in(Seat::Here);
+    }
+
+    /// [`App::recount_unread`] 와 같되 **그 프로젝트의** 안 읽은 줄을 다시 센다(moai-5v3q) —
+    /// 한눈 보기에서 남의 줄에 읽음을 적으면 그 줄의 `[NEW]` 가 내려야 한다.
+    fn recount_unread_in(&mut self, seat: Seat) {
+        let me = self.me.clone();
+        let seen = self.seen.clone();
+        let Some(site) = self.site_mut(seat) else { return };
+        let Some(me) = me else {
+            site.unread.clear();
             return;
         };
-        self.site.unread = crate::query::unread(&self.site.issues, me, &self.seen).into_iter().map(str::to_string).collect();
+        site.unread = crate::query::unread(&site.issues, &me, &seen).into_iter().map(str::to_string).collect();
     }
 
     /// 이 뿌리에서 나는 누구인가 — `이름 (메일)`(moai-j038.vna). 헤더([`App::told_user`])와 같은 자
@@ -2001,33 +2010,42 @@ impl App {
     fn mark_read(&mut self, act: keys::Browse, rows: &[Row]) {
         use keys::Browse as B;
         let cur = self.current_of(rows);
+        // **읽음도 그 줄의 프로젝트에 적는다**(moai-5v3q) — 한눈 보기의 줄은 남의 목록의 첨자라,
+        // 지금 선 프로젝트로 읽으면 엉뚱한 줄에 도장을 찍는다.
+        let seat = match &cur {
+            Some(Row::Item(seat, ..)) => *seat,
+            Some(Row::Project(n)) => Seat::Place(*n),
+            _ => Seat::Here,
+        };
+        let site = self.site_at(seat);
         let targets: Vec<usize> = match act {
             B::Read => match &cur {
-                Some(Row::Item(Seat::Here, e, _)) => e.at().into_iter().collect(),
+                Some(Row::Item(_, e, _)) => e.at().into_iter().collect(),
                 _ => Vec::new(),
             },
-            B::ReadAll => self.site.unread.iter().filter_map(|id| self.site.index.find(id)).collect(),
+            B::ReadAll => site.unread.iter().filter_map(|id| site.index.find(id)).collect(),
             B::ReadGroup => {
-                let Some(Row::Item(Seat::Here, e, _)) = &cur else {
+                let Some(Row::Item(_, e, _)) = &cur else {
                     self.notice = Some("묶음에 든 줄에서 누른다".into());
                     return;
                 };
-                let Some(group) = self.group_of(e) else {
+                let Some(group) = self.group_of(seat, e) else {
                     self.notice = Some("이 줄은 묶음에 안 든다 — 에픽·마일스톤 안에서 누른다".into());
                     return;
                 };
-                self.site.index.under_group(&self.site.issues, &group)
+                let site = self.site_at(seat);
+                site.index.under_group(&site.issues, &group)
             }
             _ => return,
         };
-        // 고른 줄의 **id** 로 적는다 — 같은 id 의 쌍둥이 줄까지 넘겨야 늦은 도장이 적혀 [NEW] 가 내린다
-        // (`query::read_marks_of`). 가리킨 줄 하나만 넘기면 `unread` 가 앞줄로 세운 [NEW] 가 영영 남는다.
-        let ids: std::collections::BTreeSet<&str> = targets.iter().map(|&at| self.site.issues[at].id.as_str()).collect();
+        let site = self.site_at(seat);
+
+        let ids: std::collections::BTreeSet<&str> = targets.iter().map(|&at| site.issues[at].id.as_str()).collect();
         if ids.is_empty() {
             self.notice = Some("읽음으로 적을 것이 없다".into());
             return;
         }
-        let issues = &self.site.issues;
+        let issues = &site.issues;
         let pick = |seen: &std::collections::BTreeMap<String, String>| {
             crate::query::read_marks_of(issues.iter().filter(|i| ids.contains(i.id.as_str())), seen)
         };
@@ -2056,7 +2074,7 @@ impl App {
                 written
             }
         };
-        self.recount_unread();
+        self.recount_unread_in(seat);
         self.notice = Some(match written.as_slice() {
             [] => "읽음으로 적을 것이 없다".into(),
             [one] => format!("✓ 읽음 · {one}"),
@@ -2072,11 +2090,12 @@ impl App {
     /// 막아, 마일스톤이 하나라도 있는 저장소에서 `(마일스톤 없음)` 안의 줄에 서서 누르면 마일스톤 밖의 안
     /// 읽은 것이 통째로 적혔다(`(길 잃음)` 도 같다) — `SPC m g` 이 `SPC m a` 가 되고, 되돌리는 길은 도구 밖에만
     /// 있다. 자식 있는 이슈 폴더 안에서 누르면 그 폴더만 읽고 에픽의 나머지와 묶음 줄 자신을 빠뜨렸다.
-    fn group_of(&self, e: &Entry) -> Option<String> {
+    fn group_of(&self, seat: Seat, e: &Entry) -> Option<String> {
+        let site = self.site_at(seat);
         if let Entry::Dir { at: Some(at), .. } = e
-            && crate::report::is_group(&self.site.issues[*at])
+            && crate::report::is_group(&site.issues[*at])
         {
-            return Some(self.site.issues[*at].id.clone());
+            return Some(site.issues[*at].id.clone());
         }
         // **줄이 사는 자리에서 읽는다**(`home_of`), 지금 디렉터리에서 읽지 않는다. 지금 디렉터리로
         // 재던 때는, 펼쳐 든 멤버 줄에 서서 누르면 그 줄의 에픽이 아니라 **그 위 마일스톤**이 나와
@@ -2084,8 +2103,8 @@ impl App {
         // 되돌리는 길은 도구 밖에만 있다. 바구니는 첨자가 없어 지금 자리로 읽고, 그 자리에 묶음이
         // 없으면 그대로 `None` 이다.
         let home: &[Seg] = match e.at() {
-            Some(at) => self.site.index.home_of(at),
-            None => &self.site.path,
+            Some(at) => site.index.home_of(at),
+            None => &site.path,
         };
         home.iter().rev().find_map(|seg| match seg {
             Seg::Epic(id) | Seg::Milestone(Some(id)) => Some(id.clone()),
@@ -2737,6 +2756,7 @@ impl App {
     pub fn key_ctx(&self, rows: &[Row]) -> keys::Ctx {
         keys::Ctx {
             layer: self.on_layer(),
+            on_row: matches!(self.current_of(rows), Some(Row::Item(..))),
             list_focus: self.focus == Pane::Explorer,
             // [`App::enter`] 가 무언가 하는 줄 — `..`(나가기)·디렉터리·층의 프로젝트.
             leaf: !matches!(self.current_of(rows), Some(Row::Up | Row::Item(_, Entry::Dir { .. }, _) | Row::Project(_))),

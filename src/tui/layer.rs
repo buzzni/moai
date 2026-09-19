@@ -534,9 +534,16 @@ impl App {
     /// 적은 것이 갈 데가 없다. 담는 순간 그 프로젝트로 들어간다([`App::stand_at`]).
     pub(super) fn open_form(&mut self) {
         let into = if self.on_layer() {
-            let Some(Row::Project(at)) = self.current() else {
-                self.notice = Some("담을 프로젝트가 없다 — `moai project add <dir>` 로 등록하면 여기 선다".into());
-                return;
+            // **커서가 선 줄의 프로젝트에 담는다**(moai-5v3q) — 머리줄이면 그 프로젝트고, 그 밑의
+            // 이슈 줄이면 그 줄이 사는 프로젝트다. 한눈 보기는 프로젝트를 가로지르므로 "지금 선
+            // 프로젝트" 라는 것이 없다 — 커서가 그것을 댄다.
+            let at = match self.current() {
+                Some(Row::Project(at)) => at,
+                Some(Row::Item(super::Seat::Place(at), ..)) => at,
+                _ => {
+                    self.notice = Some("담을 프로젝트가 없다 — `moai project add <dir>` 로 등록하면 여기 선다".into());
+                    return;
+                }
             };
             if self.open_place(at).is_none() {
                 return;
@@ -1636,6 +1643,31 @@ mod tests {
         let (_one, _two, mut a) = on_layer_with_twins(&s);
         a.hit("Enter");
         assert!(!a.on_layer(), "머리줄의 Enter 가 프로젝트로 안 들어갔다");
+    }
+
+    /// **한눈 보기의 줄에 누른 키는 그 줄의 프로젝트로 간다**(moai-5v3q, 사용자 결정 2026-09-19) —
+    /// 담기(`n`)는 그 프로젝트에 담고, 읽음(`r`)은 그 프로젝트의 줄에 도장을 찍는다. 지금 선
+    /// 프로젝트로 읽으면 남의 목록의 첨자를 이 프로젝트의 줄로 읽어 엉뚱한 데 적힌다.
+    #[test]
+    fn a_key_on_a_foreign_row_writes_to_that_project() {
+        let s = Scratch::fenced("layer-row-writes");
+        let (one, _two, mut a) = on_layer_with_twins(&s);
+        a.hit("l");
+        settle(&mut a);
+        // 머리줄 바로 밑 — one 의 줄이다.
+        a.key(key(KeyCode::Down));
+        let Some(Row::Item(crate::tui::Seat::Place(n), ..)) = a.current() else { panic!("{:?}", a.current()) };
+        assert_eq!(a.place_path(n).map(std::path::Path::to_path_buf), Some(one.clone()), "커서가 one 의 줄에 안 섰다");
+
+        // 담기 — 폼의 담을 곳이 그 줄의 프로젝트다.
+        a.hit("SPC n");
+        assert_eq!(target(&a), Some(one.clone()), "담을 곳이 그 줄의 프로젝트가 아니다");
+        a.key(key(KeyCode::Esc));
+
+        // 읽음 — 그 프로젝트의 줄에 적힌다. 적을 것이 없으면 그렇다고만 하고 조용하다.
+        a.hit("r");
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(!said.contains("못"), "읽음이 남의 프로젝트로 갔다 — {said}");
     }
 
     /// **펼치는 키는 그 자리에서 안 읽는다**(moai-12yx, 사용자 결정 2026-09-19) — 스레드에 맡기고

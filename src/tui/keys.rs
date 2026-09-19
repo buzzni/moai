@@ -578,6 +578,10 @@ pub const BROWSE: &[Bind<Browse>] = {
 pub struct Ctx {
     /// 프로젝트 층에 섰나.
     pub layer: bool,
+    /// 한눈 보기에서 커서가 **이슈 줄**에 섰나(moai-5v3q) — 머리줄이 아니라 그 밑의 줄이다.
+    /// 층에서 뜻이 없던 키(읽음·담기)가 그 줄에서는 **그 프로젝트의 것으로** 선다. 프로젝트
+    /// 안에서는 늘 참이나 마나다 — `layer` 가 거짓이라 아래 갈래에 안 걸린다.
+    pub on_row: bool,
     /// 포커스가 목록에 있나.
     pub list_focus: bool,
     /// 커서가 선 줄이 **들어갈 데가 없다** — 잎(일 한 줄)이거나 줄이 없다. `..`·디렉터리·층의
@@ -675,7 +679,8 @@ impl Browse {
             // **층에는 읽을 줄이 없다**(moai-j038.vna) — 층의 줄은 프로젝트고 안 읽은 줄은 들어간 프로젝트의
             // 것이라(`App::climb` 이 비운다), 여기서 서면 `SPC m a` 는 늘 "적을 것이 없다" 로 답하면서 그
             // 프로젝트에 [NEW] 가 남는다. 눌러도 아무 일이 없는 키는 메뉴에 안 선다(아래 `Raw` 와 같은 까닭).
-            Read | ReadAll | ReadGroup if c.layer => Err(Off::Quiet),
+            // 한눈 보기의 이슈 줄은 읽을 줄이다(moai-5v3q) — 그 줄의 프로젝트에 적는다.
+            Read | ReadAll | ReadGroup if c.layer && !c.on_row => Err(Off::Quiet),
             // 줄 보기·정렬·열은 프로젝트 안의 줄에 건다 — 층에서는 그 항목이 안 서고, 켜진 것이 하나도
             // 없는 `SPC s`·`SPC c` 는 묶음째 안 선다(`menu::live`). `SPC v` 는 상세 칸·원문이 남아 선다.
             Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer => Err(Off::Quiet),
