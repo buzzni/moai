@@ -275,8 +275,10 @@ fn answer(event: Event, decision: Decision) -> Option<String> {
 /// 판정하되, **막으면 옆 워크트리와 겹쳐 한 번 더 본다**(moai-w2iy).
 ///
 /// 워크트리의 스냅샷은 main 에서 방금 세우고 집은 줄을 모른다 — 그것만 보고 막으면 시킨 대로
-/// 한 일이 막힌다. 겹쳐 봐도 막힐 때만 막고, 까닭은 제 스냅샷의 것을 낸다(고칠 명령이 이 자리의
-/// 트래커에 듣는다). **겹쳐 보기는 막을 때만 치른다** — 지나가는 호출은 전과 같은 값이다.
+/// 한 일이 막힌다. 겹쳐 봐도 막힐 때만 막고, **까닭은 마지막으로 다시 본 판의 것**이다
+/// (moai-15c2) — 겹친 줄과 모름을 함께 본 판이 지금 가장 참에 가깝다. 고칠 명령이 이 자리의
+/// 트래커에 듣는 것은 [`crate::hook::Toward`] 가 따로 지킨다.
+/// **겹쳐 보기는 막을 때만 치른다** — 지나가는 호출은 전과 같은 값이다.
 ///
 /// **다시 본 판정이 안 막으면 풀린 것이다** — 비추는 줄(`Context`)도 푼 답이라 그대로 낸다.
 /// `Pass` 만 풀린 것으로 치던 판은 `idea add` 하나를 곁들인 명령줄을 낡은 스냅샷의 거절로 도로
@@ -301,21 +303,34 @@ fn settle(
     // moai-3k2d.1df). **겹쳐 보기는 막을 때만 치른다** — 비추기만 하는 답은 제 줄로 좁히기만 한다.
     let overlaid = first.blocks().then(|| crate::worktree::fresh(repo, issues.to_vec())).flatten();
     let seen = overlaid.is_some();
-    let (rows, mut narrow) = match overlaid {
-        Some((fresh, beside)) => (fresh, beside),
-        None => (issues.to_vec(), base.clone()),
+    // **빌려 쓴다** — 겹치지 않은 판의 줄은 부르는 쪽의 것 그대로다. 통째로 베끼던 판은 막거나 비추는
+    // 호출마다 스냅샷 전체를 복제했고, 훅은 도구 호출마다 돈다.
+    let (rows, mut narrow): (std::borrow::Cow<'_, [model::Issue]>, _) = match overlaid {
+        Some((fresh, beside)) => (std::borrow::Cow::Owned(fresh), beside),
+        None => (std::borrow::Cow::Borrowed(issues), base),
     };
+    // **겹쳐 보기만으로 풀리면 거기서 끝낸다** — 모름을 재는 값(옆 스냅샷을 다시 읽고 세션의 기록을
+    // 훑는 일)을 안 치른다. 겹치지 않은 판은 `first` 가 곧 이 답이라 다시 재지 않는다.
+    let wide = if seen { judge(&rows, &narrow) } else { first };
+    if wide == Decision::Pass {
+        return wide;
+    }
     // **모르는 줄도 같은 판에서 뺀다**(moai-ntl6, 사용자 결정 B) — 옆 워크트리가 쥐었을 일을 초점으로
     // 대지 않는다. **비추는 줄도 같은 자로 좁힌다** — 막지도 붙들지도 않기로 한 줄의 에픽을 제 물음으로
     // 비추면, 그 세션을 남의 에픽에 세우는 길로 보낸다(`idea promote -e <남의 에픽>`).
     let added = add_unsure(input, repo, &rows, &mut narrow);
-    if !seen && !added {
-        return first;
+    if !added {
+        return wide;
     }
     // 막히면 **그 판정의 까닭**을 낸다 — 겹친 줄과 모름을 함께 본 판이 지금 가장 참에 가깝다.
-    // 다만 좁힌 초점은 **풀기만 한다**: 비추기만 하던 명령을 좁혀서 막지는 않는다.
     let again = judge(&rows, &narrow);
-    if again.blocks() && !first.blocks() { first } else { again }
+    // **좁힌 초점은 풀기만 한다**: 덜 좁힌 판이 안 막는데 좁혀서 막으면 덜 좁힌 답을 낸다. 둘을 함께
+    // 본 판이 겹쳐 보기가 푼 것을 도로 막던 자리다 — 모름은 초점에서 빼기만 하고, 초점이 비면 규칙 2 가
+    // 막는다. 사용자 결정 moai-4jsy 의 "새로 막는 일은 없다" 가 여기에도 선다.
+    //
+    // **`first` 를 따로 다시 대지 않는다** — `first` 가 안 막으면 겹쳐 보지도 않아(`first.blocks()`)
+    // `wide` 가 곧 `first` 다. 두 자로 적던 판은 같은 것을 두 번 물었다.
+    if again.blocks() && !wide.blocks() { wide } else { again }
 }
 
 /// **옆 워크트리가 쥔 일은 제 초점이 아니다** (`hook::held`). 워크트리 목록은 집은 것이 있을 때만
