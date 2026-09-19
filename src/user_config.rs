@@ -106,7 +106,8 @@ pub struct Registry {
     /// 보기·읽음을 읽다 만난 까닭. `problems`(층이 대는 것)와 따로 든다 — 대는 자리가 다르다. 파일을 못 읽었거나
     /// 깨진 까닭은 여기 없다 — 층만 댄다(moai-5jsn).
     pub look_problems: Vec<String>,
-    /// 이슈 id → **내가 마지막으로 본 때**(RFC3339, moai-50mn). 여기 없는 줄은 한 번도 안 본 것이다.
+    /// 이슈 id → **내가 마지막으로 본 줄의 `updated_at`**(RFC3339, moai-50mn — 옛 바이너리는 본 때를 적었다,
+    /// moai-lyc1). 여기 없는 줄은 한 번도 안 본 것이다.
     /// 트래커가 아니라 내 설정에 드는 까닭: 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에
     /// 적으면 읽기만 해도 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다(사용자 결정 2026-09-15).
     pub read: BTreeMap<String, String>,
@@ -702,7 +703,7 @@ impl Doc {
         Ok(skipped)
     }
 
-    /// 적어 둔 읽음 — 이슈 id → 마지막으로 본 때(moai-50mn). **관대하게 읽는다**: 낱말이 아닌 값은
+    /// 적어 둔 읽음 — 이슈 id → 마지막으로 본 줄의 도장(moai-50mn·moai-lyc1). **관대하게 읽는다**: 낱말이 아닌 값은
     /// 까닭 한 줄로 대고 건너뛴다. `[read]` 가 없으면 빈 표다.
     pub fn read_marks(&self) -> (BTreeMap<String, String>, Vec<String>) {
         let mut problems = Vec::new();
@@ -725,7 +726,7 @@ impl Doc {
         (marks, problems)
     }
 
-    /// 읽은 때를 적는다 — **준 id 만 손댄다**(moai-50mn). 남이 적은 줄도, 이 바이너리가 모르는 id 도
+    /// 읽음을 적는다 — **준 id 만 손댄다**(moai-50mn). 남이 적은 줄도, 이 바이너리가 모르는 id 도
     /// 그대로 둔다: 읽음은 사람마다 쌓이는 것이라 지울 까닭이 없고, 락 안에서 다시 읽은 파일을
     /// 통째로 덮으면 옆 탐색기가 방금 읽은 줄이 사라진다(`Doc::merge_look` 과 같은 까닭).
     ///
@@ -788,7 +789,7 @@ const SORT_REVERSED: &str = "sort_reversed";
 const FIELDS: &str = "fields";
 const DETAIL: &str = "detail";
 const FIELDS_KNOWN: &str = "fields_known";
-/// 읽음이 사는 표(moai-50mn) — 이슈 id → 내가 마지막으로 본 때.
+/// 읽음이 사는 표(moai-50mn) — 이슈 id → 내가 마지막으로 본 줄의 `updated_at`(moai-lyc1).
 const READ: &str = "read";
 
 /// 탐색기의 보기 — 사람이 마지막으로 고른 것(moai-2bzp). **낱말로 든다** — 무슨 낱말이 있는지는

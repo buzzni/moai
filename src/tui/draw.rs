@@ -3114,8 +3114,8 @@ pub(super) mod tests {
             i.assignee_email = Some("tester@example.com".into());
         }
         let mut a = every(is);
-        // 시계를 고정한다 — 읽음은 `App::now` 로 적히고 줄은 2026-09-01 에 고쳐졌다. 환경의 `MOAI_NOW`
-        // 나 늦은 시계가 그보다 앞이면 적은 읽음이 줄을 못 덮어 시험이 기계를 탄다(moai-j038.vna).
+        // 시계를 고정한다 — 읽음은 이제 본 줄의 `updated_at` 을 적어(moai-lyc1) 시계를 안 타지만, 화면의
+        // 날짜 칸이 `App::now` 로 재므로 그대로 둔다.
         a.now = "2026-09-13T13:42:07Z".into();
         a.me = Some("테스터 (tester@example.com)".into());
         a.recount_unread();

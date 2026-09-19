@@ -1,8 +1,9 @@
 //! 읽었다고 표시한다(moai-u8oh).
 //!
 //! **트래커에 안 쓴다.** 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에 적으면 읽기만 해도
-//! 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다. 내 설정의 `[read]` 표에 **이슈 id → 지금**을
-//! 적는다(사용자 결정 2026-09-15) — 그 뒤에 줄이 바뀌면 다시 안 읽음이 된다.
+//! 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다. 내 설정의 `[read]` 표에 **이슈 id → 본 줄의
+//! `updated_at`** 을 적는다(사용자 결정 2026-09-15, 값은 2026-09-19 에 본 때에서 바꿨다 — moai-lyc1) —
+//! 그 뒤에 줄이 바뀌면 다시 안 읽음이 된다.
 //!
 //! **읽음은 시키는 때만 선다.** `show` 로 열었다고, 탐색기에서 커서가 지나갔다고 서지 않는다 —
 //! 스치듯 지나간 것을 읽었다고 적으면 이 표시가 곧 아무 말도 안 하게 된다.
@@ -11,7 +12,7 @@ use super::{Ctx, Fail, R};
 use crate::cli::ReadArgs;
 use crate::store::Repo;
 use crate::style::{self, paint};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
@@ -19,10 +20,9 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     let now = crate::model::now();
     let path = super::project::writable_config()?;
 
-    // 있는 줄은 **한 번 모아 견준다**(moai-j038.vna) — `Load::get` 은 줄 전부를 뒤에서부터 훑으므로
+    // 있는 id 는 **한 번 모아 견준다**(moai-j038.vna) — `Load::get` 은 줄 전부를 뒤에서부터 훑으므로
     // 받은 id 마다 부르면 `--all`·`-e` 가 줄 수의 제곱으로 느려진다(1만 줄에 안 읽은 5천이면 1초 가까이).
-    // 같은 id 가 둘이면 뒷줄이다 — `Load::get` 과 같은 자.
-    let lines: BTreeMap<&str, &crate::model::Issue> = load.issues.iter().map(|i| (i.id.as_str(), i)).collect();
+    let known: BTreeSet<&str> = load.issues.iter().map(|i| i.id.as_str()).collect();
     let mut want: Vec<String> = args.ids.clone();
     let mut missing: BTreeSet<String> = BTreeSet::new();
     // `--all` 은 **내게 온 것 가운데** 안 읽은 것이다.
@@ -59,26 +59,23 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
             }
         }
     }
-    missing.extend(want.iter().filter(|id| !lines.contains_key(id.as_str())).cloned());
-    let targets: BTreeMap<&str, &crate::model::Issue> =
-        want.iter().filter_map(|id| lines.get_key_value(id.as_str())).map(|(id, i)| (*id, *i)).collect();
+    missing.extend(want.iter().filter(|id| !known.contains(id.as_str())).cloned());
+    let targets: BTreeSet<&str> = want.iter().map(String::as_str).filter(|id| known.contains(id)).collect();
 
     // 적을 것이 없으면 설정 파일에 손을 안 댄다 — 빈 쓰기 하나 때문에 설정 디렉터리와 락 파일이
     // 아직 아무것도 등록하지 않은 사람의 집에 생긴다.
     //
-    // **이미 읽은 줄은 다시 안 적는다**(moai-j038.vna) — 본 뒤로 안 바뀐 줄의 때를 오늘로 밀면 헛 쓰기고,
-    // 옆 탐색기가 방금 적은 새 때를 이 명령이 덮을 수도 있다. 가르는 것은 **락 안에서 읽은 표**다 —
-    // 락 밖에서 읽어 두면 그사이 옆에서 적은 것과 어긋난다. 탐색기의 `r`·`SPC m` 도 같은 자로 가른다.
+    // **이미 읽은 줄은 다시 안 적는다**(moai-j038.vna) — 본 뒤로 안 바뀐 줄을 다시 적으면 헛 쓰기고,
+    // 옆 탐색기가 방금 적은 새 도장을 이 명령이 든 낡은 줄의 도장으로 덮을 수도 있다. 가르는 것은 **락
+    // 안에서 읽은 표**다 — 락 밖에서 읽어 두면 그사이 옆에서 적은 것과 어긋난다. 탐색기의 `r`·`SPC m`
+    // 도 같은 자로 가른다. 같은 id 의 줄은 **다 넘긴다** — 쌍둥이 가운데 늦은 도장을 적어야 [NEW] 가
+    // 내린다(`query::read_marks_of`).
     let fresh: Vec<String> = if targets.is_empty() {
         Vec::new()
     } else {
         crate::user_config::update(&path, |doc| {
-            let on_file = doc.read_marks().0;
-            let marks: BTreeMap<String, String> = targets
-                .values()
-                .filter(|i| crate::query::changed_since_seen(i, &on_file))
-                .map(|i| (i.id.clone(), now.clone()))
-                .collect();
+            let lines = load.issues.iter().filter(|i| targets.contains(i.id.as_str()));
+            let marks = crate::query::read_marks_of(lines, &doc.read_marks().0);
             doc.mark_read(&marks)
         })?
     };
@@ -107,5 +104,6 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
 struct Marked<'a> {
     read: &'a [String],
     missing: &'a [String],
+    /// 이 명령이 돈 때다. `[read]` 에 적힌 값이 아니다 — 그것은 줄마다 본 줄의 `updated_at` 이다(moai-lyc1).
     at: &'a str,
 }
