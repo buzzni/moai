@@ -737,6 +737,12 @@ pub struct App {
     /// 다시 서는 순간 접은 것이 옆 프로젝트로 옮아간다. **화면에만 산다**: 펼침(`Site::expanded`)이
     /// 설정에 안 남는 것과 같은 까닭이다(사용자 결정 moai-7qot).
     folded: std::collections::HashSet<std::path::PathBuf>,
+    /// 지금 줄을 읽고 있는 프로젝트의 저장소(moai-12yx) — 읽어 온 것을 [`Site`] 에 얹을 때 쓴다.
+    /// 여는 것은 그 자리에서(`open_place`), 읽는 것은 스레드에서 하므로 그사이 이것이 든다.
+    reading_repo: Option<Repo>,
+    /// `Tab` 으로 **다 펴 달라**고 한 프로젝트 가운데 아직 줄이 안 온 것(moai-12yx). 읽어 온 줄을
+    /// 들일 때 이것을 보고 편다 — 누를 때는 펼 줄이 아직 없다.
+    deep: std::collections::HashSet<std::path::PathBuf>,
     /// 사용자 설정 파일의 자리 — **층이 없을 때** 등록(`a`)이 쓰는 곳이다. 층이 있으면 층이 읽은
     /// 파일(`Layer::config`)을 쓴다. `cmd::tui` 가 `user_config::path()` 로 넣고, 시험은 임시
     /// 파일을 준다 — 여기서 환경을 읽으면 시험이 돌리는 사람의 설정을 고친다.
@@ -1010,6 +1016,8 @@ impl App {
             worktree: true,
             layer: None,
             folded: Default::default(),
+            reading_repo: None,
+            deep: Default::default(),
             user_config: None,
             config_stamp: None,
             launched_at: None,
@@ -1494,6 +1502,8 @@ impl App {
         self.follow_config();
         // 층은 제 표식을 따로 본다 — 층에 선 동안에는 아래(한 프로젝트)가 비어 할 일이 없다.
         self.follow_layer();
+        // 펼친 프로젝트의 줄도 스레드에서 온다(moai-12yx) — 요약과 따로 돈다.
+        self.follow_site();
         self.follow_commits();
         if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {
@@ -2146,41 +2156,110 @@ impl App {
     ///
     /// 못 열면 `false` 고, 머리줄은 제 요약(`Look::Shut`)이 대던 말을 그대로 댄다 — 여는 길은
     /// 층의 줄과 같다([`App::open_place`]).
-    pub(super) fn fill_site(&mut self, at: usize) -> bool {
-        if self.layer.as_ref().and_then(|l| l.places.get(at)).is_none_or(|p| p.site.is_some()) {
-            return false;
+    /// 펼친 프로젝트의 줄을 **스레드에 읽으러 보낸다**(moai-12yx). 이미 들었거나 이미 줄 서
+    /// 있으면 아무 일도 안 한다. 읽는 동안 그 머리줄은 도는 글리프를 세운다(`draw::place_line`).
+    ///
+    /// **그 자리에서 안 읽는다**(사용자 결정 2026-09-19) — 워크트리 일곱에 138→458ms 를 잰 값이
+    /// (moai-uxrn) 펼치는 키 하나에 통째로 실리면 큰 프로젝트를 펼칠 때마다 화면이 그만큼 멈춘다.
+    /// 층의 요약이 스레드로 간 것과 같은 까닭이다(moai-ezwu).
+    pub(super) fn want_site(&mut self, at: usize) {
+        let Some(place) = self.layer.as_ref().and_then(|l| l.places.get(at)) else { return };
+        if place.site.is_some() {
+            return;
         }
-        let Some(repo) = self.open_place(at) else { return false };
-        // 겹쳐 보기는 화면 하나에 하나다 — 한눈 보기의 줄도 그 깃발을 따른다.
-        let Ok(fresh) = (self.read)(&repo, self.worktree) else { return false };
-        let cfg = repo.config.clone();
-        let mut site = Site::of(fresh.issues, fresh.index, fresh.ground, cfg, Path::new(), fresh.unreadable);
-        site.repo = Some(repo);
-        site.now = fresh.now;
-        site.stamp = fresh.stamp;
-        site.warnings = fresh.warnings;
-        site.origin = fresh.origin;
-        site.elsewhere = fresh.elsewhere;
-        site.unfound = fresh.unfound;
-        site.watched = fresh.watched;
-        site.read_at = Some(std::time::Instant::now());
-        if let Some(p) = self.layer.as_mut().and_then(|l| l.places.get_mut(at)) {
-            p.site = Some(site);
-            return true;
+        let path = place.path.clone();
+        if let Some(layer) = self.layer.as_mut()
+            && !layer.wanted.contains(&path)
+            && layer.reading.as_ref().is_none_or(|(p, ..)| *p != path)
+        {
+            layer.wanted.push(path);
         }
-        false
     }
 
-    /// [`App::site_at`] 의 고칠 수 있는 판 — 펼침처럼 **그 프로젝트에 매인 것**을 고칠 때 쓴다.
-    /// 없는 자리면 지금 선 것을 낸다(까닭은 [`App::site_at`]).
-    pub(super) fn site_mut(&mut self, seat: Seat) -> &mut Site {
-        let place = match seat {
-            Seat::Here => None,
-            Seat::Place(n) => self.layer.as_mut().and_then(|l| l.places.get_mut(n)).and_then(|p| p.site.as_mut()),
+    /// 줄 선 프로젝트 하나를 읽으러 보낸다 — **한 번에 하나만 돈다**. 못 열면 그 줄은 제 요약이
+    /// 대던 말을 그대로 대고([`App::open_place`]) 머리줄만 선다.
+    pub(super) fn read_wanted(&mut self) {
+        if self.layer.as_ref().is_none_or(|l| l.reading.is_some() || l.wanted.is_empty()) {
+            return;
+        }
+        let Some(path) = self.layer.as_mut().map(|l| l.wanted.remove(0)) else { return };
+        let Some(at) = self.layer.as_ref().and_then(|l| l.position(&path)) else { return };
+        // 여는 것은 그 자리에서 한다 — 못 여는 까닭을 그 줄에 세우는 길이 이것 하나다(`open_place`).
+        let Some(repo) = self.open_place(at) else { return };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let read = self.read;
+        let worktree = self.worktree;
+        let sent = repo.clone();
+        let handle = std::thread::spawn(move || {
+            let _ = tx.send(read(&sent, worktree));
+        });
+        if let Some(layer) = self.layer.as_mut() {
+            layer.reading = Some((path, rx, handle));
+        }
+        // 연 저장소는 읽어 온 것을 들일 때 [`Site`] 에 얹는다.
+        self.reading_repo = Some(repo);
+    }
+
+    /// 스레드가 읽어 온 줄을 그 층 줄에 들인다. 그새 목록에서 빠진 경로는 버린다 — 층의 요약을
+    /// 들이는 자와 같다(`Layer::adopt`).
+    pub(super) fn follow_site(&mut self) {
+        let Some(layer) = self.layer.as_mut() else { return };
+        let Some((path, rx, _)) = layer.reading.as_ref() else {
+            self.read_wanted();
+            return;
         };
-        match place {
-            Some(site) => site,
-            None => &mut self.site,
+        let (path, got) = match rx.try_recv() {
+            Ok(got) => (path.clone(), Some(got)),
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => (path.clone(), None),
+        };
+        let (_, _, handle) = layer.reading.take().expect("바로 위에서 보았다");
+        let repo = self.reading_repo.take();
+        match got {
+            Some(Ok(fresh)) => {
+                let cfg = repo.as_ref().map_or_else(|| self.site.cfg.clone(), |r| r.config.clone());
+                let mut site = Site::of(fresh.issues, fresh.index, fresh.ground, cfg, Vec::new(), fresh.unreadable);
+                site.repo = repo;
+                site.now = fresh.now;
+                site.stamp = fresh.stamp;
+                site.warnings = fresh.warnings;
+                site.origin = fresh.origin;
+                site.elsewhere = fresh.elsewhere;
+                site.unfound = fresh.unfound;
+                site.watched = fresh.watched;
+                site.read_at = Some(std::time::Instant::now());
+                if let Some(place) = self.layer.as_mut().and_then(|l| l.places.iter_mut().find(|p| p.path == path)) {
+                    place.site = Some(site);
+                }
+                // `Tab` 으로 "다 펴 달라" 며 기다린 프로젝트면 이제 편다.
+                if self.deep.remove(&path)
+                    && let Some(at) = self.layer.as_ref().and_then(|l| l.position(&path))
+                {
+                    self.open_all(Seat::Place(at));
+                }
+            }
+            // 못 읽었다 — 까닭을 한 줄로 대고 그 프로젝트는 머리줄만 선다. 다시 펴면 다시 간다.
+            Some(Err(e)) => self.notice = Some(format!("줄을 못 읽었다 — {e}")),
+            // 읽던 스레드가 죽었다. 루프에서 난 패닉과 같게 되던진다([`App::follow`]).
+            None => {
+                if let Err(payload) = handle.join() {
+                    std::panic::resume_unwind(payload);
+                }
+            }
+        }
+        self.read_wanted();
+    }
+
+
+    /// [`App::site_at`] 의 고칠 수 있는 판 — 펼침처럼 **그 프로젝트에 매인 것**을 고칠 때 쓴다.
+    ///
+    /// **읽을 때와 달리 지금 선 것으로 갈음하지 않는다.** 아직 줄을 안 읽은 프로젝트(읽는 중이거나
+    /// 접힌 것)에 무언가 적으려다 갈음하면, 그 글이 **엉뚱한 프로젝트**에 조용히 적힌다 — 읽기는
+    /// 한 프레임 어긋날 뿐이지만 쓰기는 남는다.
+    pub(super) fn site_mut(&mut self, seat: Seat) -> Option<&mut Site> {
+        match seat {
+            Seat::Here => Some(&mut self.site),
+            Seat::Place(n) => self.layer.as_mut().and_then(|l| l.places.get_mut(n)).and_then(|p| p.site.as_mut()),
         }
     }
 
@@ -2342,8 +2421,10 @@ impl App {
     /// 자리를 잃는다. 멤버 줄이 아니면 거짓 — 그때는 한 층 나간다.
     fn fold_parent(&mut self, rows: &[Row]) -> bool {
         let Some(up) = self.parent_row(rows) else { return false };
-        if let Some((seat, path)) = self.dir_of(rows.get(up).cloned()) {
-            self.site_mut(seat).expanded.remove(&path);
+        if let Some((seat, path)) = self.dir_of(rows.get(up).cloned())
+            && let Some(site) = self.site_mut(seat)
+        {
+            site.expanded.remove(&path);
         }
         // 부모 줄 위의 줄은 안 바뀐다 — 번호가 그대로 그 줄이다.
         let rows = self.rows();
@@ -2379,15 +2460,26 @@ impl App {
             return;
         }
         self.folded.remove(&path);
-        self.fill_site(at);
         if deep {
-            let site = self.site_mut(Seat::Place(at));
-            let dirs: Vec<Path> = (0..site.issues.len())
-                .filter(|&n| site.index.is_dir(&site.issues, n))
-                .map(|n| site.index.dir_path(&site.issues, n))
-                .collect();
-            site.expanded.extend(dirs);
+            // **줄이 오면 다 편다**(moai-12yx) — 아직 안 읽은 프로젝트에서는 지금 펼 것이 없다.
+            self.deep.insert(path.clone());
         }
+        self.want_site(at);
+        self.read_wanted();
+        if deep {
+            self.open_all(Seat::Place(at));
+        }
+    }
+
+    /// 그 프로젝트의 묶음을 **다 편다**(`Tab`). 아직 줄이 없으면 아무 일도 안 한다 — 읽어 온
+    /// 뒤에 [`App::follow_site`] 가 다시 부른다.
+    fn open_all(&mut self, seat: Seat) {
+        let Some(site) = self.site_mut(seat) else { return };
+        let dirs: Vec<Path> = (0..site.issues.len())
+            .filter(|&n| site.index.is_dir(&site.issues, n))
+            .map(|n| site.index.dir_path(&site.issues, n))
+            .collect();
+        site.expanded.extend(dirs);
     }
 
     /// 머리줄을 접는다 — 그 프로젝트의 줄이 목록에서 빠진다. **읽은 것은 안 버린다**: 다시 펴면
@@ -2397,7 +2489,10 @@ impl App {
         if let Some(path) = self.place_path(at).map(std::path::Path::to_path_buf) {
             // 밑의 펼침까지 걷는다 — 다 접기(`Tab`)와 같은 자다: 접힌 것을 다시 펼 때 접기 전
             // 모양이 아니라 그 이전 모양이 서면, 같은 자리로 오는 데 두 번을 눌러야 한다.
-            self.site_mut(Seat::Place(at)).expanded.clear();
+            if let Some(site) = self.site_mut(Seat::Place(at)) {
+                site.expanded.clear();
+            }
+            self.deep.remove(&path);
             self.folded.insert(path);
         }
     }
@@ -2409,8 +2504,10 @@ impl App {
 
     /// 한 단계 펼친다(`l`·`→`). 이미 펼쳐져 있으면 아무 일도 없다 — 들어가는 것은 `Enter` 다.
     fn expand(&mut self, rows: &[Row]) {
-        if let Some((seat, path)) = self.dir_seat_at(rows) {
-            self.site_mut(seat).expanded.insert(path);
+        if let Some((seat, path)) = self.dir_seat_at(rows)
+            && let Some(site) = self.site_mut(seat)
+        {
+            site.expanded.insert(path);
         }
     }
 
@@ -2421,7 +2518,8 @@ impl App {
     /// 아무 일도 안 하는 것보다 나쁘다. 그 펼침은 검색을 풀 때 함께 걷힌다.
     fn collapse(&mut self, rows: &[Row]) -> bool {
         let Some((seat, path)) = self.open_seat_at(rows) else { return false };
-        self.site_mut(seat).expanded.remove(&path);
+        let Some(site) = self.site_mut(seat) else { return false };
+        site.expanded.remove(&path);
         true
     }
 
@@ -2437,7 +2535,7 @@ impl App {
     fn expand_all(&mut self, rows: &[Row]) {
         let Some((seat, path)) = self.dir_seat_at(rows) else { return };
         if self.open_at(rows).is_some() {
-            let site = self.site_mut(seat);
+            let Some(site) = self.site_mut(seat) else { return };
             let under: Vec<Path> = site.expanded.iter().filter(|p| p.starts_with(&path)).cloned().collect();
             for p in under {
                 site.expanded.remove(&p);

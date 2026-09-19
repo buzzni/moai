@@ -47,6 +47,13 @@ pub struct Layer {
     launch: Option<PathBuf>,
     /// 스레드에서 읽고 있는 프로젝트들. 끝나면 [`App::follow`] 가 받는다.
     pending: Option<(Receiver<Looked>, std::thread::JoinHandle<()>)>,
+    /// **펼친 프로젝트의 줄**을 읽고 있는 스레드(moai-12yx) — 어느 프로젝트인지와 받을 곳. 요약을
+    /// 읽는 [`Layer::pending`] 과 따로 두는 것은 값이 다르기 때문이다: 요약은 줄마다 작은 셈이고
+    /// 이것은 그 프로젝트를 통째로 읽어 색인까지 짓는 일이라, 한 번에 **하나만** 돈다.
+    pub(super) reading: Option<(PathBuf, Receiver<crate::fail::R<super::Fresh>>, std::thread::JoinHandle<()>)>,
+    /// 펼쳐 놓고 아직 못 읽은 프로젝트 — 차례로 하나씩 읽는다. 사람이 여럿을 잇따라 펼쳐도
+    /// 스레드가 그 수만큼 서지 않는다.
+    pub(super) wanted: Vec<PathBuf>,
 }
 
 /// 층의 한 줄 — 프로젝트 하나.
@@ -313,7 +320,16 @@ impl Layer {
             Some(p) => At::Project(p.path.clone()),
             None => At::Layer,
         };
-        Layer { at, places, problems: reg.problems.clone(), config: reg.path.clone(), launch: launch.map(Path::to_path_buf), pending: None }
+        Layer {
+            at,
+            places,
+            problems: reg.problems.clone(),
+            config: reg.path.clone(),
+            launch: launch.map(Path::to_path_buf),
+            pending: None,
+            reading: None,
+            wanted: Vec::new(),
+        }
     }
 
     /// 등록한 프로젝트가 하나라도 있는가. **없으면 층을 세우지 않는다** — 띄운 자리 하나뿐인
@@ -363,7 +379,7 @@ impl Layer {
         }
     }
 
-    fn position(&self, path: &Path) -> Option<usize> {
+    pub(super) fn position(&self, path: &Path) -> Option<usize> {
         self.places.iter().position(|p| p.path == path)
     }
 
@@ -821,8 +837,17 @@ impl App {
     }
 
     /// 층을 읽는 스레드가 도는가.
+    /// 이 프로젝트의 줄을 지금 읽고 있거나 줄 서 있는가 — 머리줄이 그동안 도는 글리프를 세운다.
+    pub(super) fn reading_place(&self, path: &Path) -> bool {
+        self.layer.as_ref().is_some_and(|l| {
+            l.reading.as_ref().is_some_and(|(p, ..)| p == path) || l.wanted.iter().any(|p| p == path)
+        })
+    }
+
     pub(super) fn layer_loading(&self) -> bool {
-        self.layer.as_ref().is_some_and(|l| l.pending.is_some())
+        // 펼친 프로젝트의 줄을 읽는 것도 읽는 중이다(moai-12yx) — 루프가 그동안 빠른 걸음으로
+        // 깨어 머리줄의 도는 글리프를 돌리고, 시험의 `settle_reads` 도 이것으로 기다린다.
+        self.layer.as_ref().is_some_and(|l| l.pending.is_some() || l.reading.is_some() || !l.wanted.is_empty())
     }
 }
 
@@ -867,6 +892,8 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
         config: None,
         launch: None,
         pending: None,
+        reading: None,
+        wanted: Vec::new(),
     }
 }
 
@@ -1530,7 +1557,10 @@ mod tests {
         assert!(a.on_layer(), "시험의 전제 — 층에서 시작한다");
         assert_eq!(a.rows().len(), 2, "안 읽은 프로젝트가 줄을 세웠다");
 
-        assert!(a.fill_site(0), "첫 프로젝트를 못 읽었다");
+        // 읽기는 스레드로 간다(moai-12yx) — `settle` 이 다 받을 때까지 걸음을 돌린다.
+        a.want_site(0);
+        settle(&mut a);
+        assert!(a.rows().len() > 2, "첫 프로젝트를 못 읽었다");
         let rows = a.rows();
         assert!(matches!(rows[0], Row::Project(0)), "{:?}", rows[0]);
         assert!(matches!(rows[1], Row::Item(crate::tui::Seat::Place(0), ..)), "{:?}", rows[1]);
@@ -1594,6 +1624,8 @@ mod tests {
             assert!(a.on_layer(), "시험의 전제 — 층에 섰다");
             let heads = a.rows().len();
             a.hit(k);
+            // 읽기는 스레드로 간다(moai-12yx) — 다 받은 뒤에 줄이 선다.
+            settle(&mut a);
             assert!(a.on_layer(), "`{k}` 가 프로젝트로 들어가 버렸다");
             assert!(a.rows().len() > heads, "`{k}` 가 머리줄을 안 폈다");
             // 접으면 도로 머리줄만 — 읽은 것은 버리지 않는다.
@@ -1606,6 +1638,28 @@ mod tests {
         assert!(!a.on_layer(), "머리줄의 Enter 가 프로젝트로 안 들어갔다");
     }
 
+    /// **펼치는 키는 그 자리에서 안 읽는다**(moai-12yx, 사용자 결정 2026-09-19) — 스레드에 맡기고
+    /// 머리줄이 도는 동안 화면은 그대로 돈다. 워크트리 일곱에 138→458ms 를 잰 값(moai-uxrn)이
+    /// 펼치는 키 하나에 통째로 실리지 않게 하는 것이 까닭이다.
+    #[test]
+    fn opening_a_head_reads_in_a_thread() {
+        let s = Scratch::fenced("layer-read-thread");
+        let (one, _two, mut a) = on_layer_with_twins(&s);
+        let heads = a.rows().len();
+        a.hit("l");
+        assert!(a.loading(), "펼쳤는데 읽으러 안 갔다");
+        assert!(a.reading_place(&one), "읽는 중인 프로젝트를 머리줄이 모른다");
+        assert_eq!(a.rows().len(), heads, "읽기를 기다리지 않고 그 자리에서 읽었다");
+        settle(&mut a);
+        assert!(!a.reading_place(&one), "다 읽고도 도는 중이라 한다");
+        assert!(a.rows().len() > heads, "읽어 온 줄이 안 섰다");
+        // 두 번 펴도 다시 안 읽는다 — 든 줄이 그대로 선다.
+        a.hit("h");
+        a.hit("l");
+        assert!(!a.loading(), "이미 읽은 프로젝트를 다시 읽으러 갔다");
+        assert!(a.rows().len() > heads);
+    }
+
     /// **머리줄의 `Tab` 은 그 프로젝트를 묶음까지 다 편다**(moai-i0wd) — 펼쳐져 있으면 통째로
     /// 접는다. 묶음 줄의 `Tab` 과 같은 자다([`App::expand_all`]).
     #[test]
@@ -1614,6 +1668,7 @@ mod tests {
         let (_one, _two, mut a) = on_layer_with_twins(&s);
         let heads = a.rows().len();
         a.hit("Tab");
+        settle(&mut a);
         assert!(a.rows().len() > heads, "Tab 이 안 폈다");
         a.hit("Tab");
         assert_eq!(a.rows().len(), heads, "다시 누른 Tab 이 안 접었다");

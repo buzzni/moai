@@ -2145,6 +2145,11 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
         }
         Look::Shut { state, said } => spans.push(Span::styled(said.clone(), shut_style(*state))),
     }
+    // **줄을 읽어 오는 동안 돈다**(moai-12yx) — 펼치는 키 하나가 값을 스레드에 맡겼으니, 화면은
+    // 그 사이를 말해야 한다. 칸 색을 입혀 루프가 이것을 "도는 것" 으로 센다(`spinner_on`).
+    if app.reading_place(&p.path) {
+        spans.push(Span::styled(format!("  {} 줄 읽는 중", style::spin_frame(app.spin)), glyph_style(app.site.cfg.statuses.first().map_or("", String::as_str))));
+    }
     if p.launched {
         spans.push(Span::styled(if p.registered { "  여기" } else { "  여기 · 등록 안 됨" }, dim()));
     }
