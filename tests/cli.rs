@@ -8837,6 +8837,42 @@ fn a_note_does_not_bring_back_a_deny_the_fresh_view_lifted() {
     }
 }
 
+/// **겹침과 모름을 한 판에서 본다**(moai-15c2, 사용자 결정). 따로 보던 판은 둘이 함께면 풀릴 것을
+/// 못 풀었다 — 겹친 줄의 판정은 모름을 안 뺐고, 모름을 뺀 판정은 낡은 제 스냅샷으로 쟀다. 여기서
+/// 이 세션은 main 에서 집은 일(제 기록)을 워크트리의 낡은 스냅샷 밖에 두고, 그 일은 같은 이름의
+/// 워크트리가 있어 옆이 쥔 것처럼도 보인다. 두 까닭이 함께 걸려 규칙 2 가 제 일을 막았다.
+#[test]
+fn a_stale_snapshot_and_an_unsure_row_are_settled_in_one_pass() {
+    let s = Scratch::new("hooksettleboth");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    // 갈라지기 전부터 벌여 놓인 남의 줄 — 이름이 id 가 아닌 워크트리가 쥐어 "모름" 이 된다.
+    let theirs = field(&ok(&main, &["add", "옆이 쥐었을 일", "--json"]), "id");
+    ok(&main, &["mv", &theirs, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    let dir = ".claude/worktrees/here";
+    git(&main, &["worktree", "add", "-q", dir, "-b", "worktree-here"]);
+    let inside = main.join(dir);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/side", "-b", "worktree-side"]);
+
+    // 갈라진 뒤 main 에 선 제 일 — 워크트리의 스냅샷은 이 줄을 모르고, 집은 것은 이 세션이다.
+    let mine = field(&ok(&main, &["add", "갈라진 뒤에 집은 내 일", "--json"]), "id");
+    let pick = format!("moai mv {mine} in_progress --from todo");
+    assert!(tool_here(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&pick))).trim().is_empty());
+    ok(&main, &["mv", &mine, "in_progress", "--from", "todo"]);
+    assert!(!issues(&inside).contains(&mine), "워크트리의 스냅샷이 갈라지지 않았다 — 겹침을 못 잰다");
+
+    // 겹친 줄에도 모름에도 한 번에 걸린다. 따로 보던 판은 겹친 판정이 남의 줄을 초점으로 대 막고,
+    // 모름을 뺀 판정은 낡은 스냅샷이라 초점이 비어 **다른 규칙**(규칙 2)의 거절을 냈다.
+    let why = refusal(&tool_here(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str("moai add '딴 일'"))));
+    assert!(why.contains(&mine), "제가 집은 일을 초점으로 안 봤다\n{why}");
+    assert!(!why.contains(&theirs), "옆이 쥐었을 일을 초점으로 댔다\n{why}");
+    assert!(why.contains("규칙 1"), "집은 것이 있는데 딴 규칙의 거절을 냈다\n{why}");
+}
+
 /// **옆이 쥐었을 일로는 비추지도 않는다**(moai-ntl6 의 자, moai-dw63.e31). 이름이 id 가 아닌
 /// 워크트리가 갈라질 때 집혀 있던 일은 그 워크트리의 것일 수 있다 — 막지도 붙들지도 않기로 한 그
 /// 줄의 에픽을 제 물음으로 비추면, main 세션을 남의 에픽에 세우는 길로 보낸다.

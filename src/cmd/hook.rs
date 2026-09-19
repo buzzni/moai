@@ -284,40 +284,29 @@ fn settle(
     if first == Decision::Pass {
         return first;
     }
-    if first.blocks()
-        && let Some((fresh, beside)) = crate::worktree::fresh(repo, issues.to_vec())
-    {
-        // **겹친 줄은 겹친 목록의 이름으로 잰다** — 옆 이름도 제 이름도 그 목록에서 읽는다(moai-m62u).
-        // `base` 는 제 스냅샷에 집은 줄이 없으면 워크트리를 안 읽어([`away_of`]) 제 이름이 비는데, 겹쳐
-        // 보는 까닭이 바로 그 스냅샷이 main 의 집기를 모를 때다 — 빈 이름으로 재던 판은 제 이름
-        // 워크트리의 멤버를 옆 에픽 워크트리에 넘겨 규칙 2 로 막았다(리뷰 moai-3k2d.1df).
-        let mut again = judge(&fresh, &beside);
-        if !again.blocks() {
-            // **겹쳐 보고 푼 답의 비추는 줄도 좁힌다**(리뷰 moai-3k2d.1df). 겹친 초점에는 옆 세션이 방금
-            // 집은 줄이 들어, 안 좁히면 `idea add` 에 비추는 물음이 남의 에픽을 대고 `idea promote -e
-            // <남의 에픽>` 을 시킨다 — 아래 좁힌 길이 막는 바로 그것이다. 좁혀서 막히면 넓은 답을 그대로
-            // 낸다: 좁힌 초점은 풀기만 한다.
-            if let Decision::Context(_) = again {
-                let mut narrow = beside;
-                if add_unsure(input, repo, &fresh, &mut narrow) {
-                    let narrowed = judge(&fresh, &narrow);
-                    if !narrowed.blocks() {
-                        again = narrowed;
-                    }
-                }
-            }
-            return again;
-        }
-    }
-    // **누구의 것인지 모르는 줄을 빼고 한 번 더 본다**(moai-ntl6, 사용자 결정 B). 좁은 초점으로도
-    // 막히면 그 까닭을 낸다 — 옆 워크트리가 쥐었을 일을 초점으로 대지 않는다. **비추는 줄도 같은
-    // 자로 좁힌다** — 막지도 붙들지도 않기로 한 줄의 에픽을 제 물음으로 비추면, 그 세션을 남의
-    // 에픽에 세우는 길로 보낸다. 좁힌 초점은 풀기만 한다: 비추기만 하던 명령을 좁혀서 막지는 않는다.
-    let mut narrow = base;
-    if !add_unsure(input, repo, issues, &mut narrow) {
+    // **겹침과 모름을 한 판에 얹어 한 번 다시 본다**(moai-15c2, 사용자 결정). 따로 보던 판은 둘이
+    // 함께일 때 풀릴 것을 못 풀었다 — 겹친 줄의 판정은 모름을 안 뺐고, 모름을 뺀 판정은 낡은 제
+    // 스냅샷으로 쟀다. **겹친 줄은 겹친 목록의 이름으로 잰다** — 옆 이름도 제 이름도 그 목록에서
+    // 읽는다(moai-m62u). `base` 는 제 스냅샷에 집은 줄이 없으면 워크트리를 안 읽어([`away_of`]) 제
+    // 이름이 비는데, 겹쳐 보는 까닭이 바로 그 스냅샷이 main 의 집기를 모를 때다 — 빈 이름으로
+    // 재던 판은 제 이름 워크트리의 멤버를 옆 에픽 워크트리에 넘겨 규칙 2 로 막았다(리뷰
+    // moai-3k2d.1df). **겹쳐 보기는 막을 때만 치른다** — 비추기만 하는 답은 제 줄로 좁히기만 한다.
+    let overlaid = first.blocks().then(|| crate::worktree::fresh(repo, issues.to_vec())).flatten();
+    let seen = overlaid.is_some();
+    let (rows, mut narrow) = match overlaid {
+        Some((fresh, beside)) => (fresh, beside),
+        None => (issues.to_vec(), base.clone()),
+    };
+    // **모르는 줄도 같은 판에서 뺀다**(moai-ntl6, 사용자 결정 B) — 옆 워크트리가 쥐었을 일을 초점으로
+    // 대지 않는다. **비추는 줄도 같은 자로 좁힌다** — 막지도 붙들지도 않기로 한 줄의 에픽을 제 물음으로
+    // 비추면, 그 세션을 남의 에픽에 세우는 길로 보낸다(`idea promote -e <남의 에픽>`).
+    let added = add_unsure(input, repo, &rows, &mut narrow);
+    if !seen && !added {
         return first;
     }
-    let again = judge(issues, &narrow);
+    // 막히면 **그 판정의 까닭**을 낸다 — 겹친 줄과 모름을 함께 본 판이 지금 가장 참에 가깝다.
+    // 다만 좁힌 초점은 **풀기만 한다**: 비추기만 하던 명령을 좁혀서 막지는 않는다.
+    let again = judge(&rows, &narrow);
     if again.blocks() && !first.blocks() { first } else { again }
 }
 
