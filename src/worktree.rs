@@ -6,7 +6,9 @@
 //! **어느 파일에도 쓰지 않는다.** 겹친 결과는 명령 하나가 끝나면 사라진다. 파일에
 //! 합쳐 쓰는 순간 옛 moai 의 `merge=union` 이 돌아온다 — id 가 겹치고, 겹친 id 를
 //! 가르려 relabel 하고, 그 별칭을 모든 조회가 풀어야 했다. 쓰기는 여전히
-//! `store::with_write` 가 **제 워크트리 파일에만** 한다.
+//! `store::with_write` 가 **파일 하나에만** 한다 — 2026-09-19 부터 그 하나는
+//! 루트의 트래커다(moai-y7go, [`tracker_root`]). 겹친 것을 되쓰지 않는다는 말은
+//! 그대로고, 바뀐 것은 어느 체크아웃의 `.moai` 냐다.
 //!
 //! **출처도 저장하지 않는다.** 줄이 어느 브랜치에서 왔는지는 겹칠 때만 아는
 //! 파생값이라 [`Origin`] 으로 곁에 들고 다니고, `report`·`query` 는 겹친
@@ -394,11 +396,11 @@ fn side(
 ///
 /// **git 목록은 한 번만 읽는다** — 겹칠 줄과 이름 후보가 한 목록에서 나온다. 못 찾으면 `None`
 /// 이고, 남의 못 읽는 줄은 말없이 빼고 겹친다 — 훅은 무엇이 어긋나도 조용해야 한다.
-pub fn fresh(repo: &Repo, here: &Path, mine: Vec<Issue>) -> Option<(Vec<Issue>, crate::hook::Away)> {
+pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, crate::hook::Away)> {
     // **이름은 세션이 선 체크아웃에서 읽는다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
     // (`store::Repo::find_from`) 제 이름은 그 워크트리의 것이다. 트래커의 자리로 읽던 판은 워크트리
     // 세션의 제 일이 겹쳐 본 판정에서 "옆의 것" 이 되어, 규칙 1 이 막아야 할 생성을 풀어 줬다.
-    let (me, trees) = others_of(here).ok()?;
+    let (me, trees) = others_of(repo.here()).ok()?;
     let away = crate::hook::Away {
         names: names(trees.iter().map(|(t, _)| t)),
         own: names(me.as_ref()),
@@ -724,6 +726,14 @@ pub fn workplaces(
             }
             None => place.unknown = true,
         }
+        // **그 워크트리가 적어 둔 집기는 만진 흔적이다**(moai-y7go) — 쓰기가 루트로 옮겨 가 스냅샷이
+        // 안 움직이므로, 이름이 id 가 아닌 워크트리는 이것 말고 제 일을 말할 길이 없다. 스냅샷을 읽은
+        // **뒤에** 더한다 — 그 길이 `touched` 를 통째로 갈아끼운다. `holds` 가 아니라 `touched` 인
+        // 까닭은 뜬 때와 견주는 한 시간 규칙을 안 타야 해서다: 짐작이 아니라 그 자리에서 실제로 집은
+        // 기록이다.
+        if let Some(dir) = disk.admin.get(&tree.path) {
+            place.touched.extend(held_here(dir));
+        }
     }
     out
 }
@@ -746,18 +756,72 @@ fn born_of(dir: &Path) -> Option<String> {
     Some(crate::model::format_rfc3339(secs))
 }
 
-/// 이 트래커를 **쓸 자리** — 딸린 워크트리면 주 체크아웃의 같은 자리다(moai-y7go).
+/// 이 체크아웃의 **git 관리 디렉터리** — 딸린 워크트리면 `<공용>/worktrees/<이름>`, 주 워크트리면
+/// `.git` 이다. 못 찾으면 `None`.
+///
+/// 집은 표식([`note_held`])이 사는 자리다. **거기는 커밋도 병합도 안 탄다** — 워크트리를 치우면
+/// 표식도 같이 사라지고, 스냅샷을 안 건드리니 병합에서 겨룰 것이 없다.
+fn admin_dir(root: &Path) -> Option<PathBuf> {
+    let top = root.ancestors().find(|d| d.join(".git").exists())?;
+    let dotgit = top.join(".git");
+    if dotgit.is_dir() {
+        return Some(dotgit);
+    }
+    let text = std::fs::read_to_string(&dotgit).ok()?;
+    Some(canonical(&top.join(text.trim_end().strip_prefix("gitdir:")?.trim())))
+}
+
+/// 이 체크아웃에서 집은 줄을 적어 둔다(moai-y7go, 2026-09-19 사용자 결정) — 벌여 놓은 칸으로 옮긴
+/// id 를 더하고, 거기서 나온 id 를 뺀다. 못 적으면 조용히 넘어간다.
+///
+/// **왜 있는가.** 쓰기가 루트로 옮겨 가면서([`tracker_root`]) 워크트리의 스냅샷이 더는 안 움직인다.
+/// 이름이 id 인 워크트리는 [`names`] 가 가리켜 그대로지만, 이름이 id 가 아닌 워크트리(에이전트 격리
+/// `worktree-agent-…`)는 "여기서 집었다" 를 말할 길을 통째로 잃어 산 일이 [`crate::report::places`]
+/// 에서 자리를 잃고 `stranded` 경고로 섰다. 스냅샷에 적지 않는 까닭은 늘 같다 — 그것은 병합에서
+/// 겨룬다. git 이 그 워크트리 몫으로 들고 있는 디렉터리는 안 겨룬다.
+pub fn note_held(root: &Path, picked: &[String], dropped: &[String]) {
+    if picked.is_empty() && dropped.is_empty() {
+        return;
+    }
+    let Some(dir) = admin_dir(root) else { return };
+    let path = dir.join(HELD);
+    let mut ids: BTreeSet<String> = held_here(&dir);
+    for id in dropped {
+        ids.remove(id);
+    }
+    ids.extend(picked.iter().cloned());
+    let text: String = ids.iter().map(|id| format!("{id}\n")).collect();
+    let _ = std::fs::write(&path, text);
+}
+
+/// 그 체크아웃이 적어 둔 집은 줄들([`note_held`]). 없으면 비어 있다.
+fn held_here(admin: &Path) -> BTreeSet<String> {
+    std::fs::read_to_string(admin.join(HELD))
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// 집은 표식 파일의 이름 — 적는 자와 읽는 자가 같은 글자를 쓴다.
+const HELD: &str = "moai-held";
+
+/// 이 트래커를 **옮겨 쓸 자리** — 딸린 워크트리면 주 체크아웃의 같은 자리고, 그대로 둘 것이면
+/// `None` 이다(moai-y7go).
 ///
 /// 워크트리의 `.moai` 를 고치면 병합에서 스냅샷이 충돌한다. [`crate::store::Repo::find_from`] 이
 /// 이것으로 옮겨 가, 워크트리 안에서 친 `moai` 도 루트의 트래커를 읽고 쓴다.
 ///
 /// **옮길 곳에 트래커가 있어야 옮긴다** — 이 가지에서 처음 `init` 한 워크트리는 루트에 `.moai` 가
-/// 없다. 주 체크아웃이 없는 것(서브모듈·맨 저장소에 딸린 워크트리)도 그대로 둔다. 둘 다 `None` 이
-/// 아니라 **찾은 자리 그대로**를 내 부르는 쪽이 갈래를 하나만 들고 있게 한다.
+/// 없다. 딸린 워크트리가 아닌 것과 주 체크아웃이 없는 것(git 밖·서브모듈·맨 저장소에 딸린
+/// 워크트리)은 [`main_root`] 가 이미 `None` 으로 가른다 — 여기서 [`is_linked`] 로 한 번 더 물으면
+/// 같은 조상 훑기를 두 번 하고, 두 자가 갈리면(중간에 선 `.git` 파일) 안 본 자리를 옮겨 준다.
+///
+/// **찾은 자리를 되돌려 주지 않는다**(리뷰 moai-71ht.jlh) — 그러면 부르는 쪽이 `root != found`
+/// 를 견줘야 하는데, 경로 견주기는 풀린 꼴과 안 풀린 꼴이 갈려 조용히 틀리는 자다.
 pub fn tracker_root(root: &Path) -> Option<PathBuf> {
-    if !is_linked(root) {
-        return Some(root.to_path_buf());
-    }
     let main = main_root(root)?;
     main.join(".moai").is_dir().then_some(main)
 }
@@ -1507,7 +1571,10 @@ mod tests {
         std::fs::write(base.join("t-2/.moai/config.toml"), "prefix = \"t\"\n").unwrap();
         std::fs::remove_file(main.join(".moai/issues.jsonl")).unwrap();
         std::fs::create_dir_all(main.join(".moai/issues.jsonl")).unwrap();
-        let crate::store::Opened::Repo(side) = Repo::open(&base.join("t-2")).unwrap() else { panic!("옆이 안 열렸다") };
+        // **옆 워크트리에 뿌리내린 채로 연다** — `Repo::open` 은 이제 루트로 옮겨 가므로(moai-y7go)
+        // 그것으로 열면 이 시험이 보려던 "옆에서 주 워크트리를 못 읽는 길" 이 아니라 주 워크트리
+        // 그 자체가 열린다.
+        let side = Repo::at(base.join("t-2"), crate::config::Config::load(&base.join("t-2")).unwrap());
         let got = gather(&side, true).unwrap();
         assert!(got.origin.named_only().iter().any(|l| !l.starts_with("worktree-")), "주 워크트리가 이름만 드는 길로 안 갔다 — {:?}", got.origin.named_only());
         let dirs: Vec<_> = got.watched.iter().filter(|(p, _)| p.ends_with(".git") && p.is_dir()).collect();

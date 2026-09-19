@@ -85,9 +85,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **낡은 AGENTS.md 블록은 알림이다**(moai-mj45, 2026-09-14 사용자 결정). 언제 서고 무엇을
     // 대는지는 `agents_notice` 가 정하고, 훅의 보드가 같은 것을 싣는다. 한눈 보기(`.moai` 밖)는
     // 남의 저장소라 안 본다.
-    st.notices.extend(crate::cmd::init::agents_notice(&repo.root, ctx.chdir));
+    st.notices.extend(crate::cmd::init::agents_notice(repo.here(), ctx.chdir));
     // 빠진 딸린 파일 규칙도 같은 자리다(moai-2f99) — `init` 이 한 번 말하고 마는 것을 여기가 잇는다.
-    st.notices.extend(crate::cmd::init::dotfile_notice(&repo.root, ctx.chdir));
+    st.notices.extend(crate::cmd::init::dotfile_notice(repo.here(), ctx.chdir));
 
     // **설정에 적은 말이 틀렸으면 여기서 댄다**(리뷰 moai-80qw). `Doc::lang` 이 그 줄을 짓는
     // 까닭은 "오타가 조용히 영어가 되면 고친 설정이 왜 안 듣는지 알 길이 없다" 였는데

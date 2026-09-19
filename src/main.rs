@@ -82,6 +82,7 @@ fn main() -> ExitCode {
             print(&lines);
             carried();
             unjournaled();
+            redirected();
             if cmd::had_partial() { ExitCode::FAILURE } else { ExitCode::SUCCESS }
         }
         Err(e) => fail(json, &e),
@@ -135,13 +136,39 @@ fn carried() {
     }
 }
 
+/// **어디에 썼는지 프로세스마다 한 줄로 알린다**(moai-y7go) — 딸린 워크트리에서 친 `moai` 는
+/// 루트의 트래커를 고친다(`store::Repo::find_from`). 조용히 옮기면 시킨 쪽은 제가 선 자리에
+/// 썼다고 믿고, 그 워크트리의 `.moai` 가 왜 안 바뀌는지를 딴 데서 찾는다.
+///
+/// **찍는 자리가 `store` 가 아니라 여기인 까닭 셋**(리뷰 moai-71ht.jlh). 쓰기 경로 안에서
+/// `eprintln!` 하면 (1) 대체 화면을 쥔 탐색기의 그림을 쓸 때마다 망가뜨리고(`tui::draw` 의 배너가
+/// 그래서 있다), (2) 락·검증에 걸려 아무것도 안 쓴 명령까지 "썼다" 고 말하고, (3) 한 프로세스가
+/// 열 번 쓰면 같은 줄이 열 번 선다. 여기는 색과 `moai: ` 머리를 다른 경고와 한 자로 쓰고,
+/// stderr 가 닫혀도 `writeln!` 의 실패를 버린다 — `eprintln!` 은 거기서 패닉한다.
+fn redirected() {
+    let Some((from, to)) = store::redirects() else { return };
+    let _ = writeln!(
+        anstream::stderr().lock(),
+        "{}{} 는 딸린 워크트리라 루트의 트래커에 썼다 — {}",
+        style::paint(style::WARN, "moai: "),
+        from.display(),
+        to.display()
+    );
+}
+
 /// 스냅샷은 썼는데 저널에 못 적었으면 말한다(moai-52z9).
 ///
 /// **종료 코드는 0 이다.** 쓰기는 담겼다 — 비영으로 끝나면 사람이 다시 부르고, `add` 는
 /// 같은 이슈를 하나 더 세운다. 그래서 "다시 부르지 않는다" 를 함께 댄다.
 fn unjournaled() {
+    let missed = store::journal_misses();
+    // **빈 것이면 자리를 안 잰다** — `Repo::find` 는 조상 훑기와 설정 읽기를 치른다(`carried` 와
+    // 같은 자리에 이미 이 갈래가 있다). 거의 모든 명령이 여기를 빈 채로 지난다.
+    if missed.is_empty() {
+        return;
+    }
     let here = store::Repo::find().ok().flatten().map(|r| r.root);
-    for (root, why) in store::journal_misses() {
+    for (root, why) in missed {
         let whose = match &here {
             Some(h) if *h == root => String::new(),
             _ => format!(" ({})", root.display()),

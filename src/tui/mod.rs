@@ -317,9 +317,13 @@ pub type Commits = std::collections::BTreeMap<
     std::collections::BTreeMap<String, Vec<crate::git::Commit>>,
 >;
 
-/// 커밋 표를 지을 뿌리 — 이 프로젝트와, 줄을 보태 온 옆 워크트리.
+/// 커밋 표를 지을 뿌리 — 이 세션이 **선 체크아웃**과, 줄을 보태 온 옆 워크트리.
+///
+/// **트래커의 자리가 아니라 `Repo::here` 다**(moai-y7go, 리뷰 moai-71ht.jlh) — 트래커는 루트로
+/// 옮겨 가지만 `git log` 가 묻는 `HEAD` 는 이 체크아웃의 것이다. 루트로 물으면 이 가지에서 방금
+/// 한 일이 루트의 `HEAD` 에서 안 보여, 표가 "아무도 안 고쳤다" 로 빈다.
 fn commit_roots(repo: &Repo, origin: &crate::worktree::Origin) -> Vec<std::path::PathBuf> {
-    std::iter::once(repo.root.as_path()).chain(origin.roots()).map(std::path::Path::to_path_buf).collect()
+    std::iter::once(repo.here()).chain(origin.roots()).map(std::path::Path::to_path_buf).collect()
 }
 
 /// 뿌리마다 [`crate::git::table`] 을 짓는다. **어느 스레드에서 불러도 같다.**
@@ -350,7 +354,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     // 워크트리의 있고 없음과 스냅샷을 읽는데, 겹쳐 보지 않을 때의 `watched` 에는 그것이 하나도
     // 안 들어 — 워크트리를 `rm -rf` 로 치워도 `App::follow` 가 다시 안 읽고 배너만 옛 수로 선다.
     // 층이 제 줄을 재는 자와 같다(`layer::marks_of`). **읽기 전에** 잰다(위와 같은 까닭).
-    let places = crate::worktree::place_marks(&repo.root);
+    let places = crate::worktree::place_marks(repo.here());
     let g = crate::worktree::gather(repo, worktree)?;
     // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
     let unreadable: Vec<Option<String>> = g
@@ -2599,7 +2603,7 @@ impl App {
     /// 그 줄에 닿은 커밋. **줄이 온 워크트리의 가지에서 읽는다** — `show` 와 같은 까닭이다:
     /// `--worktree` 로 옆에서 집은 일을 고친 커밋은 저쪽 가지에만 있다. 표가 없으면 빈 것이다.
     pub fn commits_of(&self, id: &str) -> &[crate::git::Commit] {
-        let root = self.origin.root(id).or(self.repo.as_ref().map(|r| r.root.as_path()));
+        let root = self.origin.root(id).or(self.repo.as_ref().map(|r| r.here()));
         root.and_then(|r| self.commits.get(r)).and_then(|t| t.get(id)).map_or(&[], Vec::as_slice)
     }
 

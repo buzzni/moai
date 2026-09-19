@@ -24,7 +24,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 자리 판정이 보는 옆 워크트리도 **읽기 전에** 잰다 — 다시 읽기(`tui::prepare`)가 지켜보는 목록과
     // 같은 모양이어야 첫 다시 읽기가 안 바뀐 커밋 표를 다시 짓지 않고, git 을 못 불러도 옆 워크트리를
     // 치운 것을 안다. 화면을 안 켜는 `--json` 은 지켜볼 것이 없다.
-    let places = if ctx.json { Vec::new() } else { crate::worktree::place_marks(&repo.root) };
+    let places = if ctx.json { Vec::new() } else { crate::worktree::place_marks(repo.here()) };
     // 탐색기는 옆 워크트리를 겹친 채로 연다(`App::worktree`). `--json` 은 겹치지 않는다 —
     // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).

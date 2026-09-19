@@ -20,8 +20,8 @@ pub struct Repo {
     pub root: PathBuf,
     pub config: Config,
     /// 찾은 자리가 딸린 워크트리라 **루트로 옮겨 온 것인가** — 그 워크트리의 자리다(moai-y7go).
-    /// [`Repo::with_write`] 가 이것으로 "어디에 썼는지" 한 줄을 낸다. 조용히 딴 파일을 고치면
-    /// 시킨 쪽은 제가 친 자리에 썼다고 믿는다.
+    /// [`Repo::here`] 가 이것을 낸다. 조용히 딴 파일을 고치면 시킨 쪽은 제가 친 자리에 썼다고 믿어,
+    /// `main` 이 프로세스 끝에 [`redirects`] 로 한 줄을 남긴다.
     pub moved_from: Option<PathBuf>,
 }
 
@@ -30,6 +30,41 @@ impl Repo {
     pub fn at(root: PathBuf, config: Config) -> Repo {
         Repo { root, config, moved_from: None }
     }
+
+    /// 이 세션이 **선 체크아웃** — 트래커를 루트로 옮겨 왔으면 옮겨 오기 전의 자리다(moai-y7go).
+    ///
+    /// [`Repo::root`] 는 **트래커가 사는 곳**이다. 둘은 딸린 워크트리에서만 갈리는데, 이 저장소는
+    /// 일을 모두 워크트리에서 하므로 그때가 늘이다. "지금 어느 체크아웃인가" 를 묻는 자리
+    /// (훅이 세는 파일·워크트리 이름·`git log` 의 `HEAD`·`.claude/` 에 심는 것)는 이것을 쓴다 —
+    /// `root` 로 물으면 워크트리의 파일이 죄다 루트의 `.claude/worktrees/…` 밑으로 보인다.
+    pub fn here(&self) -> &Path {
+        self.moved_from.as_deref().unwrap_or(&self.root)
+    }
+}
+
+/// 이 프로세스가 **딸린 워크트리에서 루트의 트래커로 옮겨 쓴 것** — `(선 자리, 쓴 트래커)`.
+///
+/// [`MISSED`] 와 같은 까닭으로 `store` 는 담아 두기만 하고 찍지 않는다. 찍는 자리는 `main` 이다:
+/// 대체 화면을 쥔 탐색기 안에서 `eprintln!` 은 그림을 망가뜨리고(`tui::draw` 의 배너가 그래서
+/// 있다), 쓰기 **전에** 찍으면 락이나 검증에 걸려 아무것도 안 쓴 명령이 "썼다" 고 말한다.
+/// 프로세스마다 한 줄이면 족하다 — 같은 자리에 열 번 써도 알릴 것은 하나다.
+static MOVED: std::sync::Mutex<Option<(PathBuf, PathBuf)>> = std::sync::Mutex::new(None);
+
+/// 옮겨 쓴 자리 — 없으면 `None`. `main` 이 끝에 한 번 읽는다.
+pub fn redirects() -> Option<(PathBuf, PathBuf)> {
+    MOVED.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// `MOAI_HERE` 가 **켜져 있는가** — 빈 값과 흔한 "아니오" 낱말은 끈 것으로 읽는다.
+///
+/// 글은 `MOAI_HERE=1` 로 적혀 있어 사람은 이것을 참·거짓으로 읽는다. 있기만 하면 켜던 판은
+/// `MOAI_HERE=0` 을 켬으로 읽어, 끄려던 사람에게 말없이 갈라진 스냅샷을 줬다.
+/// 켜는 낱말만 켠다 — `crate::skill` 의 `MOAI_BLESS` 와 같은 자다(거기도 `MOAI_BLESS=0` 이
+/// 커밋된 트리를 다시 쓰던 자리였다).
+fn here_wanted() -> bool {
+    let v = std::env::var_os("MOAI_HERE");
+    let v = v.as_ref().map(|v| v.to_string_lossy().trim().to_ascii_lowercase());
+    matches!(v.as_deref(), Some("1" | "true" | "yes" | "on"))
 }
 
 /// 읽다가 만난 잘못된 줄. **한 줄이 깨졌다고 파일을 통째로 거부하지 않는다** —
@@ -138,35 +173,39 @@ impl Repo {
     /// 옮겨 가지 않는 자리 둘 — 루트에 `.moai` 가 없거나([`Repo::find_from`] 이 위로 찾다 만난
     /// 워크트리가 그 저장소의 것이 아니다) 주 체크아웃을 못 찾는 것(서브모듈·맨 저장소)이다.
     /// 그때는 찾은 그대로다.
+    ///
+    /// **루트의 설정이 깨진 것은 조용히 되돌아가지 않는다**(리뷰 moai-71ht.jlh). 삼키고 워크트리에
+    /// 쓰던 판은 루트의 `config.toml` 에 충돌 표시 하나가 박히는 순간 저장소의 모든 워크트리가
+    /// 말없이 제 스냅샷에 쓰기 시작해, 이 기능이 막으려던 갈라짐을 아무 말 없이 지었다. 쓸 트래커를
+    /// 못 여는 것은 고칠 것이지 갈래가 아니다 — 루트에서 치면 나는 그 오류를 여기서도 그대로 낸다.
     pub fn find_from(dir: &Path) -> R<Option<Repo>> {
+        let Some(found) = Repo::found_root(dir) else { return Ok(None) };
         // **`MOAI_HERE` 는 이 체크아웃에 쓴다.** 일부러 갈라 놓는 자리다 — 옆 스냅샷이 갈라진 상태를
         // 짓는 시험과, 그 워크트리에서만 쓰는 트래커를 든 사람이다. 옮기는 것은 막는 것이 아니라
-        // 옮기는 것이므로, 되돌릴 손잡이 하나를 두는 값이 싸다.
-        if std::env::var_os("MOAI_HERE").is_some_and(|v| !v.is_empty()) {
-            return Repo::found_at(dir);
-        }
-        Ok(Repo::found_at(dir)?.map(|found| match crate::worktree::tracker_root(&found.root) {
-            Some(root) if root != found.root => match Repo::rooted(root) {
-                Ok(there) => Repo { moved_from: Some(found.root), ..there },
-                Err(_) => found,
-            },
-            _ => found,
-        }))
+        // 옮기는 것이므로, 되돌릴 손잡이 하나를 두는 값이 싸다. **끄는 값도 받는다** — 글이 `=1` 로
+        // 적혀 있어 `MOAI_HERE=0` 을 "아니오" 로 읽고 쓰는 쪽이 생기는데, 있기만 하면 켜던 판은
+        // 그 사람에게 말없이 갈라진 스냅샷을 줬다(리뷰 moai-71ht.jlh).
+        let Some(root) = (!here_wanted()).then(|| crate::worktree::tracker_root(&found)).flatten() else {
+            return Repo::rooted(found).map(Some);
+        };
+        // **설정은 한 번만 읽는다** — 찾은 자리로 [`Repo`] 를 지어 놓고 버리던 판은 워크트리의
+        // `config.toml` 을 읽고 안 쓴 채 버렸다. 훅이 도구 호출마다 지나는 길이다.
+        Ok(Some(Repo { moved_from: Some(found), ..Repo::rooted(root)? }))
     }
 
-    /// [`Repo::find_from`] 의 **찾기만** — 딸린 워크트리를 루트로 옮기지 않는다. 옮기는 자가
-    /// 스스로를 부르지 않게 가른다.
-    fn found_at(dir: &Path) -> R<Option<Repo>> {
+    /// [`Repo::find_from`] 의 **찾기만** — `.moai` 를 가진 조상의 자리다. 설정은 안 읽는다:
+    /// 읽을 자리를 [`crate::worktree::tracker_root`] 가 아직 옮길 수 있다.
+    fn found_root(dir: &Path) -> Option<PathBuf> {
         let mut dir = dir.to_path_buf();
         loop {
             // **못 들여다보는 조상은 건너뛴다** (`is_dir` 이 `false` 로 접는다). 위로 찾는
             // 길에서는 권한 없는 남의 디렉터리를 지나는 것이 흔한 일이라, [`Repo::open`]
             // 처럼 그것을 실패로 세면 제 저장소 밖 어디서나 넘어진다.
             if dir.join(".moai").is_dir() {
-                return Repo::rooted(dir).map(Some);
+                return Some(dir);
             }
             if !dir.pop() {
-                return Ok(None);
+                return None;
             }
         }
     }
@@ -196,13 +235,47 @@ impl Repo {
             Err(e) => return Err(Fail::new(format!("{}: {e}", dir.display()))),
         }
         match std::fs::metadata(dir.join(".moai")) {
-            Ok(m) if m.is_dir() => Repo::rooted(dir.to_path_buf()).map(Opened::Repo),
+            // **여기도 루트로 옮겨 간다**(moai-y7go, 리뷰 moai-71ht.jlh 사용자 결정) — 등록한 자리가
+            // 딸린 워크트리면 탐색기의 쓰기가 그 워크트리의 스냅샷에 조용히 들어가, 같은 자리를 CLI 로
+            // 칠 때와 다른 파일이 바뀐다. **위로 찾지 않는다는 계약은 그대로다** — 옮기는 곳은 위가
+            // 아니라 같은 나무의 주 체크아웃이고, 거기에 트래커가 없으면 옮기지 않는다.
+            Ok(m) if m.is_dir() => match crate::worktree::tracker_root(dir) {
+                Some(root) => Ok(Opened::Repo(Repo { moved_from: Some(dir.to_path_buf()), ..Repo::rooted(root)? })),
+                None => Repo::rooted(dir.to_path_buf()).map(Opened::Repo),
+            },
             // `.moai` 가 파일이면 저장소가 아니다 — 위로 찾는 [`Repo::find`] 의 `is_dir` 과 같은 자다.
             Ok(_) => Ok(Opened::Uninit),
             Err(e) if gone(&e) => Ok(Opened::Uninit),
             // 권한 없음 따위는 init 전이 아니다. 접으면 "init 하라" 는 틀린 말을 한다.
             Err(e) => Err(Fail::new(format!("{}: {e}", dir.join(".moai").display()))),
         }
+    }
+
+    /// **이 체크아웃에서 집은 줄을 git 관리 디렉터리에 적어 둔다**(moai-y7go, 2026-09-19 사용자 결정).
+    ///
+    /// 쓰기가 루트로 옮겨 가면서([`Repo::find_from`]) 워크트리의 스냅샷이 더는 안 움직인다. 이름이
+    /// id 가 아닌 워크트리(에이전트 격리)는 그래서 "여기서 집었다" 를 말할 길을 잃었고, 산 일이
+    /// `report::places` 에서 자리를 잃어 `stranded` 로 섰다(리뷰 moai-71ht.jlh). 스냅샷에는 안 적는다 —
+    /// 그것이 병합에서 겨루는 파일이다.
+    ///
+    /// **옮겨 왔을 때만 적는다.** 루트에서 친 쓰기는 옮긴 것이 없어 적을 자리도 없다 — 루트는 이름이
+    /// 가리키지 않아도 `places` 가 자리로 세지 않는 곳이다(`workplaces` 는 딸린 워크트리만 낸다).
+    fn note_held(&self, before: &[Issue], after: &[Issue]) {
+        let Some(from) = &self.moved_from else { return };
+        let was: std::collections::BTreeMap<&str, bool> =
+            before.iter().map(|i| (i.id.as_str(), self.config.is_started(i.status.as_str()))).collect();
+        let (mut picked, mut dropped) = (Vec::new(), Vec::new());
+        for i in after {
+            let now = self.config.is_started(i.status.as_str());
+            if was.get(i.id.as_str()).copied() == Some(now) {
+                continue;
+            }
+            if now { picked.push(i.id.clone()) } else { dropped.push(i.id.clone()) }
+        }
+        // 지운 줄도 그 자리에서 뺀다 — 없는 id 가 표식에 남으면 `places` 가 그 워크트리를 영영 댄다.
+        let here: std::collections::BTreeSet<&str> = after.iter().map(|i| i.id.as_str()).collect();
+        dropped.extend(before.iter().filter(|i| !here.contains(i.id.as_str())).map(|i| i.id.clone()));
+        crate::worktree::note_held(from, &picked, &dropped);
     }
 
     pub fn dir(&self) -> PathBuf {
@@ -237,13 +310,6 @@ impl Repo {
     where
         F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
     {
-        // **어디에 썼는지 한 줄로 알린다**(moai-y7go) — 딸린 워크트리에서 친 `moai` 는 루트의
-        // 트래커를 고친다([`Repo::find_from`]). 조용히 옮기면 시킨 쪽은 제가 선 자리에 썼다고
-        // 믿고, 그 워크트리의 `.moai` 가 왜 안 바뀌는지를 딴 데서 찾는다. stderr 로 낸다 —
-        // `--json` 의 stdout 은 기계가 읽는 자리다.
-        if let Some(from) = &self.moved_from {
-            eprintln!("moai: {} 는 딸린 워크트리라 루트의 트래커에 쓴다 — {}", from.display(), self.dir().display());
-        }
         let _lock = Lock::acquire(&self.dir().join("lock"))?;
 
         // 락을 잡은 **뒤에** 읽는다. 밖에서 읽으면 두 프로세스가 같은 옛 상태를
@@ -339,6 +405,15 @@ impl Repo {
         if wrote {
             // 사람이 정한 권한은 `write_atomic` 이 지킨다. 저널은 제자리에 덧붙이므로 원래 안 풀린다.
             write_atomic(&self.issues_path(), after.as_bytes())?;
+            self.note_held(&original, &issues);
+        }
+        // **어디에 썼는지 담아 둔다**(moai-y7go) — 딸린 워크트리에서 친 `moai` 는 루트의 트래커를
+        // 고친다([`Repo::find_from`]). 조용히 옮기면 시킨 쪽은 제가 선 자리에 썼다고 믿고, 그
+        // 워크트리의 `.moai` 가 왜 안 바뀌는지를 딴 데서 찾는다. **정말 쓴 뒤에** 담는다([`MOVED`]
+        // 와 위의 `wrote` 가 같은 까닭) — 락이나 검증에 걸려 물러난 명령이 "썼다" 고 하면 안 된다.
+        // 저널만 적는 `note` 도 루트에 남으므로 함께 센다.
+        if (wrote || !entries.is_empty()) && let Some(from) = &self.moved_from {
+            *MOVED.lock().unwrap_or_else(|e| e.into_inner()) = Some((from.clone(), self.dir()));
         }
         let mut tallies = TALLY.lock().unwrap_or_else(|e| e.into_inner());
         match tallies.iter_mut().find(|(root, _)| *root == self.root) {
@@ -760,6 +835,46 @@ impl Drop for Lock {
 
 #[cfg(test)]
 mod tests {
+
+    /// **등록한 자리가 딸린 워크트리면 루트의 트래커를 연다**(moai-y7go, 리뷰 moai-71ht.jlh
+    /// 사용자 결정) — 탐색기의 프로젝트 층이 이 문으로 열므로, 안 옮기면 같은 자리를 CLI 로 칠 때와
+    /// 다른 파일이 조용히 바뀐다. 옮길 곳에 트래커가 없으면 그 자리 그대로다.
+    #[test]
+    fn a_registered_worktree_opens_the_root_tracker() {
+        let dir = crate::scratch::Scratch::new("open-wt");
+        let main = dir.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        // git 은 `git::isolated` 로만 띄운다 — 돌리는 사람의 설정이 새면 임시 저장소가 멈춘다.
+        let git = |at: &std::path::Path, args: &[&str]| {
+            let out = crate::git::isolated(at).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        git(&main, &["init", "-q"]);
+        std::fs::create_dir_all(main.join(".moai")).unwrap();
+        std::fs::write(main.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        std::fs::write(main.join(".moai/issues.jsonl"), "").unwrap();
+        git(&main, &["add", "-A"]);
+        git(&main, &["commit", "-q", "-m", "init"]);
+        git(&main, &["worktree", "add", "-q", "side", "-b", "side"]);
+        let side = main.join("side");
+
+        let Opened::Repo(repo) = Repo::open(&side).unwrap() else { panic!("안 열렸다") };
+        assert_eq!(repo.root, main, "등록한 워크트리를 그 자리에서 열었다");
+        assert_eq!(repo.here(), side, "어디서 열었는지를 잃었다");
+
+        // 옮길 곳에 트래커가 없으면 그대로다 — 이 가지에서 처음 `init` 한 워크트리.
+        let alone = dir.join("alone");
+        std::fs::create_dir_all(&alone).unwrap();
+        git(&alone, &["init", "-q"]);
+        git(&alone, &["commit", "-q", "--allow-empty", "-m", "처음"]);
+        git(&alone, &["worktree", "add", "-q", "feat", "-b", "feat"]);
+        let feat = alone.join("feat");
+        std::fs::create_dir_all(feat.join(".moai")).unwrap();
+        std::fs::write(feat.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        let Opened::Repo(repo) = Repo::open(&feat).unwrap() else { panic!("안 열렸다") };
+        assert_eq!(repo.root, feat, "옮길 곳이 없는데 옮겼다");
+        assert!(repo.moved_from.is_none(), "안 옮겼는데 옮겼다고 적었다");
+    }
     use super::*;
     use crate::scratch::Scratch;
     use crate::model::{Kind, Status};

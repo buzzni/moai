@@ -3445,7 +3445,7 @@ mod tests {
         // 옛날인데, 이 워크트리가 뜰 무렵 움직인 것은 `status_since` 가 안다.
         //
         // **양쪽을 다 잰다.** 빠지는 쪽만 재던 판은 `started_at.or(status_since)` 로 바꾸는
-        // 되돌림을 초록으로 지났다(리뷰 moai-71ht.yid) — 물려받은 줄이 최근 `started_at` 하나로
+        // 되돌림을 초록으로 지났다(리뷰 moai-71ht.rv0) — 물려받은 줄이 최근 `started_at` 하나로
         // 이 워크트리의 것이 되어, 격리 워크트리 하나가 자리 잃은 줄을 도로 다 가린다.
         let mut repicked = issues.clone();
         repicked[0].started_at = Some("2026-09-15T10:50:00Z".into());
