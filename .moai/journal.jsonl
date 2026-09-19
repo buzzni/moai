@@ -5580,3 +5580,28 @@
 {"ts":"2026-09-19T15:00:49Z","id":"moai-2h77","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 멤버 둘(moai-xj7t·moai-ts32)과 에픽 끝 리뷰 moai-2h77.5wn 을 715e23a 로 병합하고 닫았다. 남은 멤버·idea 없음"}
 {"ts":"2026-09-19T15:16:16Z","id":"moai-f31d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"읽음 표 — 프로젝트마다 키를 가르고 끝없이 자라지 않게"}
 {"ts":"2026-09-19T15:16:16Z","id":"moai-f31d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-19 미룬 것을 다시 훑어 되살렸다. 둘 다 [read] 가 사용자 설정 한 파일에 id 로만 쌓이는 데서 온다 — omx7 은 이름이 같은 두 저장소가 서로의 읽음을 말없이 민다, dt5q 는 표가 안 줄어 설정 쓰기마다 느려진다. 고칠 길(프로젝트별 키, 읽음을 따로 된 파일로)은 사용자 결정 1(내 설정에 둔다)을 건드리니 일꾼이 먼저 묻는다. src/user_config.rs 를 moai-4qbv 와 같이 고치므로 그 뒤에 한다."}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-2nzg","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"겹쳐 보기에서 r 이 옆 워크트리 사본의 도장을 적어 CLI 와 [NEW] 가 갈린다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-sl2d","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"검색이 저절로 연 묶음은 h 로 접을 수 없다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-rmna","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"중복 id 두 줄이 한 트리에 서면 커서 붙들기가 첫 줄로 간다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-sz91","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"인라인 tui = { … } 안의 키를 지우면 주석이 사라진다 (리뷰 8·9·10)"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-49x7","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"남긴 주석을 닫는 글에 잇는 자가 셋이라 지우는 차례에 따라 바이트가 갈린다 (리뷰 12·14)"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-jr9r","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"separate-git-dir 저장소를 맨몸으로 읽어 자리 경로를 공용 디렉터리에서 잰다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-9zl3","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"다른 트래커를 겨눈 idea add 토막이 이 세션이 거기서 쥔 것 없이도 그 트래커의 에픽 물음을 받는다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-yinx","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"갈림길 1 의 둘째 물음 글이 guide.rs FORKS·create_in·aside_in 세 곳에 따로 적혀 있다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-z1su","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 목록이 창 밖 줄까지 프레임마다 빈 ListItem·right_fit·lead_extras 를 짓는다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-pg30","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Ground::here 가 거름망 키마다 멤버 줄 수만큼의 빌린 지도를 다시 짓는다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-8c6j","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"한눈 보기에서 머리줄을 펼칠 때마다 층 요약 스레드가 통째로 버려진다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-tbxz","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"층 읽기 스레드의 모서리 — 패닉 전파·spawn 실패·버린 손잡이, 그리고 시계에 기댄 시험"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-cq53","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"워크트리마다 target/ 이 따로라 디스크가 87% 다 — 같은 의존성을 다섯 번 빌드한다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-nt0h","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"blocked_since 가 막는 줄과 막힌 줄의 조상(부모·에픽·마일스톤)을 도로 집은 때도 센다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-0b7s","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"--worktree: 이미 미룬 줄에 defer 를 다시 쳐도 아무것도 안 적어, 옆의 늦은 mv 에 진 미룸을 다시 세울 길이 --undo 뒤 defer 뿐이다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-zsu8","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽이 done 으로 뒤집히는 순간 mv 가 한 줄 비춘다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-uvm9","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"묶음의 겨루는 집기 — 칸이 아니라 updated_at 같은 토큰으로 재는 CAS 가 있어야 에픽·마일스톤에도 --from 을 줄 수 있다. 지금은 거절한다 (moai-8xwi.rzg 가 넘김)"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-s63n","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"⎇ 의 닫힌 줄 규칙이 그리는 자리(draw.rs)에 산다 — Origin::working 을 새로 부르는 표면은 그 if 를 다시 적어야 한다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-mbbn","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC 메뉴 격자 줄 상한을 낮출까 — 뿌리 7칸이 넓은 창에서 왼쪽 한 열로만 서 허전하면 MAX_ROWS 를 4 안팎으로(열이 늘어 doom 화면처럼 퍼진다). 사용자의 '하단 8~10칸' 과 맞바꾸는 일이라 말이 나올 때 (moai-apsa)"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-15g8","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"view::Seen 이 query::Where 와 겹친다 — a9 가 cmd/show.rs·edit.rs 를 놓은 뒤"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-q4ef","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"[NEW] 를 폴더 줄과 경로 줄에 굴려 올린다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-rfnv","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"안 읽음의 작은 모서리 여럿"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-l5s8","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"좁아서 id 열이 걷히면 id 로 찾은 줄이 왜 걸렸는지 안 보인다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-p3rw","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"좁은 상세에서 태그 줄이 잘려 뒤쪽 태그에서 찾은 글자가 안 보인다"}
+{"ts":"2026-09-19T15:21:32Z","id":"moai-ju54","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"moai note 로 붙인 메모는 [NEW] 를 못 세운다 — 스냅샷에 '마지막으로 말한 때' 필드"}
