@@ -127,7 +127,7 @@ pub fn title(held: &[KeyEvent]) -> String {
 /// 뿌리의 이름 — 접두어 줄의 `SPC- 메뉴`, 키 바의 `SPC 메뉴`.
 pub const ROOT: &str = "메뉴";
 
-/// 접두어 줄에 적을 지금 층의 이름 — 뿌리는 [`ROOT`], 하위 층은 묶음의 이름(`토글`).
+/// 접두어 줄에 적을 지금 층의 이름 — 뿌리는 [`ROOT`], 하위 층은 묶음의 이름(`보기`).
 pub fn name(held: &[KeyEvent]) -> &'static str {
     if held.len() <= 1 { ROOT } else { group(held) }
 }

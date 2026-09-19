@@ -284,13 +284,14 @@ NOTE
     SPC /    검색               SPC f    거름망             SPC n    생각 담기
     SPC q    끝내기
     SPC p a  등록               SPC p d  목록에서 빼기
-  보기 — 켜고 끄는 것은 모두 여기 있다:
+  보기 — 목록의 열(SPC c) 말고 켜고 끄는 것은 모두 여기 있다:
     SPC v d  done [보임/숨김]   SPC v l  미룸               SPC v a  모두 보이기
     SPC v 1  설정의 첫 칸 [보임/숨김] — 둘째 칸부터 번호가 차례로 는다
     SPC v p  상세 칸 [보임/숨김]
     SPC v w  워크트리 겹쳐 보기 [켜짐/꺼짐]
     SPC v r  원문↔그리기
-  정렬과 열은 같은 글자가 같은 것을 가리킨다:
+  정렬과 열은 우선순위·생성·수정·담당을 같은 글자로 부른다 — 제목(SPC s t)과
+  태그(SPC c t)만 한 글자에 뜻이 갈린다:
     SPC s p  우선순위           SPC s c  생성               SPC s u  수정
     SPC s s  칸                 SPC s a  담당               SPC s t  제목
     SPC c i  id                 SPC c p  우선순위           SPC c a  담당

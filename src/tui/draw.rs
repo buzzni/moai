@@ -752,7 +752,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     };
     // **보기가 숨긴 것을 댄다**(moai-fmv5) — done 을 숨긴 채 시작하므로, 안 대면 끝난 일이 사라진
     // 줄 안다. 거름망 뱃지와 달리 **늘 서 있는 것**이라 경로의 몫을 굶기지 않는다: 경로에 여덟 칸이
-    // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v` 가 댄다. 층에서는 보기가 뜻이 없다.
+    // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v`(숨김)·`SPC s`(정렬)가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
     let sorted = (app.order != Default::default()).then(|| {
         format!("정렬 {}{}", app.order.by.word(), if app.order.reversed { " 거꾸로" } else { "" })
@@ -5511,6 +5511,14 @@ pub(super) mod tests {
         let lines = render(&mut a, 80, 20);
         assert!(!lines.iter().any(|l| *l == "─".repeat(80)), "실행했는데 창이 남았다");
         assert_eq!(lines.last(), before.last(), "실행한 뒤 바가 돌아오지 않았다");
+
+        // **하위 층의 창은 제 높이로 준다** — 읽음은 두 칸이라 두 줄 + 가름줄 하나다. 보기는 여섯 칸을
+        // 넘겨 이것을 못 잰다.
+        a.hit("SPC m");
+        let lines = render(&mut a, 80, 20);
+        let screen = lines.join("\n");
+        assert!(screen.contains("a : 안 읽은 것 전부") && screen.contains("g : 이 묶음의 멤버 전부"), "{screen}");
+        assert_eq!(lines[lines.len() - 4], "─".repeat(80), "하위 층의 창이 제 높이로 줄지 않았다\n{screen}");
     }
 
     /// **메뉴 칸은 키·`:`·실행 낱말·`+묶음` 이 제 색을 입는다**(moai-r2dt). 뜻은 글자가 지므로 색은

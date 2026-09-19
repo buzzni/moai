@@ -243,11 +243,6 @@ fn look_into(paths: &[PathBuf], now: &str, tx: &std::sync::mpsc::Sender<Looked>)
     });
 }
 
-/// 그 자리에서 다 읽는다 — 층에서 부른 갱신([`App::reread_layer`] — 층에서 담은 뒤)만 쓴다.
-fn look_at(paths: &[PathBuf], now: &str) -> Vec<Looked> {
-    projects::each(paths, |path| look_one(path, now))
-}
-
 /// 한 경로를 연다. **표식을 먼저 잰다** — 읽고 나서 재면 그 사이의 쓰기가 "이미 본 것"
 /// 으로 적혀 영영 안 보인다(`App::open` 과 같은 까닭).
 fn look_one(path: &Path, now: &str) -> Looked {
@@ -438,10 +433,7 @@ impl App {
             return self.with_layer(layer);
         }
         let mut app = self;
-        if !layer.problems.is_empty() {
-            let why = layer.problems.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>().join(" · ");
-            app.unlayered = Some(format!("사용자 설정을 못 읽어 프로젝트 층을 안 세웠다 — {why}"));
-        }
+        app.unlayered = unlayered_of(&layer);
         app
     }
 
@@ -708,42 +700,21 @@ impl App {
         self.detail.rewind();
     }
 
-    /// 층에서 부른 갱신(층에서 담은 뒤의 [`App::reload`]) — 사용자 설정부터 다시 읽고 **그 자리에서**
-    /// 전부 다시 연다(쓴 사람은 결과를 기다리고 있다). 커서는 보던 프로젝트에 선다. 층의 다른 읽기(올라오기·등록 바꾸기·시계)는 모두
-    /// 스레드로 간다([`Layer::launch`]).
+    /// **등록 목록이 바뀐 뒤** 층을 다시 세운다 — 이 탐색기가 바꾼 것(층의 `a`·`d`, moai-plvy)과 밖에서
+    /// 바꾼 것(`moai project add|rm`, 설정 파일의 표식으로 안다 — [`App::follow_config`], moai-en4u)이
+    /// 같은 길이다. 층을 다시 세우는 길은 이것 하나다 — 손으로 "전부 다시" 읽던 `SPC r` 은 걷었다.
     ///
-    /// 도는 읽기는 버린다 — 누르기 전에 띄운 것이라 늦게 닿으면 방금 읽은 것을 옛 것으로 덮는다.
-    pub(super) fn reread_layer(&mut self) {
-        let held = self.current().map(|r| self.anchor_of(&r));
-        let now = crate::model::now();
-        let Some(layer) = &mut self.layer else { return };
-        let fresh = Layer::read(layer.config.as_deref(), layer.launch.as_deref());
-        let old = std::mem::replace(layer, Layer { at: At::Layer, ..fresh });
-        // 새로 선 층의 줄은 모두 안 읽은 것이다 — 낡은 것을 고를 것 없이 다 읽는다.
-        let paths: Vec<PathBuf> = layer.places.iter().map(|p| p.path.clone()).collect();
-        layer.adopt(look_at(&paths, &now));
-        self.now = now;
-        if let Some((_, handle)) = old.pending {
-            self.discard(handle);
-        }
-        // **보던 줄에 그대로 섰으면 되감지 않는다** — 상세를 굴려 놓고 다시 읽으면 굴린
-        // 자리를 잃는다. 층이 다시 서며 차례가 바뀌어도 같은 프로젝트면 그대로다. 다시 읽은
-        // 뒤 커서를 붙드는 자는 목록 어디서나 하나다([`App::regrip`]).
-        self.regrip(held);
-    }
-
-    /// **등록 목록을 이 탐색기가 바꾼 뒤**(층의 `a`·`d`, moai-plvy) 층을 다시 세운다.
-    ///
-    /// [`App::reread_layer`] 와 가르는 것 셋:
     /// - **선 자리를 둔다.** 프로젝트 안에서 `a` 로 등록해도 층으로 끌어올리지 않는다
     /// - **이미 본 프로젝트를 일부러 다시 읽지 않는다.** 경로가 같은 줄의 셈·표식·읽은 때를 옮겨 들고,
     ///   층에 섰으면 [`Layer::launch`] 로 스레드에서 낡은 줄만 읽는다 — 새로 선 줄과, 원래 낡았던
-    ///   줄(표식이 바뀌었거나 시계로 낡은 것)이다. 그쪽은 "전부 다시" 지만 이것은
-    ///   한 줄을 더하거나 뺀 것이라, 등록 수만큼 저장소를 다시 읽을 까닭이 없다. 그 자리에서 읽으면
-    ///   시계로 낡은 줄까지 함께 걸려 등록 하나 바꾸는 키가 등록 수만큼 멈춘다(리뷰 moai-3lul.kt0)
+    ///   줄(표식이 바뀌었거나 시계로 낡은 것)이다. 한 줄을 더하거나 뺀 것이라, 등록 수만큼 저장소를
+    ///   다시 읽을 까닭이 없다. 그 자리에서 읽으면 시계로 낡은 줄까지 함께 걸려 등록 하나 바꾸는 키가
+    ///   등록 수만큼 멈춘다(리뷰 moai-3lul.kt0)
     /// - **층이 없었으면 세운다.** `.moai` 안에서 띄웠고 등록이 0 이었던 경우다. 띄운 자리가
     ///   `At::Project` 로 서므로 지금 프로젝트는 그대로이고, 층이 새로 서도 뿌리의 줄은 그대로라
-    ///   (`..` 은 디렉터리에만 선다, moai-i784) 커서는 보던 줄(정체)에 선다
+    ///   (`..` 은 디렉터리에만 선다, moai-i784) 커서는 보던 줄(정체)에 선다. 못 세우면 그 까닭
+    ///   ([`App::unlayered`])을 **이번 읽기로** 다시 단다 — 설정을 고쳤으면 옛 까닭이 걷히고, 깨졌으면
+    ///   새 까닭이 선다
     ///
     /// `land` 가 있으면 층에 섰을 때 커서를 그 프로젝트(경로)에 둔다 — 방금 등록한 것이 눈앞에
     /// 있어야 등록된 줄 안다. 없거나 못 찾으면 보던 줄, 그것도 사라졌으면(뺐으면) 그 번호를 자른 자리.
@@ -754,8 +725,10 @@ impl App {
                 let Some(repo) = &self.repo else { return };
                 let fresh = Layer::read(self.user_config.as_deref(), Some(&repo.root));
                 if !fresh.registered() {
+                    self.unlayered = unlayered_of(&fresh);
                     return;
                 }
+                self.unlayered = None;
                 self.layer = Some(fresh);
             }
             Some(mut old) => {
@@ -827,6 +800,16 @@ impl App {
     pub(super) fn layer_loading(&self) -> bool {
         self.layer.as_ref().is_some_and(|l| l.pending.is_some())
     }
+}
+
+/// 등록한 것이 하나도 안 읽혀 **층을 안 세운** 까닭([`App::unlayered`]) — 설정을 읽다 만난 것이
+/// 있을 때만. 멀쩡한 빈 설정이면 `None` 이다. 띄울 때([`App::attach_layer`])와 설정이 바뀐 뒤
+/// ([`App::relayer`])가 같은 말을 쓴다.
+fn unlayered_of(layer: &Layer) -> Option<String> {
+    (!layer.problems.is_empty()).then(|| {
+        let why = layer.problems.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>().join(" · ");
+        format!("사용자 설정을 못 읽어 프로젝트 층을 안 세웠다 — {why}")
+    })
 }
 
 /// 층에 선 동안 `App::cfg` 자리를 채우는 설정. **층에서는 아무도 읽지 않는다** — 칸 이름을
@@ -1176,6 +1159,17 @@ mod tests {
         assert!(why.contains("TOML") && !why.contains('\n'), "{why:?}");
         let banner = super::super::draw::tests_banner(&mut a);
         assert!(banner.contains("프로젝트 층을 안 세웠다"), "배너가 까닭을 안 댔다 — {banner:?}");
+
+        // **떠 있는 동안 설정을 고치면 까닭이 걷힌다**(moai-en4u) — 걸음이 설정을 다시 읽는다. 층이 안
+        // 서도(등록 0) 옛 "못 읽어" 가 붙박이로 남지 않는다. 다시 깨지면 다시 선다.
+        a.user_config = Some(cfg.clone());
+        a.follow();
+        std::fs::write(&cfg, "").unwrap();
+        a.follow();
+        assert!(a.layer.is_none() && a.unlayered.is_none(), "고친 설정에 옛 까닭이 남았다 — {:?}", a.unlayered);
+        std::fs::write(&cfg, "[[project\n").unwrap();
+        a.follow();
+        assert!(a.unlayered.as_deref().is_some_and(|u| u.contains("TOML")), "다시 깨진 설정의 까닭을 안 달았다 — {:?}", a.unlayered);
 
         std::fs::write(&cfg, "").unwrap();
         let a = open().attach_layer(Layer::read(Some(&cfg), Some(&here)));
@@ -1673,7 +1667,7 @@ mod tests {
         // 폼이 열린 동안에는 키로 못 옮기므로 속을 직접 흔든다 — 등록 차례가 뒤집히고, 층이
         // 다시 읽히고, 커서가 0(이제 two)에 선다.
         s.register(&[&two, &one]);
-        a.reread_layer();
+        a.relayer(None);
         a.cursor = 0;
         a.follow();
         assert_eq!(a.current(), Some(Row::Project(0)));
@@ -1713,7 +1707,7 @@ mod tests {
         assert!(a.on_layer(), "편집기를 청하며 층을 떠났다");
 
         s.register(&[&two, &one]);
-        a.reread_layer();
+        a.relayer(None);
         a.cursor = 0;
         a.follow();
         assert_eq!(a.place_path(0), Some(two.as_path()), "판이 다르다 — 차례가 안 뒤집혔다");
@@ -1732,7 +1726,7 @@ mod tests {
         a.hit("SPC n");
         type_in(&mut a, "갈 데 없는 것");
         s.register(&[&two]);
-        a.reread_layer();
+        a.relayer(None);
         let before = snapshots(&[&one, &two]);
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);

@@ -506,7 +506,8 @@ pub struct App {
     pub notice: Option<String>,
     /// 사용자 설정을 못 읽어 **층을 안 세운** 까닭. 층이 서면 층이 제 `problems` 를 대므로
     /// 층이 없을 때만 든다. 붙박이다 — 다시 읽기가 걷는 `trouble` 에 두면 700ms 뒤에
-    /// 사라져 사람은 층이 왜 없는지 끝내 모른다. 설정을 고치면 걸음이 다시 읽어([`App::follow_config`]) 층이 서면 걷힌다.
+    /// 사라져 사람은 층이 왜 없는지 끝내 모른다. 설정 파일이 바뀌면 걸음이 다시 읽어([`App::follow_config`])
+    /// 그 읽기로 다시 단다(`App::relayer`) — 층이 서거나 설정이 멀쩡해지면 걷히고, 깨지면 선다.
     pub unlayered: Option<String>,
     /// `--user` 로 **준 값 그대로**(`Ctx::user` 와 같다), 또는 누군지 묻는 칸에서
     /// 받은 것([`Mode::Ask`]). 쓸 때마다 `model::actor` 로 푼다 — 미리 풀어 두면
@@ -658,9 +659,12 @@ pub struct App {
     pub user_config: Option<std::path::PathBuf>,
     /// 사용자 설정 파일의 표식 — **걸음마다 잰다**(moai-en4u). 손으로 누르던 다시 읽기(`SPC r`)를 걷으며
     /// 그 키만 보던 둘을 자동 갱신에 태웠다: 옆 터미널의 `moai read` 가 적은 읽음과, 밖에서
-    /// `moai project add|rm` 한 층의 줄. 둘 다 이 한 파일에 산다. `None` 은 아직 안 쟀다 — 첫 걸음이
-    /// 재기만 한다(띄울 때 이미 읽었다).
-    config_stamp: Option<crate::store::Stamp>,
+    /// `moai project add|rm` 한 층의 줄. 둘 다 이 한 파일에 산다.
+    ///
+    /// **띄우는 길(`cmd::tui`)은 설정을 읽기 전에 재어 넣는다** — 읽은 뒤 첫 걸음에 재면 읽고 첫 걸음
+    /// 사이에 옆이 쓴 것을 본 것으로 삼아, 설정이 다시 바뀔 때까지 안 보인다(`prepare` 가 표식을
+    /// 읽기 전에 재는 것과 같은 까닭). `None` 은 아직 안 쟀다 — 첫 걸음이 재기만 한다(시험의 길).
+    pub config_stamp: Option<crate::store::Stamp>,
     /// **띄운 자리**(cwd). 고르기 창이 처음 여기서 연다. 시험은 임시 디렉터리를 준다.
     ///
     /// 이름이 [`App::here`] 와 겹치지 않게 둔다 — 그쪽은 *지금 선 프로젝트*, 곧 **쓰기가
@@ -844,11 +848,8 @@ impl App {
     /// 있으면 버린다 — 누르기 **전에** 시작한 읽기라 늦게 도착하면 방금 읽은 것을
     /// 옛 것으로 덮는다(`w` 를 끄기 전 설정으로 읽은 것이면 더더욱).
     pub fn reload(&mut self) {
-        // 층에서 부른 갱신은 사용자 설정부터 다시 읽고 프로젝트를 다시 연다.
-        if self.on_layer() {
-            self.reread_layer();
-            return;
-        }
+        // 층에는 다시 읽을 저장소가 없다 — 층에 서면 `repo` 가 빈다(`leave_project`). 층의 줄은 제 표식과
+        // 시계([`App::follow_layer`])가, 등록 목록은 설정 파일의 표식([`App::follow_config`])이 따라간다.
         if self.repo.is_none() {
             return;
         }
@@ -1232,7 +1233,7 @@ impl App {
     /// 굴린 자리가 남으면 다른 줄을 첫 줄부터 못 본다(`move_to` 와 같은 까닭).
     ///
     /// 커서를 다시 세우는 자리 — 다시 읽기([`App::regrip`]), 거름망([`App::settle`]), 층 다시 세우기
-    /// (`relayer`·`reread_layer`) — 가 **어디에 서느냐**만 저마다 고르고 서는 법은 이것 하나를 탄다.
+    /// (`relayer`) — 가 **어디에 서느냐**만 저마다 고르고 서는 법은 이것 하나를 탄다.
     /// 한때 넷이 저마다 적어, 한쪽은 정체로 한쪽은 경로로 가르고 되감는 갈래 하나는 죽은 코드였고,
     /// 목록을 두세 번 셌다(`rows()` 뒤 `current()`). 목록은 부르는 쪽이 한 번 세어 넘긴다.
     fn stand(&mut self, rows: &[Row], at: usize, held: Option<&Anchor>) {

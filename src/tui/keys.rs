@@ -417,7 +417,8 @@ pub const LEADER: Key = Key::plain(' ');
 /// `App::follow`), 그 글자는 읽음이 받았다.
 ///
 /// **SPC 밑 묶음은 넷이다**(moai-en4u): `v` 보기 · `s` 정렬 · `c` 열 · `m` 읽음, 그리고 `p` 프로젝트.
-/// 글자는 묶음을 건너 같은 것을 가리킨다 — `SPC s a`·`SPC c a` 가 둘 다 담당이다. 옛 키는
+/// 정렬과 열은 우선순위·생성·수정·담당(p·c·u·a)을 같은 글자로 부른다 — `SPC s a`·`SPC c a` 가 둘 다
+/// 담당이다. `t` 만 갈린다: 정렬의 `t` 는 제목, 열의 `t` 는 태그다(사용자 결정). 옛 키는
 /// 별칭으로 남기지 않았다(사용자 결정: 혼자 쓰는 지금이 끊을 때다).
 ///
 /// **SPC 로 시작하는 줄의 차례가 곧 메뉴의 차례다**([`super::menu::entries`]). 메뉴는 목록을
@@ -472,7 +473,7 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Quit, Some("SPC q"), LEADER, Key::plain('q')),
         row!(Pick, Some("SPC p a"), LEADER, Key::plain('p'), Key::plain('a')),
         row!(Unregister, Some("SPC p d"), LEADER, Key::plain('p'), Key::plain('d')),
-        // **보는 것을 켜고 끄는 것은 모두 `SPC v`(view) 밑이다**(moai-en4u). 한때 `SPC s`(보기)와
+        // **보는 것을 켜고 끄는 것은 목록의 열(`SPC c`) 말고 모두 `SPC v`(view) 밑이다**(moai-en4u). 한때 `SPC s`(보기)와
         // `SPC t`(토글)로 갈라 done 은 s·상세 칸은 t 에 있었다 — 둘 다 켜고 끄는 것이라 어느 쪽인지를
         // 외워야 했고, `d` 가 한쪽에서는 done 다른 쪽에서는 상세였다. 어느 줄을 보나(d·l·a·번호)가
         // 먼저, 화면의 꼴(p·w·r)이 뒤다.
@@ -509,7 +510,8 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Cell(super::view::Field::Created), Some("SPC c c"), LEADER, Key::plain('c'), Key::plain('c')),
         row!(Cell(super::view::Field::Updated), Some("SPC c u"), LEADER, Key::plain('c'), Key::plain('u')),
         row!(Cell(super::view::Field::Tally), Some("SPC c n"), LEADER, Key::plain('c'), Key::plain('n')),
-        // 태그는 `t` — 옛 `g` 는 정렬(`SPC s t` 는 제목)과 글자가 어긋났다. 열에는 제목이 없어 `t` 가 빈다.
+        // 태그는 `t`(옛 `g`, 사용자 결정 moai-en4u) — 열에는 제목이 없어 `t` 가 비어 있었다. 정렬의
+        // `SPC s t` 는 제목이라, 두 묶음에서 한 글자에 뜻이 갈리는 것은 이 `t` 하나다.
         row!(Cell(super::view::Field::Tags), Some("SPC c t"), LEADER, Key::plain('c'), Key::plain('t')),
         row!(Cell(super::view::Field::Names), Some("SPC c h"), LEADER, Key::plain('c'), Key::plain('h')),
         row!(Cell(super::view::Field::Branch), Some("SPC c w"), LEADER, Key::plain('c'), Key::plain('w')),
@@ -605,7 +607,8 @@ impl Browse {
             // 것이라(`App::climb` 이 비운다), 여기서 서면 `SPC m a` 는 늘 "적을 것이 없다" 로 답하면서 그
             // 프로젝트에 [NEW] 가 남는다. 눌러도 아무 일이 없는 키는 메뉴에 안 선다(아래 `Raw` 와 같은 까닭).
             Read | ReadAll | ReadGroup if c.layer => Err(Off::Quiet),
-            // 보기는 프로젝트 안의 줄에 건다 — 층에서는 그룹째 메뉴에 안 선다(`menu::live`).
+            // 줄 보기·정렬·열은 프로젝트 안의 줄에 건다 — 층에서는 그 항목이 안 서고, 켜진 것이 하나도
+            // 없는 `SPC s`·`SPC c` 는 묶음째 안 선다(`menu::live`). `SPC v` 는 상세 칸·원문이 남아 선다.
             Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer => Err(Off::Quiet),
             // 상세를 숨기면 갈 칸이 하나뿐이라 Tab 은 아무 일도 안 하고, 원문↔그리기는 상세의
             // 글에만 걸리므로(`draw::about` 의 `app.raw`) 눌러도 화면이 그대로다. **눌러도 아무
@@ -1562,7 +1565,7 @@ mod tests {
 
     /// 도움말에서 키 이름으로 읽히는 낱말을 전부 뽑는다 — (적힌 낱말, 키 열).
     ///
-    /// **띄어 적은 열(`SPC t w`·`g p`)을 한 낱말로 묶는다**: 어느 표에서 접두어로 읽히는 낱말 뒤에
+    /// **띄어 적은 열(`SPC v w`·`g p`)을 한 낱말로 묶는다**: 어느 표에서 접두어로 읽히는 낱말 뒤에
     /// 한 글자 낱말이 이어지면, 열이 접두어인 동안 붙인다. `.` 은 그 자체로 키다(고르기 창의 숨은 것)
     /// — **띄어 쓴 자리에 홀로 선** `` `.` `` 만 키로 읽는다. 문장 끝의 `.` 은 떼고, `줄).` 처럼 괄호
     /// 뒤에 남은 `.` 도 키가 아니다 — 그것까지 읽으면 도움말이 `.` 을 안 대도 시험이 지나간다.
