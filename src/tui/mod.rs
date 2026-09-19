@@ -2035,6 +2035,7 @@ impl App {
     /// 검색을 풀 때 커서가 설 이웃을 **보기를 안 건 차례**에서 찾으려고 따로 둔다([`Self::after_search`]).
     fn rows_where(&self, keep: &dyn Fn(usize) -> bool) -> Vec<Row> {
         let mut rows: Vec<Row> = Vec::new();
+        let found_under = self.searched_open(keep);
         // **`..` 은 디렉터리에만 선다**(moai-i784). 프로젝트 뿌리에 한 줄 더 세워 층으로
         // 올려 보내던 길은 걷었다 — 층으로 가는 길은 헤더의 `0` 하나다(사용자 결정).
         // 길이 둘이면 뿌리의 `..` 이 디렉터리의 `..` 과 다른 데로 가, 같은 글자가 두 뜻을 진다.
@@ -2055,11 +2056,37 @@ impl App {
                         &self.cfg.statuses,
                         self.cfg.naming,
                     )
-                }, &|under| self.expanded.contains(under))
+                }, &|under| self.expanded.contains(under) || found_under.contains(under))
                 .into_iter()
                 .map(|(e, twig)| Row::Item(e, twig)),
         );
         rows
+    }
+
+    /// **검색이 맞힌 줄을 품은 자리는 저절로 열린다**(moai-i5io, 사용자 결정) — 접힌 묶음
+    /// 안에서 맞은 줄은 목록에 폴더 한 줄로만 서서, 무엇이 걸렸는지 보려면 사람이 들어가야 했다.
+    /// 검색은 보기가 숨긴 줄까지 찾으므로(moai-qnkn) 그 줄이 어디 있는지를 화면이 말해야 한다.
+    ///
+    /// **거름망(`SPC f`)은 안 연다.** 거름망은 오래 걸어 두고 폴더를 돌아다니는 것이라(Esc 가
+    /// 안 푸는 보기와 한 자리다) 저절로 열면 `status=todo` 한 줄에 저장소 전체가 펼쳐진다.
+    /// 검색은 한 줄을 찾는 일이라 반대다.
+    fn searched_open(&self, keep: &dyn Fn(usize) -> bool) -> std::collections::HashSet<Path> {
+        let mut open = std::collections::HashSet::new();
+        if !self.searching() {
+            return open;
+        }
+        // 맞은 줄의 **조상 자리 전부**. 맞은 줄만 세면 두 층 밑의 줄은 가운데 폴더가 닫힌 채라
+        // 여전히 안 보인다.
+        for at in 0..self.issues.len() {
+            if !keep(at) {
+                continue;
+            }
+            let home = self.index.home_of(at);
+            for depth in 1..=home.len() {
+                open.insert(home[..depth].to_vec());
+            }
+        }
+        open
     }
 
     /// 커서가 선 묶음의 자리 — 그 줄을 펼치면 멤버가 이 자리에서 온다. 묶음이 아니면 없다.
@@ -3051,7 +3078,8 @@ mod tests {
         let mut a = veiled_app();
         search(&mut a, "argos-0005");
         a.hit("Enter");
-        assert_eq!(row_ids(&a), ["argos-0002"], "시험의 전제 — 숨은 에픽이 폴더로 선다");
+        // 숨은 에픽이 폴더로 서고, 검색이 맞힌 멤버가 그 밑에 딸려 선다(moai-i5io).
+        assert_eq!(row_ids(&a), ["argos-0002", "argos-0005"], "시험의 전제");
         a.hit("Enter");
         assert_eq!(row_ids(&a), ["argos-0005"]);
         a.hit("Esc");
@@ -3122,7 +3150,8 @@ mod tests {
         let issues = vec![make("argos-0001", Kind::Epic), parent, make("argos-0020.a1b", Kind::Issue)];
         let mut a = App::new(issues, cfg(), Path::new());
         search(&mut a, "argos-0020");
-        assert_eq!(row_ids(&a), ["argos-0020"], "시험의 전제 — 끝난 부모가 폴더로 선다");
+        // 끝난 부모가 폴더로 서고, id 가 그 id 로 시작하는 자식도 검색에 걸려 그 밑에 선다.
+        assert_eq!(row_ids(&a), ["argos-0020", "argos-0020.a1b"], "시험의 전제");
         let marked = a.rows().iter().filter(|r| matches!(r, Row::Item(e, _) if a.unveiled(e))).count();
         assert_eq!((marked, a.unveiled_count()), (0, 0));
     }
@@ -3785,6 +3814,47 @@ mod tests {
         assert_eq!(a.look_now(), before, "펼침이 설정에 실렸다");
     }
 
+    /// **검색은 맞힌 줄의 자리를 저절로 열고, 거름망은 안 연다**(moai-i5io, 사용자 결정).
+    ///
+    /// 검색은 한 줄을 찾는 일이라 그 줄이 어디 있는지를 화면이 말해야 한다. 거름망은 오래 걸어
+    /// 두고 폴더를 돌아다니는 것이라(Esc 가 안 푸는 보기와 한 자리다) 저절로 열면 `type=issue`
+    /// 한 줄에 저장소 전체가 펼쳐진다.
+    #[test]
+    fn a_search_opens_the_groups_it_matched_but_a_filter_does_not() {
+        let mut a = app();
+        a.hit("SPC f");
+        typed(&mut a, "type=issue");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0009"], "거름망이 에픽을 펼쳤다");
+
+        let mut a = app();
+        search(&mut a, "argos-0004");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0004"], "검색이 맞힌 자리를 안 열었다");
+        // 검색을 풀면 도로 접힌다 — 펼침은 `expanded` 에 안 쌓인다.
+        a.hit("Esc");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0009"]);
+    }
+
+    /// **펼친 하위도 거름망·보기를 그대로 통과한 것만 선다**(moai-i5io, 사용자 결정) — 층마다 같은
+    /// 자다([`crate::nav::Index::entries_tree`]). 정렬은 형제끼리만 매긴다: 멤버가 부모를 넘어
+    /// 올라가면 가지가 무엇에 달렸는지 알 수 없다.
+    #[test]
+    fn the_filter_and_the_order_reach_every_level_of_the_tree() {
+        let mut is = vec![make("argos-0001", Kind::Epic), member("argos-0003", "argos-0001"), member("argos-0004", "argos-0001")];
+        is[1].status = Status::new("done");
+        // 멤버의 우선순위를 에픽보다 세게 둔다 — 형제끼리만 매기면 에픽 밑에 그대로 남는다.
+        is[2].priority = Some(0);
+        let mut a = App::new(is, cfg(), Path::new());
+        a.key(key(KeyCode::Char('l')));
+        // 처음에는 done 을 숨긴다(moai-fmv5) — 펼친 멤버에도 그 보기가 그대로 걸린다.
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0004"], "done 숨김이 펼친 멤버에 안 걸렸다");
+        a.hit("SPC v d");
+        // 형제끼리의 차례는 고른 정렬이 매긴다 — p0 인 0004 가 0003 앞이다.
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0004", "argos-0003"], "done 을 켰는데 멤버가 안 선다");
+        a.hit("SPC s p");
+        let ids = row_ids(&a);
+        assert_eq!(ids[0], "argos-0001", "멤버가 부모를 넘어 올라갔다: {ids:?}");
+    }
+
     /// **`h` 는 접기고, 접을 것이 없으면 나간다**(moai-7qot) — 그래서 목록 포커스를 탄다.
     /// 펼침(`l`)은 [`App::expanded`] 를 건드리므로 자리를 안 옮긴다.
     #[test]
@@ -4209,10 +4279,10 @@ mod tests {
         assert_eq!(a.mode, Mode::Browse);
         assert_eq!(a.filter_text.as_deref(), Some("/0004"));
 
-        // 뿌리에는 그것을 품은 에픽만 남는다
+        // **뿌리에 그것을 품은 에픽이 서고, 걸린 줄이 그 밑에 딸려 선다**(moai-i5io) — 검색이
+        // 맞힌 자리는 저절로 열린다. 들어가서 보는 목록도 같은 줄이다.
         let ids = shown(&a);
-        assert_eq!(ids, ["argos-0001"], "{ids:?}");
-        // 그 안에 걸린 것이 있다
+        assert_eq!(ids, ["argos-0001", "argos-0004"], "{ids:?}");
         a.key(key(KeyCode::Enter));
         assert_eq!(shown(&a), ["argos-0004"]);
     }
@@ -4228,7 +4298,8 @@ mod tests {
             a.key(key(KeyCode::Char(c)));
         }
         assert_eq!(a.filter_text.as_deref(), Some("/0004"), "치는 동안 안 걸렸다");
-        assert_eq!((shown(&a), a.hit_count()), (vec!["argos-0001".to_string()], 1));
+        // 걸린 줄은 그것을 품은 에픽 밑에 딸려 선다(moai-i5io) — 셈은 여전히 걸린 줄 하나다.
+        assert_eq!((shown(&a), a.hit_count()), (vec!["argos-0001".to_string(), "argos-0004".to_string()], 1));
         a.key(key(KeyCode::Esc));
         assert_eq!(a.filter_text.as_deref(), Some("type=epic"), "Esc 가 열기 전 거름망을 못 돌렸다");
         assert_eq!(shown(&a), ["argos-0001", "argos-0002"]);

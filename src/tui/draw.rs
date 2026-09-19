@@ -5898,7 +5898,8 @@ pub(super) mod tests {
         assert!(lines.contains(" 보기에 가려 비었다 "), "검색을 풀었는데 설정된 보기로 안 돌아갔다: {lines}");
     }
 
-    /// **평소 보이는 줄에는 `숨김` 을 안 단다** — 검색 중에도.
+    /// **평소 보이는 줄에는 `숨김` 을 안 단다** — 검색 중에도. 그 줄 밑에 딸려 선 줄은 저마다
+    /// 잰다(moai-i5io): 검색이 맞혀 저절로 열린 폴더 밑에서 보기가 숨긴 줄은 `숨김` 이 맞다.
     #[test]
     fn a_search_leaves_plain_rows_unmarked() {
         let mut a = App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
@@ -5908,8 +5909,11 @@ pub(super) mod tests {
         }
         let lines = render(&mut a, 100, 12).join("\n");
         let rows: Vec<&str> = lines.lines().filter(|l| l.starts_with('┃')).collect();
-        assert!(rows.iter().any(|l| l.contains("argos-0001")), "시험의 전제 — 보이는 에픽이 검색에 걸린다: {lines}");
-        assert!(!rows.iter().any(|l| l.contains("숨김")), "보이던 줄에 `숨김` 을 달았다: {lines}");
+        let epic: Vec<&&str> = rows.iter().filter(|l| l.contains("argos-0001")).collect();
+        assert!(!epic.is_empty(), "시험의 전제 — 보이는 에픽이 검색에 걸린다: {lines}");
+        assert!(epic.iter().all(|l| !l.contains("숨김")), "보이던 줄에 `숨김` 을 달았다: {lines}");
+        // 그 밑에 딸려 선 done 멤버는 검색이 드러낸 줄이라 `숨김` 이 붙는다.
+        assert!(rows.iter().any(|l| l.contains("argos-0003") && l.contains("숨김")), "드러난 멤버에 `숨김` 이 없다: {lines}");
     }
 
     /// **`숨김` 도 머리를 걷는 셈에 든다**(moai-qnkn 에픽 리뷰). 제목 뒤의 `숨김` 은 좁아도 안 걷히는데, 머리를
