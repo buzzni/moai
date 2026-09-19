@@ -908,7 +908,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 매 프레임 지었다(moai-wt4n). 줄의 머리 폭과 셈 글만 있으면 걷힐 열이 정해진다.
     let common = rows.iter().zip(&tallies).fold(app.fields, |common, (r, t)| match r {
         Row::Item(e) => match e.at() {
-            Some(at) => common.both(right_fit(app.fields, head_width(app, at, app.fields, cols), t, inner)),
+            Some(at) => common.both(right_fit(app.fields, head_width(app, at, app.fields, cols) + trail_width(app, e), t, inner)),
             None => common,
         },
         Row::Up | Row::Project(_) => common,
@@ -1148,6 +1148,12 @@ fn row_line<'a>(
     debug_assert_eq!(head_w, head_width(app, at, fields, cols), "머리 폭 셈이 줄과 갈렸다");
     // 셈(`tally`, [`tally_of`])은 **제목보다 먼저 자리를 얻는다** — 긴 제목에 밀려 잘리면 진척을
     // 말하는 것이 사라진다.
+    // **검색이 드러낸 숨은 줄**(moai-4x87, 사용자 결정) — 제목 뒤에 `숨김` 을 달고 줄을 흐린다. 뜻은
+    // 낱말이 진다: 흐림이 안 서는 터미널에서도 검색을 풀면 이 줄이 도로 숨는다는 것이 읽힌다. 자리는
+    // 제목보다 먼저 얻는다 — 긴 제목에 밀려 잘리면 까닭 없이 흐린 줄만 남는다. 좁아도 안 걷히므로 오른쪽 열을
+    // 걷는 셈(`right_fit`)과 머리를 걷는 셈(`Head::of`)이 함께 잰다([`trail_width`]).
+    let unveiled = app.unveiled(e);
+    let tail = if unveiled { UNVEILED_MARK } else { "" };
     // **오른쪽 열**(moai-g7p8) — 태그·담당·생성·수정. 줄마다 폭을 고정해 여러 줄을 한 줄로 훑어
     // 내려갈 수 있게 한다(셈을 오른쪽 정렬한 까닭과 같다). 담당·날짜가 없으면 `—` 로, 태그가 없으면
     // 빈칸으로 자리를 지킨다 — 태그 없는 줄이 흔해 `—` 가 줄마다 서면 눈이 거기 걸린다.
@@ -1155,7 +1161,7 @@ fn row_line<'a>(
     // **폭은 `RIGHT` 하나가 정한다** — 줄과 이름 줄이 같은 자를 써야 맨 위의 이름이 값과 맞는다.
     // **날짜도 채운다**: `created_at` 이 짧으면(읽기는 관대하다) `+—` 두 칸으로 서서 그 줄만 오른쪽
     // 열이 네 칸 밀린다 — 고정 폭의 까닭이 그 줄에서 사라진다.
-    let kept = right_fit(fields, head_w, tally, budget);
+    let kept = right_fit(fields, head_w + crate::text::width(tail), tally, budget);
     let cells: Vec<(Field, String)> = RIGHT
         .into_iter()
         .filter(|(f, _, _)| kept.shows(*f))
@@ -1190,11 +1196,6 @@ fn row_line<'a>(
         head_w = head_w - crate::text::width(&head[glyph_at].content) + crate::text::width(&still);
         head[glyph_at] = Span::styled(still, glyph_style(app.column(at)));
     }
-    // **검색이 드러낸 숨은 줄**(moai-4x87, 사용자 결정) — 제목 뒤에 `숨김` 을 달고 줄을 흐린다. 뜻은
-    // 낱말이 진다: 흐림이 안 서는 터미널에서도 검색을 풀면 이 줄이 도로 숨는다는 것이 읽힌다. 자리는
-    // 제목보다 먼저 얻는다 — 긴 제목에 밀려 잘리면 까닭 없이 흐린 줄만 남는다.
-    let unveiled = app.unveiled(e);
-    let tail = if unveiled { UNVEILED_MARK } else { "" };
     let used = crate::text::width(CURSOR) + head_w + crate::text::width(&right) + crate::text::width(tail);
     let mut title = clip(&app.index.label(&app.issues, e), budget.saturating_sub(used));
     // **디렉터리 표시는 자른 뒤에 붙인다.** 먼저 붙이면 긴 제목에서 `/` 가
@@ -1248,6 +1249,14 @@ fn row_line<'a>(
 
 /// 검색이 드러낸 숨은 줄의 꼬리(moai-4x87). 앞 빈칸까지 한 몸이다 — 제목 몫을 셀 때 함께 뺀다.
 const UNVEILED_MARK: &str = "  숨김";
+
+/// 제목 **뒤에** 줄마다 붙어 좁아도 안 걷히는 것의 폭 — 검색이 드러낸 숨은 줄의 `숨김`([`UNVEILED_MARK`]).
+/// 머리를 걷는 셈(`Head::of`)과 오른쪽 열을 걷는 셈(`right_fit`)이 [`lead_extras`] 처럼 함께 재야 한다 —
+/// 모르면 숨은 에픽 줄에서만 머리가 남아 진척 셈이 말없이 잘리고(moai-wilg 가 걷은 그 실패), 제목은
+/// [`TITLE_MIN`] 을 못 받는다.
+fn trail_width(app: &App, e: &Entry) -> usize {
+    if app.unveiled(e) { crate::text::width(UNVEILED_MARK) } else { 0 }
+}
 
 /// 줄 머리의 폭 — 커서 뒤, 제목 앞. id·우선순위(목록이 정한 폭), 두 칸 글리프와 빈칸, 그리고 `[NEW]`·
 /// `⎇ <가지>`. **줄을 짓지 않고 잰다** — 오른쪽 열을 걷는 셈(`right_fit`)이 창 밖 줄까지 봐야 하는데 그
@@ -1404,7 +1413,7 @@ impl Head {
     /// `tallies` 는 `rows` 와 같은 차례의 셈([`tally_of`])이다.
     fn of(app: &App, rows: &[Row], tallies: &[String], budget: usize, fields: super::view::Fields) -> Head {
         let mut w = Head::default();
-        // 머리 뒤에 줄마다 붙어 안 걷히는 것(`[NEW]`·`⎇ <가지>`, 셈과 그 앞 두 칸)의 가장 긴 폭.
+        // 머리 뒤에 줄마다 붙어 안 걷히는 것(`[NEW]`·`⎇ <가지>`, 제목 뒤의 `숨김`, 셈과 그 앞 두 칸)의 가장 긴 폭.
         let mut tail = 0;
         for (r, tally) in rows.iter().zip(tallies) {
             let Row::Item(e) = r else { continue };
@@ -1415,7 +1424,7 @@ impl Head {
             let p = i.priority();
             w.priority = w.priority.max(1 + if p >= 100 { 3 } else if p >= 10 { 2 } else { 1 });
             let tally = if tally.is_empty() { 0 } else { 2 + crate::text::width(tally) };
-            tail = tail.max(lead_extras(app, at, fields) + tally);
+            tail = tail.max(lead_extras(app, at, fields) + trail_width(app, e) + tally);
         }
         // **좁으면 우선순위 → id 차례로 걷는다**(moai-wilg, 사용자 결정 2026-09-18). 오른쪽 열과
         // 스피너는 걷을 줄 알았지만 머리는 아무리 좁아도 안 걷혀, 폭 40 의 에픽 줄에서 진척 셈이
@@ -5792,8 +5801,10 @@ pub(super) mod tests {
         let lines = render(&mut a, 100, 12).join("\n");
         assert!(lines.contains("2건 · 숨김 2건 포함"), "{lines}");
         assert!(!lines.contains("비었다"), "검색이 보기가 숨긴 줄을 못 찾았다: {lines}");
-        let marked: Vec<&str> = lines.lines().filter(|l| l.contains("멤") && l.contains("숨김")).collect();
-        assert!(!marked.is_empty(), "드러난 줄에 `숨김` 이 안 붙었다: {lines}");
+        // **목록의 줄에서 찾는다** — 경로 줄(`[done 숨김] [/멤]`)과 검색 칸(`멤 … 숨김 2건`)도 두 낱말을 다 들어,
+        // 줄 전체에서 찾으면 줄에 `숨김` 이 안 붙어도 초록이다. 뿌리에 선 것은 걸린 멤버를 품은 끝난 에픽이다.
+        let marked: Vec<&str> = lines.lines().filter(|l| l.starts_with('┃') && l.contains("argos-0001")).collect();
+        assert!(!marked.is_empty() && marked.iter().all(|l| l.contains("숨김")), "드러난 줄에 `숨김` 이 안 붙었다: {lines}");
         a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         let lines = render(&mut a, 100, 12).join("\n");
         assert!(!lines.contains("비었다"), "Enter 로 칸을 닫자 검색이 걸렸는데도 보기가 도로 가렸다: {lines}");
@@ -5814,6 +5825,51 @@ pub(super) mod tests {
         let rows: Vec<&str> = lines.lines().filter(|l| l.starts_with('┃')).collect();
         assert!(rows.iter().any(|l| l.contains("argos-0001")), "시험의 전제 — 보이는 에픽이 검색에 걸린다: {lines}");
         assert!(!rows.iter().any(|l| l.contains("숨김")), "보이던 줄에 `숨김` 을 달았다: {lines}");
+    }
+
+    /// **`숨김` 도 머리를 걷는 셈에 든다**(moai-qnkn 에픽 리뷰). 제목 뒤의 `숨김` 은 좁아도 안 걷히는데, 머리를
+    /// 걷는 셈(`Head::of`)이 그것을 모르면 검색이 드러낸 에픽 줄에서만 머리가 남아 셈 `2/2` 가 다시 말없이
+    /// 잘린다(moai-wilg 가 걷은 실패). 폭은 하나도 안 건너뛴다.
+    #[test]
+    fn a_narrow_unveiled_epic_still_keeps_its_tally() {
+        let mut finished = issues();
+        for i in &mut finished {
+            i.status = Status::new("done");
+        }
+        let mut a = App::new(finished, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.fields.set(super::super::view::Field::Names, false);
+        a.see();
+        for c in "/argos".chars() {
+            a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let mut compared = 0;
+        for width in 20u16..=200 {
+            let lines: Vec<String> = render(&mut a, width, 16)
+                .into_iter()
+                .map(|l| l.split('│').next().unwrap_or_default().to_string())
+                .collect();
+            let Some(inner) = lines
+                .iter()
+                .find(|l| l.starts_with('┏'))
+                .and_then(|l| l.find('┓').map(|end| crate::text::width(&l[..end]).saturating_sub(1)))
+            else {
+                continue;
+            };
+            // 커서 두 칸, 멈춘 글리프와 빈칸, 제목 한 글자와 `/`, `숨김` 과 그 앞 두 칸, 셈 앞 두 칸과 `2/2`.
+            let least = crate::text::width(CURSOR) + 2 + 2 + crate::text::width(UNVEILED_MARK) + 2 + "2/2".len();
+            if inner < least {
+                continue;
+            }
+            let screen = lines.join("\n");
+            let epic = lines
+                .iter()
+                .find(|l| l.contains("숨김") && l.starts_with('┃'))
+                .unwrap_or_else(|| panic!("@{width} 드러난 에픽 줄에 `숨김` 이 없다(칸 안쪽 {inner})\n{screen}"));
+            assert!(epic.contains("2/2"), "@{width} 드러난 에픽 줄의 셈이 잘렸다(칸 안쪽 {inner})\n{screen}");
+            compared += 1;
+        }
+        assert!(compared > 0, "드러난 에픽 줄을 한 번도 견주지 못했다 — 훑기가 헛돈다");
     }
 
     /// 빈 저장소도 그려진다.
