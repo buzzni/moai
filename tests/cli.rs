@@ -3439,6 +3439,39 @@ fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
     assert!(!out.contains(&member), "이미 읽은 줄을 다시 적었다 — {out}");
 }
 
+/// **읽음은 본 때가 아니라 본 줄의 `updated_at` 을 적는다**(moai-lyc1, 사용자 결정 2026-09-19). 본 때를
+/// 적던 때는 워크트리 가지에서 01:30 에 고치고 03:00 에 머지한 줄을 02:00 에 읽었으면 [NEW] 가 영영 안
+/// 섰다 — 이 저장소의 평소 흐름이다. 견주는 식은 `>` 그대로라, 옛 바이너리가 적은 본 때는 옛 뜻대로
+/// 읽혀 업그레이드가 [NEW] 를 한꺼번에 세우지 않는다.
+#[test]
+fn reading_writes_the_stamp_of_the_line_i_saw() {
+    let s = init("readstamp");
+    let cfg = s.path().join("user.toml");
+    let at = |when: &str, args: &[&str]| {
+        let out = staged(args).current_dir(s.path()).env("MOAI_CONFIG", &cfg).env("MOAI_NOW", when).output().unwrap();
+        assert!(out.status.success(), "moai {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let id = field(&at("2026-09-18T00:00:00Z", &["add", "워크트리에서 고칠 줄", "--json"]), "id");
+
+    // 02:00 에 읽는다 — 적히는 것은 그 줄의 도장(00:00)이다.
+    at("2026-09-18T02:00:00Z", &["read", &id]);
+    let saved = std::fs::read_to_string(&cfg).unwrap();
+    assert!(saved.contains(&format!("\"{id}\" = \"2026-09-18T00:00:00Z\"")) || saved.contains(&format!("{id} = \"2026-09-18T00:00:00Z\"")), "{saved}");
+
+    // 가지에서 01:30 에 찍힌 고침이 머지로 들어온다 — 읽은 때(02:00)보다 이르지만 본 줄과 다르다.
+    at("2026-09-18T01:30:00Z", &["edit", &id, "--tag", "merged"]);
+    let out = at("2026-09-18T03:00:00Z", &["read", "--all", "--json"]);
+    assert!(out.contains(&id), "머지로 들어온 고침에 [NEW] 가 안 섰다 — {out}");
+
+    // 옛 값(본 때, 도장보다 늦다)은 옛 뜻대로 읽는다 — 그 뒤로 안 바뀐 줄은 안 읽음이 아니다.
+    let old = field(&at("2026-09-18T04:00:00Z", &["add", "옛 바이너리로 읽은 줄", "--json"]), "id");
+    let text = std::fs::read_to_string(&cfg).unwrap();
+    std::fs::write(&cfg, format!("{text}\"{old}\" = \"2026-09-18T05:00:00Z\"\n")).unwrap();
+    let out = at("2026-09-18T06:00:00Z", &["read", "--all", "--json"]);
+    assert!(!out.contains(&old), "옛 값으로 읽은 줄이 다시 [NEW] 로 섰다 — {out}");
+}
+
 /// **`-e` 는 그 묶음 밑에 그려진 것만 적는다**(moai-j038.vna) — 트리·`show -e`·탐색기의 `SPC m r` 과 같은
 /// 자(`nav::Index::under_group`)다. id 조상을 따로 훑던 때는 `moai epic add --parent <바깥>` 으로 선 안쪽
 /// 에픽과 **그 멤버 절반**(id 로 선 것만)을, `--parent <바깥> -e <남>` 으로 남의 에픽에 든 자식까지 적었다 —

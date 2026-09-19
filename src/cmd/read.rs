@@ -1,8 +1,9 @@
 //! 읽었다고 표시한다(moai-u8oh).
 //!
 //! **트래커에 안 쓴다.** 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에 적으면 읽기만 해도
-//! 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다. 내 설정의 `[read]` 표에 **이슈 id → 지금**을
-//! 적는다(사용자 결정 2026-09-15) — 그 뒤에 줄이 바뀌면 다시 안 읽음이 된다.
+//! 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다. 내 설정의 `[read]` 표에 **이슈 id → 본 줄의
+//! `updated_at`** 을 적는다(사용자 결정 2026-09-15, 값은 2026-09-19 에 본 때에서 바꿨다 — moai-lyc1) —
+//! 그 뒤에 줄이 바뀌면 다시 안 읽음이 된다.
 //!
 //! **읽음은 시키는 때만 선다.** `show` 로 열었다고, 탐색기에서 커서가 지나갔다고 서지 않는다 —
 //! 스치듯 지나간 것을 읽었다고 적으면 이 표시가 곧 아무 말도 안 하게 된다.
@@ -73,12 +74,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         Vec::new()
     } else {
         crate::user_config::update(&path, |doc| {
-            let on_file = doc.read_marks().0;
-            let marks: BTreeMap<String, String> = targets
-                .values()
-                .filter(|i| crate::query::changed_since_seen(i, &on_file))
-                .map(|i| (i.id.clone(), now.clone()))
-                .collect();
+            let marks = crate::query::read_marks_of(targets.values().copied(), &doc.read_marks().0);
             doc.mark_read(&marks)
         })?
     };
@@ -107,5 +103,6 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
 struct Marked<'a> {
     read: &'a [String],
     missing: &'a [String],
+    /// 이 명령이 돈 때다. `[read]` 에 적힌 값이 아니다 — 그것은 줄마다 본 줄의 `updated_at` 이다(moai-lyc1).
     at: &'a str,
 }
