@@ -5168,3 +5168,5 @@
 {"ts":"2026-09-19T00:53:04Z","id":"moai-b3o5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-qnkn 로 펼쳤다 (이슈 3건)"}
 {"ts":"2026-09-19T00:53:11Z","id":"moai-qnkn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"## 사용자 결정 (2026-09-19)\n\n- 드러낼 범위: 보기(SPC v)가 숨긴 것 전부. 숨긴 칸(done 등)과 미룬 것 모두. idea 는 지금도 `/` 에 걸린다\n- 줄 표시: 흐리게 그리고 제목 뒤에 `숨김` 낱말을 단다. 색만으로 뜻을 지지 않는다\n- 검색 기간: 검색 결과가 걸린 동안이다. Enter 로 칸을 닫아도 `/` 결과가 목록에 있으면 계속 보인다. 검색을 풀면(Esc·ClearFilter) 설정된 보기로 돌아간다\n- 커서: 검색을 풀었을 때 커서 줄이 보기에 다시 가려지면 가장 가까운 보이는 줄로 옮기고 `<id> 는 보기에 가려졌다 · SPC v a` 알림을 한 줄 낸다\n- 검색은 보기 설정을 바꾸지도 저장하지도 않는다"}
 {"ts":"2026-09-19T00:53:12Z","id":"moai-wkb8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T00:53:17Z","id":"moai-4x87","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T00:53:17Z","id":"moai-gwmc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
