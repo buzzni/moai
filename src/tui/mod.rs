@@ -651,6 +651,10 @@ pub struct App {
     /// `trouble` 과 **따로 든다.** 쓰기 뒤 다시 읽기가 실패하면 둘이 함께 참이다 —
     /// 파일에는 담겼고 화면은 못 읽었다. 한 칸에 담으면 어느 한쪽이 거짓말을 한다.
     pub notice: Option<String>,
+    /// 상세에 선 본문을 펼쳐 둔 한 벌(moai-fauw, [`draw::Body`]) — **그리기 전에** `draw::fill_body`
+    /// 가 채운다. 그리는 쪽은 `&App` 만 빌려 제자리에서 못 넣고, 안 넣으면 프레임마다 같은 본문을
+    /// 다시 판다. 값일 뿐이라 비어 있어도 그림은 같다 — 그때는 그리는 쪽이 그 자리에서 편다.
+    body: Option<draw::Body>,
     /// 사용자 설정을 못 읽어 **층을 안 세운** 까닭. 층이 서면 층이 제 `problems` 를 대므로
     /// 층이 없을 때만 든다. 붙박이다 — 다시 읽기가 걷는 `trouble` 에 두면 700ms 뒤에
     /// 사라져 사람은 층이 왜 없는지 끝내 모른다. 설정 파일이 바뀌면 걸음이 다시 읽어([`App::follow_config`])
@@ -1051,6 +1055,7 @@ impl App {
             unlayered: None,
             write_failed: false,
             notice: None,
+            body: None,
             user: None,
             identify: crate::model::actor,
             header_user: None,
