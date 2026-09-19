@@ -5686,3 +5686,5 @@
 {"ts":"2026-09-19T22:45:06Z","id":"moai-4qbv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: moai-po6v 하나가 첫 칸에 남았다 — 쭉 못 읽는 설정 앞에서 탐색기가 멈추는가 비는가 지난 것을 들고 서는가를 사람이 정한 뒤에 집는다. 나머지 셋과 리뷰는 d50fbc4 로 develop 에 들었다"}
 {"ts":"2026-09-19T22:45:58Z","id":"moai-f31d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"막음을 풀었다 — moai-4qbv 가 d50fbc4 로 병합돼 src/user_config.rs 가 비었다. 그 에픽에 첫 칸 멤버(moai-po6v)가 남아 열려 있지만 파일을 쥐고 있지는 않다."}
 {"ts":"2026-09-19T22:46:14Z","id":"moai-pz7h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T22:46:19Z","id":"moai-x2vs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T22:46:19Z","id":"moai-g33x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
