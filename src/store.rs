@@ -678,6 +678,29 @@ impl Lock {
             }
         }
     }
+
+    /// 이 락이 쥔 파일이 `path` 와 **한 파일**인가 — 철자가 아니라 파일로 견준다(unix 의 장치·아이노드). `path` 가
+    /// 없으면 거짓이다. unix 밖에서는 견줄 길이 없어 `None` 이다.
+    ///
+    /// 같은 프로세스가 한 파일에 `flock` 을 두 번 잡으면 둘째가 첫째를 기다려 `locked` 로 물러난다. 위 디렉터리나 락
+    /// 파일 자체가 링크이거나, 하드 링크이거나, 대소문자를 안 가르는 볼륨이면 철자가 달라도 한 파일이다 — 그것을
+    /// 가르는 자리다(`user_config::update`). 쥔 쪽은 **연 파일을 그대로** 재므로, 그 사이 그 이름이 다른 파일로
+    /// 갈아끼워져도 쥔 것을 헛짚지 않는다.
+    pub(crate) fn holds(&self, path: &Path) -> Option<bool> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            Some(match (self.0.metadata(), std::fs::metadata(path)) {
+                (Ok(held), Ok(other)) => (held.dev(), held.ino()) == (other.dev(), other.ino()),
+                _ => false,
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            None
+        }
+    }
 }
 
 impl Drop for Lock {
