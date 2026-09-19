@@ -165,12 +165,20 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 _ => (Vec::new(), Vec::new()),
             };
             let mine = |k: usize| !matches!(routes.get(k), Some(r) if *r != Route::Here);
+            // **내미는 줄은 그 토막이 겨눈 트래커를 댄다**(moai-v9sa, 사용자 결정) — 사람이 친 `-C` 의
+            // 글자가 아니라 [`route`] 가 푼 자리다. `Repo::find_from` 이 딸린 워크트리를 루트로 옮기니
+            // (moai-y7go) 거절문이 워크트리의 스냅샷을 겨누는 길이 닫히고, `moai -C .`·`cd src && moai -C ..`
+            // 처럼 어디서 쳤느냐에 따라 달라지는 상대 경로도 풀려 나온다.
+            let toward = |k: usize| match routes.get(k) {
+                Some(Route::There(n)) => there.get(*n).map(|r: &Repo| r.root.as_path()),
+                _ => None,
+            };
             let decision = settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
                 // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
                 // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
                 // (`Repo::find_from`) 고치는 파일은 이 워크트리의 것이다. `repo.root` 로 세던 판은
                 // 워크트리의 파일이 죄다 루트의 `.claude/worktrees/…` 밑으로 보여 규칙 2 가 통째로 꺼졌다.
-                Call::Shell(cmd) => crate::hook::guard_shell_in(issues, &repo.config, away, repo.here(), &cwd, cmd, &mine),
+                Call::Shell(cmd) => crate::hook::guard_shell_in(issues, &repo.config, away, repo.here(), &cwd, cmd, &mine, &toward),
                 Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, repo.here(), path),
                 Call::Review => crate::hook::guard_review(issues, &repo.config, away),
                 Call::Other => Decision::Pass,
@@ -184,7 +192,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                         let Ok(load) = other.read() else { return Decision::Pass };
                         let only = |k: usize| routes.get(k) == Some(&Route::There(n));
                         settle(input, other, &load.issues, away_of(other, &load.issues), &|issues, away| {
-                            crate::hook::guard_moai(issues, &other.config, away, cmd, &only)
+                            crate::hook::guard_moai(issues, &other.config, away, cmd, &only, &|_| Some(other.root.as_path()))
                         })
                     });
                 }
@@ -267,8 +275,10 @@ fn answer(event: Event, decision: Decision) -> Option<String> {
 /// 판정하되, **막으면 옆 워크트리와 겹쳐 한 번 더 본다**(moai-w2iy).
 ///
 /// 워크트리의 스냅샷은 main 에서 방금 세우고 집은 줄을 모른다 — 그것만 보고 막으면 시킨 대로
-/// 한 일이 막힌다. 겹쳐 봐도 막힐 때만 막고, 까닭은 제 스냅샷의 것을 낸다(고칠 명령이 이 자리의
-/// 트래커에 듣는다). **겹쳐 보기는 막을 때만 치른다** — 지나가는 호출은 전과 같은 값이다.
+/// 한 일이 막힌다. 겹쳐 봐도 막힐 때만 막고, **까닭은 마지막으로 다시 본 판의 것**이다
+/// (moai-15c2) — 겹친 줄과 모름을 함께 본 판이 지금 가장 참에 가깝다. 고칠 명령이 이 자리의
+/// 트래커에 듣는 것은 [`crate::hook::Toward`] 가 따로 지킨다.
+/// **겹쳐 보기는 막을 때만 치른다** — 지나가는 호출은 전과 같은 값이다.
 ///
 /// **다시 본 판정이 안 막으면 풀린 것이다** — 비추는 줄(`Context`)도 푼 답이라 그대로 낸다.
 /// `Pass` 만 풀린 것으로 치던 판은 `idea add` 하나를 곁들인 명령줄을 낡은 스냅샷의 거절로 도로
@@ -284,41 +294,43 @@ fn settle(
     if first == Decision::Pass {
         return first;
     }
-    if first.blocks()
-        && let Some((fresh, beside)) = crate::worktree::fresh(repo, issues.to_vec())
-    {
-        // **겹친 줄은 겹친 목록의 이름으로 잰다** — 옆 이름도 제 이름도 그 목록에서 읽는다(moai-m62u).
-        // `base` 는 제 스냅샷에 집은 줄이 없으면 워크트리를 안 읽어([`away_of`]) 제 이름이 비는데, 겹쳐
-        // 보는 까닭이 바로 그 스냅샷이 main 의 집기를 모를 때다 — 빈 이름으로 재던 판은 제 이름
-        // 워크트리의 멤버를 옆 에픽 워크트리에 넘겨 규칙 2 로 막았다(리뷰 moai-3k2d.1df).
-        let mut again = judge(&fresh, &beside);
-        if !again.blocks() {
-            // **겹쳐 보고 푼 답의 비추는 줄도 좁힌다**(리뷰 moai-3k2d.1df). 겹친 초점에는 옆 세션이 방금
-            // 집은 줄이 들어, 안 좁히면 `idea add` 에 비추는 물음이 남의 에픽을 대고 `idea promote -e
-            // <남의 에픽>` 을 시킨다 — 아래 좁힌 길이 막는 바로 그것이다. 좁혀서 막히면 넓은 답을 그대로
-            // 낸다: 좁힌 초점은 풀기만 한다.
-            if let Decision::Context(_) = again {
-                let mut narrow = beside;
-                if add_unsure(input, repo, &fresh, &mut narrow) {
-                    let narrowed = judge(&fresh, &narrow);
-                    if !narrowed.blocks() {
-                        again = narrowed;
-                    }
-                }
-            }
-            return again;
-        }
+    // **겹침과 모름을 한 판에 얹어 한 번 다시 본다**(moai-15c2, 사용자 결정). 따로 보던 판은 둘이
+    // 함께일 때 풀릴 것을 못 풀었다 — 겹친 줄의 판정은 모름을 안 뺐고, 모름을 뺀 판정은 낡은 제
+    // 스냅샷으로 쟀다. **겹친 줄은 겹친 목록의 이름으로 잰다** — 옆 이름도 제 이름도 그 목록에서
+    // 읽는다(moai-m62u). `base` 는 제 스냅샷에 집은 줄이 없으면 워크트리를 안 읽어([`away_of`]) 제
+    // 이름이 비는데, 겹쳐 보는 까닭이 바로 그 스냅샷이 main 의 집기를 모를 때다 — 빈 이름으로
+    // 재던 판은 제 이름 워크트리의 멤버를 옆 에픽 워크트리에 넘겨 규칙 2 로 막았다(리뷰
+    // moai-3k2d.1df). **겹쳐 보기는 막을 때만 치른다** — 비추기만 하는 답은 제 줄로 좁히기만 한다.
+    let overlaid = first.blocks().then(|| crate::worktree::fresh(repo, issues.to_vec())).flatten();
+    let seen = overlaid.is_some();
+    // **빌려 쓴다** — 겹치지 않은 판의 줄은 부르는 쪽의 것 그대로다. 통째로 베끼던 판은 막거나 비추는
+    // 호출마다 스냅샷 전체를 복제했고, 훅은 도구 호출마다 돈다.
+    let (rows, mut narrow): (std::borrow::Cow<'_, [model::Issue]>, _) = match overlaid {
+        Some((fresh, beside)) => (std::borrow::Cow::Owned(fresh), beside),
+        None => (std::borrow::Cow::Borrowed(issues), base),
+    };
+    // **겹쳐 보기만으로 풀리면 거기서 끝낸다** — 모름을 재는 값(옆 스냅샷을 다시 읽고 세션의 기록을
+    // 훑는 일)을 안 치른다. 겹치지 않은 판은 `first` 가 곧 이 답이라 다시 재지 않는다.
+    let wide = if seen { judge(&rows, &narrow) } else { first };
+    if wide == Decision::Pass {
+        return wide;
     }
-    // **누구의 것인지 모르는 줄을 빼고 한 번 더 본다**(moai-ntl6, 사용자 결정 B). 좁은 초점으로도
-    // 막히면 그 까닭을 낸다 — 옆 워크트리가 쥐었을 일을 초점으로 대지 않는다. **비추는 줄도 같은
-    // 자로 좁힌다** — 막지도 붙들지도 않기로 한 줄의 에픽을 제 물음으로 비추면, 그 세션을 남의
-    // 에픽에 세우는 길로 보낸다. 좁힌 초점은 풀기만 한다: 비추기만 하던 명령을 좁혀서 막지는 않는다.
-    let mut narrow = base;
-    if !add_unsure(input, repo, issues, &mut narrow) {
-        return first;
+    // **모르는 줄도 같은 판에서 뺀다**(moai-ntl6, 사용자 결정 B) — 옆 워크트리가 쥐었을 일을 초점으로
+    // 대지 않는다. **비추는 줄도 같은 자로 좁힌다** — 막지도 붙들지도 않기로 한 줄의 에픽을 제 물음으로
+    // 비추면, 그 세션을 남의 에픽에 세우는 길로 보낸다(`idea promote -e <남의 에픽>`).
+    let added = add_unsure(input, repo, &rows, &mut narrow);
+    if !added {
+        return wide;
     }
-    let again = judge(issues, &narrow);
-    if again.blocks() && !first.blocks() { first } else { again }
+    // 막히면 **그 판정의 까닭**을 낸다 — 겹친 줄과 모름을 함께 본 판이 지금 가장 참에 가깝다.
+    let again = judge(&rows, &narrow);
+    // **좁힌 초점은 풀기만 한다**: 덜 좁힌 판이 안 막는데 좁혀서 막으면 덜 좁힌 답을 낸다. 둘을 함께
+    // 본 판이 겹쳐 보기가 푼 것을 도로 막던 자리다 — 모름은 초점에서 빼기만 하고, 초점이 비면 규칙 2 가
+    // 막는다. 사용자 결정 moai-4jsy 의 "새로 막는 일은 없다" 가 여기에도 선다.
+    //
+    // **`first` 를 따로 다시 대지 않는다** — `first` 가 안 막으면 겹쳐 보지도 않아(`first.blocks()`)
+    // `wide` 가 곧 `first` 다. 두 자로 적던 판은 같은 것을 두 번 물었다.
+    if again.blocks() && !wide.blocks() { wide } else { again }
 }
 
 /// **옆 워크트리가 쥔 일은 제 초점이 아니다** (`hook::held`). 워크트리 목록은 집은 것이 있을 때만
