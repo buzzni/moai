@@ -5577,3 +5577,4 @@
 {"ts":"2026-09-19T15:00:32Z","id":"moai-2h77.5wn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"2건 다 반영했다(49ef52b) — 사람 화면의 todo 단언을 --json status 로 바꿨고, tool_here 가 베낀 입력 JSON 을 tool_input 하나로 모았다. 넘긴 것 없음"}
 {"ts":"2026-09-19T15:00:32Z","id":"moai-xj7t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-19T15:00:32Z","id":"moai-ts32","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-19T15:00:49Z","id":"moai-2h77","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — 멤버 둘(moai-xj7t·moai-ts32)과 에픽 끝 리뷰 moai-2h77.5wn 을 715e23a 로 병합하고 닫았다. 남은 멤버·idea 없음"}
