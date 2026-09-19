@@ -343,17 +343,21 @@ fn closes(text: &str, at: usize, open: Option<u8>, shut: u8) -> Option<usize> {
 /// 아니라 명령줄이라, 렉서가 다시 읽어야 규칙이 본다([`Lexer::relex`]).
 ///
 /// `-c` 뒤의 한 낱말만 글이다(그 뒤는 `$0`·`$1`). `eval` 은 인자를 공백으로 이어 붙인 것이 글이다 —
-/// 셸이 그렇게 한다. 곁의 참은 **그 글이 새 셸에서 도는가**다 — `eval` 은 지금 셸에서 돈다.
+/// 셸이 그렇게 한다. 곁에 **그 글이 새 셸에서 도는가**(`eval` 은 지금 셸이다)와 **띄울 때 이미
+/// errexit 가 켜졌는가**를 함께 낸다.
 ///
 /// **옵션이 아닌 낱말에서 멈춘다** — 셸도 그렇다. 끝까지 훑던 판은 `bash 스크립트.sh -c '…'` 의
 /// `-c` 를 명령 글로 읽어, 셸이 스크립트의 인자로만 넘기는 글을 규칙에 비췄다(잘못 막음,
 /// 리뷰 moai-p836.rv).
-fn shell_text(words: &[String]) -> Option<(String, bool)> {
+fn shell_text(words: &[String]) -> Option<Handed> {
     let cmd = command_of(words);
     let (head, rest) = cmd.split_first()?;
     match basename(head) {
         "bash" | "sh" | "zsh" | "dash" | "ksh" => {
             let mut it = rest.iter();
+            // **띄울 때 켠 errexit**(moai-j9tx) — `bash -e`·`bash -o errexit` 로 띄운 셸은 글의 첫
+            // 줄부터 `set -e` 아래다. `+e`·`+o errexit` 가 끄는 것도 셸이 읽는 차례 그대로다.
+            let mut strict = false;
             while let Some(w) = it.next() {
                 // `--` 뒤는 스크립트와 자리 인자다.
                 if w == "--" {
@@ -369,23 +373,39 @@ fn shell_text(words: &[String]) -> Option<(String, bool)> {
                 }
                 // `-`·`+` 로 여는 짧은 옵션 뭉치. `-c` 는 그 안 어디에 있어도 뒤 낱말이 글이다(`-lc`).
                 let Some(flags) = w.strip_prefix(['-', '+']).filter(|f| !f.is_empty()) else { break };
+                let on = w.starts_with('-');
+                if flags.contains('e') {
+                    strict = on;
+                }
                 if flags.contains('c') {
                     // **`-c` 뒤의 `--` 는 글이 아니다** — 셸은 그것을 건너뛰고 다음 낱말을 돌린다
                     // (`bash -c -- 'echo hi'` 가 `hi` 를 찍는다). 그것을 글로 집던 판은 `--` 한
                     // 낱말로 규칙 넷이 통째로 샜다(리뷰 moai-p836.rv).
                     let text = it.next().filter(|t| t.as_str() != "--").or_else(|| it.next());
-                    return text.map(|t| (t.clone(), true));
+                    return text.map(|t| Handed { text: t.clone(), fork: true, strict });
                 }
-                // `-o pipefail`·`-O extglob` 은 값을 따로 받는다.
-                if flags.ends_with(['o', 'O']) {
-                    it.next();
+                // `-o pipefail`·`-O extglob` 은 값을 따로 받는다. `-o errexit` 는 그 값이 뜻을 바꾼다.
+                if flags.ends_with(['o', 'O'])
+                    && it.next().is_some_and(|v| v == "errexit")
+                    && flags.ends_with('o')
+                {
+                    strict = on;
                 }
             }
             None
         }
-        "eval" if !rest.is_empty() => Some((rest.join(" "), false)),
+        "eval" if !rest.is_empty() => Some(Handed { text: rest.join(" "), fork: false, strict: false }),
         _ => None,
     }
+}
+
+/// 셸에 넘긴 글 하나([`shell_text`]).
+struct Handed {
+    text: String,
+    /// 새 셸에서 도는가 — `eval` 은 지금 셸에서 돈다.
+    fork: bool,
+    /// 띄울 때 이미 errexit 가 켜졌는가 — 그 글은 첫 줄부터 `set -e` 아래다([`Layer::Shell`]).
+    strict: bool,
 }
 
 /// 명령줄의 한 토막 — 낱말들과, 리다이렉션이 쓰는 자리.
@@ -443,8 +463,9 @@ enum Layer {
     /// 그 안의 errexit 를 끌 수도 있다 — `x=$(set -e; …) || true`.
     Subst(usize),
     /// `bash -c '…'`·`sh -c` 의 글 — 새 프로세스라 바깥의 `set -e` 도 `||` 도 안 닿고, 그 글의 마지막
-    /// 명령의 값이 바깥 토막의 값이다.
-    Shell(usize),
+    /// 명령의 값이 바깥 토막의 값이다. 곁의 참은 **띄울 때 이미 errexit 가 켜졌는가**다(moai-j9tx) —
+    /// `bash -e -c '…'` 의 글은 첫 줄부터 `set -e` 아래라, 그 겹을 열 때 `strict` 를 켠 채로 연다.
+    Shell(usize, bool),
 }
 
 impl Layer {
@@ -452,7 +473,7 @@ impl Layer {
     fn shift(self, by: usize) -> Layer {
         match self {
             Layer::Subst(l) => Layer::Subst(l + by),
-            Layer::Shell(l) => Layer::Shell(l + by),
+            Layer::Shell(l, strict) => Layer::Shell(l + by, strict),
         }
     }
 }
@@ -762,7 +783,7 @@ impl<'a> Lexer<'a> {
                 .map(|(_, t)| (t.as_str(), Some(Layer::Subst(0))))
                 .collect();
             let own = shell_text(&seg.words);
-            texts.extend(own.iter().map(|(t, fork)| (t.as_str(), fork.then_some(Layer::Shell(0)))));
+            texts.extend(own.iter().map(|h| (h.text.as_str(), h.fork.then_some(Layer::Shell(0, h.strict)))));
             let (depth, level, join, apart) = (seg.depth, seg.level, seg.join, seg.sub);
             // 앞 토막 뒤로 지나온 자리는 처음 심는 토막이 든다. 글을 낸 토막은 그 글을 막 나온 자리다.
             let (low, floor) = (seg.low, seg.floor);
@@ -2422,7 +2443,7 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
     fn errexit_top(frames: &[Frame]) -> Option<usize> {
         match frames.last().map(|f| f.layer) {
             None => Some(0),
-            Some(Layer::Shell(l)) => Some(l),
+            Some(Layer::Shell(l, _)) => Some(l),
             Some(Layer::Subst(_)) => None,
         }
     }
@@ -2513,11 +2534,11 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
                 // **새 셸 안에서 집기가 이긴 채로 끝났으면 그 셸의 값도 이긴 것이다**(moai-9xbq) —
                 // `bash -c '집기 || exit 1; echo done'` 은 집기가 지면 거기서 끝나, 여기 온 것은
                 // 이겼다는 뜻이다. 그 안의 `sure` 는 아래 자로 걷히니 나올 때 집기로 옮겨 적는다.
-                Layer::Shell(base) if sure.or(sure_e).is_some_and(|l| l >= base) => {
+                Layer::Shell(base, _) if sure.or(sure_e).is_some_and(|l| l >= base) => {
                     let home = base.saturating_sub(1);
                     after_pick = Some(after_pick.map_or(home, |d| d.min(home)));
                 }
-                Layer::Shell(_) => {}
+                Layer::Shell(..) => {}
             }
             (strict, lone, sure, sure_e, bailout) = (f.strict, f.lone, f.sure, f.sure_e, f.bailout);
         }
@@ -2574,8 +2595,10 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
             // 새 셸은 바깥의 errexit 도, 바깥이 열어 둔 끝내는 묶음도 안 물려받는다. 치환의 `sure` 는
             // 그대로 둔다 — 바깥에서 이긴 집기는 치환 안에서도 이긴 채다.
             (strict, lone) = (None, None);
-            if matches!(layer, Layer::Shell(_)) {
+            if let Layer::Shell(top, on) = *layer {
                 (sure, sure_e) = (None, None);
+                // 띄울 때 켠 errexit 는 그 글의 첫 줄부터 선다(moai-j9tx).
+                strict = on.then_some(top);
             }
         }
         let words = command_of(&seg.words);
@@ -3796,6 +3819,8 @@ mod tests {
         assert_eq!(mine("bash -c 'moai mv t-1 in_progress --from todo || exit 1; echo done'"), ["t-1"]);
         assert_eq!(mine("if ! bash -c 'moai mv t-1 in_progress --from todo'; then exit 1; fi"), ["t-1"]);
         assert_eq!(mine("moai mv t-1 in_progress --from todo || { bash -c 'echo fail'; exit 1; }"), ["t-1"]);
+        // 안 도는 글의 집기는 적지 않는다 — `-c` 가 스크립트의 인자인 줄이다(moai-j9tx 의 곁).
+        assert!(mine("bash -e script.sh -c 'moai mv t-1 in_progress --from todo'").is_empty());
 
         // **몸통이 안 돌 수도 있는 묶음은 뒤 토막이 없어도 걷는다**([`parse_over`]) — 표식을 받을
         // 토막이 없어 버려지던 판은 `fi` 로 끝나는 줄에서만 안 돈 집기를 적었다. 몸통 안의 `;` 가
@@ -6012,6 +6037,15 @@ mod tests {
             // 같은 꼴을 eval 과 sh 로, 그리고 하위 셸로 연 묶음으로.
             "moai mv t-1 in_progress --from todo || { eval 'echo fail'; exit 1; }; sed -i s/a/b/ src/store.rs",
             "sh -c 'moai mv t-1 in_progress --from todo || exit 1; echo done' && sed -i s/a/b/ src/store.rs",
+            // **띄울 때 켠 errexit 도 errexit 다**(moai-j9tx) — 그 글은 첫 줄부터 `set -e` 아래다.
+            // 옵션 뭉치에서 `-e` 를 보고도 그냥 넘기던 판은 에이전트가 흔히 쓰는 이 꼴을 막았다.
+            "bash -euo pipefail -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "bash -e -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "bash -o errexit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "sh -ec 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "bash -eu -c 'moai mv t-1 in_progress --from todo; echo ok; sed -i s/a/b/ src/store.rs'",
+            // 스크립트를 돌리는 줄의 `-c` 는 그 스크립트의 인자다 — 그 글은 안 돌아 쓰기도 없다.
+            "bash -e script.sh -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
             // 바깥 `set -e` 아래 이긴 집기는 그 뒤의 겹을 지나도 이긴 채다 — 겹을 열며 선 셈을 나올 때
             // 되돌리던 판은 이 줄을 막았다.
             "set -e; moai mv t-1 in_progress --from todo; bash -c 'echo ok' | cat; sed -i s/a/b/ src/store.rs",
@@ -6024,6 +6058,11 @@ mod tests {
             assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
         for cmd in [
+            // 띄울 때 끈 것은 안 켠 것이다 — `+e` 와 `-o` 가 아닌 `+o errexit` 도 같다.
+            "bash -e +e -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "bash +o errexit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            // eval 은 새 셸이 아니라 띄울 플래그가 없다 — 바깥의 errexit 를 물려받지도 않는다.
+            "set -e; eval 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
             // 글의 값은 **마지막** 명령의 값이다.
             "bash -c 'moai mv t-1 in_progress --from todo; echo ok' && sed -i s/a/b/ src/store.rs",
             "eval 'moai mv t-1 in_progress --from todo; echo ok' && sed -i s/a/b/ src/store.rs",
