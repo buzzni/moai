@@ -2005,7 +2005,12 @@ impl App {
             return;
         }
         self.reread_seen();
-        self.relayer(None);
+        // **못 읽었으면 표식을 물린다**(moai-9p7v) — 잠깐의 `ESTALE`·`EIO` 다. 표식을 올린 채 두면
+        // 설정이 **다시 바뀔 때까지** 아무도 다시 읽지 않아, 그 한 번의 실패가 층을 빈 채로 남겼다.
+        // 물리면 다음 걸음이 같은 표식 차이를 다시 보고 다시 읽는다 — 되면 그때 올라간다.
+        if !self.relayer(None) {
+            self.config_stamp = Some(was);
+        }
     }
 
     /// 적어 둔 읽음을 파일에서 다시 든다 — 설정 파일이 바뀌면 부른다([`App::follow_config`], moai-j038.vna). 띄울 때 한 번만 읽으면 옆

@@ -111,6 +111,20 @@ pub struct Registry {
     /// 트래커가 아니라 내 설정에 드는 까닭: 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에
     /// 적으면 읽기만 해도 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다(사용자 결정 2026-09-15).
     pub read: BTreeMap<String, String>,
+    /// 읽다 만난 탈. 멀쩡하면(파일이 없는 것도 멀쩡하다) `None` 이다. 까닭 글은 `problems` 에 있고
+    /// 여기는 **그 탈의 갈래**뿐이다 — 글로 가르면 말이 바뀔 때마다 가르는 쪽이 따라 깨진다.
+    pub trouble: Option<Trouble>,
+}
+
+/// 설정을 읽다 만난 탈의 갈래([`Registry::trouble`], moai-9p7v). 가르는 잣대는 **다시 해 볼 값이 있는가**다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trouble {
+    /// 파일을 못 읽었다 — 파싱까지 못 갔다. NFS 의 `ESTALE`·`EIO` 는 잠깐이라 다음 걸음에 다시 읽으면
+    /// 지나간다. 그 사이에는 **들고 있던 것을 둔다** — 빈 것으로 갈아 끼우면 탐색기의 층이 사라지고,
+    /// 설정 파일이 다시 바뀔 때까지 아무도 다시 읽지 않아 그대로 남았다(`App::follow_config`).
+    Reading,
+    /// 글이 깨졌다 — 파싱이 졌다. 사람이 고칠 때까지 다시 읽어도 같다. 까닭을 대고 멈추는 자리다.
+    Broken,
 }
 
 /// 설정을 관대하게 읽는다. 파일이 없으면 빈 목록이고 문제도 아니다 — 아직
@@ -127,10 +141,11 @@ pub fn read(path: Option<&Path>) -> Registry {
     };
     let mut reg = Registry { path: Some(path.to_path_buf()), ..Registry::default() };
     let at = |e: String| format!("{}: {e}", path.display());
+    // 못 읽은 것과 깨진 것을 가른다(moai-9p7v) — 앞의 것만 다시 해 볼 값이 있다([`Trouble`]).
     let parsed = match std::fs::read_to_string(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return reg,
-        Err(e) => Err(e.to_string()),
-        Ok(src) => Doc::parse(&src),
+        Err(e) => Err((e.to_string(), Trouble::Reading)),
+        Ok(src) => Doc::parse(&src).map_err(|e| (e, Trouble::Broken)),
     };
     match parsed {
         Ok(doc) => {
@@ -151,7 +166,10 @@ pub fn read(path: Option<&Path>) -> Registry {
         // 못 읽었거나 깨진 까닭은 **층만 댄다**(moai-5jsn). 보기에도 실으면 탐색기가 같은 파싱 오류를 층 없음
         // 배너와 보기 알림으로 두 번 댔다. 층은 늘 댄다 — 밖에서는 층 화면이, 안에서는 층을 못 세운 배너
         // (`App::attach_layer`)가. 보기는 처음값으로 뜨고, 그 뒤의 저장은 제 거절(`broken`)을 따로 댄다.
-        Err(e) => reg.problems = vec![at(e)],
+        Err((e, trouble)) => {
+            reg.problems = vec![at(e)];
+            reg.trouble = Some(trouble);
+        }
     }
     reg
 }
@@ -1544,6 +1562,36 @@ mod tests {
         let reg = read(Some(&d.join("없음/config.toml")));
         assert!(reg.projects.is_empty() && reg.problems.is_empty(), "{reg:?}");
         assert!(!read(None).problems.is_empty(), "자리를 모르면 그렇다고 말해야 한다");
+    }
+
+    /// **못 읽은 것과 깨진 것을 가른다**(moai-9p7v) — 앞의 것만 다시 해 볼 값이 있다. 가르는 값은 갈래
+    /// ([`Trouble`])뿐이고 까닭 글은 둘 다 `problems` 에 선다. 멀쩡한 파일과 없는 파일은 탈이 아니다 —
+    /// 적힌 값의 모양이 틀린 것(`project = "/a"`)도 읽기는 된 것이라 탈이 아니다.
+    #[test]
+    #[cfg(unix)]
+    fn a_file_that_cannot_be_read_is_told_apart_from_a_broken_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch("trouble");
+        let path = d.join("config.toml");
+
+        std::fs::write(&path, "[[project]]\npath = \"/a\"\n").unwrap();
+        assert_eq!(read(Some(&path)).trouble, None);
+        assert_eq!(read(Some(&d.join("없음/config.toml"))).trouble, None, "없는 파일은 탈이 아니다");
+        assert_eq!(read(None).trouble, None, "자리를 모르는 것은 읽다 만난 탈이 아니다");
+
+        std::fs::write(&path, "project = \"/a\"\n").unwrap();
+        assert_eq!(read(Some(&path)).trouble, None, "읽고 파싱까지 된 것은 탈이 아니다");
+
+        std::fs::write(&path, "[[project]\npath = \"/a\"\n").unwrap();
+        let reg = read(Some(&path));
+        assert_eq!(reg.trouble, Some(Trouble::Broken));
+        assert_eq!(reg.problems.len(), 1, "{reg:?}");
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let reg = read(Some(&path));
+        assert_eq!(reg.trouble, Some(Trouble::Reading), "{reg:?}");
+        assert_eq!(reg.problems.len(), 1, "{reg:?}");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
     }
 
     /// 깨진 파일은 읽기에서 알리고 계속, 쓰기에서 멈춘다. 파일은 한 글자도 안 바뀐다. `project` 가 표 배열이
