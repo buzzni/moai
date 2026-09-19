@@ -730,6 +730,20 @@ impl Browse {
         }
     }
 
+    /// **상태를 대는 동작인가** — 켜고 끄는 것(done·미룸·칸·열·상세·워크트리·원문)과 고르는
+    /// 것(정렬). 메뉴가 이것에 열린 채로 기다린다(사용자 결정 2026-09-19, moai-tf3n) — 눌러
+    /// 보며 원하는 상태를 맞추는 동작이라, 한 번 받고 닫으면 맞출 때마다 메뉴를 다시 열어야
+    /// 한다.
+    ///
+    /// **[`Browse::state`] 와 종류가 같고 판정은 다르다.** 그쪽은 *지금* 붙일 낱말이라 정렬은
+    /// 고른 차례에만 값을 낸다 — 그것으로 기다림을 가르면 "다른 차례로 고르기" 만 메뉴를 닫아,
+    /// 같은 층의 같은 종류가 누른 것에 따라 갈린다. 그래서 여기는 Ctx 를 안 본다.
+    /// 둘이 갈리는 것은 시험(`stateful_covers_everything_that_shows_a_state`)이 막는다.
+    pub fn stateful(self) -> bool {
+        use Browse::*;
+        matches!(self, Worktree | Raw | Column(_) | Done | Deferred | Sort(_) | Cell(_) | Detail)
+    }
+
     /// 사람에게 대는 낱말. **켜고 끄는 것은 지금 상태로 가는 곳을 댄다** — 색이 혼자 뜻을
     /// 지지 않는다.
     pub fn what(self, c: &Ctx) -> &'static str {
@@ -1135,6 +1149,28 @@ mod tests {
         // 접기는 펼쳐진 줄에서만 접고, 아니면 나가기를 그대로 탄다(뿌리에서는 조용하다).
         assert_eq!(Browse::Collapse.enabled(&Ctx { expanded: true, root: true, ..list }), Ok(()));
         assert_eq!(Browse::Collapse.enabled(&Ctx { expanded: false, root: true, ..list }), Err(Off::Quiet));
+    }
+
+    /// **상태를 대는 동작은 모두 [`Browse::stateful`] 이다.** 둘이 갈리면 메뉴가 `[보임]` 을 단
+    /// 항목에서 한 번 받고 닫히거나, 아무 상태도 없는 항목에서 ESC 를 기다린다 — 어느 쪽이든
+    /// 화면의 낱말과 손가락이 어긋난다.
+    #[test]
+    fn stateful_covers_everything_that_shows_a_state() {
+        let base = Ctx::default();
+        for o in [Order::Priority, Order::Created, Order::Updated, Order::Column, Order::Assignee, Order::Title] {
+            let c = Ctx { sorting: Sorting { by: o, reversed: false }, ..base };
+            for b in BROWSE.iter().filter(|b| b.act.state(&c).is_some()) {
+                assert!(b.act.stateful(), "{:?} 가 상태를 대는데 stateful 이 아니다", b.act);
+            }
+        }
+        // 거꾸로 — stateful 이면 어느 자리에선가 상태를 댄다. 정렬은 고른 차례에서만 댄다.
+        for b in BROWSE.iter().filter(|b| b.act.stateful()) {
+            let c = match b.act {
+                Browse::Sort(o) => Ctx { sorting: Sorting { by: o, reversed: false }, ..base },
+                _ => base,
+            };
+            assert!(b.act.state(&c).is_some(), "{:?} 가 stateful 인데 상태를 안 댄다", b.act);
+        }
     }
 
     /// **기다리는 접두어의 이름은 수식키를 함께 댄다**(리뷰) — `Ctrl-w` 를 맨 `w` 로 적으면 바가
