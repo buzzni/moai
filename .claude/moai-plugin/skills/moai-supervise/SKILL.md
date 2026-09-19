@@ -303,7 +303,8 @@ PY
        멤버**로 그 옆 일과 함께 댄다. 감독이 그 일이 끝난 뒤 보낸다. 미루지 않는다
     4-4. **moai 에 넣는 한국어 글은 한국어 글쓰기 플러그인으로 다듬는다** — 한글이 든 제목·본문·
        노트·`-m`·리뷰 원문 노트 전부. `korean-skills:humanizer` 로 윤문하고, 20줄을 넘으면 저장소 밖
-       (스크래치패드)에서 `humanize-korean:humanize-korean` 을 더 거친 뒤 그 `_workspace/` 를 지우고,
+       (스크래치패드)에서 `humanize-korean:humanize-korean` 을 더 거친 뒤 그 `_workspace/` 를 지우고
+       워크트리로 돌아와(밖에 선 채로는 훅이 트래커를 못 찾아 규칙이 안 선다),
        마지막에 `korean-skills:grammar-checker` 로 맞춤법을 본다. id·명령·경로·수는 그대로 두고,
        9-1 의 모델 줄과 12 의 `다음:` 줄, `Regression-of:` 줄은 다듬지 않는다. **리뷰 서브에이전트에게도**
        이 말을 준다
