@@ -5098,3 +5098,5 @@
 {"ts":"2026-09-18T23:57:31Z","id":"moai-m62u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T23:57:31Z","id":"moai-cle9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-18T23:57:32Z","id":"moai-4jsy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T00:08:49Z","id":"moai-lyc1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-19T00:08:49Z","id":"moai-lyc1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-19, AskUserQuestion 둘): 1. [read] 에 적는 값은 본 때가 아니라 **본 줄의 updated_at** — r·moai read 를 누른 때 화면·파일에 있던 그 줄의 도장. max(now, updated_at) 은 (a) 만 풀어 버렸다. 2. 판정은 **updated_at > 적힌 값 그대로** — 옛 값(본 때)은 옛 뜻대로 읽혀 [NEW] 가 한꺼번에 쏟아지지 않고, 다시 읽는 줄부터 새 값으로 바뀐다. 대가: 적힌 것보다 이른 도장으로 바뀐 줄(시계 뒤진 기계, 옛 도장을 가져온 머지)과 같은 초의 고침(c)은 놓친다. != 는 업그레이드 뒤 읽은 줄 전부가 한 번 [NEW] 로 서서 안 골랐다."}
