@@ -198,7 +198,8 @@ BODY
 
 늘 보이는 규칙은 `SKILL.md` 의 "한국어 글" 에 있다. 여기는 그 절차다.
 
-- 리뷰 원문은 줄이거나 판단을 섞지 않고 문장만 다듬는다 — 규칙 3 이 `그대로` 옮기라는 것은 그 뜻이다
+- 리뷰 원문은 줄이거나 판단을 섞지 않고 문장만 다듬는다 — 규칙 3 이 `그대로` 옮기라는 것은 그 뜻이다.
+  줄이는 것은 64KB 를 넘을 때뿐이고, 그때는 `요약:` 으로 밝힌다
 - 20줄을 넘는 글은 저장소 밖(스크래치패드나 임시 디렉터리)으로 옮겨 그 자리를 cwd 로 두고
   `humanize-korean:humanize-korean` 을 부른다. 이 스킬은 cwd 에 `_workspace/` 를 만든다 — 다 쓰면 지운다
 - 다 쓰면 저장소로 돌아온다 — 훅은 세션이 선 자리로 트래커를 찾아, 밖에 선 채로는 규칙이 하나도 안 선다
@@ -253,16 +254,25 @@ id** 로 그 이슈의 커밋을 그때그때 찾아 낸다. 해시를 노트에
 
     ~/.claude/projects/<프로젝트>/<세션>/subagents/agent-<task-id>.jsonl
 
-리뷰 전문은 **마지막 `text` 블록**이다.
+리뷰 전문은 **마지막 `SubagentHandback` 호출에 실린 `message`** 다. 그 호출이 없을
+때만 **마지막 `text` 블록**이다.
 
 ```sh
 python3 -c "
 import json,sys
-t=[c['text'] for l in open(sys.argv[1])
+b=[c for l in open(sys.argv[1])
    for c in json.loads(l).get('message',{}).get('content') or []
-   if isinstance(c, dict) and c.get('type') == 'text']
-print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
+   if isinstance(c, dict)]
+h=[(c.get('input') or {}).get('message') or '' for c in b
+   if c.get('type') == 'tool_use' and c.get('name') == 'SubagentHandback']
+t=[c['text'] for c in b if c.get('type') == 'text']
+print(h[-1] if h else t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
 ```
+
+**넘겨준 판에서는 마지막 `text` 블록이 원문이 아니다.** 보고를 그 호출로 넘긴
+서브에이전트는 그 뒤에 "보고를 보냈다" 같은 맺음말을 한 줄 더 적는다 — 마지막
+`text` 만 집으면 200바이트짜리 맺음말이 원문으로 남고, 넘는지 재는 것도 그 글로
+잰다. 조용히 어긋나는 자리라 위의 한 줄이 넘겨준 보고를 먼저 본다.
 
 **마지막 줄을 그냥 집지 않는다.** 한 턴의 블록이 줄마다 나뉘어 적히고 생각·
 도구 호출도 섞여, 마지막 줄이 글이 아닐 때가 있다. 그러면 빈 글이 넘어가고
@@ -271,6 +281,15 @@ print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
 
 **요약만 적고 원문을 버리지 않는다.** 요약은 이쪽의 판단이고 원문은 리뷰어가
 한 말이다. 판단은 다시 할 수 있지만 버린 원문은 못 되돌린다.
+
+**넘칠 때만 줄인다.** 한 번에 적는 글은 64KB 까지라, 그보다 큰 원문은 `moai note` 가
+거절한다.
+원문이 64KB 를 넘으면 요약한다 — 첫 줄에 `요약: 원문 <크기>KB agent-<task-id>` 를 적고,
+건마다 번호와 자리는 둔 채 문장만 줄인다. 울타리와 들여쓰기는 그대로 둔다.
+요약이라고 밝혀 두어야 다음 사람이 그 글을 리뷰어의 말로 잘못 읽지 않고, 첫 줄의
+`agent-<task-id>` 가 위 파일 이름이라 원문으로 돌아갈 길이 남는다. **쪼개 여러 노트로 적지 않는다** — 저널은 덧붙이기만 해 쪼갠 판이
+영영 남고, 사람이 고른 길은 요약이다(moai-b8aj). 울타리와 들여쓰기를 그대로 두는 까닭은
+옮겨 적은 `model:` 줄이 줄 머리에 서면 아무도 안 한 일이 `work` 에 서기 때문이다.
 
 ## 훅
 

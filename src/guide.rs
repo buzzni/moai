@@ -1,6 +1,9 @@
 //! 에이전트에게 주는 글. **한 출처다** — `init` 이 AGENTS.md 에 쓰는 블록,
-//! `skill install` 이 심는 SKILL.md 와 참고 문서, 그리고 훅이 내는 거절문이
-//! 모두 여기서 조각을 가져간다.
+//! `skill install` 이 심는 SKILL.md 와 참고 문서, 훅이 내는 거절문, 그리고 쓰기가
+//! 막을 때의 거절문(`model::check_text_size`)이 모두 여기서 조각을 가져간다.
+//!
+//! 마지막 하나는 훅이 아니다 — `add`·`edit`·`mv -m`·`note` 가 모두 지나는 쓰기 검사라,
+//! 여기서 리뷰 얘기를 길게 붙이면 제목이 큰 것을 막을 때도 그 글이 함께 나온다.
 //!
 //! ## 왜 한 출처인가
 //!
@@ -40,8 +43,30 @@ pub fn rule_head(n: usize) -> String {
 // 먹어, 첫 명령만 왼쪽 끝에 붙는다.
 pub const REVIEW_STEPS: &str = concat!(
     "  moai mv <id> in_progress      리뷰를 시작할 때\n",
-    "  moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로\n",
+    "  moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로(64KB 를 넘으면 요약)\n",
     "  moai mv <id> done -m '<무엇을 반영하고 무엇을 넘겼나>'",
+);
+
+/// 리뷰 원문이 한 번에 적는 상한([`crate::model::MAX_TEXT_BYTES`])을 넘을 때의 길
+/// (moai-b8aj, 2026-09-19 사용자 결정). **요약하되 요약이라고 밝힌다.** 원문 노트와 판단 노트를
+/// 가르는 까닭이 리뷰어가 한 말과 이쪽이 정한 것을 가르는 데 있으니, 줄인 글은 줄였다고 적혀
+/// 있어야 읽는 쪽이 둘을 안 섞는다. 건의 번호와 자리를 두는 것은 판단 노트가 "3번" 으로 가리키기
+/// 때문이다. 규칙 3 의 글·참고 문서·`note` 의 거절문이 이 글을 쓴다.
+///
+/// **울타리와 들여쓰기를 지키라는 말이 함께 선다**(리뷰 moai-4u6b.5hl). 리뷰 원문은 일한 AI 줄의
+/// 꼴을 그대로 옮겨 적고, [`crate::model::work_of`] 는 울타리와 들여쓰기로 그것을 예로 읽는다 —
+/// 줄이면서 울타리를 풀면 아무도 안 한 일이 토큰째 통계에 선다. 저널은 덧붙이기만 하니 되돌릴
+/// 길도 없다.
+///
+/// **첫 줄이 원문을 가리킨다**(2026-09-19 사용자 결정, 리뷰 moai-4u6b.5hl 13번). 크기만 적던 판은
+/// 줄인 글만 남기고 원문으로 돌아갈 길을 안 남겼다 — 대화록 파일 이름은 끝났다는 알림의 `task-id`
+/// 에만 실려 온다. 긴 집 경로는 기계마다 달라 안 싣고 `task-id` 만 싣는다.
+///
+/// **두 줄이다.** 싣는 쪽이 제 들여쓰기를 붙인다 — 한 줄로 두면 AGENTS 블록과 참고 문서에
+/// 옆 줄의 두 배가 넘는 줄이 서고, 낱말 하나를 고쳐도 그 줄이 통째로 diff 에 뜬다.
+pub const REVIEW_OVER_LIMIT: &str = concat!(
+    "원문이 64KB 를 넘으면 요약한다 — 첫 줄에 `요약: 원문 <크기>KB agent-<task-id>` 를 적고,\n",
+    "건마다 번호와 자리는 둔 채 문장만 줄인다. 울타리와 들여쓰기는 그대로 둔다",
 );
 
 /// 리뷰 이슈에 붙는 태그. 훅은 리뷰 줄을 이 글자로 가르고, 가르치는 글은 같은
@@ -276,7 +301,7 @@ const KOREAN: &str = r#"**한국어 글은 moai 에 넣기 전에 다듬는다**
 
 - `korean-skills:humanizer` 로 AI 티를 걷고, 20줄을 넘으면 `humanize-korean:humanize-korean` 을 더
   거친 뒤, 마지막에 `korean-skills:grammar-checker` 로 맞춤법·띄어쓰기를 본다
-- id·명령·경로·수·코드 조각과 꼴이 정해진 줄(`model: …`·`다음: …`·`Regression-of: …`)은 그대로 둔다
+- id·명령·경로·수·코드 조각과 꼴이 정해진 줄(`model: …`·`다음: …`·`Regression-of: …`·`요약: 원문 …`)은 그대로 둔다
 - 두 플러그인은 `moai skill install` 이 함께 깐다. 자세한 것은 `references/commands.md` 의 "한국어 글" 에 있다"#;
 
 /// 한국어 글의 자세한 절차 — 참고 문서에만 둔다. 부를 때만 읽힌다.
@@ -292,7 +317,8 @@ const KOREAN: &str = r#"**한국어 글은 moai 에 넣기 전에 다듬는다**
 /// 남으면 그 세션의 모든 규칙과 알림이 말없이 꺼진다(`cmd::hook::decide`).
 const KOREAN_DETAIL: &str = r#"늘 보이는 규칙은 `SKILL.md` 의 "한국어 글" 에 있다. 여기는 그 절차다.
 
-- 리뷰 원문은 줄이거나 판단을 섞지 않고 문장만 다듬는다 — 규칙 3 이 `그대로` 옮기라는 것은 그 뜻이다
+- 리뷰 원문은 줄이거나 판단을 섞지 않고 문장만 다듬는다 — 규칙 3 이 `그대로` 옮기라는 것은 그 뜻이다.
+  줄이는 것은 64KB 를 넘을 때뿐이고, 그때는 `요약:` 으로 밝힌다
 - 20줄을 넘는 글은 저장소 밖(스크래치패드나 임시 디렉터리)으로 옮겨 그 자리를 cwd 로 두고
   `humanize-korean:humanize-korean` 을 부른다. 이 스킬은 cwd 에 `_workspace/` 를 만든다 — 다 쓰면 지운다
 - 다 쓰면 저장소로 돌아온다 — 훅은 세션이 선 자리로 트래커를 찾아, 밖에 선 채로는 규칙이 하나도 안 선다
@@ -496,6 +522,7 @@ idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇�
 **원문과 판단을 두 노트로 가른다** — 리뷰어가 한 말과 이쪽이 정한 것은 다른
 글이다. 넘긴 것은 **이슈 번호와 함께** 적는다. "넘겼다" 만 적힌 줄은 아무도
 다시 안 본다. 원문을 어디서 찾는지는 스킬의 `references/commands.md` 에 있다.
+{REVIEW_OVER_LIMIT}.
 
 **4. {four}.** `-L`·`-S` 없는 `tmux kill-server`·`kill-session` 과 tmux 를
 겨눈 `pkill`·`killall` 을 막는다. 세션이 tmux 안에서 돌면 `$TMUX` 가 서 있어,
@@ -800,16 +827,25 @@ PLAN
 
     ~/.claude/projects/<프로젝트>/<세션>/subagents/agent-<task-id>.jsonl
 
-리뷰 전문은 **마지막 `text` 블록**이다.
+리뷰 전문은 **마지막 `SubagentHandback` 호출에 실린 `message`** 다. 그 호출이 없을
+때만 **마지막 `text` 블록**이다.
 
 ```sh
 python3 -c "
 import json,sys
-t=[c['text'] for l in open(sys.argv[1])
+b=[c for l in open(sys.argv[1])
    for c in json.loads(l).get('message',{{}}).get('content') or []
-   if isinstance(c, dict) and c.get('type') == 'text']
-print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
+   if isinstance(c, dict)]
+h=[(c.get('input') or {{}}).get('message') or '' for c in b
+   if c.get('type') == 'tool_use' and c.get('name') == 'SubagentHandback']
+t=[c['text'] for c in b if c.get('type') == 'text']
+print(h[-1] if h else t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
 ```
+
+**넘겨준 판에서는 마지막 `text` 블록이 원문이 아니다.** 보고를 그 호출로 넘긴
+서브에이전트는 그 뒤에 "보고를 보냈다" 같은 맺음말을 한 줄 더 적는다 — 마지막
+`text` 만 집으면 200바이트짜리 맺음말이 원문으로 남고, 넘는지 재는 것도 그 글로
+잰다. 조용히 어긋나는 자리라 위의 한 줄이 넘겨준 보고를 먼저 본다.
 
 **마지막 줄을 그냥 집지 않는다.** 한 턴의 블록이 줄마다 나뉘어 적히고 생각·
 도구 호출도 섞여, 마지막 줄이 글이 아닐 때가 있다. 그러면 빈 글이 넘어가고
@@ -818,6 +854,14 @@ print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
 
 **요약만 적고 원문을 버리지 않는다.** 요약은 이쪽의 판단이고 원문은 리뷰어가
 한 말이다. 판단은 다시 할 수 있지만 버린 원문은 못 되돌린다.
+
+**넘칠 때만 줄인다.** 한 번에 적는 글은 64KB 까지라, 그보다 큰 원문은 `moai note` 가
+거절한다.
+{REVIEW_OVER_LIMIT}.
+요약이라고 밝혀 두어야 다음 사람이 그 글을 리뷰어의 말로 잘못 읽지 않고, 첫 줄의
+`agent-<task-id>` 가 위 파일 이름이라 원문으로 돌아갈 길이 남는다. **쪼개 여러 노트로 적지 않는다** — 저널은 덧붙이기만 해 쪼갠 판이
+영영 남고, 사람이 고른 길은 요약이다(moai-b8aj). 울타리와 들여쓰기를 그대로 두는 까닭은
+옮겨 적은 `model:` 줄이 줄 머리에 서면 아무도 안 한 일이 `work` 에 서기 때문이다.
 
 ## 훅
 
@@ -1484,9 +1528,14 @@ const RECALL: &str = "moai -C <루트> idea promote <idea id> -e <에픽> --from
 /// **닫기는 워크트리를 지운 뒤다.** 워크트리가 남아 있으면 훅이 그 에픽을 옆 워크트리의
 /// 일로 읽어(`worktree::away`) `-m` 없는 리뷰 닫기를 못 막고, 루트의 편집은 규칙 2 로
 /// 막는다 — 그래서 충돌과 시험은 워크트리에서 풀고, 루트 병합이 막히면 되돌리고 돌아간다.
+///
+/// **넘칠 때의 길도 여기 적는다**(리뷰 moai-4u6b.5hl). 닫는 걸음이 싣는 것은 `(64KB 를 넘으면
+/// 요약)` 한 마디뿐이라, 이 글만 받은 일꾼은 줄이라는 말은 읽고 **요약이라고 밝히라는 말은**
+/// 못 읽었다 — 밝히지 않은 요약은 다음 사람이 리뷰어의 말로 읽는다.
 fn brief() -> String {
     let review = make_review("--parent <에픽>");
     let close = indent(&close_steps("<리뷰 id>"), "       ");
+    let over = indent(REVIEW_OVER_LIMIT, "       ");
     let model = indent(&model_line(), "    ");
     let levels = difficulty_levels();
     let rubric = indent(&difficulty_rubric(), "       ");
@@ -1553,8 +1602,8 @@ fn brief() -> String {
        (스크래치패드)에서 `humanize-korean:humanize-korean` 을 더 거친 뒤 그 `_workspace/` 를 지우고
        워크트리로 돌아와(밖에 선 채로는 훅이 트래커를 못 찾아 규칙이 안 선다),
        마지막에 `korean-skills:grammar-checker` 로 맞춤법을 본다. id·명령·경로·수는 그대로 두고,
-       9-1 의 모델 줄과 12 의 `다음:` 줄, `Regression-of:` 줄은 다듬지 않는다. **리뷰 서브에이전트에게도**
-       이 말을 준다
+       9-1 의 모델 줄과 12 의 `다음:` 줄, `Regression-of:` 줄, 줄인 리뷰 원문의 `요약:` 첫 줄은
+       다듬지 않는다. **리뷰 서브에이전트에게도** 이 말을 준다
     5. **멤버마다 리뷰하지 않는다.** 멤버 하나가 끝나면 시험을 돌리고 커밋해 다음 멤버로
        간다 — 리뷰는 멤버가 다 끝난 뒤 7 에서 에픽 전체를 한 번 본다. 리뷰 한 판이 비싸
        멤버 수만큼 부르지 않는다. 멤버 1 의 버그 위에 멤버 2 가 쌓이는 값은 그 한 번에서
@@ -1625,6 +1674,7 @@ fn brief() -> String {
        워크트리의 것으로 읽어 `-m` 없는 리뷰 닫기를 못 막는다. 리뷰 이슈는 무엇이
        나왔는지를 남기며 닫는다
 {close}
+{over}
        시험 통과를 보고 2 처럼 경로를 준 커밋으로 루트에 남긴다
     11. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 펼친 에픽 id, 한두 줄 요약,
        넘긴 것·새 idea, 7-1 에서 되찾아 첫 칸에 남긴 멤버, 4-3 에서 옆이 쥐어 남긴 멤버와 그 옆 일
@@ -1820,6 +1870,58 @@ mod tests {
         }
     }
 
+    /// **리뷰 원문을 그대로 붙이라는 글과 64KB 거절문이 한 길을 댄다**(moai-b8aj). 안내는
+    /// `note -b -` 로 그대로, 거절문은 "요약하고 원문은 파일로" 라 서로 어긋나 있었다 — 큰 리뷰를
+    /// 닫는 일꾼마다 밟는다.
+    ///
+    /// **상한은 표면마다 모든 자리를 잰다**(리뷰 moai-4u6b.5hl). 두 상수만 재던 판은 규칙 3·참고
+    /// 문서·한국어 절차에 손으로 적은 `64KB` 를 안 봐, 상한을 올리면 그 셋이 옛 수를 대는 채로
+    /// 초록이었다. 수째 읽어 견준다 — `contains("4KB")` 는 `64KB` 에도 맞는다.
+    #[test]
+    fn the_review_note_and_the_size_limit_say_one_thing() {
+        let limit = crate::model::MAX_TEXT_BYTES / 1024;
+        // `<크기>KB` 는 자리 표시라 수가 없다 — 그것만 건너뛰고 적힌 수는 모두 잰다.
+        let stated = |text: &str| -> Vec<String> {
+            text.match_indices("KB")
+                .map(|(at, _)| {
+                    let head = &text[..at];
+                    head[head.trim_end_matches(|c: char| c.is_ascii_digit()).len()..].to_string()
+                })
+                .filter(|digits| !digits.is_empty())
+                .collect()
+        };
+        for (surface, text) in
+            [("AGENTS 블록", agents()), ("SKILL.md", skill()), ("참고 문서", reference()), ("감독 스킬", supervise())]
+        {
+            for said in stated(&text) {
+                assert_eq!(said.parse::<usize>().ok(), Some(limit), "{surface}: 적힌 상한 {said}KB 가 실제({limit}KB)와 다르다");
+            }
+        }
+        for (what, text) in [("REVIEW_OVER_LIMIT", REVIEW_OVER_LIMIT), ("REVIEW_STEPS", REVIEW_STEPS)] {
+            let said = stated(text);
+            assert!(
+                !said.is_empty() && said.iter().all(|d| d.parse::<usize>().ok() == Some(limit)),
+                "{what}: 글의 상한이 실제와 다르다 — {said:?}"
+            );
+        }
+        // 요약 표식도 한 출처여야 한다 — 한국어 절차가 그것을 손으로 옮겨 적는다.
+        let mark = "`요약:";
+        assert!(REVIEW_OVER_LIMIT.contains(mark) && KOREAN_DETAIL.contains(mark), "요약 표식이 갈라졌다");
+        assert!(rules().contains(REVIEW_OVER_LIMIT), "규칙 3 이 넘칠 때의 길을 안 댄다");
+        assert!(reference().contains(REVIEW_OVER_LIMIT), "참고 문서가 넘칠 때의 길을 안 댄다");
+        assert!(brief().contains(&indent(REVIEW_OVER_LIMIT, "       ")), "일꾼 브리프가 넘칠 때의 길을 안 댄다");
+        // 상한 자체에서 넘는 글을 짓는다 — 손으로 적은 수는 상한이 그것을 넘어서면 `unwrap_err` 가
+        // 엉뚱한 패닉으로 터진다. `가` 는 3바이트다.
+        let big = "가".repeat(crate::model::MAX_TEXT_BYTES / 3 + 1);
+        let refused = crate::model::check_text_size("t-r", "노트", &big).unwrap_err().to_string();
+        let said = REVIEW_OVER_LIMIT
+            .replace("<크기>", &big.len().div_ceil(1024).to_string())
+            .replace('\n', "\n      ");
+        assert!(refused.contains(&said), "거절문이 다른 길을 댄다\n{refused}");
+        // 거절문은 잰 수를 그대로 내민다 — 자리 표시가 남으면 받는 쪽이 첫 줄을 손으로 채운다.
+        assert!(!refused.contains("<크기>"), "거절문이 `<크기>` 를 안 채웠다\n{refused}");
+    }
+
     /// 포맷 문자열 안의 `{{`·`}}` 가 제대로 풀렸는가. 참고 문서의 파이썬 한 줄이
     /// 딕셔너리를 쓰므로, 한 번 틀리면 복사해 친 명령이 문법 오류로 죽는다.
     ///
@@ -1830,6 +1932,53 @@ mod tests {
         let reference = reference();
         assert!(reference.contains(".get('message',{}).get('content')"));
         assert!(reference.contains("\npython3 -c \"\nimport json,sys\n"), "리뷰 원문을 꺼내는 파이썬이 들여써졌다");
+    }
+
+    /// **넘겨준 보고를 집는다**(리뷰 moai-4u6b.5hl). 서브에이전트가 `SubagentHandback` 으로 보고를
+    /// 넘기면 그 뒤에 "보고를 보냈다" 같은 맺음말을 한 줄 더 적는다 — 마지막 `text` 블록만 집던
+    /// 한 줄은 그 맺음말을 원문으로 적고도 조용했다(이 기계의 대화록 487개 중 486개가 그 꼴이고,
+    /// 리뷰만한 크기의 24개 중 8개가 보고를 넘겨준 판이었다). 빈 글이 아니라 `moai note` 의
+    /// "메모가 비었다" 도 안 서고, 넘는지 재는 것도 그 맺음말로 잰다.
+    #[test]
+    fn the_one_liner_picks_the_handed_back_report() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let reference = reference();
+        let head = "python3 -c \"";
+        let open = reference.find("\npython3 -c \"\n").expect("리뷰 원문을 꺼내는 한 줄이 없다") + 1 + head.len();
+        let script = &reference[open..];
+        // 파이썬 안에는 큰따옴표가 없다 — 셸이 `-c "…"` 로 싸는 글이라 그것이 곧 닫는 자다.
+        let script = &script[..script.find('"').expect("파이썬이 안 닫힌다")];
+        let s = crate::scratch::Scratch::new("handback");
+        let line = |v: serde_json::Value| format!("{}\n", serde_json::json!({"message": {"content": v}}));
+        let text = |t: &str| serde_json::json!([{"type": "text", "text": t}]);
+        let run = |name: &str, body: &str| -> String {
+            let path = s.path().join(name);
+            std::fs::write(&path, body).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let mut child = Command::new("python3")
+                .arg("-")
+                .arg(&path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("python3 를 실행하지 못했다 — 이 시험에는 python3 가 있어야 한다");
+            child.stdin.take().expect("stdin").write_all(script.as_bytes()).expect("스크립트를 못 넘겼다");
+            let out = child.wait_with_output().expect("python3 가 안 끝났다");
+            assert!(out.status.success(), "{name}: {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim_end().to_string()
+        };
+        let report = "리뷰 원문 — 1. src/x.rs:1 어긋났다";
+        let handed = format!(
+            "{}{}{}",
+            line(text("보겠다")),
+            line(serde_json::json!([{"type": "tool_use", "name": "SubagentHandback", "input": {"message": report}}])),
+            line(text("보고를 넘겼다.")),
+        );
+        assert_eq!(run("handed.jsonl", &handed), report, "넘겨준 보고 대신 맺음말을 집는다");
+        // 넘겨주는 호출이 없는 판은 그대로 마지막 `text` 블록이다 — 그 길을 걷어내지 않는다.
+        let plain = format!("{}{}", line(text("보겠다")), line(text(report)));
+        assert_eq!(run("plain.jsonl", &plain), report, "넘겨주지 않은 판의 원문을 못 집는다");
     }
 
     /// 템플릿 문법의 `{{`·`\{{` 도 포맷을 지나 그대로 선다. 한 번 틀려 참고 문서가 `{이름}` 과 `\{` 를
