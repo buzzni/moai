@@ -494,7 +494,7 @@ impl App {
     /// 여기서 고쳐 세운 줄(`Look::Shut`)을 옛 디렉터리의 값으로 덮는다. 버린 줄은 층에 선 다음
     /// 걸음에 [`Layer::stale`] 이 다시 고른다 — 못 들어갔거나 `n` 으로 층에 남았으면 곧바로,
     /// 들어갔으면 올라올 때다.
-    pub(super) fn open_place(&mut self, at: usize) -> Option<Repo> {
+    pub(super) fn open_place(&mut self, at: usize, how: Depth) -> Option<Repo> {
         if let Some((_, handle)) = self.layer.as_mut()?.pending.take() {
             self.discard(handle);
         }
@@ -505,16 +505,25 @@ impl App {
         // 폼을 열고 사람은 다 적고 Ctrl-S 를 눌러서야 못 담는다고 듣는다(적은 것이 갈 데가 없다). 여는
         // 법을 두 벌로 적으면 한쪽만 고쳐져 Enter 와 층의 줄이 같은 디렉터리를 달리 가른다. 한 번 더
         // 읽는 값은 사람이 키를 누른 한 번뿐이라 싸다.
-        let state = match projects::open_one(&place.path, String::new(), None, false).state {
+        //
+        // **줄을 곧 스레드가 읽을 자리는 그 한 번도 안 읽는다**([`Depth::Lean`], moai-m59y).
+        let opened = match how {
+            Depth::Whole => match projects::open_one(&place.path, String::new(), None, false).state {
+                State::Open { repo, .. } => Ok(repo),
+                state => Err(state),
+            },
+            Depth::Lean => projects::open_shallow(&place.path),
+        };
+        let state = match opened {
             // **열린 줄은 곧바로 다시 읽을 줄로 둔다**(리뷰 moai-3lul.kt0 다시 본 판) — 층의 셈이
             // "못 읽는다" 나 옛 수로 서 있어도 방금 연 것이 지금이다. 층에 남았으면(`n`) 다음 걸음에,
             // 들어갔으면 어느 길로 떠나든(올라오기·옆 번호) 올라온 뒤에 다시 읽는다. 셈은 새것이 닿을
             // 때까지 그대로 선다.
-            State::Open { repo, .. } => {
+            Ok(repo) => {
                 place.read_at = None;
                 return Some(repo);
             }
-            state => state,
+            Err(state) => state,
         };
         place.look = shut(&place.path, &place.name, state);
         place.marks = marks;
@@ -558,7 +567,7 @@ impl App {
                     return;
                 }
             };
-            if self.open_place(at).is_none() {
+            if self.open_place(at, Depth::Whole).is_none() {
                 return;
             }
             self.layer.as_ref().and_then(|l| l.places.get(at)).map(|p| Target { path: p.path.clone(), name: p.name.clone() })
@@ -636,7 +645,7 @@ impl App {
     /// 프로젝트로 바로 건너뛰는 길을 내면서 그 길이 안 도는 드나들기가 생겼다. **겹쳐 보기는
     /// 읽기 전에 정한다** — 읽는 값이 그 깃발을 탄다.
     pub(super) fn enter_project(&mut self, at: usize) {
-        let Some(repo) = self.open_place(at) else { return };
+        let Some(repo) = self.open_place(at, Depth::Whole) else { return };
         let Some(path) = self.place_path(at).map(Path::to_path_buf) else { return };
         // **겹쳐 보기를 켠다는 말은 한 번만 적는다.** 읽는 값이 이 깃발을 타므로 읽기에 건네는
         // 것과 App 에 남기는 것이 갈리면 목록은 겹친 줄인데 뱃지는 꺼진 화면이 난다. 세우는
@@ -884,6 +893,20 @@ impl App {
         // 깨어 머리줄의 도는 글리프를 돌리고, 시험의 `settle_reads` 도 이것으로 기다린다.
         self.layer.as_ref().is_some_and(|l| l.pending.is_some() || l.reading.is_some() || !l.wanted.is_empty())
     }
+}
+
+/// 층의 줄을 얼마나 깊이 열 것인가([`App::open_place`], moai-m59y).
+///
+/// 가르는 것은 **줄을 누가 읽는가** 다. 사람이 누른 한 번(Enter·`n`)은 그 자리에서 스냅샷까지
+/// 읽어 보고, 펼치기는 줄을 스레드가 읽으므로 여는 데까지만 본다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Depth {
+    /// 스냅샷까지 읽어 본다 — 못 읽는 줄을 그 자리에서 [`Look::Shut`] 으로 세운다.
+    Whole,
+    /// 여는 데까지만([`projects::open_shallow`]) — 줄은 곧 스레드가 읽는다. 여기서 스냅샷을
+    /// 읽으면 "스레드로 펼친다"(moai-12yx)가 그 한 판을 UI 실에서 치러, 펼치는 키 하나에
+    /// 화면이 그만큼 멈춘다 — 옮긴 값이 워크트리 일곱에 138→458ms 였다(moai-uxrn).
+    Lean,
 }
 
 /// 등록한 것이 하나도 안 읽혀 **층을 안 세운** 까닭([`App::unlayered`]) — 설정을 읽다 만난 것이
@@ -1844,6 +1867,56 @@ mod tests {
         a.hit("l");
         assert!(!a.loading(), "이미 읽은 프로젝트를 다시 읽으러 갔다");
         assert!(a.rows().len() > heads);
+    }
+
+    /// **옆 프로젝트의 보기는 줄도 보기도 안 바뀌면 다시 안 센다**(moai-m59y) — 지금 선 프로젝트
+    /// 하나를 다시 읽을 때마다 든 프로젝트 **전부**의 `shown`·`lit` 을 다시 세던 자리다. 보기가
+    /// 바뀌면 그때는 든 것이 다 따라 선다 — 보기는 보는 사람의 것이라 화면에 하나뿐이다(moai-1xo5).
+    #[test]
+    fn a_neighbour_is_not_measured_again_when_this_project_is_read() {
+        let s = Scratch::fenced("layer-see-again");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.want_site(0);
+        settle(&mut a);
+        assert!(a.site_of_place(0).is_some_and(|s| s.shown == [true, true]), "시험의 전제 — 옆 줄이 다 보인다");
+
+        // 옆 프로젝트의 값을 손으로 흐트러뜨린다 — 다시 셌는지가 이 값으로 드러난다. 한 줄만
+        // 건드린다: 둘 다 숨기면 층에 이슈 줄이 하나도 안 서 보기 토글 자체가 안 듣는다.
+        if let Some(site) = a.site_mut(super::super::Seat::Place(0)) {
+            site.shown[0] = false;
+        }
+        a.adopt(Vec::new());
+        assert!(
+            a.site_of_place(0).is_some_and(|s| s.shown == [false, true]),
+            "지금 선 프로젝트를 다시 읽었을 뿐인데 옆 프로젝트를 다시 셌다"
+        );
+
+        // 보기가 바뀌면 든 것이 다 따라 선다.
+        a.hit("SPC v d");
+        assert!(a.site_of_place(0).is_some_and(|s| s.shown == [true, true]), "보기 토글이 옆 프로젝트를 안 다시 셌다 — {:?}", a.view);
+    }
+
+    /// **펼치기는 여는 데까지만 그 자리에서 한다**(moai-m59y) — 줄은 스레드가 읽는다. 열리지만
+    /// 스냅샷을 못 읽는 프로젝트가 그 둘을 가른다: 스냅샷까지 그 자리에서 읽던 때(`Depth::Whole`)는
+    /// 스레드가 아예 안 뜨고 머리줄이 `Look::Shut` 으로 고쳐 섰고, 지금은 일꾼이 그 파일을 읽다
+    /// 만나 까닭을 제 길로 댄다 — UI 실은 같은 파일을 두 번 파지 않는다.
+    #[test]
+    fn expanding_opens_without_reading_the_snapshot_here() {
+        let s = Scratch::fenced("layer-lean-open");
+        let bad = s.project("bad", &[("argos-0001", "못 읽을 줄", "todo")]);
+        // 파일 자리에 디렉터리를 둔다 — `Repo::open` 은 설정까지만 보므로 열리고, 읽기가 터진다.
+        let file = bad.join(".moai/issues.jsonl");
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        let cfg = s.register(&[&bad]);
+        let mut a = layered(&cfg);
+        a.notice = None;
+
+        a.hit("l");
+        assert!(a.loading(), "펼쳤는데 읽으러 안 갔다 — 그 자리에서 읽고 말았다");
+        settle(&mut a);
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(said.contains("줄을 못 읽었다"), "일꾼이 만난 까닭을 안 댔다 — {said:?}");
     }
 
     /// **머리줄의 `Tab` 은 그 프로젝트를 묶음까지 다 편다**(moai-i0wd) — 펼쳐져 있으면 통째로

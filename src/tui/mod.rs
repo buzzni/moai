@@ -572,6 +572,11 @@ pub struct Site {
     /// 이슈 첨자 → 보기에 보이는가. `keep` 과 같은 까닭으로 **보기나 자료가 바뀔 때만** 센다
     /// ([`App::see`]) — 묶음의 칸과 물려받은 미룸을 줄마다 프레임마다 다시 풀지 않는다.
     shown: Vec<bool>,
+    /// `shown`·`lit` 이 **어느 보기로** 선 것인가(moai-m59y). 같은 보기를 같은 줄에 다시 걸면
+    /// 건너뛴다 — 지금 선 프로젝트 하나를 다시 읽을 때마다(`App::take`) 든 프로젝트 **전부**의
+    /// `shown`·`lit` 을 다시 세던 자리다. 그 둘은 보기와 줄의 함수라, 둘 다 그대로면 답이 같다.
+    /// 줄이 바뀌는 길은 둘뿐이다 — 새로 지은 [`Site`](여기가 `None`)와 [`App::take`](거기서 비운다).
+    seen_view: Option<view::View>,
     /// 보기에 보이는 줄이 사는 자리의 **모든 앞머리**([`App::see`]가 `shown` 과 함께 센다). 폴더가 검색 없이도
     /// 설지를 이 하나로 묻는다([`App::stands_in_view`]) — 폴더마다 이슈 전부를 훑으면 목록 한 번에 폴더 수 ×
     /// 이슈 수가 들고, 목록·머리 셈·열 셈이 프레임마다 그것을 묻는다(`Index::entries_sorted` 의 `lit` 과 같은 까닭).
@@ -817,6 +822,7 @@ impl Site {
             commits: Commits::new(),
             commit_ids: Default::default(),
             shown: Vec::new(),
+            seen_view: None,
             lit: Default::default(),
             unread: Default::default(),
             expanded: Default::default(),
@@ -1378,6 +1384,8 @@ impl App {
         self.site.index = index;
         self.site.ground = ground;
         self.site.now = now;
+        // 줄이 바뀌었다 — 걸어 둔 보기는 옛 줄의 것이다(moai-m59y).
+        self.site.seen_view = None;
         // 안 읽음은 **줄이 바뀔 때** 센다 — 보기 토글(`look`)도 지나는 `regrip` 에 두면 칸 하나 숨길
         // 때마다 저장소를 걷는다(moai-j038.vna).
         self.recount_unread();
@@ -1814,7 +1822,14 @@ impl App {
     }
 
     /// 한 프로젝트에 보기를 건다 — `shown` 과 그 줄들이 사는 자리 전부(`lit`).
+    ///
+    /// **같은 보기를 같은 줄에 다시 걸지 않는다**(moai-m59y, `Site::seen_view`) — 지금 선 프로젝트를
+    /// 다시 읽을 때마다 [`App::see`] 가 든 프로젝트 전부를 돌아, 옆 프로젝트들은 줄도 보기도 안
+    /// 바뀐 채로 이슈 수 × 자리 깊이를 다시 셌다.
     fn see_in(site: &mut Site, view: &view::View) {
+        if site.shown.len() == site.issues.len() && site.seen_view.as_ref() == Some(view) {
+            return;
+        }
         site.shown = (0..site.issues.len())
             .map(|at| view.shows(site.column(at), site.index.deferred_root(&site.issues[at].id).is_some(), &site.cfg.statuses))
             .collect();
@@ -1828,6 +1843,7 @@ impl App {
             }
         }
         site.lit = lit;
+        site.seen_view = Some(view.clone());
     }
 
     /// 설정 자리(`App::user_config`)에서 보기를 읽어 [`App::adopt_look`] 에 넘긴다. **시험만 부른다**(moai-u8cs) —
@@ -2265,7 +2281,9 @@ impl App {
         let Some(path) = self.layer.as_mut().map(|l| l.wanted.remove(0)) else { return };
         let Some(at) = self.layer.as_ref().and_then(|l| l.position(&path)) else { return };
         // 여는 것은 그 자리에서 한다 — 못 여는 까닭을 그 줄에 세우는 길이 이것 하나다(`open_place`).
-        let Some(repo) = self.open_place(at) else { return };
+        // **여는 데까지만 본다**(`Depth::Lean`, moai-m59y) — 줄은 바로 아래 스레드가 읽는다.
+        // 여기서 스냅샷까지 읽으면 그 한 판을 UI 실이 치르고 일꾼이 같은 파일을 또 판다.
+        let Some(repo) = self.open_place(at, layer::Depth::Lean) else { return };
         let (tx, rx) = std::sync::mpsc::channel();
         let read = self.read;
         let worktree = self.worktree;

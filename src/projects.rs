@@ -106,6 +106,22 @@ pub fn open_one(path: &Path, name: String, hue: Option<crate::style::Hue>, workt
     Project { path: path.to_path_buf(), name, hue, state, origin, trouble, swept }
 }
 
+/// **여는 데까지만** 본다 — 스냅샷은 안 읽는다(moai-m59y). 줄을 곧 스레드가 읽을 자리가 쓴다
+/// (`tui::App::read_wanted`): 거기서 [`open_one`] 을 부르면 UI 실이 `issues.jsonl` 을 한 번 파싱하고
+/// 일꾼이 또 한 번 파, "스레드로 펼친다" 가 그 한 판을 그 자리에서 치른다.
+///
+/// **못 여는 갈래는 [`open_one`] 과 같은 자다** — `Uninit`·`Missing`·`Unreadable` 셋은 [`Repo::open`]
+/// 이 가르므로 스냅샷을 안 읽어도 답이 같다. 갈리는 것은 하나뿐이다: 열리지만 **스냅샷이 못 읽히는**
+/// 저장소를 여기서는 `Ok` 로 답한다 — 그 까닭은 곧 일꾼의 읽기가 제 길로 댄다.
+pub fn open_shallow(path: &Path) -> Result<Repo, State> {
+    match Repo::open(path) {
+        Ok(Opened::Repo(repo)) => Ok(repo),
+        Ok(Opened::Uninit) => Err(State::Uninit),
+        Ok(Opened::Missing) => Err(State::Missing),
+        Err(e) => Err(State::Unreadable(e.message)),
+    }
+}
+
 impl State {
     /// 준 디렉터리 그 자리를 연다. **실패하지 않는다** — 못 여는 것도 상태다.
     ///
