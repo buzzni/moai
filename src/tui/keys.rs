@@ -1447,15 +1447,14 @@ mod tests {
         assert!(missing_in(&help).is_empty(), "고치기 전 도움말부터 빠진 키가 있다");
         // (지울 말, 바꿀 말, 도움말 전체엔 남아야 하는 키, 빠졌다고 해야 하는 것)
         for (phrase, instead, still, want) in [
-            // 다른 문단에만 남은 키 — 목록 문단의 Tab.
-            ("Tab 이 둘 사이를 옮기고", "둘 사이를 옮기고", &["Tab"][..], &["JOT: Tab"][..]),
+            // 다른 문단에만 남은 키 — 검색 칸 문단의 Tab(범위 돌리기).
+            ("Tab·Shift-Tab 이 찾을 자리를", "찾을 자리를", &["Tab"][..], &["PROMPT: Tab", "PROMPT: Shift-Tab"][..]),
             // 좁힌 표 — 같은 문단의 목록 Enter·Esc 로 지나가면 안 된다.
             ("검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며", "검색·거름망 칸은 그 칸에서 걸고 그만두며", &["Enter", "Esc"][..], &["PROMPT: Enter", "PROMPT: Esc"][..]),
             // 좁힌 표 — 같은 문단의 고르기 창 Enter·Esc 로 지나가면 안 된다.
             ("(Enter 로 가고 Esc 로", "(가고", &["Enter", "Esc"][..], &["PATH: Enter", "PATH: Esc"][..]),
             // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Backspace 로 지나가면 안 된다.
-            ("Enter·l 로 들어가고", "l 로 들어가고", &["Enter"][..], &["BROWSE: Enter"][..]),
-            ("Backspace·h 로 나온다", "h 로 나온다", &["Backspace"][..], &["BROWSE: Bksp"][..]),
+            ("Enter 로 들어가고 Backspace 로 나온다", "들어가고 나온다", &["Enter", "Backspace"][..], &["BROWSE: Enter", "BROWSE: Bksp"][..]),
             // 거꾸로 — 고르기 창이 경로 칸 문장의 Esc 로 지나가면 안 된다.
             ("창은 Esc 로 닫는다", "창은 닫는다", &["Esc"][..], &["PICK: Esc"][..]),
         ] {
@@ -1473,7 +1472,7 @@ mod tests {
     }
 
     /// 목록 문단의 첫머리 말.
-    const LIST: &str = "j·k 나 화살표로 이동";
+    const LIST: &str = "j·k 나 ↑↓ 로 이동";
     /// SPC 메뉴 문단.
     const SPC: &str = "그 밖의 동작은 SPC";
     /// 고르기 창·경로 칸·목록에서 빼기 문단.

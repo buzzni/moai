@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:28a60cbe -->
+<!-- moai:begin v:0.1.0 hash:929eccb8 -->
 ## 이슈 트래커 — moai
 
 이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
@@ -14,6 +14,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. 승인 게이트가 
     moai show --tree                       에픽 → 이슈 → 자식
     moai ready --worktree                  옆 워크트리에서 집은 것까지 겹쳐 본다
     moai tui                               탐색기로 돌아다닌다. SPC n 으로 생각을 담는다
+                                           묶음 줄에서 l 한 단계 · Tab 다 펼침 · h 접기
     moai add '제목' -p 1 -t bug -e <에픽>  만들기
     moai mv <id> in_progress               집기  →  review  →  done
     moai edit <id> --tag parser            고치기

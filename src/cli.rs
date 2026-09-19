@@ -269,7 +269,11 @@ NOTE
     #[command(after_help = "  마일스톤과 에픽이 디렉터리처럼 동작한다. 왼쪽에서 돌아다니면 커서가 머문
   것의 정보가 오른쪽에 나온다.
 
-  j·k 나 화살표로 이동, Enter·l 로 들어가고 Backspace·h 로 나온다. gg·Home
+  j·k 나 ↑↓ 로 이동, Enter 로 들어가고 Backspace 로 나온다.
+  마일스톤·에픽 줄에서 l·→ 은 그 자리에서 한 단계 펼치고 h·← 은 접는다
+  (접을 것이 없으면 한 층 나간다). Tab 은 그 밑을 재귀로 다 펼치고, 다시
+  누르면 접는다. 펼친 멤버는 제목 칸에 가지(├─·└─)로 서고, 그 펼침은
+  설정에 안 남는다. gg·Home
   이 맨 위, G·End 가 맨 아래, Ctrl-d·Ctrl-u 가 반 쪽,
   Ctrl-f·Ctrl-b(PageDown·PageUp)가 한 쪽이다. Ctrl-w w 가 목록과 상세 사이로
   포커스를 옮기고(Ctrl-w W 가 거꾸로, Ctrl-w h·Ctrl-w l 이 왼쪽·오른쪽 칸),
