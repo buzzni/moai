@@ -5190,3 +5190,4 @@
 {"ts":"2026-09-19T01:22:12Z","id":"moai-4x87","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-19T01:22:14Z","id":"moai-gwmc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-19T01:22:17Z","id":"moai-qnkn.gjv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1~9 는 리뷰가 고친 그대로 받았다(be28349). 10(가장 가까운 줄 찾기 O(R²))은 Esc 한 번에만 돌아 넘기고 이슈는 안 세운다."}
+{"ts":"2026-09-19T01:23:04Z","id":"moai-qnkn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없음 — a921664 로 develop 에 머지했고 멤버 셋과 리뷰 moai-qnkn.gjv 를 닫았다. 감독(moa-issue-27)에게 보낸 보고는 전송이 실패했다(Failed to send). 이 노트가 보고를 대신한다."}
