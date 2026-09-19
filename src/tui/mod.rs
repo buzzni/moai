@@ -2004,19 +2004,31 @@ impl App {
         if was == now {
             return;
         }
-        self.reread_seen();
-        self.relayer(None);
-    }
-
-    /// 적어 둔 읽음을 파일에서 다시 든다 — 설정 파일이 바뀌면 부른다([`App::follow_config`], moai-j038.vna). 띄울 때 한 번만 읽으면 옆
-    /// 터미널의 `moai read` 나 다른 탐색기가 적은 읽음이 이 화면에 영영 안 닿는다. 못 읽으면 들고 있던
-    /// 것을 둔다(`user_config::read_marks_at`).
-    fn reread_seen(&mut self) {
-        let Some(path) = self.user_config.as_deref() else { return };
-        if let Some(marks) = crate::user_config::read_marks_at(path) {
-            self.seen = marks;
-            self.recount_unread();
+        // **한 번만 읽는다**(moai-7yil) — 적어 둔 읽음과 등록 목록이 한 파일에 살아, 둘이 저마다 읽던
+        // 판은 이 걸음마다 같은 글을 두 번 파싱했다. 이 길은 자주 돈다: 보기 토글과 읽음이 그 파일을
+        // **스스로 써서**, `r` 을 누르고 있으면 누를 때마다 두 번 파싱이 붙었다.
+        let mut reg = crate::user_config::read(Some(path));
+        // **못 읽었으면 표식을 물리고 아무것도 안 한다**(moai-9p7v) — 잠깐의 `ESTALE`·`EIO` 다. 표식을
+        // 올린 채 두면 설정이 **다시 바뀔 때까지** 아무도 다시 읽지 않아, 그 한 번의 실패가 층을 빈 채로
+        // 남겼다. 물리면 다음 걸음이 같은 표식 차이를 다시 보고 다시 읽는다 — 되면 그때 올라간다.
+        if reg.trouble == Some(crate::user_config::Trouble::Reading) {
+            self.config_stamp = Some(was);
+            return;
         }
+        // 적어 둔 읽음을 다시 든다(moai-j038.vna) — 띄울 때 한 번만 읽으면 옆 터미널의 `moai read` 나
+        // 다른 탐색기가 적은 읽음이 이 화면에 영영 안 닿는다.
+        //
+        // **탈이 있으면 들고 있던 것을 둔다**(리뷰) — 못 읽은 것뿐 아니라 깨진 것도 그렇다. 파싱이 지면
+        // `user_config::read` 는 `read` 를 빈 표로 둔 채 까닭만 대는데, 그 빈 표를 들이면 내 줄이 통째로
+        // [NEW] 로 선다. 걷어 낸 `read_marks_at` 이 **못 읽거나 깨졌으면** `None` 을 내 막던 자리다.
+        // 층은 그대로 다시 세운다 — 깨진 설정의 빈 층과 그 까닭이 사람이 고쳐야 할 것을 비춘다.
+        //
+        // 같으면 안 센다 — 보기 토글이 `[tui]` 만 고쳐도 이 길은 돌고(스스로 쓴다), `query::unread` 는
+        // 줄 수만큼 걷는다. 옮겨 든다(`take`): 읽음 표는 읽은 줄마다 쌓여 베끼면 걸음마다 그만큼 든다.
+        if reg.trouble.is_none() && self.seen != reg.read {
+            self.adopt_read(std::mem::take(&mut reg.read));
+        }
+        self.relayer_with(Some(&reg), None);
     }
 
     /// 안 읽은 줄을 다시 센다. **누군지 모르면 아무것도 안 센다** — 읽기는 사람을 묻지 않는다

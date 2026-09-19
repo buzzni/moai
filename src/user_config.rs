@@ -111,6 +111,20 @@ pub struct Registry {
     /// 트래커가 아니라 내 설정에 드는 까닭: 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에
     /// 적으면 읽기만 해도 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다(사용자 결정 2026-09-15).
     pub read: BTreeMap<String, String>,
+    /// 읽다 만난 탈. 멀쩡하면(파일이 없는 것도 멀쩡하다) `None` 이다. 까닭 글은 `problems` 에 있고
+    /// 여기는 **그 탈의 갈래**뿐이다 — 글로 가르면 말이 바뀔 때마다 가르는 쪽이 따라 깨진다.
+    pub trouble: Option<Trouble>,
+}
+
+/// 설정을 읽다 만난 탈의 갈래([`Registry::trouble`], moai-9p7v). 가르는 잣대는 **다시 해 볼 값이 있는가**다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trouble {
+    /// 파일을 못 읽었다 — 파싱까지 못 갔다. NFS 의 `ESTALE`·`EIO` 는 잠깐이라 다음 걸음에 다시 읽으면
+    /// 지나간다. 그 사이에는 **들고 있던 것을 둔다** — 빈 것으로 갈아 끼우면 탐색기의 층이 사라지고,
+    /// 설정 파일이 다시 바뀔 때까지 아무도 다시 읽지 않아 그대로 남았다(`App::follow_config`).
+    Reading,
+    /// 글이 깨졌다 — 파싱이 졌다. 사람이 고칠 때까지 다시 읽어도 같다. 까닭을 대고 멈추는 자리다.
+    Broken,
 }
 
 /// 설정을 관대하게 읽는다. 파일이 없으면 빈 목록이고 문제도 아니다 — 아직
@@ -127,10 +141,11 @@ pub fn read(path: Option<&Path>) -> Registry {
     };
     let mut reg = Registry { path: Some(path.to_path_buf()), ..Registry::default() };
     let at = |e: String| format!("{}: {e}", path.display());
+    // 못 읽은 것과 깨진 것을 가른다(moai-9p7v) — 앞의 것만 다시 해 볼 값이 있다([`Trouble`]).
     let parsed = match std::fs::read_to_string(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return reg,
-        Err(e) => Err(e.to_string()),
-        Ok(src) => Doc::parse(&src),
+        Err(e) => Err((e.to_string(), Trouble::Reading)),
+        Ok(src) => Doc::parse(&src).map_err(|e| (e, Trouble::Broken)),
     };
     match parsed {
         Ok(doc) => {
@@ -151,22 +166,12 @@ pub fn read(path: Option<&Path>) -> Registry {
         // 못 읽었거나 깨진 까닭은 **층만 댄다**(moai-5jsn). 보기에도 실으면 탐색기가 같은 파싱 오류를 층 없음
         // 배너와 보기 알림으로 두 번 댔다. 층은 늘 댄다 — 밖에서는 층 화면이, 안에서는 층을 못 세운 배너
         // (`App::attach_layer`)가. 보기는 처음값으로 뜨고, 그 뒤의 저장은 제 거절(`broken`)을 따로 댄다.
-        Err(e) => reg.problems = vec![at(e)],
+        Err((e, trouble)) => {
+            reg.problems = vec![at(e)];
+            reg.trouble = Some(trouble);
+        }
     }
     reg
-}
-
-/// 적어 둔 읽음만 다시 읽는다(moai-j038.vna) — 탐색기의 `SPC r` 이 부른다. 띄울 때 한 번만 읽으면 옆
-/// 터미널의 `moai read` 나 다른 탐색기가 적은 읽음이 떠 있는 화면에 영영 안 닿는다.
-///
-/// 파일이 없으면 빈 표다. **못 읽거나 깨졌으면 `None`** — 부르는 쪽이 들고 있던 것을 두게 한다. 깨진
-/// 설정을 빈 표로 읽으면 내 줄이 통째로 [NEW] 로 선다.
-pub fn read_marks_at(path: &Path) -> Option<BTreeMap<String, String>> {
-    match std::fs::read_to_string(path) {
-        Ok(src) => Doc::parse(&src).ok().map(|doc| doc.read_marks().0),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(BTreeMap::new()),
-        Err(_) => None,
-    }
 }
 
 /// 설정을 고치는 **유일한 길**. 락 → 락 안에서 읽기 → 고치기 → 바뀌었으면
@@ -983,7 +988,7 @@ fn merge_words(
         if base.contains(w) || words.iter().any(|v| v.as_str() == Some(w.as_str())) {
             continue;
         }
-        words.push(w.as_str());
+        push_word(words, w);
         changed = true;
     }
     changed
@@ -1083,6 +1088,51 @@ fn draws_line(item: &Item) -> bool {
         Some(d) if d.is_dotted() => d.iter().any(|(_, v)| draws_line(v)),
         _ => item.is_value(),
     }
+}
+
+/// 배열 끝에 낱말 하나를 더한다(`merge_words`) — **여러 줄로 벌린 모양을 지킨다**(moai-n3ku).
+///
+/// 끝 원소와 `]` 사이의 글은 둘로 갈린다. 첫 줄(줄 끝 주석과 그 줄바꿈)은 **끝 원소의 줄 끝**이고, 그
+/// 뒤는 `]` 앞 글이다. 더하면 끝 원소 뒤에 쉼표가 서므로 그 줄 끝을 새 원소의 머리로 옮긴다 — 그래야
+/// 쉼표가 주석 앞에 서고, 새 원소가 앞 원소와 같은 들여쓰기로 제 줄에 선다. 안 옮기던 판은 `toml_edit`
+/// 이 그 글을 끝 원소의 꼬리로 들어, 쉼표가 줄 머리에 서고(`"done"\n, "review"]`) `]` 가 끌려 올라왔다.
+/// 줄 끝 주석이 있으면 쉼표가 그 주석 뒤로 가 파일이 통째로 안 읽혔다.
+///
+/// 들여쓰기는 **줄을 여는 원소 가운데 마지막 것**의 것이다 — 한 줄에 여럿이 선 배열(`[\n "a", "b"\n]`)의
+/// 끝 원소는 제 줄을 안 열어 들여쓰기를 모른다. 그런 배열에 더한 낱말은 제 줄에 서되 들여쓰기가 없다 —
+/// 본뜰 원소가 없으니 지어내지 않는다.
+///
+/// **빈 배열도 여러 줄일 수 있다**(리뷰) — 마지막 낱말을 뺀 자리가 `[\n]` 이라, 원소가 없다고 한 줄로
+/// 보면 `SPC v` 를 껐다 켜는 것만으로 `[` 줄에 원소가 붙는다(`["done"\n]`). 원소가 없을 때 `]` 앞 글은
+/// 배열의 꼬리(`Array::trailing`)에 통째로 있으므로 그것을 줄 끝으로 읽고, 들여쓰기는 거기 선 주석에서
+/// 든다. 진짜 한 줄 배열(`[]`·`["a"]`)은 옮길 줄 끝이 없어 `toml_edit` 의 기본 모양(`, "새것"`)이 곧
+/// 제 모양이다.
+fn push_word(words: &mut toml_edit::Array, word: &str) {
+    let last = words.len().checked_sub(1);
+    let tail = last
+        .and_then(|i| words.get(i).expect("차례 안이다").decor().suffix())
+        .and_then(|r| r.as_str())
+        .unwrap_or_default();
+    let after = format!("{tail}{}", words.trailing().as_str().unwrap_or_default());
+    let (line_end, rest) = first_line(&after);
+    if line_end.is_empty() {
+        words.push(word);
+        return;
+    }
+    let indent = (0..words.len())
+        .rev()
+        .find_map(|i| {
+            let p = prefix_of(words.get(i).expect("차례 안이다").decor());
+            p.rfind('\n').map(|at| p[at + 1..].to_string())
+        })
+        // 본뜰 원소가 없다 — 빈 여러 줄 배열이면 `]` 앞 글의 들여쓰기가 그 배열의 것이다.
+        .unwrap_or_else(|| rest.chars().take_while(|c| *c == ' ' || *c == '\t').collect());
+    let (head, trailing) = (format!("{line_end}{indent}"), format!("\n{rest}"));
+    if let Some(i) = last {
+        words.get_mut(i).expect("차례 안이다").decor_mut().set_suffix("");
+    }
+    words.push_formatted(toml_edit::Value::from(word).decorated(&head, ""));
+    words.set_trailing(trailing);
 }
 
 /// 배열에서 `gone` 인 원소를 뺀다(`merge_words`). 뺀 수를 낸다.
@@ -1508,6 +1558,36 @@ mod tests {
         assert!(!read(None).problems.is_empty(), "자리를 모르면 그렇다고 말해야 한다");
     }
 
+    /// **못 읽은 것과 깨진 것을 가른다**(moai-9p7v) — 앞의 것만 다시 해 볼 값이 있다. 가르는 값은 갈래
+    /// ([`Trouble`])뿐이고 까닭 글은 둘 다 `problems` 에 선다. 멀쩡한 파일과 없는 파일은 탈이 아니다 —
+    /// 적힌 값의 모양이 틀린 것(`project = "/a"`)도 읽기는 된 것이라 탈이 아니다.
+    #[test]
+    #[cfg(unix)]
+    fn a_file_that_cannot_be_read_is_told_apart_from_a_broken_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch("trouble");
+        let path = d.join("config.toml");
+
+        std::fs::write(&path, "[[project]]\npath = \"/a\"\n").unwrap();
+        assert_eq!(read(Some(&path)).trouble, None);
+        assert_eq!(read(Some(&d.join("없음/config.toml"))).trouble, None, "없는 파일은 탈이 아니다");
+        assert_eq!(read(None).trouble, None, "자리를 모르는 것은 읽다 만난 탈이 아니다");
+
+        std::fs::write(&path, "project = \"/a\"\n").unwrap();
+        assert_eq!(read(Some(&path)).trouble, None, "읽고 파싱까지 된 것은 탈이 아니다");
+
+        std::fs::write(&path, "[[project]\npath = \"/a\"\n").unwrap();
+        let reg = read(Some(&path));
+        assert_eq!(reg.trouble, Some(Trouble::Broken));
+        assert_eq!(reg.problems.len(), 1, "{reg:?}");
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let reg = read(Some(&path));
+        assert_eq!(reg.trouble, Some(Trouble::Reading), "{reg:?}");
+        assert_eq!(reg.problems.len(), 1, "{reg:?}");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
     /// 깨진 파일은 읽기에서 알리고 계속, 쓰기에서 멈춘다. 파일은 한 글자도 안 바뀐다. `project` 가 표 배열이
     /// 아닌 것도 목록을 고치는 쓰기는 멈춘다 — 그 키가 무엇인지 모르는 채로 더하면 남의 값을 덮는다.
     #[test]
@@ -1550,7 +1630,6 @@ mod tests {
         assert!(reg.look_problems.is_empty(), "보기가 목록의 모양 때문에 못 읽혔다 — {reg:?}");
         assert_eq!((reg.look.sort.as_deref(), reg.lang.as_deref()), (Some("title"), Some("en")));
         assert_eq!(reg.read.get("m-0001").map(String::as_str), Some("T"));
-        assert!(read_marks_at(&path).is_some_and(|m| m.contains_key("m-0001")));
 
         // 보기와 읽음은 적힌다. 목록은 그대로다.
         update(&path, |doc| doc.merge_look(&reg.look, &Look { sort: Some("created".into()), ..reg.look.clone() })).unwrap();
@@ -2009,6 +2088,78 @@ mod tests {
         assert_eq!(hide(src, &three, &["todo"]), "[tui]\nhidden = [\n  # 남길 것\n\n  \"done\", \"review\"\n]\n");
         let src = "[tui]\nhidden = [\n  \"todo\", \"done\", # 둘\n  \"review\",\n]\n";
         assert_eq!(hide(src, &three, &["done"]), "[tui]\nhidden = [\n  \"todo\", # 둘\n  \"review\",\n]\n");
+    }
+
+    /// **낱말을 더해도 여러 줄로 벌린 모양은 그대로다**(moai-n3ku, [`push_word`]). 끝 원소와 `]` 사이 글의 첫
+    /// 줄은 그 원소의 줄 끝이라 쉼표 앞에 남고, 더한 낱말은 앞 원소와 같은 들여쓰기로 제 줄에 선다.
+    /// 옮기지 않던 판은 쉼표가 줄 머리에 서고 `]` 가 끌려 올라왔으며(`"done"\n, "review"]`), 줄 끝 주석이
+    /// 있으면 쉼표가 그 주석 뒤로 가 파일이 통째로 안 읽혔다.
+    #[test]
+    fn adding_a_word_keeps_the_multiline_shape() {
+        let show = |src: &str, base: &[&str], new: &[&str]| {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let b = Look { hidden: words(base), ..Look::default() };
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&b, &Look { hidden: words(new), ..b.clone() }).unwrap();
+            doc.render()
+        };
+        let (two, three) = (["todo", "done"], ["todo", "done", "review"]);
+        // 끝 쉼표가 없는 배열 — `]` 앞 글이 끝 원소의 꼬리에 있다.
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  \"done\"\n]\n";
+        assert_eq!(show(src, &two, &three), "[tui]\nhidden = [\n  \"todo\",\n  \"done\",\n  \"review\"\n]\n");
+        // 끝 쉼표가 있으면 그대로 두고 그 아래에 선다.
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  \"done\",\n]\n";
+        assert_eq!(show(src, &two, &three), "[tui]\nhidden = [\n  \"todo\",\n  \"done\",\n  \"review\",\n]\n");
+        // 끝 원소의 줄 끝 주석은 그 줄에 남고 쉼표가 그 앞에 선다 — 뒤로 가면 쉼표가 주석에 먹힌다.
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  \"done\"  # 끝\n]\n";
+        assert_eq!(show(src, &two, &three), "[tui]\nhidden = [\n  \"todo\",\n  \"done\",  # 끝\n  \"review\"\n]\n");
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  \"done\", # 끝\n]\n";
+        assert_eq!(show(src, &two, &three), "[tui]\nhidden = [\n  \"todo\",\n  \"done\", # 끝\n  \"review\",\n]\n");
+        // `]` 앞 제 줄에 선 주석은 `]` 앞에 그대로 남는다.
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  \"done\"\n  # 끝에\n]\n";
+        assert_eq!(show(src, &two, &three), "[tui]\nhidden = [\n  \"todo\",\n  \"done\",\n  \"review\"\n  # 끝에\n]\n");
+        // 여럿을 한 번에 더해도 줄마다 선다. 들여쓰기는 줄을 연 마지막 원소의 것이다.
+        let src = "[tui]\nhidden = [\n    \"todo\"\n]\n";
+        assert_eq!(show(src, &["todo"], &three), "[tui]\nhidden = [\n    \"todo\",\n    \"done\",\n    \"review\"\n]\n");
+        let src = "[tui]\nhidden = [\n  \"todo\", \"done\"\n]\n";
+        assert_eq!(show(src, &two, &three), "[tui]\nhidden = [\n  \"todo\", \"done\",\n  \"review\"\n]\n");
+        // 한 줄 배열과 빈 배열은 한 줄 그대로다.
+        assert_eq!(show("[tui]\nhidden = [\"todo\", \"done\"]\n", &two, &three), "[tui]\nhidden = [\"todo\", \"done\", \"review\"]\n");
+        assert_eq!(show("[tui]\nhidden = []\n", &[], &["todo"]), "[tui]\nhidden = [\"todo\"]\n");
+        // **빈 여러 줄 배열도 여러 줄이다**(리뷰) — 마지막 낱말을 뺀 자리가 이 모양이라, 껐다 켜는 것만으로
+        // 여기를 지난다. 본뜰 원소가 없어 들여쓰기는 `]` 앞 글의 주석에서 들고, 그것도 없으면 안 짓는다.
+        assert_eq!(show("[tui]\nhidden = [\n]\n", &[], &["todo", "done"]), "[tui]\nhidden = [\n\"todo\",\n\"done\"\n]\n");
+        let src = "[tui]\nhidden = [\n  # 아직 없다\n]\n";
+        assert_eq!(show(src, &[], &["todo"]), "[tui]\nhidden = [\n  \"todo\"\n  # 아직 없다\n]\n");
+    }
+
+    /// **켰다 끄면 옛 바이트로 돌아온다**(moai-n3ku). 더할 때 모양이 뒤집히면 뺄 때 그 모양을 되돌리지
+    /// 못해, 토글마다 설정 파일이 헛 diff 를 냈다.
+    ///
+    /// 마지막 줄의 빈 배열 둘은 **뺀 자리에서 나는 모양**이다(리뷰) — 낱말이 하나뿐인 배열을 끄면 `[\n]`
+    /// 이 되고, 다시 켜는 것이 곧 이 왕복이다.
+    #[test]
+    fn adding_a_word_and_dropping_it_again_restores_the_bytes() {
+        for (src, base, more) in [
+            ("[tui]\nhidden = [\n  \"todo\",\n  \"done\"\n]\n", &["todo", "done"][..], &["todo", "done", "review"][..]),
+            ("[tui]\nhidden = [\n  \"todo\",\n  \"done\",\n]\n", &["todo", "done"], &["todo", "done", "review"]),
+            ("[tui]\nhidden = [\n  \"todo\",\n  \"done\"  # 끝\n]\n", &["todo", "done"], &["todo", "done", "review"]),
+            ("[tui]\nhidden = [\n  \"todo\",\n  \"done\", # 끝\n]\n", &["todo", "done"], &["todo", "done", "review"]),
+            ("[tui]\nhidden = [\n  \"todo\",\n  \"done\"\n  # 끝에\n]\n", &["todo", "done"], &["todo", "done", "review"]),
+            ("[tui]\nhidden = [\"todo\", \"done\"]\n", &["todo", "done"], &["todo", "done", "review"]),
+            ("[tui]\nhidden = [\n]\n", &[], &["todo"]),
+            ("[tui]\nhidden = [\n  # 아직 없다\n]\n", &[], &["todo"]),
+        ] {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let (base, more) =
+                (Look { hidden: words(base), ..Look::default() }, Look { hidden: words(more), ..Look::default() });
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&base, &more).unwrap();
+            let added = doc.render();
+            let mut doc = Doc::parse(&added).unwrap();
+            doc.merge_look(&more, &base).unwrap();
+            assert_eq!(doc.render(), src, "켰다 끈 뒤 — 켠 모양은 {added:?}");
+        }
     }
 
     /// **남긴 글은 점 키 줄 앞에도 선다**(moai-1upp 에픽 리뷰). 점 키(`meta.x = 1`)는 표 몸 안 제자리에 그려지고 그 줄의
