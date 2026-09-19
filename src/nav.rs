@@ -276,6 +276,20 @@ impl Index {
         &self.homes[at]
     }
 
+    /// 그 줄이 **폴더로서 여는 자리** — 제 집([`Index::home_of`])에 제 마디([`Index::seg_of`])를
+    /// 이은 것. 잎이면 그 밑에 아무것도 없는 자리이고, 폴더면 그 안의 목록이 사는 자리다.
+    ///
+    /// **화면 차례에서 되짚지 않는다**(moai-7qot 리뷰). 트리로 펼친 목록에서는 한 줄이 지금
+    /// 디렉터리의 바로 밑이 아닐 수 있는데, 그때 `지금 자리 + 제 마디` 로 셈하면 있지도 않은
+    /// 자리가 나온다 — 들어가면 빈 디렉터리가 서고, 셈(`Index::tally`)과 롤업
+    /// (`Index::progress`)은 `0` 을 낸다. 자리를 정하는 자는 이 모듈 머리글대로 `home_of`
+    /// 하나이므로, 그 자리를 묻는 곳도 하나여야 한다.
+    pub fn dir_path(&self, issues: &[Issue], at: usize) -> Path {
+        let mut path = self.homes[at].clone();
+        path.push(self.seg_of(issues, at));
+        path
+    }
+
     /// 그 자리를 home 으로 갖는 것들. **`home_of` 의 역상이다** — 목록 규칙을
     /// 따로 쓰지 않는 것이 빠짐도 겹침도 없음을 보장하는 유일한 이유다.
     pub fn entries(&self, issues: &[Issue], path: &Path) -> Vec<Entry> {

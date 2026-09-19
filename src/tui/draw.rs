@@ -1272,7 +1272,7 @@ fn trail_width(app: &App, e: &Entry) -> usize {
 fn head_width(app: &App, at: usize, twig: &Twig, fields: super::view::Fields, cols: Head) -> usize {
     // 칸 글리프는 도는 줄이든 아니든 두 칸이다(`row_glyph`). 좁아서 스피너를 걷는 것(`Head::still`)은
     // 걷기 셈 **뒤의** 일이라 여기에 안 든다.
-    cols.lead(fields) + 2 + 1 + lead_extras(app, at, fields) + crate::text::width(&twig_lead(twig))
+    cols.lead(fields) + 2 + 1 + lead_extras(app, at, fields) + twig_width(twig)
 }
 
 /// 켠 오른쪽 열 가운데 **이 머리 폭의 줄에 들어가는 것** — 좁으면 사람이 정한 차례로 걷는다(날짜 →
@@ -1315,6 +1315,14 @@ fn tally_cell(tally: &str, alone: bool, fields: super::view::Fields) -> String {
 /// 한 마디는 **세 칸**이다. box-drawing 은 East Asian Width 가 Ambiguous 라 두 칸으로 그리는
 /// 터미널이 있는데(moai-havc 와 같은 자리), 그때는 제목이 그만큼 밀릴 뿐 줄은 안 깨진다 —
 /// 제목 몫은 이 폭을 빼고 [`clip`] 이 정하고, 넘친 줄은 나가는 자리에서 한 번 더 자른다([`fit`]).
+/// 그 가지의 **폭만** — 줄을 짓지 않고 잰다. 한 마디가 세 칸이라 곧 `3 × 깊이` 다
+/// (`│`·`├`·`└`·`─`·빈칸 모두 한 칸이다). 재는 자리는 창 밖의 줄까지 훑으므로
+/// (`right_fit`·[`Head::of`], moai-wt4n) 거기서 글을 지으면 프레임마다 줄 수만큼 버릴 `String`
+/// 이 선다 — 줄을 안 짓고 재는 것이 그 셈이 있는 까닭이다.
+fn twig_width(twig: &Twig) -> usize {
+    3 * twig.depth()
+}
+
 fn twig_lead(twig: &Twig) -> String {
     let depth = twig.depth();
     if depth == 0 {
@@ -1458,7 +1466,7 @@ impl Head {
             let tally = if tally.is_empty() { 0 } else { 2 + crate::text::width(tally) };
             // 가지도 줄마다 붙어 안 걷히는 것이다 — 빠뜨리면 깊이 든 줄에서만 셈이 말없이 잘린다.
             tail = tail.max(
-                lead_extras(app, at, fields) + crate::text::width(&twig_lead(twig)) + trail_width(app, e) + tally,
+                lead_extras(app, at, fields) + twig_width(twig) + trail_width(app, e) + tally,
             );
         }
         // **좁으면 우선순위 → id 차례로 걷는다**(moai-wilg, 사용자 결정 2026-09-18). 오른쪽 열과
@@ -1733,11 +1741,20 @@ fn count_glyph(app: &App, work: &[usize], st: &str) -> &'static str {
 
 /// 그 항목 안으로 들어간 경로. 요약을 세려면 그 밑을 봐야 한다.
 fn deeper(app: &App, e: &Entry) -> crate::nav::Path {
-    let mut p = app.path.clone();
-    if let Entry::Dir { seg, .. } = e {
-        p.push(seg.clone());
+    match e {
+        // **자리를 정하는 자는 `home_of` 하나다**(`nav` 머리글, [`crate::nav::Index::dir_path`]).
+        // 지금 자리에 제 마디만 이으면 펼쳐 든 줄(깊이 1 이상)에서 있지도 않은 자리가 나와, 셈
+        // (`tally_of`)과 상세 롤업(`about`)이 둘 다 조용히 0 을 낸다 — 멤버가 바로 아랫줄에 그려져
+        // 있는데 상세는 `자식 없음` 이라 말한다(리뷰).
+        Entry::Dir { at: Some(at), .. } => app.index.dir_path(&app.issues, *at),
+        // 바구니는 제 줄이 없어 첨자가 없다. 바구니 마디는 집의 첫 마디로만 서므로 늘 뿌리의 줄이다.
+        Entry::Dir { seg, at: None } => {
+            let mut p = app.path.clone();
+            p.push(seg.clone());
+            p
+        }
+        Entry::Leaf { .. } => app.path.clone(),
     }
-    p
 }
 
 /// 이슈 하나의 낱낱.
@@ -2703,6 +2720,42 @@ pub(super) mod tests {
         assert_eq!(id_at(&held), id_at(&epic), "막내 줄의 id 가 밀렸다\n{rows:?}");
         // 굵은 선은 창 테두리의 무게다 — 가지에는 안 쓴다.
         assert!(!member.contains('┣') && !member.contains('┗') && !member.contains('┖'), "{member:?}");
+    }
+
+    /// **펼쳐 든 묶음 줄도 제 셈과 제 롤업을 낸다**(리뷰). 자리를 `지금 자리 + 제 마디` 로 셈하던
+    /// 때는 깊이 1 이상의 묶음이 있지도 않은 자리를 물어, 목록의 `n/n` 이 말없이 사라지고 상세는
+    /// 멤버가 바로 아랫줄에 그려져 있는데도 `자식 없음` 이라 말했다.
+    #[test]
+    fn an_inlined_group_row_keeps_its_tally_and_its_rollup() {
+        let mut is = issues();
+        let mut stone =
+            Issue::new("argos-0100".into(), "마일스톤".into(), Kind::Milestone, Status::new("todo"), "2026-09-01T00:00:00Z");
+        stone.priority = Some(1);
+        for i in &mut is {
+            if i.kind == Kind::Epic {
+                i.milestone = Some("argos-0100".into());
+            }
+        }
+        is.push(stone);
+        let mut a = every(is);
+        // 에픽 안으로 들어가서 본 셈을 먼저 잰다 — 펼쳐 본 줄이 그것과 같아야 한다.
+        a.hit("Tab");
+        let epic = render(&mut a, 120, 14)
+            .into_iter()
+            .filter(|l| l.contains("argos-0001"))
+            .filter_map(|l| l.split('┃').nth(1).map(str::to_string))
+            .next()
+            .unwrap_or_default();
+        assert!(epic.contains("├─") || epic.contains("└─"), "시험의 전제 — 에픽이 펼쳐 든 줄로 섰다\n{epic:?}");
+        assert!(epic.contains("1/2"), "펼쳐 든 에픽 줄에서 셈이 사라졌다\n{epic:?}");
+        // 그 줄에 커서를 두면 상세가 그 밑을 센다.
+        a.cursor = a
+            .rows()
+            .iter()
+            .position(|r| matches!(r, Row::Item(e, _) if e.at().is_some_and(|at| a.issues[at].id == "argos-0001")))
+            .expect("에픽 줄이 없다");
+        let screen = render(&mut a, 120, 20).join("\n");
+        assert!(!screen.contains("자식 없음"), "펼쳐 든 에픽의 상세가 자식 없음이라 말한다\n{screen}");
     }
 
     /// **가지는 `[NEW]` 보다 앞이다**(moai-r6rm, 사용자가 그린 그림) — 가지가 줄마다 같은 칸에

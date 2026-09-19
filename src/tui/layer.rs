@@ -698,6 +698,11 @@ impl App {
         self.write_failed = false;
         self.path.clear();
         self.remembered.clear();
+        // 펼쳐 둔 자리도 그 프로젝트에 매인 것이다 — 마디가 그 프로젝트의 이슈 id 다. 두고 오면
+        // 같은 prefix 를 쓰는 다음 프로젝트에서 아무도 안 펼친 묶음이 펼쳐진 채 서고(위의 커서
+        // 정체와 같은 자리), 바구니 마디(`Milestone(None)`·`Lost`)는 id 조차 없어 prefix 가 달라도
+        // 그대로 샌다. 세션 내내 쌓이기도 한다.
+        self.expanded.clear();
         self.detail.rewind();
     }
 
@@ -1491,6 +1496,26 @@ mod tests {
         let mut a = layered(&cfg);
         a.user = Some("레이븐 (raven@example.com)".into());
         (one, two, a)
+    }
+
+    /// **펼쳐 둔 자리는 프로젝트를 건너지 않는다**(리뷰) — 마디가 그 프로젝트의 이슈 id 이고,
+    /// 바구니 마디(`(마일스톤 없음)`·`(길 잃음)`)는 id 조차 없어 prefix 가 달라도 그대로 샌다.
+    /// 두고 오면 다음 프로젝트가 아무도 안 펼친 묶음을 펼친 채 세운다. `leave_project` 가 커서
+    /// 정체·거름망·안 읽음을 푸는 것과 같은 자리다.
+    #[test]
+    fn folding_does_not_cross_projects() {
+        let s = Scratch::fenced("layer-fold-leak");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.hit("1");
+        // 이 fixture 에는 묶음이 없어 키로 펼칠 것이 없다 — 펼쳐 둔 자리를 손으로 심는다.
+        // 바구니 마디는 id 를 안 들어, 두 프로젝트의 prefix 가 달라도 그대로 겹치는 자리다.
+        a.expanded.insert(vec![crate::nav::Seg::Milestone(None)]);
+        a.hit("2");
+        assert!(a.expanded.is_empty(), "옆 프로젝트로 건너갔는데 펼침이 남았다: {:?}", a.expanded);
+
+        a.expanded.insert(vec![crate::nav::Seg::Lost]);
+        a.hit("0");
+        assert!(a.expanded.is_empty(), "층으로 올라왔는데 펼침이 남았다: {:?}", a.expanded);
     }
 
     /// **뿌리의 Bksp 는 조용히 먹히지 않고 갈 키를 댄다**(리뷰 moai-lur8.met) — 여태 그 키가

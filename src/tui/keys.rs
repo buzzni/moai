@@ -93,6 +93,21 @@ impl Key {
     }
 }
 
+/// 누른 꼴 그대로의 한 키 이름 — **수식키까지** 적는다(`Ctrl-w`). [`name_of`] 는 글자만 읽으므로,
+/// 수식키가 붙은 접두어를 기다리는 동안 그것으로 적으면 바가 `Ctrl-w` 를 맨 `w` 라고 대고(그 키는
+/// 아무 일도 안 한다), 읽은 사람은 안 듣는 키를 누른다(리뷰). [`parse`] 가 거꾸로 읽는 이름과 같다.
+pub fn name_of_key(k: KeyEvent) -> String {
+    let mut out = String::new();
+    if k.modifiers.contains(KeyModifiers::CONTROL) {
+        out.push_str("Ctrl-");
+    }
+    if k.modifiers.contains(KeyModifiers::ALT) {
+        out.push_str("Alt-");
+    }
+    out.push_str(&name_of(k.code));
+    out
+}
+
 /// 한 키의 이름. [`parse`] 가 거꾸로 읽는 이름과 같다 — SPC 는 `SPC`, 글자는 그 글자.
 pub fn name_of(code: KeyCode) -> String {
     match code {
@@ -455,6 +470,12 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(FocusPrev, None, Key::chord('w'), Key::plain('W')),
         row!(Focus(Side::Left), None, Key::chord('w'), Key::plain('h')),
         row!(Focus(Side::Right), None, Key::chord('w'), Key::plain('l')),
+        // **Ctrl 을 쥔 채 이어 누른 꼴도 받는다** — vim 의 `Ctrl-w Ctrl-w` 다. "vim 그대로" 라
+        // 적어 두고 이 꼴을 빼면, 손이 익은 사람이 Ctrl 을 놓지 않고 두 번 누를 때 열이 통째로
+        // 버려지고(`Chord::feed`) 그 다음 키가 처음부터 다시 읽혀 `j` 가 커서를 옮긴다.
+        row!(FocusNext, None, Key::chord('w'), Key::chord('w')),
+        row!(Focus(Side::Left), None, Key::chord('w'), Key::chord('h')),
+        row!(Focus(Side::Right), None, Key::chord('w'), Key::chord('l')),
         MOVES[0],
         MOVES[1],
         MOVES[2],
@@ -575,6 +596,10 @@ pub struct Ctx {
     pub projects: usize,
     /// 커서의 줄이 지금 펼쳐져 있는가(moai-7qot). 접기(`h`)가 접을 것과 나갈 것을 여기서 가른다.
     pub expanded: bool,
+    /// 커서의 줄이 **펼칠 수 있는 묶음**인가. `leaf` 와 따로 두는 것은 `leaf` 가 "`Enter` 가
+    /// 무언가 하는가" 라서 `..` 과 층의 프로젝트 줄에도 거짓이기 때문이다 — 그것으로 가르면
+    /// 펼침이 그 줄들에서 켜진 채 아무 일도 안 한다.
+    pub group: bool,
     /// 숨긴 칸 — n 번째 비트가 설정의 n 번째 칸. 이름을 들지 않는다: 이 값은 복사로 다닌다.
     pub hidden: u16,
     pub done_hidden: bool,
@@ -618,8 +643,10 @@ impl Browse {
         use Browse::*;
         match self {
             Enter | Leave | Expand | Collapse | ExpandAll if !c.list_focus => Err(Off::Quiet),
-            // 잎에는 펼칠 것이 없다 — `Enter` 가 잎에서 조용한 것과 같은 자리다.
-            Expand | ExpandAll if c.leaf => Err(Off::Quiet),
+            // 묶음 줄에만 펼칠 것이 있다 — `Enter` 가 잎에서 조용한 것과 같은 자리다. `leaf` 로
+            // 가르지 않는다: `leaf` 는 `Enter` 의 물음이라 `..` 과 층의 프로젝트 줄에도 거짓이고,
+            // 거기서는 펼침이 아무 일도 안 한다.
+            Expand | ExpandAll if !c.group => Err(Off::Quiet),
             // **접을 것이 없으면 나가기와 같다** — 아래 `Leave` 의 갈래를 그대로 탄다.
             Collapse if !c.expanded => Browse::Leave.enabled(c),
             // 커서에서 되는 키만(moai-k3yi): 잎의 Enter·뿌리의 Bksp 는 아무 일도 없다. 까닭을 대지
@@ -1089,6 +1116,34 @@ mod tests {
         assert_eq!(one(JOT, press(KeyCode::Char('s'))), Lookup::Unknown);
     }
 
+    /// **펼침은 묶음 줄에서만 켜진다**(리뷰) — `leaf` 로 가르던 때는 `..` 과 층의 프로젝트 줄
+    /// (`leaf` 가 거짓인 두 줄)에서 `l`·`Tab` 이 켜진 채 아무 일도 안 했다. 접기는 그 줄들에서
+    /// 나가기의 갈래를 그대로 탄다.
+    #[test]
+    fn expanding_is_only_on_for_a_group_row() {
+        let list = Ctx { list_focus: true, detail: true, ..Ctx::default() };
+        for act in [Browse::Expand, Browse::ExpandAll] {
+            assert_eq!(act.enabled(&Ctx { group: true, ..list }), Ok(()), "묶음 줄에서 {act:?} 가 꺼졌다");
+            assert_eq!(act.enabled(&Ctx { group: false, ..list }), Err(Off::Quiet), "묶음이 아닌 줄에서 {act:?} 가 켜졌다");
+            // 잎은 묶음이 아니다 — 옛 갈래도 그대로 막힌다.
+            assert_eq!(act.enabled(&Ctx { group: false, leaf: true, ..list }), Err(Off::Quiet));
+        }
+        // 접기는 펼쳐진 줄에서만 접고, 아니면 나가기를 그대로 탄다(뿌리에서는 조용하다).
+        assert_eq!(Browse::Collapse.enabled(&Ctx { expanded: true, root: true, ..list }), Ok(()));
+        assert_eq!(Browse::Collapse.enabled(&Ctx { expanded: false, root: true, ..list }), Err(Off::Quiet));
+    }
+
+    /// **기다리는 접두어의 이름은 수식키를 함께 댄다**(리뷰) — `Ctrl-w` 를 맨 `w` 로 적으면 바가
+    /// 아무 일도 안 하는 키를 대고, 읽은 사람은 그것을 누른다.
+    #[test]
+    fn a_waiting_prefix_names_its_modifier() {
+        assert_eq!(name_of_key(with(KeyCode::Char('w'), KeyModifiers::CONTROL)), "Ctrl-w");
+        assert_eq!(name_of_key(press(KeyCode::Char(' '))), "SPC");
+        assert_eq!(name_of_key(press(KeyCode::Char('v'))), "v");
+        // 적은 이름은 그 키로 다시 읽혀야 한다 — 표의 이름과 같은 규칙이다.
+        assert_eq!(parse("Ctrl-w"), Some(with(KeyCode::Char('w'), KeyModifiers::CONTROL)));
+    }
+
     /// **Shift-Tab 은 두 모양으로 온다** — `BackTab` 과 SHIFT 붙은 `Tab`. 한 줄이 둘 다 받는다.
     /// 탐색에는 그 줄이 없다(moai-oudf) — 칸 옮기기가 `Ctrl-w` 로 갔고 `Tab` 자리는 비었다.
     #[test]
@@ -1192,6 +1247,17 @@ mod tests {
         // 디렉터리 하나씩이라 드나들기 그대로다.
         assert_eq!(one(BROWSE, press(C::Char('h'))), Lookup::Run(Browse::Collapse));
         assert_eq!(one(BROWSE, press(C::Char('l'))), Lookup::Run(Browse::Expand));
+        // **Ctrl 을 쥔 채 이어 누른 창 이동도 vim 그대로다** — 놓지 않고 두 번 누르면 열이 버려져
+        // 다음 키가 처음부터 다시 읽힌다(리뷰).
+        let ctrl = KeyModifiers::CONTROL;
+        for (second, act) in [
+            (with(C::Char('w'), ctrl), Browse::FocusNext),
+            (with(C::Char('h'), ctrl), Browse::Focus(Side::Left)),
+            (with(C::Char('l'), ctrl), Browse::Focus(Side::Right)),
+        ] {
+            let seq = [with(C::Char('w'), ctrl), second];
+            assert_eq!(lookup(BROWSE, &seq), Lookup::Run(act), "Ctrl 을 쥔 채 이어 누른 {second:?}");
+        }
         assert_eq!(one(PICK, press(C::Char('h'))), Lookup::Run(Pick::Up));
         assert_eq!(one(PICK, press(C::Char('l'))), Lookup::Run(Pick::Enter));
         // 소문자 `g` 하나는 맨 아래가 아니다 — SHIFT 를 떼고 견주어도 글자는 다르다.
