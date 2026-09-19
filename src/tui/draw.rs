@@ -537,6 +537,20 @@ fn banner(app: &App) -> Option<(String, bool)> {
         parts.push(format!("읽을 수 없는 줄 {}개 — 그 줄은 빠진 채로 보고 있다", app.site.unreadable.len()));
         urgent = true;
     }
+    // 층이 **안 선** 까닭은 프로젝트 안에서도 댄다 — 그 화면에서는 층이 없다는 것 말고
+    // 달리 알 길이 없다. 급하지 않다(이 프로젝트는 멀쩡하다).
+    //
+    // **붙박이들 중에서는 앞에 선다**(moai-4t1l) — 까닭이 그 글의 꼬리(`— TOML …`)라, 뒤에
+    // 서면 경고 한 줄만 있어도 80칸에서 잘려 "층을 안 세웠다" 만 남고 **왜** 가 사라진다.
+    // 그러면 고칠 것을 아는 유일한 자리가 없어진다. 드러난 것과 옆 워크트리는 잘려도
+    // 잃는 것이 없다 — 앞의 것이 `moai status` 가 다시 내고, 뒤의 것은 그 줄만 빠졌다는 말이다.
+    // 급한 둘(놓은 다시 읽기·못 읽는 줄)보다 앞서지는 않는다: 그쪽은 보고 있는 줄이 이미 틀렸다는
+    // 말이라 먼저 읽어야 하고, 둘이 함께 서면 80칸에는 어차피 한쪽만 든다.
+    if app.layer.is_none()
+        && let Some(u) = &app.unlayered
+    {
+        parts.push(u.clone());
+    }
     if app.site.warnings > 0 {
         parts.push(format!("드러난 것 {}건 — `moai status` 가 자세히 낸다", app.site.warnings));
     }
@@ -549,13 +563,6 @@ fn banner(app: &App) -> Option<(String, bool)> {
         && let Some(l) = &app.layer
     {
         parts.extend(l.problems.iter().map(|p| crate::text::one_line(p)));
-    }
-    // 층이 **안 선** 까닭은 프로젝트 안에서도 댄다 — 그 화면에서는 층이 없다는 것 말고
-    // 달리 알 길이 없다. 급하지 않다(이 프로젝트는 멀쩡하다).
-    if app.layer.is_none()
-        && let Some(u) = &app.unlayered
-    {
-        parts.push(u.clone());
     }
     // 알림 하나뿐이면 `!` 를 안 붙인다 — 담긴 것을 경보처럼 말하면 담을 때마다 무언가
     // 잘못된 줄 안다.
@@ -3941,6 +3948,25 @@ pub(super) mod tests {
         a.trouble = Some("다시 읽지 못했다 — 락".into());
         let (text, urgent) = banner(&a).unwrap();
         assert!(urgent && text.find("다시 읽지").unwrap() < text.find("담김").unwrap(), "{text}");
+    }
+
+    /// **층이 안 선 까닭은 80칸에서도 까닭째 선다**(moai-4t1l). 그 글은 까닭이 꼬리라,
+    /// 경고 한 줄 뒤에 세우면 잘려 "층을 안 세웠다" 만 남고 무엇을 고칠지가 사라진다 —
+    /// 고칠 것을 아는 자리가 이 한 줄뿐이다.
+    #[test]
+    fn the_reason_the_layer_is_missing_survives_eighty_columns() {
+        let mut a = app();
+        a.site.warnings = 4;
+        a.site.elsewhere = vec!["옆 워크트리 하나를 못 읽었다 — 스냅샷이 없다".into()];
+        a.unlayered = Some("사용자 설정을 못 읽어 프로젝트 층을 안 세웠다 — TOML 이 깨졌다".into());
+        assert!(a.layer.is_none(), "시험의 전제 — 층이 없다");
+
+        let (text, _) = banner(&a).unwrap();
+        assert!(text.find("층을 안 세웠다").unwrap() < text.find("드러난 것").unwrap(), "{text}");
+
+        let lines = render(&mut a, 80, 12);
+        assert!(lines[1].contains("TOML 이 깨졌다"), "80칸에서 까닭이 잘렸다 — {:?}", lines[1]);
+        assert!(lines.iter().all(|l| crate::text::width(l) <= 80));
     }
 
     /// 경로 줄이 **언제 읽은 화면인지** 댄다. 저절로 다시 읽으므로 배너는 없고,
