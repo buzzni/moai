@@ -5626,3 +5626,4 @@
 {"ts":"2026-09-19T21:30:26Z","id":"moai-plfi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-19T21:30:27Z","id":"moai-tmi0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-19T21:30:27Z","id":"moai-k8j1.v2k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: 새는 되돌림 1·2·3, 잘못 막음 5, 할당 8, 정리 15. 멤버로 남김: moai-9xbq(6·11·12)·moai-j9tx(10). idea: moai-9abk(4·9)·moai-ir6o(7)·moai-tq6h(13·14·문서)"}
+{"ts":"2026-09-19T21:30:53Z","id":"moai-k8j1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 첫 칸의 멤버 moai-9xbq·moai-j9tx 를 새 워크트리에서 집는다. 둘 다 src/hook.rs 의 shell_writes·shell_text 를 고치니 moai-51h9·moai-jlon 과 겹치지 않을 때 보낸다. 그 멤버로 에픽을 닫는 창은 에픽 끝 리뷰(max)를 다시 부른다 — 오라클 도구가 리뷰 원문(moai-k8j1.v2k)에 적혀 있다"}
