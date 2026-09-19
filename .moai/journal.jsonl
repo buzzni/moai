@@ -5741,3 +5741,4 @@
 {"ts":"2026-09-19T23:44:22Z","id":"moai-fauw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-19T23:44:22Z","id":"moai-lmot","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-19T23:44:32Z","id":"moai-mz0x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽은 닫혔다. 여기서 담은 생각은 없다. 시험 하나가 부하에서 흔들리는 것을 봤다 — hook::tests::a_string_handed_to_a_shell_is_read_as_commands 가 전부 돌릴 때 한 번 붉었고 혼자서도 다시 돌려서도 지나간다. src/hook.rs 는 옆 세션이 쥐고 있어 손대지 않았다."}
+{"ts":"2026-09-19T23:45:30Z","id":"moai-vt1v","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"hook 시험 a_string_handed_to_a_shell_is_read_as_commands 가 부하에서 한 번 붉었다"}
