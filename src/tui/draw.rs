@@ -553,6 +553,10 @@ fn banner(app: &App) -> Option<(String, bool)> {
 /// 자리라 빠진 화면에서는 바가 대신 대야 한다.
 fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
     let logo_w = LOGO.iter().map(|l| crate::text::width(l)).max().unwrap_or(0);
+    // 그림 다섯 줄은 문구 줄 폭 안에서 **블록째** 가운데로 민다(moai-ehr7, 사용자 결정). 줄마다
+    // 따로 맞추면 줄끼리 어긋나 그림이 깨진다. 문구 줄이 가장 넓어 그 줄은 제자리다.
+    let art = &LOGO[..LOGO.len() - 1];
+    let art_in = (logo_w - art.iter().map(|l| crate::text::width(l)).max().unwrap_or(0)) / 2;
     let told = told_of(app);
     // 라벨 칸은 `<라벨 칸> : ` 로 박았다 — [`HEADER_LABEL`] 칸과 " : " 세 칸.
     let told_w =
@@ -568,14 +572,19 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
     // 통째로 지우는 화면이 났다 — 그 번호가 숫자 키를 설명하는 유일한 자리라, 로고를 지키자고
     // 지울 것이 아니다(메일을 안 자르는 것과 같은 자).
     let want = if cell == 0 { 0 } else { HEADER_GAP + cell };
-    let with_logo = (at.width as usize) >= logo_w + HEADER_GAP * 2 + 1 + told_w + want;
+    // 로고 양옆에 같은 여백을 둔다(moai-ehr7) — 왼쪽이 0칸이면 로고가 가장자리에 붙어
+    // 한쪽으로 쏠려 보인다. **그 여백도 문턱에 센다**: 안 세면 모자란 한 칸만큼 오른쪽이 잘린다.
+    // 로고가 빠지면 여백도 함께 빠져 파이프가 첫 열에 선다.
+    let with_logo = (at.width as usize) >= HEADER_GAP + logo_w + HEADER_GAP * 2 + 1 + told_w + want;
     let lines: Vec<Line> = LOGO
         .iter()
         .enumerate()
         .map(|(n, row)| {
             let mut spans = Vec::new();
             if with_logo {
-                spans.push(Span::styled(pad(row, logo_w), dim()));
+                let indent = if n < art.len() { art_in } else { 0 };
+                spans.push(Span::raw(" ".repeat(HEADER_GAP + indent)));
+                spans.push(Span::styled(pad(row, logo_w - indent), dim()));
                 spans.push(Span::raw(" ".repeat(HEADER_GAP)));
             }
             spans.push(Span::styled("│", dim()));
@@ -587,7 +596,7 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
             Line::from(spans)
         })
         .collect();
-    let logo_cells = if with_logo { logo_w + HEADER_GAP } else { 0 };
+    let logo_cells = if with_logo { HEADER_GAP + logo_w + HEADER_GAP } else { 0 };
     let from = logo_cells + 1 + HEADER_GAP + told_w + HEADER_GAP;
     let (lines, glinted, numbered) = with_projects(app, lines, at.width as usize, from, &tags, cell);
     // 넘치면 `…` 를 남긴다 — 위젯에 맡기면 말없이 잘려 잘렸다는 표시마저 사라진다(`clip`).
@@ -4432,6 +4441,34 @@ pub(super) mod tests {
         let lines = render(&mut a, 40, 24);
         assert!(!lines[..6].iter().any(|l| l.contains('▀')), "40칸에 로고를 우겨 넣었다 — {:?}", &lines[..6]);
         assert!(lines[0].contains('│'), "좁아도 파이프는 남는다 — {:?}", lines[0]);
+    }
+
+    /// **로고 양옆의 여백은 같다**(moai-ehr7) — 왼쪽이 0칸이면 로고가 가장자리에 붙어 쏠려
+    /// 보인다. 그림 다섯 줄은 문구 줄 폭 안에서 블록째 가운데로 민다. 여백도 로고를 그릴지
+    /// 가르는 문턱에 센다 — 안 세면 문턱 폭에서 오른쪽이 한 칸 모자라 `…` 로 잘린다.
+    #[test]
+    fn the_logo_keeps_equal_margins_on_both_sides() {
+        let mut a = app();
+        a.identify = |_, _| Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() });
+        let lines = render(&mut a, 100, 24);
+        assert!(lines[5].starts_with(" Issue tracker for AI agent │"), "문구 줄 양옆이 한 칸씩이 아니다 — {:?}", lines[5]);
+        // 파이프 자리는 표시 폭으로 잰다 — 그림 글리프는 여러 바이트라 `find` 의 바이트 자리가 갈린다.
+        let pipe = |l: &str| l.split('│').next().map(crate::text::width);
+        for row in &lines[..5] {
+            assert!(row.starts_with("  ") && !row.starts_with("   "), "그림이 블록째 한 칸 더 안 들어갔다 — {row:?}");
+            assert_eq!(pipe(row), pipe(&lines[5]), "파이프 기둥이 흔들린다 — {:?}", &lines[..6]);
+        }
+        let mut stood = false;
+        for w in 40u16..=100 {
+            let head = render(&mut a, w, 24)[..6].to_vec();
+            if head.iter().any(|l| l.contains('▀')) {
+                stood = true;
+                assert!(!head.iter().any(|l| l.contains('…')), "{w}칸에서 로고를 지키고 오른쪽을 잘랐다\n{}", head.join("\n"));
+            } else {
+                assert!(head[0].starts_with('│'), "{w}칸 — 로고가 빠졌는데 여백이 남았다 — {:?}", head[0]);
+            }
+        }
+        assert!(stood, "시험의 전제 — 100칸까지 가는 동안 로고가 한 번은 선다");
     }
 
     /// **짧은 터미널에는 헤더가 서지 않는다**(moai-mzet) — 여섯 줄을 내주면 목록이 한두 줄만 남는다.
