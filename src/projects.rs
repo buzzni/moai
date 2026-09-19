@@ -106,6 +106,22 @@ pub fn open_one(path: &Path, name: String, hue: Option<crate::style::Hue>, workt
     Project { path: path.to_path_buf(), name, hue, state, origin, trouble, swept }
 }
 
+/// **여는 데까지만** 본다 — 스냅샷은 안 읽는다(moai-m59y). 줄을 곧 스레드가 읽을 자리가 쓴다
+/// (`tui::App::read_wanted`): 거기서 [`open_one`] 을 부르면 UI 실이 `issues.jsonl` 을 한 번 파싱하고
+/// 일꾼이 또 한 번 파, "스레드로 펼친다" 가 그 한 판을 그 자리에서 치른다.
+///
+/// **못 여는 갈래는 [`open_one`] 과 같은 자다** — `Uninit`·`Missing`·`Unreadable` 셋은 [`Repo::open`]
+/// 이 가르므로 스냅샷을 안 읽어도 답이 같다. 갈리는 것은 하나뿐이다: 열리지만 **스냅샷이 못 읽히는**
+/// 저장소를 여기서는 `Ok` 로 답한다 — 그 까닭은 곧 일꾼의 읽기가 제 길로 댄다.
+pub fn open_shallow(path: &Path) -> Result<Repo, State> {
+    match Repo::open(path) {
+        Ok(Opened::Repo(repo)) => Ok(repo),
+        Ok(Opened::Uninit) => Err(State::Uninit),
+        Ok(Opened::Missing) => Err(State::Missing),
+        Err(e) => Err(State::Unreadable(e.message)),
+    }
+}
+
 impl State {
     /// 준 디렉터리 그 자리를 연다. **실패하지 않는다** — 못 여는 것도 상태다.
     ///
@@ -117,18 +133,20 @@ impl State {
 
     /// 여는 것은 [`State::at`] 과 같고, 연 저장소는 `worktree` 면 옆을 겹쳐 읽는다.
     /// 옆 워크트리를 못 찾은 것(git 밖)도 문제로 든다 — 겹쳐 보라고 시킨 것이다.
+    ///
+    /// **못 여는 갈래는 [`open_shallow`] 하나가 가른다** — 두 벌로 적으면 한쪽만 고쳐져, 설정이
+    /// 깨진 저장소를 층의 줄과 `project ls` 가 달리 부른다(moai-9omq 가 고친 바로 그것이다).
     fn at_with(dir: &Path, worktree: bool) -> (State, crate::worktree::Origin, Vec<String>, bool) {
         let lone = |s: State| (s, crate::worktree::Origin::default(), Vec::new(), false);
-        match Repo::open(dir) {
-            Ok(Opened::Repo(repo)) => match crate::worktree::gather(&repo, worktree) {
-                Ok(g) => {
-                    let trouble = g.unfound.into_iter().chain(g.trouble).collect();
-                    (State::Open { repo, load: g.load }, g.origin, trouble, g.swept)
-                }
-                Err(e) => lone(State::Unreadable(e.message)),
-            },
-            Ok(Opened::Uninit) => lone(State::Uninit),
-            Ok(Opened::Missing) => lone(State::Missing),
+        let repo = match open_shallow(dir) {
+            Ok(repo) => repo,
+            Err(state) => return lone(state),
+        };
+        match crate::worktree::gather(&repo, worktree) {
+            Ok(g) => {
+                let trouble = g.unfound.into_iter().chain(g.trouble).collect();
+                (State::Open { repo, load: g.load }, g.origin, trouble, g.swept)
+            }
             Err(e) => lone(State::Unreadable(e.message)),
         }
     }
