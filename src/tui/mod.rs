@@ -3590,15 +3590,16 @@ mod tests {
     /// 접기는 접을 것이 없으면 나가기와 같은 일을 하므로 여기서 함께 잰다(moai-7qot).
     #[test]
     fn entering_and_leaving_keys_go_to_the_focused_pane() {
-        for k in [KeyCode::Enter] {
-            let mut a = app();
-            a.hit("Ctrl-w w");
-            a.key(key(k));
-            assert!(a.path.is_empty(), "상세에 포커스가 있는데 {k:?} 가 목록을 들어갔다");
-            a.hit("Ctrl-w w");
-            a.key(key(k));
-            assert_eq!(a.path.len(), 1, "목록에 포커스가 있는데 {k:?} 가 안 들어갔다");
-        }
+        let mut a = app();
+        a.hit("Ctrl-w w");
+        a.key(key(KeyCode::Enter));
+        assert!(a.path.is_empty(), "상세에 포커스가 있는데 Enter 가 목록을 들어갔다");
+        // 펼침도 목록 포커스를 탄다 — 상세를 읽다 누른 `→` 가 목록의 줄을 늘리면 안 된다.
+        a.key(key(KeyCode::Right));
+        assert_eq!(row_ids(&a).len(), 3, "상세에 포커스가 있는데 `→` 가 목록을 펼쳤다");
+        a.hit("Ctrl-w w");
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.path.len(), 1, "목록에 포커스가 있는데 Enter 가 안 들어갔다");
         for k in [KeyCode::Backspace, KeyCode::Left] {
             let mut a = app();
             a.key(key(KeyCode::Enter));

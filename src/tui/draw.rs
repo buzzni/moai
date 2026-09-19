@@ -12,7 +12,7 @@ use super::scroll::Scroll;
 use super::layer::{Look, Place, Shut};
 use super::picker::{self, Picker};
 use super::{App, Input, Mode, Pane, Row};
-use crate::nav::Entry;
+use crate::nav::{Entry, Twig};
 use crate::query::GrepIn;
 use crate::report::Blocker;
 use crate::style;
@@ -907,8 +907,10 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 걷는 셈은 **폭만으로** 한다(`right_fit`) — 줄을 다 지어 봐야 알던 때는 스크롤 창 밖의 줄까지
     // 매 프레임 지었다(moai-wt4n). 줄의 머리 폭과 셈 글만 있으면 걷힐 열이 정해진다.
     let common = rows.iter().zip(&tallies).fold(app.fields, |common, (r, t)| match r {
-        Row::Item(e, _) => match e.at() {
-            Some(at) => common.both(right_fit(app.fields, head_width(app, at, app.fields, cols) + trail_width(app, e), t, inner)),
+        Row::Item(e, twig) => match e.at() {
+            Some(at) => {
+                common.both(right_fit(app.fields, head_width(app, at, twig, app.fields, cols) + trail_width(app, e), t, inner))
+            }
             None => common,
         },
         Row::Up | Row::Project(_) => common,
@@ -1068,8 +1070,8 @@ fn row_line<'a>(
 ) -> Line<'a> {
     // 이 파일의 `Field` 는 폼의 칸이다(`form::Field`) — 목록 열은 여기서만 가린다.
     use super::view::Field;
-    let e = match r {
-        Row::Item(e, _) => e,
+    let (e, twig) = match r {
+        Row::Item(e, twig) => (e, twig),
         Row::Up => return Line::from(Span::styled("..", dim())),
         Row::Project(at) => return place_line(app, *at, budget),
     };
@@ -1139,13 +1141,19 @@ fn row_line<'a>(
         head.push(Span::styled(mark, branch()));
         head.push(Span::raw(" "));
     }
+    // **가지는 제목 바로 앞이다**(moai-r6rm, 사용자 결정) — id·우선순위·글리프 칸은 자리가
+    // 고정이고, 깊이는 제목 칸 안에서만 자란다. 흐리게 칠한다: 뜻은 제목이 지고 가지는 모양만
+    // 말한다.
+    if twig.depth() > 0 {
+        head.push(Span::styled(twig_lead(twig), dim()));
+    }
     // 커서 자리 + 머리글 폭. **`CURSOR` 에서 잰다** — 숫자를 손으로 적으면
     // 글리프를 바꾼 날 제목 몫이 한두 칸 넉넉해지고, 넘친 줄은 위젯이 말없이
     // 잘라 내 잘렸다는 `…` 마저 사라진다.
     let mut head_w = spans_width(&head);
     // 걷는 셈(`right_fit`)이 줄을 안 짓고 재는 폭과 같아야 한다 — 갈리면 창 밖 줄을 안 짓는 대가로
     // 열이 줄마다 들쭉날쭉 선다.
-    debug_assert_eq!(head_w, head_width(app, at, fields, cols), "머리 폭 셈이 줄과 갈렸다");
+    debug_assert_eq!(head_w, head_width(app, at, twig, fields, cols), "머리 폭 셈이 줄과 갈렸다");
     // 셈(`tally`, [`tally_of`])은 **제목보다 먼저 자리를 얻는다** — 긴 제목에 밀려 잘리면 진척을
     // 말하는 것이 사라진다.
     // **검색이 드러낸 숨은 줄**(moai-4x87, 사용자 결정) — 제목 뒤에 `숨김` 을 달고 줄을 흐린다. 뜻은
@@ -1261,10 +1269,10 @@ fn trail_width(app: &App, e: &Entry) -> usize {
 /// 줄 머리의 폭 — 커서 뒤, 제목 앞. id·우선순위(목록이 정한 폭), 두 칸 글리프와 빈칸, 그리고 `[NEW]`·
 /// `⎇ <가지>`. **줄을 짓지 않고 잰다** — 오른쪽 열을 걷는 셈(`right_fit`)이 창 밖 줄까지 봐야 하는데 그
 /// 줄을 다 짓지 않으려고(moai-wt4n). 줄(`row_line`)이 지은 폭과 같은지는 거기서 늘 견준다.
-fn head_width(app: &App, at: usize, fields: super::view::Fields, cols: Head) -> usize {
+fn head_width(app: &App, at: usize, twig: &Twig, fields: super::view::Fields, cols: Head) -> usize {
     // 칸 글리프는 도는 줄이든 아니든 두 칸이다(`row_glyph`). 좁아서 스피너를 걷는 것(`Head::still`)은
     // 걷기 셈 **뒤의** 일이라 여기에 안 든다.
-    cols.lead(fields) + 2 + 1 + lead_extras(app, at, fields)
+    cols.lead(fields) + 2 + 1 + lead_extras(app, at, fields) + crate::text::width(&twig_lead(twig))
 }
 
 /// 켠 오른쪽 열 가운데 **이 머리 폭의 줄에 들어가는 것** — 좁으면 사람이 정한 차례로 걷는다(날짜 →
@@ -1296,6 +1304,30 @@ fn tally_cell(tally: &str, alone: bool, fields: super::view::Fields) -> String {
         (false, true) => format!("  {tally:>TALLY_W$}"),
         (false, false) => String::new(),
     }
+}
+
+/// 제목 앞의 가지 — `│  ├─ `(moai-r6rm). 깊이 0 이면 빈 글자다.
+///
+/// **가는 선 한 벌만 쓴다**(사용자 결정 2026-09-19). 굵은 선(`┣━`)은 창 테두리(`BorderType::Thick`)
+/// 와 무게가 같아 가지가 제목보다 먼저 읽히고, `┖`(U+2516)처럼 세로만 굵은 글자는 이음줄(`│`)과
+/// 굵기가 섞인다.
+///
+/// 한 마디는 **세 칸**이다. box-drawing 은 East Asian Width 가 Ambiguous 라 두 칸으로 그리는
+/// 터미널이 있는데(moai-havc 와 같은 자리), 그때는 제목이 그만큼 밀릴 뿐 줄은 안 깨진다 —
+/// 제목 몫은 이 폭을 빼고 [`clip`] 이 정하고, 넘친 줄은 나가는 자리에서 한 번 더 자른다([`fit`]).
+fn twig_lead(twig: &Twig) -> String {
+    let depth = twig.depth();
+    if depth == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    // 조상의 층 — 그 줄 뒤에 형제가 더 있으면 이음줄을 잇는다. 0 층(지금 디렉터리의 줄)은 가지가
+    // 없어 그릴 칸이 없다.
+    for level in 1..depth {
+        out.push_str(if twig.kin(level) { "│  " } else { "   " });
+    }
+    out.push_str(if twig.last() { "└─ " } else { "├─ " });
+    out
 }
 
 /// 줄의 `⎇ <가지>` 표시 — 서지 않으면 `None`. 줄(`row_line`)과 좁을 때 머리를 걷는 셈(`Head::of`)이
@@ -1416,7 +1448,7 @@ impl Head {
         // 머리 뒤에 줄마다 붙어 안 걷히는 것(`[NEW]`·`⎇ <가지>`, 제목 뒤의 `숨김`, 셈과 그 앞 두 칸)의 가장 긴 폭.
         let mut tail = 0;
         for (r, tally) in rows.iter().zip(tallies) {
-            let Row::Item(e, _) = r else { continue };
+            let Row::Item(e, twig) = r else { continue };
             let Some(at) = e.at() else { continue };
             let i = &app.issues[at];
             w.id = w.id.max(crate::text::width(&i.id));
@@ -1424,7 +1456,10 @@ impl Head {
             let p = i.priority();
             w.priority = w.priority.max(1 + if p >= 100 { 3 } else if p >= 10 { 2 } else { 1 });
             let tally = if tally.is_empty() { 0 } else { 2 + crate::text::width(tally) };
-            tail = tail.max(lead_extras(app, at, fields) + trail_width(app, e) + tally);
+            // 가지도 줄마다 붙어 안 걷히는 것이다 — 빠뜨리면 깊이 든 줄에서만 셈이 말없이 잘린다.
+            tail = tail.max(
+                lead_extras(app, at, fields) + crate::text::width(&twig_lead(twig)) + trail_width(app, e) + tally,
+            );
         }
         // **좁으면 우선순위 → id 차례로 걷는다**(moai-wilg, 사용자 결정 2026-09-18). 오른쪽 열과
         // 스피너는 걷을 줄 알았지만 머리는 아무리 좁아도 안 걷혀, 폭 40 의 에픽 줄에서 진척 셈이
@@ -2642,6 +2677,64 @@ pub(super) mod tests {
         a.view = super::super::view::View::default();
         a.see();
         a
+    }
+
+    /// **펼친 멤버는 제목 칸에서만 들여 쓴다**(moai-r6rm, 사용자 결정) — id·우선순위·칸 글리프는
+    /// 자리가 고정이고, 가지는 가는 선 한 벌(`│` `├─` `└─`)이다.
+    #[test]
+    fn expanded_members_draw_a_light_twig_in_the_title_cell() {
+        let mut a = every(issues());
+        a.key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
+        // **목록 칸만 본다** — 가지의 `│` 를 가르개로 쓸 수 없으니(가지가 그 글자다) 포커스 칸의
+        // 굵은 테두리 안쪽을 집는다.
+        let rows: Vec<String> = render(&mut a, 100, 12)
+            .into_iter()
+            .filter(|l| l.contains("argos-"))
+            .filter_map(|l| l.split('┃').nth(1).map(str::to_string))
+            .collect();
+        let member = rows.iter().find(|l| l.contains("argos-0003")).cloned().unwrap_or_default();
+        let held = rows.iter().find(|l| l.contains("argos-0004")).cloned().unwrap_or_default();
+        assert!(member.contains("├─ 멤버"), "형제가 더 있는 멤버가 `├─` 로 안 섰다\n{rows:?}");
+        assert!(held.contains("└─ 집은 멤버"), "막내가 `└─` 로 안 섰다\n{rows:?}");
+        // **id 는 자리가 고정이다** — 에픽 줄과 멤버 줄의 id 가 같은 칸에서 시작한다.
+        let epic = rows.iter().find(|l| l.contains("argos-0001")).cloned().unwrap_or_default();
+        let id_at = |l: &str| l.find("argos-").expect("id 가 없다");
+        assert_eq!(id_at(&member), id_at(&epic), "멤버 줄의 id 가 밀렸다\n{rows:?}");
+        assert_eq!(id_at(&held), id_at(&epic), "막내 줄의 id 가 밀렸다\n{rows:?}");
+        // 굵은 선은 창 테두리의 무게다 — 가지에는 안 쓴다.
+        assert!(!member.contains('┣') && !member.contains('┗') && !member.contains('┖'), "{member:?}");
+    }
+
+    /// **깊이 2 는 이음줄(`│`)을 잇는다** — 뒤에 형제가 더 있는 조상 밑에서만. 막내 밑은 빈칸이다.
+    #[test]
+    fn a_deeper_twig_draws_the_line_of_an_ancestor_that_has_more_siblings() {
+        let mut is = issues();
+        let mut stone = Issue::new("argos-0100".into(), "마일스톤".into(), Kind::Milestone, Status::new("todo"), "2026-09-01T00:00:00Z");
+        stone.priority = Some(1);
+        for i in &mut is {
+            if i.kind == Kind::Epic {
+                i.milestone = Some("argos-0100".into());
+            }
+        }
+        let mut second = Issue::new("argos-0101".into(), "둘째 에픽".into(), Kind::Epic, Status::new("todo"), "2026-09-01T00:00:00Z");
+        second.milestone = Some("argos-0100".into());
+        second.priority = Some(2);
+        let mut kid = Issue::new("argos-0102".into(), "둘째의 멤버".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        kid.epic = Some("argos-0101".into());
+        is.extend([stone, second, kid]);
+        let mut a = every(is);
+        a.hit("Tab");
+        let rows: Vec<String> = render(&mut a, 100, 14)
+            .into_iter()
+            .filter(|l| l.contains("argos-"))
+            .filter_map(|l| l.split('┃').nth(1).map(str::to_string))
+            .collect();
+        let first_kid = rows.iter().find(|l| l.contains("argos-0003")).cloned().unwrap_or_default();
+        let last_kid = rows.iter().find(|l| l.contains("argos-0102")).cloned().unwrap_or_default();
+        // 첫 에픽 뒤에 둘째 에픽이 있으니 그 멤버 앞에는 이음줄이 선다.
+        assert!(first_kid.contains("│  ├─ 멤버"), "조상의 이음줄이 없다\n{rows:?}");
+        // 둘째 에픽은 그 층의 막내라 그 멤버 앞은 빈칸이다.
+        assert!(last_kid.contains("   └─ 둘째의 멤버") && !last_kid.contains('│'), "막내 밑에 이음줄을 그었다\n{rows:?}");
     }
 
     /// **`SPC c` 로 켠 열은 오른쪽에 서고, 좁으면 날짜 → 담당 → 태그 차례로 걷힌다**(moai-g7p8).

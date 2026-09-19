@@ -81,6 +81,15 @@ impl Entry {
     }
 }
 
+/// [`Index::entries_tree`] 가 층마다 그대로 물려 주는 것 — 이슈와 거름망·차례·무엇이 열렸는가.
+/// 한 벌로 묶어 다니는 것은 층마다 같은 자를 쓴다는 뜻이다.
+struct Tree<'a> {
+    issues: &'a [Issue],
+    keep: &'a dyn Fn(usize) -> bool,
+    order: &'a dyn Fn(usize, usize) -> std::cmp::Ordering,
+    open: &'a dyn Fn(&Path) -> bool,
+}
+
 /// 트리로 펼친 줄의 **가지 모양**(moai-7qot). 지금 디렉터리부터 이 줄까지 층마다 "그 층의 줄
 /// 뒤에 형제가 더 있는가" 를 담는다 — 그래서 길이는 깊이보다 하나 크고, 지금 디렉터리에 바로
 /// 사는 줄은 깊이 0 이라 가지를 안 그린다.
@@ -376,23 +385,15 @@ impl Index {
         open: &dyn Fn(&Path) -> bool,
     ) -> Vec<(Entry, Twig)> {
         let mut out: Vec<(Entry, Twig)> = Vec::new();
-        self.walk(issues, path, keep, order, open, &mut Vec::new(), &mut out);
+        let how = Tree { issues, keep, order, open };
+        self.walk(&how, path, &mut Vec::new(), &mut out);
         out
     }
 
     /// [`Index::entries_tree`] 의 몸통. `kin` 은 여기까지 내려온 층마다 "그 줄 뒤에 형제가 더
     /// 있는가" 다 — 그것이 곧 [`Twig`] 다.
-    fn walk(
-        &self,
-        issues: &[Issue],
-        path: &Path,
-        keep: &dyn Fn(usize) -> bool,
-        order: &dyn Fn(usize, usize) -> std::cmp::Ordering,
-        open: &dyn Fn(&Path) -> bool,
-        kin: &mut Vec<bool>,
-        out: &mut Vec<(Entry, Twig)>,
-    ) {
-        let here = self.entries_sorted(issues, path, keep, order);
+    fn walk(&self, how: &Tree<'_>, path: &Path, kin: &mut Vec<bool>, out: &mut Vec<(Entry, Twig)>) {
+        let here = self.entries_sorted(how.issues, path, how.keep, how.order);
         let last = here.len().saturating_sub(1);
         for (n, e) in here.into_iter().enumerate() {
             let seg = match &e {
@@ -406,8 +407,8 @@ impl Index {
             if let Some(seg) = seg {
                 let mut under = path.clone();
                 under.push(seg);
-                if open(&under) {
-                    self.walk(issues, &under, keep, order, open, kin, out);
+                if (how.open)(&under) {
+                    self.walk(how, &under, kin, out);
                 }
             }
             kin.pop();
