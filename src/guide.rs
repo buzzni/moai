@@ -248,6 +248,68 @@ const WRITING: &str = r#"**제목과 본문은 따로 넘긴다.** 제목은 인
 지킬 것은 다음 세션이 `moai show <id>` 로 읽는다는 것 하나다. 이 셋은 그래서 있는 권고이지
 검사하는 규칙이 아니다."#;
 
+/// 한국어 글을 다듬는 두 플러그인 — `(설치 id, 마켓플레이스 저장소)`. **`moai skill install` 이
+/// moai 와 같은 scope 로 함께 깔고**(moai-lr1s), 훅은 이 id 로 깔렸는지 본다(moai-6rrb). 안내 글과
+/// 설치와 훅이 다른 이름을 대면 시킨 대로 깔아도 알림이 끝내 안 꺼진다. 설치 id 의 `@` 앞이
+/// 플러그인 이름이고, 스킬은 `<플러그인>:<스킬>` 로 불린다 — 안내 글이 스킬을 그 이름으로 대는 까닭이다.
+///
+/// **사용자 전역에 깔지 않는다**(사용자, moai-5wk4 둘째 판). 첫 판은 "없으면 사용자 전역에
+/// 설치한다" 고 가르쳐, 남의 기계의 에이전트가 묻지 않고 버전 고정 없는 바깥 코드를 전역에
+/// 들이고 `~/.claude/settings.json` 을 고칠 수 있었다(리뷰 moai-5wk4.ydh 8번). 까는 것은 사람이
+/// 부르는 `moai skill install` 하나다.
+pub const KOREAN_PLUGINS: [(&str, &str); 2] =
+    [("korean-skills@korean-skills", "DaleSeo/korean-skills"), ("humanize-korean@im-not-ai", "epoko77-ai/im-not-ai")];
+
+/// 한국어 글을 넣기 전에 다듬는다(사용자, moai-5wk4). **권고다** — `WRITING` 과 같은 까닭으로
+/// 막지 않는다. 훅이 알림을 덧붙이는 것(moai-6rrb)도 알림일 뿐이다.
+///
+/// **늘 읽히는 자리에는 이만큼만 둔다**(사용자, 리뷰 13번). AGENTS 블록과 SKILL.md 는 한국어를 안
+/// 쓰는 저장소에서도 모든 세션이 읽는다 — 자세한 절차는 참고 문서의 `KOREAN_DETAIL` 로 내린다.
+///
+/// 판정이 **글의 글자**인 것은 결정이다: 화면 말(`MOAI_LANG`)은 사람이 읽는 말이지 에이전트가
+/// 적는 말이 아니다 — 영어 화면에서 한국어 이슈를 적는 사람도 있다.
+///
+/// **맞춤법이 마지막이다**(사용자, 리뷰 11번). 윤문이 제일 크게 고치니, 그 뒤를 맞춤법이 다시 본다.
+/// `humanize-korean` 을 긴 글에만 쓰는 까닭은 값이다 — 한 번에 서브에이전트를 1~3번 넘게 부른다.
+const KOREAN: &str = r#"**한국어 글은 moai 에 넣기 전에 다듬는다** — 한글이 한 글자라도 든 제목·본문·노트·`-m`,
+리뷰 원문 노트까지. 영어로만 쓴 글은 그대로 넣는다.
+
+- `korean-skills:humanizer` 로 AI 티를 걷고, 20줄을 넘으면 `humanize-korean:humanize-korean` 을 더
+  거친 뒤, 마지막에 `korean-skills:grammar-checker` 로 맞춤법·띄어쓰기를 본다
+- id·명령·경로·수·코드 조각과 꼴이 정해진 줄(`model: …`·`다음: …`·`Regression-of: …`)은 그대로 둔다
+- 두 플러그인은 `moai skill install` 이 함께 깐다. 자세한 것은 `references/commands.md` 의 "한국어 글" 에 있다"#;
+
+/// 한국어 글의 자세한 절차 — 참고 문서에만 둔다. 부를 때만 읽힌다.
+///
+/// **리뷰 원문도 다듬는다**(사용자 결정). 규칙 3 의 `리뷰가 낸 글을 그대로` 와 어긋나 보이니
+/// 그 말이 무엇을 막는지를 여기 적는다 — 줄이거나 제 판단을 섞는 것이지 문장을 다듬는 것이 아니다.
+///
+/// **긴 글은 저장소 밖에서 다듬는다**(사용자, 리뷰 1·12·14번). `humanize-korean` 은 cwd 에
+/// `_workspace/` 를 만들고 글의 사본을 남긴다 — 저장소 안에서 돌리면 `.gitignore` 를 고치는 편집이
+/// 저장소마다 하나 늘고, 사본은 끝없이 쌓인다.
+///
+/// **다 쓰면 저장소로 돌아온다**(리뷰 moai-5wk4.76z). 훅은 세션의 자리로 트래커를 찾는다 — 밖에 선 채로
+/// 남으면 그 세션의 모든 규칙과 알림이 말없이 꺼진다(`cmd::hook::decide`).
+const KOREAN_DETAIL: &str = r#"늘 보이는 규칙은 `SKILL.md` 의 "한국어 글" 에 있다. 여기는 그 절차다.
+
+- 리뷰 원문은 줄이거나 판단을 섞지 않고 문장만 다듬는다 — 규칙 3 이 `그대로` 옮기라는 것은 그 뜻이다
+- 20줄을 넘는 글은 저장소 밖(스크래치패드나 임시 디렉터리)으로 옮겨 그 자리를 cwd 로 두고
+  `humanize-korean:humanize-korean` 을 부른다. 이 스킬은 cwd 에 `_workspace/` 를 만든다 — 다 쓰면 지운다
+- 다 쓰면 저장소로 돌아온다 — 훅은 세션이 선 자리로 트래커를 찾아, 밖에 선 채로는 규칙이 하나도 안 선다
+- 다듬은 글이 뜻을 바꿨으면 원래 글로 돌아간다. 다듬기는 문장을 고치는 것이지 사실을 고치는 것이 아니다
+- 플러그인이 없으면 에이전트가 스스로 깔지 않는다 — 사람에게 `moai skill install` 을 다시 부르라고
+  청한다. 그것이 moai 와 같은 scope 로 아래 둘을 함께 깐다. 없어도 moai 는 아무것도 막지 않는다"#;
+
+/// 한국어 글의 참고 절 — 절차에 두 플러그인의 이름을 붙인다. 이름은 `KOREAN_PLUGINS` 한 곳에서 온다.
+fn korean_detail() -> String {
+    let plugins = KOREAN_PLUGINS
+        .iter()
+        .map(|(id, repo)| format!("    {id:<32}https://github.com/{repo}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{KOREAN_DETAIL}\n\n{plugins}")
+}
+
 /// 글 스타일의 예시(moai-1xf2). **참고 문서에만 둔다** — AGENTS 블록과 SKILL.md 는 언제나
 /// 읽히는 자리라 예시 한 벌이 모든 세션의 값이 된다. 규칙은 짧게 늘 보이고, 예시는 부를 때 온다.
 ///
@@ -472,6 +534,10 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 
 {WRITING}
 
+### 한국어 글
+
+{KOREAN}
+
 ### 지금 범위가 아닌 것은 담는다
 
 {IDEAS}
@@ -560,6 +626,10 @@ description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐
 ## 이슈에 적는 글
 
 {WRITING}
+
+## 한국어 글
+
+{KOREAN}
 
 ## 훅이 실제로 보는 것 넷
 
@@ -711,6 +781,10 @@ PLAN
 
 {WRITING_EXAMPLE}
 
+## 한국어 글
+
+{korean}
+
 ## 커밋에 id 를 적는다
 
 {COMMITS}
@@ -768,7 +842,8 @@ print(t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
 **어느 디렉터리에서 부르든 같다.** 사람도 커밋 칸도 그 트래커의 `.moai` 뿌리에서
 읽는다 — 프로젝트 안에 다른 저장소가 겹쳐 있어도(서브모듈·`vendor`) 거기서 부른
 `moai` 가 그 저장소의 이름을 적지 않는다.
-"#
+"#,
+        korean = korean_detail()
     )
 }
 
@@ -1473,6 +1548,13 @@ fn brief() -> String {
        다른 쪽을 기다린다. 이 에픽이 내건 것이 그것 없이 안 이뤄지면 idea 가 아니라 멤버다 —
        `moai -C <루트> add '<무엇을>' -e <에픽>` 로 세워 첫 칸에 두고, 11 에서 **옆이 쥐어 남긴
        멤버**로 그 옆 일과 함께 댄다. 감독이 그 일이 끝난 뒤 보낸다. 미루지 않는다
+    4-4. **moai 에 넣는 한국어 글은 한국어 글쓰기 플러그인으로 다듬는다** — 한글이 든 제목·본문·
+       노트·`-m`·리뷰 원문 노트 전부. `korean-skills:humanizer` 로 윤문하고, 20줄을 넘으면 저장소 밖
+       (스크래치패드)에서 `humanize-korean:humanize-korean` 을 더 거친 뒤 그 `_workspace/` 를 지우고
+       워크트리로 돌아와(밖에 선 채로는 훅이 트래커를 못 찾아 규칙이 안 선다),
+       마지막에 `korean-skills:grammar-checker` 로 맞춤법을 본다. id·명령·경로·수는 그대로 두고,
+       9-1 의 모델 줄과 12 의 `다음:` 줄, `Regression-of:` 줄은 다듬지 않는다. **리뷰 서브에이전트에게도**
+       이 말을 준다
     5. **멤버마다 리뷰하지 않는다.** 멤버 하나가 끝나면 시험을 돌리고 커밋해 다음 멤버로
        간다 — 리뷰는 멤버가 다 끝난 뒤 7 에서 에픽 전체를 한 번 본다. 리뷰 한 판이 비싸
        멤버 수만큼 부르지 않는다. 멤버 1 의 버그 위에 멤버 2 가 쌓이는 값은 그 한 번에서
@@ -1578,7 +1660,8 @@ mod tests {
     #[test]
     fn both_surfaces_carry_the_same_pieces() {
         let (agents, skill, reference) = (agents(), skill(), reference());
-        for piece in [CHEATSHEET, FORKS, NO_GATE, WRITING, CLOSING] {
+        assert!(reference.contains(&korean_detail()), "참고 문서에 한국어 글 절차가 없다");
+        for piece in [CHEATSHEET, FORKS, NO_GATE, WRITING, KOREAN, CLOSING] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(skill.contains(piece), "스킬에 없다 — {head}");
@@ -1590,6 +1673,21 @@ mod tests {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(reference.contains(piece), "참고 문서에 없다 — {head}");
+        }
+    }
+
+    /// **안내가 부르라는 스킬이 설치한 플러그인의 것이다**(moai-5wk4). 설치 명령은 `korean` 이
+    /// `KOREAN_PLUGINS` 에서 뽑으니 따로 안 잰다 — 손으로 적는 것은 스킬 이름뿐이다. 플러그인
+    /// 스킬은 `<플러그인>:<스킬>` 로 불려, 설치 id 의 `@` 앞과 스킬 이름의 `:` 앞이 갈라지면 시킨
+    /// 대로 설치해도 부를 스킬이 없다. 첫 판은 `im-not-ai 의 humanize-korean` 처럼 마켓플레이스
+    /// 이름을 댔다. 워커 브리프도 같은 이름을 싣는다.
+    #[test]
+    fn the_korean_piece_names_skills_of_the_plugins_it_installs() {
+        let brief = brief();
+        for (id, _) in KOREAN_PLUGINS {
+            let (plugin, _) = id.split_once('@').unwrap();
+            assert!(KOREAN.contains(&format!("`{plugin}:")), "안내가 {plugin} 의 스킬을 안 댄다");
+            assert!(brief.contains(&format!("`{plugin}:")), "브리프가 {plugin} 의 스킬을 안 댄다");
         }
     }
 

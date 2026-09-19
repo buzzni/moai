@@ -303,6 +303,12 @@ struct Seg {
     /// 을 지났다. 그 묶음의 값은 몸통이 안 돌았으면 0 이라, 몸통 안의 집기가 묶음 밖으로 이어지지 않는다.
     /// `{ … }` 는 몸통이 늘 돌아 안 센다.
     shut: Option<usize>,
+    /// 이 토막에 **글로 흘러드는 것** — 이 토막이 연 heredoc(`<<`)의 본문(제 명령 치환 안의 것도)과
+    /// here-string(`<<<`)의 낱말. 낱말에도 쓰기에도 안 든다. [`writes_korean`] 이 stdin 과 명령 치환으로
+    /// 받는 글을 여기서 읽는다 — 명령줄 전체에서 찾던 판은 옆 토막의 한글(커밋 메시지·경로)에 알림을 달았다.
+    fed: Vec<String>,
+    /// 이 토막이 연 heredoc 의 번호([`Lexer::docs`]) — 본문은 토막을 닫은 뒤에 읽혀, `run` 이 끝에서 `fed` 로 옮긴다.
+    docs: Vec<usize>,
 }
 
 /// 토막 사이의 이음사([`Seg::join`]).
@@ -371,8 +377,10 @@ enum Aim {
     Word,
     /// `>`·`>>`·`>|`·`&>`·`<>` — 쓰는 파일.
     Write,
-    /// `<`·`<<<`·`<&` — 읽는 것. 낱말도 쓰기도 아니다.
+    /// `<`·`<&` — 읽는 것. 낱말도 쓰기도 아니다.
     Read,
+    /// `<<<` — 읽는 글 그 자체. 낱말도 쓰기도 아니고, 이 토막에 흘러드는 글이다([`Seg::fed`]).
+    Here,
     /// `>&` — 숫자나 `-` 면 fd 를 잇는 것이고, 아니면 그 파일에 쓴다.
     Dup,
 }
@@ -388,8 +396,10 @@ struct Lexer<'a> {
     stack: Vec<Ctx>,
     /// `[[ … ]]` 안 — `>`·`<`·`&&`·`||`·괄호가 비교와 묶음이다.
     test: bool,
-    /// 이 줄이 끝나면 건너뛸 heredoc 본문들 — 종료어와, 앞 탭을 걷는가(`<<-`).
-    heredocs: Vec<(String, bool)>,
+    /// 이 줄이 끝나면 건너뛸 heredoc 본문들 — 종료어와, 앞 탭을 걷는가(`<<-`), 본문을 적을 [`Lexer::docs`] 의 번호.
+    heredocs: Vec<(String, bool, usize)>,
+    /// 건너뛴 heredoc 본문들 — 연 토막이 [`Seg::docs`] 로 번호를 든다.
+    docs: Vec<String>,
     /// 지금 몇 겹의 `( … )` 묶음 안인가([`Seg::depth`]).
     group: usize,
     /// 마지막으로 읽은 이음사 — 다음에 쌓이는 토막의 [`Seg::join`] 이 된다.
@@ -425,6 +435,7 @@ impl<'a> Lexer<'a> {
             stack: Vec::new(),
             test: false,
             heredocs: Vec::new(),
+            docs: Vec::new(),
             group: 0,
             join: Join::default(),
             braces: 0,
@@ -502,7 +513,18 @@ impl<'a> Lexer<'a> {
             }
         }
         self.end_by(None);
-        self.all.into_iter().filter(|s| !s.words.is_empty() || !s.writes.is_empty()).collect()
+        let docs = std::mem::take(&mut self.docs);
+        self.all
+            .into_iter()
+            .filter(|s| !s.words.is_empty() || !s.writes.is_empty())
+            .map(|mut s| {
+                // 번호는 이 렉서의 것이다 — 비워 두지 않으면 바깥 렉서가 치환 안의 토막을 다시 쌓을 때
+                // 제 번호로 읽어 남의 본문을 붙인다.
+                let own = std::mem::take(&mut s.docs);
+                s.fed.extend(own.into_iter().filter_map(|n| docs.get(n).cloned()));
+                s
+            })
+            .collect()
     }
 
     /// 따옴표 밖, 명령 치환 밖 — 셸의 연산자가 뜻을 갖는 자리.
@@ -765,7 +787,7 @@ impl<'a> Lexer<'a> {
             Some('<') => {
                 self.chars.next();
                 if self.chars.next_if_eq(&'<').is_some() {
-                    self.aim = Aim::Read;
+                    self.aim = Aim::Here;
                 } else {
                     self.heredoc();
                 }
@@ -835,7 +857,10 @@ impl<'a> Lexer<'a> {
             }
         }
         if !tag.is_empty() {
-            self.heredocs.push((tag, strip));
+            let n = self.docs.len();
+            self.docs.push(String::new());
+            self.seg.docs.push(n);
+            self.heredocs.push((tag, strip, n));
         }
     }
 
@@ -845,7 +870,7 @@ impl<'a> Lexer<'a> {
     /// 읽는다. 앞뒤를 다듬어 견주던 판은 본문에 인용된 `    MD` 에서 본문을
     /// 끝내, 남은 본문을 명령으로 읽었다.
     fn skip_heredocs(&mut self) {
-        for (tag, strip) in std::mem::take(&mut self.heredocs) {
+        for (tag, strip, n) in std::mem::take(&mut self.heredocs) {
             loop {
                 let mut line = String::new();
                 let mut more = false;
@@ -857,7 +882,14 @@ impl<'a> Lexer<'a> {
                     line.push(d);
                 }
                 let body = if strip { line.trim_start_matches('\t') } else { line.as_str() };
-                if body.strip_suffix('\r').unwrap_or(body) == tag || !more {
+                if body.strip_suffix('\r').unwrap_or(body) == tag || (!more && body.is_empty()) {
+                    break;
+                }
+                // 본문은 명령이 아니지만 그 토막에 흘러드는 글이다([`Seg::fed`]).
+                let doc = &mut self.docs[n];
+                doc.push_str(body);
+                doc.push('\n');
+                if !more {
                     break;
                 }
             }
@@ -877,6 +909,7 @@ impl<'a> Lexer<'a> {
         match std::mem::take(&mut self.aim) {
             Aim::Write => self.seg.writes.push(word),
             Aim::Read => {}
+            Aim::Here => self.seg.fed.push(word),
             Aim::Dup if word.chars().all(|d| d.is_ascii_digit() || d == '-') => {}
             Aim::Dup => self.seg.writes.push(word),
             Aim::Word => {
@@ -2033,6 +2066,141 @@ fn aside_in(issues: &[Issue], focus: &[&Issue], cmd: &str, only: &dyn Fn(usize) 
     ))
 }
 
+/// 글을 적는 `moai` 인가 — 제목·본문·노트·`-m` 을 받는 동사. **읽기는 안 센다** — `show -g 한글` 도,
+/// 네임스페이스 밑의 읽기(`idea ls -g 한글`·`epic show -g …`)도. 동사는 [`creates`] 와 같은 자로 가른다 —
+/// 첫 낱말만 보던 판은 네임스페이스의 읽기에 "방금 넣은 글" 이라며 알림을 달았다.
+fn writes_text(verbs: &[&str]) -> bool {
+    match verbs.first().copied() {
+        Some("add" | "edit" | "note" | "mv" | "defer") => true,
+        Some("idea") => matches!(verbs.get(1).copied(), Some("add" | "promote")),
+        Some("issue" | "epic" | "milestone") => verbs.get(1).copied() == Some("add"),
+        _ => false,
+    }
+}
+
+/// 값이 글이 아닌 플래그 — 자리(`-C`)·사람(`--user`·`-a`)·칸(`-s`·`--from`)·태그·소속·종류. 사람 이름도
+/// 태그와 칸 이름도 한글일 수 있다 — 칸을 한글로 지은 보드에서는 `mv` 마다 헛 알림이 섰다.
+const NOT_TEXT: &[&str] = &[
+    "-C", "--dir", "--user", "-a", "--assignee", "-t", "--tag", "--untag", "-s", "--status", "--from", "-e", "--epic",
+    "--milestone", "--parent", "-p", "--priority", "--type",
+];
+
+/// 꼴이 정해진 줄의 머리 — 읽는 쪽이 그 꼴로 세니 다듬지 않는다(`guide::KOREAN`).
+const FIXED_HEADS: &[&str] = &["model:", "다음:", "Regression-of:"];
+
+/// 이 명령줄이 **한국어 글을 moai 에 넣는가**(moai-6rrb) — 글을 적는 `moai` 토막의 글 인자에 한글이 들었거나,
+/// 그 토막에 흘러드는 글([`Seg::fed`] — stdin 의 heredoc·here-string·파이프 앞 칸, 명령 치환 속 heredoc)에
+/// 한글이 들었다. 넣으면 그 토막의 자리(`-C` 로 가리켰으면 ` -C <그곳>`, 아니면 빈 글)를 낸다 — 알림이 고쳐
+/// 적는 명령에 옮겨 적는다([`aside_in`] 과 같은 까닭). `only` 는 볼 토막을 고른다([`segments`] 의 번호) — 받는
+/// 쪽이 트래커가 없는 자리를 가리킨 토막을 뺀다. 그 `moai` 는 스스로 실패해 아무것도 안 넣는다.
+///
+/// **꼴이 정해진 줄만 있으면 아니다.** `model: …`·`다음: …`·`Regression-of: …` 는 다듬지 않는 글이라,
+/// 거기 알림을 달면 닫을 때마다 헛 알림이 선다. 줄 머리에서 시작한 줄만 그 꼴이다 — `model::parse_work` 와
+/// 같은 자다. 파일에서 흘린 본문(`< 파일`)은 모른다 — 훅이 남의 파일을 읽지 않는다. 판정은 **글의 글자**다 —
+/// 화면 말 설정과는 무관하다(`guide::KOREAN`).
+///
+/// **흘러드는 글은 그 토막의 것만 본다.** 명령줄 전체에서 한글을 찾던 판은 옆 토막의 커밋 메시지·`--user`
+/// 이름·경로에 알림을 달았고, `"$(cat <<'EOF' … EOF)"` 로 넣은 글은 렉서가 본문을 건너뛰어 놓쳤다.
+pub fn korean_write(cmd: &str, only: &dyn Fn(usize) -> bool) -> Option<String> {
+    let hangul = |t: &str| t.chars().any(|c| matches!(c, '\u{AC00}'..='\u{D7A3}' | '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}'));
+    // 렉서는 받은 글자를 옮기기만 하니 명령줄에 한글이 없으면 볼 것이 없다 — 훅은 Bash 마다 돈다.
+    if !hangul(cmd) {
+        return None;
+    }
+    let fixed = |l: &str| {
+        FIXED_HEADS.iter().any(|h| l.strip_prefix(h).is_some_and(|r| r.is_empty() || r.starts_with(char::is_whitespace)))
+    };
+    let unfixed = |t: &str| t.lines().any(|l| hangul(l) && !fixed(l));
+    // 번호는 [`segments`] 와 같게 센다 — `only` 가 그 번호로 고른다.
+    let segs: Vec<Seg> = parse(cmd).into_iter().filter(|s| !s.words.is_empty()).collect();
+    segs.iter().enumerate().find_map(|(k, seg)| {
+        let args = moai_args(&seg.words).filter(|_| only(k))?;
+        let verbs = positionals(args);
+        // 도움말과 연습(`--dry-run`)은 아무것도 안 넣는다.
+        if asks_help(&seg.words) || args.iter().any(|a| a == "--dry-run") || !writes_text(&verbs) {
+            return None;
+        }
+        let texts = if matches!(verbs.first().copied(), Some("mv" | "defer")) {
+            // 자리 인자는 id 와 갈 칸이다 — 글은 `-m` 하나다.
+            flag_values(args, &["-m", "--msg"])
+        } else {
+            prose(args)
+        };
+        let stdin = flag_values(args, &["-b", "--body", "--from"]).iter().any(|v| v == "-");
+        let substituted = texts.iter().any(|t| t.contains("$(") || t.contains('`'));
+        let mut fed: Vec<&str> = Vec::new();
+        if stdin || substituted {
+            fed.extend(seg.fed.iter().map(String::as_str));
+        }
+        // 파이프의 앞 칸이 내는 글 — `printf '…' |`·`cat <<'B' |`. 다른 명령의 인자는 파일·필터라 글이 아니다.
+        let mut j = k;
+        while stdin && j > 0 && segs[j].join.op == Op::Pipe {
+            j -= 1;
+            let head = command_of(&segs[j].words);
+            if head.first().is_some_and(|w| matches!(basename(w), "echo" | "printf")) {
+                fed.extend(head[1..].iter().map(String::as_str));
+            }
+            fed.extend(segs[j].fed.iter().map(String::as_str));
+        }
+        if !texts.iter().map(String::as_str).chain(fed).any(unfixed) {
+            return None;
+        }
+        Some(flag_values(args, &["-C", "--dir"]).pop().map(|d| format!(" -C {}", echo_dir(&d))).unwrap_or_default())
+    })
+}
+
+/// [`korean_write`] 를 토막 가림 없이 — 판정만 보는 시험이 쓴다.
+#[cfg(test)]
+fn writes_korean(cmd: &str) -> bool {
+    korean_write(cmd, &|_| true).is_some()
+}
+
+/// 글을 적는 토막의 인자 가운데 **글인 것** — [`NOT_TEXT`] 의 플래그와 그 값을 뺀다. `--tag=파서` 와 짧은
+/// 플래그에 붙여 쓴 `-t파서` 도 뺀다([`flag_values`] 가 받는 모양). `--` 뒤는 모두 자리 인자다.
+fn prose(args: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--" {
+            out.extend(it.cloned());
+            break;
+        }
+        let attached = !a.starts_with("--")
+            && NOT_TEXT.iter().any(|f| f.len() == 2 && a.len() > 2 && a.starts_with(f));
+        if NOT_TEXT.contains(&a.as_str()) {
+            it.next();
+        } else if !attached && !a.split_once('=').is_some_and(|(f, _)| NOT_TEXT.contains(&f)) {
+            out.push(a.clone());
+        }
+    }
+    out
+}
+
+/// 한국어 글을 넣은 뒤 비추는 한 줄(moai-6rrb). **막지 않는다** — 글 스타일 검사를 게이트로 두지 않는다는
+/// 결정(moai-mthy)을 지킨다. `PreToolUse` 의 비춤은 명령이 돈 뒤에 읽히니([`aside_in`]) "다듬었는가" 를
+/// 묻고 고쳐 적는 길을 댄다. `at` 은 그 글을 넣은 토막의 자리([`korean_write`]) — 고쳐 적는 명령도 같은
+/// 트래커를 겨눈다. `missing` 은 이 저장소에 안 깔린 플러그인 — 있으면 까는 길을 **사람에게** 청하라고
+/// 한다. 에이전트가 제 손으로 깔지 않는다(사용자 결정, moai-5wk4).
+///
+/// **노트와 `-m` 은 고쳐 적으라고 하지 않는다.** 둘은 저널에만 쌓여 고칠 수 없다 — `moai note` 로 다시 적으라던
+/// 판은 같은 글을 한 벌 더 영영 남기게 했다. 고칠 수 있는 제목·본문만 `moai edit` 를 대고, 나머지는 다음 글부터다.
+pub fn korean_notice(at: &str, missing: &[&str]) -> Decision {
+    let mut said = format!(
+        "방금 moai 에 넣은 한국어 글을 다듬었는가 — `korean-skills:humanizer`, 20줄을 넘으면 \
+         `humanize-korean:humanize-korean`, 마지막에 `korean-skills:grammar-checker`. 안 다듬은 제목·본문은 \
+         다듬어 `moai{at} edit` 로 고쳐 적는다. 노트와 `-m` 은 저널에만 쌓여 고칠 수 없으니 같은 글을 다시 적지 \
+         말고 다음 글부터 넣기 전에 다듬는다. id·명령·경로·수·코드 조각과 꼴이 정해진 줄은 그대로 둔다."
+    );
+    if !missing.is_empty() {
+        said.push_str(&format!(
+            "\n이 저장소에 {} 이 깔려 있지 않다 — 제 손으로 깔지 말고 사람에게 `moai skill install` 을 다시 \
+             불러 달라고 청한다. 그것이 moai 와 같은 범위로 함께 깐다.",
+            missing.join("·")
+        ));
+    }
+    Decision::Context(said)
+}
+
 /// 토막마다 **그 `moai` 가 도는 자리** — `-C`·`--dir` 나 앞의 `cd`·`pushd` 가 세션의 자리
 /// (`cwd`)를 옮겼으면 그 디렉터리, 아니면 `None`. 차례는 [`segments`] 와 같다 — 받는 쪽이
 /// 토막 번호로 가른다. `moai` 가 아닌 토막은 언제나 `None` 이다.
@@ -2538,6 +2706,12 @@ fn shelving_closes<'a>(latest: &'a [Issue], cfg: &Config, wip: &[&Issue]) -> std
 /// 여기를 고치는 것은 "일" 이 아니다 — 일을 하러 가는 길이다.
 const SKIP: &[&str] = &[".moai", ".claude", ".git", "target", "node_modules"];
 
+/// **`_workspace` 도 세지 않는다 — 어느 깊이에서든**(사용자, moai-5wk4). `humanize-korean` 은 **cwd** 에 이
+/// 폴더를 만든다 — 안내는 저장소 밖에서 돌리라고 하지만, 저장소 안에서 돌렸다고 한국어 글을 다듬는 일이 규칙 2
+/// 에 막히면 안내가 시킨 일을 규칙이 막는다. 뿌리의 것만 빼던 판은 하위 디렉터리에 선 세션을 그대로 막았다 —
+/// 이 저장소 `.gitignore` 의 `_workspace/` 도 어느 깊이에서든 걸린다.
+const SCRATCH: &str = "_workspace";
+
 /// 이 파일을 고치는 것이 일에 매여야 하는가.
 fn counted(path: &str, root: &Path) -> bool {
     if path.is_empty() {
@@ -2546,10 +2720,9 @@ fn counted(path: &str, root: &Path) -> bool {
     let Ok(rel) = resolve(path, root).strip_prefix(root).map(Path::to_path_buf) else {
         return false; // 저장소 밖 — 스크래치패드·임시 파일·남의 저장소
     };
-    rel.components()
-        .next()
-        .and_then(|c| c.as_os_str().to_str())
-        .is_some_and(|head| !SKIP.contains(&head))
+    let mut parts = rel.components().map(|c| c.as_os_str().to_str());
+    parts.next().flatten().is_some_and(|head| !SKIP.contains(&head) && head != SCRATCH)
+        && !parts.any(|p| p == Some(SCRATCH))
 }
 
 /// **상대 경로는 저장소의 자리로 푼다.** 훅 프로세스가 어디서 도는지는 아무도
@@ -4764,5 +4937,133 @@ mod tests {
             panic!("안 붙들었다");
         };
         assert!(held.contains(&crate::guide::close_steps("t-r2")), "세션 닫기가 갈라졌다\n{held}");
+    }
+}
+
+#[cfg(test)]
+mod korean_tests {
+    use super::*;
+
+    /// **한국어 글을 넣는 쓰기만 비춘다**(moai-6rrb). 읽기·영어 글·사람 이름·꼴이 정해진 줄은 아니다 —
+    /// 헛 알림이 잦으면 알림을 안 읽게 된다.
+    #[test]
+    fn only_korean_text_going_into_moai_is_noticed() {
+        for cmd in [
+            "moai add '빈 태그를 못 거른다' -t bug",
+            "moai note t-1 '발견한 것'",
+            "moai mv t-1 done -m '리뷰를 반영했다'",
+            "moai -C /repo idea add '떠오른 것'",
+            "moai edit t-1 -b - <<'B'\n- 무엇: 어긋났다\nB",
+            "cd /repo && moai add --from - <<'PLAN'\n# 에픽\n- [p1] 첫 이슈\nPLAN",
+            "moai idea promote t-1 --from - <<'PLAN'\n# 에픽\n- [p1] 첫 이슈\nPLAN",
+            // 명령 치환 속 heredoc — 렉서가 본문을 낱말에 안 남기는 자리다(리뷰 moai-5wk4.76z).
+            "moai note t-1 \"$(cat <<'EOF'\n한글 노트 본문\nEOF\n)\"",
+            "moai mv t-1 done -m \"$(cat <<'EOF'\n리뷰를 반영했다\nEOF\n)\"",
+            // 파이프 앞 칸과 here-string 이 내는 글.
+            "printf '한글 노트' | moai note t-1 -b -",
+            "cat <<'B' | moai note t-1 -b -\n한글 노트\nB",
+            "moai note t-1 -b - <<< '한글 노트'",
+            // 꼴을 닮았을 뿐인 글 — 줄 머리가 아니거나 머리 뒤가 빈칸이 아니다(`model::parse_work` 와 같은 자).
+            "moai note t-1 'model::label 이 이름과 메일을 합친다'",
+            "moai mv t-1 done -m '  model: anthropic/opus-5 (low — 들여 쓴 예)'",
+        ] {
+            assert!(writes_korean(cmd), "안 비춘다 — {cmd:?}");
+        }
+        for cmd in [
+            "moai show -g 한국어",
+            "moai add 'fix the empty tag' -t bug",
+            "moai --user '레이븐 (r@x)' add 'english title'",
+            "moai note t-1 'model: anthropic/opus-5 (high — 쓰기 경로)'",
+            "moai note t-1 '다음: 훅 멤버를 이어서 한다'",
+            "moai add '제목' --help",
+            "echo '한글' | grep moai",
+            "moai note t-1 -b - < /tmp/review.md",
+            // 네임스페이스 밑의 읽기(리뷰 moai-5wk4.76z).
+            "moai idea ls -g 한국어",
+            "moai epic show -g 저장",
+            "moai issue show -t 파서",
+            "moai milestone ls -g 출시",
+            // 글이 아닌 값 — 태그·칸·붙여 쓴 사람.
+            "moai add 'fix the parser' -t 파서",
+            "moai edit t-1 --tag=파서",
+            "moai mv t-1 진행 --from 할일",
+            "moai defer t-1 --from 할일",
+            "moai add 'english' -a레이븐",
+            // 연습은 아무것도 안 넣는다.
+            "moai add --from - --dry-run <<'PLAN'\n# 에픽\n- [p1] 첫 이슈\nPLAN",
+            // stdin 의 영어 본문 곁의 한글 — 옆 토막의 커밋 메시지·사람·경로·파일 뒤의 말.
+            "moai note t-1 -b - <<'B'\nenglish only\nB\ngit commit -m 'chore(tracker): t-1 노트를 담는다' -- .moai/",
+            "moai --user '레이븐 (r@x.y)' note t-1 -b - <<'B'\nenglish\nB",
+            "MOAI_ACTOR='레이븐 (r@x.y)' moai note t-1 -b - <<'B'\nenglish\nB",
+            "moai -C /home/레이븐/repo note t-1 -b - <<'B'\nenglish\nB",
+            "moai note t-1 -b - < /tmp/review.md && echo '완료'",
+            "moai note t-1 -b - <<'B'\nmodel: anthropic/opus-5 (high — 쓰기 경로)\nB\ngit commit -m '닫는다'",
+        ] {
+            assert!(!writes_korean(cmd), "헛 비춘다 — {cmd:?}");
+        }
+    }
+
+    /// **트래커가 없는 자리를 가리킨 토막은 안 센다** — 받는 쪽이 `only` 로 뺀다. 넣은 토막의 `-C` 는 알림의
+    /// 고쳐 적는 명령으로 옮긴다([`aside_in`] 과 같다).
+    #[test]
+    fn the_korean_write_names_where_it_went() {
+        assert_eq!(korean_write("moai note t-1 '한글'", &|_| true).as_deref(), Some(""));
+        assert_eq!(korean_write("moai -C /repo note t-1 '한글'", &|_| true).as_deref(), Some(" -C /repo"));
+        assert_eq!(korean_write("moai -C '/a b' note t-1 '한글'", &|_| true).as_deref(), Some(" -C '/a b'"));
+        assert_eq!(korean_write("moai -C /nowhere note t-1 '한글'", &|_| false), None);
+        assert_eq!(korean_write("moai -C /nowhere note t-1 '한글'; moai note t-2 '둘째'", &|k| k == 1).as_deref(), Some(""));
+    }
+
+    /// heredoc 본문과 here-string 은 **그것을 연 토막**에 흘러든다 — 줄이 끝난 뒤에 읽혀도, 명령 치환 안에서
+    /// 열려도 같다. 다른 토막에는 안 섞인다.
+    #[test]
+    fn fed_text_stays_with_the_segment_that_opened_it() {
+        let segs = parse("moai note t-1 -b - <<'B' && git commit -m x\n본문\nB\necho y <<< '여기'\nmoai note t-2 \"$(cat <<'E'\n안쪽\nE\n)\"");
+        let fed: Vec<(&str, Vec<&str>)> = segs
+            .iter()
+            .filter(|s| s.nested == 0)
+            .map(|s| (s.words[0].as_str(), s.fed.iter().map(String::as_str).collect()))
+            .collect();
+        assert_eq!(
+            fed,
+            [("moai", vec!["본문\n"]), ("git", vec![]), ("echo", vec!["여기"]), ("moai", vec!["안쪽\n"])],
+            "{segs:?}"
+        );
+    }
+
+    /// **막지 않고, 없는 플러그인은 사람에게 청하게 한다.** 에이전트가 제 손으로 깔면 사용자 결정
+    /// (moai-5wk4)을 뒤집는다. 비추는 스킬 이름은 안내와 같은 플러그인의 것이다.
+    #[test]
+    fn the_korean_notice_never_blocks_and_asks_a_person_to_install() {
+        let Decision::Context(said) = korean_notice("", &["korean-skills@korean-skills"]) else {
+            panic!("비추는 답이 아니다");
+        };
+        assert!(said.contains("moai skill install") && said.contains("사람에게"), "{said}");
+        assert!(!said.contains("claude plugin install"), "제 손으로 깔라고 한다\n{said}");
+        for (id, _) in crate::guide::KOREAN_PLUGINS {
+            let plugin = id.split_once('@').unwrap().0;
+            assert!(said.contains(&format!("`{plugin}:")), "{plugin} 의 스킬을 안 댄다\n{said}");
+        }
+        let Decision::Context(quiet) = korean_notice("", &[]) else { panic!("비추는 답이 아니다") };
+        assert!(!quiet.contains("moai skill install"), "다 깔렸는데 깔라고 한다\n{quiet}");
+    }
+
+    /// **노트와 `-m` 은 고쳐 적으라고 하지 않는다**(리뷰 moai-5wk4.76z) — 저널에만 쌓여, 다시 적으면 같은 글이
+    /// 두 벌 남는다. 고칠 수 있는 제목·본문은 그 글을 넣은 트래커로 `moai edit` 를 댄다.
+    #[test]
+    fn the_korean_notice_only_offers_edits_that_exist() {
+        let Decision::Context(said) = korean_notice(" -C /repo", &[]) else { panic!("비추는 답이 아니다") };
+        assert!(said.contains("`moai -C /repo edit`"), "{said}");
+        assert!(!said.contains("`moai note` 로 고쳐") && said.contains("저널에만"), "{said}");
+    }
+
+    /// `humanize-korean` 이 cwd 에 만드는 `_workspace/` 는 규칙 2 가 세지 않는다 — 하위 디렉터리에 선
+    /// 세션이 만든 것도.
+    #[test]
+    fn the_humanizer_workspace_is_not_counted() {
+        assert!(!counted("_workspace/2026-09-18-001/final.md", Path::new("/repo")));
+        assert!(!counted("/repo/sub/_workspace/2026-09-18-001/01_input.txt", Path::new("/repo")));
+        assert!(counted("src/main.rs", Path::new("/repo")));
+        assert!(counted("src/_workspace_notes.rs", Path::new("/repo")));
     }
 }

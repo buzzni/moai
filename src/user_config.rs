@@ -106,7 +106,8 @@ pub struct Registry {
     /// 보기·읽음을 읽다 만난 까닭. `problems`(층이 대는 것)와 따로 든다 — 대는 자리가 다르다. 파일을 못 읽었거나
     /// 깨진 까닭은 여기 없다 — 층만 댄다(moai-5jsn).
     pub look_problems: Vec<String>,
-    /// 이슈 id → **내가 마지막으로 본 때**(RFC3339, moai-50mn). 여기 없는 줄은 한 번도 안 본 것이다.
+    /// 이슈 id → **내가 마지막으로 본 줄의 `updated_at`**(RFC3339, moai-50mn — 옛 바이너리는 본 때를 적었다,
+    /// moai-lyc1). 여기 없는 줄은 한 번도 안 본 것이다.
     /// 트래커가 아니라 내 설정에 드는 까닭: 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에
     /// 적으면 읽기만 해도 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다(사용자 결정 2026-09-15).
     pub read: BTreeMap<String, String>,
@@ -183,18 +184,16 @@ pub fn read_marks_at(path: &Path) -> Option<BTreeMap<String, String>> {
 /// 디렉터리가 없으면 만든다. 락 파일은 설정 곁의 `<이름>.lock` 이다.
 pub fn update<T>(path: &Path, f: impl FnOnce(&mut Doc) -> R<T>) -> R<T> {
     let err = |p: &Path, e: std::io::Error| Fail::new(format!("{}: {e}", p.display()));
-    let dir = path
-        .parent()
-        .filter(|d| !d.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
+    let dir = dir_of(path);
     std::fs::create_dir_all(dir).map_err(|e| err(dir, e))?;
-    let _lock = Lock::acquire(&lock_beside(path))?;
+    let lock = Lock::acquire(&lock_beside(path))?;
 
     // 설정 파일이 심볼릭 링크면(dotfiles 저장소가 흔히 그렇게 건다) **링크가 가리키는
     // 파일을** 고친다. 링크 자리에 `rename` 하면 링크가 보통 파일로 갈아끼워져
     // dotfiles 쪽은 옛 내용에 멈추고, 사람은 그것을 모른다. 푸는 것은 락 **안에서**
-    // 한다: 밖에서 풀면 그 사이에 파일이 링크로 갈아끼워질 수 있다.
-    let resolved = std::fs::canonicalize(path).ok();
+    // 한다: 밖에서 풀면 그 사이에 파일이 링크로 갈아끼워질 수 있다. 가리키는 파일이 아직
+    // 없어도 링크를 따라간다([`resolve_config`]).
+    let resolved = resolve_config(path)?;
     let real = resolved.as_deref().unwrap_or(path);
 
     // **푼 자리에도 락을 잡는다.** 준 철자 곁의 락만으로는 같은 파일을 두 철자로 부른
@@ -206,7 +205,22 @@ pub fn update<T>(path: &Path, f: impl FnOnce(&mut Doc) -> R<T>) -> R<T> {
     //
     // **차례가 있어 엉키지 않는다**: 푼 경로는 `canonicalize` 의 고정점이라 모든
     // 프로세스가 같은 자리를 둘째로 잡고, 준 철자가 곧 푼 경로인 쪽은 하나만 잡는다.
-    let _real_lock = (real != path).then(|| Lock::acquire(&lock_beside(real))).transpose()?;
+    //
+    // **이미 쥔 파일이면 둘째는 없다**(moai-2l74). 링크가 파일이 아니라 위 디렉터리에 걸렸거나(`~/.config` 가
+    // dotfiles 로 걸렸다, macOS 의 `/var` → `/private/var`) 락 파일 자체가 링크면(stow·rcm 은 dotfiles 안에 선 락까지
+    // 건다) 두 철자의 락은 한 파일이라, 다시 잡으면 제가 쥔 락을 제가 기다리다 `locked` 로 물러난다 — 파일이 선
+    // 뒤의 모든 쓰기가 그렇게 멈췄다. 견주는 것은 경로 글자가 아니라 **파일**이다([`Lock::holds`]) — 하드 링크나
+    // 대소문자를 안 가르는 볼륨의 철자도 글자로는 못 가른다. 파일로 못 견주는 곳(unix 밖)은 위 디렉터리를 푼 철자로
+    // 견준다. 파일이 아직 없으면(`resolved` 가 없다) 곁의 락이 곧 그 자리의 락이다.
+    let held = |r: &Path| {
+        lock.holds(&lock_beside(r)).unwrap_or_else(|| {
+            std::fs::canonicalize(dir).ok().zip(path.file_name()).is_some_and(|(d, name)| d.join(name) == r)
+        })
+    };
+    let _real_lock = match resolved.as_deref() {
+        Some(r) if !held(r) => Some(Lock::acquire(&lock_beside(r))?),
+        _ => None,
+    };
     let path = real;
 
     // 락을 잡은 **뒤에** 읽는다. 밖에서 읽으면 두 프로세스가 같은 옛 목록을 고친다.
@@ -248,10 +262,48 @@ fn refuse(message: String) -> Fail {
 
 /// 그 설정 파일의 락 자리 — 곁의 `<이름>.lock`.
 fn lock_beside(path: &Path) -> PathBuf {
-    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let mut name = path.file_name().map(OsString::from).unwrap_or_else(|| "config".into());
     name.push(".lock");
-    dir.join(name)
+    dir_of(path).join(name)
+}
+
+/// 파일이 든 디렉터리. 디렉터리 조각이 없는 상대 철자(`config.toml`)면 `.` 이다.
+fn dir_of(path: &Path) -> &Path {
+    path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."))
+}
+
+/// 설정 파일이 실제로 선 자리(`update`). 있으면 링크를 다 푼 경로다. **없는데 링크면 링크를 따라간 자리**다 — dotfiles 는
+/// 링크를 먼저 걸고 파일은 첫 쓰기에 생기기도 하는데, `canonicalize` 는 없는 파일에서 실패해 그대로 두면 준 철자로
+/// 떨어진다. 그러면 첫 쓰기가 링크 자리에 `rename` 해 링크를 보통 파일로 갈아끼우고(dotfiles 쪽 파일은 영영 안
+/// 생긴다), 가리키는 철자로 쓰는 쪽과는 서로 다른 락을 잡는다. 링크가 아닌 없는 파일이면 `None` 이다 — 준 철자에
+/// 새로 만든다.
+///
+/// 링크가 가리키는 자리의 디렉터리가 없으면 **쓰지 않는다**(`broken`). 아직 안 받은 dotfiles 저장소 자리에 디렉터리를
+/// 지으면 뒤의 `git clone` 이 거기서 멈추고, 링크를 갈아끼우면 위의 손실이다 — 사람이 그 자리를 세울 때까지 멈춘다.
+fn resolve_config(path: &Path) -> R<Option<PathBuf>> {
+    match std::fs::canonicalize(path) {
+        Ok(real) => return Ok(Some(real)),
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {}
+    }
+    // 링크의 사슬을 끝까지 따라간다. 상대 대상은 그 링크가 든 디렉터리에서 잰다. 고리는 `canonicalize` 가 이미
+    // `NotFound` 가 아닌 것으로 댔다 — 여기의 횟수 제한은 그래도 끝나게 하는 울타리다.
+    let mut at = path.to_path_buf();
+    for _ in 0..40 {
+        let Ok(to) = std::fs::read_link(&at) else { break };
+        at = dir_of(&at).join(to);
+    }
+    if at == path {
+        return Ok(None);
+    }
+    match (std::fs::canonicalize(dir_of(&at)), at.file_name()) {
+        (Ok(dir), Some(name)) => Ok(Some(dir.join(name))),
+        _ => Err(refuse(format!(
+            "{} 는 {} 를 가리키는데 그 디렉터리가 없다 — 링크를 갈아끼우지 않도록 쓰지 않는다. 그 자리를 세우거나 링크를 고친다",
+            path.display(),
+            at.display()
+        ))),
+    }
 }
 
 /// 읽어 들인 설정 문서. 모르는 키·표·주석은 문서가 들고 있다가 그대로 낸다.
@@ -402,11 +454,20 @@ impl Doc {
             )));
         }
         let (mut hit, mut changed) = (0, false);
+        let mut kept: Vec<(isize, String)> = Vec::new();
         for t in aot.iter_mut().filter(|t| mine(t)) {
             hit += 1;
-            changed |= put_value(t, COLOR, hue.map(|h| toml_edit::Value::from(h.name())));
+            let mut left = String::new();
+            changed |= put_value(t, COLOR, hue.map(|h| toml_edit::Value::from(h.name())), &mut left);
+            if !left.is_empty()
+                && let Some(at) = t.position()
+            {
+                kept.push((at, left));
+            }
         }
         self.dirty |= changed;
+        // `color` 가 끝 줄이었으면 빈 줄로 떨어진 그 위 주석은 표 뒤로 나간다(moai-liij).
+        self.put_all_before_next(kept);
         Ok(hit)
     }
 
@@ -500,7 +561,7 @@ impl Doc {
         let mut kept: Vec<(isize, String)> = Vec::new();
         aot.retain(|t| {
             let gone = entry_path(t).is_ok_and(|p| any_of.contains(&p));
-            if gone && let (Some(at), Some(head)) = (t.position(), detached_head(t)) {
+            if gone && let (Some(at), Some(head)) = (t.position(), detached(prefix_of(t.decor()))) {
                 kept.push((at, head));
             }
             !gone
@@ -509,12 +570,17 @@ impl Doc {
         if removed > 0 {
             self.dirty = true;
         }
-        // 뒤의 것부터 앞에 붙인다 — 같은 자리 앞에 둘이 서면 파일에 있던 차례대로 선다.
-        kept.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
-        for (at, head) in kept {
-            self.put_before_next(at, head);
-        }
+        self.put_all_before_next(kept);
         Ok(removed)
+    }
+
+    /// 남긴 글들(`(그 표의 위치, 글)`)을 저마다 [`Doc::put_before_next`] 한다. **뒤의 것부터 앞에 붙인다** — 같은
+    /// 자리 앞에 둘이 서면 파일에 있던 차례대로 선다(`Doc::remove`·`Doc::set_hue`).
+    fn put_all_before_next(&mut self, mut kept: Vec<(isize, String)>) {
+        kept.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+        for (at, text) in kept {
+            self.put_before_next(at, text);
+        }
     }
 
     /// 파일 차례로 `at` 다음에 그려지는 표의 머리 앞에 `text` 를 붙인다. 뒤에 표가 없으면 끝 글 앞이다.
@@ -526,18 +592,35 @@ impl Doc {
         header_positions(self.doc.as_table(), &mut all);
         let next = all.into_iter().filter(|p| *p > at).min();
         match next.and_then(|p| header_at(self.doc.as_table_mut(), p)) {
-            Some(t) => {
-                let was = t.decor().prefix().and_then(|r| r.as_str()).unwrap_or_default().to_string();
-                // **남긴 글과 그 표 사이에 빈 줄을 지킨다**(moai-gmdu 에픽 리뷰). 빈 줄 하나는 뺀 표와 함께
-                // 빠졌다 — 그 표가 뺀 표에 빈 줄 없이 붙어 있었으면 남긴 글이 그 표의 머리에 붙고, 그 표를
-                // 뺄 때 함께 지워진다. 남긴 까닭이 그것을 안 지우려는 것이었다.
-                let gap = if blank_lines(&was).next() == Some(0) { "" } else { "\n" };
-                t.decor_mut().set_prefix(format!("{text}{gap}{was}"));
-            }
+            Some(t) => keep_in_front(t.decor_mut(), &text),
             None => {
                 let was = self.doc.trailing().as_str().unwrap_or_default().to_string();
                 self.doc.set_trailing(text + &was);
             }
+        }
+    }
+
+    /// 뿌리의 `key` 표 **다음에 그려지는 것** 앞에 `text` 를 붙인다 — 그 표의 끝 줄을 지워 표 밖으로 나갈 글이다
+    /// (`Doc::merge_look`). 머리를 그리는 표(`[tui]`)면 [`Doc::put_before_next`] 다.
+    ///
+    /// **뿌리에 점 키로 적은 표(`tui.sort = …`)는 위치가 없다** — 파서가 위치 없이 짓고, 그 줄은 뿌리 몸 안에 그려진다.
+    /// 뿌리에서 그 다음에 그려지는 줄 앞에, 없으면 첫 표 머리 앞에 선다(뿌리 몸은 표 머리보다 먼저 그려진다). 이것을
+    /// 건너뛰면 설정 머리 주석(첫 줄의 머리다)이 `tui.x` 를 지우는 저장 한 번에 사라진다. 인라인 표(`tui = { … }`)는
+    /// 여기 안 온다 — [`drop_key`] 의 주석처럼 그 안의 끝 줄 주석은 전처럼 키와 함께 빠진다.
+    fn put_after(&mut self, key: &str, text: String) {
+        let Some(t) = self.doc.get(key).and_then(Item::as_table) else {
+            return;
+        };
+        if let Some(at) = t.position() {
+            return self.put_before_next(at, text);
+        }
+        if !t.is_dotted() {
+            return;
+        }
+        let from = self.doc.iter().position(|(k, _)| k == key).map_or(0, |i| i + 1);
+        match line_key(self.doc.as_table_mut(), from) {
+            Some(mut n) => keep_in_front(n.leaf_decor_mut(), &text),
+            None => self.put_before_next(isize::MIN, text),
         }
     }
 
@@ -674,18 +757,19 @@ impl Doc {
         odd(&[DETAIL], false, &mut detail);
         let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let mut changed = false;
+        let mut left = String::new();
         if hidden {
-            changed |= merge_words(t, HIDDEN, base.hidden.as_deref(), new.hidden.as_deref());
+            changed |= merge_words(t, HIDDEN, base.hidden.as_deref(), new.hidden.as_deref(), &mut left);
         }
         if hide_deferred {
-            changed |= put_value(t, HIDE_DEFERRED, new.hide_deferred.map(toml_edit::Value::from));
+            changed |= put_value(t, HIDE_DEFERRED, new.hide_deferred.map(toml_edit::Value::from), &mut left);
         }
         if sort {
-            changed |= put_value(t, SORT, new.sort.as_deref().map(toml_edit::Value::from));
-            changed |= put_value(t, SORT_REVERSED, new.sort_reversed.map(toml_edit::Value::from));
+            changed |= put_value(t, SORT, new.sort.as_deref().map(toml_edit::Value::from), &mut left);
+            changed |= put_value(t, SORT_REVERSED, new.sort_reversed.map(toml_edit::Value::from), &mut left);
         }
         if fields {
-            changed |= merge_words(t, FIELDS, base.fields.as_deref(), new.fields.as_deref());
+            changed |= merge_words(t, FIELDS, base.fields.as_deref(), new.fields.as_deref(), &mut left);
         }
         // **`fields_known` 은 빼지 않고 더하기만 한다**(moai-6bc0 단계 리뷰) — `base` 를 비워 두는 까닭이다.
         // 이 키는 사람이 고른 것이 아니라 *적는 쪽이 아는 열 전부*라, 여기 있는데 이 바이너리가 모르는
@@ -693,16 +777,20 @@ impl Doc {
         // "몰랐던 열" 로 읽어 사람이 끈 것을 도로 켠다 — 낱말 배열을 합치는 까닭(`남이 더한 낱말은
         // 남는다`)이 여기서는 더 세게 걸린다.
         if known {
-            changed |= merge_words(t, FIELDS_KNOWN, None, new.fields_known.as_deref());
+            changed |= merge_words(t, FIELDS_KNOWN, None, new.fields_known.as_deref(), &mut left);
         }
         if detail {
-            changed |= put_value(t, DETAIL, new.detail.map(toml_edit::Value::from));
+            changed |= put_value(t, DETAIL, new.detail.map(toml_edit::Value::from), &mut left);
         }
         self.dirty |= changed;
+        // 끝 줄을 지워 표 밖으로 나갈 주석(moai-liij).
+        if !left.is_empty() {
+            self.put_after(TUI, left);
+        }
         Ok(skipped)
     }
 
-    /// 적어 둔 읽음 — 이슈 id → 마지막으로 본 때(moai-50mn). **관대하게 읽는다**: 낱말이 아닌 값은
+    /// 적어 둔 읽음 — 이슈 id → 마지막으로 본 줄의 도장(moai-50mn·moai-lyc1). **관대하게 읽는다**: 낱말이 아닌 값은
     /// 까닭 한 줄로 대고 건너뛴다. `[read]` 가 없으면 빈 표다.
     pub fn read_marks(&self) -> (BTreeMap<String, String>, Vec<String>) {
         let mut problems = Vec::new();
@@ -725,7 +813,7 @@ impl Doc {
         (marks, problems)
     }
 
-    /// 읽은 때를 적는다 — **준 id 만 손댄다**(moai-50mn). 남이 적은 줄도, 이 바이너리가 모르는 id 도
+    /// 읽음을 적는다 — **준 id 만 손댄다**(moai-50mn). 남이 적은 줄도, 이 바이너리가 모르는 id 도
     /// 그대로 둔다: 읽음은 사람마다 쌓이는 것이라 지울 까닭이 없고, 락 안에서 다시 읽은 파일을
     /// 통째로 덮으면 옆 탐색기가 방금 읽은 줄이 사라진다(`Doc::merge_look` 과 같은 까닭).
     ///
@@ -766,7 +854,7 @@ impl Doc {
         let t = self.doc.get_mut(READ).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let mut written = Vec::new();
         for (id, when) in marks {
-            if put_value(t, id, Some(toml_edit::Value::from(when.as_str()))) {
+            if write_value(t, id, toml_edit::Value::from(when.as_str())) {
                 written.push(id.clone());
             }
         }
@@ -788,7 +876,7 @@ const SORT_REVERSED: &str = "sort_reversed";
 const FIELDS: &str = "fields";
 const DETAIL: &str = "detail";
 const FIELDS_KNOWN: &str = "fields_known";
-/// 읽음이 사는 표(moai-50mn) — 이슈 id → 내가 마지막으로 본 때.
+/// 읽음이 사는 표(moai-50mn) — 이슈 id → 내가 마지막으로 본 줄의 `updated_at`(moai-lyc1).
 const READ: &str = "read";
 
 /// 탐색기의 보기 — 사람이 마지막으로 고른 것(moai-2bzp). **낱말로 든다** — 무슨 낱말이 있는지는
@@ -871,21 +959,26 @@ fn look_one<'a, T>(
 /// 배열이면 **제자리에서** 고친다 — 뺀 낱말(겹쳐 적힌 것까지)을 빼고 더한 낱말을 끝에 더한다. 낱말이
 /// 아닌 원소(새 바이너리의 모양)와 여러 줄로 벌인 모양은 그대로다. 배열이 아니거나 없으면 이 세션이 그
 /// 키를 바꿨으니 `new` 를 새로 적는다.
-fn merge_words(t: &mut dyn toml_edit::TableLike, key: &str, base: Option<&[String]>, new: Option<&[String]>) -> bool {
+fn merge_words(
+    t: &mut dyn toml_edit::TableLike,
+    key: &str,
+    base: Option<&[String]>,
+    new: Option<&[String]>,
+    left: &mut String,
+) -> bool {
     if base == new {
         return false;
     }
     let Some(new) = new else {
-        return t.remove(key).is_some();
+        return drop_key(t, key, left);
     };
     if t.get(key).and_then(Item::as_array).is_none() {
-        return put_value(t, key, Some(new.iter().map(String::as_str).collect::<toml_edit::Array>().into()));
+        return write_value(t, key, new.iter().map(String::as_str).collect::<toml_edit::Array>().into());
     }
     let base = base.unwrap_or_default();
     let words = t.get_mut(key).and_then(Item::as_array_mut).expect("방금 배열인 것을 봤다");
-    let before = words.len();
-    words.retain(|v| !v.as_str().is_some_and(|w| base.iter().any(|b| b == w) && !new.iter().any(|n| n == w)));
-    let mut changed = words.len() != before;
+    let mut changed =
+        drop_elements(words, |v| v.as_str().is_some_and(|w| base.iter().any(|b| b == w) && !new.iter().any(|n| n == w))) > 0;
     for w in new {
         if base.contains(w) || words.iter().any(|v| v.as_str() == Some(w.as_str())) {
             continue;
@@ -904,15 +997,20 @@ fn plain(item: &Item, arrays: bool) -> bool {
     matches!(item, Item::Value(v) if !v.is_inline_table() && (arrays || !v.is_array()))
 }
 
-/// 값 하나를 적는다(`Doc::merge_look`·`Doc::mark_read`·`Doc::set_hue`). 같은 값이면 안 적고, 바뀐 것이
-/// 있으면 참. `None` 이면 키를 지운다.
+/// 값 하나를 적거나(`Some`, [`write_value`]) 키를 지운다(`None`, [`drop_key`] — 표 밖으로 내보낼 주석은 `left` 에
+/// 쌓는다). 바뀐 것이 있으면 참(`Doc::merge_look`·`Doc::set_hue`).
+fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::Value>, left: &mut String) -> bool {
+    match v {
+        Some(v) => write_value(t, key, v),
+        None => drop_key(t, key, left),
+    }
+}
+
+/// 값 하나를 적는다([`put_value`]·`Doc::mark_read`·`merge_words`). 같은 값이면 안 적고, 바뀐 것이 있으면 참.
 ///
 /// **키는 안 건드리고 값만 바꾼다.** 키 위의 주석은 키의 꾸밈에 붙어 있어 `Table::insert` 로 갈아 끼우면
 /// 지워진다(키 모양을 새로 짓는다). 값 뒤의 주석은 있던 값의 꾸밈에 붙어 있어 옮겨 단다.
-fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::Value>) -> bool {
-    let Some(mut v) = v else {
-        return t.remove(key).is_some();
-    };
+fn write_value(t: &mut dyn toml_edit::TableLike, key: &str, mut v: toml_edit::Value) -> bool {
     if !t.contains_key(key) {
         t.insert(key, Item::Value(v));
         return true;
@@ -933,10 +1031,146 @@ fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::V
     true
 }
 
-/// 표 머리 앞의 글 중 **마지막 빈 줄 앞까지**(moai-bx7g) — 그 표에 붙지 않은 주석이다. 빈 줄 하나는 표와 함께
-/// 빠진다. 빈 줄이 없거나 그 앞에 주석이 없으면 `None`. 빈 줄이 무엇인지는 [`blank_lines`] 가 잰다.
-fn detached_head(t: &Table) -> Option<String> {
-    let prefix = t.decor().prefix()?.as_str()?;
+/// 남긴 글 `text` 를 다음 것의 머리 `was` 앞에 붙인 새 머리.
+///
+/// **남긴 글과 그 다음 것 사이에 빈 줄을 지킨다**(moai-gmdu 에픽 리뷰). 빈 줄 하나는 뺀 것과 함께
+/// 빠졌다 — 다음 것이 뺀 것에 빈 줄 없이 붙어 있었으면 남긴 글이 그것의 머리에 붙고, 그것을 뺄 때 함께
+/// 지워진다. 남긴 까닭이 그것을 안 지우려는 것이었다.
+fn keep_before(text: &str, was: &str) -> String {
+    let gap = if blank_lines(was).next() == Some(0) { "" } else { "\n" };
+    format!("{text}{gap}{was}")
+}
+
+/// 키 하나를 지운다(`put_value`·`merge_words` 의 `None`). 지웠으면 참.
+///
+/// **키 위의 주석 중 빈 줄로 떨어진 윗부분은 남긴다**(moai-liij) — 표를 뺄 때의 자([`Doc::remove`], moai-bx7g)를
+/// 키에도 댄다. 바로 위에 붙은 주석은 그 키의 것이라 함께 빠지고, 빈 줄 너머의 것은 앞 것의 꼬리나 밑의 것들의
+/// 머리다. 남긴 글은 같은 표에서 **다음에 그려지는 줄**의 머리 앞에 선다([`line_key`] — 점 키 줄도 줄이다). 다음
+/// 줄이 없으면 그 글은 표 밖으로 나가야 하는데 표는 제 끝 글을 안 들어, `left` 에 쌓아 부르는 쪽이 표 다음에
+/// 그려지는 것 앞에 붙인다(`Doc::put_before_next`). 나중에 쌓이는 것일수록 파일에서 앞이라 앞에 붙인다 — 끝 줄을
+/// 빼면 그 앞 줄이 끝 줄이 된다.
+///
+/// 표준 표(`[tui]`·`[[project]]`)의 키 머리는 줄 머리에서 시작한다. 인라인 표(`tui = { … }`)는 앞 쉼표 바로
+/// 뒤에서 시작해 첫 줄이 앞 줄의 끝인데, 여기는 그것을 안 가른다 — 그 안의 주석은 TOML 1.1 모양이다.
+fn drop_key(t: &mut dyn toml_edit::TableLike, key: &str, left: &mut String) -> bool {
+    let Some(at) = t.iter().position(|(k, _)| k == key) else {
+        return false;
+    };
+    let head = t.key(key).and_then(|k| detached(prefix_of(k.leaf_decor())));
+    t.remove(key);
+    let Some(head) = head else { return true };
+    match line_key(t, at) {
+        Some(mut n) => keep_in_front(n.leaf_decor_mut(), &head),
+        None => *left = keep_before_end(&head, left),
+    }
+    true
+}
+
+/// 표 몸에서 `from` 번째 것부터 보아 **처음 그려지는 줄**의 키. 점 키 줄(`meta.x = 1`)은 줄 머리를 맨 끝 조각의
+/// 꾸밈에 들고(toml_edit 의 `encode_key_path`) 몸 안 제자리에 그려지므로 그 조각까지 내려간다. 하위 표·표 배열은
+/// 몸 뒤에 제 머리로 그려져 몸의 줄이 아니다 — 그 머리는 [`Doc::put_before_next`] 가 맡는다.
+fn line_key(t: &mut dyn toml_edit::TableLike, from: usize) -> Option<toml_edit::KeyMut<'_>> {
+    let name = t.iter().skip(from).find(|(_, v)| draws_line(v)).map(|(k, _)| k.to_string())?;
+    if t.get(&name).and_then(Item::as_table_like).is_some_and(|d| d.is_dotted()) {
+        return line_key(t.get_mut(&name)?.as_table_like_mut()?, 0);
+    }
+    t.key_mut(&name)
+}
+
+/// 표 몸에 줄을 하나라도 그리는가 — 값 키(낱값·배열·인라인 표)이거나 그런 것을 든 점 키.
+fn draws_line(item: &Item) -> bool {
+    match item.as_table_like() {
+        Some(d) if d.is_dotted() => d.iter().any(|(_, v)| draws_line(v)),
+        _ => item.is_value(),
+    }
+}
+
+/// 배열에서 `gone` 인 원소를 뺀다(`merge_words`). 뺀 수를 낸다.
+///
+/// **원소 위의 주석 중 빈 줄로 떨어진 윗부분은 남긴다**(moai-liij) — [`drop_key`] 와 같은 자다. 원소의 머리는 앞
+/// 원소의 쉼표 바로 뒤에서 시작해 **첫 줄바꿈까지는 앞 줄의 끝**이다(앞 원소의 줄 끝 주석, `[` 줄의 주석) — 그것은
+/// 원소와 함께 빼지 않고, 빈 줄은 그 뒤에서만 잰다. 거꾸로 뒤 자리(다음 원소의 머리, 끝 원소면 `]` 앞 글)의 첫
+/// 줄은 **뺀 원소의 줄 끝**이라 원소와 함께 빠진다 — 둘을 뒤집으면 남는 원소가 제 주석을 잃고 뺀 원소의 주석을
+/// 단다. 원소가 앞 원소와 한 줄에 있었으면 그 줄이 남으므로 뒤 자리를 안 건드린다([`splice_mid_line`]).
+///
+/// 남긴 글은 다음 원소 앞에, 끝 원소면 닫는 `]` 앞에 선다. 뒤에서부터 빼 여럿이면 파일에 있던 차례대로 선다.
+/// 끝 쉼표가 없는 배열의 끝 원소는 `]` 앞 글을 제 꼬리(suffix)에 들고 있어 그것도 뒤 자리로 친다.
+fn drop_elements(words: &mut toml_edit::Array, gone: impl Fn(&toml_edit::Value) -> bool) -> usize {
+    let mut n = 0;
+    for i in (0..words.len()).rev() {
+        let v = words.get(i).expect("차례 안이다");
+        if !gone(v) {
+            continue;
+        }
+        let prefix = prefix_of(v.decor()).to_string();
+        let suffix = v.decor().suffix().and_then(|r| r.as_str()).unwrap_or_default().to_string();
+        words.remove(i);
+        n += 1;
+        match words.get_mut(i) {
+            Some(next) => {
+                let slot = splice_mid_line(&prefix, prefix_of(next.decor()), i == 0, false);
+                next.decor_mut().set_prefix(slot);
+            }
+            None => {
+                let trailing = words.trailing().as_str().unwrap_or_default();
+                let after = if words.trailing_comma() { trailing.to_string() } else { format!("{suffix}{trailing}") };
+                let slot = splice_mid_line(&prefix, &after, i == 0, true);
+                words.set_trailing(slot);
+            }
+        }
+    }
+    n
+}
+
+/// 머리가 **줄 가운데서** 시작하는 것(배열 원소 — 앞 쉼표 바로 뒤에서 시작한다)을 뺀 뒤 뒤 자리에 설 글. `gone` 은
+/// 뺀 것의 머리, `after` 는 뒤 자리의 지금 글, `first` 는 뺀 것이 첫 원소였나, `closing` 은 뒤 자리가 닫는 괄호 앞
+/// 글인가다.
+///
+/// - `gone` 에 줄바꿈이 없으면 뺀 것이 앞 것과 한 줄에 있었다 — 그 줄은 남으니 `after` 그대로다. 다만 첫 원소면
+///   앞이 `[` 라, 그 줄에 이어 선 뒤 원소가 자리를 이어받는다(안 그러면 `["a", "b"]` 가 `[ "b"]` 가 된다)
+/// - 있으면 `gone` 의 첫 줄(앞 줄의 끝)은 남기고 `after` 의 첫 줄(뺀 것의 줄 끝)은 버린다. `after` 에 줄바꿈이
+///   없으면 뒤 것이 뺀 것과 한 줄이었다 — 그 줄을 이어받아 뺀 것의 들여쓰기에 선다
+/// - 그 사이에 `gone` 에서 빈 줄로 떨어진 글([`detached`])을 남긴다. 닫는 괄호 앞이면 빈 줄을 안 둔다([`keep_before_end`])
+fn splice_mid_line(gone: &str, after: &str, first: bool, closing: bool) -> String {
+    let (end, rest) = first_line(gone);
+    if end.is_empty() {
+        return if first && !after.contains('\n') { gone.to_string() } else { after.to_string() };
+    }
+    let (after_end, after_rest) = first_line(after);
+    let tail = if after_end.is_empty() { &rest[rest.rfind('\n').map_or(0, |i| i + 1)..] } else { after_rest };
+    let kept = match detached(rest) {
+        None => tail.to_string(),
+        Some(head) if closing => keep_before_end(&head, tail),
+        Some(head) => keep_before(&head, tail),
+    };
+    format!("{end}{kept}")
+}
+
+/// 글의 첫 줄(첫 줄바꿈까지, 줄바꿈이 없으면 빈 글)과 나머지.
+fn first_line(text: &str) -> (&str, &str) {
+    text.split_at(text.find('\n').map_or(0, |i| i + 1))
+}
+
+/// 꾸밈의 머리 글. 없으면 빈 글이다.
+fn prefix_of(decor: &toml_edit::Decor) -> &str {
+    decor.prefix().and_then(|r| r.as_str()).unwrap_or_default()
+}
+
+/// 남긴 글을 그 꾸밈의 머리 앞에 붙인다([`keep_before`]).
+fn keep_in_front(decor: &mut toml_edit::Decor, text: &str) {
+    let head = keep_before(text, prefix_of(decor));
+    decor.set_prefix(head);
+}
+
+/// 닫는 글(`]` 앞·표 밖으로 나갈 글) 앞에 남긴 글을 붙인다 — 뒤가 비었거나 빈칸뿐이면 빈 줄 없이, 아니면
+/// [`keep_before`] 대로.
+fn keep_before_end(text: &str, was: &str) -> String {
+    if was.trim().is_empty() { format!("{text}{was}") } else { keep_before(text, was) }
+}
+
+/// 머리 글 중 **마지막 빈 줄 앞까지**(moai-bx7g) — 그 다음 것에 붙지 않은 주석이다. 빈 줄 하나는 다음 것과
+/// 함께 빠진다. 빈 줄이 없거나 그 앞에 주석이 없으면 `None`. 빈 줄이 무엇인지는 [`blank_lines`] 가 잰다.
+fn detached(prefix: &str) -> Option<String> {
     let head = &prefix[..blank_lines(prefix).last()?];
     (!head.trim().is_empty()).then(|| head.to_string())
 }
@@ -1693,6 +1927,116 @@ mod tests {
         assert_eq!(doc.render(), "[tui]\nsort = \"title\"\n\n# 목록\n# 파일 끝\n");
     }
 
+    /// **키를 지울 때도 빈 줄로 떨어진 위 주석은 남는다**(moai-liij) — 표를 뺄 때의 자(moai-bx7g)와 같다. 바로
+    /// 위에 붙은 주석은 그 키의 것이라 함께 빠진다. 남은 글은 다음 키 앞에, 끝 키였으면 표 다음 것 앞에 선다.
+    #[test]
+    fn dropping_a_key_keeps_the_comment_a_blank_line_away() {
+        let hue = |src: &str| {
+            let mut doc = Doc::parse(src).unwrap();
+            assert_eq!(doc.set_hue(&["/a".into()], None).unwrap(), 1);
+            doc.render()
+        };
+        // gmdu 에픽 리뷰가 본 자리 — 그 주석은 밑의 `name` 의 머리이기도 했다.
+        assert_eq!(
+            hue("[[project]]\npath = \"/a\"\n\n# --- hand tweaks below ---\n\ncolor = \"cyan\"\nname = \"일\"\n"),
+            "[[project]]\npath = \"/a\"\n\n# --- hand tweaks below ---\n\nname = \"일\"\n"
+        );
+        // 끝 키면 표 다음 것 앞에, 파일 끝이면 끝 글 앞에 선다.
+        assert_eq!(
+            hue("[[project]]\npath = \"/a\"\n# 색\n\ncolor = \"cyan\"\n\n[tui]\nsort = \"title\"\n"),
+            "[[project]]\npath = \"/a\"\n# 색\n\n[tui]\nsort = \"title\"\n"
+        );
+        assert_eq!(hue("[[project]]\npath = \"/a\"\n# 색\n\ncolor = \"cyan\"\n# 끝\n"), "[[project]]\npath = \"/a\"\n# 색\n# 끝\n");
+        // 바로 위에 붙은 주석은 그 키의 것이다.
+        assert_eq!(hue("[[project]]\npath = \"/a\"\n\n# 색\ncolor = \"cyan\"\n"), "[[project]]\npath = \"/a\"\n");
+
+        // 보기 키도 같다. 끝 키 둘을 한 번에 지우면 남은 글은 파일에 있던 차례로 선다.
+        let src = "[tui]\n# 위\n\nsort = \"title\"\n# 차례\n\nsort_reversed = true\n# 방향\n\ndetail = false\n\n[x]\n";
+        let base = Look { sort: Some("title".into()), sort_reversed: Some(true), detail: Some(false), ..Look::default() };
+        let mut doc = Doc::parse(src).unwrap();
+        doc.merge_look(&base, &Look { sort: None, sort_reversed: None, detail: None, ..base.clone() }).unwrap();
+        assert_eq!(doc.render(), "[tui]\n# 위\n\n# 차례\n\n# 방향\n\n[x]\n");
+    }
+
+    /// **배열 원소를 뺄 때도 빈 줄로 떨어진 위 주석은 남는다**(moai-liij). 원소의 머리는 앞 쉼표 바로 뒤에서
+    /// 시작해 첫 줄바꿈은 앞 줄의 끝이다 — 빈 줄로 세면 붙은 주석까지 남긴다.
+    #[test]
+    fn dropping_an_element_keeps_the_comment_a_blank_line_away() {
+        let hide = |src: &str, gone: &[&str]| {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let all = ["todo", "done", "review"];
+            let base = Look { hidden: words(&all), ..Look::default() };
+            let kept: Vec<&str> = all.iter().copied().filter(|w| !gone.contains(w)).collect();
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&base, &Look { hidden: words(&kept), ..base.clone() }).unwrap();
+            doc.render()
+        };
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  # 끝난 것\n\n  # 끝\n  \"done\",\n  # 리뷰\n\n  \"review\",\n]\n";
+        assert_eq!(hide(src, &["done"]), "[tui]\nhidden = [\n  \"todo\",\n  # 끝난 것\n\n  # 리뷰\n\n  \"review\",\n]\n");
+        assert_eq!(hide(src, &["review"]), "[tui]\nhidden = [\n  \"todo\",\n  # 끝난 것\n\n  # 끝\n  \"done\",\n  # 리뷰\n]\n");
+        assert_eq!(hide(src, &["done", "review"]), "[tui]\nhidden = [\n  \"todo\",\n  # 끝난 것\n\n  # 리뷰\n]\n");
+        // 한 줄 배열은 그대로 한 줄이다.
+        assert_eq!(hide("[tui]\nhidden = [\"todo\", \"done\", \"review\"]\n", &["done"]), "[tui]\nhidden = [\"todo\", \"review\"]\n");
+    }
+
+    /// **원소를 빼도 남는 원소의 줄은 그대로다**(moai-1upp 에픽 리뷰). 원소 머리의 첫 줄은 앞 원소의 줄 끝(그 줄 끝 주석,
+    /// `[` 줄의 주석)이라 남고, 뒤 자리의 첫 줄은 뺀 원소의 줄 끝이라 함께 빠진다 — 뒤집으면 남는 원소가 제 주석을
+    /// 잃고 뺀 원소의 주석을 달았다. 남긴 글은 제 줄에 서고, 끝 쉼표 없는 배열의 `]` 도 제 줄에 남는다.
+    #[test]
+    fn dropping_an_element_keeps_the_neighbours_line() {
+        let hide = |src: &str, all: &[&str], gone: &[&str]| {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let kept: Vec<&str> = all.iter().copied().filter(|w| !gone.contains(w)).collect();
+            let base = Look { hidden: words(all), ..Look::default() };
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&base, &Look { hidden: words(&kept), ..base.clone() }).unwrap();
+            doc.render()
+        };
+        let (two, three) = (["done", "review"], ["todo", "done", "review"]);
+        let src = "[tui]\nhidden = [\n  \"done\",    # 끝난 일\n  \"review\",  # 리뷰 중\n]\n";
+        assert_eq!(hide(src, &two, &["review"]), "[tui]\nhidden = [\n  \"done\",    # 끝난 일\n]\n");
+        assert_eq!(hide(src, &two, &["done"]), "[tui]\nhidden = [\n  \"review\",  # 리뷰 중\n]\n");
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  # 남길 것\n\n  \"done\", # 끝\n  \"review\",\n]\n";
+        assert_eq!(hide(src, &three, &["done"]), "[tui]\nhidden = [\n  \"todo\",\n  # 남길 것\n\n  \"review\",\n]\n");
+        // `[` 줄의 주석은 첫 원소를 빼도 남는다.
+        let src = "[tui]\nhidden = [  # 안 볼 칸\n  \"done\",\n  \"review\",\n]\n";
+        assert_eq!(hide(src, &two, &["done"]), "[tui]\nhidden = [  # 안 볼 칸\n  \"review\",\n]\n");
+        // 끝 쉼표가 없으면 `]` 앞 글이 끝 원소의 꼬리에 있다 — 남긴 글도 `]` 도 제 줄에 선다.
+        let src = "[tui]\nhidden = [\n  \"todo\",\n  # 남길 것\n\n  \"done\"\n]\n";
+        assert_eq!(hide(src, &["todo", "done"], &["done"]), "[tui]\nhidden = [\n  \"todo\"\n  # 남길 것\n]\n");
+        // 뒤 원소가 뺀 원소와 한 줄이었으면 그 줄을 이어받는다. 한 줄에 둘이 있던 줄은 남는다.
+        let src = "[tui]\nhidden = [\n  # 남길 것\n\n  \"todo\", \"done\", \"review\"\n]\n";
+        assert_eq!(hide(src, &three, &["todo"]), "[tui]\nhidden = [\n  # 남길 것\n\n  \"done\", \"review\"\n]\n");
+        let src = "[tui]\nhidden = [\n  \"todo\", \"done\", # 둘\n  \"review\",\n]\n";
+        assert_eq!(hide(src, &three, &["done"]), "[tui]\nhidden = [\n  \"todo\", # 둘\n  \"review\",\n]\n");
+    }
+
+    /// **남긴 글은 점 키 줄 앞에도 선다**(moai-1upp 에픽 리뷰). 점 키(`meta.x = 1`)는 표 몸 안 제자리에 그려지고 그 줄의
+    /// 머리를 맨 끝 조각이 든다 — 건너뛰면 남긴 글이 점 키 줄 밑으로 내려가 글의 차례가 바뀌었다. 뿌리에 점 키로 적은
+    /// `tui.x` 는 위치가 없어 남긴 글이 버려졌다 — 설정 머리 주석이 그 첫 줄의 머리다.
+    #[test]
+    fn a_kept_comment_stays_above_a_dotted_key() {
+        let mut doc = Doc::parse("[[project]]\npath = \"/a\"\n# --- 손본 것 ---\n\ncolor = \"cyan\"\nmeta.x = 1\nname = \"일\"\n").unwrap();
+        assert_eq!(doc.set_hue(&["/a".into()], None).unwrap(), 1);
+        assert_eq!(doc.render(), "[[project]]\npath = \"/a\"\n# --- 손본 것 ---\n\nmeta.x = 1\nname = \"일\"\n");
+
+        let hidden = Look { hidden: Some(vec!["done".into()]), ..Look::default() };
+        let mut doc = Doc::parse("[tui]\n# 보기\n\nhidden = [\"done\"]\nsort.by = \"title\"\n").unwrap();
+        doc.merge_look(&hidden, &Look::default()).unwrap();
+        assert_eq!(doc.render(), "[tui]\n# 보기\n\nsort.by = \"title\"\n");
+
+        let sort = Look { sort: Some("title".into()), ..Look::default() };
+        for (src, want) in [
+            ("# 내 설정\n\ntui.sort = \"title\"\n\n[[project]]\npath = \"/a\"\n", "# 내 설정\n\n[[project]]\npath = \"/a\"\n"),
+            ("# 내 설정\n\ntui.sort = \"title\"\n", "# 내 설정\n"),
+            ("# 내 설정\n\ntui.sort = \"title\"\ni18n.lang = \"ko\"\n", "# 내 설정\n\ni18n.lang = \"ko\"\n"),
+        ] {
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&sort, &Look::default()).unwrap();
+            assert_eq!(doc.render(), want, "{src:?}");
+        }
+    }
+
     /// 명령이 받는 낱말과 읽기가 받는 낱말이 같다.
     #[test]
     fn hue_choice_takes_palette_names_and_auto_only() {
@@ -2116,6 +2460,72 @@ mod tests {
         // 막지 않았다(아래 시험이 그것을 잰다). 추적 안 된 파일 하나가 조용한 손실보다 싸다.
         assert!(d.join("config.toml.lock").exists(), "준 철자 곁의 락이 없다");
         assert!(d.join("dots/config.toml.lock").exists(), "푼 자리의 락이 없다 — 두 철자가 서로를 안 막는다");
+    }
+
+    /// **링크가 위 디렉터리에 걸렸으면 락은 하나다**(moai-2l74). 그때 두 철자의 락은 같은 파일이라, 둘 다
+    /// 잡으면 제가 쥔 락을 제가 기다리다 `locked` 로 물러난다 — `~/.config` 가 dotfiles 로 걸렸거나 macOS 의
+    /// `/var` 밑이면 쓰기마다 그랬다. 파일이 없던 첫 쓰기와 파일이 선 뒤의 쓰기가 다른 길이라 둘 다 잰다.
+    /// 기다린 것은 `unwrap` 이 잡는다 — 락은 기다리다 `locked` 로 물러나지 늦게 잡히지 않는다(`store::Lock`).
+    #[cfg(unix)]
+    #[test]
+    fn a_config_under_a_linked_directory_locks_once() {
+        let s = scratch("linked-dir");
+        let d = s.canonicalize().unwrap();
+        std::fs::create_dir_all(d.join("dots")).unwrap();
+        std::os::unix::fs::symlink(d.join("dots"), d.join("cfg")).unwrap();
+        let path = d.join("cfg/config.toml");
+        assert!(update(&path, |doc| doc.add(Path::new("/a"))).unwrap(), "첫 쓰기");
+        assert!(update(&path, |doc| doc.add(Path::new("/b"))).unwrap(), "파일이 선 뒤의 쓰기");
+        assert_eq!(read(Some(&path)).projects.len(), 2);
+    }
+
+    /// **락 파일 자체가 링크여도 락은 하나다**(moai-2l74 에픽 리뷰). stow·rcm 은 dotfiles 안의 파일을 하나씩 거는데,
+    /// 설정 곁의 락도 dotfiles 안에 서니(`a_symlinked_config_stays_a_symlink`) 그것까지 걸린다. 철자로 견주면 둘이
+    /// 달라 보여 한 파일을 두 번 잡고 쓰기마다 `locked` 로 물러났다 — 파일로 견준다. 하드 링크도 같다.
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_lock_file_is_locked_once() {
+        let s = scratch("linked-lock");
+        let d = s.canonicalize().unwrap();
+        std::fs::create_dir_all(d.join("dots")).unwrap();
+        std::fs::create_dir_all(d.join("cfg")).unwrap();
+        std::fs::write(d.join("dots/config.toml"), "").unwrap();
+        std::fs::write(d.join("dots/config.toml.lock"), "").unwrap();
+        std::os::unix::fs::symlink(d.join("dots/config.toml"), d.join("cfg/config.toml")).unwrap();
+        std::os::unix::fs::symlink(d.join("dots/config.toml.lock"), d.join("cfg/config.toml.lock")).unwrap();
+        let path = d.join("cfg/config.toml");
+        assert!(update(&path, |doc| doc.add(Path::new("/a"))).unwrap(), "락 파일이 링크");
+        std::fs::remove_file(d.join("cfg/config.toml.lock")).unwrap();
+        std::fs::hard_link(d.join("dots/config.toml.lock"), d.join("cfg/config.toml.lock")).unwrap();
+        assert!(update(&path, |doc| doc.add(Path::new("/b"))).unwrap(), "락 파일이 하드 링크");
+        assert_eq!(read(Some(&d.join("dots/config.toml"))).projects.len(), 2);
+        assert!(std::fs::symlink_metadata(&path).unwrap().file_type().is_symlink());
+    }
+
+    /// **가리키는 파일이 아직 없는 링크도 링크로 남는다**(moai-2l74 에픽 리뷰). 링크를 먼저 걸고 파일은 첫 쓰기에
+    /// 생기는 dotfiles 에서, 풀리지 않는 링크를 준 철자로 두면 첫 쓰기가 링크 자리에 `rename` 해 링크를 보통 파일로
+    /// 갈아끼웠다 — dotfiles 쪽은 영영 비고, 가리키는 철자로 쓰는 쪽과는 다른 락을 잡는다. 가리키는 자리의
+    /// 디렉터리가 없으면 쓰지 않는다 — 아직 안 받은 저장소 자리에 디렉터리를 짓지 않는다.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_a_missing_config_stays_a_link() {
+        let s = scratch("dangling");
+        let d = s.canonicalize().unwrap();
+        std::fs::create_dir_all(d.join("dots")).unwrap();
+        std::fs::create_dir_all(d.join("cfg")).unwrap();
+        let link = d.join("cfg/config.toml");
+        std::os::unix::fs::symlink("../dots/config.toml", &link).unwrap();
+        assert!(update(&link, |doc| doc.add(Path::new("/a"))).unwrap());
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "링크를 보통 파일로 갈아끼웠다");
+        assert_eq!(read(Some(&d.join("dots/config.toml"))).projects, [Project { path: "/a".into(), hue: None }]);
+        assert!(d.join("dots/config.toml.lock").exists(), "가리키는 자리의 락이 없다 — 두 철자가 서로를 안 막는다");
+
+        let gone = d.join("cfg/gone.toml");
+        std::os::unix::fs::symlink(d.join("nowhere/config.toml"), &gone).unwrap();
+        let e = update(&gone, |doc| doc.add(Path::new("/a"))).unwrap_err();
+        assert_eq!(e.code, code::BROKEN, "{e}");
+        assert!(std::fs::symlink_metadata(&gone).unwrap().file_type().is_symlink());
+        assert!(!d.join("nowhere").exists(), "없는 자리에 디렉터리를 지었다");
     }
 
     /// **한 파일을 두 철자로 불러도 서로를 막는다.** 설정이 링크면(dotfiles 저장소가 흔히
