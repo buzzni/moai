@@ -62,6 +62,11 @@ pub struct Place {
     /// 이 탐색기를 띄운 자리인가.
     pub launched: bool,
     pub look: Look,
+    /// 읽어 든 그 프로젝트의 줄(moai-eyre). **한눈 보기가 머리줄 밑에 세울 것이고**, 없으면 머리줄만
+    /// 선다 — 읽는 것은 펼칠 때다(moai-12yx). 요약([`Look::Open`])과 따로 드는 까닭은 값이 다르기
+    /// 때문이다: 요약은 걸음마다 다시 재는 작은 셈이고, 이것은 그 프로젝트를 통째로 읽어 색인까지 지은
+    /// 것이다.
+    pub site: Option<super::Site>,
     /// 읽기 **전에** 잰 표식 — `.moai/issues.jsonl` 과 `.moai/config.toml`, 옆 워크트리.
     marks: Marks,
     /// 읽은 것을 **들인** 때([`Layer::adopt`]) — 시작한 때가 아니다(까닭은 거기). [`due`] 가 이것으로
@@ -301,6 +306,7 @@ impl Layer {
                 look: Look::Unread,
                 marks: Marks::default(),
                 read_at: None,
+                site: None,
             })
             .collect();
         let at = match places.iter().find(|p| p.launched) {
@@ -459,7 +465,7 @@ impl App {
     /// 여기서 고쳐 세운 줄(`Look::Shut`)을 옛 디렉터리의 값으로 덮는다. 버린 줄은 층에 선 다음
     /// 걸음에 [`Layer::stale`] 이 다시 고른다 — 못 들어갔거나 `n` 으로 층에 남았으면 곧바로,
     /// 들어갔으면 올라올 때다.
-    fn open_place(&mut self, at: usize) -> Option<Repo> {
+    pub(super) fn open_place(&mut self, at: usize) -> Option<Repo> {
         if let Some((_, handle)) = self.layer.as_mut()?.pending.take() {
             self.discard(handle);
         }
@@ -848,6 +854,7 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
                 look,
                 marks: Marks::default(),
                 read_at: Some(std::time::Instant::now()),
+                site: None,
             })
             .collect(),
         problems: Vec::new(),
@@ -940,7 +947,7 @@ mod tests {
         a.rows()
             .iter()
             .filter_map(|r| match r {
-                Row::Item(e, _) => e.at().map(|at| a.site.issues[at].title.clone()),
+                Row::Item(_, e, _) => e.at().map(|at| a.site.issues[at].title.clone()),
                 _ => None,
             })
             .collect()
@@ -1014,7 +1021,7 @@ mod tests {
 
         // one 의 argos-0002 에 서고 거름망을 건다 — two 에서 argos-0002 는 다른 자리의 다른 줄이다.
         a.key(key(KeyCode::End));
-        assert!(matches!(a.current(), Some(Row::Item(crate::nav::Entry::Leaf { at: 1 }, _))), "{:?}", a.current());
+        assert!(matches!(a.current(), Some(Row::Item(_, crate::nav::Entry::Leaf { at: 1 }, _))), "{:?}", a.current());
         a.hit("SPC f");
         for c in "status=in_progress".chars() {
             a.key(key(KeyCode::Char(c)));
@@ -1504,6 +1511,37 @@ mod tests {
         (one, two, a)
     }
 
+    /// **한눈 보기는 프로젝트마다 머리줄 하나와 그 밑의 줄을 한 목록으로 세운다**(moai-eyre, 사용자
+    /// 결정 2026-09-19). 줄은 제 프로젝트를 [`super::Seat`] 으로 들고 다녀, 같은 id 를 쓰는 두
+    /// 프로젝트가 한 트리에서 안 섞인다. 아직 안 읽은 프로젝트는 머리줄만 서고(읽는 것은 펼칠
+    /// 때다 — moai-12yx), 접은 프로젝트는 그 밑이 빠진다 — 다 접으면 옛 프로젝트 층과 같은 화면이다.
+    #[test]
+    fn the_one_list_stacks_each_project_under_its_head() {
+        let s = Scratch::fenced("layer-one-list");
+        let (one, _two, mut a) = on_layer_with_twins(&s);
+        assert!(a.on_layer(), "시험의 전제 — 층에서 시작한다");
+        assert_eq!(a.rows().len(), 2, "안 읽은 프로젝트가 줄을 세웠다");
+
+        assert!(a.fill_site(0), "첫 프로젝트를 못 읽었다");
+        let rows = a.rows();
+        assert!(matches!(rows[0], Row::Project(0)), "{:?}", rows[0]);
+        assert!(matches!(rows[1], Row::Item(crate::tui::Seat::Place(0), ..)), "{:?}", rows[1]);
+        assert!(matches!(rows.last(), Some(Row::Project(1))), "둘째 머리줄이 안 섰다: {rows:?}");
+        let mut titles: Vec<String> = rows
+            .iter()
+            .filter_map(|r| match r {
+                Row::Item(seat, e, _) => e.at().map(|at| a.site_at(*seat).issues[at].title.clone()),
+                _ => None,
+            })
+            .collect();
+        titles.sort();
+        assert_eq!(titles, ["one 의 둘째 줄", "one 의 첫 줄"], "남의 프로젝트의 줄이 섞였다");
+
+        // 접으면 그 밑이 빠진다 — 머리줄은 남는다.
+        a.folded.insert(one);
+        assert_eq!(a.rows().len(), 2, "접었는데 줄이 남았다");
+    }
+
     /// **펼쳐 둔 자리는 프로젝트를 건너지 않는다**(리뷰) — 마디가 그 프로젝트의 이슈 id 이고,
     /// 바구니 마디(`(마일스톤 없음)`·`(길 잃음)`)는 id 조차 없어 prefix 가 달라도 그대로 샌다.
     /// 두고 오면 다음 프로젝트가 아무도 안 펼친 묶음을 펼친 채 세운다. `leave_project` 가 커서
@@ -1692,7 +1730,7 @@ mod tests {
         assert_eq!(snapshots(&[&two])[0], before[1], "커서의 프로젝트 말고 다른 파일이 바뀌었다");
         assert_eq!(titles(&a).iter().filter(|t| *t == "one 에 담을 것").count(), 1);
         let on = a.current().and_then(|r| match r {
-            Row::Item(e, _) => e.at().map(|at| a.site.issues[at].title.clone()),
+            Row::Item(_, e, _) => e.at().map(|at| a.site.issues[at].title.clone()),
             _ => None,
         });
         assert_eq!(on.as_deref(), Some("one 에 담을 것"), "만든 줄에 안 섰다");
