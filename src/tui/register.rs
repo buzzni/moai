@@ -532,10 +532,13 @@ mod tests {
         }
         a.hit("SPC p d");
         a.key(key(KeyCode::Char('y')));
-        assert_eq!(s.registered(), [one.clone()]);
+        assert_eq!(s.registered(), std::slice::from_ref(&one));
         assert!(two.is_dir(), "디렉터리를 지웠다");
         assert!(one.join(".moai/config.toml").is_file());
-        assert_eq!(a.layer.as_ref().unwrap().places.iter().map(|p| p.path.clone()).collect::<Vec<_>>(), [one.clone()]);
+        assert_eq!(
+            a.layer.as_ref().unwrap().places.iter().map(|p| p.path.clone()).collect::<Vec<_>>(),
+            std::slice::from_ref(&one)
+        );
         assert_eq!(a.current(), Some(Row::Project(0)), "뺀 뒤 커서가 줄 밖에 섰다");
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("✓ 뺌") && n.contains("그대로")), "{:?}", a.notice);
 
@@ -633,7 +636,7 @@ mod tests {
         a.hit("SPC p a");
         point(&mut a, "argos");
         a.key(key(KeyCode::Char('a')));
-        assert_eq!(s.registered(), [argos.clone()]);
+        assert_eq!(s.registered(), std::slice::from_ref(&argos));
         press(&mut a, &[KeyCode::Esc]);
         assert!(a.on_layer());
         assert_eq!(place_at_cursor(&a), argos);
@@ -682,7 +685,7 @@ mod tests {
         assert!(!said.contains("Bksp"), "걷어 낸 키를 아직 댄다 — {said:?}");
         press(&mut a, &[KeyCode::Esc]);
 
-        assert_eq!(s.registered(), [other.clone()]);
+        assert_eq!(s.registered(), std::slice::from_ref(&other));
         let layer = a.layer.as_ref().expect("등록했는데 층이 안 섰다");
         assert_eq!(layer.at, At::Project(here.clone()), "등록하다 프로젝트에서 튕겨 나왔다");
         assert_eq!(a.site.repo.as_ref().map(|r| r.root.clone()), Some(here.clone()));

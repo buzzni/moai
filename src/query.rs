@@ -734,7 +734,7 @@ mod tests {
         let columns = ["review", "todo", "done"];
         let statuses: Vec<String> = ["todo", "review", "done"].map(String::from).to_vec();
         let sorted = |key, reversed| {
-            let mut idx = vec![0, 1, 2];
+            let mut idx = [0, 1, 2];
             idx.sort_by(|&x, &y| {
                 order_by(key, reversed, (&issues[x], columns[x]), (&issues[y], columns[y]), &statuses, crate::config::Naming::Full)
             });

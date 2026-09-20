@@ -1,0 +1,35 @@
+# 의존성 판올림을 한 주에 한 번, **묶음으로** 받는다.
+#
+# 묶지 않으면 크레이트마다 PR 이 서고, 그 하나하나가 CI 한 판씩을 먹는다. 판만
+# 올리는 PR 열 개는 읽히지 않고, 읽히지 않는 PR 은 눌러 담기다 낡는다.
+#
+# renovate 를 따로 두지 않았다. actions 의 SHA 고정은 워크플로에 이미 박혀 있고
+# (`uses: actions/checkout@<sha> # v4`), dependabot 의 `github-actions` 생태계가
+# 그 SHA 를 그대로 올려 준다 — 봇 둘이 같은 파일을 겨루게 할 까닭이 없다.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      # 자잘한 판올림은 한 PR 로 온다. major 는 따로 와야 무엇이 깨질지 읽는다.
+      cargo-minor:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: chore(deps)
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore(ci)
