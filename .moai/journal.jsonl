@@ -5885,3 +5885,7 @@
 {"ts":"2026-09-20T03:35:01Z","id":"moai-f31d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽이 6/6 으로 닫혔다 — 3d0cf59 까지 develop 에 들었다. 남은 것은 idea 아홉(moai-d9rv·moai-ae5c·moai-zc2x·moai-hdcf·moai-qem4·moai-0b4b·moai-uyhd·moai-lqsr·moai-qaeg)이고 그중 moai-hdcf(옛 [read] 를 언제 걷는가)와 moai-qaeg(canonicalize 코드 다섯 벌)는 사람의 결정이 든다"}
 {"ts":"2026-09-20T03:35:19Z","id":"moai-2ewr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-20T03:36:23Z","id":"moai-54pk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T03:36:55Z","id":"moai-4gy5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T03:42:10Z","id":"moai-dbzs","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정 (2026-09-20): (1) `&&` 로 이은 집기에도 `?` 를 붙인다 — 앞이 지면 안 도는 줄을 확실한 집기로 적어 정말 쥔 세션에게서 초점을 빼앗는 것이 더 나쁘다. 넘겨받기가 그만큼 약해지는 것은 받아들인다. (2) 남이 적은 `?` 줄은 읽되 막는 데는 쓰지 않는다 — \"그쪽이 쥐었을 수 있다\" 로만 읽어 내 초점을 안 빼앗고, 그것을 근거로 새로 막지도 않는다. moai-4jsy 의 \"새로 막는 일은 없다\" 와 moai-m5mg 의 elsewhere 보존을 그대로 잇는다."}
+{"ts":"2026-09-20T03:45:08Z","id":"moai-h6aq.cx8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 내려앉는 머지 드라이버와 못 도는 드라이버 알림"}
+{"ts":"2026-09-20T03:45:17Z","id":"moai-h6aq.cx8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
