@@ -736,6 +736,17 @@ impl App {
                 self.me = self.whoami(&repo.root);
                 self.site.cfg = repo.config.clone();
                 self.site.repo = Some(repo);
+                // **그 줄이 이미 들고 있던 읽음을 옮겨 든다**(moai-2gep) — 펼쳐 본 프로젝트는 제 표를
+                // 들고 선다. 아래의 `load_read` 가 그 파일을 못 읽으면(옛 `sudo moai read` 가 남긴
+                // root 의 파일) 들일 것이 없어 내게 온 줄이 모두 [NEW] 로 서고, 그 화면의 `SPC m a`
+                // 한 번이 그것을 다 찍는다. 세워 둔 줄에서 옮겨 드는 `App::follow_site` 와 같은 자다.
+                //
+                // **읽기가 되면 아래가 덮는다** — 여기 든 것은 못 읽을 때의 밑값이지 답이 아니다.
+                if let Some(held) = self.layer.as_mut().and_then(|l| l.places.get_mut(at)).and_then(|p| p.site.as_mut()) {
+                    self.site.seen = std::mem::take(&mut held.seen);
+                    self.site.read_stamp = held.read_stamp;
+                    self.site.read_tried = held.read_tried;
+                }
                 // **그 프로젝트의 읽음을 여기서 든다**(리뷰) — [`App::leave_project`] 가 `Site` 를 비워
                 // `seen` 이 빈 표라, 안 들면 아래의 들이기가 그 빈 표로 세어 **내게 온 줄이 모두** [NEW]
                 // 로 그려진다. 걸음이 그것을 고치지만 걸음은 최대 700ms 뒤고, 그사이 `SPC m a` 를 누르면
@@ -1772,6 +1783,48 @@ mod tests {
         let mut a = layered(&cfg);
         a.user = Some("레이븐 (raven@example.com)".into());
         (one, two, a)
+    }
+
+    /// **들어갈 때 그 줄이 들고 있던 읽음을 옮겨 든다**(moai-2gep). [`App::leave_project`] 가 `Site` 를
+    /// 비우고 [`App::load_read`] 가 파일에서 다시 드는데, 그 파일을 못 읽으면(옛 `sudo moai read` 가
+    /// 남긴 root 의 파일) 들일 것이 없어 **내게 온 줄이 모두** [NEW] 로 선다 — 그 화면의 `SPC m a`
+    /// 한 번이 그것을 다 찍는다. 층의 줄은 펼칠 때 읽어 둔 표를 들고 있으니, 버리지 않고 옮겨 든다.
+    /// 세워 둔 줄에서 옮겨 드는 [`App::follow_site`] 와 같은 자다.
+    #[test]
+    #[cfg(unix)]
+    fn entering_a_project_carries_the_read_marks_the_row_already_held() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::fenced("layer-enter-read");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.user_config = Some(cfg.clone());
+        a.user = Some("레이븐 (raven@example.com)".into());
+        let seen: std::collections::BTreeMap<String, String> =
+            [("argos-0001".to_string(), "2026-09-14T00:00:00Z".to_string())].into_iter().collect();
+        crate::read_marks::update(&cfg, &one, |sh| sh.mark(&seen)).unwrap();
+
+        a.want_site(0);
+        settle(&mut a);
+        let held = a.layer.as_ref().unwrap().places[0].site.as_ref().expect("펼친 줄이 제 Site 를 든다");
+        assert_eq!(held.seen.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "시험의 전제 — 줄이 읽음을 들었다");
+
+        // 들어가는 길에서 다시 읽으면 빈 표다. 들고 있던 것을 버리면 그 프로젝트가 통째로 [NEW] 다.
+        let at = crate::read_marks::path_for(&cfg, &one);
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&at).is_ok() {
+            // 권한이 안 먹는 자리(root)에서는 흉내 낼 수 없다.
+            std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return;
+        }
+        a.enter_project(0);
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!a.on_layer(), "시험의 전제 — 들어갔다");
+        assert_eq!(
+            a.site.seen.get("argos-0001").map(String::as_str),
+            Some("2026-09-14T00:00:00Z"),
+            "들어가며 들고 있던 읽음을 버렸다 — 이 프로젝트가 통째로 [NEW] 로 선다"
+        );
     }
 
     /// **한눈 보기는 프로젝트마다 머리줄 하나와 그 밑의 줄을 한 목록으로 세운다**(moai-eyre, 사용자

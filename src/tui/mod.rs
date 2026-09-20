@@ -2120,11 +2120,15 @@ impl App {
         let Some(got) = self.read_marks_of(&root) else { return };
         // 못 들었으면 표가 그대로라 다시 셀 까닭이 없다 — 잠깐 못 읽는 동안은 이 길이 걸음마다 돈다.
         let took = got.0.trouble.is_none();
+        // **몰라진 그 한 번은 다시 센다**(moai-2gep) — 들고 있는 표가 없으면 [NEW] 를 안 세는데
+        // (`App::recount_unread_in`), 그 답은 이미 세 놓은 줄을 지워야 선다. 몰랐다가 또 모르는
+        // 걸음은 답이 같으니 안 센다 — 그 길은 시계가 돌 때마다 오고, 세는 값이 줄 수만큼이다.
+        let knew = self.site.read_tried.trouble.is_none();
         // 까닭은 한 줄로 댄다 — 조용히 [NEW] 가 서면 왜 그런지 볼 데가 없다.
         if let Some(told) = Self::take_read(&mut self.site, got) {
             self.notice = Some(told);
         }
-        if took {
+        if took || knew {
             self.recount_unread();
         }
     }
@@ -2233,6 +2237,17 @@ impl App {
             site.unread.clear();
             return;
         };
+        // **읽음을 못 들었으면 아무것도 안 센다**(moai-2gep) — 위의 "누군지 모르면 안 센다" 와 같은
+        // 자다. 빈 표로 세면 **내게 온 줄이 모두** [NEW] 로 서는데, 그것은 "다 안 읽었다" 가 아니라
+        // "모른다" 다 — 그 화면의 `SPC m a` 한 번이 모르는 것을 다 읽음으로 찍는다. 들고 있는 표가
+        // 있으면 그것으로 센다(`App::enter_project` 가 옮겨 든 것이 그것이다).
+        //
+        // 읽음 파일이 **없는** 것은 여기 안 든다 — 탈이 아니라 아직 아무것도 안 읽은 프로젝트의
+        // 정상이고, 그때 모든 줄이 [NEW] 인 것이 맞는 답이다.
+        if site.read_tried.trouble.is_some() && site.seen.is_empty() {
+            site.unread.clear();
+            return;
+        }
         // **그 프로젝트의 표로 센다**(moai-bwce) — `App` 의 맵 하나로 세던 판은 한눈 보기의 모든
         // 프로젝트를 남의 읽음으로 셌다.
         let Site { issues, seen, unread, .. } = site;
@@ -5429,6 +5444,47 @@ mod tests {
         assert_eq!(a.site.seen.get("argos-0009"), Some(&stamp), "성한 줄까지 버렸다 — {:?}", a.site.seen);
         assert!(!a.site.unread.contains("argos-0009"), "읽은 줄에 [NEW] 가 섰다");
         assert!(a.notice.as_deref().is_some_and(|n| n.starts_with("읽음에 이상한 줄이 있다")), "{:?}", a.notice);
+    }
+
+    /// **읽음을 못 들었으면 [NEW] 를 안 센다**(moai-2gep) — "누군지 모르면 아무것도 안 센다" 와 같은
+    /// 자다. 빈 표로 세면 내게 온 줄이 모두 [NEW] 로 서는데 그것은 "다 안 읽었다" 가 아니라 "모른다"
+    /// 이고, 그 화면의 `SPC m a` 한 번이 모르는 것을 다 읽음으로 찍는다.
+    ///
+    /// 파일이 **없는** 것은 여기 안 든다 — 아직 아무것도 안 읽은 프로젝트의 정상이라 모든 줄이
+    /// [NEW] 인 것이 맞다.
+    #[test]
+    #[cfg(unix)]
+    fn a_sheet_we_could_not_read_counts_no_new_at_all() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::new("read-marks-unknown");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        let mut a = app();
+        for i in &mut a.site.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.me = Some("레이븐 (raven@example.com)".into());
+
+        // 파일이 없는 것은 탈이 아니다 — 그때는 다 [NEW] 가 맞다.
+        a.load_read();
+        assert!(a.site.unread.contains("argos-0009"), "시험의 전제 — 안 읽은 줄이 [NEW] 로 선다");
+
+        let at = crate::read_marks::path_for(&config, &root);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(&at, format!("path = {:?}\n\n[read]\n", root.display().to_string())).unwrap();
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&at).is_ok() {
+            // 권한이 안 먹는 자리(root)에서는 흉내 낼 수 없다.
+            std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return;
+        }
+        a.load_read();
+        assert_eq!(a.site.read_tried.trouble, Some(crate::user_config::Trouble::Unreadable), "시험의 전제 — 못 읽었다");
+        assert!(a.site.unread.is_empty(), "모르는 것을 안 읽은 것으로 셌다 — {:?}", a.site.unread);
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o644)).unwrap();
     }
 
     /// **홈이 끊기면 읽음도 지난 것을 들고 선다**(moai-4qbv.i0g 리뷰). 읽음 파일은 설정 파일 곁의
