@@ -2322,8 +2322,35 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
     // 계획은 stdin 으로 오므로 argv 의 길이 상한도 없다 — 이 상한이 유일한 문이다.
     let plan = from_stdin(s.path(), &["add", "--from", "-"], &format!("# 에픽\n- {big}\n"));
     assert!(!plan.status.success() && String::from_utf8_lossy(&plan.stderr).contains("64KB"), "add --from 이 큰 제목을 받았다");
+
+    // **거절문은 아직 안 지은 줄을 id 로 부르지 않는다**(moai-1rkl). 거절하는 쓰기는 아무것도 안
+    // 남기므로 그 id 는 어디에도 없고, 그것을 대면 받는 쪽이 없는 것을 찾으러 간다.
+    for (args, what) in [
+        (vec!["add", big.as_str()], "add 제목"),
+        (vec!["add", "새것", "-b", big.as_str()], "add -b"),
+    ] {
+        let err = String::from_utf8_lossy(&moai(s.path(), &args).stderr).to_string();
+        assert!(err.contains("새 줄"), "{what}: 안 지은 줄을 안 가리킨다\n{err}");
+        assert!(!err.contains("argos-"), "{what}: 쓰지도 않은 id 를 댔다\n{err}");
+    }
+
     assert_eq!(issues(s.path()), before, "거절한 쓰기가 스냅샷을 바꿨다");
     assert_eq!(journal(s.path()), notes, "거절한 쓰기가 저널에 남았다");
+
+    // **연습이 진짜와 같은 것을 본다**(moai-5229). 연습이 "좋다" 를 받은 뒤에 진짜가 거절하면
+    // 그 승인이 뒤늦은 말이 된다 — `add --from` 과 `idea promote` 두 길 모두.
+    let thought = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    for args in [
+        vec!["add", "--from", "-", "--dry-run"],
+        vec!["idea", "promote", thought.as_str(), "--from", "-", "--dry-run"],
+    ] {
+        let out = from_stdin(s.path(), &args, &format!("# 에픽\n- {big}\n"));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "연습이 진짜가 거절할 계획에 좋다고 했다 — {args:?}");
+        assert!(err.contains("64KB") && err.contains("새 줄"), "{args:?}\n{err}");
+    }
+    ok(s.path(), &["rm", &thought]);
+
 
     // 딱 상한은 받는다.
     ok(s.path(), &["note", &id, &"a".repeat(limit)]);

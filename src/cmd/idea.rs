@@ -77,6 +77,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     if args.dry_run {
         // **연습도 진짜와 같은 것을 본다.** 연습이 승인의 자리인데 거기서
         // 못 할 일을 하겠다고 말하면, 사람이 "좋다" 한 뒤에야 도구가 거절한다.
+        // **크기도 여기서 잰다**(moai-5229) — 연습이 승인한 계획을 진짜가 거절하면, 그 "좋다" 가
+        // 뒤늦은 말이 된다. `add --from --dry-run` 과 한 자리를 지난다.
+        crate::cmd::add::check_plan(&drafts)?;
         let load = repo.read()?;
         // **깃발은 안 세운다.** 진짜 `promote` 는 못 읽는 줄을 그대로 들고
         // 넘어가 0 으로 끝나는데 연습만 1 로 끝나면, 그것을 거절로 읽은 쪽이

@@ -26,14 +26,16 @@ pub const MAX_TEXT_BYTES: usize = 64 * 1024;
 /// 리뷰 줄은 [`crate::guide::REVIEW_OVER_LIMIT`] 에서 온다 — 가르치는 글과 거절문이 갈라지면
 /// 큰 리뷰를 닫는 쪽이 두 말 사이에서 멈춘다(moai-b8aj). `<크기>` 는 여기서 채운다: 재 놓은 수를
 /// 자리 표시로 도로 내밀면 받는 쪽이 첫 줄에서 그것을 옮겨 적어야 한다.
-pub fn check_text_size(id: &str, what: &str, text: &str) -> R<()> {
+/// `at` 은 **가리키는 말**이지 반드시 id 가 아니다 — 이 쓰기가 짓는 줄은 거절하면 안 남으므로
+/// id 가 아니라 제목으로 가리킨다([`unwritten`], moai-1rkl).
+pub fn check_text_size(at: &str, what: &str, text: &str) -> R<()> {
     if text.len() <= MAX_TEXT_BYTES {
         return Ok(());
     }
     let kb = text.len().div_ceil(1024);
     Err(Fail::coded(
         format!(
-            "{id}: {what} 크기가 {kb}KB 다 — 한 번에 {}KB 까지 적는다. 잘라 적지 않는다\n      \
+            "{at}: {what} 크기가 {kb}KB 다 — 한 번에 {}KB 까지 적는다. 잘라 적지 않는다\n      \
              요약을 적고 원문은 파일로 둔다. 리뷰 원문이면 리뷰가 낸 글이지 그 대화록(JSONL)이 아니다\n      \
              리뷰 원문이면: {}",
             MAX_TEXT_BYTES / 1024,
@@ -78,6 +80,18 @@ pub fn fit_bytes(text: &str, budget: usize) -> std::borrow::Cow<'_, str> {
         cut -= 1;
     }
     std::borrow::Cow::Owned(format!("{}{MARK}", &text[..cut]))
+}
+
+/// 크기 거절문이 **아직 안 지은 줄**을 가리키는 말(moai-1rkl).
+///
+/// 거절하는 쓰기는 아무것도 안 남기므로 그 줄의 id 는 어디에도 없다. 그런데도 그것을 대던 판은
+/// 받는 쪽을 없는 id 를 찾으러 보냈다 — 같은 계획을 두 번 돌리면 그때마다 다른 id 가 나왔다.
+/// `add` 가 "칸 검사는 id 를 뽑기 **전에** 한다" 로 이미 지키던 자를 크기 검사에도 세운다.
+///
+/// 제목 한 토막을 대는 것은 계획에 여러 줄이 있을 때 **어느 줄인지** 가려야 해서다. 제목 자체가
+/// 넘친 것이면 그 머리가 그대로 표가 된다.
+pub fn unwritten(title: &str) -> String {
+    format!("새 줄 '{}'", fit_bytes(&crate::text::one_line(title), 60))
 }
 
 /// 이슈의 구조적 종류. `tags` 와 축이 다르다 —

@@ -567,10 +567,19 @@ impl Repo {
         // **글의 크기는 한 자리에서 잰다**(moai-m9a8). 노트·`mv -m`·`defer -m`·제목·본문이 모두
         // 여기를 지나므로 명령마다 따로 걸면 한 곳은 반드시 잊는다. 저널에 적힐 글은 여기서, 제목과
         // 본문은 아래 바뀐 줄에서 — 둘 다 스냅샷을 쓰기 전이라 거절하면 아무것도 안 남는다.
+        //
+        // **이 쓰기가 짓는 줄은 id 로 안 부른다**(moai-1rkl) — 거절하면 그 id 는 어디에도 안 남아,
+        // 받는 쪽이 없는 것을 찾으러 간다. 그 줄의 제목 한 토막으로 가리킨다.
         for e in &entries {
+            let at = match original.iter().any(|o| o.id == e.id) {
+                true => e.id.clone(),
+                false => crate::model::unwritten(
+                    issues.iter().find(|i| i.id == e.id).map(|i| i.title.as_str()).unwrap_or_default(),
+                ),
+            };
             for (what, t) in [("노트", &e.text), ("메모", &e.note)] {
                 if let Some(t) = t {
-                    crate::model::check_text_size(&e.id, what, t)?;
+                    crate::model::check_text_size(&at, what, t)?;
                 }
             }
         }
@@ -592,7 +601,12 @@ impl Repo {
                     if let Some(text) = now
                         && now != before
                     {
-                        crate::model::check_text_size(&i.id, what, text)?;
+                        // 이번에 지은 줄이면 id 가 아니라 제목으로 가리킨다(moai-1rkl).
+                        let at = match was {
+                            Some(_) => i.id.clone(),
+                            None => crate::model::unwritten(&i.title),
+                        };
+                        crate::model::check_text_size(&at, what, text)?;
                     }
                 }
                 // **칸을 안 건드린 쓰기는 칸 이름을 다시 안 묻는다**(moai-hym7, 사람이
