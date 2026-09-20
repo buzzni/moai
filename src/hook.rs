@@ -3911,7 +3911,7 @@ fn counted(path: &str, root: &Path) -> bool {
     if path.is_empty() {
         return false;
     }
-    let Ok(rel) = resolve(path, root).strip_prefix(root).map(Path::to_path_buf) else {
+    let Ok(rel) = settled(path, root).strip_prefix(root).map(Path::to_path_buf) else {
         return false; // 저장소 밖 — 스크래치패드·임시 파일·남의 저장소
     };
     let mut parts = rel.components().map(|c| c.as_os_str().to_str());
@@ -3927,7 +3927,8 @@ fn resolve(path: &str, root: &Path) -> PathBuf {
     // **`..` 를 접는다.** 접지 않으면 판정이 양쪽으로 다 틀린다 —
     // `.moai/../src/store.rs` 는 첫 조각이 `.moai` 라 안 세는 자리로 보이고,
     // `../elsewhere/x.rs` 는 `strip_prefix` 가 그대로 붙어 저장소 안으로 보인다.
-    // 파일이 아직 없을 수도 있으므로 디스크를 짚지 않고 글자로만 접는다.
+    // 파일이 아직 없을 수도 있으므로 디스크를 짚지 않고 글자로만 접는다 — 링크를 푸는 것은
+    // 규칙 2 의 판정([`settled`])만 따로 한다.
     let mut out = PathBuf::new();
     for c in joined.components() {
         match c {
@@ -3941,8 +3942,35 @@ fn resolve(path: &str, root: &Path) -> PathBuf {
     out
 }
 
+/// **규칙 2 가 견주는 자리.** [`resolve`] 위에 링크 철자를 푸는 한 겹을 얹는다.
+///
+/// 같은 자리를 두 철자로 부르면 `strip_prefix` 가 어긋나 저장소 안의 파일이 밖으로 보이고,
+/// 규칙 2 가 통째로 샌다 — 훅의 `root` 는 `current_dir()` 에서 와 늘 풀린 철자인데(`getcwd` 가
+/// 링크를 푼다) Claude 가 주는 `file_path` 는 사람이 친 철자 그대로다. `TMPDIR` 이 링크인 기계,
+/// macOS 의 `/tmp`·`/var`, 링크로 건 프로젝트가 다 그 자리다.
+///
+/// **푸는 것은 여기뿐이다.** [`resolve`] 는 [`aimed`] 가 `-C` 와 `cd` 를 좇는 데도 쓰는데, 그
+/// 값은 거절문이 사람에게 내미는 명령의 경로로 그대로 선다 — 거기서 링크를 풀면 사람이 친 적
+/// 없는 철자를 옮겨 치라고 내민다. 판정은 두 철자를 한 자리로 봐야 하고, 내미는 글은 사람이 친
+/// 철자를 지켜야 한다.
+fn settled(path: &str, root: &Path) -> PathBuf {
+    let folded = resolve(path, root);
+    // **있는 가장 긴 윗자리를 풀고 나머지를 다시 붙인다**(2026-09-19 사용자 결정) — 아직 없는
+    // 파일도 그 윗자리까지는 같게 풀리므로, 새로 만드는 파일과 이미 있는 파일이 같은 답을 받는다.
+    // 통째로 `canonicalize` 하던 길은 없는 파일에서 실패해 준 철자를 그대로 돌려주고, 그러면
+    // 만드는 쪽에서만 규칙이 꺼진다. **`..` 는 [`resolve`] 가 이미 접었다** — 다시 접지 않는다.
+    for head in folded.ancestors() {
+        if let Ok(real) = std::fs::canonicalize(head)
+            && let Ok(tail) = folded.strip_prefix(head)
+        {
+            return if tail.as_os_str().is_empty() { real } else { real.join(tail) };
+        }
+    }
+    folded
+}
+
 fn rel_to(path: &str, root: &Path) -> String {
-    resolve(path, root)
+    settled(path, root)
         .strip_prefix(root)
         .map(|r| r.display().to_string())
         .unwrap_or_else(|_| path.to_string())
@@ -5456,6 +5484,31 @@ mod tests {
         // 저장소 밖이다 — 붙여 놓은 글자만 보면 안으로 보인다.
         assert_eq!(guard_edit(&all, &cfg(), &here(), root, "../elsewhere/x.rs"), Decision::Pass);
         assert_eq!(guard_edit(&all, &cfg(), &here(), root, "/repo/../elsewhere/x.rs"), Decision::Pass);
+    }
+
+    /// **링크 철자로 부른 파일도 저장소 안이다.** 훅의 `root` 는 `current_dir()` 이 준 풀린
+    /// 철자인데 `file_path` 는 사람이 친 철자라, 글자로만 견주면 규칙 2 가 통째로 샌다.
+    ///
+    /// **아직 없는 파일도 같게 풀린다** — 새로 만드는 자리에서만 규칙이 꺼지면 막아야 할 것을
+    /// 되레 놓친다. 저장소 밖은 링크를 풀어도 밖이어야 한다.
+    #[test]
+    fn a_linked_spelling_still_lands_inside_the_repo() {
+        let s = crate::scratch::Scratch::real("hooklink");
+        let root = s.path().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/store.rs"), "").unwrap();
+        std::fs::create_dir_all(s.path().join("elsewhere")).unwrap();
+        let link = s.path().join("link");
+        std::os::unix::fs::symlink(&root, &link).unwrap();
+
+        let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let judge = |at: PathBuf| guard_edit(&all, &cfg(), &here(), &root, &at.to_string_lossy());
+        // 있는 파일도, 아직 없는 파일도 링크를 지나 같은 자리로 풀린다.
+        assert!(matches!(judge(link.join("src/store.rs")), Decision::Deny(_)));
+        assert!(matches!(judge(link.join("src/새파일.rs")), Decision::Deny(_)));
+        // 안 세는 자리와 저장소 밖은 링크를 풀어도 그대로다.
+        assert_eq!(judge(link.join(".moai/issues.jsonl")), Decision::Pass);
+        assert_eq!(judge(s.path().join("elsewhere/x.rs")), Decision::Pass);
     }
 
     /// 닫을 때의 셈법이 규칙 3 과 같아야 한다. 거절문이 시킨 대로 `--parent`
