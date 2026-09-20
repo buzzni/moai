@@ -1957,7 +1957,11 @@ impl App {
                         // 늘 열 이름을 다 적으니(`look_now`) 빈 목록은 손으로 적은 것이고, 그 사람이 적은
                         // `fields` 가 곧 켠 열이다. "아무 열도 몰랐다" 로 읽으면 안 적힌 열이 모두 기본값으로
                         // 서 적힌 `fields` 가 곧 켠 열이라는 뜻이 한마디 없이 버려진다.
-                        Some(known) if known.is_empty() => true,
+                        //
+                        // **그 "모든" 은 얼린 아홉 열이다**(moai-4gy5, 사용자 결정 2026-09-18) — `Field::ALL`
+                        // 로 읽으면 뜻이 바이너리를 따라 움직여, 뒤에 더한 기본-켠 열이 이 설정에서 영영
+                        // 안 뜬다. 얼린 목록 밖의 열은 `BEFORE_KNOWN` 밖의 열과 같이 기본값으로 선다.
+                        Some(known) if known.is_empty() => view::Field::EMPTY_KNOWN.contains(&f),
                         Some(known) => known.iter().any(|w| w == f.name()),
                         // 이 키가 없던 때의 어휘 — 그때 있던 열이면 안 적힌 것이 곧 "껐다" 다.
                         None => view::Field::BEFORE_KNOWN.contains(&f),
@@ -4053,6 +4057,29 @@ mod tests {
         assert_eq!(a.notice, None, "관대히 읽을 자리에서 잔소리를 했다");
     }
 
+    /// **빈 `fields_known` 의 뜻은 바이너리를 안 따른다**(moai-4gy5, 사용자 결정 2026-09-18) — 얼린
+    /// 아홉 열([`view::Field::EMPTY_KNOWN`])이 그 뜻이고, 그 목록에 없는 열은 나중에 생긴 것이라
+    /// 기본값으로 선다. `Field::ALL` 로 읽으면 뜻이 바이너리를 따라 움직여, 뒤에 더한 기본-켠 열이
+    /// 이 설정에서 영영 안 뜬다(moai-3fnf 가 막으려던 것). 오늘은 두 목록이 같아 둘째 갈래가 빈
+    /// 채로 서지만, 열을 더하는 날 여기가 그것을 잰다.
+    #[test]
+    fn an_empty_fields_known_leaves_columns_added_later_on_their_default() {
+        let hand = crate::user_config::Look {
+            fields: Some(vec!["id".into()]),
+            fields_known: Some(Vec::new()),
+            ..crate::user_config::Look::default()
+        };
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&hand, Vec::new());
+        let fresh = view::Fields::default();
+        for f in view::Field::ALL {
+            let want =
+                if view::Field::EMPTY_KNOWN.contains(&f) { f == view::Field::Id } else { fresh.shows(f) };
+            assert_eq!(a.fields.shows(f), want, "{} 이 빈 fields_known 을 잘못 읽었다", f.name());
+        }
+        assert_eq!(a.notice, None, "관대히 읽을 자리에서 잔소리를 했다");
+    }
+
     /// **`fields` 에 적힌 열은 `fields_known` 에 없어도 켜진다**(moai-svvk 에픽 리뷰) — 적은 쪽이 그
     /// 열을 알았다는 뜻이다. `fields_known` 은 안 적힌 열만 가른다: 목록에 없고 `fields` 에도 없는 열은
     /// 기본값으로 선다. 한때는 적힌 tags 가 "몰랐던 열" 의 기본값(꺼짐)으로 서 말없이 버려졌다.
@@ -4100,6 +4127,39 @@ mod tests {
             assert_eq!(b.fields.shows(f), want, "{} 이 다음 실행에 달라졌다\n{text}", f.name());
         }
         assert_eq!(b.notice, None, "제가 적은 설정을 읽으며 말이 섰다\n{text}");
+    }
+
+    /// **빈 `fields_known` 을 다시 적어도 남의 글은 그대로다**(moai-4gy5) — 매 저장이 설정 파일 전체를
+    /// 다시 쓰는 길이라, 모르는 키·주석·다른 표가 한 번의 토글로 조용히 사라지면 되돌릴 방법이 도구
+    /// 밖에만 남는다. 이 저장소가 못 견디는 것이 그 조용한 손실이다. 두 번째 토글은 같은 값을 다시
+    /// 적지 않는다 — 읽고 그대로 쓰면 바이트가 같다.
+    #[test]
+    fn rewriting_an_empty_fields_known_keeps_the_rest_of_the_file_byte_for_byte() {
+        let s = scratch("fields-known-empty-keeps");
+        let user = s.join("user.toml");
+        let before = "# 손으로 적은 설정\n[tui]\n# 켠 열만 적었다\nfields = [\"id\"]\nfields_known = []\nwhat_is_this = 7\n\n[i18n]\nlang = \"en\"\n";
+        std::fs::write(&user, before).unwrap();
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        a.hit("SPC c t Esc");
+
+        let text = std::fs::read_to_string(&user).unwrap();
+        // 토글이 실제로 파일을 다시 썼다 — 안 썼으면 아래 것들이 그대로인 것이 아무 말도 안 한다.
+        assert!(text.contains("\"tags\""), "켠 열을 안 적었다\n{text}");
+        assert!(text.contains("\"branch\""), "빈 fields_known 을 이름으로 안 채웠다\n{text}");
+        assert!(text.contains("# 손으로 적은 설정"), "표 위의 주석이 사라졌다\n{text}");
+        assert!(text.contains("# 켠 열만 적었다"), "키 위의 주석이 사라졌다\n{text}");
+        assert!(text.contains("what_is_this = 7"), "모르는 키가 사라졌다\n{text}");
+        assert!(text.contains("lang = \"en\""), "다른 표가 사라졌다\n{text}");
+
+        // 같은 값을 다시 적는 토글은 파일을 안 건드린다.
+        let mut b = App::new(Vec::new(), cfg(), Path::new());
+        b.user_config = Some(user.clone());
+        b.load_look();
+        b.hit("SPC c t Esc");
+        b.hit("SPC c t Esc");
+        assert_eq!(std::fs::read_to_string(&user).unwrap(), text, "켰다 끈 뒤 파일이 달라졌다");
     }
 
     /// **끈 새 열은 파일을 한 바퀴 돌고도 꺼진 채다**(moai-6bc0 단계 리뷰). `look_now()` 끼리 견주는

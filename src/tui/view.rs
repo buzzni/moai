@@ -158,6 +158,28 @@ impl Field {
         Field::Tags,
     ];
 
+    /// 손으로 적은 `fields_known = []` 의 뜻(moai-4gy5, 사용자 결정 2026-09-18) — **2026-09-20 의 아홉
+    /// 열로 얼렸다.** 빈 목록은 "적는 쪽이 모든 열을 알았다" 인데, 그 "모든" 을 [`Field::ALL`] 로 읽으면
+    /// 뜻이 바이너리를 따라 움직인다: 오늘 `[]` 를 적은 사람의 설정에서 내일 더한 기본-켠 열이 "알면서
+    /// 껐다" 로 서 영영 안 뜨고, 그 설정을 먼저 만진 바이너리가 어느 쪽이냐에 따라 갈린다(moai-3fnf 가
+    /// 막으려던 것). 얼려 두면 나중 열은 [`BEFORE_KNOWN`](Field::BEFORE_KNOWN) 밖의 열과 같이 기본값으로
+    /// 서고, 그 설정을 다시 적어도 뜻이 안 바뀐다.
+    ///
+    /// **열을 더하는 사람은 이 목록을 건드리지 않는다.** 여기 더하면 이미 적힌 `[]` 설정의 뜻이 그날
+    /// 바뀐다 — 그것이 얼린 까닭이다. `the_empty_fields_known_list_is_frozen_at_todays_nine_columns`
+    /// 가 이름과 차례를 그대로 들고 선다.
+    pub const EMPTY_KNOWN: [Field; 9] = [
+        Field::Id,
+        Field::Priority,
+        Field::Assignee,
+        Field::Created,
+        Field::Updated,
+        Field::Tally,
+        Field::Tags,
+        Field::Names,
+        Field::Branch,
+    ];
+
     pub fn named(name: &str) -> Option<Field> {
         Field::ALL.into_iter().find(|f| f.name() == name)
     }
@@ -250,6 +272,18 @@ mod tests {
         f.set(Field::Id, false);
         f.set(Field::Id, false);
         assert!(!f.shows(Field::Id) && f.shows(Field::Priority), "끈 것을 끄며 켰거나 옆 열을 건드렸다");
+    }
+
+    /// **손으로 적은 빈 `fields_known` 의 뜻은 얼린 아홉 열이다**(moai-4gy5, 사용자 결정 2026-09-18).
+    /// 이름과 차례를 그대로 적어 못박는다 — **열을 더하는 사람은 이 목록을 건드리지 않는다.** `Field::ALL`
+    /// 로 읽으면 `[]` 의 뜻이 바이너리를 따라 움직여, 나중에 생긴 기본-켠 열이 그 설정에서 영영 안 뜬다.
+    #[test]
+    fn the_empty_fields_known_list_is_frozen_at_todays_nine_columns() {
+        assert_eq!(
+            Field::EMPTY_KNOWN.map(Field::name),
+            ["id", "priority", "assignee", "created", "updated", "tally", "tags", "names", "branch"],
+            "얼린 목록이 바뀌었다 — 새 열은 여기 넣지 않는다(moai-4gy5)"
+        );
     }
 
     /// **열마다 제 비트를 쓴다**(moai-ggqf) — 둘이 같은 비트를 쓰면 하나를 끄며 다른 하나가 꺼진다.
