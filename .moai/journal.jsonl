@@ -6142,3 +6142,10 @@
 {"ts":"2026-09-20T08:40:07Z","id":"moai-g0zx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-20T08:40:08Z","id":"moai-kos1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-20T08:40:08Z","id":"moai-rviv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T08:52:26Z","id":"moai-giz3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T08:59:47Z","id":"moai-4y5s","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"그리기 인자를 맥락 하나로"}
+{"ts":"2026-09-20T08:59:47Z","id":"moai-4xib","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"status·ready·한눈 보기가 view::Screen 을 받는다"}
+{"ts":"2026-09-20T08:59:47Z","id":"moai-uhzk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"목록·트리·상세도 Screen 으로 — show.rs 가 풀린 뒤"}
+{"ts":"2026-09-20T08:59:47Z","id":"moai-4y5s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-wdak 에서 펼쳤다 — 그리기 인자를 맥락 하나로 — lang·origin 이 자리마다 따라다닌다"}
+{"ts":"2026-09-20T08:59:47Z","id":"moai-wdak","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-4y5s 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-09-20T09:01:14Z","id":"moai-4xib","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
