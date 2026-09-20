@@ -87,13 +87,17 @@ pub enum Act {
 }
 
 /// `..` 에서 `a` 를 누른 까닭. 키 이름은 표에서 읽는다 — 등록 키를 옮기면 이 말도 따라온다.
-pub fn up_is_not_a_project() -> String {
-    format!("`..` 은 등록하지 않는다 — 올라가서 `./` 에서 {}", label(PICK, Pick::Register))
+pub fn up_is_not_a_project(lang: crate::i18n::Lang) -> String {
+    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.up_is_not_a_project"), &[
+        ("key", &label(PICK, Pick::Register)),
+    ])
 }
 
 /// `./` 에서 Enter 를 누른 까닭.
-pub fn here_is_already_open() -> String {
-    format!("`./` 은 지금 열어 둔 디렉터리다 — 여기를 등록하려면 {}", label(PICK, Pick::Register))
+pub fn here_is_already_open(lang: crate::i18n::Lang) -> String {
+    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.here_is_already_open"), &[
+        ("key", &label(PICK, Pick::Register)),
+    ])
 }
 
 impl Picker {
@@ -181,7 +185,7 @@ impl Picker {
     /// - **.** 점 디렉터리 보이기·감추기
     /// - **g p** 경로 적기 — 지금 디렉터리를 채워 연다. 상대경로면 지금 디렉터리에 붙는다
     /// - **Esc·q** 닫기
-    pub fn key(&mut self, k: KeyEvent) -> Act {
+    pub fn key(&mut self, k: KeyEvent, lang: crate::i18n::Lang) -> Act {
         self.error = None;
         if let Some(input) = &mut self.typing {
             if input.key(k) {
@@ -226,7 +230,7 @@ impl Picker {
                 // `Enter 들어가기` 를 대고 있고, 하위 디렉터리가 없는 자리에서는 커서가
                 // 여기 서므로(`first_dir`) 아무 말 없으면 창이 멎은 줄 안다(`..` 의 `a` 와 같다).
                 Some(Row::Here) => {
-                    self.error = Some(here_is_already_open());
+                    self.error = Some(here_is_already_open(lang));
                     Act::Stay
                 }
                 None => Act::Stay,
@@ -234,7 +238,7 @@ impl Picker {
             Pick::Up => self.path_of(Row::Up).map_or(Act::Stay, Act::Go),
             Pick::Register => match row {
                 Some(Row::Up) => {
-                    self.error = Some(up_is_not_a_project());
+                    self.error = Some(up_is_not_a_project(lang));
                     Act::Stay
                 }
                 Some(r) => self.path_of(r).map_or(Act::Stay, Act::Register),
@@ -260,8 +264,11 @@ mod tests {
     use super::*;
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
+    /// 시험은 한국어로 잰다 — `ko` 표가 이 키들을 실제로 드는지도 함께 재는 자리다.
+    const KO: crate::i18n::Lang = crate::i18n::Lang::Ko;
+
     fn press(p: &mut Picker, code: KeyCode) -> Act {
-        p.key(KeyEvent::new(code, KeyModifiers::NONE))
+        p.key(KeyEvent::new(code, KeyModifiers::NONE), KO)
     }
 
     /// 경로 적기 칸을 연다 — `g p`.
@@ -323,14 +330,14 @@ mod tests {
         assert_eq!(press(&mut p, KeyCode::Char('a')), Act::Register("/w/mono".into()));
         p.cursor = 1;
         assert_eq!(press(&mut p, KeyCode::Char('a')), Act::Stay);
-        assert_eq!(p.error, Some(up_is_not_a_project()));
+        assert_eq!(p.error, Some(up_is_not_a_project(KO)));
         // 문구는 표에서 키 이름을 읽어 짓는다 — 옮기기 전과 한 글자도 같다(moai-nc7w).
-        assert_eq!(up_is_not_a_project(), "`..` 은 등록하지 않는다 — 올라가서 `./` 에서 a");
-        assert_eq!(here_is_already_open(), "`./` 은 지금 열어 둔 디렉터리다 — 여기를 등록하려면 a");
+        assert_eq!(up_is_not_a_project(KO), "`..` 은 등록하지 않는다 — 올라가서 `./` 에서 a");
+        assert_eq!(here_is_already_open(KO), "`./` 은 지금 열어 둔 디렉터리다 — 여기를 등록하려면 a");
         press(&mut p, KeyCode::Down);
         assert_eq!(p.error, None, "까닭이 다음 키에 안 걷혔다");
         // Ctrl·Alt 붙은 `a` 는 등록이 아니다
-        assert_eq!(p.key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)), Act::Stay);
+        assert_eq!(p.key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL), KO), Act::Stay);
     }
 
     /// **새 층을 넣으면 커서는 정체로 따라간다** — 다시 읽으면 보던 줄에, 올라오면 나온
@@ -418,24 +425,24 @@ mod tests {
         let mut p = Picker::new(listing("/home/coder/work", &[]));
         path(&mut p);
         assert_eq!(text(&p).as_deref(), Some("/home/coder/work/"));
-        assert_eq!(p.key(alt_bksp), Act::Stay);
+        assert_eq!(p.key(alt_bksp, KO), Act::Stay);
         assert_eq!(text(&p).as_deref(), Some("/home/coder/"), "Alt-Backspace 가 한 층보다 많이 지웠다");
-        p.key(ctrl_w);
+        p.key(ctrl_w, KO);
         assert_eq!(text(&p).as_deref(), Some("/home/"), "Ctrl-W 가 Alt-Backspace 와 다르게 지웠다");
         for c in "a b".chars() {
             press(&mut p, KeyCode::Char(c));
         }
-        p.key(ctrl_w);
+        p.key(ctrl_w, KO);
         assert_eq!(text(&p).as_deref(), Some("/home/a "), "빈칸이 경계가 아니게 됐다");
-        p.key(ctrl_w);
-        p.key(ctrl_w);
+        p.key(ctrl_w, KO);
+        p.key(ctrl_w, KO);
         assert_eq!(text(&p).as_deref(), Some("/"));
-        p.key(ctrl_w);
+        p.key(ctrl_w, KO);
         assert_eq!(text(&p).as_deref(), Some(""), "뿌리 `/` 가 안 지워졌다");
         press(&mut p, KeyCode::Esc);
 
         p.paste("/home/coder/work");
-        p.key(alt_bksp);
+        p.key(alt_bksp, KO);
         assert_eq!(text(&p).as_deref(), Some("/home/coder/"), "붙여넣기로 연 칸이 경로 칸이 아니다");
     }
 
@@ -453,11 +460,11 @@ mod tests {
         press(&mut p, KeyCode::Char('k'));
         assert_eq!(p.cursor, 2);
         let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
-        p.key(ctrl('d'));
+        p.key(ctrl('d'), KO);
         assert_eq!(p.cursor, 2 + crate::tui::scroll::HALF);
-        p.key(ctrl('u'));
+        p.key(ctrl('u'), KO);
         assert_eq!(p.cursor, 2);
-        p.key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+        p.key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT), KO);
         assert_eq!(p.current(), Some(Row::Dir(29)), "SHIFT 붙은 `G` 가 맨 아래로 안 갔다");
         assert_eq!(press(&mut p, KeyCode::Char('g')), Act::Stay);
         assert_eq!(p.current(), Some(Row::Dir(29)), "`g` 하나에 움직였다");

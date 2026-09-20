@@ -11,6 +11,7 @@ use super::keys::{BROWSE, Browse, CONFIRM, Confirm, Lookup, label, lookup};
 use super::layer::Relayered;
 use super::picker::{Act, Dent, Listing, Picker};
 use super::{App, Mode, Row};
+use crate::i18n::{Lang, fill, say};
 use ratatui::crossterm::event::KeyEvent;
 use std::path::{Path, PathBuf};
 
@@ -37,10 +38,10 @@ pub struct Unregister {
 /// - 하나씩 못 읽는 항목은 건너뛴다. 디렉터리 자체를 못 읽으면 `Err` 한 줄
 ///
 /// `registered` 는 등록한 경로와 그 푼 철자들이다([`registered_paths`]).
-pub fn list_dir(dir: &Path, registered: &[PathBuf], show_hidden: bool) -> Result<Listing, String> {
+pub fn list_dir(dir: &Path, registered: &[PathBuf], show_hidden: bool, lang: Lang) -> Result<Listing, String> {
     let dir = std::fs::canonicalize(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     if !dir.is_dir() {
-        return Err(format!("디렉터리가 아니다 — {}", dir.display()));
+        return Err(fill(say(lang, "tui.pick.not_a_dir"), &[("path", &dir.display().to_string())]));
     }
     let read = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut found: Vec<(String, bool)> = Vec::new();
@@ -129,7 +130,7 @@ impl App {
     /// 까닭이 없다. 앞의 자리가 그새 사라졌으면 다음 자리로 넘어간다.
     pub(super) fn open_picker(&mut self) {
         let Some(config) = self.config_file() else {
-            self.notice = Some("! 사용자 설정의 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 중 하나를 준다".into());
+            self.notice = Some(say(self.site.lang, "tui.register.no_config").into());
             return;
         };
         let starts: Vec<PathBuf> = [self.pick_from.clone(), self.launched_at.clone(), self.site.repo.as_ref().map(|r| r.root.clone())]
@@ -137,9 +138,10 @@ impl App {
             .flatten()
             .collect();
         let registered = registered_paths(&config);
-        let mut why = "어디서 고를지 모른다".to_string();
+        let lang = self.site.lang;
+        let mut why = say(lang, "tui.pick.nowhere_to_start").to_string();
         for start in starts {
-            match list_dir(&start, &registered, false) {
+            match list_dir(&start, &registered, false, lang) {
                 Ok(at) => {
                     self.mode = Mode::Pick(Picker::new(at));
                     return;
@@ -147,14 +149,16 @@ impl App {
                 Err(e) => why = e,
             }
         }
-        self.notice = Some(format!("! 고르기 창을 못 열었다 — {}", crate::text::one_line(&why)));
+        let why = crate::text::one_line(&why);
+        self.notice = Some(fill(say(lang, "tui.pick.cannot_open"), &[("why", &why)]));
     }
 
     /// 창이 열린 동안의 키. **무엇을 할지는 창이 정하고**([`Picker::key`]) 여기는 그대로 한다.
     /// Ctrl-C 는 여기 오기 전에 [`App::key`] 가 받았다.
     pub(super) fn pick(&mut self, k: KeyEvent) {
+        let lang = self.site.lang;
         let Mode::Pick(p) = &mut self.mode else { return };
-        match p.key(k) {
+        match p.key(k, lang) {
             Act::Stay => {}
             Act::Close => {
                 self.pick_from = Some(p.at.dir.clone());
@@ -177,14 +181,18 @@ impl App {
     fn relist(&mut self, to: &Path, hidden: Option<bool>) {
         let to = expand_home(to);
         let registered = self.config_file().map(|c| registered_paths(&c)).unwrap_or_default();
+        let lang = self.site.lang;
         let Mode::Pick(p) = &mut self.mode else { return };
         let show = hidden.unwrap_or(p.show_hidden);
-        match list_dir(&to, &registered, show) {
+        match list_dir(&to, &registered, show, lang) {
             Ok(at) => {
                 p.show_hidden = show;
                 p.show(at);
             }
-            Err(e) => p.error = Some(format!("못 연다 — {}", crate::text::one_line(&e))),
+            Err(e) => {
+                let why = crate::text::one_line(&e);
+                p.error = Some(fill(say(lang, "tui.pick.cannot_list"), &[("why", &why)]));
+            }
         }
     }
 
@@ -195,14 +203,22 @@ impl App {
     /// 등록하는 사람이 하나마다 창을 다시 열지 않는다. 이미 있으면 그렇다고만 한다(멱등).
     fn register(&mut self, dir: &Path) {
         let Some(config) = self.config_file() else { return };
+        let lang = self.site.lang;
         match crate::projects::add(&config, dir, dir) {
             Ok(added) => {
                 let stood = self.relayer(Some(&added.path));
-                let what = if added.added { "✓ 등록함" } else { "이미 등록돼 있다" };
+                let what = match added.added {
+                    true => say(lang, "tui.register.added"),
+                    false => say(lang, "tui.register.already"),
+                };
                 // 못 읽는 저장소면 CLI `project add` 처럼 그렇다고 댄다 — 조용히 "등록함" 만 서면
                 // 층에서 "못 읽는다" 를 처음 만난다 (moai-9omq).
-                let bad = added.unreadable.as_deref().map(|e| format!(" · ! 못 읽는다 — {}", crate::text::one_line(e))).unwrap_or_default();
-                let bare = if added.initialized { "" } else { " · init 전 — .moai 가 아직 없다" };
+                let bad = added
+                    .unreadable
+                    .as_deref()
+                    .map(|e| fill(say(lang, "tui.register.unreadable"), &[("why", &crate::text::one_line(e))]))
+                    .unwrap_or_default();
+                let bare = if added.initialized { "" } else { say(lang, "tui.register.uninit") };
                 // **층을 못 세웠으면 그것도 댄다**(moai-6ek1). 설정에 쓴 것과 층이 그것을 든 것은
                 // 다른 일이다 — 다시 읽기가 지면 커서를 새 프로젝트에 두는 일도 함께 버려져, 열
                 // 줄짜리 층에서는 조용한 "✓ 등록함" 하나로는 됐는지 알 길이 없다. 다음 걸음의
@@ -221,7 +237,7 @@ impl App {
                 let back = if self.on_layer() || self.layer.is_none() || !layer.is_empty() {
                     String::new()
                 } else {
-                    format!(" · {} 로 층에 올라가면 보인다", label(BROWSE, Browse::Project(0)))
+                    fill(say(lang, "tui.register.go_up"), &[("key", &label(BROWSE, Browse::Project(0)))])
                 };
                 self.notice = Some(format!("{what} · {}{bad}{bare}{layer}{back}", shown(&added.path)));
                 if let Mode::Pick(p) = &self.mode {
@@ -233,7 +249,8 @@ impl App {
             // 거절했다 — 층의 배너가 그 설정 문제를 이미 비추고 있다.
             Err(e) => {
                 if let Mode::Pick(p) = &mut self.mode {
-                    p.error = Some(format!("등록하지 못했다 — {}", crate::text::one_line(&e.message)));
+                    let why = crate::text::one_line(&e.message);
+                    p.error = Some(fill(say(lang, "tui.register.failed"), &[("why", &why)]));
                 }
             }
         }
@@ -256,8 +273,9 @@ impl App {
         if how != Relayered::Lost {
             return String::new();
         }
-        let why = self.held.as_deref().or(self.unlayered.as_deref()).unwrap_or("사용자 설정을 다시 못 읽었다");
-        format!(" · ! 층은 그대로다 — {}", crate::text::one_line(why))
+        let lang = self.site.lang;
+        let why = self.held.as_deref().or(self.unlayered.as_deref()).unwrap_or(say(lang, "tui.register.config_unread"));
+        fill(say(lang, "tui.register.layer_stale"), &[("why", &crate::text::one_line(why))])
     }
 
     /// `d` — 커서가 선 층의 줄을 목록에서 뺄지 묻는다. **띄운 자리(등록 안 됨)는 묻지 않는다** —
@@ -266,7 +284,7 @@ impl App {
         let Some(Row::Project(at)) = self.current() else { return };
         let Some(place) = self.layer.as_ref().and_then(|l| l.places.get(at)) else { return };
         if !place.registered {
-            self.notice = Some("등록돼 있지 않다 — 여기서 띄워 층에 섰을 뿐이라 뺄 것이 없다".into());
+            self.notice = Some(say(self.site.lang, "tui.register.not_registered").into());
             return;
         }
         self.mode = Mode::Unregister(Unregister { path: place.path.clone(), name: place.name.clone() });
@@ -285,9 +303,10 @@ impl App {
     /// 디렉터리와 `.moai` 는 건드리지 않는다. 뺀 뒤 층을 다시 세우고 커서는 그 자리에 둔다.
     fn unregister(&mut self, path: &Path) {
         let Some(config) = self.config_file() else {
-            self.notice = Some("! 사용자 설정의 자리를 모른다 — 뺄 곳이 없다".into());
+            self.notice = Some(say(self.site.lang, "tui.register.no_config_to_drop").into());
             return;
         };
+        let lang = self.site.lang;
         match crate::projects::remove(&config, path, path) {
             Ok(r) => {
                 // 뺀 쪽도 같은 자다(moai-6ek1) — 층이 그대로면 뺀 줄이 화면에 그대로 서 있다.
@@ -295,15 +314,18 @@ impl App {
                 let layer = self.relayer_trouble(stood);
                 self.notice = Some(if r.removed.is_empty() {
                     // 그새 밖에서 뺐다. 층은 방금 다시 읽어 그 줄이 사라졌다.
-                    format!("이미 목록에 없다 · {}{layer}", shown(path))
+                    fill(say(lang, "tui.register.already_gone"), &[("path", &shown(path)), ("layer", &layer)])
                 } else {
                     // 뺀 것을 **다** 댄다 — 손으로 링크 철자와 푼 철자를 둘 다 적었으면 둘이 함께
                     // 빠진다(CLI `rm` 도 뺀 줄마다 적는다). 하나만 대면 사라진 다른 줄을 모른다.
                     let gone: Vec<String> = r.removed.iter().map(|p| shown(p)).collect();
-                    format!("✓ 뺌 · {} — 목록에서만 뺐다, 디렉터리와 .moai 는 그대로다{layer}", gone.join(", "))
+                    fill(say(lang, "tui.register.dropped"), &[("paths", &gone.join(", ")), ("layer", &layer)])
                 });
             }
-            Err(e) => self.notice = Some(format!("! 빼지 못했다 — {}", crate::text::one_line(&e.message))),
+            Err(e) => {
+                let why = crate::text::one_line(&e.message);
+                self.notice = Some(fill(say(lang, "tui.register.drop_failed"), &[("why", &why)]));
+            }
         }
     }
 }
@@ -397,7 +419,7 @@ mod tests {
     fn on_layer(s: &Scratch) -> App {
         let argos = s.project("work/argos");
         let cfg = s.register(&[&argos]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None, crate::i18n::Lang::Ko));
         a.launched_at = Some(s.join("work"));
         a
     }
@@ -584,7 +606,7 @@ mod tests {
         let one = s.project("work/one");
         let two = s.dir("work/two");
         let cfg = s.register(&[&one, &two]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None, crate::i18n::Lang::Ko));
         press(&mut a, &[KeyCode::Down]);
         assert_eq!(place_at_cursor(&a), two);
 
@@ -631,7 +653,7 @@ mod tests {
         let b = s.project("work/b");
         let odd = s.join("work/a/../b");
         let cfg = s.register(&[&odd]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None, crate::i18n::Lang::Ko));
         assert_eq!(place_at_cursor(&a), odd);
         a.hit("SPC p d");
         a.key(key(KeyCode::Char('y')));
@@ -647,7 +669,7 @@ mod tests {
         let one = s.project("work/one");
         let here = s.project("work/here");
         let cfg = s.register(&[&one]);
-        let mut layer = Layer::read(Some(&cfg), Some(&here));
+        let mut layer = Layer::read(Some(&cfg), Some(&here), crate::i18n::Lang::Ko);
         layer.at = At::Layer;
         let mut a = App::on_projects(layer);
         assert_eq!(place_at_cursor(&a), here);
@@ -666,7 +688,7 @@ mod tests {
         std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
         let broken = "[[project]\npath = \"/a\"\n";
         std::fs::write(&cfg, broken).unwrap();
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None, crate::i18n::Lang::Ko));
         a.launched_at = Some(s.dir("work"));
         s.dir("work/x");
 
@@ -684,7 +706,7 @@ mod tests {
         assert!(a.on_layer());
 
         // 설정 자리를 모르면 창을 안 연다.
-        let mut none = App::on_projects(Layer::read(None, None));
+        let mut none = App::on_projects(Layer::read(None, None, crate::i18n::Lang::Ko));
         none.launched_at = Some(s.path().to_path_buf());
         none.hit("SPC p a");
         assert_eq!(none.mode, Mode::Browse);
@@ -699,7 +721,7 @@ mod tests {
         let s = Scratch::real("empty");
         let cfg = s.register(&[]);
         let argos = s.project("work/argos");
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None, crate::i18n::Lang::Ko));
         a.launched_at = Some(s.join("work"));
         assert!(a.on_layer() && a.site.repo.is_none());
 
@@ -784,9 +806,9 @@ mod tests {
         for i in 0..SHOWN_MAX + 3 {
             std::fs::create_dir(s.join(format!("d{i:05}"))).unwrap();
         }
-        let l = list_dir(s.path(), &[], false).unwrap();
+        let l = list_dir(s.path(), &[], false, crate::i18n::Lang::Ko).unwrap();
         assert_eq!((l.entries.len(), l.cut), (SHOWN_MAX, 3));
         assert_eq!(l.entries[0].name, "d00000");
-        assert!(list_dir(&s.join("없음"), &[], false).is_err());
+        assert!(list_dir(&s.join("없음"), &[], false, crate::i18n::Lang::Ko).is_err());
     }
 }

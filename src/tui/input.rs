@@ -654,9 +654,15 @@ mod tests {
     /// 금지 목록이 아니라 **허락 목록**이다. `Frame`·`Repo` 를 막는 목록은
     /// `ratatui::Frame` 을 한 줄에 풀어 쓰거나 `super::` 로 돌아 들어오는 길을 못
     /// 막는다. 허락하는 것은 키 모양(`crossterm::event` 의 **타입**만 — `read`·`poll`
-    /// 은 터미널을 읽는다), 폭 셈(`CellWidth`·`unicode_*`·`crate::text`), 옆 조각,
-    /// 그리고 부수효과 없는 `std` 다. 경로 없이 화면에 찍는 `println!`·`dbg!` 같은
-    /// 매크로도 여기서 잡는다 — 조각이 찍으면 대체 화면이 깨진다.
+    /// 은 터미널을 읽는다), 폭 셈(`CellWidth`·`unicode_*`·`crate::text`), 말묶음
+    /// (`crate::i18n`), 옆 조각, 그리고 부수효과 없는 `std` 다. 경로 없이 화면에 찍는
+    /// `println!`·`dbg!` 같은 매크로도 여기서 잡는다 — 조각이 찍으면 대체 화면이 깨진다.
+    ///
+    /// 말묶음을 허락하는 까닭은 `crate::text` 와 같다 — `say(lang, key)` 는 바이너리에
+    /// 박힌 표를 보는 순수 함수고, `Lang` 은 조각이 `Ctx` 로 받는 **잰 값**이다. 터미널도
+    /// 저장소도 아니니 이 시험이 막는 것이 아니다. 조각이 글 대신 키를 돌려주고 부르는
+    /// 쪽이 옮기게 두면 글 하나가 두 파일로 갈라져, 무엇이 아직 안 옮겨졌는지 세는
+    /// 자리가 사라진다.
     fn foreign(code: &str, components: &[&str]) -> Vec<String> {
         const PRIMITIVES: [&str; 18] = [
             "self", "char", "str", "bool", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128",
@@ -680,7 +686,7 @@ mod tests {
                             || p.strip_prefix("ratatui::crossterm::event::").is_some_and(|t| t.starts_with(char::is_uppercase))
                     }
                     "unicode_segmentation" | "unicode_width" => true,
-                    "crate" => second == "text",
+                    "crate" => second == "text" || second == "i18n",
                     "super" => components.contains(&second),
                     "std" | "core" | "alloc" => !IMPURE_STD.contains(&second),
                     _ => false,
@@ -743,8 +749,9 @@ mod tests {
 
     /// 허락 목록이 제 일을 한다 — 풀어 쓴 `Frame`, 묶음 속 `Frame`, 저장소, 터미널을
     /// 읽는 함수, `super::` 로 돌아 든 `App` 을 잡고, 말로 적은 것·키 타입·옆 조각·
-    /// turbofish·부수효과 없는 `std` 는 그냥 둔다. 이게 없으면 훑기가 늘 비어 나와도
-    /// 아무도 모른다.
+    /// turbofish·말묶음(`crate::i18n`)·부수효과 없는 `std` 는 그냥 둔다. 이게 없으면
+    /// 훑기가 늘 비어 나와도 아무도 모른다. `crate::i18n` 과 `crate::store` 를 나란히
+    /// 심은 것은 `crate::` 를 통째로 연 것이 아님을 재는 자리다.
     #[test]
     fn the_purity_scan_catches_what_it_should() {
         let planted = "use ratatui::Frame;\n\
@@ -756,6 +763,7 @@ mod tests {
             let v = xs.iter().map(char::is_whitespace).collect::<Vec<_>>();\n\
             std::mem::take(&mut v); KeyCode::Up; usize::MAX; Vec::<u8>::with_capacity(1);\n\
             <[u8]>::len(&[]); if a != b { std::fs::read::<&str>(p); std::os::unix::fs::symlink(a, b); }\n\
+            crate::i18n::say(c.lang, k);\n\
             eprintln!(\"x\"); std::println!(); format!(\"{a}\");";
         assert_eq!(
             foreign(planted, &["scroll"]),
@@ -772,6 +780,81 @@ mod tests {
                 "println!"
             ]
         );
+    }
+
+    /// **탐색기의 글은 말묶음에서 온다**(moai-9it4). 화면에 서는 글을 소스에 박으면 `MOAI_LANG`
+    /// 이 안 닿아, 영어를 고른 사람의 화면 한가운데 몇 줄만 한국어로 선다. 그 한 줄이 들어오는
+    /// 순간 여기서 파일과 줄을 대며 멈춘다 — 한 줄씩 새는 것은 아무도 다시 안 센다.
+    ///
+    /// **터지는 자리의 글은 그대로 둔다.** `expect`·`panic!`·`unreachable!`·`assert*`·`must_use`
+    /// 의 글은 화면이 아니라 고치는 이에게 가는 것이라 옮길 것이 아니다 — 옮기면 표가 사람이 볼
+    /// 일 없는 키로 부풀고, 그 키가 안 맞아도 아무도 모른다. 그 글이 다음 줄로 넘어간 자리는
+    /// [`SPARE_MARK`] 를 그 줄에 적는다. 시험 모듈도 안 본다: 시험이 한국어로 재는 것은 `ko` 표가
+    /// 그 키를 실제로 드는지를 함께 재는 자리다.
+    #[test]
+    fn the_explorer_holds_no_korean_of_its_own() {
+        const SPARED: [&str; 8] =
+            ["expect(", "panic!(", "unreachable!(", "todo!(", "unimplemented!(", "assert", "must_use", "expect_err("];
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/tui");
+        let mut seen = 0usize;
+        let mut planted: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(dir).expect("src/tui 를 못 읽었다") {
+            let path = entry.expect("src/tui 를 못 읽었다").path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).expect("조각 파일을 못 읽었다");
+            let name = path.file_name().expect("파일 이름").to_string_lossy().into_owned();
+            let lines: Vec<&str> = src.lines().collect();
+            // 시험 모듈부터는 안 본다. `mod tests` 는 `pub(super)` 를 달고 서기도 해 그 줄로 찾는다.
+            let end = lines
+                .windows(2)
+                .position(|w| w[0].trim_start() == "#[cfg(test)]" && w[1].contains("mod tests"))
+                .unwrap_or(lines.len());
+            for (n, line) in lines[..end].iter().enumerate() {
+                let code = line.split("//").next().unwrap_or("");
+                if code.trim().is_empty() || line.contains(SPARE_MARK) || SPARED.iter().any(|s| code.contains(s)) {
+                    continue;
+                }
+                seen += 1;
+                if quoted(code).any(|t| t.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c))) {
+                    planted.push(format!("{name}:{}: {}", n + 1, code.trim()));
+                }
+            }
+        }
+        // 훑기가 헛돌면 이 시험은 늘 파랗다 — 줄을 하나도 못 본 것을 여기서 잡는다.
+        assert!(seen > 1000, "src/tui 를 거의 못 훑었다: {seen}줄");
+        assert!(
+            planted.is_empty(),
+            "탐색기가 제 한국어를 들고 있다 — `i18n/en.json` 에 키를 더하고 `say(lang, \"…\")` 로 부른다:\n{}",
+            planted.join("\n")
+        );
+    }
+
+    /// 터지는 자리의 글이 다음 줄로 넘어갔을 때 그 줄에 적는 표식 — 여러 줄 `assert!` 가 그렇다.
+    const SPARE_MARK: &str = "i18n:터지는-글";
+
+    /// 한 줄에 든 글자열들. 여는 따옴표부터 닫는 따옴표까지고, `\"` 는 닫지 않는다.
+    fn quoted(code: &str) -> impl Iterator<Item = &str> {
+        let mut rest = code;
+        std::iter::from_fn(move || {
+            let open = rest.find('"')?;
+            rest = &rest[open + 1..];
+            let mut at = 0;
+            let bytes = rest.as_bytes();
+            while at < bytes.len() {
+                match bytes[at] {
+                    b'\\' => at += 2,
+                    b'"' => {
+                        let (text, after) = rest.split_at(at);
+                        rest = &after[1..];
+                        return Some(text);
+                    }
+                    _ => at += 1,
+                }
+            }
+            None // 안 닫힌 따옴표 — 여러 줄 글자열의 첫 줄이다
+        })
     }
 
     /// **조각은 터미널도 저장소도 모른다**(moai-0k1p). 조각이 `Frame` 이나 `Repo` 를

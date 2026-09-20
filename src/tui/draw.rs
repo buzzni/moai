@@ -12,6 +12,7 @@ use super::scroll::Scroll;
 use super::layer::{Look, Place, Shut};
 use super::picker::{self, Picker};
 use super::{App, Input, Mode, Pane, Row, Seat, Site};
+use crate::i18n::{Lang, fill, say};
 use crate::nav::{Entry, Twig};
 use crate::query::GrepIn;
 use crate::report::Blocker;
@@ -157,12 +158,14 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     }
     .map(|into| project_style_at(app, &into.path))
     .unwrap_or_default();
+    // 말도 **폼을 그리기 전에** 든다 — 밑의 `&mut app.mode` 가 `app` 을 통째로 빌린다.
+    let lang = app.site.lang;
     match &mut app.mode {
-        Mode::Idea(form) => jot(f, form, body, true, tint),
-        Mode::Pick(p) => pick(f, p, body),
+        Mode::Idea(form) => jot(f, form, body, true, tint, lang),
+        Mode::Pick(p) => pick(f, p, body, lang),
         Mode::Ask(ask) => {
             if let Mode::Idea(form) = ask.back.as_mut() {
-                jot(f, form, body, false, tint);
+                jot(f, form, body, false, tint, lang);
             }
         }
         _ => {}
@@ -194,23 +197,32 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             None => fkeys(f, app, &rows, keys, !header_numbered),
         },
         // 안내 속 키 이름은 표에서 읽는다 — 키를 옮기면 안내도 따라온다.
-        Mode::Grep(q, g) => prompt(f, keys, &grep_label(*g), q, app.input_error(), &grep_help(app, q)),
-        Mode::Filter(q) => prompt(f, keys, "거름망", q, app.input_error(), &prompt_help("걸기")),
+        Mode::Grep(q, g) => prompt(f, keys, &grep_label(*g, app.site.lang), q, app.input_error(), &grep_help(app, q)),
+        Mode::Filter(q) => {
+            let lang = app.site.lang;
+            prompt(f, keys, say(lang, "tui.prompt.filter"), q, app.input_error(), &prompt_help(say(lang, "tui.prompt.hang"), lang))
+        }
         Mode::Ask(ask) => {
             // 글칸이 **아래**에서 자리를 먼저 얻는다 — 창이 낮아 한 줄만 남으면 적는 칸이
             // 안내에 가려 어디에 치는지 안 보인다.
             let [why, line] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(keys);
-            let text = clip(&ask_why(&ask.why), why.width as usize);
+            let lang = app.site.lang;
+            let text = clip(&ask_why(&ask.why, lang), why.width as usize);
             f.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::new().fg(Color::Black).bg(Color::LightYellow)))), why);
-            prompt(f, line, "누구", &ask.input, ask.error.clone(), &format!("이름 (메일)  {}", prompt_help("쓰기")));
+            let help = fill(say(lang, "tui.prompt.name_email"), &[("help", &prompt_help(say(lang, "tui.prompt.write"), lang))]);
+            prompt(f, line, say(lang, "tui.prompt.who"), &ask.input, ask.error.clone(), &help);
         }
-        Mode::Idea(form) => jot_keys(f, form, keys),
+        Mode::Idea(form) => jot_keys(f, form, keys, app.site.lang),
         Mode::Pick(p) => match &p.typing {
             Some(input) => {
-                let help = format!("{} 가기  {} 그만", label(PATH, Goto::Go), label(PATH, Goto::Cancel));
-                prompt(f, keys, "경로", input, p.error.clone(), &help)
+                let lang = app.site.lang;
+                let help = fill(say(lang, "tui.pick.goto_help"), &[
+                    ("go", &label(PATH, Goto::Go)),
+                    ("cancel", &label(PATH, Goto::Cancel)),
+                ]);
+                prompt(f, keys, say(lang, "tui.prompt.path"), input, p.error.clone(), &help)
             }
-            None => pick_keys(f, p, keys),
+            None => pick_keys(f, p, keys, app.site.lang),
         },
         Mode::Unregister(u) => {
             let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
@@ -219,10 +231,11 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             // 자를 때 답하는 키(`y 뺀다`)가 먼저 밀려나, 무엇으로 답하는지 없는 물음이 선다.
             let room = keys.width as usize;
             let name = clip(&crate::text::one_line(&u.name), (room / 2).max(1));
-            let line = Line::from(Span::styled(
-                format!(" {name} 을 목록에서 뺄까 — {} 뺀다 · 다른 키는 그만 · 디렉터리와 .moai 는 그대로다 ", label(CONFIRM, Confirm::Yes)),
-                ask,
-            ));
+            let asked = fill(say(app.site.lang, "tui.unregister.confirm"), &[
+                ("name", &name),
+                ("yes", &label(CONFIRM, Confirm::Yes)),
+            ]);
+            let line = Line::from(Span::styled(asked, ask));
             f.render_widget(Paragraph::new(fit(line, keys.width as usize)), keys);
         }
     }
@@ -277,21 +290,28 @@ fn glyph_style(st: &str) -> Style {
 /// 창의 테두리가 곧 지금 디렉터리를 댄다. 줄마다 `.moai` 와 `✓ 등록됨` 을 **낱말로** 붙인다 —
 /// 색이 혼자 뜻을 지지 않는다. 감춘 점 디렉터리와 상한에 잘린 수는 아래 테두리 왼쪽에
 /// 말한다: 조용히 안 보이면 거기 없는 줄 안다. 굴릴 것이 남았다는 표시는 목록과 같은 자리(오른쪽)다.
-fn pick(f: &mut Frame, p: &mut Picker, at: Rect) {
+fn pick(f: &mut Frame, p: &mut Picker, at: Rect, lang: Lang) {
     f.render_widget(Clear, at);
     let inner = at.width.saturating_sub(2) as usize;
     let rows = p.rows();
-    let items: Vec<ListItem> = rows.iter().map(|r| ListItem::new(dent_line(p, *r, inner))).collect();
+    let items: Vec<ListItem> = rows.iter().map(|r| ListItem::new(dent_line(p, *r, inner, lang))).collect();
     let dir = crate::text::one_line(&p.at.dir.display().to_string());
     // 경로는 **뒤가 값지다** — 깊이 들어갈수록 앞은 늘 같은 홈이다. 넘치면 앞을 자른다.
-    let room = inner.saturating_sub(crate::text::width(" 프로젝트 등록 ·  ") + 1);
-    let title = format!(" 프로젝트 등록 · {} ", crate::text::clip_front(&dir, room));
+    let head = say(lang, "tui.pick.title");
+    let room = inner.saturating_sub(crate::text::width(head) + crate::text::width(" ·  ") + 1);
+    let title = format!("{head} · {} ", crate::text::clip_front(&dir, room));
     let mut foot: Vec<String> = Vec::new();
     if p.at.hidden > 0 {
-        foot.push(format!("숨은 것 {}개 · {} 로 보인다", p.at.hidden, label(PICK, Pick::Hidden)));
+        foot.push(fill(say(lang, "tui.pick.hidden_count"), &[
+            ("n", &p.at.hidden.to_string()),
+            ("key", &label(PICK, Pick::Hidden)),
+        ]));
     }
     if p.at.cut > 0 {
-        foot.push(format!("그 밖 {}개 — {} 로 경로를 적는다", p.at.cut, label(PICK, Pick::Path)));
+        foot.push(fill(say(lang, "tui.pick.cut_count"), &[
+            ("n", &p.at.cut.to_string()),
+            ("key", &label(PICK, Pick::Path)),
+        ]));
     }
     let mut block = Block::default()
         .borders(Borders::ALL)
@@ -313,19 +333,21 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect) {
         at,
         &mut state,
     );
-    scroll_mark(f, &p.list, at, "", true);
+    scroll_mark(f, &p.list, at, "", true, lang);
 }
 
 /// 창의 한 줄: `apps/  .moai  ✓ 등록됨`. `./` 은 지금 디렉터리, `..` 은 위로.
-fn dent_line<'a>(p: &Picker, r: picker::Row, budget: usize) -> Line<'a> {
+fn dent_line<'a>(p: &Picker, r: picker::Row, budget: usize, lang: Lang) -> Line<'a> {
     let room = budget.saturating_sub(crate::text::width(CURSOR));
     let (mut spans, moai, registered) = match r {
         picker::Row::Here => (
-            vec![Span::styled("./", bold()), Span::styled("  이 디렉터리", dim())],
+            vec![Span::styled("./", bold()), Span::styled(format!("  {}", say(lang, "tui.pick.here")), dim())],
             p.at.moai,
             p.at.registered,
         ),
-        picker::Row::Up => return Line::from(vec![Span::styled("..", dim()), Span::styled("  위로", dim())]),
+        picker::Row::Up => {
+            return Line::from(vec![Span::styled("..", dim()), Span::styled(format!("  {}", say(lang, "tui.pick.up")), dim())]);
+        }
         picker::Row::Dir(i) => {
             let Some(d) = p.at.entries.get(i) else { return Line::from("") };
             // 이름이 줄을 다 먹으면 표시가 안 보인다 — 반까지만, `/` 는 자른 뒤에 붙인다.
@@ -338,14 +360,14 @@ fn dent_line<'a>(p: &Picker, r: picker::Row, budget: usize) -> Line<'a> {
         spans.push(Span::styled("  .moai", Style::new().fg(Color::Cyan)));
     }
     if registered {
-        spans.push(Span::styled("  ✓ 등록됨", status("done")));
+        spans.push(Span::styled(format!("  ✓ {}", say(lang, "tui.pick.registered")), status("done")));
     }
     fit(Line::from(spans), room)
 }
 
 /// 창이 열린 동안의 맨 아랫줄. 못 한 까닭이 있으면 그것이 줄을 차지한다 — 폼과 같다.
 /// 등록과 닫기는 **늘 남는다**: 창을 연 까닭과 나갈 길이다.
-fn pick_keys(f: &mut Frame, p: &Picker, at: Rect) {
+fn pick_keys(f: &mut Frame, p: &Picker, at: Rect, lang: Lang) {
     if let Some(e) = &p.error {
         let line = Line::from(vec![
             Span::styled(" ! ", Style::new().fg(Color::Black).bg(Color::LightRed)),
@@ -357,12 +379,12 @@ fn pick_keys(f: &mut Frame, p: &Picker, at: Rect) {
     if !p.chord.held().is_empty() {
         let next = keys::next_keys(PICK, p.chord.held())
             .into_iter()
-            .map(|(k, a)| (k, if let Pick::Step(m) = a { keys::move_word(m) } else { a.what(p.show_hidden) }))
+            .map(|(k, a)| (k, if let Pick::Step(m) = a { keys::move_word(m, lang) } else { a.what(p.show_hidden, lang) }))
             .collect();
         return bar(f, at, Vec::new(), vec![waiting(p.chord.held(), next)]);
     }
     // 이름과 낱말은 키 표([`PICK`])에서 읽는다. 여기서 정하는 것은 차례뿐이다.
-    let hint = |a: Pick| key(&label(PICK, a), a.what(p.show_hidden));
+    let hint = |a: Pick| key(&label(PICK, a), a.what(p.show_hidden, lang));
     let optional = vec![hint(Pick::Hidden), hint(Pick::Path), hint(Pick::Up), hint(Pick::Enter)];
     bar(f, at, optional, vec![hint(Pick::Register), hint(Pick::Close)]);
 }
@@ -375,7 +397,7 @@ fn pick_keys(f: &mut Frame, p: &Picker, at: Rect) {
 ///
 /// 커서는 터미널 커서가 키를 먹는 칸의 글 안 제자리에 선다 — [`prompt`] 와 같은 까닭이다.
 /// `active` 가 거짓이면(다른 칸이 키를 먹는 중이면) 굵은 선도 커서도 없다.
-fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool, tint: Style) {
+fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool, tint: Style, lang: Lang) {
     f.render_widget(Clear, at);
     // 머리 줄이 따로 설 자리가 없으면(머리 1 + 제목 3 + 본문 칸 3 이 안 들면) 담을 곳을 제목
     // 칸 테두리로 접는다 — 낮은 창에서 본문 칸이 테두리만 남는 것보다 낫고, 어느 프로젝트에
@@ -384,20 +406,25 @@ fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool, tint: Style) {
     let head_h = u16::from(form.into.is_some() && roomy);
     let [head_at, title_at, body_at] =
         Layout::vertical([Constraint::Length(head_h), Constraint::Length(3), Constraint::Min(0)]).areas(at);
+    let jot_title = format!(" {} · {} ", say(lang, "tui.menu.jot"), say(lang, "tui.jot.title"));
+    let into_label = format!(" {} ", say(lang, "tui.jot.into"));
     let title_name = match &form.into {
         Some(into) if roomy => {
-            f.render_widget(Paragraph::new(jot_head(into, head_at.width as usize, tint)), head_at);
-            Line::from(" 생각 담기 · 제목 ")
+            f.render_widget(Paragraph::new(jot_head(into, head_at.width as usize, tint, lang)), head_at);
+            Line::from(jot_title)
         }
         // 테두리에 접을 때도 **이름은 반까지만** 받는다(`jot_head` 와 같은 자). 안 자르면
         // 테두리가 뒤에서부터 잘려 ` · 제목 ` 이 먼저 빠지고, 이 칸이 제목 칸이라는 말이 사라진다.
         Some(into) => {
+            let tail = format!(" · {} ", say(lang, "tui.jot.title"));
             let room = (title_at.width as usize).saturating_sub(2);
-            let label = crate::text::width(" 담을 곳  · 제목 ");
+            // 이름 곁에 실제로 서는 것은 앞뒤 두 조각뿐이다 — 여기 한 칸을 더 얹던 판은 이름
+            // 몫을 한 칸씩 덜 줘, 좁은 창에서 이름이 까닭 없이 한 글자 먼저 잘렸다.
+            let label = crate::text::width(&into_label) + crate::text::width(&tail);
             let name = clip(&crate::text::one_line(&into.name), room.saturating_sub(label).min(room / 2).max(1));
-            Line::from(vec![Span::raw(" 담을 곳 "), Span::styled(name, tint), Span::raw(" · 제목 ")])
+            Line::from(vec![Span::raw(into_label), Span::styled(name, tint), Span::raw(tail)])
         }
-        None => Line::from(" 생각 담기 · 제목 "),
+        None => Line::from(jot_title),
     };
 
     let field = |which: Field, name: Line<'static>| {
@@ -416,14 +443,14 @@ fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool, tint: Style) {
         .then(|| (inner.x + view.cursor as u16, inner.y));
     f.render_widget(Paragraph::new(Line::from(view.text)).block(title_block), title_at);
 
-    let body_block = field(Field::Body, Line::from(" 본문 · 여러 줄 · 없어도 된다 "));
+    let body_block = field(Field::Body, Line::from(format!(" {} ", say(lang, "tui.jot.body_field"))));
     let inner = body_block.inner(body_at);
     form.body.fit(inner.height as usize);
     let view = form.body.view(inner.width as usize, inner.height as usize);
     let body_cursor = view.cursor.map(|(x, y)| (inner.x + x as u16, inner.y + y as u16));
     let lines: Vec<Line> = view.lines.into_iter().map(Line::from).collect();
     f.render_widget(Paragraph::new(lines).block(body_block), body_at);
-    scroll_mark(f, form.body.scroll(), body_at, "", active && form.field == Field::Body);
+    scroll_mark(f, form.body.scroll(), body_at, "", active && form.field == Field::Body, lang);
 
     // 묻는 중에는 커서를 안 세운다 — 친 키가 글자로 들어가지 않는데 커서가 글 안에 서
     // 있으면 거기 적힐 것처럼 보인다.
@@ -445,13 +472,13 @@ const JOT_HEAD_ROOM: u16 = 7;
 /// 낱말(`담을 곳`)과 이름·경로가 곁에 선다. 이름은 반까지만 받는다 — 경로가 같은 이름의 두
 /// 프로젝트를 가르는 것이라 이름이 줄을 다 먹으면 안 된다. 층이 없어도 선다: 위로 찾아
 /// 올라간 저장소가 어디인지는 층이 없어도 헷갈린다.
-fn jot_head<'a>(into: &Target, w: usize, tint: Style) -> Line<'a> {
-    const LABEL: &str = " 담을 곳  ";
-    let room = w.saturating_sub(crate::text::width(LABEL));
+fn jot_head<'a>(into: &Target, w: usize, tint: Style, lang: Lang) -> Line<'a> {
+    let label = format!(" {}  ", say(lang, "tui.jot.into"));
+    let room = w.saturating_sub(crate::text::width(&label));
     let name = clip(&crate::text::one_line(&into.name), (room / 2).max(1));
     let path = crate::text::one_line(&into.path.display().to_string());
     let line = Line::from(vec![
-        Span::styled(LABEL, bold()),
+        Span::styled(label, bold()),
         Span::styled(name, tint),
         Span::styled(format!("  {path}"), dim()),
     ]);
@@ -462,10 +489,11 @@ fn jot_head<'a>(into: &Target, w: usize, tint: Style) -> Line<'a> {
 ///
 /// 거절된 까닭(빈 제목)과 버릴지 묻는 말은 이 줄을 차지한다 — 키 안내는 폼을 연
 /// 순간 이미 봤고, 지금 답해야 할 것은 그 말이다.
-fn jot_keys(f: &mut Frame, form: &Form, at: Rect) {
+fn jot_keys(f: &mut Frame, form: &Form, at: Rect, lang: Lang) {
     let line = if form.leaving {
         let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
-        Line::from(Span::styled(format!(" 적던 것을 버릴까 — {} 버린다 · 다른 키는 폼으로 돌아간다 ", label(CONFIRM, Confirm::Yes)), ask))
+        let asked = fill(say(lang, "tui.jot.discard"), &[("yes", &label(CONFIRM, Confirm::Yes))]);
+        Line::from(Span::styled(asked, ask))
     } else if let Some(e) = &form.error {
         Line::from(vec![
             Span::styled(" ! ", Style::new().fg(Color::Black).bg(Color::LightRed)),
@@ -474,13 +502,13 @@ fn jot_keys(f: &mut Frame, form: &Form, at: Rect) {
     } else {
         // 이름과 낱말은 키 표([`JOT`])에서 읽는다 — `Tab`·`Enter` 의 낱말은 포커스 칸에 달렸다.
         let title = form.field == Field::Title;
-        let hint = |a: Jot| key(&label(JOT, a), a.what(title));
+        let hint = |a: Jot| key(&label(JOT, a), a.what(title, lang));
         Line::from(vec![
             hint(Jot::Save),
             hint(Jot::Switch),
             hint(Jot::Next),
             hint(Jot::Close),
-            Span::styled("   idea 로 담긴다 — 에픽 없이", dim()),
+            Span::styled(format!("   {}", say(lang, "tui.jot.as_idea")), dim()),
         ])
     };
     let line = fit(line, at.width as usize);
@@ -494,8 +522,8 @@ fn jot_keys(f: &mut Frame, form: &Form, at: Rect) {
 /// **다시 안 묻게 하는 법이 앞이다.** 좁은 창에서는 뒤가 잘리는데, 세션 동안만 든다는
 /// 말은 잘려도 사람이 잃는 것이 없고 설정하는 법은 잘리면 다음에 또 묻는다. 그다음이
 /// 쓰기를 멈춘 거절문(`why`)이다 — 설정이 없는지 틀렸는지를 그것이 가른다.
-fn ask_why(why: &str) -> String {
-    format!(" git config user.name·user.email 을 바르게 적어 두면 다시 안 묻는다 · {why} · 받은 것은 이 세션 동안만 든다 ")
+fn ask_why(why: &str, lang: Lang) -> String {
+    fill(say(lang, "tui.ask.why"), &[("why", why)])
 }
 
 /// 화면 안에서 알려야 할 것. **대체 화면 안에서는 `eprintln!` 이 화면을
@@ -512,6 +540,7 @@ pub(crate) fn tests_banner(app: &mut App) -> String {
 }
 
 fn banner(app: &App) -> Option<(String, bool)> {
+    let lang = app.site.lang;
     let mut parts: Vec<String> = Vec::new();
     let mut urgent = false;
     if let Some(t) = &app.trouble {
@@ -530,11 +559,11 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 모른다. 사람이 할 수 있는 것은 나갔다 다시 여는 것뿐이다(moai-j9on). 급하지만 알림
     // **뒤에** 선다: 세션 내내 남는 긴 말이 앞에 서면 80칸에서 이후 모든 쓰기의 알림을 밀어낸다.
     if app.let_go > 0 {
-        parts.push(format!("멈춘 다시 읽기 {}개를 놓았다 — 그것이 터지면 화면이 걷힌다 · 나갔다 다시 연다", app.let_go));
+        parts.push(fill(say(lang, "tui.banner.let_go"), &[("n", &app.let_go.to_string())]));
         urgent = true;
     }
     if !app.site.unreadable.is_empty() {
-        parts.push(format!("읽을 수 없는 줄 {}개 — 그 줄은 빠진 채로 보고 있다", app.site.unreadable.len()));
+        parts.push(fill(say(lang, "tui.banner.unreadable"), &[("n", &app.site.unreadable.len().to_string())]));
         urgent = true;
     }
     // 층이 **안 선** 까닭은 프로젝트 안에서도 댄다 — 그 화면에서는 층이 없다는 것 말고
@@ -571,7 +600,7 @@ fn banner(app: &App) -> Option<(String, bool)> {
         parts.extend(l.problems.iter().map(|p| crate::text::one_line(p)));
     }
     if app.site.warnings > 0 {
-        parts.push(format!("드러난 것 {}건 — `moai status` 가 자세히 낸다", app.site.warnings));
+        parts.push(fill(say(lang, "tui.banner.warnings"), &[("n", &app.site.warnings.to_string())]));
     }
     // 옆 워크트리의 문제는 **급하지 않다** — 제 파일은 멀쩡하고, 그 줄만 빠진 채로
     // 겹쳐 보고 있다.
@@ -718,7 +747,7 @@ impl Numbered {
 /// 셈까지 어긋내 번호 칸이 밀린다.
 fn numbered_projects(app: &App) -> Vec<Numbered> {
     let Some(layer) = app.layer.as_ref() else { return Vec::new() };
-    std::iter::once("전체".to_string())
+    std::iter::once(say(app.site.lang, "tui.header.all").to_string())
         .chain(layer.places.iter().map(|p| crate::text::one_line(&p.name)))
         .enumerate()
         .map(|(n, name)| numbered(n, name))
@@ -756,14 +785,18 @@ fn spans_width(spans: &[Span]) -> usize {
 /// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
 /// 깜빡임 한 번마다 도는 자리다.
 fn told_of(app: &mut App) -> [(&'static str, String); 2] {
+    let said = version_said(app.site.lang);
     let user = app.told_user().to_string();
-    [("User", user), ("Version", VERSION_SAID.to_string())]
+    [("User", user), ("Version", said)]
 }
 
 /// 판 줄의 글. 서버의 최신판은 아직 없다 — 빈 자리를 두면 "고장" 으로 읽히므로 없다는 것을
-/// 낱말로 적는다. **짓는 것이 아니라 박아 둔다**: 컴파일 때 다 정해진 글이라 프레임마다
-/// 새로 지을 까닭이 없다(그리는 자리는 키 하나·깜빡임 한 번마다 돈다).
-const VERSION_SAID: &str = concat!(env!("CARGO_PKG_VERSION"), " · 최신 확인 안 함");
+/// 낱말로 적는다. 한때 `concat!` 로 박아 둔 상수였다 — 프레임마다 새로 지을 까닭이 없다는
+/// 것이었는데, 뒷말이 말묶음에서 오면서(moai-9it4) 고른 말을 받아 짓는 자리가 됐다. 값은
+/// 표에서 한 번 집어 짧은 글 하나를 잇는 것뿐이라 그리는 걸음에 얹어도 된다.
+fn version_said(lang: Lang) -> String {
+    format!("{} · {}", env!("CARGO_PKG_VERSION"), say(lang, "tui.version.unchecked"))
+}
 
 fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let w = at.width as usize;
@@ -771,7 +804,11 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 그러면 사람이 도구를 의심하는 대신 자료를 의심한다. 그래서 **뱃지 자리를
     // 먼저 뗀다** — 경로를 줄 폭 전체로 자르면 깊이 들어갔을 때 뱃지가 줄
     // 밖으로 밀려 통째로 사라지고, 하필 그때가 목록이 가장 짧아 보이는 때다.
-    let badge = app.filter_text.as_ref().map(|t| clip(&format!("[{t}]  {} 로 푼다", label(BROWSE, Browse::ClearFilter)), w));
+    let lang = app.site.lang;
+    let badge = app.filter_text.as_ref().map(|t| {
+        let said = fill(say(lang, "tui.crumbs.filter"), &[("text", t), ("key", &label(BROWSE, Browse::ClearFilter))]);
+        clip(&said, w)
+    });
     let room = match &badge {
         Some(b) => w.saturating_sub(crate::text::width(b) + 3),
         None => w,
@@ -789,7 +826,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let overlay = (app.worktree && !trees.is_empty()).then(|| {
         let names = trees.join(", ");
         let off = match Browse::Worktree.enabled(&app.key_ctx(rows)) {
-            Ok(()) => format!("  {} 로 끈다", label(BROWSE, Browse::Worktree)),
+            Ok(()) => fill(say(lang, "tui.crumbs.overlay_off"), &[("key", &label(BROWSE, Browse::Worktree))]),
             Err(_) => String::new(),
         };
         clip(&format!("{} {names}{off}", style::BRANCH_GLYPH), w / 2)
@@ -803,11 +840,12 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v`(숨김)·`SPC s`(정렬)가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
     let sorted = (app.order != Default::default()).then(|| {
-        format!("정렬 {}{}", app.order.by.word(), if app.order.reversed { " 거꾸로" } else { "" })
+        fill(say(app.site.lang, "tui.badge.sorted"), &[("by", app.order.by.word(app.site.lang))])
+            + if app.order.reversed { say(app.site.lang, "tui.badge.reversed") } else { "" }
     });
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
-    let hidden = app.view.badge(&app.screen_statuses());
+    let hidden = app.view.badge(&app.screen_statuses(), app.site.lang);
     // **한눈 보기에도 보기 뱃지를 세운다**(moai-1xo5) — 거기서도 보기가 줄을 가리므로, 안 세우면
     // 줄이 왜 적은지 말할 자리가 없다. 칸 이름은 지금 선 프로젝트의 것으로 댄다.
     let look = {
@@ -1019,16 +1057,21 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         _ if app.on_layer() => {
             let heads = rows.iter().filter(|r| matches!(r, Row::Project(_))).count();
             let lines = rows.iter().filter(|r| matches!(r, Row::Item(..))).count();
+            let lang = app.site.lang;
             match lines {
-                0 => format!(" 프로젝트 {heads}곳 ").into(),
-                n => format!(" 프로젝트 {heads}곳 · {n}줄 ").into(),
+                0 => fill(say(lang, "tui.list.projects"), &[("heads", &heads.to_string())]).into(),
+                n => fill(say(lang, "tui.list.projects_rows"), &[
+                    ("heads", &heads.to_string()),
+                    ("n", &n.to_string()),
+                ])
+                .into(),
             }
         }
         // **보기가 다 가렸으면 그렇다고 댄다**(moai-2kyl 단계 리뷰). 까닭을 대는 경로 줄의 `[done 숨김]` 은
         // 자리가 모자라면 빠지는데, 그때 " 비었다 " 만 서면 끝난 일이 사라진 줄 안다.
-        (_, true) if app.view_hides_here() => " 보기에 가려 비었다 ".into(),
-        (_, true) => " 비었다 ".into(),
-        (true, false) => format!(" {lines}줄 ").into(),
+        (_, true) if app.view_hides_here() => say(app.site.lang, "tui.list.empty_by_view").into(),
+        (_, true) => say(app.site.lang, "tui.list.empty").into(),
+        (true, false) => fill(say(app.site.lang, "tui.list.rows"), &[("lines", &lines.to_string())]).into(),
         (false, _) => {
             let mut spans = vec![Span::raw(" ")];
             for (n, c) in counts.into_iter().enumerate() {
@@ -1097,7 +1140,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         list_at,
         &mut state,
     );
-    scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer);
+    scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer, app.site.lang);
 }
 
 /// 굴릴 것이 남았으면 **칸의 아래 테두리 오른쪽에** 적는다. 목록이든 상세든 같은
@@ -1109,8 +1152,8 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
 /// **포커스 있는 칸에서는 테두리의 초록을 이어받아 흐리게만 한다.** 표시는 테두리
 /// 위에 앉으므로 회색으로 덮으면 그 칸만 초록 선이 끊겨, 포커스 칸의 아래 테두리가
 /// 굴릴 것이 남았을 때마다 짧아 보인다. 뜻은 여전히 선 모양([`frame`])이 진다.
-fn scroll_mark(f: &mut Frame, s: &Scroll, at: Rect, hint: &str, focused: bool) {
-    let Some(mark) = s.mark() else { return };
+fn scroll_mark(f: &mut Frame, s: &Scroll, at: Rect, hint: &str, focused: bool, lang: Lang) {
+    let Some(mark) = s.mark(lang) else { return };
     if at.height < 2 || at.width < 4 {
         return;
     }
@@ -1238,7 +1281,7 @@ fn row_line<'a>(
     // 제목보다 먼저 얻는다 — 긴 제목에 밀려 잘리면 까닭 없이 흐린 줄만 남는다. 좁아도 안 걷히므로 오른쪽 열을
     // 걷는 셈(`right_fit`)과 머리를 걷는 셈(`Head::of`)이 함께 잰다([`trail_width`]).
     let unveiled = app.unveiled(e);
-    let tail = if unveiled { UNVEILED_MARK } else { "" };
+    let tail = if unveiled { unveiled_mark(site.lang) } else { "" };
     // **오른쪽 열**(moai-g7p8) — 태그·담당·생성·수정. 줄마다 폭을 고정해 여러 줄을 한 줄로 훑어
     // 내려갈 수 있게 한다(셈을 오른쪽 정렬한 까닭과 같다). 담당·날짜가 없으면 `—` 로, 태그가 없으면
     // 빈칸으로 자리를 지킨다 — 태그 없는 줄이 흔해 `—` 가 줄마다 서면 눈이 거기 걸린다.
@@ -1333,14 +1376,16 @@ fn row_line<'a>(
 }
 
 /// 검색이 드러낸 숨은 줄의 꼬리(moai-4x87). 앞 빈칸까지 한 몸이다 — 제목 몫을 셀 때 함께 뺀다.
-const UNVEILED_MARK: &str = "  숨김";
+fn unveiled_mark(lang: Lang) -> &'static str {
+    say(lang, "tui.list.unveiled_mark")
+}
 
 /// 제목 **뒤에** 줄마다 붙어 좁아도 안 걷히는 것의 폭 — 검색이 드러낸 숨은 줄의 `숨김`([`UNVEILED_MARK`]).
 /// 머리를 걷는 셈(`Head::of`)과 오른쪽 열을 걷는 셈(`right_fit`)이 [`lead_extras`] 처럼 함께 재야 한다 —
 /// 모르면 숨은 에픽 줄에서만 머리가 남아 진척 셈이 말없이 잘리고(moai-wilg 가 걷은 그 실패), 제목은
 /// [`TITLE_MIN`] 을 못 받는다.
 fn trail_width(app: &App, e: &Entry) -> usize {
-    if app.unveiled(e) { crate::text::width(UNVEILED_MARK) } else { 0 }
+    if app.unveiled(e) { crate::text::width(unveiled_mark(app.site.lang)) } else { 0 }
 }
 
 /// 줄 머리의 폭 — 커서 뒤, 제목 앞. id·우선순위(목록이 정한 폭), 두 칸 글리프와 빈칸, 그리고 `[NEW]`·
@@ -1624,15 +1669,16 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         // **빈 층은 할 일을 댄다**(moai-r8kl). 등록이 0 인 채 `.moai` 밖에서 띄운 자리다 — "없다"
         // 만 서면 밖에서 부른 실수가 멀쩡한 빈 목록으로 읽힌다.
         None if app.on_layer() => {
-            let mut out = vec![Line::from(Span::styled("등록한 프로젝트가 없다", bold())), Line::from("")];
-            let how = format!("{} 로 디렉터리를 골라 등록한다", label(BROWSE, Browse::Pick));
+            let lang = app.site.lang;
+            let mut out = vec![Line::from(Span::styled(say(lang, "tui.layer.no_projects"), bold())), Line::from("")];
+            let how = fill(say(lang, "tui.layer.how_to_register"), &[("key", &label(BROWSE, Browse::Pick))]);
             out.extend(wrapped(&how, inner.width as usize, dim()));
             out
         }
-        None => vec![Line::from(Span::styled("없다", dim()))],
+        None => vec![Line::from(Span::styled(say(app.site.lang, "tui.detail.none"), dim()))],
         // `..` 은 디렉터리에만 선다(moai-i784) — 뿌리에서 층으로 가던 갈래는 걷었으므로
         // 이 줄이 가는 데는 한 곳뿐이다.
-        Some(Row::Up) => vec![Line::from(Span::styled("한 층 위로", dim()))],
+        Some(Row::Up) => vec![Line::from(Span::styled(say(app.site.lang, "tui.detail.up"), dim()))],
         Some(Row::Project(at)) => place_about(app, at, inner.width as usize),
         // 상세도 **커서가 선 줄의 프로젝트**로 읽는다(moai-eyre).
         Some(Row::Item(seat, e, _)) => {
@@ -1666,7 +1712,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 잰 것을 조각에 넣으면 **끝을 지난 자리가 잘려 도로 들어간다**(`Scroll::fit`)
     // — 그리는 데만 자르면 끝까지 굴린 뒤 `k` 가 한동안 죽는다.
     app.detail.fit(inner.height as usize, lines.len());
-    f.render_widget(block.title(" 상세 "), at);
+    f.render_widget(block.title(format!(" {} ", say(app.site.lang, "tui.pane.detail"))), at);
     // **굴리는 키를 표시 곁에서 말한다.** 아래 키 바는 좁으면 뒤에서부터 키를
     // 떨어뜨리는데, 80칸이면 떨어지는 것이 하필 `j·k` 다. 알림은 그것이
     // 가리키는 것 곁에 둔다. **지금 자리에서 듣는 키를 댄다** — `j·k` 는 포커스 칸을
@@ -1678,7 +1724,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         label(BROWSE, Browse::FocusNext)
     };
     let hint = format!(" ({hint})");
-    scroll_mark(f, &app.detail, at, &hint, app.focus == Pane::Detail);
+    scroll_mark(f, &app.detail, at, &hint, app.focus == Pane::Detail, app.site.lang);
     // **넘친 줄은 잘렸다고 말한다.** `Wrap` 을 끈 뒤로 폭을 넘는 줄은 위젯이
     // 표시도 없이 잘라 낸다 — 태그 줄, 롤업의 칸별 건수, `SPC v r` 원문, 접지
     // 않기로 한 코드 줄이 그 길로 조용히 꼬리를 잃었다. 만드는 쪽마다 따로
@@ -1949,12 +1995,12 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     }
     if let Some(a) = &i.assignee {
         fields.push((
-            "담당".into(),
+            say(site.lang, "tui.field.assignee").into(),
             crate::model::label(a, i.assignee_email.as_deref(), site.cfg.naming),
         ));
     }
     if let Some(id) = &i.epic {
-        fields.push(("에픽".into(), site.title_of(id)));
+        fields.push((say(site.lang, "tui.about.epic").into(), site.title_of(id)));
     }
     // **그 줄이 선 마일스톤을 그린다.** 에픽이 마일스톤을 이기므로(3301f6e) 제 줄에
     // 적은 값은 그 줄이 선 자리와 다를 수 있다 — 그것을 그대로 그리면 패널은 m002 라
@@ -1965,13 +2011,19 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     // 말없이 사라지면 그게 더 헷갈린다.
     let placed = site.index.milestone_of(idx);
     if let Some(id) = placed {
-        fields.push(("마일스톤".into(), site.title_of(id)));
+        fields.push((say(site.lang, "tui.about.milestone").into(), site.title_of(id)));
     }
     // 까닭은 **선 자리로** 댄다. "에픽의 것을 따른다" 고 적으면, 에픽 없이 부모 밑에
     // 접힌 줄이나 에픽 참조가 끊겨 `(길 잃음)` 에 선 줄에서 거짓이 된다.
     if let Some(own) = i.milestone.as_deref().filter(|own| Some(*own) != placed) {
-        let why = if placed.is_some() { "선 자리의 마일스톤을 따른다" } else { "이 줄은 마일스톤 밖에 선다" };
-        fields.push(("안 쓰임".into(), format!("제 마일스톤 {own} — {why}")));
+        let why = match placed.is_some() {
+            true => say(site.lang, "tui.about.follows_place"),
+            false => say(site.lang, "tui.about.outside_milestone"),
+        };
+        fields.push((
+            say(site.lang, "tui.about.unused").into(),
+            fill(say(site.lang, "tui.about.own_milestone"), &[("own", own), ("why", why)]),
+        ));
     }
     // **막는 것은 제목까지 푼다.** id 만 내면 그것이 무엇인지 또 찾아봐야 한다.
     // **막는가는 `report::blocker` 가 가른다** — `moai ready` 가 고르는 그 자다. 한때
@@ -1983,9 +2035,12 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         let root = site.index.deferred_root(b);
         let (waiting, aside) = at.map_or((crate::report::Waiting::Live, &[][..]), |at| site.waits(at));
         let (label, text) = match crate::report::blocker(at.map(|at| site.column(at)), root.is_some(), waiting) {
-            Blocker::Missing => ("끊김", format!("! {b}  없는 이슈라 막지 않는다")),
-            Blocker::Done => ("풀림", format!("✓ {b}  {}", site.title_of(b))),
-            Blocker::Open => ("막힘", format!("· {b}  {}", site.title_of(b))),
+            Blocker::Missing => (
+                say(site.lang, "tui.block.missing"),
+                fill(say(site.lang, "tui.block.missing_text"), &[("id", b)]),
+            ),
+            Blocker::Done => (say(site.lang, "tui.block.done"), format!("✓ {b}  {}", site.title_of(b))),
+            Blocker::Open => (say(site.lang, "tui.block.open"), format!("· {b}  {}", site.title_of(b))),
             // **미룬 막음도 막는다** — 미룬 일은 끝난 일이 아니다. 다만 그 줄은 보드에도
             // `ready` 에도 없으므로 미뤘다는 말을 붙인다. 낱말은 상세 머리가 쓰는 자리다.
             // **제목 앞에 둔다** — 값은 오른쪽부터 잘리므로, 뒤에 붙이면 흔한 길이의
@@ -1994,31 +2049,43 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
             // **첫 멤버와 남은 수만** 댄다: 값은 오른쪽부터 잘리므로 다 늘어놓으면 큰 에픽을
             // 미뤘을 때 제목이 통째로 사라진다(리뷰 moai-2sea.tns).
             Blocker::Deferred if !aside.is_empty() && root.is_none() => {
-                let more = if aside.len() > 1 { format!(" 외 {}", aside.len() - 1) } else { String::new() };
-                ("막힘", format!("· {b}  미룬 멤버 {}{more}  {}", aside[0], site.title_of(b)))
+                let more = match aside.len() > 1 {
+                    true => fill(say(site.lang, "tui.block.and_more"), &[("n", &(aside.len() - 1).to_string())]),
+                    false => String::new(),
+                };
+                let text = fill(say(site.lang, "tui.block.deferred_member"), &[
+                    ("id", b),
+                    ("member", &aside[0]),
+                    ("more", &more),
+                    ("title", &site.title_of(b)),
+                ]);
+                (say(site.lang, "tui.block.open"), text)
             }
             // 멤버가 없는 묶음 — 기다릴 일이 없어도 막는다(moai-1c2l). 채울 자리라고 댄다.
-            Blocker::Empty => ("막힘", format!("· {b}  멤버 없음  {}", site.title_of(b))),
+            Blocker::Empty => (
+                say(site.lang, "tui.block.open"),
+                fill(say(site.lang, "tui.block.empty_text"), &[("id", b), ("title", &site.title_of(b))]),
+            ),
             Blocker::Deferred => {
                 let shelf = at
                     .and_then(|at| crate::view::deferred_for(&site.issues[at], root, &site.now, site.lang))
                     // 밑값도 같은 말로 선다 — 바로 위가 고른 말로 내는데 여기만 박아 두면 그 줄이
                     // 못 재는 때에만 딴 말로 선다. 낱말은 CLI 막음 줄과 한 자리다(`view::block_line`).
                     .unwrap_or_else(|| crate::i18n::say(site.lang, "status.put_off").to_string());
-                ("막힘", format!("· {b}  {shelf}  {}", site.title_of(b)))
+                (say(site.lang, "tui.block.open"), format!("· {b}  {shelf}  {}", site.title_of(b)))
             }
         };
         fields.push((label.into(), text));
     }
     // CLI 상세와 **같은 자**를 쓴다. 두 표면이 같은 값을 다르게 적으면 보는
     // 쪽이 어느 쪽을 믿을지 정해야 한다.
-    fields.push(("생성".into(), crate::view::stamp(&i.created_at)));
-    fields.push(("수정".into(), crate::view::stamp(&i.updated_at)));
+    fields.push((say(site.lang, "tui.field.created").into(), crate::view::stamp(&i.created_at)));
+    fields.push((say(site.lang, "tui.field.updated").into(), crate::view::stamp(&i.updated_at)));
     // **시작·끝도 같은 자다**(moai-38mh) — 어느 줄에 세울지(아직 안 떠난 줄·묶음은 안 세운다)까지
     // `view::span_of` 가 정한다. 여기만 없으면 탐색기로 보는 사람에게는 틀린 시각이 안 보인다.
     if let Some((start, end)) = crate::view::span_of(i) {
-        fields.push(("시작".into(), start));
-        fields.push(("끝".into(), end));
+        fields.push((say(site.lang, "tui.about.started").into(), start));
+        fields.push((say(site.lang, "tui.about.ended").into(), end));
     }
     let w_label = label_width(&fields);
     out.extend(fields.iter().map(|(k, v)| field(k, v, w_label, w)));
@@ -2047,7 +2114,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     let drawn = crate::view::commit_lines(site.commits_of(&i.id));
     if !drawn.is_empty() {
         out.push(Line::from(""));
-        out.push(Line::from(Span::styled("커밋", bold())));
+        out.push(Line::from(Span::styled(say(site.lang, "tui.about.commits"), bold())));
         for (short, subject) in drawn {
             // 제목은 폭에서 잘린다(`fit`) — 한 커밋이 한 줄이어야 해시와 제목이 짝으로 읽힌다.
             out.push(Line::from(vec![Span::styled(short.to_string(), dim()), Span::raw("  "), Span::raw(subject)]));
@@ -2160,7 +2227,10 @@ fn rollup<'a>(app: &App, site: &Site, path: &crate::nav::Path, w: usize) -> Vec<
         // 걸리지만(왼쪽 목록이 그 줄을 낸다) 진행률로는 안 센다 — 세기
         // 시작하면 담을수록 그 부모가 덜 끝난 것으로 보인다. 둘을 한 낱말로
         // 뭉치면 줄이 보이는데 `자식 없음` 이라 말한다(moai-lhbh).
-        let word = if progress.kids == 0 { "자식 없음" } else { "셀 일 없음" };
+        let word = match progress.kids == 0 {
+            true => say(site.lang, "tui.rollup.no_kids"),
+            false => say(site.lang, "tui.rollup.nothing_to_count"),
+        };
         return vec![Line::from(Span::styled(word, dim()))];
     };
     let (work, done) = (&progress.work, progress.done);
@@ -2250,6 +2320,7 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
     let Some(p) = app.layer.as_ref().and_then(|l| l.places.get(at)) else {
         return Line::from("");
     };
+    let lang = app.site.lang;
     let room = budget.saturating_sub(crate::text::width(CURSOR));
     let enterable = matches!(p.look, Look::Open { .. } | Look::Unread);
     // 이름이 줄을 다 먹으면 무엇이 서 있는지가 안 보인다 — 반까지만. `/` 는 자른 뒤에 붙인다.
@@ -2259,7 +2330,7 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
     }
     let mut spans = vec![Span::styled(name, project_style(p)), Span::raw("  ")];
     match &p.look {
-        Look::Unread => spans.push(Span::styled("읽는 중", dim())),
+        Look::Unread => spans.push(Span::styled(say(lang, "tui.place.reading"), dim())),
         Look::Open { sum, .. } => {
             let shown: Vec<Span> = sum
                 .counts
@@ -2268,7 +2339,7 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
                 .flat_map(|(st, n)| [Span::styled(format!("{}{n}", style::glyph(st)), status(st)), Span::raw(" ")])
                 .collect();
             if shown.is_empty() {
-                spans.push(Span::styled("비었다", dim()));
+                spans.push(Span::styled(say(lang, "tui.place.empty"), dim()));
             } else {
                 spans.extend(shown);
             }
@@ -2288,12 +2359,16 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
         // 화면(짧은 터미널)에서는 "읽는 중" 이라 적힌 채 한 칸에 멈춘다.
         let cfg = app.layer.as_ref().and_then(|l| l.places.get(at)).and_then(|p| p.site.as_ref()).map_or(&app.site.cfg, |s| &s.cfg);
         spans.push(Span::styled(
-            format!("  {} 줄 읽는 중", style::spin_frame(app.spin)),
+            fill(say(lang, "tui.place.reading_rows"), &[("spin", style::spin_frame(app.spin))]),
             glyph_style(cfg.started_status()),
         ));
     }
     if p.launched {
-        spans.push(Span::styled(if p.registered { "  여기" } else { "  여기 · 등록 안 됨" }, dim()));
+        let here = match p.registered {
+            true => say(lang, "tui.place.here"),
+            false => say(lang, "tui.place.here_unregistered"),
+        };
+        spans.push(Span::styled(format!("  {here}"), dim()));
     }
     spans.push(Span::styled(format!("  {}", crate::text::one_line(&p.path.display().to_string())), dim()));
     fit(Line::from(spans), room)
@@ -2313,26 +2388,28 @@ fn shut_style(s: Shut) -> Style {
 /// 내는 한 덩어리와 같은 셈이다(칸별 수·집은 것·드러난 것).
 fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
     let Some(p) = app.layer.as_ref().and_then(|l| l.places.get(at)) else {
-        return vec![Line::from(Span::styled("없다", dim()))];
+        return vec![Line::from(Span::styled(say(app.site.lang, "tui.detail.none"), dim()))];
     };
     // 이 층의 글은 전부 **남의 것**이다 — 한 줄 자리는 `one_line` 하나를 지난다. `sanitize` 가
     // 남긴 줄바꿈·탭은 한 줄 `Line` 안에서 위젯이 말없이 버려 다른 이름으로 읽힌다(moai-9tww).
+    let lang = app.site.lang;
     let mut out = wrapped(&crate::text::one_line(&p.name), w, project_style(p));
     out.extend(wrapped(&crate::text::one_line(&p.path.display().to_string()), w, dim()));
     match (p.launched, p.registered) {
-        (true, true) => out.push(Line::from(Span::styled("여기서 띄웠다", dim()))),
+        (true, true) => out.push(Line::from(Span::styled(say(lang, "tui.place.launched"), dim()))),
         // 고칠 명령에는 **그 뿌리를** 댄다. `.` 이라 적으면 하위 디렉터리에서 띄운 사람이 그
         // 하위 디렉터리를 등록한다 — 그곳은 `.moai` 가 없어 "init 전" 으로 선다.
         (true, false) => {
             // 명령에 넣는 철자는 `one_line` 을 안 지난다 — 탭·줄바꿈이 빈칸이 되면 다른 디렉터리다.
             let at = crate::text::shell_word(&p.path.display().to_string());
-            out.extend(wrapped(&format!("여기서 띄웠다 · 등록 안 됨 — `moai project add {at}` 로 더하면 어디서든 보인다"), w, dim()))
+            let said = fill(say(lang, "tui.place.launched_unregistered"), &[("at", &at)]);
+            out.extend(wrapped(&said, w, dim()))
         }
         _ => {}
     }
     out.push(Line::from(""));
     match &p.look {
-        Look::Unread => out.push(Line::from(Span::styled("읽는 중", dim()))),
+        Look::Unread => out.push(Line::from(Span::styled(say(lang, "tui.place.reading"), dim()))),
         Look::Shut { state, said } => out.extend(wrapped(said, w, shut_style(*state))),
         Look::Open { sum, .. } => {
             for (st, n) in &sum.counts {
@@ -2343,7 +2420,8 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                 )));
             }
             out.push(Line::from(""));
-            out.push(Line::from(Span::styled(format!("집은 것 {}건", sum.picked.len()), bold())));
+            let picked = fill(say(lang, "tui.place.picked"), &[("n", &sum.picked.len().to_string())]);
+            out.push(Line::from(Span::styled(picked, bold())));
             for i in &sum.picked {
                 out.push(Line::from(vec![
                     Span::styled(crate::text::one_line(&i.id), dim()),
@@ -2357,11 +2435,14 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
             // **못 셌으면 "문제 없다" 를 안 세운다** — 아래에 `!` 못 읽은 워크트리 줄이 서는데 위에서
             // ✓ 를 대면 덩어리가 제 말을 뒤집는다(moai-cuw2, 한눈 보기와 같은 자).
             if sum.warnings == 0 && sum.unread == 0 {
-                out.push(Line::from(vec![Span::styled("✓", status("done")), Span::raw(" 드러난 문제 없다")]));
+                out.push(Line::from(vec![
+                    Span::styled("✓", status("done")),
+                    Span::raw(say(lang, "tui.place.nothing_surfaced")),
+                ]));
             } else if sum.warnings > 0 {
                 out.push(Line::from(vec![
                     Span::styled("!", from_anstyle(style::WARN)),
-                    Span::raw(format!(" 드러난 것 {}건 — 들어가서 `moai status`", sum.warnings)),
+                    Span::raw(fill(say(lang, "tui.place.surfaced"), &[("n", &sum.warnings.to_string())])),
                 ]));
             }
             // **자리 없는 줄은 낱말로 따로 댄다**(moai-p3bs). 위의 수에 이미 들었지만, 죽은
@@ -2371,11 +2452,8 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
             // **감아 낸다**(`Look::Shut` 과 같은 자) — 수가 글 끝에 있어, 80칸의 상세 폭에서 자르면
             // 정작 몇 건인지가 잘려 나간다.
             if sum.stranded > 0 {
-                out.extend(wrapped(
-                    &format!("! 집었는데 일하는 워크트리가 없는 것 {}건", sum.stranded),
-                    w,
-                    from_anstyle(style::WARN),
-                ));
+                let said = fill(say(lang, "tui.place.stranded"), &[("n", &sum.stranded.to_string())]);
+                out.extend(wrapped(&said, w, from_anstyle(style::WARN)));
             }
             // **못 읽은 워크트리도 댄다**(리뷰 moai-p3bs.op2) — 안 대면 층이 "드러난 문제 없다" 로
             // 깨진 스냅샷을 덮고, 그 파일은 고칠 사람이 영영 모른다. **두 사실을 한 줄에 가른다**
@@ -2390,23 +2468,21 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
             if sum.unread > 0 {
                 let why = match sum.blind {
                     0 => String::new(),
-                    n if n == sum.unread => " — 자리를 다 못 셌다".to_string(),
-                    n => format!(" — 그중 {n}곳이 자리를 가려 다 못 셌다"),
+                    n if n == sum.unread => say(lang, "tui.place.blind_all").to_string(),
+                    n => fill(say(lang, "tui.place.blind_some"), &[("n", &n.to_string())]),
                 };
-                out.extend(wrapped(
-                    &format!("! 스냅샷을 못 읽은 워크트리 {}곳{why}", sum.unread),
-                    w,
-                    from_anstyle(style::WARN),
-                ));
+                let said = fill(say(lang, "tui.place.unread"), &[("n", &sum.unread.to_string()), ("why", &why)]);
+                out.extend(wrapped(&said, w, from_anstyle(style::WARN)));
             }
             if sum.unreadable > 0 {
                 out.push(Line::from(vec![
                     Span::styled("!", from_anstyle(style::ERROR)),
-                    Span::raw(format!(" 읽을 수 없는 줄 {}개", sum.unreadable)),
+                    Span::raw(fill(say(lang, "tui.place.unreadable"), &[("n", &sum.unreadable.to_string())])),
                 ]));
             }
             out.push(Line::from(""));
-            out.push(Line::from(Span::styled(format!("{} 로 들어간다", label(BROWSE, Browse::Enter)), dim())));
+            let how = fill(say(lang, "tui.place.enter"), &[("key", &label(BROWSE, Browse::Enter))]);
+            out.push(Line::from(Span::styled(how, dim())));
         }
     }
     out
@@ -2431,7 +2507,7 @@ fn fkeys(f: &mut Frame, app: &App, rows: &[Row], at: Rect, unnumbered: bool) {
         let next = keys::next_keys(BROWSE, app.chord.held())
             .into_iter()
             .filter(|(_, a)| a.enabled(&c).is_ok())
-            .map(|(k, a)| (k, if let Browse::Step(m) = a { keys::move_word(m) } else { a.what(&c) }))
+            .map(|(k, a)| (k, if let Browse::Step(m) = a { keys::move_word(m, c.lang) } else { a.what(&c) }))
             .collect();
         return bar(f, at, Vec::new(), vec![waiting(app.chord.held(), next)]);
     }
@@ -2508,7 +2584,7 @@ fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) 
     if app.filter_text.is_some() {
         keep.push(hint(&[B::ClearFilter]));
     }
-    keep.push((menu::title(&[LEADER.event()]), menu::ROOT));
+    keep.push((menu::title(&[LEADER.event()]), menu::root(app.site.lang)));
     (optional, keep)
 }
 
@@ -2572,9 +2648,10 @@ fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid,
             spans.push(Span::styled(format!(" {}", e.text()), menu_word(e.is_group())));
         }
     } else {
-        spans.push(Span::raw(format!(" {}", menu::name(held))));
+        spans.push(Span::raw(format!(" {}", menu::name(held, app.site.lang))));
         if grid.hidden > 0 {
-            spans.push(Span::styled(format!("  그 밖 {}개 — 창을 넓히면 선다", grid.hidden), dim()));
+            let said = fill(say(app.site.lang, "tui.menu.more"), &[("n", &grid.hidden.to_string())]);
+            spans.push(Span::styled(said, dim()));
         }
     }
     // **`Esc 닫기` 는 기다리는 층에만 선다**(사용자 결정 2026-09-19) — 그 줄이 곧 규칙이다:
@@ -2582,9 +2659,9 @@ fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid,
     // 닫지만(연 키 SPC 도, 하위 층이면 Bksp 도), 안 기다리는 층에서 그것을 대면 고르면 닫힌다는
     // 뜻이 흐려진다. **모르는 키는 그래도 무시한다**(`menu::feed`) — 아무것도 안 고르고 나가는 길은
     // `moai tui --help` 가 댄다.
-    let mut exits = if waits { vec![key(&label(MENU, Menu::Close), Menu::Close.what())] } else { Vec::new() };
+    let mut exits = if waits { vec![key(&label(MENU, Menu::Close), Menu::Close.what(app.site.lang))] } else { Vec::new() };
     if held.len() > 1 {
-        exits.push(key(&label(MENU, Menu::Up), Menu::Up.what()));
+        exits.push(key(&label(MENU, Menu::Up), Menu::Up.what(app.site.lang)));
     }
     let used = spans_width(&spans) + spans_width(&exits);
     if used <= room {
@@ -2616,30 +2693,42 @@ fn key(k: &str, what: &str) -> Span<'static> {
 }
 
 /// 글칸 안내 — `Enter <무엇>  Esc 그만`. 키 이름은 표([`PROMPT`])에서 읽는다.
-fn prompt_help(apply: &str) -> String {
-    format!("{} {apply}  {} 그만", label(PROMPT, Prompt::Apply), label(PROMPT, Prompt::Cancel))
+fn prompt_help(apply: &str, lang: Lang) -> String {
+    fill(say(lang, "tui.prompt.help"), &[
+        ("ok", &label(PROMPT, Prompt::Apply)),
+        ("apply", apply),
+        ("cancel", &label(PROMPT, Prompt::Cancel)),
+    ])
 }
 
 /// 검색 칸 이름표 — 좁힌 범위면 `검색·id` 처럼 붙인다(moai-kojj). 전체면 옛 이름 그대로다.
-fn grep_label(g: GrepIn) -> String {
+fn grep_label(g: GrepIn, lang: Lang) -> String {
     match g {
-        GrepIn::All => "검색".to_string(),
-        g => format!("검색·{}", g.name()),
+        GrepIn::All => say(lang, "tui.grep.label").to_string(),
+        g => fill(say(lang, "tui.grep.label_in"), &[("scope", g.name())]),
     }
 }
 
 /// 검색 칸 안내 — `3건  Tab·Shift-Tab 범위  Enter 걸기  Esc 그만`. 셈은 **친 글이 있을 때만**
 /// 낸다(moai-00le): 빈 칸은 거름망이 없는 것이라 전체 수가 "걸린 수" 로 읽힌다.
 fn grep_help(app: &App, q: &Input) -> String {
-    let scope = format!("{} 범위  {}", labels(PROMPT, &[Prompt::NextScope, Prompt::PrevScope]), prompt_help("걸기"));
+    let lang = app.site.lang;
+    let scope = fill(say(lang, "tui.grep.scope"), &[
+        ("keys", &labels(PROMPT, &[Prompt::NextScope, Prompt::PrevScope])),
+        ("apply", &prompt_help(say(lang, "tui.prompt.hang"), lang)),
+    ]);
     if q.text().trim().is_empty() {
         return scope;
     }
     // **보기가 숨겼을 것도 댄다**(moai-qnkn) — 검색은 보기가 숨긴 줄까지 세우므로, 흐린 줄이 왜 섰는지와
     // 검색을 풀면 몇 줄이 도로 숨는지를 글로 말한다.
     match app.unveiled_count() {
-        0 => format!("{}건  {scope}", app.hit_count()),
-        n => format!("{}건 · 숨김 {n}건 포함  {scope}", app.hit_count()),
+        0 => fill(say(lang, "tui.grep.hits"), &[("n", &app.hit_count().to_string()), ("scope", &scope)]),
+        n => fill(say(lang, "tui.grep.hits_hidden"), &[
+            ("n", &app.hit_count().to_string()),
+            ("hidden", &n.to_string()),
+            ("scope", &scope),
+        ]),
     }
 }
 
@@ -6439,7 +6528,8 @@ pub(super) mod tests {
                 continue;
             };
             // 커서 두 칸, 멈춘 글리프와 빈칸, 제목 한 글자와 `/`, `숨김` 과 그 앞 두 칸, 셈 앞 두 칸과 `2/2`.
-            let least = crate::text::width(CURSOR) + 2 + 2 + crate::text::width(UNVEILED_MARK) + 2 + "2/2".len();
+            let least =
+                crate::text::width(CURSOR) + 2 + 2 + crate::text::width(unveiled_mark(Lang::Ko)) + 2 + "2/2".len();
             if inner < least {
                 continue;
             }

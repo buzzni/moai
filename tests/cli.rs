@@ -4731,8 +4731,10 @@ fn tui_json_lists_a_directory_without_a_terminal() {
 /// 없어 화면이 이름을 붙이는 자리라, 그 이름은 제목이 아니라 말묶음에서 온다. 한때 `nav` 와
 /// `tui::mod` 가 같은 글자를 따로 들어, 한쪽만 고치면 목록 줄과 경로 줄이 다른 말을 했다.
 ///
-/// **다른 글자는 아직 한국어다** — 이 일이 옮긴 것은 넘겨받은 넷뿐이고, 나머지는 에픽
-/// moai-hom6 의 멤버로 서 있다. 그래서 여기서는 바구니 이름 하나만 잰다.
+/// **재는 것은 바구니 이름 하나다.** 탐색기의 글은 이제 다 말묶음에서 오지만(moai-9it4),
+/// 그 글자를 여기서 줄줄이 재면 낱말을 다듬을 때마다 이 시험이 같이 붉어진다. 말이 명령
+/// 층(`Ctx::lang`)에서 화면까지 닿는가만 보면 되고, 소스에 박힌 글이 다시 새는지는
+/// `tui::input` 의 `the_explorer_holds_no_korean_of_its_own` 이 파일과 줄을 대며 잡는다.
 #[test]
 fn the_explorer_names_its_baskets_in_the_chosen_language() {
     let s = init("tuilang");

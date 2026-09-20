@@ -58,12 +58,13 @@ impl View {
     /// 이어지는데, 다른 프로젝트에만 있는 칸 이름까지 대면 여기서는 번호 토글이 없어 걷을 길이 없다.
     /// 그 이름은 버리지 않고 들고 있다 — 그 칸이 있는 프로젝트로 돌아가면 다시 숨는다. 여기서는 줄도
     /// 안 숨긴다([`View::shows`]).
-    pub fn badge(&self, known: &[String]) -> Option<String> {
+    pub fn badge(&self, known: &[String], lang: crate::i18n::Lang) -> Option<String> {
         let mut names: Vec<&str> = self.hidden.iter().filter(|h| known.contains(h)).map(String::as_str).collect();
         if self.hide_deferred {
-            names.push("미룸");
+            names.push(crate::i18n::say(lang, "tui.act.deferred"));
         }
-        (!names.is_empty()).then(|| format!("{} 숨김", names.join("·")))
+        (!names.is_empty())
+            .then(|| crate::i18n::fill(crate::i18n::say(lang, "tui.badge.hidden"), &[("names", &names.join("·"))]))
     }
 }
 
@@ -86,19 +87,21 @@ pub enum Field {
 }
 
 impl Field {
-    pub fn word(self) -> &'static str {
+    pub fn word(self, lang: crate::i18n::Lang) -> &'static str {
+        use crate::i18n::say;
         match self {
+            // **`id` 는 낱말이 아니라 이름이다** — 옮기지 않는다.
             Field::Id => "id",
-            Field::Priority => "우선순위",
-            Field::Assignee => "담당",
-            Field::Created => "생성",
-            Field::Updated => "수정",
-            Field::Tally => "셈",
-            Field::Tags => "태그",
-            Field::Names => "열 이름",
+            Field::Priority => say(lang, "tui.field.priority"),
+            Field::Assignee => say(lang, "tui.field.assignee"),
+            Field::Created => say(lang, "tui.field.created"),
+            Field::Updated => say(lang, "tui.field.updated"),
+            Field::Tally => say(lang, "tui.field.tally"),
+            Field::Tags => say(lang, "tui.field.tags"),
+            Field::Names => say(lang, "tui.field.names"),
             // `SPC v w`(`keys::Toggle::Worktree`)가 이미 "워크트리" 다 — 같은 낱말을 두 줄에
             // 세우면 메뉴에서 어느 쪽이 겹쳐 보기고 어느 쪽이 줄의 표시인지 못 가른다.
-            Field::Branch => "옆 가지",
+            Field::Branch => say(lang, "tui.field.branch"),
         }
     }
 
@@ -221,7 +224,7 @@ impl Default for Fields {
 /// 그날 **컴파일이 멈추게** 못 박는다(moai-ggqf, moai-7pd5 가 적어 둔 것).
 const _: () = assert!(
     widest_bit() < u16::BITS,
-    "열이 Fields 의 비트 폭을 넘었다 — Fields 와 Field::bit 를 더 넓은 정수로 옮겨라"
+    "열이 Fields 의 비트 폭을 넘었다 — Fields 와 Field::bit 를 더 넓은 정수로 옮겨라" // i18n:터지는-글
 );
 
 /// [`Field::ALL`] 가운데 가장 큰 비트 자리. `Field::bit` 이 쓰는 그 자리다.
@@ -411,14 +414,14 @@ mod tests {
     #[test]
     fn the_badge_names_what_is_hidden() {
         let known: Vec<String> = ["todo", "review", "done"].map(String::from).to_vec();
-        assert_eq!(View::default().badge(&known), None);
-        assert_eq!(View::hiding("done").badge(&known).as_deref(), Some("done 숨김"));
+        assert_eq!(View::default().badge(&known, crate::i18n::Lang::Ko), None);
+        assert_eq!(View::hiding("done").badge(&known, crate::i18n::Lang::Ko).as_deref(), Some("done 숨김"));
         let v = View { hidden: vec!["review".into(), "done".into()], hide_deferred: true };
-        assert_eq!(v.badge(&known).as_deref(), Some("review·done·미룸 숨김"));
+        assert_eq!(v.badge(&known, crate::i18n::Lang::Ko).as_deref(), Some("review·done·미룸 숨김"));
         // 다른 프로젝트의 칸 이름은 들고만 있고 대지 않는다.
         let elsewhere = View { hidden: vec!["blocked".into(), "done".into()], hide_deferred: false };
-        assert_eq!(elsewhere.badge(&known).as_deref(), Some("done 숨김"));
-        assert_eq!(View::hiding("blocked").badge(&known), None);
+        assert_eq!(elsewhere.badge(&known, crate::i18n::Lang::Ko).as_deref(), Some("done 숨김"));
+        assert_eq!(View::hiding("blocked").badge(&known, crate::i18n::Lang::Ko), None);
     }
 
     #[test]
