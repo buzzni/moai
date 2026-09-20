@@ -24,7 +24,7 @@ pub const MAX_TEXT_BYTES: usize = 64 * 1024;
 /// 대면 에이전트는 대화록을 반으로 잘라 다시 넣는다.
 ///
 /// 리뷰 줄은 [`crate::guide::REVIEW_OVER_LIMIT`] 에서 온다 — 가르치는 글과 거절문이 갈라지면
-/// 큰 리뷰를 닫는 쪽이 두 말 사이에서 멈춘다(moai-b8aj). `<크기>` 는 여기서 채운다: 재 놓은 수를
+/// 큰 리뷰를 닫는 쪽이 두 말 사이에서 멈춘다(moai-b8aj). `<size>` 는 여기서 채운다: 재 놓은 수를
 /// 자리 표시로 도로 내밀면 받는 쪽이 첫 줄에서 그것을 옮겨 적어야 한다.
 /// `at` 은 **가리키는 말**이지 반드시 id 가 아니다 — 이 쓰기가 짓는 줄은 거절하면 안 남으므로
 /// id 가 아니라 제목으로 가리킨다([`unwritten`], moai-1rkl).
@@ -40,12 +40,12 @@ pub fn check_text_size(at: impl FnOnce() -> String, what: &str, text: &str) -> R
     let kb = text.len().div_ceil(1024);
     Err(Fail::coded(
         format!(
-            "{at}: {what} 크기가 {kb}KB 다 — 한 번에 {}KB 까지 적는다. 잘라 적지 않는다\n      \
-             요약을 적고 원문은 파일로 둔다. 리뷰 원문이면 리뷰가 낸 글이지 그 대화록(JSONL)이 아니다\n      \
-             리뷰 원문이면: {}",
+            "{at}: the {what} is {kb}KB — one write takes up to {}KB. Do not write it in slices\n      \
+             Write a summary and keep the original in a file. For a review, that is what the review said, not its transcript (JSONL)\n      \
+             For a review text: {}",
             MAX_TEXT_BYTES / 1024,
             // 두 줄짜리 글이다 — 이어 붙인 줄에도 같은 여섯 칸을 준다(`guide::REVIEW_OVER_LIMIT`).
-            crate::guide::REVIEW_OVER_LIMIT.replace("<크기>", &kb.to_string()).replace('\n', "\n      ")
+            crate::guide::REVIEW_OVER_LIMIT.replace("<size>", &kb.to_string()).replace('\n', "\n      ")
         ),
         code::BAD_INPUT,
     ))

@@ -455,37 +455,41 @@ mod tests {
             // 인자로 읽혀, 시험이 제가 만든 허깨비를 잡는다.
             .map(|l| l.split("  ").next().unwrap_or(l).trim().to_string())
             .chain(texts.iter().flat_map(|t| t.lines()).flat_map(spans))
-            .filter(|l| !l.contains("<명령>"))
+            .filter(|l| !l.contains("<command>"))
             .collect();
         let taught: Vec<String> = cmds
             .iter()
             .map(|l| {
                 l.replace("<id>", "t-r")
-                    .replace("<에픽>", "t-e")
-                    .replace("<보는 이슈>", "t-1")
-                    .replace("<리뷰 id>", "t-r")
-                    .replace("<리뷰 원문>", "/tmp/review.txt")
-                    .replace("<그 파일>", "/tmp/review.txt")
-                    .replace("<키워드>", "파서")
-                    .replace("<마일스톤>", "t-m")
+                    .replace("<epic>", "t-e")
+                    .replace("<the issue>", "t-1")
+                    .replace("<review id>", "t-r")
+                    .replace("<review text>", "/tmp/review.txt")
+                    .replace("<that file>", "/tmp/review.txt")
+                    .replace("<keyword>", "parser")
+                    .replace("<milestone>", "t-m")
+                    // 치트시트·예시의 제목 자리. 남으면 `<`·`>` 가 리다이렉션으로 읽힌다.
+                    .replace("<title>", "title")
+                    .replace("<what you found>", "what I found")
+                    .replace("<why>", "why")
                     // 감독이 일꾼에게 싣는 글은 멤버를 `<멤버>` 로 부른다. 자리표시자가 남으면 셸
                     // 읽기가 `<`·`>` 를 리다이렉션으로 읽어, 가르친 명령이 아니라 엉뚱한 쓰기를
                     // 잰다 — 9-1 의 노트 줄은 글의 `(` 가 그 쓰기를 못 읽을 것으로 돌려 우연히
                     // 지나갈 뿐이었다. 집은 일(`t-1`)을 주는 것은 그 줄이 가리키는 것이 멤버라서다 —
                     // 걸음 글의 `moai mv <멤버> done` 에 리뷰 id 를 주면 규칙 3 이 `-m` 없는 닫기로 막는다.
-                    .replace("<멤버>", "t-1")
+                    .replace("<member>", "t-1")
                     // 되짚기(7-1)가 선 에픽의 멤버로 펼치는 idea. 어느 id 든 규칙이 가리지 않는다.
                     .replace("<idea id>", "t-i")
                     // 배포 기준으로 가른 줄(7-2)을 마일스톤 밖으로 보내는 자리. `<id>` 로 부르지
                     // 않는 것은 감독이 채우는 이름과 겹치면 맡긴 idea 의 값이 그 줄에 박혀 와서다.
-                    .replace("<그 줄>", "t-1")
+                    .replace("<that row>", "t-1")
                     // 되짚기의 줄은 워크트리에서 루트를 가리켜 친다(4-1). 감독이 채우는 자리라 여기서는
                     // 시험의 뿌리로 둔다 — 남으면 `<`·`>` 가 리다이렉션으로 읽혀, 가르친 명령이 아니라
                     // 파일에 쓰는 엉뚱한 명령을 잰다.
-                    .replace("<루트>", "/repo")
+                    .replace("<root>", "/repo")
                     // 치트시트가 인자 자리를 이렇게 부른다 — 남으면 `<`·`|`·`>` 가 리다이렉션과 파이프로
                     // 읽혀, 가르친 명령이 아닌 것을 잰다(moai-8na5).
-                    .replace("<에픽|마일스톤 id>", "t-e")
+                    .replace("<epic|milestone id>", "t-e")
                     .replace("<dir>", "/tmp/elsewhere")
                     .replace("<event>", "stop")
             })
