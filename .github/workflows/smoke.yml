@@ -1,0 +1,78 @@
+# 옛 릴리스 바이너리가 쓴 스냅샷을 새 바이너리가 만져도 남의 줄이 그대로인지
+# 본다.
+#
+# PR 마다 돌리지 않는다. 재는 것이 **판과 판 사이**라, 한 PR 안에서는 잴 것이
+# 없고 릴리스를 내려받는 데 드는 시간만 든다. 밤과 태그에서만 돈다.
+name: smoke
+
+on:
+  schedule:
+    # 매일 03:17 UTC. 정각을 피하는 것은 그때 러너가 붐비기 때문이다.
+    - cron: "17 3 * * *"
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cross-version:
+    name: 옛 판이 쓴 스냅샷을 새 판이 만진다
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      # 견줄 옛 판을 고른다. **릴리스가 하나도 없으면 이 시험은 할 말이 없다** —
+      # 없는 것을 실패로 적으면 첫 릴리스 전까지 밤마다 붉은 줄이 선다.
+      - name: 옛 판을 고른다
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # 지금 미는 태그 자신은 뺀다 — 릴리스 워크플로가 그것을 아직 올리는 중일 수 있다.
+          tag=$(gh release list --limit 5 --json tagName --jq '.[].tagName' \
+            | grep -vx -- "$REF_NAME" \
+            | head -n 1 || true)
+          if [ -z "$tag" ]; then
+            echo "견줄 릴리스가 아직 없다 — 첫 릴리스 뒤부터 잰다" >>"$GITHUB_STEP_SUMMARY"
+            printf 'tag=\n' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '옛 판: %s\n' "$tag"
+          printf 'tag=%s\n' "$tag" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        if: steps.pick.outputs.tag != ''
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-release-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-release-${{ runner.os }}-
+
+      - name: build --release
+        if: steps.pick.outputs.tag != ''
+        run: cargo build --release --locked
+
+      # 옛 판은 설치 스크립트로 받는다 — 합계를 재는 길이 이미 거기 있고, 그
+      # 길이 실제로 도는지도 밤마다 함께 재진다.
+      - name: 옛 판을 받는다
+        if: steps.pick.outputs.tag != ''
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+        run: sh install.sh --version "$TAG" --dir "$RUNNER_TEMP/old"
+
+      - name: 견준다
+        if: steps.pick.outputs.tag != ''
+        env:
+          NEW: target/release/moai
+        run: OLD="$RUNNER_TEMP/old/moai" scripts/cross-version-smoke.sh

@@ -12452,6 +12452,24 @@ fn at_root(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
 }
 
+/// `scripts/cross-version-smoke.sh` 를 **실제로 돌린다**(moai-rli6). 밤과 태그에서만
+/// 도는 스크립트는 아무도 안 보는 사이 썩는다. 여기서는 옛 판 자리에 같은 바이너리를
+/// 세우니 재는 것은 판 차이가 아니라 **스크립트가 아직 서 있는가** 다 — 그리고 그 김에
+/// 한 줄을 옮기는 쓰기가 남의 줄과 모르는 필드를 그대로 두는지도 같이 잰다.
+#[cfg(unix)]
+#[test]
+fn the_cross_version_smoke_script_still_runs() {
+    let out = isolated("bash")
+        .arg(script("cross-version-smoke.sh"))
+        .env("OLD", BIN)
+        .env("NEW", BIN)
+        .output()
+        .expect("bash 를 실행하지 못했다 — 크로스 버전 시험에는 bash 가 있어야 한다");
+    assert!(out.status.success(), "스크립트가 떨어졌다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains("그대로다"), "무엇을 쟀는지 안 말한다\n{said}");
+}
+
 /// `docs/cli.md` 는 `--help` 에서 짓는다(moai-i3s8). 레퍼런스를 손으로 적으면
 /// 도움말과 갈라지는데, **갈라진 레퍼런스는 없는 것보다 나쁘다** — 읽는 사람이
 /// 그것을 믿고 친다. 그래서 글은 `--help` 한 곳에만 있고 그 파일은 옮겨 적은
