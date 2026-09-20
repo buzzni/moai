@@ -23,7 +23,7 @@
 //! 보이는 줄 수가 어긋났다(moai-lhbh).
 
 use crate::model::{Issue, Kind};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 /// 경로 한 마디.
 ///
@@ -136,11 +136,67 @@ pub struct Index {
     /// id → 그 줄을 계획에서 뺀 줄(`report::deferred_roots`). 상세가 물려받은
     /// 미룸을 말하는 데 쓴다 — 프레임마다 조상을 다시 타지 않게.
     deferred_root: BTreeMap<String, String>,
-    /// 자리 → 그 밑의 (끝난 일, 일) 수. **미리 센다**(moai-m7iy) — 목록은 묶음 줄마다 셈을 내는데
-    /// 그때 [`Index::progress`] 로 세면 줄마다 `homes` 전부를 훑어, 에픽 500개·이슈 1만 건에서 한
+    /// 자리 → 그 자리에 선 줄·그 밑에 걸린 줄·바로 밑의 바구니 마디([`Place`]). **미리 짓는다**
+    /// (moai-teka) — 목록 한 층을 짓는 [`Index::entries_sorted`] 가 `homes` 전부를 훑고, 트리로
+    /// 펼친 목록([`Index::entries_tree`])은 그것을 **열린 자리마다** 부른다. 그래서 한 프레임이
+    /// 열린 자리 수 × 이슈 수로 불었다 — 에픽 500·이슈 10,500 을 다 펼치면 목록 짓기가 3.3ms 에서
+    /// 218.6ms 였다(리뷰 moai-9m2d.qpt 4번). 색인을 두면 한 층은 제 자식 수만큼만 든다.
+    places: HashMap<Path, Place>,
+}
+
+// 목록 한 층을 지으며 **줄을 몇 개 들여다봤나**(moai-teka). 시험만 센다 — 릴리스에서는 아래
+// `scanned` 가 빈 함수라 자리도 값도 안 든다. 재는 것을 스레드마다 따로 두는 것은 시험이
+// 나란히 돌기 때문이다.
+#[cfg(test)]
+thread_local! {
+    static SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// 그 층에서 들여다본 줄 수를 센다. **펼친 목록이 제곱을 타는가는 시간이 아니라 이 수로 묻는다**
+/// (`an_open_tree_scans_only_what_it_draws`) — 시간으로 물으면 세션 예닐곱이 같이 도는 기계에서
+/// 흔들려, 붉어진 시험이 무엇을 말하는지 아무도 못 믿는다.
+#[cfg(test)]
+fn scanned(n: usize) {
+    SCANNED.with(|c| c.set(c.get() + n));
+}
+
+#[cfg(not(test))]
+fn scanned(_: usize) {}
+
+/// 지금까지 센 것을 거두고 0 으로 되돌린다 — 시험이 제 판만 재게.
+#[cfg(test)]
+fn take_scanned() -> usize {
+    SCANNED.with(|c| c.replace(0))
+}
+
+/// 한 자리에 매인 줄들([`Index::places`]).
+#[derive(Default)]
+struct Place {
+    /// **바로 이 자리에** 선 줄 — `homes` 가 이 자리와 똑같은 것. 목록 한 층이 이것이다.
+    here: Vec<usize>,
+    /// 이 자리에 선 줄과 **그 밑에 걸린 줄 전부** — `homes` 가 이 자리로 시작하는 것
+    /// ([`Index::descendants`]). `here` 가 통째로 여기 든다: `starts_with` 는 같은 자리도 참이다.
+    ///
+    /// **그 폴더 줄 자신은 안 든다.** 폴더 줄은 제 부모 자리에 서므로 `[Epic(e)]` 의 `under` 에
+    /// 에픽 `e` 는 없다 — 묶음 줄까지 세는 쪽이 그것을 따로 더하는 까닭이다
+    /// ([`Index::under_group`] 의 `once(at)`).
+    under: Vec<usize>,
+    /// 바로 밑에 선 **바구니 마디**(`(마일스톤 없음)`·`(길 잃음)`) — 제 줄이 없어 사는 것이 있을
+    /// 때만 생기는 폴더다. 많아야 둘이라 `Vec` 으로 든다.
+    buckets: Vec<Seg>,
+    /// 그 밑의 (끝난 일, 일) 수. **미리 센다**(moai-m7iy) — 목록은 묶음 줄마다 셈을 내는데 그때
+    /// [`Index::progress`] 로 세면 줄마다 `homes` 전부를 훑어, 에픽 500개·이슈 1만 건에서 한
     /// 프레임의 셈이 150ms 였다. 자는 `progress` 와 같다 — 둘이 갈리면 목록 줄과 상세 롤업이 같은
     /// 에픽을 두 진척으로 댄다(`tallies_agree_with_progress_at_every_place`).
-    tallies: HashMap<Path, (usize, usize)>,
+    ///
+    /// **같은 자리 표에 함께 든다**(moai-teka) — 자리의 진실을 한 군데로 두려는 것이다. 표가
+    /// 둘이면 같은 자리에 대해 둘이 갈릴 수 있고, 무엇이 참인지를 부르는 쪽이 고르게 된다.
+    ///
+    /// **값이 까닭은 아니다.** 둘째 표(`HashMap<Path, (usize, usize)>`)를 같은 걸음에 더해 재
+    /// 봤더니 이슈 1만 건 적재가 흔들림 안에서 그대로였다 — 한 걸음이 ~100ms 이고 판마다 ±6ms
+    /// 흔들린다(`a_frame_costs`, 2026-09-20 리뷰). 값으로 이 결정을 되돌리려는 다음 사람은 그
+    /// 수부터 다시 재면 된다.
+    tally: (usize, usize),
 }
 
 impl Index {
@@ -191,25 +247,32 @@ impl Index {
         }
         let by_id = by_id.into_iter().map(|(id, at)| (id.to_string(), at)).collect();
         let deferred_root = soil.roots.iter().map(|(id, root)| (id.to_string(), root.to_string())).collect();
-        // 줄마다 제 자리의 **모든 앞머리**에 센다 — 자리 `p` 밑이란 `homes` 가 `p` 로 시작하는 것이다
-        // (`descendants`). 깊이만큼만 돌므로 이슈 수에 비례한다.
-        let mut tallies: HashMap<Path, (usize, usize)> = HashMap::new();
+        // 자리마다 제 줄을 모은다(moai-teka). 줄마다 제 자리의 **모든 앞머리**에 제 첨자를 적고,
+        // 제 자리에는 `here` 로도 적는다. 바구니 마디는 그 앞머리의 **다음 마디**라 여기서 함께
+        // 본다. 깊이만큼만 돌므로 이슈 수에 비례하고, 차례는 첨자 차례 그대로다 — 훑어 모으던
+        // 때와 같은 줄이 같은 차례로 나와야 그 위의 정렬이 안 흔들린다.
+        let mut places: HashMap<Path, Place> = HashMap::new();
         for (at, h) in homes.iter().enumerate() {
-            if !crate::report::is_work(&issues[at]) {
-                continue;
-            }
-            let done = usize::from(issues[at].status.is_done());
+            // 일만 센다 — 묶음은 일이 아니다(`report::is_work`, moai-lhbh 가 정한 자).
+            let work = crate::report::is_work(&issues[at]);
+            let done = usize::from(work && issues[at].status.is_done());
             for n in 0..=h.len() {
-                // 이미 선 자리는 빌린 채 찾는다 — `entry` 는 찾기 전에 경로를 복사한다.
-                match tallies.get_mut(&h[..n]) {
-                    Some(t) => *t = (t.0 + done, t.1 + 1),
-                    None => {
-                        tallies.insert(h[..n].to_vec(), (done, 1));
+                let place = places.entry(h[..n].to_vec()).or_default();
+                place.under.push(at);
+                if work {
+                    place.tally = (place.tally.0 + done, place.tally.1 + 1);
+                }
+                match h.get(n) {
+                    None => place.here.push(at),
+                    Some(seg @ (Seg::Milestone(None) | Seg::Lost)) if !place.buckets.contains(seg) => {
+                        place.buckets.push(seg.clone());
                     }
+                    Some(_) => {}
                 }
             }
         }
-        Index { homes, has_kids, by_id, deferred_root, tallies }
+
+        Index { homes, has_kids, by_id, deferred_root, places }
     }
 
     /// 그 줄이 **실제로 선** 마일스톤. 제 줄의 `milestone` 이 아니다 — 에픽이
@@ -323,47 +386,26 @@ impl Index {
     ) -> Vec<Entry> {
         let mut out: Vec<Entry> = Vec::new();
         let mut buckets: Vec<Seg> = Vec::new();
-        // 걸린 것이 밑에 사는 마디 — **처음 물을 때 한 번에 모은다**(moai-2kyl 단계 리뷰). 이 자리보다 깊이
-        // 사는 줄의 첫 마디가 곧 그 줄을 품은 폴더의 마디다. 안 걸린 폴더마다 이슈 전부를 다시 훑으면, 보기가
-        // 끝난 에픽을 숨기는 동안(moai-fmv5) 목록 한 번에 끝난 폴더 수 × 이슈 수가 들고 목록은 프레임마다
-        // 센다. 다 걸리는 목록은 묻지 않으니 모으지도 않는다.
-        let mut lit: Option<HashSet<&Seg>> = None;
+        // **제 자리의 줄만 본다**(moai-teka) — 자리마다의 색인([`Index::places`])이 적재 때 한 번
+        // 지은 것이다. `homes` 전부를 훑던 때는 트리로 펼친 목록이 이 함수를 열린 자리마다 불러
+        // 한 프레임이 열린 자리 수 × 이슈 수로 불었다. 없는 자리는 줄도 바구니도 없다.
+        let Some(place) = self.places.get(path) else { return out };
+        scanned(place.here.len());
 
-        for (at, home) in self.homes.iter().enumerate() {
-            // 바로 이 자리에 사는 것 — 저 자신이 걸렸거나 **밑에 걸린 것이 있는 폴더**. **폴더만 밑을
-            // 본다** — 잎의 마디 밑에 사는 것은 없어야 하지만, 같은 id 의 가려진 줄은 폴더인 쌍둥이와
-            // 마디가 같아 그 멤버를 제 자손으로 센다.
-            if home == path {
-                let kept = keep(at)
-                    || (self.is_dir(issues, at)
-                        && lit
-                            .get_or_insert_with(|| {
-                                self.homes
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(d, h)| h.len() > path.len() && h.starts_with(path) && keep(*d))
-                                    .map(|(_, h)| &h[path.len()])
-                                    .collect()
-                            })
-                            .contains(&self.seg_of(issues, at)));
-                if !kept {
-                    continue;
-                }
-                out.push(if self.is_dir(issues, at) {
-                    Entry::Dir { seg: self.seg_of(issues, at), at: Some(at) }
-                } else {
-                    Entry::Leaf { at }
-                });
+        for &at in &place.here {
+            // 저 자신이 걸렸거나 **밑에 걸린 것이 있는 폴더**. **폴더만 밑을 본다** — 잎의 마디 밑에
+            // 사는 것은 없어야 하지만, 같은 id 의 가려진 줄은 폴더인 쌍둥이와 마디가 같아 그 멤버를
+            // 제 자손으로 센다. 밑을 묻는 값도 그 폴더의 자손만큼이다(`lit_under`).
+            let dir = self.is_dir(issues, at);
+            if !(keep(at) || (dir && self.lit_under(path, &self.seg_of(issues, at), keep))) {
                 continue;
             }
-            // 이 자리 **바로 밑의 바구니**에 사는 것 — 바구니는 제 줄이 없으므로
-            // 사는 것이 있을 때만 생긴다.
-            if home.starts_with(path)
-                && let Some(seg) = home.get(path.len())
-                && matches!(seg, Seg::Milestone(None) | Seg::Lost)
-                && keep(at)
-                && !buckets.contains(seg)
-            {
+            out.push(if dir { Entry::Dir { seg: self.seg_of(issues, at), at: Some(at) } } else { Entry::Leaf { at } });
+        }
+        // 이 자리 **바로 밑의 바구니** — 바구니는 제 줄이 없으므로 사는 것이 있을 때만 생긴다.
+        // 어느 마디가 서는가는 적재 때 이미 알고, 걸린 것이 있는가만 여기서 묻는다.
+        for seg in &place.buckets {
+            if self.lit_under(path, seg, keep) {
                 buckets.push(seg.clone());
             }
         }
@@ -380,6 +422,26 @@ impl Index {
         buckets.sort_by_key(|s| matches!(s, Seg::Lost));
         out.extend(buckets.into_iter().map(|seg| Entry::Dir { seg, at: None }));
         out
+    }
+
+    /// `path` 밑의 `seg` 폴더 안에 **걸린 것이 하나라도 있는가**(moai-teka). 보기가 끝난 에픽을
+    /// 숨기는 동안(moai-fmv5)에도 그 밑에 걸린 줄이 있으면 폴더는 서야 하고, 바구니는 사는 것이
+    /// 걸렸을 때만 선다 — 두 물음이 같은 자다.
+    ///
+    /// **그 폴더의 자손만 본다.** 한때는 이 자리보다 깊이 사는 줄의 첫 마디를 통째로 모았는데
+    /// (moai-2kyl 단계 리뷰), 그 한 번이 `homes` 전부를 훑어 펼친 목록에서 층마다 다시 들었다.
+    fn lit_under(&self, path: &Path, seg: &Seg, keep: &dyn Fn(usize) -> bool) -> bool {
+        let mut under = path.clone();
+        under.push(seg.clone());
+        let Some(place) = self.places.get(&under) else { return false };
+        // 세는 것은 **실제로 들여다본 줄**이다 — 하나라도 걸리면 거기서 멈춘다.
+        let mut seen = 0;
+        let lit = place.under.iter().any(|&at| {
+            seen += 1;
+            keep(at)
+        });
+        scanned(seen);
+        lit
     }
 
     /// 펼친 묶음의 멤버까지 한 목록으로 — 목록에서 트리로 보는 길(moai-7qot).
@@ -437,13 +499,10 @@ impl Index {
     /// `report::milestones` 도 에픽을 이기게 하므로 둘이 같은 집합을 센다.
     pub fn descendants(&self, path: &Path) -> Vec<usize> {
         // **직속 자식의 home 은 그 경로와 같다.** `len() >` 로 거르면 바로 밑의
-        // 것이 통째로 빠져, 멤버가 셋인 에픽이 "자식 없음" 이라고 나온다.
-        self.homes
-            .iter()
-            .enumerate()
-            .filter(|(_, h)| h.starts_with(path))
-            .map(|(at, _)| at)
-            .collect()
+        // 것이 통째로 빠져, 멤버가 셋인 에픽이 "자식 없음" 이라고 나온다 — 색인의
+        // `under` 가 그래서 **그 자리에 선 줄**까지 든다([`Place::under`]). 묶음 줄
+        // 자신은 제 부모 자리에 서므로 여기 없다.
+        self.places.get(path).map(|p| p.under.clone()).unwrap_or_default()
     }
 
     /// **묶음 하나를 읽을 때 적는 줄** — 묶음(에픽·마일스톤) 줄 자신과 **그 밑에 그려진 것 전부**
@@ -483,7 +542,7 @@ impl Index {
     /// 그 자리 밑의 (끝난 일, 일) 수 — [`Index::progress`] 의 `done`·`work.len()` 과 같은 값을 적재 때
     /// 센 것에서 읽는다. 셀 일이 없으면 `(0, 0)` 이다.
     pub fn tally(&self, path: &Path) -> (usize, usize) {
-        self.tallies.get(path).copied().unwrap_or_default()
+        self.places.get(path).map(|p| p.tally).unwrap_or_default()
     }
 
     /// 화면에 낼 이름. 바구니는 제 줄이 없으므로 여기서 이름을 얻는다.
@@ -624,6 +683,48 @@ mod tests {
         let mut i = make(id, Kind::Issue);
         i.epic = Some(epic.into());
         i
+    }
+
+    /// **펼친 목록 한 판은 그린 줄 수만큼만 훑는다**(moai-teka). 한 층을 짓는 [`Index::entries_sorted`]
+    /// 가 `homes` 전부를 훑던 때는, 트리가 그것을 **열린 자리마다** 불러 한 판이 열린 자리 수 ×
+    /// 이슈 수로 불었다 — 에픽 500·이슈 10,500 을 다 펼치면 목록 짓기가 3.3ms 에서 218.6ms 였고
+    /// (리뷰 moai-9m2d.qpt 4번), `/` 검색은 맞힌 자리를 다 열어 키 하나가 447ms 였다.
+    ///
+    /// **시간이 아니라 훑은 줄 수로 묻는다**([`scanned`]) — 시간으로 물으면 세션 예닐곱이 같이
+    /// 도는 기계에서 흔들려, 붉어진 시험이 무엇을 말하는지 아무도 못 믿는다. 이 잣대는 기계를
+    /// 안 탄다: 제곱으로 돌아가면 훑은 수가 곧바로 줄 수의 몇 배로 뛴다.
+    #[test]
+    fn an_open_tree_scans_only_what_it_draws() {
+        let epics = 20;
+        let mut issues = Vec::new();
+        for e in 0..epics {
+            let eid = format!("argos-e{e:03}");
+            issues.push(make(&eid, Kind::Epic));
+            for m in 0..20 {
+                issues.push(epic_of(&format!("argos-m{e:03}{m:02}"), &eid));
+            }
+        }
+        let index = Index::of(&issues);
+        let order = |a: usize, b: usize| crate::query::display_order(&issues[a], &issues[b]);
+
+        take_scanned();
+        let rows = index.entries_tree(&issues, &Path::new(), &|_| true, &order, &|_| true);
+        let scans = take_scanned();
+        assert_eq!(rows.len(), issues.len(), "다 펼쳤는데 줄이 빠졌다");
+        assert!(
+            scans <= rows.len() * 2,
+            "{} 줄을 그리며 {scans} 줄을 훑었다 — 열린 자리마다 목록 전부를 다시 훑는다",
+            rows.len()
+        );
+
+        // **거름망을 걸어도 같다** — 안 걸린 폴더는 제 밑만 들여다본다(`lit_under`). 마지막 에픽의
+        // 멤버 하나만 남기면, 훑은 수는 그 폴더들의 자손 수(≈ 이슈 수)를 넘지 않는다.
+        let only = issues.len() - 1;
+        take_scanned();
+        let rows = index.entries_tree(&issues, &Path::new(), &|at| at == only, &order, &|_| true);
+        let scans = take_scanned();
+        assert_eq!(rows.len(), 2, "걸린 줄과 그 폴더만 서야 한다 — {rows:?}");
+        assert!(scans <= issues.len() * 2, "거름망 한 판이 {scans} 줄을 훑었다 (이슈 {})", issues.len());
     }
 
     /// **펼친 목록은 들어가서 본 목록을 층마다 이어 붙인 것이다**(moai-7qot). 자를 하나로 두는
