@@ -2070,7 +2070,7 @@ mod tests {
         // 상한 자체에서 넘는 글을 짓는다 — 손으로 적은 수는 상한이 그것을 넘어서면 `unwrap_err` 가
         // 엉뚱한 패닉으로 터진다. `가` 는 3바이트다.
         let big = "가".repeat(crate::model::MAX_TEXT_BYTES / 3 + 1);
-        let refused = crate::model::check_text_size("t-r", "노트", &big).unwrap_err().to_string();
+        let refused = crate::model::check_text_size(|| "t-r".into(), "노트", &big).unwrap_err().to_string();
         let said = REVIEW_OVER_LIMIT
             .replace("<크기>", &big.len().div_ceil(1024).to_string())
             .replace('\n', "\n      ");
