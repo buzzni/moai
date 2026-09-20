@@ -102,7 +102,10 @@ pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
 /// - 같은 색이면 파일을 안 건드린다(`Doc::set_hue`)
 /// - 손으로 적은 표 모양 `color`(`color.x = 1`)는 덮지 않고 멈춘다 — 그 줄을 사람이 고친다
 pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
-    let hue = user_config::hue_choice(word).map_err(|e| Fail::coded(e, code::BAD_INPUT))?;
+    // 글은 읽기의 알림과 한 자리에서 짓는다([`crate::view::not_a_hue`]) — 재는 자가 하나여도
+    // 글이 둘이면 같은 오타에 화면과 거절문이 다른 말을 한다.
+    let hue = user_config::hue_choice(word)
+        .map_err(|e| Fail::coded(crate::view::not_a_hue(ctx.lang(), &e), code::BAD_INPUT))?;
     let config = writable_config()?;
     let spellings = user_config::spellings(input, &cwd()?);
     let not_registered = || {

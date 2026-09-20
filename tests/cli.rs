@@ -1023,6 +1023,12 @@ fn the_overview_body_speaks_the_picked_language() {
     // 기계마다 다르고, 앞머리는 나머지 둘과 같은 자로 온다.
     let gone = s.path().join("moved-away");
     let cfg = registry(&s, &[&one, &dir_in(&s, "not-yet-init"), &gone]);
+    // **설정 항목의 탈도 몸통이다**(moai-aiid). 성한 줄만 등록하면 `problems` 가 한 줄도 안 서고,
+    // 그러면 이 판은 그 자리에 박힌 한국어를 못 본다 — 실제로 그랬다. 경로는 ASCII 로 둔다:
+    // 적힌 값은 그대로 되울리므로 한글 경로를 두면 이 자가 제 글과 남의 자료를 못 가른다.
+    let mut src = std::fs::read_to_string(&cfg).unwrap();
+    src.push_str("\n[[project]]\npath = \"not/absolute\"\n\n[[project]]\npath = \"/nowhere\"\ncolor = \"red\"\n");
+    std::fs::write(&cfg, src).unwrap();
     let screen = |args: &[&str], lang: &str| {
         let got = isolated(BIN)
             .args(args)
@@ -1043,12 +1049,16 @@ fn the_overview_body_speaks_the_picked_language() {
         let korean = screen(args, "ko");
         assert!(korean.contains("건 더"), "한국어 화면에 '건 더' 줄이 안 섰다\n{korean}");
         assert!(korean.contains("init 전"), "한국어 화면에서 init 전 줄이 사라졌다\n{korean}");
+        assert!(korean.contains("프로젝트 색이 아니다"), "한국어 화면에 설정 항목의 탈이 안 섰다\n{korean}");
 
         let english = screen(args, "en");
         assert!(english.contains("more"), "영어 화면에 'N more' 줄이 안 섰다\n{english}");
         // 열지 못한 두 프로젝트의 줄이 실제로 섰는가 — 안 서면 위의 훑기가 그 자리를 안 지난다.
         assert!(english.contains("before init"), "init 전 프로젝트의 줄이 안 섰다\n{english}");
         assert!(english.contains("directory is gone"), "사라진 프로젝트의 줄이 안 섰다\n{english}");
+        // 설정 항목의 탈 둘 — 색 오타와 상대경로. 둘이 서야 그 자리를 이 훑기가 지난다.
+        assert!(english.contains("not a project colour"), "색 오타 줄이 안 섰다\n{english}");
+        assert!(english.contains("absolute path"), "상대경로 줄이 안 섰다\n{english}");
         let left: Vec<&str> = english.lines().filter(|l| l.chars().any(|c| ('가'..='힣').contains(&c))).collect();
         assert!(left.is_empty(), "영어로 고른 {args:?} 화면에 한국어가 남았다 — {left:#?}");
     }
