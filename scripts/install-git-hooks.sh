@@ -44,13 +44,20 @@ uninstall_one() {
   chmod 755 "$path"
   # 블록을 걷고 나니 `#!` 한 줄뿐이면 그 파일은 우리가 만든 것이다. 앞서 있던
   # 훅을 제자리로 돌려놓는다.
-  if [ "$(grep -cv '^#!' "$path" || true)" = 0 ]; then
+  if ! grep -qv '^#!' "$path"; then
     rm -f -- "$path"
     if [ -f "$path.moai-before" ]; then
       mv -- "$path.moai-before" "$path"
       printf 'install-git-hooks: %s — 앞서 있던 훅을 제자리로 돌렸다\n' "$name"
       return 0
     fi
+  elif [ -e "$path.moai-before" ]; then
+    # **말없이 버려두지 않는다.** 블록 밖에 남의 줄이 있으면(심은 뒤 lefthook 같은
+    # 것이 같은 파일에 붙은 자리다) 어느 쪽이 먼저 돌아야 하는지를 도구가 못 정한다.
+    # 그렇다고 입을 다물면 앞서 있던 훅이 영영 안 도는 것을 아무도 모른다.
+    printf 'install-git-hooks: %s — 블록은 걷었지만 %s.moai-before 는 그대로 둔다.\n' "$name" "$name" >&2
+    printf '  %s 에 남의 줄이 있어 어느 것이 먼저인지 도구가 못 정한다 — 손으로 합치거나 되돌린다\n' "$path" >&2
+    return 0
   fi
   printf 'install-git-hooks: %s — 블록을 걷었다\n' "$name"
 }
@@ -77,14 +84,20 @@ install_one() {
   if [ -f "$path" ]; then
     # 남의 훅이다. 옆으로 옮겨 두면 shim 이 그것을 먼저 부른다.
     [ ! -e "$path.moai-before" ] || die "$path.moai-before 가 이미 있다 — 먼저 치우고 다시 부른다"
+    # **실행 비트를 손대지 않는다.** `chmod -x` 는 훅을 끄는 표준 손잡이다 — 여기서
+    # 755 를 씌우면 사람이 꺼 둔 훅이 심는 순간 되살아나고, shim 이 그것을 불러 푸시를
+    # 막는다. 안전망을 까는 일이 남의 게이트를 다시 켜는 일이 되면 안 된다.
     mv -- "$path" "$path.moai-before"
-    chmod 755 "$path.moai-before"
     printf 'install-git-hooks: %s — 앞서 있던 훅을 %s.moai-before 로 옮기고 이어 부른다\n' "$name" "$name"
   fi
 
   cp -- "$src" "$path"
   chmod 755 "$path"
-  printf 'install-git-hooks: %s — 심었다\n' "$name"
+  # **어디에 심었는지 댄다.** 훅 자리는 클론이 함께 쓴다 — 딸린 워크트리에서 쳐도
+  # `git rev-parse --git-path hooks` 는 주 체크아웃의 자리를 낸다. 이 저장소는 일을
+  # 워크트리에서 하라고 적혀 있어 첫 판이 거기서 돌기 쉬운데, 그 한 번이 모든
+  # 체크아웃의 훅을 정한다. 말을 안 하면 그것을 아무도 모른다.
+  printf 'install-git-hooks: %s — %s 에 심었다 (이 클론의 모든 워크트리가 함께 쓴다)\n' "$name" "$path"
 }
 
 what=install

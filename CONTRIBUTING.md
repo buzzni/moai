@@ -31,8 +31,8 @@ cargo clippy --all-targets -- -D warnings
 
 **Do not add `--release` to tests.** `[profile.release]` sets `lto = true`, so
 every one-file change re-runs the LTO link and a rebuild goes from seconds to
-minutes. CI runs the same three commands, and a fourth job builds the release
-binary to check it against the 15 MB budget.
+minutes. CI has two jobs: one runs clippy and the tests on the dev profile, the
+other builds the release binary and checks it against the 15 MB budget.
 
 There are no dev-dependencies, and that is deliberate: `tests/cli.rs` runs the
 real binary through `CARGO_BIN_EXE_moai`. A test harness that drags in
@@ -61,7 +61,10 @@ So the words live in one place and that file is a copy of them.
 
 ## What a change looks like
 
-Work is tracked in `.moai/issues.jsonl`, in this repository, with this tool:
+Work is tracked in `.moai/issues.jsonl`, in this repository, with this tool.
+These commands write to it, so they are for maintainers with push access — from
+a fork, describe the issue in the pull request instead and a maintainer will
+file it:
 
 ```sh
 moai status                  # start here

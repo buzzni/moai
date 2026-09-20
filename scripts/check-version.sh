@@ -72,15 +72,24 @@ have=$(manifest_version "$manifest")
 [ -n "$have" ] || die "Cargo.toml 의 [package] 에서 version 을 못 읽었다"
 
 if [ "$#" -gt 0 ]; then
+  case $1 in
   # 릴리스 워크플로가 산출물 이름을 여기서 받는다 — 판을 읽는 자를 워크플로에
   # 따로 적으면 `[package]` 표를 가리는 줄이 두 군데가 되고, 한쪽만 고쳐도 아무도
   # 모른다.
-  if [ "$1" = --print ]; then
+  --print)
     printf '%s\n' "$have"
     exit
-  fi
-  compare "$1"
-  exit
+    ;;
+  refs/tags/* | v[0-9]* | [0-9]*)
+    compare "$1"
+    exit
+    ;;
+  esac
+  # **인자를 무조건 태그로 읽지 않는다.** git 은 pre-push 훅을 `<remote> <url>` 로
+  # 부르고 밀 줄은 stdin 으로 준다 — 위의 `ln -s` 로 이 파일을 바로 훅에 걸면 `$1` 이
+  # `origin` 이라, 태그로 재면 태그 없는 푸시까지 전부 막힌다. 꼴이 태그가 아니면
+  # 훅으로 불린 것으로 보고 stdin 으로 내려간다.
+  [ ! -t 0 ] || die "모르는 인자다 — $1. 태그는 v0.1.0 · refs/tags/v0.1.0 · 0.1.0 꼴로 준다"
 fi
 
 # pre-push 는 줄마다 `<local ref> <local sha> <remote ref> <remote sha>` 를 준다.

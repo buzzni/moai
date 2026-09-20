@@ -33,7 +33,10 @@ new=$(abs "$new")
 
 export MOAI_ACTOR=${MOAI_ACTOR:-'크로스 버전 (smoke@example.com)'}
 export NO_COLOR=1
-unset MOAI_HERE
+# **여기에 쓴다.** `MOAI_HERE` 를 끄면 워크트리 옮김이 살아 있어, `TMPDIR` 이 어쩌다
+# 딸린 워크트리 안을 가리키면 이 시험이 주 체크아웃의 진짜 `.moai/issues.jsonl` 에
+# 이슈를 만들고 모르는 필드를 심는다. 켜 두면 쓰는 자리가 밑의 `$work` 하나로 못 박힌다.
+export MOAI_HERE=1
 
 work=$(mktemp -d) || {
   printf 'cross-version-smoke: 임시 디렉터리를 못 만들었다\n' >&2
@@ -54,6 +57,14 @@ ids=$(printf '%s' "$made" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
 epic=$(printf '%s\n' "$ids" | sed -n 1p)
 one=$(printf '%s\n' "$ids" | sed -n 2p)
 two=$(printf '%s\n' "$ids" | sed -n 3p)
+# **셋을 다 못 받았으면 여기서 말한다.** 옛 판의 출력 모양은 이쪽이 정하는 것이 아니다 —
+# 빈 id 로 밀고 나가면 밤 시험이 `note: 모르는 id` 로 떨어져, 무엇이 어긋났는지가 아니라
+# 이 스크립트가 어긋난 것처럼 보인다.
+[ -n "$epic" ] && [ -n "$one" ] && [ -n "$two" ] || {
+  printf 'cross-version-smoke: 옛 판의 `add --from - --json` 에서 id 셋을 못 읽었다\n' >&2
+  printf '%s\n' "$made" >&2
+  exit 2
+}
 "$old" note "$one" '옛 판이 남긴 메모' >/dev/null
 "$old" defer "$two" -m '옛 판이 미뤘다' >/dev/null
 

@@ -21,7 +21,11 @@ moai_with_timeout() {
   if command -v timeout >/dev/null 2>&1 && timeout --version 2>/dev/null | grep -q GNU; then
     timeout "$MOAI_HOOK_TIMEOUT" "$@"
   elif command -v perl >/dev/null 2>&1; then
-    perl -e 'alarm shift; exec @ARGV' "$MOAI_HOOK_TIMEOUT" "$@"
+    # **`exec {$ARGV[0]} @ARGV` 로 부른다.** 맨 `exec @ARGV` 는 목록이 하나일 때 그것을
+    # 띄어쓰기로 갈라 넘겨, 빈칸이 든 경로(`/Users/me/My Repos/moai`)에서 엉뚱한 것을
+    # 부른다 — 그리고 exec 이 실패한 perl 은 그냥 0 으로 끝나, 재라고 세운 게이트가
+    # 조용히 안 돈다. 실패는 127 로 말하고, 그것을 어떻게 볼지는 밑에서 정한다.
+    perl -e 'alarm shift; exec {$ARGV[0]} @ARGV; exit 127' "$MOAI_HOOK_TIMEOUT" "$@"
   else
     printf 'moai: 제한 시간을 걸 도구가 없다 — 그냥 돌린다\n' >&2
     "$@"
@@ -33,6 +37,10 @@ moai_with_timeout() {
 moai_fed=$(mktemp 2>/dev/null) || moai_fed=
 if [ -n "$moai_fed" ]; then
   cat >"$moai_fed"
+else
+  # **말은 하고 지나간다.** 줄을 못 받아 두면 앞의 훅도 판 검사도 빈 stdin 을 읽어
+  # 아무것도 안 재고 통과한다 — 막지는 않되, 그것이 통과인지 안 잰 것인지는 댄다.
+  printf 'moai: 밀 줄을 받아 둘 임시 파일을 못 만들었다 — 검사 없이 그냥 보낸다\n' >&2
 fi
 moai_feed() {
   if [ -n "$moai_fed" ]; then
@@ -62,10 +70,22 @@ fi
 moai_feed moai_with_timeout "$moai_check"
 moai_said=$?
 rm -f "$moai_fed"
-if [ "$moai_said" = 124 ] || [ "$moai_said" = 142 ]; then
+case $moai_said in
+0) exit 0 ;;
+# **1 만 막는다.** 그것이 `compare` 가 "태그와 Cargo.toml 이 어긋난다" 로 내는 값이고,
+# 이 훅이 일부러 세운 게이트다(moai-jy55).
+1) exit 1 ;;
+124 | 142)
   # GNU timeout 은 124, perl 의 alarm 은 142(SIGALRM)다.
   printf 'moai: 판 검사가 %s초를 넘겼다 — 그냥 보낸다. 릴리스 워크플로가 다시 잰다\n' "$MOAI_HOOK_TIMEOUT" >&2
   exit 0
-fi
-exit "$moai_said"
+  ;;
+*)
+  # 나머지는 전부 도구의 사정이다 — `die` 의 2(Cargo.toml 을 못 읽음), exec 실패의
+  # 126·127, timeout 이 인자를 못 읽은 125. 그것으로 사람의 푸시를 막으면 이 파일의
+  # 머리에 적힌 약속이 깨진다. 넘겨 보낸 어긋남은 릴리스 워크플로가 다시 잰다.
+  printf 'moai: 판 검사가 %s 로 끝났다 — 그냥 보낸다. 릴리스 워크플로가 다시 잰다\n' "$moai_said" >&2
+  exit 0
+  ;;
+esac
 # <<< moai:pre-push <<<

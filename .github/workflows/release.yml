@@ -27,6 +27,8 @@ jobs:
   guard:
     name: 태그와 Cargo.toml
     runs-on: ubuntu-latest
+    # 빌드 행렬이 이 뒤에 선다 — 여기가 매달리면 행렬이 기본 6시간을 기다린다.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -41,7 +43,11 @@ jobs:
           if [ "$REF_TYPE" = tag ]; then
             scripts/check-version.sh "$REF_NAME"
           else
-            printf '태그가 아닌 판이다 — Cargo.toml 의 %s 로 굴러간다\n' "$(scripts/check-version.sh --print)"
+            # **대입으로 받는다.** `printf "$(…)"` 안의 명령 치환이 지면 `set -e` 가
+            # 그것을 못 봐, 판을 못 읽은 판이 빈칸을 찍고 초록으로 지나간다 — 일찍
+            # 멈추라고 둔 잡이 안 멈추는 자리다.
+            version=$(scripts/check-version.sh --print)
+            printf '태그가 아닌 판이다 — Cargo.toml 의 %s 로 굴러간다\n' "$version"
           fi
 
   build:
@@ -121,6 +127,7 @@ jobs:
     needs: build
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       # 릴리스를 만드는 잡 하나만 쓰기를 든다.
       contents: write
@@ -150,37 +157,39 @@ jobs:
       # 릴리스 노트는 CHANGELOG 의 이번 판 절을 그대로 쓴다. 그 절이 없으면 커밋
       # 목록으로 대신한다 — 노트가 없다고 릴리스를 멈추지는 않는다.
       - name: 노트를 고른다
-        id: notes
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           version=${REF_NAME#v}
-          awk -v want="$version" '
-            $0 ~ "^## \\[" want "\\]" { on = 1; next }
-            on && /^## \[/ { exit }
+          # **머리줄을 정규식으로 안 짠다.** 판에 든 `.` 하나가 아무 글자나 맞히는
+          # 자리가 되고(`0.1.0` 이 `## [0x1y0]` 을 집는다), 켜는 규칙이 끝내는 규칙보다
+          # 앞이라 한 번 어긋나면 두 절이 이어 붙는다. install.sh 가 SHA256SUMS 의
+          # 파일 이름을 낱말째 견주는 것과 같은 자리다.
+          awk -v head="## [$version]" '
+            index($0, "## [") == 1 { on = (index($0, head) == 1); next }
             on { print }
           ' CHANGELOG.md >notes.md
-          if [ -s notes.md ]; then
-            printf 'from=changelog\n' >>"$GITHUB_OUTPUT"
-          else
-            printf 'from=commits\n' >>"$GITHUB_OUTPUT"
-          fi
 
       - name: 올린다
         env:
           GH_TOKEN: ${{ github.token }}
           REF_NAME: ${{ github.ref_name }}
-          FROM: ${{ steps.notes.outputs.from }}
         run: |
           set -euo pipefail
           args=(--verify-tag --title "$REF_NAME")
           case $REF_NAME in
           *-*) args+=(--prerelease) ;;
           esac
-          if [ "$FROM" = changelog ]; then
+          # **빈 절은 노트가 아니다.** `[ -s ]` 는 개행 한 줄에도 참이라, 아무것도 안
+          # 쌓인 판을 빈 몸으로 내보낸다 — 커밋 목록으로 대신하라고 둔 갈래가 그때
+          # 안 선다. 글자가 있을 때만 그 파일을 쓴다. 고르는 자리를 올리는 자리와
+          # 한 스텝에 둔 것은 `notes.md` 가 이미 답이기 때문이다.
+          if grep -q '[^[:space:]]' notes.md; then
+            printf '노트: CHANGELOG 의 %s 절\n' "${REF_NAME#v}"
             args+=(--notes-file notes.md)
           else
+            printf '노트: 이번 판 절이 비었다 — 커밋 목록으로 대신한다\n'
             args+=(--generate-notes)
           fi
           gh release create "$REF_NAME" "${args[@]}" dist/*

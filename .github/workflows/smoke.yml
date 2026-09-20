@@ -36,10 +36,13 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          # **`gh` 가 진 것과 "아직 릴리스가 없다" 를 가른다.** 한 파이프에 `|| true` 를
+          # 걸면 토큰이 만료되거나 API 가 죽은 밤도 "없다" 로 읽혀, 아무것도 안 잰 판이
+          # 초록으로 선다 — 그것을 지켜보는 사람은 없다. 목록은 따로 받아 진 것은 진 것으로 둔다.
+          listed=$(gh release list --limit 5 --json tagName --jq '.[].tagName')
           # 지금 미는 태그 자신은 뺀다 — 릴리스 워크플로가 그것을 아직 올리는 중일 수 있다.
-          tag=$(gh release list --limit 5 --json tagName --jq '.[].tagName' \
-            | grep -vx -- "$REF_NAME" \
-            | head -n 1 || true)
+          # `-F` 로 낱말째 뺀다: 태그의 `.` 을 정규식으로 읽으면 옆 판을 대신 뺀다.
+          tag=$(printf '%s\n' "$listed" | grep -vxF -- "$REF_NAME" | head -n 1 || true)
           if [ -z "$tag" ]; then
             echo "견줄 릴리스가 아직 없다 — 첫 릴리스 뒤부터 잰다" >>"$GITHUB_STEP_SUMMARY"
             printf 'tag=\n' >>"$GITHUB_OUTPUT"
@@ -56,8 +59,11 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-release-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-release-${{ runner.os }}-
+          # **ci.yml 의 size-budget 과 열쇠를 나눠 쓴다.** 같은 열쇠에 같은 `target/` 을
+          # 담으면 둘 중 먼저 끝난 쪽만 올라가고 진 쪽은 수백 MB 를 싸서 올렸다가 거절당한다.
+          # 이긴 판은 그대로 굳어, 밤마다 그 낡은 `target/release` 를 풀고 LTO 를 다시 건다.
+          key: cargo-smoke-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-smoke-${{ runner.os }}-
 
       - name: build --release
         if: steps.pick.outputs.tag != ''
@@ -69,6 +75,10 @@ jobs:
         if: steps.pick.outputs.tag != ''
         env:
           TAG: ${{ steps.pick.outputs.tag }}
+          # 태그는 **이 저장소**의 릴리스 목록에서 골랐다 — 받는 자리도 같은 저장소여야
+          # 한다. install.sh 의 기본은 `buzzni/moai` 라, 포크에서 돌면 그쪽 태그 이름으로
+          # 본가의 파일을 받거나(짝이 안 맞는 것을 견준다) 404 로 밤마다 붉어진다.
+          MOAI_REPO: ${{ github.repository }}
         run: sh install.sh --version "$TAG" --dir "$RUNNER_TEMP/old"
 
       - name: 견준다

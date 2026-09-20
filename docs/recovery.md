@@ -110,8 +110,10 @@ Two sessions can take the same issue if neither passed `--from`:
 moai mv <id> in_progress --from todo
 ```
 
-With `--from`, the loser gets a non-zero exit (`"code":"stale"` in `--json`) and
-nothing is written. Without it, the second write wins and the journal shows both
+With `--from`, the loser gets a non-zero exit and nothing is written. That is
+not an error payload — `--json` returns the usual `moved` / `already` / `missing`
+/ `stale` object, and the losing id is in `stale`. There is no `"code":"stale"`;
+branch on the `stale` array, not on `code`. Without it, the second write wins and the journal shows both
 moves — `moai show <id>` is where you see who did what, and the fix is to agree
 and move the line once more.
 

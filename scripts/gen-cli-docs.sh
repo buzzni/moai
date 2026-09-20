@@ -25,8 +25,11 @@ out=${1:-$root/docs/cli.md}
 export MOAI_LANG=ko NO_COLOR=1 COLUMNS=80
 
 # `Commands:` 칸의 이름만 집는다. `help` 는 clap 이 저절로 붙이는 것이라 뺀다.
+#
+# **도움말은 마디마다 한 번만 받는다.** 찍는 김에 훑으면 되는 것을 따로 한 번 더
+# 부르면 바이너리를 마디 수의 두 배로 띄우는데, 이 길은 `cargo test` 마다 돈다.
 subcommands() {
-  "$moai" "$@" --help | awk '
+  printf '%s\n' "$1" | awk '
     /^Commands:/ { on = 1; next }
     on && /^[^[:space:]]/ { exit }
     on && /^  [a-z]/ && $1 != "help" { print $1 }
@@ -34,10 +37,10 @@ subcommands() {
 }
 
 walk() {
-  printf '\n## `moai %s`\n\n```\n' "$*"
-  "$moai" "$@" --help
-  printf '```\n'
-  for sub in $(subcommands "$@"); do
+  local said sub
+  said=$("$moai" "$@" --help)
+  printf '\n## `moai %s`\n\n```\n%s\n```\n' "$*" "$said"
+  for sub in $(subcommands "$said"); do
     walk "$@" "$sub"
   done
 }
@@ -58,9 +61,9 @@ today. Pass `MOAI_LANG=en` at runtime for English.
 
 ```
 HEAD
-  "$moai" --help
-  printf '```\n'
-  for sub in $(subcommands); do
+  top=$("$moai" --help)
+  printf '%s\n```\n' "$top"
+  for sub in $(subcommands "$top"); do
     walk "$sub"
   done
 } >"$out"

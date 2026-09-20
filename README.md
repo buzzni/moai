@@ -47,7 +47,13 @@ install anything it cannot verify. There is no flag to skip the check.
 
 It installs to `~/.local/bin` and will not overwrite an existing `moai` unless
 you pass `--force`. Pick another directory with `--dir`, or a specific release
-with `--version v0.1.0`.
+with `--version v0.1.0`. Through the pipe those flags belong to the script, not
+to your shell, so they need `-s --`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/buzzni/moai/develop/install.sh \
+  | sh -s -- --dir ~/bin --version v0.1.0
+```
 
 Prebuilt binaries are published for `x86_64-unknown-linux-musl` and
 `aarch64-apple-darwin`. On anything else, build from source:
@@ -116,7 +122,8 @@ moai merge-driver --install
 `moai init` writes a managed block into `AGENTS.md` describing every command and
 the three decisions an agent has to make — create or idea, defer or done, and
 whether a request is big enough to split into an epic. Re-run `moai init` when
-the tool grows; it rewrites that block and touches nothing else.
+the tool grows; it rewrites that block and tops up the `.gitattributes` and
+`.gitignore` rules it manages. It never touches your issues or your journal.
 
 If your agent reads some other file, take the same block and paste it there:
 
@@ -173,7 +180,9 @@ back to English. `i18n/README.md` describes how to add a language.
 | release binary | 15 MB |
 | clean build, unloaded machine | 5 minutes |
 
-Both are checked in CI. There is no line-count limit on the implementation —
+CI measures the binary on every pull request. Build time is not measured there —
+a shared runner is by definition a loaded machine, and the number above is about
+an unloaded one. There is no line-count limit on the implementation —
 that limit existed once and was removed, because what kills a tool like this is
 a design that was wrong from the start, not the number of lines that design
 eventually needs.

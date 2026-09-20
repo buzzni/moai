@@ -20,7 +20,10 @@ repo=${MOAI_REPO:-buzzni/moai}
 base=${MOAI_BASE_URL:-https://github.com/$repo/releases/download}
 api=${MOAI_API_URL:-https://api.github.com/repos/$repo/releases/latest}
 version=${MOAI_VERSION:-}
-dir=${MOAI_INSTALL_DIR:-$HOME/.local/bin}
+# **`$HOME` 은 다 읽은 뒤에 편다.** 여기서 펴면 `set -u` 아래에서 집 없는 자리
+# (`docker run --user`, `env -i`, 몇몇 CI 컨테이너)가 `--dir` 나 `--help` 를 준 판까지
+# 셸의 날 오류로 죽는다 — 파이프로 흘러 들어온 사람이 보는 것이 이 스크립트의 말이 아니게 된다.
+dir=${MOAI_INSTALL_DIR:-}
 force=0
 print_target=0
 
@@ -79,6 +82,11 @@ if [ "$print_target" = 1 ]; then
   exit 0
 fi
 
+if [ -z "$dir" ]; then
+  [ -n "${HOME-}" ] || die "깔 자리를 모르겠다 — HOME 이 없다. --dir 이나 MOAI_INSTALL_DIR 로 준다"
+  dir=$HOME/.local/bin
+fi
+
 # 받는 길과 재는 길이 둘 다 서야 시작한다. 받아 놓고 못 재는 것이 제일 나쁘다 —
 # 그 자리에서 사람은 "이미 받았으니" 하고 넘어간다.
 if command -v curl >/dev/null 2>&1; then
@@ -97,18 +105,26 @@ else
   die "sha256sum 도 shasum 도 없다 — 확인하지 못하면 깔지 않는다"
 fi
 
+# **치울 자리를 먼저 만들고 덫을 건다.** 임시 파일을 여기저기서 따로 만들면 `die` 로
+# 나가는 길마다 지우는 줄을 기억해야 하고, 한 번 잊으면 그것을 아무도 안 본다.
+work=$(mktemp -d) || die "임시 디렉터리를 못 만들었다"
+# `$half` 는 밑에서 깔 자리에 놓는 반쪽이다. `$work` 밖이라 같이 치워야 한다 —
+# 디스크가 차거나 Ctrl-C 로 끊기면 `PATH` 에 선 디렉터리에 잘린 파일이 남고, 다시
+# 칠 때마다 하나씩 는다. 신호를 받은 판은 **끝낸다**: 덫만 돌고 이어 가면 이미 지운
+# `$work` 를 가지고 계속 돌아 성공했다고 말한다.
+half=
+trap 'rm -rf "$work"; [ -z "$half" ] || rm -f "$half"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 if [ -z "$version" ]; then
   say "최신 릴리스를 묻는다"
-  tmp_api=$(mktemp) || die "임시 파일을 못 만들었다"
-  fetch "$api" "$tmp_api" || die "최신 릴리스를 못 읽었다 — --version 으로 태그를 준다"
-  version=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp_api" | head -n 1)
-  rm -f "$tmp_api"
+  fetch "$api" "$work/latest.json" || die "최신 릴리스를 못 읽었다 — --version 으로 태그를 준다"
+  version=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$work/latest.json" | head -n 1)
   [ -n "$version" ] || die "릴리스 답에서 태그를 못 읽었다 — --version 으로 태그를 준다"
 fi
 
 name=moai-$version-$target
-work=$(mktemp -d) || die "임시 디렉터리를 못 만들었다"
-trap 'rm -rf "$work"' EXIT INT TERM
 
 say "$repo $version $target 을 받는다"
 fetch "$base/$version/$name.tar.gz" "$work/$name.tar.gz" || die "산출물을 못 받았다 — $base/$version/$name.tar.gz"
@@ -137,9 +153,11 @@ if [ -e "$dir/moai" ] && [ "$force" != 1 ]; then
   die "$dir/moai 이 이미 있다 — 덮으려면 --force, 다른 자리에 깔려면 --dir"
 fi
 
-cp "$work/$name/moai" "$dir/moai.tmp.$$"
-chmod 755 "$dir/moai.tmp.$$"
-mv "$dir/moai.tmp.$$" "$dir/moai"
+half=$dir/moai.tmp.$$
+cp "$work/$name/moai" "$half"
+chmod 755 "$half"
+mv "$half" "$dir/moai"
+half=
 say "$dir/moai 에 깔았다 ($version)"
 
 # PATH 에 다른 moai 가 먼저 서 있으면 방금 깐 것이 안 돈다. 이것은 말만 하고

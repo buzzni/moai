@@ -12346,26 +12346,15 @@ fn init_print_json_carries_the_block_in_one_field() {
 /// 릴리스 스크립트의 자리. 워크플로가 부르는 이름과 여기서 한 번에 맞춘다.
 #[cfg(unix)]
 fn script(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts").join(name)
+    at_root("scripts").join(name)
 }
 
-/// `Cargo.toml` 의 `[package]` 버전. 시험이 이 값을 베껴 적으면 판을 올린 날
-/// 시험이 함께 붉어진다.
+/// `Cargo.toml` 의 `[package]` 버전. **cargo 가 읽어 준 값을 쓴다** — 시험이 TOML 을
+/// 제 손으로 다시 파싱하면 `[package]` 표를 가리는 자가 셋째로 늘고(스크립트 둘에
+/// 더해), 스크립트와 같은 자리를 같이 틀려도 시험은 초록으로 선다. `env!` 는 스크립트
+/// 밖에서 온 값이라 그것이 진짜 대조다.
 #[cfg(unix)]
-fn manifest_version() -> String {
-    let src = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
-    let mut pkg = false;
-    for line in src.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            pkg = line == "[package]";
-        } else if pkg && let Some(rest) = line.strip_prefix("version") {
-            let rest = rest.trim_start().strip_prefix('=').expect("version 줄에 = 가 없다");
-            return rest.trim().trim_matches('"').to_string();
-        }
-    }
-    panic!("Cargo.toml 의 [package] 에서 version 을 못 읽었다");
-}
+const MANIFEST_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 스크립트를 돌린다. `fed` 를 주면 pre-push 가 stdin 에 흘리는 줄을 흉내 낸다.
 #[cfg(unix)]
@@ -12382,7 +12371,10 @@ fn run_script(name: &str, args: &[&str], fed: Option<&str>) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect(said);
-    child.stdin.take().unwrap().write_all(fed.as_bytes()).unwrap();
+    // 쓰기가 진 것은 삼킨다 — [`from_stdin`] 과 같은 까닭이다. 줄을 안 읽고 먼저
+    // 끝나는 길(`--print`, 임시 파일을 못 만든 shim)이 있고, 그때 EPIPE 로 패닉하면
+    // 같은 시험이 기계 부하에 따라 붙었다 떨어졌다 한다.
+    let _ = child.stdin.take().unwrap().write_all(fed.as_bytes());
     child.wait_with_output().unwrap()
 }
 
@@ -12393,11 +12385,11 @@ fn run_script(name: &str, args: &[&str], fed: Option<&str>) -> Output {
 #[cfg(unix)]
 #[test]
 fn the_version_check_passes_when_the_tag_matches_the_manifest() {
-    let have = manifest_version();
+    let have = MANIFEST_VERSION;
     let out = run_script("check-version.sh", &[&format!("v{have}")], None);
     assert!(out.status.success(), "맞는 태그를 막았다\n{}", text(&out));
     let said = String::from_utf8_lossy(&out.stdout).into_owned();
-    assert!(said.contains(&have), "무엇과 무엇을 견줬는지 안 말한다\n{said}");
+    assert!(said.contains(have), "무엇과 무엇을 견줬는지 안 말한다\n{said}");
 }
 
 /// 어긋나면 0 아닌 코드로 멈추고, **고치는 명령을 함께 낸다** — 이 스크립트가
@@ -12416,7 +12408,7 @@ fn the_version_check_stops_a_tag_the_manifest_does_not_know() {
 #[cfg(unix)]
 #[test]
 fn a_push_that_carries_no_release_tag_goes_through() {
-    let have = manifest_version();
+    let have = MANIFEST_VERSION;
     let zero = "0".repeat(40);
     let fed = format!(
         "refs/heads/develop aaaa refs/heads/develop bbbb\n\
@@ -12435,7 +12427,7 @@ fn a_push_that_carries_no_release_tag_goes_through() {
 fn the_version_check_prints_the_manifest_version_for_the_release_workflow() {
     let out = run_script("check-version.sh", &["--print"], None);
     assert!(out.status.success(), "판을 못 찍었다\n{}", text(&out));
-    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), manifest_version());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), MANIFEST_VERSION);
 }
 
 /// 미는 태그 하나가 어긋나면 그 푸시가 멈춘다.
@@ -12444,6 +12436,28 @@ fn the_version_check_prints_the_manifest_version_for_the_release_workflow() {
 fn a_push_that_carries_a_mismatched_tag_stops() {
     let out = run_script("check-version.sh", &[], Some("refs/tags/v9.9.9 abcd refs/tags/v9.9.9 0000\n"));
     assert_eq!(out.status.code(), Some(1), "어긋난 태그를 밀었는데 지나갔다\n{}", text(&out));
+}
+
+/// **인자를 무조건 태그로 읽지 않는다.** git 은 pre-push 훅을 `<remote> <url>` 로 부르고
+/// 밀 줄은 stdin 으로 준다 — 이 파일을 `ln -s` 로 바로 훅에 건 자리(머리글이 되는 길로
+/// 댄다)가 그것이다. `origin` 을 태그로 재면 태그 없는 푸시까지 전부 막힌다.
+#[cfg(unix)]
+#[test]
+fn hook_arguments_are_not_read_as_a_tag() {
+    let out = run_script(
+        "check-version.sh",
+        &["origin", "https://example.invalid"],
+        Some("refs/heads/develop aaaa refs/heads/develop bbbb\n"),
+    );
+    assert!(out.status.success(), "훅 인자를 태그로 읽어 일상 푸시를 막았다\n{}", text(&out));
+
+    // 줄에 어긋난 태그가 있으면 그때는 막는다 — 인자가 아니라 stdin 이 답이다.
+    let bad = run_script(
+        "check-version.sh",
+        &["origin", "https://example.invalid"],
+        Some("refs/tags/v9.9.9 abcd refs/tags/v9.9.9 0000\n"),
+    );
+    assert_eq!(bad.status.code(), Some(1), "어긋난 태그가 지나갔다\n{}", text(&bad));
 }
 
 // ── 설치 — 확인하지 못하면 깔지 않는다 ──────────────────────────────
@@ -12456,14 +12470,6 @@ fn at_root(name: &str) -> PathBuf {
 }
 
 // ── git 훅 shim — 도구의 사정으로 푸시를 막지 않는다 ────────────────
-
-/// 시험이 만든 훅에 실행 비트를 준다. git 은 안 붙은 훅을 조용히 건너뛴다 —
-/// 그러면 "앞의 훅을 이어 불렀나" 를 재는 시험이 언제나 통과한다.
-#[cfg(unix)]
-fn make_runnable(path: &Path) {
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
-}
 
 /// 훅을 심을 수 있는 가짜 클론 하나. `scripts/` 에서 필요한 것만 베껴 둔다.
 #[cfg(unix)]
@@ -12491,7 +12497,8 @@ fn push_hook(root: &Path, fed: &str) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("훅을 실행하지 못했다");
-    child.stdin.take().unwrap().write_all(fed.as_bytes()).unwrap();
+    // [`from_stdin`] 과 같은 까닭으로 쓰기가 진 것은 삼킨다.
+    let _ = child.stdin.take().unwrap().write_all(fed.as_bytes());
     child.wait_with_output().unwrap()
 }
 
@@ -12513,8 +12520,11 @@ fn installing_the_hook_keeps_the_one_that_was_there_and_chains_it() {
     let s = Scratch::new("hook-chain");
     let root = clone_with_scripts(&s);
     let was = root.join(".git/hooks/pre-push");
-    std::fs::write(&was, "#!/bin/sh\necho 남의 훅이 돌았다\nexit 0\n").unwrap();
-    make_runnable(&was);
+    // **이 프로세스가 쓴 inode 를 exec 하지 않는다** — `write_exe` 가 `cp` 에게 쓰게
+    // 한다. 아래 `install_hooks` 가 이 파일을 `.moai-before` 로 옮기면 shim 이 그것을
+    // 부르는데, 우리가 쓰기 fd 를 연 inode 면 옆 시험의 fork 와 겹쳐 ETXTBSY 가 난다
+    // ([`place_exe`] 에 잰 표가 있다).
+    write_exe(&was, "#!/bin/sh\necho 남의 훅이 돌았다\nexit 0\n");
 
     let out = install_hooks(&root, &[]);
     assert!(out.status.success(), "못 심었다\n{}", text(&out));
@@ -12533,12 +12543,17 @@ fn a_losing_earlier_hook_still_stops_the_push() {
     let s = Scratch::new("hook-chain-fails");
     let root = clone_with_scripts(&s);
     let was = root.join(".git/hooks/pre-push");
-    std::fs::write(&was, "#!/bin/sh\necho 남의 훅이 막았다 >&2\nexit 1\n").unwrap();
-    make_runnable(&was);
-    install_hooks(&root, &[]);
+    write_exe(&was, "#!/bin/sh\necho 남의 훅이 막았다 >&2\nexit 1\n");
+    // **심었는지 먼저 본다.** 못 심으면 `.git/hooks/pre-push` 는 아직 남의 훅 그대로라
+    // 밑의 단언이 그것만으로 참이 된다 — shim 이 앞의 훅을 이어 부르는지는 안 재고
+    // 초록으로 선다.
+    let put = install_hooks(&root, &[]);
+    assert!(put.status.success(), "못 심었다\n{}", text(&put));
+    assert!(root.join(".git/hooks/pre-push.moai-before").is_file(), "shim 이 안 섰다");
 
     let ran = push_hook(&root, "refs/heads/develop a refs/heads/develop b\n");
     assert!(!ran.status.success(), "앞의 훅이 졌는데 지나갔다\n{}", text(&ran));
+    assert!(String::from_utf8_lossy(&ran.stderr).contains("남의 훅이 막았다"), "앞의 훅을 안 불렀다\n{}", text(&ran));
 }
 
 /// **다시 불러도 된다.** 블록은 하나로 남는다 — 두 번 심겨 두 번 재면, 두 번째를
@@ -12549,11 +12564,10 @@ fn installing_twice_leaves_one_block_and_uninstall_puts_the_old_hook_back() {
     let s = Scratch::new("hook-twice");
     let root = clone_with_scripts(&s);
     let was = root.join(".git/hooks/pre-push");
-    std::fs::write(&was, "#!/bin/sh\necho 남의 훅이 돌았다\nexit 0\n").unwrap();
-    make_runnable(&was);
+    write_exe(&was, "#!/bin/sh\necho 남의 훅이 돌았다\nexit 0\n");
 
-    install_hooks(&root, &[]);
-    install_hooks(&root, &[]);
+    assert!(install_hooks(&root, &[]).status.success(), "못 심었다");
+    assert!(install_hooks(&root, &[]).status.success(), "두 번째를 못 심었다");
     let body = std::fs::read_to_string(&was).unwrap();
     assert_eq!(body.matches("# >>> moai:pre-push >>>").count(), 1, "블록이 겹쳤다\n{body}");
 
@@ -12572,11 +12586,27 @@ fn installing_twice_leaves_one_block_and_uninstall_puts_the_old_hook_back() {
 fn the_hook_says_nothing_when_the_check_is_not_there() {
     let s = Scratch::new("hook-bare");
     let root = clone_with_scripts(&s);
-    install_hooks(&root, &[]);
+    assert!(install_hooks(&root, &[]).status.success(), "못 심었다");
     std::fs::remove_file(root.join("scripts/check-version.sh")).unwrap();
 
     let ran = push_hook(&root, "refs/tags/v9.9.9 abcd refs/tags/v9.9.9 0000\n");
     assert!(ran.status.success(), "잴 것이 없는데 막았다\n{}", text(&ran));
+}
+
+/// **재는 스크립트가 지는 것도 도구의 사정이다.** `Cargo.toml` 을 못 읽어 `die` 가
+/// 2 로 끝나거나 해석기가 없어 127 로 끝난 것을 그대로 넘기면, 태그를 안 미는 푸시까지
+/// 막힌다 — 이 훅이 머리에 적은 약속이 거기서 깨진다. 막는 것은 `compare` 의 1 하나다.
+#[cfg(unix)]
+#[test]
+fn a_check_that_cannot_read_the_manifest_does_not_block_the_push() {
+    let s = Scratch::new("hook-broken-manifest");
+    let root = clone_with_scripts(&s);
+    assert!(install_hooks(&root, &[]).status.success(), "못 심었다");
+    // `[package]` 가 없는 `Cargo.toml` — 워크스페이스로 옮기는 중이거나 병합이 덜 끝난 자리다.
+    std::fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+
+    let ran = push_hook(&root, "refs/heads/develop aaaa refs/heads/develop bbbb\n");
+    assert!(ran.status.success(), "판을 못 읽었다고 태그 없는 푸시를 막았다\n{}", text(&ran));
 }
 
 /// **막는 둘째 길은 일부러 세운 게이트 하나다**(moai-jy55). 어긋난 태그는 여기서
@@ -12586,14 +12616,14 @@ fn the_hook_says_nothing_when_the_check_is_not_there() {
 fn the_hook_stops_a_tag_that_disagrees_with_the_manifest() {
     let s = Scratch::new("hook-gate");
     let root = clone_with_scripts(&s);
-    install_hooks(&root, &[]);
+    assert!(install_hooks(&root, &[]).status.success(), "못 심었다");
 
     let ran = push_hook(&root, "refs/tags/v9.9.9 abcd refs/tags/v9.9.9 0000\n");
     assert!(!ran.status.success(), "어긋난 태그가 지나갔다\n{}", text(&ran));
     let said = String::from_utf8_lossy(&ran.stderr).into_owned();
     assert!(said.contains("bump-version.sh 9.9.9"), "고치는 길을 안 댄다\n{said}");
 
-    let fine = push_hook(&root, &format!("refs/tags/v{v} abcd refs/tags/v{v} 0000\n", v = manifest_version()));
+    let fine = push_hook(&root, &format!("refs/tags/v{v} abcd refs/tags/v{v} 0000\n", v = MANIFEST_VERSION));
     assert!(fine.status.success(), "맞는 태그를 막았다\n{}", text(&fine));
 }
 
@@ -12694,7 +12724,16 @@ fn fake_release(s: &Scratch) -> (PathBuf, PathBuf) {
     let name = release_name();
     std::fs::create_dir_all(here.join(&name)).unwrap();
     std::fs::write(here.join(&name).join("moai"), "#!/bin/sh\necho 가짜 moai\n").unwrap();
-    let packed = shell(&here, &format!("tar czf {name}.tar.gz {name} && rm -rf {name} && sha256sum *.tar.gz > SHA256SUMS"));
+    // 합계는 `install.sh` 가 쓰는 두 이름 중 있는 것으로 낸다 — macOS 에는
+    // `sha256sum` 이 없고, 거기서는 `shasum` 갈래만 돈다. 시험 자리가 한쪽만 알면
+    // 그 갈래는 이 저장소가 판을 내는 기계에서 한 번도 안 돌아 본 코드가 된다.
+    let packed = shell(
+        &here,
+        &format!(
+            "tar czf {name}.tar.gz {name} && rm -rf {name} && \
+             {{ sha256sum *.tar.gz 2>/dev/null || shasum -a 256 *.tar.gz; }} > SHA256SUMS"
+        ),
+    );
     assert!(packed.status.success(), "가짜 릴리스를 못 지었다\n{}", text(&packed));
     (base, here.join(format!("{name}.tar.gz")))
 }
