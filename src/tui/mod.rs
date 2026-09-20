@@ -2286,10 +2286,13 @@ impl App {
                 });
                 match wrote {
                     Ok((written, mut seen)) => {
-                        // 파일의 표를 그대로 든다 — 옆 터미널이 그사이 적은 줄까지 함께 온다. 옛
-                        // `[read]` 는 겹쳐 본 값이라 여기 다시 얹는다(사용자 결정 3) — 겹치는 자는
-                        // `read_marks::read` 와 **한 함수**다(리뷰). 둘로 두면 옛 표를 걷는 날 한쪽만 걷힌다.
-                        crate::read_marks::overlay(&mut seen, &self.legacy_read);
+                        // 파일의 표를 그대로 든다 — 옆 터미널이 그사이 적은 줄까지 함께 온다. 겹쳐만
+                        // 보는 자리들은 여기 다시 얹는다 — 옛 철자로 선 파일(moai-f5e3)과 설정의 옛
+                        // `[read]`(사용자 결정 3)다. 겹치는 자는 `read_marks::read` 와 **한 함수**다
+                        // (`read_marks::overlay_older`, 리뷰). 둘로 두면 옛 표를 걷는 날 한쪽만 걷힌다 —
+                        // 실제로 갈렸을 때 `r` 한 번이 옛 철자 파일의 읽음을 화면에서 지워, 적을 것이
+                        // 없는 판(이미 읽은 줄)에서는 파일이 안 바뀌어 [NEW] 가 이 세션 내내 섰다.
+                        crate::read_marks::overlay_older(&config, &root, &mut seen, &self.legacy_read);
                         if let Some(site) = self.site_mut(seat) {
                             site.seen = seen;
                         }
@@ -5139,6 +5142,54 @@ mod tests {
         assert!(a.site.unread.contains("argos-0002"), "걸음 전에 들었다 — 시험의 전제가 틀렸다");
         a.follow();
         assert!(!a.site.unread.contains("argos-0002"), "옆에서 적은 읽음을 걸음이 안 들었다");
+    }
+
+    /// **`r` 은 옛 철자 파일의 읽음을 화면에서 지우지 않는다**(moai-f5e3 리뷰). 쓴 뒤에 화면에 들이는 표를
+    /// 이 자리가 따로 겹치던 판은 `read_marks::read` 보다 한 층이 모자라, 옛 철자로 선 파일에만 있는 읽음이
+    /// `r` 한 번에 [NEW] 로 돌아왔다.
+    ///
+    /// **적을 것이 없는 판이 더 나쁘다.** 이미 읽은 줄에 누르면 파일이 안 바뀌어 표식도 그대로라,
+    /// [`App::follow_read`] 가 영영 같다고 보아 그 [NEW] 가 이 세션 내내 섰다 — 겹치는 자를 둘로 두면
+    /// 안 된다는 것이 이 줄이다.
+    #[test]
+    fn the_r_key_keeps_what_an_old_spelling_left() {
+        let s = Scratch::new("tui-read-past");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+
+        // 옛 바이너리가 안 푼 철자로 적어 둔 파일 — 끝 `/` 하나가 딴 이름을 냈다.
+        let slashed = s.path().join("proj/");
+        let old = crate::store::dir_of(&config)
+            .join("read")
+            .join(format!("{:016x}.toml", crate::text::fnv1a64(slashed.as_os_str().as_encoded_bytes())));
+        assert_ne!(old, crate::read_marks::path_for(&config, &slashed), "시험의 전제 — 옛 이름과 새 이름이 다르다");
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::write(&old, format!("path = {:?}\n\n[read]\n\"argos-0001\" = \"옛 도장\"\n", slashed.display().to_string()))
+            .unwrap();
+
+        // 탐색기는 그 철자(등록 줄의 것)로 든다.
+        let mut a = app();
+        a.site.repo = Some(crate::store::Repo::at(slashed.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.me = None;
+        a.load_read();
+        assert_eq!(a.site.seen.get("argos-0001").map(String::as_str), Some("옛 도장"), "읽기가 옛 철자 파일을 안 들었다");
+
+        // 아직 안 읽은 줄에 누른다 — 파일이 바뀌는 판.
+        a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
+        a.hit("r");
+        assert_eq!(
+            a.site.seen.get("argos-0001").map(String::as_str),
+            Some("옛 도장"),
+            "`r` 한 번에 옛 철자 파일의 읽음이 화면에서 사라졌다 — {:?}",
+            a.site.seen
+        );
+
+        // 이미 읽은 줄에 다시 누른다 — 적을 것이 없어 파일이 안 바뀌는 판.
+        a.hit("r");
+        assert_eq!(a.notice.as_deref(), Some("읽음으로 적을 것이 없다"));
+        assert_eq!(a.site.seen.get("argos-0001").map(String::as_str), Some("옛 도장"), "{:?}", a.site.seen);
     }
 
     /// **CLI 와 탐색기가 한 자리에 적는다**(moai-bwce) — `r` 이 적은 것을 `moai read` 가 읽는 그 길

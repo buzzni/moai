@@ -82,8 +82,16 @@ pub fn make_review(anchor: &str) -> String {
 /// 리뷰를 닫는 두 걸음 — `REVIEW_STEPS` 에서 시작 걸음을 빼고 **실제 id** 를 넣은
 /// 것. 닫기 거절문과 세션을 닫을 때의 붙듦이 쓴다. 손으로 다시 적던 두 자리는
 /// 이미 서로 다른 글을 내고 있었다.
-pub fn close_steps(id: &str) -> String {
-    REVIEW_STEPS.lines().skip(1).map(|l| l.replace("<id>", id)).collect::<Vec<_>>().join("\n")
+///
+/// **`moai` 는 겨눌 트래커를 단 머리로 받는다**(moai-j2vp) — 남의 트래커를 보는 판에서 규칙 1 은
+/// `moai -C /other` 를 대는데 이 줄만 맨 `moai` 를 내던 판은, 옮겨 친 두 줄이 이 트래커를 겨눠
+/// 거기 없는 리뷰를 닫으라고 했다. 이 자리의 트래커면 맨 `moai` 다.
+pub fn close_steps(id: &str, moai: &str) -> String {
+    // 머리는 줄마다 같다 — `map` 안에서 짓던 판은 줄 수만큼 다시 지었다. 줄의 **첫** `moai ` 만
+    // 바꾼다: `REVIEW_STEPS` 의 줄은 들여쓰기 뒤 곧바로 그 낱말로 시작한다
+    // (`the_skill_names_each_rule_as_the_hook_does` 가 그것을 못박는다).
+    let head = format!("{moai} ");
+    REVIEW_STEPS.lines().skip(1).map(|l| l.replace("<id>", id).replacen("moai ", &head, 1)).collect::<Vec<_>>().join("\n")
 }
 
 /// 난이도 한 낱말 — **모델과 리뷰 등급을 함께 정하는 그 축**이다. 낱말·모델·잣대 셋.
@@ -1647,7 +1655,7 @@ const RECALL: &str = "moai -C <루트> idea promote <idea id> -e <에픽> --from
 /// 못 읽었다 — 밝히지 않은 요약은 다음 사람이 리뷰어의 말로 읽는다.
 fn brief() -> String {
     let review = make_review("--parent <에픽>");
-    let close = indent(&close_steps("<리뷰 id>"), "       ");
+    let close = indent(&close_steps("<리뷰 id>", "moai"), "       ");
     let over = indent(REVIEW_OVER_LIMIT, "       ");
     let model = indent(&model_line(), "    ");
     let levels = difficulty_levels();
@@ -1985,6 +1993,10 @@ mod tests {
         assert!(skill.contains(&make_review("--parent <보는 이슈>")), "리뷰를 세우는 줄이 갈라졌다");
         for step in REVIEW_STEPS.lines() {
             assert!(skill.contains(step.trim()), "리뷰 걸음이 갈라졌다 — {step}");
+            // **줄은 들여쓰기 뒤 곧바로 `moai ` 로 시작한다** — [`close_steps`] 가 그 첫 낱말을
+            // 겨눌 트래커의 머리로 바꾼다(moai-j2vp). 설명 글이 앞서는 줄이 하나라도 서면 `-C` 가
+            // 그 글 안에 박히고, 아예 없으면 말없이 맨 `moai` 가 남는다.
+            assert!(step.trim_start().starts_with("moai "), "리뷰 걸음이 moai 로 안 시작한다 — {step}");
         }
     }
 
@@ -2186,7 +2198,7 @@ mod tests {
         }
         // 리뷰는 무엇이 나왔는지를 남기며 닫는다. 워크트리가 남아 있으면 훅이 그 에픽을 옆의
         // 일로 읽어 `-m` 없는 닫기를 못 막으니, 닫기는 워크트리를 지운 뒤다.
-        for step in close_steps("<리뷰 id>").lines() {
+        for step in close_steps("<리뷰 id>", "moai").lines() {
             assert!(brief.contains(step.trim()), "리뷰 닫기 걸음이 갈라졌다 — {step}");
         }
         let removed = brief.find("git worktree remove").expect("워크트리를 지우는 걸음이 없다");
