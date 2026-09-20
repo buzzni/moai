@@ -28,7 +28,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 탐색기는 옆 워크트리를 겹친 채로 연다(`App::worktree`). `--json` 은 겹치지 않는다 —
     // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
-    let crate::worktree::Gathered { load, origin, trouble, mut watched, swept, sides, .. } =
+    let crate::worktree::Gathered { load, origin, trouble, mut watched, swept, sides, mine, .. } =
         crate::worktree::gather(&repo, !ctx.json)?;
     crate::tui::watch(&mut watched, places);
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
@@ -41,7 +41,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // **못 읽은 줄을 삼키지 않는다.** 화면 쪽은 배너로 말하지만 이 길에는
         // 배너가 없다 — 여기서 안 알리면 목록이 조용히 짧아지고, 부른 쪽은
         // 그 이슈가 없다고 읽는다. 다른 읽기 명령과 같은 길로 간다.
-        super::report_load_errors(&repo.issues_path(), &load.errors);
+        super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
         let rows: Vec<Row> = index
             .entries(&load.issues, &path)
@@ -65,15 +65,22 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 옮겨 가지만 띄운 곳은 이 워크트리다. 트래커의 자리로 적던 판은 층으로 올라갔다 그 줄로 다시
     // 들어오는 걸음에서 `Repo::open(<루트>)` 을 열어 `here()` 가 루트로 뒤집혔고, 그때부터 커밋 표가
     // 이 가지의 커밋을 잃고 집기 표식도 안 적혔다.
-    // 층의 말은 얹는 문(`App::with_layer`)이 화면에서 잇는다(moai-ra67).
-    let layer = crate::tui::layer::Layer::of(&reg, Some(repo.here()));
-    let mut app = App::open(repo, load, index, ground, path, stamp).overlaid(origin, trouble, watched, swept, &sides);
+    // 층의 말은 여기서 준다(moai-9it4) — 층이 세우며 짓는 글이 그 말로 선다. 얹는 문
+    // (`App::with_layer`)이 화면의 말과 다시 맞춘다(moai-ra67).
+    let layer = crate::tui::layer::Layer::of(&reg, Some(repo.here()), ctx.lang());
+    // 옆 워크트리의 문제는 **펴서** 싣는다(moai-dpbi). 다시 읽기(`tui::prepare`)도 제 말을 들고
+    // 가므로(moai-9it4) 여는 화면과 같은 자로 편다 — 둘이 갈리면 배너가 걸음마다 말을 바꾼다.
+    let trouble = crate::tui::said_trouble(&trouble, ctx.lang());
+    let mut app =
+        App::open(repo, load, index, ground, path, stamp).overlaid(origin, trouble, watched, swept, &sides, &mine);
     // **탐색기도 고른 말로 선다**(moai-ra67) — 명령 층에서 한 번 푼 것을 화면에 놓는다.
     app.site.lang = ctx.lang();
     // **판 것은 여기서 버린다**(moai-kos1) — 옆 스냅샷의 줄은 이미 `load` 에 겹쳐 들어왔고,
     // 쓰는 자리는 바로 위 하나다. 안 버리면 탐색기가 도는 내내 워크트리마다 한 벌씩 그대로
     // 남아, 겹쳐 본 저장소의 줄을 두 번 들고 산다(다시 읽기는 `tui::prepare` 가 제 것을 판다).
+    // 겹치기 전에 잰 바닥(moai-mafv)도 같은 자리에서 버린다 — 다시 읽기는 제 것을 잰다.
     drop(sides);
+    drop(mine);
     app.user = ctx.user.clone();
     // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와
     // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.
@@ -152,12 +159,14 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
             })
             .collect();
         // 사용자 설정의 문제는 `problems` 에 싣는다 — 한눈 보기·`project ls` 와 같은 자리다.
-        // 제어문자는 serde 가 이스케이프한다.
-        return super::json_line(&Layered { projects: rows, problems: &reg.problems, config: reg.path.as_deref() });
+        // 제어문자는 serde 가 이스케이프한다. **거쳐 가는 문은 `view::settings_problems` 하나다**(리뷰) —
+        // 화면 말의 탈은 자료로 따로 서므로(moai-dpbi) `reg.problems` 만 실으면 `lang` 오타를 잃는다.
+        // 말은 이미 읽은 설정에서 고른다([`super::lang_of`]) — `ctx.lang()` 은 같은 파일을 또 판다.
+        let problems = crate::view::settings_problems(&reg, super::lang_of(&reg));
+        return super::json_line(&Layered { projects: rows, problems: &problems, config: reg.path.as_deref() });
     }
     refuse_without_terminal()?;
-    let mut layer = crate::tui::layer::Layer::of(&reg, None);
-    layer.lang = ctx.lang();
+    let layer = crate::tui::layer::Layer::of(&reg, None, ctx.lang());
     let mut app = App::on_projects(layer);
     app.site.lang = ctx.lang();
     app.user = ctx.user.clone();

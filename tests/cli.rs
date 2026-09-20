@@ -1659,6 +1659,44 @@ fn outside_a_repo_with_nothing_registered_it_says_how_to_register() {
     assert!(js.starts_with("{\"projects\":[],\"problems\":[\""), "{js}");
 }
 
+/// **설정의 탈을 대는 표면은 하나도 빠지지 않는다**(리뷰). 화면 말의 탈(`[i18n] lang` 오타)은
+/// 말묶음에서 펴느라 `problems` 가 아니라 `lang_problems` 에 자료로 서는데(moai-dpbi), 그 둘을
+/// 잇는 자(`view::settings_problems`)를 안 지나는 표면이 있으면 **그 화면에서만** 오타가 조용히
+/// 사라진다 — 고친 설정이 왜 안 듣는지 알 길이 없어지는 자리다.
+///
+/// 한 판에서 보는 것은 밖의 표면 전부다. 안쪽 `moai status` 는 바로 위
+/// `the_warnings_on_stderr_speak_the_chosen_language` 가 본다.
+#[test]
+fn every_surface_that_names_a_config_problem_names_the_language_one_too() {
+    let s = Scratch::new("langsaid");
+    let out = dir_in(&s, "out");
+    let cfg = registry(&s, &[]);
+    std::fs::write(&cfg, "[i18n]\nlang = \"kr\"\n").unwrap();
+    // **키 이름으로 잰다** — 문장은 말묶음의 것이라 옮기면 바뀌지만 `i18n.lang` 은 설정의 자다.
+    let said = "`i18n.lang`";
+
+    // 사람이 보는 밖의 화면 셋 — 등록한 것이 없을 때의 `status`·`ready`·인자 없이 부른 것.
+    let st = ok_with(&out, &cfg, &["status"]);
+    assert!(st.contains(said), "밖의 `status` 가 설정의 탈을 안 댔다\n{st}");
+    let err = String::from_utf8_lossy(&moai_with(&out, &cfg, &["ready"]).stderr).to_string();
+    assert!(err.contains(said), "밖의 `ready` 가 설정의 탈을 안 댔다\n{err}");
+    let help = ok_with(&out, &cfg, &[]);
+    assert!(help.contains(said), "인자 없이 부른 것이 설정의 탈을 안 댔다\n{help}");
+
+    // 기계가 읽는 셋 — 셋이 같은 `problems` 를 받는다(moai-yxae).
+    for args in [["status", "--json"], ["tui", "--json"]] {
+        let js = ok_with(&out, &cfg, &args);
+        one_json_value(&js);
+        assert!(js.contains(said), "`moai {}` 의 problems 가 비었다\n{js}", args.join(" "));
+    }
+    let js = ok_with(&out, &cfg, &["project", "ls", "--json"]);
+    one_json_value(&js);
+    assert!(js.contains(said), "`project ls --json` 의 problems 가 비었다\n{js}");
+    let o = moai_with(&out, &cfg, &["project", "ls"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(o.status.success() && err.contains(said), "`project ls` 가 설정의 탈을 안 댔다\n{err}");
+}
+
 /// **쓰는 명령은 `.moai` 밖에서 여전히 멈춘다** — 등록한 프로젝트가 있어도 어느 것에
 /// 쓸지 모른다. 대신 다른 곳의 저장소를 부르는 길(`-C`)을 댄다.
 #[test]
@@ -10901,6 +10939,50 @@ fn worktree_trouble_is_told_but_never_fails_the_command() {
     assert!(!board.contains("드러난 문제 없다") && board.contains("옆 워크트리 문제 1건"), "{board}");
     // 겹쳐 보라고 안 시켰으면 옆을 찾지도 않으니 문제도 없다.
     assert!(ok(bare.path(), &["status"]).contains("드러난 문제 없다"));
+}
+
+/// **stderr 의 경고도 말묶음에서 온다**(moai-dpbi). 기본이 영어인데(moai-bn1j) 이 줄만 한국어로
+/// 남으면 세션이 시작하는 화면이 두 말로 선다 — 설정에 `lang` 을 잘못 적은 영어 사용자가 가장
+/// 읽어야 할 줄이 그 줄이다.
+///
+/// 바로 위 시험이 같은 자리의 한국어를 글자로 재므로, 둘이 함께 **말만 바뀌고 일은 그대로**를
+/// 지킨다. 여기서 보는 것은 두 줄이다 — 옆 워크트리를 겹치다 만난 것(`worktree::Trouble`)과
+/// 설정에 적은 말의 탈(`user_config::LangTrouble`).
+#[test]
+fn the_warnings_on_stderr_speak_the_chosen_language() {
+    let t = trees("wtsaid");
+    let feat = t.feat().join(".moai/issues.jsonl");
+    let mut src = std::fs::read_to_string(&feat).unwrap();
+    src.push_str("{깨진 줄\n");
+    std::fs::write(&feat, src).unwrap();
+    let said = |args: &[&str], lang: &str, config: Option<&Path>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(args).current_dir(t.main()).env("MOAI_NOW", NOW).env("NO_COLOR", "1").env("MOAI_LANG", lang);
+        if let Some(at) = config {
+            cmd.env("MOAI_CONFIG", at);
+        }
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "경고로 비영 종료했다 — {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stderr).to_string()
+    };
+
+    // 옆 워크트리의 깨진 스냅샷. **가지와 경로는 말이 아니다** — 어느 말에서도 그대로다.
+    let english = said(&["status", "--worktree"], "en", None);
+    assert!(english.contains("⎇ feat/x"), "어느 워크트리인지를 잃었다\n{english}");
+    assert!(english.contains("unreadable rows"), "옆 워크트리의 문제가 영어로 안 섰다\n{english}");
+    assert!(!english.contains("읽을 수 없는 줄"), "영어 화면 곁에 한국어 줄이 남았다\n{english}");
+    let korean = said(&["status", "--worktree"], "ko", None);
+    assert!(korean.contains("읽을 수 없는 줄 1개"), "한국어가 안 남았다\n{korean}");
+
+    // 설정에 적은 말이 틀린 줄 — `moai status` 가 이 자리로만 댄다(저장소 안은 등록 목록을 안 읽는다).
+    let config = t.main().join("user.toml");
+    std::fs::write(&config, "[i18n]\nlang = \"kr\"\n").unwrap();
+    let english = said(&["status"], "en", Some(&config));
+    assert!(english.contains("`i18n.lang` is one of"), "설정의 탈이 영어로 안 섰다\n{english}");
+    assert!(english.contains("\"kr\""), "무엇을 적었는지를 잃었다\n{english}");
+    assert!(english.contains(&config.display().to_string()), "어느 파일인지를 잃었다\n{english}");
+    let korean = said(&["status"], "ko", Some(&config));
+    assert!(korean.contains("`i18n.lang` 은 en·ko·zh·ja·es 중 하나다"), "한국어가 안 남았다\n{korean}");
 }
 
 /// **여기서 지운 줄은 옆 줄로 되살아나지 않는다**(moai-0a0u). 갈라진 뒤 옆에서 안

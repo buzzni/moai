@@ -163,7 +163,8 @@ fn say_why(whys: &[String], said: &mut BTreeSet<String>) {
 ///   모르는 채로 걷으면 줄을 고친 뒤 [NEW] 가 되살아나므로 아예 안 걷는다
 /// - **옆 워크트리에만 있는 줄.** 탐색기는 겹쳐 보기를 켠 채 그 줄에 도장을 찍는데
 ///   (`worktree::gather`), 같은 파일을 걷는 이쪽이 루트의 줄만 세면 그 도장이 `moai read` 한 번에
-///   걷힌다 — 두 표면이 한 파일을 쓰니 세는 자도 같아야 한다. 옆을 못 읽었으면(`trouble`) 역시 안 걷는다
+///   걷힌다 — 두 표면이 한 파일을 쓰니 세는 자도 같아야 한다. 옆을 못 읽었으면(`trouble`) 역시 안 걷고,
+///   **아예 못 찾았으면(`unfound`) 도 그렇다**(리뷰) — 그때는 `trouble` 이 빈 채로 옆이 통째로 안 보인다
 ///
 /// 옆을 훑는 값은 **쓸 때만** 치른다(부르는 쪽이 `targets` 가 빈 판에서 안 부른다).
 fn keep_for_prune(repo: &Repo, load: &crate::store::Load) -> Option<BTreeSet<String>> {
@@ -171,7 +172,11 @@ fn keep_for_prune(repo: &Repo, load: &crate::store::Load) -> Option<BTreeSet<Str
         return None;
     }
     let beside = crate::worktree::gather(repo, true).ok()?;
-    if !beside.trouble.is_empty() {
+    // **못 찾은 것도 못 읽은 것이다**(리뷰) — `unfound` 는 "옆을 아예 못 셌다"(git 이 없거나 저장소가
+    // 아니다)는 뜻이라, 이때 `trouble` 은 빌 수밖에 없고 `sides` 도 비어 제 줄만 남는다. 그것을 걷을
+    // 기준으로 삼으면 옆에만 있는 줄의 도장이 조용히 지워진다 — 조용한 손실은 이 도구가 못 견디는
+    // 유일한 실패다. 못 봤으면 안 걷는다.
+    if !beside.trouble.is_empty() || beside.unfound.is_some() {
         return None;
     }
     Some(beside.load.issues.iter().map(|i| i.id.clone()).chain(load.reserved_ids()).collect())

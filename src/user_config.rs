@@ -93,12 +93,16 @@ pub struct Registry {
     pub problems: Vec<String>,
     /// 적어 둔 화면 언어(moai-slfv). 없으면 `None` 이고 영어로 떨어진다.
     pub lang: Option<String>,
-    /// 그 언어를 읽다 만난 까닭(리뷰 moai-80qw). **`problems` 에도 같이 든다** — 대는 자리가
-    /// 둘이라서다. `.moai` 밖의 한눈 보기는 `problems` 로 대지만, 저장소 **안**의 `moai status`
-    /// 는 등록 목록을 아예 안 읽으므로(`cmd::status` 의 결정 3) 이 자리로만 닿는다. 하나로
-    /// 줄이면 두 화면 중 하나가 이 줄을 잃고, 그러면 틀린 설정이 조용히 영어가 된다 —
-    /// 그것을 막자는 것이 [`Doc::lang`] 의 까닭이었다.
-    pub lang_problems: Vec<String>,
+    /// 그 언어를 읽다 만난 까닭(리뷰 moai-80qw) — **말이 아니라 자료다**([`LangTrouble`], moai-dpbi).
+    ///
+    /// **대는 자리가 둘이다.** `.moai` 밖의 한눈 보기는 `problems` 줄들과 나란히 대고, 저장소
+    /// **안**의 `moai status` 는 등록 목록을 아예 안 읽으므로(`cmd::status` 의 결정 3) 이 자리로만
+    /// 닿는다. 하나로 줄이면 두 화면 중 하나가 이 줄을 잃고, 그러면 틀린 설정이 조용히 영어가
+    /// 된다 — 그것을 막자는 것이 [`Doc::lang`] 의 까닭이었다.
+    ///
+    /// **`problems` 에 베껴 넣지 않는다**(moai-dpbi) — 그 글은 말을 고른 뒤에 펴므로(`view::problem`)
+    /// 여기 자료로만 선다. 두 화면 다 `problems` 를 편 뒤에 이것을 잇는다.
+    pub lang_problems: Vec<LangTrouble>,
     /// 적어 둔 탐색기 보기와 그것을 읽다 만난 까닭(moai-2bzp). **같은 파싱에서 함께 읽는다**(moai-u8cs) —
     /// 탐색기를 띄우면 층과 보기가 저마다 파일을 읽고 파싱해 한 번 띄울 때 설정을 두세 번 읽었다.
     /// 까닭을 `problems` 와 따로 드는 것은 대는 자리가 달라서다 — 층의 문제는 층이, 보기의 문제는 알림이 댄다.
@@ -119,6 +123,23 @@ pub struct Registry {
     /// 했다" 는 정상이다) "없다" 와 "읽었더니 비었다" 를 가르는 자는 여기뿐이라, `trouble.is_none()`
     /// 을 "성한 설정" 으로 읽는 새 길은 끊긴 마운트를 빈 설정으로 들인다.
     pub trouble: Option<Trouble>,
+}
+
+/// 설정에 적은 화면 말(`[i18n] lang`)을 읽다 만난 것([`Doc::lang`]) — **말이 아니라 자료다**
+/// (moai-dpbi). 글자를 고르는 것은 [`crate::view::problem`] 이다.
+///
+/// 여기서 글을 지으면 **그 글이 설 말을 바로 이 값이 정하는** 닭과 달걀이 된다. 설정을 읽는 길이
+/// 화면 말을 물으면 `cmd::Ctx::lang` 의 `OnceLock` 이 제 초기화 안에서 다시 열려 모든 명령이
+/// 아무 말 없이 멈춘다(리뷰 moai-80qw 가 옛 `i18n::picked` 에 적어 둔 덫). 자료로 내면 설정을
+/// 읽는 길은 말을 안 묻고, 펴는 쪽은 이미 고른 말을 들고 있다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LangTrouble {
+    /// `[i18n]` 이 표가 아니다 — 그 자리에 선 것.
+    NotATable { found: String },
+    /// `i18n.lang` 이 낱말이 아니다 — 그 자리에 선 것.
+    NotAWord { found: String },
+    /// 모르는 말이다 — 적힌 값.
+    Unknown { raw: String },
 }
 
 /// 설정을 읽다 만난 탈의 갈래([`Registry::trouble`], moai-9p7v). **가르는 잣대는 다시 읽어 볼 값이다**
@@ -249,8 +270,9 @@ pub fn read(path: Option<&Path>) -> Registry {
             reg.problems = problems.into_iter().map(at).collect();
             let (lang, lang_problems) = doc.lang();
             reg.lang = lang;
-            reg.lang_problems = lang_problems.into_iter().map(at).collect();
-            reg.problems.extend(reg.lang_problems.iter().cloned());
+            // **자리(`{파일}: …`)도 펴는 쪽이 붙인다**([`Registry::path`]) — 여기서 붙이면 말묶음에
+            // 들 글의 반쪽이 이미 지어진 채로 나간다.
+            reg.lang_problems = lang_problems;
             let (look, problems) = doc.look();
             reg.look = look;
             reg.look_problems = problems.into_iter().map(at).collect();
@@ -759,21 +781,25 @@ impl Doc {
     /// **틀린 값은 알린다**(리뷰 moai-slfv.vrw). `lang = "kr"` 오타나 `lang = 3` 은 조용히
     /// 영어가 되는데, 그러면 고친 설정이 왜 안 듣는지 알 길이 없다 — `look()` 이 틀린 보기 키를
     /// 대는 것과 같은 자다. 이 까닭은 **막지 않는다**: `problems` 는 알림이지 게이트가 아니다.
-    pub fn lang(&self) -> (Option<String>, Vec<String>) {
+    ///
+    /// **까닭은 글이 아니라 자료로 낸다**([`LangTrouble`], moai-dpbi) — 그 글이 설 말을 바로 이
+    /// 값이 정하기 때문이다. 여기서 말묶음을 물으면 설정을 읽는 길이 화면 말을 도로 묻게 되고,
+    /// 그러면 `Ctx::lang` 의 `OnceLock` 이 제 초기화 안에서 다시 열려 모든 명령이 아무 말 없이
+    /// 멈춘다(`cmd::Ctx::lang` 의 주석이 적어 둔 덫이 그것이다).
+    pub fn lang(&self) -> (Option<String>, Vec<LangTrouble>) {
         let mut problems = Vec::new();
         let Some(item) = self.doc.get(I18N) else { return (None, problems) };
         let Some(t) = item.as_table_like() else {
-            problems.push(format!("`{I18N}` 은 `[{I18N}]` 표여야 한다 — 지금은 {}", item.type_name()));
+            problems.push(LangTrouble::NotATable { found: item.type_name().to_string() });
             return (None, problems);
         };
         let Some(item) = t.get(LANG) else { return (None, problems) };
         let Some(raw) = item.as_str() else {
-            problems.push(format!("`{I18N}.{LANG}` 은 낱말이어야 한다 — 지금은 {}", item.type_name()));
+            problems.push(LangTrouble::NotAWord { found: item.type_name().to_string() });
             return (None, problems);
         };
         if crate::i18n::Lang::parse(raw).is_none() {
-            let known: Vec<&str> = crate::i18n::Lang::ALL.into_iter().map(crate::i18n::Lang::code).collect();
-            problems.push(format!("`{I18N}.{LANG}` 은 {} 중 하나다 — {raw:?}", known.join("·")));
+            problems.push(LangTrouble::Unknown { raw: raw.to_string() });
             return (None, problems);
         }
         (Some(raw.to_string()), problems)
@@ -947,9 +973,11 @@ impl Doc {
 
 }
 
-/// 화면 언어가 사는 표(moai-slfv).
-const I18N: &str = "i18n";
-const LANG: &str = "lang";
+/// 화면 언어가 사는 표(moai-slfv). **키 이름은 여기 하나다** — 그 탈을 펴는 쪽([`crate::view::problem`])
+/// 도 이것을 읽는다. 말묶음의 글에 박으면 번역마다 키 이름이 한 벌씩 서서, 키를 고치는 날 다섯
+/// 파일이 조용히 낡는다.
+pub const I18N: &str = "i18n";
+pub const LANG: &str = "lang";
 
 /// 탐색기 보기가 사는 표(moai-2bzp).
 const TUI: &str = "tui";
@@ -2396,23 +2424,27 @@ mod tests {
         assert_eq!(lang("[i18n]\nlang = \"ko\"\n"), (Some("ko".to_string()), vec![]));
         assert_eq!(lang("[[project]]\npath = \"/a\"\n"), (None, vec![]), "표가 없으면 없는 것이다");
         // **틀린 값은 알린다** — 조용히 영어가 되면 고친 설정이 왜 안 듣는지 알 길이 없다.
-        assert_eq!(lang("[i18n]\nlang = 3\n").1, ["`i18n.lang` 은 낱말이어야 한다 — 지금은 integer"]);
-        assert_eq!(lang("i18n = 3\n").1, ["`i18n` 은 `[i18n]` 표여야 한다 — 지금은 integer"]);
-        assert_eq!(lang("[i18n]\nlang = \"kr\"\n").1, ["`i18n.lang` 은 en·ko·zh·ja·es 중 하나다 — \"kr\""]);
+        // **자료로 낸다**(moai-dpbi) — 글은 말을 고른 뒤에 편다(`view::problem`).
+        assert_eq!(lang("[i18n]\nlang = 3\n").1, [LangTrouble::NotAWord { found: "integer".into() }]);
+        assert_eq!(lang("i18n = 3\n").1, [LangTrouble::NotATable { found: "integer".into() }]);
+        assert_eq!(lang("[i18n]\nlang = \"kr\"\n").1, [LangTrouble::Unknown { raw: "kr".into() }]);
         assert!(lang("[i18n]\nlang = \"kr\"\n").0.is_none(), "모르는 코드를 값으로 들였다");
         let reg = read(None);
         assert_eq!(reg.lang, None, "자리를 모르면 언어도 없다");
 
-        // **까닭은 두 자리에 든다**(리뷰 moai-80qw) — `.moai` 밖의 한눈 보기가 대는 `problems`
-        // 와, 저장소 안의 `status` 가 대는 `lang_problems`. 한쪽만 채우면 나머지 화면에서
-        // 오타가 조용히 영어가 된다.
+        // **까닭은 두 자리에 댄다**(리뷰 moai-80qw) — `.moai` 밖의 한눈 보기와, 저장소 안의
+        // `status`. 한쪽만 대면 나머지 화면에서 오타가 조용히 영어가 된다. 두 화면이 **같은
+        // 목록**을 받는 것이 `view::settings_problems` 고, 여기서는 그 재료가 서는지만 본다.
         let d = scratch("lang-problems");
         let path = d.join("config.toml");
         std::fs::write(&path, "[i18n]\nlang = \"kr\"\n").unwrap();
         let bad = read(Some(&path));
-        let said = format!("{}: `i18n.lang` 은 en·ko·zh·ja·es 중 하나다 — \"kr\"", path.display());
-        assert_eq!(bad.lang_problems, vec![said.clone()]);
-        assert!(bad.problems.contains(&said), "밖에서 대는 자리에 안 섰다: {:?}", bad.problems);
+        assert_eq!(bad.lang_problems, [LangTrouble::Unknown { raw: "kr".into() }]);
+        // **자리는 펴는 쪽이 붙인다** — 어느 파일인지가 없으면 고칠 데를 못 찾는다.
+        let said = crate::view::problem(crate::i18n::Lang::Ko, bad.path.as_deref(), &bad.lang_problems[0]);
+        assert_eq!(said, format!("{}: `i18n.lang` 은 en·ko·zh·ja·es 중 하나다 — \"kr\"", path.display()));
+        let both = crate::view::settings_problems(&bad, crate::i18n::Lang::Ko);
+        assert!(both.contains(&said), "밖에서 대는 자리에 안 섰다: {both:?}");
         assert_eq!(bad.lang, None, "틀린 값을 들였다");
     }
 

@@ -232,7 +232,6 @@
   "tui.layer.config_gone": "the file is gone",
   "tui.layer.config_stale": "the user config could not be read — holding the last one — {why}",
   "tui.layer.unlayered": "the user config could not be read — no project layer — {why}",
-  "tui.place.unread_worktree": "the snapshot of a sibling worktree could not be read — ⎇ {branch}: {path}",
   "tui.reload.failed": "could not re-read — {why}",
   "tui.write.no_repo": "could not write — this screen was opened without a repository",
   "tui.write.unjournaled": " — the journal was not written: {why}",
@@ -258,7 +257,6 @@
   "tui.read.marked_one": "✓ read · {id}",
   "tui.read.marked": "✓ read · {n} rows",
   "tui.layer.unread_rows": "the rows could not be read — {why}",
-  "tui.worktree.unfound": "{glyph} no sibling checkout was found — {why}",
   "tui.worktree.no_snapshot": "{glyph} {names} — no snapshot to overlay",
   "tui.worktree.none": "{glyph} none beside this one — no rows to overlay",
   "tui.missing": "(missing)",
@@ -375,5 +373,16 @@
   "tui.register.no_config_to_drop": "! the user config has no place — nothing to drop from",
   "tui.register.already_gone": "already off the list · {path}{layer}",
   "tui.register.dropped": "✓ dropped · {paths} — from the list only; the directory and .moai stay{layer}",
-  "tui.register.drop_failed": "! could not drop — {why}"
+  "tui.register.drop_failed": "! could not drop — {why}",
+  "trouble.skipped": "{at} — unreadable rows left out of the overlay {n}",
+  "trouble.no_git": "Could not run git, so sibling worktrees were not found — {why}",
+  "trouble.failed": "Could not find sibling worktrees — {why}",
+  "trouble.stream": "Reading the worktree listing was cut off — {why}",
+  "trouble.encoding": "Could not read the worktree listing — {why}",
+  "warn.lang_table": "`{key}` must be a `[{key}]` table — it is {is}",
+  "warn.lang_word": "`{key}` must be a word — it is {is}",
+  "warn.lang_unknown": "`{key}` is one of {known} — {raw}",
+  "warn.unreadable_file": "{at}: unreadable rows {n}",
+  "warn.unreadable_at": "  line {line}: {why}",
+  "warn.unreadable_more": "  … {n} more"
 }

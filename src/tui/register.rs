@@ -419,7 +419,7 @@ mod tests {
     fn on_layer(s: &Scratch) -> App {
         let argos = s.project("work/argos");
         let cfg = s.register(&[&argos]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None, crate::i18n::Lang::Ko));
         a.launched_at = Some(s.join("work"));
         a
     }
@@ -606,7 +606,7 @@ mod tests {
         let one = s.project("work/one");
         let two = s.dir("work/two");
         let cfg = s.register(&[&one, &two]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None, crate::i18n::Lang::Ko));
         press(&mut a, &[KeyCode::Down]);
         assert_eq!(place_at_cursor(&a), two);
 
@@ -653,7 +653,7 @@ mod tests {
         let b = s.project("work/b");
         let odd = s.join("work/a/../b");
         let cfg = s.register(&[&odd]);
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None, crate::i18n::Lang::Ko));
         assert_eq!(place_at_cursor(&a), odd);
         a.hit("SPC p d");
         a.key(key(KeyCode::Char('y')));
@@ -669,7 +669,7 @@ mod tests {
         let one = s.project("work/one");
         let here = s.project("work/here");
         let cfg = s.register(&[&one]);
-        let mut layer = Layer::read(Some(&cfg), Some(&here));
+        let mut layer = Layer::read(Some(&cfg), Some(&here), crate::i18n::Lang::Ko);
         layer.at = At::Layer;
         let mut a = App::on_projects(layer);
         assert_eq!(place_at_cursor(&a), here);
@@ -688,7 +688,7 @@ mod tests {
         std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
         let broken = "[[project]\npath = \"/a\"\n";
         std::fs::write(&cfg, broken).unwrap();
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None, crate::i18n::Lang::Ko));
         a.launched_at = Some(s.dir("work"));
         s.dir("work/x");
 
@@ -706,7 +706,7 @@ mod tests {
         assert!(a.on_layer());
 
         // 설정 자리를 모르면 창을 안 연다.
-        let mut none = App::on_projects(Layer::read(None, None));
+        let mut none = App::on_projects(Layer::read(None, None, crate::i18n::Lang::Ko));
         none.launched_at = Some(s.path().to_path_buf());
         none.hit("SPC p a");
         assert_eq!(none.mode, Mode::Browse);
@@ -721,7 +721,7 @@ mod tests {
         let s = Scratch::real("empty");
         let cfg = s.register(&[]);
         let argos = s.project("work/argos");
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None, crate::i18n::Lang::Ko));
         a.launched_at = Some(s.join("work"));
         assert!(a.on_layer() && a.site.repo.is_none());
 
