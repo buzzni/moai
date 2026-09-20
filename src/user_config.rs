@@ -848,8 +848,17 @@ impl Doc {
         let mut hide_deferred = base.hide_deferred != new.hide_deferred;
         let mut sort = (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed);
         let mut fields = base.fields != new.fields;
-        // `fields_known` 은 늘 더하기로 적으니(아래) 적을 것이 있으면 늘 본다.
-        let mut known = new.fields_known.is_some();
+        // **`fields_known` 도 `base != new` 로 잰다**(moai-fdq2). 한때 이 키만 "적을 것이 있으면 늘
+        // 본다"(`is_some()`)였다 — 더하기로만 적는 키라 `base` 를 안 쓰는 것과 같은 결로 둔 것인데,
+        // 그 깃발은 **늘 참**이라 건너뛴 키를 든 것으로 옮기는 길(`App::save_look` 의 `saved = look`,
+        // moai-jr3z)에서 혼자 샜다: 손으로 적은 표 모양 앞에서 같은 거절 알림이 토글마다 다시 서서
+        // 사람이 방금 띄운 말을 덮었다. `save_look` 의 글은 "알림은 이번 한 번" 이라고 적혀 있다.
+        //
+        // **`base` 를 안 쓰는 것은 아래의 `merge_words` 지 이 깃발이 아니다** — 거기 `None` 을 넘기는
+        // 것은 남이 적어 둔 이름을 빼지 않으려는 것이고, 여기서 재는 것은 *이 세션이 적을 것이
+        // 남았는가* 다. 탐색기의 `new` 는 세션 내내 같은 값(아는 열 전부)이라, 한 번 적히고 나면
+        // `saved` 가 그것을 들어 둘이 같아진다 — 그때부터 이 키는 안 본다.
+        let mut known = base.fields_known != new.fields_known;
         let mut detail = base.detail != new.detail;
         // **이 세션이 적을 키가 손으로 적은 표 모양이면 그 키만 안 적는다**(moai-j7r3, moai-jr3z) — 무엇을 덮지
         // 않는가는 `set_hue` 와 같은 자다([`plain`]). `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을
@@ -861,6 +870,15 @@ impl Doc {
         // 다음 실행에서 사라졌다. 보기는 키마다 따로 사는 값이라 한 키가 다른 키의 저장을 막을 까닭이 없다.
         // 차례와 방향은 한 벌이라 하나가 표 모양이면 둘 다 건너뛴다. 건너뛴 키의 까닭을 낸다.
         let t = self.doc.get(TUI).and_then(Item::as_table_like).expect("방금 표로 섰다");
+        // **파일에 그 키가 없으면 이 세션이 이미 적었어도 다시 적는다**(리뷰) — 위의 깃발은 *이 세션이
+        // 적을 것이 남았는가* 를 재는데, 그것만으로는 **파일이 밑에서 바뀐 판**을 못 본다. `saved` 는
+        // 한 번 적고 나면(또는 거절돼 건너뛰고 나면, moai-jr3z) 세션 내내 `new` 와 같아, 그사이 누가
+        // 이 키를 지우거나 설정을 통째로 갈아 끼우면 다음 토글이 `fields` 만 적고 `fields_known` 은
+        // 빼놓는다 — 다음 실행이 그 빈자리를 `Field::BEFORE_KNOWN` 어휘로 읽어 사람이 끈 열을 도로
+        // 켠다(`turning_off_a_new_column_survives_a_trip_through_the_file` 가 막는 그 해다). 걷은
+        // `is_some()` 이 값싸게 해 주던 일이 이것 하나라, 그것만 도로 든다. 더하기로만 적는 키라
+        // (`merge_words` 에 `None` 을 준다) 다시 적어도 남의 이름은 그대로다.
+        known |= !t.contains_key(FIELDS_KNOWN);
         let mut skipped = Vec::new();
         let mut odd = |keys: &[&str], words: bool, go: &mut bool| {
             if !*go {

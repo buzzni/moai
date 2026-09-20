@@ -551,6 +551,13 @@ fn banner(app: &App) -> Option<(String, bool)> {
     {
         parts.push(u.clone());
     }
+    // 층을 **들고 선** 까닭도 같은 자리다(moai-23pm) — 둘은 한 물음이고 서는 화면이 다를 뿐이다
+    // (저쪽은 층을 못 세운 화면, 이쪽은 낡은 층을 든 화면). 아래의 `Layer::problems` 와 달리
+    // `on_layer()` 에 안 막힌다: `moai tui` 를 저장소 안에서 띄우면 거기 서는데, 깨진 설정은
+    // 시계로도 안 풀려 사람이 `0` 을 안 누르면 그 세션 내내 모른다.
+    if let Some(h) = &app.held {
+        parts.push(h.clone());
+    }
     // 사용자 설정의 문제는 **층에서만** 말한다 — 등록 목록의 일이라 프로젝트 안의 화면과는
     // 상관이 없고, 급하지도 않다(읽을 수 있는 항목은 그대로 섰다).
     //
@@ -4075,6 +4082,27 @@ pub(super) mod tests {
 
         let lines = render(&mut a, 80, 12);
         assert!(lines[1].contains("3번째 줄이 깨졌다"), "80칸에서 까닭이 잘렸다 — {:?}", lines[1]);
+        assert!(lines.iter().all(|l| crate::text::width(l) <= 80));
+    }
+
+    /// **들고 선 까닭은 프로젝트 안에서도 댄다**(moai-23pm) — 층이 **안 선** 까닭
+    /// ([`App::unlayered`])과 같은 자다. 그 화면에서는 들고 있는 층이 낡았다는 것을 달리 알
+    /// 길이 없고, 깨진 설정은 시계로도 안 풀려([`crate::user_config::Again::Never`]) 사람이
+    /// `0` 을 안 누르면 그 세션 내내 모른다. 한때는 `Layer::problems` 에 실어 `on_layer()` 에
+    /// 막혔는데, `moai tui` 를 저장소 안에서 띄우면 거기 서지 않는다.
+    #[test]
+    fn the_reason_the_layer_is_held_is_told_inside_a_project_too() {
+        use super::super::layer::At;
+        let mut a = layered(At::Project("/w/one".into()));
+        a.notice = None;
+        assert!(!a.on_layer(), "시험의 전제 — 프로젝트 안에 섰다");
+        a.held = Some("사용자 설정을 못 읽어 지난 것을 들고 있다 — /u/config.toml: TOML 이 깨졌다".into());
+
+        let (text, _) = banner(&a).expect("배너가 서야 한다");
+        assert!(text.contains("지난 것을 들고 있다"), "프로젝트 안에서 들고 선 까닭이 사라졌다 — {text}");
+        let lines = render(&mut a, 80, 12);
+        assert!(lines[1].contains("TOML 이 깨졌다"), "80칸에서 까닭이 잘렸다 — {:?}", lines[1]);
+        // 형제 둘과 같은 자(리뷰) — 이 글이 셋 중 가장 길어, 머리말이나 글리프 칸이 늘면 여기가 먼저 넘친다.
         assert!(lines.iter().all(|l| crate::text::width(l) <= 80));
     }
 
