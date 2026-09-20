@@ -2651,7 +2651,7 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
                 // 하위 셸·파이프 칸의 `exit` 가 아닐 것, 그리고 **글이 뒤로 띄운 것으로 끝나지 않을 것**.
                 // 마지막 하나는 렉서가 `&` 를 `;` 과 한 낱말(`Op::Any`)로 접어 여기서 가릴 수가 없다 —
                 // `bash -c '집기 || { exit 1; } &'` 는 0 으로 끝나는데 이 자리는 그것을 못 본다. 넷을
-                // 한꺼번에 세우는 길은 렉서가 백그라운드를 따로 알려 준 뒤에 연다(moai-4wsq).
+                // 한꺼번에 세우는 길은 렉서가 백그라운드를 따로 알려 준 뒤에 연다(moai-4arw).
                 //
                 // **뒤로 띄운 것으로 끝나는 글의 값은 집기의 값이 아니다** — 치환처럼 들어설 때의
                 // 집기를 도로 세운다(moai-54pk). errexit 는 그 겹 안에서 이미 제 몫을 했다.
@@ -6272,11 +6272,6 @@ mod tests {
             "bash -c 'moai mv t-1 in_progress --from todo || exit 1; sed -i s/a/b/ src/store.rs'",
             "bash -c \"bash -c 'moai mv t-1 in_progress --from todo'\" && sed -i s/a/b/ src/store.rs",
             "bash -c 'set -e; bash -c \"moai mv t-1 in_progress --from todo\"; sed -i s/a/b/ src/store.rs'",
-            // **안 풀린 채 끝난 묶음은 그 셸이 0 으로 끝났다는 것으로 푼다**(moai-54pk) — 자식 셸은
-            // 집기가 지면 거기서 끝나니, 바깥의 `&&` 에 닿은 것은 집기가 이겼다는 뜻이다.
-            "bash -c 'moai mv t-1 in_progress --from todo || { echo fail; exit 1; }' && sed -i s/a/b/ src/store.rs",
-            "bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi' && sed -i s/a/b/ src/store.rs",
-            "sh -c 'moai mv t-1 in_progress --from todo || { echo fail; exit 1; }' && echo x > src/store.rs",
             // **뒤로 띄운 것으로 끝나도 띄울 때 켠 errexit 는 그대로다**(moai-54pk) — 글의 값만 0 이지
             // 그 셸이 errexit 아래 돈 것은 바뀌지 않는다.
             "bash -e -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs; echo done &'",
@@ -6319,8 +6314,13 @@ mod tests {
             "set -e; eval 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
             // 글의 값은 **마지막** 명령의 값이다.
             "bash -c 'moai mv t-1 in_progress --from todo; echo ok' && sed -i s/a/b/ src/store.rs",
-            // **끝내는 묶음이 아니면 안 푼다**(moai-54pk) — 그 묶음이 돌고도 셸이 0 으로 끝나면
-            // 집기가 졌어도 바깥의 `&&` 에 닿는다.
+            // **겹 안에서 안 풀린 채 끝난 끝내는 묶음은 안 푼다**(moai-4arw 가 열릴 때까지, 리뷰
+            // moai-k8j1.209) — 자식 셸이 집기가 져야 0 이 아닌 값으로 끝나는 것은 맞지만, 그것을
+            // 이 자리에서 알려면 전제가 넷 더 선다. 특히 `… &` 로 끝나는 글은 0 으로 끝나는데
+            // 렉서가 `&` 를 `;` 과 한 낱말로 접어 여기서 못 가린다 — 그래서 막는 쪽에 둔다.
+            "bash -c 'moai mv t-1 in_progress --from todo || { echo fail; exit 1; }' && sed -i s/a/b/ src/store.rs",
+            "bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi' && sed -i s/a/b/ src/store.rs",
+            "sh -c 'moai mv t-1 in_progress --from todo || { echo fail; exit 1; }' && echo x > src/store.rs",
             "bash -c 'moai mv t-1 in_progress --from todo || { echo fail; }' && sed -i s/a/b/ src/store.rs",
             "bash -c 'moai mv t-1 in_progress --from todo || ( echo fail; exit 1 )' && sed -i s/a/b/ src/store.rs",
             // 뒤로 띄운 것으로 끝나면 글의 값은 집기의 값이 아니다 — errexit 를 켜고 띄워도 같다.
@@ -6436,8 +6436,9 @@ mod tests {
         assert_eq!(mine("if ! bash -c 'moai mv t-1 in_progress --from todo'; then exit 1; fi"), ["t-1"]);
         assert_eq!(mine("bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi; echo ok'"), ["t-1"]);
         assert!(mine("if ! bash -c 'moai mv t-1 in_progress --from todo &'; then exit 1; fi").is_empty());
-        // **안 풀린 채 끝난 묶음을 나올 때도 같다**(moai-54pk) — 쓰기가 집은 것으로 세는 줄은 기록도 센다.
-        assert_eq!(mine("bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi'"), ["t-1"]);
+        // 글 안에서 **안 풀린 채** 끝난 묶음은 쓰기도 기록도 빈손이다 — 그 묶음을 푸는 길은 moai-4arw
+        // 가 열릴 때 함께 연다(리뷰 moai-k8j1.209). 두 자리가 같은 자로 서는 것이 여기서도 지켜진다.
+        assert!(mine("bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi'").is_empty());
         // 하위 셸의 `exit` 는 자식 셸을 안 끝내, 그 줄의 **쓰기**는 빈손이다(위 목록). 기록은 다르다 —
         // 그 집기는 첫 칸에서 정말 돈다. 기록이 모으는 것은 "집었을 수 있다" 지 "이겼다" 가 아니다.
         assert_eq!(mine("bash -c 'moai mv t-1 in_progress --from todo || ( exit 1 )'"), ["t-1"]);
