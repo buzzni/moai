@@ -6218,3 +6218,17 @@
 {"ts":"2026-09-20T09:34:57Z","id":"moai-6ek1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-3qiw 에서 펼쳤다 — 층을 못 세운 등록·해제가 됐다고만 댄다"}
 {"ts":"2026-09-20T09:34:57Z","id":"moai-3qiw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-shn2 의 멤버 moai-6ek1 로 펼쳤다"}
 {"ts":"2026-09-20T09:35:04Z","id":"moai-3bry.v4h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영 12건. EINTR 을 깨짐으로 읽던 것 · `Unread::all` 이 `blinding` 을 못 품던 것 · `show --tree` 의 `expect` 가 딴 갈래에 기대던 것 · 죽은 `placeable` 짝 · 파는 길의 헛 `open` · 안 겹쳐 볼 때의 헛 `canonical` · `held` 의 마일스톤 지도 두 벌 · 빈 `roots` 에 짓던 `Shelf` · `moai show <에픽>` 의 지도 서너 벌 · 탐색기가 세션 내내 붙들던 옆 스냅샷 · `holds` 의 경로 두 자리 · 낡은 주석 둘. 넘긴 1건은 자리 셈이 main 의 스냅샷을 다시 파는 것이다 — 겹치기 전 `Load` 를 실어 보내는 설계 결정이 붙어 moai-mafv 로 따로 세웠다. 리뷰가 diff 만 봐서 못 짚은 것 하나도 같은 커밋에서 되돌렸다. `Footing` 을 끼우며 `places` 의 문서 블록을 가로챘다."}
+{"ts":"2026-09-20T09:37:10Z","id":"moai-3prn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=502960 (high — 소속 지도와 자리 판정 모으기)"}
+{"ts":"2026-09-20T09:37:11Z","id":"moai-g0zx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 소속 지도와 자리 판정 모으기)"}
+{"ts":"2026-09-20T09:37:11Z","id":"moai-kos1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 소속 지도와 자리 판정 모으기)"}
+{"ts":"2026-09-20T09:37:11Z","id":"moai-rviv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 소속 지도와 자리 판정 모으기)"}
+{"ts":"2026-09-20T09:37:11Z","id":"moai-giz3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 소속 지도와 자리 판정 모으기)"}
+{"ts":"2026-09-20T09:37:11Z","id":"moai-3bry.v4h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=273647 (xhigh — 에픽 둘을 걸친 diff 리뷰)"}
+{"ts":"2026-09-20T09:37:17Z","id":"moai-3prn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T09:37:17Z","id":"moai-g0zx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T09:37:17Z","id":"moai-kos1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T09:37:18Z","id":"moai-rviv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T09:37:18Z","id":"moai-giz3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T09:37:52Z","id":"moai-71ht","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-giz3 의 diff 는 에픽 moai-3bry 의 끝 리뷰(moai-3bry.v4h)가 함께 봤다 — 고칠 자리가 같아 한 diff 로 묶었다(감독 결정). 멤버 리뷰를 따로 부르지 않았다."}
+{"ts":"2026-09-20T09:37:52Z","id":"moai-71ht","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 7/7 로 닫혔다. 이어서 할 것 없다"}
+{"ts":"2026-09-20T09:37:52Z","id":"moai-3bry","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 셋이 첫 칸에 남아 에픽을 연다 — moai-uc5v 와 moai-c4nk 는 src/hook.rs 를 옆 세션이 놓은 뒤에 집고, moai-mafv 는 gather 가 겹치기 전 Load 를 실어 보낼지부터 정한다"}
