@@ -12396,6 +12396,17 @@ fn a_push_that_carries_no_release_tag_goes_through() {
     assert!(out.status.success(), "일상 푸시를 막았다\n{}", text(&out));
 }
 
+/// `--print` 는 릴리스 워크플로가 산출물 이름을 짓는 자리다(moai-4gn9). 워크플로에
+/// 판을 읽는 줄을 따로 적으면 `[package]` 표를 가리는 자가 두 군데가 되고, 한쪽만
+/// 고쳐도 아무도 모른다.
+#[cfg(unix)]
+#[test]
+fn the_version_check_prints_the_manifest_version_for_the_release_workflow() {
+    let out = run_script("check-version.sh", &["--print"], None);
+    assert!(out.status.success(), "판을 못 찍었다\n{}", text(&out));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), manifest_version());
+}
+
 /// 미는 태그 하나가 어긋나면 그 푸시가 멈춘다.
 #[cfg(unix)]
 #[test]

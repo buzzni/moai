@@ -12,6 +12,7 @@
 #
 #   scripts/check-version.sh v0.1.0    릴리스 워크플로의 첫 스텝
 #   scripts/check-version.sh           pre-push 훅. git 이 주는 줄을 stdin 에서 읽는다
+#   scripts/check-version.sh --print   Cargo.toml 의 판을 찍는다 (파일 이름을 짓는 자리)
 #
 # 훅으로 거는 가장 싼 길은 이름을 걸어 두는 것이다. 클론마다 한 번 친다.
 #
@@ -71,6 +72,13 @@ have=$(manifest_version "$manifest")
 [ -n "$have" ] || die "Cargo.toml 의 [package] 에서 version 을 못 읽었다"
 
 if [ "$#" -gt 0 ]; then
+  # 릴리스 워크플로가 산출물 이름을 여기서 받는다 — 판을 읽는 자를 워크플로에
+  # 따로 적으면 `[package]` 표를 가리는 줄이 두 군데가 되고, 한쪽만 고쳐도 아무도
+  # 모른다.
+  if [ "$1" = --print ]; then
+    printf '%s\n' "$have"
+    exit
+  fi
   compare "$1"
   exit
 fi

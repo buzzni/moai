@@ -1,0 +1,181 @@
+# `v*` 태그를 밀면 바이너리와 checksums 를 GitHub 릴리스에 올린다.
+#
+# cargo-dist 를 안 쓰고 손으로 적은 까닭은 고칠 수 있게 하기 위해서다 (사람이
+# 정했다, 2026-09-20). 생성한 워크플로는 손으로 고치면 안 되는데, 여기에는 이
+# 저장소만의 규칙이 둘 있다 — 바이너리 15MB 예산과 설치 스크립트가 checksums
+# 없이는 안 깔게 하는 것(moai-j54h). 그 둘을 생성물 위에 얹으면 다음 생성이
+# 지운다.
+#
+# 배포 채널은 GitHub Releases 와 install.sh 까지다 (사람이 정했다, 2026-09-20).
+# crates.io 와 Homebrew tap 은 이번 범위가 아니다.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # 태그 없이 한 번 돌려 볼 자리. 올리는 잡은 태그일 때만 선다.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 태그를 믿고 굴러가는 것이 이 워크플로 전체라, 믿어도 되는지를 맨 앞에서 잰다.
+  guard:
+    name: 태그와 Cargo.toml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 태그 이름은 `${{ }}` 로 스크립트에 붙이지 않는다 — 이름에 든 글자가 셸
+      # 명령이 되는 자리다. 환경으로 준다.
+      - name: 판이 어긋나면 여기서 멈춘다
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_TYPE" = tag ]; then
+            scripts/check-version.sh "$REF_NAME"
+          else
+            printf '태그가 아닌 판이다 — Cargo.toml 의 %s 로 굴러간다\n' "$(scripts/check-version.sh --print)"
+          fi
+
+  build:
+    name: ${{ matrix.target }}
+    needs: guard
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      # 한 칸이 죽어도 남은 칸은 끝까지 간다 — 무엇이 되고 무엇이 안 되는지를
+      # 한 판에서 본다.
+      fail-fast: false
+      matrix:
+        include:
+          # musl 정적 판이다. 어느 배포판에서도 돌고 컨테이너에서도 돈다.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 타깃을 받는다
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-rel-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-rel-${{ matrix.target }}-
+
+      - name: build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 채로 올리면
+      # 받는 사람 쪽에서야 드러난다. `wc -c` 를 쓰는 것은 `stat` 의 인자가
+      # 리눅스와 macOS 에서 다르기 때문이다.
+      - name: 15MB 예산을 잰다
+        env:
+          BIN: target/${{ matrix.target }}/release/moai
+        run: |
+          set -euo pipefail
+          limit=$((15 * 1024 * 1024))
+          size=$(wc -c <"$BIN" | tr -d '[:space:]')
+          printf '%s  %s bytes / %s bytes\n' "$BIN" "$size" "$limit"
+          if [ "$size" -gt "$limit" ]; then
+            echo "::error::바이너리가 15MB 예산을 넘었다 ($size > $limit bytes)"
+            exit 1
+          fi
+
+      - name: 꾸린다
+        id: pack
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version=$(scripts/check-version.sh --print)
+          name="moai-v$version-$TARGET"
+          mkdir "$name"
+          cp "target/$TARGET/release/moai" "$name/"
+          cp README.md CHANGELOG.md LICENSE "$name/"
+          # macOS 의 tar 는 bsdtar 다. `--` 를 안 쓰는 꼴로 맞춘다.
+          tar czf "$name.tar.gz" "$name"
+          printf 'name=%s\n' "$name" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pack.outputs.name }}
+          path: ${{ steps.pack.outputs.name }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: GitHub 릴리스
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      # 릴리스를 만드는 잡 하나만 쓰기를 든다.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # checksums 는 산출물 곁에 한 파일로 둔다. install.sh 가 이것 없이는 설치를
+      # 거부한다 (moai-j54h) — 이 스텝이 빠지면 그쪽이 조용히 못 깔리는 것이
+      # 아니라 **소리 내어** 거부한다.
+      - name: SHA256SUMS
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum -- *.tar.gz >SHA256SUMS
+          cat SHA256SUMS
+
+      # 릴리스 노트는 CHANGELOG 의 이번 판 절을 그대로 쓴다. 그 절이 없으면 커밋
+      # 목록으로 대신한다 — 노트가 없다고 릴리스를 멈추지는 않는다.
+      - name: 노트를 고른다
+        id: notes
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=${REF_NAME#v}
+          awk -v want="$version" '
+            $0 ~ "^## \\[" want "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md >notes.md
+          if [ -s notes.md ]; then
+            printf 'from=changelog\n' >>"$GITHUB_OUTPUT"
+          else
+            printf 'from=commits\n' >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: 올린다
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+          FROM: ${{ steps.notes.outputs.from }}
+        run: |
+          set -euo pipefail
+          args=(--verify-tag --title "$REF_NAME")
+          case $REF_NAME in
+          *-*) args+=(--prerelease) ;;
+          esac
+          if [ "$FROM" = changelog ]; then
+            args+=(--notes-file notes.md)
+          else
+            args+=(--generate-notes)
+          fi
+          gh release create "$REF_NAME" "${args[@]}" dist/*
