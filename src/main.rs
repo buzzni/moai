@@ -20,6 +20,7 @@ mod model;
 mod nav;
 mod projects;
 mod query;
+mod read_marks;
 mod report;
 #[cfg(test)]
 mod scratch;
