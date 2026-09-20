@@ -2,7 +2,7 @@
 
 use super::{Ctx, Fail, R};
 use crate::config::DEFAULT_STATUSES;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// 여는 마커의 **머리**. 뒤에 메타(`v:`·`hash:`)가 붙고 `-->` 로 닫힌다 — 머리로 찾아야
 /// 메타가 없던 옛 맨 마커(`<!-- moai:begin -->`)도 같은 블록으로 알아본다. 머리가 마커가 되는
@@ -621,9 +621,64 @@ fn covers(have: &str, want: &str) -> bool {
     !have.is_empty() && ((have == want && !dir_only) || want.starts_with(&format!("{have}/")))
 }
 
+/// 이 자리에 트래커를 세우면 **아무도 안 읽을 자리**인가 — 그렇다면 어디가 진짜 자리인지(moai-pjrr·moai-mz0e).
+///
+/// 가르는 것은 **명령이 어느 트래커로 가는가** 하나다. 두 자리에서 그 답이 여기가 아니다.
+///
+/// - **딸린 워크트리**: 워크트리 안에서 친 `moai` 는 주 체크아웃의 트래커를 읽고 쓴다(moai-y7go).
+///   여기 심은 `.moai` 는 아무도 안 읽고, 커밋되면 병합에서 겨룬다
+/// - **위에 트래커가 있는 하위 디렉터리**: 여기 세우면 그 뒤로 이 밑의 명령과 옆 디렉터리의 명령이
+///   서로 다른 파일을 쓴다. 사람은 "왜 내 이슈가 안 보이나" 를 딴 데서 찾는다
+///
+/// **둘 다 일부러 하는 길이 있다** — 모노레포 하위에 제 트래커를 두는 것과, 그 워크트리에서만 쓰는
+/// 트래커다. 그래서 `MOAI_HERE` 가 이 물음을 통째로 끈다(2026-09-20 사용자 결정): 도구는 거절하며
+/// 두 길을 함께 대고, 사람이 그중 하나를 골라 다시 부른다.
+///
+/// **위로 찾는 자는 `.moai` 가 디렉터리인가로 가른다** — [`crate::store`] 의 위로 찾기와 같은 자다.
+/// `config.toml` 까지 봐야 트래커라고 세는 자리도 있지만([`crate::worktree::tracker_root`]), 여기서
+/// 물어야 하는 것은 "명령이 어디로 가는가" 라 그쪽 자를 쓰면 설정이 빠진 `.moai` 위에서 둘이 갈린다.
+fn planted_elsewhere(root: &Path) -> Option<(String, PathBuf)> {
+    // **워크트리를 먼저 묻는다.** 워크트리의 루트는 조상이기도 해 아래 자가 같은 자리를 대는데,
+    // 그때 대야 할 말은 "위에 있다" 가 아니라 "여기는 워크트리다" 다.
+    //
+    // **`MOAI_HERE` 를 보는 자는 [`crate::store`] 하나다** — 이 부름이 그것을 이미 거친다.
+    let main = crate::store::Repo::opened_root(root);
+    if main != root {
+        // **자리를 글자로 댄다** — 아래 `-C` 줄에도 같은 경로가 서지만, 그 줄은 칠 명령이지 "지금
+        // 어디에 있나" 에 대한 답이 아니다(위 갈래가 `.moai` 자리를 대는 것과 같은 자리다).
+        let there = main.join(".moai");
+        return Some((format!("여기는 딸린 워크트리다 — 트래커는 주 체크아웃에 산다\n      {}", there.display()), main));
+    }
+    if crate::store::here_wanted() {
+        return None;
+    }
+    let mut at = root.to_path_buf();
+    while at.pop() {
+        if at.join(".moai").is_dir() {
+            return Some((format!("위에 트래커가 있다 — {}", at.join(".moai").display()), at));
+        }
+    }
+    None
+}
+
 pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
+    // **세우기 전에 한 번 묻는다**(moai-pjrr·moai-mz0e). 이미 여기 심겨 있으면 안 묻는다 — 그때 이
+    // 명령이 하는 일은 딸린 파일을 다시 맞추는 것뿐이라 새 트래커가 서지 않는다.
+    if !dir.exists()
+        && let Some((why, there)) = planted_elsewhere(&root)
+    {
+        return Err(Fail::coded(
+            format!(
+                "{why}
+      거기를 맞추려면  moai -C {} init
+      정말 여기 세우려면  MOAI_HERE=1 moai init",
+                there.display()
+            ),
+            super::code::ALREADY_EXISTS,
+        ));
+    }
 
     // 이미 심긴 곳에서 다시 부르면 **딸린 파일만 다시 맞춘다.**
     //
@@ -878,6 +933,29 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **위에 트래커가 있으면 그 자리를 댄다**(moai-pjrr). 여기 하나 더 세우면 그 뒤로 이 밑의
+    /// 명령과 옆 디렉터리의 명령이 서로 다른 파일을 쓴다 — 사람은 "왜 내 이슈가 안 보이나" 를
+    /// 딴 데서 찾는다.
+    ///
+    /// **`.moai` 가 디렉터리인가로 가른다** — 위로 찾는 [`crate::store`] 와 같은 자다. 그 자가
+    /// 갈리면 여기서 지나간 자리를 명령이 잡는다.
+    #[test]
+    fn a_subdir_under_a_tracker_is_told_where_the_tracker_is() {
+        let s = crate::scratch::Scratch::new("init-above");
+        let deep = s.join("src/deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        assert!(planted_elsewhere(&deep).is_none(), "트래커가 없는데 자리를 댔다");
+
+        std::fs::create_dir_all(s.join(".moai")).unwrap();
+        let (why, there) = planted_elsewhere(&deep).expect("위의 트래커를 못 봤다");
+        assert!(why.contains("위에 트래커가 있다"), "{why}");
+        assert!(why.contains(&s.join(".moai").display().to_string()), "어느 자리인지를 안 댔다 — {why}");
+        assert_eq!(there, s.path(), "댄 자리가 트래커의 자리가 아니다");
+
+        // 그 자리 자신은 안 묻는다 — 여기 이미 심겨 있으면 `run` 이 딸린 파일만 다시 맞춘다.
+        assert!(planted_elsewhere(s.path()).is_none(), "제 트래커를 남의 것으로 댔다");
+    }
 
     /// 두 번 넣어도 블록은 하나고, 사람이 쓴 산문은 바이트 단위로 그대로다.
     #[test]

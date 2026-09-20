@@ -1479,7 +1479,10 @@ fn inside_a_repo_a_registry_changes_nothing() {
     let s = init("ovinside");
     add(s.path(), &["제 일"]);
     let other = dir_in(&s, "elsewhere");
-    ok(&other, &["init", "other"]);
+    // **위에 트래커가 있는 자리에 일부러 세운다**(moai-pjrr) — `init` 은 그 자리를 대며 거절하고,
+    // `MOAI_HERE` 가 그 물음을 끈다. 모노레포 하위에 제 트래커를 두는 그 길이다.
+    let planted = staged(&["init", "other"]).current_dir(&other).env("MOAI_HERE", "1").output().expect("moai 를 실행하지 못했다");
+    assert!(planted.status.success(), "{}", String::from_utf8_lossy(&planted.stderr));
     let cfg = registry(&s, &[&other, s.path()]);
     for args in [&[][..], &["status"], &["ready"], &["status", "--json"], &["ready", "--json"]] {
         let plain = moai(s.path(), args);
