@@ -2091,9 +2091,12 @@ fn promotes_into(seg: &[String]) -> bool {
 /// `epic` 은 비어 있어, 옳은 에픽을 댄 생성까지 거절당한다 — 시험판이 실제로
 /// 그랬고, 이 규칙을 만든 세션이 제 리뷰 결과를 이슈로 적지 못했다.
 /// `report::groups` 와 `report::milestones` 가 이미 그 상속을 푼다.
+///
+/// **두 지도를 [`report::ties`] 한 벌로 받는다**(moai-c4nk) — `milestones` 는 제 안에서
+/// `groups` 를 다시 지어, 나란히 부르면 소속 지도가 두 벌 선다. 훅은 도구 호출마다 이 길을
+/// 지난다. `report` 쪽의 같은 자리는 moai-3prn 이 이미 걷었다.
 pub fn unit_of<'a>(issues: &'a [Issue], focus: &[&'a Issue]) -> BTreeSet<&'a str> {
-    let epics = report::groups(issues);
-    let stones = report::milestones(issues);
+    let (epics, stones) = report::ties(issues);
     let mut out = BTreeSet::new();
     for i in focus {
         out.insert(i.id.as_str());
