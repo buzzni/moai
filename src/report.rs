@@ -2730,7 +2730,9 @@ pub fn status_in<'a>(
         .len();
     let no_epic = Warning::new("no_epic", ids_of(&loose));
     let ratio = if open == 0 { 0.0 } else { no_epic.count as f64 / open as f64 };
-    if no_epic.count >= cfg.status.no_epic_min || (ratio >= cfg.status.no_epic_ratio && no_epic.count > 0) {
+    // **빈 집합으로는 말하지 않는다.** 문턱이 0 이면 `>=` 가 늘 참이라, 이슈가 하나도 없는
+    // 저장소에서 `에픽 없는 이슈 0건` 이 영영 선다 — 0 은 낮춘 것이지 "없는 것도 세라" 가 아니다.
+    if no_epic.count > 0 && (no_epic.count >= cfg.status.no_epic_min || ratio >= cfg.status.no_epic_ratio) {
         warnings.push(no_epic.ratio(ratio).hint("moai show -e none"));
     }
 
@@ -2773,7 +2775,10 @@ pub fn status_in<'a>(
             Warning::new("stale_review", ids_of(&rotting))
                 .days(cfg.status.review_days)
                 .ages(|i| i.status_since.as_str(), &rotting, now)
-                .hint("moai show -s review --stale 3"),
+                // **문턱을 그대로 넘긴다.** 여기 수를 박아 두면 `status_review_days` 를 고친
+                // 저장소에서 경고가 센 것과 안내가 내는 것이 다른 집합이 된다 — 낮춘 쪽에서는
+                // 안내가 빈 목록을 내서 읽는 쪽이 경고를 틀린 것으로 읽는다.
+                .hint(&format!("moai show -s review --stale {}", cfg.status.review_days)),
         );
     }
 
@@ -2957,7 +2962,8 @@ pub fn status_in<'a>(
     let piled =
         |i: &&Issue| is_idea(i) && !i.status.is_done() && !out_of_plan.contains(i.id.as_str());
     let count = issues.iter().filter(piled).count();
-    if count >= cfg.status.idea_pile {
+    // 문턱 0 으로 `쌓인 idea 0건` 이 서지 않게 한다 — 위 `no_epic` 과 같은 까닭이다.
+    if count > 0 && count >= cfg.status.idea_pile {
         let oldest = issues
             .iter()
             .filter(piled)

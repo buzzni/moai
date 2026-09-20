@@ -46,31 +46,56 @@ fn value(raw: &str) -> Option<&str> {
     (!inner.contains('"')).then_some(inner)
 }
 
-/// 최상위 `키 = 값` 하나의 **쓰인 그대로**와 몇째 줄인지. 따옴표는 안 벗긴다 —
-/// 글([`scalar`])과 수([`count`]·[`days`]·[`ratio`])가 따옴표를 서로 반대로 요구하므로,
-/// 벗기는 일은 읽는 쪽이 한다.
-fn raw<'s>(src: &'s str, key: &str) -> Result<Option<(&'s str, usize)>, String> {
+/// `키 = 값` 줄 하나의 **쓰인 그대로**. 따옴표는 안 벗긴다 — 글([`scalar`])과
+/// 수([`count`]·[`days`]·[`ratio`])가 따옴표를 서로 반대로 요구하므로, 벗기는 일은 읽는 쪽이 한다.
+///
+/// `table` 은 그 줄 위의 마지막 `[…]` 머리다. 이 파서는 테이블을 안 읽으므로 그런 줄은 값으로
+/// 안 쓰이는데, **안 쓰인다는 것을 아는 자리가 있어야** [`Thresholds::check_keys`] 가 그것을
+/// 댈 수 있다 — 조용히 넘기면 `[status]` 밑에 적은 문턱이 영영 안 먹고 까닭이 어디에도 없다.
+struct Entry<'s> {
+    key: &'s str,
+    value: &'s str,
+    line: usize,
+    table: Option<&'s str>,
+}
+
+/// 파일을 **한 번만** 훑어 줄을 다 모은다.
+///
+/// 키마다 다시 훑던 때는 `Config::parse` 한 번이 파일을 열두 번 지났다 — 문턱 여덟에
+/// `scalar` 셋, 거기에 `check_keys` 가 한 번 더였다. 훑는 자가 하나라 주석·따옴표·테이블
+/// 규칙도 한 곳에만 산다.
+fn entries(src: &str) -> Result<Vec<Entry<'_>>, String> {
     let src = src.strip_prefix('\u{feff}').unwrap_or(src); // BOM
+    let mut out = Vec::new();
+    let mut table = None;
     for (i, line) in src.lines().enumerate() {
         let n = i + 1;
         let l = strip_comment(line, n)?.trim();
-        if l.is_empty() || l.starts_with('[') {
+        if l.is_empty() {
+            continue;
+        }
+        if let Some(t) = l.strip_prefix('[') {
+            // 모양이 어긋난 머리로 파일 전체를 거절하지 않는다 — 전에도 `[` 줄은 그냥 넘겼다.
+            table = Some(t.strip_suffix(']').unwrap_or(t).trim());
             continue;
         }
         let (k, v) = l
             .split_once('=')
             .ok_or_else(|| format!("{n}줄: `키 = \"값\"` 형식이 아니다"))?;
-        if k.trim() != key {
-            continue;
-        }
-        return Ok(Some((v.trim(), n)));
+        out.push(Entry { key: k.trim(), value: v.trim(), line: n, table });
     }
-    Ok(None)
+    Ok(out)
+}
+
+/// 최상위 줄 하나를 찾는다. **테이블 안의 줄은 안 쓴다** — 이 파서는 테이블을 안 읽으므로
+/// 거기 적힌 `prefix` 를 맨 위의 것으로 읽으면 안 적은 값을 적은 것으로 센다.
+fn raw<'s>(es: &[Entry<'s>], key: &str) -> Option<(&'s str, usize)> {
+    es.iter().find(|e| e.table.is_none() && e.key == key).map(|e| (e.value, e.line))
 }
 
 /// 최상위 `키 = "값"` 하나를 읽는다.
-pub fn scalar(src: &str, key: &str) -> Result<Option<String>, String> {
-    let Some((v, n)) = raw(src, key)? else { return Ok(None) };
+fn text(es: &[Entry<'_>], key: &str) -> Result<Option<String>, String> {
+    let Some((v, n)) = raw(es, key) else { return Ok(None) };
     let v = value(v)
         .ok_or_else(|| format!("{n}줄: `{key}` 의 값은 큰따옴표로 감싸야 한다 — {v:?}"))?;
     Ok(Some(v.to_string()))
@@ -82,8 +107,8 @@ pub fn scalar(src: &str, key: &str) -> Result<Option<String>, String> {
 ///
 /// **못 읽은 수를 기본값으로 덮지 않는다.** 덮으면 고쳐 적은 값이 안 먹는 까닭을
 /// 설정 파일만 보고는 못 찾는다 — 임계값을 파일로 뺀 뜻이 거기서 사라진다.
-fn number<T: std::str::FromStr>(src: &str, key: &str, what: &str) -> Result<Option<T>, String> {
-    let Some((v, n)) = raw(src, key)? else { return Ok(None) };
+fn number<T: std::str::FromStr>(es: &[Entry<'_>], key: &str, what: &str) -> Result<Option<T>, String> {
+    let Some((v, n)) = raw(es, key) else { return Ok(None) };
     if v.starts_with('"') {
         return Err(format!("{n}줄: `{key}` 는 수다 — 따옴표를 뺀다 ({v})"));
     }
@@ -91,19 +116,19 @@ fn number<T: std::str::FromStr>(src: &str, key: &str, what: &str) -> Result<Opti
 }
 
 /// 날수. 음수를 막으려고 `u32` 로 읽고 넓힌다 — `-1` 이 통과하면 그 경고가 모든 줄에 선다.
-fn days(src: &str, key: &str, default: i64) -> Result<i64, String> {
-    Ok(number::<u32>(src, key, "0 이상의 정수다")?.map_or(default, i64::from))
+fn days(es: &[Entry<'_>], key: &str, default: i64) -> Result<i64, String> {
+    Ok(number::<u32>(es, key, "0 이상의 정수다")?.map_or(default, i64::from))
 }
 
 /// 건수.
-fn count(src: &str, key: &str, default: usize) -> Result<usize, String> {
-    Ok(number::<usize>(src, key, "0 이상의 정수다")?.unwrap_or(default))
+fn count(es: &[Entry<'_>], key: &str, default: usize) -> Result<usize, String> {
+    Ok(number::<usize>(es, key, "0 이상의 정수다")?.unwrap_or(default))
 }
 
 /// 비율. `0.15` 가 15% 다 — 백분율로 적지 않는다. 1 을 넘기면 그 경고가 영영 안 서는데,
 /// 끄려는 뜻이었다면 그것은 임계값이 아니라 없는 손잡이다. 조용히 끄느니 거절한다.
-fn ratio(src: &str, key: &str, default: f64) -> Result<f64, String> {
-    let Some(v) = number::<f64>(src, key, "0 과 1 사이의 소수다")? else { return Ok(default) };
+fn ratio(es: &[Entry<'_>], key: &str, default: f64) -> Result<f64, String> {
+    let Some(v) = number::<f64>(es, key, "0 과 1 사이의 소수다")? else { return Ok(default) };
     if !(0.0..=1.0).contains(&v) {
         return Err(format!("`{key}` 는 0 과 1 사이의 소수다 — {v}"));
     }
@@ -181,17 +206,17 @@ pub fn check_prefix(prefix: &str) -> Result<(), String> {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Thresholds {
-    /// review 에 이만큼 머물면 썩는 것으로 본다.
+    /// review 에 **이 날수를 넘겨** 머물면 썩는 것으로 본다(`d > review_days`).
     pub review_days: i64,
-    /// 집어 놓고 이만큼 안 건드리면 잊은 것으로 본다.
+    /// 집어 놓고 이 날수를 넘겨 안 건드리면 잊은 것으로 본다.
     pub wip_days: i64,
-    /// 막힌 채로 이만큼 서 있으면 "계획이 멈춘 자리" 로 본다.
+    /// 막힌 채로 이 날수를 넘겨 서 있으면 "계획이 멈춘 자리" 로 본다.
     pub blocked_days: i64,
-    /// 한 번에 이보다 많이 벌이면 알린다.
+    /// 한 번에 이보다 많이 벌이면 알린다(`count > wip_limit`).
     pub wip_limit: usize,
-    /// 에픽 없는 이슈가 이 비율을 넘으면 알린다.
+    /// 에픽 없는 이슈가 **이 비율부터** 알린다(`ratio >= no_epic_ratio`).
     pub no_epic_ratio: f64,
-    /// 비율이 낮아도 이 수를 넘으면 알린다.
+    /// 비율이 낮아도 이 수부터 알린다(`count >= no_epic_min`).
     pub no_epic_min: usize,
     /// 흐름을 재는 창(일).
     pub flow_days: i64,
@@ -237,17 +262,17 @@ impl Thresholds {
         "status_idea_pile",
     ];
 
-    fn parse(src: &str) -> Result<Thresholds, String> {
-        let d = Thresholds::default();
+    fn parse(es: &[Entry<'_>]) -> Result<Thresholds, String> {
+        let d = Thresholds::DEFAULT;
         let t = Thresholds {
-            review_days: days(src, "status_review_days", d.review_days)?,
-            wip_days: days(src, "status_wip_days", d.wip_days)?,
-            blocked_days: days(src, "status_blocked_days", d.blocked_days)?,
-            wip_limit: count(src, "status_wip_limit", d.wip_limit)?,
-            no_epic_ratio: ratio(src, "status_no_epic_ratio", d.no_epic_ratio)?,
-            no_epic_min: count(src, "status_no_epic_min", d.no_epic_min)?,
-            flow_days: days(src, "status_flow_days", d.flow_days)?,
-            idea_pile: count(src, "status_idea_pile", d.idea_pile)?,
+            review_days: days(es, "status_review_days", d.review_days)?,
+            wip_days: days(es, "status_wip_days", d.wip_days)?,
+            blocked_days: days(es, "status_blocked_days", d.blocked_days)?,
+            wip_limit: count(es, "status_wip_limit", d.wip_limit)?,
+            no_epic_ratio: ratio(es, "status_no_epic_ratio", d.no_epic_ratio)?,
+            no_epic_min: count(es, "status_no_epic_min", d.no_epic_min)?,
+            flow_days: days(es, "status_flow_days", d.flow_days)?,
+            idea_pile: count(es, "status_idea_pile", d.idea_pile)?,
         };
         // 흐름 창이 0 이면 `생성 0 · 완료 0` 이 서서 "아무 일도 없었다" 로 읽힌다.
         // 그것은 비추는 수를 끈 것이지 낮춘 것이 아니다.
@@ -257,20 +282,32 @@ impl Thresholds {
         Ok(t)
     }
 
-    /// `status_` 로 시작하는데 아는 키가 아닌 줄을 댄다.
-    fn check_keys(src: &str) -> Result<(), String> {
-        let src = src.strip_prefix('\u{feff}').unwrap_or(src);
-        for (i, line) in src.lines().enumerate() {
-            let n = i + 1;
-            let l = strip_comment(line, n)?.trim();
-            let Some((k, _)) = l.split_once('=') else { continue };
-            let k = k.trim();
-            if k.starts_with("status_") && !Thresholds::KEYS.contains(&k) {
-                return Err(format!(
-                    "{n}줄: `{k}` 라는 설정이 없다. 있는 것: {}",
-                    Thresholds::KEYS.join(", ")
-                ));
-            }
+    /// `status_` 로 시작하는데 아는 키가 아닌 줄과, **문턱을 맨 위가 아닌 자리에 적은 줄**을 댄다.
+    ///
+    /// 문턱은 평평한 키다. 그런데 TOML 로는 `[status]` 밑에 `review_days` 를 적는 것이 더
+    /// 자연스러워서 실제로 그렇게 적히고, 이 파서는 테이블을 안 읽으므로 그 줄이 **조용히 안
+    /// 먹는다** — 오타를 소리내는 것과 똑같은 까닭으로 이것도 소리내야 한다. 고치고 나서 화면이
+    /// 안 바뀌는 것으로만 확인되는 자리라, 넘기면 왜 안 먹는지 설정 파일에 아무 자취가 없다.
+    fn check_keys(es: &[Entry<'_>]) -> Result<(), String> {
+        for e in es {
+            let flat = format!("status_{}", e.key);
+            let known = Thresholds::KEYS.contains(&e.key);
+            let bare = Thresholds::KEYS.contains(&flat.as_str());
+            let named = match (e.table.is_some(), known, bare) {
+                // 테이블 안에 적은 문턱 — 이 파서는 그 줄을 안 읽는다.
+                (true, true, _) => e.key.to_string(),
+                (true, _, true) | (false, _, true) => flat,
+                (false, false, _) if e.key.starts_with("status_") => {
+                    return Err(format!(
+                        "{}줄: `{}` 라는 설정이 없다. 있는 것: {}",
+                        e.line,
+                        e.key,
+                        Thresholds::KEYS.join(", ")
+                    ));
+                }
+                _ => continue,
+            };
+            return Err(format!("{}줄: 문턱은 테이블 없이 맨 위에 적는다 — `{named} = …`", e.line));
         }
         Ok(())
     }
@@ -296,12 +333,14 @@ impl Config {
     }
 
     pub fn parse(src: &str) -> Result<Config, String> {
-        let prefix = scalar(src, "prefix")?
+        // **파일은 한 번만 훑는다**([`entries`]) — 키마다 다시 훑으면 키 수 × 줄 수다.
+        let es = &entries(src)?;
+        let prefix = text(es, "prefix")?
             .filter(|p| !p.is_empty())
             .ok_or("`prefix` 가 없다")?;
         check_prefix(&prefix)?;
 
-        let raw = scalar(src, "statuses")?.unwrap_or_else(|| DEFAULT_STATUSES.into());
+        let raw = text(es, "statuses")?.unwrap_or_else(|| DEFAULT_STATUSES.into());
         let statuses: Vec<String> = raw
             .split(',')
             .map(|s| s.trim().to_string())
@@ -321,15 +360,15 @@ impl Config {
             return Err(format!("`statuses` 에 `{}` 가 두 번 있다", dup.1));
         }
 
-        let naming = match scalar(src, "naming")? {
+        let naming = match text(es, "naming")? {
             None => Naming::default(),
             Some(raw) => Naming::parse(&raw).ok_or_else(|| {
                 format!("`naming` 은 {} 중 하나다 — {raw:?}", Naming::ALL.join("·"))
             })?,
         };
 
-        Thresholds::check_keys(src)?;
-        let status = Thresholds::parse(src)?;
+        Thresholds::check_keys(es)?;
+        let status = Thresholds::parse(es)?;
 
         Ok(Config { prefix, statuses, naming, status })
     }
@@ -399,6 +438,12 @@ mod tests {
             Config::parse("prefix = \"argos\"\nnaming = \"email\"\n").unwrap().naming,
             Naming::Email
         );
+    }
+
+    /// 글 하나를 원본에서 바로 읽는다 — 줄 모으기([`entries`])와 글 읽기([`text`])를 한 번에
+    /// 지나는 시험용 길이다. 도는 코드는 `Config::parse` 가 줄을 한 번 모아 나눠 쓴다.
+    fn scalar(src: &str, key: &str) -> Result<Option<String>, String> {
+        text(&entries(src)?, key)
     }
 
     #[test]
@@ -543,11 +588,36 @@ status_idea_pile     = 16
         }
     }
 
-    /// 0 은 끄는 것이 아니라 낮추는 것이다 — 날수 0 이면 그날로 선다.
+    /// 0 은 끄는 것이 아니라 낮추는 것이다 — 문턱이 0 이면 한 건부터 선다.
     #[test]
     fn zero_is_a_lower_threshold_not_a_switch() {
         let c = Config::parse("prefix = \"a\"\nstatus_review_days = 0\nstatus_wip_limit = 0\n").unwrap();
         assert_eq!((c.status.review_days, c.status.wip_limit), (0, 0));
+    }
+
+    /// **`[status]` 테이블은 조용히 안 먹는 자리다.** 이 파서는 테이블을 안 읽는데 TOML 로는
+    /// 그 꼴이 더 자연스러워 실제로 그렇게 적힌다 — 오타를 소리내는 것과 똑같은 까닭으로
+    /// 이것도 소리내야 한다. 고친 뒤 화면이 안 바뀌는 것으로만 확인되는 자리라서다.
+    #[test]
+    fn a_threshold_written_under_a_table_is_refused() {
+        for src in [
+            "prefix = \"a\"\n[status]\nreview_days = 1\n",
+            "prefix = \"a\"\n[status]\nstatus_review_days = 1\n",
+            // 맨 위에 접두어 없이 적은 것도 같다 — 그 이름의 설정은 없다.
+            "prefix = \"a\"\nreview_days = 1\n",
+        ] {
+            let e = Config::parse(src).unwrap_err();
+            assert!(e.contains("테이블 없이 맨 위에") && e.contains("status_review_days"), "{src:?} → {e:?}");
+        }
+        // 문턱이 아닌 키는 테이블 안에 있어도 그대로 넘긴다 — 모르는 키는 여전히 자유다.
+        Config::parse("prefix = \"a\"\n[아무거나]\nfoo = \"x\"\n").unwrap();
+    }
+
+    /// **테이블 안의 줄을 맨 위의 것으로 읽지 않는다.** 읽으면 안 적은 접두어가 적힌 것이 된다.
+    #[test]
+    fn a_key_inside_a_table_is_not_a_top_level_key() {
+        let e = Config::parse("[아무거나]\nprefix = \"argos\"\n").unwrap_err();
+        assert!(e.contains("`prefix` 가 없다"), "{e}");
     }
 
     #[test]

@@ -9966,6 +9966,15 @@ fn git_at(dir: &Path, at: &str, args: &[&str]) -> String {
 }
 
 fn git_run(dir: &Path, at: Option<&str>, args: &[&str]) -> String {
+    let out = git_try(dir, at, args);
+    assert!(out.status.success(), "git {args:?} 가 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// 같은 git 을 돌리되 **성공을 요구하지 않는다.** 충돌을 기다리는 시험이 쓴다 —
+/// 손으로 다시 적으면 `-c` 를 하나 더 다는 날 그 시험만 안 따라오고, 실제로 그렇게
+/// `init.defaultBranch=main` 이 빠진 사본이 있었다.
+fn git_try(dir: &Path, at: Option<&str>, args: &[&str]) -> std::process::Output {
     // `isolated` 로 띄운다 — git 훅 안에서 시험이 돌 때 물려받은 `GIT_DIR` 이 남으면
     // 여기서의 `git commit` 이 바깥 저장소에 떨어진다.
     let mut cmd = isolated("git");
@@ -9975,9 +9984,7 @@ fn git_run(dir: &Path, at: Option<&str>, args: &[&str]) -> String {
     if let Some(at) = at {
         cmd.env("GIT_AUTHOR_DATE", at).env("GIT_COMMITTER_DATE", at);
     }
-    let out = cmd.output().expect("git 을 실행하지 못했다");
-    assert!(out.status.success(), "git {args:?} 가 실패했다\n{}", String::from_utf8_lossy(&out.stderr));
-    String::from_utf8(out.stdout).unwrap()
+    cmd.output().expect("git 을 실행하지 못했다")
 }
 
 /// **이 체크아웃의 트래커에 쓴다**(`MOAI_HERE`) — 딸린 워크트리의 스냅샷을 일부러 갈라 놓는
@@ -11565,12 +11572,7 @@ fn the_merge_driver_hands_a_real_clash_to_a_person() {
     ok(root, &["edit", &id, "--title", "이쪽 제목"]);
     git(root, &["commit", "-qam", "main"]);
 
-    let out = isolated("git")
-        .args(["-c", "user.name=테스터", "-c", "user.email=tester@example.com"])
-        .args(["merge", "--no-edit", "side"])
-        .current_dir(root)
-        .output()
-        .expect("git 을 실행하지 못했다");
+    let out = git_try(root, None, &["merge", "--no-edit", "side"]);
     assert!(!out.status.success(), "진짜 충돌을 말없이 골랐다\n{}", text(&out));
     let merged = issues(root);
     assert!(merged.contains("<<<<<<<") && merged.contains(">>>>>>>"), "{merged}");
@@ -11596,4 +11598,133 @@ fn an_uninstalled_clone_falls_back_to_gits_own_merge() {
     // 드라이버가 없어도 git 이 제 머지를 돌린다 — 없는 드라이버로 멈추지 않는다.
     git(root, &["merge", "--no-edit", "side"]);
     assert!(line_of(root, &id).contains("\"parser\""), "{}", issues(root));
+}
+
+/// 못 읽는 바이트를 파일 끝에 덧붙인다 — 손으로 푼 충돌이 남기는 자리다.
+fn append_raw(root: &Path, bytes: &[u8]) {
+    let path = root.join(".moai/issues.jsonl");
+    let mut raw = std::fs::read(&path).unwrap();
+    raw.extend_from_slice(bytes);
+    std::fs::write(&path, &raw).unwrap();
+}
+
+/// **답을 못 지어도 두 쪽이 다 사람에게 간다.**
+///
+/// 여기가 이 드라이버의 유일한 무너질 자리다 — git 은 비영으로 끝난 드라이버를 "충돌" 로 읽고
+/// **`%A` 를 그대로 병합 결과로 삼는다.** 그래서 드라이버가 아무것도 안 쓰고 실패하면 파일은
+/// 이쪽 것 그대로인데 충돌 표식이 없고, 그것을 열어 본 사람은 "이미 풀렸다" 로 읽는다 —
+/// `git add` 한 줄에 저쪽이 통째로 사라진다. 조용한 손실이 이 도구가 못 견디는 유일한 실패
+/// 모드라, **표식을 먼저 쓰고 나서** 비영으로 끝낸다.
+///
+/// 글자가 깨진 줄로 그 판을 만든다: 글로 읽을 수가 없어 id 로 짝지을 길이 없는 판이다.
+/// **줄은 손으로 짓는다** — 그런 파일은 `moai edit` 도 못 읽으므로 도구로는 그 판을 못 만든다.
+#[test]
+fn a_merge_it_cannot_settle_still_shows_both_sides() {
+    let s = init("mergebroken");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    add(root, &["하나"]);
+    let base = issues(root);
+    let junk: &[u8] = b"\xff\xfe \xea\xb9\xa8\n";
+    let plant = |title: &str| {
+        let mut raw = base.replace("하나", title).into_bytes();
+        raw.extend_from_slice(junk);
+        std::fs::write(root.join(".moai/issues.jsonl"), &raw).unwrap();
+    };
+    plant("하나");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    plant("저쪽 제목");
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    plant("이쪽 제목");
+    git(root, &["commit", "-qam", "main"]);
+
+    let out = git_try(root, None, &["merge", "--no-edit", "side"]);
+    assert!(!out.status.success(), "못 푼 판을 말없이 골랐다\n{}", text(&out));
+    let merged = String::from_utf8_lossy(&std::fs::read(root.join(".moai/issues.jsonl")).unwrap()).into_owned();
+    assert!(
+        merged.contains("<<<<<<<") && merged.contains(">>>>>>>"),
+        "표식 없는 충돌을 남겼다 — `git add` 한 줄에 저쪽이 사라진다\n{merged}"
+    );
+    assert!(merged.contains("이쪽 제목") && merged.contains("저쪽 제목"), "두 쪽을 다 안 보여 준다\n{merged}");
+}
+
+/// **낡은 줄 하나로 파일째 넘기지 않는다.**
+///
+/// `store` 는 못 읽는 줄을 들고 다시 쓰므로(CLAUDE.md: *"남의 낡은 줄 하나가 모든 쓰기를
+/// 막으면 되돌릴 방법이 도구 밖에만 남는다"*) 그런 줄은 저장소에 오래 남는다. 그 한 줄로
+/// 모든 병합을 파일째 충돌로 넘기면 드라이버를 심은 저장소가 **안 심은 저장소보다** 합치기
+/// 어려워진다 — git 의 기본 머지는 멀리 떨어진 두 줄을 깨끗이 합친다.
+#[test]
+fn one_stale_line_does_not_escalate_the_whole_file() {
+    let s = init("mergestale");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    let one = add(root, &["첫째"]);
+    let two = add(root, &["둘째"]);
+    // 읽히기는 하는데 이슈가 아닌 줄 — `priority` 가 수가 아니다.
+    let junk: &[u8] = b"{\"id\":\"mergestale-0000\",\"priority\":\"\xeb\x86\x92\xec\x9d\x8c\"}\n";
+    append_raw(root, junk);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &two, "--tag", "parser"]);
+    append_raw(root, junk);
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &one, "--tag", "bug"]);
+    append_raw(root, junk);
+    git(root, &["commit", "-qam", "main"]);
+
+    git(root, &["merge", "--no-edit", "side"]);
+    let merged = issues(root);
+    assert!(!merged.contains("<<<<<<<"), "낡은 줄 하나로 파일째 넘겼다\n{merged}");
+    assert!(line_of(root, &one).contains("\"bug\""), "이쪽 고침이 사라졌다\n{merged}");
+    assert!(line_of(root, &two).contains("\"parser\""), "저쪽 고침이 사라졌다\n{merged}");
+    // 못 읽는 줄도 그대로 남는다 — 버리면 그것이 조용한 손실이다.
+    assert!(merged.contains("mergestale-0000"), "낡은 줄을 버렸다\n{merged}");
+}
+
+/// **충돌일 때도 `--json` 이 어느 id 인지 말한다.**
+///
+/// `json_line` 은 찍지 않고 줄을 돌려주고 `main` 은 `Err` 에서 그 줄을 버리므로, 그냥 `Err` 로
+/// 나가면 `conflicts` 가 어디에도 안 선다 — 그러면 기계는 한국말 문장을 긁어야 한다.
+/// 종료 코드는 그대로 0 이 아니다: 그것이 git 에게 "충돌" 이다.
+#[test]
+fn the_merge_driver_names_the_clashing_ids_in_json() {
+    let s = init("mergejson");
+    let root = s.path();
+    let id = add(root, &["하나"]);
+    let snapshot = root.join(".moai/issues.jsonl");
+    let side = |name: &str, to: &str| {
+        let p = root.join(format!("{name}.jsonl"));
+        let src = std::fs::read_to_string(&snapshot).unwrap();
+        std::fs::write(&p, src.replace("\"status\":\"todo\"", &format!("\"status\":\"{to}\""))).unwrap();
+        p
+    };
+    let (base, ours, theirs) = (side("base", "todo"), side("ours", "in_progress"), side("theirs", "review"));
+    let out = moai(
+        root,
+        &[
+            "merge-driver",
+            base.to_str().unwrap(),
+            ours.to_str().unwrap(),
+            theirs.to_str().unwrap(),
+            "7",
+            ".moai/issues.jsonl",
+            "--json",
+        ],
+    );
+    assert!(!out.status.success(), "충돌인데 0 으로 끝났다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    one_json_value(&said);
+    assert!(said.contains(&format!("\"conflicts\":[\"{id}\"]")), "충돌 id 를 기계 출력에서 못 읽는다\n{said}");
 }
