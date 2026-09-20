@@ -6433,3 +6433,4 @@
 {"ts":"2026-09-20T13:17:25Z","id":"moai-mz0e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-20T13:17:25Z","id":"moai-6ek1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-20T13:17:40Z","id":"moai-shn2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 다섯과 리뷰를 8296593 으로 develop 에 머지하고 닫았다. 첫 칸에 다섯이 남았다 — moai-blvx(src/store.rs 를 moai-jlon 이 쥐어 대기), 리뷰가 넘긴 moai-bdej(못 푼 자리의 도장, 고치는 길이 사용자 결정이다)·moai-upna·moai-hzfu·moai-nppo(view.rs 는 옆 세션 자리다)."}
+{"ts":"2026-09-20T13:32:07Z","id":"moai-bdej","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정 (2026-09-20): 떨어진 자리를 past 에 넣어 다음 성한 쓰기가 합치게 한다. 리뷰 moai-shn2.mi7 이 낸 2번이다. 쓰기만 거절하는 길은 ESTALE 이 잠깐 나는 기계에서 moai read 가 가끔 지는 값을 치르고, 대기만 하는 길은 도장을 딴 파일에 둔 채로 둔다 — 값을 안 잃는 길이 이것뿐이라 골랐다. past 가 무엇을 드는가가 늘어나는 것과 떨어진 자리가 쌓일 때 합치는 값은 받아들인다."}
