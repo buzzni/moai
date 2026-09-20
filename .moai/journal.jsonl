@@ -5871,3 +5871,13 @@
 {"ts":"2026-09-20T03:31:11Z","id":"moai-uyhd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옛 자리와 지금 자리의 순서를 자리로만 가른다"}
 {"ts":"2026-09-20T03:31:15Z","id":"moai-lqsr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"없는 자리를 도구의 두 쪽이 다르게 읽는다"}
 {"ts":"2026-09-20T03:31:18Z","id":"moai-qaeg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"canonicalize 하고 떨어지는 코드가 다섯 벌이다"}
+{"ts":"2026-09-20T03:34:08Z","id":"moai-f5e3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=190000 (max — 읽음 파일의 자리 셈과 그 쓰기 경로)"}
+{"ts":"2026-09-20T03:34:08Z","id":"moai-f31d.lhe","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=302817 (max — 리뷰 서브에이전트가 쓴 몫)"}
+{"ts":"2026-09-20T03:34:10Z","id":"moai-hze6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 세션 집기 기록의 표. 토큰은 이 창이 moai-k8j1 부터 이어 써 에픽별로 못 가른다)"}
+{"ts":"2026-09-20T03:34:11Z","id":"moai-j2vp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 거절문·알림·route 가 겨눌 트래커)"}
+{"ts":"2026-09-20T03:34:11Z","id":"moai-51h9.q5l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=400394 (max — 훅 판정과 세션 기록, 10각 + 차분 오라클)"}
+{"ts":"2026-09-20T03:34:19Z","id":"moai-f5e3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T03:34:20Z","id":"moai-f31d.lhe","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열다섯 중 다섯을 고쳤고(claim 이 적는 철자, 탐색기의 r 이 겹치는 자리, 까닭의 차례, 문지기가 same_dir 를 쓰게, 걸음마다 도는 길에서 옛 자리 안 짓기) 하나는 되돌렸다 — 설정 파일을 푸니 read/ 가 dotfiles 저장소로 들어가, 트래커 밖에 둔 첫 결정이 뒤집혔다(리뷰가 지은 바이너리로 재 봤다). 뿌리만 풀고 설정 축은 안 푼다. 넘긴 7·13(걷은 id 가 옛 자리에서 되살아난다, 옛 자리가 안 합쳐진다)은 한 뿌리라 여기서 고쳤다 — 첫 쓰기가 합치고 그 뒤로는 안 읽는다. 나머지는 담았다: 10번 moai-qem4, 8번 moai-0b4b, 11번 moai-uyhd, 12번 moai-lqsr, 15번 moai-qaeg. 14번은 설정 축을 안 풀면서 없어졌다"}
+{"ts":"2026-09-20T03:34:22Z","id":"moai-hze6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T03:34:22Z","id":"moai-j2vp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T03:34:22Z","id":"moai-51h9.q5l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: 1~5·8·9·10 과 시험 11~15. 절반이 이 에픽 두 커밋의 되돌림이었다(5 는 moai-4jsy, 11 은 한국어 알림 시험이 늘 통과하던 것). 멤버로 남김: moai-dbzs(6·7, 사람 결정 필요). idea: moai-722b(3·4 나머지)·moai-v4lw(picked 튜플)"}
