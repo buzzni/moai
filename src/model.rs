@@ -26,14 +26,21 @@ pub const MAX_TEXT_BYTES: usize = 64 * 1024;
 /// 리뷰 줄은 [`crate::guide::REVIEW_OVER_LIMIT`] 에서 온다 — 가르치는 글과 거절문이 갈라지면
 /// 큰 리뷰를 닫는 쪽이 두 말 사이에서 멈춘다(moai-b8aj). `<크기>` 는 여기서 채운다: 재 놓은 수를
 /// 자리 표시로 도로 내밀면 받는 쪽이 첫 줄에서 그것을 옮겨 적어야 한다.
-pub fn check_text_size(id: &str, what: &str, text: &str) -> R<()> {
+/// `at` 은 **가리키는 말**이지 반드시 id 가 아니다 — 이 쓰기가 짓는 줄은 거절하면 안 남으므로
+/// id 가 아니라 제목으로 가리킨다([`unwritten`], moai-1rkl).
+///
+/// **그 말을 늦게 받는다.** 넘치는 글은 드물고 가리키는 말은 [`unwritten`] 이 제목을 두 벌
+/// 베껴서 짓는데, 미리 지어 넘기던 판은 500줄 계획이면 그 헛일을 500번 하고 전부 버렸다.
+/// 여기서 부르면 거절할 때만 든다.
+pub fn check_text_size(at: impl FnOnce() -> String, what: &str, text: &str) -> R<()> {
     if text.len() <= MAX_TEXT_BYTES {
         return Ok(());
     }
+    let at = at();
     let kb = text.len().div_ceil(1024);
     Err(Fail::coded(
         format!(
-            "{id}: {what} 크기가 {kb}KB 다 — 한 번에 {}KB 까지 적는다. 잘라 적지 않는다\n      \
+            "{at}: {what} 크기가 {kb}KB 다 — 한 번에 {}KB 까지 적는다. 잘라 적지 않는다\n      \
              요약을 적고 원문은 파일로 둔다. 리뷰 원문이면 리뷰가 낸 글이지 그 대화록(JSONL)이 아니다\n      \
              리뷰 원문이면: {}",
             MAX_TEXT_BYTES / 1024,
@@ -59,7 +66,12 @@ pub fn check_text_size(id: &str, what: &str, text: &str) -> R<()> {
 ///
 /// 자르는 자리는 **글자** 경계지 글자 무리(grapheme) 경계가 아니다. 이음 표식(ZWJ)이나 첫
 /// 자모 하나가 끝에 남을 수 있고, 표식이 그 뒤에 붙는다. 노트에 담는 가리킴에는 그것으로 됐다.
-pub fn fit(text: &str, budget: usize) -> std::borrow::Cow<'_, str> {
+///
+/// **단위를 이름에 적는다**(moai-jgnj). 이 저장소에는 `fit` 이 셋 더 있고(`markdown`·`tui::draw`·
+/// `tui::scroll`) 그쪽 예산은 **칸**이다. 한글은 3바이트에 2칸이라 칸 예산을 이 자리에 넘기면
+/// 답이 예산의 1.5배로 서고, 그러면 [`check_text_size`] 가 도로 거절해 moai-clta 가 그대로
+/// 돌아온다. 맞는 쪽으로 틀리는 값이 아니라 **소리 없이 넘치는** 값이라 이름으로 가른다.
+pub fn fit_bytes(text: &str, budget: usize) -> std::borrow::Cow<'_, str> {
     const MARK: &str = "…";
     if text.len() <= budget {
         return std::borrow::Cow::Borrowed(text);
@@ -73,6 +85,35 @@ pub fn fit(text: &str, budget: usize) -> std::borrow::Cow<'_, str> {
         cut -= 1;
     }
     std::borrow::Cow::Owned(format!("{}{MARK}", &text[..cut]))
+}
+
+/// 크기 거절문이 **아직 안 지은 줄**을 가리키는 말(moai-1rkl).
+///
+/// 거절하는 쓰기는 아무것도 안 남기므로 그 줄의 id 는 어디에도 없다. 그런데도 그것을 대던 판은
+/// 받는 쪽을 없는 id 를 찾으러 보냈다 — 같은 계획을 두 번 돌리면 그때마다 다른 id 가 나왔다.
+/// `add` 가 "칸 검사는 id 를 뽑기 **전에** 한다" 로 이미 지키던 자를 크기 검사에도 세운다.
+///
+/// 제목 한 토막을 대는 것은 계획에 여러 줄이 있을 때 **어느 줄인지** 가려야 해서다. 제목 자체가
+/// 넘친 것이면 그 머리가 그대로 표가 된다.
+pub fn unwritten(title: &str) -> String {
+    format!("새 줄 '{}'", fit_bytes(&crate::text::one_line(title), 60))
+}
+
+/// 이미 지어진 거절문의 머리에 선 id 를 [`unwritten`] 의 말로 갈아 끼운다(moai-1rkl).
+///
+/// 크기만 고치고 두면 **같은 쓰기가 축마다 다른 말을 한다.** [`Issue::validate_fields`] 의 말은
+/// 일곱 자리가 모두 `<id>: ` 로 시작하는데, 그 id 가 이번에 뽑은 것이면 거절 뒤에 어디에도 안
+/// 남는다 — `add --from` 에 `#bug,perf` 한 줄을 주면 `<없는 id>: 태그에 …` 가 나오고, 같은
+/// 계획을 두 번 돌리면 그때마다 다른 id 가 나왔다. [`check_text_size`] 가 이미 막아 둔 바로 그
+/// 실패다.
+///
+/// **머리만 간다.** 검사마다 가리키는 자를 따로 두면 그 말이 두 벌로 갈리고, 한쪽만 고치는 날
+/// 이 어긋남이 돌아온다. 머리가 그 꼴이 아니면(`id 형식이 아니다` 는 id 를 따옴표로 댄다) 그대로 둔다.
+pub fn point_at_unwritten(id: &str, title: &str, said: String) -> String {
+    match said.strip_prefix(&format!("{id}: ")) {
+        Some(rest) => format!("{}: {rest}", unwritten(title)),
+        None => said,
+    }
 }
 
 /// 이슈의 구조적 종류. `tags` 와 축이 다르다 —
@@ -995,19 +1036,19 @@ mod tests {
         )
     }
 
-    /// [`fit`] 은 **넘을 때만** 줄이고, 줄일 때는 글자 가운데를 안 자른다. 어느 답도
+    /// [`fit_bytes`] 는 **넘을 때만** 줄이고, 줄일 때는 글자 가운데를 안 자른다. 어느 답도
     /// `budget` 을 안 넘는다 — 넘치게 내면 [`check_text_size`] 가 도로 거절해 아무것도 못 고친다.
     #[test]
-    fn fit_shortens_only_what_must_and_never_mid_character() {
-        assert_eq!(fit("가나다", 9), "가나다", "딱 맞는 글을 줄였다");
-        assert_eq!(fit("", 0), "");
+    fn fit_bytes_shortens_only_what_must_and_never_mid_character() {
+        assert_eq!(fit_bytes("가나다", 9), "가나다", "딱 맞는 글을 줄였다");
+        assert_eq!(fit_bytes("", 0), "");
         // 표식이 3바이트다 — 8바이트 예산에는 다섯 바이트가 남지만 두 글자는 안 들어간다.
-        assert_eq!(fit("가나다", 8), "가…");
-        assert_eq!(fit("가나다", 6), "가…");
-        assert_eq!(fit("가나다", 5), "…", "글자 가운데서 잘랐다");
+        assert_eq!(fit_bytes("가나다", 8), "가…");
+        assert_eq!(fit_bytes("가나다", 6), "가…");
+        assert_eq!(fit_bytes("가나다", 5), "…", "글자 가운데서 잘랐다");
         // 표식조차 못 담는 예산에서도 넘치지 않는다.
         for budget in 0..10 {
-            assert!(fit("가나다", budget).len() <= budget, "{budget}바이트 예산이 넘쳤다");
+            assert!(fit_bytes("가나다", budget).len() <= budget, "{budget}바이트 예산이 넘쳤다");
         }
     }
 
