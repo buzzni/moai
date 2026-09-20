@@ -30,10 +30,25 @@ mkdir -p "$hooks"
 mark_head() { printf '# >>> moai:%s >>>' "$1"; }
 mark_foot() { printf '# <<< moai:%s <<<' "$1"; }
 
+# 앞서 있던 훅이 남았는데 우리가 이어 부를 자리가 없어진 때. **말없이 버려두지 않는다.**
+stray_before() {
+  printf 'install-git-hooks: %s — 블록이 없는데 %s.moai-before 가 남아 있다.\n' "$1" "$1" >&2
+  printf '  %s 를 부를 것이 없다 — 손으로 되돌리거나 치운다\n' "$2.moai-before" >&2
+}
+
 uninstall_one() {
   name=$1
   path=$hooks/$name
   [ -f "$path" ] || return 0
+  # **우리 블록이 없으면 그 파일은 우리 것이 아니다.** 걷을 것이 없는데도 awk 로 베껴 쓰던
+  # 판은 두 가지를 부쉈다 — 심볼릭 링크(husky·lefthook 이 거는 자리)가 복사본으로 굳어 그쪽
+  # 업데이트가 안 닿고, `chmod -x` 로 꺼 둔 남의 훅이 `chmod 755` 로 되살아났다. `install_one`
+  # 이 실행 비트를 안 건드리는 것과 같은 까닭이다: **안전망을 걷는 일이 남의 게이트를 다시
+  # 켜는 일이 되면 안 된다.** 게다가 그러고서 "블록을 걷었다" 고 댔다 — 안 한 일을 했다고 한다.
+  if ! grep -qF -- "$(mark_head "$name")" "$path"; then
+    [ ! -e "$path.moai-before" ] || stray_before "$name" "$path"
+    return 0
+  fi
   # 블록만 걷는다. 남의 줄은 그대로 둔다.
   awk -v head="$(mark_head "$name")" -v foot="$(mark_foot "$name")" '
     index($0, head) == 1 { skip = 1; next }

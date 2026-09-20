@@ -212,6 +212,7 @@ const SUBDIR: &str = r#"cd "$(git -C <루트> rev-parse --show-prefix)""#;
 /// 값이라는 것이 `cmd/read.rs` 의 전제인데, 신원이 하나면 그 전제가 선 채로 깨진다. 가르치려면
 /// 에이전트용 신원(`MOAI_CONFIG` 를 가르는 길)이 먼저다.
 const CHEATSHEET: &str = r#"    moai status                            보드 · 경고 · 흐름 (세션은 여기서 시작)
+    moai prime                             쥔 것과 다음 것만. 세션 첫머리에 읽는 짧은 한 판
     moai ready                             지금 집을 수 있는 일
     moai show <id>                         본문·자식·이력. 왜 그렇게 정했는지가 여기 있다
     moai show -g <키워드>                  이미 적어 뒀는지 찾는다
@@ -602,8 +603,11 @@ pub const TMUX_OWN: &str = "env -u TMUX tmux -L <고유 이름> …";
 
 /// `init` 이 AGENTS.md 의 마커 사이에 쓰는 블록. **언제나 읽히는 산문이다.**
 ///
-/// 정적이라 `bd prime` 같은 명령을 따로 두지 않는다 — **`moai status` 가
-/// prime 이다.**
+/// 한때 여기에 "정적이라 `bd prime` 같은 명령을 따로 두지 않는다 — `moai status` 가
+/// prime 이다" 가 적혀 있었다. `moai prime` 이 서면서 그 말이 틀렸는데(moai-5ok8), **이
+/// 블록이 곧 에이전트가 읽는 글이라** 고치지 않으면 도구가 제 명령을 없다고 가르친다.
+/// 나뉜 자리는 이렇다 — 보드(`status`)는 사람이 한 화면으로 훑는 것이고, `prime` 은
+/// 세션 첫머리와 접힌 뒤에 **다시 주입되는** 짧은 한 판이다. 둘 다 [`CHEATSHEET`] 에 선다.
 pub fn agents() -> String {
     format!(
         r#"## 이슈 트래커 — moai

@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:5d7c9c31 -->
+<!-- moai:begin v:0.1.0 hash:2980801f -->
 ## 이슈 트래커 — moai
 
 이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
@@ -7,6 +7,7 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. 승인 게이트가 
 세션을 시작하면 `moai status` 를 먼저 돌린다. 보드와 경고가 한 화면에 나온다.
 
     moai status                            보드 · 경고 · 흐름 (세션은 여기서 시작)
+    moai prime                             쥔 것과 다음 것만. 세션 첫머리에 읽는 짧은 한 판
     moai ready                             지금 집을 수 있는 일
     moai show <id>                         본문·자식·이력. 왜 그렇게 정했는지가 여기 있다
     moai show -g <키워드>                  이미 적어 뒀는지 찾는다

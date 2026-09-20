@@ -171,7 +171,7 @@ pub fn shelved_by<S: AsRef<str>>(roots: &[S]) -> String {
 }
 
 /// 한 줄에 이름을 대는 줄의 수. 넘으면 수로만 댄다.
-const UNBLOCKED_SHOWN: usize = 3;
+const TRAIL_SHOWN: usize = 3;
 
 /// `moai mv <id> done` 이 **그 쓰기가 연 것**을 대는 줄들(moai-j4xs, `report::freed`).
 /// 셋 다 비면 빈 목록 — 말할 것이 없을 때 출력이 전과 같다.
@@ -206,10 +206,10 @@ fn trail(head: &str, rows: &[Issue], more: &str) -> Option<String> {
     }
     let named: Vec<String> = rows
         .iter()
-        .take(UNBLOCKED_SHOWN)
+        .take(TRAIL_SHOWN)
         .map(|i| format!("{} {}", paint(style::ID, &one_line(&i.id)), paint(style::DIM, &clip(&one_line(&i.title), 40))))
         .collect();
-    let more = match rows.len().saturating_sub(UNBLOCKED_SHOWN) {
+    let more = match rows.len().saturating_sub(TRAIL_SHOWN) {
         0 => String::new(),
         n => paint(style::DIM, &fill(more, &[("n", &n.to_string())])),
     };
@@ -1120,13 +1120,19 @@ pub fn prime(p: &crate::report::Prime, epics: &crate::report::EpicLabels, screen
     let lang = screen.lang;
     let mut out = vec![format!("# {}", say(lang, "prime.title")), String::new()];
 
+    // **모든 칸이 [`one_line`] 을 지난다 — id 와 칸까지.** 읽기는 관대해서 줄바꿈이 든 id 나
+    // 칸이 파일에 실제로 설 수 있는데(손으로 푼 머지), 이 판은 사람이 읽는 표가 아니라
+    // 에이전트의 맥락에 그대로 실리는 마크다운이다. 한 줄만 새면 `## 머리글` 과 가짜 `- \`id\``
+    // 줄이 이 판의 글로 서서, 읽는 쪽이 그것을 자료가 아니라 시킴으로 읽는다. 곁의
+    // [`trail`] 은 id 를 이미 이렇게 편다 — 한 diff 에 선 두 표면이 갈려 있었다.
     let row = |i: &Issue, column: bool| {
         let epic = epics.get(&(i.id.as_str(), i.kind)).map(|t| format!(" ({})", one_line(t))).unwrap_or_default();
-        let col = if column { format!(" · {}", i.status) } else { String::new() };
+        let col = if column { format!(" · {}", one_line(i.status.as_str())) } else { String::new() };
         // **남의 가지에서 온 줄에는 그 가지를 단다**(`--worktree`). 안 달면 옆 워크트리가
         // 집은 일이 이 판의 "집은 것" 에 섞여, 읽는 쪽이 제가 쥔 것으로 읽고 이어서 한다.
-        let branch = screen.branch(&i.id).map(|b| format!(" · {} {b}", style::BRANCH_GLYPH)).unwrap_or_default();
-        format!("- `{}` p{}{}{} — {}{}", i.id, i.priority(), col, branch, one_line(&i.title), epic)
+        let branch =
+            screen.branch(&i.id).map(|b| format!(" · {} {}", style::BRANCH_GLYPH, one_line(b))).unwrap_or_default();
+        format!("- `{}` p{}{}{} — {}{}", one_line(&i.id), i.priority(), col, branch, one_line(&i.title), epic)
     };
 
     out.push(format!("## {}", say(lang, "prime.held")));
@@ -1147,8 +1153,13 @@ pub fn prime(p: &crate::report::Prime, epics: &crate::report::EpicLabels, screen
         out.extend(p.picks.iter().map(|i| row(i, false)));
         // **잘린 것을 댄다.** 안 대면 이 판이 "집을 것이 셋뿐" 으로 읽혀, 다음에 무엇을
         // 집을지 고르는 쪽이 `moai ready` 를 아예 안 부른다.
+        //
+        // **`status` 의 꼬리와 키가 같다**([`more_of`], `status.more`) — 같은 "N건 더" 를 두
+        // 키로 두면 한쪽만 옮긴 말에서 한 화면이 두 모양으로 센다. 뒤의 명령은 자료라 말묶음
+        // 밖에 둔다: 번역이 그것을 만지면 훅에 걸린 세션이 못 치는 명령을 받는다
+        // (`projects_ready` 가 같은 자리를 같은 꼴로 푼다).
         if p.rest > 0 {
-            out.push(format!("- {}", fill(say(lang, "prime.rest"), &[("n", &p.rest.to_string())])));
+            out.push(format!("- {} — `moai ready`", more_of(p.rest, lang)));
         }
     }
     // 도는 마일스톤은 **목록 밑에서** 댄다 — `ready` 가 짧아진 까닭을 그 자리에서 읽는다.
@@ -1164,6 +1175,25 @@ pub fn prime(p: &crate::report::Prime, epics: &crate::report::EpicLabels, screen
     out.extend(prime_closing(lang).into_iter().map(|said| format!("- {said}")));
     out.push(String::new());
 
+    out.push(format!("## {}", say(lang, "prime.commands")));
+    out.push(String::new());
+    out.extend(prime_commands(lang).into_iter().map(|(run, said)| format!("- `{run}` — {said}")));
+    out
+}
+
+/// 트래커를 못 읽은 자리의 [`prime`]. **머리글이 한 자리에만 있다** — `cmd/prime.rs` 가 같은
+/// `# 제목` 을 손으로 한 벌 더 짓던 판은 이 함수를 고쳐도 그쪽이 옛 모양으로 남았다.
+///
+/// **닫기 전 목록과 명령은 여기서도 선다.** `--json` 이 그 둘을 싣는데 사람 쪽만 빼면,
+/// 훅에 거는 쪽이 두 표면 중 하나를 못 믿는다([`prime_closing`] 의 까닭 그대로).
+pub fn prime_no_repo(lang: Lang) -> Vec<String> {
+    let mut out = vec![format!("# {}", say(lang, "prime.title")), String::new()];
+    out.push(say(lang, "prime.no_repo").to_string());
+    out.push(String::new());
+    out.push(format!("## {}", say(lang, "prime.closing")));
+    out.push(String::new());
+    out.extend(prime_closing(lang).into_iter().map(|said| format!("- {said}")));
+    out.push(String::new());
     out.push(format!("## {}", say(lang, "prime.commands")));
     out.push(String::new());
     out.extend(prime_commands(lang).into_iter().map(|(run, said)| format!("- `{run}` — {said}")));

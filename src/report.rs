@@ -2353,6 +2353,10 @@ pub struct Prime<'a> {
 /// `prime` 이 내미는 다음 일의 수. **셋이다** — 요약 한 판의 값은 짧다는 것이고, 더 보는 말은
 /// `moai ready` 하나다. 이 자름은 사람 쪽과 `--json` 이 **같이** 쓴다: 사람 화면만 자르면
 /// 기계가 읽는 판이 보드만큼 길어져 이 명령이 선 까닭이 사라진다.
+///
+/// **다만 이 수가 묶는 것은 줄 수지 크기가 아니다**(리뷰). 한때 `--json` 이 줄을 통째로
+/// (본문까지) 펴 11KB 였다 — 셋으로 잘렸는데도 사람 쪽의 네 배고 보드에 가까웠다. 크기를
+/// 묶는 것은 `cmd::prime::Brief` 이고, 둘이 함께 서야 위의 말이 참이 된다.
 pub const PRIME_PICKS: usize = 3;
 
 /// [`Prime`] 을 읽어 낸다.
@@ -2451,7 +2455,7 @@ pub fn unblocked<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config) -> Vec<
 ///
 /// **저장하지 않는다.** 셋 다 두 스냅샷을 지금 견준 값이다 — 필드로 적으면 이슈 A 를 닫을
 /// 때 A 이외의 줄을 써야 하고, 그것이 beads 의 `is_blocked`·`bd recompute-blocked` 다.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Freed<'a> {
     /// 쓰기 전에는 [`ready`] 가 아니었고 쓴 뒤에는 ready 인 일 — [`unblocked`] 그대로다.
     pub unblocked: Vec<&'a Issue>,
@@ -2490,11 +2494,17 @@ fn closable<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config) -> Vec<&'a I
     let open = |issues: &[Issue], id: &str, off: &BTreeSet<&str>| {
         children_of(issues, id).iter().any(|c| is_work(c) && !off.contains(c.id.as_str()) && !c.status.is_done())
     };
+    // **가려진 줄은 여기 안 든다** — `unblocked_pick` 과 [`wip`] 가 그 줄을 집은 일로 안 세는
+    // 것과 같은 자다(moai-es40). 안 맞추면 쌍둥이에게 자리를 뺏긴 부모에게 "닫으면 된다" 고
+    // 대는데, 그 id 는 `duplicate_id` 로 파일째 쓰기가 막혀 있어 시킨 명령을 도구가 제 손으로
+    // 거절한다 — 덫을 하나 놓는 일이다.
+    let eclipsed = eclipsed(after);
     after
         .iter()
         .filter(|p| {
             is_work(p)
                 && !now_off.contains(p.id.as_str())
+                && !eclipsed(p)
                 && cfg.is_started(p.status.as_str())
                 && !open(after, &p.id, &now_off)
                 && open(before, &p.id, &was_off)
@@ -2504,18 +2514,19 @@ fn closable<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config) -> Vec<&'a I
 
 /// 닫은 줄들의 에픽마다 **다음에 집을 것 하나**. 차례는 [`ready_in`] 의 차례 그대로다.
 fn next_of<'a>(after: &'a [Issue], cfg: &Config, closed: &[&str], said: &[&'a Issue]) -> Vec<&'a Issue> {
-    if closed.is_empty() {
+    // **소속을 먼저 묻고 차례는 나중에 잰다.** 에픽 없는 줄을 닫은 것은 여기서 할 말이
+    // 없는데([`groups`] 에 안 든다), 차례를 먼저 재면 그 판이 빈 답을 내려고 스냅샷을 한 번
+    // 더 걷는다 — 닫는 쓰기는 락을 쥔 자리라 헛걸음 한 판이 그대로 락 시간이다.
+    let epic_of = groups(after);
+    let epics: BTreeSet<&str> = closed.iter().filter_map(|id| epic_of.get(id).copied()).collect();
+    if epics.is_empty() {
         return Vec::new();
     }
     let (picks, _) = ready_in(after, cfg);
-    if picks.is_empty() {
-        return Vec::new();
-    }
-    let epic_of = groups(after);
     let already: BTreeSet<&str> = said.iter().map(|i| i.id.as_str()).collect();
-    // 에픽 없는 줄을 닫은 것은 여기서 할 말이 없다 — "같은 에픽" 이 없다.
-    let epics: BTreeSet<&str> = closed.iter().filter_map(|id| epic_of.get(id).copied()).collect();
-    let mut seen = BTreeSet::new();
+    // **한 줄은 한 에픽에만 든다**([`groups`] 는 id 마다 에픽 하나를 낸다). 그래서 서로 다른
+    // 에픽이 같은 줄을 고를 수 없고, 겹침을 거르는 자리는 위의 `already` 하나뿐이다 —
+    // `unblocked` 에 이미 선 줄을 또 대지 않는 것이 실제로 막아야 할 겹침이다.
     epics
         .into_iter()
         .filter_map(|e| {
@@ -2524,8 +2535,6 @@ fn next_of<'a>(after: &'a [Issue], cfg: &Config, closed: &[&str], said: &[&'a Is
                 .find(|p| epic_of.get(p.id.as_str()) == Some(&e) && !already.contains(p.id.as_str()))
                 .copied()
         })
-        // 에픽 둘을 한 번에 닫으면 두 에픽의 다음 일이 같은 줄일 수 있다 — 한 번만 댄다.
-        .filter(|p| seen.insert(p.id.as_str()))
         .collect()
 }
 

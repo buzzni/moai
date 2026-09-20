@@ -40,29 +40,61 @@ esac
 #
 # 겸사겸사 자리도 옳다: 사람이 편집기를 여는 커밋은 사람이 치는 커밋이고, 이 표식이
 # 말하려는 것은 에이전트가 돌린 커밋이다.
-grep -qv -e '^#' -e '^[[:space:]]*$' -- "$moai_file" || exit 0
-
-# **이미 적혀 있으면 안 적는다.** `--amend` 와 `-c <커밋>` 은 옛 메시지를 그대로 들고 오는데,
-# 고칠 때마다 한 줄씩 쌓이면 트레일러가 아니라 로그가 된다. 줄 머리에서 시작한 것만 센다.
-grep -q '^Executed-By:' "$moai_file" && exit 0
+#
+# **"썼는가" 를 우리 자로 세지 않는다.** `^#` 로 주석을 세던 판은 두 자리에서 졌다 —
+# `git commit -v` 는 가위선 밑에 diff 를 싣는데 그 줄은 주석도 빈 줄도 아니라 쓰기도 전인
+# 메시지가 "썼다" 로 읽혔고, `core.commentChar` 를 바꾼 클론에서는 템플릿 전체가 그렇게
+# 읽혔다. 둘 다 트레일러가 사람이 칠 제목 줄 **위**에 꽂히는 자리다. 가위선 밑을 떼는 것은
+# 우리가 하고(git 에 그 플럼빙이 없다), 주석을 떼는 것은 `git stripspace` 에게 맡긴다 —
+# 주석 글자가 무엇인지는 git 이 안다. git 을 못 부르면 아무것도 안 나와 그냥 지나간다.
+sed -e '/ >8 /,$d' <"$moai_file" | git stripspace --strip-comments | grep -q '[^[:space:]]' || exit 0
 
 # `MOAI_ACTOR` 는 `이름 (메일)` 이다(`model::Actor::parse`). **그 꼴이 아니면 아무 말도 안
 # 한다** — 반쪽만 적힌 트레일러는 없는 것보다 나쁘다. 적는 꼴은 git 관례인 `이름 <메일>` 로
 # 맞춘다(2026-09-20 사용자 결정): `Co-Authored-By`·`Signed-off-by` 와 같은 모양이라
 # `git log --format='%(trailers:key=Executed-By)'` 과 mailmap 이 그대로 읽는다.
+#
+# **제어 문자가 들면 여기서 멈춘다.** `git interpret-trailers` 는 받은 글을 그대로 쓰므로
+# 줄바꿈이 든 `MOAI_ACTOR` 하나가 둘째 줄에 남의 트레일러(`Co-Authored-By:` …)를 통째로
+# 지어 낸다 — 지울 수 없는 이력에 없던 사람이 선다. `Actor::is_sane` 이 이름에서 `\n`·`\r`
+# 을 막는 것과 같은 자다.
+case $MOAI_ACTOR in
+*[[:cntrl:]]*) exit 0 ;;
+esac
 case $MOAI_ACTOR in
 *'('*')') ;;
 *) exit 0 ;;
 esac
-moai_who=$(printf '%s' "$MOAI_ACTOR" | sed 's/[[:space:]]*(\(.*\))[[:space:]]*$/ <\1>/')
-case $moai_who in
-*'<'*'>') ;;
-*) exit 0 ;;
-esac
+
+# **뒤에서부터 여는 괄호를 찾는다** — `Actor::parse` 가 `rsplit_once('(')` 를 쓰는 것과 같은
+# 자다. 이름에 괄호가 든 사람이 실제로 있고(`model::tests::a_name_with_brackets_still_parses`),
+# BRE 의 `.*` 는 가장 긴 것을 물어 **앞** 괄호에서 자른다 — `레이븐 (부재중) (r@b.c)` 가
+# `레이븐 <부재중) (r@b.c>` 로 적히던 자리다. 안쪽에 괄호를 안 들이면(`[^()]*`) 마지막 한
+# 쌍만 걸려 Rust 쪽과 같은 곳에서 갈린다.
+moai_who=$(printf '%s' "$MOAI_ACTOR" | sed 's/[[:space:]]*(\([^()]*\))[[:space:]]*$/ <\1>/')
+moai_name=${moai_who%' <'*}
+moai_mail=${moai_who##*' <'}
+moai_mail=${moai_mail%'>'}
+
+# **`Actor::is_sane` 과 같은 자로 거른다.** 이름도 메일도 비면 안 되고, 메일에는 `@` 가 들고
+# 빈칸이 없어야 한다. "반쪽만 적힌 트레일러는 없는 것보다 나쁘다" 는 말은 이 셋을 거르고서야
+# 선다 — 안 거르던 판은 `레이븐 ()` 을 `Executed-By: 레이븐 <>` 로, `레이븐 (사람)` 을
+# `<사람>` 으로 적었다. 둘 다 moai 자신은 쓰기를 멈추는 값이다.
+case $moai_who in *' <'*'>') ;; *) exit 0 ;; esac
+case $moai_name in '') exit 0 ;; esac
+case $moai_mail in *@*) ;; *) exit 0 ;; esac
+case $moai_mail in *[[:space:]]*) exit 0 ;; esac
 
 # **`git interpret-trailers` 에게 맡긴다.** 트레일러 덩이가 어디서 시작하는지는 git 이
 # 아는 것이고(주석 줄·`Signed-off-by` 가 이미 선 덩이·본문 없는 메시지), 손으로 `>>` 하면
 # 그 셋에서 저마다 다르게 어긋난다. 실패하면 파일을 안 건드린 채 조용히 지나간다.
-git interpret-trailers --in-place --trailer "Executed-By: $moai_who" -- "$moai_file" 2>/dev/null
+#
+# **이미 적혀 있으면 안 적는 것도 git 이 한다**(`--if-exists doNothing`). `--amend` 와
+# `-c <커밋>` 은 옛 메시지를 그대로 들고 오는데 고칠 때마다 한 줄씩 쌓이면 트레일러가
+# 아니라 로그가 된다. 손으로 `grep '^Executed-By:'` 하던 판은 **본문**에 그 낱말을 적은
+# 커밋까지 "이미 있다" 로 읽어 제 표식을 스스로 지웠다 — 트레일러 덩이가 어디인지는
+# 위와 같은 까닭으로 git 만 안다.
+git interpret-trailers --in-place --if-exists doNothing \
+  --trailer "Executed-By: $moai_who" -- "$moai_file" 2>/dev/null
 exit 0
 # <<< moai:prepare-commit-msg <<<

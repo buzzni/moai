@@ -18,8 +18,9 @@ The installer puts in two shims:
   so `git log` shows which commits an agent ran. The tracker's journal already
   records who, but that lives in `.moai`; a trailer is the cheapest way to say
   the same thing where git itself keeps it. Merge and squash commits are left
-  alone, so is an amend that already carries the line, and so is a message you
-  have not written yet — a plain `git commit` gets its template back untouched.
+  alone, so is an amend that already carries the line, and so is a message you have
+  not written yet — a plain `git commit`, and a `-v` one whose diff sits below the
+  scissors line, both get their template back untouched.
 
 Each shim keeps a hook that is already there: it moves it to
 `<name>.moai-before` and calls it first, so lefthook, husky or your own script
