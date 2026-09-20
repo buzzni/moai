@@ -2244,14 +2244,14 @@ fn entry_problem(lang: Lang, why: &crate::user_config::EntryTrouble) -> String {
     // 소스를 훑는 시험(`i18n::tests::keys_in`)의 눈에서 그 키가 사라진다.
     let said = match why {
         EntryTrouble::NoPath => fill(say(lang, "warn.entry_no_path"), &[("key", PATH)]),
-        EntryTrouble::PathNotAWord { found } => {
-            fill(say(lang, "warn.entry_path_word"), &[("key", PATH), ("is", found)])
-        }
+        // **`path` 와 `color` 가 한 키를 나눠 쓴다** — 두 줄은 `{key}` 만 다른 같은 글이라,
+        // 키를 갈라 두면 말묶음 다섯이 같은 문장을 두 번씩 이고 한쪽만 고쳐질 자리가 생긴다.
+        EntryTrouble::PathNotAWord { found } => fill(say(lang, "warn.entry_word"), &[("key", PATH), ("is", found)]),
         // **적힌 값은 따옴표째 낸다** — 빈 값이나 공백만 적은 것이 그대로면 아무것도 안 보인다.
         EntryTrouble::PathNotAbsolute { raw } => {
             fill(say(lang, "warn.entry_path_abs"), &[("key", PATH), ("raw", &format!("{raw:?}"))])
         }
-        EntryTrouble::HueNotAWord { found } => fill(say(lang, "warn.entry_hue_word"), &[("key", COLOR), ("is", found)]),
+        EntryTrouble::HueNotAWord { found } => fill(say(lang, "warn.entry_word"), &[("key", COLOR), ("is", found)]),
         EntryTrouble::HueUnknown(e) => {
             fill(say(lang, "warn.entry_hue_unknown"), &[("key", COLOR), ("said", &not_a_hue(lang, e))])
         }

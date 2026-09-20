@@ -303,7 +303,10 @@ fn the_mv_screen_stands_in_one_language() {
         let one = field(&ok(s.path(), &["add", "a member", "-e", &epic, "--json"]), "id");
         ok(s.path(), &["mv", &one, "in_progress"]);
         ok(s.path(), &["defer", &one, "-m", "later"]);
-        // 한 덩이가 서는 자리 전부. 차례가 곧 상태라 앞의 판이 뒤의 판을 만든다.
+        // `mv` 가 제 글로 내는 자리 전부. 차례가 곧 상태라 앞의 판이 뒤의 판을 만든다.
+        // **칸 이름을 틀리게 친 두 판은 여기 없다** — `moai mv <id> <오타>` 와
+        // `--from <오타>` 의 글은 `config::Config` 와 `cmd::mod` 의 공용 검사에서 오고
+        // 아직 박힌 한국어다(쓰기 길과 탐색기가 같은 글을 쓴다). 그 자리는 `moai-fdk7` 이 든다.
         let runs: Vec<Vec<&str>> = vec![
             vec!["mv", &one, "review"],                  // 옮긴 줄 + 미뤄 둔 줄
             vec!["mv", &one, "review"],                  // 이미 그 칸
