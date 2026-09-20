@@ -287,7 +287,12 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
         trouble: Vec::new(),
         swept: false,
     };
-    let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()))).trim().to_string();
+    // **탐색기는 아직 한국어로 선다** — 이 층에 화면 말이 안 닿아 있고, 그 말을 잇는 일은
+    // moai-ra67 의 자리다. 여기서 기본값(이제 영어다)을 집으면 한국어 화면 한가운데 이 한 줄만
+    // 영어로 서니, 말이 닿기 전까지는 지금 화면 그대로를 적어 둔다.
+    let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()), crate::i18n::Lang::Ko))
+        .trim()
+        .to_string();
     Look::Shut { state: kind, said }
 }
 
