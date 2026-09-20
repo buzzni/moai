@@ -5956,3 +5956,16 @@
 {"ts":"2026-09-20T04:54:45Z","id":"moai-a2kn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-20T04:54:45Z","id":"moai-jgnj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-20T04:58:09Z","id":"moai-7m6u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤을 시작하면 그 안이 먼저다 — 밖의 일은 p0 만"}
+{"ts":"2026-09-20T05:02:19Z","id":"moai-4arw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"안 풀린 끝내는 묶음을 셸의 값으로 푼다 — 렉서가 백그라운드를 알려 준 뒤에"}
+{"ts":"2026-09-20T05:02:19Z","id":"moai-1zyx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"뒤로 띄운 것으로 끝나는 글은 이미 이긴 집기까지 버린다"}
+{"ts":"2026-09-20T05:02:19Z","id":"moai-q6db","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"겹을 나오는 자리의 다듬기 셋 — 같은 몸통 두 갈래, 세 벌로 적은 집기 기록, 두 번 짓는 Layer"}
+{"ts":"2026-09-20T05:04:06Z","id":"moai-493a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤이 도는 동안 그 안이 먼저다"}
+{"ts":"2026-09-20T05:04:06Z","id":"moai-q04l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ready 가 도는 마일스톤의 멤버를 먼저 내고 밖은 p0 만 남긴다"}
+{"ts":"2026-09-20T05:04:06Z","id":"moai-tvvb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"status 가 도는 마일스톤과 밖에 남은 일을 한 줄로 비춘다"}
+{"ts":"2026-09-20T05:04:06Z","id":"moai-s526","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 우선 규칙을 AGENTS 블록과 감독·일꾼 절차에 적는다"}
+{"ts":"2026-09-20T05:04:06Z","id":"moai-493a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-7m6u 에서 펼쳤다 — 마일스톤을 시작하면 그 안이 먼저다 — 밖의 일은 p0 만"}
+{"ts":"2026-09-20T05:04:06Z","id":"moai-7m6u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-493a 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-20T05:04:06Z","id":"moai-493a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-20 사용자: 마일스톤 작업을 곧 시작한다. 그래서 이 에픽이 p0 다. 규칙은 둘 — (1) 마일스톤이 서고 시작되면 그 안이 최우선이고 밖의 일은 새로 집지 않는다, (2) p0 는 마일스톤과 무관하게 밖에 있어도 집는다(핫픽스). 원래 생각은 idea moai-7m6u 에 있고 거기 적어 둔 정할 것 셋(시작을 무엇으로 재는가·막을 것인가 비출 것인가·마일스톤 둘이 동시에 도는 경우)은 그대로 남는다."}
+{"ts":"2026-09-20T05:04:21Z","id":"moai-b9xk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-20 우선순위 재조정: 자리 판정과 집기 기록의 남은 모서리다. 드문 배치(separate-git-dir·여러 사용자의 /tmp)와 1분 시계가 이미 가리는 자리라, 마일스톤 작업 앞에서 지금 집을 값이 아니다."}
+{"ts":"2026-09-20T05:04:21Z","id":"moai-5org","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-20 우선순위 재조정: 자리 판정과 집기 기록의 남은 모서리다. 드문 배치(separate-git-dir·여러 사용자의 /tmp)와 1분 시계가 이미 가리는 자리라, 마일스톤 작업 앞에서 지금 집을 값이 아니다."}
+{"ts":"2026-09-20T05:04:22Z","id":"moai-6qkc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-20 우선순위 재조정: eval \"$(…)\" 가 장부에 두 번 적히지만 held 가 id 로 모아 지금은 판정이 안 바뀐다. 토막마다 세는 셈을 더하는 날 함께 연다."}
