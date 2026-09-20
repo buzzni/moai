@@ -179,7 +179,18 @@ pub fn quoted(s: &str) -> String {
     // `=` 는 첫 낱말이 아니면 껍데기에 뜻이 없다 — 안내가 내는 경로는 늘 인자 자리다.
     let plain = !s.is_empty()
         && s.chars().all(|c| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | ',' | ':' | '@' | '%' | '='));
-    if plain { s.to_string() } else { format!("'{}'", s.replace('\'', r"'\''")) }
+    if plain { s.to_string() } else { single_quoted(s) }
+}
+
+/// 낱말 하나를 **언제나** 작은따옴표로 — 안의 `'` 는 `'\''` 로 끊어 잇는다.
+///
+/// [`quoted`] 와 갈라 두는 까닭은 **옮겨 치라고 내미는 줄**이다(moai-1yya). 훅이 내는
+/// `moai defer <id> -m '<까닭>'` 은 따옴표가 서 있어야 그 자리가 글이라는 것이 보이는데,
+/// `quoted` 는 따옴표가 필요 없는 낱말(`왜`)에서 그것을 걷는다. 안에 드는 글이 말묶음
+/// (`i18n/*.json`)에서 오면서 그 글은 더는 소스 글자가 아니다 — 번역자가 적은 `'` 하나가
+/// 열린 채 끝나는 따옴표를 내밀면, 그것을 그대로 친 셸이 이어지는 줄을 통째로 삼킨다.
+pub fn single_quoted(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
 }
 
 /// FNV-1a 32비트 — `init` 의 관리 블록 마커가 대는 `hash:<8자>`.
@@ -270,6 +281,33 @@ mod tests {
             // 맨 앞 `-` 는 `./` 를 붙여 같은 디렉터리로 푼다 — 원문 그대로면 플래그가 된다.
             let want = if s.starts_with('-') { format!("./{s}") } else { s.to_string() };
             assert_eq!(String::from_utf8(out.stdout).unwrap(), want, "{:?} 를 bash 가 다르게 풀었다", shell_word(s));
+        }
+    }
+
+    /// **옮겨 치라고 내미는 글은 따옴표를 걷지 않는다**([`single_quoted`], moai-1yya). 훅이 내는
+    /// `moai defer <id> -m '<까닭>'` 은 그 자리가 글이라는 것이 보여야 하는데, [`quoted`] 는
+    /// 따옴표가 필요 없는 낱말에서 그것을 걷는다 — 두 함수를 갈라 둔 까닭이다.
+    ///
+    /// **안의 `'` 를 끊어 잇는다.** 그 글이 말묶음(`i18n/*.json`)에서 오면서 소스 글자가 아니게
+    /// 됐다 — 번역자가 적은 `'` 하나가 열린 채 끝나는 따옴표를 내밀면, 그대로 친 셸이 이어지는
+    /// 줄을 통째로 삼킨다. bash 에 돌려 원문이 한 낱말로 돌아오는지를 본다.
+    #[test]
+    fn single_quoted_keeps_its_quotes_and_survives_an_apostrophe() {
+        assert_eq!(single_quoted("왜"), "'왜'", "따옴표를 걷었다 — `quoted` 와 갈라 둔 까닭이 이것이다");
+        assert_eq!(single_quoted("what are you waiting for"), "'what are you waiting for'");
+        assert_eq!(single_quoted("what's blocking"), r"'what'\''s blocking'");
+        assert_eq!(single_quoted(""), "''");
+        let Ok(probe) = std::process::Command::new("bash").arg("-c").arg("true").status() else { return };
+        if !probe.success() {
+            return;
+        }
+        for s in ["왜", "what's blocking", "qu'attendez-vous", "a'b'c", "`id`", "$HOME", "무엇을 기다리나"] {
+            let out = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(format!("set -- {}; printf '%s|%s' \"$#\" \"$1\"", single_quoted(s)))
+                .output()
+                .unwrap();
+            assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("1|{s}"), "{:?} 를 bash 가 한 낱말로 안 읽었다", single_quoted(s));
         }
     }
 

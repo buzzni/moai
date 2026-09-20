@@ -681,7 +681,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         // 까닭이 없다. 줄였다는 것은 출력이 말한다.
         (None, false) => {
             let full = prefix_from(&root)
-                .ok_or_else(|| Fail::new("디렉터리 이름에서 접두어를 만들 수 없다. `moai init <접두어>`"))?;
+                .ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.init_no_prefix")))?;
             let short = shorten(&full);
             if short != full {
                 shortened = Some(full);
