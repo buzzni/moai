@@ -1958,9 +1958,8 @@ impl App {
                         // `fields` 가 곧 켠 열이다. "아무 열도 몰랐다" 로 읽으면 안 적힌 열이 모두 기본값으로
                         // 서 적힌 `fields` 가 곧 켠 열이라는 뜻이 한마디 없이 버려진다.
                         //
-                        // **그 "모든" 은 얼린 아홉 열이다**(moai-4gy5, 사용자 결정 2026-09-18) — `Field::ALL`
-                        // 로 읽으면 뜻이 바이너리를 따라 움직여, 뒤에 더한 기본-켠 열이 이 설정에서 영영
-                        // 안 뜬다. 얼린 목록 밖의 열은 `BEFORE_KNOWN` 밖의 열과 같이 기본값으로 선다.
+                        // **그 "모든" 은 얼린 아홉 열이다**(moai-4gy5) — `Field::ALL` 이 아니다. 까닭은
+                        // 그 상수의 글에 있다(`view::Field::EMPTY_KNOWN`).
                         Some(known) if known.is_empty() => view::Field::EMPTY_KNOWN.contains(&f),
                         Some(known) => known.iter().any(|w| w == f.name()),
                         // 이 키가 없던 때의 어휘 — 그때 있던 열이면 안 적힌 것이 곧 "껐다" 다.
@@ -4038,10 +4037,25 @@ mod tests {
         assert!(!c.fields.shows(view::Field::Names), "끈 열이 다음 실행에 되살아났다");
     }
 
+    /// 손으로 적은 빈 `fields_known` 이 내야 할 열(moai-4gy5) — 얼린 아홉([`view::Field::EMPTY_KNOWN`])
+    /// 안은 `fields` 에 적힌 것만 켜지고, 밖은 나중에 생긴 열이라 기본값으로 선다.
+    ///
+    /// **얼린 목록에서 읽는다**(moai-8mq9.p38 리뷰) — 이름을 손으로 적어 두면 열을 더하는 날 이 셋을
+    /// 쓰는 시험이 그 열을 빠뜨린 채 붉어지고, 붉은 줄의 글("적힌 fields 를 안 따랐다")이 다음 사람에게
+    /// 그 열을 `EMPTY_KNOWN` 에 넣으라고 읽힌다 — 그것이 바로 그 상수가 금지하는 한 줄이다.
+    fn empty_known_shows(f: view::Field, on: &[view::Field]) -> bool {
+        if view::Field::EMPTY_KNOWN.contains(&f) { on.contains(&f) } else { view::Fields::default().shows(f) }
+    }
+
     /// **빈 `fields_known` 은 "모든 열을 알았다" 다**(moai-4qkj, 사용자 결정 2026-09-18). 이 바이너리는
     /// 그런 설정을 안 쓰니 손으로 적은 것이고, 그 사람이 적은 `fields` 가 곧 켠 열이다. 한때 모든 열이
     /// "몰랐던 열" 이 되어 기본값이 서고 적힌 `fields` 는 한마디 없이 버려졌다. 경고는 안 낸다: 읽기는
     /// 관대하다.
+    ///
+    /// **그 "모든" 은 얼린 아홉 열이다**(moai-4gy5, 사용자 결정 2026-09-18) — [`view::Field::EMPTY_KNOWN`]
+    /// 밖의 열은 나중에 생긴 것이라 기본값으로 선다([`empty_known_shows`]). 오늘은 두 목록이 같아 그
+    /// 둘째 갈래가 빈 채로 서지만, 열을 더하는 날 여기가 그것을 잰다 — 그날 이 줄이 붉어지면 고칠 곳은
+    /// `EMPTY_KNOWN` 이 아니라 이 시험이 든 기대다.
     #[test]
     fn an_empty_fields_known_takes_the_written_fields_as_they_are() {
         let hand = crate::user_config::Look {
@@ -4052,29 +4066,7 @@ mod tests {
         let mut a = App::new(Vec::new(), cfg(), Path::new());
         a.adopt_look(&hand, Vec::new());
         for f in view::Field::ALL {
-            assert_eq!(a.fields.shows(f), f == view::Field::Id, "{} 이 적힌 fields 를 안 따랐다", f.name());
-        }
-        assert_eq!(a.notice, None, "관대히 읽을 자리에서 잔소리를 했다");
-    }
-
-    /// **빈 `fields_known` 의 뜻은 바이너리를 안 따른다**(moai-4gy5, 사용자 결정 2026-09-18) — 얼린
-    /// 아홉 열([`view::Field::EMPTY_KNOWN`])이 그 뜻이고, 그 목록에 없는 열은 나중에 생긴 것이라
-    /// 기본값으로 선다. `Field::ALL` 로 읽으면 뜻이 바이너리를 따라 움직여, 뒤에 더한 기본-켠 열이
-    /// 이 설정에서 영영 안 뜬다(moai-3fnf 가 막으려던 것). 오늘은 두 목록이 같아 둘째 갈래가 빈
-    /// 채로 서지만, 열을 더하는 날 여기가 그것을 잰다.
-    #[test]
-    fn an_empty_fields_known_leaves_columns_added_later_on_their_default() {
-        let hand = crate::user_config::Look {
-            fields: Some(vec!["id".into()]),
-            fields_known: Some(Vec::new()),
-            ..crate::user_config::Look::default()
-        };
-        let mut a = App::new(Vec::new(), cfg(), Path::new());
-        a.adopt_look(&hand, Vec::new());
-        let fresh = view::Fields::default();
-        for f in view::Field::ALL {
-            let want =
-                if view::Field::EMPTY_KNOWN.contains(&f) { f == view::Field::Id } else { fresh.shows(f) };
+            let want = empty_known_shows(f, &[view::Field::Id]);
             assert_eq!(a.fields.shows(f), want, "{} 이 빈 fields_known 을 잘못 읽었다", f.name());
         }
         assert_eq!(a.notice, None, "관대히 읽을 자리에서 잔소리를 했다");
@@ -4112,7 +4104,8 @@ mod tests {
         a.user_config = Some(user.clone());
         a.load_look();
         for f in view::Field::ALL {
-            assert_eq!(a.fields.shows(f), f == view::Field::Id, "{} 이 적힌 fields 를 안 따랐다", f.name());
+            let want = empty_known_shows(f, &[view::Field::Id]);
+            assert_eq!(a.fields.shows(f), want, "{} 이 적힌 fields 를 안 따랐다", f.name());
         }
         a.hit("SPC c t Esc");
 
@@ -4122,17 +4115,25 @@ mod tests {
         let mut b = App::new(Vec::new(), cfg(), Path::new());
         b.user_config = Some(user);
         b.load_look();
+        // **다음 실행이 본 열은 이번 실행이 둔 열이다** — 기대를 이름으로 적지 않는다(moai-8mq9.p38 리뷰).
+        // 적어 두면 열을 더하는 날 그 열이 빠진 채 붉어지고, 붉은 줄이 다음 사람을 `EMPTY_KNOWN` 으로
+        // 보낸다. 이 시험이 잴 것은 "무엇이 켜지나" 가 아니라 "한 바퀴 돌고도 그대로인가" 다.
+        assert!(a.fields.shows(view::Field::Id) && a.fields.shows(view::Field::Tags), "토글이 안 섰다\n{text}");
         for f in view::Field::ALL {
-            let want = f == view::Field::Id || f == view::Field::Tags;
-            assert_eq!(b.fields.shows(f), want, "{} 이 다음 실행에 달라졌다\n{text}", f.name());
+            assert_eq!(b.fields.shows(f), a.fields.shows(f), "{} 이 다음 실행에 달라졌다\n{text}", f.name());
         }
         assert_eq!(b.notice, None, "제가 적은 설정을 읽으며 말이 섰다\n{text}");
     }
 
     /// **빈 `fields_known` 을 다시 적어도 남의 글은 그대로다**(moai-4gy5) — 매 저장이 설정 파일 전체를
     /// 다시 쓰는 길이라, 모르는 키·주석·다른 표가 한 번의 토글로 조용히 사라지면 되돌릴 방법이 도구
-    /// 밖에만 남는다. 이 저장소가 못 견디는 것이 그 조용한 손실이다. 두 번째 토글은 같은 값을 다시
-    /// 적지 않는다 — 읽고 그대로 쓰면 바이트가 같다.
+    /// 밖에만 남는다. 이 저장소가 못 견디는 것이 그 조용한 손실이다.
+    ///
+    /// 뒤쪽은 다른 것을 잰다 — **켠 것을 도로 끄면 바이트가 돌아온다.** 끈 열을 켰다 끄는 차례로 잰다
+    /// (moai-8mq9.p38 리뷰). `merge_words` 는 더할 낱말을 배열 **끝**에 붙이므로, 켠 열을 껐다 켜는
+    /// 차례로 재면 그 낱말이 끝으로 옮겨 가 배열이 재배열된다 — 오늘은 `tags` 가 마침 끝이라 지나갔고,
+    /// `SPC c i`(id) 로 같은 것을 재면 지금 바이너리에서도 붉어진다. 그 차례로 잰 시험은 멱등성을 열 하나에
+    /// 대해서만 증명하면서 모든 열에 대해 증명한 것처럼 읽힌다.
     #[test]
     fn rewriting_an_empty_fields_known_keeps_the_rest_of_the_file_byte_for_byte() {
         let s = scratch("fields-known-empty-keeps");
@@ -4146,19 +4147,28 @@ mod tests {
 
         let text = std::fs::read_to_string(&user).unwrap();
         // 토글이 실제로 파일을 다시 썼다 — 안 썼으면 아래 것들이 그대로인 것이 아무 말도 안 한다.
-        assert!(text.contains("\"tags\""), "켠 열을 안 적었다\n{text}");
-        assert!(text.contains("\"branch\""), "빈 fields_known 을 이름으로 안 채웠다\n{text}");
+        // **키를 갈라 본다**(moai-8mq9.p38 리뷰) — 낱말 하나를 글에서 찾는 것으로는 못 가른다.
+        // `fields_known` 이 늘 아홉 이름을 다 실어, `fields` 가 통째로 안 적혀도 `"tags"` 는 글에 선다.
+        let (back, _) = crate::user_config::read_look(Some(&user));
+        assert_eq!(back.fields, Some(vec!["id".to_string(), "tags".to_string()]), "켠 열을 안 적었다\n{text}");
+        assert_eq!(back.fields_known.map(|k| k.len()), Some(view::Field::ALL.len()), "빈 fields_known 을 이름으로 안 채웠다\n{text}");
         assert!(text.contains("# 손으로 적은 설정"), "표 위의 주석이 사라졌다\n{text}");
         assert!(text.contains("# 켠 열만 적었다"), "키 위의 주석이 사라졌다\n{text}");
         assert!(text.contains("what_is_this = 7"), "모르는 키가 사라졌다\n{text}");
         assert!(text.contains("lang = \"en\""), "다른 표가 사라졌다\n{text}");
+        assert_eq!(a.notice, None, "관대히 읽을 자리에서 잔소리를 했다\n{text}");
 
-        // 같은 값을 다시 적는 토글은 파일을 안 건드린다.
+        // 끈 열(담당)을 켰다 끈다 — 위의 글이 대는 까닭으로 켠 열을 껐다 켜지 않는다.
         let mut b = App::new(Vec::new(), cfg(), Path::new());
         b.user_config = Some(user.clone());
         b.load_look();
-        b.hit("SPC c t Esc");
-        b.hit("SPC c t Esc");
+        b.hit("SPC c a Esc");
+        // **먼저 달라진 것을 본다** — 안 보면 저장이 통째로 막힌 판에서도 아래 견줌이 그대로 지나간다
+        // (`save_look` 은 못 적은 것을 알림으로 삼키고 파일을 안 건드린다).
+        let on = std::fs::read_to_string(&user).unwrap();
+        assert_ne!(on, text, "둘째 세션의 토글이 파일에 안 닿았다 — 아래 견줌이 헛것이 된다\n{on}");
+        b.hit("SPC c a Esc");
+        assert_eq!(b.notice, None, "제가 적은 설정을 읽고 쓰며 말이 섰다\n{on}");
         assert_eq!(std::fs::read_to_string(&user).unwrap(), text, "켰다 끈 뒤 파일이 달라졌다");
     }
 
