@@ -154,16 +154,37 @@ def parents(pid):
         except OSError:
             return
         pid = int(out) if out.isdigit() else 0
+def reachable():
+    """이 감독이 tmux 서버에 닿는가. 못 닿으면 판을 하나도 못 물어본다."""
+    try:
+        r = subprocess.run(["tmux", "display-message", "-p", '#{pid}'], capture_output=True, text=True)
+    except OSError:
+        return False
+    return r.returncode == 0 and r.stdout.strip().isdigit()
+tmux_up = reachable()
 def detached(s):
-    """세션 파일이 대는 tmux 판을 이 서버에서 그 세션이 낳지 않았는가 — 떼어 낸 시험 서버의 판이다."""
+    """세션 파일이 대는 tmux 판을 이 서버에서 그 세션이 낳지 않았는가 — 떼어 낸 시험 서버의 판이다.
+
+    **못 물어보면 None 이다** — 모르는 것이지 떼어 낸 판이 아니다. 감독이 tmux 밖에서 돌거나
+    샌드박스가 소켓을 막으면 물음마다 빈 값이 오는데, 그것을 떼어 낸 판으로 읽던 판은 루트의
+    세션을 모두 걸러 아무도 일을 못 받았다(까닭을 대는 줄도 없었다).
+    """
     pane = str(s.get("tmux") or "").rpartition(".")[2]
     if not pane.startswith("%"):
         return False
+    if not tmux_up:
+        return None
     try:
-        owner = subprocess.run(["tmux", "display-message", "-p", "-t", pane, '#{pane_pid}'], capture_output=True, text=True).stdout.strip()
+        r = subprocess.run(["tmux", "display-message", "-p", "-t", pane, '#{pane_pid}'], capture_output=True, text=True)
     except OSError:
-        return False
-    return not owner.isdigit() or int(owner) not in parents(int(s["pid"]))
+        return None
+    owner = r.stdout.strip()
+    # 서버에 닿는데 그 판을 못 찾으면 이 서버의 판이 아니다 — 그것이 떼어 낸 판이다.
+    if r.returncode != 0 or not owner.isdigit():
+        return True
+    return int(owner) not in parents(int(s["pid"]))
+if not tmux_up:
+    print("tmux 에 못 닿는다 — 떼어 낸 판을 못 가린다. 아래 `루트` 에 시험용 claude 가 섞일 수 있다")
 unread = 0
 for f in glob.glob(os.path.join(home, "sessions", "*.json")):
     try:
@@ -194,6 +215,10 @@ PY
   동안 루트에 있다 — 사람의 답이나 권한을 기다리면 `waiting`, 턴을 마치면 `idle` 로 뜬다
 - **`떼어 낸 판` 은 맡기지 않는다.** 세션 파일이 대는 tmux 판을 이 서버에서 그 세션이 낳지
   않았다 — 떼어 낸 tmux 서버(`-L`)에서 띄운 시험용 `claude` 다. 자리가 루트라도 일꾼이 아니다
+- **tmux 에 아예 못 닿으면 거르지 않는다.** 감독이 tmux 밖에서 돌거나 샌드박스가 소켓을 막으면
+  판을 하나도 못 물어본다 — 그것을 떼어 낸 판으로 읽으면 루트의 세션이 모두 빠져 아무도 일을
+  못 받는다. 스크립트가 `tmux 에 못 닿는다` 한 줄을 내고 그대로 두니, 그때는 `루트` 에 시험용
+  `claude` 가 섞일 수 있다고 보고 보내기 전에 `ListAgents` 로 이름을 한 번 더 본다
 - 자리가 `<루트>/.claude/worktrees/*` 인 세션은 이 저장소에서 **일하는 중**이다.
   지켜보되 맡기지 않는다
 - **다른 디렉터리의 세션은 건드리지 않는다**
@@ -458,10 +483,40 @@ import glob, json, os, re, subprocess, sys, time
 name, epic, me, root = sys.argv[1:5]
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 erased = False
+def gone(kept, left):
+    """치던 글에서 **지운 줄만**. 남은 줄은 앞 판의 줄로 차례대로 서니(`shrunk`) 그것을 빼고 남긴다.
+    남은 줄이 치던 글의 줄이 아니면(사람이 그새 쳤다) None — 무엇이 지워졌는지 못 가린다."""
+    rest = iter(kept.split("\n"))
+    out = []
+    for line in left.split("\n"):
+        if not line:
+            continue
+        for k in rest:
+            if k == line:
+                break
+            out.append(k)
+        else:
+            return None
+    out.extend(rest)
+    return "\n".join(out)
 def skip(why, then="사람에게 비워도 된다고만 짚는다"):
     print("안 비운다 —", why, "—", then)
     if erased:
-        print("치던 글은 이미 지웠다 — 위에 옮긴 `치던 글` 을 그 창의 사람에게 돌려준다")
+        # **지운 것만 돌려준다.** 한 줄만 지우고 멈췄으면 나머지는 아직 그 칸에 있다 — 통째로
+        # 돌려주면 사람이 제 칸에 남은 줄을 한 벌 더 붙여 같은 줄이 두 벌 선다.
+        left = draft(pane)
+        if left and dim_only(pane):
+            left = ""
+        back = None if left is None else gone(kept, left)
+        if back is None:
+            print("치던 글을 일부 지웠다 — 그 칸에 남은 것을 보고, 위에 옮긴 `치던 글` 에서 겹치는 줄은 빼고 그 창의 사람에게 돌려준다")
+        elif not back:
+            print("치던 글은 그 칸에 그대로 있다 — 돌려줄 것이 없다")
+        elif back == kept:
+            print("치던 글은 이미 지웠다 — 위에 옮긴 `치던 글` 을 그 창의 사람에게 돌려준다")
+        else:
+            print("치던 글에서 지운 것 — 이것만 그 창의 사람에게 돌려준다. 나머지는 그 칸에 그대로 있다")
+            print(back)
     sys.exit(0)
 def tmux(*args):
     return subprocess.run(["tmux", *args], capture_output=True, text=True)
@@ -700,8 +755,11 @@ PY
   클라이언트의 상태줄에 한 줄이 그렇다고 말한다 — 사람은 그 글을 감독 창에서 찾는다. Claude
   Code 의 `Ctrl+Y` 는 여러 줄 글의 마지막 줄만 되살려 기댈 수 없다. 입력 칸은 Claude Code
   화면에서 프롬프트 표시(U+276F)가 선 마지막 줄로 읽는다. 그 화면도 세션 파일처럼 문서에 없는
-  것이라, 못 읽으면 치지 않는 쪽으로 넘어진다. 지우다가 멈추면 `치던 글은 이미 지웠다` 가
-  따라 나온다 — 그때는 옮긴 글을 그 창의 사람에게 돌려준다
+  것이라, 못 읽으면 치지 않는 쪽으로 넘어진다. 지우다가 멈추면 **그때까지 지운 줄만** 따라
+  나온다 — 다 지웠으면 `치던 글은 이미 지웠다`, 한 줄만 지우고 멈췄으면 `치던 글에서 지운 것` 이
+  그 줄을 낸다. 나머지는 아직 그 칸에 있어, 통째로 돌려주면 같은 줄이 두 벌 선다. 남은 것이
+  치던 글의 줄이 아니면(사람이 그새 쳤다) 무엇이 지워졌는지 못 가리니, 그때는 그 칸을 보고
+  겹치는 줄을 빼라고 말한다
 - **옮길 때 앞머리 두 칸만 벗긴다**(사용자 결정). 첫 줄은 프롬프트와 빈칸 하나, 이어지는 줄은
   두 칸이고 나머지는 화면 그대로다 — 줄마다 다듬으면 들여쓴 코드가 납작해져 돌아간다.
   그 앞머리가 아닌 줄은 **안 자른다** — 화면이 달리 그리는 날 두 글자가 말없이 깎이는데, 옮긴
