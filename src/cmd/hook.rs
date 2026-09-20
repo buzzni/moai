@@ -480,11 +480,13 @@ fn safe_sid(input: &Input) -> Option<String> {
 /// 안 그러면 `-C <루트>` 한 번으로 규칙 1 을 넘는다. 누구의 초점인가는 여전히 **이름**이 가른다
 /// (`away_of` 가 `Repo::here` 로 읽는다), 가리킨 디렉터리가 아니다.
 ///
-/// [`Route::There`] 는 그래서 **다른 저장소**의 트래커만 받는다 — 등록한 옆 프로젝트다(moai-23ky).
+/// [`Route::There`] 는 그래서 대개 **다른 저장소**의 트래커다 — 등록한 옆 프로젝트다(moai-23ky).
 /// 한때 같은 저장소의 옆 워크트리도 여기로 갔는데, 그때는 그 워크트리의 `.moai` 가 따로 있었다.
+/// **같은 저장소 안이어도 트래커가 정말 갈린 자리는 여기로 간다**(moai-acf7) — `MOAI_HERE=1` 을 든
+/// 워크트리와 `.moai` 가 여럿인 모노레포다. 단 그 토막이 **제 낱말로 `-C` 를 적었을 때만**이다.
 #[derive(Debug, PartialEq)]
 enum Route {
-    /// 세션 자리의 트래커 — 같은 저장소 안이면 어디를 가리켜도 여기다(`worktree::same_repo`).
+    /// 세션 자리의 트래커 — 같은 저장소 안이면 대개 어디를 가리켜도 여기다(`worktree::same_repo`).
     Here,
     /// 가리킨 자리에 트래커가 없다. `moai` 가 스스로 실패하니 아무도 판정하지 않는다.
     Nowhere,
@@ -557,11 +559,29 @@ fn route_one(
         *aim = Some(dir);
         return Route::Here;
     };
+    // **제 낱말로 `-C` 를 적어 딴 트래커를 가리킨 토막은 그 트래커가 본다**(moai-acf7, 2026-09-19
+    // 사용자 결정). 같은 저장소 안이라도 `Repo::find_from` 이 옮겨 주지 않는 자리가 있다 —
+    // `MOAI_HERE=1` 로 제 `.moai` 를 든 워크트리와, `.moai` 가 여럿인 모노레포다. 그 자리에서
+    // `moai -C <루트> mv <리뷰> done` 은 루트의 트래커에 쓰는데, 이 스냅샷에는 그 리뷰가 없어
+    // 규칙 3 이 통째로 샜다. 옮겨 주는 흔한 자리(맨 워크트리 세션)는 위의 `same` 이 먼저 잡으니
+    // **값은 갈라진 트래커를 `-C` 로 가리킨 호출에만 붙는다**.
+    //
+    // **`cd` 로 옮긴 토막은 지금대로 여기다** — 규칙 2 는 `There` 로 보낸 토막을 안 세므로
+    // (`guard_moai` 만 돈다), `cd <루트> && sed -i …` 를 넘기면 쓰기 셈이 그 자리에서 꺼진다.
+    // `-C` 를 적은 토막은 `moai` 를 부르는 토막이라 셀 쓰기가 없다([`crate::hook::spells_dir`]).
     if same(&found.root, &repo.root)
-        || (!crate::worktree::is_linked(&found.root) && crate::worktree::same_repo(&found.root, &repo.root))
+        || (!crate::worktree::is_linked(&found.root) && crate::worktree::same_repo(&found.root, &repo.root) && !spells())
     {
         return Route::Here;
     }
+    // **갈라 놓은 제 트래커에서 루트를 가리킨 것은 여전히 이 세션이다**(moai-acf7). 스냅샷만 루트의
+    // 것으로 바꾸고 **누구인가는 이 체크아웃에서 읽는다**(`Repo::here`) — 루트의 눈으로 이름까지
+    // 읽으면 이 워크트리가 쥔 일이 통째로 "옆의 것" 이 되어, 시킨 대로 세우고 집은 리뷰를 규칙 3 이
+    // 못 본다. `away_of`·`worktree::fresh` 가 이미 `here()` 로 이름을 읽는 그 자다(moai-y7go).
+    let found = match crate::worktree::tracker_root(repo.here()) {
+        Some(root) if same(&root, &found.root) => found.seen_from(repo.here().to_path_buf()),
+        _ => found,
+    };
     let n = match there.iter().position(|r| same(&r.root, &found.root)) {
         Some(n) => n,
         None => {

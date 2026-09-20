@@ -42,6 +42,15 @@ impl Repo {
         Repo { root, config, moved_from: Some(from) }
     }
 
+    /// 같은 트래커를 **딴 체크아웃의 눈으로** — [`Repo::here`] 만 갈아 끼운다.
+    ///
+    /// 훅이 쓴다(moai-acf7): `MOAI_HERE=1` 로 제 `.moai` 를 든 워크트리가 `moai -C <루트> …` 를 치면
+    /// 판정할 스냅샷은 루트의 것이지만 **누구인가는 그 워크트리**다. 이름을 루트에서 읽으면 그
+    /// 워크트리가 쥔 일이 통째로 "옆의 것" 이 되어(`worktree::away`) 규칙이 제 일을 못 본다.
+    pub fn seen_from(self, here: PathBuf) -> Repo {
+        Repo { moved_from: Some(here), ..self }
+    }
+
     /// 이 세션이 **선 체크아웃** — 트래커를 루트로 옮겨 왔으면 옮겨 오기 전의 자리다(moai-y7go).
     ///
     /// [`Repo::root`] 는 **트래커가 사는 곳**이다. 둘은 딸린 워크트리에서만 갈리는데, 이 저장소는
