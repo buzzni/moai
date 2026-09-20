@@ -313,7 +313,7 @@ fn a_running_milestone_comes_first_and_nothing_is_blocked() {
 
     // 보드는 알림으로 댄다 — 경고가 아니다(`!` 가 아니라 `+`).
     let board = ok(s.path(), &["status"]);
-    let line = board.lines().find(|l| l.contains("도는 마일스톤")).expect(&format!("보드가 말이 없다\n{board}"));
+    let line = board.lines().find(|l| l.contains("도는 마일스톤")).unwrap_or_else(|| panic!("보드가 말이 없다\n{board}"));
     assert!(line.starts_with('+'), "알림이 경고로 섰다 — {line:?}");
 
     // **막지 않는다.** 밖의 일을 집는 것은 그대로 지나간다.

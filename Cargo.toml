@@ -24,6 +24,22 @@ pulldown-cmark = { version = "0.13.4", default-features = false }
 # `serde` 기능은 끈다 — 표 배열 하나를 읽는 데 역직렬화가 필요 없다.
 toml_edit     = { version = "0.25.15", default-features = false, features = ["parse", "display"] }
 
+# CI 의 ci-gate 가 clippy 를 `-D warnings` 로 돌린다. 그러니 여기 적힌 세 줄은
+# "이건 경고가 아니다" 라는 선언이고, 줄마다 `#[allow]` 을 흩뿌리는 대신 까닭과
+# 함께 한자리에 둔다. 새 줄을 더할 때도 까닭을 같이 적는다 — 까닭 없는 allow 는
+# 다음 사람이 걷어도 되는지 못 가린다.
+[lints.clippy]
+# `report`·`view` 는 `&[Issue]` 에 대한 순수 함수라 필요한 것을 전부 인자로 받는다.
+# 인자를 구조체로 묶으면 그 구조체가 호출자마다 다른 것을 담게 되고, 옛 moai 가
+# 상태를 키운 길이 그것이다.
+too_many_arguments = "allow"
+# 반환 튜플의 모양이 곧 계약이다. `type` 별칭을 씌우면 부르는 쪽에서 무엇이
+# 나오는지 안 보인다.
+type_complexity = "allow"
+# `projects::State` 는 실패한 까닭을 통째로 들고 온다. 박싱하면 그 값을 읽는 자리가
+# 모두 한 겹 깊어지는데, 이 경로는 사람이 한 번 부르는 명령이라 값어치가 없다.
+result_large_err = "allow"
+
 [profile.release]
 lto = true
 strip = true
