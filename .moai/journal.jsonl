@@ -6173,3 +6173,32 @@
 {"ts":"2026-09-20T09:18:27Z","id":"moai-kjeh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T09:18:27Z","id":"moai-dbzs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T09:21:08Z","id":"moai-51h9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽은 닫혔다(멤버 10, 리뷰 셋). 남은 것은 idea 둘이다 — moai-d5ev(`&&` 로는 넘겨받기가 안 돈다, `status_since` 와 함께 본다)와 moai-pz50(`?` 를 더 넓히거나 좁힐 자리 셋). 둘 다 훅의 같은 자리를 건드리니 moai-jlon·moai-v4lw 와 차례를 맞춘다. 표(`?`)의 뜻을 바꾸려면 `Picks::line` 이 아니라 `shell_scan` 의 `certain` 하나만 고친다 — 목록을 문서에 베끼지 않기로 했다."}
+{"ts":"2026-09-20T09:25:21Z","id":"moai-y89y","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":".github/workflows 가 없다 — PR·push 에서 빌드·시험·clippy·fmt 를 돌린다"}
+{"ts":"2026-09-20T09:25:38Z","id":"moai-jy55","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"태그와 Cargo.toml 의 버전이 어긋나면 푸시를 거부한다"}
+{"ts":"2026-09-20T09:25:40Z","id":"moai-071u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"git 훅 shim — 도구가 없거나 느리면 git 을 막지 않는다"}
+{"ts":"2026-09-20T09:25:55Z","id":"moai-hom6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"화면이 영어로 선다 — 말묶음에 안 든 나머지"}
+{"ts":"2026-09-20T09:25:55Z","id":"moai-bn1j","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"기본 언어를 영어로 바꾼다 — 설정도 환경변수도 없을 때 서는 말"}
+{"ts":"2026-09-20T09:25:55Z","id":"moai-el7z","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"밖 한눈 보기 몸통의 남은 글자를 말묶음으로"}
+{"ts":"2026-09-20T09:25:55Z","id":"moai-dpbi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"stderr 의 경고·알림을 말묶음으로"}
+{"ts":"2026-09-20T09:25:55Z","id":"moai-pk2x","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show 의 상세와 이력을 말묶음으로"}
+{"ts":"2026-09-20T09:25:55Z","id":"moai-8d49","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅과 명령의 거절문을 말묶음으로"}
+{"ts":"2026-09-20T09:25:55Z","id":"moai-ra67","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기의 글을 말묶음으로"}
+{"ts":"2026-09-20T09:25:55Z","id":"moai-hom6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-4q5i 에서 펼쳤다 — 말묶음에 안 든 나머지 화면 — show 상세·이력·tui·거절문"}
+{"ts":"2026-09-20T09:25:55Z","id":"moai-4q5i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-hom6 로 펼쳤다 (이슈 6건)"}
+{"ts":"2026-09-20T09:26:03Z","id":"moai-vbmn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"머지 드라이버가 실제로 도는지 잰다"}
+{"ts":"2026-09-20T09:26:03Z","id":"moai-zdw4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"드라이버가 도는지를 파일이 아니라 실제로 불러서 잰다"}
+{"ts":"2026-09-20T09:26:03Z","id":"moai-vbmn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2syb 에서 펼쳤다 — 드라이버가 도는지를 파일이 아니라 실제로 불러서 잰다"}
+{"ts":"2026-09-20T09:26:03Z","id":"moai-2syb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vbmn 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-20T09:28:22Z","id":"moai-9khu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"드라이버를 안 심은 클론을 status 가 알림 한 줄로 비춘다"}
+{"ts":"2026-09-20T09:28:22Z","id":"moai-9khu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-jwr8 에서 펼쳤다 — 드라이버를 안 심은 클론을 status 가 한 줄로 비춘다"}
+{"ts":"2026-09-20T09:28:22Z","id":"moai-jwr8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vbmn 의 멤버 moai-9khu 로 펼쳤다"}
+{"ts":"2026-09-20T09:28:28Z","id":"moai-shn2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"첫 사용자의 함정과 조용한 손실"}
+{"ts":"2026-09-20T09:28:28Z","id":"moai-pjrr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai init 이 위의 .moai 를 안 보고 트래커를 하나 더 세운다"}
+{"ts":"2026-09-20T09:28:28Z","id":"moai-shn2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-st60 에서 펼쳤다 — moai init 이 위의 .moai 를 안 보고 트래커를 하나 더 세운다"}
+{"ts":"2026-09-20T09:28:28Z","id":"moai-st60","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-shn2 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-20T09:28:35Z","id":"moai-ajh2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"읽음을 쓰다 자리가 밀려도 아무 말이 없다"}
+{"ts":"2026-09-20T09:28:35Z","id":"moai-ajh2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-qem4 에서 펼쳤다 — 읽음을 쓰다 자리가 밀려도 아무 말이 없다"}
+{"ts":"2026-09-20T09:28:35Z","id":"moai-qem4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-shn2 의 멤버 moai-ajh2 로 펼쳤다"}
+{"ts":"2026-09-20T09:28:36Z","id":"moai-blvx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"없는 자리를 도구의 두 쪽이 다르게 읽는다"}
+{"ts":"2026-09-20T09:28:36Z","id":"moai-blvx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-lqsr 에서 펼쳤다 — 없는 자리를 도구의 두 쪽이 다르게 읽는다"}
+{"ts":"2026-09-20T09:28:36Z","id":"moai-lqsr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-shn2 의 멤버 moai-blvx 로 펼쳤다"}
