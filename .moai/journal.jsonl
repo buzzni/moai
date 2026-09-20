@@ -6269,3 +6269,7 @@
 {"ts":"2026-09-20T10:15:44Z","id":"moai-4xib","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T10:15:44Z","id":"moai-uhzk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T10:15:55Z","id":"moai-4y5s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: view::Screen 이 develop 에 섰다 — 그리기 자리는 lang·origin 을 따로 안 받는다. 남은 화면 글자는 에픽 moai-hom6 이 멤버 여섯으로 든다. 그 멤버들은 인자를 더할 일 없이 say·fill 로 갈아 끼우면 된다(moai-pk2x·moai-el7z 에 그 줄을 적어 뒀다). 이 에픽에서 나온 idea 둘: moai-8ekb(cmd::show::one 이 인자 여덟), moai-tc8a(상세의 에픽 줄에 겹침 표가 안 선다)."}
+{"ts":"2026-09-20T10:17:12Z","id":"moai-ayhh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T10:21:48Z","id":"moai-bn1j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T10:21:49Z","id":"moai-el7z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T10:21:49Z","id":"moai-pk2x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
