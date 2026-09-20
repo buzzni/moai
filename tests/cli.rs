@@ -235,14 +235,18 @@ fn last_column(l: &str) -> usize {
     cells(&line[..gap + (tail.len() - tail.trim_start().len())])
 }
 
-/// **아무도 고르지 않으면 지금은 한국어고, 영어는 낱말 하나로 온다**(사용자 결정, 리뷰
-/// moai-80qw.cb8). 옮긴 글이 열 줄뿐이라 기본을 영어로 두면 화면이 두 말로 섞인다 — 옮김이
-/// 화면을 덮을 때 `Lang` 의 `#[default]` 한 줄과 함께 이 기대값이 영어로 바뀐다.
+/// **아무도 고르지 않으면 영어다**(moai-bn1j, 2026-09-20 사용자 결정 — v0.1.0 은 영어로 나간다).
+///
+/// 한때 기본이 한국어였다(리뷰 moai-80qw.cb8) — 옮긴 글이 열 줄뿐이라 영어로 두면 화면이 두
+/// 말로 섞이던 때다. **여기가 그것을 화면으로 재는 자리다**: 단위 시험
+/// (`i18n::tests::nothing_picked_means_english`)은 고르는 자만 보고, 이쪽은 `MOAI_LANG` 을 걷은
+/// 진짜 실행이 영어 화면을 내는지를 본다. 이 시험만은 [`isolated`] 가 박아 둔 `MOAI_LANG=ko`
+/// 를 걷는다 — 다른 시험은 글자를 그대로 견주느라 한국어 화면을 본다.
 ///
 /// **`MOAI_LANG` 으로 한국어·일본어도 함께 잰다** — 고르는 길이 도는지, 그리고 두 칸 글자가
 /// 섞여도 줄이 서는지. 어느 말이든 같은 수를 대는 것으로 그 화면이 같은 화면임을 잰다.
 #[test]
-fn nothing_picked_means_korean_for_now_and_english_is_one_word_away() {
+fn english_is_the_default_when_nothing_picks_a_language() {
     let s = init("lang");
     ok(s.path(), &["add", "첫 일"]);
     let say = |lang: Option<&str>| {
@@ -256,20 +260,22 @@ fn nothing_picked_means_korean_for_now_and_english_is_one_word_away() {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8(out.stdout).unwrap()
     };
-    // **아무것도 안 고르면 지금은 한국어다**(사용자 결정) — 옮긴 글이 열 줄뿐이라, 기본을
-    // 영어로 두면 화면이 두 말로 섞인다. 옮김이 화면을 덮으면 이 기대값이 영어로 바뀐다.
+    // **아무것도 안 고르면 영어다.** 고른 영어와 글자까지 같아야 한다 — 다르면 기본값이
+    // 영어가 아니라 "영어 비슷한 무엇" 이다.
     let fallback = say(None);
-    assert!(fallback.contains("이슈 1"), "아무도 안 골랐는데 기본 화면이 아니다\n{fallback}");
+    assert!(fallback.contains("Issues 1"), "아무도 안 골랐는데 영어 화면이 아니다\n{fallback}");
 
-    // **영어는 낱말 하나로 온다** — 기준 말이라 늘 고를 수 있다.
     let english = say(Some("en"));
-    assert!(english.contains("Issues 1"), "MOAI_LANG=en 이 안 들었다\n{english}");
+    assert_eq!(english, fallback, "고른 영어와 기본 화면이 다르다");
     let head = |screen: &str| screen.lines().next().unwrap_or_default().to_string();
     assert!(!head(&english).contains("이슈"), "영어 화면의 머리에 한국어가 남았다\n{english}");
 
+    // **한국어는 낱말 하나로 온다** — 기본이 아닐 뿐 고르면 그대로 선다.
     let korean = say(Some("ko"));
     assert!(korean.contains("이슈 1"), "MOAI_LANG=ko 가 안 들었다\n{korean}");
-    assert_eq!(korean, fallback, "고른 한국어와 기본 화면이 다르다");
+    assert!(!korean.contains("Issues 1"), "한국어 화면의 머리에 영어가 남았다\n{korean}");
+
+    // 로캘은 안 읽는다 — 세 이름을 다 재는 것은 `the_system_locale_does_not_pick_the_language` 다.
 
     // 없는 키는 영어로 떨어진다 — 화면이 비지 않는다.
     let japanese = say(Some("ja_JP.UTF-8"));
@@ -325,11 +331,12 @@ fn a_running_milestone_comes_first_and_nothing_is_blocked() {
 ///
 /// `Lang::parse` 가 `ja_JP.UTF-8` 모양을 받아 주는 것은 `MOAI_LANG` 에 로캘을 그대로 붙여
 /// 넣는 사람을 받자는 것이지, `LANG`·`LC_ALL`·`LC_MESSAGES` 를 읽는다는 뜻이 아니다. 읽으면
-/// 아무것도 안 고른 사람이 제 로캘 말로 보는데, 옮긴 글이 아직 두 화면뿐이라 그 화면은
-/// 제 말 몇 줄과 영어가 섞인다 — 기본을 한국어로 둔 것과 같은 까닭이다.
+/// 아무것도 안 고른 사람이 제 로캘 말로 보는데, ja·zh·es 는 백 키를 넘긴 영어 표 가운데
+/// 아홉·열 키뿐이라 그 화면은 제 말 열 줄과 영어 아흔 줄로 섞인다.
 ///
-/// **여는 조건은 `Lang` 의 `#[default]` 를 `En` 으로 옮기는 날과 같다.** 그날 이 시험이
-/// 붉어지면 그때 고르는 층을 셋으로 늘린다.
+/// **여는 조건이던 날(`Lang` 의 `#[default]` 를 `En` 으로 옮기는 날)은 지났다** — 그날
+/// 사용자가 다시 안 읽기로 정했다(moai-bn1j, 2026-09-20). 까닭이 기본값이 아니라 번역의
+/// 양에 있었고, 그 양은 안 변했기 때문이다. 다시 여는 조건은 ja·zh·es 가 영어 표를 덮는 날이다.
 #[test]
 fn the_system_locale_does_not_pick_the_language() {
     let s = init("locale");
@@ -357,16 +364,17 @@ fn the_system_locale_does_not_pick_the_language() {
         String::from_utf8(out.stdout).unwrap()
     };
 
-    // 아무도 안 골랐으면 로캘이 일본어라도 기본값이다 — 지금은 한국어다.
+    // 아무도 안 골랐으면 로캘이 일본어라도 기본값이다 — 영어다.
     let bare = say(None, "");
-    assert!(bare.contains("이슈 1"), "로캘이 말을 골랐다\n{bare}");
+    assert!(bare.contains("Issues 1"), "로캘이 말을 골랐다\n{bare}");
     assert!(!bare.contains("課題"), "로캘이 말을 골랐다\n{bare}");
 
-    // 고른 사람은 그대로 제 말을 본다 — 로캘이 그것을 덮지 않는다.
-    let picked = say(Some("en"), "");
-    assert!(picked.contains("Issues 1"), "MOAI_LANG 이 로캘에 밀렸다\n{picked}");
-    let said = say(None, "[i18n]\nlang = \"en\"\n");
-    assert!(said.contains("Issues 1"), "설정이 로캘에 밀렸다\n{said}");
+    // 고른 사람은 그대로 제 말을 본다 — 로캘이 그것을 덮지 않는다. **기본값이 아닌 말로
+    // 잰다**: 영어로 재면 로캘을 읽어도 같은 화면이 나와 아무것도 안 잰 것이 된다.
+    let picked = say(Some("ko"), "");
+    assert!(picked.contains("이슈 1"), "MOAI_LANG 이 로캘에 밀렸다\n{picked}");
+    let said = say(None, "[i18n]\nlang = \"ko\"\n");
+    assert!(said.contains("이슈 1"), "설정이 로캘에 밀렸다\n{said}");
 }
 
 /// **설정에 적은 말도 든다**(moai-slfv), 그리고 **틀리면 저장소 안에서도 댄다**(리뷰 moai-80qw).
@@ -407,10 +415,11 @@ fn the_config_picks_the_language_and_a_bad_one_is_named() {
 
     // **오타는 조용히 기본값이 되지 않는다.** 이 줄이 없으면 고친 설정이 왜 안 듣는지 알 길이 없다.
     let (screen, said) = run("[i18n]\nlang = \"kr\"\n");
-    assert!(screen.contains("이슈 1"), "모르는 값에서 기본값(지금은 한국어)으로 안 떨어졌다\n{screen}");
+    assert!(screen.contains("Issues 1"), "모르는 값에서 기본값(영어)으로 안 떨어졌다\n{screen}");
     assert!(said.contains("`i18n.lang`") && said.contains("\"kr\""), "틀린 설정을 아무도 안 댔다 — {said:?}");
     // 보드도 그것을 안다 — 없으면 "드러난 문제 없다" 가 방금 stderr 에 한 말을 뒤집는다.
-    assert!(screen.contains("사용자 설정에서 못 읽은 것 1건"), "보드가 stderr 의 말을 모른다\n{screen}");
+    // **떨어진 말로 읽는다** — 화면은 영어이므로 찾는 글자도 영어 표의 것이다.
+    assert!(screen.contains("Unread in the user config 1"), "보드가 stderr 의 말을 모른다\n{screen}");
 }
 
 #[test]
@@ -757,6 +766,92 @@ fn outside_a_repo_it_says_what_to_do() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("moai init"));
 }
 
+/// **`show` 의 목록·트리·상세·이력도 고른 말로 선다**(moai-pk2x). 그리는 자리는 moai-4y5s 가
+/// `view::Screen` 하나로 묶어 두어 이미 말을 들고 있었는데, 아무도 그것을 안 읽어 열 이름과
+/// 줄 이름이 글자로 박혀 있었다.
+///
+/// **자료를 ASCII 로 두고 한글이 남았는지를 센다.** 제목·담당은 옮길 글이 아니라 자료라,
+/// 한글을 섞으면 이 자가 옮긴 글과 안 옮긴 글을 못 가른다. 그래서 담당도 여기서만 ASCII 로
+/// 준다([`ACTOR`] 는 한글이다).
+///
+/// **네 표면을 한 판에서 잰다** — 목록·트리·상세가 `view` 안에서 갈려 있어 한쪽만 옮기기
+/// 쉽고, 이력은 아예 다른 함수다. 한국어도 함께 재는 까닭은 옮긴 것이 사라진 것과 다르다는
+/// 것을 보이려는 것이다.
+///
+/// **아직 한국어로 남은 자리 둘은 여기서 안 잰다** — `view::deferred_for` 의 `미룸 (N일)` 과
+/// `unread_column` 의 칸 한 줄은 탐색기(`tui::draw`)가 같이 쓰는데 그쪽에 말이 안 닿아 있다
+/// (moai-ra67 의 자리). 그래서 이 판에는 미룬 줄도, 손으로 옮긴 묶음도 두지 않는다.
+#[test]
+fn show_speaks_the_picked_language() {
+    const PLAIN_ACTOR: &str = "tester (tester@example.com)";
+    let s = init("showlang");
+    let run = |lang: &str, args: &[&str]| {
+        let mut cmd = isolated(BIN);
+        cmd.args(args)
+            .current_dir(s.path())
+            .env("MOAI_ACTOR", PLAIN_ACTOR)
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            .env("MOAI_LANG", lang);
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "{lang} {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let id_of = |args: &[&str]| {
+        let mut v = vec!["add"];
+        v.extend_from_slice(args);
+        v.push("-q");
+        run("en", &v).trim().to_string()
+    };
+
+    let epic = run("en", &["epic", "add", "carrier epic", "-q"]).trim().to_string();
+    let work = id_of(&["a plain issue", "-e", &epic, "--tag", "parser"]);
+    id_of(&["a child of the work", "--parent", &work]);
+    // 에픽 밖의 줄 하나 — 트리의 `에픽 없음` 머리글이 이것으로 선다.
+    id_of(&["an issue outside every epic"]);
+    let shut = id_of(&["work already closed", "-e", &epic]);
+    run("en", &["mv", &shut, "done"]);
+    run("en", &["note", &work, "a note for the next session"]);
+    run("en", &["mv", &work, "in_progress"]);
+
+    // 네 표면. 목록은 숨긴 것(`done`)까지 대고, 상세는 에픽 줄·자식 줄·시각 줄·이력을 함께 낸다.
+    let surfaces: [&[&str]; 4] = [&["show"], &["show", "--tree"], &["show", &work], &["show", &epic]];
+    for args in surfaces {
+        let english = run("en", args);
+        let left: Vec<&str> = english
+            .lines()
+            // **바구니 이름 둘은 아직 한국어다** — `nav::Index::label` 이 짓고 탐색기
+            // (`tui::mod`)가 같은 글자를 두 벌로 들고 있어, 옮기려면 그 두 자리를 함께 봐야
+            // 한다(moai-ra67 과 나란히 선 자리). 그것까지 세면 이 판은 늘 붉은 채로 있어
+            // 새로 새는 글자를 못 드러낸다.
+            .filter(|l| !l.contains("(길 잃음)") && !l.contains("(마일스톤 없음)"))
+            .filter(|l| l.chars().any(|c| ('가'..='힣').contains(&c)))
+            .collect();
+        assert!(left.is_empty(), "영어로 고른 {args:?} 화면에 한국어가 남았다 — {left:#?}");
+    }
+    assert!(run("en", &["show", "--tree"]).contains("no epic"), "트리의 `에픽 없음` 이 안 옮겨졌다");
+
+    // **줄이 실제로 섰는지를 잰다.** 안 선 화면에 한글이 없는 것은 당연해서, 이 확인이 없으면
+    // 자료가 줄어드는 날 위의 고리가 아무것도 안 재면서 초록으로 남는다.
+    let list = run("en", &["show"]);
+    for want in ["Title", "Tags", "Epic", "hidden — `--all`"] {
+        assert!(list.contains(want), "영어 목록에 `{want}` 가 없다\n{list}");
+    }
+    let one = run("en", &["show", &work]);
+    for want in ["Epic ", "Child ", "Created", "Updated", "Started", "History", "created"] {
+        assert!(one.contains(want), "영어 상세에 `{want}` 가 없다\n{one}");
+    }
+    assert!(run("en", &["show", &epic]).contains("Members"), "에픽 상세에 멤버 줄이 없다");
+
+    // **옮긴 것은 사라진 것이 아니다** — 한국어를 고르면 그대로 선다.
+    let korean = run("ko", &["show", &work]);
+    for want in ["에픽", "자식", "생성", "수정", "시작", "이력"] {
+        assert!(korean.contains(want), "한국어 상세에 `{want}` 가 없다\n{korean}");
+    }
+    assert!(run("ko", &["show"]).contains("제목"), "한국어 목록의 열 이름이 사라졌다");
+    assert!(run("ko", &["show", &epic]).contains("멤버"), "한국어 에픽 상세에 멤버 줄이 없다");
+}
+
 // ── `.moai` 밖의 한눈 보기 — 등록한 프로젝트마다 (moai-6au6) ──────────
 
 /// 등록 목록을 **제 임시 파일로** 쓴다. 돌리는 사람의 설정을 읽으면 결과가 기계를 따른다.
@@ -799,6 +894,67 @@ fn dir_in(s: &Scratch, rel: &str) -> PathBuf {
     let d = s.path().join(rel);
     std::fs::create_dir_all(&d).unwrap();
     d
+}
+
+/// **한눈 보기의 몸통도 고른 말로 선다**(moai-el7z). 머리 줄만 말묶음에서 오던 동안, 저장소
+/// 안에서는 영어로 답하고 밖에서는 한국어로 답하는 자리가 있었다 — 같은 명령이 선 자리에 따라
+/// 다른 말을 하는 것은 덜 옮긴 것과 다른 일이다(리뷰 moai-80qw.cb8·moai-4y5s.jy3 의 5번).
+///
+/// **글자를 하나씩 견주지 않고 한글이 남았는지를 센다.** 견주면 시험이 말묶음의 베낌이 되어
+/// 영어 한 줄을 고칠 때마다 함께 고쳐야 하고, 그러면 무엇이 안 옮겨졌는지는 도로 안 보인다.
+/// **두 화면을 한 판에서 잰다** — 몸통이 `view::projects_status` 와 `projects_ready` 로 갈려
+/// 있어 한쪽만 옮기기 쉽다. 일감은 줄이 실제로 서게 넉넉히 둔다: 집은 것 넷(`PICKED_SHOWN` 은
+/// 셋)과 집을 것 일곱(`READY_SHOWN` 은 다섯)이 "N건 더" 를 양쪽에 세우고, 에픽 없는 일이
+/// 경고 줄을 세운다. 제목은 ASCII 다 — 자료의 한글은 옮길 글이 아니라 이 자가 못 가른다.
+#[test]
+fn the_overview_body_speaks_the_picked_language() {
+    let s = Scratch::new("ovlang");
+    let (one, out) = (dir_in(&s, "one"), dir_in(&s, "out"));
+    ok(&one, &["init", "argos"]);
+    for n in 0..4 {
+        let id = add(&one, &[&format!("picked work {n}")]);
+        ok(&one, &["mv", &id, "in_progress"]);
+    }
+    for n in 0..7 {
+        add(&one, &[&format!("ready work {n}")]);
+    }
+    // **열지 못한 프로젝트도 몸통이다**(리뷰 moai-hom6.soc 의 4번). 성한 프로젝트 하나만
+    // 등록하면 이 판은 `view::unopened` 를 한 줄도 안 지나면서 "몸통을 다 재고 있다" 고
+    // 말한다 — 실제로 그 자리에 한국어가 박혀 있었고 이 시험은 초록이었다.
+    // 못 읽는 프로젝트(`Seen::Unreadable`)는 안 둔다: 그 줄의 까닭은 OS 가 주는 글이라
+    // 기계마다 다르고, 앞머리는 나머지 둘과 같은 자로 온다.
+    let gone = s.path().join("moved-away");
+    let cfg = registry(&s, &[&one, &dir_in(&s, "not-yet-init"), &gone]);
+    let screen = |args: &[&str], lang: &str| {
+        let got = isolated(BIN)
+            .args(args)
+            .current_dir(&out)
+            .env("MOAI_CONFIG", &cfg)
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            .env("MOAI_LANG", lang)
+            .output()
+            .expect("moai 를 실행하지 못했다");
+        assert!(got.status.success(), "{lang} {args:?}: {}", String::from_utf8_lossy(&got.stderr));
+        String::from_utf8(got.stdout).unwrap()
+    };
+
+    for args in [&["status"][..], &["ready"][..]] {
+        // **줄이 섰는지부터 잰다.** 안 선 화면에 한글이 없는 것은 당연해서, 이 확인이 없으면
+        // 일감이 줄어드는 날 이 판은 아무것도 안 재면서 초록으로 남는다.
+        let korean = screen(args, "ko");
+        assert!(korean.contains("건 더"), "한국어 화면에 '건 더' 줄이 안 섰다\n{korean}");
+        assert!(korean.contains("init 전"), "한국어 화면에서 init 전 줄이 사라졌다\n{korean}");
+
+        let english = screen(args, "en");
+        assert!(english.contains("more"), "영어 화면에 'N more' 줄이 안 섰다\n{english}");
+        // 열지 못한 두 프로젝트의 줄이 실제로 섰는가 — 안 서면 위의 훑기가 그 자리를 안 지난다.
+        assert!(english.contains("before init"), "init 전 프로젝트의 줄이 안 섰다\n{english}");
+        assert!(english.contains("directory is gone"), "사라진 프로젝트의 줄이 안 섰다\n{english}");
+        let left: Vec<&str> =
+            english.lines().filter(|l| l.chars().any(|c| ('가'..='힣').contains(&c))).collect();
+        assert!(left.is_empty(), "영어로 고른 {args:?} 화면에 한국어가 남았다 — {left:#?}");
+    }
 }
 
 /// **`.moai` 밖 한눈 보기도 자리 없는 줄을 비춘다**(moai-p3bs). 죽은 세션을 찾으러 돌아온 사람이
@@ -4609,7 +4765,7 @@ fn help_says_what_to_type_next() {
     // 명령 목록도 그대로 있다
     assert!(out.contains("milestone") && out.contains("note"), "{out}");
     // 화면의 말을 바꾸는 길도 선다 — AGENTS.md 에만 있으면 처음 만난 쪽이 못 찾는다(moai-kbky)
-    assert!(out.contains("MOAI_LANG=en") && out.contains("[i18n]"), "{out}");
+    assert!(out.contains("MOAI_LANG=ko") && out.contains("[i18n]"), "{out}");
 }
 
 /// 도움말에서 들여쓰기를 잃은 줄.
