@@ -116,7 +116,18 @@ pub enum Cmd {
   여기서 rm 한 줄은 갈라진 뒤 옆에서 만지지 않았으면 되살아나지 않는다.
   옆 워크트리를 못 읽으면 보드가 \"옆 워크트리 문제 N건\" 으로 말한다 —
   종료 코드는 그대로다.
-  보여줄 때만 겹친다 — 어느 파일도 바뀌지 않는다.")]
+  보여줄 때만 겹친다 — 어느 파일도 바뀌지 않는다.
+
+  무엇부터 잔소리할지는 .moai/config.toml 이 정한다. 안 적으면 아래 값이고,
+  수는 따옴표 없이 적는다. 어느 값으로도 막지 않는다 — 낮추면 더 비출 뿐이다.
+    status_review_days   = 3      review 에 이 날수를 넘겨 머물면 썩는 것으로
+    status_wip_days      = 2      집어 놓고 이 날수를 넘겨 안 건드리면 잊은 것
+    status_blocked_days  = 3      막힌 채 이 날수를 넘겨 서 있으면 멈춘 자리로
+    status_wip_limit     = 3      한 번에 이보다 많이 벌이면
+    status_no_epic_ratio = 0.15   에픽 없는 이슈가 이 비율부터
+    status_no_epic_min   = 5      비율이 낮아도 이 수부터
+    status_flow_days     = 7      흐름을 재는 창
+    status_idea_pile     = 5      담아 둔 생각이 이만큼 쌓이면")]
     Status(WorktreeArg),
 
     /// 지금 집을 수 있는 일
@@ -134,7 +145,7 @@ pub enum Cmd {
     // `-h` 도 설명을 옵션 밑 줄에 둔다(`next_line_help`) — 옆 한 줄 모양이면 옵션 열이
     // `--type <issue|epic|milestone|idea>` 에 맞춰 44칸으로 벌어져 설명이 112칸까지
     // 갔다(moai-x18p). 옵션이 스물이 넘는 명령이라 열을 좁혀도 다음 옵션이 다시 넓힌다.
-    // `Typed::Add`·`IdeaCmd::Add` 도 같은 까닭으로 같다.
+    // `Typed::Add` 도 같은 까닭으로 같다 — `moai idea add` 는 그것을 접어 넣어 쓴다(moai-g33x).
     #[command(next_line_help = true, after_help = "\
 예시:
   moai add '파서가 BOM 에서 죽는다' -t bug -p 1
@@ -386,6 +397,33 @@ NOTE
         event: crate::hook::Event,
     },
 
+    /// git 이 부른다. issues.jsonl 을 이슈마다 3-way 로 합친다
+    #[command(after_help = "  사람이 손으로 부를 일은 `--install` 하나다. 나머지 자리는 git 이 준다.
+
+  moai merge-driver --install        이 저장소의 .git/config 에 심는다
+  moai merge-driver --install --as <경로>  그 명령으로 심는다
+
+  **심은 자리가 계속 있어야 한다.** git 은 못 돈 드라이버를 \"충돌\" 로 읽고 이쪽
+  파일을 표식 없이 남겨, 그것을 `git add` 하면 저쪽이 통째로 사라진다. 기본값은
+  지금 도는 바이너리의 절대 경로인데, 워크트리의 `target/` 을 가리키면 그
+  워크트리를 지울 때 같이 죽는다 — `--local` 은 클론이 함께 쓰는 자리라 그 순간
+  모든 체크아웃이 그 상태가 된다. `--as` 는 PATH 의 낱말도 받지만 이 저장소에서
+  맨 `moai` 를 주지 않는다: 그것은 옛 moai 의 바이너리라 이 명령을 모른다.
+
+  한 줄이 이슈 하나고 id 로 정렬돼 있어서, 서로 다른 이슈를 고친 두 가지가 그
+  줄들이 이웃이라는 이유로 부딪친다. 여기서는 id 로 짝지어 이슈마다 3-way 로
+  푼다. 같은 이슈의 다른 필드를 고친 것도 합친다 — 태그와 막음은 더한 것을
+  더하고 뺀 것을 뺀다.
+
+  **같은 필드를 다르게 고쳤으면 사람이 푼다.** 한쪽을 말없이 고르면 다른 쪽의
+  고침이 아무 자취 없이 사라진다. 못 읽는 줄이나 겹친 id 가 있으면 파일을
+  통째로 충돌 표식에 넣어 넘긴다 — 읽은 것만 골라 쓰면 못 읽은 줄이 사라진다.
+
+  심는 것은 클론마다 한 번이다. git 은 드라이버 명령을 설정에서만 읽고 설정은
+  커밋되지 않는다. 안 심은 클론에서는 `.gitattributes` 의 merge=moai 가 그냥
+  무시되고 git 의 기본 머지가 돈다 — 즉 안 심으면 지금까지와 똑같다.")]
+    MergeDriver(MergeDriverArgs),
+
     /// Claude 에 스킬과 훅을 심는다 (다시 불러도 된다)
     #[command(subcommand)]
     Skill(SkillCmd),
@@ -513,14 +551,16 @@ pub enum Typed {
 
 /// idea 만 갖는 동사가 하나 있다 — 펼치기. 그래서 `Typed` 를 그대로 쓰지
 /// 못하고, `Typed` 에 넣으면 `moai epic promote` 가 생긴다.
+///
+/// **공통 동사는 베끼지 않고 [`Typed`] 를 접어 넣는다**(moai-g33x). 손으로 옮겨 적었을
+/// 때 `#[command(alias = "ls")]` 가 두 곳에 서고, `cmd/mod.rs` 가 `typed()` 를 안 지나고
+/// 같은 두 줄을 다시 적었다 — `Typed` 에 동사를 더하는 날 `moai idea` 만 조용히 안 따라오고
+/// 컴파일 오류도 안 났다. 접어 넣으면 `moai idea <동사>` 의 목록이 `Typed` 하나에서 나온다.
 #[derive(Subcommand, Debug)]
 pub enum IdeaCmd {
-    /// 담는다. 제목 하나면 된다
-    #[command(next_line_help = true)]
-    Add(AddArgs),
-    /// 펼치거나 목록을 낸다 (`ls` 도 같다)
-    #[command(alias = "ls")]
-    Show(ShowArgs),
+    /// `moai idea add`·`moai idea show`(`ls`) — 종류만 idea 로 고정한 같은 동사다.
+    #[command(flatten)]
+    Common(Typed),
     /// 에픽 하나 + 이슈 여럿으로 펼치고, 그 생각을 닫는다
     #[command(after_help = "  받는 마크다운은 `add --from` 과 같은 형식이다. 형식이 둘이 되면 어느 쪽
   문법인지 매번 틀린다.
@@ -846,6 +886,37 @@ pub struct ReadArgs {
 pub struct RmArgs {
     #[arg(required = true, value_name = "id")]
     pub ids: Vec<String>,
+}
+
+/// git 이 주는 자리 셋과, 사람이 치는 `--install`.
+///
+/// **자리 인자를 `Option` 으로 둔다** — `--install` 은 그것들 없이 부르고, 세 자리를
+/// `required` 로 걸면 clap 이 `--install` 만 친 사람을 먼저 거절한다. 빠진 자리는
+/// 명령 쪽이 제 말로 거절한다: 거기서는 무엇이 빠졌는지와 심는 길을 한 줄에 댈 수 있다.
+#[derive(Args, Debug)]
+pub struct MergeDriverArgs {
+    /// `%O` — 갈라진 자리의 파일
+    #[arg(value_name = "기준")]
+    pub base: Option<std::path::PathBuf>,
+    /// `%A` — 이쪽 파일. **답도 여기 쓴다**
+    #[arg(value_name = "이쪽")]
+    pub ours: Option<std::path::PathBuf>,
+    /// `%B` — 저쪽 파일
+    #[arg(value_name = "저쪽")]
+    pub theirs: Option<std::path::PathBuf>,
+    /// `%L` — 충돌 표식의 길이 (기본 7)
+    #[arg(value_name = "표식")]
+    pub marker_size: Option<usize>,
+    /// `%P` — 합치는 파일의 이름. 말할 때만 쓴다
+    #[arg(value_name = "경로")]
+    pub path: Option<String>,
+
+    /// 이 저장소의 `.git/config` 에 드라이버를 심는다
+    #[arg(long)]
+    pub install: bool,
+    /// 심을 때 적을 명령 (기본: 이 바이너리의 절대 경로)
+    #[arg(long = "as", value_name = "명령", requires = "install")]
+    pub as_command: Option<String>,
 }
 
 #[derive(Args, Debug)]

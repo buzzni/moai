@@ -10,6 +10,7 @@ pub mod hook;
 pub mod idea;
 pub mod init;
 pub mod link;
+pub mod merge_driver;
 pub mod mv;
 pub mod note;
 pub mod read;
@@ -155,6 +156,10 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         // 필드를 다 적는다 — `..` 로 받으면 `init` 에 새 플래그를 더해도 여기서 조용히 버려진다.
         Cmd::Init { prefix, no_agents, check: false } => init::run(&ctx, prefix.as_deref(), no_agents),
         Cmd::Hook { event } => hook::run(&ctx, event),
+        // **저장소를 안 찾는다** — git 이 주는 것은 임시 파일 셋이고, 답을 쓰는 자리도
+        // 그중 하나다. `.moai` 를 찾으러 가면 `git worktree` 안이나 서브모듈에서
+        // 엉뚱한 트래커를 열고, 사람이 누구인지도 여기서는 물을 일이 없다.
+        Cmd::MergeDriver(a) => merge_driver::run(&ctx, a),
         Cmd::Skill(SkillCmd::Install { scope, dry_run }) => {
             skill::install(&ctx, scope.as_str(), dry_run)
         }
@@ -181,8 +186,9 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),
         Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
         Cmd::Milestone(t) => typed(&ctx, t, Kind::Milestone),
-        Cmd::Idea(IdeaCmd::Add(a)) => add::run(&ctx, a, Some(Kind::Idea)),
-        Cmd::Idea(IdeaCmd::Show(a)) => show::run(&ctx, a, Some(Kind::Idea)),
+        // **공통 동사는 `typed()` 를 지난다**(moai-g33x) — 여기서 `add`·`show` 를 다시 적으면
+        // `Typed` 에 동사를 더하는 날 idea 만 조용히 안 따라온다.
+        Cmd::Idea(IdeaCmd::Common(t)) => typed(&ctx, t, Kind::Idea),
         Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(&ctx, a),
     }
 }

@@ -6791,5 +6791,32 @@ mod bench {
             let _ = super::row_line(&app, r, tally, 100, app.fields, cols);
         }
         println!("row_line 전부 {:?}", t.elapsed());
+
+        // **검색 키 하나도 잰다**(moai-teka) — `/` 는 맞힌 줄이 사는 자리를 다 열므로(`searched_open`)
+        // 펼친 목록과 같은 값을 탄다. 마지막 한 글자가 그 판이다.
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let ch = |app: &mut super::App, c: char| app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        ch(&mut app, '/');
+        for c in "멤버 1".chars() {
+            ch(&mut app, c);
+        }
+        let t = std::time::Instant::now();
+        ch(&mut app, '7');
+        println!("검색 키 하나 {:?} ({} 줄)", t.elapsed(), app.rows().len());
+        app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        // **펼친 화면도 잰다**(moai-teka) — 접은 뿌리만 재던 때는 열린 자리마다 목록 전부를 다시
+        // 훑는 값이 이 표에 한 번도 안 섰다. `Tab` 으로 뿌리를 통째로 편 다음이 그 값이다.
+        app.open_all(super::super::Seat::Here);
+        let t = std::time::Instant::now();
+        let open = app.rows();
+        println!("펼친 rows {:?} ({} 줄)", t.elapsed(), open.len());
+        term.draw(|f| super::screen(f, &mut app)).unwrap();
+        let t = std::time::Instant::now();
+        for _ in 0..frames {
+            term.draw(|f| super::screen(f, &mut app)).unwrap();
+        }
+        println!("펼친 프레임 {:?}", t.elapsed() / frames);
     }
 }

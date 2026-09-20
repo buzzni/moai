@@ -2328,25 +2328,21 @@ fn holding<'a>(
 // 게이트를 없앤 자리를 메우는 것이 이 리포트 하나다. **아무것도 막지 않는다**
 // — 막기 시작하면 그게 게이트고, 이전 시도가 정확히 그것으로 죽었다.
 //
-// 임계값은 이름 붙인 상수로 둔다. 지금 설정 시스템을 만들면 아무도 안 고치는
-// 파일이 하나 늘 뿐이다. 실제로 거슬릴 때 config 로 뺀다.
+// 임계값은 `.moai/config.toml` 의 `status_*` 키다([`crate::config::Thresholds`], moai-pz7h).
+// 한 줄도 안 적으면 옛 상수 그대로고, 여기 있던 이름 붙인 상수는 그 기본값으로 옮겨 갔다.
+// **설정으로 뺐어도 막는 것은 여전히 없다** — 값을 낮춰 잔소리를 늘려도 종료 코드는 그대로다.
 
-/// review 에 이만큼 머물면 썩는 것으로 본다.
-const REVIEW_STALE_DAYS: i64 = 3;
-/// 집어 놓고 이만큼 안 건드리면 잊은 것으로 본다.
-const WIP_STALE_DAYS: i64 = 2;
-/// 막힌 채로 이만큼 서 있으면 "계획이 멈춘 자리" 로 본다. 재는 것은 [`blocked_since`] —
-/// 제 계획 자리가 바뀐 때와 **지금 막는 줄이 다시 선 때** 중 늦은 것이다(moai-xib6).
-/// `blocked_by` 를 적은 시각은 여전히 안 잰다 — 오래된 두 줄 사이에 오늘 막음을 걸면
-/// 곧장 선다. 그것을 재려면 그 시각을 스냅샷에 적어야 하는데, 링크 하나에 시각을 달
-/// 만큼 거슬린 적이 아직 없다.
-///
-/// **소속을 옮긴 때도 안 잰다**(moai-bbzg, 사용자와 정함). `moai edit <id> -e <끝난 에픽>` 으로
-/// 옛 일을 넣어 에픽이 다시 열려도 그 에픽의 [`Stand::since`] 는 멤버의 옛 칸 시각이라, 그 에픽에
-/// 막힌 줄이 곧장 선다 — `moai add` 로 새 멤버를 만들 때만 새로 선다. 소속 이동 시각을 세면 멤버를
-/// 뺐다 도로 넣는 것만으로 막힘 시계가 0일로 돌아가, 미루기에서 막은 손잡이(moai-cxk8)가 소속
-/// 쪽에 다시 생긴다.
-const BLOCKED_STALE_DAYS: i64 = 3;
+// 막힌 채로 며칠 서 있으면 "계획이 멈춘 자리" 인가(`status_blocked_days`). 재는 것은 [`blocked_since`] —
+// 제 계획 자리가 바뀐 때와 **지금 막는 줄이 다시 선 때** 중 늦은 것이다(moai-xib6).
+// `blocked_by` 를 적은 시각은 여전히 안 잰다 — 오래된 두 줄 사이에 오늘 막음을 걸면
+// 곧장 선다. 그것을 재려면 그 시각을 스냅샷에 적어야 하는데, 링크 하나에 시각을 달
+// 만큼 거슬린 적이 아직 없다.
+//
+// **소속을 옮긴 때도 안 잰다**(moai-bbzg, 사용자와 정함). `moai edit <id> -e <끝난 에픽>` 으로
+// 옛 일을 넣어 에픽이 다시 열려도 그 에픽의 [`Stand::since`] 는 멤버의 옛 칸 시각이라, 그 에픽에
+// 막힌 줄이 곧장 선다 — `moai add` 로 새 멤버를 만들 때만 새로 선다. 소속 이동 시각을 세면 멤버를
+// 뺐다 도로 넣는 것만으로 막힘 시계가 0일로 돌아가, 미루기에서 막은 손잡이(moai-cxk8)가 소속
+// 쪽에 다시 생긴다.
 
 /// 막힌 줄이 **지금 막힌 채로 선 때** — 제 칸을 옮긴 때(`status_since`)와, 지금 막는
 /// 줄들이 다시 선 때 중 **가장 이른 것** 가운데 늦은 것.
@@ -2388,14 +2384,6 @@ fn blocked_since<'a>(
         .min()
         .map_or(i.status_since.as_str(), |b| b.max(i.status_since.as_str()))
 }
-/// 한 번에 이보다 많이 벌이면 알린다.
-const WIP_LIMIT: usize = 3;
-/// 에픽 없는 이슈가 이 비율을 넘으면 알린다.
-const NO_EPIC_RATIO: f64 = 0.15;
-/// 비율이 낮아도 이 수를 넘으면 알린다.
-const NO_EPIC_MIN: usize = 5;
-/// 흐름을 재는 창.
-const FLOW_DAYS: i64 = 7;
 /// 지금보다 이만큼(초) 넘게 뒤인 시각은 "먼 미래" 로 본다(moai-ugjp). 하루 — 겹쳐 보는 다른
 /// 기계의 몇 초~몇 분 앞선 시계나 시간대 실수는 안 걸리고, 손으로 고친 2099 는 걸린다.
 const FUTURE_SLACK_SECS: i64 = 86_400;
@@ -2424,13 +2412,6 @@ fn far_ahead(i: &Issue, now: &str) -> bool {
         .filter_map(crate::model::parse_rfc3339)
         .any(|t| t - now > FUTURE_SLACK_SECS)
 }
-/// 담아 둔 생각이 이만큼 쌓이면 알린다.
-///
-/// **담는 비용을 0 으로 만들면 쌓인다.** 쌓이는 것 자체는 문제가 아니고,
-/// 쌓인 줄 모르는 것이 문제다. 그래서 드러내기만 하고 아무것도 막지 않는다.
-/// 임계값은 `NO_EPIC_MIN` 과 같은 자리에 이름 붙인 상수로 둔다 — `moai-pz7h`
-/// 가 이것들을 config 로 뺄 때 같이 간다.
-const IDEA_PILE: usize = 5;
 
 /// 드러난 것 하나. `kind` 가 **타입 붙은 열거값**이라 받는 쪽이 산문을
 /// 파싱하지 않고 분기한다.
@@ -2740,7 +2721,7 @@ pub fn status_in<'a>(
     // 센다: 미룬 소속 없는 일로는 꾸짖지 않는다. 그래서 미루기는 비율을 못 올린다.
     //
     // **문턱도 id 로 잰다** — 경고가 내는 셈(`Warning::new` 가 거른 `count`)과 같은 자다.
-    // 줄로 재면 같은 종류 쌍둥이 한 쌍이 `NO_EPIC_MIN` 을 넘겨 놓고 `4건` 을 말한다.
+    // 줄로 재면 같은 종류 쌍둥이 한 쌍이 `status_no_epic_min` 을 넘겨 놓고 `4건` 을 말한다.
     let open = issues
         .iter()
         .filter(|i| is_work(i) && !i.status.is_done())
@@ -2749,7 +2730,9 @@ pub fn status_in<'a>(
         .len();
     let no_epic = Warning::new("no_epic", ids_of(&loose));
     let ratio = if open == 0 { 0.0 } else { no_epic.count as f64 / open as f64 };
-    if no_epic.count >= NO_EPIC_MIN || (ratio >= NO_EPIC_RATIO && no_epic.count > 0) {
+    // **빈 집합으로는 말하지 않는다.** 문턱이 0 이면 `>=` 가 늘 참이라, 이슈가 하나도 없는
+    // 저장소에서 `에픽 없는 이슈 0건` 이 영영 선다 — 0 은 낮춘 것이지 "없는 것도 세라" 가 아니다.
+    if no_epic.count > 0 && (no_epic.count >= cfg.status.no_epic_min || ratio >= cfg.status.no_epic_ratio) {
         warnings.push(no_epic.ratio(ratio).hint("moai show -e none"));
     }
 
@@ -2784,15 +2767,18 @@ pub fn status_in<'a>(
         .copied()
         .filter(|i| {
             i.status.as_str() == "review"
-                && days_since(&i.status_since, now).is_some_and(|d| d > REVIEW_STALE_DAYS)
+                && days_since(&i.status_since, now).is_some_and(|d| d > cfg.status.review_days)
         })
         .collect();
     if !rotting.is_empty() {
         warnings.push(
             Warning::new("stale_review", ids_of(&rotting))
-                .days(REVIEW_STALE_DAYS)
+                .days(cfg.status.review_days)
                 .ages(|i| i.status_since.as_str(), &rotting, now)
-                .hint("moai show -s review --stale 3"),
+                // **문턱을 그대로 넘긴다.** 여기 수를 박아 두면 `status_review_days` 를 고친
+                // 저장소에서 경고가 센 것과 안내가 내는 것이 다른 집합이 된다 — 낮춘 쪽에서는
+                // 안내가 빈 목록을 내서 읽는 쪽이 경고를 틀린 것으로 읽는다.
+                .hint(&format!("moai show -s review --stale {}", cfg.status.review_days)),
         );
     }
 
@@ -2809,13 +2795,13 @@ pub fn status_in<'a>(
                 && is_blocked(i, &by_id, &states, &waits)
                 && !by_deferred(i)
                 && days_since(blocked_since(i, &by_id, &states, &waits, &group_since), now)
-                    .is_some_and(|d| d > BLOCKED_STALE_DAYS)
+                    .is_some_and(|d| d > cfg.status.blocked_days)
         })
         .collect();
     if !stuck.is_empty() {
         warnings.push(
             Warning::new("blocked_stale", ids_of(&stuck))
-                .days(BLOCKED_STALE_DAYS)
+                .days(cfg.status.blocked_days)
                 .ages(|i| blocked_since(i, &by_id, &states, &waits, &group_since), &stuck, now),
         );
     }
@@ -2871,8 +2857,8 @@ pub fn status_in<'a>(
         .collect();
     // 문턱은 id 로 잰다 — 위 `no_epic` 과 같은 까닭이다.
     let overload = Warning::new("wip_overload", ids_of(&wip));
-    if overload.count > WIP_LIMIT {
-        warnings.push(overload.limit(WIP_LIMIT));
+    if overload.count > cfg.status.wip_limit {
+        warnings.push(overload.limit(cfg.status.wip_limit));
     }
 
     // 4. 집어 놓고 잊은 것.
@@ -2881,13 +2867,13 @@ pub fn status_in<'a>(
         .copied()
         .filter(|i| {
             i.status.as_str() != "review"
-                && days_since(&i.status_since, now).is_some_and(|d| d > WIP_STALE_DAYS)
+                && days_since(&i.status_since, now).is_some_and(|d| d > cfg.status.wip_days)
         })
         .collect();
     if !forgotten.is_empty() {
         warnings.push(
             Warning::new("stale_progress", ids_of(&forgotten))
-                .days(WIP_STALE_DAYS)
+                .days(cfg.status.wip_days)
                 .ages(|i| i.status_since.as_str(), &forgotten, now),
         );
     }
@@ -2976,7 +2962,8 @@ pub fn status_in<'a>(
     let piled =
         |i: &&Issue| is_idea(i) && !i.status.is_done() && !out_of_plan.contains(i.id.as_str());
     let count = issues.iter().filter(piled).count();
-    if count >= IDEA_PILE {
+    // 문턱 0 으로 `쌓인 idea 0건` 이 서지 않게 한다 — 위 `no_epic` 과 같은 까닭이다.
+    if count > 0 && count >= cfg.status.idea_pile {
         let oldest = issues
             .iter()
             .filter(piled)
@@ -3059,7 +3046,7 @@ pub fn status_in<'a>(
     // 나이는 0 아래로 안 내려간다(`days_since`) — 조금 미래로 찍힌 줄도 오늘 것으로 센다.
     // **먼 미래 시각을 든 줄은 통째로 뺀다**(moai-ugjp) — 2099 는 "최근" 이 아니고, 셈에 넣으면
     // 위 `future_timestamp` 가 드러낸 오타가 흐름 숫자로도 새어 나온다.
-    let within = |at: &str| days_since(at, now).is_some_and(|d| d < FLOW_DAYS);
+    let within = |at: &str| days_since(at, now).is_some_and(|d| d < cfg.status.flow_days);
     let happened: Vec<&Issue> = issues.iter().filter(|i| is_work(i) && !far_ahead(i, now)).collect();
     let created = happened.iter().filter(|i| within(&i.created_at)).count();
     let closed =
@@ -3073,7 +3060,7 @@ pub fn status_in<'a>(
         warnings,
         notices,
         flow: Flow {
-            days: FLOW_DAYS,
+            days: cfg.status.flow_days,
             created,
             done: closed,
             net: created as i64 - closed as i64,
@@ -3089,6 +3076,10 @@ mod tests {
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
     }
+
+    /// 아무것도 안 적은 저장소가 받는 문턱. **기본값을 여기 다시 적지 않는다** —
+    /// 적으면 기본값을 고칠 때 시험만 옛 수를 든 채 통과한다.
+    const IDEA_PILE: usize = crate::config::Thresholds::DEFAULT.idea_pile;
 
     fn make(id: &str, kind: Kind, status: &str) -> Issue {
         Issue::new(id.into(), format!("{id} 제목"), kind, Status::new(status), "2026-09-01T00:00:00Z")

@@ -1,7 +1,10 @@
 # moai — 이슈 트래커
 # 스냅샷에는 merge=union 을 쓰지 않는다. 두 브랜치가 같은 이슈를 고치면
 # union 이 같은 id 를 가진 줄 두 개를 조용히 남기고, 그건 데이터 손상이다.
-# 진짜 충돌은 사람이 푼다 — 한 줄이 이슈 하나라 실제로 쉽다.
-.moai/issues.jsonl   text eol=lf
+# merge=moai 는 줄을 id 로 짝지어 이슈마다 3-way 로 푼다. 같은 필드를 둘이
+# 다르게 고친 진짜 충돌은 그대로 사람에게 온다 — 한 줄이 이슈 하나라 실제로 쉽다.
+# 드라이버는 클론마다 `moai merge-driver --install` 로 심는다. 안 심은 클론에서는
+# 이 낱말이 무시되고 git 의 기본 머지가 돈다.
+.moai/issues.jsonl   text eol=lf merge=moai
 # 저널은 추가 전용이고 순서가 무관하며 상태 계산에 읽히지 않는다. 여기선 맞다.
 .moai/journal.jsonl  text eol=lf merge=union
