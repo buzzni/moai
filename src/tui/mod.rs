@@ -1049,7 +1049,7 @@ impl Site {
 /// 탐색기가 읽음으로 **지켜보는 표식** — [`crate::read_marks::read`] 가 실제로 여는 파일 전부를
 /// 잰다(moai-65as).
 ///
-/// 한때 이 값은 쓰는 자리 하나(`read_marks::path_for`)의 표식이었다. moai-bdej 가 못 푼 판의 도장을
+/// 한때 이 값은 쓰는 자리 하나([`crate::read_marks::Place::at`])의 표식이었다. moai-bdej 가 못 푼 판의 도장을
 /// 대기 자리로 보내고 다음 성한 쓰기가 합치게 하면서, 읽기가 여는 파일이 셋으로 늘었는데 재는 자는
 /// 하나로 남았다 — 옆 터미널이 대기 자리에 적어도 이 표식이 안 움직여 [`App::load_read`] 가 안 돌고,
 /// 합쳐질 줄이 화면에 내내 [NEW] 로 섰다.
@@ -2219,7 +2219,7 @@ impl App {
     fn read_marks_of(&self, root: &std::path::Path) -> Option<Got> {
         let config = self.user_config.as_deref()?;
         // **자리를 한 번만 고른다** — 표식이 쓰는 파일과 아래에서 가려낼 자리 까닭이 한 값에서 온다.
-        // `path_for` 로 파일만 받던 판은 같은 `settle` 을 두 번 돌면서도 그 까닭을 버렸다.
+        // 파일 하나만 받던 판은 같은 `settle` 을 두 번 돌면서도 그 까닭을 버렸다.
         let place = crate::read_marks::place_of(config, root);
         // **읽기가 여는 파일 전부를 잰다**([`ReadStamp`], moai-65as) — 아래 `read` 는 대기 자리와
         // (지금 자리가 없으면) 옛 자리까지 연다. 지금 자리 하나만 재던 판은 그 둘이 바뀌어도
@@ -2245,7 +2245,7 @@ impl App {
             }
         }
         // **설정이 사라졌으면 없는 읽음도 사라진 것으로 든다**(moai-4qbv.i0g 리뷰). 읽음 파일은 설정
-        // 파일 곁의 디렉터리에 산다(`read_marks::path_for`) — autofs·sshfs 홈이 끊기면 둘이 함께
+        // 파일 곁의 디렉터리에 산다(`read_marks::place_of`) — autofs·sshfs 홈이 끊기면 둘이 함께
         // 사라진다. 그때 없는 읽음을 "아직 아무것도 안 읽은 프로젝트" 로 들면 빈 표를 들여 내 줄이
         // 통째로 [NEW] 로 서고, `SPC m a` 한 번이 그 프로젝트를 통째로 읽음으로 찍는다 — 층만 지키고
         // 읽음은 놓친 자리다(moai-po6v 가 설정에 대해 막은 그 해다).
@@ -2344,7 +2344,7 @@ impl App {
         let (Some(config), Some(repo)) = (self.user_config.as_deref(), self.site.repo.as_ref()) else { return };
         // **재는 자리는 [`ReadStamp::of`] 가 정한다**(moai-65as) — 여기서 파일을 따로 고르면
         // [`App::read_marks_of`] 와 갈려, 걸음이 제가 이미 읽은 것을 다시 읽거나 영영 안 읽는다.
-        // `path_for` 하나를 재던 판이 그렇게 갈렸다.
+        // 쓰는 자리 하나를 재던 판이 그렇게 갈렸다.
         let now = ReadStamp::of(&crate::read_marks::place_of(config, &repo.root));
         // **빚진 읽기는 표식이 그대로여도 한다**([`App::follow_config`] 와 한 자, moai-po6v) — 권한을
         // 되돌리는 `chmod` 은 표식을 안 바꿔, 표식만 보면 그 한 번이 세션 내내 [NEW] 를 세워 둔다.
@@ -5669,7 +5669,7 @@ mod tests {
         let config = s.path().join("user.toml");
         let root = s.path().join("proj");
         // **읽음은 그 프로젝트의 제 파일에 산다**(moai-bwce) — 뿌리를 알아야 그 파일을 고른다.
-        let sheet = crate::read_marks::path_for(&config, &root);
+        let sheet = crate::read_marks::place_of(&config, &root).at;
         let mut a = app();
         for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());
@@ -5736,7 +5736,7 @@ mod tests {
         let old = crate::store::dir_of(&config)
             .join("read")
             .join(format!("{:016x}.toml", crate::text::fnv1a64(slashed.as_os_str().as_encoded_bytes())));
-        assert_ne!(old, crate::read_marks::path_for(&config, &slashed), "시험의 전제 — 옛 이름과 새 이름이 다르다");
+        assert_ne!(old, crate::read_marks::place_of(&config, &slashed).at, "시험의 전제 — 옛 이름과 새 이름이 다르다");
         std::fs::create_dir_all(old.parent().unwrap()).unwrap();
         std::fs::write(
             &old,
@@ -5858,7 +5858,7 @@ mod tests {
         assert!(told.starts_with("읽음 자리를 못 풀었다"), "자리 탈을 제 낱말로 안 댄다 — {told}");
 
         // 건너뛴 줄이 있으면 그쪽이 먼저다 — 자리 까닭은 뒤로 물러난다.
-        let sheet = crate::read_marks::path_for(&config, &root);
+        let sheet = crate::read_marks::place_of(&config, &root).at;
         std::fs::create_dir_all(sheet.parent().unwrap()).unwrap();
         // 때가 낱말이 아닌 줄 하나 — 그 줄만 건너뛰고 나머지는 든다(`trouble` 이 안 선다).
         // `path` 는 이 뿌리여야 문지기를 지난다(`Sheet::owns`) — 자리를 못 풀었으니 적힌 철자다.
@@ -5928,7 +5928,7 @@ mod tests {
         a.me = Some("레이븐 (raven@example.com)".into());
 
         let stamp = a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
-        let at = crate::read_marks::path_for(&config, &root);
+        let at = crate::read_marks::place_of(&config, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(
             &at,
@@ -5971,7 +5971,7 @@ mod tests {
         a.load_read();
         assert!(a.site.unread.contains("argos-0009"), "시험의 전제 — 안 읽은 줄이 [NEW] 로 선다");
 
-        let at = crate::read_marks::path_for(&config, &root);
+        let at = crate::read_marks::place_of(&config, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, format!("path = {:?}\n\n[read]\n", root.display().to_string())).unwrap();
         std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o000)).unwrap();
@@ -6028,7 +6028,7 @@ mod tests {
     }
 
     /// **홈이 끊기면 읽음도 지난 것을 들고 선다**(moai-4qbv.i0g 리뷰). 읽음 파일은 설정 파일 곁의
-    /// 디렉터리에 살아([`crate::read_marks::path_for`]) autofs·sshfs 홈이 끊기면 둘이 함께 사라진다.
+    /// 디렉터리에 살아([`crate::read_marks::place_of`]) autofs·sshfs 홈이 끊기면 둘이 함께 사라진다.
     /// 설정만 지키고 읽음을 "아직 아무것도 안 읽은 프로젝트" 로 들면 내 줄이 통째로 [NEW] 로 서고,
     /// 그 화면에서 `SPC m a` 한 번이 프로젝트를 통째로 읽음으로 찍는다 — moai-po6v 가 층에 대해 막은
     /// 그 해가 읽음 쪽에 그대로 남아 있었다.
@@ -6051,7 +6051,7 @@ mod tests {
 
         std::fs::write(&config, "[[project]]\npath = \"/a\"\n").unwrap();
         let stamp = &a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
-        let at = crate::read_marks::path_for(&config, &root);
+        let at = crate::read_marks::place_of(&config, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(
             &at,
@@ -6161,7 +6161,7 @@ mod tests {
             format!("\"{id}\" = \"{stamp}\"\n")
         };
         let (nine, two) = (mark("argos-0009"), mark("argos-0002"));
-        let at = crate::read_marks::path_for(&config, &root);
+        let at = crate::read_marks::place_of(&config, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let head = format!("path = {:?}\n\n[read]\n", root.display().to_string());
         std::fs::write(&at, format!("{head}{nine}")).unwrap();
@@ -6235,7 +6235,7 @@ mod tests {
             Some(&stamp),
             "뿌리의 파일에 안 적었다"
         );
-        assert!(!crate::read_marks::path_for(&config, &worktree).exists(), "워크트리 자리에 읽음 파일을 지었다");
+        assert!(!crate::read_marks::place_of(&config, &worktree).at.exists(), "워크트리 자리에 읽음 파일을 지었다");
     }
 
     /// **한눈 보기의 줄은 그 프로젝트의 파일에 적는다**(moai-bwce) — `App` 의 맵 하나를 같이 보던 판은

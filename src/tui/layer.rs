@@ -2035,7 +2035,7 @@ mod tests {
         );
 
         // 들어가는 길에서 다시 읽으면 빈 표다. 들고 있던 것을 버리면 그 프로젝트가 통째로 [NEW] 다.
-        let at = crate::read_marks::path_for(&cfg, &one);
+        let at = crate::read_marks::place_of(&cfg, &one).at;
         std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o000)).unwrap();
         if std::fs::read(&at).is_ok() {
             // 권한이 안 먹는 자리(root)에서는 흉내 낼 수 없다.
