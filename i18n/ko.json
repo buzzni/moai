@@ -106,5 +106,21 @@
   "block.no_members": "멤버 없음",
   "journal.create": "생성",
   "journal.remove": "삭제",
-  "detail.members": "멤버"
+  "detail.members": "멤버",
+  "hook.lead": "이 저장소의 할 일은 moai 에 있다. TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다.",
+  "hook.carried": "압축 전부터 이것을 집고 있다:",
+  "hook.still_held": "아직 집고 있는 것이 있다. 실제로 끝났으면 옮기고, 안 할 것이면 미루고, 이어서 할 것이면 다음 세션에 한 줄 남긴다.",
+  "hook.waiting_why": "무엇을 기다리나",
+  "hook.waiting_hint": "결정을 기다리는 것이면 — 첫 칸에 두면 {epic} 가 열린 채 남는다",
+  "hook.defer_why": "왜",
+  "hook.defer_closes": "{epic} 의 목적을 접을 때만 — 집은 것을 미루면 {epic} 에 끝난 멤버만 남아 목적을 못 이룬 채 닫힌다",
+  "hook.defer_plain": "지금 안 할 것이면",
+  "hook.handoff_hint": "이어서 할 것이면",
+  "hook.review_open": "리뷰 이슈 {id} 가 아직 열려 있다. 낸 글을 붙이고 닫는다.",
+  "hook.warnings_grew": "경고가 {before} 에서 {now} 로 늘었다. `moai status` 로 무엇이 늘었는지 본다.",
+  "refuse.link_needs_side": "`--blocks` 나 `--unblocks` 를 적는다",
+  "refuse.link_both_ways": "{id} 를 막으면서 동시에 막음을 없앨 수는 없다",
+  "refuse.defer_empty_why": "까닭이 비었다",
+  "refuse.edit_nothing": "무엇을 고칠지 적지 않았다. `moai edit --help` 가 고칠 수 있는 것을 낸다",
+  "refuse.init_no_prefix": "디렉터리 이름에서 접두어를 만들 수 없다. `moai init <접두어>`"
 }

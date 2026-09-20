@@ -23,6 +23,7 @@
 
 use crate::config::Config;
 use crate::guide::REVIEW_STEPS;
+use crate::i18n::{Lang, fill, say};
 use crate::model::Issue;
 use crate::report;
 use serde::Deserialize;
@@ -143,20 +144,20 @@ impl Decision {
     }
 }
 
-/// 세션에 싣는 머리말. 보드만 실으면 그것이 무엇을 하라는 뜻인지가 안 붙는다.
-const LEAD: &str = "이 저장소의 할 일은 moai 에 있다. TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다.";
-
 /// 보드를 실을 글로 만든다.
 ///
 /// 보드 줄은 `view::status` 가 이미 만든 것을 그대로 받는다 — 훅이 제 손으로
 /// 다시 그리면 화면과 훅이 같은 저장소를 두 모양으로 말한다.
-pub fn board(lines: &[String]) -> Decision {
+///
+/// 머리말(`hook.lead`)은 말묶음에서 온다(moai-8d49) — 보드만 실으면 그것이 무엇을 하라는
+/// 뜻인지가 안 붙는데, 그 한 줄만 한국어로 박혀 있으면 영어 화면의 보드가 두 말로 답한다.
+pub fn board(lines: &[String], lang: Lang) -> Decision {
     // 싣기 전에 색을 걷는다. 까닭은 `style::plain` 에 있다.
     let body = crate::style::plain(&lines.join("\n"));
     if body.trim().is_empty() {
         return Decision::Pass;
     }
-    Decision::Context(format!("{LEAD}\n\n{body}"))
+    Decision::Context(format!("{}\n\n{body}", say(lang, "hook.lead")))
 }
 
 /// 접힌 뒤에도 잃으면 안 되는 것 — 지금 집고 있는 일.
@@ -167,12 +168,12 @@ pub fn board(lines: &[String]) -> Decision {
 /// **`closing` 과 같은 자로 잰다**([`holding`]) — 겹친 줄(`latest`)에서 더는 안 집힌 줄은 안 싣는다.
 /// 따로 재던 판은 main 이 이미 닫거나 놓은 줄을 딸린 워크트리의 낡은 스냅샷대로 "압축 전부터 집고
 /// 있다" 로 실었고, 같은 세션의 `Stop` 은 그 줄을 안 붙들어 두 말이 갈렸다(리뷰 moai-3k2d.1df).
-pub fn carried(issues: &[Issue], latest: &[Issue], cfg: &Config, away: &Away) -> Decision {
+pub fn carried(issues: &[Issue], latest: &[Issue], cfg: &Config, away: &Away, lang: Lang) -> Decision {
     let wip = holding(issues, latest, cfg, away);
     if wip.is_empty() {
         return Decision::Pass;
     }
-    let mut out = String::from("압축 전부터 이것을 집고 있다:");
+    let mut out = String::from(say(lang, "hook.carried"));
     for i in wip {
         out.push_str(&format!("\n  {}  {}", i.id, i.title));
     }
@@ -4148,23 +4149,21 @@ pub fn closing(
     away: &Away,
     warnings: usize,
     before: Option<usize>,
+    lang: Lang,
 ) -> Decision {
     let wip = holding(issues, latest, cfg, away);
     // **집은 것이 없으면 붙들 것은 늘어난 경고뿐이다** — 아래는 집은 줄과 그것에 매인 리뷰만 센다. `Stop` 은
     // 붙들 것이 없으면 표를 안 남겨 턴마다 여기를 다시 지나므로, 빈 초점에 소속 지도를 짓지 않는다(리뷰
     // moai-3k2d.1df).
     if wip.is_empty() {
-        return grown(warnings, before).map_or(Decision::Pass, Decision::Block);
+        return grown(warnings, before, lang).map_or(Decision::Pass, Decision::Block);
     }
     let mut lines = Vec::new();
     let epics = report::groups(issues);
     let out_of_plan = report::put_off(issues);
     let closes = shelving_closes(latest, cfg, &wip);
     if !wip.is_empty() {
-        lines.push(
-            "아직 집고 있는 것이 있다. 실제로 끝났으면 옮기고, 안 할 것이면 미루고, 이어서 할 것이면 다음 세션에 한 줄 남긴다."
-                .to_string(),
-        );
+        lines.push(say(lang, "hook.still_held").to_string());
         for i in &wip {
             // **그 줄이 갈 수 있는 칸만 댄다.** 모두에게 `review|done` 을 일러 주던
             // 판은 이미 review 인 줄에 제자리걸음을 시켰고, `|` 는 그대로 치면 파이프다.
@@ -4207,19 +4206,21 @@ pub fn closing(
             let shuts = closes.get(i.id.as_str()).copied();
             if let Some(e) = shuts.filter(|_| !is_review(i, &out_of_plan)) {
                 lines.push(format!(
-                    "  moai mv {} {} -m '무엇을 기다리나'      결정을 기다리는 것이면 — 첫 칸에 두면 {e} 가 열린 채 남는다",
+                    "  moai mv {} {} -m '{}'      {}",
                     i.id,
-                    cfg.first_status()
+                    cfg.first_status(),
+                    say(lang, "hook.waiting_why"),
+                    fill(say(lang, "hook.waiting_hint"), &[("epic", e)])
                 ));
             }
             let when = match shuts {
-                Some(e) => format!("{e} 의 목적을 접을 때만 — 집은 것을 미루면 {e} 에 끝난 멤버만 남아 목적을 못 이룬 채 닫힌다"),
-                None => "지금 안 할 것이면".to_string(),
+                Some(e) => fill(say(lang, "hook.defer_closes"), &[("epic", e)]),
+                None => say(lang, "hook.defer_plain").to_string(),
             };
             // 자유 글은 작은따옴표다(moai-1yya) — 이 줄은 옮겨 치는 글이고, 큰따옴표 안의 백틱은 bash 가
             // 명령으로 푼다.
-            lines.push(format!("  moai defer {} -m '왜'      {when}", i.id));
-            lines.push(format!("  {}      이어서 할 것이면", crate::guide::handoff(&i.id)));
+            lines.push(format!("  moai defer {} -m '{}'      {when}", i.id, say(lang, "hook.defer_why")));
+            lines.push(format!("  {}      {}", crate::guide::handoff(&i.id), say(lang, "hook.handoff_hint")));
         }
     }
     // **굴러가는 리뷰와 지금 집은 것에 매인 리뷰만 센다.** 저장소에 남은 옛
@@ -4244,21 +4245,21 @@ pub fn closing(
             || crate::id::parent_of(&i.id).is_some_and(|p| unit.contains(p));
         if mine && !wip.iter().any(|w| w.id == i.id) {
             lines.push(format!(
-                "리뷰 이슈 {} 가 아직 열려 있다. 낸 글을 붙이고 닫는다.\n{}",
-                i.id,
+                "{}\n{}",
+                fill(say(lang, "hook.review_open"), &[("id", &i.id)]),
                 crate::guide::close_steps(&i.id, "moai")
             ));
         }
     }
-    lines.extend(grown(warnings, before));
+    lines.extend(grown(warnings, before, lang));
     if lines.is_empty() { Decision::Pass } else { Decision::Block(lines.join("\n")) }
 }
 
 /// 세션을 여는 때보다 경고가 늘었으면 그 한 줄([`closing`]).
-fn grown(warnings: usize, before: Option<usize>) -> Option<String> {
-    before
-        .filter(|before| warnings > *before)
-        .map(|before| format!("경고가 {before} 에서 {warnings} 로 늘었다. `moai status` 로 무엇이 늘었는지 본다."))
+fn grown(warnings: usize, before: Option<usize>, lang: Lang) -> Option<String> {
+    before.filter(|before| warnings > *before).map(|before| {
+        fill(say(lang, "hook.warnings_grew"), &[("before", &before.to_string()), ("now", &warnings.to_string())])
+    })
 }
 
 /// 집은 것을 미루면 **목적을 못 이룬 채 `done` 으로 서는 에픽** — 집은 줄 id → 그 에픽 id.
@@ -4415,6 +4416,28 @@ fn flag_values(seg: &[String], flags: &[&str]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **훅이 싣는 글은 한국어로 잰다.** 이 시험들은 글자를 보고 규칙의 셈을 재는데(moai-8d49 로
+    /// 말묶음에 들어간 뒤로도 그 셈은 그대로다), 화면 기본이 영어라 그냥 부르면 영어가 나온다.
+    /// 기본이 정말 영어인지는 `the_loaded_text_speaks_the_language_it_is_handed` 가 따로 잰다.
+    fn closing(
+        issues: &[Issue],
+        latest: &[Issue],
+        cfg: &Config,
+        away: &Away,
+        warnings: usize,
+        before: Option<usize>,
+    ) -> Decision {
+        super::closing(issues, latest, cfg, away, warnings, before, Lang::Ko)
+    }
+
+    fn carried(issues: &[Issue], latest: &[Issue], cfg: &Config, away: &Away) -> Decision {
+        super::carried(issues, latest, cfg, away, Lang::Ko)
+    }
+
+    fn board(lines: &[String]) -> Decision {
+        super::board(lines, Lang::Ko)
+    }
 
     /// **시험은 명령줄을 글로 준다.** 규칙은 한 번 읽은 [`Line`] 을 받는데(moai-uc5v), 시험마다
     /// 그것을 세우면 표본 한 줄에 `Line::new` 가 따라붙어 읽기 힘들다. 이름을 그대로 두어
@@ -4929,6 +4952,42 @@ mod tests {
         // **`&` 로 띄운 묶음은 아직 못 가른다** — 렉서가 `&` 와 `;` 를 한 이음사(`Op::Any`)로 읽어,
         // `집기 || { …; exit 1; } & 쓰기` 의 `exit` 가 제 하위 셸만 끝내는 것을 여기서 모른다.
         // 그 줄은 지금 지나간다(샌다). 흔한 꼴이 아니라 적어 두고 idea 로 넘긴다(moai-ncay 의 노트).
+    }
+
+    /// **훅이 싣는 글은 건네받은 말로 선다**(moai-8d49). 화면 기본이 영어가 된 뒤로(moai-bn1j)
+    /// 보드는 고른 말로 나오는데 그 위의 머리말과 `Stop` 이 붙드는 글만 한국어로 박혀 있었다 —
+    /// 에이전트가 읽는 자리라 사람 눈에 가장 늦게 띈다.
+    ///
+    /// **규칙 1~4 의 거절문은 아직 여기가 아니다**(2026-09-20 사용자 결정) — 그 첫 줄은
+    /// `guide::rule_head` 고, 그 글자는 `moai skill install` 이 심는 AGENTS.md 의 규칙 제목과
+    /// 같아야 막힌 쪽이 무엇을 어겼는지 찾는다. 심는 문서를 같이 정하기 전에는 안 건드린다.
+    #[test]
+    fn the_loaded_text_speaks_the_language_it_is_handed() {
+        // 제목은 자료지 제품 글이 아니다 — 아래에서 "영어 판에 남은 한글" 을 세니 표본을 안 섞는다.
+        let mut held = under("t-1", "in_progress", "t-e");
+        held.title = "work".into();
+        let all = vec![epic("t-e"), held];
+        let lines = vec!["보드 한 줄".to_string()];
+        for (lang, head) in [(Lang::En, "Work for this repo lives in moai"), (Lang::Ko, "이 저장소의 할 일은 moai 에 있다")] {
+            let Decision::Context(said) = super::board(&lines, lang) else {
+                panic!("보드를 안 실었다");
+            };
+            assert!(said.starts_with(head), "{lang:?} 의 머리말이 아니다 — {said}");
+            let Decision::Context(said) = super::carried(&all, &all, &cfg(), &here(), lang) else {
+                panic!("집은 줄을 안 실었다");
+            };
+            assert!(said.contains("t-1"), "{lang:?}: 집은 줄을 잃었다 — {said}");
+            let Decision::Block(said) = super::closing(&all, &all, &cfg(), &here(), 0, None, lang) else {
+                panic!("안 붙들었다");
+            };
+            assert!(said.contains("moai defer t-1"), "{lang:?}: 미룸 줄을 잃었다 — {said}");
+        }
+        // 영어로 부른 판에 한국어가 남으면 그 줄이 아직 글자로 박힌 것이다 — 거절문(guide)은 안 센다.
+        let Decision::Block(said) = super::closing(&all, &all, &cfg(), &here(), 3, Some(1), Lang::En) else {
+            panic!("안 붙들었다");
+        };
+        let kept: Vec<&str> = said.lines().filter(|l| l.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c))).collect();
+        assert_eq!(kept, ["  moai note t-1 '다음: <이어서 할 것>'      if you will carry on"], "{said}");
     }
 
     /// **규칙 넷이 명령줄을 한 번만 읽는다**(moai-uc5v). 저마다 [`Lexer`] 를 세우던 판은 Bash 한
@@ -6763,7 +6822,7 @@ mod tests {
         let Decision::Context(c) = board(&["이슈 3".into(), "todo 3".into()]) else {
             panic!("보드가 안 실렸다");
         };
-        assert!(c.starts_with(LEAD), "{c}");
+        assert!(c.starts_with(say(Lang::Ko, "hook.lead")), "{c}");
         assert!(c.contains("이슈 3"), "{c}");
     }
 

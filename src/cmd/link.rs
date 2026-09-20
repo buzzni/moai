@@ -13,11 +13,11 @@ use crate::style::{self, paint};
 
 pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
     if args.blocks.is_empty() && args.unblocks.is_empty() {
-        return Err(Fail::new("`--blocks` 나 `--unblocks` 를 적는다"));
+        return Err(Fail::new(crate::i18n::say(ctx.lang(), "refuse.link_needs_side")));
     }
     // 같은 id 가 둘 다에 있으면 어느 쪽이 이기는지 조용히 정하지 않는다.
     if let Some(dup) = args.blocks.iter().find(|b| args.unblocks.contains(b)) {
-        return Err(Fail::new(format!("{dup} 를 막으면서 동시에 막음을 없앨 수는 없다")));
+        return Err(Fail::new(crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.link_both_ways"), &[("id", dup)])));
     }
     let repo = Repo::discover()?;
     let at = model::now();

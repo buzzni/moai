@@ -106,5 +106,21 @@
   "block.no_members": "no members",
   "journal.create": "created",
   "journal.remove": "removed",
-  "detail.members": "Members"
+  "detail.members": "Members",
+  "hook.lead": "Work for this repo lives in moai. Do not use TodoWrite or a markdown TODO list.",
+  "hook.carried": "You were already holding this before the compaction:",
+  "hook.still_held": "You are still holding work. If it is really done, move it; if you are not doing it, defer it; if you will carry on, leave one line for the next session.",
+  "hook.waiting_why": "what are you waiting for",
+  "hook.waiting_hint": "if it is waiting on a decision — left in the first column, {epic} stays open",
+  "hook.defer_why": "why",
+  "hook.defer_closes": "only to give up what {epic} set out to do — defer held work and {epic} closes with finished members alone",
+  "hook.defer_plain": "if you are not doing it now",
+  "hook.handoff_hint": "if you will carry on",
+  "hook.review_open": "Review issue {id} is still open. Attach what it produced and close it.",
+  "hook.warnings_grew": "Warnings grew from {before} to {now}. Run `moai status` to see what grew.",
+  "refuse.link_needs_side": "Say `--blocks` or `--unblocks`.",
+  "refuse.link_both_ways": "{id} cannot be blocked and unblocked at once",
+  "refuse.defer_empty_why": "the reason is empty",
+  "refuse.edit_nothing": "You did not say what to edit. `moai edit --help` lists what can be edited.",
+  "refuse.init_no_prefix": "Cannot make a prefix from the directory name. `moai init <prefix>`"
 }

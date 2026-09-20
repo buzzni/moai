@@ -33,7 +33,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     // 받으면, 이력에 내용 없는 `note:` 줄이 부를 때마다 하나씩 쌓인다.
     let msg = args.msg.as_deref().map(str::trim).filter(|m| !m.is_empty());
     if args.msg.is_some() && msg.is_none() {
-        return Err(Fail::new("까닭이 비었다"));
+        return Err(Fail::new(crate::i18n::say(ctx.lang(), "refuse.defer_empty_why")));
     }
     let from = args.from.map(crate::model::Status::new);
     let at = model::now();

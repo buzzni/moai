@@ -138,7 +138,7 @@ fn decide(ctx: &Ctx, event: Event, input: &Input, line: &crate::hook::Line<'_>) 
             // 누구의 것인지 모르는 줄은 싣지 않는다 — 남의 일을 "압축 전부터 집고 있다" 로 떠안긴다(moai-4jsy).
             // `Stop` 이 붙드는 것과 같은 자로 잰다([`releasing`]).
             let (away, latest) = releasing(input, &repo, &load.issues);
-            crate::hook::carried(&load.issues, latest.as_deref().unwrap_or(&load.issues), &repo.config, &away)
+            crate::hook::carried(&load.issues, latest.as_deref().unwrap_or(&load.issues), &repo.config, &away, ctx.lang())
         }
         // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다.
         Event::SessionStart => {
@@ -160,7 +160,7 @@ fn decide(ctx: &Ctx, event: Event, input: &Input, line: &crate::hook::Line<'_>) 
             // 겹쳐 보지 않는다 — 훅의 보드는 제 저장소의 줄만 싣는다. 그래서 출처가 없는
             // 화면이고(`view::Screen::new`), 빈 `Origin` 을 지어 빌려 줄 일이 없다.
             let lines = view::status(&st, &load.issues, &repo.config, &now, &source, 0, view::Screen::new(ctx.lang()));
-            crate::hook::board(&lines)
+            crate::hook::board(&lines, ctx.lang())
         }),
         Event::PreToolUse => {
             use crate::hook::Call;
@@ -263,6 +263,7 @@ fn decide(ctx: &Ctx, event: Event, input: &Input, line: &crate::hook::Line<'_>) 
                 &away,
                 warnings,
                 baseline(input, &repo),
+                ctx.lang(),
             )
         }),
     };

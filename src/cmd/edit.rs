@@ -113,7 +113,7 @@ struct Out<'a> {
 }
 
 pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
-    fail_if_nothing(&args)?;
+    fail_if_nothing(&args, ctx.lang())?;
     if let Some(t) = &args.title {
         super::refuse_if_flag_like(t.trim())?;
     }
@@ -336,7 +336,7 @@ fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str) {
     eprintln!("moai: {id} 는 {stood} — {from} {lost}. {verb} {way}");
 }
 
-fn fail_if_nothing(args: &EditArgs) -> R<()> {
+fn fail_if_nothing(args: &EditArgs, lang: crate::i18n::Lang) -> R<()> {
     let touched = args.title.is_some()
         || args.body.is_some()
         || !args.tag.is_empty()
@@ -345,9 +345,7 @@ fn fail_if_nothing(args: &EditArgs) -> R<()> {
         || args.milestone.is_some()
         || args.priority.is_some()
         || args.assignee.is_some();
-    touched.then_some(()).ok_or_else(|| {
-        Fail::new("무엇을 고칠지 적지 않았다. `moai edit --help` 가 고칠 수 있는 것을 낸다")
-    })
+    touched.then_some(()).ok_or_else(|| Fail::new(crate::i18n::say(lang, "refuse.edit_nothing")))
 }
 
 #[cfg(test)]
