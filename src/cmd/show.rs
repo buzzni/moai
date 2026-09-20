@@ -86,8 +86,9 @@ fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
 
 pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
     let repo = Repo::discover()?;
-    let crate::worktree::Gathered { load, origin, sides, .. } = super::gather(&repo, args.worktree.worktree)?;
-    super::report_load_errors(&repo.issues_path(), &load.errors);
+    let crate::worktree::Gathered { load, origin, sides, mine, .. } =
+        super::gather(ctx, &repo, args.worktree.worktree)?;
+    super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     let target = match kind_filter {
         // `moai epic show <id>` 는 그 id 를 그대로 본다. 종류는 목록일 때만 거른다.
@@ -114,7 +115,8 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
             return plan(ctx, &load.issues, issue, args.raw);
         }
         // 겹치며 이미 판 옆 스냅샷을 그대로 넘긴다 — 자리를 물을 때 같은 파일을 다시 안 판다(moai-kos1).
-        let dug = crate::worktree::dug(&sides);
+        // **제 스냅샷도 같이 넘긴다**(moai-mafv) — 바로 위에서 판 그 파일이다.
+        let dug = crate::worktree::dug(&sides, &mine);
         return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree, &dug);
     }
 

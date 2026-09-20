@@ -25,8 +25,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let Some(repo) = Repo::find()? else {
         return overview(ctx, worktree);
     };
-    let crate::worktree::Gathered { load, origin, trouble, unfound, swept, sides, .. } =
-        super::gather(&repo, worktree)?;
+    let crate::worktree::Gathered { load, origin, trouble, unfound, swept, sides, mine, .. } =
+        super::gather(ctx, &repo, worktree)?;
     // stderr 에 한 줄씩 낸 것의 수 — 보드가 "문제 없다" 로 그 말을 뒤집지 않게 넘긴다(moai-cuw2).
     let trouble = trouble.len() + usize::from(unfound.is_some());
     // **그 줄이 쓰는 id** 까지 넘긴다 — id 가 있어야 산 줄과의 중복이
@@ -54,13 +54,14 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 모아 둔 판단이 부르는 쪽마다 다른 뿌리를 받아 또 갈렸다).
     // 겹치며 이미 판 옆 스냅샷을 넘긴다(moai-kos1) — `--worktree` 면 `gather` 가 그 파일을
     // 방금 열어 풀었고, 안 겹쳐 봤으면 비어 있어 예전 그대로다.
+    // **제 스냅샷도 같이 넘긴다**(moai-mafv) — 그것은 `--worktree` 와 상관없이 방금 판 것이다.
     let (lost, unread) = crate::worktree::stranded_at_in(
         repo.here(),
         &repo.config,
         &load.issues,
         swept,
         &now,
-        &crate::worktree::dug(&sides),
+        &crate::worktree::dug(&sides, &mine),
     );
     st.warnings.extend(lost);
     // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정에서 그 워크트리는 "아무도
@@ -92,7 +93,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let said_already = swept;
     if !said_already {
         for t in &unread.all {
-            eprintln!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display());
+            // 글은 `view` 한 자리에서 짓는다(moai-dpbi) — 밖 한눈 보기가 같은 줄을 낸다.
+            eprintln!("{}", view::unread_worktree(ctx.lang(), &t.branch, &t.path));
         }
     }
     // 센 것은 **낸 것뿐이다** — `gather` 가 이미 낸 줄은 `trouble` 에 이미 들어 있다.
@@ -118,9 +120,11 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 뒤집는다(moai-cuw2). **알림이지 경고가 아니다** — 계획이 아니라 설치가 어긋난 것이라
     // `agents_stale` 과 같은 자리고, 종료 코드는 안 바뀐다. 말을 고를 때 이미 읽은 것이라
     // 설정을 다시 읽지 않는다.
-    let said = &ctx.registry().lang_problems;
-    for line in said {
-        eprintln!("{line}");
+    // 글은 말을 고른 뒤에 편다(moai-dpbi) — 설정을 읽는 길은 말을 모른다(`user_config::LangTrouble`).
+    let reg = ctx.registry();
+    let said = &reg.lang_problems;
+    for why in said {
+        eprintln!("{}", view::problem(ctx.lang(), reg.path.as_deref(), why));
     }
     if !said.is_empty() {
         st.notices.push(report::Warning::user_config(said.len()));
@@ -211,10 +215,12 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let reg = ctx.registry();
     if reg.projects.is_empty() {
         if ctx.json {
-            let none: Overview<()> = Overview { projects: Vec::new(), problems: &reg.problems, config: reg.path.as_deref() };
+            // 설정의 탈은 **편 뒤에** 싣는다(moai-dpbi) — 화면과 같은 목록이다(`view::settings_problems`).
+            let problems = view::settings_problems(reg, ctx.lang());
+            let none: Overview<()> = Overview { projects: Vec::new(), problems: &problems, config: reg.path.as_deref() };
             return super::json_line(&none);
         }
-        return Ok(super::nothing_registered(reg).message.lines().map(str::to_string).collect());
+        return Ok(super::nothing_registered(reg, ctx.lang()).message.lines().map(str::to_string).collect());
     }
     let projects = crate::projects::open_with(reg, worktree);
     let now = model::now();
@@ -263,8 +269,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         struct Said<'a> {
             status: &'a report::StatusReport,
             picked: Vec<super::Row<'a>>,
-            #[serde(skip_serializing_if = "<[String]>::is_empty")]
-            trouble: &'a [String],
+            #[serde(skip_serializing_if = "Vec::is_empty")]
+            trouble: Vec<String>,
             /// **못 읽은 워크트리는 기계에게도 댄다** — 안쪽 `status --json` 과 같은 키·같은 모양
             /// (리뷰 moai-ya06). 그런 워크트리가 있으면 자리 판정이 통째로 `모른다` 로 접혀
             /// `stranded` 가 조용해지는데, 여기 키가 없으면 밖에서 읽는 쪽은 "자리 잃은 일이
@@ -285,13 +291,15 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 seen: s.map(|b| Said {
                     status: &b.status,
                     picked: b.picked.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
-                    trouble: &p.trouble,
+                    // 옆 워크트리의 문제도 **편 뒤에** 싣는다(moai-dpbi) — 사람 화면과 같은 글이다.
+                    trouble: p.trouble.iter().map(|t| view::trouble_line(ctx.lang(), t)).collect(),
                     unreadable_worktrees: &b.blind,
                     broken_worktrees: &b.unread,
                 }),
             })
             .collect();
-        let all = Overview { projects: entries, problems: &reg.problems, config: reg.path.as_deref() };
+        let problems = view::settings_problems(reg, ctx.lang());
+        let all = Overview { projects: entries, problems: &problems, config: reg.path.as_deref() };
         return super::json_line(&all);
     }
     Ok(view::projects_status(&projects, &seen, reg, view::Screen::new(ctx.lang())))

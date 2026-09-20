@@ -81,7 +81,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // **깃발은 안 세운다.** 진짜 `promote` 는 못 읽는 줄을 그대로 들고
         // 넘어가 0 으로 끝나는데 연습만 1 로 끝나면, 그것을 거절로 읽은 쪽이
         // 도구가 기꺼이 해 줄 계획을 버린다. 어느 줄인지는 그대로 말한다.
-        super::name_load_errors(&repo.issues_path(), &load.errors);
+        super::name_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let thought = load.get(&args.id).ok_or_else(|| Fail::not_found(&args.id))?;
         if !crate::report::is_idea(thought) {
             return Err(not_an_idea(&args.id, thought));

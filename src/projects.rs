@@ -36,7 +36,7 @@ pub struct Project {
     /// 옆 워크트리를 겹치다 만난 것. **그 프로젝트 줄에서 말하고 막지 않는다** — stderr 로
     /// 흘리면 어느 프로젝트의 말인지 모르고, 비영 종료하면 남의 워크트리 하나로 한눈 보기
     /// 전체가 실패로 읽힌다.
-    pub trouble: Vec<String>,
+    pub trouble: Vec<crate::worktree::Trouble>,
     /// 옆 워크트리를 빠짐없이 열어 봤는가 (`worktree::Gathered::swept`) — 그러면 못 읽은 옆
     /// 스냅샷은 `trouble` 에 이미 섰다.
     pub swept: bool,
@@ -136,7 +136,7 @@ impl State {
     ///
     /// **못 여는 갈래는 [`open_shallow`] 하나가 가른다** — 두 벌로 적으면 한쪽만 고쳐져, 설정이
     /// 깨진 저장소를 층의 줄과 `project ls` 가 달리 부른다(moai-9omq 가 고친 바로 그것이다).
-    fn at_with(dir: &Path, worktree: bool) -> (State, crate::worktree::Origin, Vec<String>, bool) {
+    fn at_with(dir: &Path, worktree: bool) -> (State, crate::worktree::Origin, Vec<crate::worktree::Trouble>, bool) {
         let lone = |s: State| (s, crate::worktree::Origin::default(), Vec::new(), false);
         let repo = match open_shallow(dir) {
             Ok(repo) => repo,

@@ -387,7 +387,10 @@ impl Layer {
             lang: crate::i18n::Lang::Ko,
             at,
             places,
-            problems: reg.problems.clone(),
+            // 설정의 탈은 **편 뒤에** 든다(리뷰) — 화면 말의 탈은 `problems` 가 아니라 자료로 서므로
+            // (moai-dpbi) `reg.problems` 만 베끼면 층의 배너가 `lang` 오타를 잃는다. 탐색기의 말은
+            // 아직 한국어라 [`super::SAID`] 로 편다.
+            problems: crate::view::settings_problems(reg, super::SAID),
             trouble: reg.trouble,
             config: reg.path.clone(),
             launch: launch.map(Path::to_path_buf),
@@ -3109,7 +3112,7 @@ mod tests {
         let g = crate::worktree::gather(&repo, true).unwrap();
         let stamp = stamp_of(&repo);
         let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
-        let a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept, &g.sides);
+        let a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, crate::tui::said_trouble(&g.trouble), g.watched, g.swept, &g.sides, &g.mine);
         assert_eq!(a.site.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (여는 읽기)");
     }
 
@@ -3133,7 +3136,7 @@ mod tests {
         let mut g = crate::worktree::gather(&repo, true).unwrap();
         super::super::watch(&mut g.watched, places);
         let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
-        let mut a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept, &g.sides);
+        let mut a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, crate::tui::said_trouble(&g.trouble), g.watched, g.swept, &g.sides, &g.mine);
         let paths: std::collections::BTreeSet<PathBuf> = a.site.watched.iter().map(|(p, _)| p.clone()).collect();
         assert_eq!(paths.len(), a.site.watched.len(), "같은 파일을 두 번 지켜본다");
         // 여는 커밋 표는 다 짓게 둔다.

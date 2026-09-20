@@ -1736,7 +1736,7 @@ pub struct Board<'a> {
     /// `--worktree` 로 겹쳤으면 줄마다의 출처 (`Project::origin`).
     pub origin: &'a Origin,
     /// 옆 워크트리를 겹치다 만난 것 (`Project::trouble`).
-    pub trouble: &'a [String],
+    pub trouble: &'a [crate::worktree::Trouble],
     /// 자리를 재다 **못 읽어 판정을 가린** 워크트리들(moai-p3bs.op2, `report::blinding`). 그런
     /// 워크트리가 있으면 자리 판정이 `모른다` 로 접혀 경고가 조용해지는데, 여기서 세지 않으면
     /// 이 덩어리가 "드러난 문제 없다" 로 그 침묵을 덮는다 — 안쪽 `moai status` 는 같은 사실을
@@ -1764,7 +1764,7 @@ pub struct Picks<'a> {
     /// 못 읽는 줄의 수. 그 줄에 있던 일은 목록에서 빠져 있다.
     pub unreadable: usize,
     pub origin: &'a Origin,
-    pub trouble: &'a [String],
+    pub trouble: &'a [crate::worktree::Trouble],
 }
 
 /// 겹쳐 본 화면의 머리 꼬리 — `   ⎇ <워크트리들> 겹쳐 봄`. 안 겹쳤으면 빈 글.
@@ -1794,9 +1794,14 @@ fn overlaid(screen: Screen) -> String {
 }
 
 /// 옆 워크트리를 겹치다 만난 것을 한 줄씩. **막지 않는다** — `!` 로 말만 한다.
-fn troubles(out: &mut Vec<String>, trouble: &[String]) {
-    for t in trouble {
-        out.push(format!("  {} {}", paint(style::WARN, "!"), one_line(t)));
+fn troubles(out: &mut Vec<String>, trouble: &[crate::worktree::Trouble], lang: Lang) {
+    said_troubles(out, trouble.iter().map(|t| trouble_line(lang, t)));
+}
+
+/// 이미 지어진 줄을 같은 모양으로 — 못 읽은 워크트리 줄([`unread_worktree`])이 이 길로 온다.
+fn said_troubles(out: &mut Vec<String>, said: impl Iterator<Item = String>) {
+    for t in said {
+        out.push(format!("  {} {}", paint(style::WARN, "!"), one_line(&t)));
     }
 }
 
@@ -1860,7 +1865,7 @@ pub fn projects_status(
             let said = fill(say(lang, "overview.picked_more"), &[("n", &rest.to_string())]);
             out.push(format!("  {}", paint(style::DIM, &said)));
         }
-        troubles(&mut out, b.trouble);
+        troubles(&mut out, b.trouble, lang);
         // **`gather` 가 이미 낸 워크트리는 두 번 안 센다** — `cmd::status` 의 `said_already` 와 같은
         // 자(`Gathered::swept`)다. 옆 스냅샷을 빠짐없이 열었으면 같은 워크트리를 `⎇ <가지>: …` 로
         // 이미 `trouble` 에 담았다. 겹쳐 세면 깨진 워크트리 하나가 `옆 워크트리 문제 2건` 으로 서서
@@ -1871,27 +1876,23 @@ pub fn projects_status(
         // **센 것은 한 줄씩 댄다** — 안쪽 `moai status` 가 stderr 에 내는 그 말이다. 수만 세고 줄을
         // 안 내면 아래의 `옆 워크트리 문제 N건 — 위 줄` 이 없는 줄을 가리키고, 보는 쪽은 어느
         // 워크트리를 고칠지 모른다.
-        let unread: Vec<String> = if b.swept {
-            Vec::new()
-        } else {
-            b.unread
-                .iter()
-                .map(|t| {
-                    // **글리프와 자리는 말이 아니다** — 가지 이름과 경로는 자료고 `⎇` 는 표라,
-                    // 말묶음에는 `{at}` 한 자리로 든다. 번역자가 옮길 것은 그 앞의 문장뿐이다.
-                    let at = format!("{} {}: {}", style::BRANCH_GLYPH, t.branch, t.path.display());
-                    fill(say(lang, "overview.unread_snapshot"), &[("at", &at)])
-                })
-                .collect()
+        // 글은 [`unread_worktree`] 한 자리에서 짓는다 — 안쪽 `moai status` 가 stderr 에 내는
+        // 그 줄과 같은 것이어야 한다(moai-dpbi). **셈은 줄에서 다시 세지 않는다**(리뷰) — 낸 줄을
+        // 한 벌 더 들고 있을 까닭이 없다.
+        let unread = match b.swept {
+            true => 0,
+            false => {
+                said_troubles(&mut out, b.unread.iter().map(|t| unread_worktree(lang, &t.branch, &t.path)));
+                b.unread.len()
+            }
         };
-        troubles(&mut out, &unread);
         // **알림은 세지 않는다** — `moai status` 의 "드러난 문제 없다" 와 같은 자다.
         let n = b.status.warnings.len();
         let fatal = b.status.warnings.iter().filter(|w| w.fatal).count();
         let go = paint(style::DIM, &format!("→ `moai -C {} status`", shell_arg(&p.path)));
         // 옆 워크트리의 문제는 화면에서만 센다 — 위에 `!` 줄로 섰는데 밑에서 "문제 없다" 면
         // 덩어리가 제 말을 뒤집는다(moai-cuw2, `status` 와 같은 자).
-        let t = b.trouble.len() + unread.len();
+        let t = b.trouble.len() + unread;
         let beside = match t {
             0 => String::new(),
             _ => format!(" · {}", fill(say(lang, "overview.worktree_trouble"), &[("n", &t.to_string())])),
@@ -1921,7 +1922,7 @@ pub fn projects_status(
             ),
         });
     }
-    problems(&mut out, reg);
+    problems(&mut out, reg, lang);
     out.push(String::new());
     out.push(paint(style::DIM, say(lang, "overview.next")));
     out
@@ -1995,7 +1996,7 @@ pub fn projects_ready(
             out.push(format!("  {} {}", paint(style::DIM, "+"), paint(style::DIM, &said)));
         }
         // 목록 꼬리("N건 더") 뒤에 둔다 — 앞에 두면 그 꼬리가 문제 줄의 연속으로 읽힌다(`projects_status` 와 같은 차례).
-        troubles(&mut out, k.trouble);
+        troubles(&mut out, k.trouble, lang);
         if k.unreadable > 0 {
             let go = format!("moai -C {} show", shell_arg(&p.path));
             let said =
@@ -2003,7 +2004,7 @@ pub fn projects_ready(
             out.push(format!("  {} {said}", paint(style::ERROR, "!")));
         }
     }
-    problems(&mut out, reg);
+    problems(&mut out, reg, lang);
     out
 }
 
@@ -2055,14 +2056,93 @@ pub(crate) fn unopened<T>(p: &crate::projects::Project, s: &crate::projects::See
 }
 
 /// 사용자 설정을 읽다 만난 것을 한 줄씩. 목록을 막지 않는다.
-fn problems(out: &mut Vec<String>, reg: &crate::user_config::Registry) {
-    if reg.problems.is_empty() {
+///
+/// **화면 말의 탈은 말묶음에서 온다**([`problem`], moai-dpbi) — 설정을 읽는 길은 말을 모른다.
+/// 나머지 줄(항목의 탈)은 아직 지어진 글 그대로다.
+fn problems(out: &mut Vec<String>, reg: &crate::user_config::Registry, lang: Lang) {
+    let said = settings_problems(reg, lang);
+    if said.is_empty() {
         return;
     }
     out.push(String::new());
-    for p in &reg.problems {
-        out.push(format!("{} {}", paint(style::WARN, "!"), one_line(p)));
+    for p in said {
+        out.push(format!("{} {}", paint(style::WARN, "!"), one_line(&p)));
     }
+}
+
+/// 사용자 설정을 읽다 만난 것 — 지어진 줄과 말묶음에서 펴는 줄을 **한 차례로** 잇는다
+/// (moai-dpbi). 사람 화면과 `--json` 의 `problems` 가 이것을 나눠 쓴다: 갈라 적으면 한쪽만
+/// 고쳐져 기계가 받는 목록이 화면과 달라진다.
+pub fn settings_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<String> {
+    let said = reg.lang_problems.iter().map(|t| problem(lang, reg.path.as_deref(), t));
+    reg.problems.iter().cloned().chain(said).collect()
+}
+
+/// 설정에 적은 화면 말이 어긋난 한 줄([`crate::user_config::LangTrouble`]).
+///
+/// **자리를 앞에 단다** — 어느 파일의 어느 값인지 없으면 고칠 데를 못 찾는다. 설정을 읽는 쪽이
+/// 안 붙이는 것은 그 반쪽이 말묶음에 들어야 해서다(`user_config::read`).
+pub fn problem(lang: Lang, at: Option<&std::path::Path>, why: &crate::user_config::LangTrouble) -> String {
+    use crate::user_config::{I18N, LANG, LangTrouble};
+    let key = format!("{I18N}.{LANG}");
+    let said = match why {
+        LangTrouble::NotATable { found } => fill(say(lang, "warn.lang_table"), &[("key", I18N), ("is", found)]),
+        LangTrouble::NotAWord { found } => fill(say(lang, "warn.lang_word"), &[("key", &key), ("is", found)]),
+        LangTrouble::Unknown { raw } => {
+            let known: Vec<&str> = Lang::ALL.into_iter().map(Lang::code).collect();
+            // **적힌 값은 따옴표째 낸다** — 빈 값이나 공백만 적은 것이 그대로면 아무것도 안 보인다.
+            let raw = format!("{raw:?}");
+            fill(say(lang, "warn.lang_unknown"), &[("key", &key), ("known", &known.join("·")), ("raw", &raw)])
+        }
+    };
+    match at {
+        Some(at) => format!("{}: {said}", at.display()),
+        None => said,
+    }
+}
+
+/// 옆 워크트리를 겹치다 만난 한 줄([`crate::worktree::Trouble`], moai-dpbi).
+///
+/// **글리프와 자리는 말이 아니다** — 가지 이름과 경로는 자료고 `⎇` 는 표라, 말묶음에는 `{at}`
+/// 한 자리로 든다(밖 한눈 보기의 `overview.unread_snapshot` 과 같은 자). 번역자가 옮길 것은 그
+/// 앞뒤의 문장뿐이다.
+pub fn trouble_line(lang: Lang, why: &crate::worktree::Trouble) -> String {
+    use crate::worktree::{Lost, Trouble};
+    match why {
+        // **여기만 말묶음을 안 지난다** — 이 갈래는 가지와 열다 진 까닭만 댄다. `--worktree` 를
+        // 안 줬을 때 같은 사실을 대는 [`unread_worktree`] 는 문장을 두르므로, 한 워크트리가 깨진
+        // 것을 두 말로 대고 있다(리뷰가 짚었다). 문장을 맞추는 일은 그 두 갈래를 한 줄로 셀지
+        // (`the_overview_counts_work_with_no_live_worktree` 가 지금 꼴로 가른다)부터 정할 자리라
+        // 탐색기의 말을 옮기는 일(moai-ra67)과 함께 본다.
+        Trouble::Unread { branch, why } => at_branch(branch, why),
+        Trouble::Skipped { branch, path, lines } => fill(
+            say(lang, "trouble.skipped"),
+            &[("at", &at_branch(branch, &path.display().to_string())), ("n", &lines.to_string())],
+        ),
+        // **키는 줄마다 그대로 적는다** — 표와 소스를 견주는 시험(`i18n` 의 훑기)이 `say(lang, "…")`
+        // 를 글자로 읽는다. 키를 값으로 고르면 그 키는 양쪽에서 함께 숨어 훑기에 구멍이 난다.
+        Trouble::Unfound { lost, why } => {
+            let said = match lost {
+                Lost::NoGit => say(lang, "trouble.no_git"),
+                Lost::Failed => say(lang, "trouble.failed"),
+                Lost::Stream => say(lang, "trouble.stream"),
+                Lost::Encoding => say(lang, "trouble.encoding"),
+            };
+            fill(said, &[("why", why)])
+        }
+    }
+}
+
+/// 스냅샷을 못 읽은 옆 워크트리 한 줄 — `moai status` 의 stderr 와 밖 한눈 보기가 **같은 글을
+/// 쓴다**(moai-dpbi). 갈라 적던 판은 같은 일을 두 말로 댔다.
+pub fn unread_worktree(lang: Lang, branch: &str, path: &std::path::Path) -> String {
+    let at = at_branch(branch, &path.display().to_string());
+    fill(say(lang, "overview.unread_snapshot"), &[("at", &at)])
+}
+
+/// `⎇ <가지>: <무엇>` — 옆 워크트리를 대는 자리의 한 모양.
+fn at_branch(branch: &str, tail: &str) -> String {
+    format!("{} {branch}: {tail}", style::BRANCH_GLYPH)
 }
 
 /// 명령 안내에 넣을 경로 — 붙여 넣으면 그 디렉터리로 풀리게 감싼다. `one_line` 을
