@@ -286,6 +286,66 @@ fn english_is_the_default_when_nothing_picks_a_language() {
     assert_eq!(english.lines().count(), japanese.lines().count(), "영어와 일본어의 줄 수가 다르다");
 }
 
+/// **`moai mv` 한 덩이가 한 말로 선다**(moai-cj6p). 한 번의 `mv` 가 옮긴 줄·이미 그 칸·묶음의
+/// 칸·미뤄 둔 줄을 한 숨에 내는데, 그중 몇 줄만 소스에 박혀 있으면 영어를 고른 사람이 한
+/// 덩이 안에서 두 말을 읽는다. `freed_lines` 만 옮겼던 판이 그 꼴이었다.
+///
+/// **재는 자리를 화면에 둔다.** 글자를 하나하나 견주지 않고 **한글이 한 자라도 남았는가**만
+/// 본다 — 낱말을 다듬을 때마다 붉어지지 않으면서, 새 줄 하나가 박힌 채 들어오면 그 자리에서
+/// 멈춘다. 한국어로도 함께 돌려 키가 양쪽에 다 서 있는지를 같은 판에서 잰다: 영어만 재면
+/// `ko` 표가 빈 키도 파랗게 지나간다.
+#[test]
+fn the_mv_screen_stands_in_one_language() {
+    // 제목은 영어로 둔다 — 제목의 한글은 화면 글이 아니라 자료라 이 자로 재면 안 된다.
+    let screens = |name: &str, lang: Option<&str>| {
+        let s = init(name);
+        let epic = field(&ok(s.path(), &["epic", "add", "an epic", "--json"]), "id");
+        let one = field(&ok(s.path(), &["add", "a member", "-e", &epic, "--json"]), "id");
+        ok(s.path(), &["mv", &one, "in_progress"]);
+        ok(s.path(), &["defer", &one, "-m", "later"]);
+        // `mv` 가 제 글로 내는 자리 전부. 차례가 곧 상태라 앞의 판이 뒤의 판을 만든다.
+        // **칸 이름을 틀리게 친 두 판은 여기 없다** — `moai mv <id> <오타>` 와
+        // `--from <오타>` 의 글은 `config::Config` 와 `cmd::mod` 의 공용 검사에서 오고
+        // 아직 박힌 한국어다(쓰기 길과 탐색기가 같은 글을 쓴다). 그 자리는 `moai-fdk7` 이 든다.
+        let runs: Vec<Vec<&str>> = vec![
+            vec!["mv", &one, "review"],                  // 옮긴 줄 + 미뤄 둔 줄
+            vec!["mv", &one, "review"],                  // 이미 그 칸
+            vec!["mv", &epic, "done"],                   // 묶음의 칸
+            vec!["mv", &one, "todo", "--from", "done"],  // 진 집기
+            vec!["mv", "argos-zzzz", "done"],            // 못 찾은 줄
+            vec!["mv", &one],                            // 칸을 안 적었다
+            vec!["mv", &epic, "done", "--from", "todo"], // 묶음에 `--from`
+        ];
+        runs.into_iter()
+            .map(|args| {
+                let mut cmd = isolated(BIN);
+                cmd.args(&args)
+                    .current_dir(s.path())
+                    .env("MOAI_ACTOR", ACTOR)
+                    .env("MOAI_NOW", NOW)
+                    .env("NO_COLOR", "1");
+                match lang {
+                    Some(l) => cmd.env("MOAI_LANG", l),
+                    None => cmd.env_remove("MOAI_LANG"),
+                };
+                let out = cmd.output().expect("moai 를 실행하지 못했다");
+                let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+                (args.join(" "), said)
+            })
+            .collect::<Vec<_>>()
+    };
+    let hangul = |t: &str| t.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c));
+
+    for (args, said) in screens("mvlangen", None) {
+        assert!(!said.trim().is_empty(), "`{args}` 가 아무 말도 안 했다 — 재는 자가 헛돈다");
+        assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — `{args}`\n{said}");
+    }
+    // 같은 판을 한국어로. 키가 `ko` 표에 안 서 있으면 여기서 영어가 새어 나온다.
+    for (args, said) in screens("mvlangko", Some("ko")) {
+        assert!(hangul(&said), "한국어로 골랐는데 그 줄이 영어다 — `{args}`\n{said}");
+    }
+}
+
 /// **마일스톤이 도는 동안 그 안이 먼저다**(moai-493a, 2026-09-20 사용자 결정).
 ///
 /// 한 판에서 셋을 잰다 — `ready` 가 밖의 일을 빼고 그 까닭을 대는가, `--json` 이 같은 것을
@@ -572,6 +632,116 @@ fn init_in_a_worktree_points_at_the_main_checkout() {
     let hatch = err.lines().find(|l| l.contains("MOAI_HERE=1")).unwrap_or_default();
     assert!(hatch.contains(&format!("-C {}", deep.display())), "`-C` 를 빠뜨린 줄을 댔다 — {hatch}");
     assert!(!away.join(".moai").exists(), "거절하고도 셸 자리에 .moai 를 만들었다");
+}
+
+/// **"여기서 `init` 하라" 를 대는 표면들도 그 갈림을 안다**(moai-nppo). 거절은 이미 서 있는데
+/// (`init_in_a_worktree_points_at_the_main_checkout`) 대는 쪽이 그것을 몰라, 등록한 워크트리
+/// 밑자리 한 줄이 영영 `init 전` 으로 섰고 그 줄이 대는 명령은 1 로 끝났다.
+///
+/// **다섯 표면을 한자리에서 잰다** — `project add`·`project ls`·한눈 보기·`status --json`·
+/// `init --check` 다. 가르는 자는 `store::init_belongs_at` 하나라, 한 곳만 고치고 나머지를 잊으면
+/// 여기가 붉어진다. 기계로 읽는 쪽도 같은 자리를 받는다(`tracker_at`) — 사람 없이 도는 고리는
+/// 사람 줄을 안 읽는다.
+///
+/// **대는 명령이 실제로 무언가를 바꾸는지까지 잰다**(리뷰 5번). 등록 쪽에 `moai -C <주 체크아웃>
+/// init` 을 대던 판은 0 으로 끝나고 아무것도 안 바꾸는 줄을 댔다 — 여기서 자리가 서려면 그쪽에
+/// 트래커가 **이미** 있어야 하기 때문이다. 1 로 끝나던 것이 "0 으로 끝나고 안 열린다" 가 되면
+/// 고리는 그것을 됐다고 세고 지나간다.
+///
+/// **밑자리로 잰다.** 워크트리 꼭대기는 `.moai` 를 함께 들고 와 열리므로 `init 전` 이 안 선다 —
+/// 그 갈래가 실제로 서는 자리는 `worktree::main_root` 가 비추는 밑길에 트래커가 없는 곳이다.
+///
+/// **그 꼭대기에서는 이 줄이 서면 안 된다**(리뷰) — `.moai` 가 있으면 `moai init` 은 거기서 0 으로
+/// 끝나고 딸린 파일만 다시 맞춘다(`init::run` 의 `dir.exists()`). 그 갈래를 모르던 판은 `.moai` 를
+/// 커밋하는 저장소의 **모든 워크트리**에서 `--check` 가 "여기 안 선다" 를 냈고, 따라 친
+/// `moai -C <주 체크아웃> init` 은 방금 잰 것과 다른 체크아웃의 `AGENTS.md` 를 고쳤다.
+#[test]
+fn every_surface_that_says_init_points_at_the_main_checkout() {
+    let s = Scratch::new("initwt-surfaces");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/argos-wt", "-b", "worktree-argos-wt"]);
+    let deep = main.join(".claude/worktrees/argos-wt/src/deep");
+    std::fs::create_dir_all(&deep).unwrap();
+
+    let cfg = s.path().join("user/config.toml");
+    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+    let out = dir_in(&s, "out");
+    // 한 벌은 `ok_with` 가 준다 — 사람·시계·색과 걷어야 할 환경을 [`staged`]·[`isolated`] 가 이미
+    // 안다. 여기서 세 줄을 다시 적던 판은 그 목록이 느는 날 이 시험만 다른 환경에서 돌았다(리뷰).
+    let run = |dir: &Path, args: &[&str]| ok_with(dir, &cfg, args);
+    // **푼 경로로 견준다** — 등록도 자리 판정도 링크를 풀므로(`user_config::resolve_dir`·
+    // `worktree::main_root`), 스크래치 철자로 재면 기계마다 갈린다.
+    let real = |p: &Path| std::fs::canonicalize(p).unwrap().display().to_string();
+    let (there, here) = (real(&main), real(&deep));
+    let go = |at: &str| format!("moai -C {at} init");
+    // 등록 쪽이 대야 할 것은 `init` 이 아니라 등록이다 — 위의 다섯째 문단이 그 까닭이다.
+    let reg = |at: &str| format!("moai project add {at}");
+
+    let added = run(&out, &["project", "add", &deep.display().to_string()]);
+    assert!(added.contains("딸린 워크트리"), "등록 줄이 그 갈래를 모른다\n{added}");
+    assert!(added.contains(&reg(&there)), "등록 줄이 주 체크아웃을 안 댔다\n{added}");
+    assert!(!added.contains(&go(&here)), "등록 줄이 1 로 끝나는 명령을 댔다\n{added}");
+    assert!(!added.contains(&go(&there)), "등록 줄이 아무것도 안 바꾸는 명령을 댔다\n{added}");
+
+    let listed = run(&out, &["project", "ls"]);
+    assert!(listed.contains("주 체크아웃에 있다"), "목록 칸이 그 갈래를 모른다\n{listed}");
+
+    let over = run(&out, &["status"]);
+    assert!(over.contains(&reg(&there)), "한눈 보기가 주 체크아웃을 안 댔다\n{over}");
+    assert!(!over.contains(&go(&here)), "한눈 보기가 1 로 끝나는 명령을 댔다\n{over}");
+    assert!(!over.contains(&go(&there)), "한눈 보기가 아무것도 안 바꾸는 명령을 댔다\n{over}");
+
+    let checked = run(&deep, &["init", "--check"]);
+    assert!(checked.contains(&go(&there)), "--check 가 주 체크아웃을 안 댔다\n{checked}");
+
+    // **트래커를 들고 온 꼭대기에서는 입을 다문다** — 거기서 `moai init` 은 0 으로 끝난다. 이 줄이
+    // 서면 `--check` 가 제가 잰 파일과 **다른 체크아웃**을 고치라고 시킨다.
+    let top = main.join(".claude/worktrees/argos-wt");
+    assert!(top.join(".moai").is_dir(), "워크트리가 트래커를 안 들고 왔다");
+    let atop = run(&top, &["init", "--check"]);
+    assert!(!atop.contains("딸린 워크트리"), "심겨 있는 워크트리를 딴 데로 보냈다\n{atop}");
+    assert!(!atop.contains(&go(&there)), "심겨 있는 워크트리에 남의 자리를 댔다\n{atop}");
+    let atop = run(&top, &["init", "--check", "--json"]);
+    assert!(!atop.contains("tracker_at"), "기계 쪽도 심겨 있는 워크트리를 딴 데로 보냈다\n{atop}");
+    // 그리고 실제로 여기서 선다 — 대는 말과 도는 명령이 갈리면 안 된다.
+    assert!(run(&top, &["init"]).contains("이미 심겨 있다"), "심겨 있는 워크트리에서 init 이 안 섰다");
+
+    // **기계로 읽는 쪽도 같은 자리를 받는다** — 사람 줄만 고치면 고리는 그대로 헛돈다.
+    let at = format!("\"tracker_at\":{there:?}");
+    let machine: [(&Path, &[&str]); 4] = [
+        (out.as_path(), &["project", "add", here.as_str(), "--json"]),
+        (out.as_path(), &["project", "ls", "--json"]),
+        // 한눈 보기의 기계 쪽도 같은 키를 낸다(리뷰 11번) — 사람 줄만 고치던 판은 고리가 워크트리
+        // 줄과 여느 `init 전` 줄을 못 갈랐다. 자리를 `Seen::Uninit` 이 들어 저절로 따라온다.
+        (out.as_path(), &["status", "--json"]),
+        (deep.as_path(), &["init", "--check", "--json"]),
+    ];
+    for (dir, args) in machine {
+        let got = run(dir, args);
+        assert!(got.contains(&at), "{args:?} 가 자리를 안 실었다\n{got}");
+    }
+
+    // **성한 `init` 전 자리는 그대로다** — 이 갈래가 제 자리에만 선다. 낱말(`uninitialized`)도
+    // 안 바뀐다: 이미 나간 것을 바꾸면 읽던 쪽이 멀쩡한 줄을 모르는 상태로 읽는다.
+    let plain = dir_in(&s, "plain");
+    let added = run(&out, &["project", "add", plain.to_str().unwrap(), "--json"]);
+    assert!(added.contains("\"initialized\":false"), "{added}");
+    assert!(!added.contains("tracker_at"), "워크트리가 아닌 자리에 자리를 실었다\n{added}");
+    let listed = run(&out, &["project", "ls", "--json"]);
+    assert_eq!(listed.matches("\"state\":\"uninitialized\"").count(), 2, "낱말이 바뀌었다\n{listed}");
+    assert_eq!(listed.matches("tracker_at").count(), 1, "자리가 제 줄에만 안 섰다\n{listed}");
+
+    // **댄 명령을 그대로 치면 실제로 열린다**(리뷰 5번). 이 줄이 없으면 "아무것도 안 바꾸는 명령"
+    // 으로 도로 미끄러져도 위의 글자 견줌만으로는 안 잡힌다.
+    let opened = run(&out, &["project", "add", &there]);
+    assert!(!opened.contains("init 전"), "대로 등록했는데 안 열렸다\n{opened}");
+    let listed = run(&out, &["project", "ls", "--json"]);
+    assert!(listed.contains("\"state\":\"initialized\""), "대로 등록한 줄이 안 열렸다\n{listed}");
 }
 
 /// 남의 .gitignore 를 지우지 않고 빠진 줄만 덧붙인다.
@@ -966,6 +1136,12 @@ fn the_overview_body_speaks_the_picked_language() {
     // 기계마다 다르고, 앞머리는 나머지 둘과 같은 자로 온다.
     let gone = s.path().join("moved-away");
     let cfg = registry(&s, &[&one, &dir_in(&s, "not-yet-init"), &gone]);
+    // **설정 항목의 탈도 몸통이다**(moai-aiid). 성한 줄만 등록하면 `problems` 가 한 줄도 안 서고,
+    // 그러면 이 판은 그 자리에 박힌 한국어를 못 본다 — 실제로 그랬다. 경로는 ASCII 로 둔다:
+    // 적힌 값은 그대로 되울리므로 한글 경로를 두면 이 자가 제 글과 남의 자료를 못 가른다.
+    let mut src = std::fs::read_to_string(&cfg).unwrap();
+    src.push_str("\n[[project]]\npath = \"not/absolute\"\n\n[[project]]\npath = \"/nowhere\"\ncolor = \"red\"\n");
+    std::fs::write(&cfg, src).unwrap();
     let screen = |args: &[&str], lang: &str| {
         let got = isolated(BIN)
             .args(args)
@@ -986,12 +1162,16 @@ fn the_overview_body_speaks_the_picked_language() {
         let korean = screen(args, "ko");
         assert!(korean.contains("건 더"), "한국어 화면에 '건 더' 줄이 안 섰다\n{korean}");
         assert!(korean.contains("init 전"), "한국어 화면에서 init 전 줄이 사라졌다\n{korean}");
+        assert!(korean.contains("프로젝트 색이 아니다"), "한국어 화면에 설정 항목의 탈이 안 섰다\n{korean}");
 
         let english = screen(args, "en");
         assert!(english.contains("more"), "영어 화면에 'N more' 줄이 안 섰다\n{english}");
         // 열지 못한 두 프로젝트의 줄이 실제로 섰는가 — 안 서면 위의 훑기가 그 자리를 안 지난다.
         assert!(english.contains("before init"), "init 전 프로젝트의 줄이 안 섰다\n{english}");
         assert!(english.contains("directory is gone"), "사라진 프로젝트의 줄이 안 섰다\n{english}");
+        // 설정 항목의 탈 둘 — 색 오타와 상대경로. 둘이 서야 그 자리를 이 훑기가 지난다.
+        assert!(english.contains("not a project colour"), "색 오타 줄이 안 섰다\n{english}");
+        assert!(english.contains("absolute path"), "상대경로 줄이 안 섰다\n{english}");
         let left: Vec<&str> = english.lines().filter(|l| l.chars().any(|c| ('가'..='힣').contains(&c))).collect();
         assert!(left.is_empty(), "영어로 고른 {args:?} 화면에 한국어가 남았다 — {left:#?}");
     }
