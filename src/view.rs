@@ -35,7 +35,12 @@ const BAR: usize = 10;
 /// [`Seen`] 과 **가르는 것**: 그쪽은 줄 하나를 파일 전체에서 읽어 낸 것이고 이쪽은 어떻게 그릴
 /// 것인가다. [`status`]·[`ready`] 는 `Seen` 의 `roots`·`states`·`blocks`·`places` 를 쓰지 않으니,
 /// `Seen` 에 `lang` 을 더하는 길로 가면 그 넷을 안 쓰는 자리가 넷을 받는다.
-#[derive(Clone, Copy, Default)]
+///
+/// **`Default` 은 안 든다**(리뷰) — `Screen::default()` 는 말을 묻지 않고 `Lang::default` 를
+/// 집어, `MOAI_LANG` 도 `[i18n] lang` 도 안 읽은 화면을 조용히 한국어로 그린다. 말을 명령 층에서
+/// 한 번 풀어 아래로 준다는 것이 이 값이 선 까닭이라(`Ctx::lang`, moai-cigu), 그것을 건너뛰는
+/// 입구를 열어 두지 않는다 — 들어오는 길은 [`Screen::new`] 하나다.
+#[derive(Clone, Copy)]
 pub struct Screen<'a> {
     /// 화면의 말. 명령 층에서 한 번 풀어 아래로 준다(`Ctx::lang`, moai-cigu).
     pub lang: Lang,
@@ -1669,7 +1674,11 @@ pub fn projects_status(
             out.push(unopened(p, s));
             continue;
         };
-        out.push(project_head(p, overlaid(screen.over(b.origin)).trim_start()));
+        // **이 프로젝트의 화면으로 갈아 끼운다** — 머리 꼬리와 아래 줄마다의 `⎇` 가 같은 출처를
+        // 본다. 한쪽만 `over` 를 지나고 다른 쪽이 `b.origin` 을 직접 물으면, 같은 것을 묻는 길이
+        // 한 고리 안에 둘이 된다.
+        let screen = screen.over(b.origin);
+        out.push(project_head(p, overlaid(screen).trim_start()));
         out.push(board(b.cfg, &b.status.counts));
         let shown = &b.picked[..b.picked.len().min(PICKED_SHOWN)];
         // **id 도 제목도 남의 스냅샷에서 온다** — 읽기는 관대해 `\n` 말고는 아무것도 안 막으므로,
@@ -1685,7 +1694,7 @@ pub fn projects_status(
                 cell(hue, &one_line(&p.name), w_name + 2),
                 cell(hue, id, w_id + 2),
                 paint(style::status_style(i.status.as_str()), style::glyph(i.status.as_str())),
-                marked(b.origin.branch(&i.id), &one_line(&i.title), TITLE_CAP, style::PLAIN).0,
+                marked(screen.branch(&i.id), &one_line(&i.title), TITLE_CAP, style::PLAIN).0,
             ));
         }
         let rest = b.picked.len().saturating_sub(PICKED_SHOWN);
@@ -1768,7 +1777,9 @@ pub fn projects_ready(
             out.push(unopened(p, s));
             continue;
         };
-        out.push(project_head(p, &format!("{}건{}", k.picks.len(), overlaid(screen.over(k.origin)))));
+        // 머리와 줄이 같은 출처를 본다 — `projects_status` 와 같은 자리다.
+        let screen = screen.over(k.origin);
+        out.push(project_head(p, &format!("{}건{}", k.picks.len(), overlaid(screen))));
         let shown = &k.picks[..k.picks.len().min(READY_SHOWN)];
         // 남의 스냅샷에서 온 글자다 — 걸러서 찍고 걸러서 잰다(`projects_status` 와 같은 까닭).
         let ids: Vec<String> = shown.iter().map(|i| one_line(&i.id)).collect();
@@ -1780,7 +1791,7 @@ pub fn projects_ready(
                 cell(hue, &one_line(&p.name), w_name + 2),
                 cell(hue, id, w_id + 2),
                 cell(style::priority_style(i.priority()), &format!("p{}", i.priority()), 4),
-                marked(k.origin.branch(&i.id), &one_line(&i.title), TITLE_CAP, style::PLAIN).0,
+                marked(screen.branch(&i.id), &one_line(&i.title), TITLE_CAP, style::PLAIN).0,
             ));
         }
         let rest = k.picks.len() - shown.len();
@@ -2436,6 +2447,47 @@ mod tests {
             let warned = fill(say(lang, "warn.no_epic"), &[("n", "1"), ("percent", "100")]);
             assert!(screen.contains(&warned), "{}: 경고가 제 말이 아니다\n{screen}", lang.code());
         }
+    }
+
+    /// **안 겹친 화면과 빈 출처를 겹친 화면은 같은 답을 낸다**(moai-4xib). [`Screen::origin`] 의
+    /// `None` 이 빈 [`Origin`] 을 빌려 주던 자리와 뜻이 같다는 것이 그 값의 약속이고, 훅의 보드가
+    /// 그 약속 위에서 빈 `Origin` 을 안 짓는다(`cmd::hook`). 약속이 글로만 있으면 [`Origin`] 에
+    /// `None` 과 빈 값이 갈리는 물음이 하나라도 생기는 날 훅의 보드만 조용히 달라진다.
+    ///
+    /// **겹친 것이 있으면 머리와 줄이 그렇다고 말한다** — [`Screen::over`] 가 출처를 실제로 들고
+    /// 내려가는지는 여기서 잰다. 인자를 묶는 리팩터에서 빈 화면만 그려 보면, 출처를 잃은 화면도
+    /// 시험이 다 파랗다.
+    #[test]
+    fn an_empty_origin_draws_like_none_and_a_real_one_marks_the_rows() {
+        let cfg = cfg();
+        let now = "2026-09-11T04:12:03Z";
+        let lang = Lang::Ko;
+        let mine = vec![issue("argos-0001", "제 줄", "todo")];
+        let draw = |issues: &[Issue], screen: Screen| {
+            let st = crate::report::status(issues, &[], &cfg, now);
+            plain(&status(&st, issues, &cfg, now, ".moai/issues.jsonl", 0, screen)).join("\n")
+        };
+        let bare = Origin::default();
+        assert_eq!(
+            draw(&mine, Screen::new(lang)),
+            draw(&mine, Screen::new(lang).over(&bare)),
+            "빈 출처를 겹친 화면이 안 겹친 화면과 다르다"
+        );
+
+        // 옆 워크트리가 같은 줄을 나중에 집었다 — 겹치면 그 줄이 이기고 출처가 선다.
+        let mut theirs = issue("argos-0001", "옆에서 집은 줄", "in_progress");
+        theirs.status_since = "2026-09-12T00:00:00Z".into();
+        theirs.updated_at = "2026-09-12T00:00:00Z".into();
+        let side = crate::worktree::Side::new("feat/x", "/tmp/feat-x", vec![theirs]);
+        let (shown, origin) = crate::worktree::overlay(mine.clone(), vec![side]);
+        let over = draw(&shown, Screen::new(lang).over(&origin));
+        assert!(
+            over.contains(&fill(say(lang, "status.overlaid"), &[("trees", "feat/x")])),
+            "머리가 겹쳐 봤다고 안 한다\n{over}"
+        );
+        assert!(over.contains(style::BRANCH_GLYPH), "겹쳐 온 줄에 가지 표가 없다\n{over}");
+        let off = draw(&shown, Screen::new(lang));
+        assert!(!off.contains(style::BRANCH_GLYPH), "안 겹친 화면에 가지 표가 섰다\n{off}");
     }
 
     /// 없는 에픽을 가리켜도 상세가 죽지 않는다 — 드러내되 막지 않는다.
