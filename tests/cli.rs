@@ -2325,14 +2325,36 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
 
     // **거절문은 아직 안 지은 줄을 id 로 부르지 않는다**(moai-1rkl). 거절하는 쓰기는 아무것도 안
     // 남기므로 그 id 는 어디에도 없고, 그것을 대면 받는 쪽이 없는 것을 찾으러 간다.
-    for (args, what) in [
-        (vec!["add", big.as_str()], "add 제목"),
-        (vec!["add", "새것", "-b", big.as_str()], "add -b"),
+    // **이미 선 줄은 그대로 id 로 부른다** — 두 갈래를 함께 잰다. 안 지은 쪽만 재던 판은 가름을
+    // 뒤집어도 전부 푸르렀고, 그러면 이미 선 줄의 거절문까지 제목만 대어 받는 쪽이 어느 줄인지
+    // 못 찾는다. 두 자리를 다 건드린다 — 저널에 적힐 글(`mv -m`)과 줄의 밭(`edit --title`)이다.
+    for (args, what, standing) in [
+        (vec!["add", big.as_str()], "add 제목", None),
+        (vec!["add", "새것", "-b", big.as_str()], "add -b", None),
+        (vec!["mv", id.as_str(), "in_progress", "-m", big.as_str()], "mv -m", Some(id.as_str())),
+        (vec!["edit", id.as_str(), "--title", big.as_str()], "edit --title", Some(id.as_str())),
     ] {
         let err = String::from_utf8_lossy(&moai(s.path(), &args).stderr).to_string();
-        assert!(err.contains("새 줄"), "{what}: 안 지은 줄을 안 가리킨다\n{err}");
-        assert!(!err.contains("argos-"), "{what}: 쓰지도 않은 id 를 댔다\n{err}");
+        match standing {
+            None => {
+                assert!(err.contains("새 줄"), "{what}: 안 지은 줄을 안 가리킨다\n{err}");
+                assert!(!err.contains("argos-"), "{what}: 쓰지도 않은 id 를 댔다\n{err}");
+            }
+            Some(id) => {
+                assert!(err.contains(id), "{what}: 이미 선 줄을 id 로 안 부른다\n{err}");
+                assert!(!err.contains("새 줄"), "{what}: 이미 선 줄을 안 지은 줄이라 했다\n{err}");
+            }
+        }
     }
+
+    // **크기 말고 다른 거절도 안 지은 줄을 id 로 안 부른다**(moai-1rkl) — `Issue::validate_fields`
+    // 의 말도 `<id>: ` 로 시작한다. 크기만 고쳐 두면 같은 쓰기가 한 축에서는 제목을, 다른 축에서는
+    // 없는 id 를 댄다: 아래 한 줄이 바로 그 자리였다.
+    let tagged = from_stdin(s.path(), &["add", "--from", "-"], "# 에픽\n- 멤버 #bug,perf\n");
+    let err = String::from_utf8_lossy(&tagged.stderr).to_string();
+    assert!(!tagged.status.success(), "쉼표가 든 태그를 받았다");
+    assert!(err.contains("새 줄"), "안 지은 줄을 안 가리킨다\n{err}");
+    assert!(!err.contains("argos-"), "쓰지도 않은 id 를 댔다\n{err}");
 
     assert_eq!(issues(s.path()), before, "거절한 쓰기가 스냅샷을 바꿨다");
     assert_eq!(journal(s.path()), notes, "거절한 쓰기가 저널에 남았다");

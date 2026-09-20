@@ -99,6 +99,23 @@ pub fn unwritten(title: &str) -> String {
     format!("새 줄 '{}'", fit_bytes(&crate::text::one_line(title), 60))
 }
 
+/// 이미 지어진 거절문의 머리에 선 id 를 [`unwritten`] 의 말로 갈아 끼운다(moai-1rkl).
+///
+/// 크기만 고치고 두면 **같은 쓰기가 축마다 다른 말을 한다.** [`Issue::validate_fields`] 의 말은
+/// 일곱 자리가 모두 `<id>: ` 로 시작하는데, 그 id 가 이번에 뽑은 것이면 거절 뒤에 어디에도 안
+/// 남는다 — `add --from` 에 `#bug,perf` 한 줄을 주면 `<없는 id>: 태그에 …` 가 나오고, 같은
+/// 계획을 두 번 돌리면 그때마다 다른 id 가 나왔다. [`check_text_size`] 가 이미 막아 둔 바로 그
+/// 실패다.
+///
+/// **머리만 간다.** 검사마다 가리키는 자를 따로 두면 그 말이 두 벌로 갈리고, 한쪽만 고치는 날
+/// 이 어긋남이 돌아온다. 머리가 그 꼴이 아니면(`id 형식이 아니다` 는 id 를 따옴표로 댄다) 그대로 둔다.
+pub fn point_at_unwritten(id: &str, title: &str, said: String) -> String {
+    match said.strip_prefix(&format!("{id}: ")) {
+        Some(rest) => format!("{}: {rest}", unwritten(title)),
+        None => said,
+    }
+}
+
 /// 이슈의 구조적 종류. `tags` 와 축이 다르다 —
 /// `kind` 는 무엇인가, `tags` 는 어떤 성격인가.
 ///

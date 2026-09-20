@@ -169,21 +169,24 @@ fn beyond_says(at: &Path) -> String {
 /// [`beyond_says`] 의 속 — [`look_under`] 와 같은 까닭으로 임자를 재는 자를 받는다. 남의 자리를
 /// 만들려면 root 가 있어야 해, 안 받으면 "길을 안 준다" 는 갈래가 어느 기계에서도 안 돈다.
 fn beyond_says_under(at: &Path, mine: &dyn Fn(&Path) -> bool) -> String {
+    // **한 줄로 접어서 보인다**([`crate::text::one_line`]). 이 말은 `NOT_A_REPO` 뒤에 붙어 줄
+    // 단위로 읽히는데(`fail` 이 그대로 stderr 에 쓴다), 디렉터리 이름에 든 줄바꿈 하나가 그것을
+    // 둘로 갈라 어디까지가 한 까닭인지 흐린다 — `cmd::nothing_registered` 가 제 줄에 이미 거는 자다.
+    let shown = crate::text::one_line(&at.display().to_string());
     if !mine(at) {
         return format!(
-            "{} 에 `.moai` 가 있지만 임자가 다르다 — 남의 트래커에는 쓰지 않는다. \
-             여기서 `moai init` 하거나 제 프로젝트를 가리킨다",
-            at.display()
+            "{shown} 에 `.moai` 가 있지만 임자가 다르다 — 남의 트래커에는 쓰지 않는다. \
+             여기서 `moai init` 하거나 제 프로젝트를 가리킨다"
         );
     }
     // **붙여 넣어 도는 글로 낸다**([`crate::text::shell_word`], moai-dtye). 날것으로 끼우던 판은
     // 빈칸이 든 자리에 `moai -C /w/My Projects/p` 를 일러 줬는데, 껍데기가 그것을 두 인자로 갈라
-    // 막힌 사람에게 준 유일한 길이 안 돌았다.
+    // 막힌 사람에게 준 유일한 길이 안 돌았다. **접은 글이 아니라 날것을 감싼다** — 감싸는 자가
+    // 제어문자를 `$'…'` 로 적으므로, 접은 뒤에 감싸면 붙여 넣은 길이 딴 자리를 가리킨다.
     let quoted = crate::text::shell_word(&at.display().to_string());
     format!(
-        "{} 에 `.moai` 가 있지만 여기서 올라가 쓰지 않는다 — \
-         `moai -C {quoted} <명령>` 으로 가리키거나 `moai project add {quoted}` 로 등록한다",
-        at.display()
+        "{shown} 에 `.moai` 가 있지만 여기서 올라가 쓰지 않는다 — \
+         `moai -C {quoted} <명령>` 으로 가리키거나 `moai project add {quoted}` 로 등록한다"
     )
 }
 
@@ -230,11 +233,23 @@ enum Found {
 /// `p` 가 **내 것인가**. 남의 자리로는 안 올라간다(moai-a2kn).
 ///
 /// uid 를 못 읽으면 내 것으로 본다 — 여기서 넘어지면 제 저장소 밖 어디서나 못 쓴다.
-/// unix 가 아니면 늘 참이다: 그쪽에는 이 뜻을 낼 값이 없어 git 꼭대기 하나로만 막는다.
+///
+/// **unix 가 아니면 늘 참이라 천장이 아예 없다.** 그쪽에는 이 뜻을 낼 값이 없어 위로 찾기가
+/// 예전처럼 뿌리까지 간다 — [`git_at_or_above`] 는 알림을 가르는 자일 뿐 멈추는 자가 아니라
+/// 대신 서지 못한다. 막는 자를 그쪽에도 두려면 다른 축이 필요하다.
 #[cfg(unix)]
 fn mine(p: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(p).map(|m| m.uid() == unsafe { libc_getuid() }).unwrap_or(true)
+    std::fs::metadata(p).map(|m| m.uid() == my_uid()).unwrap_or(true)
+}
+
+/// 이 프로세스의 uid — **한 번만 묻는다.** `getuid(2)` 는 glibc 가 접어 두지 않아 부를 때마다
+/// 커널로 내려가는데, [`mine`] 은 올라가는 층마다 그것을 부른다(열 층 깊이에서 한 부름이
+/// 열여섯 번이었다 — 리뷰가 쟀다). 값은 프로세스 동안 안 바뀌니 처음 뜬 것을 들고 있는다.
+#[cfg(unix)]
+fn my_uid() -> u32 {
+    static UID: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *UID.get_or_init(|| unsafe { libc_getuid() })
 }
 
 #[cfg(not(unix))]
@@ -242,8 +257,13 @@ fn mine(_p: &Path) -> bool {
     true
 }
 
-// `getuid(2)`. **의존성을 하나 더 들이지 않는다** — 이 한 값을 위해 `libc` 를 넣으면
-// 바이너리·빌드 예산의 셈이 새 축으로 는다(CLAUDE.md 의 "새 축의 의존성").
+// `getuid(2)` 를 직접 건다. **예산 때문이 아니다** — `libc` 는 `fs2` 가 이미 끌고 와 링크에
+// 들어 있으니, 직접 의존으로 적어도 바이너리도 빌드 시간도 안 움직인다(CLAUDE.md 의 "새 축의
+// 의존성" 은 런타임·ORM·웹 프레임워크를 가리키지 이런 크레이트가 아니다). 이 한 값에 이름을
+// 하나 더 들이지 않을 뿐이고, 그 값은 치른다: 여기 적은 `u32` 는 `uid_t` 가 u32 인 자리
+// (리눅스·macOS·BSD)에서만 맞다. u16·i32 인 unix 로 가는 날에는 `libc::getuid` 로 바꾼다 —
+// 그때는 반환 레지스터의 윗 절반이 쓰레기라 `mine` 이 모든 자리에서 거짓이 되고, 컴파일러는
+// 아무 말도 안 한다.
 #[cfg(unix)]
 unsafe extern "C" {
     #[link_name = "getuid"]
@@ -641,11 +661,22 @@ impl Repo {
                 // **가리키는 말은 거절할 때만 짓는다**([`crate::model::check_text_size`] 가 늦게
                 // 부른다). 미리 지으면 `create` 처럼 글이 없는 저널 줄까지 `original` 과 `issues` 를
                 // 통째로 훑고 제목을 두 벌 베낀다 — 8,000줄 계획이면 락을 쥔 채 그 헛일이 8,000번이다.
+                //
+                // **제목은 저널 줄에도 있다.** 스냅샷에서 못 찾는 줄(같은 쓰기가 세우고 다시
+                // 지운 줄)에 빈 글로 떨어지던 판은 `새 줄 ''` 을 냈다 — id 도 제목도 아니라,
+                // 받는 쪽에 손잡이가 하나도 안 남는다. `create`·`rm` 이 옮겨 적은 `title` 을
+                // 다음 자리로 두고, 그것마저 없으면 id 라도 댄다.
                 let at = || match original.iter().any(|o| o.id == e.id) {
                     true => e.id.clone(),
-                    false => crate::model::unwritten(
-                        issues.iter().find(|i| i.id == e.id).map(|i| i.title.as_str()).unwrap_or_default(),
-                    ),
+                    false => match issues
+                        .iter()
+                        .find(|i| i.id == e.id)
+                        .map(|i| i.title.as_str())
+                        .or(e.title.as_deref())
+                    {
+                        Some(t) => crate::model::unwritten(t),
+                        None => e.id.clone(),
+                    },
                 };
                 crate::model::check_text_size(at, what, t)?;
             }
@@ -684,7 +715,15 @@ impl Repo {
                 // 고치는 것까지 막으면 그 줄은 도구 안에서 영영 못 만진다. 옮기는 쓰기는
                 // 그대로 엄하다: 갈 칸은 이번에 쓰는 값이라 여기가 서지 않는다.
                 let kept = was.is_some_and(|o| o.status == i.status);
-                i.validate_keeping(&self.config, kept)?;
+                // **여기도 id 로 안 부른다**(moai-1rkl) — 위의 크기 검사만 고치고 두면 같은
+                // 쓰기가 한 축에서는 제목을, 다른 축에서는 없는 id 를 댄다. 실제로 `add --from`
+                // 에 `#bug,perf` 한 줄을 준 부름이 `<안 남을 id>: 태그에 …` 를 냈고, 같은 계획을
+                // 두 번 돌리면 그때마다 다른 id 가 나왔다. **갈아 끼우는 자는 한 자리다**
+                // ([`crate::model::point_at_unwritten`]) — 검사마다 따로 적으면 두 벌로 갈린다.
+                i.validate_keeping(&self.config, kept).map_err(|said| match was {
+                    Some(_) => said,
+                    None => crate::model::point_at_unwritten(&i.id, &i.title, said),
+                })?;
             }
         }
         issues.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1014,7 +1053,14 @@ pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor
     // 적는다(`Issue::arrive`, moai-38mh).
     issue.arrive(cfg);
     issue.normalize();
-    issue.validate(cfg)?;
+    // **여기서 거절하면 이 id 를 안 댄다**(moai-1rkl). 거절은 쓰기를 통째로 물리므로 방금 뽑은
+    // id 는 어디에도 안 남는데, [`Issue::validate_fields`] 의 말은 일곱 자리가 모두 `<id>: ` 로
+    // 시작한다 — `add --from` 에 `#bug,perf` 한 줄을 준 부름이 없는 id 를 대고, 같은 계획을 두
+    // 번 돌리면 그때마다 다른 id 가 나왔다. 크기 검사만 고치고 두면 같은 쓰기가 축마다 다른
+    // 말을 하므로, **만드는 쓰기가 다 지나는 이 자리**에서 함께 건다.
+    if let Err(said) = issue.validate(cfg) {
+        return Err(crate::model::point_at_unwritten(&issue.id, &issue.title, said).into());
+    }
     let entry = JournalEntry::create(&issue.id, &issue.title, &issue.created_at, by);
     issues.push(issue.clone());
     Ok((entry, issue))

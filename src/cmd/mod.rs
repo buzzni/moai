@@ -228,6 +228,13 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
             String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
         out.push(String::new());
         out.push("여기는 아직 moai 저장소가 아니다 — `moai init` 으로 시작한다".into());
+        // **천장에 걸렸으면 바로 위 줄을 고쳐 준다**(moai-a2kn, 리뷰 moai-0ftu.h80). 맨몸 `moai` 는
+        // CLAUDE.md 가 대는 세션의 시작점이라(`인자 없이 부르면 status 가 나온다`) 막힌 사람이 가장
+        // 먼저 듣는 말이 여기일 수 있는데, 그 말이 "여기서 `init` 하라" 다 — `nothing_registered` 에만
+        // 안내를 달던 판은 이 자리를 비켜 가, 안내를 만들어 둔 채로 제 트래커 옆에 빈 트래커가 섰다.
+        if let Some(said) = crate::store::beyond_here() {
+            out.push(said);
+        }
         out.push("다른 곳의 프로젝트를 여기서 한눈에 보려면 `moai project add <dir>` 로 등록한다".into());
         // **목록이 빈 까닭이 설정의 문제면 그것을 댄다.** 세션은 여기서 시작하는데, 설정이
         // 깨져 등록한 것이 안 읽힌 사람에게 "등록한 것이 없다, 더하라" 만 하면 정반대를
