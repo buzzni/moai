@@ -397,6 +397,19 @@ impl Issue {
     /// 영영 못 만진다(moai-hym7, 사람이 정했다). 칸을 **옮기는** 쓰기는 그대로 엄하다 —
     /// 갈 칸은 바뀌는 값이라 `kept_status` 가 서지 않는다.
     pub fn validate_keeping(&self, cfg: &crate::config::Config, kept_status: bool) -> Result<(), String> {
+        if !kept_status {
+            cfg.require_known(self.status.as_str()).map_err(|e| format!("{}: {e}", self.id))?;
+        }
+        self.validate_fields()
+    }
+
+    /// 칸 이름을 뺀 나머지 검사. **설정이 필요 없는 쪽이다.**
+    ///
+    /// 갈라 둔 까닭은 머지 드라이버다(moai-x2vs) — git 이 주는 것은 임시 파일 셋뿐이라
+    /// 그쪽은 `.moai/config.toml` 을 안 읽는데, 제가 지어 내보내는 줄은 검사해야 한다.
+    /// `kept_status` 가 선 [`Issue::validate_keeping`] 은 사실 `cfg` 를 한 번도 안 쓰므로,
+    /// 그 사실을 타입으로 적어 두면 검사가 두 벌로 갈라질 자리가 없다.
+    pub fn validate_fields(&self) -> Result<(), String> {
         if !crate::id::is_valid(&self.id) {
             return Err(format!("id 형식이 아니다 — {:?}", self.id));
         }
@@ -419,9 +432,6 @@ impl Issue {
             {
                 return Err(format!("{}: {what}은 한 줄이다 — {v:?}", self.id));
             }
-        }
-        if !kept_status {
-            cfg.require_known(self.status.as_str()).map_err(|e| format!("{}: {e}", self.id))?;
         }
         if self.priority.is_some_and(|p| p > MAX_PRIORITY) {
             return Err(format!(
