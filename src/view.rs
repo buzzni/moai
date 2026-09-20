@@ -1709,7 +1709,8 @@ pub fn projects_status(
         }
         let rest = b.picked.len().saturating_sub(PICKED_SHOWN);
         if rest > 0 {
-            out.push(format!("  {}", paint(style::DIM, &format!("집은 것 {rest}건 더"))));
+            let said = fill(say(lang, "overview.picked_more"), &[("n", &rest.to_string())]);
+            out.push(format!("  {}", paint(style::DIM, &said)));
         }
         troubles(&mut out, b.trouble);
         // **`gather` 가 이미 낸 워크트리는 두 번 안 센다** — `cmd::status` 의 `said_already` 와 같은
@@ -1727,7 +1728,12 @@ pub fn projects_status(
         } else {
             b.unread
                 .iter()
-                .map(|t| format!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display()))
+                .map(|t| {
+                    // **글리프와 자리는 말이 아니다** — 가지 이름과 경로는 자료고 `⎇` 는 표라,
+                    // 말묶음에는 `{at}` 한 자리로 든다. 번역자가 옮길 것은 그 앞의 문장뿐이다.
+                    let at = format!("{} {}: {}", style::BRANCH_GLYPH, t.branch, t.path.display());
+                    fill(say(lang, "overview.unread_snapshot"), &[("at", &at)])
+                })
                 .collect()
         };
         troubles(&mut out, &unread);
@@ -1740,18 +1746,36 @@ pub fn projects_status(
         let t = b.trouble.len() + unread.len();
         let beside = match t {
             0 => String::new(),
-            _ => format!(" · 옆 워크트리 문제 {t}건"),
+            _ => format!(" · {}", fill(say(lang, "overview.worktree_trouble"), &[("n", &t.to_string())])),
         };
+        // **`say` 부름은 갈래마다 제 줄이다**([`says`] 와 같은 까닭) — 키를 도우미에 넘기면
+        // 소스를 훑는 시험(`i18n::tests::keys_in`)의 눈에서 그 키가 통째로 사라진다.
+        // **"드러난 문제 없다" 는 저장소 안의 `status` 와 키가 같다** — 한 도구가 같은 것을
+        // 두 말로 말하지 않는다.
         out.push(match (n, fatal) {
-            (0, _) if t == 0 => format!("  {} 드러난 문제 없다", paint(style::status_style("done"), "✓")),
-            (0, _) => format!("  {} 옆 워크트리 문제 {t}건 — 위 줄", paint(style::WARN, "!")),
-            (_, 0) => format!("  {} 경고 {n}건{beside}  {go}", paint(style::WARN, "!")),
-            (_, f) => format!("  {} 경고 {n}건 (데이터가 깨졌다 {f}건){beside}  {go}", paint(style::ERROR, "!")),
+            (0, _) if t == 0 => {
+                format!("  {} {}", paint(style::status_style("done"), "✓"), say(lang, "status.all_clear"))
+            }
+            (0, _) => format!(
+                "  {} {}",
+                paint(style::WARN, "!"),
+                fill(say(lang, "overview.worktree_trouble_above"), &[("n", &t.to_string())])
+            ),
+            (_, 0) => format!(
+                "  {} {}{beside}  {go}",
+                paint(style::WARN, "!"),
+                fill(say(lang, "overview.warnings"), &[("n", &n.to_string())])
+            ),
+            (_, f) => format!(
+                "  {} {}{beside}  {go}",
+                paint(style::ERROR, "!"),
+                fill(say(lang, "overview.warnings_fatal"), &[("n", &n.to_string()), ("f", &f.to_string())])
+            ),
         });
     }
     problems(&mut out, reg);
     out.push(String::new());
-    out.push(paint(style::DIM, "다음:  `moai ready` 로 프로젝트마다 집을 것을 본다"));
+    out.push(paint(style::DIM, say(lang, "overview.next")));
     out
 }
 
@@ -1789,7 +1813,10 @@ pub fn projects_ready(
         };
         // 머리와 줄이 같은 출처를 본다 — `projects_status` 와 같은 자리다.
         let screen = screen.over(k.origin);
-        out.push(project_head(p, &format!("{}건{}", k.picks.len(), overlaid(screen))));
+        // **셈 하나에도 말이 든다** — 한국어의 `건` 이 여기 박혀 있던 동안, 말묶음에서 온
+        // `overlaid` 꼬리와 한 줄에 서서 `1건   ⎇ feat/x overlaid` 가 나왔다(리뷰 moai-4y5s.jy3 #5).
+        let count = fill(say(lang, "overview.picks"), &[("n", &k.picks.len().to_string())]);
+        out.push(project_head(p, &format!("{count}{}", overlaid(screen))));
         let shown = &k.picks[..k.picks.len().min(READY_SHOWN)];
         // 남의 스냅샷에서 온 글자다 — 걸러서 찍고 걸러서 잰다(`projects_status` 와 같은 까닭).
         let ids: Vec<String> = shown.iter().map(|i| one_line(&i.id)).collect();
@@ -1806,7 +1833,10 @@ pub fn projects_ready(
         }
         let rest = k.picks.len() - shown.len();
         if rest > 0 {
-            let go = format!("{rest}건 더 → `moai -C {} ready`", shell_arg(&p.path));
+            // **`status` 의 경고 꼬리와 키가 같다**(`status.more`) — 같은 "N건 더" 를 두 키로
+            // 두면 한쪽만 옮긴 말에서 한 화면이 두 모양으로 센다. 뒤의 명령은 자료라 그대로다.
+            let more = fill(say(lang, "status.more"), &[("n", &rest.to_string())]);
+            let go = format!("{more} → `moai -C {} ready`", shell_arg(&p.path));
             out.push(format!("  {}", paint(style::DIM, &go)));
         }
         // **짧아진 목록은 왜 짧은지를 여기서도 댄다**(저장소 안의 `ready` 와 같은 글자·같은
@@ -1819,12 +1849,10 @@ pub fn projects_ready(
         // 목록 꼬리("N건 더") 뒤에 둔다 — 앞에 두면 그 꼬리가 문제 줄의 연속으로 읽힌다(`projects_status` 와 같은 차례).
         troubles(&mut out, k.trouble);
         if k.unreadable > 0 {
-            out.push(format!(
-                "  {} 읽을 수 없는 줄 {}개 — 어느 줄인지는 `moai -C {} show` 가 낸다",
-                paint(style::ERROR, "!"),
-                k.unreadable,
-                shell_arg(&p.path)
-            ));
+            let go = format!("moai -C {} show", shell_arg(&p.path));
+            let said =
+                fill(say(lang, "overview.unreadable"), &[("n", &k.unreadable.to_string()), ("go", &go)]);
+            out.push(format!("  {} {said}", paint(style::ERROR, "!")));
         }
     }
     problems(&mut out, reg);

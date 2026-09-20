@@ -810,6 +810,57 @@ fn dir_in(s: &Scratch, rel: &str) -> PathBuf {
     d
 }
 
+/// **한눈 보기의 몸통도 고른 말로 선다**(moai-el7z). 머리 줄만 말묶음에서 오던 동안, 저장소
+/// 안에서는 영어로 답하고 밖에서는 한국어로 답하는 자리가 있었다 — 같은 명령이 선 자리에 따라
+/// 다른 말을 하는 것은 덜 옮긴 것과 다른 일이다(리뷰 moai-80qw.cb8·moai-4y5s.jy3 의 5번).
+///
+/// **글자를 하나씩 견주지 않고 한글이 남았는지를 센다.** 견주면 시험이 말묶음의 베낌이 되어
+/// 영어 한 줄을 고칠 때마다 함께 고쳐야 하고, 그러면 무엇이 안 옮겨졌는지는 도로 안 보인다.
+/// **두 화면을 한 판에서 잰다** — 몸통이 `view::projects_status` 와 `projects_ready` 로 갈려
+/// 있어 한쪽만 옮기기 쉽다. 일감은 줄이 실제로 서게 넉넉히 둔다: 집은 것 넷(`PICKED_SHOWN` 은
+/// 셋)과 집을 것 일곱(`READY_SHOWN` 은 다섯)이 "N건 더" 를 양쪽에 세우고, 에픽 없는 일이
+/// 경고 줄을 세운다. 제목은 ASCII 다 — 자료의 한글은 옮길 글이 아니라 이 자가 못 가른다.
+#[test]
+fn the_overview_body_speaks_the_picked_language() {
+    let s = Scratch::new("ovlang");
+    let (one, out) = (dir_in(&s, "one"), dir_in(&s, "out"));
+    ok(&one, &["init", "argos"]);
+    for n in 0..4 {
+        let id = add(&one, &[&format!("picked work {n}")]);
+        ok(&one, &["mv", &id, "in_progress"]);
+    }
+    for n in 0..7 {
+        add(&one, &[&format!("ready work {n}")]);
+    }
+    let cfg = registry(&s, &[&one]);
+    let screen = |args: &[&str], lang: &str| {
+        let got = isolated(BIN)
+            .args(args)
+            .current_dir(&out)
+            .env("MOAI_CONFIG", &cfg)
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            .env("MOAI_LANG", lang)
+            .output()
+            .expect("moai 를 실행하지 못했다");
+        assert!(got.status.success(), "{lang} {args:?}: {}", String::from_utf8_lossy(&got.stderr));
+        String::from_utf8(got.stdout).unwrap()
+    };
+
+    for args in [&["status"][..], &["ready"][..]] {
+        // **줄이 섰는지부터 잰다.** 안 선 화면에 한글이 없는 것은 당연해서, 이 확인이 없으면
+        // 일감이 줄어드는 날 이 판은 아무것도 안 재면서 초록으로 남는다.
+        let korean = screen(args, "ko");
+        assert!(korean.contains("건 더"), "한국어 화면에 '건 더' 줄이 안 섰다\n{korean}");
+
+        let english = screen(args, "en");
+        assert!(english.contains("more"), "영어 화면에 'N more' 줄이 안 섰다\n{english}");
+        let left: Vec<&str> =
+            english.lines().filter(|l| l.chars().any(|c| ('가'..='힣').contains(&c))).collect();
+        assert!(left.is_empty(), "영어로 고른 {args:?} 화면에 한국어가 남았다 — {left:#?}");
+    }
+}
+
 /// **`.moai` 밖 한눈 보기도 자리 없는 줄을 비춘다**(moai-p3bs). 죽은 세션을 찾으러 돌아온 사람이
 /// 프로젝트 밖에서 보는 화면이 여기라, 안쪽 `moai status` 에만 그 말이 있으면 못 본다. 경고 수와
 /// `--json` 의 `warnings` 가 안쪽과 같은 수를 말한다.
