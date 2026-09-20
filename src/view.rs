@@ -2479,7 +2479,7 @@ mod tests {
         theirs.status_since = "2026-09-12T00:00:00Z".into();
         theirs.updated_at = "2026-09-12T00:00:00Z".into();
         let side = crate::worktree::Side::new("feat/x", "/tmp/feat-x", vec![theirs]);
-        let (shown, origin) = crate::worktree::overlay(mine.clone(), vec![side]);
+        let (shown, origin) = crate::worktree::overlay(mine.clone(), &[side]);
         let over = draw(&shown, Screen::new(lang).over(&origin));
         assert!(
             over.contains(&fill(say(lang, "status.overlaid"), &[("trees", "feat/x")])),
