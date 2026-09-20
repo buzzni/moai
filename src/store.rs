@@ -365,11 +365,10 @@ impl Repo {
     ///
     /// 경로는 **받은 철자 그대로** 뿌리가 된다. 링크를 풀지 않는다 — 풀지 말지는
     /// 경로를 가진 쪽(`user_config::resolve_dir`)이 이미 정했다.
+    ///
+    /// **"없다" 를 가르는 자는 [`gone`] 하나다**(moai-blvx) — 읽음 쪽([`crate::read_marks::settle`])도
+    /// 같은 자를 쓴다. 닫은 글로 여기 두던 판은 두 표면이 같은 자리를 달리 불렀다.
     pub fn open(dir: &Path) -> R<Opened> {
-        let gone = |e: &std::io::Error| {
-            // 경로 중간이 파일이면(`file/sub`) `NotADirectory` 다 — 없는 것과 같다.
-            matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)
-        };
         match std::fs::metadata(dir) {
             Ok(m) if m.is_dir() => {}
             Ok(_) => return Err(Fail::new(format!("디렉터리가 아니다 — {}", dir.display()))),
@@ -973,6 +972,24 @@ pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()
         }
     }
     Ok(())
+}
+
+/// **그 자리가 없다는 뜻인가** — 있고 없고를 가르는 잣대는 도구에 하나다(moai-blvx).
+///
+/// 경로 가운데가 파일이면(`file/sub`) `NotADirectory` 다. 그 자리는 **없는 것**이지 잠깐 못 보는
+/// 것이 아니라, `NotFound` 와 한 낱말로 읽는다.
+///
+/// [`Repo::open`] 안에 닫힌 글로 있던 것을 꺼냈다. 숨어 있던 동안 [`crate::read_marks::settle`] 은
+/// `NotFound` 만 조용히 지나가, 등록한 줄의 경로 가운데가 파일로 바뀌면 저장소 쪽은 조용히 "없다"
+/// 로 지나가는데 읽음 쪽은 적재마다 "자리를 못 풀어 적힌 철자로 든다 — Not a directory" 를 냈다
+/// (리뷰 moai-f31d.lhe 12번). 같은 조건을 두 표면이 달리 부르던 자리다.
+///
+/// **여기 안 든 갈래는 없는 것이 아니다.** `EACCES`·`ELOOP`·`ESTALE` 는 자리가 서 있는데 못 닿은
+/// 것이라, 읽는 쪽은 까닭을 대고 쓰는 쪽은 대기 자리로 간다(`read_marks` 의 `spool_at`, moai-bdej) —
+/// 그것을 "없다" 로 접으면 떨어진 도장이 갈 곳을 잃는다. 가르는 잣대가 [`crate::user_config::unreadable`]
+/// 과 따로 서는 까닭도 그것이다: 그쪽은 **다시 해 볼 값**을 가르고 이쪽은 **있는가**를 가른다.
+pub(crate) fn gone(e: &std::io::Error) -> bool {
+    matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)
 }
 
 /// 파일이 든 디렉터리. 디렉터리 조각이 없는 상대 철자(`config.toml`)면 `.` 이다.

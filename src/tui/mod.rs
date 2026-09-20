@@ -5766,8 +5766,10 @@ mod tests {
     fn marking_says_when_it_could_not_settle_the_root() {
         let s = Scratch::new("read-marks-tui-why");
         let config = s.path().join("user.toml");
-        std::fs::write(s.path().join("파일"), "x").unwrap();
-        let root = s.path().join("파일/밑");
+        // **막는 것은 고리다**(`ELOOP`, moai-blvx) — 경로 가운데에 파일을 두던 판은 그 자리가
+        // 이제 **없는 자리**로 읽혀 조용히 지나가, 여기서 재려는 까닭이 아예 안 선다.
+        std::os::unix::fs::symlink("고리", s.path().join("고리")).unwrap();
+        let root = s.path().join("고리/밑");
         let mut a = app();
         a.site.repo = Some(crate::store::Repo::at(root, cfg()));
         a.user_config = Some(config);
@@ -5790,8 +5792,10 @@ mod tests {
     fn a_place_trouble_is_not_called_a_line_trouble() {
         let s = Scratch::new("read-marks-place-name");
         let config = s.path().join("user.toml");
-        std::fs::write(s.path().join("파일"), "x").unwrap();
-        let root = s.path().join("파일/밑");
+        // **막는 것은 고리다**(`ELOOP`, moai-blvx) — 경로 가운데에 파일을 두던 판은 그 자리가
+        // 이제 **없는 자리**로 읽혀 조용히 지나가, 여기서 재려는 까닭이 아예 안 선다.
+        std::os::unix::fs::symlink("고리", s.path().join("고리")).unwrap();
+        let root = s.path().join("고리/밑");
         let mut a = app();
         a.user_config = Some(config.clone());
 

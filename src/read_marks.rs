@@ -45,11 +45,22 @@ const PATH: &str = "path";
 /// **떨어진 판의 도장은 버려지지 않는다.** 도구가 짓는 대기 자리에 남고([`spool_at`]), 다음 성한 판이
 /// 그것을 합치고 지운다(moai-bdej).
 ///
-/// **없는 것은 탈이 아니다.** 설정 파일도 읽음 파일도 처음에는 없다 — `NotFound` 는 조용히 지나간다.
+/// **없는 것은 탈이 아니다.** 설정 파일도 읽음 파일도 처음에는 없다 — 없는 자리는 조용히 지나간다.
+///
+/// **없다를 가르는 자는 [`crate::store::gone`] 하나다**(moai-blvx). `NotFound` 만 조용히 지나가던 판은
+/// 같은 조건을 도구의 두 쪽이 달리 읽었다 — 등록한 줄의 경로 가운데가 파일로 바뀌면
+/// [`crate::store::Repo::open`] 은 조용히 "없다"(`Opened::Missing`)로 지나가는데 이쪽은 `moai read --all`
+/// 과 탐색기 적재마다 "자리를 못 풀어 적힌 철자로 든다 — Not a directory" 를 냈다(리뷰 moai-f31d.lhe
+/// 12번). 없는 자리는 저쪽이 이미 제 낱말로 대므로(`디렉터리가 없다`) 여기서 한 번 더 댈 것이 없다.
+///
+/// **없는 자리는 대기 자리로 안 간다.** 떨어진 판의 대기 자리(moai-bdej)는 "자리는 서 있는데 못
+/// 닿았다"(`EACCES`·`ELOOP`·`ESTALE`)를 위한 것이고, 그때는 다음 성한 판이 합쳐 준다. 없는 자리에는
+/// 합쳐 줄 다음 판이 없다 — 그 뿌리로는 [`crate::store::Repo::open`] 이 `Missing` 을 내 읽을 이슈부터
+/// 없으니, 도장을 대기 자리에 쌓으면 아무도 안 여는 파일만 남는다.
 fn settle(path: &Path) -> (PathBuf, Option<String>) {
     match std::fs::canonicalize(path) {
         Ok(real) => (real, None),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (path.to_path_buf(), None),
+        Err(e) if crate::store::gone(&e) => (path.to_path_buf(), None),
         Err(e) => (path.to_path_buf(), Some(format!("{}: 자리를 못 풀어 적힌 철자로 든다 — {e}", path.display()))),
     }
 }
@@ -904,7 +915,11 @@ mod tests {
     /// **못 푸는 자리는 받은 철자로 떨어지고 까닭을 댄다**(사용자 결정 2026-09-20). 지워진 뿌리를
     /// 가리키는 등록 줄 하나가 `moai read` 를 통째로 멈추면 안 된다.
     ///
-    /// **없는 것은 탈이 아니다** — 설정도 읽음 파일도 처음에는 없다.
+    /// **없는 것은 탈이 아니다** — 설정도 읽음 파일도 처음에는 없다. 가르는 자는
+    /// [`crate::store::gone`] 하나라 `NotFound` 와 `NotADirectory` 가 한 낱말로 읽힌다(moai-blvx).
+    ///
+    /// **두 줄이 한자리에 선다**(리뷰의 "재는 자가 한 자리에 서 있는가"). 없는 자리가 조용한 것과 못
+    /// 닿은 자리가 말하는 것은 같은 갈림의 두 쪽이라, 갈라 두면 한쪽을 고친 날 다른 쪽이 안 무른다.
     #[test]
     fn a_root_i_cannot_resolve_falls_back_and_says_so() {
         let s = Scratch::new("read-marks-unresolved");
@@ -915,11 +930,28 @@ mod tests {
         assert_eq!(place.root, gone, "못 푼 자리를 뿌리로 안 들었다");
         assert!(place.problems.is_empty(), "없는 자리를 탈로 댔다 — {:?}", place.problems);
 
-        // 경로 가운데가 파일이면 `NotADirectory` 다 — 그것은 댄다. 윈도에서는 `NotFound` 라 안 잰다.
         #[cfg(unix)]
         {
+            // **경로 가운데가 파일이면 `NotADirectory` — 그것도 없는 자리다**(moai-blvx). 저장소 쪽
+            // ([`crate::store::Repo::open`])이 `Missing` 으로 접는 바로 그 조건이라, 대면 같은 자리를
+            // 두 표면이 달리 부른다. 윈도에서는 `NotFound` 라 안 잰다.
             std::fs::write(s.join("파일"), "x").unwrap();
             let through = s.join("파일/밑");
+            let place = place_of(&cfg, &through);
+            assert!(place.problems.is_empty(), "없는 자리를 탈로 댔다 — {:?}", place.problems);
+            assert_eq!(place.at, sheet_at(dir_of(&cfg), &through), "없는 자리를 대기 자리로 보냈다");
+            assert!(read(&cfg, &through, &BTreeMap::new()).problems.is_empty(), "읽기가 없는 자리를 탈로 댔다");
+            // 그 조건에 저장소 쪽이 내는 답과 **같은 낱말인가** — 갈리면 이 고침이 무른 것이다.
+            assert!(
+                matches!(crate::store::Repo::open(&through), Ok(crate::store::Opened::Missing)),
+                "저장소 쪽은 같은 자리를 달리 읽는다"
+            );
+
+            // **자리는 서 있는데 못 닿은 것은 댄다** — 고리(`ELOOP`)가 그 갈래다. 여기가 떨어진
+            // 도장이 대기 자리로 가는 길이라(moai-bdej), 이 줄이 무르면 그 길이 통째로 닫힌다.
+            let loop_at = s.join("고리");
+            std::os::unix::fs::symlink("고리", &loop_at).unwrap();
+            let through = loop_at.join("밑");
             let place = place_of(&cfg, &through);
             assert_eq!(place.problems.len(), 1, "{:?}", place.problems);
             assert!(place.problems[0].contains("자리를 못 풀어"), "{}", place.problems[0]);
@@ -936,8 +968,10 @@ mod tests {
     fn writing_says_why_it_could_not_settle_the_root() {
         let s = Scratch::new("read-marks-write-why");
         let cfg = s.join("config.toml");
-        std::fs::write(s.join("파일"), "x").unwrap();
-        let through = s.join("파일/밑");
+        // **자리가 서 있는데 못 닿은 갈래로 잰다** — 고리(`ELOOP`)다. 한때 경로 가운데에 파일을
+        // 두고 쟀는데, 그것은 **없는 자리**라 이제 조용하다(moai-blvx).
+        std::os::unix::fs::symlink("고리", s.join("고리")).unwrap();
+        let through = s.join("고리/밑");
 
         let wrote = update(&cfg, &through, |sh| sh.mark(&marks(&[("a", "A")]))).unwrap();
         assert_eq!(wrote.problems.len(), 1, "쓰는 길이 까닭을 버렸다 — {:?}", wrote.problems);
@@ -1000,7 +1034,9 @@ mod tests {
         let s = Scratch::new("read-marks-fallen");
         let cfg = s.join("config.toml");
         std::fs::create_dir_all(s.join("real/proj")).unwrap();
-        std::fs::write(s.join("막힌 것"), "x").unwrap();
+        // **막는 것은 고리다**(`ELOOP`, moai-blvx) — 파일을 두어 막던 판은 그 자리가 이제 **없는
+        // 자리**로 읽혀 조용히 지나가고, 떨어진 도장이 대기 자리로 안 간다.
+        std::os::unix::fs::symlink("막힌 것", s.join("막힌 것")).unwrap();
         let gate = s.join("문");
         std::os::unix::fs::symlink("real", &gate).unwrap();
         // **받은 철자가 푼 경로와 다르다** — 그래야 떨어진 자리가 다음 판에 옛 자리로 선다.
@@ -1068,7 +1104,9 @@ mod tests {
         let s = Scratch::new("read-marks-rewind");
         let cfg = s.join("config.toml");
         std::fs::create_dir_all(s.join("real/proj")).unwrap();
-        std::fs::write(s.join("막힌 것"), "x").unwrap();
+        // **막는 것은 고리다**(`ELOOP`, moai-blvx) — 파일을 두어 막던 판은 그 자리가 이제 **없는
+        // 자리**로 읽혀 조용히 지나가고, 떨어진 도장이 대기 자리로 안 간다.
+        std::os::unix::fs::symlink("막힌 것", s.join("막힌 것")).unwrap();
         let gate = s.join("문");
         std::os::unix::fs::symlink("real", &gate).unwrap();
         let spelling = s.join("문/proj/../proj");
@@ -1111,7 +1149,9 @@ mod tests {
         let s = Scratch::new("read-marks-dotted");
         let cfg = s.join("config.toml");
         std::fs::create_dir_all(s.join("real/proj")).unwrap();
-        std::fs::write(s.join("막힌 것"), "x").unwrap();
+        // **막는 것은 고리다**(`ELOOP`, moai-blvx) — 파일을 두어 막던 판은 그 자리가 이제 **없는
+        // 자리**로 읽혀 조용히 지나가고, 떨어진 도장이 대기 자리로 안 간다.
+        std::os::unix::fs::symlink("막힌 것", s.join("막힌 것")).unwrap();
         let gate = s.join("문");
         std::os::unix::fs::symlink("real", &gate).unwrap();
         let spelling = s.join("문/proj/../proj");
@@ -1148,7 +1188,9 @@ mod tests {
         let s = Scratch::new("read-marks-scalar");
         let cfg = s.join("config.toml");
         std::fs::create_dir_all(s.join("real/proj")).unwrap();
-        std::fs::write(s.join("막힌 것"), "x").unwrap();
+        // **막는 것은 고리다**(`ELOOP`, moai-blvx) — 파일을 두어 막던 판은 그 자리가 이제 **없는
+        // 자리**로 읽혀 조용히 지나가고, 떨어진 도장이 대기 자리로 안 간다.
+        std::os::unix::fs::symlink("막힌 것", s.join("막힌 것")).unwrap();
         let gate = s.join("문");
         std::os::unix::fs::symlink("real", &gate).unwrap();
         let spelling = s.join("문/proj/../proj");
