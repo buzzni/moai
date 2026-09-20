@@ -79,9 +79,7 @@ fn entries(src: &str) -> Result<Vec<Entry<'_>>, String> {
             table = Some(t.strip_suffix(']').unwrap_or(t).trim());
             continue;
         }
-        let (k, v) = l
-            .split_once('=')
-            .ok_or_else(|| format!("{n}줄: `키 = \"값\"` 형식이 아니다"))?;
+        let (k, v) = l.split_once('=').ok_or_else(|| format!("{n}줄: `키 = \"값\"` 형식이 아니다"))?;
         out.push(Entry { key: k.trim(), value: v.trim(), line: n, table });
     }
     Ok(out)
@@ -96,8 +94,7 @@ fn raw<'s>(es: &[Entry<'s>], key: &str) -> Option<(&'s str, usize)> {
 /// 최상위 `키 = "값"` 하나를 읽는다.
 fn text(es: &[Entry<'_>], key: &str) -> Result<Option<String>, String> {
     let Some((v, n)) = raw(es, key) else { return Ok(None) };
-    let v = value(v)
-        .ok_or_else(|| format!("{n}줄: `{key}` 의 값은 큰따옴표로 감싸야 한다 — {v:?}"))?;
+    let v = value(v).ok_or_else(|| format!("{n}줄: `{key}` 의 값은 큰따옴표로 감싸야 한다 — {v:?}"))?;
     Ok(Some(v.to_string()))
 }
 
@@ -335,36 +332,25 @@ impl Config {
     pub fn parse(src: &str) -> Result<Config, String> {
         // **파일은 한 번만 훑는다**([`entries`]) — 키마다 다시 훑으면 키 수 × 줄 수다.
         let es = &entries(src)?;
-        let prefix = text(es, "prefix")?
-            .filter(|p| !p.is_empty())
-            .ok_or("`prefix` 가 없다")?;
+        let prefix = text(es, "prefix")?.filter(|p| !p.is_empty()).ok_or("`prefix` 가 없다")?;
         check_prefix(&prefix)?;
 
         let raw = text(es, "statuses")?.unwrap_or_else(|| DEFAULT_STATUSES.into());
-        let statuses: Vec<String> = raw
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
+        let statuses: Vec<String> = raw.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         if statuses.is_empty() {
             return Err("`statuses` 가 비었다".into());
         }
         if !statuses.iter().any(|s| s == DONE) {
             return Err(format!("`statuses` 에 `{DONE}` 이 있어야 한다 — {raw:?}"));
         }
-        if let Some(dup) = statuses
-            .iter()
-            .enumerate()
-            .find(|(i, s)| statuses[..*i].contains(s))
-        {
+        if let Some(dup) = statuses.iter().enumerate().find(|(i, s)| statuses[..*i].contains(s)) {
             return Err(format!("`statuses` 에 `{}` 가 두 번 있다", dup.1));
         }
 
         let naming = match text(es, "naming")? {
             None => Naming::default(),
-            Some(raw) => Naming::parse(&raw).ok_or_else(|| {
-                format!("`naming` 은 {} 중 하나다 — {raw:?}", Naming::ALL.join("·"))
-            })?,
+            Some(raw) => Naming::parse(&raw)
+                .ok_or_else(|| format!("`naming` 은 {} 중 하나다 — {raw:?}", Naming::ALL.join("·")))?,
         };
 
         Thresholds::check_keys(es)?;
@@ -434,10 +420,7 @@ mod tests {
             let e = Config::parse(&src).unwrap_err();
             assert!(e.contains("full·name·email"), "{raw:?}: {e}");
         }
-        assert_eq!(
-            Config::parse("prefix = \"argos\"\nnaming = \"email\"\n").unwrap().naming,
-            Naming::Email
-        );
+        assert_eq!(Config::parse("prefix = \"argos\"\nnaming = \"email\"\n").unwrap().naming, Naming::Email);
     }
 
     /// 글 하나를 원본에서 바로 읽는다 — 줄 모으기([`entries`])와 글 읽기([`text`])를 한 번에
@@ -520,10 +503,7 @@ mod tests {
     fn thresholds_default_to_the_old_constants() {
         let c = Config::parse("prefix = \"argos\"\n").unwrap();
         assert_eq!(c.status, Thresholds::DEFAULT);
-        assert_eq!(
-            (c.status.review_days, c.status.wip_days, c.status.blocked_days),
-            (3, 2, 3)
-        );
+        assert_eq!((c.status.review_days, c.status.wip_days, c.status.blocked_days), (3, 2, 3));
         assert_eq!((c.status.wip_limit, c.status.no_epic_min, c.status.idea_pile), (3, 5, 5));
         assert_eq!((c.status.no_epic_ratio, c.status.flow_days), (0.15, 7));
     }
@@ -543,10 +523,7 @@ status_flow_days     = 15
 status_idea_pile     = 16
 ";
         let t = Config::parse(src).unwrap().status;
-        assert_eq!(
-            (t.review_days, t.wip_days, t.blocked_days, t.flow_days),
-            (10, 11, 12, 15)
-        );
+        assert_eq!((t.review_days, t.wip_days, t.blocked_days, t.flow_days), (10, 11, 12, 15));
         assert_eq!((t.wip_limit, t.no_epic_min, t.idea_pile), (13, 14, 16));
         assert_eq!(t.no_epic_ratio, 0.5);
     }

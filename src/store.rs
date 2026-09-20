@@ -163,8 +163,7 @@ impl Load {
 /// `.moai` 를 못 찾았을 때의 말. **다른 곳의 저장소를 부르는 길(`-C`)을 함께 댄다** —
 /// 등록한 프로젝트를 한눈에 보는 `status` 에 익은 사람은 `.moai` 밖에서 `add`·`mv` 도
 /// 될 줄 알고, 쓰는 명령은 어느 프로젝트인지 모르니 멈추는 것이 맞다(moai-6au6).
-pub const NOT_A_REPO: &str =
-    "moai 저장소가 아니다 (.moai/ 를 못 찾았다). `moai init` 으로 시작하거나, 다른 곳의 저장소면 `moai -C <dir> <명령>` 으로 부른다";
+pub const NOT_A_REPO: &str = "moai 저장소가 아니다 (.moai/ 를 못 찾았다). `moai init` 으로 시작하거나, 다른 곳의 저장소면 `moai -C <dir> <명령>` 으로 부른다";
 
 /// 이 프로세스가 **제 체크아웃 밖으로 올라가 잡은 트래커** — `(선 자리, 잡은 뿌리)`.
 ///
@@ -526,15 +525,12 @@ impl Repo {
                 // 다음 자리로 두고, 그것마저 없으면 id 라도 댄다.
                 let at = || match original.iter().any(|o| o.id == e.id) {
                     true => e.id.clone(),
-                    false => match issues
-                        .iter()
-                        .find(|i| i.id == e.id)
-                        .map(|i| i.title.as_str())
-                        .or(e.title.as_deref())
-                    {
-                        Some(t) => crate::model::unwritten(t),
-                        None => e.id.clone(),
-                    },
+                    false => {
+                        match issues.iter().find(|i| i.id == e.id).map(|i| i.title.as_str()).or(e.title.as_deref()) {
+                            Some(t) => crate::model::unwritten(t),
+                            None => e.id.clone(),
+                        }
+                    }
                 };
                 crate::model::check_text_size(at, what, t)?;
             }
@@ -631,11 +627,8 @@ impl Repo {
             // **적어 온 말은 저널에만 산다**(`mv -m`·`defer -m`·`promote` 의 메모). 스냅샷이
             // 담겼다고 "다시 부르지 않는다" 만 말하면 그 말은 영영 사라진다 — 어느 이슈의
             // 말이었는지 대어 `moai note` 로 다시 적게 한다.
-            let mut worded: Vec<&str> = entries
-                .iter()
-                .filter(|j| j.text.is_some() || j.note.is_some())
-                .map(|j| j.id.as_str())
-                .collect();
+            let mut worded: Vec<&str> =
+                entries.iter().filter(|j| j.text.is_some() || j.note.is_some()).map(|j| j.id.as_str()).collect();
             worded.dedup();
             let why = if worded.is_empty() {
                 e.message
@@ -1017,7 +1010,10 @@ impl Lock {
         loop {
             match f.try_lock_exclusive() {
                 Ok(()) => return Ok(Lock(f)),
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
+                {
                     if start.elapsed() >= LOCK_TIMEOUT {
                         return Err(Fail::coded(
                             format!(
@@ -1067,8 +1063,8 @@ impl Drop for Lock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scratch::Scratch;
     use crate::model::{Kind, Status};
+    use crate::scratch::Scratch;
 
     /// `<자리>/a/b/c` 를 만든다. 위로 찾기를 재는 시험들이 함께 쓴다.
     fn tree(name: &str) -> Scratch {
@@ -1251,10 +1247,7 @@ mod tests {
         })
         .unwrap();
         let src = std::fs::read_to_string(d.join(".moai/issues.jsonl")).unwrap();
-        let ids: Vec<&str> = src
-            .lines()
-            .map(|l| l.split('"').nth(3).unwrap())
-            .collect();
+        let ids: Vec<&str> = src.lines().map(|l| l.split('"').nth(3).unwrap()).collect();
         assert_eq!(ids, ["argos-0001", "argos-4aex", "argos-4aex.ae3", "argos-4aey"]);
     }
 
@@ -1283,8 +1276,10 @@ mod tests {
             Ok((vec![], ()))
         })
         .unwrap();
-        r.with_write(|_, _, _| Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &crate::model::someone("raven"))], ())))
-            .unwrap();
+        r.with_write(|_, _, _| {
+            Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &crate::model::someone("raven"))], ()))
+        })
+        .unwrap();
         let j = r.journal_of("argos-4aex").unwrap();
         assert_eq!(j.len(), 1);
         assert_eq!(j[0].text.as_deref(), Some("발견"));
@@ -1406,12 +1401,14 @@ mod tests {
     #[test]
     fn refuses_duplicate_ids() {
         let (r, _d) = repo("dup");
-        let e = r.with_write(|i, _, _| {
-            i.push(issue("argos-4aex"));
-            i.push(issue("argos-4aex"));
-            Ok((vec![], ()))
-        })
-        .unwrap_err().message;
+        let e = r
+            .with_write(|i, _, _| {
+                i.push(issue("argos-4aex"));
+                i.push(issue("argos-4aex"));
+                Ok((vec![], ()))
+            })
+            .unwrap_err()
+            .message;
         assert!(e.contains("두 번"), "{e}");
     }
 
@@ -1425,11 +1422,7 @@ mod tests {
         let (r, d) = repo("stale_row");
         let mut old = issue("argos-0001");
         old.status = Status::new("옛날칸");
-        std::fs::write(
-            d.join(".moai/issues.jsonl"),
-            format!("{}\n", serde_json::to_string(&old).unwrap()),
-        )
-        .unwrap();
+        std::fs::write(d.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&old).unwrap())).unwrap();
 
         r.with_write(|issues, _, _| {
             issues.push(issue("argos-0002"));
@@ -1452,11 +1445,7 @@ mod tests {
         let (r, d) = repo("stale_touch");
         let mut old = issue("argos-0001");
         old.status = Status::new("옛날칸");
-        std::fs::write(
-            d.join(".moai/issues.jsonl"),
-            format!("{}\n", serde_json::to_string(&old).unwrap()),
-        )
-        .unwrap();
+        std::fs::write(d.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&old).unwrap())).unwrap();
 
         r.with_write(|issues, _, _| {
             issues[0].title = "고친 제목".into();
@@ -1500,9 +1489,7 @@ mod tests {
     /// 본체와 어긋날 자리가 없다. 정규식으로 긁었으면 그 순간 파서가 둘이 된다.
     #[test]
     fn an_unreadable_line_still_yields_its_id() {
-        let load = parse_issues(
-            "{\"id\":\"argos-9999\",\"title\":\"몰라\",\"kind\":\"몰라\",\"status\":\"todo\"}\n",
-        );
+        let load = parse_issues("{\"id\":\"argos-9999\",\"title\":\"몰라\",\"kind\":\"몰라\",\"status\":\"todo\"}\n");
         assert_eq!(load.errors.len(), 1);
         assert_eq!(load.errors[0].id.as_deref(), Some("argos-9999"));
         assert_eq!(load.reserved_ids().iter().next().map(String::as_str), Some("argos-9999"));

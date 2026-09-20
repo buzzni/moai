@@ -76,7 +76,9 @@ pub const REVIEW_TAG: &str = "review";
 /// 리뷰 이슈를 세우는 줄. `anchor` 는 `--parent <id>` 나 `-e <에픽>` 이다 — 규칙
 /// 셋의 글과 두 거절문이 이 한 줄에서 나온다.
 pub fn make_review(anchor: &str) -> String {
-    format!("moai add 'review — <what you are looking at>' -t {REVIEW_TAG} {anchor} -b '<what you are looking for and why>'")
+    format!(
+        "moai add 'review — <what you are looking at>' -t {REVIEW_TAG} {anchor} -b '<what you are looking for and why>'"
+    )
 }
 
 /// 리뷰를 닫는 두 걸음 — `REVIEW_STEPS` 에서 시작 걸음을 빼고 **실제 id** 를 넣은
@@ -91,7 +93,12 @@ pub fn close_steps(id: &str, moai: &str) -> String {
     // 바꾼다: `REVIEW_STEPS` 의 줄은 들여쓰기 뒤 곧바로 그 낱말로 시작한다
     // (`the_skill_names_each_rule_as_the_hook_does` 가 그것을 못박는다).
     let head = format!("{moai} ");
-    REVIEW_STEPS.lines().skip(1).map(|l| l.replace("<id>", id).replacen("moai ", &head, 1)).collect::<Vec<_>>().join("\n")
+    REVIEW_STEPS
+        .lines()
+        .skip(1)
+        .map(|l| l.replace("<id>", id).replacen("moai ", &head, 1))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// 난이도 한 낱말 — **모델과 리뷰 등급을 함께 정하는 그 축**이다. 낱말·모델·잣대 셋.
@@ -2064,10 +2071,7 @@ fn brief() -> String {
 
 /// 줄마다 앞에 붙인다. 빈 줄은 빈 채로 둔다 — 꼬리 공백은 diff 를 더럽힌다.
 fn indent(text: &str, by: &str) -> String {
-    text.lines()
-        .map(|l| if l.is_empty() { String::new() } else { format!("{by}{l}") })
-        .collect::<Vec<_>>()
-        .join("\n")
+    text.lines().map(|l| if l.is_empty() { String::new() } else { format!("{by}{l}") }).collect::<Vec<_>>().join("\n")
 }
 
 #[cfg(test)]
@@ -2131,9 +2135,13 @@ mod tests {
         // 자리에 어떤 저장소의 id 가 들어가도 그 id 하나만 읽힌다.
         let subject = example.replace("<id>", "web-a1b2");
         assert_eq!(crate::git::ids_in(&subject).collect::<Vec<_>>(), ["web-a1b2"], "예시 제목 {subject:?}");
-        assert!(COMMITS.contains(&format!("`{}:`", crate::git::TRACKER)), "트래커 커밋의 머리가 git 이 거르는 것과 다르다");
+        assert!(
+            COMMITS.contains(&format!("`{}:`", crate::git::TRACKER)),
+            "트래커 커밋의 머리가 git 이 거르는 것과 다르다"
+        );
 
-        let rule = COMMITS.lines().find(|l| l.contains("only lines that open with a trailer word")).expect("본문 규칙이 없다");
+        let rule =
+            COMMITS.lines().find(|l| l.contains("only lines that open with a trailer word")).expect("본문 규칙이 없다");
         let heads: Vec<&str> = rule.split('`').skip(1).step_by(2).collect();
         assert!(heads.len() >= 3, "가르친 트레일러 낱말이 셋이 안 된다 — {rule:?}");
         for head in heads {
@@ -2164,8 +2172,7 @@ mod tests {
         assert!(WRITING.contains("emoji"), "글 스타일에 이모지 이야기가 없다");
         let emoji = |c: char| {
             c != '✓'
-                && (c >= '\u{1F300}'
-                    || matches!(c, '\u{FE0F}' | '\u{2600}'..='\u{27BF}' | '\u{2B00}'..='\u{2BFF}'))
+                && (c >= '\u{1F300}' || matches!(c, '\u{FE0F}' | '\u{2600}'..='\u{27BF}' | '\u{2B00}'..='\u{2BFF}'))
         };
         for (surface, text) in
             [("AGENTS 블록", agents()), ("스킬", skill()), ("참고 문서", reference()), ("감독 스킬", supervise())]
@@ -2273,7 +2280,11 @@ mod tests {
             [("AGENTS 블록", agents()), ("SKILL.md", skill()), ("참고 문서", reference()), ("감독 스킬", supervise())]
         {
             for said in stated(&text) {
-                assert_eq!(said.parse::<usize>().ok(), Some(limit), "{surface}: 적힌 상한 {said}KB 가 실제({limit}KB)와 다르다");
+                assert_eq!(
+                    said.parse::<usize>().ok(),
+                    Some(limit),
+                    "{surface}: 적힌 상한 {said}KB 가 실제({limit}KB)와 다르다"
+                );
             }
         }
         for (what, text) in [("REVIEW_OVER_LIMIT", REVIEW_OVER_LIMIT), ("REVIEW_STEPS", REVIEW_STEPS)] {
@@ -2293,9 +2304,7 @@ mod tests {
         // 엉뚱한 패닉으로 터진다. `가` 는 3바이트다.
         let big = "가".repeat(crate::model::MAX_TEXT_BYTES / 3 + 1);
         let refused = crate::model::check_text_size(|| "t-r".into(), "note", &big).unwrap_err().to_string();
-        let said = REVIEW_OVER_LIMIT
-            .replace("<size>", &big.len().div_ceil(1024).to_string())
-            .replace('\n', "\n      ");
+        let said = REVIEW_OVER_LIMIT.replace("<size>", &big.len().div_ceil(1024).to_string()).replace('\n', "\n      ");
         assert!(refused.contains(&said), "거절문이 다른 길을 댄다\n{refused}");
         // 거절문은 잰 수를 그대로 내민다 — 자리 표시가 남으면 받는 쪽이 첫 줄을 손으로 채운다.
         assert!(!refused.contains("<size>"), "거절문이 `<size>` 를 안 채웠다\n{refused}");
@@ -2377,10 +2386,19 @@ mod tests {
     /// 자리라, 머리만 재던 시험은 발동이 떨어지는 것을 못 봤다.
     #[test]
     fn the_skill_description_keeps_its_korean_triggers() {
-        let head = |text: &str| text.lines().find(|l| l.starts_with("description: ")).expect("발동어 줄이 없다").to_string();
+        let head =
+            |text: &str| text.lines().find(|l| l.starts_with("description: ")).expect("발동어 줄이 없다").to_string();
         for (whose, said, triggers) in [
-            ("moai", head(&skill()), ["뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자"].as_slice()),
-            ("moai-supervise", head(&supervise()), ["감독해 줘", "idea 나눠 줘", "놀고 있는 세션에 일 시켜"].as_slice()),
+            (
+                "moai",
+                head(&skill()),
+                ["뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자"].as_slice(),
+            ),
+            (
+                "moai-supervise",
+                head(&supervise()),
+                ["감독해 줘", "idea 나눠 줘", "놀고 있는 세션에 일 시켜"].as_slice(),
+            ),
         ] {
             for trigger in triggers {
                 assert!(said.contains(trigger), "{whose} 의 발동어에서 {trigger} 가 빠졌다 — {said}");
@@ -2428,7 +2446,11 @@ mod tests {
         let list = slot_list(&supervise);
         let seven = supervise.find("\n    7-1.").expect("되짚기 걸음이 없다");
         let eight = seven + supervise[seven..].find("\n    8.").expect("병합 걸음이 없다");
-        let slots = supervise[seven..eight].split('<').skip(1).filter_map(|s| s.split_once('>')).map(|(s, _)| format!("`<{s}>`"));
+        let slots = supervise[seven..eight]
+            .split('<')
+            .skip(1)
+            .filter_map(|s| s.split_once('>'))
+            .map(|(s, _)| format!("`<{s}>`"));
         for slot in slots.filter(|s| s != "`<root>`") {
             assert!(!list.contains(&slot), "감독이 되짚기의 자리 {slot} 를 채운다 — {list}");
         }
@@ -2494,7 +2516,10 @@ mod tests {
             // 7-1 이 첫 칸에 남긴 멤버는 아무도 안 했다 — 9-1 이 그 멤버에 모델 줄을 적거나 10 이
             // 그 멤버를 닫으면 통계가 거짓이 되거나 에픽이 목적을 못 이룬 채 닫힌다.
             ("which nobody did", "아무도 안 한 멤버에 일한 모델을 남긴다"),
-            ("members left in the first column by 7-1 and 4-3 — those members keep the epic open", "남긴 멤버를 10 에서 닫아 에픽이 목적을 못 이룬 채 닫힌다"),
+            (
+                "members left in the first column by 7-1 and 4-3 — those members keep the epic open",
+                "남긴 멤버를 10 에서 닫아 에픽이 목적을 못 이룬 채 닫힌다",
+            ),
         ] {
             assert!(brief.contains(piece), "{why} — {piece}");
         }
@@ -2513,7 +2538,10 @@ mod tests {
             ("of 3 whole, **from 4-1 to the end**", "거둔 일을 맡기는 글이 4-1 을 빼거나 끝을 자른다"),
             // 7-1 이 첫 칸에 남긴 멤버는 에픽을 연 채 둔다 — 감독의 확인(5)이 그것을 어긋남으로 읽으면
             // 시킨 대로 한 보고마다 그 창이 안 비워지고 다음 idea 도 못 받는다.
-            ("A member the report says was left in the first column by brief 7-1", "감독이 일부러 남긴 멤버를 어긋난 보고로 읽는다"),
+            (
+                "A member the report says was left in the first column by brief 7-1",
+                "감독이 일부러 남긴 멤버를 어긋난 보고로 읽는다",
+            ),
         ] {
             assert!(supervise.contains(piece), "{why} — {piece}");
         }
@@ -2541,7 +2569,10 @@ mod tests {
             ("While a milestone is running, what is inside it comes first", "AGENTS 블록에 규칙이 없다"),
             ("if even one member stands in a started\ncolumn, it is running", "무엇으로 시작을 재는지 안 적었다"),
             ("**`p0` gets picked up whether or not it is in the milestone**", "핫픽스 자리를 안 적었다"),
-            ("**Nothing is blocked.** A `moai mv` that picks up work from outside goes straight\n  through", "막지 않는다는 것을 안 적었다"),
+            (
+                "**Nothing is blocked.** A `moai mv` that picks up work from outside goes straight\n  through",
+                "막지 않는다는 것을 안 적었다",
+            ),
         ] {
             assert!(agents.contains(piece), "{why} — {piece}");
         }
@@ -2577,13 +2608,17 @@ mod tests {
         // 다시 적으면 여기서 붉어진다.
         let table = difficulty_table();
         assert!(head.contains(&table), "2-1 의 표가 DIFFICULTY 에서 안 나온다");
-        assert!(brief.contains(&indent(&difficulty_rubric(), "       ")), "일꾼이 받는 잣대가 DIFFICULTY 에서 안 나온다");
+        assert!(
+            brief.contains(&indent(&difficulty_rubric(), "       ")),
+            "일꾼이 받는 잣대가 DIFFICULTY 에서 안 나온다"
+        );
         // **칸째로 맨다** — 머리의 `모델` 칸 자리에 짝이 서는지 본다. 줄 어디에 `` `haiku` ``
         // 가 들기만 하면 되던 판은 모델 칸과 리뷰 칸을 바꿔 끼워도 초록이었다.
         let cells = |l: &str| l.trim().trim_matches('|').split('|').map(|c| c.trim().to_string()).collect::<Vec<_>>();
         let mut lines = table.lines();
         let header = cells(lines.next().expect("표에 머리가 없다"));
-        let col = |name: &str| header.iter().position(|c| c == name).unwrap_or_else(|| panic!("표 머리에 {name} 칸이 없다"));
+        let col =
+            |name: &str| header.iter().position(|c| c == name).unwrap_or_else(|| panic!("표 머리에 {name} 칸이 없다"));
         let (level_col, model_col) = (col("Level"), col("Model"));
         let rows: Vec<Vec<String>> = lines.skip(1).map(cells).collect();
         for (level, model) in [("low", "haiku"), ("medium", "sonnet"), ("high", "opus")] {
@@ -2599,7 +2634,10 @@ mod tests {
         // 창의 모델을 물려받는다). 첫 판은 "늘 opus" 를 붙들어, 글 한 줄 고친 에픽도 가장 비싼
         // 리뷰를 받았다 — 이제 가운데 모델로 보는 자리(`medium`)가 두 글 모두에 서는지 본다.
         let rule = epic_review_rule();
-        assert!(rule.contains("`medium` means `sonnet`") && rule.contains("`high` and up means `opus`"), "에픽 끝 리뷰의 모델이 등급을 안 따른다 — {rule}");
+        assert!(
+            rule.contains("`medium` means `sonnet`") && rule.contains("`high` and up means `opus`"),
+            "에픽 끝 리뷰의 모델이 등급을 안 따른다 — {rule}"
+        );
         assert!(head.contains(&rule), "감독의 2-1 에 에픽 끝 등급·모델 규칙이 없다");
         let epic = brief.find("/code-review <grade> --fix").expect("에픽 리뷰 걸음이 없다");
         let step = &brief[epic..brief[epic..].find("\n    8.").map_or(brief.len(), |n| epic + n)];
@@ -2626,7 +2664,11 @@ mod tests {
         // **멤버는 따로 리뷰하지 않는다**(moai-bx6t, 2026-09-18 사용자 결정). 멤버마다
         // `/code-review` 를 부르던 판으로 돌아가면 리뷰가 두 벌 돌아 시간과 토큰이 곱으로 든다 —
         // 브리프에 에픽 끝 말고 다른 `/code-review` 가 서면 붉어진다.
-        assert_eq!(brief.matches("/code-review").count(), 1, "브리프에 에픽 끝 말고도 리뷰가 선다 — 멤버마다 보던 판이 돌아왔다");
+        assert_eq!(
+            brief.matches("/code-review").count(),
+            1,
+            "브리프에 에픽 끝 말고도 리뷰가 선다 — 멤버마다 보던 판이 돌아왔다"
+        );
         assert!(brief.contains("Do not review member by member"), "브리프 5 가 멤버 리뷰를 걷었다고 말하지 않는다");
     }
 
@@ -2665,7 +2707,8 @@ mod tests {
         assert!(brief[step..at].contains("a commit with a path"), "비우라고 하기 전에 남긴 줄을 안 담는다");
         // **까닭과 반대를 갈라 찾는다** — 둘이 서로의 낱말(`트래커`·`리뷰`)을 품어, 한 덩어리로
         // 찾던 판은 어느 한쪽을 지워도 초록이었다.
-        let (reason, against) = brief[at..].split_once("Say the opposite").expect("지우지 말 때를 같은 줄에서 안 말한다");
+        let (reason, against) =
+            brief[at..].split_once("Say the opposite").expect("지우지 말 때를 같은 줄에서 안 말한다");
         assert!(reason.contains("lives in the tracker"), "왜 지워도 되는지가 없다");
         for (piece, missing) in [
             ("a review is running", "리뷰가 도는 중에는 지우지 말라는 말이 없다"),
@@ -2710,7 +2753,10 @@ mod tests {
             // 한 줄만 지우고 멈추면 나머지는 아직 그 칸에 있다 — 통째로 돌려주면 두 벌이 된다.
             ("def gone(kept, left)", "지우다 멈췄을 때 칸에 남은 줄까지 돌려줘 같은 줄이 두 벌 선다"),
             ("def grey(code)", "참색(`38;2;…`)으로 그린 흐린 글을 못 알아봐 창이 안 비워진다"),
-            ("bare(l).startswith(PROMPT)", "사람이 친 글 속의 프롬프트 표시나 붙임표를 제안 글로 읽어 그 글 뒤에 /clear 가 붙는다"),
+            (
+                "bare(l).startswith(PROMPT)",
+                "사람이 친 글 속의 프롬프트 표시나 붙임표를 제안 글로 읽어 그 글 뒤에 /clear 가 붙는다",
+            ),
             ("l[:2] in head", "옮긴 치던 글이 들여쓰기를 잃거나 앞머리 아닌 줄까지 두 글자 깎인다"),
             ("left is None", "입력 칸을 놓친 화면에 지우는 키를 계속 친다"),
             // 마지막으로 읽은 뒤·치기 전의 틈에 친 글 뒤에도 `/clear` 가 붙는다.
@@ -2733,14 +2779,20 @@ mod tests {
         assert!(script[send..].contains("sessionId"), "비워졌는지를 안 본다");
         // 비운 뒤에는 **찾은 그 파일**을 다시 읽는다 — 이름으로 다시 찾으면 `/clear` 뒤에 이름이
         // 바뀌거나 같은 이름이 하나 더 서는 순간 `비웠다` 를 영영 못 낸다.
-        assert!(script[send..].contains("read(f)") && !script[send..].contains("session()"), "비운 뒤에 이름으로 다시 찾는다");
+        assert!(
+            script[send..].contains("read(f)") && !script[send..].contains("session()"),
+            "비운 뒤에 이름으로 다시 찾는다"
+        );
         let rest = &supervise[open..];
         assert!(rest.contains("the script prints `cleared`"), "비운 뒤에 다음 idea 를 보내라는 말이 없다");
         // 일꾼 쪽: 감독은 `Next:` 노트를 보고 친다 — 그 노트가 일꾼의 마지막 걸음이어야 한다.
         assert!(supervise[at..open].contains("`Next:` note"), "감독이 12 를 마쳤는지 안 본다");
         let brief = brief();
         let twelve = brief.rfind("\n    12.").expect("창을 비우는 걸음이 없다");
-        assert!(brief[twelve..].contains("the supervisor may check the report"), "일꾼이 감독이 비울 수 있다는 것을 모른다");
+        assert!(
+            brief[twelve..].contains("the supervisor may check the report"),
+            "일꾼이 감독이 비울 수 있다는 것을 모른다"
+        );
     }
 
     #[test]
@@ -2781,7 +2833,10 @@ sys.exit(1 if bad else 0)
         let fresh = &script[stop..stop + script[stop..].find("\n    seen = left").expect("고리가 본 글을 안 넘긴다")];
         assert!(fresh.contains("if not dim_only(pane):"), "다시 선 제안 글을 사람이 친 글로 읽어 창이 안 비워진다");
         assert!(fresh.contains("ghost = left"), "흐린 글을 지워 보지 않고 색으로만 가른다");
-        assert!(script[loop_at..].contains("if ghost is not None and left != ghost:"), "지워진 흐린 글을 사람의 글로 안 본다");
+        assert!(
+            script[loop_at..].contains("if ghost is not None and left != ghost:"),
+            "지워진 흐린 글을 사람의 글로 안 본다"
+        );
         let program = format!("{}{CASES}", &script[from..to]);
         let mut child = Command::new("python3")
             .arg("-")
@@ -2882,23 +2937,37 @@ sys.exit(1 if bad else 0)
             assert!(text.contains("TMUX_TMPDIR"), "{name}: TMUX_TMPDIR 로 안 갇힌다는 말이 없다");
             // 속에서 `tmux` 를 부르는 스크립트(5-1)에는 손으로 `-L` 을 못 준다 — 그것을 시험하는
             // 일꾼에게도 가둘 길이 있어야 하고, 그 감싸개가 PATH 로 제 자신을 부르면 끝나지 않는다.
-            assert!(text.contains("wrapper") && text.contains("absolute path"), "{name}: 스크립트를 떼어 낸 서버에 돌릴 길이 없다");
+            assert!(
+                text.contains("wrapper") && text.contains("absolute path"),
+                "{name}: 스크립트를 떼어 낸 서버에 돌릴 길이 없다"
+            );
         }
-        assert!(brief.contains("**Give a review subagent these words too**"), "리뷰 서브에이전트가 tmux 규칙을 못 받는다");
+        assert!(
+            brief.contains("**Give a review subagent these words too**"),
+            "리뷰 서브에이전트가 tmux 규칙을 못 받는다"
+        );
         // 시험용 판에 닿는 명령은 모두 떼어 낸 서버에 선다 — 셸 줄의 낱말 `tmux` 와 `` `tmux …` ``
         // 로 적은 글을 함께 본다. 줄 머리로 가르지 않는다: 서버를 죽인 한 줄이
         // `TMUX_TMPDIR=… tmux kill-server` 였다. 맨 명령을 **하지 말라고** 적은 줄(`없는`·`맨 `)만
         // 뺀다. 본 기능의 `tmux("send-keys", …)` 는 낱말이 `tmux` 가 아니라 안 걸린다 — 실제 일꾼
         // 판을 비우는 그쪽은 기본 서버가 맞다.
-        const SERVER: [&str; 7] =
-            ["new-session", "kill-server", "kill-session", "send-keys", "capture-pane", "display-message", "list-clients"];
+        const SERVER: [&str; 7] = [
+            "new-session",
+            "kill-server",
+            "kill-session",
+            "send-keys",
+            "capture-pane",
+            "display-message",
+            "list-clients",
+        ];
         let isolated = |cmd: &str| {
             let words: Vec<&str> = cmd.split_whitespace().collect();
             words.iter().enumerate().filter(|(_, w)| **w == "tmux").all(|(t, _)| {
                 // `-L`/`-S` 는 하위 명령 **앞**에 서야 서버를 고른다 — 뒤에 서면 그 명령의 깃발이다.
-                words[t..].iter().position(|w| SERVER.contains(w)).is_none_or(|sub| {
-                    words[t..t + sub].iter().any(|w| w.starts_with("-L") || w.starts_with("-S"))
-                })
+                words[t..]
+                    .iter()
+                    .position(|w| SERVER.contains(w))
+                    .is_none_or(|sub| words[t..t + sub].iter().any(|w| w.starts_with("-L") || w.starts_with("-S")))
             })
         };
         for line in supervise.lines() {
@@ -2920,7 +2989,10 @@ sys.exit(1 if bad else 0)
         let supervise = supervise();
         let at = supervise.find("is handing you the stalled work in").expect("거둔 일을 맡기는 글이 없다");
         let end = supervise[at..].find("**1. Pick.**").map_or(supervise.len(), |n| at + n);
-        assert!(supervise[at..end].contains("the previous\n        session's share is unknown"), "거둔 일의 노트가 앞 세션 몫을 삼킨다");
+        assert!(
+            supervise[at..end].contains("the previous\n        session's share is unknown"),
+            "거둔 일의 노트가 앞 세션 몫을 삼킨다"
+        );
     }
 
     /// **일꾼이 마지막 자이고, 일한 모델은 닫을 때 남는다**(moai-lzfq, 2026-09-15 사용자 결정).
@@ -2934,14 +3006,19 @@ sys.exit(1 if bad else 0)
         // **올리는 길이 명령으로 서고, 그 명령을 칠 수 있는 자에게 간다.** "올린다" 만 적으면
         // 일꾼이 무엇을 쳐야 하는지 모른다. 그런데 `/model` 은 사람만 친다 — 에이전트는 붙박이
         // 명령을 못 불러, 제 손으로 치라고 하면 올렸다고 믿고 9-1 에 안 돈 모델을 적는다.
-        let raise = brief.find("the model that pairs with the difficulty you just measured").expect("일꾼이 모델을 올릴 길이 없다");
+        let raise = brief
+            .find("the model that pairs with the difficulty you just measured")
+            .expect("일꾼이 모델을 올릴 길이 없다");
         // **한 칸씩이 아니다** — 두 칸 어긋난 제안이 가운데 모델에 멈추면 쓰기 경로를 싼 모델이 한다.
         assert!(!brief.contains("raise it one step"), "두 칸 어긋난 제안이 한 칸만 오른다");
         // 알리는 글은 **글자로 자른다** — 바이트로 자르면 한글 한가운데서 끊겨, 실패를
         // 알리려던 자리가 제가 먼저 죽는다.
         let shown = brief[raise..].chars().take(40).collect::<String>();
         assert!(brief[..raise].contains("`/model`"), "무엇으로 올리는지가 없다 — {shown}");
-        assert!(brief[..raise].contains("ask the person watching the window"), "`/model` 을 사람에게 청하라는 말이 없다 — {shown}");
+        assert!(
+            brief[..raise].contains("ask the person watching the window"),
+            "`/model` 을 사람에게 청하라는 말이 없다 — {shown}"
+        );
         assert!(brief.contains(&indent(&model_line(), "    ")), "새 일의 모델 줄이 조각에서 안 나온다");
         // **닫는 자리에 선다** — 워크트리를 지운 뒤(맨 `moai` 가 루트를 읽는다), 멤버를 닫기
         // 전. 자리를 바이트 거리로 재던 판은 9-1 이 9 위로 올라가도 초록이었다.
@@ -2983,7 +3060,8 @@ sys.exit(1 if bad else 0)
                 .replace("<difficulty>", "high")
                 .replace("<grade>", "high")
                 .replace("<why>", "write path");
-            let w = crate::model::parse_work(&filled).unwrap_or_else(|| panic!("{whose} 의 꼴을 파서가 못 읽는다 — {said}"));
+            let w = crate::model::parse_work(&filled)
+                .unwrap_or_else(|| panic!("{whose} 의 꼴을 파서가 못 읽는다 — {said}"));
             assert_eq!(w.provider.as_deref(), Some("anthropic"), "{whose} 가 회사를 안 가르친다 — {said}");
             assert_eq!(w.tokens, Some(182000), "{whose} 가 토큰을 안 가르친다 — {said}");
             assert_eq!((w.grade.as_deref(), w.why.as_deref()), (Some("high"), Some("write path")), "{whose} — {said}");
@@ -3002,19 +3080,17 @@ sys.exit(1 if bad else 0)
         for (whose, text) in &texts {
             for line in text.lines().filter(|l| l.contains("moai ")) {
                 // 제목 자리도 자유 글이다(moai-1yya) — 이 저장소 제목 1,199개 중 39개에 백틱이 든다.
-                for bad in [
-                    "-m \"",
-                    "-b \"",
-                    "moai note <id> \"",
-                    "moai note <member> \"",
-                    "moai note <epic> \"",
-                    "add \"",
-                ] {
+                for bad in
+                    ["-m \"", "-b \"", "moai note <id> \"", "moai note <member> \"", "moai note <epic> \"", "add \""]
+                {
                     assert!(!line.contains(bad), "{whose} 가 자유 글을 큰따옴표로 가르친다 — {line}");
                 }
             }
         }
-        assert!(make_review("-e <epic>").contains("-b '<what you are looking for and why>'"), "리뷰 줄의 관점이 작은따옴표가 아니다");
+        assert!(
+            make_review("-e <epic>").contains("-b '<what you are looking for and why>'"),
+            "리뷰 줄의 관점이 작은따옴표가 아니다"
+        );
         assert!(handoff("t-1").ends_with("'Next: <what comes next>'"), "이어받을 줄이 작은따옴표가 아니다");
     }
 
@@ -3058,15 +3134,27 @@ sys.exit(1 if bad else 0)
         assert!(list.contains("`<other work>`"), "감독이 옆 일을 안 채운다 — {list}");
         let at = brief.find("\n    4-3. ").expect("4-3 이 없다");
         let end = brief.find("\n    5. ").expect("5 가 없다");
-        assert!(brief[at..end].contains("-e <epic>") && brief[at..end].contains("Do not defer it"), "옆이 쥔 일이 멤버로 안 남는다");
+        assert!(
+            brief[at..end].contains("-e <epic>") && brief[at..end].contains("Do not defer it"),
+            "옆이 쥔 일이 멤버로 안 남는다"
+        );
         let report = brief.find("\n    11. ").expect("11 이 없다");
-        assert!(brief[report..].contains("because the work beside you held the file"), "보고가 옆이 쥐어 남긴 멤버를 안 댄다");
-        assert!(supervise.contains("**A member left because the work beside it holds the file**"), "감독이 그 멤버를 언제 보낼지 모른다");
+        assert!(
+            brief[report..].contains("because the work beside you held the file"),
+            "보고가 옆이 쥐어 남긴 멤버를 안 댄다"
+        );
+        assert!(
+            supervise.contains("**A member left because the work beside it holds the file**"),
+            "감독이 그 멤버를 언제 보낼지 모른다"
+        );
         // 4-3 이 남긴 멤버도 아무도 안 했고 에픽을 열어 둔다 — 9-1 이 모델 줄을 적거나 10 이 닫으면
         // 에픽이 목적을 못 이룬 채 닫힌다(7-1 의 멤버와 같은 덫).
         let noted = brief.find("\n    9-1. ").expect("9-1 이 없다");
         let closed = brief.find("\n    10. ").expect("10 이 없다");
-        assert!(brief[noted..closed].contains("first column by 7-1 and 4-3"), "9-1 이 4-3 의 멤버에 일한 모델을 남긴다");
+        assert!(
+            brief[noted..closed].contains("first column by 7-1 and 4-3"),
+            "9-1 이 4-3 의 멤버에 일한 모델을 남긴다"
+        );
         assert!(brief[closed..report].contains("first column by 7-1 and 4-3"), "10 이 4-3 의 멤버를 닫는다");
         // 거둔 일도 4-1 부터 끝까지 받아 4-3 을 받는다 — 4-3 이 가리키는 머리 줄이 거기에도 서야 한다.
         let head = &supervise[..supervise.find(&brief).expect("감독이 싣는 글이 brief 가 아니다")];
@@ -3141,7 +3229,10 @@ sys.exit(1 if bad else 0)
         // **detached 면 멈춘다**(2026-09-18 사용자 결정). `origin/HEAD` 로 대신 읽던 판은 일꾼의
         // 병합을 가지 없는 HEAD 에 세워 `branch -d` 뒤에 그 일의 참조가 하나도 안 남았다.
         assert!(!supervise.contains("origin/HEAD"), "detached 루트에서 원격의 기본 가지로 대신 읽는다");
-        assert!(supervise.contains("**If the root is detached, do not send.**"), "detached 루트에서 멈추라는 말이 없다");
+        assert!(
+            supervise.contains("**If the root is detached, do not send.**"),
+            "detached 루트에서 멈추라는 말이 없다"
+        );
         // 일꾼은 다시 읽지 않되 **대조한다** — 바퀴 중에 루트의 가지가 바뀌어도 병합이 엉뚱한
         // HEAD 에 서지 않게.
         let merge = brief.find("git merge --no-ff worktree-<epic>").expect("병합 걸음이 없다");
@@ -3150,7 +3241,10 @@ sys.exit(1 if bad else 0)
         // 커밋 전의 대조는 머리에 선다 — 거둔 일은 머리를 따로 받으니 거기에도 같은 글이 서야 한다.
         assert!(brief.contains(&indent(BRANCH_CHECK, "    ")), "새 일의 머리에 루트 대조가 없다");
         let head = &supervise[..supervise.find(&brief).expect("감독이 싣는 글이 brief 가 아니다")];
-        assert!(head.contains(&indent(BRANCH_CHECK, "      ")), "거둔 일의 트래커 커밋이 대조 없이 엉뚱한 HEAD 에 선다");
+        assert!(
+            head.contains(&indent(BRANCH_CHECK, "      ")),
+            "거둔 일의 트래커 커밋이 대조 없이 엉뚱한 HEAD 에 선다"
+        );
     }
 
     /// **heredoc 은 들여쓰지 않는다.** 4칸 들여쓴 블록을 그대로 복사하면 닫는 표시도
@@ -3163,9 +3257,12 @@ sys.exit(1 if bad else 0)
     fn heredocs_are_copyable_as_written() {
         // 표면마다 센다 — 합쳐 세면 두 표면에 드는 조각이, 한 표면에만 있는 heredoc 이 빠진
         // 자리를 메운다.
-        for (name, text, want) in
-            [("agents", agents(), 2), ("skill", skill(), 1), ("reference", reference(), 3), ("supervise", supervise(), 1)]
-        {
+        for (name, text, want) in [
+            ("agents", agents(), 2),
+            ("skill", skill(), 1),
+            ("reference", reference(), 3),
+            ("supervise", supervise(), 1),
+        ] {
             let lines: Vec<&str> = text.lines().collect();
             let mut seen = 0;
             for (i, line) in lines.iter().enumerate() {

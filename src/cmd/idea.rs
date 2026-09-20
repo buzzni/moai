@@ -123,8 +123,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 자리를 **한 번만** 찾는다. `create_drafts` 는 뒤에 밀어 넣기만 하니
         // 첨자가 밀리지 않고, 그래야 "방금 찾은 줄이 사라졌다" 같은 있지도
         // 않을 경우를 위한 `expect` 가 필요 없다.
-        let at_idea =
-            issues.iter().position(|i| i.id == args.id).ok_or_else(|| Fail::not_found(&args.id))?;
+        let at_idea = issues.iter().position(|i| i.id == args.id).ok_or_else(|| Fail::not_found(&args.id))?;
         let thought = &issues[at_idea];
         // 연습에서 이미 봤을 수도 있지만 다시 본다 — 그 사이에 누가 지우거나
         // 바꿨을 수 있고, 쓰기가 믿을 것은 락 안에서 읽은 것뿐이다.
@@ -159,11 +158,8 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         //
         // 선 에픽에 펼치면(`-e`) 뿌리가 없다 — 만든 이슈 하나하나가 머리다. 에픽에는 적지
         // 않는다: 그 에픽은 이 idea 에서 나온 것이 아니다.
-        let grown: Vec<String> = made
-            .iter()
-            .filter(|i| into.is_some() || i.epic.is_none())
-            .map(|i| i.id.clone())
-            .collect();
+        let grown: Vec<String> =
+            made.iter().filter(|i| into.is_some() || i.epic.is_none()).map(|i| i.id.clone()).collect();
         // **노트에 담는 제목은 넘칠 때만 줄인다**(moai-clta). 이 노트는 도구가 짓는 것이라
         // 거절할 사람이 없는데, 제목이 상한 턱밑인 idea 는 머리말 몇 바이트 때문에 펼칠
         // 길이 통째로 막혔다 — 거절문은 이 쓰기가 남기지도 않을 새 id 를 댔다. 여기 담긴

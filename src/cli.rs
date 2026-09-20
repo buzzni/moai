@@ -86,7 +86,14 @@ pub struct Cli {
     // 값과 기본값은 글로 적는다 — clap 이 붙이는 `[default: …] [possible values: …]` 가
     // 옵션 열 옆에서 130칸을 넘었다(moai-c57v). `NO_COLOR` 도 auto 가 읽는다.
     /// auto|always|never (auto by default, off when piped)
-    #[arg(long, global = true, value_name = "how", default_value = "auto", hide_default_value = true, hide_possible_values = true)]
+    #[arg(
+        long,
+        global = true,
+        value_name = "how",
+        default_value = "auto",
+        hide_default_value = true,
+        hide_possible_values = true
+    )]
     pub color: ColorArg,
 
     /// Run in this directory (same as `git -C`)
@@ -179,7 +186,9 @@ pub enum Cmd {
     // `--type <issue|epic|milestone|idea>` 에 맞춰 44칸으로 벌어져 설명이 112칸까지
     // 갔다(moai-x18p). 옵션이 스물이 넘는 명령이라 열을 좁혀도 다음 옵션이 다시 넓힌다.
     // `Typed::Add` 도 같은 까닭으로 같다 — `moai idea add` 는 그것을 접어 넣어 쓴다(moai-g33x).
-    #[command(next_line_help = true, after_help = "\
+    #[command(
+        next_line_help = true,
+        after_help = "\
 Examples:
   moai add 'the parser dies on a BOM' -t bug -p 1
   moai add 'storage layer' --type epic
@@ -215,7 +224,8 @@ PLAN
 Plan templates (`{{name}}` filled by --var, every variable required):
   moai add --from .moai/templates/release.md --var version=1.2
 
-A title may start with `--`. Anything that is not a known flag is a title.")]
+A title may start with `--`. Anything that is not a known flag is a title."
+    )]
     Add(AddArgs),
     /// Open one, or list them
     Show(ShowArgs),
@@ -327,7 +337,9 @@ NOTE
     #[command(subcommand)]
     Milestone(Typed),
     /// Jot a passing thought down where you are (`--type idea`)
-    #[command(subcommand, after_help = "  One step below todo. **Jotting has to cost nearly nothing** - neither a
+    #[command(
+        subcommand,
+        after_help = "  One step below todo. **Jotting has to cost nearly nothing** - neither a
   priority nor an epic is asked for. Title and body still go separately: keep
   the title to one short line and pour a long thought into the body with
   `-b -`. That title becomes the issue title when it is unfolded, so a long
@@ -345,7 +357,8 @@ IDEA
   \"issues with no epic\" warning.
 
   Editing and dropping are the verbs you already have: `moai edit <id>`,
-  `moai rm <id>`.")]
+  `moai rm <id>`."
+    )]
     Idea(IdeaCmd),
 
     /// Open the explorer (the one write to an issue is `SPC n`, jot)
@@ -533,7 +546,9 @@ IDEA
     Skill(SkillCmd),
 
     /// Register a directory to watch several projects from one moai
-    #[command(subcommand, after_help = "\
+    #[command(
+        subcommand,
+        after_help = "\
 Examples:
   moai project add ~/work/argos         register it. Taken without a .moai
   moai project add repo/apps/a          a monorepo registers subdirs one by one
@@ -552,7 +567,8 @@ Examples:
   then ~/.config/moai/config.toml. A relative path is joined to where you are
   (the `-C` directory when you gave one) and symlinks are resolved.
 
-  It does not ask who did it. This is not a file that keeps history.")]
+  It does not ask who did it. This is not a file that keeps history."
+    )]
     Project(ProjectCmd),
 
     /// Put a .moai/ into this repository (safe to run again)
@@ -622,7 +638,9 @@ Examples:
         path: std::path::PathBuf,
     },
     /// Pick the colour that project wears at a glance and in the explorer
-    #[command(alias = "colour", after_help = "\
+    #[command(
+        alias = "colour",
+        after_help = "\
 Examples:
   moai project color ~/work/argos green   green instead of the colour by path
   moai project color ~/work/argos auto    clear it and pick by path again
@@ -635,7 +653,8 @@ Examples:
 
   It is written as `color = \"green\"` under `[[project]]` in the user config.
   Writing it by hand is fine - a wrong value is shown in one line by
-  `moai project ls`, which then uses the colour picked by path.")]
+  `moai project ls`, which then uses the colour picked by path."
+    )]
     Color {
         /// A registered directory. Found by the written path even if it is gone
         #[arg(value_name = "dir")]
@@ -656,9 +675,12 @@ Examples:
 #[derive(Subcommand, Debug)]
 pub enum Typed {
     /// Create
-    #[command(next_line_help = true, after_help = "  Title and body go separately - the title is one line saying what is wrong,
+    #[command(
+        next_line_help = true,
+        after_help = "  Title and body go separately - the title is one line saying what is wrong,
   and a long text is a markdown body poured in from stdin with `-b -`.
-  For examples see `moai add --help`.")]
+  For examples see `moai add --help`."
+    )]
     Add(AddArgs),
     // `ls` 는 같은 것의 다른 이름이다. **어휘를 둘로 만들지 않으려고 별명으로
     // 둔다** — 목록을 내는 동사가 둘이면 도움말이 둘 다 가르쳐야 한다.
@@ -1115,7 +1137,13 @@ pub enum SkillCmd {
         // 값과 기본값은 `--color` 처럼 글로 적는다 — clap 이 붙이는 괄호가 `-h` 에서
         // 98칸이 됐다(moai-x18p).
         /// Where to register: local (default), project, user
-        #[arg(long, value_name = "scope", default_value = "local", hide_default_value = true, hide_possible_values = true)]
+        #[arg(
+            long,
+            value_name = "scope",
+            default_value = "local",
+            hide_default_value = true,
+            hide_possible_values = true
+        )]
         scope: Scope,
 
         /// Install nothing; only say what would be installed

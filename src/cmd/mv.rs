@@ -270,11 +270,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         })
         .collect();
     for id in &moved.already {
-        out.push(format!(
-            "{}  {}",
-            paint(style::ID, id),
-            paint(style::DIM, &format!("이미 {to} 다"))
-        ));
+        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &format!("이미 {to} 다"))));
     }
     // 묶음의 칸이 적은 칸과 다르면 한 줄. 같으면 말하지 않는다 — 멤버가 다 끝난
     // 에픽을 `done` 에 두는 것은 틀린 일이 아니다. 접는 길은 `view` 가 고른다.
@@ -282,10 +278,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         out.push(format!(
             "{}  {}",
             paint(style::ID, id),
-            paint(
-                style::DIM,
-                &crate::view::group_moved(id, col, to.is_done(), moved.finished.contains(id))
-            )
+            paint(style::DIM, &crate::view::group_moved(id, col, to.is_done(), moved.finished.contains(id)))
         ));
     }
     // **미뤄 둔 줄을 옮겼으면 말한다.** 칸은 옮겨졌는데 그 줄은 보드에도
@@ -299,11 +292,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // `view::shelved_by` 하나다. 한때 제 줄 쪽 안내만 id 없는 `moai defer --undo`
     // 를 대, 그대로 치면 clap 이 인자가 없다며 거절했다.
     for (id, root) in &moved.shelved {
-        out.push(format!(
-            "{}  {}",
-            paint(style::ID, id),
-            paint(style::DIM, &crate::view::shelved_by(root))
-        ));
+        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &crate::view::shelved_by(root))));
     }
     // **이 쓰기가 연 것은 한 줄씩.** 없으면 말하지 않는다 — 출력이 전과 같다.
     out.extend(crate::view::freed_lines(&moved.unblocked, &moved.closable, &moved.next, ctx.lang()));

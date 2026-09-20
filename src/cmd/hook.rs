@@ -112,7 +112,13 @@ pub fn run(ctx: &Ctx, event: Event) -> R<Vec<String>> {
 /// 툴 부름마다 도는 `PreToolUse` 가 사람의 설정 파일을 매번 읽는데, 그 갈래는 지금 `ctx.lang()`
 /// 을 한 번도 안 부른다 — 규칙의 거절문을 말묶음으로 옮기는 날 그 갈래에 `say(ctx.lang(), …)`
 /// 를 놓으면 이 값이 도로 돌아온다. 그때는 말을 거절하는 가지 안에서 푼다.
-fn decide(ctx: &Ctx, event: Event, input: &Input, call: crate::hook::Call<'_>, line: &crate::hook::Line<'_>) -> Option<String> {
+fn decide(
+    ctx: &Ctx,
+    event: Event,
+    input: &Input,
+    call: crate::hook::Call<'_>,
+    line: &crate::hook::Line<'_>,
+) -> Option<String> {
     // **옮겨 갈 루트를 못 읽어도 규칙은 선다**(리뷰 moai-71ht.i1u). 트래커가 루트로 옮겨 가면서
     // (moai-y7go) 루트의 깨진 `config.toml` 하나가 저장소의 **모든** 워크트리에서 훅을 조용히
     // 껐다 — 고장의 크기가 규칙의 크기가 되면 안 된다. `moai` 자신은 그 자리에서 크게 실패하고
@@ -146,7 +152,13 @@ fn decide(ctx: &Ctx, event: Event, input: &Input, call: crate::hook::Call<'_>, l
             // 누구의 것인지 모르는 줄은 싣지 않는다 — 남의 일을 "압축 전부터 집고 있다" 로 떠안긴다(moai-4jsy).
             // `Stop` 이 붙드는 것과 같은 자로 잰다([`releasing`]).
             let (away, latest) = releasing(input, &repo, &load.issues);
-            crate::hook::carried(&load.issues, latest.as_deref().unwrap_or(&load.issues), &repo.config, &away, ctx.lang())
+            crate::hook::carried(
+                &load.issues,
+                latest.as_deref().unwrap_or(&load.issues),
+                &repo.config,
+                &away,
+                ctx.lang(),
+            )
         }
         // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다.
         Event::SessionStart => {
@@ -195,16 +207,19 @@ fn decide(ctx: &Ctx, event: Event, input: &Input, call: crate::hook::Call<'_>, l
             // (moai-y7go) 거절문이 워크트리의 스냅샷을 겨누는 길이 닫히고, `moai -C .`·`cd src && moai -C ..`
             // 처럼 어디서 쳤느냐에 따라 달라지는 상대 경로도 풀려 나온다.
             let toward = |k: usize| aims.get(k).and_then(Option::as_deref);
-            let decision = settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
-                // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
-                // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
-                // (`Repo::find_from`) 고치는 파일은 이 워크트리의 것이다. `repo.root` 로 세던 판은
-                // 워크트리의 파일이 죄다 루트의 `.claude/worktrees/…` 밑으로 보여 규칙 2 가 통째로 꺼졌다.
-                Call::Shell(_) => crate::hook::guard_shell_in(issues, &repo.config, away, repo.here(), &cwd, line, &segs, &toward),
-                Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, repo.here(), path),
-                Call::Review => crate::hook::guard_review(issues, &repo.config, away),
-                Call::Other => Decision::Pass,
-            });
+            let decision =
+                settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
+                    // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
+                    // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
+                    // (`Repo::find_from`) 고치는 파일은 이 워크트리의 것이다. `repo.root` 로 세던 판은
+                    // 워크트리의 파일이 죄다 루트의 `.claude/worktrees/…` 밑으로 보여 규칙 2 가 통째로 꺼졌다.
+                    Call::Shell(_) => {
+                        crate::hook::guard_shell_in(issues, &repo.config, away, repo.here(), &cwd, line, &segs, &toward)
+                    }
+                    Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, repo.here(), path),
+                    Call::Review => crate::hook::guard_review(issues, &repo.config, away),
+                    Call::Other => Decision::Pass,
+                });
             // 다른 트래커를 가리키는 토막은 **그 트래커가 본다**(moai-23ky). 판정을 잇는 차례는
             // `Decision::then` 이 정한다 — 막으면 남의 트래커는 묻지 않고, 남이 막으면 제 비춤을 버린다.
             let mut decision = decision;
@@ -214,7 +229,9 @@ fn decide(ctx: &Ctx, event: Event, input: &Input, call: crate::hook::Call<'_>, l
                         let Ok(load) = other.read() else { return Decision::Pass };
                         let only = |k: usize| routes.get(k) == Some(&Route::There(n));
                         settle(input, other, &load.issues, away_of(other, &load.issues), &|issues, away| {
-                            crate::hook::guard_moai(issues, &other.config, away, line, &only, &|_| Some(other.root.as_path()))
+                            crate::hook::guard_moai(issues, &other.config, away, line, &only, &|_| {
+                                Some(other.root.as_path())
+                            })
                         })
                     });
                 }
@@ -237,7 +254,9 @@ fn decide(ctx: &Ctx, event: Event, input: &Input, call: crate::hook::Call<'_>, l
             {
                 let dirs = std::cell::OnceCell::new();
                 let stands = |k: usize, id: &str| -> Option<String> {
-                    let at = |issues: &[model::Issue]| issues.iter().find(|i| i.id == id).map(|i| i.status.as_str().to_string());
+                    let at = |issues: &[model::Issue]| {
+                        issues.iter().find(|i| i.id == id).map(|i| i.status.as_str().to_string())
+                    };
                     match dirs.get_or_init(|| crate::hook::aimed(line, &cwd)).get(k).cloned().flatten() {
                         None => at(&load.issues),
                         Some(dir) => at(&Repo::find_from(&dir).ok()??.read().ok()?.issues),
@@ -281,17 +300,14 @@ fn decide(ctx: &Ctx, event: Event, input: &Input, call: crate::hook::Call<'_>, l
 fn answer(event: Event, decision: Decision) -> Option<String> {
     match decision {
         Decision::Pass => None,
-        Decision::Context(context) => serde_json::to_string(&Out {
-            specific: Specific { event: event.wire(), context },
-        })
-        .ok(),
-        Decision::Deny(reason) => serde_json::to_string(&Refusal {
-            specific: RefusalBody { event: event.wire(), decision: "deny", reason },
-        })
-        .ok(),
-        Decision::Block(reason) => {
-            serde_json::to_string(&Hold { decision: "block", reason }).ok()
+        Decision::Context(context) => {
+            serde_json::to_string(&Out { specific: Specific { event: event.wire(), context } }).ok()
         }
+        Decision::Deny(reason) => {
+            serde_json::to_string(&Refusal { specific: RefusalBody { event: event.wire(), decision: "deny", reason } })
+                .ok()
+        }
+        Decision::Block(reason) => serde_json::to_string(&Hold { decision: "block", reason }).ok(),
     }
 }
 
@@ -395,7 +411,8 @@ fn releasing(input: &Input, repo: &Repo, issues: &[model::Issue]) -> (crate::hoo
     if crate::hook::held(issues, &repo.config, &away).is_empty() {
         return (away, None);
     }
-    let still = !add_unsure(input, repo, issues, &mut away) || !crate::hook::held(issues, &repo.config, &away).is_empty();
+    let still =
+        !add_unsure(input, repo, issues, &mut away) || !crate::hook::held(issues, &repo.config, &away).is_empty();
     let latest = still.then(|| crate::worktree::fresh(repo, issues.to_vec())).flatten().map(|(fresh, _)| fresh);
     (away, latest)
 }
@@ -457,7 +474,12 @@ fn prune_picks(dir: &Path, sid: &str) {
         if entry.file_name() == sid {
             continue;
         }
-        let stale = entry.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|age| age > KEEP);
+        let stale = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > KEEP);
         if stale {
             let _ = std::fs::remove_file(entry.path());
         }
@@ -471,14 +493,13 @@ fn read_picks(input: &Input, repo: &Repo, issues: &[model::Issue]) -> crate::hoo
     let Ok(dir) = std::fs::read_dir(picks_dir(repo)) else { return Default::default() };
     // **보통 파일만 읽는다** — 임시 디렉터리라 파이프가 서 있으면 여는 자리에서 훅이 멈추고, 링크는 남의
     // 파일을 읽힌다(리뷰 moai-3k2d.1df). 적는 쪽은 보통 파일만 만든다.
-    let files = dir.filter_map(Result::ok).filter(|entry| entry.file_type().is_ok_and(|t| t.is_file())).filter_map(|entry| {
-        let text = std::fs::read_to_string(entry.path()).ok()?;
-        Some((entry.file_name().to_string_lossy().into_owned(), text))
-    });
-    let since: std::collections::BTreeMap<&str, i64> = issues
-        .iter()
-        .filter_map(|i| Some((i.id.as_str(), crate::model::parse_rfc3339(&i.status_since)?)))
-        .collect();
+    let files =
+        dir.filter_map(Result::ok).filter(|entry| entry.file_type().is_ok_and(|t| t.is_file())).filter_map(|entry| {
+            let text = std::fs::read_to_string(entry.path()).ok()?;
+            Some((entry.file_name().to_string_lossy().into_owned(), text))
+        });
+    let since: std::collections::BTreeMap<&str, i64> =
+        issues.iter().filter_map(|i| Some((i.id.as_str(), crate::model::parse_rfc3339(&i.status_since)?))).collect();
     crate::hook::Picks::fold(&me, files, &|id| since.get(id).copied())
 }
 
@@ -593,7 +614,9 @@ fn route_one(
     // (`guard_moai` 만 돈다), `cd <루트> && sed -i …` 를 넘기면 쓰기 셈이 그 자리에서 꺼진다.
     // `-C` 를 적은 토막은 `moai` 를 부르는 토막이라 셀 쓰기가 없다([`crate::hook::spells_dir`]).
     if same(&found.root, &repo.root)
-        || (!crate::worktree::is_linked(&found.root) && crate::worktree::same_repo(&found.root, &repo.root) && !spells())
+        || (!crate::worktree::is_linked(&found.root)
+            && crate::worktree::same_repo(&found.root, &repo.root)
+            && !spells())
     {
         return Route::Here;
     }
@@ -641,12 +664,7 @@ fn baseline(input: &Input, repo: &Repo) -> Option<usize> {
 ///
 /// 표를 남기는 자리는 시스템 임시 디렉터리다. `.moai/` 에 두면 세션 부스러기가
 /// 저장소에 쌓이고, 그것을 `.gitignore` 로 막는 일이 또 생긴다.
-fn once_per_session(
-    input: &Input,
-    repo: &Repo,
-    what: &str,
-    make: impl FnOnce() -> Decision,
-) -> Decision {
+fn once_per_session(input: &Input, repo: &Repo, what: &str, make: impl FnOnce() -> Decision) -> Decision {
     let Some(path) = session_file(input, repo, what) else {
         // 누구인지 모르면 한 번을 보장할 수 없다. **그러면 싣지 않는다** —
         // 한 번 빠지는 것이 매 프롬프트 도배보다 싸다.
@@ -666,12 +684,7 @@ fn once_per_session(
 ///
 /// 훅이 여는 세션마다 덮어쓴다. 재개도 새 세션이고, 재개 시점의 경고가
 /// 그 세션이 물려받은 빚이다.
-fn write_baseline(
-    input: &Input,
-    repo: &Repo,
-    issues: &[crate::model::Issue],
-    unreadable: &[report::Unreadable],
-) {
+fn write_baseline(input: &Input, repo: &Repo, issues: &[crate::model::Issue], unreadable: &[report::Unreadable]) {
     let Some(path) = session_file(input, repo, "warn") else {
         return;
     };

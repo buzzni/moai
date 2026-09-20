@@ -783,7 +783,12 @@ mod tests {
         take(&mut app, Event::Key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE)));
         take(&mut app, Event::Paste("a\tb\r".into()));
         assert_eq!(app.mode, Mode::Grep(Input::new("a b"), crate::query::GrepIn::All));
-        let release = KeyEvent::new_with_kind_and_state(KeyCode::Esc, KeyModifiers::NONE, KeyEventKind::Release, KeyEventState::NONE);
+        let release = KeyEvent::new_with_kind_and_state(
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+            KeyEventKind::Release,
+            KeyEventState::NONE,
+        );
         take(&mut app, Event::Key(release));
         assert!(matches!(app.mode, Mode::Grep(..)), "뗀 키를 먹었다");
     }
@@ -900,7 +905,11 @@ mod tests {
         let d = Dir::new("rescue");
         let one = rescue("못 담길 것", Some("## 설계\n둘째 줄"), &d.0).expect("못 남겼다");
         let text = std::fs::read_to_string(&one).unwrap();
-        assert_eq!(crate::tui::jotfile::parse(&text), Some(("못 담길 것".to_string(), Some("## 설계\n둘째 줄".to_string()))), "{text:?}");
+        assert_eq!(
+            crate::tui::jotfile::parse(&text),
+            Some(("못 담길 것".to_string(), Some("## 설계\n둘째 줄".to_string()))),
+            "{text:?}"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -908,7 +917,10 @@ mod tests {
         }
         let two = rescue("제목만", None, &d.0).expect("못 남겼다");
         assert_ne!(one, two, "앞서 남긴 파일을 덮었다");
-        assert_eq!(crate::tui::jotfile::parse(&std::fs::read_to_string(&two).unwrap()), Some(("제목만".to_string(), None)));
+        assert_eq!(
+            crate::tui::jotfile::parse(&std::fs::read_to_string(&two).unwrap()),
+            Some(("제목만".to_string(), None))
+        );
     }
 
     /// 임시 파일은 **있는 이름을 안 연다** — 남이 먼저 둔 파일에 적은 생각을 쓰지 않는다.
@@ -918,7 +930,8 @@ mod tests {
         let (a, _fa) = scratch_file(&d.0).unwrap();
         // 다음에 고를 이름들을 남이 먼저 둔다 — 카운터만 믿으면 `create_new` 갈래를 한 번도 안 지난다.
         let n: usize = a.to_string_lossy().rsplit('-').next().unwrap().trim_end_matches(".md").parse().unwrap();
-        let theirs: Vec<std::path::PathBuf> = (n + 1..=n + 8).map(|k| d.0.join(format!("moai-idea-{}-{k}.md", std::process::id()))).collect();
+        let theirs: Vec<std::path::PathBuf> =
+            (n + 1..=n + 8).map(|k| d.0.join(format!("moai-idea-{}-{k}.md", std::process::id()))).collect();
         for p in &theirs {
             std::fs::write(p, "남의 것").unwrap();
         }

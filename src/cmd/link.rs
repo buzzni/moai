@@ -17,7 +17,10 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
     }
     // 같은 id 가 둘 다에 있으면 어느 쪽이 이기는지 조용히 정하지 않는다.
     if let Some(dup) = args.blocks.iter().find(|b| args.unblocks.contains(b)) {
-        return Err(Fail::new(crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.link_both_ways"), &[("id", dup)])));
+        return Err(Fail::new(crate::i18n::fill(
+            crate::i18n::say(ctx.lang(), "refuse.link_both_ways"),
+            &[("id", dup)],
+        )));
     }
     let repo = Repo::discover()?;
     let at = model::now();
@@ -25,12 +28,8 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
     // `(대상, 막을지 없앨지)`. 어느 쪽에서 왔는지를 갖고 있어야, 다시
     // `args.blocks.contains` 로 되짚어 묻다가 판단을 두 번 다르게 하는
     // 일이 없다.
-    let edits: Vec<(String, bool)> = args
-        .blocks
-        .iter()
-        .map(|t| (t.clone(), true))
-        .chain(args.unblocks.iter().map(|t| (t.clone(), false)))
-        .collect();
+    let edits: Vec<(String, bool)> =
+        args.blocks.iter().map(|t| (t.clone(), true)).chain(args.unblocks.iter().map(|t| (t.clone(), false))).collect();
 
     let (touched, read): (Vec<(Issue, bool)>, super::Read) = repo.with_write(|issues, cfg, _| {
         // 막는 쪽의 존재는 **더할 때만** 따진다. `--unblocks` 만이면 그것이
@@ -111,11 +110,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         return super::json_line(&rows);
     }
     if touched.is_empty() {
-        return Ok(vec![format!(
-            "{}  {}",
-            paint(style::ID, &args.id),
-            paint(style::DIM, "바뀐 것이 없다")
-        )]);
+        return Ok(vec![format!("{}  {}", paint(style::ID, &args.id), paint(style::DIM, "바뀐 것이 없다"))]);
     }
     Ok(touched
         .iter()

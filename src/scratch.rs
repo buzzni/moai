@@ -185,8 +185,7 @@ fn pick(wanted: PathBuf, aways: &[&Path]) -> Result<PathBuf, String> {
 /// 그 자리에 **정말 만들 수 있는가.** `is_dir` 은 있는지만 답한다 — 있는데 못 쓰는 자리가
 /// [`pick_base`] 가 고르는 바로 그 자리들이다.
 fn usable(dir: &Path) -> bool {
-    let probe =
-        dir.join(format!("moai-probe-{}-{:?}", std::process::id(), std::thread::current().id()));
+    let probe = dir.join(format!("moai-probe-{}-{:?}", std::process::id(), std::thread::current().id()));
     let _ = std::fs::remove_dir(&probe);
     let made = std::fs::create_dir(&probe).is_ok();
     if made {

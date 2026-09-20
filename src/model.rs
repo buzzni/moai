@@ -506,10 +506,7 @@ impl Issue {
             }
         }
         if self.priority.is_some_and(|p| p > MAX_PRIORITY) {
-            return Err(format!(
-                "{}: 우선순위는 0~{MAX_PRIORITY} 다 — {:?}",
-                self.id, self.priority
-            ));
+            return Err(format!("{}: 우선순위는 0~{MAX_PRIORITY} 다 — {:?}", self.id, self.priority));
         }
         for tag in &self.tags {
             if tag.is_empty() || tag.contains(|c: char| c.is_whitespace() || c == ',') {
@@ -595,12 +592,7 @@ impl JournalEntry {
         JournalEntry { title: Some(title.to_string()), ..Self::base("create", id, at, by) }
     }
     pub fn status(id: &str, from: &Status, to: &Status, note: Option<String>, at: &str, by: &Actor) -> JournalEntry {
-        JournalEntry {
-            from: Some(from.0.clone()),
-            to: Some(to.0.clone()),
-            note,
-            ..Self::base("status", id, at, by)
-        }
+        JournalEntry { from: Some(from.0.clone()), to: Some(to.0.clone()), note, ..Self::base("status", id, at, by) }
     }
     pub fn note(id: &str, text: &str, at: &str, by: &Actor) -> JournalEntry {
         JournalEntry { text: Some(text.to_string()), ..Self::base("note", id, at, by) }
@@ -906,10 +898,7 @@ fn bad_git_identity(a: &Actor) -> Fail {
 }
 
 fn malformed(what: &str, raw: &str) -> Fail {
-    Fail::coded(
-        format!("{what} 가 `이름 (메일)` 모양이 아니다 — {raw:?}"),
-        code::BAD_INPUT,
-    )
+    Fail::coded(format!("{what} 가 `이름 (메일)` 모양이 아니다 — {raw:?}"), code::BAD_INPUT)
 }
 
 /// git 저장소 밖에서도 전역 설정을 읽는다 — moai 는 `.moai/` 만 찾지 git 을
@@ -950,10 +939,8 @@ pub fn now() -> String {
     {
         return t.trim().to_string();
     }
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let secs =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
     format_rfc3339(secs)
 }
 
@@ -975,12 +962,7 @@ pub fn format_rfc3339(secs: i64) -> String {
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
     let (y, mo, d) = civil_from_days(days);
-    format!(
-        "{y:04}-{mo:02}-{d:02}T{:02}:{:02}:{:02}Z",
-        rem / 3600,
-        (rem % 3600) / 60,
-        rem % 60
-    )
+    format!("{y:04}-{mo:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
 }
 
 fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
@@ -996,7 +978,8 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
 /// `2026-09-11T04:12:03Z` → epoch 초. 형식이 아니면 `None`.
 pub fn parse_rfc3339(s: &str) -> Option<i64> {
     let b = s.as_bytes();
-    if b.len() != 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' || b[19] != b'Z' {
+    if b.len() != 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' || b[19] != b'Z'
+    {
         return None;
     }
     let n = |a: usize, z: usize| s.get(a..z)?.parse::<i64>().ok();
@@ -1027,13 +1010,7 @@ mod tests {
     }
 
     fn issue() -> Issue {
-        Issue::new(
-            "argos-4aex".into(),
-            "제목".into(),
-            Kind::Issue,
-            Status::new("todo"),
-            "2026-09-11T04:12:03Z",
-        )
+        Issue::new("argos-4aex".into(), "제목".into(), Kind::Issue, Status::new("todo"), "2026-09-11T04:12:03Z")
     }
 
     /// [`fit_bytes`] 는 **넘을 때만** 줄이고, 줄일 때는 글자 가운데를 안 자른다. 어느 답도
@@ -1076,8 +1053,21 @@ mod tests {
         i.done_at = Some("2026-09-11T06:00:00Z".into());
         let line = serde_json::to_string(&i).unwrap();
         let want = [
-            "id", "title", "kind", "status", "priority", "tags", "assignee", "epic",
-            "milestone", "created_at", "updated_at", "status_since", "body", "done_at", "started_at",
+            "id",
+            "title",
+            "kind",
+            "status",
+            "priority",
+            "tags",
+            "assignee",
+            "epic",
+            "milestone",
+            "created_at",
+            "updated_at",
+            "status_since",
+            "body",
+            "done_at",
+            "started_at",
         ];
         let at: Vec<usize> = want
             .iter()
@@ -1125,7 +1115,10 @@ mod tests {
 
         let mut fresh = issue();
         assert_eq!(fresh.move_to(Status::new("in_progress"), t1, &c), Status::new("todo"), "떠난 칸을 돌려준다");
-        assert_eq!((fresh.status.as_str(), fresh.status_since.as_str(), fresh.updated_at.as_str()), ("in_progress", t1, t1));
+        assert_eq!(
+            (fresh.status.as_str(), fresh.status_since.as_str(), fresh.updated_at.as_str()),
+            ("in_progress", t1, t1)
+        );
         assert_eq!(fresh.started_at.as_deref(), Some(t1));
         fresh.move_to(Status::new("done"), t2, &c);
         fresh.move_to(Status::new("todo"), t3, &c);
@@ -1315,10 +1308,7 @@ mod tests {
         let line = serde_json::to_string(&i).unwrap();
         let want = ["milestone", "blocked_by", "created_at"];
         // milestone 은 비어 있으니 실제로는 blocked_by 와 created_at 만 있다.
-        let at: Vec<usize> = [want[1], want[2]]
-            .iter()
-            .map(|k| line.find(&format!("\"{k}\":")).unwrap())
-            .collect();
+        let at: Vec<usize> = [want[1], want[2]].iter().map(|k| line.find(&format!("\"{k}\":")).unwrap()).collect();
         assert!(at[0] < at[1], "{line}");
     }
 
@@ -1494,7 +1484,8 @@ mod tests {
     /// 담당이 없는데 메일만 남으면 어느 화면도 그릴 줄 모른다.
     #[test]
     fn an_email_never_outlives_its_name() {
-        let mut i = Issue::new("argos-4aex".into(), "t".into(), Kind::Issue, Status::new("todo"), "2026-09-11T05:02:44Z");
+        let mut i =
+            Issue::new("argos-4aex".into(), "t".into(), Kind::Issue, Status::new("todo"), "2026-09-11T05:02:44Z");
         i.assignee_email = Some("raven@buzzni.com".into());
         i.normalize();
         assert_eq!(i.assignee_email, None);
@@ -1554,7 +1545,11 @@ mod tests {
         assert_eq!(said("model: openai/gpt-6 tokens=0").unwrap().2, Some(0), "0 은 모름이 아니다");
         assert_eq!(said("model: opus-5(high)"), Some((None, "opus-5".into(), None, s("high"), None)));
         assert_eq!(said("model: opus-5 (high - 손으로 친 붙임표)").unwrap().4, s("손으로 친 붙임표"));
-        assert_eq!(said("model: opus-5 (high – 자동 고침의 반각 줄표)").unwrap().3, s("high"), "반각 줄표에 등급을 잃었다");
+        assert_eq!(
+            said("model: opus-5 (high – 자동 고침의 반각 줄표)").unwrap().3,
+            s("high"),
+            "반각 줄표에 등급을 잃었다"
+        );
         assert_eq!(said("model: anthropic/opus-5.").unwrap().1, "opus-5", "문장 부호를 이름에 붙였다");
     }
 
@@ -1562,7 +1557,9 @@ mod tests {
     #[test]
     fn old_model_lines_still_count() {
         assert_eq!(
-            said("model: opus (medium — 표시 리팩터 두 파일, 쓰기 경로도 동시성도 안 건드린다). 닫기는 05:03 에 다른 세션이 했다"),
+            said(
+                "model: opus (medium — 표시 리팩터 두 파일, 쓰기 경로도 동시성도 안 건드린다). 닫기는 05:03 에 다른 세션이 했다"
+            ),
             Some((None, "opus".into(), None, s("medium"), s("표시 리팩터 두 파일, 쓰기 경로도 동시성도 안 건드린다")))
         );
         assert_eq!(said("model: opus-5 (medium — 감독 스킬 글 (표 포함))").unwrap().4, s("감독 스킬 글 (표 포함)"));
@@ -1601,9 +1598,19 @@ mod tests {
         let journal = vec![
             // 제목은 읽지 않는다 — 꼴에 맞는 제목이라야 이 줄이 그것을 잰다.
             JournalEntry::create("x-1", "model: sonnet-5", "2026-09-18T01:00:00Z", &who),
-            JournalEntry::note("x-1", "고쳤다\nmodel: anthropic/opus-5 tokens=10 (high — a)\nmodel: anthropic/haiku-4.5", "2026-09-18T02:00:00Z", &who),
+            JournalEntry::note(
+                "x-1",
+                "고쳤다\nmodel: anthropic/opus-5 tokens=10 (high — a)\nmodel: anthropic/haiku-4.5",
+                "2026-09-18T02:00:00Z",
+                &who,
+            ),
             // 울타리 안의 줄은 꼴을 옮겨 적은 예다.
-            JournalEntry::note("x-1", "꼴은 이렇다\n```\nmodel: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)\n```", "2026-09-18T02:30:00Z", &who),
+            JournalEntry::note(
+                "x-1",
+                "꼴은 이렇다\n```\nmodel: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)\n```",
+                "2026-09-18T02:30:00Z",
+                &who,
+            ),
             JournalEntry::status(
                 "x-1",
                 &Status::new("review"),

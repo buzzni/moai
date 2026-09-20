@@ -179,9 +179,14 @@ impl Tried {
 pub enum Look {
     /// 아직 안 읽었다. `.moai` 안에서 띄우면 남의 프로젝트는 처음 올라갈 때 읽는다.
     Unread,
-    Open { sum: Summary },
+    Open {
+        sum: Summary,
+    },
     /// 못 연다. `said` 는 CLI 한눈 보기와 **같은 말**이다(`view::unopened`, 색은 걷었다).
-    Shut { state: Shut, said: String },
+    Shut {
+        state: Shut,
+        said: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -293,9 +298,7 @@ fn shut(path: &Path, name: &str, state: State, lang: crate::i18n::Lang) -> Look 
         swept: false,
     };
     // 말은 층이 들고 온다(moai-ra67) — 한눈 보기(`view::unopened`)가 내는 그 글을 그대로 쓴다.
-    let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()), lang))
-        .trim()
-        .to_string();
+    let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()), lang)).trim().to_string();
     Look::Shut { state: kind, said }
 }
 
@@ -420,7 +423,10 @@ impl Layer {
             .iter()
             .filter(|p| {
                 let clocked = matches!(p.look, Look::Open { .. } | Look::Shut { state: Shut::Unreadable, .. });
-                matches!(p.look, Look::Unread) || p.read_at.is_none() || (clocked && due(p.read_at)) || marks_of(&p.path) != p.marks
+                matches!(p.look, Look::Unread)
+                    || p.read_at.is_none()
+                    || (clocked && due(p.read_at))
+                    || marks_of(&p.path) != p.marks
             })
             .map(|p| p.path.clone())
             .collect()
@@ -528,7 +534,8 @@ impl App {
     /// 첫 화면은 줄마다 `읽는 중` 으로 서고 읽는 대로 수가 찬다 — 그 자리에서 다 읽으면 등록한
     /// 프로젝트의 값을 다 더한 만큼 첫 화면이 안 선다(moai-ezwu).
     pub fn on_projects(layer: Layer) -> App {
-        let mut app = App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new());
+        let mut app =
+            App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new());
         // **말은 층이 들고 온 것이다** — 부른 쪽(`cmd::tui::outside`)이 고른 말을 `Layer::of` 에
         // 줘 `problems` 가 이미 그 말로 펴졌고, 화면의 말은 이 줄 뒤에 놓인다. 여기서 화면의
         // 처음값으로 덮으면 `launch` 가 띄우는 읽기가 도구의 기본 말로 `Look::Shut` 의 글을 지어,
@@ -656,12 +663,18 @@ impl App {
             if self.open_place(at, Depth::Whole).is_none() {
                 return;
             }
-            self.layer.as_ref().and_then(|l| l.places.get(at)).map(|p| Target { path: p.path.clone(), name: p.name.clone() })
+            self.layer
+                .as_ref()
+                .and_then(|l| l.places.get(at))
+                .map(|p| Target { path: p.path.clone(), name: p.name.clone() })
         } else {
             self.here().map(|path| {
                 let name = match self.project() {
                     Some(p) => p.name.clone(),
-                    None => path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string()),
+                    None => path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path.display().to_string()),
                 };
                 Target { path, name }
             })
@@ -693,10 +706,10 @@ impl App {
         let lang = self.site.lang;
         let why = match into {
             // 문구 속 키 이름은 표에서 읽는다 — 키를 옮기면 이 말도 따라온다.
-            None => crate::i18n::fill(say(lang, "tui.jot.no_place"), &[
-                ("close", &label(JOT, Jot::Close)),
-                ("jot", &label(BROWSE, Browse::Jot)),
-            ]),
+            None => crate::i18n::fill(
+                say(lang, "tui.jot.no_place"),
+                &[("close", &label(JOT, Jot::Close)), ("jot", &label(BROWSE, Browse::Jot))],
+            ),
             Some(t) if self.on_layer() => {
                 let name = crate::text::one_line(&t.name);
                 match self.layer.as_ref().and_then(|l| l.position(&t.path)) {
@@ -707,17 +720,25 @@ impl App {
                         }
                         // 들어가기가 댄 까닭(못 연 말·못 읽은 말)을 옮긴다. 앞의 글리프는 배너의 `!` 와 겹친다.
                         let said = self.notice.take().unwrap_or_default();
-                        let said = said.trim_start_matches(['·', '!', ' ']).trim_start_matches(enter_failed_head(lang).as_str());
+                        let said = said
+                            .trim_start_matches(['·', '!', ' '])
+                            .trim_start_matches(enter_failed_head(lang).as_str());
                         crate::i18n::fill(say(lang, "tui.layer.enter_failed_at"), &[("name", &name), ("said", said)])
                     }
-                    None => crate::i18n::fill(say(lang, "tui.layer.dropped"), &[("name", &name), ("close", &label(JOT, Jot::Close))]),
+                    None => crate::i18n::fill(
+                        say(lang, "tui.layer.dropped"),
+                        &[("name", &name), ("close", &label(JOT, Jot::Close))],
+                    ),
                 }
             }
-            Some(t) => crate::i18n::fill(say(lang, "tui.jot.elsewhere"), &[
-                ("name", &crate::text::one_line(&t.name)),
-                ("close", &label(JOT, Jot::Close)),
-                ("jot", &label(BROWSE, Browse::Jot)),
-            ]),
+            Some(t) => crate::i18n::fill(
+                say(lang, "tui.jot.elsewhere"),
+                &[
+                    ("name", &crate::text::one_line(&t.name)),
+                    ("close", &label(JOT, Jot::Close)),
+                    ("jot", &label(BROWSE, Browse::Jot)),
+                ],
+            ),
         };
         self.notice = None;
         self.trouble = Some(crate::i18n::fill(say(lang, "tui.write.failed"), &[("why", why.trim())]));
@@ -860,7 +881,14 @@ impl App {
         //
         // **그 프로젝트 안에서 어디를 보고 있었나는 안 든다.** 경로·커서 기억·펼친 자리는 도로
         // 들어갈 때 처음부터다 — 마디가 그 프로젝트의 이슈 id 라 남겨 두면 지운 줄의 id 가 쌓인다.
-        let mut blank = super::Site::of(Vec::new(), Index::of(&[]), Default::default(), self.site.cfg.clone(), Vec::new(), Vec::new());
+        let mut blank = super::Site::of(
+            Vec::new(),
+            Index::of(&[]),
+            Default::default(),
+            self.site.cfg.clone(),
+            Vec::new(),
+            Vec::new(),
+        );
         // **말은 프로젝트에 안 매인다**(moai-ra67, 리뷰) — 화면 하나가 고른 말이라 떠난다고
         // 처음값으로 돌아갈 것이 아니다. 안 이으면 `0` 으로 한 번 올라간 뒤 층의 말도(`shut`·
         // `seg_label`) 다음에 들어간 프로젝트의 말도 몽땅 [`super::Site::lang`] 의 처음값으로
@@ -1094,9 +1122,9 @@ impl App {
     /// 층을 읽는 스레드가 도는가.
     /// 이 프로젝트의 줄을 지금 읽고 있거나 줄 서 있는가 — 머리줄이 그동안 도는 글리프를 세운다.
     pub(super) fn reading_place(&self, path: &Path) -> bool {
-        self.layer.as_ref().is_some_and(|l| {
-            l.reading.as_ref().is_some_and(|(p, ..)| p == path) || l.wanted.iter().any(|p| p == path)
-        })
+        self.layer
+            .as_ref()
+            .is_some_and(|l| l.reading.as_ref().is_some_and(|(p, ..)| p == path) || l.wanted.iter().any(|p| p == path))
     }
 
     pub(super) fn layer_loading(&self) -> bool {
@@ -1163,7 +1191,9 @@ fn holding(fresh: &Layer, held: bool, lang: Lang) -> Option<String> {
         return None;
     }
     let why = match (said.as_slice(), &fresh.config) {
-        ([], Some(p)) => crate::i18n::fill(say(lang, "tui.layer.config_gone_at"), &[("path", &p.display().to_string())]),
+        ([], Some(p)) => {
+            crate::i18n::fill(say(lang, "tui.layer.config_gone_at"), &[("path", &p.display().to_string())])
+        }
         ([], None) => say(lang, "tui.layer.config_gone").to_string(),
         _ => said.join(" · "),
     };
@@ -1242,12 +1272,12 @@ pub(super) fn fill(layer: &mut Layer, at: usize, issues: Vec<crate::model::Issue
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scratch::Scratch;
-    use crate::store::Opened;
-    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use crate::model::{Issue, Kind, Status};
     use crate::nav::Path as NavPath;
+    use crate::scratch::Scratch;
+    use crate::store::Opened;
     use crate::tui::{Mode, stamp_of};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     /// 진짜 디렉터리 여럿과 사용자 설정 한 벌. **돌리는 사람의 설정은 안 읽는다** — 층에
     /// 제 설정 파일을 준다(`Layer::config`).
@@ -1279,7 +1309,8 @@ mod tests {
         fn register(&self, dirs: &[&Path]) -> PathBuf {
             let path = self.join("user/config.toml");
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            let body: String = dirs.iter().map(|d| format!("[[project]]\npath = {:?}\n", d.to_str().unwrap())).collect();
+            let body: String =
+                dirs.iter().map(|d| format!("[[project]]\npath = {:?}\n", d.to_str().unwrap())).collect();
             std::fs::write(&path, body).unwrap();
             path
         }
@@ -1289,7 +1320,8 @@ mod tests {
         let body: String = lines
             .iter()
             .map(|(id, title, st)| {
-                let i = Issue::new((*id).into(), (*title).into(), Kind::Issue, Status::new(*st), "2026-09-01T00:00:00Z");
+                let i =
+                    Issue::new((*id).into(), (*title).into(), Kind::Issue, Status::new(*st), "2026-09-01T00:00:00Z");
                 format!("{}\n", serde_json::to_string(&i).unwrap())
             })
             .collect();
@@ -1331,8 +1363,10 @@ mod tests {
 
     /// 같은 id 를 쓰는 두 프로젝트 — 둘의 제목이 달라 섞이면 곧바로 보인다.
     fn twins(s: &Scratch) -> (PathBuf, PathBuf) {
-        let one = s.project("one", &[("argos-0001", "one 의 첫 줄", "todo"), ("argos-0002", "one 의 둘째 줄", "in_progress")]);
-        let two = s.project("two", &[("argos-0002", "two 의 줄", "todo"), ("argos-0001", "two 의 집은 줄", "in_progress")]);
+        let one = s
+            .project("one", &[("argos-0001", "one 의 첫 줄", "todo"), ("argos-0002", "one 의 둘째 줄", "in_progress")]);
+        let two =
+            s.project("two", &[("argos-0002", "two 의 줄", "todo"), ("argos-0001", "two 의 집은 줄", "in_progress")]);
         (one, two)
     }
 
@@ -1362,11 +1396,17 @@ mod tests {
         assert_eq!(sum.counts.iter().find(|(c, _)| c == "todo").unwrap().1, 1);
         assert_eq!(sum.picked.iter().map(|p| p.title.as_str()).collect::<Vec<_>>(), ["one 의 둘째 줄"]);
         let Look::Open { sum } = look(&a, "two") else { panic!("two 가 안 열렸다") };
-        assert_eq!(sum.picked.iter().map(|p| p.title.as_str()).collect::<Vec<_>>(), ["two 의 집은 줄"], "같은 id 의 줄이 섞였다");
+        assert_eq!(
+            sum.picked.iter().map(|p| p.title.as_str()).collect::<Vec<_>>(),
+            ["two 의 집은 줄"],
+            "같은 id 의 줄이 섞였다"
+        );
 
-        for (name, state, word) in
-            [("bare", Shut::Uninit, "init 전"), ("gone", Shut::Missing, "디렉터리가 없다"), ("broken", Shut::Unreadable, "못 읽는다")]
-        {
+        for (name, state, word) in [
+            ("bare", Shut::Uninit, "init 전"),
+            ("gone", Shut::Missing, "디렉터리가 없다"),
+            ("broken", Shut::Unreadable, "못 읽는다"),
+        ] {
             match look(&a, name) {
                 Look::Shut { state: got, said } => {
                     assert_eq!(*got, state, "{name}");
@@ -1390,7 +1430,11 @@ mod tests {
         a.key(key(KeyCode::Enter));
         assert!(!a.on_layer());
         assert_eq!(a.project().map(|p| p.path.clone()), Some(one.clone()));
-        assert_eq!(a.site.repo.as_ref().map(|r| r.root.clone()), Some(one.clone()), "선 프로젝트와 쓸 저장소가 어긋났다");
+        assert_eq!(
+            a.site.repo.as_ref().map(|r| r.root.clone()),
+            Some(one.clone()),
+            "선 프로젝트와 쓸 저장소가 어긋났다"
+        );
         // 뿌리에 `..` 은 없다 — 층으로는 `0` 이 간다(moai-i784).
         assert!(!a.rows().contains(&Row::Up), "프로젝트 뿌리에 `..` 이 섰다");
         assert_eq!(titles(&a), ["one 의 첫 줄", "one 의 둘째 줄"]);
@@ -1407,7 +1451,10 @@ mod tests {
 
         a.key(key(KeyCode::Home));
         a.hit("0");
-        assert!(a.on_layer() && a.site.repo.is_none() && a.site.issues.is_empty(), "층에 올라왔는데 프로젝트의 줄이 남았다");
+        assert!(
+            a.on_layer() && a.site.repo.is_none() && a.site.issues.is_empty(),
+            "층에 올라왔는데 프로젝트의 줄이 남았다"
+        );
         assert_eq!(a.current(), Some(Row::Project(0)), "떠난 프로젝트에 안 섰다");
         assert_eq!(a.filter_text, None, "한 프로젝트에 건 거름망이 층까지 따라왔다");
 
@@ -1502,9 +1549,12 @@ mod tests {
 
         let (hold, wait) = std::sync::mpsc::channel::<()>();
         let (_tx, rx) = std::sync::mpsc::channel();
-        a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(move || {
-            let _ = wait.recv();
-        })));
+        a.layer.as_mut().unwrap().pending = Some((
+            rx,
+            std::thread::spawn(move || {
+                let _ = wait.recv();
+            }),
+        ));
 
         a.key(key(KeyCode::Enter));
         assert!(!a.on_layer());
@@ -1566,7 +1616,11 @@ mod tests {
         assert!(a.layer.is_none() && a.unlayered.is_none(), "고친 설정에 옛 까닭이 남았다 — {:?}", a.unlayered);
         std::fs::write(&cfg, "[[project\n").unwrap();
         a.follow();
-        assert!(a.unlayered.as_deref().is_some_and(|u| u.contains("TOML")), "다시 깨진 설정의 까닭을 안 달았다 — {:?}", a.unlayered);
+        assert!(
+            a.unlayered.as_deref().is_some_and(|u| u.contains("TOML")),
+            "다시 깨진 설정의 까닭을 안 달았다 — {:?}",
+            a.unlayered
+        );
 
         std::fs::write(&cfg, "").unwrap();
         let a = open().attach_layer(Layer::read(Some(&cfg), Some(&here), crate::i18n::Lang::Ko));
@@ -1587,7 +1641,11 @@ mod tests {
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
-        let mut a = App::open(repo, load, index, ground, NavPath::new(), stamp).with_layer(Layer::read(Some(&cfg), Some(&here), crate::i18n::Lang::Ko));
+        let mut a = App::open(repo, load, index, ground, NavPath::new(), stamp).with_layer(Layer::read(
+            Some(&cfg),
+            Some(&here),
+            crate::i18n::Lang::Ko,
+        ));
         assert!(!a.on_layer());
         assert_eq!(titles(&a), ["여기 줄"]);
         assert_eq!(a.cursor, 0, "뿌리에 `..` 이 없는데 커서가 한 칸 내려가 섰다");
@@ -1608,7 +1666,10 @@ mod tests {
 
         // 등록된 자리에서 띄우면 따로 서지 않고 그 줄에 표시만 붙는다.
         let layer = Layer::read(Some(&cfg), Some(&two), crate::i18n::Lang::Ko);
-        assert_eq!(layer.places.iter().map(|p| (p.launched, p.registered)).collect::<Vec<_>>(), [(false, true), (true, true)]);
+        assert_eq!(
+            layer.places.iter().map(|p| (p.launched, p.registered)).collect::<Vec<_>>(),
+            [(false, true), (true, true)]
+        );
         assert_eq!(layer.at, At::Project(two.clone()));
     }
 
@@ -1796,7 +1857,10 @@ mod tests {
 
         std::fs::remove_dir_all(&bare).unwrap();
         settle(&mut a);
-        assert!(matches!(look(&a, "bare"), Look::Shut { state: Shut::Missing, .. }), "사라진 디렉터리를 init 전으로 둔다");
+        assert!(
+            matches!(look(&a, "bare"), Look::Shut { state: Shut::Missing, .. }),
+            "사라진 디렉터리를 init 전으로 둔다"
+        );
 
         std::fs::create_dir_all(&bare).unwrap();
         settle(&mut a);
@@ -1877,7 +1941,9 @@ mod tests {
     fn target(a: &App) -> Option<PathBuf> {
         match &a.mode {
             Mode::Idea(f) => f.into.as_ref().map(|t| t.path.clone()),
-            Mode::Ask(_) | Mode::Browse | Mode::Grep(..) | Mode::Filter(_) | Mode::Pick(_) | Mode::Unregister(_) => None,
+            Mode::Ask(_) | Mode::Browse | Mode::Grep(..) | Mode::Filter(_) | Mode::Pick(_) | Mode::Unregister(_) => {
+                None
+            }
         }
     }
 
@@ -1962,7 +2028,11 @@ mod tests {
         a.want_site(0);
         settle(&mut a);
         let held = a.layer.as_ref().unwrap().places[0].site.as_ref().expect("펼친 줄이 제 Site 를 든다");
-        assert_eq!(held.seen.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "시험의 전제 — 줄이 읽음을 들었다");
+        assert_eq!(
+            held.seen.get("argos-0001").map(String::as_str),
+            Some("2026-09-14T00:00:00Z"),
+            "시험의 전제 — 줄이 읽음을 들었다"
+        );
 
         // 들어가는 길에서 다시 읽으면 빈 표다. 들고 있던 것을 버리면 그 프로젝트가 통째로 [NEW] 다.
         let at = crate::read_marks::path_for(&cfg, &one);
@@ -2019,7 +2089,8 @@ mod tests {
         let s = Scratch::fenced("layer-foreign-detail");
         let one = s.project("one", &[("argos-0001", "막는 줄", "todo")]);
         // 막음은 `write_lines` 가 안 적는다 — 이 프로젝트만 손으로 적는다.
-        let open = Issue::new("argos-0001".into(), "막는 줄".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        let open =
+            Issue::new("argos-0001".into(), "막는 줄".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
         let mut blocked =
             Issue::new("argos-0002".into(), "막힌 줄".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
         blocked.blocked_by = vec!["argos-0001".into()];
@@ -2248,7 +2319,11 @@ mod tests {
 
         // 보기가 바뀌면 든 것이 다 따라 선다.
         a.hit("SPC v d");
-        assert!(a.site_of_place(0).is_some_and(|s| s.shown == [true, true]), "보기 토글이 옆 프로젝트를 안 다시 셌다 — {:?}", a.view);
+        assert!(
+            a.site_of_place(0).is_some_and(|s| s.shown == [true, true]),
+            "보기 토글이 옆 프로젝트를 안 다시 셌다 — {:?}",
+            a.view
+        );
     }
 
     /// **펼치기는 여는 데까지만 그 자리에서 한다**(moai-m59y) — 줄은 스레드가 읽는다. 열리지만
@@ -2339,15 +2414,25 @@ mod tests {
         a.hit("l");
         settle(&mut a);
         assert!(a.rows().len() > heads, "고친 뒤의 l 이 프로젝트를 안 폈다");
-        assert!(!titles(&a).contains(&"에픽의 멤버".to_string()), "걷지 않은 Tab 의 뜻이 l 을 통째로 폈다 — {:?}", titles(&a));
+        assert!(
+            !titles(&a).contains(&"에픽의 멤버".to_string()),
+            "걷지 않은 Tab 의 뜻이 l 을 통째로 폈다 — {:?}",
+            titles(&a)
+        );
     }
 
     /// 에픽 하나와 그 멤버를 그 프로젝트에 더한다 — 이미 쓴 줄 뒤에 잇는다.
     fn write_group(dir: &Path) {
-        let mut epic = Issue::new("argos-0100".into(), "에픽".into(), Kind::Epic, Status::new("todo"), "2026-09-01T00:00:00Z");
+        let mut epic =
+            Issue::new("argos-0100".into(), "에픽".into(), Kind::Epic, Status::new("todo"), "2026-09-01T00:00:00Z");
         epic.priority = Some(2);
-        let mut member =
-            Issue::new("argos-0101".into(), "에픽의 멤버".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        let mut member = Issue::new(
+            "argos-0101".into(),
+            "에픽의 멤버".into(),
+            Kind::Issue,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        );
         member.epic = Some(epic.id.clone());
         let file = dir.join(".moai/issues.jsonl");
         let mut body = std::fs::read_to_string(&file).unwrap();
@@ -2566,9 +2651,21 @@ mod tests {
         assert_eq!(a.here(), Some(two.clone()));
         let (one_before, two_before) = (snapshots(&[&one]), snapshots(&[&two]));
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
-        assert!(matches!(&a.mode, Mode::Idea(f) if f.title.text() == "one 에만"), "선 곳이 다른데 폼이 닫혔다 — {:?}", a.mode);
-        assert!(a.trouble.as_deref().is_some_and(|t| t.starts_with("쓰지 못했다") && t.contains("one")), "{:?}", a.trouble);
-        assert_eq!((snapshots(&[&one]), snapshots(&[&two])), (one_before, two_before), "머리에 보인 곳 말고 다른 곳에 썼다");
+        assert!(
+            matches!(&a.mode, Mode::Idea(f) if f.title.text() == "one 에만"),
+            "선 곳이 다른데 폼이 닫혔다 — {:?}",
+            a.mode
+        );
+        assert!(
+            a.trouble.as_deref().is_some_and(|t| t.starts_with("쓰지 못했다") && t.contains("one")),
+            "{:?}",
+            a.trouble
+        );
+        assert_eq!(
+            (snapshots(&[&one]), snapshots(&[&two])),
+            (one_before, two_before),
+            "머리에 보인 곳 말고 다른 곳에 썼다"
+        );
     }
 
     /// **편집기로 적는 동안에도 담을 곳은 연 순간의 프로젝트다**(moai-08af). 편집기가 도는 사이
@@ -2757,18 +2854,31 @@ mod tests {
         a.follow();
         assert_eq!(names(&a), ["one", "two"], "시험의 전제 — 층이 섰다");
         // 옆 터미널이 읽음을 적었다 — 걸음이 등록 목록과 **같은 읽기로** 그것을 든다(moai-7yil).
-        let marks = format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
+        let marks =
+            format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
         std::fs::write(&cfg, &marks).unwrap();
         settle(&mut a);
-        assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "시험의 전제 — 옛 [read] 를 들었다");
+        assert_eq!(
+            a.legacy_read.get("argos-0001").map(String::as_str),
+            Some("2026-09-14T00:00:00Z"),
+            "시험의 전제 — 옛 [read] 를 들었다"
+        );
 
         // 설정이 바뀌었는데 그 읽기가 진다. 층도 읽어 둔 줄도 그대로여야 한다.
         s.register(&[&one, &two, &three]);
         chmod(&cfg, 0o000);
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two"], "못 읽은 것으로 층이 사라졌다");
-        assert_eq!(a.config_tried.trouble, Some(user_config::Trouble::Unreadable), "다시 읽을 때를 정할 갈래를 안 들었다");
-        assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "못 읽은 설정의 빈 표를 들여 옛 [read] 가 사라졌다");
+        assert_eq!(
+            a.config_tried.trouble,
+            Some(user_config::Trouble::Unreadable),
+            "다시 읽을 때를 정할 갈래를 안 들었다"
+        );
+        assert_eq!(
+            a.legacy_read.get("argos-0001").map(String::as_str),
+            Some("2026-09-14T00:00:00Z"),
+            "못 읽은 설정의 빈 표를 들여 옛 [read] 가 사라졌다"
+        );
 
         // 권한만 되돌린다 — 파일은 그대로라 표식도 그대로다. 시계가 돌아야 다시 읽는다.
         chmod(&cfg, 0o644);
@@ -2908,10 +3018,15 @@ mod tests {
         let mut a = layered(&cfg);
         a.user_config = Some(cfg.clone());
         a.follow();
-        let marks = format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
+        let marks =
+            format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
         std::fs::write(&cfg, &marks).unwrap();
         settle(&mut a);
-        assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "시험의 전제 — 옛 [read] 를 들었다");
+        assert_eq!(
+            a.legacy_read.get("argos-0001").map(String::as_str),
+            Some("2026-09-14T00:00:00Z"),
+            "시험의 전제 — 옛 [read] 를 들었다"
+        );
 
         std::fs::remove_file(&cfg).unwrap();
         settle(&mut a);
@@ -2984,11 +3099,16 @@ mod tests {
 
         // 한 번의 쓰기가 둘을 함께 바꾼다 — 한 걸음 뒤 둘 다 들어 있어야 한다.
         s.register(&[&one, &two, &three]);
-        let both = format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
+        let both =
+            format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
         std::fs::write(&cfg, both).unwrap();
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two", "three"], "등록을 안 들었다");
-        assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "옛 [read] 를 안 들었다");
+        assert_eq!(
+            a.legacy_read.get("argos-0001").map(String::as_str),
+            Some("2026-09-14T00:00:00Z"),
+            "옛 [read] 를 안 들었다"
+        );
     }
 
     /// **깨진 설정은 스스로 다시 읽지 않는다**(moai-9p7v) — 다시 읽어도 같고, 사람이 고치면 파일이
@@ -3006,15 +3126,24 @@ mod tests {
         let mut a = layered(&cfg);
         a.user_config = Some(cfg.clone());
         a.follow();
-        let marks = format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
+        let marks =
+            format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
         std::fs::write(&cfg, &marks).unwrap();
         settle(&mut a);
-        assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "시험의 전제 — 옛 [read] 를 들었다");
+        assert_eq!(
+            a.legacy_read.get("argos-0001").map(String::as_str),
+            Some("2026-09-14T00:00:00Z"),
+            "시험의 전제 — 옛 [read] 를 들었다"
+        );
 
         std::fs::write(&cfg, "[[project]\npath = ").unwrap();
         settle(&mut a);
         assert_eq!(a.config_stamp, Some(crate::store::stamp(&cfg)), "깨진 설정의 표식은 올라간다");
-        assert_eq!(a.config_tried.trouble.map(user_config::Trouble::again), Some(user_config::Again::Never), "깨진 글을 스스로 다시 읽는다");
+        assert_eq!(
+            a.config_tried.trouble.map(user_config::Trouble::again),
+            Some(user_config::Again::Never),
+            "깨진 글을 스스로 다시 읽는다"
+        );
         assert_eq!(names(&a), ["one", "two"], "오타 하나로 층이 통째로 사라졌다");
         let said = a.held.clone().expect("들고 선 까닭을 안 댔다");
         assert!(said.contains("들고 있다"), "지난 것을 들고 있다는 말이 없다 — {said:?}");
@@ -3135,7 +3264,12 @@ mod tests {
         let own = repo.read().unwrap().issues;
         // 전제: 겹친 것으로 재면 끝난 일이 자리 없다로 선다. 시계는 줄의 때(2026-09-01)에서 한참 지난
         // 것으로 준다 — 방금 집은 줄의 틈에 걸리면 전제가 안 선다.
-        assert_eq!(super::super::placed(&repo, &own, true, "2026-09-10T00:00:00Z", &Default::default(), crate::i18n::Lang::Ko).0, 1, "전제가 안 섰다");
+        assert_eq!(
+            super::super::placed(&repo, &own, true, "2026-09-10T00:00:00Z", &Default::default(), crate::i18n::Lang::Ko)
+                .0,
+            1,
+            "전제가 안 섰다"
+        );
 
         // git 이 저장소를 거절한다 — 파일로 읽는 자리 판정(`worktree::on_disk`)은 그래도 옆을 찾는다.
         std::fs::write(main.join(".git/config"), "[core\n").unwrap();
@@ -3147,7 +3281,14 @@ mod tests {
         let g = crate::worktree::gather(&repo, true).unwrap();
         let stamp = stamp_of(&repo);
         let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
-        let a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, crate::tui::said_trouble(&g.trouble, crate::i18n::Lang::Ko), g.watched, g.swept, &g.sides, &g.mine);
+        let a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(
+            g.origin,
+            crate::tui::said_trouble(&g.trouble, crate::i18n::Lang::Ko),
+            g.watched,
+            g.swept,
+            &g.sides,
+            &g.mine,
+        );
         assert_eq!(a.site.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (여는 읽기)");
     }
 
@@ -3171,7 +3312,14 @@ mod tests {
         let mut g = crate::worktree::gather(&repo, true).unwrap();
         super::super::watch(&mut g.watched, places);
         let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
-        let mut a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, crate::tui::said_trouble(&g.trouble, crate::i18n::Lang::Ko), g.watched, g.swept, &g.sides, &g.mine);
+        let mut a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(
+            g.origin,
+            crate::tui::said_trouble(&g.trouble, crate::i18n::Lang::Ko),
+            g.watched,
+            g.swept,
+            &g.sides,
+            &g.mine,
+        );
         let paths: std::collections::BTreeSet<PathBuf> = a.site.watched.iter().map(|(p, _)| p.clone()).collect();
         assert_eq!(paths.len(), a.site.watched.len(), "같은 파일을 두 번 지켜본다");
         // 여는 커밋 표는 다 짓게 둔다.

@@ -27,7 +27,6 @@ use crate::i18n::{Lang, say};
 use crate::text::{clip, width};
 use ratatui::crossterm::event::KeyEvent;
 
-
 /// 메뉴가 열렸나.
 pub fn open(chord: &Chord) -> bool {
     chord.held().first().is_some_and(|k| LEADER.matches(*k))
@@ -335,17 +334,7 @@ mod tests {
         let root = entries(ch.held(), &inside(), &[]);
         assert_eq!(keys_of(&root), ["/", "f", "n", "q", "p", "v", "s", "c", "m"]);
         let what: Vec<&str> = root.iter().map(|e| e.what.as_str()).collect();
-        assert_eq!(what, [
-            "검색",
-            "거름망",
-            "생각 담기",
-            "끝내기",
-            "+프로젝트",
-            "+보기",
-            "+정렬",
-            "+열",
-            "+읽음"
-        ]);
+        assert_eq!(what, ["검색", "거름망", "생각 담기", "끝내기", "+프로젝트", "+보기", "+정렬", "+열", "+읽음"]);
     }
 
     /// **칸 토글은 설정의 칸 이름을 번호에 붙이고, 있는 칸 수만큼만 선다**(moai-fmv5). 숨김은
@@ -357,7 +346,10 @@ mod tests {
         let items = entries(&[k(' '), k('v')], &c, &columns);
         assert_eq!(keys_of(&items), ["d", "l", "a", "1", "2", "3", "p", "w", "r"]);
         let text: Vec<String> = items.iter().map(Entry::text).collect();
-        assert_eq!(text[..6], ["done [숨김]", "미룸 [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]);
+        assert_eq!(
+            text[..6],
+            ["done [숨김]", "미룸 [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]
+        );
         let mut ch = Chord::default();
         for x in [' ', 'v', '4'] {
             assert_eq!(feed(&mut ch, &c, k(x)), None, "없는 칸의 번호가 돌았다");
@@ -383,7 +375,8 @@ mod tests {
     /// 상한까지 위에서 아래로 채운 뒤 다음 열로 간다. 키는 열 안에서 오른쪽 맞춤이다(doom 의 `RET`).
     #[test]
     fn the_grid_fills_columns_first_and_lines_up_the_colons() {
-        let items: Vec<Entry> = ["a", "b", "SPC", "d", "e", "f", "g", "h", "i", "j"].iter().map(|k| e(k, "설명")).collect();
+        let items: Vec<Entry> =
+            ["a", "b", "SPC", "d", "e", "f", "g", "h", "i", "j"].iter().map(|k| e(k, "설명")).collect();
         let g = grid(&items, 200, 4);
         assert_eq!((g.rows, g.columns.len(), g.hidden), (4, 3, 0));
         let keys = |c: usize| g.columns[c].iter().map(|p| p.key.trim_start()).collect::<Vec<_>>();
@@ -591,14 +584,24 @@ mod tests {
     fn toggles_show_their_state_in_words() {
         // 화면의 꼴 셋(상세 칸·워크트리·원문)만 본다 — 줄 보기(done·미룸)는 위 시험이 본다.
         let states = |c: Ctx| -> Vec<Option<&'static str>> {
-            entries(&[k(' '), k('v')], &c, &[]).iter().filter(|e| ["p", "w", "r"].contains(&e.key.as_str())).map(|e| e.state).collect()
+            entries(&[k(' '), k('v')], &c, &[])
+                .iter()
+                .filter(|e| ["p", "w", "r"].contains(&e.key.as_str()))
+                .map(|e| e.state)
+                .collect()
         };
         assert_eq!(states(inside()), [Some("[보임]"), Some("[꺼짐]"), Some("[그리기]")]);
-        assert_eq!(states(Ctx { worktree: true, raw: true, ..inside() }), [Some("[보임]"), Some("[켜짐]"), Some("[원문]")]);
+        assert_eq!(
+            states(Ctx { worktree: true, raw: true, ..inside() }),
+            [Some("[보임]"), Some("[켜짐]"), Some("[원문]")]
+        );
         // **상세를 숨기면 원문↔그리기가 빠진다** — 그 키는 상세의 글에만 걸려, 서 있어 봐야
         // 눌러도 화면이 그대로다(moai-ymnu 리뷰).
         assert_eq!(states(Ctx { detail: false, ..inside() }), [Some("[숨김]"), Some("[꺼짐]")]);
-        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])), ["d", "l", "a", "p", "w"]);
+        assert_eq!(
+            keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])),
+            ["d", "l", "a", "p", "w"]
+        );
     }
 
     /// **이름 없는 하위 접두어가 없다.** 표에 SPC 줄을 더하며 새 접두어를 만들면 여기서 멈춘다.

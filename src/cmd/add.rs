@@ -159,18 +159,13 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             super::code::BAD_INPUT,
         ));
     }
-    let Some(title) = args.title.clone().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
-    else {
-        return Err(Fail::new(
-            "제목이 없다. `moai add '제목'` 또는 `moai add --from -` 이다",
-        ));
+    let Some(title) = args.title.clone().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) else {
+        return Err(Fail::new("제목이 없다. `moai add '제목'` 또는 `moai add --from -` 이다"));
     };
     super::refuse_if_flag_like(&title)?;
     let body = read_body(args.body)?;
     let kind = kind_override.or(args.kind).unwrap_or_default();
-    let status = Status::new(
-        args.status.clone().unwrap_or_else(|| repo.config.first_status().to_string()),
-    );
+    let status = Status::new(args.status.clone().unwrap_or_else(|| repo.config.first_status().to_string()));
     // 칸 검사는 id 를 뽑기 **전에** 한다. 나중에 하면 쓰이지도 않은 id 가
     // 오류 메시지에 실려 나가고, 받는 쪽은 그게 만들어진 줄 안다.
     repo.config.require_known(status.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
@@ -250,7 +245,14 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
 ///
 /// 하나씩 만들면 에이전트가 중간에 흘리고, 중간에 죽으면 반만 남은 계획이
 /// 남는다. 한 번의 쓰기라 다 되거나 하나도 안 된다.
-fn bulk(ctx: &Ctx, repo: &Repo, from: &str, vars: &[String], dry_run: bool, assignee: Option<String>) -> R<Vec<String>> {
+fn bulk(
+    ctx: &Ctx,
+    repo: &Repo,
+    from: &str,
+    vars: &[String],
+    dry_run: bool,
+    assignee: Option<String>,
+) -> R<Vec<String>> {
     let drafts = read_plan(from, vars, draft::Shape::Plan)?;
 
     if dry_run {
@@ -430,9 +432,7 @@ pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>, into: Option<&st
                 // 견주는 쪽이 안 적힌 값을 기본값으로 읽는다.
                 // 안 적혔을 때만 종류를 본다: 우선순위가 없는 종류에 기본값을
                 // 씌우면 에픽이 `p2` 인 줄 안다.
-                priority: d
-                    .priority
-                    .or_else(|| (d.kind == Kind::Issue).then_some(model::DEFAULT_PRIORITY)),
+                priority: d.priority.or_else(|| (d.kind == Kind::Issue).then_some(model::DEFAULT_PRIORITY)),
                 tags: &d.tags,
                 epic: d.epic,
             })

@@ -126,7 +126,8 @@ fn with_block(existing: &str, block: &str) -> String {
         out.push_str(&body);
         return out;
     };
-    let marker = kept_marker(&existing[start..stop], &written, block).map_or_else(|| begin_marker(block), str::to_string);
+    let marker =
+        kept_marker(&existing[start..stop], &written, block).map_or_else(|| begin_marker(block), str::to_string);
     let mut out = format!("{}{marker}{nl}{written}{END}{nl}", &existing[..start]);
     let mut at = stop;
     for &(s, e) in &found[1..] {
@@ -532,11 +533,8 @@ fn ensure_lines(path: &Path, block: &str) -> Added {
     }
     tail.push_str(&missing.join("\n"));
     tail.push('\n');
-    let wrote = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .and_then(|mut f| f.write_all(tail.as_bytes()));
+    let wrote =
+        std::fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| f.write_all(tail.as_bytes()));
     match wrote {
         Ok(()) => Added::Wrote,
         Err(e) => Added::Unwritable { why: e.to_string(), missing: missing.iter().map(|l| (*l).to_string()).collect() },
@@ -700,7 +698,8 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // [`planted_elsewhere`] 에 있다.
     if let Some(Elsewhere::Worktree(main)) = &elsewhere {
         let there = main.clone();
-        let why = format!("여기는 딸린 워크트리다 — 트래커는 주 체크아웃에 산다\n      {}", there.join(".moai").display());
+        let why =
+            format!("여기는 딸린 워크트리다 — 트래커는 주 체크아웃에 산다\n      {}", there.join(".moai").display());
         // **친 대로 도로 낸다**(리뷰). 접두어를 빠뜨린 줄을 그대로 베끼면 디렉터리 이름에서 만든
         // 접두어가 서는데, 그것은 아래 갈래가 말하듯 **나중에 못 바꾼다** — 따라 친 한 줄이 그 저장소의
         // 모든 id 에 남는다. `--no-agents` 도 일부러 준 것이라 빼면 안 준 사람의 `AGENTS.md` 를 고친다.
@@ -785,8 +784,8 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         // **디렉터리 이름에서 만든 것은 줄여서 쓴다** — 사람이 고른 이름이 아니라 거절할
         // 까닭이 없다. 줄였다는 것은 출력이 말한다.
         (None, false) => {
-            let full = prefix_from(&root)
-                .ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.init_no_prefix")))?;
+            let full =
+                prefix_from(&root).ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.init_no_prefix")))?;
             let short = shorten(&full);
             if short != full {
                 shortened = Some(full);
@@ -811,19 +810,16 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         None
     } else {
         let read = read_agents(&agents_path).map_err(|e| {
-            Fail::new(format!("{e}\n      못 읽는 AGENTS.md 는 덮어쓰지 않는다 — 읽히게 고치거나 `--no-agents` 로 부른다"))
+            Fail::new(format!(
+                "{e}\n      못 읽는 AGENTS.md 는 덮어쓰지 않는다 — 읽히게 고치거나 `--no-agents` 로 부른다"
+            ))
         })?;
         Some(read.unwrap_or_default())
     };
 
     if !again {
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
-        for (name, body) in [
-            ("config.toml", config.as_str()),
-            ("issues.jsonl", ""),
-            ("journal.jsonl", ""),
-        ] {
+        std::fs::create_dir_all(&dir).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
+        for (name, body) in [("config.toml", config.as_str()), ("issues.jsonl", ""), ("journal.jsonl", "")] {
             let p = dir.join(name);
             std::fs::write(&p, body).map_err(|e| Fail::new(format!("{}: {e}", p.display())))?;
         }
@@ -834,10 +830,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // 못 건드린 자리 — 이름과 까닭과 **손으로 더할 줄**을 함께 든다(moai-gq1c, moai-0dwc). 줄을 안
     // 대면 사람은 도구가 무엇을 넣으려 했는지 모른 채 파일만 고치게 된다. 못 읽은 것과 못 쓴 것을
     // 가르는 것은 **말뿐이다** — 사람이 할 일이 인코딩과 권한으로 갈린다.
-    let untouched: Vec<(&str, &Added, &str)> = [(".gitattributes", &attrs, GITATTRIBUTES), (".gitignore", &ignore, GITIGNORE)]
-        .into_iter()
-        .filter(|(_, done, _)| done.trouble().is_some())
-        .collect();
+    let untouched: Vec<(&str, &Added, &str)> =
+        [(".gitattributes", &attrs, GITATTRIBUTES), (".gitignore", &ignore, GITIGNORE)]
+            .into_iter()
+            .filter(|(_, done, _)| done.trouble().is_some())
+            .collect();
 
     // `AGENTS.md` **하나만** 쓴다. `CLAUDE.md` 에도 같은 것을 쓰면 곧 갈라지고,
     // 갈라진 두 벌 중 어느 것이 참인지 아무도 모른다.
@@ -876,9 +873,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // (moai-knn0) 그것으로 물으면 블록이 이미 맞는 저장소에서는 이 안내가 영영 안 선다.
     let claude_needs_pointer = agents_now.is_some()
         && root.join("CLAUDE.md").exists()
-        && !std::fs::read_to_string(root.join("CLAUDE.md"))
-            .unwrap_or_default()
-            .contains("AGENTS.md");
+        && !std::fs::read_to_string(root.join("CLAUDE.md")).unwrap_or_default().contains("AGENTS.md");
 
     if ctx.json {
         let mut v = serde_json::json!({
@@ -911,7 +906,9 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             v["untouched"] = serde_json::json!(
                 untouched
                     .iter()
-                    .filter_map(|(name, done, _)| done.trouble().map(|(kind, why)| (*name, serde_json::json!({ "kind": kind, "why": why }))))
+                    .filter_map(|(name, done, _)| done
+                        .trouble()
+                        .map(|(kind, why)| (*name, serde_json::json!({ "kind": kind, "why": why }))))
                     .collect::<std::collections::BTreeMap<_, _>>()
             );
         }
@@ -1201,10 +1198,15 @@ mod tests {
         let fresh = with_block("", block);
         let (ours, theirs) = (begin_marker("우리 글\n"), begin_marker("남의 글\n"));
         for (what, text) in [
-            ("마커 줄만", format!("# 산문\n\n<<<<<<< HEAD\n{ours}\n=======\n{theirs}\n>>>>>>> b\n{block}{END}\n꼬리\n")),
+            (
+                "마커 줄만",
+                format!("# 산문\n\n<<<<<<< HEAD\n{ours}\n=======\n{theirs}\n>>>>>>> b\n{block}{END}\n꼬리\n"),
+            ),
             (
                 "마커와 첫 줄",
-                format!("# 산문\n\n<<<<<<< HEAD\n{ours}\n## 우리\n=======\n{theirs}\n## 남\n>>>>>>> b\n본문\n{END}\n꼬리\n"),
+                format!(
+                    "# 산문\n\n<<<<<<< HEAD\n{ours}\n## 우리\n=======\n{theirs}\n## 남\n>>>>>>> b\n본문\n{END}\n꼬리\n"
+                ),
             ),
             (
                 "diff3",
@@ -1292,7 +1294,8 @@ mod tests {
             assert_eq!(got, want, "{full}");
             assert!(got.chars().count() <= PREFIX_MAX, "{full} → {got}");
             // 줄인 것도 설정이 받는 접두어다.
-            crate::config::Config::parse(&format!("prefix = \"{got}\"\n")).unwrap_or_else(|e| panic!("{full} → {got}: {e}"));
+            crate::config::Config::parse(&format!("prefix = \"{got}\"\n"))
+                .unwrap_or_else(|e| panic!("{full} → {got}: {e}"));
         }
     }
 

@@ -245,7 +245,10 @@ mod tests {
         let seen: std::collections::BTreeSet<_> = (0..SPIN.len()).map(spin_frame).collect();
         assert_eq!(seen.len(), SPIN.len(), "프레임이 겹친다");
         assert_eq!(spin_frame(SPIN.len()), spin_frame(0));
-        assert!(!SPIN.iter().any(|f| ["todo", "in_progress", "review", "done"].iter().any(|s| glyph(s) == *f)), "도는 글자가 멈춘 글리프와 겹친다");
+        assert!(
+            !SPIN.iter().any(|f| ["todo", "in_progress", "review", "done"].iter().any(|s| glyph(s) == *f)),
+            "도는 글자가 멈춘 글리프와 겹친다"
+        );
     }
 
     #[test]

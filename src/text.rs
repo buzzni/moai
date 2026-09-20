@@ -178,7 +178,8 @@ pub fn quoted(s: &str) -> String {
     }
     // `=` 는 첫 낱말이 아니면 껍데기에 뜻이 없다 — 안내가 내는 경로는 늘 인자 자리다.
     let plain = !s.is_empty()
-        && s.chars().all(|c| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | ',' | ':' | '@' | '%' | '='));
+        && s.chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '+' | ',' | ':' | '@' | '%' | '='));
     if plain { s.to_string() } else { single_quoted(s) }
 }
 
@@ -272,7 +273,19 @@ mod tests {
         if !probe.success() {
             return;
         }
-        for s in ["/w/My Projects", "/w/it's", "-rf", "-my dir", "/w/a\tb", "/w/a\nb", "/w/\u{1b}[2J", "/w/\u{85}끝 ", "/w/\\x41", "/w/$HOME", "/w/`id`"] {
+        for s in [
+            "/w/My Projects",
+            "/w/it's",
+            "-rf",
+            "-my dir",
+            "/w/a\tb",
+            "/w/a\nb",
+            "/w/\u{1b}[2J",
+            "/w/\u{85}끝 ",
+            "/w/\\x41",
+            "/w/$HOME",
+            "/w/`id`",
+        ] {
             let out = std::process::Command::new("bash")
                 .arg("-c")
                 .arg(format!("printf %s {}", shell_word(s)))
@@ -307,7 +320,12 @@ mod tests {
                 .arg(format!("set -- {}; printf '%s|%s' \"$#\" \"$1\"", single_quoted(s)))
                 .output()
                 .unwrap();
-            assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("1|{s}"), "{:?} 를 bash 가 한 낱말로 안 읽었다", single_quoted(s));
+            assert_eq!(
+                String::from_utf8(out.stdout).unwrap(),
+                format!("1|{s}"),
+                "{:?} 를 bash 가 한 낱말로 안 읽었다",
+                single_quoted(s)
+            );
         }
     }
 
@@ -338,7 +356,8 @@ mod tests {
     fn clipping_never_exceeds_the_budget() {
         // `❤️` 는 글자로 재면 1 칸, 글로 재면 2 칸이다 — 글자로만 재어 자르면 상한을 두 배 가까이 넘겼다(moai-xemz 리뷰).
         let hearts = format!("#{}", "\u{2764}\u{FE0F}".repeat(13));
-        for s in ["짧다", "아주 긴 한글 제목이 여기 들어간다", "a very long ascii title here", hearts.as_str()] {
+        for s in ["짧다", "아주 긴 한글 제목이 여기 들어간다", "a very long ascii title here", hearts.as_str()]
+        {
             for max in 0..20 {
                 assert!(width(&clip(s, max)) <= max, "{s:?} @ {max} → {:?}", clip(s, max));
             }

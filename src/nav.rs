@@ -325,8 +325,7 @@ impl Index {
         // 마일스톤을 뒷줄로 세는 것(moai-0prl)과, 이슈 중복에서 자식이 걸리는
         // 줄(`has_kids`)과 같은 자다. 가려진 앞줄은 잎으로 남아 **보인다** —
         // 깨진 자료는 숨기지 않고 `duplicate_id` 가 따로 드러낸다.
-        self.find(&issues[at].id) == Some(at)
-            && (crate::report::is_group(&issues[at]) || self.has_kids[at])
+        self.find(&issues[at].id) == Some(at) && (crate::report::is_group(&issues[at]) || self.has_kids[at])
     }
 
     /// id 로 줄을 찾는다. 화면이 프레임마다 부르므로 훑지 않는다.
@@ -366,12 +365,7 @@ impl Index {
     /// 안 보인다 — 찾으려던 것을 거름망이 숨기는 셈이다. 반대로 자손만 보면
     /// `type=epic` 같은 물음에 에픽이 제 손으로 사라진다. 그래서 둘 중
     /// 하나라도 걸리면 남긴다.
-    pub fn entries_where(
-        &self,
-        issues: &[Issue],
-        path: &Path,
-        keep: &dyn Fn(usize) -> bool,
-    ) -> Vec<Entry> {
+    pub fn entries_where(&self, issues: &[Issue], path: &Path, keep: &dyn Fn(usize) -> bool) -> Vec<Entry> {
         self.entries_sorted(issues, path, keep, &|a, b| crate::query::display_order(&issues[a], &issues[b]))
     }
 
@@ -574,7 +568,6 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-
     /// 그 이슈가 걸리는 단 하나의 자리.
     fn home(&self, at: usize) -> Path {
         let me = &self.issues[at];
@@ -663,8 +656,7 @@ impl Ctx<'_> {
                 // 멤버만 옛 자리에 남는다 — 그 자리는 뿌리에서 닿는 길이 없어
                 // (바구니는 `Milestone(None)` 과 `Lost` 뿐이다) 그 줄들이
                 // 트리에서도 탐색기에서도 통째로 사라진다. 실제로 그랬다.
-                let mut path =
-                    if self.lost(e) { vec![Seg::Lost] } else { self.under_milestone(e) };
+                let mut path = if self.lost(e) { vec![Seg::Lost] } else { self.under_milestone(e) };
                 path.push(Seg::Epic(e.to_string()));
                 path
             }
@@ -739,12 +731,7 @@ mod tests {
     fn the_tree_hangs_each_open_group_under_its_row() {
         let mut epic = make("m-epic", Kind::Epic);
         epic.milestone = Some("m-stone".into());
-        let issues = vec![
-            make("m-stone", Kind::Milestone),
-            epic,
-            epic_of("m-a", "m-epic"),
-            epic_of("m-b", "m-epic"),
-        ];
+        let issues = vec![make("m-stone", Kind::Milestone), epic, epic_of("m-a", "m-epic"), epic_of("m-b", "m-epic")];
         let index = Index::of(&issues);
         let order = |a: usize, b: usize| crate::query::display_order(&issues[a], &issues[b]);
         let ids = |rows: &[(Entry, Twig)]| -> Vec<(String, usize, bool)> {
@@ -776,11 +763,7 @@ mod tests {
         let some = index.entries_tree(&issues, &Path::new(), &|at| at != b, &order, &|_| true);
         assert_eq!(
             ids(&some),
-            [
-                ("m-stone".to_string(), 0, false),
-                ("m-epic".to_string(), 1, true),
-                ("m-a".to_string(), 2, true),
-            ],
+            [("m-stone".to_string(), 0, false), ("m-epic".to_string(), 1, true), ("m-a".to_string(), 2, true),],
             "거름망이 층마다 걸리지 않았거나 막내가 안 옮겨졌다"
         );
     }
@@ -827,15 +810,15 @@ mod tests {
         let issues = vec![
             make("argos-0001", Kind::Milestone),
             epic_in_milestone,
-            make("argos-0003", Kind::Epic),           // 마일스톤 없는 에픽
-            epic_of("argos-0004", "argos-0002"),      // 평범한 멤버
-            epic_of("argos-0005", "argos-0002"),      // 자식을 가진 멤버
-            make("argos-0005.aa1", Kind::Issue),      // 그 자식 (에픽 물려받음)
-            own_milestone,                             // 제 마일스톤을 따로 적은 것
-            epic_of("argos-0008", "argos-zzzz"),      // 없는 에픽 → 길 잃음
-            make("argos-0010", Kind::Issue),          // 아무 데도 안 딸린 것
-            make("argos-0011.bb2", Kind::Issue),      // 부모 줄이 없는 고아
-            child_elsewhere,                           // 제 에픽이 부모와 다른 자식
+            make("argos-0003", Kind::Epic),      // 마일스톤 없는 에픽
+            epic_of("argos-0004", "argos-0002"), // 평범한 멤버
+            epic_of("argos-0005", "argos-0002"), // 자식을 가진 멤버
+            make("argos-0005.aa1", Kind::Issue), // 그 자식 (에픽 물려받음)
+            own_milestone,                       // 제 마일스톤을 따로 적은 것
+            epic_of("argos-0008", "argos-zzzz"), // 없는 에픽 → 길 잃음
+            make("argos-0010", Kind::Issue),     // 아무 데도 안 딸린 것
+            make("argos-0011.bb2", Kind::Issue), // 부모 줄이 없는 고아
+            child_elsewhere,                     // 제 에픽이 부모와 다른 자식
         ];
         assert_exactly_once(&issues);
     }
@@ -896,15 +879,16 @@ mod tests {
             epic,
             make("argos-0003", Kind::Epic),
             epic_of("argos-0004", "argos-0002"),
-            make("argos-0004.aa1", Kind::Idea),   // 멤버 밑에 접힌 생각
-            make("argos-0004.bb2", Kind::Issue),  // 멤버의 자식 — 에픽을 물려받는다
-            make("argos-0002.in", Kind::Epic),    // `moai epic add --parent argos-0002`
+            make("argos-0004.aa1", Kind::Idea),  // 멤버 밑에 접힌 생각
+            make("argos-0004.bb2", Kind::Issue), // 멤버의 자식 — 에픽을 물려받는다
+            make("argos-0002.in", Kind::Epic),   // `moai epic add --parent argos-0002`
             elsewhere,
-            make("argos-0009", Kind::Issue),      // 마일스톤이 있으니 `(마일스톤 없음)` 에 선다
+            make("argos-0009", Kind::Issue), // 마일스톤이 있으니 `(마일스톤 없음)` 에 선다
         ];
         let index = Index::of(&issues);
         let ids = |group: &str| {
-            let mut v: Vec<&str> = index.under_group(&issues, group).into_iter().map(|at| issues[at].id.as_str()).collect();
+            let mut v: Vec<&str> =
+                index.under_group(&issues, group).into_iter().map(|at| issues[at].id.as_str()).collect();
             v.sort();
             v
         };
@@ -961,13 +945,7 @@ mod tests {
         ];
         let index = Index::of(&issues);
         let root = index.entries(&issues, &Vec::new());
-        assert_eq!(
-            root,
-            vec![
-                Entry::Dir { seg: Seg::Epic("argos-0002".into()), at: Some(0) },
-                Entry::Leaf { at: 2 },
-            ]
-        );
+        assert_eq!(root, vec![Entry::Dir { seg: Seg::Epic("argos-0002".into()), at: Some(0) }, Entry::Leaf { at: 2 },]);
         assert_exactly_once(&issues);
     }
 
@@ -1008,7 +986,7 @@ mod tests {
             make("argos-0003", Kind::Epic),
             epic_of("argos-0004", "argos-0002"),
             make("argos-0004.bb2", Kind::Issue), // 에픽을 물려받는다 → 부모 밑
-            elsewhere,                            // 제 에픽이 다르다 → 그 에픽 밑
+            elsewhere,                           // 제 에픽이 다르다 → 그 에픽 밑
         ];
         let index = Index::of(&issues);
 
@@ -1027,18 +1005,15 @@ mod tests {
         let issues = vec![
             make("argos-0002", Kind::Epic),
             epic_of("argos-0004", "argos-0002"),
-            make("argos-0004.aa1", Kind::Idea),                // 이슈 밑에 접힌 생각
-            make("argos-0004.aa1.bb2", Kind::Issue),           // 에픽을 안 적은 자식
-            epic_of("argos-0004.aa1.cc3", "argos-0002"),       // 같은 에픽을 적은 자식
-            thought_in_epic,                                   // 뿌리로 올라간 생각
-            epic_of("argos-0005.dd4", "argos-0002"),           // 제 에픽을 적은 자식
+            make("argos-0004.aa1", Kind::Idea),          // 이슈 밑에 접힌 생각
+            make("argos-0004.aa1.bb2", Kind::Issue),     // 에픽을 안 적은 자식
+            epic_of("argos-0004.aa1.cc3", "argos-0002"), // 같은 에픽을 적은 자식
+            thought_in_epic,                             // 뿌리로 올라간 생각
+            epic_of("argos-0005.dd4", "argos-0002"),     // 제 에픽을 적은 자식
         ];
         let index = Index::of(&issues);
-        let under = vec![
-            Seg::Epic("argos-0002".into()),
-            Seg::Issue("argos-0004".into()),
-            Seg::Issue("argos-0004.aa1".into()),
-        ];
+        let under =
+            vec![Seg::Epic("argos-0002".into()), Seg::Issue("argos-0004".into()), Seg::Issue("argos-0004.aa1".into())];
         assert_eq!(index.home_of(3), &under);
         assert_eq!(index.home_of(4), &under);
         assert_eq!(index.home_of(6), &vec![Seg::Epic("argos-0002".into())]);
@@ -1067,7 +1042,7 @@ mod tests {
             own("argos-0004", Kind::Issue, "argos-0001"),
             own("argos-0004.aa1", Kind::Issue, "argos-0002"), // 부모 밑에 접힌다
             own("argos-0004.aa1.bb2", Kind::Issue, "argos-0002"), // 손자도
-            own("argos-0004.cc3", Kind::Idea, "argos-0002"), // 이슈 밑에 접힌 생각
+            own("argos-0004.cc3", Kind::Idea, "argos-0002"),  // 이슈 밑에 접힌 생각
             own("argos-0004.cc3.dd4", Kind::Issue, "argos-0002"), // 그 밑의 일
             rooted_thought,
             own("argos-0006.ee5", Kind::Issue, "argos-0001"), // 뿌리로 올라간 생각 밑
@@ -1081,7 +1056,14 @@ mod tests {
         assert_counts_what_it_draws(&issues);
         let index = Index::of(&issues);
         assert_eq!(index.home_of(9), &vec![Seg::Milestone(None), Seg::Issue("argos-0006".into())]);
-        for (at, stone) in [(10, "argos-0001"), (11, "argos-0001"), (12, "argos-0001"), (13, "argos-0001"), (14, "argos-0002"), (15, "argos-0002")] {
+        for (at, stone) in [
+            (10, "argos-0001"),
+            (11, "argos-0001"),
+            (12, "argos-0001"),
+            (13, "argos-0001"),
+            (14, "argos-0002"),
+            (15, "argos-0002"),
+        ] {
             assert_eq!(index.home_of(at).first(), Some(&Seg::Milestone(Some(stone.into()))), "{}", issues[at].id);
         }
         assert_exactly_once(&issues);
@@ -1230,7 +1212,8 @@ mod tests {
 
         // 같은 종류도 같다(moai-9p36.kqi) — 앞줄이 적은 에픽이 에픽 없는 뒷줄에 남아
         // 둘 다 그 에픽 밑에 그려지고 세어지는데, 뒷줄은 에픽이 없다고 말했다.
-        let issues = vec![make("argos-0001", Kind::Epic), epic_of("argos-0002", "argos-0001"), make("argos-0002", Kind::Issue)];
+        let issues =
+            vec![make("argos-0001", Kind::Epic), epic_of("argos-0002", "argos-0001"), make("argos-0002", Kind::Issue)];
         assert!(!crate::report::groups(&issues).contains_key("argos-0002"));
         let index = Index::of(&issues);
         assert_eq!((index.home_of(1), index.home_of(2)), (&Vec::new(), &Vec::new()));
@@ -1321,10 +1304,7 @@ mod tests {
         // "todo 인 것만" — 에픽 자신은 안 걸린다
         let todo = |at: usize| issues[at].status.as_str() == "todo";
         let root = index.entries_where(&issues, &Vec::new(), &todo);
-        assert!(
-            root.iter().any(|e| e.at() == Some(0)),
-            "끝난 에픽이 사라지면서 걸린 멤버까지 숨겼다 — {root:?}"
-        );
+        assert!(root.iter().any(|e| e.at() == Some(0)), "끝난 에픽이 사라지면서 걸린 멤버까지 숨겼다 — {root:?}");
         // 그 안에는 걸린 멤버만 남는다
         let inside = index.entries_where(&issues, &vec![Seg::Epic("argos-0001".into())], &todo);
         assert_eq!(inside.len(), 1);
@@ -1369,17 +1349,10 @@ mod tests {
     /// 그 자식이 두 곳에 나타난다.
     #[test]
     fn a_duplicate_id_does_not_clone_its_child() {
-        let issues = vec![
-            make("argos-0010", Kind::Issue),
-            make("argos-0010", Kind::Issue),
-            make("argos-0010.aa1", Kind::Issue),
-        ];
+        let issues =
+            vec![make("argos-0010", Kind::Issue), make("argos-0010", Kind::Issue), make("argos-0010.aa1", Kind::Issue)];
         let index = Index::of(&issues);
-        let dirs = index
-            .entries(&issues, &Vec::new())
-            .into_iter()
-            .filter(|e| matches!(e, Entry::Dir { .. }))
-            .count();
+        let dirs = index.entries(&issues, &Vec::new()).into_iter().filter(|e| matches!(e, Entry::Dir { .. })).count();
         assert_eq!(dirs, 1, "같은 id 의 줄 둘이 나란히 디렉터리가 됐다");
         assert_exactly_once(&issues);
     }
@@ -1407,8 +1380,7 @@ mod tests {
             e
         };
         for (a, b) in [(Some("argos-m001"), None), (None, Some("argos-m001"))] {
-            let issues =
-                vec![make("argos-m001", Kind::Milestone), own(a), own(b), epic_of("argos-0002", "argos-0001")];
+            let issues = vec![make("argos-m001", Kind::Milestone), own(a), own(b), epic_of("argos-0002", "argos-0001")];
             assert_counts_what_it_draws(&issues);
             assert_exactly_once(&issues);
         }
@@ -1445,7 +1417,8 @@ mod tests {
         // **가려진 줄은 멤버 덕에 거름망을 지나지 않는다.** 그 줄은 폴더가 아니라
         // 멤버를 거느리지 않는다 — 멤버만 걸리는 물음에 그 잎이 따라 서면, 걸리지
         // 않은 줄이 걸린 것처럼 보인다.
-        let pair = vec![make("argos-0001", Kind::Epic), make("argos-0001", Kind::Epic), epic_of("argos-0002", "argos-0001")];
+        let pair =
+            vec![make("argos-0001", Kind::Epic), make("argos-0001", Kind::Epic), epic_of("argos-0002", "argos-0001")];
         let index = Index::of(&pair);
         let member = |at: usize| at == 2;
         assert_eq!(

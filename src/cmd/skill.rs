@@ -38,15 +38,7 @@ fn place() -> R<Place> {
     let prefix = repo.config.prefix.clone();
     // **누구인지 묻지 않는다.** 심는 것은 이력이 남는 일이 아니라 설정이다.
     let files = plant(&prefix, &root, &exe);
-    Ok(Place {
-        dir: root.join(skill::DIR),
-        market: skill::market(&prefix, &root),
-        root,
-        prefix,
-        exe,
-        on_path,
-        files,
-    })
+    Ok(Place { dir: root.join(skill::DIR), market: skill::market(&prefix, &root), root, prefix, exe, on_path, files })
 }
 
 /// 훅에 이 실행 파일을 적었을 때 심을 트리.
@@ -102,17 +94,13 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     for (path, body) in &files {
         let at = dir.join(path);
         if let Some(parent) = at.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| Fail::new(format!("{}: {e}", parent.display())))?;
+            std::fs::create_dir_all(parent).map_err(|e| Fail::new(format!("{}: {e}", parent.display())))?;
         }
         std::fs::write(&at, body).map_err(|e| Fail::new(format!("{}: {e}", at.display())))?;
     }
 
     let steps = match &clash {
-        Some(other) => vec![(
-            format!("`{market}` 이 이미 {} 를 가리킨다 — 등록은 건너뛴다", other.display()),
-            false,
-        )],
+        Some(other) => vec![(format!("`{market}` 이 이미 {} 를 가리킨다 — 등록은 건너뛴다", other.display()), false)],
         None => register(&root, &dir, &market, scope, known_at(&market).is_some()),
     };
 
@@ -194,7 +182,10 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         // **절대 경로를 낸다.** 저장소 뿌리를 기준으로 한 `./.claude/moai-plugin` 은
         // 하위 디렉터리에서 부른 사람이 그 자리에서 치면 없는 디렉터리를 가리킨다.
         // 빈칸 든 경로를 그대로 내면 친 줄이 인자 둘로 갈린다 — 따옴표로 싼다.
-        out.push(format!("  claude plugin marketplace add {} --scope {scope}", crate::text::shell_word(&dir.display().to_string())));
+        out.push(format!(
+            "  claude plugin marketplace add {} --scope {scope}",
+            crate::text::shell_word(&dir.display().to_string())
+        ));
         out.push(format!("  claude plugin install moai@{market} --scope {scope} -y"));
     }
     Ok(out)
@@ -280,10 +271,7 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     let mark = |ok: bool| if ok { "·" } else { "!" };
     let mut out = vec![format!("moai skill — {}", dir.display())];
     out.push(match (&listed, &clash) {
-        (_, Some(other)) => format!(
-            "  ! 마켓플레이스  `{market}` 이 다른 자리({}) 를 가리킨다",
-            other.display()
-        ),
+        (_, Some(other)) => format!("  ! 마켓플레이스  `{market}` 이 다른 자리({}) 를 가리킨다", other.display()),
         (Some(_), None) => format!("  · 마켓플레이스  `{market}` 등록됨"),
         (None, _) => format!("  ! 마켓플레이스  `{market}` 등록 안 됨"),
     });
@@ -424,9 +412,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     let unplugged = !dry_run && claude && steps.len() >= unplug && steps[..unplug].iter().all(|(_, ok)| *ok);
     let along_steps: Vec<(String, bool)> =
         if unplugged { along.iter().map(|a| (shown(a), run(&root, a))).collect() } else { Vec::new() };
-    let failed = steps.iter().any(|(_, ok)| !ok)
-        || clash.is_some()
-        || (!dry_run && !claude && !plan.is_empty());
+    let failed = steps.iter().any(|(_, ok)| !ok) || clash.is_some() || (!dry_run && !claude && !plan.is_empty());
     if failed {
         super::note_partial();
     }
@@ -492,7 +478,11 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     }
     if unplugged {
         for (cmd, ok) in &along_steps {
-            out.push(if *ok { format!("  · {cmd}") } else { format!("  ! {cmd}  — 실패. 손으로 다시 친다") });
+            out.push(if *ok {
+                format!("  · {cmd}")
+            } else {
+                format!("  ! {cmd}  — 실패. 손으로 다시 친다")
+            });
         }
     } else {
         out.extend(along.iter().map(|a| format!("  - {}  — 앞 걸음이 실패해 안 불렀다", shown(a))));
@@ -518,10 +508,7 @@ fn shown(args: &[String]) -> String {
 /// PATH 에서 찾아지는 그 이름. 훅에 이름을 적어도 되는지, `claude` 를 부를 수
 /// 있는지를 이것이 정한다.
 fn which(name: &str) -> Option<PathBuf> {
-    let out = Command::new("sh")
-        .args(["-c", "command -v -- \"$1\"", "sh", name])
-        .output()
-        .ok()?;
+    let out = Command::new("sh").args(["-c", "command -v -- \"$1\"", "sh", name]).output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -603,16 +590,15 @@ fn other_user_moai(target: &str) -> bool {
     plugins.iter().any(|(key, rows)| {
         key.starts_with("moai@")
             && key != target
-            && rows.as_array().is_some_and(|rows| rows.iter().any(|r| r.get("scope").and_then(|s| s.as_str()) == Some("user")))
+            && rows
+                .as_array()
+                .is_some_and(|rows| rows.iter().any(|r| r.get("scope").and_then(|s| s.as_str()) == Some("user")))
     })
 }
 
 /// 설치본 곁에 남은 옛 판 디렉터리의 수.
 fn stale_copies(installs: &[skill::Install]) -> usize {
-    let Some(parent) = installs
-        .first()
-        .and_then(|i| Path::new(&i.install_path).parent().map(Path::to_path_buf))
-    else {
+    let Some(parent) = installs.first().and_then(|i| Path::new(&i.install_path).parent().map(Path::to_path_buf)) else {
         return 0;
     };
     let live: Vec<&str> = installs.iter().map(|i| i.version.as_str()).collect();
@@ -689,10 +675,7 @@ impl Companion {
     /// 빠져나갈 길 한 줄(moai-mfw1). 막힌 채로는 몇 번을 다시 불러도 건너뛰기만 한다 —
     /// moai 의 이름이 막혔을 때 내는 줄과 같은 길이다.
     fn escape(&self) -> String {
-        format!(
-            "    그 이름을 이제 안 쓰면 `claude plugin marketplace remove {}` 뒤에 다시 부른다",
-            self.market()
-        )
+        format!("    그 이름을 이제 안 쓰면 `claude plugin marketplace remove {}` 뒤에 다시 부른다", self.market())
     }
 
     fn json(&self) -> serde_json::Value {
@@ -775,12 +758,7 @@ fn register(root: &Path, dir: &Path, market: &str, scope: &str, listed: bool) ->
 /// 제 자리로 프로젝트를 정하므로, 하위 디렉터리에서 부르면 엉뚱한 프로젝트에
 /// 적거나 못 찾는다.
 fn run(root: &Path, args: &[String]) -> bool {
-    Command::new("claude")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    Command::new("claude").args(args).current_dir(root).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 #[cfg(test)]

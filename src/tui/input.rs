@@ -614,7 +614,8 @@ mod tests {
     /// 잘리며, 커서는 칸 안에 서고 조각 속 제 자리를 가리킨다.
     #[test]
     fn every_view_fits_and_points_at_the_cursor() {
-        for s in ["", "abc", "가나다라마바사", "a가b나c다", "😀x👨\u{200d}👩e\u{301}한", "  빈 칸 "] {
+        for s in ["", "abc", "가나다라마바사", "a가b나c다", "😀x👨\u{200d}👩e\u{301}한", "  빈 칸 "]
+        {
             let mut i = Input::new(s);
             press(&mut i, KeyCode::Home);
             let bounds: Vec<usize> = i.text.grapheme_indices(true).map(|(k, _)| k).chain([i.text.len()]).collect();
@@ -665,8 +666,8 @@ mod tests {
     /// 자리가 사라진다.
     fn foreign(code: &str, components: &[&str]) -> Vec<String> {
         const PRIMITIVES: [&str; 18] = [
-            "self", "char", "str", "bool", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128",
-            "isize", "f32", "f64",
+            "self", "char", "str", "bool", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64",
+            "i128", "isize", "f32", "f64",
         ];
         const IMPURE_STD: [&str; 8] = ["io", "fs", "os", "env", "process", "net", "thread", "time"];
         const IMPURE_MACROS: [&str; 5] = ["print", "println", "eprint", "eprintln", "dbg"];
@@ -683,7 +684,8 @@ mod tests {
                     r if r.starts_with(char::is_uppercase) || PRIMITIVES.contains(&r) => true,
                     "ratatui" => {
                         p == "ratatui::buffer::CellWidth"
-                            || p.strip_prefix("ratatui::crossterm::event::").is_some_and(|t| t.starts_with(char::is_uppercase))
+                            || p.strip_prefix("ratatui::crossterm::event::")
+                                .is_some_and(|t| t.starts_with(char::is_uppercase))
                     }
                     "unicode_segmentation" | "unicode_width" => true,
                     "crate" => second == "text" || second == "i18n",
