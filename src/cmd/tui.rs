@@ -66,6 +66,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 들어오는 걸음에서 `Repo::open(<루트>)` 을 열어 `here()` 가 루트로 뒤집혔고, 그때부터 커밋 표가
     // 이 가지의 커밋을 잃고 집기 표식도 안 적혔다.
     let layer = crate::tui::layer::Layer::of(&reg, Some(repo.here()));
+    // 옆 워크트리의 문제는 **펴서** 싣는다(moai-dpbi). 탐색기의 말은 아직 한국어로 박혀 있어
+    // (moai-ra67 가 옮긴다) 다시 읽기(`tui::prepare`)와 **같은 말**로 편다 — 여는 화면과 다음
+    // 걸음이 다른 말로 서면 배너가 걸음마다 말을 바꾼다.
+    let trouble = crate::tui::said_trouble(&trouble);
     let mut app =
         App::open(repo, load, index, ground, path, stamp).overlaid(origin, trouble, watched, swept, &sides, &mine);
     // **판 것은 여기서 버린다**(moai-kos1) — 옆 스냅샷의 줄은 이미 `load` 에 겹쳐 들어왔고,

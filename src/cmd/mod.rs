@@ -110,10 +110,12 @@ pub fn had_partial() -> bool {
 /// 깃발은 안 세운다. 옆 워크트리의 깨진 줄로 `moai status` 가 비영 종료하면
 /// 제 파일은 멀쩡한데 도구가 실패로 읽힌다. 제 파일의 못 읽는 줄은 전과 같이
 /// `load.errors` 에 남아 부르는 쪽이 제 길로 알린다.
-pub fn gather(repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::Gathered> {
+/// **말은 여기서 고른다**(moai-dpbi) — `worktree::gather` 는 자료만 낸다(`worktree::Trouble`).
+/// 이 줄은 `moai status` 의 첫 화면 곁에 서므로, 그 화면과 같은 말이어야 한다.
+pub fn gather(ctx: &Ctx, repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::Gathered> {
     let g = crate::worktree::gather(repo, worktree)?;
     for t in g.unfound.iter().chain(&g.trouble) {
-        eprintln!("{t}");
+        eprintln!("{}", crate::view::trouble_line(ctx.lang(), t));
     }
     Ok(g)
 }

@@ -124,5 +124,13 @@
   "refuse.link_both_ways": "{id} 를 막으면서 동시에 막음을 없앨 수는 없다",
   "refuse.defer_empty_why": "까닭이 비었다",
   "refuse.edit_nothing": "무엇을 고칠지 적지 않았다. `moai edit --help` 가 고칠 수 있는 것을 낸다",
-  "refuse.init_no_prefix": "디렉터리 이름에서 접두어를 만들 수 없다. `moai init <접두어>`"
+  "refuse.init_no_prefix": "디렉터리 이름에서 접두어를 만들 수 없다. `moai init <접두어>`",
+  "trouble.skipped": "{at} — 읽을 수 없는 줄 {n}개는 빼고 겹쳤다",
+  "trouble.no_git": "git 을 부르지 못해 워크트리를 못 찾았다 — {why}",
+  "trouble.failed": "워크트리를 못 찾았다 — {why}",
+  "trouble.stream": "워크트리 목록을 읽다 끊겼다 — {why}",
+  "trouble.encoding": "워크트리 목록을 못 읽었다 — {why}",
+  "warn.lang_table": "`{key}` 은 `[{key}]` 표여야 한다 — 지금은 {is}",
+  "warn.lang_word": "`{key}` 은 낱말이어야 한다 — 지금은 {is}",
+  "warn.lang_unknown": "`{key}` 은 {known} 중 하나다 — {raw}"
 }

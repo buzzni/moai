@@ -124,5 +124,13 @@
   "refuse.link_both_ways": "{id} cannot be blocked and unblocked at once",
   "refuse.defer_empty_why": "the reason is empty",
   "refuse.edit_nothing": "You did not say what to edit. `moai edit --help` lists what can be edited.",
-  "refuse.init_no_prefix": "Cannot make a prefix from the directory name. `moai init <prefix>`"
+  "refuse.init_no_prefix": "Cannot make a prefix from the directory name. `moai init <prefix>`",
+  "trouble.skipped": "{at} — {n} unreadable rows were left out of the overlay",
+  "trouble.no_git": "Could not run git, so sibling worktrees were not found — {why}",
+  "trouble.failed": "Could not find sibling worktrees — {why}",
+  "trouble.stream": "Reading the worktree listing was cut off — {why}",
+  "trouble.encoding": "Could not read the worktree listing — {why}",
+  "warn.lang_table": "`{key}` must be a `[{key}]` table — it is {is}",
+  "warn.lang_word": "`{key}` must be a word — it is {is}",
+  "warn.lang_unknown": "`{key}` is one of {known} — {raw}"
 }

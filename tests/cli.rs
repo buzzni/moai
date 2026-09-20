@@ -10820,6 +10820,50 @@ fn worktree_trouble_is_told_but_never_fails_the_command() {
     assert!(ok(bare.path(), &["status"]).contains("드러난 문제 없다"));
 }
 
+/// **stderr 의 경고도 말묶음에서 온다**(moai-dpbi). 기본이 영어인데(moai-bn1j) 이 줄만 한국어로
+/// 남으면 세션이 시작하는 화면이 두 말로 선다 — 설정에 `lang` 을 잘못 적은 영어 사용자가 가장
+/// 읽어야 할 줄이 그 줄이다.
+///
+/// 바로 위 시험이 같은 자리의 한국어를 글자로 재므로, 둘이 함께 **말만 바뀌고 일은 그대로**를
+/// 지킨다. 여기서 보는 것은 두 줄이다 — 옆 워크트리를 겹치다 만난 것(`worktree::Trouble`)과
+/// 설정에 적은 말의 탈(`user_config::LangTrouble`).
+#[test]
+fn the_warnings_on_stderr_speak_the_chosen_language() {
+    let t = trees("wtsaid");
+    let feat = t.feat().join(".moai/issues.jsonl");
+    let mut src = std::fs::read_to_string(&feat).unwrap();
+    src.push_str("{깨진 줄\n");
+    std::fs::write(&feat, src).unwrap();
+    let said = |args: &[&str], lang: &str, config: Option<&Path>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(args).current_dir(t.main()).env("MOAI_NOW", NOW).env("NO_COLOR", "1").env("MOAI_LANG", lang);
+        if let Some(at) = config {
+            cmd.env("MOAI_CONFIG", at);
+        }
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "경고로 비영 종료했다 — {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stderr).to_string()
+    };
+
+    // 옆 워크트리의 깨진 스냅샷. **가지와 경로는 말이 아니다** — 어느 말에서도 그대로다.
+    let english = said(&["status", "--worktree"], "en", None);
+    assert!(english.contains("⎇ feat/x"), "어느 워크트리인지를 잃었다\n{english}");
+    assert!(english.contains("unreadable rows"), "옆 워크트리의 문제가 영어로 안 섰다\n{english}");
+    assert!(!english.contains("읽을 수 없는 줄"), "영어 화면 곁에 한국어 줄이 남았다\n{english}");
+    let korean = said(&["status", "--worktree"], "ko", None);
+    assert!(korean.contains("읽을 수 없는 줄 1개"), "한국어가 안 남았다\n{korean}");
+
+    // 설정에 적은 말이 틀린 줄 — `moai status` 가 이 자리로만 댄다(저장소 안은 등록 목록을 안 읽는다).
+    let config = t.main().join("user.toml");
+    std::fs::write(&config, "[i18n]\nlang = \"kr\"\n").unwrap();
+    let english = said(&["status"], "en", Some(&config));
+    assert!(english.contains("`i18n.lang` is one of"), "설정의 탈이 영어로 안 섰다\n{english}");
+    assert!(english.contains("\"kr\""), "무엇을 적었는지를 잃었다\n{english}");
+    assert!(english.contains(&config.display().to_string()), "어느 파일인지를 잃었다\n{english}");
+    let korean = said(&["status"], "ko", Some(&config));
+    assert!(korean.contains("`i18n.lang` 은 en·ko·zh·ja·es 중 하나다"), "한국어가 안 남았다\n{korean}");
+}
+
 /// **여기서 지운 줄은 옆 줄로 되살아나지 않는다**(moai-0a0u). 갈라진 뒤 옆에서 안
 /// 만진 줄은 사라지고, 옆에서 집은 줄은 지웠어도 선다 — 부딪힌 것을 감추면 옆에서
 /// 하던 일이 안 보인다. 옆에서 새로 만든 줄은 전처럼 선다.

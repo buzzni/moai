@@ -253,6 +253,32 @@ pub fn overlay(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin) {
     (shown, origin)
 }
 
+/// 옆 워크트리를 겹치다 만난 것 — **말이 아니라 자료다**(moai-dpbi). 글자는 [`crate::view`] 가
+/// 쥔다(`view::trouble`).
+///
+/// 여기서 문장을 지으면 그 줄이 `moai status` 의 stderr 로 나가는데, 그 곁의 화면은 말묶음에서
+/// 오고 이 줄만 한국어로 남아 **섞인 화면**이 된다. 그렇다고 [`gather`] 가 말을 받으면 그것을
+/// 부르는 자리가 모두 말을 들고 와야 하는데, 그중에는 이 줄을 아예 안 쓰는 길(`cmd::read`)과
+/// 말을 모르는 길(탐색기의 다시 읽기는 제 스레드에서 돈다)이 있다. 자료로 내면 쓰는 쪽만 말을 든다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Trouble {
+    /// 그 워크트리의 스냅샷을 못 읽었다 — 가지와 까닭.
+    Unread { branch: String, why: String },
+    /// 못 푸는 줄을 빼고 겹쳤다 — 가지·그 파일·뺀 줄 수.
+    Skipped { branch: String, path: PathBuf, lines: usize },
+    /// 옆 워크트리를 **찾지 못했다**([`Gathered::unfound`]) — git 이 없거나 저장소가 아니다.
+    Unfound { lost: Lost, why: String },
+}
+
+/// 옆 워크트리를 못 찾은 갈래 — git 의 네 실패([`crate::git::Error`]). **낱말은 여기 없다.**
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lost {
+    NoGit,
+    Failed,
+    Stream,
+    Encoding,
+}
+
 /// 겹쳐 읽은 결과.
 pub struct Gathered {
     /// 제 워크트리의 `Load` 에 남의 줄을 겹친 것. **`errors` 는 제 파일의 것뿐이다**
@@ -260,13 +286,13 @@ pub struct Gathered {
     /// 옆 워크트리 때문에 도구가 실패로 읽힌다.
     pub load: Load,
     pub origin: Origin,
-    /// 남의 워크트리에서 만난 문제. **막지 않는다** — 부르는 쪽이 한 줄씩 알린다.
-    pub trouble: Vec<String>,
+    /// 남의 워크트리에서 만난 문제. **막지 않는다** — 부르는 쪽이 한 줄씩 알린다([`Trouble`]).
+    pub trouble: Vec<Trouble>,
     /// 옆 워크트리를 **찾지 못한** 까닭(git 이 없거나 저장소가 아니다). `trouble` 과 가른다 —
     /// `--worktree` 를 시킨 CLI 는 말하지만, 겹쳐 보기를 기본으로 켜는 탐색기는 git 밖의
     /// 프로젝트를 열 때마다 시키지 않은 배너를 세우게 된다(moai-zcuh). 탐색기는 사람이
     /// `SPC t w` 로 켰을 때만 알림으로 댄다(`tui::App::unfound`, moai-d5vn).
-    pub unfound: Option<String>,
+    pub unfound: Option<Trouble>,
     /// **옆 워크트리를 빠짐없이 열어 봤다** — 겹쳐 보라고 시켰고 목록도 찾았다. 그러면 못 읽은 옆
     /// 스냅샷은 `trouble` 에 `⎇ <가지>: …` 로 이미 섰으니, 자리를 재다 못 읽은 워크트리
     /// (`stranded_at`)를 받는 쪽은 그것을 다시 말하지 않는다.
@@ -425,7 +451,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                 match crate::store::read_snapshot(&path) {
                     unread @ (Err(_) | Ok(None)) => {
                         if let Err(e) = unread {
-                            trouble.push(format!("⎇ {}: {e}", tree.label));
+                            trouble.push(Trouble::Unread { branch: tree.label.clone(), why: e.to_string() });
                         }
                         // **디렉터리가 사라진 워크트리는 이름도 안 든다** — 훅의 `away` 가 읽는
                         // `on_disk` 가 그렇게 거른다. git 은 잠근 워크트리를 경로가 사라져도 목록에
@@ -445,12 +471,11 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                     }
                     Ok(Some(other)) => {
                         if !other.errors.is_empty() {
-                            trouble.push(format!(
-                                "⎇ {}: {} — 읽을 수 없는 줄 {}개는 빼고 겹쳤다",
-                                tree.label,
-                                path.display(),
-                                other.errors.len()
-                            ));
+                            trouble.push(Trouble::Skipped {
+                                branch: tree.label.clone(),
+                                path: path.clone(),
+                                lines: other.errors.len(),
+                            });
                         }
                         others.push(side(&repo.root, &here, mine, tree, root, other.issues, &mut bases));
                     }
@@ -586,7 +611,7 @@ pub fn heads(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
 /// moai 뿌리가 워크트리 꼭대기가 아닐 수 있다(`.moai/` 를 하위 디렉터리에 둔
 /// 저장소). **제 뿌리가 꼭대기에서 떨어진 만큼 남의 꼭대기에서도 떨어뜨린다** —
 /// 같은 저장소의 워크트리는 같은 나무 모양이다.
-fn others_of(root: &Path) -> Result<(Option<Tree>, Vec<(Tree, PathBuf)>), String> {
+fn others_of(root: &Path) -> Result<(Option<Tree>, Vec<(Tree, PathBuf)>), Trouble> {
     let top = git(root, &["rev-parse", "--show-toplevel"])?;
     let top = canonical(Path::new(top.trim_end_matches('\n')));
     let rel = canonical(root).strip_prefix(&top).map(Path::to_path_buf).unwrap_or_default();
@@ -1441,13 +1466,16 @@ fn base_of(root: &Path, mine: &str, theirs: &str) -> BTreeMap<String, String> {
     then
 }
 
-fn git(root: &Path, args: &[&str]) -> Result<String, String> {
+fn git(root: &Path, args: &[&str]) -> Result<String, Trouble> {
     use crate::git::Error;
-    crate::git::run(root, args).map_err(|e| match e {
-        Error::Spawn(e) => format!("git 을 부르지 못해 워크트리를 못 찾았다 — {e}"),
-        Error::Failed(err) => format!("워크트리를 못 찾았다 — {err}"),
-        Error::Stream(e) => format!("워크트리 목록을 읽다 끊겼다 — {e}"),
-        Error::NotUtf8(e) => format!("워크트리 목록을 못 읽었다 — {e}"),
+    crate::git::run(root, args).map_err(|e| {
+        let (lost, why) = match e {
+            Error::Spawn(e) => (Lost::NoGit, e.to_string()),
+            Error::Failed(err) => (Lost::Failed, err),
+            Error::Stream(e) => (Lost::Stream, e.to_string()),
+            Error::NotUtf8(e) => (Lost::Encoding, e.to_string()),
+        };
+        Trouble::Unfound { lost, why }
     })
 }
 
@@ -1928,7 +1956,11 @@ mod tests {
         assert_eq!(got.origin.working("t-1"), Some("worktree-t-1"), "스냅샷 없는 워크트리의 이름을 못 봤다");
         assert_eq!(got.origin.working("t-2"), Some("worktree-t-2"), "스냅샷이 깨진 워크트리의 이름을 못 봤다");
         assert!(got.origin.labels().is_empty(), "겹치지 않은 곳을 겹쳐 봤다고 댄다 — {:?}", got.origin.labels());
-        assert!(got.trouble.iter().any(|t| t.contains("worktree-t-2")), "깨진 스냅샷을 말하지 않는다 — {:?}", got.trouble);
+        // **어느 워크트리인지를 자료로 든다**(moai-dpbi) — 글은 `view::trouble_line` 이 편다.
+        let said = |b: &str| {
+            got.trouble.iter().any(|t| matches!(t, Trouble::Unread { branch, .. } if branch == b))
+        };
+        assert!(said("worktree-t-2"), "깨진 스냅샷을 말하지 않는다 — {:?}", got.trouble);
         for id in ["t-1", "t-2"] {
             assert!(away(&main).names.contains(id), "훅의 자가 {id} 를 안 센다 — 이 시험이 견줄 것이 없다");
         }

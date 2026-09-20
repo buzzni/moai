@@ -27,6 +27,22 @@ use keys::Lookup;
 use ratatui::crossterm::event::KeyEvent;
 use scroll::{Move, Scroll};
 
+/// 탐색기가 말묶음에서 펴는 글이 설 말(moai-dpbi). **아직 사람의 설정을 안 읽는다** — 이 화면의
+/// 글은 한국어로 박혀 있어(`layer::look_one` 의 같은 자리), 여기만 영어로 펴면 한 화면이 두 말로
+/// 선다. 다시 읽기는 제 스레드에서 도는 순수한 걸음이라([`prepare`]) `Ctx` 를 안 들고, 여는 화면과
+/// 다음 걸음이 같은 말이어야 배너가 걸음마다 말을 안 바꾼다.
+///
+/// **moai-ra67 이 탐색기의 글을 말묶음으로 옮기면 그 일과 함께 걷힌다** — 그때 이 이름을 쫓으면
+/// 고칠 자리가 한눈에 선다.
+pub const SAID: crate::i18n::Lang = crate::i18n::Lang::Ko;
+
+/// 옆 워크트리를 겹치다 만난 것을 탐색기의 말로([`SAID`], moai-dpbi) — 여는 화면(`cmd::tui`)과
+/// 다시 읽기([`prepare`])가 **같은 자**를 쓴다. 갈라 적으면 배너가 첫 화면과 다음 걸음에서 말을
+/// 바꾼다.
+pub fn said_trouble(trouble: &[crate::worktree::Trouble]) -> Vec<String> {
+    trouble.iter().map(|t| crate::view::trouble_line(SAID, t)).collect()
+}
+
 /// 목록의 한 줄. `..` 은 이슈가 아니므로 [`Entry`] 로는 못 담는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
@@ -430,7 +446,8 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     // 그것을 그대로 물었다(이 저장소에서 ~130ms).
     // **제 스냅샷도 그대로 넘긴다**(moai-mafv) — 걸음마다 다시 파던 마지막 한 벌이다.
     let (lost, said) = placed(repo, &issues, g.swept, &now, &crate::worktree::dug(&g.sides, &g.mine));
-    let mut elsewhere = g.trouble;
+    // 옆 워크트리의 문제는 **펴서** 싣는다(moai-dpbi) — 여는 화면(`cmd::tui`)과 같은 자다.
+    let mut elsewhere = said_trouble(&g.trouble);
     elsewhere.extend(said);
     Ok(Fresh {
         root: repo.root.clone(),
@@ -442,7 +459,8 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         unreadable,
         origin: g.origin,
         elsewhere,
-        unfound: g.unfound,
+        // 못 찾은 까닭도 여기서 편다(moai-dpbi) — 배너와 알림은 글을 그대로 낸다([`SAID`]).
+        unfound: g.unfound.as_ref().map(|t| crate::view::trouble_line(SAID, t)),
         watched,
         now,
     })
@@ -6334,7 +6352,7 @@ mod tests {
         let g = crate::worktree::gather(&repo, true).unwrap();
         let stamp = stamp_of(&repo);
         let (index, ground) = measure(&g.load.issues, &repo.config);
-        let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept, &g.sides, &g.mine);
+        let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(g.origin, crate::tui::said_trouble(&g.trouble), g.watched, g.swept, &g.sides, &g.mine);
         assert!(a.site.commits_of("argos-0001").is_empty(), "여는 읽기가 git 을 기다렸다");
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         a.follow();
