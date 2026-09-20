@@ -6106,3 +6106,4 @@
 {"ts":"2026-09-20T07:47:23Z","id":"moai-zwam","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-20T07:47:47Z","id":"moai-qfhh.4no","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review max --fix 가 4개 커밋(27d8817·e5217de·ad64649·bd1351b) 위에서 도는 중이다. 끝나면 원문과 판단을 두 노트로 적고, 반영은 별도 fix 커밋으로, 그 뒤 develop 에 --no-ff 병합하고 멤버 넷과 이 리뷰를 닫는다."}
 {"ts":"2026-09-20T07:48:17Z","id":"moai-889l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T07:54:34Z","id":"moai-dbzs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
