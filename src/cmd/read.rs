@@ -1,9 +1,10 @@
 //! 읽었다고 표시한다(moai-u8oh).
 //!
 //! **트래커에 안 쓴다.** 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에 적으면 읽기만 해도
-//! 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다. 내 설정의 `[read]` 표에 **이슈 id → 본 줄의
-//! `updated_at`** 을 적는다(사용자 결정 2026-09-15, 값은 2026-09-19 에 본 때에서 바꿨다 — moai-lyc1) —
-//! 그 뒤에 줄이 바뀌면 다시 안 읽음이 된다.
+//! 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다. 적는 자리는 **그 저장소의 읽음 파일**
+//! ([`crate::read_marks`], moai-omx7)이고, 적는 값은 **이슈 id → 본 줄의 `updated_at`**
+//! (사용자 결정 2026-09-15, 값은 2026-09-19 에 본 때에서 바꿨다 — moai-lyc1) — 그 뒤에 줄이 바뀌면
+//! 다시 안 읽음이 된다. 설정의 옛 `[read]` 는 겹쳐 보기만 하고 다시 안 적는다(사용자 결정 3).
 //!
 //! **읽음은 시키는 때만 선다.** `show` 로 열었다고, 탐색기에서 커서가 지나갔다고 서지 않는다 —
 //! 스치듯 지나간 것을 읽었다고 적으면 이 표시가 곧 아무 말도 안 하게 된다.
@@ -64,7 +65,15 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     missing.extend(want.iter().filter(|id| !known.contains(id.as_str())).cloned());
     let targets: BTreeSet<&str> = want.iter().map(String::as_str).filter(|id| known.contains(id)).collect();
 
-    // 적을 것이 없으면 설정 파일에 손을 안 댄다 — 빈 쓰기 하나 때문에 설정 디렉터리와 락 파일이
+    // **걷을 때는 못 읽은 줄이 쓰는 id 도 지킨다**(리뷰) — `load.issues` 는 *이 바이너리가 이번에 읽어
+    // 낸* 줄이지 트래커가 든 줄이 아니다. 한 줄이 깨진 동안 부른 `moai read` 하나가 그 이슈의 읽음을
+    // 걷으면, 줄을 고친 뒤 [NEW] 가 되살아난다 — 조용한 손실이다. 그 id 를 아는 자는 이미 있다
+    // ([`crate::store::Load::reserved_ids`]). **`missing` 은 그대로 `known` 으로 가른다** — 못 읽는 줄의
+    // id 를 받아 놓고 적을 줄이 없으면 읽었다고도 못 찾았다고도 안 하는 것이 더 나쁘다.
+    let reserved = load.reserved_ids();
+    let keep: BTreeSet<&str> = known.iter().copied().chain(reserved.iter().map(String::as_str)).collect();
+
+    // 적을 것이 없으면 읽음 파일에 손을 안 댄다 — 빈 쓰기 하나 때문에 설정 디렉터리와 락 파일이
     // 아직 아무것도 등록하지 않은 사람의 집에 생긴다.
     //
     // **이미 읽은 줄은 다시 안 적는다**(moai-j038.vna) — 본 뒤로 안 바뀐 줄을 다시 적으면 헛 쓰기고,
@@ -82,7 +91,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
             // **트래커에 없는 id 를 여기서 걷는다**(moai-dt5q, 사용자 결정 2) — 이 자리는 트래커를 이미
             // 들고 있다. 닫힌 줄은 안 걷는다: 걷으면 그 줄이 다시 설 때 [NEW] 가 되살아나, 읽음의 뜻이
             // "본 적 있다" 에서 "최근에 본 적 있다" 로 바뀐다.
-            sheet.prune(&known);
+            sheet.prune(&keep);
             Ok(wrote)
         })?
     };

@@ -683,6 +683,11 @@ impl App {
                 self.me = self.whoami(&repo.root);
                 self.site.cfg = repo.config.clone();
                 self.site.repo = Some(repo);
+                // **그 프로젝트의 읽음을 여기서 든다**(리뷰) — [`App::leave_project`] 가 `Site` 를 비워
+                // `seen` 이 빈 표라, 안 들면 아래의 들이기가 그 빈 표로 세어 **내게 온 줄이 모두** [NEW]
+                // 로 그려진다. 걸음이 그것을 고치지만 걸음은 최대 700ms 뒤고, 그사이 `SPC m a` 를 누르면
+                // 안 든 표로 잰 "안 읽음" 전부에 도장을 찍는다. 자리는 `me` 를 다시 푸는 바로 여기다.
+                self.load_read();
                 self.cursor = 0;
                 // 떠난 프로젝트의 줄은 `leave_project` 가 이미 비웠다 — 두 프로젝트가 같은 prefix 를
                 // 쓰면(`argos-0001`) 남은 줄의 id 로 들이기가 커서를 붙들어 남의 줄 번호에 섰다.

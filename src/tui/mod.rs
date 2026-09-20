@@ -2029,6 +2029,17 @@ impl App {
         self.recount_unread();
     }
 
+    /// 읽음 파일을 고르는 뿌리 — **트래커가 사는 곳**(`Repo::root`)이다.
+    ///
+    /// **`App::here()` 가 아니다**(리뷰). 그쪽은 이 세션이 **선 체크아웃**이라, 딸린 워크트리에서는
+    /// 트래커의 자리와 갈린다(`Repo::here`). 읽음의 키는 이슈 id 고 그 id 는 트래커에서 오므로, 자리는
+    /// 트래커를 따라야 한다 — 쓰는 자([`App::mark_read`]·`cmd::read`·[`App::follow_site`])는 처음부터
+    /// `root` 로 골랐는데 읽는 자만 `here()` 로 골라, 워크트리에서 띄운 탐색기가 제가 적은 파일을 다시
+    /// 못 읽었다. `r` 을 누르면 [NEW] 가 내렸다가 다음 걸음에 도로 섰다.
+    fn read_root(&self) -> Option<std::path::PathBuf> {
+        self.site.repo.as_ref().map(|r| r.root.clone())
+    }
+
     /// 그 프로젝트의 읽음을 **제 파일에서** 든다(moai-bwce) — 옛 `[read]` 를 겹쳐 보고, 표식을 읽기
     /// **전에** 잰다(뒤에 재면 읽고 다음 걸음 사이에 옆이 쓴 것을 놓친다). 설정 자리를 모르면(시험·설정
     /// 없는 기계) `None` 이고 부르는 쪽은 들고 있던 것을 둔다.
@@ -2039,16 +2050,21 @@ impl App {
         Some((seen, stamp, problems))
     }
 
-    /// 지금 선 프로젝트의 읽음을 파일에서 들어 [NEW] 를 다시 센다. 띄울 때(`cmd::tui`)와 그 파일이 바뀐
-    /// 걸음([`App::follow_read`])이 부른다.
+    /// 지금 선 프로젝트의 읽음을 파일에서 들어 [NEW] 를 다시 센다. 띄울 때(`cmd::tui`), 프로젝트에 들어갈
+    /// 때(`App::enter_project`), 그 파일이 바뀐 걸음([`App::follow_read`])이 부른다.
     pub fn load_read(&mut self) {
-        let Some(root) = self.here() else { return };
+        let Some(root) = self.read_root() else { return };
         let Some((seen, stamp, problems)) = self.read_marks_of(&root) else { return };
         self.site.read_stamp = Some(stamp);
-        self.adopt_read(seen);
-        // 못 읽거나 남의 것이면 한 줄로 댄다 — 조용히 빈 표로 서면 [NEW] 가 통째로 서는 까닭을 모른다.
-        if let Some(why) = problems.first() {
-            self.notice = Some(format!("읽음을 못 들었다 — {}", crate::text::one_line(why)));
+        // **탈이 있으면 들고 있던 것을 둔다**(리뷰, [`App::follow_config`] 와 같은 자) — 못 읽거나
+        // 깨졌거나 남의 것이면 `read_marks::read` 는 빈 표와 까닭을 내는데, 그 빈 표를 들이면 내 줄이
+        // 통째로 [NEW] 로 선다. 잠깐의 `EACCES`·`ESTALE` 하나가 화면을 그렇게 뒤집었다. 표식은 그래도
+        // 올린다 — 파일이 고쳐지면 표식이 움직여 다음 걸음이 다시 든다.
+        //
+        // 까닭은 한 줄로 댄다 — 조용히 [NEW] 가 서면 왜 그런지 볼 데가 없다.
+        match problems.first() {
+            Some(why) => self.notice = Some(format!("읽음을 못 들었다 — {}", crate::text::one_line(why))),
+            None => self.adopt_read(seen),
         }
     }
 
@@ -2057,9 +2073,12 @@ impl App {
     /// 바뀐다(moai-bwce) — 그래서 그 파일의 표식을 따로 잰다.
     ///
     /// 처음 보는 프로젝트(표식이 없다)면 그때 든다 — 프로젝트를 옮기면 그 자리의 읽음이 그 걸음에 선다.
+    ///
+    /// **걸음마다 도는 자리다**(리뷰) — 목록을 굴리는 동안 빠른 걸음으로 돌므로, 빌려 쓰고 `stat` 은
+    /// 한 번만 한다([`App::follow_config`] 와 같은 모양).
     fn follow_read(&mut self) {
-        let (Some(config), Some(root)) = (self.user_config.clone(), self.here()) else { return };
-        let now = crate::store::stamp(&crate::read_marks::path_for(&config, &root));
+        let (Some(config), Some(repo)) = (self.user_config.as_deref(), self.site.repo.as_ref()) else { return };
+        let now = crate::store::stamp(&crate::read_marks::path_for(config, &repo.root));
         if self.site.read_stamp == Some(now) {
             return;
         }
@@ -2214,7 +2233,12 @@ impl App {
         let root = site.repo.as_ref().map(|r| r.root.clone());
         // **트래커에 없는 id 를 이 자리에서 걷는다**(moai-dt5q, 사용자 결정 2) — 여기는 그 프로젝트의
         // 줄을 이미 들고 있어, 설정 쓰기가 트래커를 읽어야 하는 일이 안 생긴다. 닫힌 줄은 안 걷는다.
-        let known: std::collections::BTreeSet<&str> = site.issues.iter().map(|i| i.id.as_str()).collect();
+        //
+        // **못 읽은 줄이 쓰는 id 도 지킨다**(리뷰, `cmd::read` 와 같은 자) — 읽어 낸 줄은 트래커가 든
+        // 줄이 아니다. 한 줄이 깨진 동안 누른 `r` 하나가 그 이슈의 읽음을 걷으면, 줄을 고친 뒤 [NEW]
+        // 가 되살아난다.
+        let known: std::collections::BTreeSet<&str> =
+            site.issues.iter().map(|i| i.id.as_str()).chain(site.unreadable.iter().filter_map(Option::as_deref)).collect();
         let written: Vec<String> = match (self.user_config.clone(), root) {
             (Some(config), Some(root)) => {
                 let wrote = crate::read_marks::update(&config, &root, |sheet| {
@@ -2224,21 +2248,18 @@ impl App {
                     Ok((written, sheet.marks().0))
                 });
                 match wrote {
-                    Ok((written, on_file)) => {
+                    Ok((written, mut seen)) => {
                         // 파일의 표를 그대로 든다 — 옆 터미널이 그사이 적은 줄까지 함께 온다. 옛
-                        // `[read]` 는 겹쳐 본 값이라 여기 다시 얹는다(사용자 결정 3).
-                        let legacy = &self.legacy_read;
-                        let mut seen = on_file;
-                        for (id, when) in legacy {
-                            seen.entry(id.clone()).or_insert_with(|| when.clone());
-                        }
+                        // `[read]` 는 겹쳐 본 값이라 여기 다시 얹는다(사용자 결정 3) — 겹치는 자는
+                        // `read_marks::read` 와 **한 함수**다(리뷰). 둘로 두면 옛 표를 걷는 날 한쪽만 걷힌다.
+                        crate::read_marks::overlay(&mut seen, &self.legacy_read);
                         if let Some(site) = self.site_mut(seat) {
                             site.seen = seen;
                         }
-                        // 방금 우리가 쓴 파일이다 — 표식을 함께 올려야 다음 걸음이 헛 읽기를 안 한다.
-                        if seat == Seat::Here {
-                            self.site.read_stamp = Some(crate::store::stamp(&crate::read_marks::path_for(&config, &root)));
-                        }
+                        // **쓴 뒤에 표식을 박지 않는다**(리뷰). 여기서 재면 락을 놓은 **뒤**라, 그 틈에
+                        // 옆이 쓴 파일의 표식을 제 것으로 박는다 — 그러면 [`App::follow_read`] 가 영영
+                        // 같다고 보아 옆의 줄이 이 화면에 안 닿는다(이 표식이 열어 둔 바로 그 길이다).
+                        // 다음 걸음이 한 번 더 읽는 값이 그것보다 싸다.
                         written
                     }
                     Err(e) => {
@@ -2433,9 +2454,16 @@ impl App {
                 // **그 프로젝트의 읽음을 제 파일에서 든다**(moai-bwce) — 한눈 보기의 줄도 제 [NEW] 를
                 // 제 표로 센다. `App` 의 맵 하나를 같이 보던 판은 이름이 같은 두 저장소의 같은 id 가
                 // 서로의 [NEW] 를 내렸다(moai-omx7 의 화면 쪽 모습이다).
-                if let Some((seen, stamp, _)) = site.repo.as_ref().map(|r| r.root.clone()).and_then(|root| self.read_marks_of(&root)) {
-                    site.seen = seen;
+                if let Some((seen, stamp, problems)) = site.repo.as_ref().map(|r| r.root.clone()).and_then(|root| self.read_marks_of(&root))
+                {
                     site.read_stamp = Some(stamp);
+                    // 탈이 있으면 들고 있던 것을 두고 까닭을 댄다 — [`App::load_read`] 와 같은 자다(리뷰).
+                    // 까닭을 삼키던 판은 깨진 읽음 파일 하나로 그 프로젝트의 줄이 통째로 [NEW] 로 서는데
+                    // 화면 어디에도 왜인지가 없었다.
+                    match problems.first() {
+                        Some(why) => self.notice = Some(format!("읽음을 못 들었다 — {}", crate::text::one_line(why))),
+                        None => site.seen = seen,
+                    }
                 }
                 if let Some(place) = self.layer.as_mut().and_then(|l| l.places.iter_mut().find(|p| p.path == path)) {
                     place.site = Some(site);
@@ -5101,6 +5129,38 @@ mod tests {
         assert_eq!(seen.get("argos-0009"), Some(&stamp), "`r` 이 적은 것을 CLI 의 길이 못 든다");
         assert!(!seen.contains_key("argos-9999"), "트래커에 없는 id 를 안 걷었다 — {seen:?}");
         assert!(!config.exists(), "읽음을 설정 파일에 적었다 — 그 자리는 옛 `[read]` 뿐이다");
+    }
+
+    /// **읽음은 트래커가 사는 뿌리로 고른다 — 선 체크아웃이 아니다**(리뷰). 딸린 워크트리에서 띄우면
+    /// `App::here()` 는 그 워크트리고 `repo.root` 는 루트다(`Repo::here`). 읽는 자만 `here()` 로 고르던
+    /// 판은 `r` 이 루트의 파일에 적고 걸음이 워크트리의 (없는) 파일을 읽어, [NEW] 가 내렸다가 한 걸음
+    /// 뒤에 도로 섰다 — 이 저장소는 일을 모두 워크트리에서 하므로 그때가 늘이다.
+    #[test]
+    fn the_sheet_is_keyed_by_the_tracker_root_not_the_checkout() {
+        let s = Scratch::new("read-marks-worktree");
+        let config = s.path().join("user.toml");
+        let (root, worktree) = (s.path().join("proj"), s.path().join("proj/.claude/worktrees/w1"));
+        let mut a = app();
+        for i in &mut a.site.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.site.repo = Some(crate::store::Repo::moved(root.clone(), cfg(), worktree.clone()));
+        assert_ne!(a.here().as_deref(), Some(root.as_path()), "시험의 전제 — 선 자리와 뿌리가 갈렸다");
+        a.user_config = Some(config.clone());
+        a.me = Some("레이븐 (raven@example.com)".into());
+        a.recount_unread();
+
+        a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
+        a.hit("r");
+        assert!(!a.site.unread.contains("argos-0009"), "적고도 [NEW] 가 안 내렸다");
+        // 걸음이 **적은 그 파일**을 본다 — 선 자리로 보던 판은 없는 파일을 읽어 방금 내린 [NEW] 를 도로 세웠다.
+        a.follow();
+        assert!(!a.site.unread.contains("argos-0009"), "걸음이 방금 적은 읽음을 도로 지웠다");
+        let empty = std::collections::BTreeMap::new();
+        let stamp = a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
+        assert_eq!(crate::read_marks::read(&config, &root, &empty).0.get("argos-0009"), Some(&stamp), "뿌리의 파일에 안 적었다");
+        assert!(!crate::read_marks::path_for(&config, &worktree).exists(), "워크트리 자리에 읽음 파일을 지었다");
     }
 
     /// **한눈 보기의 줄은 그 프로젝트의 파일에 적는다**(moai-bwce) — `App` 의 맵 하나를 같이 보던 판은
