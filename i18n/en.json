@@ -53,5 +53,8 @@
   "ready.picked": "Already picked up {n} — finishing those first goes better",
   "ready.held_by_empty": "Held by a group with no members {n} — fill the group or clear the block",
   "ready.no_members": "{groups} has no members",
-  "status.age": "{d}d"
+  "status.age": "{d}d",
+  "status.overlaid": "{trees} overlaid",
+  "opening.commands": "Commands: `moai --help`",
+  "opening.commands_here": "Commands: `moai --help`   ·   how to work in this repo: AGENTS.md"
 }

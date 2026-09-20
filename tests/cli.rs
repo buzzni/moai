@@ -295,11 +295,8 @@ fn the_system_locale_does_not_pick_the_language() {
     ok(s.path(), &["add", "첫 일"]);
     let config = s.path().join("user/config.toml");
     std::fs::create_dir_all(config.parent().unwrap()).unwrap();
-    let say = |picked: Option<&str>, body: Option<&str>| {
-        match body {
-            Some(b) => std::fs::write(&config, b).unwrap(),
-            None => std::fs::write(&config, "").unwrap(),
-        }
+    let say = |picked: Option<&str>, body: &str| {
+        std::fs::write(&config, body).unwrap();
         let mut cmd = isolated(BIN);
         cmd.args(["status"])
             .current_dir(s.path())
@@ -320,14 +317,14 @@ fn the_system_locale_does_not_pick_the_language() {
     };
 
     // 아무도 안 골랐으면 로캘이 일본어라도 기본값이다 — 지금은 한국어다.
-    let bare = say(None, None);
+    let bare = say(None, "");
     assert!(bare.contains("이슈 1"), "로캘이 말을 골랐다\n{bare}");
     assert!(!bare.contains("課題"), "로캘이 말을 골랐다\n{bare}");
 
     // 고른 사람은 그대로 제 말을 본다 — 로캘이 그것을 덮지 않는다.
-    let picked = say(Some("en"), None);
+    let picked = say(Some("en"), "");
     assert!(picked.contains("Issues 1"), "MOAI_LANG 이 로캘에 밀렸다\n{picked}");
-    let said = say(None, Some("[i18n]\nlang = \"en\"\n"));
+    let said = say(None, "[i18n]\nlang = \"en\"\n");
     assert!(said.contains("Issues 1"), "설정이 로캘에 밀렸다\n{said}");
 }
 

@@ -53,5 +53,8 @@
   "ready.picked": "이미 잡고 있는 것 {n}건 — 새로 집기 전에 끝내는 편이 낫다",
   "ready.held_by_empty": "멤버가 없는 묶음에 막혀 못 집는 일 {n}건 — 멤버를 채우거나 막음을 푼다",
   "ready.no_members": "{groups} 멤버 없음",
-  "status.age": "{d}일"
+  "status.age": "{d}일",
+  "status.overlaid": "{trees} 겹쳐 봄",
+  "opening.commands": "명령: `moai --help`",
+  "opening.commands_here": "명령: `moai --help`   ·   이 저장소에서 일하는 법: AGENTS.md"
 }

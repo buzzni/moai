@@ -30,6 +30,16 @@ fn cell(style: Style, text: &str, w: usize) -> String {
     format!("{}{}", paint(style, text), " ".repeat(pad))
 }
 
+/// 오른쪽에 붙인 칸 — 수처럼 **끝이 맞아야** 읽히는 열. [`cell`] 과 같이 칸 수로 잰다.
+///
+/// **글자 수로 재지 않는다**(리뷰). `format!("{v:>4}")` 는 `char` 를 세므로 `19일`(3자, 5칸)과
+/// 빈 글(0자, 4칸)이 한 열에서 한 칸씩 어긋났고, 그 글이 말묶음으로 옮겨 가면서
+/// (`status.age`) 어긋나는 폭을 번역이 정하게 됐다.
+fn rcell(style: Style, text: &str, w: usize) -> String {
+    let pad = w.saturating_sub(width(text));
+    format!("{}{}", " ".repeat(pad), paint(style, text))
+}
+
 /// `2026-09-11T15:18:26Z` → `2026-09-11 15:18`.
 ///
 /// **연도를 낸다.** 상세는 정확해야 하는 자리다 — 해를 넘긴 저장소에서
@@ -636,43 +646,51 @@ fn row(out: &mut Vec<String>, cx: &Ctx, i: &Issue, depth: usize) {
 /// 박혀 있으면 다른 말로 고른 사람은 머리 두 줄만 제 말이고 아래는 통째로 한국어를 본다.
 /// **키는 소스에 박힌 글자다**([`say`]) — `format!("warn.{kind}")` 로 짓지 않는다. 아래 `match`
 /// 가 갈래마다 제 키를 적으므로, 갈래를 더하며 글을 빠뜨리면 영어 표를 훑는 시험이 잡는다.
+///
+/// **`say` 부름을 갈래마다 제 줄에 쓴다** — 도우미에 키만 넘기지 않는다(리뷰). 소스를 훑는
+/// 자(`i18n::tests::keys_in`)는 `say(…, "키")` 모양만 읽으므로, `one("warn.…")` 으로 넘기면
+/// 그 키가 시험의 눈에서 통째로 사라진다. 그러면 en.json 에 없는 키를 적어도 시험이 다 파랗고,
+/// [`say`] 가 키를 그대로 돌려줘 보드에 `warn.…` 이라는 글자가 선다 — 위 문단이 믿으라는
+/// 바로 그 그물에 구멍이 난다. 도우미는 **이미 찾아 온 글**만 받는다.
+///
+/// **`{d}` 에 넣을 수는 부르는 자리가 고른다.** `days` 는 넘긴 문턱이고 `oldest` 는 실제
+/// 나이라 뜻이 다른데(`report::Warning::oldest`), 도우미가 둘 중 하나를 미리 쥐면 나이를
+/// 말하는 줄이 말없이 문턱을 낸다 — `idea_pile` 은 `days` 가 아예 없어 `0일` 이 된다.
 fn says(w: &Warning, lang: Lang) -> String {
     let n = w.count.to_string();
-    let days = w.days.unwrap_or(0).to_string();
-    let oldest = w.oldest.unwrap_or(0).to_string();
-    let one = |key: &'static str| fill(say(lang, key), &[("n", &n)]);
-    let aged = |key: &'static str| fill(say(lang, key), &[("n", &n), ("d", &days)]);
+    let one = |said: &str| fill(said, &[("n", &n)]);
+    let aged = |said: &str, d: i64| fill(said, &[("n", &n), ("d", &d.to_string())]);
     match w.kind {
         "no_epic" => fill(
             say(lang, "warn.no_epic"),
             &[("n", &n), ("percent", &((w.ratio.unwrap_or(0.0) * 100.0).round() as u32).to_string())],
         ),
-        "no_milestone" => one("warn.no_milestone"),
-        "stale_review" => aged("warn.stale_review"),
+        "no_milestone" => one(say(lang, "warn.no_milestone")),
+        "stale_review" => aged(say(lang, "warn.stale_review"), w.days.unwrap_or(0)),
         // review 도 벌여 놓은 일이다. "진행 중" 이라고 하면 review 경고와
         // 같은 이슈가 두 번 나오는 것이 말이 안 되게 보인다.
-        "wip_overload" => one("warn.wip_overload"),
-        "stale_progress" => aged("warn.stale_progress"),
+        "wip_overload" => one(say(lang, "warn.wip_overload")),
+        "stale_progress" => aged(say(lang, "warn.stale_progress"), w.days.unwrap_or(0)),
         // **죽었다고 단정하지 않는다.** 워크트리 없이 main 에서 하는 일일 수도 있다 — 그래서 고칠
         // 손을 하나로 정하지 않고, 이어 할 것이면 워크트리를 다시 띄우라는 길까지 댄다.
-        "stranded" => one("warn.stranded"),
+        "stranded" => one(say(lang, "warn.stranded")),
         // `days` 는 "막힌 기간" 이 아니라 "지금 칸에 머문 기간" 이다 — 막 막힌
         // 것을 "며칠째 막혀 있다" 고 잘못 말하지 않으려고 이렇게 적는다.
-        "blocked_stale" => aged("warn.blocked_stale"),
+        "blocked_stale" => aged(say(lang, "warn.blocked_stale"), w.days.unwrap_or(0)),
         // 막는 쪽이 어느 목록에도 없으므로 **어디서 찾는지를 같이 말한다.**
         // `ready` 가 같은 줄에 대는 말과 같다 — **키도 같다**(moai-7cyf): 둘로 두면 번역이
         // 갈라져, 한 도구가 같은 것을 두 말로 말한다. **막는 쪽이 아니라 미룬 곳이다** — 막는
         // 줄이 미룬 에픽 밑이면 그 줄에 `--undo` 를 쳐 봐야 "이미 그렇다" 로 끝난다.
-        "blocked_by_deferred" => one("warn.blocked_by_deferred"),
-        "empty_epic" => one("warn.empty_epic"),
+        "blocked_by_deferred" => one(say(lang, "warn.blocked_by_deferred")),
+        "empty_epic" => one(say(lang, "warn.empty_epic")),
         // **끊긴 것과 종류가 틀린 것을 한 낱말로 말한다** — 둘을 가려 말하면
         // 고치는 손이 달라지는 것도 아닌데 경고가 둘로 늘어난다.
-        "dangling_epic" => one("warn.dangling_epic"),
-        "dangling_milestone" => one("warn.dangling_milestone"),
-        "orphan_child" => one("warn.orphan_child"),
-        "dangling_blocked_by" => one("warn.dangling_blocked_by"),
+        "dangling_epic" => one(say(lang, "warn.dangling_epic")),
+        "dangling_milestone" => one(say(lang, "warn.dangling_milestone")),
+        "orphan_child" => one(say(lang, "warn.orphan_child")),
+        "dangling_blocked_by" => one(say(lang, "warn.dangling_blocked_by")),
         // 도구는 제 시계로만 적으므로 이런 시각은 손으로 고친 줄이나 틀린 시계다(moai-ugjp).
-        "future_timestamp" => one("warn.future_timestamp"),
+        "future_timestamp" => one(say(lang, "warn.future_timestamp")),
         // **알림이지 경고가 아니다.** 고칠 것이 있다는 말이 아니라, 담아 둔
         // 것을 한 번 펼쳐 볼 때가 됐다는 말이다.
         // **오늘 것에 "0일" 을 붙이지 않는다.** 나이를 말하는 까닭은 오래된
@@ -680,41 +698,43 @@ fn says(w: &Warning, lang: Lang) -> String {
         // 뜻을 잃는다. **그래서 키가 둘이다** — 괄호를 붙이고 말고는 번역이 정할 것이 아니라
         // 여기서 정하는 것이고, 한 키에 넣으면 그 말에서만 빈 괄호가 남는다.
         "idea_pile" => match w.oldest {
-            Some(d) if d > 0 => fill(say(lang, "warn.idea_pile_aged"), &[("n", &n), ("d", &oldest)]),
-            _ => one("warn.idea_pile"),
+            Some(d) if d > 0 => aged(say(lang, "warn.idea_pile_aged"), d),
+            _ => one(say(lang, "warn.idea_pile")),
         },
         "deferred" => match w.oldest {
-            Some(d) if d > 0 => fill(say(lang, "warn.deferred_aged"), &[("n", &n), ("d", &oldest)]),
-            _ => one("warn.deferred"),
+            Some(d) if d > 0 => aged(say(lang, "warn.deferred_aged"), d),
+            _ => one(say(lang, "warn.deferred")),
         },
         // **낡음의 두 얼굴을 다른 낱말로 낸다**(moai-mj45). 앞의 것은 "다시 빌드부터" 고, 뒤의
         // 것은 "손질이 사라진다" 다 — 한 낱말로 뭉치면 그 중 한쪽이 반드시 거짓말이 된다.
         // **어느 값인지는 여기서 안 댄다**(리뷰 moai-80qw) — 파일 자리까지 든 줄은 길어 표를
         // 밀어내므로 부르는 쪽이 stderr 로 이미 한 줄씩 냈다. 여기 서는 뜻은 "그 말을 놓쳤으면
         // 위를 봐라" 다: 이 줄이 없으면 보드가 "드러난 문제 없다" 로 방금 한 말을 뒤집는다.
-        "user_config" => one("warn.user_config"),
-        "agents_stale" => say(lang, "warn.agents_stale").to_string(),
-        "agents_hand_edited" => say(lang, "warn.agents_hand_edited").to_string(),
-        // **파일마다 결과를 따로 말한다**(moai-2f99) — 딸린 두 파일에서 빠진 줄은 결과가 아주
-        // 다르다(옆 워크트리가 `add -A` 에 딸려가는 것과, 저널이 머지에서 충돌하는 것). 한 낱말로
-        // 뭉치면 그 중 한쪽이 반드시 거짓말이 된다(바로 위 `agents_stale` 을 가른 것과 같은 까닭).
+        "user_config" => one(say(lang, "warn.user_config")),
+        "agents_stale" => one(say(lang, "warn.agents_stale")),
+        "agents_hand_edited" => one(say(lang, "warn.agents_hand_edited")),
+        // **파일마다 결과를 따로 말한다**(moai-2f99) — `.gitignore` 에 `/.claude/worktrees/` 가
+        // 없는 것과 `.gitattributes` 에 `merge=union` 이 없는 것은 결과가 아주 다르다(옆 워크트리가
+        // `add -A` 에 딸려가는 것과, 저널이 머지에서 충돌하는 것). 한 낱말로 뭉치면 그 중 한쪽이
+        // 반드시 거짓말이 된다(바로 위 `agents_stale` 을 가른 것과 같은 까닭).
         // **무엇이 빠졌는지는 `preview` 가 한 줄씩 낸다** — 규칙 줄은 제 안에 띄어쓰기를 여럿 들어
-        // 한 줄에 이어 붙이면 어디서 한 줄이 끝나는지 안 보인다.
-        "gitignore_rules" => one("warn.gitignore_rules"),
-        "gitattributes_rules" => one("warn.gitattributes_rules"),
+        // (`.moai/journal.jsonl  text eol=lf merge=union`) 한 줄에 이어 붙이면 어디서 한 줄이
+        // 끝나는지 안 보인다.
+        "gitignore_rules" => one(say(lang, "warn.gitignore_rules")),
+        "gitattributes_rules" => one(say(lang, "warn.gitattributes_rules")),
         // **"안 심었다" 가 아니라 "못 돈다" 다**(moai-2ewr). 안 심은 클론은 기본 머지가
         // 돌아 무해했고(moai-w8so), 해로운 것은 심어 놓고 그 자리가 빈 판이다 — 이슈마다 푸는
         // 것이 돈다고 믿는 쪽만 손해를 본다. 어느 경로인지는 `preview` 가 한 줄로 낸다.
-        "merge_driver_rotten" => say(lang, "warn.merge_driver_rotten").to_string(),
+        "merge_driver_rotten" => one(say(lang, "warn.merge_driver_rotten")),
         // **"안 돈다" 와 "낡았다" 를 가른다**(moai-h54i). 앞의 것은 자리가 빈 것이고 뒤의 것은
         // 그 줄에 내려앉는 마디가 없는 것이다 — 고칠 명령이 비슷해도 무엇이 어긋났는지가 다르다.
-        "merge_driver_stale" => say(lang, "warn.merge_driver_stale").to_string(),
-        "unknown_field" => one("warn.unknown_field"),
+        "merge_driver_stale" => one(say(lang, "warn.merge_driver_stale")),
+        "unknown_field" => one(say(lang, "warn.unknown_field")),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
         // `moai show` 가 낸다.
-        "duplicate_id" => one("warn.duplicate_id"),
-        "unreadable_line" => one("warn.unreadable_line"),
+        "duplicate_id" => one(say(lang, "warn.duplicate_id")),
+        "unreadable_line" => one(say(lang, "warn.unreadable_line")),
         // **모르는 갈래도 말은 한다.** 옛 스냅샷이나 새 바이너리가 낸 갈래를 화면에서 지우지
         // 않는다 — 갈래 이름은 자료라 번역하지 않고, 셈을 세는 말만 말묶음에서 온다.
         other => fill(say(lang, "warn.other"), &[("n", &n), ("kind", other)]),
@@ -737,7 +757,7 @@ pub fn status(
     lang: Lang,
 ) -> Vec<String> {
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    let overlaid = overlaid(origin);
+    let overlaid = overlaid(origin, lang);
     let mut out = vec![
         format!(
             "{}  {}       {}{overlaid}",
@@ -938,7 +958,7 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, origin: &Orig
             paint(style::ID, &i.id),
             paint(style::priority_style(i.priority()), &format!("p{}", i.priority())),
             paint(style::status_style(i.status.as_str()), style::glyph(i.status.as_str())),
-            paint(style::DIM, &format!("{age:>4}")),
+            rcell(style::DIM, &age, 4),
             marked(origin.branch(&i.id), &i.title, TITLE_CAP, style::PLAIN).0,
         ));
     }
@@ -1512,13 +1532,23 @@ pub struct Picks<'a> {
 ///
 /// **겹쳐 본 화면은 머리에서 그렇다고 말한다.** 줄마다 붙는 `⎇` 는 옆에서 온
 /// 줄에만 서므로, 옆 워크트리가 조용하면 겹쳐 본 보드와 제 보드가 똑같이 보인다.
-fn overlaid(origin: &Origin) -> String {
+///
+/// **이 꼬리도 말묶음에서 온다**(리뷰) — `status` 의 머리 줄에 그대로 이어 붙으므로, 여기만
+/// 한국어로 박혀 있으면 `--worktree` 로 부른 사람의 **첫 줄**이 반쪽만 제 말이 된다.
+fn overlaid(origin: &Origin, lang: Lang) -> String {
     let trees = origin.labels();
     match trees.is_empty() {
         true => String::new(),
         false => format!(
             "   {}",
-            paint(style::BRANCH, &format!("{} {} 겹쳐 봄", style::BRANCH_GLYPH, clip(&trees.join(", "), TITLE_CAP)))
+            paint(
+                style::BRANCH,
+                &format!(
+                    "{} {}",
+                    style::BRANCH_GLYPH,
+                    fill(say(lang, "status.overlaid"), &[("trees", &clip(&trees.join(", "), TITLE_CAP))])
+                )
+            )
         ),
     }
 }
@@ -1561,7 +1591,7 @@ pub fn projects_status(
             out.push(unopened(p, s));
             continue;
         };
-        out.push(project_head(p, overlaid(b.origin).trim_start()));
+        out.push(project_head(p, overlaid(b.origin, lang).trim_start()));
         out.push(board(b.cfg, &b.status.counts));
         let shown = &b.picked[..b.picked.len().min(PICKED_SHOWN)];
         // **id 도 제목도 남의 스냅샷에서 온다** — 읽기는 관대해 `\n` 말고는 아무것도 안 막으므로,
@@ -1659,7 +1689,7 @@ pub fn projects_ready(
             out.push(unopened(p, s));
             continue;
         };
-        out.push(project_head(p, &format!("{}건{}", k.picks.len(), overlaid(k.origin))));
+        out.push(project_head(p, &format!("{}건{}", k.picks.len(), overlaid(k.origin, lang))));
         let shown = &k.picks[..k.picks.len().min(READY_SHOWN)];
         // 남의 스냅샷에서 온 글자다 — 걸러서 찍고 걸러서 잰다(`projects_status` 와 같은 까닭).
         let ids: Vec<String> = shown.iter().map(|i| one_line(&i.id)).collect();
@@ -2275,7 +2305,7 @@ mod tests {
         let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[], &Origin::default(), lang));
         let joined = out.join("\n");
         // **글자는 말묶음에서 온다**(moai-zeyv) — 여기에 한국어를 박으면 기본 언어(영어)에서 깨진다.
-        // **셈이 화면에 닿는지는 따로 잰다**(리뷰 moai-80qw) — 기댓값도 같은 `t()` 를 지나므로,
+        // **셈이 화면에 닿는지는 따로 잰다**(리뷰 moai-80qw) — 기댓값도 같은 `say` 를 지나므로,
         // 머리 글이 `{n}` 을 잃으면 양쪽이 나란히 잃어 이 줄만으로는 아무것도 안 잡힌다.
         assert!(joined.contains(&fill(say(lang, "ready.count"), &[("n", "2")])), "{joined}");
         assert!(out[0].contains('2'), "머리 줄에 셈이 없다 — {:?}", out[0]);

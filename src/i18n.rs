@@ -76,7 +76,7 @@ pub fn pick(env: Option<&str>, setting: Option<&str>) -> Lang {
         .unwrap_or_default()
 }
 
-/// 글 안의 `{이름}` 자리를 채운다 — `fill(t("status.issues"), &[("n", "12")])`.
+/// 글 안의 `{이름}` 자리를 채운다 — `fill(say(lang, "status.issues"), &[("n", "12")])`.
 ///
 /// **자리는 이름으로 둔다**(`{n}`), 차례가 아니다. 번역은 말차례가 달라지는 일이라, 자리를
 /// 차례로 두면 번역자가 순서를 바꾸는 순간 값이 엉뚱한 자리에 든다. 모르는 이름은 그대로
@@ -210,8 +210,12 @@ mod tests {
 
     /// **영어 표가 소스가 쓰는 키를 다 갖는다**(moai-f2a6) — 새 키는 영어부터다.
     ///
-    /// 소스에서 `t("…")`·`say(…, "…")` 가 든 키를 읽어 영어 표와 견준다. 없는 키는 화면에
+    /// 소스에서 `say(…, "…")` 가 든 키를 읽어 영어 표와 견준다. 없는 키는 화면에
     /// `status.issues` 같은 글자로 그대로 나므로, 이 시험이 그 자리를 **붙이기 전에** 잡는다.
+    ///
+    /// **그러니 키는 `say` 부름에 그대로 적는다.** 도우미에 키만 넘기면(`one("warn.…")`)
+    /// 읽는 자가 그 줄을 못 보고, 이 시험은 파란 채로 구멍이 뚫린다 — `view::says` 의
+    /// 도우미가 **찾아 온 글**을 받는 까닭이 이것이다.
     /// 다른 언어는 **안 잰다**(사용자 결정) — 다섯을 함께 채우게 하면 글 한 줄 고칠 때마다
     /// 다섯을 고쳐야 하고, 모르는 언어에 기계번역이 들어온다. 그쪽은 영어로 떨어진다.
     #[test]
@@ -244,34 +248,47 @@ mod tests {
         assert!(asked.len() >= 2, "소스에서 키를 하나도 못 읽었다 — 읽는 자가 헛돈다");
         let missing: Vec<&(String, String)> = asked.iter().filter(|(k, _)| !en.contains_key(k)).collect();
         assert!(missing.is_empty(), "영어 표에 없는 키를 소스가 부른다 — {missing:#?}");
+        // **반대쪽도 센다**(리뷰) — 위의 비교는 읽는 자가 **본** 키만 재므로, 키를 도우미에
+        // 숨기면(`one("warn.…")`) 그 키는 양쪽에서 함께 사라져 이 시험이 파란 채로 구멍이
+        // 뚫린다. 실제로 `view::says` 의 스물한 줄이 그렇게 숨었고, 바로 위 주석이 "시험이
+        // 잡는다" 고 말하는 동안 틀린 키를 적어도 아무 데서도 안 붉어졌다. 영어 표에 있는데
+        // 아무도 안 부르는 키는 **지운 자리의 찌꺼기이거나 숨은 부름**이고, 둘 다 여기서
+        // 이름을 댄다 — 아직 안 이은 키를 미리 적어 두지 않는다.
+        let unasked: Vec<&String> = en.keys().filter(|k| !asked.iter().any(|(a, _)| a == *k)).collect();
+        assert!(
+            unasked.is_empty(),
+            "영어 표에 있는데 소스가 안 부르는 키 — 지웠으면 표에서도 지우고, \
+             부르고 있다면 키를 `say(lang, \"…\")` 에 그대로 적는다: {unasked:#?}"
+        );
     }
 
-    /// `t("키")`·`say(…, "키")` 의 키만 뽑는다. 이 시험 자신이 쓰는 글(`"nothing.here"` 같은)은
+    /// `say(…, "키")` 의 키만 뽑는다. 이 시험 자신이 쓰는 글(`"nothing.here"` 같은)은
     /// 부르는 모양이 아니라 안 걸린다.
+    ///
+    /// **부르는 모양은 하나다.** 한때 `t("키")` 도 읽었는데 그 함수는 걷혔다(moai-cigu) —
+    /// 없는 모양을 계속 읽으면 다음 사람이 두 입구가 다 산 줄로 읽는다.
     fn keys_in(line: &str) -> Vec<String> {
+        const HEAD: &str = "say(";
         let mut out = Vec::new();
-        for (head, skip) in [("t(\"", 0), ("say(", 1)] {
-            let mut rest = line;
-            let mut eaten = 0usize;
-            while let Some(at) = rest.find(head) {
-                // **이름 끝의 `t(` 는 이 부름이 아니다** — `parent("…")`·`insert("…")` 가 그렇게 걸렸다.
-                // 앞 글자가 이름의 일부면 건너뛴다. `i18n::t(` 의 `:` 는 이름 글자가 아니라 지나간다.
-                let before = line[..eaten + at].chars().next_back();
-                let joined = before.is_some_and(|c| c.is_alphanumeric() || c == '_');
-                eaten += at + head.len();
-                rest = &rest[at + head.len()..];
-                if joined {
-                    continue;
-                }
-                // `say(lang, "키")` 는 따옴표가 둘째 인자다 — 여는 따옴표까지 건너뛴다.
-                let quoted = if skip == 0 { Some(rest) } else { rest.split_once('"').map(|(_, r)| r) };
-                let Some(quoted) = quoted else { continue };
-                if let Some((key, _)) = quoted.split_once('"')
-                    && key.contains('.')
-                    && !key.contains(' ')
-                {
-                    out.push(key.to_string());
-                }
+        let mut rest = line;
+        let mut eaten = 0usize;
+        while let Some(at) = rest.find(HEAD) {
+            // **이름 끝의 `say(` 는 이 부름이 아니다** — `essay("…")` 같은 이름이 그렇게 걸린다.
+            // 앞 글자가 이름의 일부면 건너뛴다. `i18n::say(` 의 `:` 는 이름 글자가 아니라 지나간다.
+            let before = line[..eaten + at].chars().next_back();
+            let joined = before.is_some_and(|c| c.is_alphanumeric() || c == '_');
+            eaten += at + HEAD.len();
+            rest = &rest[at + HEAD.len()..];
+            if joined {
+                continue;
+            }
+            // `say(lang, "키")` 는 따옴표가 둘째 인자다 — 여는 따옴표까지 건너뛴다.
+            let Some(quoted) = rest.split_once('"').map(|(_, r)| r) else { continue };
+            if let Some((key, _)) = quoted.split_once('"')
+                && key.contains('.')
+                && !key.contains(' ')
+            {
+                out.push(key.to_string());
             }
         }
         out
