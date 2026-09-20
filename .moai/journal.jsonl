@@ -6022,3 +6022,17 @@
 {"ts":"2026-09-20T05:52:59Z","id":"moai-po6v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-20T05:53:06Z","id":"moai-4qbv.i0g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"12건 반영(리뷰의 --fix 와 1db1c7d), 3건 넘김 — 들고 선 층의 까닭이 프로젝트 안에서 안 보이는 것은 idea moai-wbgz, enter_project 가 읽음을 안 물려주는 것은 idea moai-b1wa, old.trouble 의 죽은 쓰기는 글만 고쳤다"}
 {"ts":"2026-09-20T05:53:18Z","id":"moai-4qbv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 마지막 멤버 moai-po6v 와 에픽 끝 리뷰 moai-4qbv.i0g 을 037b5fb 로 develop 에 병합하고 닫았다. 에픽은 6/6 이다. 리뷰가 넘긴 둘은 idea moai-wbgz·moai-b1wa 에 있다."}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-qfhh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기가 사람에게 대는 말 — 읽음·설정의 남은 모서리"}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-2gep","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"enter_project 가 읽음을 안 물려줘 못 읽는 프로젝트가 통째로 [NEW] 로 선다"}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-qfhh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-b1wa 에서 펼쳤다 — enter_project 가 읽음을 안 물려줘 못 읽는 프로젝트가 통째로 [NEW] 로 선다"}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-b1wa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-qfhh 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-23pm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"들고 선 층의 까닭이 프로젝트 안에서는 안 보인다"}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-23pm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-wbgz 에서 펼쳤다 — 들고 선 층의 까닭이 프로젝트 안에서는 안 보인다"}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-wbgz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-qfhh 의 멤버 moai-23pm 로 펼쳤다"}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-fdq2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"fields_known 의 안 적었다 알림이 토글마다 다시 선다"}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-fdq2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-t8eg 에서 펼쳤다 — fields_known 의 \"안 적었다\" 알림이 토글마다 다시 선다"}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-t8eg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-qfhh 의 멤버 moai-fdq2 로 펼쳤다"}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-zwam","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옛 바이너리가 새 열 이름을 모르는 열로 잔소리한다"}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-zwam","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-brbt 에서 펼쳤다 — 옛 바이너리가 새 바이너리의 열 이름을 \"모르는 열\" 로 잔소리한다"}
+{"ts":"2026-09-20T05:56:57Z","id":"moai-brbt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-qfhh 의 멤버 moai-zwam 로 펼쳤다"}
+{"ts":"2026-09-20T05:56:58Z","id":"moai-qfhh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-20: 오늘 밤 moai-4qbv·moai-f31d·moai-8mq9 를 끝낸 창들이 남긴 것 넷을 묶었다. 넷 다 사람에게 보이는 자리다 — 통째로 선 [NEW], 안 보이는 까닭, 되풀이되는 알림, 옛 바이너리의 잔소리. 고치는 자리는 src/tui/ 와 src/user_config.rs·src/read_marks.rs 로 한 임자가 쥔다."}
