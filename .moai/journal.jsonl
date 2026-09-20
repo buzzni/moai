@@ -6202,3 +6202,10 @@
 {"ts":"2026-09-20T09:28:36Z","id":"moai-blvx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"없는 자리를 도구의 두 쪽이 다르게 읽는다"}
 {"ts":"2026-09-20T09:28:36Z","id":"moai-blvx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-lqsr 에서 펼쳤다 — 없는 자리를 도구의 두 쪽이 다르게 읽는다"}
 {"ts":"2026-09-20T09:28:36Z","id":"moai-lqsr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-shn2 의 멤버 moai-blvx 로 펼쳤다"}
+{"ts":"2026-09-20T09:32:34Z","id":"moai-flma","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에이전트가 읽는 표면 — prime·다음 일·실행자 트레일러"}
+{"ts":"2026-09-20T09:32:34Z","id":"moai-5ok8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai prime — 세션 시작과 컴팩션 뒤에 다시 주입되는 요약 한 판"}
+{"ts":"2026-09-20T09:32:34Z","id":"moai-j4xs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"mv done 이 이로써 풀린 것을 한 줄로 댄다"}
+{"ts":"2026-09-20T09:32:34Z","id":"moai-yv87","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"prepare-commit-msg 가 MOAI_ACTOR 를 Executed-By 트레일러로 남긴다"}
+{"ts":"2026-09-20T09:32:34Z","id":"moai-flma","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-6k07 에서 펼쳤다 — beads 벤치마크 조사 원문 (2026-09-13) — 에이전트 워크플로·formulas·git 훅·.github·문서·사용자 모으기"}
+{"ts":"2026-09-20T09:32:34Z","id":"moai-6k07","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-flma 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-20T09:32:45Z","id":"moai-flma","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"6k07 의 §1·§3 가운데 아직 안 만든 셋이다. §2(에픽 템플릿·--var·--as-plan)와 init 마커 해시는 이미 만들었고, 핸드오프는 `다음:` 노트 관례로 서 있다. 배포 축은 moai-wc2h 가 든다."}
