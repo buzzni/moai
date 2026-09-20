@@ -103,9 +103,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     st.notices.extend(crate::cmd::init::agents_notice(repo.here(), ctx.chdir));
     // 빠진 딸린 파일 규칙도 같은 자리다(moai-2f99) — `init` 이 한 번 말하고 마는 것을 여기가 잇는다.
     st.notices.extend(crate::cmd::init::dotfile_notice(repo.here(), ctx.chdir));
-    // **심어 놓고 못 도는 머지 드라이버도 여기서 댄다**(moai-2ewr). 안 심은 것은 말하지 않는다 —
-    // 그 상태는 git 의 기본 머지가 돌아 무해했다(moai-w8so). 해로운 것은 돈다고 믿는데 안 도는
-    // 자리고, 그 사실이 이 화면 말고는 설 데가 없다.
+    // **머지 드라이버의 상태도 여기서 댄다**(moai-2ewr·moai-9khu). 언제 무엇이 서는지는
+    // `merge_driver::notice` 가 정하고, 훅의 보드가 같은 것을 싣는다 — 위의 `agents_notice` 와
+    // 같은 자리다. 그 사실이 이 화면 말고는 설 데가 없어서 여기 있다.
     st.notices.extend(crate::cmd::merge_driver::notice(repo.here(), ctx.chdir));
 
     // **설정에 적은 말이 틀렸으면 여기서 댄다**(리뷰 moai-80qw). `Doc::lang` 이 그 줄을 짓는

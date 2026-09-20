@@ -522,6 +522,51 @@ fn init_keeps_a_new_prefix_short() {
     assert!(add(&old, &["옛 저장소의 이슈"]).starts_with("my-company-backend-"), "옛 긴 접두어를 막았다");
 }
 
+/// **아무도 안 읽을 자리에는 세우기 전에 묻는다**(moai-pjrr·moai-mz0e) — 가르는 자는 "명령이 어느
+/// 트래커로 가는가" 하나다. 딸린 워크트리의 **밑자리**도 워크트리로 답해야 한다.
+///
+/// `worktree::main_root` 는 밑길을 주 체크아웃에 그대로 비추므로(`<wt>/src` → `<main>/src`)
+/// 거기 트래커가 없으면 워크트리 물음이 안 서고, 그대로 두던 판은 위로 찾은 **워크트리의** `.moai` 를
+/// 대며 `moai -C <워크트리> init` 을 시켰다(리뷰). 그 자리의 명령은 모두 루트의 트래커를 쓰므로,
+/// 따라 친 사람은 병합에서 겨룰 파일을 고쳤다 — moai-y7go 가 없앤 바로 그 자리다.
+///
+/// **거절문이 도로 내는 명령은 친 대로다** — 접두어를 빠뜨린 줄을 베끼면 디렉터리 이름에서 만든
+/// 접두어가 서는데, 그것은 나중에 못 바꾼다.
+#[test]
+fn init_in_a_worktree_points_at_the_main_checkout() {
+    let s = Scratch::new("initwt");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/argos-wt", "-b", "worktree-argos-wt"]);
+    let deep = main.join(".claude/worktrees/argos-wt/src/deep");
+    std::fs::create_dir_all(&deep).unwrap();
+
+    let out = moai(&deep, &["init", "argos"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "아무도 안 읽을 자리에 세웠다 — {err}");
+    assert!(err.contains("딸린 워크트리"), "워크트리를 그냥 '위의 트래커' 로 댔다 — {err}");
+    assert!(err.contains("/main/.moai"), "주 체크아웃의 트래커를 안 댔다 — {err}");
+    assert!(!err.contains("argos-wt/.moai"), "아무도 안 읽는 트래커를 고치라고 했다 — {err}");
+    assert!(err.contains("MOAI_HERE=1 moai init argos"), "친 접두어를 빠뜨린 줄을 댔다 — {err}");
+    assert!(!deep.join(".moai").exists(), "거절하고도 .moai 를 만들었다");
+
+    // **`-C` 로 왔으면 그것도 도로 낸다** — `-C` 는 `set_current_dir` 로 따르므로 "여기" 는 `-C` 가
+    // 가리킨 자리고 사람의 셸은 딴 데 있다. 빠뜨린 줄을 그대로 베끼면 그 셸 자리에 트래커가 하나
+    // 더 선다 — 나머지를 친 대로 되살린 줄일수록 더 그대로 베낀다.
+    let away = s.path().join("away");
+    std::fs::create_dir_all(&away).unwrap();
+    let out = moai(&away, &["-C", &deep.display().to_string(), "init", "argos"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{err}");
+    let hatch = err.lines().find(|l| l.contains("MOAI_HERE=1")).unwrap_or_default();
+    assert!(hatch.contains(&format!("-C {}", deep.display())), "`-C` 를 빠뜨린 줄을 댔다 — {hatch}");
+    assert!(!away.join(".moai").exists(), "거절하고도 셸 자리에 .moai 를 만들었다");
+}
+
 /// 남의 .gitignore 를 지우지 않고 빠진 줄만 덧붙인다.
 #[test]
 fn init_appends_to_an_existing_gitignore() {
@@ -1635,7 +1680,10 @@ fn inside_a_repo_a_registry_changes_nothing() {
     let s = init("ovinside");
     add(s.path(), &["제 일"]);
     let other = dir_in(&s, "elsewhere");
-    ok(&other, &["init", "other"]);
+    // **위에 트래커가 있어도 세운다**(moai-pjrr, 2026-09-20 사용자 결정 둘째 판) — 알림 한 줄을
+    // 얹을 뿐이다. 모노레포 하위에 제 트래커를 두는 길이 이것이다.
+    let planted = ok(&other, &["init", "other"]);
+    assert!(planted.contains("위에도 트래커가 있다"), "위의 트래커를 안 댔다 — {planted}");
     let cfg = registry(&s, &[&other, s.path()]);
     for args in [&[][..], &["status"], &["ready"], &["status", "--json"], &["ready", "--json"]] {
         let plain = moai(s.path(), args);
@@ -12391,16 +12439,14 @@ fn re_installing_replaces_the_line_and_every_line_falls_back() {
 
 /// **심어 놓고 못 도는 드라이버를 `status` 가 한 줄로 비춘다**(moai-2ewr).
 ///
-/// 안 심은 클론은 말하지 않는다 — 거기서는 git 의 기본 머지가 돌고 표식도 서서 무해했다
-/// (`moai-w8so`). 해로운 것은 돈다고 믿는데 안 도는 자리다. 셋을 한 자리에서 잰다:
-/// 안 심었을 때 조용한가, 썩었을 때 대는가, 제대로 심으면 걷히는가.
+/// 돈다고 믿는데 안 도는 자리다. 둘을 한 자리에서 잰다: 썩었을 때 대는가, 제대로 심으면
+/// 걷히는가. 안 심은 클론은 [`status_names_a_clone_that_never_planted_the_driver`] 가 잰다.
 #[test]
 fn status_names_a_planted_driver_that_cannot_run() {
     let s = init("mergenotice");
     let root = s.path();
     git(root, &["init", "-q", "."]);
     add(root, &["하나"]);
-    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "안 심은 클론을 졸랐다");
 
     let gone = root.join("없는/자리/moai");
     ok(root, &["merge-driver", "--install", "--as", &gone.display().to_string()]);
@@ -12421,6 +12467,130 @@ fn status_names_a_planted_driver_that_cannot_run() {
 
     ok(root, &["merge-driver", "--install", "--as", BIN]);
     assert!(!ok(root, &["status"]).contains("머지 드라이버"), "제대로 심었는데 알림이 안 걷혔다");
+}
+
+/// **선언해 놓고 안 심은 클론을 `status` 가 한 줄로 비춘다**(moai-9khu).
+///
+/// 설정은 커밋되지 않아 **클론마다 한 번** 쳐야 하는데, 안 친 쪽은 `.gitattributes` 의
+/// `merge=moai` 가 그냥 무시되는 줄 모르고 이슈마다 푸는 값을 잃는다. 새 사용자가 정확히 밟는
+/// 자리다.
+///
+/// **선언이 없으면 조용하다.** 드라이버를 안 쓰기로 한 저장소를 조르면 걷을 길이 없다 —
+/// 조르는 범위를 저장소가 스스로 건 선언으로 좁힌 까닭이고, `moai-w8so` 의 실측(안 심은 클론은
+/// 기본 머지가 돌아 무해하다)이 그대로 서 있는 자리이기도 하다.
+#[test]
+fn status_names_a_clone_that_never_planted_the_driver() {
+    let s = init("mergeabsent");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+
+    // `init` 이 `.gitattributes` 에 `merge=moai` 를 걸어 뒀다. 심지는 않았다.
+    let said = ok(root, &["status"]);
+    assert!(said.contains("안 심었다"), "안 심은 클론을 안 댔다\n{said}");
+    assert!(said.contains("moai merge-driver --install"), "칠 줄을 안 댄다\n{said}");
+    // **경고가 아니라 알림이다** — 종료 코드는 안 바뀌고(`ok` 가 그것을 이미 쟀다) `notices` 에 선다.
+    let json = ok(root, &["status", "--json"]);
+    one_json_value(&json);
+    let notices = json.split("\"notices\":").nth(1).expect("notices 가 없다").to_string();
+    let warnings =
+        json.split("\"warnings\":").nth(1).unwrap_or("").split("\"notices\":").next().unwrap_or("").to_string();
+    assert!(notices.contains("merge_driver_absent"), "{json}");
+    assert!(!warnings.contains("merge_driver_absent"), "알림이 경고로 섰다\n{json}");
+
+    // 치라는 줄을 그대로 친다 — 걷힌다.
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "심었는데 알림이 안 걷혔다");
+
+    // **선언을 걷으면 입을 다문다.** 드라이버를 안 쓰기로 한 저장소다.
+    git(root, &["config", "--local", "--unset", "merge.moai.driver"]);
+    std::fs::write(root.join(".gitattributes"), "# 이 저장소는 드라이버를 안 쓴다\n").unwrap();
+    let said = ok(root, &["status"]);
+    assert!(!said.contains("안 심었다"), "선언이 없는데 졸랐다\n{said}");
+}
+
+/// **넓은 자리에 심은 사람을 "안 심었다" 로 조르지 않는다**(리뷰 moai-vbmn.spv).
+///
+/// 심는 자리는 `--local` 이지만 git 이 드라이버를 **찾는** 자리는 system·global 까지다.
+/// `--local` 만 보고 조르던 판은 `git config --global merge.moai.driver` 하나로 모든 저장소가
+/// 도는 사람에게 저장소마다 "병합이 기본 머지로 내려앉는다" 고 말했는데, 그 병합은 실제로
+/// 그 줄이 돌아 안 내려앉는다 — 걷을 길이 없는 거짓말이다.
+///
+/// 비워 둔 키도 "안 심었다" 가 아니다. 그 상태는 git 이 빈 명령을 돌려 **표식 없이 이쪽 것만**
+/// 남기는 자리라, 무해하다는 낱말을 붙일 수 없다 — 무엇이라 부를지 정할 때까지 입을 다문다.
+#[test]
+fn status_does_not_nag_a_driver_planted_in_a_wider_scope() {
+    let s = init("mergescope");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+    assert!(ok(root, &["status"]).contains("안 심었다"), "안 심은 클론을 안 댔다");
+
+    // `--local` 이 아니라 `--worktree` 에 심는다 — 넓은 자리를 이 시험 안에서 재는 길이다
+    // (`--global` 은 사람의 `~/.gitconfig` 다). git 은 이것도 제 차례에 찾아 쓴다.
+    //
+    // **이 도구가 지은 모양 그대로, 자리만 없는 곳으로 심는다**(리뷰 moai-vbmn.spv). 아무 글이나
+    // 심던 판은 `planted_word` 가 표식을 못 찾아 어차피 `None` 으로 끝나, 아래 둘째 재기가 어느
+    // 쪽으로 고쳐도 푸르렀다. 모양을 맞춰 두면 넓은 자리를 재는 날 그 줄이 `rotten` 으로 선다.
+    git(root, &["config", "extensions.worktreeConfig", "true"]);
+    let gone = root.join("없는/자리/moai");
+    let wide = format!(
+        "cp %A %A.ours; if '{}' merge-driver %O %A %B %L %P; then rm -f %A.ours; exit 0; fi; exit 1",
+        gone.display()
+    );
+    git(root, &["config", "--worktree", "merge.moai.driver", &wide]);
+    let said = ok(root, &["status"]);
+    assert!(!said.contains("안 심었다"), "이미 도는 드라이버를 안 심었다고 했다\n{said}");
+
+    // 그 줄은 **재지도 고치라고도 안 한다** — 남이 적은 줄을 "썩었다" 고 안 부르는 자리다.
+    // `kind` 로 잰다: `alien` 의 글에는 `머지 드라이버` 가 안 들어 낱말로는 못 본다.
+    let json = ok(root, &["status", "--json"]);
+    assert!(!json.contains("merge_driver_"), "넓은 자리의 줄을 재고 말았다\n{json}");
+
+    // **비워 둔 키는 안 심은 것이 아니다.** 여기도 입을 다문다.
+    git(root, &["config", "--worktree", "--unset", "merge.moai.driver"]);
+    git(root, &["config", "--local", "merge.moai.driver", ""]);
+    let said = ok(root, &["status"]);
+    assert!(!said.contains("안 심었다"), "비워 둔 키를 안 심은 것으로 읽었다\n{said}");
+}
+
+/// **그 이름의 다른 도구가 선 자리를 "안 돈다" 로 뭉치지 않는다**(moai-zdw4).
+///
+/// 파일의 모드만 읽던 판이 조용히 지나가던 자리다 — 자리도 있고 실행 권한도 있는데 그 명령은
+/// `merge-driver` 를 모른다. 이름을 `moai` 그대로 두고 배포하기로 한 뒤 받는 쪽에서 가까워졌다.
+/// 사람이 찾으러 갈 곳이 다르므로 낱말을 가른다.
+#[cfg(unix)]
+#[test]
+fn status_names_another_tool_of_that_name() {
+    let s = init("mergealien");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+
+    // 자리는 멀쩡하고 이 명령만 모른다 — 옛 moai 가 그 꼴이다. **[`write_exe`] 로 내놓는다**
+    // (리뷰 moai-vbmn.spv): `status` 가 이 파일을 곧바로 exec 하는데, 이 프로세스가 쓴 inode 는
+    // 옆 시험의 fork 와 겹쳐 ETXTBSY 로 거절된다 — [`place_exe`] 가 2,400번으로 잰 자리다.
+    let other = root.join("옛moai");
+    write_exe(&other, "#!/bin/sh\necho '모르는 부명령' >&2\nexit 2\n");
+    ok(root, &["merge-driver", "--install", "--as", &other.display().to_string()]);
+
+    let said = ok(root, &["status"]);
+    assert!(said.contains("다른 도구가 선다"), "딴 도구를 안 댔다\n{said}");
+    assert!(!said.contains("안 돈다"), "돌기는 도는 것을 못 돈다고 했다\n{said}");
+    assert!(said.contains(&other.display().to_string()), "어느 경로인지 안 댄다\n{said}");
+    let json = ok(root, &["status", "--json"]);
+    one_json_value(&json);
+    let notices = json.split("\"notices\":").nth(1).expect("notices 가 없다").to_string();
+    assert!(notices.contains("merge_driver_alien"), "{json}");
+
+    // 맨 `--install` 로 다시 심으면 이름 충돌 자체가 사라진다.
+    //
+    // **낱말이 아니라 `kind` 로 잰다**(리뷰 moai-vbmn.spv). 옆의 셋과 달리 이 알림의 글에는
+    // `머지 드라이버` 가 안 든다("그 이름의 다른 도구가 선다") — 그 낱말로 걷혔는지를 재면
+    // `probe` 가 되돌아 `Alien` 을 계속 내도 시험은 푸르다. 걷혔는지를 실제로 재는 자다.
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    let json = ok(root, &["status", "--json"]);
+    assert!(!json.contains("merge_driver_"), "다시 심었는데 알림이 남았다\n{json}");
 }
 
 /// **옛 판으로 심은 줄도 다시 심으라고 한다**(moai-h54i).

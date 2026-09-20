@@ -297,14 +297,67 @@ pub(crate) fn read_table(root: &Table) -> (BTreeMap<String, String>, Vec<String>
 ///
 /// **깨진 파일에는 쓰지 않는다**(`broken`). 도구가 짓는 파일이라 깨질 일이 드물지만, 깨졌으면 사람이
 /// 볼 수 있게 두고 멈춘다 — 덮으면 그 안의 읽음이 통째로 사라진다.
-pub fn update<T>(config: &Path, root: &Path, f: impl FnOnce(&mut Sheet) -> R<T>) -> R<T> {
+///
+/// **자리를 고르다 만난 까닭은 값에 실어 돌려준다**([`Wrote::problems`], moai-ajh2). 읽는 길은 그것을
+/// 이미 대는데([`Marks::problems`]) 쓰는 길만 버리던 판은, 뿌리 윗자리에 잠깐 `EACCES`·`ESTALE`·`ELOOP`
+/// 가 난 그 한 번이 옛 철자 자리에 적고(락도 딴 자리다) 아무 말 없이 0 으로 끝났다.
+///
+/// **그 도장이 돌아오는 것은 지금 자리가 아직 없을 때뿐이다**(리뷰) — 합치는 자리는 `fresh_sheet`
+/// 하나고([`merge_past`]), [`read`] 도 `!place.at.exists()` 일 때만 옛 자리를 본다. ([`overlay_older`]
+/// 는 그 자를 안 쓴다 — 제가 방금 쓴 표에 얹는 자리라 탐색기의 한 걸음만 산다. 그래서 그 한 판에서는
+/// 탐색기와 `moai read` 가 같은 id 를 달리 세고, 다음 걸음의 [`read`] 가 탐색기 쪽을 도로 되돌린다.)
+/// 이미 여러 달치 도장이 선 사람에게 그 한 번이 나면 그 판의 도장은 **영영** 딴 파일에 남는다. 그러니
+/// 이 줄은 "철자가 밀렸다" 가 아니라 "이 판의 도장을 잃을 수 있다" 로 읽어야 하고, 고치는 길은
+/// 쓰는 길에서 [`settle`] 의 실패를 딱딱하게 무르는 것이다(규약의 "읽기는 관대하고 쓰기는 엄하다").
+/// 떨어지는 길 자체는 2026-09-20 사용자 결정이라 여기서 안 뒤집는다 — 재어 보고 고를 일이다.
+///
+/// **어디로 내는지는 부르는 쪽이 정한다**: 이 모듈은 아무것도 안 찍는 자라([`crate::report`]·
+/// [`crate::query`] 와 같은 약속) 여기서 찍으면 탐색기의 화면에 stderr 한 줄이 끼어든다.
+///
+/// **아직 없는 파일은 짓기 전에 묻는다**(moai-dyb7). 디렉터리와 락을 먼저 짓고 `f` 를 부르던 판은,
+/// 적을 것이 없는 `moai read <id>` 하나가 아직 아무것도 안 읽은 사람의 집에 `read/` 와 0바이트
+/// `<해시>.toml.lock` 을 남겼다 — 프로젝트마다 하나씩 쌓이고 아무도 안 치운다. 그래서 파일이 없는
+/// 판에서만 **락 밖에서 한 번 재 보고**, 쓸 것이 없으면 아무것도 안 짓고 돌아선다.
+///
+/// **치우는 길로 안 간다.** 쥔 락 파일을 지우면 기다리던 갈래가 지워진 그 아이노드를 잡고, 그다음에 온
+/// 갈래는 새로 지은 파일을 잡아 둘이 함께 쓴다 — 조용한 손실이라 못 견딘다(CLAUDE.md). 남는 값은
+/// 이쪽이 싸다: 없는 파일을 읽는 것은 파싱할 것이 없고, 파일이 이미 있으면 디렉터리도 락도 그 곁에
+/// 이미 선 세간이라 새로 남는 것이 없다.
+///
+/// 그래서 `f` 는 **두 번 돌 수 있다** — 재 보기 한 번, 락 안의 진짜 쓰기 한 번. 준 [`Sheet`] 밖에
+/// 자국을 남기면 안 된다.
+pub fn update<T>(config: &Path, root: &Path, f: impl Fn(&mut Sheet) -> R<T>) -> R<Wrote<T>> {
     // **자리는 락 밖에서 고른다.** `canonicalize` 는 락이 필요 없는데, 안에서 하면 쓰는 이마다 그만큼
     // 더 기다린다(리뷰). 푼 뿌리를 함께 받아 문지기와 [`Sheet::claim`] 에 그대로 넘긴다 — 여기서 다시
     // 풀면 이름을 고른 값과 견주는 값이 갈린다.
     let place = place_of(config, root);
-    let (path, root, past) = (place.at, place.root, place.past);
+    let (path, root, past, mut problems) = (place.at, place.root, place.past, place.problems);
     let dir = dir_of(&path);
     let err = |e: std::io::Error| Fail::new(format!("{}: {e}", path.display()));
+    let called = |sheet: &mut Sheet| {
+        f(sheet).map_err(|e| match e.code {
+            crate::fail::code::BROKEN => Fail::coded(format!("{}: {}", path.display(), e.message), e.code),
+            _ => e,
+        })
+    };
+    // **짓기 전에 재 본다**(moai-dyb7). 없는 파일은 빈 것으로 들고, 옛 자리도 그대로 겹쳐 본다 — 락 안의
+    // 차례와 **같은 것을 재야** 한다. 빼먹으면 옛 자리에만 있는 읽음이 합쳐질 판을 "쓸 것이 없다" 로 읽어,
+    // 합치기가 다음 쓰기까지 미뤄진다.
+    //
+    // 그 뒤에 옆에서 파일이 서도 잃는 것은 없다 — 여기서 "쓸 것이 없다" 가 나오려면 빈 표에 대고도 적을
+    // 것이 없었다는 뜻이고, 그것은 어느 표에 대고도 적을 것이 없다.
+    if !path.exists() {
+        let mut trial = Sheet::parse("").map_err(|e| refuse(format!("{}: {e} — 고치기 전까지 쓰지 않는다", path.display())))?;
+        // 재 보기의 까닭은 **돌아설 때만** 싣는다 — 안 돌아서면 락 안의 합치기가 같은 줄을 다시 내므로,
+        // 둘 다 실으면 한 판의 한 탈이 두 줄로 선다.
+        let mut why = Vec::new();
+        merge_past(&mut trial, &past, &root, &mut why)?;
+        let out = called(&mut trial)?;
+        if !trial.changed() {
+            problems.append(&mut why);
+            return Ok(Wrote { value: out, problems });
+        }
+    }
     // **남이 못 들여다보는 자리에 짓는다**(리뷰). 무엇을 읽었는지는 설정과 같은 갈래의 사적인 값인데,
     // `write_atomic` 이 지키는 것은 **있던 파일**의 권한이라 처음 쓰기는 umask 를 따른다 — `chmod 600
     // config.toml` 해 둔 사람의 읽음이 자리를 옮기는 것만으로 0644 로 풀린다. 파일마다 권한을 입히는
@@ -344,19 +397,9 @@ pub fn update<T>(config: &Path, root: &Path, f: impl FnOnce(&mut Sheet) -> R<T>)
     // (`read`), 합치는 자리는 여기 하나다 — 옛 파일은 그대로 두니 지우는 것도 옮기는 것도 아니다.
     // 겹치는 차례는 그대로다: 여기 이미 있는 id 는 안 건드린다.
     if fresh_sheet {
-        let mut older_marks = BTreeMap::new();
-        for old in &past {
-            let got = read_one(old, &root);
-            overlay(&mut older_marks, &got.seen);
-        }
-        if !older_marks.is_empty() {
-            sheet.mark(&older_marks)?;
-        }
+        merge_past(&mut sheet, &past, &root, &mut problems)?;
     }
-    let out = f(&mut sheet).map_err(|e| match e.code {
-        crate::fail::code::BROKEN => Fail::coded(format!("{}: {}", path.display(), e.message), e.code),
-        _ => e,
-    })?;
+    let out = called(&mut sheet)?;
     // **바뀐 것이 없으면 파일을 안 짓는다.** 어느 프로젝트의 것인지 적는 줄([`Sheet::claim`])도 그때
     // 함께 적는다 — 먼저 적던 판은 그 한 줄이 쓰기를 세워, 적을 것이 없는 `moai read` 하나가 아직
     // 아무것도 안 한 사람의 집에 빈 읽음 파일을 지었다.
@@ -364,7 +407,39 @@ pub fn update<T>(config: &Path, root: &Path, f: impl FnOnce(&mut Sheet) -> R<T>)
         sheet.claim(&root);
         write_atomic(&path, sheet.render().as_bytes())?;
     }
-    Ok(out)
+    Ok(Wrote { value: out, problems })
+}
+
+/// 옛 철자로 선 파일들을 이 [`Sheet`] 에 겹친다 — **처음 짓는 파일일 때만**([`update`]).
+///
+/// 재 보기와 락 안의 쓰기가 **한 함수로 겹친다**(moai-dyb7) — 둘로 두면 한쪽만 고치는 날 재 보기가
+/// 쓰기와 다른 답을 내고, 그 어긋남은 "쓸 것이 없다" 로 조용히 돌아선다.
+///
+/// **옛 자리를 못 든 까닭은 물고 나온다**(리뷰) — 읽는 길의 [`older`] 와 같은 자다. 여기가 **합치는
+/// 단 한 번**이라(그 뒤로 [`read`] 는 옛 자리를 안 연다) 이때 못 든 도장은 사람이 권한을 고쳐도 다시
+/// 안 들어온다. 버리던 판은 그 한 번이 아무 말 없이 지나갔다.
+fn merge_past(sheet: &mut Sheet, past: &[PathBuf], root: &Path, problems: &mut Vec<String>) -> R<()> {
+    let mut older_marks = BTreeMap::new();
+    for old in past {
+        let mut got = read_one(old, root);
+        overlay(&mut older_marks, &got.seen);
+        problems.append(&mut got.problems);
+    }
+    if !older_marks.is_empty() {
+        sheet.mark(&older_marks)?;
+    }
+    Ok(())
+}
+
+/// 읽음을 고치고 나온 것 — 부른 쪽이 시킨 값과 **그 자리를 고르다 만난 까닭**.
+///
+/// [`Marks`] 와 같은 모양이다(moai-ajh2). 읽는 쪽과 쓰는 쪽이 한 자를 쓰지 않던 판은 쓰는 쪽만 조용했다.
+#[derive(Debug)]
+pub struct Wrote<T> {
+    /// [`update`] 에 준 함수가 돌려준 것.
+    pub value: T,
+    /// 자리를 고르다([`Place::problems`]) 또 옛 자리를 합치다([`merge_past`]) 만난 까닭. 빈 것이 정상이다.
+    pub problems: Vec<String>,
 }
 
 /// 읽음 파일 하나. 모르는 키와 주석은 그대로 들고 간다 — 도구가 짓는 파일이어도 사람이 곁에 한 줄
@@ -647,6 +722,30 @@ mod tests {
         }
     }
 
+    /// **쓰는 길도 그 까닭을 댄다**(moai-ajh2). 읽는 길만 대던 판은 정작 값을 잃는 쪽이 조용했다 —
+    /// 뿌리 윗자리가 잠깐 막히면 옛 철자 자리에 적고(락도 딴 자리다) 아무 말 없이 0 으로 끝났다.
+    ///
+    /// 막지는 않는다: 적기는 그대로 서고, 까닭은 값에 실려 나간다([`Wrote::problems`]).
+    #[test]
+    #[cfg(unix)]
+    fn writing_says_why_it_could_not_settle_the_root() {
+        let s = Scratch::new("read-marks-write-why");
+        let cfg = s.join("config.toml");
+        std::fs::write(s.join("파일"), "x").unwrap();
+        let through = s.join("파일/밑");
+
+        let wrote = update(&cfg, &through, |sh| sh.mark(&marks(&[("a", "A")]))).unwrap();
+        assert_eq!(wrote.problems.len(), 1, "쓰는 길이 까닭을 버렸다 — {:?}", wrote.problems);
+        assert!(wrote.problems[0].contains("자리를 못 풀어"), "{}", wrote.problems[0]);
+        assert_eq!(wrote.value, vec!["a".to_string()], "말만 하고 안 적었다 — {:?}", wrote.value);
+
+        // 성한 자리는 조용하다 — 빈 `problems` 가 정상이다.
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let wrote = update(&cfg, &root, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
+        assert!(wrote.problems.is_empty(), "성한 자리를 탈로 댔다 — {:?}", wrote.problems);
+    }
+
     /// **문지기도 푼 경로로 견준다**(moai-f5e3) — 파일 이름을 푼 경로로 고르면서 `path` 만 철자로 보면,
     /// 옛 철자로 적힌 줄을 남의 것으로 읽어 제 읽음을 안 읽는다.
     #[test]
@@ -766,7 +865,7 @@ mod tests {
 
         let known: BTreeSet<&str> = ["argos-0001", "argos-0003"].into_iter().collect();
         let gone = update(&cfg, &root, |sheet| Ok(sheet.prune(&known))).unwrap();
-        assert_eq!(gone, 1);
+        assert_eq!(gone.value, 1);
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen, marks(&[("argos-0001", "A"), ("argos-0003", "C")]));
     }
 
@@ -776,11 +875,11 @@ mod tests {
         let s = Scratch::new("read-marks-idempotent");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        assert_eq!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap(), ["argos-0001"]);
+        assert_eq!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().value, ["argos-0001"]);
         let was = std::fs::read_to_string(path_for(&cfg, &root)).unwrap();
-        assert!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().is_empty());
+        assert!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().value.is_empty());
         assert_eq!(std::fs::read_to_string(path_for(&cfg, &root)).unwrap(), was, "같은 때를 다시 적어 파일이 바뀌었다");
-        assert_eq!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "B")]))).unwrap(), ["argos-0001"]);
+        assert_eq!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "B")]))).unwrap().value, ["argos-0001"]);
     }
 
     /// **`.` 이 든 자식 id 는 따옴표에 싼 낱말 키로 적는다**(moai-j038.vna) — 맨 키로 적히면 다음 읽기가
@@ -892,7 +991,7 @@ mod tests {
         let src = format!("path = {:?}\n\n[read]\n\"argos-0002\".rv = \"A\"\n", root.display().to_string());
         std::fs::write(&at, &src).unwrap();
         let known: BTreeSet<&str> = BTreeSet::new();
-        assert_eq!(update(&cfg, &root, |sh| Ok(sh.prune(&known))).unwrap(), 0, "때가 아닌 자리를 걷었다");
+        assert_eq!(update(&cfg, &root, |sh| Ok(sh.prune(&known))).unwrap().value, 0, "때가 아닌 자리를 걷었다");
         assert_eq!(std::fs::read_to_string(&at).unwrap(), src, "걷을 것이 없는데 파일을 고쳤다");
     }
 
@@ -912,7 +1011,7 @@ mod tests {
         );
         std::fs::write(&at, &src).unwrap();
         let known: BTreeSet<&str> = ["argos-0002"].into_iter().collect();
-        assert_eq!(update(&cfg, &root, |sh| Ok(sh.prune(&known))).unwrap(), 1);
+        assert_eq!(update(&cfg, &root, |sh| Ok(sh.prune(&known))).unwrap().value, 1);
         let now = std::fs::read_to_string(&at).unwrap();
         assert!(now.contains("# 이 파일에 대해 적어 둔 말"), "걷기가 빈 줄 너머의 주석을 데려갔다\n{now}");
         assert!(!now.contains("argos-0001"), "걷을 것을 안 걷었다\n{now}");
@@ -1046,7 +1145,39 @@ mod tests {
         let cfg = s.join("config.toml");
         let root = s.join("proj");
         update(&cfg, &root, |sh| sh.mark(&BTreeMap::new())).unwrap();
-        assert!(!path_for(&cfg, &root).exists(), "빈 쓰기가 파일을 지었다");
+        let at = path_for(&cfg, &root);
+        assert!(!at.exists(), "빈 쓰기가 파일을 지었다");
+        // **락 파일과 디렉터리까지 센다**(moai-dyb7). `.toml` 만 보던 판은 프로젝트마다 쌓이는 0바이트
+        // `<해시>.toml.lock` 과 `read/` 를 그대로 지나갔다 — 남의 설정 디렉터리에 남는 쓰레기다.
+        assert!(!crate::store::lock_beside(&at).exists(), "빈 쓰기가 락 파일을 남겼다");
+        assert!(!dir_of(&at).exists(), "빈 쓰기가 `read/` 를 지었다");
+
+        // 쓸 것이 있으면 셋 다 선다 — 재 보기가 진짜 쓰기를 삼키지 않는다.
+        update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
+        assert!(at.exists(), "쓸 것이 있는데 안 적었다");
+        assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen.get("argos-0001").map(String::as_str), Some("A"));
+    }
+
+    /// **옛 자리에만 있는 읽음은 재 보기가 삼키지 않는다**(moai-dyb7). 락 밖의 재 보기가 옛 자리를
+    /// 안 겹쳐 보면 "쓸 것이 없다" 로 돌아서, 첫 쓰기 한 번에 합치기로 한 것(리뷰 13)이 안 일어난다.
+    #[test]
+    fn the_trial_run_merges_the_older_places_too() {
+        let s = Scratch::new("read-marks-trial-past");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let slashed = s.join("proj/");
+        let old = sheet_at(dir_of(&cfg), &slashed);
+        std::fs::create_dir_all(dir_of(&old)).unwrap();
+        std::fs::write(&old, format!("path = {:?}\n\n[read]\n\"a\" = \"옛 철자\"\n", slashed.display().to_string())).unwrap();
+
+        // 적을 것은 없다 — 옛 자리의 한 줄만이 쓸 까닭이다.
+        update(&cfg, &slashed, |sh| sh.mark(&BTreeMap::new())).unwrap();
+        assert_eq!(
+            read(&cfg, &slashed, &BTreeMap::new()).seen.get("a").map(String::as_str),
+            Some("옛 철자"),
+            "재 보기가 옛 자리를 안 보고 돌아섰다"
+        );
     }
 
     /// **동시에 적어도 서로를 안 지운다**(CLAUDE.md — 조용한 손실이 이 도구가 못 견디는 유일한 실패다).

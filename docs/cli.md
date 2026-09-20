@@ -1519,8 +1519,9 @@ Options:
 
   Installing is once per clone. Git reads the driver command from the config
   only, and the config is not committed. In a clone without it, merge=moai in
-  `.gitattributes` is simply ignored and git's own merge runs - that is,
-  without it nothing changes from how it was.
+  `.gitattributes` is simply ignored and git's own merge runs - merging is
+  exactly as it was without it. When that repository does set merge=moai,
+  `moai status` says in one line that it is not installed here.
 ```
 
 ## `moai skill`
