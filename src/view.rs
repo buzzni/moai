@@ -4,7 +4,7 @@
 //! `len()` 으로 맞추면 한글 제목이 섞인 표가 전부 어긋난다.
 
 use crate::config::Config;
-use crate::i18n::{fill, t};
+use crate::i18n::{Lang, fill, say};
 use crate::model::{Issue, JournalEntry, Kind};
 use crate::report::{Roll, StatusReport, Warning, is_group};
 use crate::style::{self, paint};
@@ -724,14 +724,15 @@ pub fn status(
     at: &str,
     origin: &Origin,
     trouble: usize,
+    lang: Lang,
 ) -> Vec<String> {
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     let overlaid = overlaid(origin);
     let mut out = vec![
         format!(
             "{}  {}       {}{overlaid}",
-            paint(style::HEAD, &fill(t("status.issues"), &[("n", &st.total.to_string())])),
-            paint(style::DIM, &fill(t("status.epics"), &[("n", &st.epics.len().to_string())])),
+            paint(style::HEAD, &fill(say(lang, "status.issues"), &[("n", &st.total.to_string())])),
+            paint(style::DIM, &fill(say(lang, "status.epics"), &[("n", &st.epics.len().to_string())])),
             paint(style::DIM, at),
         ),
         String::new(),
@@ -740,7 +741,9 @@ pub fn status(
     out.push(board(cfg, &st.counts));
 
     let shelved = crate::report::put_off(issues);
-    for (label, rolls) in [(t("status.milestone_label"), &st.milestones), (t("status.epic_label"), &st.epics)] {
+    for (label, rolls) in
+        [(say(lang, "status.milestone_label"), &st.milestones), (say(lang, "status.epic_label"), &st.epics)]
+    {
         if rolls.is_empty() {
             continue;
         }
@@ -939,11 +942,12 @@ pub fn ready(
     wip: &[&Issue],
     held: &[crate::report::Held],
     origin: &Origin,
+    lang: Lang,
 ) -> Vec<String> {
-    let mut out = vec![fill(t("ready.count"), &[("n", &picks.len().to_string())])];
+    let mut out = vec![fill(say(lang, "ready.count"), &[("n", &picks.len().to_string())])];
     if picks.is_empty() {
         out.push(String::new());
-        out.push(paint(style::DIM, t("ready.none")));
+        out.push(paint(style::DIM, say(lang, "ready.none")));
     } else {
         out.push(String::new());
         let heads: Vec<(String, usize)> = picks
@@ -1526,10 +1530,11 @@ pub fn projects_status(
     projects: &[crate::projects::Project],
     seen: &[crate::projects::Seen<Board>],
     reg: &crate::user_config::Registry,
+    lang: Lang,
 ) -> Vec<String> {
     let mut out = vec![overview_head(
-        t("overview.projects"),
-        &fill(t("overview.places"), &[("places", &projects.len().to_string())]),
+        say(lang, "overview.projects"),
+        &fill(say(lang, "overview.places"), &[("places", &projects.len().to_string())]),
         reg,
     )];
     let w_name = projects.iter().map(|p| width(&one_line(&p.name))).max().unwrap_or(0);
@@ -1612,6 +1617,7 @@ pub fn projects_ready(
     projects: &[crate::projects::Project],
     seen: &[crate::projects::Seen<Picks>],
     reg: &crate::user_config::Registry,
+    lang: Lang,
 ) -> Vec<String> {
     use crate::projects::Seen;
     let total: usize = seen
@@ -1625,8 +1631,8 @@ pub fn projects_ready(
     // 말묶음에서 머리를 읽는데 여기만 한국어로 박혀 있으면, 같은 명령이 선 자리에 따라
     // 다른 말로 답한다. 덜 옮긴 것과 서로 어긋나는 것은 다른 일이다.
     let mut out = vec![overview_head(
-        t("overview.ready"),
-        &fill(t("overview.tally"), &[("places", &projects.len().to_string()), ("n", &total.to_string())]),
+        say(lang, "overview.ready"),
+        &fill(say(lang, "overview.tally"), &[("places", &projects.len().to_string()), ("n", &total.to_string())]),
         reg,
     )];
     let w_name = projects.iter().map(|p| width(&one_line(&p.name))).max().unwrap_or(0);
@@ -2219,7 +2225,8 @@ mod tests {
         let table = |all: &[Issue]| {
             let cfg = cfg();
             let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z");
-            plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", &Origin::default(), 0)).join("\n")
+            plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", &Origin::default(), 0, Lang::Ko))
+                .join("\n")
         };
         let mut epic = issue("argos-0001", "다 끝난 에픽", "todo");
         epic.kind = Kind::Epic;
@@ -2248,20 +2255,24 @@ mod tests {
         let wip = issue("argos-0004", "잡고 있는 것", "in_progress");
         let labels = BTreeMap::from([(("argos-0002", Kind::Issue), "저장 계층".to_string())]);
 
-        let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[], &Origin::default()));
+        let lang = Lang::Ko;
+        let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[], &Origin::default(), lang));
         let joined = out.join("\n");
         // **글자는 말묶음에서 온다**(moai-zeyv) — 여기에 한국어를 박으면 기본 언어(영어)에서 깨진다.
         // **셈이 화면에 닿는지는 따로 잰다**(리뷰 moai-80qw) — 기댓값도 같은 `t()` 를 지나므로,
         // 머리 글이 `{n}` 을 잃으면 양쪽이 나란히 잃어 이 줄만으로는 아무것도 안 잡힌다.
-        assert!(joined.contains(&fill(t("ready.count"), &[("n", "2")])), "{joined}");
+        assert!(joined.contains(&fill(say(lang, "ready.count"), &[("n", "2")])), "{joined}");
         assert!(out[0].contains('2'), "머리 줄에 셈이 없다 — {:?}", out[0]);
         assert!(joined.contains("저장 계층") && joined.contains("에픽 없음"), "{joined}");
         assert!(joined.contains("이미 잡고 있는 것 1건"), "{joined}");
         assert!(joined.contains("argos-0004"), "{joined}");
 
-        let empty = plain(&ready(&[], &labels, &[], &[], &Origin::default()));
+        let empty = plain(&ready(&[], &labels, &[], &[], &Origin::default(), lang));
         let joined = empty.join("\n");
-        assert!(joined.contains(&fill(t("ready.count"), &[("n", "0")])) && joined.contains(t("ready.none")), "{joined}");
+        assert!(
+            joined.contains(&fill(say(lang, "ready.count"), &[("n", "0")])) && joined.contains(say(lang, "ready.none")),
+            "{joined}"
+        );
         assert!(empty[0].contains('0'), "빈 머리 줄에 셈이 없다 — {:?}", empty[0]);
     }
 

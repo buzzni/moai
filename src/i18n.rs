@@ -62,51 +62,18 @@ impl Lang {
 ///
 /// **환경이 설정을 이긴다**: 설정은 그 사람의 평소 값이고 환경은 이번 한 번이다. 둘 다
 /// 모르는 값이면 기본값으로 떨어진다 — 여기서 멈추면 글자 하나 때문에 도구가 안 도는 셈이다.
+///
+/// **시스템 로캘(`LANG`·`LC_ALL`·`LC_MESSAGES`)은 안 읽는다**(moai-gv9n, 2026-09-20 사용자
+/// 결정). [`Lang::parse`] 가 `ko_KR.UTF-8` 모양을 받는 것은 `MOAI_LANG` 에 로캘을 그대로 붙여
+/// 넣는 사람을 받자는 것이지 로캘을 읽는다는 뜻이 아니다. 읽으면 아무것도 안 고른 사람이 제
+/// 로캘 말로 보게 되는데, 말묶음에 든 글이 아직 열 몇 줄이라 `ja_JP` 기계는 옮긴 줄만 일본어고
+/// 나머지는 한국어·영어로 **섞인다** — 기본을 한국어로 둔 것과 같은 까닭이다([`Lang`]).
+/// **여는 조건도 같다**: 옮김이 화면을 덮어 `#[default]` 를 `En` 으로 옮기는 날 이 층을 연다.
 pub fn pick(env: Option<&str>, setting: Option<&str>) -> Lang {
     env.filter(|s| !s.trim().is_empty())
         .and_then(Lang::parse)
         .or_else(|| setting.and_then(Lang::parse))
         .unwrap_or_default()
-}
-
-/// 이 판이 쓸 언어와, 설정에서 그것을 읽다 만난 까닭 — **한 프로세스에 한 번만 정한다.**
-///
-/// 매 줄 설정 파일을 다시 읽을 까닭이 없고, 한 번 돌 동안 말이 바뀌면 같은 화면에 두 말이
-/// 섞인다. 고르는 자(`MOAI_LANG` → 설정 → 영어)는 [`pick`] 하나고 그쪽이 시험을 받는다 —
-/// 여기는 환경과 파일에서 값을 길어 오는 껍데기다.
-///
-/// **긷는 것은 `get_or_init` 밖에서 한다**(리뷰 moai-80qw). 설정을 읽는 길
-/// (`user_config::read` → `Doc::lang`)은 제 글자를 화면에 내는 자리고, 그 글자가 언젠가
-/// [`t`] 를 지나면 닫히는 중인 문을 안에서 다시 두드리는 꼴이 된다 — `OnceLock` 의 재진입은
-/// 영영 안 풀리고, 모든 명령이 아무 말 없이 멈춘다. 값을 먼저 길어 두면 그럴 자리가 없다.
-fn picked() -> &'static (Lang, Vec<String>) {
-    static PICKED: OnceLock<(Lang, Vec<String>)> = OnceLock::new();
-    if let Some(got) = PICKED.get() {
-        return got;
-    }
-    let env = std::env::var("MOAI_LANG").ok();
-    let reg = crate::user_config::read(crate::user_config::path().as_deref());
-    let lang = pick(env.as_deref(), reg.lang.as_deref());
-    PICKED.get_or_init(|| (lang, reg.lang_problems))
-}
-
-/// 이 판이 실제로 쓸 언어.
-pub fn current() -> Lang {
-    picked().0
-}
-
-/// 설정에 적은 말이 틀렸을 때의 한 줄(리뷰 moai-80qw). 비어 있으면 아무 일 없다.
-///
-/// **막지 않는다** — 대는 쪽은 stderr 로 말만 하고 종료 코드를 안 건드린다. 글자 하나 때문에
-/// 도구가 안 도는 것처럼 보이면 안 된다는 것은 [`pick`] 이 영어로 떨어지는 까닭과 같다.
-/// 여기서 새로 읽지 않는다 — 말을 고를 때 이미 읽은 것을 그대로 낸다.
-pub fn problems() -> &'static [String] {
-    &picked().1
-}
-
-/// 지금 언어로 그 키의 글자. 부르는 자리는 이것 하나만 쓴다.
-pub fn t(key: &'static str) -> &'static str {
-    say(current(), key)
 }
 
 /// 글 안의 `{이름}` 자리를 채운다 — `fill(t("status.issues"), &[("n", "12")])`.
