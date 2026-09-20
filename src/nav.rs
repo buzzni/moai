@@ -174,8 +174,12 @@ fn take_scanned() -> usize {
 struct Place {
     /// **바로 이 자리에** 선 줄 — `homes` 가 이 자리와 똑같은 것. 목록 한 층이 이것이다.
     here: Vec<usize>,
-    /// 이 자리와 **그 밑에 걸린 줄 전부** — `homes` 가 이 자리로 시작하는 것([`Index::descendants`]).
-    /// 자기 자신이 든다: `starts_with` 는 같은 자리도 참이다.
+    /// 이 자리에 선 줄과 **그 밑에 걸린 줄 전부** — `homes` 가 이 자리로 시작하는 것
+    /// ([`Index::descendants`]). `here` 가 통째로 여기 든다: `starts_with` 는 같은 자리도 참이다.
+    ///
+    /// **그 폴더 줄 자신은 안 든다.** 폴더 줄은 제 부모 자리에 서므로 `[Epic(e)]` 의 `under` 에
+    /// 에픽 `e` 는 없다 — 묶음 줄까지 세는 쪽이 그것을 따로 더하는 까닭이다
+    /// ([`Index::under_group`] 의 `once(at)`).
     under: Vec<usize>,
     /// 바로 밑에 선 **바구니 마디**(`(마일스톤 없음)`·`(길 잃음)`) — 제 줄이 없어 사는 것이 있을
     /// 때만 생기는 폴더다. 많아야 둘이라 `Vec` 으로 든다.
@@ -185,8 +189,13 @@ struct Place {
     /// 프레임의 셈이 150ms 였다. 자는 `progress` 와 같다 — 둘이 갈리면 목록 줄과 상세 롤업이 같은
     /// 에픽을 두 진척으로 댄다(`tallies_agree_with_progress_at_every_place`).
     ///
-    /// **같은 자리 표에 함께 든다**(moai-teka) — 자리마다 표를 둘 두면 경로를 두 번 베끼고 두 번
-    /// 해싱해, 적재 한 걸음이 그만큼 든다(이슈 1만 건에 ~60ms).
+    /// **같은 자리 표에 함께 든다**(moai-teka) — 자리의 진실을 한 군데로 두려는 것이다. 표가
+    /// 둘이면 같은 자리에 대해 둘이 갈릴 수 있고, 무엇이 참인지를 부르는 쪽이 고르게 된다.
+    ///
+    /// **값이 까닭은 아니다.** 둘째 표(`HashMap<Path, (usize, usize)>`)를 같은 걸음에 더해 재
+    /// 봤더니 이슈 1만 건 적재가 흔들림 안에서 그대로였다 — 한 걸음이 ~100ms 이고 판마다 ±6ms
+    /// 흔들린다(`a_frame_costs`, 2026-09-20 리뷰). 값으로 이 결정을 되돌리려는 다음 사람은 그
+    /// 수부터 다시 재면 된다.
     tally: (usize, usize),
 }
 
@@ -491,7 +500,8 @@ impl Index {
     pub fn descendants(&self, path: &Path) -> Vec<usize> {
         // **직속 자식의 home 은 그 경로와 같다.** `len() >` 로 거르면 바로 밑의
         // 것이 통째로 빠져, 멤버가 셋인 에픽이 "자식 없음" 이라고 나온다 — 색인의
-        // `under` 가 그래서 제 자신을 든다([`Place::under`]).
+        // `under` 가 그래서 **그 자리에 선 줄**까지 든다([`Place::under`]). 묶음 줄
+        // 자신은 제 부모 자리에 서므로 여기 없다.
         self.places.get(path).map(|p| p.under.clone()).unwrap_or_default()
     }
 
