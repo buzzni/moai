@@ -53,17 +53,17 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         // 은 AGENTS.md 가 시키는 길이지만, 거기에 겨루는 가드는 원래 없었다.
         // 돌기 전에 한 번만 뜨는 까닭은 `standing_of` 가 적었다.
         let asked: Vec<&str> = args.ids.iter().map(String::as_str).collect();
-        if from.is_some() {
-            if let Some(g) = issues.iter().find(|i| asked.contains(&i.id.as_str()) && crate::report::is_group(i)) {
-                return Err(Fail::coded(
-                    format!(
-                        "묶음의 칸은 멤버에서 읽는다 — {} 에는 `--from` 을 못 쓴다\n      \
-                         묶음은 `--from` 없이 미룬다",
-                        g.id
-                    ),
-                    super::code::BAD_STATUS,
-                ));
-            }
+        if from.is_some()
+            && let Some(g) = issues.iter().find(|i| asked.contains(&i.id.as_str()) && crate::report::is_group(i))
+        {
+            return Err(Fail::coded(
+                format!(
+                    "묶음의 칸은 멤버에서 읽는다 — {} 에는 `--from` 을 못 쓴다\n      \
+                     묶음은 `--from` 없이 미룬다",
+                    g.id
+                ),
+                super::code::BAD_STATUS,
+            ));
         }
         let by = who?;
         let mut m = Moved::default();

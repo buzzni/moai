@@ -5671,7 +5671,7 @@ mod tests {
 
     // ── 미룸은 물려받는다 ─────────────────────────────────────────────
 
-    fn picks<'a>(issues: &'a [Issue]) -> Vec<&'a str> {
+    fn picks(issues: &[Issue]) -> Vec<&str> {
         ready(issues, &cfg()).iter().map(|i| i.id.as_str()).collect()
     }
 
@@ -5950,7 +5950,7 @@ mod tests {
     fn an_eclipsed_row_is_not_offered_as_work() {
         let mut shadowed = make("argos-0001", Kind::Issue, "todo");
         shadowed.blocked_by = vec!["argos-0009".into()];
-        let rows = vec![
+        let rows = [
             deferred("argos-0009", "todo"),
             make("argos-0002", Kind::Issue, "todo"),
             shadowed,

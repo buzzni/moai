@@ -649,7 +649,7 @@ pub fn korean_missing(root: &Path) -> Vec<&'static str> {
     crate::guide::KOREAN_PLUGINS
         .iter()
         .map(|(id, _)| *id)
-        .filter(|id| ledger.as_ref().is_none_or(|l| skill::installs_of(l, id, &is_here).is_empty()))
+        .filter(|id| ledger.as_ref().is_none_or(|l| skill::installs_of(l, id, is_here).is_empty()))
         .collect()
 }
 
