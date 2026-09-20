@@ -236,6 +236,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     }
     // **문은 지도를 지은 그 자다**(`tree_now`) — `args.tree` 로 다시 적으면 아래의 `expect` 가
     // 멀리 떨어진 `if ctx.json` 의 되돌아감에 기대게 되고, 그 차례를 건드리는 날 CLI 가 터진다.
+    // **화면은 한 번 짓는다** — 트리와 목록은 갈라져 서지만 같은 맥락으로 그리므로, 두 자리에서
+    // 따로 지으면 한쪽만 고치는 날 같은 명령의 두 표면이 다른 말이나 다른 출처로 선다.
+    let screen = view::Screen::new(ctx.lang()).over(&origin);
     if tree_now {
         // **자리는 `nav` 가 정한다.** 트리와 탐색기가 자리를 따로 정하면
         // 어긋나고, 실제로 어긋났다 — 제 에픽이 부모와 다른 자식이 두 번
@@ -245,7 +248,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         // 위에서 지도 한 벌로 지은 것이다 — `tree_now` 가 참일 때만 서 있다.
         let (index, rolls) = (index.expect("트리 색인"), rolls.expect("에픽 굴림"));
         let keep = |at: usize| shown_ids.contains(load.issues[at].id.as_str());
-        let (mut out, drawn) = view::tree(&load.issues, &index, &keep, &rolls, view::Screen::new(ctx.lang()).over(&origin));
+        let (mut out, drawn) = view::tree(&load.issues, &index, &keep, &rolls, screen);
         // **트리도 안 낸 것을 말한다.** 롤업 머리글은 `is_work` 로 세므로
         // 미뤄 둔 멤버까지 세는데, 그 줄은 여기서 빠진다 — 말하지 않으면
         // `0/2` 밑에 줄 하나만 서고 왜 하나가 없는지 아무도 모른다. 목록이
@@ -264,7 +267,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         &report::epic_labels(&load.issues),
         asked_deferred,
         &wh,
-        view::Screen::new(ctx.lang()).over(&origin),
+        screen,
     ))
 }
 
@@ -562,7 +565,10 @@ fn one(
                 // 집계를 잃어 `에픽 1건` 처럼 나온다 — 같은 에픽이 `moai show
                 // --tree` 와 다르게 읽힌다.
                 let rolls = report::rollup_in(all, &repo.config, &soil);
-                out.extend(view::members(all, &index, &keep, &rolls, &here, view::Screen::new(ctx.lang()).over(origin)));
+                // **상세가 이미 든 화면을 그대로 쓴다**(리뷰) — `seen.screen` 이 바로 그 값이고
+                // [`view::Screen`] 은 `Copy` 다. 여기서 다시 지으면 한 번 펼치는 화면 안에 같은
+                // 맥락을 짓는 자리가 둘이 된다.
+                out.extend(view::members(all, &index, &keep, &rolls, &here, seen.screen));
             }
         }
     }

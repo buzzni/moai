@@ -40,14 +40,18 @@ const BAR: usize = 10;
 /// 집어, `MOAI_LANG` 도 `[i18n] lang` 도 안 읽은 화면을 조용히 한국어로 그린다. 말을 명령 층에서
 /// 한 번 풀어 아래로 준다는 것이 이 값이 선 까닭이라(`Ctx::lang`, moai-cigu), 그것을 건너뛰는
 /// 입구를 열어 두지 않는다 — 들어오는 길은 [`Screen::new`] 하나다.
+///
+/// **그래서 두 필드가 이 모듈 안에 머문다**(리뷰) — `pub` 으로 두면 `Screen { lang:
+/// Lang::default(), origin: None }` 이 어느 모듈에서나 서서, `Default` 를 걷어 막으려던 그 길이
+/// 이름만 바꿔 그대로 열려 있다. 밖에서 그 둘을 읽는 자리가 없으니 닫는 값이 0 이다.
 #[derive(Clone, Copy)]
 pub struct Screen<'a> {
     /// 화면의 말. 명령 층에서 한 번 풀어 아래로 준다(`Ctx::lang`, moai-cigu).
-    pub lang: Lang,
+    lang: Lang,
     /// 다른 워크트리에서 온 줄 (`worktree::overlay`). `None` 이면 안 겹쳤다 — 빈 [`Origin`] 을
     /// 빌려 주는 것과 **뜻이 같아서**([`Origin::branch`]·[`Origin::labels`] 가 둘 다 빈 답을 낸다)
     /// 겹칠 것이 없는 자리가 빈 값을 지어낼 일이 없다.
-    pub origin: Option<&'a Origin>,
+    origin: Option<&'a Origin>,
 }
 
 impl<'a> Screen<'a> {
@@ -986,7 +990,7 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
         }
         let rest = w.ids.len().saturating_sub(SHOW);
         if rest > 0 {
-            out.push(format!("    {}", paint(style::DIM, &more_of(rest, screen))));
+            out.push(format!("    {}", paint(style::DIM, &more_of(rest, lang))));
         }
         return out;
     }
@@ -1018,7 +1022,7 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
         ));
     }
     let rest = w.ids.len().saturating_sub(SHOW);
-    let more = if rest > 0 { more_of(rest, screen) } else { String::new() };
+    let more = if rest > 0 { more_of(rest, lang) } else { String::new() };
     if !more.is_empty() || w.hint.is_some() {
         out.push(format!(
             "    {}{}",
@@ -1033,8 +1037,11 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
 }
 
 /// 목록에서 안 보인 나머지 — "N건 더". `status` 의 경고 밑에서만 선다.
-fn more_of(rest: usize, screen: Screen) -> String {
-    fill(say(screen.lang, "status.more"), &[("n", &rest.to_string())])
+///
+/// **[`Screen`] 이 아니라 말만 받는다**(리뷰) — 셈을 글로 옮기는 것뿐이라 겹침을 볼 일이 없다.
+/// 그리기 맥락을 통째로 받으면 이 두 줄이 옆 워크트리에 매인 것으로 읽힌다.
+fn more_of(rest: usize, lang: Lang) -> String {
+    fill(say(lang, "status.more"), &[("n", &rest.to_string())])
 }
 
 /// 집을 수 있는 일. 그리고 이미 벌여 놓은 것.
@@ -1185,7 +1192,8 @@ pub fn ready(
 /// 자식 줄에 단다. 그리기 맥락([`Screen`])을 함께 든다 — 상세의 맥락은 인자 하나다.
 ///
 /// **`Default` 은 안 든다**(moai-uhzk) — [`Screen`] 이 말을 물어야 서므로, 이것도 말 없이는
-/// 안 선다. 읽은 것이 없는 자리는 [`Seen::new`] 로 짓는다.
+/// 안 선다. 짓는 자리는 둘뿐이라 도우미를 두지 않았다: `cmd::edit` 과 `cmd::show` 가 칸마다
+/// 제 값을 채우고, 읽은 것이 없는 화면을 짓는 것은 시험의 `tests::bare_seen` 하나다.
 pub struct Seen<'a> {
     /// 계획에서 빠진 줄 → 그것을 뺀 줄 (`report::deferred_roots`).
     pub roots: BTreeMap<&'a str, &'a str>,
@@ -2471,15 +2479,24 @@ mod tests {
     /// **겹친 것이 있으면 머리와 줄이 그렇다고 말한다** — [`Screen::over`] 가 출처를 실제로 들고
     /// 내려가는지는 여기서 잰다. 인자를 묶는 리팩터에서 빈 화면만 그려 보면, 출처를 잃은 화면도
     /// 시험이 다 파랗다.
+    ///
+    /// **줄은 줄에서 잰다**(리뷰) — [`overlaid`] 가 머리 꼬리에 [`style::BRANCH_GLYPH`] 를 이미
+    /// 넣으므로, 화면 전체에서 그 글자를 찾는 자는 줄이 표를 잃어도 머리 하나로 초록이 된다.
+    /// 그러면 이 시험이 잡겠다고 적어 둔 바로 그 되돌림(줄의 `screen.branch` 가 사라지는 것)을
+    /// 못 잡는다.
     #[test]
     fn an_empty_origin_draws_like_none_and_a_real_one_marks_the_rows() {
         let cfg = cfg();
-        let now = "2026-09-11T04:12:03Z";
+        // **`now` 는 두 줄의 시각보다 뒤다**(리뷰) — `issue` 는 09-11 을, 옆에서 집은 줄은 09-12
+        // 를 적는다. `now` 를 09-11 에 두면 옆 줄이 `report::FUTURE_SLACK_SECS`(24시간)를 네 시간
+        // 남기고 스치는데, 그 상한을 스치는 날 `future_timestamp` 경고가 끼어든다 — 그쪽
+        // 미리보기는 id 만 내고 `⎇` 를 안 달아, 아래 줄 판정이 조용히 다른 줄을 보게 된다.
+        let now = "2026-09-13T00:00:00Z";
         let lang = Lang::Ko;
         let mine = vec![issue("argos-0001", "제 줄", "todo")];
         let draw = |issues: &[Issue], screen: Screen| {
             let st = crate::report::status(issues, &[], &cfg, now);
-            plain(&status(&st, issues, &cfg, now, ".moai/issues.jsonl", 0, screen)).join("\n")
+            plain(&status(&st, issues, &cfg, now, ".moai/issues.jsonl", 0, screen))
         };
         let bare = Origin::default();
         assert_eq!(
@@ -2495,13 +2512,23 @@ mod tests {
         let side = crate::worktree::Side::new("feat/x", "/tmp/feat-x", vec![theirs]);
         let (shown, origin) = crate::worktree::overlay(mine.clone(), &[side]);
         let over = draw(&shown, Screen::new(lang).over(&origin));
+        let head = over.first().map(String::as_str).unwrap_or_default();
         assert!(
-            over.contains(&fill(say(lang, "status.overlaid"), &[("trees", "feat/x")])),
-            "머리가 겹쳐 봤다고 안 한다\n{over}"
+            head.contains(&fill(say(lang, "status.overlaid"), &[("trees", "feat/x")])),
+            "머리가 겹쳐 봤다고 안 한다\n{over:#?}"
         );
-        assert!(over.contains(style::BRANCH_GLYPH), "겹쳐 온 줄에 가지 표가 없다\n{over}");
+        // 머리는 id 를 안 대므로 id 로 고른 줄은 머리가 아니다 — 그 줄에서 머리표를 찾는다.
+        let mark = format!("{} feat/x", style::BRANCH_GLYPH);
+        let row = over
+            .iter()
+            .find(|l| l.contains("argos-0001"))
+            .unwrap_or_else(|| panic!("겹쳐 온 줄이 화면에 없다\n{over:#?}"));
+        assert!(row.contains(&mark), "겹쳐 온 줄에 가지 표가 없다\n{over:#?}");
         let off = draw(&shown, Screen::new(lang));
-        assert!(!off.contains(style::BRANCH_GLYPH), "안 겹친 화면에 가지 표가 섰다\n{off}");
+        assert!(
+            !off.iter().any(|l| l.contains(style::BRANCH_GLYPH)),
+            "안 겹친 화면에 가지 표가 섰다\n{off:#?}"
+        );
     }
 
     /// 없는 에픽을 가리켜도 상세가 죽지 않는다 — 드러내되 막지 않는다.
