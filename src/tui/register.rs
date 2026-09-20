@@ -196,7 +196,7 @@ impl App {
         let Some(config) = self.config_file() else { return };
         match crate::projects::add(&config, dir, dir) {
             Ok(added) => {
-                self.relayer(Some(&added.path));
+                let stood = self.relayer(Some(&added.path));
                 let what = if added.added { "✓ 등록함" } else { "이미 등록돼 있다" };
                 // 못 읽는 저장소면 CLI `project add` 처럼 그렇다고 댄다 — 조용히 "등록함" 만 서면
                 // 층에서 "못 읽는다" 를 처음 만난다 (moai-9omq).
@@ -211,7 +211,12 @@ impl App {
                 } else {
                     format!(" · {} 로 층에 올라가면 보인다", label(BROWSE, Browse::Project(0)))
                 };
-                self.notice = Some(format!("{what} · {}{bad}{bare}{back}", shown(&added.path)));
+                // **층을 못 세웠으면 그것도 댄다**(moai-6ek1). 설정에 쓴 것과 층이 그것을 든 것은
+                // 다른 일이다 — 다시 읽기가 지면 커서를 새 프로젝트에 두는 일도 함께 버려져, 열
+                // 줄짜리 층에서는 조용한 "✓ 등록함" 하나로는 됐는지 알 길이 없다. 다음 걸음의
+                // `follow_config` 가 층은 고치지만 커서는 못 고친다.
+                let layer = self.relayer_trouble(stood);
+                self.notice = Some(format!("{what} · {}{bad}{bare}{layer}{back}", shown(&added.path)));
                 if let Mode::Pick(p) = &self.mode {
                     let here = p.at.dir.clone();
                     self.relist(&here, None);
@@ -225,6 +230,24 @@ impl App {
                 }
             }
         }
+    }
+
+    /// 층을 다시 못 세웠으면 알림에 이을 한 토막 — 세웠으면 빈 글이다(moai-6ek1).
+    ///
+    /// **까닭은 방금 적힌 것을 든다** — 배너가 이고 있는 그 글([`App::held`]·[`App::unlayered`])이다.
+    /// 여기서 새로 지으면 같은 일을 두 곳이 다르게 말한다.
+    ///
+    /// **댈 까닭이 없으면 아무 말도 안 붙인다.** 다시 세우지 않고 돌아서는 자리가 탈만은 아니다 —
+    /// 프로젝트도 층도 없는 화면이 그렇고, 그때 "층은 그대로다" 를 세우면 멀쩡한 등록에 없는 탈을
+    /// 붙인다. 경고는 셀 수 있을 때만 값이 있다.
+    fn relayer_trouble(&self, stood: bool) -> String {
+        if stood {
+            return String::new();
+        }
+        let Some(why) = self.held.as_deref().or(self.unlayered.as_deref()) else {
+            return String::new();
+        };
+        format!(" · ! 층은 그대로다 — {}", crate::text::one_line(why))
     }
 
     /// `d` — 커서가 선 층의 줄을 목록에서 뺄지 묻는다. **띄운 자리(등록 안 됨)는 묻지 않는다** —
@@ -257,15 +280,17 @@ impl App {
         };
         match crate::projects::remove(&config, path, path) {
             Ok(r) => {
-                self.relayer(None);
+                // 뺀 쪽도 같은 자다(moai-6ek1) — 층이 그대로면 뺀 줄이 화면에 그대로 서 있다.
+                let stood = self.relayer(None);
+                let layer = self.relayer_trouble(stood);
                 self.notice = Some(if r.removed.is_empty() {
                     // 그새 밖에서 뺐다. 층은 방금 다시 읽어 그 줄이 사라졌다.
-                    format!("이미 목록에 없다 · {}", shown(path))
+                    format!("이미 목록에 없다 · {}{layer}", shown(path))
                 } else {
                     // 뺀 것을 **다** 댄다 — 손으로 링크 철자와 푼 철자를 둘 다 적었으면 둘이 함께
                     // 빠진다(CLI `rm` 도 뺀 줄마다 적는다). 하나만 대면 사라진 다른 줄을 모른다.
                     let gone: Vec<String> = r.removed.iter().map(|p| shown(p)).collect();
-                    format!("✓ 뺌 · {} — 목록에서만 뺐다, 디렉터리와 .moai 는 그대로다", gone.join(", "))
+                    format!("✓ 뺌 · {} — 목록에서만 뺐다, 디렉터리와 .moai 는 그대로다{layer}", gone.join(", "))
                 });
             }
             Err(e) => self.notice = Some(format!("! 빼지 못했다 — {}", crate::text::one_line(&e.message))),
@@ -438,6 +463,36 @@ mod tests {
         assert!(picker(&a).at.entries.iter().any(|d| d.name == ".cache"), "{:?}", picker(&a).at);
         assert_eq!(picker(&a).at.hidden, 0);
         assert_eq!(picker(&a).error, None);
+    }
+
+    /// **층을 못 세웠으면 알림이 그것도 댄다**(moai-6ek1). 설정에 쓴 것과 층이 그것을 든 것은 다른
+    /// 일이다 — 다시 읽기가 지면 커서를 새 프로젝트에 두는 일(`land`)도 함께 버려져, 조용한
+    /// "✓ 등록함" 하나로는 열 줄짜리 층에서 등록이 됐는지 알 길이 없다.
+    ///
+    /// 권한으로 지게 한다 — 설정을 못 읽는 걸음이다(이웃 시험과 같은 자).
+    #[test]
+    #[cfg(unix)]
+    fn a_layer_that_did_not_stand_is_told_beside_the_done() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::real("register-relayer-lost");
+        let mut a = on_layer(&s);
+        let cfg = s.config();
+        let chmod = |mode: u32| std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(mode)).unwrap();
+        chmod(0o000);
+        // root 는 권한 000 도 읽는다 — 못 읽게 만들 수 없으면 이 시험은 볼 것이 없다.
+        if std::fs::read(&cfg).is_ok() {
+            chmod(0o644);
+            return;
+        }
+        let stood = a.relayer(None);
+        chmod(0o644);
+        assert!(!stood, "못 읽은 설정으로 층을 다시 세웠다고 했다");
+        let said = a.relayer_trouble(stood);
+        assert!(said.contains("층은 그대로다"), "{said}");
+        assert!(said.contains("못 읽어"), "까닭을 안 물고 왔다 — {said}");
+
+        // 세운 판은 아무것도 안 붙인다 — 알림에 늘 서는 꼬리가 되면 그것은 곧 아무도 안 읽는 줄이다.
+        assert_eq!(a.relayer_trouble(true), "");
     }
 
     /// **디렉터리를 드나들어 모노레포 하위를 등록한다** — `.git` 에서 멈추지 않고 고른 그

@@ -893,8 +893,8 @@ impl App {
     /// 층이 그대로 남고 까닭 한 줄만 새 읽기의 것으로 바뀐다([`holding`]). 깨진 설정도 여기 든다:
     /// 한때는 빈 층과 그 까닭이 고칠 것을 비춘다고 봤는데, 오타 하나에 등록한 프로젝트가 통째로
     /// 사라졌다. 비추는 데 필요한 것은 빈 층이 아니라 까닭 한 줄이다.
-    pub(super) fn relayer(&mut self, land: Option<&Path>) {
-        self.relayer_with(None, land);
+    pub(super) fn relayer(&mut self, land: Option<&Path>) -> bool {
+        self.relayer_with(None, land)
     }
 
     /// [`App::relayer`] 와 같되 **이미 읽은 설정**을 쓴다(moai-7yil) — 같은 걸음에 읽음도 그 설정에서
@@ -905,11 +905,17 @@ impl App {
     /// (`user_config::path`). `Some` 을 받으면 그 설정의 자리가 곧 새 층의 자리다(`Layer::of` 가
     /// `Registry::path` 를 든다, moai-y61p) — 부르는 쪽이 같은 파일을 읽어 넘길 때만 맞는 말이라,
     /// 다른 파일의 설정을 넘기면 층은 한 파일에서 서고 등록·해제는 다른 파일에 간다.
-    pub(super) fn relayer_with(&mut self, reg: Option<&user_config::Registry>, land: Option<&Path>) {
+    ///
+    /// **층을 다시 세웠는지를 돌려준다**(moai-6ek1). 거짓이면 들고 있던 층이 그대로고 `land` 도 함께
+    /// 버려졌다 — 설정을 썼다는 것과 층이 그것을 들었다는 것은 다른 일이라, 쓴 쪽(`SPC p a`·`SPC p d`)이
+    /// "됐다" 만 대면 열 줄짜리 층에서는 됐는지 알 길이 없다. 까닭은 이 부름이 방금 [`App::held`]·
+    /// [`App::unlayered`] 에 적은 그 글이다 — 여기서 또 지어내면 배너와 알림이 갈린다.
+    pub(super) fn relayer_with(&mut self, reg: Option<&user_config::Registry>, land: Option<&Path>) -> bool {
         let held = self.current().map(|r| self.anchor_of(&r));
         match self.layer.take() {
             None => {
-                let Some(repo) = &self.site.repo else { return };
+                // 프로젝트가 없으면 세울 층도 없다 — 이것은 탈이 아니라 그냥 세울 것이 없는 자리다.
+                let Some(repo) = &self.site.repo else { return false };
                 let here = Some(repo.here().to_path_buf());
                 let fresh = match reg {
                     Some(reg) => Layer::of(reg, here.as_deref()),
@@ -926,7 +932,7 @@ impl App {
                     self.unlayered = unlayered_of(&fresh);
                     // 층이 없으면 들고 있는 것도 없다 — 이 화면의 말은 위의 한 줄이다.
                     self.held = None;
-                    return;
+                    return false;
                 }
                 self.unlayered = None;
                 self.held = None;
@@ -966,7 +972,7 @@ impl App {
                     }
                     old.trouble = fresh.trouble;
                     self.layer = Some(old);
-                    return;
+                    return false;
                 }
                 for p in &mut fresh.places {
                     if let Some(o) = old.places.iter_mut().find(|o| o.path == p.path) {
@@ -1012,6 +1018,7 @@ impl App {
         });
         let at = landed.or_else(|| held.as_ref().and_then(|a| self.row_of(&rows, a))).unwrap_or(self.cursor);
         self.stand(&rows, at, held.as_ref());
+        true
     }
 
     /// 걸음마다 층을 본다. 스레드가 읽어 온 줄은 **어디 서 있든** 받는다 — 경로로 맞춰
