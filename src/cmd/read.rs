@@ -128,10 +128,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     if fresh.is_empty() {
         return Ok(vec!["읽음으로 적을 것이 없다".to_string()]);
     }
-    Ok(fresh
-        .iter()
-        .map(|id| format!("{}  {}", paint(style::ID, id), paint(style::DIM, "읽음")))
-        .collect())
+    Ok(fresh.iter().map(|id| format!("{}  {}", paint(style::ID, id), paint(style::DIM, "읽음"))).collect())
 }
 
 /// 읽음을 들고 적다 만난 까닭을 stderr 로 — **같은 글은 한 번만.**

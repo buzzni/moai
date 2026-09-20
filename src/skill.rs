@@ -318,10 +318,7 @@ mod tests {
     }
 
     fn tree_at(prefix: &str, root: &Path, exe: &str, skill: &str) -> BTreeMap<String, String> {
-        tree(prefix, root, exe, skill, "참고", "감독")
-            .into_iter()
-            .map(|(p, b)| (p.display().to_string(), b))
-            .collect()
+        tree(prefix, root, exe, skill, "참고", "감독").into_iter().map(|(p, b)| (p.display().to_string(), b)).collect()
     }
 
     /// 초점이 있을 때 **막히는 것이 옳은** 명령들.
@@ -347,7 +344,7 @@ mod tests {
     /// 리뷰어가 나쁜 명령을 일부러 심어도 시험은 웃고 있었다.
     #[test]
     fn what_the_skill_teaches_actually_passes() {
-        use crate::hook::{guard_shell, Decision};
+        use crate::hook::{Decision, guard_shell};
 
         let cfg = Config::parse("prefix = \"t\"\n").unwrap();
         let held = vec![epic_row(), held_row(), review_row("in_progress")];
@@ -395,7 +392,7 @@ mod tests {
     /// 실제로 지워 보고 알아냈다. 여기서 그 다리를 놓는다.
     #[test]
     fn a_review_made_as_taught_can_be_used_at_once() {
-        use crate::hook::{guard_review, Decision};
+        use crate::hook::{Decision, guard_review};
 
         let cfg = Config::parse("prefix = \"t\"\n").unwrap();
         let made = taught()
@@ -432,7 +429,8 @@ mod tests {
     fn taught() -> Vec<String> {
         // AGENTS 블록도 같은 조각에서 나오고, 감독이 일꾼에게 싣는 글도 리뷰를 세우고
         // 닫는 줄을 같은 조각으로 적으므로 같이 본다.
-        let texts = [crate::guide::skill(), crate::guide::reference(), crate::guide::agents(), crate::guide::supervise()];
+        let texts =
+            [crate::guide::skill(), crate::guide::reference(), crate::guide::agents(), crate::guide::supervise()];
         // **걸음 글 안에 박힌 `` `moai …` `` 도 뽑는다**(moai-8na5). 줄 머리만 보던 판은 브리프 2·10·12
         // 의 멤버를 옮기는 줄과 에픽에 남기는 노트를 훅 시험 밖에 두었다 — 거기서 무엇을 바꿔도 초록이었다.
         // 자리표시자를 든 것만 명령이다 — 글 속의 `` `moai add` `` 는 이름을 부른 것이지 칠 줄이 아니다.
@@ -526,15 +524,13 @@ mod tests {
     }
 
     fn held_row() -> Issue {
-        let mut i =
-            Issue::new("t-1".into(), "집은 일".into(), Kind::Issue, Status::new("in_progress"), NOW);
+        let mut i = Issue::new("t-1".into(), "집은 일".into(), Kind::Issue, Status::new("in_progress"), NOW);
         i.epic = Some("t-e".into());
         i
     }
 
     fn review_row(status: &str) -> Issue {
-        let mut i =
-            Issue::new("t-r".into(), "리뷰".into(), Kind::Issue, Status::new(status), NOW);
+        let mut i = Issue::new("t-r".into(), "리뷰".into(), Kind::Issue, Status::new(status), NOW);
         i.epic = Some("t-e".into());
         i.tags = vec!["review".into()];
         i.body = Some("무엇을 왜 보는가".into());
@@ -567,8 +563,7 @@ mod tests {
         let c = tree_of("/bin/moai", "# 스킬 (고침)");
         let d = tree_of("/usr/local/bin/moai", "# 스킬");
         let version = |f: &BTreeMap<String, String>| {
-            let v: serde_json::Value =
-                serde_json::from_str(&f[".claude-plugin/plugin.json"]).unwrap();
+            let v: serde_json::Value = serde_json::from_str(&f[".claude-plugin/plugin.json"]).unwrap();
             v["version"].as_str().unwrap().to_string()
         };
         assert_eq!(version(&a), version(&b), "같은 내용인데 판이 다르다");
@@ -590,8 +585,7 @@ mod tests {
     #[test]
     fn the_manifest_template_is_in_the_version() {
         let files = tree_of("/bin/moai", "# 스킬");
-        let mut shipped: serde_json::Value =
-            serde_json::from_str(&files[".claude-plugin/plugin.json"]).unwrap();
+        let mut shipped: serde_json::Value = serde_json::from_str(&files[".claude-plugin/plugin.json"]).unwrap();
         shipped["version"] = "".into();
         assert_eq!(pretty(&shipped), plugin_json("/bin/moai", ""), "셈한 틀이 심는 매니페스트와 다르다");
 
@@ -614,8 +608,7 @@ mod tests {
         let one = tree_for("alpha", "/bin/moai", "# 스킬");
         let two = tree_for("beta", "/bin/moai", "# 스킬");
         let name = |f: &BTreeMap<String, String>| {
-            let v: serde_json::Value =
-                serde_json::from_str(&f[".claude-plugin/marketplace.json"]).unwrap();
+            let v: serde_json::Value = serde_json::from_str(&f[".claude-plugin/marketplace.json"]).unwrap();
             v["name"].as_str().unwrap().to_string()
         };
         assert!(name(&one).starts_with("moai-alpha-"), "{}", name(&one));
@@ -644,8 +637,7 @@ mod tests {
     #[test]
     fn a_missing_binary_never_makes_noise() {
         let files = tree_of("/nowhere/moai", "# 스킬");
-        let v: serde_json::Value =
-            serde_json::from_str(&files[".claude-plugin/plugin.json"]).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&files[".claude-plugin/plugin.json"]).unwrap();
         let mut seen = 0;
         for (_, groups) in v["hooks"].as_object().unwrap() {
             for g in groups.as_array().unwrap() {
@@ -668,8 +660,7 @@ mod tests {
     #[test]
     fn only_the_tools_the_rules_care_about_are_watched() {
         let files = tree_of("/bin/moai", "# 스킬");
-        let v: serde_json::Value =
-            serde_json::from_str(&files[".claude-plugin/plugin.json"]).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&files[".claude-plugin/plugin.json"]).unwrap();
         let matcher = v["hooks"]["PreToolUse"][0]["matcher"].as_str().unwrap();
         assert!(matcher.contains("Bash") && matcher.contains("Edit"), "{matcher}");
         assert!(v["hooks"]["Stop"][0].get("matcher").is_none(), "Stop 에 matcher 가 붙었다");
@@ -787,7 +778,8 @@ mod tests {
             .or_else(|| loose(&market, TOP_NAME).filter(|_| bless))
             .expect("marketplace.json 에서 name 을 못 읽는다 — 깨졌으면 MOAI_BLESS=1 로 다시 쓴다");
 
-        let want = tree_named(&name, &exe, &crate::guide::skill(), &crate::guide::reference(), &crate::guide::supervise());
+        let want =
+            tree_named(&name, &exe, &crate::guide::skill(), &crate::guide::reference(), &crate::guide::supervise());
         if bless {
             for (path, body) in &want {
                 // 새로 느는 파일은 제 디렉터리가 아직 없다 (감독 스킬이 처음 그랬다).

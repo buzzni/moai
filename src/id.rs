@@ -65,10 +65,7 @@ pub fn generate_child(parent: &str, taken: &BTreeSet<String>, seed: &str) -> Str
 
 /// 호출마다 다른 씨앗. 제목이 같은 이슈를 같은 초에 두 번 만들어도 갈린다.
 pub fn seed(title: &str) -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     format!("{title}\u{0}{nanos}\u{0}{}", std::process::id())
 }
 
@@ -149,13 +146,7 @@ mod tests {
 
     #[test]
     fn accepts_good_shapes() {
-        for id in [
-            "argos-4aex",
-            "argos-4aex.ae3",
-            "argos-4aex.ae3.b3e",
-            "ai-argos-0000",
-            "a-zzzz.999",
-        ] {
+        for id in ["argos-4aex", "argos-4aex.ae3", "argos-4aex.ae3.b3e", "ai-argos-0000", "a-zzzz.999"] {
             assert!(is_valid(id), "{id}");
         }
     }
@@ -177,5 +168,4 @@ mod tests {
             assert!(!is_valid(id), "{id} 를 받아들였다");
         }
     }
-
 }

@@ -48,7 +48,14 @@ impl Blocked {
             issues: found.iter().filter_map(|b| b.issue.cloned()).collect(),
             answers: found
                 .iter()
-                .map(|b| (b.id.to_string(), b.blocker, b.root.map(str::to_string), b.aside.iter().map(|s| s.to_string()).collect()))
+                .map(|b| {
+                    (
+                        b.id.to_string(),
+                        b.blocker,
+                        b.root.map(str::to_string),
+                        b.aside.iter().map(|s| s.to_string()).collect(),
+                    )
+                })
                 .collect(),
         }
     }
@@ -179,9 +186,9 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         // 원래 비어 있던 에픽 밑 자식이 가장 흔한 자리다.
         let cut = args.epic.as_deref().is_some_and(|e| super::clearable(e).is_none());
         let kept = |issues: &[Issue]| {
-            cut.then(|| crate::report::epic_from_parent(issues, &args.id)).flatten().map(|(e, p)| {
-                Inherited { epic: e.to_string(), parent: p.to_string() }
-            })
+            cut.then(|| crate::report::epic_from_parent(issues, &args.id))
+                .flatten()
+                .map(|(e, p)| Inherited { epic: e.to_string(), parent: p.to_string() })
         };
         // `--milestone none` 도 같다(moai-0lmn) — 에픽과 부모가 마일스톤을 이긴다. 다른
         // 마일스톤을 적어도 진다(moai-mhxf): 필드는 X 가 되는데 줄은 에픽·조상이 선 곳에
@@ -240,14 +247,10 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         {
             eprintln!("moai: {e} 라는 에픽이 없다. 그대로 둔다");
         }
-        let children: Vec<Issue> = issues
-            .iter()
-            .filter(|c| crate::id::parent_of(&c.id) == Some(out.id.as_str()))
-            .cloned()
-            .collect();
+        let children: Vec<Issue> =
+            issues.iter().filter(|c| crate::id::parent_of(&c.id) == Some(out.id.as_str())).cloned().collect();
         // 상세가 그리는 줄 — 고친 줄과 그 자식. 미룸과 읽은 칸을 같은 자로 고른다.
-        let near: Vec<&str> =
-            std::iter::once(out.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
+        let near: Vec<&str> = std::iter::once(out.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
         // 상세가 미룸을 말하려면 **물려받은 것까지** 필요하다 — 미룬 에픽으로 옮기는
         // 순간 그 줄이 계획에서 빠진다. 같은 까닭으로 락 안에서 본 모습으로 잰다.
         let shelved: Vec<(String, String)> = crate::report::deferred_roots(issues)
@@ -329,7 +332,9 @@ fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str) {
             format!("에픽 {at} 에서 오는 자리라"),
             format!("`moai edit {id} -e <다른 에픽>` 이나 `moai edit {at} --milestone {wrote}`"),
         ),
-        Way::Lost => (format!("못 쓸 에픽 {at} 을 따라 (길 잃음) 에 서 있어"), format!("`moai edit {id} -e <다른 에픽>`")),
+        Way::Lost => {
+            (format!("못 쓸 에픽 {at} 을 따라 (길 잃음) 에 서 있어"), format!("`moai edit {id} -e <다른 에픽>`"))
+        }
         Way::Parent => (format!("조상 {at} 에서 오는 자리라"), format!("`moai edit {at} --milestone {wrote}`")),
     };
     let verb = if cut { "빼려면" } else { "옮기려면" };

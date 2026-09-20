@@ -8,10 +8,10 @@ use super::{Ctx, Fail, R};
 use crate::cli::ShowArgs;
 use crate::model::{self, Issue, Kind};
 use crate::query::{Filter, Hide, Raw, Sel};
-use std::collections::BTreeSet;
 use crate::report;
 use crate::store::Repo;
 use crate::view;
+use std::collections::BTreeSet;
 
 /// 대상이 무엇으로 읽히는가. id 는 `-` 를 품고 종류 낱말은 품지 않아
 /// 어휘가 겹치지 않는다.
@@ -108,9 +108,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
                 "bad_filter",
             ));
         }
-        let issue = load
-            .get(id)
-            .ok_or_else(|| Fail::coded(format!("{id} 를 못 찾았다"), super::code::NOT_FOUND))?;
+        let issue = load.get(id).ok_or_else(|| Fail::coded(format!("{id} 를 못 찾았다"), super::code::NOT_FOUND))?;
         if args.as_plan {
             return plan(ctx, &load.issues, issue, args.raw);
         }
@@ -245,8 +243,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         // **자리는 `nav` 가 정한다.** 트리와 탐색기가 자리를 따로 정하면
         // 어긋나고, 실제로 어긋났다 — 제 에픽이 부모와 다른 자식이 두 번
         // 나왔고 끊긴 참조를 가진 줄은 아예 사라졌다.
-        let shown_ids: std::collections::BTreeSet<&str> =
-            shown.iter().map(|i| i.id.as_str()).collect();
+        let shown_ids: std::collections::BTreeSet<&str> = shown.iter().map(|i| i.id.as_str()).collect();
         // 위에서 지도 한 벌로 지은 것이다 — `tree_now` 가 참일 때만 서 있다.
         let (index, rolls) = (index.expect("트리 색인"), rolls.expect("에픽 굴림"));
         let keep = |at: usize| shown_ids.contains(load.issues[at].id.as_str());
@@ -398,8 +395,7 @@ fn one(
     // 펼쳤을 때 표가 없으면 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다.
     // 묶음의 읽은 칸은 **이 줄과 자식에 대해서만** 센다 — 일 하나를 펼치는 흔한 길에서
     // 저장소 전부의 소속과 미룸을 걷는 것은 통째로 헛일이다(`group_states_of`).
-    let near: Vec<&str> =
-        std::iter::once(issue.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
+    let near: Vec<&str> = std::iter::once(issue.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
     // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 스냅샷을 다
     // 풀 까닭이 없다. 언제 재는지(딸린 워크트리에서는 겹쳐 볼 때만)는 `worktree::workplaces` 가
     // 한 곳에서 정한다 — 명령마다 두었더니 `status` 와 여기가 서로 다른 답을 냈다(moai-6opu.p65).
@@ -460,12 +456,8 @@ fn one(
         // **묶음일 때만 멤버를 고른다** — `group_members` 는 저장소 전체로 지도를 짓는다. 일 하나를
         // `--json` 으로 펼치는 흔한 길에서 그것을 짓고 버리던 자리다.
         if report::is_group(issue) {
-            let members: Vec<&str> =
-                report::group_members(all, issue).iter().map(|m| m.id.as_str()).collect();
-            extra.push((
-                "members",
-                serde_json::to_string(&members).map_err(|e| Fail::new(e.to_string()))?,
-            ));
+            let members: Vec<&str> = report::group_members(all, issue).iter().map(|m| m.id.as_str()).collect();
+            extra.push(("members", serde_json::to_string(&members).map_err(|e| Fail::new(e.to_string()))?));
         }
         // **기계 출력도 같은 것을 말한다.** `deferred_at` 은 제 줄에 적힌 것뿐이라,
         // 미룬 에픽의 멤버를 `--json` 으로 펼친 쪽은 그것이 계획 밖인 줄 모른다.
@@ -480,7 +472,7 @@ fn one(
         // **키는 `blockers` 다** — `link A --blocks B` 가 "A 가 B 를 막는다" 이므로 B 에 단
         // `blocks` 는 받는 쪽이 "B 가 A 를 막는다" 로 거꾸로 읽는다.
         if !seen.blocks.is_empty() {
-            extra.push(("blockers",serde_json::to_string(&seen.blocks).map_err(|e| Fail::new(e.to_string()))?));
+            extra.push(("blockers", serde_json::to_string(&seen.blocks).map_err(|e| Fail::new(e.to_string()))?));
         }
         // 사람 화면의 `자리` 줄과 같은 답. 줄을 안 세우는 자리에서는 키도 안 단다.
         if let Some(p) = &seen.places {
@@ -524,8 +516,7 @@ fn one(
         // 여기서 필요한 것은 "누가 이 묶음의 멤버인가" 하나뿐이다.
         // **`--json` 이 내는 것과 같은 것을 그린다** — 둘 다
         // `report::group_members` 로 고른다.
-        let mine: BTreeSet<&str> =
-            report::group_members(all, issue).iter().map(|i| i.id.as_str()).collect();
+        let mine: BTreeSet<&str> = report::group_members(all, issue).iter().map(|i| i.id.as_str()).collect();
         // **소속 지도는 한 벌이다**(moai-g0zx) — 목록 쪽(`run`)과 같은 까닭이다. 이 밑에서
         // 머리글의 굴림·색인·멤버 굴림 셋이 저마다 지으면 `groups` 가 한 번 펼치는 데 세 벌
         // 돈다(마일스톤이면 `milestones` 가 안에서 또 지어 네 벌이다).

@@ -15,7 +15,9 @@ use std::ffi::OsString;
 pub fn template(into: Option<&Target>, lang: crate::i18n::Lang) -> String {
     use crate::i18n::{fill, say};
     let place = match into {
-        Some(t) => format!("{}  {}", crate::text::one_line(&t.name), crate::text::one_line(&t.path.display().to_string())),
+        Some(t) => {
+            format!("{}  {}", crate::text::one_line(&t.name), crate::text::one_line(&t.path.display().to_string()))
+        }
         None => say(lang, "tui.jotfile.nowhere").to_string(),
     };
     format!(
@@ -112,7 +114,8 @@ mod tests {
     /// 남이 지은 이름에 줄바꿈이 들어도 **안내 줄이 주석 밖으로 새지 않는다.**
     #[test]
     fn a_target_name_with_a_newline_stays_a_comment() {
-        let t = template(Some(&Target { path: "/a\nb".into(), name: "이름\n제목이 될 줄".into() }), crate::i18n::Lang::Ko);
+        let t =
+            template(Some(&Target { path: "/a\nb".into(), name: "이름\n제목이 될 줄".into() }), crate::i18n::Lang::Ko);
         assert_eq!(parsed(&t), None, "{t}");
     }
 

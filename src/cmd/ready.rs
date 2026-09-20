@@ -5,9 +5,9 @@
 //! 정한다. 여기는 둘을 잇기만 한다.
 
 use super::{Ctx, R};
+use crate::projects::{Entry, Overview, Seen};
 use crate::report;
 use crate::store::Repo;
-use crate::projects::{Entry, Overview, Seen};
 use crate::view;
 
 pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
@@ -59,10 +59,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // 도는 것이 없으면 키를 안 단다.
             milestone: focus.running.iter().map(|m| m.id.as_str()).collect(),
             outside: focus.outside.iter().map(|i| i.id.as_str()).collect(),
-            held: held
-                .iter()
-                .map(|h| Waiting { id: &h.issue.id, by: &h.by, undo: &h.undo, empty: &h.empty })
-                .collect(),
+            held: held.iter().map(|h| Waiting { id: &h.issue.id, by: &h.by, undo: &h.undo, empty: &h.empty }).collect(),
         });
     }
 
@@ -89,13 +86,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 // 까닭도 함께 받는다 — 여기서 `ready` 만 부르면 한눈 보기의 목록만 말없이
                 // 짧아지고, 그 짧아짐이 "할 일이 없다" 로 읽힌다.
                 let (picks, focus) = report::ready_in(&load.issues, &repo.config);
-                view::Picks {
-                    picks,
-                    focus,
-                    unreadable: load.errors.len(),
-                    origin: &p.origin,
-                    trouble: &p.trouble,
-                }
+                view::Picks { picks, focus, unreadable: load.errors.len(), origin: &p.origin, trouble: &p.trouble }
             })
         })
         .collect();

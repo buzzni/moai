@@ -12,8 +12,8 @@
 //! [`lookup`] 이 [`Lookup::Pending`] 으로 "더 기다린다" 를 낸다. 기다리는 동안의 열은 든 쪽이
 //! [`Chord`] 로 들고 다음 키를 붙여 다시 부른다.
 
-use crate::i18n::{Lang, fill, say};
 use super::scroll::Move;
+use crate::i18n::{Lang, fill, say};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 const CTRL_ALT: KeyModifiers = KeyModifiers::CONTROL.union(KeyModifiers::ALT);
@@ -746,9 +746,11 @@ impl Browse {
             Browse::Done => Some(shown(c.done_hidden, c.lang)),
             Browse::Deferred => Some(shown(c.deferred_hidden, c.lang)),
             // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
-            Browse::Sort(o) if o == c.sorting.by => {
-                Some(if c.sorting.reversed { say(c.lang, "tui.state.reversed") } else { say(c.lang, "tui.state.sorted") })
-            }
+            Browse::Sort(o) if o == c.sorting.by => Some(if c.sorting.reversed {
+                say(c.lang, "tui.state.reversed")
+            } else {
+                say(c.lang, "tui.state.sorted")
+            }),
             Browse::Cell(f) => Some(shown(!c.fields.shows(f), c.lang)),
             Browse::Detail => Some(shown(!c.detail, c.lang)),
             _ => None,
@@ -1000,7 +1002,9 @@ pub fn parse_seq(name: &str) -> Option<Vec<KeyEvent>> {
     }
     let cs: Vec<char> = name.chars().collect();
     match cs[..] {
-        [a, b] if a == b && a.is_ascii_alphabetic() => Some(vec![KeyEvent::new(KeyCode::Char(a), KeyModifiers::NONE); 2]),
+        [a, b] if a == b && a.is_ascii_alphabetic() => {
+            Some(vec![KeyEvent::new(KeyCode::Char(a), KeyModifiers::NONE); 2])
+        }
         _ => None,
     }
 }
@@ -1100,7 +1104,10 @@ mod tests {
             assert_eq!(one(BROWSE, press(KeyCode::Char(c))), Lookup::Unknown, "상한 너머 {c} 가 표에 있다");
         }
         // SPC 뒤의 숫자는 그대로 칸 토글이다 — 두 길이 안 겹친다.
-        assert_eq!(lookup(BROWSE, &[pressed(&LEADER), press(KeyCode::Char('v')), press(KeyCode::Char('1'))]), Lookup::Run(Browse::Column(0)));
+        assert_eq!(
+            lookup(BROWSE, &[pressed(&LEADER), press(KeyCode::Char('v')), press(KeyCode::Char('1'))]),
+            Lookup::Run(Browse::Column(0))
+        );
     }
 
     /// **맨 숫자는 등록한 수만큼만 듣는다**(moai-o133). 층이 없으면 `0` 까지 조용하고, 등록한
@@ -1136,8 +1143,16 @@ mod tests {
         }
         // vi 의 쪽 이동은 Ctrl 만 — Alt 가 함께 붙으면 아니다(`Key::chord`).
         for (c, m) in [('d', Move::HalfDown), ('u', Move::HalfUp), ('f', Move::PageDown), ('b', Move::PageUp)] {
-            assert_eq!(one(BROWSE, with(KeyCode::Char(c), KeyModifiers::CONTROL)), Lookup::Run(Browse::Step(m)), "Ctrl-{c}");
-            assert_eq!(one(PICK, with(KeyCode::Char(c), KeyModifiers::CONTROL)), Lookup::Run(Pick::Step(m)), "창 Ctrl-{c}");
+            assert_eq!(
+                one(BROWSE, with(KeyCode::Char(c), KeyModifiers::CONTROL)),
+                Lookup::Run(Browse::Step(m)),
+                "Ctrl-{c}"
+            );
+            assert_eq!(
+                one(PICK, with(KeyCode::Char(c), KeyModifiers::CONTROL)),
+                Lookup::Run(Pick::Step(m)),
+                "창 Ctrl-{c}"
+            );
             for mods in [KeyModifiers::ALT, CTRL_ALT] {
                 assert_eq!(one(BROWSE, with(KeyCode::Char(c), mods)), Lookup::Unknown, "{mods:?}-{c}");
                 assert_eq!(one(PICK, with(KeyCode::Char(c), mods)), Lookup::Unknown, "창 {mods:?}-{c}");
@@ -1169,7 +1184,11 @@ mod tests {
         let list = Ctx { list_focus: true, detail: true, ..Ctx::default() };
         for act in [Browse::Expand, Browse::ExpandAll] {
             assert_eq!(act.enabled(&Ctx { group: true, ..list }), Ok(()), "묶음 줄에서 {act:?} 가 꺼졌다");
-            assert_eq!(act.enabled(&Ctx { group: false, ..list }), Err(Off::Quiet), "묶음이 아닌 줄에서 {act:?} 가 켜졌다");
+            assert_eq!(
+                act.enabled(&Ctx { group: false, ..list }),
+                Err(Off::Quiet),
+                "묶음이 아닌 줄에서 {act:?} 가 켜졌다"
+            );
             // 잎은 묶음이 아니다 — 옛 갈래도 그대로 막힌다.
             assert_eq!(act.enabled(&Ctx { group: false, leaf: true, ..list }), Err(Off::Quiet));
         }
@@ -1268,7 +1287,8 @@ mod tests {
         assert_eq!(c.feed(BROWSE, g), Some(Browse::Step(Move::Top)));
         assert!(!c.waiting());
 
-        for k in [press(KeyCode::Char('x')), press(KeyCode::Char('j')), press(KeyCode::Esc), press(KeyCode::Char(' '))] {
+        for k in [press(KeyCode::Char('x')), press(KeyCode::Char('j')), press(KeyCode::Esc), press(KeyCode::Char(' '))]
+        {
             assert_eq!(c.feed(BROWSE, g), None);
             assert_eq!(c.feed(BROWSE, k), None, "`g` 뒤의 {k:?} 가 제 뜻을 했다");
             assert!(!c.waiting(), "`g` 뒤의 {k:?} 가 열을 안 버렸다");
@@ -1374,10 +1394,18 @@ mod tests {
         assert_eq!(label(JOT, Jot::Save), "Ctrl-S");
         assert_eq!(labels(BROWSE, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)]), "j·k");
         assert_eq!(label(BROWSE, Browse::Step(Move::Top)), "gg", "숨은 별칭 Home 이 이름에 섰다");
-        assert_eq!(label(BROWSE, Browse::Enter), "Enter", "숨은 별칭 `l` 이 이름에 섰다 — 층의 거절문이 `Enter·l 로` 가 된다");
+        assert_eq!(
+            label(BROWSE, Browse::Enter),
+            "Enter",
+            "숨은 별칭 `l` 이 이름에 섰다 — 층의 거절문이 `Enter·l 로` 가 된다"
+        );
         assert_eq!(label(PICK, Pick::Path), "g p");
         assert_eq!(label(BROWSE, Browse::Quit), "SPC q");
-        assert_eq!(label(BROWSE, Browse::Grep), "/", "숨은 별칭 `SPC /` 가 이름에 섰다 — 층의 거절문·붙여넣기 안내가 둘을 댄다");
+        assert_eq!(
+            label(BROWSE, Browse::Grep),
+            "/",
+            "숨은 별칭 `SPC /` 가 이름에 섰다 — 층의 거절문·붙여넣기 안내가 둘을 댄다"
+        );
     }
 
     /// **옮기기 전 코드가 받던 키가 같은 동작이 된다**(moai-gaum 의 키 목록). 수식키가 붙은 모양도
@@ -1543,8 +1571,34 @@ mod tests {
         let words: Vec<&str> = named.iter().map(|(w, _)| w.as_str()).collect();
         assert!(!words.iter().any(|w| w.starts_with('F') && parse(w).is_some()), "도움말이 걷은 F키를 댄다: {words:?}");
         for must in [
-            "Ctrl-C", "SPC q", "SPC f", "SPC n", "SPC /", "SPC p a", "SPC p d", "SPC v w", "SPC v r", "SPC s p", "SPC", "Enter",
-            "Backspace", "Shift-Tab", "j", "k", "h", "l", "gg", "G", "Ctrl-d", "Ctrl-u", "Ctrl-f", "Ctrl-b", "Ctrl-S", "Esc", "/", "g p",
+            "Ctrl-C",
+            "SPC q",
+            "SPC f",
+            "SPC n",
+            "SPC /",
+            "SPC p a",
+            "SPC p d",
+            "SPC v w",
+            "SPC v r",
+            "SPC s p",
+            "SPC",
+            "Enter",
+            "Backspace",
+            "Shift-Tab",
+            "j",
+            "k",
+            "h",
+            "l",
+            "gg",
+            "G",
+            "Ctrl-d",
+            "Ctrl-u",
+            "Ctrl-f",
+            "Ctrl-b",
+            "Ctrl-S",
+            "Esc",
+            "/",
+            "g p",
             ".",
         ] {
             assert!(words.contains(&must), "도움말에서 `{must}` 를 못 뽑았다 — 뽑기가 헛돈다: {words:?}");
@@ -1582,24 +1636,50 @@ mod tests {
         // (지울 말, 바꿀 말, 도움말 전체엔 남아야 하는 키, 빠졌다고 해야 하는 것)
         for (phrase, instead, still, want) in [
             // 다른 문단에만 남은 키 — 검색 칸 문단의 Tab(범위 돌리기).
-            ("Tab and Shift-Tab pick where it", "it picks where it", &["Tab"][..], &["PROMPT: Tab", "PROMPT: Shift-Tab"][..]),
+            (
+                "Tab and Shift-Tab pick where it",
+                "it picks where it",
+                &["Tab"][..],
+                &["PROMPT: Tab", "PROMPT: Shift-Tab"][..],
+            ),
             // 좁힌 표 — 같은 문단의 목록 Enter·Esc 로 지나가면 안 된다.
-            ("The search and filter fields take Enter to apply and Esc to give up", "The search and filter fields apply and give up", &["Enter", "Esc"][..], &["PROMPT: Enter", "PROMPT: Esc"][..]),
+            (
+                "The search and filter fields take Enter to apply and Esc to give up",
+                "The search and filter fields apply and give up",
+                &["Enter", "Esc"][..],
+                &["PROMPT: Enter", "PROMPT: Esc"][..],
+            ),
             // 좁힌 표 — 같은 문단의 고르기 창 Enter·Esc 로 지나가면 안 된다.
-            ("(Enter goes, Esc gives up)", "(as you would expect)", &["Enter", "Esc"][..], &["PATH: Enter", "PATH: Esc"][..]),
+            (
+                "(Enter goes, Esc gives up)",
+                "(as you would expect)",
+                &["Enter", "Esc"][..],
+                &["PATH: Enter", "PATH: Esc"][..],
+            ),
             // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Backspace 로 지나가면 안 된다.
-            ("Enter goes in, Backspace comes back out", "it goes in and comes back out", &["Enter", "Backspace"][..], &["BROWSE: Enter", "BROWSE: Bksp"][..]),
+            (
+                "Enter goes in, Backspace comes back out",
+                "it goes in and comes back out",
+                &["Enter", "Backspace"][..],
+                &["BROWSE: Enter", "BROWSE: Bksp"][..],
+            ),
             // 거꾸로 — 고르기 창이 경로 칸 문장의 Esc 로 지나가면 안 된다.
             ("The window closes on Esc", "The window closes", &["Esc"][..], &["PICK: Esc"][..]),
             // 거꾸로 — 목록의 Esc(거름망 풀기)가 같은 문단의 메뉴 문장(`Esc 로 나간다`·`Esc 닫기`)으로
             // 지나가면 안 된다. 그 문장들을 MENU 의 것으로 안 적으면 여기서 붉어진다.
             ("Esc clears the filter you set", "it clears the filter you set", &["Esc"][..], &["BROWSE: Esc"][..]),
         ] {
-            assert!(help.contains(phrase), "시험이 지울 말 `{phrase}` 이 도움말에 없다 — 문장이 바뀌었으면 여기도 고친다");
+            assert!(
+                help.contains(phrase),
+                "시험이 지울 말 `{phrase}` 이 도움말에 없다 — 문장이 바뀌었으면 여기도 고친다"
+            );
             let broken = help.replace(phrase, instead);
             let everywhere: Vec<String> = keys_in(&broken).into_iter().map(|(w, _)| w).collect();
             for k in still {
-                assert!(everywhere.iter().any(|w| w == k), "도움말 전체에서 {k} 가 사라져 증명이 안 된다 — 옛 시험도 잡았을 경우다");
+                assert!(
+                    everywhere.iter().any(|w| w == k),
+                    "도움말 전체에서 {k} 가 사라져 증명이 안 된다 — 옛 시험도 잡았을 경우다"
+                );
             }
             let missing = missing_in(&broken);
             for w in want {
@@ -1656,15 +1736,17 @@ mod tests {
 
     /// `head` 로 시작하는 문단.
     fn paragraph<'h>(help: &'h str, head: &str) -> &'h str {
-        help.split("\n\n")
-            .find(|p| p.trim_start().starts_with(head))
-            .unwrap_or_else(|| panic!("`{head}` 로 시작하는 문단을 못 찾았다 — 도움말 문단이 바뀌었으면 SECTIONS·SENTENCES 를 고친다"))
+        help.split("\n\n").find(|p| p.trim_start().starts_with(head)).unwrap_or_else(|| {
+            panic!("`{head}` 로 시작하는 문단을 못 찾았다 — 도움말 문단이 바뀌었으면 SECTIONS·SENTENCES 를 고친다")
+        })
     }
 
     /// `par` 문단 안에서 `head` 부터 첫 `.` 까지.
     fn sentence<'h>(help: &'h str, par: &str, head: &str) -> &'h str {
         let p = paragraph(help, par);
-        let start = p.find(head).unwrap_or_else(|| panic!("`{par}` 문단에 `{head}` 로 시작하는 문장이 없다 — 도움말 문장이 바뀌었으면 SENTENCES 를 고친다"));
+        let start = p.find(head).unwrap_or_else(|| {
+            panic!("`{par}` 문단에 `{head}` 로 시작하는 문장이 없다 — 도움말 문장이 바뀌었으면 SENTENCES 를 고친다")
+        });
         let rest = &p[start..];
         &rest[..rest.find('.').map_or(rest.len(), |e| e + 1)]
     }
@@ -1701,15 +1783,24 @@ mod tests {
         const MOVES: [Bind<Pick>; 14] = moves!(Pick::Step, Key::bare);
         let moves: Vec<&str> = MOVES.iter().filter_map(|b| b.label).collect();
         let told = |text: &str, seq: &[Key]| {
-            keys_in(text).into_iter().any(|(_, k)| k.len() == seq.len() && seq.iter().zip(&k).all(|(key, ev)| key.matches(*ev)))
+            keys_in(text)
+                .into_iter()
+                .any(|(_, k)| k.len() == seq.len() && seq.iter().zip(&k).all(|(key, ev)| key.matches(*ev)))
         };
         let mut missing = Vec::new();
         for (table, rows) in tables {
             // 좁힌 표는 제 문장을 **모두** 잇는다 — 한 표가 문장 여럿을 가질 수 있다.
-            let mine: Vec<&str> =
-                SENTENCES.iter().filter(|(t, ..)| *t == table).map(|(_, par, head)| sentence(help, par, head)).collect();
+            let mine: Vec<&str> = SENTENCES
+                .iter()
+                .filter(|(t, ..)| *t == table)
+                .map(|(_, par, head)| sentence(help, par, head))
+                .collect();
             let own = if mine.is_empty() {
-                let heads = SECTIONS.iter().find(|(t, _)| *t == table).map(|(_, h)| *h).unwrap_or_else(|| panic!("{table} 의 범위가 SECTIONS·SENTENCES 에 없다"));
+                let heads = SECTIONS
+                    .iter()
+                    .find(|(t, _)| *t == table)
+                    .map(|(_, h)| *h)
+                    .unwrap_or_else(|| panic!("{table} 의 범위가 SECTIONS·SENTENCES 에 없다"));
                 scope(help, heads)
             } else {
                 mine.join("\n")
@@ -1884,9 +1975,16 @@ mod tests {
     fn the_old_menu_keys_are_gone() {
         let sp = pressed(&LEADER);
         let ch = |c| press(KeyCode::Char(c));
-        for old in [vec![sp, ch('r')], vec![sp, ch('t')], vec![sp, ch('o')], vec![sp, ch('s'), ch('d')], vec![sp, ch('s'), ch('z')],
-            vec![sp, ch('s'), ch('1')], vec![sp, ch('c'), ch('g')], vec![sp, ch('m'), ch('r')]]
-        {
+        for old in [
+            vec![sp, ch('r')],
+            vec![sp, ch('t')],
+            vec![sp, ch('o')],
+            vec![sp, ch('s'), ch('d')],
+            vec![sp, ch('s'), ch('z')],
+            vec![sp, ch('s'), ch('1')],
+            vec![sp, ch('c'), ch('g')],
+            vec![sp, ch('m'), ch('r')],
+        ] {
             assert_eq!(lookup(BROWSE, &old), Lookup::Unknown, "옛 키 {} 가 산다", super::super::menu::title(&old));
         }
     }

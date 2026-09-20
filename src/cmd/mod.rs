@@ -14,8 +14,8 @@ pub mod merge_driver;
 pub mod mv;
 pub mod note;
 pub mod prime;
-pub mod read;
 pub mod project;
+pub mod read;
 pub mod ready;
 pub mod rm;
 pub mod show;
@@ -217,9 +217,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         // 그중 하나다. `.moai` 를 찾으러 가면 `git worktree` 안이나 서브모듈에서
         // 엉뚱한 트래커를 열고, 사람이 누구인지도 여기서는 물을 일이 없다.
         Cmd::MergeDriver(a) => merge_driver::run(&ctx, a),
-        Cmd::Skill(SkillCmd::Install { scope, dry_run }) => {
-            skill::install(&ctx, scope.as_str(), dry_run)
-        }
+        Cmd::Skill(SkillCmd::Install { scope, dry_run }) => skill::install(&ctx, scope.as_str(), dry_run),
         Cmd::Skill(SkillCmd::Status) => skill::status(&ctx),
         Cmd::Skill(SkillCmd::Uninstall { dry_run }) => skill::uninstall(&ctx, dry_run),
         // 저장소가 아니라 사람의 설정을 고친다 — `Repo::discover` 를 안 지나므로
@@ -272,11 +270,8 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
     let registered = reg.is_some_and(|r| !r.projects.is_empty());
     if outside && !registered {
         let mut help = Vec::new();
-        crate::cli::Cli::command()
-            .write_help(&mut help)
-            .map_err(|e| Fail::new(e.to_string()))?;
-        let mut out: Vec<String> =
-            String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
+        crate::cli::Cli::command().write_help(&mut help).map_err(|e| Fail::new(e.to_string()))?;
+        let mut out: Vec<String> = String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
         out.push(String::new());
         out.push("여기는 아직 moai 저장소가 아니다 — `moai init` 으로 시작한다".into());
         out.push("다른 곳의 프로젝트를 여기서 한눈에 보려면 `moai project add <dir>` 로 등록한다".into());
@@ -350,9 +345,7 @@ pub fn refuse_if_flag_like(title: &str) -> R<()> {
 /// 키가 알파벳 순으로 재배열되고, 그러면 파일과 `--json` 이 서로 다른 순서를
 /// 말한다. 눈으로 훑을 때 `id` 가 줄 가운데에 있는 것도 그 탓이다.
 pub fn json_line<T: serde::Serialize>(v: &T) -> R<Vec<String>> {
-    serde_json::to_string(v)
-        .map(|s| vec![s])
-        .map_err(|e| Fail::new(e.to_string()))
+    serde_json::to_string(v).map(|s| vec![s]).map_err(|e| Fail::new(e.to_string()))
 }
 
 /// 이슈 한 줄의 기계 출력. 묶음이면 **멤버에서 읽은 칸**을 `derived_status` 로
@@ -607,10 +600,7 @@ pub fn stale(rows: &[(String, String)]) -> Vec<Stale<'_>> {
 
 /// (줄, 풀어야 할 미룸 전부 — 가까운 것부터).
 pub fn shelved(pairs: &[(String, Vec<String>)]) -> Vec<Shelved<'_>> {
-    pairs
-        .iter()
-        .map(|(id, roots)| Shelved { id, root: roots.first().map_or("", String::as_str), roots })
-        .collect()
+    pairs.iter().map(|(id, roots)| Shelved { id, root: roots.first().map_or("", String::as_str), roots }).collect()
 }
 
 #[cfg(test)]
@@ -619,7 +609,8 @@ mod tests {
     use crate::model::{Issue, Kind, Status};
 
     fn row_with(rest: &[(&str, &str)]) -> Issue {
-        let mut i = Issue::new("argos-0001".into(), "제목".into(), Kind::Epic, Status::new("todo"), "2026-09-11T04:12:03Z");
+        let mut i =
+            Issue::new("argos-0001".into(), "제목".into(), Kind::Epic, Status::new("todo"), "2026-09-11T04:12:03Z");
         for (k, v) in rest {
             i.rest.insert(k.to_string(), serde_json::Value::String(v.to_string()));
         }
@@ -630,7 +621,12 @@ mod tests {
     /// 않는 모르는 필드와 곁들인 `derived_status` 는 그대로 남는다.
     #[test]
     fn every_appended_key_wins_over_an_unknown_field_and_nothing_else_is_lost() {
-        let i = row_with(&[("members", "가짜"), ("shelved_by", "가짜"), ("duplicate_lines", "가짜"), ("due", "2026-10-01")]);
+        let i = row_with(&[
+            ("members", "가짜"),
+            ("shelved_by", "가짜"),
+            ("duplicate_lines", "가짜"),
+            ("due", "2026-10-01"),
+        ]);
         let row = Row::of(&i, Some("in_progress"));
         let extra = [
             ("members", "[]".to_string()),

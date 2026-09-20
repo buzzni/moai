@@ -195,7 +195,12 @@ pub fn place_of(config: &Path, root: &Path) -> Place {
 /// - **옛 자리는 지금 자리가 아직 없을 때만 든다**(리뷰 7·13). 첫 쓰기가 그 표를 여기로 합치므로
 ///   파일이 선 뒤에는 옛 자리에 새로 든 것이 없다 — 그때도 겹쳐 보던 판은 걷은 id 를 다음 읽기에
 ///   되살렸고(moai-dt5q 가 내건 것이 옛 자리를 가진 사람에게만 꺼졌다) 그 읽기 값을 내내 치렀다
-fn overlay_place(place: &Place, seen: &mut BTreeMap<String, String>, legacy: &BTreeMap<String, String>, problems: &mut Vec<String>) {
+fn overlay_place(
+    place: &Place,
+    seen: &mut BTreeMap<String, String>,
+    legacy: &BTreeMap<String, String>,
+    problems: &mut Vec<String>,
+) {
     let mut places: Vec<&Path> = Vec::new();
     // **대기 자리가 먼저다** — 떨어진 판이 옛 자리보다 나중에 적힌 것이다. 겹치는 차례는 나중에 적힌
     // 것이 이기는 쪽으로 세운다(`overlay` 는 먼저 든 것을 안 덮는다).
@@ -280,7 +285,13 @@ pub fn read(config: &Path, root: &Path, legacy: &BTreeMap<String, String>) -> Ma
 ///
 /// **옛 자리의 탈은 `trouble` 로 안 올린다.** 그 파일은 있을 수도 없을 수도 있는 것이라, 그것 하나로
 /// 지금 자리의 성한 표를 버리면 안 된다 — 까닭만 곁들인다.
-fn older(past_places: &[&Path], root: &Path, seen: &mut BTreeMap<String, String>, legacy: &BTreeMap<String, String>, problems: &mut Vec<String>) {
+fn older(
+    past_places: &[&Path],
+    root: &Path,
+    seen: &mut BTreeMap<String, String>,
+    legacy: &BTreeMap<String, String>,
+    problems: &mut Vec<String>,
+) {
     for old in past_places {
         let mut past = read_one(old, root);
         overlay(seen, &past.seen);
@@ -292,7 +303,12 @@ fn older(past_places: &[&Path], root: &Path, seen: &mut BTreeMap<String, String>
 /// 락 안에서 든 표에 [`read`] 와 **같은 차례로** 옛 자리와 옛 `[read]` 를 얹는다 — 탐색기의 `r` 이 제가
 /// 방금 쓴 표를 화면에 들일 때 이것으로 든다. 까닭은 안 낸다: 그 자리는 쓴 결과를 말하지 읽기를 말하지
 /// 않고, 같은 까닭은 다음 걸음의 [`read`] 가 댄다.
-pub fn overlay_older(config: &Path, root: &Path, seen: &mut BTreeMap<String, String>, legacy: &BTreeMap<String, String>) {
+pub fn overlay_older(
+    config: &Path,
+    root: &Path,
+    seen: &mut BTreeMap<String, String>,
+    legacy: &BTreeMap<String, String>,
+) {
     overlay_place(&place_of(config, root), seen, legacy, &mut Vec::new());
 }
 
@@ -309,7 +325,9 @@ fn read_one(path: &Path, root: &Path) -> Marks {
         // **가르는 잣대는 설정과 한 자다**(moai-po6v, `user_config::unreadable`) — 갈라 두면 같은
         // `Trouble` 을 두 곳이 달리 읽어, 한쪽을 고친 날 다른 쪽이 조용히 옛 뜻으로 남는다.
         // 권한으로 못 읽는 것은 다시 해도 같다 — 다시 읽을 때는 `App::take_read` 가 갈래로 정한다.
-        Err(e) if crate::user_config::unreadable(&e) => (BTreeMap::new(), vec![at(e.to_string())], Some(Trouble::Unreadable)),
+        Err(e) if crate::user_config::unreadable(&e) => {
+            (BTreeMap::new(), vec![at(e.to_string())], Some(Trouble::Unreadable))
+        }
         Err(e) => (BTreeMap::new(), vec![at(e.to_string())], Some(Trouble::Reading)),
         Ok(src) => match Sheet::parse(&src) {
             Err(e) => (BTreeMap::new(), vec![at(e)], Some(Trouble::Broken)),
@@ -427,7 +445,8 @@ pub fn update<T>(config: &Path, root: &Path, f: impl Fn(&mut Sheet) -> R<T>) -> 
     // 그 뒤에 옆에서 파일이 서도 잃는 것은 없다 — 여기서 "쓸 것이 없다" 가 나오려면 빈 표에 대고도 적을
     // 것이 없었다는 뜻이고, 그것은 어느 표에 대고도 적을 것이 없다.
     if !path.exists() {
-        let mut trial = Sheet::parse("").map_err(|e| refuse(format!("{}: {e} — 고치기 전까지 쓰지 않는다", path.display())))?;
+        let mut trial =
+            Sheet::parse("").map_err(|e| refuse(format!("{}: {e} — 고치기 전까지 쓰지 않는다", path.display())))?;
         // 재 보기의 까닭은 **돌아설 때만** 싣는다 — 안 돌아서면 락 안의 합치기가 같은 줄을 다시 내므로,
         // 둘 다 실으면 한 판의 한 탈이 두 줄로 선다.
         let mut why = Vec::new();
@@ -466,12 +485,16 @@ pub fn update<T>(config: &Path, root: &Path, f: impl Fn(&mut Sheet) -> R<T>) -> 
         Err(e) => return Err(err(e)),
     };
     let fresh_sheet = src.is_empty();
-    let mut sheet = Sheet::parse(&src)
-        .map_err(|e| refuse(format!("{}: {e} — 고치기 전까지 쓰지 않는다", path.display())))?;
+    let mut sheet =
+        Sheet::parse(&src).map_err(|e| refuse(format!("{}: {e} — 고치기 전까지 쓰지 않는다", path.display())))?;
     // **남의 읽음 위에 쓰지 않는다** — 해시가 부딪혔다. 재어 본 일이 없는 만큼 드문 자리지만, 조용히
     // 섞는 것이 이 에픽이 고치는 바로 그 해라 멈춘다.
     if !sheet.owns(&root) {
-        return Err(refuse(format!("{}: {} 의 읽음이 아니라 쓰지 않는다 — 손으로 지운다", path.display(), root.display())));
+        return Err(refuse(format!(
+            "{}: {} 의 읽음이 아니라 쓰지 않는다 — 손으로 지운다",
+            path.display(),
+            root.display()
+        )));
     }
     // **손으로 고칠 거절에는 어느 파일인지 붙인다** — [`crate::user_config::update`] 와 같은 자리이고 같은
     // 까닭이다(리뷰). 이 파일의 이름은 뿌리의 해시라 사람이 짐작할 수 없어, 붙이지 않으면 "손으로
@@ -670,10 +693,18 @@ impl Sheet {
         }
         if let Some(item) = self.doc.root().get(READ) {
             let Some(t) = item.as_table_like() else {
-                return Err(refuse(format!("`{READ}` 가 `[{READ}]` 표가 아니라({}) 읽음을 적지 않는다 — 손으로 고친다", item.type_name())));
+                return Err(refuse(format!(
+                    "`{READ}` 가 `[{READ}]` 표가 아니라({}) 읽음을 적지 않는다 — 손으로 고친다",
+                    item.type_name()
+                )));
             };
-            if let Some((id, odd)) = marks.keys().find_map(|id| t.get(id).filter(|v| v.as_str().is_none()).map(|v| (id, v))) {
-                return Err(refuse(format!("`{READ}` 의 `{id}` 가 때가 아니라({}) 읽음을 적지 않는다 — 손으로 고친다", odd.type_name())));
+            if let Some((id, odd)) =
+                marks.keys().find_map(|id| t.get(id).filter(|v| v.as_str().is_none()).map(|v| (id, v)))
+            {
+                return Err(refuse(format!(
+                    "`{READ}` 의 `{id}` 가 때가 아니라({}) 읽음을 적지 않는다 — 손으로 고친다",
+                    odd.type_name()
+                )));
             }
         } else {
             // 주석만 있던 파일이면 머리 주석을 머리에 둔다 — 안 두면 사람이 적어 둔 줄이 `[read]` 밑으로
@@ -715,8 +746,11 @@ impl Sheet {
             return 0;
         };
         // 걷을 것만 짓는다 — 먼저 모두 베끼던 판은 걷을 것이 없는 흔한 판에서도 키 수만큼 문자열을 지었다.
-        let gone: Vec<String> =
-            t.iter().filter(|(id, at)| at.as_str().is_some() && !known.contains(id)).map(|(id, _)| id.to_string()).collect();
+        let gone: Vec<String> = t
+            .iter()
+            .filter(|(id, at)| at.as_str().is_some() && !known.contains(id))
+            .map(|(id, _)| id.to_string())
+            .collect();
         self.doc.drop_keys(READ, &gone)
     }
 
@@ -771,7 +805,12 @@ mod tests {
         let sheets = std::fs::read_dir(dir_of(&cfg).join("read")).unwrap().count();
         assert_eq!(sheets, 2, "읽음 파일이 하나(와 그 락)가 아니다");
         for spelling in &spellings {
-            assert_eq!(read(&cfg, spelling, &BTreeMap::new()).seen.len(), 4, "{} 로 읽으니 덜 보인다", spelling.display());
+            assert_eq!(
+                read(&cfg, spelling, &BTreeMap::new()).seen.len(),
+                4,
+                "{} 로 읽으니 덜 보인다",
+                spelling.display()
+            );
         }
     }
 
@@ -1102,7 +1141,11 @@ mod tests {
         assert_eq!(got.trouble, None, "{:?}", got.problems);
         assert_eq!(got.seen.get("a").map(String::as_str), Some("A"), "제 파일을 남의 것으로 읽었다");
         update(&cfg, &root, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
-        assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen.get("b").map(String::as_str), Some("B"), "제 파일에 쓰기를 거절했다");
+        assert_eq!(
+            read(&cfg, &root, &BTreeMap::new()).seen.get("b").map(String::as_str),
+            Some("B"),
+            "제 파일에 쓰기를 거절했다"
+        );
     }
 
     /// **파일이 대는 자리는 그 이름을 고른 자리다**(moai-f5e3 리뷰). 이름은 푼 뿌리로 고르면서 `path` 에는
@@ -1158,7 +1201,11 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
 
         update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
-        assert!(path_for(&cfg, &root).starts_with(&xdg), "읽음이 링크를 따라 나갔다 — {}", path_for(&cfg, &root).display());
+        assert!(
+            path_for(&cfg, &root).starts_with(&xdg),
+            "읽음이 링크를 따라 나갔다 — {}",
+            path_for(&cfg, &root).display()
+        );
         assert!(!dots.join("read").exists(), "읽음이 dotfiles 저장소 안에 섰다");
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen.get("argos-0001").map(String::as_str), Some("A"));
     }
@@ -1279,7 +1326,8 @@ mod tests {
         let root = s.join("proj");
         let at = path_for(&cfg, &root);
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
-        std::fs::write(&at, format!("path = {:?}\r\n\r\n[read]\r\n\"argos-0001\" = \"A\"", root.display().to_string())).unwrap();
+        std::fs::write(&at, format!("path = {:?}\r\n\r\n[read]\r\n\"argos-0001\" = \"A\"", root.display().to_string()))
+            .unwrap();
         update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap();
         let now = std::fs::read_to_string(&at).unwrap();
         assert!(!now.replace("\r\n", "").contains('\n'), "줄 끝이 LF 로 접혔다 — {now:?}");
@@ -1364,7 +1412,10 @@ mod tests {
         let root = s.join("proj");
         let at = path_for(&cfg, &root);
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
-        let src = format!("# 손으로 적은 줄\npath = {:?}\nnote = \"나중 바이너리의 키\"\n\n[read]\n\"argos-0001\" = \"A\"\n", root.display().to_string());
+        let src = format!(
+            "# 손으로 적은 줄\npath = {:?}\nnote = \"나중 바이너리의 키\"\n\n[read]\n\"argos-0001\" = \"A\"\n",
+            root.display().to_string()
+        );
         std::fs::write(&at, &src).unwrap();
         update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap();
         let now = std::fs::read_to_string(&at).unwrap();
@@ -1382,7 +1433,8 @@ mod tests {
         let (mine, other) = (s.join("proj"), s.join("남의 것"));
         let at = path_for(&cfg, &mine);
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
-        std::fs::write(&at, format!("path = {:?}\n\n[read]\n\"argos-0001\" = \"A\"\n", other.display().to_string())).unwrap();
+        std::fs::write(&at, format!("path = {:?}\n\n[read]\n\"argos-0001\" = \"A\"\n", other.display().to_string()))
+            .unwrap();
 
         let Marks { seen, problems, trouble } = read(&cfg, &mine, &BTreeMap::new());
         assert!(seen.is_empty(), "남의 읽음을 들었다 — {seen:?}");
@@ -1507,7 +1559,8 @@ mod tests {
         let slashed = s.join("proj/");
         let old = sheet_at(dir_of(&cfg), &slashed);
         std::fs::create_dir_all(dir_of(&old)).unwrap();
-        std::fs::write(&old, format!("path = {:?}\n\n[read]\n\"a\" = \"옛 철자\"\n", slashed.display().to_string())).unwrap();
+        std::fs::write(&old, format!("path = {:?}\n\n[read]\n\"a\" = \"옛 철자\"\n", slashed.display().to_string()))
+            .unwrap();
 
         // 적을 것은 없다 — 옛 자리의 한 줄만이 쓸 까닭이다.
         update(&cfg, &slashed, |sh| sh.mark(&BTreeMap::new())).unwrap();

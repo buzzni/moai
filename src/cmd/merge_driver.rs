@@ -167,14 +167,7 @@ fn plan(o: &str, a: &str, b: &str, marker: usize) -> (String, Vec<String>) {
 }
 
 fn clash_fail(clashes: &[String], what: &str) -> Fail {
-    Fail::coded(
-        format!(
-            "{what}: {}건은 사람이 푼다 — {}",
-            clashes.len(),
-            clashes.join(" ")
-        ),
-        super::code::BROKEN,
-    )
+    Fail::coded(format!("{what}: {}건은 사람이 푼다 — {}", clashes.len(), clashes.join(" ")), super::code::BROKEN)
 }
 
 /// 파일 하나를 id → 줄로. **같은 id 가 두 번 있으면 `None`** — 그때는 id 로 짝짓는 것
@@ -301,14 +294,10 @@ fn marked_bytes(ours: Option<&[u8]>, theirs: Option<&[u8]>, marker: usize) -> Ve
 fn settle(o: Option<&Row<'_>>, a: Option<&Row<'_>>, b: Option<&Row<'_>>) -> Settled {
     // **원문을 그대로 든다**([`Row`]). 매개변수를 안 받는 것은 여덟 자리 중 한 곳에서
     // 두 쪽을 뒤집어 넘기는 실수가 컴파일되지 않게 하려는 것이다.
-    let clash = || Settled::Clash {
-        ours: a.map(|r| r.raw.to_string()),
-        theirs: b.map(|r| r.raw.to_string()),
-    };
+    let clash = || Settled::Clash { ours: a.map(|r| r.raw.to_string()), theirs: b.map(|r| r.raw.to_string()) };
     let keep = |v: &Value| {
-        issue(v).map_or_else(clash, |i| {
-            Settled::Line(Some(serde_json::to_string(&i).expect("Issue 는 언제나 직렬화된다")))
-        })
+        issue(v)
+            .map_or_else(clash, |i| Settled::Line(Some(serde_json::to_string(&i).expect("Issue 는 언제나 직렬화된다"))))
     };
     match (o.map(|r| &r.v), a.map(|r| &r.v), b.map(|r| &r.v)) {
         (_, None, None) => Settled::Line(None),
@@ -663,8 +652,7 @@ pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
 /// `tests/cli.rs` 의 격리도 그 위에 서 있어서다. 흔한 판(`git config --global`)은 `$HOME/.gitconfig`
 /// 이라 잡히고, 남는 것은 그 변수를 쓰는 판뿐이다.
 fn planted_anywhere(root: &Path) -> bool {
-    crate::git::run(root, &["config", "--get", "--default", "", &driver_key()])
-        .map_or(true, |v| !v.trim().is_empty())
+    crate::git::run(root, &["config", "--get", "--default", "", &driver_key()]).map_or(true, |v| !v.trim().is_empty())
 }
 
 /// 이 저장소가 스냅샷에 `merge=moai` 를 걸어 뒀는가.
@@ -825,34 +813,34 @@ fn probe(root: &Path, cmd: &str) -> Probe {
     }
     #[cfg(unix)]
     {
-    use std::io::ErrorKind;
-    use std::process::{Command, Stdio};
-    let has_dir = cmd.contains('/') || cmd.contains(std::path::MAIN_SEPARATOR);
-    let program = if has_dir { root.join(cmd) } else { std::path::PathBuf::from(cmd) };
-    let spawned = Command::new(program)
-        .args([SUB, "--help"])
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
-    let mut child = match spawned {
-        Ok(c) => c,
-        // 이 둘만 그 **자리**에 대한 말이다.
-        Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied) => return Probe::Dead,
-        // 나머지는 기계가 막은 것이다 — 멀쩡한 자리를 "썩었다" 고 부르지 않는다.
-        Err(_) => return Probe::Unknown,
-    };
-    let Some(st) = reaped(&mut child) else { return Probe::Unknown };
-    match st.code() {
-        Some(0) => Probe::Runs,
-        // 껍데기와 로더의 낱말이다 — 공유 라이브러리를 못 찾은 판, exec 에 막힌 래퍼. 그 이름의
-        // 딴 도구가 아니라 그 자리가 못 도는 것이다.
-        Some(126 | 127) => Probe::Dead,
-        Some(_) => Probe::Alien,
-        // 신호에 맞아 죽었다(유닉스에서만 선다) — OOM 킬러가 가장 흔하다.
-        None => Probe::Unknown,
-    }
+        use std::io::ErrorKind;
+        use std::process::{Command, Stdio};
+        let has_dir = cmd.contains('/') || cmd.contains(std::path::MAIN_SEPARATOR);
+        let program = if has_dir { root.join(cmd) } else { std::path::PathBuf::from(cmd) };
+        let spawned = Command::new(program)
+            .args([SUB, "--help"])
+            .current_dir(root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        let mut child = match spawned {
+            Ok(c) => c,
+            // 이 둘만 그 **자리**에 대한 말이다.
+            Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied) => return Probe::Dead,
+            // 나머지는 기계가 막은 것이다 — 멀쩡한 자리를 "썩었다" 고 부르지 않는다.
+            Err(_) => return Probe::Unknown,
+        };
+        let Some(st) = reaped(&mut child) else { return Probe::Unknown };
+        match st.code() {
+            Some(0) => Probe::Runs,
+            // 껍데기와 로더의 낱말이다 — 공유 라이브러리를 못 찾은 판, exec 에 막힌 래퍼. 그 이름의
+            // 딴 도구가 아니라 그 자리가 못 도는 것이다.
+            Some(126 | 127) => Probe::Dead,
+            Some(_) => Probe::Alien,
+            // 신호에 맞아 죽었다(유닉스에서만 선다) — OOM 킬러가 가장 흔하다.
+            None => Probe::Unknown,
+        }
     }
 }
 
@@ -935,10 +923,7 @@ fn install(ctx: &Ctx, as_command: Option<&str>) -> R<Vec<String>> {
             driver: &'a str,
             attribute: String,
         }
-        return super::json_line(&Planted {
-            driver: &driver,
-            attribute: format!("{SNAPSHOT} merge={DRIVER}"),
-        });
+        return super::json_line(&Planted { driver: &driver, attribute: format!("{SNAPSHOT} merge={DRIVER}") });
     }
     Ok(vec![
         format!("{key} = {driver}"),
@@ -1170,10 +1155,7 @@ mod tests {
         let b = format!("{}\n", line("argos-0001", &format!(",\"planned_at\":\"{T2}\"")));
         let (text, clashes) = merge(&o, &a, &b);
         assert!(clashes.is_empty(), "{clashes:?}\n{text}");
-        assert!(
-            !text.contains("deferred_at"),
-            "늦게 친 쪽은 도로 집었는데 미뤄 둔 채로 섰다\n{text}"
-        );
+        assert!(!text.contains("deferred_at"), "늦게 친 쪽은 도로 집었는데 미뤄 둔 채로 섰다\n{text}");
         assert!(text.contains(&format!("\"planned_at\":\"{T2}\"")), "{text}");
     }
 

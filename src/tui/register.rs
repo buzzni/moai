@@ -133,10 +133,11 @@ impl App {
             self.notice = Some(say(self.site.lang, "tui.register.no_config").into());
             return;
         };
-        let starts: Vec<PathBuf> = [self.pick_from.clone(), self.launched_at.clone(), self.site.repo.as_ref().map(|r| r.root.clone())]
-            .into_iter()
-            .flatten()
-            .collect();
+        let starts: Vec<PathBuf> =
+            [self.pick_from.clone(), self.launched_at.clone(), self.site.repo.as_ref().map(|r| r.root.clone())]
+                .into_iter()
+                .flatten()
+                .collect();
         let registered = registered_paths(&config);
         let lang = self.site.lang;
         let mut why = say(lang, "tui.pick.nowhere_to_start").to_string();
@@ -333,12 +334,12 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scratch::Scratch;
-    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
     use crate::nav::Path as NavPath;
+    use crate::scratch::Scratch;
     use crate::store::Repo;
     use crate::tui::layer::{At, Layer, Look, Shut};
     use crate::tui::stamp_of;
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
     /// 진짜 디렉터리와 사용자 설정 한 벌. **돌리는 사람의 홈·설정은 안 읽는다** — 창은
     /// `App::launched_at` 에서, 쓰기는 층이 읽은 임시 설정 파일에 한다.
@@ -374,7 +375,8 @@ mod tests {
         fn register(&self, dirs: &[&Path]) -> PathBuf {
             let path = self.config();
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            let body: String = dirs.iter().map(|d| format!("[[project]]\npath = {:?}\n", d.to_str().unwrap())).collect();
+            let body: String =
+                dirs.iter().map(|d| format!("[[project]]\npath = {:?}\n", d.to_str().unwrap())).collect();
             std::fs::write(&path, body).unwrap();
             path
         }
@@ -404,7 +406,11 @@ mod tests {
     /// 커서를 창의 그 이름 줄에 둔다.
     fn point(a: &mut App, name: &str) {
         let Mode::Pick(p) = &mut a.mode else { panic!("창이 없다") };
-        let at = p.at.entries.iter().position(|d| d.name == name).unwrap_or_else(|| panic!("{name} 가 창에 없다 — {:?}", p.at));
+        let at =
+            p.at.entries
+                .iter()
+                .position(|d| d.name == name)
+                .unwrap_or_else(|| panic!("{name} 가 창에 없다 — {:?}", p.at));
         p.cursor = p.rows().iter().position(|r| *r == crate::tui::picker::Row::Dir(at)).unwrap();
     }
 
@@ -559,7 +565,10 @@ mod tests {
         assert_eq!(s.registered(), [s.join("work/argos"), app_a.clone()]);
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("✓ 등록함")), "{:?}", a.notice);
         let p = picker(&a);
-        assert!(p.at.entries.iter().find(|d| d.name == "a").is_some_and(|d| d.registered && d.moai), "창의 표시가 안 고쳐졌다");
+        assert!(
+            p.at.entries.iter().find(|d| d.name == "a").is_some_and(|d| d.registered && d.moai),
+            "창의 표시가 안 고쳐졌다"
+        );
         assert_eq!(p.error, None);
         assert_eq!(place_at_cursor(&a), app_a, "층의 커서가 새 프로젝트에 안 섰다");
         // 새 줄은 스레드가 읽는다(moai-ezwu) — 등록하는 키가 저장소 읽기를 기다리지 않는다.

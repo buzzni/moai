@@ -214,11 +214,7 @@ impl<'a> Call<'a> {
                 Call::Edits(text("file_path").or_else(|| text("notebook_path")).unwrap_or_default())
             }
             Some("Skill") => {
-                let named = format!(
-                    "{} {}",
-                    text("skill").unwrap_or_default(),
-                    text("args").unwrap_or_default()
-                );
+                let named = format!("{} {}", text("skill").unwrap_or_default(), text("args").unwrap_or_default());
                 if named.contains(REVIEW_CMD) { Call::Review } else { Call::Other }
             }
             _ => Call::Other,
@@ -241,8 +237,7 @@ fn calls_review(line: &Line<'_>) -> bool {
         Some((first, rest)) => {
             let head = first.trim_start_matches('/');
             head == REVIEW_CMD
-                || (head.ends_with("claude")
-                    && rest.first().is_some_and(|w| w.trim_start_matches('/') == REVIEW_CMD))
+                || (head.ends_with("claude") && rest.first().is_some_and(|w| w.trim_start_matches('/') == REVIEW_CMD))
         }
         None => false,
     })
@@ -380,7 +375,8 @@ fn shell_text(words: &[String]) -> Option<Handed> {
                 Some(g) => (Some(g.as_str()), tail),
                 None => (tail.first().map(String::as_str), tail.get(1..).unwrap_or_default()),
             };
-            split_out = raw.map(split_string).unwrap_or_default().into_iter().chain(more.iter().cloned()).collect::<Vec<_>>();
+            split_out =
+                raw.map(split_string).unwrap_or_default().into_iter().chain(more.iter().cloned()).collect::<Vec<_>>();
             &split_out
         };
         let text = tail.iter().map(|w| crate::text::quoted(w)).collect::<Vec<_>>().join(" ");
@@ -1171,9 +1167,7 @@ impl<'a> Lexer<'a> {
             },
             // 낱말 머리의 `#` 부터 줄 끝까지는 주석이다. 주석 속 `a -> b` 를
             // 쓰기로 읽으면 명령이 엉뚱하게 막힌다.
-            '#' if self.at_word_start() => {
-                while self.chars.next_if(|d| *d != '\n').is_some() {}
-            }
+            '#' if self.at_word_start() => while self.chars.next_if(|d| *d != '\n').is_some() {},
             // `[[ a > b || c < d ]]` 는 비교다. 토막도 가르지 않는다.
             '<' | '>' | '&' | '|' | '(' | ')' if self.test => self.cur.push(c),
             '(' if next == Some('(') && self.at_word_start() => {
@@ -1687,10 +1681,8 @@ const SHUTS: &[&str] = &["}", "fi", "done", "esac"];
 /// 여기서 멈추면 `{ cd /tmp; … }` 의 `cd` 를 못 봐 뒤의 상대 경로를 저장소에
 /// 풀고(아무것도 안 쓰는 명령이 막혔다), `time moai mv <리뷰> done` 의 `moai`
 /// 를 못 봐 닫기 규칙이 샜다.
-const PREFIXES: &[&str] = &[
-    "!", "{", "if", "then", "elif", "else", "do", "while", "until", "time", "builtin", "command",
-    "exec", "nohup",
-];
+const PREFIXES: &[&str] =
+    &["!", "{", "if", "then", "elif", "else", "do", "while", "until", "time", "builtin", "command", "exec", "nohup"];
 
 /// 토막에서 **명령 자리**부터의 낱말들. 앞에 붙은 환경변수 대입(`FOO=1 cmd`)과
 /// 예약어·접두 명령을 지나친다. 셋이 따로 세던 것을 여기 하나로 모았다 —
@@ -1737,11 +1729,10 @@ fn command_of(words: &[String]) -> &[String] {
 /// 이름이 겹쳐도 **프로그램이 따로 있는 것은 안 든다** — `echo`·`printf`·`test`·`kill`·`pwd`·
 /// `true`·`false`·`time`·`nohup` 은 `/usr/bin` 에 있어 감싸는 명령이 그대로 돌린다.
 const BUILTINS: &[&str] = &[
-    "cd", "pushd", "popd", "set", "exit", "eval", "source", ".", "export", "unset", "shift",
-    "return", "exec", "builtin", "command", "trap", "local", "declare", "typeset", "readonly",
-    "alias", "unalias", "shopt", "ulimit", "umask", "read", "wait", "jobs", "fg", "bg", "let",
-    "if", "then", "else", "elif", "fi", "while", "until", "for", "select", "do", "done", "case",
-    "esac", "function", "in", "{", "}", "!", "[[", "]]", "coproc",
+    "cd", "pushd", "popd", "set", "exit", "eval", "source", ".", "export", "unset", "shift", "return", "exec",
+    "builtin", "command", "trap", "local", "declare", "typeset", "readonly", "alias", "unalias", "shopt", "ulimit",
+    "umask", "read", "wait", "jobs", "fg", "bg", "let", "if", "then", "else", "elif", "fi", "while", "until", "for",
+    "select", "do", "done", "case", "esac", "function", "in", "{", "}", "!", "[[", "]]", "coproc",
 ];
 
 /// [`wrapped`] 가 감싸는 명령 하나를 읽은 결과 — 명령 자리가 어디인가, 아니면 왜 못 가는가.
@@ -1823,7 +1814,14 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             long: &["--unset"],
             // `--block-signal[=SIG]` 셋은 값을 **붙여서만** 받는다 — 다음 낱말을 먹는 것으로 적던
             // 판은 `env --block-signal moai add x` 의 `moai` 를 값으로 삼켜 규칙 1 을 놓쳤다.
-            free: &["--ignore-environment", "--null", "--block-signal", "--default-signal", "--ignore-signal", "--list-signal-handling"],
+            free: &[
+                "--ignore-environment",
+                "--null",
+                "--block-signal",
+                "--default-signal",
+                "--ignore-signal",
+                "--list-signal-handling",
+            ],
             attach: &[],
             args: 0,
             stops: &["-C", "--chdir"],
@@ -1868,8 +1866,32 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             // `-h` 는 `-hHOST` 로 붙여서만 값을 받고 혼자 서면 도움말이다 — 값을 먹는 것으로 적던
             // 판은 `sudo -h moai add x` 를 `add` 라는 명령으로 읽었다.
             takes: &["-u", "-g", "-p", "-C", "-U", "-r", "-t", "-T", "-R", "-a", "-c"],
-            long: &["--user", "--group", "--prompt", "--host", "--other-user", "--role", "--type", "--command-timeout", "--chroot", "--close-from", "--auth-type", "--login-class"],
-            free: &["--non-interactive", "--preserve-env", "--set-home", "--stdin", "--background", "--remove-timestamp", "--reset-timestamp", "--askpass", "--bell", "--preserve-groups"],
+            long: &[
+                "--user",
+                "--group",
+                "--prompt",
+                "--host",
+                "--other-user",
+                "--role",
+                "--type",
+                "--command-timeout",
+                "--chroot",
+                "--close-from",
+                "--auth-type",
+                "--login-class",
+            ],
+            free: &[
+                "--non-interactive",
+                "--preserve-env",
+                "--set-home",
+                "--stdin",
+                "--background",
+                "--remove-timestamp",
+                "--reset-timestamp",
+                "--askpass",
+                "--bell",
+                "--preserve-groups",
+            ],
             attach: &["-h"],
             args: 0,
             // `-l`·`-v` 는 뒤의 명령을 **안 돌린다**(될지만 본다) — 넘기면 안 도는 줄을 막는다.
@@ -2010,7 +2032,11 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             if letter(hands, c) {
                 if w.glued {
                     let left = &word[at + c.len_utf8()..];
-                    return Some(Wrapped::Hands { at: n + 1, glued: (!left.is_empty()).then(|| left.to_string()), words: false });
+                    return Some(Wrapped::Hands {
+                        at: n + 1,
+                        glued: (!left.is_empty()).then(|| left.to_string()),
+                        words: false,
+                    });
                 }
                 handed = true;
                 stop = false;
@@ -2150,8 +2176,7 @@ fn asks_help(words: &[String]) -> bool {
 /// 한 단위로 읽어 풀어 주는 자리에서 이것만은 빼야 한다.
 fn promotes_into(seg: &[String]) -> bool {
     let Some(args) = moai_args(seg) else { return false };
-    positionals(args).get(..2) == Some(&["idea", "promote"][..])
-        && !flag_values(args, &["-e", "--epic"]).is_empty()
+    positionals(args).get(..2) == Some(&["idea", "promote"][..]) && !flag_values(args, &["-e", "--epic"]).is_empty()
 }
 
 /// 지금 집고 있는 것에 매인 단위들 — 그 이슈 자신, 그 에픽, 그 마일스톤, 그 부모.
@@ -2503,7 +2528,12 @@ pub fn picked_in(
 /// [`picked_in`] 의 id 만 — 확실한가를 안 보는 시험이 쓴다. **한 자리에 둔다**: 시험마다 제 어댑터를
 /// 두던 판은 그 하나가 `picked_in` 이라는 이름을 가려, 읽는 사람이 어느 것을 부르는지 몰랐다.
 #[cfg(test)]
-fn picked_ids(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool, stands: &dyn Fn(usize, &str) -> Option<String>) -> Vec<String> {
+fn picked_ids(
+    cmd: &str,
+    cfg: &Config,
+    only: &dyn Fn(usize) -> bool,
+    stands: &dyn Fn(usize, &str) -> Option<String>,
+) -> Vec<String> {
     picked_in(&Line::new(cmd), cfg, only, stands).into_iter().map(|(id, _)| id).collect()
 }
 
@@ -2601,8 +2631,10 @@ fn create_in<'a>(
     let (epics, loose) = epics_of(issues, shown);
     let into_epic: String =
         epics.iter().map(|e| format!("\x20 {moai} add '<title>' -e {e}        in the same epic\n")).collect();
-    let under: String =
-        shown.iter().map(|i| format!("\x20 {moai} add '<title>' --parent {}   as a child of that work\n", i.id)).collect();
+    let under: String = shown
+        .iter()
+        .map(|i| format!("\x20 {moai} add '<title>' --parent {}   as a child of that work\n", i.id))
+        .collect();
     // **무엇이 내건 것인지는 갈림길 1 과 같은 자로 댄다 — 에픽이다.** "그 일" 로 적던 판은 집은
     // 이슈가 아니라 에픽이 필요로 하는 것(moai-1k17 이 그 모양)에서 갈림길 1 과 다른 답을 냈다.
     // 에픽이 없는 집은 일만 그 일 자신이다.
@@ -2626,15 +2658,18 @@ fn create_in<'a>(
     // 둘째 물음의 글은 규칙 글과 한 출처다(moai-nxw8) — 손으로 옮겨 적던 판은 한쪽만 고쳐도
     // 안 붉어졌다.
     let pledge = crate::guide::PLEDGE;
-    refuse(1, format!(
-        "You are already holding something — {held}.\n\
+    refuse(
+        1,
+        format!(
+            "You are already holding something — {held}.\n\
          Create it inside that unit, or park it if it belongs outside. An issue created\n\
          outside the focus loses which work it came out of.\n\
          {into_epic}{under}\
          \x20 {moai} idea add '<title>'              park it if it is not for now\n\
          If {aims} {pledge}, it is not an idea — even when you cannot do it now,\n\
          {keep}"
-    ))
+        ),
+    )
 }
 
 /// 규칙 3 의 뒷짝 — **리뷰를 닫을 때 무엇이 나왔는지를 남긴다.**
@@ -2707,14 +2742,17 @@ fn close_in(
             })
         });
         if let Some(r) = open_review {
-            return refuse(3, format!(
-                "Closing review {} without leaving what came out of it.\n{}\n\
+            return refuse(
+                3,
+                format!(
+                    "Closing review {} without leaving what came out of it.\n{}\n\
                  Write what you handed on with the issue id — a line that only says\n\
                  \"handed on\" is never read again.",
-                r.id,
-                // **닫는 두 걸음도 그 토막이 겨눈 트래커를 댄다**(moai-j2vp) — 규칙 1 과 한 자다.
-                crate::guide::close_steps(&r.id, &echo_moai(aim(k), seg))
-            ));
+                    r.id,
+                    // **닫는 두 걸음도 그 토막이 겨눈 트래커를 댄다**(moai-j2vp) — 규칙 1 과 한 자다.
+                    crate::guide::close_steps(&r.id, &echo_moai(aim(k), seg))
+                ),
+            );
         }
     }
     Decision::Pass
@@ -2748,14 +2786,17 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, targ
         .collect();
     // **내미는 명령은 한 줄에 하나다** — 붙여 넣는 쪽이 줄째 옮겨 치기 때문이다. 두 명령을 한 줄에
     // 싣던 판은 그 줄이 갈리는 자리마다 한쪽만 옮겨져 "못 찾았다" 로 끝났다(리뷰 moai-ju21.70g).
-    refuse(2, format!(
-        "Changing {} while holding nothing. Which work the change came out of is not recorded.\n\
+    refuse(
+        2,
+        format!(
+            "Changing {} while holding nothing. Which work the change came out of is not recorded.\n\
          Pick something up and call again.\n{picks}\
          If it was not in the plan, create it and pick that id up.\n\
          \x20 moai add '<title>'\n\
          \x20 moai mv <id> in_progress",
-        rel_to(target, root)
-    ))
+            rel_to(target, root)
+        ),
+    )
 }
 
 /// 규칙 2 의 껍데기 쪽 — **`Bash` 로 쓰는 파일도 센다.**
@@ -2766,14 +2807,7 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, targ
 /// 상대 경로는 **껍데기의 자리(`cwd`)** 로 푼다. 저장소 뿌리로 풀면 하위
 /// 디렉터리에서 친 `echo > x` 가 엉뚱한 파일로 읽힌다.
 #[cfg(test)]
-pub fn guard_writes(
-    issues: &[Issue],
-    cfg: &Config,
-    away: &Away,
-    root: &Path,
-    cwd: &Path,
-    cmd: &str,
-) -> Decision {
+pub fn guard_writes(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, cwd: &Path, cmd: &str) -> Decision {
     guard_writes_in(issues, cfg, away, root, cwd, &Line::new(cmd), &|_| true)
 }
 
@@ -2816,15 +2850,17 @@ fn guard_writes_in(
 ///
 /// 훅은 토막을 고르는 [`guard_shell_in`] 으로 부른다. 토막 전부를 보는 이 모양은 시험이 쓴다.
 #[cfg(test)]
-pub fn guard_shell(
-    issues: &[Issue],
-    cfg: &Config,
-    away: &Away,
-    root: &Path,
-    cwd: &Path,
-    cmd: &str,
-) -> Decision {
-    guard_shell_in(issues, cfg, away, root, cwd, &Line::new(cmd), &Segs { judges: &|_| true, picks: &|_| true }, &|_| None)
+pub fn guard_shell(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, cwd: &Path, cmd: &str) -> Decision {
+    guard_shell_in(
+        issues,
+        cfg,
+        away,
+        root,
+        cwd,
+        &Line::new(cmd),
+        &Segs { judges: &|_| true, picks: &|_| true },
+        &|_| None,
+    )
 }
 
 /// 토막마다 **이 자리의 것인가** — 규칙마다 답이 다르다.
@@ -2893,24 +2929,32 @@ pub fn guard_tmux(line: &Line<'_>) -> Decision {
                     if own {
                         continue;
                     }
-                    return refuse(4, format!(
-                        "`tmux {}` aims at the person's tmux server, with no -L or -S.\n\
+                    return refuse(
+                        4,
+                        format!(
+                            "`tmux {}` aims at the person's tmux server, with no -L or -S.\n\
                          When the session runs inside tmux, a bare tmux ignores TMUX_TMPDIR and attaches to that\n\
                          server, so this one line kills every session in it. Raise a separate server for testing\n\
                          and run it there.\n\
                          \x20 {}",
-                        rest[at],
-                        crate::guide::TMUX_OWN.replace('…', &rest[at..].join(" "))
-                    ));
+                            rest[at],
+                            crate::guide::TMUX_OWN.replace('…', &rest[at..].join(" "))
+                        ),
+                    );
                 }
-                "pkill" | "killall" if rest.iter().any(|w| w.split(|c: char| !c.is_alphanumeric()).any(|p| p == "tmux")) => {
-                    return refuse(4, format!(
-                        "`{}` aims at tmux — it kills the person's tmux server too.\n\
+                "pkill" | "killall"
+                    if rest.iter().any(|w| w.split(|c: char| !c.is_alphanumeric()).any(|p| p == "tmux")) =>
+                {
+                    return refuse(
+                        4,
+                        format!(
+                            "`{}` aims at tmux — it kills the person's tmux server too.\n\
                          If you raised a separate server for testing, run kill-server against that server.\n\
                          \x20 {}",
-                        basename(word),
-                        crate::guide::TMUX_OWN.replace('…', "kill-server")
-                    ));
+                            basename(word),
+                            crate::guide::TMUX_OWN.replace('…', "kill-server")
+                        ),
+                    );
                 }
                 _ => {}
             }
@@ -3254,8 +3298,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         // 여기서 여는 겹들 가운데 가장 바깥 것 — 바깥 셸에 대해 선 것은 그 겹에 적어야 나올 때 선다.
         let base = frames.len();
         for layer in &seg.nested[base..] {
-            let held =
-                Frame { layer: *layer, held: after_pick, strict, lone, sure, sure_e, bailout: bailout.take() };
+            let held = Frame { layer: *layer, held: after_pick, strict, lone, sure, sure_e, bailout: bailout.take() };
             frames.push(held);
             // 새 셸은 바깥의 errexit 도, 바깥이 열어 둔 끝내는 묶음도 안 물려받는다.
             //
@@ -3493,12 +3536,19 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                 let from = handed_from.filter(|_| bang && came.is_some_and(|d| d > seg.level))?;
                 // 넘긴 글 안의 집기는 제 표를 이미 달고 있다 — `if` 자신이 조건에 매였으면 그 위에
                 // 한 번 더 매인다(`certain`). 둘 다 서야 확실한 집기다.
-                let &(c, _, sure) = picked.iter().rev().take_while(|(m, ..)| *m >= from).find(|(_, at, _)| *at > seg.level)?;
+                let &(c, _, sure) =
+                    picked.iter().rev().take_while(|(m, ..)| *m >= from).find(|(_, at, _)| *at > seg.level)?;
                 shell_text(&seg.words).map(|_| Cond { at: c, sure: sure && certain })
             });
             if let Some(c) = cond {
-                let b =
-                    Bailout { floor: seg.level, depth: seg.depth, held: after_pick, cond: Some(c), ends: true, hard: true };
+                let b = Bailout {
+                    floor: seg.level,
+                    depth: seg.depth,
+                    held: after_pick,
+                    cond: Some(c),
+                    ends: true,
+                    hard: true,
+                };
                 opened = Some((b, false));
             }
         }
@@ -3630,7 +3680,11 @@ fn epics_of<'a>(issues: &'a [Issue], focus: &[&'a Issue]) -> (Vec<&'a str>, Vec<
     let groups = report::groups(issues);
     let (mut epics, mut loose): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
     for i in focus {
-        match groups.get(i.id.as_str()).copied().filter(|e| issues.iter().any(|g| g.id == *e && g.kind == crate::model::Kind::Epic)) {
+        match groups
+            .get(i.id.as_str())
+            .copied()
+            .filter(|e| issues.iter().any(|g| g.id == *e && g.kind == crate::model::Kind::Epic))
+        {
             Some(e) if !epics.contains(&e) => epics.push(e),
             Some(_) => {}
             None => loose.push(i.id.as_str()),
@@ -3661,7 +3715,13 @@ fn sets_aside(seg: &[String]) -> bool {
 /// **에픽 줄이 실제로 선 것만** 댄다. 끊긴 참조나 에픽 아닌 줄을 가리키는 `epic` 은 닫힐 에픽이
 /// 없고, 그 id 로 되찾으라고 하면 시킨 대로 친 줄이 경고를 하나 늘려 `closing` 에 걸린다. 차례는
 /// 집은 차례다 — 규칙 1 의 거절문이 `focus[0]` 의 에픽을 대는 것과 같은 에픽을 앞에 둔다.
-fn aside_in(issues: &[Issue], focus: &[&Issue], line: &Line<'_>, only: &dyn Fn(usize) -> bool, aim: Toward<'_>) -> Decision {
+fn aside_in(
+    issues: &[Issue],
+    focus: &[&Issue],
+    line: &Line<'_>,
+    only: &dyn Fn(usize) -> bool,
+    aim: Toward<'_>,
+) -> Decision {
     if focus.is_empty() {
         return Decision::Pass;
     }
@@ -3710,8 +3770,24 @@ fn hangul(t: &str) -> bool {
 /// 값이 글이 아닌 플래그 — 자리(`-C`)·사람(`--user`·`-a`)·칸(`-s`·`--from`)·태그·소속·종류. 사람 이름도
 /// 태그와 칸 이름도 한글일 수 있다 — 칸을 한글로 지은 보드에서는 `mv` 마다 헛 알림이 섰다.
 const NOT_TEXT: &[&str] = &[
-    "-C", "--dir", "--user", "-a", "--assignee", "-t", "--tag", "--untag", "-s", "--status", "--from", "-e", "--epic",
-    "--milestone", "--parent", "-p", "--priority", "--type",
+    "-C",
+    "--dir",
+    "--user",
+    "-a",
+    "--assignee",
+    "-t",
+    "--tag",
+    "--untag",
+    "-s",
+    "--status",
+    "--from",
+    "-e",
+    "--epic",
+    "--milestone",
+    "--parent",
+    "-p",
+    "--priority",
+    "--type",
 ];
 
 /// 꼴이 정해진 줄의 머리 — 읽는 쪽이 그 꼴로 세니 다듬지 않는다(`guide::KOREAN`).
@@ -3740,7 +3816,9 @@ pub fn korean_write(line: &Line<'_>, only: &dyn Fn(usize) -> bool, aim: Toward<'
         return None;
     }
     let fixed = |l: &str| {
-        FIXED_HEADS.iter().any(|h| l.strip_prefix(h).is_some_and(|r| r.is_empty() || r.starts_with(char::is_whitespace)))
+        FIXED_HEADS
+            .iter()
+            .any(|h| l.strip_prefix(h).is_some_and(|r| r.is_empty() || r.starts_with(char::is_whitespace)))
     };
     let unfixed = |t: &str| t.lines().any(|l| hangul(l) && !fixed(l));
     // 번호는 [`Line::used`] 와 같게 센다 — `only` 가 그 번호로 고른다.
@@ -3801,8 +3879,7 @@ fn prose(args: &[String]) -> Vec<String> {
             out.extend(it.cloned());
             break;
         }
-        let attached = !a.starts_with("--")
-            && NOT_TEXT.iter().any(|f| f.len() == 2 && a.len() > 2 && a.starts_with(f));
+        let attached = !a.starts_with("--") && NOT_TEXT.iter().any(|f| f.len() == 2 && a.len() > 2 && a.starts_with(f));
         if NOT_TEXT.contains(&a.as_str()) {
             it.next();
         } else if !attached && !a.split_once('=').is_some_and(|(f, _)| NOT_TEXT.contains(&f)) {
@@ -3906,9 +3983,7 @@ pub fn aimed(line: &Line<'_>, cwd: &Path) -> Vec<Option<PathBuf>> {
 /// 적은 `-C` 와 앞의 `cd` 가 옮긴 자리를 한 값으로 내는데, 없는 자리에서는 둘이 다르다 — 적은
 /// `-C` 는 곧 만들어질 자리지만, `cd` 는 실패하면 세션 자리에서 돈다.
 pub fn spells_dir(line: &Line<'_>) -> Vec<bool> {
-    line.words()
-        .map(|seg| moai_args(seg).is_some_and(|args| !flag_values(args, &["-C", "--dir"]).is_empty()))
-        .collect()
+    line.words().map(|seg| moai_args(seg).is_some_and(|args| !flag_values(args, &["-C", "--dir"]).is_empty())).collect()
 }
 
 /// 이 토막이 **하나를 집는가** — `moai mv <id>… <칸>` 의 칸이 벌여 놓는 칸이다.
@@ -4021,10 +4096,8 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
     // **옆 워크트리의 리뷰는 여기서 안 센다** — 초점에서 뺀 것과 같은 자다([`theirs`]).
     // 세면 main 에서 아무것도 안 집은 세션에 옆이 이미 집은 리뷰를 "집으라" 고 막는다.
     let theirs = theirs(issues, away);
-    let open: Vec<&Issue> = issues
-        .iter()
-        .filter(|i| is_review(i, &out_of_plan) && !i.status.is_done() && !theirs(i))
-        .collect();
+    let open: Vec<&Issue> =
+        issues.iter().filter(|i| is_review(i, &out_of_plan) && !i.status.is_done() && !theirs(i)).collect();
     // [`held`] 와 같은 초점이다 — 위에서 지은 `theirs` 를 그대로 쓴다(moai-xppm). `held` 를 부르던
     // 판은 같은 소속 지도를 한 번 더 지었다.
     let focus: Vec<&Issue> = report::wip(issues, cfg).into_iter().filter(|i| !theirs(i)).collect();
@@ -4034,20 +4107,26 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
         // 여기서 "굴러가는 리뷰" 를 다시 찾던 조건은 언제나 거짓이었다.
         // 굴러가는 리뷰가 있는 길은 아래 `anchored` 가 맡는다.
         if let Some(idle) = open.first() {
-            return refuse(3, format!(
-                "Review issue {} has not been picked up. Starting the review moves that row too.\n\
+            return refuse(
+                3,
+                format!(
+                    "Review issue {} has not been picked up. Starting the review moves that row too.\n\
                  \x20 moai mv {} in_progress --from {}\n\
                  If that is not the review, pick up what you are looking at first and call again.",
-                idle.id,
-                idle.id,
-                idle.status.as_str()
-            ));
+                    idle.id,
+                    idle.id,
+                    idle.status.as_str()
+                ),
+            );
         }
-        return refuse(3, format!(
-            "A review is left as an issue. You are holding nothing, so decide what you are\n\
+        return refuse(
+            3,
+            format!(
+                "A review is left as an issue. You are holding nothing, so decide what you are\n\
              looking at first — pick that up, or create a review issue and pick that up.\n  {}\n{REVIEW_STEPS}",
-            crate::guide::make_review("-e <epic>")
-        ));
+                crate::guide::make_review("-e <epic>")
+            ),
+        );
     }
 
     // 소속 지도 한 벌로 잰다 — [`close_in`] 과 같은 자리다.
@@ -4068,13 +4147,16 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
         return Decision::Pass;
     }
     if let Some(empty) = anchored.first() {
-        return refuse(3, format!(
-            "Review issue {} says nothing about what you are looking for and why. Write it and call again.\n\
+        return refuse(
+            3,
+            format!(
+                "Review issue {} says nothing about what you are looking for and why. Write it and call again.\n\
              \x20 moai edit {} -b -\n\
              A review run with no angle leaves no record of what it swept, so the next person\n\
              sweeps the same ground again.",
-            empty.id, empty.id
-        ));
+                empty.id, empty.id
+            ),
+        );
     }
     let head = focus[0];
     let stray = if open.is_empty() {
@@ -4084,22 +4166,21 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
             "There are open review rows, but none is tied to what you are looking at: {}\n",
             open.iter()
                 .take(3)
-                .map(|i| format!(
-                    "{}({})",
-                    i.id,
-                    epics.get(i.id.as_str()).copied().unwrap_or("no epic")
-                ))
+                .map(|i| format!("{}({})", i.id, epics.get(i.id.as_str()).copied().unwrap_or("no epic")))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
     };
-    refuse(3, format!(
-        "A review is left as an issue. Create a review issue tied to what you are looking at ({} {}) first.\n\
+    refuse(
+        3,
+        format!(
+            "A review is left as an issue. Create a review issue tied to what you are looking at ({} {}) first.\n\
          {stray}\x20 {}\n{REVIEW_STEPS}",
-        head.id,
-        head.title,
-        crate::guide::make_review(&format!("--parent {}", head.id))
-    ))
+            head.id,
+            head.title,
+            crate::guide::make_review(&format!("--parent {}", head.id))
+        ),
+    )
 }
 
 /// 거절문과 비춤이 내미는 줄이 **겨눌 트래커** — 토막 번호([`Line::used`] 의 번호)로 묻는다.
@@ -4215,13 +4296,8 @@ pub fn closing(
         for i in &wip {
             // **그 줄이 갈 수 있는 칸만 댄다.** 모두에게 `review|done` 을 일러 주던
             // 판은 이미 review 인 줄에 제자리걸음을 시켰고, `|` 는 그대로 치면 파이프다.
-            let ahead: Vec<&str> = cfg
-                .statuses
-                .iter()
-                .map(String::as_str)
-                .skip_while(|s| *s != i.status.as_str())
-                .skip(1)
-                .collect();
+            let ahead: Vec<&str> =
+                cfg.statuses.iter().map(String::as_str).skip_while(|s| *s != i.status.as_str()).skip(1).collect();
             let (last, between) =
                 ahead.split_last().map_or((crate::config::DONE, &[][..]), |(last, between)| (*last, between));
             for col in between {
@@ -4288,9 +4364,10 @@ pub fn closing(
     let out = report::put_off(latest);
     let settled: BTreeSet<&str> =
         latest.iter().filter(|i| i.status.is_done() || out.contains(i.id.as_str())).map(|i| i.id.as_str()).collect();
-    for i in issues.iter().filter(|i| {
-        is_review(i, &out_of_plan) && !i.status.is_done() && !theirs(i) && !settled.contains(i.id.as_str())
-    }) {
+    for i in issues
+        .iter()
+        .filter(|i| is_review(i, &out_of_plan) && !i.status.is_done() && !theirs(i) && !settled.contains(i.id.as_str()))
+    {
         // **규칙 3 과 같은 셈법이어야 한다.** 여기서 부모를 빼면, 거절문이
         // 시킨 대로 `--parent` 로 세운 리뷰가 규칙 3 은 지나가면서 닫을 때는
         // 아무도 안 챙기는 줄이 된다 — 한 규칙의 두 짝이 서로 다른 말을 한다.
@@ -4327,7 +4404,11 @@ fn grown(warnings: usize, before: Option<usize>, lang: Lang) -> Option<String> {
 ///
 /// **집은 것을 한꺼번에 미룬다** — `closing` 이 줄마다 미룸을 대므로, 시킨 대로 다 치면 서는 칸이
 /// 물을 칸이다. 에픽 줄이 실제로 선 것만 잰다(끊긴 참조는 닫힐 에픽이 없다).
-fn shelving_closes<'a>(latest: &'a [Issue], cfg: &Config, wip: &[&Issue]) -> std::collections::BTreeMap<&'a str, &'a str> {
+fn shelving_closes<'a>(
+    latest: &'a [Issue],
+    cfg: &Config,
+    wip: &[&Issue],
+) -> std::collections::BTreeMap<&'a str, &'a str> {
     let held: BTreeSet<&str> = wip.iter().map(|i| i.id.as_str()).collect();
     if held.is_empty() {
         return Default::default();
@@ -4426,10 +4507,7 @@ fn settled(path: &str, root: &Path) -> PathBuf {
 }
 
 fn rel_to(path: &str, root: &Path) -> String {
-    settled(path, root)
-        .strip_prefix(root)
-        .map(|r| r.display().to_string())
-        .unwrap_or_else(|_| path.to_string())
+    settled(path, root).strip_prefix(root).map(|r| r.display().to_string()).unwrap_or_else(|_| path.to_string())
 }
 
 /// 명령줄에서 이 플래그들에 딸린 값을 모은다. `-e x`·`-e=x`, 그리고 짧은
@@ -4522,7 +4600,14 @@ mod tests {
         super::picked_in(&Line::new(cmd), cfg, only, stands)
     }
 
-    fn guard_moai(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str, only: &dyn Fn(usize) -> bool, aim: Toward<'_>) -> Decision {
+    fn guard_moai(
+        issues: &[Issue],
+        cfg: &Config,
+        away: &Away,
+        cmd: &str,
+        only: &dyn Fn(usize) -> bool,
+        aim: Toward<'_>,
+    ) -> Decision {
         super::guard_moai(issues, cfg, away, &Line::new(cmd), only, aim)
     }
 
@@ -4611,22 +4696,15 @@ mod tests {
         assert_eq!(closing(&all, &all, &cfg(), &both, 0, None), Decision::Pass);
         assert_eq!(carried(&all, &all, &cfg(), &both), Decision::Pass);
         // 그러면 규칙 2 가 선다 — 저장소를 고치려면 여기서 하나를 집는다.
-        assert!(matches!(
-            guard_edit(&all, &cfg(), &both, Path::new("/repo"), "/repo/src/store.rs"),
-            Decision::Deny(_)
-        ));
+        assert!(matches!(guard_edit(&all, &cfg(), &both, Path::new("/repo"), "/repo/src/store.rs"), Decision::Deny(_)));
     }
 
     /// 옆에서 그 일을 펼쳐 집은 것도 옆의 것이다 — 그 밑의 자식, 그 에픽에 든 줄.
     /// id 가 아닌 이름(`main`)이나 없는 id 는 아무것도 안 뺀다.
     #[test]
     fn what_hangs_under_the_named_work_goes_with_it() {
-        let all = vec![
-            epic("t-e"),
-            under("t-1", "in_progress", "t-e"),
-            issue("t-2", "todo"),
-            issue("t-2.aa", "in_progress"),
-        ];
+        let all =
+            vec![epic("t-e"), under("t-1", "in_progress", "t-e"), issue("t-2", "todo"), issue("t-2.aa", "in_progress")];
         assert!(held(&all, &cfg(), &away(&["t-e", "t-2"])).is_empty());
         assert_eq!(held(&all, &cfg(), &away(&["main", "t-9"])).len(), 2);
     }
@@ -4653,7 +4731,8 @@ mod tests {
             issue("t-4", "todo"),
         ];
         let elsewhere = set(&["t-1", "t-2", "t-4"]);
-        let got: Vec<String> = unsure(&all, &cfg(), &elsewhere, &set(&["t-e"]), &Picks::default()).into_iter().collect();
+        let got: Vec<String> =
+            unsure(&all, &cfg(), &elsewhere, &set(&["t-e"]), &Picks::default()).into_iter().collect();
         assert_eq!(got, ["t-2"], "제 에픽의 일이나 안 집은 줄을 모른다고 했다");
         assert!(unsure(&all, &cfg(), &set(&[]), &set(&[]), &Picks::default()).is_empty());
     }
@@ -4706,16 +4785,35 @@ mod tests {
         let mine_late = ("me", Picks::line(2, None, "t-1", false));
         assert_eq!(read(&[their_early.clone(), mine_late]).mine, set(&["t-1"]), "`?` 끼리 겨뤄 주인이 없어졌다");
         // 늦게 적은 쪽이 남이면 남의 것이다 — 같은 때면 모르는 쪽이다(위와 같은 자).
-        assert!(read(&[("me", Picks::line(1, None, "t-1", false)), ("you", Picks::line(2, None, "t-1", false))]).mine.is_empty());
-        assert!(read(&[("me", Picks::line(1, None, "t-1", false)), ("you", Picks::line(1, None, "t-1", false))]).mine.is_empty());
+        assert!(
+            read(&[("me", Picks::line(1, None, "t-1", false)), ("you", Picks::line(2, None, "t-1", false))])
+                .mine
+                .is_empty()
+        );
+        assert!(
+            read(&[("me", Picks::line(1, None, "t-1", false)), ("you", Picks::line(1, None, "t-1", false))])
+                .mine
+                .is_empty()
+        );
         // 남의 **확실한** 줄은 제 `?` 가 아무리 늦어도 못 가져온다 — 결정 2 가 그대로 선다.
-        assert!(read(&[("you", Picks::line(1, None, "t-1", true)), ("me", Picks::line(9, None, "t-1", false))]).mine.is_empty());
+        assert!(
+            read(&[("you", Picks::line(1, None, "t-1", true)), ("me", Picks::line(9, None, "t-1", false))])
+                .mine
+                .is_empty()
+        );
         // 내가 뒤에 확실히 집으면 다시 제 것이다 — 표는 줄마다 선다.
-        assert_eq!(read(&[theirs.clone(), maybe.clone(), ("me", Picks::line(3, None, "t-1", true))]).mine, set(&["t-1"]));
+        assert_eq!(
+            read(&[theirs.clone(), maybe.clone(), ("me", Picks::line(3, None, "t-1", true))]).mine,
+            set(&["t-1"])
+        );
         // **뒤에 선 `?` 한 줄이 앞서 확실히 집은 줄을 안 덮는다**(리뷰 moai-51h9.k8j1) — 마지막 한 줄만
         // 들던 판은 정말 쥔 줄을 남에게 내줬다. 같은 때의 두 줄도 적는 차례를 안 탄다.
         let later = ("me", Picks::line(3, None, "t-1", false));
-        assert_eq!(read(&[theirs.clone(), sure.clone(), later]).mine, set(&["t-1"]), "뒤의 `?` 가 확실한 집기를 덮었다");
+        assert_eq!(
+            read(&[theirs.clone(), sure.clone(), later]).mine,
+            set(&["t-1"]),
+            "뒤의 `?` 가 확실한 집기를 덮었다"
+        );
         let tie = ("me", Picks::line(2, None, "t-1", true));
         assert_eq!(read(&[theirs.clone(), maybe, tie]).mine, set(&["t-1"]), "같은 때의 두 줄이 차례를 탔다");
 
@@ -4731,7 +4829,10 @@ mod tests {
         assert!(only_theirs.mine.is_empty());
         assert_eq!(only_theirs.theirs, set(&["t-1"]), "남의 `?` 줄을 아예 안 읽었다");
         // 남이 뒤에 **확실히** 집었으면 넘어간다 — 마지막으로 집은 세션이 이기는 자는 그대로다(moai-4jsy).
-        assert!(read(&[sure.clone(), ("you", Picks::line(3, None, "t-1", true))]).mine.is_empty(), "넘겨준 줄을 붙들었다");
+        assert!(
+            read(&[sure.clone(), ("you", Picks::line(3, None, "t-1", true))]).mine.is_empty(),
+            "넘겨준 줄을 붙들었다"
+        );
         // `?` 끼리 겨루는 자는 위에 있다(moai-kjeh) — 마지막에 적은 쪽이 이긴다.
         let both_maybe = read(&[("me", Picks::line(4, None, "t-1", false)), their_maybe]);
         assert_eq!(both_maybe.mine, set(&["t-1"]), "뒤에 적은 `?` 가 졌다 — {both_maybe:?}");
@@ -4741,7 +4842,11 @@ mod tests {
         assert_eq!(read(&[theirs.clone(), old]).mine, set(&["t-1"]), "옛 줄을 못 읽었다");
         // 두 칸뿐인 더 옛 줄(`때\tid`)도 같다 — 옛 바이너리가 `초` 를 못 읽었을 때 적던 꼴이다.
         assert_eq!(read(&[theirs, ("me", "2\tt-1\n".to_string())]).mine, set(&["t-1"]), "두 칸짜리 옛 줄을 못 읽었다");
-        assert!(Picks::line(7, Some(42), "t-1", false).ends_with("\t?\n"), "{:?}", Picks::line(7, Some(42), "t-1", false));
+        assert!(
+            Picks::line(7, Some(42), "t-1", false).ends_with("\t?\n"),
+            "{:?}",
+            Picks::line(7, Some(42), "t-1", false)
+        );
         assert_eq!(Picks::line(7, Some(42), "t-1", true), "7\tt-1\t42\n");
     }
 
@@ -4756,7 +4861,8 @@ mod tests {
     fn a_pick_another_session_recorded_is_not_mine() {
         let all = vec![issue("t-1", "in_progress"), issue("t-2", "in_progress"), issue("t-3", "in_progress")];
         let picks = Picks { mine: set(&["t-2"]), theirs: set(&["t-1", "t-2"]) };
-        let got: Vec<String> = unsure(&all, &cfg(), &set(&["t-2", "t-3"]), &set(&["t-1"]), &picks).into_iter().collect();
+        let got: Vec<String> =
+            unsure(&all, &cfg(), &set(&["t-2", "t-3"]), &set(&["t-1"]), &picks).into_iter().collect();
         assert_eq!(got, ["t-2", "t-3"], "제 이름 자리의 줄을 기록에 넘겼거나, 옆이 쥔 줄을 제 기록으로 지웠다");
 
         // 제 이름이 안 가리키는 줄은 남의 기록이 이긴다 — 그것이 moai-4jsy 다.
@@ -4845,12 +4951,17 @@ mod tests {
         // 안 돌 수도 있는 집기를 확실한 것으로 적었다.
         assert_eq!(flags("if ! moai mv t-1 in_progress --from todo; then exit 1; fi"), one("t-1", true));
         assert_eq!(flags("cargo test && if ! moai mv t-1 in_progress --from todo; then exit 1; fi"), one("t-1", false));
-        assert_eq!(flags("set -e; cargo test; if ! moai mv t-1 in_progress --from todo; then exit 1; fi"), one("t-1", false));
+        assert_eq!(
+            flags("set -e; cargo test; if ! moai mv t-1 in_progress --from todo; then exit 1; fi"),
+            one("t-1", false)
+        );
         // **겹을 나오며 세우는 길도 같은 자로 잰다** — 앞이 집기라 `iffy` 가 비어, 이 줄만 `Layer::Shell`
         // 을 나오는 `credit` 으로 세워진다. 앞의 줄들은 `fi` 로 끝나 끝자락의 `credit` 으로 가니,
         // 꼬리를 `true` 로 되돌리면 여기가 그것을 잡는다.
         assert_eq!(
-            flags("moai mv t-0 in_progress --from todo && bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi'"),
+            flags(
+                "moai mv t-0 in_progress --from todo && bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi'"
+            ),
             [("t-0".to_string(), true), ("t-1".to_string(), false)]
         );
         // **넘긴 글 안의 집기는 제 표와 `if` 의 표를 둘 다 든다**(`sure && certain`) — 한쪽만 들면
@@ -4859,7 +4970,10 @@ mod tests {
         assert_eq!(flags("if ! bash -c 'a && moai mv t-1 in_progress'; then exit 1; fi"), one("t-1", false));
         assert_eq!(flags("cargo test && if ! bash -c 'moai mv t-1 in_progress'; then exit 1; fi"), one("t-1", false));
         // 남의 트래커를 가리킨 토막은 그 트래커에 적힌다 — 여기서는 `only` 가 뺀다.
-        assert_eq!(picked_ids("moai -C /x mv t-9 in_progress && moai mv t-1 in_progress", &cfg(), &|k| k == 1, &stands), ["t-1"]);
+        assert_eq!(
+            picked_ids("moai -C /x mv t-9 in_progress && moai mv t-1 in_progress", &cfg(), &|k| k == 1, &stands),
+            ["t-1"]
+        );
         // 첫 칸으로 되돌리는 것과 닫는 것은 벌여 놓는 칸이 아니다.
         assert!(mine("moai mv t-1 todo && moai mv t-2 done").is_empty());
         // 셸에 넘긴 글 안의 집기도 센다(moai-k8j1) — 그 글은 명령이다.
@@ -4923,8 +5037,14 @@ mod tests {
         // **남의 트래커의 집기도 제 사슬로 잰다** — `only` 를 셈에 넘기던 판은 그 판에서 제 토막의
         // 집기가 안 세어져, 앞이 지면 정말 도는 `a || moai -C /x mv B …` 의 B 를 통째로 버렸다.
         let his = |k: usize| k == 1;
-        assert_eq!(picked_ids("moai mv t-1 in_progress || moai -C /x mv t-2 in_progress", &cfg(), &his, &stands), ["t-2"]);
-        assert_eq!(picked_ids("moai mv t-1 in_progress && moai -C /x mv t-2 in_progress", &cfg(), &his, &stands), ["t-2"]);
+        assert_eq!(
+            picked_ids("moai mv t-1 in_progress || moai -C /x mv t-2 in_progress", &cfg(), &his, &stands),
+            ["t-2"]
+        );
+        assert_eq!(
+            picked_ids("moai mv t-1 in_progress && moai -C /x mv t-2 in_progress", &cfg(), &his, &stands),
+            ["t-2"]
+        );
     }
 
     /// **모르는 줄 밑에서 제가 집은 자식은 제 것이다**(리뷰 moai-3k2d.1df). 모름은 그 줄과 **그 밑을**
@@ -5033,7 +5153,9 @@ mod tests {
         held.title = "work".into();
         let all = vec![epic("t-e"), held];
         let lines = vec!["보드 한 줄".to_string()];
-        for (lang, head) in [(Lang::En, "Work for this repo lives in moai"), (Lang::Ko, "이 저장소의 할 일은 moai 에 있다")] {
+        for (lang, head) in
+            [(Lang::En, "Work for this repo lives in moai"), (Lang::Ko, "이 저장소의 할 일은 moai 에 있다")]
+        {
             let Decision::Context(said) = super::board(&lines, lang) else {
                 panic!("보드를 안 실었다");
             };
@@ -5096,7 +5218,8 @@ mod tests {
         let root = Path::new("/repo");
         let all_of = Segs { judges: &|_| true, picks: &|_| true };
         // 규칙 넷이 다 할 일이 있는 줄 — tmux·`moai` 규칙·쓰기 셈·리뷰가 저마다 토막을 본다.
-        let cmd = "moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs && moai add '딴 일' && /code-review high";
+        let cmd =
+            "moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs && moai add '딴 일' && /code-review high";
         let line = Line::new(cmd);
         let before = reads();
         let _ = super::guard_shell_in(&all, &cfg(), &here(), root, root, &line, &all_of, &|_| None);
@@ -5168,7 +5291,10 @@ mod tests {
             "sudo --command-timeout 5 moai add '딴 일'",
             "sudo --bell moai add '딴 일'",
         ] {
-            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "감싸는 명령이 규칙 1 을 가렸다 — {cmd}");
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "감싸는 명령이 규칙 1 을 가렸다 — {cmd}"
+            );
         }
         // 빈손의 쓰기도 같다.
         for cmd in ["env sed -i s/a/b/ src/x.rs", "sudo tee src/x.rs", "timeout 5 tee -a src/x.rs"] {
@@ -5237,8 +5363,16 @@ mod tests {
     fn a_string_handed_to_a_shell_is_read_as_commands() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
         let root = Path::new("/repo");
-        for cmd in ["bash -c \"moai add '딴 일'\"", "sh -c \"moai add '딴 일'\"", "eval \"moai add '딴 일'\"", "bash -lc \"moai add '딴 일'\""] {
-            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "셸에 넘긴 글을 안 읽었다 — {cmd}");
+        for cmd in [
+            "bash -c \"moai add '딴 일'\"",
+            "sh -c \"moai add '딴 일'\"",
+            "eval \"moai add '딴 일'\"",
+            "bash -lc \"moai add '딴 일'\"",
+        ] {
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "셸에 넘긴 글을 안 읽었다 — {cmd}"
+            );
         }
         let wrote = guard_writes(&[], &cfg(), &here(), root, root, "bash -c \"echo x > src/store.rs\"");
         assert!(matches!(wrote, Decision::Deny(_)), "셸에 넘긴 쓰기를 안 봤다 — {wrote:?}");
@@ -5248,7 +5382,10 @@ mod tests {
         // **상한은 되돌이가 스택을 넘지 않게 하는 것뿐이다** — 실제 명령줄이 닿을 자리가 아니다.
         // 여덟이던 판은 `$( … )` 아홉 겹 46바이트가 규칙 1 을 껐다(리뷰 moai-p836.rv).
         let nest = |n: usize| format!("{}moai add '딴 일'{}", "$(".repeat(n), ")".repeat(n));
-        assert!(matches!(guard_create(&all, &cfg(), &here(), &nest(9)), Decision::Deny(_)), "아홉 겹 치환이 규칙 1 을 껐다");
+        assert!(
+            matches!(guard_create(&all, &cfg(), &here(), &nest(9)), Decision::Deny(_)),
+            "아홉 겹 치환이 규칙 1 을 껐다"
+        );
         assert_eq!(guard_create(&all, &cfg(), &here(), &nest(Lexer::DEEP + 4)), Decision::Pass, "상한 없이 파고든다");
         // 상한이 실제로 되돌이를 막는다 — 막던 것이 없으면 여기서 스택이 넘쳐 훅이 통째로 죽는다.
         let clock = std::time::Instant::now();
@@ -5261,7 +5398,11 @@ mod tests {
             "moai mv t-1 in_progress --from todo && eval 'sed -i s/a/b/ src/x.rs'",
             "moai mv t-1 in_progress --from todo && bash -c \"echo y > src/x.rs\"",
         ] {
-            assert_eq!(guard_writes(&[], &cfg(), &here(), root, root, cmd), Decision::Pass, "집기 뒤의 글을 막았다 — {cmd}");
+            assert_eq!(
+                guard_writes(&[], &cfg(), &here(), root, root, cmd),
+                Decision::Pass,
+                "집기 뒤의 글을 막았다 — {cmd}"
+            );
         }
         for cmd in [
             "bash -c 'sed -i s/a/b/ src/x.rs'; cd /tmp",
@@ -5273,8 +5414,16 @@ mod tests {
         }
         // **옵션이 아닌 낱말에서 멈춘다** — `bash 스크립트.sh -c '…'` 의 `-c` 는 그 스크립트의
         // 인자지 명령 글이 아니다. 끝까지 훑던 판은 안 도는 글을 규칙에 비췄다(잘못 막음).
-        for cmd in ["bash script.sh -c \"moai add '딴 일'\"", "bash -- -c \"moai add '딴 일'\"", "env eval \"moai add '딴 일'\""] {
-            assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "안 도는 글을 명령으로 읽었다 — {cmd}");
+        for cmd in [
+            "bash script.sh -c \"moai add '딴 일'\"",
+            "bash -- -c \"moai add '딴 일'\"",
+            "env eval \"moai add '딴 일'\"",
+        ] {
+            assert_eq!(
+                guard_create(&all, &cfg(), &here(), cmd),
+                Decision::Pass,
+                "안 도는 글을 명령으로 읽었다 — {cmd}"
+            );
         }
         // `$( … )` 를 사이에 끼워 겹을 되돌리지 못한다 — 되돌리던 판은 아홉 겹 211바이트 한 줄에
         // 27초를 썼고, 훅이 제 시간에 못 끝나면 규칙이 통째로 열린다.
@@ -5284,7 +5433,11 @@ mod tests {
         }
         let clock = std::time::Instant::now();
         let _ = guard_create(&all, &cfg(), &here(), &mixed);
-        assert!(clock.elapsed() < std::time::Duration::from_secs(2), "겹마다 같은 글을 다시 읽는다 — {:?}", clock.elapsed());
+        assert!(
+            clock.elapsed() < std::time::Duration::from_secs(2),
+            "겹마다 같은 글을 다시 읽는다 — {:?}",
+            clock.elapsed()
+        );
     }
 
     /// **셸을 여는 스위치가 넘긴 글도 명령이다**(moai-drli) — `env -S` 와 `sudo -s`.
@@ -5322,7 +5475,10 @@ mod tests {
             // 잇던 판은 제목 안의 `-e <에픽>` 이 진짜 플래그로 읽혀 단위 안에 세운 것이 됐다.
             "sudo -s moai add '제목 -e t-e'",
         ] {
-            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "셸을 여는 스위치가 글을 가렸다 — {cmd}");
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "셸을 여는 스위치가 글을 가렸다 — {cmd}"
+            );
         }
         // 규칙 2 도 같은 길로 샜다 — `sudo -s sed -i …` 는 실제로 그 파일을 고친다.
         for cmd in [
@@ -5362,7 +5518,11 @@ mod tests {
         let got = guard_writes(&[], &cfg(), &here(), root, root, &blind);
         assert!(matches!(got, Decision::Deny(_)), "진짜 셸 안의 쓰기를 안 읽었다 — {blind}\n{got:?}");
         let picked = real("moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs");
-        assert_eq!(guard_writes(&[], &cfg(), &here(), root, root, &picked), Decision::Pass, "진짜 셸 안의 집기를 안 읽었다");
+        assert_eq!(
+            guard_writes(&[], &cfg(), &here(), root, root, &picked),
+            Decision::Pass,
+            "진짜 셸 안의 집기를 안 읽었다"
+        );
         // **`\\_` 는 낱말을 가른다** — 밑줄로 읽던 판은 이 줄을 낱말 하나로 만들어 규칙을 껐다.
         for cmd in [r"env -S'sed\_-i\_s/a/b/\_src/x.rs'", "env -S \"#주석\" sed -i s/a/b/ src/x.rs"] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
@@ -5399,24 +5559,43 @@ mod tests {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
         let root = Path::new("/repo");
         let open = "cat <<EOF\n$(moai add '딴 일')\nEOF";
-        assert!(matches!(guard_create(&all, &cfg(), &here(), open), Decision::Deny(_)), "따옴표 없는 본문의 치환을 안 읽었다");
+        assert!(
+            matches!(guard_create(&all, &cfg(), &here(), open), Decision::Deny(_)),
+            "따옴표 없는 본문의 치환을 안 읽었다"
+        );
         let tick = "cat <<EOF\n`moai add '딴 일'`\nEOF";
         assert!(matches!(guard_create(&all, &cfg(), &here(), tick), Decision::Deny(_)), "백틱을 안 읽었다");
         let wrote = guard_writes(&[], &cfg(), &here(), root, root, "cat <<EOF\n$(echo x > src/store.rs)\nEOF");
         assert!(matches!(wrote, Decision::Deny(_)), "본문 안의 쓰기를 안 봤다 — {wrote:?}");
 
-        for quoted in ["cat <<'EOF'\n$(moai add '딴 일')\nEOF", "cat <<\"EOF\"\n$(moai add '딴 일')\nEOF", "cat <<\\EOF\n$(moai add '딴 일')\nEOF"] {
-            assert_eq!(guard_create(&all, &cfg(), &here(), quoted), Decision::Pass, "따옴표 친 본문을 명령으로 읽었다 — {quoted}");
+        for quoted in [
+            "cat <<'EOF'\n$(moai add '딴 일')\nEOF",
+            "cat <<\"EOF\"\n$(moai add '딴 일')\nEOF",
+            "cat <<\\EOF\n$(moai add '딴 일')\nEOF",
+        ] {
+            assert_eq!(
+                guard_create(&all, &cfg(), &here(), quoted),
+                Decision::Pass,
+                "따옴표 친 본문을 명령으로 읽었다 — {quoted}"
+            );
         }
         // **줄을 넘는 치환도 한 치환이다**(리뷰 moai-p836.rv) — 줄마다 보던 판은 줄 끝에서 잘라,
         // 이어지는 줄의 명령을 아무 규칙에도 안 보였다.
         for cmd in ["cat <<EOF\n$(echo hi\nmoai add '딴 일')\nEOF", "cat <<EOF\n`\nmoai add '딴 일'\n`\nEOF"] {
-            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "줄을 넘는 치환을 잘랐다 — {cmd}");
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "줄을 넘는 치환을 잘랐다 — {cmd}"
+            );
         }
         // **따옴표 안의 괄호는 안 센다** — 셸이 그렇게 읽는다. 괄호만 세던 판은 거기서 끊어 뒤의
         // 명령을 통째로 잃었다.
-        for cmd in ["cat <<EOF\n$(echo ')' ; moai add '딴 일')\nEOF", "cat <<EOF\n$(echo \"a)b\"; moai add '딴 일')\nEOF"] {
-            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "따옴표 안의 괄호에서 끊었다 — {cmd}");
+        for cmd in
+            ["cat <<EOF\n$(echo ')' ; moai add '딴 일')\nEOF", "cat <<EOF\n$(echo \"a)b\"; moai add '딴 일')\nEOF"]
+        {
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "따옴표 안의 괄호에서 끊었다 — {cmd}"
+            );
         }
         // 셈(`$((…))`)은 명령이 아니다.
         assert_eq!(guard_create(&all, &cfg(), &here(), "cat <<EOF\n$((1 + 2))\nEOF"), Decision::Pass);
@@ -5477,7 +5656,9 @@ mod tests {
         let judge = |cmd: &str| {
             let dirs = aimed(cmd, root);
             let own = |k: usize| dirs[k].is_none();
-            guard_shell_in(&mine, &cfg(), &here(), root, root, cmd, &Segs { judges: &own, picks: &own }, &|k| dirs[k].as_deref())
+            guard_shell_in(&mine, &cfg(), &here(), root, root, cmd, &Segs { judges: &own, picks: &own }, &|k| {
+                dirs[k].as_deref()
+            })
         };
         assert_eq!(judge("moai -C /b add \"딴 일\""), Decision::Pass);
         assert_eq!(judge("cd /b && moai add '딴 일'"), Decision::Pass);
@@ -5487,8 +5668,8 @@ mod tests {
         let theirs = vec![issue("t-9", "in_progress")];
         let cmd = "moai -C /b add \"딴 일\"";
         let dirs = aimed(cmd, root);
-        let why =
-            denied(&guard_moai(&theirs, &cfg(), &here(), cmd, &|k| dirs[k].is_some(), &|k| dirs[k].as_deref())).to_string();
+        let why = denied(&guard_moai(&theirs, &cfg(), &here(), cmd, &|k| dirs[k].is_some(), &|k| dirs[k].as_deref()))
+            .to_string();
         assert!(why.contains("t-9"), "{why}");
     }
 
@@ -5504,14 +5685,18 @@ mod tests {
             };
             assert!(said.contains("can t-e deliver what it promised"), "{said}");
             // **이 줄은 생각이 담긴 뒤에 읽힌다** — 새로 세우라고 하면 같은 것이 둘 선다(moai-dw63.e31).
-            assert!(said.contains("moai idea promote <that id> -e t-e --from -"), "담은 것을 되찾는 줄을 안 댄다\n{said}");
+            assert!(
+                said.contains("moai idea promote <that id> -e t-e --from -"),
+                "담은 것을 되찾는 줄을 안 댄다\n{said}"
+            );
             assert!(!said.contains("moai add '<title>'"), "담긴 생각 곁에 같은 것을 또 세우라고 한다\n{said}");
         }
         // 담은 토막이 **겨눈 자리**도 댄다 — 빼고 치면 되찾는 줄이 세션 자리의 트래커에서 헛돈다.
         // 친 글자가 아니라 푼 자리다(moai-v9sa).
         let at = Path::new("/repo/sub");
         let all_of = Segs { judges: &|_| true, picks: &|_| true };
-        let aside = guard_shell_in(&all, &cfg(), &here(), root, root, "moai -C .. idea add \"x\"", &all_of, &|_| Some(at));
+        let aside =
+            guard_shell_in(&all, &cfg(), &here(), root, root, "moai -C .. idea add \"x\"", &all_of, &|_| Some(at));
         let Decision::Context(said) = aside else {
             panic!("안 비춘다 — {aside:?}");
         };
@@ -5536,7 +5721,8 @@ mod tests {
         }
 
         // 에픽 둘을 쥐었으면 **집은 차례로** 댄다 — 규칙 1 의 거절문과 같은 에픽을 앞에 둔다.
-        let two = vec![epic("t-z"), epic("t-a"), under("t-1", "in_progress", "t-z"), under("t-2", "in_progress", "t-a")];
+        let two =
+            vec![epic("t-z"), epic("t-a"), under("t-1", "in_progress", "t-z"), under("t-2", "in_progress", "t-a")];
         let Decision::Context(said) = guard_shell(&two, &cfg(), &here(), root, root, "moai idea add 'x'") else {
             panic!("안 비춘다");
         };
@@ -5602,7 +5788,10 @@ mod tests {
             "{ cd /tmp; } | cat; sed -i s/a/b/ src/store.rs",
             "if true; then cd /tmp; fi & sed -i s/a/b/ src/store.rs",
         ] {
-            assert!(matches!(guard_shell(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "하위 셸의 cd 가 바깥으로 샜다 — {cmd}");
+            assert!(
+                matches!(guard_shell(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)),
+                "하위 셸의 cd 가 바깥으로 샜다 — {cmd}"
+            );
         }
         // **치환 밖의 명령은 치환의 값을 모른다**(리뷰 moai-ju21.70g) — 치환 안의 집기는 바깥의 `&&` 로
         // 안 이어진다. `echo` 는 집기가 져도 이긴다.
@@ -5791,7 +5980,11 @@ mod tests {
         let root = Path::new("/repo");
         for cmd in ["moai -C /repo add \"딴 일\"", "moai add '딴 일' -C .", "moai --dir=../.. add \"딴 일\""] {
             let why = denied(&guard_create_toward(&all, &cfg(), &here(), cmd, root)).to_string();
-            for line in ["moai -C /repo add '<title>' -e t-e", "moai -C /repo add '<title>' --parent t-1", "moai -C /repo idea add"] {
+            for line in [
+                "moai -C /repo add '<title>' -e t-e",
+                "moai -C /repo add '<title>' --parent t-1",
+                "moai -C /repo idea add",
+            ] {
                 assert!(why.contains(line), "{cmd} 가 겨눈 트래커를 안 댔다 — {line}\n{why}");
             }
             assert!(!why.contains("-C ."), "친 글자를 그대로 옮겨 적었다\n{why}");
@@ -5803,7 +5996,8 @@ mod tests {
         }
 
         // 둘을 집었으면 둘 다 댄다 — 에픽이 같으면 에픽 줄은 한 번이다.
-        let two = vec![epic("t-z"), epic("t-a"), under("t-1", "in_progress", "t-z"), under("t-2", "in_progress", "t-a")];
+        let two =
+            vec![epic("t-z"), epic("t-a"), under("t-1", "in_progress", "t-z"), under("t-2", "in_progress", "t-a")];
         let why = denied(&guard_create(&two, &cfg(), &here(), "moai add '딴 일'")).to_string();
         for line in ["-e t-z ", "-e t-a ", "--parent t-1 ", "--parent t-2 "] {
             assert!(why.contains(line), "집은 것 하나를 빠뜨렸다 — {line}\n{why}");
@@ -5843,25 +6037,26 @@ mod tests {
             ("/srv/a$b/repo", "'/srv/a$b/repo'"),
             ("/srv/a`id`b", "'/srv/a`id`b'"),
         ] {
-            let why =
-                denied(&guard_create_toward(&all, &cfg(), &here(), "moai -C /x add '딴 일'", Path::new(at))).to_string();
-            assert!(why.contains(&format!("moai -C {echoed} add '<title>' -e t-e")), "{at} 를 {echoed} 로 안 옮겼다\n{why}");
+            let why = denied(&guard_create_toward(&all, &cfg(), &here(), "moai -C /x add '딴 일'", Path::new(at)))
+                .to_string();
+            assert!(
+                why.contains(&format!("moai -C {echoed} add '<title>' -e t-e")),
+                "{at} 를 {echoed} 로 안 옮겼다\n{why}"
+            );
         }
 
         // **자리를 못 푼 `-C` 는 친 글자를 그대로 옮긴다** — `aimed` 가 `$VAR`·`~`·`$( … )` 를 `None` 으로
         // 내는데, 그것을 "이 자리" 로 읽어 버리던 판은 `moai -C "$OTHER" add …` 로 막힌 사람에게 **이**
         // 트래커에 세우라고 시켰다. 그 글자는 옮겨 친 셸이 처음처럼 푼다.
-        for (typed, echoed) in [
-            ("\"$HOME/My Projects/x\"", "\"$HOME/My Projects/x\""),
-            ("\"$(pwd)\"", "\"$(pwd)\""),
-            ("~/x", "~/x"),
-        ] {
+        for (typed, echoed) in
+            [("\"$HOME/My Projects/x\"", "\"$HOME/My Projects/x\""), ("\"$(pwd)\"", "\"$(pwd)\""), ("~/x", "~/x")]
+        {
             let why = denied(&guard_create(&all, &cfg(), &here(), &format!("moai -C {typed} add '딴 일'"))).to_string();
             assert!(why.contains(&format!("moai -C {echoed} add '<title>' -e t-e")), "-C {typed} 를 버렸다\n{why}");
         }
         // 푼 자리가 있으면 그것이 이긴다 — 친 글자가 상대 경로여도 내미는 줄은 푼 경로다.
-        let why =
-            denied(&guard_create_toward(&all, &cfg(), &here(), "moai -C .. add '딴 일'", Path::new("/repo"))).to_string();
+        let why = denied(&guard_create_toward(&all, &cfg(), &here(), "moai -C .. add '딴 일'", Path::new("/repo")))
+            .to_string();
         assert!(why.contains("moai -C /repo add '<title>' -e t-e") && !why.contains("-C .."), "{why}");
 
         let not_an_epic = vec![issue("t-x", "todo"), under("t-1", "in_progress", "t-x")];
@@ -5878,7 +6073,10 @@ mod tests {
 
         let wrote = denied(&guard_edit(&[], &cfg(), &here(), Path::new("/repo"), "/repo/src/x.rs")).to_string();
         for line in wrote.lines().filter(|l| l.contains("moai ")) {
-            assert!(line.trim_start().starts_with("moai ") && line.matches("moai ").count() == 1, "한 줄에 명령이 둘이다 — {line}\n{wrote}");
+            assert!(
+                line.trim_start().starts_with("moai ") && line.matches("moai ").count() == 1,
+                "한 줄에 명령이 둘이다 — {line}\n{wrote}"
+            );
         }
         assert!(wrote.contains("\n  moai add '<title>'\n  moai mv <id> in_progress"), "{wrote}");
         // 집으라는 줄은 본 칸을 함께 준다 — 짓고 치는 사이에 옆이 그 일을 집거나 닫았으면 멈춘다.
@@ -5912,7 +6110,10 @@ mod tests {
         // 선 에픽에 펼치는 promote 도 같은 자로 본다 — 안 보면 `idea add` 뒤 `promote -e` 가
         // `add -e` 가 막히는 자리를 지나간다 (moai-f3ml.lm7). 새 에픽을 세우는 promote 는 그대로다.
         let into = |e: &str| format!("moai idea promote t-i -e {e} --from -");
-        assert!(matches!(guard_create(&all, &cfg(), &here(), &into("t-x")), Decision::Deny(_)), "남의 에픽에 promote 로 멤버를 세웠다");
+        assert!(
+            matches!(guard_create(&all, &cfg(), &here(), &into("t-x")), Decision::Deny(_)),
+            "남의 에픽에 promote 로 멤버를 세웠다"
+        );
         assert_eq!(guard_create(&all, &cfg(), &here(), &into("t-e")), Decision::Pass);
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai idea promote t-i --epic=t-e --from -"), Decision::Pass);
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai idea promote t-i --from -"), Decision::Pass);
@@ -5947,7 +6148,10 @@ mod tests {
             "moai add '안' -e t-e && moai epic add '딴 에픽'",
             "moai add '안' -e t-e && moai milestone add '딴 마일스톤'",
         ] {
-            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "앞 토막의 소속이 뒤 토막을 풀어 줬다 — {cmd}");
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "앞 토막의 소속이 뒤 토막을 풀어 줬다 — {cmd}"
+            );
         }
         // 토막마다 소속을 댔으면 지나간다 — 규칙이 요구하는 것은 그것뿐이다.
         for cmd in [
@@ -5956,7 +6160,11 @@ mod tests {
             "moai add '안' -e t-e && moai add '딴 일' --from -",
             "moai add '안' -e t-e && moai add '떠오른 것' --type idea",
         ] {
-            assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "저마다 소속을 댄 줄을 막았다 — {cmd}");
+            assert_eq!(
+                guard_create(&all, &cfg(), &here(), cmd),
+                Decision::Pass,
+                "저마다 소속을 댄 줄을 막았다 — {cmd}"
+            );
         }
     }
 
@@ -5989,11 +6197,7 @@ mod tests {
     #[test]
     fn capturing_and_planning_stay_free() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
-        for cmd in [
-            "moai idea add '떠오른 것'",
-            "moai add --from -",
-            "moai add --from plan.md --dry-run",
-        ] {
+        for cmd in ["moai idea add '떠오른 것'", "moai add --from -", "moai add --from plan.md --dry-run"] {
             assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "{cmd}");
         }
     }
@@ -6019,10 +6223,7 @@ mod tests {
     #[test]
     fn a_newline_also_ends_a_segment() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
-        for cmd in [
-            "moai show\nmoai add '딴 일'",
-            "moai status\nmoai add '딴 일'\nmoai ready",
-        ] {
+        for cmd in ["moai show\nmoai add '딴 일'", "moai status\nmoai add '딴 일'\nmoai ready"] {
             assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
         assert!(calls_review("echo hi\n/code-review high"), "리뷰 호출이 샜다");
@@ -6043,10 +6244,7 @@ mod tests {
             assert_eq!(guard_create(&all, &cfg(), &here(), free), Decision::Pass, "막혔다 — {free}");
         }
         // 환경변수를 앞세운 진짜 호출은 여전히 잡힌다.
-        assert!(matches!(
-            guard_create(&all, &cfg(), &here(), "MOAI_NOW=x moai add '딴 일'"),
-            Decision::Deny(_)
-        ));
+        assert!(matches!(guard_create(&all, &cfg(), &here(), "MOAI_NOW=x moai add '딴 일'"), Decision::Deny(_)));
     }
 
     /// heredoc 이 닫힌 **뒤**는 다시 명령이다. 속을 건너뛴다고 뒤까지
@@ -6137,10 +6335,7 @@ mod tests {
             "echo x >| src/store.rs",
             "FOO=1 sed -i s/a/b/ src/store.rs",
         ] {
-            assert!(
-                matches!(guard_writes(&all, &cfg(), &here(), root, root, cmd), Decision::Deny(_)),
-                "샜다 — {cmd}"
-            );
+            assert!(matches!(guard_writes(&all, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
     }
 
@@ -6186,16 +6381,13 @@ mod tests {
     fn a_shell_write_lands_where_the_shell_stands() {
         let root = Path::new("/repo");
         let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
-        let why = denied(&guard_writes(&all, &cfg(), &here(), root, Path::new("/repo/docs"), "echo > a.md"))
-            .to_string();
+        let why =
+            denied(&guard_writes(&all, &cfg(), &here(), root, Path::new("/repo/docs"), "echo > a.md")).to_string();
         assert!(why.contains("docs/a.md"), "{why}");
         // 저장소 밖에 서 있으면 상대 경로도 밖이다.
         assert_eq!(guard_writes(&all, &cfg(), &here(), root, Path::new("/tmp"), "echo > a.md"), Decision::Pass);
         // `.moai` 안에 서서 쓰는 것은 트래커 자신이다.
-        assert_eq!(
-            guard_writes(&all, &cfg(), &here(), root, Path::new("/repo/.moai"), "echo > x"),
-            Decision::Pass
-        );
+        assert_eq!(guard_writes(&all, &cfg(), &here(), root, Path::new("/repo/.moai"), "echo > x"), Decision::Pass);
     }
 
     /// 하나를 집으면 껍데기 쓰기도 그대로 지나간다.
@@ -6212,7 +6404,8 @@ mod tests {
     #[test]
     fn a_redirection_does_not_hide_the_column() {
         let all = vec![issue("t-1", "in_progress"), review("t-r", "in_progress", None)];
-        for cmd in ["moai mv t-r done > /dev/null", "moai mv t-r done 2>/dev/null", "moai mv t-r done >/dev/null 2>&1"] {
+        for cmd in ["moai mv t-r done > /dev/null", "moai mv t-r done 2>/dev/null", "moai mv t-r done >/dev/null 2>&1"]
+        {
             assert!(matches!(guard_close(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
     }
@@ -6323,16 +6516,10 @@ mod tests {
             "ls | grep x && moai add '딴 일'",
             "cd /repo\nmoai add '딴 일'",
         ] {
-            assert!(
-                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
-                "지나갔다 — {cmd}"
-            );
+            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "지나갔다 — {cmd}");
         }
         // 뒷토막이 담아 두는 것이면 그대로 지나간다.
-        assert_eq!(
-            guard_create(&all, &cfg(), &here(), "cd /repo && moai idea add '떠오른 것'"),
-            Decision::Pass
-        );
+        assert_eq!(guard_create(&all, &cfg(), &here(), "cd /repo && moai idea add '떠오른 것'"), Decision::Pass);
 
         assert!(calls_review("cd /repo && /code-review high"));
     }
@@ -6351,7 +6538,10 @@ mod tests {
         assert!(why.contains("idea add"), "담아 두는 길이 없다\n{why}");
         // 에픽 없는 일의 자식은 부모를 안 붙든다 — 첫 칸에 두면 그 일이 안 닫힌다고 비치지 않는다.
         assert!(why.contains("it is not an idea"), "일이 이것 없이 안 끝나는 경우를 안 가른다\n{why}");
-        assert!(!why.contains("leave it in the first column"), "에픽 없는 일에 자식이 그 일을 열어 둔다고 비친다\n{why}");
+        assert!(
+            !why.contains("leave it in the first column"),
+            "에픽 없는 일에 자식이 그 일을 열어 둔다고 비친다\n{why}"
+        );
 
         // 에픽이 있으면 그때는 에픽을 가리킨다.
         let held = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
@@ -6364,10 +6554,7 @@ mod tests {
     #[test]
     fn from_is_a_token_not_a_substring() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
-        assert!(matches!(
-            guard_create(&all, &cfg(), &here(), "moai add '--from 을 나중에 본다'"),
-            Decision::Deny(_)
-        ));
+        assert!(matches!(guard_create(&all, &cfg(), &here(), "moai add '--from 을 나중에 본다'"), Decision::Deny(_)));
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add --from -"), Decision::Pass);
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add --from=plan.md"), Decision::Pass);
     }
@@ -6379,10 +6566,7 @@ mod tests {
         let root = Path::new("/repo");
         let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         // 저장소 안이다 — `.moai` 를 지나왔어도 닿는 곳은 `src/store.rs` 다.
-        assert!(matches!(
-            guard_edit(&all, &cfg(), &here(), root, ".moai/../src/store.rs"),
-            Decision::Deny(_)
-        ));
+        assert!(matches!(guard_edit(&all, &cfg(), &here(), root, ".moai/../src/store.rs"), Decision::Deny(_)));
         // 저장소 밖이다 — 붙여 놓은 글자만 보면 안으로 보인다.
         assert_eq!(guard_edit(&all, &cfg(), &here(), root, "../elsewhere/x.rs"), Decision::Pass);
         assert_eq!(guard_edit(&all, &cfg(), &here(), root, "/repo/../elsewhere/x.rs"), Decision::Pass);
@@ -6442,10 +6626,7 @@ mod tests {
         let why = denied(&guard_review(&all, &cfg(), &here())).to_string();
         let lines: Vec<&str> = why.lines().filter(|l| l.trim_start().starts_with("moai ")).collect();
         assert!(lines.len() >= 3, "일러 주는 줄이 모자라다\n{why}");
-        assert!(
-            lines.iter().all(|l| l.starts_with("  ")),
-            "줄마다 시작이 다르다\n{why}"
-        );
+        assert!(lines.iter().all(|l| l.starts_with("  ")), "줄마다 시작이 다르다\n{why}");
     }
 
     /// **관점 없는 리뷰 줄은 리뷰로 안 친다.** 제목뿐인 줄은 무엇을 왜 보는지를
@@ -6536,11 +6717,7 @@ mod tests {
     /// 여럿을 한 번에 옮길 때도 그중 리뷰가 있으면 본다.
     #[test]
     fn a_review_hidden_in_a_batch_still_counts() {
-        let all = vec![
-            issue("t-1", "in_progress"),
-            issue("t-2", "in_progress"),
-            review("t-r", "in_progress", None),
-        ];
+        let all = vec![issue("t-1", "in_progress"), issue("t-2", "in_progress"), review("t-r", "in_progress", None)];
         assert!(matches!(guard_close(&all, &cfg(), &here(), "moai mv t-1 t-2 t-r done"), Decision::Deny(_)));
     }
 
@@ -6553,16 +6730,9 @@ mod tests {
     #[test]
     fn every_offered_command_actually_passes() {
         let cfg = cfg();
-        let all = vec![
-            epic("t-e"),
-            under("t-1", "in_progress", "t-e"),
-            blank_review("t-r", "in_progress", Some("t-e")),
-        ];
-        let reviewed = vec![
-            epic("t-e"),
-            under("t-1", "in_progress", "t-e"),
-            review("t-r", "in_progress", Some("t-e")),
-        ];
+        let all =
+            vec![epic("t-e"), under("t-1", "in_progress", "t-e"), blank_review("t-r", "in_progress", Some("t-e"))];
+        let reviewed = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), review("t-r", "in_progress", Some("t-e"))];
 
         let refusals = [
             (guard_create(&all, &cfg, &here(), "moai add '딴 일'"), &all),
@@ -6580,10 +6750,8 @@ mod tests {
                     continue;
                 }
                 // 사람이 채울 자리는 실제 값으로 바꿔 친다.
-                let cmd = line
-                    .replace("<id>", "t-r")
-                    .replace("<에픽>", "t-e")
-                    .replace("<리뷰 원문>", "/tmp/review.txt");
+                let cmd =
+                    line.replace("<id>", "t-r").replace("<에픽>", "t-e").replace("<리뷰 원문>", "/tmp/review.txt");
                 assert_eq!(
                     guard_create(issues, &cfg, &here(), &cmd),
                     Decision::Pass,
@@ -6608,10 +6776,7 @@ mod tests {
         let Decision::Deny(why) = guard_review(&all, &cfg(), &here()) else {
             panic!("막지 않았다");
         };
-        let made = why
-            .lines()
-            .find(|l| l.trim_start().starts_with("moai add"))
-            .expect("리뷰를 세울 명령이 없다");
+        let made = why.lines().find(|l| l.trim_start().starts_with("moai add")).expect("리뷰를 세울 명령이 없다");
         assert!(made.contains("-t review"), "{made}");
         assert!(made.contains("-b "), "관점 없이 세우라고 한다 — {made}");
     }
@@ -6621,11 +6786,7 @@ mod tests {
     #[test]
     fn an_empty_message_is_no_message() {
         let all = vec![issue("t-1", "in_progress"), review("t-r", "in_progress", None)];
-        for sneaky in [
-            "moai mv t-r done -m \"\"",
-            "moai mv t-r done --msg=",
-            "moai mv t-r done -m \"   \"",
-        ] {
+        for sneaky in ["moai mv t-r done -m \"\"", "moai mv t-r done --msg=", "moai mv t-r done -m \"   \""] {
             assert!(
                 matches!(guard_close(&all, &cfg(), &here(), sneaky), Decision::Deny(_)),
                 "빈 한 줄로 지나갔다 — {sneaky}"
@@ -6639,20 +6800,12 @@ mod tests {
     #[test]
     fn a_stale_review_can_just_be_closed() {
         let cfg = cfg();
-        let all = vec![
-            epic("t-e"),
-            epic("t-f"),
-            under("t-1", "in_progress", "t-e"),
-            review("t-old", "todo", Some("t-f")),
-        ];
+        let all =
+            vec![epic("t-e"), epic("t-f"), under("t-1", "in_progress", "t-e"), review("t-old", "todo", Some("t-f"))];
         assert_eq!(guard_close(&all, &cfg, &here(), "moai mv t-old done"), Decision::Pass);
 
         // 지금 보는 것에 매인 리뷰는 그대로 붙든다.
-        let mine = vec![
-            epic("t-e"),
-            under("t-1", "in_progress", "t-e"),
-            review("t-r", "in_progress", Some("t-e")),
-        ];
+        let mine = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), review("t-r", "in_progress", Some("t-e"))];
         assert!(matches!(guard_close(&mine, &cfg, &here(), "moai mv t-r done"), Decision::Deny(_)));
     }
 
@@ -6720,7 +6873,12 @@ mod tests {
         assert!(!why.contains("moai mv t-1 todo"), "{why}");
 
         // 남은 멤버가 있으면 미뤄도 에픽이 안 닫힌다 — 보통 줄이다.
-        let more = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), under("t-2", "done", "t-e"), under("t-3", "todo", "t-e")];
+        let more = vec![
+            epic("t-e"),
+            under("t-1", "in_progress", "t-e"),
+            under("t-2", "done", "t-e"),
+            under("t-3", "todo", "t-e"),
+        ];
         // 끝난 멤버가 없으면 미뤄도 에픽은 첫 칸이다.
         let fresh = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
         // 에픽 없는 일은 붙들 에픽이 없다.
@@ -7032,7 +7190,9 @@ mod tests {
     fn a_dup_redirection_to_a_file_is_a_write() {
         let root = Path::new("/repo");
         let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
-        for cmd in ["echo x >& src/store.rs", "echo x >&src/store.rs", "echo x &> src/store.rs", "echo x &>> src/store.rs"] {
+        for cmd in
+            ["echo x >& src/store.rs", "echo x >&src/store.rs", "echo x &> src/store.rs", "echo x &>> src/store.rs"]
+        {
             assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
         for cmd in ["cargo build >&2", "cargo test 2>&1 | tail -5", "exec 3>&-"] {
@@ -7175,7 +7335,8 @@ mod tests {
         ] {
             assert!(matches!(guard_close(&reviewing, &cfg(), &here(), cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
-        for ok in ["moai mv t-r done -m\"반영\"", "moai mv -m \"반영\" t-r done", "moai --json mv t-r done --msg=반영"] {
+        for ok in ["moai mv t-r done -m\"반영\"", "moai mv -m \"반영\" t-r done", "moai --json mv t-r done --msg=반영"]
+        {
             assert_eq!(guard_close(&reviewing, &cfg(), &here(), ok), Decision::Pass, "막혔다 — {ok}");
         }
 
@@ -7192,10 +7353,9 @@ mod tests {
     fn a_write_after_picking_one_up_is_held() {
         let root = Path::new("/repo");
         let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
-        for cmd in [
-            "moai mv t-1 in_progress && echo x > src/store.rs",
-            "moai mv t-1 review && sed -i s/a/b/ src/store.rs",
-        ] {
+        for cmd in
+            ["moai mv t-1 in_progress && echo x > src/store.rs", "moai mv t-1 review && sed -i s/a/b/ src/store.rs"]
+        {
             assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
         for cmd in [
@@ -7396,7 +7556,9 @@ mod tests {
         let judge = |cmd: &str| {
             let dirs = aimed(cmd, root);
             let own = |k: usize| dirs[k].is_none();
-            guard_shell_in(&idle, &cfg(), &here(), root, root, cmd, &Segs { judges: &own, picks: &own }, &|k| dirs[k].as_deref())
+            guard_shell_in(&idle, &cfg(), &here(), root, root, cmd, &Segs { judges: &own, picks: &own }, &|k| {
+                dirs[k].as_deref()
+            })
         };
         for cmd in [
             "moai -C /b mv t-1 in_progress && echo x > src/store.rs",
@@ -7710,10 +7872,13 @@ mod tests {
     fn a_leftover_worktree_of_a_closed_row_leaves_the_focus_alone_but_keeps_its_children() {
         let root = Path::new("/repo");
         let all = vec![epic("t-e"), under("t-1", "done", "t-e"), under("t-2", "in_progress", "t-e")];
-        let focus = |all: &[Issue], names: &Away| {
-            held(all, &cfg(), names).iter().map(|i| i.id.clone()).collect::<Vec<_>>()
-        };
-        assert_eq!(focus(&all, &away(&["t-1", "worktree-t-1"])), focus(&all, &here()), "닫힌 줄의 이름이 초점을 바꿨다");
+        let focus =
+            |all: &[Issue], names: &Away| held(all, &cfg(), names).iter().map(|i| i.id.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            focus(&all, &away(&["t-1", "worktree-t-1"])),
+            focus(&all, &here()),
+            "닫힌 줄의 이름이 초점을 바꿨다"
+        );
         assert_eq!(guard_edit(&all, &cfg(), &away(&["t-1"]), root, "/repo/src/x.rs"), Decision::Pass);
 
         let child = vec![epic("t-e"), under("t-1", "done", "t-e"), under("t-1.x", "in_progress", "t-e")];
@@ -7759,10 +7924,13 @@ mod tests {
     fn a_bsd_sed_suffix_is_not_the_script() {
         let root = Path::new("/repo");
         let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
-        for cmd in ["sed -i '' 's/foo/bar/' /tmp/notes.txt", "sed -i .bak 's/a/b/' /tmp/x", "sed -i '' -E 's/a/b/' /tmp/x"] {
+        for cmd in
+            ["sed -i '' 's/foo/bar/' /tmp/notes.txt", "sed -i .bak 's/a/b/' /tmp/x", "sed -i '' -E 's/a/b/' /tmp/x"]
+        {
             assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
-        let why = denied(&guard_writes(&idle, &cfg(), &here(), root, root, "sed -i '' 's/a/b/' src/store.rs")).to_string();
+        let why =
+            denied(&guard_writes(&idle, &cfg(), &here(), root, root, "sed -i '' 's/a/b/' src/store.rs")).to_string();
         assert!(why.contains("src/store.rs"), "엉뚱한 파일을 댄다\n{why}");
     }
 
@@ -7771,10 +7939,14 @@ mod tests {
     #[test]
     fn a_review_call_does_not_carry_the_rest_past_the_rules() {
         let root = Path::new("/repo");
-        let reviewing = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), review("t-r", "in_progress", Some("t-e"))];
+        let reviewing =
+            vec![epic("t-e"), under("t-1", "in_progress", "t-e"), review("t-r", "in_progress", Some("t-e"))];
         assert_eq!(guard_shell(&reviewing, &cfg(), &here(), root, root, "/code-review high"), Decision::Pass);
         for cmd in ["moai mv t-r done && /code-review high", "moai add '딴 일' && claude /code-review high"] {
-            assert!(matches!(guard_shell(&reviewing, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
+            assert!(
+                matches!(guard_shell(&reviewing, &cfg(), &here(), root, root, cmd), Decision::Deny(_)),
+                "샜다 — {cmd}"
+            );
         }
         let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         let why = denied(&guard_shell(&idle, &cfg(), &here(), root, root, "cd /repo && /code-review high")).to_string();
@@ -7876,12 +8048,19 @@ mod korean_tests {
         let here = |_: usize| None;
         let there = |_: usize| Some(Path::new("/repo/sub"));
         assert_eq!(korean_write("moai note t-1 '한글'", &|_| true, &here).as_deref(), Some(""));
-        assert_eq!(korean_write("moai -C .. note t-1 '한글'", &|_| true, &here).as_deref(), Some(""), "친 글자를 옮겨 적었다");
+        assert_eq!(
+            korean_write("moai -C .. note t-1 '한글'", &|_| true, &here).as_deref(),
+            Some(""),
+            "친 글자를 옮겨 적었다"
+        );
         assert_eq!(korean_write("moai -C /x note t-1 '한글'", &|_| true, &there).as_deref(), Some(" -C /repo/sub"));
         let spaced = |_: usize| Some(Path::new("/a b"));
         assert_eq!(korean_write("moai -C '/a b' note t-1 '한글'", &|_| true, &spaced).as_deref(), Some(" -C '/a b'"));
         // 못 푼 자리(변수·`~`)는 친 글자를 그대로 되돌려 준다 — 그 셸이 다시 풀면 같은 자리다.
-        assert_eq!(korean_write("moai -C \"$OTHER\" note t-1 '한글'", &|_| true, &here).as_deref(), Some(" -C \"$OTHER\""));
+        assert_eq!(
+            korean_write("moai -C \"$OTHER\" note t-1 '한글'", &|_| true, &here).as_deref(),
+            Some(" -C \"$OTHER\"")
+        );
         assert_eq!(korean_write("moai -C /nowhere note t-1 '한글'", &|_| false, &here), None);
         assert_eq!(
             korean_write("moai -C /nowhere note t-1 '한글'; moai note t-2 '둘째'", &|k| k == 1, &here).as_deref(),
@@ -7893,7 +8072,9 @@ mod korean_tests {
     /// 열려도 같다. 다른 토막에는 안 섞인다.
     #[test]
     fn fed_text_stays_with_the_segment_that_opened_it() {
-        let segs = parse("moai note t-1 -b - <<'B' && git commit -m x\n본문\nB\necho y <<< '여기'\nmoai note t-2 \"$(cat <<'E'\n안쪽\nE\n)\"");
+        let segs = parse(
+            "moai note t-1 -b - <<'B' && git commit -m x\n본문\nB\necho y <<< '여기'\nmoai note t-2 \"$(cat <<'E'\n안쪽\nE\n)\"",
+        );
         let fed: Vec<(&str, Vec<&str>)> = segs
             .iter()
             .filter(|s| s.nested.is_empty())

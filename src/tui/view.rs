@@ -160,15 +160,8 @@ impl Field {
     /// 없던 설정 전부에서 "알면서 껐다" 로 서 그날 꺼진다. 한때 이 금지가 `EMPTY_KNOWN` 에만 적혀 있어,
     /// 여덟 줄 사이에 선 두 기록 중 하나만 지키면 되는 것으로 읽혔다.
     /// `the_before_known_list_is_frozen_at_the_seven_columns_of_that_day` 가 이름과 차례를 들고 선다.
-    pub const BEFORE_KNOWN: [Field; 7] = [
-        Field::Id,
-        Field::Priority,
-        Field::Assignee,
-        Field::Created,
-        Field::Updated,
-        Field::Tally,
-        Field::Tags,
-    ];
+    pub const BEFORE_KNOWN: [Field; 7] =
+        [Field::Id, Field::Priority, Field::Assignee, Field::Created, Field::Updated, Field::Tally, Field::Tags];
 
     /// 손으로 적은 `fields_known = []` 의 뜻(moai-4gy5, 사용자 결정 2026-09-18) — **2026-09-20 의 아홉
     /// 열로 얼렸다.** 빈 목록은 "적는 쪽이 모든 열을 알았다" 인데, 그 "모든" 을 [`Field::ALL`] 로 읽으면

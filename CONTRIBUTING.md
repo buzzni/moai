@@ -39,6 +39,7 @@ matters.
 cargo build --release      # target/release/moai
 cargo test                 # 1,500+ tests, a few seconds
 cargo clippy --all-targets -- -D warnings
+cargo fmt --all --check    # or `cargo fmt --all` to fix
 ```
 
 **Do not add `--release` to tests.** `[profile.release]` sets `lto = true`, so
@@ -56,7 +57,20 @@ listed under `[lints.clippy]` in `Cargo.toml`, each with the reason it is there.
 Add the reason when you add a line — an `allow` without one cannot be judged
 later.
 
-`cargo fmt --check` is not in CI yet; see the issue tracker for when it will be.
+`cargo fmt --all --check` runs in CI, before clippy and the tests. The width is
+set in `rustfmt.toml`, which also records why that value and not the default.
+
+The whole repository was formatted in one commit. `git blame` can step over it
+so that it points at the commit that actually wrote each line, but git only
+reads that list from config, and config is not committed — so turn it on once
+per clone, the same as the `.moai` merge driver:
+
+```sh
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
+A clone that skips this is no worse off than before; `blame` just stops at the
+formatting commit.
 
 ## If you change a command's help
 

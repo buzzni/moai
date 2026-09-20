@@ -242,12 +242,7 @@ fn fail(json: bool, e: &cmd::Fail) -> ExitCode {
     } else {
         // `eprintln!` 은 anstream 을 안 거치므로 색을 끄는 판단이 적용되지
         // 않는다 — `NO_COLOR` 로도 `--no-color` 로도 빨강이 그대로 샌다.
-        let _ = writeln!(
-            anstream::stderr().lock(),
-            "{}{}",
-            style::paint(style::ERROR, "moai: "),
-            e.message
-        );
+        let _ = writeln!(anstream::stderr().lock(), "{}{}", style::paint(style::ERROR, "moai: "), e.message);
     }
     ExitCode::FAILURE
 }

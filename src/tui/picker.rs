@@ -88,16 +88,12 @@ pub enum Act {
 
 /// `..` 에서 `a` 를 누른 까닭. 키 이름은 표에서 읽는다 — 등록 키를 옮기면 이 말도 따라온다.
 pub fn up_is_not_a_project(lang: crate::i18n::Lang) -> String {
-    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.up_is_not_a_project"), &[
-        ("key", &label(PICK, Pick::Register)),
-    ])
+    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.up_is_not_a_project"), &[("key", &label(PICK, Pick::Register))])
 }
 
 /// `./` 에서 Enter 를 누른 까닭.
 pub fn here_is_already_open(lang: crate::i18n::Lang) -> String {
-    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.here_is_already_open"), &[
-        ("key", &label(PICK, Pick::Register)),
-    ])
+    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.here_is_already_open"), &[("key", &label(PICK, Pick::Register))])
 }
 
 impl Picker {
@@ -156,7 +152,8 @@ impl Picker {
         };
         let moved = at.dir != self.at.dir;
         self.at = at;
-        let found = want.and_then(|w| self.rows().into_iter().position(|r| self.path_of(r).as_deref() == Some(w.as_path())));
+        let found =
+            want.and_then(|w| self.rows().into_iter().position(|r| self.path_of(r).as_deref() == Some(w.as_path())));
         self.cursor = found.unwrap_or_else(|| self.first_dir());
         if moved {
             self.list.rewind();
@@ -377,7 +374,11 @@ mod tests {
 
         path(&mut p);
         p.typing = Some(Input::path("apps/sub"));
-        assert_eq!(press(&mut p, KeyCode::Enter), Act::Go("/w/apps/sub".into()), "상대경로가 지금 디렉터리에 안 붙었다");
+        assert_eq!(
+            press(&mut p, KeyCode::Enter),
+            Act::Go("/w/apps/sub".into()),
+            "상대경로가 지금 디렉터리에 안 붙었다"
+        );
 
         // **`~` 는 붙이지 않고 그대로 넘긴다** — 껍데기가 풀어 주는 철자라 경로 칸에
         // 가장 먼저 치는 것이 이것이고, 붙여 버리면 `…/~/work` 를 찾다 없다고 한다.

@@ -266,7 +266,11 @@ mod tests {
             press(&mut f, KeyCode::Esc);
             assert_eq!(press(&mut f, KeyCode::Esc), Act::Stay, "Esc 두 번에 버렸다");
             press(&mut f, KeyCode::Esc);
-            assert_eq!(f.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL), KO), Act::Stay, "Ctrl-Y 로 버렸다");
+            assert_eq!(
+                f.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL), KO),
+                Act::Stay,
+                "Ctrl-Y 로 버렸다"
+            );
             press(&mut f, KeyCode::Esc);
             assert_eq!(press(&mut f, KeyCode::Char('y')), Act::Close);
         }

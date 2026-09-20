@@ -8,9 +8,9 @@
 
 use super::{Ctx, R};
 use crate::model;
+use crate::projects::{Entry, Overview, Seen};
 use crate::report;
 use crate::store::Repo;
-use crate::projects::{Entry, Overview, Seen};
 use crate::view;
 
 /// `status --json` 이 보고서에 덧붙이는 키(`run`). 보고서는 필드가 선언된 것뿐이라 걷을 것이
@@ -169,7 +169,10 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         // **겹쳐 봤을 때만 키를 단다.** 늘 달면 `--worktree` 없이 부른 쪽도 빈
         // 지도를 받아 "겹쳐 봤는데 옆에 아무것도 없다" 로 읽는다.
         if worktree {
-            extra.push(("branches", serde_json::to_string(&origin.branches()).map_err(|e| super::Fail::new(e.to_string()))?));
+            extra.push((
+                "branches",
+                serde_json::to_string(&origin.branches()).map_err(|e| super::Fail::new(e.to_string()))?,
+            ));
         }
         if extra.is_empty() {
             return super::json_line(&st);
@@ -217,7 +220,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         if ctx.json {
             // 설정의 탈은 **편 뒤에** 싣는다(moai-dpbi) — 화면과 같은 목록이다(`view::settings_problems`).
             let problems = view::settings_problems(reg, ctx.lang());
-            let none: Overview<()> = Overview { projects: Vec::new(), problems: &problems, config: reg.path.as_deref() };
+            let none: Overview<()> =
+                Overview { projects: Vec::new(), problems: &problems, config: reg.path.as_deref() };
             return super::json_line(&none);
         }
         return Ok(super::nothing_registered(reg, ctx.lang()).message.lines().map(str::to_string).collect());

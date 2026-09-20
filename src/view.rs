@@ -207,7 +207,9 @@ fn trail(head: &str, rows: &[Issue], more: &str) -> Option<String> {
     let named: Vec<String> = rows
         .iter()
         .take(TRAIL_SHOWN)
-        .map(|i| format!("{} {}", paint(style::ID, &one_line(&i.id)), paint(style::DIM, &clip(&one_line(&i.title), 40))))
+        .map(|i| {
+            format!("{} {}", paint(style::ID, &one_line(&i.id)), paint(style::DIM, &clip(&one_line(&i.title), 40)))
+        })
         .collect();
     let more = match rows.len().saturating_sub(TRAIL_SHOWN) {
         0 => String::new(),
@@ -270,12 +272,10 @@ impl Hidden {
             (self.deferred, say(lang, "status.put_off"), "--deferred"),
             (self.ideas, "idea", "--type idea"),
         ]
-            .into_iter()
-            .filter(|(n, _, _)| *n > 0)
-            .map(|(n, what, how)| {
-                fill(say(lang, "list.hidden"), &[("what", what), ("n", &n.to_string()), ("how", how)])
-            })
-            .collect()
+        .into_iter()
+        .filter(|(n, _, _)| *n > 0)
+        .map(|(n, what, how)| fill(say(lang, "list.hidden"), &[("what", what), ("n", &n.to_string()), ("how", how)]))
+        .collect()
     }
 
     /// 숨긴 줄 하나를 그것을 여는 낱말 밑에 센다. 어느 낱말로도 안 열리는
@@ -327,10 +327,8 @@ pub fn list(
     // 미룬 것만 냈을 때 표가 통째로 사라져 계획 밖의 줄이 일과 똑같이 보인다 —
     // 안 물었는데 사라지는 것이 물어서 붙는 군더더기보다 나쁘다.
     let mark_deferred = !asked_deferred;
-    let heads: Vec<(String, usize)> = issues
-        .iter()
-        .map(|i| marked(screen.branch(&i.id), &i.title, TITLE_CAP, title_style(i)))
-        .collect();
+    let heads: Vec<(String, usize)> =
+        issues.iter().map(|i| marked(screen.branch(&i.id), &i.title, TITLE_CAP, title_style(i))).collect();
     let tags: Vec<String> = issues.iter().map(tags_of).collect();
     // 에픽 열은 **제목**을 보여준다. id 를 보여주면 사람이 그걸 다시 찾아봐야 한다.
     let epics: Vec<String> = issues
@@ -413,8 +411,7 @@ fn summary(issues: &[Issue], cfg: &Config, hidden: Hidden, wh: &crate::query::Wh
         })
         .collect();
     // 칸 이름은 설정에서 오는 낱말이라 그대로 센다 — 옮기는 것은 셈을 대는 틀뿐이다.
-    let mut line =
-        fill(say(lang, "list.summary"), &[("n", &issues.len().to_string()), ("cols", &counts.join(" · "))]);
+    let mut line = fill(say(lang, "list.summary"), &[("n", &issues.len().to_string()), ("cols", &counts.join(" · "))]);
     let why = hidden.says(lang);
     if !why.is_empty() {
         line.push_str(&paint(style::DIM, &format!("     {}", why.join(" · "))));
@@ -429,11 +426,7 @@ pub fn bar(percent: Option<u8>) -> String {
         None => paint(style::DIM, &"░".repeat(BAR)),
         Some(p) => {
             let filled = crate::text::bar_fill(Some(p), BAR);
-            format!(
-                "{}{}",
-                paint(style::BAR, &"█".repeat(filled)),
-                paint(style::DIM, &"░".repeat(BAR - filled))
-            )
+            format!("{}{}", paint(style::BAR, &"█".repeat(filled)), paint(style::DIM, &"░".repeat(BAR - filled)))
         }
     }
 }
@@ -693,11 +686,9 @@ pub fn members(
 fn head(roll: &Roll, title: &str, shown: usize, branch: Option<&str>, lang: Lang) -> String {
     match &roll.id {
         // 묶음일 뿐 진척을 가진 것이 아니므로, 걸러진 뒤 **보이는** 수를 말한다.
-        None => format!(
-            "{}  {}",
-            paint(style::HEAD, title),
-            fill(say(lang, "tree.count"), &[("n", &shown.to_string())])
-        ),
+        None => {
+            format!("{}  {}", paint(style::HEAD, title), fill(say(lang, "tree.count"), &[("n", &shown.to_string())]))
+        }
         Some(id) => {
             let pct = match roll.percent {
                 // `status` 의 에픽 표와 **키가 같다** — 같은 사실을 두 말로 말하지 않는다.
@@ -1036,10 +1027,7 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
         return out;
     }
     // 에픽에 대한 말은 칸도 나이도 뜻이 없다. 어느 에픽인지만 말한다.
-    if matches!(
-        w.kind,
-        "empty_epic" | "unknown_field" | "dangling_epic" | "dangling_milestone" | "milestone_focus"
-    ) {
+    if matches!(w.kind, "empty_epic" | "unknown_field" | "dangling_epic" | "dangling_milestone" | "milestone_focus") {
         for id in w.ids.iter().take(SHOW) {
             let title = by_id.get(id.as_str()).map(|i| i.title.as_str()).unwrap_or("");
             out.push(format!(
@@ -1252,10 +1240,8 @@ pub fn ready(
         out.push(paint(style::DIM, say(lang, "ready.none")));
     } else {
         out.push(String::new());
-        let heads: Vec<(String, usize)> = picks
-            .iter()
-            .map(|i| marked(screen.branch(&i.id), &i.title, TITLE_CAP, style::PLAIN))
-            .collect();
+        let heads: Vec<(String, usize)> =
+            picks.iter().map(|i| marked(screen.branch(&i.id), &i.title, TITLE_CAP, style::PLAIN)).collect();
         let tags: Vec<String> = picks.iter().map(|i| tags_of(i)).collect();
         let w_id = picks.iter().map(|i| width(&i.id)).max().unwrap_or(2);
         let w_title = heads.iter().map(|(_, w)| *w).max().unwrap_or(4);
@@ -1372,7 +1358,10 @@ pub fn ready(
                 "  {}  {}  {}  {}",
                 paint(style::ID, &h.issue.id),
                 marked(screen.branch(&h.issue.id), &h.issue.title, TITLE_CAP, style::DIM).0,
-                paint(style::DIM, &format!("← {}", fill(say(lang, "ready.no_members"), &[("groups", &h.empty.join(" · "))]))),
+                paint(
+                    style::DIM,
+                    &format!("← {}", fill(say(lang, "ready.no_members"), &[("groups", &h.empty.join(" · "))]))
+                ),
                 paint(style::DIM, &unblock.join("  ")),
             ));
         }
@@ -1444,9 +1433,7 @@ fn block_line(b: &crate::report::Block, branch: Option<&str>, now: &str, lang: L
     // 훑는 시험(`i18n::tests::keys_in`)의 눈에서 그 키가 통째로 사라진다. 그래서 `막힘` 셋이
     // 같은 키를 세 번 적는다.
     let (label, mark, glyph, what) = match b.blocker {
-        Blocker::Missing => {
-            (say(lang, "block.broken"), style::ERROR, "!", say(lang, "block.missing_says").to_string())
-        }
+        Blocker::Missing => (say(lang, "block.broken"), style::ERROR, "!", say(lang, "block.missing_says").to_string()),
         Blocker::Done => (say(lang, "block.freed"), style::status_style("done"), "✓", title),
         Blocker::Open => (say(lang, "block.held"), style::WARN, "·", title),
         // 미뤄 뺀 멤버만 기다리는 묶음 — 묶음은 미룬 적이 없으니 그 멤버를 댄다. 첫 멤버와 남은 수만.
@@ -1763,8 +1750,7 @@ pub fn body_lines(body: &str) -> Vec<String> {
             if line.is_empty() {
                 return String::new();
             }
-            let painted: String =
-                line.iter().map(|s| paint(role_style(s.role), &s.text)).collect();
+            let painted: String = line.iter().map(|s| paint(role_style(s.role), &s.text)).collect();
             format!("{PAD}{painted}")
         })
         .collect()
@@ -2151,8 +2137,7 @@ pub fn projects_ready(
         troubles(&mut out, k.trouble, lang);
         if k.unreadable > 0 {
             let go = format!("moai -C {} show", shell_arg(&p.path));
-            let said =
-                fill(say(lang, "overview.unreadable"), &[("n", &k.unreadable.to_string()), ("go", &go)]);
+            let said = fill(say(lang, "overview.unreadable"), &[("n", &k.unreadable.to_string()), ("go", &go)]);
             out.push(format!("  {} {said}", paint(style::ERROR, "!")));
         }
     }
@@ -2163,9 +2148,7 @@ pub fn projects_ready(
 /// 한눈 보기의 머리 — 무엇을 몇이나 봤는지와, 목록을 읽은 사용자 설정 파일.
 fn overview_head(what: &str, count: &str, reg: &crate::user_config::Registry) -> String {
     let at = reg.path.as_ref().map(|p| one_line(&p.display().to_string())).unwrap_or_default();
-    format!("{}  {count}       {}", paint(style::HEAD, what), paint(style::DIM, &at))
-        .trim_end()
-        .to_string()
+    format!("{}  {count}       {}", paint(style::HEAD, what), paint(style::DIM, &at)).trim_end().to_string()
 }
 
 fn project_head(p: &crate::projects::Project, tail: &str) -> String {
@@ -2397,7 +2380,10 @@ mod tests {
         let mut group = issue("argos-000e", "에픽", "done");
         group.kind = Kind::Epic;
         let said = unread_column(&group, "in_progress", &cfg(), Lang::En);
-        assert_eq!(said.as_deref(), Some("the column is read from its members (the written column `done` is not read)"));
+        assert_eq!(
+            said.as_deref(),
+            Some("the column is read from its members (the written column `done` is not read)")
+        );
         assert!(unread_column(&group, "in_progress", &cfg(), Lang::Ko).is_some_and(|s| s.contains("적힌 칸 `done`")));
         // 서 있는 칸과 같으면 두 말 다 아무 말도 안 한다.
         for lang in [Lang::En, Lang::Ko] {
@@ -2471,21 +2457,20 @@ mod tests {
     /// 한글 제목과 ASCII 제목이 같은 열에서 만난다.
     #[test]
     fn cjk_titles_line_up() {
-        let issues = vec![
-            issue("argos-0001", "한글 제목이다", "todo"),
-            issue("argos-0002", "ascii title", "review"),
-        ];
-        let out = plain(&list(&issues, &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false, &Default::default(), Screen::new(Lang::Ko)));
-        let cols: Vec<usize> = out[1..3]
-            .iter()
-            .map(|l| width(l.split_once("  ").unwrap().0))
-            .collect();
+        let issues = vec![issue("argos-0001", "한글 제목이다", "todo"), issue("argos-0002", "ascii title", "review")];
+        let out = plain(&list(
+            &issues,
+            &cfg(),
+            Hidden { done: 0, ..Hidden::default() },
+            &no_epics(),
+            false,
+            &Default::default(),
+            Screen::new(Lang::Ko),
+        ));
+        let cols: Vec<usize> = out[1..3].iter().map(|l| width(l.split_once("  ").unwrap().0)).collect();
         assert_eq!(cols[0], cols[1], "{out:#?}");
         // 제목 시작 열이 같다
-        let starts: Vec<usize> = out[1..3]
-            .iter()
-            .map(|l| width(&l[..l.find(['한', 'a']).unwrap()]))
-            .collect();
+        let starts: Vec<usize> = out[1..3].iter().map(|l| width(&l[..l.find(['한', 'a']).unwrap()])).collect();
         assert_eq!(starts[0], starts[1], "{out:#?}");
     }
 
@@ -2493,7 +2478,15 @@ mod tests {
     #[test]
     fn header_lines_up_with_rows() {
         let issues = vec![issue("argos-0001", "제목이다", "todo")];
-        let out = plain(&list(&issues, &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false, &Default::default(), Screen::new(Lang::Ko)));
+        let out = plain(&list(
+            &issues,
+            &cfg(),
+            Hidden { done: 0, ..Hidden::default() },
+            &no_epics(),
+            false,
+            &Default::default(),
+            Screen::new(Lang::Ko),
+        ));
         let head_at = width(&out[0][..out[0].find("제목").unwrap()]);
         let row_at = width(&out[1][..out[1].find("제목이다").unwrap()]);
         assert_eq!(head_at, row_at, "{out:#?}");
@@ -2501,14 +2494,44 @@ mod tests {
 
     #[test]
     fn empty_list_says_why() {
-        assert_eq!(plain(&list(&[], &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false, &Default::default(), Screen::new(Lang::Ko)))[0], "없다.");
-        assert!(plain(&list(&[], &cfg(), Hidden { done: 3, ..Hidden::default() }, &no_epics(), false, &Default::default(), Screen::new(Lang::Ko)))[0].contains("done 3건"));
+        assert_eq!(
+            plain(&list(
+                &[],
+                &cfg(),
+                Hidden { done: 0, ..Hidden::default() },
+                &no_epics(),
+                false,
+                &Default::default(),
+                Screen::new(Lang::Ko)
+            ))[0],
+            "없다."
+        );
+        assert!(
+            plain(&list(
+                &[],
+                &cfg(),
+                Hidden { done: 3, ..Hidden::default() },
+                &no_epics(),
+                false,
+                &Default::default(),
+                Screen::new(Lang::Ko)
+            ))[0]
+                .contains("done 3건")
+        );
     }
 
     #[test]
     fn summary_counts_each_column() {
         let issues = vec![issue("argos-0001", "a", "todo"), issue("argos-0002", "b", "todo")];
-        let out = plain(&list(&issues, &cfg(), Hidden { done: 5, ..Hidden::default() }, &no_epics(), false, &Default::default(), Screen::new(Lang::Ko)));
+        let out = plain(&list(
+            &issues,
+            &cfg(),
+            Hidden { done: 5, ..Hidden::default() },
+            &no_epics(),
+            false,
+            &Default::default(),
+            Screen::new(Lang::Ko),
+        ));
         let last = out.last().unwrap();
         assert!(last.starts_with("2건 (todo 2)"), "{last}");
         assert!(last.contains("done 5건 숨김"), "{last}");
@@ -2517,7 +2540,15 @@ mod tests {
     #[test]
     fn long_titles_are_clipped_not_wrapped() {
         let long = "가".repeat(80);
-        let out = plain(&list(&[issue("argos-0001", &long, "todo")], &cfg(), Hidden { done: 0, ..Hidden::default() }, &no_epics(), false, &Default::default(), Screen::new(Lang::Ko)));
+        let out = plain(&list(
+            &[issue("argos-0001", &long, "todo")],
+            &cfg(),
+            Hidden { done: 0, ..Hidden::default() },
+            &no_epics(),
+            false,
+            &Default::default(),
+            Screen::new(Lang::Ko),
+        ));
         assert!(out[1].ends_with('…'), "{:?}", out[1]);
         assert!(width(&out[1]) < 80, "{:?}", out[1]);
     }
@@ -2528,18 +2559,32 @@ mod tests {
     fn a_line_from_another_branch_carries_its_mark_before_the_title() {
         let mine = vec![issue("argos-0001", "여기 일", "todo")];
         let theirs = vec![issue("argos-0002", "옆 일", "in_progress")];
-        let (all, origin) = crate::worktree::overlay(
-            mine,
-            &[crate::worktree::Side::new("feat/x", "/wt", theirs)],
-        );
-        let tagged: crate::report::EpicLabels = all.iter().map(|i| ((i.id.as_str(), i.kind), "에픽".to_string())).collect();
-        let out = plain(&list(&all, &cfg(), Hidden::default(), &tagged, false, &Default::default(), Screen::new(Lang::Ko).over(&origin)));
+        let (all, origin) = crate::worktree::overlay(mine, &[crate::worktree::Side::new("feat/x", "/wt", theirs)]);
+        let tagged: crate::report::EpicLabels =
+            all.iter().map(|i| ((i.id.as_str(), i.kind), "에픽".to_string())).collect();
+        let out = plain(&list(
+            &all,
+            &cfg(),
+            Hidden::default(),
+            &tagged,
+            false,
+            &Default::default(),
+            Screen::new(Lang::Ko).over(&origin),
+        ));
         assert!(out[1].contains("여기 일") && !out[1].contains('⎇'), "{out:#?}");
         assert!(out[2].contains("⎇ feat/x 옆 일"), "{out:#?}");
         let col = |l: &str| width(&l[..l.find("에픽").unwrap()]);
         assert_eq!(col(&out[1]), col(&out[2]), "머리표가 다음 열을 밀었다\n{out:#?}");
         // 색을 켜면 머리표는 제 색을 입는다.
-        let painted = list(&all, &cfg(), Hidden::default(), &tagged, false, &Default::default(), Screen::new(Lang::Ko).over(&origin));
+        let painted = list(
+            &all,
+            &cfg(),
+            Hidden::default(),
+            &tagged,
+            false,
+            &Default::default(),
+            Screen::new(Lang::Ko).over(&origin),
+        );
         assert!(painted[2].contains(&paint(style::BRANCH, "⎇ feat/x")), "{:?}", painted[2]);
     }
 
@@ -2597,7 +2642,8 @@ mod tests {
         let mut i = issue("argos-0001", "제목", "todo");
         i.body = Some("앞\u{1b}[2J\u{7}뒤".into());
         for raw in [true, false] {
-            let out = plain(&detail(&i, None, &[], &bare_seen(Lang::Ko), &cfg(), "2026-09-11T04:12:03Z",raw)).join("\n");
+            let out =
+                plain(&detail(&i, None, &[], &bare_seen(Lang::Ko), &cfg(), "2026-09-11T04:12:03Z", raw)).join("\n");
             assert!(!out.contains('\u{1b}'), "ESC 가 화면에 닿았다 (raw={raw})\n{out:?}");
             assert!(!out.contains('\u{7}'), "벨이 화면에 닿았다 (raw={raw})\n{out:?}");
         }
@@ -2654,12 +2700,17 @@ mod tests {
         for lang in Lang::ALL {
             let mut seen = bare_seen(lang);
             seen.blocks = vec![
-                Block { id: "argos-0009", issue: Some(&blocker), blocker: Blocker::Open, root: None, aside: Vec::new() },
+                Block {
+                    id: "argos-0009",
+                    issue: Some(&blocker),
+                    blocker: Blocker::Open,
+                    root: None,
+                    aside: Vec::new(),
+                },
                 Block { id: "argos-0008", issue: Some(&epic), blocker: Blocker::Done, root: None, aside: Vec::new() },
                 Block { id: "argos-0007", issue: None, blocker: Blocker::Missing, root: None, aside: Vec::new() },
             ];
-            let mut lines =
-                detail(&i, Some(&epic), &[&child], &seen, &cfg(), "2026-09-11T04:12:03Z", false);
+            let mut lines = detail(&i, Some(&epic), &[&child], &seen, &cfg(), "2026-09-11T04:12:03Z", false);
             // 멤버 줄은 `cmd::show` 가 굴림을 들고 세운다 — 같은 자를 쓰는지 여기서 함께 본다.
             lines.push(format!("  {}   1/2", members_label(lang)));
             // 이름 칸을 가진 줄만 — 머리 두 줄(제목·칸)은 이름 칸이 없다.
@@ -2670,11 +2721,7 @@ mod tests {
                 .collect();
             assert!(cols.len() >= 6, "{}: 잴 줄이 모자라다 — {cols:#?}", lang.code());
             let first = cols[0].0;
-            assert!(
-                cols.iter().all(|(c, _)| *c == first),
-                "{}: 왼쪽 이름 칸이 줄마다 갈렸다 — {cols:#?}",
-                lang.code()
-            );
+            assert!(cols.iter().all(|(c, _)| *c == first), "{}: 왼쪽 이름 칸이 줄마다 갈렸다 — {cols:#?}", lang.code());
         }
     }
 
@@ -2685,12 +2732,21 @@ mod tests {
         let mut i = issue("argos-0002", "멤버", "todo");
         i.epic = Some("argos-0001".into());
         let labels = BTreeMap::from([(("argos-0002", Kind::Issue), "저장 계층".to_string())]);
-        let out = plain(&list(&[i.clone()], &cfg(), Hidden::default(), &labels, false, &Default::default(), Screen::new(Lang::Ko)));
+        let out = plain(&list(
+            &[i.clone()],
+            &cfg(),
+            Hidden::default(),
+            &labels,
+            false,
+            &Default::default(),
+            Screen::new(Lang::Ko),
+        ));
         assert!(out[1].contains("저장 계층") && !out[1].contains("argos-0001"), "{out:#?}");
 
         // 없는 에픽을 가리켜도 죽지 않고 그렇다고 말한다
         let dangling = BTreeMap::from([(("argos-0002", Kind::Issue), "(없는 에픽)".to_string())]);
-        let out = plain(&list(&[i], &cfg(), Hidden::default(), &dangling, false, &Default::default(), Screen::new(Lang::Ko)));
+        let out =
+            plain(&list(&[i], &cfg(), Hidden::default(), &dangling, false, &Default::default(), Screen::new(Lang::Ko)));
         assert!(out[1].contains("(없는 에픽)"), "{out:#?}");
     }
 
@@ -2736,12 +2792,28 @@ mod tests {
         b.deferred_at = Some("2026-09-01T00:00:00Z".into());
         let all = vec![a, b];
 
-        let wide = plain(&list(&all, &cfg(), Hidden::default(), &no_epics(), false, &Default::default(), Screen::new(Lang::Ko)));
+        let wide = plain(&list(
+            &all,
+            &cfg(),
+            Hidden::default(),
+            &no_epics(),
+            false,
+            &Default::default(),
+            Screen::new(Lang::Ko),
+        ));
         assert!(wide[1].contains("미룸"), "미룬 줄이 일과 똑같이 보인다 — {wide:#?}");
         assert!(wide[2].contains("미룸"), "{wide:#?}");
 
         // 콕 집어 물었을 때는 줄마다 같은 낱말을 달지 않는다.
-        let asked = plain(&list(&all, &cfg(), Hidden::default(), &no_epics(), true, &Default::default(), Screen::new(Lang::Ko)));
+        let asked = plain(&list(
+            &all,
+            &cfg(),
+            Hidden::default(),
+            &no_epics(),
+            true,
+            &Default::default(),
+            Screen::new(Lang::Ko),
+        ));
         assert!(!asked[1].contains("미룸"), "물어서 낸 목록에 군더더기가 붙었다 — {asked:#?}");
     }
 
@@ -2829,7 +2901,8 @@ mod tests {
         let index = crate::nav::Index::of(&all);
         let out = plain(&tree(&all, &index, &|_| true, &rolls, Screen::new(Lang::Ko)).0);
         let joined = out.join("\n");
-        let at = |needle: &str| out.iter().position(|l| l.contains(needle)).unwrap_or_else(|| panic!("{needle}\n{joined}"));
+        let at =
+            |needle: &str| out.iter().position(|l| l.contains(needle)).unwrap_or_else(|| panic!("{needle}\n{joined}"));
 
         let (bucket, head, stray, member) = (at("(길 잃음)"), at("argos-e001"), at("끊긴 이슈"), at("멤버"));
         assert!(bucket < stray && stray < head, "끊긴 이슈가 잃은 에픽 머리글 밑에 섰다\n{joined}");
@@ -2956,15 +3029,18 @@ mod tests {
         let cfg = cfg();
         let now = "2026-09-11T04:12:03Z";
         let st = crate::report::status(&issues, &[], &cfg, now);
-        let draw = |lang| {
-            plain(&status(&st, &issues, &cfg, now, ".moai/issues.jsonl", 0, Screen::new(lang))).join("\n")
-        };
+        let draw =
+            |lang| plain(&status(&st, &issues, &cfg, now, ".moai/issues.jsonl", 0, Screen::new(lang))).join("\n");
         let (ko, en) = (draw(Lang::Ko), draw(Lang::En));
         assert_ne!(ko, en, "두 말이 같은 화면을 냈다 — 말이 화면에 안 닿는다");
         for (lang, screen) in [(Lang::Ko, &ko), (Lang::En, &en)] {
             // 흐름 줄과 닫는 줄 — 이 화면의 머리가 아니라 **꼬리**다.
             assert!(screen.contains(say(lang, "status.next")), "{}: 닫는 줄이 제 말이 아니다\n{screen}", lang.code());
-            assert!(screen.contains(&fill(say(lang, "status.piling"), &[("n", "+1")])), "{}: 흐름 줄\n{screen}", lang.code());
+            assert!(
+                screen.contains(&fill(say(lang, "status.piling"), &[("n", "+1")])),
+                "{}: 흐름 줄\n{screen}",
+                lang.code()
+            );
             // 경고 글. 에픽 없는 이슈 하나뿐이라 `no_epic` 이 선다.
             let warned = fill(say(lang, "warn.no_epic"), &[("n", "1"), ("percent", "100")]);
             assert!(screen.contains(&warned), "{}: 경고가 제 말이 아니다\n{screen}", lang.code());
@@ -3025,10 +3101,7 @@ mod tests {
             .unwrap_or_else(|| panic!("겹쳐 온 줄이 화면에 없다\n{over:#?}"));
         assert!(row.contains(&mark), "겹쳐 온 줄에 가지 표가 없다\n{over:#?}");
         let off = draw(&shown, Screen::new(lang));
-        assert!(
-            !off.iter().any(|l| l.contains(style::BRANCH_GLYPH)),
-            "안 겹친 화면에 가지 표가 섰다\n{off:#?}"
-        );
+        assert!(!off.iter().any(|l| l.contains(style::BRANCH_GLYPH)), "안 겹친 화면에 가지 표가 섰다\n{off:#?}");
     }
 
     /// 없는 에픽을 가리켜도 상세가 죽지 않는다 — 드러내되 막지 않는다.
@@ -3036,7 +3109,7 @@ mod tests {
     fn a_dangling_epic_is_shown_not_fatal() {
         let mut i = issue("argos-0001", "제목", "todo");
         i.epic = Some("argos-0000".into());
-        let out = plain(&detail(&i, None, &[], &bare_seen(Lang::Ko), &cfg(), "2026-09-11T04:12:03Z",false));
+        let out = plain(&detail(&i, None, &[], &bare_seen(Lang::Ko), &cfg(), "2026-09-11T04:12:03Z", false));
         assert!(out.iter().any(|l| l.contains("(없는 에픽)")), "{out:#?}");
     }
 }

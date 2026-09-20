@@ -43,7 +43,10 @@ pub struct Project {
 }
 
 pub enum State {
-    Open { repo: Repo, load: Load },
+    Open {
+        repo: Repo,
+        load: Load,
+    },
     /// 디렉터리는 있는데 `.moai/` 가 없다 — 나중에 `moai init` 하면 보인다.
     Uninit,
     /// 디렉터리가 없다.
@@ -178,7 +181,9 @@ pub enum Seen<'a, T> {
     #[serde(rename = "uninitialized")]
     Uninit,
     Missing,
-    Unreadable { error: &'a str },
+    Unreadable {
+        error: &'a str,
+    },
 }
 
 impl<'a, T> Seen<'a, T> {

@@ -44,9 +44,7 @@ fn split_parts(raw: &str, n: usize) -> Result<(String, Option<u8>, Vec<String>),
     let mut priority = None;
 
     if let Some(after) = rest.strip_prefix('[') {
-        let (tag, tail) = after
-            .split_once(']')
-            .ok_or_else(|| format!("{n}줄: `[` 를 닫지 않았다 — {raw:?}"))?;
+        let (tag, tail) = after.split_once(']').ok_or_else(|| format!("{n}줄: `[` 를 닫지 않았다 — {raw:?}"))?;
         let p = tag
             .trim()
             .strip_prefix('p')
@@ -261,23 +259,17 @@ pub fn parse_as(src: &str, shape: Shape) -> Result<Vec<Draft>, String> {
             None => match l.strip_prefix("# ") {
                 Some(b) => (Kind::Epic, b),
                 None => {
-                    errors.push(format!(
-                        "{n}줄: `# 에픽` 도 `- 이슈` 도 아니다 — {l:?}"
-                    ));
+                    errors.push(format!("{n}줄: `# 에픽` 도 `- 이슈` 도 아니다 — {l:?}"));
                     continue;
                 }
             },
         };
         if kind == Kind::Epic && shape == Shape::Members {
-            errors.push(format!(
-                "{n}줄: 선 에픽에 펼칠 때는 `# 에픽` 을 적지 않는다 — `- 이슈` 만 적는다 — {l:?}"
-            ));
+            errors.push(format!("{n}줄: 선 에픽에 펼칠 때는 `# 에픽` 을 적지 않는다 — `- 이슈` 만 적는다 — {l:?}"));
             continue;
         }
         if kind == Kind::Issue && epic.is_none() && shape == Shape::Plan {
-            errors.push(format!(
-                "{n}줄: 어느 에픽의 이슈인지 알 수 없다. 위에 `# 에픽 제목` 을 둔다 — {l:?}"
-            ));
+            errors.push(format!("{n}줄: 어느 에픽의 이슈인지 알 수 없다. 위에 `# 에픽 제목` 을 둔다 — {l:?}"));
             continue;
         }
         match split_parts(body, n) {
@@ -286,13 +278,7 @@ pub fn parse_as(src: &str, shape: Shape) -> Result<Vec<Draft>, String> {
                 if kind == Kind::Epic {
                     epic = Some(out.len());
                 }
-                out.push(Draft {
-                    kind,
-                    title,
-                    priority,
-                    tags,
-                    epic: (kind == Kind::Issue).then_some(epic).flatten(),
-                });
+                out.push(Draft { kind, title, priority, tags, epic: (kind == Kind::Issue).then_some(epic).flatten() });
             }
         }
     }
@@ -326,9 +312,7 @@ pub fn parse_as(src: &str, shape: Shape) -> Result<Vec<Draft>, String> {
 ///   파일의 줄바꿈이 든 제목은 다음 줄을 딴 이슈로 만들고, 제어문자는 이 글을
 ///   그대로 찍는 터미널을 다시 칠한다
 pub fn render(epic: &Issue, members: &[&Issue]) -> String {
-    std::iter::once(format!("# {}\n", body(epic)))
-        .chain(members.iter().map(|m| format!("- {}\n", body(m))))
-        .collect()
+    std::iter::once(format!("# {}\n", body(epic))).chain(members.iter().map(|m| format!("- {}\n", body(m)))).collect()
 }
 
 /// 글머리(`#`·`-`)를 뗀 한 줄 — [`split_parts`] 가 읽는 바로 그 자리.
@@ -345,9 +329,8 @@ fn body(i: &Issue) -> String {
     // 안 쓰면 제목의 `{{version}}` 같은 글자가 채우지 않은 변수로 거절되고, `{{` 앞 역슬래시가 쌍으로
     // 먹혀 `C:\{{dir}}` 가 제자리로 안 돌아온다.
     let title = escape_braces(&crate::text::one_line(&i.title));
-    let title = map_trailing_words(&title, |w| {
-        w.strip_prefix('#').filter(|t| !t.is_empty()).map(|t| format!("\\#{t}"))
-    });
+    let title =
+        map_trailing_words(&title, |w| w.strip_prefix('#').filter(|t| !t.is_empty()).map(|t| format!("\\#{t}")));
     if title.starts_with('[') {
         s.push('\\');
     }
@@ -411,7 +394,8 @@ mod tests {
     }
 
     fn issue(title: &str, kind: Kind, priority: Option<u8>, tags: &[&str]) -> Issue {
-        let mut i = Issue::new("x-1".into(), title.into(), kind, crate::model::Status::new("todo"), "2026-09-14T00:00:00Z");
+        let mut i =
+            Issue::new("x-1".into(), title.into(), kind, crate::model::Status::new("todo"), "2026-09-14T00:00:00Z");
         i.priority = priority;
         i.tags = tags.iter().map(|t| t.to_string()).collect();
         i
@@ -425,11 +409,35 @@ mod tests {
         let a = issue("--json 이 #1 에서 깨진다", Kind::Issue, Some(0), &["bug", "parser"]);
         let b = issue("태그도 우선순위도 없다", Kind::Issue, None, &[]);
         let md = render(&epic, &[&a, &b]);
-        assert_eq!(md, "# [p1] 릴리스 #release\n- [p0] --json 이 #1 에서 깨진다 #bug #parser\n- 태그도 우선순위도 없다\n");
+        assert_eq!(
+            md,
+            "# [p1] 릴리스 #release\n- [p0] --json 이 #1 에서 깨진다 #bug #parser\n- 태그도 우선순위도 없다\n"
+        );
         let got = one(&md);
-        assert_eq!(got[0], Draft { kind: Kind::Epic, title: "릴리스".into(), priority: Some(1), tags: vec!["release".into()], epic: None });
-        assert_eq!(got[1], Draft { kind: Kind::Issue, title: a.title.clone(), priority: Some(0), tags: vec!["bug".into(), "parser".into()], epic: Some(0) });
-        assert_eq!(got[2], Draft { kind: Kind::Issue, title: b.title.clone(), priority: None, tags: vec![], epic: Some(0) });
+        assert_eq!(
+            got[0],
+            Draft {
+                kind: Kind::Epic,
+                title: "릴리스".into(),
+                priority: Some(1),
+                tags: vec!["release".into()],
+                epic: None
+            }
+        );
+        assert_eq!(
+            got[1],
+            Draft {
+                kind: Kind::Issue,
+                title: a.title.clone(),
+                priority: Some(0),
+                tags: vec!["bug".into(), "parser".into()],
+                epic: Some(0)
+            }
+        );
+        assert_eq!(
+            got[2],
+            Draft { kind: Kind::Issue, title: b.title.clone(), priority: None, tags: vec![], epic: Some(0) }
+        );
     }
 
     /// 손으로 고친 파일의 제목에 줄바꿈이나 ESC 가 들어도 한 줄에 하나로 선다.
@@ -463,14 +471,21 @@ mod tests {
         );
         let got = one(&md);
         for (d, i) in got.iter().zip(std::iter::once(&epic).chain(all)) {
-            assert_eq!((d.title.as_str(), d.priority, d.tags.as_slice()), (i.title.as_str(), i.priority, i.tags.as_slice()), "{md}");
+            assert_eq!(
+                (d.title.as_str(), d.priority, d.tags.as_slice()),
+                (i.title.as_str(), i.priority, i.tags.as_slice()),
+                "{md}"
+            );
         }
         assert!(lossy(&epic, &all).is_empty(), "되돌아 읽히는데 lossy 가 짚었다");
 
         // 태그 고리는 `' '` 가 아닌 공백(전각·NBSP)에서도 낱말을 가른다 — 이스케이프도 같은 자리를 본다.
         let wide = issue("메모\u{3000}#12", Kind::Issue, None, &["x"]);
         let nbsp = issue("[a]\u{a0}#1 #2", Kind::Issue, Some(1), &[]);
-        assert_eq!(render(&epic, &[&wide, &nbsp]).lines().skip(1).collect::<Vec<_>>(), ["- 메모\u{3000}\\#12 #x", "- [p1] \\[a]\u{a0}\\#1 \\#2"]);
+        assert_eq!(
+            render(&epic, &[&wide, &nbsp]).lines().skip(1).collect::<Vec<_>>(),
+            ["- 메모\u{3000}\\#12 #x", "- [p1] \\[a]\u{a0}\\#1 \\#2"]
+        );
         assert!(lossy(&epic, &[&wide, &nbsp]).is_empty(), "전각 공백 뒤의 #낱말 을 태그로 먹었다");
     }
 
@@ -480,9 +495,16 @@ mod tests {
     fn escapes_are_read_by_hand_and_typos_are_still_refused() {
         // 가운데 `#` 은 원래 태그로 안 읽혀 이스케이프가 필요 없다 — 끝쪽의 `\#` 만 푼다.
         let got = one("# 가\n- \\[x] 체크박스처럼 #todo\n- 우선 #1 과 \\#2\n- [p1] \\[p2] 는 제목\n");
-        assert_eq!((got[1].title.as_str(), got[1].priority, got[1].tags.as_slice()), ("[x] 체크박스처럼", None, &["todo".to_string()][..]));
+        assert_eq!(
+            (got[1].title.as_str(), got[1].priority, got[1].tags.as_slice()),
+            ("[x] 체크박스처럼", None, &["todo".to_string()][..])
+        );
         assert_eq!((got[2].title.as_str(), got[2].tags.len()), ("우선 #1 과 #2", 0));
-        assert_eq!((got[3].title.as_str(), got[3].priority), ("[p2] 는 제목", Some(1)), "우선순위 뒤의 이스케이프를 못 풀었다");
+        assert_eq!(
+            (got[3].title.as_str(), got[3].priority),
+            ("[p2] 는 제목", Some(1)),
+            "우선순위 뒤의 이스케이프를 못 풀었다"
+        );
         let e = parse("# 가\n- [P1] 대문자\n- [x] 체크박스\n").unwrap_err();
         assert!(e.contains("2줄") && e.contains("3줄"), "오타를 제목으로 받았다 — {e}");
     }
@@ -576,7 +598,11 @@ mod tests {
         assert!(md.starts_with("# \\{{version}} 문법\n"), "{md}");
         let got = fill(&md, &[]).expect("되뽑은 계획이 변수로 거절됐다");
         for (d, i) in got.iter().zip([&epic, &a, &b]) {
-            assert_eq!((d.title.as_str(), d.priority, d.tags.as_slice()), (i.title.as_str(), i.priority, i.tags.as_slice()), "{md}");
+            assert_eq!(
+                (d.title.as_str(), d.priority, d.tags.as_slice()),
+                (i.title.as_str(), i.priority, i.tags.as_slice()),
+                "{md}"
+            );
         }
         assert!(lossy(&epic, &[&a, &b]).is_empty(), "되돌아 읽히는데 lossy 가 짚었다");
     }
@@ -608,7 +634,11 @@ mod tests {
         assert!(md.starts_with("# C:\\\\\\{{dir}} 에 둔다\n"), "{md}");
         let got = fill(&md, &[]).expect("되뽑은 계획이 변수로 거절됐다");
         for (d, i) in got.iter().zip([&epic, &a, &b]) {
-            assert_eq!((d.title.as_str(), d.priority, d.tags.as_slice()), (i.title.as_str(), i.priority, i.tags.as_slice()), "{md}");
+            assert_eq!(
+                (d.title.as_str(), d.priority, d.tags.as_slice()),
+                (i.title.as_str(), i.priority, i.tags.as_slice()),
+                "{md}"
+            );
         }
         assert!(lossy(&epic, &[&a, &b]).is_empty(), "되돌아 읽히는데 lossy 가 짚었다");
     }
@@ -699,8 +729,20 @@ mod tests {
     fn reads_an_epic_and_its_issues() {
         let got = one("# 저장 계층\n- [p1] 원자적으로 쓴다 #enhancement\n- 잘린 줄을 복구한다 #bug\n");
         assert_eq!(got.len(), 3);
-        assert_eq!(got[0], Draft { kind: Kind::Epic, title: "저장 계층".into(), priority: None, tags: vec![], epic: None });
-        assert_eq!(got[1], Draft { kind: Kind::Issue, title: "원자적으로 쓴다".into(), priority: Some(1), tags: vec!["enhancement".into()], epic: Some(0) });
+        assert_eq!(
+            got[0],
+            Draft { kind: Kind::Epic, title: "저장 계층".into(), priority: None, tags: vec![], epic: None }
+        );
+        assert_eq!(
+            got[1],
+            Draft {
+                kind: Kind::Issue,
+                title: "원자적으로 쓴다".into(),
+                priority: Some(1),
+                tags: vec!["enhancement".into()],
+                epic: Some(0)
+            }
+        );
         assert_eq!(got[2].epic, Some(0));
     }
 

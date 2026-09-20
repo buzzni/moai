@@ -54,7 +54,10 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     if !initialized {
         out.push(paint(
             style::DIM,
-            &format!("  init 전 — .moai 가 아직 없다. `moai -C {} init` 으로 시작하면 보인다", shell_word(&dir.display().to_string())),
+            &format!(
+                "  init 전 — .moai 가 아직 없다. `moai -C {} init` 으로 시작하면 보인다",
+                shell_word(&dir.display().to_string())
+            ),
         ));
     }
     Ok(out)
@@ -84,8 +87,7 @@ pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
             one_line(&spelled.display().to_string())
         )]);
     }
-    let mut out: Vec<String> =
-        removed.iter().map(|p| format!("뺌  {}", one_line(&p.display().to_string()))).collect();
+    let mut out: Vec<String> = removed.iter().map(|p| format!("뺌  {}", one_line(&p.display().to_string()))).collect();
     out.push(paint(style::DIM, "  목록에서만 뺐다 — 디렉터리와 그 .moai 는 그대로다"));
     Ok(out)
 }
@@ -239,10 +241,8 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     let reg = ctx.registry();
     let projects = projects::open(reg);
     let now = model::now();
-    let rows: Vec<Row> = projects
-        .iter()
-        .map(|p| Row { name: &p.name, path: &p.path, hue: p.hue, state: state(p, &now) })
-        .collect();
+    let rows: Vec<Row> =
+        projects.iter().map(|p| Row { name: &p.name, path: &p.path, hue: p.hue, state: state(p, &now) }).collect();
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -336,10 +336,7 @@ fn said(state: &State) -> String {
 /// 다른 말(고칠 길을 대는 말과 안 대는 말)을 하지 않게(moai-j038.vna).
 pub(super) fn writable_config() -> R<PathBuf> {
     user_config::path().ok_or_else(|| {
-        Fail::coded(
-            "사용자 설정의 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 중 하나를 준다",
-            code::ERROR,
-        )
+        Fail::coded("사용자 설정의 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 중 하나를 준다", code::ERROR)
     })
 }
 

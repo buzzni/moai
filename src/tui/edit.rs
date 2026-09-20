@@ -430,7 +430,10 @@ mod tests {
         // **Alt-Backspace 는 한 줄 칸과 같이 커서 줄의 낱말 하나를 지운다**(moai-979m) — 본문도 줄의 키를
         // `Input::key` 에 맡기므로 Ctrl-W·Ctrl-U 처럼 칸의 것이다.
         let mut words = typed("ab\ncd ef");
-        assert!(words.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT)), "본문 칸이 Alt-Backspace 를 안 먹었다");
+        assert!(
+            words.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT)),
+            "본문 칸이 Alt-Backspace 를 안 먹었다"
+        );
         assert_eq!(shown(&words), "ab\ncd |");
         assert!(e.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)));
         assert_eq!(shown(&e), "ab\n|", "Ctrl-U 가 커서 줄 밖을 지웠다");
@@ -478,7 +481,11 @@ mod tests {
         assert_eq!(e.view(5, 2), View { lines: vec!["가나", "ghij"], cursor: Some((4, 1)) });
         press(&mut e, KeyCode::Up);
         e.fit(2);
-        assert_eq!(e.view(5, 2), View { lines: vec!["라마", "abcde"], cursor: Some((4, 0)) }, "↑ 는 10 칸을 겨눠 끝에 선다");
+        assert_eq!(
+            e.view(5, 2),
+            View { lines: vec!["라마", "abcde"], cursor: Some((4, 0)) },
+            "↑ 는 10 칸을 겨눠 끝에 선다"
+        );
         assert_eq!(e.view(0, 2).cursor, None);
         assert_eq!(e.view(5, 0), View { lines: vec![], cursor: None });
     }
@@ -489,7 +496,8 @@ mod tests {
     fn every_view_fits_and_points_at_the_cursor() {
         let text = "가나다\n\nabc😀def\ne\u{301}👨\u{200d}👩\n  빈 칸 \nx";
         let mut e = Editor::new(text);
-        let moves = [KeyCode::Up, KeyCode::Left, KeyCode::Up, KeyCode::End, KeyCode::Down, KeyCode::Home, KeyCode::Right];
+        let moves =
+            [KeyCode::Up, KeyCode::Left, KeyCode::Up, KeyCode::End, KeyCode::Down, KeyCode::Home, KeyCode::Right];
         for (step, code) in moves.iter().cycle().take(60).enumerate() {
             press(&mut e, *code);
             for height in 0..5 {
