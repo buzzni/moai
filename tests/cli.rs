@@ -7503,7 +7503,7 @@ fn hook_in(s: &Scratch, run_in: &Path, event: &str, input: &str) -> Output {
 
 /// 한국어 글 알림(moai-6rrb)의 첫 낱말. 훅의 글과 같아야 한다 — 어긋나면 알림을 못 걷어 위의 시험들이
 /// 한꺼번에 붉어지니 저절로 드러난다.
-const KOREAN_NOTICE: &str = "방금 moai 에 넣은 한국어 글을 다듬었는가";
+const KOREAN_NOTICE: &str = "Did you polish the Korean text you just put into moai";
 
 /// **한국어 글 알림을 걷은 출력.** 훅 시험들은 한국어 제목을 표본으로 쓰면서 "막지 않았다·다른 비춤이
 /// 없다" 를 빈 출력으로 잰다 — 한국어 글에 늘 붙는 알림이 그 자리를 다 붉게 만든다. 알림은 다른 비춤 뒤에
@@ -8085,7 +8085,7 @@ fn creation_is_judged_through_the_contract() {
     let out = shell_call(&s, "moai idea add \"떠오른 것\"");
     one_json_value(&out);
     assert!(!out.contains("permissionDecision"), "담는 것을 막았다\n{out}");
-    assert!(out.contains("\"additionalContext\":\"") && out.contains(&format!("{epic} 가 내건 것")), "{out}");
+    assert!(out.contains("\"additionalContext\":\"") && out.contains(&format!("can {epic} deliver what it promised")), "{out}");
 }
 
 /// 규칙 2 — 저장소를 고치기 전에 하나를 집는다. **세는 것은 저장소 안의
@@ -9615,7 +9615,7 @@ fn a_note_does_not_bring_back_a_deny_the_fresh_view_lifted() {
         for (how, out) in [("루트", bash(&cmd)), ("MOAI_HERE", here(&cmd))] {
             one_json_value(&out);
             assert!(!out.contains("permissionDecision"), "{how}: 비추는 줄이 곁들자 풀린 거절이 돌아왔다 — {cmd}\n{out}");
-            assert!(out.contains(&format!("{epic} 가 내건 것")), "{how}: {out}");
+            assert!(out.contains(&format!("can {epic} deliver what it promised")), "{how}: {out}");
         }
     }
 }
@@ -9757,7 +9757,7 @@ fn work_an_unnamed_worktree_may_hold_is_not_offered_as_this_sessions_aim() {
     let work = field(&ok(&main, &["add", "main 에서 집은 일", "-e", &mine, "--json"]), "id");
     ok(&main, &["mv", &work, "in_progress"]);
     let out = bash("moai idea add \"관찰\"");
-    assert!(out.contains(&format!("{mine} 가 내건 것")), "제 일의 물음을 안 비춘다\n{out}");
+    assert!(out.contains(&format!("can {mine} deliver what it promised")), "제 일의 물음을 안 비춘다\n{out}");
     assert!(!out.contains(&theirs), "옆이 쥐었을 일의 에픽을 댄다\n{out}");
 }
 
@@ -9941,8 +9941,10 @@ fn notes_and_refusals_from_two_trackers_are_joined_in_one_order() {
     let out = bash(&format!("moai idea add \"a\"; moai -C {bp} idea add \"b\""));
     one_json_value(&out);
     assert!(!out.contains("permissionDecision"), "{out}");
-    assert!(out.contains(&format!("{ea} 가 내건 것")) && out.contains(&format!("{eb} 가 내건 것")), "{out}");
-    assert!(out.contains(&format!("moai -C {bp} idea promote <그 id> -e {eb}")), "남의 트래커에 되찾을 자리를 안 댄다\n{out}");
+    // 두 토막이 저마다 제 트래커의 에픽을 대니 물음도 둘이다 — 뒤의 것을 말없이 버리지 않는다.
+    assert!(out.contains(&format!("can {ea} deliver what it promised")), "{out}");
+    assert!(out.contains(&format!("can {eb} deliver what it promised")), "{out}");
+    assert!(out.contains(&format!("moai -C {bp} idea promote <that id> -e {eb}")), "남의 트래커에 되찾을 자리를 안 댄다\n{out}");
 }
 
 /// 규칙 2 의 껍데기 쪽은 **stdin 의 `cwd` 로** 상대 경로를 푼다. 훅 프로세스를

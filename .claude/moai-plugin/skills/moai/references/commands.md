@@ -103,9 +103,11 @@ claim=$(moai mv "$id" in_progress --json --from "$col") || {
 - **Pass one id at a time.** Several at once mix the rows you won and the rows you
   lost into **one exit code** — the won rows have already moved while the caller
   believes it picked up nothing
-- A lost row stands as one line on stderr and as `stale: [{"id":…,"status":<the column it stands in>}]`
-  under `--json`. The "already in <column>" on stdout is **a different thing** — that
-  row was already in the column you asked for, and the exit code is 0
+- A lost row stands as one line on stderr (`moai: <id> 는 이미 <칸> 다 — …`) and as
+  `stale: [{"id":…,"status":<the column it stands in>}]` under `--json`. The `이미 <칸> 다`
+  on stdout is **a different thing** — that row was already in the column you asked for,
+  and the exit code is 0. Those two are quoted as the binary prints them, which is Korean
+  either way: they are not in the language bundle, so matching an English phrase finds nothing
 - **Not every non-zero code means "lost".** No identity, the lock being held, a
   mistyped column and a broken row all come back with the same code. Losing a contest
   puts the row on stdout; a failure puts `{"code":…}` on stderr and leaves stdout
@@ -366,7 +368,8 @@ It goes wrong quietly, so the one-liner above looks at the handed-back report fi
 
 **Do not simply take the last line.** One turn's blocks are written line by line with
 thinking and tool calls mixed in, so the last line is sometimes not text at all. Then
-an empty text is passed on and `moai note` stops with "the memo is empty" — it stops
+an empty text is passed on and `moai note` stops with `메모가 비었다` — quoted as the binary
+prints it, which is Korean in every language, so matching a translation finds nothing. It stops
 loudly, so nothing is lost, but getting it right the first time is better.
 
 **Do not keep the summary and throw the original away.** A summary is your own call;
@@ -380,7 +383,7 @@ the first line, keep every finding's number and place, and shorten only the sent
 Saying it is a summary keeps the next person from reading it as the reviewer's words,
 and the `agent-<task-id>` on the first line is the file name above, so the way back to
 the original stays open. **Do not split it across several notes** — the journal only
-appends, so a split stays forever, and the way the person chose is the summary.
+appends, so a split stays forever, and the way the person chose is the summary (moai-b8aj).
 Fences and indentation are left alone because a `model:` line copied over, standing at
 the beginning of a line, puts work nobody did into `work`.
 

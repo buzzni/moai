@@ -50,10 +50,10 @@ fn stable(bytes: &[u8]) -> u64 {
 /// 는 걸지 않는다** — `claude` 가 그 출력을 거절한다. 까닭은 `hook::Event` 에
 /// 적혀 있다.
 const HOOKS: &[(&str, &str, &str)] = &[
-    ("SessionStart", "session-start", "moai 경고를 센다..."),
-    ("UserPromptSubmit", "user-prompt-submit", "moai 보드를 읽는다..."),
-    ("PreToolUse", "pre-tool-use", "moai 규칙을 본다..."),
-    ("Stop", "stop", "moai 상태를 견준다..."),
+    ("SessionStart", "session-start", "counting moai warnings..."),
+    ("UserPromptSubmit", "user-prompt-submit", "reading the moai board..."),
+    ("PreToolUse", "pre-tool-use", "checking the moai rules..."),
+    ("Stop", "stop", "comparing the moai state..."),
 ];
 
 /// `PreToolUse` 가 볼 도구들. 규칙이 뜻을 두는 것만 적는다 — 전부 받으면
@@ -170,7 +170,7 @@ fn plugin_json(exe: &str, version: &str) -> String {
     }
     let manifest = serde_json::json!({
         "name": "moai",
-        "description": "이 저장소의 이슈 트래커. 보드를 세션에 싣고, 새 이슈가 집고 있는 단위 밖으로 새는 것을 막는다.",
+        "description": "This repository's issue tracker. Loads the board into the session and keeps new issues from leaking outside the unit you picked up.",
         "version": version,
         "hooks": hooks,
     });
@@ -181,11 +181,11 @@ fn marketplace_json(name: &str) -> String {
     pretty(&serde_json::json!({
         "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
         "name": name,
-        "description": "moai 가 심는다. 손으로 고치면 다음 `moai skill install` 이 덮어쓴다.",
+        "description": "Planted by moai. Edit it by hand and the next `moai skill install` overwrites it.",
         "owner": { "name": "moai" },
         "plugins": [{
             "name": "moai",
-            "description": "이 저장소의 할 일·규칙·보드.",
+            "description": "This repository's work, rules and board.",
             "source": "./",
             "category": "productivity",
         }],

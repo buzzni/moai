@@ -1,6 +1,6 @@
 ---
 name: moai-supervise
-description: Use when handing the ideas piled up on one repository, one at a time, to the Claude sessions idling on it and taking their reports. Triggers on "supervise", "hand out the ideas", "put the idle sessions to work".
+description: Use when handing the ideas piled up on one repository, one at a time, to the Claude sessions idling on it and taking their reports. Triggers on "supervise", "hand out the ideas", "put the idle sessions to work", "감독해 줘", "idea 나눠 줘", "놀고 있는 세션에 일 시켜".
 ---
 
 # moai-supervise — hand ideas out to the sessions that are idling
@@ -55,7 +55,7 @@ the work on.
 The `Place` line (`place` under `--json`) has four values. **Only `none` is handed on.**
 
     <path> (<branch>)  at        it runs there. Go in and carry on
-    not visible yet    fresh     just picked up — the gap while the worker raises its worktree. Leave it
+    not showing yet    fresh     just picked up — the gap while the worker raises its worktree. Leave it
     unknown            unknown   **a sibling worktree could not be read.** It may be there, so do not hand it on
     none               lost      it lost its place — only this one is reclaimed
 
@@ -65,7 +65,7 @@ snapshot that names no picked-up row cannot be read, the place verdict folds int
 `unreadable_worktrees` key stands under `status --json`, **fix that worktree and look
 again** — an empty list read before that is not "none", it is "not counted".
 
-**The `N problems in sibling worktrees` on the person's screen is a different number.**
+**The `Trouble in sibling worktrees <n>` on the person's screen is a different number.**
 That one counts **every** worktree it could not read among the snapshots it opened, and
 counts the other problems met while overlaying too (a snapshot with unparseable rows,
 a worktree list that could not be read) — a worktree that could not be read but whose
@@ -104,7 +104,7 @@ the script in 2 does not print as a `worktree` row.
       branch — if `git -C <root> symbolic-ref -q HEAD` is not `refs/heads/<base branch>` (detached, or
       someone switched the branch), do not run it: tell the supervisor and stop. A merge that lands on
       the wrong HEAD leaves no reference at all once `branch -d` runs
-      Root: <root> — the `root` from 2. The tracker you edit is always the one there (4-1 of the text in 3)
+      Root: <root> — the `root dir` from 2. The tracker you edit is always the one there (4-1 of the text in 3)
       - If the worktree is there, go in with EnterWorktree(path), read how far it got with
         `git log <base branch>..HEAD` and `git status`, and carry on
       - If it is not, raise it again from the root. If the branch survives, on that branch
@@ -157,7 +157,8 @@ worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a secon
 `~/.claude/sessions/*.json`, which Claude Code writes per session (under
 `CLAUDE_CONFIG_DIR` if you moved it). For a subdirectory project in a monorepo, the
 subdirectory that has `.moai` is the root. The script prints that `<root>` on the first
-line, `root`, and if the root is not the top of the repository it prints the path from
+line, `root dir` (a session row below is labelled `root` — a different word on purpose,
+so the path and a session never get read for each other), and if the root is not the top of the repository it prints the path from
 the top down to the root on a `subdir` line — a worktree stands for the whole
 repository, so the worker has to go into the same subdirectory inside it (brief 3).
 
@@ -171,7 +172,7 @@ while here not in (top, os.path.dirname(here)) and not os.path.isdir(os.path.joi
     here = os.path.dirname(here)
 root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
 trees = os.path.join(root, ".claude", "worktrees") + os.sep
-print("root  ", root)
+print("root dir", root)
 if os.path.relpath(here, top) != ".":
     print("subdir", os.path.relpath(here, top))
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
@@ -215,7 +216,7 @@ def detached(s):
         return True
     return int(owner) not in parents(int(s["pid"]))
 if not tmux_up:
-    print("cannot reach tmux — detached panes cannot be told apart. A test claude may be mixed into `root` below")
+    print("cannot reach tmux — a test pane cannot be told apart. A test claude may be mixed into `root` below")
 unread = 0
 for f in glob.glob(os.path.join(home, "sessions", "*.json")):
     try:
@@ -230,7 +231,7 @@ for f in glob.glob(os.path.join(home, "sessions", "*.json")):
     if cwd is None:
         unread += 1
     elif cwd == root and detached(s):
-        print("detached", s.get("status"), s.get("name"))
+        print("test pane", s.get("status"), s.get("name"))
     elif cwd == root:
         print("root    ", s.get("status"), s.get("name"))
     elif cwd.startswith(trees):
@@ -246,9 +247,12 @@ PY
 - **Leave out a session whose sent idea has not had its report checked.** A worker is in
   the root while it unfolds, picks up and merges — it shows `waiting` when it is waiting
   on a person's answer or a permission, and `idle` when it finishes a turn
-- **Do not hand work to a `detached` pane.** The tmux pane the session file names was not
+- **Do not hand work to a `test pane` row.** The tmux pane the session file names was not
   spawned by that session on this server — it is a test `claude` raised on a separate
-  tmux server (`-L`). Even with the root as its place, it is not a worker
+  tmux server (`-L`). Even with the root as its place, it is not a worker. The row is
+  labelled `test pane`, not `detached`, on purpose: in this skill `detached` is the root's
+  git HEAD (`If the root is detached, do not send`), and one word for both would stop a
+  whole round over a test pane
 - **If tmux cannot be reached at all, do not filter.** When the supervisor runs outside
   tmux or a sandbox blocks the socket, not one pane can be asked about — read that as
   detached and every session in the root drops out and nobody gets any work. The script
@@ -298,7 +302,7 @@ with `/model`.
 nothing of this conversation, so send the text below **whole** — it is all the worker
 receives, so everything the worker has to keep is inside it.
 Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
-`<root>` is the `root` from 2. **Leave it unfilled** and the worker, inside its worktree,
+`<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root.
 `<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
@@ -594,7 +598,7 @@ epic reclaimed in 0 already has the previous session's one. The report (11) come
 do not point it out to the person: leave the notification from 4 and look after it
 arrives. Clearing erases the whole conversation that worker holds, so never call it
 before the check. `<session>` is the name of the session that sent the report, and
-`<root>` is the `root` from 2.
+`<root>` is the `root dir` from 2.
 
 ```sh
 python3 - '<session>' '<epic>' '<my name>' '<root>' <<'PY'

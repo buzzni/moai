@@ -3674,10 +3674,12 @@ fn aside_in(issues: &[Issue], focus: &[&Issue], line: &Line<'_>, only: &dyn Fn(u
     };
     let moai = echo_moai(aim(at), seg);
     Decision::Context(format!(
-        "갈림길 1 의 둘째 물음 — {} 가 내건 것이 방금 담은 생각 없이도 이뤄지는가. 아니면 idea 가 아니라 안 끝난 이 일이다.\n\
-         그렇다면 지금 못 해도 `{moai} idea promote <그 id> -e {first} --from -` 로 그 에픽의 멤버로 되찾아 첫 칸에 \
-         둔다 — 밖에 두면 에픽이 목적을 못 이룬 채 닫힌다.",
-        aims.join("·")
+        "The second question of fork 1 — can {} deliver what it promised without the thought you just parked? \
+         If not, it is not an idea but this work, unfinished.\n\
+         Then, even if you cannot do it now, reclaim it as a member of that epic with \
+         `{moai} idea promote <that id> -e {first} --from -` and leave it in the first column — left outside, the \
+         epic closes without delivering what it promised.",
+        aims.join(", ")
     ))
 }
 
@@ -3820,18 +3822,20 @@ fn prose(args: &[String]) -> Vec<String> {
 /// 판은 같은 글을 한 벌 더 영영 남기게 했다. 고칠 수 있는 제목·본문만 `moai edit` 를 대고, 나머지는 다음 글부터다.
 pub fn korean_notice(at: &str, missing: &[&str]) -> Decision {
     let mut said = format!(
-        "방금 moai 에 넣은 한국어 글을 다듬었는가 — `korean-skills:humanizer`, 20줄을 넘으면 \
-         `humanize-korean:humanize-korean`, 마지막에 `korean-skills:grammar-checker`. 안 다듬은 제목·본문은 \
-         다듬어 `moai{at} edit` 로 고쳐 적는다. 노트와 `-m` 은 저널에만 쌓여 고칠 수 없으니 같은 글을 다시 적지 \
-         말고 다음 글부터 넣기 전에 다듬는다. id·명령·경로·수·코드 조각과 꼴이 정해진 줄은 그대로 둔다."
+        "Did you polish the Korean text you just put into moai — `korean-skills:humanizer`, \
+         `humanize-korean:humanize-korean` when it runs past 20 lines, and `korean-skills:grammar-checker` last? \
+         Polish an unpolished title or body and write it back with `moai{at} edit`. A note and `-m` only pile up in \
+         the journal and cannot be fixed, so do not write the same text again: polish from the next one on. \
+         Leave ids, commands, paths, numbers, code fragments and the fixed-form lines as they are."
     );
     if !missing.is_empty() {
         said.push_str(&format!(
-            "\n이 저장소에 {} 이 깔려 있지 않다 — 제 손으로 깔지 말고 사람에게 `moai skill install` 을 다시 \
-             불러 달라고 청한다. 그것이 moai 와 같은 범위로 함께 깐다. 그 명령이 `건너뛰었다` 를 내면 같은 \
-             이름의 마켓플레이스가 남의 저장소를 가리키는 것이니, 그 줄이 함께 내는 \
-             `claude plugin marketplace remove` 를 먼저 친다 — 그 전에는 몇 번을 불러도 건너뛴다.",
-            missing.join("·")
+            "\n{} is not installed in this repository — do not install it yourself: ask the person to run \
+             `moai skill install` again, which installs it in the same scope as moai. If that command says it \
+             skipped, a marketplace of the same name points at someone else's repository, so run the \
+             `claude plugin marketplace remove` it prints alongside first — before that it skips however many \
+             times you call it.",
+            missing.join(", ")
         ));
     }
     Decision::Context(said)
@@ -5008,10 +5012,16 @@ mod tests {
     /// 보드는 고른 말로 나오는데 그 위의 머리말과 `Stop` 이 붙드는 글만 한국어로 박혀 있었다 —
     /// 에이전트가 읽는 자리라 사람 눈에 가장 늦게 띈다.
     ///
-    /// **규칙 1~4 의 거절문은 아직 여기가 아니다**(2026-09-20 사용자 결정) — 그 첫 줄은
+    /// **규칙 1~4 의 거절문은 말묶음에 안 든다**(moai-54k2, 2026-09-20 사용자 결정) — 그 첫 줄은
     /// `guide::rule_head` 고, 그 글자는 `moai skill install` 이 심는 AGENTS.md 의 규칙 제목과
-    /// 같아야 막힌 쪽이 무엇을 어겼는지 찾는다. 심는 문서를 같이 정하기 전에는 안 건드린다.
-    /// `guide::close_steps`(`REVIEW_STEPS`)와 `guide::handoff` 도 같은 까닭으로 남는다.
+    /// 같아야 막힌 쪽이 무엇을 어겼는지 찾는다. 심는 문서가 영어로 통일되며 그 계약이 영어 쪽으로
+    /// 풀렸다 — `guide::close_steps`(`REVIEW_STEPS`)와 `guide::handoff` 도 같은 까닭으로 영어다.
+    /// 그래서 아래는 갈래마다 **남은 한글이 없다**를 센다: 여기에 한글이 서면 그것은 뜻이 아니라
+    /// 아직 글자로 박힌 줄이다.
+    ///
+    /// **`aside_in`·`korean_notice` 도 영어다**(moai-54k2 리뷰) — 막지 않고 비추는 줄이지만 읽는 쪽은
+    /// 같은 에이전트고, `aside_in` 은 심는 글의 절 이름(`fork 1`)을 가리킨다. 한국어로 두면 그 절을
+    /// 글에서 못 찾는다 — 가리키는 이름이 없는 규칙은 지킬 수 없다.
     ///
     /// **남은 한글을 표본 하나로 세지 않는다**(리뷰 moai-8d49.ssb). `closing` 의 갈래는 셋이고
     /// (보통 줄·에픽을 닫는 멤버·열린 리뷰) 갈래마다 남는 줄이 다르다 — 보통 줄 하나로 재고
@@ -5492,10 +5502,10 @@ mod tests {
             let Decision::Context(said) = guard_shell(&all, &cfg(), &here(), root, root, cmd) else {
                 panic!("안 비춘다 — {cmd}");
             };
-            assert!(said.contains("t-e 가 내건 것"), "{said}");
+            assert!(said.contains("can t-e deliver what it promised"), "{said}");
             // **이 줄은 생각이 담긴 뒤에 읽힌다** — 새로 세우라고 하면 같은 것이 둘 선다(moai-dw63.e31).
-            assert!(said.contains("moai idea promote <그 id> -e t-e --from -"), "담은 것을 되찾는 줄을 안 댄다\n{said}");
-            assert!(!said.contains("moai add '제목'"), "담긴 생각 곁에 같은 것을 또 세우라고 한다\n{said}");
+            assert!(said.contains("moai idea promote <that id> -e t-e --from -"), "담은 것을 되찾는 줄을 안 댄다\n{said}");
+            assert!(!said.contains("moai add '<title>'"), "담긴 생각 곁에 같은 것을 또 세우라고 한다\n{said}");
         }
         // 담은 토막이 **겨눈 자리**도 댄다 — 빼고 치면 되찾는 줄이 세션 자리의 트래커에서 헛돈다.
         // 친 글자가 아니라 푼 자리다(moai-v9sa).
@@ -5505,7 +5515,7 @@ mod tests {
         let Decision::Context(said) = aside else {
             panic!("안 비춘다 — {aside:?}");
         };
-        assert!(said.contains("moai -C /repo/sub idea promote <그 id> -e t-e"), "{said}");
+        assert!(said.contains("moai -C /repo/sub idea promote <that id> -e t-e"), "{said}");
 
         // 집은 것이 없거나, 에픽 없는 일이거나, 도움말이면 조용하다. **에픽 줄이 실제로 안 선
         // 참조**도 조용하다 — 닫힐 에픽이 없고, 그 id 로 되찾게 하면 경고가 하나 는다.
@@ -5530,7 +5540,7 @@ mod tests {
         let Decision::Context(said) = guard_shell(&two, &cfg(), &here(), root, root, "moai idea add 'x'") else {
             panic!("안 비춘다");
         };
-        assert!(said.contains("t-z·t-a 가 내건 것") && said.contains("-e t-z --from -"), "{said}");
+        assert!(said.contains("can t-z, t-a deliver what it promised") && said.contains("-e t-z --from -"), "{said}");
         let refused = guard_shell(&two, &cfg(), &here(), root, root, "moai add '딴 일'");
         assert!(denied(&refused).contains("-e t-z"), "두 글이 다른 에픽을 댄다\n{refused:?}");
 
@@ -7903,7 +7913,7 @@ mod korean_tests {
         let Decision::Context(said) = korean_notice("", &["korean-skills@korean-skills"]) else {
             panic!("비추는 답이 아니다");
         };
-        assert!(said.contains("moai skill install") && said.contains("사람에게"), "{said}");
+        assert!(said.contains("moai skill install") && said.contains("ask the person"), "{said}");
         assert!(!said.contains("claude plugin install"), "제 손으로 깔라고 한다\n{said}");
         for (id, _) in crate::guide::KOREAN_PLUGINS {
             let plugin = id.split_once('@').unwrap().0;
@@ -7919,7 +7929,7 @@ mod korean_tests {
     fn the_korean_notice_only_offers_edits_that_exist() {
         let Decision::Context(said) = korean_notice(" -C /repo", &[]) else { panic!("비추는 답이 아니다") };
         assert!(said.contains("`moai -C /repo edit`"), "{said}");
-        assert!(!said.contains("`moai note` 로 고쳐") && said.contains("저널에만"), "{said}");
+        assert!(!said.contains("`moai note`") && said.contains("only pile up in the journal"), "{said}");
     }
 
     /// `humanize-korean` 이 cwd 에 만드는 `_workspace/` 는 규칙 2 가 세지 않는다 — 하위 디렉터리에 선

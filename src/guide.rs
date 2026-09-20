@@ -739,11 +739,17 @@ it does not fix and it does not merge.
 ///
 /// 발동어는 frontmatter 의 `description` 이다. 항상 켜져 있는 비용이 이 한
 /// 줄이라, 여기에 낱말을 더하는 것은 모든 세션에 값을 매기는 일이다.
+///
+/// **이 줄은 산문이 아니라 짝맞추개다**(moai-54k2 리뷰). 심는 글을 영어로 통일하면서 한국어
+/// 발동어를 걷었더니, 한국어로 묻는 저장소에서 "뭐부터 할까" 가 짝맞출 글자를 잃었다 — 그러면
+/// 이 스킬이 안 서고 세션은 이 줄의 마지막 문장이 막는 TodoWrite 로 돌아간다. 읽는 글은 영어로
+/// 두고 **발동어는 두 말을 함께 싣는다**: 여기서 아끼는 것은 토큰이 아니라 발동이다.
+/// `the_skill_description_keeps_its_korean_triggers` 가 그것을 못박는다.
 pub fn skill() -> String {
     format!(
         r#"---
 name: moai
-description: Use for this repository's work, issues and plans. "what should I do first", "sort out the to-dos", "create an issue", "how is it going", "let us do this later", when a feature request has to be split into several parts, or when something out of scope comes to mind mid-task. Use this instead of TodoWrite or a markdown TODO list.
+description: Use for this repository's work, issues and plans. "what should I do first", "sort out the to-dos", "create an issue", "how is it going", "let us do this later", "뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자", when a feature request has to be split into several parts, or when something out of scope comes to mind mid-task. Use this instead of TodoWrite or a markdown TODO list.
 ---
 
 # moai — this repository's issue tracker
@@ -859,9 +865,11 @@ claim=$(moai mv "$id" in_progress --json --from "$col") || {{
 - **Pass one id at a time.** Several at once mix the rows you won and the rows you
   lost into **one exit code** — the won rows have already moved while the caller
   believes it picked up nothing
-- A lost row stands as one line on stderr and as `stale: [{{"id":…,"status":<the column it stands in>}}]`
-  under `--json`. The "already in <column>" on stdout is **a different thing** — that
-  row was already in the column you asked for, and the exit code is 0
+- A lost row stands as one line on stderr (`moai: <id> 는 이미 <칸> 다 — …`) and as
+  `stale: [{{"id":…,"status":<the column it stands in>}}]` under `--json`. The `이미 <칸> 다`
+  on stdout is **a different thing** — that row was already in the column you asked for,
+  and the exit code is 0. Those two are quoted as the binary prints them, which is Korean
+  either way: they are not in the language bundle, so matching an English phrase finds nothing
 - **Not every non-zero code means "lost".** No identity, the lock being held, a
   mistyped column and a broken row all come back with the same code. Losing a contest
   puts the row on stdout; a failure puts `{{"code":…}}` on stderr and leaves stdout
@@ -984,7 +992,8 @@ It goes wrong quietly, so the one-liner above looks at the handed-back report fi
 
 **Do not simply take the last line.** One turn's blocks are written line by line with
 thinking and tool calls mixed in, so the last line is sometimes not text at all. Then
-an empty text is passed on and `moai note` stops with "the memo is empty" — it stops
+an empty text is passed on and `moai note` stops with `메모가 비었다` — quoted as the binary
+prints it, which is Korean in every language, so matching a translation finds nothing. It stops
 loudly, so nothing is lost, but getting it right the first time is better.
 
 **Do not keep the summary and throw the original away.** A summary is your own call;
@@ -997,7 +1006,7 @@ refuses text larger than that.
 Saying it is a summary keeps the next person from reading it as the reviewer's words,
 and the `agent-<task-id>` on the first line is the file name above, so the way back to
 the original stays open. **Do not split it across several notes** — the journal only
-appends, so a split stays forever, and the way the person chose is the summary.
+appends, so a split stays forever, and the way the person chose is the summary (moai-b8aj).
 Fences and indentation are left alone because a `model:` line copied over, standing at
 the beginning of a line, puts work nobody did into `work`.
 
@@ -1058,7 +1067,7 @@ pub fn supervise() -> String {
     format!(
         r#"---
 name: moai-supervise
-description: Use when handing the ideas piled up on one repository, one at a time, to the Claude sessions idling on it and taking their reports. Triggers on "supervise", "hand out the ideas", "put the idle sessions to work".
+description: Use when handing the ideas piled up on one repository, one at a time, to the Claude sessions idling on it and taking their reports. Triggers on "supervise", "hand out the ideas", "put the idle sessions to work", "감독해 줘", "idea 나눠 줘", "놀고 있는 세션에 일 시켜".
 ---
 
 # moai-supervise — hand ideas out to the sessions that are idling
@@ -1113,7 +1122,7 @@ the work on.
 The `Place` line (`place` under `--json`) has four values. **Only `none` is handed on.**
 
     <path> (<branch>)  at        it runs there. Go in and carry on
-    not visible yet    fresh     just picked up — the gap while the worker raises its worktree. Leave it
+    not showing yet    fresh     just picked up — the gap while the worker raises its worktree. Leave it
     unknown            unknown   **a sibling worktree could not be read.** It may be there, so do not hand it on
     none               lost      it lost its place — only this one is reclaimed
 
@@ -1123,7 +1132,7 @@ snapshot that names no picked-up row cannot be read, the place verdict folds int
 `unreadable_worktrees` key stands under `status --json`, **fix that worktree and look
 again** — an empty list read before that is not "none", it is "not counted".
 
-**The `N problems in sibling worktrees` on the person's screen is a different number.**
+**The `Trouble in sibling worktrees <n>` on the person's screen is a different number.**
 That one counts **every** worktree it could not read among the snapshots it opened, and
 counts the other problems met while overlaying too (a snapshot with unparseable rows,
 a worktree list that could not be read) — a worktree that could not be read but whose
@@ -1154,7 +1163,7 @@ the script in 2 does not print as a `worktree` row.
       {BESIDE}
       Base branch: <base branch> — the supervisor read it in the root and filled it in; do not read it again.
 {reclaim_check}
-      Root: <root> — the `root` from 2. The tracker you edit is always the one there (4-1 of the text in 3)
+      Root: <root> — the `root dir` from 2. The tracker you edit is always the one there (4-1 of the text in 3)
       - If the worktree is there, go in with EnterWorktree(path), read how far it got with
         `git log <base branch>..HEAD` and `git status`, and carry on
       - If it is not, raise it again from the root. If the branch survives, on that branch
@@ -1207,7 +1216,8 @@ worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a secon
 `~/.claude/sessions/*.json`, which Claude Code writes per session (under
 `CLAUDE_CONFIG_DIR` if you moved it). For a subdirectory project in a monorepo, the
 subdirectory that has `.moai` is the root. The script prints that `<root>` on the first
-line, `root`, and if the root is not the top of the repository it prints the path from
+line, `root dir` (a session row below is labelled `root` — a different word on purpose,
+so the path and a session never get read for each other), and if the root is not the top of the repository it prints the path from
 the top down to the root on a `subdir` line — a worktree stands for the whole
 repository, so the worker has to go into the same subdirectory inside it (brief 3).
 
@@ -1221,7 +1231,7 @@ while here not in (top, os.path.dirname(here)) and not os.path.isdir(os.path.joi
     here = os.path.dirname(here)
 root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
 trees = os.path.join(root, ".claude", "worktrees") + os.sep
-print("root  ", root)
+print("root dir", root)
 if os.path.relpath(here, top) != ".":
     print("subdir", os.path.relpath(here, top))
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
@@ -1265,7 +1275,7 @@ def detached(s):
         return True
     return int(owner) not in parents(int(s["pid"]))
 if not tmux_up:
-    print("cannot reach tmux — detached panes cannot be told apart. A test claude may be mixed into `root` below")
+    print("cannot reach tmux — a test pane cannot be told apart. A test claude may be mixed into `root` below")
 unread = 0
 for f in glob.glob(os.path.join(home, "sessions", "*.json")):
     try:
@@ -1280,7 +1290,7 @@ for f in glob.glob(os.path.join(home, "sessions", "*.json")):
     if cwd is None:
         unread += 1
     elif cwd == root and detached(s):
-        print("detached", s.get("status"), s.get("name"))
+        print("test pane", s.get("status"), s.get("name"))
     elif cwd == root:
         print("root    ", s.get("status"), s.get("name"))
     elif cwd.startswith(trees):
@@ -1296,9 +1306,12 @@ PY
 - **Leave out a session whose sent idea has not had its report checked.** A worker is in
   the root while it unfolds, picks up and merges — it shows `waiting` when it is waiting
   on a person's answer or a permission, and `idle` when it finishes a turn
-- **Do not hand work to a `detached` pane.** The tmux pane the session file names was not
+- **Do not hand work to a `test pane` row.** The tmux pane the session file names was not
   spawned by that session on this server — it is a test `claude` raised on a separate
-  tmux server (`-L`). Even with the root as its place, it is not a worker
+  tmux server (`-L`). Even with the root as its place, it is not a worker. The row is
+  labelled `test pane`, not `detached`, on purpose: in this skill `detached` is the root's
+  git HEAD (`If the root is detached, do not send`), and one word for both would stop a
+  whole round over a test pane
 - **If tmux cannot be reached at all, do not filter.** When the supervisor runs outside
   tmux or a sandbox blocks the socket, not one pane can be asked about — read that as
   detached and every session in the root drops out and nobody gets any work. The script
@@ -1340,7 +1353,7 @@ with `/model`.
 nothing of this conversation, so send the text below **whole** — it is all the worker
 receives, so everything the worker has to keep is inside it.
 Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
-`<root>` is the `root` from 2. **Leave it unfilled** and the worker, inside its worktree,
+`<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root.
 `<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
@@ -1414,7 +1427,7 @@ epic reclaimed in 0 already has the previous session's one. The report (11) come
 do not point it out to the person: leave the notification from 4 and look after it
 arrives. Clearing erases the whole conversation that worker holds, so never call it
 before the check. `<session>` is the name of the session that sent the report, and
-`<root>` is the `root` from 2.
+`<root>` is the `root dir` from 2.
 
 ```sh
 python3 - '<session>' '<epic>' '<my name>' '<root>' <<'PY'
@@ -2354,6 +2367,27 @@ mod tests {
         assert!(!reference.contains("`{name}`"), "참고 문서가 `{{{{name}}}}` 을 `{{name}}` 으로 깎았다");
     }
 
+    /// **발동어는 두 말을 함께 싣는다**(moai-54k2 리뷰). 심는 글은 영어지만 이 줄은 산문이 아니라
+    /// 짝맞추개다 — 한국어로 묻는 저장소에서 한국어 발동어를 걷으면 스킬이 안 서고, 세션은 이 줄이
+    /// 막으려는 TodoWrite 로 돌아간다. 걷혔던 낱말들을 이름째 잰다: 글을 다시 쓸 때 조용히 빠지는
+    /// 자리라, 머리만 재던 시험은 발동이 떨어지는 것을 못 봤다.
+    #[test]
+    fn the_skill_description_keeps_its_korean_triggers() {
+        let head = |text: &str| text.lines().find(|l| l.starts_with("description: ")).expect("발동어 줄이 없다").to_string();
+        for (whose, said, triggers) in [
+            ("moai", head(&skill()), ["뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자"].as_slice()),
+            ("moai-supervise", head(&supervise()), ["감독해 줘", "idea 나눠 줘", "놀고 있는 세션에 일 시켜"].as_slice()),
+        ] {
+            for trigger in triggers {
+                assert!(said.contains(trigger), "{whose} 의 발동어에서 {trigger} 가 빠졌다 — {said}");
+            }
+            // 영어 쪽도 함께 선다 — 한쪽만 남기면 다른 말로 묻는 쪽이 못 부른다.
+            assert!(said.contains("Use "), "{whose} 의 발동어에 영어가 없다 — {said}");
+            // 발동어 줄은 1,024자까지다. 두 말을 실어도 그 안이어야 한다.
+            assert!(said.chars().count() <= 1024, "{whose} 의 발동어가 상한을 넘었다 — {}자", said.chars().count());
+        }
+    }
+
     /// 스킬의 frontmatter 는 **첫 줄**에서 시작해야 읽힌다.
     #[test]
     fn the_frontmatter_opens_the_skill() {
@@ -3050,7 +3084,10 @@ sys.exit(1 if bad else 0)
         let walk = &step[walk..walk + step[walk..].find("def detached(").expect("detached 가 없다")];
         assert!(walk.contains("except OSError:"), "ps 가 없으면 세션 목록이 통째로 죽는다");
         assert!(step.contains("'#{pane_pid}'"), "판 주인을 포맷이 깨뜨렸다");
-        assert!(step.contains("**Do not hand work to a `detached` pane.**"), "떼어 낸 판을 어떻게 할지 없다");
+        assert!(step.contains("**Do not hand work to a `test pane` row.**"), "떼어 낸 판을 어떻게 할지 없다");
+        // **그 줄의 이름은 `detached` 가 아니다**(리뷰). 이 스킬에서 `detached` 는 루트의 git HEAD 라,
+        // 한 낱말로 둘을 부르면 시험용 판 하나가 루트의 detached 로 읽혀 한 바퀴가 통째로 멈춘다.
+        assert!(step.contains("print(\"test pane\","), "떼어 낸 판의 이름이 루트의 HEAD 와 같은 낱말이다");
         assert!(brief.contains("keep its cwd outside the root"), "시험용 claude 를 루트에서 띄운다");
         // **못 닿는 것은 떼어 낸 판이 아니다**(moai-gmut). 감독이 tmux 밖에서 돌거나 소켓이 막히면
         // 물음마다 빈 값이 오는데, 그것을 떼어 낸 판으로 읽던 판은 루트의 세션을 **모두** 걸러
