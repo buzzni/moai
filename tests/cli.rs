@@ -522,6 +522,51 @@ fn init_keeps_a_new_prefix_short() {
     assert!(add(&old, &["옛 저장소의 이슈"]).starts_with("my-company-backend-"), "옛 긴 접두어를 막았다");
 }
 
+/// **아무도 안 읽을 자리에는 세우기 전에 묻는다**(moai-pjrr·moai-mz0e) — 가르는 자는 "명령이 어느
+/// 트래커로 가는가" 하나다. 딸린 워크트리의 **밑자리**도 워크트리로 답해야 한다.
+///
+/// `worktree::main_root` 는 밑길을 주 체크아웃에 그대로 비추므로(`<wt>/src` → `<main>/src`)
+/// 거기 트래커가 없으면 워크트리 물음이 안 서고, 그대로 두던 판은 위로 찾은 **워크트리의** `.moai` 를
+/// 대며 `moai -C <워크트리> init` 을 시켰다(리뷰). 그 자리의 명령은 모두 루트의 트래커를 쓰므로,
+/// 따라 친 사람은 병합에서 겨룰 파일을 고쳤다 — moai-y7go 가 없앤 바로 그 자리다.
+///
+/// **거절문이 도로 내는 명령은 친 대로다** — 접두어를 빠뜨린 줄을 베끼면 디렉터리 이름에서 만든
+/// 접두어가 서는데, 그것은 나중에 못 바꾼다.
+#[test]
+fn init_in_a_worktree_points_at_the_main_checkout() {
+    let s = Scratch::new("initwt");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/argos-wt", "-b", "worktree-argos-wt"]);
+    let deep = main.join(".claude/worktrees/argos-wt/src/deep");
+    std::fs::create_dir_all(&deep).unwrap();
+
+    let out = moai(&deep, &["init", "argos"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "아무도 안 읽을 자리에 세웠다 — {err}");
+    assert!(err.contains("딸린 워크트리"), "워크트리를 그냥 '위의 트래커' 로 댔다 — {err}");
+    assert!(err.contains("/main/.moai"), "주 체크아웃의 트래커를 안 댔다 — {err}");
+    assert!(!err.contains("argos-wt/.moai"), "아무도 안 읽는 트래커를 고치라고 했다 — {err}");
+    assert!(err.contains("MOAI_HERE=1 moai init argos"), "친 접두어를 빠뜨린 줄을 댔다 — {err}");
+    assert!(!deep.join(".moai").exists(), "거절하고도 .moai 를 만들었다");
+
+    // **`-C` 로 왔으면 그것도 도로 낸다** — `-C` 는 `set_current_dir` 로 따르므로 "여기" 는 `-C` 가
+    // 가리킨 자리고 사람의 셸은 딴 데 있다. 빠뜨린 줄을 그대로 베끼면 그 셸 자리에 트래커가 하나
+    // 더 선다 — 나머지를 친 대로 되살린 줄일수록 더 그대로 베낀다.
+    let away = s.path().join("away");
+    std::fs::create_dir_all(&away).unwrap();
+    let out = moai(&away, &["-C", &deep.display().to_string(), "init", "argos"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{err}");
+    let hatch = err.lines().find(|l| l.contains("MOAI_HERE=1")).unwrap_or_default();
+    assert!(hatch.contains(&format!("-C {}", deep.display())), "`-C` 를 빠뜨린 줄을 댔다 — {hatch}");
+    assert!(!away.join(".moai").exists(), "거절하고도 셸 자리에 .moai 를 만들었다");
+}
+
 /// 남의 .gitignore 를 지우지 않고 빠진 줄만 덧붙인다.
 #[test]
 fn init_appends_to_an_existing_gitignore() {
@@ -1635,7 +1680,10 @@ fn inside_a_repo_a_registry_changes_nothing() {
     let s = init("ovinside");
     add(s.path(), &["제 일"]);
     let other = dir_in(&s, "elsewhere");
-    ok(&other, &["init", "other"]);
+    // **위에 트래커가 있어도 세운다**(moai-pjrr, 2026-09-20 사용자 결정 둘째 판) — 알림 한 줄을
+    // 얹을 뿐이다. 모노레포 하위에 제 트래커를 두는 길이 이것이다.
+    let planted = ok(&other, &["init", "other"]);
+    assert!(planted.contains("위에도 트래커가 있다"), "위의 트래커를 안 댔다 — {planted}");
     let cfg = registry(&s, &[&other, s.path()]);
     for args in [&[][..], &["status"], &["ready"], &["status", "--json"], &["ready", "--json"]] {
         let plain = moai(s.path(), args);

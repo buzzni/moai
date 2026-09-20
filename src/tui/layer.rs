@@ -898,8 +898,8 @@ impl App {
     /// 층이 그대로 남고 까닭 한 줄만 새 읽기의 것으로 바뀐다([`holding`]). 깨진 설정도 여기 든다:
     /// 한때는 빈 층과 그 까닭이 고칠 것을 비춘다고 봤는데, 오타 하나에 등록한 프로젝트가 통째로
     /// 사라졌다. 비추는 데 필요한 것은 빈 층이 아니라 까닭 한 줄이다.
-    pub(super) fn relayer(&mut self, land: Option<&Path>) {
-        self.relayer_with(None, land);
+    pub(super) fn relayer(&mut self, land: Option<&Path>) -> Relayered {
+        self.relayer_with(None, land)
     }
 
     /// [`App::relayer`] 와 같되 **이미 읽은 설정**을 쓴다(moai-7yil) — 같은 걸음에 읽음도 그 설정에서
@@ -910,11 +910,18 @@ impl App {
     /// (`user_config::path`). `Some` 을 받으면 그 설정의 자리가 곧 새 층의 자리다(`Layer::of` 가
     /// `Registry::path` 를 든다, moai-y61p) — 부르는 쪽이 같은 파일을 읽어 넘길 때만 맞는 말이라,
     /// 다른 파일의 설정을 넘기면 층은 한 파일에서 서고 등록·해제는 다른 파일에 간다.
-    pub(super) fn relayer_with(&mut self, reg: Option<&user_config::Registry>, land: Option<&Path>) {
+    ///
+    /// **층을 다시 세웠는지를 돌려준다**(moai-6ek1, [`Relayered`]). [`Relayered::Lost`] 면 들고 있던
+    /// 층이 그대로고 `land` 도 함께 버려졌다 — 설정을 썼다는 것과 층이 그것을 들었다는 것은 다른
+    /// 일이라, 쓴 쪽(`SPC p a`·`SPC p d`)이 "됐다" 만 대면 열 줄짜리 층에서는 됐는지 알 길이 없다.
+    /// 까닭은 이 부름이 방금 [`App::held`]·[`App::unlayered`] 에 적은 그 글이다 — 여기서 또
+    /// 지어내면 배너와 알림이 갈린다.
+    pub(super) fn relayer_with(&mut self, reg: Option<&user_config::Registry>, land: Option<&Path>) -> Relayered {
         let held = self.current().map(|r| self.anchor_of(&r));
         match self.layer.take() {
             None => {
-                let Some(repo) = &self.site.repo else { return };
+                // 프로젝트가 없으면 세울 층도 없다 — 이것은 탈이 아니라 그냥 세울 것이 없는 자리다.
+                let Some(repo) = &self.site.repo else { return Relayered::Nothing };
                 let here = Some(repo.here().to_path_buf());
                 let fresh = match reg {
                     Some(reg) => Layer::of(reg, here.as_deref()),
@@ -931,7 +938,7 @@ impl App {
                     self.unlayered = unlayered_of(&fresh);
                     // 층이 없으면 들고 있는 것도 없다 — 이 화면의 말은 위의 한 줄이다.
                     self.held = None;
-                    return;
+                    return Relayered::Lost;
                 }
                 self.unlayered = None;
                 self.held = None;
@@ -971,7 +978,7 @@ impl App {
                     }
                     old.trouble = fresh.trouble;
                     self.layer = Some(old);
-                    return;
+                    return Relayered::Lost;
                 }
                 for p in &mut fresh.places {
                     if let Some(o) = old.places.iter_mut().find(|o| o.path == p.path) {
@@ -1017,6 +1024,7 @@ impl App {
         });
         let at = landed.or_else(|| held.as_ref().and_then(|a| self.row_of(&rows, a))).unwrap_or(self.cursor);
         self.stand(&rows, at, held.as_ref());
+        Relayered::Stood
     }
 
     /// 걸음마다 층을 본다. 스레드가 읽어 온 줄은 **어디 서 있든** 받는다 — 경로로 맞춰
@@ -1085,6 +1093,22 @@ pub(super) enum Depth {
     /// 값인데, 여기서 걷어낸 `open_one` 은 `worktree: false` 로 불러 `worktree::gather` 가
     /// `repo.read()` 뒤에 바로 돌아섰다. 옮긴 것은 파싱 한 판이고, 그 값은 안 쟀다.
     Lean,
+}
+
+/// [`App::relayer_with`] 가 한 일 — **못 세운 것과 세울 것이 없던 것을 가른다**(moai-6ek1).
+///
+/// 둘을 한 낱말(`false`)로 내던 판은 쓴 쪽이 둘을 같게 읽어, 프로젝트도 층도 없는 화면에서 멀쩡한
+/// 등록에 "층은 그대로다" 를 붙였다. 가르는 값은 **댈 까닭이 있는가** 가 아니다 — 그 까닭은
+/// [`App::held`]·[`App::unlayered`] 가 늘 대는 것이 아니어서(빈 `problems` 에 사라진 파일),
+/// 그것으로 가르면 진짜 진 판이 조용해진다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Relayered {
+    /// 다시 세웠다. `land` 도 섰다.
+    Stood,
+    /// 세울 것이 없었다 — 프로젝트가 없어 층이 설 자리가 아니다. 탈이 아니다.
+    Nothing,
+    /// 다시 읽기가 졌다. 들고 있던 층이 그대로고 `land` 는 버려졌다.
+    Lost,
 }
 
 /// 탈이 난 설정을 **들고 설 때** 대는 까닭(moai-po6v) — 배너가 이것을 한 줄로 줄여 낸다

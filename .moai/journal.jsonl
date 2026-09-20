@@ -6423,3 +6423,18 @@
 {"ts":"2026-09-20T13:14:20Z","id":"moai-dpbi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-20T13:14:21Z","id":"moai-ajh2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 읽음 쓰기 경로, 부르는 쪽 셋을 함께 고쳤다)"}
 {"ts":"2026-09-20T13:14:22Z","id":"moai-dyb7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 락 차례와 동시성, 치우는 길을 버리고 재 보기로 갔다)"}
+{"ts":"2026-09-20T13:14:30Z","id":"moai-pjrr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 자리 판정, 사용자 결정 두 판)"}
+{"ts":"2026-09-20T13:14:30Z","id":"moai-mz0e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 자리 판정, moai-pjrr 과 한 함수)"}
+{"ts":"2026-09-20T13:14:31Z","id":"moai-6ek1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 탐색기 알림, 갈래를 셋으로 갈랐다)"}
+{"ts":"2026-09-20T13:15:18Z","id":"moai-9it4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기의 남은 글자를 말묶음으로 — draw·keys·mod·layer·menu"}
+{"ts":"2026-09-20T13:17:24Z","id":"moai-ajh2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T13:17:24Z","id":"moai-dyb7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T13:17:24Z","id":"moai-pjrr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T13:17:25Z","id":"moai-mz0e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T13:17:25Z","id":"moai-6ek1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T13:17:40Z","id":"moai-shn2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 다섯과 리뷰를 8296593 으로 develop 에 머지하고 닫았다. 첫 칸에 다섯이 남았다 — moai-blvx(src/store.rs 를 moai-jlon 이 쥐어 대기), 리뷰가 넘긴 moai-bdej(못 푼 자리의 도장, 고치는 길이 사용자 결정이다)·moai-upna·moai-hzfu·moai-nppo(view.rs 는 옆 세션 자리다)."}
+{"ts":"2026-09-20T13:32:07Z","id":"moai-bdej","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정 (2026-09-20): 떨어진 자리를 past 에 넣어 다음 성한 쓰기가 합치게 한다. 리뷰 moai-shn2.mi7 이 낸 2번이다. 쓰기만 거절하는 길은 ESTALE 이 잠깐 나는 기계에서 moai read 가 가끔 지는 값을 치르고, 대기만 하는 길은 도장을 딴 파일에 둔 채로 둔다 — 값을 안 잃는 길이 이것뿐이라 골랐다. past 가 무엇을 드는가가 늘어나는 것과 떨어진 자리가 쌓일 때 합치는 값은 받아들인다."}
+{"ts":"2026-09-20T13:34:35Z","id":"moai-hom6.acg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — --help 영어와 탐색기 말잇기"}
+{"ts":"2026-09-20T13:34:43Z","id":"moai-hom6.acg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T13:37:10Z","id":"moai-bdej","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T13:37:21Z","id":"moai-54k2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}

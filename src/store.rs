@@ -102,7 +102,7 @@ pub fn remember_invoked() {
 /// `MOAI_HERE=0` 을 켬으로 읽어, 끄려던 사람에게 말없이 갈라진 스냅샷을 줬다.
 /// 켜는 낱말만 켠다 — `crate::skill` 의 `MOAI_BLESS` 와 같은 자다(거기도 `MOAI_BLESS=0` 이
 /// 커밋된 트리를 다시 쓰던 자리였다).
-fn here_wanted() -> bool {
+pub(crate) fn here_wanted() -> bool {
     let v = std::env::var_os("MOAI_HERE");
     let v = v.as_ref().map(|v| v.to_string_lossy().trim().to_ascii_lowercase());
     matches!(v.as_deref(), Some("1" | "true" | "yes" | "on"))
