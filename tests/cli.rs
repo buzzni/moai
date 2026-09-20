@@ -4775,7 +4775,8 @@ fn outside_a_repo_it_teaches_instead_of_erroring() {
     let out = moai(s.path(), &[]);
     assert!(out.status.success(), "{:?}", out.status.code());
     let text = String::from_utf8_lossy(&out.stdout);
-    for want in ["moai status", "moai ready", "add --from", "승인 게이트가 없다", "moai init"] {
+    // **도움말은 영어다**(moai-l5uf) — 이 화면은 `--help` 그대로다.
+    for want in ["moai status", "moai ready", "add --from", "no approval gate", "moai init"] {
         assert!(text.contains(want), "{want} 가 없다\n{text}");
     }
 }
