@@ -537,6 +537,18 @@ pub struct Workplace {
     /// 풀리는 것도 거짓이다** — 머지 충돌이 그렇다. 까닭과 값은 `crate::worktree::holds` 에 있다.
     #[serde(skip)]
     pub unknown: bool,
+    /// **그 스냅샷을 못 읽었다** — 파일 자체의 사실이다. [`Workplace::unknown`] 과 가른다
+    /// (moai-giz3): 저것은 *그래서 무엇을 쥐었는지 모른다* 는 판정 쪽 사실이라, 이름만으로 자리가
+    /// 다 잡혀 스냅샷을 아예 안 파는 길([`crate::worktree::workplaces_in`] 의 문)에서는 깨진
+    /// 파일이 있어도 서지 않았다. 그러면 같은 저장소를 `moai status` 는 조용히 지나고
+    /// `moai status --worktree` 는 그 워크트리를 대, 두 화면이 같은 상태를 달리 말한다
+    /// (moai-7p48 의 재현). 깨진 것은 고칠 사람이 있어야 고쳐지므로 그 사실은 판정과 무관하게
+    /// 선다 — `crate::worktree::Unread::all` 이 이것으로 센다.
+    ///
+    /// **`--json` 에 안 싣는다** — 이 값을 싣는 자리(`status --json` 의 `broken_worktrees`)가
+    /// 이미 "깨진 것들" 이라, 줄마다 참을 한 번 더 적는 셈이다. 늘린 키는 되무를 수 없다.
+    #[serde(skip)]
+    pub broken: bool,
 }
 
 /// 집은 줄 하나가 **어디에 서 있는가**(moai-xn9n·moai-lt7h). `status` 의 경고와 `show` 의 `자리`
@@ -3415,6 +3427,7 @@ mod tests {
             marked: BTreeSet::new(),
             born: None,
             unknown: false,
+            broken: false,
         }
     }
 

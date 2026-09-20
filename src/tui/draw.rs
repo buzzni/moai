@@ -3145,10 +3145,10 @@ pub(super) mod tests {
                     2 => {
                         let (shown, origin) = crate::worktree::overlay(
                             a.site.issues.clone(),
-                            vec![crate::worktree::Side::new("worktree-argos-0005", "/wt/argos-0005", vec![])],
+                            &[crate::worktree::Side::new("worktree-argos-0005", "/wt/argos-0005", vec![])],
                         );
                         a.adopt(shown);
-                        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
+                        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[]);
                     }
                     _ => {}
                 }
@@ -3402,13 +3402,13 @@ pub(super) mod tests {
     #[test]
     fn a_row_held_in_a_sibling_worktree_wears_the_branch_mark() {
         let mut a = every(issues());
-        let (shown, origin) = crate::worktree::overlay(a.site.issues.clone(), vec![crate::worktree::Side::new(
+        let (shown, origin) = crate::worktree::overlay(a.site.issues.clone(), &[crate::worktree::Side::new(
             "worktree-argos-0004",
             "/wt/argos-0004",
             vec![],
         )]);
         a.adopt(shown);
-        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[]);
         let seen = |a: &mut App| render(a, 120, 12).join("\n");
         // 가지 없는 줄에는 안 붙는다 — 뿌리의 에픽 줄로 본다.
         let root = seen(&mut a);
@@ -3438,13 +3438,13 @@ pub(super) mod tests {
         let mut rows = issues();
         rows[2].status = Status::new("done");
         let mut a = every(rows);
-        let (shown, origin) = crate::worktree::overlay(a.site.issues.clone(), vec![crate::worktree::Side::new(
+        let (shown, origin) = crate::worktree::overlay(a.site.issues.clone(), &[crate::worktree::Side::new(
             "worktree-argos-0004",
             "/wt/argos-0004",
             vec![],
         )]);
         a.adopt(shown);
-        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[]);
         a.hit("Enter");
         let text = render(&mut a, 120, 12).join("\n");
         let row = text.lines().find(|l| l.contains("집은 멤버")).unwrap_or_else(|| panic!("줄이 없다\n{text}"));
@@ -3750,7 +3750,7 @@ pub(super) mod tests {
         theirs.updated_at = "2026-09-02T00:00:00Z".into();
         let (all, origin) = crate::worktree::overlay(
             issues(),
-            vec![crate::worktree::Side::new("feat/x", "/wt", vec![theirs])],
+            &[crate::worktree::Side::new("feat/x", "/wt", vec![theirs])],
         );
         a.adopt(all);
         a.site.origin = origin;
@@ -5044,7 +5044,7 @@ pub(super) mod tests {
         assert!(a.worktree && !lines[0].contains('⎇'), "{:?}", lines[0]);
         // 옆이 있으면 층에서도 뱃지가 서지만, `SPC v w` 는 층의 메뉴에 안 서므로 끄는 법을 대지 않는다.
         let (_, origin) =
-            crate::worktree::overlay(Vec::new(), vec![crate::worktree::Side::new("feat/x", "/wt", vec![issues()[2].clone()])]);
+            crate::worktree::overlay(Vec::new(), &[crate::worktree::Side::new("feat/x", "/wt", vec![issues()[2].clone()])]);
         let plain = std::mem::replace(&mut a.site.origin, origin);
         let top = render(&mut a, 80, 22).remove(0);
         assert!(top.contains("⎇ feat/x"), "{top:?}");

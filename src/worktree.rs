@@ -214,7 +214,10 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
 /// 스냅샷을 안 바꾸고, 그것을 세려고 옆 저널을 읽으면 "저널은 상태 계산에 읽히지
 /// 않는다" 가 무너진다(moai-dyeu, 사용자와 정함). 옆에서 지운 줄(여기에만 있다)은 그대로
 /// 둔다 — 그 삭제는 브랜치가 합쳐질 때 반영된다.
-pub fn overlay(mine: Vec<Issue>, others: Vec<Side>) -> (Vec<Issue>, Origin) {
+/// **옆을 빌려 받는다**(moai-kos1) — 부르는 쪽([`gather`])이 그 스냅샷을 그대로 들고 있어야
+/// 자리 셈([`workplaces_in`])이 같은 파일을 다시 열지 않는다. 겹쳐 세우는 줄만 베끼므로 베끼는
+/// 수는 보통 몇 줄이다 — 옆 줄은 거의 다 이쪽에도 같은 값으로 있어 그냥 지나간다.
+pub fn overlay(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin) {
     let mut shown = mine;
     let mut origin = Origin::default();
     // id → `shown` 의 자리. 제 줄이 둘이면 **뒷자리를** 적는다 — `store::Load::get`·
@@ -225,13 +228,13 @@ pub fn overlay(mine: Vec<Issue>, others: Vec<Side>) -> (Vec<Issue>, Origin) {
     for (k, i) in shown.iter().enumerate() {
         at.insert(i.id.clone(), k);
     }
-    for (tree, Side { label, root, issues, base, holds }) in others.into_iter().enumerate() {
-        origin.trees.push((label, root, holds));
+    for (tree, Side { label, root, issues, base, holds }) in others.iter().enumerate() {
+        origin.trees.push((label.clone(), root.clone(), holds.clone()));
         for i in issues {
             match at.get(&i.id) {
                 Some(&k) if (i.planned(), i.updated_at.as_str()) > (shown[k].planned(), shown[k].updated_at.as_str()) => {
                     origin.from.insert(i.id.clone(), tree);
-                    shown[k] = i;
+                    shown[k] = i.clone();
                 }
                 Some(_) => {}
                 None if base.get(&i.id).is_some_and(|then| i.updated_at <= *then) => {}
@@ -239,7 +242,7 @@ pub fn overlay(mine: Vec<Issue>, others: Vec<Side>) -> (Vec<Issue>, Origin) {
                     at.insert(i.id.clone(), shown.len());
                     origin.added.insert(i.id.clone());
                     origin.from.insert(i.id.clone(), tree);
-                    shown.push(i);
+                    shown.push(i.clone());
                 }
             }
         }
@@ -281,6 +284,25 @@ pub struct Gathered {
     /// 워크트리들의 HEAD 가 움직인 것을 알리는 git 파일도 든다([`heads`]) — 갈라진 자리가
     /// 바뀌면 지운 줄 숨김의 답이 바뀐다(moai-pqrq).
     pub watched: Vec<(PathBuf, crate::store::Stamp)>,
+    /// **읽어 낸 옆 스냅샷 그대로**(moai-kos1) — 자리 셈([`workplaces_in`])이 같은 파일을 다시
+    /// 열어 파지 않게 실어 보낸다. 바로 앞에서 겹치며 이미 판 것이라, 탐색기는 걸음마다 옆
+    /// 스냅샷을 두 벌씩 풀고 있었다(이 저장소에서 ~130ms).
+    ///
+    /// **못 읽은 옆은 여기 없다** — 그쪽은 `trouble` 이 대고, 자리 셈이 제 손으로 열어 보고
+    /// `unknown`·`broken` 을 세운다. 겹쳐 보지 않았으면 비어 있다.
+    pub sides: Vec<Side>,
+}
+
+/// 이미 판 옆 스냅샷 — 워크트리의 moai 뿌리(정규화) → 그 파일에서 읽은 줄([`dug`]).
+pub type Dug<'a> = BTreeMap<PathBuf, &'a [Issue]>;
+
+/// 판 것([`Gathered::sides`])을 자리 셈([`workplaces_in`])이 찾을 모양으로.
+///
+/// **뿌리를 정규화해 맞춘다** — 겹치기는 git 에게 물어 목록을 얻고([`others_of`]) 자리 셈은 git 이
+/// 적어 둔 파일만 읽어([`on_disk`]), 같은 워크트리가 글자만 다른 경로로 올 수 있다. 못 맞추면 그
+/// 워크트리만 예전처럼 다시 판다 — 최악이 지금과 같다.
+pub fn dug(sides: &[Side]) -> Dug<'_> {
+    sides.iter().map(|s| (canonical(&s.root), s.issues.as_slice())).collect()
 }
 
 /// 제 저장소를 읽고, `worktree` 면 다른 워크트리의 스냅샷을 겹친다.
@@ -298,6 +320,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
             unfound: None,
             swept: false,
             watched: Vec::new(),
+            sides: Vec::new(),
         });
     }
     let mut trouble = Vec::new();
@@ -353,10 +376,10 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
         }
     }
     let Load { issues, errors } = load;
-    let (issues, mut origin) = overlay(issues, others);
+    let (issues, mut origin) = overlay(issues, &others);
     origin.named = named;
     let swept = unfound.is_none();
-    Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, swept, watched })
+    Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, swept, watched, sides: others })
 }
 
 /// 옆 워크트리 하나의 줄을 겹칠 모양으로 — 옆에만 있는 줄이 있으면 갈라진 자리([`Side::base`])를 댄다.
@@ -422,7 +445,7 @@ pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, crate::hook::
             others.push(side(&repo.root, &here, head, tree, root, other.issues, &mut bases));
         }
     }
-    Some((overlay(mine, others).0, away))
+    Some((overlay(mine, &others).0, away))
 }
 
 /// 워크트리들의 HEAD 가 움직인 것을 알아챌 git 파일과 **지금 잰** 표식 — 제 워크트리와
@@ -569,7 +592,8 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
         if *me || !*linked {
             continue;
         }
-        let (open, later) = holds(&disk, tree, mine, cfg).unwrap_or_default();
+        // 훅은 겹쳐 본 결과를 들고 오지 않는다 — 판 것이 없으니 제 손으로 연다.
+        let (open, later) = holds(&disk, tree, mine, cfg, &Dug::new()).unwrap_or_default();
         out.extend(open);
         out.extend(later);
         // **그 워크트리가 적어 둔 집기도 든다**(moai-y7go, 리뷰 moai-71ht 셋째 판) — 쓰기가 루트로
@@ -602,21 +626,43 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
 /// 사실이고, 이것을 모름으로 세면 그런 워크트리 하나가 저장소 전체의 `stranded` 를 영영 재운다
 /// ([`crate::report::places`] 의 `blind`). 스냅샷 없는 워크트리를 두고 말하지 않는 것은 이미 선
 /// 규약이다(`worktree_writes_nothing_and_skips_trees_without_a_snapshot`).
-fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) -> Option<(BTreeSet<String>, BTreeSet<String>)> {
-    let path = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
+fn holds(
+    disk: &Disk,
+    tree: &Tree,
+    mine: &[Issue],
+    cfg: &crate::config::Config,
+    dug: &Dug<'_>,
+) -> Option<(BTreeSet<String>, BTreeSet<String>)> {
+    let at = tree.path.join(&disk.rel);
+    // **이미 판 것이 있으면 다시 안 판다**(moai-kos1) — 겹쳐 보는 길([`gather`])은 바로 앞에서
+    // 같은 파일을 열어 풀었다. 재는 자는 그대로 아래 하나다: 건네받은 것도 안 건네받은 것도
+    // [`holds_of`] 를 지난다.
+    if let Some(side) = dug.get(&canonical(&at)) {
+        return Some(holds_of(side, mine, cfg));
+    }
+    let path = at.join(".moai").join("issues.jsonl");
     let side = match crate::store::read_snapshot(&path) {
         Ok(Some(side)) => side,
         Ok(None) => return Some(Default::default()),
         Err(_) => return None,
     };
+    Some(holds_of(&side.issues, mine, cfg))
+}
+
+/// [`holds`] 의 셈 — **판 줄을 받아 잰다.** 파는 것과 재는 것을 가른 까닭은 겹쳐 보는 길이 같은
+/// 파일을 이미 풀어 두기 때문이다(moai-kos1). 판정은 여기 하나다.
+fn holds_of(
+    side: &[Issue],
+    mine: &[Issue],
+    cfg: &crate::config::Config,
+) -> (BTreeSet<String>, BTreeSet<String>) {
     let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
     // **벌여 놓인 줄은 자리 셈의 자로 잰다**([`crate::report::started`]) — 가려진 쌍둥이 줄도 든다
     // (moai-es40, 사용자 결정). `report::wip` 은 그 줄을 빼므로, 그것으로 재면 머지가 남긴 id 충돌
     // 하나로 이 워크트리에서 도는 줄이 `places` 에서 자리를 잃는다. 훅의 짐작(`hook::unsure`)은
     // 제 초점(`wip`)과 겹치는 id 만 쓰므로 더 든 id 로 답이 안 바뀐다.
-    let open = crate::report::started(&side.issues, cfg).into_iter().map(|i| i.id.clone()).collect();
+    let open = crate::report::started(side, cfg).into_iter().map(|i| i.id.clone()).collect();
     let later = side
-        .issues
         .iter()
         .filter(|i| {
             // 여기에 없는 줄은 그 워크트리에서 세운 것이다 — 그것도 만진 흔적이다.
@@ -626,7 +672,30 @@ fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) 
         })
         .map(|i| i.id.clone())
         .collect();
-    Some((open, later))
+    (open, later)
+}
+
+/// 그 워크트리의 스냅샷 파일 자리 — [`holds`] 와 값싼 문([`unreadable_snapshot`])이 같은 자를 쓴다.
+fn snapshot_in(disk: &Disk, tree: &Tree) -> PathBuf {
+    tree.path.join(&disk.rel).join(".moai").join("issues.jsonl")
+}
+
+/// **그 스냅샷을 못 읽는가** — 값싼 자다: 열어서 한 바이트를 읽어 본다.
+///
+/// 없는 것은 못 읽는 것이 아니다([`holds`] 의 `Ok(None)` 과 같은 답) — moai 를 들이기 전에
+/// 갈라진 가지다. 자리에 디렉터리가 섰으면 열리기는 해도 안 읽혀 여기서 걸린다(moai-7p48 의
+/// 재현이 그 꼴이다).
+///
+/// **읽어 보지는 않는다** — 스냅샷을 푸는 값이 이 문을 둔 까닭이고(moai-7igy 의 측정), 여는
+/// 것은 그 값의 수천분의 일이다. 같은 자리에서 이미 워크트리마다 작은 파일 하나를 읽고 있다
+/// ([`held_here`]). 그래서 이 문과 파는 길의 답이 갈리는 자리가 하나 남는다 — 열려서 첫 바이트도
+/// 읽히는데 그다음이 깨진 파일. 그런 판은 파는 길이 제 답으로 덮는다.
+fn unreadable_snapshot(path: &Path) -> bool {
+    use std::io::Read;
+    match std::fs::File::open(path) {
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+        Ok(mut f) => f.read(&mut [0u8]).is_err(),
+    }
 }
 
 /// 살아 있는 **딸린** 워크트리마다 자리 하나(moai-ir8q) — 판정은 `report::places`·`report::stranded`.
@@ -675,7 +744,7 @@ pub fn workplaces(
     worktree: bool,
     asked: &[Issue],
 ) -> Vec<crate::report::Workplace> {
-    workplaces_in(root, worktree, &crate::report::Footing::of(asked, cfg))
+    workplaces_in(root, worktree, &crate::report::Footing::of(asked, cfg), &Dug::new())
 }
 
 /// [`workplaces`] 와 같은 것. **자리 판정의 재료를 받는다**([`crate::report::Footing`]) — 문을 여는
@@ -688,6 +757,7 @@ pub fn workplaces_in(
     root: &Path,
     worktree: bool,
     footing: &crate::report::Footing<'_, '_>,
+    dug: &Dug<'_>,
 ) -> Vec<crate::report::Workplace> {
     if !worktree && is_linked(root) {
         return Vec::new();
@@ -714,6 +784,7 @@ pub fn workplaces_in(
         marked: BTreeSet::new(),
         born: None,
         unknown: false,
+        broken: false,
     };
     let mut out: Vec<crate::report::Workplace> = linked.iter().map(|tree| bare(tree)).collect();
     // **집은 표식은 빠른 길에서도 읽는다**([`note_held`], 리뷰 moai-71ht 셋째 판의 훑기) — 옆 스냅샷과
@@ -724,6 +795,10 @@ pub fn workplaces_in(
         if let Some(dir) = disk.admin.get(&tree.path) {
             place.marked = held_here(dir);
         }
+        // **깨진 스냅샷은 안 파는 길에서도 선다**(moai-giz3, idea moai-7p48) — 아래 문이 닫히면
+        // 이 워크트리는 `unknown` 도 `holds` 도 없이 지나가, 깨진 파일이 어느 화면에도 안 섰다.
+        // 그 사실은 자리 판정과 상관없이 고칠 사람이 있어야 고쳐진다([`crate::report::Workplace::broken`]).
+        place.broken = unreadable_snapshot(&snapshot_in(&disk, tree));
     }
     // 이름만으로 자리가 다 잡히면(또는 집은 줄이 없으면) 스냅샷을 한 벌도 안 판다.
     //
@@ -755,12 +830,17 @@ pub fn workplaces_in(
         place.born = disk.admin.get(&tree.path).and_then(|dir| born_of(dir));
         // **제 워크트리도 남과 같은 자로 잰다.** 한때 비워 두었더니, 이름이 id 가 아닌
         // 워크트리(에이전트 격리)가 제가 하고 있는 일을 제 화면에서 "자리 없다" 로 댔다.
-        match holds(&disk, tree, mine, footing.cfg()) {
+        // **판 결과가 임자다** — 위의 값싼 문은 열어 보는 데까지고, 여기는 실제로 읽은 답이다.
+        match holds(&disk, tree, mine, footing.cfg(), dug) {
             Some((holds, touched)) => {
                 place.holds = holds;
                 place.touched = touched;
+                place.broken = false;
             }
-            None => place.unknown = true,
+            None => {
+                place.unknown = true;
+                place.broken = true;
+            }
         }
     }
     out
@@ -1008,15 +1088,29 @@ pub fn stranded_at(
     worktree: bool,
     now: &str,
 ) -> (Option<crate::report::Warning>, Unread) {
+    stranded_at_in(root, cfg, issues, worktree, now, &Dug::new())
+}
+
+/// [`stranded_at`] 과 같은 것. **겹치며 이미 판 옆 스냅샷을 받는다**([`Dug`], moai-kos1) — 탐색기와
+/// `moai status --worktree` 는 바로 앞에서 그 파일들을 열어 풀었다.
+pub fn stranded_at_in(
+    root: &Path,
+    cfg: &crate::config::Config,
+    issues: &[Issue],
+    worktree: bool,
+    now: &str,
+    dug: &Dug<'_>,
+) -> (Option<crate::report::Warning>, Unread) {
     // **재료는 한 벌이다**([`crate::report::Footing`], moai-rviv) — 문(`workplaces_in`)과 그 뒤의
     // 판정 둘이 같은 줄을 세고 같은 소속 지도를 읽는다. 저마다 지으면 `moai status` 한 번에 집은
     // 줄을 네 번 고르고 `groups` 를 예닐곱 번 짓는다. 게을러서, 볼 워크트리가 없으면 안 짓는다.
     let footing = crate::report::Footing::of(issues, cfg);
-    let trees = workplaces_in(root, worktree, &footing);
+    let trees = workplaces_in(root, worktree, &footing, dug);
     let warning = crate::report::stranded_in(&footing, &trees, now);
     let blinding: Vec<crate::report::Workplace> =
         crate::report::blinding_in(&footing, &trees).into_iter().cloned().collect();
-    let all = trees.into_iter().filter(|t| t.unknown).collect();
+    // **깨진 것 전부다** — 판정을 가렸는지(`unknown`)가 아니라 그 파일이 깨졌는가다(moai-giz3).
+    let all = trees.into_iter().filter(|t| t.broken).collect();
     (warning, Unread { all, blinding })
 }
 
@@ -1337,7 +1431,7 @@ mod tests {
             issue("m-0003", "todo", at),
         ]);
         side.base = [("m-0001".to_string(), at.to_string()), ("m-0002".to_string(), at.to_string())].into();
-        let (shown, origin) = overlay(vec![], vec![side]);
+        let (shown, origin) = overlay(vec![], &[side]);
         let ids: Vec<&str> = shown.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, ["m-0002", "m-0003"], "지운 줄이 되살았거나 옆의 작업이 사라졌다");
         assert_eq!(origin.branch("m-0001"), None);
@@ -1348,7 +1442,7 @@ mod tests {
         quiet.base = [("m-0001".to_string(), at.to_string())].into();
         let mut busy = tree("b", vec![issue("m-0001", "review", later)]);
         busy.base = quiet.base.clone();
-        let (shown, origin) = overlay(vec![], vec![quiet, busy]);
+        let (shown, origin) = overlay(vec![], &[quiet, busy]);
         assert_eq!(shown.len(), 1);
         assert_eq!(origin.branch("m-0001"), Some("b"));
     }
@@ -1358,7 +1452,7 @@ mod tests {
     /// **훅과 같은 자**([`names`])로 가른다 — 후보가 통째로 같아야 쥔 것이다(moai-nxt4 리뷰).
     #[test]
     fn a_sibling_worktree_holding_the_issue_is_found() {
-        let (_, origin) = overlay(vec![issue("moai-3fnf", "in_progress", "2026-09-15T00:00:00Z")], vec![
+        let (_, origin) = overlay(vec![issue("moai-3fnf", "in_progress", "2026-09-15T00:00:00Z")], &[
             tree("worktree-moai-3fnf", vec![]),
             tree("feat/moai-9xyz-따로", vec![]),
         ]);
@@ -1368,11 +1462,11 @@ mod tests {
         assert_eq!(origin.working("moai-9xyz"), None, "id 가 이름의 한 토막일 뿐인데 쥐었다고 했다");
         assert_eq!(origin.working("moai-3fn"), None, "id 의 앞토막이 남의 가지에 걸렸다");
         // 자식의 워크트리는 부모 줄에 안 붙는다 — 부모가 제가 집힌 줄 안다.
-        let (_, child) = overlay(vec![], vec![tree("worktree-moai-3fnf.abc", vec![])]);
+        let (_, child) = overlay(vec![], &[tree("worktree-moai-3fnf.abc", vec![])]);
         assert_eq!(child.working("moai-3fnf"), None);
         assert_eq!(child.working("moai-3fnf.abc"), Some("worktree-moai-3fnf.abc"));
         // 가지 이름 그대로도 후보다 — `-b` 없이 띄운 워크트리.
-        let (_, plain) = overlay(vec![], vec![tree("moai-3fnf", vec![])]);
+        let (_, plain) = overlay(vec![], &[tree("moai-3fnf", vec![])]);
         assert_eq!(plain.working("moai-3fnf"), Some("moai-3fnf"));
     }
 
@@ -1381,7 +1475,7 @@ mod tests {
         let mine = vec![issue("m-0001", "todo", "2026-09-12T00:00:00Z"), issue("m-0002", "todo", "2026-09-12T00:00:00Z")];
         let (shown, origin) = overlay(
             mine,
-            vec![tree("feat/x", vec![
+            &[tree("feat/x", vec![
                 issue("m-0001", "in_progress", "2026-09-13T00:00:00Z"),
                 issue("m-0002", "done", "2026-09-11T00:00:00Z"),
             ])],
@@ -1399,7 +1493,7 @@ mod tests {
         let mut picked = issue("m-0001", "in_progress", "2026-09-12T00:00:00Z");
         picked.status_since = "2026-09-12T00:00:00Z".into();
         let edited = issue("m-0001", "todo", "2026-09-13T00:00:00Z");
-        let (shown, origin) = overlay(vec![edited], vec![tree("feat/x", vec![picked])]);
+        let (shown, origin) = overlay(vec![edited], &[tree("feat/x", vec![picked])]);
         assert_eq!(shown[0].status.as_str(), "in_progress", "늦은 필드 편집이 옆에서 집은 것을 풀었다");
         assert_eq!(origin.branch("m-0001"), Some("feat/x"));
 
@@ -1407,7 +1501,7 @@ mod tests {
         let mut moved = issue("m-0002", "done", "2026-09-12T00:00:00Z");
         moved.status_since = "2026-09-12T00:00:00Z".into();
         let theirs = issue("m-0002", "todo", "2026-09-13T00:00:00Z");
-        let (shown, origin) = overlay(vec![moved], vec![tree("feat/x", vec![theirs])]);
+        let (shown, origin) = overlay(vec![moved], &[tree("feat/x", vec![theirs])]);
         assert_eq!(shown[0].status.as_str(), "done");
         assert_eq!(origin.branch("m-0002"), None);
     }
@@ -1423,7 +1517,7 @@ mod tests {
         let mut shelved = issue("m-0001", "todo", t2);
         shelved.deferred_at = Some(t2.into());
         shelved.planned_at = Some(t2.into());
-        let (shown, origin) = overlay(vec![picked], vec![tree("feat/x", vec![shelved.clone()])]);
+        let (shown, origin) = overlay(vec![picked], &[tree("feat/x", vec![shelved.clone()])]);
         assert!(shown[0].is_deferred(), "옆에서 늦게 미룬 것이 여기서 먼저 집은 줄에 가려졌다");
         assert_eq!(origin.branch("m-0001"), Some("feat/x"));
 
@@ -1433,7 +1527,7 @@ mod tests {
         here.status_since = t2.into();
         let mut back = issue("m-0001", "todo", t3);
         back.planned_at = Some(t3.into());
-        let (shown, origin) = overlay(vec![here], vec![tree("feat/x", vec![back])]);
+        let (shown, origin) = overlay(vec![here], &[tree("feat/x", vec![back])]);
         assert!(!shown[0].is_deferred(), "옆에서 도로 집은 것이 여기서 미룬 줄에 가려졌다");
         assert_eq!(origin.branch("m-0001"), Some("feat/x"));
 
@@ -1444,7 +1538,7 @@ mod tests {
         let mut later_shelf = issue("m-0001", "todo", t3);
         later_shelf.deferred_at = Some(t3.into());
         later_shelf.planned_at = Some(t3.into());
-        let (shown, origin) = overlay(vec![later_shelf], vec![tree("feat/x", vec![moved])]);
+        let (shown, origin) = overlay(vec![later_shelf], &[tree("feat/x", vec![moved])]);
         assert_eq!(shown[0].status.as_str(), "review", "늦게 옮긴 칸이 그 전의 미룸에 졌다");
         assert_eq!(origin.branch("m-0001"), Some("feat/x"));
     }
@@ -1729,7 +1823,7 @@ mod tests {
         let at = "2026-09-13T00:00:00Z";
         let (shown, origin) = overlay(
             vec![issue("m-0001", "todo", at)],
-            vec![
+            &[
                 tree("a", vec![issue("m-0001", "done", at), issue("m-0002", "review", at)]),
                 tree("b", vec![issue("m-0001", "review", at), issue("m-0002", "done", at)]),
             ],
@@ -1745,7 +1839,7 @@ mod tests {
     fn a_line_only_elsewhere_is_shown_in_id_order() {
         let (shown, origin) = overlay(
             vec![issue("m-0003", "todo", "2026-09-12T00:00:00Z")],
-            vec![tree("feat/x", vec![issue("m-0001", "todo", "2026-09-01T00:00:00Z")])],
+            &[tree("feat/x", vec![issue("m-0001", "todo", "2026-09-01T00:00:00Z")])],
         );
         let ids: Vec<&str> = shown.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, ["m-0001", "m-0003"]);
@@ -1758,7 +1852,7 @@ mod tests {
         let at = "2026-09-12T00:00:00Z";
         let (shown, _) = overlay(
             vec![issue("m-0001", "todo", at), issue("m-0001", "review", at)],
-            vec![tree("feat/x", vec![])],
+            &[tree("feat/x", vec![])],
         );
         assert_eq!(shown.len(), 2);
         assert_eq!(shown[1].status.as_str(), "review", "읽은 차례가 뒤집혔다");
@@ -1767,7 +1861,7 @@ mod tests {
         let later = "2026-09-13T00:00:00Z";
         let (shown, _) = overlay(
             vec![issue("m-0001", "todo", at), issue("m-0001", "review", at)],
-            vec![tree("feat/x", vec![issue("m-0001", "done", later)])],
+            &[tree("feat/x", vec![issue("m-0001", "done", later)])],
         );
         let cols: Vec<&str> = shown.iter().map(|i| i.status.as_str()).collect();
         assert_eq!(cols, ["todo", "done"], "옆 줄이 앞줄을 덮었다");
@@ -1781,7 +1875,7 @@ mod tests {
         let later = "2026-09-13T00:00:00Z";
         let (_, origin) = overlay(
             vec![issue("m-0002", "todo", at)],
-            vec![tree("feat/x", vec![issue("m-0001", "todo", at), issue("m-0002", "review", later)])],
+            &[tree("feat/x", vec![issue("m-0001", "todo", at), issue("m-0002", "review", later)])],
         );
         assert_eq!(origin.unreadable([Some("m-0001")].into_iter()), [None]);
         assert_eq!(origin.unreadable([Some("m-0002")].into_iter()), [Some("m-0002")]);

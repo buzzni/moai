@@ -86,7 +86,7 @@ fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
 
 pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
     let repo = Repo::discover()?;
-    let crate::worktree::Gathered { load, origin, .. } = super::gather(&repo, args.worktree.worktree)?;
+    let crate::worktree::Gathered { load, origin, sides, .. } = super::gather(&repo, args.worktree.worktree)?;
     super::report_load_errors(&repo.issues_path(), &load.errors);
 
     let target = match kind_filter {
@@ -113,7 +113,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         if args.as_plan {
             return plan(ctx, &load.issues, issue, args.raw);
         }
-        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree);
+        // 겹치며 이미 판 옆 스냅샷을 그대로 넘긴다 — 자리를 물을 때 같은 파일을 다시 안 판다(moai-kos1).
+        let dug = crate::worktree::dug(&sides);
+        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree, &dug);
     }
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
@@ -375,6 +377,7 @@ fn one(
     raw: bool,
     origin: &crate::worktree::Origin,
     worktree: bool,
+    dug: &crate::worktree::Dug<'_>,
 ) -> R<Vec<String>> {
     // **에픽도 뒷줄로 푼다** — 펼친 줄을 고른 자(`Load::get`)와 같다(moai-e0ro).
     let epic = issue.epic.as_ref().and_then(|e| all.iter().rfind(|i| &i.id == e));
@@ -407,7 +410,7 @@ fn one(
         // 옮겨 가지만(`Repo::find_from`) "여기가 어디냐" 는 여전히 이 체크아웃이다. 루트로 재던 판은
         // 워크트리 안에서도 자리를 파고 제 워크트리를 옆으로 세어, 겹쳐 보지 않을 때는 안 판다는
         // 결정(moai-6opu)이 조용히 꺼졌다.
-        crate::worktree::workplaces_in(repo.here(), worktree, &footing)
+        crate::worktree::workplaces_in(repo.here(), worktree, &footing, dug)
     } else {
         Vec::new()
     };
