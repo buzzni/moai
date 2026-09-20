@@ -86,7 +86,7 @@ fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
 
 pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
     let repo = Repo::discover()?;
-    let crate::worktree::Gathered { load, origin, .. } = super::gather(&repo, args.worktree.worktree)?;
+    let crate::worktree::Gathered { load, origin, sides, .. } = super::gather(&repo, args.worktree.worktree)?;
     super::report_load_errors(&repo.issues_path(), &load.errors);
 
     let target = match kind_filter {
@@ -113,7 +113,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         if args.as_plan {
             return plan(ctx, &load.issues, issue, args.raw);
         }
-        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree);
+        // 겹치며 이미 판 옆 스냅샷을 그대로 넘긴다 — 자리를 물을 때 같은 파일을 다시 안 판다(moai-kos1).
+        let dug = crate::worktree::dug(&sides);
+        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree, &dug);
     }
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
@@ -186,7 +188,14 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // "없다." 라고 하면, 방금 담은 사람은 파일이 비었다고 믿는다.
     let asked_deferred = filter.deferred.is_some();
     let wide = Filter { all: true, ideas: true, ..filter.clone() };
-    let wh = crate::query::Where::of(&load.issues, &repo.config);
+    // **소속 지도는 한 벌이다**(moai-g0zx) — 거름망과 트리의 색인·에픽 굴림이 저마다 지으면
+    // `groups` 가 한 명령에 세 벌 돈다. 지도를 빌려 쓰는 둘을 먼저 짓고, 그것을 제 필드로 들고
+    // 사는 거름망(`Where::from_soil`)이 마지막에 지도를 받아 간다.
+    let soil = crate::report::Soil::of(&load.issues);
+    let tree_now = args.tree && !ctx.json;
+    let index = tree_now.then(|| crate::nav::Index::in_soil(&load.issues, &soil));
+    let rolls = tree_now.then(|| report::rollup_in(&load.issues, &repo.config, &soil));
+    let wh = crate::query::Where::from_soil(&load.issues, &repo.config, soil);
     let mut shown: Vec<Issue> = Vec::new();
     // 숨긴 줄과 까닭. **세는 것은 그린 뒤다** — 트리는 걸리지 않은 줄도 걸린
     // 자손의 조상이면 그리므로, 먼저 세면 방금 그린 줄을 숨겼다고 말한다.
@@ -225,21 +234,18 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
             .collect();
         return super::json_line(&rows);
     }
-    if args.tree {
+    // **문은 지도를 지은 그 자다**(`tree_now`) — `args.tree` 로 다시 적으면 아래의 `expect` 가
+    // 멀리 떨어진 `if ctx.json` 의 되돌아감에 기대게 되고, 그 차례를 건드리는 날 CLI 가 터진다.
+    if tree_now {
         // **자리는 `nav` 가 정한다.** 트리와 탐색기가 자리를 따로 정하면
         // 어긋나고, 실제로 어긋났다 — 제 에픽이 부모와 다른 자식이 두 번
         // 나왔고 끊긴 참조를 가진 줄은 아예 사라졌다.
         let shown_ids: std::collections::BTreeSet<&str> =
             shown.iter().map(|i| i.id.as_str()).collect();
-        let index = crate::nav::Index::of(&load.issues);
+        // 위에서 지도 한 벌로 지은 것이다 — `tree_now` 가 참일 때만 서 있다.
+        let (index, rolls) = (index.expect("트리 색인"), rolls.expect("에픽 굴림"));
         let keep = |at: usize| shown_ids.contains(load.issues[at].id.as_str());
-        let (mut out, drawn) = view::tree(
-            &load.issues,
-            &index,
-            &keep,
-            &report::rollup(&load.issues, &repo.config),
-            &origin,
-        );
+        let (mut out, drawn) = view::tree(&load.issues, &index, &keep, &rolls, &origin);
         // **트리도 안 낸 것을 말한다.** 롤업 머리글은 `is_work` 로 세므로
         // 미뤄 둔 멤버까지 세는데, 그 줄은 여기서 빠진다 — 말하지 않으면
         // `0/2` 밑에 줄 하나만 서고 왜 하나가 없는지 아무도 모른다. 목록이
@@ -373,6 +379,7 @@ fn one(
     raw: bool,
     origin: &crate::worktree::Origin,
     worktree: bool,
+    dug: &crate::worktree::Dug<'_>,
 ) -> R<Vec<String>> {
     // **에픽도 뒷줄로 푼다** — 펼친 줄을 고른 자(`Load::get`)와 같다(moai-e0ro).
     let epic = issue.epic.as_ref().and_then(|e| all.iter().rfind(|i| &i.id == e));
@@ -396,18 +403,22 @@ fn one(
     // 규약의 자리(`.claude/worktrees/<id>`)가 어느 자리에서 펼치든 같은 글자로 나와, 그대로
     // `EnterWorktree` 에 옮길 수 있다. `status` 의 못 읽은 워크트리와 같은 자다 — 부르는 쪽마다
     // 따로 재던 때는 빈 경로를 다루는 법이 갈렸다.
-    let trees: Vec<report::Workplace> = if report::placeable(all, &repo.config, issue) {
+    // **자리 판정의 재료는 한 벌이다**([`report::Footing`], moai-rviv) — 문(`placeable`), 스냅샷을
+    // 팔지 고르는 문(`workplaces`), 그리고 판정(`places`)이 저마다 집은 줄을 고르고 소속 지도를
+    // 지었다. 게을러서, 아래 문이 닫히면 한 벌도 안 짓는다.
+    let footing = report::Footing::of(all, &repo.config);
+    let trees: Vec<report::Workplace> = if report::placeable_in(&footing, issue) {
         // **자리는 세션이 선 체크아웃에서 잰다**(리뷰 moai-71ht.jlh 사용자 결정) — 트래커는 루트로
         // 옮겨 가지만(`Repo::find_from`) "여기가 어디냐" 는 여전히 이 체크아웃이다. 루트로 재던 판은
         // 워크트리 안에서도 자리를 파고 제 워크트리를 옆으로 세어, 겹쳐 보지 않을 때는 안 판다는
         // 결정(moai-6opu)이 조용히 꺼졌다.
-        crate::worktree::workplaces(repo.here(), &repo.config, worktree, all)
+        crate::worktree::workplaces_in(repo.here(), worktree, &footing, dug)
     } else {
         Vec::new()
     };
     // 워크트리가 없으면 `places` 가 아무 키도 안 내므로(moai-tbin) 여기 가드를 따로 두지 않는다 —
     // 두면 "자리를 물을 수 있는가" 를 재는 자가 둘이 된다.
-    let places = report::places(all, &repo.config, &trees, &model::now()).remove(&issue.id);
+    let places = report::places_in(&footing, &trees, &model::now()).remove(&issue.id);
     let seen = view::Seen {
         roots: report::deferred_roots(all),
         states: report::group_states_of(all, &repo.config, &near),
@@ -510,7 +521,16 @@ fn one(
         // `report::group_members` 로 고른다.
         let mine: BTreeSet<&str> =
             report::group_members(all, issue).iter().map(|i| i.id.as_str()).collect();
-        let roll = report::rollup_of(issue.kind, all, &repo.config)
+        // **소속 지도는 한 벌이다**(moai-g0zx) — 목록 쪽(`run`)과 같은 까닭이다. 이 밑에서
+        // 머리글의 굴림·색인·멤버 굴림 셋이 저마다 지으면 `groups` 가 한 번 펼치는 데 세 벌
+        // 돈다(마일스톤이면 `milestones` 가 안에서 또 지어 네 벌이다).
+        let soil = report::Soil::of(all);
+        let eclipsed = soil.eclipsed();
+        let group = match issue.kind {
+            Kind::Milestone => &soil.milestone,
+            _ => &soil.epic,
+        };
+        let roll = report::rollup_of_in(issue.kind, all, &repo.config, group, &eclipsed)
             .into_iter()
             .find(|r| r.id.as_deref() == Some(issue.id.as_str()));
         if let Some(r) = &roll {
@@ -528,7 +548,7 @@ fn one(
         // **자리를 못 찾으면 아무것도 내지 않는다.** 뿌리로 되돌리면 그 에픽의
         // 멤버라며 저장소 전부를 낸다 — 없는 답보다 틀린 답이 비싸다.
         if !mine.is_empty() {
-            let index = crate::nav::Index::of(all);
+            let index = crate::nav::Index::in_soil(all, &soil);
             let here = index.find(&issue.id).map(|at| {
                 let mut p = index.home_of(at).clone();
                 p.push(index.seg_of(all, at));
@@ -541,7 +561,7 @@ fn one(
                 // (마일스톤 밑의 에픽, 에픽 밑에는 없다), 빈 것을 건네면 그 줄이
                 // 집계를 잃어 `에픽 1건` 처럼 나온다 — 같은 에픽이 `moai show
                 // --tree` 와 다르게 읽힌다.
-                let rolls = report::rollup(all, &repo.config);
+                let rolls = report::rollup_in(all, &repo.config, &soil);
                 out.extend(view::members(all, &index, &keep, &rolls, &here, origin));
             }
         }

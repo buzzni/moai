@@ -25,7 +25,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let Some(repo) = Repo::find()? else {
         return overview(ctx, worktree);
     };
-    let crate::worktree::Gathered { load, origin, trouble, unfound, swept, .. } = super::gather(&repo, worktree)?;
+    let crate::worktree::Gathered { load, origin, trouble, unfound, swept, sides, .. } =
+        super::gather(&repo, worktree)?;
     // stderr 에 한 줄씩 낸 것의 수 — 보드가 "문제 없다" 로 그 말을 뒤집지 않게 넘긴다(moai-cuw2).
     let trouble = trouble.len() + usize::from(unfound.is_some());
     // **그 줄이 쓰는 id** 까지 넘긴다 — id 가 있어야 산 줄과의 중복이
@@ -51,7 +52,16 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 자다. 트래커의 자리로 재던 판은 루트로 옮겨 간 워크트리 안에서 `status` 만 자리를 파, 같은
     // 자리에서 `show` 는 아무 말도 안 하는데 보드는 `자리 없다` 를 댔다(moai-6opu.p65 가 한 곳에
     // 모아 둔 판단이 부르는 쪽마다 다른 뿌리를 받아 또 갈렸다).
-    let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, swept, &now);
+    // 겹치며 이미 판 옆 스냅샷을 넘긴다(moai-kos1) — `--worktree` 면 `gather` 가 그 파일을
+    // 방금 열어 풀었고, 안 겹쳐 봤으면 비어 있어 예전 그대로다.
+    let (lost, unread) = crate::worktree::stranded_at_in(
+        repo.here(),
+        &repo.config,
+        &load.issues,
+        swept,
+        &now,
+        &crate::worktree::dug(&sides),
+    );
     st.warnings.extend(lost);
     // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정에서 그 워크트리는 "아무도
     // 없다" 가 아니라 "모른다" 로 빠지므로(`report::Place::Unknown`), 말이 없으면 경고가 조용한
@@ -77,8 +87,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **여기서 대는 것은 판정을 가렸는지와 상관없이 못 읽은 것 전부다**(사용자 결정 2026-09-18,
     // 리뷰 moai-rgz9.7vt). 깨진 스냅샷은 고칠 사람이 있어야 고쳐지는데, 이름이 집은 줄을 가리킨다는
     // 까닭으로 입을 다물면 그 워크트리는 어느 화면에도 안 선다. "못 셌다" 쪽은 `Unread::blinding`
-    // 이 따로 센다. 다만 **판 것 가운데** 다 — 이름만으로 자리가 다 잡히면 `workplaces` 가 옆
-    // 스냅샷을 아예 안 연다(moai-7igy 의 문, idea `moai-7p48`).
+    // 이 따로 센다. **판 것에 매이지 않는다**(moai-giz3) — 이름만으로 자리가 다 잡혀 스냅샷을
+    // 안 푸는 길에서도 `workplaces_in` 이 파일을 열어 보고 깨진 것을 세운다.
     let said_already = swept;
     if !said_already {
         for t in &unread.all {
