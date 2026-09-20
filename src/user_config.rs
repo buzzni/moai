@@ -111,8 +111,13 @@ pub struct Registry {
     /// 트래커가 아니라 내 설정에 드는 까닭: 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에
     /// 적으면 읽기만 해도 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다(사용자 결정 2026-09-15).
     pub read: BTreeMap<String, String>,
-    /// 읽다 만난 탈. 멀쩡하면(파일이 없는 것도 멀쩡하다) `None` 이다. 까닭 글은 `problems` 에 있고
-    /// 여기는 **그 탈의 갈래**뿐이다 — 글로 가르면 말이 바뀔 때마다 가르는 쪽이 따라 깨진다.
+    /// 읽다 만난 탈. 멀쩡하면 `None` 이다. 까닭 글은 `problems` 에 있고 여기는 **그 탈의 갈래**뿐이다
+    /// — 글로 가르면 말이 바뀔 때마다 가르는 쪽이 따라 깨진다.
+    ///
+    /// **없는 파일도 갈래는 선다**([`Trouble::Gone`], moai-po6v) — `problems` 는 비는데 여기는 `Some`
+    /// 이다. 그 둘을 한 물음으로 읽으면 안 된다: 사람에게 댈 까닭은 없지만("아직 아무것도 등록 안
+    /// 했다" 는 정상이다) "없다" 와 "읽었더니 비었다" 를 가르는 자는 여기뿐이라, `trouble.is_none()`
+    /// 을 "성한 설정" 으로 읽는 새 길은 끊긴 마운트를 빈 설정으로 들인다.
     pub trouble: Option<Trouble>,
 }
 
@@ -178,17 +183,42 @@ pub fn unreadable(e: &std::io::Error) -> bool {
 }
 
 /// 심링크 고리(`ELOOP`) — 고친 것이 파일을 바꾸므로 표식이 낸다. **번호로 든다**: 이것을 낱말로 드는
-/// `ErrorKind::FilesystemLoop` 은 아직 안 여물었다(`io_error_more`, rust#86442). 모르는 기계에서는 안
-/// 맞추고 잠깐으로 본다 — 틀려도 헛 읽기 몇 번이다.
-#[cfg(target_os = "linux")]
+/// `ErrorKind::FilesystemLoop` 은 아직 안 여물었다(`io_error_more`, rust#86442 — 1.97 에서도 E0658 이다).
+///
+/// **아는 기계는 다 적는다**(리뷰) — 못 맞추면 `Trouble::Reading` 으로 떨어지고 그 갈래는
+/// [`Again::Step`] 이라, 고리 하나가 "헛 읽기 몇 번" 이 아니라 **걸음마다 영영** 다시 읽는다.
+/// 안드로이드는 cfg 에서 `linux` 가 아니고(번호는 같다), 애플과 BSD 는 62 로 한자다.
+#[cfg(any(target_os = "linux", target_os = "android"))]
 const ELOOP: i32 = 40;
-#[cfg(target_os = "macos")]
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
 const ELOOP: i32 = 62;
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+)))]
 const ELOOP: i32 = i32::MIN;
 
-/// 설정을 관대하게 읽는다. 파일이 없으면 빈 목록이고 문제도 아니다 — 아직
-/// 아무것도 등록하지 않은 사람의 정상이다.
+/// 설정을 관대하게 읽는다. 파일이 없으면 빈 목록이고 **사람에게 댈 까닭도 아니다** — 아직
+/// 아무것도 등록하지 않은 사람의 정상이라 `problems` 에 한 줄도 안 선다. 다만 갈래는 남긴다
+/// ([`Trouble::Gone`], moai-po6v): "없다" 와 "읽었더니 비었다" 를 못 가르면 끊긴 마운트가 빈 설정으로
+/// 들어와, 탐색기가 들고 있던 층과 읽음을 빈 것으로 갈아 끼운다.
 ///
 /// **락을 잡지 않는다.** 쓰기가 `rename` 으로 갈아끼우므로 찢어진 파일을 못 본다
 /// (`store::Repo::read` 와 같은 까닭).

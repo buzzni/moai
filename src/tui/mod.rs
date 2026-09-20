@@ -560,14 +560,12 @@ pub struct Site {
     /// 프로젝트는 `None` 이고, 읽음 파일이 없는 것은 `Some(None)` 이다. 하나로 들면 옛 `[read]` 만 있는
     /// 사람의 프로젝트가 영영 안 들린다(새 파일이 없어 표식이 늘 `None` 이라 "그대로" 로 읽힌다).
     read_stamp: Option<Stamp>,
-    /// 마지막 읽음 읽기가 만난 탈 — 멀쩡했으면 `None`(moai-po6v). 다시 읽을 때를 정하는 자다
-    /// ([`crate::user_config::Trouble::again`]). **설정과 한 자다**([`App::config_trouble`]) — 갈라 두면
-    /// 같은 갈래를 두 곳이 달리 읽어, 한쪽을 고친 날 다른 쪽이 조용히 옛 뜻으로 남는다.
-    read_trouble: Option<crate::user_config::Trouble>,
-    /// 읽음을 마지막으로 **읽어 본** 때 — 되든 안 되든 찍는다. 시계로 다시 보는 갈래
-    /// ([`crate::user_config::Again::Clock`])가 이것을 잰다. 위의 `read_at`(스냅샷을 **들인** 때)과
-    /// 다른 값이다 — 이름이 닮아 헷갈리기 쉬우나 재는 파일이 서로 다르다.
-    read_tried_at: Option<std::time::Instant>,
+    /// 마지막 읽음 읽기의 자취(moai-po6v) — 갈래와 언제 해 봤는가. 다시 읽을 때를 정하는 자다
+    /// ([`layer::owed`]). **설정과 한 자다**([`App::config_tried`]) — 갈라 두면 같은 갈래를 두 곳이 달리
+    /// 읽어, 한쪽을 고친 날 다른 쪽이 조용히 옛 뜻으로 남는다.
+    ///
+    /// 아래 `read_at`(스냅샷을 **들인** 때)과 다른 값이다 — 이름이 닮았으나 재는 파일이 서로 다르다.
+    read_tried: layer::Tried,
     /// 마지막 읽기를 **들인** 때. 표식이 그대로여도 [`layer::REREAD_EVERY`] 가 지나면 다시 읽는다
     /// ([`App::follow`], moai-z4r4). 들인 때로 찍는 까닭은 층과 같다(`Layer::adopt`) — 시작한 때로
     /// 찍으면 한 번 읽는 데 그만큼 걸리는 자리에서 쉬지 않고 다시 읽는다.
@@ -797,14 +795,11 @@ pub struct App {
     /// 마지막 읽기가 만난 탈 — 멀쩡했으면 `None`(moai-po6v). **표식만으로는 못 재는 것을 잰다**:
     /// 표식은 읽기 *전에* 재므로 진 읽기 뒤에도 파일의 것과 같고, 권한을 고치는 `chmod` 은 표식을
     /// 아예 안 바꾼다. 그래서 다시 읽을 때를 정하는 자는 표식이 아니라 이 갈래다
-    /// ([`crate::user_config::Trouble::again`]).
+    /// ([`layer::owed`]). 층의 못 읽는 줄이 시계에 걸린 그 자([`layer::due`])를 그대로 쓴다 —
+    /// 상수를 두 벌로 두면 한쪽만 바뀐다.
     ///
     /// 띄우는 길(`cmd::tui`)이 제 읽기의 것을 넣는다 — 안 넣으면 띄울 때 진 한 번이 세션 내내 남는다.
-    pub config_trouble: Option<crate::user_config::Trouble>,
-    /// 마지막으로 설정을 **읽어 본** 때 — 되든 안 되든 찍는다. 시계로 다시 보는 갈래
-    /// ([`crate::user_config::Again::Clock`])가 이것을 잰다. 층의 못 읽는 줄이 시계에 걸린 그
-    /// 자([`crate::tui::layer::due`])를 그대로 쓴다 — 상수를 두 벌로 두면 한쪽만 바뀐다.
-    pub config_read_at: Option<std::time::Instant>,
+    pub config_tried: layer::Tried,
     /// **띄운 자리**(cwd). 고르기 창이 처음 여기서 연다. 시험은 임시 디렉터리를 준다.
     ///
     /// 이름이 [`App::here`] 와 겹치지 않게 둔다 — 그쪽은 *지금 선 프로젝트*, 곧 **쓰기가
@@ -857,8 +852,7 @@ impl Site {
             stamp: None,
             seen: Default::default(),
             read_stamp: None,
-            read_trouble: None,
-            read_tried_at: None,
+            read_tried: layer::Tried::default(),
             read_at: None,
             watched: Vec::new(),
             commits: Commits::new(),
@@ -1107,8 +1101,7 @@ impl App {
             deep: Default::default(),
             user_config: None,
             config_stamp: None,
-            config_trouble: None,
-            config_read_at: None,
+            config_tried: layer::Tried::default(),
             launched_at: None,
             pick_from: None,
             editor: None,
@@ -2065,7 +2058,23 @@ impl App {
     fn read_marks_of(&self, root: &std::path::Path) -> Option<(crate::read_marks::Marks, Stamp)> {
         let config = self.user_config.as_deref()?;
         let stamp = crate::store::stamp(&crate::read_marks::path_for(config, root));
-        Some((crate::read_marks::read(config, root, &self.legacy_read), stamp))
+        let mut marks = crate::read_marks::read(config, root, &self.legacy_read);
+        // **설정이 사라졌으면 없는 읽음도 사라진 것으로 든다**(moai-4qbv.i0g 리뷰). 읽음 파일은 설정
+        // 파일 곁의 디렉터리에 산다(`read_marks::path_for`) — autofs·sshfs 홈이 끊기면 둘이 함께
+        // 사라진다. 그때 없는 읽음을 "아직 아무것도 안 읽은 프로젝트" 로 들면 빈 표를 들여 내 줄이
+        // 통째로 [NEW] 로 서고, `SPC m a` 한 번이 그 프로젝트를 통째로 읽음으로 찍는다 — 층만 지키고
+        // 읽음은 놓친 자리다(moai-po6v 가 설정에 대해 막은 그 해다).
+        //
+        // **읽음 쪽에서 혼자 가르지 않는다** — 없는 읽음은 그 프로젝트를 아직 안 읽은 사람의 정상이라,
+        // 그것만 보고는 갈릴 수 없다. 가르는 자는 **곁의 설정도 사라졌는가** 다. 읽어 낸 줄이 있으면
+        // 딴 자리에 살아 있다는 뜻이니 건드리지 않는다.
+        if marks.trouble.is_none()
+            && marks.seen.is_empty()
+            && self.config_tried.trouble == Some(crate::user_config::Trouble::Gone)
+        {
+            marks.trouble = Some(crate::user_config::Trouble::Gone);
+        }
+        Some((marks, stamp))
     }
 
     /// 들어 온 읽음을 한 [`Site`] 에 얹는다 — **들일지, 표식을 올릴지, 무엇을 말할지가 한 자리에 있다**
@@ -2079,8 +2088,7 @@ impl App {
         // 한다. 권한은 다시 해도 같아 걸음마다 읽으면 헛돌지만, 되돌리는 `chmod` 이 고친 때도 길이도
         // 안 바꿔 표식으로는 영영 못 벗어난다 — 그래서 표식은 올리고 시계로 다시 본다
         // ([`App::follow_read`]). 깨진 것·남의 것은 사람이 고쳐야 같아지고 고치면 파일이 바뀐다.
-        site.read_trouble = marks.trouble;
-        site.read_tried_at = Some(std::time::Instant::now());
+        site.read_tried.saw(marks.trouble);
         if marks.trouble.map(crate::user_config::Trouble::again) != Some(crate::user_config::Again::Step) {
             site.read_stamp = Some(stamp);
         }
@@ -2134,11 +2142,8 @@ impl App {
         let now = crate::store::stamp(&crate::read_marks::path_for(config, &repo.root));
         // **빚진 읽기는 표식이 그대로여도 한다**([`App::follow_config`] 와 한 자, moai-po6v) — 권한을
         // 되돌리는 `chmod` 은 표식을 안 바꿔, 표식만 보면 그 한 번이 세션 내내 [NEW] 를 세워 둔다.
-        let owed = match self.site.read_trouble.map(crate::user_config::Trouble::again) {
-            Some(crate::user_config::Again::Step) => true,
-            Some(crate::user_config::Again::Clock) => layer::due(self.site.read_tried_at),
-            Some(crate::user_config::Again::Never) | None => false,
-        };
+        // 재는 자는 [`layer::owed`] 하나다 — 여기와 저기에 저마다 적으면 갈래를 더한 날 한쪽만 고쳐진다.
+        let owed = layer::owed(&self.site.read_tried);
         if self.site.read_stamp == Some(now) && !owed {
             return;
         }
@@ -2165,11 +2170,8 @@ impl App {
         // **언제 갚는가는 갈래가 정한다**([`crate::user_config::Again`]) — 잠깐인 것은 다음 걸음에,
         // 고쳐도 표식이 안 바뀌는 것(권한)은 시계로, 고치면 파일이 바뀌는 것(깨진 글·사라진 파일)은
         // 표식에 맡기고 스스로는 안 한다. 한 가지로 재면 한쪽이 영영 안 풀리거나 걸음마다 헛돈다.
-        let owed = match self.config_trouble.map(crate::user_config::Trouble::again) {
-            Some(crate::user_config::Again::Step) => true,
-            Some(crate::user_config::Again::Clock) => layer::due(self.config_read_at),
-            Some(crate::user_config::Again::Never) | None => false,
-        };
+        // 재는 자는 [`layer::owed`] 하나다 — 읽음도 그것으로 잰다([`App::follow_read`]).
+        let owed = layer::owed(&self.config_tried);
         if was == now && !owed {
             return;
         }
@@ -2180,8 +2182,15 @@ impl App {
         // 표식은 늘 올린다 — 다시 읽을 때를 정하는 자는 이제 갈래다(위의 `owed`). 한때는 못 읽으면
         // 표식을 물려 다음 걸음이 같은 차이를 다시 보게 했는데(moai-9p7v), 그 길은 띄울 때 진 읽기를
         // 못 갚는다(밑값으로 삼을 `was` 가 없다). 재는 자가 둘이면 한쪽만 고쳐진다.
-        self.config_trouble = reg.trouble;
-        self.config_read_at = Some(std::time::Instant::now());
+        self.config_tried.saw(reg.trouble);
+        // **사라진 것을 본 걸음은 표식도 사라진 것으로 적는다**(리뷰) — 표식은 읽기 **전에** 재므로,
+        // 그 틈에 없어진 파일은 있던 때의 표식을 인 채 남는다(NFS 의 attribute cache 는 그 틈을 초
+        // 단위로 벌린다). 사라진 파일은 표식에 기대는 갈래라([`crate::user_config::Again::Never`])
+        // 그대로 두면, 같은 (고친 때, 길이)로 돌아온 파일 — 깜빡인 마운트나 `cp -p` 로 되돌린 것 —
+        // 이 표식으로 안 보여 "파일이 사라졌다" 를 인 층이 세션 내내 안 풀린다.
+        if reg.trouble == Some(crate::user_config::Trouble::Gone) {
+            self.config_stamp = Some(None);
+        }
         // **옛 `[read]` 를 다시 든다**(moai-bwce, 사용자 결정 3) — 읽음은 이제 제 파일에 살고 여기는
         // 겹쳐 보는 옛 표다. 이 바이너리는 여기 안 적지만 옛 바이너리나 사람 손은 적을 수 있다.
         //
@@ -2559,10 +2568,10 @@ impl App {
                     {
                         site.seen = std::mem::take(&mut held.seen);
                         site.read_stamp = held.read_stamp;
-                        // 다시 읽을 때를 정하는 둘도 함께 옮긴다 — 두고 가면 들고 온 표는 있는데 그것을
-                        // 언제 다시 볼지를 잃어, 못 읽는 프로젝트로 돌아올 때마다 시계가 처음부터 돈다.
-                        site.read_trouble = held.read_trouble;
-                        site.read_tried_at = held.read_tried_at;
+                        // **갈래와 읽어 본 때는 안 옮긴다**(리뷰) — 바로 아래 [`App::take_read`] 가
+                        // 이 걸음의 읽기로 둘 다 다시 적는다. 옮겨 봐야 그 자리에서 덮이고, 덮이는
+                        // 줄은 "옮겼으니 이어진다" 는 거짓말을 남긴다. 표식만 옮기는 것은 다르다 —
+                        // 잠깐의 실패([`crate::user_config::Again::Step`])에는 그쪽이 안 적는다.
                     }
                     if let Some(got) = self.read_marks_of(&root)
                         && let Some(told) = Self::take_read(&mut site, got)
@@ -5422,6 +5431,51 @@ mod tests {
         assert!(a.notice.as_deref().is_some_and(|n| n.starts_with("읽음에 이상한 줄이 있다")), "{:?}", a.notice);
     }
 
+    /// **홈이 끊기면 읽음도 지난 것을 들고 선다**(moai-4qbv.i0g 리뷰). 읽음 파일은 설정 파일 곁의
+    /// 디렉터리에 살아([`crate::read_marks::path_for`]) autofs·sshfs 홈이 끊기면 둘이 함께 사라진다.
+    /// 설정만 지키고 읽음을 "아직 아무것도 안 읽은 프로젝트" 로 들면 내 줄이 통째로 [NEW] 로 서고,
+    /// 그 화면에서 `SPC m a` 한 번이 프로젝트를 통째로 읽음으로 찍는다 — moai-po6v 가 층에 대해 막은
+    /// 그 해가 읽음 쪽에 그대로 남아 있었다.
+    #[test]
+    fn a_home_that_dropped_does_not_turn_every_line_new() {
+        let s = Scratch::new("read-marks-home-gone");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        let mut a = app();
+        for i in &mut a.site.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.me = Some("레이븐 (raven@example.com)".into());
+
+        std::fs::write(&config, "[[project]]\npath = \"/a\"\n").unwrap();
+        let stamp = &a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
+        let at = crate::read_marks::path_for(&config, &root);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(&at, format!("path = {:?}\n\n[read]\n\"argos-0009\" = \"{stamp}\"\n", root.display().to_string())).unwrap();
+        a.load_read();
+        assert!(!a.site.unread.contains("argos-0009"), "시험의 전제 — 읽음을 들었다");
+        a.follow();
+        assert!(a.config_tried.trouble.is_none(), "시험의 전제 — 설정이 멀쩡하다");
+
+        // 홈이 통째로 끊긴다 — 설정도 읽음도 함께 사라진다.
+        std::fs::remove_file(&at).unwrap();
+        std::fs::remove_file(&config).unwrap();
+        a.follow();
+        assert_eq!(a.config_tried.trouble, Some(crate::user_config::Trouble::Gone), "설정이 사라진 것을 못 봤다");
+        assert!(!a.site.unread.contains("argos-0009"), "사라진 읽음의 빈 표를 들여 읽은 줄이 [NEW] 로 섰다");
+        assert_eq!(a.site.read_tried.trouble, Some(crate::user_config::Trouble::Gone), "읽음만 사라진 것과 홈이 끊긴 것을 안 갈랐다");
+
+        // 돌아오면 표식이 그것을 낸다.
+        std::fs::write(&config, "[[project]]\npath = \"/a\"\n").unwrap();
+        std::fs::write(&at, format!("path = {:?}\n\n[read]\n\"argos-0009\" = \"{stamp}\"\n", root.display().to_string())).unwrap();
+        a.follow();
+        assert!(a.config_tried.trouble.is_none() && a.site.read_tried.trouble.is_none(), "돌아왔는데 탈이 남았다");
+        assert!(!a.site.unread.contains("argos-0009"), "돌아온 읽음을 안 들었다");
+    }
+
     /// **읽음 파일도 다시 읽을 때를 갈래로 잰다**(moai-po6v) — 설정과 **한 자다**([`App::follow_config`],
     /// [`crate::user_config::Again`]). 갈라 두면 같은 `Trouble` 을 두 곳이 달리 읽어, 한쪽을 고친 날
     /// 다른 쪽이 조용히 옛 뜻으로 남는다.
@@ -5467,7 +5521,7 @@ mod tests {
             return;
         }
         a.follow();
-        assert_eq!(a.site.read_trouble, Some(crate::user_config::Trouble::Unreadable), "권한을 잠깐의 실패로 읽었다");
+        assert_eq!(a.site.read_tried.trouble, Some(crate::user_config::Trouble::Unreadable), "권한을 잠깐의 실패로 읽었다");
         assert_eq!(a.site.read_stamp, Some(crate::store::stamp(&at)), "다시 해도 같은 갈래인데 표식을 물렸다 — 걸음마다 헛 읽는다");
         assert!(!a.site.unread.contains("argos-0009"), "못 읽은 빈 표를 들여 읽은 줄이 [NEW] 로 섰다");
 
@@ -5476,10 +5530,10 @@ mod tests {
         a.follow();
         assert!(a.site.unread.contains("argos-0002"), "다시 해도 같은 갈래를 걸음마다 다시 읽었다");
 
-        a.site.read_tried_at = std::time::Instant::now().checked_sub(layer::REREAD_EVERY);
+        a.site.read_tried.at = Some(std::time::Instant::now().checked_sub(layer::REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
         a.follow();
         assert!(!a.site.unread.contains("argos-0002"), "시계가 돌았는데 다시 안 읽었다");
-        assert_eq!(a.site.read_trouble, None, "읽혔는데 탈이 남았다");
+        assert_eq!(a.site.read_tried.trouble, None, "읽혔는데 탈이 남았다");
     }
 
     /// **읽음은 트래커가 사는 뿌리로 고른다 — 선 체크아웃이 아니다**(리뷰). 딸린 워크트리에서 띄우면

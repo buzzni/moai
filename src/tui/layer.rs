@@ -40,7 +40,9 @@ pub struct Layer {
     pub places: Vec<Place>,
     /// 사용자 설정을 읽다 만난 것. 층에 선 동안 배너가 비춘다.
     pub problems: Vec<String>,
-    /// 그 탈의 갈래([`user_config::Trouble`], moai-9p7v) — 다시 해 볼 값이 있는 것만 [`App::relayer`] 가 가른다.
+    /// 그 탈의 갈래([`user_config::Trouble`], moai-9p7v). **[`App::relayer`] 는 이제 갈래를 안 가린다**
+    /// (moai-po6v) — 어느 탈이든 들고 있던 층을 두므로, 이 값을 보고 갈라서는 자리는 없다. 다시 읽을
+    /// 때를 정하는 자는 층이 아니라 [`App::config_tried`] 다. 여기 새 갈래를 매달지 않는다.
     pub trouble: Option<user_config::Trouble>,
     /// 읽은 사용자 설정 파일. 그 파일이 바뀌면 걸음이 여기를 다시 읽는다(`App::follow_config`) — **시험은 제 임시 파일을 준다.**
     /// 환경을 다시 보면 돌리는 사람의 설정을 읽는다.
@@ -115,6 +117,57 @@ pub(super) const REREAD_EVERY: std::time::Duration = std::time::Duration::from_s
 /// 화면이 또 갈린다. 들인 적이 없으면 시계로는 안 낡는다 — 그런 줄은 부르는 쪽이 따로 고른다.
 pub(super) fn due(read_at: Option<std::time::Instant>) -> bool {
     read_at.is_some_and(|t| t.elapsed() >= REREAD_EVERY)
+}
+
+/// 진 읽기를 **지금 갚을 때인가**(moai-po6v) — 표식이 그대로여도 다시 읽을 까닭이 되는 자다.
+/// 갈래가 정하고([`user_config::Again`]) 시계는 [`due`] 하나로 잰다.
+///
+/// **설정과 읽음이 이 자 하나를 함께 쓴다**([`App::follow_config`]·[`App::follow_read`]) — [`due`] 와
+/// 같은 까닭이다. 저마다 적으면 갈래를 하나 더할 때 한쪽만 고쳐져, 설정은 다시 읽는데 읽음은 영영
+/// 안 읽는 화면이 선다. 갈래를 더하는 사람이 고칠 자리는 [`user_config::Trouble::again`] 하나다.
+pub(super) fn owed(tried: &Tried) -> bool {
+    match tried.trouble.map(user_config::Trouble::again) {
+        // **잠깐이라던 것이 잠깐이 아니면 시계로 내린다**(moai-4qbv.i0g 리뷰) — 이 갈래는 모르는 실패가
+        // 다 모이는 자리다(`user_config::unreadable` 이 안 집은 것은 다 잠깐으로 본다). 끊긴 sshfs·NFS 는
+        // `ENOTCONN`·`EIO` 로 지는데 그것이 여기 들어, 끝을 안 두면 **막히는 읽기**를 걸음마다 다시 연다.
+        // 이슈가 "다시 해 보는 데 끝을 두라" 고 한 자리다.
+        Some(user_config::Again::Step) => tried.since.is_none_or(|t| t.elapsed() < BLIP) || due(tried.at),
+        Some(user_config::Again::Clock) => due(tried.at),
+        Some(user_config::Again::Never) | None => false,
+    }
+}
+
+/// 잠깐이라고 봐 주는 동안(moai-4qbv.i0g 리뷰). 이만큼 이어서 지면 그것은 잠깐이 아니라 탈이라,
+/// 다시 읽는 때가 [`REREAD_EVERY`] 로 내려간다. 걸음은 30ms~700ms 마다 오므로 이 사이에 몇 번은 된다 —
+/// 걸음 수로 세지 않는 것은 걸음 사이가 화면에 따라 스무 배까지 벌어지기 때문이다.
+pub(super) const BLIP: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// 마지막 읽기의 자취 — 갈래와 **언제 해 봤는가·언제부터 지고 있는가**(moai-po6v). 설정과 읽음이
+/// 저마다 같은 세 값을 들던 판은 셋을 함께 올리는 규칙이 두 곳에 적혀, 한쪽만 고쳐질 자리였다.
+/// 올리는 자([`Tried::saw`])와 재는 자([`owed`])가 각각 하나다.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Tried {
+    /// 멀쩡했으면 `None`. 다시 읽을 때를 정하는 자다([`user_config::Trouble::again`]).
+    pub trouble: Option<user_config::Trouble>,
+    /// 마지막으로 **읽어 본** 때 — 되든 안 되든 찍는다. 시계로 다시 보는 갈래가 이것을 잰다.
+    pub at: Option<std::time::Instant>,
+    /// 지금 이어지는 실패가 **시작한** 때. 읽히면 지운다 — 다음 실패는 다시 잠깐부터 센다.
+    pub since: Option<std::time::Instant>,
+}
+
+impl Tried {
+    /// 읽어 본 것을 적는다. **읽었으면 늘 부른다** — 안 부르면 자취가 낡은 채로 남아 다시 읽을 때를
+    /// 옛 갈래가 정한다.
+    pub fn saw(&mut self, trouble: Option<user_config::Trouble>) {
+        let now = std::time::Instant::now();
+        self.since = match (self.trouble.is_some(), trouble.is_some()) {
+            (_, false) => None,
+            (true, true) => self.since.or(Some(now)),
+            (false, true) => Some(now),
+        };
+        self.trouble = trouble;
+        self.at = Some(now);
+    }
 }
 
 /// 프로젝트 하나를 본 것.
@@ -814,8 +867,10 @@ impl App {
     /// `land` 가 있으면 층에 섰을 때 커서를 그 프로젝트(경로)에 둔다 — 방금 등록한 것이 눈앞에
     /// 있어야 등록된 줄 안다. 없거나 못 찾으면 보던 줄, 그것도 사라졌으면(뺐으면) 그 번호를 자른 자리.
     ///
-    /// **파일을 못 읽었으면 아무것도 안 한다**(moai-9p7v) — 들고 있던 층이 그대로 남는다. 깨진 설정은
-    /// 그렇지 않다: 읽기는 됐고 다시 읽어도 같아, 빈 층과 그 까닭이 사람이 고쳐야 할 것을 비춘다.
+    /// **탈이 있으면 아무것도 안 갈아 끼운다**(moai-9p7v·moai-po6v, 사용자 결정 2026-09-19) — 들고 있던
+    /// 층이 그대로 남고 까닭 한 줄만 새 읽기의 것으로 바뀐다([`holding`]). 깨진 설정도 여기 든다:
+    /// 한때는 빈 층과 그 까닭이 고칠 것을 비춘다고 봤는데, 오타 하나에 등록한 프로젝트가 통째로
+    /// 사라졌다. 비추는 데 필요한 것은 빈 층이 아니라 까닭 한 줄이다.
     pub(super) fn relayer(&mut self, land: Option<&Path>) {
         self.relayer_with(None, land);
     }
@@ -990,26 +1045,31 @@ pub(super) enum Depth {
     Lean,
 }
 
-/// 등록한 것이 하나도 안 읽혀 **층을 안 세운** 까닭([`App::unlayered`]) — 설정을 읽다 만난 것이
-/// 있을 때만. 멀쩡한 빈 설정이면 `None` 이다. 띄울 때([`App::attach_layer`])와 설정이 바뀐 뒤
-/// ([`App::relayer`])가 같은 말을 쓴다.
 /// 탈이 난 설정을 **들고 설 때** 층이 대는 까닭(moai-po6v) — 배너가 이것을 한 줄로 줄여 낸다
 /// (`draw::banner`). 층이 선 화면에서 사용자 설정의 말을 내는 자리는 `Layer::problems` 하나다.
 ///
+/// **들고 있는 것이 없으면 "들고 있다" 고 하지 않는다**(리뷰) — 까닭만 그대로 낸다. 등록한 줄 하나
+/// 없는 층에 대고 그렇게 말하면, 아무것도 안 든 화면에 든 것이 있다고 말하는 꼴이다. 층은 등록한
+/// 줄이 없어도 선다(`.moai` 밖에서 띄운 화면이 그렇다, `App::on_projects`) — `held` 가 그것을 가른다.
+///
 /// 사라진 파일은 `problems` 가 빈다 — 읽기에게는 댈 까닭이 아니라서다(아직 아무것도 등록 안 한
-/// 사람의 정상). 여기서는 다를 수 있다: 들고 있는 것이 있으면 **있던 파일이 사라졌다**는 뜻이라
-/// 말해야 한다. `held` 가 그것을 가른다 — 등록한 줄 하나 없는 층에 대고 "사라졌다" 고 하면, 설정을
-/// 한 번도 안 만든 사람에게 없던 파일을 잃었다고 말하는 꼴이다.
+/// 사람의 정상). 여기서는 다르다: 들고 있는 것이 있으면 **있던 파일이 사라졌다**는 뜻이라 말해야 한다.
 fn holding(fresh: &Layer, held: bool) -> Vec<String> {
-    let why = match (fresh.problems.as_slice(), &fresh.config) {
-        ([], _) if !held => return Vec::new(),
+    let said = fresh.problems.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>();
+    if !held {
+        return said;
+    }
+    let why = match (said.as_slice(), &fresh.config) {
         ([], Some(p)) => format!("{}: 파일이 사라졌다", p.display()),
         ([], None) => "파일이 사라졌다".to_string(),
-        (ps, _) => ps.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>().join(" · "),
+        _ => said.join(" · "),
     };
     vec![format!("사용자 설정을 못 읽어 지난 것을 들고 있다 — {why}")]
 }
 
+/// 등록한 것이 하나도 안 읽혀 **층을 안 세운** 까닭([`App::unlayered`]) — 설정을 읽다 만난 것이
+/// 있을 때만. 멀쩡한 빈 설정이면 `None` 이다. 띄울 때([`App::attach_layer`])와 설정이 바뀐 뒤
+/// ([`App::relayer`])가 같은 말을 쓴다.
 fn unlayered_of(layer: &Layer) -> Option<String> {
     (!layer.problems.is_empty()).then(|| {
         let why = layer.problems.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>().join(" · ");
@@ -2499,15 +2559,39 @@ mod tests {
         chmod(&cfg, 0o000);
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two"], "못 읽은 것으로 층이 사라졌다");
-        assert_eq!(a.config_trouble, Some(user_config::Trouble::Unreadable), "다시 읽을 때를 정할 갈래를 안 들었다");
+        assert_eq!(a.config_tried.trouble, Some(user_config::Trouble::Unreadable), "다시 읽을 때를 정할 갈래를 안 들었다");
         assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "못 읽은 설정의 빈 표를 들여 옛 [read] 가 사라졌다");
 
         // 권한만 되돌린다 — 파일은 그대로라 표식도 그대로다. 시계가 돌아야 다시 읽는다.
         chmod(&cfg, 0o644);
-        a.config_read_at = std::time::Instant::now().checked_sub(REREAD_EVERY);
+        a.config_tried.at = Some(std::time::Instant::now().checked_sub(REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two", "three"], "읽을 수 있게 됐는데 다시 안 읽었다");
-        assert_eq!(a.config_trouble, None, "읽혔는데 탈이 남았다");
+        assert_eq!(a.config_tried.trouble, None, "읽혔는데 탈이 남았다");
+    }
+
+    /// **잠깐이라던 것이 잠깐이 아니면 시계로 내린다**(moai-4qbv.i0g 리뷰). [`user_config::Again::Step`]
+    /// 은 모르는 실패가 다 모이는 자리라(`user_config::unreadable` 이 안 집은 것), 끊긴 sshfs·NFS 의
+    /// `ENOTCONN`·`EIO` 가 여기 든다 — 끝을 안 두면 **막히는 읽기**를 걸음마다 다시 연다.
+    #[test]
+    fn a_blip_that_lasts_is_no_blip_and_drops_to_the_clock() {
+        let long_ago = |d| std::time::Instant::now().checked_sub(d).expect("시계가 1분도 안 돌았다");
+        let mut t = Tried::default();
+        assert!(!owed(&t), "멀쩡한데 빚이 섰다");
+
+        t.saw(Some(user_config::Trouble::Reading));
+        let first = t.since;
+        assert!(owed(&t), "잠깐의 실패를 다음 걸음에 안 갚는다");
+        t.saw(Some(user_config::Trouble::Reading));
+        assert_eq!(t.since, first, "이어서 지는데 처음 진 때를 다시 찍었다 — 끝이 영영 안 온다");
+
+        t.since = Some(long_ago(BLIP));
+        assert!(!owed(&t), "잠깐이 아닌 것을 걸음마다 다시 읽는다");
+        t.at = Some(long_ago(REREAD_EVERY));
+        assert!(owed(&t), "시계가 돌았는데 다시 안 본다");
+
+        t.saw(None);
+        assert!(!owed(&t) && t.since.is_none(), "읽혔는데 자취가 남았다 — 다음 실패가 잠깐부터 못 센다");
     }
 
     /// **띄울 때 진 읽기는 빚으로 남아 다음 걸음이 갚는다**(moai-po6v). 표식은 읽기 **전에** 재므로
@@ -2528,14 +2612,18 @@ mod tests {
 
         // 띄울 때 못 읽었다 — `cmd::tui` 와 같은 차례로 표식을 먼저 재고 읽는다.
         chmod(&cfg, 0o000);
+        // 권한이 안 먹는 자리(root)에서는 흉내 낼 수 없다 — 이웃 시험과 같은 문지기다.
+        if std::fs::read(&cfg).is_ok() {
+            chmod(&cfg, 0o644);
+            return;
+        }
         let stamp = crate::store::stamp(&cfg);
         let reg = user_config::read(Some(&cfg));
         assert_eq!(reg.trouble, Some(user_config::Trouble::Unreadable), "시험의 전제 — 읽기가 졌다");
         let mut a = App::on_projects(Layer::of(&reg, None));
         a.user_config = Some(cfg.clone());
         a.config_stamp = Some(stamp);
-        a.config_trouble = reg.trouble;
-        a.config_read_at = Some(std::time::Instant::now());
+        a.config_tried.saw(reg.trouble);
         settle(&mut a);
         assert!(names(&a).is_empty(), "시험의 전제 — 못 읽어 줄이 없다");
 
@@ -2545,10 +2633,10 @@ mod tests {
         settle(&mut a);
         assert!(names(&a).is_empty(), "다시 해도 같은 갈래를 걸음마다 다시 읽었다");
 
-        a.config_read_at = std::time::Instant::now().checked_sub(REREAD_EVERY);
+        a.config_tried.at = Some(std::time::Instant::now().checked_sub(REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two"], "시계가 돌았는데 빚진 읽기를 안 갚았다");
-        assert_eq!(a.config_trouble, None, "읽혔는데 탈이 남았다");
+        assert_eq!(a.config_tried.trouble, None, "읽혔는데 탈이 남았다");
     }
 
     /// **잠깐의 실패는 다음 걸음에 갚는다**(moai-po6v) — 시계를 안 기다린다. 갈래마다 벗어나는 길이
@@ -2561,8 +2649,7 @@ mod tests {
         let mut a = App::on_projects(Layer::of(&user_config::Registry::default(), None));
         a.user_config = Some(cfg.clone());
         a.config_stamp = Some(crate::store::stamp(&cfg));
-        a.config_trouble = Some(user_config::Trouble::Reading);
-        a.config_read_at = Some(std::time::Instant::now());
+        a.config_tried.saw(Some(user_config::Trouble::Reading));
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two"], "잠깐의 실패를 시계에 걸어 다음 걸음이 안 읽었다");
     }
@@ -2587,6 +2674,11 @@ mod tests {
         // 설정이 바뀌었는데 그 읽기가 진다.
         s.register(&[&one, &two, &three]);
         std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // 권한이 안 먹는 자리(root)에서는 흉내 낼 수 없다 — 이웃 시험과 같은 문지기다.
+        if std::fs::read(&cfg).is_ok() {
+            std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return;
+        }
         settle(&mut a);
         std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o644)).unwrap();
         assert_eq!(names(&a), ["one", "two"], "못 읽은 것으로 층이 사라졌다");
@@ -2625,7 +2717,7 @@ mod tests {
         std::fs::write(&cfg, &marks).unwrap();
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two"], "돌아온 설정을 안 읽었다");
-        assert_eq!(a.config_trouble, None, "돌아왔는데 탈이 남았다");
+        assert_eq!(a.config_tried.trouble, None, "돌아왔는데 탈이 남았다");
     }
 
     /// **설정을 한 번도 안 만든 사람에게 잃었다고 하지 않는다**(moai-po6v). 없는 파일은 갈래로는
@@ -2641,6 +2733,27 @@ mod tests {
         a.relayer(None);
         let said = &a.layer.as_ref().expect("빈 층이 섰다").problems;
         assert!(said.is_empty(), "없던 파일을 잃었다고 말했다 — {said:?}");
+    }
+
+    /// **빈 층에 대고 "지난 것을 들고 있다" 고 하지 않는다**(리뷰) — 까닭은 대되 안 든 것을 들었다고
+    /// 말하지 않는다. `.moai` 밖에서 띄운 화면은 등록한 줄이 하나도 없어도 층이 서므로(`App::on_projects`),
+    /// 그 사람이 `[tui]` 에 오타를 내면 이 길로 온다. 사라진 파일만 가리던 `held` 를 모든 갈래로 넓힌
+    /// 자리다 — 깨진 글은 `problems` 가 비지 않아 그 문지기를 그냥 지나갔다.
+    #[test]
+    fn a_layer_that_holds_nothing_says_the_reason_without_claiming_to_hold() {
+        let s = Scratch::fenced("layer-config-empty-broken");
+        let cfg = s.dir("설정").join("config.toml");
+        std::fs::write(&cfg, "[tui]\n").unwrap();
+        let mut a = App::on_projects(Layer::of(&user_config::read(Some(&cfg)), None));
+        a.user_config = Some(cfg.clone());
+        assert!(names(&a).is_empty(), "시험의 전제 — 등록한 줄이 없다");
+
+        std::fs::write(&cfg, "[tui\n").unwrap();
+        a.relayer(None);
+        let said = &a.layer.as_ref().expect("빈 층이 섰다").problems;
+        assert_eq!(said.len(), 1, "깨진 글의 까닭을 안 댔다 — {said:?}");
+        assert!(!said[0].contains("들고 있다"), "안 든 것을 들었다고 말했다 — {said:?}");
+        assert!(said[0].contains(&cfg.display().to_string()), "어느 파일인지 안 댔다 — {said:?}");
     }
 
     /// **한 걸음이 등록과 읽음을 한 번의 읽기로 든다**(moai-7yil). 둘은 한 파일에 산다 — 저마다 읽던
@@ -2690,7 +2803,7 @@ mod tests {
         std::fs::write(&cfg, "[[project]\npath = ").unwrap();
         settle(&mut a);
         assert_eq!(a.config_stamp, Some(crate::store::stamp(&cfg)), "깨진 설정의 표식은 올라간다");
-        assert_eq!(a.config_trouble.map(user_config::Trouble::again), Some(user_config::Again::Never), "깨진 글을 스스로 다시 읽는다");
+        assert_eq!(a.config_tried.trouble.map(user_config::Trouble::again), Some(user_config::Again::Never), "깨진 글을 스스로 다시 읽는다");
         assert_eq!(names(&a), ["one", "two"], "오타 하나로 층이 통째로 사라졌다");
         let said = &a.layer.as_ref().expect("층이 섰다").problems;
         assert!(said.len() == 1 && said[0].contains("들고 있다"), "지난 것을 들고 있다는 말이 없다 — {said:?}");
