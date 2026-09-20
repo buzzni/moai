@@ -889,7 +889,11 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, origin: &Orig
     }
     for id in w.ids.iter().take(SHOW) {
         let Some(i) = by_id.get(id.as_str()) else {
-            out.push(format!("    {}", paint(style::ID, id)));
+            // **여기 오는 것이 늘 id 는 아니다** — `gitattributes_rules` 는 규칙 줄을,
+            // `merge_driver_rotten` 은 `.git/config` 에 적힌 **경로**를 든다. 손으로 고칠 수
+            // 있는 파일에서 온 글이라 제어문자를 걷고 그린다(리뷰 moai-h6aq.cx8) — ESC 가
+            // 그대로 나가면 그 줄이 화면을 다시 칠한다(`text::sanitize` 가 선 까닭).
+            out.push(format!("    {}", paint(style::ID, &crate::text::sanitize(id))));
             continue;
         };
         // **판정한 나이를 댄다**(`Warning::ages`, moai-7azq). 여기서 새로 재면 `blocked_stale`

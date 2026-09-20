@@ -2577,20 +2577,30 @@ impl Warning {
     /// 안 바뀐다 — `agents_stale` 과 같은 자리다.
     ///
     /// `ids` 에 **적힌 명령**을 그대로 담는다. 어느 경로가 썩었는지가 고치는 데 필요한 전부다.
+    ///
+    /// **힌트는 그대로 칠 수 있는 줄이다**(리뷰 moai-h6aq.cx8). 앞 판은 `--as <늘 있는 자리>` 로
+    /// 끝나 자리표시자를 남겼는데, 이 저장소의 힌트는 에이전트가 **그대로 친다** — 껍데기는
+    /// `<늘` 을 넣기 자리로 읽어 깨지고, 따옴표로 싸면 그 글자가 명령으로 심긴다. 맨
+    /// `--install` 은 지금 도는 바이너리의 절대 경로로 다시 심으므로, 흔한 판(옛 자리가 사라졌다,
+    /// 다시 빌드해 자리가 옮겨졌다)에서 그대로 답이다. 워크트리의 `target/` 을 피하라는 말은
+    /// `merge-driver --install --help` 와 관리 블록에 이미 있다.
     pub fn merge_driver_rotten(cmd: &str, root: Option<&str>) -> Warning {
-        let hint = match root {
-            None => "moai merge-driver --install --as <늘 있는 자리>".to_string(),
-            Some(r) => format!("moai -C {r} merge-driver --install --as <늘 있는 자리>"),
-        };
+        let hint = Warning::cli_hint(root, "merge-driver --install");
         Warning::new("merge_driver_rotten", vec![cmd.to_string()]).notice().hint(&hint)
     }
 
     /// 고칠 명령. 뿌리가 부른 자리와 다르면 `-C` 로 거기를 댄다 — `init` 은 부른 자리에 심으므로
     /// 그 `-C` 가 없으면 따라 친 쪽에 트래커가 하나 더 선다.
     fn init_hint(root: Option<&str>) -> String {
+        Warning::cli_hint(root, "init")
+    }
+
+    /// 힌트 한 줄. **`-C` 를 붙이는 규칙은 한 자리다** — 알림마다 제 손으로 지으면 규칙이 바뀔 때
+    /// 한쪽만 안 고쳐진다(리뷰 moai-h6aq.cx8).
+    fn cli_hint(root: Option<&str>, tail: &str) -> String {
         match root {
-            None => "moai init".to_string(),
-            Some(r) => format!("moai -C {r} init"),
+            None => format!("moai {tail}"),
+            Some(r) => format!("moai -C {r} {tail}"),
         }
     }
 }

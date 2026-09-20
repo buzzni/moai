@@ -11784,6 +11784,46 @@ fn a_rotten_driver_path_falls_back_to_gits_own_merge() {
     assert!(issues(root).contains("저쪽 제목"), "저쪽 고침이 자취 없이 사라졌다\n{}", issues(root));
 }
 
+/// **파일에 이미 있던 표식이 내려앉는 길을 막지 않는다**(리뷰 moai-h6aq.cx8).
+///
+/// 심는 줄이 `%A` 에서 `<<<<<<<` 를 `grep` 으로 찾아 갈랐을 때, **한 번 잘못 푼 흔적**이 그
+/// 파일에 남아 있으면 못 돈 드라이버까지 "사람에게 넘겼다" 로 읽혔다 — 표식 없는 이쪽 파일이
+/// 그대로 남고, 사람은 눈에 익은 옛 표식만 고친 뒤 `git add` 해서 저쪽을 통째로 버린다. 못 읽는
+/// 줄은 `keyed` 가 그대로 들고 가므로 그 흔적은 한 번 들어오면 오래 산다(바로 위 시험이 표식이
+/// 든 파일을 `git add` 한다 — 그 상태가 이 판의 출발점이다).
+///
+/// 그래서 가르는 자를 `%A` 의 내용이 아니라 **드라이버가 `%A` 를 건드렸는가**(`cmp`)로 둔다.
+#[test]
+fn a_marker_already_in_the_file_does_not_disarm_the_fallback() {
+    let s = init("mergestale");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", &s.path().join("없는/자리/moai").display().to_string()]);
+    let id = add(root, &["하나"]);
+    // 한 번 잘못 푼 흔적. moai 는 못 읽는 줄로 들고 다니고, 병합마다 다시 만난다.
+    append_raw(root, b"<<<<<<< \xea\xb7\xb8\xeb\x95\x8c \xeb\x82\xa8\xea\xb8\xb4 \xec\xa4\x84\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &id, "--title", "저쪽 제목"]);
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &id, "--tag", "parser"]);
+    git(root, &["commit", "-qam", "main"]);
+
+    let out = git_try(root, None, &["merge", "--no-edit", "side"]);
+    assert!(!out.status.success(), "못 돈 드라이버를 성공으로 읽었다\n{}", text(&out));
+    let merged = issues(root);
+    // **저쪽 글이 파일에 서야 한다.** 옛 표식만 남고 저쪽이 없으면 `git add` 한 번에 사라진다.
+    assert!(merged.contains("저쪽 제목"), "옛 표식 때문에 내려앉지 않았다 — 저쪽이 파일에 없다\n{merged}");
+    assert!(merged.contains(">>>>>>>"), "표식을 새로 안 세웠다\n{merged}");
+    git(root, &["add", ".moai/issues.jsonl"]);
+    git(root, &["commit", "-qm", "그대로 add"]);
+    assert!(issues(root).contains("저쪽 제목"), "저쪽 고침이 자취 없이 사라졌다\n{}", issues(root));
+}
+
 /// **빈칸이 든 경로로 심어도 그대로 돈다.**
 ///
 /// git 은 드라이버 명령을 `sh -c` 로 돌린다. 감싸지 않은 경로는 첫 낱말에서 끊겨 늘 내려앉는
@@ -11858,7 +11898,9 @@ fn status_names_a_planted_driver_that_cannot_run() {
     let said = ok(root, &["status"]);
     assert!(said.contains("심어 둔 머지 드라이버가 안 돈다"), "못 도는 드라이버를 안 댔다\n{said}");
     assert!(said.contains(&gone.display().to_string()), "어느 경로인지 안 댄다\n{said}");
-    assert!(said.contains("merge-driver --install --as"), "고칠 명령을 안 댄다\n{said}");
+    // **힌트는 그대로 칠 수 있는 줄이다** — 자리표시자를 끼우면 그것을 그대로 치는 쪽이 깨진다.
+    assert!(said.contains("moai merge-driver --install"), "고칠 명령을 안 댄다\n{said}");
+    assert!(!said.contains('<') && !said.contains('>'), "힌트에 자리표시자를 남겼다\n{said}");
     // **경고가 아니라 알림이다** — 종료 코드는 안 바뀌고(`ok` 가 그것을 이미 쟀다) `notices` 에 선다.
     let json = ok(root, &["status", "--json"]);
     one_json_value(&json);

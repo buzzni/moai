@@ -116,7 +116,12 @@ pub fn run(ctx: &Ctx, args: MergeDriverArgs) -> R<Vec<String>> {
         // 글자가 깨진 줄은 id 로 짝지을 수가 없다 — 두 쪽을 통째로 넘긴다.
         _ => whole_bytes(&a, &b, marker),
     };
-    std::fs::write(ours, &text).map_err(|e| Fail::new(format!("{}: {e}", ours.display())))?;
+    // **`%A` 는 temp+rename 으로 갈아끼운다**(`store::write_atomic`, 리뷰 moai-h6aq.cx8). 맨
+    // `fs::write` 는 자르고 나서 쓰므로, 그 사이에 죽으면(ENOSPC·OOM kill) `%A` 가 잘린 파일로
+    // 남는다. 심는 줄은 "드라이버가 `%A` 를 안 건드렸다" 를 보고 git 의 기본 머지로 내려앉는데
+    // ([`driver_command`]), 잘린 파일은 건드린 것도 안 건드린 것도 아니라 그 판정이 거짓이 된다.
+    // 여기서 원자적으로 쓰면 `%A` 는 늘 **받은 그대로**이거나 **다 쓴 답**이고, 판정이 참이 된다.
+    crate::store::write_atomic(ours, &text)?;
 
     if clashes.is_empty() {
         return match ctx.json {
@@ -491,15 +496,34 @@ fn time(v: Option<&Value>) -> Option<i64> {
 /// 읽어 `git add` 한 번에 저쪽을 통째로 버린다. 안 심은 클론이 도리어 안전한 자리다 — 거기서는
 /// git 의 기본 머지가 적어도 표식을 남긴다(`moai-w8so` 의 실측).
 ///
-/// 그 두 상태를 같게 만든다. 세 마디다.
+/// 그 두 상태를 같게 만든다. 가르는 자는 **드라이버가 `%A` 를 건드렸는가** 하나다.
 ///
 /// 1. 드라이버가 0 으로 끝나면 그것으로 끝이다.
-/// 2. 비영인데 `%A` 에 표식이 있으면 **답을 못 지어 사람에게 넘긴 것**이므로 그대로 비영이다.
-/// 3. 비영인데 표식이 없으면 그 명령은 답을 안 쓴 것이다 — `git merge-file` 로 다시 합친다.
-///    이 길은 표식을 남기므로, 최악이 "조용한 손실" 에서 "안 심은 클론과 같음" 으로 내려온다.
+/// 2. 비영인데 `%A` 가 **달라졌으면** 답을 쓰고 나서 실패한 것 — 표식을 쓰고 사람에게 넘긴
+///    갈래다(`run` 은 그 길에서만 비영으로 끝난다). 그대로 비영이다.
+/// 3. 비영인데 `%A` 가 **받은 그대로면** 그 명령은 답을 안 쓴 것이다(경로가 사라졌다, PATH 에
+///    없다, 실행 권한이 없다, 옛 바이너리라 이 명령을 모른다, 저쪽 파일을 못 읽었다) —
+///    `git merge-file` 로 다시 합친다. 이 길은 표식을 남기므로, 최악이 "조용한 손실" 에서
+///    "안 심은 클론과 같음" 으로 내려온다.
 ///
-/// 표식을 `<<<<<<<` 일곱 자로 찾는 것은 git 의 기본값이다. 저장소가 `conflict-marker-size` 를
-/// 그보다 짧게 잡아 못 찾으면 3번으로 내려가는데, 그것도 표식이 서는 길이라 잃는 것은 없다.
+/// **`%A` 의 내용을 보고 가르지 않는다**(리뷰 moai-h6aq.cx8). 표식을 `grep` 으로 찾던 판은 두
+/// 군데서 틀렸다. 하나, `.moai/issues.jsonl` 에 **이미** `<<<<<<<` 줄이 들어 있으면(못 읽는 줄은
+/// `keyed` 가 그대로 들고 가므로 한 번 들어오면 오래 남는다) 명령이 아예 못 돈 판도 2번으로
+/// 읽혀, 표식 없는 이쪽 파일이 그대로 남는 옛 버그가 되돌아온다. 둘, 저장소가
+/// `conflict-marker-size` 를 7 보다 짧게 잡으면 드라이버가 쓴 표식을 못 찾아 3번으로 내려가고,
+/// 그러면 `git merge-file` 이 **표식이 든 `%A`** 를 이쪽 것으로 알고 다시 합쳐 표식이 겹친다.
+/// 앞뒤를 `cmp` 로 견주면 둘 다 안 생긴다 — 파일에 무엇이 들었는지가 아니라 이번 판이 무엇을
+/// 했는지를 재기 때문이다.
+///
+/// 그 견줌이 서려면 `%A` 가 **받은 그대로**이거나 **다 쓴 답**이어야 한다. `run` 이 `%A` 를
+/// `store::write_atomic` 으로 갈아끼우는 까닭이 그것이다 — 잘린 파일이 남으면 3번이 그것을
+/// 이쪽 것으로 알고 합쳐, 지워진 줄이 "이쪽이 지웠다" 로 읽혀 **0 으로** 끝난다.
+///
+/// `--marker-size=%L` 을 준다. 안 주면 내려앉은 판만 일곱 자를 써서, 저장소가 고른 너비와
+/// 드라이버가 쓰는 너비와 이것이 셋으로 갈린다.
+///
+/// 베낀 자리(`%A.ours`)는 어느 갈래에서나 지운다. `cp` 자체가 실패하면(그럴 자리가 거의 없지만)
+/// `[ -f ]` 가 거짓이 되어 3번으로 간다 — 잃는 쪽이 아니라 **표식이 서는 쪽**으로 기운다.
 ///
 /// 경로는 `shell_word` 로 감싼다 — 빈칸이 든 경로는 첫 낱말에서 끊기고, 그때 껍데기가 내는
 /// 것은 1번도 2번도 아닌 3번이다. `%A %O %B` 는 git 이 제가 지은 임시 파일 이름으로 바꾸므로
@@ -507,10 +531,18 @@ fn time(v: Option<&Value>) -> Option<i64> {
 fn driver_command(cmd: &str) -> String {
     let q = crate::text::shell_word(cmd);
     format!(
-        "if {q} merge-driver %O %A %B %L %P; then exit 0; fi; \
-         grep -q '^<<<<<<<' %A && exit 1; \
-         exec git merge-file -L ours -L base -L theirs %A %O %B"
+        "cp %A %A.ours; \
+         if {q} merge-driver %O %A %B %L %P; then rm -f %A.ours; exit 0; fi; \
+         if [ -f %A.ours ] && ! cmp -s %A %A.ours; then rm -f %A.ours; exit 1; fi; \
+         rm -f %A.ours; \
+         exec git merge-file --marker-size=%L -L ours -L base -L theirs %A %O %B"
     )
+}
+
+/// 심은 줄이 앉는 설정 키. **적는 쪽과 재는 쪽이 한 글을 쓴다** — 따로 지으면 `merge.<이름>.*`
+/// 를 손볼 때 한쪽만 안 고쳐져도 컴파일은 되고, 그때 알림만 조용해진다(리뷰 moai-h6aq.cx8).
+fn driver_key() -> String {
+    format!("merge.{DRIVER}.driver")
 }
 
 /// 심어 둔 드라이버가 **못 도는** 상태의 알림(moai-2ewr).
@@ -528,15 +560,14 @@ fn driver_command(cmd: &str) -> String {
 ///
 /// **모르면 입을 다문다.** 설정을 못 읽었거나 적힌 줄이 이 도구가 지은 모양이 아니면 아무 말도
 /// 안 한다 — 남이 손으로 적은 줄을 "썩었다" 고 부르면 걷을 길이 없는 알림이 선다.
+/// **이 저장소에 심은 줄만 본다**(`--local`, 리뷰 moai-h6aq.cx8). 맨 `--get` 은 system·global 까지
+/// 훑어, 사람이 한때 `git config --global merge.moai.driver` 를 적어 뒀으면 심은 적 없는 저장소마다
+/// — git 저장소가 아닌 `.moai` 자리까지 — 이 알림이 서고, 힌트를 따라 쳐도 그것은 `--local` 에
+/// 적으니 영영 안 걷힌다. `install` 이 적는 자리가 `--local` 이므로 재는 자리도 거기다.
 pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
-    let key = format!("merge.{DRIVER}.driver");
-    let planted = crate::git::run(root, &["config", "--get", &key]).ok()?;
-    let planted = planted.trim();
-    if planted.is_empty() {
-        return None;
-    }
-    let word = planted_word(planted)?;
-    if runnable(&word) {
+    let planted = crate::git::run(root, &["config", "--local", "--get", &driver_key()]).ok()?;
+    let word = planted_word(planted.trim())?;
+    if runnable(root, &word) {
         return None;
     }
     Some(crate::report::Warning::merge_driver_rotten(&word, crate::cmd::init::away_root(root, chdir).as_deref()))
@@ -544,41 +575,67 @@ pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
 
 /// 심어 둔 줄에서 **실제로 부르는 명령**을 떼어 낸다. 모양이 이 도구가 지은 것이 아니면 `None`.
 ///
-/// [`driver_command`] 가 지은 줄은 `if <명령> merge-driver …` 로 선다. 빈칸이 든 경로는
-/// `shell_word` 가 홑따옴표로 싸는데, 그 안에 홑따옴표가 또 들면(`'/a/it'\''s'`) 떼어 낸 조각이
-/// 실제 경로가 아니다 — 그때는 재지 않는다. `$'…'` 도 같다.
+/// **표식은 [`CALL`] 이다** — 이 도구가 지은 줄은 명령 바로 뒤에 그것이 선다. 앞에 무엇이 붙든
+/// (지금은 `cp %A %A.ours; if `, 옛 판은 아무것도 없다) 그 자리 앞의 낱말 하나가 명령이다.
+/// 재는 쪽이 앞머리를 세지 않으니 [`driver_command`] 를 고쳐도 여기가 안 따라 낡는다.
+///
+/// **표식이 없으면 재지 않는다**(리뷰 moai-h6aq.cx8). 앞 판은 낱말 하나만 떼어, 사람이 손으로
+/// 적은 `python3 tools/merge.py %O %A %B` 를 `python3` 으로 읽고 그것이 이 프로세스의 PATH 에
+/// 없으면 "썩었다" 고 불렀다 — 남의 줄을 덮으라는 힌트가 함께 서는데 걷을 길이 없다.
+///
+/// 빈칸이 든 경로는 `shell_word` 가 홑따옴표로 싸는데, 그 안에 홑따옴표가 또 들면
+/// (`'/a/it'\''s'`) 떼어 낸 조각이 실제 경로가 아니다 — 그때는 재지 않는다. `$'…'` 도 같다.
 fn planted_word(planted: &str) -> Option<String> {
-    let rest = planted.strip_prefix("if ").unwrap_or(planted);
-    match rest.strip_prefix('\'') {
-        Some(quoted) => {
-            let end = quoted.find('\'')?;
-            // 이어 붙인 따옴표(`'…'\''…'`)면 여기서 끊은 것이 경로가 아니다.
-            quoted[end + 1..].starts_with(' ').then(|| quoted[..end].to_string())
+    /// 심은 줄에서 명령 바로 뒤에 서는 글. 이 도구가 지은 줄인지를 이것으로 가른다.
+    const CALL: &str = " merge-driver %O %A %B";
+    let head = planted.split_once(CALL)?.0;
+    let word = match head.strip_suffix('\'') {
+        Some(inner) => {
+            let start = inner.rfind('\'')?;
+            // 이어 붙인 따옴표(`'…'\''…'`)와 `$'…'` 은 앞이 빈칸으로 안 끝난다. `$'…'` 을
+            // 풀지 않는 것은 푸는 규칙을 여기 또 쓰면 `shell_word` 와 둘이 어긋나서다.
+            let (before, word) = (&inner[..start], &inner[start + 1..]);
+            if !before.is_empty() && !before.ends_with(' ') {
+                return None;
+            }
+            word
         }
-        // `$'…'` 은 풀지 않는다 — 푸는 규칙을 여기 또 쓰면 `shell_word` 와 둘이 어긋난다.
-        None if rest.starts_with('$') => None,
-        None => rest.split_whitespace().next().map(str::to_string),
-    }
+        None => head.rsplit(' ').next()?,
+    };
+    (!word.is_empty()).then(|| word.to_string())
 }
 
 /// 그 명령을 껍데기가 실제로 부를 수 있는가. 자리에 `/` 가 들면 그 파일을, 아니면 `PATH` 를 본다.
-fn runnable(cmd: &str) -> bool {
-    if cmd.contains('/') {
-        return is_exe(Path::new(cmd));
+///
+/// **상대 경로는 `root` 에 붙인다**(리뷰 moai-h6aq.cx8). git 은 드라이버를 그 워크트리 꼭대기에서
+/// 돌리는데, 프로세스의 현재 자리로 풀던 판은 저장소의 아래 디렉터리에서 친 `moai status` 가
+/// 멀쩡한 `--as bin/moai` 를 "썩었다" 고 불렀다. 절대 경로면 `join` 이 그대로 낸다.
+///
+/// **재는 자리가 도는 자리는 아니다.** `PATH` 는 이 프로세스의 것이고 git 이 병합에서 쓸 것이
+/// 아니며, 실행 권한도 "누군가 돌릴 수 있는가" 까지만 본다 — 이름으로 심은 것(`--as moai`)은
+/// 그만큼만 믿는다. 옛 moai 처럼 **자리는 있는데 이 명령을 모르는** 판은 여기서 못 가른다.
+fn runnable(root: &Path, cmd: &str) -> bool {
+    // **유닉스가 아니면 아무 말도 안 한다.** `\` 와 `PATHEXT` 규칙을 여기 또 쓰면, 멀쩡한
+    // `C:\…\moai.exe` 를 PATH 의 낱말로 읽어 걷을 길 없는 알림이 선다 — 모르면 입을 다문다.
+    #[cfg(not(unix))]
+    {
+        let _ = (root, cmd);
+        true
     }
-    let Some(path) = std::env::var_os("PATH") else { return false };
-    std::env::split_paths(&path).any(|dir| is_exe(&dir.join(cmd)))
-}
-
-fn is_exe(p: &Path) -> bool {
-    let Ok(meta) = std::fs::metadata(p) else { return false };
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt as _;
-        meta.is_file() && meta.permissions().mode() & 0o111 != 0
+        if cmd.contains('/') {
+            return is_exe(&root.join(cmd));
+        }
+        let Some(path) = std::env::var_os("PATH") else { return false };
+        std::env::split_paths(&path).any(|dir| is_exe(&dir.join(cmd)))
     }
-    #[cfg(not(unix))]
-    meta.is_file()
+}
+
+#[cfg(unix)]
+fn is_exe(p: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 /// `.git/config` 에 드라이버를 심는다.
@@ -599,7 +656,7 @@ fn install(ctx: &Ctx, as_command: Option<&str>) -> R<Vec<String>> {
     };
     let driver = driver_command(&cmd);
     let name = format!("merge.{DRIVER}.name");
-    let key = format!("merge.{DRIVER}.driver");
+    let key = driver_key();
     // **속 병합에는 이 드라이버를 쓰지 않는다**(`merge.<이름>.recursive`). 갈래가 엇갈린
     // 이력에서 git 은 공통 조상 여럿을 먼저 합쳐 가상 조상을 짓는데, 그 자리에 이 드라이버를
     // 쓰면 충돌 표식이 `%O` 로 들어와 다음 판에서 못 읽는 줄이 된다 — 그러면 이슈마다 푼 것이
@@ -610,11 +667,16 @@ fn install(ctx: &Ctx, as_command: Option<&str>) -> R<Vec<String>> {
     // **저장소 지역 설정에 적는다.** 사람의 전역 설정에 남기면 이 저장소를 지운 뒤에도
     // 없는 바이너리를 가리키는 줄이 남는다. 자리는 지금 선 곳이 정한다 — git 이 제
     // 규칙으로 저장소를 찾으니, 저장소 밖이면 git 이 제 말로 거절한다.
+    //
+    // **드라이버를 맨 마지막에 적는다**(리뷰 moai-h6aq.cx8). 세 줄은 따로 적히고 되돌리는 길이
+    // 없으니, 드라이버를 먼저 적었다가 `recursive` 에서 실패하면 그 저장소는 **드라이버는 서 있고
+    // 속 병합 막이는 없는** 상태로 남는다 — 바로 위가 그것이 이슈마다 푼 것을 통째로 날린다고
+    // 적어 둔 자리다. 차례를 뒤집으면 실패한 판은 안 심은 것과 같아진다.
     let here = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     for (k, v) in [
         (name.as_str(), "moai issues.jsonl — 이슈마다 3-way"),
-        (key.as_str(), driver.as_str()),
         (recursive.as_str(), "binary"),
+        (key.as_str(), driver.as_str()),
     ] {
         crate::git::run(&here, &["config", "--local", k, v]).map_err(|e| Fail::new(e.to_string()))?;
     }
@@ -907,15 +969,23 @@ mod tests {
         assert!(clashes.is_empty(), "{clashes:?}");
     }
 
-    /// **심는 줄은 세 마디다** — 돌면 그것으로 끝, 표식을 남기고 실패했으면 그대로 넘김,
-    /// 아무것도 안 쓰고 실패했으면 `git merge-file`. 셋째 마디가 없으면 경로가 썩은 순간
+    /// **심는 줄은 세 마디다** — 돌면 그것으로 끝, `%A` 를 건드리고 실패했으면 그대로 넘김,
+    /// 안 건드리고 실패했으면 `git merge-file`. 셋째 마디가 없으면 경로가 썩은 순간
     /// git 이 표식 없는 파일을 남기고, `git add` 한 번에 저쪽이 사라진다.
+    ///
+    /// **가르는 자가 `%A` 의 내용이 아니라 `cmp` 여야 한다**(리뷰 moai-h6aq.cx8) — 표식을
+    /// `grep` 으로 찾으면 파일에 이미 있던 `<<<<<<<` 한 줄이 못 돈 판을 "사람에게 넘겼다" 로
+    /// 읽히게 하고, `conflict-marker-size` 가 7 보다 짧으면 드라이버가 쓴 표식을 놓친다.
     #[test]
     fn the_planted_line_falls_back_to_gits_own_merge() {
         let line = driver_command("/w/moai");
-        assert!(line.starts_with("if /w/moai merge-driver %O %A %B %L %P; then exit 0; fi;"), "{line}");
-        assert!(line.contains("grep -q '^<<<<<<<' %A && exit 1"), "표식이 선 실패를 내려앉혔다\n{line}");
-        assert!(line.ends_with("exec git merge-file -L ours -L base -L theirs %A %O %B"), "{line}");
+        assert!(line.starts_with("cp %A %A.ours; if /w/moai merge-driver %O %A %B %L %P; then"), "{line}");
+        assert!(line.contains("! cmp -s %A %A.ours; then rm -f %A.ours; exit 1"), "건드린 판을 내려앉혔다\n{line}");
+        assert!(!line.contains("grep"), "`%A` 의 내용으로 갈랐다\n{line}");
+        assert!(
+            line.ends_with("exec git merge-file --marker-size=%L -L ours -L base -L theirs %A %O %B"),
+            "내려앉은 판이 저장소가 고른 표식 너비를 안 쓴다\n{line}"
+        );
         // 한 줄이어야 한다 — `git config` 의 값은 줄 하나다.
         assert_eq!(line.lines().count(), 1, "{line}");
     }
@@ -928,31 +998,43 @@ mod tests {
         assert_eq!(word("/w/moai").as_deref(), Some("/w/moai"));
         assert_eq!(word("/w/My Work/moai").as_deref(), Some("/w/My Work/moai"));
         assert_eq!(word("moai").as_deref(), Some("moai"), "PATH 의 낱말도 읽는다");
-        // 홑따옴표가 든 경로는 `shell_query` 가 이어 붙여 싼다 — 떼어 낸 조각이 경로가 아니다.
+        // 홑따옴표가 든 경로는 `shell_word` 가 이어 붙여 싼다 — 떼어 낸 조각이 경로가 아니다.
         assert_eq!(word("/w/it's/moai"), None);
         // 제어문자가 든 경로는 `$'…'` 다. 푸는 규칙을 여기 또 쓰지 않는다.
         assert_eq!(word("/w/a\tb/moai"), None);
-        // 이 도구가 지은 모양이 아니면 재지 않는다 — 다만 옛 판(맨 명령)은 그대로 읽는다.
+        // 빈 `--as` 는 `''` 로 심긴다. 아무 경로도 안 대는 알림을 세우지 않는다.
+        assert_eq!(word(""), None);
+        // 옛 판(맨 명령)은 그대로 읽는다 — 그 줄에도 `merge-driver %O %A %B` 가 선다.
         assert_eq!(planted_word("/w/moai merge-driver %O %A %B %L %P").as_deref(), Some("/w/moai"));
+        // **이 도구가 지은 모양이 아니면 재지 않는다.** 남이 손으로 적은 줄이다.
+        assert_eq!(planted_word("python3 tools/merge.py %O %A %B"), None);
+        assert_eq!(planted_word("if command -v moai >/dev/null; then moai m %O %A %B; fi"), None);
+        assert_eq!(planted_word(""), None);
     }
 
     /// **부를 수 있는지는 파일로 잰다.** 있고 없음이 아니라 실행할 수 있는가다 — 권한을 잃은
     /// 파일은 git 이 부르지 못하고, 그때가 바로 표식 없이 끝나던 자리다.
+    ///
+    /// **상대 경로는 뿌리에 붙는다** — git 이 드라이버를 워크트리 꼭대기에서 돌리기 때문이다.
     #[cfg(unix)]
     #[test]
     fn runnable_reads_the_file_not_just_its_name() {
         use std::os::unix::fs::PermissionsExt as _;
-        let dir = std::env::temp_dir().join(format!("moai-runnable-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        // 자리는 `Scratch` 가 쥔다 — 끝에서 `remove_dir_all` 을 부르면 패닉한 판이 찌꺼기를 남긴다.
+        let scratch = crate::scratch::Scratch::new("runnable");
+        let dir = scratch.path();
         let p = dir.join("moai");
         std::fs::write(&p, "#!/bin/sh\n").unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(!runnable(&p.display().to_string()), "실행 권한이 없는 파일을 돈다고 했다");
+        let at = |cmd: &Path| runnable(dir, &cmd.display().to_string());
+        assert!(!at(&p), "실행 권한이 없는 파일을 돈다고 했다");
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(runnable(&p.display().to_string()));
-        assert!(!runnable(&dir.display().to_string()), "디렉터리를 명령으로 읽었다");
-        assert!(!runnable(&dir.join("없다").display().to_string()));
-        std::fs::remove_dir_all(&dir).ok();
+        assert!(at(&p));
+        assert!(!at(dir), "디렉터리를 명령으로 읽었다");
+        assert!(!at(&dir.join("없다")));
+        // 상대 경로는 프로세스의 자리가 아니라 뿌리에서 푼다.
+        assert!(runnable(dir, "./moai"), "뿌리에 있는 상대 경로를 못 찾았다");
+        assert!(!runnable(Path::new("/"), "./moai"), "엉뚱한 뿌리에서 찾아 냈다");
     }
 
     /// **빈칸이 든 경로를 감싼다.** 안 감싸면 첫 낱말에서 끊겨 늘 내려앉는 길로만 가고,
@@ -960,7 +1042,7 @@ mod tests {
     #[test]
     fn the_planted_line_quotes_a_path_with_a_space() {
         let line = driver_command("/w/My Work/moai");
-        assert!(line.starts_with("if '/w/My Work/moai' merge-driver "), "{line}");
+        assert!(line.contains("if '/w/My Work/moai' merge-driver "), "{line}");
         // 자리표시자는 감싸지 않는다 — git 이 제 임시 파일 이름으로 바꾼다. `%P` 는 git 이 이미 싼다.
         assert!(!line.contains("\"%A\"") && !line.contains("'%A'"), "자리표시자를 덧쌌다\n{line}");
     }
