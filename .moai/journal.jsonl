@@ -5847,3 +5847,12 @@
 {"ts":"2026-09-20T03:20:22Z","id":"moai-x129","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T03:20:33Z","id":"moai-4g7x.eac","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=215453 (high — 에픽 끝 리뷰, --fix)"}
 {"ts":"2026-09-20T03:20:33Z","id":"moai-4g7x.eac","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"세 건 모두 반영했다(12c2471) — 머지 드라이버 절에 심는 자리의 경고와 --as, companions[].blocked_by 를 자리 모양으로(못 읽으면 빈 글자), 5-1 의 빈 줄만 남은 지움. 넘긴 것은 없다"}
+{"ts":"2026-09-20T03:20:52Z","id":"moai-4g7x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 없다 — 멤버 아홉과 리뷰가 모두 닫혔고 ceb6597 로 develop 에 들었다. 루트 release 를 다시 빌드하는 중이다"}
+{"ts":"2026-09-20T03:21:00Z","id":"moai-h6aq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"머지 드라이버를 켤 수 있게 — 못 도는 드라이버가 삼키지 않는다"}
+{"ts":"2026-09-20T03:21:00Z","id":"moai-8bsy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"심는 줄이 바이너리를 못 찾으면 git merge-file 로 내려앉는다"}
+{"ts":"2026-09-20T03:21:00Z","id":"moai-h6aq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-irzo 에서 펼쳤다 — 못 도는 드라이버는 git 기본 머지로 내려앉힌다"}
+{"ts":"2026-09-20T03:21:00Z","id":"moai-irzo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-h6aq 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-20T03:21:01Z","id":"moai-2ewr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"status 의 알림을 \"심겼는가\" 가 아니라 \"그 명령이 도는가\" 로 본다"}
+{"ts":"2026-09-20T03:21:01Z","id":"moai-2ewr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-hgmv 에서 펼쳤다 — status 의 드라이버 알림은 심겼는가가 아니라 도는가를 본다"}
+{"ts":"2026-09-20T03:21:01Z","id":"moai-hgmv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-h6aq 의 멤버 moai-2ewr 로 펼쳤다"}
+{"ts":"2026-09-20T03:21:01Z","id":"moai-h6aq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-20 사용자 결정: 머지 드라이버를 켜되, 켜기 전에 내려앉는 감싸개를 먼저 넣는다. 근거는 moai-w8so 의 실측이다 — 심은 경로가 비면 git 이 표식 0개로 끝내고, 그 파일을 git add 하면 저쪽 고침이 자취 없이 사라진다. 안 심은 클론(기본 머지)은 표식을 남기니, 못 도는 드라이버가 안 심은 것보다 나쁘다. 이 에픽이 끝나면 루트 클론에 심는다."}
