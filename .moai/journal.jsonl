@@ -5981,3 +5981,8 @@
 {"ts":"2026-09-20T05:13:29Z","id":"moai-4qbv.i0g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-20T05:13:37Z","id":"moai-po6v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-20T05:15:41Z","id":"moai-589b","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰가 낸 것을 배포 기준으로 갈라 마일스톤 안팎에 둔다"}
+{"ts":"2026-09-20T05:15:44Z","id":"moai-54pk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 훅의 쓰기 판정. 절반은 리뷰 뒤 되돌렸다. 토큰은 이 창이 moai-k8j1 부터 이어 써 못 가른다)"}
+{"ts":"2026-09-20T05:15:44Z","id":"moai-k8j1.209","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=400000 (max — 훅 쓰기 판정, 10각 + 실제 bash 대조)"}
+{"ts":"2026-09-20T05:16:03Z","id":"moai-k8j1.209","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"앞 줄의 tokens=400000 은 어림값이라 잘못 적었다 — 도구가 이 판의 토큰을 안 줬다(중간에 멈춘 판이라 사용량 줄이 없다). 통계는 그 수를 빼고 읽는다."}
+{"ts":"2026-09-20T05:16:15Z","id":"moai-54pk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T05:16:15Z","id":"moai-k8j1.209","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: feeds 되돌림, 안 도는 묶음의 찌꺼기 bailout, 두 벌 가름자, 낡은 문서. **이 커밋의 절반(안 풀린 묶음 풀기)은 사용자 결정으로 되돌렸다** — 남은 전제 넷은 렉서의 백그라운드 신호가 먼저다. 멤버로 남김: moai-4arw. idea: moai-1zyx(9번)·moai-q6db(12·13·14번)"}
