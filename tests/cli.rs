@@ -10664,6 +10664,9 @@ fn outside_a_repo_the_overview_overlays_each_projects_worktrees() {
     let b = block(&rd, "main");
     assert!(!b.contains(&t.picked), "옆에서 집은 일을 집으라고 낸다\n{rd}");
     assert!(b.contains("⎇ feat/x 옆에서 만든 일"), "{rd}");
+    // **이 머리도 겹쳐 봤다고 말한다** — 위 `status` 와 같은 꼬리다(리뷰). 줄의 `⎇` 는 옆에서 온
+    // 줄에만 서므로, 옆이 조용한 판에서는 이 꼬리만이 겹쳐 본 화면과 제 화면을 가른다.
+    assert!(b.lines().next().unwrap().contains("⎇ feat/x 겹쳐 봄"), "ready 머리가 겹쳐 봤다고 안 한다\n{rd}");
     let json = ok_with(&out, &cfg, &["ready", "--worktree", "--json"]);
     assert!(json.contains(&format!("\"id\":\"{}\"", t.made)) && json.contains("\"branch\":\"feat/x\""), "{json}");
     assert!(!json.contains("\"trouble\""), "문제가 없는데 trouble 키가 섰다\n{json}");

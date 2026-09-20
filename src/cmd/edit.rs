@@ -294,7 +294,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let seen = view::Seen {
         roots: shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect(),
         states: read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect(),
-        origin: None,
+        // 쓰는 길은 옆 워크트리를 겹쳐 보지 않는다 — 겹칠 것이 없는 화면이다.
+        screen: view::Screen::new(ctx.lang()),
         blocks: blocked.blocks(),
         places: None,
     };
