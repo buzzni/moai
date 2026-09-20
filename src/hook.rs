@@ -1,5 +1,12 @@
 //! 훅이 무엇을 낼지 정한다. **순수 함수다** — 이벤트와 `&[Issue]` 만 보고
-//! 아무것도 찍지 않고 아무것도 읽지 않는다.
+//! 아무것도 찍지 않고 저장소를 읽지 않는다.
+//!
+//! **예외는 한 자리, [`settled`] 뿐이다**(2026-09-20 사용자 결정, 리뷰 moai-1upp.nwq).
+//! 규칙 2 는 "이 경로가 저장소 안인가" 를 묻는데, 같은 자리를 가리키는 두 철자를 한
+//! 자리로 보려면 링크를 풀어야 하고 그것은 파일 시스템에만 있다. 판정을 `cmd/` 로
+//! 올리면 `guard_shell_in` 이 셸 토막에서 캐낸 경로마다 푸는 손잡이를 인자로 더 받아야
+//! 하는데, 그 함수는 이미 인자 여덟이다. 읽는 것은 **경로 한 줄**이지 저장소가 아니다 —
+//! 이슈도 설정도 여전히 `cmd/hook.rs` 가 읽어 넘긴다.
 //!
 //! **여기가 에이전트와의 계약이다.** `cmd/hook.rs` 는 stdin 을 풀고, 저장소를
 //! 읽고, 여기가 낸 답을 계약 JSON 으로 옮기기만 한다. 판단을 `cmd/` 에 두면
@@ -3960,10 +3967,12 @@ fn settled(path: &str, root: &Path) -> PathBuf {
     // 통째로 `canonicalize` 하던 길은 없는 파일에서 실패해 준 철자를 그대로 돌려주고, 그러면
     // 만드는 쪽에서만 규칙이 꺼진다. **`..` 는 [`resolve`] 가 이미 접었다** — 다시 접지 않는다.
     for head in folded.ancestors() {
-        if let Ok(real) = std::fs::canonicalize(head)
-            && let Ok(tail) = folded.strip_prefix(head)
-        {
-            return if tail.as_os_str().is_empty() { real } else { real.join(tail) };
+        if let Ok(real) = std::fs::canonicalize(head) {
+            // **떼어 내기는 실패하지 않는다** — `head` 는 `folded` 의 조상이다. 이것을 `if let` 으로
+            // 받아 넘기면 못 뗀 자리에서 한 칸 더 짧은 조상으로 내려가, 엉뚱한 윗자리로 푼 경로를
+            // 아무 말 없이 답으로 낸다. 남은 조각이 비면 `join` 이 끝에 가름선만 붙이는데,
+            // `Path` 의 견주기와 `strip_prefix` 는 조각으로 도니 두 쪽 다 같은 답이다.
+            return real.join(folded.strip_prefix(head).expect("조상에서 떼어 낸다"));
         }
     }
     folded
@@ -5491,7 +5500,11 @@ mod tests {
     ///
     /// **아직 없는 파일도 같게 풀린다** — 새로 만드는 자리에서만 규칙이 꺼지면 막아야 할 것을
     /// 되레 놓친다. 저장소 밖은 링크를 풀어도 밖이어야 한다.
+    ///
+    /// 링크를 만드는 시험이라 unix 에서만 돈다 — 가리지 않으면 unix 가 아닌 곳에서 이 한 시험이
+    /// 아니라 바이너리의 시험 전부가 컴파일되지 않는다(`user_config`·`read_marks` 의 링크 시험과 같다).
     #[test]
+    #[cfg(unix)]
     fn a_linked_spelling_still_lands_inside_the_repo() {
         let s = crate::scratch::Scratch::real("hooklink");
         let root = s.path().join("repo");
