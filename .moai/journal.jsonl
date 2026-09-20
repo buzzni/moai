@@ -5807,3 +5807,11 @@
 {"ts":"2026-09-20T02:39:03Z","id":"moai-ae5c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"적을 것이 없는 읽기가 read 디렉터리와 락 파일을 남긴다"}
 {"ts":"2026-09-20T02:39:12Z","id":"moai-zc2x","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"주석만 있던 읽음 파일에 path 가 머리 주석을 물고 들어간다"}
 {"ts":"2026-09-20T02:39:15Z","id":"moai-hdcf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옛 [read] 표는 안 줄어 moai-dt5q 의 값이 옛 사용자에게만 남는다"}
+{"ts":"2026-09-20T02:41:12Z","id":"moai-omx7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=700000 (max — 읽음의 새 자리와 그 쓰기 경로. 두 창에 걸친 일이고, 이 줄은 둘을 합한 값이다)"}
+{"ts":"2026-09-20T02:41:12Z","id":"moai-dt5q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (max — 걷는 자와 그 부르는 자리. 토큰은 moai-omx7 에 한 줄로 적었다)"}
+{"ts":"2026-09-20T02:41:19Z","id":"moai-bwce","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (max — App::seen 을 Site::seen 으로 옮기고 쓰는 자 둘을 한 커밋에. 토큰은 moai-omx7 에 한 줄로 적었다)"}
+{"ts":"2026-09-20T02:41:20Z","id":"moai-f31d.rs3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=421435 (max — 리뷰 서브에이전트 둘째 판이 쓴 몫. 첫 판은 보고 전에 끊겨 토큰을 모른다)"}
+{"ts":"2026-09-20T02:41:26Z","id":"moai-omx7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T02:41:26Z","id":"moai-dt5q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T02:41:27Z","id":"moai-bwce","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T02:41:38Z","id":"moai-f31d.rs3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"두 판을 돌렸다. 첫 판은 보고 전에 끊겨 고침만 남았고 그것을 직접 읽어 06c94f3 로 담았다(전말은 앞 노트에). 둘째 판 열다섯 중 열하나를 6f3a449 로 반영했다 — 걷기가 못 본 줄의 읽음을 지우던 것, 관대한 건너뛰기를 통째 실패로 읽던 것, 잠깐 못 읽었는데 표식을 올려 다시 안 읽던 것, 빈 site 를 들고 있던 것으로 치던 것, 걷기가 주석을 물고 가던 것, 0700, CLI 의 까닭, --help 의 옛 자리, 고아 doc. 넘긴 다섯은 번호를 달아 담았다 — 8·9번은 멤버 moai-f5e3(자리를 푼 경로로, 마이그레이션이라 사람의 결정이 든다), 12번 moai-d9rv, 13번 moai-ae5c, 15번 moai-zc2x, 그리고 걷지 않은 옛 표는 moai-hdcf"}
