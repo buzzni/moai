@@ -2328,6 +2328,11 @@ fn create_in<'a>(
     // **토막마다 본다.** `cd /repo && moai add …` 의 뒷토막이 진짜 생성이다. **세우는 토막은 모두
     // 본다** — 첫 것만 보던 판은 단위 안에 세운 앞 토막 하나로 뒤의 맨 `moai add` 를 넘겼다. 치환은
     // 바깥 토막보다 먼저 쌓여, `x=$(moai add 'a' -e <에픽>); moai add 'b'` 가 그 모양이다(리뷰 moai-ju21.70g).
+    //
+    // **앞 토막의 에픽을 뒤로 물려주지 않는다**(moai-ean3, 2026-09-19 사용자 결정) — 물려주면
+    // `moai add 'a' -e <에픽> && moai add 'b'` 의 `b` 가 어느 일에서 나왔는지를 잃는데, 그것이
+    // 이 규칙이 지키려던 단 하나다. 토막마다 제 소속을 댄다
+    // ([`tests::every_creating_segment_names_its_own_unit`] 이 그 뜻을 못박는다).
     let makes = segments(cmd).into_iter().enumerate().filter(|(k, _)| only(*k)).find(|(_, seg)| {
         // `add` 만 본다. `idea add` 는 담는 자리고, `--from` 은 에픽과 그
         // 자식들을 한 단위로 세우는 자리라 새는 줄이 아니다.
@@ -5372,6 +5377,48 @@ mod tests {
         assert_eq!(guard_create(&all, &cfg(), &here(), &into("t-e")), Decision::Pass);
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai idea promote t-i --epic=t-e --from -"), Decision::Pass);
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai idea promote t-i --from -"), Decision::Pass);
+    }
+
+    /// **만드는 토막은 저마다 소속을 댄다**(moai-ean3, 2026-09-19 사용자 결정) — 한 줄에 `moai add`
+    /// 가 여럿이면 앞 토막이 단위 안에 세웠다고 뒤 토막이 풀리지 않는다. 첫 토막의 에픽을 뒤로
+    /// 물려주는 길은 고르지 않았다: 물려주면 `moai add 'a' -e <에픽> && moai add 'b'` 의 `b` 가
+    /// 어느 일에서 나왔는지를 잃는데, 그것이 규칙 1 이 지키려던 단 하나다.
+    ///
+    /// `create_in` 이 **첫 만드는 토막만** 재던 자리다 — 리뷰 moai-ju21.70g 의 고침(0de7d49)이
+    /// `find` 의 거르개를 토막마다 돌리면서 함께 닫혔고, 이 시험이 그 뜻을 못박는다. 자유로운 둘
+    /// (`idea add`·`add --from`)은 그대로 둔다.
+    #[test]
+    fn every_creating_segment_names_its_own_unit() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        for cmd in [
+            "moai add '안' -e t-e && moai add '딴 일'",
+            "moai add '안' -e t-e; moai add '딴 일'",
+            "moai add '딴 일' && moai add '안' -e t-e",
+            "moai add '안' --parent t-1 && moai add '딴 일'",
+            // 치환은 바깥 토막보다 먼저 쌓인다 — 차례로 첫 토막을 고르면 단위 안의 것이 앞선다.
+            "x=$(moai add '안' -e t-e); moai add '딴 일'",
+            "( moai add '안' -e t-e ); moai add '딴 일'",
+            "moai add '안' -e t-e | tee log && moai add '딴 일'",
+            // 자유로운 앞 토막도 뒤를 안 풀어 준다.
+            "moai idea add '떠오른 것' && moai add '딴 일'",
+            "moai add --from - && moai add '딴 일'",
+            "moai idea promote t-i --from - && moai add '딴 일'",
+            // 세우는 철자가 달라도 같다.
+            "moai add '안' -e t-e && moai issue add '딴 일'",
+            "moai add '안' -e t-e && moai epic add '딴 에픽'",
+            "moai add '안' -e t-e && moai milestone add '딴 마일스톤'",
+        ] {
+            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "앞 토막의 소속이 뒤 토막을 풀어 줬다 — {cmd}");
+        }
+        // 토막마다 소속을 댔으면 지나간다 — 규칙이 요구하는 것은 그것뿐이다.
+        for cmd in [
+            "moai add '안' -e t-e && moai add '또 안' --parent t-1",
+            "moai add '안' -e t-e && moai idea add '떠오른 것'",
+            "moai add '안' -e t-e && moai add '딴 일' --from -",
+            "moai add '안' -e t-e && moai add '떠오른 것' --type idea",
+        ] {
+            assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "저마다 소속을 댄 줄을 막았다 — {cmd}");
+        }
     }
 
     /// **소속은 물려받는다.** 자식 이슈를 집었을 때 그 줄의 `epic` 은 비어
