@@ -111,24 +111,114 @@ pub struct Registry {
     /// 트래커가 아니라 내 설정에 드는 까닭: 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에
     /// 적으면 읽기만 해도 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다(사용자 결정 2026-09-15).
     pub read: BTreeMap<String, String>,
-    /// 읽다 만난 탈. 멀쩡하면(파일이 없는 것도 멀쩡하다) `None` 이다. 까닭 글은 `problems` 에 있고
-    /// 여기는 **그 탈의 갈래**뿐이다 — 글로 가르면 말이 바뀔 때마다 가르는 쪽이 따라 깨진다.
+    /// 읽다 만난 탈. 멀쩡하면 `None` 이다. 까닭 글은 `problems` 에 있고 여기는 **그 탈의 갈래**뿐이다
+    /// — 글로 가르면 말이 바뀔 때마다 가르는 쪽이 따라 깨진다.
+    ///
+    /// **없는 파일도 갈래는 선다**([`Trouble::Gone`], moai-po6v) — `problems` 는 비는데 여기는 `Some`
+    /// 이다. 그 둘을 한 물음으로 읽으면 안 된다: 사람에게 댈 까닭은 없지만("아직 아무것도 등록 안
+    /// 했다" 는 정상이다) "없다" 와 "읽었더니 비었다" 를 가르는 자는 여기뿐이라, `trouble.is_none()`
+    /// 을 "성한 설정" 으로 읽는 새 길은 끊긴 마운트를 빈 설정으로 들인다.
     pub trouble: Option<Trouble>,
 }
 
-/// 설정을 읽다 만난 탈의 갈래([`Registry::trouble`], moai-9p7v). 가르는 잣대는 **다시 해 볼 값이 있는가**다.
+/// 설정을 읽다 만난 탈의 갈래([`Registry::trouble`], moai-9p7v). **가르는 잣대는 다시 읽어 볼 값이다**
+/// (moai-po6v) — 어느 단계에서 졌는가가 아니다. 한때 `read_to_string` 이 진 것은 모두 [`Trouble::Reading`]
+/// 이라, 권한·디렉터리·UTF-8 아닌 바이트처럼 다시 해도 같은 것까지 걸음마다 다시 읽었다.
+///
+/// **들고 있던 것은 어느 갈래에서도 둔다**(사용자 결정 2026-09-19). 빈 것으로 갈아 끼우면 탐색기의 층이
+/// 사라지고 읽음이 통째로 [NEW] 로 서는데, 그것을 막을 길이 도구 안에 없다(`SPC r` 은 moai-en4u 가
+/// 걷었다). 까닭은 배너가 한 줄로 댄다. 갈리는 것은 **다시 읽는 때**뿐이고 그것이 [`Trouble::again`] 이다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Trouble {
-    /// 파일을 못 읽었다 — 파싱까지 못 갔다. NFS 의 `ESTALE`·`EIO` 는 잠깐이라 다음 걸음에 다시 읽으면
-    /// 지나간다. 그 사이에는 **들고 있던 것을 둔다** — 빈 것으로 갈아 끼우면 탐색기의 층이 사라지고,
-    /// 설정 파일이 다시 바뀔 때까지 아무도 다시 읽지 않아 그대로 남았다(`App::follow_config`).
+    /// 파일을 못 읽었고 **잠깐일 것이다** — NFS 의 `ESTALE`·`EIO`, `Interrupted`. 다음 걸음에 다시 읽으면
+    /// 지나간다.
     Reading,
-    /// 글이 깨졌다 — 파싱이 졌다. 사람이 고칠 때까지 다시 읽어도 같다. 까닭을 대고 멈추는 자리다.
+    /// 파일을 못 읽었고 **다시 해도 같다** — 권한, 디렉터리를 설정 자리로 준 것, 심링크 고리,
+    /// UTF-8 이 아닌 바이트. 이 가운데 권한만은 고쳐도 파일의 표식이 안 바뀌어(`chmod` 은 고친 때도
+    /// 길이도 안 바꾼다) 표식으로는 영영 못 벗어난다 — 그래서 시계로 다시 본다. 층의 못 읽는 줄이
+    /// 같은 까닭으로 시계에 걸린 그 자다(`Layer::stale`).
+    Unreadable,
+    /// 글이 깨졌다 — 파싱이 졌다. 사람이 고칠 때까지 다시 읽어도 같고, 고치면 파일이 바뀌어 표식이
+    /// 그것을 낸다. 까닭을 대는 자리다.
     Broken,
+    /// 파일이 없다. **사람에게 댈 까닭이 아니다** — 아직 아무것도 등록 안 한 사람의 정상이라 `problems`
+    /// 에 한 줄도 안 선다. 그래도 갈래로 두는 것은 탐색기 때문이다(moai-po6v): autofs·sshfs 홈이 끊겨
+    /// 설정이 사라진 자리를 "읽었더니 비었다" 로 들면 층도 읽음도 빈 채로 갈린다. 돌아오면 표식이
+    /// 바뀌므로(`store::stamp` 은 없는 파일에 `None`) 다시 읽는 때는 그것이 정한다.
+    Gone,
 }
 
-/// 설정을 관대하게 읽는다. 파일이 없으면 빈 목록이고 문제도 아니다 — 아직
-/// 아무것도 등록하지 않은 사람의 정상이다.
+/// 진 읽기를 **언제 다시 해 볼 것인가**([`Trouble`], moai-po6v). 갈래마다 벗어나는 길이 다르다 —
+/// 한 가지로 재면 잠깐의 실패가 영영 안 풀리거나(다시 안 읽는다), 다시 해도 같은 것을 걸음마다
+/// 다시 읽는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Again {
+    /// 다음 걸음에. 잠깐이라 곧 지나간다.
+    Step,
+    /// 시계로. 고쳐도 파일의 표식이 안 바뀌는 탈이라 표식만 보면 영영 못 벗어난다.
+    Clock,
+    /// 스스로는 안 한다. 고치면 파일이 바뀌어 표식이 그것을 낸다.
+    Never,
+}
+
+impl Trouble {
+    /// 이 탈을 언제 다시 읽어 볼 것인가. **이것이 갈래를 가르는 잣대다** — 갈래를 더하는 사람은
+    /// 여기부터 답한다.
+    pub fn again(self) -> Again {
+        match self {
+            Trouble::Reading => Again::Step,
+            Trouble::Unreadable => Again::Clock,
+            Trouble::Broken | Trouble::Gone => Again::Never,
+        }
+    }
+}
+
+/// 읽기가 진 까닭을 **다시 해 볼 값**으로 가른다(moai-po6v). 여기 안 든 갈래는 잠깐으로 본다 —
+/// 모르는 것을 "다시 해도 같다" 로 두면 고쳐도 안 풀리는 쪽이 기본이 되고, 잠깐의 실패가 영영 안
+/// 풀린다. 틀리는 쪽을 고르자면 헛 읽기 몇 번이 싸다.
+pub fn unreadable(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind as E;
+    matches!(e.kind(), E::PermissionDenied | E::IsADirectory | E::NotADirectory | E::InvalidData | E::InvalidInput)
+        || Some(ELOOP) == e.raw_os_error()
+}
+
+/// 심링크 고리(`ELOOP`) — 고친 것이 파일을 바꾸므로 표식이 낸다. **번호로 든다**: 이것을 낱말로 드는
+/// `ErrorKind::FilesystemLoop` 은 아직 안 여물었다(`io_error_more`, rust#86442 — 1.97 에서도 E0658 이다).
+///
+/// **아는 기계는 다 적는다**(리뷰) — 못 맞추면 `Trouble::Reading` 으로 떨어지고 그 갈래는
+/// [`Again::Step`] 이라, 고리 하나가 "헛 읽기 몇 번" 이 아니라 **걸음마다 영영** 다시 읽는다.
+/// 안드로이드는 cfg 에서 `linux` 가 아니고(번호는 같다), 애플과 BSD 는 62 로 한자다.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const ELOOP: i32 = 40;
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+const ELOOP: i32 = 62;
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+)))]
+const ELOOP: i32 = i32::MIN;
+
+/// 설정을 관대하게 읽는다. 파일이 없으면 빈 목록이고 **사람에게 댈 까닭도 아니다** — 아직
+/// 아무것도 등록하지 않은 사람의 정상이라 `problems` 에 한 줄도 안 선다. 다만 갈래는 남긴다
+/// ([`Trouble::Gone`], moai-po6v): "없다" 와 "읽었더니 비었다" 를 못 가르면 끊긴 마운트가 빈 설정으로
+/// 들어와, 탐색기가 들고 있던 층과 읽음을 빈 것으로 갈아 끼운다.
 ///
 /// **락을 잡지 않는다.** 쓰기가 `rename` 으로 갈아끼우므로 찢어진 파일을 못 본다
 /// (`store::Repo::read` 와 같은 까닭).
@@ -143,7 +233,12 @@ pub fn read(path: Option<&Path>) -> Registry {
     let at = |e: String| format!("{}: {e}", path.display());
     // 못 읽은 것과 깨진 것을 가른다(moai-9p7v) — 앞의 것만 다시 해 볼 값이 있다([`Trouble`]).
     let parsed = match std::fs::read_to_string(path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return reg,
+        // **없는 파일은 까닭을 안 댄다**(아직 아무것도 등록 안 한 사람의 정상) — 갈래만 남긴다.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            reg.trouble = Some(Trouble::Gone);
+            return reg;
+        }
+        Err(e) if unreadable(&e) => Err((e.to_string(), Trouble::Unreadable)),
         Err(e) => Err((e.to_string(), Trouble::Reading)),
         Ok(src) => Doc::parse(&src).map_err(|e| (e, Trouble::Broken)),
     };
@@ -1532,9 +1627,11 @@ mod tests {
         assert!(!read(None).problems.is_empty(), "자리를 모르면 그렇다고 말해야 한다");
     }
 
-    /// **못 읽은 것과 깨진 것을 가른다**(moai-9p7v) — 앞의 것만 다시 해 볼 값이 있다. 가르는 값은 갈래
-    /// ([`Trouble`])뿐이고 까닭 글은 둘 다 `problems` 에 선다. 멀쩡한 파일과 없는 파일은 탈이 아니다 —
-    /// 적힌 값의 모양이 틀린 것(`project = "/a"`)도 읽기는 된 것이라 탈이 아니다.
+    /// **못 읽은 것과 깨진 것을 가른다**(moai-9p7v). 가르는 값은 갈래([`Trouble`])뿐이고 까닭 글은 둘 다
+    /// `problems` 에 선다. 멀쩡한 파일은 탈이 아니다 — 적힌 값의 모양이 틀린 것(`project = "/a"`)도
+    /// 읽기는 된 것이라 탈이 아니다. 없는 파일은 갈래는 서되 **까닭은 안 댄다**(moai-po6v).
+    ///
+    /// 어느 갈래를 **언제 다시 읽는가**는 이웃(`the_trouble_says_how_reading_again_could_ever_win`)이 잰다.
     #[test]
     #[cfg(unix)]
     fn a_file_that_cannot_be_read_is_told_apart_from_a_broken_one() {
@@ -1544,7 +1641,7 @@ mod tests {
 
         std::fs::write(&path, "[[project]]\npath = \"/a\"\n").unwrap();
         assert_eq!(read(Some(&path)).trouble, None);
-        assert_eq!(read(Some(&d.join("없음/config.toml"))).trouble, None, "없는 파일은 탈이 아니다");
+        assert!(read(Some(&d.join("없음/config.toml"))).problems.is_empty(), "없는 파일로 잔소리를 했다");
         assert_eq!(read(None).trouble, None, "자리를 모르는 것은 읽다 만난 탈이 아니다");
 
         std::fs::write(&path, "project = \"/a\"\n").unwrap();
@@ -1555,11 +1652,59 @@ mod tests {
         assert_eq!(reg.trouble, Some(Trouble::Broken));
         assert_eq!(reg.problems.len(), 1, "{reg:?}");
 
+        // **권한은 잠깐이 아니다**(moai-po6v) — 한때 `read_to_string` 이 진 것은 모두 `Reading` 이라
+        // 걸음마다 다시 읽었다. 갈래를 가르는 잣대는 단계가 아니라 다시 읽어 볼 값이다
+        // (`the_trouble_says_how_reading_again_could_ever_win`).
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
         let reg = read(Some(&path));
-        assert_eq!(reg.trouble, Some(Trouble::Reading), "{reg:?}");
+        assert_eq!(reg.trouble, Some(Trouble::Unreadable), "{reg:?}");
         assert_eq!(reg.problems.len(), 1, "{reg:?}");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    /// **가르는 잣대는 다시 읽어 볼 값이다**(moai-po6v, 사용자 결정 2026-09-19) — 단계(읽기냐 파싱이냐)가
+    /// 아니다. 한때 `read_to_string` 이 진 것은 모두 `Reading` 이라, 권한·디렉터리·UTF-8 아닌 바이트처럼
+    /// 다시 해도 같은 것까지 걸음마다 다시 읽었다. 갈래마다 **어떻게 벗어나는지가 다르다**:
+    ///
+    /// - `Reading`(잠깐의 `EIO`·`ESTALE`)은 다음 걸음에 지나간다
+    /// - `Unreadable`(권한)은 고쳐도 파일의 표식이 안 바뀌어 시계로만 다시 본다
+    /// - `Broken`·`Gone` 은 고치면 파일이 바뀌어 표식이 그것을 낸다
+    #[test]
+    #[cfg(unix)]
+    fn the_trouble_says_how_reading_again_could_ever_win() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch("trouble-again");
+        let path = d.join("config.toml");
+
+        std::fs::write(&path, "[[project]]\npath = \"/a\"\n").unwrap();
+        assert_eq!(read(Some(&path)).trouble, None, "성한 파일에 탈이 섰다");
+
+        std::fs::write(&path, "[[project]\npath = ").unwrap();
+        assert_eq!(read(Some(&path)).trouble.map(Trouble::again), Some(Again::Never), "깨진 글은 고치면 파일이 바뀐다");
+
+        // UTF-8 이 아닌 바이트 — 읽기가 지지만 다시 해도 같다.
+        std::fs::write(&path, [0xff, 0xfe, 0x00, 0x41]).unwrap();
+        let reg = read(Some(&path));
+        assert_eq!(reg.trouble, Some(Trouble::Unreadable), "{reg:?}");
+        assert_eq!(reg.problems.len(), 1, "까닭을 한 줄로 안 댔다 — {reg:?}");
+
+        // 디렉터리를 설정 자리로 준 것도 마찬가지다.
+        assert_eq!(read(Some(&d)).trouble, Some(Trouble::Unreadable), "디렉터리를 잠깐의 실패로 읽었다");
+
+        // 권한은 고쳐도 표식이 안 바뀌어, 갈래는 같아도 벗어나는 길이 시계다.
+        std::fs::write(&path, "[[project]]\npath = \"/a\"\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let reg = read(Some(&path));
+        assert_eq!(reg.trouble.map(Trouble::again), Some(Again::Clock), "권한을 걸음마다 다시 읽는다 — {reg:?}");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        // **파일이 없는 것은 사람에게 댈 까닭이 아니다** — 아직 아무것도 등록 안 한 사람의 정상이다.
+        // 다만 탐색기는 그것을 알아야 한다: 들고 있던 층과 읽음을 빈 것으로 갈아 끼우지 않으려면
+        // "없다" 와 "읽었더니 비었다" 를 갈라야 한다(autofs·sshfs 홈이 끊긴 자리).
+        let reg = read(Some(&d.join("없음/config.toml")));
+        assert_eq!(reg.trouble, Some(Trouble::Gone), "사라진 파일을 읽었더니 빈 것으로 읽었다");
+        assert!(reg.problems.is_empty(), "없는 파일로 잔소리를 했다 — {reg:?}");
+        assert_eq!(read(None).trouble, None, "자리를 모르는 것은 읽다 만난 탈이 아니다");
     }
 
     /// 깨진 파일은 읽기에서 알리고 계속, 쓰기에서 멈춘다. 파일은 한 글자도 안 바뀐다. `project` 가 표 배열이

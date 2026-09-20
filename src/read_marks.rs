@@ -148,15 +148,22 @@ pub fn path_for(config: &Path, root: &Path) -> PathBuf {
 /// **못 든 것과 한 줄 건너뛴 것을 가른다**(리뷰). 둘을 `problems` 하나로 내던 판은 부르는 쪽이 셋 다
 /// 틀리게 읽었다 — 탐색기는 낱말이 아닌 줄 하나에 성한 표를 통째로 버려 내 줄이 모두 [NEW] 로 섰고,
 /// CLI 는 못 읽은 파일을 조용히 빈 표로 지나갔다. 가르는 낱말은 [`crate::user_config::Trouble`] 과
-/// **같은 것**이다 — 설정이 이미 그 둘을 그 이름으로 가르고(`moai-9p7v`), 둘을 두면 한쪽만 고쳐진다.
+/// **같은 것**이다 — 설정이 이미 그것들을 그 이름으로 가르고(`moai-9p7v`), 둘을 두면 한쪽만 고쳐진다.
 pub struct Marks {
     /// 이슈 id → 마지막으로 본 줄의 도장. 옛 `[read]` 를 겹쳐 본 값이다([`overlay`]).
     pub seen: BTreeMap<String, String>,
     /// 사람에게 댈 까닭. `trouble` 이 서 있으면 **표를 못 든 까닭**이고, 없으면 건너뛴 줄의 까닭이다.
     pub problems: Vec<String>,
-    /// **표를 못 들었는가.** `Reading` 은 잠깐(`EACCES`·`ESTALE`)이라 다시 재면 지나가고, `Broken` 은
-    /// 사람이 고칠 때까지 같다. 이때 `seen` 에는 옛 `[read]` 밖에 없으므로 부르는 쪽은 들고 있던 것을
-    /// 둔다 — 빈 표를 들이면 내 줄이 통째로 [NEW] 로 선다.
+    /// **표를 못 들었는가.** 갈래마다 다시 읽을 때가 다르고, 그것을 [`crate::user_config::Trouble::again`]
+    /// 하나가 답한다(moai-po6v) — `Reading` 은 잠깐(`ESTALE`·`EIO`)이라 다음 걸음에, `Unreadable`
+    /// (`EACCES`·디렉터리·UTF-8 아닌 바이트)은 다시 해도 같지만 고친 것이 표식을 안 바꿔 시계로,
+    /// `Broken` 은 사람이 고치면 파일이 바뀌어 표식에 맡긴다. 이때 `seen` 에는 옛 `[read]` 밖에 없으므로
+    /// 부르는 쪽은 들고 있던 것을 둔다 — 빈 표를 들이면 내 줄이 통째로 [NEW] 로 선다.
+    ///
+    /// **`Gone` 은 이 읽기가 혼자 세우지 않는다** — 없는 읽음 파일은 "아직 이 프로젝트를 안 읽었다"
+    /// 는 정상이고, 그것만 보고는 홈이 끊긴 것과 갈릴 수 없다. 가르는 자는 **곁의 설정도 사라졌는가**
+    /// 이고, 그것을 아는 쪽은 부르는 탐색기다 — 세우는 자리는 `App::read_marks_of` 다
+    /// (moai-4qbv.i0g 리뷰). 읽음 파일은 설정 파일 곁의 디렉터리에 살아 둘이 함께 사라진다.
     pub trouble: Option<crate::user_config::Trouble>,
 }
 
@@ -225,6 +232,10 @@ fn read_one(path: &Path, root: &Path) -> Marks {
     let at = |why: String| format!("{}: {why}", path.display());
     let (seen, problems, trouble) = match std::fs::read_to_string(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (BTreeMap::new(), Vec::new(), None),
+        // **가르는 잣대는 설정과 한 자다**(moai-po6v, `user_config::unreadable`) — 갈라 두면 같은
+        // `Trouble` 을 두 곳이 달리 읽어, 한쪽을 고친 날 다른 쪽이 조용히 옛 뜻으로 남는다.
+        // 권한으로 못 읽는 것은 다시 해도 같다 — 다시 읽을 때는 `App::take_read` 가 갈래로 정한다.
+        Err(e) if crate::user_config::unreadable(&e) => (BTreeMap::new(), vec![at(e.to_string())], Some(Trouble::Unreadable)),
         Err(e) => (BTreeMap::new(), vec![at(e.to_string())], Some(Trouble::Reading)),
         Ok(src) => match Sheet::parse(&src) {
             Err(e) => (BTreeMap::new(), vec![at(e)], Some(Trouble::Broken)),
@@ -969,9 +980,13 @@ mod tests {
         assert!(got.problems[0].contains(&at.display().to_string()), "어느 파일인지를 안 댔다 — {:?}", got.problems);
     }
 
-    /// **잠깐 못 읽은 것과 깨진 것을 가른다**(리뷰) — 앞은 다시 재면 지나가고(`Reading`), 뒤는 사람이
-    /// 고쳐야 같아진다(`Broken`). 탐색기가 표식을 올릴지를 이것으로 가르므로, 권한 하나가 세션 내내
-    /// [NEW] 를 세워 두던 자리가 여기다.
+    /// **못 읽은 것과 깨진 것을 가른다**(리뷰) — 탐색기가 표식을 올릴지를 이것으로 가르므로, 권한
+    /// 하나가 세션 내내 [NEW] 를 세워 두던 자리가 여기다.
+    ///
+    /// **권한은 잠깐이 아니다**(moai-po6v) — 다시 해도 같고, 고치는 `chmod` 은 표식을 안 바꿔 표식으로는
+    /// 영영 못 벗어난다. 그래서 갈래는 `Unreadable` 이고 벗어나는 길은 시계다
+    /// (`App::a_sheet_we_cannot_read_again_is_retried_by_the_clock`). 가르는 자는 설정과 한 자다
+    /// (`user_config::unreadable`).
     #[cfg(unix)]
     #[test]
     fn a_sheet_i_cannot_open_is_transient_not_broken() {
@@ -985,7 +1000,7 @@ mod tests {
         let got = read(&cfg, &root, &BTreeMap::new());
         // root 로 돌리면 권한이 안 걸린다 — 그때는 이 시험이 잴 것이 없다.
         if got.trouble.is_some() {
-            assert_eq!(got.trouble, Some(crate::user_config::Trouble::Reading), "{:?}", got.problems);
+            assert_eq!(got.trouble, Some(crate::user_config::Trouble::Unreadable), "{:?}", got.problems);
             assert!(got.seen.is_empty(), "못 읽고도 표를 냈다");
         }
         std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o644)).unwrap();
