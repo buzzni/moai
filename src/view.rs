@@ -322,9 +322,13 @@ pub fn list(
         })
         .collect();
 
+    // **머리글도 열 폭에 든다.** `ID` 가 `.max(2)` 로 이미 그렇게 잰다 — 자료만 재면 제목이
+    // 머리글보다 짧은 표에서 `Title` 이 제 칸을 넘어 `Tags` 와 붙는다(`TitleTagsEpic`). 한국어의
+    // `제목`(4칸)일 때는 한 글자짜리 제목에서만 나던 것이, 말이 바뀌면 머리글 길이가 그 문턱을
+    // 정한다.
     let w_id = issues.iter().map(|i| width(&i.id)).max().unwrap_or(2).max(2);
-    let w_title = heads.iter().map(|(_, w)| *w).max().unwrap_or(4);
-    let w_tags = tags.iter().map(|t| width(t)).max().unwrap_or(0);
+    let w_title = heads.iter().map(|(_, w)| *w).max().unwrap_or(4).max(width(say(lang, "col.title")));
+    let w_tags = tags.iter().map(|t| width(t)).max().unwrap_or(0).max(width(say(lang, "col.tags")));
 
     let mut out = Vec::with_capacity(issues.len() + 2);
     let mut head = format!(
@@ -1313,7 +1317,16 @@ fn block_line(b: &crate::report::Block, branch: Option<&str>, now: &str, lang: L
             (say(lang, "block.held"), style::WARN, "·", format!("{}  {title}", paint(style::WARN, &shelf)))
         }
     };
-    format!("  {}   {} {}  {what}", paint(mark, label), paint(mark, glyph), paint(style::ID, b.id))
+    // **이름 칸은 상세의 다른 줄과 한 폭이다**([`label_width`]) — 한국어는 `막힘`·`풀림`·`끊김`
+    // 이 다 두 글자라 채울 것이 없었지만, `held`(4)·`freed`(5)·`broken`(6)은 제각각이라 글리프와
+    // id 칸이 줄마다 옮겨 갔다. **칠한 뒤에 채운다**([`cell`] 과 같은 차례) — 먼저 채우면
+    // 이스케이프 뒤의 빈칸까지 색이 물린다.
+    format!(
+        "  {}   {} {}  {what}",
+        pad(&paint(mark, label), width(label), label_width(lang)),
+        paint(mark, glyph),
+        paint(style::ID, b.id)
+    )
 }
 
 /// 상세의 **시작·끝** 두 값(moai-38mh) — CLI 상세와 탐색기 상세가 이 한 자로 그린다. 따로 두면
@@ -1511,23 +1524,47 @@ pub fn detail(
     out
 }
 
-/// 상세 왼쪽의 이름 칸 — 그 말에서 가장 긴 이름에 폭을 맞춘다.
+/// 상세 왼쪽 이름 칸의 폭 — **그 말에서 가장 긴 이름 하나로 잰다.**
 ///
-/// **한국어는 이 자가 없어도 섰다.** `에픽`·`자식`·`자리`·`멤버` 가 모두 두 글자였기 때문이다.
-/// 말이 바뀌면 그 우연이 사라져 `Epic`·`Child`·`Place`·`Members` 가 제각각 서고, 그 뒤의 id
-/// 열이 줄마다 어긋난다 — 열을 자료에서 재는 목록과 같은 자다.
+/// **한국어는 이 자가 없어도 섰다.** `에픽`·`자식`·`자리`·`멤버`·`생성`·`시작`·`막힘` 이 모두
+/// 두 글자였기 때문이다. 말이 바뀌면 그 우연이 사라져 `Epic`·`Child`·`Members`·`held`·`broken`
+/// 이 제각각 서고, 그 뒤의 id 열이 줄마다 어긋난다 — 열을 자료에서 재는 목록과 같은 자다.
 ///
-/// **네 이름을 한 자리에서 센다.** 멤버 줄은 `cmd::show` 가 굴림을 들고 세우므로 그리는 곳이
-/// 갈려 있는데, 폭을 저마다 재면 한 화면의 왼쪽 칸이 두 폭으로 선다.
-pub(crate) fn row_label(what: &str, lang: Lang) -> String {
-    let widest = width(say(lang, "detail.epic"))
-        .max(width(say(lang, "detail.child")))
-        .max(width(say(lang, "detail.place")))
-        .max(width(say(lang, "detail.members")));
-    format!("{what}{}", " ".repeat(widest.saturating_sub(width(what))))
+/// **한 화면의 이름을 다 센다.** 한때 넷(`에픽`·`자식`·`자리`·`멤버`)만 세고 시각 줄과 막음 줄은
+/// 저마다 쟀는데, 영어에서 `Created`(7)와 `Members`(7)가 마침 같아 그 갈림이 안 보였다 —
+/// `held`(4)·`freed`(5)·`broken`(6)은 실제로 어긋나 막음 세 줄의 글리프 칸이 줄마다 옮겨 갔다.
+/// 재는 곳이 하나여야 어느 말에서도 한 폭으로 선다.
+///
+/// **`중복` 은 안 센다** — 같은 id 의 줄이 둘일 때만 서는 경고 줄이고, 영어 `Duplicate`(9)를
+/// 세면 그 드문 줄 하나 때문에 모든 상세가 두 칸씩 넓어진다. 그 줄은 [`row_label`] 을 지나며
+/// 폭이 모자랄 때만 채워지고, 넘치면 넘친 채로 선다.
+fn label_width(lang: Lang) -> usize {
+    [
+        say(lang, "detail.epic"),
+        say(lang, "detail.child"),
+        say(lang, "detail.place"),
+        say(lang, "detail.members"),
+        say(lang, "detail.created"),
+        say(lang, "detail.started"),
+        say(lang, "block.held"),
+        say(lang, "block.freed"),
+        say(lang, "block.broken"),
+    ]
+    .into_iter()
+    .map(width)
+    .max()
+    .unwrap_or(0)
 }
 
-/// 상세의 `멤버` 이름 칸 — `cmd::show` 가 굴림과 함께 세운다. 위의 네 이름과 같은 폭이다.
+/// 상세 왼쪽의 이름 칸 — [`label_width`] 에 맞춰 뒤를 채운다. 그보다 긴 이름은 그대로 선다.
+///
+/// **멤버 줄은 `cmd::show` 가 굴림을 들고 세우므로** 그리는 곳이 갈려 있는데, 폭을 저마다
+/// 재면 한 화면의 왼쪽 칸이 두 폭으로 선다.
+pub(crate) fn row_label(what: &str, lang: Lang) -> String {
+    pad(what, width(what), label_width(lang))
+}
+
+/// 상세의 `멤버` 이름 칸 — `cmd::show` 가 굴림과 함께 세운다. 위의 이름들과 같은 폭이다.
 pub fn members_label(lang: Lang) -> String {
     row_label(say(lang, "detail.members"), lang)
 }
@@ -1537,10 +1574,13 @@ pub fn members_label(lang: Lang) -> String {
 ///
 /// 한국어에서는 `생성`(4칸)과 `시작`(4칸), `수정`(4칸)과 `끝`(2칸)이 뒤의 빈칸으로 맞춰져
 /// 있었다 — 그 빈칸이 글에 박혀 있어, 말이 바뀌면 시각 열이 두 줄 사이에서 어긋났다.
+///
+/// **왼쪽 칸은 [`label_width`] 를 그대로 쓴다** — `생성`·`시작` 만 따로 재면 그 둘이 `에픽`·
+/// `자식` 과 다른 폭으로 서서, 한 상세 안에서 왼쪽 칸이 두 번 갈린다.
 fn stamp_labels(lang: Lang) -> (impl Fn(&str) -> String, impl Fn(&str) -> String) {
-    let l = width(say(lang, "detail.created")).max(width(say(lang, "detail.started")));
+    let l = label_width(lang);
     let r = width(say(lang, "detail.updated")).max(width(say(lang, "detail.finished")));
-    let pad_to = |w: usize| move |what: &str| format!("{what}{}", " ".repeat(w.saturating_sub(width(what))));
+    let pad_to = |w: usize| move |what: &str| pad(what, width(what), w);
     (pad_to(l), pad_to(r))
 }
 
@@ -1595,9 +1635,13 @@ fn role_style(r: crate::markdown::Role) -> Style {
 /// 펼친 id 가 여러 줄에 쓰였다는 한 줄 (`report::duplicate_lines`). **뒷줄을 열었다고
 /// 말한다** — 트리·탐색기가 고르는 줄과 같다는 것까지 알아야 앞줄을 찾으러 간다.
 pub fn duplicate_note(lines: usize, lang: Lang) -> String {
+    // 이름 칸은 상세의 다른 줄과 같은 자로 잰다([`label_width`]) — 이 낱말이 그보다 짧은 말에서
+    // 왼쪽 칸이 혼자 좁게 서던 자리다. 길면 그대로 넘친다: 드문 경고 줄 하나 때문에 모든 상세를
+    // 넓히지 않는다.
+    let what = say(lang, "detail.duplicate");
     format!(
         "  {}   {}",
-        paint(style::WARN, say(lang, "detail.duplicate")),
+        pad(&paint(style::WARN, what), width(what), label_width(lang)),
         paint(style::WARN, &fill(say(lang, "detail.duplicate_says"), &[("n", &lines.to_string())]))
     )
 }
@@ -1780,7 +1824,7 @@ pub fn projects_status(
         out.push(String::new());
         let crate::projects::Seen::Ok(b) = s else {
             out.push(project_head(p, ""));
-            out.push(unopened(p, s));
+            out.push(unopened(p, s, lang));
             continue;
         };
         // **이 프로젝트의 화면으로 갈아 끼운다** — 머리 꼬리와 아래 줄마다의 `⎇` 가 같은 출처를
@@ -1907,7 +1951,7 @@ pub fn projects_ready(
         out.push(String::new());
         let Seen::Ok(k) = s else {
             out.push(project_head(p, ""));
-            out.push(unopened(p, s));
+            out.push(unopened(p, s, lang));
             continue;
         };
         // 머리와 줄이 같은 출처를 본다 — `projects_status` 와 같은 자리다.
@@ -1973,24 +2017,35 @@ fn project_head(p: &crate::projects::Project, tail: &str) -> String {
 }
 
 /// 열지 못한 프로젝트의 한 줄. **무엇을 하면 되는지를 함께 댄다.**
-pub(crate) fn unopened<T>(p: &crate::projects::Project, s: &crate::projects::Seen<T>) -> String {
+///
+/// **이 줄도 한눈 보기의 몸통이다**(moai-el7z, 리뷰 moai-hom6.soc 의 3번). 등록만 하고 아직
+/// `init` 하지 않은 프로젝트 하나면 영어로 고른 화면에 이 줄이 한국어로 선다 — 옮긴 나머지와
+/// 한 덩어리 안에서 말이 갈린다.
+///
+/// **명령은 자료라 `{go}` 한 자리로 든다.** 번역자가 옮길 것은 그 앞의 문장뿐이고, `moai -C …`
+/// 는 붙여 넣으면 도는 글자 그대로여야 한다.
+pub(crate) fn unopened<T>(p: &crate::projects::Project, s: &crate::projects::Seen<T>, lang: Lang) -> String {
     use crate::projects::Seen;
     let at = shell_arg(&p.path);
     match s {
         Seen::Ok(_) => String::new(),
         // init 전은 고칠 것이 아니다 — 나중에 `init` 하면 보이는 것이 요구다. `!` 를 달지 않는다.
         Seen::Uninit => {
-            let say = format!("init 전 — `moai -C {at} init` 으로 시작하면 여기 보인다");
-            format!("  {} {}", paint(style::DIM, "·"), paint(style::DIM, &say))
+            let said = fill(say(lang, "overview.uninit"), &[("go", &format!("moai -C {at} init"))]);
+            format!("  {} {}", paint(style::DIM, "·"), paint(style::DIM, &said))
         }
         Seen::Missing => {
-            let go = format!("→ 옮겼으면 새 자리를 등록하고, 아니면 `moai project rm {at}`");
-            format!("  {} 디렉터리가 없다  {}", paint(style::WARN, "!"), paint(style::DIM, &go))
+            let go = fill(say(lang, "overview.missing_go"), &[("go", &format!("moai project rm {at}"))]);
+            format!("  {} {}  {}", paint(style::WARN, "!"), say(lang, "overview.missing"), paint(style::DIM, &go))
         }
         // **까닭은 한 줄에 둔다** — `sanitize` 는 줄바꿈을 남기므로 그대로 쓰면 뒤가
         // 다음 줄로 흘러 옆 프로젝트의 줄과 안 갈린다. 이 글은 층의 알림(`layer::shut`)
         // 으로도 그대로 가는데 거기는 한 줄짜리 자리다.
-        Seen::Unreadable { error } => format!("  {} 못 읽는다 — {}", paint(style::ERROR, "!"), one_line(error)),
+        Seen::Unreadable { error } => format!(
+            "  {} {}",
+            paint(style::ERROR, "!"),
+            fill(say(lang, "overview.project_unreadable"), &[("why", &one_line(error))])
+        ),
     }
 }
 
@@ -2303,6 +2358,55 @@ mod tests {
         assert!(joined.contains("이력"), "{joined}");
         assert!(joined.contains("todo → in_progress"), "{joined}");
         assert!(joined.contains("09-09 14:02"), "{joined}");
+    }
+
+    /// **상세의 왼쪽 이름 칸은 어느 말에서도 한 폭이다**(`label_width`).
+    ///
+    /// 한국어는 `에픽`·`자식`·`생성`·`막힘` 이 모두 두 글자라 이 자가 없어도 섰고, 영어는
+    /// `Created`(7)와 `Members`(7)가 마침 같아 폭을 두 자로 나눠 재도 안 드러났다. 실제로
+    /// 어긋난 것은 막음 줄이다 — `held`(4)·`freed`(5)·`broken`(6)이 제각각 서서 글리프와 id
+    /// 칸이 줄마다 옮겨 갔다. **그러니 우연이 아니라 자로 잰다**: 값이 시작하는 칸이 줄마다
+    /// 같은지를 다섯 말 모두에서 본다.
+    #[test]
+    fn the_left_name_column_stands_in_every_language() {
+        use crate::report::{Block, Blocker};
+        // `  이름   값` 에서 값이 시작하는 칸. 이름 뒤 빈칸 묶음이 끝나는 자리다.
+        let value_col = |line: &str| {
+            let body = line.trim_start();
+            let gap = body.find("   ").unwrap_or_else(|| panic!("이름 칸이 없다 — {line:?}"));
+            width(line) - width(body[gap..].trim_start())
+        };
+        let blocker = issue("argos-0009", "막는 일", "todo");
+        let mut i = issue("argos-0002", "멤버", "in_progress");
+        i.epic = Some("argos-0001".into());
+        i.started_at = Some("2026-09-10T10:11:00Z".into());
+        let epic = issue("argos-0001", "에픽", "in_progress");
+        let child = issue("argos-0002.a1b", "자식", "todo");
+        for lang in Lang::ALL {
+            let mut seen = bare_seen(lang);
+            seen.blocks = vec![
+                Block { id: "argos-0009", issue: Some(&blocker), blocker: Blocker::Open, root: None, aside: Vec::new() },
+                Block { id: "argos-0008", issue: Some(&epic), blocker: Blocker::Done, root: None, aside: Vec::new() },
+                Block { id: "argos-0007", issue: None, blocker: Blocker::Missing, root: None, aside: Vec::new() },
+            ];
+            let mut lines =
+                detail(&i, Some(&epic), &[&child], &seen, &cfg(), "2026-09-11T04:12:03Z", false);
+            // 멤버 줄은 `cmd::show` 가 굴림을 들고 세운다 — 같은 자를 쓰는지 여기서 함께 본다.
+            lines.push(format!("  {}   1/2", members_label(lang)));
+            // 이름 칸을 가진 줄만 — 머리 두 줄(제목·칸)은 이름 칸이 없다.
+            let cols: Vec<(usize, String)> = plain(&lines)
+                .into_iter()
+                .filter(|l| l.starts_with("  ") && l.trim_start().contains("   "))
+                .map(|l| (value_col(&l), l))
+                .collect();
+            assert!(cols.len() >= 6, "{}: 잴 줄이 모자라다 — {cols:#?}", lang.code());
+            let first = cols[0].0;
+            assert!(
+                cols.iter().all(|(c, _)| *c == first),
+                "{}: 왼쪽 이름 칸이 줄마다 갈렸다 — {cols:#?}",
+                lang.code()
+            );
+        }
     }
 
     /// 목록의 에픽 열은 id 가 아니라 제목이다. id 를 보여 주면 사람이

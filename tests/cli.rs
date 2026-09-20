@@ -331,8 +331,8 @@ fn a_running_milestone_comes_first_and_nothing_is_blocked() {
 ///
 /// `Lang::parse` 가 `ja_JP.UTF-8` 모양을 받아 주는 것은 `MOAI_LANG` 에 로캘을 그대로 붙여
 /// 넣는 사람을 받자는 것이지, `LANG`·`LC_ALL`·`LC_MESSAGES` 를 읽는다는 뜻이 아니다. 읽으면
-/// 아무것도 안 고른 사람이 제 로캘 말로 보는데, ja·zh·es 는 영어 표 예순 키 가운데 아홉·열
-/// 키뿐이라 그 화면은 제 말 열 줄과 영어 쉰 줄로 섞인다.
+/// 아무것도 안 고른 사람이 제 로캘 말로 보는데, ja·zh·es 는 백 키를 넘긴 영어 표 가운데
+/// 아홉·열 키뿐이라 그 화면은 제 말 열 줄과 영어 아흔 줄로 섞인다.
 ///
 /// **여는 조건이던 날(`Lang` 의 `#[default]` 를 `En` 으로 옮기는 날)은 지났다** — 그날
 /// 사용자가 다시 안 읽기로 정했다(moai-bn1j, 2026-09-20). 까닭이 기본값이 아니라 번역의
@@ -918,7 +918,13 @@ fn the_overview_body_speaks_the_picked_language() {
     for n in 0..7 {
         add(&one, &[&format!("ready work {n}")]);
     }
-    let cfg = registry(&s, &[&one]);
+    // **열지 못한 프로젝트도 몸통이다**(리뷰 moai-hom6.soc 의 4번). 성한 프로젝트 하나만
+    // 등록하면 이 판은 `view::unopened` 를 한 줄도 안 지나면서 "몸통을 다 재고 있다" 고
+    // 말한다 — 실제로 그 자리에 한국어가 박혀 있었고 이 시험은 초록이었다.
+    // 못 읽는 프로젝트(`Seen::Unreadable`)는 안 둔다: 그 줄의 까닭은 OS 가 주는 글이라
+    // 기계마다 다르고, 앞머리는 나머지 둘과 같은 자로 온다.
+    let gone = s.path().join("moved-away");
+    let cfg = registry(&s, &[&one, &dir_in(&s, "not-yet-init"), &gone]);
     let screen = |args: &[&str], lang: &str| {
         let got = isolated(BIN)
             .args(args)
@@ -938,9 +944,13 @@ fn the_overview_body_speaks_the_picked_language() {
         // 일감이 줄어드는 날 이 판은 아무것도 안 재면서 초록으로 남는다.
         let korean = screen(args, "ko");
         assert!(korean.contains("건 더"), "한국어 화면에 '건 더' 줄이 안 섰다\n{korean}");
+        assert!(korean.contains("init 전"), "한국어 화면에서 init 전 줄이 사라졌다\n{korean}");
 
         let english = screen(args, "en");
         assert!(english.contains("more"), "영어 화면에 'N more' 줄이 안 섰다\n{english}");
+        // 열지 못한 두 프로젝트의 줄이 실제로 섰는가 — 안 서면 위의 훑기가 그 자리를 안 지난다.
+        assert!(english.contains("before init"), "init 전 프로젝트의 줄이 안 섰다\n{english}");
+        assert!(english.contains("directory is gone"), "사라진 프로젝트의 줄이 안 섰다\n{english}");
         let left: Vec<&str> =
             english.lines().filter(|l| l.chars().any(|c| ('가'..='힣').contains(&c))).collect();
         assert!(left.is_empty(), "영어로 고른 {args:?} 화면에 한국어가 남았다 — {left:#?}");
