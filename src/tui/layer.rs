@@ -384,8 +384,8 @@ impl Layer {
             None => At::Layer,
         };
         Layer {
-            // 기본값은 [`super::Site::lang`] 과 같은 까닭으로 한국어다 — 부른 쪽이 갈아 끼운다.
-            lang: crate::i18n::Lang::Ko,
+            // 기본값은 [`super::Site::lang`] 과 같다 — 부른 쪽이 고른 말로 갈아 끼운다.
+            lang: crate::i18n::Lang::default(),
             at,
             places,
             problems: reg.problems.clone(),
@@ -525,7 +525,10 @@ impl App {
     /// 프로젝트의 값을 다 더한 만큼 첫 화면이 안 선다(moai-ezwu).
     pub fn on_projects(layer: Layer) -> App {
         let mut app = App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new());
-        let mut layer = Layer { at: At::Layer, ..layer };
+        // **말을 먼저 넣는다** — `launch` 가 띄우는 읽기가 그 말로 `Look::Shut` 의 글을 짓는다.
+        // 뒤에 넣으면 이미 떠난 읽기가 옛 말로 지어, 층의 첫 화면만 다른 말로 선다.
+        // [`App::with_layer`] 와 같은 자리다.
+        let mut layer = Layer { at: At::Layer, lang: app.site.lang, ..layer };
         layer.launch();
         app.layer = Some(layer);
         app
@@ -660,7 +663,7 @@ impl App {
         // 담을 곳은 여기서 박힌 그대로 요청에 실려 가고, 돌아온 글이 [`App::edited`] 로 담긴다.
         match &self.editor {
             Some(editor) => {
-                let text = super::jotfile::template(into.as_ref());
+                let text = super::jotfile::template(into.as_ref(), self.site.lang);
                 self.edit = Some(super::Edit { into, text, editor: editor.clone() });
             }
             None => self.mode = super::Mode::Idea(Form::new(into)),

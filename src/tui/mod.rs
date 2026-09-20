@@ -873,11 +873,11 @@ impl Site {
     /// 두 벌로 적으면 한쪽만 고쳐져 같은 프로젝트가 화면 둘에서 달리 선다.
     fn of(issues: Vec<Issue>, index: Index, ground: Ground, cfg: Config, path: Path, unreadable: Vec<Option<String>>) -> Site {
         Site {
-            // **여기 기본값은 도구의 것(영어)이 아니라 한국어다**(moai-ra67) — 탐색기의 나머지
-            // 글자가 아직 한국어라, 말이 안 닿은 자리에서 영어를 집으면 한국어 화면 한가운데
-            // 몇 줄만 영어로 선다. 부른 쪽(`cmd/tui.rs`)이 고른 말로 갈아 끼운다. 나머지 글이
-            // 말묶음으로 옮겨 가는 날 이 한 줄이 `Lang::default()` 가 된다.
-            lang: crate::i18n::Lang::Ko,
+            // 기본값은 도구의 것이다(moai-9it4). 한때 여기가 `Lang::Ko` 였고 그 한 줄이 "탐색기는
+            // 아직 한국어로 선다" 는 뜻이었다 — 말이 안 닿은 자리에서 영어를 집으면 한국어 화면
+            // 한가운데 몇 줄만 영어로 섰기 때문이다. 이제 탐색기의 글이 다 말묶음에서 오므로 그
+            // 버팀목이 필요 없다. 부른 쪽(`cmd/tui.rs`)이 고른 말로 갈아 끼운다.
+            lang: crate::i18n::Lang::default(),
             // 들어간 채로 시작하면(`--path`) 나올 층마다 기억 자리를 만들어 둔다.
             remembered: vec![0; path.len()],
             keep: vec![true; issues.len()],
@@ -1165,6 +1165,14 @@ impl App {
             editor: None,
             edit: None,
         };
+        // **시험은 한국어로 잰다**(moai-9it4). 그림 시험의 글을 영어로 다시 적으면 `ko` 표를
+        // 재는 자리가 통째로 없어진다 — 영어 표는 `english_has_every_key_the_source_asks_for`
+        // 가 키마다 보지만, 한국어 표가 그 키를 실제로 드는지는 아무도 안 본다. 진짜 화면의
+        // 말은 `cmd/tui.rs` 가 `Ctx::lang` 으로 넣고, 그 길은 `tests/cli.rs` 가 잰다.
+        #[cfg(test)]
+        {
+            app.site.lang = crate::i18n::Lang::Ko;
+        }
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
         // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
         app.site.warnings = warnings_of(&app.site.issues, &app.site.unreadable, &app.site.cfg, &app.site.now);
@@ -3691,8 +3699,9 @@ impl App {
     /// Ctrl-C 는 폼보다 먼저 [`App::key`] 가 받는다 — 어느 모드에서든 나가는 길이다. 적던 것은
     /// 그 길로 날아가지만, raw mode 에서 Ctrl-C 를 막으면 멈춘 화면에서 나갈 길이 없어진다.
     fn jot(&mut self, k: KeyEvent) {
+        let lang = self.site.lang;
         let Mode::Idea(form) = &mut self.mode else { return };
-        match form.key(k) {
+        match form.key(k, lang) {
             Act::Stay => {}
             Act::Save => save_idea(self),
             Act::Close => {
@@ -7450,7 +7459,7 @@ mod tests {
         type_in(&mut a, "본문만 있다");
         a.key(ctrl('s'));
         let Mode::Idea(form) = &a.mode else { panic!("빈 제목에 폼이 닫혔다 — {:?}", a.mode) };
-        assert_eq!((form.error.as_deref(), form.field), (Some(form::EMPTY_TITLE), form::Field::Title));
+        assert_eq!((form.error.as_deref(), form.field), (Some(form::empty_title(crate::i18n::Lang::Ko)), form::Field::Title));
         assert_eq!(form.body.text(), "본문만 있다", "거절하며 적은 것을 지웠다");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
         assert!(a.trouble.is_none(), "빈 제목은 쓰기의 실패가 아니다 — {:?}", a.trouble);
@@ -7711,7 +7720,7 @@ mod tests {
             (Err("편집기가 3 로 끝났다(vi)".to_string()), "3 로 끝났다"),
             (Ok(String::new()), "제목이 비었다"),
             // 안 고치고 닫은 안내 글 그대로
-            (Ok(jotfile::template(None)), "제목이 비었다"),
+            (Ok(jotfile::template(None, crate::i18n::Lang::Ko)), "제목이 비었다"),
         ] {
             let edit = ask_editor(&mut a);
             a.edited(edit.into, got);

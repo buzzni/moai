@@ -224,7 +224,7 @@ impl Default for Fields {
 /// 그날 **컴파일이 멈추게** 못 박는다(moai-ggqf, moai-7pd5 가 적어 둔 것).
 const _: () = assert!(
     widest_bit() < u16::BITS,
-    "열이 Fields 의 비트 폭을 넘었다 — Fields 와 Field::bit 를 더 넓은 정수로 옮겨라"
+    "열이 Fields 의 비트 폭을 넘었다 — Fields 와 Field::bit 를 더 넓은 정수로 옮겨라" // i18n:터지는-글
 );
 
 /// [`Field::ALL`] 가운데 가장 큰 비트 자리. `Field::bit` 이 쓰는 그 자리다.

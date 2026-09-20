@@ -782,6 +782,81 @@ mod tests {
         );
     }
 
+    /// **탐색기의 글은 말묶음에서 온다**(moai-9it4). 화면에 서는 글을 소스에 박으면 `MOAI_LANG`
+    /// 이 안 닿아, 영어를 고른 사람의 화면 한가운데 몇 줄만 한국어로 선다. 그 한 줄이 들어오는
+    /// 순간 여기서 파일과 줄을 대며 멈춘다 — 한 줄씩 새는 것은 아무도 다시 안 센다.
+    ///
+    /// **터지는 자리의 글은 그대로 둔다.** `expect`·`panic!`·`unreachable!`·`assert*`·`must_use`
+    /// 의 글은 화면이 아니라 고치는 이에게 가는 것이라 옮길 것이 아니다 — 옮기면 표가 사람이 볼
+    /// 일 없는 키로 부풀고, 그 키가 안 맞아도 아무도 모른다. 그 글이 다음 줄로 넘어간 자리는
+    /// [`SPARE_MARK`] 를 그 줄에 적는다. 시험 모듈도 안 본다: 시험이 한국어로 재는 것은 `ko` 표가
+    /// 그 키를 실제로 드는지를 함께 재는 자리다.
+    #[test]
+    fn the_explorer_holds_no_korean_of_its_own() {
+        const SPARED: [&str; 8] =
+            ["expect(", "panic!(", "unreachable!(", "todo!(", "unimplemented!(", "assert", "must_use", "expect_err("];
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/tui");
+        let mut seen = 0usize;
+        let mut planted: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(dir).expect("src/tui 를 못 읽었다") {
+            let path = entry.expect("src/tui 를 못 읽었다").path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).expect("조각 파일을 못 읽었다");
+            let name = path.file_name().expect("파일 이름").to_string_lossy().into_owned();
+            let lines: Vec<&str> = src.lines().collect();
+            // 시험 모듈부터는 안 본다. `mod tests` 는 `pub(super)` 를 달고 서기도 해 그 줄로 찾는다.
+            let end = lines
+                .windows(2)
+                .position(|w| w[0].trim_start() == "#[cfg(test)]" && w[1].contains("mod tests"))
+                .unwrap_or(lines.len());
+            for (n, line) in lines[..end].iter().enumerate() {
+                let code = line.split("//").next().unwrap_or("");
+                if code.trim().is_empty() || line.contains(SPARE_MARK) || SPARED.iter().any(|s| code.contains(s)) {
+                    continue;
+                }
+                seen += 1;
+                if quoted(code).any(|t| t.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c))) {
+                    planted.push(format!("{name}:{}: {}", n + 1, code.trim()));
+                }
+            }
+        }
+        // 훑기가 헛돌면 이 시험은 늘 파랗다 — 줄을 하나도 못 본 것을 여기서 잡는다.
+        assert!(seen > 1000, "src/tui 를 거의 못 훑었다: {seen}줄");
+        assert!(
+            planted.is_empty(),
+            "탐색기가 제 한국어를 들고 있다 — `i18n/en.json` 에 키를 더하고 `say(lang, \"…\")` 로 부른다:\n{}",
+            planted.join("\n")
+        );
+    }
+
+    /// 터지는 자리의 글이 다음 줄로 넘어갔을 때 그 줄에 적는 표식 — 여러 줄 `assert!` 가 그렇다.
+    const SPARE_MARK: &str = "i18n:터지는-글";
+
+    /// 한 줄에 든 글자열들. 여는 따옴표부터 닫는 따옴표까지고, `\"` 는 닫지 않는다.
+    fn quoted(code: &str) -> impl Iterator<Item = &str> {
+        let mut rest = code;
+        std::iter::from_fn(move || {
+            let open = rest.find('"')?;
+            rest = &rest[open + 1..];
+            let mut at = 0;
+            let bytes = rest.as_bytes();
+            while at < bytes.len() {
+                match bytes[at] {
+                    b'\\' => at += 2,
+                    b'"' => {
+                        let (text, after) = rest.split_at(at);
+                        rest = &after[1..];
+                        return Some(text);
+                    }
+                    _ => at += 1,
+                }
+            }
+            None // 안 닫힌 따옴표 — 여러 줄 글자열의 첫 줄이다
+        })
+    }
+
     /// **조각은 터미널도 저장소도 모른다**(moai-0k1p). 조각이 `Frame` 이나 `Repo` 를
     /// 알기 시작하면 `KeyEvent` 를 넣고 상태를 보는 시험이 곧 못 쓰게 되고, 그러면
     /// 다음 화면은 또 손으로 짠다. 그 첫 줄(`use`)이 들어오는 순간 여기서 이름을 대며

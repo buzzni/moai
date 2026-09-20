@@ -151,12 +151,14 @@ impl Scroll {
     /// 줄 수를 붙인다 — 색이 혼자 뜻을 지지 않듯 글리프도 혼자 지지 않는다.
     /// 끝까지 굴렸으면 `끝` 이라 적는다: 표시가 사라지기만 하면 굴릴 것이 없는
     /// 짧은 글과 끝까지 굴린 긴 글이 같아 보인다.
-    pub fn mark(&self) -> Option<String> {
+    pub fn mark(&self, lang: crate::i18n::Lang) -> Option<String> {
+        use crate::i18n::{fill, say};
+        let (up, down) = (self.above().to_string(), self.below().to_string());
         match (self.above(), self.below()) {
             (0, 0) => None,
-            (0, down) => Some(format!("↓ {down}줄")),
-            (up, 0) => Some(format!("↑ {up}줄 · 끝")),
-            (up, down) => Some(format!("↑ {up}줄 · ↓ {down}줄")),
+            (0, _) => Some(fill(say(lang, "tui.scroll.below"), &[("down", &down)])),
+            (_, 0) => Some(fill(say(lang, "tui.scroll.end"), &[("up", &up)])),
+            _ => Some(fill(say(lang, "tui.scroll.both"), &[("up", &up), ("down", &down)])),
         }
     }
 }
@@ -208,7 +210,7 @@ mod tests {
             }
             s.by(5);
             s.reveal(3);
-            assert_eq!((s.offset(), s.mark()), (0, None));
+            assert_eq!((s.offset(), s.mark(crate::i18n::Lang::Ko)), (0, None));
         }
     }
 
@@ -225,7 +227,7 @@ mod tests {
             s.by(len as isize);
             s.reveal(len - 1);
             assert_eq!(s.offset(), 0, "{len}줄짜리가 by·reveal 에 굴렀다");
-            assert_eq!(s.mark(), None, "{len}줄짜리에 더 있다고 한다");
+            assert_eq!(s.mark(crate::i18n::Lang::Ko), None, "{len}줄짜리에 더 있다고 한다");
         }
     }
 
@@ -301,18 +303,18 @@ mod tests {
             s.go(Move::PageDown);
         }
         s.fit(10, 0);
-        assert_eq!((s.offset(), s.mark()), (0, None));
+        assert_eq!((s.offset(), s.mark(crate::i18n::Lang::Ko)), (0, None));
     }
 
     /// 굴릴 것이 남았으면 **표시가 선다** — 아래로 몇 줄, 위로 몇 줄, 끝.
     #[test]
     fn the_mark_says_how_much_is_hidden() {
         let mut s = sized(10, 22);
-        assert_eq!(s.mark().as_deref(), Some("↓ 12줄"));
+        assert_eq!(s.mark(crate::i18n::Lang::Ko).as_deref(), Some("↓ 12줄"));
         s.by(4);
-        assert_eq!(s.mark().as_deref(), Some("↑ 4줄 · ↓ 8줄"));
+        assert_eq!(s.mark(crate::i18n::Lang::Ko).as_deref(), Some("↑ 4줄 · ↓ 8줄"));
         s.go(Move::Bottom);
-        assert_eq!(s.mark().as_deref(), Some("↑ 12줄 · 끝"), "끝까지 굴렸는데 끝이라 안 한다");
+        assert_eq!(s.mark(crate::i18n::Lang::Ko).as_deref(), Some("↑ 12줄 · 끝"), "끝까지 굴렸는데 끝이라 안 한다");
         assert_eq!((s.above(), s.below()), (12, 0));
     }
 
