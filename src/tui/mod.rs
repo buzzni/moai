@@ -27,6 +27,22 @@ use keys::Lookup;
 use ratatui::crossterm::event::KeyEvent;
 use scroll::{Move, Scroll};
 
+/// 탐색기가 말묶음에서 펴는 글이 설 말(moai-dpbi). **아직 사람의 설정을 안 읽는다** — 이 화면의
+/// 글은 한국어로 박혀 있어(`layer::look_one` 의 같은 자리), 여기만 영어로 펴면 한 화면이 두 말로
+/// 선다. 다시 읽기는 제 스레드에서 도는 순수한 걸음이라([`prepare`]) `Ctx` 를 안 들고, 여는 화면과
+/// 다음 걸음이 같은 말이어야 배너가 걸음마다 말을 안 바꾼다.
+///
+/// **moai-ra67 이 탐색기의 글을 말묶음으로 옮기면 그 일과 함께 걷힌다** — 그때 이 이름을 쫓으면
+/// 고칠 자리가 한눈에 선다.
+pub const SAID: crate::i18n::Lang = crate::i18n::Lang::Ko;
+
+/// 옆 워크트리를 겹치다 만난 것을 탐색기의 말로([`SAID`], moai-dpbi) — 여는 화면(`cmd::tui`)과
+/// 다시 읽기([`prepare`])가 **같은 자**를 쓴다. 갈라 적으면 배너가 첫 화면과 다음 걸음에서 말을
+/// 바꾼다.
+pub fn said_trouble(trouble: &[crate::worktree::Trouble]) -> Vec<String> {
+    trouble.iter().map(|t| crate::view::trouble_line(SAID, t)).collect()
+}
+
 /// 목록의 한 줄. `..` 은 이슈가 아니므로 [`Entry`] 로는 못 담는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
@@ -428,8 +444,10 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     // 겹치며 이미 판 옆 스냅샷을 그대로 넘긴다(moai-kos1) — 자리 판정이 바로 앞에서 푼 같은
     // 파일을 다시 열어 파고 있었다. 걸음마다 치르던 값이라 쓰기·`SPC r`·프로젝트 들어가기가
     // 그것을 그대로 물었다(이 저장소에서 ~130ms).
-    let (lost, said) = placed(repo, &issues, g.swept, &now, &crate::worktree::dug(&g.sides));
-    let mut elsewhere = g.trouble;
+    // **제 스냅샷도 그대로 넘긴다**(moai-mafv) — 걸음마다 다시 파던 마지막 한 벌이다.
+    let (lost, said) = placed(repo, &issues, g.swept, &now, &crate::worktree::dug(&g.sides, &g.mine));
+    // 옆 워크트리의 문제는 **펴서** 싣는다(moai-dpbi) — 여는 화면(`cmd::tui`)과 같은 자다.
+    let mut elsewhere = said_trouble(&g.trouble);
     elsewhere.extend(said);
     Ok(Fresh {
         root: repo.root.clone(),
@@ -441,7 +459,8 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         unreadable,
         origin: g.origin,
         elsewhere,
-        unfound: g.unfound,
+        // 못 찾은 까닭도 여기서 편다(moai-dpbi) — 배너와 알림은 글을 그대로 낸다([`SAID`]).
+        unfound: g.unfound.as_ref().map(|t| crate::view::trouble_line(SAID, t)),
         watched,
         now,
     })
@@ -497,7 +516,9 @@ fn placed(
         false => unread
             .all
             .iter()
-            .map(|t| format!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display()))
+            // 글은 [`crate::view::unread_worktree`] 한 자리에서 짓는다(리뷰) — `moai status` 의
+            // stderr·밖 한눈 보기와 **같은 줄**이어야 한다. 갈라 적으면 말묶음을 고치는 날 여기만 남는다.
+            .map(|t| crate::view::unread_worktree(SAID, &t.branch, &t.path))
             .collect(),
     };
     (usize::from(lost.is_some()), said)
@@ -536,6 +557,15 @@ fn warnings_in<'a>(
 /// **보는 사람의 것은 안 든다** — 커서·굴린 자리·정렬·열·보기 토글·누구인가는 화면에 하나뿐이라
 /// [`App`] 에 남는다. 여기 드는 것은 *그 프로젝트가 무엇인가* 와 *그 안에서 어디를 보나* 다.
 pub struct Site {
+    /// 이 화면의 말(moai-ra67). **탐색기도 고른 말로 선다** — 한때 이 층에 말이 안 닿아
+    /// `layer::shut` 이 `Lang::Ko` 를 손으로 줬고, 그 한 줄이 "탐색기는 아직 한국어로 선다" 는
+    /// 뜻이었다. 명령 층에서 한 번 풀어(`Ctx::lang`) 여기 놓는다 — `view::Screen` 이 CLI 에서
+    /// 하는 일과 같은 자리다.
+    ///
+    /// **아직 여기서 오는 글이 탐색기의 전부는 아니다** — 넘겨받은 넷(미룸 한 마디·묶음 칸
+    /// 한 줄·바구니 이름 둘)만 이 말을 따르고, 나머지 글자는 그대로 한국어다. 그 나머지는
+    /// 에픽 moai-hom6 의 멤버로 서 있다.
+    pub lang: crate::i18n::Lang,
     pub issues: Vec<Issue>,
     pub index: Index,
     /// 파일 전체를 훑어야 아는 것 — 묶음이 선 칸, 소속, 물려받은 미룸, 가려짐. **적재 때 한 번 센다**
@@ -857,6 +887,11 @@ impl Site {
     /// 두 벌로 적으면 한쪽만 고쳐져 같은 프로젝트가 화면 둘에서 달리 선다.
     fn of(issues: Vec<Issue>, index: Index, ground: Ground, cfg: Config, path: Path, unreadable: Vec<Option<String>>) -> Site {
         Site {
+            // **여기 기본값은 도구의 것(영어)이 아니라 한국어다**(moai-ra67) — 탐색기의 나머지
+            // 글자가 아직 한국어라, 말이 안 닿은 자리에서 영어를 집으면 한국어 화면 한가운데
+            // 몇 줄만 영어로 선다. 부른 쪽(`cmd/tui.rs`)이 고른 말로 갈아 끼운다. 나머지 글이
+            // 말묶음으로 옮겨 가는 날 이 한 줄이 `Lang::default()` 가 된다.
+            lang: crate::i18n::Lang::Ko,
             // 들어간 채로 시작하면(`--path`) 나올 층마다 기억 자리를 만들어 둔다.
             remembered: vec![0; path.len()],
             keep: vec![true; issues.len()],
@@ -1046,6 +1081,8 @@ impl App {
         // 겹치며 이미 판 옆 스냅샷([`crate::worktree::Gathered::sides`]) — 자리 판정이 같은
         // 파일을 다시 열어 파지 않게 넘긴다(moai-kos1). 첫 화면이 바로 이 값을 물었다.
         sides: &[crate::worktree::Side],
+        // 겹치기 전에 잰 제 스냅샷([`crate::worktree::Gathered::mine`], moai-mafv) — 같은 까닭이다.
+        mine: &crate::worktree::Floor,
     ) -> App {
         let unreadable: Vec<Option<String>> = origin
             .unreadable(self.site.unreadable.iter().map(Option::as_deref))
@@ -1061,7 +1098,7 @@ impl App {
         // `prepare` 가 같은 자로 세어 [`Fresh::warnings`] 에 실어 온다. 위의 셈에 **한 번만** 더한다 —
         // 이 길은 여는 읽기 하나가 한 번 지난다.
         if let Some(repo) = &self.site.repo {
-            let dug = crate::worktree::dug(sides);
+            let dug = crate::worktree::dug(sides, mine);
             let (lost, said) = placed(repo, &self.site.issues, self.worktree && swept, &self.site.now, &dug);
             self.site.warnings += lost;
             elsewhere.extend(said);
@@ -2613,6 +2650,11 @@ impl App {
             Some(Ok(fresh)) => {
                 let cfg = repo.as_ref().map_or_else(|| self.site.cfg.clone(), |r| r.config.clone());
                 let mut site = Site::of(fresh.issues, fresh.index, fresh.ground, cfg, Vec::new(), fresh.unreadable);
+                // **펼친 프로젝트의 줄도 같은 말로 선다**(moai-ra67, 리뷰) — 한 화면의 말이지
+                // 프로젝트의 것이 아니다. 안 이으면 한눈 보기에서 편 남의 프로젝트의 바구니
+                // 이름만 [`Site::lang`] 의 처음값으로 서서, 같은 목록의 두 프로젝트가 같은
+                // 바구니를 다른 말로 부른다.
+                site.lang = self.site.lang;
                 site.repo = repo;
                 site.now = fresh.now;
                 site.stamp = fresh.stamp;
@@ -3217,7 +3259,9 @@ impl App {
                     // 스냅샷만 없는 옆은 "없음" 이 아니다 — 그 이름으로 줄에 `⎇` 가 선다(`Origin::named_only`).
                     let named = self.site.origin.named_only();
                     self.notice = Some(match &self.site.unfound {
-                        Some(why) => format!("{g} 옆 워크트리를 못 찾았다 — {}", crate::text::one_line(why)),
+                        // **까닭이 이미 "못 찾았다" 로 시작한다**(리뷰) — `worktree::Trouble::Unfound`
+                        // 를 편 글이 그 문장이라, 앞에 한 번 더 달면 같은 말이 두 번 선다.
+                        Some(why) => format!("{g} {}", crate::text::one_line(why)),
                         None if !named.is_empty() => format!("{g} {} — 겹칠 스냅샷이 없다", named.join(", ")),
                         None => format!("{g} 옆 워크트리 없음 — 겹칠 줄이 없다"),
                     });
@@ -3717,10 +3761,12 @@ impl App {
         out
     }
 
+    /// 바구니 이름은 [`crate::nav::Index::label`] 과 **같은 키에서** 온다(moai-ra67) — 글자로
+    /// 두 벌 들던 판은 한쪽만 고쳐도 경로 줄과 목록 줄이 다른 말을 했다.
     fn seg_label(&self, seg: &Seg) -> String {
         let id = match seg {
-            Seg::Milestone(None) => return "(마일스톤 없음)".into(),
-            Seg::Lost => return "(길 잃음)".into(),
+            Seg::Milestone(None) => return crate::i18n::say(self.site.lang, "nav.no_milestone").into(),
+            Seg::Lost => return crate::i18n::say(self.site.lang, "nav.lost").into(),
             Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => id,
         };
         self.site.title_of(id)
@@ -6359,7 +6405,7 @@ mod tests {
         let g = crate::worktree::gather(&repo, true).unwrap();
         let stamp = stamp_of(&repo);
         let (index, ground) = measure(&g.load.issues, &repo.config);
-        let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept, &g.sides);
+        let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(g.origin, crate::tui::said_trouble(&g.trouble), g.watched, g.swept, &g.sides, &g.mine);
         assert!(a.site.commits_of("argos-0001").is_empty(), "여는 읽기가 git 을 기다렸다");
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         a.follow();
@@ -6564,7 +6610,14 @@ mod tests {
     /// 옆 워크트리를 **못 찾는** 읽기 — git 밖 프로젝트를 흉내 낸다. 시험 기계의 git 에 기대지 않는다.
     fn lost(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         let mut f = prepare(repo, worktree)?;
-        f.unfound = worktree.then(|| "git 저장소가 아니다".to_string());
+        // **진짜 꼴로 흉내 낸다**(리뷰) — [`prepare`] 가 싣는 것은 이미 편 문장이다
+        // ([`crate::view::trouble_line`]). 맨 까닭을 실으면 알림이 제 문장을 한 번 더 달아도
+        // 시험이 그것을 못 잡는다 — 실제로 그렇게 서 있었다.
+        let why = crate::worktree::Trouble::Unfound {
+            lost: crate::worktree::Lost::Failed,
+            why: "git 저장소가 아니다".to_string(),
+        };
+        f.unfound = worktree.then(|| crate::view::trouble_line(SAID, &why));
         Ok(f)
     }
 
@@ -6583,7 +6636,10 @@ mod tests {
         a.hit("SPC v w");
         assert!(a.worktree);
         let said = a.notice.clone().expect("켰는데 못 찾은 까닭을 안 댄다");
-        assert!(said.contains("git 저장소가 아니다") && said.contains("옆 워크트리"), "{said}");
+        assert!(said.contains("git 저장소가 아니다") && said.contains("워크트리를 못 찾았다"), "{said}");
+        // **같은 말은 한 번만 선다**(리뷰) — 실린 것이 이미 편 문장이라, 알림이 제 문장을 앞에 또
+        // 달면 `⎇ 옆 워크트리를 못 찾았다 — 워크트리를 못 찾았다 — …` 가 된다.
+        assert_eq!(said.matches("워크트리를 못 찾았다").count(), 1, "같은 말이 두 번 섰다 — {said}");
         a.hit("Esc");
         // 알림은 다음 키에 걷힌다 — 키 없이 부르는 다시 읽기가 새로 대지 않는지만 본다.
         a.notice = None;

@@ -253,6 +253,32 @@ pub fn overlay(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin) {
     (shown, origin)
 }
 
+/// 옆 워크트리를 겹치다 만난 것 — **말이 아니라 자료다**(moai-dpbi). 글자는 [`crate::view`] 가
+/// 쥔다(`view::trouble`).
+///
+/// 여기서 문장을 지으면 그 줄이 `moai status` 의 stderr 로 나가는데, 그 곁의 화면은 말묶음에서
+/// 오고 이 줄만 한국어로 남아 **섞인 화면**이 된다. 그렇다고 [`gather`] 가 말을 받으면 그것을
+/// 부르는 자리가 모두 말을 들고 와야 하는데, 그중에는 이 줄을 아예 안 쓰는 길(`cmd::read`)과
+/// 말을 모르는 길(탐색기의 다시 읽기는 제 스레드에서 돈다)이 있다. 자료로 내면 쓰는 쪽만 말을 든다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Trouble {
+    /// 그 워크트리의 스냅샷을 못 읽었다 — 가지와 까닭.
+    Unread { branch: String, why: String },
+    /// 못 푸는 줄을 빼고 겹쳤다 — 가지·그 파일·뺀 줄 수.
+    Skipped { branch: String, path: PathBuf, lines: usize },
+    /// 옆 워크트리를 **찾지 못했다**([`Gathered::unfound`]) — git 이 없거나 저장소가 아니다.
+    Unfound { lost: Lost, why: String },
+}
+
+/// 옆 워크트리를 못 찾은 갈래 — git 의 네 실패([`crate::git::Error`]). **낱말은 여기 없다.**
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lost {
+    NoGit,
+    Failed,
+    Stream,
+    Encoding,
+}
+
 /// 겹쳐 읽은 결과.
 pub struct Gathered {
     /// 제 워크트리의 `Load` 에 남의 줄을 겹친 것. **`errors` 는 제 파일의 것뿐이다**
@@ -260,13 +286,13 @@ pub struct Gathered {
     /// 옆 워크트리 때문에 도구가 실패로 읽힌다.
     pub load: Load,
     pub origin: Origin,
-    /// 남의 워크트리에서 만난 문제. **막지 않는다** — 부르는 쪽이 한 줄씩 알린다.
-    pub trouble: Vec<String>,
+    /// 남의 워크트리에서 만난 문제. **막지 않는다** — 부르는 쪽이 한 줄씩 알린다([`Trouble`]).
+    pub trouble: Vec<Trouble>,
     /// 옆 워크트리를 **찾지 못한** 까닭(git 이 없거나 저장소가 아니다). `trouble` 과 가른다 —
     /// `--worktree` 를 시킨 CLI 는 말하지만, 겹쳐 보기를 기본으로 켜는 탐색기는 git 밖의
     /// 프로젝트를 열 때마다 시키지 않은 배너를 세우게 된다(moai-zcuh). 탐색기는 사람이
     /// `SPC t w` 로 켰을 때만 알림으로 댄다(`tui::App::unfound`, moai-d5vn).
-    pub unfound: Option<String>,
+    pub unfound: Option<Trouble>,
     /// **옆 워크트리를 빠짐없이 열어 봤다** — 겹쳐 보라고 시켰고 목록도 찾았다. 그러면 못 읽은 옆
     /// 스냅샷은 `trouble` 에 `⎇ <가지>: …` 로 이미 섰으니, 자리를 재다 못 읽은 워크트리
     /// (`stranded_at`)를 받는 쪽은 그것을 다시 말하지 않는다.
@@ -291,18 +317,97 @@ pub struct Gathered {
     /// **못 읽은 옆은 여기 없다** — 그쪽은 `trouble` 이 대고, 자리 셈이 제 손으로 열어 보고
     /// `unknown`·`broken` 을 세운다. 겹쳐 보지 않았으면 비어 있다.
     pub sides: Vec<Side>,
+    /// **제 스냅샷을 겹치기 전에 잰 바닥**(moai-mafv) — 자리 셈([`workplaces_in`])이 같은 파일을
+    /// 다시 열어 풀지 않게 실어 보낸다. 옆 스냅샷을 걷은 자리(moai-kos1)에 제 것이 남아 있었다:
+    /// 그 파일은 `repo.read()` 가 방금 판 것이고 저장소에서 가장 큰 스냅샷이라, `status --worktree`
+    /// 와 탐색기의 다시 읽기가 걸음마다 그것을 두 벌씩 풀었다.
+    ///
+    /// **옆 스냅샷과 달리 겹쳐 보지 않아도 선다** — main 체크아웃의 `moai status` 도 자리를 재려고
+    /// 그 파일을 열었다. 재는 값은 줄마다 짧은 글 둘을 베끼는 것뿐이라(`Floor`), 자리를 안 묻고
+    /// 끝나는 길(`ready`)이 치르는 값도 그 읽기의 백분의 일 아래다.
+    pub mine: Floor,
 }
 
-/// 이미 판 옆 스냅샷 — 워크트리의 moai 뿌리(정규화) → 그 파일에서 읽은 줄([`dug`]).
-pub type Dug<'a> = BTreeMap<PathBuf, &'a [Issue]>;
-
-/// 판 것([`Gathered::sides`])을 자리 셈([`workplaces_in`])이 찾을 모양으로.
+/// 옆 워크트리의 줄이 **여기보다 늦게 만져졌는가** 를 견줄 바닥([`holds_of`] 의 `later`) — 제
+/// 스냅샷에서 그 물음에 드는 만큼만(id → `planned`·`updated_at`) 잰 것이다.
 ///
-/// **뿌리를 정규화해 맞춘다** — 겹치기는 git 에게 물어 목록을 얻고([`others_of`]) 자리 셈은 git 이
-/// 적어 둔 파일만 읽어([`on_disk`]), 같은 워크트리가 글자만 다른 경로로 올 수 있다. 못 맞추면 그
-/// 워크트리만 예전처럼 다시 판다 — 최악이 지금과 같다.
-pub fn dug(sides: &[Side]) -> Dug<'_> {
-    sides.iter().map(|s| (canonical(&s.root), s.issues.as_slice())).collect()
+/// **줄을 통째로 안 들고 다닌다.** 겹치는 길([`overlay`])이 그 `Vec` 을 먹으므로 남기려면 한 벌을
+/// 베껴야 하는데, 재는 데 드는 것은 줄마다 짧은 글 둘뿐이다. 겹친 **뒤의** 줄로는 잴 수 없다 —
+/// 옆에서 온 줄이 바닥에 서면 그 워크트리가 제 줄과 저를 견주게 되어 만진 흔적이 통째로 사라진다.
+///
+/// 재는 자는 하나다([`holds_of`]) — 건네받은 길과 제 손으로 파는 길이 같은 것을 지난다.
+pub struct Floor {
+    /// 어느 파일에서 잰 바닥인가 — 자리 셈([`workplaces_in`])은 제 `base`(main 의 스냅샷)와 **같을
+    /// 때만** 건네받은 것을 쓴다. `MOAI_HERE=1` 은 부르는 쪽의 트래커를 그 워크트리의 `.moai` 로
+    /// 가르는데, 그것을 main 의 바닥으로 삼으면 갈라질 때의 main 으로 지금 main 을 재어 옆이 만진
+    /// 흔적이 뒤집힌다(갈라진 뒤 main 이 옮긴 줄이 전부 "옆이 만졌다" 로 선다).
+    at: PathBuf,
+    /// id → (`planned`, `updated_at`). 같은 id 가 둘이면 **뒷줄이 선다** — `Load::get` 과 같은 자다.
+    rows: BTreeMap<String, (String, String)>,
+}
+
+impl Floor {
+    /// 그 파일에서 읽은 줄로 — **자리를 함께 든다.**
+    pub fn of(at: PathBuf, mine: &[Issue]) -> Floor {
+        let rows = mine.iter().map(|i| (i.id.clone(), (i.planned().to_string(), i.updated_at.clone()))).collect();
+        Floor { at, rows }
+    }
+
+    /// 자리 없이 — 그 파일과 견줄 일이 없는 부르는 쪽(훅의 [`held_elsewhere`])이 쓴다. 빈 자리는
+    /// 어떤 스냅샷 자리와도 안 같아([`Dug::floor`]), [`Dug`] 에 실려도 자리 셈이 안 집어 든다.
+    pub fn loose(mine: &[Issue]) -> Floor {
+        Floor::of(PathBuf::new(), mine)
+    }
+
+    /// 옆의 이 줄이 **여기보다 늦게 만져졌는가.** 여기에 없는 줄은 그 워크트리에서 세운 것이라
+    /// 든다 — 그것도 만진 흔적이다.
+    fn later(&self, i: &Issue) -> bool {
+        self.rows
+            .get(i.id.as_str())
+            .is_none_or(|(p, u)| (i.planned(), i.updated_at.as_str()) > (p.as_str(), u.as_str()))
+    }
+}
+
+/// 부르는 쪽이 **이미 판 것** — 자리 셈([`workplaces_in`])이 같은 파일을 다시 열어 풀지 않게
+/// 실어 보낸다. 옆 워크트리의 스냅샷(moai-kos1)과 제 스냅샷(moai-mafv) 둘 다 여기 실린다.
+#[derive(Default)]
+pub struct Dug<'a> {
+    /// 옆 워크트리의 moai 뿌리(정규화) → 그 파일에서 읽은 줄([`dug`]).
+    sides: BTreeMap<PathBuf, &'a [Issue]>,
+    /// 부르는 쪽이 읽은 제 스냅샷([`Gathered::mine`]) — **자리가 같을 때만** 쓴다([`Floor::at`]).
+    mine: Option<&'a Floor>,
+}
+
+impl<'a> Dug<'a> {
+    /// 아무것도 안 건네받은 것 — 제 손으로 파는 길(훅·시험·[`stranded_at`])이 쓴다.
+    pub fn new() -> Dug<'a> {
+        Dug::default()
+    }
+
+    /// 그 워크트리의 스냅샷을 이미 팠으면 그 줄.
+    ///
+    /// **뿌리를 정규화해 맞춘다** — 겹치기는 git 에게 물어 목록을 얻고([`others_of`]) 자리 셈은 git 이
+    /// 적어 둔 파일만 읽어([`on_disk`]), 같은 워크트리가 글자만 다른 경로로 올 수 있다. 못 맞추면 그
+    /// 워크트리만 예전처럼 다시 판다 — 최악이 지금과 같다. **건네받은 것이 없으면 뿌리를 정규화하지도
+    /// 않는다** — `canonical` 은 디스크를 묻는 자라, 안 겹쳐 보는 흔한 길이 워크트리마다 그 값을
+    /// 헛되이 치르면 안 된다.
+    fn side(&self, root: &Path) -> Option<&'a [Issue]> {
+        match self.sides.is_empty() {
+            true => None,
+            false => self.sides.get(&canonical(root)).copied(),
+        }
+    }
+
+    /// 자리 셈이 견줄 바닥을 부르는 쪽이 이미 쟀으면 그것 — **그 파일이 그 파일일 때만.**
+    fn floor(&self, snapshot: &Path) -> Option<&'a Floor> {
+        let mine = self.mine?;
+        (!mine.at.as_os_str().is_empty() && canonical(&mine.at) == canonical(snapshot)).then_some(mine)
+    }
+}
+
+/// 판 것([`Gathered::sides`]·[`Gathered::mine`])을 자리 셈([`workplaces_in`])이 찾을 모양으로.
+pub fn dug<'a>(sides: &'a [Side], mine: &'a Floor) -> Dug<'a> {
+    Dug { sides: sides.iter().map(|s| (canonical(&s.root), s.issues.as_slice())).collect(), mine: Some(mine) }
 }
 
 /// 제 저장소를 읽고, `worktree` 면 다른 워크트리의 스냅샷을 겹친다.
@@ -312,6 +417,9 @@ pub fn dug(sides: &[Side]) -> Dug<'_> {
 /// 없는 워크트리는 moai 를 들이기 전에 갈라진 브랜치라 **말하지도 않는다.**
 pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let load = repo.read()?;
+    // **겹치기 전에 잰다**(moai-mafv) — 자리 셈이 견줄 바닥은 옆이 안 섞인 제 줄이다([`Floor`]).
+    // 겹친 뒤에 재면 옆에서 온 줄이 바닥에 서서 그 워크트리가 만진 흔적이 통째로 사라진다.
+    let mine = Floor::of(repo.issues_path(), &load.issues);
     if !worktree {
         return Ok(Gathered {
             load,
@@ -321,6 +429,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
             swept: false,
             watched: Vec::new(),
             sides: Vec::new(),
+            mine,
         });
     }
     let mut trouble = Vec::new();
@@ -333,7 +442,10 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     match others_of(&repo.root) {
         Err(why) => unfound = Some(why),
         Ok((me, trees)) => {
-            let mine = head_of(me.as_ref());
+            // **이름을 `mine` 으로 두지 않는다**(리뷰) — 이 함수의 `mine` 은 위에서 잰 [`Floor`] 고,
+            // 그것을 그대로 싣는 곳이 아래 `Gathered { .., mine }` 이다. 같은 이름이 둘이면 이 팔
+            // 안팎으로 줄을 옮기는 날 어느 쪽이 실리는지가 눈으로 안 갈린다.
+            let head = head_of(me.as_ref());
             let here: std::collections::HashSet<&str> = load.issues.iter().map(|i| i.id.as_str()).collect();
             let mut bases = Bases::new();
             for (tree, root) in trees {
@@ -342,7 +454,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                 match crate::store::read_snapshot(&path) {
                     unread @ (Err(_) | Ok(None)) => {
                         if let Err(e) = unread {
-                            trouble.push(format!("⎇ {}: {e}", tree.label));
+                            trouble.push(Trouble::Unread { branch: tree.label.clone(), why: e.to_string() });
                         }
                         // **디렉터리가 사라진 워크트리는 이름도 안 든다** — 훅의 `away` 가 읽는
                         // `on_disk` 가 그렇게 거른다. git 은 잠근 워크트리를 경로가 사라져도 목록에
@@ -362,14 +474,13 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                     }
                     Ok(Some(other)) => {
                         if !other.errors.is_empty() {
-                            trouble.push(format!(
-                                "⎇ {}: {} — 읽을 수 없는 줄 {}개는 빼고 겹쳤다",
-                                tree.label,
-                                path.display(),
-                                other.errors.len()
-                            ));
+                            trouble.push(Trouble::Skipped {
+                                branch: tree.label.clone(),
+                                path: path.clone(),
+                                lines: other.errors.len(),
+                            });
                         }
-                        others.push(side(&repo.root, &here, mine, tree, root, other.issues, &mut bases));
+                        others.push(side(&repo.root, &here, head, tree, root, other.issues, &mut bases));
                     }
                 }
             }
@@ -379,7 +490,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let (issues, mut origin) = overlay(issues, &others);
     origin.named = named;
     let swept = unfound.is_none();
-    Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, swept, watched, sides: others })
+    Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, swept, watched, sides: others, mine })
 }
 
 /// 옆 워크트리 하나의 줄을 겹칠 모양으로 — 옆에만 있는 줄이 있으면 갈라진 자리([`Side::base`])를 댄다.
@@ -503,7 +614,7 @@ pub fn heads(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
 /// moai 뿌리가 워크트리 꼭대기가 아닐 수 있다(`.moai/` 를 하위 디렉터리에 둔
 /// 저장소). **제 뿌리가 꼭대기에서 떨어진 만큼 남의 꼭대기에서도 떨어뜨린다** —
 /// 같은 저장소의 워크트리는 같은 나무 모양이다.
-fn others_of(root: &Path) -> Result<(Option<Tree>, Vec<(Tree, PathBuf)>), String> {
+fn others_of(root: &Path) -> Result<(Option<Tree>, Vec<(Tree, PathBuf)>), Trouble> {
     let top = git(root, &["rev-parse", "--show-toplevel"])?;
     let top = canonical(Path::new(top.trim_end_matches('\n')));
     let rel = canonical(root).strip_prefix(&top).map(Path::to_path_buf).unwrap_or_default();
@@ -587,13 +698,20 @@ impl Disk {
 /// `Stop` 에서만 부른다.
 pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> BTreeSet<String> {
     let Some(disk) = on_disk(root) else { return BTreeSet::new() };
+    // 견줄 바닥은 **워크트리 수와 상관없이 한 벌이다** — 워크트리마다 지으면 제 줄을 그만큼 다시
+    // 훑는다. 훅은 제 손으로 읽은 줄을 그대로 주므로 자리는 안 든다([`Floor::loose`]).
+    // **첫 옆을 만날 때 짓는다**(리뷰) — 딸린 워크트리가 하나도 없는 흔한 체크아웃에서는 아래 고리가
+    // 한 번도 안 도는데, 미리 지으면 그 판이 줄마다 짧은 글 셋을 헛되이 베낀다. 훅은 툴 부름마다
+    // 도는 길이라(`hook::unsure`) 그 헛일이 제일 자주 걸린다.
+    let floor = std::cell::OnceCell::new();
     let mut out = BTreeSet::new();
     for (tree, linked, me) in &disk.all {
         if *me || !*linked {
             continue;
         }
         // 훅은 겹쳐 본 결과를 들고 오지 않는다 — 판 것이 없으니 제 손으로 연다.
-        let (open, later) = holds(&disk, tree, mine, cfg, &Dug::new()).unwrap_or_default();
+        let (open, later) =
+            holds(&disk, tree, floor.get_or_init(|| Floor::loose(mine)), cfg, &Dug::new()).unwrap_or_default();
         out.extend(open);
         out.extend(later);
         // **그 워크트리가 적어 둔 집기도 든다**(moai-y7go, 리뷰 moai-71ht 셋째 판) — 쓰기가 루트로
@@ -629,17 +747,14 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
 fn holds(
     disk: &Disk,
     tree: &Tree,
-    mine: &[Issue],
+    mine: &Floor,
     cfg: &crate::config::Config,
     dug: &Dug<'_>,
 ) -> Option<(BTreeSet<String>, BTreeSet<String>)> {
     // **이미 판 것이 있으면 다시 안 판다**(moai-kos1) — 겹쳐 보는 길([`gather`])은 바로 앞에서
     // 같은 파일을 열어 풀었다. 재는 자는 그대로 아래 하나다: 건네받은 것도 안 건네받은 것도
-    // [`holds_of`] 를 지난다. **건네받은 것이 없으면 뿌리를 정규화하지도 않는다** — `canonical`
-    // 은 디스크를 묻는 자라, 안 겹쳐 보는 흔한 길이 워크트리마다 그 값을 헛되이 치르면 안 된다.
-    if !dug.is_empty()
-        && let Some(side) = dug.get(&canonical(&tree.path.join(&disk.rel)))
-    {
+    // [`holds_of`] 를 지난다.
+    if let Some(side) = dug.side(&tree.path.join(&disk.rel)) {
         return Some(holds_of(side, mine, cfg));
     }
     let path = snapshot_in(disk, tree);
@@ -655,25 +770,15 @@ fn holds(
 /// 파일을 이미 풀어 두기 때문이다(moai-kos1). 판정은 여기 하나다.
 fn holds_of(
     side: &[Issue],
-    mine: &[Issue],
+    mine: &Floor,
     cfg: &crate::config::Config,
 ) -> (BTreeSet<String>, BTreeSet<String>) {
-    let by_id: BTreeMap<&str, &Issue> = mine.iter().map(|i| (i.id.as_str(), i)).collect();
     // **벌여 놓인 줄은 자리 셈의 자로 잰다**([`crate::report::started`]) — 가려진 쌍둥이 줄도 든다
     // (moai-es40, 사용자 결정). `report::wip` 은 그 줄을 빼므로, 그것으로 재면 머지가 남긴 id 충돌
     // 하나로 이 워크트리에서 도는 줄이 `places` 에서 자리를 잃는다. 훅의 짐작(`hook::unsure`)은
     // 제 초점(`wip`)과 겹치는 id 만 쓰므로 더 든 id 로 답이 안 바뀐다.
     let open = crate::report::started(side, cfg).into_iter().map(|i| i.id.clone()).collect();
-    let later = side
-        .iter()
-        .filter(|i| {
-            // 여기에 없는 줄은 그 워크트리에서 세운 것이다 — 그것도 만진 흔적이다.
-            by_id
-                .get(i.id.as_str())
-                .is_none_or(|m| (i.planned(), i.updated_at.as_str()) > (m.planned(), m.updated_at.as_str()))
-        })
-        .map(|i| i.id.clone())
-        .collect();
+    let later = side.iter().filter(|i| mine.later(i)).map(|i| i.id.clone()).collect();
     (open, later)
 }
 
@@ -834,10 +939,22 @@ pub fn workplaces_in(
     // `logs/HEAD` 를 한 번씩 읽고 버리는 헛일이었다(`Disk::admin` 이 같은 까닭으로 `on_disk`
     // 에서 이것을 뺐다).
     let base = disk.main().map(|t| t.path.join(&disk.rel)).unwrap_or_else(|| root.to_path_buf());
-    let own = crate::store::read_snapshot(&base.join(".moai").join("issues.jsonl"));
-    let mine: &[Issue] = match &own {
-        Ok(Some(load)) => &load.issues,
-        _ => &[],
+    let snapshot = base.join(".moai").join("issues.jsonl");
+    // **부르는 쪽이 이미 판 파일이면 다시 안 판다**(moai-mafv) — 옆 스냅샷을 걷은 자리(moai-kos1)에
+    // 제 것이 남아 있었다. 이것은 `repo.read()` 가 방금 판 그 파일이고 저장소에서 가장 큰 스냅샷이다.
+    //
+    // **그 파일이 그 파일일 때만이다**([`Dug::floor`]) — `MOAI_HERE=1` 은 부르는 쪽의 트래커를 그
+    // 워크트리의 `.moai` 로 가르는데, 여기 `base` 는 언제나 main 의 것이다. 안 보고 쓰면 갈라질 때의
+    // main 으로 지금 main 을 재어 자리가 뒤집힌다. 못 맞추면 예전처럼 제 손으로 판다.
+    let own;
+    let mine = match dug.floor(&snapshot) {
+        Some(floor) => floor,
+        None => {
+            // 못 읽으면 바닥이 빈다 — 옆의 줄이 다 만진 흔적이 되어 자리를 넉넉히 대는 쪽으로 틀린다.
+            let read = crate::store::read_snapshot(&snapshot).ok().flatten().unwrap_or_default();
+            own = Floor::of(snapshot, &read.issues);
+            &own
+        }
     };
     for (place, tree) in out.iter_mut().zip(&linked) {
         place.born = disk.admin.get(&tree.path).and_then(|dir| born_of(dir));
@@ -1356,13 +1473,16 @@ fn base_of(root: &Path, mine: &str, theirs: &str) -> BTreeMap<String, String> {
     then
 }
 
-fn git(root: &Path, args: &[&str]) -> Result<String, String> {
+fn git(root: &Path, args: &[&str]) -> Result<String, Trouble> {
     use crate::git::Error;
-    crate::git::run(root, args).map_err(|e| match e {
-        Error::Spawn(e) => format!("git 을 부르지 못해 워크트리를 못 찾았다 — {e}"),
-        Error::Failed(err) => format!("워크트리를 못 찾았다 — {err}"),
-        Error::Stream(e) => format!("워크트리 목록을 읽다 끊겼다 — {e}"),
-        Error::NotUtf8(e) => format!("워크트리 목록을 못 읽었다 — {e}"),
+    crate::git::run(root, args).map_err(|e| {
+        let (lost, why) = match e {
+            Error::Spawn(e) => (Lost::NoGit, e.to_string()),
+            Error::Failed(err) => (Lost::Failed, err),
+            Error::Stream(e) => (Lost::Stream, e.to_string()),
+            Error::NotUtf8(e) => (Lost::Encoding, e.to_string()),
+        };
+        Trouble::Unfound { lost, why }
     })
 }
 
@@ -1377,6 +1497,89 @@ mod tests {
     use super::*;
 
     use crate::model::{Kind, Status};
+
+    /// **건네받은 바닥은 그 파일 하나에만 선다**(moai-mafv). `MOAI_HERE=1` 은 부르는 쪽의 트래커를
+    /// 그 워크트리의 `.moai` 로 가르는데, 자리 셈의 `base` 는 언제나 main 의 것이다 — 자리를 안 보고
+    /// 쓰면 갈라질 때의 main 으로 지금 main 을 재어 옆이 만진 흔적이 통째로 뒤집힌다.
+    #[test]
+    fn a_handed_floor_stands_for_the_one_file_it_was_measured_from() {
+        let main = PathBuf::from("/nowhere/repo/.moai/issues.jsonl");
+        let here = Path::new("/nowhere/repo/.claude/worktrees/w/.moai/issues.jsonl");
+        let floor = Floor::of(main.clone(), &[]);
+        assert!(dug(&[], &floor).floor(&main).is_some(), "같은 파일인데 판 것을 안 썼다");
+        assert!(dug(&[], &floor).floor(here).is_none(), "MOAI_HERE 로 갈린 파일을 main 의 바닥으로 썼다");
+        // 자리 없는 바닥(훅)은 어떤 파일에도 안 선다 — 실수로 실려도 자리 셈이 안 집어 든다.
+        assert!(dug(&[], &Floor::loose(&[])).floor(&main).is_none(), "자리 없는 바닥이 남의 파일에 섰다");
+        assert!(Dug::new().floor(&main).is_none(), "아무것도 안 건네받았는데 바닥이 섰다");
+    }
+
+    /// **"옆이 여기보다 늦게 만졌는가" 를 재는 자는 하나다**([`Floor::later`]) — 여기에 없는 줄,
+    /// 늦게 고친 줄, 늦게 미룬 줄이 든다. 미룸은 칸을 안 옮기므로 `updated_at` 만 보면 옆에서
+    /// 미룬 것이 여기서 먼저 집은 것에 가려진다(moai-l11z).
+    #[test]
+    fn the_floor_names_only_lines_touched_later_there() {
+        let at = "2026-09-12T00:00:00Z";
+        let later = "2026-09-13T00:00:00Z";
+        let floor = Floor::of(PathBuf::new(), &[issue("m-0001", "todo", at), issue("m-0002", "todo", at)]);
+        assert!(!floor.later(&issue("m-0001", "todo", at)), "그대로인 줄이 만진 흔적이 됐다");
+        assert!(floor.later(&issue("m-0001", "in_progress", later)), "옆에서 늦게 만진 줄을 안 세웠다");
+        assert!(floor.later(&issue("m-0003", "todo", at)), "옆에서 세운 줄을 안 세웠다");
+        let mut put_off = issue("m-0002", "todo", at);
+        put_off.planned_at = Some(later.into());
+        assert!(floor.later(&put_off), "옆에서 늦게 미룬 줄을 안 세웠다 — 미룸은 칸을 안 옮긴다");
+    }
+
+    /// **파는 길은 건네받은 바닥으로 잰다 — 그 파일을 다시 안 연다**(moai-mafv). 옆 스냅샷을 걷은
+    /// 자리(moai-kos1)에 제 것이 남아, `status`·탐색기가 걸음마다 저장소에서 가장 큰 파일을 두 벌씩
+    /// 풀었다. **재는 자가 한 자리에 서 있는가**를 두 쪽에서 본다 — 건네받은 자리가 자리 셈의
+    /// `base` 와 같으면 그것으로 재고(디스크의 값과 답이 갈리게 두어 확인한다), 갈리면 예전처럼
+    /// 제 손으로 판다.
+    #[test]
+    fn the_dug_path_measures_against_the_handed_floor_and_digs_again_when_it_is_elsewhere() {
+        let s = crate::scratch::Scratch::new("floor");
+        let main = s.path().join("main");
+        let side = s.path().join("wt");
+        let admin = main.join(".git").join("worktrees").join("w1");
+        std::fs::create_dir_all(&admin).unwrap();
+        std::fs::create_dir_all(main.join(".moai")).unwrap();
+        std::fs::create_dir_all(side.join(".moai")).unwrap();
+        std::fs::write(main.join(".git").join("HEAD"), "ref: refs/heads/develop\n").unwrap();
+        std::fs::write(admin.join("HEAD"), "ref: refs/heads/worktree-w1\n").unwrap();
+        std::fs::write(admin.join("gitdir"), format!("{}\n", side.join(".git").display())).unwrap();
+        std::fs::write(side.join(".git"), format!("gitdir: {}\n", admin.display())).unwrap();
+        let snapshot = |root: &Path, issues: &[Issue]| {
+            let text: String = issues.iter().map(|i| serde_json::to_string(i).unwrap() + "\n").collect();
+            let path = root.join(".moai").join("issues.jsonl");
+            std::fs::write(&path, text).unwrap();
+            path
+        };
+        let early = "2026-09-12T00:00:00Z";
+        let touched = "2026-09-13T00:00:00Z";
+        let late = "2026-09-14T00:00:00Z";
+        // 옆은 `m-0001` 을 `touched` 에 만졌고, 디스크의 main 은 그보다 **늦다** — 그대로 읽으면
+        // 옆이 만진 것이 아니다. 집은 줄은 이름으로 안 잡혀(`w1`·`wt`) 파는 길이 열린다.
+        snapshot(&side, &[issue("m-0001", "todo", touched)]);
+        let at = snapshot(&main, &[issue("m-0001", "todo", late)]);
+        let asked = vec![issue("m-0001", "in_progress", late)];
+        let cfg = crate::config::Config::parse("prefix = \"m\"\n").unwrap();
+        let dig = |floor: &Floor| {
+            let trees = workplaces_in(&main, false, &crate::report::Footing::of(&asked, &cfg), &dug(&[], floor));
+            assert_eq!(trees.len(), 1, "딸린 워크트리 하나를 못 찾았다");
+            trees[0].touched.clone()
+        };
+        // 건네받은 바닥은 그 줄을 `early` 로 든다 — 디스크를 다시 팠으면 답이 갈린다.
+        let handed = Floor::of(at, &[issue("m-0001", "todo", early)]);
+        assert_eq!(dig(&handed), ["m-0001".to_string()].into(), "건네받은 바닥을 두고 그 파일을 다시 팠다");
+        // **철자가 달라도 같은 파일이면 쓴다**(`Dug::floor` 의 `canonical`) — 부르는 쪽이 든 자리는
+        // `Repo` 가 찾아 오른 경로고 자리 셈의 것은 git 이 적어 둔 목록에서 지은 경로라, 같은 파일이
+        // 글자만 다르게 올 수 있다. 정규화를 걷으면 이 줄이 먼저 붉어진다.
+        let spelt = main.join(".moai").join("..").join(".moai").join("issues.jsonl");
+        let handed = Floor::of(spelt, &[issue("m-0001", "todo", early)]);
+        assert_eq!(dig(&handed), ["m-0001".to_string()].into(), "같은 파일을 글자가 다르다고 다시 팠다");
+        // 자리가 갈리면(`MOAI_HERE=1`) 안 쓴다 — 디스크의 `late` 로 재어 만진 흔적이 없다.
+        let elsewhere = Floor::of(side.join(".moai").join("issues.jsonl"), &[issue("m-0001", "todo", early)]);
+        assert_eq!(dig(&elsewhere), BTreeSet::new(), "남의 파일에서 잰 바닥으로 main 을 쟀다");
+    }
 
     /// **자리 경로는 늘 상대 경로다**(moai-xpd7) — 밑이면 잘라서, 밖이면 `../` 로 올라가서, 같은
     /// 자리면 `.`.
@@ -1766,7 +1969,11 @@ mod tests {
         assert_eq!(got.origin.working("t-1"), Some("worktree-t-1"), "스냅샷 없는 워크트리의 이름을 못 봤다");
         assert_eq!(got.origin.working("t-2"), Some("worktree-t-2"), "스냅샷이 깨진 워크트리의 이름을 못 봤다");
         assert!(got.origin.labels().is_empty(), "겹치지 않은 곳을 겹쳐 봤다고 댄다 — {:?}", got.origin.labels());
-        assert!(got.trouble.iter().any(|t| t.contains("worktree-t-2")), "깨진 스냅샷을 말하지 않는다 — {:?}", got.trouble);
+        // **어느 워크트리인지를 자료로 든다**(moai-dpbi) — 글은 `view::trouble_line` 이 편다.
+        let said = |b: &str| {
+            got.trouble.iter().any(|t| matches!(t, Trouble::Unread { branch, .. } if branch == b))
+        };
+        assert!(said("worktree-t-2"), "깨진 스냅샷을 말하지 않는다 — {:?}", got.trouble);
         for id in ["t-1", "t-2"] {
             assert!(away(&main).names.contains(id), "훅의 자가 {id} 를 안 센다 — 이 시험이 견줄 것이 없다");
         }

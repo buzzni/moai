@@ -1,4 +1,11 @@
 //! argv 의 모양만 정의한다. **로직은 여기 없다.**
+//!
+//! **도움말은 영어다**(moai-l5uf, 2026-09-20 사용자 결정). 화면의 말은 말묶음이 고르지만
+//! (`i18n`) 이 글은 못 고른다 — clap 은 인자를 풀기 **전에** 도움말을 지으므로 `Ctx::lang`
+//! 이 정해지기 전이고, `docs/cli.md` 는 이 글에서 지어 커밋되는 한 벌이라 어느 한 말로
+//! 서야 한다. 심는 문서를 영어로 통일한 결정(moai-54k2)과 같은 자리다.
+//!
+//! 아래 `//` 주석은 이 저장소의 글이라 그대로 한국어다 — 화면에 안 나간다.
 
 use crate::model::Kind;
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -13,79 +20,81 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 #[command(
     name = "moai",
     version,
-    about = "이슈 트래커. 승인 게이트 없음. 규율은 `moai status` 가 비춘다.",
+    about = "Issue tracker. No approval gate. `moai status` shows the discipline.",
     after_help = "\
-세션은 이렇게 시작한다:
+Start a session like this:
 
-  moai status                   보드 · 경고 · 흐름. 인자 없이도 이것이 나온다
-  moai ready                    지금 집을 수 있는 일
-  moai show <id>                본문과 이력 — 왜 그렇게 정했는지가 여기 있다
-  moai mv <id> in_progress      집는다.  끝나면 done
-  moai note <id> '발견한 것'    다음 사람이 읽을 메모
-  moai tui                      탐색기 — 에픽이 디렉터리처럼 열린다.
-                                SPC n 으로 생각을 담는다
+  moai status                   board, warnings, flow. Also the bare call
+  moai ready                    what you can pick up now
+  moai show <id>                body and history - why it was decided so
+  moai mv <id> in_progress      pick it up.  done when finished
+  moai note <id> 'what I found' a note for whoever comes next
+  moai tui                      explorer - epics open like directories.
+                                SPC n jots a thought down
 
-지금 할 일은 아닌 것이 떠오르면:
+When something not for now comes to mind:
 
-  moai idea add '반짝 떠오른 것'   담는다. 제목 하나면 된다 — 일로 세지 않는다
-  moai idea promote <id> --from -  때가 되면 에픽과 이슈로 펼친다
+  moai idea add 'a passing thought'  jot it. A title is enough - not work yet
+  moai idea promote <id> --from -    unfold it into an epic and issues later
 
-이미 있는 일을 지금 안 할 때:
+When you are not doing an existing piece of work right now:
 
-  moai defer <id> -m '다음 분기에'  계획에서 잠시 뺀다. 칸도 종류도 안 바뀐다
-  moai defer <id> --undo           도로 집는다
+  moai defer <id> -m 'next quarter'  out of the plan for a while
+  moai defer <id> --undo             pick it back up
 
-여러 프로젝트를 한곳에서 볼 때:
+To watch several projects from one place:
 
-  moai project add <dir>        등록하면 `.moai` 밖의 moai·status·ready 가
-                                등록한 프로젝트를 한눈에 낸다
-  moai -C <dir> <명령>          그 밖의 명령은 어느 프로젝트인지 댄다
+  moai project add <dir>        registered, moai/status/ready outside a
+                                `.moai` show every project at a glance
+  moai -C <dir> <command>       other commands need to be told which one
 
-화면의 말을 바꿀 때:
+To change the language of the screen:
 
-  MOAI_LANG=ko moai status      기본은 영어다. en·ko·zh·ja·es 가 된다
-                                늘 쓰려면 사용자 설정의 [i18n] 에 lang = \"ko\"
+  MOAI_LANG=ko moai status      English by default. en, ko, zh, ja, es
+                                To keep it, put lang = \"ko\" under [i18n]
+                                in your user config
 
-계획을 한 번에 세울 때:
+To lay out a whole plan at once:
 
 moai add --from - <<'PLAN'
-# 에픽 제목
-- [p1] 첫 이슈 #bug
+# Epic title
+- [p1] first issue #bug
 PLAN
 
-승인 게이트가 없다. 무엇이든 만들고 무엇이든 옮길 수 있다. 대신 `moai status` 가
-에픽 없는 이슈·오래 멈춘 review·한 번에 벌여 놓은 것을 비춘다.
+There is no approval gate. Create anything, move anything. In exchange
+`moai status` shows issues with no epic, reviews stalled for days, and how
+much you have opened at once.
 
-`moai <명령> --help` 가 그 명령의 전부를 낸다. 저장소에 AGENTS.md 가 있으면
-그 저장소에서 일하는 절차가 거기 있다."
+`moai <command> --help` tells you all of that command. If the repository has
+an AGENTS.md, how to work in that repository is written there."
 )]
 pub struct Cli {
-    /// 없으면 `status` 다 (저장소 밖에서는 등록한 프로젝트의 한눈 보기, 등록한
-    /// 것도 없으면 도움말). **오류가 아니다** —
-    /// 맨몸으로 부른 것을 실패로 끝내면 처음 만난 쪽이 도구가 고장 난 줄 안다.
+    /// Without one this is `status` (outside a repository, a glance at the
+    /// registered projects; with none registered, this help). **Not an error** -
+    /// failing a bare call makes a newcomer think the tool is broken.
     #[command(subcommand)]
     pub cmd: Option<Cmd>,
 
-    /// 기계가 읽는 출력. 사람 출력은 전부 사라진다
+    /// Machine-readable output. Every human line goes away
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// 색을 끈다 (`--color never` 와 같다)
+    /// Turn colour off (same as `--color never`)
     #[arg(long, global = true, conflicts_with = "color")]
     pub no_color: bool,
 
     // 값과 기본값은 글로 적는다 — clap 이 붙이는 `[default: …] [possible values: …]` 가
     // 옵션 열 옆에서 130칸을 넘었다(moai-c57v). `NO_COLOR` 도 auto 가 읽는다.
-    /// auto|always|never (기본 auto, 파이프면 끈다)
-    #[arg(long, global = true, value_name = "어떻게", default_value = "auto", hide_default_value = true, hide_possible_values = true)]
+    /// auto|always|never (auto by default, off when piped)
+    #[arg(long, global = true, value_name = "how", default_value = "auto", hide_default_value = true, hide_possible_values = true)]
     pub color: ColorArg,
 
-    /// 이 디렉터리에서 실행한다 (`git -C` 와 같다)
-    #[arg(short = 'C', long = "dir", global = true, value_name = "경로")]
+    /// Run in this directory (same as `git -C`)
+    #[arg(short = 'C', long = "dir", global = true, value_name = "path")]
     pub dir: Option<std::path::PathBuf>,
 
-    /// 누가 하는가 (없으면 `git config`)
-    #[arg(long, global = true, value_name = "이름 (메일)")]
+    /// Who is doing this (from `git config` when absent)
+    #[arg(long, global = true, value_name = "name (email)")]
     pub user: Option<String>,
 }
 
@@ -105,404 +114,452 @@ pub enum ColorArg {
 // (`every_help_heredoc_is_copyable`, moai-foc3).
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
-    /// 보드 · 경고 · 흐름. 세션은 여기서 시작한다
-    #[command(after_help = "  아무것도 막지 않는다. 승인도 통과도 없다.
-  대신 에픽에 안 붙은 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것을 드러낸다.
-  종료 코드는 데이터가 깨졌을 때만 0 이 아니다.
+    /// Board, warnings, flow. A session starts here
+    #[command(after_help = "  It blocks nothing. No approval, no gate.
+  Instead it surfaces issues with no epic, reviews stalled for days, and how
+  much you have opened at once.
+  The exit code is non-zero only when the data itself is broken.
 
-  --worktree 는 다른 git 워크트리의 이슈도 겹쳐 본다. 같은 id 는 칸을 옮기거나
-  미루고 도로 집은 때가 늦은 줄이 서고(같으면 updated_at 이 늦은 줄), 지금
-  브랜치가 아닌 줄은 제목 앞에 ⎇ <브랜치> 가 붙는다.
-  여기서 rm 한 줄은 갈라진 뒤 옆에서 만지지 않았으면 되살아나지 않는다.
-  옆 워크트리를 못 읽으면 보드가 \"옆 워크트리 문제 N건\" 으로 말한다 —
-  종료 코드는 그대로다.
-  보여줄 때만 겹친다 — 어느 파일도 바뀌지 않는다.
+  --worktree also overlays the issues of other git worktrees. For one id the
+  row that moved column, or was deferred and picked back up, later wins (on a
+  tie, the later updated_at), and a row from another branch gets a leading
+  branch mark in front of its title.
+  A row removed here does not come back unless the other side touched it
+  after the fork.
+  When a sibling worktree cannot be read the board says so and the exit code
+  stays the same.
+  Overlaying is for showing only - no file changes.
 
-  무엇부터 잔소리할지는 .moai/config.toml 이 정한다. 안 적으면 아래 값이고,
-  수는 따옴표 없이 적는다. 어느 값으로도 막지 않는다 — 낮추면 더 비출 뿐이다.
-    status_review_days   = 3      review 에 이 날수를 넘겨 머물면 썩는 것으로
-    status_wip_days      = 2      집어 놓고 이 날수를 넘겨 안 건드리면 잊은 것
-    status_blocked_days  = 3      막힌 채 이 날수를 넘겨 서 있으면 멈춘 자리로
-    status_wip_limit     = 3      한 번에 이보다 많이 벌이면
-    status_no_epic_ratio = 0.15   에픽 없는 이슈가 이 비율부터
-    status_no_epic_min   = 5      비율이 낮아도 이 수부터
-    status_flow_days     = 7      흐름을 재는 창
-    status_idea_pile     = 5      담아 둔 생각이 이만큼 쌓이면")]
+  What to nag about first comes from .moai/config.toml. Unwritten, these are
+  the values, and numbers go without quotes. No value ever blocks - a lower
+  one only shows more.
+    status_review_days   = 3      days in review before it counts as rot
+    status_wip_days      = 2      days untouched after pickup before forgotten
+    status_blocked_days  = 3      days blocked before it counts as stuck
+    status_wip_limit     = 3      more than this opened at once
+    status_no_epic_ratio = 0.15   issues with no epic from this ratio up
+    status_no_epic_min   = 5      from this count up, even at a low ratio
+    status_flow_days     = 7      the window the flow is measured over
+    status_idea_pile     = 5      when this many thoughts have piled up")]
     Status(WorktreeArg),
 
-    /// 지금 집을 수 있는 일
-    #[command(after_help = "  에픽 자체, 미뤄 둔 것과 그 밑, 아직 안 끝난 자식을 가진 부모는 뺀다.
-  급한 것 → 끝나가는 에픽 → 오래된 것 차례로 낸다.
+    /// What you can pick up now
+    #[command(after_help = "  Epics themselves, deferred rows and what is under them, and parents with
+  unfinished children are left out.
+  Urgent first, then epics near the end, then the oldest.
 
-  --worktree 면 다른 워크트리에서 이미 집은 일은 여기서 빠지고, 잡고 있는
-  것에 ⎇ <브랜치> 와 함께 선다. 같은 id 는 칸을 옮기거나 미루고 도로 집은
-  때가 늦은 줄로 읽으므로, 옆에서 집은 뒤 여기서 제목·우선순위만 고쳐도
-  옆에서 집은 것이 풀리지 않고, 옆에서 늦게 미룬 일을 여기서 집으라고 내지
-  않는다.")]
+  With --worktree, work already picked up in another worktree drops out here
+  and what you hold shows with its branch. For one id the row that moved
+  column, or was deferred and picked back up, later wins - so editing only
+  the title or priority here does not free what the other side picked up, and
+  work the other side deferred later is not offered here.")]
     Ready(WorktreeArg),
 
-    /// 이슈를 만든다
+    /// Create an issue
     // `-h` 도 설명을 옵션 밑 줄에 둔다(`next_line_help`) — 옆 한 줄 모양이면 옵션 열이
     // `--type <issue|epic|milestone|idea>` 에 맞춰 44칸으로 벌어져 설명이 112칸까지
     // 갔다(moai-x18p). 옵션이 스물이 넘는 명령이라 열을 좁혀도 다음 옵션이 다시 넓힌다.
     // `Typed::Add` 도 같은 까닭으로 같다 — `moai idea add` 는 그것을 접어 넣어 쓴다(moai-g33x).
     #[command(next_line_help = true, after_help = "\
-예시:
-  moai add '파서가 BOM 에서 죽는다' -t bug -p 1
-  moai add '저장 계층' --type epic
-  moai add '부모에 딸린 일' --parent moai-4aex
-  moai add '본문은 stdin 에서' -b -
-  moai add '남에게' -a \"철수 (chulsoo@example.com)\"    안 주면 만든 이가 담당
-  moai add '임자 없이' -a none
+Examples:
+  moai add 'the parser dies on a BOM' -t bug -p 1
+  moai add 'storage layer' --type epic
+  moai add 'work under a parent' --parent moai-4aex
+  moai add 'body from stdin' -b -
+  moai add 'to someone else' -a 'Kim (kim@example.com)'   else the creator
+  moai add 'with no owner' -a none
 
-제목과 본문은 따로 넘긴다. 제목은 무엇이 어긋났는지 한 줄이다 — 보드와
-`ready` 와 탐색기 목록은 제목만 보여 준다. 긴 글은 제목에 밀어 넣지 말고
-본문으로 가른다. 본문은 마크다운이고 `-b -` 가 stdin 에서 읽는다:
+Title and body go separately. The title is one line saying what is wrong -
+the board, `ready` and the explorer list show the title only. Do not push a
+long text into the title; split it into the body. The body is markdown and
+`-b -` reads it from stdin:
 
-moai add '파서가 BOM 에서 죽는다' -t bug -b - <<'BODY'
-- 무엇이 어긋났는가: 앞머리 세 바이트를 제목으로 읽는다
-- 어디를 고치는가: src/store.rs 의 읽기
+moai add 'the parser dies on a BOM' -t bug -b - <<'BODY'
+- what is wrong: it reads the three leading bytes as the title
+- where to fix: the read in src/store.rs
 BODY
 
-한 번에 여럿 (`--from`):
+Several at once (`--from`):
 
 moai add --from - <<'PLAN'
-# 저장 계층
-- [p1] 원자적으로 쓴다 #bug
-- 잘린 줄을 복구한다
-- \\[WIP] 이슈 \\#12
+# Storage layer
+- [p1] write atomically #bug
+- recover a truncated line
+- \\[WIP] issue \\#12
 PLAN
 
-  `#` 줄은 에픽, `-` 줄은 바로 위 에픽의 이슈다. [pN] 과 #태그 는 없어도 된다.
-  제목의 앞머리 [ 와 끝 #낱말 은 \\ 를 앞에 붙인다.
-  --dry-run 이 heredoc 오타로 여섯 개를 잘못 만드는 것을 막는다.
+  A `#` line is an epic, a `-` line is an issue of the epic above it.
+  [pN] and #tag are optional.
+  Put \\ in front of a leading [ or a trailing #word in a title.
+  --dry-run keeps a heredoc typo from creating six wrong issues.
 
-계획 템플릿 (`{{이름}}` 을 --var 로 채운다, 변수는 전부 필수):
+Plan templates (`{{name}}` filled by --var, every variable required):
   moai add --from .moai/templates/release.md --var version=1.2
 
-제목이 `--` 로 시작해도 된다. 아는 플래그가 아니면 제목으로 읽는다.")]
+A title may start with `--`. Anything that is not a known flag is a title.")]
     Add(AddArgs),
-    /// 하나를 펼치거나 목록을 낸다
+    /// Open one, or list them
     Show(ShowArgs),
-    /// 상태를 옮긴다
-    #[command(after_help = "  마지막 인자가 갈 칸이고, 그 앞이 전부 옮길 이슈다.
-  칸 이름과 차례는 .moai/config.toml 의 statuses 가 정한다 (기본: todo,
-  in_progress, review, done).
+    /// Move the status
+    #[command(after_help = "  The last argument is the column to go to, everything before it the issues.
+  Column names and their order come from statuses in .moai/config.toml
+  (todo, in_progress, review, done by default).
 
-  순서를 건너뛰어도, 되돌려도, 막지 않는다. 이 도구에 승인은 없다.
-  되감긴 것과 오래 멈춘 것은 `moai status` 가 드러낸다.
+  Skipping ahead and going back are both allowed. This tool has no approval.
+  `moai status` surfaces what was rewound and what has stalled.
 
   moai mv moai-4aex in_progress
   moai mv moai-4aex moai-9k2p done
-  moai mv moai-4aex review -m '테스트는 다음 이슈로 뺐다'
+  moai mv moai-4aex review -m 'tests moved to the next issue'
 
-  여럿이 같은 .moai 를 쓰면 본 칸을 함께 준다. `--from` 은 락 안에서 다시 보고
-  그 칸일 때만 옮긴다 — 진 쪽은 stderr 한 줄과 0 아닌 코드를 받는다. 그때는
-  **id 를 하나만** 준다: 여럿이면 이긴 줄과 진 줄이 한 코드에 섞인다.
+  When several people share one .moai, say which column you saw. `--from`
+  looks again inside the lock and moves only if it is still that column - the
+  loser gets one stderr line and a non-zero code. **Give one id** then:
+  with several, the won and the lost rows share one exit code.
 
   moai mv moai-4aex in_progress --from todo")]
     Mv(MvArgs),
-    /// 제목·본문·태그·에픽·우선순위를 고친다
-    #[command(after_help = "  `--epic none`·`--milestone none` 은 그 줄에 적힌 필드만 뺀다. 부모나
-  에픽에게서 물려받는 소속은 남는다.
+    /// Edit title, body, tags, epic or priority
+    #[command(after_help = "  `--epic none` and `--milestone none` clear only the field on that row.
+  Membership inherited from a parent or an epic stays.
 
-  제목과 본문은 따로 간다 — `--title` 은 한 줄, `-b` 는 마크다운 본문이고
-  `-b -` 가 stdin 에서 읽는다. **`-b` 는 본문을 통째로 바꾼다.** 끝에 한 줄을
-  더하려면 지금 본문을 먼저 읽어 이어 붙인다:
+  Title and body go separately - `--title` is one line, `-b` is a markdown
+  body and `-b -` reads it from stdin. **`-b` replaces the whole body.** To
+  append one line, read the body first and join it:
 
 { moai show <id> --json | jq -r '.body // empty'
-printf '\\n한 줄 더\\n'; } | moai edit <id> -b -")]
+printf '\\none more line\\n'; } | moai edit <id> -b -")]
     Edit(EditArgs),
-    /// 지운다
+    /// Remove
     Rm(RmArgs),
-    /// 이슈에 메모를 남긴다 (저널에만 쌓인다)
-    #[command(after_help = "  moai note moai-4aex '파서가 BOM 에서 죽는다'
-  moai note moai-4aex -b - < review.txt        긴 글은 stdin 에서
+    /// Leave a note on an issue (journal only)
+    #[command(after_help = "  moai note moai-4aex 'the parser dies on a BOM'
+  moai note moai-4aex -b - < review.txt        a long text from stdin
 
 moai note moai-4aex -b - <<'NOTE'
-여러 줄의 긴 글
+a long text over several lines
 NOTE
 
-  짧은 발견은 자리 인자로, 리뷰 전문처럼 긴 글은 `-b -` 로 넣는다. 둘은 서로
-  밀어낸다 — 둘 다 받으면 어느 쪽이 이기는지 아무도 못 외운다.
+  A short finding goes as the positional, a long one - a whole review - with
+  `-b -`. The two push each other out: given both, nobody can remember which
+  one wins.
 
-  메모는 저널에만 쌓이고 스냅샷을 안 바꾼다. `moai show <id>` 가 이력으로 낸다.")]
+  Notes pile up in the journal only and never touch the snapshot.
+  `moai show <id>` prints them as history.")]
     Note(NoteArgs),
-    /// 지금 안 할 일을 계획에서 잠시 뺀다 (또는 도로 집는다)
-    #[command(after_help = "  moai defer moai-4aex                       미룬다
-  moai defer moai-4aex moai-9k2p -m '다음 분기'   여럿을, 까닭과 함께
-  moai defer moai-4aex --undo                도로 집는다
+    /// Take work out of the plan for now (or pick it back up)
+    #[command(after_help = "  moai defer moai-4aex                          defer it
+  moai defer moai-4aex moai-9k2p -m 'next quarter'   several, with a reason
+  moai defer moai-4aex --undo                   pick it back up
 
-  **칸도 종류도 안 바꾼다.** 어느 칸에 있었는지는 도로 집을 때 그대로
-  필요하고, 같은 줄이 그대로 돌아와야 한다. 미룬 것은 `moai ready` 와 보드와
-  경고에서 빠지고, 쌓이면 `moai status` 가 한 줄로 비춘다. 에픽·마일스톤·
-  부모를 미루면 그 밑의 일도 같이 빠진다.
+  **Neither the column nor the kind changes.** Which column it was in is
+  exactly what you need when picking it back up, and the same row has to come
+  back. Deferred rows drop out of `moai ready`, the board and the warnings,
+  and once they pile up `moai status` says so in one line. Defer an epic, a
+  milestone or a parent and the work under it drops out too.
 
-  `moai show --deferred` 로 미뤄 둔 것만 본다.
+  `moai show --deferred` shows only what is deferred.
 
-  `--from <칸>` 은 `mv --from` 과 같은 자다 — 옆에서 집어 **칸이 움직인** 줄을
-  뒤늦은 미루기가 계획 밖으로 빼지 않는다. 미루기는 칸을 안 바꾸므로, 겨루는
-  둘이 **둘 다 미루는** 것은 이것으로 안 갈린다.
+  `--from <column>` is the same measure as `mv --from` - a late defer does
+  not take a row **whose column moved** out of the plan. Deferring does not
+  change the column, so two racing defers are not told apart by it.
 
-  moai defer moai-4aex -m '다음 분기' --from todo")]
+  moai defer moai-4aex -m 'next quarter' --from todo")]
     Defer(DeferArgs),
 
-    /// 읽었다고 표시한다 (내 설정에만 남는다)
-    #[command(after_help = "  moai read moai-4aex              이 줄을 읽음으로
-  moai read --all                  내게 온 것 가운데 안 읽은 것 전부
-  moai read -e moai-9k2p           그 에픽의 멤버와 그 밑까지
+    /// Mark as read (kept in your own config only)
+    #[command(after_help = "  moai read moai-4aex              this row as read
+  moai read --all                  everything unread that came to me
+  moai read -e moai-9k2p           that epic's members and what is under them
 
-  **트래커에 안 쓴다.** 읽음은 사람마다 다른 값이라 이슈 줄에 적으면 읽기만 해도
-  남과 부딪힌다. 설정 곁의 <설정 디렉터리>/read/ 에 **프로젝트마다 한 파일**을
-  두고 이슈 id 와 본 줄의 수정 때(updated_at)를 적는다 — 그 뒤에 그 줄이 바뀌면
-  다시 안 읽음이 된다. 이름은 저장소 뿌리의 해시고, 어느 뿌리의 것인지는 그 안의
-  path 가 댄다. 설정 파일의 옛 [read] 표는 겹쳐 읽기만 하고 다시 안 적는다.
+  **Nothing is written to the tracker.** Read marks differ per person, so
+  writing them on the issue row would make even reading collide with others.
+  Next to the config, <config dir>/read/ holds **one file per project** with
+  the issue id and the updated_at of the row you saw - change that row after
+  that and it becomes unread again. The file name is a hash of the repository
+  root, and the path inside it says which root. The old [read] table in the
+  config file is still read but never written again.
 
-  안 읽은 줄은 탐색기 목록에서 제목 앞에 [NEW] 로 선다 — 내게 할당된 것과 그 밑
-  (자식·리뷰·에픽 멤버)만 센다.")]
+  Unread rows carry a [NEW] mark in front of the title in the explorer list -
+  only what is assigned to me and what is under it (children, reviews, epic
+  members) counts.")]
     Read(ReadArgs),
 
-    /// 하나가 다른 것을 막는다 (또는 그 막음을 없앤다)
-    #[command(after_help = "  moai link moai-4aex --blocks moai-9k2p     4aex 가 9k2p 를 막는다
-  moai link moai-4aex --unblocks moai-9k2p   그 막음을 없앤다
+    /// One blocks another (or clear that block)
+    #[command(after_help = "  moai link moai-4aex --blocks moai-9k2p     4aex blocks 9k2p
+  moai link moai-4aex --unblocks moai-9k2p   clear that block
 
-  막는 쪽이 아니라 막히는 쪽에 `blocked_by` 를 적는다. 고리(A 가 B 를
-  막는데 B 도 이미 A 를 막고 있는 것)는 쓰기 전에 막는다.")]
+  `blocked_by` is written on the blocked side, not on the blocking one.
+  A cycle (A blocks B while B already blocks A) is refused before any write.")]
     Link(LinkArgs),
 
-    /// 위 동사를 `--type issue` 로 고정해 부른다
+    /// The verbs above, pinned to `--type issue`
     #[command(subcommand)]
     Issue(Typed),
-    /// 위 동사를 `--type epic` 으로 고정해 부른다
+    /// The verbs above, pinned to `--type epic`
     #[command(subcommand)]
     Epic(Typed),
-    /// 위 동사를 `--type milestone` 으로 고정해 부른다
+    /// The verbs above, pinned to `--type milestone`
     #[command(subcommand)]
     Milestone(Typed),
-    /// 반짝 떠오른 것을 그 자리에서 담는다 (`--type idea`)
-    #[command(subcommand, after_help = "  todo 보다 한 칸 낮은 자리다. **담는 비용이 0 에 가까워야 담는다** —
-  우선순위도 에픽도 묻지 않는다. 제목과 본문은 그래도 가른다: 제목은 한 줄로
-  짧게 적고, 긴 생각은 `-b -` 로 본문에 흘린다. 펼칠 때 이 제목이 이슈 제목이
-  되니, 여기 적은 긴 제목은 이슈로 그대로 옮겨 간다.
+    /// Jot a passing thought down where you are (`--type idea`)
+    #[command(subcommand, after_help = "  One step below todo. **Jotting has to cost nearly nothing** - neither a
+  priority nor an epic is asked for. Title and body still go separately: keep
+  the title to one short line and pour a long thought into the body with
+  `-b -`. That title becomes the issue title when it is unfolded, so a long
+  one here carries straight over.
 
-  moai idea add '반짝 떠오른 것'      담기
-  moai idea ls                        쌓인 것 보기 (`idea show` 와 같다)
+  moai idea add 'a passing thought'   jot it
+  moai idea ls                        what has piled up (same as `idea show`)
 
-moai idea add '머지 드라이버를 클론마다 손으로 심는다' -b - <<'IDEA'
-지금은 `moai merge-driver --install` 을 사람이 한 번 쳐야 한다.
+moai idea add 'install the merge driver by hand in every clone' -b - <<'IDEA'
+Today `moai merge-driver --install` has to be typed once per clone.
 IDEA
 
-  idea 는 일이 아니다 — `moai ready` 에도 보드의 셈에도 들지 않고, 에픽 없이
-  사는 것이 정상이라 \"에픽 없는 이슈\" 경고에 안 걸린다.
+  An idea is not work - it is in neither `moai ready` nor the board's counts,
+  and living without an epic is normal for it, so it never trips the
+  \"issues with no epic\" warning.
 
-  고치고 버리는 것은 이미 있는 동사가 한다: `moai edit <id>`, `moai rm <id>`.")]
+  Editing and dropping are the verbs you already have: `moai edit <id>`,
+  `moai rm <id>`.")]
     Idea(IdeaCmd),
 
-    /// 탐색기 화면을 띄운다 (이슈에 쓰는 것은 `SPC n` 생각 담기 하나)
-    #[command(after_help = "  마일스톤과 에픽이 디렉터리처럼 동작한다. 왼쪽에서 돌아다니면 커서가 머문
-  것의 정보가 오른쪽에 나온다.
+    /// Open the explorer (the one write to an issue is `SPC n`, jot)
+    #[command(after_help = "  Milestones and epics behave like directories. Move around on the left and
+  what the cursor rests on is described on the right.
 
-  j·k 나 ↑↓ 로 이동, Enter 로 들어가고 Backspace 로 나온다.
-  마일스톤·에픽 줄에서 l·→ 은 그 자리에서 한 단계 펼치고 h·← 은 접는다.
-  펼친 멤버 줄의 h 는 그 부모를 접고 부모 줄에 서며, 접을 것이 없으면 한 층
-  나간다. 프로젝트 머리줄에서도 l·→ 이 펼치고 h·← 이 접는다. Tab 은 그 밑을
-  재귀로 다 펼치고, 다시 누르면 접는다. 펼친 멤버는 제목 칸에 가지(├─·└─)로
-  서고, 그 펼침은 설정에 안 남는다. gg·Home 이 맨 위, G·End 가 맨 아래,
-  Ctrl-d·Ctrl-u 가 반 쪽, Ctrl-f·Ctrl-b(PageDown·PageUp)가 한 쪽이다.
-  Ctrl-w w 가 목록과 상세 사이로
-  포커스를 옮기고(Ctrl-w W 가 거꾸로, Ctrl-w h·Ctrl-w l 이 왼쪽·오른쪽 칸),
-  이동키는 모두 포커스 있는 칸을 움직인다 — 상세를 굴리려면 Ctrl-w w 로 간다.
-  / 가 검색, Esc 가 걸어 둔 거름망을 푼다. r 은 커서가 선 줄을 읽음으로
-  적는다(아래 [NEW]).
-  검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며, 검색은 치는 대로 목록을
-  거르고 Tab·Shift-Tab 이 찾을 자리를 전체·id·제목·태그·본문으로 돌린다. 맨
-  위 헤더가 등록한 프로젝트마다 번호를 대고, 그 숫자를 SPC 없이 그대로 누르면 그
-  프로젝트로 바로 간다 — 0 은 전체, 곧 모든 프로젝트를 한 목록으로 보는 자리다.
+  j and k or the arrow keys move, Enter goes in, Backspace comes back out.
+  On a milestone or epic row, l and the right arrow unfold one step there and
+  h and the left arrow fold it. On an unfolded member row, h folds its parent
+  and lands on the parent; with nothing to fold it leaves one level. On a
+  project header row, l and the right arrow unfold and h and the left arrow
+  fold. Tab unfolds everything under it recursively and folds it again on a
+  second press. Unfolded members stand with branch marks in the title column,
+  and that unfolding is not kept in the config. gg and Home go to the top,
+  G and End to the bottom, Ctrl-d and Ctrl-u half a page, Ctrl-f and Ctrl-b
+  (PageDown and PageUp) a whole page.
+  Ctrl-w w moves the focus between the list and the detail (Ctrl-w W goes the
+  other way, Ctrl-w h and Ctrl-w l pick the left and right pane), and every
+  movement key moves the focused pane — to scroll the detail, go there with
+  Ctrl-w w.
+  / searches, Esc clears the filter you set. r marks the row under the cursor
+  as read (see [NEW] below).
+  The search and filter fields take Enter to apply and Esc to give up, the
+  search filters the list as you type, and Tab and Shift-Tab pick where it
+  looks: everything, id, title, tag or body. The header at the top
+  numbers every registered project, and pressing that number without SPC
+  jumps straight there — 0 is everything, one list of all projects.
 
-  그 밖의 동작은 SPC 를 누르면 곧바로 뜨는 메뉴에 있다. 메뉴는 그 자리에서 되는
-  것만 세우고, 모르는 키는 무시하며, Esc 나 SPC 로 닫고 Backspace 로 한 층
-  올라간다. 켜고 끄는 것과 정렬(SPC v·SPC c·SPC s)은 눌러도 안 닫힌다 — 눌러
-  보며 상태를 맞추고 Esc 로 나간다. 그 층은 아랫줄 오른쪽에 Esc 닫기 가 서서
-  기다린다고 알린다.
-    SPC /    검색               SPC f    거름망             SPC n    생각 담기
-    SPC q    끝내기
-    SPC p a  등록               SPC p d  목록에서 빼기
-  보기 — 목록의 열(SPC c) 말고 켜고 끄는 것은 모두 여기 있다:
-    SPC v d  done [보임/숨김]   SPC v l  미룸               SPC v a  모두 보이기
-    SPC v 1  설정의 첫 칸 [보임/숨김] — 둘째 칸부터 번호가 차례로 는다
-    SPC v p  상세 칸 [보임/숨김]
-    SPC v w  워크트리 겹쳐 보기 [켜짐/꺼짐]
-    SPC v r  원문↔그리기
-  정렬과 열은 우선순위·생성·수정·담당을 같은 글자로 부른다 — 제목(SPC s t)과
-  태그(SPC c t)만 한 글자에 뜻이 갈린다:
-    SPC s p  우선순위           SPC s c  생성               SPC s u  수정
-    SPC s s  칸                 SPC s a  담당               SPC s t  제목
-    SPC c i  id                 SPC c p  우선순위           SPC c a  담당
-    SPC c c  생성               SPC c u  수정               SPC c n  셈
-    SPC c t  태그               SPC c h  열 이름 줄 [보임/숨김]
-    SPC c w  ⎇ 옆 가지 표시 [보임/숨김] — SPC v w 로 겹쳐 봐야 선다
-  읽음:
-    SPC m a  안 읽은 것 전부    SPC m g  이 묶음의 멤버 전부
-  바로 끝내는 키는 Ctrl-C 하나다 — 어디서든, 글을 적는 중에도 끝낸다.
-  화면은 저절로 다시 읽는다 — 옆에서 쓴 이슈도, 옆 터미널의 `moai read` 와
-  `moai project add` 도 누르지 않고 선다.
+  The rest lives in the menu that opens the moment you press SPC. The menu
+  stands up only what works where you are, ignores keys it does not know,
+  closes on Esc or SPC and goes one level up on Backspace. Toggles and sorts
+  (SPC v, SPC c, SPC s) do not close it — try them, watch the state, and
+  leave with Esc. That level says so at the bottom right with a close hint.
+    SPC /    search              SPC f    filter             SPC n    jot
+    SPC q    quit
+    SPC p a  register            SPC p d  drop from the list
+  View — every toggle except the list columns (SPC c) is here:
+    SPC v d  done [shown/hidden] SPC v l  deferred           SPC v a  show all
+    SPC v 1  first column of the config [shown/hidden] — the next ones count up
+    SPC v p  detail pane [shown/hidden]
+    SPC v w  overlay worktrees [on/off]
+    SPC v r  raw or rendered
+  Sorts and columns call priority, created, updated and assignee by the same
+  letter — only title (SPC s t) and tag (SPC c t) split one letter:
+    SPC s p  priority            SPC s c  created            SPC s u  updated
+    SPC s s  column              SPC s a  assignee           SPC s t  title
+    SPC c i  id                  SPC c p  priority           SPC c a  assignee
+    SPC c c  created             SPC c u  updated            SPC c n  counts
+    SPC c t  tag                 SPC c h  column names [shown/hidden]
+    SPC c w  branch mark [shown/hidden] — needs SPC v w to overlay first
+  Read:
+    SPC m a  everything unread   SPC m g  every member of this group
+  The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
+  The screen rereads itself — issues written next door, and `moai read` or
+  `moai project add` in another terminal, land without a keypress.
 
-  내게 온 것(담당이 나이거나 그 밑) 가운데 마지막으로 본 뒤에 바뀐 줄은
-  제목 앞에 [NEW] 가 선다. 읽음은 내 설정에만 남고 트래커는 안 바뀐다 —
-  CLI 로는 `moai read` 다.
+  Of what came to me (assigned to me or under it), rows changed since the
+  last look carry a [NEW] mark in front of the title. Read marks live in my own
+  config and the tracker does not change — on the CLI that is `moai read`.
 
-  목록은 처음에 done 을 숨긴다 — 경로 줄의 [done 숨김] 이 그것을 댄다. 보기는
-  거름망과 따로라 Esc 로 안 풀리고, 둘은 함께 걸린다.
-  정렬은 급한 것·새것·앞 칸·가나다가 위고, 고른 것을 다시 누르면 거꾸로 선다.
-  기본(우선순위)이 아니면 경로 줄이 그 차례를 댄다.
-  열(SPC c)은 [보임/숨김] 으로 켜고 끈다. 담당·태그·생성·수정 날짜는 줄
-  오른쪽에 서고, 좁으면 날짜 → 담당 → 태그 차례로 걷혀 제목 몫을 남긴다.
-  보기·정렬·열은 누를 때마다 사용자 설정의 [tui] 표에 적혀 다음 실행과 다른
-  프로젝트로 이어진다(`moai project add` 가 쓰는 파일과 같다).
+  The list hides done to begin with — the [done hidden] mark on the path line
+  says so. The view is separate from the filter, so Esc does not clear it and
+  the two apply together.
+  Sorting puts urgent, new, earlier column and alphabetical on top, and
+  pressing the chosen one again turns it around. When it is not the default
+  (priority) the path line says which order it is.
+  Columns (SPC c) turn on and off with [shown/hidden]. Assignee, tag, created
+  and updated dates stand on the right of the row, and when it gets narrow
+  they are dropped in that order — dates, then assignee, then tag — to leave
+  room for the title.
+  View, sort and columns are written into the [tui] table of the user config
+  on every press and carry over to the next run and to other projects (the
+  same file `moai project add` writes).
 
-  등록한 프로젝트(`moai project add`)가 있으면 0 이 그것들을 한 목록으로
-  낸다 — 프로젝트마다 머리줄이 서고 그 밑에 그 프로젝트의 줄이 선다. `.moai`
-  밖에서 띄우면 거기서 시작하고, 안에서 띄우면 그 프로젝트 안에서 시작한다.
-  0 으로 나온 뒤에는 있던 프로젝트가 펼쳐진 채 서고 나머지는 머리줄만 선다 —
-  펼치는 그때 그 프로젝트를 읽는다(읽는 동안 머리줄이 돈다).
-  머리줄의 Enter 는 그 프로젝트 안으로 들어가고, Backspace 는 디렉터리만
-  올라간다. 그 밑의 묶음 줄에서 누른 Enter 는 그 프로젝트로 들어가 그 자리에
-  선다 — 한 목록에서 파고들지 않고, 파고드는 곳은 언제나 프로젝트 안이다.
-  보기·정렬·열은 펼친 프로젝트 전부에 걸리고 검색·거름망은 프로젝트 안에서만
-  건다 — 담기(SPC n)와 읽음(r)은 커서가 선 줄의 프로젝트로 간다. 등록한 것이
-  없는데 밖에서 띄우면 빈 목록이 서서 SPC p a 로 첫 프로젝트를 더하라고
-  댄다(`--json` 은 등록 없음으로 멈춘다).
+  With registered projects (`moai project add`), 0 lists them all — a header
+  row per project with that project's rows under it. Started outside a
+  `.moai` it begins there; started inside one it begins in that project.
+  Coming out through 0 leaves the project you were in unfolded and the rest
+  as header rows only — a project is read the moment it unfolds (its header
+  spins while it reads).
+  Enter on a header row goes into that project, Backspace only goes up a
+  directory. Enter on a group row under it goes into that project and lands
+  there — you never drill down in the one list; drilling down always happens
+  inside a project.
+  View, sort and columns apply to every unfolded project while search and
+  filter apply inside one project only — jotting (SPC n) and read (r) go to
+  the project of the row under the cursor. With nothing registered and
+  started outside, an empty list stands and says to add the first project
+  with SPC p a (`--json` gives an empty `projects` array and exits 0).
 
-  SPC p a 는 디렉터리를 골라 프로젝트로 등록하는 창을 연다 — 띄운 자리에서
-  한 층씩 드나들고(Enter·Backspace, 이동은 목록과 같은 j·k·gg·G), `.moai` 가
-  있는 것과 이미 등록한 것에 표시가 붙는다. 창 안에서 a 가 커서의 디렉터리를
-  등록하고, `.` 이 숨은 디렉터리를 보이거나 감추고, g p 가 경로를 직접
-  적는 칸을 연다(Enter 로 가고 Esc 로 그만둔다). 창은 Esc 로 닫는다. 모노레포
-  하위도 고른 그대로 따로 선다. `.moai` 가 없어도 받는다. 프로젝트 안에서도
-  열리므로 등록이 없어도 첫 프로젝트를 더할 수 있다.
-  머리줄에서 SPC p d 는 한 번 물은 뒤 목록에서만 뺀다 — y 가 예고 다른 키는
-  그만둔다. 디렉터리와 `.moai` 는 그대로다.
-  쓰는 곳은 `moai project add|rm` 과 같다.
+  SPC p a opens a window to pick a directory and register it as a project —
+  it walks in and out one level at a time (Enter and Backspace, moving with
+  the same j, k, gg and G as the list), and directories with a `.moai` and those
+  already registered are marked. Inside the window, a registers the directory
+  under the cursor, `.` shows or hides dotted directories, and g p opens a
+  field to type a path (Enter goes, Esc gives up). The window closes on Esc.
+  Any subdirectory of a monorepo stands on its own exactly as picked. It is
+  taken even without a `.moai`. The window opens inside a project too, so the
+  first project can be added with nothing registered.
+  On a header row, SPC p d asks once and then only drops it from the list —
+  y is yes and any other key gives up. The directory and its `.moai` stay.
+  It writes where `moai project add|rm` writes.
 
-  SPC n 은 프로젝트 안 어디서든 생각 담기를 연다 — idea 로 담긴다(에픽 없이).
-  편집기($VISUAL, $EDITOR, 없으면 PATH 의 vi 나 nano)가 있으면 git 커밋
-  메시지처럼 그것이 뜬다: 첫 줄이 제목, 한 줄 띄우고 본문, 주석 줄은 안내라
-  지운다. 제목을 비우거나 편집기를 오류로 끝내면 담지 않는다. 편집기가 없으면
-  안의 폼이 열린다 — 제목 한 줄과 본문, Tab 이 둘 사이를 옮기고(제목 칸의
-  Enter 는 본문으로 간다) Ctrl-S 가 담는다. Esc 는 닫되 적던 것이 있으면 한 번
-  묻는다(y 로 버린다). 이슈에 쓰는 것은 이것 하나다 — 고치는 것은 CLI 로 한다.
-  `--json` 은 화면 없이 그 디렉터리의 목록만 낸다(`.moai` 밖이면 층의 줄).")]
+  SPC n opens the jot form anywhere inside a project — it is kept as an idea
+  (with no epic). If an editor is there ($VISUAL, $EDITOR, or vi or nano on
+  PATH) it opens like a git commit message: the first line is the title, then
+  a blank line, then the body, and comment lines are guidance to be deleted.
+  Leave the title empty, or end the editor with an error, and nothing is
+  kept. With no editor the built-in form opens — one title line and a body,
+  Tab moves between them (Enter in the title goes to the body) and Ctrl-S
+  keeps it. Esc closes it, asking once if you had typed something (y throws
+  it away). This is the one write to an issue — editing is done on the CLI.
+  `--json` prints only that directory's listing, with no screen (outside a
+  `.moai`, the rows of the layer).
+
+  `--path` takes an issue id, or one of the two baskets by the word this
+  tool uses for them: none (no milestone) and lost.")]
     Tui(TuiArgs),
 
-    /// Claude 의 훅이 부른다. stdin 으로 이벤트를 받아 낼 것만 낸다
-    #[command(after_help = "  사람이 손으로 부를 일은 없다. Claude 에 심은 플러그인이 이것을 부른다.
+    /// Called by Claude's hook. Reads an event on stdin
+    #[command(after_help = "  Nobody calls this by hand. The plugin installed into Claude calls it.
 
-  **아무것도 막지 않고, 무엇이 어긋나도 종료 코드는 0 이다.** 훅이 에러를
-  뱉으면 매 세션 시작이 시끄럽고, 그러면 사람이 훅을 꺼 버린다 — 꺼진 규칙은
-  없는 규칙이다.
+  **It blocks nothing, and whatever goes wrong the exit code is 0.** A hook
+  that spits errors makes every session start noisy, and then people turn the
+  hook off - a rule that is off is no rule.
 
-  자리(cwd)와 세션 id 는 stdin 이 준 것을 쓴다. 환경변수에는 없다.
+  The directory (cwd) and the session id come from stdin. They are not in the
+  environment.
 
-  이벤트:
-    session-start       기준선을 적는다. 접힌 뒤면 집은 것을 싣는다
-    user-prompt-submit  사람이 시켰다. 보드를 세션당 한 번 싣는다
-    pre-tool-use        도구를 부르기 직전. 규칙이 여기서 선다
-    stop                턴이 끝난다. 상태가 실제와 맞는지 본다
+  Events:
+    session-start       Writes the baseline. Loads what is held after a compact
+    user-prompt-submit  A person asked. Loads the board once per session
+    pre-tool-use        Just before a tool call. The rules stand here
+    stop                The turn ends. Checks the state against reality
 
   echo '{\"session_id\":\"x\",\"cwd\":\"/repo\"}' | moai hook user-prompt-submit")]
     Hook {
         // 값은 글로 적는다 — clap 이 붙이는 `[possible values: …]` 가 `-h` 에서 105칸이 됐다
         // (moai-h0r2). 목록의 글은 `hook::Event` 의 doc 주석과 같다 — 시험이 둘을 견준다.
-        /// 어느 자리에서 불렸나 (아래 목록)
-        #[arg(value_name = "이벤트", hide_possible_values = true)]
+        /// Which place it was called from (see the list below)
+        #[arg(value_name = "event", hide_possible_values = true)]
         event: crate::hook::Event,
     },
 
-    /// git 이 부른다. issues.jsonl 을 이슈마다 3-way 로 합친다
-    #[command(after_help = "  사람이 손으로 부를 일은 `--install` 하나다. 나머지 자리는 git 이 준다.
+    /// Called by git. Merges issues.jsonl per issue, three-way
+    #[command(after_help = "  The only thing anyone types by hand is `--install`. Git gives the rest.
 
-  moai merge-driver --install        이 저장소의 .git/config 에 심는다
-  moai merge-driver --install --as <경로>  그 명령으로 심는다
+  moai merge-driver --install        install into this repository's .git/config
+  moai merge-driver --install --as <path>  install with that command
 
-  **적은 자리가 사라지면 기본 머지로 내려앉는다.** git 은 못 돈 드라이버를
-  \"충돌\" 로 읽으면서 이쪽 파일을 그대로 두는데, 거기에 표식이 없으면 그것을
-  `git add` 하는 사람이 저쪽을 통째로 버린다. 그래서 심는 줄은 드라이버가 답도
-  표식도 안 쓰고 실패한 판을 `git merge-file` 로 다시 합친다 — 표식은 서고,
-  최악이 안 심은 클론과 같아진다. 그래도 자리는 지키는 편이 낫다: 내려앉은
-  판은 이슈마다 푸는 값을 잃는다. 기본값은 지금 도는 바이너리의 절대 경로인데,
-  워크트리의 `target/` 을 가리키면 그 워크트리를 지울 때 같이 죽는다 —
-  `--local` 은 클론이 함께 쓰는 자리라 그 순간 모든 체크아웃이 그 상태가 된다.
-  `--as` 는 PATH 의 낱말도 받지만 이 저장소에서 맨 `moai` 를 주지 않는다:
-  그것은 옛 moai 의 바이너리라 이 명령을 모른다.
+  **When the installed path disappears, git falls back to its own merge.**
+  Git reads a driver that did not run as a conflict while leaving this side's
+  file as it is, and with no markers in it whoever runs `git add` throws the
+  other side away wholesale. So the installed line makes the driver write
+  neither an answer nor markers and merges the failed round again with
+  `git merge-file` - markers stand, and the worst case equals an uninstalled
+  clone. Even so the path is worth keeping: a fallen-back round loses the
+  value of resolving per issue. The default is the absolute path of the
+  binary running now, and pointing that at a worktree `target/` kills it with
+  that worktree - `--local` is shared by the clone, so every checkout lands in
+  that state at once. `--as` also takes a word on PATH, but in this
+  repository do not pass a bare `moai`: that is the old moai binary and does
+  not know this command.
 
-  한 줄이 이슈 하나고 id 로 정렬돼 있어서, 서로 다른 이슈를 고친 두 가지가 그
-  줄들이 이웃이라는 이유로 부딪친다. 여기서는 id 로 짝지어 이슈마다 3-way 로
-  푼다. 같은 이슈의 다른 필드를 고친 것도 합친다 — 태그와 막음은 더한 것을
-  더하고 뺀 것을 뺀다.
+  One line is one issue and they are sorted by id, so two branches that fixed
+  different issues collide just because those lines are neighbours. Here they
+  are paired by id and merged three-way per issue. Different fields of the
+  same issue are merged too - tags and blocks add what was added and remove
+  what was removed.
 
-  **같은 필드를 다르게 고쳤으면 사람이 푼다.** 한쪽을 말없이 고르면 다른 쪽의
-  고침이 아무 자취 없이 사라진다. 못 읽는 줄이나 겹친 id 가 있으면 파일을
-  통째로 충돌 표식에 넣어 넘긴다 — 읽은 것만 골라 쓰면 못 읽은 줄이 사라진다.
+  **When the same field was changed differently, a person resolves it.**
+  Picking one side silently makes the other side's edit vanish without a
+  trace. With an unreadable line or a duplicated id the whole file is handed
+  over inside conflict markers - keeping only what parsed would lose the rest.
 
-  심는 것은 클론마다 한 번이다. git 은 드라이버 명령을 설정에서만 읽고 설정은
-  커밋되지 않는다. 안 심은 클론에서는 `.gitattributes` 의 merge=moai 가 그냥
-  무시되고 git 의 기본 머지가 돈다 — 병합은 안 심었을 때와 똑같다. 다만 그
-  저장소가 merge=moai 를 걸어 뒀으면 `moai status` 가 안 심었다고 한 줄 댄다.")]
+  Installing is once per clone. Git reads the driver command from the config
+  only, and the config is not committed. In a clone without it, merge=moai in
+  `.gitattributes` is simply ignored and git's own merge runs - merging is
+  exactly as it was without it. When that repository does set merge=moai,
+  `moai status` says in one line that it is not installed here.")]
     MergeDriver(MergeDriverArgs),
 
-    /// Claude 에 스킬과 훅을 심는다 (다시 불러도 된다)
+    /// Install the skills and hooks into Claude (safe to run again)
     #[command(subcommand)]
     Skill(SkillCmd),
 
-    /// 여러 프로젝트를 한 moai 에서 보려고 디렉터리를 등록한다
+    /// Register a directory to watch several projects from one moai
     #[command(subcommand, after_help = "\
-예시:
-  moai project add ~/work/argos         등록한다. .moai 가 아직 없어도 받는다
-  moai project add repo/apps/a          모노레포는 하위 디렉터리를 따로 등록한다
-  moai project ls                       등록한 것과 그 상태
-  moai project rm ~/work/argos          목록에서만 뺀다. 디렉터리는 안 건드린다
-  moai project color ~/work/argos green 색을 정한다 (auto 면 경로로 고른다)
+Examples:
+  moai project add ~/work/argos         register it. Taken without a .moai
+  moai project add repo/apps/a          a monorepo registers subdirs one by one
+  moai project ls                       what is registered and its state
+  moai project rm ~/work/argos          drop from the list only. Directory stays
+  moai project color ~/work/argos green pick a colour (auto picks by path)
 
-  등록하면 `.moai` 밖에서 부른 `moai`·`moai status`·`moai ready` 가 등록한
-  프로젝트를 프로젝트마다 한눈에 낸다 (`--json` 은 `projects` 배열).
-  `--worktree` 를 붙이면 프로젝트마다 옆 워크트리도 겹친다. 그 밖의 명령은
-  어느 프로젝트인지 모르니 `moai -C <dir> <명령>` 으로 부른다.
+  Once registered, `moai`, `moai status` and `moai ready` called outside a
+  `.moai` show every registered project at a glance (`--json` gives a
+  `projects` array). With `--worktree` each project overlays its sibling
+  worktrees too. Other commands do not know which project, so call them as
+  `moai -C <dir> <command>`.
 
-  저장소가 아니라 **사람의** 설정이다 — `.moai` 밖 어디서 불러도 된다. 자리는
-  MOAI_CONFIG → $XDG_CONFIG_HOME/moai/config.toml →
-  ~/.config/moai/config.toml. 상대경로는 지금 자리(`-C` 를 줬으면 그 디렉터리)에
-  붙이고 심볼릭 링크를 풀어 적는다.
+  This is **your** config, not the repository's - call it anywhere outside a
+  `.moai`. The place is MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml,
+  then ~/.config/moai/config.toml. A relative path is joined to where you are
+  (the `-C` directory when you gave one) and symlinks are resolved.
 
-  누가 했는지 묻지 않는다. 이력이 남는 파일이 아니다.")]
+  It does not ask who did it. This is not a file that keeps history.")]
     Project(ProjectCmd),
 
-    /// 이 저장소에 .moai/ 를 심는다 (다시 불러도 된다)
-    #[command(after_help = "  이미 심긴 곳에서 다시 부르면 딸린 파일(.gitattributes·.gitignore·AGENTS.md)
-  만 다시 맞춘다. 이슈와 저널은 건드리지 않는다.
+    /// Put a .moai/ into this repository (safe to run again)
+    #[command(after_help = "  Run again where it is already installed and only the attached files
+  (.gitattributes, .gitignore, AGENTS.md) are brought back in line. Issues
+  and the journal are not touched.
 
-  접두어는 처음 한 번만 정한다 — 이미 발급된 id 가 전부 그것을 달고 있다.
+  The prefix is decided once - every id already issued carries it.
 
-  새 접두어는 8자까지다 — id 를 칠 때마다 붙는다. 긴 것을 주면 거절하고
-  짧은 후보를 댄다. 안 주면 디렉터리 이름에서 만들고, 8자를 넘으면 하이픈을
-  빼서 들어가면 그것(moa-issue → moaissue), 아니면 하이픈 낱말
-  머리글자(my-company-backend → mcb), 낱말이 하나면 앞 8자로 줄인다. 이미 긴
-  접두어로 심긴 저장소는 그대로 읽고 쓴다.
+  A new prefix is up to 8 characters - you type it with every id. A longer
+  one is refused with shorter candidates. Without one it is made from the
+  directory name: dropping hyphens if that fits (moa-issue becomes moaissue),
+  else the initials of the hyphenated words (my-company-backend becomes mcb),
+  and with a single word the first 8 characters. A repository already
+  installed with a longer prefix is read and written as it is.
 
-  --check 는 아무것도 안 쓰고 AGENTS.md 블록이 current·stale·missing 인지만
-  답한다. 파일을 못 읽을 때만 0 이 아니다.
+  --check writes nothing and only answers whether the AGENTS.md block is
+  current, stale or missing. It is non-zero only when a file cannot be read.
 
-  --print 는 그 블록을 찍기만 한다. 에이전트가 읽는 파일이 AGENTS.md 가 아닐
-  때 거기에 붙여 넣는 자리다 — 글은 --print 와 init 이 같은 것을 쓴다.")]
+  --print only prints that block. That is where to copy it from when the file
+  the agent reads is not AGENTS.md - --print and init write the same text.")]
     Init {
-        /// id 접두어(8자까지). 없으면 디렉터리 이름에서 만든다
+        /// id prefix (up to 8). Made from the directory name when absent
         prefix: Option<String>,
-        /// AGENTS.md 를 건드리지 않는다
+        /// Leave AGENTS.md alone
         #[arg(long)]
         no_agents: bool,
-        /// 아무것도 안 쓰고 AGENTS.md 블록이 낡았는지만 본다
+        /// Write nothing; say if the AGENTS.md block is stale
         #[arg(long, conflicts_with_all = ["prefix", "no_agents"])]
         check: bool,
-        /// 아무것도 안 쓰고 그 블록을 찍는다 (붙여 넣을 때)
+        /// Write nothing; print that block (to paste it)
         #[arg(long, conflicts_with_all = ["prefix", "no_agents", "check"])]
         print: bool,
     },
@@ -516,51 +573,54 @@ IDEA
 /// `main` 이 먼저 그리로 옮겨 가고, `add argos` 가 `argos/argos` 를 찾는다.
 #[derive(Subcommand, Debug)]
 pub enum ProjectCmd {
-    /// 디렉터리를 등록한다 (이미 있으면 그대로)
+    /// Register a directory (already there, nothing changes)
     #[command(after_help = "\
-예시:
-  moai project add .                    지금 디렉터리
-  moai project add ~/work/argos         .moai 가 없어도 등록한다 (\"init 전\")
+Examples:
+  moai project add .                    the current directory
+  moai project add ~/work/argos         taken without a .moai (\"before init\")
 
-  다시 불러도 된다 — 이미 있으면 \"이미 등록돼 있다\" 로 0 종료한다.")]
+  Safe to run again - already registered, it says so and exits 0.")]
     Add {
-        /// 등록할 디렉터리. 있어야 하지만 `.moai` 는 없어도 된다
-        #[arg(value_name = "디렉터리")]
+        /// The directory to register. It must exist; a `.moai` need not
+        #[arg(value_name = "dir")]
         path: std::path::PathBuf,
     },
-    /// 등록한 것을 낸다 — 이름·경로·`.moai` 유무
-    #[command(after_help = "  이름은 디렉터리 이름이고, 겹치면 위 조각을 붙여 가른다 (`apps/a`·`libs/a`).
-  언제나 0 으로 끝난다 — 설정 파일이 깨졌으면 stderr 에 한 줄로 비추고 계속한다
-  (`--json` 이면 stderr 대신 `problems` 배열에 선다).")]
+    /// List what is registered - name, path, whether it has a `.moai`
+    #[command(after_help = "  The name is the directory name, and when two collide the segment above is
+  joined to tell them apart (`apps/a`, `libs/a`).
+  It always exits 0 - a broken config file is shown in one stderr line and it
+  carries on (with `--json`, in a `problems` array instead of stderr).")]
     Ls,
-    /// 목록에서 뺀다. 디렉터리와 그 `.moai` 는 그대로 둔다
+    /// Drop from the list. The directory and its `.moai` stay
     Rm {
-        /// 뺄 디렉터리. 이미 사라졌어도 적힌 경로로 찾는다
-        #[arg(value_name = "디렉터리")]
+        /// The directory to drop. Found by the written path even if it is gone
+        #[arg(value_name = "dir")]
         path: std::path::PathBuf,
     },
-    /// 한눈 보기와 탐색기에서 그 프로젝트가 입을 색을 정한다
+    /// Pick the colour that project wears at a glance and in the explorer
     #[command(alias = "colour", after_help = "\
-예시:
-  moai project color ~/work/argos green   경로로 고른 색 대신 초록으로
-  moai project color ~/work/argos auto    정한 것을 지우고 경로로 고른다
+Examples:
+  moai project color ~/work/argos green   green instead of the colour by path
+  moai project color ~/work/argos auto    clear it and pick by path again
 
-  고를 수 있는 색은 cyan·green·blue 셋뿐이다. 빨강·노랑·자홍은 이미
-  오류·집은 일·review 를 뜻해 id 곁에서 거짓 뜻이 되고, 밝은 색과 회색은 어느
-  한쪽 바탕에서 사라진다. 색은 곁들이다 — 이름이 늘 곁에 선다. 두 프로젝트가
-  같은 색으로 겹칠 때 쓴다.
+  The colours to pick from are cyan, green and blue only. Red, yellow and
+  magenta already mean error, held work and review, so next to an id they
+  would read as something they are not, and bright colours and grey vanish on
+  one background or the other. The colour is a companion - the name always
+  stands next to it. Use it when two projects land on the same colour.
 
-  사용자 설정의 `[[project]]` 에 `color = \"green\"` 로 적힌다. 손으로 적어도
-  된다 — 틀린 값은 `moai project ls` 가 한 줄로 비추고 경로로 고른 색을 쓴다.")]
+  It is written as `color = \"green\"` under `[[project]]` in the user config.
+  Writing it by hand is fine - a wrong value is shown in one line by
+  `moai project ls`, which then uses the colour picked by path.")]
     Color {
-        /// 등록한 디렉터리. 이미 사라졌어도 적힌 경로로 찾는다
-        #[arg(value_name = "디렉터리")]
+        /// A registered directory. Found by the written path even if it is gone
+        #[arg(value_name = "dir")]
         path: std::path::PathBuf,
         // 필드 이름을 `color` 로 짓지 않는다 — 전역 `--color` 의 clap id 와 겹쳐 준 값이
         // 그리로 샌다(`path` 가 `dir` 을 피한 것과 같다). 값은 여기서 거르지 않고 `cmd` 가
         // `user_config::hue_choice` 로 잰다 — 설정 읽기와 한 자로 재고, `--json` 오류로 선다.
-        /// cyan · green · blue · auto
-        #[arg(value_name = "색")]
+        /// cyan, green, blue or auto
+        #[arg(value_name = "colour")]
         hue: String,
     },
 }
@@ -571,13 +631,14 @@ pub enum ProjectCmd {
 /// 은 여기 없다 — id 가 대상을 정확히 가리켜서 종류를 덧붙일 자리가 없다.
 #[derive(Subcommand, Debug)]
 pub enum Typed {
-    /// 만든다
-    #[command(next_line_help = true, after_help = "  제목과 본문은 따로 넘긴다 — 제목은 무엇이 어긋났는지 한 줄이고, 긴 글은
-  `-b -` 로 stdin 에서 흘리는 마크다운 본문이다. 예시는 `moai add --help`.")]
+    /// Create
+    #[command(next_line_help = true, after_help = "  Title and body go separately - the title is one line saying what is wrong,
+  and a long text is a markdown body poured in from stdin with `-b -`.
+  For examples see `moai add --help`.")]
     Add(AddArgs),
     // `ls` 는 같은 것의 다른 이름이다. **어휘를 둘로 만들지 않으려고 별명으로
     // 둔다** — 목록을 내는 동사가 둘이면 도움말이 둘 다 가르쳐야 한다.
-    /// 펼치거나 목록을 낸다 (`ls` 도 같다)
+    /// Open one, or list them (`ls` is the same)
     #[command(alias = "ls")]
     Show(ShowArgs),
 }
@@ -591,106 +652,106 @@ pub enum Typed {
 /// 컴파일 오류도 안 났다. 접어 넣으면 `moai idea <동사>` 의 목록이 `Typed` 하나에서 나온다.
 #[derive(Subcommand, Debug)]
 pub enum IdeaCmd {
-    /// `moai idea add`·`moai idea show`(`ls`) — 종류만 idea 로 고정한 같은 동사다.
+    /// `moai idea add` and `moai idea show` (`ls`) - the same verbs, kind pinned
     #[command(flatten)]
     Common(Typed),
-    /// 에픽 하나 + 이슈 여럿으로 펼치고, 그 생각을 닫는다
-    #[command(after_help = "  받는 마크다운은 `add --from` 과 같은 형식이다. 형식이 둘이 되면 어느 쪽
-  문법인지 매번 틀린다.
+    /// Unfold into one epic and several issues, and close that thought
+    #[command(after_help = "  The markdown it takes is the same shape as `add --from`. With two shapes,
+  you get the grammar wrong every single time.
 
 moai idea promote <id> --from - <<'PLAN'
-# 에픽 제목
-- [p1] 첫 이슈 #enhancement
-- [p2] 둘째 이슈
+# Epic title
+- [p1] first issue #enhancement
+- [p2] second issue
 PLAN
 
-  **계획에 적은 줄이 그대로 이슈 제목이 된다.** idea 의 제목이 길면 그 길이가
-  이슈로 옮겨 가니, 펼칠 때 제목을 짧게 새로 적는다. 원래 글은 그 idea 에
-  그대로 남아 이력에서 찾아간다.
+  **A line in the plan becomes the issue title as it is.** A long idea title
+  carries its length over to the issue, so write a short title again when
+  unfolding. The original text stays on that idea and the history leads back.
 
-  펼치면 닫힌다 — 그 idea 는 `done` 으로 간다. 무엇이 무엇에서 나왔는지는
-  저널에 남는다 (`moai show <id>` 의 이력).
+  Unfolding closes it - that idea goes to `done`. What came from what is kept
+  in the journal (the history in `moai show <id>`).
 
-  에픽이 이미 서 있으면 `-e <에픽>` 으로 그 에픽의 멤버로 펼친다. 에픽이
-  내건 것이 idea 로 밖에 나가 있던 것을 되찾는 자리다 — 계획에는
-  `- 이슈` 만 적는다.
+  With the epic already standing, `-e <epic>` unfolds into it as members.
+  That is where you take back something the epic needs that had gone out as
+  an idea - the plan then holds `- issue` lines only.
 
-moai idea promote <id> -e <에픽> --from - <<'PLAN'
-- [p1] 에픽이 내건 것
+moai idea promote <id> -e <epic> --from - <<'PLAN'
+- [p1] what the epic set out to do
 PLAN
 
-  `--dry-run` 이 펼친 안을 사람이 한 번 보고 \"좋다\" 하는 자리다.")]
+  `--dry-run` is where a person looks at the unfolded plan once and says yes.")]
     Promote(PromoteArgs),
 }
 
 #[derive(Args, Debug)]
 pub struct PromoteArgs {
-    /// 펼칠 idea
+    /// The idea to unfold
     #[arg(value_name = "id")]
     pub id: String,
 
-    /// 마크다운에서 에픽과 이슈를. `-` 이면 stdin
-    #[arg(long, value_name = "파일|-")]
+    /// Epic and issues from markdown. `-` is stdin
+    #[arg(long, value_name = "file|-")]
     pub from: String,
 
-    /// 새 에픽 대신 이미 선 이 에픽에 멤버로 펼친다
-    #[arg(short, long, value_name = "에픽")]
+    /// Unfold as members of this standing epic
+    #[arg(short, long, value_name = "epic")]
     pub epic: Option<String>,
 
-    /// 템플릿의 `{{이름}}` 을 채운다 (여러 번 준다)
-    #[arg(long = "var", value_name = "이름=값")]
+    /// Fill `{{name}}` in the template (repeatable)
+    #[arg(long = "var", value_name = "name=value")]
     pub var: Vec<String>,
 
-    /// 만들지 않고 무엇이 만들어질지만 낸다
+    /// Create nothing; only say what would be created
     #[arg(long)]
     pub dry_run: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct AddArgs {
-    /// 한 줄. 따옴표로 감싼다. `--` 로 시작해도 된다
-    #[arg(value_name = "제목", allow_hyphen_values = true)]
+    /// One line. Wrap it in quotes. It may start with `--`
+    #[arg(value_name = "title", allow_hyphen_values = true)]
     pub title: Option<String>,
 
-    /// 이 에픽에 넣는다
+    /// Put it in this epic
     #[arg(short, long, value_name = "id")]
     pub epic: Option<String>,
 
-    /// 이 마일스톤에 넣는다
+    /// Put it in this milestone
     #[arg(long, value_name = "id")]
     pub milestone: Option<String>,
 
-    /// 쉼표로 잇거나 여러 번 쓴다
-    #[arg(short, long, value_name = "태그", value_delimiter = ',')]
+    /// Join with commas or give it several times
+    #[arg(short, long, value_name = "tag", value_delimiter = ',')]
     pub tag: Vec<String>,
 
-    /// 0 이 가장 높다
+    /// 0 is the highest
     #[arg(short, long, value_name = "0-3")]
     pub priority: Option<u8>,
 
-    /// 처음 놓일 칸. 없으면 첫 칸
-    #[arg(short, long, value_name = "상태")]
+    /// The column it first stands in. The first column when absent
+    #[arg(short, long, value_name = "status")]
     pub status: Option<String>,
 
-    /// 본문. `-` 이면 stdin 에서 읽는다
-    #[arg(short, long, value_name = "글")]
+    /// Body. `-` reads it from stdin
+    #[arg(short, long, value_name = "text")]
     pub body: Option<String>,
 
-    /// 담당. 안 주면 만든 사람, `이름 (메일)` 로 준다. `none` 이면 비운다
-    #[arg(short, long, value_name = "누구|none")]
+    /// Assignee. The creator when absent; `none` clears it
+    #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 
     // 설명이 없으면 `next_line_help` 가 공백만 든 줄을 그린다(리뷰 moai-5yq0).
-    /// 만들 것의 종류 (없으면 issue, `epic add` 면 epic)
+    /// What kind to create (issue when absent, epic under `epic add`)
     #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
     pub kind: Option<Kind>,
 
-    /// 이 이슈의 자식으로 만든다 (id 가 `.xxx` 로 붙는다)
+    /// Create it as a child of this issue (the id gets a `.xxx`)
     #[arg(long, value_name = "id")]
     pub parent: Option<String>,
 
-    /// 마크다운에서 에픽과 이슈를 한 번에. `-` 이면 stdin
-    #[arg(long, value_name = "파일|-", conflicts_with_all = ["title", "epic", "tag", "priority", "parent"])]
+    /// Epic and issues from markdown at once. `-` is stdin
+    #[arg(long, value_name = "file|-", conflicts_with_all = ["title", "epic", "tag", "priority", "parent"])]
     pub from: Option<String>,
 
     // 거절은 `clap` 이 아니라 `add::run` 이 한다. `requires = "from"` 은
@@ -701,44 +762,47 @@ pub struct AddArgs {
     // 안에서 손으로 끊고 `verbatim_doc_comment` 로 그 끊음을 지킨다 — clap 은
     // 문단을 한 줄로 이어 붙이고 접지 않아(moai-opjn) 200칸을 넘었다(moai-c57v).
     // 이 파일의 다른 긴 글도 같다.
-    /// 만들지 않고 무엇이 만들어질지만 낸다 (`--from` 과 함께)
+    /// Create nothing; only say what would be created (with `--from`)
     ///
-    /// **`--from` 이 있어야 뜻이 있다.** 한때 없이도 받았고, 그때
-    /// `moai add '제목' --dry-run` 은 연습이라고 적힌 줄을 찍은 다음 그것을
-    /// 실제로 만들었다 — 막는 줄 알고 부른 명령이 쓰는 것이 가장 나쁘다.
+    /// **It means nothing without `--from`.** It once took it alone, and
+    /// then `moai add 'title' --dry-run` printed a line saying it was a
+    /// rehearsal and then actually created it - a command called to hold
+    /// back that writes instead is the worst kind.
     #[arg(long, verbatim_doc_comment)]
     pub dry_run: bool,
 
     // 변수가 전부 필수인 까닭은 moai-ahyz.
-    /// 계획 템플릿의 `{{이름}}` 을 채운다 (`--from` 과 함께, 여러 번 준다)
+    /// Fill `{{name}}` in a plan template (with `--from`, several times)
     ///
-    /// **변수는 전부 필수다** — 못 채운 이름·빈 값·줄바꿈이 든 값·계획에
-    /// 없는 이름·같은 이름 두 번은 거절하고 아무것도 안 만든다. 이름은
-    /// 영문·숫자·`_`·`-` 이고, 값은 늘 제목 글자라 변수는 제목 자리에만
-    /// 둔다. `--dry-run` 과 같은 까닭으로 `--from` 없이 주면 거절한다.
-    #[arg(long = "var", value_name = "이름=값", verbatim_doc_comment)]
+    /// **Every variable is required** - an unfilled name, an empty value, a
+    /// value with a line break, a name not in the plan, or the same name
+    /// twice is refused and nothing is created. Names are letters, digits,
+    /// `_` and `-`, and values are always title text, so variables belong
+    /// in the title only. Like `--dry-run`, giving it without `--from` is
+    /// refused.
+    #[arg(long = "var", value_name = "name=value", verbatim_doc_comment)]
     pub var: Vec<String>,
 
-    /// id 만 낸다 (스크립트용)
+    /// Print the id only (for scripts)
     #[arg(short, long)]
     pub quiet: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct ShowArgs {
-    /// 이슈 id, 또는 종류(issue·epic). 없으면 전체 목록
-    #[arg(value_name = "대상")]
+    /// An issue id, or a kind (issue, epic). The whole list when absent
+    #[arg(value_name = "target")]
     pub target: Option<String>,
 
-    /// 본문을 그리지 않고 파일에 있는 그대로 낸다
+    /// Print the body as it is in the file, not rendered
     #[arg(long)]
     pub raw: bool,
 
-    /// 에픽 → 이슈 → 자식으로 접어 낸다
+    /// Fold it as epic, issue, child
     #[arg(long)]
     pub tree: bool,
 
-    /// 에픽을 `add --from` 이 받는 마크다운으로 되뽑는다
+    /// Print an epic back as `add --from` markdown
     #[arg(long)]
     pub as_plan: bool,
 
@@ -754,7 +818,7 @@ pub struct ShowArgs {
 /// 제 워크트리 파일에만 간다.
 #[derive(Args, Debug, Default, Clone, Copy)]
 pub struct WorktreeArg {
-    /// 다른 워크트리의 이슈도 겹쳐 본다 (파일은 안 바뀐다)
+    /// Also overlay other worktrees (no file changes)
     #[arg(long)]
     pub worktree: bool,
 }
@@ -764,60 +828,60 @@ pub struct WorktreeArg {
 /// 쉼표를 clap 에게 맡기지 않는 이유가 있다 — `-s todo,review` 와
 /// `-s todo -s review` 가 구별돼야 뒤엣것에 친절한 오류를 낼 수 있다.
 #[derive(Args, Debug)]
-#[command(next_help_heading = "필터  (쉼표 = 또는,  반복 = 그리고)")]
+#[command(next_help_heading = "Filters  (comma = or,  repeated = and)")]
 pub struct FilterArgs {
-    /// 그 칸에 있는 것
-    #[arg(short, long, value_name = "상태")]
+    /// In that column
+    #[arg(short, long, value_name = "status")]
     pub status: Vec<String>,
 
-    /// 그 태그를 가진 것
-    #[arg(short, long, value_name = "태그")]
+    /// Carrying that tag
+    #[arg(short, long, value_name = "tag")]
     pub tag: Vec<String>,
 
-    /// 그 태그가 없는 것
-    #[arg(long = "no-tag", value_name = "태그")]
+    /// Not carrying that tag
+    #[arg(long = "no-tag", value_name = "tag")]
     pub no_tag: Vec<String>,
 
-    /// 그 에픽 소속 (`none` = 에픽 없는 것)
+    /// In that epic (`none` = no epic)
     #[arg(short, long, value_name = "id|none")]
     pub epic: Vec<String>,
 
-    /// 그 마일스톤 소속 (`none` = 없는 것)
+    /// In that milestone (`none` = none)
     #[arg(long, value_name = "id|none")]
     pub milestone: Vec<String>,
 
-    /// 그 이슈의 자식 (`none` = 최상위만)
+    /// A child of that issue (`none` = top)
     #[arg(long, value_name = "id|none")]
     pub parent: Vec<String>,
 
     #[arg(short, long, value_name = "0-3")]
     pub priority: Vec<String>,
 
-    /// 그 담당 (`none`·`me` = 없음·나)
-    #[arg(short, long, value_name = "이름|메일|none|me")]
+    /// That assignee (`none` and `me` too)
+    #[arg(short, long, value_name = "who|none|me")]
     pub assignee: Vec<String>,
 
     #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
     pub kind: Option<Kind>,
 
-    /// id·제목·태그·본문에 이 글이 든 것
-    #[arg(short = 'g', long, value_name = "글")]
+    /// In id, title, tag or body
+    #[arg(short = 'g', long, value_name = "text")]
     pub grep: Option<String>,
 
-    /// 지금 칸에 그만큼 머문 것
-    #[arg(long, value_name = "일")]
+    /// Sitting in its column that long
+    #[arg(long, value_name = "days")]
     pub stale: Option<i64>,
 
-    /// 미뤄 둔 것만
+    /// Only what is deferred
     #[arg(long)]
     pub deferred: bool,
 
-    /// done 과 미뤄 둔 것을 포함한다
+    /// Include done and what is deferred
     #[arg(long)]
     pub all: bool,
 
-    /// 필터를 한 문자열로 (`status=todo`)
-    #[arg(long, value_name = "항목=값")]
+    /// Filters as one string (`status=todo`)
+    #[arg(long, value_name = "item=value")]
     pub filter: Vec<String>,
 }
 
@@ -825,19 +889,20 @@ pub struct FilterArgs {
 pub struct MvArgs {
     // 개수는 clap 이 아니라 `mv` 가 본다 — `2 values required by '<id> <id>...'`
     // 는 무엇을 빠뜨렸는지 말해 주지 않는다.
-    /// 옮길 이슈들, 그리고 맨 끝에 갈 칸
+    /// The issues to move, and the column to go to at the end
     #[arg(required = true, num_args = 1.., value_name = "id")]
     pub args: Vec<String>,
 
-    /// 이 이동에 한 줄 메모 (저널에만 남는다)
-    #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
+    /// One line of note on this move (journal only)
+    #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
     pub msg: Option<String>,
 
-    /// 아직 이 칸에 있을 때만 옮긴다 (겨루는 집기)
+    /// Only while still in this column (racing pickups)
     ///
-    /// 안 주면 지금까지처럼 무엇도 막지 않는다. 주면 락 안에서 다시 보고,
-    /// 그 사이에 칸이 달라진 줄은 건드리지 않은 채 부분 실패로 선다.
-    #[arg(long, value_name = "칸", verbatim_doc_comment)]
+    /// Without it nothing is blocked, as before. With it, the column is
+    /// looked at again inside the lock, and a row whose column changed in
+    /// the meantime is left untouched and stands as a partial failure.
+    #[arg(long, value_name = "column", verbatim_doc_comment)]
     pub from: Option<String>,
 }
 
@@ -846,35 +911,35 @@ pub struct EditArgs {
     #[arg(value_name = "id")]
     pub id: String,
 
-    /// 한 줄. `--` 로 시작해도 된다
-    #[arg(long, value_name = "글", allow_hyphen_values = true)]
+    /// One line. It may start with `--`
+    #[arg(long, value_name = "text", allow_hyphen_values = true)]
     pub title: Option<String>,
 
-    /// 본문. `-` 이면 stdin 에서 읽는다
-    #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
+    /// Body. `-` reads it from stdin
+    #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
     pub body: Option<String>,
 
-    /// 태그를 더한다
-    #[arg(short, long, value_name = "태그", value_delimiter = ',')]
+    /// Add tags
+    #[arg(short, long, value_name = "tag", value_delimiter = ',')]
     pub tag: Vec<String>,
 
-    /// 태그를 뺀다
-    #[arg(long, value_name = "태그", value_delimiter = ',')]
+    /// Remove tags
+    #[arg(long, value_name = "tag", value_delimiter = ',')]
     pub untag: Vec<String>,
 
-    /// 에픽을 옮긴다 (`none` 이면 제 필드만 뺀다)
+    /// Move the epic (`none` clears only its own field)
     #[arg(short, long, value_name = "id|none")]
     pub epic: Option<String>,
 
-    /// 마일스톤을 옮긴다 (`none` 이면 제 필드만 뺀다)
+    /// Move the milestone (`none` clears its own field)
     #[arg(long, value_name = "id|none")]
     pub milestone: Option<String>,
 
     #[arg(short, long, value_name = "0-3")]
     pub priority: Option<u8>,
 
-    /// `이름 (메일)` 로 준다. `none` 이면 뺀다
-    #[arg(short, long, value_name = "누구|none")]
+    /// Give `name (email)`. `none` clears it
+    #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 }
 
@@ -883,39 +948,40 @@ pub struct DeferArgs {
     #[arg(required = true, value_name = "id")]
     pub ids: Vec<String>,
 
-    /// 도로 집는다
+    /// Pick it back up
     #[arg(long)]
     pub undo: bool,
 
-    /// 왜 미루는가 (저널에만 남는다)
-    #[arg(short, long, value_name = "글", allow_hyphen_values = true)]
+    /// Why it is deferred (journal only)
+    #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
     pub msg: Option<String>,
 
-    /// 이 칸에 있을 때만 미루거나 도로 집는다 (겨루는 집기)
+    /// Only while it is in this column (racing pickups)
     ///
-    /// `mv --from` 과 같은 자다. 옆에서 집어 일하기 시작한 줄을 뒤늦게
-    /// 계획 밖으로 빼지 않는다. 안 주면 지금까지처럼 아무것도 막지 않는다.
-    #[arg(long, value_name = "칸", verbatim_doc_comment)]
+    /// The same measure as `mv --from`. A row the other side picked up and
+    /// started on is not taken out of the plan late. Without it nothing is
+    /// blocked, as before.
+    #[arg(long, value_name = "column", verbatim_doc_comment)]
     pub from: Option<String>,
 }
 
 /// `moai read` — 읽었다고 표시한다.
 #[derive(Args, Debug)]
 pub struct ReadArgs {
-    /// 읽음으로 적을 이슈들
+    /// The issues to mark as read
     ///
-    /// 무엇을 읽었는지는 언제나 댄다 — 인자 없이 부르면 아무 줄도 안
-    /// 적으면서 성공으로 끝나, 사람은 다 적힌 줄 알고 넘어간다.
-    /// `--all`·`-e` 가 그 자리를 채운다.
+    /// What was read is always named - called with no argument it would
+    /// mark nothing while exiting as a success, and a person would move on
+    /// believing it was all marked. `--all` and `-e` fill that place.
     #[arg(value_name = "id", required_unless_present_any = ["all", "epic"], verbatim_doc_comment)]
     pub ids: Vec<String>,
 
-    /// 내게 온 것 가운데 안 읽은 것 전부
+    /// Everything unread that came to me
     #[arg(long)]
     pub all: bool,
 
-    /// 그 에픽(또는 묶음)의 멤버와 그 밑까지
-    #[arg(short, long, value_name = "에픽")]
+    /// That group's members and what is under them
+    #[arg(short, long, value_name = "epic")]
     pub epic: Option<String>,
 }
 
@@ -932,34 +998,37 @@ pub struct RmArgs {
 /// 명령 쪽이 제 말로 거절한다: 거기서는 무엇이 빠졌는지와 심는 길을 한 줄에 댈 수 있다.
 #[derive(Args, Debug)]
 pub struct MergeDriverArgs {
-    /// `%O` — 갈라진 자리의 파일
-    #[arg(value_name = "기준")]
+    /// `%O` - the file at the fork
+    #[arg(value_name = "base")]
     pub base: Option<std::path::PathBuf>,
-    /// `%A` — 이쪽 파일. **답도 여기 쓴다**
-    #[arg(value_name = "이쪽")]
+    /// `%A` - this side's file. **The answer is written here too**
+    #[arg(value_name = "ours")]
     pub ours: Option<std::path::PathBuf>,
-    /// `%B` — 저쪽 파일
-    #[arg(value_name = "저쪽")]
+    /// `%B` - the other side's file
+    #[arg(value_name = "theirs")]
     pub theirs: Option<std::path::PathBuf>,
-    /// `%L` — 충돌 표식의 길이 (기본 7)
-    #[arg(value_name = "표식")]
+    /// `%L` - the length of the conflict markers (7 by default)
+    #[arg(value_name = "marker")]
     pub marker_size: Option<usize>,
-    /// `%P` — 합치는 파일의 이름. 말할 때만 쓴다
-    #[arg(value_name = "경로")]
+    /// `%P` - the name of the file being merged. Only used when speaking
+    #[arg(value_name = "path")]
     pub path: Option<String>,
 
-    /// 이 저장소의 `.git/config` 에 드라이버를 심는다
+    /// Install the driver into this repo's `.git/config`
     #[arg(long)]
     pub install: bool,
-    /// 심을 때 적을 명령 (기본: 이 바이너리의 절대 경로)
-    #[arg(long = "as", value_name = "명령", requires = "install")]
+    /// The command to install with (default: this binary)
+    #[arg(long = "as", value_name = "command", requires = "install")]
     pub as_command: Option<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct TuiArgs {
-    /// 여기서 연다 — 디렉터리면 그 안, 아니면 든 곳
-    #[arg(long, value_name = "id|없음|길잃음")]
+    // `none`·`lost` 는 화면 글이 아니라 **이 명령이 받는 낱말**이다(`cmd/tui.rs` 의
+    // `NO_MILESTONE`·`LOST`). **`value_name` 에는 안 적는다** — 두 낱말이 옵션 열을 넓혀
+    // 이 명령의 전역 옵션 설명까지 80칸을 넘겼다(moai-l5uf). 받는 낱말은 `after_help` 가 댄다.
+    /// Open here - a directory opens inside it
+    #[arg(long, value_name = "id|basket")]
     pub path: Option<String>,
 }
 
@@ -968,11 +1037,11 @@ pub struct LinkArgs {
     #[arg(value_name = "id")]
     pub id: String,
 
-    /// 이 이슈(들)을 막는다
+    /// Block this issue (or issues)
     #[arg(long, value_name = "id", value_delimiter = ',')]
     pub blocks: Vec<String>,
 
-    /// 이 이슈(들)에 대한 막음을 없앤다
+    /// Clear the block on this issue (or issues)
     #[arg(long, value_name = "id", value_delimiter = ',')]
     pub unblocks: Vec<String>,
 }
@@ -981,82 +1050,93 @@ pub struct LinkArgs {
 pub struct NoteArgs {
     #[arg(value_name = "id")]
     pub id: String,
-    /// 다음 사람(또는 다음 에이전트)이 읽을 발견사항. `--` 로 시작해도 된다
-    #[arg(value_name = "글", allow_hyphen_values = true)]
+    /// What the next person (or agent) should read. May start with `--`
+    #[arg(value_name = "text", allow_hyphen_values = true)]
     pub text: Option<String>,
 
-    /// 긴 글. `-` 이면 stdin 에서 읽는다
+    /// A long text. `-` reads it from stdin
     ///
-    /// **자리 인자와 서로 밀어낸다.** 둘 다 받으면 어느 쪽이 이기는지 아무도
-    /// 못 외우고, 외우지 못하는 규칙은 언젠가 남의 글을 지운다.
-    #[arg(short = 'b', long, value_name = "글", conflicts_with = "text", verbatim_doc_comment)]
+    /// **It pushes the positional out.** Given both, nobody can remember
+    /// which one wins, and a rule nobody remembers erases someone's text
+    /// sooner or later.
+    #[arg(short = 'b', long, value_name = "text", conflicts_with = "text", verbatim_doc_comment)]
     pub body: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum SkillCmd {
-    /// 플러그인 트리를 심고 `claude` 에 등록한다
-    #[command(after_help = "  `.claude/moai-plugin/` 에 스킬과 훅을 심고 `claude` 에 등록한다. 사람의
-  settings.json 은 건드리지 않는다 — 두 키를 넣는 것은 `claude` 다.
+    /// Install the plugin tree and register it with `claude`
+    #[command(after_help = "  Skills and hooks are installed into `.claude/moai-plugin/` and registered
+  with `claude`. Your settings.json is not touched - putting the two keys in
+  is `claude`'s job.
 
-  **지우지 않는다.** 다시 불러도 덮어쓰기만 한다. 돌고 있는 세션이 물고 있는
-  훅 파일을 지우면 그 세션의 도구 호출이 전부 막힌다.
+  **Nothing is deleted.** Running again only overwrites. Deleting a hook file
+  a running session holds would block every tool call of that session.
 
-  판은 심는 내용의 해시다. 내용이 같으면 판도 같아 헛 업데이트가 없다.
+  The version is a hash of what is installed. Same content, same version, so
+  there are no empty updates.
 
-  한국어 글을 다듬는 플러그인 둘도 **같은 범위로** 함께 깐다
-  (korean-skills·humanize-korean). 못 깔아도 moai 의 등록은 그대로 서고,
-  걷을 때 함께 걷는다.
+  The two plugins that polish Korean text are installed **at the same scope**
+  (korean-skills and humanize-korean). If they cannot be installed, moai's
+  own registration still stands, and they are removed along with it.
 
-  moai skill install                  나만 (기본. settings.local.json)
-  moai skill install --scope user     이 기계의 모든 저장소에
-  moai skill install --scope project  팀과 함께 (커밋되는 settings.json)
-  moai skill install --dry-run        무엇이 심길지만 본다
+  moai skill install                  just me (the default. settings.local.json)
+  moai skill install --scope user     every repository on this machine
+  moai skill install --scope project  with the team (committed settings.json)
+  moai skill install --dry-run        only show what would be installed
 
-  이미 열려 있는 Claude 세션은 옛 판을 계속 쓴다 — 다시 열어야 든다.")]
+  A Claude session already open keeps the old version - reopen it to pick
+  this one up.")]
     Install {
         // 값과 기본값은 `--color` 처럼 글로 적는다 — clap 이 붙이는 괄호가 `-h` 에서
         // 98칸이 됐다(moai-x18p).
-        /// 어디에 등록할까: local(기본)·project·user
-        #[arg(long, value_name = "범위", default_value = "local", hide_default_value = true, hide_possible_values = true)]
+        /// Where to register: local (default), project, user
+        #[arg(long, value_name = "scope", default_value = "local", hide_default_value = true, hide_possible_values = true)]
         scope: Scope,
 
-        /// 심지 않고 무엇이 심길지만 낸다
+        /// Install nothing; only say what would be installed
         #[arg(long)]
         dry_run: bool,
     },
 
-    /// 무엇이 어느 범위에 심겼나, 저장소와 설치본이 어긋났나
-    #[command(after_help = "  `claude` 의 장부(~/.claude/plugins/)를 **읽기만** 한다. 무엇이 어긋나도
-  종료 코드는 0 이다 — 보이는 명령이지 막는 명령이 아니다.
+    /// What is installed at which scope, and where it differs
+    #[command(after_help = "  It **only reads** `claude`'s registry (~/.claude/plugins/). Whatever is out
+  of line the exit code is 0 - this is a command that shows, not one that
+  blocks.
 
-  보는 것:
-    마켓플레이스  이 저장소 이름으로 등록됐나, 남의 자리를 가리키지 않나
-    설치          어느 범위에 어느 판이, 지금 심을 판과 같은가
-    곁 플러그인   한국어 글을 다듬는 둘이 이 저장소에 깔렸나
-    훅            설치본이 부르는 실행 파일이 아직 있나
-    claude        PATH 에 있나 (없으면 심을 수도 걷을 수도 없다)")]
+  What it looks at:
+    marketplace   registered under this repository's name, not pointing
+                  somewhere else
+    install       which version at which scope, and whether it matches the
+                  version that would be installed now
+    companions    whether the two Korean text plugins are in this repository
+    hook          whether the executable the install calls is still there
+    claude        whether it is on PATH (without it nothing can be installed
+                  or removed)")]
     Status,
 
-    /// `claude` 에서 등록을 걷어낸다. 심은 파일은 남긴다
-    #[command(after_help = "  이 저장소의 설치를 범위마다 `claude plugin uninstall` 하고, 마켓플레이스를
-  `claude plugin marketplace remove` 한다. 사람의 settings 에서 두 키를 지우는
-  것은 `claude` 가 한다 — 우리는 남의 JSON 을 만지지 않는다.
+    /// Remove the registration from `claude`. Installed files stay
+    #[command(after_help = "  This repository's install is removed per scope with
+  `claude plugin uninstall`, and the marketplace with
+  `claude plugin marketplace remove`. Deleting the two keys from your
+  settings is `claude`'s job - we do not touch someone else's JSON.
 
-  **`.claude/moai-plugin/` 은 지우지 않는다.** 돌고 있는 세션이 물고 있는
-  파일을 지우면 그 세션의 도구 호출이 막힐 수 있다. 세션을 닫은 뒤 지운다.
+  **`.claude/moai-plugin/` is not deleted.** Deleting a file a running
+  session holds can block that session's tool calls. Delete it after closing
+  the session.
 
-  함께 깐 한국어 플러그인 둘도 **moai 를 걷은 범위에서** 함께 걷는다.
-  마켓플레이스는 두고 간다 — 이름은 기계 하나에서 전역이라 다른 저장소의
-  설치가 그것을 쓴다.
-  사용자 범위의 설치도 다른 저장소의 moai 가 거기 서 있으면 두고 가고, 그때는
-  걷는 명령을 한 줄로 낸다.
+  The two Korean plugins installed alongside are removed **at the scope moai
+  was removed from**. The marketplace is left behind - the name is global to
+  one machine and another repository's install uses it.
+  A user-scope install is also left behind when another repository's moai
+  stands there, and then the command to remove it is printed in one line.
 
-  이미 열려 있는 Claude 세션은 옛 훅을 계속 부른다 — 다시 열어야 걷힌다.
+  A Claude session already open keeps calling the old hook - reopen it for
+  the removal to land.
 
-  moai skill uninstall --dry-run      무엇을 부를지만 본다")]
+  moai skill uninstall --dry-run      only show what would be called")]
     Uninstall {
-        /// 부르지 않고 무엇을 부를지만 낸다
+        /// Call nothing; only say what would be called
         #[arg(long)]
         dry_run: bool,
     },
@@ -1065,15 +1145,16 @@ pub enum SkillCmd {
 /// 설치 범위. **`--user` 를 못 쓴다** — 그 이름은 이미 "누가 하는가" 다.
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq)]
 pub enum Scope {
-    /// 이 저장소에, 커밋되는 자리에 (`.claude/settings.json`)
+    /// In this repository, where it gets committed (`.claude/settings.json`)
     ///
-    /// **기본이 아니다.** `claude` 가 거기 적는 것은 절대 경로라, 커밋하면
-    /// 남의 기계에서 아무 데도 안 가리키는 줄이 되고 그 사람이 제 손으로
-    /// 심으면 줄이 하나 더 는다 — 사람 수만큼 쌓인다.
+    /// **Not the default.** What `claude` writes there is an absolute path,
+    /// so committing it leaves a line that points nowhere on someone else's
+    /// machine, and when that person installs it themselves one more line is
+    /// added - they pile up per person.
     Project,
-    /// 이 저장소에, 나만 (`.claude/settings.local.json` — 기본)
+    /// In this repository, just me (`.claude/settings.local.json` - default)
     Local,
-    /// 이 기계의 모든 저장소에
+    /// In every repository on this machine
     User,
 }
 

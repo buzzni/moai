@@ -1659,6 +1659,44 @@ fn outside_a_repo_with_nothing_registered_it_says_how_to_register() {
     assert!(js.starts_with("{\"projects\":[],\"problems\":[\""), "{js}");
 }
 
+/// **설정의 탈을 대는 표면은 하나도 빠지지 않는다**(리뷰). 화면 말의 탈(`[i18n] lang` 오타)은
+/// 말묶음에서 펴느라 `problems` 가 아니라 `lang_problems` 에 자료로 서는데(moai-dpbi), 그 둘을
+/// 잇는 자(`view::settings_problems`)를 안 지나는 표면이 있으면 **그 화면에서만** 오타가 조용히
+/// 사라진다 — 고친 설정이 왜 안 듣는지 알 길이 없어지는 자리다.
+///
+/// 한 판에서 보는 것은 밖의 표면 전부다. 안쪽 `moai status` 는 바로 위
+/// `the_warnings_on_stderr_speak_the_chosen_language` 가 본다.
+#[test]
+fn every_surface_that_names_a_config_problem_names_the_language_one_too() {
+    let s = Scratch::new("langsaid");
+    let out = dir_in(&s, "out");
+    let cfg = registry(&s, &[]);
+    std::fs::write(&cfg, "[i18n]\nlang = \"kr\"\n").unwrap();
+    // **키 이름으로 잰다** — 문장은 말묶음의 것이라 옮기면 바뀌지만 `i18n.lang` 은 설정의 자다.
+    let said = "`i18n.lang`";
+
+    // 사람이 보는 밖의 화면 셋 — 등록한 것이 없을 때의 `status`·`ready`·인자 없이 부른 것.
+    let st = ok_with(&out, &cfg, &["status"]);
+    assert!(st.contains(said), "밖의 `status` 가 설정의 탈을 안 댔다\n{st}");
+    let err = String::from_utf8_lossy(&moai_with(&out, &cfg, &["ready"]).stderr).to_string();
+    assert!(err.contains(said), "밖의 `ready` 가 설정의 탈을 안 댔다\n{err}");
+    let help = ok_with(&out, &cfg, &[]);
+    assert!(help.contains(said), "인자 없이 부른 것이 설정의 탈을 안 댔다\n{help}");
+
+    // 기계가 읽는 셋 — 셋이 같은 `problems` 를 받는다(moai-yxae).
+    for args in [["status", "--json"], ["tui", "--json"]] {
+        let js = ok_with(&out, &cfg, &args);
+        one_json_value(&js);
+        assert!(js.contains(said), "`moai {}` 의 problems 가 비었다\n{js}", args.join(" "));
+    }
+    let js = ok_with(&out, &cfg, &["project", "ls", "--json"]);
+    one_json_value(&js);
+    assert!(js.contains(said), "`project ls --json` 의 problems 가 비었다\n{js}");
+    let o = moai_with(&out, &cfg, &["project", "ls"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(o.status.success() && err.contains(said), "`project ls` 가 설정의 탈을 안 댔다\n{err}");
+}
+
 /// **쓰는 명령은 `.moai` 밖에서 여전히 멈춘다** — 등록한 프로젝트가 있어도 어느 것에
 /// 쓸지 모른다. 대신 다른 곳의 저장소를 부르는 길(`-C`)을 댄다.
 #[test]
@@ -4620,6 +4658,33 @@ fn tui_json_lists_a_directory_without_a_terminal() {
     assert!(inside.contains(&member), "{inside}");
 }
 
+/// **탐색기도 고른 말로 선다**(moai-ra67). 바구니(`(마일스톤 없음)`·`(길 잃음)`)는 제 줄이
+/// 없어 화면이 이름을 붙이는 자리라, 그 이름은 제목이 아니라 말묶음에서 온다. 한때 `nav` 와
+/// `tui::mod` 가 같은 글자를 따로 들어, 한쪽만 고치면 목록 줄과 경로 줄이 다른 말을 했다.
+///
+/// **다른 글자는 아직 한국어다** — 이 일이 옮긴 것은 넘겨받은 넷뿐이고, 나머지는 에픽
+/// moai-hom6 의 멤버로 서 있다. 그래서 여기서는 바구니 이름 하나만 잰다.
+#[test]
+fn the_explorer_names_its_baskets_in_the_chosen_language() {
+    let s = init("tuilang");
+    let stone = add(s.path(), &["v0.1", "--type", "milestone"]);
+    add(s.path(), &["마일스톤에 든 것", "--milestone", &stone]);
+    add(s.path(), &["마일스톤 밖의 것"]);
+
+    let basket = |lang: &str| {
+        let mut cmd = isolated(BIN);
+        cmd.args(["tui", "--json"]).current_dir(s.path()).env("NO_COLOR", "1").env("MOAI_LANG", lang);
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "{lang}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let korean = basket("ko");
+    assert!(korean.contains("(마일스톤 없음)"), "{korean}");
+    let english = basket("en");
+    assert!(english.contains("(no milestone)"), "{english}");
+    assert!(!english.contains("(마일스톤 없음)"), "영어로 골랐는데 바구니 이름이 한국어다 — {english}");
+}
+
 /// **멤버 없는 에픽도 디렉터리다.** 비었다고 부모를 대신 열면 그 에픽을 물은
 /// 답으로 형제들이 나오고, `dir` 을 보고 파고드는 쪽은 제자리를 돈다.
 #[test]
@@ -4650,14 +4715,21 @@ fn tui_json_hands_back_a_path_for_every_row() {
 
     let root = ok(s.path(), &["tui", "--json"]);
     assert!(root.contains(r#""kind":"bucket""#), "{root}");
-    assert!(root.contains(r#""path":"길잃음""#), "바구니에 손잡이가 없다 — {root}");
+    assert!(root.contains(r#""path":"lost""#), "바구니에 손잡이가 없다 — {root}");
 
-    let inside = ok(s.path(), &["tui", "--json", "--path", "길잃음"]);
+    let inside = ok(s.path(), &["tui", "--json", "--path", "lost"]);
     assert!(inside.contains(&one), "{inside}");
 
     // 없는 바구니는 조용한 빈 목록이 아니라 거절이다
-    let out = moai(s.path(), &["tui", "--json", "--path", "없음"]);
+    let out = moai(s.path(), &["tui", "--json", "--path", "none"]);
     assert!(!out.status.success(), "없는 바구니를 열어 주었다");
+
+    // **옛 낱말은 안 받는다**(moai-l5uf, 2026-09-20 사용자 결정) — 받는 말을 둘로 두면
+    // 그것이 곧 둘째 어휘다. 배포 전이라 밖에서 이 낱말을 치는 사람이 없어 값이 0 이다.
+    for old in ["길잃음", "없음"] {
+        let out = moai(s.path(), &["tui", "--json", "--path", old]);
+        assert!(!out.status.success(), "옛 낱말 `{old}` 을 아직 받는다");
+    }
 }
 
 /// **못 읽은 줄을 삼키지 않는다.** 다른 읽기 명령과 같이 stderr 로 알리고
@@ -4796,8 +4868,8 @@ fn outside_a_repo_it_teaches_instead_of_erroring() {
     let out = moai(s.path(), &[]);
     assert!(out.status.success(), "{:?}", out.status.code());
     let text = String::from_utf8_lossy(&out.stdout);
-    // 이 줄은 `src/cli.rs` 의 가르치는 글에서 온다 — 아직 한국어다(moai-l5uf 의 몫이다).
-    for want in ["moai status", "moai ready", "add --from", "승인 게이트가 없다", "moai init"] {
+    // **도움말은 영어다**(moai-l5uf) — 이 화면은 `--help` 그대로다.
+    for want in ["moai status", "moai ready", "add --from", "no approval gate", "moai init"] {
         assert!(text.contains(want), "{want} 가 없다\n{text}");
     }
 }
@@ -10867,6 +10939,50 @@ fn worktree_trouble_is_told_but_never_fails_the_command() {
     assert!(!board.contains("드러난 문제 없다") && board.contains("옆 워크트리 문제 1건"), "{board}");
     // 겹쳐 보라고 안 시켰으면 옆을 찾지도 않으니 문제도 없다.
     assert!(ok(bare.path(), &["status"]).contains("드러난 문제 없다"));
+}
+
+/// **stderr 의 경고도 말묶음에서 온다**(moai-dpbi). 기본이 영어인데(moai-bn1j) 이 줄만 한국어로
+/// 남으면 세션이 시작하는 화면이 두 말로 선다 — 설정에 `lang` 을 잘못 적은 영어 사용자가 가장
+/// 읽어야 할 줄이 그 줄이다.
+///
+/// 바로 위 시험이 같은 자리의 한국어를 글자로 재므로, 둘이 함께 **말만 바뀌고 일은 그대로**를
+/// 지킨다. 여기서 보는 것은 두 줄이다 — 옆 워크트리를 겹치다 만난 것(`worktree::Trouble`)과
+/// 설정에 적은 말의 탈(`user_config::LangTrouble`).
+#[test]
+fn the_warnings_on_stderr_speak_the_chosen_language() {
+    let t = trees("wtsaid");
+    let feat = t.feat().join(".moai/issues.jsonl");
+    let mut src = std::fs::read_to_string(&feat).unwrap();
+    src.push_str("{깨진 줄\n");
+    std::fs::write(&feat, src).unwrap();
+    let said = |args: &[&str], lang: &str, config: Option<&Path>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(args).current_dir(t.main()).env("MOAI_NOW", NOW).env("NO_COLOR", "1").env("MOAI_LANG", lang);
+        if let Some(at) = config {
+            cmd.env("MOAI_CONFIG", at);
+        }
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "경고로 비영 종료했다 — {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stderr).to_string()
+    };
+
+    // 옆 워크트리의 깨진 스냅샷. **가지와 경로는 말이 아니다** — 어느 말에서도 그대로다.
+    let english = said(&["status", "--worktree"], "en", None);
+    assert!(english.contains("⎇ feat/x"), "어느 워크트리인지를 잃었다\n{english}");
+    assert!(english.contains("unreadable rows"), "옆 워크트리의 문제가 영어로 안 섰다\n{english}");
+    assert!(!english.contains("읽을 수 없는 줄"), "영어 화면 곁에 한국어 줄이 남았다\n{english}");
+    let korean = said(&["status", "--worktree"], "ko", None);
+    assert!(korean.contains("읽을 수 없는 줄 1개"), "한국어가 안 남았다\n{korean}");
+
+    // 설정에 적은 말이 틀린 줄 — `moai status` 가 이 자리로만 댄다(저장소 안은 등록 목록을 안 읽는다).
+    let config = t.main().join("user.toml");
+    std::fs::write(&config, "[i18n]\nlang = \"kr\"\n").unwrap();
+    let english = said(&["status"], "en", Some(&config));
+    assert!(english.contains("`i18n.lang` is one of"), "설정의 탈이 영어로 안 섰다\n{english}");
+    assert!(english.contains("\"kr\""), "무엇을 적었는지를 잃었다\n{english}");
+    assert!(english.contains(&config.display().to_string()), "어느 파일인지를 잃었다\n{english}");
+    let korean = said(&["status"], "ko", Some(&config));
+    assert!(korean.contains("`i18n.lang` 은 en·ko·zh·ja·es 중 하나다"), "한국어가 안 남았다\n{korean}");
 }
 
 /// **여기서 지운 줄은 옆 줄로 되살아나지 않는다**(moai-0a0u). 갈라진 뒤 옆에서 안

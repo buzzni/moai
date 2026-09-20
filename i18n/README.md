@@ -83,12 +83,26 @@
 글자는 `moai skill install` 이 심는 스킬·AGENTS.md 의 규칙 제목과 같아야 막힌 쪽이 무엇을
 어겼는지 찾으니, 심는 문서를 어느 말로 심을지부터 정할 자리다.
 
-**stderr 로 나가는 줄이 먼저다.** `warn.user_config` 와 `status.worktree_trouble` 은
-"한 줄씩은 stderr 에 냈다" 고 제 말로 말하는데, 정작 그 줄들(`cmd::status`·`cmd::mod` 의
-워크트리 알림, `user_config::Doc::lang` 의 `i18n.lang` 오타 안내)은 한국어뿐이다 — 설정에
-`lang` 을 잘못 적은 영어 사용자가 가장 읽어야 할 줄이 그것이다. 옮길 때 `user_config` 쪽은
-`Ctx::lang` 의 주석을 먼저 읽는다: 설정을 읽는 길이 화면 말을 도로 물으면 `OnceLock` 이
-제 초기화 안에서 다시 열린다.
+**stderr 로 나가는 줄은 옮겼다**(moai-dpbi). `cmd::status`·`cmd::mod` 의 워크트리 알림
+(`trouble.*`)과 `user_config::Doc::lang` 의 `i18n.lang` 오타 안내(`warn.lang_*`)가 말묶음에서
+온다 — `warn.user_config` 와 `status.worktree_trouble` 이 "한 줄씩은 stderr 에 냈다" 고 제 말로
+말하는 그 줄들이다.
+
+**그 두 자리는 글을 안 짓는다.** 옆 워크트리의 문제는 `worktree::Trouble` 로, 설정의 탈은
+`user_config::LangTrouble` 로 자료만 내고 `view::trouble_line`·`view::problem` 이 편다.
+설정 쪽이 그런 까닭은 `Ctx::lang` 의 주석에 있다 — 설정을 읽는 길이 화면 말을 도로 물으면
+`OnceLock` 이 제 초기화 안에서 다시 열린다.
+
+**`--json` 의 사람 글도 고른 말을 따른다**(moai-dpbi 리뷰). `status`·`ready` 의 한눈 보기가 내는
+`trouble` 과 `problems` 는 사람이 읽을 한 줄이라, 이제 `MOAI_LANG`·설정이 고른 말로 나간다(전에는
+늘 한국어였다). **기계가 가르는 값은 여기가 아니다** — `broken_worktrees`·`unreadable_worktrees`
+처럼 `kind` 와 수를 든 곁의 키들이고, 경고도 `report::Warning` 의 `kind` 로 가른다. 그 두 배열을
+글자로 맞춰 읽는 고리가 있으면 말이 바뀔 때 같이 깨진다 — 모양(배열·키)은 그대로다.
+
+**아직 한국어로 박힌 자리 둘.** `[[project]]` 항목의 탈(색 오타·경로 없음)은 `moai project`
+의 거절문과 **같은 자**(`hue_choice`·`entry_path`)를 쓰므로 그 명령과 함께 옮긴다. 탐색기의
+배너는 화면 전체가 한국어라 같은 말로 편다(`tui::SAID`) — 탐색기를 옮길 때 그 이름을 쫓으면
+고칠 자리가 한눈에 선다.
 
 **en·ko 말고는 새 키가 아직 비어 있다.** ja·zh·es 는 머리 몇 줄만 제 말이고 나머지는
 영어로 떨어진다 — 다섯을 함께 채우게 하지 않는 것이 결정이라(위 "고치는 법"), 아는 사람이

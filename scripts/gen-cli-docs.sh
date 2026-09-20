@@ -9,8 +9,9 @@
 #
 # 갈라지면 시험(`the_cli_reference_matches_the_help`)이 잡는다.
 #
-# 화면 말을 못 박는 것은 산출물이 기계마다 달라지지 않게 하기 위해서다. 기본
-# 화면 말이 바뀌는 날 여기도 같이 바꾸고 다시 짓는다.
+# **도움말 자체는 영어 한 벌이다**(moai-l5uf) — clap 은 인자를 풀기 전에 도움말을
+# 지어 화면 말을 모른다. 아래에서 `MOAI_LANG` 을 못 박는 것은 그 말이 다른 자리로
+# 새지 않게 하려는 것이지 도움말의 말을 고르는 것이 아니다.
 set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -54,8 +55,9 @@ walk() {
 A test compares this file against the binary's own help, so a reference that
 drifts fails the build rather than misleading a reader.
 
-The screen language is pinned to `ko` here, which is what the tool defaults to
-today. Pass `MOAI_LANG=en` at runtime for English.
+The help text itself is English, one copy for everyone: clap builds it before
+the arguments are parsed, so it cannot follow `MOAI_LANG` (moai-l5uf). The rest
+of the screen does follow it - see `moai --help` for how to pick a language.
 
 ## `moai`
 

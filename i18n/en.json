@@ -124,5 +124,22 @@
   "refuse.link_both_ways": "{id} cannot be blocked and unblocked at once",
   "refuse.defer_empty_why": "the reason is empty",
   "refuse.edit_nothing": "You did not say what to edit. `moai edit --help` lists what can be edited.",
-  "refuse.init_no_prefix": "Cannot make a prefix from the directory name. `moai init <prefix>`"
+  "refuse.init_no_prefix": "Cannot make a prefix from the directory name. `moai init <prefix>`",
+  "detail.deferred": "deferred",
+  "detail.deferred_days": "deferred ({n}d)",
+  "detail.deferred_under": "deferred — under {id}",
+  "detail.unread_column": "the column is read from its members (the written column `{col}` is not read)",
+  "nav.no_milestone": "(no milestone)",
+  "nav.lost": "(lost)",
+  "trouble.skipped": "{at} — unreadable rows left out of the overlay {n}",
+  "trouble.no_git": "Could not run git, so sibling worktrees were not found — {why}",
+  "trouble.failed": "Could not find sibling worktrees — {why}",
+  "trouble.stream": "Reading the worktree listing was cut off — {why}",
+  "trouble.encoding": "Could not read the worktree listing — {why}",
+  "warn.lang_table": "`{key}` must be a `[{key}]` table — it is {is}",
+  "warn.lang_word": "`{key}` must be a word — it is {is}",
+  "warn.lang_unknown": "`{key}` is one of {known} — {raw}",
+  "warn.unreadable_file": "{at}: unreadable rows {n}",
+  "warn.unreadable_at": "  line {line}: {why}",
+  "warn.unreadable_more": "  … {n} more"
 }

@@ -234,8 +234,10 @@ struct Row<'a> {
 /// 부른 스크립트가 도구가 고장 난 줄 안다 (`moai status` 가 막지 않는 것과 같다).
 /// 등록한 프로젝트의 `.moai` 가 깨진 것도 같다 — 그 줄에만 선다.
 pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
-    let reg = user_config::read(user_config::path().as_deref());
-    let projects = projects::open(&reg);
+    // **설정은 [`Ctx::registry`] 로 읽는다**(리뷰) — 아래에서 `ctx.lang()` 으로 말을 묻는데, 제 손으로
+    // 한 번 더 읽으면 한 명령이 같은 파일을 두 번 판다(moai-u8cs 가 걷어 낸 그것이다).
+    let reg = ctx.registry();
+    let projects = projects::open(reg);
     let now = model::now();
     let rows: Vec<Row> = projects
         .iter()
@@ -249,11 +251,14 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
             projects: &'a [Row<'a>],
             problems: &'a [String],
         }
-        return super::json_line(&Out { config: reg.path.as_deref(), projects: &rows, problems: &reg.problems });
+        // 설정의 탈은 **편 뒤에** 싣는다(리뷰) — 화면 말의 탈은 `problems` 가 아니라 `lang_problems`
+        // 에 자료로 서므로(moai-dpbi), `reg.problems` 를 그냥 실으면 `lang` 오타가 여기서만 사라진다.
+        let problems = crate::view::settings_problems(reg, ctx.lang());
+        return super::json_line(&Out { config: reg.path.as_deref(), projects: &rows, problems: &problems });
     }
 
-    for p in &reg.problems {
-        eprintln!("moai: {}", one_line(p));
+    for p in crate::view::settings_problems(reg, ctx.lang()) {
+        eprintln!("moai: {}", one_line(&p));
     }
     let mut out = Vec::new();
     if rows.is_empty() {
