@@ -2589,6 +2589,20 @@ impl Warning {
         Warning::new("merge_driver_rotten", vec![cmd.to_string()]).notice().hint(&hint)
     }
 
+    /// 심은 줄이 **옛 판**이라는 알림(moai-h54i). 적힌 명령은 도는데 그 줄에 지금 판의 마디가
+    /// 없는 자리다 — 리뷰 `moai-h6aq.cx8` 의 8번이 짚었다.
+    ///
+    /// **못 도는 것과 낱말을 가른다.** 고칠 명령이 같아도 뜻이 다르다: 한쪽은 "적은 자리가
+    /// 비었다" 고 다른 한쪽은 "그 줄이 낡았다" 다. 뭉치면 그 중 한쪽이 반드시 거짓말이 된다
+    /// (`agents_stale` 을 둘로 가른 것과 같은 까닭).
+    ///
+    /// 고칠 명령은 **같은 명령으로 다시 심는다** — 맨 `--install` 은 지금 도는 바이너리로 바꿔
+    /// 적어, 그것이 워크트리의 `target/` 이면 고치라는 말이 썩을 자리를 심는다.
+    pub fn merge_driver_stale(cmd: &str, root: Option<&str>) -> Warning {
+        let tail = format!("merge-driver --install --as {}", crate::text::shell_word(cmd));
+        Warning::new("merge_driver_stale", vec![cmd.to_string()]).notice().hint(&Warning::cli_hint(root, &tail))
+    }
+
     /// 고칠 명령. 뿌리가 부른 자리와 다르면 `-C` 로 거기를 댄다 — `init` 은 부른 자리에 심으므로
     /// 그 `-C` 가 없으면 따라 친 쪽에 트래커가 하나 더 선다.
     fn init_hint(root: Option<&str>) -> String {

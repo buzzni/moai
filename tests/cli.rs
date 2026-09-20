@@ -11914,6 +11914,36 @@ fn status_names_a_planted_driver_that_cannot_run() {
     assert!(!ok(root, &["status"]).contains("머지 드라이버"), "제대로 심었는데 알림이 안 걷혔다");
 }
 
+/// **옛 판으로 심은 줄도 다시 심으라고 한다**(moai-h54i).
+///
+/// 적힌 명령은 도는데 그 줄에 내려앉는 마디가 없는 자리다. 다시 심는 길은 사람이 치는
+/// `--install` 하나뿐이고 설정은 커밋되지 않으니, 말하지 않으면 그 클론은 영영 옛 줄을 들고
+/// 안내만 "내려앉는다" 로 읽는다 — 적은 자리가 사라지는 날 표식 없이 저쪽이 사라진다.
+#[test]
+fn status_tells_an_old_planted_line_to_be_replanted() {
+    let s = init("mergestaleline");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+    // 이 에픽 전의 줄. 명령은 멀쩡하고 마디만 없다.
+    let old = format!("{BIN} merge-driver %O %A %B %L %P");
+    git(root, &["config", "--local", "merge.moai.driver", &old]);
+    let said = ok(root, &["status"]);
+    assert!(said.contains("옛 판이다"), "옛 줄을 안 댔다\n{said}");
+    assert!(said.contains(&format!("merge-driver --install --as {BIN}")), "같은 명령으로 다시 심으라고 안 한다\n{said}");
+    assert!(!said.contains("안 돈다"), "도는 명령을 못 돈다고 했다\n{said}");
+
+    // 고칠 명령을 그대로 친다 — 알림이 걷힌다.
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "다시 심었는데 알림이 남았다");
+
+    // **못 도는 것이 먼저다.** 옛 줄이면서 자리까지 비었으면 자리가 빈 쪽을 말한다.
+    let gone = root.join("없는/자리/moai");
+    git(root, &["config", "--local", "merge.moai.driver", &format!("{} merge-driver %O %A %B %L %P", gone.display())]);
+    let said = ok(root, &["status"]);
+    assert!(said.contains("안 돈다") && !said.contains("옛 판이다"), "{said}");
+}
+
 /// 못 읽는 바이트를 파일 끝에 덧붙인다 — 손으로 푼 충돌이 남기는 자리다.
 fn append_raw(root: &Path, bytes: &[u8]) {
     let path = root.join(".moai/issues.jsonl");

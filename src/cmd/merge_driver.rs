@@ -566,11 +566,21 @@ fn driver_key() -> String {
 /// 적으니 영영 안 걷힌다. `install` 이 적는 자리가 `--local` 이므로 재는 자리도 거기다.
 pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
     let planted = crate::git::run(root, &["config", "--local", "--get", &driver_key()]).ok()?;
-    let word = planted_word(planted.trim())?;
-    if runnable(root, &word) {
-        return None;
+    let planted = planted.trim();
+    let word = planted_word(planted)?;
+    let away = crate::cmd::init::away_root(root, chdir);
+    if !runnable(root, &word) {
+        return Some(crate::report::Warning::merge_driver_rotten(&word, away.as_deref()));
     }
-    Some(crate::report::Warning::merge_driver_rotten(&word, crate::cmd::init::away_root(root, chdir).as_deref()))
+    // **줄의 모양도 본다**(moai-h54i). 명령이 도는 것과 그 줄이 지금 판인 것은 다른 말이다 —
+    // 내려앉는 마디가 없던 판에 심은 클론은 그 마디 없이 그대로 돌고, 적힌 경로가 사라지는 날
+    // 표식 없이 저쪽을 버린다. 다시 심는 것은 사람이 치는 `--install` 하나뿐이고 설정은
+    // 커밋되지 않으니, 말하지 않으면 그 클론은 영영 옛 줄을 든다.
+    //
+    // **고칠 명령은 같은 명령으로 다시 심는다**(`--as`). 맨 `--install` 은 지금 도는 바이너리로
+    // 바꿔 적는데, 그것이 워크트리의 `target/` 이면 고치라는 말이 도리어 썩은 자리를 심는다.
+    (planted != driver_command(&word))
+        .then(|| crate::report::Warning::merge_driver_stale(&word, away.as_deref()))
 }
 
 /// 심어 둔 줄에서 **실제로 부르는 명령**을 떼어 낸다. 모양이 이 도구가 지은 것이 아니면 `None`.
