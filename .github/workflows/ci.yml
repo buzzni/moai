@@ -32,7 +32,7 @@ jobs:
   # 이것 하나가 required check 로 선다. 갈래를 늘리면 저장소 보호 규칙도 같이
   # 는다 — 검사를 더할 자리는 새 잡이 아니라 이 잡의 스텝이다.
   ci-gate:
-    name: clippy · test
+    name: fmt · clippy · test
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -82,6 +82,17 @@ jobs:
           key: cargo-dev-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-dev-${{ runner.os }}-
 
+      # 폭은 `rustfmt.toml` 이 정하고 그 값을 고른 까닭도 거기 적혀 있다. 맞추는
+      # 한 판은 c005039 이고, `.git-blame-ignore-revs` 가 `blame` 에서 그것을
+      # 건너뛰게 한다 — 켜는 것은 클론마다 한 번이다(그 파일의 머리글).
+      #
+      # **clippy 앞에 선다.** 이것은 빌드를 안 하고 몇 초에 끝나는데, 뒤에 두면
+      # 빈칸 하나가 어긋난 판이 clippy 빌드와 시험을 다 돈 뒤에야 그 말을 듣는다.
+      # clippy 가 `-D warnings` 로 먼저 죽는 판에서는 아예 안 돌아, 고쳐 올린
+      # 다음 판에서 처음 붉어진다.
+      - name: fmt
+        run: cargo fmt --all --check
+
       # clippy 와 시험에 `--release` 를 붙이지 않는다 — LTO 링크가 파일 하나
       # 고칠 때마다 다시 돌아 dev 의 초 단위가 분 단위가 된다 (CLAUDE.md).
       #
@@ -93,11 +104,6 @@ jobs:
 
       - name: test
         run: cargo test --locked
-
-      # `cargo fmt --check` 는 아직 없다. 저장소가 rustfmt 를 한 번도 안 거쳐
-      # 지금 켜면 3,971 군데가 붉어지고, 맞추는 커밋이 옆에서 도는 워크트리들과
-      # 통째로 충돌한다. moai-jlon 과 moai-4y5s 와 moai-hom6 이 다 든 뒤에 친다 —
-      # 그 커밋을 언제 어떻게 치는지는 moai-hwxc 에 있다.
 
   # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 것을 릴리스
   # 태그에서 처음 알면 그때는 되돌릴 자리가 없으니 PR 에서 잰다.
