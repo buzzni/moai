@@ -2002,7 +2002,9 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
             Blocker::Deferred => {
                 let shelf = at
                     .and_then(|at| crate::view::deferred_for(&site.issues[at], root, &site.now, site.lang))
-                    .unwrap_or_else(|| "미룸".into());
+                    // 밑값도 같은 말로 선다 — 바로 위가 고른 말로 내는데 여기만 박아 두면 그 줄이
+                    // 못 재는 때에만 딴 말로 선다. 낱말은 CLI 막음 줄과 한 자리다(`view::block_line`).
+                    .unwrap_or_else(|| crate::i18n::say(site.lang, "status.put_off").to_string());
                 ("막힘", format!("· {b}  {shelf}  {}", site.title_of(b)))
             }
         };

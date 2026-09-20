@@ -2627,6 +2627,11 @@ impl App {
             Some(Ok(fresh)) => {
                 let cfg = repo.as_ref().map_or_else(|| self.site.cfg.clone(), |r| r.config.clone());
                 let mut site = Site::of(fresh.issues, fresh.index, fresh.ground, cfg, Vec::new(), fresh.unreadable);
+                // **펼친 프로젝트의 줄도 같은 말로 선다**(moai-ra67, 리뷰) — 한 화면의 말이지
+                // 프로젝트의 것이 아니다. 안 이으면 한눈 보기에서 편 남의 프로젝트의 바구니
+                // 이름만 [`Site::lang`] 의 처음값으로 서서, 같은 목록의 두 프로젝트가 같은
+                // 바구니를 다른 말로 부른다.
+                site.lang = self.site.lang;
                 site.repo = repo;
                 site.now = fresh.now;
                 site.stamp = fresh.stamp;

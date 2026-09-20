@@ -845,7 +845,12 @@ impl App {
         //
         // **그 프로젝트 안에서 어디를 보고 있었나는 안 든다.** 경로·커서 기억·펼친 자리는 도로
         // 들어갈 때 처음부터다 — 마디가 그 프로젝트의 이슈 id 라 남겨 두면 지운 줄의 id 가 쌓인다.
-        let blank = super::Site::of(Vec::new(), Index::of(&[]), Default::default(), self.site.cfg.clone(), Vec::new(), Vec::new());
+        let mut blank = super::Site::of(Vec::new(), Index::of(&[]), Default::default(), self.site.cfg.clone(), Vec::new(), Vec::new());
+        // **말은 프로젝트에 안 매인다**(moai-ra67, 리뷰) — 화면 하나가 고른 말이라 떠난다고
+        // 처음값으로 돌아갈 것이 아니다. 안 이으면 `0` 으로 한 번 올라간 뒤 층의 말도(`shut`·
+        // `seg_label`) 다음에 들어간 프로젝트의 말도 몽땅 [`super::Site::lang`] 의 처음값으로
+        // 섰다 — 고른 말은 `cmd/tui.rs` 가 띄울 때 한 번만 놓기 때문이다.
+        blank.lang = self.site.lang;
         let mut parked = std::mem::replace(&mut self.site, blank);
         parked.path.clear();
         parked.remembered.clear();
@@ -1860,6 +1865,41 @@ mod tests {
         let mut a = layered(&cfg);
         a.user = Some("레이븐 (raven@example.com)".into());
         (one, two, a)
+    }
+
+    /// **고른 말은 프로젝트를 오가도 그대로다**(moai-ra67, 리뷰). 말은 화면 하나의 것이라
+    /// 어느 프로젝트에 서 있는가와 상관이 없는데, 떠나며 비우는 `Site` 와 펼친 줄에 세우는
+    /// `Site` 가 제 처음값을 들고 오던 판은 `0` 한 번에 층도 다음 프로젝트도 몽땅 그 처음값으로
+    /// 섰다 — 고른 말을 놓는 자리는 띄울 때(`cmd/tui.rs`) 한 번뿐이다.
+    #[test]
+    fn the_chosen_language_survives_moving_between_projects() {
+        use crate::i18n::Lang;
+        let s = Scratch::fenced("layer-lang");
+        let (one, two, mut a) = on_layer_with_twins(&s);
+        a.site.lang = Lang::En;
+        a.layer.as_mut().unwrap().lang = Lang::En;
+
+        // 펼친 남의 프로젝트의 줄도 같은 말로 선다 — 안 이으면 한 목록의 두 프로젝트가 같은
+        // 바구니를 다른 말로 부른다.
+        a.want_site(0);
+        settle(&mut a);
+        let held = a.layer.as_ref().unwrap().places[0].site.as_ref().expect("펼친 줄이 제 Site 를 든다");
+        assert_eq!(held.lang, Lang::En, "펼친 프로젝트의 줄이 딴 말로 선다");
+
+        let one_at = a.layer.as_ref().unwrap().position(&one).expect("one 이 층에 있다");
+        a.enter_project(one_at);
+        assert_eq!(a.site.lang, Lang::En, "들어가며 말이 바뀌었다");
+
+        a.climb();
+        assert_eq!(a.site.lang, Lang::En, "층으로 올라오며 말이 바뀌었다");
+
+        let two_at = a.layer.as_ref().unwrap().position(&two).expect("two 가 층에 있다");
+        a.enter_project(two_at);
+        assert_eq!(a.site.lang, Lang::En, "옆 프로젝트로 건너가며 말이 바뀌었다");
+
+        // 다시 세운 층도 같은 말을 든다 — 못 연 프로젝트의 한 줄(`shut`)이 여기서 말을 받는다.
+        a.relayer(None);
+        assert_eq!(a.layer.as_ref().unwrap().lang, Lang::En, "다시 세운 층이 딴 말을 든다");
     }
 
     /// **들어갈 때 그 줄이 들고 있던 읽음을 옮겨 든다**(moai-2gep). [`App::leave_project`] 가 `Site` 를

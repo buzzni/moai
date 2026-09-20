@@ -1396,7 +1396,7 @@ Options:
   filter apply inside one project only — jotting (SPC n) and read (r) go to
   the project of the row under the cursor. With nothing registered and
   started outside, an empty list stands and says to add the first project
-  with SPC p a (`--json` stops with nothing registered).
+  with SPC p a (`--json` gives an empty `projects` array and exits 0).
 
   SPC p a opens a window to pick a directory and register it as a project —
   it walks in and out one level at a time (Enter and Backspace, moving with
