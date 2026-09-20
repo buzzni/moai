@@ -6036,3 +6036,8 @@
 {"ts":"2026-09-20T05:56:57Z","id":"moai-zwam","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-brbt 에서 펼쳤다 — 옛 바이너리가 새 바이너리의 열 이름을 \"모르는 열\" 로 잔소리한다"}
 {"ts":"2026-09-20T05:56:57Z","id":"moai-brbt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-qfhh 의 멤버 moai-zwam 로 펼쳤다"}
 {"ts":"2026-09-20T05:56:58Z","id":"moai-qfhh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-20: 오늘 밤 moai-4qbv·moai-f31d·moai-8mq9 를 끝낸 창들이 남긴 것 넷을 묶었다. 넷 다 사람에게 보이는 자리다 — 통째로 선 [NEW], 안 보이는 까닭, 되풀이되는 알림, 옛 바이너리의 잔소리. 고치는 자리는 src/tui/ 와 src/user_config.rs·src/read_marks.rs 로 한 임자가 쥔다."}
+{"ts":"2026-09-20T05:57:34Z","id":"moai-q04l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T05:57:34Z","id":"moai-tvvb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T05:57:34Z","id":"moai-s526","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T05:57:34Z","id":"moai-589b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T05:57:43Z","id":"moai-493a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-20 사용자 결정 넷. (1) \"시작됐다\" 는 멤버에서 읽는다 — in_progress 멤버가 하나라도 있으면 도는 중. 새 필드도 새 축도 없다. (2) 막지 않고 비추기만 한다 — ready 의 차례와 status 의 알림. 훅은 안 건드린다. (3) 도는 마일스톤이 여럿이면 둘 다 안이고, 그 안의 차례는 지금처럼 p·나이로 잰다. 이미 집은 밖의 일은 그대로 끝내게 둔다. (4) moai-589b 는 일꾼이 그 자리에서 #bug 태그와 Regression-of: 줄로 가른다 — 그 둘이면 안, 나머지는 밖."}
