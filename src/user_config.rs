@@ -860,6 +860,7 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// sort = "updated"
 /// sort_reversed = false
 /// fields = ["id", "priority", "tally", "assignee"]
+/// # 적는 쪽이 아는 열 전부 — 바이너리를 따라 자란다. `fields_known = []` 의 뜻을 얼린 목록과 다른 목록이다.
 /// fields_known = ["id", "priority", "assignee", "created", "updated", "tally", "tags", "names", "branch"]
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -874,9 +875,18 @@ pub struct Look {
     /// 사람에게 영영 안 떴다. 이 목록에 없는 열은 **탐색기의 기본값**으로 선다. 옛 설정에는 이 키가
     /// 없으니 새 열이 기본대로 서고, 한 번 적히고 나면 끈 열은 끈 채로 남는다.
     ///
-    /// **빈 목록은 "모든 열을 알았다" 다**(moai-4qkj, 사용자 결정 2026-09-18) — 바이너리는 늘 이름을
-    /// 다 적으니 `[]` 는 손으로 적은 것이고, 그때는 `fields` 가 곧 켠 열이다. `fields` 에 적힌 열은
-    /// 이 목록과 상관없이 켜진다 — 적은 쪽이 그 열을 알았다는 뜻이다(`App::apply_look`).
+    /// **빈 목록은 "2026-09-20 에 있던 아홉 열을 알았다" 다**(moai-4qkj·moai-4gy5, 사용자 결정
+    /// 2026-09-18) — 바이너리는 늘 이름을 다 적으니 `[]` 는 손으로 적은 것이고, **그 아홉 열에 대해서는**
+    /// `fields` 가 곧 켠 열이다. `fields` 에 적힌 열은 이 목록과 상관없이 켜진다 — 적은 쪽이 그 열을
+    /// 알았다는 뜻이다(`App::apply_look`).
+    ///
+    /// **그 아홉은 날짜로 얼렸다.** 읽는 쪽이 아는 열로 읽으면 `[]` 의 뜻이 바이너리를 따라 움직여, 파일을
+    /// 먼저 만진 바이너리가 어느 쪽이냐에 따라 같은 파일이 다른 화면을 낸다. 얼린 뒤로는 어느 쪽이 먼저
+    /// 만지든 한 자리로 모인다. 그 아홉을 들고 있는 것은 탐색기(`crate::tui::view::Field::EMPTY_KNOWN`)다
+    /// — 무슨 낱말이 있는지를 아는 쪽이 거기라, 이 모듈은 규칙만 적고 목록은 안 든다(위의 `Look` 글).
+    ///
+    /// **대가는 적어 둔다**(moai-8mq9.p38 리뷰): 2026-09-20 뒤에 생긴 열은 `[]` 로 끌 수 없다. 그 열은
+    /// 늘 기본값으로 서고, 끄려면 `fields_known` 에 이름을 다 적어야 한다. 읽기는 이때 아무 말도 안 한다.
     pub fields_known: Option<Vec<String>>,
     /// 오른쪽 상세 칸이 보이나(moai-ymnu).
     pub detail: Option<bool>,
