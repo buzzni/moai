@@ -3573,7 +3573,11 @@ fn read_sheet(cfg: &std::path::Path, root: &std::path::Path) -> String {
     let mut files: Vec<std::path::PathBuf> =
         entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "toml")).collect();
     files.sort();
-    let mine = format!("path = {:?}", root.display().to_string());
+    // **링크를 푼 철자로 견준다.** 적는 쪽이 뿌리를 `canonicalize` 로 모으므로(`read_marks::settle`),
+    // `TMPDIR` 이 링크인 기계에서는 시험이 든 철자와 파일에 적힌 철자가 갈린다 — 여기서 풀지 않으면
+    // 다섯 단언이 제품이 아니라 임시 자리의 철자 때문에 붉다. 어느 뿌리의 것인지를 보는 힘은 그대로다.
+    let real = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mine = format!("path = {:?}", real.display().to_string());
     files
         .iter()
         .map(|p| std::fs::read_to_string(p).expect("방금 본 파일이다"))
