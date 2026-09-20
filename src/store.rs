@@ -47,6 +47,11 @@ impl Repo {
     /// 훅이 쓴다(moai-acf7): `MOAI_HERE=1` 로 제 `.moai` 를 든 워크트리가 `moai -C <루트> …` 를 치면
     /// 판정할 스냅샷은 루트의 것이지만 **누구인가는 그 워크트리**다. 이름을 루트에서 읽으면 그
     /// 워크트리가 쥔 일이 통째로 "옆의 것" 이 되어(`worktree::away`) 규칙이 제 일을 못 본다.
+    ///
+    /// **읽기 전용 [`Repo`] 에만 쓴다.** `moved_from` 을 읽는 자리는 [`Repo::here`] 말고 둘 더
+    /// 있고(`note_held` 의 물러설 자리, [`with_write`] 가 [`MOVED`] 에 미는 줄), 그 둘에게 이
+    /// 값은 거짓말이다 — 아무것도 옮겨 오지 않았다. 지금 부르는 자리(`cmd/hook.rs` 의 `route_one`)
+    /// 는 그 [`Repo`] 로 `read()` 만 한다. 여기로 쓰는 길이 생기면 `moved_from` 을 쪼갠다.
     pub fn seen_from(self, here: PathBuf) -> Repo {
         Repo { moved_from: Some(here), ..self }
     }

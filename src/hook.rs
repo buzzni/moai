@@ -369,8 +369,39 @@ fn shell_text(words: &[String]) -> Option<Handed> {
     // **셸을 여는 스위치가 넘긴 글도 여기서 읽는다**(moai-drli) — `env -S`·`sudo -s`·`-i`·`doas -s`.
     // `command_of` 는 그 앞에서 멈추고([`Wrapped::Hands`]) 그 뒤는 명령이 아니라 글이다. 멈추기만
     // 하고 아무도 안 읽던 판은 `env -S "moai add x"` 와 `sudo -s moai add x` 가 규칙을 통째로 지나갔다.
-    if let Some(Wrapped::Hands { at, glued }) = wrapped(basename(head), rest) {
-        let text = glued.into_iter().chain(rest[at.min(rest.len())..].iter().cloned()).collect::<Vec<_>>().join(" ");
+    if let Some(Wrapped::Hands { at, glued, words: split }) = wrapped(basename(head), rest) {
+        let tail = &rest[at..];
+        // **이미 갈린 낱말은 도로 감싸서 잇는다** — `sudo -s <명령…>` 은 argv 를 통째로 escape 해
+        // 셸에 `-c` 로 넘긴다(sudo 의 `parse_args.c`). 맨 빈칸으로만 잇던 판은 바깥 껍데기가 이미
+        // 벗긴 따옴표를 못 되살려 두 쪽으로 틀렸다 — `sudo -s git commit -m 'a > b'` 의 `>` 가
+        // 리다이렉션으로 읽혀 없는 파일 `b` 로 규칙 2 가 **잘못 막았고**, `sudo -s bash -c '쓰기'` 는
+        // 안쪽 글이 낱말로 흩어져 첫 낱말만 `-c` 의 글이 되어 그 쓰기가 **통째로 샜다**.
+        //
+        // **`env -S` 의 글은 제 자로 가른다**([`split_string`]) — 셸이 아니라 낱말로 가를 뿐이다.
+        // 셸로 읽던 판은 양쪽으로 틀렸다. 없는 쓰기를 지어내 **잘못 막았고**(`env -S 'echo x > f'`
+        // 는 `>` 를 낱말로 넘길 뿐이다), 없는 **집기**를 지어내 규칙 2 를 채웠다 —
+        // `env -S 'true && moai mv <id> in_progress' && 쓰기` 는 `/bin/true` 에 낱말을 넘길 뿐
+        // moai 를 안 돌리는데, 그 집기가 뒤의 빈손 쓰기를 풀어 줬다. 더 보는 쪽이 늘 안전하다는
+        // 셈이 **집기 축에서는 거꾸로** 선다: 지어낸 집기는 규칙을 덜 막게 한다.
+        //
+        // **`env -S` 가 가르는 것은 제 글 하나뿐이다** — 그 뒤의 피연산자는 env 가 통째로 argv 로
+        // 넘긴다(안 가른다). 이어 붙여 함께 가르던 판은 없는 낱말을 지어냈고, 그것이 또 집기가 됐다:
+        // `env -S "moai mv" "t-1 in_progress --from todo" && 쓰기` 는 실제로 자리 인자 **하나**를 든
+        // `moai mv` 라 실패해 `&&` 가 끊기는데, 여섯 낱말로 갈라 읽은 판은 그것을 집기로 세어 뒤의
+        // 빈손 쓰기를 풀어 줬다. 주석 하나(`env -S '#c' sed -i …`)에 글이 통째로 비던 것도 여기다 —
+        // env 는 주석을 버리고 피연산자를 그대로 돌린다.
+        let split_out;
+        let tail: &[String] = if split {
+            tail
+        } else {
+            let (raw, more) = match &glued {
+                Some(g) => (Some(g.as_str()), tail),
+                None => (tail.first().map(String::as_str), tail.get(1..).unwrap_or_default()),
+            };
+            split_out = raw.map(split_string).unwrap_or_default().into_iter().chain(more.iter().cloned()).collect::<Vec<_>>();
+            &split_out
+        };
+        let text = tail.iter().map(|w| crate::text::quoted(w)).collect::<Vec<_>>().join(" ");
         // `sudo -s` 혼자는 사람이 쓸 셸을 띄운다 — 넘긴 글이 없다.
         return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false });
     }
@@ -424,6 +455,61 @@ fn shell_text(words: &[String]) -> Option<Handed> {
         "eval" if !rest.is_empty() => Some(Handed { text: rest.join(" "), fork: false, strict: false }),
         _ => None,
     }
+}
+
+/// `env -S` 가 글 하나를 **낱말로** 가르는 자 — 셸이 아니다(GNU coreutils 의 `--split-string`).
+///
+/// 빈칸으로 가르고 `'`·`"`·`\` 만 본다. `&&`·`|`·`;`·`>`·`$( … )` 는 뜻 없는 낱말로 남는다 —
+/// env 는 그것을 그대로 argv 로 넘긴다. **여기서 셸을 부르지 않는다**: [`shell_text`] 는
+/// [`Lexer::relex`] 가 부르는데, 안에서 다시 렉서를 세우면 `env -S "env -S …"` 가 겹마다
+/// 겹 셈([`Lexer::DEEP`])을 0 으로 되돌려 끝없이 판다.
+///
+/// **`\` 뒤의 글자는 env 의 표대로 푼다.** 맨 글자로 읽던 판은 `\_` 를 밑줄로 읽어
+/// `env -S'sed\_-i\_s/a/b/\_src/x.rs'` 를 낱말 **하나**로 만들었고, 그 한 줄에서 규칙이 통째로
+/// 꺼졌다(coreutils 9.4 에서 그 줄은 실제로 파일을 고친다). 덜 보는 쪽이 곧 구멍인 자리다.
+fn split_string(text: &str) -> Vec<String> {
+    let (mut out, mut word, mut open, mut had) = (Vec::new(), String::new(), None, false);
+    let mut it = text.chars();
+    let push = |out: &mut Vec<String>, word: &mut String, had: &mut bool| {
+        if *had {
+            out.push(std::mem::take(word));
+            *had = false;
+        }
+    };
+    while let Some(c) = it.next() {
+        match c {
+            // 작은따옴표 안에서는 `\` 도 그냥 글자다.
+            '\\' if open != Some('\'') => match it.next() {
+                // `\_` 는 **낱말을 가른다**(따옴표 안이면 그냥 빈칸), `\c` 는 글을 거기서 끝낸다.
+                Some('_') if open.is_none() => push(&mut out, &mut word, &mut had),
+                Some('c') => break,
+                Some(e) => {
+                    word.push(match e {
+                        '_' => ' ',
+                        't' => '\t',
+                        'n' => '\n',
+                        'f' => '\u{c}',
+                        'r' => '\r',
+                        'v' => '\u{b}',
+                        e => e,
+                    });
+                    had = true;
+                }
+                None => {}
+            },
+            '\'' | '"' if open.is_none() => (open, had) = (Some(c), true),
+            c if open == Some(c) => open = None,
+            // 낱말을 **여는** `#` 는 글 끝까지 주석이다.
+            '#' if open.is_none() && !had => break,
+            c if open.is_none() && c.is_whitespace() => push(&mut out, &mut word, &mut had),
+            c => {
+                word.push(c);
+                had = true;
+            }
+        }
+    }
+    push(&mut out, &mut word, &mut had);
+    out
 }
 
 /// 셸에 넘긴 글 하나([`shell_text`]).
@@ -1589,18 +1675,28 @@ const BUILTINS: &[&str] = &[
     "esac", "function", "in", "{", "}", "!", "[[", "]]", "coproc",
 ];
 
-/// 감싸는 명령 하나를 넘은 결과 — 감싸는 명령이 아니면 `None`([`wrapped`]).
+/// [`wrapped`] 가 감싸는 명령 하나를 읽은 결과 — 명령 자리가 어디인가, 아니면 왜 못 가는가.
 enum Wrapped {
     /// 뒤 낱말 이만큼을 넘으면 **명령 자리**다.
     Runs(usize),
     /// 뒤에 오는 것이 명령이 아니라 **셸에 넘기는 글**이다(moai-drli) — `env -S`·`sudo -s`·`-i`·
     /// `doas -s`. 붙여 온 값이 있으면 그 글이 먼저고, 뒤 낱말들이 그 뒤에 이어 붙는다.
-    Hands { at: usize, glued: Option<String> },
+    Hands {
+        /// 뒤 낱말 이만큼을 넘은 자리부터가 글이다.
+        at: usize,
+        /// 낱말 안에 붙어 온 글 — `env -SCMD`·`env --split-string=CMD`.
+        glued: Option<String>,
+        /// 뒤엣것이 **껍데기가 이미 가른 낱말**인가(`sudo -s 명령 …`), 아니면 안 갈린 원문
+        /// 한 낱말인가(`env -S '글'`). 갈린 낱말은 도로 감싸서 이어야 바깥 껍데기가 벗긴
+        /// 따옴표가 되살아난다 — sudo 가 argv 를 셸에 넘길 때 하는 일이 그 escape 다.
+        words: bool,
+    },
     /// 여기서 멈춘다 — 아무것도 안 돌리거나(`sudo -l`) 딴 자리에서 돌린다(`env -C`).
     Stops,
 }
 
-/// 감싸는 명령 하나를 넘는 데 드는 **뒤 낱말 수** — 감싸는 명령이 아니면 `None`([`command_of`]).
+/// 감싸는 명령 하나를 읽는다 — 그 이름을 모르면 `None` 이고, 알면 [`Wrapped`] 로 답한다
+/// ([`command_of`]·[`shell_text`]).
 ///
 /// 옵션 꼴은 GNU coreutils 와 sudo 의 것이다. `--long=값` 은 한 낱말이고, 값을 따로 받는 짧은 옵션만
 /// 하나를 더 먹는다. `--` 뒤는 곧 명령이다.
@@ -1635,13 +1731,18 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         /// 읽는 것이 **아무도 없었다** — `env -S "moai add x"` 와 `sudo -s moai add x` 가 규칙을
         /// 통째로 지나갔다. `bash -c` 와 같은 표의 줄로 둔다.
         ///
-        /// `env -S` 는 사실 셸이 아니라 낱말로 가를 뿐이라, 그 글의 `&&`·`|` 는 낱말로 남는다 —
-        /// 여기서는 셸의 글로 읽어 **더 많이 본다**. 덜 보는 쪽으로 어림잡으면 그 자리가 곧 구멍이고,
-        /// 더 보는 쪽은 한 줄에 여럿을 적은 사람이 저마다 소속을 대는 것으로 끝난다.
+        /// `env -S` 는 사실 셸이 아니라 낱말로 가를 뿐이라, 그 글의 `&&`·`|`·`>` 는 낱말로 남는다 —
+        /// 그래서 [`shell_text`] 가 그것을 [`split_string`] 으로 가른다. 한때 셸의 글로 읽어
+        /// **더 많이 보는** 쪽으로 어림잡았는데, 그 셈이 **집기 축에서는 거꾸로** 선다: 지어낸
+        /// 집기는 규칙 2 를 채워 빈손의 쓰기를 풀어 준다(`env -S 'true && moai mv <id> in_progress'
+        /// && 쓰기`). 더 보는 것이 늘 안전한 것은 막는 축뿐이다.
         hands: &'static [&'static str],
-        /// `hands` 스위치가 **값을 그 낱말에 붙여 받는가** — `env -SCMD`·`env --split-string=CMD` 는
-        /// 낱말 안에 글이 있고, `sudo -s` 는 뒤 낱말부터가 글이다. 붙여 받는 것을 안 받는 것으로
-        /// 적으면 뭉치의 남은 글자(`sudo -si` 의 `i`)가 글의 첫 낱말이 된다.
+        /// `hands` 스위치가 **값을 받는가** — `env -S` 는 그 자리에서 글을 받아(`-SCMD`·
+        /// `--split-string=CMD`·뒤 낱말) 옵션 읽기가 거기서 끝나고, `sudo -s` 는 값 없는 깃발이라
+        /// 옵션 읽기가 **계속된다**. 받는 것을 안 받는 것으로 적으면 뭉치의 남은 글자(`sudo -si` 의
+        /// `i`)가 글의 첫 낱말이 되고, 거꾸로 적으면 그 뒤의 옵션이 글의 첫 낱말이 된다 —
+        /// `sudo -s -u 남 moai add x` 와 `sudo -su 남 moai add x` 의 글은 `moai add x` 지 `-u 남 …`
+        /// 이 아니다(둘 다 규칙이 통째로 샜다).
         glued: bool,
     }
     const COMMON: &[&str] = &["--debug", "--verbose", "--version", "--help"];
@@ -1734,6 +1835,11 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
     }
     let mut n = 0;
     let mut seen = 0;
+    // **값 없는 글 스위치를 이미 봤는가** — `sudo -s`·`-i`·`doas -s` 는 깃발이라 옵션 읽기가 거기서
+    // 안 끝난다(`glued` 가 거짓인 줄). 곧장 그 뒤부터를 글로 읽던 판은 `sudo -s -u 남 moai add x` 와
+    // `sudo -su 남 moai add x` 의 글을 `-u 남 moai add x` 로 잡아 그 글의 명령 자리가 `-u` 가 됐고,
+    // 규칙 1~2 가 이 스위치를 도로 통째로 지나갔다. 옵션이 다 끝난 자리가 곧 글이다.
+    let mut handed = false;
     while let Some(word) = rest.get(n) {
         if word == "--" {
             n += 1;
@@ -1765,12 +1871,21 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             return Some(Wrapped::Stops);
         }
         // **셸에 넘기는 글은 여기서부터다**(moai-drli). `--split-string=글` 은 그 낱말 안에 글이 있다.
+        // 값을 받는 스위치(`env -S`)는 여기서 옵션이 끝나고, 값 없는 깃발(`sudo -s`)은 표만 달고
+        // 옵션을 마저 읽는다 — 글은 옵션이 다 끝난 자리다.
         if let Some(glued) = hands.iter().find_map(|f| {
             (word == f)
                 .then_some(None)
                 .or_else(|| word.strip_prefix(f).filter(|r| r.starts_with('=')).map(|r| Some(r[1..].to_string())))
         }) {
-            return Some(Wrapped::Hands { at: n + 1, glued });
+            if w.glued {
+                return Some(Wrapped::Hands { at: n + 1, glued, words: false });
+            }
+            // 값 없는 깃발에 `=` 를 단 꼴(`sudo -s=x`)은 그 프로그램이 거절한다 — 붙은 것을 글로
+            // 읽지 않는다. 표만 달고 옵션을 마저 읽는다.
+            handed = true;
+            n += 1;
+            continue;
         }
         if takes.contains(&word.as_str()) {
             // 값이 없으면(`env -u`) 그 줄은 셸이 거절한다 — 넘겨짚지 않는다.
@@ -1810,14 +1925,17 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             if letter(stops, c) {
                 return Some(Wrapped::Stops);
             }
-            // **뭉치 안의 글 스위치**(moai-drli) — `env -iS '글'`·`sudo -ns 명령`. 붙여 받는 것
-            // (`env -S`)은 남은 글자가 곧 글이고, 안 받는 것(`sudo -s`)은 뒤 낱말부터다.
+            // **뭉치 안의 글 스위치**(moai-drli) — `env -iS '글'`·`sudo -ns 명령`. 값을 받는 것
+            // (`env -S`)은 남은 글자가 곧 글이라 옵션이 여기서 끝나고, 값 없는 깃발(`sudo -s`)은
+            // 뭉치의 남은 글자도 스위치다 — `sudo -su 남 moai add x` 의 `u` 가 그렇다.
             if letter(hands, c) {
-                let left = &word[at + c.len_utf8()..];
-                return Some(Wrapped::Hands {
-                    at: n + 1,
-                    glued: (w.glued && !left.is_empty()).then(|| left.to_string()),
-                });
+                if w.glued {
+                    let left = &word[at + c.len_utf8()..];
+                    return Some(Wrapped::Hands { at: n + 1, glued: (!left.is_empty()).then(|| left.to_string()), words: false });
+                }
+                handed = true;
+                stop = false;
+                continue;
             }
             if letter(takes, c) {
                 // 뒤에 붙은 것이 값이고, 없으면 다음 낱말이다.
@@ -1844,6 +1962,11 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             need!(rest.get(n + 1));
         }
         n += 1 + usize::from(eats);
+    }
+    // 값 없는 글 스위치를 봤으면 **옵션이 끝난 이 자리부터가 글이다**. 뒤가 비어도 괜찮다 —
+    // `sudo -s` 혼자는 사람이 쓸 셸을 띄우고, [`shell_text`] 가 빈 글을 안 읽는다.
+    if handed {
+        return Some(Wrapped::Hands { at: n, glued: None, words: true });
     }
     // 뒤에 명령이 없으면 감싸는 것이 아니다(`env` 혼자는 환경을 찍는다).
     need!(rest.get(n));
@@ -2597,13 +2720,27 @@ pub fn guard_shell(
     cwd: &Path,
     cmd: &str,
 ) -> Decision {
-    guard_shell_in(issues, cfg, away, root, cwd, cmd, &|_| true, &|_| None)
+    guard_shell_in(issues, cfg, away, root, cwd, cmd, &Segs { judges: &|_| true, picks: &|_| true }, &|_| None)
 }
 
-/// [`guard_shell`] 을 세션 자리의 트래커로 — 만들기·닫기 규칙은 `only` 가 고른 `moai` 토막만
-/// 본다. 다른 트래커를 가리키는 토막은 [`guard_moai`] 가 그 트래커의 줄로 본다(moai-23ky).
-/// 쓰기와 리뷰는 세션 자리의 규칙이라 명령 전체를 본다 — 쓰기 규칙이 `only` 로 가르는 것은
-/// 어느 집기가 이 자리의 것인가 하나다.
+/// 토막마다 **이 자리의 것인가** — 규칙마다 답이 다르다.
+///
+/// **판정과 집기를 한 자로 두지 않는다**(moai-acf7 의 뒷짝). 딴 트래커를 가리킨 토막은 그
+/// 트래커가 판정하지만([`Segs::judges`], moai-23ky), 갈라 놓은 **제** 트래커를 `-C` 로 가리킨
+/// 토막(`MOAI_HERE=1` 워크트리)의 집기는 여전히 이 세션의 것이다.
+/// 한 자로 두던 판은 규약이 시키는 `moai -C <루트> mv <id> in_progress && sed -i …` 를 규칙 2 가
+/// "집은 것 없이 고친다" 며 막았다 — 방금 집은 그 id 를 집으라고 내밀면서.
+pub struct Segs<'a> {
+    /// `moai` 규칙(1·3)이 볼 토막 — 딴 트래커를 가리킨 것은 그 트래커가 본다.
+    pub judges: &'a dyn Fn(usize) -> bool,
+    /// 규칙 2 가 **이 자리의 집기**로 셀 토막.
+    pub picks: &'a dyn Fn(usize) -> bool,
+}
+
+/// [`guard_shell`] 을 세션 자리의 트래커로 — 만들기·닫기 규칙은 [`Segs::judges`] 가 고른 `moai`
+/// 토막만 본다. 다른 트래커를 가리키는 토막은 [`guard_moai`] 가 그 트래커의 줄로 본다(moai-23ky).
+/// 쓰기와 리뷰는 세션 자리의 규칙이라 명령 전체를 본다 — 쓰기 규칙이 토막으로 가르는 것은
+/// 어느 집기가 이 자리의 것인가 하나고, 그래서 [`Segs::picks`] 로 따로 묻는다.
 pub fn guard_shell_in(
     issues: &[Issue],
     cfg: &Config,
@@ -2611,14 +2748,14 @@ pub fn guard_shell_in(
     root: &Path,
     cwd: &Path,
     cmd: &str,
-    only: &dyn Fn(usize) -> bool,
+    segs: &Segs<'_>,
     aim: Toward<'_>,
 ) -> Decision {
     // 차례는 [`Decision::then`] 이 정한다 — 먼저 막는 규칙이 이기고, 비추는 줄(`Context`)은 뒤의
     // 규칙이 막을 것을 가리지 않는다. 되돌릴 수 없는 것을 먼저 본다.
     guard_tmux(cmd)
-        .then(|| guard_moai(issues, cfg, away, cmd, only, aim))
-        .then(|| guard_writes_in(issues, cfg, away, root, cwd, cmd, only))
+        .then(|| guard_moai(issues, cfg, away, cmd, segs.judges, aim))
+        .then(|| guard_writes_in(issues, cfg, away, root, cwd, cmd, segs.picks))
         .then(|| if calls_review(cmd) { guard_review(issues, cfg, away) } else { Decision::Pass })
 }
 
@@ -4839,14 +4976,71 @@ mod tests {
             "sudo -u 남 -s moai add '딴 일'",
             "doas -s moai add '딴 일'",
             "doas -u 남 -s moai add '딴 일'",
+            // **깃발 뒤에도 옵션은 이어진다** — `sudo -s`·`-i`·`doas -s` 는 값을 안 받는 깃발이라
+            // 명령은 옵션이 **다 끝난** 자리다. 곧장 그 뒤부터를 글로 읽던 판은 글의 명령 자리가
+            // `-n`·`남`·`--` 가 되어, 옵션 하나만 더 적으면 규칙이 도로 통째로 샜다.
+            "sudo -s -n moai add '딴 일'",
+            "sudo -s -u 남 moai add '딴 일'",
+            "sudo -su 남 moai add '딴 일'",
+            "sudo -s --non-interactive moai add '딴 일'",
+            "sudo -s -- moai add '딴 일'",
+            "sudo -i -n moai add '딴 일'",
+            "doas -su 남 moai add '딴 일'",
+            // **따옴표가 되살아난다** — 바깥 껍데기가 벗긴 것을 도로 감싸서 잇는다. 맨 빈칸으로만
+            // 잇던 판은 제목 안의 `-e <에픽>` 이 진짜 플래그로 읽혀 단위 안에 세운 것이 됐다.
+            "sudo -s moai add '제목 -e t-e'",
         ] {
             assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "셸을 여는 스위치가 글을 가렸다 — {cmd}");
         }
         // 규칙 2 도 같은 길로 샜다 — `sudo -s sed -i …` 는 실제로 그 파일을 고친다.
-        for cmd in ["sudo -s sed -i s/a/b/ src/x.rs", "env -S \"sed -i s/a/b/ src/x.rs\"", "doas -s tee src/x.rs"] {
+        for cmd in [
+            "sudo -s sed -i s/a/b/ src/x.rs",
+            "env -S \"sed -i s/a/b/ src/x.rs\"",
+            "doas -s tee src/x.rs",
+            "sudo -s -n sed -i s/a/b/ src/x.rs",
+            // **안쪽 `-c` 의 글은 한 낱말로 남아야 한다** — 맨 빈칸으로 잇던 판은 그 글이 낱말로
+            // 흩어져 `bash -c sed` 가 되고, 안쪽 렉서가 `sed` 하나만 글로 받아 쓰기가 통째로 샜다.
+            "sudo -s bash -c 'sed -i s/a/b/ src/x.rs'",
+        ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "셸을 여는 스위치가 쓰기를 가렸다 — {cmd}\n{got:?}");
         }
+        // **없는 쓰기를 지어내지 않는다** — sudo 는 argv 를 escape 해 셸에 넘기므로 따옴표 안의
+        // `>`·`;` 는 연산자가 아니다. 맨 빈칸으로 잇던 판은 그것을 리다이렉션으로 읽어, 아무것도
+        // 안 쓰는 줄을 "집은 것 없이 src/x.rs 를 고친다" 며 **잘못 막았다** — 새는 것보다 나쁘다.
+        for cmd in [
+            "sudo -s git commit -m '고침: a > src/x.rs'",
+            "sudo -s echo 'a; sed -i s/a/b/ src/x.rs'",
+            "sudo -s moai note t-1 'a > src/x.rs 로 고쳤다'",
+            // **`env -S` 는 셸이 아니다** — `>` 를 낱말로 넘길 뿐이라 아무것도 안 쓴다.
+            "env -S \"echo done > src/x.rs\"",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "따옴표 안의 글자를 연산자로 읽어 없는 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        // **지어낸 집기는 규칙을 덜 막게 한다** — 더 보는 쪽이 늘 안전하다는 셈이 집기 축에서는
+        // 거꾸로 선다. `env -S` 는 `&&` 를 낱말로 넘겨 `/bin/true` 하나를 돌릴 뿐인데, 그 안의
+        // `moai mv` 를 집기로 세던 판은 뒤의 **빈손 쓰기**를 그것으로 풀어 줬다.
+        let faked = "env -S \"true && moai mv t-1 in_progress --from todo\" && sed -i s/a/b/ src/x.rs";
+        let got = guard_writes(&[], &cfg(), &here(), root, root, faked);
+        assert!(matches!(got, Decision::Deny(_)), "돌지도 않는 집기로 빈손의 쓰기가 샜다\n{got:?}");
+        // 같은 자가 **진짜 셸**은 그대로 읽는다 — `env -S` 가 연 셸 안의 집기는 정말 돈다.
+        // **두 쪽을 함께 잰다** — Pass 하나만 두면 글을 아예 안 읽어도 Pass 라, 아무것도 안 잰다.
+        let real = |inner: &str| format!("env -S \"bash -c '{inner}'\"");
+        let blind = real("sed -i s/a/b/ src/x.rs");
+        let got = guard_writes(&[], &cfg(), &here(), root, root, &blind);
+        assert!(matches!(got, Decision::Deny(_)), "진짜 셸 안의 쓰기를 안 읽었다 — {blind}\n{got:?}");
+        let picked = real("moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs");
+        assert_eq!(guard_writes(&[], &cfg(), &here(), root, root, &picked), Decision::Pass, "진짜 셸 안의 집기를 안 읽었다");
+        // **`\\_` 는 낱말을 가른다** — 밑줄로 읽던 판은 이 줄을 낱말 하나로 만들어 규칙을 껐다.
+        for cmd in [r"env -S'sed\_-i\_s/a/b/\_src/x.rs'", "env -S \"#주석\" sed -i s/a/b/ src/x.rs"] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "`env -S` 의 낱말 가르기가 쓰기를 가렸다 — {cmd}\n{got:?}");
+        }
+        // **피연산자는 env 가 안 가른다** — 이어 붙여 함께 가르던 판은 없는 집기를 지어냈다.
+        let faked = "env -S \"moai mv\" \"t-1 in_progress --from todo\" && sed -i s/a/b/ src/x.rs";
+        let got = guard_writes(&[], &cfg(), &here(), root, root, faked);
+        assert!(matches!(got, Decision::Deny(_)), "피연산자를 갈라 없는 집기를 지어냈다\n{got:?}");
         // 그 글 안의 집기도 같은 자리에서 읽힌다 — 집고 쓰는 한 줄은 지나간다.
         let picked = "sudo -s moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs";
         assert_eq!(guard_writes(&[], &cfg(), &here(), root, root, picked), Decision::Pass, "글 안의 집기를 안 읽었다");
@@ -4945,7 +5139,8 @@ mod tests {
         let root = Path::new("/a");
         let judge = |cmd: &str| {
             let dirs = aimed(cmd, root);
-            guard_shell_in(&mine, &cfg(), &here(), root, root, cmd, &|k| dirs[k].is_none(), &|k| dirs[k].as_deref())
+            let own = |k: usize| dirs[k].is_none();
+            guard_shell_in(&mine, &cfg(), &here(), root, root, cmd, &Segs { judges: &own, picks: &own }, &|k| dirs[k].as_deref())
         };
         assert_eq!(judge("moai -C /b add \"딴 일\""), Decision::Pass);
         assert_eq!(judge("cd /b && moai add '딴 일'"), Decision::Pass);
@@ -4978,7 +5173,8 @@ mod tests {
         // 담은 토막이 **겨눈 자리**도 댄다 — 빼고 치면 되찾는 줄이 세션 자리의 트래커에서 헛돈다.
         // 친 글자가 아니라 푼 자리다(moai-v9sa).
         let at = Path::new("/repo/sub");
-        let aside = guard_shell_in(&all, &cfg(), &here(), root, root, "moai -C .. idea add \"x\"", &|_| true, &|_| Some(at));
+        let all_of = Segs { judges: &|_| true, picks: &|_| true };
+        let aside = guard_shell_in(&all, &cfg(), &here(), root, root, "moai -C .. idea add \"x\"", &all_of, &|_| Some(at));
         let Decision::Context(said) = aside else {
             panic!("안 비춘다 — {aside:?}");
         };
@@ -6856,7 +7052,8 @@ mod tests {
         let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         let judge = |cmd: &str| {
             let dirs = aimed(cmd, root);
-            guard_shell_in(&idle, &cfg(), &here(), root, root, cmd, &|k| dirs[k].is_none(), &|k| dirs[k].as_deref())
+            let own = |k: usize| dirs[k].is_none();
+            guard_shell_in(&idle, &cfg(), &here(), root, root, cmd, &Segs { judges: &own, picks: &own }, &|k| dirs[k].as_deref())
         };
         for cmd in [
             "moai -C /b mv t-1 in_progress && echo x > src/store.rs",

@@ -9168,6 +9168,47 @@ fn a_dash_c_at_the_root_is_judged_by_the_roots_snapshot_when_the_trackers_really
     assert!(why.contains(&id), "`cd` 로 옮긴 토막까지 루트로 보냈다\n{why}");
 }
 
+/// **그 토막의 집기는 여전히 이 세션의 것이다**(moai-acf7 의 뒷짝). `-C <루트>` 를 적은 토막을
+/// 루트의 스냅샷으로 재면서 규칙 2 의 **집기 셈**까지 그 자리에서 꺼지던 판은, 규약이 시키는
+/// `moai -C <루트> mv <id> in_progress && sed -i …` 한 줄을 "집은 것 없이 고친다" 며 막았다 —
+/// 방금 집은 바로 그 id 를 집으라고 내밀면서. 판정할 스냅샷을 바꾼 것이지 누가 집었는지를 바꾼
+/// 것이 아니다.
+///
+/// 가르는 자는 `Repo::seen_from` 하나다 — 등록한 옆 프로젝트의 집기는 그대로 여기서 아무것도
+/// 안 쥐어 준다(moai-23ky).
+#[test]
+fn a_pick_spelled_with_dash_c_at_the_root_still_counts_for_rule_two() {
+    let s = Scratch::new("hookaimpick");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "루트의 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/w", "-b", "worktree-w"]);
+    let inside = main.join(".claude/worktrees/w");
+    let mp = main.display().to_string();
+    let here = |cmd: &str| tool_here(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+    assert!(!issues(&inside).contains("in_progress"), "양쪽 다 빈손이어야 규칙 2 를 잰다");
+
+    let picks = format!("moai -C {mp} mv {id} in_progress --from todo && sed -i s/a/b/ src/x.rs");
+    let out = here(&picks);
+    assert!(out.trim().is_empty(), "`-C <루트>` 로 집은 것을 규칙 2 가 안 셌다\n{out}");
+
+    // 남의 프로젝트에서 집은 것은 그대로 아무것도 안 쥐어 준다.
+    let other = s.path().join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    git(&other, &["init", "-q"]);
+    ok(&other, &["init", "argos"]);
+    let far = field(&ok(&other, &["add", "남의 일", "--json"]), "id");
+    let why = refusal(&here(&format!(
+        "moai -C {} mv {far} in_progress --from todo && sed -i s/a/b/ src/x.rs",
+        other.display()
+    )));
+    assert!(why.contains("규칙 2"), "남의 트래커의 집기가 여기 규칙 2 를 채웠다\n{why}");
+}
+
 /// **`moai` 는 그 명령이 가리키는 저장소의 트래커로 판정한다** (moai-23ky) — `-C`·`--dir`
 /// 나 앞의 `cd`. 세션 자리의 트래커로 판정하던 훅은 남의 프로젝트에 세우는 줄을 제
 /// 초점으로 막았고, 남의 프로젝트가 쥔 초점은 못 봤다.

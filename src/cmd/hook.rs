@@ -170,6 +170,18 @@ fn decide(ctx: &Ctx, event: Event, input: &Input) -> Option<String> {
                 _ => (Vec::new(), Vec::new(), Vec::new()),
             };
             let mine = |k: usize| !matches!(routes.get(k), Some(r) if *r != Route::Here);
+            // **갈라 놓은 제 트래커를 가리킨 토막의 집기도 이 세션의 것이다**(moai-acf7 의 뒷짝).
+            // 규칙 1·3 은 그 트래커가 보지만([`Route::There`]), 규칙 2 의 집기 셈까지 그 자리에서
+            // 꺼지면 규약이 시키는 `moai -C <루트> mv <id> in_progress && sed -i …` 가 집고도 막힌다 —
+            // 방금 집은 그 id 를 집으라고 내밀면서. 가르는 자는 `Repo::seen_from` 이 적어 둔 것
+            // 하나다: 그 트래커를 **이 체크아웃의 눈으로** 본다면 그 집기는 여기 것이다. 등록한 옆
+            // 프로젝트와 `.moai` 가 여럿인 모노레포의 옆 칸은 제 자리를 그대로 들어 여기 안 든다
+            // (moai-23ky 가 그은 트래커 경계다).
+            let ours = |k: usize| match routes.get(k) {
+                Some(Route::There(n)) => there.get(*n).is_some_and(|r| same(r.here(), repo.here())),
+                r => !matches!(r, Some(Route::Nowhere)),
+            };
+            let segs = crate::hook::Segs { judges: &mine, picks: &ours };
             // **내미는 줄은 그 토막이 겨눈 트래커를 댄다**(moai-v9sa, 사용자 결정) — 사람이 친 `-C` 의
             // 글자가 아니라 [`route`] 가 푼 자리다. `Repo::find_from` 이 딸린 워크트리를 루트로 옮기니
             // (moai-y7go) 거절문이 워크트리의 스냅샷을 겨누는 길이 닫히고, `moai -C .`·`cd src && moai -C ..`
@@ -180,7 +192,7 @@ fn decide(ctx: &Ctx, event: Event, input: &Input) -> Option<String> {
                 // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
                 // (`Repo::find_from`) 고치는 파일은 이 워크트리의 것이다. `repo.root` 로 세던 판은
                 // 워크트리의 파일이 죄다 루트의 `.claude/worktrees/…` 밑으로 보여 규칙 2 가 통째로 꺼졌다.
-                Call::Shell(cmd) => crate::hook::guard_shell_in(issues, &repo.config, away, repo.here(), &cwd, cmd, &mine, &toward),
+                Call::Shell(cmd) => crate::hook::guard_shell_in(issues, &repo.config, away, repo.here(), &cwd, cmd, &segs, &toward),
                 Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, repo.here(), path),
                 Call::Review => crate::hook::guard_review(issues, &repo.config, away),
                 Call::Other => Decision::Pass,
@@ -483,7 +495,9 @@ fn safe_sid(input: &Input) -> Option<String> {
 /// [`Route::There`] 는 그래서 대개 **다른 저장소**의 트래커다 — 등록한 옆 프로젝트다(moai-23ky).
 /// 한때 같은 저장소의 옆 워크트리도 여기로 갔는데, 그때는 그 워크트리의 `.moai` 가 따로 있었다.
 /// **같은 저장소 안이어도 트래커가 정말 갈린 자리는 여기로 간다**(moai-acf7) — `MOAI_HERE=1` 을 든
-/// 워크트리와 `.moai` 가 여럿인 모노레포다. 단 그 토막이 **제 낱말로 `-C` 를 적었을 때만**이다.
+/// 워크트리가 그 자리고, 그 토막이 **제 낱말로 `-C` 를 적었을 때만**이다. `.moai` 가 여럿인
+/// 모노레포는 `worktree::same_repo` 가 애초에 안 세 이 커밋 전부터 여기로 왔다 — 그쪽의 집기는
+/// [`crate::hook::Segs::picks`] 도 이 자리의 것으로 안 센다.
 #[derive(Debug, PartialEq)]
 enum Route {
     /// 세션 자리의 트래커 — 같은 저장소 안이면 대개 어디를 가리켜도 여기다(`worktree::same_repo`).
@@ -578,7 +592,19 @@ fn route_one(
     // 것으로 바꾸고 **누구인가는 이 체크아웃에서 읽는다**(`Repo::here`) — 루트의 눈으로 이름까지
     // 읽으면 이 워크트리가 쥔 일이 통째로 "옆의 것" 이 되어, 시킨 대로 세우고 집은 리뷰를 규칙 3 이
     // 못 본다. `away_of`·`worktree::fresh` 가 이미 `here()` 로 이름을 읽는 그 자다(moai-y7go).
-    let found = match crate::worktree::tracker_root(repo.here()) {
+    //
+    // **닿는 것은 `MOAI_HERE=1` 워크트리 하나다** — `tracker_root` 는 git 꼭대기의 트래커만 답해,
+    // `.moai` 가 여럿인 모노레포는 여기 안 든다. 그쪽은 `same_repo` 도 못 세 이 줄 전에 이미
+    // `There` 로 가고(`tracker_place` 의 뿌리 상대경로가 갈린다) 집기도 여기 것이 아니다 — 이
+    // 커밋 전부터 그랬다. 옆 칸의 집기를 이 칸의 것으로 세려면 "같은 저장소인가" 라는 **다른 자**가
+    // 있어야 하고, 그것은 moai-23ky 가 정한 트래커 경계를 다시 여는 결정이다.
+    //
+    // **트래커를 이미 옮겨 온 세션에는 안 묻는다** — 옮겨 왔으면 `repo.root` 가 곧 그 루트라
+    // ([`crate::store::Repo::from_found`]) 그 물음의 답이 `repo.root` 고, 여기 오는 길은
+    // `found.root != repo.root` 뿐이라 늘 거짓이다. 맨 `Path` 견줌 하나로 거르지 않으면 토막마다
+    // `tracker_root` 가 디스크를 훑는다 — 흔한 워크트리 세션이 답 없는 물음의 값만 치른다.
+    let own = repo.here() == repo.root.as_path();
+    let found = match own.then(|| crate::worktree::tracker_root(repo.here())).flatten() {
         Some(root) if same(&root, &found.root) => found.seen_from(repo.here().to_path_buf()),
         _ => found,
     };

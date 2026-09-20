@@ -145,6 +145,15 @@ pub fn shell_word(s: &str) -> String {
     if s.starts_with('-') {
         return shell_word(&format!("./{s}"));
     }
+    quoted(s)
+}
+
+/// 낱말 하나를 **껍데기가 도로 그 낱말 하나로 읽도록** 감싼다. [`shell_word`] 는 여기에 경로의
+/// 규칙(맨 `-` 에 `./`)을 하나 더 얹은 것이다 — 경로가 아닌 낱말은 이쪽으로 온다.
+///
+/// 훅이 쓴다: `sudo -s <명령…>` 은 argv 를 도로 escape 해 셸에 `-c` 로 넘기므로, 그 낱말들을 다시
+/// 읽으려면 바깥 껍데기가 이미 벗긴 따옴표를 되살려야 한다([`crate::hook`] 의 `shell_text`).
+pub fn quoted(s: &str) -> String {
     if s.chars().any(char::is_control) {
         let mut out = String::from("$'");
         for c in s.chars() {
