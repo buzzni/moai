@@ -280,6 +280,54 @@ fn nothing_picked_means_korean_for_now_and_english_is_one_word_away() {
     assert_eq!(english.lines().count(), japanese.lines().count(), "영어와 일본어의 줄 수가 다르다");
 }
 
+/// **시스템 로캘은 말을 안 고른다**(moai-gv9n, 2026-09-20 사용자 결정).
+///
+/// `Lang::parse` 가 `ja_JP.UTF-8` 모양을 받아 주는 것은 `MOAI_LANG` 에 로캘을 그대로 붙여
+/// 넣는 사람을 받자는 것이지, `LANG`·`LC_ALL`·`LC_MESSAGES` 를 읽는다는 뜻이 아니다. 읽으면
+/// 아무것도 안 고른 사람이 제 로캘 말로 보는데, 옮긴 글이 아직 두 화면뿐이라 그 화면은
+/// 제 말 몇 줄과 영어가 섞인다 — 기본을 한국어로 둔 것과 같은 까닭이다.
+///
+/// **여는 조건은 `Lang` 의 `#[default]` 를 `En` 으로 옮기는 날과 같다.** 그날 이 시험이
+/// 붉어지면 그때 고르는 층을 셋으로 늘린다.
+#[test]
+fn the_system_locale_does_not_pick_the_language() {
+    let s = init("locale");
+    ok(s.path(), &["add", "첫 일"]);
+    let config = s.path().join("user/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let say = |picked: Option<&str>, body: &str| {
+        std::fs::write(&config, body).unwrap();
+        let mut cmd = isolated(BIN);
+        cmd.args(["status"])
+            .current_dir(s.path())
+            .env("MOAI_CONFIG", &config)
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            // 세 이름을 다 준다 — 하나만 재면 나머지 둘로 새는 길이 안 잡힌다.
+            .env("LANG", "ja_JP.UTF-8")
+            .env("LC_ALL", "ja_JP.UTF-8")
+            .env("LC_MESSAGES", "ja_JP.UTF-8");
+        match picked {
+            Some(l) => cmd.env("MOAI_LANG", l),
+            None => cmd.env_remove("MOAI_LANG"),
+        };
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+
+    // 아무도 안 골랐으면 로캘이 일본어라도 기본값이다 — 지금은 한국어다.
+    let bare = say(None, "");
+    assert!(bare.contains("이슈 1"), "로캘이 말을 골랐다\n{bare}");
+    assert!(!bare.contains("課題"), "로캘이 말을 골랐다\n{bare}");
+
+    // 고른 사람은 그대로 제 말을 본다 — 로캘이 그것을 덮지 않는다.
+    let picked = say(Some("en"), "");
+    assert!(picked.contains("Issues 1"), "MOAI_LANG 이 로캘에 밀렸다\n{picked}");
+    let said = say(None, "[i18n]\nlang = \"en\"\n");
+    assert!(said.contains("Issues 1"), "설정이 로캘에 밀렸다\n{said}");
+}
+
 /// **설정에 적은 말도 든다**(moai-slfv), 그리고 **틀리면 저장소 안에서도 댄다**(리뷰 moai-80qw).
 ///
 /// 여기까지 오는 길(`Doc::lang` → `Registry::lang` → `i18n::pick`)은 `MOAI_LANG` 만 재는
@@ -2322,8 +2370,56 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
     // 계획은 stdin 으로 오므로 argv 의 길이 상한도 없다 — 이 상한이 유일한 문이다.
     let plan = from_stdin(s.path(), &["add", "--from", "-"], &format!("# 에픽\n- {big}\n"));
     assert!(!plan.status.success() && String::from_utf8_lossy(&plan.stderr).contains("64KB"), "add --from 이 큰 제목을 받았다");
+
+    // **거절문은 아직 안 지은 줄을 id 로 부르지 않는다**(moai-1rkl). 거절하는 쓰기는 아무것도 안
+    // 남기므로 그 id 는 어디에도 없고, 그것을 대면 받는 쪽이 없는 것을 찾으러 간다.
+    // **이미 선 줄은 그대로 id 로 부른다** — 두 갈래를 함께 잰다. 안 지은 쪽만 재던 판은 가름을
+    // 뒤집어도 전부 푸르렀고, 그러면 이미 선 줄의 거절문까지 제목만 대어 받는 쪽이 어느 줄인지
+    // 못 찾는다. 두 자리를 다 건드린다 — 저널에 적힐 글(`mv -m`)과 줄의 밭(`edit --title`)이다.
+    for (args, what, standing) in [
+        (vec!["add", big.as_str()], "add 제목", None),
+        (vec!["add", "새것", "-b", big.as_str()], "add -b", None),
+        (vec!["mv", id.as_str(), "in_progress", "-m", big.as_str()], "mv -m", Some(id.as_str())),
+        (vec!["edit", id.as_str(), "--title", big.as_str()], "edit --title", Some(id.as_str())),
+    ] {
+        let err = String::from_utf8_lossy(&moai(s.path(), &args).stderr).to_string();
+        match standing {
+            None => {
+                assert!(err.contains("새 줄"), "{what}: 안 지은 줄을 안 가리킨다\n{err}");
+                assert!(!err.contains("argos-"), "{what}: 쓰지도 않은 id 를 댔다\n{err}");
+            }
+            Some(id) => {
+                assert!(err.contains(id), "{what}: 이미 선 줄을 id 로 안 부른다\n{err}");
+                assert!(!err.contains("새 줄"), "{what}: 이미 선 줄을 안 지은 줄이라 했다\n{err}");
+            }
+        }
+    }
+
+    // **크기 말고 다른 거절도 안 지은 줄을 id 로 안 부른다**(moai-1rkl) — `Issue::validate_fields`
+    // 의 말도 `<id>: ` 로 시작한다. 크기만 고쳐 두면 같은 쓰기가 한 축에서는 제목을, 다른 축에서는
+    // 없는 id 를 댄다: 아래 한 줄이 바로 그 자리였다.
+    let tagged = from_stdin(s.path(), &["add", "--from", "-"], "# 에픽\n- 멤버 #bug,perf\n");
+    let err = String::from_utf8_lossy(&tagged.stderr).to_string();
+    assert!(!tagged.status.success(), "쉼표가 든 태그를 받았다");
+    assert!(err.contains("새 줄"), "안 지은 줄을 안 가리킨다\n{err}");
+    assert!(!err.contains("argos-"), "쓰지도 않은 id 를 댔다\n{err}");
+
     assert_eq!(issues(s.path()), before, "거절한 쓰기가 스냅샷을 바꿨다");
     assert_eq!(journal(s.path()), notes, "거절한 쓰기가 저널에 남았다");
+
+    // **연습이 진짜와 같은 것을 본다**(moai-5229). 연습이 "좋다" 를 받은 뒤에 진짜가 거절하면
+    // 그 승인이 뒤늦은 말이 된다 — `add --from` 과 `idea promote` 두 길 모두.
+    let thought = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    for args in [
+        vec!["add", "--from", "-", "--dry-run"],
+        vec!["idea", "promote", thought.as_str(), "--from", "-", "--dry-run"],
+    ] {
+        let out = from_stdin(s.path(), &args, &format!("# 에픽\n- {big}\n"));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "연습이 진짜가 거절할 계획에 좋다고 했다 — {args:?}");
+        assert!(err.contains("64KB") && err.contains("새 줄"), "{args:?}\n{err}");
+    }
+    ok(s.path(), &["rm", &thought]);
 
     // 딱 상한은 받는다.
     ok(s.path(), &["note", &id, &"a".repeat(limit)]);

@@ -57,7 +57,7 @@ struct Hold {
     reason: String,
 }
 
-pub fn run(_ctx: &Ctx, event: Event) -> R<Vec<String>> {
+pub fn run(ctx: &Ctx, event: Event) -> R<Vec<String>> {
     // 색은 언제나 끈다. 훅의 stdout 은 사람이 아니라 파서가 읽는다 —
     // 이스케이프가 한 바이트라도 섞이면 계약 JSON 이 통째로 버려진다.
     anstream::ColorChoice::Never.write_global();
@@ -88,11 +88,14 @@ pub fn run(_ctx: &Ctx, event: Event) -> R<Vec<String>> {
         return Ok(Vec::new());
     }
 
-    Ok(decide(event, &input).map(|line| vec![line]).unwrap_or_default())
+    Ok(decide(ctx, event, &input).map(|line| vec![line]).unwrap_or_default())
 }
 
 /// 답을 내되, 못 내면 아무 말도 하지 않는다.
-fn decide(event: Event, input: &Input) -> Option<String> {
+///
+/// **`Ctx` 를 통째로 받는다** — 화면 언어([`Ctx::lang`])가 드는 것은 보드 한 줄뿐인데,
+/// 여기서 미리 풀면 툴 부름마다 도는 `PreToolUse` 가 사람의 설정 파일을 매번 읽는다.
+fn decide(ctx: &Ctx, event: Event, input: &Input) -> Option<String> {
     // **옮겨 갈 루트를 못 읽어도 규칙은 선다**(리뷰 moai-71ht.i1u). 트래커가 루트로 옮겨 가면서
     // (moai-y7go) 루트의 깨진 `config.toml` 하나가 저장소의 **모든** 워크트리에서 훅을 조용히
     // 껐다 — 고장의 크기가 규칙의 크기가 되면 안 된다. `moai` 자신은 그 자리에서 크게 실패하고
@@ -154,6 +157,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                     &source,
                     &crate::worktree::Origin::default(),
                     0,
+                    ctx.lang(),
                 );
             crate::hook::board(&lines)
         }),

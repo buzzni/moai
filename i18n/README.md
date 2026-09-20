@@ -57,13 +57,44 @@
 
     cargo test i18n
 
-- 영어 표가 소스가 부르는 키를 다 갖는가 (`english_has_every_key_the_source_asks_for`)
+- 영어 표가 소스가 부르는 키를 다 갖는가 (`english_has_every_key_the_source_asks_for`).
+  **읽는 자는 `say(…, "키")` 모양만 본다** — 그래서 키는 도우미에 넘기지 않고 `say` 부름에
+  그대로 적는다(`view::says`). 키를 감추면 이 시험이 파란 채로 구멍이 뚫린다
 - 번역이 영어의 자리(`{n}`)를 지키고, 빈 값이나 낡은 키가 없는가
   (`every_translation_keeps_the_places_english_marks`)
 - 다섯 말에서 `ready` 표의 열이 같은 칸에 서는가 (`every_language_keeps_the_ready_table_in_line`)
 - 실린 JSON 다섯이 다 읽히고 제 파일을 가리키는가 (`every_bundle_parses_and_is_wired_to_its_own_file`)
 
-## 아직 영어·한국어가 섞이는 화면
+## 아직 다 안 옮긴 화면
 
-글자는 표면 하나씩 옮긴다. 지금 말묶음에 든 것은 `status`·`ready` 의 머리뿐이라, 다른 말로
-띄우면 그 두 줄만 바뀌고 나머지는 한국어로 남는다. 남은 자리는 트래커에 있다.
+글자는 표면 하나씩 옮긴다. 지금 말묶음에 든 것은 **저장소 안에서 부른** `status`·`ready`
+두 화면이다 — 머리와 경고 글, 흐름 줄, 집을 수 있는 일의 표까지(moai-7cyf). 보드의 칸
+이름은 그 저장소의 `config.toml` 에서 오는 낱말이라 번역하지 않는다.
+
+**같은 두 명령의 다른 자리는 아직 한국어다.** `.moai` 밖에서 부른 한눈 보기
+(`view::projects_status`·`projects_ready`)는 머리 줄만 제 말이고 아래는 한국어고, `ready`
+표의 에픽 칸에 서는 `(없는 에픽)` 은 `report::epic_labels` 가 짓는다. 그 밖의 화면
+(`show` 의 상세와 이력, `tui`, 훅이 싣는 머리말, 거절문)도 아직 한국어로 박혀 있다 — 한
+낱말이 두 화면에 서면(`미룸`·`자식 없음`) 한쪽만 옮긴 동안은 같은 줄이 두 말로 보인다.
+남은 자리는 트래커에 있다.
+
+**stderr 로 나가는 줄이 먼저다.** `warn.user_config` 와 `status.worktree_trouble` 은
+"한 줄씩은 stderr 에 냈다" 고 제 말로 말하는데, 정작 그 줄들(`cmd::status`·`cmd::mod` 의
+워크트리 알림, `user_config::Doc::lang` 의 `i18n.lang` 오타 안내)은 한국어뿐이다 — 설정에
+`lang` 을 잘못 적은 영어 사용자가 가장 읽어야 할 줄이 그것이다. 옮길 때 `user_config` 쪽은
+`Ctx::lang` 의 주석을 먼저 읽는다: 설정을 읽는 길이 화면 말을 도로 물으면 `OnceLock` 이
+제 초기화 안에서 다시 열린다.
+
+**en·ko 말고는 새 키가 아직 비어 있다.** ja·zh·es 는 머리 몇 줄만 제 말이고 나머지는
+영어로 떨어진다 — 다섯을 함께 채우게 하지 않는 것이 결정이라(위 "고치는 법"), 아는 사람이
+제 말의 파일만 채우면 그 줄부터 선다.
+
+## 시스템 로캘은 안 읽는다
+
+`LANG`·`LC_ALL`·`LC_MESSAGES` 를 보지 않는다(2026-09-20 사용자 결정, moai-gv9n). 고르는 것은
+`MOAI_LANG` 과 설정뿐이다. `ko_KR.UTF-8` 모양을 받아 주는 것은 `MOAI_LANG` 에 로캘을 그대로
+붙여 넣는 사람을 받자는 것이지 로캘을 읽는다는 뜻이 아니다.
+
+까닭은 기본을 한국어로 둔 것과 같다 — 옮긴 글이 화면을 다 덮기 전에 로캘로 말을 고르면,
+아무것도 안 고른 `ja_JP` 기계의 사람이 일본어 몇 줄과 영어·한국어가 섞인 화면을 본다.
+**여는 조건도 같다**: `src/i18n.rs` 의 `#[default]` 를 `En` 으로 옮기는 날 이 층을 함께 연다.
