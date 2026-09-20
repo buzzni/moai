@@ -20,9 +20,10 @@
 //! 위의 섞임이 **옛 줄에 한해** 그대로 남는다. 새로 적는 것은 모두 제 파일로 가므로 섞임은 자라지 않지만,
 //! 사라지지도 않는다 — 걷으려면 그것은 설정이 아니라 마이그레이션이라, 그 값을 따로 물어야 한다.
 //!
-//! **락과 쓰기는 [`crate::user_config::update`] 보다 단순하다.** 그쪽은 설정 **파일** 자체가 심볼릭
-//! 링크인 경우(dotfiles 가 흔히 그렇게 건다)를 풀어야 하는데, 이 파일은 도구가 짓는 것이라 링크일 수
-//! 없다. 설정 디렉터리가 링크인 것은 커널이 알아서 지나가므로 여기서 풀 것이 없다. 문서 자체는
+//! **락과 쓰기는 [`crate::user_config::update`] 보다 단순하다.** 그쪽은 링크 자리에 `rename` 하지 않으려고
+//! 설정 **파일**을 풀어 그 자리에 락까지 하나 더 잡는데, 이 파일은 도구가 짓는 것이라 링크일 수 없어
+//! 락이 하나다. 다만 **자리를 고를 때는 그 파일을 푼다**([`place_of`], moai-f5e3) — 같은 설정이 XDG 기본과
+//! dotfiles 링크 두 철자로 불리면 읽음 파일이 둘로 갈리기 때문이다. 문서 자체는
 //! [`crate::user_config::Doc`] 을 그대로 쓴다([`Sheet`]) — 바이트를 지키는 자를 둘로 두지 않는다.
 
 use crate::fail::{Fail, R};
@@ -50,18 +51,33 @@ fn settle(path: &Path) -> (PathBuf, Option<String>) {
     }
 }
 
+/// 읽음 파일의 이름 — `<설정 디렉터리>/read/<뿌리 해시>.toml`.
+///
+/// **이름을 세는 자는 하나다**(리뷰). 시험이 이 식을 저마다 옮겨 적던 판은, 이름을 바꾸는 순간 모든
+/// 사람의 읽음이 한 번에 사라지는데 시험은 옛 이름을 그대로 재며 푸르게 섰다.
+fn sheet_at(dir: &Path, root: &Path) -> PathBuf {
+    dir.join("read").join(format!("{:016x}.toml", crate::text::fnv1a64(root.as_os_str().as_encoded_bytes())))
+}
+
 /// 한 프로젝트의 읽음이 사는 자리들.
 pub struct Place {
     /// 읽고 **쓰는** 자리. 하나다.
     pub at: PathBuf,
+    /// [`Place::at`] 을 고른 **푼 뿌리**. 문지기([`Sheet::owns`])와 [`Sheet::claim`] 이 이것으로 견주고
+    /// 적는다 — **이름을 고른 값과 파일에 적는 값을 가르지 않는다**(리뷰). 갈라 두던 판은 받은 철자를
+    /// `path` 에 적어, 그 철자가 가리키던 링크가 사라지는 날 도구가 제가 지은 파일을 남의 것으로 읽었다.
+    pub root: PathBuf,
     /// **옛 철자로 선 파일들 — 읽기만 한다.** 쓰는 자리를 둘로 두면 이 에픽이 고친 섞임이 그대로
     /// 돌아온다(moai-omx7).
     ///
     /// **이 부름이 받은 철자의 것만 찾는다.** 표면마다 제 철자로 부르므로(한눈 보기는 등록 줄, CLI 는
-    /// `current_dir`) 저마다 제 옛 파일을 만나 새 자리로 합쳐지고, 몇 번 쓰면 다 모인다. 아무 철자나
-    /// 찾아 주지는 않는다 — 그러려면 `read/` 를 통째로 훑어 파일마다 `path` 를 견줘야 하고, 그 값을
-    /// 읽기마다 치른다. **저장소 이름을 바꾼 것은 여기서도 못 잇는다**: 옛 파일의 `path` 가 옛 이름을
-    /// 가리켜 어느 철자로도 안 풀린다. 그것은 지우지 않기로 한 결정의 대가다(사용자 결정 2026-09-20).
+    /// `current_dir`) 저마다 제 옛 파일을 만난다. 아무 철자나 찾아 주지는 않는다 — 그러려면 `read/` 를
+    /// 통째로 훑어 파일마다 `path` 를 견줘야 하고, 그 값을 읽기마다 치른다. **저장소 이름을 바꾼 것은
+    /// 여기서도 못 잇는다**: 옛 파일의 `path` 가 옛 이름을 가리켜 어느 철자로도 안 풀린다. 그것은
+    /// 지우지 않기로 한 결정의 대가다(사용자 결정 2026-09-20).
+    ///
+    /// **저절로 합쳐지지는 않는다**(리뷰). 쓰는 길은 지금 자리의 표만 보고 적을 것을 고르므로, 사람이
+    /// 그 줄을 다시 읽음으로 적을 때에만 새 자리로 넘어온다 — 그 전까지 이 읽기 값은 계속 치른다.
     pub past: Vec<PathBuf>,
     /// 자리를 고르다 만난 까닭.
     pub problems: Vec<String>,
@@ -81,38 +97,48 @@ pub struct Place {
 /// 달라질 수 있다고 문서가 밝혀, 올리기 한 번에 모든 사람의 읽음 파일 이름이 바뀐다. 상수와 그 까닭은
 /// 이미 `text` 에 한 벌 있어 여기 다시 적지 않는다(moai-2vrw 가 못박은 그 값이다, 리뷰).
 ///
-/// **철자가 아니라 푼 경로로 센다**(moai-f5e3). `Repo::open` 은 받은 철자를 그대로 뿌리로 들고 설정
-/// 자리는 환경이 고르므로, 같은 저장소가 `/w/b` 와 `/w/b/` 로, 같은 설정이 XDG 기본과 dotfiles 링크로
-/// 불린다 — 철자를 세던 판은 그때마다 읽음 파일이 둘로 갈려 서로를 못 본 채 저마다 걷었다. 설정은
-/// **파일**을 푼다: 그 파일이 링크면 두 철자가 한자리로 모인다(`user_config::update` 가 락에 같은 값을
-/// 치르는 그 자리다).
+/// **뿌리는 푼 경로로 세고, 설정 자리는 받은 철자 그대로 둔다**(moai-f5e3).
+///
+/// 뿌리를 푸는 까닭: `Repo::open` 은 받은 철자를 그대로 뿌리로 들어 같은 저장소가 `/w/b` 와 `/w/b/`
+/// 로, `cd` 한 자리와 등록한 줄로 갈린다 — 철자를 세던 판은 그때마다 읽음 파일이 둘로 갈려 서로를
+/// 못 본 채 저마다 걷었다. 이 멤버가 고치는 해가 그것이다.
+///
+/// **설정 자리를 안 푸는 까닭은 더 무겁다**(리뷰가 잰 것, 2026-09-20). 한때 설정 **파일**을 풀어 두
+/// 철자를 한자리로 모았는데, `~/.config/moai/config.toml` 이 dotfiles 로 걸린 사람(흔한 꼴이다)은
+/// `read/` 가 통째로 그 저장소 안에 섰다 — 지은 바이너리로 재 보니 `dotfiles/moai/read/….toml` 과 그
+/// 락이 거기 생겼다. `~/.config` 자체가 링크인 사람도 같다. 무엇을 읽었는지는 사람마다 다른 사적인
+/// 값이고, **남의 읽음이 내 diff 에 섞이지 않게 하려고** 트래커 밖에 둔 것이 이 모듈의 첫
+/// 결정이다(2026-09-15) — 그것을 버전 관리되는 저장소에 넣으면 그 결정이 통째로 뒤집힌다.
+///
+/// 그 대가로 XDG 기본과 `MOAI_CONFIG` 를 번갈아 쓰는 사람의 읽음은 두 자리로 갈린 채다. 잃는 것은
+/// 없고(둘 다 남는다) 같은 철자로 부르면 제 것을 본다. 갈라짐이 흔하고 해가 큰 축은 뿌리고, 설정 축은
+/// 그 반대다 — 그래서 한쪽만 푼다.
 ///
 /// 옛 철자로 이미 선 파일은 [`Place::past`] 로 **읽기만** 한다 — 지우지도 옮기지도 않으니
 /// 마이그레이션이 아니고 읽음을 잃는 사람도 없다(옛 `[read]` 를 겹쳐 보는 것과 같은 꼴이다).
 pub fn place_of(config: &Path, root: &Path) -> Place {
-    let sheet = |dir: &Path, root: &Path| {
-        dir.join("read").join(format!("{:016x}.toml", crate::text::fnv1a64(root.as_os_str().as_encoded_bytes())))
-    };
-    let (real_config, why_config) = settle(config);
     let (real_root, why_root) = settle(root);
-    let (real_dir, raw_dir) = (dir_of(&real_config).to_path_buf(), dir_of(config).to_path_buf());
-    let at = sheet(&real_dir, &real_root);
-    // 푼 것과 받은 것이 갈리는 축이 둘이라 옛 자리는 셋까지 선다 — 설정만 갈린 것, 뿌리만 갈린 것, 둘 다.
-    let mut past = Vec::new();
-    for dir in [&real_dir, &raw_dir] {
-        for root in [&real_root, &root.to_path_buf()] {
-            let one = sheet(dir, root);
-            if one != at && !past.contains(&one) {
-                past.push(one);
-            }
-        }
-    }
-    Place { at, past, problems: why_config.into_iter().chain(why_root).collect() }
+    let dir = dir_of(config);
+    let at = sheet_at(dir, &real_root);
+    // 옛 자리는 **뿌리 축 하나**다. 등록한 줄은 이미 푼 경로라(`user_config::resolve_dir`) 흔한 판은
+    // 두 철자가 같고, 그때 이 줄은 통째로 `at` 으로 접힌다.
+    //
+    // **뿌리는 바이트로 가른다** — 이름이 바이트 해시라 끝 `/` 하나가 딴 파일을 짓는데, `Path` 의
+    // 견줌은 그 둘을 같다고 읽어 정작 찾아야 할 옛 파일을 건너뛴다.
+    let past = (real_root.as_os_str() != root.as_os_str()).then(|| sheet_at(dir, root)).into_iter().collect();
+    Place { at, root: real_root, past, problems: why_root.into_iter().collect() }
+}
+
+/// 읽고 쓰는 자리와 그 자리를 고른 푼 뿌리 — **옛 자리는 안 센다.** 쓰는 쪽([`update`])과 표식만 재는
+/// 쪽(`tui::App::follow_read` 은 걸음마다 부른다)은 `past` 를 안 쓰는데, 짓고 버리면 그만큼이 헛일이다(리뷰).
+fn at_of(config: &Path, root: &Path) -> (PathBuf, PathBuf) {
+    let (real_root, _) = settle(root);
+    (sheet_at(dir_of(config), &real_root), real_root)
 }
 
 /// 읽고 쓰는 자리 하나([`Place::at`]).
 pub fn path_for(config: &Path, root: &Path) -> PathBuf {
-    place_of(config, root).at
+    at_of(config, root).0
 }
 
 /// 읽어 낸 읽음과 그때 생긴 말.
@@ -144,24 +170,42 @@ pub struct Marks {
 /// 때는 **이 파일이 이긴다**: 옛 표는 이 바이너리가 다시 안 적는 지나간 값이고, 새 자리의 값이 그 뒤에
 /// 적힌 것이다.
 pub fn read(config: &Path, root: &Path, legacy: &BTreeMap<String, String>) -> Marks {
-    let place = place_of(config, root);
-    let mut marks = read_one(&place.at, root);
-    marks.problems.splice(..0, place.problems);
-    // **겹치는 차례는 한 자리에 있다**(moai-f5e3) — 지금 자리가 가장 세고, 그다음이 옛 철자로 선 파일,
-    // 마지막이 설정의 옛 `[read]` 다. 셋이 부르는 쪽마다 갈리면 넷째가 붙는 날 한쪽만 따라간다.
-    //
-    // **옛 자리의 탈은 `trouble` 로 안 올린다.** 그 파일은 있을 수도 없을 수도 있는 것이라, 그것 하나로
-    // 지금 자리의 성한 표를 버리면 안 된다 — 까닭만 곁들인다.
-    for old in &place.past {
-        let mut past = read_one(old, root);
-        overlay(&mut marks.seen, &past.seen);
-        marks.problems.append(&mut past.problems);
-    }
-    overlay(&mut marks.seen, legacy);
+    let mut place = place_of(config, root);
+    let mut marks = read_one(&place.at, &place.root);
+    // **자리를 고르다 만난 까닭은 뒤에 붙인다**(리뷰). 앞에 두던 판은 `problems.first()` 하나만 보는
+    // 탐색기가 표를 못 든 진짜 까닭 대신 이것을 대고, 낱말까지 "이상한 줄" 로 어긋났다.
+    marks.problems.append(&mut place.problems);
+    older(&place, &mut marks.seen, legacy, &mut marks.problems);
     marks
 }
 
-/// 읽음 파일 **하나**를 읽는다. 겹치는 일은 [`read`] 가 한다.
+/// 지금 자리의 표 위에 **옛 자리들을 차례대로** 얹는다 — 옛 철자로 선 파일, 그다음 설정의 옛 `[read]`.
+///
+/// **겹치는 차례는 한 함수에 있다**(moai-f5e3, 리뷰). [`read`] 와 탐색기의 `r`([`overlay_older`])이 저마다
+/// 세던 판은 이미 갈려 있었다 — `r` 한 번이 옛 철자 파일의 읽음을 화면에서 지워 그 줄이 [NEW] 로 돌아왔고,
+/// 그 판에 적을 것이 없으면(이미 읽은 줄) 파일이 안 바뀌어 다음 걸음도 다시 안 읽어 그대로 남았다.
+///
+/// **옛 자리의 탈은 `trouble` 로 안 올린다.** 그 파일은 있을 수도 없을 수도 있는 것이라, 그것 하나로
+/// 지금 자리의 성한 표를 버리면 안 된다 — 까닭만 곁들인다.
+fn older(place: &Place, seen: &mut BTreeMap<String, String>, legacy: &BTreeMap<String, String>, problems: &mut Vec<String>) {
+    for old in &place.past {
+        let mut past = read_one(old, &place.root);
+        overlay(seen, &past.seen);
+        problems.append(&mut past.problems);
+    }
+    overlay(seen, legacy);
+}
+
+/// 락 안에서 든 표에 [`read`] 와 **같은 차례로** 옛 자리와 옛 `[read]` 를 얹는다 — 탐색기의 `r` 이 제가
+/// 방금 쓴 표를 화면에 들일 때 이것으로 든다. 까닭은 안 낸다: 그 자리는 쓴 결과를 말하지 읽기를 말하지
+/// 않고, 같은 까닭은 다음 걸음의 [`read`] 가 댄다.
+pub fn overlay_older(config: &Path, root: &Path, seen: &mut BTreeMap<String, String>, legacy: &BTreeMap<String, String>) {
+    older(&place_of(config, root), seen, legacy, &mut Vec::new());
+}
+
+/// 읽음 파일 **하나**를 읽는다. 겹치는 일은 [`read`] 가 한다. `root` 는 [`Place::root`] — 자리를 고른
+/// 그 푼 뿌리다. 여기서 다시 풀지 않는다(리뷰): 파일마다 같은 값을 다시 세면 읽기 한 번이 `canonicalize`
+/// 를 열 번 부르고, 그 사이 자리가 바뀌면 이름을 고른 자와 문지기가 서로 다른 뿌리를 본다.
 fn read_one(path: &Path, root: &Path) -> Marks {
     use crate::user_config::Trouble;
     // **까닭에는 어느 파일인지를 붙인다** — 이름이 뿌리의 해시라 사람이 짐작할 수 없어, 안 붙이면
@@ -231,7 +275,10 @@ pub(crate) fn read_table(root: &Table) -> (BTreeMap<String, String>, Vec<String>
 /// **깨진 파일에는 쓰지 않는다**(`broken`). 도구가 짓는 파일이라 깨질 일이 드물지만, 깨졌으면 사람이
 /// 볼 수 있게 두고 멈춘다 — 덮으면 그 안의 읽음이 통째로 사라진다.
 pub fn update<T>(config: &Path, root: &Path, f: impl FnOnce(&mut Sheet) -> R<T>) -> R<T> {
-    let path = path_for(config, root);
+    // **자리는 락 밖에서 고른다.** `canonicalize` 는 락이 필요 없는데, 안에서 하면 쓰는 이마다 그만큼
+    // 더 기다린다(리뷰). 푼 뿌리를 함께 받아 문지기와 [`Sheet::claim`] 에 그대로 넘긴다 — 여기서 다시
+    // 풀면 이름을 고른 값과 견주는 값이 갈린다.
+    let (path, root) = at_of(config, root);
     let dir = dir_of(&path);
     let err = |e: std::io::Error| Fail::new(format!("{}: {e}", path.display()));
     // **남이 못 들여다보는 자리에 짓는다**(리뷰). 무엇을 읽었는지는 설정과 같은 갈래의 사적인 값인데,
@@ -262,7 +309,7 @@ pub fn update<T>(config: &Path, root: &Path, f: impl FnOnce(&mut Sheet) -> R<T>)
         .map_err(|e| refuse(format!("{}: {e} — 고치기 전까지 쓰지 않는다", path.display())))?;
     // **남의 읽음 위에 쓰지 않는다** — 해시가 부딪혔다. 재어 본 일이 없는 만큼 드문 자리지만, 조용히
     // 섞는 것이 이 에픽이 고치는 바로 그 해라 멈춘다.
-    if !sheet.owns(root) {
+    if !sheet.owns(&root) {
         return Err(refuse(format!("{}: {} 의 읽음이 아니라 쓰지 않는다 — 손으로 지운다", path.display(), root.display())));
     }
     // **손으로 고칠 거절에는 어느 파일인지 붙인다** — [`crate::user_config::update`] 와 같은 자리이고 같은
@@ -276,7 +323,7 @@ pub fn update<T>(config: &Path, root: &Path, f: impl FnOnce(&mut Sheet) -> R<T>)
     // 함께 적는다 — 먼저 적던 판은 그 한 줄이 쓰기를 세워, 적을 것이 없는 `moai read` 하나가 아직
     // 아무것도 안 한 사람의 집에 빈 읽음 파일을 지었다.
     if sheet.changed() {
-        sheet.claim(root);
+        sheet.claim(&root);
         write_atomic(&path, sheet.render().as_bytes())?;
     }
     Ok(out)
@@ -312,12 +359,22 @@ impl Sheet {
             None => true,
             // **푼 경로로 견준다**(moai-f5e3) — 파일 이름은 그것으로 고르는데 이 문지기만 철자를 보면,
             // 옛 철자로 적힌 `path` 를 남의 것으로 읽어 제 읽음을 안 읽는다. 짝이 어긋난 문지기는
-            // 지키는 시늉만 한다.
-            Some(item) => item.as_str().is_some_and(|at| settle(Path::new(at)).0 == settle(root).0),
+            // 지키는 시늉만 한다. 받는 `root` 는 그 이름을 고른 [`Place::root`] 다.
+            //
+            // **견주는 자는 [`crate::user_config::same_dir`] 하나다**(리뷰). 손으로 풀어 견주던 판은
+            // 이 모듈을 그 견줌의 다섯째 사본으로 만들면서, 철자가 같을 때 거저 끝나는 길까지 버려
+            // 이 바이너리가 적은 파일에도 `canonicalize` 를 두 번씩 불렀다 — 락 안에서도 그랬다.
+            Some(item) => item.as_str().is_some_and(|at| crate::user_config::same_dir(Path::new(at), root)),
         }
     }
 
     /// 어느 프로젝트의 것인지 적는다 — 없을 때만. 이미 적혀 있으면 [`Sheet::owns`] 가 같은 것을 보았다.
+    ///
+    /// **적는 것은 이름을 고른 푼 뿌리다**([`Place::root`], moai-f5e3 리뷰). 받은 철자를 적던 판은 이름과
+    /// 짝이 어긋나, 그 철자가 링크였다가 사라지는 날 [`Sheet::owns`] 가 제가 지은 파일을 남의 것으로
+    /// 읽었다 — 읽기는 빈 표와 `Broken` 을 내고 쓰기는 "손으로 지운다" 로 거절해, 시키는 대로 하면
+    /// 그 프로젝트의 읽음이 통째로 사라졌다. 옛 바이너리에도 이쪽이 안전하다: 그것이 푼 철자로 불리면
+    /// 같은 파일을 열어 글자로 견주는데, 그때 맞는 값이 이것이다.
     ///
     /// **글자로 못 적는 뿌리는 안 적는다**(리뷰). `display()` 는 UTF-8 이 아닌 바이트를 U+FFFD 로 바꿔
     /// 적는데, [`Sheet::owns`] 는 그것을 바이트째 견줘 남의 것으로 읽는다 — 제가 방금 지은 파일을 다음
@@ -470,9 +527,7 @@ mod tests {
 
         // 옛 바이너리가 안 푼 철자로 적어 둔 파일 — 끝 `/` 하나가 딴 이름을 냈다.
         let slashed = s.join("proj/");
-        let old = dir_of(&cfg)
-            .join("read")
-            .join(format!("{:016x}.toml", crate::text::fnv1a64(slashed.as_os_str().as_encoded_bytes())));
+        let old = sheet_at(dir_of(&cfg), &slashed);
         std::fs::create_dir_all(old.parent().unwrap()).unwrap();
         let before = format!("path = {:?}\n\n[read]\n\"argos-0001\" = \"옛것\"\n", slashed.display().to_string());
         std::fs::write(&old, &before).unwrap();
@@ -504,9 +559,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
 
         let slashed = s.join("proj/");
-        let old = dir_of(&cfg)
-            .join("read")
-            .join(format!("{:016x}.toml", crate::text::fnv1a64(slashed.as_os_str().as_encoded_bytes())));
+        let old = sheet_at(dir_of(&cfg), &slashed);
         std::fs::create_dir_all(old.parent().unwrap()).unwrap();
         std::fs::write(
             &old,
@@ -532,19 +585,20 @@ mod tests {
         let cfg = s.join("config.toml");
         let gone = s.join("사라진 것");
         let place = place_of(&cfg, &gone);
-        assert_eq!(place.at, {
-            let h = crate::text::fnv1a64(gone.as_os_str().as_encoded_bytes());
-            dir_of(&cfg).join("read").join(format!("{h:016x}.toml"))
-        });
+        assert_eq!(place.at, sheet_at(dir_of(&cfg), &gone));
+        assert_eq!(place.root, gone, "못 푼 자리를 뿌리로 안 들었다");
         assert!(place.problems.is_empty(), "없는 자리를 탈로 댔다 — {:?}", place.problems);
 
-        // 경로 가운데가 파일이면 `NotADirectory` 다 — 그것은 댄다.
-        std::fs::write(s.join("파일"), "x").unwrap();
-        let through = s.join("파일/밑");
-        let place = place_of(&cfg, &through);
-        assert_eq!(place.problems.len(), 1, "{:?}", place.problems);
-        assert!(place.problems[0].contains("자리를 못 풀어"), "{}", place.problems[0]);
-        assert_eq!(read(&cfg, &through, &BTreeMap::new()).problems.len(), 1, "읽기가 그 까닭을 안 물고 왔다");
+        // 경로 가운데가 파일이면 `NotADirectory` 다 — 그것은 댄다. 윈도에서는 `NotFound` 라 안 잰다.
+        #[cfg(unix)]
+        {
+            std::fs::write(s.join("파일"), "x").unwrap();
+            let through = s.join("파일/밑");
+            let place = place_of(&cfg, &through);
+            assert_eq!(place.problems.len(), 1, "{:?}", place.problems);
+            assert!(place.problems[0].contains("자리를 못 풀어"), "{}", place.problems[0]);
+            assert_eq!(read(&cfg, &through, &BTreeMap::new()).problems.len(), 1, "읽기가 그 까닭을 안 물고 왔다");
+        }
     }
 
     /// **문지기도 푼 경로로 견준다**(moai-f5e3) — 파일 이름을 푼 경로로 고르면서 `path` 만 철자로 보면,
@@ -566,6 +620,64 @@ mod tests {
         assert_eq!(got.seen.get("a").map(String::as_str), Some("A"), "제 파일을 남의 것으로 읽었다");
         update(&cfg, &root, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen.get("b").map(String::as_str), Some("B"), "제 파일에 쓰기를 거절했다");
+    }
+
+    /// **파일이 대는 자리는 그 이름을 고른 자리다**(moai-f5e3 리뷰). 이름은 푼 뿌리로 고르면서 `path` 에는
+    /// 받은 철자를 적던 판은, 그 철자가 가리키던 링크가 사라지는 순간 제가 지은 파일을 남의 것으로 읽었다 —
+    /// 읽기는 빈 표와 `Broken` 을, 쓰기는 "손으로 지운다" 를 냈고, 시키는 대로 지우면 그 프로젝트의 읽음이
+    /// 통째로 사라졌다.
+    #[test]
+    #[cfg(unix)]
+    fn the_place_a_sheet_claims_is_the_one_that_named_it() {
+        let s = Scratch::new("read-marks-claim");
+        let cfg = s.join("config.toml");
+        let real = s.join("proj");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = s.join("바로 가기");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let settled = std::fs::canonicalize(&link).unwrap();
+
+        // 링크 철자로 적어도 파일은 푼 자리의 것 하나다.
+        update(&cfg, &link, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
+        let at = path_for(&cfg, &link);
+        assert_eq!(at, path_for(&cfg, &real), "링크와 실제 자리가 딴 파일로 갔다");
+        let text = std::fs::read_to_string(&at).unwrap();
+        assert!(text.contains(&settled.display().to_string()), "받은 철자를 적었다 — 이름과 짝이 어긋난다\n{text}");
+
+        // 링크가 사라져도 제 파일이다 — 읽기도 쓰기도 그대로 선다.
+        std::fs::remove_file(&link).unwrap();
+        let got = read(&cfg, &real, &BTreeMap::new());
+        assert_eq!(got.trouble, None, "제가 지은 파일을 남의 것으로 읽었다 — {:?}", got.problems);
+        assert_eq!(got.seen.get("argos-0001").map(String::as_str), Some("A"));
+        update(&cfg, &real, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap();
+    }
+
+    /// **읽음은 설정 철자가 가리키는 자리에 선다 — 링크를 따라가지 않는다**(moai-f5e3, 리뷰가 잰 것).
+    ///
+    /// `~/.config/moai/config.toml` 을 dotfiles 로 거는 것은 흔한 꼴인데, 한때 설정 **파일**을 풀어
+    /// 자리를 고르던 판은 `read/` 를 통째로 그 저장소 안에 세웠다 — 지은 바이너리로 재 보니 그 밑에
+    /// 파일과 락이 생겼다. 무엇을 읽었는지는 사적인 값이고, 남의 읽음이 내 diff 에 섞이지 않게 하려고
+    /// 트래커 밖에 둔 것이 이 모듈의 첫 결정이다(2026-09-15). 버전 관리되는 자리에 넣으면 그 결정이
+    /// 통째로 뒤집힌다.
+    #[test]
+    #[cfg(unix)]
+    fn the_sheet_stays_where_the_config_spelling_says() {
+        let s = Scratch::new("read-marks-dotfiles");
+        let dots = s.join("dots/moai");
+        std::fs::create_dir_all(&dots).unwrap();
+        std::fs::write(dots.join("config.toml"), "").unwrap();
+        // 사람이 흔히 거는 꼴 — XDG 자리의 설정 파일이 dotfiles 의 파일을 가리킨다.
+        let xdg = s.join("xdg/moai");
+        std::fs::create_dir_all(&xdg).unwrap();
+        let cfg = xdg.join("config.toml");
+        std::os::unix::fs::symlink(dots.join("config.toml"), &cfg).unwrap();
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+
+        update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
+        assert!(path_for(&cfg, &root).starts_with(&xdg), "읽음이 링크를 따라 나갔다 — {}", path_for(&cfg, &root).display());
+        assert!(!dots.join("read").exists(), "읽음이 dotfiles 저장소 안에 섰다");
+        assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen.get("argos-0001").map(String::as_str), Some("A"));
     }
 
     /// **설정 곁에 선다** — `MOAI_CONFIG` 를 옮기면 읽음도 따라간다. 자리를 따로 정하면 제 임시 설정을
