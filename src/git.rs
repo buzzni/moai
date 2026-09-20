@@ -549,7 +549,9 @@ pub(crate) mod tests {
     #[test]
     fn told_names_each_failure() {
         let io = |k| std::io::Error::new(k, "x");
-        let dir = std::env::temp_dir();
+        // **뿌리로 잡는다** — `not_a_repo` 를 재는 자리라 체크아웃 밖이어야 하고, 그것을
+        // 보장하는 자는 `scratch::base` 다(moai-izeo). 맨 `temp_dir()` 은 그 보장 밖이다.
+        let dir = crate::scratch::base();
         assert_eq!(Error::Spawn(io(std::io::ErrorKind::NotFound)).told(&dir).kind, "no_git");
         assert_eq!(Error::Spawn(io(std::io::ErrorKind::PermissionDenied)).told(&dir).kind, "failed");
         assert_eq!(Error::Stream(io(std::io::ErrorKind::BrokenPipe)).told(&dir).kind, "stream");
@@ -655,10 +657,9 @@ pub(crate) mod tests {
     #[test]
     fn a_repo_without_commits_is_empty_not_broken() {
         let dir = crate::scratch::Scratch::new("git-unborn");
-        // 임시 자리가 체크아웃 안이면 "저장소 밖" 이 이 기계에 없다 — 울타리 밑이다(moai-boc6).
-        if !crate::scratch::fenced_base() {
-            assert!(table(&dir, &["moai-aaaa"]).is_err(), "저장소 밖인데 빈 표를 냈다");
-        }
+        // **어느 기계에서나 "저장소 밖" 이다** — 임시 자리는 체크아웃 밖에서 잡힌다(moai-izeo).
+        // `TMPDIR` 이 체크아웃 안인 기계에서 이 단언만 건너뛰던 자리다.
+        assert!(table(&dir, &["moai-aaaa"]).is_err(), "저장소 밖인데 빈 표를 냈다");
         run_git(&dir, None, &["init", "-q"]);
         assert!(table(&dir, &["moai-aaaa"]).unwrap().is_empty(), "커밋 없는 저장소를 실패로 셌다");
     }

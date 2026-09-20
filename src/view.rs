@@ -694,6 +694,13 @@ fn says(w: &Warning) -> String {
         "gitattributes_rules" => {
             format!(".gitattributes 에 moai 가 쓰는 자리 {n}줄이 빠졌다 — 저널이 머지에서 충돌하고 줄 끝이 흔들린다")
         }
+        // **"안 심었다" 가 아니라 "못 돈다" 다**(moai-2ewr). 안 심은 클론은 git 의 기본 머지가
+        // 돌아 무해했고(moai-w8so), 해로운 것은 심어 놓고 그 자리가 빈 판이다 — 이슈마다 푸는
+        // 것이 돈다고 믿는 쪽만 손해를 본다. 어느 경로인지는 `preview` 가 한 줄로 낸다.
+        "merge_driver_rotten" => "심어 둔 머지 드라이버가 안 돈다 — 병합이 git 의 기본 머지로 내려앉는다".to_string(),
+        // **"안 돈다" 와 "낡았다" 를 가른다**(moai-h54i). 앞의 것은 자리가 빈 것이고 뒤의 것은
+        // 그 줄에 내려앉는 마디가 없는 것이다 — 고칠 명령이 비슷해도 무엇이 어긋났는지가 다르다.
+        "merge_driver_stale" => "심어 둔 머지 드라이버가 옛 판이다 — 적은 자리가 사라지면 표식 없이 저쪽을 버린다".to_string(),
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
@@ -885,7 +892,11 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, origin: &Orig
     }
     for id in w.ids.iter().take(SHOW) {
         let Some(i) = by_id.get(id.as_str()) else {
-            out.push(format!("    {}", paint(style::ID, id)));
+            // **여기 오는 것이 늘 id 는 아니다** — `gitattributes_rules` 는 규칙 줄을,
+            // `merge_driver_rotten` 은 `.git/config` 에 적힌 **경로**를 든다. 손으로 고칠 수
+            // 있는 파일에서 온 글이라 제어문자를 걷고 그린다(리뷰 moai-h6aq.cx8) — ESC 가
+            // 그대로 나가면 그 줄이 화면을 다시 칠한다(`text::sanitize` 가 선 까닭).
+            out.push(format!("    {}", paint(style::ID, &crate::text::sanitize(id))));
             continue;
         };
         // **판정한 나이를 댄다**(`Warning::ages`, moai-7azq). 여기서 새로 재면 `blocked_stale`
