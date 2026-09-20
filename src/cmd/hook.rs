@@ -15,7 +15,7 @@ use crate::store::Repo;
 use crate::{model, view};
 use serde::Serialize;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// 계약이 받는 모양. 이벤트 이름이 안에 한 번 더 들어간다.
 #[derive(Serialize)]
@@ -160,19 +160,16 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             use crate::hook::Call;
             let call = Call::read(input.tool_name.as_deref(), &input.tool_input);
             let cwd = cwd.clone();
-            let (routes, there) = match call {
+            let (routes, there, aims) = match call {
                 Call::Shell(cmd) => route(&repo, cmd, &cwd),
-                _ => (Vec::new(), Vec::new()),
+                _ => (Vec::new(), Vec::new(), Vec::new()),
             };
             let mine = |k: usize| !matches!(routes.get(k), Some(r) if *r != Route::Here);
             // **내미는 줄은 그 토막이 겨눈 트래커를 댄다**(moai-v9sa, 사용자 결정) — 사람이 친 `-C` 의
             // 글자가 아니라 [`route`] 가 푼 자리다. `Repo::find_from` 이 딸린 워크트리를 루트로 옮기니
             // (moai-y7go) 거절문이 워크트리의 스냅샷을 겨누는 길이 닫히고, `moai -C .`·`cd src && moai -C ..`
             // 처럼 어디서 쳤느냐에 따라 달라지는 상대 경로도 풀려 나온다.
-            let toward = |k: usize| match routes.get(k) {
-                Some(Route::There(n)) => there.get(*n).map(|r: &Repo| r.root.as_path()),
-                _ => None,
-            };
+            let toward = |k: usize| aims.get(k).and_then(Option::as_deref);
             let decision = settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
                 // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
                 // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
@@ -200,7 +197,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 // 안 넣었다. 트래커가 없는 자리를 가리킨 토막도 안 넣는다 — 그 `moai` 는 스스로 실패한다.
                 // 깔렸는지는 비출 때만 장부를 읽는다.
                 decision = decision.then(|| {
-                    match crate::hook::korean_write(cmd, &|k| routes.get(k) != Some(&Route::Nowhere)) {
+                    match crate::hook::korean_write(cmd, &|k| routes.get(k) != Some(&Route::Nowhere), &toward) {
                         Some(at) => crate::hook::korean_notice(&at, &crate::cmd::skill::korean_missing(&repo.root)),
                         None => Decision::Pass,
                     }
@@ -492,38 +489,60 @@ enum Route {
 
 /// 토막마다 판정할 트래커를 가른다(`hook::aimed`). 가리킨 곳이 없으면 디스크를 안 짚는다 —
 /// 대부분의 호출은 `-C`·`cd` 가 없어 여기서 아무것도 안 읽는다.
-fn route(repo: &Repo, cmd: &str, cwd: &Path) -> (Vec<Route>, Vec<Repo>) {
+fn route(repo: &Repo, cmd: &str, cwd: &Path) -> (Vec<Route>, Vec<Repo>, Vec<Option<PathBuf>>) {
     let same = |a: &Path, b: &Path| a == b || std::fs::canonicalize(a).ok().zip(std::fs::canonicalize(b).ok()).is_some_and(|(x, y)| x == y);
     let mut there: Vec<Repo> = Vec::new();
+    // 토막마다 **내미는 줄이 겨눌 자리**([`crate::hook::Toward`]) — 판정할 트래커와 따로 든다. 판정은
+    // 이 트래커가 하면서도 겨눌 자리는 딴 곳인 경우가 있다(아직 없는 자리, 아래).
+    let mut aims: Vec<Option<PathBuf>> = Vec::new();
     let routes = crate::hook::aimed(cmd, cwd)
         .into_iter()
         .map(|dir| {
-            let Some(dir) = dir else { return Route::Here };
-            // **없는 자리는 어디인지 모른다 — 세션의 눈으로 본다.** `Nowhere` 로 보내던 판은
-            // `mkdir d && moai -C d add`·`mkdir d && cd d && moai add` 를 아무도 판정하지 않았는데,
-            // 실행할 때는 `d` 가 있어 `moai` 가 위로 찾아 이 트래커에 세운다 — 규칙 1 이 샜다.
-            // `cd /없는곳; moai add` 도 `cd` 가 실패해 세션 자리에서 돈다.
-            if !dir.is_dir() {
-                return Route::Here;
-            }
-            let Ok(Some(found)) = Repo::find_from(&dir) else {
-                return Route::Nowhere;
-            };
-            if same(&found.root, &repo.root)
-                || (!crate::worktree::is_linked(&found.root) && crate::worktree::same_repo(&found.root, &repo.root))
-            {
-                return Route::Here;
-            }
-            match there.iter().position(|r| same(&r.root, &found.root)) {
-                Some(n) => Route::There(n),
-                None => {
-                    there.push(found);
-                    Route::There(there.len() - 1)
-                }
-            }
+            let mut aim = None;
+            let route = route_one(repo, &same, &mut there, &mut aim, dir);
+            aims.push(aim);
+            route
         })
         .collect();
-    (routes, there)
+    (routes, there, aims)
+}
+
+/// [`route`] 의 토막 하나 — 판정할 트래커를 가르고, 내미는 줄이 겨눌 자리를 `aim` 에 적는다.
+fn route_one(
+    repo: &Repo,
+    same: &dyn Fn(&Path, &Path) -> bool,
+    there: &mut Vec<Repo>,
+    aim: &mut Option<PathBuf>,
+    dir: Option<PathBuf>,
+) -> Route {
+    let Some(dir) = dir else { return Route::Here };
+    // **없는 자리는 어디인지 모른다 — 세션의 눈으로 본다.** `Nowhere` 로 보내던 판은
+    // `mkdir d && moai -C d add`·`mkdir d && cd d && moai add` 를 아무도 판정하지 않았는데,
+    // 실행할 때는 `d` 가 있어 `moai` 가 위로 찾아 이 트래커에 세운다 — 규칙 1 이 샜다.
+    // `cd /없는곳; moai add` 도 `cd` 가 실패해 세션 자리에서 돈다.
+    if !dir.is_dir() {
+        // **겨눌 자리는 그래도 그 자리다**(moai-j2vp) — 판정만 이 트래커가 맡는다. 겨눌
+        // 자리까지 이 트래커로 보던 판은 `mkdir -p /srv/새것 && moai -C /srv/새것 add …` 의
+        // 거절문에서 `-C` 를 통째로 잃어, 옮겨 친 줄이 이 트래커에 섰다.
+        *aim = (!crate::worktree::same_repo(&dir, &repo.root)).then_some(dir);
+        return Route::Here;
+    }
+    let Ok(Some(found)) = Repo::find_from(&dir) else {
+        return Route::Nowhere;
+    };
+    if same(&found.root, &repo.root)
+        || (!crate::worktree::is_linked(&found.root) && crate::worktree::same_repo(&found.root, &repo.root))
+    {
+        return Route::Here;
+    }
+    *aim = Some(found.root.clone());
+    match there.iter().position(|r| same(&r.root, &found.root)) {
+        Some(n) => Route::There(n),
+        None => {
+            there.push(found);
+            Route::There(there.len() - 1)
+        }
+    }
 }
 
 /// 이 세션이 열릴 때 적어 둔 경고 수. 없으면 견줄 것이 없다.

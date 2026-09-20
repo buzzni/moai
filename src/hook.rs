@@ -2147,11 +2147,18 @@ fn create_in<'a>(
 /// 훅은 토막을 고르는 [`guard_shell_in`] 으로 부른다. 토막 전부를 보는 이 모양은 시험이 쓴다.
 #[cfg(test)]
 pub fn guard_close(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str) -> Decision {
-    close_in(issues, cfg, away, cmd, &|_| true)
+    close_in(issues, cfg, away, cmd, &|_| true, &|_| None)
 }
 
 /// [`guard_close`] 를 `only` 가 고른 토막에만 — [`create_in`] 과 같은 까닭.
-fn close_in(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str, only: &dyn Fn(usize) -> bool) -> Decision {
+fn close_in(
+    issues: &[Issue],
+    cfg: &Config,
+    away: &Away,
+    cmd: &str,
+    only: &dyn Fn(usize) -> bool,
+    aims: Toward<'_>,
+) -> Decision {
     for (k, seg) in segments(cmd).into_iter().enumerate() {
         if !only(k) {
             continue;
@@ -2197,7 +2204,8 @@ fn close_in(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str, only: &dyn F
                  넘긴 것은 이슈 번호와 함께 적는다 — \"넘겼다\" 만 적힌 줄은 아무도\n\
                  다시 안 본다.",
                 r.id,
-                crate::guide::close_steps(&r.id)
+                // **닫는 두 걸음도 그 토막이 겨눈 트래커를 댄다**(moai-j2vp) — 규칙 1 과 한 자다.
+                crate::guide::close_steps(&r.id, &echo_moai(aims(k), &seg))
             ));
         }
     }
@@ -2932,7 +2940,7 @@ pub fn guard_moai(
     // 초점은 한 번 잰다 — `held` 는 미룬 줄이 있으면 소속 지도를 다시 짓고, 훅은 도구 호출마다 돈다.
     let focus = held(issues, cfg, away);
     create_in(issues, &focus, cmd, only, aim)
-        .then(|| close_in(issues, cfg, away, cmd, only))
+        .then(|| close_in(issues, cfg, away, cmd, only, aim))
         .then(|| aside_in(issues, &focus, cmd, only, aim))
 }
 
@@ -3031,7 +3039,7 @@ const FIXED_HEADS: &[&str] = &["model:", "다음:", "Regression-of:"];
 ///
 /// **흘러드는 글은 그 토막의 것만 본다.** 명령줄 전체에서 한글을 찾던 판은 옆 토막의 커밋 메시지·`--user`
 /// 이름·경로에 알림을 달았고, `"$(cat <<'EOF' … EOF)"` 로 넣은 글은 렉서가 본문을 건너뛰어 놓쳤다.
-pub fn korean_write(cmd: &str, only: &dyn Fn(usize) -> bool) -> Option<String> {
+pub fn korean_write(cmd: &str, only: &dyn Fn(usize) -> bool, aims: Toward<'_>) -> Option<String> {
     let hangul = |t: &str| t.chars().any(|c| matches!(c, '\u{AC00}'..='\u{D7A3}' | '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}'));
     // 렉서는 받은 글자를 옮기기만 하니 명령줄에 한글이 없으면 볼 것이 없다 — 훅은 Bash 마다 돈다.
     if !hangul(cmd) {
@@ -3075,14 +3083,18 @@ pub fn korean_write(cmd: &str, only: &dyn Fn(usize) -> bool) -> Option<String> {
         if !texts.iter().map(String::as_str).chain(fed).any(unfixed) {
             return None;
         }
-        Some(flag_values(args, &["-C", "--dir"]).pop().map(|d| format!(" -C {}", echo_dir(&d))).unwrap_or_default())
+        // **겨눈 트래커를 댄다 — 친 글자가 아니다**(moai-j2vp, moai-v9sa 와 한 자). 옮겨 적던 판은
+        // `cd src && moai -C .. note …` 에 `moai -C .. edit` 를, 워크트리 안의 `moai -C . note …` 에
+        // `moai -C . edit` 를 내밀었다 — 앞엣것은 어디서 치느냐로 자리가 바뀌고, 뒤엣것은 v9sa 가
+        // 닫은 바로 그 길(워크트리 스냅샷)이다. 같은 훅 한 판이 거절문과 다른 자리를 대면 안 된다.
+        Some(echo_moai(aims(k), &seg.words).trim_start_matches("moai").to_string())
     })
 }
 
 /// [`korean_write`] 를 토막 가림 없이 — 판정만 보는 시험이 쓴다.
 #[cfg(test)]
 fn writes_korean(cmd: &str) -> bool {
-    korean_write(cmd, &|_| true).is_some()
+    korean_write(cmd, &|_| true, &|_| None).is_some()
 }
 
 /// 글을 적는 토막의 인자 가운데 **글인 것** — [`NOT_TEXT`] 의 플래그와 그 값을 뺀다. `--tag=파서` 와 짧은
@@ -3500,7 +3512,7 @@ pub fn closing(
             // **리뷰 줄은 낸 글과 함께 닫는 걸음을 댄다**(리뷰 moai-dw63.nzw). `-m` 없는 `done` 은
             // 규칙 3 이 막는다 — 훅이 일러 준 명령을 훅이 막는 자리는 덫이다(`guide::REVIEW_STEPS`).
             if last == crate::config::DONE && is_review(i, &out_of_plan) {
-                lines.push(crate::guide::close_steps(&i.id));
+                lines.push(crate::guide::close_steps(&i.id, "moai"));
             } else {
                 lines.push(format!("  moai mv {} {last}     {}", i.id, i.title));
             }
@@ -3563,7 +3575,7 @@ pub fn closing(
             lines.push(format!(
                 "리뷰 이슈 {} 가 아직 열려 있다. 낸 글을 붙이고 닫는다.\n{}",
                 i.id,
-                crate::guide::close_steps(&i.id)
+                crate::guide::close_steps(&i.id, "moai")
             ));
         }
     }
@@ -5561,12 +5573,12 @@ mod tests {
         let Decision::Block(why) = closing(&all, &all, &cfg(), &here(), 0, None) else {
             panic!("안 붙들었다");
         };
-        assert!(why.contains(&crate::guide::close_steps("t-r")), "{why}");
+        assert!(why.contains(&crate::guide::close_steps("t-r", "moai")), "{why}");
         assert!(!why.contains("moai mv t-r done     "), "규칙 3 이 막는 줄을 댄다\n{why}");
         assert!(why.contains("moai mv t-r review\n"), "앞 칸은 그대로 댄다\n{why}");
         // 보통 줄은 그대로다.
         assert!(why.contains("moai mv t-1 done     제목"), "{why}");
-        let steps = crate::guide::close_steps("t-r");
+        let steps = crate::guide::close_steps("t-r", "moai");
         let close = steps.lines().last().unwrap().trim();
         assert_eq!(guard_close(&all, &cfg(), &here(), close), Decision::Pass, "{close}");
     }
@@ -6411,7 +6423,7 @@ mod tests {
     #[test]
     fn the_closing_steps_come_from_the_guide() {
         let all = vec![issue("t-1", "in_progress"), review("t-r", "in_progress", None)];
-        let steps = crate::guide::close_steps("t-r");
+        let steps = crate::guide::close_steps("t-r", "moai");
         assert!(steps.contains("moai note t-r -b -") && steps.contains("moai mv t-r done -m"), "{steps}");
         let why = denied(&guard_close(&all, &cfg(), &here(), "moai mv t-r done")).to_string();
         assert!(why.contains(&steps), "닫기 거절문이 갈라졌다\n{why}");
@@ -6420,7 +6432,7 @@ mod tests {
         let Decision::Block(held) = closing(&near, &near, &cfg(), &here(), 0, None) else {
             panic!("안 붙들었다");
         };
-        assert!(held.contains(&crate::guide::close_steps("t-r2")), "세션 닫기가 갈라졌다\n{held}");
+        assert!(held.contains(&crate::guide::close_steps("t-r2", "moai")), "세션 닫기가 갈라졌다\n{held}");
     }
 }
 
@@ -6487,15 +6499,26 @@ mod korean_tests {
         }
     }
 
-    /// **트래커가 없는 자리를 가리킨 토막은 안 센다** — 받는 쪽이 `only` 로 뺀다. 넣은 토막의 `-C` 는 알림의
-    /// 고쳐 적는 명령으로 옮긴다([`aside_in`] 과 같다).
+    /// **트래커가 없는 자리를 가리킨 토막은 안 센다** — 받는 쪽이 `only` 로 뺀다. 글이 **간 자리**는
+    /// 알림의 고쳐 적는 명령으로 옮긴다 — 친 `-C` 글자가 아니라 [`aimed`] 가 푼 자리다(moai-j2vp,
+    /// moai-v9sa 와 한 자). `cd src && moai -C .. note …` 와 워크트리 안의 `moai -C . note …` 가 그
+    /// 글자를 도로 내밀면, 옮겨 친 사람이 딴 트래커나 워크트리의 스냅샷을 고친다.
     #[test]
     fn the_korean_write_names_where_it_went() {
-        assert_eq!(korean_write("moai note t-1 '한글'", &|_| true).as_deref(), Some(""));
-        assert_eq!(korean_write("moai -C /repo note t-1 '한글'", &|_| true).as_deref(), Some(" -C /repo"));
-        assert_eq!(korean_write("moai -C '/a b' note t-1 '한글'", &|_| true).as_deref(), Some(" -C '/a b'"));
-        assert_eq!(korean_write("moai -C /nowhere note t-1 '한글'", &|_| false), None);
-        assert_eq!(korean_write("moai -C /nowhere note t-1 '한글'; moai note t-2 '둘째'", &|k| k == 1).as_deref(), Some(""));
+        let here = |_: usize| None;
+        let there = |_: usize| Some(Path::new("/repo/sub"));
+        assert_eq!(korean_write("moai note t-1 '한글'", &|_| true, &here).as_deref(), Some(""));
+        assert_eq!(korean_write("moai -C .. note t-1 '한글'", &|_| true, &here).as_deref(), Some(""), "친 글자를 옮겨 적었다");
+        assert_eq!(korean_write("moai -C /x note t-1 '한글'", &|_| true, &there).as_deref(), Some(" -C /repo/sub"));
+        let spaced = |_: usize| Some(Path::new("/a b"));
+        assert_eq!(korean_write("moai -C '/a b' note t-1 '한글'", &|_| true, &spaced).as_deref(), Some(" -C '/a b'"));
+        // 못 푼 자리(변수·`~`)는 친 글자를 그대로 되돌려 준다 — 그 셸이 다시 풀면 같은 자리다.
+        assert_eq!(korean_write("moai -C \"$OTHER\" note t-1 '한글'", &|_| true, &here).as_deref(), Some(" -C \"$OTHER\""));
+        assert_eq!(korean_write("moai -C /nowhere note t-1 '한글'", &|_| false, &here), None);
+        assert_eq!(
+            korean_write("moai -C /nowhere note t-1 '한글'; moai note t-2 '둘째'", &|k| k == 1, &here).as_deref(),
+            Some("")
+        );
     }
 
     /// heredoc 본문과 here-string 은 **그것을 연 토막**에 흘러든다 — 줄이 끝난 뒤에 읽혀도, 명령 치환 안에서

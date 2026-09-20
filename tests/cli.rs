@@ -8864,6 +8864,33 @@ fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
     let op = other.display().to_string();
     let why = refusal(&tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(&format!("moai -C {op} add '딴 일'")))));
     assert!(why.contains(&format!("moai -C {op} add '제목'")), "남의 트래커를 안 댄다\n{why}");
+
+    // **규칙 3 의 닫는 두 걸음도 같은 자리를 댄다**(moai-j2vp) — 규칙 1 은 `-C /other` 를 대는데
+    // 이 줄만 맨 `moai` 를 내던 판은, 옮겨 친 사람이 여기 없는 리뷰를 이 트래커에서 닫게 했다.
+    let review = field(
+        &ok(&other, &["add", "리뷰 — 남의 일", "-t", "review", "--parent", &theirs, "-b", "무엇을 왜 보는가", "--json"]),
+        "id",
+    );
+    ok(&other, &["mv", &review, "in_progress"]);
+    let shut = format!("moai -C {op} mv {review} done");
+    let got = tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(&shut)));
+    assert!(!got.trim().is_empty(), "규칙 3 이 남의 트래커의 리뷰를 안 봤다 — {shut}");
+    let why = refusal(&got);
+    assert!(why.contains(&format!("moai -C {op} note {review}")), "규칙 3 이 남의 트래커를 안 댄다\n{why}");
+    assert!(!why.lines().any(|l| l.trim_start().starts_with("moai note")), "맨 moai 로 댄 줄이 남았다\n{why}");
+
+    // **한국어 알림도 간 자리를 댄다** — 친 `-C` 글자가 아니다. 워크트리에서 친 줄은 루트로 간다.
+    let noted = format!("moai -C . note {id} '한국어 노트'");
+    let out = tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&noted)));
+    assert!(!out.contains("-C ."), "친 글자를 알림에 도로 내밀었다\n{out}");
+
+    // **아직 없는 자리를 가리킨 줄은 그 자리를 그대로 댄다**(리뷰 moai-51h9.n0z 13번) — 판정은 이
+    // 트래커가 맡되, 옮겨 친 줄이 이 트래커에 서면 안 된다.
+    let fresh = s.path().join("newproj");
+    let np = fresh.display().to_string();
+    let make = format!("mkdir -p {np} && moai -C {np} add '딴 일'");
+    let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&make))));
+    assert!(why.contains(&format!("moai -C {np} add '제목'")), "없는 자리의 -C 를 버렸다\n{why}");
 }
 
 /// **겹침과 모름을 한 판에서 본다**(moai-15c2, 사용자 결정). 따로 보던 판은 둘이 함께면 풀릴 것을
