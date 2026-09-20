@@ -82,15 +82,30 @@ fn main() -> ExitCode {
     // `--json` 을 찾으면 제목이나 메모가 그 낱말일 때(`add -- "--json"`)
     // 아무도 시키지 않은 기계 출력이 나온다.
     let json = cli.json;
+    // **훅은 입을 다문다**(`cli::Cmd::Hook` 의 도움말: "훅이 에러를 뱉으면 매 세션 시작이 시끄럽고,
+    // 그러면 사람이 훅을 꺼 버린다"). 훅은 도구 호출마다 도는데, git 아닌 저장소의 하위
+    // 디렉터리에서 돌면 올라가 잡았다는 줄이 그 횟수만큼 선다 — 알림을 둔 까닭이 소음을 줄이는
+    // 것인데 가장 잦은 부름에서 소음이 된다.
+    let quiet = matches!(cli.cmd, Some(cli::Cmd::Hook { .. }));
     match cmd::run(cli) {
         Ok(lines) => {
             print(&lines);
             carried();
             unjournaled();
-            redirected();
+            if !quiet {
+                redirected();
+            }
             if cmd::had_partial() { ExitCode::FAILURE } else { ExitCode::SUCCESS }
         }
-        Err(e) => fail(json, &e),
+        // **넘어진 길에서도 어느 트래커를 봤는지는 댄다**(moai-a2kn) — 올라가 잡은 자리는
+        // *찾기*의 결과라 실패한 명령도 이미 그것을 썼다. 안 대던 판은 `~/.moai` 를 잡은 `show`
+        // 가 "못 찾았다" 만 내어, 엉뚱한 트래커를 본 줄 모르고 없는 줄을 찾게 했다.
+        Err(e) => {
+            if !quiet {
+                redirected();
+            }
+            fail(json, &e)
+        }
     }
 }
 
@@ -152,12 +167,15 @@ fn carried() {
 /// 열 번 쓰면 같은 줄이 열 번 선다. 여기는 색과 `moai: ` 머리를 다른 경고와 한 자로 쓰고,
 /// stderr 가 닫혀도 `writeln!` 의 실패를 버린다 — `eprintln!` 은 거기서 패닉한다.
 fn redirected() {
-    // **올라가 잡은 것은 git 밖에서만 선다**(moai-a2kn) — 제 체크아웃 안에서 하위 디렉터리에
+    // **올라가 잡은 것은 제 체크아웃 밖일 때만 선다**(moai-a2kn) — 제 저장소의 하위 디렉터리에
     // 선 사람에게는 한 줄도 안 나간다. `store::CLIMBED` 가 그 가름을 적는다.
+    //
+    // **"썼다" 고 하지 않는다.** 이 줄은 *찾기*의 결과라 `status`·`ready`·`show` 도 지나는데,
+    // 아래 `redirects()` 처럼 쓴 것으로 적으면 읽기만 한 명령이 없던 쓰기를 주장한다.
     for (from, to) in store::climbs() {
         let _ = writeln!(
             anstream::stderr().lock(),
-            "{}{} 위로 올라가 {} 의 트래커를 쓴다 — 여기는 git 체크아웃이 아니다",
+            "{}{} 위로 올라가 {} 의 트래커를 잡았다 — 여기에는 `.moai` 가 없다",
             style::paint(style::WARN, "moai: "),
             from.display(),
             to.display()

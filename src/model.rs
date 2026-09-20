@@ -28,10 +28,15 @@ pub const MAX_TEXT_BYTES: usize = 64 * 1024;
 /// 자리 표시로 도로 내밀면 받는 쪽이 첫 줄에서 그것을 옮겨 적어야 한다.
 /// `at` 은 **가리키는 말**이지 반드시 id 가 아니다 — 이 쓰기가 짓는 줄은 거절하면 안 남으므로
 /// id 가 아니라 제목으로 가리킨다([`unwritten`], moai-1rkl).
-pub fn check_text_size(at: &str, what: &str, text: &str) -> R<()> {
+///
+/// **그 말을 늦게 받는다.** 넘치는 글은 드물고 가리키는 말은 [`unwritten`] 이 제목을 두 벌
+/// 베껴서 짓는데, 미리 지어 넘기던 판은 500줄 계획이면 그 헛일을 500번 하고 전부 버렸다.
+/// 여기서 부르면 거절할 때만 든다.
+pub fn check_text_size(at: impl FnOnce() -> String, what: &str, text: &str) -> R<()> {
     if text.len() <= MAX_TEXT_BYTES {
         return Ok(());
     }
+    let at = at();
     let kb = text.len().div_ceil(1024);
     Err(Fail::coded(
         format!(

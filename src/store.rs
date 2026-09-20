@@ -157,22 +157,28 @@ pub const NOT_A_REPO: &str =
 /// **막는 것이 안내가 되는 자리다.** 지금까지 위쪽 `.moai` 로 쓰던 사람은 이 고침 뒤에 "없다" 를
 /// 만나는데, 그때 도구 안에 길이 없으면 도구 밖으로 나가야 한다. 본 것과 가리키는 법을 함께 댄다.
 fn beyond_says(at: &Path) -> String {
+    // **붙여 넣어 도는 글로 낸다**([`crate::text::shell_word`], moai-dtye). 날것으로 끼우던 판은
+    // 빈칸이 든 자리에 `moai -C /w/My Projects/p` 를 일러 줬는데, 껍데기가 그것을 두 인자로 갈라
+    // 막힌 사람에게 준 유일한 길이 안 돌았다.
+    let quoted = crate::text::shell_word(&at.display().to_string());
     format!(
         "{NOT_A_REPO}\n{} 에 `.moai` 가 있지만 여기서 올라가 쓰지 않는다 — \
-         `moai -C {} <명령>` 으로 가리키거나 `moai project add {}` 로 등록한다",
-        at.display(),
-        at.display(),
+         `moai -C {quoted} <명령>` 으로 가리키거나 `moai project add {quoted}` 로 등록한다",
         at.display()
     )
 }
 
-/// 이 프로세스가 **체크아웃 없이 위로 올라가 잡은 트래커** — `(선 자리, 잡은 뿌리)`.
+/// 이 프로세스가 **제 체크아웃 밖으로 올라가 잡은 트래커** — `(선 자리, 잡은 뿌리)`.
 ///
-/// [`MOVED`] 와 같은 자리에서 같은 까닭으로 담아 두기만 하고 `main` 이 찍는다.
+/// [`MOVED`] 와 **같은 꼴로** 담아 두기만 하고 `main` 이 찍는다. 담는 자리는 다르다 — 아래를 본다.
 ///
-/// **git 체크아웃 안에서는 한 줄도 안 낸다.** 제 저장소의 하위 디렉터리에 선 사람에게 매번
-/// 알리면 그건 소음이고, 소음은 곧 아무도 안 읽는 줄이다. 남는 것은 git 이 아닌 자리에서
-/// 올라가 잡은 때뿐이고(`~/.moai` 하나가 홈 아래 전부를 잡는 꼴), 그게 바로 알릴 값이 있는 자리다.
+/// **제 체크아웃 안에서 올라간 것은 한 줄도 안 낸다.** 제 저장소의 하위 디렉터리에 선 사람에게
+/// 매번 알리면 그건 소음이고, 소음은 곧 아무도 안 읽는 줄이다. 남는 것은 잡은 트래커가 내가 선
+/// 체크아웃 **밖**일 때뿐이고(`~/.moai` 하나가 홈 아래 전부를 잡는 꼴, 그리고 `.moai` 없는 클론
+/// 안에서 그 위의 트래커를 잡는 꼴), 그게 바로 알릴 값이 있는 자리다.
+///
+/// **적는 말이 "썼다" 가 아니다.** 여기 담기는 것은 *찾기*의 결과라 `status`·`ready`·`show` 도
+/// 지난다 — `MOVED` 처럼 "썼다" 로 적으면 읽기만 한 명령이 일어나지 않은 쓰기를 주장한다.
 static CLIMBED: std::sync::Mutex<Vec<(PathBuf, PathBuf)>> = std::sync::Mutex::new(Vec::new());
 
 /// 올라가 잡은 자리들 — 없으면 비어 있다. `main` 이 끝에 한 번 읽는다.
@@ -181,11 +187,12 @@ pub fn climbs() -> Vec<(PathBuf, PathBuf)> {
 }
 
 /// 위로 찾기의 결과(moai-a2kn).
-struct Found {
-    /// 천장 안에서 찾은 트래커의 뿌리.
-    root: Option<PathBuf>,
-    /// 천장 **위**에서 본 `.moai`. 쓰지 않는다 — 거절문이 이리로 가는 길을 댈 뿐이다.
-    beyond: Option<PathBuf>,
+enum Found {
+    /// 천장 안에서 찾은 트래커의 뿌리. `climbed` 는 **올라가 잡았고 그 자리가 내가 선 체크아웃
+    /// 밖**이라는 뜻이다 — [`CLIMBED`] 가 적는 것이 그것뿐이다.
+    Root { root: PathBuf, climbed: bool },
+    /// 못 찾고 멈춘 자리 — 천장이다. 거절문이 그 **위**를 볼 때만 쓴다([`above`]).
+    Ceiling(PathBuf),
 }
 
 /// `p` 가 **내 것인가**. 남의 자리로는 안 올라간다(moai-a2kn).
@@ -229,62 +236,78 @@ unsafe extern "C" {
 /// 그때 `top/projA/sub` 는 `top/projA/.moai` 를, `.moai` 없는 `top/projB/sub` 는 `top/.moai` 를
 /// 잡는다. 둘 다 그 체크아웃 안이라 천장에 안 걸린다. 막히는 것은 **밖으로 새는 것**뿐이다.
 ///
-/// 못 찾았으면 천장 위를 한 번 더 본다 — 쓰려는 것이 아니라 거절문이 가리킬 자리를 들려고다
-/// ([`beyond_says`]). 그 훑기는 **못 찾은 길에서만** 돈다.
+/// 못 찾았으면 [`Repo::discover`] 가 천장 위를 한 번 더 본다 — 쓰려는 것이 아니라 거절문이
+/// 가리킬 자리를 들려고다([`beyond_says`]). 그 훑기는 그 답을 읽는 그 한 자리에서만 돈다.
 fn look(from: &Path) -> Found {
-    look_under(from, &mine)
+    let found = look_under(from, &mine);
+    // **적는 것은 이 명령이 선 자리에서 올라간 때뿐이다.** 훅은 셸 명령에서 읽어 낸 남의
+    // 디렉터리로도 트래커를 찾아 보므로(`cmd::hook::route_one`), 그것까지 적으면 손도 안 댄
+    // 프로젝트를 잡았다고 말한다 — 아직 만들지도 않은 디렉터리를 대기도 한다.
+    if let Found::Root { root, climbed: true } = &found
+        && std::env::current_dir().is_ok_and(|cwd| cwd == from)
+    {
+        let mut climbed = CLIMBED.lock().unwrap_or_else(|e| e.into_inner());
+        let pair = (from.to_path_buf(), root.clone());
+        if !climbed.contains(&pair) {
+            climbed.push(pair);
+        }
+    }
+    found
 }
 
 /// [`look`] 의 속 — **임자를 재는 자를 받는다.** 시험은 남의 uid 로 된 디렉터리를 못 만든다
 /// (그러려면 root 가 있어야 한다). 받지 않으면 천장에 걸리는 갈래가 어느 기계에서도 안 돌고,
 /// 되돌려 놔도 판이 푸르다 — 지난 리뷰가 `scratch::base` 에서 짚은 것과 같은 덫이다.
+///
+/// **한 걸음에 다 잰다.** 천장을 미리 한 바퀴 돌던 판은 `.moai` 가 선 자리에 서 있어도 층마다
+/// `stat` 을 두 번씩 더 쳐, 도구 호출마다 도는 훅에서 한 번이 열세 번이 됐다(리뷰가 쟀다).
+/// 이제 흔한 자리는 `stat` 한 번에 돌아간다.
 fn look_under(from: &Path, mine: &dyn Fn(&Path) -> bool) -> Found {
-    let (ceiling, in_git) = ceiling_of(from, mine);
     let mut dir = from.to_path_buf();
+    // **`.moai` 보다 아래에서 만난 `.git`** — 잡은 트래커가 내가 선 체크아웃 **밖**이라는 뜻이다.
+    // 한 번 서면 안 바뀌니 그 뒤로는 안 묻는다.
+    let mut left_a_checkout = false;
     loop {
         // **못 들여다보는 조상은 건너뛴다** (`is_dir` 이 `false` 로 접는다). 위로 찾는
         // 길에서는 권한 없는 남의 디렉터리를 지나는 것이 흔한 일이라, [`Repo::open`]
         // 처럼 그것을 실패로 세면 제 저장소 밖 어디서나 넘어진다.
         if dir.join(".moai").is_dir() {
-            // **올라가 잡은 것은 git 밖에서만 알린다.** 위의 [`CLIMBED`] 가 왜인지 적는다.
-            if dir != from && !in_git {
-                let mut climbed = CLIMBED.lock().unwrap_or_else(|e| e.into_inner());
-                let pair = (from.to_path_buf(), dir.clone());
-                if !climbed.contains(&pair) {
-                    climbed.push(pair);
-                }
-            }
-            return Found { root: Some(dir), beyond: None };
+            // **잡은 자리가 내가 선 체크아웃 밖일 때만 알린다.** "위로 오는 길 어딘가에 `.git` 이
+            // 있었나" 로 재던 판은 그 `.git` 이 트래커보다 **아래**일 때도 입을 다물어, `.moai` 없는
+            // 클론 안에서 친 `add` 가 그 위의 트래커에 말없이 들어갔다 — 알리려던 바로 그 자리다.
+            let climbed = dir != from && (left_a_checkout || !git_at_or_above(&dir, mine));
+            return Found::Root { root: dir, climbed };
         }
-        if dir == ceiling {
-            break;
+        if !left_a_checkout {
+            left_a_checkout = dir.join(".git").exists();
         }
-        match dir.parent() {
-            Some(up) => dir = up.to_path_buf(),
-            None => break,
-        }
-    }
-    Found { root: None, beyond: above(&ceiling) }
-}
-
-/// [`look`] 의 천장과 **그 안에 git 이 있었는가**. 있었으면 알림을 안 낸다 — 체크아웃 안에서
-/// 하위 디렉터리에 선 사람에게 매번 알리면 그건 소음이다.
-///
-/// 한 번 오르며 둘을 함께 잰다. git 은 **막는 데 안 쓴다** — 알림을 낼지만 가른다.
-fn ceiling_of(from: &Path, mine: &dyn Fn(&Path) -> bool) -> (PathBuf, bool) {
-    let mut dir = from.to_path_buf();
-    let mut in_git = false;
-    loop {
-        in_git |= dir.join(".git").exists();
         match dir.parent() {
             Some(up) if mine(up) => dir = up.to_path_buf(),
-            _ => break,
+            _ => return Found::Ceiling(dir),
         }
     }
-    (dir, in_git)
 }
 
-/// 천장 **위**의 첫 `.moai`. 못 찾은 길에서만 돈다([`look`]).
+/// 잡은 트래커가 **내가 선 체크아웃 안**인가 — `.moai` 를 만난 자리에서 위로만 본다.
+///
+/// 그 아래에서 `.git` 을 이미 지났으면 체크아웃을 **두고** 올라간 것이라 부르지 않는다
+/// ([`look_under`] 가 `||` 로 끊는다). 모노레포처럼 `.git` 하나가 `top/projA/.moai` 를 품는
+/// 모양은 여기서 참이 되어 조용히 넘어간다.
+fn git_at_or_above(root: &Path, mine: &dyn Fn(&Path) -> bool) -> bool {
+    let mut dir = root.to_path_buf();
+    loop {
+        if dir.join(".git").exists() {
+            return true;
+        }
+        match dir.parent() {
+            Some(up) if mine(up) => dir = up.to_path_buf(),
+            _ => return false,
+        }
+    }
+}
+
+/// 천장 **위**의 첫 `.moai`. [`Repo::discover`] 만 부른다 — 못 찾은 길마다 `/` 까지 훑던 것을
+/// 그 답을 실제로 읽는 한 자리로 옮겼다.
 fn above(ceiling: &Path) -> Option<PathBuf> {
     let mut dir = ceiling.parent()?.to_path_buf();
     loop {
@@ -323,14 +346,15 @@ impl Repo {
     /// 사람이 이 고침 뒤에 처음 만나는 말이 여기다.
     pub fn discover() -> R<Repo> {
         let dir = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
-        if let Some(repo) = Repo::find_from(&dir)? {
-            return Ok(repo);
+        match look(&dir) {
+            Found::Root { root, .. } => Repo::from_found(root),
+            // 천장 위를 보는 훑기는 **여기서만** 돈다. `Found` 에 담아 내던 판은 `find`·
+            // `find_here`·훅까지 못 찾을 때마다 `/` 까지 훑게 하고는 그 답을 버렸다.
+            Found::Ceiling(ceiling) => Err(match above(&ceiling) {
+                Some(at) => beyond_says(&at).into(),
+                None => NOT_A_REPO.into(),
+            }),
         }
-        // 천장 위를 보는 훑기는 여기서만 돈다 — 찾은 길은 위에서 이미 돌아갔다.
-        Err(match look(&dir).beyond {
-            Some(at) => beyond_says(&at).into(),
-            None => NOT_A_REPO.into(),
-        })
     }
 
     /// [`Repo::discover`] 와 같되 **못 찾은 것을 실패로 접지 않는다** — `None`.
@@ -363,18 +387,24 @@ impl Repo {
     /// 말없이 제 스냅샷에 쓰기 시작해, 이 기능이 막으려던 갈라짐을 아무 말 없이 지었다. 쓸 트래커를
     /// 못 여는 것은 고칠 것이지 갈래가 아니다 — 루트에서 치면 나는 그 오류를 여기서도 그대로 낸다.
     pub fn find_from(dir: &Path) -> R<Option<Repo>> {
-        let Some(found) = Repo::found_root(dir) else { return Ok(None) };
-        // **`MOAI_HERE` 는 이 체크아웃에 쓴다.** 일부러 갈라 놓는 자리다 — 옆 스냅샷이 갈라진 상태를
-        // 짓는 시험과, 그 워크트리에서만 쓰는 트래커를 든 사람이다. 옮기는 것은 막는 것이 아니라
-        // 옮기는 것이므로, 되돌릴 손잡이 하나를 두는 값이 싸다. **끄는 값도 받는다** — 글이 `=1` 로
-        // 적혀 있어 `MOAI_HERE=0` 을 "아니오" 로 읽고 쓰는 쪽이 생기는데, 있기만 하면 켜던 판은
-        // 그 사람에게 말없이 갈라진 스냅샷을 줬다(리뷰 moai-71ht.jlh).
+        Repo::found_root(dir).map(Repo::from_found).transpose()
+    }
+
+    /// 찾은 자리로 [`Repo`] 를 짓는다 — [`Repo::find_from`] 과 [`Repo::discover`] 가 같이 쓴다.
+    /// 둘이 따로 적으면 한쪽만 `MOAI_HERE` 를 보거나 한쪽만 워크트리를 안 옮긴다.
+    ///
+    /// **`MOAI_HERE` 는 이 체크아웃에 쓴다.** 일부러 갈라 놓는 자리다 — 옆 스냅샷이 갈라진 상태를
+    /// 짓는 시험과, 그 워크트리에서만 쓰는 트래커를 든 사람이다. 옮기는 것은 막는 것이 아니라
+    /// 옮기는 것이므로, 되돌릴 손잡이 하나를 두는 값이 싸다. **끄는 값도 받는다** — 글이 `=1` 로
+    /// 적혀 있어 `MOAI_HERE=0` 을 "아니오" 로 읽고 쓰는 쪽이 생기는데, 있기만 하면 켜던 판은
+    /// 그 사람에게 말없이 갈라진 스냅샷을 줬다(리뷰 moai-71ht.jlh).
+    fn from_found(found: PathBuf) -> R<Repo> {
         let Some(root) = Repo::redirect(&found) else {
-            return Repo::rooted(found).map(Some);
+            return Repo::rooted(found);
         };
         // **설정은 한 번만 읽는다** — 찾은 자리로 [`Repo`] 를 지어 놓고 버리던 판은 워크트리의
         // `config.toml` 을 읽고 안 쓴 채 버렸다. 훅이 도구 호출마다 지나는 길이다.
-        Ok(Some(Repo { moved_from: Some(found), ..Repo::rooted(root)? }))
+        Ok(Repo { moved_from: Some(found), ..Repo::rooted(root)? })
     }
 
     /// [`Repo::find_from`] 과 같되 **안 옮긴다** — 찾은 자리의 트래커 그대로다.
@@ -405,7 +435,10 @@ impl Repo {
     /// [`Repo::find_from`] 의 **찾기만** — `.moai` 를 가진 조상의 자리다. 설정은 안 읽는다:
     /// 읽을 자리를 [`crate::worktree::tracker_root`] 가 아직 옮길 수 있다.
     fn found_root(dir: &Path) -> Option<PathBuf> {
-        look(dir).root
+        match look(dir) {
+            Found::Root { root, .. } => Some(root),
+            Found::Ceiling(_) => None,
+        }
     }
 
     fn rooted(root: PathBuf) -> R<Repo> {
@@ -571,16 +604,18 @@ impl Repo {
         // **이 쓰기가 짓는 줄은 id 로 안 부른다**(moai-1rkl) — 거절하면 그 id 는 어디에도 안 남아,
         // 받는 쪽이 없는 것을 찾으러 간다. 그 줄의 제목 한 토막으로 가리킨다.
         for e in &entries {
-            let at = match original.iter().any(|o| o.id == e.id) {
-                true => e.id.clone(),
-                false => crate::model::unwritten(
-                    issues.iter().find(|i| i.id == e.id).map(|i| i.title.as_str()).unwrap_or_default(),
-                ),
-            };
             for (what, t) in [("노트", &e.text), ("메모", &e.note)] {
-                if let Some(t) = t {
-                    crate::model::check_text_size(&at, what, t)?;
-                }
+                let Some(t) = t else { continue };
+                // **가리키는 말은 거절할 때만 짓는다**([`crate::model::check_text_size`] 가 늦게
+                // 부른다). 미리 지으면 `create` 처럼 글이 없는 저널 줄까지 `original` 과 `issues` 를
+                // 통째로 훑고 제목을 두 벌 베낀다 — 8,000줄 계획이면 락을 쥔 채 그 헛일이 8,000번이다.
+                let at = || match original.iter().any(|o| o.id == e.id) {
+                    true => e.id.clone(),
+                    false => crate::model::unwritten(
+                        issues.iter().find(|i| i.id == e.id).map(|i| i.title.as_str()).unwrap_or_default(),
+                    ),
+                };
+                crate::model::check_text_size(at, what, t)?;
             }
         }
 
@@ -602,11 +637,13 @@ impl Repo {
                         && now != before
                     {
                         // 이번에 지은 줄이면 id 가 아니라 제목으로 가리킨다(moai-1rkl).
-                        let at = match was {
+                        // **거절할 때만 짓는다** — 넘치는 글은 드물고 `unwritten` 은 제목을 두 벌
+                        // 베낀다. 500줄 계획이면 그 헛일을 500번 하고 전부 버리던 자리다.
+                        let at = || match was {
                             Some(_) => i.id.clone(),
                             None => crate::model::unwritten(&i.title),
                         };
-                        crate::model::check_text_size(&at, what, text)?;
+                        crate::model::check_text_size(at, what, text)?;
                     }
                 }
                 // **칸을 안 건드린 쓰기는 칸 이름을 다시 안 묻는다**(moai-hym7, 사람이
@@ -1100,15 +1137,28 @@ mod tests {
     /// `<자리>/a/b/c` 를 만들고 그 자리를 **임자의 끝**으로 삼는 자를 낸다. 시험은 남의 uid 로 된
     /// 디렉터리를 못 만들어(root 가 있어야 한다) 천장을 이렇게 흉내 낸다 — [`look_under`] 가
     /// 임자를 재는 자를 받는 까닭이다.
-    fn tree(name: &str) -> (Scratch, Box<dyn Fn(&Path) -> bool>) {
+    fn tree(name: &str) -> (Scratch, impl Fn(&Path) -> bool) {
         let s = Scratch::new(name);
         let top = s.path().to_path_buf();
         std::fs::create_dir_all(top.join("a/b/c")).unwrap();
-        (s, Box::new(move |p: &Path| p.starts_with(&top)))
+        (s, move |p: &Path| p.starts_with(&top))
     }
 
     fn moai_at(dir: &Path) {
         std::fs::create_dir_all(dir.join(".moai")).unwrap();
+    }
+
+    /// 찾은 뿌리만 — 못 찾았으면 `None`. 시험 대부분은 [`Found`] 의 둘째 값을 안 본다.
+    fn root_of(found: &Found) -> Option<&Path> {
+        match found {
+            Found::Root { root, .. } => Some(root),
+            Found::Ceiling(_) => None,
+        }
+    }
+
+    /// **올라가 잡았고 그 자리가 내가 선 체크아웃 밖인가** — 알릴지를 가르는 값이다.
+    fn climbed_out(found: &Found) -> bool {
+        matches!(found, Found::Root { climbed: true, .. })
     }
 
     /// **천장 위로는 안 올라간다**(moai-a2kn, 2026-09-20 사용자 결정). 남의 `.moai` 밑 어느
@@ -1129,13 +1179,24 @@ mod tests {
         let deep = proj.join("a/b/c");
 
         let found = look_under(&deep, &mine);
-        assert!(found.root.is_none(), "천장 위의 트래커를 잡았다 — {:?}", found.root);
-        assert_eq!(found.beyond.as_deref(), Some(s.path()), "못 쓴 자리를 안 가리킨다");
-        assert!(beyond_says(&found.beyond.unwrap()).contains("moai -C"), "가는 길을 안 댄다");
+        assert!(root_of(&found).is_none(), "천장 위의 트래커를 잡았다");
+        let Found::Ceiling(ceiling) = &found else { panic!("천장을 안 냈다") };
+        let beyond = above(ceiling);
+        assert_eq!(beyond.as_deref(), Some(s.path()), "못 쓴 자리를 안 가리킨다");
+        assert!(beyond_says(&beyond.unwrap()).contains("moai -C"), "가는 길을 안 댄다");
 
         // 천장 **안**이면 그대로 올라가 잡는다.
         moai_at(&proj.join("a"));
-        assert_eq!(look_under(&deep, &mine).root.as_deref(), Some(proj.join("a").as_path()));
+        assert_eq!(root_of(&look_under(&deep, &mine)), Some(proj.join("a").as_path()));
+    }
+
+    /// **가리키는 자리는 붙여 넣어 돌아야 한다**(moai-dtye). 빈칸이 든 경로를 날것으로 끼우던 판은
+    /// 막힌 사람에게 준 유일한 길(`moai -C …`)이 껍데기에서 두 인자로 갈라졌다.
+    #[test]
+    fn the_way_out_is_quoted_so_it_can_be_pasted() {
+        let said = beyond_says(Path::new("/w/My Projects/p"));
+        assert!(said.contains("moai -C '/w/My Projects/p' <명령>"), "{said}");
+        assert!(said.contains("moai project add '/w/My Projects/p'"), "{said}");
     }
 
     /// **처음 만난 `.moai` 가 이기는 자는 그대로다**(2026-09-20 사용자가 짚었다). 모노레포는
@@ -1150,16 +1211,13 @@ mod tests {
         std::fs::create_dir_all(s.join("projB/sub")).unwrap();
         moai_at(&s.join("projA"));
 
-        assert_eq!(
-            look_under(&s.join("projA/sub"), &mine).root.as_deref(),
-            Some(s.join("projA").as_path()),
-            "제 `.moai` 를 두고 모노레포 꼭대기로 갔다"
-        );
-        assert_eq!(
-            look_under(&s.join("projB/sub"), &mine).root.as_deref(),
-            Some(s.path()),
-            "`.moai` 없는 하위가 꼭대기의 것을 못 잡았다"
-        );
+        let a = look_under(&s.join("projA/sub"), &mine);
+        assert_eq!(root_of(&a), Some(s.join("projA").as_path()), "제 `.moai` 를 두고 모노레포 꼭대기로 갔다");
+        // 꼭대기의 `.git` 이 `projA` 를 품으니 그 안에서 올라간 것이다 — 알릴 일이 아니다.
+        assert!(!climbed_out(&a), "한 체크아웃 안에서 올라간 것을 밖이라고 했다");
+        let b = look_under(&s.join("projB/sub"), &mine);
+        assert_eq!(root_of(&b), Some(s.path()), "`.moai` 없는 하위가 꼭대기의 것을 못 잡았다");
+        assert!(!climbed_out(&b), "한 체크아웃 안에서 올라간 것을 밖이라고 했다");
     }
 
     /// **겹쳐 둔 저장소에서도 바깥 프로젝트의 트래커를 쓴다.** git 꼭대기를 천장으로 두었다가
@@ -1171,27 +1229,38 @@ mod tests {
         moai_at(s.path());
         let vendor = s.join("vendor");
         std::fs::create_dir_all(vendor.join(".git")).unwrap();
-        assert_eq!(look_under(&vendor, &mine).root.as_deref(), Some(s.path()));
+        let found = look_under(&vendor, &mine);
+        assert_eq!(root_of(&found), Some(s.path()));
+        // 겹쳐 둔 저장소를 **두고** 올라갔다 — 잡은 트래커가 그 체크아웃 밖이니 알린다.
+        assert!(climbed_out(&found), "체크아웃을 두고 올라간 것을 안 알린다");
     }
 
-    /// **올라가 잡은 것은 git 밖에서만 알린다.** 제 체크아웃 안에서 하위 디렉터리에 선 사람에게
+    /// **올라가 잡은 것은 제 체크아웃 밖일 때만 알린다.** 제 저장소의 하위 디렉터리에 선 사람에게
     /// 매번 한 줄을 내면 그건 소음이고, 소음은 아무도 안 읽는다.
+    ///
+    /// **셋을 가른다.** git 이 없는 자리(알린다), 트래커가 선 자리가 곧 체크아웃 꼭대기인 자리
+    /// (안 알린다), 그리고 `.moai` 없는 클론 **안**에서 그 위의 트래커를 잡는 자리(알린다). 셋째는
+    /// "위로 오는 길 어딘가에 `.git` 이 있었나" 로 재던 판이 조용히 넘기던 것이고, 알리려던 바로
+    /// 그 꼴이다 — 시험이 `.git` 과 `.moai` 를 같은 자리에만 두어 못 잡았다.
     #[test]
     fn climbing_outside_a_checkout_is_told_of_but_inside_one_is_not() {
-        // **셈이 아니라 그 자리를 찾는다** — 장부는 한 판의 모든 시험이 나눠 쓰므로, 몇 줄이
-        // 늘었는지로 재면 옆 시험이 같이 적을 때 헛돈다.
-        let told = |at: &Path| climbs().iter().any(|(_, to)| to == at);
-
         let (s, mine) = tree("look-climb");
         moai_at(s.path());
-        assert_eq!(look_under(&s.join("a/b"), &mine).root.as_deref(), Some(s.path()));
-        assert!(told(s.path()), "git 밖에서 올라갔는데 안 알렸다");
+        assert!(climbed_out(&look_under(&s.join("a/b"), &mine)), "git 밖에서 올라갔는데 안 알렸다");
 
         let (t, mine) = tree("look-climb-git");
         std::fs::create_dir_all(t.join(".git")).unwrap();
         moai_at(t.path());
-        assert_eq!(look_under(&t.join("a/b"), &mine).root.as_deref(), Some(t.path()));
-        assert!(!told(t.path()), "체크아웃 안에서 올라간 것을 알렸다 — 소음이다");
+        let inside = look_under(&t.join("a/b"), &mine);
+        assert_eq!(root_of(&inside), Some(t.path()));
+        assert!(!climbed_out(&inside), "체크아웃 안에서 올라간 것을 알렸다 — 소음이다");
+
+        let (u, mine) = tree("look-climb-leak");
+        moai_at(u.path());
+        std::fs::create_dir_all(u.join("a/.git")).unwrap();
+        let leak = look_under(&u.join("a/b"), &mine);
+        assert_eq!(root_of(&leak), Some(u.path()));
+        assert!(climbed_out(&leak), "`.moai` 없는 클론을 두고 올라간 것을 조용히 넘겼다");
     }
 
     /// **등록한 자리가 딸린 워크트리면 루트의 트래커를 연다**(moai-y7go, 리뷰 moai-71ht.jlh

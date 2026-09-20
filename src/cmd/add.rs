@@ -354,6 +354,26 @@ pub fn line_of(d: &Draft, id: Option<&str>) -> String {
     format!("{indent}{head}  {mark}  {}{tags}", d.title).trim_end().to_string()
 }
 
+/// 계획의 제목들이 상한 안인가 — **연습이 진짜와 같은 것을 보게 하는 자**(moai-5229).
+///
+/// 연습은 사람이 "좋다" 하는 자리다(AGENTS.md 갈림길 3). 크기를 안 재던 판은 66KB 계획에 0 으로
+/// 끝나며 `만들 것` 을 찍고, 같은 부름을 진짜로 하면 거절했다 — 승인한 뒤에 도구가 거절하는 꼴이다.
+///
+/// 재는 자는 진짜와 **한 자리**다([`crate::model::check_text_size`]). 여기에 따로 적으면 상한이
+/// 두 곳에 서고, 한쪽만 고치는 날 이 어긋남이 그대로 돌아온다. 가리키는 말도 같다 —
+/// 연습에도 진짜에도 아직 id 가 없다.
+///
+/// **여기서 거른다고 연습과 진짜가 같아진 것은 아니다.** 진짜는 `store::with_write` 에서
+/// `Issue::validate` 도 지나고 사람 이름도 푼다 — 쉼표가 든 태그(`#bug,perf`)나 git 사용자 정보가
+/// 없는 기계는 아직 연습을 지나 진짜에서 거절당한다. 그 자리를 닫는 길은 검사를 하나씩 옮겨
+/// 적는 것이 아니라 초안을 **id 를 뽑기 전에** 이슈로 빚어 한 번에 재는 것이다.
+pub fn check_plan(drafts: &[Draft]) -> R<()> {
+    for d in drafts {
+        crate::model::check_text_size(|| crate::model::unwritten(&d.title), "제목", &d.title)?;
+    }
+    Ok(())
+}
+
 /// 연습의 기계 출력. **`--dry-run` 도 `--json` 을 지킨다** — 연습은 계획을
 /// 미리 보는 자리인데 거기서만 사람 글이 나오면, 미리 보는 쪽은 파싱에
 /// 실패하고 결국 진짜로 만들어 보고서야 계획을 읽는다.
@@ -364,21 +384,6 @@ pub fn line_of(d: &Draft, id: Option<&str>) -> String {
 ///
 /// `dry_run` 을 적어 두는 것은 **id 가 없는 까닭**이 거기서 나오기 때문이다.
 /// 진짜 출력은 만든 줄을 그대로 내므로, 이 깃발이 두 모양을 가른다.
-/// 계획의 제목들이 상한 안인가 — **연습이 진짜와 같은 것을 보게 하는 자**(moai-5229).
-///
-/// 연습은 사람이 "좋다" 하는 자리다(AGENTS.md 갈림길 3). 크기를 안 재던 판은 66KB 계획에 0 으로
-/// 끝나며 `만들 것` 을 찍고, 같은 부름을 진짜로 하면 거절했다 — 승인한 뒤에 도구가 거절하는 꼴이다.
-///
-/// 재는 자는 진짜와 **한 자리**다([`crate::model::check_text_size`]). 여기에 따로 적으면 상한이
-/// 두 곳에 서고, 한쪽만 고치는 날 이 어긋남이 그대로 돌아온다. 가리키는 말도 같다 —
-/// 연습에도 진짜에도 아직 id 가 없다.
-pub fn check_plan(drafts: &[Draft]) -> R<()> {
-    for d in drafts {
-        crate::model::check_text_size(&crate::model::unwritten(&d.title), "제목", &d.title)?;
-    }
-    Ok(())
-}
-
 pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>, into: Option<&str>) -> R<Vec<String>> {
     /// 기본 우선순위는 **여기서 풀어 낸다.** `null` 을 내면 받는 쪽이 기본값을
     /// 다시 알아야 하고, 그러면 그 값이 두 곳에 적힌다. 우선순위가 없는 종류

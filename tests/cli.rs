@@ -2351,7 +2351,6 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
     }
     ok(s.path(), &["rm", &thought]);
 
-
     // 딱 상한은 받는다.
     ok(s.path(), &["note", &id, &"a".repeat(limit)]);
 
