@@ -8,6 +8,7 @@ description: Use for this repository's work, issues and plans. "what should I do
 The work lives in `.moai/issues.jsonl`. There is no approval gate — create anything, move anything. Do not ask a human.
 
     moai status                            board · warnings · flow (start a session here)
+    moai prime                             what you hold and what is next, nothing else
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
     moai show -g <keyword>                 find out whether it is written down already

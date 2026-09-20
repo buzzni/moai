@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:5180f6da -->
+<!-- moai:begin v:0.1.0 hash:cf13e1e5 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -7,6 +7,7 @@ Do not use TodoWrite or a markdown TODO list. There is no approval gate — crea
 Start a session by running `moai status`. The board and the warnings come up on one screen.
 
     moai status                            board · warnings · flow (start a session here)
+    moai prime                             what you hold and what is next, nothing else
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
     moai show -g <keyword>                 find out whether it is written down already

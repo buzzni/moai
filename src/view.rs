@@ -170,30 +170,50 @@ pub fn shelved_by<S: AsRef<str>>(roots: &[S]) -> String {
     )
 }
 
-/// 한 줄에 이름을 대는 풀린 일의 수. 넘으면 `moai ready` 로 넘긴다.
-const UNBLOCKED_SHOWN: usize = 3;
+/// 한 줄에 이름을 대는 줄의 수. 넘으면 수로만 댄다.
+const TRAIL_SHOWN: usize = 3;
 
-/// `moai mv <id> done` 뒤 **이로써 집을 수 있게 된 일** 한 줄(moai-942k, `report::unblocked`).
-/// 없으면 `None` — 말할 것이 없을 때 출력이 전과 같다.
+/// `moai mv <id> done` 이 **그 쓰기가 연 것**을 대는 줄들(moai-j4xs, `report::freed`).
+/// 셋 다 비면 빈 목록 — 말할 것이 없을 때 출력이 전과 같다.
 ///
-/// **흐린 한 줄이다.** 옮긴 줄이 주인공이고 이것은 곁들임이다. 색이 혼자 뜻을 지지 않게
-/// `↳ 풀림` 을 앞에 둔다. 여럿이면 앞 몇 건만 대고 나머지는 `moai ready` 가 낸다 —
-/// 제목을 다 달면 막음 하나를 푼 에픽 닫기가 화면을 채운다.
-pub fn unblocked_line(freed: &[Issue]) -> Option<String> {
-    if freed.is_empty() {
+/// **흐린 곁들임이다.** 옮긴 줄이 주인공이다. 색이 혼자 뜻을 지지 않게 머리에 낱말을 둔다.
+///
+/// **셋을 한 줄로 합치지 않는다.** 뜻이 다르기 때문이다 — 풀린 것은 집을 수 있고, 닫을 수
+/// 있는 것은 이미 쥔 것이고, 다음 것은 아직 아무도 안 쥔 것이다. 한 줄에 몰면 읽는 쪽이
+/// 다음 수를 그 줄에서 못 고른다.
+/// **키를 표에 접지 않는다** — `say(lang, "…")` 를 소스에서 읽는 시험
+/// (`i18n::tests::english_has_every_key_the_source_asks_for`)이 표에 숨은 키를 못 본다.
+pub fn freed_lines(freed: &[Issue], closable: &[Issue], next: &[Issue], lang: Lang) -> Vec<String> {
+    // **풀린 줄만 `moai ready` 를 곁들인다**: 그것은 이제 그 목록에 서는 줄이라 이어서 볼
+    // 곳이 있고, 닫을 수 있는 부모는 `ready` 에 안 선다.
+    [
+        trail(say(lang, "mv.unblocked"), freed, say(lang, "mv.unblocked_more")),
+        trail(say(lang, "mv.closable"), closable, say(lang, "mv.trail_more")),
+        trail(say(lang, "mv.next"), next, say(lang, "mv.trail_more")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+/// 머리 낱말 하나에 줄 몇을 단 흐린 한 줄. 비면 `None`.
+///
+/// 여럿이면 앞 몇 건만 대고 나머지는 수로 넘긴다 — 제목을 다 달면 막음 하나를 푼 에픽
+/// 닫기가 화면을 채운다.
+fn trail(head: &str, rows: &[Issue], more: &str) -> Option<String> {
+    if rows.is_empty() {
         return None;
     }
-    let named: Vec<String> = freed
+    let named: Vec<String> = rows
         .iter()
-        .take(UNBLOCKED_SHOWN)
+        .take(TRAIL_SHOWN)
         .map(|i| format!("{} {}", paint(style::ID, &one_line(&i.id)), paint(style::DIM, &clip(&one_line(&i.title), 40))))
         .collect();
-    let rest = freed.len().saturating_sub(UNBLOCKED_SHOWN);
-    let more = match rest {
+    let more = match rows.len().saturating_sub(TRAIL_SHOWN) {
         0 => String::new(),
-        n => paint(style::DIM, &format!("  외 {n}건 — `moai ready`")),
+        n => paint(style::DIM, &fill(more, &[("n", &n.to_string())])),
     };
-    Some(format!("{}  {}{more}", paint(style::DIM, "↳ 풀림"), named.join(&paint(style::DIM, " · "))))
+    Some(format!("{}  {}{more}", paint(style::DIM, head), named.join(&paint(style::DIM, " · "))))
 }
 
 /// 칠한 글과 **칠하지 않은 폭**을 받아 채운다 — [`cell`] 이 한 가지 색만 칠할 수
@@ -1082,6 +1102,138 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
 /// 그리기 맥락을 통째로 받으면 이 두 줄이 옆 워크트리에 매인 것으로 읽힌다.
 fn more_of(rest: usize, lang: Lang) -> String {
     fill(say(lang, "status.more"), &[("n", &rest.to_string())])
+}
+
+/// `moai prime` 한 판. **마크다운이고 칠하지 않는다**(moai-5ok8).
+///
+/// 이 글은 세션 첫머리와 접힌 뒤에 **다시 주입되는 맥락**이라, 보드처럼 표로 서지 않는다.
+/// 표는 폭을 맞추려고 제목을 자르는데 읽는 쪽이 사람이 아니면 그 자름은 그냥 잃은 글이고,
+/// 칸을 맞춘 빈칸은 세는 쪽에 값만 더한다. 그래서 제목은 안 자르고([`one_line`] 으로 한 줄로만
+/// 편다) 줄은 목록으로 선다.
+///
+/// **색을 안 입힌다.** [`paint`] 는 터미널이 붙어 있으면 칠하는데, 이 판은 그때도 문서다 —
+/// 마크다운 안의 이스케이프는 읽는 쪽이 사람이든 기계든 뜻이 없다.
+///
+/// **아무것도 막지 않는다.** 경고도 흐름도 안 싣는다 — 그것을 여기 실으면 세션마다 처음 읽는
+/// 글이 잔소리가 되고, 잔소리는 곧 린트고 린트는 곧 게이트다.
+pub fn prime(p: &crate::report::Prime, epics: &crate::report::EpicLabels, screen: Screen) -> Vec<String> {
+    let lang = screen.lang;
+    let mut out = vec![format!("# {}", say(lang, "prime.title")), String::new()];
+
+    // **모든 칸이 [`one_line`] 을 지난다 — id 와 칸까지.** 읽기는 관대해서 줄바꿈이 든 id 나
+    // 칸이 파일에 실제로 설 수 있는데(손으로 푼 머지), 이 판은 사람이 읽는 표가 아니라
+    // 에이전트의 맥락에 그대로 실리는 마크다운이다. 한 줄만 새면 `## 머리글` 과 가짜 `- \`id\``
+    // 줄이 이 판의 글로 서서, 읽는 쪽이 그것을 자료가 아니라 시킴으로 읽는다. 곁의
+    // [`trail`] 은 id 를 이미 이렇게 편다 — 한 diff 에 선 두 표면이 갈려 있었다.
+    let row = |i: &Issue, column: bool| {
+        let epic = epics.get(&(i.id.as_str(), i.kind)).map(|t| format!(" ({})", one_line(t))).unwrap_or_default();
+        let col = if column { format!(" · {}", one_line(i.status.as_str())) } else { String::new() };
+        // **남의 가지에서 온 줄에는 그 가지를 단다**(`--worktree`). 안 달면 옆 워크트리가
+        // 집은 일이 이 판의 "집은 것" 에 섞여, 읽는 쪽이 제가 쥔 것으로 읽고 이어서 한다.
+        let branch =
+            screen.branch(&i.id).map(|b| format!(" · {} {}", style::BRANCH_GLYPH, one_line(b))).unwrap_or_default();
+        format!("- `{}` p{}{}{} — {}{}", one_line(&i.id), i.priority(), col, branch, one_line(&i.title), epic)
+    };
+
+    out.push(format!("## {}", say(lang, "prime.held")));
+    out.push(String::new());
+    if p.held.is_empty() {
+        out.push(say(lang, "prime.held_none").to_string());
+    } else {
+        // 집은 것에는 **칸을 함께 단다** — `in_progress` 와 `review` 는 다음 수가 다르다.
+        out.extend(p.held.iter().map(|i| row(i, true)));
+    }
+    out.push(String::new());
+
+    out.push(format!("## {}", say(lang, "prime.ready")));
+    out.push(String::new());
+    if p.picks.is_empty() {
+        out.push(say(lang, "prime.ready_none").to_string());
+    } else {
+        out.extend(p.picks.iter().map(|i| row(i, false)));
+        // **잘린 것을 댄다.** 안 대면 이 판이 "집을 것이 셋뿐" 으로 읽혀, 다음에 무엇을
+        // 집을지 고르는 쪽이 `moai ready` 를 아예 안 부른다.
+        //
+        // **`status` 의 꼬리와 키가 같다**([`more_of`], `status.more`) — 같은 "N건 더" 를 두
+        // 키로 두면 한쪽만 옮긴 말에서 한 화면이 두 모양으로 센다. 뒤의 명령은 자료라 말묶음
+        // 밖에 둔다: 번역이 그것을 만지면 훅에 걸린 세션이 못 치는 명령을 받는다
+        // (`projects_ready` 가 같은 자리를 같은 꼴로 푼다).
+        if p.rest > 0 {
+            out.push(format!("- {} — `moai ready`", more_of(p.rest, lang)));
+        }
+    }
+    // 도는 마일스톤은 **목록 밑에서** 댄다 — `ready` 가 짧아진 까닭을 그 자리에서 읽는다.
+    if !p.focus.running.is_empty() {
+        let ids: Vec<&str> = p.focus.running.iter().map(|m| m.id.as_str()).collect();
+        out.push(String::new());
+        out.push(format!("> {}", fill(say(lang, "prime.milestone"), &[("ids", &ids.join(", "))])));
+    }
+    out.push(String::new());
+
+    out.push(format!("## {}", say(lang, "prime.closing")));
+    out.push(String::new());
+    out.extend(prime_closing(lang).into_iter().map(|said| format!("- {said}")));
+    out.push(String::new());
+
+    out.push(format!("## {}", say(lang, "prime.commands")));
+    out.push(String::new());
+    out.extend(prime_commands(lang).into_iter().map(|(run, said)| format!("- `{run}` — {said}")));
+    out
+}
+
+/// 트래커를 못 읽은 자리의 [`prime`]. **머리글이 한 자리에만 있다** — `cmd/prime.rs` 가 같은
+/// `# 제목` 을 손으로 한 벌 더 짓던 판은 이 함수를 고쳐도 그쪽이 옛 모양으로 남았다.
+///
+/// **닫기 전 목록과 명령은 여기서도 선다.** `--json` 이 그 둘을 싣는데 사람 쪽만 빼면,
+/// 훅에 거는 쪽이 두 표면 중 하나를 못 믿는다([`prime_closing`] 의 까닭 그대로).
+pub fn prime_no_repo(lang: Lang) -> Vec<String> {
+    let mut out = vec![format!("# {}", say(lang, "prime.title")), String::new()];
+    out.push(say(lang, "prime.no_repo").to_string());
+    out.push(String::new());
+    out.push(format!("## {}", say(lang, "prime.closing")));
+    out.push(String::new());
+    out.extend(prime_closing(lang).into_iter().map(|said| format!("- {said}")));
+    out.push(String::new());
+    out.push(format!("## {}", say(lang, "prime.commands")));
+    out.push(String::new());
+    out.extend(prime_commands(lang).into_iter().map(|(run, said)| format!("- `{run}` — {said}")));
+    out
+}
+
+/// 닫기 전에 볼 것 — **[`prime`] 이 그리는 것과 같은 줄**. `--json` 이 이것으로 같은 말을
+/// 낸다. 두 표면이 목록을 따로 들면 한쪽만 자라고, 그때 받는 쪽은 어느 것이 참인지 못 가린다.
+///
+/// **차례는 훅이 실제로 보는 규칙과 같다** — 이 글만 읽은 세션이 거절문을 처음 만나는 자리가
+/// 없게 한다.
+///
+/// **키를 표에 접어 두지 않는다.** 키를 `&[&str]` 에 모아 놓고 도는 판은 `say(lang, "…")` 를
+/// 소스에서 읽는 시험(`i18n::tests::english_has_every_key_the_source_asks_for`)의 눈에 안
+/// 띄어, 오타 난 키가 아무 데서도 안 붉어진다 — `view::says` 의 스물한 줄이 그렇게 숨었던
+/// 자리다. 한 줄씩 적어 두면 표와 소스가 한 자리에서 견줘진다.
+pub fn prime_closing(lang: Lang) -> Vec<&'static str> {
+    vec![
+        say(lang, "prime.close_pick"),
+        say(lang, "prime.close_scope"),
+        say(lang, "prime.close_review"),
+        say(lang, "prime.close_model"),
+        say(lang, "prime.close_handoff"),
+        say(lang, "prime.close_status"),
+    ]
+}
+
+/// 명령과 그 한 줄 — [`prime_closing`] 과 같은 까닭으로 [`prime`] 과 한 자리를 쓴다.
+///
+/// **예닐곱 개다.** 여기가 길어지면 `--help` 가 된다 — 이 판의 값은 짧다는 것 하나다.
+pub fn prime_commands(lang: Lang) -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("moai status", say(lang, "prime.cmd_status")),
+        ("moai ready", say(lang, "prime.cmd_ready")),
+        ("moai show <id>", say(lang, "prime.cmd_show")),
+        ("moai mv <id> in_progress --from todo", say(lang, "prime.cmd_mv")),
+        ("moai note <id> '…'", say(lang, "prime.cmd_note")),
+        ("moai mv <id> done -m '…'", say(lang, "prime.cmd_done")),
+        ("moai idea add '…'", say(lang, "prime.cmd_idea")),
+    ]
 }
 
 /// 집을 수 있는 일. 그리고 이미 벌여 놓은 것.

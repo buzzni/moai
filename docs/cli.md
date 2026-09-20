@@ -19,6 +19,7 @@ Usage: moai [OPTIONS] [COMMAND]
 Commands:
   status        Board, warnings, flow. A session starts here
   ready         What you can pick up now
+  prime         A short markdown page - what you hold and what comes next
   add           Create an issue
   show          Open one, or list them
   mv            Move the status
@@ -165,6 +166,40 @@ Options:
   column, or was deferred and picked back up, later wins - so editing only
   the title or priority here does not free what the other side picked up, and
   work the other side deferred later is not offered here.
+```
+
+## `moai prime`
+
+```
+A short markdown page - what you hold and what comes next
+
+Usage: moai prime [OPTIONS]
+
+Options:
+      --worktree             Also overlay other worktrees (no file changes)
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Made for a session's first read and for the context injected again
+  after a compact. The board is for a person: it draws warnings, the flow and
+  the group bars, and that is far more than the two questions asked there -
+  what was I holding, and what comes next.
+
+  Markdown, never coloured, and the exit code is always 0. If it ever spoke
+  with a non-zero code, a session that wires it into a start-up hook would
+  open on a failure - and then this is a lint, and a lint is a gate.
+
+  Wire it where your editor injects context at session start. For Claude Code
+  that is a SessionStart hook, which fires again after a compact:
+
+    moai prime
+
+  With --worktree, work picked up in a sibling worktree shows with its branch
+  and drops out of what is next - the same overlay `moai ready` uses.
 ```
 
 ## `moai add`
@@ -382,6 +417,11 @@ Options:
   with several, the won and the lost rows share one exit code.
 
   moai mv moai-4aex in_progress --from todo
+
+  Closing says what that write opened - work that just became ready, a parent
+  whose last unfinished child is now done, and the next pick in the same epic.
+  Nothing of that is stored: it is read from the rows each time, and `--json`
+  carries unblocked, closable and next, always as arrays.
 ```
 
 ## `moai edit`

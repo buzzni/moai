@@ -13,6 +13,7 @@ pub mod link;
 pub mod merge_driver;
 pub mod mv;
 pub mod note;
+pub mod prime;
 pub mod read;
 pub mod project;
 pub mod ready;
@@ -237,6 +238,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Defer(a) => defer::run(&ctx, a),
         Cmd::Read(a) => read::run(&ctx, a),
         Cmd::Ready(w) => ready::run(&ctx, w.worktree),
+        Cmd::Prime(w) => prime::run(&ctx, w.worktree),
         Cmd::Status(w) => status::run(&ctx, w.worktree),
         Cmd::Tui(a) => tui::run(&ctx, a),
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),

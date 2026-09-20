@@ -2328,6 +2328,44 @@ pub fn ready_in<'a>(issues: &'a [Issue], cfg: &Config) -> (Vec<&'a Issue>, Focus
     picks_in(issues, cfg, true)
 }
 
+/// `moai prime` 한 판이 읽어 낸 것 — **집은 것과 다음에 집을 것**.
+///
+/// 세션 첫머리와 접힌 뒤에 다시 주입되는 요약이라, 보드([`status`])가 아니라 이것이다.
+/// 보드는 13KB 를 넘고 경고·흐름·묶음 막대까지 그리는데, 그 자리가 묻는 것은 "내가 무엇을
+/// 쥐고 있었나, 다음은 무엇인가" 둘뿐이다 — 나머지는 읽는 쪽의 맥락을 그만큼 밀어낸다.
+///
+/// **저장하지 않는다.** 여기 든 것은 전부 지금 줄들에서 읽어 낸 값이고, 고르는 자는 이미
+/// 있는 둘([`wip`]·[`ready_in`])이다. 새 자를 세우면 `prime` 이 대는 "다음 일" 과
+/// `moai ready` 가 내미는 줄이 갈린다.
+#[derive(Debug)]
+pub struct Prime<'a> {
+    /// 지금 집은 일 — [`wip`] 와 같은 자다.
+    pub held: Vec<&'a Issue>,
+    /// 다음에 집을 것. [`ready_in`] 의 앞에서 [`PRIME_PICKS`] 개.
+    pub picks: Vec<&'a Issue>,
+    /// `picks` 에 안 실린 나머지 수. **0 이 아니면 잘렸다는 뜻**이라, 받는 쪽이 이 판을
+    /// "집을 것이 셋뿐" 으로 안 읽는다.
+    pub rest: usize,
+    /// 도는 마일스톤이 목록에 한 일 — [`ready_in`] 이 낸 그대로다.
+    pub focus: Focus<'a>,
+}
+
+/// `prime` 이 내미는 다음 일의 수. **셋이다** — 요약 한 판의 값은 짧다는 것이고, 더 보는 말은
+/// `moai ready` 하나다. 이 자름은 사람 쪽과 `--json` 이 **같이** 쓴다: 사람 화면만 자르면
+/// 기계가 읽는 판이 보드만큼 길어져 이 명령이 선 까닭이 사라진다.
+///
+/// **다만 이 수가 묶는 것은 줄 수지 크기가 아니다**(리뷰). 한때 `--json` 이 줄을 통째로
+/// (본문까지) 펴 11KB 였다 — 셋으로 잘렸는데도 사람 쪽의 네 배고 보드에 가까웠다. 크기를
+/// 묶는 것은 `cmd::prime::Brief` 이고, 둘이 함께 서야 위의 말이 참이 된다.
+pub const PRIME_PICKS: usize = 3;
+
+/// [`Prime`] 을 읽어 낸다.
+pub fn prime<'a>(issues: &'a [Issue], cfg: &Config) -> Prime<'a> {
+    let (all, focus) = ready_in(issues, cfg);
+    let rest = all.len().saturating_sub(PRIME_PICKS);
+    Prime { held: wip(issues, cfg), picks: all.into_iter().take(PRIME_PICKS).collect(), rest, focus }
+}
+
 /// **막음만 보는 목록** — 도는 마일스톤은 안 본다. [`unblocked`] 가 이것으로 두 판을 견준다.
 ///
 /// 마일스톤 우선은 **막음이 아니다**(리뷰 moai-493a.2om 2). 거른 목록으로 견주면, 마일스톤이
@@ -2406,6 +2444,98 @@ fn picks_in<'a>(issues: &'a [Issue], cfg: &Config, focused: bool) -> (Vec<&'a Is
 pub fn unblocked<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     let was: BTreeSet<&str> = ready_unfocused(before, cfg).into_iter().map(|i| i.id.as_str()).collect();
     ready_unfocused(after, cfg).into_iter().filter(|i| !was.contains(i.id.as_str())).collect()
+}
+
+/// 닫는 쓰기가 **연 것 셋** — 이로써 집을 수 있게 된 일, 이제 닫을 수 있는 부모, 같은
+/// 에픽의 다음 일(moai-j4xs). `moai mv <id> done` 이 한 줄씩 댄다.
+///
+/// **셋이 겹치지 않는다.** [`unblocked`] 는 첫 칸의 줄만 세고([`ready`]), [`Freed::closable`] 은
+/// 이미 시작한 칸의 줄만 세며, [`Freed::next`] 는 [`Freed::unblocked`] 에 든 id 를 뺀다 —
+/// 한 줄이 두 자리에서 두 번 불리면 읽는 쪽이 그것을 두 건으로 센다.
+///
+/// **저장하지 않는다.** 셋 다 두 스냅샷을 지금 견준 값이다 — 필드로 적으면 이슈 A 를 닫을
+/// 때 A 이외의 줄을 써야 하고, 그것이 beads 의 `is_blocked`·`bd recompute-blocked` 다.
+#[derive(Debug)]
+pub struct Freed<'a> {
+    /// 쓰기 전에는 [`ready`] 가 아니었고 쓴 뒤에는 ready 인 일 — [`unblocked`] 그대로다.
+    pub unblocked: Vec<&'a Issue>,
+    /// **이제 닫을 수 있는 부모** — 마지막 안 끝난 일 자식이 이 쓰기로 닫혔는데, 부모가
+    /// 이미 시작한 칸에 서 있어 [`unblocked`] 에는 안 드는 줄.
+    ///
+    /// 묶음(에픽·마일스톤)은 여기 안 든다 — 칸을 멤버에서 읽어 저절로 서고, 그것은
+    /// `mv` 가 `stands` 로 이미 댄다. 여기 드는 것은 **제 칸을 제가 드는 부모 이슈**뿐이다.
+    pub closable: Vec<&'a Issue>,
+    /// 닫은 줄과 **같은 에픽에서 다음에 집을 것.** 이미 ready 이던 줄이라 두 판을 견주는
+    /// [`unblocked`] 에는 안 드는데, 멤버 하나를 닫은 자리에서 가장 자주 묻는 것이 이것이다.
+    /// 에픽마다 하나다 — 목록을 내는 것은 `moai ready` 의 일이다.
+    pub next: Vec<&'a Issue>,
+}
+
+/// [`Freed`] 를 읽어 낸다. `closed` 는 이 쓰기가 실제로 `done` 으로 옮긴 id 들이다.
+///
+/// **[`ready`] 를 세 번 센다**(`before` 한 번, `after` 를 거르개 없이·있이 각각 한 번). 닫는
+/// 쓰기에서만 도는 자리라 그 값을 치른다 — [`Freed::next`] 가 도는 마일스톤을 봐야 하고
+/// ([`ready_in`]), [`unblocked`] 는 봐서는 안 되기 때문이다([`ready_unfocused`]): 마일스톤이
+/// 끝나는 순간 밖의 일 전부가 "풀림" 으로 서면 아무도 안 막던 줄을 막혔던 것으로 말한다.
+pub fn freed<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config, closed: &[&str]) -> Freed<'a> {
+    let unblocked = unblocked(before, after, cfg);
+    Freed { closable: closable(before, after, cfg), next: next_of(after, cfg, closed, &unblocked), unblocked }
+}
+
+/// 마지막 안 끝난 일 자식이 이 쓰기로 닫힌 부모 — **이미 시작한 칸에 선 것만**.
+///
+/// 첫 칸의 부모는 [`unblocked`] 가 이미 낸다([`unblocked_pick`] 의 `has_open_child`). 여기서
+/// 그것까지 세면 같은 줄이 두 번 불린다.
+fn closable<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
+    // **미룬 자식은 안 끝난 자식이 아니다** — `unblocked_pick` 이 `ready` 에서 쓰는 자와 같다.
+    // 이것을 안 맞추면 미룬 자식 하나가 남은 부모를 여기서는 "닫을 수 있다" 로, `ready` 에서는
+    // "아직 자식이 있다" 로 말한다.
+    let (was_off, now_off) = (put_off(before), put_off(after));
+    let open = |issues: &[Issue], id: &str, off: &BTreeSet<&str>| {
+        children_of(issues, id).iter().any(|c| is_work(c) && !off.contains(c.id.as_str()) && !c.status.is_done())
+    };
+    // **가려진 줄은 여기 안 든다** — `unblocked_pick` 과 [`wip`] 가 그 줄을 집은 일로 안 세는
+    // 것과 같은 자다(moai-es40). 안 맞추면 쌍둥이에게 자리를 뺏긴 부모에게 "닫으면 된다" 고
+    // 대는데, 그 id 는 `duplicate_id` 로 파일째 쓰기가 막혀 있어 시킨 명령을 도구가 제 손으로
+    // 거절한다 — 덫을 하나 놓는 일이다.
+    let eclipsed = eclipsed(after);
+    after
+        .iter()
+        .filter(|p| {
+            is_work(p)
+                && !now_off.contains(p.id.as_str())
+                && !eclipsed(p)
+                && cfg.is_started(p.status.as_str())
+                && !open(after, &p.id, &now_off)
+                && open(before, &p.id, &was_off)
+        })
+        .collect()
+}
+
+/// 닫은 줄들의 에픽마다 **다음에 집을 것 하나**. 차례는 [`ready_in`] 의 차례 그대로다.
+fn next_of<'a>(after: &'a [Issue], cfg: &Config, closed: &[&str], said: &[&'a Issue]) -> Vec<&'a Issue> {
+    // **소속을 먼저 묻고 차례는 나중에 잰다.** 에픽 없는 줄을 닫은 것은 여기서 할 말이
+    // 없는데([`groups`] 에 안 든다), 차례를 먼저 재면 그 판이 빈 답을 내려고 스냅샷을 한 번
+    // 더 걷는다 — 닫는 쓰기는 락을 쥔 자리라 헛걸음 한 판이 그대로 락 시간이다.
+    let epic_of = groups(after);
+    let epics: BTreeSet<&str> = closed.iter().filter_map(|id| epic_of.get(id).copied()).collect();
+    if epics.is_empty() {
+        return Vec::new();
+    }
+    let (picks, _) = ready_in(after, cfg);
+    let already: BTreeSet<&str> = said.iter().map(|i| i.id.as_str()).collect();
+    // **한 줄은 한 에픽에만 든다**([`groups`] 는 id 마다 에픽 하나를 낸다). 그래서 서로 다른
+    // 에픽이 같은 줄을 고를 수 없고, 겹침을 거르는 자리는 위의 `already` 하나뿐이다 —
+    // `unblocked` 에 이미 선 줄을 또 대지 않는 것이 실제로 막아야 할 겹침이다.
+    epics
+        .into_iter()
+        .filter_map(|e| {
+            picks
+                .iter()
+                .find(|p| epic_of.get(p.id.as_str()) == Some(&e) && !already.contains(p.id.as_str()))
+                .copied()
+        })
+        .collect()
 }
 
 /// 막음을 재는 데 드는 것 — 계획에서 빠진 줄(뺀 곳과 함께)과, 막는 묶음의 읽은 칸.
@@ -4421,6 +4551,62 @@ mod tests {
         assert_eq!(got, BTreeSet::from(["argos-0002", "argos-0003"]));
         // 아무것도 안 바꾼 쓰기는 풀린 것이 없다.
         assert!(unblocked(&before, &before, &cfg()).is_empty());
+    }
+
+    /// **이미 시작한 부모는 `unblocked` 에 안 든다**(moai-j4xs). ready 는 첫 칸의 줄만 세므로,
+    /// 마지막 자식을 닫아도 `in_progress` 에 선 부모는 두 판을 견주는 자에 안 걸린다 — 그
+    /// 부모야말로 "이제 닫으면 된다" 는 말을 받을 줄이다.
+    ///
+    /// **첫 칸의 부모는 여기 안 든다** — 그쪽은 `unblocked` 가 이미 댄다. 둘이 겹치면 한 줄이
+    /// 두 번 불려 읽는 쪽이 두 건으로 센다.
+    #[test]
+    fn closable_names_the_started_parent_whose_last_child_just_closed() {
+        let before = vec![
+            make("argos-0001", Kind::Issue, "in_progress"), // 시작한 부모
+            make("argos-0001.aaa", Kind::Issue, "todo"),    // 그 마지막 자식
+            make("argos-0002", Kind::Issue, "todo"),        // 첫 칸의 부모
+            make("argos-0002.aaa", Kind::Issue, "todo"),
+            make("argos-0003", Kind::Issue, "in_progress"), // 자식이 남은 부모
+            make("argos-0003.aaa", Kind::Issue, "todo"),
+            make("argos-0003.bbb", Kind::Issue, "todo"),
+        ];
+        let mut after = before.clone();
+        for i in after.iter_mut().filter(|i| i.id.ends_with(".aaa")) {
+            i.status = Status::new("done");
+        }
+        let got: Vec<&str> = closable(&before, &after, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(got, ["argos-0001"], "시작한 부모 하나만 든다");
+        let freed: BTreeSet<&str> = unblocked(&before, &after, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert!(freed.contains("argos-0002"), "첫 칸의 부모는 전처럼 `unblocked` 가 댄다");
+        assert!(!freed.contains("argos-0001"), "같은 줄이 두 자리에서 불렸다");
+        // 아무것도 안 바꾼 쓰기는 닫을 수 있게 된 것도 없다.
+        assert!(closable(&before, &before, &cfg()).is_empty());
+    }
+
+    /// **같은 에픽의 다음 일은 에픽마다 하나**(moai-j4xs). 이미 ready 이던 줄이라 두 판을
+    /// 견주는 [`unblocked`] 에는 안 들고, 멤버 하나를 닫은 자리에서 가장 자주 묻는 것이 이것이다.
+    #[test]
+    fn next_of_names_one_pick_per_epic_of_what_just_closed() {
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "todo"),
+            member("argos-000a", "argos-0001", "done"), // 방금 닫은 멤버
+            member("argos-000b", "argos-0001", "todo"), // 그 에픽의 다음
+            member("argos-000c", "argos-0001", "todo"), // 목록은 `moai ready` 의 일이다
+            make("argos-0002", Kind::Epic, "todo"),
+            member("argos-000d", "argos-0002", "todo"), // 남의 에픽 — 안 댄다
+        ];
+        let got: Vec<&str> = next_of(&issues, &cfg(), &["argos-000a"], &[]).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(got, ["argos-000b"], "그 에픽의 다음 하나만 든다");
+        // **`unblocked` 에 이미 든 줄은 빼고 고른다** — 같은 줄을 두 줄에 적으면 두 건으로 읽힌다.
+        let said = [&issues[2]];
+        let got: Vec<&str> = next_of(&issues, &cfg(), &["argos-000a"], &said).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(got, ["argos-000c"], "이미 댄 줄을 또 댔다");
+        // **에픽 없는 줄을 닫은 것은 여기서 할 말이 없다** — "같은 에픽" 이 없다. 이것을
+        // 안 가르면 에픽 없는 일 하나를 닫을 때마다 아무 에픽의 줄이나 "다음" 으로 선다.
+        let mut loose = issues.clone();
+        loose.push(make("argos-000e", Kind::Issue, "done"));
+        assert!(next_of(&loose, &cfg(), &["argos-000e"], &[]).is_empty(), "에픽 없는 줄에 남의 다음을 댔다");
+        assert!(next_of(&issues, &cfg(), &[], &[]).is_empty(), "닫은 것이 없으면 다음도 없다");
     }
 
     /// 급한 것 먼저, 그다음 끝나가는 에픽 먼저.

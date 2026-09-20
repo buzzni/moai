@@ -4,22 +4,34 @@
 
 ```sh
 moai merge-driver --install     # resolve issues.jsonl per issue
-scripts/install-git-hooks.sh    # refuse a tag that disagrees with Cargo.toml
+scripts/install-git-hooks.sh    # pre-push and prepare-commit-msg
 ```
 
 Neither is committed — git reads merge-driver commands from config, and hooks
 live outside the working tree — so a clone that skips these behaves exactly as
 before. They are a safety net, not a rule.
 
-The hook installer keeps a hook that is already there: it moves it to
-`pre-push.moai-before` and calls it first, so lefthook, husky or your own script
+The installer puts in two shims:
+
+- `pre-push` refuses a tag that disagrees with `Cargo.toml`
+- `prepare-commit-msg` adds `Executed-By: Name <email>` when `MOAI_ACTOR` is set,
+  so `git log` shows which commits an agent ran. The tracker's journal already
+  records who, but that lives in `.moai`; a trailer is the cheapest way to say
+  the same thing where git itself keeps it. Merge and squash commits are left
+  alone, so is an amend that already carries the line, and so is a message you have
+  not written yet — a plain `git commit`, and a `-v` one whose diff sits below the
+  scissors line, both get their template back untouched.
+
+Each shim keeps a hook that is already there: it moves it to
+`<name>.moai-before` and calls it first, so lefthook, husky or your own script
 keeps working. `scripts/install-git-hooks.sh --uninstall` puts it back.
 
-The hook itself is thin, and it blocks a push in exactly two cases: the hook that
-was there before it fails, or a tag disagrees with `Cargo.toml`. Missing tools, a
-missing checkout, a check that runs long — all pass. A push should not be blocked
-by the tooling's own circumstances, and the release workflow measures the same
-thing again where it actually matters.
+The shims are thin, and they block in exactly two cases: the hook that was there
+before one of them fails, or a tag disagrees with `Cargo.toml`. Missing tools, a
+missing checkout, a check that runs long, a trailer that could not be written —
+all pass. Pushing and committing should not be blocked by the tooling's own
+circumstances, and the release workflow measures the tag again where it actually
+matters.
 
 ## Build and test
 

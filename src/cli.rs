@@ -155,6 +155,25 @@ pub enum Cmd {
   work the other side deferred later is not offered here.")]
     Ready(WorktreeArg),
 
+    /// A short markdown page - what you hold and what comes next
+    #[command(after_help = "  Made for a session's first read and for the context injected again
+  after a compact. The board is for a person: it draws warnings, the flow and
+  the group bars, and that is far more than the two questions asked there -
+  what was I holding, and what comes next.
+
+  Markdown, never coloured, and the exit code is always 0. If it ever spoke
+  with a non-zero code, a session that wires it into a start-up hook would
+  open on a failure - and then this is a lint, and a lint is a gate.
+
+  Wire it where your editor injects context at session start. For Claude Code
+  that is a SessionStart hook, which fires again after a compact:
+
+    moai prime
+
+  With --worktree, work picked up in a sibling worktree shows with its branch
+  and drops out of what is next - the same overlay `moai ready` uses.")]
+    Prime(WorktreeArg),
+
     /// Create an issue
     // `-h` 도 설명을 옵션 밑 줄에 둔다(`next_line_help`) — 옆 한 줄 모양이면 옵션 열이
     // `--type <issue|epic|milestone|idea>` 에 맞춰 44칸으로 벌어져 설명이 112칸까지
@@ -217,7 +236,12 @@ A title may start with `--`. Anything that is not a known flag is a title.")]
   loser gets one stderr line and a non-zero code. **Give one id** then:
   with several, the won and the lost rows share one exit code.
 
-  moai mv moai-4aex in_progress --from todo")]
+  moai mv moai-4aex in_progress --from todo
+
+  Closing says what that write opened - work that just became ready, a parent
+  whose last unfinished child is now done, and the next pick in the same epic.
+  Nothing of that is stored: it is read from the rows each time, and `--json`
+  carries unblocked, closable and next, always as arrays.")]
     Mv(MvArgs),
     /// Edit title, body, tags, epic or priority
     #[command(after_help = "  `--epic none` and `--milestone none` clear only the field on that row.
