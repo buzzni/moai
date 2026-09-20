@@ -667,11 +667,27 @@ fn holds(disk: &Disk, tree: &Tree, mine: &[Issue], cfg: &crate::config::Config) 
 /// 줄까지 `places`·`stranded` 에 거는데, main 의 스냅샷에는 그 줄이 없어 "이름으로 다 잡혔다" 로
 /// 읽힌다 — 그러면 `holds` 가 빈 채로 나가 그 줄이 통째로 `Lost` 로 서고, 살아 있는 세션의 일이
 /// `stranded` 경고와 `show` 의 `자리 없다` 로 뒤집힌다.
+// 바이너리는 재료를 든 [`workplaces_in`] 을 부른다(moai-rviv) — 이 꼴은 시험의 짧은 길이다.
+#[cfg(test)]
 pub fn workplaces(
     root: &Path,
     cfg: &crate::config::Config,
     worktree: bool,
     asked: &[Issue],
+) -> Vec<crate::report::Workplace> {
+    workplaces_in(root, worktree, &crate::report::Footing::of(asked, cfg))
+}
+
+/// [`workplaces`] 와 같은 것. **자리 판정의 재료를 받는다**([`crate::report::Footing`]) — 문을 여는
+/// 자리와 그 뒤의 판정([`crate::report::places`]·[`crate::report::stranded`])이 같은 재료를 나눠
+/// 쓴다. 저마다 지으면 `moai status` 한 번에 집은 줄과 소속 지도를 네댓 벌 짓는다(moai-rviv).
+///
+/// 재료는 **게으르다** — 아래 세 갈래(딸린 워크트리에서 안 겹쳐 볼 때, git 밖, 딸린 워크트리가
+/// 하나도 없을 때)는 그것을 하나도 안 보고 돌아서므로, 그 길의 값은 예전 그대로다.
+pub fn workplaces_in(
+    root: &Path,
+    worktree: bool,
+    footing: &crate::report::Footing<'_, '_>,
 ) -> Vec<crate::report::Workplace> {
     if !worktree && is_linked(root) {
         return Vec::new();
@@ -722,8 +738,7 @@ pub fn workplaces(
     // 수 있는 그 줄이 `stranded` 로 선다. 이름으로는 거의 못 찾는다 — 쌍둥이(뒷줄)가 그 id 의 에픽을
     // `groups` 에서 지워, 규약대로 에픽 이름으로 뜬 워크트리도 그 줄을 못 가리킨다.
     let all_names = names(linked.iter().copied());
-    let named = crate::report::claimed(asked, &all_names);
-    if crate::report::started(asked, cfg).iter().all(|i| named(i)) {
+    if footing.picked().values().all(|i| footing.claims(&all_names, i)) {
         return out;
     }
     // 여기서부터가 파는 길이다 — **뜬 때도 여기서 읽는다.** `born` 은 이름 없는 워크트리의
@@ -740,7 +755,7 @@ pub fn workplaces(
         place.born = disk.admin.get(&tree.path).and_then(|dir| born_of(dir));
         // **제 워크트리도 남과 같은 자로 잰다.** 한때 비워 두었더니, 이름이 id 가 아닌
         // 워크트리(에이전트 격리)가 제가 하고 있는 일을 제 화면에서 "자리 없다" 로 댔다.
-        match holds(&disk, tree, mine, cfg) {
+        match holds(&disk, tree, mine, footing.cfg()) {
             Some((holds, touched)) => {
                 place.holds = holds;
                 place.touched = touched;
@@ -993,10 +1008,14 @@ pub fn stranded_at(
     worktree: bool,
     now: &str,
 ) -> (Option<crate::report::Warning>, Unread) {
-    let trees = workplaces(root, cfg, worktree, issues);
-    let warning = crate::report::stranded(issues, cfg, &trees, now);
+    // **재료는 한 벌이다**([`crate::report::Footing`], moai-rviv) — 문(`workplaces_in`)과 그 뒤의
+    // 판정 둘이 같은 줄을 세고 같은 소속 지도를 읽는다. 저마다 지으면 `moai status` 한 번에 집은
+    // 줄을 네 번 고르고 `groups` 를 예닐곱 번 짓는다. 게을러서, 볼 워크트리가 없으면 안 짓는다.
+    let footing = crate::report::Footing::of(issues, cfg);
+    let trees = workplaces_in(root, worktree, &footing);
+    let warning = crate::report::stranded_in(&footing, &trees, now);
     let blinding: Vec<crate::report::Workplace> =
-        crate::report::blinding(issues, cfg, &trees).into_iter().cloned().collect();
+        crate::report::blinding_in(&footing, &trees).into_iter().cloned().collect();
     let all = trees.into_iter().filter(|t| t.unknown).collect();
     (warning, Unread { all, blinding })
 }
