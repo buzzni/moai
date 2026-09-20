@@ -35,10 +35,16 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
             /// **읽을 때는 키가 없다.** 늘 달면 전부터 내던 줄이 바뀐다.
             #[serde(skip_serializing_if = "Option::is_none")]
             error: Option<&'a str>,
+            /// `init` 이 여기 안 서는 딸린 워크트리면 **트래커가 설 주 체크아웃**(moai-nppo) —
+            /// 사람 줄이 대는 그 자리다. **아닐 때는 키가 없다**: 늘 달면 전부터 내던 줄이 바뀌고,
+            /// 있는 것 자체가 "여기에 `init` 하지 마라" 라 받는 쪽이 값을 또 가를 것이 없다.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            tracker_at: Option<PathBuf>,
             config: &'a Path,
         }
         let error = unreadable.as_deref();
-        return super::json_line(&Out { path: &dir, added, initialized, error, config: &config });
+        let tracker_at = if initialized { None } else { crate::store::init_belongs_at(&dir) };
+        return super::json_line(&Out { path: &dir, added, initialized, error, tracker_at, config: &config });
     }
 
     let shown = one_line(&dir.display().to_string());
@@ -52,15 +58,25 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
         out.push(format!("  {} 못 읽는다 — {}", paint(style::ERROR, "!"), one_line(error)));
     }
     if !initialized {
-        out.push(paint(
-            style::DIM,
-            &format!(
-                "  init 전 — .moai 가 아직 없다. `moai -C {} init` 으로 시작하면 보인다",
-                shell_word(&dir.display().to_string())
-            ),
-        ));
+        out.push(paint(style::DIM, &format!("  {}", uninit_line(&dir))));
     }
     Ok(out)
+}
+
+/// `init` 전인 한 줄. **딸린 워크트리면 여기가 아니라 주 체크아웃을 댄다**(moai-nppo).
+///
+/// 대던 `moai -C <여기> init` 은 그 자리에서 1 로 끝난다(moai-mz0e 가 거절을 세웠다) — 그러니
+/// 등록한 워크트리 한 줄은 영영 `init 전` 으로 서고, 사람이 그 줄을 따라 쳐도 아무것도 안 바뀌었다.
+/// 가르는 자는 [`crate::store::init_belongs_at`] 하나고, 한눈 보기(`view::unopened`)와 `--json` 의
+/// `tracker_at` 이 같은 자를 쓴다.
+fn uninit_line(dir: &Path) -> String {
+    let go = |at: &Path| format!("`moai -C {} init`", shell_word(&at.display().to_string()));
+    match crate::store::init_belongs_at(dir) {
+        Some(main) => {
+            format!("init 전 — 여기는 딸린 워크트리다. 트래커는 주 체크아웃에 사니 {} 로 시작한다", go(&main))
+        }
+        None => format!("init 전 — .moai 가 아직 없다. {} 으로 시작하면 보인다", go(dir)),
+    }
 }
 
 pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
@@ -197,7 +213,15 @@ enum State<'a> {
         columns: &'a [String],
     },
     /// 디렉터리는 있는데 `.moai` 가 없다 — 등록한 뒤 `moai init` 하면 보인다.
-    Uninitialized,
+    ///
+    /// **딸린 워크트리면 그 `init` 이 여기 안 선다**(moai-nppo) — 그때 `tracker_at` 이 대신 설 주
+    /// 체크아웃을 든다. 낱말(`uninitialized`)은 그대로 둔다: 상태는 달라지지 않았고, 이미 나간
+    /// 낱말을 바꾸면 읽던 쪽이 멀쩡한 줄을 모르는 상태로 읽는다.
+    Uninitialized {
+        /// **아닐 때는 키가 없다** — `Initialized` 곁의 값들과 같은 자다.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tracker_at: Option<PathBuf>,
+    },
     /// 디렉터리가 없다. 옮겼거나 지웠다. 목록에서 빼는 것은 사람의 몫이다.
     Missing,
     /// 설정이 깨졌거나, 스냅샷을 못 읽거나, 등록한 경로가 디렉터리가 아니다.
@@ -298,7 +322,7 @@ fn state<'a>(p: &'a projects::Project, now: &str) -> State<'a> {
                 columns: &repo.config.statuses,
             }
         }
-        projects::State::Uninit => State::Uninitialized,
+        projects::State::Uninit => State::Uninitialized { tracker_at: crate::store::init_belongs_at(&p.path) },
         projects::State::Missing => State::Missing,
         projects::State::Unreadable(e) => State::Unreadable { error: e },
     }
@@ -324,7 +348,9 @@ fn said(state: &State) -> String {
             }
             cols.join("  ")
         }
-        State::Uninitialized => paint(style::DIM, "init 전"),
+        // **워크트리면 여기가 아니라 주 체크아웃이다**(moai-nppo) — `add` 의 줄과 같은 말이다.
+        State::Uninitialized { tracker_at: Some(_) } => paint(style::DIM, "init 전 — 주 체크아웃에 있다"),
+        State::Uninitialized { .. } => paint(style::DIM, "init 전"),
         State::Missing => paint(style::WARN, "디렉터리가 없다"),
         // 까닭은 한 줄에 둔다 — 줄바꿈이 섞이면 다음 프로젝트의 줄과 갈리지 않는다.
         State::Unreadable { error } => format!("{} 못 읽는다 — {}", paint(style::ERROR, "!"), one_line(error)),

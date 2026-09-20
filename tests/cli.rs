@@ -574,6 +574,88 @@ fn init_in_a_worktree_points_at_the_main_checkout() {
     assert!(!away.join(".moai").exists(), "거절하고도 셸 자리에 .moai 를 만들었다");
 }
 
+/// **"여기서 `init` 하라" 를 대는 표면들도 그 갈림을 안다**(moai-nppo). 거절은 이미 서 있는데
+/// (`init_in_a_worktree_points_at_the_main_checkout`) 대는 쪽이 그것을 몰라, 등록한 워크트리
+/// 밑자리 한 줄이 영영 `init 전` 으로 섰고 그 줄이 대는 명령은 1 로 끝났다.
+///
+/// **네 표면을 한자리에서 잰다** — `project add`·`project ls`·한눈 보기·`init --check` 다. 가르는
+/// 자는 `store::init_belongs_at` 하나라, 한 곳만 고치고 나머지를 잊으면 여기가 붉어진다. 기계로
+/// 읽는 쪽도 같은 자리를 받는다(`tracker_at`) — 사람 없이 도는 고리는 사람 줄을 안 읽는다.
+///
+/// **밑자리로 잰다.** 워크트리 꼭대기는 `.moai` 를 함께 들고 와 열리므로 `init 전` 이 안 선다 —
+/// 그 갈래가 실제로 서는 자리는 `worktree::main_root` 가 비추는 밑길에 트래커가 없는 곳이다.
+#[test]
+fn every_surface_that_says_init_points_at_the_main_checkout() {
+    let s = Scratch::new("initwt-surfaces");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/argos-wt", "-b", "worktree-argos-wt"]);
+    let deep = main.join(".claude/worktrees/argos-wt/src/deep");
+    std::fs::create_dir_all(&deep).unwrap();
+
+    let cfg = s.path().join("user/config.toml");
+    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+    let out = dir_in(&s, "out");
+    let run = |dir: &Path, args: &[&str]| {
+        let o = isolated(BIN)
+            .args(args)
+            .current_dir(dir)
+            .env("MOAI_CONFIG", &cfg)
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("moai 를 실행하지 못했다");
+        assert!(o.status.success(), "{args:?} → {}", text(&o));
+        String::from_utf8(o.stdout).unwrap()
+    };
+    // **푼 경로로 견준다** — 등록도 자리 판정도 링크를 풀므로(`user_config::resolve_dir`·
+    // `worktree::main_root`), 스크래치 철자로 재면 기계마다 갈린다.
+    let real = |p: &Path| std::fs::canonicalize(p).unwrap().display().to_string();
+    let (there, here) = (real(&main), real(&deep));
+    let go = |at: &str| format!("moai -C {at} init");
+
+    let added = run(&out, &["project", "add", &deep.display().to_string()]);
+    assert!(added.contains("딸린 워크트리"), "등록 줄이 그 갈래를 모른다\n{added}");
+    assert!(added.contains(&go(&there)), "등록 줄이 주 체크아웃을 안 댔다\n{added}");
+    assert!(!added.contains(&go(&here)), "등록 줄이 1 로 끝나는 명령을 댔다\n{added}");
+
+    let listed = run(&out, &["project", "ls"]);
+    assert!(listed.contains("주 체크아웃에 있다"), "목록 칸이 그 갈래를 모른다\n{listed}");
+
+    let over = run(&out, &["status"]);
+    assert!(over.contains(&go(&there)), "한눈 보기가 주 체크아웃을 안 댔다\n{over}");
+    assert!(!over.contains(&go(&here)), "한눈 보기가 1 로 끝나는 명령을 댔다\n{over}");
+
+    let checked = run(&deep, &["init", "--check"]);
+    assert!(checked.contains(&go(&there)), "--check 가 주 체크아웃을 안 댔다\n{checked}");
+
+    // **기계로 읽는 쪽도 같은 자리를 받는다** — 사람 줄만 고치면 고리는 그대로 헛돈다.
+    let at = format!("\"tracker_at\":{there:?}");
+    let machine: [(&Path, &[&str]); 3] = [
+        (out.as_path(), &["project", "add", here.as_str(), "--json"]),
+        (out.as_path(), &["project", "ls", "--json"]),
+        (deep.as_path(), &["init", "--check", "--json"]),
+    ];
+    for (dir, args) in machine {
+        let got = run(dir, args);
+        assert!(got.contains(&at), "{args:?} 가 자리를 안 실었다\n{got}");
+    }
+
+    // **성한 `init` 전 자리는 그대로다** — 이 갈래가 제 자리에만 선다. 낱말(`uninitialized`)도
+    // 안 바뀐다: 이미 나간 것을 바꾸면 읽던 쪽이 멀쩡한 줄을 모르는 상태로 읽는다.
+    let plain = dir_in(&s, "plain");
+    let added = run(&out, &["project", "add", plain.to_str().unwrap(), "--json"]);
+    assert!(added.contains("\"initialized\":false"), "{added}");
+    assert!(!added.contains("tracker_at"), "워크트리가 아닌 자리에 자리를 실었다\n{added}");
+    let listed = run(&out, &["project", "ls", "--json"]);
+    assert_eq!(listed.matches("\"state\":\"uninitialized\"").count(), 2, "낱말이 바뀌었다\n{listed}");
+    assert_eq!(listed.matches("tracker_at").count(), 1, "자리가 제 줄에만 안 섰다\n{listed}");
+}
+
 /// 남의 .gitignore 를 지우지 않고 빠진 줄만 덧붙인다.
 #[test]
 fn init_appends_to_an_existing_gitignore() {

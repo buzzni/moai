@@ -2171,8 +2171,18 @@ pub(crate) fn unopened<T>(p: &crate::projects::Project, s: &crate::projects::See
     match s {
         Seen::Ok(_) => String::new(),
         // init 전은 고칠 것이 아니다 — 나중에 `init` 하면 보이는 것이 요구다. `!` 를 달지 않는다.
+        //
+        // **딸린 워크트리면 여기가 아니라 주 체크아웃을 댄다**(moai-nppo). `init` 은 그 자리를 이미
+        // 거절하는데(moai-mz0e) 이 줄만 그 갈래를 몰라, 등록한 워크트리 한 줄이 영영 `init 전` 으로
+        // 서고 그 줄이 대는 명령은 1 로 끝났다. 가르는 자는 [`crate::store::init_belongs_at`] 하나다.
         Seen::Uninit => {
-            let said = fill(say(lang, "overview.uninit"), &[("go", &format!("moai -C {at} init"))]);
+            // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests::keys_in`)은 `say(…, "키")` 모양만
+            // 읽어, 변수로 넘기면 두 키가 그 눈에서 통째로 사라진다.
+            let (said, go) = match crate::store::init_belongs_at(&p.path) {
+                Some(main) => (say(lang, "overview.uninit_worktree"), shell_arg(&main)),
+                None => (say(lang, "overview.uninit"), at),
+            };
+            let said = fill(said, &[("go", &format!("moai -C {go} init"))]);
             format!("  {} {}", paint(style::DIM, "·"), paint(style::DIM, &said))
         }
         Seen::Missing => {

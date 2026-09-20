@@ -2,7 +2,8 @@
 
 use super::{Ctx, Fail, R};
 use crate::config::DEFAULT_STATUSES;
-use std::path::{Path, PathBuf};
+use crate::store::Elsewhere;
+use std::path::Path;
 
 /// 여는 마커의 **머리**. 뒤에 메타(`v:`·`hash:`)가 붙고 `-->` 로 닫힌다 — 머리로 찾아야
 /// 메타가 없던 옛 맨 마커(`<!-- moai:begin -->`)도 같은 블록으로 알아본다. 머리가 마커가 되는
@@ -322,8 +323,17 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     // 빠진 딸린 파일 규칙도 같은 자리에서 본다(moai-2f99) — `--check` 는 "무엇이 낡았나" 를 묻는
     // 자리고, 블록만이 아니라 딸린 파일도 `init` 이 맞추는 것이다.
     let gaps = dotfile_gaps(&root);
+    // **`moai init` 을 대기 전에 그것이 여기 서는지 묻는다**(moai-nppo). 딸린 워크트리에서는 안 선다
+    // (moai-mz0e 가 거절을 세웠다) — 그 갈래를 모르던 판은 여기서 `moai init` 을 세 줄로 권하고,
+    // 따라 친 사람은 1 로 끝나는 명령을 받았다. 가르는 자는 [`crate::store::init_belongs_at`] 하나고
+    // `moai project add|ls` 와 한눈 보기가 같은 자를 쓴다.
+    let tracker_at = crate::store::init_belongs_at(&root);
     if ctx.json {
         let mut v = serde_json::json!({ "agents": state });
+        // **아닐 때는 키가 없다** — 늘 달면 전부터 내던 줄이 바뀐다(`missing` 과 같은 자).
+        if let Some(main) = &tracker_at {
+            v["tracker_at"] = serde_json::json!(main);
+        }
         if !gaps.is_empty() {
             v["missing"] = serde_json::json!(
                 gaps.iter().map(|(name, _, missing)| (*name, missing)).collect::<std::collections::BTreeMap<_, _>>()
@@ -353,6 +363,16 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     // 안 보인다.
     for (name, _, missing) in &gaps {
         out.push(format!("{name}: 규칙 {}개 빠졌다 ({}) — `moai init`", missing.len(), missing.join(", ")));
+    }
+    // **어디서 쳐야 하는지를 끝에 한 줄로 댄다**(moai-nppo). 위의 줄들이 저마다 대는 `moai init` 은
+    // 여기서 1 로 끝나므로, 그 자리를 안 대면 세 줄이 통째로 못 따를 말이 된다. 줄들을 고쳐 쓰지 않고
+    // 한 줄을 더하는 까닭은 낡음을 말하는 것과 어디서 고치는가가 다른 물음이어서다 — 딸린 파일이 다
+    // 맞은 워크트리에서도 이 줄은 서고, 그때 위는 `current` 다.
+    if let Some(main) = &tracker_at {
+        out.push(format!(
+            "여기는 딸린 워크트리다 — `moai init` 은 여기 안 선다. 주 체크아웃에서 친다: `moai -C {} init`",
+            crate::text::shell_word(&main.display().to_string())
+        ));
     }
     Ok(out)
 }
@@ -623,79 +643,14 @@ fn covers(have: &str, want: &str) -> bool {
     !have.is_empty() && ((have == want && !dir_only) || want.starts_with(&format!("{have}/")))
 }
 
-/// 이 자리에 트래커를 세우면 무엇이 어긋나는가(moai-pjrr·moai-mz0e) — 없으면 `None`.
-///
-/// 묻는 것은 **명령이 어느 트래커로 가는가** 하나인데, 자리마다 답이 달라 [`Elsewhere`] 로 가른다.
-///
-/// - **딸린 워크트리**([`Elsewhere::Worktree`]): 워크트리 안에서 친 `moai` 는 주 체크아웃의 트래커를
-///   읽고 쓴다(moai-y7go). 여기 심은 `.moai` 는 **아무도 안 읽고**, 커밋되면 병합에서 겨룬다 —
-///   그래서 거절한다
-/// - **위에 트래커가 있는 하위 디렉터리**([`Elsewhere::Above`]): 여기 세우면 이 밑의 명령은 여기
-///   것을 쓰고 옆 디렉터리는 위의 것을 쓴다. 심은 것이 **읽히기는 한다** — 그래서 알리기만 한다
-///
-/// **둘을 가른 것은 값이 다르기 때문이다**(2026-09-20 사용자 결정 둘째 판). 위로 찾기에는 경계를
-/// 그을 자가 없다 — 천장을 두었다가 걷은 것이 같은 날의 moai-a2kn 이고, 그 결정은 "`여기서
-/// moai init` 은 트래커를 하나 더 세운다" 를 **살아 있는 길**로 적었다. `~/.moai` 를 둔 사람의 새
-/// 프로젝트마다 거절을 세우면 그 길이 막힌다. 워크트리는 다르다: 거기 심은 것은 어느 명령도 안 읽어,
-/// 알림 한 줄로 두면 사람이 그것을 모른 채 커밋한다.
-///
-/// `MOAI_HERE` 는 둘 다 끈다 — 그 워크트리에서만 쓰는 트래커를 일부러 두는 길이다.
-///
-/// **위로 찾는 자는 `.moai` 가 디렉터리인가로 가른다** — [`crate::store`] 의 위로 찾기와 같은 자다.
-/// `config.toml` 까지 봐야 트래커라고 세는 자리도 있지만([`crate::worktree::tracker_root`]), 여기서
-/// 물어야 하는 것은 "명령이 어디로 가는가" 라 그쪽 자를 쓰면 설정이 빠진 `.moai` 위에서 둘이 갈린다.
-///
-/// **찾은 자리에서 한 번 더 옮김을 묻는다**(리뷰) — `.moai` 를 가진 조상을 찾았다고 거기가 끝이
-/// 아니다. [`crate::store::Repo::find_from`] 은 그 자리에서 [`crate::worktree::tracker_root`] 로 한
-/// 번 더 옮겨 가므로(moai-y7go), 묻지 않으면 도구가 **제가 안 읽는 트래커**를 댄다.
-fn planted_elsewhere(root: &Path) -> Option<Elsewhere> {
-    // **`MOAI_HERE` 가 이 물음을 통째로 끈다.** 아래 [`crate::store::Repo::opened_root`] 도 같은
-    // 손잡이를 거치지만(`Repo::redirect`), 여기 한 줄로 세워야 두 갈래가 한 자로 꺼진다 — 그쪽에
-    // 맡기던 판은 켠 것이 어느 갈래를 끄는지가 두 모듈을 오가야 보였다.
-    if crate::store::here_wanted() {
-        return None;
-    }
-    // **워크트리를 먼저 묻는다.** 워크트리의 루트는 조상이기도 해 아래 자가 같은 자리를 대는데,
-    // 그때 대야 할 말은 "위에 있다" 가 아니라 "여기는 워크트리다" 다.
-    let main = crate::store::Repo::opened_root(root);
-    if main != root {
-        return Some(Elsewhere::Worktree(main));
-    }
-    let mut at = root.to_path_buf();
-    while at.pop() {
-        if at.join(".moai").is_dir() {
-            // **여기가 두 갈래를 가른다**(리뷰). 워크트리의 **밑자리**에서는 위의 물음이 안 선다 —
-            // [`crate::worktree::main_root`] 는 밑길을 주 체크아웃에 그대로 비추므로
-            // (`<wt>/src` → `<main>/src`), 거기 트래커가 없으면 "워크트리다" 가 아니라고 답한다.
-            // 그대로 두던 판은 워크트리의 `.moai` 를 대며 `moai -C <워크트리> init` 을 시켰는데,
-            // 그 자리의 명령은 모두 루트의 트래커를 쓰고 그 줄을 따라 친 사람은 병합에서 겨룰
-            // 파일을 고쳤다.
-            let main = crate::store::Repo::opened_root(&at);
-            if main != at {
-                return Some(Elsewhere::Worktree(main));
-            }
-            return Some(Elsewhere::Above(at));
-        }
-    }
-    None
-}
-
-/// [`planted_elsewhere`] 가 찾은 자리 — **자리마다 값이 다르다.**
-enum Elsewhere {
-    /// 딸린 워크트리의 주 체크아웃. 여기 심은 트래커는 아무도 안 읽어 **거절한다.**
-    Worktree(PathBuf),
-    /// 위에서 찾은 트래커의 뿌리. 여기 세운 것도 읽히므로 **알리기만 한다.**
-    Above(PathBuf),
-}
-
 pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
     // **세우기 전에 한 번 묻는다**(moai-pjrr·moai-mz0e). 이미 여기 심겨 있으면 안 묻는다 — 그때 이
     // 명령이 하는 일은 딸린 파일을 다시 맞추는 것뿐이라 새 트래커가 서지 않는다.
-    let elsewhere = if dir.exists() { None } else { planted_elsewhere(&root) };
+    let elsewhere = if dir.exists() { None } else { crate::store::planted_elsewhere(&root) };
     // **거절하는 자리는 워크트리 하나다.** 위에서 찾은 것은 세우고 아래에서 알린다 — 가른 까닭은
-    // [`planted_elsewhere`] 에 있다.
+    // [`crate::store::planted_elsewhere`] 에 있다.
     if let Some(Elsewhere::Worktree(main)) = &elsewhere {
         let there = main.clone();
         let why =
@@ -924,7 +879,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         ]
     };
     // **위에도 트래커가 있으면 세우고 나서 말한다**(moai-pjrr, 2026-09-20 사용자 결정 둘째 판).
-    // 막지 않는 까닭은 [`planted_elsewhere`] 에 있다 — 여기 심은 것은 이 밑에서 실제로 읽힌다.
+    // 막지 않는 까닭은 [`crate::store::planted_elsewhere`] 에 있다 — 여기 심은 것은 이 밑에서 실제로 읽힌다.
     // 그래도 말은 해야 한다: 이 줄이 없으면 `<프로젝트>/src/deep` 에 선 사람이 옆 디렉터리와 다른
     // 파일을 쓰기 시작한 것을 모른 채 "왜 내 이슈가 안 보이나" 를 딴 데서 찾는다.
     if let Some(Elsewhere::Above(at)) = &elsewhere {
@@ -1037,17 +992,17 @@ mod tests {
         let s = crate::scratch::Scratch::new("init-above");
         let deep = s.join("src/deep");
         std::fs::create_dir_all(&deep).unwrap();
-        assert!(planted_elsewhere(&deep).is_none(), "트래커가 없는데 자리를 댔다");
+        assert!(crate::store::planted_elsewhere(&deep).is_none(), "트래커가 없는데 자리를 댔다");
 
         std::fs::create_dir_all(s.join(".moai")).unwrap();
-        match planted_elsewhere(&deep) {
+        match crate::store::planted_elsewhere(&deep) {
             Some(Elsewhere::Above(at)) => assert_eq!(at, s.path(), "댄 자리가 트래커의 자리가 아니다"),
             Some(Elsewhere::Worktree(main)) => panic!("워크트리가 아닌데 워크트리라 했다 — {}", main.display()),
             None => panic!("위의 트래커를 못 봤다"),
         }
 
         // 그 자리 자신은 안 묻는다 — 여기 이미 심겨 있으면 `run` 이 딸린 파일만 다시 맞춘다.
-        assert!(planted_elsewhere(s.path()).is_none(), "제 트래커를 남의 것으로 댔다");
+        assert!(crate::store::planted_elsewhere(s.path()).is_none(), "제 트래커를 남의 것으로 댔다");
     }
 
     /// 두 번 넣어도 블록은 하나고, 사람이 쓴 산문은 바이트 단위로 그대로다.
