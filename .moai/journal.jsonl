@@ -5766,3 +5766,4 @@
 {"ts":"2026-09-20T02:01:12Z","id":"moai-9xbq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T02:01:12Z","id":"moai-j9tx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T02:01:12Z","id":"moai-k8j1.034","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: 새는 길 다섯(1~6)과 잘못 막음 셋(7·8·9)에 10·15 절반, 리뷰가 세운 시험 둘. 멤버로 남김: moai-54pk(12·13). idea: moai-pxis(11)·moai-dmri(14)·moai-wmpj(altitude·15 나머지). 토큰은 두 판으로 끊겨 합을 못 가른다"}
+{"ts":"2026-09-20T02:02:05Z","id":"moai-k8j1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 첫 칸의 멤버 moai-54pk 하나가 에픽을 열어 둔다(6/7). 그것으로 에픽을 닫는 창이 에픽 끝 리뷰(max)를 다시 부른다. 병합 dacc8de 까지가 이 에픽의 코드고, 리뷰 원문·판단은 moai-k8j1.034 에 있다. 훅 파일을 쥘 다음 일은 moai-54pk·moai-hze6·moai-j2vp·moai-jlon 이 서로 겹친다"}
