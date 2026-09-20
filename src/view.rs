@@ -820,6 +820,9 @@ fn says(w: &Warning, screen: Screen) -> String {
         // **"안 돈다" 와 "낡았다" 를 가른다**(moai-h54i). 앞의 것은 자리가 빈 것이고 뒤의 것은
         // 그 줄에 내려앉는 마디가 없는 것이다 — 고칠 명령이 비슷해도 무엇이 어긋났는지가 다르다.
         "merge_driver_stale" => one(say(lang, "warn.merge_driver_stale")),
+        // **"안 돈다" 와 "딴 것이 선다" 도 가른다**(moai-zdw4). 자리가 빈 것과 그 이름에 다른
+        // 도구가 선 것은 사람이 찾으러 갈 곳이 다르다 — 뭉치면 없는 파일을 찾으러 간다.
+        "merge_driver_alien" => one(say(lang, "warn.merge_driver_alien")),
         "unknown_field" => one(say(lang, "warn.unknown_field")),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는

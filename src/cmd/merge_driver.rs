@@ -547,19 +547,20 @@ fn driver_key() -> String {
 
 /// 심어 둔 드라이버가 **못 도는** 상태의 알림(moai-2ewr).
 ///
-/// **안 심은 것은 말하지 않는다.** `moai-w8so` 가 임시 저장소에서 둘을 나란히 쟀다 — 안 심은
-/// 클론에서는 `.gitattributes` 의 `merge=moai` 가 그냥 무시되고 git 의 기본 머지가 돌며 표식도
-/// 선다. 그 상태를 조르면 드라이버를 안 쓰기로 한 클론을 영영 조르는 셈이다(`agents_stale` 이
-/// `missing` 을 안 말하는 것과 같은 까닭).
-///
-/// 해로운 것은 **심어 놓고 그 명령이 못 도는 자리**다. 사람은 이슈마다 푸는 것이 돈다고 믿는데
+/// 해로운 첫째는 **심어 놓고 그 명령이 못 도는 자리**다. 사람은 이슈마다 푸는 것이 돈다고 믿는데
 /// 실제로는 `driver_command` 의 셋째 마디로 내려앉아 기본 머지가 돌고, 그 사실이 어느 화면에도
 /// 안 선다. 이 저장소에서 그 자리는 가깝다 — `--install` 의 기본값은 지금 도는 바이너리의 절대
 /// 경로이고, 워크트리에서 치면 그 워크트리의 `target/` 이 적히는데 `--local` 은 클론이 함께
 /// 쓰는 자리라 그 워크트리를 지우는 순간 모든 체크아웃이 그 상태가 된다.
 ///
-/// **모르면 입을 다문다.** 설정을 못 읽었거나 적힌 줄이 이 도구가 지은 모양이 아니면 아무 말도
-/// 안 한다 — 남이 손으로 적은 줄을 "썩었다" 고 부르면 걷을 길이 없는 알림이 선다.
+/// **안 심은 것은 말하지 않는다.** `moai-w8so` 가 임시 저장소에서 둘을 나란히 쟀다 — 안 심은
+/// 클론에서는 `.gitattributes` 의 `merge=moai` 가 그냥 무시되고 git 의 기본 머지가 돌며 표식도
+/// 선다. 그 상태를 조르면 드라이버를 안 쓰기로 한 클론을 영영 조르는 셈이다.
+///
+/// **모르면 입을 다문다.** 설정을 못 읽었거나(저장소 밖이다, git 이 없다) 적힌 줄이 이 도구가
+/// 지은 모양이 아니면 아무 말도 안 한다 — 남이 손으로 적은 줄을 "썩었다" 고 부르면 걷을 길이 없는
+/// 알림이 선다.
+///
 /// **이 저장소에 심은 줄만 본다**(`--local`, 리뷰 moai-h6aq.cx8). 맨 `--get` 은 system·global 까지
 /// 훑어, 사람이 한때 `git config --global merge.moai.driver` 를 적어 뒀으면 심은 적 없는 저장소마다
 /// — git 저장소가 아닌 `.moai` 자리까지 — 이 알림이 서고, 힌트를 따라 쳐도 그것은 `--local` 에
@@ -567,20 +568,23 @@ fn driver_key() -> String {
 pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
     let planted = crate::git::run(root, &["config", "--local", "--get", &driver_key()]).ok()?;
     let planted = planted.trim();
-    let word = planted_word(planted)?;
     let away = crate::cmd::init::away_root(root, chdir);
-    if !runnable(root, &word) {
-        return Some(crate::report::Warning::merge_driver_rotten(&word, away.as_deref()));
+    let word = planted_word(planted)?;
+    match probe(root, &word) {
+        // 띄우지도 못했다 — 자리가 비었거나, 권한이 없거나, 그 파일이 실행될 수 없다.
+        Probe::Dead => Some(crate::report::Warning::merge_driver_rotten(&word, away.as_deref())),
+        // 돌기는 도는데 이 명령을 모른다 — **그 이름의 다른 도구**가 그 자리에 있다.
+        Probe::Alien => Some(crate::report::Warning::merge_driver_alien(&word, away.as_deref())),
+        // **줄의 모양도 본다**(moai-h54i). 명령이 도는 것과 그 줄이 지금 판인 것은 다른 말이다 —
+        // 내려앉는 마디가 없던 판에 심은 클론은 그 마디 없이 그대로 돌고, 적힌 경로가 사라지는 날
+        // 표식 없이 저쪽을 버린다. 다시 심는 것은 사람이 치는 `--install` 하나뿐이고 설정은
+        // 커밋되지 않으니, 말하지 않으면 그 클론은 영영 옛 줄을 든다.
+        //
+        // **고칠 명령은 같은 명령으로 다시 심는다**(`--as`). 맨 `--install` 은 지금 도는 바이너리로
+        // 바꿔 적는데, 그것이 워크트리의 `target/` 이면 고치라는 말이 도리어 썩은 자리를 심는다.
+        Probe::Runs => (planted != driver_command(&word))
+            .then(|| crate::report::Warning::merge_driver_stale(&word, away.as_deref())),
     }
-    // **줄의 모양도 본다**(moai-h54i). 명령이 도는 것과 그 줄이 지금 판인 것은 다른 말이다 —
-    // 내려앉는 마디가 없던 판에 심은 클론은 그 마디 없이 그대로 돌고, 적힌 경로가 사라지는 날
-    // 표식 없이 저쪽을 버린다. 다시 심는 것은 사람이 치는 `--install` 하나뿐이고 설정은
-    // 커밋되지 않으니, 말하지 않으면 그 클론은 영영 옛 줄을 든다.
-    //
-    // **고칠 명령은 같은 명령으로 다시 심는다**(`--as`). 맨 `--install` 은 지금 도는 바이너리로
-    // 바꿔 적는데, 그것이 워크트리의 `target/` 이면 고치라는 말이 도리어 썩은 자리를 심는다.
-    (planted != driver_command(&word))
-        .then(|| crate::report::Warning::merge_driver_stale(&word, away.as_deref()))
 }
 
 /// 심어 둔 줄에서 **실제로 부르는 명령**을 떼어 낸다. 모양이 이 도구가 지은 것이 아니면 `None`.
@@ -615,37 +619,63 @@ fn planted_word(planted: &str) -> Option<String> {
     (!word.is_empty()).then(|| word.to_string())
 }
 
-/// 그 명령을 껍데기가 실제로 부를 수 있는가. 자리에 `/` 가 들면 그 파일을, 아니면 `PATH` 를 본다.
+/// 심어 둔 명령을 실제로 불러 본 결과.
+///
+/// **셋을 가른다.** 고칠 명령이 비슷해도 무엇이 어긋났는지가 다르고, 뭉치면 그 중 하나는 반드시
+/// 거짓말이 된다(`agents_stale` 을 둘로 가른 것과 같은 까닭).
+enum Probe {
+    /// 이 명령을 알고 0 으로 끝났다.
+    Runs,
+    /// 돌기는 도는데 `merge-driver` 를 모른다 — 그 이름의 **다른 도구**가 그 자리에 있다.
+    Alien,
+    /// 띄우지도 못했다 — 자리가 비었거나, 권한이 없거나, 그 파일이 실행될 수 없다.
+    Dead,
+}
+
+/// 그 명령이 이 드라이버를 아는가 — **파일을 보지 않고 실제로 불러서 잰다**(moai-zdw4,
+/// 2026-09-20 사용자 결정).
+///
+/// 앞 판은 `metadata` 로 "그 자리에 실행할 수 있는 파일이 있는가" 만 봤고, 그래서 둘을 놓쳤다.
+///
+/// - `--as moai` 로 심었는데 그 이름의 **다른 도구**가 PATH 에 선 판. 파일도 있고 실행 권한도
+///   있으니 조용한데 그 명령은 `merge-driver` 를 모른다 — 매 병합이 말없이 내려앉는다. 이름을
+///   `moai` 그대로 두고 배포하기로 한 뒤(2026-09-20) 받는 쪽에서 가까워진 자리다
+/// - `mode & 0o111` 은 "아무나 돌릴 수 있는가" 지 "내가 돌릴 수 있는가" 가 아니다. 남의 소유
+///   0o700 이나 `noexec` 에 얹힌 파일은 통과하는데 껍데기는 126 을 낸다
+///
+/// 부르는 것은 `--help` 다. **답을 안 바꾸는 부름이라야 한다** — 재자고 병합을 돌릴 수는 없고,
+/// 이 도구의 `--help` 는 어느 갈래에서도 파일을 안 건드린다. 0 으로 끝나면 그 바이너리가 이
+/// 명령을 아는 것이고, 비영이면 clap 이 모르는 부명령을 거절한 것이다.
+///
+/// **값은 프로세스 하나**다 — `moai status` 한 번에 9ms(126ms 의 7%, 2026-09-20 이 기계에서 잰
+/// 값)이고 훅의 보드는 세션당 한 번이다(`once_per_session`). 그만큼을 내고 사는 것은 "심었는데
+/// 안 돈다" 를 **틀리게 말하지 않는 것**이다.
+///
+/// **표준 입력을 끊는다.** 물려주면 그 명령이 stdin 을 읽는 순간 `moai status` 가 사람의 터미널을
+/// 붙들고 영영 안 끝난다 — 이 함수가 시간 제한을 안 두고 사는 까닭이기도 하다. 표준 출력과 오류도
+/// 버린다: 재는 부름이 사람의 화면에 글을 쓰면 안 된다.
 ///
 /// **상대 경로는 `root` 에 붙인다**(리뷰 moai-h6aq.cx8). git 은 드라이버를 그 워크트리 꼭대기에서
 /// 돌리는데, 프로세스의 현재 자리로 풀던 판은 저장소의 아래 디렉터리에서 친 `moai status` 가
-/// 멀쩡한 `--as bin/moai` 를 "썩었다" 고 불렀다. 절대 경로면 `join` 이 그대로 낸다.
-///
-/// **재는 자리가 도는 자리는 아니다.** `PATH` 는 이 프로세스의 것이고 git 이 병합에서 쓸 것이
-/// 아니며, 실행 권한도 "누군가 돌릴 수 있는가" 까지만 본다 — 이름으로 심은 것(`--as moai`)은
-/// 그만큼만 믿는다. 옛 moai 처럼 **자리는 있는데 이 명령을 모르는** 판은 여기서 못 가른다.
-fn runnable(root: &Path, cmd: &str) -> bool {
-    // **유닉스가 아니면 아무 말도 안 한다.** `\` 와 `PATHEXT` 규칙을 여기 또 쓰면, 멀쩡한
-    // `C:\…\moai.exe` 를 PATH 의 낱말로 읽어 걷을 길 없는 알림이 선다 — 모르면 입을 다문다.
-    #[cfg(not(unix))]
-    {
-        let _ = (root, cmd);
-        true
+/// 멀쩡한 `--as bin/moai` 를 "썩었다" 고 불렀다. 절대 경로면 `join` 이 그대로 낸다. 자리에
+/// 구분자가 없으면 이름이므로 `PATH` 에 맡긴다 — 그 `PATH` 는 이 프로세스의 것이고 git 이 병합에서
+/// 쓸 것과 꼭 같지는 않지만, 이름으로 심은 것은 그만큼만 믿는 것이 맞다.
+fn probe(root: &Path, cmd: &str) -> Probe {
+    use std::process::{Command, Stdio};
+    let has_dir = cmd.contains('/') || cmd.contains(std::path::MAIN_SEPARATOR);
+    let program = if has_dir { root.join(cmd) } else { std::path::PathBuf::from(cmd) };
+    let out = Command::new(program)
+        .args(["merge-driver", "--help"])
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    match out {
+        Err(_) => Probe::Dead,
+        Ok(st) if st.success() => Probe::Runs,
+        Ok(_) => Probe::Alien,
     }
-    #[cfg(unix)]
-    {
-        if cmd.contains('/') {
-            return is_exe(&root.join(cmd));
-        }
-        let Some(path) = std::env::var_os("PATH") else { return false };
-        std::env::split_paths(&path).any(|dir| is_exe(&dir.join(cmd)))
-    }
-}
-
-#[cfg(unix)]
-fn is_exe(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 /// `.git/config` 에 드라이버를 심는다.
@@ -1022,29 +1052,54 @@ mod tests {
         assert_eq!(planted_word(""), None);
     }
 
-    /// **부를 수 있는지는 파일로 잰다.** 있고 없음이 아니라 실행할 수 있는가다 — 권한을 잃은
-    /// 파일은 git 이 부르지 못하고, 그때가 바로 표식 없이 끝나던 자리다.
+    /// **부를 수 있는지는 불러서 잰다**(moai-zdw4). 파일의 모드를 읽던 판은 "아무나 돌릴 수
+    /// 있는가" 까지만 봤고, 자리는 멀쩡한데 **이 명령을 모르는** 바이너리를 못 갈랐다 — 이름을
+    /// `moai` 그대로 두고 배포하는 마당에 그 자리가 가장 가깝다.
     ///
     /// **상대 경로는 뿌리에 붙는다** — git 이 드라이버를 워크트리 꼭대기에서 돌리기 때문이다.
     #[cfg(unix)]
     #[test]
-    fn runnable_reads_the_file_not_just_its_name() {
+    fn the_probe_calls_the_command_instead_of_reading_its_mode() {
         use std::os::unix::fs::PermissionsExt as _;
         // 자리는 `Scratch` 가 쥔다 — 끝에서 `remove_dir_all` 을 부르면 패닉한 판이 찌꺼기를 남긴다.
-        let scratch = crate::scratch::Scratch::new("runnable");
+        let scratch = crate::scratch::Scratch::new("probe");
         let dir = scratch.path();
-        let p = dir.join("moai");
-        std::fs::write(&p, "#!/bin/sh\n").unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let at = |cmd: &Path| runnable(dir, &cmd.display().to_string());
-        assert!(!at(&p), "실행 권한이 없는 파일을 돈다고 했다");
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(at(&p));
-        assert!(!at(dir), "디렉터리를 명령으로 읽었다");
-        assert!(!at(&dir.join("없다")));
+        let write = |name: &str, body: &str| {
+            let p = dir.join(name);
+            std::fs::write(&p, body).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p
+        };
+        let at = |cmd: &std::path::Path| probe(dir, &cmd.display().to_string());
+
+        // 이 명령을 아는 바이너리. `--help` 는 어느 갈래에서도 파일을 안 건드린다.
+        let ours = write("moai", "#!/bin/sh\n[ \"$1\" = merge-driver ] && exit 0\nexit 2\n");
+        assert!(matches!(at(&ours), Probe::Runs));
+
+        // **그 이름의 다른 도구.** 파일도 있고 돌기도 도는데 이 명령을 모른다 — 모드를 읽던
+        // 판이 조용히 지나가던 자리다.
+        let alien = write("옛moai", "#!/bin/sh\necho '모르는 부명령' >&2\nexit 2\n");
+        assert!(matches!(at(&alien), Probe::Alien));
+
+        // 띄우지도 못하는 셋. 자리가 비었다, 실행 권한이 없다, 디렉터리다.
+        assert!(matches!(at(&dir.join("없다")), Probe::Dead));
+        let dead = write("권한없다", "#!/bin/sh\nexit 0\n");
+        std::fs::set_permissions(&dead, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(matches!(at(&dead), Probe::Dead));
+        assert!(matches!(at(dir), Probe::Dead), "디렉터리를 명령으로 읽었다");
+
         // 상대 경로는 프로세스의 자리가 아니라 뿌리에서 푼다.
-        assert!(runnable(dir, "./moai"), "뿌리에 있는 상대 경로를 못 찾았다");
-        assert!(!runnable(Path::new("/"), "./moai"), "엉뚱한 뿌리에서 찾아 냈다");
+        assert!(matches!(probe(dir, "./moai"), Probe::Runs), "뿌리에 있는 상대 경로를 못 찾았다");
+        assert!(matches!(probe(Path::new("/"), "./moai"), Probe::Dead), "엉뚱한 뿌리에서 찾아 냈다");
+
+        // **표준 입력을 끊는다.** 물려주면 stdin 을 읽는 명령 하나가 `moai status` 를 영영
+        // 붙든다. 읽은 것이 비었는지로 잰다 — 끊긴 자리는 곧바로 EOF 다.
+        let seen = dir.join("본것");
+        // 자리를 감싼다 — `Scratch` 의 이름에는 `ThreadId(3)` 의 괄호가 든다.
+        let quoted = crate::text::shell_word(&seen.display().to_string());
+        let reader = write("읽는다", &format!("#!/bin/sh\ncat > {quoted}\nexit 0\n"));
+        assert!(matches!(at(&reader), Probe::Runs));
+        assert_eq!(std::fs::read(&seen).unwrap(), Vec::<u8>::new(), "표준 입력을 물려줬다");
     }
 
     /// **빈칸이 든 경로를 감싼다.** 안 감싸면 첫 낱말에서 끊겨 늘 내려앉는 길로만 가고,

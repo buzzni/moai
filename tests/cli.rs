@@ -12395,6 +12395,42 @@ fn status_names_a_planted_driver_that_cannot_run() {
     assert!(!ok(root, &["status"]).contains("머지 드라이버"), "제대로 심었는데 알림이 안 걷혔다");
 }
 
+/// **그 이름의 다른 도구가 선 자리를 "안 돈다" 로 뭉치지 않는다**(moai-zdw4).
+///
+/// 파일의 모드만 읽던 판이 조용히 지나가던 자리다 — 자리도 있고 실행 권한도 있는데 그 명령은
+/// `merge-driver` 를 모른다. 이름을 `moai` 그대로 두고 배포하기로 한 뒤 받는 쪽에서 가까워졌다.
+/// 사람이 찾으러 갈 곳이 다르므로 낱말을 가른다.
+#[test]
+fn status_names_another_tool_of_that_name() {
+    let s = init("mergealien");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+
+    // 자리는 멀쩡하고 이 명령만 모른다 — 옛 moai 가 그 꼴이다.
+    let other = root.join("옛moai");
+    std::fs::write(&other, "#!/bin/sh\necho '모르는 부명령' >&2\nexit 2\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    ok(root, &["merge-driver", "--install", "--as", &other.display().to_string()]);
+
+    let said = ok(root, &["status"]);
+    assert!(said.contains("다른 도구가 선다"), "딴 도구를 안 댔다\n{said}");
+    assert!(!said.contains("안 돈다"), "돌기는 도는 것을 못 돈다고 했다\n{said}");
+    assert!(said.contains(&other.display().to_string()), "어느 경로인지 안 댄다\n{said}");
+    let json = ok(root, &["status", "--json"]);
+    one_json_value(&json);
+    let notices = json.split("\"notices\":").nth(1).expect("notices 가 없다").to_string();
+    assert!(notices.contains("merge_driver_alien"), "{json}");
+
+    // 맨 `--install` 로 다시 심으면 이름 충돌 자체가 사라진다.
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "다시 심었는데 알림이 남았다");
+}
+
 /// **옛 판으로 심은 줄도 다시 심으라고 한다**(moai-h54i).
 ///
 /// 적힌 명령은 도는데 그 줄에 내려앉는 마디가 없는 자리다. 다시 심는 길은 사람이 치는

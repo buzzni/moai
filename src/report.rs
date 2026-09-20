@@ -2845,6 +2845,21 @@ impl Warning {
         Warning::new("merge_driver_rotten", vec![cmd.to_string()]).notice().hint(&hint)
     }
 
+    /// 심어 둔 명령이 **이 드라이버를 모른다**는 알림(moai-zdw4). 자리도 있고 돌기도 도는데
+    /// `merge-driver` 를 모르는 자리다 — 그 이름의 **다른 도구**가 거기 있다.
+    ///
+    /// **못 도는 것과 가른다.** 고칠 명령이 같아도 사람이 봐야 할 것이 다르다: 한쪽은 "적은
+    /// 자리가 비었다" 고 이쪽은 "그 이름에 딴 것이 선다" 다. 이름을 `moai` 그대로 두고 배포하기로
+    /// 한 뒤(2026-09-20) `--as moai` 로 심은 클론에서 실제로 가까워진 자리라, 뭉뚱그려 "안 돈다"
+    /// 고 말하면 사람이 없는 파일을 찾으러 간다.
+    ///
+    /// 고칠 명령은 맨 `--install` 이다 — 지금 도는 이 바이너리의 절대 경로로 다시 심으면 이름
+    /// 충돌 자체가 사라진다.
+    pub fn merge_driver_alien(cmd: &str, root: Option<&str>) -> Warning {
+        let hint = Warning::cli_hint(root, "merge-driver --install");
+        Warning::new("merge_driver_alien", vec![cmd.to_string()]).notice().hint(&hint)
+    }
+
     /// 심은 줄이 **옛 판**이라는 알림(moai-h54i). 적힌 명령은 도는데 그 줄에 지금 판의 마디가
     /// 없는 자리다 — 리뷰 `moai-h6aq.cx8` 의 8번이 짚었다.
     ///
