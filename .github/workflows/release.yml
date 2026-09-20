@@ -86,20 +86,9 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 채로 올리면
-      # 받는 사람 쪽에서야 드러난다. `wc -c` 를 쓰는 것은 `stat` 의 인자가
-      # 리눅스와 macOS 에서 다르기 때문이다.
+      # 받는 사람 쪽에서야 드러난다. 자는 ci.yml 과 나눠 쓰는 것 하나다.
       - name: 15MB 예산을 잰다
-        env:
-          BIN: target/${{ matrix.target }}/release/moai
-        run: |
-          set -euo pipefail
-          limit=$((15 * 1024 * 1024))
-          size=$(wc -c <"$BIN" | tr -d '[:space:]')
-          printf '%s  %s bytes / %s bytes\n' "$BIN" "$size" "$limit"
-          if [ "$size" -gt "$limit" ]; then
-            echo "::error::바이너리가 15MB 예산을 넘었다 ($size > $limit bytes)"
-            exit 1
-          fi
+        run: scripts/check-size.sh "target/${{ matrix.target }}/release/moai"
 
       - name: 꾸린다
         id: pack

@@ -121,15 +121,7 @@ jobs:
       - name: build --release
         run: cargo build --release --locked
 
+      # 자는 저장소 안에 하나뿐이다. 릴리스 워크플로도 같은 것을 부른다 — 양쪽에
+      # 적어 두면 갈라진다.
       - name: 예산을 잰다
-        run: |
-          set -euo pipefail
-          limit=$((15 * 1024 * 1024))
-          # `stat` 의 인자가 리눅스와 macOS 에서 달라, 릴리스 워크플로와 같은
-          # 꼴로 맞춘다.
-          size=$(wc -c <target/release/moai | tr -d '[:space:]')
-          printf 'target/release/moai  %s bytes / %s bytes\n' "$size" "$limit"
-          if [ "$size" -gt "$limit" ]; then
-            echo "::error file=Cargo.toml::바이너리가 15MB 예산을 넘었다 ($size > $limit bytes). lto 를 낮추지 말고 무엇이 들어왔는지 먼저 본다 — 예산이 먼저다."
-            exit 1
-          fi
+        run: scripts/check-size.sh target/release/moai
