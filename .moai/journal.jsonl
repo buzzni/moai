@@ -5881,3 +5881,4 @@
 {"ts":"2026-09-20T03:34:22Z","id":"moai-hze6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T03:34:22Z","id":"moai-j2vp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T03:34:22Z","id":"moai-51h9.q5l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영: 1~5·8·9·10 과 시험 11~15. 절반이 이 에픽 두 커밋의 되돌림이었다(5 는 moai-4jsy, 11 은 한국어 알림 시험이 늘 통과하던 것). 멤버로 남김: moai-dbzs(6·7, 사람 결정 필요). idea: moai-722b(3·4 나머지)·moai-v4lw(picked 튜플)"}
+{"ts":"2026-09-20T03:34:48Z","id":"moai-51h9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 첫 칸의 멤버 moai-dbzs 하나가 에픽을 열어 둔다(7/8). 그 멤버는 사람의 결정이 먼저다 — 집기 기록의 `?` 표를 `&&` 로 이은 집기까지 넓히나, 남이 적은 `?` 줄도 세나. 병합 3787092 까지가 이 에픽의 코드고 리뷰 원문·판단은 moai-51h9.q5l 에 있다. 훅 파일을 쥘 다음 일은 moai-dbzs·moai-54pk(k8j1)·moai-jlon 이 서로 겹친다"}
