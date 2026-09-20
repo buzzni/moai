@@ -220,5 +220,16 @@
   "tui.group.sort": "정렬",
   "tui.group.cell": "열",
   "tui.group.read": "읽음",
-  "tui.badge.hidden": "{names} 숨김"
+  "tui.badge.hidden": "{names} 숨김",
+  "tui.layer.no_jot_target": "담을 프로젝트가 없다 — `moai project add <dir>` 로 등록하면 여기 선다",
+  "tui.jot.no_place": "담을 곳 없이 연 폼이다 — {close} 로 닫고 프로젝트 안에서 다시 {jot}",
+  "tui.layer.enter_failed": "들어가지 못했다",
+  "tui.layer.enter_failed_at": "{name} 에 못 들어갔다 · {said}",
+  "tui.layer.dropped": "{name} 이 프로젝트 층에서 빠졌다 — {close} 로 닫고 다시 고른다",
+  "tui.jot.elsewhere": "폼을 연 곳({name})과 지금 선 곳이 다르다 — {close} 로 닫고 다시 {jot}",
+  "tui.write.failed": "쓰지 못했다 — {why}",
+  "tui.layer.config_gone_at": "{path}: 파일이 사라졌다",
+  "tui.layer.config_gone": "파일이 사라졌다",
+  "tui.layer.config_stale": "사용자 설정을 못 읽어 지난 것을 들고 있다 — {why}",
+  "tui.layer.unlayered": "사용자 설정을 못 읽어 프로젝트 층을 안 세웠다 — {why}"
 }

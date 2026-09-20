@@ -220,5 +220,16 @@
   "tui.group.sort": "sort",
   "tui.group.cell": "columns",
   "tui.group.read": "read",
-  "tui.badge.hidden": "{names} hidden"
+  "tui.badge.hidden": "{names} hidden",
+  "tui.layer.no_jot_target": "no project to jot into — `moai project add <dir>` puts one here",
+  "tui.jot.no_place": "this form has no place to jot into — {close} closes it, then {jot} inside a project",
+  "tui.layer.enter_failed": "could not enter",
+  "tui.layer.enter_failed_at": "could not enter {name} · {said}",
+  "tui.layer.dropped": "{name} left the project layer — {close} closes the form, then pick again",
+  "tui.jot.elsewhere": "the form was opened at {name} but you stand elsewhere — {close} closes it, then {jot} again",
+  "tui.write.failed": "could not write — {why}",
+  "tui.layer.config_gone_at": "{path}: the file is gone",
+  "tui.layer.config_gone": "the file is gone",
+  "tui.layer.config_stale": "the user config could not be read — holding the last one — {why}",
+  "tui.layer.unlayered": "the user config could not be read — no project layer — {why}"
 }

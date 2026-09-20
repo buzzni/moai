@@ -17,6 +17,7 @@
 use super::form::{Form, Target};
 use super::keys::{BROWSE, Browse, JOT, Jot, label};
 use super::{App, Row, Stamp};
+use crate::i18n::{Lang, say};
 use crate::nav::Index;
 use crate::projects::{self, State};
 use crate::store::Repo;
@@ -539,7 +540,7 @@ impl App {
             return self.with_layer(layer);
         }
         let mut app = self;
-        app.unlayered = unlayered_of(&layer);
+        app.unlayered = unlayered_of(&layer, app.site.lang);
         app
     }
 
@@ -638,7 +639,7 @@ impl App {
                 Some(Row::Project(at)) => at,
                 Some(Row::Item(super::Seat::Place(at), ..)) => at,
                 _ => {
-                    self.notice = Some("담을 프로젝트가 없다 — `moai project add <dir>` 로 등록하면 여기 선다".into());
+                    self.notice = Some(say(self.site.lang, "tui.layer.no_jot_target").into());
                     return;
                 }
             };
@@ -679,9 +680,13 @@ impl App {
         if self.here() == want {
             return true;
         }
+        let lang = self.site.lang;
         let why = match into {
             // 문구 속 키 이름은 표에서 읽는다 — 키를 옮기면 이 말도 따라온다.
-            None => format!("담을 곳 없이 연 폼이다 — {} 로 닫고 프로젝트 안에서 다시 {}", label(JOT, Jot::Close), label(BROWSE, Browse::Jot)),
+            None => crate::i18n::fill(say(lang, "tui.jot.no_place"), &[
+                ("close", &label(JOT, Jot::Close)),
+                ("jot", &label(BROWSE, Browse::Jot)),
+            ]),
             Some(t) if self.on_layer() => {
                 let name = crate::text::one_line(&t.name);
                 match self.layer.as_ref().and_then(|l| l.position(&t.path)) {
@@ -692,20 +697,20 @@ impl App {
                         }
                         // 들어가기가 댄 까닭(못 연 말·못 읽은 말)을 옮긴다. 앞의 글리프는 배너의 `!` 와 겹친다.
                         let said = self.notice.take().unwrap_or_default();
-                        format!("{name} 에 못 들어갔다 · {}", said.trim_start_matches(['·', '!', ' ']).trim_start_matches("들어가지 못했다 — "))
+                        let said = said.trim_start_matches(['·', '!', ' ']).trim_start_matches(enter_failed_head(lang).as_str());
+                        crate::i18n::fill(say(lang, "tui.layer.enter_failed_at"), &[("name", &name), ("said", said)])
                     }
-                    None => format!("{name} 이 프로젝트 층에서 빠졌다 — {} 로 닫고 다시 고른다", label(JOT, Jot::Close)),
+                    None => crate::i18n::fill(say(lang, "tui.layer.dropped"), &[("name", &name), ("close", &label(JOT, Jot::Close))]),
                 }
             }
-            Some(t) => format!(
-                "폼을 연 곳({})과 지금 선 곳이 다르다 — {} 로 닫고 다시 {}",
-                crate::text::one_line(&t.name),
-                label(JOT, Jot::Close),
-                label(BROWSE, Browse::Jot)
-            ),
+            Some(t) => crate::i18n::fill(say(lang, "tui.jot.elsewhere"), &[
+                ("name", &crate::text::one_line(&t.name)),
+                ("close", &label(JOT, Jot::Close)),
+                ("jot", &label(BROWSE, Browse::Jot)),
+            ]),
         };
         self.notice = None;
-        self.trouble = Some(format!("쓰지 못했다 — {}", why.trim()));
+        self.trouble = Some(crate::i18n::fill(say(lang, "tui.write.failed"), &[("why", why.trim())]));
         self.write_failed = true;
         false
     }
@@ -785,7 +790,7 @@ impl App {
                 // 들어갈 때와 같은 자리다(`App::first_row`, moai-cm13). 여기서 목록을 또 세지 않는다(moai-go4o).
                 self.apply_fresh(fresh);
             }
-            Err(e) => self.notice = Some(format!("들어가지 못했다 — {e}")),
+            Err(e) => self.notice = Some(format!("{}{e}", enter_failed_head(self.site.lang))),
         }
     }
 
@@ -952,7 +957,7 @@ impl App {
                 // **갈래를 안 가린다**(moai-po6v) — 여기서 세울 것은 어차피 없다. 못 읽었으면 목록이
                 // 비고, 깨졌으면 파싱이 진 자리라 역시 비어, 빈 층을 세우는 일과 안 세우는 일이 같다.
                 if fresh.trouble.is_some() || !fresh.registered() {
-                    self.unlayered = unlayered_of(&fresh);
+                    self.unlayered = unlayered_of(&fresh, self.site.lang);
                     // 층이 없으면 들고 있는 것도 없다 — 이 화면의 말은 위의 한 줄이다.
                     self.held = None;
                     return Relayered::Lost;
@@ -991,7 +996,7 @@ impl App {
                     // 지난 읽기의 까닭이 지금 까닭 옆에 표식도 없이 서서(`draw::banner` 가 `held`
                     // 다음에 `Layer::problems` 를 잇는다), 고친 줄을 다시 고치라고 하거나 같은 글이
                     // 두 번 선다. 한때 이 자리가 통째로 갈아 끼우던 까닭이 그것이다.
-                    self.held = holding(&fresh, old.registered());
+                    self.held = holding(&fresh, old.registered(), self.site.lang);
                     if !old.registered() {
                         old.problems.clear();
                     }
@@ -1142,29 +1147,36 @@ pub(super) enum Relayered {
 /// 사람의 정상). 여기서는 다르다: 들고 있는 것이 있으면 **있던 파일이 사라졌다**는 뜻이라 말해야 한다.
 /// **안 들었으면 그대로 `None` 이다**(리뷰) — 없던 것을 잃었다고 말하는 꼴이라, [`unlayered_of`] 가
 /// 빈 `problems` 에 `None` 을 내는 것과 한 답이다.
-fn holding(fresh: &Layer, held: bool) -> Option<String> {
+fn holding(fresh: &Layer, held: bool, lang: Lang) -> Option<String> {
     let said = fresh.problems.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>();
     if !held && said.is_empty() {
         return None;
     }
     let why = match (said.as_slice(), &fresh.config) {
-        ([], Some(p)) => format!("{}: 파일이 사라졌다", p.display()),
-        ([], None) => "파일이 사라졌다".to_string(),
+        ([], Some(p)) => crate::i18n::fill(say(lang, "tui.layer.config_gone_at"), &[("path", &p.display().to_string())]),
+        ([], None) => say(lang, "tui.layer.config_gone").to_string(),
         _ => said.join(" · "),
     };
     Some(match held {
-        true => format!("사용자 설정을 못 읽어 지난 것을 들고 있다 — {why}"),
+        true => crate::i18n::fill(say(lang, "tui.layer.config_stale"), &[("why", &why)]),
         false => why,
     })
+}
+
+/// `들어가지 못했다 — ` 머리. [`App::enter_project`] 가 붙이고 [`App::stand_at`] 이 떼어 제
+/// 문장에 이으므로 **한 자리에서 짓는다** — 두 군데가 글자를 따로 적으면 말을 옮긴 날 떼기가
+/// 조용히 안 먹어 같은 까닭이 두 번 선다.
+fn enter_failed_head(lang: Lang) -> String {
+    format!("{} — ", say(lang, "tui.layer.enter_failed"))
 }
 
 /// 등록한 것이 하나도 안 읽혀 **층을 안 세운** 까닭([`App::unlayered`]) — 설정을 읽다 만난 것이
 /// 있을 때만. 멀쩡한 빈 설정이면 `None` 이다. 띄울 때([`App::attach_layer`])와 설정이 바뀐 뒤
 /// ([`App::relayer`])가 같은 말을 쓴다.
-fn unlayered_of(layer: &Layer) -> Option<String> {
+fn unlayered_of(layer: &Layer, lang: Lang) -> Option<String> {
     (!layer.problems.is_empty()).then(|| {
         let why = layer.problems.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>().join(" · ");
-        format!("사용자 설정을 못 읽어 프로젝트 층을 안 세웠다 — {why}")
+        crate::i18n::fill(say(lang, "tui.layer.unlayered"), &[("why", &why)])
     })
 }
 
