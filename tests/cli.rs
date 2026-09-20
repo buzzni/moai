@@ -9753,12 +9753,20 @@ fn skill_install_skips_a_korean_marketplace_that_points_elsewhere() {
     let out = c.run(s.path(), &["skill", "install", "--json"], true);
     assert!(out.status.success(), "{}", text(&out));
     let json = String::from_utf8(out.stdout).unwrap();
-    assert!(json.contains("이미 someone/else 를 가리킨다"), "{json}");
+    // **맨 위의 `blocked_by` 와 같은 모양이다**(moai-mfw1) — 막은 자리 하나고, 까닭은 사람
+    // 출력의 몫이다. 한때 여기만 문장이라 같은 이름의 키가 한 출력 안에서 뜻이 둘이었다.
+    assert!(json.contains(r#""blocked_by":"someone/else""#), "{json}");
+    assert!(!json.contains("가리킨다"), "기계 출력에 사람이 읽을 문장이 섰다 — {json}");
     let calls = c.calls()[before..].to_string();
     assert!(!calls.contains("korean-skills"), "남의 이름을 건드렸다\n{calls}");
     assert!(calls.contains("plugin marketplace add epoko77-ai/im-not-ai --scope local"), "아는 출처를 이 범위에 안 적는다\n{calls}");
     assert!(calls.contains("plugin install humanize-korean@im-not-ai --scope local -y"), "{calls}");
 
+    // **빠져나갈 길을 함께 낸다**(moai-mfw1). 까닭만 적던 판은 다시 불러도 늘 건너뛰기만 해,
+    // 훅의 "깔려 있지 않다" 알림이 영영 안 꺼졌다 — moai 의 이름이 막혔을 때와 같은 길이다.
+    let said = text(&c.run(s.path(), &["skill", "install"], true));
+    assert!(said.contains("이미 someone/else 를 가리킨다"), "{said}");
+    assert!(said.contains("claude plugin marketplace remove korean-skills"), "빠져나갈 길이 없다 — {said}");
 }
 
 /// **같은 저장소를 다른 철자로 알면 남의 것으로 안 본다**(리뷰 moai-5wk4.76z). upstream 안내대로

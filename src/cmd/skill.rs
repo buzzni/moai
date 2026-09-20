@@ -87,10 +87,13 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
             None => format!("등록: claude plugin install moai@{market} --scope {scope} -y"),
         });
         for c in &companions {
-            out.push(match &c.blocked {
-                Some(why) => format!("함께: 건너뛴다 — {why}"),
-                None => format!("함께: {}", c.shown()),
-            });
+            match c.why() {
+                Some(why) => {
+                    out.push(format!("함께: 건너뛴다 — {why}"));
+                    out.push(c.escape());
+                }
+                None => out.push(format!("함께: {}", c.shown())),
+            }
         }
         return Ok(out);
     }
@@ -162,11 +165,16 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         out.push(format!("  {} {what}", if *ok { "·" } else { "!" }));
     }
     for (c, ok) in &companions {
-        out.push(match (&c.blocked, ok) {
-            (Some(why), _) => format!("  ! {} 은 건너뛰었다 — {why}", c.id),
-            (None, true) => format!("  · {} 을 함께 깔았다 (--scope {scope})", c.id),
-            (None, false) => format!("  ! {} 을 못 깔았다 — 손으로: {}", c.id, c.shown()),
-        });
+        match (c.why(), ok) {
+            // **빠져나갈 길을 함께 낸다**(moai-mfw1). 이 줄만 있던 판은 다시 부르라고도, 이름을
+            // 어떻게 푸는지도 말하지 않아 — 훅의 알림이 "깔려 있지 않다" 를 영영 되풀이했다.
+            (Some(why), _) => {
+                out.push(format!("  ! {} 은 건너뛰었다 — {why}", c.id));
+                out.push(c.escape());
+            }
+            (None, true) => out.push(format!("  · {} 을 함께 깔았다 (--scope {scope})", c.id)),
+            (None, false) => out.push(format!("  ! {} 을 못 깔았다 — 손으로: {}", c.id, c.shown())),
+        }
     }
     if registered {
         out.push(String::new());
@@ -221,6 +229,12 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             _ => want.clone(),
         })
         .collect();
+    // **곁 플러그인도 비춘다**(moai-mfw1). `install` 이 함께 깔고 `uninstall` 이 함께 걷는데 이
+    // 화면만 그것을 몰라, 훅이 "깔려 있지 않다" 를 비출 때 무엇이 서 있는지 볼 자리가 없었다.
+    // 세는 자는 훅과 **같다**([`korean_missing`]) — 자가 둘이면 화면과 알림이 엇갈린다.
+    let missing = korean_missing(&root);
+    let companions: Vec<(&str, bool)> =
+        crate::guide::KOREAN_PLUGINS.iter().map(|(id, _)| (*id, !missing.contains(id))).collect();
     let hooked = hooks.iter().flatten().next().cloned();
     let hook_path = hooked.as_deref().and_then(|h| runs(h, on_path.as_deref()));
     let stale = stale_copies(&installs);
@@ -254,6 +268,12 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             "hook_exe_path": hook_path.as_ref().map(|p| p.display().to_string()),
             "stale_copies": stale,
             "claude": claude,
+            // **늘 서는 배열이다.** 빈 배열과 없는 키를 가르라고 기계에 두는 키가 아니다 —
+            // 곁 플러그인은 늘 둘이고, 깔렸는지만 다르다.
+            "companions": companions
+                .iter()
+                .map(|(id, ok)| serde_json::json!({"id": id, "installed": ok}))
+                .collect::<Vec<_>>(),
         }));
     }
 
@@ -298,6 +318,13 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             } else {
                 format!("  — 심을 판은 {want}. 다시 심는다{advice}")
             }
+        ));
+    }
+    for (id, ok) in &companions {
+        out.push(format!(
+            "  {} 곁 플러그인   {id}{}",
+            mark(*ok),
+            if *ok { "" } else { " — 없다 (`moai skill install`)" }
         ));
     }
     if let Some(hook) = &hooked {
@@ -632,12 +659,35 @@ pub fn korean_missing(root: &Path) -> Vec<&'static str> {
 struct Companion {
     id: &'static str,
     steps: Vec<Vec<String>>,
-    /// 같은 이름의 마켓플레이스가 **다른 저장소를** 가리키면 그 까닭. 건너뛴다 — 덮으면 남의 등록을
-    /// 이쪽으로 돌려놓는다(`clash_of` 와 같은 까닭).
+    /// 같은 이름의 마켓플레이스가 **다른 저장소를** 가리키면 그것이 가리키는 자리. 건너뛴다 —
+    /// 덮으면 남의 등록을 이쪽으로 돌려놓는다(`clash_of` 와 같은 까닭).
+    ///
+    /// **까닭이 아니라 자리를 든다**(moai-mfw1). 맨 위의 `blocked_by` 는 막은 자리(경로) 하나인데
+    /// 여기만 문장이라, 한 `--json` 안에서 같은 이름의 키가 모양이 둘이었다 — 읽는 쪽이 키 이름으로
+    /// 뜻을 못 정한다. 사람이 읽을 한 줄은 [`Companion::why`] 가 그때 짓는다.
     blocked: Option<String>,
 }
 
 impl Companion {
+    /// 설치 id 의 `@` 뒤가 마켓플레이스 이름이다.
+    fn market(&self) -> &str {
+        self.id.split_once('@').map_or(self.id, |(_, m)| m)
+    }
+
+    /// 건너뛴 까닭 한 줄 — 사람 출력만 쓴다.
+    fn why(&self) -> Option<String> {
+        self.blocked.as_ref().map(|at| format!("`{}` 이 이미 {at} 를 가리킨다", self.market()))
+    }
+
+    /// 빠져나갈 길 한 줄(moai-mfw1). 막힌 채로는 몇 번을 다시 불러도 건너뛰기만 한다 —
+    /// moai 의 이름이 막혔을 때 내는 줄과 같은 길이다.
+    fn escape(&self) -> String {
+        format!(
+            "    그 이름을 이제 안 쓰면 `claude plugin marketplace remove {}` 뒤에 다시 부른다",
+            self.market()
+        )
+    }
+
     fn json(&self) -> serde_json::Value {
         serde_json::json!({
             "id": self.id,
@@ -678,10 +728,7 @@ fn companions(scope: &str) -> Vec<Companion> {
                 Some(s) if *s == serde_json::json!({"source": "github", "repo": repo}) => (vec![add, install], None),
                 Some(_) => match known.as_ref().and_then(|k| skill::market_repo(k, market)) {
                     Some(at) if at.eq_ignore_ascii_case(repo) => (vec![install], None),
-                    at => {
-                        let at = at.filter(|a| !a.is_empty()).unwrap_or_else(|| "다른 출처".into());
-                        (Vec::new(), Some(format!("`{market}` 이 이미 {at} 를 가리킨다")))
-                    }
+                    at => (Vec::new(), Some(at.filter(|a| !a.is_empty()).unwrap_or_else(|| "다른 출처".into()))),
                 },
             };
             Companion { id, steps, blocked }
