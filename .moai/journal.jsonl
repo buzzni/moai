@@ -6042,3 +6042,5 @@
 {"ts":"2026-09-20T05:57:34Z","id":"moai-589b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-20T05:57:43Z","id":"moai-493a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-20 사용자 결정 넷. (1) \"시작됐다\" 는 멤버에서 읽는다 — in_progress 멤버가 하나라도 있으면 도는 중. 새 필드도 새 축도 없다. (2) 막지 않고 비추기만 한다 — ready 의 차례와 status 의 알림. 훅은 안 건드린다. (3) 도는 마일스톤이 여럿이면 둘 다 안이고, 그 안의 차례는 지금처럼 p·나이로 잰다. 이미 집은 밖의 일은 그대로 끝내게 둔다. (4) moai-589b 는 일꾼이 그 자리에서 #bug 태그와 Regression-of: 줄로 가른다 — 그 둘이면 안, 나머지는 밖."}
 {"ts":"2026-09-20T05:57:49Z","id":"moai-2gep","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T06:07:07Z","id":"moai-2gep","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-20T06:07:07Z","id":"moai-23pm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
