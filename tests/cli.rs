@@ -12424,6 +12424,16 @@ fn at_root(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
 }
 
+/// 릴리스가 산출물에 함께 넣는 파일들(moai-4gn9 의 `꾸린다` 스텝). 하나를 옮기면
+/// 태그를 민 뒤에야 드러나고, 그때는 되돌릴 자리가 없다.
+#[cfg(unix)]
+#[test]
+fn the_files_the_release_packs_are_all_there() {
+    for name in ["README.md", "CHANGELOG.md", "LICENSE", "install.sh"] {
+        assert!(at_root(name).is_file(), "{name} 이 없다 — 릴리스가 태그에서 죽는다");
+    }
+}
+
 /// `install.sh` 를 돌린다. `MOAI_BASE_URL` 로 가짜 릴리스를 가리켜, 시험이
 /// 네트워크를 타지 않는다.
 #[cfg(unix)]
