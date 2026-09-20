@@ -560,6 +560,14 @@ pub struct Site {
     /// 프로젝트는 `None` 이고, 읽음 파일이 없는 것은 `Some(None)` 이다. 하나로 들면 옛 `[read]` 만 있는
     /// 사람의 프로젝트가 영영 안 들린다(새 파일이 없어 표식이 늘 `None` 이라 "그대로" 로 읽힌다).
     read_stamp: Option<Stamp>,
+    /// 마지막 읽음 읽기가 만난 탈 — 멀쩡했으면 `None`(moai-po6v). 다시 읽을 때를 정하는 자다
+    /// ([`crate::user_config::Trouble::again`]). **설정과 한 자다**([`App::config_trouble`]) — 갈라 두면
+    /// 같은 갈래를 두 곳이 달리 읽어, 한쪽을 고친 날 다른 쪽이 조용히 옛 뜻으로 남는다.
+    read_trouble: Option<crate::user_config::Trouble>,
+    /// 읽음을 마지막으로 **읽어 본** 때 — 되든 안 되든 찍는다. 시계로 다시 보는 갈래
+    /// ([`crate::user_config::Again::Clock`])가 이것을 잰다. 위의 `read_at`(스냅샷을 **들인** 때)과
+    /// 다른 값이다 — 이름이 닮아 헷갈리기 쉬우나 재는 파일이 서로 다르다.
+    read_tried_at: Option<std::time::Instant>,
     /// 마지막 읽기를 **들인** 때. 표식이 그대로여도 [`layer::REREAD_EVERY`] 가 지나면 다시 읽는다
     /// ([`App::follow`], moai-z4r4). 들인 때로 찍는 까닭은 층과 같다(`Layer::adopt`) — 시작한 때로
     /// 찍으면 한 번 읽는 데 그만큼 걸리는 자리에서 쉬지 않고 다시 읽는다.
@@ -786,6 +794,17 @@ pub struct App {
     /// 사이에 옆이 쓴 것을 본 것으로 삼아, 설정이 다시 바뀔 때까지 안 보인다(`prepare` 가 표식을
     /// 읽기 전에 재는 것과 같은 까닭). `None` 은 아직 안 쟀다 — 첫 걸음이 재기만 한다(시험의 길).
     pub config_stamp: Option<crate::store::Stamp>,
+    /// 마지막 읽기가 만난 탈 — 멀쩡했으면 `None`(moai-po6v). **표식만으로는 못 재는 것을 잰다**:
+    /// 표식은 읽기 *전에* 재므로 진 읽기 뒤에도 파일의 것과 같고, 권한을 고치는 `chmod` 은 표식을
+    /// 아예 안 바꾼다. 그래서 다시 읽을 때를 정하는 자는 표식이 아니라 이 갈래다
+    /// ([`crate::user_config::Trouble::again`]).
+    ///
+    /// 띄우는 길(`cmd::tui`)이 제 읽기의 것을 넣는다 — 안 넣으면 띄울 때 진 한 번이 세션 내내 남는다.
+    pub config_trouble: Option<crate::user_config::Trouble>,
+    /// 마지막으로 설정을 **읽어 본** 때 — 되든 안 되든 찍는다. 시계로 다시 보는 갈래
+    /// ([`crate::user_config::Again::Clock`])가 이것을 잰다. 층의 못 읽는 줄이 시계에 걸린 그
+    /// 자([`crate::tui::layer::due`])를 그대로 쓴다 — 상수를 두 벌로 두면 한쪽만 바뀐다.
+    pub config_read_at: Option<std::time::Instant>,
     /// **띄운 자리**(cwd). 고르기 창이 처음 여기서 연다. 시험은 임시 디렉터리를 준다.
     ///
     /// 이름이 [`App::here`] 와 겹치지 않게 둔다 — 그쪽은 *지금 선 프로젝트*, 곧 **쓰기가
@@ -838,6 +857,8 @@ impl Site {
             stamp: None,
             seen: Default::default(),
             read_stamp: None,
+            read_trouble: None,
+            read_tried_at: None,
             read_at: None,
             watched: Vec::new(),
             commits: Commits::new(),
@@ -1086,6 +1107,8 @@ impl App {
             deep: Default::default(),
             user_config: None,
             config_stamp: None,
+            config_trouble: None,
+            config_read_at: None,
             launched_at: None,
             pick_from: None,
             editor: None,
@@ -2051,11 +2074,14 @@ impl App {
     /// 돌려주는 것은 화면에 댈 한 줄이다(없으면 `None`) — `notice` 는 `App` 의 것이라 여기서 못 적는다.
     fn take_read(site: &mut Site, got: (crate::read_marks::Marks, Stamp)) -> Option<String> {
         let (marks, stamp) = got;
-        // **잠깐 못 읽은 것은 표식을 안 올린다**(`App::follow_config` 와 같은 자, moai-9p7v). 올리면
-        // 파일이 **바뀔 때까지** 아무도 다시 안 읽는데, 권한을 되돌리는 것은 고친 때도 길이도 안 바꾼다
-        // — `chmod 000` 한 번이 이 세션 내내 [NEW] 를 세운 채로 두었다. 깨진 것·남의 것은 사람이 고쳐야
-        // 같아지므로 올린다: 안 올리면 걸음마다 다시 읽고 같은 말을 되뇐다.
-        if marks.trouble != Some(crate::user_config::Trouble::Reading) {
+        // **다시 읽을 때는 갈래가 정한다**(moai-po6v) — [`App::follow_config`] 와 **한 자다**
+        // ([`crate::user_config::Again`]). 잠깐인 것만 표식을 안 올려 다음 걸음이 같은 차이를 다시 보게
+        // 한다. 권한은 다시 해도 같아 걸음마다 읽으면 헛돌지만, 되돌리는 `chmod` 이 고친 때도 길이도
+        // 안 바꿔 표식으로는 영영 못 벗어난다 — 그래서 표식은 올리고 시계로 다시 본다
+        // ([`App::follow_read`]). 깨진 것·남의 것은 사람이 고쳐야 같아지고 고치면 파일이 바뀐다.
+        site.read_trouble = marks.trouble;
+        site.read_tried_at = Some(std::time::Instant::now());
+        if marks.trouble.map(crate::user_config::Trouble::again) != Some(crate::user_config::Again::Step) {
             site.read_stamp = Some(stamp);
         }
         // **못 든 것과 한 줄 건너뛴 것을 가른다**(리뷰). 못 들었으면 들고 있던 것을 둔다 — 빈 표를
@@ -2066,7 +2092,10 @@ impl App {
         // **잠깐 못 읽은 것은 말하지 않는다** — 다음 걸음에 다시 읽으므로, 말하면 걸음마다 같은 줄이
         // 서서 사람이 방금 띄운 말을 덮는다(`follow_config` 도 그 갈래에서는 조용히 다시 읽는다).
         let told = match marks.trouble {
-            Some(crate::user_config::Trouble::Reading) => None,
+            // **못 읽은 것은 말하지 않는다** — 잠깐인 것은 다음 걸음에 지나가고, 다시 해도 같은 것은
+            // 시계가 돌 때마다 같은 줄을 세워 사람이 방금 띄운 말을 덮는다. 설정은 배너가 늘 이고
+            // 있지만(`Layer::problems`) 여기 낼 것은 스치는 알림 한 줄뿐이다.
+            Some(t) if t.again() != crate::user_config::Again::Never => None,
             Some(_) => marks.problems.first().map(|why| format!("읽음을 못 들었다 — {}", crate::text::one_line(why))),
             None => marks.problems.first().map(|why| format!("읽음에 이상한 줄이 있다 — {}", crate::text::one_line(why))),
         };
@@ -2103,7 +2132,14 @@ impl App {
     fn follow_read(&mut self) {
         let (Some(config), Some(repo)) = (self.user_config.as_deref(), self.site.repo.as_ref()) else { return };
         let now = crate::store::stamp(&crate::read_marks::path_for(config, &repo.root));
-        if self.site.read_stamp == Some(now) {
+        // **빚진 읽기는 표식이 그대로여도 한다**([`App::follow_config`] 와 한 자, moai-po6v) — 권한을
+        // 되돌리는 `chmod` 은 표식을 안 바꿔, 표식만 보면 그 한 번이 세션 내내 [NEW] 를 세워 둔다.
+        let owed = match self.site.read_trouble.map(crate::user_config::Trouble::again) {
+            Some(crate::user_config::Again::Step) => true,
+            Some(crate::user_config::Again::Clock) => layer::due(self.site.read_tried_at),
+            Some(crate::user_config::Again::Never) | None => false,
+        };
+        if self.site.read_stamp == Some(now) && !owed {
             return;
         }
         self.load_read();
@@ -2121,27 +2157,39 @@ impl App {
         let Some(path) = self.user_config.as_deref() else { return };
         let now = crate::store::stamp(path);
         let Some(was) = self.config_stamp.replace(now) else { return };
-        if was == now {
+        // **빚진 읽기는 표식이 그대로여도 한다**(moai-po6v) — 띄울 때 진 읽기가 여기 든다. 표식은 읽기
+        // **전에** 재므로 진 뒤에도 파일의 것과 같아, 표식만 보면 그 한 번의 실패가 세션 내내 남고
+        // 등록한 프로젝트가 영영 안 선다. `config_stamp` 를 `None` 으로 두는 것으로는 안 된다 — 다음
+        // 걸음이 같은 표식을 다시 재고 그것을 밑값 삼아 돌아설 뿐이다.
+        //
+        // **언제 갚는가는 갈래가 정한다**([`crate::user_config::Again`]) — 잠깐인 것은 다음 걸음에,
+        // 고쳐도 표식이 안 바뀌는 것(권한)은 시계로, 고치면 파일이 바뀌는 것(깨진 글·사라진 파일)은
+        // 표식에 맡기고 스스로는 안 한다. 한 가지로 재면 한쪽이 영영 안 풀리거나 걸음마다 헛돈다.
+        let owed = match self.config_trouble.map(crate::user_config::Trouble::again) {
+            Some(crate::user_config::Again::Step) => true,
+            Some(crate::user_config::Again::Clock) => layer::due(self.config_read_at),
+            Some(crate::user_config::Again::Never) | None => false,
+        };
+        if was == now && !owed {
             return;
         }
         // **한 번만 읽는다**(moai-7yil) — 적어 둔 읽음과 등록 목록이 한 파일에 살아, 둘이 저마다 읽던
         // 판은 이 걸음마다 같은 글을 두 번 파싱했다. 이 길은 자주 돈다: 보기 토글과 읽음이 그 파일을
         // **스스로 써서**, `r` 을 누르고 있으면 누를 때마다 두 번 파싱이 붙었다.
         let mut reg = crate::user_config::read(Some(path));
-        // **못 읽었으면 표식을 물리고 아무것도 안 한다**(moai-9p7v) — 잠깐의 `ESTALE`·`EIO` 다. 표식을
-        // 올린 채 두면 설정이 **다시 바뀔 때까지** 아무도 다시 읽지 않아, 그 한 번의 실패가 층을 빈 채로
-        // 남겼다. 물리면 다음 걸음이 같은 표식 차이를 다시 보고 다시 읽는다 — 되면 그때 올라간다.
-        if reg.trouble == Some(crate::user_config::Trouble::Reading) {
-            self.config_stamp = Some(was);
-            return;
-        }
+        // 표식은 늘 올린다 — 다시 읽을 때를 정하는 자는 이제 갈래다(위의 `owed`). 한때는 못 읽으면
+        // 표식을 물려 다음 걸음이 같은 차이를 다시 보게 했는데(moai-9p7v), 그 길은 띄울 때 진 읽기를
+        // 못 갚는다(밑값으로 삼을 `was` 가 없다). 재는 자가 둘이면 한쪽만 고쳐진다.
+        self.config_trouble = reg.trouble;
+        self.config_read_at = Some(std::time::Instant::now());
         // **옛 `[read]` 를 다시 든다**(moai-bwce, 사용자 결정 3) — 읽음은 이제 제 파일에 살고 여기는
         // 겹쳐 보는 옛 표다. 이 바이너리는 여기 안 적지만 옛 바이너리나 사람 손은 적을 수 있다.
         //
-        // **탈이 있으면 들고 있던 것을 둔다**(리뷰) — 못 읽은 것뿐 아니라 깨진 것도 그렇다. 파싱이 지면
-        // `user_config::read` 는 `read` 를 빈 표로 둔 채 까닭만 대는데, 그 빈 표를 들이면 내 줄이 통째로
-        // [NEW] 로 선다. 걷어 낸 `read_marks_at` 이 **못 읽거나 깨졌으면** `None` 을 내 막던 자리다.
-        // 층은 그대로 다시 세운다 — 깨진 설정의 빈 층과 그 까닭이 사람이 고쳐야 할 것을 비춘다.
+        // **탈이 있으면 들고 있던 것을 둔다**(리뷰) — 갈래를 안 가린다. 파싱이 지면 `user_config::read`
+        // 는 `read` 를 빈 표로 둔 채 까닭만 대는데, 그 빈 표를 들이면 내 줄이 통째로 [NEW] 로 선다.
+        // 걷어 낸 `read_marks_at` 이 **못 읽거나 깨졌으면** `None` 을 내 막던 자리다. 사라진 파일도
+        // 여기 든다(moai-po6v) — autofs 홈이 끊긴 자리를 "읽었더니 비었다" 로 들면 같은 해가 난다.
+        // 층도 그대로 들고 선다(`App::relayer_with`, 사용자 결정 2026-09-19).
         //
         // 같으면 안 든다 — 보기 토글이 `[tui]` 만 고쳐도 이 길은 돌고(스스로 쓴다), 다시 드는 일은
         // 읽음 파일 읽기와 `query::unread` 의 줄 수만큼 걷기다.
@@ -2511,6 +2559,10 @@ impl App {
                     {
                         site.seen = std::mem::take(&mut held.seen);
                         site.read_stamp = held.read_stamp;
+                        // 다시 읽을 때를 정하는 둘도 함께 옮긴다 — 두고 가면 들고 온 표는 있는데 그것을
+                        // 언제 다시 볼지를 잃어, 못 읽는 프로젝트로 돌아올 때마다 시계가 처음부터 돈다.
+                        site.read_trouble = held.read_trouble;
+                        site.read_tried_at = held.read_tried_at;
                     }
                     if let Some(got) = self.read_marks_of(&root)
                         && let Some(told) = Self::take_read(&mut site, got)
@@ -5368,6 +5420,66 @@ mod tests {
         assert_eq!(a.site.seen.get("argos-0009"), Some(&stamp), "성한 줄까지 버렸다 — {:?}", a.site.seen);
         assert!(!a.site.unread.contains("argos-0009"), "읽은 줄에 [NEW] 가 섰다");
         assert!(a.notice.as_deref().is_some_and(|n| n.starts_with("읽음에 이상한 줄이 있다")), "{:?}", a.notice);
+    }
+
+    /// **읽음 파일도 다시 읽을 때를 갈래로 잰다**(moai-po6v) — 설정과 **한 자다**([`App::follow_config`],
+    /// [`crate::user_config::Again`]). 갈라 두면 같은 `Trouble` 을 두 곳이 달리 읽어, 한쪽을 고친 날
+    /// 다른 쪽이 조용히 옛 뜻으로 남는다.
+    ///
+    /// 권한으로 못 읽는 것은 다시 해도 같아 걸음마다 읽으면 헛돌고, 고치는 `chmod` 은 고친 때도 길이도
+    /// 안 바꿔 표식만 보면 영영 못 벗어난다 — 그래서 시계로 다시 본다. 들고 있던 표는 그동안 그대로다:
+    /// 빈 표를 들이면 내 줄이 통째로 [NEW] 로 선다.
+    #[test]
+    #[cfg(unix)]
+    fn a_sheet_we_cannot_read_again_is_retried_by_the_clock() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::new("read-marks-clock");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        let mut a = app();
+        for i in &mut a.site.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.me = Some("레이븐 (raven@example.com)".into());
+
+        let mark = |id: &str| {
+            let stamp = &a.site.issues.iter().find(|i| i.id == id).unwrap().updated_at;
+            format!("\"{id}\" = \"{stamp}\"\n")
+        };
+        let (nine, two) = (mark("argos-0009"), mark("argos-0002"));
+        let at = crate::read_marks::path_for(&config, &root);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        let head = format!("path = {:?}\n\n[read]\n", root.display().to_string());
+        std::fs::write(&at, format!("{head}{nine}")).unwrap();
+        a.load_read();
+        assert!(!a.site.unread.contains("argos-0009"), "시험의 전제 — 읽음을 들었다");
+        assert!(a.site.unread.contains("argos-0002"), "시험의 전제 — 아직 안 읽은 줄이 있다");
+
+        // 옆 터미널이 한 줄 더 적었는데 그 읽기가 진다. 표식은 바뀌었다 — 읽기는 한다.
+        std::fs::write(&at, format!("{head}{nine}{two}")).unwrap();
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&at).is_ok() {
+            // 권한이 안 먹는 자리(root)에서는 흉내 낼 수 없다.
+            std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return;
+        }
+        a.follow();
+        assert_eq!(a.site.read_trouble, Some(crate::user_config::Trouble::Unreadable), "권한을 잠깐의 실패로 읽었다");
+        assert_eq!(a.site.read_stamp, Some(crate::store::stamp(&at)), "다시 해도 같은 갈래인데 표식을 물렸다 — 걸음마다 헛 읽는다");
+        assert!(!a.site.unread.contains("argos-0009"), "못 읽은 빈 표를 들여 읽은 줄이 [NEW] 로 섰다");
+
+        // 권한만 되돌린다 — 파일은 그대로라 표식도 그대로다.
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o644)).unwrap();
+        a.follow();
+        assert!(a.site.unread.contains("argos-0002"), "다시 해도 같은 갈래를 걸음마다 다시 읽었다");
+
+        a.site.read_tried_at = std::time::Instant::now().checked_sub(layer::REREAD_EVERY);
+        a.follow();
+        assert!(!a.site.unread.contains("argos-0002"), "시계가 돌았는데 다시 안 읽었다");
+        assert_eq!(a.site.read_trouble, None, "읽혔는데 탈이 남았다");
     }
 
     /// **읽음은 트래커가 사는 뿌리로 고른다 — 선 체크아웃이 아니다**(리뷰). 딸린 워크트리에서 띄우면

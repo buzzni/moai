@@ -840,8 +840,12 @@ impl App {
                 };
                 // 못 읽었으면 세우지 않는다 — 다만 **까닭은 댄다**(리뷰). 층이 없는 화면에서는 이 배너가
                 // 유일한 말이라, 조용히 돌아서면 쭉 못 읽는 설정이 아무 말 없이 빈 화면으로 선다. 다음
-                // 읽기가 되면 그때 걷힌다([`unlayered_of`] 는 탈이 없으면 `None` 이다).
-                if fresh.trouble == Some(user_config::Trouble::Reading) {
+                // 읽기가 되면 그때 걷힌다([`unlayered_of`] 는 댈 까닭이 없으면 `None` 이다 — 없는 파일이
+                // 그렇다: 아직 아무것도 등록 안 한 사람의 정상이라 잔소리할 자리가 아니다).
+                //
+                // **갈래를 안 가린다**(moai-po6v) — 여기서 세울 것은 어차피 없다. 못 읽었으면 목록이
+                // 비고, 깨졌으면 파싱이 진 자리라 역시 비어, 빈 층을 세우는 일과 안 세우는 일이 같다.
+                if fresh.trouble.is_some() {
                     self.unlayered = unlayered_of(&fresh);
                     return;
                 }
@@ -857,12 +861,20 @@ impl App {
                     Some(reg) => Layer::of(reg, old.launch.as_deref()),
                     None => Layer::read(old.config.as_deref(), old.launch.as_deref()),
                 };
-                // **못 읽었으면 들고 있던 층을 둔다**(moai-9p7v) — 잠깐의 `ESTALE`·`EIO` 다. 빈 층으로
-                // 갈아 끼우면 줄이 통째로 사라지고, 표식은 이미 올라가 설정이 **다시 바뀔 때까지**
-                // 아무도 다시 읽지 않아 그대로 남았다. 손으로 누르던 비상구(`SPC r`)는 걷었다(moai-en4u).
-                // 깨진 설정([`user_config::Trouble::Broken`])은 여기 안 든다 — 다시 읽어도 같고, 빈 층과
-                // 그 까닭이 사람이 고쳐야 할 것을 비춘다.
-                if fresh.trouble == Some(user_config::Trouble::Reading) {
+                // **탈이 있으면 들고 있던 층을 두고 까닭을 단다**(moai-po6v, 사용자 결정 2026-09-19).
+                // 빈 층으로 갈아 끼우면 줄이 통째로 사라지는데, 손으로 누르던 비상구(`SPC r`)는
+                // 걷었다(moai-en4u) — 되돌릴 길이 도구 밖에만 남는다.
+                //
+                // **갈래를 안 가린다.** 한때는 잠깐의 실패(`Reading`)만 들고 서고 깨진 설정은 빈 층으로
+                // 갈아 끼웠는데(moai-9p7v), 사람이 `[tui]` 에 오타 하나를 낸 순간 등록한 프로젝트가
+                // 통째로 사라졌다. 고칠 것을 비추는 데 필요한 것은 빈 층이 아니라 **까닭 한 줄**이고,
+                // 그것은 아래가 단다.
+                //
+                // **까닭은 새 읽기의 것으로 갈아 끼운다** — 들고 있던 층이 지난 읽기의 까닭을 이고 있으면
+                // 지금 무엇이 어긋났는지를 덮는다.
+                if fresh.trouble.is_some() {
+                    old.problems = holding(&fresh, old.registered());
+                    old.trouble = fresh.trouble;
                     self.layer = Some(old);
                     return;
                 }
@@ -981,6 +993,23 @@ pub(super) enum Depth {
 /// 등록한 것이 하나도 안 읽혀 **층을 안 세운** 까닭([`App::unlayered`]) — 설정을 읽다 만난 것이
 /// 있을 때만. 멀쩡한 빈 설정이면 `None` 이다. 띄울 때([`App::attach_layer`])와 설정이 바뀐 뒤
 /// ([`App::relayer`])가 같은 말을 쓴다.
+/// 탈이 난 설정을 **들고 설 때** 층이 대는 까닭(moai-po6v) — 배너가 이것을 한 줄로 줄여 낸다
+/// (`draw::banner`). 층이 선 화면에서 사용자 설정의 말을 내는 자리는 `Layer::problems` 하나다.
+///
+/// 사라진 파일은 `problems` 가 빈다 — 읽기에게는 댈 까닭이 아니라서다(아직 아무것도 등록 안 한
+/// 사람의 정상). 여기서는 다를 수 있다: 들고 있는 것이 있으면 **있던 파일이 사라졌다**는 뜻이라
+/// 말해야 한다. `held` 가 그것을 가른다 — 등록한 줄 하나 없는 층에 대고 "사라졌다" 고 하면, 설정을
+/// 한 번도 안 만든 사람에게 없던 파일을 잃었다고 말하는 꼴이다.
+fn holding(fresh: &Layer, held: bool) -> Vec<String> {
+    let why = match (fresh.problems.as_slice(), &fresh.config) {
+        ([], _) if !held => return Vec::new(),
+        ([], Some(p)) => format!("{}: 파일이 사라졌다", p.display()),
+        ([], None) => "파일이 사라졌다".to_string(),
+        (ps, _) => ps.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>().join(" · "),
+    };
+    vec![format!("사용자 설정을 못 읽어 지난 것을 들고 있다 — {why}")]
+}
+
 fn unlayered_of(layer: &Layer) -> Option<String> {
     (!layer.problems.is_empty()).then(|| {
         let why = layer.problems.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>().join(" · ");
@@ -2435,12 +2464,16 @@ mod tests {
         assert_eq!(a.detail.offset(), 0, "다른 프로젝트에 섰는데 굴린 자리가 남았다");
     }
 
-    /// **설정을 잠깐 못 읽어도 층은 그대로 남고, 다음 걸음이 다시 읽는다**(moai-9p7v). 표식은 걸음마다
-    /// 재지만 읽기는 한 번 지면 그만이라, `ESTALE`·`EIO` 한 번이 층을 빈 채로 두고 설정이 **다시 바뀔
-    /// 때까지** 아무도 다시 읽지 않았다. 손으로 누르던 비상구(`SPC r`)는 걷었다(moai-en4u).
+    /// **설정을 못 읽어도 층은 그대로 남고, 언젠가 다시 읽는다**(moai-9p7v, moai-po6v). 표식은 걸음마다
+    /// 재지만 읽기는 한 번 지면 그만이라, 한 번의 실패가 층을 빈 채로 두고 설정이 **다시 바뀔 때까지**
+    /// 아무도 다시 읽지 않았다. 손으로 누르던 비상구(`SPC r`)는 걷었다(moai-en4u).
     ///
     /// 권한으로 읽기만 지게 한다 — `chmod` 는 고친 때도 길이도 안 바꿔([`crate::store::stamp`]) 표식이
-    /// 그대로다. 표식을 안 물렸으면 되돌린 뒤에도 "이미 본 설정" 이라 세 번째 프로젝트가 영영 안 선다.
+    /// 그대로다. 표식만 보면 되돌린 뒤에도 "이미 본 설정" 이라 세 번째 프로젝트가 영영 안 선다.
+    ///
+    /// **다시 읽는 때가 시계로 옮겨 갔다**(moai-po6v) — 이 갈래는 다시 해도 같은 쪽이라 걸음마다 읽는
+    /// 것은 헛돈다. 한때는 못 읽으면 표식을 물려 다음 걸음이 다시 읽게 했는데, 그 길은 띄울 때 진
+    /// 읽기를 못 갚는다(`a_read_the_launch_lost_is_owed_though_the_stamp_never_moves`).
     #[test]
     #[cfg(unix)]
     fn a_config_that_could_not_be_read_leaves_the_layer_alone_and_is_retried() {
@@ -2464,16 +2497,150 @@ mod tests {
         // 설정이 바뀌었는데 그 읽기가 진다. 층도 읽어 둔 줄도 그대로여야 한다.
         s.register(&[&one, &two, &three]);
         chmod(&cfg, 0o000);
-        let blind = a.config_stamp;
         settle(&mut a);
-        assert_eq!(names(&a), ["one", "two"], "잠깐 못 읽은 것으로 층이 사라졌다");
-        assert_eq!(a.config_stamp, blind, "못 읽었는데 표식을 올렸다 — 설정이 다시 바뀔 때까지 다시 안 읽는다");
+        assert_eq!(names(&a), ["one", "two"], "못 읽은 것으로 층이 사라졌다");
+        assert_eq!(a.config_trouble, Some(user_config::Trouble::Unreadable), "다시 읽을 때를 정할 갈래를 안 들었다");
         assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "못 읽은 설정의 빈 표를 들여 옛 [read] 가 사라졌다");
 
-        // 권한만 되돌린다 — 파일은 그대로라 표식도 그대로다.
+        // 권한만 되돌린다 — 파일은 그대로라 표식도 그대로다. 시계가 돌아야 다시 읽는다.
         chmod(&cfg, 0o644);
+        a.config_read_at = std::time::Instant::now().checked_sub(REREAD_EVERY);
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two", "three"], "읽을 수 있게 됐는데 다시 안 읽었다");
+        assert_eq!(a.config_trouble, None, "읽혔는데 탈이 남았다");
+    }
+
+    /// **띄울 때 진 읽기는 빚으로 남아 다음 걸음이 갚는다**(moai-po6v). 표식은 읽기 **전에** 재므로
+    /// 진 뒤에도 파일의 것과 같다 — 표식만 보면 그 한 번의 실패가 세션 내내 남아, 등록한 프로젝트가
+    /// 영영 안 선다. `config_stamp` 를 `None` 으로 두는 것으로는 안 된다: 다음 걸음이 같은 표식을
+    /// 다시 재고 그것을 밑값으로 삼아 돌아설 뿐이다.
+    ///
+    /// 권한으로 지게 한다 — `chmod` 은 고친 때도 길이도 안 바꿔([`crate::store::stamp`]) 표식이 내내
+    /// 그대로다. 그 갈래는 시계로 다시 보는 자리라([`user_config::Again::Clock`]) 시계를 돌려 갚는다.
+    #[test]
+    #[cfg(unix)]
+    fn a_read_the_launch_lost_is_owed_though_the_stamp_never_moves() {
+        use std::os::unix::fs::PermissionsExt;
+        let chmod = |p: &Path, mode: u32| std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+        let s = Scratch::fenced("layer-config-owed");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+
+        // 띄울 때 못 읽었다 — `cmd::tui` 와 같은 차례로 표식을 먼저 재고 읽는다.
+        chmod(&cfg, 0o000);
+        let stamp = crate::store::stamp(&cfg);
+        let reg = user_config::read(Some(&cfg));
+        assert_eq!(reg.trouble, Some(user_config::Trouble::Unreadable), "시험의 전제 — 읽기가 졌다");
+        let mut a = App::on_projects(Layer::of(&reg, None));
+        a.user_config = Some(cfg.clone());
+        a.config_stamp = Some(stamp);
+        a.config_trouble = reg.trouble;
+        a.config_read_at = Some(std::time::Instant::now());
+        settle(&mut a);
+        assert!(names(&a).is_empty(), "시험의 전제 — 못 읽어 줄이 없다");
+
+        // 권한을 되돌린다. 파일은 한 바이트도 안 바뀌어 표식이 그대로다.
+        chmod(&cfg, 0o644);
+        assert_eq!(crate::store::stamp(&cfg), stamp, "시험의 전제 — chmod 은 표식을 안 바꾼다");
+        settle(&mut a);
+        assert!(names(&a).is_empty(), "다시 해도 같은 갈래를 걸음마다 다시 읽었다");
+
+        a.config_read_at = std::time::Instant::now().checked_sub(REREAD_EVERY);
+        settle(&mut a);
+        assert_eq!(names(&a), ["one", "two"], "시계가 돌았는데 빚진 읽기를 안 갚았다");
+        assert_eq!(a.config_trouble, None, "읽혔는데 탈이 남았다");
+    }
+
+    /// **잠깐의 실패는 다음 걸음에 갚는다**(moai-po6v) — 시계를 안 기다린다. 갈래마다 벗어나는 길이
+    /// 다르고([`user_config::Again`]), 잠깐인 것을 시계에 걸면 1분 동안 층이 빈 채로 선다.
+    #[test]
+    fn a_blip_is_read_again_on_the_very_next_step() {
+        let s = Scratch::fenced("layer-config-blip");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = App::on_projects(Layer::of(&user_config::Registry::default(), None));
+        a.user_config = Some(cfg.clone());
+        a.config_stamp = Some(crate::store::stamp(&cfg));
+        a.config_trouble = Some(user_config::Trouble::Reading);
+        a.config_read_at = Some(std::time::Instant::now());
+        settle(&mut a);
+        assert_eq!(names(&a), ["one", "two"], "잠깐의 실패를 시계에 걸어 다음 걸음이 안 읽었다");
+    }
+
+    /// **쭉 못 읽어도 조용하지 않다**(moai-po6v, 사용자 결정 2026-09-19) — 지난 것을 들고 서되 까닭을
+    /// 배너에 댄다. 한때 들고 있던 층을 두고 `return` 만 해, 옆 터미널에서 등록한 프로젝트가 영영 안
+    /// 서는데 까닭을 아무 데서도 못 읽었다. 층이 선 화면에서 그 말을 내는 자리는 `Layer::problems`
+    /// 하나다(`draw::banner`).
+    #[test]
+    #[cfg(unix)]
+    fn a_config_we_cannot_read_keeps_the_layer_and_says_why() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::fenced("layer-config-said");
+        let (one, two) = twins(&s);
+        let three = s.project("three", &[]);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.user_config = Some(cfg.clone());
+        a.follow();
+        assert_eq!(names(&a), ["one", "two"], "시험의 전제 — 층이 섰다");
+
+        // 설정이 바뀌었는데 그 읽기가 진다.
+        s.register(&[&one, &two, &three]);
+        std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o000)).unwrap();
+        settle(&mut a);
+        std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(names(&a), ["one", "two"], "못 읽은 것으로 층이 사라졌다");
+        let said = &a.layer.as_ref().expect("층이 섰다").problems;
+        assert_eq!(said.len(), 1, "까닭을 한 줄로 안 댔다 — {said:?}");
+        assert!(said[0].contains("들고 있다"), "지난 것을 들고 있다는 말이 없다 — {said:?}");
+        assert!(said[0].contains(&cfg.display().to_string()), "어느 파일인지 안 댔다 — {said:?}");
+    }
+
+    /// **설정 파일이 사라져도 지난 것을 들고 선다**(moai-po6v) — autofs·sshfs 홈이 끊기면 설정이 빈
+    /// 디렉터리째 사라진다. "없다" 를 "읽었더니 비었다" 로 들면 층도 읽음도 빈 채로 갈리는데,
+    /// 그것이 moai-9p7v 가 막으려던 바로 그 해다(걷어 낸 `read_marks_at` 에도 있던 구멍이다).
+    #[test]
+    fn a_config_that_vanished_keeps_the_layer_and_the_read_marks() {
+        let s = Scratch::fenced("layer-config-gone");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.user_config = Some(cfg.clone());
+        a.follow();
+        let marks = format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
+        std::fs::write(&cfg, &marks).unwrap();
+        settle(&mut a);
+        assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "시험의 전제 — 옛 [read] 를 들었다");
+
+        std::fs::remove_file(&cfg).unwrap();
+        settle(&mut a);
+        assert_eq!(names(&a), ["one", "two"], "사라진 설정으로 층이 비었다");
+        assert_eq!(
+            a.legacy_read.get("argos-0001").map(String::as_str),
+            Some("2026-09-14T00:00:00Z"),
+            "사라진 설정의 빈 표를 들여 옛 [read] 가 사라졌다"
+        );
+
+        // 돌아오면 표식이 그것을 낸다 — 없는 파일의 표식은 `None` 이라 늘 갈린다.
+        std::fs::write(&cfg, &marks).unwrap();
+        settle(&mut a);
+        assert_eq!(names(&a), ["one", "two"], "돌아온 설정을 안 읽었다");
+        assert_eq!(a.config_trouble, None, "돌아왔는데 탈이 남았다");
+    }
+
+    /// **설정을 한 번도 안 만든 사람에게 잃었다고 하지 않는다**(moai-po6v). 없는 파일은 갈래로는
+    /// 탈이지만(`Trouble::Gone`) 사람에게 댈 까닭은 아니다 — 들고 있는 줄이 하나도 없으면 잃은 것도
+    /// 없다. 가르는 자는 등록한 줄이 있는가 하나다.
+    #[test]
+    fn a_config_that_was_never_made_is_not_told_as_lost() {
+        let s = Scratch::fenced("layer-config-never");
+        let cfg = s.dir("설정").join("config.toml");
+        let mut a = App::on_projects(Layer::of(&user_config::read(Some(&cfg)), None));
+        a.user_config = Some(cfg.clone());
+        assert!(names(&a).is_empty(), "시험의 전제 — 등록한 줄이 없다");
+        a.relayer(None);
+        let said = &a.layer.as_ref().expect("빈 층이 섰다").problems;
+        assert!(said.is_empty(), "없던 파일을 잃었다고 말했다 — {said:?}");
     }
 
     /// **한 걸음이 등록과 읽음을 한 번의 읽기로 든다**(moai-7yil). 둘은 한 파일에 산다 — 저마다 읽던
@@ -2500,11 +2667,13 @@ mod tests {
         assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "옛 [read] 를 안 들었다");
     }
 
-    /// **깨진 설정은 다시 읽어도 같다** — 못 읽은 것과 달리 표식을 올리고 그 까닭을 댄다(moai-9p7v).
-    /// 물리면 걸음마다 같은 파일을 다시 파싱하고 같은 까닭을 다시 세운다.
+    /// **깨진 설정은 스스로 다시 읽지 않는다**(moai-9p7v) — 다시 읽어도 같고, 사람이 고치면 파일이
+    /// 바뀌어 표식이 그것을 낸다([`user_config::Again::Never`]).
     ///
-    /// **읽음은 그래도 지킨다**(리뷰) — 깨진 파일의 `read` 는 파싱이 진 자리라 빈 표다. 그것을 들이면
-    /// 내 줄이 통째로 [NEW] 로 선다. 층은 비우고 읽음은 두는 것이 걷어 낸 `read_marks_at` 의 계약이었다.
+    /// **층과 읽음은 둘 다 지킨다**(moai-po6v, 사용자 결정 2026-09-19). 깨진 파일의 `read` 는 파싱이
+    /// 진 자리라 빈 표이고, 그것을 들이면 내 줄이 통째로 [NEW] 로 선다 — 층도 같다. 한때는 층만
+    /// 비웠는데(빈 층과 까닭이 고칠 것을 비춘다는 말이었다), 사람이 `[tui]` 에 오타 하나를 낸 순간
+    /// 등록한 프로젝트가 통째로 사라졌다. 고칠 것을 비추는 것은 빈 층이 아니라 **까닭 한 줄**이다.
     #[test]
     fn a_broken_config_is_not_retried_every_step() {
         let s = Scratch::fenced("layer-config-broken");
@@ -2521,7 +2690,10 @@ mod tests {
         std::fs::write(&cfg, "[[project]\npath = ").unwrap();
         settle(&mut a);
         assert_eq!(a.config_stamp, Some(crate::store::stamp(&cfg)), "깨진 설정의 표식은 올라간다");
-        assert!(a.layer.as_ref().is_none_or(|l| l.places.is_empty()), "깨진 설정으로 층이 남았다");
+        assert_eq!(a.config_trouble.map(user_config::Trouble::again), Some(user_config::Again::Never), "깨진 글을 스스로 다시 읽는다");
+        assert_eq!(names(&a), ["one", "two"], "오타 하나로 층이 통째로 사라졌다");
+        let said = &a.layer.as_ref().expect("층이 섰다").problems;
+        assert!(said.len() == 1 && said[0].contains("들고 있다"), "지난 것을 들고 있다는 말이 없다 — {said:?}");
         assert_eq!(
             a.legacy_read.get("argos-0001").map(String::as_str),
             Some("2026-09-14T00:00:00Z"),

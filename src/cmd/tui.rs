@@ -75,6 +75,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
     app.config_stamp = config_stamp;
+    // **띄울 때 진 읽기도 걸음이 갚는다**(moai-po6v) — 표식은 읽기 전에 쟀으니 진 뒤에도 파일의 것과
+    // 같아, 갈래를 안 넘기면 그 한 번의 실패가 세션 내내 남는다(`App::config_trouble`).
+    app.config_trouble = reg.trouble;
+    app.config_read_at = Some(std::time::Instant::now());
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp). 못 읽은 설정의 까닭은 보기가 아니라 층이 댄다 —
     // 얹는 쪽(`App::attach_layer`)이 배너에 달고 `look_problems` 에는 그 까닭이 없다(moai-5jsn). 그래서 둘의
     // 차례에 걸린 것은 없다(moai-gmdu 에픽 리뷰). 한때는 `with_layer` 가 첫 화면의 커서를 `..` 너머로 밀어
@@ -154,6 +158,10 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.me = app.whoami(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
     app.user_config = config;
     app.config_stamp = config_stamp;
+    // **띄울 때 진 읽기도 걸음이 갚는다**(moai-po6v) — 표식은 읽기 전에 쟀으니 진 뒤에도 파일의 것과
+    // 같아, 갈래를 안 넘기면 그 한 번의 실패가 세션 내내 남는다(`App::config_trouble`).
+    app.config_trouble = reg.trouble;
+    app.config_read_at = Some(std::time::Instant::now());
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp).
     app.adopt_look(&reg.look, reg.look_problems);
     app.legacy_read = reg.read;

@@ -225,6 +225,10 @@ fn read_one(path: &Path, root: &Path) -> Marks {
     let at = |why: String| format!("{}: {why}", path.display());
     let (seen, problems, trouble) = match std::fs::read_to_string(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (BTreeMap::new(), Vec::new(), None),
+        // **가르는 잣대는 설정과 한 자다**(moai-po6v, `user_config::unreadable`) — 갈라 두면 같은
+        // `Trouble` 을 두 곳이 달리 읽어, 한쪽을 고친 날 다른 쪽이 조용히 옛 뜻으로 남는다.
+        // 권한으로 못 읽는 것은 다시 해도 같다 — 다시 읽을 때는 `App::take_read` 가 갈래로 정한다.
+        Err(e) if crate::user_config::unreadable(&e) => (BTreeMap::new(), vec![at(e.to_string())], Some(Trouble::Unreadable)),
         Err(e) => (BTreeMap::new(), vec![at(e.to_string())], Some(Trouble::Reading)),
         Ok(src) => match Sheet::parse(&src) {
             Err(e) => (BTreeMap::new(), vec![at(e)], Some(Trouble::Broken)),
@@ -969,9 +973,13 @@ mod tests {
         assert!(got.problems[0].contains(&at.display().to_string()), "어느 파일인지를 안 댔다 — {:?}", got.problems);
     }
 
-    /// **잠깐 못 읽은 것과 깨진 것을 가른다**(리뷰) — 앞은 다시 재면 지나가고(`Reading`), 뒤는 사람이
-    /// 고쳐야 같아진다(`Broken`). 탐색기가 표식을 올릴지를 이것으로 가르므로, 권한 하나가 세션 내내
-    /// [NEW] 를 세워 두던 자리가 여기다.
+    /// **못 읽은 것과 깨진 것을 가른다**(리뷰) — 탐색기가 표식을 올릴지를 이것으로 가르므로, 권한
+    /// 하나가 세션 내내 [NEW] 를 세워 두던 자리가 여기다.
+    ///
+    /// **권한은 잠깐이 아니다**(moai-po6v) — 다시 해도 같고, 고치는 `chmod` 은 표식을 안 바꿔 표식으로는
+    /// 영영 못 벗어난다. 그래서 갈래는 `Unreadable` 이고 벗어나는 길은 시계다
+    /// (`App::a_sheet_we_cannot_read_again_is_retried_by_the_clock`). 가르는 자는 설정과 한 자다
+    /// (`user_config::unreadable`).
     #[cfg(unix)]
     #[test]
     fn a_sheet_i_cannot_open_is_transient_not_broken() {
@@ -985,7 +993,7 @@ mod tests {
         let got = read(&cfg, &root, &BTreeMap::new());
         // root 로 돌리면 권한이 안 걸린다 — 그때는 이 시험이 잴 것이 없다.
         if got.trouble.is_some() {
-            assert_eq!(got.trouble, Some(crate::user_config::Trouble::Reading), "{:?}", got.problems);
+            assert_eq!(got.trouble, Some(crate::user_config::Trouble::Unreadable), "{:?}", got.problems);
             assert!(got.seen.is_empty(), "못 읽고도 표를 냈다");
         }
         std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o644)).unwrap();
