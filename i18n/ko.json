@@ -47,6 +47,8 @@
   "warn.gitattributes_rules": ".gitattributes 에 moai 가 쓰는 자리 {n}줄이 빠졌다 — 저널이 머지에서 충돌하고 줄 끝이 흔들린다",
   "warn.merge_driver_rotten": "심어 둔 머지 드라이버가 안 돈다 — 병합이 git 의 기본 머지로 내려앉는다",
   "warn.merge_driver_stale": "심어 둔 머지 드라이버가 옛 판이다 — 적은 자리가 사라지면 표식 없이 저쪽을 버린다",
+  "warn.merge_driver_alien": "심어 둔 자리에 그 이름의 다른 도구가 선다 — 이 명령을 몰라 병합이 git 의 기본 머지로 내려앉는다",
+  "warn.merge_driver_absent": "이 저장소는 moai 머지 드라이버를 걸어 뒀는데 이 클론에 안 심었다 — 병합이 git 의 기본 머지로 내려앉는다",
   "warn.unknown_field": "모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다",
   "warn.duplicate_id": "id 가 두 번 있다 {n}건 — 머지 흔적이거나 못 읽는 줄과 겹친다",
   "warn.unreadable_line": "읽을 수 없는 줄 {n}개",
