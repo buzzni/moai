@@ -57,6 +57,17 @@ const PATH: &str = "path";
 /// 닿았다"(`EACCES`·`ELOOP`·`ESTALE`)를 위한 것이고, 그때는 다음 성한 판이 합쳐 준다. 없는 자리에는
 /// 합쳐 줄 다음 판이 없다 — 그 뿌리로는 [`crate::store::Repo::open`] 이 `Missing` 을 내 읽을 이슈부터
 /// 없으니, 도장을 대기 자리에 쌓으면 아무도 안 여는 파일만 남는다.
+///
+/// **다만 그 말은 영영 죽은 뿌리에 대해서만 참이다**(리뷰 7번). 링크 하나가 잠깐 파일로 바뀌었다가
+/// 돌아오는 판에서는, 그 창에 찍힌 도장이 받은 철자의 읽음 파일로 가고 자리가 다시 풀린 뒤에는 그것이
+/// [`Place::past`] 라 **처음 짓는 파일일 때만** 합쳐진다 — 지금 자리 파일이 이미 있으면 그 도장은
+/// 조용히 남겨진다. 탐색기를 띄워 둔 채 그 링크가 바뀌면 `r` 이 그 창에 든다.
+///
+/// 이 구멍은 `NotADirectory` 가 새로 연 것이 아니라 `NotFound` 가 처음부터 가진 것이다 — 없는 자리를
+/// 받은 철자로 떨어뜨리는 길(moai-f5e3, 사용자 결정 2026-09-20)이 곧 그 구멍이고, 여기서는 그 길에
+/// 갈래 하나를 더 맞췄을 뿐이다. 닫으려면 "없는 자리도 대기 자리로 보낸다" 로 가야 하는데, 그러면
+/// 읽기가 지금 자리 파일을 못 봐 그 창 동안 모든 줄이 [NEW] 로 선다 — moai-bdej 의 차례 결정을 다시
+/// 여는 일이라 여기서 안 뒤집는다. 그 물음은 idea 로 담았다.
 fn settle(path: &Path) -> (PathBuf, Option<String>) {
     match std::fs::canonicalize(path) {
         Ok(real) => (real, None),
@@ -323,6 +334,16 @@ pub fn overlay_older(
     overlay_place(&place_of(config, root), seen, legacy, &mut Vec::new());
 }
 
+/// 까닭에 **어느 파일인지를 붙인다** — 이름이 뿌리의 해시라 사람이 짐작할 수 없어, 안 붙이면
+/// "손으로 고친다" 가 갈 곳 없는 말이 된다.
+///
+/// **붙이는 자는 하나다**(리뷰). 읽는 길([`read_one`])과 쓰는 길([`update`])이 저마다 꼴을 적던 판은,
+/// 두 길이 같은 줄을 글자째 같게 낸다는 약속(`writing_says_which_line_it_skipped`)을 지키는 것이
+/// 시험 하나뿐이었다 — 한쪽의 꼴만 고치면 그 시험이 뒤늦게 붉어질 뿐, 갈라지는 것을 막는 것은 없었다.
+fn tag(path: &Path, why: String) -> String {
+    format!("{}: {why}", path.display())
+}
+
 /// 읽음 파일 **하나**를 읽는다. 겹치는 일은 [`read`] 가 한다. `root` 는 [`Place::root`] — 자리를 고른
 /// 그 푼 뿌리다. 여기서 다시 풀지 않는다(리뷰): 파일마다 같은 값을 다시 세면 읽기 한 번이 `canonicalize`
 /// 를 열 번 부르고, 그 사이 자리가 바뀌면 이름을 고른 자와 문지기가 서로 다른 뿌리를 본다.
@@ -330,7 +351,7 @@ fn read_one(path: &Path, root: &Path) -> Marks {
     use crate::user_config::Trouble;
     // **까닭에는 어느 파일인지를 붙인다** — 이름이 뿌리의 해시라 사람이 짐작할 수 없어, 안 붙이면
     // "손으로 고친다" 가 갈 곳 없는 말이 된다([`update`] 가 거절문에 붙이는 것과 같은 자다, 리뷰).
-    let at = |why: String| format!("{}: {why}", path.display());
+    let at = |why: String| tag(path, why);
     let (seen, problems, trouble) = match std::fs::read_to_string(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (BTreeMap::new(), Vec::new(), None),
         // **가르는 잣대는 설정과 한 자다**(moai-po6v, `user_config::unreadable`) — 갈라 두면 같은
@@ -374,24 +395,44 @@ pub fn overlay(marks: &mut BTreeMap<String, String>, legacy: &BTreeMap<String, S
 /// **읽는 자를 하나로 둔다**(리뷰) — 옛 `[read]`([`crate::user_config::Doc::read_marks`])와 이 파일이 같은
 /// 모양이라, 둘이 저마다 읽으면 모양이 자라는 날 한쪽만 따라가고 그 한쪽은 남은 읽음을 조용히 버린다.
 pub(crate) fn read_table(root: &Table) -> (BTreeMap<String, String>, Vec<String>) {
+    let mut marks = BTreeMap::new();
+    let problems = scan(root, |id, when| {
+        marks.insert(id.to_string(), when.to_string());
+    });
+    (marks, problems)
+}
+
+/// 건너뛴 줄만 — **표는 안 짓는다**(리뷰). 쓰는 길([`update`])은 까닭만 쓰는데 [`read_table`] 을
+/// 부르면 id 마다 문자열 둘과 트리 마디 하나를 짓고 그대로 버린다. 그 값이 **락 안에서** 드는 데다,
+/// 이 모듈은 같은 낭비를 이미 두 자리에서 거절했다([`overlay`] 의 "버릴 문자열 1만 개", [`Sheet::prune`]
+/// 의 "걷을 것만 짓는다").
+///
+/// **훑는 자는 [`scan`] 하나다** — 걸러 내는 잣대를 여기 또 적으면 [`read_table`] 과 갈려, 한쪽만
+/// 고친 날 읽는 길과 쓰는 길이 같은 줄을 달리 부른다(moai-upna 가 고친 바로 그 어긋남이다).
+fn skipped_in(root: &Table) -> Vec<String> {
+    scan(root, |_, _| {})
+}
+
+/// `[read]` 표를 한 번 훑는다 — 성한 줄은 `on` 에 넘기고, 건너뛴 줄의 까닭만 모아 낸다.
+///
+/// [`read_table`] 과 [`skipped_in`] 이 **이 하나로** 센다. 둘로 두면 "무엇을 건너뛰는가" 가 두 벌이
+/// 되고, 그때 읽는 길이 대는 줄과 쓰는 길이 대는 줄이 갈린다.
+fn scan(root: &Table, mut on: impl FnMut(&str, &str)) -> Vec<String> {
     let mut problems = Vec::new();
     let Some(item) = root.get(READ) else {
-        return (BTreeMap::new(), problems);
+        return problems;
     };
     let Some(t) = item.as_table_like() else {
         problems.push(format!("`{READ}` 는 `[{READ}]` 표여야 한다 — 지금은 {}", item.type_name()));
-        return (BTreeMap::new(), problems);
+        return problems;
     };
-    let mut marks = BTreeMap::new();
     for (id, at) in t.iter() {
         match at.as_str() {
-            Some(when) => {
-                marks.insert(id.to_string(), when.to_string());
-            }
+            Some(when) => on(id, when),
             None => problems.push(format!("`{READ}.{id}` 는 때를 적은 낱말이어야 한다 — 지금은 {}", at.type_name())),
         }
     }
-    (marks, problems)
+    problems
 }
 
 /// 읽음을 고치는 **유일한 길**. 락 → 락 안에서 읽기 → 고치기 → 바뀌었으면 temp+rename.
@@ -405,9 +446,10 @@ pub(crate) fn read_table(root: &Table) -> (BTreeMap<String, String>, Vec<String>
 /// 이미 대는데([`Marks::problems`]) 쓰는 길만 버리던 판은, 뿌리 윗자리에 잠깐 `EACCES`·`ESTALE`·`ELOOP`
 /// 가 난 그 한 번이 옛 철자 자리에 적고(락도 딴 자리다) 아무 말 없이 0 으로 끝났다.
 ///
-/// **건너뛴 줄도 같은 자리에 싣는다**(moai-upna). 자리 고르기만 싣던 판은 [`Sheet::marks`] 가 건너뛴
+/// **건너뛴 줄도 같은 자리에 싣는다**(moai-upna). 자리 고르기만 싣던 판은 [`Sheet::skipped`] 가 대는
 /// 줄을 그대로 버렸다 — 읽는 길([`read_one`])은 그것을 대므로 같은 파일을 두 길이 달리 읽었고, 그
-/// 줄은 견줌에서도 빠져 쓰는 길이 "이미 읽었는가" 를 그 줄 없이 쟀다.
+/// 줄은 견줌에서도 빠져 쓰는 길이 "이미 읽었는가" 를 그 줄 없이 쟀다. **차례도 읽는 길과 같다** —
+/// 건너뛴 줄이 앞, 자리를 고르다 만난 까닭이 뒤다.
 ///
 /// **그 도장은 다음 성한 쓰기가 합치고 지운다**(moai-bdej, 사용자 결정 2026-09-20). 떨어진 판은 도구가
 /// 짓는 대기 자리([`spool_at`])에 적고, 자리가 다시 풀리는 판이 그것을 [`Place::pending`] 으로 들어
@@ -515,7 +557,7 @@ pub fn update<T>(config: &Path, root: &Path, f: impl Fn(&mut Sheet) -> R<T>) -> 
     // 까닭이다(리뷰). 이 파일의 이름은 뿌리의 해시라 사람이 짐작할 수 없어, 붙이지 않으면 "손으로
     // 고친다" 가 갈 곳 없는 말이 된다. 붙이는 곳을 부르는 쪽마다 두면 붙인 곳과 잊은 곳이 갈린다.
 
-    // **이 파일에서 건너뛴 줄도 댄다**(moai-upna). [`Sheet::marks`] 의 둘째 값은 읽는 길만 물고
+    // **이 파일에서 건너뛴 줄도 댄다**(moai-upna). [`Sheet::skipped`] 가 대는 줄은 읽는 길만 물고
     // 갔고([`read_one`]) 쓰는 길은 버렸다 — 손으로 적은 `"argos-0002" = 3` 한 줄이 있는 사람에게
     // `moai read --all` 은 그것을 대는데 `moai read <id>` 는 조용했고, 그 줄은 견줌에서도 빠져
     // 쓰는 길이 "이미 읽었는가" 를 그 줄 없이 쟀다. 옛 자리와 대기 자리의 같은 줄은 [`merge_past`]
@@ -525,7 +567,14 @@ pub fn update<T>(config: &Path, root: &Path, f: impl Fn(&mut Sheet) -> R<T>) -> 
     // 줄이 두 번 서고, 부르는 쪽마다 세면 [`crate::cmd::read`] 와 탐색기가 갈린다. 재 보기 쪽은 빈
     // 표라 셀 것이 없다. 겹치기 전에 센다 — [`merge_past`] 가 얹은 줄은 도구가 지은 값이라 건너뛸
     // 것이 없고, 그 뒤에 세면 같은 줄을 옛 자리의 것과 섞어 두 번 댈 길이 열린다.
-    problems.extend(sheet.marks().1.into_iter().map(|why| format!("{}: {why}", path.display())));
+    //
+    // **차례도 읽는 길과 같다**(리뷰) — 건너뛴 줄이 앞, 자리를 고르다 만난 까닭이 뒤다([`read`] 가
+    // `place.problems` 를 뒤에 붙이는 그 차례다). 뒤에 잇던 판은 두 값이 다 선 판에서 차례가
+    // 뒤집혔고, `problems.first()` 하나만 보는 자리들(탐색기의 `r` 알림)이 걸음마다 다른 까닭을
+    // 댔다 — `a_place_trouble_is_not_called_a_line_trouble`(moai-hzfu)이 읽는 길에서 막는 바로 그
+    // 어긋남이다. 글자만이 아니라 **차례까지 같아야** 두 길이 한 줄을 같게 부른다.
+    let skipped: Vec<String> = sheet.skipped().into_iter().map(|why| tag(&path, why)).collect();
+    problems.splice(0..0, skipped);
 
     // **대기 자리는 그 락 안에서 들고, 쓴 뒤에 지운다**(moai-bdej, 리뷰 4). 락 없이 읽고 지우던 길은
     // 읽기와 지우기 사이에 떨어진 판이 적은 도장을 함께 지웠다 — 조용한 손실이라 못 견딘다. 락의
@@ -619,7 +668,9 @@ pub struct Wrote<T> {
     /// [`update`] 에 준 함수가 돌려준 것.
     pub value: T,
     /// 자리를 고르다([`Place::problems`]) 또 옛 자리를 합치다([`merge_past`]) 만나고, **이 파일에서
-    /// 건너뛴 줄**([`Sheet::marks`] 의 둘째 값, moai-upna) 때문에 생긴 까닭. 빈 것이 정상이다.
+    /// 건너뛴 줄**([`Sheet::skipped`], moai-upna) 때문에 생긴 까닭. 빈 것이 정상이다.
+    ///
+    /// **차례는 [`Marks::problems`] 와 같다** — 건너뛴 줄이 앞, 자리를 고른 까닭이 뒤다(리뷰).
     pub problems: Vec<String>,
 }
 
@@ -706,6 +757,11 @@ impl Sheet {
     /// ([`read_table`], 옛 `[read]` 와 같은 자).
     pub fn marks(&self) -> (BTreeMap<String, String>, Vec<String>) {
         read_table(self.doc.root())
+    }
+
+    /// 건너뛴 줄의 까닭만 — **표는 안 짓는다**([`skipped_in`]). 쓰는 길이 이것으로 센다.
+    pub fn skipped(&self) -> Vec<String> {
+        skipped_in(self.doc.root())
     }
 
     /// 읽음을 적는다 — **준 id 만 손댄다**. 같은 때가 이미 적혀 있으면 아무것도 안 한다. 돌려주는 것은
@@ -983,6 +1039,31 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let wrote = update(&cfg, &root, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
         assert!(wrote.problems.is_empty(), "성한 자리를 탈로 댔다 — {:?}", wrote.problems);
+    }
+
+    /// **둘이 다 서면 차례도 읽는 길과 같다**(리뷰) — 건너뛴 줄이 앞, 자리를 고르다 만난 까닭이 뒤다.
+    ///
+    /// [`read`] 가 `place.problems` 를 **뒤에** 붙이는 것은 `problems.first()` 하나만 보는 자리
+    /// (탐색기의 `r` 알림)가 진짜 까닭을 대게 하려는 결정이다. 쓰는 길만 거꾸로 두던 판은 두 값이 다
+    /// 선 판에서 한 걸음과 다음 걸음이 다른 까닭을 댔고, 그것이 `a_place_trouble_is_not_called_a_line_trouble`
+    /// (moai-hzfu)이 읽는 길에서 막는 어긋남이다. **글자만이 아니라 차례까지** 견준다.
+    #[test]
+    #[cfg(unix)]
+    fn the_two_paths_order_their_reasons_the_same_way() {
+        let s = Scratch::new("read-marks-order");
+        let cfg = s.join("config.toml");
+        std::os::unix::fs::symlink("고리", s.join("고리")).unwrap();
+        let through = s.join("고리/밑");
+        // 못 푼 판이 적는 자리에 손으로 적은 줄 하나를 둔다 — 그 자리가 이 판의 `at` 이다.
+        let at = path_for(&cfg, &through);
+        std::fs::create_dir_all(dir_of(&at)).unwrap();
+        std::fs::write(&at, "[read]\n\"a-0002\" = 3\n").unwrap();
+
+        let wrote = update(&cfg, &through, |sh| sh.mark(&marks(&[("a-0001", "A")]))).unwrap();
+        assert_eq!(wrote.problems.len(), 2, "둘 다 안 댔다 — {:?}", wrote.problems);
+        assert!(wrote.problems[0].contains("a-0002"), "건너뛴 줄이 앞이 아니다 — {:?}", wrote.problems);
+        assert!(wrote.problems[1].contains("자리를 못 풀어"), "자리 까닭이 뒤가 아니다 — {:?}", wrote.problems);
+        assert_eq!(read(&cfg, &through, &BTreeMap::new()).problems, wrote.problems, "두 길의 차례가 갈렸다");
     }
 
     /// **쓰는 길도 건너뛴 줄을 댄다**(moai-upna). 읽는 길만 대던 판은 같은 파일을 두 길이 달리 읽었다 —

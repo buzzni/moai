@@ -19,7 +19,7 @@
   "overview.picks": "{n}",
   "overview.unreadable": "Unreadable rows {n} — `{go}` names which",
   "overview.uninit": "before init — start with `{go}` and it shows up here",
-  "overview.uninit_worktree": "before init — this is a linked worktree; the tracker lives in the main checkout. start with `{go}`",
+  "overview.uninit_worktree": "before init — this is a linked worktree; the tracker lives in the main checkout. register that one with `{go}`",
   "overview.missing": "the directory is gone",
   "overview.missing_go": "→ register the new place if it moved, otherwise `{go}`",
   "overview.project_unreadable": "cannot read it — {why}",

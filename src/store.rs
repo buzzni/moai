@@ -1040,7 +1040,18 @@ pub(crate) fn planted_elsewhere(root: &Path) -> Option<Elsewhere> {
 /// **가르는 자를 여기 하나로 둔다.** 한눈 보기(`view::unopened`)·`moai project add|ls`·
 /// `moai init --check` 가 저마다 갈래를 풀면 한 곳을 고친 날 나머지가 옛 말을 한다 — 등록한
 /// 워크트리 한 줄이 영영 `init 전` 으로 서고 그 줄이 대는 명령이 1 로 끝나던 자리가 그것이다.
+///
+/// **이미 여기 심겨 있으면 안 묻는다**(리뷰) — [`crate::cmd::init::run`] 의 `dir.exists()` 와 같은
+/// 자다. 거절은 **새 트래커가 설 때만** 서고, 심겨 있는 자리에서 `init` 이 하는 일은 딸린 파일을
+/// 다시 맞추는 것뿐이라 0 으로 끝난다. 그 물음을 부르는 쪽 하나에만 두던 판은 `.moai` 를 커밋하는
+/// 저장소(여기가 그렇다)의 **모든 워크트리**에서 `moai init --check` 가 "`moai init` 은 여기 안
+/// 선다" 를 냈다 — 그 말은 거짓인 데다, 따라 친 `moai -C <주 체크아웃> init` 은 방금 잰 것과 **다른
+/// 체크아웃**의 `AGENTS.md` 와 딸린 파일을 고쳐, 이 워크트리의 낡은 블록은 영영 낡은 채로 남았다.
+/// 묻는 자리를 여기 두어야 표면이 다섯이 되어도 같은 답이 선다.
 pub(crate) fn init_belongs_at(dir: &Path) -> Option<PathBuf> {
+    if dir.join(".moai").exists() {
+        return None;
+    }
     match planted_elsewhere(dir) {
         Some(Elsewhere::Worktree(main)) => Some(main),
         Some(Elsewhere::Above(_)) | None => None,
@@ -1294,6 +1305,69 @@ mod tests {
         let Opened::Repo(repo) = Repo::open(&feat).unwrap() else { panic!("안 열렸다") };
         assert_eq!(repo.root, feat, "옮길 곳이 없는데 옮겼다");
         assert_eq!(repo.here(), feat, "안 옮겼는데 옮겼다고 적었다");
+    }
+
+    /// **위에 트래커가 있으면 그 자리를 찾아 낸다**(moai-pjrr). 막지는 않는다 — 여기 심은 것은 이
+    /// 밑에서 읽히고, 위로 찾기에는 경계를 그을 자가 없다(같은 날 moai-a2kn 이 천장을 걷었다).
+    /// 부르는 쪽이 이 값으로 알림 한 줄을 세운다.
+    ///
+    /// **`.moai` 가 디렉터리인가로 가른다** — 위로 찾는 [`look`] 과 같은 자다. 그 자가 갈리면
+    /// 여기서 지나간 자리를 명령이 잡는다.
+    ///
+    /// 한때 `cmd/init.rs` 에 섰다 — [`planted_elsewhere`] 가 이리로 오면서 그 파일의 것은 하나도
+    /// 안 재게 되었고, 재는 자와 시험이 갈리면 여기를 고치는 사람이 시험을 못 찾는다(리뷰).
+    #[test]
+    fn a_subdir_under_a_tracker_finds_the_one_above() {
+        let s = Scratch::new("init-above");
+        let deep = s.join("src/deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        assert!(planted_elsewhere(&deep).is_none(), "트래커가 없는데 자리를 댔다");
+
+        moai_at(s.path());
+        match planted_elsewhere(&deep) {
+            Some(Elsewhere::Above(at)) => assert_eq!(at, s.path(), "댄 자리가 트래커의 자리가 아니다"),
+            Some(Elsewhere::Worktree(main)) => panic!("워크트리가 아닌데 워크트리라 했다 — {}", main.display()),
+            None => panic!("위의 트래커를 못 봤다"),
+        }
+
+        // 그 자리 자신은 안 묻는다 — 여기 이미 심겨 있으면 `run` 이 딸린 파일만 다시 맞춘다.
+        assert!(planted_elsewhere(s.path()).is_none(), "제 트래커를 남의 것으로 댔다");
+    }
+
+    /// **이미 심겨 있는 자리는 "여기 안 선다" 가 아니다**(리뷰) — [`init_belongs_at`] 은
+    /// [`crate::cmd::init::run`] 과 **같은 물음**에 답해야 한다. `run` 은 `.moai` 가 이미 있으면 안
+    /// 묻고 딸린 파일만 다시 맞춰 0 으로 끝나므로, 그 자리에서 "주 체크아웃에서 친다" 를 대면 대는
+    /// 말이 거짓이고 따라 친 명령은 **다른 체크아웃**의 `AGENTS.md` 를 고친다.
+    ///
+    /// `.moai` 를 커밋하는 저장소(이 저장소가 그렇다)에서는 워크트리마다 `.moai` 가 함께 와,
+    /// 그 갈래가 **모든 워크트리 세션**에 섰다. 밑자리는 그대로 주 체크아웃을 댄다 — 거기는 `run` 도
+    /// 거절하는 자리다.
+    #[test]
+    fn a_worktree_that_already_carries_a_tracker_is_not_sent_away() {
+        let dir = Scratch::real("init-belongs");
+        let main = dir.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let git = |at: &std::path::Path, args: &[&str]| crate::git::tests::run_git(at, None, args);
+        git(&main, &["init", "-q"]);
+        moai_at(&main);
+        std::fs::write(main.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        git(&main, &["add", "-A"]);
+        git(&main, &["commit", "-q", "-m", "init"]);
+        git(&main, &["worktree", "add", "-q", "side", "-b", "side"]);
+        let side = main.join("side");
+
+        // 가지가 `.moai` 를 함께 들고 왔다 — `moai init` 은 여기서 0 으로 끝난다.
+        assert!(side.join(".moai").is_dir(), "워크트리가 트래커를 안 들고 왔다");
+        assert_eq!(init_belongs_at(&side), None, "심겨 있는 워크트리를 딴 데로 보냈다");
+
+        // 밑자리에는 안 심겼다 — 거기는 `run` 도 거절하니 주 체크아웃을 댄다.
+        let deep = side.join("src/deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        assert_eq!(init_belongs_at(&deep), Some(main.clone()), "밑자리가 주 체크아웃을 못 댔다");
+
+        // 트래커를 걷으면 그 자리도 주 체크아웃을 댄다 — 가르는 것은 `.moai` 가 여기 있는가다.
+        std::fs::remove_dir_all(side.join(".moai")).unwrap();
+        assert_eq!(init_belongs_at(&side), Some(main), "안 심긴 워크트리를 제자리라 했다");
     }
 
     const T: &str = "2026-09-11T04:12:03Z";

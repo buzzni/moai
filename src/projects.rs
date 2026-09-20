@@ -48,7 +48,13 @@ pub enum State {
         load: Load,
     },
     /// 디렉터리는 있는데 `.moai/` 가 없다 — 나중에 `moai init` 하면 보인다.
-    Uninit,
+    ///
+    /// **딸린 워크트리면 트래커가 사는 주 체크아웃을 함께 든다**(moai-nppo, 리뷰 10·11번).
+    /// 여기서 한 번 세는 까닭은 [`Repo::open`] 이 이미 그 물음을 풀고 답을 버렸기
+    /// 때문이고(`Repo::redirect` 가 `None` 이라 이 갈래로 왔다), 그리는 쪽이 저마다 다시
+    /// 세면 `view` 가 줄마다 `canonicalize` 와 관리 파일 읽기를 치른다 — 그쪽은 순수
+    /// 함수라는 글을 머리에 달고 있고, 탐색기의 층은 그 줄을 시계마다 다시 그린다.
+    Uninit(Option<PathBuf>),
     /// 디렉터리가 없다.
     Missing,
     /// 설정이 깨졌거나 못 읽는다. 사람이 읽을 한 줄.
@@ -119,7 +125,7 @@ pub fn open_one(path: &Path, name: String, hue: Option<crate::style::Hue>, workt
 pub fn open_shallow(path: &Path) -> Result<Repo, State> {
     match Repo::open(path) {
         Ok(Opened::Repo(repo)) => Ok(repo),
-        Ok(Opened::Uninit) => Err(State::Uninit),
+        Ok(Opened::Uninit) => Err(State::Uninit(crate::store::init_belongs_at(path))),
         Ok(Opened::Missing) => Err(State::Missing),
         Err(e) => Err(State::Unreadable(e.message)),
     }
@@ -163,7 +169,7 @@ impl Project {
     pub fn seen<'a, T>(&'a self, f: impl FnOnce(&'a Repo, &'a Load) -> T) -> Seen<'a, T> {
         match &self.state {
             State::Open { repo, load } => Seen::Ok(f(repo, load)),
-            State::Uninit => Seen::Uninit,
+            State::Uninit(at) => Seen::Uninit { tracker_at: at.as_deref() },
             State::Missing => Seen::Missing,
             State::Unreadable(e) => Seen::Unreadable { error: e },
         }
@@ -179,7 +185,12 @@ pub enum Seen<'a, T> {
     /// `moai project ls --json` 과 같은 낱말이다 — 같은 상태를 두 명령이 달리 부르면
     /// 둘을 함께 읽는 쪽이 두 낱말을 다 알아야 한다.
     #[serde(rename = "uninitialized")]
-    Uninit,
+    Uninit {
+        /// 딸린 워크트리라 여기서 `moai init` 이 안 서면 **트래커가 사는 주 체크아웃**.
+        /// **아닐 때는 키가 없다** — 늘 달면 전부터 내던 줄이 바뀐다.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tracker_at: Option<&'a Path>,
+    },
     Missing,
     Unreadable {
         error: &'a str,
@@ -191,7 +202,7 @@ impl<'a, T> Seen<'a, T> {
     pub fn map<'b, U>(&'b self, f: impl FnOnce(&'b T) -> U) -> Seen<'a, U> {
         match self {
             Seen::Ok(t) => Seen::Ok(f(t)),
-            Seen::Uninit => Seen::Uninit,
+            Seen::Uninit { tracker_at } => Seen::Uninit { tracker_at: *tracker_at },
             Seen::Missing => Seen::Missing,
             Seen::Unreadable { error } => Seen::Unreadable { error },
         }
@@ -227,6 +238,9 @@ pub struct Added {
     /// 그 디렉터리에 `.moai` 가 있나. 없으면 "init 전" 이다. 못 봐서 모르면(권한) `true` 쪽이다 —
     /// 그 까닭은 `unreadable` 이 대고, "init 하라" 는 틀린 말을 하지 않는다.
     pub initialized: bool,
+    /// 딸린 워크트리라 여기서 `moai init` 이 안 서면 **트래커가 사는 주 체크아웃**(moai-nppo).
+    /// 여는 자리에서 함께 세므로 그리는 쪽이 다시 묻지 않는다 — [`Seen::Uninit`] 과 한 값이다.
+    pub tracker_at: Option<PathBuf>,
     /// 등록은 했는데 그 저장소를 못 읽는다 — 설정이 깨졌거나 스냅샷을 못 연다. 사람이 읽을
     /// 한 줄. **등록을 막지 않는다** — 쓰는 곳은 사람의 설정이지 그 저장소가 아니다.
     pub unreadable: Option<String>,
@@ -254,12 +268,13 @@ pub fn add(config: &Path, input: &Path, cwd: &Path) -> R<Added> {
     })?;
     // **한 번 열어 둘 다 읽는다.** `.moai` 를 따로 `is_dir` 로 보면 권한이 없어 못 본 `.moai`
     // 가 "init 전" 으로 접혀, 못 읽는다는 줄 옆에 `init` 하라는 틀린 말이 선다 (`Repo::open`).
-    let (initialized, unreadable) = match State::at(&dir) {
-        State::Unreadable(e) => (true, Some(e)),
-        State::Uninit | State::Missing => (false, None),
-        State::Open { .. } => (true, None),
+    let (initialized, tracker_at, unreadable) = match State::at(&dir) {
+        State::Unreadable(e) => (true, None, Some(e)),
+        State::Uninit(at) => (false, at, None),
+        State::Missing => (false, None, None),
+        State::Open { .. } => (true, None, None),
     };
-    Ok(Added { path: dir, added, initialized, unreadable })
+    Ok(Added { path: dir, added, initialized, tracker_at, unreadable })
 }
 
 /// 뺀 결과 — [`remove`] 가 낸다.

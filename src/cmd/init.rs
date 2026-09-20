@@ -331,8 +331,15 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     if ctx.json {
         let mut v = serde_json::json!({ "agents": state });
         // **아닐 때는 키가 없다** — 늘 달면 전부터 내던 줄이 바뀐다(`missing` 과 같은 자).
-        if let Some(main) = &tracker_at {
-            v["tracker_at"] = serde_json::json!(main);
+        //
+        // **못 싣는 경로에서도 키만 빠진다**(리뷰). `serde_json::json!(<식>)` 은 속으로
+        // `to_value(..).unwrap()` 이라, UTF-8 이 아닌 경로에 `Path` 의 직렬화가 지면 그 `unwrap` 이
+        // 101 로 터진다 — 여기는 `current_dir()` 에서 자리를 받으므로 사람이 그런 이름을 쓰면 닿는다.
+        // 위의 "아닐 때는 키가 없다" 가 이미 받는 쪽의 약속이니, 못 싣는 판도 같은 답으로 접는다.
+        if let Some(main) = &tracker_at
+            && let Ok(at) = serde_json::to_value(main)
+        {
+            v["tracker_at"] = at;
         }
         if !gaps.is_empty() {
             v["missing"] = serde_json::json!(
@@ -979,30 +986,6 @@ mod tests {
             rule.contains(&format!("merge={}", crate::cmd::merge_driver::DRIVER)),
             "그 줄이 드라이버를 안 건다 — {rule}"
         );
-    }
-
-    /// **위에 트래커가 있으면 그 자리를 찾아 낸다**(moai-pjrr). 막지는 않는다 — 여기 심은 것은 이
-    /// 밑에서 읽히고, 위로 찾기에는 경계를 그을 자가 없다(같은 날 moai-a2kn 이 천장을 걷었다).
-    /// 부르는 쪽이 이 값으로 알림 한 줄을 세운다.
-    ///
-    /// **`.moai` 가 디렉터리인가로 가른다** — 위로 찾는 [`crate::store`] 와 같은 자다. 그 자가
-    /// 갈리면 여기서 지나간 자리를 명령이 잡는다.
-    #[test]
-    fn a_subdir_under_a_tracker_finds_the_one_above() {
-        let s = crate::scratch::Scratch::new("init-above");
-        let deep = s.join("src/deep");
-        std::fs::create_dir_all(&deep).unwrap();
-        assert!(crate::store::planted_elsewhere(&deep).is_none(), "트래커가 없는데 자리를 댔다");
-
-        std::fs::create_dir_all(s.join(".moai")).unwrap();
-        match crate::store::planted_elsewhere(&deep) {
-            Some(Elsewhere::Above(at)) => assert_eq!(at, s.path(), "댄 자리가 트래커의 자리가 아니다"),
-            Some(Elsewhere::Worktree(main)) => panic!("워크트리가 아닌데 워크트리라 했다 — {}", main.display()),
-            None => panic!("위의 트래커를 못 봤다"),
-        }
-
-        // 그 자리 자신은 안 묻는다 — 여기 이미 심겨 있으면 `run` 이 딸린 파일만 다시 맞춘다.
-        assert!(crate::store::planted_elsewhere(s.path()).is_none(), "제 트래커를 남의 것으로 댔다");
     }
 
     /// 두 번 넣어도 블록은 하나고, 사람이 쓴 산문은 바이트 단위로 그대로다.

@@ -284,7 +284,7 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
 /// 화면이 달리 부르면 둘을 오가는 사람이 두 낱말을 다 배워야 한다.
 fn shut(path: &Path, name: &str, state: State, lang: crate::i18n::Lang) -> Look {
     let kind = match &state {
-        State::Uninit => Shut::Uninit,
+        State::Uninit(_) => Shut::Uninit,
         State::Missing => Shut::Missing,
         State::Unreadable(_) | State::Open { .. } => Shut::Unreadable,
     };
