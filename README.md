@@ -118,10 +118,42 @@ the three decisions an agent has to make — create or idea, defer or done, and
 whether a request is big enough to split into an epic. Re-run `moai init` when
 the tool grows; it rewrites that block and touches nothing else.
 
-Every command takes `--json`. `moai ready --json` returns
-`{"ready":[…],"held":[…]}`, which is enough to drive a loop with no human in it.
-`examples/bash-agent/agent.sh` is such a loop in bash and jq;
-`examples/python-agents/agents.py` is the multi-agent version.
+If your agent reads some other file, take the same block and paste it there:
+
+```sh
+moai init --print          # writes nothing, prints the block
+moai init --check          # writes nothing, says current / stale / missing
+```
+
+`examples/bash-agent/agent.sh` is a complete pick-work-close loop in bash and jq,
+and `examples/python-agents/agents.py` is the multi-agent version. Both are run
+by the test suite, so neither can rot quietly.
+
+### The `--json` contract
+
+**Every command takes `--json`.** That is the contract this tool offers to
+editors, web UIs, orchestrators and other agents: one flag, on everything, with
+no human-shaped output mixed in.
+
+- `--json` prints **exactly one JSON value on one line**, and nothing else goes
+  to stdout. Human output disappears entirely; it is not interleaved.
+- Failures are JSON too, with a stable `code` you can branch on — `not_found`,
+  `bad_status`, `bad_filter`, `bad_target`, `bad_input`, `no_actor`,
+  `already_exists`, `locked`, `broken`, and `error` as the catch-all. The human
+  sentence beside it is not something to match on.
+- Keys that are always present stay present. `moai ready --json` is
+  `{"ready":[…],"held":[…]}`, never a bare array — `held` is work that exists but
+  cannot be picked up, with where to pick it up from.
+- A partial result says so in the payload rather than only in the exit code.
+  `moai mv <id> <col> --from <col>` carries `moved`, `already`, `missing` and
+  `stale` side by side, so a loser in a race reads `stale` and moves on.
+- `moai show <id> --json` always carries `commits` and `work` as arrays. An empty
+  `commits` means no commit named this issue; a `commits_error` object means git
+  could not be read at all. The two are deliberately different answers.
+
+Nothing here is derived at read time from folding the journal, and `report` and
+`query` are pure functions over `&[Issue]` that print nothing. That is what makes
+a second surface — a TUI, a web view, your own tool — cheap to attach.
 
 ## Screen language
 

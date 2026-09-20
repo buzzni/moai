@@ -12310,6 +12310,34 @@ fn the_merge_driver_names_the_clashing_ids_in_json() {
     assert!(said.contains(&format!("\"conflicts\":[\"{id}\"]")), "충돌 id 를 기계 출력에서 못 읽는다\n{said}");
 }
 
+/// `moai init --print` 는 **아무것도 안 쓰고** `init` 이 쓸 그 글을 그대로 낸다
+/// (moai-cf21). Claude 의 훅이 없는 에이전트는 제 도구가 읽는 파일이 AGENTS.md 가
+/// 아닐 수 있고, 그 파일에 붙여 넣을 글을 여기서 받는다. 둘이 갈라지면 붙여 간
+/// 쪽이 옛 계약을 든 채로 남는다.
+#[test]
+fn init_print_writes_nothing_and_hands_back_the_very_block_init_writes() {
+    let s = Scratch::new("init-print");
+    let said = ok(s.path(), &["init", "--print"]);
+    assert!(said.contains("moai status"), "명령을 안 댄다\n{said}");
+    assert!(said.contains("--json"), "기계가 읽는 길을 안 댄다\n{said}");
+    assert!(!s.path().join("AGENTS.md").exists(), "찍기만 해야 하는데 AGENTS.md 를 썼다");
+    assert!(!s.path().join(".moai").exists(), "찍기만 해야 하는데 .moai 를 심었다");
+
+    ok(s.path(), &["init"]);
+    let written = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
+    assert!(written.contains(said.trim_end()), "찍은 글과 심은 글이 다르다\n{said}");
+}
+
+/// 기계가 읽는 꼴도 같은 글 하나다.
+#[test]
+fn init_print_json_carries_the_block_in_one_field() {
+    let s = Scratch::new("init-print-json");
+    let said = ok(s.path(), &["init", "--print", "--json"]);
+    one_json_value(&said);
+    assert!(said.trim().starts_with("{\"agents\":\""), "글을 필드 하나에 안 담았다\n{said}");
+    assert!(said.contains("moai status"), "블록이 아니다\n{said}");
+}
+
 // ── 릴리스 — 태그와 Cargo.toml 을 한 자로 잰다 ───────────────────────
 
 /// 릴리스 스크립트의 자리. 워크플로가 부르는 이름과 여기서 한 번에 맞춘다.
