@@ -152,6 +152,17 @@ fn carried() {
 /// 열 번 쓰면 같은 줄이 열 번 선다. 여기는 색과 `moai: ` 머리를 다른 경고와 한 자로 쓰고,
 /// stderr 가 닫혀도 `writeln!` 의 실패를 버린다 — `eprintln!` 은 거기서 패닉한다.
 fn redirected() {
+    // **올라가 잡은 것은 git 밖에서만 선다**(moai-a2kn) — 제 체크아웃 안에서 하위 디렉터리에
+    // 선 사람에게는 한 줄도 안 나간다. `store::CLIMBED` 가 그 가름을 적는다.
+    for (from, to) in store::climbs() {
+        let _ = writeln!(
+            anstream::stderr().lock(),
+            "{}{} 위로 올라가 {} 의 트래커를 쓴다 — 여기는 git 체크아웃이 아니다",
+            style::paint(style::WARN, "moai: "),
+            from.display(),
+            to.display()
+        );
+    }
     for (from, to) in store::redirects() {
         let _ = writeln!(
             anstream::stderr().lock(),

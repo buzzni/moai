@@ -152,6 +152,151 @@ impl Load {
 pub const NOT_A_REPO: &str =
     "moai 저장소가 아니다 (.moai/ 를 못 찾았다). `moai init` 으로 시작하거나, 다른 곳의 저장소면 `moai -C <dir> <명령>` 으로 부른다";
 
+/// 천장에 걸려 **안 쓴** 트래커를 가리키는 말(moai-a2kn). [`NOT_A_REPO`] 뒤에 붙는다.
+///
+/// **막는 것이 안내가 되는 자리다.** 지금까지 위쪽 `.moai` 로 쓰던 사람은 이 고침 뒤에 "없다" 를
+/// 만나는데, 그때 도구 안에 길이 없으면 도구 밖으로 나가야 한다. 본 것과 가리키는 법을 함께 댄다.
+fn beyond_says(at: &Path) -> String {
+    format!(
+        "{NOT_A_REPO}\n{} 에 `.moai` 가 있지만 여기서 올라가 쓰지 않는다 — \
+         `moai -C {} <명령>` 으로 가리키거나 `moai project add {}` 로 등록한다",
+        at.display(),
+        at.display(),
+        at.display()
+    )
+}
+
+/// 이 프로세스가 **체크아웃 없이 위로 올라가 잡은 트래커** — `(선 자리, 잡은 뿌리)`.
+///
+/// [`MOVED`] 와 같은 자리에서 같은 까닭으로 담아 두기만 하고 `main` 이 찍는다.
+///
+/// **git 체크아웃 안에서는 한 줄도 안 낸다.** 제 저장소의 하위 디렉터리에 선 사람에게 매번
+/// 알리면 그건 소음이고, 소음은 곧 아무도 안 읽는 줄이다. 남는 것은 git 이 아닌 자리에서
+/// 올라가 잡은 때뿐이고(`~/.moai` 하나가 홈 아래 전부를 잡는 꼴), 그게 바로 알릴 값이 있는 자리다.
+static CLIMBED: std::sync::Mutex<Vec<(PathBuf, PathBuf)>> = std::sync::Mutex::new(Vec::new());
+
+/// 올라가 잡은 자리들 — 없으면 비어 있다. `main` 이 끝에 한 번 읽는다.
+pub fn climbs() -> Vec<(PathBuf, PathBuf)> {
+    CLIMBED.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// 위로 찾기의 결과(moai-a2kn).
+struct Found {
+    /// 천장 안에서 찾은 트래커의 뿌리.
+    root: Option<PathBuf>,
+    /// 천장 **위**에서 본 `.moai`. 쓰지 않는다 — 거절문이 이리로 가는 길을 댈 뿐이다.
+    beyond: Option<PathBuf>,
+}
+
+/// `p` 가 **내 것인가**. 남의 자리로는 안 올라간다(moai-a2kn).
+///
+/// uid 를 못 읽으면 내 것으로 본다 — 여기서 넘어지면 제 저장소 밖 어디서나 못 쓴다.
+/// unix 가 아니면 늘 참이다: 그쪽에는 이 뜻을 낼 값이 없어 git 꼭대기 하나로만 막는다.
+#[cfg(unix)]
+fn mine(p: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(p).map(|m| m.uid() == unsafe { libc_getuid() }).unwrap_or(true)
+}
+
+#[cfg(not(unix))]
+fn mine(_p: &Path) -> bool {
+    true
+}
+
+// `getuid(2)`. **의존성을 하나 더 들이지 않는다** — 이 한 값을 위해 `libc` 를 넣으면
+// 바이너리·빌드 예산의 셈이 새 축으로 는다(CLAUDE.md 의 "새 축의 의존성").
+#[cfg(unix)]
+unsafe extern "C" {
+    #[link_name = "getuid"]
+    fn libc_getuid() -> u32;
+}
+
+/// `.moai` 를 가진 조상을 찾되 **천장을 넘지 않는다**(moai-a2kn, 2026-09-20 사용자 결정).
+///
+/// 천장은 **내 것인 자리의 끝**이다 — 남의 디렉터리로는 안 올라간다([`mine`]).
+///
+/// **git 꼭대기를 천장으로 두지 않았다.** 처음 안은 그것이었는데 재 보니 두 자리가 깨진다.
+/// 프로젝트 P 안에 겹쳐 둔 저장소(`P/vendor` — 서브모듈·vendoring 의 흔한 모양)에서 친 `moai` 는
+/// P 의 트래커를 써야 하고(moai-d3sy 가 사람을 P 에서 읽게 고친 바로 그 자리다), P 가 git 저장소가
+/// 아니면 "가장 바깥 꼭대기" 로 고쳐 잡아도 그 겹친 저장소에서 끊긴다. 막으려던 것은 **남의**
+/// 트래커에 쓰는 것이고, 그 자는 임자지 git 이 아니다.
+///
+/// 남는 구멍 하나는 알림이 덮는다 — `~/.moai` 하나가 제 홈 아래 전부를 잡는 꼴은 그대로지만,
+/// 그것은 제 것이고 [`CLIMBED`] 가 한 줄로 비춘다.
+///
+/// **처음 만난 `.moai` 가 이기는 자는 그대로다.** 천장은 "저장소마다 트래커 하나" 가 아니다 —
+/// 모노레포는 `.git` 하나에 하위 프로젝트마다 `.moai` 가 설 수 있고(2026-09-20 사용자가 짚었다),
+/// 그때 `top/projA/sub` 는 `top/projA/.moai` 를, `.moai` 없는 `top/projB/sub` 는 `top/.moai` 를
+/// 잡는다. 둘 다 그 체크아웃 안이라 천장에 안 걸린다. 막히는 것은 **밖으로 새는 것**뿐이다.
+///
+/// 못 찾았으면 천장 위를 한 번 더 본다 — 쓰려는 것이 아니라 거절문이 가리킬 자리를 들려고다
+/// ([`beyond_says`]). 그 훑기는 **못 찾은 길에서만** 돈다.
+fn look(from: &Path) -> Found {
+    look_under(from, &mine)
+}
+
+/// [`look`] 의 속 — **임자를 재는 자를 받는다.** 시험은 남의 uid 로 된 디렉터리를 못 만든다
+/// (그러려면 root 가 있어야 한다). 받지 않으면 천장에 걸리는 갈래가 어느 기계에서도 안 돌고,
+/// 되돌려 놔도 판이 푸르다 — 지난 리뷰가 `scratch::base` 에서 짚은 것과 같은 덫이다.
+fn look_under(from: &Path, mine: &dyn Fn(&Path) -> bool) -> Found {
+    let (ceiling, in_git) = ceiling_of(from, mine);
+    let mut dir = from.to_path_buf();
+    loop {
+        // **못 들여다보는 조상은 건너뛴다** (`is_dir` 이 `false` 로 접는다). 위로 찾는
+        // 길에서는 권한 없는 남의 디렉터리를 지나는 것이 흔한 일이라, [`Repo::open`]
+        // 처럼 그것을 실패로 세면 제 저장소 밖 어디서나 넘어진다.
+        if dir.join(".moai").is_dir() {
+            // **올라가 잡은 것은 git 밖에서만 알린다.** 위의 [`CLIMBED`] 가 왜인지 적는다.
+            if dir != from && !in_git {
+                let mut climbed = CLIMBED.lock().unwrap_or_else(|e| e.into_inner());
+                let pair = (from.to_path_buf(), dir.clone());
+                if !climbed.contains(&pair) {
+                    climbed.push(pair);
+                }
+            }
+            return Found { root: Some(dir), beyond: None };
+        }
+        if dir == ceiling {
+            break;
+        }
+        match dir.parent() {
+            Some(up) => dir = up.to_path_buf(),
+            None => break,
+        }
+    }
+    Found { root: None, beyond: above(&ceiling) }
+}
+
+/// [`look`] 의 천장과 **그 안에 git 이 있었는가**. 있었으면 알림을 안 낸다 — 체크아웃 안에서
+/// 하위 디렉터리에 선 사람에게 매번 알리면 그건 소음이다.
+///
+/// 한 번 오르며 둘을 함께 잰다. git 은 **막는 데 안 쓴다** — 알림을 낼지만 가른다.
+fn ceiling_of(from: &Path, mine: &dyn Fn(&Path) -> bool) -> (PathBuf, bool) {
+    let mut dir = from.to_path_buf();
+    let mut in_git = false;
+    loop {
+        in_git |= dir.join(".git").exists();
+        match dir.parent() {
+            Some(up) if mine(up) => dir = up.to_path_buf(),
+            _ => break,
+        }
+    }
+    (dir, in_git)
+}
+
+/// 천장 **위**의 첫 `.moai`. 못 찾은 길에서만 돈다([`look`]).
+fn above(ceiling: &Path) -> Option<PathBuf> {
+    let mut dir = ceiling.parent()?.to_path_buf();
+    loop {
+        if dir.join(".moai").is_dir() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
 /// 디렉터리 하나를 [`Repo::open`] 으로 연 결과.
 ///
 /// **셋을 가른다.** 등록한 프로젝트를 한눈에 볼 때 "아직 `init` 안 했다" 와
@@ -171,9 +316,21 @@ pub enum Opened {
 }
 
 impl Repo {
-    /// `.moai/` 를 가진 디렉터리를 위로 찾는다. 깊이를 코드에 박지 않는다.
+    /// `.moai/` 를 가진 디렉터리를 위로 찾는다. 깊이를 코드에 박지 않는다 — 대신 천장이 있다
+    /// ([`look`]).
+    ///
+    /// **못 찾았는데 천장 위에 있으면 그리로 가는 길을 댄다**(moai-a2kn). 위쪽 `.moai` 로 쓰던
+    /// 사람이 이 고침 뒤에 처음 만나는 말이 여기다.
     pub fn discover() -> R<Repo> {
-        Repo::find()?.ok_or_else(|| NOT_A_REPO.into())
+        let dir = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
+        if let Some(repo) = Repo::find_from(&dir)? {
+            return Ok(repo);
+        }
+        // 천장 위를 보는 훑기는 여기서만 돈다 — 찾은 길은 위에서 이미 돌아갔다.
+        Err(match look(&dir).beyond {
+            Some(at) => beyond_says(&at).into(),
+            None => NOT_A_REPO.into(),
+        })
     }
 
     /// [`Repo::discover`] 와 같되 **못 찾은 것을 실패로 접지 않는다** — `None`.
@@ -248,18 +405,7 @@ impl Repo {
     /// [`Repo::find_from`] 의 **찾기만** — `.moai` 를 가진 조상의 자리다. 설정은 안 읽는다:
     /// 읽을 자리를 [`crate::worktree::tracker_root`] 가 아직 옮길 수 있다.
     fn found_root(dir: &Path) -> Option<PathBuf> {
-        let mut dir = dir.to_path_buf();
-        loop {
-            // **못 들여다보는 조상은 건너뛴다** (`is_dir` 이 `false` 로 접는다). 위로 찾는
-            // 길에서는 권한 없는 남의 디렉터리를 지나는 것이 흔한 일이라, [`Repo::open`]
-            // 처럼 그것을 실패로 세면 제 저장소 밖 어디서나 넘어진다.
-            if dir.join(".moai").is_dir() {
-                return Some(dir);
-            }
-            if !dir.pop() {
-                return None;
-            }
-        }
+        look(dir).root
     }
 
     fn rooted(root: PathBuf) -> R<Repo> {
@@ -936,6 +1082,103 @@ mod tests {
     use super::*;
     use crate::scratch::Scratch;
     use crate::model::{Kind, Status};
+
+    /// `<자리>/a/b/c` 를 만들고 그 자리를 **임자의 끝**으로 삼는 자를 낸다. 시험은 남의 uid 로 된
+    /// 디렉터리를 못 만들어(root 가 있어야 한다) 천장을 이렇게 흉내 낸다 — [`look_under`] 가
+    /// 임자를 재는 자를 받는 까닭이다.
+    fn tree(name: &str) -> (Scratch, Box<dyn Fn(&Path) -> bool>) {
+        let s = Scratch::new(name);
+        let top = s.path().to_path_buf();
+        std::fs::create_dir_all(top.join("a/b/c")).unwrap();
+        (s, Box::new(move |p: &Path| p.starts_with(&top)))
+    }
+
+    fn moai_at(dir: &Path) {
+        std::fs::create_dir_all(dir.join(".moai")).unwrap();
+    }
+
+    /// **천장 위로는 안 올라간다**(moai-a2kn, 2026-09-20 사용자 결정). 남의 `.moai` 밑 어느
+    /// 디렉터리에서 친 `moai add` 가 그 사람 트래커에 쓰던 자리다 — 시험 쪽에서 세 번 막았고
+    /// (moai-46xz·moai-boc6·moai-izeo) 이번이 제품 쪽이다.
+    ///
+    /// **못 쓴 자리를 가리키는 것까지 함께 잰다.** 막는 것이 안내가 되려면 거절문이 무엇을 봤는지
+    /// 대야 한다 — 그 줄이 없으면 위쪽 `.moai` 로 쓰던 사람이 도구 밖으로 나가야 한다.
+    #[test]
+    fn the_walk_stops_at_the_edge_of_what_is_mine() {
+        // 천장 **위**는 제 자리 안에 만든다 — `/tmp` 에 `.moai` 를 심으면 이 기계의 다른 판이
+        // 그것을 잡는다(moai-izeo 가 막은 바로 그 사고를 이 시험이 지을 뻔했다).
+        let s = Scratch::new("look-ceiling");
+        let proj = s.join("proj");
+        std::fs::create_dir_all(proj.join("a/b/c")).unwrap();
+        moai_at(s.path());
+        let mine = |p: &Path| p.starts_with(&proj);
+        let deep = proj.join("a/b/c");
+
+        let found = look_under(&deep, &mine);
+        assert!(found.root.is_none(), "천장 위의 트래커를 잡았다 — {:?}", found.root);
+        assert_eq!(found.beyond.as_deref(), Some(s.path()), "못 쓴 자리를 안 가리킨다");
+        assert!(beyond_says(&found.beyond.unwrap()).contains("moai -C"), "가는 길을 안 댄다");
+
+        // 천장 **안**이면 그대로 올라가 잡는다.
+        moai_at(&proj.join("a"));
+        assert_eq!(look_under(&deep, &mine).root.as_deref(), Some(proj.join("a").as_path()));
+    }
+
+    /// **처음 만난 `.moai` 가 이기는 자는 그대로다**(2026-09-20 사용자가 짚었다). 모노레포는
+    /// `.git` 하나에 하위 프로젝트마다 `.moai` 가 설 수 있다 — 천장이 "저장소마다 트래커 하나" 로
+    /// 읽히면 그 사람들이 제 트래커를 잃는다.
+    #[test]
+    fn each_project_in_a_monorepo_keeps_its_own_tracker() {
+        let (s, mine) = tree("look-monorepo");
+        std::fs::create_dir_all(s.join(".git")).unwrap();
+        moai_at(s.path());
+        std::fs::create_dir_all(s.join("projA/sub")).unwrap();
+        std::fs::create_dir_all(s.join("projB/sub")).unwrap();
+        moai_at(&s.join("projA"));
+
+        assert_eq!(
+            look_under(&s.join("projA/sub"), &mine).root.as_deref(),
+            Some(s.join("projA").as_path()),
+            "제 `.moai` 를 두고 모노레포 꼭대기로 갔다"
+        );
+        assert_eq!(
+            look_under(&s.join("projB/sub"), &mine).root.as_deref(),
+            Some(s.path()),
+            "`.moai` 없는 하위가 꼭대기의 것을 못 잡았다"
+        );
+    }
+
+    /// **겹쳐 둔 저장소에서도 바깥 프로젝트의 트래커를 쓴다.** git 꼭대기를 천장으로 두었다가
+    /// 걷어낸 까닭이다 — `P/vendor` 는 vendoring·서브모듈의 흔한 모양이고, 거기서 끊으면
+    /// moai-d3sy 가 고친 자리(사람을 P 에서 읽는다)가 도로 무너진다.
+    #[test]
+    fn a_repo_nested_in_a_project_still_writes_to_that_project() {
+        let (s, mine) = tree("look-vendor");
+        moai_at(s.path());
+        let vendor = s.join("vendor");
+        std::fs::create_dir_all(vendor.join(".git")).unwrap();
+        assert_eq!(look_under(&vendor, &mine).root.as_deref(), Some(s.path()));
+    }
+
+    /// **올라가 잡은 것은 git 밖에서만 알린다.** 제 체크아웃 안에서 하위 디렉터리에 선 사람에게
+    /// 매번 한 줄을 내면 그건 소음이고, 소음은 아무도 안 읽는다.
+    #[test]
+    fn climbing_outside_a_checkout_is_told_of_but_inside_one_is_not() {
+        // **셈이 아니라 그 자리를 찾는다** — 장부는 한 판의 모든 시험이 나눠 쓰므로, 몇 줄이
+        // 늘었는지로 재면 옆 시험이 같이 적을 때 헛돈다.
+        let told = |at: &Path| climbs().iter().any(|(_, to)| to == at);
+
+        let (s, mine) = tree("look-climb");
+        moai_at(s.path());
+        assert_eq!(look_under(&s.join("a/b"), &mine).root.as_deref(), Some(s.path()));
+        assert!(told(s.path()), "git 밖에서 올라갔는데 안 알렸다");
+
+        let (t, mine) = tree("look-climb-git");
+        std::fs::create_dir_all(t.join(".git")).unwrap();
+        moai_at(t.path());
+        assert_eq!(look_under(&t.join("a/b"), &mine).root.as_deref(), Some(t.path()));
+        assert!(!told(t.path()), "체크아웃 안에서 올라간 것을 알렸다 — 소음이다");
+    }
 
     /// **등록한 자리가 딸린 워크트리면 루트의 트래커를 연다**(moai-y7go, 리뷰 moai-71ht.jlh
     /// 사용자 결정) — 탐색기의 프로젝트 층이 이 문으로 열므로, 안 옮기면 같은 자리를 CLI 로 칠 때와
