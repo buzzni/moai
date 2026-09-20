@@ -428,7 +428,8 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     // 겹치며 이미 판 옆 스냅샷을 그대로 넘긴다(moai-kos1) — 자리 판정이 바로 앞에서 푼 같은
     // 파일을 다시 열어 파고 있었다. 걸음마다 치르던 값이라 쓰기·`SPC r`·프로젝트 들어가기가
     // 그것을 그대로 물었다(이 저장소에서 ~130ms).
-    let (lost, said) = placed(repo, &issues, g.swept, &now, &crate::worktree::dug(&g.sides));
+    // **제 스냅샷도 그대로 넘긴다**(moai-mafv) — 걸음마다 다시 파던 마지막 한 벌이다.
+    let (lost, said) = placed(repo, &issues, g.swept, &now, &crate::worktree::dug(&g.sides, &g.mine));
     let mut elsewhere = g.trouble;
     elsewhere.extend(said);
     Ok(Fresh {
@@ -1046,6 +1047,8 @@ impl App {
         // 겹치며 이미 판 옆 스냅샷([`crate::worktree::Gathered::sides`]) — 자리 판정이 같은
         // 파일을 다시 열어 파지 않게 넘긴다(moai-kos1). 첫 화면이 바로 이 값을 물었다.
         sides: &[crate::worktree::Side],
+        // 겹치기 전에 잰 제 스냅샷([`crate::worktree::Gathered::mine`], moai-mafv) — 같은 까닭이다.
+        mine: &crate::worktree::Floor,
     ) -> App {
         let unreadable: Vec<Option<String>> = origin
             .unreadable(self.site.unreadable.iter().map(Option::as_deref))
@@ -1061,7 +1064,7 @@ impl App {
         // `prepare` 가 같은 자로 세어 [`Fresh::warnings`] 에 실어 온다. 위의 셈에 **한 번만** 더한다 —
         // 이 길은 여는 읽기 하나가 한 번 지난다.
         if let Some(repo) = &self.site.repo {
-            let dug = crate::worktree::dug(sides);
+            let dug = crate::worktree::dug(sides, mine);
             let (lost, said) = placed(repo, &self.site.issues, self.worktree && swept, &self.site.now, &dug);
             self.site.warnings += lost;
             elsewhere.extend(said);
@@ -6331,7 +6334,7 @@ mod tests {
         let g = crate::worktree::gather(&repo, true).unwrap();
         let stamp = stamp_of(&repo);
         let (index, ground) = measure(&g.load.issues, &repo.config);
-        let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept, &g.sides);
+        let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(g.origin, g.trouble, g.watched, g.swept, &g.sides, &g.mine);
         assert!(a.site.commits_of("argos-0001").is_empty(), "여는 읽기가 git 을 기다렸다");
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         a.follow();

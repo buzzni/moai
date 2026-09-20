@@ -25,7 +25,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let Some(repo) = Repo::find()? else {
         return overview(ctx, worktree);
     };
-    let crate::worktree::Gathered { load, origin, trouble, unfound, swept, sides, .. } =
+    let crate::worktree::Gathered { load, origin, trouble, unfound, swept, sides, mine, .. } =
         super::gather(&repo, worktree)?;
     // stderr 에 한 줄씩 낸 것의 수 — 보드가 "문제 없다" 로 그 말을 뒤집지 않게 넘긴다(moai-cuw2).
     let trouble = trouble.len() + usize::from(unfound.is_some());
@@ -54,13 +54,14 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 모아 둔 판단이 부르는 쪽마다 다른 뿌리를 받아 또 갈렸다).
     // 겹치며 이미 판 옆 스냅샷을 넘긴다(moai-kos1) — `--worktree` 면 `gather` 가 그 파일을
     // 방금 열어 풀었고, 안 겹쳐 봤으면 비어 있어 예전 그대로다.
+    // **제 스냅샷도 같이 넘긴다**(moai-mafv) — 그것은 `--worktree` 와 상관없이 방금 판 것이다.
     let (lost, unread) = crate::worktree::stranded_at_in(
         repo.here(),
         &repo.config,
         &load.issues,
         swept,
         &now,
-        &crate::worktree::dug(&sides),
+        &crate::worktree::dug(&sides, &mine),
     );
     st.warnings.extend(lost);
     // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정에서 그 워크트리는 "아무도
