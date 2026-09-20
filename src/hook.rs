@@ -235,8 +235,8 @@ pub use crate::guide::REVIEW_TAG;
 /// 명령 자리만 본다. 명령줄 어디서든 낱말을 찾으면 리뷰 결과를 이슈에 적는
 /// `moai note` 가 리뷰 규칙에 걸린다 — 시험판에서 실제로 걸렸고, 그때 이
 /// 세션은 제 리뷰 결과를 적지 못했다.
-fn calls_review(cmd: &str) -> bool {
-    segments(cmd).iter().any(|seg| match command_of(seg).split_first() {
+fn calls_review(line: &Line<'_>) -> bool {
+    line.words().any(|seg| match command_of(seg).split_first() {
         Some((first, rest)) => {
             let head = first.trim_start_matches('/');
             head == REVIEW_CMD
@@ -245,25 +245,6 @@ fn calls_review(cmd: &str) -> bool {
         }
         None => false,
     })
-}
-
-/// 명령줄을 **토막마다** 토큰으로 가른다. 따옴표 안은 한 토큰이다.
-///
-/// 네 가지를 같이 해야 한다. 넷 다 실제로 틀려 본 자리다.
-///
-/// - **제목이 동사로 오해받지 않아야 한다.** `moai add "idea 정리"` 의 `idea`
-///   는 제목이지 하위 명령이 아니다.
-/// - **이어 붙인 명령을 버리지 않아야 한다.** `;`·`&&`·`|` 에서 잘라 버리던
-///   판은 `cd /repo && moai add "딴 일"` 하나로 규칙을 통째로 지나갔다.
-/// - **줄바꿈도 토막을 가른다.** 앞서 `'\n'` 을 갈래에 적어 두고도 그 앞의
-///   `is_whitespace()` 가 먼저 잡아, 여러 줄 명령이 한 토막으로 뭉쳤다.
-///   `moai show\nmoai add "딴 일"` 이 그대로 지나갔다 — 시험도 있었지만
-///   하필 첫 줄이 `cd` 라 우연히 통과해 거짓 안심만 줬다.
-/// - **heredoc 의 속은 명령이 아니다.** `python3 - <<'PY' … PY` 의 본문에
-///   `moai add "제목" -e <에픽>` 이라는 **글자**가 있다고 그것을 생성으로 읽으면,
-///   리뷰 글을 이슈에 적는 일이 막힌다. 실제로 막혔다.
-fn segments(cmd: &str) -> Vec<Vec<String>> {
-    parse(cmd).into_iter().map(|s| s.words).filter(|w| !w.is_empty()).collect()
 }
 
 /// 글 안의 **명령 치환들**(`$( … )`·`` ` … ` ``) — 따옴표 없는 heredoc 본문에서 셸이 돌릴 것을
@@ -656,15 +637,99 @@ enum Op {
 /// 규칙 2 가 생긴 뒤로 명령으로 잘못 읽힌 `a -> b` 는 곧 **아무것도 안 쓰는
 /// 명령을 막는 거절**이다. `"$(echo "it's")"` 의 안쪽 `"` 를 바깥을 닫는 것으로
 /// 읽어, 따옴표가 뒤 줄 전부에서 뒤집힌 것도 같은 뿌리다.
+#[cfg(test)]
 fn parse(cmd: &str) -> Vec<Seg> {
     Lexer::new(cmd).run()
 }
 
-/// [`parse`] 에 **마지막 토막 뒤로 닫힌 예약어 묶음**([`Lexer::run_over`])을 곁들여 — 글이
-/// `fi`·`esac`·`done` 으로 끝나면 그 표식을 받을 토막이 없어 [`Seg::shut`] 으로는 안 온다.
-/// 쓰기는 그 뒤가 없어 셈이 같지만, 기록([`shell_scan`])은 여기서 걷어야 안 돈 집기를 안 떠안는다.
-fn parse_over(cmd: &str) -> (Vec<Seg>, Option<usize>) {
-    Lexer::new(cmd).run_over()
+/// 명령줄 하나를 **한 번만 읽은 것**(moai-uc5v).
+///
+/// 규칙은 여덟 남짓이고 저마다 토막이 필요한데, 저마다 [`Lexer`] 를 새로 세우던 판은 Bash 한
+/// 번에 같은 글을 여덟 번 읽었다. 그 한 번이 이미 비싸다 — 겹친 치환은 겹마다 안쪽 렉서를 새로
+/// 세우므로([`Lexer::end_by`]) 읽는 값이 겹 수에 비례하고, 겹 상한([`Lexer::DEEP`])에 닿기
+/// 전까지는 길이의 제곱으로 는다. 9KB·3,000겹 한 줄이 dev 빌드에서 한 번 읽는 데 787ms 였고,
+/// 규칙마다 읽던 `guard_shell` 은 4.6초였다. 훅은 도구 호출마다 돈다.
+///
+/// **게으르다** — `Edit` 처럼 명령줄이 없는 호출은 아무것도 안 읽고, 규칙 4([`guard_tmux`])에서
+/// 막혀 되돌아가는 줄도 그 한 번으로 끝난다. 읽은 뒤에는 빌려 주기만 한다: 토막을 통째로
+/// 복제하면 규칙마다 복제가 서서 아낀 것을 도로 치른다.
+pub struct Line<'a> {
+    cmd: &'a str,
+    read: std::cell::OnceCell<(Vec<Seg>, Option<usize>)>,
+    /// **몇 번 읽었나** — 시험이 "규칙마다 다시 안 읽는다" 를 못박는 자다. 시계로 재면 부하 있는
+    /// 기계에서 흔들리고, 흔들리는 시험은 곧 지워진다.
+    #[cfg(test)]
+    reads: std::cell::Cell<usize>,
+}
+
+impl<'a> Line<'a> {
+    pub fn new(cmd: &'a str) -> Line<'a> {
+        Line {
+            cmd,
+            read: std::cell::OnceCell::new(),
+            #[cfg(test)]
+            reads: std::cell::Cell::new(0),
+        }
+    }
+
+    /// 이 줄을 읽은 횟수 — 한 번을 넘으면 규칙 하나가 제 [`Line`] 을 따로 세운 것이다(moai-uc5v).
+    #[cfg(test)]
+    fn reads(&self) -> usize {
+        self.reads.get()
+    }
+
+    /// 읽은 것 — **처음 묻는 쪽이 읽고 그다음부터는 그것을 본다.**
+    ///
+    /// 곁들이는 **마지막 토막 뒤로 닫힌 예약어 묶음**([`Lexer::run_over`])이다. 글이 `fi`·`esac`·
+    /// `done` 으로 끝나면 그 표식을 받을 토막이 없어 [`Seg::shut`] 으로는 안 온다 — 쓰기는 그 뒤가
+    /// 없어 셈이 같지만, 기록([`shell_scan`])은 여기서 걷어야 안 돈 집기를 안 떠안는다.
+    fn read(&self) -> &(Vec<Seg>, Option<usize>) {
+        self.read.get_or_init(|| {
+            #[cfg(test)]
+            self.reads.set(self.reads.get() + 1);
+            Lexer::new(self.cmd).run_over()
+        })
+    }
+
+    /// 토막 전부 — 낱말 없는 것도 든다(읽는 리다이렉션만 있는 토막).
+    fn segs(&self) -> &[Seg] {
+        &self.read().0
+    }
+
+    /// 마지막 토막 뒤로 닫힌 예약어 묶음([`Line::read`]).
+    fn over(&self) -> Option<usize> {
+        self.read().1
+    }
+
+    /// **낱말이 있는 토막만.** 규칙이 토막을 세는 번호(`only(k)`)가 이 차례다 — 한때 `segments`
+    /// 라는 이름의 함수로 서 있었고, 그 번호를 쓰는 자리가 여럿이라 한 자리에 둔다.
+    ///
+    /// 토막을 가르는 데 네 가지를 같이 해야 한다. 넷 다 실제로 틀려 본 자리다.
+    ///
+    /// - **제목이 동사로 오해받지 않아야 한다.** `moai add "idea 정리"` 의 `idea`
+    ///   는 제목이지 하위 명령이 아니다.
+    /// - **이어 붙인 명령을 버리지 않아야 한다.** `;`·`&&`·`|` 에서 잘라 버리던
+    ///   판은 `cd /repo && moai add "딴 일"` 하나로 규칙을 통째로 지나갔다.
+    /// - **줄바꿈도 토막을 가른다.** 앞서 `'\n'` 을 갈래에 적어 두고도 그 앞의
+    ///   `is_whitespace()` 가 먼저 잡아, 여러 줄 명령이 한 토막으로 뭉쳤다.
+    ///   `moai show\nmoai add "딴 일"` 이 그대로 지나갔다 — 시험도 있었지만
+    ///   하필 첫 줄이 `cd` 라 우연히 통과해 거짓 안심만 줬다.
+    /// - **heredoc 의 속은 명령이 아니다.** `python3 - <<'PY' … PY` 의 본문에
+    ///   `moai add "제목" -e <에픽>` 이라는 **글자**가 있다고 그것을 생성으로 읽으면,
+    ///   리뷰 글을 이슈에 적는 일이 막힌다. 실제로 막혔다.
+    fn used(&self) -> impl Iterator<Item = &Seg> {
+        self.segs().iter().filter(|s| !s.words.is_empty())
+    }
+
+    /// [`Line::used`] 의 낱말만.
+    fn words(&self) -> impl Iterator<Item = &[String]> {
+        self.used().map(|s| s.words.as_slice())
+    }
+
+    /// 읽기 전의 글 그대로 — 한글이 들었는지처럼 토막을 안 가르고 답하는 물음이 쓴다.
+    fn text(&self) -> &'a str {
+        self.cmd
+    }
 }
 
 /// 지금 무엇의 안에 있는가.
@@ -2377,13 +2442,13 @@ pub fn unsure(
 /// 닫거나 미루라고 붙들고 규칙 1 이 막는다) 이긴 쪽은 제 줄을 놓는다. 지금 칸을 모르면(못 읽었다·그 줄이
 /// 없다) 낸다 — 전과 같다. `--from` 없이 이미 선 칸으로 다시 집는 것은 넘겨받기라 낸다.
 pub fn picked_in(
-    cmd: &str,
+    line: &Line<'_>,
     cfg: &Config,
     only: &dyn Fn(usize) -> bool,
     stands: &dyn Fn(usize, &str) -> Option<String>,
 ) -> Vec<(String, bool)> {
     // 훅은 도구 호출마다 돈다 — `mv` 라는 글자도 없으면 명령줄을 다시 가르지 않는다.
-    if !cmd.contains("mv") {
+    if !line.text().contains("mv") {
         return Vec::new();
     }
     // **쓰기 규칙이 집기로 센 토막만 적는다**(moai-m5mg, 사용자 결정) — `! moai mv …`·`a || moai mv …`
@@ -2393,9 +2458,9 @@ pub fn picked_in(
     // **셈은 토막을 안 가리고 낸 뒤 여기서 고른다** — `only` 를 [`shell_scan`] 에 넘기면 그것이 고르는
     // 것은 낼 토막만이 아니라 **사슬**이다(`picked_before`). 남의 트래커를 보는 판에서는 제 토막의
     // 집기가 안 세어져 `a || moai -C /x mv B …` 의 B 가 통째로 빠졌다 — 앞이 지면 B 는 정말 돈다.
-    let counted = shell_scan(cmd, cfg, &|_| true).1;
+    let counted = shell_scan(line, cfg, &|_| true).1;
     let mut out = Vec::new();
-    for (k, seg) in segments(cmd).into_iter().enumerate() {
+    for (k, seg) in line.words().enumerate() {
         if !only(k) {
             continue;
         }
@@ -2405,7 +2470,7 @@ pub fn picked_in(
         let Some(sure) = counted.iter().filter(|(n, _)| *n == k).map(|(_, sure)| *sure).reduce(|a, b| a && b) else {
             continue;
         };
-        let Some(args) = moai_args(&seg) else { continue };
+        let Some(args) = moai_args(seg) else { continue };
         let seen = flag_values(args, &["--from"]).pop();
         let verbs = positionals(args);
         let Some((_, ids)) = verbs.get(1..).and_then(<[&str]>::split_last) else { continue };
@@ -2422,7 +2487,7 @@ pub fn picked_in(
 /// 두던 판은 그 하나가 `picked_in` 이라는 이름을 가려, 읽는 사람이 어느 것을 부르는지 몰랐다.
 #[cfg(test)]
 fn picked_ids(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool, stands: &dyn Fn(usize, &str) -> Option<String>) -> Vec<String> {
-    picked_in(cmd, cfg, only, stands).into_iter().map(|(id, _)| id).collect()
+    picked_in(&Line::new(cmd), cfg, only, stands).into_iter().map(|(id, _)| id).collect()
 }
 
 /// 규칙 1 — **집은 것 밖에 새 이슈를 세우지 않는다.**
@@ -2437,14 +2502,14 @@ fn picked_ids(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool, stands: &dy
 /// 훅은 토막을 고르는 [`guard_shell_in`] 으로 부른다. 토막 전부를 보는 이 모양은 시험이 쓴다.
 #[cfg(test)]
 pub fn guard_create(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str) -> Decision {
-    create_in(issues, &held(issues, cfg, away), cmd, &|_| true, &|_| None)
+    create_in(issues, &held(issues, cfg, away), &Line::new(cmd), &|_| true, &|_| None)
 }
 
 /// [`guard_create`] 를 **내미는 줄이 겨눌 트래커와 함께** — 그 자리를 푸는 것은 `cmd/hook.rs` 라
 /// ([`Toward`]) 시험이 대신 댄다.
 #[cfg(test)]
 pub fn guard_create_toward(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str, at: &Path) -> Decision {
-    create_in(issues, &held(issues, cfg, away), cmd, &|_| true, &|_| Some(at))
+    create_in(issues, &held(issues, cfg, away), &Line::new(cmd), &|_| true, &|_| Some(at))
 }
 
 /// [`guard_create`] 를 `only` 가 고른 토막에만 — 다른 트래커를 가리키는 토막은 그 트래커의
@@ -2452,7 +2517,7 @@ pub fn guard_create_toward(issues: &[Issue], cfg: &Config, away: &Away, cmd: &st
 fn create_in<'a>(
     issues: &'a [Issue],
     focus: &[&'a Issue],
-    cmd: &str,
+    line: &Line<'_>,
     only: &dyn Fn(usize) -> bool,
     aim: Toward<'_>,
 ) -> Decision {
@@ -2469,7 +2534,7 @@ fn create_in<'a>(
     // `moai add 'a' -e <에픽> && moai add 'b'` 의 `b` 가 어느 일에서 나왔는지를 잃는데, 그것이
     // 이 규칙이 지키려던 단 하나다. 토막마다 제 소속을 댄다
     // ([`tests::every_creating_segment_names_its_own_unit`] 이 그 뜻을 못박는다).
-    let makes = segments(cmd).into_iter().enumerate().filter(|(k, _)| only(*k)).find(|(_, seg)| {
+    let makes = line.words().enumerate().filter(|(k, _)| only(*k)).find(|(_, seg)| {
         // `add` 만 본다. `idea add` 는 담는 자리고, `--from` 은 에픽과 그
         // 자식들을 한 단위로 세우는 자리라 새는 줄이 아니다.
         //
@@ -2500,7 +2565,7 @@ fn create_in<'a>(
     // 워크트리의 스냅샷에 줄을 세웠다 — 루트에는 안 서고 병합에서 스냅샷이 겨룬다. 글자로만은
     // 못 푸는 `-C`(`$VAR`·`~`·`$( … )`)만 그대로 옮긴다([`echo_moai`]) — 버리면 남의 자리를 겨눈
     // 줄이 이 트래커를 겨눈 줄로 바뀐다.
-    let moai = echo_moai(aim(at), &seg);
+    let moai = echo_moai(aim(at), seg);
     // **에픽이 없으면 에픽을 대라고 말하지 않는다.** 없는 에픽 자리에 이슈 id 를
     // 넣어 일러 주던 자리다 — 시키는 대로 치면 `moai add '제목' -e <이슈>` 가
     // 만들어지고, `moai status` 에 "에픽으로 쓸 수 없는 것을 가리키는 줄" 이
@@ -2564,7 +2629,7 @@ fn create_in<'a>(
 /// 훅은 토막을 고르는 [`guard_shell_in`] 으로 부른다. 토막 전부를 보는 이 모양은 시험이 쓴다.
 #[cfg(test)]
 pub fn guard_close(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str) -> Decision {
-    close_in(issues, cfg, away, cmd, &|_| true, &|_| None)
+    close_in(issues, cfg, away, &Line::new(cmd), &|_| true, &|_| None)
 }
 
 /// [`guard_close`] 를 `only` 가 고른 토막에만 — [`create_in`] 과 같은 까닭.
@@ -2572,15 +2637,15 @@ fn close_in(
     issues: &[Issue],
     cfg: &Config,
     away: &Away,
-    cmd: &str,
+    line: &Line<'_>,
     only: &dyn Fn(usize) -> bool,
     aim: Toward<'_>,
 ) -> Decision {
-    for (k, seg) in segments(cmd).into_iter().enumerate() {
+    for (k, seg) in line.words().enumerate() {
         if !only(k) {
             continue;
         }
-        let Some(args) = moai_args(&seg) else { continue };
+        let Some(args) = moai_args(seg) else { continue };
         let verbs = positionals(args);
         // `moai mv <id>... <칸>` — 맨 끝이 갈 칸이고 그 앞이 전부 옮길 것이다.
         let Some((&"mv", rest)) = verbs.split_first() else { continue };
@@ -2622,7 +2687,7 @@ fn close_in(
                  다시 안 본다.",
                 r.id,
                 // **닫는 두 걸음도 그 토막이 겨눈 트래커를 댄다**(moai-j2vp) — 규칙 1 과 한 자다.
-                crate::guide::close_steps(&r.id, &echo_moai(aim(k), &seg))
+                crate::guide::close_steps(&r.id, &echo_moai(aim(k), seg))
             ));
         }
     }
@@ -2683,7 +2748,7 @@ pub fn guard_writes(
     cwd: &Path,
     cmd: &str,
 ) -> Decision {
-    guard_writes_in(issues, cfg, away, root, cwd, cmd, &|_| true)
+    guard_writes_in(issues, cfg, away, root, cwd, &Line::new(cmd), &|_| true)
 }
 
 /// [`guard_writes`] 를 세션 자리의 트래커로 — 집기는 `only` 가 고른 `moai` 토막의 것만 센다.
@@ -2695,12 +2760,12 @@ fn guard_writes_in(
     away: &Away,
     root: &Path,
     cwd: &Path,
-    cmd: &str,
+    line: &Line<'_>,
     only: &dyn Fn(usize) -> bool,
 ) -> Decision {
     // **싼 것부터 잰다**(moai-xppm) — 쓰는 파일이 없는 명령이 대부분이고, 명령줄을 읽는 것은
     // 소속 지도를 짓는 [`held`] 보다 싸다. 거꾸로 재던 판은 Bash 마다 초점부터 지었다.
-    let writes = shell_writes(cmd, cfg, only);
+    let writes = shell_writes(line, cfg, only);
     if writes.is_empty() || !held(issues, cfg, away).is_empty() {
         return Decision::Pass;
     }
@@ -2733,7 +2798,7 @@ pub fn guard_shell(
     cwd: &Path,
     cmd: &str,
 ) -> Decision {
-    guard_shell_in(issues, cfg, away, root, cwd, cmd, &Segs { judges: &|_| true, picks: &|_| true }, &|_| None)
+    guard_shell_in(issues, cfg, away, root, cwd, &Line::new(cmd), &Segs { judges: &|_| true, picks: &|_| true }, &|_| None)
 }
 
 /// 토막마다 **이 자리의 것인가** — 규칙마다 답이 다르다.
@@ -2760,16 +2825,16 @@ pub fn guard_shell_in(
     away: &Away,
     root: &Path,
     cwd: &Path,
-    cmd: &str,
+    line: &Line<'_>,
     segs: &Segs<'_>,
     aim: Toward<'_>,
 ) -> Decision {
     // 차례는 [`Decision::then`] 이 정한다 — 먼저 막는 규칙이 이기고, 비추는 줄(`Context`)은 뒤의
     // 규칙이 막을 것을 가리지 않는다. 되돌릴 수 없는 것을 먼저 본다.
-    guard_tmux(cmd)
-        .then(|| guard_moai(issues, cfg, away, cmd, segs.judges, aim))
-        .then(|| guard_writes_in(issues, cfg, away, root, cwd, cmd, segs.picks))
-        .then(|| if calls_review(cmd) { guard_review(issues, cfg, away) } else { Decision::Pass })
+    guard_tmux(line)
+        .then(|| guard_moai(issues, cfg, away, line, segs.judges, aim))
+        .then(|| guard_writes_in(issues, cfg, away, root, cwd, line, segs.picks))
+        .then(|| if calls_review(line) { guard_review(issues, cfg, away) } else { Decision::Pass })
 }
 
 /// 규칙 4 — **사람의 tmux 서버를 죽이지 않는다**(moai-zis7, 사용자 결정).
@@ -2785,10 +2850,10 @@ pub fn guard_shell_in(
 /// 토막 안의 **어느 낱말이든** `tmux` 면 본다: `env -u TMUX tmux …`·`sudo tmux …` 의 tmux 는
 /// 명령 자리에 있지 않다. 따옴표로 묶인 글(`moai note … "tmux kill-server"`)은 낱말 하나라
 /// `tmux` 가 아니다. 창·칸을 닫는 `kill-window`·`kill-pane` 은 서버를 안 끝내 안 본다.
-pub fn guard_tmux(cmd: &str) -> Decision {
+pub fn guard_tmux(line: &Line<'_>) -> Decision {
     // tmux 는 모호하지 않은 앞머리도 그 명령으로 받는다 — `kill-ser` 가 `kill-server` 다.
     let kills = |w: &str| w.len() > "kill-s".len() && ["kill-server", "kill-session"].iter().any(|k| k.starts_with(w));
-    for seg in segments(cmd) {
+    for seg in line.words() {
         for (i, word) in seg.iter().enumerate() {
             let rest = &seg[i + 1..];
             match basename(word) {
@@ -2862,20 +2927,20 @@ pub fn guard_tmux(cmd: &str) -> Decision {
 /// **집기로 안 세는 것:** 남의 트래커를 가리킨 집기(`only` 가 안 고른 토막 — 여기서 아무것도
 /// 안 쥐어 준다)와 `! moai mv …`·`! ( moai mv … )` (집기가 져야 뒤가 돈다), `a || moai mv …` (앞이
 /// 이기면 집기가 안 돈다 — 앞도 집기면 어느 쪽이든 하나를 쥔다).
-fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<String> {
-    shell_scan(cmd, cfg, only).0
+fn shell_writes(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<String> {
+    shell_scan(line, cfg, only).0
 }
 
-/// [`shell_writes`] 의 한 걸음 — 쓰는 파일들과 함께 **집기로 센 토막의 번호**([`segments`] 의 번호)를 낸다.
+/// [`shell_writes`] 의 한 걸음 — 쓰는 파일들과 함께 **집기로 센 토막의 번호**([`Line::used`] 의 번호)를 낸다.
 /// [`picked_in`] 이 그 번호로 세션의 집기를 적는다(moai-m5mg) — 집기를 두 자리에서 따로 가르면 한쪽만
 /// 고쳐지는 날 `! moai mv …` 가 쓰기에는 빈손인데 기록에는 제 집기로 선다.
-fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<String>, Vec<(usize, bool)>) {
+fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<String>, Vec<(usize, bool)>) {
     /// `if ! 집기; then exit 1; fi` 의 **조건에 선 집기**([`Bailout::cond`]) — 토막 번호와 그것이
     /// 확실히 도는가다. 번호만 들던 판은 그 집기를 늘 확실한 것으로 세워, `a && if ! 집기; then exit 1;
     /// fi` 처럼 `if` 자신이 조건에 매인 줄에서 안 돌 수도 있는 집기를 확실한 것으로 적었다(moai-dbzs).
     #[derive(Clone, Copy)]
     struct Cond {
-        /// 그 집기의 토막 번호([`segments`] 의 번호).
+        /// 그 집기의 토막 번호([`Line::used`] 의 번호).
         at: usize,
         /// 그 집기가 확실히 도는가 — `shell_scan` 의 `certain` 이다.
         sure: bool,
@@ -2956,7 +3021,7 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
     // `heads` 와 한 자리에서 서고 한 자로 걷힌다. `|` 는 `&&`·`||` 보다 단단히 묶여 `a && b | 집기`
     // 의 집기도 `a` 가 져야 안 도는데, 그 집기의 이음사는 `Op::Pipe` 라 제 자리만 봐서는 모른다.
     let mut piped: Vec<bool> = Vec::new();
-    // [`segments`] 의 토막 번호 — `only` 가 그것으로 가른다. 낱말 없는 토막(`> f` 만)은 안 센다.
+    // [`Line::used`] 의 토막 번호 — `only` 가 그것으로 가른다. 낱말 없는 토막(`> f` 만)은 안 센다.
     let mut k = 0;
     // `set -e` 를 켠 묶음의 깊이. 묶음을 나오면 걷는다 — `{ set -e; }` 뒤처럼 bash 가 이어 가는 자리도
     // 모르는 쪽(세는 쪽)으로 선다.
@@ -3020,8 +3085,8 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
     fn prune(picked: &mut Vec<(usize, usize, bool)>, from: usize, deeper_than: usize) {
         picked.retain(|(n, at, _)| *n < from || *at <= deeper_than);
     }
-    let (segs, over) = parse_over(cmd);
-    for mut seg in segs {
+    let over = line.over();
+    for seg in line.segs() {
         // **몸통이 안 돌았을 수 있는 묶음을 나오면 그 안의 집기는 끝난다**(리뷰 moai-ju21.70g) —
         // `fi`·`esac`·`done` 의 묶음은 몸통이 안 돌아도 0 이고, `a || { mv; }` 는 `a` 가 이기면 안 돈다.
         // `if false; then mv; fi && sed -i …` 의 `sed` 는 집기 없이 돈다. **치환에 들어서기 전에 본다** —
@@ -3323,7 +3388,7 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
             enters.push(n);
         }
         // `[[ a > b ]]`·`(( a > b ))` 의 `>` 는 비교다 — 낱말을 가를 때 이미 걸렀다.
-        let mut found = std::mem::take(&mut seg.writes);
+        let mut found = seg.writes.clone();
         match head {
             Some("sed") => found.extend(sed_in_place(&words[1..])),
             Some("tee") => found.extend(words[1..].iter().filter(|w| !w.starts_with('-')).cloned()),
@@ -3482,7 +3547,7 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
         credit(&mut picked, Some(b), b.floor.saturating_sub(1));
     }
     // 줄이 끝나도록 안 닫힌 묶음도 나온 것으로 친다 — `a || (moai mv …)` 와 `if …; then 집기; fi` 처럼
-    // 뒤 토막이 없으면 위의 걷기가 안 돈다(예약어 묶음의 표식은 [`parse_over`] 가 낸다). 쓰기는 그 뒤가
+    // 뒤 토막이 없으면 위의 걷기가 안 돈다(예약어 묶음의 표식은 [`Line::read`] 가 낸다). 쓰기는 그 뒤가
     // 없어 셈이 같지만, 기록은 여기서 걷어야 안 돈 집기를 떠안지 않는다.
     if let Some(l) = over {
         prune(&mut picked, enters.get(l + 1).copied().unwrap_or(0), l);
@@ -3513,20 +3578,20 @@ pub fn guard_moai(
     issues: &[Issue],
     cfg: &Config,
     away: &Away,
-    cmd: &str,
+    line: &Line<'_>,
     only: &dyn Fn(usize) -> bool,
     aim: Toward<'_>,
 ) -> Decision {
     // **`moai` 를 부르는 토막이 없으면 볼 것이 없다**(moai-xppm) — 세 규칙 모두 그 토막만 본다.
     // 초점을 먼저 짓던 판은 `cargo test` 하나에도 소속 지도를 지었다.
-    if !segments(cmd).iter().enumerate().any(|(k, seg)| only(k) && moai_args(seg).is_some()) {
+    if !line.words().enumerate().any(|(k, seg)| only(k) && moai_args(seg).is_some()) {
         return Decision::Pass;
     }
     // 초점은 한 번 잰다 — `held` 는 미룬 줄이 있으면 소속 지도를 다시 짓고, 훅은 도구 호출마다 돈다.
     let focus = held(issues, cfg, away);
-    create_in(issues, &focus, cmd, only, aim)
-        .then(|| close_in(issues, cfg, away, cmd, only, aim))
-        .then(|| aside_in(issues, &focus, cmd, only, aim))
+    create_in(issues, &focus, line, only, aim)
+        .then(|| close_in(issues, cfg, away, line, only, aim))
+        .then(|| aside_in(issues, &focus, line, only, aim))
 }
 
 /// 집은 줄들의 에픽과, 에픽 없는 집은 줄 — **에픽 줄이 실제로 선 것만** 에픽이다. 집은 차례로, 에픽은
@@ -3569,18 +3634,18 @@ fn sets_aside(seg: &[String]) -> bool {
 /// **에픽 줄이 실제로 선 것만** 댄다. 끊긴 참조나 에픽 아닌 줄을 가리키는 `epic` 은 닫힐 에픽이
 /// 없고, 그 id 로 되찾으라고 하면 시킨 대로 친 줄이 경고를 하나 늘려 `closing` 에 걸린다. 차례는
 /// 집은 차례다 — 규칙 1 의 거절문이 `focus[0]` 의 에픽을 대는 것과 같은 에픽을 앞에 둔다.
-fn aside_in(issues: &[Issue], focus: &[&Issue], cmd: &str, only: &dyn Fn(usize) -> bool, aim: Toward<'_>) -> Decision {
+fn aside_in(issues: &[Issue], focus: &[&Issue], line: &Line<'_>, only: &dyn Fn(usize) -> bool, aim: Toward<'_>) -> Decision {
     if focus.is_empty() {
         return Decision::Pass;
     }
-    let Some((at, seg)) = segments(cmd).into_iter().enumerate().find(|(k, seg)| only(*k) && sets_aside(seg)) else {
+    let Some((at, seg)) = line.words().enumerate().find(|(k, seg)| only(*k) && sets_aside(seg)) else {
         return Decision::Pass;
     };
     let (aims, _) = epics_of(issues, focus);
     let Some(first) = aims.first() else {
         return Decision::Pass;
     };
-    let moai = echo_moai(aim(at), &seg);
+    let moai = echo_moai(aim(at), seg);
     Decision::Context(format!(
         "갈림길 1 의 둘째 물음 — {} 가 내건 것이 방금 담은 생각 없이도 이뤄지는가. 아니면 idea 가 아니라 안 끝난 이 일이다.\n\
          그렇다면 지금 못 해도 `{moai} idea promote <그 id> -e {first} --from -` 로 그 에픽의 멤버로 되찾아 첫 칸에 \
@@ -3614,7 +3679,7 @@ const FIXED_HEADS: &[&str] = &["model:", "다음:", "Regression-of:"];
 /// 이 명령줄이 **한국어 글을 moai 에 넣는가**(moai-6rrb) — 글을 적는 `moai` 토막의 글 인자에 한글이 들었거나,
 /// 그 토막에 흘러드는 글([`Seg::fed`] — stdin 의 heredoc·here-string·파이프 앞 칸, 명령 치환 속 heredoc)에
 /// 한글이 들었다. 넣으면 그 토막의 자리(`-C` 로 가리켰으면 ` -C <그곳>`, 아니면 빈 글)를 낸다 — 알림이 고쳐
-/// 적는 명령에 옮겨 적는다([`aside_in`] 과 같은 까닭). `only` 는 볼 토막을 고른다([`segments`] 의 번호) — 받는
+/// 적는 명령에 옮겨 적는다([`aside_in`] 과 같은 까닭). `only` 는 볼 토막을 고른다([`Line::used`] 의 번호) — 받는
 /// 쪽이 트래커가 없는 자리를 가리킨 토막을 뺀다. 그 `moai` 는 스스로 실패해 아무것도 안 넣는다.
 ///
 /// **꼴이 정해진 줄만 있으면 아니다.** `model: …`·`다음: …`·`Regression-of: …` 는 다듬지 않는 글이라,
@@ -3624,18 +3689,18 @@ const FIXED_HEADS: &[&str] = &["model:", "다음:", "Regression-of:"];
 ///
 /// **흘러드는 글은 그 토막의 것만 본다.** 명령줄 전체에서 한글을 찾던 판은 옆 토막의 커밋 메시지·`--user`
 /// 이름·경로에 알림을 달았고, `"$(cat <<'EOF' … EOF)"` 로 넣은 글은 렉서가 본문을 건너뛰어 놓쳤다.
-pub fn korean_write(cmd: &str, only: &dyn Fn(usize) -> bool, aim: Toward<'_>) -> Option<String> {
+pub fn korean_write(line: &Line<'_>, only: &dyn Fn(usize) -> bool, aim: Toward<'_>) -> Option<String> {
     let hangul = |t: &str| t.chars().any(|c| matches!(c, '\u{AC00}'..='\u{D7A3}' | '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}'));
     // 렉서는 받은 글자를 옮기기만 하니 명령줄에 한글이 없으면 볼 것이 없다 — 훅은 Bash 마다 돈다.
-    if !hangul(cmd) {
+    if !hangul(line.text()) {
         return None;
     }
     let fixed = |l: &str| {
         FIXED_HEADS.iter().any(|h| l.strip_prefix(h).is_some_and(|r| r.is_empty() || r.starts_with(char::is_whitespace)))
     };
     let unfixed = |t: &str| t.lines().any(|l| hangul(l) && !fixed(l));
-    // 번호는 [`segments`] 와 같게 센다 — `only` 가 그 번호로 고른다.
-    let segs: Vec<Seg> = parse(cmd).into_iter().filter(|s| !s.words.is_empty()).collect();
+    // 번호는 [`Line::used`] 와 같게 센다 — `only` 가 그 번호로 고른다.
+    let segs: Vec<&Seg> = line.used().collect();
     segs.iter().enumerate().find_map(|(k, seg)| {
         let args = moai_args(&seg.words).filter(|_| only(k))?;
         let verbs = positionals(args);
@@ -3679,7 +3744,7 @@ pub fn korean_write(cmd: &str, only: &dyn Fn(usize) -> bool, aim: Toward<'_>) ->
 /// [`korean_write`] 를 토막 가림 없이 — 판정만 보는 시험이 쓴다.
 #[cfg(test)]
 fn writes_korean(cmd: &str) -> bool {
-    korean_write(cmd, &|_| true, &|_| None).is_some()
+    korean_write(&Line::new(cmd), &|_| true, &|_| None).is_some()
 }
 
 /// 글을 적는 토막의 인자 가운데 **글인 것** — [`NOT_TEXT`] 의 플래그와 그 값을 뺀다. `--tag=파서` 와 짧은
@@ -3731,7 +3796,7 @@ pub fn korean_notice(at: &str, missing: &[&str]) -> Decision {
 }
 
 /// 토막마다 **그 `moai` 가 도는 자리** — `-C`·`--dir` 나 앞의 `cd`·`pushd` 가 세션의 자리
-/// (`cwd`)를 옮겼으면 그 디렉터리, 아니면 `None`. 차례는 [`segments`] 와 같다 — 받는 쪽이
+/// (`cwd`)를 옮겼으면 그 디렉터리, 아니면 `None`. 차례는 [`Line::used`] 와 같다 — 받는 쪽이
 /// 토막 번호로 가른다. `moai` 가 아닌 토막은 언제나 `None` 이다.
 ///
 /// **모르면 `None` 이다** — 세션의 자리로 본다. 변수·틸드 뒤, `cd -`·`popd`·인자 없는 `cd`
@@ -3742,14 +3807,12 @@ pub fn korean_notice(at: &str, missing: &[&str]) -> Decision {
 /// 파이프의 칸이나 `&` 로 띄운 `cd` 는 아무것도 안 옮긴다. 가르지 않던 판은
 /// `(cd <남의 트래커> && moai status); moai add "딴 일"` 의 뒷토막을 남의 트래커로 보내, 실제로는
 /// 세션 자리에 서는 줄이 규칙 1 을 넘었다.
-pub fn aimed(cmd: &str, cwd: &Path) -> Vec<Option<PathBuf>> {
+pub fn aimed(line: &Line<'_>, cwd: &Path) -> Vec<Option<PathBuf>> {
     let here = resolve(".", cwd);
     let mut at = Some(here.clone());
     // 묶음 겹마다 들어가기 전의 자리.
     let mut outer: Vec<Option<PathBuf>> = Vec::new();
-    parse(cmd)
-        .into_iter()
-        .filter(|s| !s.words.is_empty())
+    line.used()
         .map(|seg| {
             // 앞 토막 뒤로 내려간 자리까지 푼다 — 깊이가 같아도 형제 괄호(`(cd /b); (moai add x)`)는 딴 셸이다.
             while outer.len() > seg.low {
@@ -3796,9 +3859,8 @@ pub fn aimed(cmd: &str, cwd: &Path) -> Vec<Option<PathBuf>> {
 /// 아직 없는 자리를 가리킨 토막이 내미는 줄에 그 자리를 댈지를 가른다(moai-j2vp). [`aimed`] 는
 /// 적은 `-C` 와 앞의 `cd` 가 옮긴 자리를 한 값으로 내는데, 없는 자리에서는 둘이 다르다 — 적은
 /// `-C` 는 곧 만들어질 자리지만, `cd` 는 실패하면 세션 자리에서 돈다.
-pub fn spells_dir(cmd: &str) -> Vec<bool> {
-    segments(cmd)
-        .iter()
+pub fn spells_dir(line: &Line<'_>) -> Vec<bool> {
+    line.words()
         .map(|seg| moai_args(seg).is_some_and(|args| !flag_values(args, &["-C", "--dir"]).is_empty()))
         .collect()
 }
@@ -3993,7 +4055,7 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
     ))
 }
 
-/// 거절문과 비춤이 내미는 줄이 **겨눌 트래커** — 토막 번호([`segments`] 의 번호)로 묻는다.
+/// 거절문과 비춤이 내미는 줄이 **겨눌 트래커** — 토막 번호([`Line::used`] 의 번호)로 묻는다.
 /// `None` 이면 이 자리의 트래커라 맨 `moai` 로 낸다. 자리를 푸는 것은 파일 계통을 아는 `cmd/hook.rs`
 /// 고(`aimed` → `Repo::find_from`, 딸린 워크트리는 루트로 옮겨진다), 여기는 그 답만 받는다.
 pub type Toward<'a> = &'a dyn Fn(usize) -> Option<&'a Path>;
@@ -4353,6 +4415,52 @@ fn flag_values(seg: &[String], flags: &[&str]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **시험은 명령줄을 글로 준다.** 규칙은 한 번 읽은 [`Line`] 을 받는데(moai-uc5v), 시험마다
+    /// 그것을 세우면 표본 한 줄에 `Line::new` 가 따라붙어 읽기 힘들다. 이름을 그대로 두어
+    /// 바깥 것을 가린다 — `Line` 을 세우는 자리는 여기 한 곳이다.
+    fn aimed(cmd: &str, cwd: &Path) -> Vec<Option<PathBuf>> {
+        super::aimed(&Line::new(cmd), cwd)
+    }
+
+    fn spells_dir(cmd: &str) -> Vec<bool> {
+        super::spells_dir(&Line::new(cmd))
+    }
+
+    fn calls_review(cmd: &str) -> bool {
+        super::calls_review(&Line::new(cmd))
+    }
+
+    fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<String> {
+        super::shell_writes(&Line::new(cmd), cfg, only)
+    }
+
+    fn picked_in(
+        cmd: &str,
+        cfg: &Config,
+        only: &dyn Fn(usize) -> bool,
+        stands: &dyn Fn(usize, &str) -> Option<String>,
+    ) -> Vec<(String, bool)> {
+        super::picked_in(&Line::new(cmd), cfg, only, stands)
+    }
+
+    fn guard_moai(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str, only: &dyn Fn(usize) -> bool, aim: Toward<'_>) -> Decision {
+        super::guard_moai(issues, cfg, away, &Line::new(cmd), only, aim)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn guard_shell_in(
+        issues: &[Issue],
+        cfg: &Config,
+        away: &Away,
+        root: &Path,
+        cwd: &Path,
+        cmd: &str,
+        segs: &Segs<'_>,
+        aim: Toward<'_>,
+    ) -> Decision {
+        super::guard_shell_in(issues, cfg, away, root, cwd, &Line::new(cmd), segs, aim)
+    }
     use crate::model::{Kind, Status};
 
     fn cfg() -> Config {
@@ -4686,7 +4794,7 @@ mod tests {
         // 안 도는 글의 집기는 적지 않는다 — `-c` 가 스크립트의 인자인 줄이다(moai-j9tx 의 곁).
         assert!(mine("bash -e script.sh -c 'moai mv t-1 in_progress --from todo'").is_empty());
 
-        // **몸통이 안 돌 수도 있는 묶음은 뒤 토막이 없어도 걷는다**([`parse_over`]) — 표식을 받을
+        // **몸통이 안 돌 수도 있는 묶음은 뒤 토막이 없어도 걷는다**([`Line::read`]) — 표식을 받을
         // 토막이 없어 버려지던 판은 `fi` 로 끝나는 줄에서만 안 돈 집기를 적었다. 몸통 안의 `;` 가
         // 사슬을 이미 끊은 판도 같다 — 걷기를 `after_pick` 에 매던 자리다.
         for cmd in [
@@ -4821,6 +4929,32 @@ mod tests {
         // **`&` 로 띄운 묶음은 아직 못 가른다** — 렉서가 `&` 와 `;` 를 한 이음사(`Op::Any`)로 읽어,
         // `집기 || { …; exit 1; } & 쓰기` 의 `exit` 가 제 하위 셸만 끝내는 것을 여기서 모른다.
         // 그 줄은 지금 지나간다(샌다). 흔한 꼴이 아니라 적어 두고 idea 로 넘긴다(moai-ncay 의 노트).
+    }
+
+    /// **규칙 넷이 명령줄을 한 번만 읽는다**(moai-uc5v). 저마다 [`Lexer`] 를 세우던 판은 Bash 한
+    /// 번에 같은 글을 네댓 번 읽었고, 겹친 치환은 그 한 번을 이미 비싸게 만든다 — 9KB·3,000겹 한
+    /// 줄이 dev 빌드에서 `guard_shell` 4.59초였다(고친 뒤 2.22초, 흔한 줄도 2.1배 빨라졌다).
+    ///
+    /// **시계로 재지 않는다** — 부하 있는 기계에서 흔들리고, 흔들리는 시험은 곧 지워진다. 읽은
+    /// 횟수를 [`Line`] 이 세고 여기서 그 수를 못박는다. 규칙 하나가 제 `Line` 을 따로 세우면
+    /// (`Line::new(cmd)` 를 안쪽에 다시 적으면) 이 수가 는다.
+    #[test]
+    fn the_rules_read_the_command_line_once() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let root = Path::new("/repo");
+        let all_of = Segs { judges: &|_| true, picks: &|_| true };
+        // 규칙 넷이 다 할 일이 있는 줄 — tmux·`moai` 규칙·쓰기 셈·리뷰가 저마다 토막을 본다.
+        let cmd = "moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs && moai add '딴 일' && /code-review high";
+        let line = Line::new(cmd);
+        let _ = super::guard_shell_in(&all, &cfg(), &here(), root, root, &line, &all_of, &|_| None);
+        assert_eq!(line.reads(), 1, "규칙마다 명령줄을 다시 읽는다");
+        // 명령줄을 안 보는 호출은 **아예 안 읽는다** — `Edit`·`Skill` 이 그 자리다.
+        let idle = Line::new(cmd);
+        assert_eq!(idle.reads(), 0, "묻지도 않았는데 읽었다");
+        // 그 뒤로는 물을 때마다 같은 것을 본다.
+        let asked = Line::new(cmd);
+        assert!(!super::calls_review(&asked) || super::calls_review(&asked));
+        assert_eq!(asked.reads(), 1, "물을 때마다 다시 읽는다");
     }
 
     /// **감싸는 명령은 명령 자리를 안 가린다**(moai-455j) — `env`·`timeout`·`nice`·`stdbuf`·`sudo` 뒤의
@@ -7496,6 +7630,11 @@ mod tests {
 #[cfg(test)]
 mod korean_tests {
     use super::*;
+
+    /// 시험은 명령줄을 글로 준다 — [`tests`] 와 같은 까닭(moai-uc5v).
+    fn korean_write(cmd: &str, only: &dyn Fn(usize) -> bool, aim: Toward<'_>) -> Option<String> {
+        super::korean_write(&Line::new(cmd), only, aim)
+    }
 
     /// **한국어 글을 넣는 쓰기만 비춘다**(moai-6rrb). 읽기·영어 글·사람 이름·꼴이 정해진 줄은 아니다 —
     /// 헛 알림이 잦으면 알림을 안 읽게 된다.
