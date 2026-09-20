@@ -394,6 +394,10 @@ pub(crate) fn read_table(root: &Table) -> (BTreeMap<String, String>, Vec<String>
 /// 이미 대는데([`Marks::problems`]) 쓰는 길만 버리던 판은, 뿌리 윗자리에 잠깐 `EACCES`·`ESTALE`·`ELOOP`
 /// 가 난 그 한 번이 옛 철자 자리에 적고(락도 딴 자리다) 아무 말 없이 0 으로 끝났다.
 ///
+/// **건너뛴 줄도 같은 자리에 싣는다**(moai-upna). 자리 고르기만 싣던 판은 [`Sheet::marks`] 가 건너뛴
+/// 줄을 그대로 버렸다 — 읽는 길([`read_one`])은 그것을 대므로 같은 파일을 두 길이 달리 읽었고, 그
+/// 줄은 견줌에서도 빠져 쓰는 길이 "이미 읽었는가" 를 그 줄 없이 쟀다.
+///
 /// **그 도장은 다음 성한 쓰기가 합치고 지운다**(moai-bdej, 사용자 결정 2026-09-20). 떨어진 판은 도구가
 /// 짓는 대기 자리([`spool_at`])에 적고, 자리가 다시 풀리는 판이 그것을 [`Place::pending`] 으로 들어
 /// 여기서 합친 뒤 그 파일을 지운다 — **닫는 자가 합치기 자신이다.** 그러니 이 줄은 "철자가 밀렸다" 가
@@ -499,6 +503,19 @@ pub fn update<T>(config: &Path, root: &Path, f: impl Fn(&mut Sheet) -> R<T>) -> 
     // **손으로 고칠 거절에는 어느 파일인지 붙인다** — [`crate::user_config::update`] 와 같은 자리이고 같은
     // 까닭이다(리뷰). 이 파일의 이름은 뿌리의 해시라 사람이 짐작할 수 없어, 붙이지 않으면 "손으로
     // 고친다" 가 갈 곳 없는 말이 된다. 붙이는 곳을 부르는 쪽마다 두면 붙인 곳과 잊은 곳이 갈린다.
+
+    // **이 파일에서 건너뛴 줄도 댄다**(moai-upna). [`Sheet::marks`] 의 둘째 값은 읽는 길만 물고
+    // 갔고([`read_one`]) 쓰는 길은 버렸다 — 손으로 적은 `"argos-0002" = 3` 한 줄이 있는 사람에게
+    // `moai read --all` 은 그것을 대는데 `moai read <id>` 는 조용했고, 그 줄은 견줌에서도 빠져
+    // 쓰는 길이 "이미 읽었는가" 를 그 줄 없이 쟀다. 옛 자리와 대기 자리의 같은 줄은 [`merge_past`]
+    // 가 이미 대므로, 여기서 대는 것은 **지금 자리의 것**이다.
+    //
+    // **락 안에서 한 번만 훑는다.** 닫은 글은 두 번 돌 수 있어(재 보기·락 안) 그 안에서 세면 같은
+    // 줄이 두 번 서고, 부르는 쪽마다 세면 [`crate::cmd::read`] 와 탐색기가 갈린다. 재 보기 쪽은 빈
+    // 표라 셀 것이 없다. 겹치기 전에 센다 — [`merge_past`] 가 얹은 줄은 도구가 지은 값이라 건너뛸
+    // 것이 없고, 그 뒤에 세면 같은 줄을 옛 자리의 것과 섞어 두 번 댈 길이 열린다.
+    problems.extend(sheet.marks().1.into_iter().map(|why| format!("{}: {why}", path.display())));
+
     // **대기 자리는 그 락 안에서 들고, 쓴 뒤에 지운다**(moai-bdej, 리뷰 4). 락 없이 읽고 지우던 길은
     // 읽기와 지우기 사이에 떨어진 판이 적은 도장을 함께 지웠다 — 조용한 손실이라 못 견딘다. 락의
     // 차례는 늘 `at` → 대기 자리다: 떨어진 판은 대기 자리가 곧 `at` 이라 하나만 잡으므로 고리가 없다.
@@ -590,7 +607,8 @@ fn merge_past(sheet: &mut Sheet, past: &[&Path], root: &Path, problems: &mut Vec
 pub struct Wrote<T> {
     /// [`update`] 에 준 함수가 돌려준 것.
     pub value: T,
-    /// 자리를 고르다([`Place::problems`]) 또 옛 자리를 합치다([`merge_past`]) 만난 까닭. 빈 것이 정상이다.
+    /// 자리를 고르다([`Place::problems`]) 또 옛 자리를 합치다([`merge_past`]) 만나고, **이 파일에서
+    /// 건너뛴 줄**([`Sheet::marks`] 의 둘째 값, moai-upna) 때문에 생긴 까닭. 빈 것이 정상이다.
     pub problems: Vec<String>,
 }
 
@@ -931,6 +949,39 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let wrote = update(&cfg, &root, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
         assert!(wrote.problems.is_empty(), "성한 자리를 탈로 댔다 — {:?}", wrote.problems);
+    }
+
+    /// **쓰는 길도 건너뛴 줄을 댄다**(moai-upna). 읽는 길만 대던 판은 같은 파일을 두 길이 달리 읽었다 —
+    /// 손으로 적은 `"a-0002" = 3` 한 줄이 있으면 `moai read --all` 은 그것을 대는데 `moai read <id>`
+    /// 는 조용했고, 그 줄은 견줌에서도 빠져 쓰는 길이 "이미 읽었는가" 를 그 줄 없이 쟀다.
+    ///
+    /// **재는 자는 한 자리다** — 두 길의 글을 글자째 견준다. 한쪽만 고치면 여기가 붉어진다.
+    #[test]
+    fn writing_says_which_line_it_skipped() {
+        let s = Scratch::new("read-marks-skipped");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let at = path_for(&cfg, &root);
+        std::fs::create_dir_all(dir_of(&at)).unwrap();
+        std::fs::write(&at, "[read]\n\"a-0002\" = 3\n\"a-0003\" = \"본 때\"\n").unwrap();
+
+        let wrote = update(&cfg, &root, |sh| sh.mark(&marks(&[("a-0001", "A")]))).unwrap();
+        assert_eq!(wrote.value, vec!["a-0001".to_string()], "말만 하고 안 적었다 — {:?}", wrote.value);
+        assert_eq!(wrote.problems.len(), 1, "쓰는 길이 건너뛴 줄을 버렸다 — {:?}", wrote.problems);
+        assert!(wrote.problems[0].contains("a-0002"), "{}", wrote.problems[0]);
+        assert_eq!(read(&cfg, &root, &BTreeMap::new()).problems, wrote.problems, "두 길이 같은 줄을 달리 부른다");
+
+        // 건너뛴 줄은 **그대로 남는다** — 대는 것이지 걷는 것이 아니다.
+        let (kept, skipped) = Sheet::parse(&std::fs::read_to_string(&at).unwrap()).unwrap().marks();
+        assert_eq!(skipped.len(), 1, "건너뛴 줄을 지웠다 — {skipped:?}");
+        assert_eq!(kept.get("a-0001").map(String::as_str), Some("A"));
+
+        // 성한 표는 조용하다 — 빈 `problems` 가 정상이다.
+        let clean = s.join("proj2");
+        std::fs::create_dir_all(&clean).unwrap();
+        let wrote = update(&cfg, &clean, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
+        assert!(wrote.problems.is_empty(), "성한 표를 탈로 댔다 — {:?}", wrote.problems);
     }
 
     /// **못 푼 판의 도장은 대기 자리로 가고, 다음 성한 쓰기가 합치고 지운다**(moai-bdej,
