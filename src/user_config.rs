@@ -261,7 +261,7 @@ pub fn update<T>(path: &Path, f: impl FnOnce(&mut Doc) -> R<T>) -> R<T> {
 /// (moai-3owm, 사용자 결정 2026-09-18) — 깨진 설정에 안 쓰는 것([`update`])과 같은 갈래다. 둘 다 사람이 설정 파일을
 /// 손으로 고쳐야 쓴다는 뜻이라, 받는 쪽이 I/O 실패(`error`)와 가를 수 있어야 한다. 거절마다 한 코드를 내야 해서 한
 /// 곳에 둔다. 어느 파일인지는 [`update`] 가 붙인다 — 문서는 제 자리를 모른다.
-fn refuse(message: String) -> Fail {
+pub(crate) fn refuse(message: String) -> Fail {
     Fail::coded(message, code::BROKEN)
 }
 
@@ -370,6 +370,26 @@ impl Doc {
     /// 고쳤다고 알린다 — [`Doc::root_mut`] 로 손댄 쪽이 부른다.
     pub(crate) fn touched(&mut self) {
         self.dirty = true;
+    }
+
+    /// 뿌리의 `table` 표에서 키들을 뺀다 — 실제로 빠진 수를 돌려준다.
+    ///
+    /// **맨 `TableLike::remove` 로 빼지 않는다**(리뷰). 그쪽은 키 위의 주석을 **빈 줄 너머까지** 함께
+    /// 가져가, 읽음을 한 번 걷는 것이 사람이 그 파일에 적어 둔 글과 앞 줄의 꼬리를 말없이 지운다.
+    /// [`drop_key`] 가 그 자를 이미 들고 있고(moai-liij·moai-bx7g), 보기를 뺄 때(`Doc::merge_look`)가
+    /// 그것을 쓴다 — 같은 파일을 고치는 자가 둘로 갈리면 한쪽만 주석을 지킨다.
+    pub(crate) fn drop_keys(&mut self, table: &str, keys: &[String]) -> usize {
+        let Some(t) = self.doc.get_mut(table).and_then(Item::as_table_like_mut) else {
+            return 0;
+        };
+        let mut left = String::new();
+        let gone = keys.iter().filter(|k| drop_key(t, k, &mut left)).count();
+        // 끝 줄을 지워 표 밖으로 나갈 주석(moai-liij) — `merge_look` 과 같은 자다.
+        if !left.is_empty() {
+            self.put_after(table, left);
+        }
+        self.dirty |= gone > 0;
+        gone
     }
 
     pub fn render(&self) -> String {
@@ -827,7 +847,6 @@ const SORT_REVERSED: &str = "sort_reversed";
 const FIELDS: &str = "fields";
 const DETAIL: &str = "detail";
 const FIELDS_KNOWN: &str = "fields_known";
-/// 읽음이 사는 표(moai-50mn) — 이슈 id → 내가 마지막으로 본 줄의 `updated_at`(moai-lyc1).
 
 /// 탐색기의 보기 — 사람이 마지막으로 고른 것(moai-2bzp). **낱말로 든다** — 무슨 낱말이 있는지는
 /// 탐색기가 안다. 이 모듈이 조각의 타입을 알면 설정 파일의 모양이 화면 코드에 매인다. 없는 키는
