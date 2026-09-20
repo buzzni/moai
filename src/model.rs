@@ -59,7 +59,12 @@ pub fn check_text_size(id: &str, what: &str, text: &str) -> R<()> {
 ///
 /// 자르는 자리는 **글자** 경계지 글자 무리(grapheme) 경계가 아니다. 이음 표식(ZWJ)이나 첫
 /// 자모 하나가 끝에 남을 수 있고, 표식이 그 뒤에 붙는다. 노트에 담는 가리킴에는 그것으로 됐다.
-pub fn fit(text: &str, budget: usize) -> std::borrow::Cow<'_, str> {
+///
+/// **단위를 이름에 적는다**(moai-jgnj). 이 저장소에는 `fit` 이 셋 더 있고(`markdown`·`tui::draw`·
+/// `tui::scroll`) 그쪽 예산은 **칸**이다. 한글은 3바이트에 2칸이라 칸 예산을 이 자리에 넘기면
+/// 답이 예산의 1.5배로 서고, 그러면 [`check_text_size`] 가 도로 거절해 moai-clta 가 그대로
+/// 돌아온다. 맞는 쪽으로 틀리는 값이 아니라 **소리 없이 넘치는** 값이라 이름으로 가른다.
+pub fn fit_bytes(text: &str, budget: usize) -> std::borrow::Cow<'_, str> {
     const MARK: &str = "…";
     if text.len() <= budget {
         return std::borrow::Cow::Borrowed(text);
@@ -995,19 +1000,19 @@ mod tests {
         )
     }
 
-    /// [`fit`] 은 **넘을 때만** 줄이고, 줄일 때는 글자 가운데를 안 자른다. 어느 답도
+    /// [`fit_bytes`] 는 **넘을 때만** 줄이고, 줄일 때는 글자 가운데를 안 자른다. 어느 답도
     /// `budget` 을 안 넘는다 — 넘치게 내면 [`check_text_size`] 가 도로 거절해 아무것도 못 고친다.
     #[test]
-    fn fit_shortens_only_what_must_and_never_mid_character() {
-        assert_eq!(fit("가나다", 9), "가나다", "딱 맞는 글을 줄였다");
-        assert_eq!(fit("", 0), "");
+    fn fit_bytes_shortens_only_what_must_and_never_mid_character() {
+        assert_eq!(fit_bytes("가나다", 9), "가나다", "딱 맞는 글을 줄였다");
+        assert_eq!(fit_bytes("", 0), "");
         // 표식이 3바이트다 — 8바이트 예산에는 다섯 바이트가 남지만 두 글자는 안 들어간다.
-        assert_eq!(fit("가나다", 8), "가…");
-        assert_eq!(fit("가나다", 6), "가…");
-        assert_eq!(fit("가나다", 5), "…", "글자 가운데서 잘랐다");
+        assert_eq!(fit_bytes("가나다", 8), "가…");
+        assert_eq!(fit_bytes("가나다", 6), "가…");
+        assert_eq!(fit_bytes("가나다", 5), "…", "글자 가운데서 잘랐다");
         // 표식조차 못 담는 예산에서도 넘치지 않는다.
         for budget in 0..10 {
-            assert!(fit("가나다", budget).len() <= budget, "{budget}바이트 예산이 넘쳤다");
+            assert!(fit_bytes("가나다", budget).len() <= budget, "{budget}바이트 예산이 넘쳤다");
         }
     }
 

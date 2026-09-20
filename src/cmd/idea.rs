@@ -166,7 +166,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 주면 64KB 짜리 제목이 만든 이슈마다 저널에 한 벌씩 베껴져, `moai show` 의 이력이 그
         // 한 줄에 묻힌다 — `MAX_TEXT_BYTES` 가 애초에 막으려던 바로 그것이다.
         let head = format!("{} 에서 펼쳤다 — ", args.id);
-        let shown = crate::model::fit(&title, TITLE_IN_NOTE);
+        let shown = crate::model::fit_bytes(&title, TITLE_IN_NOTE);
         // **한 번만 짓는다.** 줄마다 똑같은 글이라, 루프 안에서 지으면 64KB 짜리를 멤버 수만큼
         // 새로 짓고 곧바로 버린다 — `-e` 로 펼치면 만든 이슈가 모두 여기 든다.
         let grew = format!("{head}{shown}");
@@ -180,8 +180,8 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         };
         // **이 노트도 같은 자로 잰다.** 계획에 줄 수 상한이 없어 id 목록만으로도 상한을 넘는데
         // (재 봤다: 8,000줄 계획이 79KB), 그러면 위와 똑같이 펼칠 길이 통째로 막힌 채 거절문이
-        // 남지도 않을 id 를 댄다. 도구가 짓는 글에는 줄일 사람이 없다는 것이 `fit` 의 규칙이다.
-        let note = crate::model::fit(&note, crate::model::MAX_TEXT_BYTES).into_owned();
+        // 남지도 않을 id 를 댄다. 도구가 짓는 글에는 줄일 사람이 없다는 것이 `fit_bytes` 의 규칙이다.
+        let note = crate::model::fit_bytes(&note, crate::model::MAX_TEXT_BYTES).into_owned();
         // **이미 닫힌 것을 또 닫지 않는다.** `done → done` 을 적으면 저널에
         // 일어나지도 않은 전이가 남고, `status_since` 가 움직여 "언제 닫혔나"
         // 가 마지막 `promote` 시각으로 밀린다. 적어 온 말은 그래도 버리지
