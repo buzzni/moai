@@ -572,6 +572,11 @@ pub struct Site {
     /// 이슈 첨자 → 보기에 보이는가. `keep` 과 같은 까닭으로 **보기나 자료가 바뀔 때만** 센다
     /// ([`App::see`]) — 묶음의 칸과 물려받은 미룸을 줄마다 프레임마다 다시 풀지 않는다.
     shown: Vec<bool>,
+    /// `shown`·`lit` 이 **어느 보기로** 선 것인가(moai-m59y). 같은 보기를 같은 줄에 다시 걸면
+    /// 건너뛴다 — 지금 선 프로젝트 하나를 다시 읽을 때마다(`App::take`) 든 프로젝트 **전부**의
+    /// `shown`·`lit` 을 다시 세던 자리다. 그 둘은 보기와 줄의 함수라, 둘 다 그대로면 답이 같다.
+    /// 줄이 바뀌는 길은 둘뿐이다 — 새로 지은 [`Site`](여기가 `None`)와 [`App::take`](거기서 비운다).
+    seen_view: Option<view::View>,
     /// 보기에 보이는 줄이 사는 자리의 **모든 앞머리**([`App::see`]가 `shown` 과 함께 센다). 폴더가 검색 없이도
     /// 설지를 이 하나로 묻는다([`App::stands_in_view`]) — 폴더마다 이슈 전부를 훑으면 목록 한 번에 폴더 수 ×
     /// 이슈 수가 들고, 목록·머리 셈·열 셈이 프레임마다 그것을 묻는다(`Index::entries_sorted` 의 `lit` 과 같은 까닭).
@@ -633,6 +638,10 @@ pub struct App {
     /// `trouble` 과 **따로 든다.** 쓰기 뒤 다시 읽기가 실패하면 둘이 함께 참이다 —
     /// 파일에는 담겼고 화면은 못 읽었다. 한 칸에 담으면 어느 한쪽이 거짓말을 한다.
     pub notice: Option<String>,
+    /// 상세에 선 본문을 펼쳐 둔 한 벌(moai-fauw, [`draw::Body`]) — **그리기 전에** `draw::fill_body`
+    /// 가 채운다. 그리는 쪽은 `&App` 만 빌려 제자리에서 못 넣고, 안 넣으면 프레임마다 같은 본문을
+    /// 다시 판다. 값일 뿐이라 비어 있어도 그림은 같다 — 그때는 그리는 쪽이 그 자리에서 편다.
+    body: Option<draw::Body>,
     /// 사용자 설정을 못 읽어 **층을 안 세운** 까닭. 층이 서면 층이 제 `problems` 를 대므로
     /// 층이 없을 때만 든다. 붙박이다 — 다시 읽기가 걷는 `trouble` 에 두면 700ms 뒤에
     /// 사라져 사람은 층이 왜 없는지 끝내 모른다. 설정 파일이 바뀌면 걸음이 다시 읽어([`App::follow_config`])
@@ -817,6 +826,7 @@ impl Site {
             commits: Commits::new(),
             commit_ids: Default::default(),
             shown: Vec::new(),
+            seen_view: None,
             lit: Default::default(),
             unread: Default::default(),
             expanded: Default::default(),
@@ -1028,6 +1038,7 @@ impl App {
             unlayered: None,
             write_failed: false,
             notice: None,
+            body: None,
             user: None,
             identify: crate::model::actor,
             header_user: None,
@@ -1378,6 +1389,8 @@ impl App {
         self.site.index = index;
         self.site.ground = ground;
         self.site.now = now;
+        // 줄이 바뀌었다 — 걸어 둔 보기는 옛 줄의 것이다(moai-m59y).
+        self.site.seen_view = None;
         // 안 읽음은 **줄이 바뀔 때** 센다 — 보기 토글(`look`)도 지나는 `regrip` 에 두면 칸 하나 숨길
         // 때마다 저장소를 걷는다(moai-j038.vna).
         self.recount_unread();
@@ -1463,7 +1476,7 @@ impl App {
             // **그 줄의 프로젝트로 읽는다**(moai-1xo5) — 한눈 보기에서는 지금 선 프로젝트의 줄이
             // 비어 있어, 남의 첨자를 여기서 읽으면 그 자리에서 죽는다.
             Row::Item(seat, Entry::Dir { at: Some(at), .. } | Entry::Leaf { at }, _) => {
-                let id = self.site_at(*seat).issues.get(*at).map(|i| i.id.clone()).unwrap_or_default();
+                let id = self.issue_at(*seat, *at).map(|i| i.id.clone()).unwrap_or_default();
                 match seat {
                     Seat::Here => Anchor::Issue(id),
                     Seat::Place(n) => Anchor::Foreign(self.place_path(*n).map(Into::into).unwrap_or_default(), id),
@@ -1814,7 +1827,14 @@ impl App {
     }
 
     /// 한 프로젝트에 보기를 건다 — `shown` 과 그 줄들이 사는 자리 전부(`lit`).
+    ///
+    /// **같은 보기를 같은 줄에 다시 걸지 않는다**(moai-m59y, `Site::seen_view`) — 지금 선 프로젝트를
+    /// 다시 읽을 때마다 [`App::see`] 가 든 프로젝트 전부를 돌아, 옆 프로젝트들은 줄도 보기도 안
+    /// 바뀐 채로 이슈 수 × 자리 깊이를 다시 셌다.
     fn see_in(site: &mut Site, view: &view::View) {
+        if site.shown.len() == site.issues.len() && site.seen_view.as_ref() == Some(view) {
+            return;
+        }
         site.shown = (0..site.issues.len())
             .map(|at| view.shows(site.column(at), site.index.deferred_root(&site.issues[at].id).is_some(), &site.cfg.statuses))
             .collect();
@@ -1828,6 +1848,7 @@ impl App {
             }
         }
         site.lit = lit;
+        site.seen_view = Some(view.clone());
     }
 
     /// 설정 자리(`App::user_config`)에서 보기를 읽어 [`App::adopt_look`] 에 넘긴다. **시험만 부른다**(moai-u8cs) —
@@ -2086,13 +2107,17 @@ impl App {
         use keys::Browse as B;
         let cur = self.current_of(rows);
         // **읽음도 그 줄의 프로젝트에 적는다**(moai-5v3q) — 한눈 보기의 줄은 남의 목록의 첨자라,
-        // 지금 선 프로젝트로 읽으면 엉뚱한 줄에 도장을 찍는다.
+        // 지금 선 프로젝트로 읽으면 엉뚱한 줄에 도장을 찍는다. **머리줄은 여기 안 온다**: 층의
+        // 머리줄에서 읽음 셋은 아예 안 듣는다(`keys::Browse::enabled` 의 `on_row`) — 층의 줄은
+        // 프로젝트고 안 읽은 줄은 들어간 프로젝트의 것이라는 결정(moai-j038.vna)이다. 그 결정을
+        // 넓히려면 키 쪽을 먼저 연다.
         let seat = match &cur {
             Some(Row::Item(seat, ..)) => *seat,
-            Some(Row::Project(n)) => Seat::Place(*n),
             _ => Seat::Here,
         };
-        let site = self.site_at(seat);
+        // 빠진 프로젝트의 줄에는 안 적는다(moai-m59y) — 갈음한 프로젝트에 남의 첨자로 도장을
+        // 찍으면 되돌리는 길이 도구 밖에만 남는다.
+        let Some(site) = self.site_of_seat(seat) else { return };
         let targets: Vec<usize> = match act {
             B::Read => match &cur {
                 Some(Row::Item(_, e, _)) => e.at().into_iter().collect(),
@@ -2108,14 +2133,15 @@ impl App {
                     self.notice = Some("이 줄은 묶음에 안 든다 — 에픽·마일스톤 안에서 누른다".into());
                     return;
                 };
-                let site = self.site_at(seat);
+                let Some(site) = self.site_of_seat(seat) else { return };
                 site.index.under_group(&site.issues, &group)
             }
             _ => return,
         };
-        let site = self.site_at(seat);
-
-        let ids: std::collections::BTreeSet<&str> = targets.iter().map(|&at| site.issues[at].id.as_str()).collect();
+        let Some(site) = self.site_of_seat(seat) else { return };
+        // 넘친 첨자는 건너뛴다 — 그 줄은 이미 없다.
+        let ids: std::collections::BTreeSet<&str> =
+            targets.iter().filter_map(|&at| site.issues.get(at)).map(|i| i.id.as_str()).collect();
         if ids.is_empty() {
             self.notice = Some("읽음으로 적을 것이 없다".into());
             return;
@@ -2166,18 +2192,22 @@ impl App {
     /// 읽은 것이 통째로 적혔다(`(길 잃음)` 도 같다) — `SPC m g` 이 `SPC m a` 가 되고, 되돌리는 길은 도구 밖에만
     /// 있다. 자식 있는 이슈 폴더 안에서 누르면 그 폴더만 읽고 에픽의 나머지와 묶음 줄 자신을 빠뜨렸다.
     fn group_of(&self, seat: Seat, e: &Entry) -> Option<String> {
-        let site = self.site_at(seat);
+        // 빠진 프로젝트의 줄은 묶음이 없다(moai-m59y) — 갈음한 목록에서 읽으면 남의 에픽이 나온다.
+        let site = self.site_of_seat(seat)?;
         if let Entry::Dir { at: Some(at), .. } = e
-            && crate::report::is_group(&site.issues[*at])
+            && let Some(i) = site.issues.get(*at)
+            && crate::report::is_group(i)
         {
-            return Some(site.issues[*at].id.clone());
+            return Some(i.id.clone());
         }
         // **줄이 사는 자리에서 읽는다**(`home_of`), 지금 디렉터리에서 읽지 않는다. 지금 디렉터리로
         // 재던 때는, 펼쳐 든 멤버 줄에 서서 누르면 그 줄의 에픽이 아니라 **그 위 마일스톤**이 나와
         // `SPC m g` 이 마일스톤 전체를 읽음으로 적었다(리뷰) — 이 함수가 막으려던 바로 그것이고,
         // 되돌리는 길은 도구 밖에만 있다. 바구니는 첨자가 없어 지금 자리로 읽고, 그 자리에 묶음이
         // 없으면 그대로 `None` 이다.
+        // 넘친 첨자에는 집이 없다 — `Index::home_of` 도 첨자를 그대로 짚는다(위의 `get` 과 한 자다).
         let home: &[Seg] = match e.at() {
+            Some(at) if at >= site.issues.len() => return None,
             Some(at) => site.index.home_of(at),
             None => &site.path,
         };
@@ -2270,7 +2300,9 @@ impl App {
         let Some(path) = self.layer.as_mut().map(|l| l.wanted.remove(0)) else { return };
         let Some(at) = self.layer.as_ref().and_then(|l| l.position(&path)) else { return };
         // 여는 것은 그 자리에서 한다 — 못 여는 까닭을 그 줄에 세우는 길이 이것 하나다(`open_place`).
-        let Some(repo) = self.open_place(at) else { return };
+        // **여는 데까지만 본다**(`Depth::Lean`, moai-m59y) — 줄은 바로 아래 스레드가 읽는다.
+        // 여기서 스냅샷까지 읽으면 그 한 판을 UI 실이 치르고 일꾼이 같은 파일을 또 판다.
+        let Some(repo) = self.open_place(at, layer::Depth::Lean) else { return };
         let (tx, rx) = std::sync::mpsc::channel();
         let read = self.read;
         let worktree = self.worktree;
@@ -2300,6 +2332,10 @@ impl App {
         };
         let (_, _, handle) = layer.reading.take().expect("바로 위에서 보았다");
         let repo = self.reading_repo.take();
+        // **`Tab` 의 뜻은 이 읽기 하나로 끝난다** — 못 읽었을 때 그 뜻을 남겨 두면, 다음에 `l` 로
+        // 한 층만 펴려던 사람이 통째로 펼쳐진 프로젝트를 본다. `Depth::Lean` 이 "열리지만 스냅샷을
+        // 못 읽는" 저장소를 이 갈래로 보내면서 그 자리가 실제로 닿는다(moai-m59y).
+        let deep = self.deep.remove(&path);
         match got {
             Some(Ok(fresh)) => {
                 let cfg = repo.as_ref().map_or_else(|| self.site.cfg.clone(), |r| r.config.clone());
@@ -2331,9 +2367,7 @@ impl App {
                     self.recount_unread_in(Seat::Place(at));
                 }
                 // `Tab` 으로 "다 펴 달라" 며 기다린 프로젝트면 이제 편다.
-                if self.deep.remove(&path)
-                    && let Some(at) = landed
-                {
+                if deep && let Some(at) = landed {
                     self.open_all(Seat::Place(at));
                 }
             }
@@ -2350,11 +2384,11 @@ impl App {
     }
 
 
-    /// [`App::site_at`] 의 고칠 수 있는 판 — 펼침처럼 **그 프로젝트에 매인 것**을 고칠 때 쓴다.
+    /// [`App::site_of_seat`] 의 고칠 수 있는 판 — 펼침처럼 **그 프로젝트에 매인 것**을 고칠 때 쓴다.
     ///
-    /// **읽을 때와 달리 지금 선 것으로 갈음하지 않는다.** 아직 줄을 안 읽은 프로젝트(읽는 중이거나
-    /// 접힌 것)에 무언가 적으려다 갈음하면, 그 글이 **엉뚱한 프로젝트**에 조용히 적힌다 — 읽기는
-    /// 한 프레임 어긋날 뿐이지만 쓰기는 남는다.
+    /// **지금 선 것으로 갈음하지 않는다.** 아직 줄을 안 읽은 프로젝트(읽는 중이거나 접힌 것)에
+    /// 무언가 적으려다 갈음하면, 그 글이 **엉뚱한 프로젝트**에 조용히 적힌다 — 읽기는 한 프레임
+    /// 어긋날 뿐이지만 쓰기는 남는다. 읽는 판도 이제 같은 자다(리뷰).
     pub(super) fn site_mut(&mut self, seat: Seat) -> Option<&mut Site> {
         match seat {
             Seat::Here => Some(&mut self.site),
@@ -2362,11 +2396,14 @@ impl App {
         }
     }
 
-    /// 그 줄이 사는 프로젝트 — 줄에 실린 [`Seat`] 을 푼다. `..` 과 머리줄은 지금 선 것으로 답한다.
-    pub fn site_of(&self, r: &Row) -> &Site {
+    /// 그 줄이 사는 프로젝트 — 줄에 실린 [`Seat`] 을 푼다. `..` 과 머리줄은 제 줄이 없어 지금 선
+    /// 것으로 답한다. **빠진 프로젝트의 줄은 `None`** 이다([`App::site_of_seat`]) — 갈음해 주면
+    /// 받는 쪽이 남의 첨자를 이 목록에 대고, `Index::dir_path` 처럼 첨자를 그대로 짚는 자리에서
+    /// 그것이 조용한 오답이 되거나 터진다(moai-m59y).
+    pub fn site_of_row(&self, r: &Row) -> Option<&Site> {
         match r {
-            Row::Item(seat, ..) => self.site_at(*seat),
-            Row::Up | Row::Project(_) => &self.site,
+            Row::Item(seat, ..) => self.site_of_seat(*seat),
+            Row::Up | Row::Project(_) => Some(&self.site),
         }
     }
 
@@ -2405,16 +2442,30 @@ impl App {
         out
     }
 
-    /// `seat` 이 든 프로젝트 — 한눈 보기의 줄은 제 층 줄의 것을, 프로젝트 안의 줄은 지금 선 것을 쓴다.
-    /// **없는 자리는 지금 선 것으로 답한다**: 층 줄이 그새 빠졌다면 그 줄은 다음 프레임에 사라지고,
-    /// 여기서 멈추면 그 한 프레임에 탐색기가 죽는다. 고치는 판([`App::site_mut`])은 갈음하지 않는다.
-    pub fn site_at(&self, seat: Seat) -> &Site {
+    /// `seat` 이 든 프로젝트 — 한눈 보기의 줄은 제 층 줄의 것을, 프로젝트 안의 줄은 지금 선 것을
+    /// 쓴다. **없으면 없다고 답한다.**
+    ///
+    /// 한때 여기 곁에 지금 선 것으로 갈음해 주는 판(`App::site_at`)이 있었다 — 층 줄이 그새 빠져도
+    /// 그 한 프레임에 탐색기가 안 죽게 하려는 것이었다. **걷었다**(리뷰, moai-m59y): 줄에 실린
+    /// 첨자는 제 프로젝트의 목록의 것이라(`Seat`) 남의 목록에 대면 엉뚱한 이슈가 그 줄로 서고,
+    /// 넘치면 `Index::dir_path`·`home_of`·`Site::spins` 처럼 첨자를 그대로 짚는 자리에서 어차피
+    /// 죽는다. 갈음이 지켜 주던 것을 이제는 **부르는 쪽이 그 줄을 건너뛰어** 지킨다 — 빠진 줄은
+    /// 다음 프레임에 사라지고, 그때까지 남의 이슈를 그 줄로 세우지 않는다. 그 규칙을 쓰는 판이
+    /// [`App::issue_at`]·[`App::site_of_row`]·[`App::site_mut`] 다.
+    pub fn site_of_seat(&self, seat: Seat) -> Option<&Site> {
         match seat {
-            Seat::Here => &self.site,
-            Seat::Place(n) => {
-                self.layer.as_ref().and_then(|l| l.places.get(n)).and_then(|p| p.site.as_ref()).unwrap_or(&self.site)
-            }
+            Seat::Here => Some(&self.site),
+            Seat::Place(n) => self.site_of_place(n),
         }
+    }
+
+    /// 그 줄의 이슈 — **없는 자리도 넘친 첨자도 `None`** 이다(moai-m59y). 줄에 실린 첨자는 제
+    /// 프로젝트의 목록의 것이라([`Seat`]), 그 프로젝트가 없을 때 지금 선 것으로 갈음하면 첨자
+    /// 넘침이 조용한 오답이 된다 — 남의 목록에서 그 첨자에 선 이슈가 이 줄로 선다.
+    /// 부르는 쪽은 **그 줄을 건너뛴다**: 빠진 줄은 다음 프레임에 사라지고, 그때까지 남의 이슈를
+    /// 그 줄로 세우지 않는다.
+    pub fn issue_at(&self, seat: Seat, at: usize) -> Option<&Issue> {
+        self.site_of_seat(seat)?.issues.get(at)
     }
 
     /// 지금 디렉터리의 목록 — `keep` 을 지나는 줄로. [`Self::rows`] 는 이것에 거름망과 보기를 건 것이다.
@@ -2503,16 +2554,21 @@ impl App {
     }
 
     /// 그 줄이 묶음이면 그것이 여는 자리. [`App::dir_at`] 을 커서 밖의 줄(펼친 멤버의 부모)에도 쓴다.
+    ///
+    /// **빠진 프로젝트의 줄에는 자리가 없다**(moai-m59y) — 갈음한 목록에 남의 첨자를 대면
+    /// `Index::dir_path` 가 첨자를 그대로 짚어 터진다. 여기는 `key_ctx` 가 키 하나마다 묻는
+    /// 자리라, 그 죽음은 커서가 그 줄에 선 채 아무 키나 누르는 것으로 난다. 고치는 판
+    /// ([`App::site_mut`])도 같은 자리에서 `None` 이니, 읽은 자리와 쓴 자리가 안 갈린다.
     fn dir_of(&self, row: Option<Row>) -> Option<(Seat, Path)> {
         match row {
             Some(Row::Item(seat, Entry::Dir { at: Some(at), .. }, _)) => {
-                let site = self.site_at(seat);
-                Some((seat, site.index.dir_path(&site.issues, at)))
+                let site = self.site_of_seat(seat)?;
+                (at < site.issues.len()).then(|| (seat, site.index.dir_path(&site.issues, at)))
             }
             // 바구니는 제 줄이 없어 첨자가 없다. 바구니 마디(`Milestone(None)`·`Lost`)는 집의 첫
             // 마디로만 서므로(`Index::home_of_work`) 늘 뿌리의 줄이고, 그때 지금 자리가 곧 제 부모다.
             Some(Row::Item(seat, Entry::Dir { seg, at: None }, _)) => {
-                let mut path = self.site_at(seat).path.clone();
+                let mut path = self.site_of_seat(seat)?.path.clone();
                 path.push(seg);
                 Some((seat, path))
             }
@@ -2530,7 +2586,7 @@ impl App {
     /// [`App::open_at`] 과 같되 그 줄의 프로젝트까지 낸다.
     fn open_seat_at(&self, rows: &[Row]) -> Option<(Seat, Path)> {
         let (seat, path) = self.dir_seat_at(rows)?;
-        let site = self.site_at(seat);
+        let site = self.site_of_seat(seat)?;
         (site.expanded.contains(&path) || self.searched_into(seat, &path)).then_some((seat, path))
     }
 
@@ -2539,7 +2595,9 @@ impl App {
     /// 전부의 조상 자리를 프레임마다 다시 모은다(`lit` 을 미리 세는 까닭과 같다).
     fn searched_into(&self, seat: Seat, path: &Path) -> bool {
         // 그 집합에 든 자리는 맞은 줄의 조상 자리 전부다 — 곧 "맞은 줄의 집이 이 자리로 시작하는가" 다.
-        let site = self.site_at(seat);
+        // **빠진 프로젝트는 아무것도 안 열었다**(moai-m59y) — 갈음한 목록에서 찾으면 남의 줄이
+        // 이 자리를 열어 놓은 것으로 읽혀, 접을 것이 없는 줄에서 `h` 가 디렉터리를 통째로 나간다.
+        let Some(site) = self.site_of_seat(seat) else { return false };
         self.searching()
             && (0..site.issues.len())
                 .any(|at| site.visible(at, self.searching()) && site.index.home_of(at).starts_with(path))
@@ -2714,7 +2772,14 @@ impl App {
     pub fn key(&mut self, k: KeyEvent) {
         // 쓰기의 알림은 **다음 키 하나에 걷힌다.** 읽었으면 할 일을 다 했고, 이 키가 또
         // 쓰기라면 그 쓰기가 제 알림을 새로 단다.
-        self.notice = None;
+        //
+        // **메뉴만 만지는 키는 그 하나로 안 센다**(moai-g56h) — 상태를 대는 항목은 메뉴를 열린
+        // 채로 두므로([`menu::feed`]), `SPC v w` 가 단 알림을 읽고 메뉴를 닫는 Esc 가 곧 "다음 키"
+        // 다. 거기서 걷으면 그 알림은 메뉴 창이 떠 있는 동안만 살고, 메뉴를 닫자마자 사라진다 —
+        // 알림을 남긴 키와 그것을 지우는 키가 한 누름이다. 메뉴가 열린 채 아무 동작도 안 돈 키
+        // (Esc·SPC 닫기, Bksp 한 층 위, 모르는 키, 한 층 내려가기)에는 도로 세운다.
+        let carried = self.notice.take();
+        let in_menu = menu::open(&self.chord);
         // raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. **어느 모드에서든 먼저 받는다** — 글을
         // 받는 중에 글자로 먹으면 검색칸에 `c` 가 찍히고, 폼·창·물음에서 막히면 멈춘 화면에서
         // 나갈 길이 없다. 적던 것은 그 길로 날아간다.
@@ -2737,7 +2802,16 @@ impl App {
         // 목록은 여기서 **한 번** 센다 — 커서의 사실(`Ctx::leaf`)과 이동의 끝(`step`)이 같은 줄을 읽는다.
         let rows = self.rows();
         let ctx = self.key_ctx(&rows);
-        let Some(act) = menu::feed(&mut self.chord, &ctx, k) else { return };
+        let Some(act) = menu::feed(&mut self.chord, &ctx, k) else {
+            // **기다리는 열도 아무 동작을 안 돈 키다**(리뷰) — `gg` 의 첫 `g`·`Ctrl-w`·메뉴를 여는
+            // SPC 가 그것이고, 거기서 걷으면 메뉴의 Esc 를 고친 까닭이 메뉴 밖에 그대로 남는다.
+            // 가르는 것은 [`keys::Chord::feed`] 가 남긴 열이다 — 뜻 없는 키만 열을 버리므로,
+            // **모르는 키는 여태처럼 걷는다.** 메뉴를 닫는 Esc·SPC 도 열을 버려 `in_menu` 가 쥔다.
+            if in_menu || !self.chord.held().is_empty() {
+                self.notice = carried;
+            }
+            return;
+        };
         // **되는지는 한 판정이 가른다**([`keys::Browse::enabled`]) — 키 바가 같은 판정으로
         // 적을 키를 고르므로 둘이 안 갈린다. 층에서 뜻이 없는 키는 왜 안 되는지를 한 줄로
         // 말한다. `n` 은 층에서도 듣는다 — 커서의 프로젝트를 담을 곳으로 박는다([`App::open_form`]).
@@ -5619,6 +5693,62 @@ mod tests {
         a.hit("SPC v w");
         let said = a.notice.clone().expect("켰는데 겹칠 것이 없다고 안 한다");
         assert!(said.contains("옆 워크트리 없음") && !said.contains("못 찾았다"), "{said}");
+    }
+
+    /// **메뉴를 닫는 Esc 는 토글이 낸 알림을 함께 지우지 않는다**(moai-g56h). 상태를 대는 항목은
+    /// 메뉴를 열린 채로 두므로(사용자 결정 2026-09-19, moai-osgw), 알림을 읽고 메뉴를 닫는 Esc 가
+    /// 곧 "다음 키" 다 — 거기서 걷으면 알림을 낸 키와 지우는 키가 한 누름이 되고, 알림은 메뉴
+    /// 창이 떠 있는 동안만 산다. 걷는 것은 메뉴 밖의 다음 키다.
+    #[test]
+    fn closing_the_menu_keeps_the_notice_the_toggle_left() {
+        let (_scratch, mut a) = writable("menu-notice");
+        a.read = lost;
+        assert!(a.worktree, "시험의 전제 — 겹쳐 보기가 켜진 채로 시작한다");
+        a.hit("SPC v w Esc");
+        a.hit("SPC v w");
+        let said = a.notice.clone().expect("켰는데 못 찾은 까닭을 안 댄다");
+        assert!(super::menu::open(&a.chord), "시험의 전제 — 토글을 누르고도 메뉴가 떠 있다");
+
+        a.hit("Esc");
+        assert!(!super::menu::open(&a.chord), "Esc 가 메뉴를 안 닫았다");
+        assert_eq!(a.notice.as_deref(), Some(said.as_str()), "메뉴를 닫는 Esc 가 알림을 함께 지웠다");
+
+        a.hit("j");
+        assert_eq!(a.notice, None, "메뉴 밖의 다음 키가 알림을 안 걷었다");
+    }
+
+    /// **다음 키를 기다리는 접두어도 알림을 안 걷는다**(리뷰) — `gg` 의 첫 `g` 와 메뉴를 여는 SPC 가
+    /// 그것이다. 메뉴 안에서만 도로 세우던 때는, 고친 Esc 바로 옆에서 같은 실패가 그대로 섰다:
+    /// 알림을 남긴 키와 지우는 키가 한 누름이다. **모르는 키는 여태처럼 걷는다** — `Chord::feed`
+    /// 가 뜻 없는 키에만 기다리는 열을 버리므로, 그 하나로 둘을 가른다.
+    #[test]
+    fn a_prefix_waiting_for_its_next_key_keeps_the_notice() {
+        let (_scratch, mut a) = writable("chord-notice");
+        a.read = lost;
+        // 겹쳐 보기를 껐다 켠다 — 켜는 쪽이 못 찾은 까닭을 알림으로 단다.
+        let toggled = |a: &mut App| {
+            a.hit("SPC v w Esc");
+            a.hit("SPC v w Esc");
+            a.notice.clone().expect("켰는데 못 찾은 까닭을 안 댄다")
+        };
+
+        let said = toggled(&mut a);
+        a.hit("g");
+        assert!(a.chord.waiting(), "시험의 전제 — `g` 는 다음 키를 기다린다");
+        assert_eq!(a.notice.as_deref(), Some(said.as_str()), "기다리는 접두어가 알림을 걷었다");
+        a.hit("g");
+        assert_eq!(a.notice, None, "열을 끝내 동작이 돈 키가 알림을 안 걷었다");
+
+        // 메뉴를 여는 SPC 도 아무 동작을 안 돈 키다.
+        let said = toggled(&mut a);
+        a.hit("SPC");
+        assert!(super::menu::open(&a.chord), "시험의 전제 — SPC 가 메뉴를 열었다");
+        assert_eq!(a.notice.as_deref(), Some(said.as_str()), "메뉴를 여는 SPC 가 알림을 걷었다");
+
+        // **모르는 키는 여태처럼 걷는다** — 기다리는 열을 버리는 것이 그 하나다.
+        a.hit("Esc");
+        a.hit("z");
+        assert_eq!(a.notice, None, "뜻 없는 키가 알림을 안 걷었다");
     }
 
     fn prepare_found(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {

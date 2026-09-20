@@ -493,11 +493,16 @@ impl App {
     /// 말(`view::unopened`)을 알림으로 댄 뒤 `None` — 들어가기(Enter)와 담기(`n`)가 같은 길이라
     /// 같은 상태를 두 키가 달리 부르지 않는다.
     ///
+    /// **한 상태만 갈린다**(moai-lmot) — 열리지만 스냅샷을 못 읽는 저장소다. `n` 은 [`Depth::Whole`]
+    /// 로 물어 여기서 `view::unopened` 의 말을 받고, Enter 는 [`Depth::Lean`] 이라 곧 뒤따르는
+    /// 읽기가 제 까닭을 댄다("들어가지 못했다 — …"). 둘 다 안 들어가고 줄도 다시 읽히지만,
+    /// **말은 다르다** — 여기서 두 벌로 적은 것이 아니라 읽는 자리가 둘이라 그렇다.
+    ///
     /// **도는 층 읽기는 버린다**(moai-800o). 그것은 이 줄을 재기 **전에** 띄운 것이라, 늦게 닿으면
     /// 여기서 고쳐 세운 줄(`Look::Shut`)을 옛 디렉터리의 값으로 덮는다. 버린 줄은 층에 선 다음
     /// 걸음에 [`Layer::stale`] 이 다시 고른다 — 못 들어갔거나 `n` 으로 층에 남았으면 곧바로,
     /// 들어갔으면 올라올 때다.
-    pub(super) fn open_place(&mut self, at: usize) -> Option<Repo> {
+    pub(super) fn open_place(&mut self, at: usize, how: Depth) -> Option<Repo> {
         if let Some((_, handle)) = self.layer.as_mut()?.pending.take() {
             self.discard(handle);
         }
@@ -508,16 +513,25 @@ impl App {
         // 폼을 열고 사람은 다 적고 Ctrl-S 를 눌러서야 못 담는다고 듣는다(적은 것이 갈 데가 없다). 여는
         // 법을 두 벌로 적으면 한쪽만 고쳐져 Enter 와 층의 줄이 같은 디렉터리를 달리 가른다. 한 번 더
         // 읽는 값은 사람이 키를 누른 한 번뿐이라 싸다.
-        let state = match projects::open_one(&place.path, String::new(), None, false).state {
+        //
+        // **줄을 곧 스레드가 읽을 자리는 그 한 번도 안 읽는다**([`Depth::Lean`], moai-m59y).
+        let opened = match how {
+            Depth::Whole => match projects::open_one(&place.path, String::new(), None, false).state {
+                State::Open { repo, .. } => Ok(repo),
+                state => Err(state),
+            },
+            Depth::Lean => projects::open_shallow(&place.path),
+        };
+        let state = match opened {
             // **열린 줄은 곧바로 다시 읽을 줄로 둔다**(리뷰 moai-3lul.kt0 다시 본 판) — 층의 셈이
             // "못 읽는다" 나 옛 수로 서 있어도 방금 연 것이 지금이다. 층에 남았으면(`n`) 다음 걸음에,
             // 들어갔으면 어느 길로 떠나든(올라오기·옆 번호) 올라온 뒤에 다시 읽는다. 셈은 새것이 닿을
             // 때까지 그대로 선다.
-            State::Open { repo, .. } => {
+            Ok(repo) => {
                 place.read_at = None;
                 return Some(repo);
             }
-            state => state,
+            Err(state) => state,
         };
         place.look = shut(&place.path, &place.name, state);
         place.marks = marks;
@@ -561,7 +575,7 @@ impl App {
                     return;
                 }
             };
-            if self.open_place(at).is_none() {
+            if self.open_place(at, Depth::Whole).is_none() {
                 return;
             }
             self.layer.as_ref().and_then(|l| l.places.get(at)).map(|p| Target { path: p.path.clone(), name: p.name.clone() })
@@ -639,7 +653,12 @@ impl App {
     /// 프로젝트로 바로 건너뛰는 길을 내면서 그 길이 안 도는 드나들기가 생겼다. **겹쳐 보기는
     /// 읽기 전에 정한다** — 읽는 값이 그 깃발을 탄다.
     pub(super) fn enter_project(&mut self, at: usize) {
-        let Some(repo) = self.open_place(at) else { return };
+        // **여는 데까지만 본다**(moai-lmot) — 줄은 바로 아래에서 읽는다. 스냅샷까지 열어 보던
+        // 때는 그 판의 `load` 를 버리고 두 줄 뒤에서 같은 파일을 또 팠다. 갈리는 것은 하나다:
+        // 열리지만 스냅샷을 못 읽는 저장소를 여태는 여기서 `Look::Shut` 으로 고쳐 세웠고, 이제는
+        // 아래의 읽기가 제 까닭을 알림으로 댄다("들어가지 못했다 — …"). 그 줄은 `read_at` 이
+        // 비어 다음 걸음의 쓸기가 다시 읽어 제 상태로 선다 — 말은 남고 줄은 저절로 낫는다.
+        let Some(repo) = self.open_place(at, Depth::Lean) else { return };
         let Some(path) = self.place_path(at).map(Path::to_path_buf) else { return };
         // **겹쳐 보기를 켠다는 말은 한 번만 적는다.** 읽는 값이 이 깃발을 타므로 읽기에 건네는
         // 것과 App 에 남기는 것이 갈리면 목록은 겹친 줄인데 뱃지는 꺼진 화면이 난다. 세우는
@@ -764,6 +783,10 @@ impl App {
         // 정체와 같은 자리), 바구니 마디(`Milestone(None)`·`Lost`)는 id 조차 없어 prefix 가 달라도
         // 그대로 샌다. 세션 내내 쌓이기도 한다.
         self.site.expanded.clear();
+        // 펴 둔 본문도 그 프로젝트에 매인 것이다(리뷰) — 글과 id 가 떠난 줄의 것이다. 상세를
+        // 연 채면 다음 프레임의 `draw::fill_body` 가 곧 갈아 끼우지만, `SPC v p` 로 상세를
+        // 닫아 둔 채 떠나면 그리는 쪽이 안 돌아 큰 본문 한 벌이 세션 내내 남는다.
+        self.body = None;
         self.detail.rewind();
     }
 
@@ -927,6 +950,29 @@ impl App {
     }
 }
 
+/// 층의 줄을 얼마나 깊이 열 것인가([`App::open_place`], moai-m59y).
+///
+/// 가르는 것은 **줄을 누가 읽는가** 다. 사람이 누른 한 번(Enter·`n`)은 그 자리에서 스냅샷까지
+/// 읽어 보고, 펼치기는 줄을 스레드가 읽으므로 여는 데까지만 본다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Depth {
+    /// 스냅샷까지 읽어 본다 — 못 읽는 줄을 그 자리에서 [`Look::Shut`] 으로 세운다.
+    ///
+    /// **읽는 사람이 한참 뒤에 있는 자리만 이것을 쓴다**(moai-lmot) — 지금은 `n`(담기) 하나다.
+    /// 거기서는 못 읽는 저장소가 폼을 열고, 사람이 다 적고 Ctrl-S 를 눌러서야 못 담는다고
+    /// 듣는다(적은 것이 갈 데가 없다). 뒤이어 곧 읽는 자리는 그 읽기가 제 까닭을 대므로
+    /// [`Depth::Lean`] 이다.
+    Whole,
+    /// 여는 데까지만([`projects::open_shallow`]) — 줄은 곧 **누군가 읽는다**. 스레드가 읽든
+    /// (`read_wanted`) 그 자리에서 읽든(`enter_project`) 여기서 스냅샷을 또 파면 같은 파일을
+    /// 두 번 파는 것이고, 첫 판의 `load` 는 그대로 버려진다.
+    ///
+    /// **moai-uxrn 의 138→458ms 를 여기에 대지 않는다**(리뷰) — 그것은 옆 워크트리를 겹쳐 읽는
+    /// 값인데, 여기서 걷어낸 `open_one` 은 `worktree: false` 로 불러 `worktree::gather` 가
+    /// `repo.read()` 뒤에 바로 돌아섰다. 옮긴 것은 파싱 한 판이고, 그 값은 안 쟀다.
+    Lean,
+}
+
 /// 등록한 것이 하나도 안 읽혀 **층을 안 세운** 까닭([`App::unlayered`]) — 설정을 읽다 만난 것이
 /// 있을 때만. 멀쩡한 빈 설정이면 `None` 이다. 띄울 때([`App::attach_layer`])와 설정이 바뀐 뒤
 /// ([`App::relayer`])가 같은 말을 쓴다.
@@ -972,6 +1018,16 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
         reading: None,
         wanted: Vec::new(),
     }
+}
+
+/// 가짜 층의 한 줄에 **그 프로젝트의 줄까지** 올린다(moai-m59y). [`fake`] 만으로는 머리줄뿐이라
+/// (`site: None`) 한눈 보기의 목록에 남의 프로젝트의 줄이 한 번도 안 서고, 그 줄을 그리는 길
+/// (`draw::row_line` 의 `Seat::Place`)을 그림 시험이 통째로 안 지난다 — 남의 줄이 제 프로젝트의
+/// 칸과 색으로 서는지를 아무도 안 보는 자리가 거기 있었다.
+#[cfg(test)]
+pub(super) fn fill(layer: &mut Layer, at: usize, issues: Vec<crate::model::Issue>, cfg: crate::config::Config) {
+    let (index, ground) = crate::tui::measure(&issues, &cfg);
+    layer.places[at].site = Some(super::Site::of(issues, index, ground, cfg, crate::nav::Path::new(), Vec::new()));
 }
 
 #[cfg(test)]
@@ -1052,12 +1108,13 @@ mod tests {
         &a.layer.as_ref().unwrap().places.iter().find(|p| p.name == name).unwrap().look
     }
 
-    /// 보이는 줄의 제목 (`..` 은 뺀다).
+    /// 보이는 줄의 제목 (`..` 은 뺀다). **줄마다 제 프로젝트에서 읽는다**([`App::issue_at`]) —
+    /// 한눈 보기의 줄은 남의 목록의 첨자라, 지금 선 것으로 읽으면 엉뚱한 제목이 나온다.
     fn titles(a: &App) -> Vec<String> {
         a.rows()
             .iter()
             .filter_map(|r| match r {
-                Row::Item(_, e, _) => e.at().map(|at| a.site.issues[at].title.clone()),
+                Row::Item(seat, e, _) => e.at().and_then(|at| a.issue_at(*seat, at)).map(|i| i.title.clone()),
                 _ => None,
             })
             .collect()
@@ -1642,13 +1699,7 @@ mod tests {
         assert!(matches!(rows[0], Row::Project(0)), "{:?}", rows[0]);
         assert!(matches!(rows[1], Row::Item(crate::tui::Seat::Place(0), ..)), "{:?}", rows[1]);
         assert!(matches!(rows.last(), Some(Row::Project(1))), "둘째 머리줄이 안 섰다: {rows:?}");
-        let mut titles: Vec<String> = rows
-            .iter()
-            .filter_map(|r| match r {
-                Row::Item(seat, e, _) => e.at().map(|at| a.site_at(*seat).issues[at].title.clone()),
-                _ => None,
-            })
-            .collect();
+        let mut titles: Vec<String> = titles(&a);
         titles.sort();
         assert_eq!(titles, ["one 의 둘째 줄", "one 의 첫 줄"], "남의 프로젝트의 줄이 섞였다");
 
@@ -1680,7 +1731,9 @@ mod tests {
         let rows = a.rows();
         let at = rows
             .iter()
-            .position(|r| matches!(r, Row::Item(seat, e, _) if e.at().is_some_and(|at| a.site_at(*seat).issues[at].id == "argos-0002")))
+            .position(|r| {
+                matches!(r, Row::Item(seat, e, _) if e.at().and_then(|at| a.issue_at(*seat, at)).is_some_and(|i| i.id == "argos-0002"))
+            })
             .expect("막힌 줄이 한눈 보기에 안 섰다");
         a.cursor = at;
         // 그리는 것이 곧 시험이다 — 넘치면 여기서 죽는다.
@@ -1716,15 +1769,7 @@ mod tests {
         assert!(a.view.hides(crate::config::DONE), "시험의 전제 — 탐색기는 done 을 숨긴 채로 뜬다");
         a.want_site(0);
         settle(&mut a);
-        let shown: Vec<String> = a
-            .rows()
-            .iter()
-            .filter_map(|r| match r {
-                Row::Item(seat, e, _) => e.at().map(|at| a.site_at(*seat).issues[at].title.clone()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(shown, ["열린 줄"], "펼치며 읽은 프로젝트가 걸려 있던 보기를 안 따랐다");
+        assert_eq!(titles(&a), ["열린 줄"], "펼치며 읽은 프로젝트가 걸려 있던 보기를 안 따랐다");
     }
 
     /// **펼쳐 둔 자리는 프로젝트를 건너지 않는다**(리뷰) — 마디가 그 프로젝트의 이슈 id 이고,
@@ -1877,18 +1922,137 @@ mod tests {
         assert!(a.rows().len() > heads);
     }
 
+    /// **옆 프로젝트의 보기는 줄도 보기도 안 바뀌면 다시 안 센다**(moai-m59y) — 지금 선 프로젝트
+    /// 하나를 다시 읽을 때마다 든 프로젝트 **전부**의 `shown`·`lit` 을 다시 세던 자리다. 보기가
+    /// 바뀌면 그때는 든 것이 다 따라 선다 — 보기는 보는 사람의 것이라 화면에 하나뿐이다(moai-1xo5).
+    #[test]
+    fn a_neighbour_is_not_measured_again_when_this_project_is_read() {
+        let s = Scratch::fenced("layer-see-again");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.want_site(0);
+        settle(&mut a);
+        assert!(a.site_of_place(0).is_some_and(|s| s.shown == [true, true]), "시험의 전제 — 옆 줄이 다 보인다");
+
+        // 옆 프로젝트의 값을 손으로 흐트러뜨린다 — 다시 셌는지가 이 값으로 드러난다. 한 줄만
+        // 건드린다: 둘 다 숨기면 층에 이슈 줄이 하나도 안 서 보기 토글 자체가 안 듣는다.
+        if let Some(site) = a.site_mut(super::super::Seat::Place(0)) {
+            site.shown[0] = false;
+        }
+        a.adopt(Vec::new());
+        assert!(
+            a.site_of_place(0).is_some_and(|s| s.shown == [false, true]),
+            "지금 선 프로젝트를 다시 읽었을 뿐인데 옆 프로젝트를 다시 셌다"
+        );
+
+        // 보기가 바뀌면 든 것이 다 따라 선다.
+        a.hit("SPC v d");
+        assert!(a.site_of_place(0).is_some_and(|s| s.shown == [true, true]), "보기 토글이 옆 프로젝트를 안 다시 셌다 — {:?}", a.view);
+    }
+
+    /// **펼치기는 여는 데까지만 그 자리에서 한다**(moai-m59y) — 줄은 스레드가 읽는다. 열리지만
+    /// 스냅샷을 못 읽는 프로젝트가 그 둘을 가른다: 스냅샷까지 그 자리에서 읽던 때(`Depth::Whole`)는
+    /// 스레드가 아예 안 뜨고 머리줄이 `Look::Shut` 으로 고쳐 섰고, 지금은 일꾼이 그 파일을 읽다
+    /// 만나 까닭을 제 길로 댄다 — UI 실은 같은 파일을 두 번 파지 않는다.
+    #[test]
+    fn expanding_opens_without_reading_the_snapshot_here() {
+        let s = Scratch::fenced("layer-lean-open");
+        let bad = s.project("bad", &[("argos-0001", "못 읽을 줄", "todo")]);
+        // 파일 자리에 디렉터리를 둔다 — `Repo::open` 은 설정까지만 보므로 열리고, 읽기가 터진다.
+        let file = bad.join(".moai/issues.jsonl");
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        let cfg = s.register(&[&bad]);
+        let mut a = layered(&cfg);
+        a.notice = None;
+
+        a.hit("l");
+        assert!(a.loading(), "펼쳤는데 읽으러 안 갔다 — 그 자리에서 읽고 말았다");
+        settle(&mut a);
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(said.contains("줄을 못 읽었다"), "일꾼이 만난 까닭을 안 댔다 — {said:?}");
+    }
+
     /// **머리줄의 `Tab` 은 그 프로젝트를 묶음까지 다 편다**(moai-i0wd) — 펼쳐져 있으면 통째로
     /// 접는다. 묶음 줄의 `Tab` 과 같은 자다([`App::expand_all`]).
+    ///
+    /// **fixture 에 묶음을 둔다**(moai-m59y) — 줄만 있는 프로젝트로 재던 때는 `l` 과 `Tab` 이
+    /// 같은 줄 수를 내, [`App::open_all`] 을 통째로 지워도 이 시험이 지나갔다. 에픽 하나와 그
+    /// 멤버가 있어야 "묶음까지" 가 실제로 걸린다.
+    ///
+    /// **`Tab` 은 안 읽은 머리줄에서 먼저 누른다**(리뷰) — 그래야 [`App::deep`] 에 뜻을 담고
+    /// 읽어 온 뒤에 펴는 길([`App::follow_site`])을 지난다. 읽어 둔 프로젝트에서 누르면 `open_all`
+    /// 이 그 자리에서 돌아, 그 길을 통째로 지워도 이 시험이 지나갔다.
     #[test]
     fn tab_opens_a_whole_project_and_folds_it_again() {
         let s = Scratch::fenced("layer-tab-all");
-        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        let deep = s.project("deep", &[("argos-0001", "묶음 밖의 줄", "todo")]);
+        write_group(&deep);
+        let cfg = s.register(&[&deep]);
+        let mut a = layered(&cfg);
         let heads = a.rows().len();
+        assert_eq!(heads, 1, "시험의 전제 — 안 읽은 프로젝트는 머리줄만 선다");
+
+        // 안 읽은 채로 누른 `Tab` — 읽으러 가고, 줄이 닿은 뒤에 묶음까지 편다.
         a.hit("Tab");
+        assert!(a.loading(), "Tab 이 읽으러 안 갔다 — 그 자리에서 읽고 말았다");
         settle(&mut a);
-        assert!(a.rows().len() > heads, "Tab 이 안 폈다");
+        let all = a.rows().len();
+        assert!(titles(&a).contains(&"에픽의 멤버".to_string()), "읽어 온 뒤에 묶음을 안 폈다 — {:?}", titles(&a));
         a.hit("Tab");
         assert_eq!(a.rows().len(), heads, "다시 누른 Tab 이 안 접었다");
+
+        // `l` 은 머리줄만 편다 — 에픽은 접힌 채라 멤버가 안 선다. 담아 둔 `Tab` 의 뜻이 남아
+        // 있으면 여기서 통째로 펼쳐진다.
+        a.hit("l");
+        settle(&mut a);
+        let shallow = a.rows().len();
+        assert!(shallow > heads && shallow < all, "l 이 한 층만 안 폈다 — {:?}", titles(&a));
+        assert!(!titles(&a).contains(&"에픽의 멤버".to_string()), "l 이 묶음까지 폈다 — {:?}", titles(&a));
+    }
+
+    /// **못 읽은 읽기도 `Tab` 의 뜻을 걷는다**(리뷰) — 안 걷으면 그 뜻이 남아, 다음에 `l` 로 한
+    /// 층만 펴려던 사람이 통째로 펼쳐진 프로젝트를 본다. [`Depth::Lean`] 이 "열리지만 스냅샷을 못
+    /// 읽는" 저장소를 일꾼에게 보내면서 그 갈래가 실제로 닿는다.
+    #[test]
+    fn a_failed_read_does_not_leave_the_tab_intent_behind() {
+        let s = Scratch::fenced("layer-tab-failed");
+        let deep = s.project("deep", &[("argos-0001", "묶음 밖의 줄", "todo")]);
+        write_group(&deep);
+        let file = deep.join(".moai/issues.jsonl");
+        let body = std::fs::read_to_string(&file).unwrap();
+        // 파일 자리에 디렉터리를 둔다 — `Repo::open` 은 설정까지만 보므로 열리고, 읽기가 터진다.
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        let cfg = s.register(&[&deep]);
+        let mut a = layered(&cfg);
+        let heads = a.rows().len();
+
+        a.hit("Tab");
+        settle(&mut a);
+        assert_eq!(a.rows().len(), heads, "시험의 전제 — 못 읽었으니 머리줄만 선다");
+
+        // 파일을 고치고 이번에는 `l` 로 한 층만 편다.
+        std::fs::remove_dir(&file).unwrap();
+        std::fs::write(&file, body).unwrap();
+        a.hit("l");
+        settle(&mut a);
+        assert!(a.rows().len() > heads, "고친 뒤의 l 이 프로젝트를 안 폈다");
+        assert!(!titles(&a).contains(&"에픽의 멤버".to_string()), "걷지 않은 Tab 의 뜻이 l 을 통째로 폈다 — {:?}", titles(&a));
+    }
+
+    /// 에픽 하나와 그 멤버를 그 프로젝트에 더한다 — 이미 쓴 줄 뒤에 잇는다.
+    fn write_group(dir: &Path) {
+        let mut epic = Issue::new("argos-0100".into(), "에픽".into(), Kind::Epic, Status::new("todo"), "2026-09-01T00:00:00Z");
+        epic.priority = Some(2);
+        let mut member =
+            Issue::new("argos-0101".into(), "에픽의 멤버".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        member.epic = Some(epic.id.clone());
+        let file = dir.join(".moai/issues.jsonl");
+        let mut body = std::fs::read_to_string(&file).unwrap();
+        for i in [epic, member] {
+            body.push_str(&format!("{}\n", serde_json::to_string(&i).unwrap()));
+        }
+        std::fs::write(&file, body).unwrap();
     }
 
     /// **건너뛰면 포커스가 목록으로 돌아온다**(리뷰 moai-i784.pzh) — 층의 상세에는 듣는 키가
@@ -1920,6 +2084,32 @@ mod tests {
         a.hit("0");
         assert!(a.on_layer());
         assert_eq!(a.focus, super::super::Pane::Explorer, "층에서 누른 `0` 이 포커스를 안 돌렸다");
+    }
+
+    /// **들어가기도 여는 데까지만 그 자리에서 한다**(moai-lmot) — 줄은 바로 아래에서 읽으므로,
+    /// 여기서 스냅샷을 또 파면 같은 파일을 두 번 판다. 열리지만 스냅샷을 못 읽는 프로젝트가 그
+    /// 둘을 가른다: 스냅샷까지 그 자리에서 읽던 때(`Depth::Whole`)는 여는 쪽이 CLI 한눈 보기의
+    /// 말로 줄을 고쳐 세웠고, 지금은 읽기가 제 까닭을 댄다. 어느 쪽이든 **안 들어간다.**
+    #[test]
+    fn entering_opens_without_reading_the_snapshot_twice() {
+        let s = Scratch::fenced("layer-enter-lean");
+        let here = s.project("here", &[("argos-0001", "여기 줄", "todo")]);
+        let bad = s.project("bad", &[("argos-0002", "못 읽을 줄", "todo")]);
+        // 파일 자리에 디렉터리를 둔다 — `Repo::open` 은 설정까지만 보므로 열리고, 읽기가 터진다.
+        let file = bad.join(".moai/issues.jsonl");
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        let cfg = s.register(&[&here, &bad]);
+        let mut a = layered(&cfg);
+        a.hit("1");
+        assert_eq!(a.here(), Some(here.clone()), "시험의 전제 — 첫 프로젝트에 들어갔다");
+
+        a.hit("2");
+        assert_eq!(a.here(), Some(here), "못 읽는 프로젝트로 들어가 버렸다");
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(said.contains("들어가지 못했다"), "읽기가 만난 까닭을 안 댔다 — {said:?}");
+        // 그 줄은 다음 쓸기가 다시 읽어 제 상태로 선다 — 여는 쪽이 고쳐 세우지 않는다.
+        assert!(a.layer.as_ref().unwrap().places[1].read_at.is_none(), "다시 읽을 줄로 안 뒀다");
     }
 
     /// **못 들어가면 포커스도 그대로다**(리뷰). `enter_project` 는 실패하면 선 자리를 안 바꾸고
