@@ -529,10 +529,13 @@ impl App {
     /// 프로젝트의 값을 다 더한 만큼 첫 화면이 안 선다(moai-ezwu).
     pub fn on_projects(layer: Layer) -> App {
         let mut app = App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new());
-        // **말을 먼저 넣는다** — `launch` 가 띄우는 읽기가 그 말로 `Look::Shut` 의 글을 짓는다.
-        // 뒤에 넣으면 이미 떠난 읽기가 옛 말로 지어, 층의 첫 화면만 다른 말로 선다.
-        // [`App::with_layer`] 와 같은 자리다.
-        let mut layer = Layer { at: At::Layer, lang: app.site.lang, ..layer };
+        // **말은 층이 들고 온 것이다** — 부른 쪽(`cmd::tui::outside`)이 고른 말을 `Layer::of` 에
+        // 줘 `problems` 가 이미 그 말로 펴졌고, 화면의 말은 이 줄 뒤에 놓인다. 여기서 화면의
+        // 처음값으로 덮으면 `launch` 가 띄우는 읽기가 도구의 기본 말로 `Look::Shut` 의 글을 지어,
+        // 고른 말이 한국어일 때 못 연 프로젝트의 줄만 영어로 선다(`MOAI_LANG` 이 안 닿는 자리).
+        // 화면에 놓는 것도 여기다 — [`App::with_layer`] 가 반대 방향으로 잇는 것과 짝이다.
+        app.site.lang = layer.lang;
+        let mut layer = Layer { at: At::Layer, ..layer };
         layer.launch();
         app.layer = Some(layer);
         app
@@ -1919,6 +1922,22 @@ mod tests {
         // 다시 세운 층도 같은 말을 든다 — 못 연 프로젝트의 한 줄(`shut`)이 여기서 말을 받는다.
         a.relayer(None);
         assert_eq!(a.layer.as_ref().unwrap().lang, Lang::En, "다시 세운 층이 딴 말을 든다");
+    }
+
+    /// **밖에서 띄운 층도 제가 세워진 말을 그대로 든다**(moai-9it4). 그 층은 `cmd::tui::outside`
+    /// 가 고른 말로 세우고([`Layer::of`]) 얹자마자 [`Layer::launch`] 가 읽기를 띄우는데, 얹는
+    /// 문이 화면의 처음값으로 그 말을 덮던 판은 못 연 프로젝트의 한 줄(`Look::Shut`)만 도구의
+    /// 기본 말로 섰다 — `MOAI_LANG=ko` 가 안 닿는 자리이고, 같은 층의 `problems` 는 이미 고른
+    /// 말로 펴져 있어 한 화면이 두 말로 섰다. 화면의 말도 같은 줄에서 선다.
+    #[test]
+    fn a_layer_built_outside_keeps_the_language_it_was_given() {
+        use crate::i18n::Lang;
+        let s = Scratch::fenced("layer-lang-outside");
+        let one = s.project("one", &[]);
+        let cfg = s.register(&[&one]);
+        let a = App::on_projects(Layer::read(Some(&cfg), None, Lang::En));
+        assert_eq!(a.layer.as_ref().unwrap().lang, Lang::En, "얹는 문이 층의 말을 덮었다");
+        assert_eq!(a.site.lang, Lang::En, "화면이 층과 다른 말로 섰다");
     }
 
     /// **들어갈 때 그 줄이 들고 있던 읽음을 옮겨 든다**(moai-2gep). [`App::leave_project`] 가 `Site` 를

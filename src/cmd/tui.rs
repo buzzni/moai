@@ -71,10 +71,13 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 옆 워크트리의 문제는 **펴서** 싣는다(moai-dpbi). 다시 읽기(`tui::prepare`)도 제 말을 들고
     // 가므로(moai-9it4) 여는 화면과 같은 자로 편다 — 둘이 갈리면 배너가 걸음마다 말을 바꾼다.
     let trouble = crate::tui::said_trouble(&trouble, ctx.lang());
-    let mut app =
-        App::open(repo, load, index, ground, path, stamp).overlaid(origin, trouble, watched, swept, &sides, &mine);
+    let mut app = App::open(repo, load, index, ground, path, stamp);
     // **탐색기도 고른 말로 선다**(moai-ra67) — 명령 층에서 한 번 푼 것을 화면에 놓는다.
+    // **겹치기 전에 놓는다**(moai-9it4) — `overlaid` 가 자리 판정의 글(`tui::placed` 의
+    // `view::unread_worktree`)을 화면의 말로 편다. 뒤에 놓던 판은 그 한 줄만 도구의 기본 말로
+    // 서서, 바로 위에서 고른 말로 편 `trouble` 과 한 배너에 두 말이 섞였다.
     app.site.lang = ctx.lang();
+    let mut app = app.overlaid(origin, trouble, watched, swept, &sides, &mine);
     // **판 것은 여기서 버린다**(moai-kos1) — 옆 스냅샷의 줄은 이미 `load` 에 겹쳐 들어왔고,
     // 쓰는 자리는 바로 위 하나다. 안 버리면 탐색기가 도는 내내 워크트리마다 한 벌씩 그대로
     // 남아, 겹쳐 본 저장소의 줄을 두 번 들고 산다(다시 읽기는 `tui::prepare` 가 제 것을 판다).

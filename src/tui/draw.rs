@@ -418,7 +418,9 @@ fn jot(f: &mut Frame, form: &mut Form, at: Rect, active: bool, tint: Style, lang
         Some(into) => {
             let tail = format!(" · {} ", say(lang, "tui.jot.title"));
             let room = (title_at.width as usize).saturating_sub(2);
-            let label = crate::text::width(&into_label) + 1 + crate::text::width(&tail);
+            // 이름 곁에 실제로 서는 것은 앞뒤 두 조각뿐이다 — 여기 한 칸을 더 얹던 판은 이름
+            // 몫을 한 칸씩 덜 줘, 좁은 창에서 이름이 까닭 없이 한 글자 먼저 잘렸다.
+            let label = crate::text::width(&into_label) + crate::text::width(&tail);
             let name = clip(&crate::text::one_line(&into.name), room.saturating_sub(label).min(room / 2).max(1));
             Line::from(vec![Span::raw(into_label), Span::styled(name, tint), Span::raw(tail)])
         }
@@ -789,8 +791,9 @@ fn told_of(app: &mut App) -> [(&'static str, String); 2] {
 }
 
 /// 판 줄의 글. 서버의 최신판은 아직 없다 — 빈 자리를 두면 "고장" 으로 읽히므로 없다는 것을
-/// 낱말로 적는다. **짓는 것이 아니라 박아 둔다**: 컴파일 때 다 정해진 글이라 프레임마다
-/// 새로 지을 까닭이 없다(그리는 자리는 키 하나·깜빡임 한 번마다 돈다).
+/// 낱말로 적는다. 한때 `concat!` 로 박아 둔 상수였다 — 프레임마다 새로 지을 까닭이 없다는
+/// 것이었는데, 뒷말이 말묶음에서 오면서(moai-9it4) 고른 말을 받아 짓는 자리가 됐다. 값은
+/// 표에서 한 번 집어 짧은 글 하나를 잇는 것뿐이라 그리는 걸음에 얹어도 된다.
 fn version_said(lang: Lang) -> String {
     format!("{} · {}", env!("CARGO_PKG_VERSION"), say(lang, "tui.version.unchecked"))
 }
