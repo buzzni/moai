@@ -83,11 +83,18 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let seen: Vec<Seen<view::Picks>> = projects
         .iter()
         .map(|p| {
-            p.seen(|repo, load| view::Picks {
-                picks: report::ready(&load.issues, &repo.config),
-                unreadable: load.errors.len(),
-                origin: &p.origin,
-                trouble: &p.trouble,
+            p.seen(|repo, load| {
+                // **저장소 안의 `ready` 와 같은 자다.** 도는 마일스톤이 목록을 줄였으면 그
+                // 까닭도 함께 받는다 — 여기서 `ready` 만 부르면 한눈 보기의 목록만 말없이
+                // 짧아지고, 그 짧아짐이 "할 일이 없다" 로 읽힌다.
+                let (picks, focus) = report::ready_in(&load.issues, &repo.config);
+                view::Picks {
+                    picks,
+                    focus,
+                    unreadable: load.errors.len(),
+                    origin: &p.origin,
+                    trouble: &p.trouble,
+                }
             })
         })
         .collect();
@@ -96,6 +103,11 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         #[derive(serde::Serialize)]
         struct Said<'a> {
             ready: Vec<super::Row<'a>>,
+            /// 저장소 안의 `ready --json` 과 같은 두 키 — 없으면 안 단다.
+            #[serde(skip_serializing_if = "Vec::is_empty")]
+            milestone: Vec<&'a str>,
+            #[serde(skip_serializing_if = "Vec::is_empty")]
+            outside: Vec<&'a str>,
             unreadable: usize,
             #[serde(skip_serializing_if = "<[String]>::is_empty")]
             trouble: &'a [String],
@@ -108,6 +120,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 path: &p.path,
                 seen: s.map(|k| Said {
                     ready: k.picks.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
+                    milestone: k.focus.running.iter().map(|m| m.id.as_str()).collect(),
+                    outside: k.focus.outside.iter().map(|i| i.id.as_str()).collect(),
                     unreadable: k.unreadable,
                     trouble: &p.trouble,
                 }),
