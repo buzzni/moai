@@ -57,7 +57,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 첫 칸도 아니고 끝나지도 않은 것 = 누군가 이미 잡고 있는 것.
     let wip = report::wip(&load.issues, &repo.config);
 
-    Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip, &held, &origin))
+    Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip, &held, &origin, ctx.lang()))
 }
 
 /// 등록한 프로젝트마다 집을 수 있는 일. 무엇이 ready 인지는 프로젝트마다 같은 자
@@ -67,7 +67,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
 /// **못 읽는 줄이 있어도 0 으로 끝난다** (`status::overview` 와 같은 까닭). 그 줄은
 /// 프로젝트 줄 밑에 수로 말하고, 어느 줄인지는 그 프로젝트의 `show` 가 낸다.
 fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
-    let (reg, projects) = super::registered(worktree)?;
+    let (reg, projects) = super::registered(ctx, worktree)?;
     let seen: Vec<Seen<view::Picks>> = projects
         .iter()
         .map(|p| {
@@ -104,5 +104,5 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         let all = Overview { projects: entries, problems: &reg.problems, config: reg.path.as_deref() };
         return super::json_line(&all);
     }
-    Ok(view::projects_ready(&projects, &seen, &reg))
+    Ok(view::projects_ready(&projects, &seen, reg, ctx.lang()))
 }

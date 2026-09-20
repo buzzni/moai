@@ -108,7 +108,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 뒤집는다(moai-cuw2). **알림이지 경고가 아니다** — 계획이 아니라 설치가 어긋난 것이라
     // `agents_stale` 과 같은 자리고, 종료 코드는 안 바뀐다. 말을 고를 때 이미 읽은 것이라
     // 설정을 다시 읽지 않는다.
-    let said = crate::i18n::problems();
+    let said = &ctx.registry().lang_problems;
     for line in said {
         eprintln!("{line}");
     }
@@ -170,6 +170,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         &source_of(&repo),
         &origin,
         trouble,
+        ctx.lang(),
     ))
 }
 
@@ -198,15 +199,15 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 말은 그대로 댄다: 저장소가 아니라는 것, 등록하는 길, 목록이 빈 까닭. `ready` 는
     // [`super::registered`] 로 여전히 멈춘다 — 그쪽 계약은 따로 정한다. `tui --json` 은 같은 객체로
     // 0 이다(moai-yxae).
-    let reg = crate::user_config::read(crate::user_config::path().as_deref());
+    let reg = ctx.registry();
     if reg.projects.is_empty() {
         if ctx.json {
             let none: Overview<()> = Overview { projects: Vec::new(), problems: &reg.problems, config: reg.path.as_deref() };
             return super::json_line(&none);
         }
-        return Ok(super::nothing_registered(&reg).message.lines().map(str::to_string).collect());
+        return Ok(super::nothing_registered(reg).message.lines().map(str::to_string).collect());
     }
-    let projects = crate::projects::open_with(&reg, worktree);
+    let projects = crate::projects::open_with(reg, worktree);
     let now = model::now();
     // **셈은 프로젝트마다 나란히 한다**(moai-b7o3) — 자리 판정이 옆 스냅샷을 파면 그 값이 프로젝트
     // 마다 더해진다. 보드는 연 프로젝트를 빌리므로 그 스레드에서 곧바로 짓는다 — 연 것만 가르는 자는
@@ -284,5 +285,5 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         let all = Overview { projects: entries, problems: &reg.problems, config: reg.path.as_deref() };
         return super::json_line(&all);
     }
-    Ok(view::projects_status(&projects, &seen, &reg))
+    Ok(view::projects_status(&projects, &seen, reg, ctx.lang()))
 }

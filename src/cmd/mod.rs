@@ -25,6 +25,7 @@ pub mod tui;
 use crate::cli::{Cli, Cmd, IdeaCmd, ProjectCmd, SkillCmd, Typed};
 use crate::model::Kind;
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use crate::fail::{Fail, R, code};
@@ -37,6 +38,47 @@ pub struct Ctx {
     /// `-C` 로 자리를 옮겨 불렀는가. 그러면 부른 사람의 셸은 여기가 아니다 — 부른 자리에서
     /// 도는 명령(`init`)을 일러 줄 때 `-C <뿌리>` 를 붙여야 엉뚱한 자리에 심지 않는다.
     pub chdir: bool,
+    /// 사용자 설정 — **한 판에 한 번만 읽는다**([`Ctx::registry`]).
+    reg: OnceLock<crate::user_config::Registry>,
+    /// 이 판의 화면 언어 — 설정에서 한 번 푼 값([`Ctx::lang`]).
+    lang: OnceLock<crate::i18n::Lang>,
+}
+
+impl Ctx {
+    pub fn new(json: bool, user: Option<String>, chdir: bool) -> Ctx {
+        Ctx { json, user, chdir, reg: OnceLock::new(), lang: OnceLock::new() }
+    }
+
+    /// 사용자 설정. **이 문으로 드는 명령은 한 판에 한 번만 읽는다**(moai-cigu) — 등록 목록도
+    /// 화면 언어도 같은 파일에서 오는데, 읽는 자리가 갈리면 한 번 부를 때 같은 TOML 을 두 번
+    /// 판다. 그리는 쪽이 제 손으로 다시 읽던 자리(`i18n::current`)를 걷어낸 것이 이 문이다.
+    ///
+    /// **아직 유일한 문은 아니다**(리뷰) — `cmd::tui`·`cmd::project::ls`·`cmd::read` 는 제
+    /// 손으로 `user_config::read` 를 부른다. 지금은 그 명령들이 이 문을 안 지나 두 번 파는
+    /// 판이 없지만, 그쪽에 `ctx.lang()` 을 들이는 날은 이 문으로 함께 옮긴다.
+    pub fn registry(&self) -> &crate::user_config::Registry {
+        self.reg.get_or_init(|| crate::user_config::read(crate::user_config::path().as_deref()))
+    }
+
+    /// 이 판의 화면 언어. **명령 층이 한 번 풀어 그리는 쪽에 준다**(moai-cigu) — `view` 는
+    /// 이것을 인자로 받고 설정을 안 읽는다. 그래야 그리는 시험이 돌리는 사람의 진짜
+    /// `~/.config/moai/config.toml` 을 안 읽는다(옛 자리는 기계마다 다른 시험이었다).
+    ///
+    /// **늦게 읽는다.** 언어가 드는 자리는 `status`·`ready` 와 훅이 세션에 싣는 보드
+    /// (`cmd::hook`)뿐인데 `run` 에서 미리 풀면 `moai add` 한 줄에도 설정 파일이 딸려 온다.
+    ///
+    /// **[`Ctx::registry`] 를 `get_or_init` 안에서 부르는 것은 자물쇠가 둘이라서다**(리뷰
+    /// moai-80qw 가 옛 `i18n::picked` 에 적어 둔 덫). 설정을 읽는 길(`user_config::read` →
+    /// `Doc::lang`)은 제 글자를 화면에 내는 자리라, 그 글자가 언젠가 이 말로 나가려고
+    /// `Ctx::lang` 을 도로 부르면 `lang` 의 `OnceLock` 이 제 초기화 안에서 다시 열린다 —
+    /// 재진입은 영영 안 풀리고 모든 명령이 아무 말 없이 멈춘다. 그 줄을 쓰게 되는 날에는
+    /// 값을 **먼저 길어 놓고** `get_or_init` 에 넣는다. 옛 자리가 그렇게 썼던 까닭이다.
+    pub fn lang(&self) -> crate::i18n::Lang {
+        *self.lang.get_or_init(|| {
+            let env = std::env::var("MOAI_LANG").ok();
+            crate::i18n::pick(env.as_deref(), self.registry().lang.as_deref())
+        })
+    }
 }
 
 /// 할 수 있는 것은 다 하고, 된 것과 안 된 것을 둘 다 보고한 뒤 비영 종료한다.
@@ -88,12 +130,12 @@ pub fn gather(repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::G
 /// `worktree` 면 프로젝트마다 옆 워크트리를 겹친다. 옆에서 만난 문제는 stderr 가 아니라
 /// 그 프로젝트의 줄(`Project::trouble`)이 말한다 — 여럿을 한 번에 보는 화면에서 stderr 의
 /// 한 줄은 어느 프로젝트의 것인지 모른다.
-pub fn registered(worktree: bool) -> R<(crate::user_config::Registry, Vec<crate::projects::Project>)> {
-    let reg = crate::user_config::read(crate::user_config::path().as_deref());
+pub fn registered(ctx: &Ctx, worktree: bool) -> R<(&crate::user_config::Registry, Vec<crate::projects::Project>)> {
+    let reg = ctx.registry();
     if reg.projects.is_empty() {
-        return Err(nothing_registered(&reg));
+        return Err(nothing_registered(reg));
     }
-    let projects = crate::projects::open_with(&reg, worktree);
+    let projects = crate::projects::open_with(reg, worktree);
     Ok((reg, projects))
 }
 
@@ -145,7 +187,7 @@ pub fn name_load_errors(path: &std::path::Path, errors: &[crate::store::LoadErro
 }
 
 pub fn run(cli: Cli) -> R<Vec<String>> {
-    let ctx = Ctx { json: cli.json, user: cli.user, chdir: cli.dir.is_some() };
+    let ctx = Ctx::new(cli.json, cli.user, cli.dir.is_some());
     let Some(cmd) = cli.cmd else {
         return opening(&ctx);
     };
@@ -210,8 +252,8 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
     // 같은 말·같은 종료 코드로 그 설정을 댄다. 도움말로 접으면 "아직 moai 저장소가 아니다"
     // 를 믿은 사람이 제 저장소에 `init` 을 다시 친다 (moai-byih).
     let outside = matches!(found, Ok(None));
-    let reg = outside.then(|| crate::user_config::read(crate::user_config::path().as_deref()));
-    let registered = reg.as_ref().is_some_and(|r| !r.projects.is_empty());
+    let reg = outside.then(|| ctx.registry());
+    let registered = reg.is_some_and(|r| !r.projects.is_empty());
     if outside && !registered {
         let mut help = Vec::new();
         crate::cli::Cli::command()
@@ -238,14 +280,16 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
     }
     out.push(String::new());
     let here = !registered && std::path::Path::new("AGENTS.md").exists();
-    out.push(crate::style::paint(
-        crate::style::DIM,
-        if here {
-            "명령: `moai --help`   ·   이 저장소에서 일하는 법: AGENTS.md"
-        } else {
-            "명령: `moai --help`"
-        },
-    ));
+    // **이 꼬리도 말묶음에서 온다**(리뷰) — 바로 위의 `status` 가 통째로 제 말로 나오는데
+    // 여기만 한국어로 박혀 있으면, 세션이 가장 많이 치는 맨몸 `moai` 의 **마지막 줄**이
+    // 화면과 다른 말로 선다. **키가 둘인 것은 AGENTS.md 를 댈지 말지가 여기서 정하는
+    // 것**이라서다 — 한 키에 넣으면 그 말에서만 빈 꼬리가 남는다(`warn.idea_pile` 과 같다).
+    let lang = ctx.lang();
+    let tail = match here {
+        true => crate::i18n::say(lang, "opening.commands_here"),
+        false => crate::i18n::say(lang, "opening.commands"),
+    };
+    out.push(crate::style::paint(crate::style::DIM, tail));
     Ok(out)
 }
 
