@@ -12452,6 +12452,39 @@ fn at_root(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
 }
 
+/// `docs/cli.md` 는 `--help` 에서 짓는다(moai-i3s8). 레퍼런스를 손으로 적으면
+/// 도움말과 갈라지는데, **갈라진 레퍼런스는 없는 것보다 나쁘다** — 읽는 사람이
+/// 그것을 믿고 친다. 그래서 글은 `--help` 한 곳에만 있고 그 파일은 옮겨 적은
+/// 것이며, 여기서 다시 지어 견준다.
+#[cfg(unix)]
+#[test]
+fn the_cli_reference_matches_the_help() {
+    let s = Scratch::new("cli-docs");
+    let made = s.path().join("cli.md");
+    let out = isolated("bash")
+        .arg(script("gen-cli-docs.sh"))
+        .arg(&made)
+        .env("MOAI", BIN)
+        .output()
+        .expect("bash 를 실행하지 못했다 — 레퍼런스 시험에는 bash 가 있어야 한다");
+    assert!(out.status.success(), "레퍼런스를 못 지었다\n{}", text(&out));
+
+    let fresh = std::fs::read_to_string(&made).unwrap();
+    let kept = std::fs::read_to_string(at_root("docs/cli.md")).unwrap();
+    if fresh == kept {
+        return;
+    }
+    let (kept, fresh): (Vec<&str>, Vec<&str>) = (kept.lines().collect(), fresh.lines().collect());
+    let at = kept.iter().zip(&fresh).position(|(a, b)| a != b).unwrap_or(kept.len().min(fresh.len()));
+    panic!(
+        "docs/cli.md 가 `--help` 와 갈라졌다 — `cargo build --release && scripts/gen-cli-docs.sh` 를 돌리고 담는다\n  \
+         {}줄\n  적힌 것: {:?}\n  지금 것: {:?}",
+        at + 1,
+        kept.get(at),
+        fresh.get(at)
+    );
+}
+
 /// 릴리스가 산출물에 함께 넣는 파일들(moai-4gn9 의 `꾸린다` 스텝). 하나를 옮기면
 /// 태그를 민 뒤에야 드러나고, 그때는 되돌릴 자리가 없다.
 #[cfg(unix)]

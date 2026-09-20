@@ -35,6 +35,19 @@ later.
 
 `cargo fmt --check` is not in CI yet; see the issue tracker for when it will be.
 
+## If you change a command's help
+
+`docs/cli.md` is generated from `--help`, and a test compares the two. When you
+change help text, or add or remove a command, regenerate and commit it:
+
+```sh
+cargo build --release && scripts/gen-cli-docs.sh
+```
+
+A reference written by hand drifts from the binary, and a reference that has
+drifted is worse than none at all — a reader trusts it and types what it says.
+So the words live in one place and that file is a copy of them.
+
 ## What a change looks like
 
 Work is tracked in `.moai/issues.jsonl`, in this repository, with this tool:

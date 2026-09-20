@@ -180,6 +180,7 @@ eventually needs.
 
 ## Documentation
 
+- `docs/cli.md` — every command's `--help`, generated from the binary
 - `CONTRIBUTING.md` — building, testing, and what a commit here looks like
 - `SECURITY.md` — reporting a vulnerability
 - `docs/recovery.md` — what to do when the tracker files get into a bad state
