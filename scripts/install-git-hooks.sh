@@ -108,7 +108,7 @@ if [ "$#" -gt 0 ]; then
   esac
 fi
 
-for name in pre-push; do
+for name in pre-push prepare-commit-msg; do
   if [ "$what" = install ]; then
     install_one "$name"
   else

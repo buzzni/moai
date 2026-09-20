@@ -13131,7 +13131,11 @@ fn clone_with_scripts(s: &Scratch) -> PathBuf {
     for name in ["install-git-hooks.sh", "check-version.sh"] {
         std::fs::copy(script(name), root.join("scripts").join(name)).unwrap();
     }
-    std::fs::copy(script("git-hooks/pre-push"), root.join("scripts/git-hooks/pre-push")).unwrap();
+    // **심는 목록에 든 shim 을 다 베낀다** — 하나라도 빠지면 `install_one` 이 없다고 멈춰,
+    // 이 아래 시험들이 재려던 것과 아무 상관 없는 자리에서 붉어진다.
+    for name in ["pre-push", "prepare-commit-msg"] {
+        std::fs::copy(script(&format!("git-hooks/{name}")), root.join("scripts/git-hooks").join(name)).unwrap();
+    }
     std::fs::copy(at_root("Cargo.toml"), root.join("Cargo.toml")).unwrap();
     git(&root, &["init", "-q", "."]);
     root
@@ -13162,6 +13166,74 @@ fn install_hooks(root: &Path, more: &[&str]) -> Output {
         .current_dir(root)
         .output()
         .expect("bash 를 실행하지 못했다 — 훅 시험에는 bash 가 있어야 한다")
+}
+
+/// `prepare-commit-msg` shim 을 돌린다. git 이 주는 대로 메시지 파일과 (있으면) 출처를 준다.
+#[cfg(unix)]
+fn msg_hook(root: &Path, file: &Path, source: Option<&str>, actor: Option<&str>) -> Output {
+    let mut cmd = isolated(root.join(".git/hooks/prepare-commit-msg"));
+    cmd.arg(file);
+    if let Some(s) = source {
+        cmd.arg(s);
+    }
+    match actor {
+        Some(a) => cmd.env("MOAI_ACTOR", a),
+        None => cmd.env_remove("MOAI_ACTOR"),
+    };
+    cmd.current_dir(root).output().expect("훅을 실행하지 못했다")
+}
+
+/// 메시지 파일 하나를 놓고 훅을 돌린 뒤의 내용.
+#[cfg(unix)]
+fn after_msg_hook(root: &Path, name: &str, body: &str, source: Option<&str>, actor: Option<&str>) -> String {
+    let file = root.join(name);
+    std::fs::write(&file, body).unwrap();
+    let out = msg_hook(root, &file, source, actor);
+    // **어느 갈래든 0 이다.** 표식 하나를 못 달았다고 커밋을 막으면 사람이 훅을 꺼 버린다.
+    assert!(out.status.success(), "{name} 에서 0 이 아니었다\n{}", text(&out));
+    std::fs::read_to_string(&file).unwrap()
+}
+
+/// **`MOAI_ACTOR` 가 서 있으면 그 커밋이 에이전트의 것임을 git 이력에 남긴다**(moai-yv87).
+/// 꼴은 git 관례인 `이름 <메일>` 이다(2026-09-20 사용자 결정) — `Co-Authored-By` 와 같은
+/// 모양이라 `%(trailers:key=…)` 와 mailmap 이 그대로 읽는다.
+#[cfg(unix)]
+#[test]
+fn the_commit_hook_marks_what_an_agent_ran() {
+    let s = Scratch::new("hook-actor");
+    let root = clone_with_scripts(&s);
+    assert!(install_hooks(&root, &[]).status.success(), "못 심었다");
+    let who = Some("레이븐 (raven@buzzni.com)");
+
+    let said = after_msg_hook(&root, "m1", "feat: 무엇 (moai-x)\n\n본문\n", Some("message"), who);
+    assert!(said.contains("Executed-By: 레이븐 <raven@buzzni.com>"), "표식을 안 달았다\n{said}");
+
+    // **되풀이해 달지 않는다.** `--amend` 는 옛 메시지를 그대로 들고 오는데, 고칠 때마다
+    // 한 줄씩 쌓이면 트레일러가 아니라 로그가 된다.
+    let again = after_msg_hook(&root, "m2", &said, Some("commit"), who);
+    assert_eq!(again.matches("Executed-By:").count(), 1, "고칠 때마다 쌓인다\n{again}");
+
+    // 머지는 사람도 에이전트도 쓴 것이 아니라 git 이 두 갈래를 합친 자리다.
+    let merged = after_msg_hook(&root, "m3", "Merge branch x\n", Some("merge"), who);
+    assert!(!merged.contains("Executed-By:"), "머지 커밋에 실행자를 적었다\n{merged}");
+
+    // 누군지 모르면 아무 말도 안 한다 — 반쪽만 적힌 트레일러는 없는 것보다 나쁘다.
+    assert!(!after_msg_hook(&root, "m4", "feat: 무엇\n", Some("message"), None).contains("Executed-By:"));
+    assert!(!after_msg_hook(&root, "m5", "feat: 무엇\n", Some("message"), Some("레이븐")).contains("Executed-By:"));
+}
+
+/// **아직 아무 말도 안 적힌 메시지는 안 건드린다**(moai-yv87). 맨 `git commit` 은 주석뿐인
+/// 파일을 주는데, 거기에 트레일러를 미리 꽂으면 사람이 쓸 제목 줄보다 **위**에 서서 제목이
+/// 빈 줄이 되고 git 이 그 커밋을 거절한다. 한때 이 자리가 그랬다.
+#[cfg(unix)]
+#[test]
+fn the_commit_hook_leaves_a_message_that_is_not_written_yet_alone() {
+    let s = Scratch::new("hook-actor-empty");
+    let root = clone_with_scripts(&s);
+    assert!(install_hooks(&root, &[]).status.success(), "못 심었다");
+    let blank = "\n\n# Please enter the commit message for your changes.\n";
+    let said = after_msg_hook(&root, "m1", blank, None, Some("레이븐 (raven@buzzni.com)"));
+    assert_eq!(said, blank, "쓰기도 전인 메시지를 고쳤다\n{said}");
 }
 
 /// 앞서 있던 훅을 **지우지 않고 이어 부른다**(moai-071u). 훅 파일은 하나뿐이라,
