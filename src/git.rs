@@ -549,7 +549,9 @@ pub(crate) mod tests {
     #[test]
     fn told_names_each_failure() {
         let io = |k| std::io::Error::new(k, "x");
-        let dir = std::env::temp_dir();
+        // **뿌리로 잡는다** — `not_a_repo` 를 재는 자리라 체크아웃 밖이어야 하고, 그것을
+        // 보장하는 자는 `scratch::base` 다(moai-izeo). 맨 `temp_dir()` 은 그 보장 밖이다.
+        let dir = crate::scratch::base();
         assert_eq!(Error::Spawn(io(std::io::ErrorKind::NotFound)).told(&dir).kind, "no_git");
         assert_eq!(Error::Spawn(io(std::io::ErrorKind::PermissionDenied)).told(&dir).kind, "failed");
         assert_eq!(Error::Stream(io(std::io::ErrorKind::BrokenPipe)).told(&dir).kind, "stream");

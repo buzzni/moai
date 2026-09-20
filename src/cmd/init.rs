@@ -1107,8 +1107,7 @@ mod tests {
     /// 써 보고, 쓴 뒤 `.moai/` 에도 뿌리에도 찌꺼기가 없는지 본다.
     #[test]
     fn root_files_are_swapped_through_a_temp_file_in_dot_moai() {
-        // 울타리(`.git`)는 뿌리의 셈을 흐리고 이 시험은 저장소가 필요 없다 — 맨 자리에 선다.
-        let s = crate::scratch::Scratch::in_place(&crate::scratch::base(), "init-tmp");
+        let s = crate::scratch::Scratch::new("init-tmp");
         let agents = s.join("AGENTS.md");
         assert_eq!(tmp_dir(&agents), s.path(), ".moai 가 없으면 옆자리다");
         std::fs::create_dir(s.join(".moai")).unwrap();

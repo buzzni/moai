@@ -21,7 +21,11 @@ impl Scratch {
                 .unwrap()
                 .as_nanos()
         ));
-        std::fs::create_dir_all(&dir).unwrap();
+        // **겹치면 크게 실패한다.** `create_dir_all` 은 이미 있는 자리에도 `Ok` 를 내, 두 시험이
+        // 한 자리를 말없이 나눠 쓰고 먼저 놓는 쪽의 `Drop` 이 다른 쪽의 `.moai` 를 지운다 — 그
+        // 조용한 손실이 이 도구가 못 견디는 하나다. 뿌리가 여럿이 나눠 쓰는 `/tmp` 로 옮겨 갈 수
+        // 있게 된 뒤로는(moai-izeo) 남이 먼저 만들어 둔 자리도 셈에 든다.
+        std::fs::create_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
         Scratch(dir)
     }
     fn path(&self) -> &Path {
@@ -5576,28 +5580,38 @@ fn promoting_an_idea_opens_a_plan_and_closes_the_thought() {
 }
 
 /// **펼침 노트의 제목은 넘칠 때만 줄여 넣는다**(moai-clta). `promote` 는 새로 선 줄마다
-/// `<idea id> 에서 펼쳤다 — <제목>` 을 저널에 적는데, 머리말이 31바이트라 제목이 상한 턱밑인
-/// idea 는 그 노트가 상한을 넘어 **펼칠 길 자체가 막혔다** — 그것도 아직 쓰지도 않은 새 id 를
-/// 대면서. 원래 제목은 그 idea 줄에 그대로 남으니 노트의 것은 가리킴이지 사본이 아니다.
+/// `<idea id> 에서 펼쳤다 — <제목>` 을 저널에 적는데, 머리말(`<id> 길이 + 22`바이트) 때문에
+/// 제목이 상한 턱밑인 idea 는 그 노트가 상한을 넘어 **펼칠 길 자체가 막혔다** — 그것도 아직
+/// 쓰지도 않은 새 id 를 대면서. 원래 제목은 그 idea 줄에 그대로 남으니 노트의 것은 가리킴이다.
 #[test]
 fn an_idea_titled_up_to_the_limit_still_promotes() {
     let s = init("promotebig");
     let limit = 64 * 1024;
-    // 제목 자체는 상한을 지난다 — 머리말을 붙여야 넘는다.
-    let big = "가".repeat(limit / 3);
-    assert!(big.len() <= limit && big.len() + 31 > limit, "{}", big.len());
+    // **꼬리를 알아볼 수 있게 짓는다** — 한 글자만 되풀이하면 어느 쪽에서 잘랐든 단언이 지나가,
+    // "앞에서부터 줄인다" 를 못 잰다.
+    let big = format!("머리{}꼬리", "가".repeat(limit / 3 - 4));
     let id = ok(s.path(), &["idea", "add", &big, "-q"]).trim().to_string();
+    // 머리말 길이는 접두어를 따르니 **베껴 적지 않고 여기서 잰다**. 제목 자체는 상한 아래고,
+    // 머리말을 붙여야 넘는다 — 그 사이가 아니면 이 시험이 `fit` 를 한 번도 안 부른다.
+    let head = format!("{id} 에서 펼쳤다 — ").len();
+    assert!(big.len() <= limit && big.len() + head > limit, "{} + {head}", big.len());
 
     let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], "# 펼친 에픽\n- [p1] 첫 일\n");
     assert!(out.status.success(), "상한 턱밑 idea 를 못 펼쳤다 — {}", String::from_utf8_lossy(&out.stderr));
 
-    // 지나갔다는 것이 곧 상한 아래라는 뜻이다 — 쓰기가 같은 자로 잰다. 줄인 자리는 밝혀 둔다.
     let notes = journal(s.path());
     let grown: Vec<&str> = notes.lines().filter(|l| l.contains("에서 펼쳤다")).collect();
     assert_eq!(grown.len(), 1, "펼침 노트가 하나가 아니다 — {}", grown.len());
-    assert!(grown[0].contains("…"), "줄인 것을 안 밝힌다");
-    // 줄인 것은 **앞에서부터**다 — 어느 생각에서 왔는지 보라고 담는 글이다.
-    assert!(grown[0].contains(&big[..1023]), "제목의 머리가 아니라 딴 데를 담았다");
+    // **글 자체를 꺼내 잰다.** 지나간 것만 보면 쓰기 쪽 검사가 좁아지는 날 이 시험도 같이 눈을
+    // 감는다. `note` 는 없고 글에 따옴표가 없으니 `"text":"` 부터 다음 따옴표까지가 그 글이다.
+    let text = grown[0].split_once(r#""text":""#).expect("text 가 없다").1;
+    let text = text.split('"').next().unwrap();
+    assert!(text.len() <= limit, "노트가 {}바이트다 — 쓰기가 같은 자로 잰다", text.len());
+    // 줄인 것은 **앞에서부터**다 — 어느 생각에서 왔는지 보라고 담는 글이다. 줄인 자리는 밝힌다.
+    let head_of = |t: &str| t.chars().take(24).collect::<String>();
+    assert!(text.starts_with(&format!("{id} 에서 펼쳤다 — 머리")), "제목의 머리를 안 담았다 — {}", head_of(text));
+    assert!(text.ends_with('…'), "줄인 것을 안 밝힌다");
+    assert!(!text.contains("꼬리"), "꼬리를 담았다 — 앞에서부터 자르지 않았다");
 
     // 원래 제목은 그 idea 줄에 그대로 남는다 — 줄인 것은 노트뿐이다.
     assert!(line_of(s.path(), &id).contains(&big), "idea 줄의 제목이 줄었다");
@@ -7669,7 +7683,10 @@ fn edits_are_judged_through_the_contract() {
         format!("{root}/.moai/config.toml"),
         format!("{root}/.claude/settings.json"),
         format!("{root}/target/release/moai"),
-        std::env::temp_dir().join("scratchpad/memo.md").display().to_string(),
+        // 저장소 밖의 스크래치패드 — 뿌리로 잡는다. 맨 `temp_dir()` 은 체크아웃 밖임을 보장하는
+        // 자(`scratch::base`, moai-izeo) 밖이라, `TMPDIR` 이 체크아웃 안인 기계에서는 이 줄만
+        // "밖" 이 아니게 된다.
+        scratch::base().join("scratchpad/memo.md").display().to_string(),
         format!("{}/src/main.rs", other.path().display()),
     ] {
         let out = edit_call(&s, &other, &free);
