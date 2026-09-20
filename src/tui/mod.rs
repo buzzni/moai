@@ -1075,8 +1075,11 @@ impl ReadStamp {
     ///
     /// **`stat` 은 늘 하나, 흔하게 둘이다.** 지금 자리와 (못 푼 판이 아니면) 대기 자리다. 옛 자리는
     /// 지금 자리가 없을 때만 더 재는데, 그 판정을 방금 잰 `at` 에서 읽어 `exists` 를 한 번 더 묻지
-    /// 않는다 — 못 읽은 파일(권한)도 없는 것으로 세지만, 그때 치르는 것은 안 열 파일을 잰 `stat`
-    /// 하나이고 답은 안 틀린다.
+    /// 않는다 — `metadata` 가 지면 `read_marks::overlay_place` 가 묻는 `exists` 도 함께 져, 둘이 같은
+    /// 답을 낸다. **파일의 권한은 여기서 안 갈린다**: `0o000` 은 `metadata` 를 안 막아 그 판의 `at` 은
+    /// 그대로 서고, 그래야 못 읽은 파일에도 표식이 올라 [`crate::user_config::Again`] 이 재는 대로
+    /// 돈다. 갈리는 자리는 고친 때가 없는 파일 하나뿐이고, 거기서 치르는 것은 안 열 파일을 잰 `stat`
+    /// 하나다 — 답은 안 틀린다.
     fn of(place: &crate::read_marks::Place) -> ReadStamp {
         let at = crate::store::stamp(&place.at);
         let pending = place.pending.as_deref().and_then(crate::store::stamp);
