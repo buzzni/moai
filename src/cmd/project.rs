@@ -20,12 +20,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
-    let config = writable_config()?;
+    let config = writable_config(ctx.lang())?;
     // 적는 길은 TUI 층의 `a` 와 하나다 — 링크 풀기·멱등·`.moai` 를 준 자리에서만 보기.
     // **자리는 여는 자리에서 함께 세어 온다**(리뷰 10번) — 그리는 쪽이 다시 물으면 `Repo::open`
     // 이 이미 푼 답을 더 무거운 자로 또 풀고, 그 값을 `project ls` 는 줄마다 치른다.
     let projects::Added { path: dir, added, initialized, tracker_at, unreadable } =
-        projects::add(&config, input, &cwd()?)?;
+        projects::add(&config, input, &cwd()?, ctx.lang())?;
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -91,9 +91,9 @@ fn uninit_line(dir: &Path, tracker_at: Option<&Path>) -> String {
 }
 
 pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
-    let config = writable_config()?;
+    let config = writable_config(ctx.lang())?;
     // 빼는 길은 TUI 층의 `d` 와 하나다 — 철자 여럿으로 견주고, 설정 파일이 없으면 안 만든다.
-    let projects::Removed { spelled, removed } = projects::remove(&config, input, &cwd()?)?;
+    let projects::Removed { spelled, removed } = projects::remove(&config, input, &cwd()?, ctx.lang())?;
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -133,7 +133,7 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     // 글이 둘이면 같은 오타에 화면과 거절문이 다른 말을 한다.
     let hue = user_config::hue_choice(word)
         .map_err(|e| Fail::coded(crate::view::not_a_hue(ctx.lang(), &e), code::BAD_INPUT))?;
-    let config = writable_config()?;
+    let config = writable_config(ctx.lang())?;
     let spellings = user_config::spellings(input, &cwd()?);
     let not_registered = || {
         let shown = one_line(&spellings[0].display().to_string());
@@ -149,7 +149,7 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     if !config.exists() {
         return Err(not_registered());
     }
-    let (before, changed) = user_config::update(&config, |doc| {
+    let (before, changed) = user_config::update(&config, ctx.lang(), |doc| {
         let found = doc.projects().0.into_iter().find(|p| spellings.contains(&p.path));
         // **맞은 줄이 없어도 부른다**(moai-gmdu 에픽 리뷰) — 목록의 모양이 틀렸으면(`project = [{ … }]`)
         // `projects()` 가 비어 "등록돼 있지 않다" 로 새고, 그 말이 시키는 `add` 는 모양 때문에 거절된다.
@@ -374,12 +374,14 @@ fn said(state: &State) -> String {
 /// 쓸 설정 파일의 자리. 모르면 **쓰기는 멈춘다** — 어디에 적었는지 모르는 등록은
 /// 다음 `ls` 에서 안 보이는 등록이다. `moai read` 도 이것을 부른다 — 같은 조건에 두 명령이
 /// 다른 말(고칠 길을 대는 말과 안 대는 말)을 하지 않게(moai-j038.vna).
-pub(super) fn writable_config() -> R<PathBuf> {
-    user_config::path().ok_or_else(|| {
-        Fail::coded("사용자 설정의 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 중 하나를 준다", code::ERROR)
-    })
+pub(super) fn writable_config(lang: crate::i18n::Lang) -> R<PathBuf> {
+    // 읽기가 같은 자리를 못 찾았을 때 대는 줄(`ConfigTrouble::NoPlace`)과 **한 뿌리에서 나온다** —
+    // 한쪽은 "없다" 고 알리고 다른 쪽은 "고칠 길" 을 대므로 글은 둘이지만, 낱말이 갈리면 같은
+    // 처지를 두 말로 읽는다.
+    user_config::path().ok_or_else(|| Fail::coded(crate::i18n::say(lang, "refuse.config_no_place"), code::ERROR))
 }
 
 fn cwd() -> R<PathBuf> {
-    std::env::current_dir().map_err(|e| Fail::new(format!("지금 자리를 모른다: {e}")))
+    // OS 가 낸 글을 그대로 나른다 — 우리가 지은 글이 아니다.
+    std::env::current_dir().map_err(|e| Fail::new(format!("{e}")))
 }

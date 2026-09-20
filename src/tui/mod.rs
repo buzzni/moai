@@ -2188,13 +2188,16 @@ impl App {
         if look == self.saved {
             return;
         }
-        match crate::user_config::update(&path, |doc| doc.merge_look(&self.saved, &look)) {
+        match crate::user_config::update(&path, self.site.lang, |doc| doc.merge_look(&self.saved, &look)) {
             // 건너뛴 키도 든 것으로 옮긴다(moai-jr3z) — 안 옮기면 다음 저장마다 그 차이가 또 실려 같은 알림이
             // 토글마다 선다. 알림은 이번 한 번이고, 파일의 손으로 적은 모양은 그대로다.
             Ok(skipped) => {
                 self.saved = look;
                 if !skipped.is_empty() {
-                    self.notice = Some(fill(say(self.site.lang, "tui.look.skipped"), &[("why", &skipped.join(" · "))]));
+                    // 건너뛴 키의 까닭도 말묶음에서 온다(moai-wflg) — 자료로 와서 여기서 편다.
+                    let why: Vec<String> =
+                        skipped.iter().map(|t| crate::view::write_trouble(self.site.lang, None, t)).collect();
+                    self.notice = Some(fill(say(self.site.lang, "tui.look.skipped"), &[("why", &why.join(" · "))]));
                 }
             }
             Err(e) => {

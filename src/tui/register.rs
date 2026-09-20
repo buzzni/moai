@@ -205,7 +205,7 @@ impl App {
     fn register(&mut self, dir: &Path) {
         let Some(config) = self.config_file() else { return };
         let lang = self.site.lang;
-        match crate::projects::add(&config, dir, dir) {
+        match crate::projects::add(&config, dir, dir, lang) {
             Ok(added) => {
                 let stood = self.relayer(Some(&added.path));
                 let what = match added.added {
@@ -308,7 +308,7 @@ impl App {
             return;
         };
         let lang = self.site.lang;
-        match crate::projects::remove(&config, path, path) {
+        match crate::projects::remove(&config, path, path, lang) {
             Ok(r) => {
                 // 뺀 쪽도 같은 자다(moai-6ek1) — 층이 그대로면 뺀 줄이 화면에 그대로 서 있다.
                 let stood = self.relayer(None);

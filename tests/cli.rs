@@ -386,6 +386,78 @@ fn the_column_refusals_stand_in_the_chosen_language() {
     assert!(refused(None, by_rows[0]).contains("no row stands"), "줄까지 보고 거절했는데 그 말이 없다");
 }
 
+/// **설정을 고치다 멈춘 까닭도 고른 말로 선다**(moai-wflg). 읽기의 알림은 moai-aiid 가
+/// 옮겼는데 쓰기의 거절문은 박힌 한국어로 남아, 같은 오타 하나에 `project ls` 는 영어로
+/// 알리고 `project add` 는 한국어로 거절했다.
+///
+/// **네 갈래를 한 판에서 잰다** — 깨진 파일·목록 모양·색 모양·설정 자리 없음. 넷이 `Doc` 의
+/// 다른 자리에서 나므로 한 갈래만 옮겨도 나머지가 조용히 남는다. 종료 코드도 함께 본다:
+/// 손으로 고쳐야 쓰는 것은 `broken` 이라야 기계가 I/O 실패와 가른다(moai-3owm).
+#[test]
+fn the_config_write_refusals_stand_in_the_chosen_language() {
+    let s = Scratch::new("cfgwrite");
+    let one = dir_in(&s, "one");
+    let cfg = registry(&s, &[&one]);
+    let refused = |lang: Option<&str>, src: &str, args: &[&str]| -> String {
+        std::fs::write(&cfg, src).unwrap();
+        let mut cmd = isolated(BIN);
+        cmd.args(args).current_dir(s.path()).env("MOAI_CONFIG", &cfg).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+        match lang {
+            Some(l) => cmd.env("MOAI_LANG", l),
+            None => cmd.env_remove("MOAI_LANG"),
+        };
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(!out.status.success(), "{args:?} 를 받아 버렸다 — {}", String::from_utf8_lossy(&out.stdout));
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    let here = one.to_str().unwrap();
+    let cases: [(&str, Vec<&str>, &str); 3] = [
+        // 깨진 TOML — 고치기 전까지 안 쓴다.
+        ("[[project]\n", vec!["project", "add", here], "nothing is written"),
+        // 목록이 표 배열이 아니다 — 목록을 안 고친다.
+        ("project = \"x\"\n", vec!["project", "add", here], "fix it by hand"),
+        // 그 줄의 색이 색 낱말이 아니다 — 덮지 않는다.
+        (
+            &format!("[[project]]\npath = {here:?}\ncolor.x = 1\n"),
+            vec!["project", "color", here, "green"],
+            "fix it by hand",
+        ),
+    ];
+    let hangul = |t: &str| t.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c));
+    for (src, args, want) in &cases {
+        let english = refused(None, src, args);
+        assert!(english.contains(want), "{want:?} 가 없다 — {args:?}\n{english}");
+        assert!(english.contains("config.toml"), "어느 파일인지를 안 댔다 — {args:?}\n{english}");
+        assert!(!hangul(&english), "영어 화면에 박힌 한국어가 남았다 — {args:?}\n{english}");
+        assert!(hangul(&refused(Some("ko"), src, args)), "한국어로 골랐는데 영어로 거절했다 — {args:?}");
+    }
+    // 코드는 그대로 `broken` 이다 — 글을 옮기며 갈래가 바뀌지 않았다.
+    let json = refused(None, "[[project]\n", &["project", "add", here, "--json"]);
+    assert!(json.contains(r#""code":"broken""#), "{json}");
+
+    // 설정의 자리를 아예 모르면 쓰기는 멈추고, 그 줄도 고른 말로 선다.
+    let no_place = |lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(["project", "add", here])
+            .current_dir(s.path())
+            .env_remove("MOAI_CONFIG")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("HOME")
+            .env("NO_COLOR", "1");
+        match lang {
+            Some(l) => cmd.env("MOAI_LANG", l),
+            None => cmd.env_remove("MOAI_LANG"),
+        };
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(!out.status.success(), "자리를 모르는데 등록했다");
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    let english = no_place(None);
+    assert!(english.contains("MOAI_CONFIG"), "고칠 길을 안 댔다\n{english}");
+    assert!(!hangul(&english), "영어 화면에 박힌 한국어가 남았다\n{english}");
+    assert!(hangul(&no_place(Some("ko"))), "한국어로 골랐는데 영어로 거절했다");
+}
+
 /// **마일스톤이 도는 동안 그 안이 먼저다**(moai-493a, 2026-09-20 사용자 결정).
 ///
 /// 한 판에서 셋을 잰다 — `ready` 가 밖의 일을 빼고 그 까닭을 대는가, `--json` 이 같은 것을

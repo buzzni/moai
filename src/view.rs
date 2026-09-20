@@ -2281,6 +2281,49 @@ fn entry_problem(lang: Lang, why: &crate::user_config::EntryTrouble) -> String {
     }
 }
 
+/// 설정을 고치다 멈춘 한 줄([`crate::user_config::WriteTrouble`], moai-wflg).
+///
+/// **자리를 앞에 단다** — [`config_problem`] 과 같은 까닭이고 같은 모양이다. 자리를 제 글에
+/// 이미 든 갈래(링크·경로)만 앞이 빈다.
+pub fn write_trouble(lang: Lang, at: Option<&std::path::Path>, why: &crate::user_config::WriteTrouble) -> String {
+    use crate::user_config::{COLOR, PROJECT, TUI, WriteTrouble};
+    // **갈래마다 제 `say` 를 적는다**([`problem`] 과 같은 까닭) — 키를 도우미에 넘기면 소스를
+    // 훑는 시험(`i18n::tests::keys_in`)의 눈에서 그 키가 사라진다.
+    let said = match why {
+        // **남의 글은 옮기지 않는다** — toml 이 낸 줄이라 말묶음에 키를 둘 자리가 없다.
+        WriteTrouble::Unparsable { said } => fill(say(lang, "refuse.config_unparsable"), &[("said", said)]),
+        WriteTrouble::LinkDangling { from, to } => fill(
+            say(lang, "refuse.config_link_dangling"),
+            &[("from", &from.display().to_string()), ("to", &to.display().to_string())],
+        ),
+        WriteTrouble::NotTables { found } => {
+            fill(say(lang, "refuse.project_not_tables"), &[("key", PROJECT), ("is", found)])
+        }
+        WriteTrouble::HueNotPlain { at, found } => {
+            fill(say(lang, "refuse.hue_not_plain"), &[("at", &at.display().to_string()), ("key", COLOR), ("is", found)])
+        }
+        WriteTrouble::LookNotATable { found } => {
+            fill(say(lang, "refuse.look_not_a_table"), &[("key", TUI), ("is", found)])
+        }
+        WriteTrouble::LookKeyNotPlain { key, found } => {
+            fill(say(lang, "refuse.look_key_not_plain"), &[("key", &format!("{TUI}.{key}")), ("is", found)])
+        }
+        WriteTrouble::PathNotUtf8 { at } => {
+            fill(say(lang, "refuse.path_not_utf8"), &[("at", &at.display().to_string())])
+        }
+        WriteTrouble::PathNotAbsolute { raw } => {
+            fill(say(lang, "refuse.path_not_absolute"), &[("raw", &format!("{raw:?}"))])
+        }
+        WriteTrouble::NotADirectory { at } => {
+            fill(say(lang, "refuse.not_a_directory"), &[("at", &at.display().to_string())])
+        }
+    };
+    match at {
+        Some(at) => format!("{}: {said}", at.display()),
+        None => said,
+    }
+}
+
 /// 모르는 칸 한 줄([`crate::config::NoSuchColumn`], moai-fdk7).
 ///
 /// **두 거절은 잰 것이 다르다.** 설정만 보고 거절한 자리(`add -s`·`mv <칸>`)는 "그런 칸이

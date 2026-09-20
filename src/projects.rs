@@ -253,9 +253,9 @@ pub struct Added {
 /// 상대경로는 `cwd` 에 붙이고 링크를 푼다. 디렉터리가 있어야 하지만 `.moai` 는 없어도
 /// 된다. **`.moai` 는 준 디렉터리에서만** 본다 — 위로 찾아 올라가면 모노레포의 `apps/a`
 /// 가 루트의 `.moai` 를 제 것으로 읽고, 그러면 따로 등록한 뜻이 없다.
-pub fn add(config: &Path, input: &Path, cwd: &Path) -> R<Added> {
-    let dir = crate::user_config::resolve_dir(input, cwd)?;
-    let added = crate::user_config::update(config, |doc| {
+pub fn add(config: &Path, input: &Path, cwd: &Path, lang: crate::i18n::Lang) -> R<Added> {
+    let dir = crate::user_config::resolve_dir(input, cwd, lang)?;
+    let added = crate::user_config::update(config, lang, |doc| {
         // **링크를 풀어서도 견준다.** `Doc::add` 는 파일 시스템을 안 보는 자리라 글자로만
         // 재는데, 목록에 링크 철자(`/w/link`)로 적힌 줄이 있으면 푼 경로(`/w/real`)가 또
         // 실려 같은 저장소가 두 줄로 선다. TUI 의 고르기 창은 이미 링크를 풀어 그 줄에
@@ -291,12 +291,12 @@ pub struct Removed {
 /// 견주는 철자는 [`crate::user_config::spellings`] 다(글자로 정리한 것과 링크를 푼 것).
 /// **설정 파일이 없으면 뺄 것도 없다.** 그대로 `update` 로 가면 빈 목록에서 아무것도 안
 /// 빼려고 설정 디렉터리를 만든다 — 아무 일도 안 한 명령이 사람의 `~/.config` 에 흔적을 남긴다.
-pub fn remove(config: &Path, input: &Path, cwd: &Path) -> R<Removed> {
+pub fn remove(config: &Path, input: &Path, cwd: &Path, lang: crate::i18n::Lang) -> R<Removed> {
     // 준 철자 그대로까지 [`crate::user_config::spellings`] 가 댄다 — `color` 와 같은
     // 목록이라야 한쪽이 빼는 줄을 다른 쪽이 없다고 하지 않는다. 대표 철자(`spelled`)는 앞의 것이다.
     let spellings = crate::user_config::spellings(input, cwd);
     let removed: Vec<PathBuf> = if config.exists() {
-        crate::user_config::update(config, |doc| {
+        crate::user_config::update(config, lang, |doc| {
             let hit: Vec<PathBuf> =
                 doc.projects().0.into_iter().map(|p| p.path).filter(|p| spellings.contains(p)).collect();
             doc.remove(&spellings)?;

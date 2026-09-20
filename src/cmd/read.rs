@@ -19,7 +19,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     let load = repo.read()?;
     let now = crate::model::now();
-    let path = super::project::writable_config()?;
+    let path = super::project::writable_config(ctx.lang())?;
 
     // 있는 id 는 **한 번 모아 견준다**(moai-j038.vna) — `Load::get` 은 줄 전부를 뒤에서부터 훑으므로
     // 받은 id 마다 부르면 `--all`·`-e` 가 줄 수의 제곱으로 느려진다(1만 줄에 안 읽은 5천이면 1초 가까이).
