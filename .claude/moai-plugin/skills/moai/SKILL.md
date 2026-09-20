@@ -1,151 +1,164 @@
 ---
 name: moai
-description: 이 저장소의 할 일·이슈·계획을 다룰 때 쓴다. "뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자", 기능 요청을 여러 갈래로 쪼갤 때, 또는 작업 중 지금 범위가 아닌 것이 떠올랐을 때. TodoWrite 나 마크다운 TODO 목록 대신 이것을 쓴다.
+description: Use for this repository's work, issues and plans. "what should I do first", "sort out the to-dos", "create an issue", "how is it going", "let us do this later", "뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자", when a feature request has to be split into several parts, or when something out of scope comes to mind mid-task. Use this instead of TodoWrite or a markdown TODO list.
 ---
 
-# moai — 이 저장소의 이슈 트래커
+# moai — this repository's issue tracker
 
-할 일은 `.moai/issues.jsonl` 에 있다. 승인 게이트가 없다 — 무엇이든 만들고 무엇이든 옮길 수 있다. 사람을 부르지 않는다.
+The work lives in `.moai/issues.jsonl`. There is no approval gate — create anything, move anything. Do not ask a human.
 
-    moai status                            보드 · 경고 · 흐름 (세션은 여기서 시작)
-    moai prime                             쥔 것과 다음 것만. 세션 첫머리에 읽는 짧은 한 판
-    moai ready                             지금 집을 수 있는 일
-    moai show <id>                         본문·자식·이력. 왜 그렇게 정했는지가 여기 있다
-    moai show -g <키워드>                  이미 적어 뒀는지 찾는다
-    moai show -s todo -t bug               필터 (쉼표 = 또는, 반복 = 그리고)
-    moai show --tree                       에픽 → 이슈 → 자식
-    moai ready --worktree                  옆 워크트리에서 집은 것까지 겹쳐 본다
-    moai tui                               탐색기로 돌아다닌다. SPC n 으로 생각을 담는다
-                                           묶음 줄에서 l 한 단계 · Tab 다 펼침 · h 접기
-    moai add '제목' -p 1 -t bug -e <에픽>  만들기
-    moai mv <id> in_progress               집기  →  review  →  done
-    moai edit <id> --tag parser            고치기
-    moai note <id> '발견한 것'             다음 사람이 읽을 메모
-    moai defer <id> -m '왜'                지금 안 할 일을 계획에서 뺀다
+    moai status                            board · warnings · flow (start a session here)
+    moai prime                             what you hold and what is next, nothing else
+    moai ready                             what you can pick up right now
+    moai show <id>                         body, children, history. Why it was decided is here
+    moai show -g <keyword>                 find out whether it is written down already
+    moai show -s todo -t bug               filters (comma = or, repeated flag = and)
+    moai show --tree                       epic → issue → child
+    moai ready --worktree                  overlay what the other worktrees picked up
+    moai tui                               walk the explorer. SPC n parks a thought
+                                           on a group row: l one step · Tab expand all · h fold
+    moai add '<title>' -p 1 -t bug -e <epic>   create
+    moai mv <id> in_progress               pick up  →  review  →  done
+    moai edit <id> --tag parser            change
+    moai note <id> '<what you found>'      a memo for whoever comes next
+    moai defer <id> -m '<why>'             take work out of the plan for now
 
-모든 명령에 `--json` 이 붙는다. `ready --json` 은 `{"ready":[…],"held":[…]}` —
-`held` 는 미뤄 둔 것·빈 묶음에 막혀 못 집는 일과 도로 집을 곳이다.
-그것으로 사람 없이 도는 고리를 짤 수 있다. moai 저장소의 `examples/bash-agent/agent.sh`
-가 bash 와 jq 만으로 집고·일하고·닫는 한 벌이다.
+Every command takes `--json`. `ready --json` gives `{"ready":[…],"held":[…]}` —
+`held` is what is deferred or blocked behind an empty group, and where to pick it up
+again. That is enough to build a loop that runs without a person — one such loop, in
+bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
 
-**여럿이 같은 저장소에서 돌면 `moai mv <id> in_progress --from todo` 로 집는다.**
-본 칸이 그대로일 때만 옮기므로, 옆에서 먼저 집은 일을 뒤늦게 덮지 않는다 — 진
-쪽은 stderr 한 줄(`--json` 이면 `stale`)과 0 아닌 종료 코드를 받고 다음 일로 간다.
-`defer` 도 같은 `--from` 을 받는다. 안 쓰면 지금까지처럼 아무것도 막지 않는다.
-**id 를 하나만 준다** — 여럿을 한 번에 주면 이긴 것과 진 것이 한 종료 코드에
-섞여, 이긴 줄을 집어 놓고 버린다.
+**When several sessions share one repository, pick up with
+`moai mv <id> in_progress --from todo`.** It moves only while the column you saw
+still holds, so it never overwrites work someone else picked up first — the loser
+gets one line on stderr (`stale` under `--json`) and a non-zero exit code, and
+moves on. `defer` takes the same `--from`. Without it nothing is blocked, as before.
+**Pass one id only** — several at once mix winners and losers into a single exit
+code, so you pick a row up and then throw it away.
 
-**딸린 git 워크트리 안에서 친 `moai` 는 주 체크아웃의 트래커를 읽고 쓴다.** 워크트리의
-`.moai` 를 고치면 병합에서 그 파일이 충돌하고, 푸는 길이 도구 밖에만 남기 때문이다 — 어디에
-썼는지는 stderr 한 줄로 알린다. 그러니 그 워크트리의 `.moai/issues.jsonl` 은 갈라질 때 그대로고,
-지금 줄은 주 체크아웃의 파일에 있다.
+**A `moai` run inside a linked git worktree reads and writes the main checkout's
+tracker.** Editing the worktree's `.moai` makes that file conflict on the merge,
+and then the only way out is outside the tool — one line on stderr says where it
+wrote. So that worktree's `.moai/issues.jsonl` stays as it was when the worktree
+split off, and the current rows are in the main checkout's file.
 
-담당은 만든 사람이 저절로 맡는다.
+Whoever creates an issue is its assignee, for free.
 
-## 갈림길 셋
+## The three forks
 
-**1. `add` 냐 `idea` 냐** — 가르는 것은 *지금 집을 것인가* 다.
-집을 것이면 `moai add`, 나중에 볼 것이면 `moai idea add '떠오른 것'`.
-idea 는 보드에도 `ready` 에도 안 들어 계획을 흐리지 않는다.
-**적지 않고 넘어가는 것이 제일 나쁘다.**
+**1. `add` or `idea`** — what decides is *whether you would pick it up now.*
+If you would, `moai add`; if it is for later, `moai idea add '<what came to mind>'`.
+An idea stands on neither the board nor `ready`, so it does not blur the plan.
+**Walking past it without writing it down is the worst of all.**
 
-에픽 안에서 나온 것이면 그 앞에 하나를 더 묻는다 — *이 에픽이 내건 것이 이것
-없이도 이뤄지는가.* 아니면 그것은 나중에 볼 것이 아니라 안 끝난 이 일이다.
-지금 못 하더라도(사람의 결정을 기다린다, 옆이 그 파일을 쥐었다) `-e <에픽>`
-멤버로 세워 첫 칸에 둔다 — 남은 멤버가 있으면 에픽이 저절로 안 닫힌다.
-idea 로 내보내면 에픽이 제 목적을 못 이룬 채 `done` 으로 선다. 그 멤버를
-`defer` 하는 것은 그 목적을 접는다는 결정이다.
+If it came out of an epic, ask one more question first — *can this epic deliver
+what it promised without this?* If not, it is not for later: it is this work,
+unfinished. Even when you cannot do it now (waiting on a person's decision, the
+work beside you holds that file), create it as a member with `-e <epic>` and
+leave it in the first column — a member still standing keeps the epic from
+closing by itself. Send it out as an idea and the epic stands `done` without
+having delivered what it promised. To `defer` such a member is to decide to give
+that promise up.
 
-**2. `defer` 냐 `done` 이냐** — 안 하기로 한 것을 `done` 으로 옮기지 않는다.
-`moai defer <id> -m '왜'` 는 칸도 종류도 안 바꾸고, `--undo` 로 같은 줄이
-그대로 돌아온다. idea 는 "아직 일이 아닌 것", defer 는 "일이지만 지금은 아닌 것".
+**2. `defer` or `done`** — never move to `done` what you decided not to do.
+`moai defer <id> -m '<why>'` changes neither the column nor the kind, and
+`--undo` brings the same row back as it was. An idea is "not work yet"; a defer
+is "work, but not now".
 
-**3. 에픽으로 쪼갤 만한가** — 파일 하나로 안 끝나는 요청이면 코드를 쓰기 전에
-에픽 하나 + 이슈 3~7개로 쪼갠 안을 사람에게 **한 번** 보여주고 물어본다.
-"좋다" 를 받으면 `moai add --from -` 로 한 번에 만든다 (`--dry-run` 으로 먼저 봐도 된다).
+**3. Is it worth splitting into an epic** — if the request does not end inside one
+file, show the person **once**, before writing code, a plan split into one epic
+plus three to seven issues, and ask. On a "yes", create it in one go with
+`moai add --from -` (`--dry-run` shows it first).
 
 ```sh
 moai add --from - <<'PLAN'
-# 에픽 제목
-- [p1] 첫 이슈 #enhancement
-- [p2] 둘째 이슈
+# Epic title
+- [p1] first issue #enhancement
+- [p2] second issue
 PLAN
 ```
 
-## 이슈에 적는 글
+## What to write in an issue
 
-**제목과 본문은 따로 넘긴다.** 제목은 인자로 주고, 본문은 마크다운으로 적어
-`-b -` 로 stdin 에서 흘린다 — heredoc 이 편하다. 제목을 본문에 다시 적지 않는다.
+**Pass the title and the body separately.** The title is an argument; the body is
+markdown streamed in from stdin with `-b -` — a heredoc is easiest. Do not repeat
+the title inside the body.
 
-- **제목은 짧게.** 무엇이 어긋났는지 한 줄이다. 보드와 `ready` 와 탐색기 목록은 제목만 보여 준다
-- **본문은 서술형으로 적지 않는다.** 겪은 일을 문단으로 늘어놓는 대신 목록으로 가른다 —
-  무엇이 어긋났는가, 무엇을 봤는가, 어디를 고치는가
-- **이모지를 쓰지 않는다** — 제목에도 본문에도. 터미널마다 폭이 달라 보드와 표가 어긋난다
+- **Keep the title short.** One line on what went wrong. The board, `ready` and the explorer list show the title alone
+- **Do not write the body as a narrative.** Instead of laying out what happened in paragraphs, split it into a list —
+  what went wrong, what you saw, where it gets fixed
+- **Do not use emoji** — not in the title, not in the body. Their width differs per terminal, so the board and the tables come out crooked
 
-지킬 것은 다음 세션이 `moai show <id>` 로 읽는다는 것 하나다. 이 셋은 그래서 있는 권고이지
-검사하는 규칙이 아니다.
+The one thing that matters is that the next session reads this with
+`moai show <id>`. These three are advice for that reason, not rules anything checks.
 
-## 한국어 글
+## Korean text
 
-**한국어 글은 moai 에 넣기 전에 다듬는다** — 한글이 한 글자라도 든 제목·본문·노트·`-m`,
-리뷰 원문 노트까지. 영어로만 쓴 글은 그대로 넣는다.
+**Polish Korean text before it goes into moai** — any title, body, note or `-m`
+that carries even one Hangul character, review text included. Text written only in
+English goes in as it is.
 
-- `korean-skills:humanizer` 로 AI 티를 걷고, 20줄을 넘으면 `humanize-korean:humanize-korean` 을 더
-  거친 뒤, 마지막에 `korean-skills:grammar-checker` 로 맞춤법·띄어쓰기를 본다
-- id·명령·경로·수·코드 조각과 꼴이 정해진 줄(`model: …`·`다음: …`·`Regression-of: …`·`요약: 원문 …`)은 그대로 둔다
-- 두 플러그인은 `moai skill install` 이 함께 깐다. 자세한 것은 moai 스킬 안의
-  `references/commands.md` 의 "한국어 글" 에 있다
+- Run `korean-skills:humanizer` to take the AI tell out, add `humanize-korean:humanize-korean`
+  when it runs past 20 lines, and finish with `korean-skills:grammar-checker` for spelling and spacing
+- Leave ids, commands, paths, numbers, code fragments and the fixed-form lines
+  (`model: …`, `Next: …`, `Regression-of: …`, `Summary: original …`) exactly as they are
+- `moai skill install` installs both plugins together. The detail is under "Korean text"
+  in the moai skill's `references/commands.md`
 
-## 훅이 실제로 보는 것 넷
+## The four things the hook actually watches
 
-**1. 집은 것 밖에 새 이슈를 세우지 않는다.** 집은 이슈 — 첫 칸을 떠났고 아직 안 닫힌 것
-(`in_progress`·`review`) — 가 초점이다.
-그 일을 하다 나온 것은 같은 에픽 안(`-e <에픽>`)이나 그 일의 자식
-(`--parent <id>`)으로 만든다. 에픽이 내건 것이 이것 없이 안 이뤄지면 지금 못
-해도 이 둘 중 하나다(갈림길 1). 지금 할 일이 아니면 `moai idea add` 로 담는다 —
-idea 는 이 규칙에서 언제나 자유롭고, `moai add --from` 도 그렇다 (거기서
-만들어지는 것은 에픽과 그 자식들이라 그 자체로 한 단위다).
+**1. New issues stay inside what you picked up.** The issue in focus is the one you picked up — it has left the
+first column and is not closed yet (`in_progress`·`review`).
+Anything that comes out of that work belongs in the same epic (`-e <epic>`) or
+under that issue (`--parent <id>`). If the epic cannot deliver what it promised without this, it is one of those two
+even when you cannot do it now (fork 1). If it is not for now, park it with
+`moai idea add` — an idea is always free of this rule, and so is
+`moai add --from` (what it creates is an epic and its children, one unit on its own).
 
-**2. 저장소를 고치기 전에 하나를 집는다.** `moai mv <id> in_progress`.
-세는 것은 저장소 안의 일감뿐이다 — `.moai/`·`.claude/`·`target/` 과 저장소
-밖(스크래치패드·임시 파일)은 안 센다. `Edit`·`Write` 뿐 아니라 껍데기로 쓰는
-것(`>`·`>>`·`sed -i`·`tee`)도 센다. 계획에 없던 것이면 `moai add '제목'` 으로
-세우고 그것을 집는다.
+**2. Pick something up before you change the repository.** `moai mv <id> in_progress`.
+What counts is work inside the repository — `.moai/`, `.claude/`, `target/` and
+anything outside the repository (scratchpad, temporary files) do not. Shell
+writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
+was not in the plan, create it with `moai add 'a title'` and pick that up.
 
-**3. 리뷰도 이슈다.** `/code-review` 를 부르기 전에 지금 보는 것에 매인 리뷰
-이슈를 세운다.
+**3. A review is an issue too.** Before you call `/code-review`, create a review issue tied to
+what you are reviewing.
 
-    moai add '리뷰 — <무엇을 보는가>' -t review --parent <보는 이슈> -b '<무엇을 왜 보는가>'
-    moai mv <id> in_progress      리뷰를 시작할 때
-    moai note <id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로(64KB 를 넘으면 요약)
-    moai mv <id> done -m '<무엇을 반영하고 무엇을 넘겼나>'
+    moai add 'review — <what you are looking at>' -t review --parent <the issue> -b '<what you are looking for and why>'
+    moai mv <id> in_progress      when the review starts
+    moai note <id> -b - < <review text>   the reviewer's own words (summarize past 64KB)
+    moai mv <id> done -m '<what you took in, what you handed on>'
 
-관점(`-b`)과 닫는 한 줄(`-m`)은 규칙이 **실제로 요구한다.** 없이 부르면
-막히고, 거절문이 고칠 명령을 함께 낸다. **사람을 부르지 않는다** — 그 명령을
-그대로 부르면 지나간다.
+The angle (`-b`) and the closing line (`-m`) are **actually required.** Calling
+without them is refused, and the refusal hands you the command to fix it.
+**Do not ask a human** — running that command as given goes through.
 
-**원문과 판단을 두 노트로 가른다** — 리뷰어가 한 말과 이쪽이 정한 것은 다른
-글이다. 넘긴 것은 **이슈 번호와 함께** 적는다. "넘겼다" 만 적힌 줄은 아무도
-다시 안 본다. 원문을 어디서 찾는지는 스킬의 `references/commands.md` 에 있다.
-원문이 64KB 를 넘으면 요약한다 — 첫 줄에 `요약: 원문 <크기>KB agent-<task-id>` 를 적고,
-건마다 번호와 자리는 둔 채 문장만 줄인다. 울타리와 들여쓰기는 그대로 둔다.
+**Keep the reviewer's words and your own call in two notes** — what the reviewer
+said and what you decided are different texts. Write what you handed on **with
+the issue id**. A line that only says "handed on" is never read again. Where the
+review text lives is in the skill's `references/commands.md`.
+If the text runs past 64KB, summarize it — put `Summary: original <size>KB agent-<task-id>` on
+the first line, keep every finding's number and place, and shorten only the sentences. Leave fences and indentation alone.
 
-**4. 사람의 tmux 서버를 죽이지 않는다.** `-L`·`-S` 없는 `tmux kill-server`·`kill-session` 과 tmux 를
-겨눈 `pkill`·`killall` 을 막는다. 세션이 tmux 안에서 돌면 `$TMUX` 가 서 있어,
-맨 `tmux` 는 `TMUX_TMPDIR` 를 무시하고 그 서버에 붙는다 — 한 줄이 그 안의
-세션을 모두 끈다. 시험용 tmux 는 제 서버를 따로 띄운다.
+**4. Never kill the person's tmux server.** `tmux kill-server` and `kill-session` without `-L`/`-S`, and
+`pkill`/`killall` aimed at tmux, are refused. When the session runs inside tmux
+`$TMUX` is set, so a bare `tmux` ignores `TMUX_TMPDIR` and attaches to that
+server — one line kills every session in it. A tmux you are testing gets its
+own server.
 
-    env -u TMUX tmux -L <고유 이름> …
+    env -u TMUX tmux -L <unique name> …
 
-## 세션을 닫기 전에
+## Before you close the session
 
-`moai status` 를 한 번 더 돌려 경고가 늘지 않았는지 본다. 경고는 막지 않는다 —
-에픽 없는 이슈, 오래 멈춘 review, 한 번에 벌여 놓은 것을 비출 뿐이다. 쌓인 idea 와
-미뤄 둔 것은 경고가 아니라 알림(`notices`)으로 따로 선다.
+Run `moai status` once more and see whether the warnings grew. Warnings block
+nothing — they shine a light on issues with no epic, reviews stalled for a long
+time, and how much you have open at once. Ideas piling up and what is deferred are
+not warnings; they stand apart as notices (`notices`).
 
-집은 채 닫으면 다음 세션이 이어받을 한 줄을 그 이슈에 남긴다. 다음 세션은
-`moai show <id>` 의 이력에서 그것을 읽는다.
+If you end the session still holding something, leave one line on that issue for
+the next session to take over from. The next session reads it in the history under
+`moai show <id>`.
 
-    moai note <id> '다음: <이어서 할 것>'
+    moai note <id> 'Next: <what comes next>'
 
-전체 명령과 `--from` 문법은 `references/commands.md` 에 있다.
+Every command and the `--from` syntax are in `references/commands.md`.

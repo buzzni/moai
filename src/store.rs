@@ -514,7 +514,7 @@ impl Repo {
         // **이 쓰기가 짓는 줄은 id 로 안 부른다**(moai-1rkl) — 거절하면 그 id 는 어디에도 안 남아,
         // 받는 쪽이 없는 것을 찾으러 간다. 그 줄의 제목 한 토막으로 가리킨다.
         for e in &entries {
-            for (what, t) in [("노트", &e.text), ("메모", &e.note)] {
+            for (what, t) in [("note", &e.text), ("memo", &e.note)] {
                 let Some(t) = t else { continue };
                 // **가리키는 말은 거절할 때만 짓는다**([`crate::model::check_text_size`] 가 늦게
                 // 부른다). 미리 지으면 `create` 처럼 글이 없는 저널 줄까지 `original` 과 `issues` 를
@@ -551,8 +551,8 @@ impl Repo {
                 // 남는다. 저널의 `title` 을 위에서 재지 않는 것은 그것이 스냅샷 제목의 사본이라서다 —
                 // 거기서 재면 옛 큰 제목을 든 줄을 `rm` 으로도 못 치운다.
                 for (what, now, before) in [
-                    ("제목", Some(&i.title), was.map(|o| &o.title)),
-                    ("본문", i.body.as_ref(), was.and_then(|o| o.body.as_ref())),
+                    ("title", Some(&i.title), was.map(|o| &o.title)),
+                    ("body", i.body.as_ref(), was.and_then(|o| o.body.as_ref())),
                 ] {
                     if let Some(text) = now
                         && now != before

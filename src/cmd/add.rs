@@ -369,7 +369,10 @@ pub fn line_of(d: &Draft, id: Option<&str>) -> String {
 /// 적는 것이 아니라 초안을 **id 를 뽑기 전에** 이슈로 빚어 한 번에 재는 것이다.
 pub fn check_plan(drafts: &[Draft]) -> R<()> {
     for d in drafts {
-        crate::model::check_text_size(|| crate::model::unwritten(&d.title), "제목", &d.title)?;
+        // 가리키는 낱말도 진짜와 한 자리다 — `store::with_write` 가 같은 자리에서 `"title"` 을 준다.
+        // 한글로 두던 판은 영어로 옮긴 거절문 안에 낱말 하나만 한국어로 남아, 연습과 진짜가 같은
+        // 칸을 다른 이름으로 불렀다(리뷰).
+        crate::model::check_text_size(|| crate::model::unwritten(&d.title), "title", &d.title)?;
     }
     Ok(())
 }

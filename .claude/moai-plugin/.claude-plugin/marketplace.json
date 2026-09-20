@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "description": "moai 가 심는다. 손으로 고치면 다음 `moai skill install` 이 덮어쓴다.",
+  "description": "Planted by moai. Edit it by hand and the next `moai skill install` overwrites it.",
   "name": "moai-moai-0cb7",
   "owner": {
     "name": "moai"
@@ -8,7 +8,7 @@
   "plugins": [
     {
       "category": "productivity",
-      "description": "이 저장소의 할 일·규칙·보드.",
+      "description": "This repository's work, rules and board.",
       "name": "moai",
       "source": "./"
     }

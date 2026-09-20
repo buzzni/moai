@@ -102,10 +102,9 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
             Ok(wrote)
         })?;
         // **적는 자리를 못 골랐으면 말한다**(moai-ajh2) — 위의 `--all` 이 읽는 길에 대는 것과 같은 줄이고,
-        // 값을 잃는 쪽은 이쪽이다. 떨어진 자리는 받은 철자라 그 판의 도장은 딴 파일에 사는데, 그것이
-        // 돌아오는 것은 **지금 자리가 아직 없을 때뿐이다**(`read_marks::update` 의 `merge_past`) — 이미
-        // 도장이 선 사람에게는 그 판의 것이 영영 거기 남는다. 막지는 않는다 — 종료 코드는 못 찾은 id
-        // 만 움직인다(#a-partial).
+        // 값을 잃는 쪽은 이쪽이다. 떨어진 판의 도장은 도구가 짓는 **대기 자리**에 가고, 다음 성한 쓰기가
+        // 그것을 합치고 지운다(`read_marks::spool_at`, moai-bdej) — 이미 도장이 선 사람에게도 그렇다.
+        // 막지는 않는다 — 종료 코드는 못 찾은 id 만 움직인다(#a-partial).
         say_why(&wrote.problems, &mut said);
         wrote.value
     };

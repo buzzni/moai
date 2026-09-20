@@ -2637,7 +2637,7 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
     let refused = from_stdin(s.path(), &["note", &id, "-b", "-"], &big);
     assert!(!refused.status.success());
     let err = String::from_utf8_lossy(&refused.stderr);
-    assert!(err.contains("64KB") && err.contains("대화록"), "무엇을 넣어야 했는지 안 댄다\n{err}");
+    assert!(err.contains("64KB") && err.contains("transcript"), "무엇을 넣어야 했는지 안 댄다\n{err}");
     for (args, what) in [
         (vec!["mv", id.as_str(), "in_progress", "-m", big.as_str()], "mv -m"),
         (vec!["defer", id.as_str(), "-m", big.as_str()], "defer -m"),
@@ -3542,9 +3542,9 @@ fn init_writes_an_agents_block() {
     let s = init("agents");
     let md = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
     assert!(md.contains("<!-- moai:begin v:") && md.contains("<!-- moai:end -->"));
-    assert!(md.contains("moai status") && md.contains("승인 게이트가 없다"), "{md}");
+    assert!(md.contains("moai status") && md.contains("There is no approval gate"), "{md}");
     // 훅이 서는 규칙도 같은 출처에서 온다 — 스킬에만 적혀 있던 자리다.
-    assert!(md.contains("리뷰도 이슈다"), "규칙 셋이 빠졌다\n{md}");
+    assert!(md.contains("A review is an issue too"), "규칙 셋이 빠졌다\n{md}");
     assert!(md.contains("--from"), "한 번에 만드는 법이 빠졌다\n{md}");
     // 치트시트가 낡으면 새 세션의 에이전트가 있는 명령을 모른다.
     assert!(md.contains("moai tui"), "치트시트가 낡았다\n{md}");
@@ -3587,7 +3587,7 @@ fn init_check_says_current_stale_or_missing_and_writes_nothing() {
     assert_eq!(std::fs::read_to_string(&md).unwrap(), once, "다시 심었더니 바뀌었다");
 
     // 블록 안을 손으로 고치면 낡은 것이다 — 다음 `init` 이 덮어쓴다.
-    std::fs::write(&md, once.replace("승인 게이트가 없다", "승인 게이트가 있다")).unwrap();
+    std::fs::write(&md, once.replace("There is no approval gate", "There is an approval gate")).unwrap();
     check("stale");
 }
 
@@ -3715,7 +3715,7 @@ fn status_notices_a_stale_agents_block_but_not_a_missing_one() {
     quiet("갓 심은 블록");
 
     let fresh = std::fs::read_to_string(&md).unwrap();
-    std::fs::write(&md, fresh.replace("승인 게이트가 없다", "승인 게이트가 있다")).unwrap();
+    std::fs::write(&md, fresh.replace("There is no approval gate", "There is an approval gate")).unwrap();
     let st = ok(s.path(), &["status"]);
     assert!(st.contains("+ AGENTS.md 블록을 손으로 고쳤다") && st.contains("`moai init`"), "{st}");
     let board = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "agents")));
@@ -3859,7 +3859,7 @@ fn init_says_only_what_it_wrote() {
 
     let md = s.path().join("AGENTS.md");
     let fresh = std::fs::read_to_string(&md).unwrap();
-    let edited = fresh.replace("승인 게이트가 없다", "승인 게이트가 있다");
+    let edited = fresh.replace("There is no approval gate", "There is an approval gate");
     // 안내 글이 바뀌어 이 낱말이 사라지면 아래 단언이 엉뚱한 것을 탓한다 — 여기서 먼저 잡는다.
     assert_ne!(edited, fresh, "시험이 블록을 못 고쳤다 — 안내 글에서 찾는 낱말이 사라졌다");
     std::fs::write(&md, edited).unwrap();
@@ -7726,7 +7726,7 @@ fn hook_in(s: &Scratch, run_in: &Path, event: &str, input: &str) -> Output {
 
 /// 한국어 글 알림(moai-6rrb)의 첫 낱말. 훅의 글과 같아야 한다 — 어긋나면 알림을 못 걷어 위의 시험들이
 /// 한꺼번에 붉어지니 저절로 드러난다.
-const KOREAN_NOTICE: &str = "방금 moai 에 넣은 한국어 글을 다듬었는가";
+const KOREAN_NOTICE: &str = "Did you polish the Korean text you just put into moai";
 
 /// **한국어 글 알림을 걷은 출력.** 훅 시험들은 한국어 제목을 표본으로 쓰면서 "막지 않았다·다른 비춤이
 /// 없다" 를 빈 출력으로 잰다 — 한국어 글에 늘 붙는 알림이 그 자리를 다 붉게 만든다. 알림은 다른 비춤 뒤에
@@ -8308,7 +8308,7 @@ fn creation_is_judged_through_the_contract() {
     let out = shell_call(&s, "moai idea add \"떠오른 것\"");
     one_json_value(&out);
     assert!(!out.contains("permissionDecision"), "담는 것을 막았다\n{out}");
-    assert!(out.contains("\"additionalContext\":\"") && out.contains(&format!("{epic} 가 내건 것")), "{out}");
+    assert!(out.contains("\"additionalContext\":\"") && out.contains(&format!("can {epic} deliver what it promised")), "{out}");
 }
 
 /// 규칙 2 — 저장소를 고치기 전에 하나를 집는다. **세는 것은 저장소 안의
@@ -9655,7 +9655,7 @@ fn a_dash_c_at_the_root_is_judged_by_the_roots_snapshot_when_the_trackers_really
 
     // 규칙 1 — 루트가 쥔 초점으로 막고, 내미는 줄도 루트를 겨눈다.
     let why = refusal(&here(&format!("moai -C {mp} add '딴 일'")));
-    assert!(why.contains(&format!("moai -C {mp} add '제목' --parent {id}")), "루트의 초점을 못 봤다\n{why}");
+    assert!(why.contains(&format!("moai -C {mp} add '<title>' --parent {id}")), "루트의 초점을 못 봤다\n{why}");
 
     // **`cd` 로만 옮긴 토막은 지금대로 이 세션의 눈이다.** 둘을 가르려고 두 스냅샷을 벌려 놓는다 —
     // 루트는 아무것도 안 쥐었고, 이 워크트리의 낡은 스냅샷은 갈라질 때의 집기를 그대로 든다.
@@ -9706,7 +9706,7 @@ fn a_pick_spelled_with_dash_c_at_the_root_still_counts_for_rule_two() {
         "moai -C {} mv {far} in_progress --from todo && sed -i s/a/b/ src/x.rs",
         other.display()
     )));
-    assert!(why.contains("규칙 2"), "남의 트래커의 집기가 여기 규칙 2 를 채웠다\n{why}");
+    assert!(why.contains("Rule 2"), "남의 트래커의 집기가 여기 규칙 2 를 채웠다\n{why}");
 }
 
 /// **`moai` 는 그 명령이 가리키는 저장소의 트래커로 판정한다** (moai-23ky) — `-C`·`--dir`
@@ -9838,7 +9838,7 @@ fn a_note_does_not_bring_back_a_deny_the_fresh_view_lifted() {
         for (how, out) in [("루트", bash(&cmd)), ("MOAI_HERE", here(&cmd))] {
             one_json_value(&out);
             assert!(!out.contains("permissionDecision"), "{how}: 비추는 줄이 곁들자 풀린 거절이 돌아왔다 — {cmd}\n{out}");
-            assert!(out.contains(&format!("{epic} 가 내건 것")), "{how}: {out}");
+            assert!(out.contains(&format!("can {epic} deliver what it promised")), "{how}: {out}");
         }
     }
 }
@@ -9858,7 +9858,7 @@ fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
         assert!(!why.contains(&wt), "워크트리의 스냅샷을 겨누라고 한다 — {typed}\n{why}");
         assert!(!why.contains("-C ."), "친 글자를 그대로 옮겨 적었다 — {typed}\n{why}");
         // 루트의 트래커가 이 자리에서 맨 `moai` 로 닿는다(moai-y7go) — 그래서 `-C` 가 아예 없다.
-        assert!(why.contains("moai add '제목'"), "맨 moai 로 안 댄다 — {typed}\n{why}");
+        assert!(why.contains("moai add '<title>'"), "맨 moai 로 안 댄다 — {typed}\n{why}");
     }
     // 남의 트래커를 가리킨 줄은 그 트래커를 댄다 — 거기서 막혔으니 거기로 겨눈다.
     let other = s.path().join("other");
@@ -9869,7 +9869,7 @@ fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
     ok(&other, &["mv", &theirs, "in_progress"]);
     let op = other.display().to_string();
     let why = refusal(&tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(&format!("moai -C {op} add '딴 일'")))));
-    assert!(why.contains(&format!("moai -C {op} add '제목'")), "남의 트래커를 안 댄다\n{why}");
+    assert!(why.contains(&format!("moai -C {op} add '<title>'")), "남의 트래커를 안 댄다\n{why}");
 
     // **규칙 3 의 닫는 두 걸음도 같은 자리를 댄다**(moai-j2vp) — 규칙 1 은 `-C /other` 를 대는데
     // 이 줄만 맨 `moai` 를 내던 판은, 옮겨 친 사람이 여기 없는 리뷰를 이 트래커에서 닫게 했다.
@@ -9901,7 +9901,7 @@ fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
     let np = fresh.display().to_string();
     let make = format!("mkdir -p {np} && moai -C {np} add '딴 일'");
     let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&make))));
-    assert!(why.contains(&format!("moai -C {np} add '제목'")), "없는 자리의 -C 를 버렸다\n{why}");
+    assert!(why.contains(&format!("moai -C {np} add '<title>'")), "없는 자리의 -C 를 버렸다\n{why}");
 
     // **안 적은 `-C` 는 지어내지 않는다**(리뷰 moai-51h9.k8j1) — 앞의 `cd` 가 없는 자리를 가리키면
     // 그 `cd` 는 실패하고 `moai` 는 세션 자리에서 돈다. 그 자리를 내밀던 판은 `git worktree add …
@@ -9909,13 +9909,13 @@ fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
     // 줄을 내밀었다.
     for typed in [format!("cd {np}; moai add '딴 일'"), format!("mkdir -p {np} && cd {np} && moai add '딴 일'")] {
         let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&typed))));
-        assert!(why.contains("moai add '제목'"), "맨 moai 로 안 댄다 — {typed}\n{why}");
+        assert!(why.contains("moai add '<title>'"), "맨 moai 로 안 댄다 — {typed}\n{why}");
         assert!(!why.contains(&np), "안 적은 -C 를 지어냈다 — {typed}\n{why}");
     }
     // **이 트래커 밑의 아직 없는 자리도 맨 `moai` 다** — 만들어지면 `moai` 가 위로 찾아 여기에 선다.
     let sub = format!("mkdir -p {wt}/sub && moai -C {wt}/sub add '딴 일'");
     let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&sub))));
-    assert!(why.contains("moai add '제목'") && !why.contains("-C"), "제 트래커로 도로 풀리는 -C 를 댔다\n{why}");
+    assert!(why.contains("moai add '<title>'") && !why.contains("-C"), "제 트래커로 도로 풀리는 -C 를 댔다\n{why}");
 }
 
 /// **겹침과 모름을 한 판에서 본다**(moai-15c2, 사용자 결정). 따로 보던 판은 둘이 함께면 풀릴 것을
@@ -9951,7 +9951,7 @@ fn a_stale_snapshot_and_an_unsure_row_are_settled_in_one_pass() {
     let why = refusal(&tool_here(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str("moai add '딴 일'"))));
     assert!(why.contains(&mine), "제가 집은 일을 초점으로 안 봤다\n{why}");
     assert!(!why.contains(&theirs), "옆이 쥐었을 일을 초점으로 댔다\n{why}");
-    assert!(why.contains("규칙 1"), "집은 것이 있는데 딴 규칙의 거절을 냈다\n{why}");
+    assert!(why.contains("Rule 1"), "집은 것이 있는데 딴 규칙의 거절을 냈다\n{why}");
 }
 
 /// **옆이 쥐었을 일로는 비추지도 않는다**(moai-ntl6 의 자, moai-dw63.e31). 이름이 id 가 아닌
@@ -9980,7 +9980,7 @@ fn work_an_unnamed_worktree_may_hold_is_not_offered_as_this_sessions_aim() {
     let work = field(&ok(&main, &["add", "main 에서 집은 일", "-e", &mine, "--json"]), "id");
     ok(&main, &["mv", &work, "in_progress"]);
     let out = bash("moai idea add \"관찰\"");
-    assert!(out.contains(&format!("{mine} 가 내건 것")), "제 일의 물음을 안 비춘다\n{out}");
+    assert!(out.contains(&format!("can {mine} deliver what it promised")), "제 일의 물음을 안 비춘다\n{out}");
     assert!(!out.contains(&theirs), "옆이 쥐었을 일의 에픽을 댄다\n{out}");
 }
 
@@ -10136,7 +10136,7 @@ fn the_hook_leaves_what_a_nameless_worktree_marked_as_held() {
 fn the_tmux_rule_stands_outside_a_tracker() {
     let s = Scratch::new("hooktmuxbare");
     let bash = |cmd: &str| tool_at(&s, s.path(), "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
-    assert!(refusal(&bash("tmux kill-server")).starts_with("규칙 4"), "트래커 밖에서 사람의 서버를 겨눈 줄이 지나간다");
+    assert!(refusal(&bash("tmux kill-server")).starts_with("Rule 4"), "트래커 밖에서 사람의 서버를 겨눈 줄이 지나간다");
     assert_eq!(bash("env -u TMUX tmux -L t kill-server"), "", "제 서버를 가리킨 줄을 막는다");
     assert_eq!(bash("echo x > f"), "", "트래커 밖에서 트래커의 규칙을 세운다");
 }
@@ -10164,8 +10164,10 @@ fn notes_and_refusals_from_two_trackers_are_joined_in_one_order() {
     let out = bash(&format!("moai idea add \"a\"; moai -C {bp} idea add \"b\""));
     one_json_value(&out);
     assert!(!out.contains("permissionDecision"), "{out}");
-    assert!(out.contains(&format!("{ea} 가 내건 것")) && out.contains(&format!("{eb} 가 내건 것")), "{out}");
-    assert!(out.contains(&format!("moai -C {bp} idea promote <그 id> -e {eb}")), "남의 트래커에 되찾을 자리를 안 댄다\n{out}");
+    // 두 토막이 저마다 제 트래커의 에픽을 대니 물음도 둘이다 — 뒤의 것을 말없이 버리지 않는다.
+    assert!(out.contains(&format!("can {ea} deliver what it promised")), "{out}");
+    assert!(out.contains(&format!("can {eb} deliver what it promised")), "{out}");
+    assert!(out.contains(&format!("moai -C {bp} idea promote <that id> -e {eb}")), "남의 트래커에 되찾을 자리를 안 댄다\n{out}");
 }
 
 /// 규칙 2 의 껍데기 쪽은 **stdin 의 `cwd` 로** 상대 경로를 푼다. 훅 프로세스를

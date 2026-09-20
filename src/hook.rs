@@ -2600,16 +2600,16 @@ fn create_in<'a>(
     // 첫 일의 에픽에 세우게 했다. 에픽은 겹치면 한 번이다.
     let (epics, loose) = epics_of(issues, shown);
     let into_epic: String =
-        epics.iter().map(|e| format!("\x20 {moai} add '제목' -e {e}        같은 에픽 안에\n")).collect();
+        epics.iter().map(|e| format!("\x20 {moai} add '<title>' -e {e}        in the same epic\n")).collect();
     let under: String =
-        shown.iter().map(|i| format!("\x20 {moai} add '제목' --parent {}   그 일의 자식으로\n", i.id)).collect();
+        shown.iter().map(|i| format!("\x20 {moai} add '<title>' --parent {}   as a child of that work\n", i.id)).collect();
     // **무엇이 내건 것인지는 갈림길 1 과 같은 자로 댄다 — 에픽이다.** "그 일" 로 적던 판은 집은
     // 이슈가 아니라 에픽이 필요로 하는 것(moai-1k17 이 그 모양)에서 갈림길 1 과 다른 답을 냈다.
     // 에픽이 없는 집은 일만 그 일 자신이다.
     // 여럿 집어 에픽이 여럿이면 그 모두다 — idea add 에 비추는 줄([`aside_in`])과 같은 꼴이다.
     // 이름은 [`aside_in`] 의 같은 값과 맞춘다 — `aim` 으로 적던 판은 겨눌 트래커를 묻는 매개변수
     // (`aim: Toward`)를 이 자리에서 가려, 위의 `echo_moai(aim(at))` 를 한 줄만 내려도 안 되는 글이 됐다.
-    let aims = epics.iter().chain(&loose).copied().collect::<Vec<_>>().join("·");
+    let aims = epics.iter().chain(&loose).copied().collect::<Vec<_>>().join(", ");
     // **첫 칸에 둔 줄이 일을 열어 두는 것은 에픽뿐이다** — 에픽의 칸은 멤버에서 읽지만, 에픽 없는
     // 일은 자식이 첫 칸에 있어도 그대로 닫힌다. 그때 "첫 칸에 두면 안 닫힌다" 를 비치면 거짓이다.
     // 가리키는 줄도 이름으로 댄다 — "위의 줄" 바로 위가 `idea add` 줄이고, idea 도 첫 칸에 선다.
@@ -2617,22 +2617,22 @@ fn create_in<'a>(
     // 말없이 뺐다(리뷰 moai-ju21.70g).
     let mut keep = Vec::new();
     if !epics.is_empty() {
-        keep.push(format!("위의 `moai add` 줄로 세워 첫 칸에 둔다. 밖으로 내보내면 {} 가 목적을 못 이룬 채 닫힌다", epics.join("·")));
+        keep.push(format!("create it with the `moai add` line above and leave it in the first column. Send it out and {} closes without delivering what it promised", epics.join(", ")));
     }
     if !loose.is_empty() {
-        keep.push(format!("위의 `--parent` 줄로 세운다. 에픽 없는 일은 자식이 남아도 닫히니 {} 를 닫기 전에 끝낸다", loose.join("·")));
+        keep.push(format!("create it with the `--parent` line above. Work with no epic closes even with a child left, so finish it before you close {}", loose.join(", ")));
     }
     let keep = keep.join("\n");
     // 둘째 물음의 글은 규칙 글과 한 출처다(moai-nxw8) — 손으로 옮겨 적던 판은 한쪽만 고쳐도
     // 안 붉어졌다.
     let pledge = crate::guide::PLEDGE;
     refuse(1, format!(
-        "지금 집고 있는 것이 있다 — {held}.\n\
-         그 단위 안에서 만들거나, 밖의 것이면 담아 둔다. 초점 밖에 이슈를 세우면\n\
-         그 줄이 어느 일에서 나왔는지를 잃는다.\n\
+        "You are already holding something — {held}.\n\
+         Create it inside that unit, or park it if it belongs outside. An issue created\n\
+         outside the focus loses which work it came out of.\n\
          {into_epic}{under}\
-         \x20 {moai} idea add '제목'                 지금 할 일이 아니면 담아 둔다\n\
-         {aims} 가 {pledge} idea 가 아니다 — 지금 못 해도\n\
+         \x20 {moai} idea add '<title>'              park it if it is not for now\n\
+         If {aims} {pledge}, it is not an idea — even when you cannot do it now,\n\
          {keep}"
     ))
 }
@@ -2708,9 +2708,9 @@ fn close_in(
         });
         if let Some(r) = open_review {
             return refuse(3, format!(
-                "리뷰 {} 를 닫으면서 무엇이 나왔는지를 안 남긴다.\n{}\n\
-                 넘긴 것은 이슈 번호와 함께 적는다 — \"넘겼다\" 만 적힌 줄은 아무도\n\
-                 다시 안 본다.",
+                "Closing review {} without leaving what came out of it.\n{}\n\
+                 Write what you handed on with the issue id — a line that only says\n\
+                 \"handed on\" is never read again.",
                 r.id,
                 // **닫는 두 걸음도 그 토막이 겨눈 트래커를 댄다**(moai-j2vp) — 규칙 1 과 한 자다.
                 crate::guide::close_steps(&r.id, &echo_moai(aim(k), seg))
@@ -2749,10 +2749,10 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, targ
     // **내미는 명령은 한 줄에 하나다** — 붙여 넣는 쪽이 줄째 옮겨 치기 때문이다. 두 명령을 한 줄에
     // 싣던 판은 그 줄이 갈리는 자리마다 한쪽만 옮겨져 "못 찾았다" 로 끝났다(리뷰 moai-ju21.70g).
     refuse(2, format!(
-        "집은 것 없이 {} 를 고치고 있다. 어느 일에서 나온 변경인지가 남지 않는다.\n\
-         하나를 집고 다시 부른다.\n{picks}\
-         계획에 없던 것이면 세우고 그 id 를 집는다.\n\
-         \x20 moai add '제목'\n\
+        "Changing {} while holding nothing. Which work the change came out of is not recorded.\n\
+         Pick something up and call again.\n{picks}\
+         If it was not in the plan, create it and pick that id up.\n\
+         \x20 moai add '<title>'\n\
          \x20 moai mv <id> in_progress",
         rel_to(target, root)
     ))
@@ -2894,9 +2894,10 @@ pub fn guard_tmux(line: &Line<'_>) -> Decision {
                         continue;
                     }
                     return refuse(4, format!(
-                        "`tmux {}` 가 -L·-S 없이 사람의 tmux 서버를 겨눈다.\n\
-                         세션이 tmux 안에서 돌면 맨 tmux 는 TMUX_TMPDIR 를 무시하고 그 서버에 붙어, 이 한 줄이\n\
-                         그 안의 세션을 모두 끈다. 시험용 서버를 따로 띄워 거기에 친다.\n\
+                        "`tmux {}` aims at the person's tmux server, with no -L or -S.\n\
+                         When the session runs inside tmux, a bare tmux ignores TMUX_TMPDIR and attaches to that\n\
+                         server, so this one line kills every session in it. Raise a separate server for testing\n\
+                         and run it there.\n\
                          \x20 {}",
                         rest[at],
                         crate::guide::TMUX_OWN.replace('…', &rest[at..].join(" "))
@@ -2904,8 +2905,8 @@ pub fn guard_tmux(line: &Line<'_>) -> Decision {
                 }
                 "pkill" | "killall" if rest.iter().any(|w| w.split(|c: char| !c.is_alphanumeric()).any(|p| p == "tmux")) => {
                     return refuse(4, format!(
-                        "`{}` 가 tmux 를 겨눈다 — 사람의 tmux 서버까지 끈다.\n\
-                         시험용 서버를 따로 띄웠으면 그 서버에 kill-server 를 친다.\n\
+                        "`{}` aims at tmux — it kills the person's tmux server too.\n\
+                         If you raised a separate server for testing, run kill-server against that server.\n\
                          \x20 {}",
                         basename(word),
                         crate::guide::TMUX_OWN.replace('…', "kill-server")
@@ -3673,10 +3674,12 @@ fn aside_in(issues: &[Issue], focus: &[&Issue], line: &Line<'_>, only: &dyn Fn(u
     };
     let moai = echo_moai(aim(at), seg);
     Decision::Context(format!(
-        "갈림길 1 의 둘째 물음 — {} 가 내건 것이 방금 담은 생각 없이도 이뤄지는가. 아니면 idea 가 아니라 안 끝난 이 일이다.\n\
-         그렇다면 지금 못 해도 `{moai} idea promote <그 id> -e {first} --from -` 로 그 에픽의 멤버로 되찾아 첫 칸에 \
-         둔다 — 밖에 두면 에픽이 목적을 못 이룬 채 닫힌다.",
-        aims.join("·")
+        "The second question of fork 1 — can {} deliver what it promised without the thought you just parked? \
+         If not, it is not an idea but this work, unfinished.\n\
+         Then, even if you cannot do it now, reclaim it as a member of that epic with \
+         `{moai} idea promote <that id> -e {first} --from -` and leave it in the first column — left outside, the \
+         epic closes without delivering what it promised.",
+        aims.join(", ")
     ))
 }
 
@@ -3712,7 +3715,11 @@ const NOT_TEXT: &[&str] = &[
 ];
 
 /// 꼴이 정해진 줄의 머리 — 읽는 쪽이 그 꼴로 세니 다듬지 않는다(`guide::KOREAN`).
-const FIXED_HEADS: &[&str] = &["model:", "다음:", "Regression-of:"];
+///
+/// **옛 한국어 머리도 그대로 둔다**(moai-54k2). 심는 글은 이제 `Next:` 를 가르치지만, 이미 적힌 노트
+/// 수백 줄이 `다음:` 이고 사람도 그것을 그대로 치는 동안 여기서 걷으면 그 줄마다 헛 알림이 선다.
+/// 걷는 것은 알림이 하는 일이 아니라 마이그레이션이다.
+const FIXED_HEADS: &[&str] = &["model:", "Next:", "다음:", "Regression-of:"];
 
 /// 이 명령줄이 **한국어 글을 moai 에 넣는가**(moai-6rrb) — 글을 적는 `moai` 토막의 글 인자에 한글이 들었거나,
 /// 그 토막에 흘러드는 글([`Seg::fed`] — stdin 의 heredoc·here-string·파이프 앞 칸, 명령 치환 속 heredoc)에
@@ -3815,18 +3822,20 @@ fn prose(args: &[String]) -> Vec<String> {
 /// 판은 같은 글을 한 벌 더 영영 남기게 했다. 고칠 수 있는 제목·본문만 `moai edit` 를 대고, 나머지는 다음 글부터다.
 pub fn korean_notice(at: &str, missing: &[&str]) -> Decision {
     let mut said = format!(
-        "방금 moai 에 넣은 한국어 글을 다듬었는가 — `korean-skills:humanizer`, 20줄을 넘으면 \
-         `humanize-korean:humanize-korean`, 마지막에 `korean-skills:grammar-checker`. 안 다듬은 제목·본문은 \
-         다듬어 `moai{at} edit` 로 고쳐 적는다. 노트와 `-m` 은 저널에만 쌓여 고칠 수 없으니 같은 글을 다시 적지 \
-         말고 다음 글부터 넣기 전에 다듬는다. id·명령·경로·수·코드 조각과 꼴이 정해진 줄은 그대로 둔다."
+        "Did you polish the Korean text you just put into moai — `korean-skills:humanizer`, \
+         `humanize-korean:humanize-korean` when it runs past 20 lines, and `korean-skills:grammar-checker` last? \
+         Polish an unpolished title or body and write it back with `moai{at} edit`. A note and `-m` only pile up in \
+         the journal and cannot be fixed, so do not write the same text again: polish from the next one on. \
+         Leave ids, commands, paths, numbers, code fragments and the fixed-form lines as they are."
     );
     if !missing.is_empty() {
         said.push_str(&format!(
-            "\n이 저장소에 {} 이 깔려 있지 않다 — 제 손으로 깔지 말고 사람에게 `moai skill install` 을 다시 \
-             불러 달라고 청한다. 그것이 moai 와 같은 범위로 함께 깐다. 그 명령이 `건너뛰었다` 를 내면 같은 \
-             이름의 마켓플레이스가 남의 저장소를 가리키는 것이니, 그 줄이 함께 내는 \
-             `claude plugin marketplace remove` 를 먼저 친다 — 그 전에는 몇 번을 불러도 건너뛴다.",
-            missing.join("·")
+            "\n{} is not installed in this repository — do not install it yourself: ask the person to run \
+             `moai skill install` again, which installs it in the same scope as moai. If that command says it \
+             skipped, a marketplace of the same name points at someone else's repository, so run the \
+             `claude plugin marketplace remove` it prints alongside first — before that it skips however many \
+             times you call it.",
+            missing.join(", ")
         ));
     }
     Decision::Context(said)
@@ -4026,18 +4035,18 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
         // 굴러가는 리뷰가 있는 길은 아래 `anchored` 가 맡는다.
         if let Some(idle) = open.first() {
             return refuse(3, format!(
-                "리뷰 이슈 {} 가 아직 안 집혔다. 리뷰를 시작하면 그 줄도 같이 움직인다.\n\
+                "Review issue {} has not been picked up. Starting the review moves that row too.\n\
                  \x20 moai mv {} in_progress --from {}\n\
-                 그 리뷰가 아니면 지금 보는 것을 먼저 집고 다시 부른다.",
+                 If that is not the review, pick up what you are looking at first and call again.",
                 idle.id,
                 idle.id,
                 idle.status.as_str()
             ));
         }
         return refuse(3, format!(
-            "리뷰는 이슈로 남긴다. 집은 것이 없으니 무엇을 보는지부터 정한다 —\n\
-             보는 것을 집거나, 리뷰 이슈를 세워 그것을 집는다.\n  {}\n{REVIEW_STEPS}",
-            crate::guide::make_review("-e <에픽>")
+            "A review is left as an issue. You are holding nothing, so decide what you are\n\
+             looking at first — pick that up, or create a review issue and pick that up.\n  {}\n{REVIEW_STEPS}",
+            crate::guide::make_review("-e <epic>")
         ));
     }
 
@@ -4060,10 +4069,10 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
     }
     if let Some(empty) = anchored.first() {
         return refuse(3, format!(
-            "리뷰 이슈 {} 에 무엇을 왜 보는지가 없다. 적고 다시 부른다.\n\
+            "Review issue {} says nothing about what you are looking for and why. Write it and call again.\n\
              \x20 moai edit {} -b -\n\
-             관점 없이 돌린 리뷰는 무엇을 훑었는지가 안 남아, 다음 사람이 같은 자리를\n\
-             다시 훑는다.",
+             A review run with no angle leaves no record of what it swept, so the next person\n\
+             sweeps the same ground again.",
             empty.id, empty.id
         ));
     }
@@ -4072,20 +4081,20 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
         String::new()
     } else {
         format!(
-            "열린 리뷰 줄이 있지만 지금 보는 것에 안 매여 있다: {}\n",
+            "There are open review rows, but none is tied to what you are looking at: {}\n",
             open.iter()
                 .take(3)
                 .map(|i| format!(
                     "{}({})",
                     i.id,
-                    epics.get(i.id.as_str()).copied().unwrap_or("에픽 없음")
+                    epics.get(i.id.as_str()).copied().unwrap_or("no epic")
                 ))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
     };
     refuse(3, format!(
-        "리뷰는 이슈로 남긴다. 지금 보는 것({} {})에 매인 리뷰 이슈를 먼저 세운다.\n\
+        "A review is left as an issue. Create a review issue tied to what you are looking at ({} {}) first.\n\
          {stray}\x20 {}\n{REVIEW_STEPS}",
         head.id,
         head.title,
@@ -5003,10 +5012,16 @@ mod tests {
     /// 보드는 고른 말로 나오는데 그 위의 머리말과 `Stop` 이 붙드는 글만 한국어로 박혀 있었다 —
     /// 에이전트가 읽는 자리라 사람 눈에 가장 늦게 띈다.
     ///
-    /// **규칙 1~4 의 거절문은 아직 여기가 아니다**(2026-09-20 사용자 결정) — 그 첫 줄은
+    /// **규칙 1~4 의 거절문은 말묶음에 안 든다**(moai-54k2, 2026-09-20 사용자 결정) — 그 첫 줄은
     /// `guide::rule_head` 고, 그 글자는 `moai skill install` 이 심는 AGENTS.md 의 규칙 제목과
-    /// 같아야 막힌 쪽이 무엇을 어겼는지 찾는다. 심는 문서를 같이 정하기 전에는 안 건드린다.
-    /// `guide::close_steps`(`REVIEW_STEPS`)와 `guide::handoff` 도 같은 까닭으로 남는다.
+    /// 같아야 막힌 쪽이 무엇을 어겼는지 찾는다. 심는 문서가 영어로 통일되며 그 계약이 영어 쪽으로
+    /// 풀렸다 — `guide::close_steps`(`REVIEW_STEPS`)와 `guide::handoff` 도 같은 까닭으로 영어다.
+    /// 그래서 아래는 갈래마다 **남은 한글이 없다**를 센다: 여기에 한글이 서면 그것은 뜻이 아니라
+    /// 아직 글자로 박힌 줄이다.
+    ///
+    /// **`aside_in`·`korean_notice` 도 영어다**(moai-54k2 리뷰) — 막지 않고 비추는 줄이지만 읽는 쪽은
+    /// 같은 에이전트고, `aside_in` 은 심는 글의 절 이름(`fork 1`)을 가리킨다. 한국어로 두면 그 절을
+    /// 글에서 못 찾는다 — 가리키는 이름이 없는 규칙은 지킬 수 없다.
     ///
     /// **남은 한글을 표본 하나로 세지 않는다**(리뷰 moai-8d49.ssb). `closing` 의 갈래는 셋이고
     /// (보통 줄·에픽을 닫는 멤버·열린 리뷰) 갈래마다 남는 줄이 다르다 — 보통 줄 하나로 재고
@@ -5040,10 +5055,9 @@ mod tests {
             other => panic!("안 붙들었다 — {other:?}"),
         };
         let kept = |said: &str| said.lines().filter(|l| super::hangul(l)).map(str::to_string).collect::<Vec<_>>();
-        let handoff = format!("  {}      if you will carry on", crate::guide::handoff("t-1"));
-        let only_handoff = std::slice::from_ref(&handoff);
+        let none: [String; 0] = [];
         let said = english(&all);
-        assert_eq!(kept(&said), only_handoff, "{said}");
+        assert_eq!(kept(&said), none, "{said}");
 
         // **에픽을 닫는 멤버의 갈래도 영어로 본다** — `{epic}` 을 채우는 두 글(`hook.waiting_hint`·
         // `hook.defer_closes`)은 이 갈래에서만 서는데, 위의 표본은 거기 안 닿아 영어 판이 없었다.
@@ -5052,19 +5066,20 @@ mod tests {
         assert!(said.contains("moai mv t-1 todo -m 'what are you waiting for'"), "{said}");
         assert!(said.contains("t-e stays open"), "{said}");
         assert!(said.contains("t-e set out to do"), "{said}");
-        assert_eq!(kept(&said), only_handoff, "{said}");
+        assert_eq!(kept(&said), none, "{said}");
 
-        // **열린 리뷰의 갈래에는 아직 한글이 남는다.** `hook.review_open` 은 옮겼지만 그 밑의 두
-        // 걸음은 `guide::REVIEW_STEPS` 에서 오고, 그 글자는 `moai skill install` 이 심는 문서와
-        // 같아야 한다(위 머리글). **여기서 세어 둔다** — 표본이 그 갈래에 안 닿던 판은 "영어 판에
-        // 남은 한글은 한 줄" 이라고 말하면서 흔한 리뷰 흐름에서는 세 줄을 냈다.
+        // **열린 리뷰의 갈래도 영어다**(moai-54k2). 한때 이 갈래에만 한글 세 줄이 남았다 —
+        // `hook.review_open` 밑의 두 걸음이 `guide::REVIEW_STEPS` 에서 오고, 그 글자는
+        // `moai skill install` 이 심는 문서와 같아야 했기 때문이다(위 머리글). 심는 문서가 영어로
+        // 통일되면서 그 계약이 영어 쪽으로 풀렸다. **갈래마다 센다** — 표본이 그 갈래에 안 닿던
+        // 판은 "영어 판에 남은 한글은 없다" 고 말하면서 흔한 리뷰 흐름에서는 세 줄을 냈다.
         let tied = vec![epic("t-e"), all[1].clone(), review("t-r", "todo", Some("t-e"))];
         let said = english(&tied);
         assert!(said.contains("Review issue t-r is still open"), "{said}");
-        let steps = crate::guide::close_steps("t-r", "moai");
-        let mut want = vec![handoff];
-        want.extend(steps.lines().map(str::to_string));
-        assert_eq!(kept(&said), want, "{said}");
+        for step in crate::guide::close_steps("t-r", "moai").lines() {
+            assert!(said.contains(step.trim()), "리뷰 닫기 걸음이 갈라졌다 — {step}\n{said}");
+        }
+        assert_eq!(kept(&said), none, "{said}");
     }
 
     /// **규칙 넷이 명령줄을 한 번만 읽는다**(moai-uc5v). 저마다 [`Lexer`] 를 세우던 판은 Bash 한
@@ -5487,10 +5502,10 @@ mod tests {
             let Decision::Context(said) = guard_shell(&all, &cfg(), &here(), root, root, cmd) else {
                 panic!("안 비춘다 — {cmd}");
             };
-            assert!(said.contains("t-e 가 내건 것"), "{said}");
+            assert!(said.contains("can t-e deliver what it promised"), "{said}");
             // **이 줄은 생각이 담긴 뒤에 읽힌다** — 새로 세우라고 하면 같은 것이 둘 선다(moai-dw63.e31).
-            assert!(said.contains("moai idea promote <그 id> -e t-e --from -"), "담은 것을 되찾는 줄을 안 댄다\n{said}");
-            assert!(!said.contains("moai add '제목'"), "담긴 생각 곁에 같은 것을 또 세우라고 한다\n{said}");
+            assert!(said.contains("moai idea promote <that id> -e t-e --from -"), "담은 것을 되찾는 줄을 안 댄다\n{said}");
+            assert!(!said.contains("moai add '<title>'"), "담긴 생각 곁에 같은 것을 또 세우라고 한다\n{said}");
         }
         // 담은 토막이 **겨눈 자리**도 댄다 — 빼고 치면 되찾는 줄이 세션 자리의 트래커에서 헛돈다.
         // 친 글자가 아니라 푼 자리다(moai-v9sa).
@@ -5500,7 +5515,7 @@ mod tests {
         let Decision::Context(said) = aside else {
             panic!("안 비춘다 — {aside:?}");
         };
-        assert!(said.contains("moai -C /repo/sub idea promote <그 id> -e t-e"), "{said}");
+        assert!(said.contains("moai -C /repo/sub idea promote <that id> -e t-e"), "{said}");
 
         // 집은 것이 없거나, 에픽 없는 일이거나, 도움말이면 조용하다. **에픽 줄이 실제로 안 선
         // 참조**도 조용하다 — 닫힐 에픽이 없고, 그 id 로 되찾게 하면 경고가 하나 는다.
@@ -5525,7 +5540,7 @@ mod tests {
         let Decision::Context(said) = guard_shell(&two, &cfg(), &here(), root, root, "moai idea add 'x'") else {
             panic!("안 비춘다");
         };
-        assert!(said.contains("t-z·t-a 가 내건 것") && said.contains("-e t-z --from -"), "{said}");
+        assert!(said.contains("can t-z, t-a deliver what it promised") && said.contains("-e t-z --from -"), "{said}");
         let refused = guard_shell(&two, &cfg(), &here(), root, root, "moai add '딴 일'");
         assert!(denied(&refused).contains("-e t-z"), "두 글이 다른 에픽을 댄다\n{refused:?}");
 
@@ -5742,7 +5757,7 @@ mod tests {
         }
         // 거절문이 댄 줄은 자리표시자만 채우면 지나간다.
         let why = denied(&guard_shell(&idle, &cfg(), &here(), root, root, "tmux kill-server")).to_string();
-        let line = why.lines().last().unwrap().trim().replace("<고유 이름>", "moai-t");
+        let line = why.lines().last().unwrap().trim().replace("<unique name>", "moai-t");
         assert!(line.ends_with("kill-server"), "{why}");
         assert_eq!(guard_shell(&idle, &cfg(), &here(), root, root, &line), Decision::Pass, "{line}");
     }
@@ -5776,7 +5791,7 @@ mod tests {
         let root = Path::new("/repo");
         for cmd in ["moai -C /repo add \"딴 일\"", "moai add '딴 일' -C .", "moai --dir=../.. add \"딴 일\""] {
             let why = denied(&guard_create_toward(&all, &cfg(), &here(), cmd, root)).to_string();
-            for line in ["moai -C /repo add '제목' -e t-e", "moai -C /repo add '제목' --parent t-1", "moai -C /repo idea add"] {
+            for line in ["moai -C /repo add '<title>' -e t-e", "moai -C /repo add '<title>' --parent t-1", "moai -C /repo idea add"] {
                 assert!(why.contains(line), "{cmd} 가 겨눈 트래커를 안 댔다 — {line}\n{why}");
             }
             assert!(!why.contains("-C ."), "친 글자를 그대로 옮겨 적었다\n{why}");
@@ -5793,7 +5808,7 @@ mod tests {
         for line in ["-e t-z ", "-e t-a ", "--parent t-1 ", "--parent t-2 "] {
             assert!(why.contains(line), "집은 것 하나를 빠뜨렸다 — {line}\n{why}");
         }
-        assert!(why.contains("t-z·t-a 가 내건 것"), "{why}");
+        assert!(why.contains("If t-z, t-a cannot deliver"), "{why}");
         let same = vec![epic("t-e"), under("t-1", "in_progress", "t-e"), under("t-2", "in_progress", "t-e")];
         let why = denied(&guard_create(&same, &cfg(), &here(), "moai add '딴 일'")).to_string();
         assert_eq!(why.matches("-e t-e ").count(), 1, "같은 에픽을 두 번 댄다\n{why}");
@@ -5803,12 +5818,12 @@ mod tests {
         assert!(!why.contains("add \""), "거절문이 제목을 큰따옴표로 가르친다\n{why}");
         let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         let wrote = denied(&guard_edit(&idle, &cfg(), &here(), Path::new("/repo"), "/repo/src/x.rs")).to_string();
-        assert!(wrote.contains("add '제목'") && !wrote.contains("add \""), "{wrote}");
+        assert!(wrote.contains("add '<title>'") && !wrote.contains("add \""), "{wrote}");
 
         // 둘째 물음은 규칙 글과 같은 글이다.
         let pledge = crate::guide::PLEDGE;
-        assert!(why.contains(&format!("t-e 가 {pledge}")), "{why}");
-        assert!(crate::guide::agents().contains(&format!("에픽이 {pledge}")), "규칙 글이 갈라졌다");
+        assert!(why.contains(&format!("If t-e {pledge}")), "{why}");
+        assert!(crate::guide::agents().contains(&format!("If the epic {pledge}")), "규칙 글이 갈라졌다");
     }
 
     /// **거절문의 모서리 넷**(리뷰 moai-ju21.70g) — 옮겨 친 `-C` 는 한 낱말로 감싸고, 에픽 아닌 줄은
@@ -5830,7 +5845,7 @@ mod tests {
         ] {
             let why =
                 denied(&guard_create_toward(&all, &cfg(), &here(), "moai -C /x add '딴 일'", Path::new(at))).to_string();
-            assert!(why.contains(&format!("moai -C {echoed} add '제목' -e t-e")), "{at} 를 {echoed} 로 안 옮겼다\n{why}");
+            assert!(why.contains(&format!("moai -C {echoed} add '<title>' -e t-e")), "{at} 를 {echoed} 로 안 옮겼다\n{why}");
         }
 
         // **자리를 못 푼 `-C` 는 친 글자를 그대로 옮긴다** — `aimed` 가 `$VAR`·`~`·`$( … )` 를 `None` 으로
@@ -5842,27 +5857,30 @@ mod tests {
             ("~/x", "~/x"),
         ] {
             let why = denied(&guard_create(&all, &cfg(), &here(), &format!("moai -C {typed} add '딴 일'"))).to_string();
-            assert!(why.contains(&format!("moai -C {echoed} add '제목' -e t-e")), "-C {typed} 를 버렸다\n{why}");
+            assert!(why.contains(&format!("moai -C {echoed} add '<title>' -e t-e")), "-C {typed} 를 버렸다\n{why}");
         }
         // 푼 자리가 있으면 그것이 이긴다 — 친 글자가 상대 경로여도 내미는 줄은 푼 경로다.
         let why =
             denied(&guard_create_toward(&all, &cfg(), &here(), "moai -C .. add '딴 일'", Path::new("/repo"))).to_string();
-        assert!(why.contains("moai -C /repo add '제목' -e t-e") && !why.contains("-C .."), "{why}");
+        assert!(why.contains("moai -C /repo add '<title>' -e t-e") && !why.contains("-C .."), "{why}");
 
         let not_an_epic = vec![issue("t-x", "todo"), under("t-1", "in_progress", "t-x")];
         let why = denied(&guard_create(&not_an_epic, &cfg(), &here(), "moai add '딴 일'")).to_string();
         assert!(!why.contains("-e t-x"), "에픽 아닌 줄을 에픽으로 댄다\n{why}");
-        assert!(why.contains("--parent t-1") && why.contains("t-1 를 닫기 전에 끝낸다"), "{why}");
+        assert!(why.contains("--parent t-1") && why.contains("before you close t-1"), "{why}");
 
         let mixed = vec![epic("t-e"), issue("t-a", "in_progress"), under("t-1", "in_progress", "t-e")];
         let why = denied(&guard_create(&mixed, &cfg(), &here(), "moai add '딴 일'")).to_string();
-        assert!(why.contains("t-e 가 목적을 못 이룬 채") && why.contains("t-a 를 닫기 전에 끝낸다"), "한쪽 경고를 뺐다\n{why}");
+        assert!(
+            why.contains("t-e closes without delivering what it promised") && why.contains("before you close t-a"),
+            "한쪽 경고를 뺐다\n{why}"
+        );
 
         let wrote = denied(&guard_edit(&[], &cfg(), &here(), Path::new("/repo"), "/repo/src/x.rs")).to_string();
         for line in wrote.lines().filter(|l| l.contains("moai ")) {
             assert!(line.trim_start().starts_with("moai ") && line.matches("moai ").count() == 1, "한 줄에 명령이 둘이다 — {line}\n{wrote}");
         }
-        assert!(wrote.contains("\n  moai add '제목'\n  moai mv <id> in_progress"), "{wrote}");
+        assert!(wrote.contains("\n  moai add '<title>'\n  moai mv <id> in_progress"), "{wrote}");
         // 집으라는 줄은 본 칸을 함께 준다 — 짓고 치는 사이에 옆이 그 일을 집거나 닫았으면 멈춘다.
         let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         let wrote = denied(&guard_edit(&idle, &cfg(), &here(), Path::new("/repo"), "/repo/src/x.rs")).to_string();
@@ -5881,9 +5899,12 @@ mod tests {
         // 목적을 못 이룬 채 닫힌다 (moai-l288).
         // 무엇이 내건 것인지는 갈림길 1 처럼 에픽으로 댄다 — 집은 이슈로 대면 에픽만 필요로
         // 하는 것에서 두 글이 다른 답을 낸다 (moai-dw63.gwf 4번).
-        assert!(why.contains("t-e 가 내건 것"), "idea 가 아닌 경우를 에픽으로 안 가른다\n{why}");
+        assert!(why.contains("If t-e cannot deliver"), "idea 가 아닌 경우를 에픽으로 안 가른다\n{why}");
         // 세울 줄은 이름으로 가리킨다 — "위의 줄" 바로 위가 `idea add` 줄이고 idea 도 첫 칸에 선다.
-        assert!(why.contains("위의 `moai add` 줄로 세워 첫 칸에 둔다"), "에픽이 내건 것을 세울 줄을 안 가리킨다\n{why}");
+        assert!(
+            why.contains("create it with the `moai add` line above and leave it in the first column"),
+            "에픽이 내건 것을 세울 줄을 안 가리킨다\n{why}"
+        );
 
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add '안의 일' -e t-e"), Decision::Pass);
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add '자식' --parent t-1"), Decision::Pass);
@@ -6329,8 +6350,8 @@ mod tests {
         assert!(why.contains("--parent t-1"), "자식으로 다는 길이 없다\n{why}");
         assert!(why.contains("idea add"), "담아 두는 길이 없다\n{why}");
         // 에픽 없는 일의 자식은 부모를 안 붙든다 — 첫 칸에 두면 그 일이 안 닫힌다고 비치지 않는다.
-        assert!(why.contains("idea 가 아니다"), "일이 이것 없이 안 끝나는 경우를 안 가른다\n{why}");
-        assert!(!why.contains("첫 칸에 둔다"), "에픽 없는 일에 자식이 그 일을 열어 둔다고 비친다\n{why}");
+        assert!(why.contains("it is not an idea"), "일이 이것 없이 안 끝나는 경우를 안 가른다\n{why}");
+        assert!(!why.contains("leave it in the first column"), "에픽 없는 일에 자식이 그 일을 열어 둔다고 비친다\n{why}");
 
         // 에픽이 있으면 그때는 에픽을 가리킨다.
         let held = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
@@ -7892,7 +7913,7 @@ mod korean_tests {
         let Decision::Context(said) = korean_notice("", &["korean-skills@korean-skills"]) else {
             panic!("비추는 답이 아니다");
         };
-        assert!(said.contains("moai skill install") && said.contains("사람에게"), "{said}");
+        assert!(said.contains("moai skill install") && said.contains("ask the person"), "{said}");
         assert!(!said.contains("claude plugin install"), "제 손으로 깔라고 한다\n{said}");
         for (id, _) in crate::guide::KOREAN_PLUGINS {
             let plugin = id.split_once('@').unwrap().0;
@@ -7908,7 +7929,7 @@ mod korean_tests {
     fn the_korean_notice_only_offers_edits_that_exist() {
         let Decision::Context(said) = korean_notice(" -C /repo", &[]) else { panic!("비추는 답이 아니다") };
         assert!(said.contains("`moai -C /repo edit`"), "{said}");
-        assert!(!said.contains("`moai note` 로 고쳐") && said.contains("저널에만"), "{said}");
+        assert!(!said.contains("`moai note`") && said.contains("only pile up in the journal"), "{said}");
     }
 
     /// `humanize-korean` 이 cwd 에 만드는 `_workspace/` 는 규칙 2 가 세지 않는다 — 하위 디렉터리에 선
