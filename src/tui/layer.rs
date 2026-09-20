@@ -803,7 +803,7 @@ impl App {
                 // 가 이 걸음의 읽기로 다시 적어 덮이고, 덮이기 전에 한 번 읽히는 데가 있다(그 `knew`).
                 // 게다가 `Tried::since` 까지 따라와 방금 난 실패가 오래된 것으로 보여, [`owed`] 가 잠깐
                 // 봐 주는 틈(`BLIP`)을 건너뛰고 시계로 내려앉는다.
-                let carried = self.site_mut(super::Seat::Place(at)).map(|h| (h.seen.clone(), h.read_stamp));
+                let carried = self.site_mut(super::Seat::Place(at)).map(|h| (h.seen.clone(), h.read_stamp.clone()));
                 if let Some((seen, stamp)) = carried {
                     self.site.seen = seen;
                     self.site.read_stamp = stamp;

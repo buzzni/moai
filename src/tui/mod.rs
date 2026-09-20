@@ -589,10 +589,13 @@ pub struct Site {
     /// ([`App::follow_config`], moai-j038.vna). 한때 설정 파일의 표식이 그 길이었는데, 읽음이 설정 밖으로
     /// 나가면서 설정은 더 안 바뀐다 — 그 길을 여기로 옮겼다.
     ///
-    /// **없는 것과 못 찾은 것을 가른다**(`Option<Stamp>`, [`App::config_stamp`] 와 같은 자) — 아직 안 든
-    /// 프로젝트는 `None` 이고, 읽음 파일이 없는 것은 `Some(None)` 이다. 하나로 들면 옛 `[read]` 만 있는
-    /// 사람의 프로젝트가 영영 안 들린다(새 파일이 없어 표식이 늘 `None` 이라 "그대로" 로 읽힌다).
-    read_stamp: Option<Stamp>,
+    /// **없는 것과 못 찾은 것을 가른다**(`Option<…>`, [`App::config_stamp`] 와 같은 자) — 아직 안 든
+    /// 프로젝트는 `None` 이고, 읽음 파일이 없는 것은 `Some(…)` 안의 `at` 이 `None` 이다. 하나로 들면
+    /// 옛 `[read]` 만 있는 사람의 프로젝트가 영영 안 들린다(새 파일이 없어 표식이 늘 `None` 이라
+    /// "그대로" 로 읽힌다).
+    ///
+    /// **재는 파일이 하나가 아니다**([`ReadStamp`], moai-65as) — 읽기가 여는 자리가 셋이라 그 전부를 든다.
+    read_stamp: Option<ReadStamp>,
     /// 마지막 읽음 읽기의 자취(moai-po6v) — 갈래와 언제 해 봤는가. 다시 읽을 때를 정하는 자다
     /// ([`layer::owed`]). **설정과 한 자다**([`App::config_tried`]) — 갈라 두면 같은 갈래를 두 곳이 달리
     /// 읽어, 한쪽을 고친 날 다른 쪽이 조용히 옛 뜻으로 남는다.
@@ -1043,10 +1046,52 @@ impl Site {
     }
 }
 
+/// 탐색기가 읽음으로 **지켜보는 표식** — [`crate::read_marks::read`] 가 실제로 여는 파일 전부를
+/// 잰다(moai-65as).
+///
+/// 한때 이 값은 쓰는 자리 하나(`read_marks::path_for`)의 표식이었다. moai-bdej 가 못 푼 판의 도장을
+/// 대기 자리로 보내고 다음 성한 쓰기가 합치게 하면서, 읽기가 여는 파일이 셋으로 늘었는데 재는 자는
+/// 하나로 남았다 — 옆 터미널이 대기 자리에 적어도 이 표식이 안 움직여 [`App::load_read`] 가 안 돌고,
+/// 합쳐질 줄이 화면에 내내 [NEW] 로 섰다.
+///
+/// **무엇을 재는가는 [`ReadStamp::of`] 한 자리가 정한다.** [`App::read_marks_of`] 와
+/// [`App::follow_read`] 가 저마다 파일을 골라 재던 판이 이 버그다: 한쪽만 자리를 늘리면 표식이 든
+/// 것과 읽기가 연 것이 갈려, 걸음이 제가 이미 읽은 것을 다시 읽거나 영영 안 읽는다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReadStamp {
+    /// 읽고 쓰는 자리([`crate::read_marks::Place::at`]).
+    at: Stamp,
+    /// 대기 자리([`crate::read_marks::Place::pending`]). **있는가가 곧 "아직 안 합쳤다" 라** 생기는
+    /// 것도 지워지는 것도 이 값이 바뀌는 일이다 — `exists` 를 따로 묻지 않는다. 못 푼 판에서는
+    /// `at` 이 곧 그 자리라 잴 것이 없다(`Place::pending` 이 `None` 이다).
+    pending: Stamp,
+    /// 옛 철자 파일들([`crate::read_marks::Place::past`]). **지금 자리가 없을 때만 잰다** —
+    /// `read_marks::overlay_place` 가 그때만 열기 때문이다. 흔한 판은 두 철자가 같아 비어 있다.
+    past: Vec<Stamp>,
+}
+
+impl ReadStamp {
+    /// 그 자리에서 읽기가 여는 파일을 전부 잰다.
+    ///
+    /// **`stat` 은 늘 하나, 흔하게 둘이다.** 지금 자리와 (못 푼 판이 아니면) 대기 자리다. 옛 자리는
+    /// 지금 자리가 없을 때만 더 재는데, 그 판정을 방금 잰 `at` 에서 읽어 `exists` 를 한 번 더 묻지
+    /// 않는다 — 못 읽은 파일(권한)도 없는 것으로 세지만, 그때 치르는 것은 안 열 파일을 잰 `stat`
+    /// 하나이고 답은 안 틀린다.
+    fn of(place: &crate::read_marks::Place) -> ReadStamp {
+        let at = crate::store::stamp(&place.at);
+        let pending = place.pending.as_deref().and_then(crate::store::stamp);
+        let past = match at.is_none() {
+            true => place.past.iter().map(|p| crate::store::stamp(p)).collect(),
+            false => Vec::new(),
+        };
+        ReadStamp { at, pending, past }
+    }
+}
+
 /// 한 걸음의 읽음 읽기([`App::read_marks_of`]).
 struct Got {
     marks: crate::read_marks::Marks,
-    stamp: Stamp,
+    stamp: ReadStamp,
     /// 읽음 **자리**를 고르다 만난 까닭 — 파일 안의 건너뛴 줄과 **다른 갈래**다(moai-hzfu).
     /// `Marks::problems` 는 둘을 한 자루에 담는데, 건너뛴 줄이 없으면 이것이 `first()` 가 되어
     /// "읽음에 이상한 줄이 있다" 로 이름 붙었다.
@@ -2176,7 +2221,10 @@ impl App {
         // **자리를 한 번만 고른다** — 표식이 쓰는 파일과 아래에서 가려낼 자리 까닭이 한 값에서 온다.
         // `path_for` 로 파일만 받던 판은 같은 `settle` 을 두 번 돌면서도 그 까닭을 버렸다.
         let place = crate::read_marks::place_of(config, root);
-        let stamp = crate::store::stamp(&place.at);
+        // **읽기가 여는 파일 전부를 잰다**([`ReadStamp`], moai-65as) — 아래 `read` 는 대기 자리와
+        // (지금 자리가 없으면) 옛 자리까지 연다. 지금 자리 하나만 재던 판은 그 둘이 바뀌어도
+        // [`App::follow_read`] 가 못 알아채, 합쳐질 줄이 내내 [NEW] 로 섰다.
+        let stamp = ReadStamp::of(&place);
         let mut marks = crate::read_marks::read(config, root, &self.legacy_read);
         // **자리 탈을 줄 탈에서 가려낸다**(moai-hzfu). `Marks::problems` 는 두 갈래를 한 자루에
         // 담는다 — 자리를 고르다 만난 까닭(`place_of`)과 파일 안의 건너뛴 줄이다. `read` 는 자리
@@ -2294,7 +2342,10 @@ impl App {
     /// 한 번만 한다([`App::follow_config`] 와 같은 모양).
     fn follow_read(&mut self) {
         let (Some(config), Some(repo)) = (self.user_config.as_deref(), self.site.repo.as_ref()) else { return };
-        let now = crate::store::stamp(&crate::read_marks::path_for(config, &repo.root));
+        // **재는 자리는 [`ReadStamp::of`] 가 정한다**(moai-65as) — 여기서 파일을 따로 고르면
+        // [`App::read_marks_of`] 와 갈려, 걸음이 제가 이미 읽은 것을 다시 읽거나 영영 안 읽는다.
+        // `path_for` 하나를 재던 판이 그렇게 갈렸다.
+        let now = ReadStamp::of(&crate::read_marks::place_of(config, &repo.root));
         // **빚진 읽기는 표식이 그대로여도 한다**([`App::follow_config`] 와 한 자, moai-po6v) — 권한을
         // 되돌리는 `chmod` 은 표식을 안 바꿔, 표식만 보면 그 한 번이 세션 내내 [NEW] 를 세워 둔다.
         // 재는 자는 [`layer::owed`] 하나다 — 여기와 저기에 저마다 적으면 갈래를 더한 날 한쪽만 고쳐진다.
@@ -2763,7 +2814,7 @@ impl App {
                         .and_then(|p| p.site.as_mut())
                     {
                         site.seen = std::mem::take(&mut held.seen);
-                        site.read_stamp = held.read_stamp;
+                        site.read_stamp = held.read_stamp.take();
                         // **갈래와 읽어 본 때는 안 옮긴다**(리뷰) — 바로 아래 [`App::take_read`] 가
                         // 이 걸음의 읽기로 둘 다 다시 적는다. 옮겨 봐야 그 자리에서 덮이고, 덮이는
                         // 줄은 "옮겼으니 이어진다" 는 거짓말을 남긴다. 표식만 옮기는 것은 다르다 —
@@ -6032,6 +6083,52 @@ mod tests {
         assert!(!a.site.unread.contains("argos-0009"), "돌아온 읽음을 안 들었다");
     }
 
+    /// **대기 자리에 적힌 도장도 걸음이 따라간다**(moai-65as). moai-bdej 가 못 푼 판의 도장을
+    /// `read/<받은 철자>.pending.toml` 로 보내고 다음 성한 쓰기가 합치게 했는데, 걸음은 쓰는 자리
+    /// 하나만 재고 있었다 — 옆 터미널의 `moai read` 가 `ESTALE` 을 한 번 만나 그 자리에 적으면 지금
+    /// 자리는 그대로라, 합쳐질 줄이 화면에 내내 [NEW] 로 섰다.
+    ///
+    /// **재는 자리를 [`ReadStamp::of`] 하나로 모은 것이 그 고침이다** — 읽기가 여는 파일과 걸음이 재는
+    /// 파일이 한 자리에서 나온다. 여기서 재는 것은 그 둘이 갈렸는지다.
+    #[test]
+    fn a_stamp_in_the_pending_place_reaches_the_screen() {
+        let s = Scratch::new("read-marks-pending");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        let mut a = app();
+        // [NEW] 는 내게 온 줄에 선다 — 안 맡기면 셀 줄이 하나도 없어 전제부터 안 선다.
+        for i in &mut a.site.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.me = Some("레이븐 (raven@example.com)".into());
+
+        let mark = |id: &str| {
+            let stamp = &a.site.issues.iter().find(|i| i.id == id).unwrap().updated_at;
+            format!("\"{id}\" = \"{stamp}\"\n")
+        };
+        let (nine, two) = (mark("argos-0009"), mark("argos-0002"));
+        let head = format!("path = {:?}\n\n[read]\n", root.display().to_string());
+        let place = crate::read_marks::place_of(&config, &root);
+        std::fs::create_dir_all(place.at.parent().unwrap()).unwrap();
+        std::fs::write(&place.at, format!("{head}{nine}")).unwrap();
+        a.load_read();
+        assert!(!a.site.unread.contains("argos-0009"), "시험의 전제 — 쓰는 자리의 읽음을 들었다");
+        assert!(a.site.unread.contains("argos-0002"), "시험의 전제 — 아직 안 읽은 줄이 있다");
+
+        // 옆에서 돈 `moai read` 가 자리를 못 풀어 대기 자리에 적었다. **쓰는 자리는 그대로다** —
+        // 그것만 재던 걸음은 여기서 아무것도 안 했다.
+        let spool = place.pending.clone().expect("성한 판에는 대기 자리가 선다");
+        let was = crate::store::stamp(&place.at);
+        std::fs::write(&spool, format!("{head}{two}")).unwrap();
+        assert_eq!(crate::store::stamp(&place.at), was, "시험의 전제 — 쓰는 자리는 안 바뀌었다");
+
+        a.follow();
+        assert!(!a.site.unread.contains("argos-0002"), "대기 자리에 적힌 도장이 화면에 안 닿았다");
+    }
+
     /// **읽음 파일도 다시 읽을 때를 갈래로 잰다**(moai-po6v) — 설정과 **한 자다**([`App::follow_config`],
     /// [`crate::user_config::Again`]). 갈라 두면 같은 `Trouble` 을 두 곳이 달리 읽어, 한쪽을 고친 날
     /// 다른 쪽이 조용히 옛 뜻으로 남는다.
@@ -6084,7 +6181,7 @@ mod tests {
         );
         assert_eq!(
             a.site.read_stamp,
-            Some(crate::store::stamp(&at)),
+            Some(ReadStamp::of(&crate::read_marks::place_of(&config, &root))),
             "다시 해도 같은 갈래인데 표식을 물렸다 — 걸음마다 헛 읽는다"
         );
         assert!(!a.site.unread.contains("argos-0009"), "못 읽은 빈 표를 들여 읽은 줄이 [NEW] 로 섰다");
