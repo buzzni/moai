@@ -6679,7 +6679,7 @@ pub(super) mod tests {
         assert_eq!(text(tags.clone(), 12), "#데이터베…", "잘린 태그 뒤에 다음 태그가 붙었다");
         assert_eq!(text(tags, 40), "#데이터베이스마이그레이션 #db");
         // `/f` 로 찾아 `f` 마다 갈라진 원문(`SPC v r`) 줄.
-        let found = ["see the con", "f", "iguration ", "f", "lags"].map(|s| Span::raw(s)).to_vec();
+        let found = ["see the con", "f", "iguration ", "f", "lags"].map(Span::raw).to_vec();
         assert_eq!(text(found, 20), "see the configurat…", "딴 낱말의 글자가 잘린 낱말에 붙었다");
     }
 

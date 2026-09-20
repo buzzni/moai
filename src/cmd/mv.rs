@@ -76,17 +76,17 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         // 멤버에서 읽고 쓰기는 줄에 적힌 칸에 한다 — 두 축이 갈려 있어, 재는 것이 맞아도
         // 쓰는 것은 아무도 안 지킨다. 겨루는 둘이 같은 에픽에 같은 `--from` 을 걸면 둘 다
         // 이겼다고 믿는다. 먹는 척하는 가드보다 없는 가드가 정직하다.
-        if from.is_some() {
-            if let Some(g) = issues.iter().find(|i| asked_all.contains(&i.id.as_str()) && crate::report::is_group(i)) {
-                return Err(Fail::coded(
-                    format!(
-                        "묶음의 칸은 멤버에서 읽는다 — {} 에는 `--from` 을 못 쓴다\n      \
-                         멤버를 집거나, 묶음은 `moai defer` 로 접는다",
-                        g.id
-                    ),
-                    super::code::BAD_STATUS,
-                ));
-            }
+        if from.is_some()
+            && let Some(g) = issues.iter().find(|i| asked_all.contains(&i.id.as_str()) && crate::report::is_group(i))
+        {
+            return Err(Fail::coded(
+                format!(
+                    "묶음의 칸은 멤버에서 읽는다 — {} 에는 `--from` 을 못 쓴다\n      \
+                     멤버를 집거나, 묶음은 `moai defer` 로 접는다",
+                    g.id
+                ),
+                super::code::BAD_STATUS,
+            ));
         }
         let by = who?;
         let mut m = Moved::default();

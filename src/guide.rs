@@ -478,10 +478,11 @@ const PROJECTS: &str = r#"    moai project add <dir>                 내 설정�
 
 /// 화면의 말(moai-acy5). AGENTS.md 에만 적혀 있어 스킬만 읽는 세션은 `MOAI_LANG` 을 몰랐다 —
 /// 조각으로 빼 참고 문서도 같이 읽는다.
-const LANGUAGE: &str = r#"지금 기본은 한국어다 — 옮긴 글이 아직 적어, 옮김이 화면을 덮으면 기본이 영어로 바뀐다.
-다른 말로 보려면 `MOAI_LANG=en moai status` 처럼 주거나, 사용자 설정에 `[i18n]` 의
-`lang = "en"` 을 적는다 (환경변수가 설정을 이긴다). 되는 말은 en·ko·zh·ja·es 고,
-그 말에 아직 없는 글은 영어로 나온다. 번역을 보태는 길은 moai 저장소의 `i18n/README.md` 에 있다."#;
+const LANGUAGE: &str = r#"기본은 영어다. 다른 말로 보려면 `MOAI_LANG=ko moai status` 처럼 주거나, 사용자 설정에
+`[i18n]` 의 `lang = "ko"` 를 적는다 (환경변수가 설정을 이긴다). 되는 말은 en·ko·zh·ja·es 고,
+그 말에 아직 없는 글은 영어로 나온다 — 지금 다 찬 것은 en·ko 둘이다.
+**시스템 로캘(`LANG`·`LC_ALL`)은 안 읽는다**: 위의 두 길 중 하나로 골라야 바뀐다.
+번역을 보태는 길은 moai 저장소의 `i18n/README.md` 에 있다."#;
 
 /// 커밋과 이슈를 잇는 고리(moai-wqm7). **새 저장소는 이 저장소의 CLAUDE.md 규약을 모른다** —
 /// 여기 안 적으면 커밋 칸(`show <id>`·탐색기 상세)이 늘 빈다.

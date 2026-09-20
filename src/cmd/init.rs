@@ -356,6 +356,26 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     Ok(out)
 }
 
+/// `moai init --print`. **아무것도 안 쓰고 블록만 찍는다.**
+///
+/// Claude 의 훅이 없는 에이전트는 제 도구가 읽는 파일이 `AGENTS.md` 가 아닐 수
+/// 있다 — 그 파일에 붙여 넣을 글을 여기서 받는다. 계약은 이 글 하나다: 명령
+/// 전부와 `--json` 의 모양이 여기 있으므로, 붙여 넣는 쪽은 도구가 자란 뒤에도
+/// 같은 자리에서 새 글을 받는다.
+///
+/// **새 명령(`onboard`)을 안 둔 것은 `--check` 와 같은 까닭이다**(moai-mstm) —
+/// 쓰는 길과 보는 길이 한 이름에 있어야, 받아 간 글이 낡았을 때 무엇을 칠지
+/// 안다. 글도 `init` 이 쓰는 그것 하나라, 둘이 갈라질 자리가 없다.
+///
+/// `.moai` 가 없어도 선다. 심기 전에 무엇이 붙는지 보는 것이 자연스럽다.
+pub fn print(ctx: &Ctx) -> R<Vec<String>> {
+    let block = crate::guide::agents();
+    if ctx.json {
+        return super::json_line(&serde_json::json!({ "agents": block }));
+    }
+    Ok(block.lines().map(str::to_string).collect())
+}
+
 const GITATTRIBUTES: &str = "\
 # moai — 이슈 트래커
 # 스냅샷에는 merge=union 을 쓰지 않는다. 두 브랜치가 같은 이슈를 고치면

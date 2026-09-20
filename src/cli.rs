@@ -43,8 +43,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 화면의 말을 바꿀 때:
 
-  MOAI_LANG=en moai status      영어 화면으로. en·ko·zh·ja·es 가 된다
-                                늘 쓰려면 사용자 설정의 [i18n] 에 lang = \"en\"
+  MOAI_LANG=ko moai status      기본은 영어다. en·ko·zh·ja·es 가 된다
+                                늘 쓰려면 사용자 설정의 [i18n] 에 lang = \"ko\"
 
 계획을 한 번에 세울 때:
 
@@ -488,7 +488,10 @@ IDEA
   접두어로 심긴 저장소는 그대로 읽고 쓴다.
 
   --check 는 아무것도 안 쓰고 AGENTS.md 블록이 current·stale·missing 인지만
-  답한다. 파일을 못 읽을 때만 0 이 아니다.")]
+  답한다. 파일을 못 읽을 때만 0 이 아니다.
+
+  --print 는 그 블록을 찍기만 한다. 에이전트가 읽는 파일이 AGENTS.md 가 아닐
+  때 거기에 붙여 넣는 자리다 — 글은 --print 와 init 이 같은 것을 쓴다.")]
     Init {
         /// id 접두어(8자까지). 없으면 디렉터리 이름에서 만든다
         prefix: Option<String>,
@@ -498,6 +501,9 @@ IDEA
         /// 아무것도 안 쓰고 AGENTS.md 블록이 낡았는지만 본다
         #[arg(long, conflicts_with_all = ["prefix", "no_agents"])]
         check: bool,
+        /// 아무것도 안 쓰고 그 블록을 찍는다 (붙여 넣을 때)
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "check"])]
+        print: bool,
     },
 }
 

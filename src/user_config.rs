@@ -1977,7 +1977,7 @@ mod tests {
             assert!(update(&path, |doc| doc.add(Path::new("/z"))).unwrap());
             let text = std::fs::read_to_string(&path).unwrap();
             let lf = text.matches('\n').count() - text.matches("\r\n").count();
-            assert_eq!(if crlf { lf == 0 } else { !text.contains('\r') }, true, "{src:?} → {text:?}");
+            assert!(if crlf { lf == 0 } else { !text.contains('\r') }, "{src:?} → {text:?}");
         }
     }
 

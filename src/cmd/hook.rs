@@ -148,17 +148,9 @@ fn decide(ctx: &Ctx, event: Event, input: &Input) -> Option<String> {
             // 보드가 **정말 읽은 파일**을 댄다(`cmd::status::source_of` 와 같은 자) — 워크트리
             // 세션의 보드는 루트의 트래커에서 온다(moai-y7go).
             let source = crate::cmd::status::source_of(&repo);
-            let lines =
-                view::status(
-                    &st,
-                    &load.issues,
-                    &repo.config,
-                    &now,
-                    &source,
-                    &crate::worktree::Origin::default(),
-                    0,
-                    ctx.lang(),
-                );
+            // 겹쳐 보지 않는다 — 훅의 보드는 제 저장소의 줄만 싣는다. 그래서 출처가 없는
+            // 화면이고(`view::Screen::new`), 빈 `Origin` 을 지어 빌려 줄 일이 없다.
+            let lines = view::status(&st, &load.issues, &repo.config, &now, &source, 0, view::Screen::new(ctx.lang()));
             crate::hook::board(&lines)
         }),
         Event::PreToolUse => {
