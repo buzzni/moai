@@ -683,6 +683,9 @@ fn says(w: &Warning, lang: Lang) -> String {
         // 줄이 미룬 에픽 밑이면 그 줄에 `--undo` 를 쳐 봐야 "이미 그렇다" 로 끝난다.
         "blocked_by_deferred" => one(say(lang, "warn.blocked_by_deferred")),
         "empty_epic" => one(say(lang, "warn.empty_epic")),
+        // **알림이지 경고가 아니다**(moai-tvvb) — 지금 무엇이 먼저인지를 대는 줄이다. 어느
+        // 마일스톤이 도는지는 `preview` 가 id 와 제목으로 낸다.
+        "milestone_focus" => one(say(lang, "warn.milestone_focus")),
         // **끊긴 것과 종류가 틀린 것을 한 낱말로 말한다** — 둘을 가려 말하면
         // 고치는 손이 달라지는 것도 아닌데 경고가 둘로 늘어난다.
         "dangling_epic" => one(say(lang, "warn.dangling_epic")),
@@ -919,7 +922,7 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, origin: &Orig
     // 에픽에 대한 말은 칸도 나이도 뜻이 없다. 어느 에픽인지만 말한다.
     if matches!(
         w.kind,
-        "empty_epic" | "unknown_field" | "dangling_epic" | "dangling_milestone"
+        "empty_epic" | "unknown_field" | "dangling_epic" | "dangling_milestone" | "milestone_focus"
     ) {
         for id in w.ids.iter().take(SHOW) {
             let title = by_id.get(id.as_str()).map(|i| i.title.as_str()).unwrap_or("");
@@ -988,6 +991,7 @@ pub fn ready(
     epics: &crate::report::EpicLabels,
     wip: &[&Issue],
     held: &[crate::report::Held],
+    focus: &crate::report::Focus,
     origin: &Origin,
     lang: Lang,
 ) -> Vec<String> {
@@ -1026,6 +1030,27 @@ pub fn ready(
                 .trim_end()
                 .to_string(),
             );
+        }
+    }
+
+    // **목록이 왜 짧은지를 목록 바로 밑에서 댄다**(moai-q04l). 안 대면 도는 마일스톤이 밖의
+    // 일을 뺀 것과 정말로 할 일이 없는 것이 화면에서 같아 보인다 — 미뤄 둔 것에 막힌 줄을
+    // 아래에서 대는 것과 같은 까닭이다.
+    //
+    // **글리프는 `+` 다.** `!` 는 고칠 것이고 이것은 규칙이 서 있다는 알림이라, 보드가 쌓인
+    // idea 에 `+` 를 쓰는 것과 같은 자리다. 꾸지람으로 읽히면 사람이 규칙을 끄고 싶어진다.
+    // **뺀 것이 없으면 말하지 않는다**(리뷰 6) — "밖의 일 0건은 안 냈다" 는 아무것도 안
+    // 말하면서 자리만 차지한다. 보드의 알림도 같은 자로 0 을 거른다.
+    if !focus.outside.is_empty() {
+        out.push(String::new());
+        let said = fill(say(lang, "ready.outside_held"), &[("n", &focus.outside.len().to_string())]);
+        out.push(format!("{} {}", paint(style::DIM, "+"), paint(style::DIM, &said)));
+        for m in &focus.running {
+            out.push(format!(
+                "  {}  {}",
+                paint(style::ID, &one_line(&m.id)),
+                marked(origin.branch(&m.id), &m.title, TITLE_CAP, style::EPIC).0,
+            ));
         }
     }
 
@@ -1522,6 +1547,10 @@ pub struct Board<'a> {
 /// 한눈 보기에서 연 프로젝트 하나의 집을 것 — `moai ready` 가 `.moai` 밖에서 낸다.
 pub struct Picks<'a> {
     pub picks: Vec<&'a Issue>,
+    /// 도는 마일스톤이 이 목록에 한 일(`report::ready_in`). **한눈 보기에서도 댄다** — 저장소
+    /// 안의 `ready` 가 목록이 왜 짧은지를 대는데 여기만 입을 다물면, 같은 명령이 선 자리에
+    /// 따라 짧아진 목록을 "할 일이 없다" 로 읽는다.
+    pub focus: crate::report::Focus<'a>,
     /// 못 읽는 줄의 수. 그 줄에 있던 일은 목록에서 빠져 있다.
     pub unreadable: usize,
     pub origin: &'a Origin,
@@ -1708,6 +1737,13 @@ pub fn projects_ready(
         if rest > 0 {
             let go = format!("{rest}건 더 → `moai -C {} ready`", shell_arg(&p.path));
             out.push(format!("  {}", paint(style::DIM, &go)));
+        }
+        // **짧아진 목록은 왜 짧은지를 여기서도 댄다**(저장소 안의 `ready` 와 같은 글자·같은
+        // 글리프). 뺀 것이 없으면 댈 것도 없으니 입을 다문다 — 어느 마일스톤이 도는지는 그
+        // 프로젝트의 `ready` 가 낸다.
+        if !k.focus.outside.is_empty() {
+            let said = fill(say(lang, "ready.outside_held"), &[("n", &k.focus.outside.len().to_string())]);
+            out.push(format!("  {} {}", paint(style::DIM, "+"), paint(style::DIM, &said)));
         }
         // 목록 꼬리("N건 더") 뒤에 둔다 — 앞에 두면 그 꼬리가 문제 줄의 연속으로 읽힌다(`projects_status` 와 같은 차례).
         troubles(&mut out, k.trouble);
@@ -2302,7 +2338,8 @@ mod tests {
         let labels = BTreeMap::from([(("argos-0002", Kind::Issue), "저장 계층".to_string())]);
 
         let lang = Lang::Ko;
-        let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[], &Origin::default(), lang));
+        let none = crate::report::Focus::default();
+        let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[], &none, &Origin::default(), lang));
         let joined = out.join("\n");
         // **글자는 말묶음에서 온다**(moai-zeyv) — 여기에 한국어를 박으면 기본 언어(영어)에서 깨진다.
         // **셈이 화면에 닿는지는 따로 잰다**(리뷰 moai-80qw) — 기댓값도 같은 `say` 를 지나므로,
@@ -2313,7 +2350,7 @@ mod tests {
         assert!(joined.contains("이미 잡고 있는 것 1건"), "{joined}");
         assert!(joined.contains("argos-0004"), "{joined}");
 
-        let empty = plain(&ready(&[], &labels, &[], &[], &Origin::default(), lang));
+        let empty = plain(&ready(&[], &labels, &[], &[], &none, &Origin::default(), lang));
         let joined = empty.join("\n");
         assert!(
             joined.contains(&fill(say(lang, "ready.count"), &[("n", "0")])) && joined.contains(say(lang, "ready.none")),

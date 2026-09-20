@@ -280,6 +280,47 @@ fn nothing_picked_means_korean_for_now_and_english_is_one_word_away() {
     assert_eq!(english.lines().count(), japanese.lines().count(), "영어와 일본어의 줄 수가 다르다");
 }
 
+/// **마일스톤이 도는 동안 그 안이 먼저다**(moai-493a, 2026-09-20 사용자 결정).
+///
+/// 한 판에서 셋을 잰다 — `ready` 가 밖의 일을 빼고 그 까닭을 대는가, `--json` 이 같은 것을
+/// 기계에도 대는가, 보드가 알림 한 줄로 비추는가. **막지 않는다**: 밖의 일을 집는 `mv` 는
+/// 그대로 0 으로 끝나야 한다. 거절하면 그것이 게이트고, 그 결정은 여기서 뒤집힌다.
+#[test]
+fn a_running_milestone_comes_first_and_nothing_is_blocked() {
+    let s = init("focus");
+    let stone = field(&ok(s.path(), &["milestone", "add", "v0.1", "--json"]), "id");
+    let epic = field(&ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &stone, "--json"]), "id");
+    let inside = field(&ok(s.path(), &["add", "안의 일", "-e", &epic, "--json"]), "id");
+    let held = field(&ok(s.path(), &["add", "밖의 일", "--json"]), "id");
+    let hot = field(&ok(s.path(), &["add", "밖의 핫픽스", "-p", "0", "--json"]), "id");
+
+    // 아직 아무도 안 집었다 — 마일스톤은 안 돈다(시작은 멤버에서 읽는다).
+    let before = ok(s.path(), &["ready"]);
+    assert!(before.contains(&held), "안 도는데 밖의 일을 뺐다\n{before}");
+
+    // 안의 일을 하나 집으면 그때부터 돈다.
+    ok(s.path(), &["mv", &inside, "in_progress", "--from", "todo"]);
+    let after = ok(s.path(), &["ready"]);
+    assert!(!after.contains(&held), "도는데 밖의 p2 를 그대로 냈다\n{after}");
+    assert!(after.contains(&hot), "밖의 p0 까지 뺐다 — 핫픽스 자리가 사라졌다\n{after}");
+    assert!(after.contains(&stone), "무엇이 도는지 안 댔다\n{after}");
+
+    // 기계에도 같은 것을 댄다 — 짧아진 목록을 "할 일이 없다" 로 읽지 않게.
+    let json = ok(s.path(), &["ready", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(&format!("\"milestone\":[\"{stone}\"]")), "{json}");
+    assert!(json.contains(&format!("\"outside\":[\"{held}\"]")), "{json}");
+
+    // 보드는 알림으로 댄다 — 경고가 아니다(`!` 가 아니라 `+`).
+    let board = ok(s.path(), &["status"]);
+    let line = board.lines().find(|l| l.contains("도는 마일스톤")).expect(&format!("보드가 말이 없다\n{board}"));
+    assert!(line.starts_with('+'), "알림이 경고로 섰다 — {line:?}");
+
+    // **막지 않는다.** 밖의 일을 집는 것은 그대로 지나간다.
+    let out = moai(s.path(), &["mv", &held, "in_progress", "--from", "todo"]);
+    assert!(out.status.success(), "밖의 일 집기를 막았다 — 게이트가 됐다\n{}", text(&out));
+}
+
 /// **시스템 로캘은 말을 안 고른다**(moai-gv9n, 2026-09-20 사용자 결정).
 ///
 /// `Lang::parse` 가 `ja_JP.UTF-8` 모양을 받아 주는 것은 `MOAI_LANG` 에 로캘을 그대로 붙여
@@ -2370,8 +2411,56 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
     // 계획은 stdin 으로 오므로 argv 의 길이 상한도 없다 — 이 상한이 유일한 문이다.
     let plan = from_stdin(s.path(), &["add", "--from", "-"], &format!("# 에픽\n- {big}\n"));
     assert!(!plan.status.success() && String::from_utf8_lossy(&plan.stderr).contains("64KB"), "add --from 이 큰 제목을 받았다");
+
+    // **거절문은 아직 안 지은 줄을 id 로 부르지 않는다**(moai-1rkl). 거절하는 쓰기는 아무것도 안
+    // 남기므로 그 id 는 어디에도 없고, 그것을 대면 받는 쪽이 없는 것을 찾으러 간다.
+    // **이미 선 줄은 그대로 id 로 부른다** — 두 갈래를 함께 잰다. 안 지은 쪽만 재던 판은 가름을
+    // 뒤집어도 전부 푸르렀고, 그러면 이미 선 줄의 거절문까지 제목만 대어 받는 쪽이 어느 줄인지
+    // 못 찾는다. 두 자리를 다 건드린다 — 저널에 적힐 글(`mv -m`)과 줄의 밭(`edit --title`)이다.
+    for (args, what, standing) in [
+        (vec!["add", big.as_str()], "add 제목", None),
+        (vec!["add", "새것", "-b", big.as_str()], "add -b", None),
+        (vec!["mv", id.as_str(), "in_progress", "-m", big.as_str()], "mv -m", Some(id.as_str())),
+        (vec!["edit", id.as_str(), "--title", big.as_str()], "edit --title", Some(id.as_str())),
+    ] {
+        let err = String::from_utf8_lossy(&moai(s.path(), &args).stderr).to_string();
+        match standing {
+            None => {
+                assert!(err.contains("새 줄"), "{what}: 안 지은 줄을 안 가리킨다\n{err}");
+                assert!(!err.contains("argos-"), "{what}: 쓰지도 않은 id 를 댔다\n{err}");
+            }
+            Some(id) => {
+                assert!(err.contains(id), "{what}: 이미 선 줄을 id 로 안 부른다\n{err}");
+                assert!(!err.contains("새 줄"), "{what}: 이미 선 줄을 안 지은 줄이라 했다\n{err}");
+            }
+        }
+    }
+
+    // **크기 말고 다른 거절도 안 지은 줄을 id 로 안 부른다**(moai-1rkl) — `Issue::validate_fields`
+    // 의 말도 `<id>: ` 로 시작한다. 크기만 고쳐 두면 같은 쓰기가 한 축에서는 제목을, 다른 축에서는
+    // 없는 id 를 댄다: 아래 한 줄이 바로 그 자리였다.
+    let tagged = from_stdin(s.path(), &["add", "--from", "-"], "# 에픽\n- 멤버 #bug,perf\n");
+    let err = String::from_utf8_lossy(&tagged.stderr).to_string();
+    assert!(!tagged.status.success(), "쉼표가 든 태그를 받았다");
+    assert!(err.contains("새 줄"), "안 지은 줄을 안 가리킨다\n{err}");
+    assert!(!err.contains("argos-"), "쓰지도 않은 id 를 댔다\n{err}");
+
     assert_eq!(issues(s.path()), before, "거절한 쓰기가 스냅샷을 바꿨다");
     assert_eq!(journal(s.path()), notes, "거절한 쓰기가 저널에 남았다");
+
+    // **연습이 진짜와 같은 것을 본다**(moai-5229). 연습이 "좋다" 를 받은 뒤에 진짜가 거절하면
+    // 그 승인이 뒤늦은 말이 된다 — `add --from` 과 `idea promote` 두 길 모두.
+    let thought = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    for args in [
+        vec!["add", "--from", "-", "--dry-run"],
+        vec!["idea", "promote", thought.as_str(), "--from", "-", "--dry-run"],
+    ] {
+        let out = from_stdin(s.path(), &args, &format!("# 에픽\n- {big}\n"));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "연습이 진짜가 거절할 계획에 좋다고 했다 — {args:?}");
+        assert!(err.contains("64KB") && err.contains("새 줄"), "{args:?}\n{err}");
+    }
+    ok(s.path(), &["rm", &thought]);
 
     // 딱 상한은 받는다.
     ok(s.path(), &["note", &id, &"a".repeat(limit)]);

@@ -21,7 +21,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **겹친 줄로 고른다.** 옆 워크트리에서 집은 일은 거기서 `in_progress` 로 서
     // 있으므로, 같은 자(`report::ready`)가 그것을 저절로 뺀다 — 여기에 "남이 집은
     // 것" 을 가르는 `if` 를 따로 두지 않는다.
-    let picks = report::ready(&load.issues, &repo.config);
+    let (picks, focus) = report::ready_in(&load.issues, &repo.config);
     // 미뤄 둔 것·빈 묶음에 막혀 못 집는 것. 안 대면 `ready` 가 까닭 없이 빈다.
     let held = report::held(&load.issues, &repo.config);
     if ctx.json {
@@ -32,6 +32,12 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         struct Said<'a> {
             ready: Vec<super::Row<'a>>,
             held: Vec<Waiting<'a>>,
+            /// 지금 도는 마일스톤. 없으면 키를 안 단다.
+            #[serde(skip_serializing_if = "Vec::is_empty")]
+            milestone: Vec<&'a str>,
+            /// 그 밖이라 이번에 안 낸 일. `p0` 은 안 든다 — 핫픽스는 밖에서도 낸다.
+            #[serde(skip_serializing_if = "Vec::is_empty")]
+            outside: Vec<&'a str>,
         }
         // 사람 화면의 held 줄과 같은 셋. 빈 목록은 안 싣는다 — 미룬 막음이면 `empty` 가,
         // 빈 묶음이면 `by`·`undo` 가 늘 비어 키만 늘린다.
@@ -47,6 +53,12 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         }
         return super::json_line(&Said {
             ready: picks.iter().map(|i| super::Row::of(i, None).on(&origin)).collect(),
+            // **왜 짧은지를 기계에도 댄다**(moai-q04l). 사람 화면이 한 줄로 대는 것을 여기서
+            // 빼면, `ready --json` 으로 도는 고리는 도는 마일스톤이 목록을 줄인 것을 "할 일이
+            // 없다" 로 읽는다 — `held` 를 객체로 감싼 것과 같은 까닭이다(moai-w6n2).
+            // 도는 것이 없으면 키를 안 단다.
+            milestone: focus.running.iter().map(|m| m.id.as_str()).collect(),
+            outside: focus.outside.iter().map(|i| i.id.as_str()).collect(),
             held: held
                 .iter()
                 .map(|h| Waiting { id: &h.issue.id, by: &h.by, undo: &h.undo, empty: &h.empty })
@@ -57,7 +69,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 첫 칸도 아니고 끝나지도 않은 것 = 누군가 이미 잡고 있는 것.
     let wip = report::wip(&load.issues, &repo.config);
 
-    Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip, &held, &origin, ctx.lang()))
+    Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip, &held, &focus, &origin, ctx.lang()))
 }
 
 /// 등록한 프로젝트마다 집을 수 있는 일. 무엇이 ready 인지는 프로젝트마다 같은 자
@@ -71,11 +83,18 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let seen: Vec<Seen<view::Picks>> = projects
         .iter()
         .map(|p| {
-            p.seen(|repo, load| view::Picks {
-                picks: report::ready(&load.issues, &repo.config),
-                unreadable: load.errors.len(),
-                origin: &p.origin,
-                trouble: &p.trouble,
+            p.seen(|repo, load| {
+                // **저장소 안의 `ready` 와 같은 자다.** 도는 마일스톤이 목록을 줄였으면 그
+                // 까닭도 함께 받는다 — 여기서 `ready` 만 부르면 한눈 보기의 목록만 말없이
+                // 짧아지고, 그 짧아짐이 "할 일이 없다" 로 읽힌다.
+                let (picks, focus) = report::ready_in(&load.issues, &repo.config);
+                view::Picks {
+                    picks,
+                    focus,
+                    unreadable: load.errors.len(),
+                    origin: &p.origin,
+                    trouble: &p.trouble,
+                }
             })
         })
         .collect();
@@ -84,6 +103,11 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         #[derive(serde::Serialize)]
         struct Said<'a> {
             ready: Vec<super::Row<'a>>,
+            /// 저장소 안의 `ready --json` 과 같은 두 키 — 없으면 안 단다.
+            #[serde(skip_serializing_if = "Vec::is_empty")]
+            milestone: Vec<&'a str>,
+            #[serde(skip_serializing_if = "Vec::is_empty")]
+            outside: Vec<&'a str>,
             unreadable: usize,
             #[serde(skip_serializing_if = "<[String]>::is_empty")]
             trouble: &'a [String],
@@ -96,6 +120,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 path: &p.path,
                 seen: s.map(|k| Said {
                     ready: k.picks.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
+                    milestone: k.focus.running.iter().map(|m| m.id.as_str()).collect(),
+                    outside: k.focus.outside.iter().map(|i| i.id.as_str()).collect(),
                     unreadable: k.unreadable,
                     trouble: &p.trouble,
                 }),
