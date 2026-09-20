@@ -21,7 +21,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
   moai ready                    지금 집을 수 있는 일
   moai show <id>                본문과 이력 — 왜 그렇게 정했는지가 여기 있다
   moai mv <id> in_progress      집는다.  끝나면 done
-  moai note <id> \"발견한 것\"    다음 사람이 읽을 메모
+  moai note <id> '발견한 것'    다음 사람이 읽을 메모
   moai tui                      탐색기 — 에픽이 디렉터리처럼 열린다.
                                 SPC n 으로 생각을 담는다
 
@@ -32,7 +32,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 이미 있는 일을 지금 안 할 때:
 
-  moai defer <id> -m \"다음 분기에\"  계획에서 잠시 뺀다. 칸도 종류도 안 바뀐다
+  moai defer <id> -m '다음 분기에'  계획에서 잠시 뺀다. 칸도 종류도 안 바뀐다
   moai defer <id> --undo           도로 집는다
 
 여러 프로젝트를 한곳에서 볼 때:
@@ -155,6 +155,15 @@ pub enum Cmd {
   moai add '남에게' -a \"철수 (chulsoo@example.com)\"    안 주면 만든 이가 담당
   moai add '임자 없이' -a none
 
+제목과 본문은 따로 넘긴다. 제목은 무엇이 어긋났는지 한 줄이다 — 보드와
+`ready` 와 탐색기 목록은 제목만 보여 준다. 긴 글은 제목에 밀어 넣지 말고
+본문으로 가른다. 본문은 마크다운이고 `-b -` 가 stdin 에서 읽는다:
+
+moai add '파서가 BOM 에서 죽는다' -t bug -b - <<'BODY'
+- 무엇이 어긋났는가: 앞머리 세 바이트를 제목으로 읽는다
+- 어디를 고치는가: src/store.rs 의 읽기
+BODY
+
 한 번에 여럿 (`--from`):
 
 moai add --from - <<'PLAN'
@@ -185,7 +194,7 @@ PLAN
 
   moai mv moai-4aex in_progress
   moai mv moai-4aex moai-9k2p done
-  moai mv moai-4aex review -m \"테스트는 다음 이슈로 뺐다\"
+  moai mv moai-4aex review -m '테스트는 다음 이슈로 뺐다'
 
   여럿이 같은 .moai 를 쓰면 본 칸을 함께 준다. `--from` 은 락 안에서 다시 보고
   그 칸일 때만 옮긴다 — 진 쪽은 stderr 한 줄과 0 아닌 코드를 받는다. 그때는
@@ -195,12 +204,19 @@ PLAN
     Mv(MvArgs),
     /// 제목·본문·태그·에픽·우선순위를 고친다
     #[command(after_help = "  `--epic none`·`--milestone none` 은 그 줄에 적힌 필드만 뺀다. 부모나
-  에픽에게서 물려받는 소속은 남는다.")]
+  에픽에게서 물려받는 소속은 남는다.
+
+  제목과 본문은 따로 간다 — `--title` 은 한 줄, `-b` 는 마크다운 본문이고
+  `-b -` 가 stdin 에서 읽는다. **`-b` 는 본문을 통째로 바꾼다.** 끝에 한 줄을
+  더하려면 지금 본문을 먼저 읽어 이어 붙인다:
+
+{ moai show <id> --json | jq -r '.body // empty'
+printf '\\n한 줄 더\\n'; } | moai edit <id> -b -")]
     Edit(EditArgs),
     /// 지운다
     Rm(RmArgs),
     /// 이슈에 메모를 남긴다 (저널에만 쌓인다)
-    #[command(after_help = "  moai note moai-4aex \"파서가 BOM 에서 죽는다\"
+    #[command(after_help = "  moai note moai-4aex '파서가 BOM 에서 죽는다'
   moai note moai-4aex -b - < review.txt        긴 글은 stdin 에서
 
 moai note moai-4aex -b - <<'NOTE'
@@ -214,7 +230,7 @@ NOTE
     Note(NoteArgs),
     /// 지금 안 할 일을 계획에서 잠시 뺀다 (또는 도로 집는다)
     #[command(after_help = "  moai defer moai-4aex                       미룬다
-  moai defer moai-4aex moai-9k2p -m \"다음 분기\"   여럿을, 까닭과 함께
+  moai defer moai-4aex moai-9k2p -m '다음 분기'   여럿을, 까닭과 함께
   moai defer moai-4aex --undo                도로 집는다
 
   **칸도 종류도 안 바꾼다.** 어느 칸에 있었는지는 도로 집을 때 그대로
@@ -228,7 +244,7 @@ NOTE
   뒤늦은 미루기가 계획 밖으로 빼지 않는다. 미루기는 칸을 안 바꾸므로, 겨루는
   둘이 **둘 다 미루는** 것은 이것으로 안 갈린다.
 
-  moai defer moai-4aex -m \"다음 분기\" --from todo")]
+  moai defer moai-4aex -m '다음 분기' --from todo")]
     Defer(DeferArgs),
 
     /// 읽었다고 표시한다 (내 설정에만 남는다)
@@ -264,12 +280,17 @@ NOTE
     #[command(subcommand)]
     Milestone(Typed),
     /// 반짝 떠오른 것을 그 자리에서 담는다 (`--type idea`)
-    #[command(subcommand, after_help = "  todo 보다 한 칸 낮은 자리다. **담는 비용이 0 에 가까워야 담는다** — 제목
-  하나로 끝나고 우선순위도 에픽도 묻지 않는다.
+    #[command(subcommand, after_help = "  todo 보다 한 칸 낮은 자리다. **담는 비용이 0 에 가까워야 담는다** —
+  우선순위도 에픽도 묻지 않는다. 제목과 본문은 그래도 가른다: 제목은 한 줄로
+  짧게 적고, 긴 생각은 `-b -` 로 본문에 흘린다. 펼칠 때 이 제목이 이슈 제목이
+  되니, 여기 적은 긴 제목은 이슈로 그대로 옮겨 간다.
 
   moai idea add '반짝 떠오른 것'      담기
-  moai idea add '긴 생각' -b -        본문은 stdin 에서
   moai idea ls                        쌓인 것 보기 (`idea show` 와 같다)
+
+moai idea add '머지 드라이버를 클론마다 손으로 심는다' -b - <<'IDEA'
+지금은 `moai merge-driver --install` 을 사람이 한 번 쳐야 한다.
+IDEA
 
   idea 는 일이 아니다 — `moai ready` 에도 보드의 셈에도 들지 않고, 에픽 없이
   사는 것이 정상이라 \"에픽 없는 이슈\" 경고에 안 걸린다.
@@ -540,7 +561,8 @@ pub enum ProjectCmd {
 #[derive(Subcommand, Debug)]
 pub enum Typed {
     /// 만든다
-    #[command(next_line_help = true)]
+    #[command(next_line_help = true, after_help = "  제목과 본문은 따로 넘긴다 — 제목은 무엇이 어긋났는지 한 줄이고, 긴 글은
+  `-b -` 로 stdin 에서 흘리는 마크다운 본문이다. 예시는 `moai add --help`.")]
     Add(AddArgs),
     // `ls` 는 같은 것의 다른 이름이다. **어휘를 둘로 만들지 않으려고 별명으로
     // 둔다** — 목록을 내는 동사가 둘이면 도움말이 둘 다 가르쳐야 한다.
@@ -570,6 +592,10 @@ moai idea promote <id> --from - <<'PLAN'
 - [p1] 첫 이슈 #enhancement
 - [p2] 둘째 이슈
 PLAN
+
+  **계획에 적은 줄이 그대로 이슈 제목이 된다.** idea 의 제목이 길면 그 길이가
+  이슈로 옮겨 가니, 펼칠 때 제목을 짧게 새로 적는다. 원래 글은 그 idea 에
+  그대로 남아 이력에서 찾아간다.
 
   펼치면 닫힌다 — 그 idea 는 `done` 으로 간다. 무엇이 무엇에서 나왔는지는
   저널에 남는다 (`moai show <id>` 의 이력).
@@ -667,7 +693,7 @@ pub struct AddArgs {
     /// 만들지 않고 무엇이 만들어질지만 낸다 (`--from` 과 함께)
     ///
     /// **`--from` 이 있어야 뜻이 있다.** 한때 없이도 받았고, 그때
-    /// `moai add "제목" --dry-run` 은 연습이라고 적힌 줄을 찍은 다음 그것을
+    /// `moai add '제목' --dry-run` 은 연습이라고 적힌 줄을 찍은 다음 그것을
     /// 실제로 만들었다 — 막는 줄 알고 부른 명령이 쓰는 것이 가장 나쁘다.
     #[arg(long, verbatim_doc_comment)]
     pub dry_run: bool,
@@ -996,6 +1022,7 @@ pub enum SkillCmd {
   보는 것:
     마켓플레이스  이 저장소 이름으로 등록됐나, 남의 자리를 가리키지 않나
     설치          어느 범위에 어느 판이, 지금 심을 판과 같은가
+    곁 플러그인   한국어 글을 다듬는 둘이 이 저장소에 깔렸나
     훅            설치본이 부르는 실행 파일이 아직 있나
     claude        PATH 에 있나 (없으면 심을 수도 걷을 수도 없다)")]
     Status,
@@ -1007,6 +1034,12 @@ pub enum SkillCmd {
 
   **`.claude/moai-plugin/` 은 지우지 않는다.** 돌고 있는 세션이 물고 있는
   파일을 지우면 그 세션의 도구 호출이 막힐 수 있다. 세션을 닫은 뒤 지운다.
+
+  함께 깐 한국어 플러그인 둘도 **moai 를 걷은 범위에서** 함께 걷는다.
+  마켓플레이스는 두고 간다 — 이름은 기계 하나에서 전역이라 다른 저장소의
+  설치가 그것을 쓴다.
+  사용자 범위의 설치도 다른 저장소의 moai 가 거기 서 있으면 두고 가고, 그때는
+  걷는 명령을 한 줄로 낸다.
 
   이미 열려 있는 Claude 세션은 옛 훅을 계속 부른다 — 다시 열어야 걷힌다.
 

@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:5dc471e5 -->
+<!-- moai:begin v:0.1.0 hash:3cf30fcc -->
 ## 이슈 트래커 — moai
 
 이 저장소의 할 일은 `.moai/issues.jsonl` 에 있다.
@@ -93,7 +93,8 @@ PLAN
 - `korean-skills:humanizer` 로 AI 티를 걷고, 20줄을 넘으면 `humanize-korean:humanize-korean` 을 더
   거친 뒤, 마지막에 `korean-skills:grammar-checker` 로 맞춤법·띄어쓰기를 본다
 - id·명령·경로·수·코드 조각과 꼴이 정해진 줄(`model: …`·`다음: …`·`Regression-of: …`·`요약: 원문 …`)은 그대로 둔다
-- 두 플러그인은 `moai skill install` 이 함께 깐다. 자세한 것은 `references/commands.md` 의 "한국어 글" 에 있다
+- 두 플러그인은 `moai skill install` 이 함께 깐다. 자세한 것은 moai 스킬 안의
+  `references/commands.md` 의 "한국어 글" 에 있다
 
 ### 지금 범위가 아닌 것은 담는다
 
@@ -110,6 +111,10 @@ moai idea promote <id> --from - <<'PLAN'
 - [p1] 첫 이슈 #enhancement
 PLAN
 ```
+
+**계획에 적은 줄이 그대로 이슈 제목이 된다.** 담을 때 길어진 idea 제목을 옮겨
+적으면 그 길이가 이슈로 번지니, 펼칠 때 제목을 짧게 새로 적는다 — 원래 글은 그
+idea 에 그대로 남고, 이력의 "<idea id> 에서 펼쳤다" 가 거기로 데려간다.
 
 ### 이미 있는 일을 지금 안 할 때
 
@@ -196,6 +201,24 @@ id** 로 그 이슈의 커밋을 그때그때 찾아 낸다. 해시를 노트에
 도구가 자라 이 블록이 낡으면 `moai init` 을 다시 부른다. 이슈와 저널은
 건드리지 않고 이 블록만 다시 쓴다. 낡았는지만 보려면 `moai init --check` —
 아무것도 안 쓰고 `current`·`stale`·`missing` 으로 답한다.
+
+### 이슈 파일을 합칠 때
+
+`.moai/issues.jsonl` 은 한 줄이 이슈 하나고 id 로 정렬돼 있어,
+서로 다른 이슈를 고친 두 가지가 줄이 이웃이라는 이유로 부딪친다. 머지 드라이버를
+심으면 git 이 그것을 이슈마다 3-way 로 푼다.
+
+    moai merge-driver --install
+
+**클론마다 한 번 친다.** git 은 드라이버 명령을 설정에서만 읽고 설정은 커밋되지
+않는다. 안 심은 클론에서는 `.gitattributes` 의 `merge=moai` 가 그냥 무시되고 git 의
+기본 머지가 돈다 — 안 심으면 지금까지와 같다.
+
+**심은 자리가 계속 있어야 한다.** 적히는 것은 그때 도는 바이너리의 절대 경로이고, 그
+자리가 비면 git 은 그것을 충돌로 읽어 이쪽 파일을 표식 없이 남긴다 — 그 파일을 `git add`
+하면 저쪽이 통째로 사라진다. 적는 자리(`--local`)는 클론이 함께 쓰니, 딸린 워크트리의
+`target/` 에서 치면 그 워크트리를 지우는 순간 모든 체크아웃이 그 꼴이 된다. 그럴 때는 `--as`
+로 안 사라질 자리를 준다. 무엇을 어떻게 합치는지는 `moai merge-driver --help` 에 있다.
 
 ### 일한 AI 를 남긴다
 

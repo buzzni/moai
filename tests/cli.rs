@@ -4627,6 +4627,32 @@ fn every_help_heredoc_is_copyable() {
     assert!(bad.is_empty(), "복사해 못 도는 heredoc:\n{}", bad.join("\n"));
 }
 
+/// **도움말도 자유 글을 작은따옴표로 가르친다** (moai-vj4e, 2026-09-18 사용자 결정).
+///
+/// 큰따옴표로 가르친 `-m`·`-b`·노트는 채운 글에 백틱이나 `$(…)` 가 들면 셸이 명령 치환을
+/// 해 글이 잘린 채 0 으로 끝난다 — 이 저장소의 노트는 백틱을 자주 쓴다. `guide` 의 같은
+/// 이름 시험은 AGENTS 블록과 스킬 글만 훑어 `--help` 를 못 본다. 도움말이 사람과 에이전트가
+/// 가장 먼저 읽는 자리라 여기서 함께 잰다.
+#[test]
+fn every_help_teaches_free_text_in_single_quotes() {
+    let s = init("helpquotes");
+    let mut bad = Vec::new();
+    let mut seen = 0;
+    for (path, help) in every_help(&s) {
+        for l in help.lines().filter(|l| l.contains("moai ")) {
+            seen += 1;
+            // 제목 자리도 자유 글이다(moai-1yya) — 이 저장소 제목에는 백틱이 든다.
+            for pat in ["-m \"", "-b \"", "add \"", "note <id> \"", "note moai-4aex \""] {
+                if l.contains(pat) {
+                    bad.push(format!("moai {path} --help: {l}"));
+                }
+            }
+        }
+    }
+    assert!(seen > 40, "`moai` 가 든 도움말 줄을 {seen}개밖에 못 봤다 — 훑기가 헛돌았다");
+    assert!(bad.is_empty(), "자유 글을 큰따옴표로 가르치는 도움말:\n{}", bad.join("\n"));
+}
+
 /// **좁은 터미널에서도 heredoc 여는 줄이 접히지 않는다** (moai-opjn).
 ///
 /// clap 의 `wrap_help` 는 도움말을 터미널 폭에 맞춰 낱말 사이에 **실제 개행**을 넣어
@@ -9020,6 +9046,52 @@ fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
     let op = other.display().to_string();
     let why = refusal(&tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(&format!("moai -C {op} add '딴 일'")))));
     assert!(why.contains(&format!("moai -C {op} add '제목'")), "남의 트래커를 안 댄다\n{why}");
+
+    // **규칙 3 의 닫는 두 걸음도 같은 자리를 댄다**(moai-j2vp) — 규칙 1 은 `-C /other` 를 대는데
+    // 이 줄만 맨 `moai` 를 내던 판은, 옮겨 친 사람이 여기 없는 리뷰를 이 트래커에서 닫게 했다.
+    let review = field(
+        &ok(&other, &["add", "리뷰 — 남의 일", "-t", "review", "--parent", &theirs, "-b", "무엇을 왜 보는가", "--json"]),
+        "id",
+    );
+    ok(&other, &["mv", &review, "in_progress"]);
+    let shut = format!("moai -C {op} mv {review} done");
+    let got = tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(&shut)));
+    assert!(!got.trim().is_empty(), "규칙 3 이 남의 트래커의 리뷰를 안 봤다 — {shut}");
+    let why = refusal(&got);
+    assert!(why.contains(&format!("moai -C {op} note {review}")), "규칙 3 이 남의 트래커를 안 댄다\n{why}");
+    assert!(!why.lines().any(|l| l.trim_start().starts_with("moai note")), "맨 moai 로 댄 줄이 남았다\n{why}");
+
+    // **한국어 알림도 간 자리를 댄다** — 친 `-C` 글자가 아니다. 워크트리에서 친 줄은 루트로 간다.
+    // **걷지 않은 출력으로 잰다**(리뷰 moai-51h9.k8j1) — [`tool_at`] 은 알림을 통째로 걷어 내
+    // ([`without_korean_notice`]), 거기에 "그 글자가 없다" 를 물으면 알림이 안 서도 참이다.
+    let noted = format!("moai -C . note {id} '한국어 노트'");
+    let raw = hook_in_raw(&s, &inside, "pre-tool-use", &tool_input(&inside, "Bash", &format!("{{\"command\":{}}}", json_str(&noted))));
+    let out = String::from_utf8(raw.stdout).unwrap();
+    assert!(out.contains(KOREAN_NOTICE), "한국어 알림이 안 섰다 — {noted}\n{out}");
+    assert!(out.contains("`moai edit`"), "맨 moai 로 안 댄다\n{out}");
+    assert!(!out.contains("-C ."), "친 글자를 알림에 도로 내밀었다\n{out}");
+
+    // **아직 없는 자리를 가리킨 줄은 그 자리를 그대로 댄다**(리뷰 moai-51h9.n0z 13번) — 판정은 이
+    // 트래커가 맡되, 옮겨 친 줄이 이 트래커에 서면 안 된다.
+    let fresh = s.path().join("newproj");
+    let np = fresh.display().to_string();
+    let make = format!("mkdir -p {np} && moai -C {np} add '딴 일'");
+    let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&make))));
+    assert!(why.contains(&format!("moai -C {np} add '제목'")), "없는 자리의 -C 를 버렸다\n{why}");
+
+    // **안 적은 `-C` 는 지어내지 않는다**(리뷰 moai-51h9.k8j1) — 앞의 `cd` 가 없는 자리를 가리키면
+    // 그 `cd` 는 실패하고 `moai` 는 세션 자리에서 돈다. 그 자리를 내밀던 판은 `git worktree add …
+    // && cd <새 워크트리> && moai add` 로 막힌 사람에게 아직 없는 디렉터리를 겨눈, 쳐도 안 도는
+    // 줄을 내밀었다.
+    for typed in [format!("cd {np}; moai add '딴 일'"), format!("mkdir -p {np} && cd {np} && moai add '딴 일'")] {
+        let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&typed))));
+        assert!(why.contains("moai add '제목'"), "맨 moai 로 안 댄다 — {typed}\n{why}");
+        assert!(!why.contains(&np), "안 적은 -C 를 지어냈다 — {typed}\n{why}");
+    }
+    // **이 트래커 밑의 아직 없는 자리도 맨 `moai` 다** — 만들어지면 `moai` 가 위로 찾아 여기에 선다.
+    let sub = format!("mkdir -p {wt}/sub && moai -C {wt}/sub add '딴 일'");
+    let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&sub))));
+    assert!(why.contains("moai add '제목'") && !why.contains("-C"), "제 트래커로 도로 풀리는 -C 를 댔다\n{why}");
 }
 
 /// **겹침과 모름을 한 판에서 본다**(moai-15c2, 사용자 결정). 따로 보던 판은 둘이 함께면 풀릴 것을
@@ -9790,11 +9862,20 @@ fn skill_install_skips_a_korean_marketplace_that_points_elsewhere() {
     let out = c.run(s.path(), &["skill", "install", "--json"], true);
     assert!(out.status.success(), "{}", text(&out));
     let json = String::from_utf8(out.stdout).unwrap();
-    assert!(json.contains("이미 someone/else 를 가리킨다"), "{json}");
+    // **맨 위의 `blocked_by` 와 같은 모양이다**(moai-mfw1) — 막은 자리 하나고, 까닭은 사람
+    // 출력의 몫이다. 한때 여기만 문장이라 같은 이름의 키가 한 출력 안에서 뜻이 둘이었다.
+    assert!(json.contains(r#""blocked_by":"someone/else""#), "{json}");
+    assert!(!json.contains("가리킨다"), "기계 출력에 사람이 읽을 문장이 섰다 — {json}");
     let calls = c.calls()[before..].to_string();
     assert!(!calls.contains("korean-skills"), "남의 이름을 건드렸다\n{calls}");
     assert!(calls.contains("plugin marketplace add epoko77-ai/im-not-ai --scope local"), "아는 출처를 이 범위에 안 적는다\n{calls}");
     assert!(calls.contains("plugin install humanize-korean@im-not-ai --scope local -y"), "{calls}");
+
+    // **빠져나갈 길을 함께 낸다**(moai-mfw1). 까닭만 적던 판은 다시 불러도 늘 건너뛰기만 해,
+    // 훅의 "깔려 있지 않다" 알림이 영영 안 꺼졌다 — moai 의 이름이 막혔을 때와 같은 길이다.
+    let said = text(&c.run(s.path(), &["skill", "install"], true));
+    assert!(said.contains("이미 someone/else 를 가리킨다"), "{said}");
+    assert!(said.contains("claude plugin marketplace remove korean-skills"), "빠져나갈 길이 없다 — {said}");
 }
 
 /// **같은 저장소를 다른 철자로 알면 남의 것으로 안 본다**(리뷰 moai-5wk4.76z). upstream 안내대로
