@@ -50,17 +50,24 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     }
 
     let shown = one_line(&dir.display().to_string());
-    let mut out = vec![if added {
-        format!("등록함  {shown}")
-    } else {
-        format!("{}  {shown}", paint(style::DIM, "이미 등록돼 있다"))
+    let said = match added {
+        true => crate::i18n::say(ctx.lang(), "project.added"),
+        false => crate::i18n::say(ctx.lang(), "project.already"),
+    };
+    let mut out = vec![match added {
+        true => format!("{said}  {shown}"),
+        false => format!("{}  {shown}", paint(style::DIM, said)),
     }];
     // 한 줄은 `project ls` 의 끝 칸과 같은 말이다 — 두 화면이 같은 디렉터리를 달리 부르지 않는다.
     if let Some(error) = &unreadable {
-        out.push(format!("  {} 못 읽는다 — {}", paint(style::ERROR, "!"), one_line(error)));
+        let why = crate::i18n::fill(
+            crate::i18n::say(ctx.lang(), "overview.project_unreadable"),
+            &[("why", &one_line(error))],
+        );
+        out.push(format!("  {} {why}", paint(style::ERROR, "!")));
     }
     if !initialized {
-        out.push(paint(style::DIM, &format!("  {}", uninit_line(&dir, tracker_at.as_deref()))));
+        out.push(paint(style::DIM, &format!("  {}", uninit_line(&dir, tracker_at.as_deref(), ctx.lang()))));
     }
     Ok(out)
 }
@@ -77,16 +84,19 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
 ///
 /// 빼는 것(`moai project rm`)은 안 댄다 — 지우는 쪽은 사람이 정한다.
 ///
-/// 글은 말묶음의 `overview.uninit`·`overview.uninit_worktree` 와 **같은 문장이어야 한다** — 이 명령이
-/// 아직 말묶음을 안 지나(이 파일의 다른 줄도 그렇다) 손으로 맞춘 자리다.
-fn uninit_line(dir: &Path, tracker_at: Option<&Path>) -> String {
+/// 글은 한눈 보기와 **한 키에서 온다**(moai-95g1) — 한때 같은 문장을 손으로 맞춰 두었고,
+/// 그런 자리는 한쪽만 고쳐지는 날 두 화면이 같은 처지를 달리 부른다.
+fn uninit_line(dir: &Path, tracker_at: Option<&Path>, lang: crate::i18n::Lang) -> String {
     let word = |at: &Path| shell_word(&at.display().to_string());
     match tracker_at {
-        Some(main) => format!(
-            "init 전 — 여기는 딸린 워크트리다. 트래커는 주 체크아웃에 사니 `moai project add {}` 로 그쪽을 등록한다",
-            word(main)
+        Some(main) => crate::i18n::fill(
+            crate::i18n::say(lang, "overview.uninit_worktree"),
+            &[("go", &format!("moai project add {}", word(main)))],
         ),
-        None => format!("init 전 — .moai 가 아직 없다. `moai -C {} init` 으로 시작하면 보인다", word(dir)),
+        None => crate::i18n::fill(
+            crate::i18n::say(lang, "overview.uninit"),
+            &[("go", &format!("moai -C {} init", word(dir)))],
+        ),
     }
 }
 
@@ -110,12 +120,14 @@ pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     if removed.is_empty() {
         return Ok(vec![format!(
             "{}  {}",
-            paint(style::DIM, "등록돼 있지 않다"),
+            paint(style::DIM, crate::i18n::say(ctx.lang(), "project.not_registered")),
             one_line(&spelled.display().to_string())
         )]);
     }
-    let mut out: Vec<String> = removed.iter().map(|p| format!("뺌  {}", one_line(&p.display().to_string()))).collect();
-    out.push(paint(style::DIM, "  목록에서만 뺐다 — 디렉터리와 그 .moai 는 그대로다"));
+    let dropped = crate::i18n::say(ctx.lang(), "project.dropped");
+    let mut out: Vec<String> =
+        removed.iter().map(|p| format!("{dropped}  {}", one_line(&p.display().to_string()))).collect();
+    out.push(paint(style::DIM, &format!("  {}", crate::i18n::say(ctx.lang(), "project.list_only"))));
     Ok(out)
 }
 
@@ -138,9 +150,12 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     let not_registered = || {
         let shown = one_line(&spellings[0].display().to_string());
         Fail::coded(
-            format!(
-                "등록돼 있지 않다 — {shown} · `moai project add {}` 로 먼저 더한다",
-                shell_word(&spellings[0].display().to_string())
+            crate::i18n::fill(
+                crate::i18n::say(ctx.lang(), "project.not_registered_yet"),
+                &[
+                    ("path", &shown),
+                    ("go", &format!("moai project add {}", shell_word(&spellings[0].display().to_string()))),
+                ],
             ),
             code::NOT_FOUND,
         )
@@ -189,12 +204,15 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     let now = hue.unwrap_or_else(|| Hue::of_path(&before.path));
     let word = paint(style::project_colour(&before.path, Some(now)), now.name());
     let said = match hue {
-        Some(_) => format!("색 {word}"),
-        None => format!("색 {AUTO} — 경로로 고른다 ({word})", AUTO = user_config::AUTO),
+        Some(_) => crate::i18n::fill(crate::i18n::say(ctx.lang(), "project.colour"), &[("colour", &word)]),
+        None => crate::i18n::fill(
+            crate::i18n::say(ctx.lang(), "project.colour_auto"),
+            &[("auto", user_config::AUTO), ("colour", &word)],
+        ),
     };
     let mut line = format!("{said}  {shown}");
     if !changed {
-        line = format!("{}  {line}", paint(style::DIM, "이미 그렇다"));
+        line = format!("{}  {line}", paint(style::DIM, crate::i18n::say(ctx.lang(), "project.already_so")));
     }
     Ok(vec![line])
 }
@@ -300,7 +318,7 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     }
     let mut out = Vec::new();
     if rows.is_empty() {
-        out.push("등록한 프로젝트가 없다 — `moai project add <디렉터리>` 로 더한다".into());
+        out.push(crate::i18n::say(ctx.lang(), "project.none").into());
     } else {
         let names: Vec<String> = rows.iter().map(|r| one_line(r.name)).collect();
         let paths: Vec<String> = rows.iter().map(|r| one_line(&r.path.display().to_string())).collect();
@@ -314,12 +332,16 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
                 paint(style::project_colour(r.path, r.hue), name),
                 " ".repeat(name_w - width(name)),
                 " ".repeat(path_w - width(path)),
-                said(&r.state),
+                said(&r.state, ctx.lang()),
             ));
         }
     }
     if let Some(config) = &reg.path {
-        out.push(paint(style::DIM, &format!("설정: {}", one_line(&config.display().to_string()))));
+        let line = crate::i18n::fill(
+            crate::i18n::say(ctx.lang(), "project.config_at"),
+            &[("at", &one_line(&config.display().to_string()))],
+        );
+        out.push(paint(style::DIM, &line));
     }
     Ok(out)
 }
@@ -344,7 +366,7 @@ fn state<'a>(p: &'a projects::Project, now: &str) -> State<'a> {
 
 /// 목록 한 줄의 끝 칸. 칸별 수는 한눈 보기의 보드 줄과 같은 글리프·낱말이되 한 줄에
 /// 들게 사이를 좁힌다. **색이 혼자 뜻을 지지 않는다** — 글리프와 낱말이 늘 곁에 선다.
-fn said(state: &State) -> String {
+fn said(state: &State, lang: crate::i18n::Lang) -> String {
     match state {
         State::Initialized { counts, unreadable, columns } => {
             let mut cols: Vec<String> = columns
@@ -358,16 +380,26 @@ fn said(state: &State) -> String {
                 })
                 .collect();
             if *unreadable > 0 {
-                cols.push(format!("{} 읽을 수 없는 줄 {unreadable}개", paint(style::ERROR, "!")));
+                let why = crate::i18n::fill(
+                    crate::i18n::say(lang, "warn.unreadable_line"),
+                    &[("n", &unreadable.to_string())],
+                );
+                cols.push(format!("{} {why}", paint(style::ERROR, "!")));
             }
             cols.join("  ")
         }
         // **워크트리면 여기가 아니라 주 체크아웃이다**(moai-nppo) — `add` 의 줄과 같은 말이다.
-        State::Uninitialized { tracker_at: Some(_) } => paint(style::DIM, "init 전 — 트래커는 주 체크아웃에 있다"),
-        State::Uninitialized { .. } => paint(style::DIM, "init 전"),
-        State::Missing => paint(style::WARN, "디렉터리가 없다"),
+        State::Uninitialized { tracker_at: Some(_) } => {
+            paint(style::DIM, crate::i18n::say(lang, "project.uninit_worktree"))
+        }
+        State::Uninitialized { .. } => paint(style::DIM, crate::i18n::say(lang, "project.uninit")),
+        State::Missing => paint(style::WARN, crate::i18n::say(lang, "overview.missing")),
         // 까닭은 한 줄에 둔다 — 줄바꿈이 섞이면 다음 프로젝트의 줄과 갈리지 않는다.
-        State::Unreadable { error } => format!("{} 못 읽는다 — {}", paint(style::ERROR, "!"), one_line(error)),
+        State::Unreadable { error } => {
+            let why =
+                crate::i18n::fill(crate::i18n::say(lang, "overview.project_unreadable"), &[("why", &one_line(error))]);
+            format!("{} {why}", paint(style::ERROR, "!"))
+        }
     }
 }
 

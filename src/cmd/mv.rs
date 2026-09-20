@@ -201,7 +201,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
 
     for id in &moved.missing {
         super::note_partial();
-        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "mv.missing"), &[("id", id)]));
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.not_found"), &[("id", id)]));
     }
     // **진 집기도 못 찾은 줄과 같은 자리다.** 종료 코드로 갈려야 jq 없는 껍데기가
     // 이긴 쪽과 진 쪽을 가른다 — 여기서 실패로 끝내지는 않는다(나머지 id 는 옮겼다).

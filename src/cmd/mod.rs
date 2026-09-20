@@ -153,10 +153,9 @@ pub fn registered(ctx: &Ctx, worktree: bool) -> R<(&crate::user_config::Registry
 /// 화면의 `tui` 는 멈추지 않고 빈 층에서 `SPC p a` 를 댄다(moai-r8kl).
 /// 목록이 빈 까닭이 사용자 설정의 문제일 수 있어 그것도 붙인다.
 pub fn nothing_registered(reg: &crate::user_config::Registry, lang: crate::i18n::Lang) -> Fail {
-    let mut msg = format!(
-        "{}\n등록한 프로젝트도 없다 — `moai project add <dir>` 로 더하면 `.moai` 밖에서 한눈에 본다",
-        crate::store::NOT_A_REPO
-    );
+    // 앞줄(`저장소가 아니다`)은 아직 `store` 의 것이라 한국어다 — 저장 계층의 글은 그 층과
+    // 함께 옮긴다(moai-yn5x). 뒷줄은 이 층의 것이라 말묶음에서 온다.
+    let mut msg = format!("{}\n{}", crate::store::NOT_A_REPO, crate::i18n::say(lang, "opening.nothing_registered"));
     // 사람의 설정 파일에서 온 글이다 — 제어문자를 걷고 한 줄로 접는다. 이 말은 줄 단위로
     // 읽히므로(`fail` 이 그대로 stderr 에 쓴다) 여러 줄이 섞이면 어디까지가 한 까닭인지 흐려진다.
     // **읽는 문은 [`crate::view::settings_problems`] 하나다**(리뷰) — 화면 말의 탈은 `problems` 가

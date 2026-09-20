@@ -137,13 +137,16 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
 
     for id in &moved.missing {
         super::note_partial();
-        eprintln!("moai: {id} 를 못 찾았다");
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.not_found"), &[("id", id)]));
     }
     // 진 줄은 못 찾은 줄과 같은 표면 하나(stderr)와 같은 종료 코드로 선다 —
     // `mv --from` 과 한 자다. 나머지 id 는 그대로 처리한다.
     for (id, now) in &moved.stale {
         super::note_partial();
-        eprintln!("moai: {id} 는 이미 {now} 다 — 그대로 뒀다");
+        eprintln!(
+            "moai: {}",
+            crate::i18n::fill(crate::i18n::say(ctx.lang(), "defer.stale"), &[("id", id), ("now", now)])
+        );
     }
 
     if ctx.json {
@@ -170,7 +173,12 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         });
     }
 
-    let word = if back { "도로 집음" } else { "미룸" };
+    // **갈래마다 제 `say` 를 적는다** — 키를 `if` 로 고르면 소스를 훑는 시험
+    // (`i18n::tests::keys_in`)의 눈에서 그 키가 사라진다.
+    let word = match back {
+        true => crate::i18n::say(ctx.lang(), "defer.undid"),
+        false => crate::i18n::say(ctx.lang(), "defer.did"),
+    };
     let mut out: Vec<String> = moved
         .done
         .iter()
@@ -187,7 +195,13 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         out.push(format!(
             "{}  {}",
             paint(style::ID, id),
-            paint(style::DIM, if back { "이미 계획에 있다" } else { "이미 미뤄 뒀다" })
+            paint(
+                style::DIM,
+                match back {
+                    true => crate::i18n::say(ctx.lang(), "defer.already_in"),
+                    false => crate::i18n::say(ctx.lang(), "defer.already_out"),
+                },
+            )
         ));
     }
     // **아직 계획 밖이면 도로 집을 줄을 댄다.** 제 줄을 풀었든 원래 안 미뤘든,

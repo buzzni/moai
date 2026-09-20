@@ -458,6 +458,78 @@ fn the_config_write_refusals_stand_in_the_chosen_language() {
     assert!(hangul(&no_place(Some("ko"))), "한국어로 골랐는데 영어로 거절했다");
 }
 
+/// **한 명령의 몸통도 고른 말로 선다**(moai-95g1). 거절만 옮겨 두었던 동안 `moai defer` 는
+/// 영어 한 줄 위에 `미룸` 을 세웠고, `moai project ls` 는 영어 알림 아래 한국어 몸통을
+/// 세웠다 — 한 덩이 안에서 말이 갈리는 것은 덜 옮긴 것과 다른 일이다.
+///
+/// **여덟 표면을 한 판에서 잰다.** 명령마다 제 글을 짓는 자리라 한 곳만 옮겨도 나머지가
+/// 조용히 남는다. 글자를 하나씩 견주지 않고 **한글이 남았는가**만 보는 것은 낱말을 다듬을
+/// 때마다 이 판이 붉어지지 않게 하려는 것이고, 같은 판을 한국어로도 돌려 키가 `ko` 표에
+/// 서 있는지를 함께 잰다.
+#[test]
+fn the_command_bodies_stand_in_one_language() {
+    let hangul = |t: &str| t.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c));
+    let screens = |name: &str, lang: Option<&str>| {
+        let s = Scratch::new(name);
+        let one = dir_in(&s, "one");
+        let bare = dir_in(&s, "bare");
+        ok(&one, &["init", "argos"]);
+        // **제목도 사람 이름도 ASCII 다** — 자료의 한글은 옮길 글이 아니라 이 자가 못 가른다.
+        // 상세가 담당을 그려, 기본 `ACTOR`(한국어 이름)를 쓰면 이 판이 제 자료에 걸린다.
+        let id = add_as(&one, "Tester (t@e.st)", &["a row"]);
+        let cfg = s.path().join("user/config.toml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        let at = |dir: &Path| dir.to_str().unwrap().to_string();
+        let runs: Vec<Vec<String>> = vec![
+            // 계획에서 빼고, 도로 집고, 이미 그런 것까지.
+            vec!["defer".into(), id.clone(), "-m".into(), "later".into()],
+            vec!["defer".into(), id.clone(), "--undo".into()],
+            vec!["defer".into(), id.clone(), "--undo".into()],
+            vec!["defer".into(), "argos-zzzz".into(), "-m".into(), "later".into()],
+            // 고칠 것이 없는 판 — "바뀐 것이 없다".
+            vec!["edit".into(), id.clone(), "-p".into(), "2".into()],
+            vec!["edit".into(), id.clone(), "-p".into(), "2".into()],
+            vec!["edit".into(), id.clone(), "-e".into(), "argos-zzzz".into()],
+            // 없는 id 는 어느 명령에서나 한 낱말이다.
+            vec!["note".into(), "argos-zzzz".into(), "x".into()],
+            // 등록·이미 등록·뺌·등록 안 됨·색·이미 그렇다.
+            vec!["project".into(), "add".into(), at(&bare)],
+            vec!["project".into(), "add".into(), at(&bare)],
+            vec!["project".into(), "color".into(), at(&bare), "green".into()],
+            vec!["project".into(), "color".into(), at(&bare), "green".into()],
+            vec!["project".into(), "ls".into()],
+            vec!["project".into(), "rm".into(), at(&bare)],
+            vec!["project".into(), "rm".into(), at(&bare)],
+        ];
+        runs.into_iter()
+            .map(|args| {
+                let mut cmd = isolated(BIN);
+                cmd.args(&args)
+                    .current_dir(&one)
+                    .env("MOAI_ACTOR", "Tester (t@e.st)")
+                    .env("MOAI_NOW", NOW)
+                    .env("MOAI_CONFIG", &cfg)
+                    .env("NO_COLOR", "1");
+                match lang {
+                    Some(l) => cmd.env("MOAI_LANG", l),
+                    None => cmd.env_remove("MOAI_LANG"),
+                };
+                let out = cmd.output().expect("moai 를 실행하지 못했다");
+                let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+                (args.join(" "), said)
+            })
+            .collect::<Vec<_>>()
+    };
+
+    for (args, said) in screens("bodyen", None) {
+        assert!(!said.trim().is_empty(), "`{args}` 가 아무 말도 안 했다 — 재는 자가 헛돈다");
+        assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — `{args}`\n{said}");
+    }
+    for (args, said) in screens("bodyko", Some("ko")) {
+        assert!(hangul(&said), "한국어로 골랐는데 그 덩이가 영어다 — `{args}`\n{said}");
+    }
+}
+
 /// **마일스톤이 도는 동안 그 안이 먼저다**(moai-493a, 2026-09-20 사용자 결정).
 ///
 /// 한 판에서 셋을 잰다 — `ready` 가 밖의 일을 빼고 그 까닭을 대는가, `--json` 이 같은 것을
@@ -2050,6 +2122,24 @@ fn add(dir: &Path, args: &[&str]) -> String {
     v.extend_from_slice(args);
     v.push("-q");
     ok(dir, &v).trim().to_string()
+}
+
+/// [`add`] 와 같되 **사람을 골라 세운다.** 화면에 한글이 남았는지를 재는 판은 담당 이름까지
+/// ASCII 라야 제 자료에 걸리지 않는다 — 기본 [`ACTOR`] 는 한국어 이름이다.
+fn add_as(dir: &Path, who: &str, args: &[&str]) -> String {
+    let mut v = vec!["add"];
+    v.extend_from_slice(args);
+    v.push("-q");
+    let out = isolated(BIN)
+        .args(&v)
+        .current_dir(dir)
+        .env("MOAI_ACTOR", who)
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("moai 를 실행하지 못했다");
+    assert!(out.status.success(), "{v:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
 /// 그 이슈의 줄 하나. 파일 전체를 보면 남의 줄에 걸린다 — 에픽의

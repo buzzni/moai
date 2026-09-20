@@ -37,7 +37,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         // `status` 가 드러낸 끊긴 참조를 손으로 파일을 고쳐야만 없앨 수 있다.
         if !args.blocks.is_empty() {
             let Some(blocker) = issues.iter().find(|i| i.id == args.id) else {
-                return Err(Fail::not_found(&args.id));
+                return Err(Fail::not_found(&args.id, ctx.lang()));
             };
             // **담아 둔 생각은 막지 않는다.** idea 는 보통 `done` 에 닿지
             // 않으므로, 막게 두면 막힌 이슈가 영영 안 풀리면서 `status` 는
@@ -56,7 +56,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         }
         for (target, wants_block) in &edits {
             let Some(t) = issues.iter().find(|i| &i.id == target) else {
-                return Err(Fail::not_found(target));
+                return Err(Fail::not_found(target, ctx.lang()));
             };
             // 막히는 쪽도 마찬가지다. 생각은 집는 것이 아니라서 막힐 것도 없다.
             if *wants_block && crate::report::is_idea(t) {
