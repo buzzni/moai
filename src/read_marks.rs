@@ -37,6 +37,36 @@ const READ: &str = "read";
 /// 이 파일이 어느 프로젝트의 것인지 적는 키([`path_for`] 의 해시가 부딪혔는지 여기서 본다).
 const PATH: &str = "path";
 
+/// 같은 자리를 가리키는 철자를 **하나로 모은다** — 링크와 `..`·끝 `/` 를 걷는다(`canonicalize`).
+/// 못 풀면 받은 철자로 떨어진다(moai-f5e3, 사용자 결정 2026-09-20): 자리를 못 고르는 것보다 낫다 —
+/// 지워진 뿌리를 가리키는 등록 줄 하나가 `moai read` 를 통째로 멈추면 안 된다.
+///
+/// **없는 것은 탈이 아니다.** 설정 파일도 읽음 파일도 처음에는 없다 — `NotFound` 는 조용히 지나간다.
+fn settle(path: &Path) -> (PathBuf, Option<String>) {
+    match std::fs::canonicalize(path) {
+        Ok(real) => (real, None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (path.to_path_buf(), None),
+        Err(e) => (path.to_path_buf(), Some(format!("{}: 자리를 못 풀어 적힌 철자로 든다 — {e}", path.display()))),
+    }
+}
+
+/// 한 프로젝트의 읽음이 사는 자리들.
+pub struct Place {
+    /// 읽고 **쓰는** 자리. 하나다.
+    pub at: PathBuf,
+    /// **옛 철자로 선 파일들 — 읽기만 한다.** 쓰는 자리를 둘로 두면 이 에픽이 고친 섞임이 그대로
+    /// 돌아온다(moai-omx7).
+    ///
+    /// **이 부름이 받은 철자의 것만 찾는다.** 표면마다 제 철자로 부르므로(한눈 보기는 등록 줄, CLI 는
+    /// `current_dir`) 저마다 제 옛 파일을 만나 새 자리로 합쳐지고, 몇 번 쓰면 다 모인다. 아무 철자나
+    /// 찾아 주지는 않는다 — 그러려면 `read/` 를 통째로 훑어 파일마다 `path` 를 견줘야 하고, 그 값을
+    /// 읽기마다 치른다. **저장소 이름을 바꾼 것은 여기서도 못 잇는다**: 옛 파일의 `path` 가 옛 이름을
+    /// 가리켜 어느 철자로도 안 풀린다. 그것은 지우지 않기로 한 결정의 대가다(사용자 결정 2026-09-20).
+    pub past: Vec<PathBuf>,
+    /// 자리를 고르다 만난 까닭.
+    pub problems: Vec<String>,
+}
+
 /// 그 프로젝트의 읽음 파일 — `<설정 디렉터리>/read/<뿌리 해시>.toml`.
 ///
 /// **설정 곁에 둔다.** `MOAI_CONFIG` 가 가리키는 자리를 따라가므로 시험과 격리가 설정 하나만 옮기면
@@ -50,8 +80,39 @@ const PATH: &str = "path";
 /// 셈은 [`crate::text::fnv1a64`] 다. **표준 해셔를 안 쓴다** — `DefaultHasher` 는 러스트 버전마다 값이
 /// 달라질 수 있다고 문서가 밝혀, 올리기 한 번에 모든 사람의 읽음 파일 이름이 바뀐다. 상수와 그 까닭은
 /// 이미 `text` 에 한 벌 있어 여기 다시 적지 않는다(moai-2vrw 가 못박은 그 값이다, 리뷰).
+///
+/// **철자가 아니라 푼 경로로 센다**(moai-f5e3). `Repo::open` 은 받은 철자를 그대로 뿌리로 들고 설정
+/// 자리는 환경이 고르므로, 같은 저장소가 `/w/b` 와 `/w/b/` 로, 같은 설정이 XDG 기본과 dotfiles 링크로
+/// 불린다 — 철자를 세던 판은 그때마다 읽음 파일이 둘로 갈려 서로를 못 본 채 저마다 걷었다. 설정은
+/// **파일**을 푼다: 그 파일이 링크면 두 철자가 한자리로 모인다(`user_config::update` 가 락에 같은 값을
+/// 치르는 그 자리다).
+///
+/// 옛 철자로 이미 선 파일은 [`Place::past`] 로 **읽기만** 한다 — 지우지도 옮기지도 않으니
+/// 마이그레이션이 아니고 읽음을 잃는 사람도 없다(옛 `[read]` 를 겹쳐 보는 것과 같은 꼴이다).
+pub fn place_of(config: &Path, root: &Path) -> Place {
+    let sheet = |dir: &Path, root: &Path| {
+        dir.join("read").join(format!("{:016x}.toml", crate::text::fnv1a64(root.as_os_str().as_encoded_bytes())))
+    };
+    let (real_config, why_config) = settle(config);
+    let (real_root, why_root) = settle(root);
+    let (real_dir, raw_dir) = (dir_of(&real_config).to_path_buf(), dir_of(config).to_path_buf());
+    let at = sheet(&real_dir, &real_root);
+    // 푼 것과 받은 것이 갈리는 축이 둘이라 옛 자리는 셋까지 선다 — 설정만 갈린 것, 뿌리만 갈린 것, 둘 다.
+    let mut past = Vec::new();
+    for dir in [&real_dir, &raw_dir] {
+        for root in [&real_root, &root.to_path_buf()] {
+            let one = sheet(dir, root);
+            if one != at && !past.contains(&one) {
+                past.push(one);
+            }
+        }
+    }
+    Place { at, past, problems: why_config.into_iter().chain(why_root).collect() }
+}
+
+/// 읽고 쓰는 자리 하나([`Place::at`]).
 pub fn path_for(config: &Path, root: &Path) -> PathBuf {
-    dir_of(config).join("read").join(format!("{:016x}.toml", crate::text::fnv1a64(root.as_os_str().as_encoded_bytes())))
+    place_of(config, root).at
 }
 
 /// 읽어 낸 읽음과 그때 생긴 말.
@@ -83,12 +144,30 @@ pub struct Marks {
 /// 때는 **이 파일이 이긴다**: 옛 표는 이 바이너리가 다시 안 적는 지나간 값이고, 새 자리의 값이 그 뒤에
 /// 적힌 것이다.
 pub fn read(config: &Path, root: &Path, legacy: &BTreeMap<String, String>) -> Marks {
+    let place = place_of(config, root);
+    let mut marks = read_one(&place.at, root);
+    marks.problems.splice(..0, place.problems);
+    // **겹치는 차례는 한 자리에 있다**(moai-f5e3) — 지금 자리가 가장 세고, 그다음이 옛 철자로 선 파일,
+    // 마지막이 설정의 옛 `[read]` 다. 셋이 부르는 쪽마다 갈리면 넷째가 붙는 날 한쪽만 따라간다.
+    //
+    // **옛 자리의 탈은 `trouble` 로 안 올린다.** 그 파일은 있을 수도 없을 수도 있는 것이라, 그것 하나로
+    // 지금 자리의 성한 표를 버리면 안 된다 — 까닭만 곁들인다.
+    for old in &place.past {
+        let mut past = read_one(old, root);
+        overlay(&mut marks.seen, &past.seen);
+        marks.problems.append(&mut past.problems);
+    }
+    overlay(&mut marks.seen, legacy);
+    marks
+}
+
+/// 읽음 파일 **하나**를 읽는다. 겹치는 일은 [`read`] 가 한다.
+fn read_one(path: &Path, root: &Path) -> Marks {
     use crate::user_config::Trouble;
-    let path = path_for(config, root);
     // **까닭에는 어느 파일인지를 붙인다** — 이름이 뿌리의 해시라 사람이 짐작할 수 없어, 안 붙이면
     // "손으로 고친다" 가 갈 곳 없는 말이 된다([`update`] 가 거절문에 붙이는 것과 같은 자다, 리뷰).
     let at = |why: String| format!("{}: {why}", path.display());
-    let (mut seen, problems, trouble) = match std::fs::read_to_string(&path) {
+    let (seen, problems, trouble) = match std::fs::read_to_string(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (BTreeMap::new(), Vec::new(), None),
         Err(e) => (BTreeMap::new(), vec![at(e.to_string())], Some(Trouble::Reading)),
         Ok(src) => match Sheet::parse(&src) {
@@ -104,7 +183,6 @@ pub fn read(config: &Path, root: &Path, legacy: &BTreeMap<String, String>) -> Ma
             }
         },
     };
-    overlay(&mut seen, legacy);
     Marks { seen, problems, trouble }
 }
 
@@ -232,7 +310,10 @@ impl Sheet {
     fn owns(&self, root: &Path) -> bool {
         match self.doc.root().get(PATH) {
             None => true,
-            Some(item) => item.as_str().is_some_and(|at| Path::new(at) == root),
+            // **푼 경로로 견준다**(moai-f5e3) — 파일 이름은 그것으로 고르는데 이 문지기만 철자를 보면,
+            // 옛 철자로 적힌 `path` 를 남의 것으로 읽어 제 읽음을 안 읽는다. 짝이 어긋난 문지기는
+            // 지키는 시늉만 한다.
+            Some(item) => item.as_str().is_some_and(|at| settle(Path::new(at)).0 == settle(root).0),
         }
     }
 
@@ -349,6 +430,142 @@ mod tests {
         assert_eq!(read(&cfg, &one, &BTreeMap::new()).seen, marks(&[("argos-0001", "A")]));
         assert_eq!(read(&cfg, &two, &BTreeMap::new()).seen, marks(&[("argos-0001", "B")]));
         assert_ne!(path_for(&cfg, &one), path_for(&cfg, &two));
+    }
+
+    /// **한 저장소를 가리키는 철자가 여럿이어도 한 파일에 쓴다**(moai-f5e3). `Repo::open` 은 받은 철자를
+    /// 그대로 뿌리로 들어, 끝 `/`·`..`·링크가 저마다 딴 파일을 짓던 자리다 — 둘은 서로를 못 본 채
+    /// 저마다 걷었다.
+    #[test]
+    fn every_spelling_of_one_root_writes_to_one_file() {
+        let s = Scratch::new("read-marks-spelling");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let real = std::fs::canonicalize(&root).unwrap();
+
+        let spellings = [root.clone(), s.join("proj/"), s.join("proj/../proj"), real.clone()];
+        for (n, spelling) in spellings.iter().enumerate() {
+            let id = format!("argos-{n:04}");
+            update(&cfg, spelling, |sh| sh.mark(&marks(&[(&id, "A")]))).unwrap();
+            assert_eq!(path_for(&cfg, spelling), path_for(&cfg, &real), "{} 가 딴 파일로 갔다", spelling.display());
+        }
+        // 넷이 한 파일에 쌓였고, 어느 철자로 읽어도 넷이 다 보인다.
+        let sheets = std::fs::read_dir(dir_of(&cfg).join("read")).unwrap().count();
+        assert_eq!(sheets, 2, "읽음 파일이 하나(와 그 락)가 아니다");
+        for spelling in &spellings {
+            assert_eq!(read(&cfg, spelling, &BTreeMap::new()).seen.len(), 4, "{} 로 읽으니 덜 보인다", spelling.display());
+        }
+    }
+
+    /// **옛 철자로 선 파일은 읽기만 한다**(moai-f5e3, 사용자 결정 2026-09-20). 지우지도 옮기지도 않으니
+    /// 마이그레이션이 아니고 읽음을 잃는 사람도 없다 — 옛 `[read]` 를 겹쳐 보는 것과 같은 꼴이다.
+    ///
+    /// **쓰는 자리는 하나다.** 둘에 쓰면 이 에픽이 고친 섞임이 그대로 돌아오므로 그것을 못박는다.
+    #[test]
+    fn the_file_an_old_spelling_left_is_read_but_never_written() {
+        let s = Scratch::new("read-marks-past");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+
+        // 옛 바이너리가 안 푼 철자로 적어 둔 파일 — 끝 `/` 하나가 딴 이름을 냈다.
+        let slashed = s.join("proj/");
+        let old = dir_of(&cfg)
+            .join("read")
+            .join(format!("{:016x}.toml", crate::text::fnv1a64(slashed.as_os_str().as_encoded_bytes())));
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        let before = format!("path = {:?}\n\n[read]\n\"argos-0001\" = \"옛것\"\n", slashed.display().to_string());
+        std::fs::write(&old, &before).unwrap();
+        assert_ne!(old, path_for(&cfg, &slashed), "시험의 전제 — 옛 이름과 새 이름이 다르다");
+
+        // 그 철자로 부르면 읽을 때는 보인다 — 찾는 옛 자리는 **이 부름이 받은 철자**의 것이다.
+        assert_eq!(read(&cfg, &slashed, &BTreeMap::new()).seen.get("argos-0001").map(String::as_str), Some("옛것"));
+
+        // 적을 때는 새 자리에만 간다 — 옛 파일은 한 바이트도 안 바뀐다.
+        update(&cfg, &slashed, |sh| sh.mark(&marks(&[("argos-0002", "새것")]))).unwrap();
+        assert_eq!(std::fs::read_to_string(&old).unwrap(), before, "옛 철자 파일에 썼다");
+        let now = std::fs::read_to_string(path_for(&cfg, &root)).unwrap();
+        assert!(now.contains("argos-0002") && !now.contains("argos-0001"), "{now}");
+
+        // 겹쳐 보면 둘 다. 같은 id 면 **지금 자리가 이긴다**.
+        update(&cfg, &slashed, |sh| sh.mark(&marks(&[("argos-0001", "새것이 이긴다")]))).unwrap();
+        let seen = read(&cfg, &slashed, &BTreeMap::new()).seen;
+        assert_eq!(seen.get("argos-0001").map(String::as_str), Some("새것이 이긴다"));
+        assert_eq!(seen.len(), 2);
+    }
+
+    /// **겹치는 차례는 셋이다** — 지금 자리 > 옛 철자 > 설정의 옛 `[read]`. 한 자리에서 갈라지게 두면
+    /// 넷째가 붙는 날 한쪽만 따라간다.
+    #[test]
+    fn the_three_places_overlay_in_one_order() {
+        let s = Scratch::new("read-marks-three");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let slashed = s.join("proj/");
+        let old = dir_of(&cfg)
+            .join("read")
+            .join(format!("{:016x}.toml", crate::text::fnv1a64(slashed.as_os_str().as_encoded_bytes())));
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::write(
+            &old,
+            format!("path = {:?}\n\n[read]\n\"a\" = \"옛 철자\"\n\"b\" = \"옛 철자\"\n", slashed.display().to_string()),
+        )
+        .unwrap();
+        update(&cfg, &slashed, |sh| sh.mark(&marks(&[("a", "지금 자리")]))).unwrap();
+        let legacy = marks(&[("a", "옛 표"), ("b", "옛 표"), ("c", "옛 표")]);
+
+        let seen = read(&cfg, &slashed, &legacy).seen;
+        assert_eq!(seen.get("a").map(String::as_str), Some("지금 자리"));
+        assert_eq!(seen.get("b").map(String::as_str), Some("옛 철자"));
+        assert_eq!(seen.get("c").map(String::as_str), Some("옛 표"));
+    }
+
+    /// **못 푸는 자리는 받은 철자로 떨어지고 까닭을 댄다**(사용자 결정 2026-09-20). 지워진 뿌리를
+    /// 가리키는 등록 줄 하나가 `moai read` 를 통째로 멈추면 안 된다.
+    ///
+    /// **없는 것은 탈이 아니다** — 설정도 읽음 파일도 처음에는 없다.
+    #[test]
+    fn a_root_i_cannot_resolve_falls_back_and_says_so() {
+        let s = Scratch::new("read-marks-unresolved");
+        let cfg = s.join("config.toml");
+        let gone = s.join("사라진 것");
+        let place = place_of(&cfg, &gone);
+        assert_eq!(place.at, {
+            let h = crate::text::fnv1a64(gone.as_os_str().as_encoded_bytes());
+            dir_of(&cfg).join("read").join(format!("{h:016x}.toml"))
+        });
+        assert!(place.problems.is_empty(), "없는 자리를 탈로 댔다 — {:?}", place.problems);
+
+        // 경로 가운데가 파일이면 `NotADirectory` 다 — 그것은 댄다.
+        std::fs::write(s.join("파일"), "x").unwrap();
+        let through = s.join("파일/밑");
+        let place = place_of(&cfg, &through);
+        assert_eq!(place.problems.len(), 1, "{:?}", place.problems);
+        assert!(place.problems[0].contains("자리를 못 풀어"), "{}", place.problems[0]);
+        assert_eq!(read(&cfg, &through, &BTreeMap::new()).problems.len(), 1, "읽기가 그 까닭을 안 물고 왔다");
+    }
+
+    /// **문지기도 푼 경로로 견준다**(moai-f5e3) — 파일 이름을 푼 경로로 고르면서 `path` 만 철자로 보면,
+    /// 옛 철자로 적힌 줄을 남의 것으로 읽어 제 읽음을 안 읽는다.
+    #[test]
+    fn the_guard_compares_the_settled_path_too() {
+        let s = Scratch::new("read-marks-owns");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let at = path_for(&cfg, &root);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        // 같은 자리를 딴 철자로 적어 둔 파일.
+        let spelled = s.join("proj/../proj");
+        std::fs::write(&at, format!("path = {:?}\n\n[read]\n\"a\" = \"A\"\n", spelled.display().to_string())).unwrap();
+
+        let got = read(&cfg, &root, &BTreeMap::new());
+        assert_eq!(got.trouble, None, "{:?}", got.problems);
+        assert_eq!(got.seen.get("a").map(String::as_str), Some("A"), "제 파일을 남의 것으로 읽었다");
+        update(&cfg, &root, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
+        assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen.get("b").map(String::as_str), Some("B"), "제 파일에 쓰기를 거절했다");
     }
 
     /// **설정 곁에 선다** — `MOAI_CONFIG` 를 옮기면 읽음도 따라간다. 자리를 따로 정하면 제 임시 설정을
