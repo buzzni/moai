@@ -76,8 +76,8 @@ Options:
 
 화면의 말을 바꿀 때:
 
-  MOAI_LANG=en moai status      영어 화면으로. en·ko·zh·ja·es 가 된다
-                                늘 쓰려면 사용자 설정의 [i18n] 에 lang = "en"
+  MOAI_LANG=ko moai status      기본은 영어다. en·ko·zh·ja·es 가 된다
+                                늘 쓰려면 사용자 설정의 [i18n] 에 lang = "ko"
 
 계획을 한 번에 세울 때:
 
