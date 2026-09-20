@@ -1841,14 +1841,16 @@ impl Picks {
     /// 칸의 때(`status_since`)는 명령이 돈 때라 기록보다 조금 늦고, 락을 기다리면 더 늦는다 — 그 틈을 준다.
     const SLACK_SECS: i64 = 60;
 
-    /// 집기 한 번을 적는 줄 — `때\tid\t초`. `때` 는 차례를 가르는 벽시계 나노초, `초` 는 줄의 칸 시각과
-    /// 견줄 `model::now` 의 초다(못 읽었으면 뺀다). 읽는 쪽은 [`Picks::fold`] 하나다 — 꼴이 두 자리에
-    /// 서면 한쪽만 고쳐지는 날 기록이 통째로 안 읽힌다.
-    pub fn line(at: u128, stamp: Option<i64>, id: &str) -> String {
-        match stamp {
-            Some(secs) => format!("{at}\t{id}\t{secs}\n"),
-            None => format!("{at}\t{id}\n"),
-        }
+    /// 집기 한 번을 적는 줄 — `때\tid\t초\t?`. `때` 는 차례를 가르는 벽시계 나노초, `초` 는 줄의 칸
+    /// 시각과 견줄 `model::now` 의 초다(못 읽었으면 빈 칸). 끝의 `?` 는 **돌았는지 모르는 집기**다
+    /// (moai-hze6) — `집기 && 무엇 || 집기` 의 뒤 집기처럼 앞이 이기면 안 도는 자리다. 읽는 쪽은
+    /// [`Picks::fold`] 하나다 — 꼴이 두 자리에 서면 한쪽만 고쳐지는 날 기록이 통째로 안 읽힌다.
+    ///
+    /// **칸을 늘리기만 한다.** 옛 바이너리의 `fold` 는 앞 셋만 읽고 나머지를 버려, 새 줄도 그대로 읽는다.
+    pub fn line(at: u128, stamp: Option<i64>, id: &str, sure: bool) -> String {
+        let secs = stamp.map(|s| s.to_string()).unwrap_or_default();
+        let maybe = if sure { "" } else { "\t?" };
+        format!("{at}\t{id}\t{secs}{maybe}\n")
     }
 
     /// 세션마다 적어 둔 집기(`(세션, 그 세션의 글)`)를 `me` 의 눈으로 가른다 — 줄마다 **마지막으로** 집은
@@ -1869,7 +1871,15 @@ impl Picks {
         since: &dyn Fn(&str) -> Option<i64>,
     ) -> Picks {
         // id → (이 세션의 마지막 때, 다른 세션들의 마지막 때). `None` 은 어느 때보다 이르다.
-        let mut last: std::collections::BTreeMap<String, (Option<u128>, Option<u128>)> = Default::default();
+        /// 줄 하나에 쌓인 마지막 기록 — 이름을 달아 둔다([`Bailout`] 과 같은 까닭이다).
+        #[derive(Default)]
+        struct Seen {
+            /// 이 세션의 마지막 때와, 그 집기가 확실히 도는가([`Picks::line`] 의 `?`).
+            mine: Option<(u128, bool)>,
+            /// 다른 세션들의 마지막 때. `None` 은 어느 때보다 이르다.
+            theirs: Option<u128>,
+        }
+        let mut last: std::collections::BTreeMap<String, Seen> = Default::default();
         for (sid, text) in files {
             let mine = sid.as_ref() == me;
             for line in text.as_ref().split_inclusive('\n') {
@@ -1883,18 +1893,25 @@ impl Picks {
                 {
                     continue;
                 }
-                let (m, t) = last.entry(id.to_string()).or_default();
-                let side = if mine { m } else { t };
-                *side = (*side).max(Some(at));
+                let sure = parts.next() != Some("?");
+                let seen = last.entry(id.to_string()).or_default();
+                match mine {
+                    true if seen.mine.is_none_or(|(was, _)| was < at) => seen.mine = Some((at, sure)),
+                    true => {}
+                    false => seen.theirs = seen.theirs.max(Some(at)),
+                }
             }
         }
         let mut out = Picks::default();
-        for (id, (m, t)) in last {
-            if m > t {
-                out.mine.insert(id);
-            } else {
-                out.theirs.insert(id);
-            }
+        for (id, Seen { mine: m, theirs: t }) in last {
+            // **돌았는지 모르는 집기는 남의 기록을 안 지운다**(moai-hze6, 사용자 결정). 적기는 적는다 —
+            // 기록은 "이 세션이 집었을 수 있다" 를 모으는 자리다. 다만 그것으로 남이 쥔 줄을 제 것으로
+            // 삼으면, 안 돈 집기 하나가 남의 일을 초점에 세워 규칙 1 이 막고 `Stop` 이 그것을 닫으라고
+            // 붙든다 — 기록은 풀기만 한다(moai-m5mg 의 elsewhere 보존과 같은 자다).
+            match m.map(|(at, _)| at) > t && m.is_some_and(|(_, sure)| sure || t.is_none()) {
+                true => out.mine.insert(id),
+                false => out.theirs.insert(id),
+            };
         }
         out
     }
@@ -1967,7 +1984,7 @@ pub fn picked_in(
     cfg: &Config,
     only: &dyn Fn(usize) -> bool,
     stands: &dyn Fn(usize, &str) -> Option<String>,
-) -> Vec<String> {
+) -> Vec<(String, bool)> {
     // 훅은 도구 호출마다 돈다 — `mv` 라는 글자도 없으면 명령줄을 다시 가르지 않는다.
     if !cmd.contains("mv") {
         return Vec::new();
@@ -1982,9 +1999,7 @@ pub fn picked_in(
     let counted = shell_scan(cmd, cfg, &|_| true).1;
     let mut out = Vec::new();
     for (k, seg) in segments(cmd).into_iter().enumerate() {
-        if !only(k) || !counted.contains(&k) {
-            continue;
-        }
+        let Some((_, sure)) = counted.iter().copied().find(|(n, _)| *n == k).filter(|_| only(k)) else { continue };
         let Some(args) = moai_args(&seg) else { continue };
         let seen = flag_values(args, &["--from"]).pop();
         let verbs = positionals(args);
@@ -1992,7 +2007,7 @@ pub fn picked_in(
         out.extend(
             ids.iter()
                 .filter(|id| seen.as_deref().is_none_or(|from| stands(k, id).is_none_or(|now| now == from)))
-                .map(|id| id.to_string()),
+                .map(|id| (id.to_string(), sure)),
         );
     }
     out
@@ -2415,7 +2430,7 @@ fn shell_writes(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<St
 /// [`shell_writes`] 의 한 걸음 — 쓰는 파일들과 함께 **집기로 센 토막의 번호**([`segments`] 의 번호)를 낸다.
 /// [`picked_in`] 이 그 번호로 세션의 집기를 적는다(moai-m5mg) — 집기를 두 자리에서 따로 가르면 한쪽만
 /// 고쳐지는 날 `! moai mv …` 가 쓰기에는 빈손인데 기록에는 제 집기로 선다.
-fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<String>, Vec<usize>) {
+fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<String>, Vec<(usize, bool)>) {
     /// **집기가 지면 끝내는 묶음** 하나([`shell_writes`], moai-ncay).
     ///
     /// 이름 없는 네 자리 튜플로 두면 `floor`·`depth`·`held` 가 자리로만 갈려, 하나를 바꿔 적어도
@@ -2500,15 +2515,17 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
     let mut bailout: Option<Bailout> = None;
     // 집기로 센 토막의 번호와 그 묶음 깊이([`shell_scan`]) — 몸통이 안 돌았을 수 있는 묶음을 나오면
     // 그 안의 집기는 쥔 것이 없으니 함께 걷는다.
-    let mut picked: Vec<(usize, usize)> = Vec::new();
+    // 토막 번호와 그 묶음 깊이, 그리고 **그 집기가 확실히 도는가** — `집기 && 무엇 || 집기` 의 뒤
+    // 집기는 앞이 이기면 안 돈다(moai-hze6). 적기는 적되 남의 기록을 안 지운다([`Picks::fold`]).
+    let mut picked: Vec<(usize, usize, bool)> = Vec::new();
     // 겹마다 **그 겹에 처음 든 토막의 번호** — 묶음을 나올 때 **그 묶음 안에서** 적은 집기만 걷는다.
     // 깊이만 보던 판은 같은 깊이의 **앞선 형제** 묶음까지 함께 버렸다 — `(집기 A); if …; then 집기 B;
     // fi` 가 늘 도는 A 까지 잃었다. `seg.floor` 로 걷는 것은 옆의 `strict`·`sure` 와 같은 자다.
     let mut enters: Vec<usize> = Vec::new();
     // 걷을 자리를 한 곳에 둔다 — 두 벌로 적던 자리마다 한쪽만 고쳐졌다(moai-ju21.70g·moai-ncay).
     // `from` 보다 앞서 적힌 집기는 그 까닭이 서기 전에 이미 돈 것이라 남긴다.
-    fn prune(picked: &mut Vec<(usize, usize)>, from: usize, deeper_than: usize) {
-        picked.retain(|(n, at)| *n < from || *at <= deeper_than);
+    fn prune(picked: &mut Vec<(usize, usize, bool)>, from: usize, deeper_than: usize) {
+        picked.retain(|(n, at, _)| *n < from || *at <= deeper_than);
     }
     let (segs, over) = parse_over(cmd);
     for mut seg in segs {
@@ -2599,7 +2616,7 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
                 // 있어 위에서 안 적혔지만, 여기 온 것은 그 집기가 이겼다는 뜻이다. 쓰기 규칙만 세우던
                 // 판은 같은 줄을 "쓰기에는 집은 채, 기록에는 빈손" 으로 갈라 놨다.
                 if let Some(c) = b.cond {
-                    picked.push((c, home));
+                    picked.push((c, home, true));
                 }
             }
             bailout = None;
@@ -2759,7 +2776,8 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
         }
         if picks_up(&seg.words, cfg) && only(n) && !negated && (!or || picked_before) {
             after_pick = Some(after_pick.map_or(seg.level, |d| d.min(seg.level)));
-            picked.push((n, seg.level));
+            // `||` 뒤라서 센 집기는 앞이 이기면 안 돈다 — 적되 확실하지 않다고 적는다(moai-hze6).
+            picked.push((n, seg.level, !or));
         }
         // **집기가 지면 끝내는 묶음이 여기서 열리는가**(moai-ncay) — 두 꼴이고, 먼저 열린 하나만
         // 든다. `|| exit` 한 꼴만 알던 판은 겨루다 진 쪽을 끊는 이 흔한 두 꼴에서 집기를 잃어,
@@ -2799,7 +2817,7 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
             let own = (picks_up(&seg.words, cfg) && only(n)).then_some(n);
             let cond = own.or_else(|| {
                 let from = handed_from.filter(|_| bang && came.is_some_and(|d| d > seg.level))?;
-                let (c, _) = picked.iter().rev().take_while(|(m, _)| *m >= from).find(|(_, at)| *at > seg.level)?;
+                let (c, ..) = picked.iter().rev().take_while(|(m, ..)| *m >= from).find(|(_, at, _)| *at > seg.level)?;
                 shell_text(&seg.words).map(|_| *c)
             });
             if let Some(c) = cond {
@@ -2868,7 +2886,7 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
         && b.ends
         && let Some(c) = b.cond
     {
-        picked.push((c, b.floor.saturating_sub(1)));
+        picked.push((c, b.floor.saturating_sub(1), true));
     }
     // 줄이 끝나도록 안 닫힌 묶음도 나온 것으로 친다 — `a || (moai mv …)` 와 `if …; then 집기; fi` 처럼
     // 뒤 토막이 없으면 위의 걷기가 안 돈다(예약어 묶음의 표식은 [`parse_over`] 가 낸다). 쓰기는 그 뒤가
@@ -2879,7 +2897,7 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
     if let Some((c, from)) = orelse {
         prune(&mut picked, from, c.saturating_sub(1));
     }
-    (out, picked.into_iter().map(|(n, _)| n).collect())
+    (out, picked.into_iter().map(|(n, _, sure)| (n, sure)).collect())
 }
 
 /// 글자만으로는 **어디인지 모르는 경로** — 변수·틸드·글롭·프로세스 치환·`-`. 모르는 자리는
@@ -3832,6 +3850,36 @@ mod tests {
     /// **제 기록은 남의 기록만 지운다**(moai-ydtm) — 옆 스냅샷이 쥔 줄은 그대로 모른다. 안 돌 수도 있는
     /// 토막이 적은 기록 하나가 새로 막지 않게 한다. 기록이 없는 줄은 전과 같다.
     #[test]
+    fn a_pick_that_might_not_have_run_never_takes_a_row_from_another_session() {
+        let never = |_: &str| None;
+        let read = |files: &[(&str, String)]| {
+            Picks::fold("me", files.iter().map(|(s, t)| (*s, t.as_str())).collect::<Vec<_>>(), &never)
+        };
+        let theirs = ("you", Picks::line(1, None, "t-1", true));
+        let sure = ("me", Picks::line(2, None, "t-1", true));
+        let maybe = ("me", Picks::line(2, None, "t-1", false));
+
+        // 확실히 도는 집기는 남의 기록을 지운다 — 마지막으로 집은 세션이 이긴다(moai-4jsy).
+        assert_eq!(read(&[theirs.clone(), sure.clone()]).mine, set(&["t-1"]), "넘겨받은 줄을 제 것으로 안 든다");
+        // **돌았는지 모르는 집기는 안 지운다**(moai-hze6, 사용자 결정) — 남이 쥔 줄을 제 초점에 세우면
+        // 규칙 1 이 막고 `Stop` 이 그것을 닫으라고 붙든다. 기록은 풀기만 한다.
+        let read_maybe = read(&[theirs.clone(), maybe.clone()]);
+        assert!(read_maybe.mine.is_empty(), "안 돈 집기가 남의 기록을 지웠다 — {read_maybe:?}");
+        assert_eq!(read_maybe.theirs, set(&["t-1"]));
+        // 남의 기록이 없으면 그대로 제 것이다 — 적는 것 자체는 그대로다(그 줄이 정말 돌았을 수 있다).
+        assert_eq!(read(std::slice::from_ref(&maybe)).mine, set(&["t-1"]), "적기는 적는다");
+        // 내가 뒤에 확실히 집으면 다시 제 것이다 — 표는 줄마다 선다.
+        assert_eq!(read(&[theirs.clone(), maybe, ("me", Picks::line(3, None, "t-1", true))]).mine, set(&["t-1"]));
+
+        // **표가 없는 옛 줄은 확실한 것으로 읽는다** — 새 칸을 늘리기만 했다.
+        let old = ("me", "2\tt-1\t\n".to_string());
+        assert_eq!(read(&[theirs, old]).mine, set(&["t-1"]), "옛 줄을 못 읽었다");
+        assert!(Picks::line(7, Some(42), "t-1", false).ends_with("\t?\n"), "{:?}", Picks::line(7, Some(42), "t-1", false));
+        assert_eq!(Picks::line(7, Some(42), "t-1", true), "7\tt-1\t42\n");
+    }
+
+    /// 앞의 짝 — 이 세션이 마지막으로 집은 줄은 옆 스냅샷에 있어도 제 것이다.
+    #[test]
     fn a_pick_another_session_recorded_is_not_mine() {
         let all = vec![issue("t-1", "in_progress"), issue("t-2", "in_progress"), issue("t-3", "in_progress")];
         let picks = Picks { mine: set(&["t-2"]), theirs: set(&["t-1", "t-2"]) };
@@ -3847,6 +3895,9 @@ mod tests {
 
         // 집는 id 는 `only` 가 고른 `mv … <벌여 놓는 칸>` 에서만 읽는다.
         let stands = |_: usize, _: &str| None;
+        let picked_in = |cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool, stands: &dyn Fn(usize, &str) -> Option<String>| {
+            crate::hook::picked_in(cmd, cfg, only, stands).into_iter().map(|(id, _)| id).collect::<Vec<_>>()
+        };
         let cmd = "moai mv t-1 in_progress --from todo && moai mv t-2 done && moai -C /x mv t-3 review";
         assert_eq!(picked_in(cmd, &cfg(), &|_| true, &stands), ["t-1", "t-3"]);
         assert_eq!(picked_in(cmd, &cfg(), &|k| k == 0, &stands), ["t-1"]);
@@ -3860,7 +3911,8 @@ mod tests {
     #[test]
     fn a_pick_that_may_not_run_is_not_recorded_as_mine() {
         let stands = |_: usize, _: &str| None;
-        let mine = |cmd: &str| picked_in(cmd, &cfg(), &|_| true, &stands);
+        let ids = |v: Vec<(String, bool)>| v.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        let mine = |cmd: &str| ids(picked_in(cmd, &cfg(), &|_| true, &stands));
         for cmd in [
             "! moai mv t-1 in_progress",
             "! (moai mv t-1 in_progress)",
@@ -3872,7 +3924,7 @@ mod tests {
         // 앞도 집기면 어느 쪽이든 하나를 쥔다 — 쓰기 규칙과 같은 자다.
         assert_eq!(mine("moai mv t-1 in_progress --from todo || moai mv t-2 in_progress"), ["t-1", "t-2"]);
         // 남의 트래커를 가리킨 토막은 그 트래커에 적힌다 — 여기서는 `only` 가 뺀다.
-        assert_eq!(picked_in("moai -C /x mv t-9 in_progress && moai mv t-1 in_progress", &cfg(), &|k| k == 1, &stands), ["t-1"]);
+        assert_eq!(ids(picked_in("moai -C /x mv t-9 in_progress && moai mv t-1 in_progress", &cfg(), &|k| k == 1, &stands)), ["t-1"]);
         // 첫 칸으로 되돌리는 것과 닫는 것은 벌여 놓는 칸이 아니다.
         assert!(mine("moai mv t-1 todo && moai mv t-2 done").is_empty());
         // 셸에 넘긴 글 안의 집기도 센다(moai-k8j1) — 그 글은 명령이다.
@@ -3936,8 +3988,8 @@ mod tests {
         // **남의 트래커의 집기도 제 사슬로 잰다** — `only` 를 셈에 넘기던 판은 그 판에서 제 토막의
         // 집기가 안 세어져, 앞이 지면 정말 도는 `a || moai -C /x mv B …` 의 B 를 통째로 버렸다.
         let his = |k: usize| k == 1;
-        assert_eq!(picked_in("moai mv t-1 in_progress || moai -C /x mv t-2 in_progress", &cfg(), &his, &stands), ["t-2"]);
-        assert_eq!(picked_in("moai mv t-1 in_progress && moai -C /x mv t-2 in_progress", &cfg(), &his, &stands), ["t-2"]);
+        assert_eq!(ids(picked_in("moai mv t-1 in_progress || moai -C /x mv t-2 in_progress", &cfg(), &his, &stands)), ["t-2"]);
+        assert_eq!(ids(picked_in("moai mv t-1 in_progress && moai -C /x mv t-2 in_progress", &cfg(), &his, &stands)), ["t-2"]);
     }
 
     /// **모르는 줄 밑에서 제가 집은 자식은 제 것이다**(리뷰 moai-3k2d.1df). 모름은 그 줄과 **그 밑을**
@@ -6224,7 +6276,7 @@ mod tests {
         // **쓰기와 기록이 안 갈린다**(moai-m5mg) — 조건에 선 집기는 뒤집혀 있어 그 자리에서 안 적히고,
         // 묶음을 지나올 때 적힌다. 겹 안에서도 같다.
         let stands = |_: usize, _: &str| None;
-        let mine = |cmd: &str| picked_in(cmd, &cfg(), &|_| true, &stands);
+        let mine = |cmd: &str| picked_in(cmd, &cfg(), &|_| true, &stands).into_iter().map(|(id, _)| id).collect::<Vec<_>>();
         assert_eq!(mine("if ! bash -c 'moai mv t-1 in_progress --from todo'; then exit 1; fi"), ["t-1"]);
         assert_eq!(mine("bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi; echo ok'"), ["t-1"]);
         assert!(mine("if ! bash -c 'moai mv t-1 in_progress --from todo &'; then exit 1; fi").is_empty());

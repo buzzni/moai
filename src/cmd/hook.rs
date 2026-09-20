@@ -401,7 +401,7 @@ fn picks_dir(repo: &Repo) -> std::path::PathBuf {
 }
 
 /// 이 세션이 `ids` 를 지금 집었다고 적는다. 못 적으면 조용히 넘어간다 — 빠진 기록은 전과 같은 판정이다.
-fn record_picks(input: &Input, repo: &Repo, ids: &[String]) {
+fn record_picks(input: &Input, repo: &Repo, ids: &[(String, bool)]) {
     use std::io::Write;
     if ids.is_empty() {
         return;
@@ -417,7 +417,7 @@ fn record_picks(input: &Input, repo: &Repo, ids: &[String]) {
     let now = now.as_nanos();
     // 줄의 칸 시각(`status_since`)과 견줄 때는 같은 시계로 잰다 — `MOAI_NOW` 가 서면 그것이다.
     let stamp = crate::model::parse_rfc3339(&model::now());
-    let lines: String = ids.iter().map(|id| crate::hook::Picks::line(now, stamp, id)).collect();
+    let lines: String = ids.iter().map(|(id, sure)| crate::hook::Picks::line(now, stamp, id, *sure)).collect();
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join(&sid)) {
         let _ = f.write_all(lines.as_bytes());
     }
