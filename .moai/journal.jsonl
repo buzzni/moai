@@ -6121,3 +6121,9 @@
 {"ts":"2026-09-20T08:22:30Z","id":"moai-fdq2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 설정 쓰기 경로의 깃발)"}
 {"ts":"2026-09-20T08:22:30Z","id":"moai-zwam","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 무엇을 오타로 읽는가)"}
 {"ts":"2026-09-20T08:22:30Z","id":"moai-qfhh.4no","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (max — 에픽 끝 리뷰. 세션 한도로 끊겨 토큰을 모른다)"}
+{"ts":"2026-09-20T08:23:00Z","id":"moai-2gep","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T08:23:01Z","id":"moai-23pm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T08:23:01Z","id":"moai-fdq2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T08:23:01Z","id":"moai-zwam","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T08:23:08Z","id":"moai-qfhh.4no","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"리뷰가 고쳐 둔 여덟을 다 받고 하나를 더 고쳤다(a4ac0da). 넘긴 것은 없다 — 다만 그 판이 3단계 훑기를 남기고 세션 한도에 걸려 건별 원문이 없다. 되살린 목록과 그 사정은 앞 노트 둘에 있다."}
+{"ts":"2026-09-20T08:23:21Z","id":"moai-qfhh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 넷과 에픽 끝 리뷰를 4898a30 으로 develop 에 병합하고 닫았다. 에픽은 5/5 다. 리뷰가 세션 한도로 3단계 훑기를 못 끝내 건별 원문이 없다 — 이 에픽에서 머지 뒤 버그가 나오면 그 사정을 함께 센다."}
