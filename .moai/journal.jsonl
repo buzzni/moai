@@ -6138,3 +6138,7 @@
 {"ts":"2026-09-20T08:29:08Z","id":"moai-3rwe","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T08:29:08Z","id":"moai-889l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T08:29:17Z","id":"moai-1upp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 넷과 리뷰가 다 닫혀 에픽이 끝났다. 21eadec 로 develop 에 병합했고 TMPDIR 이 링크인 판과 보통 판 둘 다 cargo test 가 초록이다. 리뷰가 넘긴 것은 idea 셋으로 담았다 — moai-b727(경로 푸는 식 세 벌), moai-au2p(통합 시험의 Scratch 가 자리를 안 푼다), moai-u1fq(settled 와 settle 이름). 에픽 끝 리뷰는 세션 한도로 각도 여섯이 끊겨 재사용·규약 둘만 돌았으니, 정확성·동시성 각도가 필요하면 그 자리는 안 본 채로 남았다."}
+{"ts":"2026-09-20T08:40:07Z","id":"moai-3prn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T08:40:07Z","id":"moai-g0zx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T08:40:08Z","id":"moai-kos1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T08:40:08Z","id":"moai-rviv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
