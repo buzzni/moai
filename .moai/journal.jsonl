@@ -6303,3 +6303,19 @@
 {"ts":"2026-09-20T11:17:40Z","id":"moai-fume","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CI 가 안 써도 되는 빌드를 돈다 — 문서만 바뀐 PR 의 LTO 와 이중 컴파일"}
 {"ts":"2026-09-20T11:17:53Z","id":"moai-dq4j","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"설치 시험이 릴리스를 안 내는 플랫폼에서 떨어진다"}
 {"ts":"2026-09-20T11:18:09Z","id":"moai-7mhf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"베껴 적은 두 자리 — 설치 스크립트의 플랫폼 표와 담아 둔 CLI 레퍼런스"}
+{"ts":"2026-09-20T11:21:32Z","id":"moai-y89y","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 출시 준비 에픽 열한 멤버)"}
+{"ts":"2026-09-20T11:21:32Z","id":"moai-wc2h.n1y","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=366874 (max — 에픽 끝 리뷰)"}
+{"ts":"2026-09-20T11:21:50Z","id":"moai-wc2h.n1y","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"열다섯 건을 모두 고쳤다(커밋 1dfd2cd). 가장 무거운 넷은 포크 가드가 거의 모든 PR 을 막던 것, pre-push 가 제 머리에 적은 약속을 어기고 도구의 사정으로 푸시를 막던 것, macOS 에서 게이트가 아예 안 돌던 것, `ln -s` 로 건 훅이 모든 푸시를 막던 것이다.\n\n넘긴 것 중 하나는 여기서 마저 했다 — 15MB 를 재는 자가 ci.yml 과 release.yml 에 따로 적혀 이미 갈라져 있었다. `scripts/check-size.sh` 하나로 모았다(커밋 531e039).\n\n나머지는 idea 로 담았다. moai-mu8w(태그 검사가 미는 커밋이 아니라 작업본을 본다) · moai-fume(문서만 바뀐 PR 의 LTO 와 이중 컴파일) · moai-dq4j(설치 시험이 릴리스를 안 내는 플랫폼에서 떨어진다) · moai-7mhf(베껴 적은 두 자리).\n\n안 고치기로 한 것 하나는 `check-version.sh` 의 링크 푸는 고리다. 설치 스크립트가 파일을 베끼니 지금은 안 도는 길이지만, 머리글이 대는 `ln -s` 설치를 쓰면 그때 선다 — 걷으면 그 길이 깨진다."}
+{"ts":"2026-09-20T11:21:50Z","id":"moai-wc2h.n1y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열다섯 건을 다 고쳤다. 넘긴 것은 앞 노트에 idea id 와 함께 적었다"}
+{"ts":"2026-09-20T11:21:57Z","id":"moai-y89y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T11:21:57Z","id":"moai-jy55","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T11:21:57Z","id":"moai-4gn9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T11:21:57Z","id":"moai-j54h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T11:21:57Z","id":"moai-pu19","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T11:21:57Z","id":"moai-ayhh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T11:21:57Z","id":"moai-cf21","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T11:21:57Z","id":"moai-i3s8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T11:21:57Z","id":"moai-rli6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T11:21:57Z","id":"moai-q32f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T11:21:57Z","id":"moai-071u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T11:22:04Z","id":"moai-wc2h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: moai-hwxc 하나가 첫 칸에 남았다 — 저장소를 rustfmt 로 한 번 맞추고 ci-gate 에 `cargo fmt --check` 를 켜는 일이다. moai-jlon 과 moai-hom6 이 develop 에 든 뒤에 친다. 첫 릴리스는 CONTRIBUTING 의 Releasing 절대로, CHANGELOG 의 [Unreleased] 를 손으로 [0.1.0] 으로 바꿔 달고 태그한다."}
