@@ -14,9 +14,9 @@
 #   scripts/check-version.sh           pre-push 훅. git 이 주는 줄을 stdin 에서 읽는다
 #   scripts/check-version.sh --print   Cargo.toml 의 판을 찍는다 (파일 이름을 짓는 자리)
 #
-# 훅으로 거는 가장 싼 길은 이름을 걸어 두는 것이다. 클론마다 한 번 친다.
-#
-#   ln -s ../../scripts/check-version.sh .git/hooks/pre-push
+# 훅으로 걸려면 `scripts/install-git-hooks.sh` 를 클론마다 한 번 친다. 그쪽은
+# 앞서 있던 훅을 지우지 않고 이어 부르며, 이것이 없거나 오래 걸리면 푸시를
+# 그냥 보낸다. 이름만 걸어 두는 길(`ln -s`)도 되지만, 그러면 그 두 가지가 없다.
 set -euo pipefail
 
 # 저장소 뿌리는 **이 파일의 실제 자리**에서 읽는다. 위처럼 훅으로 걸면

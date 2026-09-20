@@ -3,12 +3,23 @@
 ## Once per clone
 
 ```sh
-moai merge-driver --install                            # resolve issues.jsonl per issue
-ln -s ../../scripts/check-version.sh .git/hooks/pre-push   # refuse a tag that disagrees with Cargo.toml
+moai merge-driver --install     # resolve issues.jsonl per issue
+scripts/install-git-hooks.sh    # refuse a tag that disagrees with Cargo.toml
 ```
 
-Git reads merge-driver commands from config, and config is not committed, so a
-clone that skips the first line silently falls back to git's default merge.
+Neither is committed — git reads merge-driver commands from config, and hooks
+live outside the working tree — so a clone that skips these behaves exactly as
+before. They are a safety net, not a rule.
+
+The hook installer keeps a hook that is already there: it moves it to
+`pre-push.moai-before` and calls it first, so lefthook, husky or your own script
+keeps working. `scripts/install-git-hooks.sh --uninstall` puts it back.
+
+The hook itself is thin, and it blocks a push in exactly two cases: the hook that
+was there before it fails, or a tag disagrees with `Cargo.toml`. Missing tools, a
+missing checkout, a check that runs long — all pass. A push should not be blocked
+by the tooling's own circumstances, and the release workflow measures the same
+thing again where it actually matters.
 
 ## Build and test
 

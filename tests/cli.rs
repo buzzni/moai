@@ -12452,6 +12452,148 @@ fn at_root(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
 }
 
+// ── git 훅 shim — 도구의 사정으로 푸시를 막지 않는다 ────────────────
+
+/// 시험이 만든 훅에 실행 비트를 준다. git 은 안 붙은 훅을 조용히 건너뛴다 —
+/// 그러면 "앞의 훅을 이어 불렀나" 를 재는 시험이 언제나 통과한다.
+#[cfg(unix)]
+fn make_runnable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// 훅을 심을 수 있는 가짜 클론 하나. `scripts/` 에서 필요한 것만 베껴 둔다.
+#[cfg(unix)]
+fn clone_with_scripts(s: &Scratch) -> PathBuf {
+    let root = s.path().join("clone");
+    std::fs::create_dir_all(root.join("scripts/git-hooks")).unwrap();
+    for name in ["install-git-hooks.sh", "check-version.sh"] {
+        std::fs::copy(script(name), root.join("scripts").join(name)).unwrap();
+    }
+    std::fs::copy(script("git-hooks/pre-push"), root.join("scripts/git-hooks/pre-push")).unwrap();
+    std::fs::copy(at_root("Cargo.toml"), root.join("Cargo.toml")).unwrap();
+    git(&root, &["init", "-q", "."]);
+    root
+}
+
+/// 훅을 돌린다. pre-push 가 받는 줄을 stdin 으로 먹인다.
+#[cfg(unix)]
+fn push_hook(root: &Path, fed: &str) -> Output {
+    use std::io::Write as _;
+    let mut child = isolated(root.join(".git/hooks/pre-push"))
+        .args(["origin", "https://example.invalid"])
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("훅을 실행하지 못했다");
+    child.stdin.take().unwrap().write_all(fed.as_bytes()).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[cfg(unix)]
+fn install_hooks(root: &Path, more: &[&str]) -> Output {
+    isolated("bash")
+        .arg(root.join("scripts/install-git-hooks.sh"))
+        .args(more)
+        .current_dir(root)
+        .output()
+        .expect("bash 를 실행하지 못했다 — 훅 시험에는 bash 가 있어야 한다")
+}
+
+/// 앞서 있던 훅을 **지우지 않고 이어 부른다**(moai-071u). 훅 파일은 하나뿐이라,
+/// 심는 것이 곧 남의 것을 덮는 것이면 아무도 심지 않는다.
+#[cfg(unix)]
+#[test]
+fn installing_the_hook_keeps_the_one_that_was_there_and_chains_it() {
+    let s = Scratch::new("hook-chain");
+    let root = clone_with_scripts(&s);
+    let was = root.join(".git/hooks/pre-push");
+    std::fs::write(&was, "#!/bin/sh\necho 남의 훅이 돌았다\nexit 0\n").unwrap();
+    make_runnable(&was);
+
+    let out = install_hooks(&root, &[]);
+    assert!(out.status.success(), "못 심었다\n{}", text(&out));
+    assert!(root.join(".git/hooks/pre-push.moai-before").is_file(), "남의 훅을 잃었다");
+
+    let ran = push_hook(&root, "refs/heads/develop a refs/heads/develop b\n");
+    assert!(ran.status.success(), "가지를 미는데 막았다\n{}", text(&ran));
+    assert!(String::from_utf8_lossy(&ran.stdout).contains("남의 훅이 돌았다"), "앞의 훅을 안 불렀다\n{}", text(&ran));
+}
+
+/// **git 을 막는 첫째 길은 앞의 훅이 진 때다.** 그것까지 삼키면 심는 순간 남의
+/// 검사가 조용히 없어진다.
+#[cfg(unix)]
+#[test]
+fn a_losing_earlier_hook_still_stops_the_push() {
+    let s = Scratch::new("hook-chain-fails");
+    let root = clone_with_scripts(&s);
+    let was = root.join(".git/hooks/pre-push");
+    std::fs::write(&was, "#!/bin/sh\necho 남의 훅이 막았다 >&2\nexit 1\n").unwrap();
+    make_runnable(&was);
+    install_hooks(&root, &[]);
+
+    let ran = push_hook(&root, "refs/heads/develop a refs/heads/develop b\n");
+    assert!(!ran.status.success(), "앞의 훅이 졌는데 지나갔다\n{}", text(&ran));
+}
+
+/// **다시 불러도 된다.** 블록은 하나로 남는다 — 두 번 심겨 두 번 재면, 두 번째를
+/// 걷는 사람이 첫 번째가 남은 것을 못 본다.
+#[cfg(unix)]
+#[test]
+fn installing_twice_leaves_one_block_and_uninstall_puts_the_old_hook_back() {
+    let s = Scratch::new("hook-twice");
+    let root = clone_with_scripts(&s);
+    let was = root.join(".git/hooks/pre-push");
+    std::fs::write(&was, "#!/bin/sh\necho 남의 훅이 돌았다\nexit 0\n").unwrap();
+    make_runnable(&was);
+
+    install_hooks(&root, &[]);
+    install_hooks(&root, &[]);
+    let body = std::fs::read_to_string(&was).unwrap();
+    assert_eq!(body.matches("# >>> moai:pre-push >>>").count(), 1, "블록이 겹쳤다\n{body}");
+
+    let out = install_hooks(&root, &["--uninstall"]);
+    assert!(out.status.success(), "못 걷었다\n{}", text(&out));
+    let back = std::fs::read_to_string(&was).unwrap();
+    assert!(back.contains("남의 훅이 돌았다"), "걷고 나니 남의 훅이 없다\n{back}");
+    assert!(!back.contains("moai:pre-push"), "걷었는데 블록이 남았다\n{back}");
+}
+
+/// **재는 스크립트가 없으면 조용히 지나간다**(moai-071u 의 안전 규약). 도구의
+/// 사정으로 사람의 푸시를 막지 않는다 — `moai status` 가 아무것도 안 막는 것과
+/// 같은 자리다.
+#[cfg(unix)]
+#[test]
+fn the_hook_says_nothing_when_the_check_is_not_there() {
+    let s = Scratch::new("hook-bare");
+    let root = clone_with_scripts(&s);
+    install_hooks(&root, &[]);
+    std::fs::remove_file(root.join("scripts/check-version.sh")).unwrap();
+
+    let ran = push_hook(&root, "refs/tags/v9.9.9 abcd refs/tags/v9.9.9 0000\n");
+    assert!(ran.status.success(), "잴 것이 없는데 막았다\n{}", text(&ran));
+}
+
+/// **막는 둘째 길은 일부러 세운 게이트 하나다**(moai-jy55). 어긋난 태그는 여기서
+/// 멈춘다.
+#[cfg(unix)]
+#[test]
+fn the_hook_stops_a_tag_that_disagrees_with_the_manifest() {
+    let s = Scratch::new("hook-gate");
+    let root = clone_with_scripts(&s);
+    install_hooks(&root, &[]);
+
+    let ran = push_hook(&root, "refs/tags/v9.9.9 abcd refs/tags/v9.9.9 0000\n");
+    assert!(!ran.status.success(), "어긋난 태그가 지나갔다\n{}", text(&ran));
+    let said = String::from_utf8_lossy(&ran.stderr).into_owned();
+    assert!(said.contains("bump-version.sh 9.9.9"), "고치는 길을 안 댄다\n{said}");
+
+    let fine = push_hook(&root, &format!("refs/tags/v{v} abcd refs/tags/v{v} 0000\n", v = manifest_version()));
+    assert!(fine.status.success(), "맞는 태그를 막았다\n{}", text(&fine));
+}
+
 /// `scripts/cross-version-smoke.sh` 를 **실제로 돌린다**(moai-rli6). 밤과 태그에서만
 /// 도는 스크립트는 아무도 안 보는 사이 썩는다. 여기서는 옛 판 자리에 같은 바이너리를
 /// 세우니 재는 것은 판 차이가 아니라 **스크립트가 아직 서 있는가** 다 — 그리고 그 김에

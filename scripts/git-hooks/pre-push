@@ -1,0 +1,71 @@
+#!/bin/sh
+# >>> moai:pre-push >>>
+# moai 의 pre-push shim. **얇다** — 재는 일은 저장소 안의 스크립트가 하고, 여기서는
+# 그것을 부를 수 있는지와 너무 오래 걸리지 않는지만 본다.
+#
+# 심는 것은 `scripts/install-git-hooks.sh` 다. 이 블록 밖의 줄은 건드리지 않으니
+# lefthook·husky 같은 훅 매니저와 한 파일에서 같이 산다.
+#
+# **git 을 막는 길은 둘뿐이다.**
+#   1. 앞서 있던 훅을 이어 부르다 그쪽이 진 때
+#   2. 태그와 `Cargo.toml` 이 어긋난 때 (moai-jy55 가 일부러 세운 게이트)
+#
+# 그 밖에는 무슨 일이 있어도 0 이다 — 도구가 없어도, 트래커가 없어도, 제한
+# 시간을 넘겨도. 사람의 푸시를 도구의 사정으로 막지 않는다. 넘겨 보낸 어긋남은
+# 릴리스 워크플로의 첫 잡이 다시 재니, 여기서 놓쳐도 나가지는 않는다.
+MOAI_HOOK_TIMEOUT=${MOAI_HOOK_TIMEOUT:-20}
+
+# 제한 시간 도구를 **글자로** 가른다. Windows 의 `timeout.exe` 는 같은 이름으로
+# 전혀 다른 일을 해, 이름만 보고 부르면 훅이 거기서 멈춘다.
+moai_with_timeout() {
+  if command -v timeout >/dev/null 2>&1 && timeout --version 2>/dev/null | grep -q GNU; then
+    timeout "$MOAI_HOOK_TIMEOUT" "$@"
+  elif command -v perl >/dev/null 2>&1; then
+    perl -e 'alarm shift; exec @ARGV' "$MOAI_HOOK_TIMEOUT" "$@"
+  else
+    printf 'moai: 제한 시간을 걸 도구가 없다 — 그냥 돌린다\n' >&2
+    "$@"
+  fi
+}
+
+# pre-push 는 밀 줄을 stdin 으로 준다. 이어 부르는 훅과 우리가 **둘 다** 읽어야
+# 하므로 한 번 받아 두고 각자에게 먹인다.
+moai_fed=$(mktemp 2>/dev/null) || moai_fed=
+if [ -n "$moai_fed" ]; then
+  cat >"$moai_fed"
+fi
+moai_feed() {
+  if [ -n "$moai_fed" ]; then
+    "$@" <"$moai_fed"
+  else
+    "$@" </dev/null
+  fi
+}
+
+# 앞서 있던 훅. 심을 때 옆으로 옮겨 둔 것이고, **그쪽이 지면 그것이 git 을 막는다.**
+moai_before=$0.moai-before
+if [ -x "$moai_before" ]; then
+  if ! moai_feed "$moai_before" "$@"; then
+    rm -f "$moai_fed"
+    exit 1
+  fi
+fi
+
+moai_root=$(git rev-parse --show-toplevel 2>/dev/null) || moai_root=
+moai_check=$moai_root/scripts/check-version.sh
+if [ -z "$moai_root" ] || [ ! -x "$moai_check" ]; then
+  # 이 저장소가 아니거나 스크립트가 없다. 할 말이 없으니 조용히 지나간다.
+  rm -f "$moai_fed"
+  exit 0
+fi
+
+moai_feed moai_with_timeout "$moai_check"
+moai_said=$?
+rm -f "$moai_fed"
+if [ "$moai_said" = 124 ] || [ "$moai_said" = 142 ]; then
+  # GNU timeout 은 124, perl 의 alarm 은 142(SIGALRM)다.
+  printf 'moai: 판 검사가 %s초를 넘겼다 — 그냥 보낸다. 릴리스 워크플로가 다시 잰다\n' "$MOAI_HOOK_TIMEOUT" >&2
+  exit 0
+fi
+exit "$moai_said"
+# <<< moai:pre-push <<<
