@@ -11698,6 +11698,102 @@ fn an_uninstalled_clone_falls_back_to_gits_own_merge() {
     assert!(line_of(root, &id).contains("\"parser\""), "{}", issues(root));
 }
 
+/// **적은 자리가 썩어도 조용히 잃지 않는다.**
+///
+/// git 은 못 돈 드라이버를 "충돌" 로 읽으면서 `%A` 를 그대로 병합 결과로 삼는다. 심는 줄이
+/// 드라이버만 부르면 그 파일에는 표식이 없고, 그것을 연 사람은 "이미 풀렸다" 로 읽어 `git add`
+/// 한 번에 저쪽을 통째로 버린다 — 안 심은 클론보다 나쁜 자리다(`moai-w8so` 의 실측). 그래서
+/// 심는 줄은 답도 표식도 안 쓰고 실패한 판을 `git merge-file` 로 다시 합친다.
+///
+/// 경로를 없는 자리로 주어 그 판을 만든다. 보는 것은 셋이다 — 병합이 비영으로 끝나는가,
+/// **표식이 파일에 실제로 서는가**, 그리고 그것을 그대로 `git add` 해도 저쪽이 남는가.
+#[test]
+fn a_rotten_driver_path_falls_back_to_gits_own_merge() {
+    let s = init("mergerotten");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", &s.path().join("없는/자리/moai").display().to_string()]);
+    let id = add(root, &["하나"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &id, "--title", "저쪽 제목"]);
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &id, "--tag", "parser"]);
+    git(root, &["commit", "-qam", "main"]);
+
+    let out = git_try(root, None, &["merge", "--no-edit", "side"]);
+    assert!(!out.status.success(), "못 돈 드라이버를 성공으로 읽었다\n{}", text(&out));
+    let merged = issues(root);
+    assert!(
+        merged.contains("<<<<<<<") && merged.contains(">>>>>>>"),
+        "표식 없는 충돌을 남겼다 — `git add` 한 줄에 저쪽이 사라진다\n{merged}"
+    );
+    // 사람이 그대로 받아 적는 판. 표식이 있으니 저쪽 글이 파일에 남아 있다.
+    git(root, &["add", ".moai/issues.jsonl"]);
+    git(root, &["commit", "-qm", "그대로 add"]);
+    assert!(issues(root).contains("저쪽 제목"), "저쪽 고침이 자취 없이 사라졌다\n{}", issues(root));
+}
+
+/// **빈칸이 든 경로로 심어도 그대로 돈다.**
+///
+/// git 은 드라이버 명령을 `sh -c` 로 돌린다. 감싸지 않은 경로는 첫 낱말에서 끊겨 늘 내려앉는
+/// 길로만 가고, 그 저장소는 드라이버를 심고도 안 심은 것과 같아진다 — 게다가 조용하다.
+/// `%O %A %B %L %P` 가 껍데기를 거쳐 그대로 닿는지도 여기서 함께 잰다.
+#[cfg(unix)]
+#[test]
+fn the_planted_line_survives_a_path_with_a_space() {
+    let s = init("mergespace");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    let dir = root.join("빈 칸 든 자리");
+    std::fs::create_dir_all(&dir).unwrap();
+    let shim = dir.join("moai");
+    write_exe(&shim, &format!("#!/bin/sh\nexec '{BIN}' \"$@\"\n"));
+    ok(root, &["merge-driver", "--install", "--as", &shim.display().to_string()]);
+
+    let one = add(root, &["첫째"]);
+    let two = add(root, &["둘째"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &two, "--tag", "parser"]);
+    git(root, &["commit", "-qam", "side"]);
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &one, "--tag", "bug"]);
+    git(root, &["commit", "-qam", "main"]);
+
+    git(root, &["merge", "--no-edit", "side"]);
+    let merged = issues(root);
+    assert!(!merged.contains("<<<<<<<"), "빈칸에서 끊겨 내려앉았다\n{merged}");
+    assert!(line_of(root, &one).contains("\"bug\"") && line_of(root, &two).contains("\"parser\""), "{merged}");
+}
+
+/// **다시 심으면 옛 줄을 덮는다.** 값이 둘로 서면 git 은 마지막 것을 쓰는데, 사람이 `--as` 를
+/// 고쳐 치고도 옛 줄이 남아 있다고 읽으면 어느 쪽이 도는지 못 본다. 기본값으로 심은 줄에도
+/// 내려앉는 마디가 서는지를 같은 자리에서 본다 — `--as` 를 준 판만 안전하면 안 된다.
+#[test]
+fn re_installing_replaces_the_line_and_every_line_falls_back() {
+    let s = init("mergereinstall");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", "/w/옛/moai"]);
+    ok(root, &["merge-driver", "--install", "--as", "/w/새/moai"]);
+    let planted = git(root, &["config", "--get-all", "merge.moai.driver"]);
+    assert_eq!(planted.lines().count(), 1, "옛 줄이 남았다\n{planted}");
+    assert!(planted.contains("/w/새/moai"), "{planted}");
+    assert!(planted.contains("git merge-file"), "내려앉는 마디가 없다\n{planted}");
+
+    // `--as` 없이 심은 줄도 같다. 기본값은 지금 도는 바이너리의 절대 경로다.
+    ok(root, &["merge-driver", "--install"]);
+    let planted = git(root, &["config", "--get-all", "merge.moai.driver"]);
+    assert_eq!(planted.lines().count(), 1, "{planted}");
+    assert!(planted.contains(BIN) && planted.contains("git merge-file"), "{planted}");
+}
+
 /// 못 읽는 바이트를 파일 끝에 덧붙인다 — 손으로 푼 충돌이 남기는 자리다.
 fn append_raw(root: &Path, bytes: &[u8]) {
     let path = root.join(".moai/issues.jsonl");

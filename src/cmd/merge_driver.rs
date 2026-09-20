@@ -483,6 +483,36 @@ fn time(v: Option<&Value>) -> Option<i64> {
     crate::model::parse_rfc3339(v?.as_str()?)
 }
 
+/// 설정에 적는 한 줄을 짓는다. **못 돌면 git 의 기본 머지로 내려앉는다.**
+///
+/// git 은 드라이버 명령을 `sh -c` 로 돌리고, **비영으로 끝난 것을 "충돌" 로 읽으면서 `%A` 를
+/// 그대로 병합 결과로 삼는다.** 그래서 명령이 아예 못 돌면(적힌 경로가 사라졌다, PATH 에 없다,
+/// 실행 권한이 없다) 파일은 이쪽 것 그대로인데 표식이 없고, 그것을 연 사람은 "이미 풀렸다" 로
+/// 읽어 `git add` 한 번에 저쪽을 통째로 버린다. 안 심은 클론이 도리어 안전한 자리다 — 거기서는
+/// git 의 기본 머지가 적어도 표식을 남긴다(`moai-w8so` 의 실측).
+///
+/// 그 두 상태를 같게 만든다. 세 마디다.
+///
+/// 1. 드라이버가 0 으로 끝나면 그것으로 끝이다.
+/// 2. 비영인데 `%A` 에 표식이 있으면 **답을 못 지어 사람에게 넘긴 것**이므로 그대로 비영이다.
+/// 3. 비영인데 표식이 없으면 그 명령은 답을 안 쓴 것이다 — `git merge-file` 로 다시 합친다.
+///    이 길은 표식을 남기므로, 최악이 "조용한 손실" 에서 "안 심은 클론과 같음" 으로 내려온다.
+///
+/// 표식을 `<<<<<<<` 일곱 자로 찾는 것은 git 의 기본값이다. 저장소가 `conflict-marker-size` 를
+/// 그보다 짧게 잡아 못 찾으면 3번으로 내려가는데, 그것도 표식이 서는 길이라 잃는 것은 없다.
+///
+/// 경로는 `shell_word` 로 감싼다 — 빈칸이 든 경로는 첫 낱말에서 끊기고, 그때 껍데기가 내는
+/// 것은 1번도 2번도 아닌 3번이다. `%A %O %B` 는 git 이 제가 지은 임시 파일 이름으로 바꾸므로
+/// 그대로 둔다. `%P` 는 git 이 이미 따옴표로 싸서 넣으니 덧싸지 않는다.
+fn driver_command(cmd: &str) -> String {
+    let q = crate::text::shell_word(cmd);
+    format!(
+        "if {q} merge-driver %O %A %B %L %P; then exit 0; fi; \
+         grep -q '^<<<<<<<' %A && exit 1; \
+         exec git merge-file -L ours -L base -L theirs %A %O %B"
+    )
+}
+
 /// `.git/config` 에 드라이버를 심는다.
 ///
 /// **저장소마다 한 번씩 쳐야 한다** — git 은 드라이버 명령을 설정에서만 읽고 설정은
@@ -499,10 +529,7 @@ fn install(ctx: &Ctx, as_command: Option<&str>) -> R<Vec<String>> {
             .display()
             .to_string(),
     };
-    // **셸이 읽는 줄이다** — git 은 드라이버 명령을 `sh -c` 로 돌린다. 감싸지 않으면 자리에
-    // 빈칸이 든 경로가 첫 낱말에서 끊기고, 그때 git 은 "충돌" 이라고만 말하면서 `%A` 를 이쪽
-    // 파일 그대로 남긴다 — 표식 없는 그 파일을 `git add` 하는 순간 저쪽이 통째로 사라진다.
-    let driver = format!("{} merge-driver %O %A %B %L %P", crate::text::shell_word(&cmd));
+    let driver = driver_command(&cmd);
     let name = format!("merge.{DRIVER}.name");
     let key = format!("merge.{DRIVER}.driver");
     // **속 병합에는 이 드라이버를 쓰지 않는다**(`merge.<이름>.recursive`). 갈래가 엇갈린
@@ -538,11 +565,13 @@ fn install(ctx: &Ctx, as_command: Option<&str>) -> R<Vec<String>> {
         format!("{key} = {driver}"),
         format!("`.gitattributes` 의 `.moai/issues.jsonl merge={DRIVER}` 가 이것을 부른다 — 없으면 `moai init` 이 넣는다"),
         "클론마다 한 번씩 친다. 안 친 클론은 git 의 기본 머지가 돈다".into(),
-        // **적은 자리가 사라지면 조용히 잃는다.** git 은 못 돈 드라이버를 "충돌" 로 읽고 `%A` 를
-        // 이쪽 파일 그대로 남기는데, 그 파일에는 표식이 없어 `git add` 한 번에 저쪽이 사라진다.
+        // **적은 자리가 사라져도 조용히 잃지는 않는다** — 심는 줄이 `git merge-file` 로
+        // 내려앉으므로(`driver_command`) 최악이 안 심은 클론과 같아진다. 그래도 자리는
+        // 지키는 편이 낫다: 내려앉은 판은 이슈마다 푼 것을 못 쓰고 사람 손으로 간다.
         // 딸린 워크트리에서 쳐도 이 줄은 **클론이 함께 쓰는** `.git/config` 에 앉으므로
-        // (`--local` 은 공용 자리다), 그 워크트리를 지우면 클론 전체의 병합이 그 상태가 된다.
-        "적은 자리가 계속 있어야 한다 — 워크트리의 `target/` 을 가리키면 그 워크트리를 지울 때 같이 죽는다. 그때는 다시 치거나 `--as <늘 있는 자리>` 로 심는다".into(),
+        // (`--local` 은 공용 자리다), 그 워크트리를 지우면 클론 전체가 그 상태가 된다.
+        "적은 자리가 사라지면 git 의 기본 머지로 내려앉는다 — 표식은 서지만 이슈마다 푸는 값은 잃는다".into(),
+        "워크트리의 `target/` 을 가리키면 그 워크트리를 지울 때 같이 죽는다. 그때는 다시 치거나 `--as <늘 있는 자리>` 로 심는다".into(),
     ])
 }
 
@@ -808,5 +837,28 @@ mod tests {
         let b = format!("{}\n", line("argos-0001", ",\"priority\":1"));
         let (_, clashes) = merge(&o, &a, &b);
         assert!(clashes.is_empty(), "{clashes:?}");
+    }
+
+    /// **심는 줄은 세 마디다** — 돌면 그것으로 끝, 표식을 남기고 실패했으면 그대로 넘김,
+    /// 아무것도 안 쓰고 실패했으면 `git merge-file`. 셋째 마디가 없으면 경로가 썩은 순간
+    /// git 이 표식 없는 파일을 남기고, `git add` 한 번에 저쪽이 사라진다.
+    #[test]
+    fn the_planted_line_falls_back_to_gits_own_merge() {
+        let line = driver_command("/w/moai");
+        assert!(line.starts_with("if /w/moai merge-driver %O %A %B %L %P; then exit 0; fi;"), "{line}");
+        assert!(line.contains("grep -q '^<<<<<<<' %A && exit 1"), "표식이 선 실패를 내려앉혔다\n{line}");
+        assert!(line.ends_with("exec git merge-file -L ours -L base -L theirs %A %O %B"), "{line}");
+        // 한 줄이어야 한다 — `git config` 의 값은 줄 하나다.
+        assert_eq!(line.lines().count(), 1, "{line}");
+    }
+
+    /// **빈칸이 든 경로를 감싼다.** 안 감싸면 첫 낱말에서 끊겨 늘 내려앉는 길로만 가고,
+    /// 그 저장소는 드라이버를 심고도 안 심은 것과 같아진다.
+    #[test]
+    fn the_planted_line_quotes_a_path_with_a_space() {
+        let line = driver_command("/w/My Work/moai");
+        assert!(line.starts_with("if '/w/My Work/moai' merge-driver "), "{line}");
+        // 자리표시자는 감싸지 않는다 — git 이 제 임시 파일 이름으로 바꾼다. `%P` 는 git 이 이미 싼다.
+        assert!(!line.contains("\"%A\"") && !line.contains("'%A'"), "자리표시자를 덧쌌다\n{line}");
     }
 }
