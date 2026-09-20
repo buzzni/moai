@@ -5931,3 +5931,9 @@
 {"ts":"2026-09-20T04:47:29Z","id":"moai-k4uh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"model::fit 이 이름으로 칸을 재는 fit 둘과 부딪힌다"}
 {"ts":"2026-09-20T04:47:39Z","id":"moai-zmv9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"트래커 찾기가 뿌리까지 말없이 올라간다 — 남의 .moai 밑에서 친 moai 가 그 트래커에 쓴다"}
 {"ts":"2026-09-20T04:48:41Z","id":"moai-po6v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T04:51:42Z","id":"moai-clta","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 저널에 적히는 글을 짓는 쓰기 경로)"}
+{"ts":"2026-09-20T04:51:42Z","id":"moai-izeo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 시험 바닥의 임시 자리)"}
+{"ts":"2026-09-20T04:51:42Z","id":"moai-5lwd.n5l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=326573 (max — 에픽 끝 리뷰)"}
+{"ts":"2026-09-20T04:51:51Z","id":"moai-clta","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T04:51:51Z","id":"moai-izeo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T04:51:51Z","id":"moai-5lwd.n5l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열둘을 반영했다 — 표식에 .moai 를 더해 구멍을 막고(1번, 이 에픽이 고치려던 바로 그 훑기였다), 둘째 노트도 같은 자로 재고, base 를 pick/usable 로 갈라 옮김·실패 갈래를 시험에 넣었다. 3번(예산 2KB)도 재고 받아들였다 — 제목 최대가 516바이트라 여태 선 노트는 안 잘린다. 넘긴 셋은 idea 로 섰다: --dry-run 크기 검사 moai-0lqb, fit 이름 충돌 moai-k4uh, 뿌리까지 말없이 오르는 찾기 moai-zmv9. 앞서 담은 거절문의 새 id 는 moai-gw18 이다."}
