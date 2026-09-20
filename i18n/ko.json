@@ -56,5 +56,7 @@
   "status.age": "{d}일",
   "status.overlaid": "{trees} 겹쳐 봄",
   "opening.commands": "명령: `moai --help`",
-  "opening.commands_here": "명령: `moai --help`   ·   이 저장소에서 일하는 법: AGENTS.md"
+  "opening.commands_here": "명령: `moai --help`   ·   이 저장소에서 일하는 법: AGENTS.md",
+  "warn.milestone_focus": "도는 마일스톤이 있다 — 밖에 남은 일 {n}건은 나중이다 (p0 은 그대로 집는다)",
+  "ready.outside_held": "도는 마일스톤 밖의 일 {n}건은 안 냈다 — 그 안을 먼저 끝낸다 (p0 은 밖에서도 낸다)"
 }

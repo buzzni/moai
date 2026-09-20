@@ -280,6 +280,47 @@ fn nothing_picked_means_korean_for_now_and_english_is_one_word_away() {
     assert_eq!(english.lines().count(), japanese.lines().count(), "영어와 일본어의 줄 수가 다르다");
 }
 
+/// **마일스톤이 도는 동안 그 안이 먼저다**(moai-493a, 2026-09-20 사용자 결정).
+///
+/// 한 판에서 셋을 잰다 — `ready` 가 밖의 일을 빼고 그 까닭을 대는가, `--json` 이 같은 것을
+/// 기계에도 대는가, 보드가 알림 한 줄로 비추는가. **막지 않는다**: 밖의 일을 집는 `mv` 는
+/// 그대로 0 으로 끝나야 한다. 거절하면 그것이 게이트고, 그 결정은 여기서 뒤집힌다.
+#[test]
+fn a_running_milestone_comes_first_and_nothing_is_blocked() {
+    let s = init("focus");
+    let stone = field(&ok(s.path(), &["milestone", "add", "v0.1", "--json"]), "id");
+    let epic = field(&ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &stone, "--json"]), "id");
+    let inside = field(&ok(s.path(), &["add", "안의 일", "-e", &epic, "--json"]), "id");
+    let held = field(&ok(s.path(), &["add", "밖의 일", "--json"]), "id");
+    let hot = field(&ok(s.path(), &["add", "밖의 핫픽스", "-p", "0", "--json"]), "id");
+
+    // 아직 아무도 안 집었다 — 마일스톤은 안 돈다(시작은 멤버에서 읽는다).
+    let before = ok(s.path(), &["ready"]);
+    assert!(before.contains(&held), "안 도는데 밖의 일을 뺐다\n{before}");
+
+    // 안의 일을 하나 집으면 그때부터 돈다.
+    ok(s.path(), &["mv", &inside, "in_progress", "--from", "todo"]);
+    let after = ok(s.path(), &["ready"]);
+    assert!(!after.contains(&held), "도는데 밖의 p2 를 그대로 냈다\n{after}");
+    assert!(after.contains(&hot), "밖의 p0 까지 뺐다 — 핫픽스 자리가 사라졌다\n{after}");
+    assert!(after.contains(&stone), "무엇이 도는지 안 댔다\n{after}");
+
+    // 기계에도 같은 것을 댄다 — 짧아진 목록을 "할 일이 없다" 로 읽지 않게.
+    let json = ok(s.path(), &["ready", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(&format!("\"milestone\":[\"{stone}\"]")), "{json}");
+    assert!(json.contains(&format!("\"outside\":[\"{held}\"]")), "{json}");
+
+    // 보드는 알림으로 댄다 — 경고가 아니다(`!` 가 아니라 `+`).
+    let board = ok(s.path(), &["status"]);
+    let line = board.lines().find(|l| l.contains("도는 마일스톤")).expect(&format!("보드가 말이 없다\n{board}"));
+    assert!(line.starts_with('+'), "알림이 경고로 섰다 — {line:?}");
+
+    // **막지 않는다.** 밖의 일을 집는 것은 그대로 지나간다.
+    let out = moai(s.path(), &["mv", &held, "in_progress", "--from", "todo"]);
+    assert!(out.status.success(), "밖의 일 집기를 막았다 — 게이트가 됐다\n{}", text(&out));
+}
+
 /// **시스템 로캘은 말을 안 고른다**(moai-gv9n, 2026-09-20 사용자 결정).
 ///
 /// `Lang::parse` 가 `ja_JP.UTF-8` 모양을 받아 주는 것은 `MOAI_LANG` 에 로캘을 그대로 붙여
