@@ -4212,6 +4212,33 @@ mod tests {
         assert_eq!(b.notice, None, "제가 적은 설정을 읽으며 말이 섰다\n{text}");
     }
 
+    /// **손으로 적은 표 모양의 거절은 한 번만 말한다**(moai-fdq2). 건너뛴 키를 `App::saved` 에 든
+    /// 것으로 옮겨 다음 저장이 그 차이를 안 싣는 것이 그 길인데(moai-jr3z), `fields_known` 만은 깃발이
+    /// `base != new` 가 아니라 **늘 참**이라 그 길에서 샜다 — 토글마다 같은 알림이 서서 사람이 방금
+    /// 띄운 말을 덮었다. 파일의 손으로 적은 모양은 그대로다.
+    #[test]
+    fn a_refused_fields_known_is_told_once_not_on_every_toggle() {
+        let s = scratch("fields-known-refused");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\nfields_known = { id = true }\n").unwrap();
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+
+        a.hit("SPC c t Esc");
+        let first = a.notice.take();
+        assert!(first.as_deref().is_some_and(|n| n.contains("fields_known")), "첫 거절을 안 말했다 — {first:?}");
+
+        a.hit("SPC c t Esc");
+        assert_eq!(a.notice, None, "같은 거절이 토글마다 다시 선다 — {:?}", a.notice);
+        a.hit("SPC c a Esc");
+        assert_eq!(a.notice, None, "다른 키를 토글해도 같은 거절이 선다 — {:?}", a.notice);
+
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(text.contains("fields_known = { id = true }"), "손으로 적은 모양을 덮었다\n{text}");
+        assert!(text.contains("\"assignee\""), "거절된 키 하나가 다른 키의 저장을 막았다\n{text}");
+    }
+
     /// **빈 `fields_known` 을 다시 적어도 남의 글은 그대로다**(moai-4gy5) — 매 저장이 설정 파일 전체를
     /// 다시 쓰는 길이라, 모르는 키·주석·다른 표가 한 번의 토글로 조용히 사라지면 되돌릴 방법이 도구
     /// 밖에만 남는다. 이 저장소가 못 견디는 것이 그 조용한 손실이다.

@@ -848,8 +848,17 @@ impl Doc {
         let mut hide_deferred = base.hide_deferred != new.hide_deferred;
         let mut sort = (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed);
         let mut fields = base.fields != new.fields;
-        // `fields_known` 은 늘 더하기로 적으니(아래) 적을 것이 있으면 늘 본다.
-        let mut known = new.fields_known.is_some();
+        // **`fields_known` 도 `base != new` 로 잰다**(moai-fdq2). 한때 이 키만 "적을 것이 있으면 늘
+        // 본다"(`is_some()`)였다 — 더하기로만 적는 키라 `base` 를 안 쓰는 것과 같은 결로 둔 것인데,
+        // 그 깃발은 **늘 참**이라 건너뛴 키를 든 것으로 옮기는 길(`App::save_look` 의 `saved = look`,
+        // moai-jr3z)에서 혼자 샜다: 손으로 적은 표 모양 앞에서 같은 거절 알림이 토글마다 다시 서서
+        // 사람이 방금 띄운 말을 덮었다. `save_look` 의 글은 "알림은 이번 한 번" 이라고 적혀 있다.
+        //
+        // **`base` 를 안 쓰는 것은 아래의 `merge_words` 지 이 깃발이 아니다** — 거기 `None` 을 넘기는
+        // 것은 남이 적어 둔 이름을 빼지 않으려는 것이고, 여기서 재는 것은 *이 세션이 적을 것이
+        // 남았는가* 다. 탐색기의 `new` 는 세션 내내 같은 값(아는 열 전부)이라, 한 번 적히고 나면
+        // `saved` 가 그것을 들어 둘이 같아진다 — 그때부터 이 키는 안 본다.
+        let mut known = base.fields_known != new.fields_known;
         let mut detail = base.detail != new.detail;
         // **이 세션이 적을 키가 손으로 적은 표 모양이면 그 키만 안 적는다**(moai-j7r3, moai-jr3z) — 무엇을 덮지
         // 않는가는 `set_hue` 와 같은 자다([`plain`]). `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을
