@@ -899,7 +899,7 @@ pub fn stranded(issues: &[Issue], cfg: &Config, trees: &[Workplace], now: &str) 
     // 하루가 안 된 것에 다 `0일` 이 붙어 "방금 집었다" 로 읽힌다. 안 실으면 보는 쪽이 칸 나이를
     // 내는데 그 값이 똑같으므로 화면은 그대로고, `--json` 에서 속이는 키 하나가 준다.
     (!lost.is_empty())
-        .then(|| Warning::new("stranded", ids_of(&lost)).hint("moai mv <id> todo  ·  moai defer <id> -m \"왜\""))
+        .then(|| Warning::new("stranded", ids_of(&lost)).hint("moai mv <id> todo  ·  moai defer <id> -m '왜'"))
 }
 
 /// 같은 id 를 쓰는 줄이 **둘 이상이면** 그 수. 하나뿐이면 `None`.
@@ -3513,7 +3513,12 @@ mod tests {
         assert_eq!(w.kind, "stranded");
         assert_eq!(w.ids, ["argos-0001"], "{w:?}");
         assert!(!w.fatal && !w.notice);
-        assert!(w.hint.as_deref().is_some_and(|h| h.contains("moai mv <id> todo")), "{w:?}");
+        let hint = w.hint.as_deref().expect("고칠 손을 안 댄다");
+        assert!(hint.contains("moai mv <id> todo"), "{w:?}");
+        // **내미는 줄의 자유 글도 작은따옴표다**(moai-vj4e). 큰따옴표로 가르친 `-m` 은 채운 글에
+        // 백틱이나 `$(…)` 가 들면 셸이 명령으로 풀어 글이 잘린 채 0 으로 끝난다 — 가르치는 글을
+        // 훑는 `guide` 의 시험은 `guide` 의 글만 보아 이 줄을 못 본다.
+        assert!(!hint.contains('"'), "보드가 자유 글을 큰따옴표로 가르친다 — {hint}");
 
         assert!(stranded(&issues, &cfg(), &[], now).is_none(), "워크트리를 안 쓰는 저장소에서 떠들었다");
         let all_placed = vec![tree("/r/w", "worktree-argos-0001", &[]), trees[0].clone()];
