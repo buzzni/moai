@@ -74,11 +74,17 @@ impl Ctx {
     /// 재진입은 영영 안 풀리고 모든 명령이 아무 말 없이 멈춘다. 그 줄을 쓰게 되는 날에는
     /// 값을 **먼저 길어 놓고** `get_or_init` 에 넣는다. 옛 자리가 그렇게 썼던 까닭이다.
     pub fn lang(&self) -> crate::i18n::Lang {
-        *self.lang.get_or_init(|| {
-            let env = std::env::var("MOAI_LANG").ok();
-            crate::i18n::pick(env.as_deref(), self.registry().lang.as_deref())
-        })
+        *self.lang.get_or_init(|| lang_of(self.registry()))
     }
+}
+
+/// 이미 읽어 든 설정에서 화면 말을 고른다 — [`Ctx::lang`] 과 **같은 자**다. 제 손으로
+/// `user_config::read` 를 부르는 길(`cmd::tui::outside`)이 말을 물으려고 `ctx.lang()` 을 부르면
+/// [`Ctx::registry`] 가 같은 파일을 한 번 더 읽는다(moai-u8cs 가 걷어 낸 바로 그것이다). 고르는
+/// 규칙을 두 벌로 적지 않으려고 여기 한 자리에 둔다.
+pub fn lang_of(reg: &crate::user_config::Registry) -> crate::i18n::Lang {
+    let env = std::env::var("MOAI_LANG").ok();
+    crate::i18n::pick(env.as_deref(), reg.lang.as_deref())
 }
 
 /// 할 수 있는 것은 다 하고, 된 것과 안 된 것을 둘 다 보고한 뒤 비영 종료한다.
@@ -135,7 +141,7 @@ pub fn gather(ctx: &Ctx, repo: &crate::store::Repo, worktree: bool) -> R<crate::
 pub fn registered(ctx: &Ctx, worktree: bool) -> R<(&crate::user_config::Registry, Vec<crate::projects::Project>)> {
     let reg = ctx.registry();
     if reg.projects.is_empty() {
-        return Err(nothing_registered(reg));
+        return Err(nothing_registered(reg, ctx.lang()));
     }
     let projects = crate::projects::open_with(reg, worktree);
     Ok((reg, projects))
@@ -145,46 +151,50 @@ pub fn registered(ctx: &Ctx, worktree: bool) -> R<(&crate::user_config::Registry
 /// 같은 말을 내고 0 으로 끝난다(moai-ynsb).
 /// 화면의 `tui` 는 멈추지 않고 빈 층에서 `SPC p a` 를 댄다(moai-r8kl).
 /// 목록이 빈 까닭이 사용자 설정의 문제일 수 있어 그것도 붙인다.
-pub fn nothing_registered(reg: &crate::user_config::Registry) -> Fail {
+pub fn nothing_registered(reg: &crate::user_config::Registry, lang: crate::i18n::Lang) -> Fail {
     let mut msg = format!(
         "{}\n등록한 프로젝트도 없다 — `moai project add <dir>` 로 더하면 `.moai` 밖에서 한눈에 본다",
         crate::store::NOT_A_REPO
     );
     // 사람의 설정 파일에서 온 글이다 — 제어문자를 걷고 한 줄로 접는다. 이 말은 줄 단위로
     // 읽히므로(`fail` 이 그대로 stderr 에 쓴다) 여러 줄이 섞이면 어디까지가 한 까닭인지 흐려진다.
-    for p in &reg.problems {
-        msg.push_str(&format!("\n{}", crate::text::one_line(p)));
+    // **읽는 문은 [`crate::view::settings_problems`] 하나다**(리뷰) — 화면 말의 탈은 `problems` 가
+    // 아니라 `lang_problems` 에 자료로 서므로(moai-dpbi), `reg.problems` 를 그냥 훑으면 `lang` 오타가
+    // 이 줄에서만 조용히 사라진다.
+    for p in crate::view::settings_problems(reg, lang) {
+        msg.push_str(&format!("\n{}", crate::text::one_line(&p)));
     }
     Fail::new(msg)
 }
 
 /// 읽다 만난 잘못된 줄을 stderr 로 알린다. 결과는 그대로 낸다.
-pub fn report_load_errors(path: &std::path::Path, errors: &[crate::store::LoadError]) {
+pub fn report_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, errors: &[crate::store::LoadError]) {
     if errors.is_empty() {
         return;
     }
     note_partial();
-    name_load_errors(path, errors);
+    name_load_errors(lang, path, errors);
 }
 
 /// 같은 말을 하되 **부분 실패 깃발은 안 세운다.** 읽기가 답을 덜 낸 자리
 /// (`show`·`ready`)는 비영 종료가 맞지만, 쓰기와 짝을 이루는 자리(`promote`
 /// 의 연습)는 진짜 실행이 그 줄 때문에 멈추지 않으므로 연습만 실패로 끝나면
 /// 안 된다 — 그것을 거절로 읽은 쪽은 도구가 기꺼이 해 줄 계획을 버린다.
-pub fn name_load_errors(path: &std::path::Path, errors: &[crate::store::LoadError]) {
+///
+/// **이 줄도 말묶음에서 온다**(moai-dpbi 리뷰) — 바로 곁에서 `gather` 가 옆 워크트리의 같은
+/// 사실을 고른 말로 내므로(`cmd::gather`), 여기만 한국어면 한 명령의 stderr 가 두 말로 선다.
+pub fn name_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, errors: &[crate::store::LoadError]) {
+    use crate::i18n::{fill, say};
     if errors.is_empty() {
         return;
     }
-    eprintln!(
-        "{}: 읽을 수 없는 줄 {}개",
-        path.display(),
-        errors.len()
-    );
+    let at = path.display().to_string();
+    eprintln!("{}", fill(say(lang, "warn.unreadable_file"), &[("at", &at), ("n", &errors.len().to_string())]));
     for e in errors.iter().take(5) {
-        eprintln!("  {}줄: {}", e.line, e.message);
+        eprintln!("{}", fill(say(lang, "warn.unreadable_at"), &[("line", &e.line.to_string()), ("why", &e.message)]));
     }
     if errors.len() > 5 {
-        eprintln!("  … {}개 더", errors.len() - 5);
+        eprintln!("{}", fill(say(lang, "warn.unreadable_more"), &[("n", &(errors.len() - 5).to_string())]));
     }
 }
 
@@ -272,8 +282,8 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
         // 깨져 등록한 것이 안 읽힌 사람에게 "등록한 것이 없다, 더하라" 만 하면 정반대를
         // 믿고 깨진 파일에 `project add` 를 친다. `status`·`ready` 는 이미 이 줄을 대고
         // (`nothing_registered`), `tui --json` 은 `problems` 에 싣는다. 도움말 자리라 종료 코드는 그대로 0 이다.
-        for p in reg.iter().flat_map(|r| &r.problems) {
-            out.push(crate::style::paint(crate::style::WARN, &format!("! {}", crate::text::one_line(p))));
+        for p in reg.iter().flat_map(|r| crate::view::settings_problems(r, ctx.lang())) {
+            out.push(crate::style::paint(crate::style::WARN, &format!("! {}", crate::text::one_line(&p))));
         }
         return Ok(out);
     }

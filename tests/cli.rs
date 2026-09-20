@@ -1659,6 +1659,44 @@ fn outside_a_repo_with_nothing_registered_it_says_how_to_register() {
     assert!(js.starts_with("{\"projects\":[],\"problems\":[\""), "{js}");
 }
 
+/// **설정의 탈을 대는 표면은 하나도 빠지지 않는다**(리뷰). 화면 말의 탈(`[i18n] lang` 오타)은
+/// 말묶음에서 펴느라 `problems` 가 아니라 `lang_problems` 에 자료로 서는데(moai-dpbi), 그 둘을
+/// 잇는 자(`view::settings_problems`)를 안 지나는 표면이 있으면 **그 화면에서만** 오타가 조용히
+/// 사라진다 — 고친 설정이 왜 안 듣는지 알 길이 없어지는 자리다.
+///
+/// 한 판에서 보는 것은 밖의 표면 전부다. 안쪽 `moai status` 는 바로 위
+/// `the_warnings_on_stderr_speak_the_chosen_language` 가 본다.
+#[test]
+fn every_surface_that_names_a_config_problem_names_the_language_one_too() {
+    let s = Scratch::new("langsaid");
+    let out = dir_in(&s, "out");
+    let cfg = registry(&s, &[]);
+    std::fs::write(&cfg, "[i18n]\nlang = \"kr\"\n").unwrap();
+    // **키 이름으로 잰다** — 문장은 말묶음의 것이라 옮기면 바뀌지만 `i18n.lang` 은 설정의 자다.
+    let said = "`i18n.lang`";
+
+    // 사람이 보는 밖의 화면 셋 — 등록한 것이 없을 때의 `status`·`ready`·인자 없이 부른 것.
+    let st = ok_with(&out, &cfg, &["status"]);
+    assert!(st.contains(said), "밖의 `status` 가 설정의 탈을 안 댔다\n{st}");
+    let err = String::from_utf8_lossy(&moai_with(&out, &cfg, &["ready"]).stderr).to_string();
+    assert!(err.contains(said), "밖의 `ready` 가 설정의 탈을 안 댔다\n{err}");
+    let help = ok_with(&out, &cfg, &[]);
+    assert!(help.contains(said), "인자 없이 부른 것이 설정의 탈을 안 댔다\n{help}");
+
+    // 기계가 읽는 셋 — 셋이 같은 `problems` 를 받는다(moai-yxae).
+    for args in [["status", "--json"], ["tui", "--json"]] {
+        let js = ok_with(&out, &cfg, &args);
+        one_json_value(&js);
+        assert!(js.contains(said), "`moai {}` 의 problems 가 비었다\n{js}", args.join(" "));
+    }
+    let js = ok_with(&out, &cfg, &["project", "ls", "--json"]);
+    one_json_value(&js);
+    assert!(js.contains(said), "`project ls --json` 의 problems 가 비었다\n{js}");
+    let o = moai_with(&out, &cfg, &["project", "ls"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(o.status.success() && err.contains(said), "`project ls` 가 설정의 탈을 안 댔다\n{err}");
+}
+
 /// **쓰는 명령은 `.moai` 밖에서 여전히 멈춘다** — 등록한 프로젝트가 있어도 어느 것에
 /// 쓸지 모른다. 대신 다른 곳의 저장소를 부르는 길(`-C`)을 댄다.
 #[test]

@@ -132,5 +132,8 @@
   "trouble.encoding": "워크트리 목록을 못 읽었다 — {why}",
   "warn.lang_table": "`{key}` 은 `[{key}]` 표여야 한다 — 지금은 {is}",
   "warn.lang_word": "`{key}` 은 낱말이어야 한다 — 지금은 {is}",
-  "warn.lang_unknown": "`{key}` 은 {known} 중 하나다 — {raw}"
+  "warn.lang_unknown": "`{key}` 은 {known} 중 하나다 — {raw}",
+  "warn.unreadable_file": "{at}: 읽을 수 없는 줄 {n}개",
+  "warn.unreadable_at": "  {line}줄: {why}",
+  "warn.unreadable_more": "  … {n}개 더"
 }

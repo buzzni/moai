@@ -16,7 +16,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         return overview(ctx, worktree);
     };
     let crate::worktree::Gathered { load, origin, .. } = super::gather(ctx, &repo, worktree)?;
-    super::report_load_errors(&repo.issues_path(), &load.errors);
+    super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     // **겹친 줄로 고른다.** 옆 워크트리에서 집은 일은 거기서 `in_progress` 로 서
     // 있으므로, 같은 자(`report::ready`)가 그것을 저절로 뺀다 — 여기에 "남이 집은
@@ -110,17 +110,13 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             #[serde(skip_serializing_if = "Vec::is_empty")]
             outside: Vec<&'a str>,
             unreadable: usize,
-            #[serde(skip_serializing_if = "<[String]>::is_empty")]
-            trouble: &'a [String],
+            #[serde(skip_serializing_if = "Vec::is_empty")]
+            trouble: Vec<String>,
         }
-        // 옆 워크트리의 문제와 설정의 탈은 **편 뒤에** 싣는다(moai-dpbi) — `status --json` 과 같은 자다.
-        let troubles: Vec<Vec<String>> =
-            projects.iter().map(|p| p.trouble.iter().map(|t| view::trouble_line(ctx.lang(), t)).collect()).collect();
         let entries = projects
             .iter()
             .zip(&seen)
-            .zip(&troubles)
-            .map(|((p, s), trouble)| Entry {
+            .map(|(p, s)| Entry {
                 name: &p.name,
                 path: &p.path,
                 seen: s.map(|k| Said {
@@ -128,7 +124,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     milestone: k.focus.running.iter().map(|m| m.id.as_str()).collect(),
                     outside: k.focus.outside.iter().map(|i| i.id.as_str()).collect(),
                     unreadable: k.unreadable,
-                    trouble,
+                    // 옆 워크트리의 문제와 설정의 탈은 **편 뒤에** 싣는다(moai-dpbi) — `status --json` 과 같은 자다.
+                    trouble: p.trouble.iter().map(|t| view::trouble_line(ctx.lang(), t)).collect(),
                 }),
             })
             .collect();

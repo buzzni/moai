@@ -442,7 +442,10 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     match others_of(&repo.root) {
         Err(why) => unfound = Some(why),
         Ok((me, trees)) => {
-            let mine = head_of(me.as_ref());
+            // **이름을 `mine` 으로 두지 않는다**(리뷰) — 이 함수의 `mine` 은 위에서 잰 [`Floor`] 고,
+            // 그것을 그대로 싣는 곳이 아래 `Gathered { .., mine }` 이다. 같은 이름이 둘이면 이 팔
+            // 안팎으로 줄을 옮기는 날 어느 쪽이 실리는지가 눈으로 안 갈린다.
+            let head = head_of(me.as_ref());
             let here: std::collections::HashSet<&str> = load.issues.iter().map(|i| i.id.as_str()).collect();
             let mut bases = Bases::new();
             for (tree, root) in trees {
@@ -477,7 +480,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                                 lines: other.errors.len(),
                             });
                         }
-                        others.push(side(&repo.root, &here, mine, tree, root, other.issues, &mut bases));
+                        others.push(side(&repo.root, &here, head, tree, root, other.issues, &mut bases));
                     }
                 }
             }
@@ -697,14 +700,18 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
     let Some(disk) = on_disk(root) else { return BTreeSet::new() };
     // 견줄 바닥은 **워크트리 수와 상관없이 한 벌이다** — 워크트리마다 지으면 제 줄을 그만큼 다시
     // 훑는다. 훅은 제 손으로 읽은 줄을 그대로 주므로 자리는 안 든다([`Floor::loose`]).
-    let floor = Floor::loose(mine);
+    // **첫 옆을 만날 때 짓는다**(리뷰) — 딸린 워크트리가 하나도 없는 흔한 체크아웃에서는 아래 고리가
+    // 한 번도 안 도는데, 미리 지으면 그 판이 줄마다 짧은 글 셋을 헛되이 베낀다. 훅은 툴 부름마다
+    // 도는 길이라(`hook::unsure`) 그 헛일이 제일 자주 걸린다.
+    let floor = std::cell::OnceCell::new();
     let mut out = BTreeSet::new();
     for (tree, linked, me) in &disk.all {
         if *me || !*linked {
             continue;
         }
         // 훅은 겹쳐 본 결과를 들고 오지 않는다 — 판 것이 없으니 제 손으로 연다.
-        let (open, later) = holds(&disk, tree, &floor, cfg, &Dug::new()).unwrap_or_default();
+        let (open, later) =
+            holds(&disk, tree, floor.get_or_init(|| Floor::loose(mine)), cfg, &Dug::new()).unwrap_or_default();
         out.extend(open);
         out.extend(later);
         // **그 워크트리가 적어 둔 집기도 든다**(moai-y7go, 리뷰 moai-71ht 셋째 판) — 쓰기가 루트로
@@ -1563,6 +1570,12 @@ mod tests {
         // 건네받은 바닥은 그 줄을 `early` 로 든다 — 디스크를 다시 팠으면 답이 갈린다.
         let handed = Floor::of(at, &[issue("m-0001", "todo", early)]);
         assert_eq!(dig(&handed), ["m-0001".to_string()].into(), "건네받은 바닥을 두고 그 파일을 다시 팠다");
+        // **철자가 달라도 같은 파일이면 쓴다**(`Dug::floor` 의 `canonical`) — 부르는 쪽이 든 자리는
+        // `Repo` 가 찾아 오른 경로고 자리 셈의 것은 git 이 적어 둔 목록에서 지은 경로라, 같은 파일이
+        // 글자만 다르게 올 수 있다. 정규화를 걷으면 이 줄이 먼저 붉어진다.
+        let spelt = main.join(".moai").join("..").join(".moai").join("issues.jsonl");
+        let handed = Floor::of(spelt, &[issue("m-0001", "todo", early)]);
+        assert_eq!(dig(&handed), ["m-0001".to_string()].into(), "같은 파일을 글자가 다르다고 다시 팠다");
         // 자리가 갈리면(`MOAI_HERE=1`) 안 쓴다 — 디스크의 `late` 로 재어 만진 흔적이 없다.
         let elsewhere = Floor::of(side.join(".moai").join("issues.jsonl"), &[issue("m-0001", "todo", early)]);
         assert_eq!(dig(&elsewhere), BTreeSet::new(), "남의 파일에서 잰 바닥으로 main 을 쟀다");

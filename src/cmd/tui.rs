@@ -41,7 +41,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // **못 읽은 줄을 삼키지 않는다.** 화면 쪽은 배너로 말하지만 이 길에는
         // 배너가 없다 — 여기서 안 알리면 목록이 조용히 짧아지고, 부른 쪽은
         // 그 이슈가 없다고 읽는다. 다른 읽기 명령과 같은 길로 간다.
-        super::report_load_errors(&repo.issues_path(), &load.errors);
+        super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
         let rows: Vec<Row> = index
             .entries(&load.issues, &path)
@@ -156,8 +156,11 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
             })
             .collect();
         // 사용자 설정의 문제는 `problems` 에 싣는다 — 한눈 보기·`project ls` 와 같은 자리다.
-        // 제어문자는 serde 가 이스케이프한다.
-        return super::json_line(&Layered { projects: rows, problems: &reg.problems, config: reg.path.as_deref() });
+        // 제어문자는 serde 가 이스케이프한다. **거쳐 가는 문은 `view::settings_problems` 하나다**(리뷰) —
+        // 화면 말의 탈은 자료로 따로 서므로(moai-dpbi) `reg.problems` 만 실으면 `lang` 오타를 잃는다.
+        // 말은 이미 읽은 설정에서 고른다([`super::lang_of`]) — `ctx.lang()` 은 같은 파일을 또 판다.
+        let problems = crate::view::settings_problems(&reg, super::lang_of(&reg));
+        return super::json_line(&Layered { projects: rows, problems: &problems, config: reg.path.as_deref() });
     }
     refuse_without_terminal()?;
     let mut app = App::on_projects(crate::tui::layer::Layer::of(&reg, None));

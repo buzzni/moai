@@ -88,7 +88,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     let repo = Repo::discover()?;
     let crate::worktree::Gathered { load, origin, sides, mine, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
-    super::report_load_errors(&repo.issues_path(), &load.errors);
+    super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     let target = match kind_filter {
         // `moai epic show <id>` 는 그 id 를 그대로 본다. 종류는 목록일 때만 거른다.

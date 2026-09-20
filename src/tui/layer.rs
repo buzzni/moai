@@ -289,8 +289,9 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
     };
     // **탐색기는 아직 한국어로 선다** — 이 층에 화면 말이 안 닿아 있고, 그 말을 잇는 일은
     // moai-ra67 의 자리다. 여기서 기본값(이제 영어다)을 집으면 한국어 화면 한가운데 이 한 줄만
-    // 영어로 서니, 말이 닿기 전까지는 지금 화면 그대로를 적어 둔다.
-    let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()), crate::i18n::Lang::Ko))
+    // 영어로 서니, 말이 닿기 전까지는 지금 화면 그대로를 적어 둔다. **이름은 [`super::SAID`] 다**
+    // (리뷰) — `Lang::Ko` 를 글자로 박으면 moai-ra67 이 그 이름을 쫓을 때 이 자리가 안 잡힌다.
+    let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()), super::SAID))
         .trim()
         .to_string();
     Look::Shut { state: kind, said }
@@ -383,7 +384,10 @@ impl Layer {
         Layer {
             at,
             places,
-            problems: reg.problems.clone(),
+            // 설정의 탈은 **편 뒤에** 든다(리뷰) — 화면 말의 탈은 `problems` 가 아니라 자료로 서므로
+            // (moai-dpbi) `reg.problems` 만 베끼면 층의 배너가 `lang` 오타를 잃는다. 탐색기의 말은
+            // 아직 한국어라 [`super::SAID`] 로 편다.
+            problems: crate::view::settings_problems(reg, super::SAID),
             trouble: reg.trouble,
             config: reg.path.clone(),
             launch: launch.map(Path::to_path_buf),

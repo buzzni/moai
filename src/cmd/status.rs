@@ -220,7 +220,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             let none: Overview<()> = Overview { projects: Vec::new(), problems: &problems, config: reg.path.as_deref() };
             return super::json_line(&none);
         }
-        return Ok(super::nothing_registered(reg).message.lines().map(str::to_string).collect());
+        return Ok(super::nothing_registered(reg, ctx.lang()).message.lines().map(str::to_string).collect());
     }
     let projects = crate::projects::open_with(reg, worktree);
     let now = model::now();
@@ -269,8 +269,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         struct Said<'a> {
             status: &'a report::StatusReport,
             picked: Vec<super::Row<'a>>,
-            #[serde(skip_serializing_if = "<[String]>::is_empty")]
-            trouble: &'a [String],
+            #[serde(skip_serializing_if = "Vec::is_empty")]
+            trouble: Vec<String>,
             /// **못 읽은 워크트리는 기계에게도 댄다** — 안쪽 `status --json` 과 같은 키·같은 모양
             /// (리뷰 moai-ya06). 그런 워크트리가 있으면 자리 판정이 통째로 `모른다` 로 접혀
             /// `stranded` 가 조용해지는데, 여기 키가 없으면 밖에서 읽는 쪽은 "자리 잃은 일이
@@ -282,20 +282,17 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             #[serde(skip_serializing_if = "<[report::Workplace]>::is_empty")]
             broken_worktrees: &'a [report::Workplace],
         }
-        // 옆 워크트리의 문제도 **편 뒤에** 싣는다(moai-dpbi) — 사람 화면과 같은 글이다.
-        let troubles: Vec<Vec<String>> =
-            projects.iter().map(|p| p.trouble.iter().map(|t| view::trouble_line(ctx.lang(), t)).collect()).collect();
         let entries = projects
             .iter()
             .zip(&seen)
-            .zip(&troubles)
-            .map(|((p, s), trouble)| Entry {
+            .map(|(p, s)| Entry {
                 name: &p.name,
                 path: &p.path,
                 seen: s.map(|b| Said {
                     status: &b.status,
                     picked: b.picked.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
-                    trouble,
+                    // 옆 워크트리의 문제도 **편 뒤에** 싣는다(moai-dpbi) — 사람 화면과 같은 글이다.
+                    trouble: p.trouble.iter().map(|t| view::trouble_line(ctx.lang(), t)).collect(),
                     unreadable_worktrees: &b.blind,
                     broken_worktrees: &b.unread,
                 }),

@@ -516,7 +516,9 @@ fn placed(
         false => unread
             .all
             .iter()
-            .map(|t| format!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display()))
+            // 글은 [`crate::view::unread_worktree`] 한 자리에서 짓는다(리뷰) — `moai status` 의
+            // stderr·밖 한눈 보기와 **같은 줄**이어야 한다. 갈라 적으면 말묶음을 고치는 날 여기만 남는다.
+            .map(|t| crate::view::unread_worktree(SAID, &t.branch, &t.path))
             .collect(),
     };
     (usize::from(lost.is_some()), said)
@@ -3238,7 +3240,9 @@ impl App {
                     // 스냅샷만 없는 옆은 "없음" 이 아니다 — 그 이름으로 줄에 `⎇` 가 선다(`Origin::named_only`).
                     let named = self.site.origin.named_only();
                     self.notice = Some(match &self.site.unfound {
-                        Some(why) => format!("{g} 옆 워크트리를 못 찾았다 — {}", crate::text::one_line(why)),
+                        // **까닭이 이미 "못 찾았다" 로 시작한다**(리뷰) — `worktree::Trouble::Unfound`
+                        // 를 편 글이 그 문장이라, 앞에 한 번 더 달면 같은 말이 두 번 선다.
+                        Some(why) => format!("{g} {}", crate::text::one_line(why)),
                         None if !named.is_empty() => format!("{g} {} — 겹칠 스냅샷이 없다", named.join(", ")),
                         None => format!("{g} 옆 워크트리 없음 — 겹칠 줄이 없다"),
                     });
@@ -6585,7 +6589,14 @@ mod tests {
     /// 옆 워크트리를 **못 찾는** 읽기 — git 밖 프로젝트를 흉내 낸다. 시험 기계의 git 에 기대지 않는다.
     fn lost(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
         let mut f = prepare(repo, worktree)?;
-        f.unfound = worktree.then(|| "git 저장소가 아니다".to_string());
+        // **진짜 꼴로 흉내 낸다**(리뷰) — [`prepare`] 가 싣는 것은 이미 편 문장이다
+        // ([`crate::view::trouble_line`]). 맨 까닭을 실으면 알림이 제 문장을 한 번 더 달아도
+        // 시험이 그것을 못 잡는다 — 실제로 그렇게 서 있었다.
+        let why = crate::worktree::Trouble::Unfound {
+            lost: crate::worktree::Lost::Failed,
+            why: "git 저장소가 아니다".to_string(),
+        };
+        f.unfound = worktree.then(|| crate::view::trouble_line(SAID, &why));
         Ok(f)
     }
 
@@ -6604,7 +6615,10 @@ mod tests {
         a.hit("SPC v w");
         assert!(a.worktree);
         let said = a.notice.clone().expect("켰는데 못 찾은 까닭을 안 댄다");
-        assert!(said.contains("git 저장소가 아니다") && said.contains("옆 워크트리"), "{said}");
+        assert!(said.contains("git 저장소가 아니다") && said.contains("워크트리를 못 찾았다"), "{said}");
+        // **같은 말은 한 번만 선다**(리뷰) — 실린 것이 이미 편 문장이라, 알림이 제 문장을 앞에 또
+        // 달면 `⎇ 옆 워크트리를 못 찾았다 — 워크트리를 못 찾았다 — …` 가 된다.
+        assert_eq!(said.matches("워크트리를 못 찾았다").count(), 1, "같은 말이 두 번 섰다 — {said}");
         a.hit("Esc");
         // 알림은 다음 키에 걷힌다 — 키 없이 부르는 다시 읽기가 새로 대지 않는지만 본다.
         a.notice = None;
