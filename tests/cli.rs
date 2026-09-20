@@ -286,6 +286,66 @@ fn english_is_the_default_when_nothing_picks_a_language() {
     assert_eq!(english.lines().count(), japanese.lines().count(), "영어와 일본어의 줄 수가 다르다");
 }
 
+/// **`moai mv` 한 덩이가 한 말로 선다**(moai-cj6p). 한 번의 `mv` 가 옮긴 줄·이미 그 칸·묶음의
+/// 칸·미뤄 둔 줄을 한 숨에 내는데, 그중 몇 줄만 소스에 박혀 있으면 영어를 고른 사람이 한
+/// 덩이 안에서 두 말을 읽는다. `freed_lines` 만 옮겼던 판이 그 꼴이었다.
+///
+/// **재는 자리를 화면에 둔다.** 글자를 하나하나 견주지 않고 **한글이 한 자라도 남았는가**만
+/// 본다 — 낱말을 다듬을 때마다 붉어지지 않으면서, 새 줄 하나가 박힌 채 들어오면 그 자리에서
+/// 멈춘다. 한국어로도 함께 돌려 키가 양쪽에 다 서 있는지를 같은 판에서 잰다: 영어만 재면
+/// `ko` 표가 빈 키도 파랗게 지나간다.
+#[test]
+fn the_mv_screen_stands_in_one_language() {
+    // 제목은 영어로 둔다 — 제목의 한글은 화면 글이 아니라 자료라 이 자로 재면 안 된다.
+    let screens = |name: &str, lang: Option<&str>| {
+        let s = init(name);
+        let epic = field(&ok(s.path(), &["epic", "add", "an epic", "--json"]), "id");
+        let one = field(&ok(s.path(), &["add", "a member", "-e", &epic, "--json"]), "id");
+        ok(s.path(), &["mv", &one, "in_progress"]);
+        ok(s.path(), &["defer", &one, "-m", "later"]);
+        // `mv` 가 제 글로 내는 자리 전부. 차례가 곧 상태라 앞의 판이 뒤의 판을 만든다.
+        // **칸 이름을 틀리게 친 두 판은 여기 없다** — `moai mv <id> <오타>` 와
+        // `--from <오타>` 의 글은 `config::Config` 와 `cmd::mod` 의 공용 검사에서 오고
+        // 아직 박힌 한국어다(쓰기 길과 탐색기가 같은 글을 쓴다). 그 자리는 `moai-fdk7` 이 든다.
+        let runs: Vec<Vec<&str>> = vec![
+            vec!["mv", &one, "review"],                  // 옮긴 줄 + 미뤄 둔 줄
+            vec!["mv", &one, "review"],                  // 이미 그 칸
+            vec!["mv", &epic, "done"],                   // 묶음의 칸
+            vec!["mv", &one, "todo", "--from", "done"],  // 진 집기
+            vec!["mv", "argos-zzzz", "done"],            // 못 찾은 줄
+            vec!["mv", &one],                            // 칸을 안 적었다
+            vec!["mv", &epic, "done", "--from", "todo"], // 묶음에 `--from`
+        ];
+        runs.into_iter()
+            .map(|args| {
+                let mut cmd = isolated(BIN);
+                cmd.args(&args)
+                    .current_dir(s.path())
+                    .env("MOAI_ACTOR", ACTOR)
+                    .env("MOAI_NOW", NOW)
+                    .env("NO_COLOR", "1");
+                match lang {
+                    Some(l) => cmd.env("MOAI_LANG", l),
+                    None => cmd.env_remove("MOAI_LANG"),
+                };
+                let out = cmd.output().expect("moai 를 실행하지 못했다");
+                let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+                (args.join(" "), said)
+            })
+            .collect::<Vec<_>>()
+    };
+    let hangul = |t: &str| t.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c));
+
+    for (args, said) in screens("mvlangen", None) {
+        assert!(!said.trim().is_empty(), "`{args}` 가 아무 말도 안 했다 — 재는 자가 헛돈다");
+        assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — `{args}`\n{said}");
+    }
+    // 같은 판을 한국어로. 키가 `ko` 표에 안 서 있으면 여기서 영어가 새어 나온다.
+    for (args, said) in screens("mvlangko", Some("ko")) {
+        assert!(hangul(&said), "한국어로 골랐는데 그 줄이 영어다 — `{args}`\n{said}");
+    }
+}
+
 /// **마일스톤이 도는 동안 그 안이 먼저다**(moai-493a, 2026-09-20 사용자 결정).
 ///
 /// 한 판에서 셋을 잰다 — `ready` 가 밖의 일을 빼고 그 까닭을 대는가, `--json` 이 같은 것을
@@ -966,6 +1026,12 @@ fn the_overview_body_speaks_the_picked_language() {
     // 기계마다 다르고, 앞머리는 나머지 둘과 같은 자로 온다.
     let gone = s.path().join("moved-away");
     let cfg = registry(&s, &[&one, &dir_in(&s, "not-yet-init"), &gone]);
+    // **설정 항목의 탈도 몸통이다**(moai-aiid). 성한 줄만 등록하면 `problems` 가 한 줄도 안 서고,
+    // 그러면 이 판은 그 자리에 박힌 한국어를 못 본다 — 실제로 그랬다. 경로는 ASCII 로 둔다:
+    // 적힌 값은 그대로 되울리므로 한글 경로를 두면 이 자가 제 글과 남의 자료를 못 가른다.
+    let mut src = std::fs::read_to_string(&cfg).unwrap();
+    src.push_str("\n[[project]]\npath = \"not/absolute\"\n\n[[project]]\npath = \"/nowhere\"\ncolor = \"red\"\n");
+    std::fs::write(&cfg, src).unwrap();
     let screen = |args: &[&str], lang: &str| {
         let got = isolated(BIN)
             .args(args)
@@ -986,12 +1052,16 @@ fn the_overview_body_speaks_the_picked_language() {
         let korean = screen(args, "ko");
         assert!(korean.contains("건 더"), "한국어 화면에 '건 더' 줄이 안 섰다\n{korean}");
         assert!(korean.contains("init 전"), "한국어 화면에서 init 전 줄이 사라졌다\n{korean}");
+        assert!(korean.contains("프로젝트 색이 아니다"), "한국어 화면에 설정 항목의 탈이 안 섰다\n{korean}");
 
         let english = screen(args, "en");
         assert!(english.contains("more"), "영어 화면에 'N more' 줄이 안 섰다\n{english}");
         // 열지 못한 두 프로젝트의 줄이 실제로 섰는가 — 안 서면 위의 훑기가 그 자리를 안 지난다.
         assert!(english.contains("before init"), "init 전 프로젝트의 줄이 안 섰다\n{english}");
         assert!(english.contains("directory is gone"), "사라진 프로젝트의 줄이 안 섰다\n{english}");
+        // 설정 항목의 탈 둘 — 색 오타와 상대경로. 둘이 서야 그 자리를 이 훑기가 지난다.
+        assert!(english.contains("not a project colour"), "색 오타 줄이 안 섰다\n{english}");
+        assert!(english.contains("absolute path"), "상대경로 줄이 안 섰다\n{english}");
         let left: Vec<&str> = english.lines().filter(|l| l.chars().any(|c| ('가'..='힣').contains(&c))).collect();
         assert!(left.is_empty(), "영어로 고른 {args:?} 화면에 한국어가 남았다 — {left:#?}");
     }
