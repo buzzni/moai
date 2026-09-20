@@ -50,8 +50,19 @@ impl<'a> Where<'a> {
     /// 서로의 재료라, 따로 부르면 `groups` 만 서너 번 돈다. 이미 잰 것을 든 쪽(탐색기의 `tui::Ground`)은
     /// 이것을 안 부르고 제 지도를 빌려 **필드 이름으로** 짓는다(moai-fbdg) — 같은 타입의 지도가 넷이라
     /// 차례로 넘기면 `states` 와 `since` 가 바뀌어도 컴파일된다.
+    // 바이너리는 지도를 든 [`Where::from_soil`] 을 부른다(moai-g0zx) — 이 꼴은 시험의 짧은 길이다.
+    #[cfg(test)]
     pub fn of(all: &'a [Issue], cfg: &'a crate::config::Config) -> Where<'a> {
-        let soil = crate::report::Soil::of(all);
+        Where::from_soil(all, cfg, crate::report::Soil::of(all))
+    }
+
+    /// [`Where::of`] 와 같은 것. **이미 잰 지도를 받는다** — `moai show --tree` 는 같은 명령 안에서
+    /// 색인(`nav::Index`)과 에픽 굴림도 지으므로, 저마다 재면 `groups` 가 세 벌 돈다(moai-g0zx).
+    ///
+    /// **지도를 통째로 받는다**(`&Soil` 이 아니다) — 거름망은 그 지도를 제 필드로 들고 사는데,
+    /// 빌려 받으면 그 지도가 사는 동안 거름망도 거기 매인다. 받은 쪽이 옮겨 담는 것은 한 번이고,
+    /// 부르는 쪽은 색인처럼 지도를 먼저 쓰는 것을 다 쓴 뒤에 이것을 짓는다.
+    pub fn from_soil(all: &'a [Issue], cfg: &'a crate::config::Config, soil: crate::report::Soil<'a>) -> Where<'a> {
         let stands = soil.stands(all, cfg);
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();

@@ -8543,6 +8543,44 @@ fn a_nameless_worktrees_birth_is_read_from_git_not_the_clock() {
     }
 }
 
+/// **겹치며 이미 판 스냅샷으로 재도 답이 같다**(moai-kos1). 겹쳐 보는 길(`worktree::gather`)은 옆
+/// 스냅샷을 열어 풀어 놓고, 바로 뒤의 자리 셈(`worktree::workplaces`)이 같은 파일을 한 번 더 열어
+/// 풀었다 — 탐색기는 걸음마다 그 값을 치렀다(이 저장소에서 ~130ms). 이제 판 것을 건네받는다.
+///
+/// 건네받은 길과 제 손으로 파는 길은 **같은 자**(`worktree::holds_of`)를 지나야 한다. 갈리면 같은
+/// 저장소에서 `--worktree` 를 붙이고 뗄 때마다 그 일이 자리를 얻었다 잃었다 한다.
+#[test]
+fn a_place_dug_while_overlaying_matches_the_one_dug_here() {
+    let s = Scratch::new("dugplace");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "에이전트가 할 일", "--json"]), "id");
+    // 집은 때와 뜬 때가 같은 시계여야 한다 — git 의 reflog 은 벽시계로 적힌다(위 시험과 같은 까닭).
+    let clock = std::process::Command::new("date").args(["-u", "+%Y-%m-%dT%H:%M:%SZ"]).output().unwrap();
+    let now = String::from_utf8(clock.stdout).unwrap().trim().to_string();
+    let run = |args: &[&str]| {
+        let out = staged(args).current_dir(&main).env("MOAI_NOW", &now).output().unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    run(&["mv", &id, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    // 이름이 id 를 안 가리키는 워크트리 — 자리는 그 스냅샷이 쥔 줄로만 잡힌다. 집은 표식
+    // (`moai-held`)은 main 에서 집었으니 비어 있어, 남는 길이 스냅샷 하나다.
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-a04acfb3", "-b", "worktree-agent-a04acfb3"]);
+
+    let here = run(&["show", &id, "--json"]);
+    let both = run(&["show", &id, "--json", "--worktree"]);
+    assert!(here.contains(r#""place":"at""#), "제 손으로 판 길이 자리를 잃었다\n{here}");
+    assert!(both.contains(r#""place":"at""#), "건네받은 길이 자리를 잃었다\n{both}");
+    assert!(here.contains("agent-a04acfb3") && both.contains("agent-a04acfb3"), "어느 워크트리인지 갈렸다\n{here}\n{both}");
+    assert!(!run(&["status", "--json"]).contains("\"stranded\""), "제 손으로 판 길이 산 일을 자리 없다고 했다");
+    assert!(!run(&["status", "--worktree", "--json"]).contains("\"stranded\""), "건네받은 길이 산 일을 자리 없다고 했다");
+}
+
 /// **자리 경로는 늘 main 에서 잰 상대 경로다**(moai-xpd7·moai-3aec, 2026-09-18 사용자 결정) — main
 /// 밖에 만든 워크트리는 `../` 로 올라가서 잰다. 절대 경로로 두던 판은 한 배열에 두 모양이 섞였고
 /// 기계의 홈 경로가 `--json` 으로 나갔다. main 이 없는 맨몸 저장소는 그 저장소 디렉터리에서 재어,
@@ -8650,8 +8688,11 @@ fn status_names_picked_work_with_no_live_worktree_and_still_exits_zero() {
 /// **자리를 셀 일이 없으면 옆 스냅샷을 안 판다**(moai-7igy, 사용자 결정). `moai status` 는 세션마다·
 /// 훅마다 도는데, 워크트리 일곱이면 스냅샷 여덟 벌을 다시 파 40→95ms(따뜻)·138→458ms(참)이었다.
 ///
-/// **판 것을 어떻게 아는가** — 깨진 스냅샷을 둔 워크트리를 판 순간 `status` 가 "못 읽었다" 를 낸다
-/// (moai-lt7h). 안 판 경우에는 그 말이 없다. 집은 줄이 없을 때와, 이름으로 자리가 다 잡힐 때가 그렇다.
+/// **판 것을 어떻게 아는가** — `unreadable_worktrees` 다. 그 목록은 "무엇을 쥐었는지 모른다"
+/// (`report::Workplace::unknown`)를 세는데, 그 값은 실제로 스냅샷을 푼 길에서만 선다.
+///
+/// 깨진 스냅샷의 **말**로는 못 가른다(moai-giz3) — 이제 안 파는 길도 파일을 열어 보고 "못 읽었다"
+/// 를 낸다. 여는 것과 푸는 것은 값이 세 자릿수 다르고, 깨진 파일은 고칠 사람이 있어야 고쳐진다.
 #[test]
 fn status_reads_a_side_snapshot_only_when_a_place_is_still_missing() {
     let s = Scratch::new("placecost");
@@ -8671,10 +8712,24 @@ fn status_reads_a_side_snapshot_only_when_a_place_is_still_missing() {
     std::fs::remove_file(&broken).unwrap();
     std::fs::create_dir(&broken).unwrap();
 
-    // 집은 줄이 이름으로 다 자리를 잡았다 — 깨진 스냅샷을 안 판다.
-    let out = isolated(BIN).arg("status").current_dir(&main).env("MOAI_NOW", LATER).env("NO_COLOR", "1").output().unwrap();
+    // 집은 줄이 이름으로 다 자리를 잡았다 — 깨진 스냅샷을 **안 판다.** 그래도 깨졌다는 말은
+    // 선다(moai-giz3): 한때 이 길에서만 아무 화면에도 안 서서, 같은 저장소를 `moai status` 는
+    // 조용히 지나고 `moai status --worktree` 는 그 워크트리를 댔다(idea moai-7p48 의 재현).
+    let out = isolated(BIN)
+        .args(["status", "--json"])
+        .current_dir(&main)
+        .env("MOAI_NOW", LATER)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
     let said = String::from_utf8(out.stderr).unwrap();
-    assert!(said.is_empty(), "이름으로 답이 나왔는데 옆 스냅샷을 팠다\n{said}");
+    assert!(said.contains("못 읽었다") && said.contains("agent-x"), "깨진 스냅샷이 아무 데도 안 섰다\n{said}");
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        json.contains(r#""broken_worktrees":[{"path":".claude/worktrees/agent-x","branch":"worktree-agent-x"}]"#),
+        "기계에게는 안 댔다\n{json}"
+    );
+    assert!(!json.contains("unreadable_worktrees"), "이름으로 답이 나왔는데 옆 스냅샷을 팠다\n{json}");
 
     // 자리를 못 찾은 줄이 생기면 그때 판다 — 그리고 못 읽었다고 말한다.
     let lost = field(&ok(&main, &["add", "자리 없는 일", "--json"]), "id");
