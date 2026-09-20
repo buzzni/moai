@@ -8,6 +8,7 @@
 //! (`App::user_config`)다. 환경을 여기서 다시 읽으면 시험이 돌리는 사람의 설정을 쓴다.
 
 use super::keys::{BROWSE, Browse, CONFIRM, Confirm, Lookup, label, lookup};
+use super::layer::Relayered;
 use super::picker::{Act, Dent, Listing, Picker};
 use super::{App, Mode, Row};
 use ratatui::crossterm::event::KeyEvent;
@@ -202,20 +203,26 @@ impl App {
                 // 층에서 "못 읽는다" 를 처음 만난다 (moai-9omq).
                 let bad = added.unreadable.as_deref().map(|e| format!(" · ! 못 읽는다 — {}", crate::text::one_line(e))).unwrap_or_default();
                 let bare = if added.initialized { "" } else { " · init 전 — .moai 가 아직 없다" };
-                // **층으로 가는 키를 대는 자리다** — 뿌리의 `..` 을 걷은 뒤(moai-i784) Bksp 는
-                // 디렉터리만 올라간다. 옛 글대로 Bksp 를 대면 방금 등록한 프로젝트를 보러 가는
-                // 바로 그 화면이 아무 일도 안 하는 키를 대고, 없는 키를 적어 두면 그것부터
-                // 도구를 못 믿게 된다(키 바와 같은 까닭).
-                let back = if self.on_layer() || self.layer.is_none() {
-                    String::new()
-                } else {
-                    format!(" · {} 로 층에 올라가면 보인다", label(BROWSE, Browse::Project(0)))
-                };
                 // **층을 못 세웠으면 그것도 댄다**(moai-6ek1). 설정에 쓴 것과 층이 그것을 든 것은
                 // 다른 일이다 — 다시 읽기가 지면 커서를 새 프로젝트에 두는 일도 함께 버려져, 열
                 // 줄짜리 층에서는 조용한 "✓ 등록함" 하나로는 됐는지 알 길이 없다. 다음 걸음의
                 // `follow_config` 가 층은 고치지만 커서는 못 고친다.
                 let layer = self.relayer_trouble(stood);
+                // **층으로 가는 키를 대는 자리다** — 뿌리의 `..` 을 걷은 뒤(moai-i784) Bksp 는
+                // 디렉터리만 올라간다. 옛 글대로 Bksp 를 대면 방금 등록한 프로젝트를 보러 가는
+                // 바로 그 화면이 아무 일도 안 하는 키를 대고, 없는 키를 적어 두면 그것부터
+                // 도구를 못 믿게 된다(키 바와 같은 까닭).
+                //
+                // **까닭을 댄 판에서만 걷는다**(리뷰 둘째 판). 층이 안 섰는데 "올라가면 보인다" 를
+                // 대면 한 알림이 제 말을 뒤집는데, 그렇다고 `!stood` 로 통째로 걷으면 위가 댈 까닭을
+                // 못 찾은 판(`Trouble::Gone` 에 `problems` 가 빈 자리)에서 화면의 말이 "✓ 등록함"
+                // 하나로 줄어든다 — 그때는 이 키가 남은 단 하나의 갈 곳이다. 가르는 자는 **위가
+                // 무언가 댔는가** 다.
+                let back = if self.on_layer() || self.layer.is_none() || !layer.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · {} 로 층에 올라가면 보인다", label(BROWSE, Browse::Project(0)))
+                };
                 self.notice = Some(format!("{what} · {}{bad}{bare}{layer}{back}", shown(&added.path)));
                 if let Mode::Pick(p) = &self.mode {
                     let here = p.at.dir.clone();
@@ -237,16 +244,19 @@ impl App {
     /// **까닭은 방금 적힌 것을 든다** — 배너가 이고 있는 그 글([`App::held`]·[`App::unlayered`])이다.
     /// 여기서 새로 지으면 같은 일을 두 곳이 다르게 말한다.
     ///
-    /// **댈 까닭이 없으면 아무 말도 안 붙인다.** 다시 세우지 않고 돌아서는 자리가 탈만은 아니다 —
-    /// 프로젝트도 층도 없는 화면이 그렇고, 그때 "층은 그대로다" 를 세우면 멀쩡한 등록에 없는 탈을
-    /// 붙인다. 경고는 셀 수 있을 때만 값이 있다.
-    fn relayer_trouble(&self, stood: bool) -> String {
-        if stood {
+    /// **말할 자리는 [`Relayered::Lost`] 하나다.** 다시 세우지 않고 돌아서는 자리가 탈만은 아니다 —
+    /// 프로젝트도 층도 없는 화면이 그렇고([`Relayered::Nothing`]), 그때 "층은 그대로다" 를 세우면
+    /// 멀쩡한 등록에 없는 탈을 붙인다.
+    ///
+    /// **까닭이 없어도 진 것은 말한다**(리뷰). 위의 둘은 늘 대는 것이 아니다 — 사라진 설정은
+    /// `problems` 가 비어(`user_config::Trouble::Gone`) 등록 줄 하나 없는 층에서는 `holding` 이
+    /// `None` 이고, `unlayered` 는 층이 선 동안 내내 `None` 이다. 그 판에서 입을 다물면 이 알림이
+    /// 고치려던 바로 그 조용한 "✓ 등록함" 이 돌아온다.
+    fn relayer_trouble(&self, how: Relayered) -> String {
+        if how != Relayered::Lost {
             return String::new();
         }
-        let Some(why) = self.held.as_deref().or(self.unlayered.as_deref()) else {
-            return String::new();
-        };
+        let why = self.held.as_deref().or(self.unlayered.as_deref()).unwrap_or("사용자 설정을 다시 못 읽었다");
         format!(" · ! 층은 그대로다 — {}", crate::text::one_line(why))
     }
 
@@ -484,15 +494,23 @@ mod tests {
             chmod(0o644);
             return;
         }
-        let stood = a.relayer(None);
+        let how = a.relayer(None);
         chmod(0o644);
-        assert!(!stood, "못 읽은 설정으로 층을 다시 세웠다고 했다");
-        let said = a.relayer_trouble(stood);
+        assert_eq!(how, Relayered::Lost, "못 읽은 설정으로 층을 다시 세웠다고 했다");
+        let said = a.relayer_trouble(how);
         assert!(said.contains("층은 그대로다"), "{said}");
         assert!(said.contains("못 읽어"), "까닭을 안 물고 왔다 — {said}");
 
         // 세운 판은 아무것도 안 붙인다 — 알림에 늘 서는 꼬리가 되면 그것은 곧 아무도 안 읽는 줄이다.
-        assert_eq!(a.relayer_trouble(true), "");
+        assert_eq!(a.relayer_trouble(Relayered::Stood), "");
+        // **세울 것이 없던 판도 조용하다** — 프로젝트가 없는 화면의 멀쩡한 등록에 없는 탈을 안 붙인다.
+        assert_eq!(a.relayer_trouble(Relayered::Nothing), "");
+
+        // **까닭을 못 찾아도 진 것은 말한다**(리뷰) — 사라진 설정은 `problems` 가 비어 위의 둘이
+        // 침묵하는데, 그때 입을 다물면 이 알림이 고치려던 조용한 "✓ 등록함" 이 돌아온다.
+        let (held, unlayered) = (a.held.take(), a.unlayered.take());
+        assert!(a.relayer_trouble(Relayered::Lost).contains("층은 그대로다"), "까닭이 없다고 입을 다물었다");
+        (a.held, a.unlayered) = (held, unlayered);
     }
 
     /// **디렉터리를 드나들어 모노레포 하위를 등록한다** — `.git` 에서 멈추지 않고 고른 그

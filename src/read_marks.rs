@@ -300,10 +300,19 @@ pub(crate) fn read_table(root: &Table) -> (BTreeMap<String, String>, Vec<String>
 ///
 /// **자리를 고르다 만난 까닭은 값에 실어 돌려준다**([`Wrote::problems`], moai-ajh2). 읽는 길은 그것을
 /// 이미 대는데([`Marks::problems`]) 쓰는 길만 버리던 판은, 뿌리 윗자리에 잠깐 `EACCES`·`ESTALE`·`ELOOP`
-/// 가 난 그 한 번이 옛 철자 자리에 적고(락도 딴 자리다) 아무 말 없이 0 으로 끝났다 — 그 도장은 그 뒤
-/// 첫 쓰기가 합칠 때까지 딴 파일에 산다. **어디로 내는지는 부르는 쪽이 정한다**: 이 모듈은 아무것도
-/// 안 찍는 자라([`crate::report`]·[`crate::query`] 와 같은 약속) 여기서 찍으면 탐색기의 화면에 stderr
-/// 한 줄이 끼어든다.
+/// 가 난 그 한 번이 옛 철자 자리에 적고(락도 딴 자리다) 아무 말 없이 0 으로 끝났다.
+///
+/// **그 도장이 돌아오는 것은 지금 자리가 아직 없을 때뿐이다**(리뷰) — 합치는 자리는 `fresh_sheet`
+/// 하나고([`merge_past`]), [`read`] 도 `!place.at.exists()` 일 때만 옛 자리를 본다. ([`overlay_older`]
+/// 는 그 자를 안 쓴다 — 제가 방금 쓴 표에 얹는 자리라 탐색기의 한 걸음만 산다. 그래서 그 한 판에서는
+/// 탐색기와 `moai read` 가 같은 id 를 달리 세고, 다음 걸음의 [`read`] 가 탐색기 쪽을 도로 되돌린다.)
+/// 이미 여러 달치 도장이 선 사람에게 그 한 번이 나면 그 판의 도장은 **영영** 딴 파일에 남는다. 그러니
+/// 이 줄은 "철자가 밀렸다" 가 아니라 "이 판의 도장을 잃을 수 있다" 로 읽어야 하고, 고치는 길은
+/// 쓰는 길에서 [`settle`] 의 실패를 딱딱하게 무르는 것이다(규약의 "읽기는 관대하고 쓰기는 엄하다").
+/// 떨어지는 길 자체는 2026-09-20 사용자 결정이라 여기서 안 뒤집는다 — 재어 보고 고를 일이다.
+///
+/// **어디로 내는지는 부르는 쪽이 정한다**: 이 모듈은 아무것도 안 찍는 자라([`crate::report`]·
+/// [`crate::query`] 와 같은 약속) 여기서 찍으면 탐색기의 화면에 stderr 한 줄이 끼어든다.
 ///
 /// **아직 없는 파일은 짓기 전에 묻는다**(moai-dyb7). 디렉터리와 락을 먼저 짓고 `f` 를 부르던 판은,
 /// 적을 것이 없는 `moai read <id>` 하나가 아직 아무것도 안 읽은 사람의 집에 `read/` 와 0바이트
@@ -322,7 +331,7 @@ pub fn update<T>(config: &Path, root: &Path, f: impl Fn(&mut Sheet) -> R<T>) -> 
     // 더 기다린다(리뷰). 푼 뿌리를 함께 받아 문지기와 [`Sheet::claim`] 에 그대로 넘긴다 — 여기서 다시
     // 풀면 이름을 고른 값과 견주는 값이 갈린다.
     let place = place_of(config, root);
-    let (path, root, past, problems) = (place.at, place.root, place.past, place.problems);
+    let (path, root, past, mut problems) = (place.at, place.root, place.past, place.problems);
     let dir = dir_of(&path);
     let err = |e: std::io::Error| Fail::new(format!("{}: {e}", path.display()));
     let called = |sheet: &mut Sheet| {
@@ -339,9 +348,13 @@ pub fn update<T>(config: &Path, root: &Path, f: impl Fn(&mut Sheet) -> R<T>) -> 
     // 것이 없었다는 뜻이고, 그것은 어느 표에 대고도 적을 것이 없다.
     if !path.exists() {
         let mut trial = Sheet::parse("").map_err(|e| refuse(format!("{}: {e} — 고치기 전까지 쓰지 않는다", path.display())))?;
-        merge_past(&mut trial, &past, &root)?;
+        // 재 보기의 까닭은 **돌아설 때만** 싣는다 — 안 돌아서면 락 안의 합치기가 같은 줄을 다시 내므로,
+        // 둘 다 실으면 한 판의 한 탈이 두 줄로 선다.
+        let mut why = Vec::new();
+        merge_past(&mut trial, &past, &root, &mut why)?;
         let out = called(&mut trial)?;
         if !trial.changed() {
+            problems.append(&mut why);
             return Ok(Wrote { value: out, problems });
         }
     }
@@ -384,7 +397,7 @@ pub fn update<T>(config: &Path, root: &Path, f: impl Fn(&mut Sheet) -> R<T>) -> 
     // (`read`), 합치는 자리는 여기 하나다 — 옛 파일은 그대로 두니 지우는 것도 옮기는 것도 아니다.
     // 겹치는 차례는 그대로다: 여기 이미 있는 id 는 안 건드린다.
     if fresh_sheet {
-        merge_past(&mut sheet, &past, &root)?;
+        merge_past(&mut sheet, &past, &root, &mut problems)?;
     }
     let out = called(&mut sheet)?;
     // **바뀐 것이 없으면 파일을 안 짓는다.** 어느 프로젝트의 것인지 적는 줄([`Sheet::claim`])도 그때
@@ -401,11 +414,16 @@ pub fn update<T>(config: &Path, root: &Path, f: impl Fn(&mut Sheet) -> R<T>) -> 
 ///
 /// 재 보기와 락 안의 쓰기가 **한 함수로 겹친다**(moai-dyb7) — 둘로 두면 한쪽만 고치는 날 재 보기가
 /// 쓰기와 다른 답을 내고, 그 어긋남은 "쓸 것이 없다" 로 조용히 돌아선다.
-fn merge_past(sheet: &mut Sheet, past: &[PathBuf], root: &Path) -> R<()> {
+///
+/// **옛 자리를 못 든 까닭은 물고 나온다**(리뷰) — 읽는 길의 [`older`] 와 같은 자다. 여기가 **합치는
+/// 단 한 번**이라(그 뒤로 [`read`] 는 옛 자리를 안 연다) 이때 못 든 도장은 사람이 권한을 고쳐도 다시
+/// 안 들어온다. 버리던 판은 그 한 번이 아무 말 없이 지나갔다.
+fn merge_past(sheet: &mut Sheet, past: &[PathBuf], root: &Path, problems: &mut Vec<String>) -> R<()> {
     let mut older_marks = BTreeMap::new();
     for old in past {
-        let got = read_one(old, root);
+        let mut got = read_one(old, root);
         overlay(&mut older_marks, &got.seen);
+        problems.append(&mut got.problems);
     }
     if !older_marks.is_empty() {
         sheet.mark(&older_marks)?;
@@ -420,7 +438,7 @@ fn merge_past(sheet: &mut Sheet, past: &[PathBuf], root: &Path) -> R<()> {
 pub struct Wrote<T> {
     /// [`update`] 에 준 함수가 돌려준 것.
     pub value: T,
-    /// 자리를 고르다 만난 까닭([`Place::problems`]). 빈 것이 정상이다.
+    /// 자리를 고르다([`Place::problems`]) 또 옛 자리를 합치다([`merge_past`]) 만난 까닭. 빈 것이 정상이다.
     pub problems: Vec<String>,
 }
 

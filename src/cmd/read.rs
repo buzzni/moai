@@ -26,6 +26,10 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     let known: BTreeSet<&str> = load.issues.iter().map(|i| i.id.as_str()).collect();
     let mut want: Vec<String> = args.ids.clone();
     let mut missing: BTreeSet<String> = BTreeSet::new();
+    // **같은 까닭을 두 번 대지 않는다**(리뷰). `--all` 은 읽는 길과 쓰는 길을 한 판에 지나는데, 둘 다
+    // 같은 `place_of` 의 한 줄을 물고 온다 — 그대로 내던 판은 한 번 난 탈을 두 줄로 세워, 사람은 두 번
+    // 났다고 읽고 로그를 세는 쪽은 두 건으로 센다.
+    let mut said: BTreeSet<String> = BTreeSet::new();
     // `--all` 은 **내게 온 것 가운데** 안 읽은 것이다.
     //
     // **누군지는 여기서만 묻는다**(moai-u8oh.x85). 담당을 재는 것은 `--all` 뿐이고, id 를 받은
@@ -42,9 +46,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         // **못 든 까닭은 말한다**(리뷰) — 삼키던 판은 못 읽는 읽음 파일 하나로 `--all` 이 내게 온 것을
         // 통째로 "안 읽음" 으로 세어 도장을 다시 찍으면서, 왜 그랬는지를 어디에도 안 남겼다. 막지는
         // 않는다 — 종료 코드는 못 찾은 id 만 움직인다(#a-partial).
-        for why in &marks.problems {
-            eprintln!("moai: {why}");
-        }
+        say_why(&marks.problems, &mut said);
         want.extend(crate::query::unread(&load.issues, &me, &marks.seen).into_iter().map(str::to_string));
     }
     // `-e <묶음>` 은 그 묶음 줄과 **그 밑에 그려진 것 전부** — 목록에서 `SPC m r` 이 부르는 것과 같은
@@ -84,6 +86,9 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     } else {
         // 걷을 것을 **쓸 때만** 센다 — 적을 것이 없는 판에서 줄 수만큼 집합을 짓지 않는다(리뷰).
         let keep = keep_for_prune(&repo, &load);
+        // **집합은 닫은 글 밖에서 한 번 짓는다**(리뷰) — [`crate::read_marks::update`] 는 그 글을 두 번
+        // 돌릴 수 있어(짓기 전 재 보기), 안에서 지으면 줄 수만큼의 짓기가 판마다 두 번 선다.
+        let keep: Option<BTreeSet<&str>> = keep.as_ref().map(|k| k.iter().map(String::as_str).collect());
         let wrote = crate::read_marks::update(&path, &repo.root, |sheet| {
             let lines = load.issues.iter().filter(|i| targets.contains(i.id.as_str()));
             let marks = crate::query::read_marks_of(lines, &sheet.marks().0);
@@ -92,16 +97,16 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
             // 들고 있다. 닫힌 줄은 안 걷는다: 걷으면 그 줄이 다시 설 때 [NEW] 가 되살아나, 읽음의 뜻이
             // "본 적 있다" 에서 "최근에 본 적 있다" 로 바뀐다.
             if let Some(keep) = &keep {
-                sheet.prune(&keep.iter().map(String::as_str).collect());
+                sheet.prune(keep);
             }
             Ok(wrote)
         })?;
         // **적는 자리를 못 골랐으면 말한다**(moai-ajh2) — 위의 `--all` 이 읽는 길에 대는 것과 같은 줄이고,
-        // 값을 잃는 쪽은 이쪽이다. 떨어진 자리는 받은 철자라, 그 한 번의 도장은 다음 쓰기가 합칠 때까지
-        // 딴 파일에 산다. 막지는 않는다 — 종료 코드는 못 찾은 id 만 움직인다(#a-partial).
-        for why in &wrote.problems {
-            eprintln!("moai: {why}");
-        }
+        // 값을 잃는 쪽은 이쪽이다. 떨어진 자리는 받은 철자라 그 판의 도장은 딴 파일에 사는데, 그것이
+        // 돌아오는 것은 **지금 자리가 아직 없을 때뿐이다**(`read_marks::update` 의 `merge_past`) — 이미
+        // 도장이 선 사람에게는 그 판의 것이 영영 거기 남는다. 막지는 않는다 — 종료 코드는 못 찾은 id
+        // 만 움직인다(#a-partial).
+        say_why(&wrote.problems, &mut said);
         wrote.value
     };
 
@@ -114,7 +119,12 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         eprintln!("moai: {id} 를 못 찾았다");
     }
     if ctx.json {
-        return super::json_line(&Marked { read: &fresh, missing: &missing, at: &now });
+        // **기계도 그 까닭을 받는다**(moai-ajh2). stderr 한 줄만 내던 판은 고리를 짜는 쪽이 그것을
+        // 못 봤다 — 사람 없이 도는 고리는 stderr 를 버리기 일쑤라, 옛 철자 자리에 찍힌 도장을
+        // "적혔다" 로 세고 지나갔다. **늘 서는 배열**이다: 빈 것이 "탈이 없었다" 는 답이라 받는
+        // 쪽이 키를 안 가른다. 종료 코드는 그대로 못 찾은 id 만 움직인다 — 막는 값이 아니다.
+        let problems: Vec<&str> = said.iter().map(String::as_str).collect();
+        return super::json_line(&Marked { read: &fresh, missing: &missing, problems: &problems, at: &now });
     }
     if fresh.is_empty() {
         return Ok(vec!["읽음으로 적을 것이 없다".to_string()]);
@@ -123,6 +133,23 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         .iter()
         .map(|id| format!("{}  {}", paint(style::ID, id), paint(style::DIM, "읽음")))
         .collect())
+}
+
+/// 읽음을 들고 적다 만난 까닭을 stderr 로 — **같은 글은 한 번만.**
+///
+/// **한 줄로 접는다**([`crate::text::one_line`]) — 이 글은 사람의 경로와 `io::Error` 를 품어(`settle`)
+/// 줄바꿈이나 제어문자가 들 수 있고, 여기 낸 줄은 줄 단위로 읽힌다. 접지 않으면 한 까닭이 여러 줄로
+/// 흩어져 어디까지가 한 줄인지가 흐려진다(`cmd::project` 와 같은 자).
+///
+/// **본 글을 적어 둔다** — `--all` 은 읽는 길과 쓰는 길을 한 판에 지나고 둘이 같은 자리 고르기를 물고
+/// 오므로, 그대로 내면 한 번 난 탈이 두 줄로 선다.
+fn say_why(whys: &[String], said: &mut BTreeSet<String>) {
+    for why in whys {
+        let line = crate::text::one_line(why);
+        if said.insert(line.clone()) {
+            eprintln!("moai: {line}");
+        }
+    }
 }
 
 /// 걷을 때 **지킬 id 전부** — 되면 `Some`, 이 스냅샷이 트래커 전부를 봤다고 말 못 하면 `None` 이고
@@ -154,6 +181,8 @@ fn keep_for_prune(repo: &Repo, load: &crate::store::Load) -> Option<BTreeSet<Str
 struct Marked<'a> {
     read: &'a [String],
     missing: &'a [String],
+    /// 읽음을 들고 적다 만난 까닭 — stderr 로 낸 그 글들이다([`say_why`]). 빈 배열이 정상이다.
+    problems: &'a [&'a str],
     /// 이 명령이 돈 때다. `[read]` 에 적힌 값이 아니다 — 그것은 줄마다 본 줄의 `updated_at` 이다(moai-lyc1).
     at: &'a str,
 }
