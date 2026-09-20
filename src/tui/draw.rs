@@ -1155,7 +1155,7 @@ fn row_line<'a>(
     let is_dir = matches!(e, Entry::Dir { .. });
     let Some(at) = e.at() else {
         // 바구니는 제 줄이 없다 — 이름만 낸다.
-        return Line::from(Span::styled(format!("{}/", site.index.label(&site.issues, e)), dim()));
+        return Line::from(Span::styled(format!("{}/", site.index.label(&site.issues, e, site.lang)), dim()));
     };
     let Some(i) = site.issues.get(at) else { return Line::default() };
     // 걸린 검색이 이 자리를 보면 찾은 글자를 칠한다(moai-yio7).
@@ -1282,7 +1282,7 @@ fn row_line<'a>(
         head[glyph_at] = Span::styled(still, glyph_style(site.column(at)));
     }
     let used = crate::text::width(CURSOR) + head_w + crate::text::width(&right) + crate::text::width(tail);
-    let mut title = clip(&site.index.label(&site.issues, e), budget.saturating_sub(used));
+    let mut title = clip(&site.index.label(&site.issues, e, site.lang), budget.saturating_sub(used));
     // **디렉터리 표시는 자른 뒤에 붙인다.** 먼저 붙이면 긴 제목에서 `/` 가
     // 제일 먼저 잘려 나가고, 목록에는 디렉터리라고 말하는 것이 달리 없다.
     if is_dir {
@@ -1647,7 +1647,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
                     // 바구니는 제 줄이 없다. 밑에 무엇이 있는지만 센다.
                     None => {
                         let mut out = vec![
-                            Line::from(Span::styled(site.index.label(&site.issues, &e), bold())),
+                            Line::from(Span::styled(site.index.label(&site.issues, &e, site.lang), bold())),
                             Line::from(""),
                         ];
                         out.extend(rollup(app, site, &deeper(site, &e), inner.width as usize));
@@ -1921,7 +1921,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     // 안 나오는 까닭은 이 패널 말고는 어디에도 안 적힌다 — 낱말은 CLI 상세와
     // 같은 자리(`view::deferred_for`)에서 받는다. **물려받은 미룸도** 같이 받는다 —
     // 미룬 에픽의 멤버에 표가 없으면 그 까닭이 여기서도 빈다.
-    if let Some(d) = crate::view::deferred_for(i, site.index.deferred_root(&i.id), &site.now) {
+    if let Some(d) = crate::view::deferred_for(i, site.index.deferred_root(&i.id), &site.now, site.lang) {
         head.push(Span::raw("  ·  "));
         head.push(Span::styled(d, Style::new().fg(Color::Yellow)));
     }
@@ -1929,7 +1929,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     // 손으로 옮긴 칸이 읽은 칸과 다르면 말한다 — CLI 상세와 같은 말. **제 줄로
     // 낸다**: 머리 줄에 이어 붙이면 80~160칸에서 `fit` 이 그 말을 통째로 잘라, 정작
     // `moai mv <에픽> done` 을 친 사람이 까닭을 못 본다.
-    if let Some(n) = crate::view::unread_column(i, &st, &site.cfg) {
+    if let Some(n) = crate::view::unread_column(i, &st, &site.cfg, site.lang) {
         out.extend(wrapped(&n, w, dim()));
     }
 
@@ -2001,7 +2001,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
             Blocker::Empty => ("막힘", format!("· {b}  멤버 없음  {}", site.title_of(b))),
             Blocker::Deferred => {
                 let shelf = at
-                    .and_then(|at| crate::view::deferred_for(&site.issues[at], root, &site.now))
+                    .and_then(|at| crate::view::deferred_for(&site.issues[at], root, &site.now, site.lang))
                     .unwrap_or_else(|| "미룸".into());
                 ("막힘", format!("· {b}  {shelf}  {}", site.title_of(b)))
             }

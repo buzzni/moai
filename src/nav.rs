@@ -546,12 +546,16 @@ impl Index {
     }
 
     /// 화면에 낼 이름. 바구니는 제 줄이 없으므로 여기서 이름을 얻는다.
-    pub fn label(&self, issues: &[Issue], e: &Entry) -> String {
+    ///
+    /// **바구니 이름은 말묶음에서 온다**(moai-ra67) — 이름 없는 줄에 화면이 붙이는 말이라
+    /// 제목처럼 자료가 아니다. 고른 말은 부르는 쪽이 준다: `nav` 는 자리를 정할 뿐이라
+    /// 제가 말을 고르면 그 층에 설정이 딸려 온다.
+    pub fn label(&self, issues: &[Issue], e: &Entry, lang: crate::i18n::Lang) -> String {
         match e.at() {
             Some(at) => issues[at].title.clone(),
             None => match e {
-                Entry::Dir { seg: Seg::Milestone(None), .. } => "(마일스톤 없음)".into(),
-                Entry::Dir { seg: Seg::Lost, .. } => "(길 잃음)".into(),
+                Entry::Dir { seg: Seg::Milestone(None), .. } => crate::i18n::say(lang, "nav.no_milestone").into(),
+                Entry::Dir { seg: Seg::Lost, .. } => crate::i18n::say(lang, "nav.lost").into(),
                 _ => String::new(),
             },
         }
