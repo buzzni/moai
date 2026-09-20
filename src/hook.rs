@@ -2065,7 +2065,17 @@ impl Picks {
             // 옆 워크트리 스냅샷이 쥔 줄(`elsewhere`, moai-m5mg)까지 그 자리에서 안 풀린다. 남의 `?`
             // 한 줄에 제 초점을 안 내준다는 사용자 결정(2026-09-20 결정 2)이 치르는 값이고, 대신
             // 넘겨받기가 약해진다 — 남이 `&&` 로 이어 집으면 제 옛 확실한 줄이 그대로 이긴다.
-            match sure > st || (t.is_none() && m.is_some()) {
+            //
+            // **확실한 기록이 한 쪽에도 없으면 마지막에 적은 쪽이 이긴다**(moai-kjeh, 사용자 결정
+            // 2026-09-20). `?` 끼리 겨루는 자를 안 두던 판은 그 줄을 어느 쪽에도 안 줘, 두 세션이
+            // 모두 `cd … && moai mv X in_progress --from todo` 로 집은 줄이 주인 없이 남았다 —
+            // `Stop` 이 아무도 안 붙들고 규칙 1 도 그 줄로 안 묶인다(리뷰 moai-51h9.3jh 의 5번).
+            // 남이 **확실히** 쥔 줄은 여전히 `?` 로 못 가져오니 결정 2 는 그대로다.
+            let mine = match (sure, st) {
+                (None, None) => m > t,
+                _ => sure > st,
+            };
+            match mine {
                 true => out.mine.insert(id),
                 false => out.theirs.insert(id),
             };
@@ -2094,7 +2104,8 @@ impl Picks {
 /// 이름을 제 이름으로 달아, 거기서 집힌 줄이 "확실히 제 것" 이 됐다 — `Stop` 이 그 세션에 남의 일을
 /// 닫거나 미루라고 댔다. 남이 머지 직후 워크트리를 치운 줄도 루트의 아무 세션에게 그렇게 섰다.
 /// 가르는 자는 [`Picks::fold`] 다 — **마지막으로 확실히 집은** 세션이 이기고, 아무도 확실하지 않으면
-/// 모르는 것이다. "마지막으로 집었으면" 으로 적던 판은 `?` 가 선 뒤로 틀렸다(moai-dbzs).
+/// **마지막에 적은** 쪽이다(moai-kjeh). "마지막으로 집었으면" 으로만 적던 판은 `?` 가 선 뒤로 틀렸다
+/// (moai-dbzs).
 pub fn unsure(
     issues: &[Issue],
     cfg: &Config,
@@ -4226,6 +4237,16 @@ mod tests {
         assert_eq!(read_maybe.theirs, set(&["t-1"]));
         // 남의 기록이 없으면 그대로 제 것이다 — 적는 것 자체는 그대로다(그 줄이 정말 돌았을 수 있다).
         assert_eq!(read(std::slice::from_ref(&maybe)).mine, set(&["t-1"]), "적기는 적는다");
+        // **`?` 끼리는 마지막이 이긴다**(moai-kjeh, 사용자 결정 2026-09-20) — 두 세션이 모두 `&&` 로
+        // 집으면 양쪽이 `?` 다. 겨루는 자를 안 두던 판은 그 줄을 어느 쪽에도 안 줘 주인 없이 남겼다.
+        let their_early = ("you", Picks::line(1, None, "t-1", false));
+        let mine_late = ("me", Picks::line(2, None, "t-1", false));
+        assert_eq!(read(&[their_early.clone(), mine_late]).mine, set(&["t-1"]), "`?` 끼리 겨뤄 주인이 없어졌다");
+        // 늦게 적은 쪽이 남이면 남의 것이다 — 같은 때면 모르는 쪽이다(위와 같은 자).
+        assert!(read(&[("me", Picks::line(1, None, "t-1", false)), ("you", Picks::line(2, None, "t-1", false))]).mine.is_empty());
+        assert!(read(&[("me", Picks::line(1, None, "t-1", false)), ("you", Picks::line(1, None, "t-1", false))]).mine.is_empty());
+        // 남의 **확실한** 줄은 제 `?` 가 아무리 늦어도 못 가져온다 — 결정 2 가 그대로 선다.
+        assert!(read(&[("you", Picks::line(1, None, "t-1", true)), ("me", Picks::line(9, None, "t-1", false))]).mine.is_empty());
         // 내가 뒤에 확실히 집으면 다시 제 것이다 — 표는 줄마다 선다.
         assert_eq!(read(&[theirs.clone(), maybe.clone(), ("me", Picks::line(3, None, "t-1", true))]).mine, set(&["t-1"]));
         // **뒤에 선 `?` 한 줄이 앞서 확실히 집은 줄을 안 덮는다**(리뷰 moai-51h9.k8j1) — 마지막 한 줄만
@@ -4248,9 +4269,9 @@ mod tests {
         assert_eq!(only_theirs.theirs, set(&["t-1"]), "남의 `?` 줄을 아예 안 읽었다");
         // 남이 뒤에 **확실히** 집었으면 넘어간다 — 마지막으로 집은 세션이 이기는 자는 그대로다(moai-4jsy).
         assert!(read(&[sure.clone(), ("you", Picks::line(3, None, "t-1", true))]).mine.is_empty(), "넘겨준 줄을 붙들었다");
-        // 제 `?` 는 남의 `?` 도 못 이긴다 — 둘 다 안 돌았을 수 있는 자리다.
+        // `?` 끼리 겨루는 자는 위에 있다(moai-kjeh) — 마지막에 적은 쪽이 이긴다.
         let both_maybe = read(&[("me", Picks::line(4, None, "t-1", false)), their_maybe]);
-        assert!(both_maybe.mine.is_empty(), "`?` 끼리 겨뤄 제 것이 됐다 — {both_maybe:?}");
+        assert_eq!(both_maybe.mine, set(&["t-1"]), "뒤에 적은 `?` 가 졌다 — {both_maybe:?}");
 
         // **표가 없는 옛 줄은 확실한 것으로 읽는다** — 새 칸을 늘리기만 했다.
         let old = ("me", "2\tt-1\t\n".to_string());
