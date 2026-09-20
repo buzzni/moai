@@ -10,6 +10,17 @@ use crate::model::{self, Issue, JournalEntry, Kind, Status};
 use crate::store::Repo;
 use crate::style::{self, paint};
 
+/// 펼침 노트에 담는 제목 한 토막의 예산(리뷰 moai-5lwd.n5l 3번).
+///
+/// **상한(`MAX_TEXT_BYTES`)을 주지 않는다.** 그것은 "한 번에 적을 수 있는 가장 큰 글" 이고,
+/// 이 노트는 가리킴이다 — 상한을 주면 제목 64KB 가 만든 이슈마다 저널에 한 벌씩 베껴져
+/// `moai show` 의 이력이 그 한 줄에 묻힌다. 상한이 서 있는 까닭이 바로 그것을 막는 데 있다.
+///
+/// 2KB 는 **재고 골랐다** — 이 저장소의 이슈 1,439줄에서 가장 긴 제목이 516바이트다. 네 곱절
+/// 넉넉하니 여태 선 노트도, 사람이 손으로 칠 만한 제목도 여기서 안 잘린다. 잘리는 것은 제목이
+/// 본문 노릇을 하는 줄뿐이고, 그때도 원본은 그 idea 줄에 그대로 있다.
+const TITLE_IN_NOTE: usize = 2 * 1024;
+
 /// 펼칠 수 없는 것을 펼치라 했을 때. **한 곳에서 만든다** — 연습과 진짜가
 /// 같은 것을 거절하는데 문장이 둘이면, 어느 쪽을 봤느냐로 말이 달라진다.
 fn not_an_idea(id: &str, i: &Issue) -> Fail {
@@ -146,19 +157,31 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             .filter(|i| into.is_some() || i.epic.is_none())
             .map(|i| i.id.clone())
             .collect();
+        // **노트에 담는 제목은 넘칠 때만 줄인다**(moai-clta). 이 노트는 도구가 짓는 것이라
+        // 거절할 사람이 없는데, 제목이 상한 턱밑인 idea 는 머리말 몇 바이트 때문에 펼칠
+        // 길이 통째로 막혔다 — 거절문은 이 쓰기가 남기지도 않을 새 id 를 댔다. 여기 담긴
+        // 제목은 어느 생각에서 왔는지 보이라는 가리킴이고, 원본은 그 idea 줄에 그대로 남는다.
+        //
+        // **예산은 상한이 아니라 [`TITLE_IN_NOTE`] 다**(리뷰 moai-5lwd.n5l 3번). 상한을 그대로
+        // 주면 64KB 짜리 제목이 만든 이슈마다 저널에 한 벌씩 베껴져, `moai show` 의 이력이 그
+        // 한 줄에 묻힌다 — `MAX_TEXT_BYTES` 가 애초에 막으려던 바로 그것이다.
+        let head = format!("{} 에서 펼쳤다 — ", args.id);
+        let shown = crate::model::fit(&title, TITLE_IN_NOTE);
+        // **한 번만 짓는다.** 줄마다 똑같은 글이라, 루프 안에서 지으면 64KB 짜리를 멤버 수만큼
+        // 새로 짓고 곧바로 버린다 — `-e` 로 펼치면 만든 이슈가 모두 여기 든다.
+        let grew = format!("{head}{shown}");
         for top in &grown {
-            entries.push(JournalEntry::note(
-                top,
-                &format!("{} 에서 펼쳤다 — {title}", args.id),
-                &at,
-                &by,
-            ));
+            entries.push(JournalEntry::note(top, &grew, &at, &by));
         }
         let done = Status::new(crate::config::DONE);
         let note = match into {
             Some(e) => format!("{e} 의 멤버 {} 로 펼쳤다", grown.join(" ")),
             None => format!("{} 로 펼쳤다 (이슈 {}건)", grown.join(" "), made.len() - grown.len()),
         };
+        // **이 노트도 같은 자로 잰다.** 계획에 줄 수 상한이 없어 id 목록만으로도 상한을 넘는데
+        // (재 봤다: 8,000줄 계획이 79KB), 그러면 위와 똑같이 펼칠 길이 통째로 막힌 채 거절문이
+        // 남지도 않을 id 를 댄다. 도구가 짓는 글에는 줄일 사람이 없다는 것이 `fit` 의 규칙이다.
+        let note = crate::model::fit(&note, crate::model::MAX_TEXT_BYTES).into_owned();
         // **이미 닫힌 것을 또 닫지 않는다.** `done → done` 을 적으면 저널에
         // 일어나지도 않은 전이가 남고, `status_since` 가 움직여 "언제 닫혔나"
         // 가 마지막 `promote` 시각으로 밀린다. 적어 온 말은 그래도 버리지
