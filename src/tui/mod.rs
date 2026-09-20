@@ -536,6 +536,15 @@ fn warnings_in<'a>(
 /// **보는 사람의 것은 안 든다** — 커서·굴린 자리·정렬·열·보기 토글·누구인가는 화면에 하나뿐이라
 /// [`App`] 에 남는다. 여기 드는 것은 *그 프로젝트가 무엇인가* 와 *그 안에서 어디를 보나* 다.
 pub struct Site {
+    /// 이 화면의 말(moai-ra67). **탐색기도 고른 말로 선다** — 한때 이 층에 말이 안 닿아
+    /// `layer::shut` 이 `Lang::Ko` 를 손으로 줬고, 그 한 줄이 "탐색기는 아직 한국어로 선다" 는
+    /// 뜻이었다. 명령 층에서 한 번 풀어(`Ctx::lang`) 여기 놓는다 — `view::Screen` 이 CLI 에서
+    /// 하는 일과 같은 자리다.
+    ///
+    /// **아직 여기서 오는 글이 탐색기의 전부는 아니다** — 넘겨받은 넷(미룸 한 마디·묶음 칸
+    /// 한 줄·바구니 이름 둘)만 이 말을 따르고, 나머지 글자는 그대로 한국어다. 그 나머지는
+    /// 에픽 moai-hom6 의 멤버로 서 있다.
+    pub lang: crate::i18n::Lang,
     pub issues: Vec<Issue>,
     pub index: Index,
     /// 파일 전체를 훑어야 아는 것 — 묶음이 선 칸, 소속, 물려받은 미룸, 가려짐. **적재 때 한 번 센다**
@@ -857,6 +866,11 @@ impl Site {
     /// 두 벌로 적으면 한쪽만 고쳐져 같은 프로젝트가 화면 둘에서 달리 선다.
     fn of(issues: Vec<Issue>, index: Index, ground: Ground, cfg: Config, path: Path, unreadable: Vec<Option<String>>) -> Site {
         Site {
+            // **여기 기본값은 도구의 것(영어)이 아니라 한국어다**(moai-ra67) — 탐색기의 나머지
+            // 글자가 아직 한국어라, 말이 안 닿은 자리에서 영어를 집으면 한국어 화면 한가운데
+            // 몇 줄만 영어로 선다. 부른 쪽(`cmd/tui.rs`)이 고른 말로 갈아 끼운다. 나머지 글이
+            // 말묶음으로 옮겨 가는 날 이 한 줄이 `Lang::default()` 가 된다.
+            lang: crate::i18n::Lang::Ko,
             // 들어간 채로 시작하면(`--path`) 나올 층마다 기억 자리를 만들어 둔다.
             remembered: vec![0; path.len()],
             keep: vec![true; issues.len()],
@@ -2613,6 +2627,11 @@ impl App {
             Some(Ok(fresh)) => {
                 let cfg = repo.as_ref().map_or_else(|| self.site.cfg.clone(), |r| r.config.clone());
                 let mut site = Site::of(fresh.issues, fresh.index, fresh.ground, cfg, Vec::new(), fresh.unreadable);
+                // **펼친 프로젝트의 줄도 같은 말로 선다**(moai-ra67, 리뷰) — 한 화면의 말이지
+                // 프로젝트의 것이 아니다. 안 이으면 한눈 보기에서 편 남의 프로젝트의 바구니
+                // 이름만 [`Site::lang`] 의 처음값으로 서서, 같은 목록의 두 프로젝트가 같은
+                // 바구니를 다른 말로 부른다.
+                site.lang = self.site.lang;
                 site.repo = repo;
                 site.now = fresh.now;
                 site.stamp = fresh.stamp;
@@ -3717,10 +3736,12 @@ impl App {
         out
     }
 
+    /// 바구니 이름은 [`crate::nav::Index::label`] 과 **같은 키에서** 온다(moai-ra67) — 글자로
+    /// 두 벌 들던 판은 한쪽만 고쳐도 경로 줄과 목록 줄이 다른 말을 했다.
     fn seg_label(&self, seg: &Seg) -> String {
         let id = match seg {
-            Seg::Milestone(None) => return "(마일스톤 없음)".into(),
-            Seg::Lost => return "(길 잃음)".into(),
+            Seg::Milestone(None) => return crate::i18n::say(self.site.lang, "nav.no_milestone").into(),
+            Seg::Lost => return crate::i18n::say(self.site.lang, "nav.lost").into(),
             Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => id,
         };
         self.site.title_of(id)

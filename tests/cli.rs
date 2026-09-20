@@ -4620,6 +4620,33 @@ fn tui_json_lists_a_directory_without_a_terminal() {
     assert!(inside.contains(&member), "{inside}");
 }
 
+/// **탐색기도 고른 말로 선다**(moai-ra67). 바구니(`(마일스톤 없음)`·`(길 잃음)`)는 제 줄이
+/// 없어 화면이 이름을 붙이는 자리라, 그 이름은 제목이 아니라 말묶음에서 온다. 한때 `nav` 와
+/// `tui::mod` 가 같은 글자를 따로 들어, 한쪽만 고치면 목록 줄과 경로 줄이 다른 말을 했다.
+///
+/// **다른 글자는 아직 한국어다** — 이 일이 옮긴 것은 넘겨받은 넷뿐이고, 나머지는 에픽
+/// moai-hom6 의 멤버로 서 있다. 그래서 여기서는 바구니 이름 하나만 잰다.
+#[test]
+fn the_explorer_names_its_baskets_in_the_chosen_language() {
+    let s = init("tuilang");
+    let stone = add(s.path(), &["v0.1", "--type", "milestone"]);
+    add(s.path(), &["마일스톤에 든 것", "--milestone", &stone]);
+    add(s.path(), &["마일스톤 밖의 것"]);
+
+    let basket = |lang: &str| {
+        let mut cmd = isolated(BIN);
+        cmd.args(["tui", "--json"]).current_dir(s.path()).env("NO_COLOR", "1").env("MOAI_LANG", lang);
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "{lang}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let korean = basket("ko");
+    assert!(korean.contains("(마일스톤 없음)"), "{korean}");
+    let english = basket("en");
+    assert!(english.contains("(no milestone)"), "{english}");
+    assert!(!english.contains("(마일스톤 없음)"), "영어로 골랐는데 바구니 이름이 한국어다 — {english}");
+}
+
 /// **멤버 없는 에픽도 디렉터리다.** 비었다고 부모를 대신 열면 그 에픽을 물은
 /// 답으로 형제들이 나오고, `dir` 을 보고 파고드는 쪽은 제자리를 돈다.
 #[test]
@@ -4650,14 +4677,21 @@ fn tui_json_hands_back_a_path_for_every_row() {
 
     let root = ok(s.path(), &["tui", "--json"]);
     assert!(root.contains(r#""kind":"bucket""#), "{root}");
-    assert!(root.contains(r#""path":"길잃음""#), "바구니에 손잡이가 없다 — {root}");
+    assert!(root.contains(r#""path":"lost""#), "바구니에 손잡이가 없다 — {root}");
 
-    let inside = ok(s.path(), &["tui", "--json", "--path", "길잃음"]);
+    let inside = ok(s.path(), &["tui", "--json", "--path", "lost"]);
     assert!(inside.contains(&one), "{inside}");
 
     // 없는 바구니는 조용한 빈 목록이 아니라 거절이다
-    let out = moai(s.path(), &["tui", "--json", "--path", "없음"]);
+    let out = moai(s.path(), &["tui", "--json", "--path", "none"]);
     assert!(!out.status.success(), "없는 바구니를 열어 주었다");
+
+    // **옛 낱말은 안 받는다**(moai-l5uf, 2026-09-20 사용자 결정) — 받는 말을 둘로 두면
+    // 그것이 곧 둘째 어휘다. 배포 전이라 밖에서 이 낱말을 치는 사람이 없어 값이 0 이다.
+    for old in ["길잃음", "없음"] {
+        let out = moai(s.path(), &["tui", "--json", "--path", old]);
+        assert!(!out.status.success(), "옛 낱말 `{old}` 을 아직 받는다");
+    }
 }
 
 /// **못 읽은 줄을 삼키지 않는다.** 다른 읽기 명령과 같이 stderr 로 알리고
@@ -4796,7 +4830,8 @@ fn outside_a_repo_it_teaches_instead_of_erroring() {
     let out = moai(s.path(), &[]);
     assert!(out.status.success(), "{:?}", out.status.code());
     let text = String::from_utf8_lossy(&out.stdout);
-    for want in ["moai status", "moai ready", "add --from", "승인 게이트가 없다", "moai init"] {
+    // **도움말은 영어다**(moai-l5uf) — 이 화면은 `--help` 그대로다.
+    for want in ["moai status", "moai ready", "add --from", "no approval gate", "moai init"] {
         assert!(text.contains(want), "{want} 가 없다\n{text}");
     }
 }

@@ -1573,18 +1573,18 @@ mod tests {
         // (지울 말, 바꿀 말, 도움말 전체엔 남아야 하는 키, 빠졌다고 해야 하는 것)
         for (phrase, instead, still, want) in [
             // 다른 문단에만 남은 키 — 검색 칸 문단의 Tab(범위 돌리기).
-            ("Tab·Shift-Tab 이 찾을 자리를", "찾을 자리를", &["Tab"][..], &["PROMPT: Tab", "PROMPT: Shift-Tab"][..]),
+            ("Tab and Shift-Tab pick where it", "it picks where it", &["Tab"][..], &["PROMPT: Tab", "PROMPT: Shift-Tab"][..]),
             // 좁힌 표 — 같은 문단의 목록 Enter·Esc 로 지나가면 안 된다.
-            ("검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며", "검색·거름망 칸은 그 칸에서 걸고 그만두며", &["Enter", "Esc"][..], &["PROMPT: Enter", "PROMPT: Esc"][..]),
+            ("The search and filter fields take Enter to apply and Esc to give up", "The search and filter fields apply and give up", &["Enter", "Esc"][..], &["PROMPT: Enter", "PROMPT: Esc"][..]),
             // 좁힌 표 — 같은 문단의 고르기 창 Enter·Esc 로 지나가면 안 된다.
-            ("(Enter 로 가고 Esc 로", "(가고", &["Enter", "Esc"][..], &["PATH: Enter", "PATH: Esc"][..]),
+            ("(Enter goes, Esc gives up)", "(as you would expect)", &["Enter", "Esc"][..], &["PATH: Enter", "PATH: Esc"][..]),
             // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Backspace 로 지나가면 안 된다.
-            ("Enter 로 들어가고 Backspace 로 나온다", "들어가고 나온다", &["Enter", "Backspace"][..], &["BROWSE: Enter", "BROWSE: Bksp"][..]),
+            ("Enter goes in, Backspace comes back out", "it goes in and comes back out", &["Enter", "Backspace"][..], &["BROWSE: Enter", "BROWSE: Bksp"][..]),
             // 거꾸로 — 고르기 창이 경로 칸 문장의 Esc 로 지나가면 안 된다.
-            ("창은 Esc 로 닫는다", "창은 닫는다", &["Esc"][..], &["PICK: Esc"][..]),
+            ("The window closes on Esc", "The window closes", &["Esc"][..], &["PICK: Esc"][..]),
             // 거꾸로 — 목록의 Esc(거름망 풀기)가 같은 문단의 메뉴 문장(`Esc 로 나간다`·`Esc 닫기`)으로
             // 지나가면 안 된다. 그 문장들을 MENU 의 것으로 안 적으면 여기서 붉어진다.
-            ("Esc 가 걸어 둔 거름망을 푼다", "걸어 둔 거름망을 푼다", &["Esc"][..], &["BROWSE: Esc"][..]),
+            ("Esc clears the filter you set", "it clears the filter you set", &["Esc"][..], &["BROWSE: Esc"][..]),
         ] {
             assert!(help.contains(phrase), "시험이 지울 말 `{phrase}` 이 도움말에 없다 — 문장이 바뀌었으면 여기도 고친다");
             let broken = help.replace(phrase, instead);
@@ -1600,13 +1600,13 @@ mod tests {
     }
 
     /// 목록 문단의 첫머리 말.
-    const LIST: &str = "j·k 나 ↑↓ 로 이동";
+    const LIST: &str = "j and k or the arrow keys move";
     /// SPC 메뉴 문단.
-    const SPC: &str = "그 밖의 동작은 SPC";
+    const SPC: &str = "The rest lives in the menu";
     /// 고르기 창·경로 칸·목록에서 빼기 문단.
-    const PICKER: &str = "SPC p a 는 디렉터리를 골라";
+    const PICKER: &str = "SPC p a opens a window";
     /// 생각 담기 문단.
-    const JOTTING: &str = "SPC n 은 프로젝트 안";
+    const JOTTING: &str = "SPC n opens the jot form";
 
     /// 같은 문단을 **같은 키로** 나눠 쓰는 표 → (그 문단, 그 표를 말하는 문장의 첫머리 말). 문장은
     /// 그 말부터 첫 `.` 까지이고 **그 문단 안에서만** 찾는다 — 도움말 어디든 찾으면 같은 말이 앞선
@@ -1620,15 +1620,15 @@ mod tests {
     /// 문단에서 `Esc 가 걸어 둔 거름망을 푼다` 를 지워도 안 잡힌다(리뷰 moai-osgw.mez).
     const SENTENCES: &[(&str, &str, &str)] = &[
         // 목록(BROWSE)과 Enter·Esc 를 나눠 쓴다.
-        ("PROMPT", LIST, "검색·거름망 칸은"),
+        ("PROMPT", LIST, "The search and filter fields"),
         // 목록(BROWSE)과 Esc·Bksp 를 나눠 쓴다.
-        ("MENU", SPC, "메뉴는 그 자리에서"),
+        ("MENU", SPC, "stands up only what works"),
         // 메뉴가 언제 열린 채로 기다리는지를 말하는 두 문장도 메뉴의 것이다(moai-68j8) — 여기 적힌
         // Esc 는 메뉴를 닫는 Esc 지 거름망을 푸는 Esc 가 아니다.
-        ("MENU", SPC, "켜고 끄는 것과 정렬"),
-        ("MENU", SPC, "그 층은 아랫줄 오른쪽에"),
+        ("MENU", SPC, "Toggles and sorts"),
+        ("MENU", SPC, "That level says so at the bottom right"),
         // 고르기 창(PICK)과 Enter·Esc 를 나눠 쓴다. `g p` 는 창의 것이라 괄호부터 잡는다.
-        ("PATH", PICKER, "적는 칸을 연다("),
+        ("PATH", PICKER, "field to type a path"),
     ];
 
     /// [`SENTENCES`] 에 없는 표 → 그 표를 말하는 문단들. 문단은 빈 줄로 나눈 덩어리다.

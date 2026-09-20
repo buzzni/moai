@@ -143,14 +143,14 @@ pub fn tag_parts(tags: &[String]) -> impl Iterator<Item = (&'static str, &str)> 
 /// 미룸도 여기서 말한다** — 미룬 에픽의 멤버를 펼쳤는데 표가 없으면, 이 낱말을
 /// 쓰는 두 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다. 제가 미룬 줄은
 /// 전처럼 제 시각으로 나이를 댄다.
-pub fn deferred_for(i: &Issue, root: Option<&str>, now: &str) -> Option<String> {
+pub fn deferred_for(i: &Issue, root: Option<&str>, now: &str, lang: Lang) -> Option<String> {
     if let Some(r) = root.filter(|r| *r != i.id) {
-        return Some(format!("미룸 — {r} 밑"));
+        return Some(fill(say(lang, "detail.deferred_under"), &[("id", r)]));
     }
     let at = i.deferred_at.as_deref()?;
     Some(match crate::model::days_since(at, now) {
-        Some(d) if d > 0 => format!("미룸 ({d}일)"),
-        _ => "미룸".to_string(),
+        Some(d) if d > 0 => fill(say(lang, "detail.deferred_days"), &[("n", &d.to_string())]),
+        _ => say(lang, "detail.deferred").to_string(),
     })
 }
 
@@ -611,7 +611,7 @@ fn place(
             // **이름은 제 줄에서 읽는다.** 집계는 id 로 찾으므로 같은 id 의 줄이
             // 둘이면 남의 줄 것일 수 있다 — 그러면 두 줄이 한 제목을 달고 폴더인
             // 줄의 이름은 트리에서 사라진다(moai-sfml). 수는 id 가 같으면 같다.
-            let title = cx.index.label(cx.all, e);
+            let title = cx.index.label(cx.all, e, cx.screen.lang);
             let lang = cx.screen.lang;
             match cx.rolls.iter().find(|r| r.id.as_deref() == Some(id)) {
                 Some(roll) => out.push(head(roll, &title, shown, cx.screen.branch(id), lang)),
@@ -636,7 +636,7 @@ fn place(
             // 여기서는 셈만 옮긴다. 그 이름을 옮기는 자리는 `nav` 쪽이다.
             out.push(format!(
                 "{}  {}",
-                paint(style, &cx.index.label(cx.all, e)),
+                paint(style, &cx.index.label(cx.all, e, cx.screen.lang)),
                 fill(say(cx.screen.lang, "tree.count"), &[("n", &under(cx, path, e).to_string())])
             ));
             walk(out, drawn, cx, &deeper, 1);
@@ -1258,9 +1258,9 @@ pub struct Seen<'a> {
 /// `moai mv <에픽> done` 을 한 사람이 상세에서 `in_progress` 만 보면 쓰기가 안
 /// 먹은 줄 안다. 첫 칸 그대로인 줄은 말하지 않는다 — 묶음은 거의 다 만든 칸에
 /// 서 있어, 그것까지 말하면 모든 에픽 상세에 같은 군말이 붙는다.
-pub fn unread_column(i: &Issue, col: &str, cfg: &Config) -> Option<String> {
+pub fn unread_column(i: &Issue, col: &str, cfg: &Config, lang: Lang) -> Option<String> {
     (col != i.status.as_str() && i.status.as_str() != cfg.first_status())
-        .then(|| format!("칸은 멤버에서 읽는다 (적힌 칸 `{}` 은 안 읽는다)", i.status))
+        .then(|| fill(say(lang, "detail.unread_column"), &[("col", i.status.as_str())]))
 }
 
 /// `moai mv <묶음>` 이 내는 한 줄 — 서 있는 칸과, `done` 으로 옮기려 했으면 **실제로
@@ -1315,11 +1315,9 @@ fn block_line(b: &crate::report::Block, branch: Option<&str>, now: &str, lang: L
             format!("{}  {title}", paint(style::WARN, say(lang, "block.no_members"))),
         ),
         Blocker::Deferred => {
-            // **`deferred_for` 의 낱말은 아직 한국어다** — 탐색기가 같은 자리를 쓰는데
-            // (`tui::draw`) 그쪽에 말이 안 닿아 있어, 옮기는 자리는 moai-ra67 이다.
             let shelf = b
                 .issue
-                .and_then(|x| deferred_for(x, b.root, now))
+                .and_then(|x| deferred_for(x, b.root, now, lang))
                 .unwrap_or_else(|| say(lang, "status.put_off").to_string());
             (say(lang, "block.held"), style::WARN, "·", format!("{}  {title}", paint(style::WARN, &shelf)))
         }
@@ -1389,10 +1387,10 @@ pub fn detail(
     }
     // **미룬 것은 상세에서 반드시 말한다.** 목록에서는 아예 안 보이므로,
     // id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안 나오나" 에 답하는 자리다.
-    if let Some(d) = deferred_for(i, seen.roots.get(i.id.as_str()).copied(), now) {
+    if let Some(d) = deferred_for(i, seen.roots.get(i.id.as_str()).copied(), now, seen.screen.lang) {
         line.push_str(&format!(" · {}", paint(style::WARN, &d)));
     }
-    if let Some(n) = unread_column(i, col, cfg) {
+    if let Some(n) = unread_column(i, col, cfg, seen.screen.lang) {
         line.push_str(&format!(" · {}", paint(style::DIM, &n)));
     }
     if !i.tags.is_empty() {
@@ -1461,7 +1459,7 @@ pub fn detail(
         if c.kind != Kind::Issue {
             tail.push_str(&format!(" · {}", paint(style::DIM, c.kind.as_str())));
         }
-        if let Some(d) = deferred_for(c, seen.roots.get(c.id.as_str()).copied(), now) {
+        if let Some(d) = deferred_for(c, seen.roots.get(c.id.as_str()).copied(), now, seen.screen.lang) {
             tail.push_str(&format!(" · {}", paint(style::WARN, &d)));
         }
         let ccol = crate::report::column(c, &seen.states);
@@ -2141,6 +2139,38 @@ mod tests {
 
     fn no_epics() -> crate::report::EpicLabels<'static> {
         BTreeMap::new()
+    }
+
+    /// **미룸 한 마디와 묶음 칸 한 줄도 고른 말로 선다**(moai-ra67). 목록은 이미 말묶음에서
+    /// 오는데 이 둘만 한국어로 박혀 있어, 영어로 고른 화면이 목록에서는 `deferred` 라 하고
+    /// 상세 머리 줄에서는 `미룸` 이라 했다 — 나란히 놓고 보는 사람이 어느 쪽을 믿을지 정하게
+    /// 되는 자리다(리뷰 moai-hom6.soc 의 5·6번).
+    #[test]
+    fn the_deferred_word_and_the_unread_column_follow_the_chosen_language() {
+        let mut i = issue("argos-0001", "일", "in_progress");
+        i.deferred_at = Some("2026-09-08T04:12:03Z".into());
+        let now = "2026-09-11T04:12:03Z";
+        assert_eq!(deferred_for(&i, None, now, Lang::Ko).as_deref(), Some("미룸 (3일)"));
+        assert_eq!(deferred_for(&i, None, now, Lang::En).as_deref(), Some("deferred (3d)"));
+        // 나이를 못 재면 낱말 하나다.
+        let mut fresh = i.clone();
+        fresh.deferred_at = Some(now.into());
+        assert_eq!(deferred_for(&fresh, None, now, Lang::En).as_deref(), Some("deferred"));
+        // 물려받은 미룸은 뺀 줄을 댄다 — id 는 자료라 말이 바뀌어도 그대로다.
+        let under = deferred_for(&i, Some("argos-0009"), now, Lang::En);
+        assert_eq!(under.as_deref(), Some("deferred — under argos-0009"));
+        assert_eq!(deferred_for(&i, Some("argos-0009"), now, Lang::Ko).as_deref(), Some("미룸 — argos-0009 밑"));
+
+        // 손으로 적은 칸이 읽은 칸과 다를 때만 말한다 — 그 한 줄도 같은 말로 선다.
+        let mut group = issue("argos-000e", "에픽", "done");
+        group.kind = Kind::Epic;
+        let said = unread_column(&group, "in_progress", &cfg(), Lang::En);
+        assert_eq!(said.as_deref(), Some("the column is read from its members (the written column `done` is not read)"));
+        assert!(unread_column(&group, "in_progress", &cfg(), Lang::Ko).is_some_and(|s| s.contains("적힌 칸 `done`")));
+        // 서 있는 칸과 같으면 두 말 다 아무 말도 안 한다.
+        for lang in [Lang::En, Lang::Ko] {
+            assert_eq!(unread_column(&group, "done", &cfg(), lang), None, "{lang:?}");
+        }
     }
 
     fn issue(id: &str, title: &str, status: &str) -> Issue {

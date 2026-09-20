@@ -46,7 +46,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         let rows: Vec<Row> = index
             .entries(&load.issues, &path)
             .iter()
-            .map(|e| Row::of(&index, &load.issues, &states, e))
+            .map(|e| Row::of(&index, &load.issues, &states, e, ctx.lang()))
             .collect();
         return super::json_line(&rows);
     }
@@ -65,8 +65,11 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 옮겨 가지만 띄운 곳은 이 워크트리다. 트래커의 자리로 적던 판은 층으로 올라갔다 그 줄로 다시
     // 들어오는 걸음에서 `Repo::open(<루트>)` 을 열어 `here()` 가 루트로 뒤집혔고, 그때부터 커밋 표가
     // 이 가지의 커밋을 잃고 집기 표식도 안 적혔다.
+    // 층의 말은 얹는 문(`App::with_layer`)이 화면에서 잇는다(moai-ra67).
     let layer = crate::tui::layer::Layer::of(&reg, Some(repo.here()));
     let mut app = App::open(repo, load, index, ground, path, stamp).overlaid(origin, trouble, watched, swept, &sides);
+    // **탐색기도 고른 말로 선다**(moai-ra67) — 명령 층에서 한 번 푼 것을 화면에 놓는다.
+    app.site.lang = ctx.lang();
     // **판 것은 여기서 버린다**(moai-kos1) — 옆 스냅샷의 줄은 이미 `load` 에 겹쳐 들어왔고,
     // 쓰는 자리는 바로 위 하나다. 안 버리면 탐색기가 도는 내내 워크트리마다 한 벌씩 그대로
     // 남아, 겹쳐 본 저장소의 줄을 두 번 들고 산다(다시 읽기는 `tui::prepare` 가 제 것을 판다).
@@ -153,7 +156,10 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         return super::json_line(&Layered { projects: rows, problems: &reg.problems, config: reg.path.as_deref() });
     }
     refuse_without_terminal()?;
-    let mut app = App::on_projects(crate::tui::layer::Layer::of(&reg, None));
+    let mut layer = crate::tui::layer::Layer::of(&reg, None);
+    layer.lang = ctx.lang();
+    let mut app = App::on_projects(layer);
+    app.site.lang = ctx.lang();
     app.user = ctx.user.clone();
     // 밖에서 띄워도 누군지는 같은 자로 푼다(moai-z9pc.9av). 층에는 저장소가 없으니 지금 디렉터리에서
     // 묻는다 — 전역 git 설정이면 그것으로 선다. 층에서 프로젝트로 들어가면 그 뿌리에서 다시 푼다
@@ -344,9 +350,15 @@ struct Row {
 }
 
 impl Row {
-    fn of(index: &Index, issues: &[Issue], states: &std::collections::BTreeMap<&str, &str>, e: &Entry) -> Row {
+    fn of(
+        index: &Index,
+        issues: &[Issue],
+        states: &std::collections::BTreeMap<&str, &str>,
+        e: &Entry,
+        lang: crate::i18n::Lang,
+    ) -> Row {
         let dir = matches!(e, Entry::Dir { .. });
-        let title = index.label(issues, e);
+        let title = index.label(issues, e, lang);
         match e.at() {
             Some(at) => Row {
                 id: Some(issues[at].id.clone()),
@@ -379,8 +391,16 @@ impl Row {
 }
 
 /// 바구니를 `--path` 로 부르는 이름. 바구니는 제 줄이 없어 id 가 없다.
-const NO_MILESTONE: &str = "없음";
-const LOST: &str = "길잃음";
+///
+/// **영어다**(moai-l5uf, 2026-09-20 사용자 결정). 한때 `없음`·`길잃음` 이었는데, 도움말이
+/// 영어로 서면서 영어 화면이 받는 값만 한국어로 남았다. 옛 낱말은 **안 받는다** — 받는 말을
+/// 둘로 두면 그것이 곧 둘째 어휘고, 지우려면 남의 스크립트를 깨야 한다. v0.1.0 을 안 내보낸
+/// 지금은 밖에서 이 낱말을 치는 사람이 없어 값이 0 이다.
+///
+/// **`--json` 의 `path` 도 이 낱말을 낸다.** 내는 말과 받는 말이 갈리면 그 출력을 그대로
+/// `--path` 에 넣는 고리가 끊긴다 — 기계가 읽고 다시 치는 자리라 한 낱말이어야 한다.
+const NO_MILESTONE: &str = "none";
+const LOST: &str = "lost";
 
 // ── 화면 ──────────────────────────────────────────────────────────────
 

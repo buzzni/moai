@@ -35,6 +35,10 @@ pub enum At {
 
 /// 프로젝트 층. `App::layer` 가 `None` 이면 등록한 것이 없고, 탐색기는 오늘과 같다.
 pub struct Layer {
+    /// 층의 말(moai-ra67). **층도 고른 말로 선다** — 한때 [`shut`] 이 `Lang::Ko` 를 손으로
+    /// 줬고, 그 한 줄이 "탐색기는 아직 한국어로 선다" 는 뜻이었다. 말은 [`super::Site::lang`]
+    /// 과 한 자리에서 오고(`Ctx::lang`), 읽기가 스레드로 흩어지므로 층이 제 몫을 들고 간다.
+    pub lang: crate::i18n::Lang,
     pub at: At,
     /// 층의 줄. 차례는 띄운 자리(등록 안 됨)가 맨 앞, 나머지는 등록 차례 그대로다.
     pub places: Vec<Place>,
@@ -272,7 +276,7 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
 
 /// 열지 못한 상태를 층의 말로. 말은 CLI 한눈 보기의 것을 그대로 쓴다 — 같은 상태를 두
 /// 화면이 달리 부르면 둘을 오가는 사람이 두 낱말을 다 배워야 한다.
-fn shut(path: &Path, name: &str, state: State) -> Look {
+fn shut(path: &Path, name: &str, state: State, lang: crate::i18n::Lang) -> Look {
     let kind = match &state {
         State::Uninit => Shut::Uninit,
         State::Missing => Shut::Missing,
@@ -287,10 +291,8 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
         trouble: Vec::new(),
         swept: false,
     };
-    // **탐색기는 아직 한국어로 선다** — 이 층에 화면 말이 안 닿아 있고, 그 말을 잇는 일은
-    // moai-ra67 의 자리다. 여기서 기본값(이제 영어다)을 집으면 한국어 화면 한가운데 이 한 줄만
-    // 영어로 서니, 말이 닿기 전까지는 지금 화면 그대로를 적어 둔다.
-    let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()), crate::i18n::Lang::Ko))
+    // 말은 층이 들고 온다(moai-ra67) — 한눈 보기(`view::unopened`)가 내는 그 글을 그대로 쓴다.
+    let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()), lang))
         .trim()
         .to_string();
     Look::Shut { state: kind, said }
@@ -314,22 +316,22 @@ fn shut(path: &Path, name: &str, state: State) -> Look {
 /// 나란히 부르는 것은 한눈 보기와 같은 [`projects::each`] 다 — 한 줄의 패닉이 **그 까닭 그대로**
 /// 되던져지고(`scope` 에 맡기면 std 가 까닭을 지운다), 스레드를 못 띄우면 그 자리에서 읽는다.
 /// 보내기는 줄마다 제 스레드 안에서 하므로 닿는 대로 흐른다.
-fn look_into(paths: &[PathBuf], now: &str, tx: &std::sync::mpsc::Sender<Looked>) {
+fn look_into(paths: &[PathBuf], now: &str, lang: crate::i18n::Lang, tx: &std::sync::mpsc::Sender<Looked>) {
     projects::each(paths, |path| {
-        let _ = tx.send(look_one(path, now));
+        let _ = tx.send(look_one(path, now, lang));
     });
 }
 
 /// 한 경로를 연다. **표식을 먼저 잰다** — 읽고 나서 재면 그 사이의 쓰기가 "이미 본 것"
 /// 으로 적혀 영영 안 보인다(`App::open` 과 같은 까닭).
-fn look_one(path: &Path, now: &str) -> Looked {
+fn look_one(path: &Path, now: &str, lang: crate::i18n::Lang) -> Looked {
     let marks = marks_of(path);
     // 여는 길은 한눈 보기와 같다(`projects::open_one`) — 상태를 가르는 셈을 두 벌 두지 않는다.
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
     let p = projects::open_one(path, String::new(), None, false);
     let look = match p.state {
         State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now) },
-        state => shut(&p.path, &p.name, state),
+        state => shut(&p.path, &p.name, state, lang),
     };
     Looked { path: p.path, marks, look }
 }
@@ -381,6 +383,8 @@ impl Layer {
             None => At::Layer,
         };
         Layer {
+            // 기본값은 [`super::Site::lang`] 과 같은 까닭으로 한국어다 — 부른 쪽이 갈아 끼운다.
+            lang: crate::i18n::Lang::Ko,
             at,
             places,
             problems: reg.problems.clone(),
@@ -474,7 +478,8 @@ impl Layer {
         }
         let (tx, rx) = std::sync::mpsc::channel();
         let now = crate::model::now();
-        let handle = std::thread::spawn(move || look_into(&stale, &now, &tx));
+        let lang = self.lang;
+        let handle = std::thread::spawn(move || look_into(&stale, &now, lang, &tx));
         self.pending = Some((rx, handle));
     }
 
@@ -542,7 +547,11 @@ impl App {
     /// 층이 서면서 뿌리에 `..` 이 새로 생기던 시절의 일이다. 뿌리의 `..` 을 걷은 뒤(moai-i784)
     /// 층이 서도 줄은 하나도 안 밀리므로 밀 것이 없고, 미는 척하는 한 줄이 남아 있으면 그것을
     /// 위해 뿌리의 목록을 통째로 세고 정렬하는 값(`first_row` → `rows`)을 띄울 때마다 치른다.
-    pub fn with_layer(mut self, layer: Layer) -> App {
+    pub fn with_layer(mut self, mut layer: Layer) -> App {
+        // **말은 화면에서 온다**(moai-ra67) — 층은 설정에서 나므로 제 말을 모른다. 얹는 문이
+        // 여기 하나라, 부르는 쪽마다 손으로 이어 주던 판이 한 자리만 빠뜨려도 못 연 프로젝트의
+        // 한 줄만 딴 말로 섰다.
+        layer.lang = self.site.lang;
         self.layer = Some(layer);
         self
     }
@@ -591,7 +600,7 @@ impl App {
             }
             Err(state) => state,
         };
-        place.look = shut(&place.path, &place.name, state);
+        place.look = shut(&place.path, &place.name, state, self.site.lang);
         place.marks = marks;
         // 들인 때로 찍는다 — [`Layer::adopt`] 와 같은 자다.
         place.read_at = Some(std::time::Instant::now());
@@ -836,7 +845,12 @@ impl App {
         //
         // **그 프로젝트 안에서 어디를 보고 있었나는 안 든다.** 경로·커서 기억·펼친 자리는 도로
         // 들어갈 때 처음부터다 — 마디가 그 프로젝트의 이슈 id 라 남겨 두면 지운 줄의 id 가 쌓인다.
-        let blank = super::Site::of(Vec::new(), Index::of(&[]), Default::default(), self.site.cfg.clone(), Vec::new(), Vec::new());
+        let mut blank = super::Site::of(Vec::new(), Index::of(&[]), Default::default(), self.site.cfg.clone(), Vec::new(), Vec::new());
+        // **말은 프로젝트에 안 매인다**(moai-ra67, 리뷰) — 화면 하나가 고른 말이라 떠난다고
+        // 처음값으로 돌아갈 것이 아니다. 안 이으면 `0` 으로 한 번 올라간 뒤 층의 말도(`shut`·
+        // `seg_label`) 다음에 들어간 프로젝트의 말도 몽땅 [`super::Site::lang`] 의 처음값으로
+        // 섰다 — 고른 말은 `cmd/tui.rs` 가 띄울 때 한 번만 놓기 때문이다.
+        blank.lang = self.site.lang;
         let mut parked = std::mem::replace(&mut self.site, blank);
         parked.path.clear();
         parked.remembered.clear();
@@ -923,10 +937,13 @@ impl App {
                 // 프로젝트가 없으면 세울 층도 없다 — 이것은 탈이 아니라 그냥 세울 것이 없는 자리다.
                 let Some(repo) = &self.site.repo else { return Relayered::Nothing };
                 let here = Some(repo.here().to_path_buf());
-                let fresh = match reg {
+                let mut fresh = match reg {
                     Some(reg) => Layer::of(reg, here.as_deref()),
                     None => Layer::read(self.user_config.as_deref(), here.as_deref()),
                 };
+                // **말은 화면에서 온다**(moai-ra67) — 다시 세운 층은 설정에서 나므로 제 말을 모른다.
+                // 안 이어 주면 설정 파일이 한 번 바뀔 때마다 못 연 프로젝트의 한 줄만 기본 말로 돌아간다.
+                fresh.lang = self.site.lang;
                 // 못 읽었으면 세우지 않는다 — 다만 **까닭은 댄다**(리뷰). 층이 없는 화면에서는 이 배너가
                 // 유일한 말이라, 조용히 돌아서면 쭉 못 읽는 설정이 아무 말 없이 빈 화면으로 선다. 다음
                 // 읽기가 되면 그때 걷힌다([`unlayered_of`] 는 댈 까닭이 없으면 `None` 이다 — 없는 파일이
@@ -949,6 +966,8 @@ impl App {
                     Some(reg) => Layer::of(reg, old.launch.as_deref()),
                     None => Layer::read(old.config.as_deref(), old.launch.as_deref()),
                 };
+                // 말은 화면에서 온다 — 위와 같은 자리다(moai-ra67).
+                fresh.lang = self.site.lang;
                 // **탈이 있으면 들고 있던 층을 두고 까닭을 단다**(moai-po6v, 사용자 결정 2026-09-19).
                 // 빈 층으로 갈아 끼우면 줄이 통째로 사라지는데, 손으로 누르던 비상구(`SPC r`)는
                 // 걷었다(moai-en4u) — 되돌릴 길이 도구 밖에만 남는다.
@@ -1161,6 +1180,8 @@ fn blank_config() -> crate::config::Config {
 #[cfg(test)]
 pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
     Layer {
+        // 기본값은 [`Layer::of`] 와 같다(moai-ra67).
+        lang: crate::i18n::Lang::Ko,
         at,
         places: places
             .into_iter()
@@ -1433,7 +1454,7 @@ mod tests {
 
         // 층이 two 를 읽어 둔 채 아직 들이지 않았다. 그새 two 가 사라진다.
         let (tx, rx) = std::sync::mpsc::channel();
-        look_into(std::slice::from_ref(&two), &crate::model::now(), &tx);
+        look_into(std::slice::from_ref(&two), &crate::model::now(), crate::i18n::Lang::Ko, &tx);
         a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {})));
         std::fs::remove_dir_all(&two).unwrap();
 
@@ -1844,6 +1865,41 @@ mod tests {
         let mut a = layered(&cfg);
         a.user = Some("레이븐 (raven@example.com)".into());
         (one, two, a)
+    }
+
+    /// **고른 말은 프로젝트를 오가도 그대로다**(moai-ra67, 리뷰). 말은 화면 하나의 것이라
+    /// 어느 프로젝트에 서 있는가와 상관이 없는데, 떠나며 비우는 `Site` 와 펼친 줄에 세우는
+    /// `Site` 가 제 처음값을 들고 오던 판은 `0` 한 번에 층도 다음 프로젝트도 몽땅 그 처음값으로
+    /// 섰다 — 고른 말을 놓는 자리는 띄울 때(`cmd/tui.rs`) 한 번뿐이다.
+    #[test]
+    fn the_chosen_language_survives_moving_between_projects() {
+        use crate::i18n::Lang;
+        let s = Scratch::fenced("layer-lang");
+        let (one, two, mut a) = on_layer_with_twins(&s);
+        a.site.lang = Lang::En;
+        a.layer.as_mut().unwrap().lang = Lang::En;
+
+        // 펼친 남의 프로젝트의 줄도 같은 말로 선다 — 안 이으면 한 목록의 두 프로젝트가 같은
+        // 바구니를 다른 말로 부른다.
+        a.want_site(0);
+        settle(&mut a);
+        let held = a.layer.as_ref().unwrap().places[0].site.as_ref().expect("펼친 줄이 제 Site 를 든다");
+        assert_eq!(held.lang, Lang::En, "펼친 프로젝트의 줄이 딴 말로 선다");
+
+        let one_at = a.layer.as_ref().unwrap().position(&one).expect("one 이 층에 있다");
+        a.enter_project(one_at);
+        assert_eq!(a.site.lang, Lang::En, "들어가며 말이 바뀌었다");
+
+        a.climb();
+        assert_eq!(a.site.lang, Lang::En, "층으로 올라오며 말이 바뀌었다");
+
+        let two_at = a.layer.as_ref().unwrap().position(&two).expect("two 가 층에 있다");
+        a.enter_project(two_at);
+        assert_eq!(a.site.lang, Lang::En, "옆 프로젝트로 건너가며 말이 바뀌었다");
+
+        // 다시 세운 층도 같은 말을 든다 — 못 연 프로젝트의 한 줄(`shut`)이 여기서 말을 받는다.
+        a.relayer(None);
+        assert_eq!(a.layer.as_ref().unwrap().lang, Lang::En, "다시 세운 층이 딴 말을 든다");
     }
 
     /// **들어갈 때 그 줄이 들고 있던 읽음을 옮겨 든다**(moai-2gep). [`App::leave_project`] 가 `Site` 를

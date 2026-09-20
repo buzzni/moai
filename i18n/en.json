@@ -124,5 +124,11 @@
   "refuse.link_both_ways": "{id} cannot be blocked and unblocked at once",
   "refuse.defer_empty_why": "the reason is empty",
   "refuse.edit_nothing": "You did not say what to edit. `moai edit --help` lists what can be edited.",
-  "refuse.init_no_prefix": "Cannot make a prefix from the directory name. `moai init <prefix>`"
+  "refuse.init_no_prefix": "Cannot make a prefix from the directory name. `moai init <prefix>`",
+  "detail.deferred": "deferred",
+  "detail.deferred_days": "deferred ({n}d)",
+  "detail.deferred_under": "deferred — under {id}",
+  "detail.unread_column": "the column is read from its members (the written column `{col}` is not read)",
+  "nav.no_milestone": "(no milestone)",
+  "nav.lost": "(lost)"
 }

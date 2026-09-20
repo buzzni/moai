@@ -51,13 +51,13 @@ use std::path::{Path, PathBuf};
 pub enum Event {
     // **`hook --help` 의 이벤트 목록이 이 글을 옮겨 적는다**(moai-h0r2) — clap 이 붙이는 값 목록은
     // `-h` 에서 80칸을 넘어 숨겼다. `the_hook_help_lists_every_event` 가 둘을 견준다.
-    /// 기준선을 적는다. 접힌 뒤면 집은 것을 싣는다
+    /// Writes the baseline. Loads what is held after a compact
     SessionStart,
-    /// 사람이 시켰다. 보드를 세션당 한 번 싣는다
+    /// A person asked. Loads the board once per session
     UserPromptSubmit,
-    /// 도구를 부르기 직전. 규칙이 여기서 선다
+    /// Just before a tool call. The rules stand here
     PreToolUse,
-    /// 턴이 끝난다. 상태가 실제와 맞는지 본다
+    /// The turn ends. Checks the state against reality
     Stop,
 }
 
