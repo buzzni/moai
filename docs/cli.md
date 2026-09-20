@@ -417,6 +417,11 @@ Options:
   with several, the won and the lost rows share one exit code.
 
   moai mv moai-4aex in_progress --from todo
+
+  Closing says what that write opened - work that just became ready, a parent
+  whose last unfinished child is now done, and the next pick in the same epic.
+  Nothing of that is stored: it is read from the rows each time, and `--json`
+  carries unblocked, closable and next, always as arrays.
 ```
 
 ## `moai edit`

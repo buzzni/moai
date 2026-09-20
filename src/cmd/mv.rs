@@ -27,6 +27,10 @@ struct Moved {
     finished: std::collections::BTreeSet<String>,
     /// `done` 으로 옮겨 **이로써 집을 수 있게 된 일**(moai-942k, `report::unblocked`).
     unblocked: Vec<Issue>,
+    /// 그 쓰기로 **이제 닫을 수 있게 된 부모**(moai-j4xs, `report::Freed::closable`).
+    closable: Vec<Issue>,
+    /// 닫은 줄과 **같은 에픽에서 다음에 집을 것**(moai-j4xs, `report::Freed::next`).
+    next: Vec<Issue>,
 }
 
 pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
@@ -177,9 +181,13 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             .filter(|g| m.read.contains_key(&g.id) && crate::report::has_finished_member(issues, g))
             .map(|g| g.id.clone())
             .collect();
-        // 이로써 풀린 일. 옮긴 것이 없으면 풀린 것도 없다. 판단은 `report` 가 한다.
+        // 이 쓰기가 연 것 셋. 옮긴 것이 없으면 연 것도 없다. 판단은 `report` 가 한다.
         if let Some(before) = before.filter(|_| !m.done.is_empty()) {
-            m.unblocked = crate::report::unblocked(&before, issues, cfg).into_iter().cloned().collect();
+            let closed: Vec<&str> = m.done.iter().map(|(i, _)| i.id.as_str()).collect();
+            let opened = crate::report::freed(&before, issues, cfg, &closed);
+            m.unblocked = opened.unblocked.into_iter().cloned().collect();
+            m.closable = opened.closable.into_iter().cloned().collect();
+            m.next = opened.next.into_iter().cloned().collect();
         }
         Ok((entries, m))
     })?;
@@ -222,6 +230,10 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             /// 이로써 집을 수 있게 된 일. **늘 싣는다** — 없으면 `[]`. 다른 목록 키와 같은
             /// 모양이라 받는 쪽이 키가 있는지 가르지 않는다.
             unblocked: Vec<super::Row<'a>>,
+            /// 이제 닫을 수 있게 된 부모. `unblocked` 와 같은 약속으로 **늘 싣는다**.
+            closable: Vec<super::Row<'a>>,
+            /// 같은 에픽에서 다음에 집을 것. `unblocked` 와 같은 약속으로 **늘 싣는다**.
+            next: Vec<super::Row<'a>>,
         }
         return super::json_line(&Out {
             moved: moved.done.iter().map(|(i, _)| super::Row::from(i, &moved.read)).collect(),
@@ -236,6 +248,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 .map(|(id, col)| Stands { id, derived_status: col })
                 .collect(),
             unblocked: moved.unblocked.iter().map(|i| super::Row::of(i, None)).collect(),
+            closable: moved.closable.iter().map(|i| super::Row::of(i, None)).collect(),
+            next: moved.next.iter().map(|i| super::Row::of(i, None)).collect(),
         });
     }
 
@@ -291,7 +305,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             paint(style::DIM, &crate::view::shelved_by(root))
         ));
     }
-    // **이로써 풀린 일은 한 줄.** 없으면 말하지 않는다 — 출력이 전과 같다.
-    out.extend(crate::view::unblocked_line(&moved.unblocked));
+    // **이 쓰기가 연 것은 한 줄씩.** 없으면 말하지 않는다 — 출력이 전과 같다.
+    out.extend(crate::view::freed_lines(&moved.unblocked, &moved.closable, &moved.next, ctx.lang()));
     Ok(out)
 }

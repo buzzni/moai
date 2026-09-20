@@ -6707,6 +6707,61 @@ fn mv_done_names_the_work_it_just_unblocked() {
     assert!(json.contains(&format!(r#""unblocked":[{{"id":"{b}""#)), "{json}");
 }
 
+/// **마지막 자식을 닫으면 그 부모를 닫으라고 댄다**(moai-j4xs). 부모가 이미 `in_progress` 면
+/// ready 전후의 차(`unblocked`)에 안 든다 — ready 는 첫 칸의 줄만 세기 때문이다. 그 부모야말로
+/// 다음 수가 정해진 줄인데, 여기가 없으면 아무도 그것을 말하지 않는다.
+#[test]
+fn mv_done_names_the_parent_it_just_made_closable() {
+    let s = init("mvclosable");
+    let parent = add(s.path(), &["부모 일"]);
+    let child = ok(s.path(), &["add", "마지막 자식", "--parent", &parent, "--json"]);
+    let child = field(&child, "id");
+    ok(s.path(), &["mv", &parent, "in_progress"]);
+
+    let text = ok(s.path(), &["mv", &child, "done"]);
+    let line = text.lines().find(|l| l.contains("닫을 수 있음")).unwrap_or_else(|| panic!("안 댄다 — {text}"));
+    assert!(line.contains(&parent), "{line:?}");
+    // **같은 줄이 두 자리에서 안 불린다** — 두 번 불리면 읽는 쪽이 두 건으로 센다.
+    assert!(!text.lines().any(|l| l.contains("풀림") && l.contains(&parent)), "한 줄이 두 번 불렸다\n{text}");
+
+    // 자식이 남았으면 말하지 않는다. 기계 쪽은 빈 배열을 늘 싣는다.
+    let other = add(s.path(), &["둘째 부모"]);
+    let kept = field(&ok(s.path(), &["add", "남는 자식", "--parent", &other, "--json"]), "id");
+    let gone = field(&ok(s.path(), &["add", "닫는 자식", "--parent", &other, "--json"]), "id");
+    ok(s.path(), &["mv", &other, "in_progress"]);
+    let json = ok(s.path(), &["mv", &gone, "done", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(r#""closable":[]"#), "자식이 남았는데 닫으라고 했다 — {json}");
+    assert!(ok(s.path(), &["mv", &kept, "done", "--json"]).contains(&format!(r#""closable":[{{"id":"{other}""#)));
+}
+
+/// **에픽 멤버를 닫으면 그 에픽의 다음 일을 댄다**(moai-j4xs). 이미 ready 이던 줄이라
+/// `unblocked` 에는 안 드는데, 멤버 하나를 닫은 자리에서 가장 자주 묻는 것이 이것이다 —
+/// 에픽마다 하나만 댄다. 목록을 내는 것은 `moai ready` 의 일이다.
+#[test]
+fn mv_done_names_the_next_pick_in_the_same_epic() {
+    let s = init("mvnext");
+    let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
+    let first = add(s.path(), &["첫 멤버", "-e", &epic]);
+    // **차례는 `ready` 의 차례 그대로다.** 시계를 고정한 시험에서는 우선순위가 같으면 나이도
+    // 같아 id 로 갈리므로, 어느 것이 다음인지는 `-p` 로 못박는다 — 안 박으면 이 단언이
+    // 만든 차례가 아니라 id 의 차례를 재고, 그 값은 판마다 바뀐다.
+    let second = add(s.path(), &["둘째 멤버", "-e", &epic, "-p", "1"]);
+    let third = add(s.path(), &["셋째 멤버", "-e", &epic]);
+    let outside = add(s.path(), &["에픽 밖의 일"]);
+
+    let text = ok(s.path(), &["mv", &first, "done"]);
+    let line = text.lines().find(|l| l.contains("↳ 다음")).unwrap_or_else(|| panic!("다음을 안 댄다 — {text}"));
+    assert!(line.contains(&second), "{line:?}");
+    assert!(!line.contains(&third), "에픽마다 하나만 댄다 — {line:?}");
+    assert!(!line.contains(&outside), "남의 에픽의 일을 댔다 — {line:?}");
+
+    // 에픽 밖의 일을 닫은 자리에는 "같은 에픽" 이 없다.
+    let json = ok(s.path(), &["mv", &outside, "done", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains(r#""next":[]"#), "에픽 없는 줄에 남의 다음을 댔다 — {json}");
+}
+
 /// **묶음을 미루면 멤버도 계획에서 빠진다.** 에픽 줄 하나만 사라지고 멤버가
 /// `ready` 에 그 에픽 제목을 달고 서면, 미루기는 머리글 하나 지운 일이다.
 /// 목록도 같은 자로 숨기고, `--deferred` 가 그것을 연다.

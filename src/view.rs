@@ -170,30 +170,50 @@ pub fn shelved_by<S: AsRef<str>>(roots: &[S]) -> String {
     )
 }
 
-/// 한 줄에 이름을 대는 풀린 일의 수. 넘으면 `moai ready` 로 넘긴다.
+/// 한 줄에 이름을 대는 줄의 수. 넘으면 수로만 댄다.
 const UNBLOCKED_SHOWN: usize = 3;
 
-/// `moai mv <id> done` 뒤 **이로써 집을 수 있게 된 일** 한 줄(moai-942k, `report::unblocked`).
-/// 없으면 `None` — 말할 것이 없을 때 출력이 전과 같다.
+/// `moai mv <id> done` 이 **그 쓰기가 연 것**을 대는 줄들(moai-j4xs, `report::freed`).
+/// 셋 다 비면 빈 목록 — 말할 것이 없을 때 출력이 전과 같다.
 ///
-/// **흐린 한 줄이다.** 옮긴 줄이 주인공이고 이것은 곁들임이다. 색이 혼자 뜻을 지지 않게
-/// `↳ 풀림` 을 앞에 둔다. 여럿이면 앞 몇 건만 대고 나머지는 `moai ready` 가 낸다 —
-/// 제목을 다 달면 막음 하나를 푼 에픽 닫기가 화면을 채운다.
-pub fn unblocked_line(freed: &[Issue]) -> Option<String> {
-    if freed.is_empty() {
+/// **흐린 곁들임이다.** 옮긴 줄이 주인공이다. 색이 혼자 뜻을 지지 않게 머리에 낱말을 둔다.
+///
+/// **셋을 한 줄로 합치지 않는다.** 뜻이 다르기 때문이다 — 풀린 것은 집을 수 있고, 닫을 수
+/// 있는 것은 이미 쥔 것이고, 다음 것은 아직 아무도 안 쥔 것이다. 한 줄에 몰면 읽는 쪽이
+/// 다음 수를 그 줄에서 못 고른다.
+/// **키를 표에 접지 않는다** — `say(lang, "…")` 를 소스에서 읽는 시험
+/// (`i18n::tests::english_has_every_key_the_source_asks_for`)이 표에 숨은 키를 못 본다.
+pub fn freed_lines(freed: &[Issue], closable: &[Issue], next: &[Issue], lang: Lang) -> Vec<String> {
+    // **풀린 줄만 `moai ready` 를 곁들인다**: 그것은 이제 그 목록에 서는 줄이라 이어서 볼
+    // 곳이 있고, 닫을 수 있는 부모는 `ready` 에 안 선다.
+    [
+        trail(say(lang, "mv.unblocked"), freed, say(lang, "mv.unblocked_more")),
+        trail(say(lang, "mv.closable"), closable, say(lang, "mv.trail_more")),
+        trail(say(lang, "mv.next"), next, say(lang, "mv.trail_more")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+/// 머리 낱말 하나에 줄 몇을 단 흐린 한 줄. 비면 `None`.
+///
+/// 여럿이면 앞 몇 건만 대고 나머지는 수로 넘긴다 — 제목을 다 달면 막음 하나를 푼 에픽
+/// 닫기가 화면을 채운다.
+fn trail(head: &str, rows: &[Issue], more: &str) -> Option<String> {
+    if rows.is_empty() {
         return None;
     }
-    let named: Vec<String> = freed
+    let named: Vec<String> = rows
         .iter()
         .take(UNBLOCKED_SHOWN)
         .map(|i| format!("{} {}", paint(style::ID, &one_line(&i.id)), paint(style::DIM, &clip(&one_line(&i.title), 40))))
         .collect();
-    let rest = freed.len().saturating_sub(UNBLOCKED_SHOWN);
-    let more = match rest {
+    let more = match rows.len().saturating_sub(UNBLOCKED_SHOWN) {
         0 => String::new(),
-        n => paint(style::DIM, &format!("  외 {n}건 — `moai ready`")),
+        n => paint(style::DIM, &fill(more, &[("n", &n.to_string())])),
     };
-    Some(format!("{}  {}{more}", paint(style::DIM, "↳ 풀림"), named.join(&paint(style::DIM, " · "))))
+    Some(format!("{}  {}{more}", paint(style::DIM, head), named.join(&paint(style::DIM, " · "))))
 }
 
 /// 칠한 글과 **칠하지 않은 폭**을 받아 채운다 — [`cell`] 이 한 가지 색만 칠할 수
