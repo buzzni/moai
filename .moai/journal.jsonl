@@ -6232,3 +6232,6 @@
 {"ts":"2026-09-20T09:37:52Z","id":"moai-71ht","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-giz3 의 diff 는 에픽 moai-3bry 의 끝 리뷰(moai-3bry.v4h)가 함께 봤다 — 고칠 자리가 같아 한 diff 로 묶었다(감독 결정). 멤버 리뷰를 따로 부르지 않았다."}
 {"ts":"2026-09-20T09:37:52Z","id":"moai-71ht","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 7/7 로 닫혔다. 이어서 할 것 없다"}
 {"ts":"2026-09-20T09:37:52Z","id":"moai-3bry","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 셋이 첫 칸에 남아 에픽을 연다 — moai-uc5v 와 moai-c4nk 는 src/hook.rs 를 옆 세션이 놓은 뒤에 집고, moai-mafv 는 gather 가 겹치기 전 Load 를 실어 보낼지부터 정한다"}
+{"ts":"2026-09-20T09:38:08Z","id":"moai-acf7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T09:38:13Z","id":"moai-drli","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T09:38:17Z","id":"moai-ean3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
