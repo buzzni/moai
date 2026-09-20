@@ -877,6 +877,22 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    /// **선언을 거는 자리와 묻는 자리가 한 글을 쓴다**(moai-9khu). `.gitattributes` 에 쓰는 줄과
+    /// `check-attr` 로 묻는 경로가 갈리면 "안 심었다" 알림이 영영 안 서거나(묻는 자리가 틀렸다)
+    /// 영영 안 걷힌다(쓰는 자리가 틀렸다) — 둘 다 조용해서 아무도 모른다.
+    #[test]
+    fn the_declared_path_is_the_one_init_writes() {
+        let path = crate::cmd::merge_driver::SNAPSHOT;
+        let rule = GITATTRIBUTES
+            .lines()
+            .find(|l| l.starts_with(path))
+            .unwrap_or_else(|| panic!("{path} 에 거는 줄이 없다\n{GITATTRIBUTES}"));
+        assert!(
+            rule.contains(&format!("merge={}", crate::cmd::merge_driver::DRIVER)),
+            "그 줄이 드라이버를 안 건다 — {rule}"
+        );
+    }
+
     use super::*;
 
     /// 두 번 넣어도 블록은 하나고, 사람이 쓴 산문은 바이트 단위로 그대로다.

@@ -48,6 +48,7 @@
   "warn.merge_driver_rotten": "The planted merge driver does not run — merges fall back to the default one",
   "warn.merge_driver_stale": "The planted merge driver is an old one — if the recorded place goes, it drops their side with no markers",
   "warn.merge_driver_alien": "The planted merge driver is another tool of that name — it does not know this command, so merges fall back to the default one",
+  "warn.merge_driver_absent": "This repository asks for the moai merge driver but this clone has not planted it — merges fall back to the default one",
   "warn.unknown_field": "Rows carrying unknown fields {n} — the file may come from a newer binary",
   "warn.duplicate_id": "Ids standing twice {n} — a merge scar, or a clash with an unreadable row",
   "warn.unreadable_line": "Unreadable rows {n}",

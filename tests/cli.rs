@@ -12363,16 +12363,14 @@ fn re_installing_replaces_the_line_and_every_line_falls_back() {
 
 /// **심어 놓고 못 도는 드라이버를 `status` 가 한 줄로 비춘다**(moai-2ewr).
 ///
-/// 안 심은 클론은 말하지 않는다 — 거기서는 git 의 기본 머지가 돌고 표식도 서서 무해했다
-/// (`moai-w8so`). 해로운 것은 돈다고 믿는데 안 도는 자리다. 셋을 한 자리에서 잰다:
-/// 안 심었을 때 조용한가, 썩었을 때 대는가, 제대로 심으면 걷히는가.
+/// 돈다고 믿는데 안 도는 자리다. 둘을 한 자리에서 잰다: 썩었을 때 대는가, 제대로 심으면
+/// 걷히는가. 안 심은 클론은 [`status_names_a_clone_that_never_planted_the_driver`] 가 잰다.
 #[test]
 fn status_names_a_planted_driver_that_cannot_run() {
     let s = init("mergenotice");
     let root = s.path();
     git(root, &["init", "-q", "."]);
     add(root, &["하나"]);
-    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "안 심은 클론을 졸랐다");
 
     let gone = root.join("없는/자리/moai");
     ok(root, &["merge-driver", "--install", "--as", &gone.display().to_string()]);
@@ -12393,6 +12391,46 @@ fn status_names_a_planted_driver_that_cannot_run() {
 
     ok(root, &["merge-driver", "--install", "--as", BIN]);
     assert!(!ok(root, &["status"]).contains("머지 드라이버"), "제대로 심었는데 알림이 안 걷혔다");
+}
+
+/// **선언해 놓고 안 심은 클론을 `status` 가 한 줄로 비춘다**(moai-9khu).
+///
+/// 설정은 커밋되지 않아 **클론마다 한 번** 쳐야 하는데, 안 친 쪽은 `.gitattributes` 의
+/// `merge=moai` 가 그냥 무시되는 줄 모르고 이슈마다 푸는 값을 잃는다. 새 사용자가 정확히 밟는
+/// 자리다.
+///
+/// **선언이 없으면 조용하다.** 드라이버를 안 쓰기로 한 저장소를 조르면 걷을 길이 없다 —
+/// 조르는 범위를 저장소가 스스로 건 선언으로 좁힌 까닭이고, `moai-w8so` 의 실측(안 심은 클론은
+/// 기본 머지가 돌아 무해하다)이 그대로 서 있는 자리이기도 하다.
+#[test]
+fn status_names_a_clone_that_never_planted_the_driver() {
+    let s = init("mergeabsent");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+
+    // `init` 이 `.gitattributes` 에 `merge=moai` 를 걸어 뒀다. 심지는 않았다.
+    let said = ok(root, &["status"]);
+    assert!(said.contains("안 심었다"), "안 심은 클론을 안 댔다\n{said}");
+    assert!(said.contains("moai merge-driver --install"), "칠 줄을 안 댄다\n{said}");
+    // **경고가 아니라 알림이다** — 종료 코드는 안 바뀌고(`ok` 가 그것을 이미 쟀다) `notices` 에 선다.
+    let json = ok(root, &["status", "--json"]);
+    one_json_value(&json);
+    let notices = json.split("\"notices\":").nth(1).expect("notices 가 없다").to_string();
+    let warnings =
+        json.split("\"warnings\":").nth(1).unwrap_or("").split("\"notices\":").next().unwrap_or("").to_string();
+    assert!(notices.contains("merge_driver_absent"), "{json}");
+    assert!(!warnings.contains("merge_driver_absent"), "알림이 경고로 섰다\n{json}");
+
+    // 치라는 줄을 그대로 친다 — 걷힌다.
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "심었는데 알림이 안 걷혔다");
+
+    // **선언을 걷으면 입을 다문다.** 드라이버를 안 쓰기로 한 저장소다.
+    git(root, &["config", "--local", "--unset", "merge.moai.driver"]);
+    std::fs::write(root.join(".gitattributes"), "# 이 저장소는 드라이버를 안 쓴다\n").unwrap();
+    let said = ok(root, &["status"]);
+    assert!(!said.contains("안 심었다"), "선언이 없는데 졸랐다\n{said}");
 }
 
 /// **그 이름의 다른 도구가 선 자리를 "안 돈다" 로 뭉치지 않는다**(moai-zdw4).

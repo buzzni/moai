@@ -2825,9 +2825,10 @@ impl Warning {
     /// `cmd::merge_driver::notice` 고, `status` 와 훅의 보드가 이것을 `notices` 에 얹는다 —
     /// [`status`] 는 `&[Issue]` 만 받는 순수 함수라 설정도 파일도 안 읽는다.
     ///
-    /// **안 심은 것은 여기서 말하지 않는다.** 그 상태는 실측에서 무해했다(`moai-w8so`) — git 의
-    /// 기본 머지가 돌고 표식도 선다. 해로운 것은 심어 놓고 그 명령이 못 도는 자리다: 사람은
-    /// 이슈마다 푸는 것이 돈다고 믿는데 실제로는 안 돌고, 그 사실이 어느 화면에도 안 선다.
+    /// **안 심은 것은 여기서 말하지 않는다** — 그것은 [`Warning::merge_driver_absent`] 다. 여기는
+    /// 심어 놓고 그 명령이 못 도는 자리다: 사람은 이슈마다 푸는 것이 돈다고 믿는데 실제로는 안
+    /// 돌고, 그 사실이 어느 화면에도 안 선다. 둘을 가르는 까닭은 칠 줄이 같아도 무엇이 어긋났는지가
+    /// 다르기 때문이다 — 한쪽은 "한 번도 안 쳤다" 고 다른 한쪽은 "쳐 뒀는데 그 자리가 비었다" 다.
     ///
     /// **경고가 아니라 알림이다.** 계획이 어긋난 것이 아니라 설치가 어긋난 것이고, 종료 코드는
     /// 안 바뀐다 — `agents_stale` 과 같은 자리다.
@@ -2858,6 +2859,23 @@ impl Warning {
     pub fn merge_driver_alien(cmd: &str, root: Option<&str>) -> Warning {
         let hint = Warning::cli_hint(root, "merge-driver --install");
         Warning::new("merge_driver_alien", vec![cmd.to_string()]).notice().hint(&hint)
+    }
+
+    /// 저장소는 `merge=moai` 를 걸어 뒀는데 이 클론에 **안 심었다**는 알림(moai-9khu,
+    /// 2026-09-20 사용자 결정).
+    ///
+    /// **한때 말하지 않던 자리다.** `moai-w8so` 의 실측은 그대로 서 있다 — 안 심은 클론에서는 그
+    /// 낱말이 무시되고 git 의 기본 머지가 돌며 표식도 선다. 무해하다는 그 말과 말할 값이 없다는
+    /// 말은 다르다: 설정은 커밋되지 않아 **클론마다 한 번** 쳐야 하고, 안 친 쪽은 이슈마다 푸는
+    /// 값을 잃는 줄 모르고 잃는다. 새 사용자가 정확히 밟는 자리다.
+    ///
+    /// **경고가 아니라 알림이고 종료 코드는 안 바뀐다.** 막는 것이 아니라 비추는 것이다.
+    ///
+    /// **`ids` 가 없다.** 셀 이슈도 댈 경로도 없다 — 그 자리가 비었다는 것이 전부이고, 칠 줄은
+    /// `hint` 가 낸다(`agents_stale` 과 같은 자리).
+    pub fn merge_driver_absent(root: Option<&str>) -> Warning {
+        let hint = Warning::cli_hint(root, "merge-driver --install");
+        Warning::new("merge_driver_absent", Vec::new()).count(1).notice().hint(&hint)
     }
 
     /// 심은 줄이 **옛 판**이라는 알림(moai-h54i). 적힌 명령은 도는데 그 줄에 지금 판의 마디가

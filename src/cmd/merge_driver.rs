@@ -44,6 +44,11 @@ use std::path::Path;
 /// git 설정에 심는 이름. `.gitattributes` 의 `merge=moai` 가 이것을 가리킨다.
 pub const DRIVER: &str = "moai";
 
+/// 그 이름이 걸리는 파일 — 저장소 뿌리에서 본 자리. [`declared`] 가 git 에게 이 자리의 `merge`
+/// 속성을 묻고, `cmd::init` 의 `GITATTRIBUTES` 가 그 줄을 쓴다. **둘이 갈리면 알림이 영영 안
+/// 서거나 영영 안 걷힌다** — `the_declared_path_is_the_one_init_writes` 가 그것을 맨다.
+pub(crate) const SNAPSHOT: &str = ".moai/issues.jsonl";
+
 /// 한 줄과 그 줄을 읽은 값.
 ///
 /// **원문을 곁에 든다.** 충돌 표식에 넣는 것은 사람이 실제로 커밋한 그 바이트여야 한다 —
@@ -545,7 +550,7 @@ fn driver_key() -> String {
     format!("merge.{DRIVER}.driver")
 }
 
-/// 심어 둔 드라이버가 **못 도는** 상태의 알림(moai-2ewr).
+/// 심어 둔 드라이버가 **못 도는** 상태와, 심어야 하는데 **안 심은** 상태의 알림(moai-2ewr·moai-9khu).
 ///
 /// 해로운 첫째는 **심어 놓고 그 명령이 못 도는 자리**다. 사람은 이슈마다 푸는 것이 돈다고 믿는데
 /// 실제로는 `driver_command` 의 셋째 마디로 내려앉아 기본 머지가 돌고, 그 사실이 어느 화면에도
@@ -553,22 +558,33 @@ fn driver_key() -> String {
 /// 경로이고, 워크트리에서 치면 그 워크트리의 `target/` 이 적히는데 `--local` 은 클론이 함께
 /// 쓰는 자리라 그 워크트리를 지우는 순간 모든 체크아웃이 그 상태가 된다.
 ///
-/// **안 심은 것은 말하지 않는다.** `moai-w8so` 가 임시 저장소에서 둘을 나란히 쟀다 — 안 심은
-/// 클론에서는 `.gitattributes` 의 `merge=moai` 가 그냥 무시되고 git 의 기본 머지가 돌며 표식도
-/// 선다. 그 상태를 조르면 드라이버를 안 쓰기로 한 클론을 영영 조르는 셈이다.
+/// **안 심은 것도 말한다 — 저장소가 `merge=moai` 를 걸어 뒀을 때만**(moai-9khu, 2026-09-20 사용자
+/// 결정). 앞 판은 입을 다물었다. `moai-w8so` 가 임시 저장소에서 둘을 나란히 재어 안 심은 클론이
+/// 무해함을 보였기 때문이다 — `.gitattributes` 의 `merge=moai` 는 그냥 무시되고 git 의 기본 머지가
+/// 돌며 표식도 선다. 그 실측은 그대로 서 있고 **갈래도 그대로 알림**이지만, 무해한 것과 말할 값이
+/// 없는 것은 다르다: 클론마다 한 번 쳐야 하는 명령이라 새 사용자가 정확히 밟는 자리고, 이슈마다
+/// 푸는 값을 잃는 줄 모르고 잃는다. 조르는 범위는 **저장소가 스스로 걸어 둔 선언**으로 좁힌다
+/// ([`declared`]) — 드라이버를 안 쓰기로 한 저장소는 그 선언이 없으니 이 줄을 아예 안 본다. 선언을
+/// 커밋해 두고 안 심기로 한 **클론**은 이 줄을 계속 보는데, 그 대가는 `gitattributes_rules` 와
+/// `agents_stale` 이 이미 치르는 것과 같고 걷는 길은 한 줄이다.
 ///
 /// **모르면 입을 다문다.** 설정을 못 읽었거나(저장소 밖이다, git 이 없다) 적힌 줄이 이 도구가
 /// 지은 모양이 아니면 아무 말도 안 한다 — 남이 손으로 적은 줄을 "썩었다" 고 부르면 걷을 길이 없는
-/// 알림이 선다.
+/// 알림이 선다. 안 심은 것과 못 읽은 것을 가르는 자는 `--default ''` 다: 맨 `--get` 은 키가 없을
+/// 때도 비영으로 끝나, 저장소 밖과 안 심은 클론이 한 답으로 왔다.
 ///
 /// **이 저장소에 심은 줄만 본다**(`--local`, 리뷰 moai-h6aq.cx8). 맨 `--get` 은 system·global 까지
 /// 훑어, 사람이 한때 `git config --global merge.moai.driver` 를 적어 뒀으면 심은 적 없는 저장소마다
 /// — git 저장소가 아닌 `.moai` 자리까지 — 이 알림이 서고, 힌트를 따라 쳐도 그것은 `--local` 에
 /// 적으니 영영 안 걷힌다. `install` 이 적는 자리가 `--local` 이므로 재는 자리도 거기다.
 pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
-    let planted = crate::git::run(root, &["config", "--local", "--get", &driver_key()]).ok()?;
+    let planted =
+        crate::git::run(root, &["config", "--local", "--get", "--default", "", &driver_key()]).ok()?;
     let planted = planted.trim();
     let away = crate::cmd::init::away_root(root, chdir);
+    if planted.is_empty() {
+        return declared(root).then(|| crate::report::Warning::merge_driver_absent(away.as_deref()));
+    }
     let word = planted_word(planted)?;
     match probe(root, &word) {
         // 띄우지도 못했다 — 자리가 비었거나, 권한이 없거나, 그 파일이 실행될 수 없다.
@@ -585,6 +601,23 @@ pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
         Probe::Runs => (planted != driver_command(&word))
             .then(|| crate::report::Warning::merge_driver_stale(&word, away.as_deref())),
     }
+}
+
+/// 이 저장소가 스냅샷에 `merge=moai` 를 걸어 뒀는가.
+///
+/// **딸린 파일을 손으로 읽지 않는다.** 규칙은 `.gitattributes` 하나에만 있는 것이 아니다 —
+/// `.git/info/attributes` 와 위 디렉터리의 파일, 그리고 패턴끼리의 우선순위까지 git 의 규칙이다.
+/// 그것을 여기 다시 적으면 git 이 실제로 무엇을 쓰는지와 이 판정이 갈리고, 갈리는 쪽은 늘
+/// 이쪽이다. `check-attr` 에게 물으면 git 이 제 규칙으로 답한다.
+///
+/// `-z` 로 받는다 — 맨 출력은 `<경로>: merge: <값>` 이라 경로에 `: ` 가 들면 자를 자리가 갈린다.
+/// 못 물어봤으면(저장소 밖이다, git 이 없다) **거짓이다**: 모르면 입을 다문다.
+fn declared(root: &Path) -> bool {
+    let Ok(out) = crate::git::run(root, &["check-attr", "-z", "merge", "--", SNAPSHOT]) else {
+        return false;
+    };
+    let mut f = out.split('\0');
+    f.next() == Some(SNAPSHOT) && f.next() == Some("merge") && f.next() == Some(DRIVER)
 }
 
 /// 심어 둔 줄에서 **실제로 부르는 명령**을 떼어 낸다. 모양이 이 도구가 지은 것이 아니면 `None`.

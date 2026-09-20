@@ -813,9 +813,9 @@ fn says(w: &Warning, screen: Screen) -> String {
         // 끝나는지 안 보인다.
         "gitignore_rules" => one(say(lang, "warn.gitignore_rules")),
         "gitattributes_rules" => one(say(lang, "warn.gitattributes_rules")),
-        // **"안 심었다" 가 아니라 "못 돈다" 다**(moai-2ewr). 안 심은 클론은 기본 머지가
-        // 돌아 무해했고(moai-w8so), 해로운 것은 심어 놓고 그 자리가 빈 판이다 — 이슈마다 푸는
-        // 것이 돈다고 믿는 쪽만 손해를 본다. 어느 경로인지는 `preview` 가 한 줄로 낸다.
+        // **"안 심었다" 가 아니라 "못 돈다" 다**(moai-2ewr) — 안 심은 것은 밑의
+        // `merge_driver_absent` 가 제 낱말로 말한다. 여기는 심어 놓고 그 자리가 빈 판이고,
+        // 이슈마다 푸는 것이 돈다고 믿는 쪽만 손해를 본다. 어느 경로인지는 `preview` 가 한 줄로 낸다.
         "merge_driver_rotten" => one(say(lang, "warn.merge_driver_rotten")),
         // **"안 돈다" 와 "낡았다" 를 가른다**(moai-h54i). 앞의 것은 자리가 빈 것이고 뒤의 것은
         // 그 줄에 내려앉는 마디가 없는 것이다 — 고칠 명령이 비슷해도 무엇이 어긋났는지가 다르다.
@@ -823,6 +823,10 @@ fn says(w: &Warning, screen: Screen) -> String {
         // **"안 돈다" 와 "딴 것이 선다" 도 가른다**(moai-zdw4). 자리가 빈 것과 그 이름에 다른
         // 도구가 선 것은 사람이 찾으러 갈 곳이 다르다 — 뭉치면 없는 파일을 찾으러 간다.
         "merge_driver_alien" => one(say(lang, "warn.merge_driver_alien")),
+        // **안 심은 클론**(moai-9khu). 저장소가 `merge=moai` 를 걸어 뒀을 때만 선다 — 드라이버를
+        // 안 쓰기로 한 저장소는 그 선언이 없어 이 줄을 아예 안 본다. 댈 경로가 없으니 `ids` 도
+        // 없고, 칠 줄은 `hint` 가 낸다.
+        "merge_driver_absent" => one(say(lang, "warn.merge_driver_absent")),
         "unknown_field" => one(say(lang, "warn.unknown_field")),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
