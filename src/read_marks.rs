@@ -297,12 +297,19 @@ pub(crate) fn read_table(root: &Table) -> (BTreeMap<String, String>, Vec<String>
 ///
 /// **깨진 파일에는 쓰지 않는다**(`broken`). 도구가 짓는 파일이라 깨질 일이 드물지만, 깨졌으면 사람이
 /// 볼 수 있게 두고 멈춘다 — 덮으면 그 안의 읽음이 통째로 사라진다.
-pub fn update<T>(config: &Path, root: &Path, f: impl FnOnce(&mut Sheet) -> R<T>) -> R<T> {
+///
+/// **자리를 고르다 만난 까닭은 값에 실어 돌려준다**([`Wrote::problems`], moai-ajh2). 읽는 길은 그것을
+/// 이미 대는데([`Marks::problems`]) 쓰는 길만 버리던 판은, 뿌리 윗자리에 잠깐 `EACCES`·`ESTALE`·`ELOOP`
+/// 가 난 그 한 번이 옛 철자 자리에 적고(락도 딴 자리다) 아무 말 없이 0 으로 끝났다 — 그 도장은 그 뒤
+/// 첫 쓰기가 합칠 때까지 딴 파일에 산다. **어디로 내는지는 부르는 쪽이 정한다**: 이 모듈은 아무것도
+/// 안 찍는 자라([`crate::report`]·[`crate::query`] 와 같은 약속) 여기서 찍으면 탐색기의 화면에 stderr
+/// 한 줄이 끼어든다.
+pub fn update<T>(config: &Path, root: &Path, f: impl FnOnce(&mut Sheet) -> R<T>) -> R<Wrote<T>> {
     // **자리는 락 밖에서 고른다.** `canonicalize` 는 락이 필요 없는데, 안에서 하면 쓰는 이마다 그만큼
     // 더 기다린다(리뷰). 푼 뿌리를 함께 받아 문지기와 [`Sheet::claim`] 에 그대로 넘긴다 — 여기서 다시
     // 풀면 이름을 고른 값과 견주는 값이 갈린다.
     let place = place_of(config, root);
-    let (path, root, past) = (place.at, place.root, place.past);
+    let (path, root, past, problems) = (place.at, place.root, place.past, place.problems);
     let dir = dir_of(&path);
     let err = |e: std::io::Error| Fail::new(format!("{}: {e}", path.display()));
     // **남이 못 들여다보는 자리에 짓는다**(리뷰). 무엇을 읽었는지는 설정과 같은 갈래의 사적인 값인데,
@@ -364,7 +371,18 @@ pub fn update<T>(config: &Path, root: &Path, f: impl FnOnce(&mut Sheet) -> R<T>)
         sheet.claim(&root);
         write_atomic(&path, sheet.render().as_bytes())?;
     }
-    Ok(out)
+    Ok(Wrote { value: out, problems })
+}
+
+/// 읽음을 고치고 나온 것 — 부른 쪽이 시킨 값과 **그 자리를 고르다 만난 까닭**.
+///
+/// [`Marks`] 와 같은 모양이다(moai-ajh2). 읽는 쪽과 쓰는 쪽이 한 자를 쓰지 않던 판은 쓰는 쪽만 조용했다.
+#[derive(Debug)]
+pub struct Wrote<T> {
+    /// [`update`] 에 준 함수가 돌려준 것.
+    pub value: T,
+    /// 자리를 고르다 만난 까닭([`Place::problems`]). 빈 것이 정상이다.
+    pub problems: Vec<String>,
 }
 
 /// 읽음 파일 하나. 모르는 키와 주석은 그대로 들고 간다 — 도구가 짓는 파일이어도 사람이 곁에 한 줄
@@ -647,6 +665,30 @@ mod tests {
         }
     }
 
+    /// **쓰는 길도 그 까닭을 댄다**(moai-ajh2). 읽는 길만 대던 판은 정작 값을 잃는 쪽이 조용했다 —
+    /// 뿌리 윗자리가 잠깐 막히면 옛 철자 자리에 적고(락도 딴 자리다) 아무 말 없이 0 으로 끝났다.
+    ///
+    /// 막지는 않는다: 적기는 그대로 서고, 까닭은 값에 실려 나간다([`Wrote::problems`]).
+    #[test]
+    #[cfg(unix)]
+    fn writing_says_why_it_could_not_settle_the_root() {
+        let s = Scratch::new("read-marks-write-why");
+        let cfg = s.join("config.toml");
+        std::fs::write(s.join("파일"), "x").unwrap();
+        let through = s.join("파일/밑");
+
+        let wrote = update(&cfg, &through, |sh| sh.mark(&marks(&[("a", "A")]))).unwrap();
+        assert_eq!(wrote.problems.len(), 1, "쓰는 길이 까닭을 버렸다 — {:?}", wrote.problems);
+        assert!(wrote.problems[0].contains("자리를 못 풀어"), "{}", wrote.problems[0]);
+        assert_eq!(wrote.value, vec!["a".to_string()], "말만 하고 안 적었다 — {:?}", wrote.value);
+
+        // 성한 자리는 조용하다 — 빈 `problems` 가 정상이다.
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let wrote = update(&cfg, &root, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
+        assert!(wrote.problems.is_empty(), "성한 자리를 탈로 댔다 — {:?}", wrote.problems);
+    }
+
     /// **문지기도 푼 경로로 견준다**(moai-f5e3) — 파일 이름을 푼 경로로 고르면서 `path` 만 철자로 보면,
     /// 옛 철자로 적힌 줄을 남의 것으로 읽어 제 읽음을 안 읽는다.
     #[test]
@@ -766,7 +808,7 @@ mod tests {
 
         let known: BTreeSet<&str> = ["argos-0001", "argos-0003"].into_iter().collect();
         let gone = update(&cfg, &root, |sheet| Ok(sheet.prune(&known))).unwrap();
-        assert_eq!(gone, 1);
+        assert_eq!(gone.value, 1);
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen, marks(&[("argos-0001", "A"), ("argos-0003", "C")]));
     }
 
@@ -776,11 +818,11 @@ mod tests {
         let s = Scratch::new("read-marks-idempotent");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        assert_eq!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap(), ["argos-0001"]);
+        assert_eq!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().value, ["argos-0001"]);
         let was = std::fs::read_to_string(path_for(&cfg, &root)).unwrap();
-        assert!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().is_empty());
+        assert!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().value.is_empty());
         assert_eq!(std::fs::read_to_string(path_for(&cfg, &root)).unwrap(), was, "같은 때를 다시 적어 파일이 바뀌었다");
-        assert_eq!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "B")]))).unwrap(), ["argos-0001"]);
+        assert_eq!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "B")]))).unwrap().value, ["argos-0001"]);
     }
 
     /// **`.` 이 든 자식 id 는 따옴표에 싼 낱말 키로 적는다**(moai-j038.vna) — 맨 키로 적히면 다음 읽기가
@@ -892,7 +934,7 @@ mod tests {
         let src = format!("path = {:?}\n\n[read]\n\"argos-0002\".rv = \"A\"\n", root.display().to_string());
         std::fs::write(&at, &src).unwrap();
         let known: BTreeSet<&str> = BTreeSet::new();
-        assert_eq!(update(&cfg, &root, |sh| Ok(sh.prune(&known))).unwrap(), 0, "때가 아닌 자리를 걷었다");
+        assert_eq!(update(&cfg, &root, |sh| Ok(sh.prune(&known))).unwrap().value, 0, "때가 아닌 자리를 걷었다");
         assert_eq!(std::fs::read_to_string(&at).unwrap(), src, "걷을 것이 없는데 파일을 고쳤다");
     }
 
@@ -912,7 +954,7 @@ mod tests {
         );
         std::fs::write(&at, &src).unwrap();
         let known: BTreeSet<&str> = ["argos-0002"].into_iter().collect();
-        assert_eq!(update(&cfg, &root, |sh| Ok(sh.prune(&known))).unwrap(), 1);
+        assert_eq!(update(&cfg, &root, |sh| Ok(sh.prune(&known))).unwrap().value, 1);
         let now = std::fs::read_to_string(&at).unwrap();
         assert!(now.contains("# 이 파일에 대해 적어 둔 말"), "걷기가 빈 줄 너머의 주석을 데려갔다\n{now}");
         assert!(!now.contains("argos-0001"), "걷을 것을 안 걷었다\n{now}");

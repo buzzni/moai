@@ -84,7 +84,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     } else {
         // 걷을 것을 **쓸 때만** 센다 — 적을 것이 없는 판에서 줄 수만큼 집합을 짓지 않는다(리뷰).
         let keep = keep_for_prune(&repo, &load);
-        crate::read_marks::update(&path, &repo.root, |sheet| {
+        let wrote = crate::read_marks::update(&path, &repo.root, |sheet| {
             let lines = load.issues.iter().filter(|i| targets.contains(i.id.as_str()));
             let marks = crate::query::read_marks_of(lines, &sheet.marks().0);
             let wrote = sheet.mark(&marks)?;
@@ -95,7 +95,14 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
                 sheet.prune(&keep.iter().map(String::as_str).collect());
             }
             Ok(wrote)
-        })?
+        })?;
+        // **적는 자리를 못 골랐으면 말한다**(moai-ajh2) — 위의 `--all` 이 읽는 길에 대는 것과 같은 줄이고,
+        // 값을 잃는 쪽은 이쪽이다. 떨어진 자리는 받은 철자라, 그 한 번의 도장은 다음 쓰기가 합칠 때까지
+        // 딴 파일에 산다. 막지는 않는다 — 종료 코드는 못 찾은 id 만 움직인다(#a-partial).
+        for why in &wrote.problems {
+            eprintln!("moai: {why}");
+        }
+        wrote.value
     };
 
     // **없는 줄은 `--json` 에서도 말한다** — 기계로 읽는 쪽은 `missing` 으로, 사람은 stderr 로.
