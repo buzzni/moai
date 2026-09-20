@@ -2167,8 +2167,25 @@ pub(crate) fn unopened<T>(p: &crate::projects::Project, s: &crate::projects::See
     match s {
         Seen::Ok(_) => String::new(),
         // init 전은 고칠 것이 아니다 — 나중에 `init` 하면 보이는 것이 요구다. `!` 를 달지 않는다.
-        Seen::Uninit => {
-            let said = fill(say(lang, "overview.uninit"), &[("go", &format!("moai -C {at} init"))]);
+        //
+        // **딸린 워크트리면 여기가 아니라 주 체크아웃을 댄다**(moai-nppo). `init` 은 그 자리를 이미
+        // 거절하는데(moai-mz0e) 이 줄만 그 갈래를 몰라, 등록한 워크트리 한 줄이 영영 `init 전` 으로
+        // 서고 그 줄이 대는 명령은 1 로 끝났다. 가르는 자는 [`crate::store::init_belongs_at`] 하나다.
+        Seen::Uninit { tracker_at } => {
+            // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests::keys_in`)은 `say(…, "키")` 모양만
+            // 읽어, 변수로 넘기면 두 키가 그 눈에서 통째로 사라진다.
+            //
+            // **자리는 받아 쓰기만 한다**(리뷰 10번) — 이 모듈은 순수 함수라는 글을 머리에 달고 있고,
+            // 여기서 물으면 탐색기의 층이 줄마다 걸음마다 `canonicalize` 를 치른다. 세는 자리는
+            // 프로젝트를 여는 쪽 하나다(`projects::State::Uninit`).
+            //
+            // 대는 명령이 `init` 이 아니라 등록인 까닭은 `cmd::project::uninit_line` 에 있다 —
+            // 그 자리가 서려면 주 체크아웃에 트래커가 이미 있어야 해서 `init` 은 아무것도 안 바꾼다.
+            let (said, go) = match tracker_at {
+                Some(main) => (say(lang, "overview.uninit_worktree"), format!("moai project add {}", shell_arg(main))),
+                None => (say(lang, "overview.uninit"), format!("moai -C {at} init")),
+            };
+            let said = fill(said, &[("go", &go)]);
             format!("  {} {}", paint(style::DIM, "·"), paint(style::DIM, &said))
         }
         Seen::Missing => {
