@@ -22,9 +22,6 @@ impl Scratch {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        if scratch::fenced_base() {
-            scratch::fence(&dir);
-        }
         Scratch(dir)
     }
     fn path(&self) -> &Path {
@@ -113,8 +110,8 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
 #[path = "../src/git_leaks.rs"]
 mod git_leaks;
 
-// 임시 자리의 뿌리와 울타리 — 단위 시험의 `Scratch` 와 **한 파일**을 읽는다(moai-boc6). 임시 자리가 체크아웃
-// 안이면 자리마다 울타리를 치는데, 두 벌로 두면 한쪽만 그 울타리를 친다. 쓰는 것은 `base`·`fenced_base`·`fence` 다.
+// 임시 자리의 뿌리 — 단위 시험의 `Scratch` 와 **한 파일**을 읽는다(moai-boc6). 그 뿌리가 체크아웃 밖임을
+// 보장하는 자가 거기 있고(moai-izeo), 두 벌로 두면 한쪽만 옮겨 가 이쪽 시험이 바깥 트래커를 잡는다.
 // 그 파일의 `#[cfg(test)]` 시험도 여기서 함께 돈다 — 통합 시험도 `cfg(test)` 로 컴파일된다.
 #[path = "../src/scratch.rs"]
 #[allow(dead_code)]
@@ -5041,11 +5038,8 @@ fn json_tells_no_commits_apart_from_no_git() {
     let outside = ok(s.path(), &["show", &id, "--json"]);
     assert!(outside.contains(r#""commits":[]"#), "빈 배열을 안 냈다\n{outside}");
     // **까닭은 가를 수 있는 값이다**(moai-6p1n) — 산문을 부분 문자열로 맞추지 않는다.
-    // 울타리 밑(임시 자리가 체크아웃 안인 기계)에는 "저장소가 아닌 자리" 가 없다 — `git.rs` 의
-    // `a_repo_without_commits_is_empty_not_broken` 와 같은 자리다(moai-boc6).
-    if !scratch::fenced_base() {
-        assert!(outside.contains(r#""commits_error":{"kind":"not_a_repo","said":"#), "git 을 못 읽은 까닭이 없다\n{outside}");
-    }
+    // 임시 자리가 체크아웃 밖에서 잡히므로 "저장소가 아닌 자리" 는 어느 기계에나 있다(moai-izeo).
+    assert!(outside.contains(r#""commits_error":{"kind":"not_a_repo","said":"#), "git 을 못 읽은 까닭이 없다\n{outside}");
     let root = s.path().to_str().unwrap();
     assert!(!outside.contains(root), "기계의 절대 경로가 --json 으로 나갔다\n{outside}");
 
@@ -10314,12 +10308,10 @@ fn worktree_trouble_is_told_but_never_fails_the_command() {
     let bare = init("wtnogit");
     let out = moai(bare.path(), &["status", "--worktree"]);
     assert!(out.status.success(), "git 저장소가 아니라고 실패했다");
-    // 울타리 밑에는 "저장소가 아닌 자리" 가 없다(moai-boc6) — 못 찾았다는 말은 그 밖에서만 잰다.
-    if !scratch::fenced_base() {
-        assert!(String::from_utf8_lossy(&out.stderr).contains("워크트리를 못 찾았다"));
-        let board = String::from_utf8_lossy(&out.stdout);
-        assert!(!board.contains("드러난 문제 없다") && board.contains("옆 워크트리 문제 1건"), "{board}");
-    }
+    // "저장소가 아닌 자리" 는 어느 기계에나 있다 — 임시 자리가 체크아웃 밖이다(moai-izeo).
+    assert!(String::from_utf8_lossy(&out.stderr).contains("워크트리를 못 찾았다"));
+    let board = String::from_utf8_lossy(&out.stdout);
+    assert!(!board.contains("드러난 문제 없다") && board.contains("옆 워크트리 문제 1건"), "{board}");
     // 겹쳐 보라고 안 시켰으면 옆을 찾지도 않으니 문제도 없다.
     assert!(ok(bare.path(), &["status"]).contains("드러난 문제 없다"));
 }

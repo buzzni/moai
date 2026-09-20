@@ -17,16 +17,17 @@
 //!
 //! ## 자리
 //!
-//! `std::env::temp_dir()` 다 — **그것이 어느 체크아웃 안이면 자리마다 울타리를 친다**
-//! ([`fenced_base`]). **`CARGO_TARGET_TMPDIR` 은 여기서 못 쓴다** — cargo 는
+//! `std::env::temp_dir()` 다 — **그것이 어느 체크아웃 안이면 밖으로 옮긴다**([`base`], moai-izeo).
+//! **`CARGO_TARGET_TMPDIR` 은 여기서 못 쓴다** — cargo 는
 //! 그것을 통합 시험·벤치 타깃에만 주고, 이 모듈은 바이너리 타깃의 단위 시험으로
 //! 컴파일되므로 `option_env!` 가 늘 `None` 이었다(`tests/cli.rs` 는 통합 시험이라
 //! `env!` 로 그것을 곧바로 읽는다). 있는 척하는 갈래는 걷어냈다.
 //!
-//! 일부러 저장소 안(`target/` 밑)으로 옮기지는 않는다 — 울타리 없는 자리마다 위의 `.git` 이
-//! 꼭대기로 잡혀 moai-46xz 가 통째로 돌아온다([`Scratch::fenced`]). 시험 하나의 자리는 울타리째
-//! `Drop` 이 치우므로 쌓이지 않는다 — 체크아웃 안에 커밋 없는 저장소가 남으면 그 체크아웃의
-//! `git add -A` 가 거기서 멈춘다([`fence`]).
+//! 일부러 저장소 안(`target/` 밑)으로 옮기지는 않는다 — 위의 `.git` 이 꼭대기로 잡혀 moai-46xz 가
+//! 통째로 돌아오고, 위의 `.moai` 는 그보다 나쁘다(moai-izeo: 시험이 바깥 트래커에 실제로 썼다).
+//! [`Scratch::fenced`] 는 그래서 남는다 — **자리를 고르는 시험**(`layer`·`worktree`·`git`)이 제
+//! 자리를 저장소 꼭대기로 세울 때 쓴다. 울타리는 자리째 `Drop` 이 치운다 — 체크아웃 안에 커밋
+//! 없는 저장소가 남으면 그 체크아웃의 `git add -A` 가 거기서 멈춘다([`fence`]).
 
 use std::path::{Path, PathBuf};
 
@@ -39,9 +40,11 @@ pub struct Scratch(PathBuf);
 impl Scratch {
     /// `<자리>/moai-<이름>-<pid>-<스레드>-<셈>` 을 만든다. 이미 있으면 지우고 새로 만든다.
     ///
-    /// **임시 자리가 체크아웃 안이면 울타리를 친다**([`fenced_base`], moai-boc6).
+    /// **울타리는 없다.** [`base`] 가 체크아웃 밖임을 보장하므로 위에 잡힐 `.git` 도 `.moai` 도
+    /// 없다(moai-izeo). 울타리를 골라 치던 자리다 — 그것은 `.git` 훑기만 세웠고, `.moai` 를
+    /// 찾아 오르는 쪽은 그대로 바깥 트래커를 잡았다.
     pub fn new(name: &str) -> Scratch {
-        if fenced_base() { Scratch::fenced(name) } else { Scratch::in_place(&base(), name) }
+        Scratch::in_place(&base(), name)
     }
 
     /// 자리를 받아 세운다. 이름 짓는 법은 [`Scratch::new`] 와 같다. 울타리는 없다 —
@@ -112,26 +115,45 @@ impl Drop for Scratch {
     }
 }
 
-/// 임시 자리의 뿌리 — `std::env::temp_dir()`. 모듈 머리의 "자리" 가 왜 이것뿐인지를 적어 둔다.
+/// 임시 자리의 뿌리. **어느 체크아웃 안도 아님을 보장한다**(moai-izeo, 2026-09-20 사용자 결정).
+///
+/// `TMPDIR` 이 moai 체크아웃 안이면(컨테이너·CI 에서 흔하다) 시험이 만든 자리 위에 그
+/// 체크아웃이 서고, moai 는 `.git` 이 아니라 `.moai` 를 찾아 위로 오르므로 **바깥 저장소의
+/// 트래커**가 잡힌다. 통합 시험 스무 개가 붉었고, 그중 하나는 그 트래커에 이슈를 실제로 **썼다**
+/// (moai-595o). 울타리([`fence`])로는 못 막는다 — 그것은 `.git` 훑기를 세울 뿐이다.
+///
+/// **환경변수로 천장을 두는 길은 안 갔다.** 시험 하나 때문에 생긴 변수가 찾기 경로의 갈래로
+/// 영영 남는다. 자리를 옮기는 것은 시험 바닥 안에서 끝나고 제품 표면을 안 늘린다.
+///
+/// 옮겼으면 **한 줄로 알린다** — `TMPDIR` 을 준 사람은 거기에 쓸 까닭이 있었고, 말없이 딴 데
+/// 쓰면 디스크가 어디서 차는지 못 찾는다. 갈 곳이 아예 없으면 크게 실패한다: 그대로 돌면
+/// 스무 개가 알 수 없는 까닭으로 붉고 남의 트래커가 더러워진다.
 pub fn base() -> PathBuf {
-    std::env::temp_dir()
-}
-
-/// 임시 자리가 체크아웃 안인가 — 곧 **시험 자리마다 울타리를 치는가**(moai-boc6, 2026-09-18 사용자
-/// 결정). 그렇다면 "저장소가 아닌 자리" 가 이 기계에 없으니, 그 전제가 필요한 시험은 그 단언만
-/// 건너뛴다. 한 판에 한 번 잰다.
-///
-/// 울타리를 골라 쓰던 때는 두 시험만 막혀 있었고, 나머지 자리는 `TMPDIR` 이 체크아웃 밑인
-/// 기계(컨테이너·CI)에서 그 체크아웃의 HEAD·refs 를 읽었다. 환경 변수로는 못 막는다 — `worktree`
-/// 의 파일로 읽는 훑기(`Path::ancestors()`)는 git 의 변수를 안 보고, git 쪽의
-/// `GIT_CEILING_DIRECTORIES` 는 릴리스에서까지 걷는다(`git_leaks::REPO`).
-///
-/// **체크아웃 밖에서는 울타리를 안 친다.** 늘 치면 "저장소가 아닌 자리" 가 필요한 시험
-/// (`a_repo_without_commits_is_empty_not_broken` 같은)의 전제가 바뀐다. 체크아웃 안에서는 그
-/// 시험들이 어차피 바깥 저장소를 보고 있었으니, 빈 울타리가 그보다 낫다.
-pub fn fenced_base() -> bool {
-    static IN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *IN.get_or_init(|| inside_checkout(&base()))
+    static BASE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BASE.get_or_init(|| {
+        let wanted = std::env::temp_dir();
+        if !inside_checkout(&wanted) {
+            return wanted;
+        }
+        for away in ["/tmp", "/var/tmp"] {
+            let away = PathBuf::from(away);
+            if away.is_dir() && !inside_checkout(&away) {
+                eprintln!(
+                    "moai 시험: 임시 자리({})가 체크아웃 안이라 {} 로 옮긴다 — \
+                     그대로 두면 시험이 바깥 저장소의 .moai 를 잡는다",
+                    wanted.display(),
+                    away.display()
+                );
+                return away;
+            }
+        }
+        panic!(
+            "임시 자리({})가 체크아웃 안이고 밖에 쓸 자리도 없다 — \
+             TMPDIR 을 체크아웃 밖에 두고 다시 돌린다",
+            wanted.display()
+        )
+    })
+    .clone()
 }
 
 /// `dir` 이 어느 체크아웃 안인가. **링크를 푼 자리로 잰다** — `TMPDIR` 이 체크아웃 안을 가리키는
@@ -205,15 +227,23 @@ mod tests {
         }
     }
 
-    /// **체크아웃 안이면 자리마다 울타리를 치고, 놓으면 울타리째 치운다**(moai-8mq9.1bw). 판들이 나눠
-    /// 쓰던 뿌리는 아무도 안 치워 그 체크아웃의 `git add -A` 를 멈췄다.
+    /// **울타리는 자리째 치운다**(moai-8mq9.1bw). 판들이 나눠 쓰던 뿌리는 아무도 안 치워 그
+    /// 체크아웃의 `git add -A` 를 멈췄다.
     #[test]
     fn a_fenced_scratch_takes_its_fence_away() {
-        let s = Scratch::new("fence-drop");
+        let s = Scratch::fenced("fence-drop");
         let dir = s.path().to_path_buf();
-        assert_eq!(dir.join(".git/HEAD").is_file(), fenced_base());
+        assert!(dir.join(".git/HEAD").is_file(), "울타리를 안 쳤다");
         assert_eq!(dir.parent(), Some(base().as_path()), "자리는 임시 자리 바로 밑이다");
         drop(s);
         assert!(!dir.exists());
+    }
+
+    /// **뿌리는 어느 체크아웃 안도 아니다**(moai-izeo). 여기가 무너지면 시험이 바깥 저장소의
+    /// `.moai` 를 잡고, 쓰는 시험 하나가 그 트래커를 실제로 더럽힌다.
+    #[test]
+    fn the_base_is_never_inside_a_checkout() {
+        assert!(!inside_checkout(&base()), "임시 자리가 체크아웃 안이다 — {}", base().display());
+        assert!(!inside_checkout(Scratch::new("outside").path()));
     }
 }
