@@ -221,10 +221,10 @@ impl Pane {
     }
 
     /// 칸의 이름. 키 바가 칸 옮기는 키가 **어디로 가는지** 댄다.
-    pub fn word(self) -> &'static str {
+    pub fn word(self, lang: crate::i18n::Lang) -> &'static str {
         match self {
-            Pane::Explorer => "목록",
-            Pane::Detail => "상세",
+            Pane::Explorer => crate::i18n::say(lang, "tui.pane.list"),
+            Pane::Detail => crate::i18n::say(lang, "tui.pane.detail"),
         }
     }
 }
@@ -3318,6 +3318,7 @@ impl App {
         // 이것은 줄을 낸 프로젝트를 도는 셈이다([`App::screen_statuses`]).
         let statuses = self.screen_statuses();
         keys::Ctx {
+            lang: self.site.lang,
             layer: self.on_layer(),
             on_row: matches!(self.current_of(rows), Some(Row::Item(..))),
             rows_here: rows.iter().any(|r| matches!(r, Row::Item(..))),
@@ -3349,10 +3350,10 @@ impl App {
             sorting: self.order,
             fields: self.fields,
             detail: self.detail_open,
-            next_pane: self.focus.next().word(),
-            prev_pane: self.focus.prev().word(),
-            left_pane: self.focus.step(keys::Side::Left).word(),
-            right_pane: self.focus.step(keys::Side::Right).word(),
+            next_pane: self.focus.next().word(self.site.lang),
+            prev_pane: self.focus.prev().word(self.site.lang),
+            left_pane: self.focus.step(keys::Side::Left).word(self.site.lang),
+            right_pane: self.focus.step(keys::Side::Right).word(self.site.lang),
         }
     }
 

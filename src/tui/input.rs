@@ -654,9 +654,15 @@ mod tests {
     /// 금지 목록이 아니라 **허락 목록**이다. `Frame`·`Repo` 를 막는 목록은
     /// `ratatui::Frame` 을 한 줄에 풀어 쓰거나 `super::` 로 돌아 들어오는 길을 못
     /// 막는다. 허락하는 것은 키 모양(`crossterm::event` 의 **타입**만 — `read`·`poll`
-    /// 은 터미널을 읽는다), 폭 셈(`CellWidth`·`unicode_*`·`crate::text`), 옆 조각,
-    /// 그리고 부수효과 없는 `std` 다. 경로 없이 화면에 찍는 `println!`·`dbg!` 같은
-    /// 매크로도 여기서 잡는다 — 조각이 찍으면 대체 화면이 깨진다.
+    /// 은 터미널을 읽는다), 폭 셈(`CellWidth`·`unicode_*`·`crate::text`), 말묶음
+    /// (`crate::i18n`), 옆 조각, 그리고 부수효과 없는 `std` 다. 경로 없이 화면에 찍는
+    /// `println!`·`dbg!` 같은 매크로도 여기서 잡는다 — 조각이 찍으면 대체 화면이 깨진다.
+    ///
+    /// 말묶음을 허락하는 까닭은 `crate::text` 와 같다 — `say(lang, key)` 는 바이너리에
+    /// 박힌 표를 보는 순수 함수고, `Lang` 은 조각이 `Ctx` 로 받는 **잰 값**이다. 터미널도
+    /// 저장소도 아니니 이 시험이 막는 것이 아니다. 조각이 글 대신 키를 돌려주고 부르는
+    /// 쪽이 옮기게 두면 글 하나가 두 파일로 갈라져, 무엇이 아직 안 옮겨졌는지 세는
+    /// 자리가 사라진다.
     fn foreign(code: &str, components: &[&str]) -> Vec<String> {
         const PRIMITIVES: [&str; 18] = [
             "self", "char", "str", "bool", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128",
@@ -680,7 +686,7 @@ mod tests {
                             || p.strip_prefix("ratatui::crossterm::event::").is_some_and(|t| t.starts_with(char::is_uppercase))
                     }
                     "unicode_segmentation" | "unicode_width" => true,
-                    "crate" => second == "text",
+                    "crate" => second == "text" || second == "i18n",
                     "super" => components.contains(&second),
                     "std" | "core" | "alloc" => !IMPURE_STD.contains(&second),
                     _ => false,
@@ -743,8 +749,9 @@ mod tests {
 
     /// 허락 목록이 제 일을 한다 — 풀어 쓴 `Frame`, 묶음 속 `Frame`, 저장소, 터미널을
     /// 읽는 함수, `super::` 로 돌아 든 `App` 을 잡고, 말로 적은 것·키 타입·옆 조각·
-    /// turbofish·부수효과 없는 `std` 는 그냥 둔다. 이게 없으면 훑기가 늘 비어 나와도
-    /// 아무도 모른다.
+    /// turbofish·말묶음(`crate::i18n`)·부수효과 없는 `std` 는 그냥 둔다. 이게 없으면
+    /// 훑기가 늘 비어 나와도 아무도 모른다. `crate::i18n` 과 `crate::store` 를 나란히
+    /// 심은 것은 `crate::` 를 통째로 연 것이 아님을 재는 자리다.
     #[test]
     fn the_purity_scan_catches_what_it_should() {
         let planted = "use ratatui::Frame;\n\
@@ -756,6 +763,7 @@ mod tests {
             let v = xs.iter().map(char::is_whitespace).collect::<Vec<_>>();\n\
             std::mem::take(&mut v); KeyCode::Up; usize::MAX; Vec::<u8>::with_capacity(1);\n\
             <[u8]>::len(&[]); if a != b { std::fs::read::<&str>(p); std::os::unix::fs::symlink(a, b); }\n\
+            crate::i18n::say(c.lang, k);\n\
             eprintln!(\"x\"); std::println!(); format!(\"{a}\");";
         assert_eq!(
             foreign(planted, &["scroll"]),

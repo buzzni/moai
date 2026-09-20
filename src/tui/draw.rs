@@ -12,6 +12,7 @@ use super::scroll::Scroll;
 use super::layer::{Look, Place, Shut};
 use super::picker::{self, Picker};
 use super::{App, Input, Mode, Pane, Row, Seat, Site};
+use crate::i18n::{Lang, fill, say};
 use crate::nav::{Entry, Twig};
 use crate::query::GrepIn;
 use crate::report::Blocker;
@@ -204,13 +205,13 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             f.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::new().fg(Color::Black).bg(Color::LightYellow)))), why);
             prompt(f, line, "누구", &ask.input, ask.error.clone(), &format!("이름 (메일)  {}", prompt_help("쓰기")));
         }
-        Mode::Idea(form) => jot_keys(f, form, keys),
+        Mode::Idea(form) => jot_keys(f, form, keys, app.site.lang),
         Mode::Pick(p) => match &p.typing {
             Some(input) => {
                 let help = format!("{} 가기  {} 그만", label(PATH, Goto::Go), label(PATH, Goto::Cancel));
                 prompt(f, keys, "경로", input, p.error.clone(), &help)
             }
-            None => pick_keys(f, p, keys),
+            None => pick_keys(f, p, keys, app.site.lang),
         },
         Mode::Unregister(u) => {
             let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
@@ -345,7 +346,7 @@ fn dent_line<'a>(p: &Picker, r: picker::Row, budget: usize) -> Line<'a> {
 
 /// 창이 열린 동안의 맨 아랫줄. 못 한 까닭이 있으면 그것이 줄을 차지한다 — 폼과 같다.
 /// 등록과 닫기는 **늘 남는다**: 창을 연 까닭과 나갈 길이다.
-fn pick_keys(f: &mut Frame, p: &Picker, at: Rect) {
+fn pick_keys(f: &mut Frame, p: &Picker, at: Rect, lang: Lang) {
     if let Some(e) = &p.error {
         let line = Line::from(vec![
             Span::styled(" ! ", Style::new().fg(Color::Black).bg(Color::LightRed)),
@@ -357,12 +358,12 @@ fn pick_keys(f: &mut Frame, p: &Picker, at: Rect) {
     if !p.chord.held().is_empty() {
         let next = keys::next_keys(PICK, p.chord.held())
             .into_iter()
-            .map(|(k, a)| (k, if let Pick::Step(m) = a { keys::move_word(m) } else { a.what(p.show_hidden) }))
+            .map(|(k, a)| (k, if let Pick::Step(m) = a { keys::move_word(m, lang) } else { a.what(p.show_hidden, lang) }))
             .collect();
         return bar(f, at, Vec::new(), vec![waiting(p.chord.held(), next)]);
     }
     // 이름과 낱말은 키 표([`PICK`])에서 읽는다. 여기서 정하는 것은 차례뿐이다.
-    let hint = |a: Pick| key(&label(PICK, a), a.what(p.show_hidden));
+    let hint = |a: Pick| key(&label(PICK, a), a.what(p.show_hidden, lang));
     let optional = vec![hint(Pick::Hidden), hint(Pick::Path), hint(Pick::Up), hint(Pick::Enter)];
     bar(f, at, optional, vec![hint(Pick::Register), hint(Pick::Close)]);
 }
@@ -462,7 +463,7 @@ fn jot_head<'a>(into: &Target, w: usize, tint: Style) -> Line<'a> {
 ///
 /// 거절된 까닭(빈 제목)과 버릴지 묻는 말은 이 줄을 차지한다 — 키 안내는 폼을 연
 /// 순간 이미 봤고, 지금 답해야 할 것은 그 말이다.
-fn jot_keys(f: &mut Frame, form: &Form, at: Rect) {
+fn jot_keys(f: &mut Frame, form: &Form, at: Rect, lang: Lang) {
     let line = if form.leaving {
         let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
         Line::from(Span::styled(format!(" 적던 것을 버릴까 — {} 버린다 · 다른 키는 폼으로 돌아간다 ", label(CONFIRM, Confirm::Yes)), ask))
@@ -474,7 +475,7 @@ fn jot_keys(f: &mut Frame, form: &Form, at: Rect) {
     } else {
         // 이름과 낱말은 키 표([`JOT`])에서 읽는다 — `Tab`·`Enter` 의 낱말은 포커스 칸에 달렸다.
         let title = form.field == Field::Title;
-        let hint = |a: Jot| key(&label(JOT, a), a.what(title));
+        let hint = |a: Jot| key(&label(JOT, a), a.what(title, lang));
         Line::from(vec![
             hint(Jot::Save),
             hint(Jot::Switch),
@@ -803,7 +804,8 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v`(숨김)·`SPC s`(정렬)가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
     let sorted = (app.order != Default::default()).then(|| {
-        format!("정렬 {}{}", app.order.by.word(), if app.order.reversed { " 거꾸로" } else { "" })
+        fill(say(app.site.lang, "tui.badge.sorted"), &[("by", app.order.by.word(app.site.lang))])
+            + if app.order.reversed { say(app.site.lang, "tui.badge.reversed") } else { "" }
     });
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
@@ -2431,7 +2433,7 @@ fn fkeys(f: &mut Frame, app: &App, rows: &[Row], at: Rect, unnumbered: bool) {
         let next = keys::next_keys(BROWSE, app.chord.held())
             .into_iter()
             .filter(|(_, a)| a.enabled(&c).is_ok())
-            .map(|(k, a)| (k, if let Browse::Step(m) = a { keys::move_word(m) } else { a.what(&c) }))
+            .map(|(k, a)| (k, if let Browse::Step(m) = a { keys::move_word(m, c.lang) } else { a.what(&c) }))
             .collect();
         return bar(f, at, Vec::new(), vec![waiting(app.chord.held(), next)]);
     }
@@ -2582,9 +2584,9 @@ fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid,
     // 닫지만(연 키 SPC 도, 하위 층이면 Bksp 도), 안 기다리는 층에서 그것을 대면 고르면 닫힌다는
     // 뜻이 흐려진다. **모르는 키는 그래도 무시한다**(`menu::feed`) — 아무것도 안 고르고 나가는 길은
     // `moai tui --help` 가 댄다.
-    let mut exits = if waits { vec![key(&label(MENU, Menu::Close), Menu::Close.what())] } else { Vec::new() };
+    let mut exits = if waits { vec![key(&label(MENU, Menu::Close), Menu::Close.what(app.site.lang))] } else { Vec::new() };
     if held.len() > 1 {
-        exits.push(key(&label(MENU, Menu::Up), Menu::Up.what()));
+        exits.push(key(&label(MENU, Menu::Up), Menu::Up.what(app.site.lang)));
     }
     let used = spans_width(&spans) + spans_width(&exits);
     if used <= room {

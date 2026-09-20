@@ -86,19 +86,21 @@ pub enum Field {
 }
 
 impl Field {
-    pub fn word(self) -> &'static str {
+    pub fn word(self, lang: crate::i18n::Lang) -> &'static str {
+        use crate::i18n::say;
         match self {
+            // **`id` 는 낱말이 아니라 이름이다** — 옮기지 않는다.
             Field::Id => "id",
-            Field::Priority => "우선순위",
-            Field::Assignee => "담당",
-            Field::Created => "생성",
-            Field::Updated => "수정",
-            Field::Tally => "셈",
-            Field::Tags => "태그",
-            Field::Names => "열 이름",
+            Field::Priority => say(lang, "tui.field.priority"),
+            Field::Assignee => say(lang, "tui.field.assignee"),
+            Field::Created => say(lang, "tui.field.created"),
+            Field::Updated => say(lang, "tui.field.updated"),
+            Field::Tally => say(lang, "tui.field.tally"),
+            Field::Tags => say(lang, "tui.field.tags"),
+            Field::Names => say(lang, "tui.field.names"),
             // `SPC v w`(`keys::Toggle::Worktree`)가 이미 "워크트리" 다 — 같은 낱말을 두 줄에
             // 세우면 메뉴에서 어느 쪽이 겹쳐 보기고 어느 쪽이 줄의 표시인지 못 가른다.
-            Field::Branch => "옆 가지",
+            Field::Branch => say(lang, "tui.field.branch"),
         }
     }
 

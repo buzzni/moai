@@ -297,8 +297,13 @@ mod tests {
 
     /// **`detail` 은 켜 둔다** — 탐색기의 처음값은 상세 칸이 보이는 것이고(`App::detail_open`),
     /// 숨김을 fixture 의 처음값으로 두면 Tab·원문↔그리기가 여기서 늘 꺼진 채로 재어진다.
+    ///
+    /// **말은 한국어로 고정한다.** 아래 시험들이 재는 것은 차례와 상태이지 화면 말이 아니라,
+    /// 기본값(`Lang::default()`)을 따라가면 기본값이 바뀔 때마다 여기가 같이 붉어진다. 한국어로
+    /// 박아 두면 그 덤으로 `ko` 표가 이 키들을 실제로 들고 있는지도 재어진다 — 영어 표만
+    /// `english_has_every_key_the_source_asks_for` 가 본다.
     fn inside() -> Ctx {
-        Ctx { list_focus: true, detail: true, ..Ctx::default() }
+        Ctx { list_focus: true, detail: true, lang: crate::i18n::Lang::Ko, ..Ctx::default() }
     }
 
     fn layer() -> Ctx {
